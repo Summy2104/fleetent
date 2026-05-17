@@ -1,0 +1,34 @@
+"""Built-in tools. Import this module to register them with the tool registry."""
+
+import datetime
+
+from mini_agent.tool_registry import tool
+
+
+@tool
+def get_current_time() -> str:
+    """Return the current UTC time as a string."""
+    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+@tool
+def calculate(expression: str) -> str:
+    """Evaluate a basic arithmetic expression and return the result."""
+    allowed = set("0123456789+-*/()., ")
+    if not all(c in allowed for c in expression):
+        return "error: only arithmetic expressions are allowed"
+    try:
+        result = eval(expression)  # noqa: S307  # whitelist-validated above
+        return str(result)
+    except Exception as exc:
+        return f"error: {exc}"
+
+
+@tool
+def read_file(path: str) -> str:
+    """Read a local file and return its contents (first 2000 chars)."""
+    try:
+        with open(path) as f:
+            return f.read(2000)
+    except OSError as exc:
+        return f"error: {exc}"
