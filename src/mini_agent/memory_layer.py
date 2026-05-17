@@ -18,6 +18,28 @@ _EXTRACT_SYSTEM = (
 )
 
 
+def load_memories(n: int = 20) -> str:
+    """Return the last n memories as a formatted string for the system prompt.
+
+    Returns empty string if no memories exist yet.
+    """
+    if not _MEM_PATH.exists():
+        return ""
+    lines = _MEM_PATH.read_text(encoding="utf-8").splitlines()
+    recent = lines[-n:] if len(lines) > n else lines
+    facts: list[str] = []
+    for line in recent:
+        try:
+            entry = json.loads(line)
+            if isinstance(entry, dict) and isinstance(entry.get("text"), str):
+                facts.append(f"- {entry['text']}")
+        except json.JSONDecodeError:
+            continue
+    if not facts:
+        return ""
+    return "[Memory]\n" + "\n".join(facts)
+
+
 def extract_and_save(user_input: str, messages: list[Any]) -> None:
     """Call a cheap LLM to extract memorable facts and append them to JSONL."""
     client, cfg = get_client_and_config("memory_extraction")

@@ -5,7 +5,7 @@ from typing import Any
 
 import mini_agent.tools  # noqa: F401  # side-effect: register built-in tools
 from mini_agent.eval_logger import log_run
-from mini_agent.memory_layer import extract_and_save
+from mini_agent.memory_layer import extract_and_save, load_memories
 from mini_agent.model_router import get_client_and_config
 from mini_agent.tool_registry import dispatch, get_schemas
 
@@ -16,8 +16,10 @@ def run(user_input: str, system_prompt: str = _SYSTEM) -> str:
     """Run the agent loop for a single user turn. Return the final text reply."""
     client, cfg = get_client_and_config("default")
 
+    memory_ctx = load_memories()
+    full_system = f"{memory_ctx}\n\n{system_prompt}" if memory_ctx else system_prompt
     messages: list[Any] = [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": full_system},
         {"role": "user", "content": user_input},
     ]
 
