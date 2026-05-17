@@ -5,6 +5,7 @@ from typing import Any
 
 import mini_agent.tools  # noqa: F401  # side-effect: register built-in tools
 from mini_agent.eval_logger import log_run
+from mini_agent.memory_layer import extract_and_save
 from mini_agent.model_router import get_client_and_config
 from mini_agent.tool_registry import dispatch, get_schemas
 
@@ -46,4 +47,5 @@ def run(user_input: str, system_prompt: str = _SYSTEM) -> str:
     reply = msg.content or ""
     usage = response.usage if response else None
     log_run(user_input, reply, messages, time.monotonic() - start, usage)
+    extract_and_save(user_input, messages)
     return reply
