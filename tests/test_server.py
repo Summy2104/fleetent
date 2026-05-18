@@ -44,7 +44,10 @@ def test_chat_valid_token_streams(tmp_path, monkeypatch):
 
     monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
 
+    received_user_ids: list[str] = []
+
     async def fake_stream(msg: str, user_id: str):  # type: ignore[misc]
+        received_user_ids.append(user_id)
         yield {"type": "text_delta", "content": "hi"}
         yield {"type": "done", "content": "hi"}
 
@@ -60,3 +63,4 @@ def test_chat_valid_token_streams(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert "text/event-stream" in resp.headers["content-type"]
     assert "done" in resp.text
+    assert received_user_ids == [user.id]  # user_id flows from auth to run_stream

@@ -74,7 +74,6 @@ async def run_stream(
 
     Event types: tool_call, tool_result, text_delta, done.
     """
-    scan_skills()
     client, cfg = get_async_client_and_config("default")
 
     memory_ctx = load_memories(user_id=user_id)

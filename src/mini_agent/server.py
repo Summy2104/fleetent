@@ -2,15 +2,24 @@
 
 import json
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from mini_agent.agent_loop import run_stream
+from mini_agent.skill_registry import scan as scan_skills
 from mini_agent.user_store import get_by_api_key
 
-app = FastAPI(title="mini-agent")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    scan_skills()
+    yield
+
+
+app = FastAPI(title="mini-agent", lifespan=lifespan)
 
 
 class ChatRequest(BaseModel):
