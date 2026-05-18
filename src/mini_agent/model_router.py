@@ -7,7 +7,7 @@ maintains no state, and knows nothing about agents, tools, or memory.
 import os
 from dataclasses import dataclass
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 
 @dataclass(frozen=True)
@@ -45,3 +45,10 @@ def get_client_and_config(task_type: str = "default") -> tuple[OpenAI, RouteConf
         raise RuntimeError(f"Missing env var {route.api_key_env} for route '{task_type}'")
     client = OpenAI(base_url=route.base_url, api_key=api_key)
     return client, route
+
+
+def get_async_client_and_config(task_type: str = "default") -> tuple[AsyncOpenAI, RouteConfig]:
+    """Return an async OpenAI client and route config for the given task type."""
+    cfg = ROUTES.get(task_type, ROUTES["default"])
+    api_key = os.environ.get(cfg.api_key_env, "")
+    return AsyncOpenAI(base_url=cfg.base_url, api_key=api_key), cfg
