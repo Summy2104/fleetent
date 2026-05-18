@@ -7,7 +7,10 @@ from typing import Any
 
 from mini_agent.model_router import get_client_and_config
 
-_MEM_PATH = Path("data/memories.jsonl")
+
+def _mem_path(user_id: str = "default") -> Path:
+    return Path(f"data/users/{user_id}/memories.jsonl")
+
 
 _EXTRACT_SYSTEM = (
     "You are a memory extractor. From the conversation below, extract facts about the user "
@@ -18,14 +21,15 @@ _EXTRACT_SYSTEM = (
 )
 
 
-def load_memories(n: int = 20) -> str:
+def load_memories(user_id: str = "default", n: int = 20) -> str:
     """Return the last n memories as a formatted string for the system prompt.
 
     Returns empty string if no memories exist yet.
     """
-    if not _MEM_PATH.exists():
+    mem_path = _mem_path(user_id)
+    if not mem_path.exists():
         return ""
-    lines = _MEM_PATH.read_text(encoding="utf-8").splitlines()
+    lines = mem_path.read_text(encoding="utf-8").splitlines()
     recent = lines[-n:] if len(lines) > n else lines
     facts: list[str] = []
     for line in recent:
@@ -40,7 +44,7 @@ def load_memories(n: int = 20) -> str:
     return "[Memory]\n" + "\n".join(facts)
 
 
-def extract_and_save(user_input: str, messages: list[Any]) -> None:
+def extract_and_save(user_input: str, messages: list[Any], user_id: str = "default") -> None:
     """Call a cheap LLM to extract memorable facts and append them to JSONL."""
     client, cfg = get_client_and_config("memory_extraction")
     convo = _messages_to_text(messages)
@@ -66,9 +70,10 @@ def extract_and_save(user_input: str, messages: list[Any]) -> None:
     if not facts:
         return
 
-    _MEM_PATH.parent.mkdir(parents=True, exist_ok=True)
+    mem_path = _mem_path(user_id)
+    mem_path.parent.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    with _MEM_PATH.open("a", encoding="utf-8") as f:
+    with mem_path.open("a", encoding="utf-8") as f:
         for fact in facts:
             entry: dict[str, str] = {"ts": ts, "text": fact.strip(), "source_input": user_input}
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
