@@ -1,4 +1,4 @@
-from mini_agent.context_mgr import DEFAULT_CONFIG, estimate_tokens, maybe_compress
+from mini_agent.context_mgr import DEFAULT_CONFIG, estimate_tokens, maybe_compress, _keep_tail
 
 
 def _make_messages(n: int) -> list[dict]:
@@ -53,3 +53,16 @@ def test_compress_triggers_above_threshold(monkeypatch):
         "Summary" in str(m.get("content", "")) for m in result
     )  # summary injected
     assert len([m for m in result if m.get("role") != "system"]) <= 5  # summary + keep_recent
+
+
+def test_keep_tail_identity_not_equality():
+    # Two tool messages with identical content — must use identity, not equality
+    tool_msg = {"role": "tool", "content": "result"}
+    tool_msg2 = {"role": "tool", "content": "result"}  # equal content, different object
+    caller = {"role": "assistant", "content": "call"}
+    caller2 = {"role": "assistant", "content": "call"}
+    msgs = [caller, tool_msg, caller2, tool_msg2]
+    tail = _keep_tail(msgs, 1)
+    # tail starts with tool_msg2 (last 1) → should extend back to caller2, not caller
+    assert tail[0] is caller2
+    assert tail[1] is tool_msg2

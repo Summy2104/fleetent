@@ -20,14 +20,15 @@ def estimate_tokens(messages: list[Any]) -> int:
 
 def maybe_compress(
     messages: list[Any],
-    config: ContextConfig = DEFAULT_CONFIG,
+    config: ContextConfig | None = None,
 ) -> list[Any]:
     """If messages exceed threshold, compress and return new list. Otherwise return as-is."""
-    threshold = int(config["max_tokens"] * config["compress_threshold"])
+    cfg = config if config is not None else DEFAULT_CONFIG
+    threshold = int(cfg["max_tokens"] * cfg["compress_threshold"])
     if estimate_tokens(messages) <= threshold:
         return messages
 
-    keep_recent = config["keep_recent"]
+    keep_recent = cfg["keep_recent"]
 
     # Separate system prompt from conversation
     system_msgs = [m for m in messages if _role(m) == "system"]
@@ -47,26 +48,29 @@ def maybe_compress(
 
 
 def _summarize(messages: list[Any]) -> str:
-    client, cfg = get_client_and_config("memory_extraction")
-    text = "\n".join(
-        f"{_role(m)}: {_content(m)}"
-        for m in messages
-        if _role(m) in ("user", "assistant") and _content(m)
-    )
-    response = client.chat.completions.create(
-        model=cfg.model,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    "Summarize this conversation concisely. "
-                    "Focus on user goals and completed actions:\n\n" + text
-                ),
-            }
-        ],
-        max_tokens=512,
-    )
-    return response.choices[0].message.content or ""
+    try:
+        client, cfg = get_client_and_config("memory_extraction")
+        text = "\n".join(
+            f"{_role(m)}: {_content(m)}"
+            for m in messages
+            if _role(m) in ("user", "assistant") and _content(m)
+        )
+        response = client.chat.completions.create(
+            model=cfg.model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Summarize this conversation concisely. "
+                        "Focus on user goals and completed actions:\n\n" + text
+                    ),
+                }
+            ],
+            max_tokens=512,
+        )
+        return response.choices[0].message.content or ""
+    except Exception:
+        return "[Earlier conversation summary unavailable]"
 
 
 def _keep_tail(msgs: list[Any], n: int) -> list[Any]:
@@ -74,7 +78,7 @@ def _keep_tail(msgs: list[Any], n: int) -> list[Any]:
     tail = msgs[-n:] if len(msgs) > n else msgs[:]
     # Ensure no orphaned tool_call at the start of tail
     while tail and _role(tail[0]) == "tool":
-        idx = msgs.index(tail[0])
+        idx = next((i for i, m in enumerate(msgs) if m is tail[0]), 0)
         if idx > 0:
             tail = [msgs[idx - 1], *tail]
         else:
