@@ -38,7 +38,11 @@ async def chat(
     req: ChatRequest, user_id: str = Depends(_require_auth)
 ) -> StreamingResponse:
     async def _stream() -> AsyncGenerator[str, None]:
-        async for event in run_stream(req.message, user_id=user_id):
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        try:
+            async for event in run_stream(req.message, user_id=user_id):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as exc:
+            error = {"type": "error", "content": str(exc)}
+            yield f"data: {json.dumps(error, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
