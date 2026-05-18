@@ -2,7 +2,10 @@
 
 import time
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, cast
+
+from openai import AsyncStream
+from openai.types.chat import ChatCompletionChunk
 
 import mini_agent.tools  # noqa: F401  # side-effect: register built-in tools
 from mini_agent.context_mgr import maybe_compress
@@ -73,6 +76,7 @@ async def run_stream(
     """Async streaming version of run(). Yields SSE event dicts.
 
     Event types: tool_call, tool_result, text_delta, done.
+    text_delta events stream as tokens arrive from the LLM.
     """
     client, cfg = get_async_client_and_config("default")
 
@@ -89,35 +93,76 @@ async def run_stream(
     ]
 
     start = time.monotonic()
-    response = None
+    reply = ""
 
     while True:
         messages = maybe_compress(messages)
-        response = await client.chat.completions.create(
-            model=cfg.model,
-            messages=messages,
-            tools=get_schemas(),  # type: ignore[arg-type]
-            max_tokens=cfg.max_tokens,
-        )
-        choice = response.choices[0]
-        msg = choice.message
-        messages.append(msg)
 
-        if choice.finish_reason != "tool_calls":
+        # Accumulate streaming response
+        reply_parts: list[str] = []
+        # tool_calls_acc: index → {id, name, arguments}
+        tool_calls_acc: dict[int, dict[str, str]] = {}
+        finish_reason = "stop"
+
+        stream = cast(
+            AsyncStream[ChatCompletionChunk],
+            await client.chat.completions.create(
+                model=cfg.model,
+                messages=messages,
+                tools=get_schemas(),  # type: ignore[arg-type]
+                max_tokens=cfg.max_tokens,
+                stream=True,
+            ),
+        )
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            delta = choice.delta
+
+            if delta.content:
+                reply_parts.append(delta.content)
+                yield {"type": "text_delta", "content": delta.content}
+
+            for tc in delta.tool_calls or []:
+                idx = tc.index
+                if idx not in tool_calls_acc:
+                    tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                if tc.id:
+                    tool_calls_acc[idx]["id"] = tc.id
+                if tc.function:
+                    tool_calls_acc[idx]["name"] += tc.function.name or ""
+                    tool_calls_acc[idx]["arguments"] += tc.function.arguments or ""
+
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+
+        if finish_reason != "tool_calls":
+            reply = "".join(reply_parts)
             break
 
-        for tc in msg.tool_calls or []:
-            if not hasattr(tc, "function"):
-                continue
-            yield {"type": "tool_call", "name": tc.function.name, "args": tc.function.arguments}
-            result = dispatch(tc.function.name, tc.function.arguments)
-            yield {"type": "tool_result", "name": tc.function.name, "content": result}
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+        # Reconstruct assistant message with tool_calls for messages list
+        tool_calls_list: list[dict[str, Any]] = [
+            {
+                "id": tc["id"],
+                "type": "function",
+                "function": {"name": tc["name"], "arguments": tc["arguments"]},
+            }
+            for tc in (tool_calls_acc[i] for i in sorted(tool_calls_acc))
+        ]
+        messages.append({"role": "assistant", "content": None, "tool_calls": tool_calls_list})
 
-    reply = msg.content or ""
-    yield {"type": "text_delta", "content": reply}
+        # Dispatch tool calls
+        for tc_data in tool_calls_list:
+            func: dict[str, str] = tc_data["function"]
+            name = func["name"]
+            args = func["arguments"]
+            yield {"type": "tool_call", "name": name, "args": args}
+            result = dispatch(name, args)
+            yield {"type": "tool_result", "name": name, "content": result}
+            messages.append({"role": "tool", "tool_call_id": tc_data["id"], "content": result})
+
     yield {"type": "done", "content": reply}
 
-    usage = response.usage if response else None
-    log_run(user_input, reply, messages, time.monotonic() - start, usage)
+    log_run(user_input, reply, messages, time.monotonic() - start, usage=None)
     extract_and_save(user_input, messages, user_id=user_id)
