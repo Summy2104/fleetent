@@ -32,15 +32,16 @@ def main() -> None:
         if not users:
             print("No users.")
             return
-        print(f"{'ID':<38}  {'NAME':<20}  CREATED")
+        print(f"{'ID':<36}  {'NAME':<20}  CREATED")
         for u in users:
-            print(f"{u.id}  {u.name:<20}  {u.created_at}")
+            name = u.name[:17] + "..." if len(u.name) > 20 else u.name
+            print(f"{u.id:<36}  {name:<20}  {u.created_at}")
 
     elif args.cmd == "rotate-key":
         try:
             user = rotate_key(args.user_id)
-        except KeyError as e:
-            print(f"Error: {e}", file=sys.stderr)
+        except KeyError:
+            print(f"Error: User {args.user_id!r} not found.", file=sys.stderr)
             sys.exit(1)
         print(f"Key rotated for {user.name}.")
         print(f"  new api_key: {user.api_key}  ← save this, shown once")
