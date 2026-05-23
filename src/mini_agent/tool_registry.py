@@ -11,7 +11,7 @@ from typing import Any
 
 ToolSchema = dict[str, Any]
 
-_registry: dict[str, tuple[Callable[..., str], ToolSchema]] = {}
+_registry: dict[str, tuple[Callable[..., Any], ToolSchema]] = {}
 
 
 def tool[F: Callable[..., str]](fn: F) -> F:
@@ -38,10 +38,11 @@ def dispatch(
         return f"unknown tool: {name}"
     fn, _ = _registry[name]
     kwargs: dict[str, Any] = json.loads(arguments_json)
-    return fn(**kwargs)
+    result = fn(**kwargs)
+    return result  # type: ignore[no-any-return]
 
 
-def _build_schema(fn: Callable[..., str]) -> ToolSchema:
+def _build_schema(fn: Callable[..., Any]) -> ToolSchema:
     sig = inspect.signature(fn)
     description = (fn.__doc__ or "").strip().splitlines()[0] if fn.__doc__ else fn.__name__
     properties: dict[str, dict[str, str]] = {}

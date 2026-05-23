@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ async def _register_server(server: McpServerConfig) -> None:
     logger.info("mcp_server_registered server_id=%s tool_count=%d", server.id, len(tools))
 
 
-def _register_tool(server: McpServerConfig, tool_name: str, tool_def: dict) -> None:
+def _register_tool(server: McpServerConfig, tool_name: str, tool_def: dict[str, Any]) -> None:
     import mini_agent.tool_registry as tr
 
     input_schema = tool_def.get("inputSchema", {"type": "object", "properties": {}})
@@ -81,7 +82,7 @@ def _register_tool(server: McpServerConfig, tool_name: str, tool_def: dict) -> N
     tr._registry[tool_name] = (call, schema)
 
 
-async def call_tool(server_id: str, tool_name: str, args: dict) -> object:
+async def call_tool(server_id: str, tool_name: str, args: dict[str, Any]) -> object:
     server = _server_registry.get(server_id)
     if server is None:
         raise KeyError(f"Unknown MCP server: {server_id}")
