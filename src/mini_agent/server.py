@@ -1,21 +1,83 @@
 """FastAPI HTTP server: POST /chat (SSE), GET /health."""
 
+from __future__ import annotations
+
+import asyncio
 import json
+import logging
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+import yaml
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from mini_agent import mcp_client
 from mini_agent.agent_loop import run_stream
+from mini_agent.mcp_client import McpServerConfig
 from mini_agent.skill_registry import scan as scan_skills
 from mini_agent.user_store import get_by_api_key
+
+logger = logging.getLogger(__name__)
+
+_MCP_YAML_PATH: Path = Path("config/mcp.yaml")
+
+
+async def _start_slack_adapter() -> None:
+    """Start Slack Socket Mode adapter as a background task."""
+    try:
+        from typing import Any
+
+        from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
+
+        from mini_agent.im_gateway.slack import create_app as create_slack_app
+
+        slack_app: Any = create_slack_app()
+        app_token = os.environ.get("SLACK_APP_TOKEN", "")
+        handler = AsyncSocketModeHandler(slack_app, app_token)
+        await handler.start_async()  # type: ignore[no-untyped-call]
+    except Exception as exc:
+        logger.warning("slack_adapter_start_failed error=%s", exc)
+
+
+async def _start_telegram_adapter() -> None:
+    """Start Telegram polling adapter as a background task."""
+    try:
+        from typing import Any
+
+        from mini_agent.im_gateway.telegram import create_app as create_telegram_app
+
+        tg_app: Any = create_telegram_app()
+        await tg_app.initialize()
+        await tg_app.start()
+        await tg_app.updater.start_polling()
+    except Exception as exc:
+        logger.warning("telegram_adapter_start_failed error=%s", exc)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     scan_skills()
+
+    # Load MCP servers from config/mcp.yaml if present
+    if _MCP_YAML_PATH.exists():
+        try:
+            raw = yaml.safe_load(_MCP_YAML_PATH.read_text())
+            servers = [McpServerConfig(**s) for s in raw.get("servers", [])]
+            await mcp_client.register_all(servers)
+        except Exception as exc:
+            logger.warning("mcp_yaml_load_failed path=%s error=%s", _MCP_YAML_PATH, exc)
+
+    # Start IM adapters as background tasks if tokens are configured
+    if os.environ.get("SLACK_BOT_TOKEN") and os.environ.get("SLACK_APP_TOKEN"):
+        asyncio.create_task(_start_slack_adapter())
+
+    if os.environ.get("TELEGRAM_BOT_TOKEN"):
+        asyncio.create_task(_start_telegram_adapter())
+
     yield
 
 
@@ -38,8 +100,14 @@ async def _require_auth(authorization: str = Header()) -> str:
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict:  # type: ignore[type-arg]
+    return {
+        "status": "ok",
+        "adapters": {
+            "slack": bool(os.environ.get("SLACK_BOT_TOKEN")),
+            "telegram": bool(os.environ.get("TELEGRAM_BOT_TOKEN")),
+        },
+    }
 
 
 @app.post("/chat")
