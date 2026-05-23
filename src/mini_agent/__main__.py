@@ -2,7 +2,7 @@
 
 import sys
 
-from mini_agent.agent_loop import run
+from mini_agent.agent_loop import run_sync as run
 
 
 def main() -> None:

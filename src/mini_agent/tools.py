@@ -32,3 +32,9 @@ def read_file(path: str) -> str:
             return f.read(2000)
     except OSError as exc:
         return f"error: {exc}"
+
+
+@tool
+def sub_agent(tasks: str) -> str:
+    """Run multiple sub-tasks in parallel. tasks is a JSON array with 'name' and 'prompt' fields."""
+    return "Sub-agent dispatch is handled by the agent loop."

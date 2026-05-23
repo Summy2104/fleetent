@@ -11,7 +11,7 @@ import mini_agent.tools  # noqa: F401  # side-effect: register built-in tools
 from mini_agent.context_mgr import maybe_compress
 from mini_agent.eval_logger import log_run
 from mini_agent.memory_layer import extract_and_save, load_memories
-from mini_agent.model_router import get_async_client_and_config, get_client_and_config
+from mini_agent.model_router import get_async_client_and_config
 from mini_agent.skill_registry import load as load_skill
 from mini_agent.skill_registry import match as match_skill
 from mini_agent.skill_registry import scan as scan_skills
@@ -19,35 +19,36 @@ from mini_agent.tool_registry import dispatch, get_schemas
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
 
+_SUB_AGENT_TOOL = "sub_agent"
 
-def run(user_input: str, user_id: str = "default", system_prompt: str = _SYSTEM) -> str:
-    """Run the agent loop for a single user turn. Return the final text reply."""
-    scan_skills()
-    client, cfg = get_client_and_config("default")
 
-    memory_ctx = load_memories(user_id=user_id)
-    full_system = f"{memory_ctx}\n\n{system_prompt}" if memory_ctx else system_prompt
+async def run(
+    messages: list[dict[str, Any]],
+    user_id: str = "default",
+    system_prompt: str = _SYSTEM,
+    is_sub_agent: bool = False,
+) -> str:
+    """Async agent loop accepting a messages list. Return the final text reply.
 
-    # Inject matching skill into system prompt
-    matched = match_skill(user_input)
-    if matched:
-        skill_content = load_skill(matched)
-        full_system = f"{full_system}\n\n{skill_content}"
+    When is_sub_agent=True the sub_agent tool is excluded from the tool schema
+    so child agents cannot spawn further sub-agents.
+    """
+    client, cfg = get_async_client_and_config("default")
 
-    messages: list[Any] = [
-        {"role": "system", "content": full_system},
-        {"role": "user", "content": user_input},
-    ]
+    # Determine effective tool schemas (exclude sub_agent for child agents)
+    schemas = [s for s in get_schemas() if s["function"]["name"] != _SUB_AGENT_TOOL] \
+        if is_sub_agent else get_schemas()
 
     start = time.monotonic()
     response = None
+    msg: Any = None
 
     while True:
         messages = maybe_compress(messages)
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=cfg.model,
-            messages=messages,
-            tools=get_schemas(),  # type: ignore[arg-type]
+            messages=messages,  # type: ignore[arg-type]
+            tools=schemas,  # type: ignore[arg-type]
             max_tokens=cfg.max_tokens,
         )
         choice = response.choices[0]
@@ -63,11 +64,36 @@ def run(user_input: str, user_id: str = "default", system_prompt: str = _SYSTEM)
             result = dispatch(tc.function.name, tc.function.arguments)
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 
-    reply = msg.content or ""
+    reply = (msg.content if msg is not None else None) or ""
     usage = response.usage if response else None
+    user_input = next(
+        (m["content"] for m in messages if isinstance(m, dict) and m.get("role") == "user"),
+        "",
+    )
     log_run(user_input, reply, messages, time.monotonic() - start, usage)
     extract_and_save(user_input, messages, user_id=user_id)
     return reply
+
+
+def run_sync(user_input: str, user_id: str = "default", system_prompt: str = _SYSTEM) -> str:
+    """Synchronous wrapper around run() for CLI use."""
+    import asyncio
+
+    scan_skills()
+    memory_ctx = load_memories(user_id=user_id)
+    full_system = f"{memory_ctx}\n\n{system_prompt}" if memory_ctx else system_prompt
+
+    matched = match_skill(user_input)
+    if matched:
+        skill_content = load_skill(matched)
+        full_system = f"{full_system}\n\n{skill_content}"
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": full_system},
+        {"role": "user", "content": user_input},
+    ]
+
+    return asyncio.run(run(messages, user_id=user_id, system_prompt=system_prompt))
 
 
 async def run_stream(

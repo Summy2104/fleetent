@@ -55,10 +55,18 @@ def get_schemas() -> list[ToolSchema]:
     return [schema for _, schema in _registry.values()]
 
 
+_SUB_AGENT_TOOL = "sub_agent"
+
+
 def dispatch(
-    name: str, arguments_json: str, allowed_tools: list[str] | None = None
+    name: str,
+    arguments_json: str | dict[str, Any],
+    allowed_tools: list[str] | None = None,
+    is_sub_agent: bool = False,
 ) -> str:
     """Execute a registered tool by name with JSON-encoded arguments."""
+    if is_sub_agent and name == _SUB_AGENT_TOOL:
+        raise PermissionError("sub_agent tool is not available inside a sub-agent")
     if allowed_tools is not None:
         from mini_agent.agent_policy import check_tool_access
 
@@ -67,7 +75,9 @@ def dispatch(
     if name not in _registry:
         return f"unknown tool: {name}"
     fn, _ = _registry[name]
-    kwargs: dict[str, Any] = json.loads(arguments_json)
+    kwargs: dict[str, Any] = (
+        arguments_json if isinstance(arguments_json, dict) else json.loads(arguments_json)
+    )
     result = fn(**kwargs)
     return result  # type: ignore[no-any-return]
 
