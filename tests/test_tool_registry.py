@@ -63,6 +63,27 @@ def test_schema_required_params():
     assert "optional" not in params["required"]
 
 
+def test_dispatch_with_allowed_tools_passes():
+    @tool_registry.tool
+    def _test_access_tool() -> str:
+        """Test access control."""
+        return "ok"
+
+    result = tool_registry.dispatch("_test_access_tool", "{}", allowed_tools=["_test_access_tool"])
+    assert result == "ok"
+
+
+def test_dispatch_tool_not_in_allowed_tools_raises():
+    with pytest.raises(PermissionError, match="not permitted"):
+        tool_registry.dispatch("shell", "{}", allowed_tools=["github__*"])
+
+
+def test_dispatch_without_allowed_tools_skips_check():
+    # No allowed_tools = no check (backwards compat) — returns error string for unknown tool
+    result = tool_registry.dispatch("nonexistent_tool_xyz", "{}")
+    assert "unknown tool" in result
+
+
 def test_schema_type_mapping():
     @tool_registry.tool
     def typed_fn(s: str, n: int, f: float, b: bool) -> str:

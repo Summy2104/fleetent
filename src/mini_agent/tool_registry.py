@@ -25,8 +25,15 @@ def get_schemas() -> list[ToolSchema]:
     return [schema for _, schema in _registry.values()]
 
 
-def dispatch(name: str, arguments_json: str) -> str:
+def dispatch(
+    name: str, arguments_json: str, allowed_tools: list[str] | None = None
+) -> str:
     """Execute a registered tool by name with JSON-encoded arguments."""
+    if allowed_tools is not None:
+        from mini_agent.agent_policy import check_tool_access
+
+        if not check_tool_access(name, allowed_tools):
+            raise PermissionError(f"Tool '{name}' not permitted by agent policy")
     if name not in _registry:
         return f"unknown tool: {name}"
     fn, _ = _registry[name]
