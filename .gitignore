@@ -14,6 +14,7 @@ data/*.db
 # Env
 .env
 .env.local
+.env.production
 
 # Worktrees
 .worktrees/
