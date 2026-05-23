@@ -1,8 +1,8 @@
 import sqlite3
 from pathlib import Path
-import pytest
-from alembic.config import Config
+
 from alembic import command
+from alembic.config import Config
 
 
 def apply_migrations(db_path: Path) -> None:
