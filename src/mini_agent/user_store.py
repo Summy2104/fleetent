@@ -79,6 +79,12 @@ def rotate_key(user_id: str) -> User:
     return User(*updated)
 
 
+def get_or_create_im_user(platform: str, platform_user_id: str) -> "User":
+    from mini_agent.im_user_store import get_or_create
+
+    return get_or_create(platform, platform_user_id)
+
+
 def _conn() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     return sqlite3.connect(DB_PATH)
