@@ -1,0 +1,6 @@
+# Optional overrides — values here are the defaults
+# All can be overridden via environment variables
+log_format: console  # "console" | "json"
+microsandbox_url: http://host.docker.internal:7777
+permission_gate_medium_timeout_seconds: 300
+permission_gate_high_timeout_seconds: 3600

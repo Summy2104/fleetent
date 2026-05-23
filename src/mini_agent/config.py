@@ -1,0 +1,46 @@
+import logging
+
+import structlog
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    anthropic_api_key: str
+    slack_bot_token: str = ""
+    slack_app_token: str = ""
+    telegram_bot_token: str = ""
+    microsandbox_url: str = "http://host.docker.internal:7777"
+    permission_gate_medium_timeout_seconds: int = 300
+    permission_gate_high_timeout_seconds: int = 3600
+    log_format: str = "console"
+
+
+def configure_logging(settings: Settings) -> None:
+    shared_processors: list[structlog.types.Processor] = [
+        structlog.contextvars.merge_contextvars,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+    ]
+
+    if settings.log_format == "json":
+        renderer: structlog.types.Processor = structlog.processors.JSONRenderer()
+    else:
+        renderer = structlog.dev.ConsoleRenderer()
+
+    structlog.configure(
+        processors=shared_processors + [renderer],
+        wrapper_class=structlog.make_filtering_bound_logger(logging.DEBUG),
+        context_class=dict,
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+    logging.basicConfig(
+        format="%(message)s",
+        level=logging.INFO,
+        handlers=[logging.StreamHandler()],
+    )

@@ -8,6 +8,13 @@ dependencies = [
     "openai>=1.50.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.30.0",
+    "slack-bolt>=1.18.0",
+    "python-telegram-bot>=21.0",
+    "microsandbox>=0.1.0",
+    "pydantic-settings>=2.0.0",
+    "structlog>=24.0.0",
+    "alembic>=1.13.0",
+    "mcp>=1.0.0",
 ]
 
 [project.scripts]

@@ -18,6 +18,10 @@ data/*.db
 # Worktrees
 .worktrees/
 
+# Config — example files are committed, actual configs are not
+config/*.yaml
+config/mcp.yaml
+
 # IDE
 .vscode/
 .idea/
