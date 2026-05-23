@@ -15,6 +15,9 @@ data/*.db
 .env
 .env.local
 
+# Worktrees
+.worktrees/
+
 # IDE
 .vscode/
 .idea/
