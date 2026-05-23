@@ -1,0 +1,30 @@
+## ADDED Requirements
+
+### Requirement: Alembic migration management
+The system SHALL use alembic to manage all SQLite schema changes, with migration files checked into the repository.
+
+#### Scenario: Fresh install
+- **WHEN** service starts on a new machine with no existing database
+- **THEN** running `alembic upgrade head` creates all tables at the latest schema version
+
+#### Scenario: Upgrade existing install
+- **WHEN** a new version adds a table or column
+- **THEN** running `alembic upgrade head` applies only the pending migrations without data loss
+
+### Requirement: Migration covers all new tables
+The initial migration for this change SHALL create: `im_users`, `agents`, `user_agents`, `approvals`.
+
+#### Scenario: Migration creates required tables
+- **WHEN** `alembic upgrade head` runs on a database that only has the `users` table
+- **THEN** all four new tables are created with correct columns and constraints
+
+### Requirement: No raw schema creation in application code
+The system SHALL NOT use `CREATE TABLE IF NOT EXISTS` in application startup code for new tables.
+
+#### Scenario: New tables only created via migration
+- **WHEN** the application starts
+- **THEN** it does NOT call `CREATE TABLE` for `im_users`, `agents`, `user_agents`, or `approvals`
+
+#### Scenario: Existing users table
+- **WHEN** alembic runs on a database with the legacy `users` table (created by `_init_db`)
+- **THEN** migration treats it as already present and does not fail

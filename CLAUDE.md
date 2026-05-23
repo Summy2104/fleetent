@@ -46,8 +46,11 @@ data/
 
 Tests use `tmp_path + monkeypatch` to redirect all data paths — never touch `data/` in tests.
 
-## Testing Conventions
+## Testing Approach
 
+TDD is the default — tests are written before production code during `opsx:apply`.
+
+Isolation patterns:
 - `monkeypatch.setattr(module, "DB_PATH", tmp_path / "x.db")` — isolate SQLite
 - `monkeypatch.setattr(memory_layer, "_mem_path", ...)` — isolate memory files
 - `patch("mini_agent.memory_layer.get_client_and_config", ...)` — mock LLM calls
@@ -66,11 +69,18 @@ Feature development follows OpenSpec spec-driven flow:
 
 ```
 /opsx:propose "feature-name"   # create proposal + spec + design + tasks
-/opsx:apply                    # implement the current change
+/opsx:apply                    # implement the current change (TDD: tests first)
 /opsx:archive                  # archive completed change
 ```
 
 Changes live in `openspec/changes/`. Propose → refine spec → apply → archive.
+
+During `opsx:apply`, follow TDD order per task:
+1. Write the failing test(s) for the task
+2. Run `uv run pytest -x -q` — confirm red
+3. Implement the minimal code to pass
+4. Run tests again — confirm green
+5. Refactor if needed, keep green
 
 ## Code Style
 
