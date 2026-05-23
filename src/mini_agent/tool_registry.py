@@ -7,17 +7,47 @@ The agent loop calls get_schemas() for the API payload and dispatch() to execute
 import inspect
 import json
 from collections.abc import Callable
-from typing import Any
+from typing import Any, overload
 
 ToolSchema = dict[str, Any]
 
 _registry: dict[str, tuple[Callable[..., Any], ToolSchema]] = {}
+_risk_levels: dict[str, str] = {}
 
 
-def tool[F: Callable[..., str]](fn: F) -> F:
-    """Register a function as a callable tool."""
-    _registry[fn.__name__] = (fn, _build_schema(fn))
-    return fn
+@overload
+def tool[F: Callable[..., str]](fn: F) -> F: ...
+
+
+@overload
+def tool(*, risk_level: str = "none") -> Callable[[Callable[..., str]], Callable[..., str]]: ...
+
+
+def tool(
+    fn: Callable[..., str] | None = None,
+    *,
+    risk_level: str = "none",
+) -> Any:
+    """Register a function as a callable tool.
+
+    Supports both `@tool` (bare) and `@tool(risk_level="medium")` forms.
+    The risk_level is recorded so callers can route execution through the
+    permission gate when needed.
+    """
+
+    def _register(target: Callable[..., str]) -> Callable[..., str]:
+        _registry[target.__name__] = (target, _build_schema(target))
+        _risk_levels[target.__name__] = risk_level
+        return target
+
+    if fn is not None:
+        return _register(fn)
+    return _register
+
+
+def get_risk_level(name: str) -> str:
+    """Return the registered risk level for a tool, defaulting to 'none'."""
+    return _risk_levels.get(name, "none")
 
 
 def get_schemas() -> list[ToolSchema]:
