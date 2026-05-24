@@ -162,11 +162,14 @@ async def test_call_tool_sends_jsonrpc_and_returns_result(monkeypatch):
 
     with respx.mock:
         respx.post("http://callee.test/").mock(
-            return_value=httpx.Response(200, json={"result": {"output": "42"}})
+            return_value=httpx.Response(
+                200,
+                json={"result": {"content": [{"type": "text", "text": "42"}]}},
+            )
         )
         result = await mcp.call_tool("callee", "compute", {"x": 1})
 
-    assert result == {"output": "42"}
+    assert result == "42"
 
 
 @pytest.mark.asyncio

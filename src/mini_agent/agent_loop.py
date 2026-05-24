@@ -7,6 +7,8 @@ from typing import Any, cast
 from openai import AsyncStream
 from openai.types.chat import ChatCompletionChunk
 
+import asyncio
+import inspect
 import json
 import uuid
 from collections.abc import Callable, Coroutine
@@ -102,8 +104,12 @@ async def run(
                         result = f"tool execution {decision}: user did not approve {tc.function.name}"
                     else:
                         result = dispatch(tc.function.name, tc.function.arguments, is_sub_agent=is_sub_agent)
+                        if inspect.iscoroutine(result):
+                            result = await result
                 else:
                     result = dispatch(tc.function.name, tc.function.arguments, is_sub_agent=is_sub_agent)
+                    if inspect.iscoroutine(result):
+                        result = await result
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 
     reply = (msg.content if msg is not None else None) or ""

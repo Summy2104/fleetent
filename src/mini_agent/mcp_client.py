@@ -107,4 +107,10 @@ async def call_tool(server_id: str, tool_name: str, args: dict[str, Any]) -> obj
         )
         resp.raise_for_status()
         data = resp.json()
-    return data.get("result")
+    result = data.get("result")
+    # Extract text content if MCP returned a content array
+    if isinstance(result, dict):
+        contents = result.get("content", [])
+        if contents and isinstance(contents[0], dict):
+            return contents[0].get("text", str(result))
+    return str(result) if result is not None else ""
