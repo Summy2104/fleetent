@@ -1,4 +1,4 @@
-from mini_agent.context_mgr import DEFAULT_CONFIG, _keep_tail, estimate_tokens, maybe_compress
+from mini_agent.context_mgr import _keep_tail, estimate_tokens, maybe_compress
 
 
 def _make_messages(n: int) -> list[dict]:
@@ -39,7 +39,6 @@ def test_compress_triggers_above_threshold(monkeypatch):
         ],
     ]
     config = {
-        **DEFAULT_CONFIG,
         "max_tokens": 10_000,
         "compress_threshold": 0.5,
         "keep_recent": 4,

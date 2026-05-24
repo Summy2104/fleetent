@@ -6,11 +6,15 @@ from mini_agent.model_router import get_client_and_config
 
 ContextConfig = dict[str, Any]
 
-DEFAULT_CONFIG: ContextConfig = {
-    "max_tokens": 200_000,
-    "compress_threshold": 0.8,
-    "keep_recent": 10,
-}
+
+def _default_config() -> ContextConfig:
+    from mini_agent.config import Settings
+    s = Settings()
+    return {
+        "max_tokens": s.context_max_tokens,
+        "compress_threshold": s.context_compress_threshold,
+        "keep_recent": s.context_keep_recent,
+    }
 
 
 def estimate_tokens(messages: list[Any]) -> int:
@@ -23,7 +27,7 @@ def maybe_compress(
     config: ContextConfig | None = None,
 ) -> list[Any]:
     """If messages exceed threshold, compress and return new list. Otherwise return as-is."""
-    cfg = config if config is not None else DEFAULT_CONFIG
+    cfg = config if config is not None else _default_config()
     threshold = int(cfg["max_tokens"] * cfg["compress_threshold"])
     if estimate_tokens(messages) <= threshold:
         return messages

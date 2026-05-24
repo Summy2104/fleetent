@@ -117,6 +117,28 @@ class PermissionGate:
 _default_gate: PermissionGate = PermissionGate()
 
 
+def list_approvals(status: str | None = None) -> list[dict]:  # type: ignore[type-arg]
+    """Return approvals from DB, optionally filtered by status."""
+    _init_db()
+    with _conn() as conn:
+        if status:
+            rows = conn.execute(
+                "SELECT id, tool_name, risk_level, tool_args, status, "
+                "requester_user_id, approver_user_id, created_at, resolved_at "
+                "FROM approvals WHERE status = ? ORDER BY created_at DESC",
+                (status,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, tool_name, risk_level, tool_args, status, "
+                "requester_user_id, approver_user_id, created_at, resolved_at "
+                "FROM approvals ORDER BY created_at DESC LIMIT 50",
+            ).fetchall()
+    cols = ["id", "tool_name", "risk_level", "tool_args", "status",
+            "requester_user_id", "approver_user_id", "created_at", "resolved_at"]
+    return [dict(zip(cols, r)) for r in rows]
+
+
 def cleanup_stale_approvals() -> None:
     """Mark all pending approvals as timeout. Call at server startup after a restart."""
     _init_db()

@@ -19,7 +19,7 @@ from mini_agent import mcp_client
 from mini_agent.agent_loop import run_stream
 from mini_agent.config import Settings
 from mini_agent.mcp_client import McpServerConfig
-from mini_agent.permission_gate import _default_gate, cleanup_stale_approvals
+from mini_agent.permission_gate import _default_gate, cleanup_stale_approvals, list_approvals
 from mini_agent.skill_registry import scan as scan_skills
 from mini_agent.user_store import get_by_api_key
 
@@ -112,6 +112,11 @@ async def health() -> dict:  # type: ignore[type-arg]
             "telegram": bool(settings.telegram_bot_token),
         },
     }
+
+
+@app.get("/approvals")
+async def get_approvals(status: str | None = None) -> list:  # type: ignore[type-arg]
+    return list_approvals(status=status)
 
 
 class ApprovalRequest(BaseModel):
