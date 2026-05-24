@@ -1,6 +1,7 @@
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
+
 import pytest
+
 from mini_agent.im_gateway.normalizer import NormalizedMessage, route
 
 
@@ -49,7 +50,8 @@ async def test_slack_dm_session_id():
 
 async def test_slack_thread_session_id():
     from mini_agent.im_gateway.slack import _derive_session_id
-    assert _derive_session_id(user_id="U123", channel_type="channel", thread_ts="T456") == "thread:T456"
+    result = _derive_session_id(user_id="U123", channel_type="channel", thread_ts="T456")
+    assert result == "thread:T456"
 
 
 async def test_slack_channel_no_thread():

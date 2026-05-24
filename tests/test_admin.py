@@ -1,8 +1,9 @@
-import sys
-import pytest
 from io import StringIO
 from unittest.mock import patch
-from mini_agent import user_store, admin
+
+import pytest
+
+from mini_agent import admin, user_store
 
 
 @pytest.fixture(autouse=True)
@@ -14,12 +15,15 @@ def run_admin(*args: str) -> tuple[str, str, int]:
     """Run admin.main() with given CLI args. Returns (stdout, stderr, exit_code)."""
     stdout, stderr = StringIO(), StringIO()
     exit_code = 0
-    with patch("sys.argv", ["mini-agent-admin", *args]):
-        with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
-            try:
-                admin.main()
-            except SystemExit as e:
-                exit_code = int(e.code or 0)
+    with (
+        patch("sys.argv", ["mini-agent-admin", *args]),
+        patch("sys.stdout", stdout),
+        patch("sys.stderr", stderr),
+    ):
+        try:
+            admin.main()
+        except SystemExit as e:
+            exit_code = int(e.code or 0)
     return stdout.getvalue(), stderr.getvalue(), exit_code
 
 

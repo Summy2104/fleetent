@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import yaml
@@ -53,10 +52,12 @@ def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch):
     import mini_agent.server as srv
 
     # Patch adapter starters to avoid real socket connections during lifespan
-    with patch.object(srv, "_start_slack_adapter", new_callable=AsyncMock), \
-         patch.object(srv, "_start_telegram_adapter", new_callable=AsyncMock):
-        with TestClient(srv.app) as client:
-            resp = client.get("/health")
+    with (
+        patch.object(srv, "_start_slack_adapter", new_callable=AsyncMock),
+        patch.object(srv, "_start_telegram_adapter", new_callable=AsyncMock),
+        TestClient(srv.app) as client,
+    ):
+        resp = client.get("/health")
 
     assert resp.status_code == 200
     data = resp.json()
