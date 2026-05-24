@@ -29,6 +29,7 @@ def test_health_includes_adapter_status(tmp_path, monkeypatch):
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.chdir(tmp_path)  # no .env here — prevents Settings from loading tokens
 
     import mini_agent.server as srv
 

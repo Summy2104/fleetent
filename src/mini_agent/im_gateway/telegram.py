@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -22,7 +20,8 @@ def create_app() -> object:
     except ImportError:
         raise RuntimeError("python-telegram-bot not installed") from None
 
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    from mini_agent.config import Settings
+    bot_token = Settings().telegram_bot_token
     builder = Application.builder().token(bot_token)
     application = builder.build()
 

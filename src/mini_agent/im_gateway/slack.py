@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -23,7 +21,8 @@ def create_app() -> object:
     except ImportError:
         raise RuntimeError("slack-bolt not installed") from None
 
-    bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
+    from mini_agent.config import Settings
+    bot_token = Settings().slack_bot_token
     app = App(token=bot_token)
 
     @app.event("message")

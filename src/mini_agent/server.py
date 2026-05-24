@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from mini_agent import mcp_client
 from mini_agent.agent_loop import run_stream
+from mini_agent.config import Settings
 from mini_agent.mcp_client import McpServerConfig
 from mini_agent.skill_registry import scan as scan_skills
 from mini_agent.user_store import get_by_api_key
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 _MCP_YAML_PATH: Path = Path("config/mcp.yaml")
 
 
-async def _start_slack_adapter() -> None:
+async def _start_slack_adapter(app_token: str) -> None:
     """Start Slack Socket Mode adapter as a background task."""
     try:
         from typing import Any
@@ -36,7 +37,6 @@ async def _start_slack_adapter() -> None:
         from mini_agent.im_gateway.slack import create_app as create_slack_app
 
         slack_app: Any = create_slack_app()
-        app_token = os.environ.get("SLACK_APP_TOKEN", "")
         handler = AsyncSocketModeHandler(slack_app, app_token)
         await handler.start_async()  # type: ignore[no-untyped-call]
     except Exception as exc:
@@ -61,6 +61,7 @@ async def _start_telegram_adapter() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     scan_skills()
+    settings = Settings()
 
     # Load MCP servers from config/mcp.yaml if present
     if _MCP_YAML_PATH.exists():
@@ -72,10 +73,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.warning("mcp_yaml_load_failed path=%s error=%s", _MCP_YAML_PATH, exc)
 
     # Start IM adapters as background tasks if tokens are configured
-    if os.environ.get("SLACK_BOT_TOKEN") and os.environ.get("SLACK_APP_TOKEN"):
-        asyncio.create_task(_start_slack_adapter())
+    if settings.slack_bot_token and settings.slack_app_token:
+        asyncio.create_task(_start_slack_adapter(settings.slack_app_token))
 
-    if os.environ.get("TELEGRAM_BOT_TOKEN"):
+    if settings.telegram_bot_token:
         asyncio.create_task(_start_telegram_adapter())
 
     yield
@@ -101,11 +102,12 @@ async def _require_auth(authorization: str = Header()) -> str:
 
 @app.get("/health")
 async def health() -> dict:  # type: ignore[type-arg]
+    settings = Settings()
     return {
         "status": "ok",
         "adapters": {
-            "slack": bool(os.environ.get("SLACK_BOT_TOKEN")),
-            "telegram": bool(os.environ.get("TELEGRAM_BOT_TOKEN")),
+            "slack": bool(settings.slack_bot_token),
+            "telegram": bool(settings.telegram_bot_token),
         },
     }
 
