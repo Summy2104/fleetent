@@ -53,7 +53,7 @@ async def run(
         )
         choice = response.choices[0]
         msg = choice.message
-        messages.append(msg)
+        messages.append(msg.model_dump())  # dict for JSON serializability (session persistence)
 
         if choice.finish_reason != "tool_calls":
             break
