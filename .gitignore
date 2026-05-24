@@ -28,3 +28,5 @@ config/mcp.yaml
 .idea/
 *.swp
 .DS_Store
+
+.coverage
