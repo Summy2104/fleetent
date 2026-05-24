@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from collections.abc import AsyncGenerator
+from typing import Any
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -144,9 +145,20 @@ async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # t
 async def chat(
     req: ChatRequest, user_id: str = Depends(_require_auth)
 ) -> StreamingResponse:
+    from mini_agent.agent_store import get_agent_for_user
+
+    agent = get_agent_for_user(user_id)
+    system_prompt = agent.system_prompt if agent else None
+    allowed_tools = agent.allowed_tools if agent else None
+
     async def _stream() -> AsyncGenerator[str, None]:
         try:
-            async for event in run_stream(req.message, user_id=user_id):
+            kwargs: dict[str, Any] = {"user_id": user_id}
+            if system_prompt is not None:
+                kwargs["system_prompt"] = system_prompt
+            if allowed_tools is not None:
+                kwargs["allowed_tools"] = allowed_tools
+            async for event in run_stream(req.message, **kwargs):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as exc:
             error = {"type": "error", "content": str(exc)}

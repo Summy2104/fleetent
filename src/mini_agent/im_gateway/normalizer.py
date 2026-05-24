@@ -7,6 +7,8 @@ from typing import Any
 
 import structlog
 
+from mini_agent.agent_store import get_agent_for_user
+
 logger = structlog.get_logger(__name__)
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
@@ -49,9 +51,14 @@ async def route(msg: NormalizedMessage) -> None:
     async with session_mgr.session_lock(msg.session_id):
         history = await session_mgr.load(msg.session_id)
 
+        # Resolve agent config for this user (custom system_prompt + tool restrictions)
+        agent = get_agent_for_user(msg.user_id)
+        base_system = agent.system_prompt if agent else _SYSTEM
+        allowed_tools = agent.allowed_tools if agent else None
+
         # Build fresh system message: memories + matching skill
         memory_ctx = load_memories(user_id=msg.user_id)
-        system_content = f"{memory_ctx}\n\n{_SYSTEM}" if memory_ctx else _SYSTEM
+        system_content = f"{memory_ctx}\n\n{base_system}" if memory_ctx else base_system
         matched = match_skill(msg.text)
         if matched:
             system_content = f"{system_content}\n\n{load_skill(matched)}"
@@ -64,7 +71,10 @@ async def route(msg: NormalizedMessage) -> None:
 
         history.append({"role": "user", "content": msg.text})
 
-        response = await agent_loop.run(messages=history, user_id=msg.user_id, reply_func=msg.reply_func)
+        response = await agent_loop.run(
+            messages=history, user_id=msg.user_id, reply_func=msg.reply_func,
+            allowed_tools=allowed_tools,
+        )
 
         # agent_loop.run() already appended the assistant message to history in-place.
         # Do NOT append again here — that caused duplicate messages in every session.

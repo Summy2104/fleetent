@@ -24,6 +24,7 @@ from mini_agent.skill_registry import load as load_skill
 from mini_agent.skill_registry import match as match_skill
 from mini_agent.skill_registry import scan as scan_skills
 from mini_agent.sub_agent import SubAgentExecutor
+from mini_agent.agent_policy import check_tool_access
 from mini_agent.tool_registry import dispatch, get_risk_level, get_schemas
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
@@ -40,17 +41,23 @@ async def run(
     system_prompt: str = _SYSTEM,
     is_sub_agent: bool = False,
     reply_func: ReplyFunc | None = None,
+    allowed_tools: list[str] | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
     When is_sub_agent=True the sub_agent tool is excluded from the tool schema
     so child agents cannot spawn further sub-agents.
+    When allowed_tools is set, only matching tools (fnmatch patterns) are exposed.
     """
     client, cfg = get_async_client_and_config("default")
 
     # Determine effective tool schemas (exclude sub_agent for child agents)
     schemas = [s for s in get_schemas() if s["function"]["name"] != _SUB_AGENT_TOOL] \
         if is_sub_agent else get_schemas()
+
+    # Filter by agent-level allowed_tools if specified
+    if allowed_tools is not None:
+        schemas = [s for s in schemas if check_tool_access(s["function"]["name"], allowed_tools)]
 
     start = time.monotonic()
     response = None
@@ -145,7 +152,10 @@ def run_sync(user_input: str, user_id: str = "default", system_prompt: str = _SY
 
 
 async def run_stream(
-    user_input: str, user_id: str = "default", system_prompt: str = _SYSTEM
+    user_input: str,
+    user_id: str = "default",
+    system_prompt: str = _SYSTEM,
+    allowed_tools: list[str] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -178,12 +188,16 @@ async def run_stream(
         tool_calls_acc: dict[int, dict[str, str]] = {}
         finish_reason = "stop"
 
+        stream_schemas = get_schemas()
+        if allowed_tools is not None:
+            stream_schemas = [s for s in stream_schemas if check_tool_access(s["function"]["name"], allowed_tools)]
+
         stream = cast(
             AsyncStream[ChatCompletionChunk],
             await client.chat.completions.create(
                 model=cfg.model,
                 messages=messages,
-                tools=get_schemas(),  # type: ignore[arg-type]
+                tools=stream_schemas,  # type: ignore[arg-type]
                 max_tokens=cfg.max_tokens,
                 stream=True,
             ),

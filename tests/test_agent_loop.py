@@ -280,3 +280,45 @@ async def test_run_sub_agent_result_formatted_in_tool_message(mock_client):
     call_messages = mock_client.chat.completions.create.call_args_list[1][1]["messages"]
     tool_msg = next(m for m in call_messages if m.get("role") == "tool")
     assert "[fetch] some data" in tool_msg["content"]
+
+
+async def test_run_allowed_tools_filters_schemas(mock_client, monkeypatch):
+    """allowed_tools restricts which tool schemas are sent to the LLM."""
+    all_schemas = [
+        {"type": "function", "function": {"name": "shell", "description": ""}},
+        {"type": "function", "function": {"name": "calculate", "description": ""}},
+        {"type": "function", "function": {"name": "get_current_time", "description": ""}},
+    ]
+    monkeypatch.setattr(al, "get_schemas", lambda: all_schemas)
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+
+    await al.run(
+        [{"role": "user", "content": "hi"}],
+        allowed_tools=["calculate", "get_current_time"],
+    )
+
+    sent_tools = mock_client.chat.completions.create.call_args[1]["tools"]
+    sent_names = [s["function"]["name"] for s in sent_tools]
+    assert "shell" not in sent_names
+    assert "calculate" in sent_names
+    assert "get_current_time" in sent_names
+
+
+async def test_run_allowed_tools_supports_wildcard(mock_client, monkeypatch):
+    """allowed_tools patterns support fnmatch wildcards."""
+    all_schemas = [
+        {"type": "function", "function": {"name": "filesystem__read_file", "description": ""}},
+        {"type": "function", "function": {"name": "filesystem__write_file", "description": ""}},
+        {"type": "function", "function": {"name": "shell", "description": ""}},
+    ]
+    monkeypatch.setattr(al, "get_schemas", lambda: all_schemas)
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+
+    await al.run(
+        [{"role": "user", "content": "hi"}],
+        allowed_tools=["filesystem__*"],
+    )
+
+    sent_tools = mock_client.chat.completions.create.call_args[1]["tools"]
+    sent_names = [s["function"]["name"] for s in sent_tools]
+    assert sent_names == ["filesystem__read_file", "filesystem__write_file"]

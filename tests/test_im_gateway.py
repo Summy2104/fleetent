@@ -202,3 +202,66 @@ async def test_telegram_create_app_returns_application_object(monkeypatch):
 
     assert result is mock_app
     mock_app.add_handler.assert_called_once()
+
+
+async def test_route_uses_agent_system_prompt_and_allowed_tools(
+    mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
+):
+    """route() should pass agent's system_prompt and allowed_tools when an agent is assigned."""
+    from mini_agent.agent_store import Agent
+    import mini_agent.im_gateway.normalizer as norm
+
+    fake_agent = Agent(
+        id=1,
+        name="restricted",
+        system_prompt="You are a restricted agent.",
+        allowed_tools=["calculate"],
+    )
+    monkeypatch.setattr(norm, "get_agent_for_user", lambda user_id: fake_agent)
+
+    reply_calls: list[str] = []
+
+    async def fake_reply(text: str) -> None:
+        reply_calls.append(text)
+
+    msg = NormalizedMessage(
+        platform="slack",
+        session_id="user:U999",
+        user_id="restricted-user",
+        text="hi",
+        attachments=[],
+        reply_func=fake_reply,
+    )
+
+    await route(msg)
+
+    call_kwargs = mock_agent_loop.run.call_args[1]
+    assert call_kwargs["allowed_tools"] == ["calculate"]
+    system_msg = call_kwargs["messages"][0]
+    assert "restricted agent" in system_msg["content"]
+
+
+async def test_route_no_agent_passes_none_allowed_tools(
+    mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
+):
+    """When no agent is assigned, allowed_tools should be None (all tools available)."""
+    import mini_agent.im_gateway.normalizer as norm
+
+    monkeypatch.setattr(norm, "get_agent_for_user", lambda user_id: None)
+
+    async def fake_reply(text: str) -> None:
+        pass
+
+    msg = NormalizedMessage(
+        platform="slack",
+        session_id="user:U000",
+        user_id="free-user",
+        text="hi",
+        attachments=[],
+        reply_func=fake_reply,
+    )
+
+    await route(msg)
+
+    call_kwargs = mock_agent_loop.run.call_args[1]
+    assert call_kwargs["allowed_tools"] is None
