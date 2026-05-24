@@ -3,14 +3,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
+
 import pytest
+
+import mini_agent.agent_store as agent_store
+import mini_agent.im_user_store as im_user_store
+import mini_agent.permission_gate as permission_gate
 import mini_agent.session_mgr as session_mgr
 import mini_agent.user_store as user_store
-import mini_agent.im_user_store as im_user_store
-import mini_agent.agent_store as agent_store
-import mini_agent.permission_gate as permission_gate
 
 
 @pytest.fixture

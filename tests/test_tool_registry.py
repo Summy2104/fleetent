@@ -1,4 +1,5 @@
 import pytest
+
 from mini_agent import tool_registry
 
 

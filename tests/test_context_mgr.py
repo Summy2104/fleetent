@@ -1,4 +1,4 @@
-from mini_agent.context_mgr import DEFAULT_CONFIG, estimate_tokens, maybe_compress, _keep_tail
+from mini_agent.context_mgr import DEFAULT_CONFIG, _keep_tail, estimate_tokens, maybe_compress
 
 
 def _make_messages(n: int) -> list[dict]:

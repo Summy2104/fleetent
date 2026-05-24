@@ -1,6 +1,7 @@
-import os
-from mini_agent import tools  # noqa: F401 — registers tools as side effect
-from mini_agent import tool_registry
+from mini_agent import (
+    tool_registry,
+    tools,  # noqa: F401 — registers tools as side effect
+)
 
 
 def test_get_current_time_registered():

@@ -1,8 +1,8 @@
-import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
+
 import pytest
-import mini_agent.sub_agent as sub_agent
-from mini_agent.sub_agent import SubAgentExecutor, SubAgentResult
+
+from mini_agent.sub_agent import SubAgentExecutor
 
 
 async def test_two_tasks_run_and_return_results():
