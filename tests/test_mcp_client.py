@@ -58,7 +58,7 @@ async def test_register_tool_puts_in_registry():
         "inputSchema": {"type": "object", "properties": {}},
     }
 
-    mcp_client._register_tool(server, "testsvr__do_thing", tool_def)
+    mcp_client._register_tool_http(server, "testsvr__do_thing", tool_def)
 
     assert "testsvr__do_thing" in tr._registry
     fn, schema = tr._registry["testsvr__do_thing"]
@@ -83,7 +83,7 @@ async def test_register_tool_schema_format():
         },
     }
 
-    mcp_client._register_tool(server, "linear__create_ticket", tool_def)
+    mcp_client._register_tool_http(server, "linear__create_ticket", tool_def)
 
     assert "linear__create_ticket" in tr._registry
     fn, schema = tr._registry["linear__create_ticket"]

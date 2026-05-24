@@ -83,6 +83,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
+    await mcp_client.close()
+
 
 app = FastAPI(title="mini-agent", lifespan=lifespan)
 
