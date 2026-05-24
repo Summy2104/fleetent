@@ -10,6 +10,7 @@ __pycache__/
 # Runtime data — keep repo clean and avoid leaking conversations
 data/*.jsonl
 data/*.db
+data/users/
 
 # Env
 .env
