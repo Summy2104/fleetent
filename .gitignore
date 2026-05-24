@@ -11,6 +11,7 @@ __pycache__/
 data/*.jsonl
 data/*.db
 data/users/
+data/sessions/
 
 # Env
 .env
