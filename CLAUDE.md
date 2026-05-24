@@ -7,7 +7,7 @@ Foundation for a multi-user IM-native agent service (Slack/Telegram/WhatsApp).
 
 ```bash
 uv sync                          # install deps
-uv run pytest                    # run tests (48, ~0.5s)
+uv run pytest                    # run tests
 uv run pytest -x -q              # fail-fast
 uv run ruff check src tests      # lint
 uv run mypy src                  # type-check
@@ -24,7 +24,7 @@ Modular monolith. Each module has one responsibility and a clean interface.
 src/mini_agent/
   agent_loop.py      ← while tool-use loop; run() + run_stream()
   model_router.py    ← maps task type → provider config (OpenAI-compatible)
-  tool_registry.py   ← @tool decorator, schema building, dispatch
+  tool_registry.py   ← @tool decorator, schema building, dispatch; access control
   tools.py           ← built-in tools (register on import as side-effect)
   skill_registry.py  ← scans skills/, progressive SKILL.md injection
   context_mgr.py     ← in-session token compression, identity-based keep_tail
@@ -33,6 +33,19 @@ src/mini_agent/
   eval_logger.py     ← append-only JSONL trace log (data/traces.jsonl)
   server.py          ← FastAPI: POST /chat (SSE), GET /health, Bearer auth
   admin.py           ← CLI: create-user, list-users, rotate-key
+  config.py          ← pydantic-settings; loads .env + config/settings.yaml
+  agent_policy.py    ← fnmatch-based tool access check for allowed_tools
+  agent_store.py     ← SQLite CRUD for agent definitions and user-agent assignments
+  im_user_store.py   ← maps (platform, platform_user_id) → internal User
+  session_mgr.py     ← JSON session persistence; per-session asyncio.Lock
+  permission_gate.py ← asyncio.Event-based human approval gate (medium/high risk)
+  sandbox_client.py  ← httpx client for microsandbox MicroVM workspace/exec
+  mcp_client.py      ← MCP HTTP/SSE client; registers tools as {server}__{tool}
+  sub_agent.py       ← asyncio.gather parallelism; max depth 1
+  im_gateway/
+    normalizer.py    ← NormalizedMessage dataclass; route() pipeline
+    slack.py         ← slack-bolt Socket Mode adapter
+    telegram.py      ← python-telegram-bot polling adapter
 ```
 
 ## Data Directory
@@ -47,8 +60,6 @@ data/
 Tests use `tmp_path + monkeypatch` to redirect all data paths — never touch `data/` in tests.
 
 ## Testing Approach
-
-Tests are written before production code — see OpenSpec Workflow below for the hard gate.
 
 Isolation patterns:
 - `monkeypatch.setattr(module, "DB_PATH", tmp_path / "x.db")` — isolate SQLite
@@ -104,3 +115,6 @@ MINI_AGENT_SKILLS_DIR  # override skills/ directory (default: ./skills)
 - `context_mgr._keep_tail()` uses identity check (`m is tail[0]`), not equality — dict equality fails for identical-content messages
 - Bearer token format: `Authorization: Bearer ma-<64hex>` — `ma-` prefix distinguishes service keys from model API keys
 - `model_router.get_async_client_and_config()` creates a new client each call — intentional, clients are stateless and cheap
+- `permission_gate` tests need short timeout: pass `medium_timeout=0.1` to `PermissionGate()` constructor
+- MCP tool names use double underscore: `{server_id}__{tool_name}` — single underscore is part of the tool name
+- `session_mgr` writes atomically via `.json.tmp → rename`; monkeypatch `session_mgr.SESSIONS_DIR` in tests
