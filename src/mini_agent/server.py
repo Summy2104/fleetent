@@ -123,11 +123,13 @@ class ApprovalRequest(BaseModel):
 async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # type: ignore[type-arg]
     if req.decision not in ("approved", "rejected"):
         raise HTTPException(status_code=400, detail="decision must be 'approved' or 'rejected'")
-    await _default_gate.resolve(
+    found = await _default_gate.resolve(
         approval_id=approval_id,
         decision=req.decision,  # type: ignore[arg-type]
         approver_user_id=req.approver_user_id,
     )
+    if not found:
+        raise HTTPException(status_code=404, detail=f"approval {approval_id} not found or expired")
     return {"status": "ok", "approval_id": approval_id, "decision": req.decision}
 
 

@@ -99,16 +99,19 @@ class PermissionGate:
         approval_id: str,
         decision: Literal["approved", "rejected"],
         approver_user_id: str,
-    ) -> None:
+    ) -> bool:
+        """Resolve an approval request. Returns True if the request was found, False if expired/unknown."""
+        event = self._events.get(approval_id)
+        if event is None:
+            return False
         with _conn() as conn:
             conn.execute(
                 "UPDATE approvals SET approver_user_id = ? WHERE id = ?",
                 (approver_user_id, approval_id),
             )
         self._decisions[approval_id] = decision
-        event = self._events.get(approval_id)
-        if event:
-            event.set()
+        event.set()
+        return True
 
 
 _default_gate: PermissionGate = PermissionGate()

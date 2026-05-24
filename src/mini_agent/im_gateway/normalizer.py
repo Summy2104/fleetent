@@ -30,12 +30,15 @@ async def route(msg: NormalizedMessage) -> None:
         from mini_agent.permission_gate import _default_gate
         decision = "approved" if m.group(1).lower() == "approve" else "rejected"
         approval_id = m.group(2)
-        await _default_gate.resolve(
+        found = await _default_gate.resolve(
             approval_id=approval_id,
             decision=decision,  # type: ignore[arg-type]
             approver_user_id=msg.user_id,
         )
-        await msg.reply_func(f"{'✅' if decision == 'approved' else '❌'} {approval_id} {decision}")
+        if found:
+            await msg.reply_func(f"{'✅' if decision == 'approved' else '❌'} {approval_id} {decision}")
+        else:
+            await msg.reply_func(f"⚠️ approval {approval_id} not found or already expired")
         return
 
     from mini_agent import agent_loop, session_mgr
