@@ -22,7 +22,7 @@ def create_app() -> object:
 
     from mini_agent.config import Settings
     bot_token = Settings().telegram_bot_token
-    builder = Application.builder().token(bot_token)
+    builder = Application.builder().token(bot_token).concurrent_updates(True)
     application = builder.build()
 
     async def handle_message(update: object, context: object) -> None:

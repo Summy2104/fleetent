@@ -190,6 +190,7 @@ async def test_telegram_create_app_returns_application_object(monkeypatch):
     mock_app = MagicMock()
     mock_builder = MagicMock()
     mock_builder.token.return_value = mock_builder
+    mock_builder.concurrent_updates.return_value = mock_builder
     mock_builder.build.return_value = mock_app
 
     # Application is imported inside create_app() via `from telegram.ext import Application`
