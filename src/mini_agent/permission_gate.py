@@ -114,6 +114,19 @@ class PermissionGate:
 _default_gate: PermissionGate = PermissionGate()
 
 
+def cleanup_stale_approvals() -> None:
+    """Mark all pending approvals as timeout. Call at server startup after a restart."""
+    _init_db()
+    now = datetime.datetime.now(datetime.UTC).isoformat()
+    with _conn() as conn:
+        count = conn.execute(
+            "UPDATE approvals SET status = 'timeout', resolved_at = ? WHERE status = 'pending'",
+            (now,),
+        ).rowcount
+    if count:
+        logger.info("startup_cleanup stale_approvals_marked_timeout count=%d", count)
+
+
 def _init_db() -> None:
     with _conn() as conn:
         conn.execute(

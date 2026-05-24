@@ -57,6 +57,75 @@ async def test_route_loads_history_calls_agent_saves_replies(
     assert reply_calls == ["agent response"]
 
 
+async def test_approve_command_resolves_gate_and_does_not_call_agent(
+    mock_session_mgr, mock_agent_loop, mock_memory_skill
+):
+    from unittest.mock import AsyncMock, patch
+
+    from mini_agent.im_gateway.normalizer import NormalizedMessage, route
+
+    reply_calls: list[str] = []
+
+    async def fake_reply(text: str) -> None:
+        reply_calls.append(text)
+
+    msg = NormalizedMessage(
+        platform="slack",
+        session_id="user:U123",
+        user_id="approver-1",
+        text="approve abc12345",
+        attachments=[],
+        reply_func=fake_reply,
+    )
+
+    mock_resolve = AsyncMock()
+    with patch("mini_agent.permission_gate._default_gate") as mock_gate:
+        mock_gate.resolve = mock_resolve
+        await route(msg)
+
+    mock_resolve.assert_called_once_with(
+        approval_id="abc12345",
+        decision="approved",
+        approver_user_id="approver-1",
+    )
+    mock_agent_loop.run.assert_not_called()
+    assert "abc12345" in reply_calls[0]
+    assert "approved" in reply_calls[0]
+
+
+async def test_reject_command_resolves_gate(mock_session_mgr, mock_agent_loop, mock_memory_skill):
+    from unittest.mock import AsyncMock, patch
+
+    from mini_agent.im_gateway.normalizer import NormalizedMessage, route
+
+    reply_calls: list[str] = []
+
+    async def fake_reply(text: str) -> None:
+        reply_calls.append(text)
+
+    msg = NormalizedMessage(
+        platform="telegram",
+        session_id="user:999",
+        user_id="approver-2",
+        text="reject abc12345",
+        attachments=[],
+        reply_func=fake_reply,
+    )
+
+    mock_resolve = AsyncMock()
+    with patch("mini_agent.permission_gate._default_gate") as mock_gate:
+        mock_gate.resolve = mock_resolve
+        await route(msg)
+
+    mock_resolve.assert_called_once_with(
+        approval_id="abc12345",
+        decision="rejected",
+        approver_user_id="approver-2",
+    )
+    mock_agent_loop.run.assert_not_called()
+    assert "rejected" in reply_calls[0]
+
+
 async def test_slack_dm_session_id():
     from mini_agent.im_gateway.slack import _derive_session_id
     assert _derive_session_id(user_id="U123", channel_type="im", thread_ts=None) == "user:U123"

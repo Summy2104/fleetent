@@ -19,7 +19,7 @@ from mini_agent import mcp_client
 from mini_agent.agent_loop import run_stream
 from mini_agent.config import Settings
 from mini_agent.mcp_client import McpServerConfig
-from mini_agent.permission_gate import _default_gate
+from mini_agent.permission_gate import _default_gate, cleanup_stale_approvals
 from mini_agent.skill_registry import scan as scan_skills
 from mini_agent.user_store import get_by_api_key
 
@@ -62,6 +62,7 @@ async def _start_telegram_adapter() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     scan_skills()
+    cleanup_stale_approvals()
     settings = Settings()
 
     # Load MCP servers from config/mcp.yaml if present

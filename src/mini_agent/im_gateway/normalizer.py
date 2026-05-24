@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
@@ -9,6 +10,7 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
+_APPROVAL_RE = re.compile(r"^(approve|reject)\s+([a-f0-9-]{6,36})\s*$", re.IGNORECASE)
 
 
 @dataclass
@@ -22,6 +24,20 @@ class NormalizedMessage:
 
 
 async def route(msg: NormalizedMessage) -> None:
+    # Approval commands bypass the agent loop entirely
+    m = _APPROVAL_RE.match(msg.text.strip())
+    if m:
+        from mini_agent.permission_gate import _default_gate
+        decision = "approved" if m.group(1).lower() == "approve" else "rejected"
+        approval_id = m.group(2)
+        await _default_gate.resolve(
+            approval_id=approval_id,
+            decision=decision,  # type: ignore[arg-type]
+            approver_user_id=msg.user_id,
+        )
+        await msg.reply_func(f"{'✅' if decision == 'approved' else '❌'} {approval_id} {decision}")
+        return
+
     from mini_agent import agent_loop, session_mgr
     from mini_agent.memory_layer import load_memories
     from mini_agent.skill_registry import load as load_skill
