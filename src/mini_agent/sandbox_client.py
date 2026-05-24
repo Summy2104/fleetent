@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+import re
 from dataclasses import dataclass
 
-import httpx
-import structlog
+logger = logging.getLogger(__name__)
 
-logger = structlog.get_logger(__name__)
+_SAFE_NAME = re.compile(r"[^a-zA-Z0-9_.-]")
 
 
 @dataclass
@@ -16,38 +18,51 @@ class ExecResult:
 
 
 class SandboxClient:
-    def __init__(self, base_url: str = "http://host.docker.internal:7777") -> None:
-        self._base_url = base_url.rstrip("/")
+    def __init__(self, image: str = "python:3.12-slim") -> None:
+        self._image = image
 
     async def create_workspace(self, session_id: str) -> str:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self._base_url}/workspace",
-                json={"session_id": session_id},
-                timeout=30.0,
-            )
-            resp.raise_for_status()
-            return str(resp.json()["id"])
+        """Start an isolated container, return container ID as workspace_id."""
+        safe = _SAFE_NAME.sub("-", session_id)[:48]
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "run", "-d",
+            "--name", f"sandbox-{safe}",
+            "--network", "none",
+            "--memory", "256m",
+            "--cpus", "0.5",
+            "--read-only",
+            "--tmpfs", "/tmp",
+            self._image, "sleep", "infinity",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"docker run failed: {stderr.decode().strip()}")
+        container_id = stdout.decode().strip()
+        logger.info("sandbox_created", session_id=session_id, container_id=container_id[:12])
+        return container_id
 
     async def exec(self, workspace_id: str, command: str) -> ExecResult:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self._base_url}/workspace/{workspace_id}/exec",
-                json={"command": command},
-                timeout=60.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        """Execute a shell command inside the running container."""
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "exec", workspace_id, "sh", "-c", command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
         return ExecResult(
-            stdout=data.get("stdout", ""),
-            stderr=data.get("stderr", ""),
-            exit_code=data.get("exit_code", 0),
+            stdout=stdout.decode(),
+            stderr=stderr.decode(),
+            exit_code=proc.returncode or 0,
         )
 
     async def destroy_workspace(self, workspace_id: str) -> None:
-        async with httpx.AsyncClient() as client:
-            resp = await client.delete(
-                f"{self._base_url}/workspace/{workspace_id}",
-                timeout=10.0,
-            )
-            resp.raise_for_status()
+        """Stop and remove the container."""
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "rm", "-f", workspace_id,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.communicate()
+        logger.info("sandbox_destroyed", container_id=workspace_id[:12])
