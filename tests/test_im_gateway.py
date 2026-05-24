@@ -70,3 +70,51 @@ async def test_telegram_private_session_id():
 async def test_telegram_group_reply_session_id():
     from mini_agent.im_gateway.telegram import _derive_session_id
     assert _derive_session_id(chat_type="group", user_id=12345, reply_to_id=999) == "thread:999"
+
+
+async def test_telegram_group_no_reply_falls_back_to_user_session():
+    from mini_agent.im_gateway.telegram import _derive_session_id
+
+    # group message with no reply_to_id → user session (line 15 in telegram.py)
+    result = _derive_session_id(chat_type="group", user_id=99, reply_to_id=None)
+    assert result == "user:99"
+
+
+async def test_slack_create_app_returns_app_object(monkeypatch):
+    """create_app() instantiates a bolt App and registers the message handler."""
+    from unittest.mock import MagicMock, patch
+
+    mock_app_instance = MagicMock()
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-fake")
+
+    # App is imported inside create_app() via `from slack_bolt import App`, so patch the source
+    with patch("slack_bolt.App", return_value=mock_app_instance) as mock_app_cls:
+        import mini_agent.im_gateway.slack as slack_mod
+
+        result = slack_mod.create_app()
+
+    assert result is mock_app_instance
+    mock_app_cls.assert_called_once_with(token="xoxb-fake")
+    mock_app_instance.event.assert_called_once_with("message")
+
+
+async def test_telegram_create_app_returns_application_object(monkeypatch):
+    """create_app() builds a telegram Application and registers a message handler."""
+    from unittest.mock import MagicMock, patch
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg-fake-token")
+
+    mock_app = MagicMock()
+    mock_builder = MagicMock()
+    mock_builder.token.return_value = mock_builder
+    mock_builder.build.return_value = mock_app
+
+    # Application is imported inside create_app() via `from telegram.ext import Application`
+    with patch("telegram.ext.Application") as mock_cls:
+        mock_cls.builder.return_value = mock_builder
+        import mini_agent.im_gateway.telegram as tg_mod
+
+        result = tg_mod.create_app()
+
+    assert result is mock_app
+    mock_app.add_handler.assert_called_once()

@@ -17,10 +17,11 @@ def test_settings_env_override(monkeypatch):
     assert s.microsandbox_url == "http://localhost:9999"
 
 
-def test_settings_missing_required_key(monkeypatch):
+def test_settings_missing_required_key(monkeypatch, tmp_path):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)  # no .env here — prevents pydantic-settings from loading it
     with pytest.raises(Exception):  # noqa: B017
-        Settings()  # no anthropic_api_key, no env var
+        Settings()
 
 
 def test_configure_logging_does_not_raise(monkeypatch):

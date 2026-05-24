@@ -66,3 +66,35 @@ def test_chat_valid_token_streams(tmp_path, monkeypatch):
     assert "text/event-stream" in resp.headers["content-type"]
     assert "done" in resp.text
     assert received_user_ids == [user.id]  # user_id flows from auth to run_stream
+
+
+def test_require_auth_non_bearer_scheme(client):
+    resp = client.post(
+        "/chat",
+        json={"message": "hi"},
+        headers={"Authorization": "Token abc123"},
+    )
+    assert resp.status_code == 401
+
+
+def test_chat_stream_exception_yields_error_event(tmp_path, monkeypatch):
+    import mini_agent.server as srv
+    import mini_agent.user_store as us2
+
+    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
+
+    async def error_stream(msg: str, user_id: str):  # type: ignore[misc]
+        raise RuntimeError("boom")
+        yield  # makes this an async generator
+
+    monkeypatch.setattr(srv, "run_stream", error_stream)
+    user = us2.create_user("ErrUser")
+    with TestClient(srv.app) as c:
+        resp = c.post(
+            "/chat",
+            json={"message": "hi"},
+            headers={"Authorization": f"Bearer {user.api_key}"},
+        )
+    assert resp.status_code == 200
+    assert '"type": "error"' in resp.text
+    assert "boom" in resp.text

@@ -90,3 +90,88 @@ async def test_register_tool_schema_format():
     assert schema["type"] == "function"
     assert schema["function"]["name"] == "linear__create_ticket"
     assert "parameters" in schema["function"]
+
+
+@pytest.mark.asyncio
+async def test_register_server_registers_tools_from_response(monkeypatch):
+    """_register_server fetches tools/list and registers each tool."""
+    import httpx
+    import respx
+
+    import mini_agent.tool_registry as tr
+    from mini_agent.mcp_client import McpServerConfig, _register_server
+
+    server = McpServerConfig(id="mysvr", url="http://mcp.test", auth_type="none")
+
+    tools_response = {
+        "result": {
+            "tools": [
+                {
+                    "name": "do_thing",
+                    "description": "does a thing",
+                    "inputSchema": {"type": "object", "properties": {}},
+                }
+            ]
+        }
+    }
+
+    with respx.mock:
+        respx.post("http://mcp.test/").mock(return_value=httpx.Response(200, json=tools_response))
+        await _register_server(server)
+
+    assert "mysvr__do_thing" in tr._registry
+
+
+@pytest.mark.asyncio
+async def test_register_server_with_api_key_auth(monkeypatch):
+    """_register_server sets Authorization header when auth_type=api_key."""
+    import httpx
+    import respx
+
+    from mini_agent.mcp_client import McpServerConfig, _register_server
+
+    monkeypatch.setenv("MY_API_KEY", "secret-token")
+    server = McpServerConfig(
+        id="authsvr", url="http://auth.test", auth_type="api_key", api_key_env="MY_API_KEY"
+    )
+
+    captured_headers: list[dict] = []
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        captured_headers.append(dict(request.headers))
+        return httpx.Response(200, json={"result": {"tools": []}})
+
+    with respx.mock:
+        respx.post("http://auth.test/").mock(side_effect=capture)
+        await _register_server(server)
+
+    assert captured_headers[0].get("authorization") == "Bearer secret-token"
+
+
+@pytest.mark.asyncio
+async def test_call_tool_sends_jsonrpc_and_returns_result(monkeypatch):
+    """call_tool posts tools/call and returns result field from response."""
+    import httpx
+    import respx
+
+    import mini_agent.mcp_client as mcp
+    from mini_agent.mcp_client import McpServerConfig
+
+    server = McpServerConfig(id="callee", url="http://callee.test", auth_type="none")
+    monkeypatch.setitem(mcp._server_registry, "callee", server)
+
+    with respx.mock:
+        respx.post("http://callee.test/").mock(
+            return_value=httpx.Response(200, json={"result": {"output": "42"}})
+        )
+        result = await mcp.call_tool("callee", "compute", {"x": 1})
+
+    assert result == {"output": "42"}
+
+
+@pytest.mark.asyncio
+async def test_call_tool_unknown_server_raises():
+    import mini_agent.mcp_client as mcp
+
+    with pytest.raises(KeyError, match="Unknown MCP server"):
+        await mcp.call_tool("no_such_server", "tool", {})

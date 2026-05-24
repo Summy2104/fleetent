@@ -70,3 +70,56 @@ def test_trace_with_message_id(tmp_path, monkeypatch):
     assert "session_id" not in entry
     assert "channel_id" not in entry
     assert "thread_id" not in entry
+
+
+def test_log_run_writes_entry(tmp_path, monkeypatch):
+    import mini_agent.eval_logger as el
+
+    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    el.log_run(
+        user_input="ping",
+        reply="pong",
+        messages=[{"role": "user", "content": "ping"}],
+        elapsed_s=0.5,
+    )
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert entry["input"] == "ping"
+    assert entry["reply"] == "pong"
+    assert entry["elapsed_s"] == 0.5
+    assert entry["tokens"] is None
+    assert "ts" in entry
+
+
+def test_log_run_with_usage(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    import mini_agent.eval_logger as el
+
+    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    usage = MagicMock()
+    usage.prompt_tokens = 10
+    usage.completion_tokens = 5
+    usage.total_tokens = 15
+    el.log_run("hi", "hello", [], 0.1, usage=usage)
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert entry["tokens"] == {"prompt": 10, "completion": 5, "total": 15}
+
+
+def test_serialize_model_dump():
+    from mini_agent.eval_logger import _serialize
+
+    class FakeMsg:
+        def model_dump(self):
+            return {"role": "assistant", "content": "reply"}
+
+    assert _serialize(FakeMsg()) == {"role": "assistant", "content": "reply"}
+
+
+def test_serialize_fallback_str():
+    from mini_agent.eval_logger import _serialize
+
+    class Unknown:
+        def __str__(self):
+            return "custom_repr"
+
+    assert _serialize(Unknown()) == "custom_repr"

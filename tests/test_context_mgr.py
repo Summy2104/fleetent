@@ -66,3 +66,67 @@ def test_keep_tail_identity_not_equality():
     # tail starts with tool_msg2 (last 1) → should extend back to caller2, not caller
     assert tail[0] is caller2
     assert tail[1] is tool_msg2
+
+
+def test_role_with_object_attribute():
+    from mini_agent.context_mgr import _role
+
+    class FakeMsg:
+        role = "assistant"
+
+    assert _role(FakeMsg()) == "assistant"
+
+
+def test_content_with_object_attribute():
+    from mini_agent.context_mgr import _content
+
+    class FakeMsg:
+        content = "hello"
+
+    assert _content(FakeMsg()) == "hello"
+
+
+def test_content_with_none_attribute_returns_empty():
+    from mini_agent.context_mgr import _content
+
+    class FakeMsg:
+        content = None
+
+    assert _content(FakeMsg()) == ""
+
+
+def test_summarize_calls_llm_and_returns_content(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import mini_agent.context_mgr as cm
+
+    mock_client = MagicMock()
+    mock_cfg = MagicMock()
+    mock_cfg.model = "haiku"
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = "Summary here"
+    mock_client.chat.completions.create.return_value = mock_response
+    monkeypatch.setattr(cm, "get_client_and_config", lambda _: (mock_client, mock_cfg))
+
+    result = cm._summarize([{"role": "user", "content": "hello"}])
+    assert result == "Summary here"
+
+
+def test_summarize_exception_returns_placeholder(monkeypatch):
+    import mini_agent.context_mgr as cm
+
+    def raise_exc(_task):
+        raise RuntimeError("no key")
+
+    monkeypatch.setattr(cm, "get_client_and_config", raise_exc)
+    result = cm._summarize([{"role": "user", "content": "hello"}])
+    assert "unavailable" in result
+
+
+def test_keep_tail_tool_at_index_zero_stops_extending():
+    from mini_agent.context_mgr import _keep_tail
+
+    tool_msg = {"role": "tool", "content": "result"}
+    msgs = [tool_msg]  # tool at index 0 — idx==0, must break
+    tail = _keep_tail(msgs, 2)
+    assert tail[0] is tool_msg
