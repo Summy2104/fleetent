@@ -1,3 +1,5 @@
+import asyncio
+import time
 from unittest.mock import patch
 
 import pytest
@@ -97,3 +99,33 @@ async def test_results_contain_parent_session_id():
         )
 
     assert results[0].parent_session_id == "sess-xyz"
+
+
+async def test_tasks_run_concurrently_not_sequentially():
+    """asyncio.gather should overlap task execution, not serialize it."""
+    start_times: list[float] = []
+
+    async def timed_run(messages, **kwargs):
+        start_times.append(time.monotonic())
+        await asyncio.sleep(0.05)
+        return "done"
+
+    with patch("mini_agent.sub_agent.agent_loop.run", side_effect=timed_run):
+        executor = SubAgentExecutor()
+        t0 = time.monotonic()
+        await executor.run(
+            tasks=[
+                {"name": "t1", "prompt": "p1"},
+                {"name": "t2", "prompt": "p2"},
+            ],
+            parent_user_id="u",
+            parent_agent_id=None,
+            parent_session_id="s",
+        )
+        elapsed = time.monotonic() - t0
+
+    # Sequential would take ~0.10s; parallel should complete in ~0.05s
+    assert elapsed < 0.09, f"tasks appear sequential (elapsed={elapsed:.3f}s)"
+    # Both tasks must have started before either finished
+    assert len(start_times) == 2
+    assert abs(start_times[1] - start_times[0]) < 0.02
