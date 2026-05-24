@@ -45,7 +45,7 @@ async def route(msg: NormalizedMessage) -> None:
 
         history.append({"role": "user", "content": msg.text})
 
-        response = await agent_loop.run(messages=history, user_id=msg.user_id)
+        response = await agent_loop.run(messages=history, user_id=msg.user_id, reply_func=msg.reply_func)
 
         # agent_loop.run() already appended the assistant message to history in-place.
         # Do NOT append again here — that caused duplicate messages in every session.

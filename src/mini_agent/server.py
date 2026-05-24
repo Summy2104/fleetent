@@ -19,6 +19,7 @@ from mini_agent import mcp_client
 from mini_agent.agent_loop import run_stream
 from mini_agent.config import Settings
 from mini_agent.mcp_client import McpServerConfig
+from mini_agent.permission_gate import _default_gate
 from mini_agent.skill_registry import scan as scan_skills
 from mini_agent.user_store import get_by_api_key
 
@@ -110,6 +111,23 @@ async def health() -> dict:  # type: ignore[type-arg]
             "telegram": bool(settings.telegram_bot_token),
         },
     }
+
+
+class ApprovalRequest(BaseModel):
+    decision: str  # "approved" | "rejected"
+    approver_user_id: str = "anonymous"
+
+
+@app.post("/approvals/{approval_id}/resolve")
+async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # type: ignore[type-arg]
+    if req.decision not in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="decision must be 'approved' or 'rejected'")
+    await _default_gate.resolve(
+        approval_id=approval_id,
+        decision=req.decision,  # type: ignore[arg-type]
+        approver_user_id=req.approver_user_id,
+    )
+    return {"status": "ok", "approval_id": approval_id, "decision": req.decision}
 
 
 @app.post("/chat")

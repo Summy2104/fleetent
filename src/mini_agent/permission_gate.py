@@ -111,6 +111,9 @@ class PermissionGate:
             event.set()
 
 
+_default_gate: PermissionGate = PermissionGate()
+
+
 def _init_db() -> None:
     with _conn() as conn:
         conn.execute(

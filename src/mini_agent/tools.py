@@ -34,6 +34,17 @@ def read_file(path: str) -> str:
         return f"error: {exc}"
 
 
+@tool(risk_level="medium")
+def write_file(path: str, content: str) -> str:
+    """Write content to a local file. Requires approval before executing."""
+    try:
+        with open(path, "w") as f:
+            f.write(content)
+        return f"written {len(content)} bytes to {path}"
+    except OSError as exc:
+        return f"error: {exc}"
+
+
 @tool
 def sub_agent(tasks: str) -> str:
     """Run multiple sub-tasks in parallel. tasks is a JSON array with 'name' and 'prompt' fields."""

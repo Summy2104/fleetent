@@ -8,21 +8,28 @@ from openai import AsyncStream
 from openai.types.chat import ChatCompletionChunk
 
 import json
+import uuid
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 import mini_agent.tools  # noqa: F401  # side-effect: register built-in tools
 from mini_agent.context_mgr import maybe_compress
 from mini_agent.eval_logger import log_run
 from mini_agent.memory_layer import extract_and_save, load_memories
 from mini_agent.model_router import get_async_client_and_config
+from mini_agent.permission_gate import _default_gate
 from mini_agent.skill_registry import load as load_skill
 from mini_agent.skill_registry import match as match_skill
 from mini_agent.skill_registry import scan as scan_skills
 from mini_agent.sub_agent import SubAgentExecutor
-from mini_agent.tool_registry import dispatch, get_schemas
+from mini_agent.tool_registry import dispatch, get_risk_level, get_schemas
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
 
 _SUB_AGENT_TOOL = "sub_agent"
+
+
+ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
 
 
 async def run(
@@ -30,6 +37,7 @@ async def run(
     user_id: str = "default",
     system_prompt: str = _SYSTEM,
     is_sub_agent: bool = False,
+    reply_func: ReplyFunc | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -78,7 +86,24 @@ async def run(
                     for r in sub_results
                 )
             else:
-                result = dispatch(tc.function.name, tc.function.arguments, is_sub_agent=is_sub_agent)
+                risk = get_risk_level(tc.function.name)
+                if risk in ("medium", "high") and reply_func is not None:
+                    tool_args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+                    approval_id = str(uuid.uuid4())[:8]
+                    decision = await _default_gate.request_approval(
+                        approval_id=approval_id,
+                        risk_level=risk,
+                        tool_name=tc.function.name,
+                        tool_args=tool_args,
+                        requester_user_id=user_id,
+                        reply_func=reply_func,
+                    )
+                    if decision != "approved":
+                        result = f"tool execution {decision}: user did not approve {tc.function.name}"
+                    else:
+                        result = dispatch(tc.function.name, tc.function.arguments, is_sub_agent=is_sub_agent)
+                else:
+                    result = dispatch(tc.function.name, tc.function.arguments, is_sub_agent=is_sub_agent)
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 
     reply = (msg.content if msg is not None else None) or ""
