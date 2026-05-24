@@ -15,15 +15,15 @@ def _derive_session_id(user_id: str, channel_type: str, thread_ts: str | None) -
 
 
 def create_app() -> object:
-    """Create and return a configured slack-bolt App with Socket Mode."""
+    """Create and return a configured slack-bolt AsyncApp with Socket Mode."""
     try:
-        from slack_bolt import App
+        from slack_bolt.async_app import AsyncApp
     except ImportError:
         raise RuntimeError("slack-bolt not installed") from None
 
     from mini_agent.config import Settings
     bot_token = Settings().slack_bot_token
-    app = App(token=bot_token)
+    app = AsyncApp(token=bot_token)
 
     @app.event("message")
     async def handle_message(event: dict[str, str | None], say: object) -> None:
