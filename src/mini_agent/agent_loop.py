@@ -7,6 +7,8 @@ from typing import Any, cast
 from openai import AsyncStream
 from openai.types.chat import ChatCompletionChunk
 
+import json
+
 import mini_agent.tools  # noqa: F401  # side-effect: register built-in tools
 from mini_agent.context_mgr import maybe_compress
 from mini_agent.eval_logger import log_run
@@ -15,6 +17,7 @@ from mini_agent.model_router import get_async_client_and_config
 from mini_agent.skill_registry import load as load_skill
 from mini_agent.skill_registry import match as match_skill
 from mini_agent.skill_registry import scan as scan_skills
+from mini_agent.sub_agent import SubAgentExecutor
 from mini_agent.tool_registry import dispatch, get_schemas
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
@@ -61,7 +64,21 @@ async def run(
         for tc in msg.tool_calls or []:
             if not hasattr(tc, "function"):
                 continue
-            result = dispatch(tc.function.name, tc.function.arguments)
+            if tc.function.name == _SUB_AGENT_TOOL and not is_sub_agent:
+                args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+                tasks = json.loads(args["tasks"]) if isinstance(args.get("tasks"), str) else args.get("tasks", [])
+                sub_results = await SubAgentExecutor().run(
+                    tasks=tasks,
+                    parent_user_id=user_id,
+                    parent_agent_id=None,
+                    parent_session_id="",
+                )
+                result = "\n".join(
+                    f"[{r.name}] {'ERROR: ' + r.error if r.error else r.result}"
+                    for r in sub_results
+                )
+            else:
+                result = dispatch(tc.function.name, tc.function.arguments, is_sub_agent=is_sub_agent)
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 
     reply = (msg.content if msg is not None else None) or ""

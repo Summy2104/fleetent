@@ -70,7 +70,7 @@ def mock_client(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
     monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "dispatch", lambda name, args: f"{name}_result")
+    monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "load_memories", lambda **kw: "")
     monkeypatch.setattr(al, "match_skill", lambda _: None)
     return client
@@ -98,7 +98,7 @@ async def test_run_dispatches_tool_then_gets_final_reply(mock_client):
         side_effect=[_tool_resp("get_time"), _text_resp("it is noon")]
     )
 
-    def capture_dispatch(name: str, args: str) -> str:
+    def capture_dispatch(name: str, args: str, **kw) -> str:
         dispatched.append(name)
         return f"{name}_result"
 
@@ -212,3 +212,71 @@ async def test_run_stream_tool_call_yields_tool_events(mock_client):
 
     tool_event = next(e for e in events if e["type"] == "tool_call")
     assert tool_event["name"] == "get_time"
+
+
+async def test_run_sub_agent_tool_intercepted_and_executed(mock_client):
+    """sub_agent tool call is intercepted by agent_loop, not passed to dispatch."""
+    from mini_agent.sub_agent import SubAgentResult
+
+    tasks_json = '[{"name": "t1", "prompt": "do it"}]'
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _tool_resp("sub_agent", f'{{"tasks": "{tasks_json.replace(chr(34), chr(92)+chr(34))}"}}'  ),
+            _text_resp("all done"),
+        ]
+    )
+
+    fake_results = [SubAgentResult(name="t1", result="task result", error=None, parent_session_id="")]
+
+    with patch.object(al, "SubAgentExecutor") as mock_executor_cls:
+        mock_instance = AsyncMock()
+        mock_instance.run = AsyncMock(return_value=fake_results)
+        mock_executor_cls.return_value = mock_instance
+
+        result = await al.run([{"role": "user", "content": "run tasks"}])
+
+    assert result == "all done"
+    mock_instance.run.assert_called_once()
+    call_kwargs = mock_instance.run.call_args[1]
+    assert call_kwargs["parent_user_id"] == "default"
+
+
+async def test_run_sub_agent_result_formatted_in_tool_message(mock_client):
+    """Sub-agent results are formatted as [name] result lines in the tool message."""
+    import json as _json
+    from mini_agent.sub_agent import SubAgentResult
+
+    tasks = [{"name": "fetch", "prompt": "get data"}]
+    args_json = _json.dumps({"tasks": _json.dumps(tasks)})
+
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_tool_resp("sub_agent", args_json), _text_resp("done")]
+    )
+
+    fake_results = [
+        SubAgentResult(name="fetch", result="some data", error=None, parent_session_id=""),
+    ]
+
+    captured_messages: list = []
+
+    async def capture_create(**kwargs):
+        captured_messages.extend(kwargs.get("messages", []))
+        if len(captured_messages) < 4:
+            return _tool_resp("sub_agent", args_json)
+        return _text_resp("done")
+
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_tool_resp("sub_agent", args_json), _text_resp("done")]
+    )
+
+    with patch.object(al, "SubAgentExecutor") as mock_cls:
+        inst = AsyncMock()
+        inst.run = AsyncMock(return_value=fake_results)
+        mock_cls.return_value = inst
+
+        await al.run([{"role": "user", "content": "go"}], user_id="u1")
+
+    # The tool result message passed to second LLM call contains formatted output
+    call_messages = mock_client.chat.completions.create.call_args_list[1][1]["messages"]
+    tool_msg = next(m for m in call_messages if m.get("role") == "tool")
+    assert "[fetch] some data" in tool_msg["content"]

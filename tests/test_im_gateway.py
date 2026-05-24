@@ -20,7 +20,17 @@ def mock_agent_loop(monkeypatch):
     return al
 
 
-async def test_route_loads_history_calls_agent_saves_replies(mock_session_mgr, mock_agent_loop):
+@pytest.fixture
+def mock_memory_skill(monkeypatch):
+    import mini_agent.memory_layer as ml
+    import mini_agent.skill_registry as sr
+    monkeypatch.setattr(ml, "load_memories", lambda **kwargs: "")
+    monkeypatch.setattr(sr, "match", lambda text: None)
+
+
+async def test_route_loads_history_calls_agent_saves_replies(
+    mock_session_mgr, mock_agent_loop, mock_memory_skill
+):
     reply_calls = []
 
     async def fake_reply(text: str) -> None:
@@ -39,6 +49,10 @@ async def test_route_loads_history_calls_agent_saves_replies(mock_session_mgr, m
 
     mock_session_mgr.load.assert_called_once_with("user:U123")
     mock_agent_loop.run.assert_called_once()
+    # system message inserted + user message appended → messages passed to run()
+    call_messages = mock_agent_loop.run.call_args[1]["messages"]
+    assert call_messages[0]["role"] == "system"
+    assert call_messages[-1] == {"role": "user", "content": "hello"}
     mock_session_mgr.save.assert_called_once()
     assert reply_calls == ["agent response"]
 
@@ -87,8 +101,8 @@ async def test_slack_create_app_returns_app_object(monkeypatch):
     mock_app_instance = MagicMock()
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-fake")
 
-    # App is imported inside create_app() via `from slack_bolt import App`, so patch the source
-    with patch("slack_bolt.App", return_value=mock_app_instance) as mock_app_cls:
+    # AsyncApp is imported inside create_app() via `from slack_bolt.async_app import AsyncApp`
+    with patch("slack_bolt.async_app.AsyncApp", return_value=mock_app_instance) as mock_app_cls:
         import mini_agent.im_gateway.slack as slack_mod
 
         result = slack_mod.create_app()

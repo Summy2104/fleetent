@@ -37,4 +37,5 @@ def read_file(path: str) -> str:
 @tool
 def sub_agent(tasks: str) -> str:
     """Run multiple sub-tasks in parallel. tasks is a JSON array with 'name' and 'prompt' fields."""
-    return "Sub-agent dispatch is handled by the agent loop."
+    # Execution is intercepted by agent_loop before reaching here.
+    return "sub_agent must be called through the agent loop"

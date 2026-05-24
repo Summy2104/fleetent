@@ -35,9 +35,12 @@ async def test_full_slack_message_pipeline(isolated_db):
     async def fake_reply(text: str) -> None:
         reply_calls.append(text)
 
-    # Mock agent_loop.run to return deterministic response
+    # Mock agent_loop.run to return deterministic response and mutate messages in-place
     with patch("mini_agent.agent_loop.run", new_callable=AsyncMock) as mock_run:
-        mock_run.return_value = "Hello from agent"
+        async def fake_run(messages, **kwargs):
+            messages.append({"role": "assistant", "content": "Hello from agent"})
+            return "Hello from agent"
+        mock_run.side_effect = fake_run
 
         msg = NormalizedMessage(
             platform="slack",
@@ -58,11 +61,11 @@ async def test_full_slack_message_pipeline(isolated_db):
     # Verify reply was sent
     assert reply_calls == ["Hello from agent"]
 
-    # Verify session was saved
+    # Verify session was saved with system + user + assistant
     session_file = isolated_db / "sessions" / "user:U123.json"
     assert session_file.exists()
     saved = json.loads(session_file.read_text())
-    assert len(saved) == 2  # user message + assistant response
+    assert len(saved) == 3  # system message + user message + assistant response
     assert saved[-1]["role"] == "assistant"
     assert saved[-1]["content"] == "Hello from agent"
 
@@ -130,7 +133,10 @@ async def test_session_history_accumulates_across_messages(isolated_db):
         reply_calls.append(text)
 
     with patch("mini_agent.agent_loop.run", new_callable=AsyncMock) as mock_run:
-        mock_run.return_value = "response"
+        async def fake_run(messages, **kwargs):
+            messages.append({"role": "assistant", "content": "response"})
+            return "response"
+        mock_run.side_effect = fake_run
 
         for text in ["message one", "message two"]:
             msg = NormalizedMessage(
@@ -143,8 +149,8 @@ async def test_session_history_accumulates_across_messages(isolated_db):
             )
             await route(msg)
 
-    # After two messages, session should have 4 entries (2 user + 2 assistant)
+    # After two messages: system + user1 + assistant1 + user2 + assistant2 = 5 entries
     history = await session_mgr.load("user:U999")
-    assert len(history) == 4
-    assert history[0]["content"] == "message one"
-    assert history[2]["content"] == "message two"
+    assert len(history) == 5
+    assert history[1]["content"] == "message one"   # history[0] is system message
+    assert history[3]["content"] == "message two"
