@@ -48,7 +48,7 @@ Tests use `tmp_path + monkeypatch` to redirect all data paths — never touch `d
 
 ## Testing Approach
 
-TDD is the default — tests are written before production code during `opsx:apply`.
+Tests are written before production code — see OpenSpec Workflow below for the hard gate.
 
 Isolation patterns:
 - `monkeypatch.setattr(module, "DB_PATH", tmp_path / "x.db")` — isolate SQLite
@@ -65,22 +65,31 @@ MINI_AGENT_SKILLS_DIR  # override skills/ directory (default: ./skills)
 
 ## OpenSpec Workflow
 
-Feature development follows OpenSpec spec-driven flow:
+本项目使用 OpenSpec 流进行功能开发（见用户级 CLAUDE.md 的完整流程定义）。
 
-```
-/opsx:propose "feature-name"   # create proposal + spec + design + tasks
-/opsx:apply                    # implement the current change (TDD: tests first)
-/opsx:archive                  # archive completed change
-```
+**1. opsx:propose** — 定义「做什么」
 
-Changes live in `openspec/changes/`. Propose → refine spec → apply → archive.
+- 写 proposal.md、specs/、design.md（可选）、tasks.md
+- tasks.md 中**测试任务必须在对应实现任务之前**：
+  ```
+  - [ ] 3.1 Write failing tests for X: ...
+  - [ ] 3.2 Implement X to pass tests
+  ```
+- 所有 artifact review 通过后才能进入实施
 
-During `opsx:apply`, follow TDD order per task:
-1. Write the failing test(s) for the task
-2. Run `uv run pytest -x -q` — confirm red
-3. Implement the minimal code to pass
-4. Run tests again — confirm green
-5. Refactor if needed, keep green
+**2. 建 worktree + 功能分支**
+
+**3. opsx:apply** — 每个 task 强制 TDD（hard gate）
+
+- 先写测试，运行 `uv run pytest -x -q`，**必须看到红**，不红不能继续
+- 再写实现，运行 `uv run pytest -x -q`，**必须看到绿**，不绿不能继续
+- 可选 refactor，确保仍然绿
+- 完成后将该 task 标记为 `[x]`
+- 跳过任何一步 = 违反流程
+
+**4. merge / PR，清理 worktree**
+
+**5. opsx:archive** — 所有 checkbox 为 `[x]` 后归档，同步 specs
 
 ## Code Style
 
