@@ -2,6 +2,7 @@
 
 import datetime
 
+from mini_agent.sandbox_client import SandboxClient
 from mini_agent.tool_registry import tool
 
 
@@ -43,6 +44,29 @@ def write_file(path: str, content: str) -> str:
         return f"written {len(content)} bytes to {path}"
     except OSError as exc:
         return f"error: {exc}"
+
+
+@tool(risk_level="medium")
+async def run_code(code: str) -> str:
+    """Execute Python code in an isolated Docker container and return the output.
+
+    The container has no network access and limited memory (256 MB).
+    State does not persist between calls.
+    """
+    client = SandboxClient()
+    ws_id = await client.create_workspace("run-code")
+    try:
+        result = await client.exec(ws_id, f"python3 -c {__import__('shlex').quote(code)}")
+        parts = []
+        if result.stdout:
+            parts.append(result.stdout.rstrip())
+        if result.stderr:
+            parts.append(f"[stderr] {result.stderr.rstrip()}")
+        if result.exit_code != 0:
+            parts.append(f"[exit {result.exit_code}]")
+        return "\n".join(parts) if parts else "(no output)"
+    finally:
+        await client.destroy_workspace(ws_id)
 
 
 @tool
