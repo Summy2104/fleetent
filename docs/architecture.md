@@ -12,48 +12,54 @@
 
 ---
 
-## 模块全景
+## 架构分层
+
+```mermaid
+graph TD
+    A["接入层\nserver.py · im_gateway · webhook_router"]
+    B["编排层\nagent_loop · sub_agent"]
+    C["能力层\nmodel_router · tool_registry · memory_layer\nskill_registry · context_mgr · mcp_client\nsandbox_client · permission_gate · cron_scheduler"]
+    D["基础层\nuser_store · agent_store · im_user_store\nsession_mgr · schedule_store · eval_logger\nagent_policy · config · admin"]
+
+    A --> B --> C --> D
+```
+
+依赖方向单向向下，禁止反向或循环导入。
+
+---
+
+## 模块地图
 
 ```
 src/fleetent/
-  ┌─── 接入层 ──────────────────────────────────────────┐
-  │  server.py          FastAPI：POST /chat (SSE)、Bearer 认证   │
-  │  im_gateway/        Slack / Telegram / WhatsApp 适配器       │
-  │    normalizer.py    NormalizedMessage 统一路由 pipeline       │
-  │    slack.py         slack-bolt Socket Mode                    │
-  │    telegram.py      python-telegram-bot polling               │
-  └────────────────────────────────────────────────────┘
-  ┌─── 编排层 ──────────────────────────────────────────┐
-  │  agent_loop.py      while tool-use 核心循环                   │
-  │  sub_agent.py       asyncio.gather 并行子 agent               │
-  └────────────────────────────────────────────────────┘
-  ┌─── 能力层 ──────────────────────────────────────────┐
-  │  model_router.py    LLM 路由 + fallback 链                    │
-  │  tool_registry.py   @tool 注册、dispatch、访问控制            │
-  │  tools.py           内置工具（import 即注册）                 │
-  │  skill_registry.py  关键词匹配，注入 system prompt            │
-  │  context_mgr.py     in-session token 压缩                     │
-  │  memory_layer.py    跨 session 事实提取与注入                 │
-  │  mcp_client.py      MCP HTTP/stdio 工具注册                   │
-  │  sandbox_client.py  Docker 隔离代码执行                       │
-  │  permission_gate.py asyncio.Event 人工审批门                  │
-  │  cron_scheduler.py  APScheduler 定时任务                      │
-  │  webhook_router.py  Webhook 签名验证与消息提取                │
-  └────────────────────────────────────────────────────┘
-  ┌─── 基础层 ──────────────────────────────────────────┐
-  │  user_store.py      用户/API key 管理（SQLite）               │
-  │  agent_store.py     agent 定义 + channel 绑定（SQLite）       │
-  │  im_user_store.py   IM 平台用户映射 + allowlist               │
-  │  session_mgr.py     JSON session 持久化 + asyncio.Lock        │
-  │  schedule_store.py  定时任务持久化（SQLite）                  │
-  │  eval_logger.py     append-only JSONL trace 日志              │
-  │  agent_policy.py    fnmatch 工具访问检查                      │
-  │  config.py          pydantic-settings 配置体系                │
-  │  admin.py           CLI 管理工具                              │
-  └────────────────────────────────────────────────────┘
+  server.py          ← FastAPI：POST /chat (SSE)、GET /health、Bearer 认证
+  im_gateway/
+    normalizer.py    ← NormalizedMessage 统一路由 pipeline
+    slack.py         ← slack-bolt Socket Mode 适配器
+    telegram.py      ← python-telegram-bot polling 适配器
+  agent_loop.py      ← while tool-use 核心循环；run() + run_stream()
+  sub_agent.py       ← asyncio.gather 并行子 agent；最大深度 1
+  model_router.py    ← task_type → provider 配置 + fallback 链
+  tool_registry.py   ← @tool 注册、schema 构建、dispatch、访问控制
+  tools.py           ← 内置工具（import 即注册，副作用）
+  skill_registry.py  ← 扫描 skills/，关键词匹配，注入 system prompt
+  context_mgr.py     ← in-session token 压缩
+  memory_layer.py    ← 跨 session 事实：Haiku 提取 → JSONL → 注入
+  mcp_client.py      ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
+  sandbox_client.py  ← Docker CLI 封装：隔离 Python 执行
+  permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
+  cron_scheduler.py  ← APScheduler 定时任务；server 启动时初始化
+  webhook_router.py  ← Webhook 来源配置加载、签名验证、消息提取
+  user_store.py      ← SQLite 用户/API key 管理
+  agent_store.py     ← SQLite：agent 定义 + 用户绑定 + channel 绑定
+  im_user_store.py   ← (platform, platform_user_id) → 内部 User；allowlist
+  session_mgr.py     ← JSON session 持久化；per-session asyncio.Lock
+  schedule_store.py  ← SQLite：定时任务定义与状态持久化
+  eval_logger.py     ← append-only JSONL trace 日志
+  agent_policy.py    ← fnmatch 工具访问检查
+  config.py          ← pydantic-settings；加载 .env + config/settings.yaml
+  admin.py           ← CLI 管理工具
 ```
-
-依赖方向单向向下：接入层 → 编排层 → 能力层 → 基础层。
 
 ---
 
@@ -61,50 +67,55 @@ src/fleetent/
 
 ### HTTP 路径
 
-```
-POST /chat + Bearer token
-  → server.py 认证（API key → user_id）
-  → agent_loop.run_stream()
-      ├─ 注入跨 session 记忆
-      ├─ 匹配 Skill，注入 system prompt
-      ├─ while True:
-      │   ├─ context_mgr 检查是否需要压缩
-      │   ├─ LLM streaming call（含 fallback 链）
-      │   ├─ 流式输出 SSE text_delta
-      │   └─ tool_calls → permission_gate → dispatch → loop back
-      ├─ eval_logger 写 trace
-      └─ memory_layer 异步提取事实（不阻塞响应）
-  → SSE {"type": "done"}
+```mermaid
+flowchart TD
+    A["POST /chat + Bearer token"] --> B["server.py\n认证 → user_id"]
+    B --> C["agent_loop.run_stream"]
+    C --> D["注入记忆\n匹配 Skill"]
+    D --> E["LLM streaming call\n含 fallback 链"]
+    E -->|text_delta| F["SSE 流式输出"]
+    E -->|tool_calls| G["permission_gate\nmedium/high 风险审批"]
+    G --> H["tool dispatch\n执行工具"]
+    H --> E
+    E -->|stop| I["eval_logger\n写 trace"]
+    I --> J["memory_layer\n异步提取事实"]
+    J --> K["SSE done"]
 ```
 
 ### IM 路径
 
+```mermaid
+flowchart TD
+    A["IM 消息"] --> B["平台适配器\nSlack / Telegram"]
+    B --> C["im_user_store\n身份映射 / 自动创建"]
+    C --> D["normalizer.route"]
+    D -->|approve/reject 命令| E["permission_gate.resolve\n审批结果"]
+    D -->|普通消息| F{"allowlist 检查"}
+    F -->|未审批| G["拒绝\n提示联系管理员"]
+    F -->|已审批| H["agent 解析\nchannel → user → default → 裸跑"]
+    H --> I["agent_loop.run"]
+    I --> J["回写平台"]
 ```
-IM 消息
-  → 平台适配器（Slack/Telegram）
-  → im_user_store.get_or_create()     # 身份映射
-  → normalizer.route()
-      ├─ approve/reject 命令 → permission_gate.resolve()
-      └─ 普通消息
-          ├─ im_user_store 检查 allowlist
-          ├─ agent_store 解析 agent（channel → user → default → 裸跑）
-          └─ agent_loop.run() → 回写平台
 
 ### Webhook 路径
 
-POST /webhook/{source_id}
-  → webhook_router.verify_signature()  # HMAC-SHA256 或无 secret 直通
-  → webhook_router.extract_message()   # 模板提取或 JSON 序列化
-  → normalizer.route()                 # 复用 IM pipeline
+```mermaid
+flowchart TD
+    A["POST /webhook/{source_id}"] --> B["webhook_router\n加载来源配置"]
+    B --> C{"签名验证\nHMAC-SHA256"}
+    C -->|失败| D["403 拒绝"]
+    C -->|通过| E["extract_message\n模板提取 / JSON 序列化"]
+    E --> F["normalizer.route\n复用 IM pipeline"]
+    F --> G["agent_loop.run"]
 ```
 
 ### Cron 路径
 
-```
-APScheduler trigger
-  → schedule_store 读取任务定义
-  → agent_loop.run()
-  → 结果通过 reply_func 回写（IM 消息或日志）
+```mermaid
+flowchart TD
+    A["APScheduler trigger"] --> B["schedule_store\n读取任务定义"]
+    B --> C["agent_loop.run"]
+    C --> D["reply_func\n回写 IM 或记录日志"]
 ```
 
 ---
@@ -113,20 +124,18 @@ APScheduler trigger
 
 | 决策 | 结论 | 理由 |
 |------|------|------|
-| 部署结构 | 模块化单体，单进程 | on-premises 天敌是复杂度，微服务带来不必要的运维负担 |
-| LLM 调用 | 直接调 SDK，不用框架 | LangChain 等框架频繁 breaking change，debug 困难，与 Hermes/OpenClaw 问题性质相同 |
-| 数据库 | SQLite（可升 PostgreSQL）| 零运维，on-premises 友好；模块内直接用 aiosqlite，不引入 ORM |
-| Session 存储 | JSON 文件 + asyncio.Lock | 可调试，原子写（.tmp → rename）防损坏 |
-| 工具审批 | asyncio.Event 门控 | 无轮询，优雅等待；重启后孤儿请求通过 cleanup_stale_approvals() 清理 |
+| 部署结构 | 模块化单体，单进程 | on-premises 天敌是复杂度，微服务带来不必要运维负担 |
+| LLM 调用 | 直接调 SDK，不用框架 | LangChain 频繁 breaking change，debug 困难 |
+| 数据库 | SQLite（可升 PostgreSQL）| 零运维，on-premises 友好；直接用 aiosqlite，不引入 ORM |
+| Session 存储 | JSON 文件 + asyncio.Lock | 可调试；原子写（.tmp → rename）防损坏 |
+| 工具审批 | asyncio.Event 门控 | 无轮询，优雅等待；重启后调用 cleanup_stale_approvals() 清理孤儿 |
 | 代码执行隔离 | Docker CLI 封装 | 真隔离 + 资源限制；启动约 1s，可接受 |
 | MCP 工具命名 | `{server}__{tool}` 双下划线 | 避免与内置工具名冲突，来源可追溯 |
-| 记忆提取 | Haiku 异步提取，不阻塞响应 | 廉价且快；提取结果写 JSONL，top-20 条注入下次请求 |
+| 记忆提取 | Haiku 异步，不阻塞响应 | 廉价且快；JSONL 存储，top-20 条注入下次请求 |
 
 ---
 
 ## 能力域文档索引
-
-详细设计和验收标准见各能力域文档：
 
 | 文档 | 覆盖范围 |
 |------|---------|
