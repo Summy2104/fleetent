@@ -47,7 +47,7 @@ def test_trace_without_im_metadata_no_null_pollution(tmp_path, monkeypatch):
     assert "message_id" not in entry
     # Core fields must exist
     assert "user_id" in entry
-    assert "response" in entry
+    assert "reply" in entry
 
 
 def test_trace_with_message_id(tmp_path, monkeypatch):
@@ -123,3 +123,63 @@ def test_serialize_fallback_str():
             return "custom_repr"
 
     assert _serialize(Unknown()) == "custom_repr"
+
+
+# --- model_used ---
+
+def test_log_run_model_used_written_to_trace(tmp_path, monkeypatch):
+    import mini_agent.eval_logger as el
+
+    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    el.log_run("hi", "hello", [], 0.1, model_used="claude-haiku-4-5")
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert entry["model_used"] == "claude-haiku-4-5"
+
+
+def test_log_run_model_used_omitted_when_not_provided(tmp_path, monkeypatch):
+    import mini_agent.eval_logger as el
+
+    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    el.log_run("hi", "hello", [], 0.1)
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert "model_used" not in entry
+
+
+# --- user_id ---
+
+def test_log_run_user_id_written(tmp_path, monkeypatch):
+    import mini_agent.eval_logger as el
+
+    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    el.log_run("hi", "hello", [], 0.1, user_id="user-42")
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert entry["user_id"] == "user-42"
+
+
+def test_log_run_user_id_omitted_when_not_provided(tmp_path, monkeypatch):
+    import mini_agent.eval_logger as el
+
+    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    el.log_run("hi", "hello", [], 0.1)
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert "user_id" not in entry
+
+
+# --- agent_name ---
+
+def test_log_run_agent_name_written(tmp_path, monkeypatch):
+    import mini_agent.eval_logger as el
+
+    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    el.log_run("hi", "hello", [], 0.1, agent_name="support-bot")
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert entry["agent_name"] == "support-bot"
+
+
+def test_log_run_agent_name_omitted_when_not_provided(tmp_path, monkeypatch):
+    import mini_agent.eval_logger as el
+
+    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    el.log_run("hi", "hello", [], 0.1)
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert "agent_name" not in entry

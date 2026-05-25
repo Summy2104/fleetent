@@ -16,6 +16,7 @@ class RouteConfig:
     model: str
     api_key_env: str
     max_tokens: int
+    fallbacks: tuple[str, ...] = ()
 
 
 ROUTES: dict[str, RouteConfig] = {

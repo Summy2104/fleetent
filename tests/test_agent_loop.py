@@ -4,8 +4,10 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from openai import APIStatusError, RateLimitError
 
 import mini_agent.agent_loop as al
+from mini_agent.model_router import RouteConfig
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -50,11 +52,25 @@ async def _stream_chunks(*contents: str | None, finish: str = "stop"):
     """Async generator yielding fake stream chunks. Last chunk gets finish_reason."""
     for i, content in enumerate(contents):
         c = MagicMock()
+        c.usage = None
         c.choices = [MagicMock()]
         c.choices[0].delta.content = content
         c.choices[0].delta.tool_calls = None
         c.choices[0].finish_reason = finish if i == len(contents) - 1 else None
         yield c
+
+
+async def _stream_chunks_with_usage(prompt: int, completion: int, *contents: str | None):
+    """Like _stream_chunks but appends a usage-only chunk (no choices) at the end."""
+    async for chunk in _stream_chunks(*contents):
+        yield chunk
+    u = MagicMock()
+    u.choices = []
+    u.usage = MagicMock()
+    u.usage.prompt_tokens = prompt
+    u.usage.completion_tokens = completion
+    u.usage.total_tokens = prompt + completion
+    yield u
 
 
 @pytest.fixture
@@ -64,6 +80,8 @@ def mock_client(monkeypatch) -> AsyncMock:
     cfg = MagicMock()
     cfg.model = "test-model"
     cfg.max_tokens = 512
+
+    cfg.fallbacks = ()
 
     monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
     monkeypatch.setattr(al, "get_schemas", lambda: [])
@@ -322,3 +340,143 @@ async def test_run_allowed_tools_supports_wildcard(mock_client, monkeypatch):
     sent_tools = mock_client.chat.completions.create.call_args[1]["tools"]
     sent_names = [s["function"]["name"] for s in sent_tools]
     assert sent_names == ["filesystem__read_file", "filesystem__write_file"]
+
+
+# ── fallback helpers ──────────────────────────────────────────────────────────
+
+def _mk_http_error(status: int, cls=APIStatusError) -> APIStatusError:
+    r = MagicMock()
+    r.status_code = status
+    r.request = MagicMock()
+    r.headers = {}
+    if cls is RateLimitError:
+        return RateLimitError("rate limit", response=r, body={})
+    return APIStatusError(f"status {status}", response=r, body={})
+
+
+@pytest.fixture
+def mock_client_fb(monkeypatch) -> AsyncMock:
+    """mock_client variant with one fallback model configured."""
+    client = AsyncMock()
+    cfg = RouteConfig(
+        base_url="https://api.test.com",
+        model="primary-model",
+        api_key_env="TEST_KEY",
+        max_tokens=512,
+        fallbacks=("fallback-model",),
+    )
+    monkeypatch.setenv("TEST_KEY", "k")
+    monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(al, "get_schemas", lambda: [])
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
+    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
+    monkeypatch.setattr(al, "match_skill", lambda _: None)
+    return client
+
+
+# ── run() fallback ────────────────────────────────────────────────────────────
+
+
+async def test_run_falls_back_on_429(mock_client_fb):
+    mock_client_fb.chat.completions.create = AsyncMock(
+        side_effect=[_mk_http_error(429, RateLimitError), _text_resp("fallback reply")]
+    )
+    result = await al.run([{"role": "user", "content": "hi"}])
+    assert result == "fallback reply"
+    calls = mock_client_fb.chat.completions.create.call_args_list
+    assert calls[0].kwargs["model"] == "primary-model"
+    assert calls[1].kwargs["model"] == "fallback-model"
+
+
+async def test_run_falls_back_on_503(mock_client_fb):
+    mock_client_fb.chat.completions.create = AsyncMock(
+        side_effect=[_mk_http_error(503), _text_resp("ok")]
+    )
+    result = await al.run([{"role": "user", "content": "hi"}])
+    assert result == "ok"
+
+
+async def test_run_exhausted_fallbacks_raises(mock_client_fb):
+    mock_client_fb.chat.completions.create = AsyncMock(
+        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+    )
+    with pytest.raises(RateLimitError):
+        await al.run([{"role": "user", "content": "hi"}])
+
+
+async def test_run_401_not_retried(mock_client_fb):
+    mock_client_fb.chat.completions.create = AsyncMock(
+        side_effect=_mk_http_error(401)
+    )
+    with pytest.raises(APIStatusError) as exc_info:
+        await al.run([{"role": "user", "content": "hi"}])
+    assert exc_info.value.status_code == 401
+    assert mock_client_fb.chat.completions.create.call_count == 1
+
+
+# ── run_stream() fallback ─────────────────────────────────────────────────────
+
+
+async def test_run_stream_falls_back_on_429(mock_client_fb):
+    mock_client_fb.chat.completions.create = AsyncMock(
+        side_effect=[_mk_http_error(429, RateLimitError), _stream_chunks("streamed", finish="stop")]
+    )
+    events = [e async for e in al.run_stream("hi")]
+    text = "".join(e["content"] for e in events if e["type"] == "text_delta")
+    assert "streamed" in text
+    calls = mock_client_fb.chat.completions.create.call_args_list
+    assert calls[1].kwargs["model"] == "fallback-model"
+
+
+async def test_run_stream_exhausted_yields_error(mock_client_fb):
+    mock_client_fb.chat.completions.create = AsyncMock(
+        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+    )
+    events = [e async for e in al.run_stream("hi")]
+    assert any(e["type"] == "error" for e in events)
+
+
+# ── log fields: user_id, agent_name, streaming usage ─────────────────────────
+
+
+async def test_run_passes_user_id_to_log_run(mock_client, monkeypatch):
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    await al.run([{"role": "user", "content": "hi"}], user_id="user-99")
+    assert captured.get("user_id") == "user-99"
+
+
+async def test_run_passes_agent_name_to_log_run(mock_client, monkeypatch):
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    await al.run([{"role": "user", "content": "hi"}], agent_name="support-bot")
+    assert captured.get("agent_name") == "support-bot"
+
+
+async def test_run_stream_passes_user_id_and_agent_name_to_log_run(mock_client, monkeypatch):
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_stream_chunks("hi", finish="stop")
+    )
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    [_ async for _ in al.run_stream("hi", user_id="user-7", agent_name="myagent")]
+    assert captured.get("user_id") == "user-7"
+    assert captured.get("agent_name") == "myagent"
+
+
+async def test_run_stream_captures_usage_from_stream(mock_client, monkeypatch):
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_stream_chunks_with_usage(100, 50, "hello")
+    )
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    [_ async for _ in al.run_stream("hi")]
+    usage = captured.get("usage")
+    assert usage is not None
+    assert usage.prompt_tokens == 100
+    assert usage.completion_tokens == 50

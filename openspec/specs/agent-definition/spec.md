@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
 
+Defines agent configurations (system prompt, tool allowlist) stored in SQLite, supports user-to-agent assignment, and controls which tools an agent can access via glob patterns.
+## Requirements
 ### Requirement: Agent definition storage
 The system SHALL store agent definitions (name, system_prompt, allowed_tools) in the `agents` SQLite table.
 
@@ -40,3 +42,15 @@ The `user_agents` table SHALL store: `user_id` (→ users.id), `agent_id` (→ a
 #### Scenario: Duplicate agent name rejected
 - **WHEN** admin tries to create an agent with a name that already exists
 - **THEN** the database UNIQUE constraint prevents it and an error is returned
+
+### Requirement: Route configuration schema
+`RouteConfig` defines the LLM routing parameters for a task type. It SHALL contain: `base_url`, `model`, `api_key_env`, `max_tokens`, and an optional `fallbacks` ordered sequence of model names to try when the primary model is unavailable.
+
+#### Scenario: RouteConfig with fallbacks
+- **WHEN** `RouteConfig` is instantiated with `fallbacks=("claude-haiku-4-5",)`
+- **THEN** the config holds a valid fallback sequence accessible as `config.fallbacks`
+
+#### Scenario: RouteConfig without fallbacks remains valid
+- **WHEN** `RouteConfig` is instantiated without the `fallbacks` parameter
+- **THEN** `config.fallbacks` is an empty tuple and the config is fully valid
+

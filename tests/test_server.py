@@ -111,9 +111,10 @@ def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch):
 
     captured: dict = {}
 
-    async def fake_stream(msg: str, user_id: str, system_prompt: str | None = None, allowed_tools=None):  # type: ignore[misc]
+    async def fake_stream(msg: str, user_id: str, system_prompt: str | None = None, allowed_tools=None, agent_name: str | None = None):  # type: ignore[misc]
         captured["system_prompt"] = system_prompt
         captured["allowed_tools"] = allowed_tools
+        captured["agent_name"] = agent_name
         yield {"type": "done", "content": "ok"}
 
     monkeypatch.setattr(srv, "run_stream", fake_stream)

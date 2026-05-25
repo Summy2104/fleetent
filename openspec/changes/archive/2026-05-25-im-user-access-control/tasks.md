@@ -33,4 +33,4 @@
 ## 7. 验证
 
 - [x] 7.1 Run full test suite (`uv run pytest -x -q`), confirm all tests pass
-- [ ] 7.2 Manual smoke test: new IM user gets rejected; after `approve-user`, same user can chat; `assign-channel` routes group messages to correct agent
+- [x] 7.2 Manual smoke test: new IM user gets rejected; after `approve-user`, same user can chat; `assign-channel` routes group messages to correct agent

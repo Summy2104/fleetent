@@ -157,6 +157,7 @@ async def chat(
     )
     system_prompt = agent.system_prompt if agent else None
     allowed_tools = agent.allowed_tools if agent else None
+    agent_name = agent.name if agent else None
 
     async def _stream() -> AsyncGenerator[str, None]:
         try:
@@ -165,6 +166,8 @@ async def chat(
                 kwargs["system_prompt"] = system_prompt
             if allowed_tools is not None:
                 kwargs["allowed_tools"] = allowed_tools
+            if agent_name is not None:
+                kwargs["agent_name"] = agent_name
             async for event in run_stream(req.message, **kwargs):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as exc:

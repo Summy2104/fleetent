@@ -1,7 +1,7 @@
 import pytest
 from openai import AsyncOpenAI, OpenAI
 
-from mini_agent.model_router import ROUTES, get_async_client_and_config, get_client_and_config
+from mini_agent.model_router import ROUTES, RouteConfig, get_async_client_and_config, get_client_and_config
 
 
 def test_routes_define_default_and_memory_extraction():
@@ -47,3 +47,27 @@ def test_get_async_client_and_config_memory_route(monkeypatch):
     _, cfg = get_async_client_and_config("memory_extraction")
     assert cfg.model == "claude-haiku-4-5"
     assert cfg.max_tokens == 1024
+
+
+# --- fallbacks ---
+
+def test_route_config_fallbacks_default_empty():
+    cfg = RouteConfig(base_url="https://api.test.com", model="m", api_key_env="K", max_tokens=512)
+    assert cfg.fallbacks == ()
+
+
+def test_route_config_fallbacks_explicit():
+    cfg = RouteConfig(
+        base_url="https://api.test.com",
+        model="primary",
+        api_key_env="K",
+        max_tokens=512,
+        fallbacks=("fb-1", "fb-2"),
+    )
+    assert cfg.fallbacks == ("fb-1", "fb-2")
+
+
+def test_route_config_fallbacks_immutable():
+    cfg = RouteConfig(base_url="https://api.test.com", model="m", api_key_env="K", max_tokens=512)
+    with pytest.raises((AttributeError, TypeError)):
+        cfg.fallbacks = ("x",)  # type: ignore[misc]

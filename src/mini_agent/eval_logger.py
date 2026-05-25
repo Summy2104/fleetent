@@ -17,6 +17,9 @@ def log_run(
     messages: list[Any],
     elapsed_s: float,
     usage: CompletionUsage | None = None,
+    model_used: str | None = None,
+    user_id: str | None = None,
+    agent_name: str | None = None,
 ) -> None:
     """Append one run record to the JSONL trace file."""
     entry: dict[str, Any] = {
@@ -35,6 +38,12 @@ def log_run(
             else None
         ),
     }
+    if model_used is not None:
+        entry["model_used"] = model_used
+    if user_id is not None:
+        entry["user_id"] = user_id
+    if agent_name is not None:
+        entry["agent_name"] = agent_name
     _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _LOG_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -55,7 +64,7 @@ def log(
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "user_id": user_id,
         "messages": [_serialize(m) for m in messages],
-        "response": response,
+        "reply": response,
     }
     if platform is not None:
         entry["platform"] = platform

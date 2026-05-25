@@ -4,7 +4,7 @@ import time
 from collections.abc import AsyncGenerator
 from typing import Any, cast
 
-from openai import AsyncStream
+from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
 from openai.types.chat import ChatCompletionChunk
 
 import asyncio
@@ -18,7 +18,7 @@ import mini_agent.tools  # noqa: F401  # side-effect: register built-in tools
 from mini_agent.context_mgr import maybe_compress
 from mini_agent.eval_logger import log_run
 from mini_agent.memory_layer import extract_and_save, load_memories
-from mini_agent.model_router import get_async_client_and_config
+from mini_agent.model_router import RouteConfig, get_async_client_and_config
 from mini_agent.permission_gate import _default_gate
 from mini_agent.skill_registry import load as load_skill
 from mini_agent.skill_registry import match as match_skill
@@ -32,6 +32,64 @@ _SYSTEM = "You are a helpful assistant with access to tools. Use them when neede
 _SUB_AGENT_TOOL = "sub_agent"
 
 
+async def _call_with_fallback(
+    client: AsyncOpenAI,
+    cfg: RouteConfig,
+    messages: list[Any],
+    schemas: list[Any],
+    models: list[str],
+) -> tuple[Any, str]:
+    """Try each model in order on 429/503; return (response, model_used)."""
+    last_exc: Exception | None = None
+    for model in models:
+        try:
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=messages,  # type: ignore[arg-type]
+                tools=schemas,  # type: ignore[arg-type]
+                max_tokens=cfg.max_tokens,
+            )
+            return resp, model
+        except RateLimitError as exc:
+            last_exc = exc
+        except APIStatusError as exc:
+            if exc.status_code == 503:
+                last_exc = exc
+            else:
+                raise
+    raise last_exc  # type: ignore[misc]
+
+
+async def _stream_with_fallback(
+    client: AsyncOpenAI,
+    cfg: RouteConfig,
+    messages: list[Any],
+    schemas: list[Any],
+    models: list[str],
+) -> tuple[Any, str]:
+    """Try each model in order on 429/503 for streaming; return (stream, model_used)."""
+    last_exc: Exception | None = None
+    for model in models:
+        try:
+            stream = await client.chat.completions.create(
+                model=model,
+                messages=messages,  # type: ignore[arg-type]
+                tools=schemas,  # type: ignore[arg-type]
+                max_tokens=cfg.max_tokens,
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+            return stream, model
+        except RateLimitError as exc:
+            last_exc = exc
+        except APIStatusError as exc:
+            if exc.status_code == 503:
+                last_exc = exc
+            else:
+                raise
+    raise last_exc  # type: ignore[misc]
+
+
 ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
 
 
@@ -42,6 +100,7 @@ async def run(
     is_sub_agent: bool = False,
     reply_func: ReplyFunc | None = None,
     allowed_tools: list[str] | None = None,
+    agent_name: str | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -62,15 +121,13 @@ async def run(
     start = time.monotonic()
     response = None
     msg: Any = None
+    models_to_try = [cfg.model, *cfg.fallbacks]
+    model_used = cfg.model
 
     while True:
         messages = maybe_compress(messages)
-        response = await client.chat.completions.create(
-            model=cfg.model,
-            messages=messages,  # type: ignore[arg-type]
-            tools=schemas,  # type: ignore[arg-type]
-            max_tokens=cfg.max_tokens,
-        )
+        response, model_used = await _call_with_fallback(client, cfg, messages, schemas, models_to_try)
+        models_to_try = [model_used]  # stick with the winning model for subsequent turns
         choice = response.choices[0]
         msg = choice.message
         messages.append(msg.model_dump())  # dict for JSON serializability (session persistence)
@@ -125,7 +182,7 @@ async def run(
         (m["content"] for m in messages if isinstance(m, dict) and m.get("role") == "user"),
         "",
     )
-    log_run(user_input, reply, messages, time.monotonic() - start, usage)
+    log_run(user_input, reply, messages, time.monotonic() - start, usage, model_used=model_used, user_id=user_id, agent_name=agent_name)
     extract_and_save(user_input, messages, user_id=user_id)
     return reply
 
@@ -156,6 +213,7 @@ async def run_stream(
     user_id: str = "default",
     system_prompt: str = _SYSTEM,
     allowed_tools: list[str] | None = None,
+    agent_name: str | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -178,6 +236,10 @@ async def run_stream(
 
     start = time.monotonic()
     reply = ""
+    models_to_try = [cfg.model, *cfg.fallbacks]
+    model_used = cfg.model
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
 
     while True:
         messages = maybe_compress(messages)
@@ -192,17 +254,20 @@ async def run_stream(
         if allowed_tools is not None:
             stream_schemas = [s for s in stream_schemas if check_tool_access(s["function"]["name"], allowed_tools)]
 
-        stream = cast(
-            AsyncStream[ChatCompletionChunk],
-            await client.chat.completions.create(
-                model=cfg.model,
-                messages=messages,
-                tools=stream_schemas,  # type: ignore[arg-type]
-                max_tokens=cfg.max_tokens,
-                stream=True,
-            ),
-        )
+        try:
+            stream, model_used = await _stream_with_fallback(
+                client, cfg, messages, stream_schemas, models_to_try
+            )
+            models_to_try = [model_used]
+        except (RateLimitError, APIStatusError) as exc:
+            yield {"type": "error", "content": str(exc)}
+            return
+
+        stream = cast(AsyncStream[ChatCompletionChunk], stream)
         async for chunk in stream:
+            if chunk.usage:
+                total_prompt_tokens += chunk.usage.prompt_tokens
+                total_completion_tokens += chunk.usage.completion_tokens
             if not chunk.choices:
                 continue
             choice = chunk.choices[0]
@@ -252,5 +317,15 @@ async def run_stream(
 
     yield {"type": "done", "content": reply}
 
-    log_run(user_input, reply, messages, time.monotonic() - start, usage=None)
+    from openai.types import CompletionUsage as _CU
+    stream_usage: _CU | None = (
+        _CU(
+            prompt_tokens=total_prompt_tokens,
+            completion_tokens=total_completion_tokens,
+            total_tokens=total_prompt_tokens + total_completion_tokens,
+        )
+        if total_prompt_tokens or total_completion_tokens
+        else None
+    )
+    log_run(user_input, reply, messages, time.monotonic() - start, usage=stream_usage, model_used=model_used, user_id=user_id, agent_name=agent_name)
     extract_and_save(user_input, messages, user_id=user_id)

@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Maps IM platform users `(platform, platform_user_id)` to internal user records, creating new records on first contact and maintaining uniqueness per platform identity.
+
+## Requirements
 
 ### Requirement: Map platform user to internal user
 The system SHALL map `(platform, platform_user_id)` to an internal `user_id` before routing to the agent pipeline.
