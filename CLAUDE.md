@@ -167,7 +167,7 @@ uvicorn fleetent.server:app --reload  # HTTP 服务（端口 8000）
 
 ```
 ANTHROPIC_API_KEY      # 默认路由必需
-MINI_AGENT_SKILLS_DIR  # 覆盖 skills/ 目录（默认 ./skills）
+FLEETENT_SKILLS_DIR  # 覆盖 skills/ 目录（默认 ./skills）
 ```
 
 ---
