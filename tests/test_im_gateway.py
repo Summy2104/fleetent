@@ -24,8 +24,12 @@ def mock_agent_loop(monkeypatch):
 def mock_memory_skill(monkeypatch):
     import mini_agent.memory_layer as ml
     import mini_agent.skill_registry as sr
+    import mini_agent.im_user_store as ius
+    import mini_agent.im_gateway.normalizer as norm
     monkeypatch.setattr(ml, "load_memories", lambda **kwargs: "")
     monkeypatch.setattr(sr, "match", lambda text: None)
+    monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
+    monkeypatch.setattr(norm, "get_agent_for_context", lambda platform, channel_id, user_id: None)
 
 
 async def test_route_loads_history_calls_agent_saves_replies(
@@ -217,7 +221,7 @@ async def test_route_uses_agent_system_prompt_and_allowed_tools(
         system_prompt="You are a restricted agent.",
         allowed_tools=["calculate"],
     )
-    monkeypatch.setattr(norm, "get_agent_for_user", lambda user_id: fake_agent)
+    monkeypatch.setattr(norm, "get_agent_for_context", lambda platform, channel_id, user_id: fake_agent)
 
     reply_calls: list[str] = []
 
@@ -247,13 +251,14 @@ async def test_route_no_agent_passes_none_allowed_tools(
     """When no agent is assigned, allowed_tools should be None (all tools available)."""
     import mini_agent.im_gateway.normalizer as norm
 
-    monkeypatch.setattr(norm, "get_agent_for_user", lambda user_id: None)
+    monkeypatch.setattr(norm, "get_agent_for_context", lambda platform, channel_id, user_id: None)
 
     async def fake_reply(text: str) -> None:
         pass
 
     msg = NormalizedMessage(
         platform="slack",
+        channel_id="C000",
         session_id="user:U000",
         user_id="free-user",
         text="hi",
@@ -265,3 +270,69 @@ async def test_route_no_agent_passes_none_allowed_tools(
 
     call_kwargs = mock_agent_loop.run.call_args[1]
     assert call_kwargs["allowed_tools"] is None
+
+
+async def test_route_blocked_user_gets_rejection_not_agent(
+    mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
+):
+    """User with allowed=False receives rejection message; agent_loop is NOT called."""
+    import mini_agent.im_gateway.normalizer as norm
+    import mini_agent.im_user_store as ius
+
+    monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: False)
+
+    reply_calls: list[str] = []
+
+    async def fake_reply(text: str) -> None:
+        reply_calls.append(text)
+
+    msg = NormalizedMessage(
+        platform="slack",
+        channel_id="C1",
+        session_id="user:UBLOCK",
+        user_id="blocked-user",
+        text="hello",
+        attachments=[],
+        reply_func=fake_reply,
+    )
+
+    await route(msg)
+
+    mock_agent_loop.run.assert_not_called()
+    assert len(reply_calls) == 1
+    assert reply_calls[0]  # some rejection message
+
+
+async def test_route_channel_agent_takes_priority(
+    mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
+):
+    """Channel-level agent is used when bound, regardless of user binding."""
+    from mini_agent.agent_store import Agent
+    import mini_agent.im_gateway.normalizer as norm
+    import mini_agent.im_user_store as ius
+
+    monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
+
+    channel_agent = Agent(id=10, name="channel-bot", system_prompt="Channel sys.", allowed_tools=["shell"])
+    monkeypatch.setattr(norm, "get_agent_for_context", lambda platform, channel_id, user_id: channel_agent)
+
+    reply_calls: list[str] = []
+
+    async def fake_reply(text: str) -> None:
+        reply_calls.append(text)
+
+    msg = NormalizedMessage(
+        platform="slack",
+        channel_id="C-BOUND",
+        session_id="thread:T1",
+        user_id="some-user",
+        text="hello channel",
+        attachments=[],
+        reply_func=fake_reply,
+    )
+
+    await route(msg)
+
+    call_kwargs = mock_agent_loop.run.call_args[1]
+    assert call_kwargs["allowed_tools"] == ["shell"]
+    assert "Channel sys." in call_kwargs["messages"][0]["content"]

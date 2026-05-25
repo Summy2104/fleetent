@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
 
-from mini_agent.agent_store import get_agent_for_user
+from mini_agent import agent_store, im_user_store
+from mini_agent.agent_store import Agent
 
 logger = structlog.get_logger(__name__)
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
 _APPROVAL_RE = re.compile(r"^(approve|reject)\s+([a-f0-9-]{6,36})\s*$", re.IGNORECASE)
+_REJECTION_MSG = "你还没有权限使用此 bot，请联系管理员审批。"
 
 
 @dataclass
@@ -23,6 +25,19 @@ class NormalizedMessage:
     text: str
     attachments: list[Any]
     reply_func: Callable[[str], Coroutine[Any, Any, None]]
+    channel_id: str = field(default="")
+
+
+def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> Agent | None:
+    """Resolve agent: channel binding → user binding → default agent → None (bare run)."""
+    if channel_id:
+        agent = agent_store.get_agent_for_channel(platform, channel_id)
+        if agent:
+            return agent
+    agent = agent_store.get_agent_for_user(user_id)
+    if agent:
+        return agent
+    return agent_store.get_default_agent()
 
 
 async def route(msg: NormalizedMessage) -> None:
@@ -43,6 +58,11 @@ async def route(msg: NormalizedMessage) -> None:
             await msg.reply_func(f"⚠️ approval {approval_id} not found or already expired")
         return
 
+    # Allowlist check — IM users must be approved before interacting
+    if not im_user_store.check_allowed_by_user_id(msg.user_id):
+        await msg.reply_func(_REJECTION_MSG)
+        return
+
     from mini_agent import agent_loop, session_mgr
     from mini_agent.memory_layer import load_memories
     from mini_agent.skill_registry import load as load_skill
@@ -51,8 +71,8 @@ async def route(msg: NormalizedMessage) -> None:
     async with session_mgr.session_lock(msg.session_id):
         history = await session_mgr.load(msg.session_id)
 
-        # Resolve agent config for this user (custom system_prompt + tool restrictions)
-        agent = get_agent_for_user(msg.user_id)
+        # Resolve agent config: channel → user → default → bare run
+        agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
         base_system = agent.system_prompt if agent else _SYSTEM
         allowed_tools = agent.allowed_tools if agent else None
 

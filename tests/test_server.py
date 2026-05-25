@@ -98,3 +98,40 @@ def test_chat_stream_exception_yields_error_event(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert '"type": "error"' in resp.text
     assert "boom" in resp.text
+
+
+def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch):
+    """/chat with x-platform + x-channel-id uses the channel-bound agent."""
+    import mini_agent.server as srv
+    import mini_agent.user_store as us2
+    import mini_agent.agent_store as ag
+
+    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
+
+    captured: dict = {}
+
+    async def fake_stream(msg: str, user_id: str, system_prompt: str | None = None, allowed_tools=None):  # type: ignore[misc]
+        captured["system_prompt"] = system_prompt
+        captured["allowed_tools"] = allowed_tools
+        yield {"type": "done", "content": "ok"}
+
+    monkeypatch.setattr(srv, "run_stream", fake_stream)
+
+    user = us2.create_user("ChannelTester")
+    channel_agent = ag.create_agent("channel-bot", "Channel system.", ["shell"])
+    ag.assign_channel("slack", "C-TEST", channel_agent.id)
+
+    with TestClient(srv.app) as c:
+        resp = c.post(
+            "/chat",
+            json={"message": "hello"},
+            headers={
+                "Authorization": f"Bearer {user.api_key}",
+                "x-platform": "slack",
+                "x-channel-id": "C-TEST",
+            },
+        )
+    assert resp.status_code == 200
+    assert captured.get("system_prompt") == "Channel system."
+    assert captured.get("allowed_tools") == ["shell"]

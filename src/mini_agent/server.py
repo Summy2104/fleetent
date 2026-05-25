@@ -143,11 +143,18 @@ async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # t
 
 @app.post("/chat")
 async def chat(
-    req: ChatRequest, user_id: str = Depends(_require_auth)
+    req: ChatRequest,
+    user_id: str = Depends(_require_auth),
+    x_platform: str | None = Header(default=None),
+    x_channel_id: str | None = Header(default=None),
 ) -> StreamingResponse:
-    from mini_agent.agent_store import get_agent_for_user
+    from mini_agent.im_gateway.normalizer import get_agent_for_context
 
-    agent = get_agent_for_user(user_id)
+    agent = get_agent_for_context(
+        platform=x_platform or "",
+        channel_id=x_channel_id or "",
+        user_id=user_id,
+    )
     system_prompt = agent.system_prompt if agent else None
     allowed_tools = agent.allowed_tools if agent else None
 

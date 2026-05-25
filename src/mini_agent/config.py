@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     context_compress_threshold: float = 0.8
     context_keep_recent: int = 10
     log_format: str = "console"
+    default_agent_name: str | None = None
 
 
 def configure_logging(settings: Settings) -> None:

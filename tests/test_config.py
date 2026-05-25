@@ -28,3 +28,15 @@ def test_configure_logging_does_not_raise(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     s = Settings()
     configure_logging(s)  # should not raise
+
+
+def test_default_agent_name_defaults_to_none():
+    s = Settings(anthropic_api_key="test-key")
+    assert s.default_agent_name is None
+
+
+def test_default_agent_name_from_env(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DEFAULT_AGENT_NAME", "basic")
+    s = Settings()
+    assert s.default_agent_name == "basic"
