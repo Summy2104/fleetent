@@ -1,9 +1,9 @@
 import datetime
 
-from mini_agent.user_store import (
+from fleetent.user_store import (
     DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching
 )
-from mini_agent.user_store import (
+from fleetent.user_store import (
     User,
     _conn,
     create_user,

@@ -128,7 +128,7 @@ async def _register_http_server(server: McpServerConfig) -> None:
 
 
 def _register_tool_stdio(server: McpServerConfig, tool_name: str, tool_def: Any) -> None:
-    import mini_agent.tool_registry as tr
+    import fleetent.tool_registry as tr
 
     input_schema = tool_def.inputSchema if hasattr(tool_def, "inputSchema") else {"type": "object", "properties": {}}
 
@@ -147,7 +147,7 @@ def _register_tool_stdio(server: McpServerConfig, tool_name: str, tool_def: Any)
 
 
 def _register_tool_http(server: McpServerConfig, tool_name: str, tool_def: dict[str, Any]) -> None:
-    import mini_agent.tool_registry as tr
+    import fleetent.tool_registry as tr
 
     input_schema = tool_def.get("inputSchema", {"type": "object", "properties": {}})
 

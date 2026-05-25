@@ -45,8 +45,8 @@ When a webhook source has a `secret` configured, the system SHALL verify the `X-
 When a source has a `message_template` configured, the system SHALL extract the message text by substituting payload fields using Python `str.format_map`. When `message_template` is absent or substitution fails, the system SHALL fall back to `json.dumps(payload)`.
 
 #### Scenario: Template substitution succeeds
-- **WHEN** `message_template` is `"PR merged: {repository[name]}"` and payload contains `{"repository": {"name": "mini-agent"}}`
-- **THEN** the extracted message text is `"PR merged: mini-agent"`
+- **WHEN** `message_template` is `"PR merged: {repository[name]}"` and payload contains `{"repository": {"name": "fleetent"}}`
+- **THEN** the extracted message text is `"PR merged: fleetent"`
 
 #### Scenario: Template substitution fails gracefully
 - **WHEN** `message_template` references a field not present in the payload

@@ -1,6 +1,6 @@
 ## Why
 
-mini-agent 目前只能被动响应 IM 消息，无法被外部系统主动触发。CI 构建完成、监控告警触发、GitHub PR 合并等高频工作流事件，都需要一个 Webhook 入口才能调用 agent 自动处理。这是把 agent 从"聊天工具"变成"自动化节点"的关键缺口。
+fleetent 目前只能被动响应 IM 消息，无法被外部系统主动触发。CI 构建完成、监控告警触发、GitHub PR 合并等高频工作流事件，都需要一个 Webhook 入口才能调用 agent 自动处理。这是把 agent 从"聊天工具"变成"自动化节点"的关键缺口。
 
 ## What Changes
 

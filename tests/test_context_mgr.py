@@ -1,4 +1,4 @@
-from mini_agent.context_mgr import _keep_tail, estimate_tokens, maybe_compress
+from fleetent.context_mgr import _keep_tail, estimate_tokens, maybe_compress
 
 
 def _make_messages(n: int) -> list[dict]:
@@ -26,7 +26,7 @@ def test_no_compress_below_threshold():
 
 def test_compress_triggers_above_threshold(monkeypatch):
     # Patch _summarize so we don't call the real LLM in tests
-    import mini_agent.context_mgr as cm
+    import fleetent.context_mgr as cm
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs: "Summary: user asked things.")
 
@@ -68,7 +68,7 @@ def test_keep_tail_identity_not_equality():
 
 
 def test_role_with_object_attribute():
-    from mini_agent.context_mgr import _role
+    from fleetent.context_mgr import _role
 
     class FakeMsg:
         role = "assistant"
@@ -77,7 +77,7 @@ def test_role_with_object_attribute():
 
 
 def test_content_with_object_attribute():
-    from mini_agent.context_mgr import _content
+    from fleetent.context_mgr import _content
 
     class FakeMsg:
         content = "hello"
@@ -86,7 +86,7 @@ def test_content_with_object_attribute():
 
 
 def test_content_with_none_attribute_returns_empty():
-    from mini_agent.context_mgr import _content
+    from fleetent.context_mgr import _content
 
     class FakeMsg:
         content = None
@@ -97,7 +97,7 @@ def test_content_with_none_attribute_returns_empty():
 def test_summarize_calls_llm_and_returns_content(monkeypatch):
     from unittest.mock import MagicMock
 
-    import mini_agent.context_mgr as cm
+    import fleetent.context_mgr as cm
 
     mock_client = MagicMock()
     mock_cfg = MagicMock()
@@ -112,7 +112,7 @@ def test_summarize_calls_llm_and_returns_content(monkeypatch):
 
 
 def test_summarize_exception_returns_placeholder(monkeypatch):
-    import mini_agent.context_mgr as cm
+    import fleetent.context_mgr as cm
 
     def raise_exc(_task):
         raise RuntimeError("no key")
@@ -123,7 +123,7 @@ def test_summarize_exception_returns_placeholder(monkeypatch):
 
 
 def test_keep_tail_tool_at_index_zero_stops_extending():
-    from mini_agent.context_mgr import _keep_tail
+    from fleetent.context_mgr import _keep_tail
 
     tool_msg = {"role": "tool", "content": "result"}
     msgs = [tool_msg]  # tool at index 0 — idx==0, must break

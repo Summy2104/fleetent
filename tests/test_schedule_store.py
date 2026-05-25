@@ -1,6 +1,6 @@
 """Tests for schedule_store: create, list_tasks, delete."""
 
-import mini_agent.schedule_store as ss
+import fleetent.schedule_store as ss
 
 
 def test_create_returns_dict_with_uuid_id(tmp_path, monkeypatch):

@@ -1,7 +1,7 @@
 [project]
-name = "mini-agent"
+name = "fleetent"
 version = "0.2.0"
-description = "Minimal Agent loop in ~300 lines of Python. No framework."
+description = "Lean on-premises agent platform for enterprise IM (Slack/Telegram). No framework."
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
 dependencies = [
@@ -21,15 +21,15 @@ dependencies = [
 ]
 
 [project.scripts]
-mini-agent = "mini_agent.__main__:main"
-mini-agent-admin = "mini_agent.admin:main"
+fleetent = "fleetent.__main__:main"
+fleetent-admin = "fleetent.admin:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mini_agent"]
+packages = ["src/fleetent"]
 
 [dependency-groups]
 dev = [

@@ -6,7 +6,7 @@ from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
-from mini_agent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatching
+from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatching
 
 DB_PATH = Path("data/users.db")
 

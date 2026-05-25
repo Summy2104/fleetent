@@ -19,7 +19,7 @@ New users auto-registered from IM platforms SHALL be created with `allowed=False
 The admin CLI SHALL provide a `list-pending` command that lists all IM users with `allowed=False`.
 
 #### Scenario: Pending users exist
-- **WHEN** admin runs `mini-agent-admin list-pending`
+- **WHEN** admin runs `fleetent-admin list-pending`
 - **THEN** a table is printed with columns: `id`, `platform`, `platform_user_id`, `created_at` for all rows with `allowed=False`
 
 #### Scenario: No pending users
@@ -30,7 +30,7 @@ The admin CLI SHALL provide a `list-pending` command that lists all IM users wit
 The admin CLI SHALL provide an `approve-user` command to set `allowed=True` for a given IM user.
 
 #### Scenario: Approve by IM user id
-- **WHEN** admin runs `mini-agent-admin approve-user --im-user-id <id>`
+- **WHEN** admin runs `fleetent-admin approve-user --im-user-id <id>`
 - **THEN** the `im_users` row's `allowed` field is set to `True`
 
 #### Scenario: User not found
@@ -41,7 +41,7 @@ The admin CLI SHALL provide an `approve-user` command to set `allowed=True` for 
 The admin CLI SHALL provide a `block-user` command to set `allowed=False` for a given IM user (revoking access).
 
 #### Scenario: Block by IM user id
-- **WHEN** admin runs `mini-agent-admin block-user --im-user-id <id>`
+- **WHEN** admin runs `fleetent-admin block-user --im-user-id <id>`
 - **THEN** the `im_users` row's `allowed` field is set to `False`
 
 #### Scenario: Already blocked user

@@ -1,4 +1,4 @@
-# mini-agent
+# fleetent
 
 Lean agent platform in Python. No AI framework — just a FastAPI HTTP server, a tool-calling loop, and clean module boundaries.
 
@@ -8,8 +8,8 @@ Built to run as a multi-user IM-native agent service (Slack, Telegram) with supp
 
 ```bash
 # Prerequisites: Python 3.12+, uv, ANTHROPIC_API_KEY
-git clone https://github.com/raw34/mini-agent.git
-cd mini-agent
+git clone https://github.com/raw34/fleetent.git
+cd fleetent
 uv sync
 cp config/settings.yaml.example config/settings.yaml   # optional
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -18,17 +18,17 @@ export ANTHROPIC_API_KEY=sk-ant-...
 **CLI mode (single user, no auth):**
 
 ```bash
-uv run mini-agent "What time is it, and what is 123 * 456?"
+uv run fleetent "What time is it, and what is 123 * 456?"
 ```
 
 **HTTP server mode (multi-user, Bearer auth):**
 
 ```bash
 # Start the server
-uvicorn mini_agent.server:app --reload
+uvicorn fleetent.server:app --reload
 
 # Create a user and get an API key
-uv run mini-agent-admin create-user --name "Alice"
+uv run fleetent-admin create-user --name "Alice"
 # → api_key: ma-abc123...
 
 # Chat via SSE
@@ -112,7 +112,7 @@ curl -s http://localhost:8000/chat \
 All `/chat` requests require a Bearer token issued by the admin CLI:
 
 ```bash
-uv run mini-agent-admin create-user --name "Alice"
+uv run fleetent-admin create-user --name "Alice"
 # api_key: ma-<64 hex chars>
 ```
 
@@ -150,8 +150,8 @@ data: {"type": "done",       "content": "The current time is 10:00 UTC."}
 ## Adding Tools
 
 ```python
-# src/mini_agent/tools.py  (or any file imported at startup)
-from mini_agent.tool_registry import tool
+# src/fleetent/tools.py  (or any file imported at startup)
+from fleetent.tool_registry import tool
 
 @tool
 def search_database(query: str, limit: int = 10) -> str:
@@ -179,7 +179,7 @@ skills/
 ```bash
 export SLACK_BOT_TOKEN=xoxb-...
 export SLACK_APP_TOKEN=xapp-...
-uvicorn mini_agent.server:app --reload
+uvicorn fleetent.server:app --reload
 ```
 
 The server starts the Slack Socket Mode handler as a background task on startup. Each Slack user is auto-mapped to an internal user on first message.
@@ -188,7 +188,7 @@ The server starts the Slack Socket Mode handler as a background task on startup.
 
 ```bash
 export TELEGRAM_BOT_TOKEN=...
-uvicorn mini_agent.server:app --reload
+uvicorn fleetent.server:app --reload
 ```
 
 Uses polling mode. The bot handles private chats and group replies. Session IDs are scoped to user (`user:{id}`) or thread (`thread:{message_id}`).
@@ -247,7 +247,7 @@ Sub-agents run concurrently via `asyncio.gather`. Nesting is blocked at depth 1 
 
 **Switching LLM providers:**
 
-Edit `ROUTES` in `src/mini_agent/model_router.py`:
+Edit `ROUTES` in `src/fleetent/model_router.py`:
 
 ```python
 ROUTES = {
@@ -267,12 +267,12 @@ The agent loop, tool registry, and memory layer are provider-agnostic — only `
 ```bash
 uv run pytest                    # run all tests (151 tests, ~4s)
 uv run pytest -x -q              # fail-fast
-uv run pytest --cov=mini_agent   # with coverage (89%)
+uv run pytest --cov=fleetent   # with coverage (89%)
 uv run ruff check src tests      # lint
 uv run mypy src                  # type-check
 
 # Smoke tests against a live server
-uvicorn mini_agent.server:app &
+uvicorn fleetent.server:app &
 uv run python tests/smoke/smoke.py
 ```
 

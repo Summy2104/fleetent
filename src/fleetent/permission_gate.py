@@ -14,10 +14,10 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any, Literal
 
-from mini_agent.user_store import (
+from fleetent.user_store import (
     DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching
 )
-from mini_agent.user_store import (
+from fleetent.user_store import (
     _conn,
 )
 

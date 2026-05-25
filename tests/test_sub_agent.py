@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mini_agent.sub_agent import SubAgentExecutor
+from fleetent.sub_agent import SubAgentExecutor
 
 
 async def test_two_tasks_run_and_return_results():
@@ -13,7 +13,7 @@ async def test_two_tasks_run_and_return_results():
     async def fake_run(messages, **kwargs):
         return messages[0]["content"] + "_result"
 
-    with patch("mini_agent.sub_agent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.sub_agent.agent_loop.run", side_effect=fake_run):
         results = await executor.run(
             tasks=[
                 {"name": "task_a", "prompt": "do_a"},
@@ -39,7 +39,7 @@ async def test_partial_failure_returns_error_for_failed_task():
             raise RuntimeError("child failed")
         return "ok"
 
-    with patch("mini_agent.sub_agent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.sub_agent.agent_loop.run", side_effect=fake_run):
         results = await executor.run(
             tasks=[
                 {"name": "good", "prompt": "do_good"},
@@ -59,7 +59,7 @@ async def test_partial_failure_returns_error_for_failed_task():
 
 async def test_child_cannot_spawn_sub_agent():
     """When is_sub_agent=True, sub_agent tool must not be in registry."""
-    import mini_agent.tool_registry as tr
+    import fleetent.tool_registry as tr
 
     # Simulate what agent_loop does when is_sub_agent=True
     # The sub_agent tool should not be dispatched
@@ -73,7 +73,7 @@ async def test_child_cannot_spawn_sub_agent():
                 await tr.dispatch("sub_agent", {"tasks": []}, is_sub_agent=True)
         return "ok"
 
-    with patch("mini_agent.sub_agent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.sub_agent.agent_loop.run", side_effect=fake_run):
         results = await executor.run(
             tasks=[{"name": "t1", "prompt": "test"}],
             parent_user_id="user-1",
@@ -90,7 +90,7 @@ async def test_results_contain_parent_session_id():
     async def fake_run(messages, **kwargs):
         return "done"
 
-    with patch("mini_agent.sub_agent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.sub_agent.agent_loop.run", side_effect=fake_run):
         results = await executor.run(
             tasks=[{"name": "t1", "prompt": "go"}],
             parent_user_id="user-1",
@@ -110,7 +110,7 @@ async def test_tasks_run_concurrently_not_sequentially():
         await asyncio.sleep(0.05)
         return "done"
 
-    with patch("mini_agent.sub_agent.agent_loop.run", side_effect=timed_run):
+    with patch("fleetent.sub_agent.agent_loop.run", side_effect=timed_run):
         executor = SubAgentExecutor()
         t0 = time.monotonic()
         await executor.run(

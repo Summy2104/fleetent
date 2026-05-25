@@ -1,4 +1,4 @@
-# mini-agent
+# fleetent
 
 **定位**：面向企业 on-premises 部署的 Lean Agent 平台。Python + FastAPI，无 AI 框架依赖，支持 Slack / Telegram / WhatsApp，数据不出内网。
 
@@ -58,7 +58,7 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 模块化单体，每个模块一个职责，边界清晰。
 
 ```
-src/mini_agent/
+src/fleetent/
   agent_loop.py      ← while tool-use 核心循环；run() + run_stream()
   model_router.py    ← task_type → provider 配置（OpenAI-compatible + fallback 链）
   tool_registry.py   ← @tool 装饰器、schema 构建、dispatch；访问控制
@@ -118,7 +118,7 @@ data/
 
 - `monkeypatch.setattr(module, "DB_PATH", tmp_path / "x.db")` — SQLite 隔离
 - `monkeypatch.setattr(memory_layer, "_mem_path", ...)` — 记忆文件隔离
-- `patch("mini_agent.memory_layer.get_client_and_config", ...)` — LLM 调用隔离
+- `patch("fleetent.memory_layer.get_client_and_config", ...)` — LLM 调用隔离
 - 所有 async 测试自动收集：`asyncio_mode = auto`（pytest.ini），无需 `@pytest.mark.asyncio`
 
 ### Mock 策略
@@ -156,9 +156,9 @@ uv run pytest                    # 运行测试
 uv run pytest -x -q              # fail-fast
 uv run ruff check src tests      # lint
 uv run mypy src                  # 类型检查
-uv run mini-agent "hello"        # CLI
-uv run mini-agent-admin create-user --name "Alice"  # 用户管理
-uvicorn mini_agent.server:app --reload  # HTTP 服务（端口 8000）
+uv run fleetent "hello"        # CLI
+uv run fleetent-admin create-user --name "Alice"  # 用户管理
+uvicorn fleetent.server:app --reload  # HTTP 服务（端口 8000）
 ```
 
 ---

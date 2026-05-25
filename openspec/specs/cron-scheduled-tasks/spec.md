@@ -71,14 +71,14 @@ The `cancel_task` built-in tool SHALL allow an agent to cancel a scheduled task 
 The admin CLI SHALL provide `list-schedules`, `add-schedule`, and `remove-schedule` commands for operator management of scheduled tasks.
 
 #### Scenario: list-schedules with no tasks
-- **WHEN** `mini-agent-admin list-schedules` is run with no tasks defined
+- **WHEN** `fleetent-admin list-schedules` is run with no tasks defined
 - **THEN** output contains "No scheduled tasks"
 
 #### Scenario: add-schedule creates a persisted task
-- **WHEN** `mini-agent-admin add-schedule --name "Daily" --cron "0 9 * * *" --user-id <id> --message "Hello"` is run
+- **WHEN** `fleetent-admin add-schedule --name "Daily" --cron "0 9 * * *" --user-id <id> --message "Hello"` is run
 - **THEN** exit code is 0 and a new task id is printed
 
 #### Scenario: remove-schedule deletes a task
-- **WHEN** `mini-agent-admin remove-schedule --task-id <id>` is run with a valid id
+- **WHEN** `fleetent-admin remove-schedule --task-id <id>` is run with a valid id
 - **THEN** exit code is 0 and the task no longer appears in list-schedules
 

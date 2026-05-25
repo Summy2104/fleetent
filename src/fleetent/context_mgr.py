@@ -2,13 +2,13 @@
 
 from typing import Any
 
-from mini_agent.model_router import get_client_and_config
+from fleetent.model_router import get_client_and_config
 
 ContextConfig = dict[str, Any]
 
 
 def _default_config() -> ContextConfig:
-    from mini_agent.config import Settings
+    from fleetent.config import Settings
     s = Settings()
     return {
         "max_tokens": s.context_max_tokens,

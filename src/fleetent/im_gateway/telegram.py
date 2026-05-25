@@ -20,7 +20,7 @@ def create_app() -> object:
     except ImportError:
         raise RuntimeError("python-telegram-bot not installed") from None
 
-    from mini_agent.config import Settings
+    from fleetent.config import Settings
     bot_token = Settings().telegram_bot_token
     builder = Application.builder().token(bot_token).concurrent_updates(True)
     application = builder.build()
@@ -28,8 +28,8 @@ def create_app() -> object:
     async def handle_message(update: object, context: object) -> None:
         from telegram import Update
 
-        from mini_agent.im_gateway.normalizer import NormalizedMessage, route  # noqa: PLC0415
-        from mini_agent.im_user_store import get_or_create  # noqa: PLC0415
+        from fleetent.im_gateway.normalizer import NormalizedMessage, route  # noqa: PLC0415
+        from fleetent.im_user_store import get_or_create  # noqa: PLC0415
 
         assert isinstance(update, Update)
         if not update.message or not update.effective_user:

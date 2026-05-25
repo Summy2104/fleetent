@@ -9,7 +9,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-import mini_agent.user_store as us
+import fleetent.user_store as us
 
 
 @pytest.fixture()
@@ -19,7 +19,7 @@ def client(tmp_path, monkeypatch):
 
 
 def app_module():
-    import mini_agent.server as srv
+    import fleetent.server as srv
 
     return srv
 
@@ -31,7 +31,7 @@ def test_health_includes_adapter_status(tmp_path, monkeypatch):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.chdir(tmp_path)  # no .env here — prevents Settings from loading tokens
 
-    import mini_agent.server as srv
+    import fleetent.server as srv
 
     with TestClient(srv.app) as client:
         resp = client.get("/health")
@@ -50,7 +50,7 @@ def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch):
     monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-fake")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg-fake")
 
-    import mini_agent.server as srv
+    import fleetent.server as srv
 
     # Patch adapter starters to avoid real socket connections during lifespan
     with (
@@ -68,8 +68,8 @@ def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch):
 
 async def test_mcp_yaml_loaded_if_exists(tmp_path, monkeypatch):
     """Lifespan calls register_all with servers from config/mcp.yaml."""
-    import mini_agent.mcp_client as mcp_mod
-    import mini_agent.server as srv
+    import fleetent.mcp_client as mcp_mod
+    import fleetent.server as srv
 
     mcp_yaml = tmp_path / "mcp.yaml"
     mcp_yaml.write_text(yaml.dump({"servers": [{"id": "test", "url": "http://mcp.example.com"}]}))
@@ -90,8 +90,8 @@ async def test_mcp_yaml_loaded_if_exists(tmp_path, monkeypatch):
 
 async def test_mcp_yaml_missing_skipped_gracefully(tmp_path, monkeypatch):
     """Lifespan skips MCP loading if config/mcp.yaml doesn't exist."""
-    import mini_agent.mcp_client as mcp_mod
-    import mini_agent.server as srv
+    import fleetent.mcp_client as mcp_mod
+    import fleetent.server as srv
 
     mock_register = AsyncMock(return_value=None)
     monkeypatch.setattr(mcp_mod, "register_all", mock_register)

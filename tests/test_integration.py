@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import mini_agent.agent_store as agent_store
-import mini_agent.im_user_store as im_user_store
-import mini_agent.permission_gate as permission_gate
-import mini_agent.session_mgr as session_mgr
-import mini_agent.user_store as user_store
+import fleetent.agent_store as agent_store
+import fleetent.im_user_store as im_user_store
+import fleetent.permission_gate as permission_gate
+import fleetent.session_mgr as session_mgr
+import fleetent.user_store as user_store
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def isolated_db(tmp_path, monkeypatch):
 
 async def test_full_slack_message_pipeline(isolated_db):
     """Mock Slack message → full pipeline → reply sent + session saved."""
-    from mini_agent.im_gateway.normalizer import NormalizedMessage, route
+    from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
     reply_calls: list[str] = []
 
@@ -36,7 +36,7 @@ async def test_full_slack_message_pipeline(isolated_db):
         reply_calls.append(text)
 
     # Mock agent_loop.run to return deterministic response and mutate messages in-place
-    with patch("mini_agent.agent_loop.run", new_callable=AsyncMock) as mock_run:
+    with patch("fleetent.agent_loop.run", new_callable=AsyncMock) as mock_run:
         async def fake_run(messages, **kwargs):
             messages.append({"role": "assistant", "content": "Hello from agent"})
             return "Hello from agent"
@@ -74,7 +74,7 @@ async def test_permission_gate_approved_tool_executes(isolated_db):
     """Tool with medium risk + approval → executes successfully."""
     import asyncio
 
-    from mini_agent.permission_gate import PermissionGate
+    from fleetent.permission_gate import PermissionGate
 
     gate = PermissionGate(medium_timeout=1.0, high_timeout=1.0)
     reply_func = AsyncMock()
@@ -107,7 +107,7 @@ async def test_permission_gate_approved_tool_executes(isolated_db):
 
 async def test_tool_not_in_allowed_tools_raises_before_approval(isolated_db):
     """Tool not in agent's allowed_tools → PermissionError, no approval row created."""
-    import mini_agent.tool_registry as tr
+    import fleetent.tool_registry as tr
 
     with pytest.raises(PermissionError, match="not permitted"):
         tr.dispatch("shell", {}, allowed_tools=["github__*"])
@@ -125,14 +125,14 @@ async def test_tool_not_in_allowed_tools_raises_before_approval(isolated_db):
 
 async def test_session_history_accumulates_across_messages(isolated_db):
     """Two messages to same session → history grows correctly."""
-    from mini_agent.im_gateway.normalizer import NormalizedMessage, route
+    from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
     reply_calls: list[str] = []
 
     async def fake_reply(text: str) -> None:
         reply_calls.append(text)
 
-    with patch("mini_agent.agent_loop.run", new_callable=AsyncMock) as mock_run:
+    with patch("fleetent.agent_loop.run", new_callable=AsyncMock) as mock_run:
         async def fake_run(messages, **kwargs):
             messages.append({"role": "assistant", "content": "response"})
             return "response"

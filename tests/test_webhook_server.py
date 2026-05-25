@@ -11,8 +11,8 @@ import pytest
 import yaml
 from starlette.testclient import TestClient
 
-import mini_agent.server as srv
-import mini_agent.webhook_router as wr
+import fleetent.server as srv
+import fleetent.webhook_router as wr
 
 
 def _make_sig(secret: str, body: bytes) -> str:
@@ -40,7 +40,7 @@ def _yaml_with_source(tmp_path, source_id="test-src", secret=None, user_id="u-1"
 def test_webhook_known_source_returns_202(tmp_path, monkeypatch):
     monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", _yaml_with_source(tmp_path))
 
-    with patch("mini_agent.im_gateway.normalizer.route", new=AsyncMock()):
+    with patch("fleetent.im_gateway.normalizer.route", new=AsyncMock()):
         with TestClient(srv.app) as client:
             resp = client.post("/webhook/test-src", json={"event": "push"})
 
@@ -87,7 +87,7 @@ def test_webhook_valid_signature_returns_202(tmp_path, monkeypatch):
     body = json.dumps({"event": "push"}).encode()
     sig = _make_sig("mysecret", body)
 
-    with patch("mini_agent.im_gateway.normalizer.route", new=AsyncMock()):
+    with patch("fleetent.im_gateway.normalizer.route", new=AsyncMock()):
         with TestClient(srv.app) as client:
             resp = client.post(
                 "/webhook/test-src",
@@ -103,7 +103,7 @@ def test_webhook_no_secret_accepts_without_signature(tmp_path, monkeypatch):
     monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH",
                         _yaml_with_source(tmp_path, secret=None))
 
-    with patch("mini_agent.im_gateway.normalizer.route", new=AsyncMock()):
+    with patch("fleetent.im_gateway.normalizer.route", new=AsyncMock()):
         with TestClient(srv.app) as client:
             resp = client.post("/webhook/test-src", json={"event": "push"})
 
@@ -123,7 +123,7 @@ async def test_webhook_dispatches_normalized_message(monkeypatch):
     monkeypatch.setitem(srv._webhook_sources, "test-src", source)
 
     route_mock = AsyncMock()
-    with patch("mini_agent.im_gateway.normalizer.route", new=route_mock):
+    with patch("fleetent.im_gateway.normalizer.route", new=route_mock):
         async with AsyncClient(
             transport=ASGITransport(app=srv.app), base_url="http://test"
         ) as client:
@@ -147,7 +147,7 @@ async def test_webhook_reply_func_is_noop(monkeypatch):
     monkeypatch.setitem(srv._webhook_sources, "test-src", source)
 
     route_mock = AsyncMock()
-    with patch("mini_agent.im_gateway.normalizer.route", new=route_mock):
+    with patch("fleetent.im_gateway.normalizer.route", new=route_mock):
         async with AsyncClient(
             transport=ASGITransport(app=srv.app), base_url="http://test"
         ) as client:

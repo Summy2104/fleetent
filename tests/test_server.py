@@ -1,8 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-import mini_agent.user_store as us
-from mini_agent.server import app
+import fleetent.user_store as us
+from fleetent.server import app
 
 
 @pytest.fixture()
@@ -41,8 +41,8 @@ def test_chat_invalid_token(client):
 
 
 def test_chat_valid_token_streams(tmp_path, monkeypatch):
-    import mini_agent.server as srv
-    import mini_agent.user_store as us2
+    import fleetent.server as srv
+    import fleetent.user_store as us2
 
     monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
 
@@ -78,8 +78,8 @@ def test_require_auth_non_bearer_scheme(client):
 
 
 def test_chat_stream_exception_yields_error_event(tmp_path, monkeypatch):
-    import mini_agent.server as srv
-    import mini_agent.user_store as us2
+    import fleetent.server as srv
+    import fleetent.user_store as us2
 
     monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
 
@@ -102,9 +102,9 @@ def test_chat_stream_exception_yields_error_event(tmp_path, monkeypatch):
 
 def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch):
     """/chat with x-platform + x-channel-id uses the channel-bound agent."""
-    import mini_agent.server as srv
-    import mini_agent.user_store as us2
-    import mini_agent.agent_store as ag
+    import fleetent.server as srv
+    import fleetent.user_store as us2
+    import fleetent.agent_store as ag
 
     monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
     monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
@@ -143,14 +143,14 @@ def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch):
 def test_lifespan_starts_and_stops_cron_scheduler(tmp_path, monkeypatch):
     from unittest.mock import AsyncMock, patch
     from starlette.testclient import TestClient
-    import mini_agent.server as srv
+    import fleetent.server as srv
 
     monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", tmp_path / "webhooks.yaml")
 
     start_mock = AsyncMock()
     shutdown_mock = AsyncMock()
 
-    with patch("mini_agent.server.CronScheduler") as mock_cls:
+    with patch("fleetent.server.CronScheduler") as mock_cls:
         instance = mock_cls.return_value
         instance.start = start_mock
         instance.shutdown = shutdown_mock

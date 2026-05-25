@@ -2,7 +2,7 @@
 
 ## 注册机制：side-effect import
 
-`@tool` 装饰器在模块加载时执行（不是调用时）。`import mini_agent.tools` 这一行就触发了所有 `@tool` 的注册，无需显式调用。`agent_loop.py` 顶部有一行 `import mini_agent.tools  # noqa: F401`，这是故意的。
+`@tool` 装饰器在模块加载时执行（不是调用时）。`import fleetent.tools` 这一行就触发了所有 `@tool` 的注册，无需显式调用。`agent_loop.py` 顶部有一行 `import fleetent.tools  # noqa: F401`，这是故意的。
 
 ## arguments 为什么是 JSON 字符串
 

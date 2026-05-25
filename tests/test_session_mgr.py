@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-import mini_agent.session_mgr as session_mgr
+import fleetent.session_mgr as session_mgr
 
 
 @pytest.fixture

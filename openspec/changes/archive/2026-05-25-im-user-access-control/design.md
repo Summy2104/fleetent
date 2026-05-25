@@ -1,6 +1,6 @@
 ## Context
 
-mini-agent 已实现 Slack/Telegram IM gateway、用户映射（`im_users`）、用户级 agent 绑定（`user_agents`）。但目前所有 IM 用户都可以无限制使用 bot，且 agent 只能按用户绑定，群聊场景下无法为 channel 统一配置 agent。
+fleetent 已实现 Slack/Telegram IM gateway、用户映射（`im_users`）、用户级 agent 绑定（`user_agents`）。但目前所有 IM 用户都可以无限制使用 bot，且 agent 只能按用户绑定，群聊场景下无法为 channel 统一配置 agent。
 
 当前 agent 查找逻辑：`user_agents` → 裸跑（无 agent）。
 

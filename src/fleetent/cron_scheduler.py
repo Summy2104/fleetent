@@ -9,8 +9,8 @@ from typing import Any
 import yaml
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from mini_agent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatching
-import mini_agent.schedule_store as _store
+from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatching
+import fleetent.schedule_store as _store
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ _CRON_YAML_PATH = Path("config/cron.yaml")
 
 
 async def _agent_run(messages: list[dict[str, Any]], user_id: str, agent_name: str | None = None) -> str:
-    from mini_agent import agent_loop
+    from fleetent import agent_loop
     return await agent_loop.run(messages, user_id=user_id, agent_name=agent_name)
 
 

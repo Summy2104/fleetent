@@ -40,5 +40,5 @@ The system SHALL handle microsandbox connectivity failures gracefully.
 The system SHALL connect to microsandbox-server via `host.docker.internal` when running inside Docker.
 
 #### Scenario: Docker to host connection
-- **WHEN** mini-agent runs in a Docker container
+- **WHEN** fleetent runs in a Docker container
 - **THEN** `sandbox_client` uses `http://host.docker.internal:<port>` as the microsandbox-server base URL

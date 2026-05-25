@@ -2,8 +2,8 @@
 
 import datetime
 
-from mini_agent.sandbox_client import SandboxClient
-from mini_agent.tool_registry import tool
+from fleetent.sandbox_client import SandboxClient
+from fleetent.tool_registry import tool
 
 
 @tool
@@ -73,7 +73,7 @@ async def run_code(code: str) -> str:
 def schedule_task(name: str, cron_expr: str, message: str, timezone: str = "UTC", user_id: str = "default") -> str:
     """Create a recurring cron task that runs the agent with the given message.
     cron_expr is a standard 5-field expression e.g. '0 9 * * 1-5'."""
-    from mini_agent import schedule_store, cron_scheduler
+    from fleetent import schedule_store, cron_scheduler
     task = schedule_store.create(
         name=name,
         cron_expr=cron_expr,
@@ -89,7 +89,7 @@ def schedule_task(name: str, cron_expr: str, message: str, timezone: str = "UTC"
 @tool(risk_level="medium")
 def cancel_task(task_id: str) -> str:
     """Cancel a scheduled cron task by its id."""
-    from mini_agent import schedule_store
+    from fleetent import schedule_store
     deleted = schedule_store.delete(task_id)
     if not deleted:
         return f"error: task {task_id!r} not found"

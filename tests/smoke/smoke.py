@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Smoke tests for mini-agent. Requires a running server with ANTHROPIC_API_KEY set.
+Smoke tests for fleetent. Requires a running server with ANTHROPIC_API_KEY set.
 
 Usage:
   uv run python tests/smoke/smoke.py                        # auto-creates test user
@@ -81,9 +81,9 @@ def get_api_key() -> str:
         info(f"Using existing key from MINI_AGENT_TEST_KEY ({key[:12]}...)")
         return key
 
-    info("Creating smoke-test user via mini-agent-admin...")
+    info("Creating smoke-test user via fleetent-admin...")
     result = subprocess.run(
-        ["uv", "run", "mini-agent-admin", "create-user", "--name", "smoke-test"],
+        ["uv", "run", "fleetent-admin", "create-user", "--name", "smoke-test"],
         capture_output=True,
         text=True,
     )
@@ -193,7 +193,7 @@ TESTS = [
 
 
 def main() -> None:
-    print(f"\n{BOLD}mini-agent smoke tests{RESET} → {BASE_URL}\n")
+    print(f"\n{BOLD}fleetent smoke tests{RESET} → {BASE_URL}\n")
 
     api_key = get_api_key()
     headers = {"Authorization": f"Bearer {api_key}"}

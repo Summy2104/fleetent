@@ -4,9 +4,9 @@ from unittest.mock import patch
 
 import pytest
 
-from mini_agent import admin, user_store
-import mini_agent.im_user_store as im_user_store
-import mini_agent.agent_store as agent_store
+from fleetent import admin, user_store
+import fleetent.im_user_store as im_user_store
+import fleetent.agent_store as agent_store
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +22,7 @@ def run_admin(*args: str) -> tuple[str, str, int]:
     stdout, stderr = StringIO(), StringIO()
     exit_code = 0
     with (
-        patch("sys.argv", ["mini-agent-admin", *args]),
+        patch("sys.argv", ["fleetent-admin", *args]),
         patch("sys.stdout", stdout),
         patch("sys.stderr", stderr),
     ):
@@ -173,7 +173,7 @@ def test_set_default_agent_clear(tmp_path, monkeypatch):
 
 # ── schedule admin commands ───────────────────────────────────────────────────
 
-import mini_agent.schedule_store as schedule_store_mod
+import fleetent.schedule_store as schedule_store_mod
 
 
 @pytest.fixture(autouse=False)

@@ -14,18 +14,18 @@ import uuid
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-import mini_agent.tools  # noqa: F401  # side-effect: register built-in tools
-from mini_agent.context_mgr import maybe_compress
-from mini_agent.eval_logger import log_run
-from mini_agent.memory_layer import extract_and_save, load_memories
-from mini_agent.model_router import RouteConfig, get_async_client_and_config
-from mini_agent.permission_gate import _default_gate
-from mini_agent.skill_registry import load as load_skill
-from mini_agent.skill_registry import match as match_skill
-from mini_agent.skill_registry import scan as scan_skills
-from mini_agent.sub_agent import SubAgentExecutor
-from mini_agent.agent_policy import check_tool_access
-from mini_agent.tool_registry import dispatch, get_risk_level, get_schemas
+import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
+from fleetent.context_mgr import maybe_compress
+from fleetent.eval_logger import log_run
+from fleetent.memory_layer import extract_and_save, load_memories
+from fleetent.model_router import RouteConfig, get_async_client_and_config
+from fleetent.permission_gate import _default_gate
+from fleetent.skill_registry import load as load_skill
+from fleetent.skill_registry import match as match_skill
+from fleetent.skill_registry import scan as scan_skills
+from fleetent.sub_agent import SubAgentExecutor
+from fleetent.agent_policy import check_tool_access
+from fleetent.tool_registry import dispatch, get_risk_level, get_schemas
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
 

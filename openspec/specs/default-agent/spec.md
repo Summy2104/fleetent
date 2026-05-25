@@ -41,10 +41,10 @@ The system SHALL resolve the agent for each incoming message in the following pr
 The admin CLI SHALL provide a `set-default-agent` command.
 
 #### Scenario: Set default agent
-- **WHEN** admin runs `mini-agent-admin set-default-agent --agent-name basic`
+- **WHEN** admin runs `fleetent-admin set-default-agent --agent-name basic`
 - **THEN** `config/settings.yaml` is updated with `default_agent_name: basic`
 
 #### Scenario: Clear default agent
-- **WHEN** admin runs `mini-agent-admin set-default-agent --clear`
+- **WHEN** admin runs `fleetent-admin set-default-agent --clear`
 - **THEN** `default_agent_name` is removed from `config/settings.yaml`
 

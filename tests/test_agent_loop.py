@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from openai import APIStatusError, RateLimitError
 
-import mini_agent.agent_loop as al
-from mini_agent.model_router import RouteConfig
+import fleetent.agent_loop as al
+from fleetent.model_router import RouteConfig
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -234,7 +234,7 @@ async def test_run_stream_tool_call_yields_tool_events(mock_client):
 
 async def test_run_sub_agent_tool_intercepted_and_executed(mock_client):
     """sub_agent tool call is intercepted by agent_loop, not passed to dispatch."""
-    from mini_agent.sub_agent import SubAgentResult
+    from fleetent.sub_agent import SubAgentResult
 
     tasks_json = '[{"name": "t1", "prompt": "do it"}]'
     mock_client.chat.completions.create = AsyncMock(
@@ -262,7 +262,7 @@ async def test_run_sub_agent_tool_intercepted_and_executed(mock_client):
 async def test_run_sub_agent_result_formatted_in_tool_message(mock_client):
     """Sub-agent results are formatted as [name] result lines in the tool message."""
     import json as _json
-    from mini_agent.sub_agent import SubAgentResult
+    from fleetent.sub_agent import SubAgentResult
 
     tasks = [{"name": "fetch", "prompt": "get data"}]
     args_json = _json.dumps({"tasks": _json.dumps(tasks)})

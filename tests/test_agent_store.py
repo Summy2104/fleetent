@@ -1,12 +1,12 @@
 import pytest
 
-import mini_agent.agent_store as agent_store
+import fleetent.agent_store as agent_store
 
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_store, "DB_PATH", tmp_path / "users.db")
-    import mini_agent.user_store as user_store
+    import fleetent.user_store as user_store
     monkeypatch.setattr(user_store, "DB_PATH", tmp_path / "users.db")
     agent_store._init_db()
     return tmp_path / "users.db"

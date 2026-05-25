@@ -1,6 +1,6 @@
 import pytest
 
-from mini_agent.config import Settings, configure_logging
+from fleetent.config import Settings, configure_logging
 
 
 def test_settings_defaults():

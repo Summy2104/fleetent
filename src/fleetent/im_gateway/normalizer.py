@@ -7,8 +7,8 @@ from typing import Any
 
 import structlog
 
-from mini_agent import agent_store, im_user_store
-from mini_agent.agent_store import Agent
+from fleetent import agent_store, im_user_store
+from fleetent.agent_store import Agent
 
 logger = structlog.get_logger(__name__)
 
@@ -44,7 +44,7 @@ async def route(msg: NormalizedMessage) -> None:
     # Approval commands bypass the agent loop entirely
     m = _APPROVAL_RE.match(msg.text.strip())
     if m:
-        from mini_agent.permission_gate import _default_gate
+        from fleetent.permission_gate import _default_gate
         decision = "approved" if m.group(1).lower() == "approve" else "rejected"
         approval_id = m.group(2)
         found = await _default_gate.resolve(
@@ -63,10 +63,10 @@ async def route(msg: NormalizedMessage) -> None:
         await msg.reply_func(_REJECTION_MSG)
         return
 
-    from mini_agent import agent_loop, session_mgr
-    from mini_agent.memory_layer import load_memories
-    from mini_agent.skill_registry import load as load_skill
-    from mini_agent.skill_registry import match as match_skill
+    from fleetent import agent_loop, session_mgr
+    from fleetent.memory_layer import load_memories
+    from fleetent.skill_registry import load as load_skill
+    from fleetent.skill_registry import match as match_skill
 
     async with session_mgr.session_lock(msg.session_id):
         history = await session_mgr.load(msg.session_id)

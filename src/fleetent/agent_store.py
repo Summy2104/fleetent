@@ -2,10 +2,10 @@ import datetime
 import json
 from dataclasses import dataclass
 
-from mini_agent.user_store import (
+from fleetent.user_store import (
     DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching
 )
-from mini_agent.user_store import (
+from fleetent.user_store import (
     _conn,
 )
 
@@ -104,7 +104,7 @@ def get_agent_for_channel(platform: str, channel_id: str) -> Agent | None:
 
 
 def _get_default_agent_name() -> str | None:
-    from mini_agent.config import Settings
+    from fleetent.config import Settings
 
     return Settings().default_agent_name
 

@@ -12,7 +12,7 @@ jobs:
     # Timezone (IANA format). Defaults to UTC if omitted.
     timezone: "Asia/Shanghai"
     # Internal user_id that owns this run (must exist in users table).
-    # Create with: uv run mini-agent-admin create-user --name "cron-bot"
+    # Create with: uv run fleetent-admin create-user --name "cron-bot"
     user_id: "replace-with-real-user-id"
     # Optional: agent name to use. Falls back to default agent if omitted.
     agent_name: "analyst"

@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from mini_agent import agent_loop
+from fleetent import agent_loop
 
 logger = logging.getLogger(__name__)
 

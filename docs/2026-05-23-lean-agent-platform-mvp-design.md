@@ -4,15 +4,15 @@
 **状态**：Brainstorming 完成，待实施计划
 **前置文档**：
 - [[2026-05-19-自研Agent平台战略决策]]
-- [[2026-05-13-mini-agent-项目设计]]
+- [[2026-05-13-fleetent-项目设计]]
 
 ---
 
 ## 1. 背景与目标
 
-mini-agent（`~/wwwroot/repo/mini-agent`）已完成技术验证（agent loop、streaming、memory、skill registry、context 压缩、HTTP server、user 管理、48 个测试）。
+fleetent（`~/wwwroot/repo/fleetent`）已完成技术验证（agent loop、streaming、memory、skill registry、context 压缩、HTTP server、user 管理、48 个测试）。
 
-本文是在 mini-agent 基础上扩展的 **Slack/Telegram MVP 设计方案**，目标：
+本文是在 fleetent 基础上扩展的 **Slack/Telegram MVP 设计方案**，目标：
 
 - **1–2 个月**内在内部跑通 Slack + Telegram 完整链路
 - 验证"可治理、可部署"的核心差异化能力
@@ -54,7 +54,7 @@ mini-agent（`~/wwwroot/repo/mini-agent`）已完成技术验证（agent loop、
 | Sub-agent 通信 | 进程内 asyncio.gather() | I/O-bound 工作用 asyncio 并行有效；无需队列 |
 | Sub-agent 上下文 | 全新上下文 | 防止 token 随嵌套爆炸；parent 按需摘要传递背景 |
 | 沙盒方案 | microsandbox | macOS M + Linux KVM 统一方案；开发/生产行为一致 |
-| 部署结构 | microsandbox 原生 + mini-agent Docker | microsandbox 需直接访问 KVM/Hypervisor.framework，无法入容器 |
+| 部署结构 | microsandbox 原生 + fleetent Docker | microsandbox 需直接访问 KVM/Hypervisor.framework，无法入容器 |
 | 权限门级别 | medium（发起人确认）/ high（预配置 approver）| 企业合规要求"双人操作"；级别在工具注册时声明 |
 | 外部系统访问 | 统一走 MCP | MCP server 自管鉴权；平台控制"用户可用哪些 MCP server" |
 | 权限模型 | Agent 定义 + 用户分配 | 权限绑定 Agent 而非用户；用户通过 Agent 继承工具集 |
@@ -69,7 +69,7 @@ mini-agent（`~/wwwroot/repo/mini-agent`）已完成技术验证（agent loop、
 ├── microsandbox-server（原生守护进程）
 │     └── 管理 per-session MicroVM workspace
 └── docker-compose
-      └── mini-agent 容器
+      └── fleetent 容器
             ├── Slack adapter    ─┐
             ├── Telegram adapter ─┤→ normalizer → session_mgr → agent_loop
             ├── session_mgr        （查找/创建 session，加载/保存历史）
@@ -325,7 +325,7 @@ async def run(tasks):
 ├── microsandbox-server（原生，pip install microsandbox）
 │     ├── /dev/kvm（Linux）或 Hypervisor.framework（macOS M）
 │     └── HTTP API：POST /workspace, POST /workspace/{id}/exec, DELETE /workspace/{id}
-└── mini-agent 容器
+└── fleetent 容器
       └── sandbox_client
             └── HTTP → host.docker.internal → microsandbox-server
 ```
@@ -362,8 +362,8 @@ docker-compose up -d
 
 ```yaml
 services:
-  mini-agent:
-    image: mini-agent:latest
+  fleetent:
+    image: fleetent:latest
     env_file: .env.production
     extra_hosts:
       - "host.docker.internal:host-gateway"  # Linux 访问宿主机

@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-import mini_agent.im_user_store as im_user_store
+import fleetent.im_user_store as im_user_store
 
 
 @pytest.fixture
@@ -10,7 +10,7 @@ def db(tmp_path, monkeypatch):
     db_path = tmp_path / "users.db"
     monkeypatch.setattr(im_user_store, "DB_PATH", db_path)
     # Also need to monkeypatch user_store DB_PATH since im_user_store creates users too
-    import mini_agent.user_store as user_store
+    import fleetent.user_store as user_store
     monkeypatch.setattr(user_store, "DB_PATH", db_path)
     im_user_store._init_db()
     return db_path

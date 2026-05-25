@@ -1,6 +1,6 @@
 import pytest
 
-from mini_agent import (
+from fleetent import (
     tool_registry,
     tools,  # noqa: F401 — registers tools as side effect
 )
@@ -56,8 +56,8 @@ def test_read_file_missing_file():
 @pytest.mark.asyncio
 async def test_run_code_returns_stdout(monkeypatch):
     from unittest.mock import AsyncMock
-    from mini_agent.sandbox_client import ExecResult
-    import mini_agent.tools as tl
+    from fleetent.sandbox_client import ExecResult
+    import fleetent.tools as tl
 
     mock_client = AsyncMock()
     mock_client.create_workspace = AsyncMock(return_value="cid-123")
@@ -74,8 +74,8 @@ async def test_run_code_returns_stdout(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_code_includes_stderr(monkeypatch):
     from unittest.mock import AsyncMock
-    from mini_agent.sandbox_client import ExecResult
-    import mini_agent.tools as tl
+    from fleetent.sandbox_client import ExecResult
+    import fleetent.tools as tl
 
     mock_client = AsyncMock()
     mock_client.create_workspace = AsyncMock(return_value="cid-456")
@@ -96,7 +96,7 @@ async def test_run_code_includes_stderr(monkeypatch):
 async def test_run_code_destroys_workspace_on_error(monkeypatch):
     """destroy_workspace must be called even when exec raises."""
     from unittest.mock import AsyncMock
-    import mini_agent.tools as tl
+    import fleetent.tools as tl
 
     mock_client = AsyncMock()
     mock_client.create_workspace = AsyncMock(return_value="cid-789")

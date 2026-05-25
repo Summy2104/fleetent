@@ -4,7 +4,7 @@ import json
 
 
 def test_trace_with_im_metadata(tmp_path, monkeypatch):
-    import mini_agent.eval_logger as el
+    import fleetent.eval_logger as el
 
     monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
 
@@ -27,7 +27,7 @@ def test_trace_with_im_metadata(tmp_path, monkeypatch):
 
 
 def test_trace_without_im_metadata_no_null_pollution(tmp_path, monkeypatch):
-    import mini_agent.eval_logger as el
+    import fleetent.eval_logger as el
 
     monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
 
@@ -51,7 +51,7 @@ def test_trace_without_im_metadata_no_null_pollution(tmp_path, monkeypatch):
 
 
 def test_trace_with_message_id(tmp_path, monkeypatch):
-    import mini_agent.eval_logger as el
+    import fleetent.eval_logger as el
 
     monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
 
@@ -73,7 +73,7 @@ def test_trace_with_message_id(tmp_path, monkeypatch):
 
 
 def test_log_run_writes_entry(tmp_path, monkeypatch):
-    import mini_agent.eval_logger as el
+    import fleetent.eval_logger as el
 
     monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
     el.log_run(
@@ -93,7 +93,7 @@ def test_log_run_writes_entry(tmp_path, monkeypatch):
 def test_log_run_with_usage(tmp_path, monkeypatch):
     from unittest.mock import MagicMock
 
-    import mini_agent.eval_logger as el
+    import fleetent.eval_logger as el
 
     monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
     usage = MagicMock()
@@ -106,7 +106,7 @@ def test_log_run_with_usage(tmp_path, monkeypatch):
 
 
 def test_serialize_model_dump():
-    from mini_agent.eval_logger import _serialize
+    from fleetent.eval_logger import _serialize
 
     class FakeMsg:
         def model_dump(self):
@@ -116,7 +116,7 @@ def test_serialize_model_dump():
 
 
 def test_serialize_fallback_str():
-    from mini_agent.eval_logger import _serialize
+    from fleetent.eval_logger import _serialize
 
     class Unknown:
         def __str__(self):
@@ -128,7 +128,7 @@ def test_serialize_fallback_str():
 # --- model_used ---
 
 def test_log_run_model_used_written_to_trace(tmp_path, monkeypatch):
-    import mini_agent.eval_logger as el
+    import fleetent.eval_logger as el
 
     monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1, model_used="claude-haiku-4-5")
@@ -137,7 +137,7 @@ def test_log_run_model_used_written_to_trace(tmp_path, monkeypatch):
 
 
 def test_log_run_model_used_omitted_when_not_provided(tmp_path, monkeypatch):
-    import mini_agent.eval_logger as el
+    import fleetent.eval_logger as el
 
     monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1)
@@ -148,7 +148,7 @@ def test_log_run_model_used_omitted_when_not_provided(tmp_path, monkeypatch):
 # --- user_id ---
 
 def test_log_run_user_id_written(tmp_path, monkeypatch):
-    import mini_agent.eval_logger as el
+    import fleetent.eval_logger as el
 
     monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1, user_id="user-42")
@@ -157,7 +157,7 @@ def test_log_run_user_id_written(tmp_path, monkeypatch):
 
 
 def test_log_run_user_id_omitted_when_not_provided(tmp_path, monkeypatch):
-    import mini_agent.eval_logger as el
+    import fleetent.eval_logger as el
 
     monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1)
@@ -168,7 +168,7 @@ def test_log_run_user_id_omitted_when_not_provided(tmp_path, monkeypatch):
 # --- agent_name ---
 
 def test_log_run_agent_name_written(tmp_path, monkeypatch):
-    import mini_agent.eval_logger as el
+    import fleetent.eval_logger as el
 
     monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1, agent_name="support-bot")
@@ -177,7 +177,7 @@ def test_log_run_agent_name_written(tmp_path, monkeypatch):
 
 
 def test_log_run_agent_name_omitted_when_not_provided(tmp_path, monkeypatch):
-    import mini_agent.eval_logger as el
+    import fleetent.eval_logger as el
 
     monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1)

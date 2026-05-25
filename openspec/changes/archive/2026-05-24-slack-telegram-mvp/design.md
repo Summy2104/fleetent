@@ -1,8 +1,8 @@
 ## Context
 
-mini-agent 已实现：agent loop、streaming、memory、skill registry、context 压缩、HTTP server、user 管理、48 个测试。核心 300 行直接调 SDK，无 LangChain/框架依赖。
+fleetent 已实现：agent loop、streaming、memory、skill registry、context 压缩、HTTP server、user 管理、48 个测试。核心 300 行直接调 SDK，无 LangChain/框架依赖。
 
-本次扩展将 mini-agent 从单用户 CLI/HTTP 工具升级为多用户 IM 原生服务，验证"可治理、可部署"核心差异化，为 on-premises 商业化打基础。目标：**1–2 个月内跑通 Slack + Telegram 完整链路**。
+本次扩展将 fleetent 从单用户 CLI/HTTP 工具升级为多用户 IM 原生服务，验证"可治理、可部署"核心差异化，为 on-premises 商业化打基础。目标：**1–2 个月内跑通 Slack + Telegram 完整链路**。
 
 ## Goals / Non-Goals
 
@@ -58,7 +58,7 @@ mini-agent 已实现：agent loop、streaming、memory、skill registry、contex
 
 ### 5. 沙盒：microsandbox（MicroVM）
 
-**选择**：microsandbox-server 作为宿主机原生守护进程（非 Docker），mini-agent 通过 HTTP 连接 `host.docker.internal`。
+**选择**：microsandbox-server 作为宿主机原生守护进程（非 Docker），fleetent 通过 HTTP 连接 `host.docker.internal`。
 
 **理由**：microsandbox 需直接访问 KVM（Linux）或 Hypervisor.framework（macOS M），无法入容器。MicroVM 提供强隔离（内核级），每 session 独立 workspace，跨步骤共享文件。
 

@@ -1,6 +1,6 @@
 import pytest
 
-from mini_agent import tool_registry
+from fleetent import tool_registry
 
 
 @pytest.fixture(autouse=True)

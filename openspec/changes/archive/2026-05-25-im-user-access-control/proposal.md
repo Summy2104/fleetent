@@ -26,9 +26,9 @@ IM 用户可以无限制地与 bot 交互，存在越权风险。同时，agent 
 
 ## Impact
 
-- `src/mini_agent/im_user_store.py` — 新增 `allowed` 字段，新增 `approve_user()`、`block_user()`、`list_pending()`
-- `src/mini_agent/agent_store.py` — 新增 `channel_agents` 表 CRUD，新增 `get_default_agent()`、`get_agent_for_channel()`
-- `src/mini_agent/config.py` — 新增 `default_agent_name: str | None`
-- `src/mini_agent/im_gateway/normalizer.py` — 新增准入检查 + 更新 agent 查找顺序
-- `src/mini_agent/admin.py` — 新增 6 条 CLI 命令
+- `src/fleetent/im_user_store.py` — 新增 `allowed` 字段，新增 `approve_user()`、`block_user()`、`list_pending()`
+- `src/fleetent/agent_store.py` — 新增 `channel_agents` 表 CRUD，新增 `get_default_agent()`、`get_agent_for_channel()`
+- `src/fleetent/config.py` — 新增 `default_agent_name: str | None`
+- `src/fleetent/im_gateway/normalizer.py` — 新增准入检查 + 更新 agent 查找顺序
+- `src/fleetent/admin.py` — 新增 6 条 CLI 命令
 - `tests/` — 对应新增单元测试

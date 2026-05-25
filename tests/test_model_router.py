@@ -1,7 +1,7 @@
 import pytest
 from openai import AsyncOpenAI, OpenAI
 
-from mini_agent.model_router import ROUTES, RouteConfig, get_async_client_and_config, get_client_and_config
+from fleetent.model_router import ROUTES, RouteConfig, get_async_client_and_config, get_client_and_config
 
 
 def test_routes_define_default_and_memory_extraction():

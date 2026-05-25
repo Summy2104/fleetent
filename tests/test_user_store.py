@@ -1,6 +1,6 @@
 import pytest
 
-from mini_agent import user_store
+from fleetent import user_store
 
 
 @pytest.fixture(autouse=True)

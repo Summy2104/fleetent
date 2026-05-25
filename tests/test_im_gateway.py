@@ -2,12 +2,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mini_agent.im_gateway.normalizer import NormalizedMessage, route
+from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
 
 @pytest.fixture
 def mock_session_mgr(monkeypatch):
-    import mini_agent.session_mgr as sm
+    import fleetent.session_mgr as sm
     monkeypatch.setattr(sm, "load", AsyncMock(return_value=[]))
     monkeypatch.setattr(sm, "save", AsyncMock())
     return sm
@@ -15,17 +15,17 @@ def mock_session_mgr(monkeypatch):
 
 @pytest.fixture
 def mock_agent_loop(monkeypatch):
-    import mini_agent.agent_loop as al
+    import fleetent.agent_loop as al
     monkeypatch.setattr(al, "run", AsyncMock(return_value="agent response"))
     return al
 
 
 @pytest.fixture
 def mock_memory_skill(monkeypatch):
-    import mini_agent.memory_layer as ml
-    import mini_agent.skill_registry as sr
-    import mini_agent.im_user_store as ius
-    import mini_agent.im_gateway.normalizer as norm
+    import fleetent.memory_layer as ml
+    import fleetent.skill_registry as sr
+    import fleetent.im_user_store as ius
+    import fleetent.im_gateway.normalizer as norm
     monkeypatch.setattr(ml, "load_memories", lambda **kwargs: "")
     monkeypatch.setattr(sr, "match", lambda text: None)
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
@@ -66,7 +66,7 @@ async def test_approve_command_resolves_gate_and_does_not_call_agent(
 ):
     from unittest.mock import AsyncMock, patch
 
-    from mini_agent.im_gateway.normalizer import NormalizedMessage, route
+    from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
     reply_calls: list[str] = []
 
@@ -83,7 +83,7 @@ async def test_approve_command_resolves_gate_and_does_not_call_agent(
     )
 
     mock_resolve = AsyncMock()
-    with patch("mini_agent.permission_gate._default_gate") as mock_gate:
+    with patch("fleetent.permission_gate._default_gate") as mock_gate:
         mock_gate.resolve = mock_resolve
         await route(msg)
 
@@ -100,7 +100,7 @@ async def test_approve_command_resolves_gate_and_does_not_call_agent(
 async def test_reject_command_resolves_gate(mock_session_mgr, mock_agent_loop, mock_memory_skill):
     from unittest.mock import AsyncMock, patch
 
-    from mini_agent.im_gateway.normalizer import NormalizedMessage, route
+    from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
     reply_calls: list[str] = []
 
@@ -117,7 +117,7 @@ async def test_reject_command_resolves_gate(mock_session_mgr, mock_agent_loop, m
     )
 
     mock_resolve = AsyncMock()
-    with patch("mini_agent.permission_gate._default_gate") as mock_gate:
+    with patch("fleetent.permission_gate._default_gate") as mock_gate:
         mock_gate.resolve = mock_resolve
         await route(msg)
 
@@ -131,18 +131,18 @@ async def test_reject_command_resolves_gate(mock_session_mgr, mock_agent_loop, m
 
 
 async def test_slack_dm_session_id():
-    from mini_agent.im_gateway.slack import _derive_session_id
+    from fleetent.im_gateway.slack import _derive_session_id
     assert _derive_session_id(user_id="U123", channel_type="im", thread_ts=None) == "user:U123"
 
 
 async def test_slack_thread_session_id():
-    from mini_agent.im_gateway.slack import _derive_session_id
+    from fleetent.im_gateway.slack import _derive_session_id
     result = _derive_session_id(user_id="U123", channel_type="channel", thread_ts="T456")
     assert result == "thread:T456"
 
 
 async def test_slack_channel_no_thread():
-    from mini_agent.im_gateway.slack import _derive_session_id
+    from fleetent.im_gateway.slack import _derive_session_id
     # No thread_ts in a channel message → use user session as fallback
     result = _derive_session_id(user_id="U123", channel_type="channel", thread_ts=None)
     # Should return something non-None (either user: or create a new thread)
@@ -150,17 +150,17 @@ async def test_slack_channel_no_thread():
 
 
 async def test_telegram_private_session_id():
-    from mini_agent.im_gateway.telegram import _derive_session_id
+    from fleetent.im_gateway.telegram import _derive_session_id
     assert _derive_session_id(chat_type="private", user_id=12345, reply_to_id=None) == "user:12345"
 
 
 async def test_telegram_group_reply_session_id():
-    from mini_agent.im_gateway.telegram import _derive_session_id
+    from fleetent.im_gateway.telegram import _derive_session_id
     assert _derive_session_id(chat_type="group", user_id=12345, reply_to_id=999) == "thread:999"
 
 
 async def test_telegram_group_no_reply_falls_back_to_user_session():
-    from mini_agent.im_gateway.telegram import _derive_session_id
+    from fleetent.im_gateway.telegram import _derive_session_id
 
     # group message with no reply_to_id → user session (line 15 in telegram.py)
     result = _derive_session_id(chat_type="group", user_id=99, reply_to_id=None)
@@ -176,7 +176,7 @@ async def test_slack_create_app_returns_app_object(monkeypatch):
 
     # AsyncApp is imported inside create_app() via `from slack_bolt.async_app import AsyncApp`
     with patch("slack_bolt.async_app.AsyncApp", return_value=mock_app_instance) as mock_app_cls:
-        import mini_agent.im_gateway.slack as slack_mod
+        import fleetent.im_gateway.slack as slack_mod
 
         result = slack_mod.create_app()
 
@@ -200,7 +200,7 @@ async def test_telegram_create_app_returns_application_object(monkeypatch):
     # Application is imported inside create_app() via `from telegram.ext import Application`
     with patch("telegram.ext.Application") as mock_cls:
         mock_cls.builder.return_value = mock_builder
-        import mini_agent.im_gateway.telegram as tg_mod
+        import fleetent.im_gateway.telegram as tg_mod
 
         result = tg_mod.create_app()
 
@@ -212,8 +212,8 @@ async def test_route_uses_agent_system_prompt_and_allowed_tools(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
     """route() should pass agent's system_prompt and allowed_tools when an agent is assigned."""
-    from mini_agent.agent_store import Agent
-    import mini_agent.im_gateway.normalizer as norm
+    from fleetent.agent_store import Agent
+    import fleetent.im_gateway.normalizer as norm
 
     fake_agent = Agent(
         id=1,
@@ -249,7 +249,7 @@ async def test_route_no_agent_passes_none_allowed_tools(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
     """When no agent is assigned, allowed_tools should be None (all tools available)."""
-    import mini_agent.im_gateway.normalizer as norm
+    import fleetent.im_gateway.normalizer as norm
 
     monkeypatch.setattr(norm, "get_agent_for_context", lambda platform, channel_id, user_id: None)
 
@@ -276,8 +276,8 @@ async def test_route_blocked_user_gets_rejection_not_agent(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
     """User with allowed=False receives rejection message; agent_loop is NOT called."""
-    import mini_agent.im_gateway.normalizer as norm
-    import mini_agent.im_user_store as ius
+    import fleetent.im_gateway.normalizer as norm
+    import fleetent.im_user_store as ius
 
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: False)
 
@@ -307,9 +307,9 @@ async def test_route_channel_agent_takes_priority(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
     """Channel-level agent is used when bound, regardless of user binding."""
-    from mini_agent.agent_store import Agent
-    import mini_agent.im_gateway.normalizer as norm
-    import mini_agent.im_user_store as ius
+    from fleetent.agent_store import Agent
+    import fleetent.im_gateway.normalizer as norm
+    import fleetent.im_user_store as ius
 
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
 

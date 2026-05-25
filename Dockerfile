@@ -21,4 +21,4 @@ RUN mkdir -p data config
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "mini_agent.server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "fleetent.server:app", "--host", "0.0.0.0", "--port", "8000"]

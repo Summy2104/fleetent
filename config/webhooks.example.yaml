@@ -4,7 +4,7 @@ sources:
 
   - id: github-ci
     # Required: internal user ID that owns this webhook's agent runs.
-    # Must exist in the users table (create with: uv run mini-agent-admin create-user).
+    # Must exist in the users table (create with: uv run fleetent-admin create-user).
     user_id: "replace-with-real-user-id"
 
     # Optional: HMAC-SHA256 secret for request verification.

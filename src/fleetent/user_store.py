@@ -80,7 +80,7 @@ def rotate_key(user_id: str) -> User:
 
 
 def get_or_create_im_user(platform: str, platform_user_id: str) -> "User":
-    from mini_agent.im_user_store import get_or_create
+    from fleetent.im_user_store import get_or_create
 
     return get_or_create(platform, platform_user_id)
 

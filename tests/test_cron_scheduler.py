@@ -11,8 +11,8 @@ import pytest
 
 
 async def test_start_makes_scheduler_running(tmp_path, monkeypatch):
-    import mini_agent.schedule_store as ss
-    import mini_agent.cron_scheduler as cs
+    import fleetent.schedule_store as ss
+    import fleetent.cron_scheduler as cs
 
     monkeypatch.setattr(ss, "DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr(cs, "DB_PATH", tmp_path / "test.db")
@@ -25,8 +25,8 @@ async def test_start_makes_scheduler_running(tmp_path, monkeypatch):
 
 
 async def test_add_job_registers_in_scheduler(tmp_path, monkeypatch):
-    import mini_agent.schedule_store as ss
-    import mini_agent.cron_scheduler as cs
+    import fleetent.schedule_store as ss
+    import fleetent.cron_scheduler as cs
 
     monkeypatch.setattr(ss, "DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr(cs, "DB_PATH", tmp_path / "test.db")
@@ -45,8 +45,8 @@ async def test_add_job_registers_in_scheduler(tmp_path, monkeypatch):
 
 
 async def test_remove_job_deletes_from_scheduler(tmp_path, monkeypatch):
-    import mini_agent.schedule_store as ss
-    import mini_agent.cron_scheduler as cs
+    import fleetent.schedule_store as ss
+    import fleetent.cron_scheduler as cs
 
     monkeypatch.setattr(ss, "DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr(cs, "DB_PATH", tmp_path / "test.db")
@@ -66,8 +66,8 @@ async def test_remove_job_deletes_from_scheduler(tmp_path, monkeypatch):
 
 
 async def test_shutdown_stops_scheduler(tmp_path, monkeypatch):
-    import mini_agent.schedule_store as ss
-    import mini_agent.cron_scheduler as cs
+    import fleetent.schedule_store as ss
+    import fleetent.cron_scheduler as cs
 
     monkeypatch.setattr(ss, "DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr(cs, "DB_PATH", tmp_path / "test.db")
@@ -83,7 +83,7 @@ async def test_shutdown_stops_scheduler(tmp_path, monkeypatch):
 
 
 async def test_fire_calls_agent_loop_run(tmp_path, monkeypatch):
-    import mini_agent.cron_scheduler as cs
+    import fleetent.cron_scheduler as cs
 
     run_mock = AsyncMock(return_value="reply")
     monkeypatch.setattr(cs, "_agent_run", run_mock)
@@ -101,7 +101,7 @@ async def test_fire_calls_agent_loop_run(tmp_path, monkeypatch):
 
 
 async def test_fire_message_in_user_content(tmp_path, monkeypatch):
-    import mini_agent.cron_scheduler as cs
+    import fleetent.cron_scheduler as cs
 
     run_mock = AsyncMock(return_value="ok")
     monkeypatch.setattr(cs, "_agent_run", run_mock)
@@ -122,7 +122,7 @@ async def test_fire_message_in_user_content(tmp_path, monkeypatch):
 
 def test_load_cron_yaml_returns_jobs(tmp_path):
     import yaml
-    import mini_agent.cron_scheduler as cs
+    import fleetent.cron_scheduler as cs
 
     p = tmp_path / "cron.yaml"
     p.write_text(yaml.dump({"jobs": [
@@ -136,7 +136,7 @@ def test_load_cron_yaml_returns_jobs(tmp_path):
 
 
 def test_load_cron_yaml_missing_file_returns_empty(tmp_path):
-    import mini_agent.cron_scheduler as cs
+    import fleetent.cron_scheduler as cs
 
     jobs = cs.load_cron_yaml(tmp_path / "nonexistent.yaml")
     assert jobs == []
@@ -144,7 +144,7 @@ def test_load_cron_yaml_missing_file_returns_empty(tmp_path):
 
 def test_load_cron_yaml_skips_entry_missing_required_field(tmp_path):
     import yaml
-    import mini_agent.cron_scheduler as cs
+    import fleetent.cron_scheduler as cs
 
     p = tmp_path / "cron.yaml"
     p.write_text(yaml.dump({"jobs": [

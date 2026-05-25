@@ -21,14 +21,14 @@ def create_app() -> object:
     except ImportError:
         raise RuntimeError("slack-bolt not installed") from None
 
-    from mini_agent.config import Settings
+    from fleetent.config import Settings
     bot_token = Settings().slack_bot_token
     app = AsyncApp(token=bot_token)
 
     @app.event("message")
     async def handle_message(event: dict[str, str | None], say: object) -> None:
-        from mini_agent.im_gateway.normalizer import NormalizedMessage, route
-        from mini_agent.im_user_store import get_or_create
+        from fleetent.im_gateway.normalizer import NormalizedMessage, route
+        from fleetent.im_user_store import get_or_create
 
         slack_user_id = event.get("user") or "unknown"
         user = get_or_create("slack", slack_user_id)

@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from mini_agent.model_router import get_client_and_config
+from fleetent.model_router import get_client_and_config
 
 
 def _mem_path(user_id: str = "default") -> Path:

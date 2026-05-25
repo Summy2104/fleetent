@@ -1,4 +1,4 @@
-"""Admin CLI for user management. Usage: uv run mini-agent-admin <command>"""
+"""Admin CLI for user management. Usage: uv run fleetent-admin <command>"""
 
 import argparse
 import sys
@@ -6,13 +6,13 @@ from pathlib import Path
 
 import yaml
 
-from mini_agent.user_store import create_user, list_users, rotate_key
+from fleetent.user_store import create_user, list_users, rotate_key
 
 _SETTINGS_YAML = Path("config/settings.yaml")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="mini-agent-admin", description="User management CLI")
+    parser = argparse.ArgumentParser(prog="fleetent-admin", description="User management CLI")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     # --- existing user commands ---
@@ -92,7 +92,7 @@ def main() -> None:
         print(f"  new api_key: {user.api_key}  ← save this, shown once")
 
     elif args.cmd == "list-pending":
-        import mini_agent.im_user_store as ius
+        import fleetent.im_user_store as ius
         pending = ius.list_pending()
         if not pending:
             print("No pending users.")
@@ -103,9 +103,9 @@ def main() -> None:
             print(f"{row['id']:<6}  {row['platform']:<12}  {pid:<24}  {row['created_at']}")
 
     elif args.cmd == "approve-user":
-        import mini_agent.im_user_store as ius
+        import fleetent.im_user_store as ius
         ius._init_db()
-        from mini_agent.user_store import _conn as conn_fn
+        from fleetent.user_store import _conn as conn_fn
         with conn_fn() as conn:
             row = conn.execute(
                 "SELECT id FROM im_users WHERE id = ?", (args.im_user_id,)
@@ -117,9 +117,9 @@ def main() -> None:
         print(f"IM user {args.im_user_id} approved.")
 
     elif args.cmd == "block-user":
-        import mini_agent.im_user_store as ius
+        import fleetent.im_user_store as ius
         ius._init_db()
-        from mini_agent.user_store import _conn as conn_fn
+        from fleetent.user_store import _conn as conn_fn
         with conn_fn() as conn:
             row = conn.execute(
                 "SELECT id FROM im_users WHERE id = ?", (args.im_user_id,)
@@ -131,7 +131,7 @@ def main() -> None:
         print(f"IM user {args.im_user_id} blocked.")
 
     elif args.cmd == "assign-channel":
-        from mini_agent.agent_store import assign_channel, get_by_name
+        from fleetent.agent_store import assign_channel, get_by_name
         agent = get_by_name(args.agent_name)
         if agent is None:
             print(f"Error: Agent {args.agent_name!r} not found.", file=sys.stderr)
@@ -140,12 +140,12 @@ def main() -> None:
         print(f"Channel {args.platform}/{args.channel_id} → agent '{args.agent_name}'.")
 
     elif args.cmd == "unassign-channel":
-        from mini_agent.agent_store import unassign_channel
+        from fleetent.agent_store import unassign_channel
         unassign_channel(args.platform, args.channel_id)
         print(f"Channel {args.platform}/{args.channel_id} unassigned.")
 
     elif args.cmd == "list-schedules":
-        from mini_agent import schedule_store
+        from fleetent import schedule_store
         tasks = schedule_store.list_tasks()
         if not tasks:
             print("No scheduled tasks")
@@ -155,7 +155,7 @@ def main() -> None:
             print(f"{t['id']:<36}  {t['name']:<20}  {t['cron_expr']:<15}  {t['user_id']}")
 
     elif args.cmd == "add-schedule":
-        from mini_agent import schedule_store
+        from fleetent import schedule_store
         task = schedule_store.create(
             name=args.name,
             cron_expr=args.cron,
@@ -168,7 +168,7 @@ def main() -> None:
         print(task["id"])
 
     elif args.cmd == "remove-schedule":
-        from mini_agent import schedule_store
+        from fleetent import schedule_store
         deleted = schedule_store.delete(args.task_id)
         if not deleted:
             print(f"Error: task {args.task_id!r} not found.", file=sys.stderr)

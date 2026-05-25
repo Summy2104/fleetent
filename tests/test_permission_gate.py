@@ -4,13 +4,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-import mini_agent.permission_gate as permission_gate
-from mini_agent.permission_gate import PermissionGate
+import fleetent.permission_gate as permission_gate
+from fleetent.permission_gate import PermissionGate
 
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
-    import mini_agent.user_store as user_store
+    import fleetent.user_store as user_store
 
     db_path = tmp_path / "users.db"
     monkeypatch.setattr(user_store, "DB_PATH", db_path)

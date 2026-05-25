@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mini_agent.sandbox_client import ExecResult, SandboxClient
+from fleetent.sandbox_client import ExecResult, SandboxClient
 
 
 def _mock_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> MagicMock:

@@ -4,7 +4,7 @@
 The system SHALL store channel-to-agent bindings in a `channel_agents` table keyed by `(platform, channel_id)`.
 
 #### Scenario: Create binding
-- **WHEN** admin runs `mini-agent-admin assign-channel --platform slack --channel-id C123456 --agent-name assistant`
+- **WHEN** admin runs `fleetent-admin assign-channel --platform slack --channel-id C123456 --agent-name assistant`
 - **THEN** a row is inserted into `channel_agents(platform="slack", channel_id="C123456", agent_id=<assistant's id>)`
 
 #### Scenario: Duplicate binding is replaced
@@ -12,7 +12,7 @@ The system SHALL store channel-to-agent bindings in a `channel_agents` table key
 - **THEN** the old binding is replaced (upsert semantics)
 
 #### Scenario: Remove binding
-- **WHEN** admin runs `mini-agent-admin unassign-channel --platform slack --channel-id C123456`
+- **WHEN** admin runs `fleetent-admin unassign-channel --platform slack --channel-id C123456`
 - **THEN** the row for `("slack", "C123456")` is deleted from `channel_agents`
 
 #### Scenario: Channel not bound

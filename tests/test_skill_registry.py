@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-import mini_agent.skill_registry as sr
+import fleetent.skill_registry as sr
 
 
 @pytest.fixture(autouse=True)

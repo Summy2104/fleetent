@@ -1,6 +1,6 @@
 ## Why
 
-mini-agent 已完成技术验证（agent loop、streaming、memory、48 个测试），但仍是单用户 CLI/HTTP 工具。需要扩展为可在企业内网运行的 Slack/Telegram IM 原生服务，验证"可治理、可部署"核心差异化，为后续 on-premises 商业化打基础。
+fleetent 已完成技术验证（agent loop、streaming、memory、48 个测试），但仍是单用户 CLI/HTTP 工具。需要扩展为可在企业内网运行的 Slack/Telegram IM 原生服务，验证"可治理、可部署"核心差异化，为后续 on-premises 商业化打基础。
 
 ## What Changes
 
@@ -40,5 +40,5 @@ mini-agent 已完成技术验证（agent loop、streaming、memory、48 个测�
 - **新文件**：`im_gateway/slack.py`, `im_gateway/telegram.py`, `im_gateway/normalizer.py`, `session_mgr.py`, `sub_agent.py`, `permission_gate.py`, `sandbox_client.py`, `mcp_client.py`, `agent_policy.py`, `config.py`, `migrations/`
 - **现有文件扩展**：`user_store.py`（新增 im_users 查询）, `tool_registry.py`（dispatch 层新增访问控制）, `eval_logger.py`（新增 IM 字段）
 - **新依赖**：`slack-bolt`, `python-telegram-bot`, `microsandbox`, `pydantic-settings`, `structlog`, `alembic`, `mcp`
-- **部署变化**：宿主机需安装 microsandbox-server（原生守护进程），mini-agent 打包为 Docker 镜像，docker-compose 编排
+- **部署变化**：宿主机需安装 microsandbox-server（原生守护进程），fleetent 打包为 Docker 镜像，docker-compose 编排
 - **配置新增**：`config/mcp.yaml`（MCP server 连接信息），`.env.production`（密钥，gitignored）

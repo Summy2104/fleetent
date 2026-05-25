@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mini_agent import memory_layer
+from fleetent import memory_layer
 
 
 @pytest.fixture(autouse=True)
@@ -78,7 +78,7 @@ def test_extract_and_save_writes_facts(tmp_path):
     mock_config.model = "test-model"
     mock_config.max_tokens = 512
 
-    patch_target = "mini_agent.memory_layer.get_client_and_config"
+    patch_target = "fleetent.memory_layer.get_client_and_config"
     with patch(patch_target, return_value=(mock_client, mock_config)):
         memory_layer.extract_and_save(
             "how do I learn Python?",
@@ -98,7 +98,7 @@ def test_extract_and_save_handles_empty_list(tmp_path):
     mock_config.model = "test-model"
     mock_config.max_tokens = 512
 
-    patch_target = "mini_agent.memory_layer.get_client_and_config"
+    patch_target = "fleetent.memory_layer.get_client_and_config"
     with patch(patch_target, return_value=(mock_client, mock_config)):
         memory_layer.extract_and_save("hello", [], user_id="alice")
 
@@ -112,7 +112,7 @@ def test_extract_and_save_handles_malformed_json(tmp_path):
     mock_config.model = "test-model"
     mock_config.max_tokens = 512
 
-    patch_target = "mini_agent.memory_layer.get_client_and_config"
+    patch_target = "fleetent.memory_layer.get_client_and_config"
     with patch(patch_target, return_value=(mock_client, mock_config)):
         memory_layer.extract_and_save("hello", [], user_id="alice")
 

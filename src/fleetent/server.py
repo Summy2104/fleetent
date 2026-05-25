@@ -16,14 +16,14 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from mini_agent import mcp_client
-from mini_agent.cron_scheduler import CronScheduler
-from mini_agent.agent_loop import run_stream
-from mini_agent.config import Settings
-from mini_agent.mcp_client import McpServerConfig
-from mini_agent.permission_gate import _default_gate, cleanup_stale_approvals, list_approvals
-from mini_agent.skill_registry import scan as scan_skills
-from mini_agent.user_store import get_by_api_key
+from fleetent import mcp_client
+from fleetent.cron_scheduler import CronScheduler
+from fleetent.agent_loop import run_stream
+from fleetent.config import Settings
+from fleetent.mcp_client import McpServerConfig
+from fleetent.permission_gate import _default_gate, cleanup_stale_approvals, list_approvals
+from fleetent.skill_registry import scan as scan_skills
+from fleetent.user_store import get_by_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ async def _start_slack_adapter(app_token: str) -> None:
 
         from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 
-        from mini_agent.im_gateway.slack import create_app as create_slack_app
+        from fleetent.im_gateway.slack import create_app as create_slack_app
 
         slack_app: Any = create_slack_app()
         handler = AsyncSocketModeHandler(slack_app, app_token)
@@ -53,7 +53,7 @@ async def _start_telegram_adapter() -> None:
     try:
         from typing import Any
 
-        from mini_agent.im_gateway.telegram import create_app as create_telegram_app
+        from fleetent.im_gateway.telegram import create_app as create_telegram_app
 
         tg_app: Any = create_telegram_app()
         await tg_app.initialize()
@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.warning("mcp_yaml_load_failed path=%s error=%s", _MCP_YAML_PATH, exc)
 
     # Load webhook sources from config/webhooks.yaml if present
-    from mini_agent import webhook_router as _wr
+    from fleetent import webhook_router as _wr
     _webhook_sources.clear()
     if _WEBHOOK_YAML_PATH.exists():
         _webhook_sources.update(_wr.load_sources(_WEBHOOK_YAML_PATH))
@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await mcp_client.close()
 
 
-app = FastAPI(title="mini-agent", lifespan=lifespan)
+app = FastAPI(title="fleetent", lifespan=lifespan)
 
 
 class ChatRequest(BaseModel):
@@ -161,7 +161,7 @@ async def chat(
     x_platform: str | None = Header(default=None),
     x_channel_id: str | None = Header(default=None),
 ) -> StreamingResponse:
-    from mini_agent.im_gateway.normalizer import get_agent_for_context
+    from fleetent.im_gateway.normalizer import get_agent_for_context
 
     agent = get_agent_for_context(
         platform=x_platform or "",
@@ -192,8 +192,8 @@ async def chat(
 
 @app.post("/webhook/{source_id}")
 async def webhook(source_id: str, request: Request) -> Response:
-    from mini_agent import webhook_router as wr
-    from mini_agent.im_gateway.normalizer import NormalizedMessage, route
+    from fleetent import webhook_router as wr
+    from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
     source = _webhook_sources.get(source_id)
     if source is None:

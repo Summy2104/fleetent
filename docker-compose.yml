@@ -1,5 +1,5 @@
 services:
-  mini-agent:
+  fleetent:
     build: .
     env_file: .env.production
     ports:
