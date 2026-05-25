@@ -17,6 +17,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from mini_agent import mcp_client
+from mini_agent.cron_scheduler import CronScheduler
 from mini_agent.agent_loop import run_stream
 from mini_agent.config import Settings
 from mini_agent.mcp_client import McpServerConfig
@@ -90,8 +91,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.telegram_bot_token:
         asyncio.create_task(_start_telegram_adapter())
 
+    cron = CronScheduler()
+    await cron.start()
+
     yield
 
+    await cron.shutdown()
     await mcp_client.close()
 
 

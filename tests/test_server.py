@@ -136,3 +136,27 @@ def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert captured.get("system_prompt") == "Channel system."
     assert captured.get("allowed_tools") == ["shell"]
+
+
+# ── cron scheduler lifespan ───────────────────────────────────────────────────
+
+def test_lifespan_starts_and_stops_cron_scheduler(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock, patch
+    from starlette.testclient import TestClient
+    import mini_agent.server as srv
+
+    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", tmp_path / "webhooks.yaml")
+
+    start_mock = AsyncMock()
+    shutdown_mock = AsyncMock()
+
+    with patch("mini_agent.server.CronScheduler") as mock_cls:
+        instance = mock_cls.return_value
+        instance.start = start_mock
+        instance.shutdown = shutdown_mock
+
+        with TestClient(srv.app):
+            pass  # lifespan runs on enter/exit
+
+    start_mock.assert_called_once()
+    shutdown_mock.assert_called_once()

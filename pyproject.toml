@@ -17,6 +17,7 @@ dependencies = [
     "alembic>=1.13.0",
     "mcp>=1.0.0",
     "pyyaml>=6.0.3",
+    "apscheduler>=3.10",
 ]
 
 [project.scripts]

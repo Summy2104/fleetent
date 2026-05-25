@@ -169,3 +169,56 @@ def test_set_default_agent_clear(tmp_path, monkeypatch):
     assert code == 0
     content = settings_yaml.read_text()
     assert "basic" not in content
+
+
+# ── schedule admin commands ───────────────────────────────────────────────────
+
+import mini_agent.schedule_store as schedule_store_mod
+
+
+@pytest.fixture(autouse=False)
+def tmp_sched_db(tmp_path, monkeypatch):
+    db = tmp_path / "sched.db"
+    monkeypatch.setattr(schedule_store_mod, "DB_PATH", db)
+    return db
+
+
+def test_list_schedules_empty(tmp_sched_db):
+    out, _, code = run_admin("list-schedules")
+    assert code == 0
+    assert "No scheduled tasks" in out
+
+
+def test_add_schedule_prints_task_id(tmp_sched_db):
+    out, _, code = run_admin(
+        "add-schedule",
+        "--name", "standup",
+        "--cron", "0 9 * * 1-5",
+        "--user-id", "u-1",
+        "--message", "run standup",
+    )
+    assert code == 0
+    assert len(out.strip()) == 36  # UUID printed
+
+
+def test_list_schedules_shows_task(tmp_sched_db):
+    run_admin("add-schedule", "--name", "daily", "--cron", "0 9 * * *",
+              "--user-id", "u-1", "--message", "go")
+    out, _, code = run_admin("list-schedules")
+    assert code == 0
+    assert "daily" in out
+    assert "0 9 * * *" in out
+    assert "u-1" in out
+
+
+def test_remove_schedule_success(tmp_sched_db):
+    out, _, _ = run_admin("add-schedule", "--name", "x", "--cron", "* * * * *",
+                           "--user-id", "u-1", "--message", "hi")
+    task_id = out.strip()
+    _, _, code = run_admin("remove-schedule", "--task-id", task_id)
+    assert code == 0
+
+
+def test_remove_schedule_not_found_exits_nonzero(tmp_sched_db):
+    _, _, code = run_admin("remove-schedule", "--task-id", "no-such-id")
+    assert code != 0
