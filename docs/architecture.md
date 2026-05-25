@@ -141,9 +141,9 @@ flowchart TD
 |------|---------|-----|
 | [agent-runtime.md](capabilities/agent-runtime.md) | 核心循环、工具、Skill、MCP、沙箱、上下文压缩 | 张洋  |
 | [im-gateway.md](capabilities/im-gateway.md) | Slack / Telegram / WhatsApp 接入、用户映射 | 张亮  |
-| [memory.md](capabilities/memory.md) | 跨 session 记忆、自进化机制 | 常乐 |
+| [memory.md](capabilities/memory.md) | 跨 session 记忆、自进化机制 | 常乐  |
 | [scheduling.md](capabilities/scheduling.md) | Cron 定时任务、Webhook 事件触发 | 程鑫  |
 | [governance.md](capabilities/governance.md) | 权限审批、工具白名单、agent 定义与分配 | 张亮  |
-| [platform.md](capabilities/platform.md) | 用户管理、API 认证、admin CLI | 张亮  |
+| [platform.md](capabilities/platform.md) | 用户管理、API 认证、admin CLI | 张洋 |
 | [observability.md](capabilities/observability.md) | 评估日志、数据统计、链路追踪 | 程鑫  |
 | [deployment.md](capabilities/deployment.md) | on-premises 打包、配置管理 | 常乐  |
