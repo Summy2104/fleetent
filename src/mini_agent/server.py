@@ -12,8 +12,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import yaml
-from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from mini_agent import mcp_client
@@ -27,6 +27,8 @@ from mini_agent.user_store import get_by_api_key
 logger = logging.getLogger(__name__)
 
 _MCP_YAML_PATH: Path = Path("config/mcp.yaml")
+_WEBHOOK_YAML_PATH: Path = Path("config/webhooks.yaml")
+_webhook_sources: dict[str, Any] = {}
 
 
 async def _start_slack_adapter(app_token: str) -> None:
@@ -74,6 +76,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await mcp_client.register_all(servers)
         except Exception as exc:
             logger.warning("mcp_yaml_load_failed path=%s error=%s", _MCP_YAML_PATH, exc)
+
+    # Load webhook sources from config/webhooks.yaml if present
+    from mini_agent import webhook_router as _wr
+    _webhook_sources.clear()
+    if _WEBHOOK_YAML_PATH.exists():
+        _webhook_sources.update(_wr.load_sources(_WEBHOOK_YAML_PATH))
 
     # Start IM adapters as background tasks if tokens are configured
     if settings.slack_bot_token and settings.slack_app_token:
@@ -175,3 +183,40 @@ async def chat(
             yield f"data: {json.dumps(error, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+@app.post("/webhook/{source_id}")
+async def webhook(source_id: str, request: Request) -> Response:
+    from mini_agent import webhook_router as wr
+    from mini_agent.im_gateway.normalizer import NormalizedMessage, route
+
+    source = _webhook_sources.get(source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail=f"webhook source {source_id!r} not configured")
+
+    body = await request.body()
+    sig_header = request.headers.get("x-hub-signature-256")
+    if not wr.verify_signature(source.secret, body, sig_header):
+        raise HTTPException(status_code=403, detail="invalid signature")
+
+    try:
+        payload = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        payload = {}
+
+    text = wr.extract_message(source.message_template, payload)
+
+    async def _noop_reply(_: str) -> None:
+        pass
+
+    msg = NormalizedMessage(
+        platform="webhook",
+        session_id=f"webhook-{source_id}",
+        user_id=source.user_id,
+        text=text,
+        attachments=[],
+        reply_func=_noop_reply,
+        channel_id="",
+    )
+    asyncio.create_task(route(msg))
+    return Response(status_code=202)

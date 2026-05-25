@@ -24,6 +24,7 @@ data/sessions/
 # Config — example files are committed, actual configs are not
 config/*.yaml
 config/mcp.yaml
+!config/*.example.yaml
 
 # IDE
 .vscode/
