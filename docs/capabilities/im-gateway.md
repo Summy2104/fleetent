@@ -72,7 +72,7 @@
 
 - [ ] **长消息分片**：超过平台单条上限时按 word 或代码块边界自动分片，附带 (1/N) 续标
 
-- [ ] **UTF-16 长度感知**：emoji、CJK 等多字节字符按平台真实计费方式（如 Telegram 的 UTF-16 code unit）测算长度
+- [ ] **连贯性**：回复总是回复到消息列里，不要回复到公屏（可配置）。
 
 ### 流式输出
 
@@ -80,7 +80,7 @@
 
 - [ ] **工具进度可见性**：工具调用开始 / 进行中 / 结束作为可观察事件呈现给用户（占位 + 编辑或独立消息）
 
-- [ ] **Flood-control 退避**：编辑频率过高时自适应降频，避免被平台限流
+- [ ] ～～**Flood-control 退避**：编辑频率过高时自适应降频，避免被平台限流～～
 
 - [ ] **思考标签过滤**：模型 `<think>` / `<reasoning>` 等内部段不流式给用户
 
@@ -88,23 +88,15 @@
 
 - [ ] **chat_type 分支策略**：dm / group / channel / thread 分别有独立的 session 派生与回复策略
 
-- [ ] **群内多用户隔离**：群聊里每位用户默认独立 session，可配置切换为群共享
-
-- [ ] **二级线程支持**：Telegram forum topic、Discord thread、Slack 子线程作为 session 维度独立路由
+- [ ] **群内多用户隔离**：公屏session/ 消息列session/ dm session 3个级别。
 
 - [ ] **群聊触发策略**：群里默认仅在 @bot 或回复 bot 时响应，可按 channel 配置
-
-- [ ] **频道主题上下文**：频道描述 / topic 作为 system prompt 的一部分注入
 
 ### 身份、权限、审批
 
 - [ ] **Pairing 自助申请**：用户发申请码自助请求接入，带 TTL、频控、连续失败 lockout
 
 - [ ] **Slash 命令分级权限**：区分 admin / 普通用户 / 按命令白名单，DM 与群聊各有策略
-
-- [ ] **Per-channel prompt 与 skill 绑定**：channel 维度可绑定额外 system prompt 与自动加载的 skill（不仅是 agent）
-
-- [ ] **Reaction / 按钮审批 UI**：permission_gate 的审批可通过点击按钮或加 emoji 完成，替代纯文字 approve/reject
 
 ### 运维与可观测
 
@@ -129,10 +121,6 @@
 - [ ] **卡死 session 检测**：超过阈值仍未完成的会话被识别并安全释放，避免 IM 永远卡在"输入中"
 
 ### 生命周期与扩展点
-
-- [ ] **事件总线**：session / agent / command / message 生命周期暴露事件，用户可挂自定义 hook
-
-- [ ] **发送后置回调**：消息发送成功 / 失败后可触发外部回调（埋点、二次通知、审计）
 
 - [ ] **WhatsApp 适配器**：接入 whatsapp-cloud-api，复用上述抽象与 normalizer pipeline
 
@@ -178,12 +166,7 @@
 - When：agent_loop 收到该消息
 - Then：被引用消息文本作为上下文出现在 agent 看到的对话中
 
-**场景 9：群内多用户 session 隔离**
-- Given：群里 A、B 两人同时与 bot 对话
-- When：A 询问 X，B 询问 Y
-- Then：A 和 B 的 session 互相独立，B 的上下文不出现在 A 的对话中
-
-**场景 10：群里仅 @bot 触发**
+**场景 10：群里仅 @bot 触发（可配置）**
 - Given：群聊配置为"仅 @bot 才响应"
 - When：群内出现非 @bot 的普通消息
 - Then：bot 不进入 agent_loop，不产生回复；@bot 的消息进入 agent_loop 后 @bot 字样从 text 中剥离
@@ -248,25 +231,10 @@
 - When：thread 内继续发消息
 - Then：所有 thread 内消息共享同一 session，与频道顶层及其他 thread 互不串扰
 
-**场景 23：pairing 自助申请**
-- Given：未审批的新用户
-- When：用户发送一次性申请码
-- Then：在 TTL 内激活成功；连续多次失败后被锁定一段时间，期间申请无效
-
-**场景 24：命令分级权限**
-- Given：普通用户尝试一条 admin-only 命令
-- When：命令进入 gateway
-- Then：用户收到"无权限"提示，命令不执行；/help 等始终允许
-
-**场景 25：per-channel system prompt**
-- Given：某 channel 绑定了额外的 system prompt 片段
-- When：用户在该 channel 发消息
-- Then：agent 看到的 system prompt 包含该绑定内容
-
 **场景 26：/health 暴露平台运行状态**
 - Given：多个平台适配器在运行，其中一个平台 token 无效
 - When：访问 /health
-- Then：返回每个平台的 connected / disconnected / fatal 状态、最近错误及重连次数；失效平台标记为 fatal 且不再无限重试
+- Then：返回每个平台的 ok/fail
 
 **场景 27：断线后指数退避重连**
 - Given：平台网络瞬断
@@ -278,35 +246,10 @@
 - When：agent 调用 send_message_tool 指定 target="#ops"
 - Then：工具从目录解析出对应 chat_id 并发送成功
 
-**场景 29：cron 主动消息回写历史**
-- Given：cron 定时任务向某频道发了一条消息
-- When：查看该 session 的对话历史
-- Then：该消息出现在 transcript 中，并带有来源标签（如 cron）
-
-**场景 30：日志敏感字段脱敏**
-- Given：消息含手机号、token 或邮箱
-- When：适配器写日志
-- Then：日志实际写入的敏感字段已打码（如 138****1234），原文不进磁盘
-
-**场景 31：适配器走代理 + SSRF 防护**
-- Given：适配器配置了 HTTP_PROXY，且入站消息含一个指向 169.254.169.254 的媒体 URL
-- When：适配器对外请求 + 媒体下载流程
-- Then：出站请求实际经代理出口；指向云元数据 / 回环 / 私网的 URL 下载被拒绝并记录原因
-
 **场景 32：SIGTERM 不丢消息**
 - Given：进程正在处理一条消息
 - When：收到 SIGTERM 或被新进程替换
 - Then：该消息处理完后再退出，新进程不会重复处理这条消息
-
-**场景 33：卡死 session 被识别并释放**
-- Given：某 session 超过阈值时间无进展
-- When：检测器扫描
-- Then：该 session 被标记并安全释放，下次该用户消息开启新 session
-
-**场景 34：生命周期事件钩子被触发**
-- Given：注册了 session:start 钩子
-- When：新 session 创建
-- Then：钩子被调用，参数包含 session_id、platform、user_id
 
 ## 待决问题
 
