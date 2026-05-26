@@ -33,13 +33,44 @@
 
 ### 定时任务
 
+- [ ] **任务类型**：支持三种触发模式
+  - **一次性任务**：指定未来某个时间点触发一次，执行后自动标记为 done
+  - **固定间隔任务**：每隔 N 秒 / 分钟 / 小时触发一次（如"每 30 分钟巡检一次"）
+  - **Cron 任务**：标准五字段 cron 表达式，支持复杂周期（现有能力，补充到类型体系中）
+
+- [ ] **时区支持**：任务按指定时区运行，创建时可设置 timezone
+  - 默认 UTC，支持任意 IANA 时区（如 `Asia/Shanghai`）
+  - list_tasks 输出中展示本地时间和时区
+
+- [ ] **任务绑定**：每个任务记录所属上下文
+  - 必填：`agent_name`（指定由哪个 agent 执行）、投递目标（主频道 channel 或私聊 DM）
+  - 可选：`user_id`（标记该任务归属哪个用户，用于权限过滤和查询）、`session_id`（复用已有会话上下文，未指定时新建会话）
+
 - [ ] **完整 CRUD 入口**：用户对话和系统命令均可创建、编辑、删除、查询定时任务
   - 对话入口：通过 schedule_task / edit_task / cancel_task / list_tasks 工具
   - 系统命令入口：`fleetent-admin task create/edit/cancel/list`
-  - 编辑支持修改 cron 表达式、消息内容、绑定 agent，修改立即生效
+  - 编辑支持修改触发规则、消息内容、绑定 agent / 用户 / 会话，修改立即生效
+
+- [ ] **暂停与恢复**：任务可在不删除的情况下暂停，之后可恢复
+  - 对话：`pause_task` / `resume_task` 工具
+  - CLI：`fleetent-admin task pause --id <task_id>` / `fleetent-admin task resume --id <task_id>`
+  - 暂停期间到点不触发，恢复后按原规则继续
+
+- [ ] **单次手动触发**：无论任务状态如何，立即触发一次执行（不影响原有调度）
+  - CLI：`fleetent-admin task run --id <task_id>`
+  - 对话：`run_task` 工具
+
+- [ ] **路由预览**：创建或编辑任务后，可预览接下来 N 次触发时间
+  - CLI：`fleetent-admin task preview --id <task_id> [--n 5]`
+  - 输出按任务时区显示
+
+- [ ] **任务定义存文件，Git 管理**：任务定义以 YAML 文件形式存储于 `config/tasks/`，纳入 Git 版本控制
+  - 运行时状态（上次触发时间、执行次数、暂停标志）单独存 SQLite，重启不丢
+  - 文件变更（新增 / 修改 / 删除）在服务启动时自动同步到调度器
+  - SQLite 中的状态以 task_id 为 key 关联，文件删除后对应状态自动清理
 
 - [ ] **结构化输出**：每次定时任务触发后，agent 回复以结构化格式写入执行记录
-  - 字段：task_id、triggered_at、status（success / failed）、reply、error（若失败）
+  - 字段：task_id、execution_id、triggered_at、finished_at、status（success / failed）、reply、error（若失败）
 
 - [ ] **失败重试与幂等**：触发失败时按配置重试，防止重复执行
   - 支持配置最大重试次数和重试间隔
@@ -104,7 +135,57 @@
 
 ## 验收标准（规划）
 
-**场景 5：对话创建定时任务**
+**场景 5：一次性任务**
+- Given：用户对话"明天下午 3 点提醒我开会"
+- When：agent 调用 schedule_task 工具，type=once，at=明天 15:00
+- Then：到时触发一次，执行后状态变为 done，不再触发
+
+**场景 5a：固定间隔任务**
+- Given：用户对话"每 30 分钟检查一次服务状态"
+- When：agent 调用 schedule_task 工具，type=interval，every=30m
+- Then：每隔 30 分钟触发，list_tasks 可查到下次触发时间
+
+**场景 5b：时区运行**
+- Given：创建任务 cron="0 9 * * 1"，timezone=Asia/Shanghai
+- When：北京时间周一 09:00
+- Then：任务触发；UTC 时间 01:00 不触发
+
+**场景 5c：任务绑定用户和 agent**
+- Given：创建任务时指定 user_id=alice、agent_name=support-bot、target=dm
+- When：任务触发
+- Then：以 alice 身份、support-bot 执行，消息投递到 alice 私聊
+
+**场景 5d：任务绑定频道**
+- Given：创建任务时指定 channel_id=C123、target=channel
+- When：任务触发
+- Then：执行结果投递到频道 C123，不发私聊
+
+**场景 5e：暂停与恢复**
+- Given：task_id=t001 每天 9 点触发
+- When：执行 `fleetent-admin task pause --id t001`，等待过了 9 点
+- Then：该时间点不触发；执行 `resume` 后恢复，下次到时间正常触发
+
+**场景 5f：单次手动触发**
+- Given：task_id=t001 处于暂停状态
+- When：执行 `fleetent-admin task run --id t001`
+- Then：立即触发一次执行；任务仍保持暂停状态，原调度不受影响
+
+**场景 5g：路由预览**
+- Given：task_id=t001，cron="0 9 * * 1-5"，timezone=Asia/Shanghai
+- When：执行 `fleetent-admin task preview --id t001 --n 5`
+- Then：输出接下来 5 次触发的北京时间，格式清晰
+
+**场景 5h：任务定义 Git 管理**
+- Given：在 config/tasks/ 新增一个 YAML 文件定义任务，提交到 Git
+- When：服务重启
+- Then：新任务自动加载并开始调度，无需手动创建
+
+**场景 5i：运行状态重启不丢**
+- Given：task_id=t001 已执行 10 次，最后触发时间为 T
+- When：服务重启
+- Then：list_tasks 仍显示执行次数=10、最后触发时间=T，任务恢复调度
+
+**场景 5j：对话创建定时任务**
 - Given：用户对话"每周一早上 8 点提醒我写周报"
 - When：agent 调用 schedule_task 工具
 - Then：任务创建成功，list_tasks 可查到，server 重启后仍存在
@@ -184,3 +265,5 @@
 - [ ] 失败日志的保留策略：条数上限还是时间上限？（负责人：待认领）
 - [ ] 双向回调失败是否重试？重试策略与主任务是否共用？（负责人：待认领）
 - [ ] task_id 的生成方式：服务端生成还是调用方传入？（负责人：待认领）
+- [ ] config/tasks/ YAML 文件变更检测方式：仅启动时扫描，还是支持运行时热重载？（负责人：待认领）
+- [ ] session_id 绑定语义：复用已有会话上下文，还是每次触发新建会话但注入历史摘要？（负责人：待认领）
