@@ -77,12 +77,23 @@
   - 每次触发携带唯一 execution_id，重复投递时幂等跳过
   - 失败超过重试上限后保留完整失败日志，不静默丢弃
 
+- [ ] **失败兜底**：重试耗尽后触发兜底处理，确保不静默丢失
+  - 兜底方式可在任务配置中选择（可组合）：
+    - `fallback_channel`：将错误信息投递到指定频道或私聊
+    - `dead_letter`：写入死信队列文件 `data/dead_letter.jsonl`，支持人工重放
+  - 兜底触发后在执行日志中标记 `status=dead_lettered`
+
 - [ ] **完整执行日志**：每次触发（无论成功或失败）均写入持久化日志
   - 字段：task_id、execution_id、triggered_at、finished_at、status、retry_count、reply、error
   - 支持通过 `fleetent-admin task logs --id <task_id>` 查询某任务的历史执行记录
   - 支持按状态过滤：`--status failed`
 
 ### Webhook
+
+- [ ] **官方平台 Webhook 适配**：内置对主流平台官方 Webhook 格式的解析与验签，开箱即用
+  - **Slack**：支持 Slack Events API（`X-Slack-Signature` + `X-Slack-Request-Timestamp` 验签）和 Slash Command；自动处理 URL verification challenge
+  - **GitHub**：支持所有 GitHub Webhook 事件（`X-Hub-Signature-256` 验签）；event type 通过 `X-GitHub-Event` 头路由，可在配置中按 event 筛选触发
+  - 每个平台作为独立 source type，在 `config/webhooks.yaml` 中声明 `type: slack` / `type: github`，由框架自动套用对应解析逻辑，无需手动写 message_template
 
 - [ ] **请求携带标识字段**：每条 Webhook 请求包含 task_id、session_id、user_id
   - task_id 用于关联执行记录；session_id 用于上下文追踪；user_id 用于权限路由
@@ -91,7 +102,7 @@
   - 不阻塞调用方，主流程不受 agent 执行时长影响
 
 - [ ] **多种认证方式**：来源认证支持三种方式，按来源配置选择
-  - HMAC-SHA256 签名验证（现有，增强为可配置算法）
+  - HMAC-SHA256 签名验证（现有，增强为可配置算法）；官方平台适配器使用各自签名规范
   - API Token：请求头携带 `X-Api-Token`，与来源配置中的 token 比对
   - IP 白名单：来源配置中指定允许的 IP 或 CIDR，不在名单内返回 403
 
@@ -107,11 +118,25 @@
   - 支持通过 `fleetent-admin webhook logs --source <source_id>` 查询某来源的历史请求记录
   - 支持按状态过滤：`--status failed`
 
+- [ ] **失败兜底**：重试耗尽后触发兜底处理，确保不静默丢失
+  - 兜底方式可在来源配置中选择（可组合）：
+    - `fallback_channel`：将原始 payload 和错误信息投递到指定频道或私聊
+    - `fallback_webhook`：转发到另一个 Webhook URL（如告警系统）
+    - `dead_letter`：写入死信队列文件 `data/dead_letter.jsonl`，支持人工重放
+  - 兜底触发后在执行日志中标记 `status=dead_lettered`
+
+- [ ] **路由预览**：在不实际触发 agent 的情况下，验证 Webhook 配置是否正确
+  - CLI：`fleetent-admin webhook preview --source <source_id> --payload <file.json>`
+  - 输出：匹配的 source、认证方式、提取的消息内容、将触发的 agent，以及若配置有误的具体原因
+  - 用于上线前验证配置，排查 message_template 提取逻辑是否符合预期
+
 - [ ] **双向回调**：agent 执行完成后主动回调调用方
   - 来源配置中指定 callback_url；回调携带 task_id、status、reply
   - 回调失败时记录日志，不影响本次执行结果
 
 ## 验收标准
+
+### 现状
 
 **场景 1：创建定时任务**
 - Given：agent 支持 schedule_task 工具
@@ -133,7 +158,7 @@
 - When：发送 POST /webhook/{source_id}
 - Then：跳过签名验证，直接触发 agent
 
-## 验收标准（规划）
+### 规划
 
 **场景 5：一次性任务**
 - Given：用户对话"明天下午 3 点提醒我开会"
@@ -153,7 +178,7 @@
 **场景 5c：任务绑定用户和 agent**
 - Given：创建任务时指定 user_id=alice、agent_name=support-bot、target=dm
 - When：任务触发
-- Then：以 alice 身份、support-bot 执行，消息投递到 alice 私聊
+- Then：support-bot 执行，归属用户=alice，消息投递到 alice 私聊
 
 **场景 5d：任务绑定频道**
 - Given：创建任务时指定 channel_id=C123、target=channel
@@ -200,10 +225,45 @@
 - When：自动重试
 - Then：最多重试 3 次；全部失败后失败日志保留，包含 execution_id、error、每次重试时间
 
+**场景 7a：定时任务失败兜底——投递到频道**
+- Given：任务配置 fallback_channel=C-alert，最大重试 3 次
+- When：agent 执行连续失败 3 次，重试耗尽
+- Then：错误信息投递到频道 C-alert；执行日志 status=dead_lettered
+
+**场景 7b：定时任务失败兜底——写入死信队列**
+- Given：任务配置 fallback=dead_letter，重试耗尽
+- When：agent 执行失败超过上限
+- Then：`data/dead_letter.jsonl` 新增一条记录，包含 task_id、execution_id、error
+
 **场景 8：定时任务幂等**
 - Given：相同 execution_id 的触发请求因网络抖动被投递两次
 - When：第二次投递到达
 - Then：第二次被幂等跳过，agent 仅执行一次
+
+**场景 8：官方平台 Webhook 适配——概述**
+- Given：配置文件中声明 `type: slack` 或 `type: github`
+- When：服务启动
+- Then：对应平台的签名验证和消息解析逻辑自动加载，无需手动配置 message_template
+
+**场景 8a：Slack Events API**
+- Given：配置 type=slack，secret=xxx；Slack 发送 `app_mention` 事件
+- When：POST /webhook/{source_id}，携带正确 `X-Slack-Signature`
+- Then：验签通过，agent 收到提取后的消息文本，正常触发；签名错误返回 403
+
+**场景 8b：Slack URL verification**
+- Given：首次配置 Slack Events API，Slack 发送 challenge 请求
+- When：POST /webhook/{source_id}，body 含 `type=url_verification`
+- Then：自动返回 `{"challenge": "..."}` ，无需额外配置
+
+**场景 8c：GitHub Webhook 触发**
+- Given：配置 type=github，secret=xxx，event_filter=push
+- When：GitHub 推送代码，发送 `X-GitHub-Event: push`，签名正确
+- Then：agent dev-bot 被触发，收到 push 事件的结构化摘要
+
+**场景 8d：GitHub 事件过滤**
+- Given：配置 event_filter=push，收到 `X-GitHub-Event: pull_request`
+- When：请求到达
+- Then：返回 200 但不触发 agent（事件类型不匹配，静默忽略）
 
 **场景 9：Webhook 请求字段**
 - Given：来源配置了 user_id=alice、agent_name=ops-bot
@@ -229,6 +289,26 @@
 - Given：调用方携带 `X-Idempotency-Key: evt-abc123` 重发同一请求
 - When：第二次请求到达
 - Then：返回 202，agent 不重复执行
+
+**场景 13a：失败兜底——投递到频道**
+- Given：来源配置 fallback_channel=C-alert，最大重试 3 次
+- When：agent 执行连续失败 3 次，重试耗尽
+- Then：原始 payload 和错误信息投递到频道 C-alert；执行日志 status=dead_lettered
+
+**场景 13b：失败兜底——写入死信队列**
+- Given：来源配置 fallback=dead_letter，重试耗尽
+- When：agent 执行失败超过上限
+- Then：`data/dead_letter.jsonl` 新增一条记录，包含 source_id、task_id、payload、error
+
+**场景 13c：路由预览——配置正确**
+- Given：source_id=github，配置 type=github，event_filter=push，agent_name=dev-bot
+- When：`fleetent-admin webhook preview --source github --payload push_event.json`
+- Then：输出 source=github、auth=hmac、提取的消息摘要、将触发 agent=dev-bot，无报错
+
+**场景 13d：路由预览——配置有误**
+- Given：source_id=ops，message_template 引用了 payload 中不存在的字段
+- When：`fleetent-admin webhook preview --source ops --payload sample.json`
+- Then：输出提取失败原因（字段不存在），并提示将降级为 JSON 序列化全量 payload
 
 **场景 14：双向回调**
 - Given：来源配置了 callback_url=https://example.com/hook

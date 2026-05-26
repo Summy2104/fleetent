@@ -76,11 +76,11 @@
   - trace 中 `steps` 字段为数组，每个元素包含该轮的 `prompt_tokens`、`completion_tokens` 和触发的工具名（若有）
 
 - [ ] **per-user token 统计**：按用户汇总历史 token 用量
-  - CLI：`uv run fleetent-admin token-stats --user <user_id> [--period 2026-05]`
+  - CLI：`fleetent-admin token-stats --user <user_id> [--period 2026-05]`
   - 输出：总 prompt_tokens、总 completion_tokens、总 turns、时间范围
 
 - [ ] **per-agent token 统计**：按 agent 名称汇总 token 用量
-  - CLI：`uv run fleetent-admin token-stats --agent <agent_name> [--period 2026-05]`
+  - CLI：`fleetent-admin token-stats --agent <agent_name> [--period 2026-05]`
   - 输出格式同上
 
 - [ ] **敏感信息脱敏**：日志和 trace 写入前自动脱敏，防止敏感字段明文落盘
@@ -118,6 +118,8 @@
 
 ## 验收标准
 
+### 现状
+
 **场景 1：trace 记录完整**
 - **Given**：一次正常的 `/chat` 请求
 - **When**：请求完成
@@ -128,52 +130,54 @@
 - **When**：SSE 流结束
 - **Then**：trace 中 `usage.input_tokens` 和 `usage.output_tokens` 均有值
 
-**场景 3：双通道同时输出**
-- **Given**：配置终端级别 info、文件级别 debug
-- **When**：服务处理一次请求，产生 debug、info、warning 各一条日志
-- **Then**：终端显示 info 和 warning 两条；日志文件写入全部三条
-
-**场景 3a：两通道格式独立**
-- **Given**：双通道均已启用
-- **When**：写入同一条 warning 日志
-- **Then**：终端输出带颜色的 human-readable 格式；文件中为 JSON 格式同一条记录
-
-**场景 3b：文件通道故障不影响终端**
-- **Given**：日志目录不可写（磁盘满）
-- **When**：服务继续运行
-- **Then**：终端日志正常输出，服务不崩溃，文件写入失败记录一条 error 到终端
+### 规划
 
 **场景 3：日志级别过滤**
 - **Given**：配置日志级别为 `warn`
 - **When**：系统执行了一次正常对话（产生 `info` 级别日志）
 - **Then**：`info`、`debug`、`trace` 日志均不出现在日志文件中；`warn` 及以上正常写入
 
-**场景 3c：fatal / error 日志含文件行号**
+**场景 3a：fatal / error 日志含文件行号**
 - **Given**：配置日志级别为 `error`，某模块抛出未捕获异常
 - **When**：异常被记录为 `error` 或 `fatal`
 - **Then**：日志中包含报错的文件名和行号（如 `agent_loop.py:185`）
 
-**场景 3d：trace 级别可开启**
+**场景 3b：trace 级别可开启**
 - **Given**：配置日志级别为 `trace`
 - **When**：收到一条 Webhook 请求
 - **Then**：原始 payload 和每次 LLM chunk 均出现在日志文件中
 
-**场景 3e：silent 完全静默**
+**场景 3c：silent 完全静默**
 - **Given**：配置日志级别为 `silent`
 - **When**：服务正常运行并处理请求
 - **Then**：终端无任何输出，日志文件无任何写入
 
-**场景 3f：日志字段完整性**
+**场景 3d：日志字段完整性**
 - **Given**：用户 alice 通过 Slack 向 support-bot 发送一条消息，触发工具调用
 - **When**：请求完成，写入日志
 - **Then**：日志条目包含 `timestamp`（毫秒精度）、`level=info`、`logger=agent_loop`、`session_id`、`user_id=alice`、`agent_name=support-bot`、`model=claude-sonnet-4-5`、`source=slack`、`tokens.prompt`、`tokens.completion`、`duration_ms`、`message`
 
-**场景 3g：非 agent 日志字段留空**
+**场景 3e：非 agent 日志字段留空**
 - **Given**：服务启动，写入一条 `info` 级别的启动成功日志（由 `server` 模块产生）
 - **When**：查看日志
 - **Then**：该条记录含 `timestamp`、`level`、`logger=server`、`message`，`session_id`、`user_id`、`tokens`、`duration_ms` 字段为空或不存在
 
-**场景 4：日志文件按日期生成，每天两份**
+**场景 4：双通道同时输出**
+- **Given**：配置终端级别 info、文件级别 debug
+- **When**：服务处理一次请求，产生 debug、info、warn 各一条日志
+- **Then**：终端显示 info 和 warn 两条；日志文件写入全部三条
+
+**场景 4a：两通道格式独立**
+- **Given**：双通道均已启用
+- **When**：写入同一条 warn 日志
+- **Then**：终端输出带颜色的 human-readable 格式；文件中为 JSON 格式同一条记录
+
+**场景 4b：文件通道故障不影响终端**
+- **Given**：日志目录不可写（磁盘满）
+- **When**：服务继续运行
+- **Then**：终端日志正常输出，服务不崩溃，文件写入失败记录一条 error 到终端
+
+**场景 5：日志文件按日期生成，每天两份**
 - **Given**：服务在 2026-05-25 产生 info、warn、error 各若干条；在 2026-05-26 00:01 再处理一次请求
 - **When**：查看 `data/logs/` 目录
 - **Then**：
@@ -181,95 +185,95 @@
   - 跨天后生成 `2026-05-26.log` 和 `2026-05-26.error.log`
   - 所有文件时间戳格式为 HH:MM:SS
 
-**场景 4a：error.log 内容正确**
+**场景 5a：error.log 内容正确**
 - **Given**：2026-05-25 产生 10 条 info、3 条 warn、2 条 error
 - **When**：查看 `2026-05-25.error.log`
 - **Then**：仅有 5 条记录（3 warn + 2 error），info 不出现
 
-**场景 5：性能追踪字段完整**
+**场景 6：性能追踪字段完整**
 - **Given**：一次包含 2 次工具调用的 `/chat` 请求
 - **When**：请求完成
 - **Then**：trace 中 `timing` 字段包含 `memory_load_ms`、`llm_ms`（数组，每轮一条）、`tool_ms`（数组，每次调用一条）、`memory_extract_ms`
 
-**场景 6：结果来源标注**
+**场景 7：结果来源标注**
 - **Given**：回复内容一部分来自记忆注入，一部分来自模型推理
 - **When**：SSE 流结束
 - **Then**：done 事件的 `sources` 字段包含 `["记忆", "推理"]`，不包含 `"知识库"`
 
-**场景 7：log tail 查看最新 N 行**
-- **Given**：日志文件已积累数百条记录
-- **When**：执行 `fleetent-admin log tail --n 50`
-- **Then**：输出最新 50 行日志，不阻塞，立即返回
-
-**场景 7a：log follow 实时跟踪**
-- **Given**：服务正在处理请求
-- **When**：执行 `fleetent-admin log follow`
-- **Then**：终端持续输出新产生的日志，Ctrl+C 退出
-
-**场景 7b：log query 按用户过滤**
-- **Given**：用户 alice 产生了若干条日志，其中有 error
-- **When**：执行 `fleetent-admin log query --user alice --level error`
-- **Then**：仅返回 alice 的 error 及以上日志
-
-**场景 7c：log query 按 agent 过滤**
-- **Given**：agent `support-bot` 产生了 30 条日志
-- **When**：执行 `fleetent-admin log query --agent support-bot --n 10`
-- **Then**：返回 support-bot 最新 10 条日志
-
-**场景 7d：log query 关键词搜索**
-- **Given**：日志中有多条含 `timeout` 的记录
-- **When**：执行 `fleetent-admin log query --keyword "timeout"`
-- **Then**：返回所有含 `timeout` 的日志行，按时间升序
-
-**场景 7e：log query 多条件组合**
-- **Given**：agent `ops-bot` 有多条日志，其中部分含 `calculate`
-- **When**：执行 `fleetent-admin log query --agent ops-bot --keyword "calculate" --level warn`
-- **Then**：返回同时满足三个条件的日志
-
-**场景 7f：log set-level 动态生效**
-- **Given**：服务正在运行，当前终端级别为 `info`
-- **When**：执行 `fleetent-admin log set-level debug --channel console`
-- **Then**：无需重启，后续终端立即输出 `debug` 级别日志；文件通道级别不变
-
-**场景 7f：启动诊断——API key 缺失**
-- **Given**：未设置 `ANTHROPIC_API_KEY` 环境变量启动服务
-- **When**：进程退出
-- **Then**：stderr 输出包含组件名 `model_router`、原因 `ANTHROPIC_API_KEY not set`、建议 `export ANTHROPIC_API_KEY=...`
-
-**场景 7g：启动诊断——MCP server 不可达**
-- **Given**：`config/mcp.yaml` 配置了一个无法连接的 server URL
-- **When**：服务启动完成（非致命错误，不退出）
-- **Then**：启动日志中输出 `warn` 级别诊断，包含 server id 和连接失败原因
-
-**场景 9：每步 token 分解**
+**场景 8：每步 token 分解**
 - **Given**：一次包含 2 轮工具调用的 `/chat` 请求（共 3 次 LLM 调用）
 - **When**：请求完成
 - **Then**：trace 中 `steps` 数组长度为 3，每个元素含 `prompt_tokens`、`completion_tokens`，工具调用轮次含对应工具名
 
-**场景 10：per-user token 统计**
+**场景 9：per-user token 统计**
 - **Given**：用户 alice 本月有 5 次对话，累计消耗 10000 prompt tokens、3000 completion tokens
-- **When**：执行 `uv run fleetent-admin token-stats --user alice --period 2026-05`
+- **When**：执行 `fleetent-admin token-stats --user alice --period 2026-05`
 - **Then**：输出显示 `prompt_tokens=10000`、`completion_tokens=3000`、`turns=5`
 
-**场景 11：per-agent token 统计**
+**场景 10：per-agent token 统计**
 - **Given**：agent `support-bot` 本月被调用 20 次，累计 50000 prompt tokens
-- **When**：执行 `uv run fleetent-admin token-stats --agent support-bot --period 2026-05`
+- **When**：执行 `fleetent-admin token-stats --agent support-bot --period 2026-05`
 - **Then**：输出显示 `agent_name=support-bot`、`prompt_tokens=50000`、`turns=20`
 
-**场景 12：API key 脱敏**
+**场景 11：API key 脱敏**
 - **Given**：工具调用的参数中包含字段 `api_key=sk-ant-abc123456`
 - **When**：trace 写入 `traces.jsonl`
 - **Then**：文件中该字段值为 `sk-a****`，原始值不出现在文件中
 
-**场景 13：Bearer token 脱敏**
+**场景 11a：Bearer token 脱敏**
 - **Given**：日志中记录了一条含 `Authorization: Bearer ma-deadbeef...` 的请求头
 - **When**：写入日志文件
 - **Then**：日志中显示 `ma-d****`，完整 token 不落盘
 
-**场景 14：运行时值不受影响**
+**场景 11b：运行时值不受影响**
 - **Given**：agent 调用工具时传入含敏感字段的参数
 - **When**：工具实际执行
 - **Then**：工具收到的是原始未脱敏值，脱敏仅发生在日志写入阶段
+
+**场景 12：log tail 查看最新 N 行**
+- **Given**：日志文件已积累数百条记录
+- **When**：执行 `fleetent-admin log tail --n 50`
+- **Then**：输出最新 50 行日志，不阻塞，立即返回
+
+**场景 12a：log follow 实时跟踪**
+- **Given**：服务正在处理请求
+- **When**：执行 `fleetent-admin log follow`
+- **Then**：终端持续输出新产生的日志，Ctrl+C 退出
+
+**场景 12b：log query 按用户过滤**
+- **Given**：用户 alice 产生了若干条日志，其中有 error
+- **When**：执行 `fleetent-admin log query --user alice --level error`
+- **Then**：仅返回 alice 的 error 及以上日志
+
+**场景 12c：log query 按 agent 过滤**
+- **Given**：agent `support-bot` 产生了 30 条日志
+- **When**：执行 `fleetent-admin log query --agent support-bot --n 10`
+- **Then**：返回 support-bot 最新 10 条日志
+
+**场景 12d：log query 关键词搜索**
+- **Given**：日志中有多条含 `timeout` 的记录
+- **When**：执行 `fleetent-admin log query --keyword "timeout"`
+- **Then**：返回所有含 `timeout` 的日志行，按时间升序
+
+**场景 12e：log query 多条件组合**
+- **Given**：agent `ops-bot` 有多条日志，其中部分含 `calculate`
+- **When**：执行 `fleetent-admin log query --agent ops-bot --keyword "calculate" --level warn`
+- **Then**：返回同时满足三个条件的日志
+
+**场景 12f：log set-level 动态生效**
+- **Given**：服务正在运行，当前终端级别为 `info`
+- **When**：执行 `fleetent-admin log set-level debug --channel console`
+- **Then**：无需重启，后续终端立即输出 `debug` 级别日志；文件通道级别不变
+
+**场景 13：启动诊断——API key 缺失**
+- **Given**：未设置 `ANTHROPIC_API_KEY` 环境变量启动服务
+- **When**：进程退出
+- **Then**：stderr 输出包含组件名 `model_router`、原因 `ANTHROPIC_API_KEY not set`、建议 `export ANTHROPIC_API_KEY=...`
+
+**场景 13a：启动诊断——MCP server 不可达**
+- **Given**：`config/mcp.yaml` 配置了一个无法连接的 server URL
+- **When**：服务启动完成（非致命错误，不退出）
+- **Then**：启动日志中输出 `warn` 级别诊断，包含 server id 和连接失败原因
 
 ---
 
