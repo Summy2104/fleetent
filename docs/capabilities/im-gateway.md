@@ -17,10 +17,10 @@
 
 - ✅ **Slack Socket Mode 适配器**：slack-bolt 接入，实时接收消息
   - 支持 DM 和频道消息
-  - session_id = "slack-{channel_id}"
+  - `session_id` 推导：DM → `"user:{slack_user_id}"`；有 thread_ts 的群聊 → `"thread:{thread_ts}"`；无 thread 的频道消息 → `"user:{slack_user_id}"`（bot 强制在 thread 中回复）
 
 - ✅ **Telegram polling 适配器**：python-telegram-bot 接入
-  - session_id = "telegram-{chat_id}"
+  - `session_id` 推导：私聊 → `"user:{telegram_user_id}"`；群组 reply chain → `"thread:{message_id}"`
 
 - ✅ **IM 用户身份映射**：(platform, platform_user_id) → 内部 User
   - 新用户自动创建，默认 allowed=0（待审批）
@@ -38,6 +38,19 @@
 
 - ✅ **HTTP API channel 绑定**：透传 x-platform / x-channel-id 请求头
   - 支持通过 HTTP API 模拟 IM 场景的 channel 绑定
+
+## 数据模型
+
+```sql
+im_users (
+  id               INTEGER PRIMARY KEY,
+  platform         TEXT,              -- "slack" | "telegram"
+  platform_user_id TEXT,
+  user_id          TEXT,              -- → users.id
+  created_at       DATETIME,
+  UNIQUE(platform, platform_user_id)
+)
+```
 
 ## 规划中（v1.0）
 

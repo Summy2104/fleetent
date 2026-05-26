@@ -31,6 +31,40 @@ agent 的治理层：控制谁能用哪些工具、高风险操作需要人工�
 - ✅ **Channel-Agent 绑定**：管理员可将指定 agent 绑定到指定 IM channel
 - ✅ **默认 Agent**：config.default_agent_name 设置全局默认，无绑定时使用
 
+## 数据模型
+
+```sql
+-- Agent 定义
+agents (
+  id            INTEGER PRIMARY KEY,
+  name          TEXT UNIQUE,
+  system_prompt TEXT,
+  allowed_tools TEXT,    -- JSON 数组，支持 fnmatch 通配符，如 ["read_*", "github__*"]
+  created_at    DATETIME
+)
+
+-- 用户 → Agent 分配
+user_agents (
+  user_id   TEXT,        -- → users.id
+  agent_id  INTEGER,     -- → agents.id
+  PRIMARY KEY (user_id, agent_id)
+)
+
+-- 权限门审批记录
+approvals (
+  id                INTEGER PRIMARY KEY,
+  session_id        TEXT,
+  requester_user_id TEXT,     -- → users.id
+  risk_level        TEXT,     -- "medium" | "high"
+  tool_name         TEXT,
+  tool_args         TEXT,     -- JSON
+  status            TEXT,     -- "pending" | "approved" | "rejected" | "timeout"
+  approver_user_id  TEXT,     -- → users.id；medium 级可为 requester 本人
+  created_at        DATETIME,
+  resolved_at       DATETIME
+)
+```
+
 ## 规划中（v1.0）
 
 - [ ] **审批记录查询**：管理员可查询历史审批记录（发起人、工具、时间、决策）
