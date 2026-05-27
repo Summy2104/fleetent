@@ -28,33 +28,33 @@ flowchart TD
     end
 
     subgraph 被动触发
-        EXT["外部系统 GitHub / Slack / 自定义"]
-        WH["POST /webhook/{source_id}"]
-        WR["webhook_router 验签 + 消息提取"]
+        EXT["外部系统 GitHub, Slack, 自定义"]
+        WH["POST /webhook/source_id"]
+        WR["webhook_router 验签+消息提取"]
         EXT --> WH --> WR
     end
 
     FIRE --> NM[NormalizedMessage]
-    WR -->|202 Accepted 异步| NM
+    WR -->|202 异步| NM
 
     NM --> AL["agent_loop.run"]
-    AL --> REPLY[agent 回复]
+    AL --> REPLY["agent 回复"]
     REPLY -->|规划| CB["双向回调 callback_url"]
-    REPLY -->|规划| CH["投递到频道 / DM"]
+    REPLY -->|规划| CH["投递到频道或DM"]
 ```
 
 ### Webhook 认证决策树
 
 ```mermaid
 flowchart TD
-    REQ["POST /webhook/{source_id}"] --> CFG{来源配置存在?}
+    REQ["POST /webhook/source_id"] --> CFG{来源配置存在}
     CFG -->|否| E404[404 Not Found]
     CFG -->|是| AUTH{认证方式}
 
-    AUTH -->|无 secret 内网信任| PASS[放行]
-    AUTH -->|HMAC-SHA256| SIG{X-Hub-Signature-256 验签}
-    AUTH -->|规划: API Token| TOK{"X-Api-Token 比对"}
-    AUTH -->|规划: IP 白名单| IP{来源 IP 在白名单?}
+    AUTH -->|无secret内网信任| PASS[放行]
+    AUTH -->|HMAC-SHA256| SIG{X-Hub-Signature-256验签}
+    AUTH -->|规划API Token| TOK{X-Api-Token比对}
+    AUTH -->|规划IP白名单| IP{来源IP在白名单}
 
     SIG -->|通过| PASS
     SIG -->|失败| E403A[403 Forbidden]
@@ -65,7 +65,7 @@ flowchart TD
 
     PASS --> EXTRACT["消息提取 message_template"]
     EXTRACT -->|成功| AL[agent_loop]
-    EXTRACT -->|失败降级| FALLBACK["JSON 序列化整个 payload"]
+    EXTRACT -->|失败降级| FALLBACK["JSON序列化整个payload"]
     FALLBACK --> AL
 ```
 
@@ -75,7 +75,7 @@ flowchart TD
 flowchart TD
     TRIGGER[任务触发] --> EXEC["agent_loop.run"]
     EXEC -->|成功| LOG_OK["执行日志 status=success"]
-    EXEC -->|失败| RETRY{重试次数 < 最大上限?}
+    EXEC -->|失败| RETRY{重试次数未超上限}
 
     RETRY -->|是| WAIT[等待重试间隔] --> EXEC
     RETRY -->|否| DL{兜底方式}
