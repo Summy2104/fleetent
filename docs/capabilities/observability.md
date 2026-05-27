@@ -26,17 +26,17 @@ flowchart TD
     AL -->|"log_run / log"| EL["eval_logger"]
     EL --> TJ[("data/traces.jsonl")]
 
-    AL -->|规划: 结构化日志| LM["Log Manager"]
-    LM -->|JSON 格式| LF[("data/logs/YYYY-MM-DD.log")]
-    LM -->|"warn/error/fatal"| EF[("data/logs/YYYY-MM-DD.error.log")]
-    LM -->|"human-readable + 颜色"| CON["终端 Console"]
-
-    subgraph 规划
-        LM
-        LF
-        EF
-        CON
+    subgraph 规划中
+        LM["Log Manager"]
+        LF[("data/logs/日期.log")]
+        EF[("data/logs/日期.error.log")]
+        CON["终端 Console"]
     end
+
+    AL -->|结构化日志| LM
+    LM -->|JSON 格式| LF
+    LM -->|warn以上| EF
+    LM -->|彩色文本| CON
 ```
 
 ### 日志级别漏斗
@@ -46,14 +46,14 @@ flowchart TD
     ALL([所有日志事件]) --> S{当前级别}
 
     S -->|silent| DROP[全部丢弃]
-    S -->|fatal 及以上| FA[fatal]
-    S -->|error 及以上| ER[error]
-    S -->|warn 及以上| WA[warn]
-    S -->|info 及以上| IN[info]
-    S -->|debug 及以上| DE[debug]
+    S -->|"fatal ~"| FA[fatal]
+    S -->|"error ~"| ER[error]
+    S -->|"warn ~"| WA[warn]
+    S -->|"info ~"| IN[info]
+    S -->|"debug ~"| DE[debug]
     S -->|trace| TR[trace]
 
-    FA --> OUT([写文件 / 输出终端])
+    FA --> OUT([写文件 输出终端])
     ER --> OUT
     WA --> OUT
     IN --> OUT
@@ -66,22 +66,22 @@ flowchart TD
 ```mermaid
 flowchart LR
     subgraph NOW[现状字段]
-        N1[ts]
-        N2[input / reply]
-        N3[messages]
-        N4[elapsed_s]
-        N5[tokens]
-        N6[model_used]
-        N7[user_id / agent_name]
+        N1["ts"]
+        N2["input, reply"]
+        N3["messages"]
+        N4["elapsed_s"]
+        N5["tokens"]
+        N6["model_used"]
+        N7["user_id, agent_name"]
     end
 
     subgraph PLAN[规划新增字段]
-        P1[session_id / source]
-        P2[level / logger]
-        P3[duration_ms]
-        P4[timing 耗时分解]
-        P5[steps 每轮 token]
-        P6[sources 来源标注]
+        P1["session_id, source"]
+        P2["level, logger"]
+        P3["duration_ms"]
+        P4["timing 耗时分解"]
+        P5["steps 每轮 token"]
+        P6["sources 来源标注"]
     end
 
     NOW -->|扩展| PLAN
