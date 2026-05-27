@@ -166,7 +166,25 @@ async def delete(document_id: str) -> None:
 
 ## 现状
 
-尚未实现。
+团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移代码**，而非从零重写。
+
+**可直接迁移（knowledge-bridge 已实现，无 LlamaIndex 依赖）**：
+- ✅ 文档解析器：HTML / Markdown / PDF / DOCX / PPTX / Google Docs / Google Sheets / 图片（换输出类型即可）
+- ✅ Confluence 连接器：分页、增量同步、限速逻辑
+- ✅ Google Drive 连接器：OAuth 2.0 认证、Service Account、变更 token 增量同步、Webhook
+- ✅ 本地目录连接器
+- ✅ 中文 BM25 分词：jieba + RagFlow 方式（`retrieval/lexical.py`）
+- ✅ 同步规划器：6 种动作模型（SKIP / UPSERT_METADATA_ONLY / REEMBED / RECHUNK_LOCAL / REFETCH_AND_REINDEX / DELETE_LOCAL）
+
+**需要重写（深度耦合 LlamaIndex 或违反 fleetent 约束）**：
+- 向量存储：LanceDB → fleetent `vector_store`（sqlite-vec / Qdrant）
+- Embedding：OpenAI Embeddings API（云托管，禁止）→ 自托管 bge-m3 / multilingual-e5
+- 分块器：逻辑参考 knowledge-bridge，但 `TextNode` 类型替换为 fleetent 自定义 dataclass
+- 检索引擎：逻辑参考，接口对齐 `search()` / `graph_search()`
+
+**全新实现（knowledge-bridge 没有）**：
+- 实体与关系提取（`kb_extraction` task）
+- 图谱存储（entities / relations 表）与 `graph_search()`
 
 ## 规划中（v1.0）
 
