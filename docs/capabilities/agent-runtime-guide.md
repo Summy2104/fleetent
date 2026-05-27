@@ -825,28 +825,39 @@ MCP 服务在处理请求时可以反过来调用平台的 AI 能力。此功能
 
 ```mermaid
 flowchart TD
-    subgraph enable["启用控制（双层）"]
-        CFG["settings.yaml\nsandbox.mode"] --> CHK{Docker 可用?}
-        CHK -->|否| OFF["自动降级 off\nrun_code 不注册"]
-        CHK -->|是| MODE{mode}
+    subgraph startup["平台启动"]
+        BOOT[平台启动] --> SCAN[扫描遗留沙箱容器]
+        SCAN --> RM[销毁孤儿容器]
+        RM --> READY[平台就绪]
+    end
+
+    subgraph enable["启用控制（双层，每次调用时检查）"]
+        READY --> REQ[run_code 被调用]
+        REQ --> DOCKER{Docker 可用?}
+        DOCKER -->|否| OFF[拒绝：代码执行不可用]
+        DOCKER -->|是| MODE{全局模式}
         MODE -->|off| OFF
-        MODE -->|selective| FEAT{"agent.features\n.code_execution"}
-        MODE -->|all| ON[run_code 可用]
-        FEAT -->|true| ON
-        FEAT -->|false| OFF
+        MODE -->|selective| AGENT{agent 是否开启\n代码执行权限?}
+        MODE -->|all| LC
+        AGENT -->|是| LC[进入生命周期管理]
+        AGENT -->|否| OFF
     end
 
-    subgraph lifecycle["生命周期（scope=run 默认）"]
-        START["run() 开始"] --> CREATE["create_workspace(run_id)\n启动容器"]
-        CREATE --> EXEC["exec() 执行代码"]
-        EXEC -->|超时| TERM[SIGTERM → SIGKILL]
-        EXEC -->|完成| RET[返回结果]
-        TERM & RET --> DESTROY["run() 结束 → destroy"]
-    end
+    subgraph lifecycle["生命周期管理（scope 决定容器存活粒度）"]
+        LC --> SCOPE{scope 配置}
+        SCOPE -->|"run（默认）"| CR["每次任务开始\n新建容器"]
+        SCOPE -->|session| CS["首次调用时新建\n同 session 内复用"]
+        SCOPE -->|shared| CSH[复用全局长期容器]
 
-    subgraph cleanup["孤儿容器清理"]
-        BOOT[平台启动] --> SCAN["扫描 sandbox-* 容器"]
-        SCAN --> RM[销毁遗留容器]
+        CR & CS & CSH --> RUN[在容器内执行代码]
+        RUN -->|正常完成| RET[返回执行结果]
+        RUN -->|超时| KILL["SIGTERM → SIGKILL\n强制终止"]
+        KILL --> RET
+
+        RET --> WHEN{何时销毁容器?}
+        WHEN -->|"scope=run"| DR[任务结束立即销毁]
+        WHEN -->|"scope=session"| DS[session 结束时销毁]
+        WHEN -->|"scope=shared"| DSH["idle 超时后销毁\n（默认 2 小时）"]
     end
 ```
 
