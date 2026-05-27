@@ -42,47 +42,50 @@ flowchart TD
 ### 日志级别漏斗
 
 ```mermaid
-flowchart TD
-    ALL[所有日志事件]
-    ALL --> S{当前级别?}
+flowchart LR
+    ALL([所有日志事件]) --> S{当前级别}
 
-    S -->|silent| DROP1[🚫 全部丢弃]
-    S -->|fatal| F[fatal]
-    S -->|error| F & E[error]
-    S -->|warn| F & E & W[warn]
-    S -->|info| F & E & W & I[info]
-    S -->|debug| F & E & W & I & D[debug]
-    S -->|trace| F & E & W & I & D & T[trace]
+    S -->|silent| DROP[全部丢弃]
 
-    F & E & W & I & D & T --> OUT[写入文件 / 输出终端]
+    S -->|fatal| FA[fatal]
+    S -->|error| FA & ER[error]
+    S -->|warn|  FA & ER & WA[warn]
+    S -->|info|  FA & ER & WA & IN[info]
+    S -->|debug| FA & ER & WA & IN & DE[debug]
+    S -->|trace| FA & ER & WA & IN & DE & TR[trace]
+
+    FA --> OUT([写文件 / 输出终端])
+    ER --> OUT
+    WA --> OUT
+    IN --> OUT
+    DE --> OUT
+    TR --> OUT
 ```
 
 ### Trace 字段结构（现状 → 规划）
 
 ```mermaid
-erDiagram
-    TRACE_NOW {
-        string ts
-        string input
-        string reply
-        array  messages
-        float  elapsed_s
-        object tokens_prompt_completion_total
-        string model_used
-        string user_id
-        string agent_name
-    }
-    TRACE_PLANNED {
-        string  session_id
-        string  source
-        string  level
-        string  logger
-        integer duration_ms
-        object  timing_memory_llm_tool
-        array   steps
-        array   sources
-    }
-    TRACE_NOW ||--o{ TRACE_PLANNED : "扩展"
+flowchart LR
+    subgraph NOW[现状字段]
+        N1[ts]
+        N2[input / reply]
+        N3[messages]
+        N4[elapsed_s]
+        N5[tokens]
+        N6[model_used]
+        N7[user_id / agent_name]
+    end
+
+    subgraph PLAN[规划新增字段]
+        P1[session_id / source]
+        P2[level / logger]
+        P3[duration_ms]
+        P4[timing 耗时分解]
+        P5[steps 每轮 token]
+        P6[sources 来源标注]
+    end
+
+    NOW -->|扩展| PLAN
 ```
 
 ---
