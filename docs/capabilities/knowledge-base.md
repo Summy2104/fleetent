@@ -174,6 +174,7 @@ async def delete(document_id: str) -> None:
   - **文件直传**：管理员通过 API 直接上传文件（Markdown / 纯文本 / PDF）
   - **Confluence Server/DC**：通过 Confluence REST API 拉取页面，使用 `atlassian-python-api`
   - **本地目录**：扫描指定目录，监听文件变更，适合 NFS / 共享盘场景
+  - **Google Drive**：通过 Drive API v3 拉取文件，使用 `google-api-python-client`；Google Docs 通过 Export API 导出为 HTML 再解析；需要 per-tenant OAuth 2.0 token 存储与刷新
   - 新增数据源只需实现 `DataSource` 接口，不改核心导入逻辑
 
 - [ ] **文档解析**：将原始文件内容转换为干净文本，再进入分块流程
@@ -264,4 +265,5 @@ async def delete(document_id: str) -> None:
 - [ ] 图提取时机：与分块同批次触发，还是分块后单独排队？大文档图提取耗时较长，影响何时可检索。（负责人：待认领）
 - [ ] PDF 解析库选型：`pymupdf`（轻量，仅 PDF）还是 `unstructured`（重但覆盖更多格式）？如需支持 DOCX/PPTX 等格式，`unstructured` 更合适。（负责人：待认领）
 - [ ] Confluence 连接器认证方式：API Token（Confluence Cloud）vs Basic Auth（Server/DC）？优先支持哪种？（负责人：待认领）
+- [ ] Google Drive OAuth token 存储：token 存在哪里（SQLite per-tenant）？刷新失败时如何通知管理员重新授权？（负责人：待认领）
 - [ ] 数据源同步策略：连接器是全量重新导入，还是增量同步（只处理变更文档）？（负责人：待认领）
