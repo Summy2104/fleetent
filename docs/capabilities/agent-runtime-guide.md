@@ -32,6 +32,39 @@
 >
 > **当前状态**：基础执行跑通；预算管理、取消信号、循环检测、错误分类尚未实现。
 
+**关键流程**
+
+```mermaid
+flowchart TD
+    subgraph entry["入口层"]
+        E1["run()\n完整返回"]
+        E2["run_stream()\n流式输出"]
+        E3["run_sync()\n同步阻塞"]
+    end
+
+    subgraph loop["主循环"]
+        A[组装消息 + 工具列表] --> B[调用 LLM]
+        B --> C{响应类型}
+        C -->|tool_use| D[调度工具]
+        D --> E[追加 tool_result]
+        E --> A
+        C -->|end_turn| F[返回最终结果]
+        B -->|429 / 503| G[切换 fallback 模型]
+        G --> B
+    end
+
+    subgraph stop["强制终止（计划中）"]
+        S1[步数超限]
+        S2["预算耗尽 → Grace Call"]
+        S3[外部取消]
+        S4[循环检测]
+        S5[连续失败]
+    end
+
+    E1 & E2 & E3 --> A
+    S1 & S2 & S3 & S4 & S5 -->|强制终止| F
+```
+
 ---
 
 ### 1.1 主循环执行　⚡ 部分实现
@@ -220,6 +253,31 @@ AI 单轮可能同时请求调用多个工具，是逐个执行还是同时执�
 > 工具来源分三类：**内置工具**（平台开发者编写，随平台发布）、**插件工具**（企业或团队自行扩展，无需改平台代码）、**MCP 外部服务**（通过协议接入，仅需配置）。
 >
 > **当前状态**：注册机制、风险分级、访问控制已完成；插件工具机制、调用超时保护、结果截断、守卫机制、参数消毒尚未实现。
+
+**关键流程**
+
+```mermaid
+flowchart TD
+    subgraph register["注册（平台启动时）"]
+        R1["src/fleetent/tools/\n@tool 自动扫描"] -->|"source=builtin"| REG
+        R2["plugins/{name}/\nplugin.yaml + @tool"] -->|"source=plugin\n自动命名空间"| REG
+        R3["MCP 服务连接\nconfig 声明"] -->|"source=mcp\nserver__tool"| REG[工具注册表]
+    end
+
+    subgraph dispatch["调用（运行时）"]
+        LLM[LLM 返回 tool_use] --> AC1{"插件可见性\n第一层"}
+        AC1 -->|"不在 agent.plugins"| DENY[拒绝]
+        AC1 -->|通过| AC2{"allowed_tools 白名单\n第二层"}
+        AC2 -->|不在白名单| DENY
+        AC2 -->|通过| RISK{风险等级}
+        RISK -->|low| EXEC[执行工具]
+        RISK -->|"medium / high"| APPR[等待人工审批]
+        APPR -->|批准| EXEC
+        APPR -->|拒绝| DENY
+        EXEC --> FMT["结果格式化\n写入时面包屑压缩（2.6）"]
+        FMT --> CTX[写入 context]
+    end
+```
 
 ---
 
@@ -478,6 +536,32 @@ AI 调用工具之前需要知道这个工具「能做什么、接受什么参�
 >
 > **当前状态**：基础扫描和关键词匹配可用；渐进式加载、热更新、安全审计、禁用机制均未实现。
 
+**关键流程**
+
+```mermaid
+flowchart TD
+    subgraph scan["启动时扫描"]
+        DIR["skills/ 目录\n递归扫描 SKILL.md"] --> PARSE["解析 frontmatter\nname / description / keywords"]
+        PARSE --> IDX["L1 索引\n全量 name + 摘要"]
+    end
+
+    subgraph match["请求时匹配"]
+        INPUT[用户输入] --> KW{"关键词匹配\nLayer 0（当前实现）"}
+        KW -->|命中| L2
+        KW -->|未命中| LLMR["aux LLM 路由\n读取 L1 摘要\n计划中"]
+        LLMR -->|有匹配| L2[加载 L2 全文]
+        LLMR -->|无匹配| NONE[不注入 Skill]
+        L2 --> REF{"L3 引用文件\n按需加载（计划中）"}
+        REF --> SYS[注入 system prompt]
+    end
+
+    subgraph conflict["多 Skill 命中（计划中）"]
+        MULTI[多个 Skill 匹配] --> CHK{指令是否冲突}
+        CHK -->|否| ALL["全部注入 L1\n最高匹配注入 L2"]
+        CHK -->|"exclusive=true"| ASK[询问用户选择]
+    end
+```
+
 ---
 
 ### 3.1 Skill 扫描与发现　⚡ 部分实现
@@ -595,6 +679,31 @@ Skill 文件是由人工编写的，存在被植入恶意内容的风险（诱�
 >
 > **当前状态**：本地和远程服务接入、工具注册已完成；健康检查、标准会话管理、OAuth 认证、运行时降级尚未完整实现。
 
+**关键流程**
+
+```mermaid
+flowchart TD
+    subgraph conn["启动时连接"]
+        CFG["config: mcp_servers"] --> T1["stdio transport\n子进程 stdin/stdout"]
+        CFG --> T2["HTTP transport\nPOST + SSE"]
+        T1 & T2 --> INIT[initialize 握手]
+        INIT -->|成功| NS["工具注册\nserver__tool 命名空间"]
+        INIT -->|失败| DEG["降级：屏蔽该服务工具\n不阻断平台启动"]
+    end
+
+    subgraph runtime["运行时调用"]
+        CALL[LLM 调用 MCP 工具] --> AUTH[认证 token]
+        AUTH --> REQ[发送请求]
+        REQ -->|成功| RET[返回结果]
+        REQ -->|"超时 / 失败"| DEG2["降级处理\ndegrade / strict / silent"]
+    end
+
+    subgraph health["健康维护（计划中）"]
+        PING[周期性 ping] -->|失败| RECON["指数退避重连\n1s→2s→4s→60s"]
+        RECON -->|多次失败| PERM[标记永久不可用]
+    end
+```
+
 ---
 
 ### 4.1 本地服务接入（stdio）　✅ 已完成
@@ -711,6 +820,35 @@ MCP 服务在处理请求时可以反过来调用平台的 AI 能力。此功能
 > **生命周期**：沙箱按 `scope` 配置决定存活粒度（`run / session / shared`），平台启动时清理上次崩溃遗留的孤儿容器。
 >
 > **当前状态**：Docker 沙箱基本运行，资源限制生效；生命周期管理、启用/关闭控制、环境变量过滤、输出截断、执行超时保护尚未实现。
+
+**关键流程**
+
+```mermaid
+flowchart TD
+    subgraph enable["启用控制（双层）"]
+        CFG["settings.yaml\nsandbox.mode"] --> CHK{Docker 可用?}
+        CHK -->|否| OFF["自动降级 off\nrun_code 不注册"]
+        CHK -->|是| MODE{mode}
+        MODE -->|off| OFF
+        MODE -->|selective| FEAT{"agent.features\n.code_execution"}
+        MODE -->|all| ON[run_code 可用]
+        FEAT -->|true| ON
+        FEAT -->|false| OFF
+    end
+
+    subgraph lifecycle["生命周期（scope=run 默认）"]
+        START["run() 开始"] --> CREATE["create_workspace(run_id)\n启动容器"]
+        CREATE --> EXEC["exec() 执行代码"]
+        EXEC -->|超时| TERM[SIGTERM → SIGKILL]
+        EXEC -->|完成| RET[返回结果]
+        TERM & RET --> DESTROY["run() 结束 → destroy"]
+    end
+
+    subgraph cleanup["孤儿容器清理"]
+        BOOT[平台启动] --> SCAN["扫描 sandbox-* 容器"]
+        SCAN --> RM[销毁遗留容器]
+    end
+```
 
 ---
 
@@ -895,6 +1033,30 @@ sandbox:
 >
 > **当前状态**：基础压缩流程可用（单阈值触发 + LLM 摘要 + 保留最近消息）；分层保留策略、增量摘要、工具结果预修剪、可追溯记录均未完整实现。
 
+**关键流程**
+
+```mermaid
+flowchart TD
+    subgraph write["写入时处理（2.6，每次工具调用后）"]
+        TOOL[工具返回结果] --> SIZE{"结果大小"}
+        SIZE -->|"≤ 4000 tokens"| WR[直接写入 context]
+        SIZE -->|"> 4000 tokens"| TR["截断 + 保留关键标识符"]
+        WR & TR --> TURN{进入下一轮?}
+        TURN -->|是| BREAD["旧 tool_result\n降级为面包屑"]
+        TURN -->|否| ACTIVE[当轮完整保留]
+    end
+
+    subgraph compress["压缩时（token > Tmax 触发）"]
+        TRIG["token 超过 Tmax"] --> PRUNE["轻量预清理（6.5）\n图片占位 / 重复去重"]
+        PRUNE --> SPLIT[切分三段]
+        SPLIT --> HEAD["头部\n系统提示 + 初始意图\n完整保留"]
+        SPLIT --> MID["中段\naux LLM 摘要\n含工具调用面包屑"]
+        SPLIT --> TAIL["尾部\n最近 N tokens\n完整保留"]
+        HEAD & MID & TAIL --> FIX["工具对完整性检查\n补占位 / 移孤立 result"]
+        FIX --> NEW["新 context\n压至 Tretained"]
+    end
+```
+
 ---
 
 ### 6.1 触发条件（双阈值）　⚡ 部分实现
@@ -1026,6 +1188,27 @@ sandbox:
 > 不属于某一个具体功能，但贯穿所有模块的基础能力。这些是平台「可治理」主张的支柱——让每次 AI 运行都可追溯、可审批、可控成本、可安全停止。
 >
 > **当前状态**：运行日志和审批门已实现；成本预算、错误分类、取消传播尚未实现。
+
+**关键流程**
+
+```mermaid
+flowchart LR
+    LOOP["核心循环\n每一轮"] -->|"每轮写入"| TRACE
+    LOOP -->|"预算检查"| BUDGET
+    LOOP -->|"监听信号"| CANCEL
+
+    TOOL["工具调用\n每次"] -->|"写入事件"| TRACE
+    TOOL -->|"medium/high 风险"| APPR
+    TOOL -->|"异常时"| ERR
+
+    subgraph cross["横切能力（贯穿所有模块）"]
+        TRACE["7.1 Trace\nappend-only JSONL\nPII 脱敏"]
+        APPR["7.2 审批门\nasyncio.Event\n超时默拒"]
+        BUDGET["7.3 成本预算\nrun/session/user\nagent/global 五层"]
+        ERR["7.4 错误分类\n12+ 枚举\n携带恢复策略标志"]
+        CANCEL["7.5 取消传播\ncancel token 单向流\ncooperative + 硬 deadline"]
+    end
+```
 
 ---
 
