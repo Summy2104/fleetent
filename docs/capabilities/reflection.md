@@ -16,7 +16,7 @@
 - **knowledge base reflection**：per-tenant，观察知识库使用质量，上报缺口与问题，不自动写回
 
 **调用关系**：
-- 依赖：traces.jsonl（情节记忆数据源）、memory_layer（读取与写回）、skill_registry（读取现有 skill）、knowledge_base（只读，查询召回质量）、permission_gate（prod 环境 skill 变更审批）、config
+- 依赖：`traces` 表（情节记忆数据源，SQLite）、memory_layer（读取与写回）、skill_registry（读取现有 skill）、knowledge_base（只读，查询召回质量）、permission_gate（prod 环境 skill 变更审批）、config
 - 被依赖：cron_scheduler（定期触发）
 
 ## 关键流程
@@ -32,7 +32,7 @@ flowchart TD
     end
 
     subgraph skill["skill reflection（per-agent，定期触发）"]
-        E[cron_scheduler] --> F[读取 traces.jsonl]
+        E[cron_scheduler] --> F[读取 traces 表\n按 agent_id + 时间窗口过滤]
         F --> G[LLM 分析：高频 pattern / 低效 skill]
         G --> H{环境？}
         H -->|dev| I[直接更新 skills/ 文件]

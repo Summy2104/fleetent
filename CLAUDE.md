@@ -108,9 +108,14 @@ src/fleetent/
 
 ```
 data/
-  users.db                        # SQLite — gitignored
-  users/{user_id}/memories.jsonl  # per-user 记忆 — gitignored
-  traces.jsonl                    # eval 日志 — gitignored
+  users.db                        # SQLite 主库 — gitignored
+    ├── users / im_users / agents / user_agents / channel_agents
+    ├── scheduled_tasks / approvals
+    ├── traces                    # eval 日志（append-only，按 agent_id/user_id/时间可查）
+    ├── memory_items              # per-user 语义记忆（v1.0，替换 memories.jsonl）
+    ├── documents / chunks / chunks_fts / entities / relations  # knowledge_base（v1.0）
+    └── skill_proposals / kb_reflection_reports                 # reflection（v1.0）
+  users/{user_id}/memories.jsonl  # per-user 记忆（当前实现，v1.0 前迁移到 users.db）
 ```
 
 测试用 `tmp_path + monkeypatch` 隔离，绝不触碰 `data/`。
