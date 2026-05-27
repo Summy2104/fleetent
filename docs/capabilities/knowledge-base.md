@@ -33,7 +33,7 @@ flowchart TD
     subgraph hybrid_search["混合检索（由 long_term_ctx 触发）"]
         K[search query + scope] --> L[并行]
         L --> L1[vector_store.search\n语义检索]
-        L --> L2[FTS5 全文检索\n关键词精确匹配]
+        L --> L2[BM25 检索\n关键词精确匹配\n实现：SQLite FTS5]
         L1 --> M[RRF 融合排序]
         L2 --> M
         M --> N[返回 KnowledgeChunk 列表]
@@ -159,7 +159,7 @@ async def delete(document_id: str) -> None:
 
 - [ ] **混合检索（Hybrid Search）**：BM25 关键词检索与向量语义检索并行，RRF 融合排序后返回
   - 对外接口不变：`search(query: str, scope: str) → list[KnowledgeChunk]`
-  - BM25 使用 SQLite FTS5（内置，无需额外服务），擅长精确词匹配（产品编号、人名、专有名词）
+  - BM25 擅长精确词匹配（产品编号、人名、专有名词），当前实现使用 SQLite FTS5（内置，无需额外服务）
   - 向量检索负责语义相似度和同义词
   - RRF（Reciprocal Rank Fusion）合并两路排序结果，无需调权重参数
 
