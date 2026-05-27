@@ -278,20 +278,20 @@ uv run python tests/smoke/smoke.py
 
 ## Internals
 
-Per-module deep dives in [`docs/internals/`](docs/internals/):
+Per-module deep dives in [`docs/internals/`](docs/archive/internals/):
 
 | Doc | Covers |
 |-----|--------|
-| [agent_loop.md](docs/internals/agent_loop.md) | Loop structure, run/run_stream/run_sync differences, is_sub_agent filtering, streaming tool_call accumulation |
-| [tool_registry.md](docs/internals/tool_registry.md) | @tool decorator, dispatch, MCP naming convention, access control |
-| [memory_layer.md](docs/internals/memory_layer.md) | Extract/inject flow, per-user JSONL, haiku extraction, known caveats |
-| [model_router.md](docs/internals/model_router.md) | Route config, sync vs async clients, provider switching |
-| [eval_logger.md](docs/internals/eval_logger.md) | log_run vs log, JSONL format, _serialize duck typing |
-| [context_mgr.md](docs/internals/context_mgr.md) | Token compression, identity-check gotcha in _keep_tail |
-| [session_mgr.md](docs/internals/session_mgr.md) | Atomic writes, per-session asyncio.Lock, test isolation |
-| [sub_agent.md](docs/internals/sub_agent.md) | asyncio.gather parallelism, max depth 1, partial failure handling |
-| [mcp_client.md](docs/internals/mcp_client.md) | Registration flow, double-underscore naming, auth, runtime dispatch |
-| [im_gateway.md](docs/internals/im_gateway.md) | NormalizedMessage, route() pipeline, session_id derivation per platform |
+| [agent_loop.md](docs/archive/internals/agent_loop.md) | Loop structure, run/run_stream/run_sync differences, is_sub_agent filtering, streaming tool_call accumulation |
+| [tool_registry.md](docs/archive/internals/tool_registry.md) | @tool decorator, dispatch, MCP naming convention, access control |
+| [memory_layer.md](docs/archive/internals/memory_layer.md) | Extract/inject flow, per-user JSONL, haiku extraction, known caveats |
+| [model_router.md](docs/archive/internals/model_router.md) | Route config, sync vs async clients, provider switching |
+| [eval_logger.md](docs/archive/internals/eval_logger.md) | log_run vs log, JSONL format, _serialize duck typing |
+| [context_mgr.md](docs/archive/internals/context_mgr.md) | Token compression, identity-check gotcha in _keep_tail |
+| [session_mgr.md](docs/archive/internals/session_mgr.md) | Atomic writes, per-session asyncio.Lock, test isolation |
+| [sub_agent.md](docs/archive/internals/sub_agent.md) | asyncio.gather parallelism, max depth 1, partial failure handling |
+| [mcp_client.md](docs/archive/internals/mcp_client.md) | Registration flow, double-underscore naming, auth, runtime dispatch |
+| [im_gateway.md](docs/archive/internals/im_gateway.md) | NormalizedMessage, route() pipeline, session_id derivation per platform |
 
 ## License
 

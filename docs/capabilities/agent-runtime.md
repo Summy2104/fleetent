@@ -7,7 +7,7 @@
 核心 agent 执行引擎，负责 LLM 调用、工具执行、Skill 注入、上下文管理。是其他所有能力域的执行基础。
 
 **调用关系**：
-- 依赖：model_router、tool_registry、skill_registry、context_mgr、memory_layer、eval_logger、session_mgr
+- 依赖：model_router、tool_registry、skill_registry、context_mgr、long_term_ctx、eval_logger、session_mgr
 - 被依赖：server.py（HTTP 路径）、normalizer（IM 路径）、cron_scheduler（定时路径）
 
 ## 现状
@@ -33,6 +33,7 @@
 - ✅ **Docker 沙箱代码执行**：run_code 工具通过 Docker 隔离执行
   - --network none --memory 256m --cpus 0.5 --read-only
   - 执行完毕自动清理容器
+  - 降级方案（宿主机无 `/dev/kvm`）：Docker + gVisor runtime + seccomp profile，隔离级别较低，需在部署文档中注明
 
 - ✅ **Skill 注入**：用户输入关键词匹配 SKILL.md description，命中后注入 system prompt
   - server 启动时 scan()，CLI 每次调用时 scan()
@@ -45,6 +46,7 @@
 - ✅ **sub_agent 并行**：asyncio.gather 并发执行多个子 agent
   - 最大深度 1，sub_agent 内过滤 sub_agent 工具防递归
   - 每个子 agent 使用全新上下文
+  - child trace 记录 `parent_session_id` 字段，可通过 traces.jsonl 追踪完整调用链
 
 ## 规划中（v1.0）
 
