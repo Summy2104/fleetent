@@ -56,9 +56,9 @@ flowchart TD
 skill_proposals (
   id           TEXT PRIMARY KEY,  -- UUID
   agent_id     TEXT,              -- 目标 agent
-  skill_name   TEXT,              -- skill 文件名（不含路径）
-  action       TEXT,              -- "create" | "update"
-  content      TEXT,              -- 新的 skill 内容
+  skill_path   TEXT,              -- skill 目录相对路径，如 "summarizer" 或 "tools/code_runner"
+  action       TEXT,              -- "create" | "update" | "delete"
+  snapshot     TEXT,              -- JSON {files: {rel_path: content}}；delete 时为 NULL
   rationale    TEXT,              -- 变更理由（来自 LLM 分析）
   status       TEXT,              -- "pending" | "approved" | "rejected"
   created_at   DATETIME,
@@ -104,10 +104,11 @@ async def run_kb_reflection(scope: str) -> None:
   - 合并语义重复条目
   - 修正已知冲突（比较 identity / preferences 类条目间的矛盾）
 
-- [ ] **skill reflection**：分析 per-agent traces，生成或改进 skill
-  - 发现高频重复的 prompt pattern，提炼为新 skill
-  - 识别现有 skill 的低效用法，生成改进版本
-  - 可创建新 skill，也可修改现有 skill
+- [ ] **skill reflection**：分析 per-agent traces，生成、改进或删除 skill
+  - `create`：发现高频重复的 prompt pattern，提炼为新 skill
+  - `update`：识别现有 skill 的低效用法，生成改进版本
+  - `delete`：skill 长期未被触发、与其他 skill 高度重复、或持续产生负面效果时，提议删除
+  - skill 可以是单文件，也可以是含脚本、模板的多级目录；`snapshot` 字段统一存储整个目录的文件快照（JSON），审批时展示完整新状态，应用时直接覆盖写入
 
 - [ ] **knowledge base reflection**：观察知识库使用质量，只上报不写回
   - 知识空白检测：用户频繁提问但召回质量差 → 上报"该类内容可能缺失"
@@ -142,12 +143,17 @@ async def run_kb_reflection(scope: str) -> None:
 - When：skill reflection 定期任务触发
 - Then：skill 文件直接更新，无需审批
 
-**场景 5：知识空白上报**
+**场景 5：skill 删除提案（prod）**
+- Given：某 agent 的某个 skill 在过去 N 天 traces 中从未被触发
+- When：skill reflection 定期任务触发
+- Then：生成一条 action 为 "delete" 的提案，snapshot 为 NULL，管理员 approve 后 skill 目录被删除
+
+**场景 6：知识空白上报**
 - Given：用户连续多次提问某类话题，knowledge_base.search() 返回的 chunk 相关度持续低于阈值
 - When：knowledge base reflection 定期任务触发
 - Then：生成一条上报记录，注明话题类型和问题频次，管理员可查看
 
-**场景 6：陈旧内容标记**
+**场景 7：陈旧内容标记**
 - Given：某个 chunk 在过去 N 天内从未被召回
 - When：knowledge base reflection 定期任务触发
 - Then：该 chunk 被标记为"待审查"，管理员可决定保留或删除，知识库内容本身不被自动修改
@@ -157,8 +163,10 @@ async def run_kb_reflection(scope: str) -> None:
 **需要单元测试的行为**：
 - memory reflection 过期清理：TTL 超期条目被移除，未超期条目保留
 - memory reflection 冲突合并：两条矛盾 identity 条目合并为一，不产生重复
-- skill reflection prod 路径：生成 skill_proposals 记录，状态为 pending，不直接写文件
-- skill reflection dev 路径：skill 文件直接更新，不写 proposals 表
+- skill reflection prod create/update：生成 skill_proposals 记录（snapshot 含完整文件），状态 pending，不直接写文件
+- skill reflection prod delete：生成 skill_proposals 记录（snapshot 为 NULL），状态 pending，不直接删文件
+- skill reflection dev 路径：skill 文件直接写入或删除，不写 proposals 表
+- snapshot 完整性：create/update 的 snapshot 包含 skill 目录下所有文件，不遗漏
 - kb reflection 上报：低召回查询触发 gap 类型报告，写入 kb_reflection_reports
 - reflection 不阻塞：三个 run_*() 函数均为 fire-and-forget，不阻塞调度器
 
