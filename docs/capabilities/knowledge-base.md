@@ -6,13 +6,127 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**负责**：文档导入与分块、向量索引构建、按查询召回相关文档片段。
+**负责**：文档导入与分块、向量索引构建、实体与关系提取、图谱存储、按查询召回相关文档片段（支持向量检索和图增强检索）。
 
 **不负责**：注入 system prompt 的协调与 token 预算（→ long_term_ctx）、用户个人记忆（→ memory）。
 
 **调用关系**：
-- 依赖：vector_store（向量索引）、config
-- 被依赖：long_term_ctx（检索注入内容）
+- 依赖：vector_store（向量索引）、model_router（`kb_extraction` task，实体提取）、config
+- 被依赖：long_term_ctx（检索注入内容）、reflection（只读，观察召回质量）
+
+## 关键流程
+
+```mermaid
+flowchart TD
+    subgraph ingest["导入流程（异步，导入请求立即返回）"]
+        A[管理员上传文档] --> B[写入 documents 表]
+        B --> C[立即返回 document_id]
+        B --> D[后台：分块]
+        D --> E[写入 chunks 表]
+        E --> F[vector_store.upsert\nchunk_id + content + scope]
+        D --> G[LLM 提取实体与关系]
+        G --> H[写入 entities 表]
+        G --> I[写入 relations 表]
+        H --> J[vector_store.upsert\nentity_id + description + scope]
+    end
+
+    subgraph vector_search["向量检索（由 long_term_ctx 触发）"]
+        K[search query + scope] --> L[vector_store.search]
+        L --> M[按 chunk_id 查 chunks 表]
+        M --> N[返回 KnowledgeChunk 列表]
+    end
+
+    subgraph graph_search["图增强检索（关系型查询）"]
+        O[graph_search query + scope] --> P[vector_store.search entities]
+        P --> Q[匹配相关实体]
+        Q --> R[遍历 relations 表\n按 depth 展开]
+        R --> S[收集关联 chunk]
+        S --> T[返回 KnowledgeGraphResult]
+    end
+```
+
+## 数据模型
+
+```sql
+-- 文档元数据
+documents (
+  id          TEXT PRIMARY KEY,  -- UUID
+  filename    TEXT,
+  scope       TEXT,              -- tenant_id 或 agent_id，用于隔离
+  format      TEXT,              -- "markdown" | "text" | "pdf"
+  created_at  DATETIME,
+  updated_at  DATETIME
+)
+
+-- 分块内容
+chunks (
+  id          TEXT PRIMARY KEY,  -- UUID，同时作为 vector_store 的 key
+  document_id TEXT,              -- → documents.id
+  content     TEXT,              -- chunk 文本
+  position    INTEGER,           -- chunk 在文档中的顺序
+  created_at  DATETIME
+)
+
+-- 实体（从文档中 LLM 提取）
+entities (
+  id          TEXT PRIMARY KEY,  -- UUID，同时作为 vector_store 的 key
+  document_id TEXT,              -- → documents.id，来源文档
+  name        TEXT,              -- 实体名称
+  type        TEXT,              -- 实体类型（person / org / concept / product / ...）
+  description TEXT,              -- 实体描述，作为 embedding 文本
+  scope       TEXT,              -- 与 documents.scope 一致，用于隔离
+  created_at  DATETIME
+)
+
+-- 关系（实体间关系，从文档中 LLM 提取）
+relations (
+  id          TEXT PRIMARY KEY,  -- UUID
+  source_id   TEXT,              -- → entities.id
+  target_id   TEXT,              -- → entities.id
+  relation    TEXT,              -- 关系描述（如 "负责" / "属于" / "依赖"）
+  document_id TEXT,              -- → documents.id，关系来源文档
+  created_at  DATETIME
+)
+```
+
+向量 embedding 存储在 vector_store，namespace 格式为 `kb_{scope}`：
+- chunk 向量：以 `chunk.id` 为 key
+- entity 向量：以 `entity.id` 为 key（用于图检索入口定位）
+
+## 接口定义
+
+```python
+@dataclass
+class KnowledgeChunk:
+    id: str
+    document_id: str
+    filename: str
+    content: str
+    score: float  # vector_store 返回的相似度分数
+
+
+@dataclass
+class KnowledgeGraphResult:
+    chunks: list[KnowledgeChunk]   # 关联的文档片段
+    entities: list[str]            # 匹配到的实体名称（展示用）
+    relations: list[str]           # 关系描述列表（如 "A 负责 B"，展示用）
+
+
+async def ingest(filename: str, content: bytes, format: str, scope: str) -> str:
+    """导入文档，异步执行分块、embedding 和图提取。立即返回 document_id，后台处理不阻塞。"""
+
+
+async def search(query: str, scope: str, limit: int = 10) -> list[KnowledgeChunk]:
+    """向量相似度检索，返回最相关的文档片段。适合事实型问答。由 long_term_ctx 调用。"""
+
+
+async def graph_search(query: str, scope: str, depth: int = 2) -> KnowledgeGraphResult:
+    """图增强检索：定位相关实体后按关系展开，返回关联片段与关系链。适合关系型查询。由 long_term_ctx 调用。"""
+
+
+async def delete(document_id: str) -> None:
+    """删除文档及其所有 chunk、实体、关系和对应向量。"""
+```
 
 ## 现状
 
@@ -22,14 +136,26 @@
 
 - [ ] **文档导入**：支持将文档导入知识库
   - 支持格式：Markdown、纯文本、PDF
-  - 导入后异步处理（分块 + embedding），不阻塞调用方
+  - 导入后异步处理（分块 + embedding + 图提取），不阻塞调用方
 
-- [ ] **分块与向量索引**：文档内容分块后 embedding，写入共享 vector_store
-  - 每个 chunk 保留来源文档信息（文件名、chunk 位置）
+- [ ] **分块与向量索引**：文档内容分块后写入 vector_store
+  - 每个 chunk 保留来源文档信息（filename、position）
+  - 分块策略见待决问题
+
+- [ ] **实体与关系提取**：分块完成后，用 LLM 从文档提取实体和关系写入图谱
+  - 使用 model_router 的 `kb_extraction` task，默认路由到轻量模型
+  - entity 描述同时写入 vector_store，用于图检索的入口定位
+  - 提取在后台执行，与分块并行触发
 
 - [ ] **向量相似度检索**：根据查询召回最相关的文档片段
-  - 对外接口：`search(query: str, scope: str) → List[KnowledgeChunk]`
-  - 由 long_term_ctx 在对话开始时调用
+  - 对外接口：`search(query: str, scope: str) → list[KnowledgeChunk]`
+  - 适合事实型问答（"X 是什么？"）
+
+- [ ] **图增强检索**：从相关实体出发，按关系图谱展开，收集关联 chunk
+  - 对外接口：`graph_search(query: str, scope: str, depth: int) → KnowledgeGraphResult`
+  - 适合关系型查询（"X 和 Y 是什么关系？"、"谁负责 Z？"）
+  - depth 控制关系展开层数，默认 2 层，防止结果爆炸
+  - 图数据存储在 SQLite（entities + relations 表），不需要独立图数据库
 
 - [ ] **作用域隔离**：支持 per-tenant 或 per-agent 两种隔离粒度
   - per-tenant：整个租户共享同一知识库
@@ -45,15 +171,43 @@
 **场景 2：导入不阻塞**
 - Given：管理员上传一份较大的 PDF
 - When：导入请求返回
-- Then：API 立即返回成功，分块与 embedding 在后台执行
+- Then：API 立即返回 document_id，分块与 embedding 在后台执行
 
 **场景 3：作用域隔离**
-- Given：agent A 和 agent B 分别绑定不同知识库
+- Given：agent A 和 agent B 分别绑定不同 scope 的知识库
 - When：两个 agent 分别检索相同 query
-- Then：各自只召回自己作用域内的文档片段，互不干扰
+- Then：各自只召回自己 scope 内的文档片段，互不干扰
+
+**场景 4：文档删除**
+- Given：已导入并可检索的文档
+- When：管理员调用 delete(document_id)
+- Then：该文档的所有 chunk 及其实体、关系不再出现在任何检索结果中
+
+**场景 5：图增强检索返回关系链**
+- Given：知识库中有文档描述 "Alice 负责项目 Orion，Bob 是 Alice 的上级"
+- When：用户提问 "谁可以审批 Orion 项目？"
+- Then：graph_search 通过实体 "Orion" → 关系 "负责" → "Alice" → 关系 "上级" → "Bob" 展开，返回包含 Bob 和审批信息的相关 chunk
+
+## 测试边界
+
+**需要单元测试的行为**：
+- 导入异步性：ingest() 立即返回，分块、embedding 和图提取均在后台执行
+- scope 隔离：不同 scope 的检索结果（向量和图）互不干扰
+- delete 级联：删除文档后对应 chunk、entity、relation 均不出现在检索结果中
+- chunk 来源关联：KnowledgeChunk 返回正确的 filename 和 position
+- 图遍历 depth：graph_search(depth=1) 只返回直接关联实体，不展开二级
+- graph_search scope 隔离：不同 scope 的实体和关系不互通
+
+**需要 mock 的依赖**：
+- `vector_store`：隔离向量索引读写
+- `model_router.get_async_client_and_config`：隔离实体提取 LLM 调用
+- SQLite DB 路径：`monkeypatch` 到 `tmp_path`，绝不触碰 data/
 
 ## 待决问题
 
 - [ ] 分块策略：固定 token 大小（如 512 tokens，overlap 50）vs 语义分块（按段落/标题）？（负责人：待认领）
-- [ ] 文档更新机制：重新导入同名文档时覆盖旧 chunk，还是版本化保留？（负责人：待认领）
+- [ ] 文档更新机制：重新导入同名文档时覆盖旧 chunk 和图数据，还是版本化保留？（负责人：待认领）
 - [ ] 默认作用域粒度：per-tenant 还是 per-agent？（负责人：待认领）
+- [ ] 实体类型预定义：实体类型（person / org / concept 等）由 LLM 自由生成，还是预定义枚举？自由生成灵活但类型不一致，预定义可控但覆盖不全。（负责人：待认领）
+- [ ] graph_search 与 search 的调用决策：由 long_term_ctx 根据 query 类型选择，还是总是并行调用两者再合并？（负责人：待认领）
+- [ ] 图提取时机：与分块同批次触发，还是分块后单独排队？大文档图提取耗时较长，影响何时可检索。（负责人：待认领）

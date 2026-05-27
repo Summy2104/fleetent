@@ -21,15 +21,17 @@
 flowchart TD
     A[agent_loop 调用 build_context] --> B[并行检索]
     B --> C[memory_layer.search]
-    B --> D[knowledge_base.search]
-    C --> E[合并结果]
-    D --> E
-    E --> F[按相关度排序，memory 条目优先]
-    F --> G{超出 token 预算？}
-    G -->|是| H[截断低优先级条目]
-    G -->|否| I[格式化为注入文本]
-    H --> I
-    I --> J[返回 str]
+    B --> D[knowledge_base.search\n向量检索]
+    B --> E[knowledge_base.graph_search\n图增强检索，关系型 query 时触发]
+    C --> F[合并结果]
+    D --> F
+    E --> F
+    F --> G[按相关度排序，memory 条目优先]
+    G --> H{超出 token 预算？}
+    H -->|是| I[截断低优先级条目]
+    H -->|否| J[格式化为注入文本]
+    I --> J
+    J --> K[返回 str]
 ```
 
 ## 接口定义
@@ -49,7 +51,8 @@ async def build_context(user_id: str, query: str, agent_id: str) -> str:
 
 ## 规划中（v1.0）
 
-- [ ] **并行检索**：asyncio.gather 同时调用 memory_layer.search() 和 knowledge_base.search()，不串行等待
+- [ ] **并行检索**：asyncio.gather 同时调用 memory_layer.search()、knowledge_base.search() 和（按需）knowledge_base.graph_search()，不串行等待
+  - graph_search 触发条件见待决问题
 
 - [ ] **优先级合并**：memory 条目优先于 knowledge 条目
   - 同等相关度时，用户个人记忆排在通用文档前
@@ -102,3 +105,4 @@ async def build_context(user_id: str, query: str, agent_id: str) -> str:
 - [ ] token 预算默认值：注入长期上下文的 token 上限设多少？（负责人：待认领）
 - [ ] memory 与 knowledge 的 token 分配：各自固定比例，还是完全按相关度动态分配？（负责人：待认领）
 - [ ] 格式化模板：memory 和 knowledge 区段的具体格式由谁定义，是否需要可配置？（负责人：待认领）
+- [ ] graph_search 触发决策：由调用方传入 query_type 标记，还是 long_term_ctx 内部判断（如关键词检测）？（与 knowledge-base 待决问题对齐，负责人：待认领）
