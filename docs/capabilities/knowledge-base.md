@@ -6,7 +6,7 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**负责**：文档导入与分块、向量索引构建、实体与关系提取、图谱存储、按查询召回相关文档片段（支持向量检索和图增强检索）。
+**负责**：数据源接入与文档获取、文档解析与分块、向量索引构建、实体与关系提取、图谱存储、按查询召回相关文档片段（支持混合检索和图增强检索）。
 
 **不负责**：注入 system prompt 的协调与 token 预算（→ long_term_ctx）、用户个人记忆（→ memory）。
 
@@ -18,11 +18,17 @@
 
 ```mermaid
 flowchart TD
+    subgraph connector["连接器流程（定时或手动触发）"]
+        C1[DataSource.list_documents] --> C2[DataSource.fetch]
+        C2 --> C3[knowledge_base.ingest\nfilename + content + format + scope]
+    end
+
     subgraph ingest["导入流程（异步，导入请求立即返回）"]
-        A[管理员上传文档] --> B[写入 documents 表]
+        A[ingest 调用] --> B[写入 documents 表]
         B --> C[立即返回 document_id]
         B --> D[后台：分块]
         D --> E[写入 chunks 表]
+        E --> E2[同步写入 chunks_fts\nBM25 索引]
         E --> F[vector_store.upsert\nchunk_id + content + scope]
         D --> G[LLM 提取实体与关系]
         G --> H[写入 entities 表]
@@ -57,6 +63,8 @@ documents (
   filename    TEXT,
   scope       TEXT,              -- tenant_id 或 agent_id，用于隔离
   format      TEXT,              -- "markdown" | "text" | "pdf"
+  source      TEXT,              -- 来源标识（"upload" | "confluence" | "local_dir" | ...）
+  source_url  TEXT,              -- 原始文档 URL 或路径（可选，供溯源用）
   created_at  DATETIME,
   updated_at  DATETIME
 )
@@ -107,6 +115,24 @@ relations (
 
 ```python
 @dataclass
+class DocumentRef:
+    id: str        # 数据源内的唯一标识（如 Confluence page_id）
+    filename: str  # 文件名或标题
+    format: str    # "markdown" | "text" | "pdf" | "html"
+    url: str       # 原始文档 URL 或路径（供溯源）
+
+
+class DataSource:
+    """数据源连接器基类，每种数据源实现此接口。"""
+
+    async def list_documents(self) -> list[DocumentRef]:
+        """列举数据源中所有可导入的文档。"""
+
+    async def fetch(self, ref: DocumentRef) -> bytes:
+        """获取文档原始内容。"""
+
+
+@dataclass
 class KnowledgeChunk:
     id: str
     document_id: str
@@ -144,8 +170,19 @@ async def delete(document_id: str) -> None:
 
 ## 规划中（v1.0）
 
-- [ ] **文档导入**：支持将文档导入知识库
-  - 支持格式：Markdown、纯文本、PDF
+- [ ] **数据源连接器**：通过统一 `DataSource` 接口接入不同来源的文档
+  - **文件直传**：管理员通过 API 直接上传文件（Markdown / 纯文本 / PDF）
+  - **Confluence Server/DC**：通过 Confluence REST API 拉取页面，使用 `atlassian-python-api`
+  - **本地目录**：扫描指定目录，监听文件变更，适合 NFS / 共享盘场景
+  - 新增数据源只需实现 `DataSource` 接口，不改核心导入逻辑
+
+- [ ] **文档解析**：将原始文件内容转换为干净文本，再进入分块流程
+  - Markdown / 纯文本：直接处理，无需额外依赖
+  - PDF：使用 `pymupdf`（轻量，仅处理 PDF）
+  - HTML（来自 Confluence 等）：使用 `beautifulsoup4` 清洗标签
+  - 解析结果统一为纯文本，再交给分块逻辑
+
+- [ ] **文档导入**：解析后的文本写入知识库
   - 导入后异步处理（分块 + embedding + 图提取），不阻塞调用方
 
 - [ ] **分块与向量索引**：文档内容分块后写入 vector_store
@@ -225,3 +262,6 @@ async def delete(document_id: str) -> None:
 - [ ] 实体类型预定义：实体类型（person / org / concept 等）由 LLM 自由生成，还是预定义枚举？自由生成灵活但类型不一致，预定义可控但覆盖不全。（负责人：待认领）
 - [ ] graph_search 与 search 的调用决策：由 long_term_ctx 根据 query 类型选择，还是总是并行调用两者再合并？（负责人：待认领）
 - [ ] 图提取时机：与分块同批次触发，还是分块后单独排队？大文档图提取耗时较长，影响何时可检索。（负责人：待认领）
+- [ ] PDF 解析库选型：`pymupdf`（轻量，仅 PDF）还是 `unstructured`（重但覆盖更多格式）？如需支持 DOCX/PPTX 等格式，`unstructured` 更合适。（负责人：待认领）
+- [ ] Confluence 连接器认证方式：API Token（Confluence Cloud）vs Basic Auth（Server/DC）？优先支持哪种？（负责人：待认领）
+- [ ] 数据源同步策略：连接器是全量重新导入，还是增量同步（只处理变更文档）？（负责人：待认领）
