@@ -19,6 +19,80 @@
 - 依赖：traces.jsonl（情节记忆数据源）、memory_layer（读取与写回）、skill_registry（读取现有 skill）、knowledge_base（只读，查询召回质量）、permission_gate（prod 环境 skill 变更审批）、config
 - 被依赖：cron_scheduler（定期触发）
 
+## 关键流程
+
+三条反射流程相互独立，分别调度。
+
+```mermaid
+flowchart TD
+    subgraph mem["memory reflection（per-user，定期触发）"]
+        A[cron_scheduler] --> B[读取 memory_items]
+        B --> C[LLM 分析：过期 / 重复 / 冲突]
+        C --> D[写回清理后的记忆]
+    end
+
+    subgraph skill["skill reflection（per-agent，定期触发）"]
+        E[cron_scheduler] --> F[读取 traces.jsonl]
+        F --> G[LLM 分析：高频 pattern / 低效 skill]
+        G --> H{环境？}
+        H -->|dev| I[直接更新 skills/ 文件]
+        H -->|prod| J[写入 skill_proposals 表\n状态 pending]
+        J --> K[permission_gate 审批]
+        K -->|approve| I
+    end
+
+    subgraph kb["knowledge base reflection（per-tenant，定期触发）"]
+        L[cron_scheduler] --> M[读取检索质量日志]
+        M --> N[分析：低召回 / 未命中 / 陈旧 chunk]
+        N --> O[写入 kb_reflection_reports 表]
+        O --> P[管理员查看并决策\n知识库内容不自动修改]
+    end
+```
+
+## 数据模型
+
+```sql
+-- skill 变更提案（dev 直接跳过，prod 需要审批）
+skill_proposals (
+  id           TEXT PRIMARY KEY,  -- UUID
+  agent_id     TEXT,              -- 目标 agent
+  skill_name   TEXT,              -- skill 文件名（不含路径）
+  action       TEXT,              -- "create" | "update"
+  content      TEXT,              -- 新的 skill 内容
+  rationale    TEXT,              -- 变更理由（来自 LLM 分析）
+  status       TEXT,              -- "pending" | "approved" | "rejected"
+  created_at   DATETIME,
+  resolved_at  DATETIME
+)
+
+-- knowledge base 反射上报
+kb_reflection_reports (
+  id           TEXT PRIMARY KEY,  -- UUID
+  scope        TEXT,              -- tenant_id 或 agent_id
+  report_type  TEXT,              -- "gap" | "stale" | "co_occurrence"
+  description  TEXT,              -- 上报描述
+  evidence     TEXT,              -- 证据 JSON（查询样本、低分 chunk ID 等）
+  status       TEXT,              -- "pending" | "reviewed"
+  created_at   DATETIME,
+  reviewed_at  DATETIME
+)
+```
+
+## 接口定义
+
+```python
+async def run_memory_reflection(user_id: str) -> None:
+    """清理并合并指定用户的记忆：移除过期条目、合并重复、修正冲突。由 cron_scheduler 触发。"""
+
+
+async def run_skill_reflection(agent_id: str) -> None:
+    """分析 agent traces，生成 skill 变更提案（prod）或直接更新 skill 文件（dev）。"""
+
+
+async def run_kb_reflection(scope: str) -> None:
+    """分析知识库检索质量，将缺口 / 陈旧内容写入 kb_reflection_reports。不修改知识库内容。"""
+```
+
 ## 现状
 
 尚未实现。
@@ -79,6 +153,22 @@
 - Given：某个 chunk 在过去 N 天内从未被召回
 - When：knowledge base reflection 定期任务触发
 - Then：该 chunk 被标记为"待审查"，管理员可决定保留或删除，知识库内容本身不被自动修改
+
+## 测试边界
+
+**需要单元测试的行为**：
+- memory reflection 过期清理：TTL 超期条目被移除，未超期条目保留
+- memory reflection 冲突合并：两条矛盾 identity 条目合并为一，不产生重复
+- skill reflection prod 路径：生成 skill_proposals 记录，状态为 pending，不直接写文件
+- skill reflection dev 路径：skill 文件直接更新，不写 proposals 表
+- kb reflection 上报：低召回查询触发 gap 类型报告，写入 kb_reflection_reports
+- reflection 不阻塞：三个 run_*() 函数均为 fire-and-forget，不阻塞调度器
+
+**需要 mock 的依赖**：
+- `model_router.get_async_client_and_config`：隔离所有 LLM 分析调用
+- `memory_layer`：注入可控的记忆数据，隔离写回操作
+- `skill_registry`：隔离 skill 文件读写
+- SQLite DB 路径：`monkeypatch` 到 `tmp_path`
 
 ## 待决问题
 

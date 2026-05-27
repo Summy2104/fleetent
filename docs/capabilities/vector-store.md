@@ -108,5 +108,8 @@ async def delete(id: str, namespace: str) -> None:
 ## 待决问题
 
 - [ ] 默认后端选型：开发用 sqlite-vec，生产用 Qdrant，通过 config 切换——确认这是唯一方案还是需要其他选项？（负责人：待认领）
-- [ ] embedding 模型加载方式：进程启动时预加载到内存，还是每次调用按需加载？（负责人：待认领）
+- [ ] embedding 模型运行方式：in-process（fleetent 主进程内加载 bge-m3）还是 HTTP sidecar（`infinity_emb` / `text-embeddings-inference` 独立进程，vector_store 调 HTTP 接口）？
+  - in-process：部署简单，但 bge-m3 约 500MB-1GB 内存、冷启动 30-60s，影响主进程重启体验
+  - HTTP sidecar：多 fleetent 实例可共享同一 embedding 服务，主进程重启不影响 embedding；两者均完全自托管
+  - 建议接口设计为 HTTP endpoint，开发时用本地 `infinity_emb`，生产时独立部署——现在决定，后续不改接口（负责人：待认领）
 - [ ] namespace 命名规范：`mem_{user_id}` 和 `kb_{tenant_id}` 是否最终方案？（负责人：待认领）
