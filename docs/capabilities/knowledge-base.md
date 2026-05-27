@@ -225,9 +225,11 @@ async def delete(document_id: str) -> None:
   - depth 控制关系展开层数，默认 2 层，防止结果爆炸
   - 图数据存储在 SQLite（entities + relations 表），不需要独立图数据库
 
-- [ ] **作用域隔离**：支持 per-tenant 或 per-agent 两种隔离粒度
-  - per-tenant：整个租户共享同一知识库
-  - per-agent：不同 agent 使用不同知识库，适合多业务线场景
+- [ ] **作用域隔离**：通过多 KB + agent 绑定实现访问控制
+  - 按内容敏感度或部门建立多个 KB（如 Company-Wide / Engineering / HR / Finance）
+  - agent 绑定到一个或多个 KB，检索时只访问绑定的 KB
+  - 公共内容放 Company-Wide KB，多个 agent 同时绑定；部门内容放部门 KB，只有对应 agent 可见
+  - 真正高度敏感的数据（个人薪资、绩效记录等）不进知识库，由结构化系统管理
 
 ## 验收标准
 
@@ -285,3 +287,4 @@ async def delete(document_id: str) -> None:
 - [ ] Confluence 连接器认证方式：API Token（Confluence Cloud）vs Basic Auth（Server/DC）？优先支持哪种？（负责人：待认领）
 - [ ] Google Drive OAuth token 存储：token 存在哪里（SQLite per-tenant）？刷新失败时如何通知管理员重新授权？（负责人：待认领）
 - [ ] 数据源同步策略：连接器是全量重新导入，还是增量同步（只处理变更文档）？（负责人：待认领）
+- [ ] 文档级 ACL（v2.0）：当前用多 KB + agent 绑定控制访问。如需更细粒度（同一 KB 内不同文档对不同用户可见），需引入文档级权限字段和检索时过滤逻辑。（负责人：待认领）
