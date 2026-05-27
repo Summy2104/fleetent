@@ -6,40 +6,43 @@
 
 让每次 agent 运行可查、可分析、可排障。面向运维人员和管理员，不面向最终用户。
 
+**负责**：记录每次 agent 运行的完整 trace、token 用量、耗时；提供日志查询和统计工具。
+
+**不负责**：业务逻辑的正确性（→ agent_loop）、告警通知（→ 外部监控系统）。
+
 **调用关系**：
 - 依赖：`eval_logger`、`config`
 - 被依赖：`agent_loop`（写 trace）、`server.py`（未来的统计 API）
 
----
+## 关键流程
 
-## 架构图
-
-### 日志数据流
+两条独立流程：请求结束后写 trace，管理员随时查询日志。
 
 ```mermaid
 flowchart TD
-    A["HTTP /chat"] --> AL["agent_loop.run"]
-    B["Slack / Telegram"] --> AL
-    C["Cron 定时任务"] --> AL
-    D["Webhook"] --> AL
+    subgraph trace["Trace 写入（每次请求结束后）"]
+        A["HTTP /chat"] --> AL["agent_loop.run"]
+        B["Slack / Telegram"] --> AL
+        C["Cron 定时任务"] --> AL
+        D["Webhook"] --> AL
+        AL -->|"log_run / log"| EL["eval_logger"]
+        EL --> TJ[("data/traces.jsonl")]
+    end
 
-    AL -->|"log_run / log"| EL["eval_logger"]
-    EL --> TJ[("data/traces.jsonl")]
-
-    subgraph 规划中
+    subgraph log["结构化日志（规划中）"]
         LM["Log Manager"]
         LF[("data/logs/日期.log")]
         EF[("data/logs/日期.error.log")]
         CON["终端 Console"]
+        LM -->|JSON 格式| LF
+        LM -->|warn以上| EF
+        LM -->|彩色文本| CON
     end
 
     AL -->|结构化日志| LM
-    LM -->|JSON 格式| LF
-    LM -->|warn以上| EF
-    LM -->|彩色文本| CON
 ```
 
-### 日志级别漏斗
+日志级别过滤示意（`~` 表示「该级别及以上」均会输出）：
 
 ```mermaid
 flowchart TD
@@ -61,33 +64,67 @@ flowchart TD
     TR --> OUT
 ```
 
-### Trace 字段结构（现状 → 规划）
+## 数据模型
 
-```mermaid
-flowchart LR
-    subgraph NOW[现状字段]
-        N1["ts"]
-        N2["input, reply"]
-        N3["messages"]
-        N4["elapsed_s"]
-        N5["tokens"]
-        N6["model_used"]
-        N7["user_id, agent_name"]
-    end
+Trace 以 append-only JSONL 写入，无固定 schema，字段按函数不同而异：
 
-    subgraph PLAN[规划新增字段]
-        P1["session_id, source"]
-        P2["level, logger"]
-        P3["duration_ms"]
-        P4["timing 耗时分解"]
-        P5["steps 每轮 token"]
-        P6["sources 来源标注"]
-    end
-
-    NOW -->|扩展| PLAN
+```
+data/traces.jsonl          -- 所有 agent 运行记录，一行一条 JSON
+data/logs/YYYY-MM-DD.log        -- 规划中：全量结构化日志
+data/logs/YYYY-MM-DD.error.log  -- 规划中：仅 warn / error / fatal
 ```
 
----
+`log_run()` 写入字段：
+
+```
+ts, input, reply, messages, elapsed_s,
+tokens { prompt, completion, total },
+model_used, user_id, agent_name
+```
+
+`log()`（IM 感知）写入字段：
+
+```
+ts, user_id, messages, reply,
+platform, session_id, channel_id, thread_id, message_id
+```
+
+规划中的结构化日志字段：
+
+```
+timestamp, level, logger, session_id, user_id,
+agent_name, model, source, tokens, duration_ms, message
+-- fatal / error 额外附带 file, line
+```
+
+## 接口定义
+
+```python
+def log_run(
+    user_input: str,
+    reply: str,
+    messages: list[Any],
+    elapsed_s: float,
+    usage: CompletionUsage | None = None,
+    model_used: str | None = None,
+    user_id: str | None = None,
+    agent_name: str | None = None,
+) -> None:
+    """追加一条 agent 运行 trace 到 data/traces.jsonl。由 agent_loop.run() 在结束后调用。"""
+
+
+def log(
+    user_id: str,
+    messages: list[Any],
+    response: str,
+    platform: str | None = None,
+    session_id: str | None = None,
+    channel_id: str | None = None,
+    thread_id: str | None = None,
+    message_id: str | None = None,
+) -> None:
+    """追加一条 IM 感知的 trace 条目，包含平台和会话上下文。"""
+```
 
 ## 现状
 
@@ -97,9 +134,7 @@ flowchart LR
 
 - ✅ **流式 token 统计**：流式响应模式下正确记录完整的 input/output token 用量，trace 中 `tokens` 不为空
 
----
-
-## 规划中
+## 规划中（v1.0）
 
 ### 日志级别
 
@@ -115,32 +150,11 @@ flowchart LR
     - `trace`：逐函数调用级（原始 Webhook payload、每次 LLM chunk、heartbeat）
   - `fatal` / `error` 额外附带 `file`（报错文件名）和 `line`（行号）
 
-### 日志字段规范
-
-- [ ] **结构化字段**：每条日志包含以下字段
-
-  | 字段 | 说明 | 示例 |
-  |------|------|------|
-  | `timestamp` | 时间戳，精确到毫秒 | `2026-05-26T14:32:01.123+08:00` |
-  | `level` | 日志级别 | `info` |
-  | `logger` | 产生日志的模块 | `agent_loop` / `mcp_client` / `server` |
-  | `session_id` | 会话 ID | `sess-abc123` |
-  | `user_id` | 触发本次操作的用户 | `user-uuid-xxx` |
-  | `agent_name` | 处理本次请求的 agent | `support-bot` |
-  | `model` | 实际使用的模型 | `claude-sonnet-4-6` |
-  | `source` | 触发来源 | `slack` / `webhook` / `cli` / `cron` |
-  | `tokens` | 本次消耗 token | `{"prompt": 512, "completion": 128}` |
-  | `duration_ms` | 操作耗时（毫秒） | `1340` |
-  | `message` | 日志内容 | `tool calculate called` |
-
-  - 非 agent 运行类日志（启动、配置加载等）中 `session_id` / `user_id` / `agent_name` / `model` / `tokens` / `duration_ms` 留空
-  - `fatal` / `error` 额外附带 `file` 和 `line`
-
 ### 日志输出
 
 - [ ] **按日期滚动**：日志按天写入 `data/logs/`，每天两份：
-  - `data/logs/2026-05-25.log` — 全量日志，所有级别
-  - `data/logs/2026-05-25.error.log` — 仅 `warn` / `error` / `fatal`，方便排错
+  - `data/logs/YYYY-MM-DD.log` — 全量日志，所有级别
+  - `data/logs/YYYY-MM-DD.error.log` — 仅 `warn` / `error` / `fatal`，方便排错
   - 文件内时间戳精确到 HH:MM:SS
 
 - [ ] **双通道输出**：日志同时写入文件和终端，两个通道独立配置
@@ -183,27 +197,16 @@ flowchart LR
 - [ ] **`fleetent-admin log` 命令**：无需直接操作文件
 
   ```bash
-  # 查看最新 N 行日志
-  fleetent-admin log tail [--n 100]
-
-  # 实时跟踪，持续输出新日志
-  fleetent-admin log follow
-
-  # 按条件过滤查询（可任意组合）
-  fleetent-admin log query [--user <user_id>] [--agent <agent_name>] [--level warn] [--keyword <text>] [--n 200]
-
-  # 动态调整运行中服务的日志级别（无需重启）
-  fleetent-admin log set-level <level>
-  fleetent-admin log set-level <level> --channel console
-  fleetent-admin log set-level <level> --channel file
+  fleetent-admin log tail [--n 100]                                              # 最新 N 行
+  fleetent-admin log follow                                                       # 实时跟踪
+  fleetent-admin log query [--user <id>] [--agent <name>] [--level warn] [--keyword <text>] [--n 200]
+  fleetent-admin log set-level <level> [--channel console|file]                  # 动态调整，无需重启
   ```
 
 ### 启动诊断
 
-- [ ] **服务启动失败时输出结构化诊断信息**，覆盖场景：API key 缺失/无效、数据库不可写、MCP server 连接失败、配置文件解析错误
+- [ ] **结构化诊断信息**：服务启动失败时输出具体原因，覆盖：API key 缺失/无效、数据库不可写、MCP server 连接失败、配置文件解析错误
   - 每条诊断包含：组件名、失败原因、建议修复步骤
-
----
 
 ## 验收标准
 
@@ -362,7 +365,18 @@ flowchart LR
 - When：服务启动完成（非致命，不退出）
 - Then：启动日志输出 `warn` 级别诊断，包含 server id 和连接失败原因
 
----
+## 测试边界
+
+**需要单元测试的行为**：
+- `log_run` 正确序列化所有字段并追加到 JSONL
+- `tokens` 为 `None` 时字段缺失（不写 `null`）
+- 日志级别过滤：低于当前级别的条目不写入文件，也不输出终端
+- 脱敏：含 `sk-*` / `ma-*` / `password` 字段的入参，写入前被替换为 `****`
+- 双通道：文件写入失败不抛异常、不影响终端输出
+
+**需要 mock 的依赖**：
+- 文件系统（`_LOG_PATH`）：`monkeypatch` 到 `tmp_path`，绝不触碰 `data/`
+- `time.strftime`：固定时间戳，保证断言确定性
 
 ## 待决问题
 
