@@ -7,7 +7,7 @@
 核心 agent 执行引擎，负责 LLM 调用、工具执行、Skill 注入、上下文管理。是其他所有能力域的执行基础。
 
 **调用关系**：
-- 依赖：model_router、tool_registry、skill_registry、context_mgr、memory_layer、eval_logger、session_mgr
+- 依赖：model_router、tool_registry、skill_registry、context_mgr、long_term_ctx、eval_logger、session_mgr
 - 被依赖：server.py（HTTP 路径）、normalizer（IM 路径）、cron_scheduler（定时路径）
 
 ## 现状

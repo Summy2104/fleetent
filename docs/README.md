@@ -11,6 +11,7 @@
 ```
 docs/
   README.md                       ← 本文件：导航 + 写作规范
+  strategy.md                     ← 战略背景：为什么做、卖什么、与竞品的差异
   architecture.md                 ← 总体架构：系统定位、模块关系、数据流、关键决策
   capabilities/
     _template.md                  ← 能力域文档模板（新建时复制）
