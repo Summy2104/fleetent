@@ -1,6 +1,6 @@
-# CLAUDE.md
+# fleetent
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+**定位**：面向企业 on-premises 部署的 Lean Agent 平台。Python + FastAPI，无 AI 框架依赖，支持 Slack / Telegram / WhatsApp，数据不出内网。
 
 **基础设施原则**：所有外部服务组件必须可自托管（self-hostable），数据不出客户内网。PostgreSQL、Redis、Qdrant、RabbitMQ 等有官方 Docker 镜像的基础设施组件均可引入；Pinecone Cloud、OpenAI Embeddings API 等云托管专有服务禁止使用。
 
@@ -55,41 +55,9 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 
 ---
 
-## 常用命令
-
-```bash
-uv sync                                          # 安装依赖
-uv run pytest                                    # 运行全部测试
-uv run pytest -x -q                             # fail-fast（TDD 用）
-uv run pytest tests/test_agent_loop.py -x -q    # 运行单个测试文件
-uv run pytest -k "test_function_name" -x -q     # 运行单个测试函数
-uv run pytest --cov=fleetent                    # 带覆盖率
-uv run ruff check src tests                      # lint
-uv run ruff format src tests                     # 格式化
-uv run mypy src                                  # 类型检查
-uv run fleetent "hello"                          # CLI 模式
-uv run fleetent-admin create-user --name "Alice" # 创建用户
-uvicorn fleetent.server:app --reload             # HTTP 服务（端口 8000）
-```
-
----
-
 ## 架构
 
-模块化单体，每个模块一个职责，边界清晰。核心数据流：
-
-```
-HTTP/IM → NormalizedMessage → agent_loop.run()
-                                 ├── load_memories()      # 跨 session 事实注入
-                                 ├── maybe_compress()     # token 压缩
-                                 ├── match_skill()        # SKILL.md 注入 system prompt
-                                 ├── model_router          # OpenAI-compatible client
-                                 └── tool_registry.dispatch()
-                                       ├── built-in tools
-                                       ├── MCP tools ({server}__{tool})
-                                       └── sub_agent (asyncio.gather, 最大深度 1)
-                              └── log_run() + extract_and_save()  # 结束后
-```
+模块化单体，每个模块一个职责，边界清晰。
 
 ```
 src/fleetent/
@@ -110,7 +78,7 @@ src/fleetent/
   im_user_store.py   ← (platform, platform_user_id) → 内部 User；allowlist 管理
   session_mgr.py     ← JSON session 持久化；per-session asyncio.Lock
   permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
-  sandbox_client.py  ← httpx client 封装：microsandbox MicroVM 隔离执行
+  sandbox_client.py  ← Docker CLI 封装：隔离 Python 执行
   mcp_client.py      ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
   sub_agent.py       ← asyncio.gather 并行子 agent；最大深度 1
   cron_scheduler.py  ← APScheduler 定时任务；server 启动时初始化
@@ -140,9 +108,14 @@ src/fleetent/
 
 ```
 data/
-  users.db                        # SQLite — gitignored
-  users/{user_id}/memories.jsonl  # per-user 记忆 — gitignored
-  traces.jsonl                    # eval 日志 — gitignored
+  users.db                        # SQLite 主库 — gitignored
+    ├── users / im_users / agents / user_agents / channel_agents
+    ├── scheduled_tasks / approvals
+    ├── traces                    # eval 日志（append-only，按 agent_id/user_id/时间可查）
+    ├── memory_items              # per-user 语义记忆（v1.0，替换 memories.jsonl）
+    ├── documents / chunks / chunks_fts / entities / relations  # knowledge_base（v1.0）
+    └── skill_proposals / kb_reflection_reports                 # reflection（v1.0）
+  users/{user_id}/memories.jsonl  # per-user 记忆（当前实现，v1.0 前迁移到 users.db）
 ```
 
 测试用 `tmp_path + monkeypatch` 隔离，绝不触碰 `data/`。
@@ -177,6 +150,7 @@ data/
 
 - **行长**：100（ruff 强制）
 - **类型注解**：mypy strict，所有公开函数必须有完整注解
+- **格式化**：提交前运行 `uv run ruff format src tests && uv run ruff check src tests`
 - **注释**：只写"为什么"，不写"做什么"；好命名能表达的不加注释
 - **Docstring**：Google 风格，只在公开 API 上写，内部函数不需要
 - **异常**：不吞异常，catch 后必须 log 或 re-raise
@@ -184,40 +158,37 @@ data/
 
 ---
 
+## 常用命令
+
+```bash
+uv sync                          # 安装依赖
+uv run pytest                    # 运行测试
+uv run pytest -x -q              # fail-fast
+uv run ruff check src tests      # lint
+uv run mypy src                  # 类型检查
+uv run fleetent "hello"        # CLI
+uv run fleetent-admin create-user --name "Alice"  # 用户管理
+uvicorn fleetent.server:app --reload  # HTTP 服务（端口 8000）
+```
+
+---
+
 ## 环境变量
 
-必需：
 ```
-ANTHROPIC_API_KEY      # 默认路由
+ANTHROPIC_API_KEY      # 默认路由必需
+FLEETENT_SKILLS_DIR  # 覆盖 skills/ 目录（默认 ./skills）
 ```
-
-可选（留空则对应功能禁用）：
-```
-SLACK_BOT_TOKEN / SLACK_APP_TOKEN        # 启用 Slack 适配器
-TELEGRAM_BOT_TOKEN                        # 启用 Telegram 适配器
-MICROSANDBOX_URL                          # sandbox MicroVM（默认 http://host.docker.internal:7777）
-FLEETENT_SKILLS_DIR                      # 覆盖 skills/ 目录（默认 ./skills）
-PERMISSION_GATE_MEDIUM_TIMEOUT_SECONDS   # 默认 300
-PERMISSION_GATE_HIGH_TIMEOUT_SECONDS     # 默认 3600
-```
-
-也可写入 `config/settings.yaml`（从 `config/settings.yaml.example` 复制）。
 
 ---
 
 ## Gotchas
 
-- `tools.py` 注册工具是 import 副作用——`agent_loop.py` 顶部必须 `import fleetent.tools`，否则 `get_schemas()` 返回空
+- `tools.py` 注册工具是 import 副作用——`agent_loop.py` 顶部必须 import，否则 `get_schemas()` 返回空
 - `skill_registry.scan()` 在服务启动时运行（FastAPI lifespan），不是每次请求；CLI `run()` 每次调用
 - `context_mgr._keep_tail()` 用 identity check（`m is tail[0]`），不用 `==`——内容相同的 dict 相等但非同一对象
 - Bearer token 格式：`Authorization: Bearer ma-<64hex>`——`ma-` 前缀区分服务 key 与模型 API key
 - `model_router.get_async_client_and_config()` 每次调用新建 client——故意的，client 无状态且廉价
+- `permission_gate` 测试需要短超时：`PermissionGate(medium_timeout=0.1)`
 - MCP 工具名用双下划线：`{server_id}__{tool_name}`——单下划线是工具名的一部分
 - `session_mgr` 原子写：`.json.tmp → rename`；测试中 monkeypatch `session_mgr.SESSIONS_DIR`
-- 切换 LLM provider：只需编辑 `model_router.py` 中的 `ROUTES`——agent loop、tool registry、memory layer 均 provider-agnostic
-
----
-
-## 深度文档
-
-`docs/internals/` 包含各模块的详细说明（loop 结构、streaming、MCP 注册流程、IM gateway session_id 派生等），遇到模块级疑问时优先查阅。
