@@ -1,190 +1,183 @@
 # Agent Runtime 模块验收测试用例
 
-> **定位**：模块级主流程验收场景，关注可观察的端到端行为。细粒度子功能场景见 [`agent-runtime-acceptance-criteria.md`](./agent-runtime-acceptance-criteria.md)。
+> **定位**：模块级主流程验收场景，关注可观察的端到端行为，不涉及实现细节。细粒度子功能场景见 [`agent-runtime-acceptance-criteria.md`](./agent-runtime-acceptance-criteria.md)。
 >
 > **格式**：每个场景采用 Given / When / Then 结构，聚焦主路径与关键失败路径。
->
-> **运行方式**：每条场景应能映射为一条集成测试或手动验收步骤；LLM 调用在自动化测试中 mock。
 
 ---
 
 ## 模块一：核心循环
 
 **场景 1.1：基本工具调用循环**
-- Given：用户发送「计算 2+3*4 并告知结果」，LLM 需调用 calculate 工具
-- When：调用 `agent_loop.run()`
-- Then：LLM 调用工具 → 工具返回结果 → LLM 生成最终回复；用户收到含计算结果的文本；trace 中含 `llm_call` 和 `tool_call` 事件
+- Given：用户发送「计算 2+3×4 并告知结果」
+- When：agent 开始处理
+- Then：agent 自动调用计算工具，获得结果后继续生成回复；用户最终收到包含正确计算结果的文本
 
-**场景 1.2：自然结束**
-- Given：用户发送「今天星期几」，LLM 无需工具即可回答
-- When：调用 `run()`
-- Then：循环在第一轮结束；trace 中 `finish_reason = natural_end`；用户收到直接回复
+**场景 1.2：无工具直接回复**
+- Given：用户发送「今天星期几」，agent 无需调用任何工具即可回答
+- When：agent 开始处理
+- Then：agent 直接生成回复，不触发任何工具调用；用户收到简短直接的回复
 
-**场景 1.3：模型 fallback**
-- Given：主模型配置为返回 429 限流，fallback 模型正常
-- When：调用 `run()`
-- Then：自动切换到 fallback 模型继续执行；用户收到正常回复；trace 中 `model_used` 记录实际使用的 fallback 模型
+**场景 1.3：主模型不可用自动切换**
+- Given：主模型当前不可用（限流或故障），配置了备用模型
+- When：用户发送消息
+- Then：agent 无感知地切换到备用模型，用户收到正常回复；运行记录中注明实际使用的模型
 
-**场景 1.4：步数预算触发 Grace Call**
-- Given：`max_turns=3`，任务实际需要 6 轮；LLM mock 为始终返回工具调用
-- When：调用 `run()`
-- Then：第 3 轮后触发 Grace Call（给 LLM 最后一次总结机会）；用户收到包含当前进展的回复，而非空响应；trace 中 `finish_reason = budget_exceeded`
+**场景 1.4：任务预算耗尽给出总结**
+- Given：当前任务已消耗到配置的最大步数上限，任务仍未完成
+- When：预算耗尽
+- Then：agent 不直接截断，而是给用户一个「当前已完成部分」的总结回复；用户不会收到空响应
 
-**场景 1.5：流式调用事件序列**
-- Given：用户消息触发一次工具调用
-- When：`async for event in run_stream()`
-- Then：事件序列依次包含 `text_delta`、`tool_start`、`tool_end`、`text_delta`、`done`；无事件乱序
+**场景 1.5：流式输出实时推送**
+- Given：用户通过 HTTP 接口发送消息，触发工具调用
+- When：agent 处理过程中
+- Then：用户端实时收到逐步推送的文字；工具执行完成后继续推送后续内容；整个过程连续不中断
 
 ---
 
 ## 模块二：工具
 
-**场景 2.1：内置工具正常调用**
-- Given：工具注册表中有 `calculate` 内置工具；LLM 请求调用该工具
-- When：`tool_registry.dispatch("calculate", {"expression": "100 / 4"})`
-- Then：返回 `25.0`；tool_result 写入 context；trace 中记录工具名、参数、结果、耗时
+**场景 2.1：内置工具正常执行**
+- Given：用户请求涉及文件读写或数学计算
+- When：agent 识别需要工具并发起调用
+- Then：工具执行成功，结果被 agent 引用并融入最终回复；运行记录中留有工具调用条目
 
-**场景 2.2：插件工具访问控制**
-- Given：`crm_tools` 插件已加载；agent A 的 `plugins: []`，agent B 的 `plugins: [crm_tools]`
-- When：两个 agent 分别尝试调用 `crm_tools__search_customer`
-- Then：agent A 调用被拦截，返回「工具不存在」；agent B 正常执行
+**场景 2.2：未授权插件工具无法调用**
+- Given：某 agent 未配置 CRM 插件权限；用户请求触发 CRM 相关工具调用
+- When：agent 尝试调用该工具
+- Then：调用被拦截；agent 收到「工具不可用」的反馈，并据此调整回复；不执行任何 CRM 操作
 
-**场景 2.3：高风险工具需审批**
-- Given：`write_file` 工具 `risk_level=high`；用户发送触发该工具的消息
-- When：LLM 请求调用 `write_file`
-- Then：执行暂停，用户收到审批请求；用户批准后工具执行并返回结果；用户拒绝后 LLM 收到「操作已拒绝」结果
+**场景 2.3：高风险操作等待审批**
+- Given：某工具被标记为高风险（如写入文件）；用户请求触发该工具
+- When：agent 准备调用
+- Then：执行暂停，用户收到审批请求；用户批准后工具执行并返回结果；用户拒绝后 agent 告知操作未执行
 
-**场景 2.4：工具调用超时**
-- Given：某工具执行时间超过配置超时上限（mock 为永不返回）
-- When：dispatch 该工具
-- Then：超时后返回包含超时说明的 tool_result；主循环继续；不抛出未捕获异常
+**场景 2.4：工具超时不中断任务**
+- Given：某工具执行时间超出上限（如调用外部接口无响应）
+- When：超时触发
+- Then：该工具调用以超时失败结束；agent 收到超时反馈后继续处理（可重试或提示用户）；整个任务不崩溃
 
-**场景 2.5：大结果写入时面包屑压缩**
-- Given：`read_file` 返回 5000 token 的文件内容；context 进入下一轮
-- When：下一轮开始，组装消息
-- Then：上一轮的 tool_result 已降级为面包屑格式（含文件路径和关键字段摘要）；完整内容不出现在新一轮 context 中
+**场景 2.5：大结果不占满对话空间**
+- Given：agent 读取了一个大文件（数千行），对话继续进行后续操作
+- When：后续轮次组装上下文
+- Then：上一轮的文件内容已自动压缩为关键摘要（含文件路径、核心字段）；不因单次大结果导致后续对话报错
 
 ---
 
 ## 模块三：Skill
 
-**场景 3.1：关键词命中注入**
-- Given：已加载 `crm_skill`，其 keywords 含「客户」；用户发送「帮我查一下这个客户的合同」
-- When：`run()` 开始前执行 Skill 匹配
-- Then：`crm_skill` 的 L2 全文被注入 system prompt；LLM 在该 Skill 指导下回复
+**场景 3.1：相关 Skill 自动注入**
+- Given：平台已加载「CRM 操作规范」Skill；用户发送「帮我查一下这个客户的合同」
+- When：agent 处理请求前
+- Then：该 Skill 的内容自动融入 agent 的处理上下文；agent 的回复符合 CRM Skill 中定义的操作规范
 
-**场景 3.2：无匹配不注入**
-- Given：已加载若干 Skill；用户发送「今天天气怎么样」（与所有 Skill 无关）
-- When：执行 Skill 匹配
-- Then：没有 Skill 注入 system prompt；LLM 以基础能力回复
+**场景 3.2：无关请求不注入 Skill**
+- Given：平台已加载若干业务 Skill；用户发送「今天天气怎么样」
+- When：agent 处理请求
+- Then：没有 Skill 被注入；agent 以通用能力回复，不引用任何业务规范
 
-**场景 3.3：多 Skill 命中共存**
-- Given：`crm_skill` 和 `hr_tools` 同时命中；两者无指令冲突
-- When：执行匹配
-- Then：两个 Skill 的 L1 摘要均注入 system prompt；置信度最高的 Skill 加载 L2 全文；LLM 可感知两个 Skill 的存在
+**场景 3.3：多个 Skill 同时可用**
+- Given：用户请求同时涉及「客户查询」和「合同审批」两个 Skill 的内容
+- When：agent 处理请求
+- Then：两个 Skill 对 agent 均可见；agent 的回复综合了两个 Skill 的指导，不遗漏任何一方
 
-**场景 3.4：Skill 热加载**
-- Given：平台运行中，管理员通过 admin CLI 新增一个 Skill 并触发重扫描
+**场景 3.4：运行中新增 Skill 立即生效**
+- Given：平台运行中，管理员新增一个 Skill 并触发更新
 - When：下一条用户消息到达
-- Then：新 Skill 对本次及后续请求生效；存量进行中的任务不受影响
+- Then：新 Skill 对后续请求生效；正在进行中的对话不受影响
 
 ---
 
 ## 模块四：MCP
 
-**场景 4.1：服务正常启动与工具注册**
-- Given：配置文件声明一个 MCP 服务（stdio 或 HTTP）；服务正常运行
+**场景 4.1：外部服务工具正常注册并可调用**
+- Given：配置文件中声明了一个外部 MCP 服务（如 GitHub 工具服务）
+- When：平台启动完成
+- Then：该服务的工具对 agent 可见；用户请求触发后，agent 可成功调用该服务的工具并获得结果
+
+**场景 4.2：单个服务连接失败不影响平台启动**
+- Given：配置了两个外部服务，其中一个在启动时无法连接
 - When：平台启动
-- Then：服务连接成功；该服务的所有工具以 `server__tool` 格式注册到工具注册表；LLM 可调用这些工具
+- Then：平台正常启动；连接失败的服务的工具不可用，但另一个服务正常；告警日志记录失败服务信息
 
-**场景 4.2：单个服务启动失败不阻断平台**
-- Given：配置了两个 MCP 服务；其中一个启动时连接失败
-- When：平台启动
-- Then：失败服务的工具不可用；平台正常启动；另一个服务的工具正常注册；告警日志记录失败原因
-
-**场景 4.3：运行时工具调用**
-- Given：MCP 服务已连接；LLM 请求调用 `github__create_issue`
-- When：dispatch 该工具
-- Then：请求转发到 MCP 服务；结果返回给 LLM；tool_result 写入 context
-
-**场景 4.4：服务断开自动重连**
-- Given：已连接的 MCP 服务中途断开
-- When：LLM 尝试调用该服务的工具
-- Then：工具返回「服务暂时不可用」；后台触发重连（指数退避）；重连成功后工具恢复可用
+**场景 4.3：外部服务断开后自动恢复**
+- Given：正常运行的外部服务中途断开连接
+- When：断开发生后，用户触发相关工具调用
+- Then：该工具返回「服务暂时不可用」，agent 据此作出提示；后台自动尝试重连；重连成功后工具恢复正常
 
 ---
 
 ## 模块五：沙箱
 
-**场景 5.1：代码在隔离环境执行**
-- Given：`sandbox.mode=all`；LLM 调用 `run_code("import os; print(os.getcwd())")`
-- When：sandbox 执行
-- Then：代码在 Docker 容器内执行；网络不可用（`--network none`）；stdout 结果返回给 LLM；主机文件系统未被修改
+**场景 5.1：代码在隔离环境中安全执行**
+- Given：用户请求 agent 运行一段 Python 代码
+- When：agent 执行代码
+- Then：代码在隔离容器内运行，无法访问外部网络；执行结果返回给用户；主机文件系统不受影响
 
-**场景 5.2：执行超时强制终止**
-- Given：提交一段死循环代码；超时配置为 5 秒
-- When：sandbox exec
-- Then：5 秒后先发 SIGTERM；未响应则 SIGKILL；容器被清理；LLM 收到超时错误结果；主循环继续
+**场景 5.2：代码执行超时自动终止**
+- Given：用户请求运行一段耗时过长的代码（超出配置时限）
+- When：执行超时
+- Then：容器被强制终止并清理；用户收到超时提示；对话可继续进行
 
-**场景 5.3：全局关闭沙箱**
-- Given：`settings.yaml` 中 `sandbox.mode=off`
-- When：平台启动
-- Then：`run_code` 工具不出现在工具注册表中；LLM 的工具列表中无 `run_code`
+**场景 5.3：关闭沙箱后代码执行能力不可用**
+- Given：管理员在配置中关闭了沙箱功能
+- When：用户请求 agent 运行代码
+- Then：agent 告知无法执行代码；不尝试任何代码执行操作
 
-**场景 5.4：Agent 级别禁用**
-- Given：`sandbox.mode=all`；agent 定义 `features.code_execution: false`
-- When：该 agent 运行时 LLM 尝试调用 `run_code`
-- Then：调用被拦截；LLM 收到「工具不可用」结果；其他 agent 不受影响
+**场景 5.4：特定 agent 禁用代码执行**
+- Given：平台沙箱功能全局开启；某个客服 agent 配置为不允许代码执行
+- When：用户与该 agent 对话并触发代码执行请求
+- Then：该 agent 拒绝执行代码；其他具备代码执行权限的 agent 不受影响
 
-**场景 5.5：平台重启清理孤儿容器**
-- Given：上次运行异常退出，留有名为 `sandbox-*` 的遗留容器
+**场景 5.5：平台重启后无遗留容器**
+- Given：上次运行异常退出，留有未清理的沙箱容器
 - When：平台重新启动
-- Then：启动过程中自动检测并销毁所有 `sandbox-*` 遗留容器；不影响正常启动流程
+- Then：遗留容器在启动过程中自动清理；平台正常启动，无残留资源占用
 
 ---
 
 ## 模块六：上下文压缩
 
-**场景 6.1：超阈值自动触发压缩**
-- Given：`context_max_tokens=8000`，`compress_threshold=0.8`；对话历史积累至 6500 token
-- When：下一轮 LLM 调用前
-- Then：压缩自动触发；中段历史替换为摘要；头部系统提示和尾部最近消息完整保留；压缩后 token 量低于 Tretained
+**场景 6.1：对话过长时自动压缩**
+- Given：用户与 agent 进行了较长的多轮对话，历史内容接近处理上限
+- When：新一轮对话开始
+- Then：系统自动压缩早期历史；用户最初的需求意图和最近的对话内容完整保留；对话正常继续，不报错
 
-**场景 6.2：压缩不破坏工具调用配对**
-- Given：对话中含多对 tool_use / tool_result；触发压缩
-- When：压缩执行
-- Then：压缩后消息序列中不存在孤立的 tool_use（无对应 result）或孤立的 tool_result（无对应 use）；LLM 接口不报错
+**场景 6.2：压缩后工具调用记录不残缺**
+- Given：对话中含有多次工具调用；触发压缩
+- When：压缩完成后 agent 继续处理
+- Then：压缩后的上下文中不存在「只有工具调用请求、没有对应结果」的残缺记录；agent 接口不因格式错误而报错
 
-**场景 6.3：工具结果面包屑降级**
-- Given：上一轮 `read_file` 返回 4000 token 的内容；本轮开始新一次 LLM 调用
-- When：组装消息
-- Then：上一轮的 tool_result 已替换为面包屑（如 `read_file("path") → N 行，含 {key_fields}`）；LLM 仍能感知文件被读取及关键信息
+**场景 6.3：工具大结果自动摘要**
+- Given：上一轮 agent 读取了大量数据（如完整日志文件）；本轮对话继续
+- When：本轮上下文组装
+- Then：上一轮的完整数据已被替换为包含关键信息的摘要（如「读取了 500 行日志，发现 3 处异常，ID 分别为…」）；关键标识符保留，不丢失
 
-**场景 6.4：摘要失败安全降级**
-- Given：aux LLM（摘要模型）调用失败
-- When：压缩触发，摘要步骤抛出异常
-- Then：降级为静态截断（保留头尾，丢弃中段）；对话继续；不抛出未捕获异常；trace 中记录压缩失败原因
+**场景 6.4：摘要服务不可用时安全降级**
+- Given：用于生成摘要的辅助模型暂时不可用
+- When：压缩触发，摘要步骤失败
+- Then：系统降级为保留头尾、截断中段的静态处理方式；对话继续，不崩溃；运行记录中注明压缩方式降级
 
 ---
 
 ## 模块七：横切关注点
 
-**场景 7.1：Trace 完整记录**
+**场景 7.1：每次运行留有完整记录**
 - Given：一次包含工具调用的完整 agent 运行
-- When：`run()` 完成
-- Then：`traces.jsonl` 中追加一条完整运行记录；包含 `llm_call`、`tool_call`、`finish` 事件；每个事件含时间戳、耗时、token 用量（LLM 事件）
+- When：运行结束
+- Then：运行日志中有该次运行的完整记录，包含每次模型调用和工具调用的时间、耗时、用量信息；可凭记录还原运行过程
 
-**场景 7.2：审批门阻塞与放行**
-- Given：`write_file` 风险等级 `medium`；用户触发该工具
-- When：agent_loop 准备调用工具
-- Then：执行暂停，等待审批；用户调用 approve API → 工具执行，结果返回 LLM；用户调用 reject API → LLM 收到「已拒绝」，主循环继续
+**场景 7.2：中等风险操作需用户确认**
+- Given：某工具被标记为中等风险；用户请求触发该工具
+- When：agent 准备调用
+- Then：执行暂停，用户收到确认请求；用户确认后工具正常执行；用户不响应超时后操作默认取消
 
-**场景 7.3：成本预算超限停止任务**
-- Given：`run_budget_usd=0.01`；当前运行已累计消耗 $0.01
-- When：下一次 LLM 调用前检查预算
-- Then：任务停止；触发 Grace Call 给用户一个总结回复；trace 中 `finish_reason = budget_exceeded`
+**场景 7.3：成本超限任务自动停止并给出总结**
+- Given：当前 agent 运行已达到配置的成本上限
+- When：下一次模型调用前检查预算
+- Then：任务停止继续执行；用户收到当前进展的总结回复，而非直接断开；运行记录标注停止原因为预算超限
 
-**场景 7.4：取消信号穿透工具执行**
-- Given：一次耗时的工具调用正在进行中（如 sandbox 执行长任务）
-- When：外部发送取消信号
-- Then：工具调用被中断（容器或连接被终止）；主循环收到取消信号后退出；trace 记录取消时间点；不留悬空进程
+**场景 7.4：取消操作真正停止所有执行**
+- Given：agent 正在执行一个耗时工具（如代码执行或外部服务调用）
+- When：用户发出取消操作
+- Then：正在进行的工具执行被真正中止（不只是停止等待）；相关资源（容器、连接）被释放；运行记录注明取消时间点
