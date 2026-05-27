@@ -17,7 +17,10 @@
   - 密钥不进 DB，不进 git，仅通过 env var 注入
 
 - ✅ **Dockerfile**：单容器部署
-  - 当前已有 Dockerfile 和 docker-compose.yml
+  - 当前已有 Dockerfile 和 docker-compose.yml，关键配置：
+    - `extra_hosts: host.docker.internal:host-gateway`（Linux 宿主机访问，sandbox_client 通过此地址调用宿主机工具进程）
+    - `volumes: ./data:/app/data, ./config:/app/config`（持久化用户数据和配置）
+    - `env_file: .env.production`（密钥通过 env_file 注入，不写入镜像）
 
 - ✅ **alembic DB migration**：schema 版本管理
   - 升级时自动执行 migration，不需要手动改表

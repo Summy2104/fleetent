@@ -2,6 +2,8 @@
 
 **定位**：面向企业 on-premises 部署的 Lean Agent 平台。Python + FastAPI，无 AI 框架依赖，支持 Slack / Telegram / WhatsApp，数据不出内网。
 
+**基础设施原则**：所有外部服务组件必须可自托管（self-hostable），数据不出客户内网。PostgreSQL、Redis、Qdrant、RabbitMQ 等有官方 Docker 镜像的基础设施组件均可引入；Pinecone Cloud、OpenAI Embeddings API 等云托管专有服务禁止使用。
+
 ---
 
 ## 不可逾越的规则
@@ -95,7 +97,10 @@ src/fleetent/
 - **禁止引入 AI 框架**：LangChain / LlamaIndex / LangGraph——直接调 SDK，不要框架抽象
 - **禁止 ORM**：不用 SQLAlchemy，用 aiosqlite 直接写 SQL
 - **禁止全局可变状态**：模块级路径常量（`DB_PATH` / `SESSIONS_DIR` 等）必须可通过 `monkeypatch` 注入，方便测试隔离
-- **禁止未经讨论引入新依赖**：先在 PR 或 issue 中说明必要性，再 import 新包
+- **新依赖必须经过讨论**：区分三类——
+  - 基础设施服务（PostgreSQL、Redis、Qdrant 等）：可引入，需在 PR 中说明必要性和自托管方案
+  - AI 框架（LangChain / LlamaIndex / LangGraph）：永久禁止，无论何种理由
+  - 云托管专有服务（Pinecone Cloud、OpenAI Embeddings API 等）：永久禁止，违反数据主权原则
 
 ---
 
@@ -103,9 +108,14 @@ src/fleetent/
 
 ```
 data/
-  users.db                        # SQLite — gitignored
-  users/{user_id}/memories.jsonl  # per-user 记忆 — gitignored
-  traces.jsonl                    # eval 日志 — gitignored
+  users.db                        # SQLite 主库 — gitignored
+    ├── users / im_users / agents / user_agents / channel_agents
+    ├── scheduled_tasks / approvals
+    ├── traces                    # eval 日志（append-only，按 agent_id/user_id/时间可查）
+    ├── memory_items              # per-user 语义记忆（v1.0，替换 memories.jsonl）
+    ├── documents / chunks / chunks_fts / entities / relations  # knowledge_base（v1.0）
+    └── skill_proposals / kb_reflection_reports                 # reflection（v1.0）
+  users/{user_id}/memories.jsonl  # per-user 记忆（当前实现，v1.0 前迁移到 users.db）
 ```
 
 测试用 `tmp_path + monkeypatch` 隔离，绝不触碰 `data/`。
