@@ -845,18 +845,18 @@ flowchart TD
 
     subgraph lifecycle["生命周期管理（scope 决定容器存活粒度）"]
         LC --> SCOPE{scope 配置}
-        SCOPE -->|"run（默认）"| CR["每次任务开始\n新建容器"]
-        SCOPE -->|session| CS["首次调用时新建\n同 session 内复用"]
-        SCOPE -->|shared| CSH[复用全局长期容器]
+        SCOPE -->|"session（默认）"| CS["会话开始时新建容器\n同 session 内复用"]
+        SCOPE -->|agent| CA["每个 agent 定义共享一个容器\n跨 session 长期保留"]
+        SCOPE -->|shared| CSH[所有 agent 共享一个全局容器]
 
-        CR & CS & CSH --> RUN[在容器内执行代码]
+        CS & CA & CSH --> RUN[在容器内执行代码]
         RUN -->|正常完成| RET[返回执行结果]
         RUN -->|超时| KILL["SIGTERM → SIGKILL\n强制终止"]
         KILL --> RET
 
         RET --> WHEN{何时销毁容器?}
-        WHEN -->|"scope=run"| DR[任务结束立即销毁]
         WHEN -->|"scope=session"| DS[session 结束时销毁]
+        WHEN -->|"scope=agent"| DA["idle 超时后销毁\n或管理员手动重建"]
         WHEN -->|"scope=shared"| DSH["idle 超时后销毁\n（默认 2 小时）"]
     end
 ```
@@ -873,13 +873,13 @@ flowchart TD
 
 | scope | 存活范围 | 适用场景 |
 |-------|---------|---------|
-| `run`（默认） | 每次 agent `run()` 开始时创建，`run()` 结束时销毁 | 同一轮任务内代码状态连续，不同轮完全隔离 |
-| `session` | 整个会话共享一个沙箱，用户会话结束时销毁 | 跨多轮对话保留变量、文件、已安装包 |
-| `shared` | 所有会话共享一个长期运行的沙箱 | 预置公共工具链（需谨慎，存在隔离泄漏风险） |
+| `session`（默认） | 会话开始时创建，同一会话内复用，会话结束时销毁 | 同一对话内代码状态连续（变量、文件），不同会话完全隔离 |
+| `agent` | 每个 agent 定义独享一个容器，跨会话长期保留 | 保留已安装的依赖包、预置工具链，多个用户共用同一 agent 时共享环境 |
+| `shared` | 所有 agent 和会话共享一个全局容器 | 平台级公共工具链（需谨慎，存在跨用户、跨 agent 的隔离泄漏风险） |
 
 **孤儿容器清理：**
 - 平台启动时扫描 `docker ps --filter name=sandbox-*`，销毁上次崩溃遗留的容器
-- `idle_hours`：沙箱闲置超过 N 小时后自动销毁（默认 2 小时，适用于 `session` / `shared` scope）
+- `idle_hours`：沙箱闲置超过 N 小时后自动销毁（默认 2 小时，适用于 `agent` / `shared` scope）
 
 ---
 
@@ -889,7 +889,7 @@ flowchart TD
 # settings.yaml（全局配置）
 sandbox:
   mode: "all"       # 三态：off / selective / all
-  scope: "run"      # 生命周期粒度：run / session / shared
+  scope: "session"  # 生命周期粒度：session / agent / shared
   backend: "docker" # 隔离后端：docker / gvisor / firecracker / ssh
   idle_hours: 2     # 闲置容器清理时限（小时）
 ```
@@ -999,9 +999,9 @@ sandbox:
 - 超时触发：先发 SIGTERM，等待 5 秒优雅退出
 - 仍未退出：发 SIGKILL 强制终止
 - 终止后按 scope 决定后续处理：
-  - `scope=run`：超时即销毁容器（run 本身也会结束）
-  - `scope=session`：终止当次执行，容器保留供下次使用
-  - `scope=shared`：终止当次执行，容器继续运行，不影响其他 session
+  - `scope=session`：终止当次执行，容器保留供同 session 内下次使用；session 结束时销毁
+  - `scope=agent`：终止当次执行，容器继续运行，供该 agent 其他 session 继续使用
+  - `scope=shared`：终止当次执行，容器继续运行，不影响其他 agent 和 session
 
 ---
 
