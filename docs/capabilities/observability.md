@@ -12,6 +12,81 @@
 
 ---
 
+## 架构图
+
+### 日志数据流
+
+```mermaid
+flowchart TD
+    A[HTTP /chat] --> AL[agent_loop.run]
+    B[Slack / Telegram] --> AL
+    C[Cron 定时任务] --> AL
+    D[Webhook] --> AL
+
+    AL -->|log_run / log| EL[eval_logger]
+    EL --> TJ[(data/traces.jsonl)]
+
+    AL -->|规划: 结构化日志| LM[Log Manager]
+    LM -->|JSON 格式| LF[(data/logs/YYYY-MM-DD.log)]
+    LM -->|warn/error/fatal| EF[(data/logs/YYYY-MM-DD.error.log)]
+    LM -->|human-readable + 颜色| CON[终端 Console]
+
+    subgraph 规划
+        LM
+        LF
+        EF
+        CON
+    end
+```
+
+### 日志级别漏斗
+
+```mermaid
+flowchart TD
+    ALL[所有日志事件]
+    ALL --> S{当前级别?}
+
+    S -->|silent| DROP1[🚫 全部丢弃]
+    S -->|fatal| F[fatal]
+    S -->|error| F & E[error]
+    S -->|warn| F & E & W[warn]
+    S -->|info| F & E & W & I[info]
+    S -->|debug| F & E & W & I & D[debug]
+    S -->|trace| F & E & W & I & D & T[trace]
+
+    F & E & W & I & D & T --> OUT[写入文件 / 输出终端]
+```
+
+### Trace 字段结构（现状 → 规划）
+
+```mermaid
+erDiagram
+    TRACE_NOW {
+        string ts
+        string input
+        string reply
+        array  messages
+        float  elapsed_s
+        object tokens_prompt_completion_total
+        string model_used
+        string user_id
+        string agent_name
+    }
+    TRACE_PLANNED {
+        string  session_id
+        string  source
+        string  level
+        string  logger
+        integer duration_ms
+        object  timing_memory_llm_tool
+        array   steps
+        array   sources
+    }
+    TRACE_NOW ||--o{ TRACE_PLANNED : "扩展"
+```
+
+---
+
 ## 现状
 
 - ✅ **append-only trace 日志**：每次 run 写一条 JSONL 到 `data/traces.jsonl`

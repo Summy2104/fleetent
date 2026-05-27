@@ -12,6 +12,84 @@
 
 ---
 
+## 架构图
+
+### 触发链路总览
+
+```mermaid
+flowchart TD
+    subgraph 主动触发
+        CY[config/cron.yaml\n静态任务]
+        DB[(schedule_store\nSQLite)]
+        AP[APScheduler]
+        CY -->|启动时加载| AP
+        DB -->|启动时恢复| AP
+        AP -->|到点触发| FIRE[_fire\n构造消息]
+    end
+
+    subgraph 被动触发
+        EXT[外部系统\nGitHub / Slack / 自定义]
+        WH[POST /webhook/source_id]
+        WR[webhook_router\n验签 + 消息提取]
+        EXT --> WH --> WR
+    end
+
+    FIRE --> NM[NormalizedMessage]
+    WR -->|202 Accepted 异步| NM
+
+    NM --> AL[agent_loop.run]
+    AL --> REPLY[agent 回复]
+    REPLY -->|规划| CB[双向回调\ncallback_url]
+    REPLY -->|规划| CH[投递到频道 / DM]
+```
+
+### Webhook 认证决策树
+
+```mermaid
+flowchart TD
+    REQ[POST /webhook/source_id] --> CFG{来源配置存在?}
+    CFG -->|否| 404[404 Not Found]
+    CFG -->|是| AUTH{认证方式}
+
+    AUTH -->|无 secret\n内网信任| PASS[✅ 放行]
+    AUTH -->|HMAC-SHA256| SIG{X-Hub-Signature-256\n验签}
+    AUTH -->|规划: API Token| TOK{X-Api-Token\n比对}
+    AUTH -->|规划: IP 白名单| IP{来源 IP\n在白名单?}
+
+    SIG -->|通过| PASS
+    SIG -->|失败| 403A[403 Forbidden]
+    TOK -->|通过| PASS
+    TOK -->|失败| 403B[403 Forbidden]
+    IP -->|通过| PASS
+    IP -->|失败| 403C[403 Forbidden]
+
+    PASS --> EXTRACT[消息提取\nmessage_template]
+    EXTRACT -->|成功| AL[agent_loop]
+    EXTRACT -->|失败| FALLBACK[降级: JSON 序列化\n整个 payload]
+    FALLBACK --> AL
+```
+
+### 定时任务失败处理流程
+
+```mermaid
+flowchart TD
+    TRIGGER[任务触发] --> EXEC[agent_loop.run]
+    EXEC -->|成功| LOG_OK[写执行日志\nstatus=success]
+    EXEC -->|失败| RETRY{重试次数\n< 最大上限?}
+
+    RETRY -->|是| WAIT[等待重试间隔] --> EXEC
+    RETRY -->|否| DL{兜底方式}
+
+    DL -->|fallback_channel| CH[投递错误信息\n到指定频道]
+    DL -->|dead_letter| DLQ[(data/dead_letter.jsonl)]
+    DL -->|两者组合| CH & DLQ
+
+    CH --> LOG_DL[写执行日志\nstatus=dead_lettered]
+    DLQ --> LOG_DL
+```
+
+---
+
 ## 现状
 
 ### 定时任务
