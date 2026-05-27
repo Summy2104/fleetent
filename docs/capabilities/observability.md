@@ -20,26 +20,18 @@
 
 ```mermaid
 flowchart TD
-    subgraph trace["Trace 写入（每次请求结束后）"]
-        A["HTTP /chat"] --> AL["agent_loop.run"]
-        B["Slack / Telegram"] --> AL
-        C["Cron 定时任务"] --> AL
-        D["Webhook"] --> AL
-        AL -->|"log_run / log"| EL["eval_logger"]
-        EL --> TJ[("data/traces.jsonl")]
-    end
+    A["HTTP /chat"] --> AL["agent_loop.run"]
+    B["Slack / Telegram"] --> AL
+    C["Cron 定时任务"] --> AL
+    D["Webhook"] --> AL
 
-    subgraph log["结构化日志（规划中）"]
-        LM["Log Manager"]
-        LF[("data/logs/日期.log")]
-        EF[("data/logs/日期.error.log")]
-        CON["终端 Console"]
-        LM -->|JSON 格式| LF
-        LM -->|warn以上| EF
-        LM -->|彩色文本| CON
-    end
+    AL -->|"log_run / log"| EL["eval_logger"]
+    EL --> TJ[("traces.jsonl")]
 
-    AL -->|结构化日志| LM
+    AL -->|"结构化日志 规划中"| LM["Log Manager"]
+    LM -->|"JSON 格式"| LF[("日期.log")]
+    LM -->|"warn以上"| EF[("日期.error.log")]
+    LM -->|"彩色文本"| CON["终端 Console"]
 ```
 
 日志级别过滤示意（`~` 表示「该级别及以上」均会输出）：
@@ -48,13 +40,13 @@ flowchart TD
 flowchart TD
     ALL([所有日志事件]) --> S{当前级别}
 
-    S -->|silent| DROP[全部丢弃]
+    S -->|"silent"| DROP[全部丢弃]
     S -->|"fatal ~"| FA[fatal]
     S -->|"error ~"| ER[error]
     S -->|"warn ~"| WA[warn]
     S -->|"info ~"| IN[info]
     S -->|"debug ~"| DE[debug]
-    S -->|trace| TR[trace]
+    S -->|"trace"| TR[trace]
 
     FA --> OUT([写文件 输出终端])
     ER --> OUT

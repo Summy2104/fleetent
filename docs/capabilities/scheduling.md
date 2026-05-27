@@ -20,70 +20,75 @@
 
 ```mermaid
 flowchart TD
-    subgraph 主动触发
+    FIRE["_fire 构造消息"]
+    WR["webhook_router 验签+消息提取"]
+    NM[NormalizedMessage]
+    AL["agent_loop.run"]
+
+    subgraph active["主动触发"]
         CY["config/cron.yaml 静态任务"]
         DB[("schedule_store SQLite")]
         AP[APScheduler]
-        CY -->|启动时加载| AP
-        DB -->|启动时恢复| AP
-        AP -->|到点触发| FIRE["_fire 构造消息"]
+        CY -->|"启动时加载"| AP
+        DB -->|"启动时恢复"| AP
+        AP -->|"到点触发"| FIRE
     end
 
-    subgraph 被动触发
+    subgraph passive["被动触发"]
         EXT["外部系统 GitHub, Slack, 自定义"]
         WH["POST /webhook/source_id"]
-        WR["webhook_router 验签+消息提取"]
         EXT --> WH --> WR
     end
 
-    FIRE --> NM[NormalizedMessage]
-    WR -->|202 异步| NM
-
-    NM --> AL["agent_loop.run"]
+    FIRE --> NM
+    WR -->|"202 异步"| NM
+    NM --> AL
     AL --> REPLY["agent 回复"]
-    REPLY -->|规划| CB["双向回调 callback_url"]
-    REPLY -->|规划| CH["投递到频道或DM"]
+    REPLY -->|"规划"| CB["双向回调 callback_url"]
+    REPLY -->|"规划"| CH["投递到频道或DM"]
 ```
 
 Webhook 认证决策：
 
 ```mermaid
 flowchart TD
-    REQ["POST /webhook/source_id"] --> CFG{来源配置存在}
-    CFG -->|否| E404[404 Not Found]
-    CFG -->|是| AUTH{认证方式}
+    REQ["POST /webhook/source_id"] --> CFG{"来源配置存在"}
+    CFG -->|"否"| E404["404 Not Found"]
+    CFG -->|"是"| AUTH{"认证方式"}
 
-    AUTH -->|无secret内网信任| PASS[放行]
-    AUTH -->|HMAC-SHA256| SIG{X-Hub-Signature-256验签}
-    AUTH -->|规划API Token| TOK{X-Api-Token比对}
-    AUTH -->|规划IP白名单| IP{来源IP在白名单}
+    AUTH -->|"无secret内网信任"| PASS["放行"]
+    AUTH -->|"HMAC-SHA256"| SIG{"X-Hub-Signature-256 验签"}
+    AUTH -->|"规划 API Token"| TOK{"X-Api-Token 比对"}
+    AUTH -->|"规划 IP 白名单"| IP{"来源IP在白名单"}
 
-    SIG -->|通过| PASS
-    SIG -->|失败| E403A[403 Forbidden]
-    TOK -->|通过| PASS
-    TOK -->|失败| E403B[403 Forbidden]
-    IP -->|通过| PASS
-    IP -->|失败| E403C[403 Forbidden]
+    SIG -->|"通过"| PASS
+    SIG -->|"失败"| E403A["403 Forbidden"]
+    TOK -->|"通过"| PASS
+    TOK -->|"失败"| E403B["403 Forbidden"]
+    IP -->|"通过"| PASS
+    IP -->|"失败"| E403C["403 Forbidden"]
 
     PASS --> EXTRACT["消息提取 message_template"]
-    EXTRACT -->|成功| AL[agent_loop]
-    EXTRACT -->|失败降级| FALLBACK["JSON序列化整个payload"]
-    FALLBACK --> AL
+    EXTRACT -->|"成功"| WH_AL["agent_loop"]
+    EXTRACT -->|"失败降级"| FALLBACK["JSON序列化整个payload"]
+    FALLBACK --> WH_AL
 ```
 
 定时任务失败处理：
 
 ```mermaid
 flowchart TD
-    TRIGGER[任务触发] --> EXEC["agent_loop.run"]
-    EXEC -->|成功| LOG_OK["执行日志 status=success"]
-    EXEC -->|失败| RETRY{重试次数未超上限}
+    TRIGGER[任务触发] --> EXEC1["agent_loop 第1次"]
+    EXEC1 -->|"成功"| LOG_OK["执行日志 status=success"]
+    EXEC1 -->|"失败"| RETRY{"重试次数未超上限"}
 
-    RETRY -->|否| DL{兜底方式}
-    RETRY -->|是，等待后重试| EXEC
+    RETRY -->|"是"| EXEC2["agent_loop 重试"]
+    RETRY -->|"否"| DL{"兜底方式"}
 
-    DL -->|fallback_channel| CH["投递错误信息到指定频道"]
-    DL -->|dead_letter| DLQ[("dead_letter.jsonl")]
+    EXEC2 -->|"仍失败"| RETRY
+
+    DL -->|"fallback_channel"| CH["投递错误信息到指定频道"]
+    DL -->|"dead_letter"| DLQ[("dead_letter.jsonl")]
 
     CH --> LOG_DL["执行日志 status=dead_lettered"]
     DLQ --> LOG_DL
