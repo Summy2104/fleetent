@@ -30,9 +30,12 @@ flowchart TD
         H --> J[vector_store.upsert\nentity_id + description + scope]
     end
 
-    subgraph vector_search["向量检索（由 long_term_ctx 触发）"]
-        K[search query + scope] --> L[vector_store.search]
-        L --> M[按 chunk_id 查 chunks 表]
+    subgraph hybrid_search["混合检索（由 long_term_ctx 触发）"]
+        K[search query + scope] --> L[并行]
+        L --> L1[vector_store.search\n语义检索]
+        L --> L2[FTS5 全文检索\n关键词精确匹配]
+        L1 --> M[RRF 融合排序]
+        L2 --> M
         M --> N[返回 KnowledgeChunk 列表]
     end
 
@@ -65,6 +68,13 @@ chunks (
   content     TEXT,              -- chunk 文本
   position    INTEGER,           -- chunk 在文档中的顺序
   created_at  DATETIME
+)
+
+-- 全文索引（SQLite FTS5 虚拟表，与 chunks 表同步写入）
+chunks_fts USING fts5 (
+  content,                       -- 索引 chunks.content
+  content="chunks",              -- 关联原表，content rowid 对应 chunks rowid
+  tokenize="unicode61"           -- 支持中英文混合
 )
 
 -- 实体（从文档中 LLM 提取）
@@ -147,9 +157,11 @@ async def delete(document_id: str) -> None:
   - entity 描述同时写入 vector_store，用于图检索的入口定位
   - 提取在后台执行，与分块并行触发
 
-- [ ] **向量相似度检索**：根据查询召回最相关的文档片段
-  - 对外接口：`search(query: str, scope: str) → list[KnowledgeChunk]`
-  - 适合事实型问答（"X 是什么？"）
+- [ ] **混合检索（Hybrid Search）**：BM25 关键词检索与向量语义检索并行，RRF 融合排序后返回
+  - 对外接口不变：`search(query: str, scope: str) → list[KnowledgeChunk]`
+  - BM25 使用 SQLite FTS5（内置，无需额外服务），擅长精确词匹配（产品编号、人名、专有名词）
+  - 向量检索负责语义相似度和同义词
+  - RRF（Reciprocal Rank Fusion）合并两路排序结果，无需调权重参数
 
 - [ ] **图增强检索**：从相关实体出发，按关系图谱展开，收集关联 chunk
   - 对外接口：`graph_search(query: str, scope: str, depth: int) → KnowledgeGraphResult`
@@ -195,6 +207,8 @@ async def delete(document_id: str) -> None:
 - scope 隔离：不同 scope 的检索结果（向量和图）互不干扰
 - delete 级联：删除文档后对应 chunk、entity、relation 均不出现在检索结果中
 - chunk 来源关联：KnowledgeChunk 返回正确的 filename 和 position
+- BM25 精确匹配：含精确关键词的 chunk 在 search() 结果中排名靠前
+- RRF 融合：向量和 BM25 各自命中的 chunk 都出现在合并结果中，不互相覆盖
 - 图遍历 depth：graph_search(depth=1) 只返回直接关联实体，不展开二级
 - graph_search scope 隔离：不同 scope 的实体和关系不互通
 
