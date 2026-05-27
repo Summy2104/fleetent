@@ -6,58 +6,444 @@
 
 主动触发机制：定时任务（Cron）和外部事件驱动（Webhook）。让 agent 不只是被动响应，也能主动发起任务。
 
+**负责**：定时调度 agent 运行、接收外部 Webhook 事件并路由到对应 agent、签名验证与消息提取。
+
+**不负责**：agent 执行逻辑（→ agent_loop）、IM 消息投递（→ im_gateway）、执行结果的持久化分析（→ observability）。
+
 **调用关系**：
-- 依赖：schedule_store、agent_loop、webhook_router、normalizer
-- 被依赖：server.py（Webhook 路由）、APScheduler（Cron 触发）
+- 依赖：`schedule_store`、`agent_loop`、`webhook_router`、`normalizer`
+- 被依赖：`server.py`（Webhook 路由）、APScheduler（Cron 触发）
+
+## 关键流程
+
+两条独立触发链路，最终都汇入 `agent_loop`：
+
+```mermaid
+flowchart TD
+    FIRE["_fire 构造消息"]
+    WR["webhook_router 验签+消息提取"]
+    NM[NormalizedMessage]
+    AL["agent_loop.run"]
+
+    subgraph active["主动触发"]
+        CY["config/cron.yaml 静态任务"]
+        DB[("schedule_store SQLite")]
+        AP[APScheduler]
+        CY -->|"启动时加载"| AP
+        DB -->|"启动时恢复"| AP
+        AP -->|"到点触发"| FIRE
+    end
+
+    subgraph passive["被动触发"]
+        EXT["外部系统 GitHub, Slack, 自定义"]
+        WH["POST /webhook/source_id"]
+        EXT --> WH --> WR
+    end
+
+    FIRE --> NM
+    WR -->|"202 异步"| NM
+    NM --> AL
+    AL --> REPLY["agent 回复"]
+    REPLY -->|"规划"| CB["双向回调 callback_url"]
+    REPLY -->|"规划"| CH["投递到频道或DM"]
+```
+
+Webhook 认证决策：
+
+```mermaid
+flowchart TD
+    REQ["POST /webhook/source_id"] --> CFG{"来源配置存在"}
+    CFG -->|"否"| E404["404 Not Found"]
+    CFG -->|"是"| AUTH{"认证方式"}
+
+    AUTH -->|"无secret内网信任"| PASS["放行"]
+    AUTH -->|"HMAC-SHA256"| SIG{"X-Hub-Signature-256 验签"}
+    AUTH -->|"规划 API Token"| TOK{"X-Api-Token 比对"}
+    AUTH -->|"规划 IP 白名单"| IP{"来源IP在白名单"}
+
+    SIG -->|"通过"| PASS
+    SIG -->|"失败"| E403A["403 Forbidden"]
+    TOK -->|"通过"| PASS
+    TOK -->|"失败"| E403B["403 Forbidden"]
+    IP -->|"通过"| PASS
+    IP -->|"失败"| E403C["403 Forbidden"]
+
+    PASS --> EXTRACT["消息提取 message_template"]
+    EXTRACT -->|"成功"| WH_AL["agent_loop"]
+    EXTRACT -->|"失败降级"| FALLBACK["JSON序列化整个payload"]
+    FALLBACK --> WH_AL
+```
+
+定时任务失败处理：
+
+```mermaid
+flowchart TD
+    TRIGGER[任务触发] --> EXEC1["agent_loop 第1次"]
+    EXEC1 -->|"成功"| LOG_OK["执行日志 status=success"]
+    EXEC1 -->|"失败"| RETRY{"重试次数未超上限"}
+
+    RETRY -->|"是"| EXEC2["agent_loop 重试"]
+    RETRY -->|"否"| DL{"兜底方式"}
+
+    EXEC2 -->|"仍失败"| RETRY
+
+    DL -->|"fallback_channel"| CH["投递错误信息到指定频道"]
+    DL -->|"dead_letter"| DLQ[("dead_letter.jsonl")]
+
+    CH --> LOG_DL["执行日志 status=dead_lettered"]
+    DLQ --> LOG_DL
+```
+
+## 数据模型
+
+```sql
+scheduled_tasks (
+  id          TEXT PRIMARY KEY,  -- UUID，服务端生成
+  name        TEXT NOT NULL,
+  cron_expr   TEXT NOT NULL,     -- 标准五字段 cron 表达式
+  timezone    TEXT NOT NULL,     -- IANA 时区，默认 UTC
+  user_id     TEXT NOT NULL,     -- 归属用户
+  agent_name  TEXT,              -- 指定执行 agent，NULL 时用默认 agent
+  message     TEXT NOT NULL,     -- 触发时注入的消息内容
+  enabled     INTEGER NOT NULL,  -- 1=启用，0=禁用（规划中暂停功能使用）
+  source      TEXT NOT NULL,     -- "dynamic" | "tool" | "static"
+  created_at  TEXT NOT NULL
+)
+```
+
+Webhook 来源配置存 `config/webhooks.yaml`（非数据库），字段：`id`、`user_id`、`secret`、`agent_name`、`message_template`。
+
+## 接口定义
+
+```python
+# schedule_store
+def create(
+    name: str, cron_expr: str, timezone: str,
+    user_id: str, agent_name: str | None, message: str,
+    source: str = "dynamic",
+) -> dict[str, Any]:
+    """创建定时任务并写入 SQLite，返回完整任务字典。"""
+
+def list_tasks() -> list[dict[str, Any]]:
+    """返回所有 enabled=1 的任务，server 启动时用于恢复调度。"""
+
+def delete(task_id: str) -> bool:
+    """删除指定任务，返回是否成功找到并删除。"""
+
+
+# webhook_router
+def verify_signature(secret: str | None, body: bytes, header: str | None) -> bool:
+    """HMAC-SHA256 验签。secret 为 None 时直接返回 True（内网信任）。"""
+
+def extract_message(template: str | None, payload: Any) -> str:
+    """按模板提取消息；模板为 None 或提取失败时降级为 json.dumps(payload)。"""
+```
 
 ## 现状
 
-- ✅ **APScheduler 定时任务**：server 启动时初始化，支持 cron 表达式
-  - schedule_task 工具：创建定时任务，指定 cron 表达式、agent、消息内容
-  - cancel_task 工具：取消指定任务
-  - list_tasks 工具：查看当前所有任务
+### 定时任务
 
-- ✅ **定时任务持久化**：任务定义存 SQLite，server 重启后自动恢复
+- ✅ **APScheduler Cron 任务**：server 启动时初始化，支持标准五字段 cron 表达式和时区（IANA 格式，默认 UTC）
+  - `schedule_task` 工具：创建 cron 任务，指定名称、cron 表达式、消息内容、时区、user_id
+  - `cancel_task` 工具：取消指定任务（`risk_level=medium`，需审批）
+  - `fleetent-admin list-schedules`：查看所有任务（id、name、cron_expr、user_id）
+  - `fleetent-admin add-schedule --cron <expr> ...`：CLI 创建任务
+  - `fleetent-admin remove-schedule --id <task_id>`：CLI 删除任务
 
-- ✅ **Webhook 接入**：POST /webhook/{source_id} 接收外部事件
-  - 来源配置：config/webhooks.yaml，支持 id、user_id、secret、agent_name、message_template
+- ✅ **任务持久化**：任务定义存 SQLite（`data/users.db`），server 重启后自动恢复调度
 
-- ✅ **HMAC-SHA256 签名验证**：防止伪造请求
-  - 来源未配置 secret 时跳过验签，直接放行（信任内网来源）
+- ✅ **静态任务配置**：`config/cron.yaml` 中定义 `jobs` 列表，server 启动时自动加载；SQLite 中同名 id 的任务优先级更高
+
+### Webhook
+
+- ✅ **Webhook 接入**：`POST /webhook/{source_id}` 接收外部事件，触发对应 agent
+  - 来源配置文件：`config/webhooks.yaml`，字段：`id`、`user_id`、`secret`、`agent_name`、`message_template`
+
+- ✅ **HMAC-SHA256 签名验证**（`X-Hub-Signature-256` 头）
+  - 来源未配置 `secret` 时跳过验签，直接放行（信任内网来源）
   - 签名不匹配返回 403
 
-- ✅ **消息提取**：支持 message_template 从 payload 中提取字段
-  - 模板提取失败时降级为 JSON 序列化整个 payload
+- ✅ **消息提取**：支持 `message_template` 从 payload 中提取字段（`{key}` / `{key[subkey]}` 语法）
+  - 提取失败时降级为 JSON 序列化整个 payload
 
 ## 规划中（v1.0）
 
-- [ ] **Webhook 来源热重载**：修改 webhooks.yaml 后无需重启服务即可生效
+### 定时任务
 
-- [ ] **定时任务执行历史**：记录每次触发的执行时间、结果、是否成功
-  - 支持通过 admin CLI 查询历史
+- [ ] **任务类型扩展**：支持三种触发模式
+  - **一次性任务**（`type=once`）：指定未来某个时间点触发一次，执行后自动标记为 `done`
+  - **固定间隔任务**（`type=interval`）：每隔 N 秒/分钟/小时触发（如"每 30 分钟巡检"）
+  - **Cron 任务**（`type=cron`，现有）：标准五字段 cron 表达式，支持复杂周期
+
+- [ ] **任务绑定**：每个任务记录投递目标
+  - `agent_name`（必填）：指定执行 agent
+  - 投递目标（必填）：主频道 channel 或私聊 DM
+  - `user_id`（可选）：归属用户，用于权限过滤和查询
+  - `session_id`（可选）：复用已有会话上下文，未指定时新建会话
+
+- [ ] **暂停与恢复**：不删除任务的情况下暂停，之后可恢复
+  - 对话工具：`pause_task` / `resume_task`
+  - CLI：`fleetent-admin task pause --id <task_id>` / `fleetent-admin task resume --id <task_id>`
+  - 暂停期间到点不触发；恢复后按原规则继续
+
+- [ ] **单次手动触发**：立即触发一次，不影响原有调度
+  - 对话工具：`run_task`
+  - CLI：`fleetent-admin task run --id <task_id>`
+
+- [ ] **完整 CRUD**：对话和 CLI 均可创建、编辑、删除、查询任务
+  - `edit_task` 工具 / `fleetent-admin task edit --id <task_id> [--cron ...] [--message ...]`
+  - 编辑支持修改触发规则、消息内容、绑定 agent/用户/会话，修改立即生效
+
+- [ ] **触发时间预览**
+  - CLI：`fleetent-admin task preview --id <task_id> [--n 5]`
+  - 按任务时区输出接下来 N 次触发时间
+
+- [ ] **任务定义 Git 管理**：任务定义以 YAML 存储于 `config/tasks/`，纳入 Git 版本控制
+  - 运行时状态（上次触发时间、执行次数、暂停标志）单独存 SQLite
+  - 服务启动时自动同步 `config/tasks/` 变更；文件删除后对应状态自动清理
+
+- [ ] **失败重试与幂等**
+  - 支持配置最大重试次数和重试间隔
+  - 每次触发携带唯一 `execution_id`，重复投递时幂等跳过
+  - 失败超过重试上限后保留完整失败日志，不静默丢弃
+
+- [ ] **失败兜底**：重试耗尽后触发（可在任务配置中组合选择）
+  - `fallback_channel`：将错误信息投递到指定频道或私聊
+  - `dead_letter`：写入 `data/dead_letter.jsonl`，支持人工重放
+
+- [ ] **完整执行日志**
+  - 字段：`task_id`、`execution_id`、`triggered_at`、`finished_at`、`status`、`retry_count`、`reply`、`error`
+  - CLI：`fleetent-admin task logs --id <task_id> [--status failed]`
+
+### Webhook
+
+- [ ] **官方平台适配**：内置主流平台的 Webhook 解析与验签
+  - **Slack**：`X-Slack-Signature` + `X-Slack-Request-Timestamp` 验签；自动处理 URL verification challenge
+  - **GitHub**：`X-Hub-Signature-256` 验签；按 `X-GitHub-Event` 头路由，支持 `event_filter` 配置
+  - 在 `config/webhooks.yaml` 中声明 `type: slack` / `type: github`，框架自动套用对应解析逻辑
+
+- [ ] **异步处理**：收到请求立即返回 202 Accepted，agent 执行在后台进行
+
+- [ ] **多种认证方式**（按来源配置选择）
+  - HMAC-SHA256 签名（现有，增强为可配置算法）
+  - API Token：请求头携带 `X-Api-Token`，与来源配置中的 token 比对
+  - IP 白名单：来源配置中指定允许的 IP 或 CIDR，不在名单内返回 403
+
+- [ ] **幂等处理**：请求头携带 `X-Idempotency-Key`，相同 key 的重复请求幂等跳过
+
+- [ ] **失败重试与兜底**
+  - agent 执行失败时按配置重试，超限后触发兜底
+  - `fallback_channel`：投递原始 payload 和错误信息到指定频道
+  - `fallback_webhook`：转发到另一个 Webhook URL（如告警系统）
+  - `dead_letter`：写入 `data/dead_letter.jsonl`
+
+- [ ] **完整执行日志**
+  - 字段：`source_id`、`task_id`、`session_id`、`received_at`、`finished_at`、`status`、`retry_count`、`reply`、`error`
+  - CLI：`fleetent-admin webhook logs --source <source_id> [--status failed]`
+
+- [ ] **路由预览**：不实际触发 agent，验证 Webhook 配置是否正确
+  - CLI：`fleetent-admin webhook preview --source <source_id> --payload <file.json>`
+  - 输出：匹配的 source、认证方式、提取的消息内容、将触发的 agent；配置有误时说明原因
+
+- [ ] **双向回调**：agent 执行完成后主动回调调用方
+  - 来源配置中指定 `callback_url`；回调携带 `task_id`、`status`、`reply`
+  - 回调失败时记录日志，不影响本次执行结果
 
 ## 验收标准
 
+### 现状
+
 **场景 1：创建定时任务**
-- Given：agent 支持 schedule_task 工具
+- Given：agent 支持 `schedule_task` 工具
 - When：用户请求"每天早上 9 点发送日报"
-- Then：任务创建成功，server 重启后仍然存在，到时间自动触发
+- Then：任务创建成功，`list-schedules` 可查到；server 重启后仍然存在并自动触发
+
+**场景 1a：静态任务配置加载**
+- Given：`config/cron.yaml` 中定义了一个 job，`id=daily-report`
+- When：server 启动
+- Then：`list-schedules` 中出现 `id=daily-report` 的任务，调度正常
+
+**场景 1b：SQLite 优先于 YAML**
+- Given：`config/cron.yaml` 和 SQLite 中均有 `id=daily-report`，内容不同
+- When：server 启动
+- Then：以 SQLite 中的定义为准
 
 **场景 2：Webhook 触发 agent**
-- Given：配置了来源 id=github，secret=xxx，agent_name=dev-bot
-- When：GitHub 发送 POST /webhook/github，签名正确
+- Given：配置来源 `id=github`、`secret=xxx`、`agent_name=dev-bot`
+- When：GitHub 发送 `POST /webhook/github`，签名正确
 - Then：dev-bot 收到提取后的消息内容，执行并回写结果
 
 **场景 3：签名验证失败**
-- Given：来源配置了 secret
-- When：请求的签名不正确
+- Given：来源配置了 `secret`
+- When：请求签名不正确
 - Then：返回 403，不触发 agent
 
 **场景 4：无 secret 来源**
-- Given：来源未配置 secret（内网服务）
-- When：发送 POST /webhook/{source_id}
+- Given：来源未配置 `secret`（内网服务）
+- When：发送 `POST /webhook/{source_id}`
 - Then：跳过签名验证，直接触发 agent
+
+**场景 4a：消息提取失败降级**
+- Given：`message_template` 引用了 payload 中不存在的字段
+- When：Webhook 请求到达
+- Then：agent 收到 JSON 序列化的完整 payload，正常触发
+
+### 规划
+
+**场景 5：一次性任务**
+- Given：用户对话"明天下午 3 点提醒我开会"
+- When：agent 调用 `schedule_task`，`type=once`，`at=明天 15:00`
+- Then：到时触发一次，执行后状态变为 `done`，不再触发
+
+**场景 5a：固定间隔任务**
+- Given：用户对话"每 30 分钟检查一次服务状态"
+- When：agent 调用 `schedule_task`，`type=interval`，`every=30m`
+- Then：每隔 30 分钟触发，`list-schedules` 可查到下次触发时间
+
+**场景 5b：时区运行**
+- Given：创建任务 `cron="0 9 * * 1"`，`timezone=Asia/Shanghai`
+- When：北京时间周一 09:00
+- Then：任务触发；UTC 时间 01:00 不触发
+
+**场景 5c：任务绑定用户和 agent**
+- Given：创建任务时指定 `user_id=alice`、`agent_name=support-bot`、`target=dm`
+- When：任务触发
+- Then：support-bot 执行，归属用户=alice，消息投递到 alice 私聊
+
+**场景 5d：暂停与恢复**
+- Given：`task_id=t001` 每天 9 点触发
+- When：`fleetent-admin task pause --id t001`，等待过了 9 点
+- Then：该时间点不触发；`resume` 后恢复，下次到时间正常触发
+
+**场景 5e：单次手动触发**
+- Given：`task_id=t001` 处于暂停状态
+- When：`fleetent-admin task run --id t001`
+- Then：立即触发一次；任务仍保持暂停状态，原调度不受影响
+
+**场景 5f：触发时间预览**
+- Given：`task_id=t001`，`cron="0 9 * * 1-5"`，`timezone=Asia/Shanghai`
+- When：`fleetent-admin task preview --id t001 --n 5`
+- Then：输出接下来 5 次触发的北京时间
+
+**场景 5g：任务定义 Git 管理**
+- Given：在 `config/tasks/` 新增一个 YAML 文件定义任务，提交到 Git
+- When：服务重启
+- Then：新任务自动加载并开始调度
+
+**场景 5h：运行状态重启不丢**
+- Given：`task_id=t001` 已执行 10 次，最后触发时间为 T
+- When：服务重启
+- Then：`list-schedules` 仍显示执行次数=10、最后触发时间=T，任务恢复调度
+
+**场景 6：CLI 编辑定时任务**
+- Given：已存在 `task_id=t001`，cron 为每天 9 点
+- When：`fleetent-admin task edit --id t001 --cron "0 10 * * *"`
+- Then：下次触发时间变为每天 10 点，无需重启服务
+
+**场景 7：定时任务失败重试**
+- Given：任务配置最大重试 3 次，第 1 次因 API 超时失败
+- When：自动重试
+- Then：最多重试 3 次；全部失败后失败日志保留，含 `execution_id`、`error`、每次重试时间
+
+**场景 7a：失败兜底——投递到频道**
+- Given：任务配置 `fallback_channel=C-alert`，重试耗尽
+- When：agent 执行连续失败 3 次
+- Then：错误信息投递到频道 C-alert；执行日志 `status=dead_lettered`
+
+**场景 7b：失败兜底——死信队列**
+- Given：任务配置 `fallback=dead_letter`，重试耗尽
+- When：agent 执行失败超过上限
+- Then：`data/dead_letter.jsonl` 新增一条记录，含 `task_id`、`execution_id`、`error`
+
+**场景 8：定时任务幂等**
+- Given：相同 `execution_id` 的触发请求因网络抖动被投递两次
+- When：第二次投递到达
+- Then：第二次被幂等跳过，agent 仅执行一次
+
+**场景 9：Slack Events API**
+- Given：配置 `type=slack`，`secret=xxx`；Slack 发送 `app_mention` 事件
+- When：`POST /webhook/{source_id}`，携带正确 `X-Slack-Signature`
+- Then：验签通过，agent 收到提取后的消息文本，正常触发；签名错误返回 403
+
+**场景 9a：Slack URL verification**
+- Given：首次配置 Slack Events API，Slack 发送 challenge 请求
+- When：`POST /webhook/{source_id}`，body 含 `type=url_verification`
+- Then：自动返回 `{"challenge": "..."}`，无需额外配置
+
+**场景 9b：GitHub Webhook 触发**
+- Given：配置 `type=github`，`secret=xxx`，`event_filter=push`
+- When：GitHub 推送代码，发送 `X-GitHub-Event: push`，签名正确
+- Then：agent dev-bot 被触发，收到 push 事件的结构化摘要
+
+**场景 9c：GitHub 事件过滤**
+- Given：配置 `event_filter=push`，收到 `X-GitHub-Event: pull_request`
+- When：请求到达
+- Then：返回 200 但不触发 agent（静默忽略）
+
+**场景 10：Webhook 异步返回**
+- Given：agent 执行预计耗时 5 秒
+- When：`POST /webhook/{source_id}`
+- Then：立即返回 202 Accepted，不等待 agent 执行完成
+
+**场景 11：API Token 认证**
+- Given：来源配置 `auth=api_token`，`token=secret123`
+- When：请求头携带 `X-Api-Token: secret123`
+- Then：认证通过，agent 被触发；token 错误返回 403
+
+**场景 12：IP 白名单认证**
+- Given：来源配置 `auth=ip_whitelist`，允许 `192.168.1.0/24`
+- When：来自 `192.168.1.50` 的请求到达
+- Then：认证通过；来自 `10.0.0.1` 的请求返回 403
+
+**场景 13：Webhook 幂等**
+- Given：调用方携带 `X-Idempotency-Key: evt-abc123` 重发同一请求
+- When：第二次请求到达
+- Then：返回 202，agent 不重复执行
+
+**场景 14：双向回调**
+- Given：来源配置了 `callback_url=https://example.com/hook`
+- When：agent 执行完成
+- Then：向 `callback_url` POST 请求，body 含 `task_id`、`status=success`、`reply` 内容
+
+**场景 15：定时任务完整执行日志**
+- Given：`task_id=t001` 历史触发 5 次，第 3 次失败并重试 2 次后成功
+- When：`fleetent-admin task logs --id t001`
+- Then：输出 5 条记录，每条含 `execution_id`、`triggered_at`、`finished_at`、`status`、`retry_count`；第 3 条 `retry_count=2`、含 `error` 字段
+
+**场景 15a：定时任务日志按状态过滤**
+- Given：`task_id=t001` 历史 10 次执行，3 次失败
+- When：`fleetent-admin task logs --id t001 --status failed`
+- Then：仅返回 3 条失败记录
+
+**场景 16：Webhook 完整执行日志**
+- Given：`source_id=github` 历史收到 20 条请求，4 条执行失败
+- When：`fleetent-admin webhook logs --source github`
+- Then：输出 20 条记录，每条含 `task_id`、`session_id`、`received_at`、`finished_at`、`status`、`retry_count`
+
+**场景 16a：Webhook 日志按状态过滤**
+- Given：`source_id=github` 历史 20 条请求，4 条失败
+- When：`fleetent-admin webhook logs --source github --status failed`
+- Then：仅返回 4 条失败记录，每条含 `error` 字段
+
+## 测试边界
+
+**需要单元测试的行为**：
+- `verify_signature`：secret 为 None 时直接放行；签名正确时返回 True；签名错误时返回 False
+- `extract_message`：模板为 None 时返回 json.dumps；字段存在时正确替换；字段缺失时降级为 json.dumps
+- `schedule_store.create`：写入 SQLite 后 `list_tasks` 可查到；`delete` 后不再出现
+- `load_cron_yaml`：缺少必填字段的条目跳过并记录 warning；文件不存在时返回空列表
+- `CronScheduler`：SQLite 中的任务 id 与 YAML 冲突时 SQLite 优先
+
+**需要 mock 的依赖**：
+- `agent_loop.run`：隔离 LLM 调用，只验证触发行为
+- SQLite DB 路径（`schedule_store.DB_PATH`）：`monkeypatch` 到 `tmp_path`
+- `config/cron.yaml` 路径（`cron_scheduler._CRON_YAML_PATH`）：`monkeypatch` 到临时文件
+- APScheduler：测试注册逻辑时可 mock `_scheduler.add_job`，不实际启动定时器
 
 ## 待决问题
 
-- [ ] 定时任务执行历史的保留策略（条数上限 or 时间上限）（负责人：待认领）
+- [ ] 失败日志的保留策略：条数上限还是时间上限？（负责人：待认领）
+- [ ] 双向回调失败是否重试？重试策略与主任务是否共用？（负责人：待认领）
+- [ ] `task_id` 的生成方式：服务端生成（现为 UUID）还是调用方传入？（负责人：待认领）
+- [ ] `config/tasks/` YAML 变更检测：仅启动时扫描，还是支持运行时热重载？（负责人：待认领）
+- [ ] `session_id` 绑定语义：复用已有会话上下文，还是每次触发新建会话但注入历史摘要？（负责人：待认领）
