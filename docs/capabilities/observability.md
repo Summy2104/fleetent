@@ -18,18 +18,18 @@
 
 ```mermaid
 flowchart TD
-    A[HTTP /chat] --> AL[agent_loop.run]
-    B[Slack / Telegram] --> AL
-    C[Cron 定时任务] --> AL
-    D[Webhook] --> AL
+    A["HTTP /chat"] --> AL["agent_loop.run"]
+    B["Slack / Telegram"] --> AL
+    C["Cron 定时任务"] --> AL
+    D["Webhook"] --> AL
 
-    AL -->|log_run / log| EL[eval_logger]
-    EL --> TJ[(data/traces.jsonl)]
+    AL -->|"log_run / log"| EL["eval_logger"]
+    EL --> TJ[("data/traces.jsonl")]
 
-    AL -->|规划: 结构化日志| LM[Log Manager]
-    LM -->|JSON 格式| LF[(data/logs/YYYY-MM-DD.log)]
-    LM -->|warn/error/fatal| EF[(data/logs/YYYY-MM-DD.error.log)]
-    LM -->|human-readable + 颜色| CON[终端 Console]
+    AL -->|规划: 结构化日志| LM["Log Manager"]
+    LM -->|JSON 格式| LF[("data/logs/YYYY-MM-DD.log")]
+    LM -->|"warn/error/fatal"| EF[("data/logs/YYYY-MM-DD.error.log")]
+    LM -->|"human-readable + 颜色"| CON["终端 Console"]
 
     subgraph 规划
         LM
@@ -42,17 +42,16 @@ flowchart TD
 ### 日志级别漏斗
 
 ```mermaid
-flowchart LR
+flowchart TD
     ALL([所有日志事件]) --> S{当前级别}
 
     S -->|silent| DROP[全部丢弃]
-
-    S -->|fatal| FA[fatal]
-    S -->|error| FA & ER[error]
-    S -->|warn|  FA & ER & WA[warn]
-    S -->|info|  FA & ER & WA & IN[info]
-    S -->|debug| FA & ER & WA & IN & DE[debug]
-    S -->|trace| FA & ER & WA & IN & DE & TR[trace]
+    S -->|fatal 及以上| FA[fatal]
+    S -->|error 及以上| ER[error]
+    S -->|warn 及以上| WA[warn]
+    S -->|info 及以上| IN[info]
+    S -->|debug 及以上| DE[debug]
+    S -->|trace| TR[trace]
 
     FA --> OUT([写文件 / 输出终端])
     ER --> OUT
