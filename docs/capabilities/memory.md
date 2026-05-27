@@ -10,6 +10,19 @@ per-user 语义记忆的提取、存储与检索，让 agent 在多次对话中�
 
 **不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、记忆质量的定期优化（→ reflection）。
 
+### 记忆系统全局架构
+
+fleetent 的记忆系统借鉴认知科学的四类记忆划分，每类由不同模块负责：
+
+| 类型 | 内容 | 存储位置 | 负责模块 |
+|------|------|---------|---------|
+| **语义记忆** | 用户身份、偏好、临时状态等跨 session 事实 | SQLite `memory_items` + vector_store | `memory_layer`（本模块）|
+| **情节记忆** | 对话与工具执行的完整历史轨迹 | `traces.jsonl` | `eval_logger` |
+| **程序记忆** | agent 完成特定任务的技能与方法 | `skills/` 目录 | `skill_registry` |
+| **工作记忆** | 当前 session 的对话上下文（session 结束即释放） | 内存 | `context_mgr` |
+
+本模块（`memory_layer`）只负责**语义记忆**，即按 `identity` / `preferences` / `context` 三类结构化存储的用户事实。其余三类由各自模块独立管理，`reflection` 跨模块读取情节记忆（traces）与语义记忆（memory_items）来做质量优化。
+
 **调用关系**：
 - 依赖：model_router（`memory_extraction` task，默认轻量模型，可通过 config 覆盖）、vector_store（向量索引）、config
 - 被依赖：long_term_ctx（检索注入内容）、reflection（读取现有记忆、写回优化结果）
@@ -167,10 +180,14 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
 
 ## 相关能力域
 
-以下能力域与 memory 共同构成长期上下文层：
+记忆系统四个类型各自对应的模块，以及协调层：
 
-| 能力域 | 职责 |
-|--------|------|
-| `long-term-ctx` | 协调 memory + knowledge_base 的检索与注入，统一管理 token 预算 |
-| `knowledge-base` | 企业文档知识，per-tenant，与 memory 并列由 long_term_ctx 统一注入 |
-| `reflection` | 定期优化 memory 内容；读取 traces，生成/改进 skills（per-agent） |
+| 能力域 | 记忆类型 | 职责 |
+|--------|---------|------|
+| `memory_layer`（本模块）| 语义记忆 | 用户事实的提取、存储与检索 |
+| `eval_logger` | 情节记忆 | 对话与工具执行历史的追加写入 |
+| `skill_registry` | 程序记忆 | skill 的扫描、匹配与注入 |
+| `context_mgr` | 工作记忆 | in-session token 压缩与上下文管理 |
+| `long_term_ctx` | — | 协调语义记忆 + 知识库的检索与注入，统一管理 token 预算 |
+| `knowledge_base` | — | 企业文档知识（per-tenant），与语义记忆并列由 long_term_ctx 注入 |
+| `reflection` | — | 跨类型读取（情节 + 语义），优化记忆质量，生成/改进程序记忆 |
