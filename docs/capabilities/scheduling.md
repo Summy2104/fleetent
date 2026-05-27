@@ -79,11 +79,11 @@ flowchart TD
     EXEC -->|成功| LOG_OK["执行日志 status=success"]
     EXEC -->|失败| RETRY{重试次数未超上限}
 
-    RETRY -->|是| WAIT[等待重试间隔] --> EXEC
     RETRY -->|否| DL{兜底方式}
+    RETRY -->|是，等待后重试| EXEC
 
     DL -->|fallback_channel| CH["投递错误信息到指定频道"]
-    DL -->|dead_letter| DLQ[("data/dead_letter.jsonl")]
+    DL -->|dead_letter| DLQ[("dead_letter.jsonl")]
 
     CH --> LOG_DL["执行日志 status=dead_lettered"]
     DLQ --> LOG_DL
