@@ -11,12 +11,74 @@ per-user 语义记忆的提取、存储与检索，让 agent 在多次对话中�
 **不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、记忆质量的定期优化（→ reflection）。
 
 **调用关系**：
-- 依赖：model_router（Haiku 提取与冲突判断）、vector_store（向量索引）、config
+- 依赖：model_router（`memory_extraction` task，默认轻量模型，可通过 config 覆盖）、vector_store（向量索引）、config
 - 被依赖：long_term_ctx（检索注入内容）、reflection（读取现有记忆、写回优化结果）
+
+## 关键流程
+
+两条独立流程，分别在对话结束后和对话开始前触发。
+
+```mermaid
+flowchart TD
+    subgraph extract["提取流程（异步，SSE done 后触发）"]
+        A[SSE done] --> B[LLM 提取新事实]
+        B --> C{与已有同类记忆比较}
+        C -->|无冲突| D[追加新条目]
+        C -->|有冲突| E[合并或替换旧条目]
+        D --> F[Re-embed → 更新 vector_store]
+        E --> F
+    end
+
+    subgraph search["检索流程（对话开始时，由 long_term_ctx 触发）"]
+        G[long_term_ctx 调用 search] --> H[Embed query]
+        H --> I[vector_store 向量检索]
+        I --> J[过滤已过期条目]
+        J --> K[返回 MemoryItem 列表]
+    end
+```
+
+## 数据模型
+
+```sql
+memory_items (
+  id          TEXT PRIMARY KEY,  -- UUID
+  user_id     TEXT,              -- → users.id
+  type        TEXT,              -- "identity" | "preferences" | "context"
+  content     TEXT,              -- 事实内容
+  created_at  DATETIME,
+  updated_at  DATETIME,
+  expires_at  DATETIME           -- 仅 context 类有值；identity / preferences 为 NULL
+)
+```
+
+向量 embedding 存储在 vector_store，以 `memory_item.id` 为 key，不写入此表。
+
+## 接口定义
+
+```python
+@dataclass
+class MemoryItem:
+    id: str
+    user_id: str
+    type: Literal["identity", "preferences", "context"]
+    content: str
+    created_at: datetime
+    updated_at: datetime
+    expires_at: datetime | None
+
+
+async def search(user_id: str, query: str, limit: int = 10) -> list[MemoryItem]:
+    """按语义相似度返回最相关的记忆条目，自动过滤已过期条目。由 long_term_ctx 调用。"""
+
+
+async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
+    """从对话中提取事实，冲突检测后写入。SSE done 后异步调用，不阻塞响应。"""
+```
 
 ## 现状
 
-- ✅ **事实提取**：对话结束后用 Haiku 异步提取用户相关事实，写入 JSONL
+- ✅ **事实提取**：对话结束后异步提取用户相关事实，写入 JSONL
+  - 使用 model_router 的 `memory_extraction` task，默认路由到轻量模型
   - 提取不阻塞主响应，在 SSE done 之后异步执行
   - 存储路径：data/users/{user_id}/memories.jsonl
 
@@ -31,10 +93,15 @@ per-user 语义记忆的提取、存储与检索，让 agent 在多次对话中�
   - `preferences`：工作偏好（风格、输出格式偏好）— 长期有效
   - `context`：临时状态（当前项目、进行中任务）— TTL 30 天，过期自动失效
 
-- [ ] **冲突检测与合并**：新提取的事实与已有同类记忆比较，冲突时合并或替换，不追加矛盾条目
+- [ ] **冲突检测与合并**：新提取的事实与已有同类记忆比较，按类型规则决定处理方式
+  - `identity` / `context`：新覆盖旧（身份和状态以最新为准）
+  - `preferences`：区分**明确陈述**（"我以后都想要..."）和**一次性请求**（"这次帮我..."）
+    - 明确陈述 → 更新记忆
+    - 一次性请求 → 不更新记忆，当前 session 上下文处理即可
+  - 判断在提取 prompt 内完成，LLM 输出 `update` 或 `ignore`，不额外调用
 
 - [ ] **向量相似度检索**：通过共享 vector_store 对记忆条目建立向量索引
-  - 对外接口：`search(user_id: str, query: str) → List[MemoryItem]`
+  - 对外接口：`search(user_id: str, query: str) → list[MemoryItem]`
   - 由 long_term_ctx 在对话开始时调用
 
 - [ ] **embedding 模型**：自托管本地模型（bge-m3 或 multilingual-e5）
@@ -67,16 +134,43 @@ per-user 语义记忆的提取、存储与检索，让 agent 在多次对话中�
 - When：该记忆被检索
 - Then：不出现在返回结果中
 
+## 测试边界
+
+测试分两层，职责不同。
+
+**第一层：结构正确性（CI 自动运行，LLM 全部 mock）**
+
+需要单元测试的行为：
+- 冲突检测：identity 类新事实导致旧条目被替换，不产生重复
+- preferences 信号强度：mock LLM 返回 `update` 时更新记忆，返回 `ignore` 时不更新
+- TTL 过期过滤：search() 不返回 expires_at < now 的条目
+- 类型分类：LLM 提取结果被正确归类到 identity / preferences / context
+- 提取异步性：extract_and_update 不阻塞调用方（fire-and-forget）
+
+需要 mock 的依赖：
+- `model_router.get_async_client_and_config`：隔离所有 LLM 调用（提取和冲突判断）
+- `vector_store`：隔离向量索引读写
+- SQLite DB 路径：`monkeypatch` 到 `tmp_path`，绝不触碰 data/
+
+**第二层：提取质量（定期手动触发，使用真实 LLM）**
+
+用合成对话 fixture 验证端到端提取质量：
+- 准备若干包含已知事实的多轮对话（如"用户告知职位、偏好、当前项目"）
+- 跑完整提取流程，断言关键事实出现在记忆中且无幻觉条目
+- 适合在升级 LLM 模型或修改提取 prompt 后触发，不纳入日常 CI
+
 ## 待决问题
 
 - [ ] 冲突判断粒度：同 type 下全量比较，还是只对语义相似度超过阈值的条目做冲突检测？（负责人：待认领）
 - [ ] context TTL 起算点：首次提及时间，还是最后一次提及时间？（负责人：待认领）
+- [ ] 记忆条数上限：v1.0 先设软监控阈值（超出记告警日志），还是直接按 type 设硬上限？如设硬上限，identity / preferences 各多少合适？超出时由 reflection 批量合并，还是 memory_layer 内联驱逐？（负责人：待认领）
 
-## 相关能力域（待建文档）
+## 相关能力域
 
 以下能力域与 memory 共同构成长期上下文层：
 
 | 能力域 | 职责 |
 |--------|------|
+| `long-term-ctx` | 协调 memory + knowledge_base 的检索与注入，统一管理 token 预算 |
 | `knowledge-base` | 企业文档知识，per-tenant，与 memory 并列由 long_term_ctx 统一注入 |
 | `reflection` | 定期优化 memory 内容；读取 traces，生成/改进 skills（per-agent） |
