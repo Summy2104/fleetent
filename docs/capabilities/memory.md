@@ -178,16 +178,3 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
 - [ ] context TTL 起算点：首次提及时间，还是最后一次提及时间？（负责人：待认领）
 - [ ] 记忆条数上限：v1.0 先设软监控阈值（超出记告警日志），还是直接按 type 设硬上限？如设硬上限，identity / preferences 各多少合适？超出时由 reflection 批量合并，还是 memory_layer 内联驱逐？（负责人：待认领）
 
-## 相关能力域
-
-记忆系统四个类型各自对应的模块，以及协调层：
-
-| 能力域 | 记忆类型 | 职责 |
-|--------|---------|------|
-| `memory_layer`（本模块）| 语义记忆 | 用户事实的提取、存储与检索 |
-| `eval_logger` | 情节记忆 | 对话与工具执行历史的追加写入 |
-| `skill_registry` | 程序记忆 | skill 的扫描、匹配与注入 |
-| `context_mgr` | 工作记忆 | in-session token 压缩与上下文管理 |
-| `long_term_ctx` | — | 协调语义记忆 + 知识库的检索与注入，统一管理 token 预算 |
-| `knowledge_base` | — | 企业文档知识（per-tenant），与语义记忆并列由 long_term_ctx 注入 |
-| `reflection` | — | 跨类型读取（情节 + 语义），优化记忆质量，生成/改进程序记忆 |

@@ -142,8 +142,6 @@ async def run_kb_reflection(scope: str) -> None:
 - When：skill reflection 定期任务触发
 - Then：skill 文件直接更新，无需审批
 
-## 验收标准（补充：knowledge base reflection）
-
 **场景 5：知识空白上报**
 - Given：用户连续多次提问某类话题，knowledge_base.search() 返回的 chunk 相关度持续低于阈值
 - When：knowledge base reflection 定期任务触发
