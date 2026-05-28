@@ -48,45 +48,52 @@ flowchart TD
 
 ## 现状
 
-- ✅ **Docker 沙箱基本执行**：代码在 Docker 容器内隔离运行，返回 stdout / stderr / exit_code
-  - 当前资源限制：`--network none --memory 256m --cpus 0.5 --read-only`（硬编码）
+- ⚡ **Docker 沙箱基本执行**：代码在 Docker 容器内隔离运行，返回 stdout / stderr / exit_code
+  - 当前实现：`sandbox_client.py` 封装 Docker CLI，资源限制（`--network none --memory 256m --cpus 0.5 --read-only`）硬编码
+  - **目标**：迁移至 microsandbox SDK（v0.4.6 已安装），采用 microVM 级别隔离（见规划中）
 
 - ⚡ **资源限制**：限制生效，但参数硬编码在 `sandbox_client.py`，无法通过配置调整
 
 - ⚡ **文件系统隔离**：`--read-only` 模式，整个文件系统只读，`/tmp` 目录可写
-  - 当前缺失：无符号链接攻击防护（代码可通过符号链接跳出沙箱目录）
+  - 当前缺失：无符号链接攻击防护
 
 - ⚡ **执行过程可观测**：返回 stdout / stderr / exit_code，但未写入运行日志（trace）
 
 ## 规划中（v1.0）
 
-- [ ] **生命周期管理（scope）**：按配置决定容器存活粒度
+- [ ] **迁移至 microsandbox SDK**：用 microsandbox 替换当前 Docker CLI 封装
+  - microsandbox 为每个沙箱分配独立 Linux 内核（microVM），不共享宿主机内核，无命名空间逃逸风险
+  - 无需 dockerd 守护进程，以子进程方式启动，无需 root 权限
+  - 启动时间 < 100ms（使用 OCI 镜像缓存）
+  - 支持 macOS（Apple Silicon）和 Linux（需 KVM）；不支持 KVM 的环境回退至 Docker 模式
+  - Python SDK 接口：`Sandbox.create() → exec() → stop()`，全程 async/await
+
+- [ ] **生命周期管理（scope）**：按配置决定沙箱存活粒度
   - `session`（默认）：会话开始创建，同一会话内复用，会话结束时销毁
-  - `agent`：每个 agent 定义独享一个容器，跨会话长期保留（适合保留已安装依赖、预置工具链）
+  - `agent`：每个 agent 定义独享一个沙箱，跨会话长期保留；底层通过 microsandbox Snapshot 实现（捕获已安装依赖的状态 → 下次快速恢复，无需重新安装）
   - 闲置超时自动销毁（`idle_hours`，默认 2 小时，适用于 `agent` scope）
 
 - [ ] **启用/关闭控制（三态模式）**：全局 `mode` + agent 级别开关双层控制
   - `off`：`run_code` 工具不注册，AI 完全不知道代码执行能力存在
   - `selective`：全局默认关闭，仅 `features.code_execution: true` 的 agent 可用
   - `all`（默认）：所有 agent 可用，agent 可显式设置 `code_execution: false` 关闭
-  - Docker 不可用时自动降级为 `off`，不阻断平台启动
+  - microsandbox / Docker 均不可用时自动降级为 `off`，不阻断平台启动
 
 - [ ] **资源限制可配置**：通过 `settings.yaml` 声明，不再硬编码
   ```yaml
   sandbox:
     resources:
-      cpu: 0.5
-      memory: "256m"
-      pids_limit: 256
-      network: "none"
-      tmpfs_size: "512m"
+      memory: 256       # MB
+      cpus: 0.5
+      network: "none"   # none / public_only / allow_all
+      exec_timeout: 30  # 单次执行超时（秒）
   ```
-  未配置时使用安全默认值；`network: none` 为默认且推荐值
+  未配置时使用安全默认值；`network: none` 为默认且推荐值（对应 microsandbox `Network.none()`）
 
-- [ ] **环境变量过滤**：三层过滤，防止密钥泄露到沙箱进程
-  1. 白名单通过：`PATH`、`LANG`、`VIRTUAL_ENV` 等安全变量
-  2. 名称过滤：变量名含 `KEY`、`TOKEN`、`SECRET` 的直接排除
-  3. 其余全部不传入（默认拒绝）
+- [ ] **密钥安全注入（Secret）**：使用 microsandbox 原生 `Secret` 机制，密钥不以明文传入 VM
+  - 沙箱内代码看到的是随机占位符，真实密钥只在网络边界透明替换（HTTP 请求发出时替换 header/body）
+  - AI 生成的代码无法通过 `print()` 或文件读取方式泄露真实密钥
+  - 比三层环境变量过滤更强：即使代码试图枚举环境变量，也只能看到占位符
 
 - [ ] **输出截断**：防止海量输出占满对话空间
   - stdout 上限 50KB，stderr 上限 10KB
@@ -94,25 +101,19 @@ flowchart TD
   - 非 UTF-8 字符做安全转义
 
 - [ ] **执行超时与强制终止**：默认 30s（可配置，最长 600s）
-  - 超时：先发 SIGTERM，等待 5s 优雅退出；仍未退出则 SIGKILL 强制终止
-  - 终止后按 scope 决定容器处理：`session` 保留容器供同 session 复用；`agent` 保留容器供该 agent 其他 session 使用
+  - microsandbox `exec()` 支持 per-command `timeout` 参数，超时后通过 `ExecHandle.kill()` 强制终止
+  - 终止后按 scope 决定沙箱处理：`session` 保留沙箱供同 session 复用；`agent` 保留沙箱供该 agent 其他 session 使用
 
-- [ ] **孤儿容器清理**：平台启动时扫描 `sandbox-*` 前缀的遗留容器并销毁
+- [ ] **孤儿沙箱清理**：平台启动时检测并销毁上次崩溃遗留的 microsandbox 实例
 
 - [ ] **执行结果写入 trace**：记录执行时长、退出码、输出大小、使用的沙箱类型
-
-- [ ] **可插拔隔离后端**：统一 `create / exec / destroy` 接口，后端可切换
-  - `docker`（当前）：容器级隔离，冷启动 ~1s，适合可信内网
-  - `gvisor`：内核级隔离，中等不可信场景
-  - `firecracker`：微虚拟机级，高不可信/多租户场景
-  - `ssh`：远程主机隔离，有专用沙箱机器的部署
 
 ## 验收标准
 
 **场景 1：代码在隔离环境中安全执行**
 - Given：用户请求 agent 运行一段 Python 代码
 - When：agent 执行 `run_code` 工具
-- Then：代码在隔离容器内运行，无法访问外部网络；执行结果返回给用户；主机文件系统不受影响
+- Then：代码在隔离 VM 内运行，无法访问外部网络；执行结果返回给用户；主机文件系统不受影响
 
 **场景 2：代码执行超时自动终止**
 - Given：用户请求运行一段耗时超出配置时限的代码
@@ -149,7 +150,7 @@ flowchart TD
 - 环境变量过滤：含 `TOKEN`、`KEY`、`SECRET` 的变量不传入沙箱
 
 **需要 mock 的依赖**：
-- Docker CLI（`subprocess`）：mock `sandbox_client` 的子进程调用，隔离真实容器
+- microsandbox SDK（`Sandbox.create / exec / stop`）：mock 整个 SDK，隔离真实 VM 创建
 - `agent_store`：mock agent 的 `features.code_execution` 值
 - `config/settings.yaml` 路径：`monkeypatch` 到临时文件
 
