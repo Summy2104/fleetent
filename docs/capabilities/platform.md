@@ -9,7 +9,7 @@
 多用户管理、API 认证和管理员操作。是 fleetent 作为多租户平台的基础层。
 
 **调用关系**：
-- 依赖：user_store、im_user_store
+- 依赖：user-center（用户创建、禁用、拉黑等写操作均通过 user-center 接口，不直接写 users 表）、user_store / im_user_store（只读，供 Bearer token 认证查询）
 - 被依赖：server.py（认证）、normalizer（用户查找）、admin CLI
 - **不涉及**：agent_store（属 agent-runtime 域）、config（属 deployment 域）
 
