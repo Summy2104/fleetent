@@ -149,10 +149,10 @@ flowchart TD
 | [platform.md](capabilities/platform.md) | 用户管理、API 认证、admin CLI | 张亮 |
 | [memory.md](capabilities/memory.md) | 跨 session 记忆（语义 / 情节 / 程序 / 工作） | 常乐 |
 | [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入 | 常乐 |
-| [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、混合检索 | - |
-| [vector-store.md](capabilities/vector-store.md) | 向量索引基础设施 | - |
+| [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、混合检索 | 常乐 |
+| [vector-store.md](capabilities/vector-store.md) | 向量索引基础设施 | 常乐 |
 | [connectors.md](capabilities/connectors.md) | 数据源连接器（Confluence / Google Drive 等） | - |
-| [reflection.md](capabilities/reflection.md) | 记忆 / Skill / 知识库反思与自进化 | - |
+| [reflection.md](capabilities/reflection.md) | 记忆 / Skill / 知识库反思与自进化 | 常乐 |
 | [session-management.md](capabilities/session-management.md) | session 持久化、并发保护、生命周期管理 | - |
 | [governance.md](capabilities/governance.md) | 权限审批、工具白名单、agent 定义与分配 | 宋凯宇 |
 | [scheduling.md](capabilities/scheduling.md) | Cron 定时任务、Webhook 事件触发 | 程鑫 |
