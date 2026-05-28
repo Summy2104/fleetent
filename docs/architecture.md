@@ -139,23 +139,23 @@ flowchart TD
 
 | 文档 | 覆盖范围 | 负责人 |
 |------|---------|-----|
-| [agent-runtime.md](capabilities/agent-runtime.md) | 核心循环、工具调度、上下文压缩、运行治理 | 张洋 |
-| [model-router.md](capabilities/model-router.md) | task_type 路由、provider 配置、fallback 链 | - |
-| [tools.md](capabilities/tools.md) | @tool 装饰器、schema 构建、dispatch、内置工具集 | - |
-| [mcp.md](capabilities/mcp.md) | MCP 外部工具集成（stdio / HTTP） | 张洋 |
-| [sandbox.md](capabilities/sandbox.md) | 安全代码执行（microsandbox microVM） | 张洋 |
-| [skill.md](capabilities/skill.md) | Skill 发现、匹配、注入 | 张洋 |
-| [im-gateway.md](capabilities/im-gateway.md) | Slack / Telegram / WhatsApp 接入、用户映射 | 张亮 |
-| [platform.md](capabilities/platform.md) | 用户管理、API 认证、admin CLI | 张亮 |
-| [memory.md](capabilities/memory.md) | 跨 session 记忆（语义 / 情节 / 程序 / 工作） | 常乐 |
-| [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入 | 常乐 |
-| [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、混合检索 | 常乐 |
-| [vector-store.md](capabilities/vector-store.md) | 向量索引基础设施 | 常乐 |
-| [connectors.md](capabilities/connectors.md) | 数据源连接器（Confluence / Google Drive 等） | - |
-| [reflection.md](capabilities/reflection.md) | 记忆 / Skill / 知识库反思与自进化 | 常乐 |
-| [session-management.md](capabilities/session-management.md) | session 持久化、并发保护、生命周期管理 | - |
-| [governance.md](capabilities/governance.md) | 权限审批、工具白名单、agent 定义与分配 | 宋凯宇 |
-| [scheduling.md](capabilities/scheduling.md) | Cron 定时任务、Webhook 事件触发 | 程鑫 |
-| [observability.md](capabilities/observability.md) | 评估日志、数据统计、链路追踪 | 程鑫 |
-| [user-center.md](capabilities/user-center.md) | 用户中心、多租户管理 | - |
-| [deployment.md](capabilities/deployment.md) | on-premises 打包、配置管理 | 常乐 |
+| [agent-runtime.md](capabilities/agent-runtime.md) | 核心循环、工具调度、上下文压缩、运行治理 | 张洋  |
+| [model-router.md](capabilities/model-router.md) | task_type 路由、provider 配置、fallback 链 | 张洋  |
+| [tools.md](capabilities/tools.md) | @tool 装饰器、schema 构建、dispatch、内置工具集 | 张洋  |
+| [mcp.md](capabilities/mcp.md) | MCP 外部工具集成（stdio / HTTP） | 张洋  |
+| [sandbox.md](capabilities/sandbox.md) | 安全代码执行（microsandbox microVM） | 张洋  |
+| [skill.md](capabilities/skill.md) | Skill 发现、匹配、注入 | 张洋  |
+| [im-gateway.md](capabilities/im-gateway.md) | Slack / Telegram / WhatsApp 接入、用户映射 | 张亮  |
+| [platform.md](capabilities/platform.md) | 用户管理、API 认证、admin CLI | 张亮  |
+| [memory.md](capabilities/memory.md) | 跨 session 记忆（语义 / 情节 / 程序 / 工作） | 常乐  |
+| [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入 | 常乐  |
+| [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、混合检索 | 常乐  |
+| [vector-store.md](capabilities/vector-store.md) | 向量索引基础设施 | 常乐  |
+| [connectors.md](capabilities/connectors.md) | 数据源连接器（Confluence / Google Drive 等） | 张亮  |
+| [reflection.md](capabilities/reflection.md) | 记忆 / Skill / 知识库反思与自进化 | 常乐  |
+| [session.md](capabilities/session.md) | session 持久化、并发保护、生命周期管理 | 张洋  |
+| [governance.md](capabilities/governance.md) | 权限审批、工具白名单、agent 定义与分配 | 张亮  |
+| [scheduling.md](capabilities/scheduling.md) | Cron 定时任务、Webhook 事件触发 | 张亮  |
+| [observability.md](capabilities/observability.md) | 评估日志、数据统计、链路追踪 | 常乐  |
+| [user-center.md](capabilities/user-center.md) | 用户中心、多租户管理 | 张亮  |
+| [deployment.md](capabilities/deployment.md) | on-premises 打包、配置管理 | 常乐  |
