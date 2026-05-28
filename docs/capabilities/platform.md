@@ -10,10 +10,58 @@
 - 依赖：user_store、im_user_store、agent_store、config
 - 被依赖：server.py（认证）、normalizer（用户查找）、admin CLI
 
+## 架构总览
+
+```mermaid
+flowchart TD
+    subgraph 接入["接入层"]
+        HTTP["POST /chat<br/>Bearer token"]
+        IM["IM 消息<br/>Slack / TG / WA"]
+    end
+    subgraph PLAT["platform 平台层"]
+        AUTH["认证 / 用户解析"]
+        US["user_store<br/>账号 + API key"]
+        IUS["im_user_store<br/>(platform, pid) → user"]
+        AS["agent_store<br/>agent + 绑定"]
+        CFG["config<br/>.env / yaml / 凭据"]
+    end
+    subgraph MGMT["管理入口"]
+        CLI["admin CLI（现状）"]
+        UI["Admin Web 后台（v1.0）"]
+    end
+    HTTP --> AUTH
+    IM --> AUTH
+    AUTH --> US
+    AUTH --> IUS
+    AUTH --> AS
+    CLI --> US
+    CLI --> IUS
+    CLI --> AS
+    UI -.规划.-> US
+    UI -.规划.-> IUS
+    UI -.规划.-> AS
+    UI -.规划.-> CFG
+```
+
 ## 现状
 
 - ✅ **Bearer token 认证**：`Authorization: Bearer ma-<64hex>`，`ma-` 前缀区分服务 key 与模型 API key
   - get_by_api_key() 查 SQLite，无外部 IdP
+
+```mermaid
+sequenceDiagram
+    actor Client
+    Client->>server.py: POST /chat<br/>Authorization: Bearer ma-xxx
+    server.py->>user_store: get_by_api_key(token)
+    alt key 无效或过期
+        user_store-->>server.py: None
+        server.py-->>Client: 401 Unauthorized
+    else key 有效
+        user_store-->>server.py: User(user_id)
+        server.py->>agent_loop: run(user_id, ...)
+        agent_loop-->>Client: SSE 流
+    end
+```
 
 - ✅ **用户管理 CLI**：create-user、list-users、rotate-key
 
@@ -29,6 +77,27 @@
 
 - [ ] **终端用户自助注册**：Web 邮箱注册 + 激活邮件、第三方 OAuth、企业 SSO（OIDC / SAML）、邀请码注册可切换，注册渠道写入用户详情
 
+```mermaid
+flowchart TD
+    Start["未注册访客"] --> Way{"注册方式"}
+    Way -->|邮箱密码| Email["填写邮箱 + 密码"]
+    Way -->|OAuth| OAuth["Google / GitHub<br/>授权回调"]
+    Way -->|SSO| SSO["企业 OIDC / SAML"]
+    Way -->|邀请码| Invite["填写邀请码 + 邮箱"]
+    Email --> Rate{"速率 / 邀请制<br/>校验"}
+    OAuth --> Rate
+    SSO --> Rate
+    Invite --> Rate
+    Rate -->|不通过| Reject["拒绝<br/>记入可疑事件"]
+    Rate -->|通过| Create["建账号<br/>记录注册渠道"]
+    Create --> Verify{"需邮件激活?"}
+    Verify -->|是| Mail["发激活邮件"]
+    Mail --> Active["用户点击激活链接"]
+    Active --> Key["签发首把 API key"]
+    Verify -->|否| Key
+    Key --> Done["可调用 /chat"]
+```
+
 - [ ] **注册防滥用**：同 IP、同邮箱域、同时间窗的注册次数有上限，超限请求自动拒绝并记入可疑事件
 
 - [ ] **用户列表与生命周期**：按名称 / 邮箱 / 状态 / 创建时间 / 最近活跃排序与筛选，单页查看基本信息、关联 IM 账号、用量、历史会话，可创建 / 编辑 / 禁用 / 删除
@@ -36,6 +105,22 @@
 - [ ] **多 API key 管理**：一个用户可拥有多把 key，每把可设有效期、scope（endpoint / agent 级）、备注，独立轮换与撤销
 
 - [ ] **一键拉黑与解封**：拉黑后所有 key 立即失效、关联 IM 账号同步封禁、同邮箱 / OAuth subject 后续注册被拒；拉黑必须填写原因写入审计；解封后账号可登录但已失效的 key 不自动恢复
+
+```mermaid
+flowchart TD
+    Admin["管理员一键拉黑<br/>+ 填写原因"] --> Lock["账号标记 blocked"]
+    Lock --> K["撤销所有 API key"]
+    Lock --> IM["关联 IM 账号<br/>同步封禁"]
+    Lock --> Dedup["邮箱 / OAuth subject<br/>加入禁注册名单"]
+    Lock --> Audit["写审计日志<br/>原因 / 操作人 / 时间"]
+    K --> E1["原 key 调用 /chat → 401"]
+    IM --> E2["IM 发消息 → 拒绝提示"]
+    Dedup --> E3["同邮箱再注册 → 被拒"]
+
+    UnBlock["管理员解除拉黑"] -.-> Unlock["账号可登录"]
+    Unlock -.-> NoKey["旧 key 不自动恢复<br/>需重新生成"]
+    Unlock -.-> ReApprove["IM 账号需重新审批"]
+```
 
 - [ ] **批量拉黑**：按邮箱域、IP、注册时间窗批量拉黑，用于应对滥注或撞库攻击
 
