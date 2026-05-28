@@ -288,7 +288,7 @@ def extract_message(template: str | None, payload: Any) -> str:
 - When：Webhook 请求到达
 - Then：agent 收到 JSON 序列化的完整 payload，正常触发
 
-### 规划
+### 规划中（v1.0）
 
 **场景 5：一次性任务**
 - Given：用户对话"明天下午 3 点提醒我开会"

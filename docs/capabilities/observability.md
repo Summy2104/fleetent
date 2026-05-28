@@ -214,7 +214,7 @@ def log(
 - When：SSE 流结束
 - Then：trace 中 `tokens.prompt` 和 `tokens.completion` 均有值
 
-### 日志级别
+### 规划中（v1.0）
 
 **场景 3：日志级别过滤**
 - Given：配置日志级别为 `warn`
@@ -236,7 +236,6 @@ def log(
 - When：服务正常运行并处理请求
 - Then：终端无任何输出，日志文件无任何写入
 
-### 日志字段
 
 **场景 4：日志字段完整性**
 - Given：用户 alice 通过 Slack 向 support-bot 发送一条消息
@@ -248,7 +247,6 @@ def log(
 - When：查看日志
 - Then：含 `timestamp`、`level`、`message`；`session_id` / `user_id` / `tokens` / `duration_ms` 为空或不存在
 
-### 双通道输出
 
 **场景 5：双通道同时输出**
 - Given：配置终端级别 `info`、文件级别 `debug`
@@ -265,7 +263,6 @@ def log(
 - When：服务继续运行
 - Then：终端日志正常输出，服务不崩溃，文件写入失败记录一条 `error` 到终端
 
-### 日志文件滚动
 
 **场景 6：按日期生成，每天两份**
 - Given：服务在 2026-05-25 产生 `info`、`warn`、`error` 各若干条；2026-05-26 00:01 再处理一次请求
@@ -277,7 +274,6 @@ def log(
 - When：查看 `2026-05-25.error.log`
 - Then：仅有 5 条记录（3 warn + 2 error）
 
-### Trace 增强
 
 **场景 7：性能耗时分解**
 - Given：一次包含 2 次工具调用的 `/chat` 请求
@@ -294,7 +290,6 @@ def log(
 - When：SSE 流结束
 - Then：`done` 事件的 `sources` 字段包含 `["记忆", "推理"]`，不包含 `"知识库"`
 
-### Token 统计
 
 **场景 8：per-user token 统计**
 - Given：用户 alice 本月有 5 次对话，累计 10000 prompt tokens、3000 completion tokens
@@ -306,7 +301,6 @@ def log(
 - When：`uv run fleetent-admin token-stats --agent support-bot --period 2026-05`
 - Then：输出 `agent_name=support-bot`、`prompt_tokens=50000`、`turns=20`
 
-### 脱敏
 
 **场景 9：API key 脱敏**
 - Given：工具调用参数中包含 `api_key=sk-ant-abc123456`
@@ -323,7 +317,6 @@ def log(
 - When：工具实际执行
 - Then：工具收到的是原始未脱敏值
 
-### CLI
 
 **场景 10：log tail**
 - Given：日志文件已积累数百条记录
@@ -345,7 +338,6 @@ def log(
 - When：`fleetent-admin log set-level debug --channel console`
 - Then：无需重启，后续终端立即输出 `debug` 日志；文件通道级别不变
 
-### 启动诊断
 
 **场景 11：API key 缺失**
 - Given：未设置 `ANTHROPIC_API_KEY` 启动服务

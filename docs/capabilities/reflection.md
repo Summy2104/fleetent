@@ -178,7 +178,7 @@ async def run_kb_reflection(scope: str) -> None:
 
 ## 待决问题
 
-- [ ] 触发频率：三个 reflection 分开调度，还是同一个 cron job 按序执行？（负责人：待认领）
+- [x] 触发频率：已决定分开调度，频率各异（memory reflection 每日，skill / kb reflection 每周），由 cron_scheduler 独立配置
 - [ ] skill reflection 触发条件：需要多少条 traces 样本才触发一次分析？（负责人：待认领）
 - [ ] skill 变更提案存储：复用现有 permission_gate 表，还是单独的提案表？（负责人：待认领）
 - [ ] knowledge base reflection 上报的输出形式：写入独立日志表，还是通过 IM 通知管理员？（负责人：待认领）

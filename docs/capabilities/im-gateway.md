@@ -179,87 +179,87 @@ im_users (
 - When：agent_loop 收到该消息
 - Then：被引用消息文本作为上下文出现在 agent 看到的对话中
 
-**场景 10：群里仅 @bot 触发（可配置）**
+**场景 9：群里仅 @bot 触发（可配置）**
 - Given：群聊配置为"仅 @bot 才响应"
 - When：群内出现非 @bot 的普通消息
 - Then：bot 不进入 agent_loop，不产生回复；@bot 的消息进入 agent_loop 后 @bot 字样从 text 中剥离
 
-**场景 11：/new 重置 session**
+**场景 10：/new 重置 session**
 - Given：用户和 bot 已有多轮对话
 - When：用户发送 /new
 - Then：当前 session 被清空，下一条消息开启新 session；本条命令不触发 LLM 调用
 
-**场景 12：/stop 停止当前工作**
+**场景 11：/stop 停止当前工作**
 - Given：agent 正在执行长工具调用
 - When：用户发送 /stop
 - Then：当前工具被中断，agent 立即停止，并向用户确认已停止
 
-**场景 13：agent 编辑已发消息**
+**场景 12：agent 编辑已发消息**
 - Given：agent 已发出占位消息"思考中…"
 - When：工具结果就绪，agent 调用编辑接口
 - Then：原消息内容被替换为最终回复，不产生新消息
 
-**场景 14：agent 撤回已发消息**
+**场景 13：agent 撤回已发消息**
 - Given：agent 发出消息后判定内容有误
 - When：agent 调用撤回
 - Then：用户侧该消息消失或显示为"已撤回"
 
-**场景 15：长任务展示 typing**
+**场景 14：长任务展示 typing**
 - Given：agent 在执行一个超过 5 秒的工具调用
 - When：工具执行期间
 - Then：用户在 IM 持续看到"输入中"提示，直到最终回复发出
 
-**场景 16：agent 回发媒体**
+**场景 15：agent 回发媒体**
 - Given：agent 调用 send_image / send_document 工具
 - When：工具执行成功
 - Then：用户在 IM 收到对应附件，而非附件 URL 文本
 
-**场景 17：ephemeral 消息仅发送者可见**
+**场景 16：ephemeral 消息仅发送者可见**
 - Given：agent 在群里触发 ephemeral 帮助提示
 - When：消息发出
 - Then：仅触发的用户能看到，群内其他成员不可见
 
-**场景 18：按钮审批**
+**场景 17：按钮审批**
 - Given：agent 触发 medium 风险工具
 - When：permission_gate 等待审批
 - Then：审批人收到带"批准/拒绝"按钮的消息，点击后工具继续或中止；不需要打字 approve
 
-**场景 19：长消息分片**
+**场景 18：长消息分片**
 - Given：agent 输出超过平台单条上限的回复，且含大量 emoji（按 Python len 未超限但 UTF-16 超限）
 - When：消息发送
 - Then：自动按词或代码块边界拆成 N 条消息，附带 (1/N) 续标，无单条被平台拒绝
 
-**场景 20：增量流式回复**
+**场景 19：增量流式回复**
 - Given：agent 正在生成一段较长的回复
 - When：模型流式输出
 - Then：用户在生成结束前就能看到部分内容，最终消息平滑收尾，过程中不出现重复或跳变
 
-**场景 21：模型 think 段不流给用户**
+**场景 20：模型 think 段不流给用户**
 - Given：模型输出包含 `<think>…</think>` 段
 - When：流式呈现到 IM
 - Then：用户看到的内容不含 think 标签及其内部文字
 
-**场景 22：thread 内共享 session**
+**场景 21：thread 内共享 session**
 - Given：用户在 Slack / Telegram 某个 thread 内多轮对话
 - When：thread 内继续发消息
 - Then：所有 thread 内消息共享同一 session，与频道顶层及其他 thread 互不串扰
 
-**场景 26：/health 暴露平台运行状态**
+**场景 22：/health 暴露平台运行状态**
 - Given：多个平台适配器在运行，其中一个平台 token 无效
 - When：访问 /health
 - Then：返回每个平台的 ok/fail
 
-**场景 27：断线后指数退避重连**
+**场景 23：断线后指数退避重连**
 - Given：平台网络瞬断
 - When：适配器检测到断线
 - Then：按指数退避 + 抖动重连，恢复后状态变回 connected，期间不刷屏报错
 
-**场景 28：频道目录按名字反查**
+**场景 24：频道目录按名字反查**
 - Given：bot 已加入多个频道，目录已刷新
 - When：agent 调用 send_message_tool 指定 target="#ops"
 - Then：工具从目录解析出对应 chat_id 并发送成功
 
-**场景 32：SIGTERM 不丢消息**
+**场景 25：SIGTERM 不丢消息**
 - Given：进程正在处理一条消息
 - When：收到 SIGTERM 或被新进程替换
 - Then：该消息处理完后再退出，新进程不会重复处理这条消息

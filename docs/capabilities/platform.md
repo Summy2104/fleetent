@@ -210,168 +210,168 @@ flowchart TD
 - When：命令执行成功
 - Then：输出 API key，Alice 可立即用该 key 调用 /chat
 
-**场景 4：内置 admin 种子化（v1.0）**
+**场景 3：内置 admin 种子化（v1.0）**
 - Given：系统首次启动，数据库无任何管理员账户
 - When：启动进程
 - Then：自动创建用户名固定的内置 admin 账户，初始密码写入启动日志并标记 must_reset=true
 
-**场景 5：内置 admin 首次登录强制改密（v1.0）**
+**场景 4：内置 admin 首次登录强制改密（v1.0）**
 - Given：内置 admin 用初始密码登录，must_reset=true
 - When：登录成功
 - Then：被强制跳转改密页，未完成改密前访问任何其他页面均被打回；改密后 must_reset 清除，正常进入后台
 
-**场景 6：内置 admin 不可删除 / 不可改名（v1.0）**
+**场景 5：内置 admin 不可删除 / 不可改名（v1.0）**
 - Given：任意角色（含其他 admin）已登录
 - When：尝试在 UI 或 API 删除内置 admin、修改其用户名、或将其降级
 - Then：操作被拒并提示"内置管理员不可修改"，请求不落库
 
-**场景 7：内置 admin 提升普通用户为 admin（v1.0）**
+**场景 6：内置 admin 提升普通用户为 admin（v1.0）**
 - Given：内置 admin 已登录，普通用户 Alice 当前无管理员角色
 - When：在用户详情页将 Alice 角色设为 admin
 - Then：Alice 下次登录后可见管理后台并可执行 admin 权限内的操作，操作记入审计
 
-**场景 8：普通 admin 不可禁用内置 admin（v1.0）**
+**场景 7：普通 admin 不可禁用内置 admin（v1.0）**
 - Given：普通 admin（非内置）已登录
 - When：尝试禁用 / 拉黑 / 降级内置 admin
 - Then：操作被拒，按钮不可见或返回 403，请求不落库
 
-**场景 9：管理员角色分级（v1.0）**
+**场景 8：管理员角色分级（v1.0）**
 - Given：viewer 角色管理员已登录
 - When：访问"删除用户"等写操作入口
 - Then：相关按钮 / 菜单不可见或返回无权限，请求不落库
 
-**场景 10：高危操作二次验证（v1.0）**
+**场景 9：高危操作二次验证（v1.0）**
 - Given：admin 已登录但未通过 2FA
 - When：尝试删除一个用户
 - Then：UI 弹出二次验证；通过后才执行，否则操作被拒并记入审计
 
-**场景 11：admin 在 UI 手动建用户（v1.0）**
+**场景 10：admin 在 UI 手动建用户（v1.0）**
 - Given：admin 已登录
 - When：在用户管理页填写邮箱 / 姓名 / 初始密码并保存
 - Then：账号即刻可用，系统向该邮箱发账号通知邮件；用户首次登录被强制改密
 
-**场景 12：admin 发邀请链接（v1.0）**
+**场景 11：admin 发邀请链接（v1.0）**
 - Given：admin 已登录
 - When：在用户管理页点"邀请用户"，填写邮箱并生成一次性邀请链接
 - Then：系统向该邮箱发送含一次性 token 的邀请邮件，token 在使用或过期后立即失效
 
-**场景 13：用户通过邀请激活账号（v1.0）**
+**场景 12：用户通过邀请激活账号（v1.0）**
 - Given：用户收到邀请邮件并在 token 有效期内点击链接
 - When：在激活页设置密码并提交
 - Then：账号激活，首把 API key 自动签发，邀请 token 立即失效，再次访问链接返回"邀请已失效"
 
-**场景 14：无自助注册入口（v1.0）**
+**场景 13：无自助注册入口（v1.0）**
 - Given：v1.0 部署后的系统
 - When：访客直接访问 `/register` 或类似公网注册路径
 - Then：返回 404 或显式提示"本系统不开放自助注册，请联系管理员"，无法绕过 admin 自行建账
 
-**场景 15：用户详情统一展示 web 与 IM 身份（v1.0）**
+**场景 14：用户详情统一展示 web 与 IM 身份（v1.0）**
 - Given：Alice 持有 2 把 API key，且绑定了 Slack U123（allowed）+ Telegram 456（blocked）
 - When：admin 在用户管理页点击 Alice 进入详情
 - Then：一屏并列看到 Alice 的 web 身份（邮箱 / 角色）、2 把 API key 及其使用情况、2 个 IM 账号及各自状态；可直接在该页面对单个 IM 身份执行加黑 / 恢复，无需跳转
 
-**场景 16：IM 工作台跳回 User 详情（v1.0）**
+**场景 15：IM 工作台跳回 User 详情（v1.0）**
 - Given：admin 在 IM 用户管理工作台筛选"被加黑"列表，看到一条 Telegram 456 对应 Alice
 - When：点击该条记录的"查看用户"
 - Then：跳转到 Alice 的统一详情页，可看到她的全部 web + IM 信息上下文，再决定恢复该 IM 身份或升级到一键拉黑账号
 
-**场景 17：多 API key 独立轮换（v1.0）**
+**场景 16：多 API key 独立轮换（v1.0）**
 - Given：Alice 拥有两把 key A、B
 - When：在 UI 内仅轮换 A
 - Then：A 旧值立即失效，B 仍可正常调用 /chat
 
-**场景 18：API key scope 限制为单 agent（v1.0）**
+**场景 17：API key scope 限制为单 agent（v1.0）**
 - Given：Alice 的 key A 的 scope 设为 `[ops-bot]`（仅允许访问 agent "ops-bot"）
 - When：用 key A POST /chat 且请求路由到 agent "support-bot"
 - Then：返回 403，提示"scope 不允许访问该 agent"
 - And：同一把 key A 调用路由到 "ops-bot" 的请求正常通过；scope = `*` 的 key 调用任意 agent 都通过
 
-**场景 19：admin 主动签发新 key（v1.0）**
+**场景 18：admin 主动签发新 key（v1.0）**
 - Given：Alice 持有 1 把活跃 key A
 - When：admin 在 UI 点"新增 key"，备注 "ci-runner"，可选设有效期与 scope
 - Then：签发新 key B 并展示一次明文；A 不受影响，A 与 B 可同时使用
 
-**场景 20：撤销单把 key 不影响账号（v1.0）**
+**场景 19：撤销单把 key 不影响账号（v1.0）**
 - Given：Alice 持有 key A、B，其中 A 怀疑泄露
 - When：admin 点 A 的"撤销"并填写原因
 - Then：A 立即失效（调用返回 401），B 不受影响；Alice 账号本身仍可正常登录与使用；撤销动作写审计
 
-**场景 21：API key 使用情况展示（v1.0）**
+**场景 20：API key 使用情况展示（v1.0）**
 - Given：Alice 的 key A 在过去 24 小时被多次调用
 - When：admin 打开 Alice 用户详情的 key 列表
 - Then：A 显示创建时间、最后一次使用时间、最近来源 IP / UA、累计调用次数
 
-**场景 22：API key 过期前提醒（v1.0）**
+**场景 21：API key 过期前提醒（v1.0）**
 - Given：Alice 的 key A 设了 30 天有效期、距过期仅剩 N 天（达提醒阈值）
 - When：到达每日定时检查
 - Then：系统向 Alice 账号邮箱发送续期提醒，UI 该 key 标记"即将过期"；Alice 一键续期后到期日推迟，续期动作写审计；如未续期，过期当日自动失效
 
-**场景 23：一键拉黑级联生效（v1.0）**
+**场景 22：一键拉黑级联生效（v1.0）**
 - Given：Alice 持有 2 把 API key、绑定 Slack 与 Telegram 两个 IM 账号
 - When：管理员一键拉黑 Alice 并填写原因
 - Then：两把 key 立即失效；两个 IM 账号同步封禁；同邮箱再次注册被拒；操作进入审计日志
 
-**场景 24：解封后 key 不复活（v1.0）**
+**场景 23：解封后 key 不复活（v1.0）**
 - Given：Alice 已被拉黑
 - When：管理员在后台解除拉黑
 - Then：账号本身恢复可登录，已失效的 key 不自动恢复；IM 账号需重新审批
 
-**场景 25：批量拉黑（v1.0）**
+**场景 24：批量拉黑（v1.0）**
 - Given：检测到来自同一邮箱域的 N 个滥注账号
 - When：管理员按"邮箱域=evil.com"批量拉黑
 - Then：所有匹配账号被拉黑，操作以一条聚合审计记录入库
 
-**场景 26：IM 用户首次会话默认放行（v1.0）**
+**场景 25：IM 用户首次会话默认放行（v1.0）**
 - Given：新 Slack 用户 U999 之前从未发过消息，发消息所在的 channel #ops 已被部署方配置允许
 - When：U999 在 #ops 第一次发 "hi"
 - Then：系统自动建 im_users 记录并 allowed=1，消息直接进入 agent_loop 并返回回复；**无任何审批等待**
 
-**场景 27：admin 加黑 IM 用户后被拒（v1.0）**
+**场景 26：admin 加黑 IM 用户后被拒（v1.0）**
 - Given：Slack 用户 U999 当前 allowed=1
 - When：admin 在 IM 用户管理工作台对 U999 执行"加黑"并填写原因
 - Then：U999 状态变为 blocked，下次发消息收到拒绝提示，消息不进入 agent_loop；加黑动作进入审计日志
 
-**场景 28：admin 恢复被加黑的 IM 用户（v1.0）**
+**场景 27：admin 恢复被加黑的 IM 用户（v1.0）**
 - Given：Slack 用户 U999 当前为 blocked
 - When：admin 在 IM 用户管理工作台对 U999 执行"恢复"并填写原因
 - Then：U999 状态变为 allowed，下次发消息正常进入 agent_loop；恢复动作进入审计日志
 
-**场景 29：IM 用户批量加黑 / 恢复（v1.0）**
+**场景 28：IM 用户批量加黑 / 恢复（v1.0）**
 - Given：admin 在工作台筛选出多个 IM 用户
 - When：全选并点"批量加黑"或"批量恢复"并填写原因
 - Then：所选 IM 用户状态批量变更，每条操作单独写入审计日志并关联批次 ID
 
-**场景 30：配额超限被拒（v1.0）**
+**场景 29：配额超限被拒（v1.0）**
 - Given：Alice 设置了 10k token 配额且已用满
 - When：Alice 再次调用 /chat
 - Then：返回 429，告知超限；UI 收到超限事件
 
-**场景 31：审计日志可检索（v1.0）**
+**场景 30：审计日志可检索（v1.0）**
 - Given：管理员 admin1 刚轮换了 Alice 的 key
 - When：在审计日志按"操作=轮换 key"筛选
 - Then：找到该条记录，含 admin1、时间戳、目标用户、操作类型
 
-**场景 32：单会话 trace 可见（v1.0）**
+**场景 31：单会话 trace 可见（v1.0）**
 - Given：一段含工具调用与审批的会话
 - When：打开该会话的 trace 视图
 - Then：按时间序展示模型输出、工具入参 / 出参、permission_gate 决策、memory 命中
 
-**场景 33：仪表盘总览（v1.0）**
+**场景 32：仪表盘总览（v1.0）**
 - Given：多平台运行中，其中一个平台已断线
 - When：打开后台首页
 - Then：一屏看到各平台连接状态（含断线项）、API 错误率、活跃 session 数、待审批积压数
 
-**场景 34：CLI 加黑入口收回（v1.0）**
+**场景 33：CLI 加黑入口收回（v1.0）**
 - Given：v1.0 部署后的系统
 - When：操作者执行 `block-user --im-user-id {id}`
 - Then：命令返回 deprecated 提示，要求改用后台 UI；该 IM 账号状态保持不变
 
-**场景 35：viewer 不可加黑 / 恢复 IM 用户（v1.0）**
+**场景 34：viewer 不可加黑 / 恢复 IM 用户（v1.0）**
 - Given：viewer 角色管理员在 UI 打开 IM 用户管理工作台
 - When：选中一条 allowed 或 blocked 记录
 - Then：仅可查看，"加黑"和"恢复"按钮均不可见或返回 403；这两个动作仅 admin 可执行
 
-**场景 36：admin 在 UI 可加黑 IM 用户（v1.0）**
+**场景 35：admin 在 UI 可加黑 IM 用户（v1.0）**
 - Given：admin 角色已登录，目标 IM 用户当前 allowed=1
 - When：在 UI 点击该用户的"加黑"并填写原因
 - Then：该 IM 账号被封禁，下次发消息收到拒绝提示；操作进入审计日志
