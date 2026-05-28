@@ -45,14 +45,17 @@ flowchart TD
 - ✅ **Bearer token 认证**：`Authorization: Bearer ma-<64hex>`，`ma-` 前缀区分服务 key 与模型 API key
   - get_by_api_key() 查 SQLite，无外部 IdP
 
-## v1.0 规划
+- ✅ **CLI 鉴权模型：OS-level、无登录**：所有 `fleetent-admin ...` 命令直接读写本地 SQLite，不经过 HTTP 鉴权也不要求 admin 登录；访问控制完全交给 OS 层（ssh key / sudo / 数据目录文件权限），遵循 **"能 ssh 到主机即视为受信"** 的企业内部工具惯例（Camunda、PostgreSQL psql、Kafka CLI 等皆是此模型）
+  - 代价：审计日志只能记录 OS user（`root` / `ubuntu`），无法追溯到具体 fleetent admin 身份
+  - 对策：v1.0 起 CLI 严格收窄到低危操作（建用户、加 IM allowlist），加黑 / 封禁 / 降级 / 改角色 等高危动作只能在 UI 中由 admin 角色完成（详见「规划中」权限矩阵 CLI 列）
 
-目前所有管理操作仅靠 CLI，v1.0 新增**面向管理员的可视化后台**。设计哲学：**集中管控、admin 建账**——不开放公网自助注册，所有web用户由 admin 通过 UI 手动建或发邀请链接创建。
+- ✅ **用户管理 CLI**：create-user、list-users、rotate-key
 
-**统一用户模型**：后台**统一管理 web 用户和 IM 用户**，二者共享同一个内部 User UUID。一个内部 User 等于：
+- ✅ **IM 用户管理 CLI**：approve-user、block-user、list-pending（v1.0 起 IM 用户首次会话**默认放行**，`approve-user` / `list-pending` 仅作历史兼容；`block-user` 收回到 UI 由 admin 操作）
 
-- **1 套 web 身份**：邮箱 + 密码+ 0~N 把 API key，用于走 HTTP `/chat`
-- **0~N 个 IM 身份**：每条 `(platform, platform_user_id)` 映射到该 User，用于在 Slack / Telegram / WhatsApp 里和 bot 对话
+## 规划中（v1.0）
+
+- [ ] **管理员后台（Admin UI）**：面向管理员的可视化后台，设计哲学「集中管控、admin 建账」——不开放公网自助注册，所有 web 用户由 admin 手动建或发邀请链接创建；**统一管理 web 用户和 IM 用户**，共享同一个内部 User UUID（1 套 web 身份：邮箱 + 密码 + 0~N 把 API key；0~N 个 IM 身份：每条 (platform, platform_user_id) 映射到该 User）
 
 ```mermaid
 flowchart LR
@@ -87,20 +90,9 @@ sequenceDiagram
     end
 ```
 
-- ✅ **CLI 鉴权模型：OS-level、无登录**：所有 `fleetent-admin ...` 命令直接读写本地 SQLite，不经过 HTTP 鉴权也不要求 admin 登录；访问控制完全交给 OS 层（ssh key / sudo / 数据目录文件权限），遵循 **"能 ssh 到主机即视为受信"** 的企业内部工具惯例（Camunda、PostgreSQL psql、Kafka CLI 等皆是此模型）
-  - 代价：审计日志只能记录 OS user（`root` / `ubuntu`），无法追溯到具体 fleetent admin 身份
-  - 对策：v1.0 起 CLI 严格收窄到低危操作（建用户、加 IM allowlist），加黑 / 封禁 / 降级 / 改角色 等高危动作只能在 UI 中由 admin 角色完成（详见「v1.0 规划」权限矩阵 CLI 列）
-
-- ✅ **用户管理 CLI**：create-user、list-users、rotate-key
-
-- ✅ **IM 用户管理 CLI**：approve-user、block-user、list-pending（v1.0 起 IM 用户首次会话**默认放行**，`approve-user` / `list-pending` 仅作历史兼容；`block-user` 收回到 UI 由 admin 操作）
-
-admin 后台同时提供**两个入口看同一份数据**：
-- **用户管理页**（以内部 User 为主视角）：列表展示所有 User，详情页一屏看到 web 身份、API key 列表、绑定的所有 IM 账号、用量、历史会话
-- **IM 用户管理工作台**（以待办为主视角）：展示所有活跃 / 被加黑的 IM 身份，admin 可批量加黑 / 恢复，点任意一条可跳回对应的 User 详情页
-
-加黑 / 禁用动作既可以在 User 维度（拉黑整个账号、级联失效所有 web + IM 身份），也可以只在 IM 身份维度（只封某个 Slack 账号，不影响该 User 的 web key 与其他 IM 账号）。
-
+- [ ] **用户管理页 + IM 工作台双视图**：admin 后台两个互通入口；加黑 / 禁用可在 User 维度（级联失效所有 web + IM 身份）或单独 IM 身份维度（只封某个 Slack 账号，不影响该 User 其他身份）
+  - 用户管理页（以内部 User 为主视角）：列表展示所有 User，详情页一屏可见 web 身份、API key 列表、所有 IM 账号、用量、历史会话
+  - IM 用户管理工作台（以待办为主视角）：展示所有活跃 / 被加黑的 IM 身份，可批量加黑 / 恢复，点任意一条跳回对应 User 详情页
 
 - [ ] **内置 admin 账户**：系统首次启动自动种子化一个用户名固定的内置管理员（如 `admin`），首次登录强制修改初始密码后才可进入后台；该账号不可删除、不可改用户名、不可被降级，永远拥有全部权限；只能由其本人在后台修改自己的密码
 

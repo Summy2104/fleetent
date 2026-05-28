@@ -6,6 +6,10 @@
 
 负责多 IM 平台的接入、消息归一化和用户身份映射。将各平台差异屏蔽在 gateway 层，上层只处理 NormalizedMessage。
 
+**负责**：多 IM 平台接入（Slack / Telegram）、NormalizedMessage 消息归一化、(platform, platform_user_id) → 内部 User 身份映射、Allowlist 审批检查、agent 解析优先级（channel → user → default → 裸跑）、审批命令直接路由。
+
+**不负责**：agent 逻辑与工具调用（→ agent_loop）、用户账号管理（→ user_store）、消息持久化（→ session_mgr）、session 生命周期（→ session-management）。
+
 **调用关系**：
 - 依赖：im_user_store、agent_store、agent_loop、permission_gate
 - 被依赖：无（入口层）

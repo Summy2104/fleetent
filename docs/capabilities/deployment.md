@@ -6,6 +6,10 @@
 
 让 fleetent 能安全、可重复地部署到客户自己的服务器上，并在版本升级时不丢数据。
 
+**负责**：容器化打包（Docker）、环境变量与配置文件加载、数据库 schema 版本管理（alembic）、on-premises 安装包与 license 校验。
+
+**不负责**：运行时业务逻辑（→ 各模块）、IM 平台网络连接（→ im-gateway）、用户认证（→ user_store）。
+
 **调用关系**：
 - 依赖：config、alembic（DB migration）
 - 被依赖：所有模块（运行时依赖配置）

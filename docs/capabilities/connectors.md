@@ -21,14 +21,18 @@
 - 被依赖：agent-runtime（工具调用时取凭证）、governance（查授权状态以决定是否提示 consent）
 - 对外：各外部系统的 OAuth Authorization Server + Resource API
 
-## 核心功能
+## 现状
 
-- **Connector 抽象**：每个外部系统一个 connector，声明它的 OAuth 配置（authorize/token endpoint、scopes、client_id）。加新外部系统 = 加一个 connector 配置，不改核心代码
-- **per-user OAuth 授权（consent）**：用户首次需要某外部系统时，引导走 OAuth consent（浏览器跳转），授权后保存该用户对该 connector 的 refresh token
-- **凭证生命周期**：加密存储 refresh token（不存明文）；access token 过期前自动 refresh；用户可主动解绑（revoke）
-- **凭证注入**：工具调用外部系统时，按 (user_id, connector) 取出有效 access token，注入到对外请求
-- **授权状态查询**：回答"用户 X 授权过 connector Y 吗、scope 够不够"，供 agent / governance 在调用前决定是否先引导 consent
-- **离职 / 禁用联动**：user-center 禁用某用户时，撤销其全部 connector 凭证并调用各外部系统的 revoke endpoint
+尚未实现。
+
+## 规划中（v1.0）
+
+- [ ] **Connector 抽象**：每个外部系统一个 connector，声明它的 OAuth 配置（authorize/token endpoint、scopes、client_id）。加新外部系统 = 加一个 connector 配置，不改核心代码
+- [ ] **per-user OAuth 授权（consent）**：用户首次需要某外部系统时，引导走 OAuth consent（浏览器跳转），授权后保存该用户对该 connector 的 refresh token
+- [ ] **凭证生命周期**：加密存储 refresh token（不存明文）；access token 过期前自动 refresh；用户可主动解绑（revoke）
+- [ ] **凭证注入**：工具调用外部系统时，按 (user_id, connector) 取出有效 access token，注入到对外请求
+- [ ] **授权状态查询**：回答"用户 X 授权过 connector Y 吗、scope 够不够"，供 agent / governance 在调用前决定是否先引导 consent
+- [ ] **离职 / 禁用联动**：user-center 禁用某用户时，撤销其全部 connector 凭证并调用各外部系统的 revoke endpoint
 
 ## 授权与凭证流程
 
@@ -313,6 +317,22 @@ graph LR
 ```
 
 冒烟测试覆盖这 4 条主路径即可判断 connectors 基本可用：OAuth 授权、凭证注入、解绑撤销、connector 注册。
+
+## 测试边界
+
+**需要单元测试的行为**：
+- `get_credential` 基础路径：已授权用户返回 Credential，未授权返回 NeedsConsent + consent URL
+- access token 自动刷新：剩余时效 < 60s 时调用 refresh，返回新 Credential
+- refresh token 过期：OAuth server 返回 token 无效时，grant 标记失效并返回 NeedsConsent
+- refresh 网络失败：返回 CredentialError（区别于 NeedsConsent，可重试）
+- OAuth callback：state 校验通过后写入 connector_grants；state 不匹配则拒绝（CSRF 防护）
+- per-user 隔离：dispatch 取 acting_user 自己的凭证，不读取其他用户的 grant
+- revoke：标记 `connector_grants.revoked_at` + 调用外部 revoke endpoint；后续 `get_credential` 返回 NeedsConsent
+
+**需要 mock 的依赖**：
+- 外部 OAuth server（token endpoint / revoke endpoint）：用 `respx` mock HTTP 调用
+- 时间（`datetime.utcnow`）：控制 token 过期时间和 OAuth state TTL
+- SQLite DB 路径：`monkeypatch` 到 `tmp_path`
 
 ## 待决问题
 

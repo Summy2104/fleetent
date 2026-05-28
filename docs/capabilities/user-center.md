@@ -12,15 +12,19 @@ agent 系统自建的用户中心：不依赖外部 IdP，自己维护用户身�
 - 依赖：user_store、im_user_store
 - 被依赖：im-gateway（身份解析）、governance（审计归属）、platform（用户管理 CLI）
 
-## 核心功能
+## 现状
 
-- **邮箱前置验证（统一,无例外）**：任何渠道首次使用都必须先通过邮箱验证码确立身份，**Slack 也不例外**。未验证身份的请求不进入 agent_loop
-- **邮箱为唯一键**：内部 `user_id` 为稳定主键，邮箱为 UNIQUE 去重键。验证邮箱时"查到则绑、查无则建"，所以同一邮箱跨渠道天然归到同一 `user_id` —— 不存在未验证的 provisional 用户，**没有事后归并**
-- **多渠道绑定**：`(channel, channel_user_id) → 同一 user_id`，一个用户可绑多个渠道
-- **管理员手动审批（兜底）**：无公司邮箱的人（外包 / 承包商）由管理员手动绑定到指定 user_id
-- **邮箱域名白名单**：只接受公司域（如 `@acme.com`），其他域拒绝
-- **验证码时效与限流**：6 位码 10 分钟过期、错 5 次锁定、同邮箱 1 分钟限发一次
-- **用户生命周期**：管理员可禁用用户；禁用时该用户所有渠道立即失效
+尚未实现。当前 `im_user_store.py` 维护平台用户 allowlist，但无邮箱验证和多渠道身份归并机制。
+
+## 规划中（v1.0）
+
+- [ ] **邮箱前置验证（统一,无例外）**：任何渠道首次使用都必须先通过邮箱验证码确立身份，**Slack 也不例外**。未验证身份的请求不进入 agent_loop
+- [ ] **邮箱为唯一键**：内部 `user_id` 为稳定主键，邮箱为 UNIQUE 去重键。验证邮箱时"查到则绑、查无则建"，所以同一邮箱跨渠道天然归到同一 `user_id` —— 不存在未验证的 provisional 用户，**没有事后归并**
+- [ ] **多渠道绑定**：`(channel, channel_user_id) → 同一 user_id`，一个用户可绑多个渠道
+- [ ] **管理员手动审批（兜底）**：无公司邮箱的人（外包 / 承包商）由管理员手动绑定到指定 user_id
+- [ ] **邮箱域名白名单**：只接受公司域（如 `@acme.com`），其他域拒绝
+- [ ] **验证码时效与限流**：6 位码 10 分钟过期、错 5 次锁定、同邮箱 1 分钟限发一次
+- [ ] **用户生命周期**：管理员可禁用用户；禁用时该用户所有渠道立即失效
 
 ## 身份建立（邮箱前置验证）
 
@@ -223,6 +227,20 @@ graph LR
 ```
 
 冒烟测试覆盖这 5 条主路径即可判断用户中心基本可用：邮箱验证建号、同邮箱绑新渠道、人工兜底绑定、审计归并查询、禁用生效。
+
+## 测试边界
+
+**需要单元测试的行为**：
+- `resolve_identity`：有绑定时返回 Resolved，无绑定时返回 NeedsBinding，禁用用户返回 Blocked
+- `request_email_code`：域名白名单校验（非白名单域 → DomainRejected），限流（1 分钟内重复发 → RateLimited）
+- `verify_email_code`：正确码触发 find-or-create by email + 绑定渠道；过期码返回 CodeExpired；连错 5 次返回 Locked
+- find-or-create 幂等：同一邮箱第二个渠道验证时，直接绑到已有用户，不创建第二个用户
+- `disable_user`：users.status 置为 disabled 后，`resolve_identity` 对该用户任意渠道返回 Blocked
+
+**需要 mock 的依赖**：
+- email sender（SMTP）：注入可控的发送函数，不发真实邮件
+- 时间（`datetime.utcnow`）：控制验证码过期时间
+- SQLite DB 路径：`monkeypatch` 到 `tmp_path`
 
 ## 待决问题
 

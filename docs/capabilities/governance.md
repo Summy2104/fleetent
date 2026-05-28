@@ -16,7 +16,7 @@ agent 工具执行前的治理层：在 agent 即将调用某个工具的那一�
 - 被依赖：agent_loop（工具访问检查、审批门）、normalizer（agent 解析）
 - 产出：决策结果交 observability 留痕
 
-## 核心职责
+## 现状
 
 - ✅ **Agent 能力边界**：每个 agent 有 name、system_prompt、allowed_tools 白名单（fnmatch 通配符，如 `read_*`、`github__*`）。这是 agent 的**能力面**，per-user auth 管不到
 - ✅ **工具访问控制**：dispatch 时检查 tool_name 是否在该 agent 的 allowed_tools 内，不在则直接拒绝、原因回给 LLM
@@ -194,6 +194,19 @@ graph LR
 ```
 
 冒烟测试覆盖这 4 条主路径即可判断治理层基本可用：白名单拦截、不可逆确认、可逆放行、agent 配置分配。
+
+## 测试边界
+
+**需要单元测试的行为**：
+- 工具访问控制：allowed_tools fnmatch 匹配，白名单外的工具被拒绝且原因回给 LLM
+- Agent 解析优先级：channel binding → user binding → default agent 的查找顺序
+- permission_gate 超时 fail-closed：超时时状态变为 timeout，不放行工具
+- 审批状态机：pending → approved / rejected / timeout 的转换正确，不可跨状态跳转
+
+**需要 mock 的依赖**：
+- `agent_store`：注入可控的 agent 定义与 user/channel 绑定数据
+- `permission_gate`：使用短超时（`PermissionGate(medium_timeout=0.1)`）
+- SQLite DB 路径：`monkeypatch` 到 `tmp_path`
 
 ## 待决问题
 

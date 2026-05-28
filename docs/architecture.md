@@ -78,7 +78,7 @@ flowchart TD
     G --> H["tool dispatch\n执行工具"]
     H --> E
     E -->|stop| I["eval_logger\n写 trace"]
-    I --> J["long_term_ctx\n异步提取事实"]
+    I --> J["long_term_ctx（规划中）\n异步提取事实"]
     J --> K["SSE done"]
 ```
 
@@ -129,7 +129,7 @@ flowchart TD
 | 数据库 | SQLite（可升 PostgreSQL）| 零运维，on-premises 友好；直接用 aiosqlite，不引入 ORM |
 | Session 存储 | JSON 文件 + asyncio.Lock | 可调试；原子写（.tmp → rename）防损坏 |
 | 工具审批 | asyncio.Event 门控 | 无轮询，优雅等待；重启后调用 cleanup_stale_approvals() 清理孤儿 |
-| 代码执行隔离 | microsandbox（microVM） | 每个沙箱独立 Linux 内核，无命名空间逃逸风险；< 100ms 启动；无需 dockerd |
+| 代码执行隔离 | Docker CLI（当前）→ microsandbox microVM（v1.0 目标） | 每个沙箱独立 Linux 内核，无命名空间逃逸风险；< 100ms 启动；无需 dockerd |
 | MCP 工具命名 | `{server}__{tool}` 双下划线 | 避免与内置工具名冲突，来源可追溯 |
 | 记忆提取 | Haiku 异步，不阻塞响应 | 廉价且快；JSONL 存储，top-20 条注入下次请求 |
 
@@ -140,6 +140,8 @@ flowchart TD
 | 文档 | 覆盖范围 | 负责人 |
 |------|---------|-----|
 | [agent-runtime.md](capabilities/agent-runtime.md) | 核心循环、工具调度、上下文压缩、运行治理 | 张洋 |
+| [model-router.md](capabilities/model-router.md) | task_type 路由、provider 配置、fallback 链 | - |
+| [tools.md](capabilities/tools.md) | @tool 装饰器、schema 构建、dispatch、内置工具集 | - |
 | [mcp.md](capabilities/mcp.md) | MCP 外部工具集成（stdio / HTTP） | 张洋 |
 | [sandbox.md](capabilities/sandbox.md) | 安全代码执行（microsandbox microVM） | 张洋 |
 | [skill.md](capabilities/skill.md) | Skill 发现、匹配、注入 | 张洋 |
