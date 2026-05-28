@@ -21,7 +21,9 @@
 
 ## 关键流程
 
-三条反射流程相互独立，分别调度。
+三条反射流程相互独立，分别调度，可安全并发。
+
+**并发安全说明**：三条流程的写入目标完全不重叠——memory reflection 写 `memory_items`，skill reflection 写 `skill_proposals`（prod）或 `skills/` 文件（dev），kb reflection 写 `kb_reflection_reports`。三者读取 `traces` 表时均为只读，不互相阻塞。memory reflection 写 `memory_items` 的同时，`long_term_ctx` 可能正在读取同一表；`memory_layer` 自身的并发控制负责保证读写安全，reflection 不额外加锁。
 
 ```mermaid
 flowchart TD

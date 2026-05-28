@@ -37,10 +37,17 @@ flowchart TD
 ## 接口定义
 
 ```python
-async def build_context(user_id: str, query: str, agent_id: str) -> str:
+async def build_context(
+    user_id: str,
+    query: str,
+    agent_id: str,
+    available_tokens: int,
+) -> str:
     """并行检索 memory 和 knowledge_base，合并后返回注入 system prompt 的文本。
 
-    token 预算上限从 config 读取。超出时按相关度截断，memory 条目优先于 knowledge 条目。
+    available_tokens: 调用方（agent_loop）传入的当前可用 token 数，
+        build_context 的输出不超过此值与 config 预算上限中的较小值。
+        为 0 时直接返回空字符串，不发起检索。
     任意一侧检索无结果时正常降级，不报错。
     """
 ```
@@ -87,6 +94,11 @@ async def build_context(user_id: str, query: str, agent_id: str) -> str:
 - When：build_context 调用
 - Then：返回空字符串，agent_loop 正常继续
 
+**场景 5：可用 token 预算为零**
+- Given：agent_loop 当前 context 已接近上限，传入 `available_tokens=0`
+- When：build_context 调用
+- Then：不发起任何检索，直接返回空字符串；agent_loop 正常继续，不因注入失败报错
+
 ## 测试边界
 
 **需要单元测试的行为**：
@@ -102,7 +114,7 @@ async def build_context(user_id: str, query: str, agent_id: str) -> str:
 
 ## 待决问题
 
-- [ ] token 预算默认值：注入长期上下文的 token 上限设多少？（负责人：待认领）
+- [ ] token 预算默认值：config 中配置的 token 上限设多少？与 `available_tokens` 取 min 时，两者的典型比例是多少？（负责人：待认领）
 - [ ] memory 与 knowledge 的 token 分配：各自固定比例，还是完全按相关度动态分配？（负责人：待认领）
 - [ ] 格式化模板：memory 和 knowledge 区段的具体格式由谁定义，是否需要可配置？（负责人：待认领）
 - [ ] graph_search 触发决策：由调用方传入 query_type 标记，还是 long_term_ctx 内部判断（如关键词检测）？（与 knowledge-base 待决问题对齐，负责人：待认领）

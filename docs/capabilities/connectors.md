@@ -45,6 +45,8 @@
 工具要访问外部系统
   → connectors 取该 user 对该 connector 的凭证
   → access token 过期(<60s) → 用 refresh token 换新的
+    → refresh token 本身过期 → 返回 NeedsConsent（需重新授权，不可自动恢复）
+    → refresh 请求网络失败 → 返回 CredentialError（区别于未授权，可重试）
   → 注入到工具的对外请求(Authorization: Bearer <access token>)
   → 外部系统按"该用户本人"权限返回数据(行级权限由外部系统保证)
 
@@ -89,7 +91,7 @@ dispatch(tool_name, args, acting_user):
 
 **connectors 对 dispatch 暴露的契约**（`tool_registry` / dispatch 属 agent-runtime，这里只定义 connectors 这侧的接口与 dispatch 必须遵守的约定）：
 
-- 接口：`connectors.get_credential(user_id, connector_id, scopes) -> Credential | NeedsConsent`
+- 接口：`connectors.get_credential(user_id, connector_id, scopes) -> Credential | NeedsConsent | CredentialError`
 - 工具元数据约定：`connector: str | None`、`scopes: list[str]`
 - dispatch 必须：调用工具前检查 `meta.connector` → 调 `get_credential` → 若 NeedsConsent 则短路返回（不执行工具）→ 否则按工具类型注入 → 再执行
 
@@ -256,6 +258,11 @@ connector_oauth_states (
 - Given：用户已授权 Drive，access token 已过期
 - When：agent 再次查 Drive
 - Then：connectors 用 refresh token 换新 access token 并注入请求；Drive 按 Alice 本人权限返回她能看到的文件
+
+**场景 3b：refresh token 过期需重新授权**
+- Given：用户已授权 Drive，但 refresh token 已过期（如长期未使用被外部系统吊销）
+- When：agent 调用 Drive 相关工具，connectors 尝试用 refresh token 换新 access token
+- Then：外部 OAuth server 返回 token 无效；connectors 将该 grant 标记为已失效；返回 NeedsConsent + consent URL；工具不执行；agent 提示用户重新授权
 
 **场景 4：per-user 隔离**
 - Given：Alice 和 Bob 都授权了 Drive

@@ -177,6 +177,14 @@ def log(
   - `uv run fleetent-admin token-stats --agent <agent_name> [--period 2026-05]`
   - 输出格式同上
 
+- [ ] **实时用量查询接口**：供 agent-runtime 预算执行层在运行时调用，查询当前累计用量
+  - 接口：`get_usage(scope: str, period: str) -> TokenUsage`
+    - `scope`：`user:{user_id}` / `agent:{agent_id}` / `session:{session_id}` / `global`
+    - `period`：`run`（当次 run）/ `session`（当前 session）/ `YYYY-MM`（自然月）
+  - 返回：`TokenUsage(prompt_tokens, completion_tokens, cost_usd, turns)`
+  - agent-runtime 在每次 LLM 调用前查询此接口，与配置预算比较，超限则触发 Grace Call
+  - 查询走 `traces` 表聚合，结果可缓存（TTL 数秒），不要求强一致
+
 ### 安全
 
 - [ ] **敏感信息脱敏**：日志和 trace 写入前自动脱敏
