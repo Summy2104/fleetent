@@ -18,7 +18,7 @@
 graph TD
     A["接入层\nserver.py · im_gateway · webhook_router"]
     B["编排层\nagent_loop · sub_agent"]
-    C["能力层\nmodel_router · tool_registry · memory_layer\nskill_registry · context_mgr · mcp_client\nsandbox_client · permission_gate · cron_scheduler"]
+    C["能力层\nmodel_router · tool_registry · long_term_ctx\nskill_registry · context_mgr · mcp_client\nsandbox_client · permission_gate · cron_scheduler"]
     D["基础层\nuser_store · agent_store · im_user_store\nsession_mgr · schedule_store · eval_logger\nagent_policy · config · admin"]
 
     A --> B --> C --> D
@@ -44,7 +44,7 @@ src/fleetent/
   tools.py           ← 内置工具（import 即注册，副作用）
   skill_registry.py  ← 扫描 skills/，关键词匹配，注入 system prompt
   context_mgr.py     ← in-session token 压缩
-  memory_layer.py    ← 跨 session 事实：Haiku 提取 → JSONL → 注入
+  memory_layer.py    ← 长期上下文：Haiku 提取事实 → SQLite → 注入（能力层称 long_term_ctx）
   mcp_client.py      ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
   sandbox_client.py  ← Docker CLI 封装：隔离 Python 执行
   permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
@@ -78,7 +78,7 @@ flowchart TD
     G --> H["tool dispatch\n执行工具"]
     H --> E
     E -->|stop| I["eval_logger\n写 trace"]
-    I --> J["memory_layer\n异步提取事实"]
+    I --> J["long_term_ctx\n异步提取事实"]
     J --> K["SSE done"]
 ```
 
@@ -129,7 +129,7 @@ flowchart TD
 | 数据库 | SQLite（可升 PostgreSQL）| 零运维，on-premises 友好；直接用 aiosqlite，不引入 ORM |
 | Session 存储 | JSON 文件 + asyncio.Lock | 可调试；原子写（.tmp → rename）防损坏 |
 | 工具审批 | asyncio.Event 门控 | 无轮询，优雅等待；重启后调用 cleanup_stale_approvals() 清理孤儿 |
-| 代码执行隔离 | Docker CLI 封装 | 真隔离 + 资源限制；启动约 1s，可接受 |
+| 代码执行隔离 | microsandbox（microVM） | 每个沙箱独立 Linux 内核，无命名空间逃逸风险；< 100ms 启动；无需 dockerd |
 | MCP 工具命名 | `{server}__{tool}` 双下划线 | 避免与内置工具名冲突，来源可追溯 |
 | 记忆提取 | Haiku 异步，不阻塞响应 | 廉价且快；JSONL 存储，top-20 条注入下次请求 |
 
@@ -139,11 +139,20 @@ flowchart TD
 
 | 文档 | 覆盖范围 | 负责人 |
 |------|---------|-----|
-| [agent-runtime.md](capabilities/agent-runtime.md) | 核心循环、工具、Skill、MCP、沙箱、上下文压缩 | 张洋  |
-| [im-gateway.md](capabilities/im-gateway.md) | Slack / Telegram / WhatsApp 接入、用户映射 | 张亮  |
-| [memory.md](capabilities/memory.md) | 跨 session 记忆、自进化机制 | 常乐  |
-| [scheduling.md](capabilities/scheduling.md) | Cron 定时任务、Webhook 事件触发 | 程鑫  |
+| [agent-runtime.md](capabilities/agent-runtime.md) | 核心循环、工具调度、上下文压缩、运行治理 | 张洋 |
+| [mcp.md](capabilities/mcp.md) | MCP 外部工具集成（stdio / HTTP） | 张洋 |
+| [sandbox.md](capabilities/sandbox.md) | 安全代码执行（microsandbox microVM） | 张洋 |
+| [skill.md](capabilities/skill.md) | Skill 发现、匹配、注入 | 张洋 |
+| [im-gateway.md](capabilities/im-gateway.md) | Slack / Telegram / WhatsApp 接入、用户映射 | 张亮 |
+| [platform.md](capabilities/platform.md) | 用户管理、API 认证、admin CLI | 张亮 |
+| [memory.md](capabilities/memory.md) | 跨 session 记忆（语义 / 情节 / 程序 / 工作） | 常乐 |
+| [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入 | 常乐 |
+| [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、混合检索 | - |
+| [vector-store.md](capabilities/vector-store.md) | 向量索引基础设施 | - |
+| [connectors.md](capabilities/connectors.md) | 数据源连接器（Confluence / Google Drive 等） | - |
+| [reflection.md](capabilities/reflection.md) | 记忆 / Skill / 知识库反思与自进化 | - |
 | [governance.md](capabilities/governance.md) | 权限审批、工具白名单、agent 定义与分配 | 宋凯宇 |
-| [platform.md](capabilities/platform.md) | 用户管理、API 认证、admin CLI | 张亮  |
-| [observability.md](capabilities/observability.md) | 评估日志、数据统计、链路追踪 | 程鑫  |
-| [deployment.md](capabilities/deployment.md) | on-premises 打包、配置管理 | 常乐  |
+| [scheduling.md](capabilities/scheduling.md) | Cron 定时任务、Webhook 事件触发 | 程鑫 |
+| [observability.md](capabilities/observability.md) | 评估日志、数据统计、链路追踪 | 程鑫 |
+| [user-center.md](capabilities/user-center.md) | 用户中心、多租户管理 | - |
+| [deployment.md](capabilities/deployment.md) | on-premises 打包、配置管理 | 常乐 |
