@@ -151,6 +151,7 @@ flowchart TD
 | [vector-store.md](capabilities/vector-store.md) | 向量索引基础设施 | - |
 | [connectors.md](capabilities/connectors.md) | 数据源连接器（Confluence / Google Drive 等） | - |
 | [reflection.md](capabilities/reflection.md) | 记忆 / Skill / 知识库反思与自进化 | - |
+| [session-management.md](capabilities/session-management.md) | session 持久化、并发保护、生命周期管理 | - |
 | [governance.md](capabilities/governance.md) | 权限审批、工具白名单、agent 定义与分配 | 宋凯宇 |
 | [scheduling.md](capabilities/scheduling.md) | Cron 定时任务、Webhook 事件触发 | 程鑫 |
 | [observability.md](capabilities/observability.md) | 评估日志、数据统计、链路追踪 | 程鑫 |

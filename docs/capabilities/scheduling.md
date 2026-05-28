@@ -446,4 +446,4 @@ def extract_message(template: str | None, payload: Any) -> str:
 - [ ] 双向回调失败是否重试？重试策略与主任务是否共用？（负责人：待认领）
 - [ ] `task_id` 的生成方式：服务端生成（现为 UUID）还是调用方传入？（负责人：待认领）
 - [ ] `config/tasks/` YAML 变更检测：仅启动时扫描，还是支持运行时热重载？（负责人：待认领）
-- [ ] `session_id` 绑定语义：复用已有会话上下文，还是每次触发新建会话但注入历史摘要？（负责人：待认领）
+- [x] `session_id` 绑定语义：已决——指定时复用完整历史上下文（持续性任务）；未指定时每次新建独立 session（无状态操作）。详见 [session-management.md](./session-management.md)
