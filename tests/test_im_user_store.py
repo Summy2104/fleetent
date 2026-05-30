@@ -45,50 +45,30 @@ def test_unique_constraint(db):
     assert count == 1
 
 
-# --- allowlist tests ---
+# --- allowlist tests (v1.0: default-allow) ---
 
-def test_get_or_create_new_user_is_not_allowed(db):
+def test_get_or_create_new_user_is_allowed_by_default(db):
     user = im_user_store.get_or_create("slack", "U999")
-    assert im_user_store.check_allowed_by_user_id(user.id) is False
+    assert im_user_store.check_allowed_by_user_id(user.id) is True
 
 
 def test_check_allowed_returns_true_for_unknown_user(db):
     assert im_user_store.check_allowed_by_user_id("not-an-im-user") is True
 
 
-def test_approve_user_sets_allowed_true(db):
-    user = im_user_store.get_or_create("slack", "UA1")
-    pending = im_user_store.list_pending()
-    im_user_store.approve_user(pending[0]["id"])
-    assert im_user_store.check_allowed_by_user_id(user.id) is True
-
-
-def test_block_user_revokes_access(db):
-    user = im_user_store.get_or_create("slack", "UB1")
-    pending = im_user_store.list_pending()
-    im_user_store.approve_user(pending[0]["id"])
-    assert im_user_store.check_allowed_by_user_id(user.id) is True
-    im_user_store.block_user(pending[0]["id"])
-    assert im_user_store.check_allowed_by_user_id(user.id) is False
-
-
-def test_block_user_idempotent(db):
-    im_user_store.get_or_create("slack", "UC1")
-    pending = im_user_store.list_pending()
-    im_user_id = pending[0]["id"]
-    im_user_store.block_user(im_user_id)
-    im_user_store.block_user(im_user_id)  # should not raise
-
-
-def test_list_pending_returns_only_unapproved(db):
+def test_new_users_not_pending(db):
+    # Default-allow: newly created users are not pending approval.
     im_user_store.get_or_create("slack", "UD1")
     im_user_store.get_or_create("slack", "UD2")
-    pending = im_user_store.list_pending()
-    assert len(pending) == 2
-    im_user_store.approve_user(pending[0]["id"])
-    remaining = im_user_store.list_pending()
-    assert len(remaining) == 1
-    assert remaining[0]["platform_user_id"] == "UD2"
+    assert im_user_store.list_pending() == []
+
+
+def test_legacy_block_user_revokes_access(db):
+    user = im_user_store.get_or_create("slack", "UB1")
+    assert im_user_store.check_allowed_by_user_id(user.id) is True
+    im_id = im_user_store.list_im_identities(user.id)[0]["id"]
+    im_user_store.block_user(im_id)  # legacy CLI-style block still sets allowed=0
+    assert im_user_store.check_allowed_by_user_id(user.id) is False
 
 
 def test_list_pending_empty(db):

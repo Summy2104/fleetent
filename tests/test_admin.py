@@ -85,22 +85,31 @@ def test_list_pending_no_users():
     assert "No pending" in out
 
 
-def test_list_pending_shows_unapproved_users():
+def test_new_users_not_pending_by_default():
+    # v1.0 default-allow: newly created IM users are not pending.
     im_user_store.get_or_create("slack", "U_PEND1")
     im_user_store.get_or_create("telegram", "12345")
     out, _, code = run_admin("list-pending")
     assert code == 0
-    assert "U_PEND1" in out
-    assert "12345" in out
+    assert "No pending" in out
+
+
+def test_list_pending_shows_blocked_users():
+    u = im_user_store.get_or_create("slack", "U_BLK")
+    im_id = im_user_store.list_im_identities(u.id)[0]["id"]
+    im_user_store.block_user(im_id)  # allowed=0 -> appears in legacy pending list
+    out, _, code = run_admin("list-pending")
+    assert code == 0
+    assert "U_BLK" in out
 
 
 def test_approve_user():
-    im_user_store.get_or_create("slack", "U_APPROVE")
-    pending = im_user_store.list_pending()
-    im_user_id = str(pending[0]["id"])
-    out, _, code = run_admin("approve-user", "--im-user-id", im_user_id)
+    u = im_user_store.get_or_create("slack", "U_APPROVE")
+    im_id = im_user_store.list_im_identities(u.id)[0]["id"]
+    im_user_store.block_user(im_id)
+    out, _, code = run_admin("approve-user", "--im-user-id", str(im_id))
     assert code == 0
-    assert im_user_store.list_pending() == []
+    assert im_user_store.check_allowed_by_user_id(u.id) is True
 
 
 def test_approve_user_not_found_exits_nonzero():
@@ -109,15 +118,24 @@ def test_approve_user_not_found_exits_nonzero():
     assert "not found" in err.lower() or "error" in err.lower()
 
 
-def test_block_user():
-    im_user_store.get_or_create("slack", "U_BLOCK")
-    pending = im_user_store.list_pending()
-    im_user_id = str(pending[0]["id"])
-    run_admin("approve-user", "--im-user-id", im_user_id)
-    assert im_user_store.list_pending() == []
-    out, _, code = run_admin("block-user", "--im-user-id", im_user_id)
+def test_block_user_is_deprecated_noop():
+    u = im_user_store.get_or_create("slack", "U_BLOCK")
+    im_id = im_user_store.list_im_identities(u.id)[0]["id"]
+    _, err, code = run_admin("block-user", "--im-user-id", str(im_id))
     assert code == 0
-    assert len(im_user_store.list_pending()) == 1
+    assert "deprecated" in err.lower()
+    # state unchanged: still allowed
+    assert im_user_store.check_allowed_by_user_id(u.id) is True
+
+
+def test_seed_builtin_admin():
+    out, _, code = run_admin("seed-builtin-admin")
+    assert code == 0
+    assert "initial_password" in out
+    # second run is a no-op
+    out2, _, code2 = run_admin("seed-builtin-admin")
+    assert code2 == 0
+    assert "already exists" in out2
 
 
 # --- channel agent admin commands ---
