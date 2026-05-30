@@ -26,6 +26,7 @@ class NormalizedMessage:
     attachments: list[Any]
     reply_func: Callable[[str], Coroutine[Any, Any, None]]
     channel_id: str = field(default="")
+    workspace_id: str = field(default="")
 
 
 def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> Agent | None:
@@ -56,6 +57,16 @@ async def route(msg: NormalizedMessage) -> None:
             await msg.reply_func(f"{'✅' if decision == 'approved' else '❌'} {approval_id} {decision}")
         else:
             await msg.reply_func(f"⚠️ approval {approval_id} not found or already expired")
+        return
+
+    # Channel allowlist gate — checked before any user-level check. When the platform's
+    # connector has allowlist_enforced off, this always passes (backward compatible).
+    from fleetent import im_channel_allowlist
+
+    if not im_channel_allowlist.is_allowed(
+        msg.platform, msg.channel_id, msg.workspace_id or None
+    ):
+        await msg.reply_func(_REJECTION_MSG)
         return
 
     # Allowlist check — IM users must be approved before interacting
