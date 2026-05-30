@@ -6,7 +6,7 @@
 
 ## 概述
 
-多用户管理、API 认证和管理员操作。是 fleetent 作为多租户平台的基础层。
+多用户管理、API 认证和管理员操作，并向上扩展为统一的 Admin Web 后台——涵盖用户 / IM、Agent、Skill 管理，askit 编排与 fleetent 自管理，跨 agent 统计与单请求全链路追踪，以及资源监控与告警。是 fleetent 作为多租户平台的基础层与运维控制面。
 
 **调用关系**：
 - 依赖：user-center（用户创建、禁用、拉黑等写操作均通过 user-center 接口，不直接写 users 表）、user_store / im_user_store（只读，供 Bearer token 认证查询）、agent_store（Agent 定义与绑定的读写，供 Admin UI 的 Agent 管理页）、skill_registry（Skill 索引读取与热加载触发，供 Admin UI 的 Skill 管理页）、reflection（读取 skill_proposals 待审提案，供 Skill 提案审批入口）、askit（外部 spec 编译 / 部署工具链，供 Admin UI 的 askit 编排控制台调用，详见「askit 编排控制台」）
@@ -22,7 +22,7 @@ flowchart TD
         HTTP["POST /chat<br/>Bearer token"]
         IM["IM 消息<br/>Slack / TG / WA"]
     end
-    subgraph PLAT["platform 平台层"]
+    subgraph PLAT["platform 存储层"]
         AUTH["认证 / 用户解析"]
         US["user_store<br/>账号 + API key"]
         IUS["im_user_store<br/>(platform, pid) → user"]
@@ -33,11 +33,24 @@ flowchart TD
         CLI["admin CLI（现状）"]
         UI["Admin Web 后台（v1.0）"]
     end
-    subgraph RT["运行语义（不在本域）"]
+    subgraph ADMIN["Admin UI 能力面（v1.0）"]
+        F1["用户 / IM 管理"]
+        F2["Agent 管理"]
+        F3["Skill 管理 + 提案审批"]
+        F4["统计面板<br/>跨 agent / 单请求全链路"]
+        F5["askit 编排控制台"]
+        F6["资源监控与告警"]
+    end
+    subgraph RT["运行语义 / 外部域（不在本域）"]
         GOV["governance<br/>allowed_tools / 审批"]
-        ART["agent-runtime<br/>路由解析 / 执行"]
+        ART["agent-runtime<br/>路由 / 执行 / request_id"]
         SKR["skill<br/>匹配 / 注入 / 禁用"]
         REF["reflection<br/>skill 提案"]
+        OBS["observability<br/>traces"]
+        ASKIT["askit<br/>ai-skills-toolkit"]
+    end
+    subgraph MONT["监控目标"]
+        T["主机 / 进程+容器<br/>依赖基础设施 / 应用层"]
     end
     HTTP --> AUTH
     IM --> AUTH
@@ -45,14 +58,19 @@ flowchart TD
     AUTH --> IUS
     CLI --> US
     CLI --> IUS
-    UI -.规划.-> US
-    UI -.规划.-> IUS
-    UI -.Agent 管理页.-> AS
-    UI -.Skill 管理页.-> SK
-    UI -.提案审批.-> REF
+    UI --> ADMIN
+    F1 -.-> US
+    F1 -.-> IUS
+    F2 -.-> AS
+    F3 -.-> SK
+    F3 -.提案.-> REF
+    F4 -.聚合.-> OBS
+    F5 -.编排 / 受管 deploy.-> ASKIT
+    F6 -.内置采集.-> T
     AS -.被消费.-> GOV
     AS -.被消费.-> ART
     SK -.被消费.-> SKR
+    ASKIT -.deploy --target fleetent.-> AS
 ```
 
 ## 现状
@@ -445,7 +463,7 @@ stateDiagram-v2
   - **临管（ad-hoc / DB-only）**：直接在「Agent 管理」「Skill 管理」UI 即时创建，只活在 DB / 文件、git 不追踪；用于快速实验。列表打「临管」徽章
   - **受管对象被 UI 改动 → 视为运行时覆盖**：UI 仍可应急改受管对象，但改动经 `override sync` 捕获为 override，列表标 **drift**；admin 在「覆盖回流」系列以 diff 审阅后 `promote` 回流到 spec 开 PR（转正为正式来源）或 `discard`（下次 deploy 被 spec 覆盖还原）
   - **受管对象的不可变字段**：标为 immutable 的字段（对齐 askit 的 IMMUTABLE_FILES，如 identity）UI 改了也会在下次 deploy 被 spec 还原，UI 上给出明确提示
-  - **临管转受管**：对临管对象执行 `decompile` 反编译为 spec、纳入 git，之后即变受管，进入版本化轨道
+  - **临管转受管**：对临管对象执行 `decompile` 反编译为 spec、纳入 git，之后即变受管；`deploy` 命中同名临管对象时走 "adopt 收编"（沿用同 agent_id 翻转为受管）。两条路径都**保持 agent_id 不变**，历史 trace 与绑定天然续上（identity = 稳定的 agent_id，"受管/临管"只是同一行上的标志位）
   - 依赖前提：ai-skills-toolkit 需新增 **fleetent target**（renderer + deployer，把 spec 编译进 SQLite agent_store 与 skills/ 目录，而非纯文件），属外部工具域工作，见「待决问题」
 
 ```mermaid
@@ -466,7 +484,7 @@ flowchart LR
 
 - [ ] **② 构建与校验系列（Build & Validate）**：`build`（从 spec 编译所有 agent，可选 `--targets`）、`lint`（校验 spec / skill）、`check`（build 后比对产物有无 drift）、`audit`（skill 目录安全预检）、`catalog export`（导出 catalog.json）；作为发布前的 CI 闸门，UI 展示每次运行的通过 / 失败、drift 文件清单与 audit 命中项
 
-- [ ] **③ 部署系列（Deploy）**：`deploy --target {fleetent|openclaw|claude|codex|hermes}`（部署到目标平台，含 **fleetent 自身**——把受管 spec 编译进本平台 agent_store / skills）、`provision`（为 MCP channel + agent account 跑 OAuth 等配置流程）；UI 提供目标平台选择、`--dry-run` 预演开关，部署前强制先过②的 check 绿灯（可配置为硬门槛）；`deploy --target fleetent` 不覆盖临管对象、对受管对象的未回流 drift 给出冲突提示
+- [ ] **③ 部署系列（Deploy）**：`deploy --target {fleetent|openclaw|claude|codex|hermes}`（部署到目标平台，含 **fleetent 自身**——把受管 spec 编译后经 fleetent **幂等 apply API**（按 agent_id / name upsert）写入 agent_store，skills 投递到共享目录并触发 hot reload；deploy 不覆盖运行态 bindings）、`provision`（为 MCP channel + agent account 跑 OAuth 等配置流程）；UI 提供目标平台选择、`--dry-run` 预演开关，部署前强制先过②的 check 绿灯（可配置为硬门槛）；`deploy --target fleetent` 不覆盖临管对象、对受管对象的未回流 drift 给出冲突提示
 
 - [ ] **④ 依赖系列（Skill Deps）**：`install`（按 project.yaml 解析并安装 skill 依赖、写 skills.lock）；UI 展示已锁定版本与待更新依赖
 
@@ -996,10 +1014,24 @@ flowchart LR
 
 ## 待决问题
 
-- [x] **fleetent ↔ askit 集成模型（已定：方案 a+b 混合）**：fleetent 同时是 askit 的**舰队控制面**（编排 openclaw / claude / codex / hermes 等外部平台）**和受管 target**（自身 agent / skill 可 spec-as-code 化，由 `deploy --target fleetent` 编译进 agent_store / skills）。spec 与 DB 的双源问题用「双层来源 + 覆盖回流」模型解决：受管对象以 spec 为源、临管对象以 DB 为源，受管对象的 UI 改动经 askit override sync/promote/discard 回流，临管对象经 decompile 转正。放弃纯 (c)「内嵌 askit 子集」（重复造轮子、与上游分叉）；其中 `lint` / `audit` / `check`(drift) 无状态校验器是否内联为发布前闸门，保留为 v1.1 可选优化。
-- [ ] **askit 新增 fleetent target（前置依赖）**：ai-skills-toolkit 需实现 fleetent renderer + deployer，把 spec 编译进 **SQLite agent_store 与 skills/ 目录**（不同于现有平台的纯文件产物）；并定义 fleetent 的 MUTABLE / IMMUTABLE 字段集（哪些 UI 改动可回流、哪些 deploy 时强制还原）。属外部工具域工作。（负责人：待认领）
-- [ ] **askit 调用形态**：控制台以子进程调用 askit CLI，还是依赖 askit 暴露的库 API / 服务？涉及在 on-prem 容器内的可执行分发与版本锁定（倾向子进程 + 镜像内固定 askit 版本）。（负责人：待认领）
-- [ ] **工作区与多环境**：控制台操作的 spec 工作区如何与 askit 的 dev/test/pre/prod 分支模型（override 环境检测）对齐？跨环境 promote 的权限边界；fleetent 运行库（DB）与 spec 仓库的同机 / 跨机部署关系。（负责人：待认领）
-- [ ] **来源切换的边界**：临管 agent 与受管 agent 重名如何处理？decompile 转正后该 agent 的历史 trace / 绑定如何无缝衔接？（负责人：待认领）
-- [ ] **请求级链路的关联 ID（request_id）**：请求级全链路追踪依赖一个稳定的 request_id 贯穿主循环与所有子事件（工具调用、permission_gate、模型路由 / fallback、memory、压缩、sub_agent），并在 HTTP 路径补 session_id。需在 agent-runtime / observability 侧定义：request_id 的生成时机与格式、子事件如何统一携带它、是否回填历史 trace。本面板按 request_id 渲染，不负责发射。（负责人：待认领）
-- [ ] **成本统计的模型单价表**：成本指标 = token × 模型单价，这张单价表存哪、由谁维护、如何随模型路由配置同步？（负责人：待认领）
+- [x] **fleetent ↔ askit 集成模型（已定：方案 a+b 混合）**：fleetent 同时是 askit 的**舰队控制面**（编排 openclaw / claude / codex / hermes 等外部平台）**和受管 target**（自身 agent / skill 可 spec-as-code 化，由 `deploy --target fleetent` 编译进 agent_store / skills）。spec 与 DB 的双源问题用「双层来源 + 覆盖回流」模型解决：受管对象以 spec 为源、临管对象以 DB 为源，受管对象的 UI 改动经 askit override sync/promote/discard 回流，临管对象经 decompile 转正。放弃纯 (c)「内嵌 askit 子集」（重复造轮子、与上游分叉）；`lint` / `audit` / `check`(drift) 无状态校验器**不内联，v1.0 一律走控制台调 askit**，内联与否留 v1.1 评估。
+- [x] **askit 新增 fleetent target（已定）**：(1) askit 的 fleetent deployer **不直接写 SQLite**，而是把编译结果经 fleetent 新增的**幂等 apply API**（POST，按 agent_id / name upsert）交给 fleetent 自己落库，skills 投递到共享 skills 目录后触发 hot reload——askit 不耦合 fleetent 表结构、跨机可用、fleetent 始终是自己 DB 的唯一写入者；(2) **spec 只拥有 agent 定义**（name / system_prompt / allowed_tools / model 配置），**bindings（user / channel / 默认）留运行态，deploy 不覆盖**；(3) 字段集：`name` = identity **immutable**（deploy 时还原），`system_prompt / allowed_tools / model` **mutable**（UI 改记 override），bindings 不进 spec。
+  - 跨域 follow-up：fleetent 侧需新增 agents 批量 apply API（server / admin）；ai-skills-toolkit 侧实现 fleetent renderer + deployer。
+- [x] **askit 调用形态（已定）**：控制台以**子进程调用 askit CLI + 镜像内固定 askit 版本**，不引库 API；编排外部平台直接子进程，fleetent 自管理的"落库"经上条 apply API 完成。
+- [x] **工作区与多环境（已定）**：控制台持 **git-backed 的 spec 工作副本、按环境分（dev/test/pre/prod）**，对齐 askit 分支 env 检测；`deploy` 指向**某环境的 fleetent endpoint**（可远程，不要求与 spec 仓库同机）；**跨环境 promote 需 admin + 2FA**（复用高危二次确认）。spec 仓库（SoT）与运行 DB 解耦、经 endpoint 连接。
+- [x] **来源切换的边界（已定）**：核心原则 **identity = 稳定的 agent_id，「受管/临管」只是同一行上的标志位，切换来源不重建对象**——decompile 转正 / adopt 后历史 trace（按 agent_id）与绑定（user_agents / channel_agents 外键引用 agent_id）天然续上；`deploy` 命中**同名临管 agent** 时走 "**adopt 收编**"（沿用同 agent_id、翻转为受管，UI 确认），不覆盖、不硬拒。
+- [x] **请求级链路的关联 ID（已定）**：agent-runtime 在 `run() / run_stream() / run_sync()` **入口生成 ULID**（时间可排序），用 **contextvar** 贯穿主循环，所有子事件（工具 / 审批 / 路由 / memory / 压缩）携带；**sub_agent 继承父 request_id + 自带 span_id** 形成 trace 树（OTel-lite）；HTTP 路径补 session_id；**历史 trace 不回填**（退化见场景 85）。platform 仅按 request_id 渲染。
+  - 跨域 follow-up：request_id / span 的生成与传播在 agent-runtime / observability 实现。
+- [x] **成本统计的模型单价表（已定）**：单价表放 **model_router 配置**（与 provider / model 声明同处，operator 维护），每模型记 input / output 每 1k token 单价；聚合时 `token × 单价`；**未配置单价的模型成本显示"未配置"而非 0**（自托管 / 自定义模型常无公开价）。
+  - 跨域 follow-up：model_router 配置 schema 增加单价字段。
+
+### 多机集群部署（待评估，可能延期到 v1.1+）
+
+> 以下为后台管理多机器实例集群时的待决问题。当前实现有多处单机假设，集群化的地基（状态外置）属 session / scheduling / deployment 域，platform 侧只承担"把整个 fleet 当一个逻辑系统来管"的控制面与节点维度。本组在 v1.0 范围未定，按需评估或延期。
+
+- [ ] **集群状态外置（前置地基）**：SQLite（users.db）、JSON sessions + per-session `asyncio.Lock`、permission_gate 的 `asyncio.Event`、APScheduler 进程内调度、traces.jsonl 均为单进程/单机假设。多机共享同一份事实需迁到自托管基础设施：users.db → PostgreSQL；sessions → PostgreSQL / Redis；per-session 锁 → 分布式锁（Redis / PG advisory lock）；traces → 集中表。无此步则多机只是各跑各的。（负责人：待认领）
+- [ ] **跨节点审批信令**：一个在途请求只活在某一台节点，但审批动作可能落在另一台后台。permission_gate 的 `asyncio.Event` 需改为跨节点唤醒（Redis pub/sub 或 PG LISTEN/NOTIFY），或把 approval / cancel 路由到持有该请求的 owning node（配合 request_id）。（负责人：待认领）
+- [ ] **单例协调任务的 leader 选举**：cron_scheduler 与 reflection 定期任务必须全集群只跑一次，否则每台节点重复触发同一任务。需 leader 选举或共享 jobstore + 互斥锁。（负责人：待认领）
+- [ ] **节点注册表与控制面**：后台是否演进为无状态控制面（任一节点提供同一 Admin UI，读写共享状态，管整个 fleet）？是否新增「节点 / 实例管理」面——实例注册（node_id / host / 版本 / 心跳 / 状态）、集群拓扑、drain / 滚动重启、版本偏移告警？（负责人：待认领）
+- [ ] **监控告警的节点维度**：「资源监控与告警」需从单机扩为按节点上报 + 集群汇总；告警规则作用域扩到 单节点 / 节点组 / 集群聚合，区分"单节点挂"与"集群整体降级"；抑制规则上提到节点层级（节点宕机抑制其上容器 / 进程的次生告警）。（负责人：待认领）
+- [ ] **配置一致性与 skill 分发**：`deploy --target fleetent` 写共享 store 后全节点自动收敛，但 skill 文件的跨节点分发载体（共享卷 / 对象存储 / deploy 时同步）与 per-node 配置 drift / 版本展示待定。（负责人：待认领）
