@@ -9,9 +9,10 @@
 多用户管理、API 认证和管理员操作。是 fleetent 作为多租户平台的基础层。
 
 **调用关系**：
-- 依赖：user-center（用户创建、禁用、拉黑等写操作均通过 user-center 接口，不直接写 users 表）、user_store / im_user_store（只读，供 Bearer token 认证查询）
+- 依赖：user-center（用户创建、禁用、拉黑等写操作均通过 user-center 接口，不直接写 users 表）、user_store / im_user_store（只读，供 Bearer token 认证查询）、agent_store（Agent 定义与绑定的读写，供 Admin UI 的 Agent 管理页）、skill_registry（Skill 索引读取与热加载触发，供 Admin UI 的 Skill 管理页）、reflection（读取 skill_proposals 待审提案，供 Skill 提案审批入口）、askit（外部 spec 编译 / 部署工具链，供 Admin UI 的 askit 编排控制台调用，详见「askit 编排控制台」）
 - 被依赖：server.py（认证）、normalizer（用户查找）、admin CLI
-- **不涉及**：agent_store（属 agent-runtime 域）、config（属 deployment 域）
+- **职责边界**：platform 只提供 Agent / Skill / askit 操作的**管理面**（Admin UI 上的增删改查、启停、绑定 / 分配、按系列触发与观测）；它们的**运行语义**——Agent 的 allowed_tools 校验、审批、路由解析归 [governance](./governance.md) / [agent-runtime](./agent-runtime.md)；Skill 的扫描 / 匹配 / 注入 / 禁用 / 安全审计归 [skill](./skill.md)，AI 自动生成的 Skill 提案与审批流归 [reflection](./reflection.md)；askit 的 spec 编译 / 校验 / 部署 / 覆盖回流等语义归 **ai-skills-toolkit 外部工具域**。本模块只交叉引用、不重复定义这些语义
+- **不涉及**：config（属 deployment 域）
 
 ## 架构总览
 
@@ -25,10 +26,18 @@ flowchart TD
         AUTH["认证 / 用户解析"]
         US["user_store<br/>账号 + API key"]
         IUS["im_user_store<br/>(platform, pid) → user"]
+        AS["agent_store<br/>Agent 定义 + 绑定"]
+        SK["skill_registry<br/>Skill 索引"]
     end
     subgraph MGMT["管理入口"]
         CLI["admin CLI（现状）"]
         UI["Admin Web 后台（v1.0）"]
+    end
+    subgraph RT["运行语义（不在本域）"]
+        GOV["governance<br/>allowed_tools / 审批"]
+        ART["agent-runtime<br/>路由解析 / 执行"]
+        SKR["skill<br/>匹配 / 注入 / 禁用"]
+        REF["reflection<br/>skill 提案"]
     end
     HTTP --> AUTH
     IM --> AUTH
@@ -38,6 +47,12 @@ flowchart TD
     CLI --> IUS
     UI -.规划.-> US
     UI -.规划.-> IUS
+    UI -.Agent 管理页.-> AS
+    UI -.Skill 管理页.-> SK
+    UI -.提案审批.-> REF
+    AS -.被消费.-> GOV
+    AS -.被消费.-> ART
+    SK -.被消费.-> SKR
 ```
 
 ## 现状
@@ -189,6 +204,312 @@ flowchart TD
 - [ ] **会话与 trace 浏览**：按用户 / channel / 时间 / 关键词检索历史对话，单会话展开完整 transcript 与逐轮工具调用、permission_gate 决策、模型路由、memory 命中；traces.jsonl 渲染为可筛选、可下钻的事件流
 
 - [ ] **系统健康仪表盘**：首页一屏可见各 IM 平台连接状态、API 错误率与延迟、活跃 session 数、permission_gate 待审批积压、定时任务执行情况；新申请、超限告警、平台断线等关键事件按时间倒序滚动
+
+### Agent 管理（v1.0）
+
+> 设计哲学借鉴市面成熟 agent 后台（Dify 的 App 管理、Coze 的 Bot 工作台、Bedrock 的 agent 版本/别名、LangSmith 的按项目观测）：**Agent 是后台里可被增删改查、可启停、可绑定的一等公民**，管理员无需改代码或重启服务即可上线一个新 Agent。本模块只写**管理面的可观察行为**；Agent 真正运行时的能力边界校验、审批与路由解析由 [governance](./governance.md) / [agent-runtime](./agent-runtime.md) 负责。
+>
+> **来源归属**：每个 Agent 标注「受管（spec-owned）」或「临管（DB-only）」徽章——临管在本页即时创建，受管由 askit `deploy --target fleetent` 从 spec 编译而来；对受管 Agent 的 UI 改动会被标 drift 并经 askit 覆盖回流转正或还原（详见「askit 编排控制台 / fleetent 自管理」）。本页所有即时操作默认产出临管对象。
+
+- [ ] **Agent 列表与检索**：列表展示所有 Agent 的名称、状态（启用 / 禁用 / 已归档）、模型配置摘要、allowed_tools 数量、绑定的用户数 / channel 数、是否为默认 Agent、创建与最近更新时间；支持按名称 / 状态搜索与排序
+
+- [ ] **动态创建 Agent**：管理员在 Agent 管理页填写名称、system_prompt、allowed_tools（fnmatch 通配符白名单，如 `read_*`、`github__*`）即可即时创建并启用，**无需改配置或重启服务**；名称全局唯一，重名拒绝并提示
+
+- [ ] **编辑 Agent**：可在线修改 system_prompt、allowed_tools、模型配置与备注；保存后**对新会话立即生效**，对进行中的会话在下一轮 LLM 调用时生效（运行语义口径以 [agent-runtime](./agent-runtime.md) 为准）
+
+- [ ] **启用 / 禁用（启停开关）**：禁用的 Agent 保留定义与全部绑定，但**不再接受新会话**——路由到被禁用 Agent 的 `/chat` 请求被拒并提示"该 Agent 已停用"；重新启用后立即恢复服务，启停动作写审计
+
+- [ ] **删除与软删除 + 绑定保护**：删除走**软删除（归档）**——Agent 标记为 archived 后不再可被路由、从默认列表隐去，但定义与历史 trace 保留可追溯；删除前做**绑定保护**：若仍被任何 user / channel 绑定或被设为默认 Agent，则阻止删除并列出占用方，要求先解绑或迁移；归档后可在保留期内"恢复"，超过保留期由运维硬清理（高危，CLI 不开放）
+
+- [ ] **克隆与模板库**：可对现有 Agent 一键"克隆"出一个新名称的副本（复制 system_prompt / allowed_tools / 模型配置，不复制绑定关系）；内置若干**模板**（如"只读问答 Agent""运维 Agent""客服 Agent"），从模板起一个新 Agent 时预填推荐的 allowed_tools 与提示词，降低从零配置的门槛
+
+- [ ] **按 Agent 配置模型与运行参数**：每个 Agent 可绑定 [model-router](./model-router.md) 的 task_type、温度、以及该 Agent 维度的成本 / 步数预算上限（五层预算中的"单 agent"层，见 [agent-runtime](./agent-runtime.md)）；未显式配置时回落到全局默认，配置仅声明意图，实际生效与回退由对应运行域解释
+
+- [ ] **绑定管理（UI 化）**：在 Agent 详情页可视化管理 user→agent、channel→agent 绑定与"设为默认 Agent"，等价于现有 CLI 的 `assign-channel` / `unassign-channel` / `set-default-agent`，并展示该 Agent 当前被哪些用户 / channel 引用（与删除保护共用同一引用视图）
+
+- [ ] **按 Agent 观测与用量**：Agent 详情页一屏可见该 Agent 的调用次数、token / 成本用量曲线、错误率、平均时延、permission_gate 触发与审批通过率、最近会话列表，可下钻到单会话 trace（数据源为 observability 的 traces，本页只做按 agent_id 的聚合视图）
+
+- [ ] **Agent 管理权限与审计**：Agent 的增删改、启停、绑定、改模型配置均**仅 admin 角色可操作**，viewer 仅可浏览列表与观测；删除（归档）等高危动作要求二次确认；所有动作写审计日志（谁、何时、对哪个 Agent、做了什么）
+
+| 操作 | admin | viewer | CLI |
+|------|:-----:|:------:|:---:|
+| 浏览 Agent 列表 / 观测 | ✅ | ✅ | 部分（list 只读） |
+| 创建 / 编辑 / 克隆 Agent | ✅ | ❌ | ❌ |
+| 启用 / 禁用 Agent | ✅ | ❌ | ❌ |
+| 归档（软删除）/ 恢复 Agent | ✅ | ❌ | ❌ |
+| 改 Agent 模型 / 预算配置 | ✅ | ❌ | ❌ |
+| 绑定 user / channel / 设默认 | ✅ | ❌ | ✅（channel / 默认） |
+
+```mermaid
+stateDiagram-v2
+    [*] --> enabled: 创建即启用
+    enabled --> disabled: 禁用（保留绑定）
+    disabled --> enabled: 重新启用
+    enabled --> archived: 归档（先过绑定保护）
+    disabled --> archived: 归档
+    archived --> enabled: 保留期内恢复
+    archived --> [*]: 超保留期硬清理（运维）
+```
+
+```mermaid
+flowchart TD
+    A["admin 在 Agent 管理页"] --> B{"入口"}
+    B -->|新建| C["填名称 / prompt / allowed_tools / 模型"]
+    B -->|从模板| D["选模板预填，再微调"]
+    B -->|克隆现有| E["复制定义，不带绑定"]
+    C --> F{"名称唯一?"}
+    D --> F
+    E --> F
+    F -->|否| G["拒绝并提示重名"]
+    F -->|是| H["落库并启用 + 写审计"]
+    H --> I["可立即在详情页绑定 user / channel / 设默认"]
+
+    Del["admin 点删除"] --> J{"仍被绑定<br/>或为默认?"}
+    J -->|是| K["阻止 + 列出占用方<br/>要求先解绑/迁移"]
+    J -->|否| L["标记 archived<br/>停止路由 + 写审计"]
+    L --> M["保留期内可恢复"]
+```
+
+### Skill 管理（v1.0）
+
+> 设计哲学借鉴市面成熟的「能力市场」形态（Anthropic Skills 的 SKILL.md 包、Dify / Coze 的插件市场与启停开关、OpenAI GPT Store 的上架与审核）：**Skill 是后台里可上传、可启停、可按 Agent 分配、可观测的一等公民**，领域专家无需登录服务器改文件即可上线一条行为指南。本模块只写**管理面的可观察行为**；Skill 真正的扫描 / 匹配 / 注入 / 安全审计 / 禁用语义由 [skill](./skill.md) 负责，AI 自动产出的 Skill 变更提案与审批流由 [reflection](./reflection.md) 负责，本节只提供这些能力的 UI 入口并交叉引用。
+>
+> **来源归属**：与 Agent 一致，每个 Skill 标注「受管 / 临管」徽章——UI 上传 / 新建产出临管 Skill，受管 Skill 由 askit `deploy --target fleetent` 从 spec 编译而来；对受管 Skill 的 UI 改动标 drift 并经覆盖回流处理（详见「askit 编排控制台 / fleetent 自管理」）。
+
+- [ ] **Skill 列表与检索**：列表展示所有 Skill 的名称、一句话描述、tags / platforms、启用状态（全局启用 / 全局禁用 / 已归档）、安全审计结论（通过 / 可疑 / 拒绝加载）、累计命中注入次数、最近触发时间、被哪些 Agent 启用；支持按名称 / tag / 状态 / 审计结论搜索与排序
+
+- [ ] **上传 / 新建 Skill**：管理员可在 UI 上传一个 Skill（`SKILL.md` 或含脚本 / 模板的目录包），或在线新建；保存前自动校验 YAML frontmatter 并触发 [skill](./skill.md) 的**安全审计**——审计「拒绝加载」级别时不予上线并提示命中的注入模式，「可疑」级别时允许上线但在列表打标；上线即触发热加载，无需重启服务
+
+- [ ] **编辑 Skill**：可在线修改 frontmatter（name / description / tags / platforms / `exclusive` 等）与正文内容；保存后重新跑安全审计并触发热加载，**对后续请求生效、进行中的会话不受影响**（热加载语义以 [skill](./skill.md) 为准）
+
+- [ ] **启用 / 禁用（全局 + 按 Agent）**：提供 [skill](./skill.md) 已规划的「禁用机制」的 UI 入口——可全局禁用某 Skill（对所有 Agent 不再匹配注入），或在 Agent 详情页按 Agent 维度启停该 Skill；禁用动作写审计，便于排查"为什么这个 Skill 没生效"
+
+- [ ] **删除与归档 + 引用保护**：删除走**软删除（归档）**——归档后不再参与匹配注入、从列表隐去，但文件快照与历史命中 trace 保留可追溯；删除前做**引用保护**：若仍被任一 Agent 显式启用，则阻止删除并列出占用方，要求先在对应 Agent 上停用；归档后保留期内可恢复
+
+- [ ] **按 Agent 分配（Skill ↔ Agent 矩阵）**：可视化管理"哪些 Skill 对哪个 Agent 可用"——在 Agent 详情页勾选可用 Skill，或在 Skill 详情页查看 / 调整启用它的 Agent 列表；与「按 Agent 启停」共用同一引用视图，也供删除引用保护复用
+
+- [ ] **AI 提案审批入口（Skill Proposal Inbox）**：[reflection](./reflection.md) 在 prod 环境产出的 Skill 变更提案（create / update / delete，状态 pending）汇总到后台一个待办收件箱；admin 可逐条查看提案理由与**变更 diff（基于 reflection 的 snapshot 快照对比当前内容）**，approve 后由 reflection 应用生效、reject 后关闭，审批结果回写提案状态并写审计
+
+- [ ] **安全审计结果展示与隔离**：列表与详情页展示每个 Skill 的最近一次审计结论与命中规则；被判为「拒绝加载」的 Skill 进入隔离区不参与注入，需 admin 显式复核后才可强制上线（强制上线写审计并二次确认）
+
+- [ ] **热加载触发**：UI 提供"重新扫描 skills/ 目录"按钮，等价于 [skill](./skill.md) 规划的热加载；重扫描期间继续用旧索引、完成后原子切换，扫描失败保留旧索引并在 UI 告警
+
+- [ ] **按 Skill 观测**：Skill 详情页一屏可见该 Skill 的命中 / 注入次数曲线、触发它的会话列表、最近 N 天是否被触发（长期零触发的会高亮，呼应 reflection 的 delete 提案依据），可下钻到单会话 trace（数据源为 observability，本页只做按 skill 的聚合视图）
+
+- [ ] **Skill 管理权限与审计**：Skill 的上传 / 编辑 / 启停 / 归档 / 按 Agent 分配 / 提案审批 / 强制上线均**仅 admin 角色可操作**，viewer 仅可浏览列表、审计结论与观测；归档、强制上线疑似注入 Skill、approve 提案等高危动作要求二次确认；所有动作写审计日志（谁、何时、对哪个 Skill、做了什么）
+
+| 操作 | admin | viewer | CLI |
+|------|:-----:|:------:|:---:|
+| 浏览 Skill 列表 / 观测 / 审计结论 | ✅ | ✅ | 部分（list 只读） |
+| 上传 / 新建 / 编辑 Skill | ✅ | ❌ | ❌ |
+| 全局 / 按 Agent 启停 Skill | ✅ | ❌ | ❌ |
+| 归档（软删除）/ 恢复 Skill | ✅ | ❌ | ❌ |
+| 触发热加载（重新扫描） | ✅ | ❌ | ✅ |
+| 审批 AI 生成的 Skill 提案 | ✅ | ❌ | ❌ |
+| 强制上线被判拒绝的 Skill | ✅ | ❌ | ❌ |
+
+```mermaid
+flowchart TD
+    A["admin 上传 / 新建 Skill"] --> B["校验 frontmatter"]
+    B --> C{"安全审计结论"}
+    C -->|拒绝加载| D["进隔离区，不上线<br/>提示命中的注入模式"]
+    C -->|可疑| E["上线 + 列表打标"]
+    C -->|通过| F["上线"]
+    D -.admin 复核强制上线.-> E
+    E --> G["热加载 + 写审计"]
+    F --> G
+    G --> H["可在 Agent 维度按需启停 / 分配"]
+
+    subgraph inbox["AI 提案审批"]
+        P["reflection 产出提案<br/>create/update/delete(pending)"] --> Q["收件箱展示理由 + diff"]
+        Q -->|approve| R["reflection 应用生效 + 写审计"]
+        Q -->|reject| S["关闭提案 + 写审计"]
+    end
+```
+
+### 统计面板（Agent 维度）（v1.0）
+
+> 一个以 **Agent 为主视角的统计分析面板**，回答"每个 agent 用得多不多、快不快、稳不稳、贵不贵、被谁用"。它是 platform 的**聚合视图**，原始 trace 数据归 [observability](./observability.md)（traces）、审批数据归 permission_gate、绑定数据归 agent_store；本面板只做按 agent_id 的聚合与下钻，不重复定义采集语义。与「系统健康仪表盘」（平台级实时态）和 Agent 详情页「按 Agent 观测」（单 agent）互补——本面板是**跨 agent、可对比、可下钻**的分析层。
+>
+> 标注：✅ = 现有 trace 字段直接可出；🟡 = 需从 trace 的 messages 解析；⏳ = 依赖 v1.0 新字段（budget 成本、agent-runtime 终止码 / 错误分类、skill 命中日志），字段就绪前 UI 以"待数据接入"占位、就绪后自动点亮。
+
+- [ ] **面板总览与筛选**：可选单个或多个 agent、时间范围（日 / 周 / 月 / 自定义）、环境；多 agent 并排**对比视图**（同一指标横向比），支持把任一指标卡片下钻成明细
+
+- [ ] **① 用量与成本**：调用次数、活跃独立用户数 / channel 数 / 会话数、token 用量（prompt / completion / total 的总量与单次均值）、按天 / 周趋势曲线 ✅；成本（$，token × 模型单价）⏳
+
+- [ ] **② 性能与可靠性**：响应时延（平均 / P50 / P95）、每会话平均轮数 ✅；错误率 / 失败率、**终止原因分布**（max_turns / budget_exceeded / cancelled / approval_rejected / loop_detected / consecutive_failures）、model fallback 触发率、上下文压缩触发次数 ⏳
+
+- [ ] **③ 工具与治理**：Top 工具调用排行、每次运行平均工具数 🟡；工具失败率 / 超时率 ⏳；**allowed_tools 覆盖率**——列出该 agent 配了白名单却从未被调用的工具，驱动最小权限收窄 🟡；permission_gate 触发数与审批**通过 / 拒绝 / 超时率** ✅（approvals）
+
+- [ ] **④ 模型 · Skill · 绑定**：按模型的调用 / token / 成本分布、task_type 分布 ✅；该 agent 的 skill 命中 Top、memory 命中率、sub_agent 调用数与子任务成功率 ⏳；绑定用户数 / channel 数、是否默认 agent、受管 / 临管来源分布 ✅
+
+- [ ] **⑤ 下钻维度（按用户 / channel / 模型 / 时间切片）**：任一 agent 指标都可沿这四个维度切片。重点支持 **per-user 视图**——在选定 agent 下，各用户的 **token 用量、调用频率（次数 / 活跃天数）、最近活跃**排行；并支持反向"按用户"看某用户在所有 agent 上的用量与频率汇总。用于识别重度用户、分配配额、定位异常激增 ✅（user_id 现有）
+
+- [ ] **⑥ 请求级全链路追踪（Request Trace）**：从 per-user 排行可一路下钻——**用户 → 该用户的请求列表（按时间 / agent / channel 筛选）→ 单个请求的完整链路**。单请求链路按时间序展开一个**事件流**：用户输入 → 每轮 LLM 调用（模型、token、耗时、是否触发 fallback）→ 每次工具调用的入参 / 出参 / 耗时 / 成功失败 → permission_gate 审批决策 → memory 命中 → 上下文压缩事件 → sub_agent 派生（经 `parent_session_id` 关联，可就地展开子 agent 的完整子链路）→ 最终回复；每个节点可展开 / 折叠、可复制原始 JSON。与「会话与 trace 浏览」（会话级 transcript）互补：本视图聚焦**单个请求**的纵深链路与跨 agent 调用链
+  - 数据现状：单请求的对话与工具入出参已在 trace 的 `messages` 中 ✅；sub_agent 子链路经 `parent_session_id` 可关联 ✅
+  - ⏳ **依赖：单请求关联 ID（request_id）**——需由 agent-runtime / observability 为每次运行生成稳定 request_id 并贯穿主循环与所有子事件（工具调用、审批、模型路由、memory、压缩、sub_agent），HTTP 路径还需补 session_id；platform 仅按 request_id 聚合渲染，不负责发射（见「待决问题」与 [observability](./observability.md) / [agent-runtime](./agent-runtime.md)）
+
+- [ ] **导出与定时报告**：面板任意视图可导出 CSV / 图片；可配置按周 / 月把指定 agent 的统计摘要定时推送到管理员邮箱（复用 scheduling 域）
+
+- [ ] **统计面板权限**：viewer 与 admin 均可浏览（纯只读分析）；不涉及写操作，但 per-user 明细等含个人用量数据按部署方策略可对 viewer 脱敏
+
+```mermaid
+flowchart LR
+    subgraph src["数据源（各归原域）"]
+        TR["traces<br/>tokens / elapsed_s / model_used<br/>user_id / agent_name"]
+        AP["approvals<br/>permission_gate 决策"]
+        ASr["agent_store<br/>绑定 / 来源"]
+    end
+    src --> AGG["platform 聚合<br/>按 agent_id"]
+    AGG --> P["统计面板"]
+    P -->|下钻| D["按 用户 / channel / 模型 / 时间 切片<br/>含 per-user token & 频率排行"]
+    P -->|对比| C["多 agent 横向对比"]
+    P -->|导出/定时| R["CSV / 图片 / 邮件报告"]
+    D -->|用户 → 请求列表 → 单请求| RT["请求级全链路<br/>LLM轮 / 工具入出参 / 审批 / 路由 / memory / sub_agent"]
+    RT -.需 request_id 贯穿.-> NEED["agent-runtime / observability 发射"]
+```
+
+### 资源监控与告警（v1.0）
+
+> 面向运维的**资源监控 + 阈值告警**：实时看各层资源水位、留历史曲线、配阈值规则、命中后多通道发告警。借鉴 Grafana / Netdata / Datadog 的"指标面板 + 告警规则 + 告警中心"三件套，但**全自托管、零云依赖、数据不出内网**（采集与存储均在内网，遵守数据主权原则）。
+>
+> **与 observability 的边界**：[observability](./observability.md) 负责 agent 运行的 trace / 日志 / 业务统计；本模块负责**基础设施与进程资源**的监控与告警。告警通知此前由 observability 划给外部系统，**v1.0 起平台内置轻量告警**（仍可经 Webhook 外发对接外部系统）。应用层指标（API 错误率 / 延迟 / 队列积压 / 活跃 session）复用「系统健康仪表盘」并接入同一套告警规则。
+
+- [ ] **四层监控目标**：
+  - **主机资源**：宿主机 CPU、内存、磁盘（用量 / inode）、负载、网络 IO
+  - **fleetent 进程 + sandbox 容器**：进程级 CPU / 内存 / 文件句柄、活跃 sandbox 容器数、容器 OOM / 超时被杀次数
+  - **依赖基础设施**：自托管 PostgreSQL / Redis / Qdrant / RabbitMQ 的存活、连接数、内存 / 磁盘占用、队列积压
+  - **应用层指标**：API 错误率 / 延迟、permission_gate 待审批积压、活跃 session、定时任务执行（复用「系统健康仪表盘」数据）
+
+- [ ] **内置轻量采集**：平台自带轻量采集器周期性读取上述指标，**无外部依赖、全部在内网**；采集间隔与指标留存期可配置；采集器自身故障时在 UI 标"采集中断"并告警，不静默丢数
+
+- [ ] **实时仪表盘与历史曲线**：每层目标一组指标卡片，实时水位 + 可选时间范围（小时 / 天 / 周）的历史曲线；支持多指标叠加对比、按宿主机 / 容器 / 服务实例筛选
+
+- [ ] **告警规则管理**：admin 可对任一指标设规则——阈值（如 CPU > 85%）、**持续时间**（持续 N 分钟才触发，避免抖动）、级别（warning / critical）、生效时段；规则可启用 / 禁用 / 复制；支持静态阈值，可选同比 / 环比突增规则
+
+- [ ] **多通道告警通知**：每条规则可选一个或多个通道——**邮件**、**IM 推送**（复用 im-gateway 向 Slack / Telegram / WhatsApp 的 admin 推送）、**Webhook**（POST 到外部告警 / 值班系统）、**站内告警中心 + 健康仪表盘顶部横幅**；通道发送失败有重试与失败记录
+
+- [ ] **告警降噪**：同一规则连续命中**去重 / 聚合**为一条活跃告警（不刷屏）；告警风暴时按目标 / 级别**分组**；支持**抑制规则**（如主机宕机时抑制其上所有容器的次生告警）
+
+- [ ] **告警生命周期**：每条告警有状态机——`触发(firing) → 通知 → 确认(ack) → 恢复(resolved)`；admin 可在告警中心**确认 / 静默 / 标注处理人**；指标回落到阈值内自动转 resolved 并通知；可选**升级（escalation）**：critical 告警在 N 分钟内未 ack 则升级到更高通道 / 更多接收人
+
+- [ ] **维护窗静默**：admin 可设维护窗口（针对某目标或全局），窗口内命中的告警只记录不通知，避免计划内运维触发噪声
+
+- [ ] **告警中心与历史**：检索全部历史告警，按目标 / 级别 / 状态 / 时间筛选；每条告警关联触发时的指标快照与处理记录；告警规则的增删改、ack / 静默动作写审计
+
+- [ ] **资源监控权限**：viewer 可浏览监控仪表盘与告警历史（只读）；新建 / 改 / 删告警规则、ack / 静默告警、配置通道仅 admin
+
+```mermaid
+flowchart LR
+    subgraph targets["四层监控目标"]
+        H["主机<br/>CPU/内存/磁盘/负载"]
+        P["进程 + sandbox 容器<br/>CPU/内存/OOM"]
+        I["依赖基础设施<br/>PG/Redis/Qdrant/RabbitMQ"]
+        A["应用层<br/>错误率/延迟/积压"]
+    end
+    targets --> COL["内置轻量采集器<br/>(内网, 零外部依赖)"]
+    COL --> TS[("时序存储<br/>留存期可配")]
+    TS --> DASH["实时仪表盘 + 历史曲线"]
+    TS --> EVAL["告警规则评估<br/>阈值 + 持续时间"]
+    EVAL -->|命中| ALERT["告警(去重/分组/抑制)"]
+    ALERT --> CH["邮件 / IM / Webhook / 站内+横幅"]
+    ALERT --> AUD["审计 + 告警中心"]
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> firing: 阈值持续命中
+    firing --> notified: 多通道通知
+    notified --> ack: admin 确认
+    notified --> escalated: N 分钟未 ack(critical)
+    escalated --> ack
+    ack --> resolved: 指标回落
+    notified --> resolved: 指标回落
+    firing --> silenced: 维护窗 / 手动静默
+    silenced --> resolved
+    resolved --> [*]
+```
+
+### askit 编排控制台（v1.0）
+
+> **askit**（ai-skills-toolkit）是 spec 驱动的编译器：读 agent YAML spec 与 skill Markdown，编译成各运行平台的配置产物，并提供运行时配置回流、定时任务、依赖、环境诊断等一整套命令。本模块把 askit 的命令面收敛为后台一个**按系列分类的编排控制台**——admin 在 UI 里按系列触发操作、看实时日志与结果、走审批与审计，**无需登录服务器敲命令**。
+>
+> **定位（v1.0 集成模型 = 方案 a+b 混合，已定）**：fleetent 同时扮演两个角色——(1) **跨 runtime 舰队的中央控制面**：用 askit 编排 openclaw / claude / codex / hermes 等**外部平台项目**；(2) **askit 的受管 target**：fleetent **自身**的 agent / skill 也可以 spec-as-code 化，由 askit `deploy --target fleetent` 编译写入本平台的 agent_store / skills，享受版本化、跨环境晋升与覆盖回流。两个角色共用同一个控制台。
+>
+> **与 DB-first 管理的关系（关键）**：fleetent 的「Agent 管理」「Skill 管理」是 **DB-first 即时管理**，askit 是 **spec-first 编译管理**，二者通过下文「fleetent 自管理：双层来源 + 覆盖回流」模型调和，不构成双源冲突。
+>
+> **职责边界**：platform 只提供**控制面**（触发、参数表单、日志流、结果展示、权限与审计）；askit 的编译 / 校验 / 部署 / 覆盖回流 / 迁移等**实际语义与产物正确性归 ai-skills-toolkit 外部工具域**，本模块不重复定义，仅以系列为单位编排调用。控制台对每个系列只暴露该系列命令的可观察行为。
+
+- [ ] **fleetent 自管理：双层来源 + 覆盖回流**：每个 fleetent agent / skill 有一个**来源归属**，解决 spec 与 DB 谁说了算：
+  - **受管（spec-owned）**：源是 git 里的 YAML spec / SKILL.md，经 askit `deploy --target fleetent` 编译写入 agent_store / skills；用于生产、需版本化与跨环境晋升的对象。列表打「受管」徽章
+  - **临管（ad-hoc / DB-only）**：直接在「Agent 管理」「Skill 管理」UI 即时创建，只活在 DB / 文件、git 不追踪；用于快速实验。列表打「临管」徽章
+  - **受管对象被 UI 改动 → 视为运行时覆盖**：UI 仍可应急改受管对象，但改动经 `override sync` 捕获为 override，列表标 **drift**；admin 在「覆盖回流」系列以 diff 审阅后 `promote` 回流到 spec 开 PR（转正为正式来源）或 `discard`（下次 deploy 被 spec 覆盖还原）
+  - **受管对象的不可变字段**：标为 immutable 的字段（对齐 askit 的 IMMUTABLE_FILES，如 identity）UI 改了也会在下次 deploy 被 spec 还原，UI 上给出明确提示
+  - **临管转受管**：对临管对象执行 `decompile` 反编译为 spec、纳入 git，之后即变受管，进入版本化轨道
+  - 依赖前提：ai-skills-toolkit 需新增 **fleetent target**（renderer + deployer，把 spec 编译进 SQLite agent_store 与 skills/ 目录，而非纯文件），属外部工具域工作，见「待决问题」
+
+```mermaid
+flowchart LR
+    SPEC["git: YAML spec / SKILL.md<br/>(受管对象的源)"] -->|askit deploy --target fleetent| DB["agent_store / skills<br/>(运行态)"]
+    UI["Agent / Skill 管理 UI"] -->|即时创建| ADHOC["临管对象<br/>(DB-only)"]
+    UI -->|应急改受管对象| DRIFT["override<br/>(标 drift)"]
+    DRIFT -->|override sync + review| DEC{"admin 决策"}
+    DEC -->|promote 开 PR| SPEC
+    DEC -->|discard| DB
+    ADHOC -->|decompile 转正| SPEC
+    DB -.下次 deploy.-> RESTORE["immutable 字段被 spec 还原"]
+```
+
+按系列分类管理（每个系列在 UI 中为一个分组卡片，列出该系列的可触发操作、上次执行状态与耗时）：
+
+- [ ] **① 作者 / 脚手架系列（Authoring）**：`init-repo`（新建 agent/skill 项目）、`new-agent`（从模板建 agent spec）、`new-skill`（建 skill 骨架）、`init-from-excel`（从 Excel 批量初始化）；UI 以表单收集参数，生成的 spec 落到工作区供后续系列消费
+
+- [ ] **② 构建与校验系列（Build & Validate）**：`build`（从 spec 编译所有 agent，可选 `--targets`）、`lint`（校验 spec / skill）、`check`（build 后比对产物有无 drift）、`audit`（skill 目录安全预检）、`catalog export`（导出 catalog.json）；作为发布前的 CI 闸门，UI 展示每次运行的通过 / 失败、drift 文件清单与 audit 命中项
+
+- [ ] **③ 部署系列（Deploy）**：`deploy --target {fleetent|openclaw|claude|codex|hermes}`（部署到目标平台，含 **fleetent 自身**——把受管 spec 编译进本平台 agent_store / skills）、`provision`（为 MCP channel + agent account 跑 OAuth 等配置流程）；UI 提供目标平台选择、`--dry-run` 预演开关，部署前强制先过②的 check 绿灯（可配置为硬门槛）；`deploy --target fleetent` 不覆盖临管对象、对受管对象的未回流 drift 给出冲突提示
+
+- [ ] **④ 依赖系列（Skill Deps）**：`install`（按 project.yaml 解析并安装 skill 依赖、写 skills.lock）；UI 展示已锁定版本与待更新依赖
+
+- [ ] **⑤ 运行时覆盖回流系列（Override Flow）**：`override sync`（捕获运行时改动为 override 文件）、`override review`（逐条审阅 pending override，决定 Promote / Discard / Skip）、`override promote`（回流到 spec 并开 PR，支持跨环境 `--base`）、`override discard`（丢弃）、`override cleanup`（清理过期 override）、`decompile`（workspace 文件反编译回 spec）；UI 以 diff 视图呈现每条 override，P/D/S 决策与 promote 生成的 PR 链接一屏可见——这是与平台「Skill 提案审批」体验对齐的第二个审阅入口
+
+- [ ] **⑥ 定时任务系列（Cron）**：`cron list`（离线列出声明的 cron）、`cron diff` / `cron diff-hermes`（声明态 vs 已安装态对比）、`cron install` / `cron install-hermes`（安装到 OpenClaw / Hermes）、`cron remove`（移除未声明任务）；UI 展示声明态与运行态的差异高亮，安装 / 移除走二次确认
+
+- [ ] **⑦ 环境与连接器系列（Env & MCP）**：`doctor`（前置依赖检查）、`env doctor`（运行时 + host 环境诊断）、`env-sync`（同步 agent 的 .env 变量，支持 `--agent` / `--all` / 跨平台 `--from`）、`mcp doctor`（MCP 环境健康检查）、`sync allowlist`（把外部数据同步进 .env allowlist）；UI 把诊断结论渲染为红 / 黄 / 绿清单，敏感变量值脱敏展示
+
+- [ ] **⑧ 迁移系列（Migrations）**：`migrate-openclaw-overrides`、`migrate-shared-identity`、`migrate-env`（重命名废弃 env 前缀）等一次性迁移；均为高危批量改写，UI 默认 `--dry-run` 预演、展示将变更的文件清单，确认后才落盘
+
+- [ ] **运行模型、日志与审计**：每次系列操作作为一个**任务**异步执行，UI 实时流式输出 askit 的 stdout/stderr 并保留历史；操作的发起人、系列、命令、参数、退出码、产物 / PR 链接全部写审计；同一工作区的写操作（build/deploy/override promote/migrate）串行排队，避免并发踩踏
+
+- [ ] **askit 控制台权限矩阵**：只读诊断与列表 viewer 可看；触发写操作仅 admin；部署 / 迁移 / promote 等高危系列要求二次确认
+
+| 系列 | admin | viewer | 说明 |
+|------|:-----:|:------:|------|
+| ① 作者 / 脚手架 | ✅ | ❌ | 生成 spec 骨架 |
+| ② 构建与校验 | ✅ | ✅（只读跑 lint/check） | 发布前闸门 |
+| ③ 部署 | ✅ | ❌ | 需先过 check，二次确认 |
+| ④ 依赖 | ✅ | ❌ | 写 skills.lock |
+| ⑤ 覆盖回流 | ✅ | ✅（只读看 diff） | promote 开 PR，二次确认 |
+| ⑥ 定时任务 | ✅ | ✅（只读 diff/list） | install/remove 二次确认 |
+| ⑦ 环境与连接器 | ✅ | ✅（只读诊断） | 变量值脱敏 |
+| ⑧ 迁移 | ✅ | ❌ | 默认 dry-run，高危二次确认 |
+
+```mermaid
+flowchart LR
+    subgraph console["askit 编排控制台（platform 提供 UI）"]
+        S1["① 作者/脚手架<br/>init-repo / new-agent / new-skill"]
+        S2["② 构建与校验<br/>build / lint / check / audit / catalog"]
+        S3["③ 部署<br/>deploy / provision"]
+        S4["④ 依赖<br/>install"]
+        S5["⑤ 覆盖回流<br/>sync / review / promote / discard / cleanup / decompile"]
+        S6["⑥ 定时任务<br/>cron install / diff / remove / list"]
+        S7["⑦ 环境与连接器<br/>doctor / env-sync / mcp doctor / sync allowlist"]
+        S8["⑧ 迁移<br/>migrate-*"]
+    end
+    console -->|按系列触发| ASKIT["askit CLI<br/>(ai-skills-toolkit 外部工具域)"]
+    ASKIT -->|stdout/stderr 流 + 退出码 + 产物| console
+    ASKIT -.编译/部署产物.-> OUT["目标平台配置<br/>openclaw / claude / codex / hermes"]
+    console -.写审计.-> AUD["审计日志"]
+```
 
 ## 验收标准
 
@@ -367,3 +688,318 @@ flowchart TD
 - Given：admin 角色已登录，目标 IM 用户当前 allowed=1
 - When：在 UI 点击该用户的"加黑"并填写原因
 - Then：该 IM 账号被封禁，下次发消息收到拒绝提示；操作进入审计日志
+
+**场景 36：admin 动态创建 Agent（v1.0）**
+- Given：admin 已登录，系统当前无名为 "ops-bot" 的 Agent
+- When：在 Agent 管理页填写名称 "ops-bot"、system_prompt、allowed_tools（如 `read_*`）并保存
+- Then：Agent 即时创建并处于启用状态，无需重启服务即出现在列表中；随后将其绑定到某 channel 后，该 channel 的消息可路由到 "ops-bot"
+
+**场景 37：创建重名 Agent 被拒（v1.0）**
+- Given：已存在名为 "ops-bot" 的 Agent
+- When：admin 再次创建名为 "ops-bot" 的 Agent
+- Then：操作被拒并提示名称已存在，请求不落库
+
+**场景 38：编辑 Agent 对新会话生效（v1.0）**
+- Given：Agent "ops-bot" 的 allowed_tools 原为 `[read_*]`
+- When：admin 在详情页改为 `[read_*, write_file]` 并保存
+- Then：保存后新发起的会话中 "ops-bot" 可调用 write_file；编辑动作写审计
+
+**场景 39：禁用的 Agent 拒绝新会话（v1.0）**
+- Given：Agent "ops-bot" 已被 admin 禁用
+- When：一条消息路由到 "ops-bot"
+- Then：请求被拒并提示"该 Agent 已停用"，不进入 agent_loop；重新启用后同样的请求恢复正常
+
+**场景 40：删除仍被绑定的 Agent 受阻（v1.0）**
+- Given：Agent "ops-bot" 仍被某 channel 绑定（或被设为默认 Agent）
+- When：admin 点击删除
+- Then：删除被阻止，UI 列出占用该 Agent 的用户 / channel / 默认绑定，提示先解绑或迁移；请求不落库
+
+**场景 41：归档（软删除）后停止路由且可恢复（v1.0）**
+- Given：Agent "ops-bot" 已无任何绑定且非默认
+- When：admin 删除并二次确认
+- Then：Agent 标记为 archived、从可路由列表移除、历史 trace 仍可查；在保留期内点击"恢复"可重新启用；删除与恢复均写审计
+
+**场景 42：克隆 Agent 不带绑定（v1.0）**
+- Given：Agent "ops-bot" 已绑定若干 channel
+- When：admin 对其执行"克隆"并命名 "ops-bot-staging"
+- Then：新 Agent 复制了 system_prompt / allowed_tools / 模型配置，但不继承任何 user / channel 绑定，且默认处于启用状态
+
+**场景 43：从模板创建 Agent（v1.0）**
+- Given：admin 选择内置"只读问答"模板新建 Agent
+- When：进入创建表单
+- Then：allowed_tools 与 system_prompt 已按模板预填，admin 微调名称后即可保存创建
+
+**场景 44：按 Agent 配置模型生效（v1.0）**
+- Given：admin 为 Agent "ops-bot" 配置了特定 task_type 与单 agent 成本上限
+- When：通过 "ops-bot" 发起会话
+- Then：该会话按所配 task_type 路由模型；达到该 Agent 成本上限时按 agent-runtime 的预算策略停止（运行语义以 agent-runtime 为准）
+
+**场景 45：按 Agent 观测视图（v1.0）**
+- Given：Agent "ops-bot" 过去 24 小时有多次调用
+- When：admin 打开 "ops-bot" 详情的观测页
+- Then：一屏看到该 Agent 的调用次数、token / 成本用量、错误率、平均时延与最近会话列表，可点击下钻到单会话 trace
+
+**场景 46：viewer 不可管理 Agent（v1.0）**
+- Given：viewer 角色已登录并打开 Agent 管理页
+- When：尝试创建 / 编辑 / 启停 / 删除 Agent
+- Then：相关按钮不可见或返回 403，请求不落库；viewer 仅能浏览列表与观测视图
+
+**场景 47：admin 上传 Skill 即时生效（v1.0）**
+- Given：admin 已登录，上传一个 frontmatter 合法、安全审计通过的 Skill
+- When：保存上传
+- Then：Skill 通过校验与审计后上线并触发热加载，出现在列表中且对后续请求可匹配，无需重启服务
+
+**场景 48：上传被判注入的 Skill 进隔离不上线（v1.0）**
+- Given：admin 上传的 Skill 内容命中安全审计「拒绝加载」级规则
+- When：保存上传
+- Then：Skill 不上线、进入隔离区，UI 提示命中的注入模式；该 Skill 不参与任何匹配注入，事件写审计
+
+**场景 49：可疑 Skill 上线但被打标（v1.0）**
+- Given：admin 上传的 Skill 命中「可疑」级规则
+- When：保存上传
+- Then：Skill 上线并可匹配，但在列表标注"可疑"，详情页展示命中的规则供复核
+
+**场景 50：全局禁用 Skill 后不再注入（v1.0）**
+- Given：Skill "crm-ops" 当前全局启用
+- When：admin 在 Skill 管理页将其全局禁用
+- Then：后续任何请求都不再匹配注入该 Skill；禁用动作写审计；重新启用后恢复匹配
+
+**场景 51：按 Agent 启停 Skill（v1.0）**
+- Given：Skill "crm-ops" 全局启用，Agent "support-bot" 已对其停用
+- When：通过 "support-bot" 发起会触发该 Skill 的请求
+- Then："support-bot" 不注入 "crm-ops"，而其他启用了该 Skill 的 Agent 仍正常注入
+
+**场景 52：删除仍被 Agent 启用的 Skill 受阻（v1.0）**
+- Given：Skill "crm-ops" 仍被至少一个 Agent 显式启用
+- When：admin 点击删除
+- Then：删除被阻止，UI 列出启用它的 Agent，提示先停用；请求不落库
+
+**场景 53：归档 Skill 后停止注入且可恢复（v1.0）**
+- Given：Skill "crm-ops" 已无任何 Agent 启用
+- When：admin 删除并二次确认
+- Then：Skill 标记归档、不再参与匹配注入、文件快照与历史 trace 保留；保留期内可恢复
+
+**场景 54：审批 AI 生成的 Skill 提案（v1.0）**
+- Given：prod 环境，reflection 产出一条 update 提案（状态 pending）汇总到提案收件箱
+- When：admin 打开该提案，查看理由与变更 diff 后点击 approve
+- Then：reflection 应用该变更使 Skill 更新生效，提案状态置为已批准；审批动作写审计
+
+**场景 55：驳回 Skill 提案不改动 Skill（v1.0）**
+- Given：提案收件箱有一条 pending 的 delete 提案
+- When：admin 点击 reject
+- Then：提案关闭、对应 Skill 不被删除、维持原状；驳回动作写审计
+
+**场景 56：触发热加载（v1.0）**
+- Given：admin 已在 skills/ 目录新增 / 修改了文件
+- When：在 Skill 管理页点击"重新扫描"
+- Then：索引重建后新 / 改 Skill 对后续请求生效；重扫描期间旧索引继续服务，扫描失败时保留旧索引并在 UI 告警
+
+**场景 57：viewer 不可管理 Skill（v1.0）**
+- Given：viewer 角色已登录并打开 Skill 管理页
+- When：尝试上传 / 编辑 / 启停 / 归档 Skill 或审批提案
+- Then：相关按钮不可见或返回 403，请求不落库；viewer 仅能浏览列表、审计结论与观测视图
+
+**场景 58：askit 控制台按系列分组展示（v1.0）**
+- Given：admin 打开 askit 编排控制台
+- When：页面加载
+- Then：八个系列各为一张分组卡片（作者 / 构建校验 / 部署 / 依赖 / 覆盖回流 / 定时任务 / 环境连接器 / 迁移），每张卡片列出该系列可触发的操作、上次执行状态与耗时
+
+**场景 59：触发 build 并看实时日志（v1.0）**
+- Given：admin 在「构建与校验」系列点击 `build`
+- When：任务异步执行
+- Then：UI 实时流式输出 askit 的 stdout/stderr，结束时展示退出码与（若失败）错误摘要；该次执行写入审计与历史
+
+**场景 60：check 不绿时阻止部署（v1.0）**
+- Given：硬门槛已开启，最近一次 `check` 检出 drift（未通过）
+- When：admin 在「部署」系列点击 `deploy`
+- Then：部署被阻止并提示先通过 check；通过 check 后再次部署可正常发起
+
+**场景 61：部署支持 dry-run 预演（v1.0）**
+- Given：admin 在「部署」系列选目标平台并勾选 `--dry-run`
+- When：执行
+- Then：仅输出将写入的文件计划、不落盘任何产物；取消勾选后实际部署需二次确认
+
+**场景 62：覆盖回流 diff 审阅与 P/D/S（v1.0）**
+- Given：运行时产生了若干 override，admin 在「覆盖回流」系列点 `review`
+- When：逐条查看
+- Then：每条 override 以 diff 视图呈现，admin 可选 Promote / Discard / Skip；选择 Promote 的项经 `promote` 生成 PR，PR 链接在 UI 可见，决策写审计
+
+**场景 63：cron 声明态与运行态差异（v1.0）**
+- Given：声明的 cron 与已安装的不一致
+- When：admin 在「定时任务」系列点 `diff`
+- Then：UI 高亮新增 / 缺失 / 变更的任务；执行 `install` / `remove` 前要求二次确认
+
+**场景 64：环境诊断脱敏展示（v1.0）**
+- Given：admin 在「环境与连接器」系列点 `env doctor`
+- When：诊断完成
+- Then：结论渲染为红 / 黄 / 绿清单，涉及的敏感变量值被脱敏，不在 UI 或日志中明文显示
+
+**场景 65：迁移默认 dry-run（v1.0）**
+- Given：admin 在「迁移」系列点某迁移命令
+- When：首次执行
+- Then：默认以 dry-run 运行，展示将变更的文件清单且不落盘；admin 二次确认后才真正写入，写入动作记审计
+
+**场景 66：viewer 在 askit 控制台只读（v1.0）**
+- Given：viewer 已登录 askit 编排控制台
+- When：查看各系列
+- Then：可触发只读类操作（如 lint / check / diff / 各类 doctor）并查看日志与历史，但作者 / 部署 / 依赖 / 迁移等写操作按钮不可见或返回 403
+
+**场景 67：同工作区写操作串行（v1.0）**
+- Given：一个 `build` 任务正在运行
+- When：admin 又触发同工作区的 `deploy`
+- Then：后触发的写操作排队等待前者完成，不并发执行；UI 显示其排队状态
+
+**场景 68：deploy --target fleetent 编译受管对象（v1.0）**
+- Given：git spec 中定义了 agent "ops-bot"，fleetent 的 agent_store 中尚无该 Agent
+- When：admin 在控制台执行 `deploy --target fleetent`
+- Then："ops-bot" 被写入 agent_store 并在「Agent 管理」列表出现，标「受管」徽章；随后即可被路由调用
+
+**场景 69：临管对象不被 deploy 覆盖（v1.0）**
+- Given：admin 在「Agent 管理」UI 即时创建了临管 Agent "tmp-bot"
+- When：执行 `deploy --target fleetent`
+- Then："tmp-bot" 不受影响（spec 不含它，deploy 不删不改临管对象）；仅受管对象按 spec 同步
+
+**场景 70：UI 改受管对象产生 drift 并可回流（v1.0）**
+- Given：受管 Agent "ops-bot" 已部署
+- When：admin 在 UI 改了它的 system_prompt
+- Then：列表对 "ops-bot" 标 drift；admin 在「覆盖回流」系列经 `override sync` 看到该 diff，`promote` 后回流到 spec 并生成 PR，drift 标记清除
+
+**场景 71：丢弃 drift 后被 spec 还原（v1.0）**
+- Given：受管 Agent "ops-bot" 有一处未回流的 UI 改动（drift）
+- When：admin 对该 override 选择 `discard`，随后执行 `deploy --target fleetent`
+- Then：该 UI 改动被 spec 内容覆盖还原，drift 清除
+
+**场景 72：临管 Agent 经 decompile 转正（v1.0）**
+- Given：临管 Agent "tmp-bot" 验证可用，需纳入版本化
+- When：admin 对其执行 `decompile`
+- Then：生成对应 spec 并纳入 git，"tmp-bot" 徽章变为「受管」，此后由 spec 管理
+
+**场景 73：受管对象 immutable 字段被还原（v1.0）**
+- Given："ops-bot" 的某字段被标为 immutable（如 identity）
+- When：admin 在 UI 改该字段并随后 `deploy --target fleetent`
+- Then：该字段被 spec 值强制还原，UI 在改动时已提示"该字段受 spec 保护，将于部署时还原"
+
+**场景 74：统计面板按 agent 出核心指标（v1.0）**
+- Given："ops-bot" 在所选时间范围内有运行记录
+- When：在统计面板选中 "ops-bot"
+- Then：展示其调用次数、活跃用户 / channel / 会话数、token 用量、P50 / P95 时延、按天趋势等现有字段可出的指标
+
+**场景 75：多 agent 横向对比（v1.0）**
+- Given：选中 "ops-bot" 与 "support-bot"
+- When：切到对比视图
+- Then：同一指标（如 token 用量、P95 时延）两个 agent 并排展示，可一眼比较
+
+**场景 76：per-user 用量与频率排行（v1.0）**
+- Given："ops-bot" 被多个用户调用
+- When：在 "ops-bot" 下打开 per-user 下钻
+- Then：列出各用户的 token 用量、调用频率、最近活跃并可排序；切到"按用户"反向视图时，可看某用户在所有 agent 上的用量与频率汇总
+
+**场景 77：指标按时间 / channel 下钻（v1.0）**
+- Given："ops-bot" 的 token 用量卡片
+- When：点击下钻并选"按 channel"
+- Then：该指标按 channel 拆分展示；再叠加时间范围筛选时数据随之收敛
+
+**场景 78：allowed_tools 覆盖率提示收窄（v1.0）**
+- Given："ops-bot" 的 allowed_tools 含 `write_file`，但所选周期内从未调用过它
+- When：查看「工具与治理」组
+- Then：`write_file` 被标为"已授权未使用"，提示可考虑从白名单移除以收窄权限
+
+**场景 79：依赖字段未接入时占位（v1.0）**
+- Given：成本与终止原因字段尚未接入（budget / 终止码未上线）
+- When：打开「① 用量与成本」「② 性能与可靠性」
+- Then：成本、终止原因分布等 ⏳ 指标显示"待数据接入"占位而非报错；其余 ✅ 指标正常展示；相关字段上线后这些指标自动点亮
+
+**场景 80：审批统计可见（v1.0）**
+- Given："ops-bot" 在周期内触发过若干次 permission_gate
+- When：查看「工具与治理」组
+- Then：展示该 agent 的审批触发数与通过 / 拒绝 / 超时率
+
+**场景 81：导出与定时报告（v1.0）**
+- Given：admin 打开某 agent 的统计视图
+- When：点击导出并另配置每周邮件报告
+- Then：当前视图导出为 CSV / 图片；按所配周期向管理员邮箱推送该 agent 的统计摘要
+
+**场景 82：从用户下钻到其请求列表（v1.0）**
+- Given：在 "ops-bot" 的 per-user 视图选中用户 Alice
+- When：点击 Alice
+- Then：展示 Alice 在该 agent（或全部 agent）的请求列表，可按时间 / channel 筛选，每条显示时间、入参摘要、token、耗时、结果状态
+
+**场景 83：单请求全链路事件流（v1.0）**
+- Given：选中 Alice 的某一条请求
+- When：打开其请求级全链路视图
+- Then：按时间序展开事件流——用户输入、各轮 LLM 调用（模型 / token / 耗时 / fallback）、每次工具调用入参与出参、permission_gate 决策、memory 命中、压缩事件、最终回复；各节点可展开折叠并复制原始 JSON
+
+**场景 84：sub_agent 子链路就地展开（v1.0）**
+- Given：该请求过程中派生了 sub_agent
+- When：在链路中点击 sub_agent 节点
+- Then：经 `parent_session_id` 关联，就地展开该子 agent 的完整子链路，与父链路同构
+
+**场景 85：缺 request_id 时按会话退化（v1.0）**
+- Given：某次运行尚未带 request_id（如旧 HTTP trace）
+- When：尝试做请求级链路
+- Then：视图退化到可用的关联键（session_id / ts + user_id）尽力聚合，并提示"该请求缺少完整关联键，链路可能不完整"，不报错
+
+**场景 86：主机资源实时与历史（v1.0）**
+- Given：平台运行中，内置采集器正常工作
+- When：admin 打开资源监控仪表盘
+- Then：实时看到主机 CPU / 内存 / 磁盘 / 负载水位，并可切到小时 / 天 / 周的历史曲线
+
+**场景 87：sandbox 容器 OOM 可见（v1.0）**
+- Given：某次 sandbox 代码执行因内存超限被 OOM kill
+- When：查看「进程 + sandbox 容器」层
+- Then：活跃容器数与 OOM / 超时被杀计数更新，该事件可在监控中观察到
+
+**场景 88：依赖基础设施存活监控（v1.0）**
+- Given：自托管 Redis 实例停止响应
+- When：采集器下一轮采集
+- Then：监控标记 Redis 不可用，若已配存活告警规则则触发告警
+
+**场景 89：设阈值 + 持续时间触发告警（v1.0）**
+- Given：admin 配置规则"主机 CPU > 85% 持续 5 分钟，级别 warning，通道=邮件+站内"
+- When：CPU 持续 6 分钟超过 85%
+- Then：触发一条 warning 告警，邮件与站内告警中心各收到通知；CPU 仅瞬时尖峰不持续时不触发
+
+**场景 90：critical 告警未确认自动升级（v1.0）**
+- Given：一条 critical 告警已通知但 N 分钟内无人 ack，且配置了升级
+- When：超过升级等待时间
+- Then：按升级策略发到更高优先级通道 / 更多接收人；升级动作写审计
+
+**场景 91：告警确认与恢复（v1.0）**
+- Given：一条 firing 告警
+- When：admin 在告警中心点击确认（ack）并标注处理人，随后指标回落到阈值内
+- Then：告警状态转 ack → resolved，并发出恢复通知；全过程记入告警历史
+
+**场景 92：告警降噪与抑制（v1.0）**
+- Given：某主机宕机，其上 10 个容器同时不可达
+- When：告警评估
+- Then：同规则重复命中被去重为一条活跃告警；主机宕机告警抑制其上容器的次生告警，不刷屏
+
+**场景 93：维护窗静默（v1.0）**
+- Given：admin 为某主机设了今晚 22:00–23:00 维护窗
+- When：窗口内该主机指标命中告警规则
+- Then：告警只记录不发通知；窗口结束后恢复正常通知
+
+**场景 94：Webhook 外发对接外部系统（v1.0）**
+- Given：某规则配置了 Webhook 通道指向外部值班系统
+- When：该规则触发
+- Then：平台 POST 告警内容到该 Webhook；发送失败有重试与失败记录
+
+**场景 95：viewer 不可改告警规则（v1.0）**
+- Given：viewer 已登录资源监控页
+- When：尝试新建 / 修改 / 删除告警规则或 ack 告警
+- Then：相关按钮不可见或返回 403；viewer 仅可浏览仪表盘与告警历史
+
+**场景 96：采集全程在内网（v1.0）**
+- Given：v1.0 部署在隔离内网
+- When：资源监控与告警运行
+- Then：指标采集与存储均在内网完成，不依赖任何云托管服务；仅当 admin 显式配置 Webhook / 邮件外发时才产生出网流量
+
+## 待决问题
+
+- [x] **fleetent ↔ askit 集成模型（已定：方案 a+b 混合）**：fleetent 同时是 askit 的**舰队控制面**（编排 openclaw / claude / codex / hermes 等外部平台）**和受管 target**（自身 agent / skill 可 spec-as-code 化，由 `deploy --target fleetent` 编译进 agent_store / skills）。spec 与 DB 的双源问题用「双层来源 + 覆盖回流」模型解决：受管对象以 spec 为源、临管对象以 DB 为源，受管对象的 UI 改动经 askit override sync/promote/discard 回流，临管对象经 decompile 转正。放弃纯 (c)「内嵌 askit 子集」（重复造轮子、与上游分叉）；其中 `lint` / `audit` / `check`(drift) 无状态校验器是否内联为发布前闸门，保留为 v1.1 可选优化。
+- [ ] **askit 新增 fleetent target（前置依赖）**：ai-skills-toolkit 需实现 fleetent renderer + deployer，把 spec 编译进 **SQLite agent_store 与 skills/ 目录**（不同于现有平台的纯文件产物）；并定义 fleetent 的 MUTABLE / IMMUTABLE 字段集（哪些 UI 改动可回流、哪些 deploy 时强制还原）。属外部工具域工作。（负责人：待认领）
+- [ ] **askit 调用形态**：控制台以子进程调用 askit CLI，还是依赖 askit 暴露的库 API / 服务？涉及在 on-prem 容器内的可执行分发与版本锁定（倾向子进程 + 镜像内固定 askit 版本）。（负责人：待认领）
+- [ ] **工作区与多环境**：控制台操作的 spec 工作区如何与 askit 的 dev/test/pre/prod 分支模型（override 环境检测）对齐？跨环境 promote 的权限边界；fleetent 运行库（DB）与 spec 仓库的同机 / 跨机部署关系。（负责人：待认领）
+- [ ] **来源切换的边界**：临管 agent 与受管 agent 重名如何处理？decompile 转正后该 agent 的历史 trace / 绑定如何无缝衔接？（负责人：待认领）
+- [ ] **请求级链路的关联 ID（request_id）**：请求级全链路追踪依赖一个稳定的 request_id 贯穿主循环与所有子事件（工具调用、permission_gate、模型路由 / fallback、memory、压缩、sub_agent），并在 HTTP 路径补 session_id。需在 agent-runtime / observability 侧定义：request_id 的生成时机与格式、子事件如何统一携带它、是否回填历史 trace。本面板按 request_id 渲染，不负责发射。（负责人：待认领）
+- [ ] **成本统计的模型单价表**：成本指标 = token × 模型单价，这张单价表存哪、由谁维护、如何随模型路由配置同步？（负责人：待认领）
