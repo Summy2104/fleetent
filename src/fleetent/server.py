@@ -16,14 +16,14 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from fleetent import mcp_client
+from fleetent import api_key_store, mcp_client, quota, user_admin_api, user_store
+from fleetent.auth import seed_builtin_admin
 from fleetent.cron_scheduler import CronScheduler
 from fleetent.agent_loop import run_stream
 from fleetent.config import Settings
 from fleetent.mcp_client import McpServerConfig
 from fleetent.permission_gate import _default_gate, cleanup_stale_approvals, list_approvals
 from fleetent.skill_registry import scan as scan_skills
-from fleetent.user_store import get_by_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     cleanup_stale_approvals()
     settings = Settings()
 
+    # Seed the built-in admin on first boot; log the one-time initial password.
+    admin_seed = seed_builtin_admin()
+    if admin_seed is not None:
+        admin_user, temp_password = admin_seed
+        logger.warning(
+            "builtin_admin_seeded username=%s initial_password=%s (must change on first login)",
+            admin_user.name,
+            temp_password,
+        )
+
     # Load MCP servers from config/mcp.yaml if present
     if _MCP_YAML_PATH.exists():
         try:
@@ -101,21 +111,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(title="fleetent", lifespan=lifespan)
+app.include_router(user_admin_api.router)
 
 
 class ChatRequest(BaseModel):
     message: str
 
 
-async def _require_auth(authorization: str = Header()) -> str:
-    """Extract user_id from Bearer token. Raises 401 if invalid."""
+async def _authenticate(authorization: str = Header()) -> tuple[user_store.User, dict]:
+    """Resolve a Bearer API key to (User, key_metadata). Raises 401 if invalid/blocked."""
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Bearer token required")
     api_key = authorization.removeprefix("Bearer ").strip()
-    user = get_by_api_key(api_key)
-    if user is None:
+    result = user_store.authenticate(api_key)
+    if result is None:
         raise HTTPException(status_code=401, detail="Invalid API key")
-    return user.id
+    return result
 
 
 @app.get("/health")
@@ -157,11 +168,15 @@ async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # t
 @app.post("/chat")
 async def chat(
     req: ChatRequest,
-    user_id: str = Depends(_require_auth),
+    request: Request,
+    auth_result: tuple[user_store.User, dict] = Depends(_authenticate),
     x_platform: str | None = Header(default=None),
     x_channel_id: str | None = Header(default=None),
 ) -> StreamingResponse:
     from fleetent.im_gateway.normalizer import get_agent_for_context
+
+    user, key_meta = auth_result
+    user_id = user.id
 
     agent = get_agent_for_context(
         platform=x_platform or "",
@@ -171,6 +186,23 @@ async def chat(
     system_prompt = agent.system_prompt if agent else None
     allowed_tools = agent.allowed_tools if agent else None
     agent_name = agent.name if agent else None
+
+    # API-key scope: the key may be restricted to specific agents.
+    if agent_name is not None and not api_key_store.check_scope(key_meta["scope"], agent_name):
+        raise HTTPException(status_code=403, detail="scope does not allow this agent")
+
+    # Usage quota: reject when the user's or global limit is already exhausted.
+    if not quota.check_quota(user_id):
+        raise HTTPException(status_code=429, detail="usage quota exceeded")
+
+    # Record key usage (source IP / UA / call count). Legacy keys have no row id.
+    if key_meta.get("id") is not None:
+        api_key_store.record_usage(
+            key_meta["id"],
+            ip=request.client.host if request.client else None,
+            ua=request.headers.get("user-agent"),
+        )
+    quota.record_usage(user_id, tokens=0)  # token-precise accounting: see follow-up note
 
     async def _stream() -> AsyncGenerator[str, None]:
         try:

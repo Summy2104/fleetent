@@ -25,9 +25,11 @@ def get_or_create(platform: str, platform_user_id: str) -> User:
     user = create_user(name=f"{platform}:{platform_user_id}")
     now = datetime.datetime.now(datetime.UTC).isoformat()
     with _conn() as conn:
+        # v1.0: new IM users are allowed by default; channel admission is handled by the
+        # channel allowlist (see im-channel-allowlist), not per-user approval.
         conn.execute(
             "INSERT OR IGNORE INTO im_users"
-            " (platform, platform_user_id, user_id, allowed, created_at) VALUES (?, ?, ?, 0, ?)",
+            " (platform, platform_user_id, user_id, allowed, created_at) VALUES (?, ?, ?, 1, ?)",
             (platform, platform_user_id, user.id, now),
         )
     return user
@@ -55,6 +57,62 @@ def block_user(im_user_id: int) -> None:
     _init_db()
     with _conn() as conn:
         conn.execute("UPDATE im_users SET allowed = 0 WHERE id = ?", (im_user_id,))
+
+
+def block_im_user(
+    im_user_id: int, reason: str | None = None, actor: str | None = None,
+    batch_id: str | None = None,
+) -> None:
+    """Block a single IM identity (admin workbench). Audited."""
+    from fleetent import audit_log
+
+    _init_db()
+    with _conn() as conn:
+        conn.execute("UPDATE im_users SET allowed = 0 WHERE id = ?", (im_user_id,))
+    audit_log.write_audit(
+        actor, "block_im_user", target_type="im_user", target_id=str(im_user_id),
+        detail={"reason": reason}, batch_id=batch_id,
+    )
+
+
+def restore_im_user(
+    im_user_id: int, reason: str | None = None, actor: str | None = None,
+    batch_id: str | None = None,
+) -> None:
+    """Restore a single IM identity (admin workbench). Audited."""
+    from fleetent import audit_log
+
+    _init_db()
+    with _conn() as conn:
+        conn.execute("UPDATE im_users SET allowed = 1 WHERE id = ?", (im_user_id,))
+    audit_log.write_audit(
+        actor, "restore_im_user", target_type="im_user", target_id=str(im_user_id),
+        detail={"reason": reason}, batch_id=batch_id,
+    )
+
+
+def batch_block_im(im_user_ids: list[int], reason: str, actor: str | None = None) -> str:
+    import secrets
+
+    batch_id = f"batch-{secrets.token_hex(6)}"
+    for im_user_id in im_user_ids:
+        block_im_user(im_user_id, reason=reason, actor=actor, batch_id=batch_id)
+    return batch_id
+
+
+def list_im_identities(user_id: str) -> list[dict]:
+    """All IM identities (across platforms) belonging to one internal User."""
+    _init_db()
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT id, platform, platform_user_id, allowed FROM im_users WHERE user_id = ?"
+            " ORDER BY platform",
+            (user_id,),
+        ).fetchall()
+    return [
+        {"id": r[0], "platform": r[1], "platform_user_id": r[2], "allowed": bool(r[3])}
+        for r in rows
+    ]
 
 
 def list_pending() -> list[dict]:

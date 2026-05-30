@@ -30,8 +30,10 @@ def main() -> None:
     p_approve = sub.add_parser("approve-user", help="Approve an IM user")
     p_approve.add_argument("--im-user-id", required=True, type=int, help="im_users.id")
 
-    p_block = sub.add_parser("block-user", help="Block/revoke an IM user")
+    p_block = sub.add_parser("block-user", help="[DEPRECATED] use the admin UI to block IM users")
     p_block.add_argument("--im-user-id", required=True, type=int, help="im_users.id")
+
+    sub.add_parser("seed-builtin-admin", help="Seed the built-in admin (first run)")
 
     # --- channel agent commands ---
     p_assign_ch = sub.add_parser("assign-channel", help="Bind an agent to a channel")
@@ -117,18 +119,23 @@ def main() -> None:
         print(f"IM user {args.im_user_id} approved.")
 
     elif args.cmd == "block-user":
-        import fleetent.im_user_store as ius
-        ius._init_db()
-        from fleetent.user_store import _conn as conn_fn
-        with conn_fn() as conn:
-            row = conn.execute(
-                "SELECT id FROM im_users WHERE id = ?", (args.im_user_id,)
-            ).fetchone()
-        if not row:
-            print(f"Error: IM user {args.im_user_id} not found.", file=sys.stderr)
-            sys.exit(1)
-        ius.block_user(args.im_user_id)
-        print(f"IM user {args.im_user_id} blocked.")
+        # Deprecated (v1.0): blocking IM users moved to the admin UI/API. This command
+        # no longer changes state; it only prints a deprecation notice.
+        print(
+            "block-user is deprecated; block/restore IM users from the admin UI/API instead.",
+            file=sys.stderr,
+        )
+
+    elif args.cmd == "seed-builtin-admin":
+        from fleetent.auth import seed_builtin_admin
+        result = seed_builtin_admin()
+        if result is None:
+            print("Built-in admin already exists.")
+        else:
+            admin_user, temp_password = result
+            print("Built-in admin created.")
+            print(f"  username:         {admin_user.name}")
+            print(f"  initial_password: {temp_password}  ← change on first login, shown once")
 
     elif args.cmd == "assign-channel":
         from fleetent.agent_store import assign_channel, get_by_name
