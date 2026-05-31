@@ -16,6 +16,15 @@ class ObservabilitySettings(BaseModel):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
 
+class VectorStoreSettings(BaseModel):
+    backend: str = "memory"
+
+
+class EmbeddingSettings(BaseModel):
+    backend: str = "deterministic"
+    dimensions: int = 64
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -33,6 +42,8 @@ class Settings(BaseSettings):
     default_agent_name: str | None = None
     database_url: str = "sqlite:///data/users.db"
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    vector_store: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
 
 
 def configure_logging(settings: Settings) -> None:
