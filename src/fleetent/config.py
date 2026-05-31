@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     provider_cooldown_seconds: int = 60
     log_format: str = "console"
     default_agent_name: str | None = None
+    disabled_skills: list[str] = []
 
 
 def configure_logging(settings: Settings) -> None:

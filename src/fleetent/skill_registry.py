@@ -11,6 +11,12 @@ import yaml
 logger = structlog.get_logger(__name__)
 
 
+# Platform-shipped builtin skills live inside the package so a fresh deployment
+# is non-empty. Module-level path constant (injectable via monkeypatch per the
+# project's no-global-mutable-state rule).
+BUILTIN_SKILLS_DIR = Path(__file__).parent / "builtin_skills"
+
+
 @dataclass
 class SkillEntry:
     """Indexed metadata for a single skill, parsed from SKILL.md frontmatter."""
@@ -21,6 +27,7 @@ class SkillEntry:
     platforms: list[str] = field(default_factory=list)
     version: str | None = None
     enabled_by_default: bool = True
+    builtin: bool = False
 
 
 _index: dict[str, SkillEntry] = {}
@@ -29,11 +36,23 @@ _STOP_WORDS = {"the", "a", "an", "when", "use", "for", "to", "and", "or", "is", 
 
 
 def scan(skills_dir: str | None = None) -> None:
-    """Scan skills directory and build name → SkillEntry index."""
+    """Scan platform builtin and user skills directories, building name → SkillEntry.
+
+    Both the package builtin directory and the user `skills/` directory are
+    traversed with the same frontmatter parsing. Source is recorded on each
+    entry via `builtin`; same-name conflicts (within or across sources) are
+    resolved by `skill-name-conflict-warning` (SK8) path-sort, never by source
+    priority — this change introduces no override rule of its own.
+    """
     if skills_dir is None:
         skills_dir = os.environ.get("FLEETENT_SKILLS_DIR", "skills")
     _index.clear()
-    base = Path(skills_dir)
+    _scan_dir(BUILTIN_SKILLS_DIR, builtin=True)
+    _scan_dir(Path(skills_dir), builtin=False)
+
+
+def _scan_dir(base: Path, *, builtin: bool) -> None:
+    """Index every SKILL.md under base, tagging entries with their source."""
     if not base.is_dir():
         return
     for skill_md in base.rglob("SKILL.md"):
@@ -49,8 +68,9 @@ def scan(skills_dir: str | None = None) -> None:
         path = str(skill_md)
         existing = _index.get(name)
         if existing is not None:
-            # Deterministic selection independent of traversal order: the
-            # SKILL.md whose path string sorts first wins; warn on every loser.
+            # Deterministic selection independent of traversal order and source:
+            # the SKILL.md whose path string sorts first wins; warn on every
+            # loser. (SK8 strategy; not a builtin-vs-user priority rule.)
             kept_path, dropped_path = sorted((existing.path, path))
             logger.warning(
                 "skill_name_conflict",
@@ -67,11 +87,20 @@ def scan(skills_dir: str | None = None) -> None:
             platforms=_as_str_list(frontmatter.get("platforms")),
             version=_as_opt_str(frontmatter.get("version")),
             enabled_by_default=bool(frontmatter.get("enabled_by_default", True)),
+            builtin=builtin,
         )
 
 
-def match(user_input: str) -> str | None:
-    """Return the first skill name whose description keywords appear in user_input."""
+def match(user_input: str, disabled_skills: list[str] | None = None) -> str | None:
+    """Return the first enabled skill whose description keywords appear in user_input.
+
+    A skill is excluded from matching (and not auto-injected) when it is
+    disabled — either `enabled_by_default` is false, or its name is in
+    `disabled_skills`. The exclusion reason is logged so operators can answer
+    "why didn't this skill fire?". `disabled_skills` defaults to the deployment
+    `Settings.disabled_skills` (param > config); `load()` is unaffected.
+    """
+    disabled = _resolve_disabled_skills(disabled_skills)
     lowered = user_input.lower()
     for name, entry in _index.items():
         keywords = {
@@ -79,8 +108,34 @@ def match(user_input: str) -> str | None:
             for w in entry.description.split()
             if len(w) > 4 and w.lower() not in _STOP_WORDS
         }
-        if any(kw in lowered for kw in keywords):
-            return name
+        if not any(kw in lowered for kw in keywords):
+            continue
+        reason = _disabled_reason(name, entry, disabled)
+        if reason is not None:
+            logger.info("skill_disabled_skipped", name=name, reason=reason, builtin=entry.builtin)
+            continue
+        return name
+    return None
+
+
+def _resolve_disabled_skills(disabled_skills: list[str] | None) -> set[str]:
+    """Resolve the force-disable name set: explicit param > deployment Settings."""
+    if disabled_skills is not None:
+        return set(disabled_skills)
+    from fleetent.config import Settings
+
+    return set(Settings().disabled_skills)
+
+
+def _disabled_reason(name: str, entry: SkillEntry, disabled: set[str]) -> str | None:
+    """Return the disable reason for a skill, or None when it is enabled.
+
+    Config force-disable takes priority over the author's default-state intent.
+    """
+    if name in disabled:
+        return "disabled_skills_config"
+    if not entry.enabled_by_default:
+        return "enabled_by_default_false"
     return None
 
 
