@@ -21,6 +21,7 @@ def log_run(
     user_id: str | None = None,
     agent_name: str | None = None,
     stop_reason: str | None = None,
+    error_category: str | None = None,
 ) -> None:
     """Append one run record to the JSONL trace file."""
     entry: dict[str, Any] = {
@@ -47,6 +48,8 @@ def log_run(
         entry["agent_name"] = agent_name
     if stop_reason is not None:
         entry["stop_reason"] = stop_reason
+    if error_category is not None:
+        entry["error_category"] = error_category
     _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _LOG_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")

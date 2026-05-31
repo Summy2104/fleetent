@@ -14,6 +14,7 @@ from openai.types.chat import ChatCompletionChunk
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent.agent_policy import check_tool_access
 from fleetent.context_mgr import maybe_compress
+from fleetent.error_classifier import classify
 from fleetent.eval_logger import log_run
 from fleetent.memory_layer import extract_and_save, load_memories
 from fleetent.model_router import RouteConfig, get_async_client_and_config
@@ -89,13 +90,12 @@ async def _call_with_fallback(
                 max_tokens=cfg.max_tokens,
             )
             return resp, model
-        except RateLimitError as exc:
-            last_exc = exc
-        except APIStatusError as exc:
-            if exc.status_code == 503:
-                last_exc = exc
-            else:
+        except Exception as exc:
+            # Classification owns the "should we switch models?" decision; the
+            # loop no longer hardcodes status codes here (design D5).
+            if not classify(exc).should_switch_model:
                 raise
+            last_exc = exc
     raise last_exc  # type: ignore[misc]
 
 
@@ -119,14 +119,40 @@ async def _stream_with_fallback(
                 stream_options={"include_usage": True},
             )
             return stream, model
-        except RateLimitError as exc:
-            last_exc = exc
-        except APIStatusError as exc:
-            if exc.status_code == 503:
-                last_exc = exc
-            else:
+        except Exception as exc:
+            if not classify(exc).should_switch_model:
                 raise
+            last_exc = exc
     raise last_exc  # type: ignore[misc]
+
+
+def _first_user_input(messages: list[Any]) -> str:
+    return next(
+        (m["content"] for m in messages if isinstance(m, dict) and m.get("role") == "user"),
+        "",
+    )
+
+
+def _log_run_error(
+    exc: Exception,
+    messages: list[Any],
+    start: float,
+    model_used: str,
+    user_id: str | None,
+    agent_name: str | None,
+) -> None:
+    """Write a trace record tagged with the error's classification code."""
+    log_run(
+        _first_user_input(messages),
+        "",
+        messages,
+        time.monotonic() - start,
+        None,
+        model_used=model_used,
+        user_id=user_id,
+        agent_name=agent_name,
+        error_category=classify(exc).category.value,
+    )
 
 
 ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
@@ -180,9 +206,14 @@ async def run(
             break
 
         messages = maybe_compress(messages)
-        response, model_used = await _call_with_fallback(
-            client, cfg, messages, schemas, models_to_try
-        )
+        try:
+            response, model_used = await _call_with_fallback(
+                client, cfg, messages, schemas, models_to_try
+            )
+        except Exception as exc:
+            # Record the error class on the trace before propagating (design D4).
+            _log_run_error(exc, messages, start, model_used, user_id, agent_name)
+            raise
         state.turn += 1
         models_to_try = [model_used]  # stick with the winning model for subsequent turns
         choice = response.choices[0]
@@ -363,6 +394,7 @@ async def run_stream(
             models_to_try = [model_used]
         except (RateLimitError, APIStatusError) as exc:
             yield {"type": "error", "content": str(exc)}
+            _log_run_error(exc, messages, start, model_used, user_id, agent_name)
             return
 
         stream = cast(AsyncStream[ChatCompletionChunk], stream)

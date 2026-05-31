@@ -653,3 +653,56 @@ async def test_run_stream_captures_usage_from_stream(mock_client, monkeypatch):
     assert usage is not None
     assert usage.prompt_tokens == 100
     assert usage.completion_tokens == 50
+
+
+# ── classification-driven fallback + trace error_category ────────────────────
+
+
+async def test_call_with_fallback_switches_on_classified_switchable(mock_client_fb):
+    # 503 → classify → should_switch_model=True → try fallback model.
+    mock_client_fb.chat.completions.create = AsyncMock(
+        side_effect=[_mk_http_error(503), _text_resp("ok")]
+    )
+    result = await al.run([{"role": "user", "content": "hi"}])
+    assert result == "ok"
+    calls = mock_client_fb.chat.completions.create.call_args_list
+    assert calls[1].kwargs["model"] == "fallback-model"
+
+
+async def test_call_with_fallback_raises_on_non_switchable(mock_client_fb):
+    # 403 → classify → should_switch_model=False → raise without trying fallback.
+    mock_client_fb.chat.completions.create = AsyncMock(side_effect=_mk_http_error(403))
+    with pytest.raises(APIStatusError) as exc_info:
+        await al.run([{"role": "user", "content": "hi"}])
+    assert exc_info.value.status_code == 403
+    assert mock_client_fb.chat.completions.create.call_count == 1
+
+
+async def test_run_logs_error_category_on_exhaustion(mock_client_fb, monkeypatch):
+    mock_client_fb.chat.completions.create = AsyncMock(
+        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+    )
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    with pytest.raises(RateLimitError):
+        await al.run([{"role": "user", "content": "hi"}])
+    assert captured.get("error_category") == "rate_limit"
+
+
+async def test_run_no_error_category_on_success(mock_client, monkeypatch):
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    await al.run([{"role": "user", "content": "hi"}])
+    assert captured.get("error_category") is None
+
+
+async def test_run_stream_logs_error_category_on_exhaustion(mock_client_fb, monkeypatch):
+    mock_client_fb.chat.completions.create = AsyncMock(
+        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+    )
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    events = [e async for e in al.run_stream("hi")]
+    assert any(e["type"] == "error" for e in events)
+    assert captured.get("error_category") == "rate_limit"
