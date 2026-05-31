@@ -562,3 +562,51 @@ class CancellationChecker:                       # TerminationChecker
 2. **`sandbox_mode is None → 不过滤` 的兼容语义**（自解冲突 2）：是否认可「未传 mode = 不 gate」而非「默认 all」。生产调用方都传 mode，但若希望防御性默认，可改 None→ALL。
 3. **非服务端 `get_effective_mode()` 进程缓存**（自解冲突 3）：IM/CLI 用进程级单值缓存。若部署期望 IM/CLI 也随服务端 app.state 走同一 mode、或运行期 Docker 状态变化需重探，再调整。
 4. **死代码 `_safe_dispatch` 不传 allowed_tools**（design Risk）：本 change 未修；若要补「调用层防御纵深」需另开 change。
+
+## 15. sandbox-resource-limits (SB4)：沙箱资源限制可配置（按次 SandboxResources）
+
+> 共享资源引用：`config/settings.yaml` 的 `sandbox:` 段 owner = SB3。本 change 仅向该段**追加** `resources` 子段（`memory`/`cpus`/`network`/`exec_timeout`/`read_only`），与 `sandbox.mode`（SB3）/`scope`/`idle_hours`（SB2）共处同段，不另立 yaml、不改已有段骨架。
+
+**前置核实（tasks 1.x 结论）：**
+- 1.1：`create_workspace`（sandbox_client.py，AR19/SB3 后行号位移）硬编码 `--network none --memory 256m --cpus 0.5 --read-only --tmpfs /tmp`。参数化：`--network`（三态）/`--memory`/`--cpus`/`--read-only`（可关）。保留：`--tmpfs /tmp` 始终加。`__init__` 仅收 `image`，无资源参数。AR19 的 `run_code` 编排/`destroy_workspace` 幂等、SB3 的 `docker_available` 探测均**未动**。
+- 1.2：yaml 加载惯例同 `model_router.ROUTES_PATH`（模块级 `Path` 常量 + `yaml.safe_load(path.read_text())`，可 monkeypatch）。SB3 的 `sandbox_enablement.SETTINGS_PATH` 已是 `config/settings.yaml` 该模式的落地。本 change 在新模块 `sandbox_config.py` 重复同一注入式常量 `SETTINGS_PATH`（与 SB3 指向同一文件，各自独立读 `sandbox.resources` / `sandbox.mode` 段，无耦合），不集中化加载器。
+- 1.3：`create_workspace(session_id)` → `create_workspace(session_id, resources=None)`，可选缺省。`resources=None` 回退 `SandboxResources()`，docker run 命令与现状 byte-equivalent（默认含 `--read-only`、`--network none`、256m、0.5），既有 `test_sandbox_client.py` 3 个 create_workspace 用例不回归。不在 `__init__` 固定资源策略。
+
+**D1 SandboxResources + 加载 + 校验 + clamp（新建 `src/fleetent/sandbox_config.py`）：**
+- `NetworkPolicy(StrEnum)`：`NONE="none"`/`PUBLIC_ONLY="public_only"`/`ALLOW_ALL="allow_all"`。
+- `SandboxResources`（dataclass，默认即安全默认单一事实源）：`memory:int=256`/`cpus:float=0.5`/`network:NetworkPolicy=NONE`/`exec_timeout:int=30`/`read_only:bool=True`。
+- 模块级 `SETTINGS_PATH: Path = Path("config/settings.yaml")`（可 monkeypatch；无全局可变状态）。
+- `load_sandbox_resources(path=None) -> SandboxResources`：读 `sandbox.resources` 段，**逐字段**「有则覆盖、缺则默认」；文件/段/子段缺失全默认；corrupt YAML log warning 后全默认（不抛、不静默吞——记录后回退）。
+- **非法校验（不静默吞）**：`memory<=0` 或非 int / `cpus<=0` 或非数 / `network` 非枚举值 / `read_only` 非 bool → log warning 后回退该字段默认（采「回退默认」取向而非抛 ValueError，与 SB3 `load_sandbox_mode` 非法值 log+回退的惯例一致，保持启动不崩）。`bool` 显式排除在 int/float 校验外（避免 `True` 被当 1）。
+- **exec_timeout clamp [1,600]**：int 值一律 clamp（`0→1`、`1000→600`、范围内不变）——超范围属「范围校验」故 clamp 到边界（非回退默认）；非 int（str/None/bool）才 log 回退默认 30。
+
+**D2 资源值 → docker run 映射（`_resource_flags` staticmethod）：**
+- `memory → --memory {n}m`；`cpus → --cpus {n}`（`str(float)`，如 `0.5`/`2.0`）。
+- `network`：`none → --network none`（默认推荐）；`allow_all → 不加 --network`（默认 bridge 放行全部出站）；`public_only → ` 网络未预置，按「不可用配置」处理：**log warning 后回退 `--network none`，绝不静默以 bridge 放行**（spec public_only scenario 的安全回退取向）。
+- `read_only`：`True → --read-only`；`False → 不加`。`--tmpfs /tmp` **始终保留**（与 read_only 无关的可写临时目录）。
+- `exec_timeout` **不进 docker run**（它是单次 docker exec 超时，本 change 仅承载传递供波次 3，不实现 `docker kill`/`--stop-timeout` 等终止逻辑）。
+
+**D3 create_workspace 按次接收 resources（不在 __init__ 固定）：**
+- `create_workspace(session_id, resources: SandboxResources | None = None)`：None 回退 `SandboxResources()`。据 resources 经 `_resource_flags` 构造参数，`*flags` splat 进 `docker run` argv（`--name` 之后、image 之前）。
+- **不在 __init__ 固定资源策略**：SB2 单 client 需 per-scope 造只读/可写两种容器；同一 client 先后传只读档位、可写档位两次互不串（`test_create_workspace_per_scope_does_not_bleed` 守卫）。
+- **缺省等价现状**：不传 resources 时命令含 `--network none`/`--memory 256m`/`--cpus 0.5`/`--read-only`/`--tmpfs /tmp`，既有用例不破（`test_create_workspace_default_command_matches_current_behaviour`）。
+
+**exec_timeout 仅承载（task 5）：** `SandboxResources.exec_timeout` 可被 client 读取，但 `create_workspace` 不含任何 docker kill / 超时终止逻辑（明确划归波次 3）；`test_create_workspace_exec_timeout_not_in_docker_run` 断言其不出现在 argv。
+
+**自解冲突（C·全自主，最小改动）：**
+1. **非法配置取「回退默认」而非抛 ValueError**：design Risk 给出「回退默认或抛 ValueError」二选一。取回退默认，与 SB3 `load_sandbox_mode`（非法 mode log+回退 ALL）的既有惯例一致，保证启动不崩；记录 warning 不静默。
+2. **exec_timeout 超范围 clamp ≠ 回退默认**：design D1/tasks 3.5 明确 `0→1`、`1000→600`，故超范围 int 走 clamp 到边界；只有「非 int」才回退默认 30。这要求 exec_timeout 不复用通用 `_load_positive_int`（后者对 `0` 会回退默认），单独 `_load_exec_timeout` 处理。
+3. **public_only 回退 none 仅 log，不抛**：design 给「log 回退 none（或严格模式抛错）」二选一；本 change 无严格模式开关，取「log warning + 回退 none」，开箱安全且不崩。
+4. **新模块独立 SETTINGS_PATH 常量**（不复用 sandbox_enablement 的）：两模块各读自己的段、各自可 monkeypatch，避免跨模块耦合；config/settings.yaml 仍是同一物理文件。
+5. **flags 顺序**：默认命令资源标志顺序由 `--network none → --memory → ...` 变为 `--memory → --cpus → --network none → --read-only → --tmpfs`。docker 对标志顺序无语义依赖，既有测试改用 index 查找（非位置切片）故不回归；功能等价。
+
+**影响：**
+- 改/建文件：新建 `src/fleetent/sandbox_config.py`、`tests/test_sandbox_config.py`（+13）；改 `src/fleetent/sandbox_client.py`（`create_workspace` 按次 resources + `_resource_flags`）、`tests/test_sandbox_client.py`（+10）、`config/settings.yaml.example`（`sandbox:` 段追加 `resources` 子段）。
+- pytest：base **1035 → after 1058 passed**（净 +23：test_sandbox_config +13、test_sandbox_client +10）。无回归。
+- ruff：改/建文件 `sandbox_config.py`/`sandbox_client.py`/`test_sandbox_config.py` format+check 全绿；`test_sandbox_client.py` 仅余 2 项 HEAD 既有遗留（`F401 ExecResult` 未用、`SIM117` 嵌套 with，均在我未触碰的既有用例行，`git show HEAD:` 对照确认非本 change 引入），按「只动自己改的」未修。`sandbox_client.py` diff 仅本 change 行，AR19/SB3 既有编排未被 format 顺带改。
+- mypy：base **76 → after 76**，无新增错误模式（新模块 `sandbox_config.py` 零 mypy 错误；checked files 53→54）。
+
+**需 zy 核实：**
+1. **非法配置回退默认 vs 抛错**（自解冲突 1）：是否认可全部非法值「log+回退默认」（含 memory/cpus/network/read_only），而非严格模式抛 `ValueError` 阻断启动。
+2. **public_only 落地**（Open Question）：当前未预置网络时 log+回退 none。若部署需真实公网受限网络，需运维预置 Docker 网络并约定从何处读网络名（本 change 未引入该配置项）。
+3. **exec_timeout 承载位置**：本 change 仅把值读入 `SandboxResources` 并随 create_workspace 入参可达，未在 client 持久存储 / 未传 docker exec；波次 3 取该值的具体通路待定。
