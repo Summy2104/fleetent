@@ -148,7 +148,7 @@ data/
   - `tests/integration/`：多模块协作、SQLite/Alembic/FastAPI、observability trace / usage / logging 等需要真实本地组件的测试
   - `tests/e2e/`：启动服务或走 CLI/HTTP/IM 完整链路的端到端测试；默认不进入 PR 门禁，真实服务 smoke 需显式开启
   - `tests/evaluation/`：memory、reflection、long-term context、knowledge-base 等效果评估；不得接入真实 LLM / embedding 服务作为默认测试
-- `tests/` 根目录保留兼容期，现有平铺测试可继续被 `uv run pytest` 收集；后续新增测试不得继续平铺到根目录
+- 历史平铺测试已迁移到分层目录；不得继续向 `tests/` 根目录新增 `test_*.py`
 - 命名：`test_{模块名}.py`，一模块一文件
 - 每个测试函数只测一个行为，不在同一函数里断言多个不相关的事情
 - `permission_gate` 测试必须传短超时：`PermissionGate(medium_timeout=0.1)`

@@ -7,8 +7,6 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from fleetent import agent_loop
-
 logger = logging.getLogger(__name__)
 
 
@@ -41,6 +39,9 @@ class SubAgentExecutor:
         parent_agent_id: int | None,
         parent_session_id: str,
     ) -> SubAgentResult:
+        # Avoid module import cycle: agent_loop imports SubAgentExecutor for tool dispatch.
+        from fleetent import agent_loop
+
         name = task["name"]
         prompt = task["prompt"]
         try:

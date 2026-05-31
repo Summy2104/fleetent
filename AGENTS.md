@@ -59,7 +59,7 @@ re-export shim，但 shim 不承载业务逻辑。
 `tool_registry.py` / `tools.py`（工具注册与内置工具）、`server.py`（FastAPI）、`admin.py`（管理 CLI）、
 `im_gateway/`（Slack / Telegram 适配器）。
 
-测试在 `tests/`，命名为 `test_<module>.py`。配置样例在 `config/`，Alembic 迁移在 `migrations/`，技能在 `skills/`，文档在 `docs/`。`data/` 是本地运行数据，测试不得直接触碰。
+测试按层放在 `tests/unit/`、`tests/integration/`、`tests/e2e/`、`tests/evaluation/`，命名为 `test_<module>.py`。配置样例在 `config/`，Alembic 迁移在 `migrations/`，技能在 `skills/`，文档在 `docs/`。`data/` 是本地运行数据，测试不得直接触碰。
 
 ## Build, Test, and Development Commands
 
@@ -103,7 +103,7 @@ pytest 配置为 `asyncio_mode = auto`，async 测试无需 `@pytest.mark.asynci
 - `tests/integration/`：多模块协作、SQLite/Alembic/FastAPI、observability trace / usage / logging 等需要真实本地组件的测试。
 - `tests/e2e/`：启动服务或走 CLI/HTTP/IM 完整链路的端到端测试；默认不进入 PR 门禁，真实服务 smoke 需显式开启。
 - `tests/evaluation/`：memory、reflection、long-term context、knowledge-base 等效果评估；不得接入真实 LLM / embedding 服务作为默认测试。
-- `tests/` 根目录保留兼容期，现有平铺测试可继续被 `uv run pytest` 收集；后续新增测试不得继续平铺到根目录。
+历史平铺测试已迁移到分层目录；不得继续向 `tests/` 根目录新增 `test_*.py`。
 
 TDD 红绿循环优先运行最近相关分层命令，例如 `uv run pytest tests/unit -x -q` 或
 `uv run pytest tests/integration -x -q`；收尾必须运行 `uv run pytest -x -q`。
