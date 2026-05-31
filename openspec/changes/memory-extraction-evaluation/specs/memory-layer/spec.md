@@ -5,7 +5,7 @@
 
 #### Scenario: Fixture schema is explicit
 - **WHEN** evaluation runner 加载 fixture
-- **THEN** fixture 包含 name、initial_memories、conversation、expected_actions、forbidden_actions 和 mock_actions
+- **THEN** fixture 包含 name、initial_memories、conversation、mock_actions、expected_memories 和 forbidden_memories
 
 #### Scenario: Invalid fixture is rejected
 - **WHEN** fixture 缺失必需字段或包含非法 action 类型
@@ -19,13 +19,13 @@
 - **THEN** evaluation runner 使用 mock_actions 驱动 `extract_and_update()`
 - **AND** 不调用真实 LLM 服务
 
-#### Scenario: Expected actions are validated
+#### Scenario: Expected memory state is validated
 - **WHEN** evaluation case 运行完成
-- **THEN** runner 验证 expected_actions 对应的 memory 状态存在
+- **THEN** runner 验证 expected_memories 对应的 memory 状态存在
 
-#### Scenario: Forbidden actions are rejected
+#### Scenario: Forbidden memory state is rejected
 - **WHEN** evaluation case 运行完成
-- **THEN** runner 验证 forbidden_actions 对应的 memory 状态不存在
+- **THEN** runner 验证 forbidden_memories 对应的 memory 状态不存在
 
 #### Scenario: Evaluation isolates storage and vector dependencies
 - **WHEN** evaluation case 运行
@@ -74,6 +74,10 @@
 #### Scenario: Real LLM evaluation requires explicit opt-in
 - **WHEN** 设置 `FLEETENT_EVAL_REAL_LLM=1`
 - **THEN** runner 可以使用真实 `memory_extraction` 路由运行 fixture
+
+#### Scenario: Real LLM evaluation skips when provider credentials are missing
+- **WHEN** 设置 `FLEETENT_EVAL_REAL_LLM=1` 但缺少真实 provider API key
+- **THEN** 真实 LLM evaluation case 被 skip
 
 #### Scenario: Real LLM evaluation is not a PR gate
 - **WHEN** Bitbucket PR/main pipeline 运行

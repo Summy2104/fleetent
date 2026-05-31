@@ -1,6 +1,6 @@
 ## Why
 
-`memory-update-merge-actions` 将让 memory extraction 支持 `create` / `update` / `delete` /
+`memory-update-merge-actions` 已让 memory extraction 支持 `create` / `update` / `delete` /
 `ignore`，但这只保证 action contract 可执行，并不能说明模型提取质量是否稳定。memory 一旦误记、
 漏记或把一次性请求写成长期偏好，会直接污染 long-term-ctx 注入结果。
 
@@ -15,9 +15,9 @@
   - `name`
   - `initial_memories`
   - `conversation`
-  - `expected_actions`
-  - `forbidden_actions`
   - `mock_actions`
+  - `expected_memories`
+  - `forbidden_memories`
 - 覆盖第一批 memory extraction 场景：
   - identity create
   - identity update
@@ -29,11 +29,11 @@
 - 默认 evaluation 使用 mock LLM，保证稳定、快速、可在 `make test-evaluation` 下运行。
 - 新增真实 LLM 手动入口，通过显式环境变量启用，例如：
   - `FLEETENT_EVAL_REAL_LLM=1 uv run pytest tests/evaluation/test_memory_extraction_eval.py`
-- 真实 LLM evaluation 默认 skip，不进入 Bitbucket PR/main gate。
+- 真实 LLM evaluation 默认 skip；即使显式启用，缺少 provider API key 时也 skip，不进入 Bitbucket PR/main gate。
 
 ## Dependencies
 
-- 依赖 `memory-update-merge-actions` 完成后执行；否则 update / delete expected actions 无运行时基础。
+- 依赖 `memory-update-merge-actions` 完成后执行；否则 update / delete memory state expectations 无运行时基础。
 - 依赖已完成的测试分层：evaluation tests 必须放在 `tests/evaluation/`。
 
 ## Module Boundary Impact
@@ -49,7 +49,7 @@
 ## Impact
 
 - **代码**：不修改运行时代码，除非 evaluation 暴露 `memory-update-merge-actions` 的 contract bug。
-- **测试**：新增 evaluation fixture 与 pytest runner。
+- **测试**：新增 evaluation fixture 与 pytest runner，替换当前 evaluation placeholder。
 - **CI**：不改变 PR/main Bitbucket gate；evaluation 仍为手动或显式命令。
 - **数据**：不使用真实用户数据，不触碰 `data/`。
 - **不包含**：
