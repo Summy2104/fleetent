@@ -152,6 +152,43 @@ class SandboxClient:
         container_id = stdout.decode().strip()
         return container_id or None
 
+    async def list_containers(self, name_prefix: str) -> list[str]:
+        """Return names of all containers whose name matches `name_prefix` (D2).
+
+        Runs `docker ps -a --filter name=<prefix> --format {{.Names}}`; `-a`
+        includes stopped containers so orphans that already exited (but were
+        never removed) are still enumerated. Like `docker_available`, this never
+        raises: a missing CLI, a failed spawn, or a non-zero exit logs a warning
+        and returns an empty list so SB8's startup cleanup degrades silently when
+        Docker is absent. `--filter name=` is substring matching, so callers must
+        re-check the prefix before destroying (D3).
+        """
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker",
+                "ps",
+                "-a",
+                "--filter",
+                f"name={name_prefix}",
+                "--format",
+                "{{.Names}}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+        except (FileNotFoundError, OSError) as exc:
+            logger.warning("docker_list_containers_failed prefix=%s error=%s", name_prefix, exc)
+            return []
+        if proc.returncode != 0:
+            logger.warning(
+                "docker_list_containers_nonzero prefix=%s returncode=%s error=%s",
+                name_prefix,
+                proc.returncode,
+                stderr.decode().strip(),
+            )
+            return []
+        return [line for line in stdout.decode().splitlines() if line.strip()]
+
     async def commit_workspace(self, workspace_id: str, image_tag: str) -> None:
         """Commit a container to an image so its installed deps survive a destroy.
 

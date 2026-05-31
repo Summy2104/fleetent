@@ -23,6 +23,7 @@ from fleetent.agent_loop import run_stream
 from fleetent.config import Settings
 from fleetent.mcp_client import McpServerConfig
 from fleetent.permission_gate import _default_gate, cleanup_stale_approvals, list_approvals
+from fleetent.sandbox_cleanup import cleanup_orphans
 from fleetent.sandbox_client import SandboxClient
 from fleetent.sandbox_enablement import Mode, load_sandbox_mode, resolve_effective_mode
 from fleetent.skill_registry import scan as scan_skills
@@ -75,7 +76,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # and stash it on app.state for /chat and /health. Docker unavailable degrades
     # the mode to off without blocking startup (the probe itself never raises).
     configured_mode = load_sandbox_mode()
-    docker_available = await SandboxClient().docker_available()
+    sandbox_client = SandboxClient()
+    docker_available = await sandbox_client.docker_available()
     effective_mode = resolve_effective_mode(configured_mode, docker_available)
     app.state.sandbox_mode = effective_mode
     app.state.sandbox_docker_available = docker_available
@@ -87,6 +89,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             effective_mode.value,
             configured_mode.value,
         )
+
+    # SB8: reuse the single SB3 Docker probe above — when Docker is available,
+    # reclaim orphan sandbox-* containers left by a previous crash. Best-effort:
+    # a failure is logged and startup proceeds; unavailable Docker skips cleanup
+    # (the mode is already degraded by SB3). No second probe, no scheduler.
+    if docker_available:
+        try:
+            await cleanup_orphans(sandbox_client)
+        except Exception as exc:
+            logger.warning("sandbox_orphan_cleanup_failed error=%s", exc)
 
     # Seed the built-in admin on first boot; log the one-time initial password.
     admin_seed = seed_builtin_admin()
