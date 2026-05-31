@@ -129,3 +129,15 @@
 
 **影响:** 596 passed;mypy model_router 0 错。
 **⚠️ 需 zy 核实/后续优化:** **每次 LLM 调用都读盘 YAML**(为可测试性选每次加载)——生产高频下建议加可注入缓存(design Risk 已记为后续优化点)。fail-loud vs 缺失回落的边界是否认可。
+
+## skill-yaml-frontmatter (SK2) — feat/skill-yaml-frontmatter
+
+**实现(skill 轨地基):** `_parse_frontmatter` 改 `yaml.safe_load`(支持标量/列表/布尔/数字);四种失败→返回 None(无 `---`/无闭合/YAMLError/顶层非 mapping);`scan()` 收 None 记 structlog warning(path+reason)并跳过(纠正静默吞);`_index` 值由 tuple 改 `@dataclass SkillEntry`(description/path/tags/platforms/version/enabled_by_default),**match/load/list_skills 对外契约不变**;类型归一(tags/platforms 标量→单元素 list、缺失→[]、enabled_by_default 缺省 True、version 归一字符串);enabled_by_default 仅解析存储不接线过滤(留 builtin-skills)。
+
+**自解冲突:**
+1. 既有 test_scan_builds_index 解包内部 tuple → 改为属性访问 entry.description/path(断言内部结构、对外契约未变)。
+2. structlog 断言用 `structlog.testing.capture_logs()`(仓库无 log capture 先例)。
+3. env 变量名 MINI_AGENT_SKILLS_DIR 未改(属 SK9 范畴,不越界)。
+
+**影响:** 610 passed;skill_registry mypy 0 错。解锁 SK7/SK8/SK9/builtin-skills/agent-skill-binding。
+**需 zy 核实:** SkillEntry 结构(对外契约保持);失败跳过 + warning 策略。
