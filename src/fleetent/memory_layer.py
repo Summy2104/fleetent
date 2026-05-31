@@ -16,10 +16,19 @@ MemoryType = Literal["identity", "preferences", "context"]
 _EXTRACT_SYSTEM = (
     "Extract user semantic memories from the conversation. Return a JSON array of actions. "
     "Use action=create with type identity, preferences, or context and non-empty content. "
-    "Use action=ignore for facts that should not be remembered."
+    "Use action=update with target_id, matching type, and non-empty content when the "
+    "conversation corrects an existing identity, preferences, or context memory. "
+    "Use action=delete with target_id when the user asks to forget an existing memory. "
+    "Use action=ignore for facts that should not be remembered, including uncertain facts "
+    "and one-time preferences or formatting requests."
 )
 _VALID_TYPES = {"identity", "preferences", "context"}
 _CONTEXT_TTL = timedelta(days=30)
+_SNAPSHOT_LIMITS: dict[MemoryType, int] = {
+    "identity": 20,
+    "preferences": 30,
+    "context": 20,
+}
 
 
 @dataclass(frozen=True)
@@ -37,12 +46,13 @@ class MemoryItem:
 
 async def extract_and_update(user_id: str, conversation: list[dict[str, Any]]) -> None:
     """Extract structured memories from conversation and update the memory store."""
+    snapshot = _memory_snapshot(user_id)
     client, cfg = get_async_client_and_config("memory_extraction")
     response = await client.chat.completions.create(
         model=cfg.model,
         messages=[
             {"role": "system", "content": _EXTRACT_SYSTEM},
-            {"role": "user", "content": _conversation_to_text(conversation)},
+            {"role": "user", "content": _extraction_user_message(conversation, snapshot)},
         ],
         max_tokens=cfg.max_tokens,
     )
@@ -55,14 +65,45 @@ async def extract_and_update(user_id: str, conversation: list[dict[str, Any]]) -
         return
 
     now = datetime.now(UTC).replace(microsecond=0)
+    snapshot_by_id = {item.id: item for items in snapshot.values() for item in items}
     for action in actions:
-        if not isinstance(action, dict) or action.get("action") != "create":
+        if not isinstance(action, dict):
+            continue
+        action_name = action.get("action")
+        if action_name == "delete":
+            target_id = action.get("target_id")
+            target = snapshot_by_id.get(target_id) if isinstance(target_id, str) else None
+            if target is None:
+                continue
+            _delete_memory(user_id, target.id)
+            await vector_store.delete(target.id, vector_store.memory_namespace(user_id))
             continue
         content = action.get("content")
         raw_type = action.get("type")
         if not isinstance(content, str) or not content.strip() or raw_type not in _VALID_TYPES:
             continue
         memory_type = cast(MemoryType, raw_type)
+        if action_name == "update":
+            target_id = action.get("target_id")
+            target = snapshot_by_id.get(target_id) if isinstance(target_id, str) else None
+            if target is None or target.type != memory_type:
+                continue
+            updated = MemoryItem(
+                id=target.id,
+                user_id=user_id,
+                type=target.type,
+                content=content.strip(),
+                created_at=target.created_at,
+                updated_at=now,
+                expires_at=_expires_at(memory_type, now),
+            )
+            _update_memory(updated)
+            await vector_store.upsert(
+                updated.id, updated.content, vector_store.memory_namespace(user_id)
+            )
+            continue
+        if action_name != "create":
+            continue
         item = MemoryItem(
             id=str(uuid.uuid4()),
             user_id=user_id,
@@ -130,6 +171,71 @@ def _insert_memory(item: MemoryItem) -> None:
     )
 
 
+def _update_memory(item: MemoryItem) -> None:
+    _database().execute(
+        """
+        UPDATE memory_items
+        SET content = :content,
+            updated_at = :updated_at,
+            expires_at = :expires_at
+        WHERE id = :id AND user_id = :user_id
+        """,
+        {
+            "id": item.id,
+            "user_id": item.user_id,
+            "content": item.content,
+            "updated_at": _format_datetime(item.updated_at),
+            "expires_at": _format_datetime(item.expires_at),
+        },
+    )
+
+
+def _delete_memory(user_id: str, target_id: str) -> None:
+    _database().execute(
+        """
+        DELETE FROM memory_items
+        WHERE id = :id AND user_id = :user_id
+        """,
+        {
+            "id": target_id,
+            "user_id": user_id,
+        },
+    )
+
+
+def _memory_snapshot(user_id: str) -> dict[MemoryType, list[MemoryItem]]:
+    return {
+        memory_type: _memory_snapshot_by_type(user_id, memory_type, limit)
+        for memory_type, limit in _SNAPSHOT_LIMITS.items()
+    }
+
+
+def _memory_snapshot_by_type(user_id: str, memory_type: MemoryType, limit: int) -> list[MemoryItem]:
+    now = datetime.now(UTC).replace(microsecond=0)
+    rows = (
+        _database()
+        .execute(
+            """
+            SELECT id, user_id, type, content, created_at, updated_at, expires_at
+            FROM memory_items
+            WHERE user_id = :user_id
+              AND type = :type
+              AND (:type != 'context' OR expires_at IS NULL OR expires_at >= :now)
+            ORDER BY updated_at DESC
+            LIMIT :limit
+            """,
+            {
+                "user_id": user_id,
+                "type": memory_type,
+                "now": _format_datetime(now),
+                "limit": limit,
+            },
+        )
+        .fetchall()
+    )
+    return [_row_to_memory_item(row) for row in rows]
+
+
 def _database() -> SQLiteDatabase:
     return create_database(Settings(anthropic_api_key="").database_url)
 
@@ -177,6 +283,32 @@ def _row_to_memory_item(row: dict[str, Any]) -> MemoryItem:
         created_at=_parse_datetime(row["created_at"]),
         updated_at=_parse_datetime(row["updated_at"]),
         expires_at=_parse_optional_datetime(row["expires_at"]),
+    )
+
+
+def _extraction_user_message(
+    conversation: list[dict[str, Any]], snapshot: dict[MemoryType, list[MemoryItem]]
+) -> str:
+    snapshot_payload = {
+        memory_type: [
+            {
+                "id": item.id,
+                "type": item.type,
+                "content": item.content,
+                "updated_at": _format_datetime(item.updated_at),
+                "expires_at": _format_datetime(item.expires_at),
+            }
+            for item in items
+        ]
+        for memory_type, items in snapshot.items()
+    }
+    return "\n\n".join(
+        [
+            "Existing memory snapshot:",
+            json.dumps(snapshot_payload, ensure_ascii=False),
+            "Conversation:",
+            _conversation_to_text(conversation),
+        ]
     )
 
 

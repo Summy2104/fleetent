@@ -49,9 +49,11 @@ def _insert_memory_row(
     user_id: str = "alice",
     type: str = "identity",
     content: str,
+    updated_at: str | None = None,
     expires_at: str | None = None,
 ) -> None:
     now = datetime.now(UTC).replace(microsecond=0).isoformat()
+    updated_at = updated_at or now
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
@@ -60,7 +62,7 @@ def _insert_memory_row(
             )
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (id, user_id, type, content, now, now, expires_at),
+            (id, user_id, type, content, now, updated_at, expires_at),
         )
 
 
@@ -155,6 +157,416 @@ async def test_extract_and_update_upserts_created_memory_to_vector_store(tmp_pat
     upsert.assert_awaited_once_with(
         row["id"], "User is a backend engineer", vector_store.memory_namespace("alice")
     )
+
+
+async def test_extract_and_update_includes_current_user_memory_snapshot(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    _insert_memory_row(
+        db_path,
+        id="alice-identity",
+        content="User is a backend engineer",
+    )
+    _insert_memory_row(
+        db_path,
+        id="alice-preference",
+        type="preferences",
+        content="User prefers concise replies",
+    )
+    _insert_memory_row(
+        db_path,
+        id="alice-context",
+        type="context",
+        content="User is working on billing",
+        expires_at=(datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)).isoformat(),
+    )
+    _insert_memory_row(
+        db_path,
+        id="bob-identity",
+        user_id="bob",
+        content="Bob likes unrelated data",
+    )
+    create = _patch_extraction(monkeypatch, "[]")
+
+    await memory_layer.extract_and_update(
+        "alice", [{"role": "user", "content": "I now work on payments"}]
+    )
+
+    user_message = create.await_args.kwargs["messages"][1]["content"]
+    assert "Existing memory snapshot:" in user_message
+    assert "alice-identity" in user_message
+    assert "User is a backend engineer" in user_message
+    assert "alice-preference" in user_message
+    assert "User prefers concise replies" in user_message
+    assert "alice-context" in user_message
+    assert "User is working on billing" in user_message
+    assert "bob-identity" not in user_message
+    assert "Bob likes unrelated data" not in user_message
+
+
+async def test_extract_and_update_limits_snapshot_and_excludes_expired_context(
+    tmp_path, monkeypatch
+):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    for index in range(25):
+        _insert_memory_row(
+            db_path,
+            id=f"identity-{index}",
+            content=f"identity memory {index}",
+            updated_at=(base + timedelta(minutes=index)).isoformat(),
+        )
+    for index in range(35):
+        _insert_memory_row(
+            db_path,
+            id=f"preference-{index}",
+            type="preferences",
+            content=f"preference memory {index}",
+            updated_at=(base + timedelta(minutes=index)).isoformat(),
+        )
+    for index in range(25):
+        _insert_memory_row(
+            db_path,
+            id=f"context-{index}",
+            type="context",
+            content=f"context memory {index}",
+            updated_at=(base + timedelta(minutes=index)).isoformat(),
+            expires_at=(datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)).isoformat(),
+        )
+    _insert_memory_row(
+        db_path,
+        id="expired-context",
+        type="context",
+        content="expired context memory",
+        expires_at=(datetime.now(UTC).replace(microsecond=0) - timedelta(days=1)).isoformat(),
+    )
+    create = _patch_extraction(monkeypatch, "[]")
+
+    await memory_layer.extract_and_update("alice", [{"role": "user", "content": "facts"}])
+
+    user_message = create.await_args.kwargs["messages"][1]["content"]
+    assert "identity-24" in user_message
+    assert "identity-5" in user_message
+    assert "identity-4" not in user_message
+    assert "preference-34" in user_message
+    assert "preference-5" in user_message
+    assert "preference-4" not in user_message
+    assert "context-24" in user_message
+    assert "context-5" in user_message
+    assert "context-4" not in user_message
+    assert "expired-context" not in user_message
+    assert "expired context memory" not in user_message
+
+
+async def test_extract_and_update_updates_existing_memory_content_and_timestamp(
+    tmp_path, monkeypatch
+):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    old_updated_at = datetime(2026, 1, 1, tzinfo=UTC).isoformat()
+    _insert_memory_row(
+        db_path,
+        id="mem-identity",
+        content="User is a backend engineer",
+        updated_at=old_updated_at,
+    )
+    _patch_extraction(
+        monkeypatch,
+        """
+        [
+          {
+            "action": "update",
+            "target_id": "mem-identity",
+            "type": "identity",
+            "content": "User is a platform engineer"
+          }
+        ]
+        """,
+    )
+
+    await memory_layer.extract_and_update(
+        "alice", [{"role": "user", "content": "I am a platform engineer now"}]
+    )
+
+    [row] = _memory_rows(db_path)
+    assert row["id"] == "mem-identity"
+    assert row["content"] == "User is a platform engineer"
+    assert datetime.fromisoformat(row["updated_at"]) > datetime.fromisoformat(old_updated_at)
+
+
+async def test_extract_and_update_applies_update_ttl_rules(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    old_expiry = (datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)).isoformat()
+    _insert_memory_row(
+        db_path,
+        id="mem-context",
+        type="context",
+        content="User is working on billing",
+        expires_at=old_expiry,
+    )
+    _insert_memory_row(
+        db_path,
+        id="mem-preference",
+        type="preferences",
+        content="User prefers verbose replies",
+        expires_at=old_expiry,
+    )
+    _patch_extraction(
+        monkeypatch,
+        """
+        [
+          {
+            "action": "update",
+            "target_id": "mem-context",
+            "type": "context",
+            "content": "User is working on payments"
+          },
+          {
+            "action": "update",
+            "target_id": "mem-preference",
+            "type": "preferences",
+            "content": "User prefers concise replies"
+          }
+        ]
+        """,
+    )
+    before = datetime.now(UTC).replace(microsecond=0) + timedelta(days=30)
+
+    await memory_layer.extract_and_update("alice", [{"role": "user", "content": "facts"}])
+
+    after = datetime.now(UTC).replace(microsecond=0) + timedelta(days=30)
+    rows = {row["id"]: row for row in _memory_rows(db_path)}
+    context_expires = datetime.fromisoformat(rows["mem-context"]["expires_at"])
+    assert before <= context_expires <= after
+    assert rows["mem-preference"]["expires_at"] is None
+
+
+async def test_extract_and_update_upserts_updated_memory_to_vector_store(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    upsert = AsyncMock()
+    monkeypatch.setattr(vector_store, "upsert", upsert)
+    _insert_memory_row(
+        db_path,
+        id="mem-identity",
+        content="User is a backend engineer",
+    )
+    _patch_extraction(
+        monkeypatch,
+        """
+        [
+          {
+            "action": "update",
+            "target_id": "mem-identity",
+            "type": "identity",
+            "content": "User is a platform engineer"
+          }
+        ]
+        """,
+    )
+
+    await memory_layer.extract_and_update(
+        "alice", [{"role": "user", "content": "I am a platform engineer now"}]
+    )
+
+    upsert.assert_awaited_once_with(
+        "mem-identity", "User is a platform engineer", vector_store.memory_namespace("alice")
+    )
+
+
+async def test_extract_and_update_deletes_existing_memory(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    _insert_memory_row(
+        db_path,
+        id="mem-context",
+        type="context",
+        content="User is working on billing",
+        expires_at=(datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)).isoformat(),
+    )
+    _patch_extraction(
+        monkeypatch,
+        """[{"action": "delete", "target_id": "mem-context"}]""",
+    )
+
+    await memory_layer.extract_and_update(
+        "alice", [{"role": "user", "content": "Forget that billing context"}]
+    )
+
+    assert _memory_rows(db_path) == []
+
+
+async def test_extract_and_update_deletes_memory_from_vector_store(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    delete = AsyncMock()
+    monkeypatch.setattr(vector_store, "delete", delete)
+    _insert_memory_row(
+        db_path,
+        id="mem-context",
+        type="context",
+        content="User is working on billing",
+        expires_at=(datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)).isoformat(),
+    )
+    _patch_extraction(
+        monkeypatch,
+        """[{"action": "delete", "target_id": "mem-context"}]""",
+    )
+
+    await memory_layer.extract_and_update(
+        "alice", [{"role": "user", "content": "Forget that billing context"}]
+    )
+
+    delete.assert_awaited_once_with("mem-context", vector_store.memory_namespace("alice"))
+
+
+async def test_extract_and_update_ignores_delete_target_outside_current_snapshot(
+    tmp_path, monkeypatch
+):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    delete = AsyncMock()
+    monkeypatch.setattr(vector_store, "delete", delete)
+    expired = (datetime.now(UTC).replace(microsecond=0) - timedelta(days=1)).isoformat()
+    _insert_memory_row(
+        db_path,
+        id="bob-memory",
+        user_id="bob",
+        content="Bob memory",
+    )
+    _insert_memory_row(
+        db_path,
+        id="expired-context",
+        type="context",
+        content="Expired context memory",
+        expires_at=expired,
+    )
+    _patch_extraction(
+        monkeypatch,
+        """
+        [
+          {"action": "delete", "target_id": "bob-memory"},
+          {"action": "delete", "target_id": "expired-context"}
+        ]
+        """,
+    )
+
+    await memory_layer.extract_and_update("alice", [{"role": "user", "content": "forget"}])
+
+    assert {row["id"] for row in _memory_rows(db_path)} == {"bob-memory", "expired-context"}
+    delete.assert_not_awaited()
+
+
+async def test_extract_and_update_prompt_describes_action_contract(tmp_path, monkeypatch):
+    _patch_database(tmp_path, monkeypatch)
+    create = _patch_extraction(monkeypatch, "[]")
+
+    await memory_layer.extract_and_update("alice", [{"role": "user", "content": "facts"}])
+
+    system_message = create.await_args.kwargs["messages"][0]["content"]
+    assert "create" in system_message
+    assert "update" in system_message
+    assert "delete" in system_message
+    assert "ignore" in system_message
+    assert "target_id" in system_message
+    assert "preferences" in system_message
+    assert "one-time" in system_message
+
+
+async def test_extract_and_update_ignores_invalid_mutation_outputs(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    upsert = AsyncMock()
+    delete = AsyncMock()
+    monkeypatch.setattr(vector_store, "upsert", upsert)
+    monkeypatch.setattr(vector_store, "delete", delete)
+    _insert_memory_row(
+        db_path,
+        id="mem-identity",
+        content="User is a backend engineer",
+    )
+    _patch_extraction(
+        monkeypatch,
+        """
+        [
+          {"action": "archive", "type": "identity", "content": "Unknown action"},
+          {"action": "create", "type": "project", "content": "Invalid type"},
+          {"action": "create", "type": "identity", "content": "   "},
+          {
+            "action": "update",
+            "type": "identity",
+            "content": "Missing target id"
+          },
+          {
+            "action": "update",
+            "target_id": "missing",
+            "type": "identity",
+            "content": "Invalid target id"
+          },
+          {"action": "delete"}
+        ]
+        """,
+    )
+
+    await memory_layer.extract_and_update("alice", [{"role": "user", "content": "facts"}])
+
+    [row] = _memory_rows(db_path)
+    assert row["id"] == "mem-identity"
+    assert row["content"] == "User is a backend engineer"
+    upsert.assert_not_awaited()
+    delete.assert_not_awaited()
+
+
+async def test_extract_and_update_ignores_invalid_json_without_mutation(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    _insert_memory_row(
+        db_path,
+        id="mem-identity",
+        content="User is a backend engineer",
+    )
+    _patch_extraction(monkeypatch, "{not json")
+
+    await memory_layer.extract_and_update("alice", [{"role": "user", "content": "facts"}])
+
+    [row] = _memory_rows(db_path)
+    assert row["content"] == "User is a backend engineer"
+
+
+async def test_extract_and_update_uses_update_for_identity_conflicts_without_duplicate(
+    tmp_path, monkeypatch
+):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    _insert_memory_row(
+        db_path,
+        id="mem-identity",
+        content="User is a backend engineer",
+    )
+    _patch_extraction(
+        monkeypatch,
+        """
+        [
+          {
+            "action": "update",
+            "target_id": "mem-identity",
+            "type": "identity",
+            "content": "User is a platform engineer"
+          }
+        ]
+        """,
+    )
+
+    await memory_layer.extract_and_update(
+        "alice", [{"role": "user", "content": "Actually, I am a platform engineer"}]
+    )
+
+    rows = _memory_rows(db_path)
+    assert len(rows) == 1
+    assert rows[0]["id"] == "mem-identity"
+    assert rows[0]["content"] == "User is a platform engineer"
+
+
+async def test_extract_and_update_ignores_one_off_preference_requests(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    _patch_extraction(monkeypatch, """[{"action": "ignore", "reason": "one-time request"}]""")
+
+    await memory_layer.extract_and_update(
+        "alice", [{"role": "user", "content": "Use a table for this answer only"}]
+    )
+
+    assert _memory_rows(db_path) == []
 
 
 async def test_search_uses_vector_ids_and_filters_expired_memory(tmp_path, monkeypatch):
