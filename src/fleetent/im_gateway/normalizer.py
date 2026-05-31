@@ -46,6 +46,7 @@ async def route(msg: NormalizedMessage) -> None:
     m = _APPROVAL_RE.match(msg.text.strip())
     if m:
         from fleetent.permission_gate import _default_gate
+
         decision = "approved" if m.group(1).lower() == "approve" else "rejected"
         approval_id = m.group(2)
         found = await _default_gate.resolve(
@@ -54,7 +55,9 @@ async def route(msg: NormalizedMessage) -> None:
             approver_user_id=msg.user_id,
         )
         if found:
-            await msg.reply_func(f"{'✅' if decision == 'approved' else '❌'} {approval_id} {decision}")
+            await msg.reply_func(
+                f"{'✅' if decision == 'approved' else '❌'} {approval_id} {decision}"
+            )
         else:
             await msg.reply_func(f"⚠️ approval {approval_id} not found or already expired")
         return
@@ -63,9 +66,7 @@ async def route(msg: NormalizedMessage) -> None:
     # connector has allowlist_enforced off, this always passes (backward compatible).
     from fleetent import im_channel_allowlist
 
-    if not im_channel_allowlist.is_allowed(
-        msg.platform, msg.channel_id, msg.workspace_id or None
-    ):
+    if not im_channel_allowlist.is_allowed(msg.platform, msg.channel_id, msg.workspace_id or None):
         await msg.reply_func(_REJECTION_MSG)
         return
 
@@ -75,6 +76,7 @@ async def route(msg: NormalizedMessage) -> None:
         return
 
     from fleetent import agent_loop, session_mgr
+    from fleetent.agent_policy import check_skill_access
     from fleetent.memory_layer import load_memories
     from fleetent.skill_registry import load as load_skill
     from fleetent.skill_registry import match as match_skill
@@ -86,12 +88,16 @@ async def route(msg: NormalizedMessage) -> None:
         agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
         base_system = agent.system_prompt if agent else _SYSTEM
         allowed_tools = agent.allowed_tools if agent else None
+        allowed_skills = agent.allowed_skills if agent else None
+        blocked_skills = agent.blocked_skills if agent else None
 
-        # Build fresh system message: memories + matching skill
+        # Build fresh system message: memories + matching skill. opt-in: a skill
+        # is injected only when the resolved agent whitelists it (and does not
+        # block it); an unbound context (no agent) injects nothing.
         memory_ctx = load_memories(user_id=msg.user_id)
         system_content = f"{memory_ctx}\n\n{base_system}" if memory_ctx else base_system
         matched = match_skill(msg.text)
-        if matched:
+        if matched and check_skill_access(matched, allowed_skills, blocked_skills):
             system_content = f"{system_content}\n\n{load_skill(matched)}"
 
         # Replace existing system message or insert at position 0
@@ -103,7 +109,9 @@ async def route(msg: NormalizedMessage) -> None:
         history.append({"role": "user", "content": msg.text})
 
         response = await agent_loop.run(
-            messages=history, user_id=msg.user_id, reply_func=msg.reply_func,
+            messages=history,
+            user_id=msg.user_id,
+            reply_func=msg.reply_func,
             allowed_tools=allowed_tools,
         )
 
