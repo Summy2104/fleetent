@@ -610,3 +610,47 @@ class CancellationChecker:                       # TerminationChecker
 1. **非法配置回退默认 vs 抛错**（自解冲突 1）：是否认可全部非法值「log+回退默认」（含 memory/cpus/network/read_only），而非严格模式抛 `ValueError` 阻断启动。
 2. **public_only 落地**（Open Question）：当前未预置网络时 log+回退 none。若部署需真实公网受限网络，需运维预置 Docker 网络并约定从何处读网络名（本 change 未引入该配置项）。
 3. **exec_timeout 承载位置**：本 change 仅把值读入 `SandboxResources` 并随 create_workspace 入参可达，未在 client 持久存储 / 未传 docker exec；波次 3 取该值的具体通路待定。
+
+## 16. sandbox-lifecycle (SB2)：沙箱容器生命周期管理（scope→档位 + 复用/销毁）
+
+**分支** feat/sandbox-lifecycle（基于 feature/zhangyang，已含 SB3+SB4+AR19）。消费 SB3（run_code 上下文通道 + `sandbox:` 段）+ SB4（`SandboxResources`），在其上拥有 scope→档位映射与容器生命周期。
+
+**改/建文件**
+- 建 `src/fleetent/sandbox_manager.py`：`Scope`（StrEnum session/agent）、`SandboxManager`（实例持登记表 + scope→档位 + 时钟）。
+- 改 `src/fleetent/sandbox_client.py`：新增 `SANDBOX_NAME_PREFIX="sandbox-"` 常量、`find_workspace` / `commit_workspace` / `image_exists`；`create_workspace` 签名收敛为 `(name, resources, image)`。
+- 改 `src/fleetent/sandbox_config.py`：新增 `SandboxLifecycle` 数据类 + `load_sandbox_lifecycle`（scope/idle_hours）+ `build_resources_by_scope`（消费 SB4 resources + agent_scope override）；抽出 `_read_sandbox_section` / `_resources_from_section` 复用。
+- 改 `src/fleetent/tools.py`：`run_code` 改走 `_MANAGER`（惰性单例，可 monkeypatch）`acquire`，正常路径不销毁。
+- 改 `config/settings.yaml.example`：`sandbox:` 段追加 `scope` / `idle_hours` / `agent_scope`。
+- 测试：新建 `tests/test_sandbox_manager.py`（17）、扩 `tests/test_sandbox_client.py`、`tests/test_sandbox_config.py`、重写 `tests/test_tools.py` 的 run_code 段。
+
+**create_workspace 签名收敛如何兼容 SB4/AR19/既有用例**
+SB4 已让 create 收 `resources`（派生名 `sandbox-{清洗 session_id}`）。本 change 把派生名职责上移到 manager（`_sanitise` 复用 client 的 `_SAFE_NAME`），client 收 `name` 直接用，并增 `image`（取代旧硬编码基础镜像、`base_image` 并入）。既有 `test_sandbox_client.py` 调用点全部改为显式传 `name`（如 `sandbox-session-1`）；以加固档 + 默认镜像（image=None 回退 `python:3.12-slim`）调用时 docker run 命令与现状逐字等价（`test_create_workspace_default_command_matches_current_behaviour` 守护）。AR19 的 `destroy_workspace` 幂等性未触碰。原 `test_create_workspace_sanitizes_session_id`（验证 client 派生名清洗）已无意义，替换为 `test_create_workspace_uses_name_verbatim`——清洗改由 manager 单测覆盖。
+
+**run_code 与 AR19 取消硬中止如何协调（重点）**
+- 正常路径（无取消）：`run_code` 经 `manager.acquire(scope, session_id, agent_name)` 取容器，执行后**不再 destroy**（复用是 scope 的核心价值）；销毁交 `release_session` / `sweep_idle`。这与原「finally 必 destroy」语义对立，故原 `test_run_code_destroys_workspace_on_error` 改为 `test_run_code_does_not_destroy_on_exec_error`、normal-path 用例断言 `destroy_workspace.assert_not_called()`。
+- 取消路径：仍走 AR19 的 `_exec_or_cancel`——取消时 `docker rm -f` 硬中止销毁容器（AR19 语义不破，`destroy_workspace.assert_any_call(cid)` 守护）。但销毁的是 manager 登记表里的容器，故 `run_code` 在 `_exec_or_cancel` 返回 None 后调 `manager.forget(container_name)` 把该 key 从登记表移除；下次 `acquire` 同 key 时登记表 miss → `find_workspace`（容器已销毁）miss → 重建。`test_run_code_cancel_forgets_registry_then_reacquires` 守护：取消销毁后再 acquire 同 ctx 必触发一次 `create_workspace`。
+- 兜底鲁棒：即便不 `forget`，`acquire` 的 `find_workspace` 也会兜底——登记表命中但容器实际已销毁是唯一漏洞，故显式 forget 关闭它。`forget` 是纯内存登记表操作，不发 docker 命令。
+
+**Scope / acquire / release_session / sweep_idle + commit 固化**
+- `acquire(scope, session_id, agent_name)`：key = session scope 取 session_id、agent scope 取 agent_name；算容器名 → 登记表命中则刷新 last_used 复用 → 否则 `find_workspace` 命中则登记复用 → 否则按 scope 选档位 + 选 image `create_workspace` 新建并登记。
+- `release_session(session_id)`：按 `sandbox-session-{清洗}` 查登记表，仅销毁该 session 的 **session scope** 容器并移除；agent scope / 其它 session 不动。
+- `sweep_idle()`：遍历登记表，对 **agent scope 且 `now-last_used > idle_hours*3600`** 的容器**先 `commit_workspace(ws_id, fleetent-sandbox-agent-{清洗 key}:latest)` 再 `destroy_workspace`**（commit-then-destroy 顺序，`test_sweep_idle_commits_then_destroys_idle_agent` 守护）；session scope 不参与。时钟经 `clock` 构造参数注入（默认 `time.monotonic`），测试用可控 lambda。
+
+**scope→档位映射（session 加固 / agent 降档）**
+`build_resources_by_scope()`：session 用 `sandbox.resources` 加固档原样（`read_only=True` + `network=none`）；agent = 加固档 `replace` 叠加 `sandbox.agent_scope` override（memory/cpus/network 三项可覆盖）**再强制 `read_only=False`**——可写 rootfs 是 commit 固化依赖成立的前提（D3）。manager 默认构造时从该函数取映射；测试用 `resources_by_scope` 参数注入隔离档位。`SandboxManager.__init__` 仅在 `resources_by_scope=None` 时读配置（含 scope/idle_hours），且仅当调用方未显式指定 scope/idle_hours（仍为默认 session/2.0）时才以配置覆盖——保证显式注入优先。
+
+**agent 镜像复用**
+`acquire(agent)` 经 `_image_for`：`image_exists(fleetent-sandbox-agent-{key}:latest)` 为真则把该 tag 作 `create_workspace(image=...)` 传入；为假回退 `image=None`（client 默认 `python:3.12-slim`）。`image_exists` 用 `docker image inspect` 返回码判定，永不抛（CLI 缺失/失败 → False）。
+
+**自解冲突（最小改动，未停下问）**
+1. **配置 `sandbox.agent_scope` 字段此前不存在**：SB4 只落了 `sandbox.resources` 的 loader，proposal/design 称 agent_scope「字段定义属 SB4，本 change 消费」，但仓库现状无该字段 loader。最小处理：本 change 在 `sandbox_config.py` 新增 `build_resources_by_scope` 读取并应用 agent_scope override（仅 memory/cpus/network），未改 SB4 既有 `SandboxResources` 数据类与 `load_sandbox_resources`。视为「消费方自带 override 解析」，未侵入 SB4 owner 代码。
+2. **`scope` / `idle_hours` 字段此前不存在**：按 proposal「本 change 只追加这两个生命周期字段」，新增 `SandboxLifecycle` + `load_sandbox_lifecycle`，未改 SB3 的 `load_sandbox_mode`。
+3. **`image_exists` 非 design 显式列出**：D3 要求「镜像存在则用、不存在回退默认」，需要存在性探测；SandboxClient 是唯一发 docker 命令处，故在 client 加 `image_exists`（与 `docker_available` 同风格：探测返回码、不抛）。
+4. **run_code 的 scope 来源**：design 未明确 run_code 用哪个 scope。取 `manager.scope`（来自配置 `sandbox.scope`，默认 session）作为单进程统一 scope，agent_name 缺失时退 `"default"`。
+5. **agent_scope override 仅认 memory/cpus/network**：read_only 由 D3 强制 False（不允许 override 翻回 True，否则固化失效）；exec_timeout 属 wave-3，不在 override 范围。
+
+**需 zy 核实**
+1. **release_session / sweep_idle 接线点（Open Question，未接线）**：本 change 只提供 `release_session` / `sweep_idle` 入口与单测，**未在 session_mgr/server/调度器接线**。release_session 挂会话关闭还是 server 请求结束待定；sweep_idle 启动触发与 SB8 孤儿清理合流、定期触发待调度器接入。当前 session scope 容器不会自动回收（依赖后续 change 或 SB8 兜底）。
+2. **agent_scope override 是否应认 SB4 owner 而非本 change 自解析**：本 change 在 sandbox_config 自加 `build_resources_by_scope` 读 agent_scope。若团队认为该字段解析应归 SB4，可后移；当前作为消费方就近实现。
+3. **`_MANAGER` 单进程单例 scope 固定**：所有 run_code 共用 `manager.scope`（进程级配置），不支持「不同 agent 不同 scope」。design 的 scope 是全局配置项，符合现状；若未来要 per-agent scope 需扩展。
+4. **commit 镜像累积/清理策略**（Open Question）：仅销毁前 commit 一次，未实现镜像保留/清理（保留最近一份 vs 累积），待认领。

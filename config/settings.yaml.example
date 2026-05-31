@@ -15,6 +15,13 @@ permission_gate_high_timeout_seconds: 3600
 # NOTE: quote "off" so YAML keeps it a string rather than the boolean false.
 sandbox:
   mode: all  # off | selective | all
+  # Container lifecycle (SB2). scope sets the container granularity / reuse
+  # boundary; idle_hours is the agent-scope idle TTL before sweep_idle reclaims.
+  #   session — one container per session, reused within it, destroyed on release
+  #   agent   — one container per agent, reused across sessions, deps committed
+  #             then destroyed once idle past idle_hours
+  scope: session       # session (default) | agent
+  idle_hours: 2        # > 0; agent-scope idle TTL in hours
   # Per-container resource limits (SB4). All optional; omitted fields use the
   # safe defaults shown below. Invalid values log a warning and fall back to the
   # default; exec_timeout is clamped to [1, 600].
@@ -24,6 +31,14 @@ sandbox:
     network: "none"    # none (default, recommended) | public_only | allow_all
     exec_timeout: 30   # seconds; carried for wave-3 termination (not enforced yet)
     read_only: true    # session containers read-only; SB2 sets false for agent scope
+  # Agent-scope tier override (SB2 consumes; applied atop `resources`). agent
+  # containers always run with a writable rootfs (read_only forced false) so deps
+  # land in the rootfs for `docker commit` to capture; loosen network here as
+  # needed to install them. Only memory/cpus/network are honoured as overrides.
+  agent_scope:
+    network: "none"    # widen (e.g. allow_all) only if agents must fetch deps
+    memory: 256        # MB, > 0
+    cpus: 0.5          # fractional CPUs, > 0
 # Max leading user messages kept whole as initial intent during compression (AR13).
 compression_initial_intent_max: 2
 # Coarse loop detection (AR4): repeats of one tool (same args, or same successful

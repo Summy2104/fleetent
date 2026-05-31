@@ -194,3 +194,105 @@ def test_exec_timeout_within_range_unchanged(
     )
     monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
     assert load_sandbox_resources().exec_timeout == 45
+
+
+# --- SB2 lifecycle config (scope / idle_hours) -----------------------------
+
+
+def test_load_lifecycle_defaults_when_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.sandbox_config import load_sandbox_lifecycle
+
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", tmp_path / "absent.yaml")
+    lc = load_sandbox_lifecycle()
+    assert lc.scope == "session"
+    assert lc.idle_hours == 2.0
+
+
+def test_load_lifecycle_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleetent.sandbox_config import load_sandbox_lifecycle
+
+    path = _write_settings(
+        tmp_path,
+        """
+        sandbox:
+          scope: agent
+          idle_hours: 6
+        """,
+    )
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
+    lc = load_sandbox_lifecycle()
+    assert lc.scope == "agent"
+    assert lc.idle_hours == 6.0
+
+
+def test_load_lifecycle_invalid_scope_falls_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.sandbox_config import load_sandbox_lifecycle
+
+    path = _write_settings(
+        tmp_path,
+        """
+        sandbox:
+          scope: bogus
+          idle_hours: -1
+        """,
+    )
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
+    lc = load_sandbox_lifecycle()
+    assert lc.scope == "session"
+    assert lc.idle_hours == 2.0
+
+
+# --- SB2 scope→tier mapping (consumes SB4 resources + agent_scope override) -
+
+
+def test_build_resources_by_scope_session_hardened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.sandbox_config import build_resources_by_scope
+
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", tmp_path / "absent.yaml")
+    by_scope = build_resources_by_scope()
+    assert by_scope["session"].read_only is True
+    assert by_scope["session"].network is NetworkPolicy.NONE
+
+
+def test_build_resources_by_scope_agent_downgraded_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no agent_scope override, agent tier still drops read_only to writable."""
+    from fleetent.sandbox_config import build_resources_by_scope
+
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", tmp_path / "absent.yaml")
+    by_scope = build_resources_by_scope()
+    assert by_scope["agent"].read_only is False
+
+
+def test_build_resources_by_scope_agent_scope_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleetent.sandbox_config import build_resources_by_scope
+
+    path = _write_settings(
+        tmp_path,
+        """
+        sandbox:
+          resources:
+            memory: 512
+          agent_scope:
+            network: allow_all
+            memory: 2048
+        """,
+    )
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
+    by_scope = build_resources_by_scope()
+    # session keeps base resources hardened
+    assert by_scope["session"].memory == 512
+    assert by_scope["session"].read_only is True
+    # agent inherits base then applies override + forced writable rootfs
+    assert by_scope["agent"].memory == 2048
+    assert by_scope["agent"].network is NetworkPolicy.ALLOW_ALL
+    assert by_scope["agent"].read_only is False

@@ -29,11 +29,29 @@ SETTINGS_PATH: Path = Path("config/settings.yaml")
 _EXEC_TIMEOUT_MIN = 1
 _EXEC_TIMEOUT_MAX = 600
 
+# SB2 lifecycle defaults. `scope` selects container granularity (session-local vs
+# per-agent), `idle_hours` is the agent-scope idle TTL before sweep_idle reclaims.
+_DEFAULT_SCOPE = "session"
+_VALID_SCOPES = ("session", "agent")
+_DEFAULT_IDLE_HOURS = 2.0
+
 
 class NetworkPolicy(StrEnum):
     NONE = "none"
     PUBLIC_ONLY = "public_only"
     ALLOW_ALL = "allow_all"
+
+
+@dataclass
+class SandboxLifecycle:
+    """SB2 container-lifecycle policy from the `sandbox:` section.
+
+    `scope` ("session" | "agent") sets container granularity; `idle_hours` is the
+    agent-scope idle TTL. SB4 owns resource fields; these two are SB2's additions.
+    """
+
+    scope: str = _DEFAULT_SCOPE
+    idle_hours: float = _DEFAULT_IDLE_HOURS
 
 
 @dataclass
@@ -59,22 +77,67 @@ def load_sandbox_resources(path: Path | None = None) -> SandboxResources:
     a warning and fall back to that field's default (never silently accepted).
     A corrupt YAML file logs and yields all defaults rather than failing startup.
     """
-    section = _read_resources_section(path or SETTINGS_PATH)
-    if section is None:
-        return SandboxResources()
+    return _resources_from_section(_read_resources_section(path or SETTINGS_PATH))
 
-    defaults = SandboxResources()
-    return SandboxResources(
-        memory=_load_positive_int(section, "memory", defaults.memory),
-        cpus=_load_positive_float(section, "cpus", defaults.cpus),
-        network=_load_network(section, defaults.network),
-        exec_timeout=_load_exec_timeout(section, defaults.exec_timeout),
-        read_only=_load_read_only(section, defaults.read_only),
+
+def load_sandbox_lifecycle(path: Path | None = None) -> SandboxLifecycle:
+    """Load SB2's `sandbox.scope` / `sandbox.idle_hours`, falling back per field.
+
+    An unrecognised scope or a non-positive idle_hours logs a warning and falls
+    back to its default rather than being silently accepted.
+    """
+    sandbox = _read_sandbox_section(path or SETTINGS_PATH)
+    if sandbox is None:
+        return SandboxLifecycle()
+    return SandboxLifecycle(
+        scope=_load_scope(sandbox, _DEFAULT_SCOPE),
+        idle_hours=_load_positive_float(sandbox, "idle_hours", _DEFAULT_IDLE_HOURS),
     )
 
 
-def _read_resources_section(path: Path) -> dict[str, object] | None:
-    """Pull `sandbox.resources` out of the settings file, or None when absent."""
+def build_resources_by_scope(path: Path | None = None) -> dict[str, SandboxResources]:
+    """Map each scope to its resource tier (SB2's scope→tier strategy).
+
+    `session` uses the hardened `sandbox.resources` tier as-is (read_only stays
+    True, network none). `agent` inherits that base, applies the optional
+    `sandbox.agent_scope` override, then forces `read_only=False` so the writable
+    rootfs can hold installed deps for `docker commit` to capture (D3).
+    """
+    resolved = path or SETTINGS_PATH
+    sandbox = _read_sandbox_section(resolved)
+    base = _resources_from_section(_read_resources_section(resolved))
+
+    override = sandbox.get("agent_scope") if isinstance(sandbox, dict) else None
+    if not isinstance(override, dict):
+        override = {}
+    from dataclasses import replace
+
+    agent = replace(
+        base,
+        memory=_load_positive_int(override, "memory", base.memory),
+        cpus=_load_positive_float(override, "cpus", base.cpus),
+        network=_load_network(override, base.network),
+        read_only=False,
+    )
+    return {_DEFAULT_SCOPE: base, "agent": agent}
+
+
+def _load_scope(section: dict[str, object], default: str) -> str:
+    if "scope" not in section:
+        return default
+    value = section["scope"]
+    if isinstance(value, str) and value in _VALID_SCOPES:
+        return value
+    logger.warning("sandbox_scope_invalid value=%r falling_back=%s", value, default)
+    return default
+
+
+def _read_sandbox_section(path: Path) -> dict[str, object] | None:
+    """Pull the top-level `sandbox:` mapping out of the settings file, or None.
+
+    A corrupt YAML file or a missing/non-mapping `sandbox` section yields None so
+    callers fall back to defaults rather than failing startup.
+    """
     if not path.exists():
         return None
     try:
@@ -87,10 +150,32 @@ def _read_resources_section(path: Path) -> dict[str, object] | None:
     sandbox = raw.get("sandbox")
     if not isinstance(sandbox, dict):
         return None
+    return sandbox
+
+
+def _read_resources_section(path: Path) -> dict[str, object] | None:
+    """Pull `sandbox.resources` out of the settings file, or None when absent."""
+    sandbox = _read_sandbox_section(path)
+    if sandbox is None:
+        return None
     resources = sandbox.get("resources")
     if not isinstance(resources, dict):
         return None
     return resources
+
+
+def _resources_from_section(section: dict[str, object] | None) -> SandboxResources:
+    """Build SandboxResources from a `resources`-shaped mapping (per-field validated)."""
+    if section is None:
+        return SandboxResources()
+    defaults = SandboxResources()
+    return SandboxResources(
+        memory=_load_positive_int(section, "memory", defaults.memory),
+        cpus=_load_positive_float(section, "cpus", defaults.cpus),
+        network=_load_network(section, defaults.network),
+        exec_timeout=_load_exec_timeout(section, defaults.exec_timeout),
+        read_only=_load_read_only(section, defaults.read_only),
+    )
 
 
 def _load_positive_int(section: dict[str, object], key: str, default: int) -> int:

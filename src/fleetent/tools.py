@@ -8,11 +8,26 @@ from pathlib import Path
 from fleetent import image_gen_client, vision_client
 from fleetent.cancellation import CancelToken
 from fleetent.sandbox_client import ExecResult, SandboxClient
+from fleetent.sandbox_manager import SandboxManager
 from fleetent.tool_registry import ToolContext, tool
 
 # How often the cancel watcher polls the token while exec runs (seconds). Small
 # enough that cancellation is observed promptly, large enough to stay cheap.
 _CANCEL_POLL_INTERVAL = 0.05
+
+# Process-wide sandbox lifecycle manager (SB2). Lazily built on first run_code so
+# config is read once, not per call; injectable (tests monkeypatch this to an
+# isolated instance) rather than a hidden global — the registry lives on the
+# instance, not at module scope.
+_MANAGER: SandboxManager | None = None
+
+
+def _get_manager() -> SandboxManager:
+    global _MANAGER
+    if _MANAGER is None:
+        _MANAGER = SandboxManager()
+    return _MANAGER
+
 
 # Generated images are written here, then a short reference is returned to the
 # loop (never inline base64). Injectable module-level constant (no global mutable
@@ -158,39 +173,45 @@ async def run_code(
     State does not persist between calls.
     """
     token = cancel_token if cancel_token is not None else CancelToken()
-    # SB3 D5: when an execution context is supplied, key the workspace on its
-    # session id so SB2 can later locate/reuse it; degrade to the default key
-    # when called without a context (direct/unbound call) — never raise here.
-    workspace_key = (
+    manager = _get_manager()
+    # SB3 D5: key the workspace on the context's session id so SB2 can locate/reuse
+    # it; degrade to the default key when called without a context (direct/unbound
+    # call) — never raise here. agent_name feeds agent-scope naming.
+    session_id = (
         tool_context.session_id
         if tool_context is not None and tool_context.session_id
         else "run-code"
     )
-    client = SandboxClient()
-    ws_id = await client.create_workspace(workspace_key)
-    try:
-        command = f"python3 -c {__import__('shlex').quote(code)}"
-        result = await _exec_or_cancel(client, ws_id, command, token)
-        if result is None:
-            return "code execution cancelled"
-        parts = []
-        if result.stdout:
-            parts.append(result.stdout.rstrip())
-        if result.stderr:
-            parts.append(f"[stderr] {result.stderr.rstrip()}")
-        if result.exit_code != 0:
-            parts.append(f"[exit {result.exit_code}]")
-        return "\n".join(parts) if parts else "(no output)"
-    finally:
-        # Idempotent (D3b): a no-op when the cancel path already destroyed it.
-        await client.destroy_workspace(ws_id)
+    agent_name = tool_context.agent_name if tool_context is not None else None
+    scope = manager.scope
+    ws_id = await manager.acquire(scope, session_id, agent_name or "default")
+    command = f"python3 -c {__import__('shlex').quote(code)}"
+    # SB2 D4: normal completion does NOT destroy — reuse is the point; destruction
+    # is owned by release_session / sweep_idle. AR19's cancel path still hard-aborts
+    # by destroying the container; we then drop the registry entry so a later acquire
+    # rebuilds (find_workspace miss) rather than handing back a destroyed container.
+    result = await _exec_or_cancel(manager.client, ws_id, command, token)
+    if result is None:
+        manager.forget(manager.container_name(scope, session_id, agent_name or "default"))
+        return "code execution cancelled"
+    parts = []
+    if result.stdout:
+        parts.append(result.stdout.rstrip())
+    if result.stderr:
+        parts.append(f"[stderr] {result.stderr.rstrip()}")
+    if result.exit_code != 0:
+        parts.append(f"[exit {result.exit_code}]")
+    return "\n".join(parts) if parts else "(no output)"
 
 
 @tool(risk_level="high")
-def schedule_task(name: str, cron_expr: str, message: str, timezone: str = "UTC", user_id: str = "default") -> str:
+def schedule_task(
+    name: str, cron_expr: str, message: str, timezone: str = "UTC", user_id: str = "default"
+) -> str:
     """Create a recurring cron task that runs the agent with the given message.
     cron_expr is a standard 5-field expression e.g. '0 9 * * 1-5'."""
     from fleetent import schedule_store, cron_scheduler
+
     task = schedule_store.create(
         name=name,
         cron_expr=cron_expr,
@@ -207,6 +228,7 @@ def schedule_task(name: str, cron_expr: str, message: str, timezone: str = "UTC"
 def cancel_task(task_id: str) -> str:
     """Cancel a scheduled cron task by its id."""
     from fleetent import schedule_store
+
     deleted = schedule_store.delete(task_id)
     if not deleted:
         return f"error: task {task_id!r} not found"
