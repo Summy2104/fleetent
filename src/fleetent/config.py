@@ -30,6 +30,17 @@ class Settings(BaseSettings):
     session_cleanup_interval_seconds: float = 3600.0
     agent_max_turns: int = 50
     agent_max_consecutive_failures: int = 3
+    # Three-dimensional iteration budget (AR2). max_turns reuses agent_max_turns
+    # above (the step dimension is folded into the budget). -1 = unlimited; the
+    # token / cost dimensions default to unlimited so existing deployments keep
+    # behaving as a pure step budget until configured.
+    agent_max_tokens: int = -1
+    agent_max_cost_usd: float = -1.0
+    # Grace Call reserved budget (AR2 D3): on budget exhaustion the loop spends a
+    # last LLM call summarizing progress, capped at max(round(max_tokens*ratio),
+    # min_tokens). Floor guards a tiny main budget from reserving ~0 tokens.
+    agent_grace_call_token_ratio: float = 0.05
+    agent_grace_call_min_tokens: int = 512
     # Coarse loop detection (AR4): how many times one tool may repeat (same args,
     # signal A; or same successful result, signal B) within the detection window
     # before a hit. First hit warns the model; a repeat after that force-stops with

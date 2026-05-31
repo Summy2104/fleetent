@@ -14,3 +14,13 @@ agent_loop_repeat_threshold: 3
 # Optional escape hatch: argument keys stripped before the signal-A fingerprint
 # (e.g. a volatile timestamp). Empty by default.
 loop_detect_ignore_arg_keys: []
+# Three-dimensional iteration budget (AR2). The step dimension reuses
+# agent_max_turns (default 50). token / cost dimensions are unlimited (-1) by
+# default, so deployments stay a pure step budget until configured. On exhaustion
+# of any dimension the loop terminates with budget_exceeded after a Grace Call.
+agent_max_tokens: -1        # total prompt+completion tokens across the run; -1 = unlimited
+agent_max_cost_usd: -1.0    # estimated USD cost (static price table); -1 = unlimited
+# Grace Call: a final summarizing LLM call on budget exhaustion. Its token cap is
+# max(round(agent_max_tokens * ratio), min_tokens); the floor guards tiny budgets.
+agent_grace_call_token_ratio: 0.05
+agent_grace_call_min_tokens: 512

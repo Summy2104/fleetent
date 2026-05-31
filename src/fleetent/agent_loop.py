@@ -8,12 +8,14 @@ import uuid
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from typing import Any, cast
 
+import structlog
 from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
 from openai.types.chat import ChatCompletionChunk
 
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent import model_router
 from fleetent.agent_policy import check_tool_access
+from fleetent.budget import BudgetChecker, BudgetConfig, BudgetUsage, grace_max_tokens
 from fleetent.cancellation import CancellationChecker, CancelToken
 from fleetent.context_mgr import maybe_compress
 from fleetent.error_classifier import classify
@@ -32,12 +34,13 @@ from fleetent.termination import (
     ApprovalRejectedChecker,
     ConsecutiveFailuresChecker,
     LoopState,
-    MaxTurnsChecker,
     StopReason,
     TerminationController,
     resolve_limits,
 )
 from fleetent.tool_registry import dispatch, get_risk_level, get_schemas
+
+logger = structlog.get_logger(__name__)
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
 
@@ -49,6 +52,34 @@ _SUB_AGENT_TOOL = "sub_agent"
 _LOOP_WARNING_TEXT = (
     "检测到你正在重复调用同一工具且似乎没有进展，请改用其它方式或直接给出当前结论。"
 )
+
+# Appended as a final `user` message when a budget dimension is exhausted (AR2 D3):
+# the Grace Call asks the model to summarize progress in one go without further
+# tool use, so the user gets a graceful conclusion instead of a half-cut reply.
+_GRACE_CALL_TEXT = "已达到本次任务的预算上限。请用一段话总结当前进展与已得结论，不要再调用工具。"
+
+
+def _resolve_budget_config(
+    max_turns: int | None,
+    max_tokens: int | None,
+    max_cost_usd: float | None,
+) -> BudgetConfig:
+    """Resolve the three-dimensional budget: call param > Settings > default (D1).
+
+    The step dimension reuses the existing max_turns resolution (resolve_limits);
+    token / cost come from Settings (NO_LIMIT by default) unless overridden.
+    """
+    mt, _ = resolve_limits(max_turns, None)
+    if max_tokens is not None and max_cost_usd is not None:
+        return BudgetConfig(max_turns=mt, max_tokens=max_tokens, max_cost_usd=max_cost_usd)
+    from fleetent.config import Settings
+
+    s = Settings()
+    return BudgetConfig(
+        max_turns=mt,
+        max_tokens=max_tokens if max_tokens is not None else s.agent_max_tokens,
+        max_cost_usd=max_cost_usd if max_cost_usd is not None else s.agent_max_cost_usd,
+    )
 
 
 def _resolve_loop_config(
@@ -72,33 +103,43 @@ def _build_controller(
     max_consecutive_failures: int | None,
     *,
     include_approval: bool,
+    budget_config: BudgetConfig,
+    budget_usage: BudgetUsage,
     loop_repeat_threshold: int | None = None,
     loop_ignore_arg_keys: list[str] | None = None,
     cancel_token: CancelToken | None = None,
-) -> tuple[TerminationController, LoopDetectionChecker]:
+) -> tuple[TerminationController, LoopDetectionChecker, BudgetChecker]:
     """Assemble the termination controller with the active checkers.
 
-    The loop-detection checker (AR4) registers AFTER the existing checkers so the
-    established termination priority (max_turns / consecutive_failures /
-    approval_rejected) is unchanged. Returns the checker too so the loop can read
-    its derived history window.
+    The budget checker (AR2) replaces the retired MaxTurnsChecker: the step
+    dimension is now one of three budget dimensions (turns / tokens / cost), and
+    any exhausted dimension produces `budget_exceeded` (not `max_turns`). The
+    `StopReason.max_turns` enum member is retained but the loop no longer produces
+    it (design D2). The budget checker reads the same per-run `budget_usage` the
+    loop accumulates into each turn, and is returned so the loop can read the
+    triggering dimension for the trace.
+
+    The loop-detection checker (AR4) registers AFTER it so the established
+    termination priority (budget / consecutive_failures / approval_rejected) is
+    unchanged relative to the old (max_turns / ...) ordering.
 
     The cancellation checker (AR19) registers first so an already-cancelled token
     short-circuits before any other reason; with a never-cancelling default token
     it can never fire, keeping the no-token path byte-identical.
     """
-    mt, mcf = resolve_limits(max_turns, max_consecutive_failures)
+    _, mcf = resolve_limits(max_turns, max_consecutive_failures)
     threshold, ignore_keys = _resolve_loop_config(loop_repeat_threshold, loop_ignore_arg_keys)
     controller = TerminationController()
     if cancel_token is not None:
         controller.register(CancellationChecker(cancel_token))
-    controller.register(MaxTurnsChecker(mt))
+    budget_checker = BudgetChecker(budget_config, budget_usage)
+    controller.register(budget_checker)
     controller.register(ConsecutiveFailuresChecker(mcf))
     if include_approval:
         controller.register(ApprovalRejectedChecker())
     loop_checker = LoopDetectionChecker(threshold, ignore_keys)
     controller.register(loop_checker)
-    return controller, loop_checker
+    return controller, loop_checker, budget_checker
 
 
 def _maybe_inject_loop_warning(messages: list[Any], state: LoopState) -> None:
@@ -180,6 +221,58 @@ async def _call_with_fallback(
             cache.record_failure(model)
             last_exc = exc
     raise last_exc  # type: ignore[misc]
+
+
+def _budget_add(usage: BudgetUsage, response_usage: Any, model: str) -> None:
+    """Fold one main-loop turn into the budget accumulator (D1).
+
+    Reads prompt/completion tokens off the response usage; a missing or non-int
+    usage still counts the turn (step dimension) with zero tokens, so the turns
+    dimension never silently stops accumulating.
+    """
+    prompt = getattr(response_usage, "prompt_tokens", 0)
+    completion = getattr(response_usage, "completion_tokens", 0)
+    usage.add(
+        prompt if isinstance(prompt, int) else 0,
+        completion if isinstance(completion, int) else 0,
+        model,
+    )
+
+
+async def _grace_call(
+    client: AsyncOpenAI,
+    cfg: RouteConfig,
+    messages: list[Any],
+    schemas: list[Any],
+    models: list[str],
+    budget_max_tokens: int,
+    partial_reply: str,
+) -> str:
+    """Final non-streaming summarizing call on budget exhaustion (AR2 D3).
+
+    Appends the grace instruction and asks for a one-paragraph summary under a
+    token cap reserved from the budget's token dimension. On any failure
+    (timeout/error/empty) the call degrades to the partial reply already
+    accumulated — logged, never retried, never crashing.
+    """
+    grace_messages = [*messages, {"role": "user", "content": _GRACE_CALL_TEXT}]
+    reserved = grace_max_tokens(budget_max_tokens)
+    try:
+        resp = await client.chat.completions.create(
+            model=models[0],
+            messages=grace_messages,
+            tools=schemas,
+            max_tokens=reserved,
+            **cfg.params,
+        )
+        summary = resp.choices[0].message.content or ""
+        if not summary:
+            logger.warning("grace_call_empty_fallback_partial")
+            return partial_reply
+        return summary
+    except Exception as exc:  # degrade to partial result; not swallowed silently
+        logger.warning("grace_call_failed_fallback_partial", error=str(exc))
+        return partial_reply
 
 
 async def _stream_with_fallback(
@@ -345,6 +438,8 @@ async def run(
     agent_name: str | None = None,
     max_turns: int | None = None,
     max_consecutive_failures: int | None = None,
+    max_tokens: int | None = None,
+    max_cost_usd: float | None = None,
     force_model: str | None = None,
     disabled_skills_trace: list[dict[str, str]] | None = None,
     loop_repeat_threshold: int | None = None,
@@ -395,10 +490,14 @@ async def run(
 
     # None → a never-cancelling default token, keeping the no-token path identical.
     token = cancel_token if cancel_token is not None else CancelToken()
-    controller, loop_checker = _build_controller(
+    budget_config = _resolve_budget_config(max_turns, max_tokens, max_cost_usd)
+    budget_usage = BudgetUsage()
+    controller, loop_checker, budget_checker = _build_controller(
         max_turns,
         max_consecutive_failures,
         include_approval=True,
+        budget_config=budget_config,
+        budget_usage=budget_usage,
         loop_repeat_threshold=loop_repeat_threshold,
         loop_ignore_arg_keys=loop_ignore_arg_keys,
         cancel_token=token,
@@ -438,6 +537,11 @@ async def run(
             _log_run_error(exc, messages, start, model_used, user_id, agent_name)
             raise
         state.turn += 1
+        # D1: accumulate this turn's usage immediately (step + tokens + cost) so the
+        # BudgetChecker judges on up-to-date usage at the next checkpoint — not on a
+        # single end-of-loop response.usage. Compression's internal LLM never reaches
+        # here, so it is exempt by construction (D4).
+        _budget_add(budget_usage, response.usage, model_used)
         models_to_try = [model_used]  # stick with the winning model for subsequent turns
         choice = response.choices[0]
         msg = choice.message
@@ -516,6 +620,15 @@ async def run(
             )
 
     reply = (msg.content if msg is not None else None) or ""
+    budget_dimension: str | None = None
+    if stop_reason == StopReason.budget_exceeded:
+        # Grace Call (D3): a final summarizing call instead of a hard cut. Its own
+        # usage is NOT folded into budget_usage (D4/D6: it spends the reserved
+        # dimension). Failure degrades to the partial reply already accumulated.
+        budget_dimension = budget_checker.triggered_dimension
+        reply = await _grace_call(
+            client, cfg, messages, schemas, [model_used], budget_config.max_tokens, reply
+        )
     usage = response.usage if response else None
     user_input = _first_user_input(messages)
     log_run(
@@ -531,6 +644,7 @@ async def run(
         hygiene_repairs=hygiene_repairs or None,
         cache_tokens=_extract_cache_tokens(usage),
         disabled_skills_trace=disabled_skills_trace,
+        budget_dimension=budget_dimension,
     )
     extract_and_save(user_input, messages, user_id=user_id)
     return reply
@@ -574,6 +688,8 @@ async def run_stream(
     agent_name: str | None = None,
     max_turns: int | None = None,
     max_consecutive_failures: int | None = None,
+    max_tokens: int | None = None,
+    max_cost_usd: float | None = None,
     images: list[tuple[bytes, str]] | None = None,
     force_model: str | None = None,
     loop_repeat_threshold: int | None = None,
@@ -621,10 +737,14 @@ async def run_stream(
     cache_tokens: dict[str, int] | None = None
 
     token = cancel_token if cancel_token is not None else CancelToken()
-    controller, loop_checker = _build_controller(
+    budget_config = _resolve_budget_config(max_turns, max_tokens, max_cost_usd)
+    budget_usage = BudgetUsage()
+    controller, loop_checker, budget_checker = _build_controller(
         max_turns,
         max_consecutive_failures,
         include_approval=False,
+        budget_config=budget_config,
+        budget_usage=budget_usage,
         loop_repeat_threshold=loop_repeat_threshold,
         loop_ignore_arg_keys=loop_ignore_arg_keys,
         cancel_token=token,
@@ -673,8 +793,12 @@ async def run_stream(
             return
 
         stream = cast(AsyncStream[ChatCompletionChunk], stream)
+        turn_prompt_tokens = 0
+        turn_completion_tokens = 0
         async for chunk in stream:
             if chunk.usage:
+                turn_prompt_tokens += chunk.usage.prompt_tokens
+                turn_completion_tokens += chunk.usage.completion_tokens
                 total_prompt_tokens += chunk.usage.prompt_tokens
                 total_completion_tokens += chunk.usage.completion_tokens
                 chunk_cache = _extract_cache_tokens(chunk.usage)
@@ -701,6 +825,11 @@ async def run_stream(
 
             if choice.finish_reason:
                 finish_reason = choice.finish_reason
+
+        # D1: settle this turn's usage into the per-run accumulator now (step +
+        # tokens + cost), so the BudgetChecker judges between turns rather than only
+        # at the end of the whole run. Compression's LLM never reaches here (D4).
+        budget_usage.add(turn_prompt_tokens, turn_completion_tokens, model_used)
 
         if finish_reason != "tool_calls":
             reply = "".join(reply_parts)
@@ -735,6 +864,49 @@ async def run_stream(
                 window=loop_checker.window,
             )
 
+    budget_dimension: str | None = None
+    if stop_reason == StopReason.budget_exceeded:
+        # D7: streaming Grace Call — re-issue one streaming LLM call under the
+        # reserved token cap and stream its summary out as text_delta before done.
+        # Degradations: (a) failure before any delta → emit the partial reply text
+        # then done; (b) failure after partial deltas → keep what streamed (cannot
+        # be unsent), record degradation, then done. Both always reach `done`.
+        budget_dimension = budget_checker.triggered_dimension
+        partial_reply = reply
+        grace_messages = [*messages, {"role": "user", "content": _GRACE_CALL_TEXT}]
+        reserved = grace_max_tokens(budget_config.max_tokens)
+        grace_parts: list[str] = []
+        any_delta = False
+        try:
+            grace_stream = await client.chat.completions.create(
+                model=model_used,
+                messages=grace_messages,
+                tools=[],
+                max_tokens=reserved,
+                stream=True,
+                stream_options={"include_usage": True},
+                **cfg.params,
+            )
+            grace_stream = cast(AsyncStream[ChatCompletionChunk], grace_stream)
+            async for chunk in grace_stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    any_delta = True
+                    grace_parts.append(delta.content)
+                    yield {"type": "text_delta", "content": delta.content}
+            reply = "".join(grace_parts) or partial_reply
+        except Exception as exc:  # degrade, never crash the stream (D7)
+            if any_delta:
+                logger.warning("grace_stream_failed_after_partial", error=str(exc))
+                reply = "".join(grace_parts)
+            else:
+                logger.warning("grace_stream_failed_before_delta", error=str(exc))
+                reply = partial_reply
+                if partial_reply:
+                    yield {"type": "text_delta", "content": partial_reply}
+
     yield {"type": "done", "content": reply}
 
     from openai.types import CompletionUsage as _CU
@@ -761,5 +933,6 @@ async def run_stream(
         hygiene_repairs=hygiene_repairs or None,
         cache_tokens=cache_tokens,
         disabled_skills_trace=disabled_trace,
+        budget_dimension=budget_dimension,
     )
     extract_and_save(user_input, messages, user_id=user_id)

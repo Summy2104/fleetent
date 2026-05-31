@@ -53,6 +53,9 @@ class StopReason(StrEnum):
     """Why the agent loop stopped. str-valued for clean JSONL trace serialization."""
 
     normal = "normal"
+    # Retained for compatibility (existing references / historical traces) but no
+    # longer produced by the loop: the step dimension is now one of the budget
+    # dimensions and surfaces as `budget_exceeded` (AR2 design D2).
     max_turns = "max_turns"
     consecutive_failures = "consecutive_failures"
     approval_rejected = "approval_rejected"
@@ -117,16 +120,6 @@ class TerminationController:
             if reason is not None:
                 return reason
         return None
-
-
-class MaxTurnsChecker:
-    """Stop once the loop has run the configured number of turns."""
-
-    def __init__(self, max_turns: int) -> None:
-        self._max_turns = max_turns
-
-    def check(self, state: LoopState) -> StopReason | None:
-        return StopReason.max_turns if state.turn >= self._max_turns else None
 
 
 class ConsecutiveFailuresChecker:

@@ -31,6 +31,7 @@ def log_run(
     hygiene_repairs: dict[str, int] | None = None,
     cache_tokens: dict[str, int] | None = None,
     disabled_skills_trace: list[dict[str, str]] | None = None,
+    budget_dimension: str | None = None,
 ) -> None:
     """Append one run record to the JSONL trace file."""
     entry: dict[str, Any] = {
@@ -57,6 +58,8 @@ def log_run(
         entry["agent_name"] = agent_name
     if stop_reason is not None:
         entry["stop_reason"] = stop_reason
+    if budget_dimension is not None:
+        entry["budget_dimension"] = budget_dimension
     if error_category is not None:
         entry["error_category"] = error_category
     if hygiene_repairs is not None:

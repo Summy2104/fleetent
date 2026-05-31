@@ -125,3 +125,24 @@ def test_image_gen_model_from_env(monkeypatch):
     monkeypatch.setenv("IMAGE_GEN_MODEL", "sdxl")
     s = Settings()
     assert s.image_gen_model == "sdxl"
+
+
+def test_budget_settings_defaults():
+    s = Settings(anthropic_api_key="test-key")
+    assert s.agent_max_tokens == -1
+    assert s.agent_max_cost_usd == -1.0
+    assert s.agent_grace_call_token_ratio == 0.05
+    assert s.agent_grace_call_min_tokens == 512
+
+
+def test_budget_settings_env_override(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("AGENT_MAX_TOKENS", "100000")
+    monkeypatch.setenv("AGENT_MAX_COST_USD", "2.5")
+    monkeypatch.setenv("AGENT_GRACE_CALL_TOKEN_RATIO", "0.1")
+    monkeypatch.setenv("AGENT_GRACE_CALL_MIN_TOKENS", "256")
+    s = Settings()
+    assert s.agent_max_tokens == 100000
+    assert s.agent_max_cost_usd == 2.5
+    assert s.agent_grace_call_token_ratio == 0.1
+    assert s.agent_grace_call_min_tokens == 256
