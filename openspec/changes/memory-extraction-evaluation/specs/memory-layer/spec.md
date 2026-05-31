@@ -1,0 +1,80 @@
+## ADDED Requirements
+
+### Requirement: Memory extraction evaluation fixtures
+系统 SHALL 提供 memory extraction evaluation fixtures，用于验证提取动作和最终 memory 状态。
+
+#### Scenario: Fixture schema is explicit
+- **WHEN** evaluation runner 加载 fixture
+- **THEN** fixture 包含 name、initial_memories、conversation、expected_actions、forbidden_actions 和 mock_actions
+
+#### Scenario: Invalid fixture is rejected
+- **WHEN** fixture 缺失必需字段或包含非法 action 类型
+- **THEN** evaluation runner 报告 fixture validation failure
+
+### Requirement: Deterministic memory extraction evaluation
+系统 SHALL 默认通过 mock LLM 运行 memory extraction evaluation，保证评估稳定且不依赖外部模型。
+
+#### Scenario: Mock actions drive extraction
+- **WHEN** evaluation fixture 提供 mock_actions
+- **THEN** evaluation runner 使用 mock_actions 驱动 `extract_and_update()`
+- **AND** 不调用真实 LLM 服务
+
+#### Scenario: Expected actions are validated
+- **WHEN** evaluation case 运行完成
+- **THEN** runner 验证 expected_actions 对应的 memory 状态存在
+
+#### Scenario: Forbidden actions are rejected
+- **WHEN** evaluation case 运行完成
+- **THEN** runner 验证 forbidden_actions 对应的 memory 状态不存在
+
+#### Scenario: Evaluation isolates storage and vector dependencies
+- **WHEN** evaluation case 运行
+- **THEN** SQLite 使用 tmp path 隔离
+- **AND** vector_store 被 mock 或使用测试替身
+- **AND** 不触碰 `data/`
+
+### Requirement: Memory extraction scenario coverage
+系统 SHALL 覆盖第一批 memory extraction 质量基线场景。
+
+#### Scenario: Identity create is covered
+- **WHEN** 用户首次提供稳定身份事实
+- **THEN** evaluation 包含 expected create identity action
+
+#### Scenario: Identity update is covered
+- **WHEN** 用户修正已有身份事实
+- **THEN** evaluation 包含 expected update identity action
+
+#### Scenario: Context update is covered
+- **WHEN** 用户更新当前项目或临时状态
+- **THEN** evaluation 包含 expected update context action
+
+#### Scenario: Preference create is covered
+- **WHEN** 用户明确表达长期偏好
+- **THEN** evaluation 包含 expected create preferences action
+
+#### Scenario: One-off preference request is covered
+- **WHEN** 用户只提出一次性格式或输出要求
+- **THEN** evaluation 包含 expected ignore action
+
+#### Scenario: Explicit forget is covered
+- **WHEN** 用户明确要求忘记某条记忆
+- **THEN** evaluation 包含 expected delete action
+
+#### Scenario: Noisy conversation ignore is covered
+- **WHEN** 对话没有可记忆事实或内容噪声较多
+- **THEN** evaluation 包含 expected ignore action
+
+### Requirement: Optional real LLM memory extraction evaluation
+系统 SHALL 提供显式启用的真实 LLM memory extraction evaluation 入口，且默认跳过。
+
+#### Scenario: Real LLM evaluation is skipped by default
+- **WHEN** 未设置 `FLEETENT_EVAL_REAL_LLM=1`
+- **THEN** 真实 LLM evaluation case 被 skip
+
+#### Scenario: Real LLM evaluation requires explicit opt-in
+- **WHEN** 设置 `FLEETENT_EVAL_REAL_LLM=1`
+- **THEN** runner 可以使用真实 `memory_extraction` 路由运行 fixture
+
+#### Scenario: Real LLM evaluation is not a PR gate
+- **WHEN** Bitbucket PR/main pipeline 运行
+- **THEN** pipeline 不默认运行真实 LLM evaluation
