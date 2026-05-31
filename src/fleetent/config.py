@@ -1,7 +1,19 @@
 import logging
 
 import structlog
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class LoggingSettings(BaseModel):
+    console_level: str = "info"
+    file_level: str = "debug"
+    directory: str = "data/logs"
+    json_file: bool = True
+
+
+class ObservabilitySettings(BaseModel):
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
 
 class Settings(BaseSettings):
@@ -20,9 +32,18 @@ class Settings(BaseSettings):
     log_format: str = "console"
     default_agent_name: str | None = None
     database_url: str = "sqlite:///data/users.db"
+    observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
 
 
 def configure_logging(settings: Settings) -> None:
+    from fleetent.observability.structured_logging import configure_structured_logging
+
+    configure_structured_logging(
+        console_level=settings.observability.logging.console_level,
+        file_level=settings.observability.logging.file_level,
+        directory=settings.observability.logging.directory,
+    )
+
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_logger_name,

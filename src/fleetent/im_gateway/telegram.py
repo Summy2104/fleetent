@@ -21,7 +21,8 @@ def create_app() -> object:
         raise RuntimeError("python-telegram-bot not installed") from None
 
     from fleetent.config import Settings
-    bot_token = Settings().telegram_bot_token
+
+    bot_token = Settings().telegram_bot_token  # type: ignore[call-arg]
     builder = Application.builder().token(bot_token).concurrent_updates(True)
     application = builder.build()
 
@@ -61,5 +62,6 @@ def create_app() -> object:
         await route(msg)
 
     from telegram.ext import MessageHandler, filters
+
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     return application

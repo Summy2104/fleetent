@@ -22,7 +22,8 @@ def create_app() -> object:
         raise RuntimeError("slack-bolt not installed") from None
 
     from fleetent.config import Settings
-    bot_token = Settings().slack_bot_token
+
+    bot_token = Settings().slack_bot_token  # type: ignore[call-arg]
     app = AsyncApp(token=bot_token)
 
     @app.event("message")

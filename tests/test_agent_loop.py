@@ -1,4 +1,5 @@
 """Unit tests for agent_loop.run() and run_stream()."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -8,7 +9,6 @@ from openai import APIStatusError, RateLimitError
 
 import fleetent.agent_loop as al
 from fleetent.model_router import RouteConfig
-
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -137,10 +137,14 @@ async def test_run_is_sub_agent_filters_sub_agent_from_schemas(mock_client):
 
     mock_client.chat.completions.create = capture
 
-    with patch.object(al, "get_schemas", return_value=[
-        {"function": {"name": "sub_agent"}},
-        {"function": {"name": "get_time"}},
-    ]):
+    with patch.object(
+        al,
+        "get_schemas",
+        return_value=[
+            {"function": {"name": "sub_agent"}},
+            {"function": {"name": "get_time"}},
+        ],
+    ):
         await al.run([{"role": "user", "content": "go"}], is_sub_agent=True)
 
     names = [s["function"]["name"] for s in schemas_used[0]]
@@ -157,10 +161,14 @@ async def test_run_not_sub_agent_includes_sub_agent_in_schemas(mock_client):
 
     mock_client.chat.completions.create = capture
 
-    with patch.object(al, "get_schemas", return_value=[
-        {"function": {"name": "sub_agent"}},
-        {"function": {"name": "get_time"}},
-    ]):
+    with patch.object(
+        al,
+        "get_schemas",
+        return_value=[
+            {"function": {"name": "sub_agent"}},
+            {"function": {"name": "get_time"}},
+        ],
+    ):
         await al.run([{"role": "user", "content": "go"}])
 
     names = [s["function"]["name"] for s in schemas_used[0]]
@@ -171,9 +179,7 @@ async def test_run_not_sub_agent_includes_sub_agent_in_schemas(mock_client):
 
 
 async def test_run_stream_yields_text_deltas_and_done(mock_client):
-    mock_client.chat.completions.create = AsyncMock(
-        return_value=_stream_chunks("hel", "lo", None)
-    )
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("hel", "lo", None))
 
     events = [e async for e in al.run_stream("say hello")]
 
@@ -216,9 +222,7 @@ async def test_run_stream_tool_call_yields_tool_events(mock_client):
         c.choices[0].finish_reason = "stop"
         yield c
 
-    mock_client.chat.completions.create = AsyncMock(
-        side_effect=[tool_stream(), text_stream()]
-    )
+    mock_client.chat.completions.create = AsyncMock(side_effect=[tool_stream(), text_stream()])
 
     events = [e async for e in al.run_stream("what time?")]
 
@@ -239,12 +243,16 @@ async def test_run_sub_agent_tool_intercepted_and_executed(mock_client):
     tasks_json = '[{"name": "t1", "prompt": "do it"}]'
     mock_client.chat.completions.create = AsyncMock(
         side_effect=[
-            _tool_resp("sub_agent", f'{{"tasks": "{tasks_json.replace(chr(34), chr(92)+chr(34))}"}}'  ),
+            _tool_resp(
+                "sub_agent", f'{{"tasks": "{tasks_json.replace(chr(34), chr(92) + chr(34))}"}}'
+            ),
             _text_resp("all done"),
         ]
     )
 
-    fake_results = [SubAgentResult(name="t1", result="task result", error=None, parent_session_id="")]
+    fake_results = [
+        SubAgentResult(name="t1", result="task result", error=None, parent_session_id="")
+    ]
 
     with patch.object(al, "SubAgentExecutor") as mock_executor_cls:
         mock_instance = AsyncMock()
@@ -262,6 +270,7 @@ async def test_run_sub_agent_tool_intercepted_and_executed(mock_client):
 async def test_run_sub_agent_result_formatted_in_tool_message(mock_client):
     """Sub-agent results are formatted as [name] result lines in the tool message."""
     import json as _json
+
     from fleetent.sub_agent import SubAgentResult
 
     tasks = [{"name": "fetch", "prompt": "get data"}]
@@ -344,6 +353,7 @@ async def test_run_allowed_tools_supports_wildcard(mock_client, monkeypatch):
 
 # ── fallback helpers ──────────────────────────────────────────────────────────
 
+
 def _mk_http_error(status: int, cls=APIStatusError) -> APIStatusError:
     r = MagicMock()
     r.status_code = status
@@ -408,9 +418,7 @@ async def test_run_exhausted_fallbacks_raises(mock_client_fb):
 
 
 async def test_run_401_not_retried(mock_client_fb):
-    mock_client_fb.chat.completions.create = AsyncMock(
-        side_effect=_mk_http_error(401)
-    )
+    mock_client_fb.chat.completions.create = AsyncMock(side_effect=_mk_http_error(401))
     with pytest.raises(APIStatusError) as exc_info:
         await al.run([{"role": "user", "content": "hi"}])
     assert exc_info.value.status_code == 401

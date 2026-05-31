@@ -18,8 +18,14 @@ def test_table_columns(db):
     with sqlite3.connect(db) as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(audit_log)").fetchall()}
     assert {
-        "id", "actor_user_id", "action", "target_type", "target_id",
-        "detail", "batch_id", "created_at",
+        "id",
+        "actor_user_id",
+        "action",
+        "target_type",
+        "target_id",
+        "detail",
+        "batch_id",
+        "created_at",
     } <= cols
 
 

@@ -9,6 +9,7 @@ from fleetent import memory_layer
 @pytest.fixture(autouse=True)
 def patch_mem_path(tmp_path, monkeypatch):
     """Redirect _mem_path to tmp_path so tests don't touch real data/."""
+
     def _patched(user_id: str = "default") -> object:
         return tmp_path / user_id / "memories.jsonl"
 
@@ -71,9 +72,9 @@ def test_load_memories_user_id_isolation(tmp_path):
 
 def test_extract_and_save_writes_facts(tmp_path):
     mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value.choices[0].message.content = (
-        '["User is learning Python", "Prefers short answers"]'
-    )
+    mock_client.chat.completions.create.return_value.choices[
+        0
+    ].message.content = '["User is learning Python", "Prefers short answers"]'
     mock_config = MagicMock()
     mock_config.model = "test-model"
     mock_config.max_tokens = 512

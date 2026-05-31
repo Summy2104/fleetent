@@ -22,9 +22,10 @@ def db(tmp_path, monkeypatch):
 def test_block_user_cascade(db):
     u = user_store.create_web_user("a@x.com", "Alice")
     plaintext, _ = aks.issue_key(u.id)
-    im = im_user_store.get_or_create("slack", "U1")  # creates User; bind not needed
+    im_user_store.get_or_create("slack", "U1")  # creates User; bind not needed
     # bind the IM identity to the blocked user for the cascade test
     import sqlite3
+
     with sqlite3.connect(db) as conn:
         conn.execute("UPDATE im_users SET user_id = ? WHERE platform='slack'", (u.id,))
 

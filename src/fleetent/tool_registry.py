@@ -6,8 +6,8 @@ The agent loop calls get_schemas() for the API payload and dispatch() to execute
 
 import inspect
 import json
-from collections.abc import Callable
-from typing import Any, overload
+from collections.abc import Callable, Coroutine
+from typing import Any, cast, overload
 
 ToolSchema = dict[str, Any]
 
@@ -15,16 +15,19 @@ _registry: dict[str, tuple[Callable[..., Any], ToolSchema]] = {}
 _risk_levels: dict[str, str] = {}
 
 
-@overload
-def tool[F: Callable[..., str]](fn: F) -> F: ...
+ToolFunc = Callable[..., str | Coroutine[Any, Any, str]]
 
 
 @overload
-def tool(*, risk_level: str = "none") -> Callable[[Callable[..., str]], Callable[..., str]]: ...
+def tool[F: ToolFunc](fn: F) -> F: ...
+
+
+@overload
+def tool(*, risk_level: str = "none") -> Callable[[ToolFunc], ToolFunc]: ...
 
 
 def tool(
-    fn: Callable[..., str] | None = None,
+    fn: ToolFunc | None = None,
     *,
     risk_level: str = "none",
 ) -> Any:
@@ -35,7 +38,7 @@ def tool(
     permission gate when needed.
     """
 
-    def _register(target: Callable[..., str]) -> Callable[..., str]:
+    def _register(target: ToolFunc) -> ToolFunc:
         _registry[target.__name__] = (target, _build_schema(target))
         _risk_levels[target.__name__] = risk_level
         return target
@@ -63,7 +66,7 @@ def dispatch(
     arguments_json: str | dict[str, Any],
     allowed_tools: list[str] | None = None,
     is_sub_agent: bool = False,
-) -> str:
+) -> str | Coroutine[Any, Any, str]:
     """Execute a registered tool by name with JSON-encoded arguments."""
     if is_sub_agent and name == _SUB_AGENT_TOOL:
         raise PermissionError("sub_agent tool is not available inside a sub-agent")
@@ -78,8 +81,7 @@ def dispatch(
     kwargs: dict[str, Any] = (
         arguments_json if isinstance(arguments_json, dict) else json.loads(arguments_json)
     )
-    result = fn(**kwargs)
-    return result  # type: ignore[no-any-return]
+    return cast(str | Coroutine[Any, Any, str], fn(**kwargs))
 
 
 def _build_schema(fn: Callable[..., Any]) -> ToolSchema:

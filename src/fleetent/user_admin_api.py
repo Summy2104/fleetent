@@ -5,6 +5,8 @@ Authentication uses a login session token in the Authorization header:
 This router does not import the agent loop, so it is testable in isolation.
 """
 
+from typing import Any
+
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
@@ -66,27 +68,34 @@ class IssueKeyBody(BaseModel):
     expires_at: str | None = None
 
 
-def _user_dict(u: user_store.User) -> dict:
+def _user_dict(u: user_store.User) -> dict[str, Any]:
     return {
-        "id": u.id, "name": u.name, "email": u.email,
-        "role": u.role, "status": u.status, "must_reset": u.must_reset,
+        "id": u.id,
+        "name": u.name,
+        "email": u.email,
+        "role": u.role,
+        "status": u.status,
+        "must_reset": u.must_reset,
     }
 
 
 @router.get("/users")
-def list_users(authorization: str | None = Header(None)) -> list[dict]:
+def list_users(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
     _current_user(authorization)
     return [_user_dict(u) for u in user_store.list_users()]
 
 
 @router.post("/users", status_code=201)
-def create_user(body: CreateUserBody, authorization: str | None = Header(None)) -> dict:
+def create_user(body: CreateUserBody, authorization: str | None = Header(None)) -> dict[str, Any]:
     _require_admin(authorization)
     pw_hash = auth.hash_password(body.password) if body.password else None
     try:
         user = user_store.create_web_user(
-            body.email, body.name, password_hash=pw_hash,
-            must_reset=body.must_reset, role=body.role,
+            body.email,
+            body.name,
+            password_hash=pw_hash,
+            must_reset=body.must_reset,
+            role=body.role,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -96,7 +105,7 @@ def create_user(body: CreateUserBody, authorization: str | None = Header(None)) 
 
 
 @router.get("/users/{user_id}")
-def get_user(user_id: str, authorization: str | None = Header(None)) -> dict:
+def get_user(user_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     _current_user(authorization)
     user = user_store.get_by_id(user_id)
     if user is None:
@@ -115,7 +124,9 @@ def delete_user(user_id: str, authorization: str | None = Header(None)) -> None:
 
 
 @router.patch("/users/{user_id}/role")
-def set_role(user_id: str, body: RoleBody, authorization: str | None = Header(None)) -> dict:
+def set_role(
+    user_id: str, body: RoleBody, authorization: str | None = Header(None)
+) -> dict[str, Any]:
     admin = _require_admin(authorization)
     try:
         user_store.set_role(user_id, body.role)
@@ -128,7 +139,9 @@ def set_role(user_id: str, body: RoleBody, authorization: str | None = Header(No
 
 
 @router.post("/users/{user_id}/block")
-def block_user(user_id: str, body: ReasonBody, authorization: str | None = Header(None)) -> dict:
+def block_user(
+    user_id: str, body: ReasonBody, authorization: str | None = Header(None)
+) -> dict[str, str]:
     admin = _require_admin(authorization)
     try:
         blocklist.block_user(user_id, reason=body.reason, actor=admin.id)
@@ -138,14 +151,14 @@ def block_user(user_id: str, body: ReasonBody, authorization: str | None = Heade
 
 
 @router.post("/users/{user_id}/unblock")
-def unblock_user(user_id: str, authorization: str | None = Header(None)) -> dict:
+def unblock_user(user_id: str, authorization: str | None = Header(None)) -> dict[str, str]:
     admin = _require_admin(authorization)
     blocklist.unblock_user(user_id, actor=admin.id)
     return {"status": "active"}
 
 
 @router.get("/users/{user_id}/keys")
-def list_keys(user_id: str, authorization: str | None = Header(None)) -> list[dict]:
+def list_keys(user_id: str, authorization: str | None = Header(None)) -> list[dict[str, Any]]:
     _current_user(authorization)
     return api_key_store.list_keys(user_id)
 
@@ -153,7 +166,7 @@ def list_keys(user_id: str, authorization: str | None = Header(None)) -> list[di
 @router.post("/users/{user_id}/keys", status_code=201)
 def issue_key(
     user_id: str, body: IssueKeyBody, authorization: str | None = Header(None)
-) -> dict:
+) -> dict[str, Any]:
     admin = _require_admin(authorization)
     plaintext, meta = api_key_store.issue_key(
         user_id, scope=body.scope, note=body.note, expires_at=body.expires_at
@@ -172,7 +185,7 @@ def revoke_key(key_id: int, authorization: str | None = Header(None)) -> None:
 @router.post("/im-users/{im_user_id}/block")
 def block_im_user(
     im_user_id: int, body: ReasonBody, authorization: str | None = Header(None)
-) -> dict:
+) -> dict[str, bool]:
     admin = _require_admin(authorization)
     im_user_store.block_im_user(im_user_id, reason=body.reason, actor=admin.id)
     return {"allowed": False}
@@ -181,7 +194,7 @@ def block_im_user(
 @router.post("/im-users/{im_user_id}/restore")
 def restore_im_user(
     im_user_id: int, body: ReasonBody, authorization: str | None = Header(None)
-) -> dict:
+) -> dict[str, bool]:
     admin = _require_admin(authorization)
     im_user_store.restore_im_user(im_user_id, reason=body.reason, actor=admin.id)
     return {"allowed": True}
@@ -193,6 +206,6 @@ def search_audit(
     actor: str | None = None,
     target_id: str | None = None,
     authorization: str | None = Header(None),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     _current_user(authorization)
     return audit_log.search_audit(action=action, actor=actor, target_id=target_id)

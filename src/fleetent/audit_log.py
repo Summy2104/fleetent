@@ -2,6 +2,7 @@
 
 import datetime
 import json
+from typing import Any
 
 from fleetent.user_store import (
     DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching
@@ -19,7 +20,7 @@ def write_audit(
     action: str,
     target_type: str | None = None,
     target_id: str | None = None,
-    detail: dict | None = None,
+    detail: dict[str, Any] | None = None,
     batch_id: str | None = None,
 ) -> None:
     _init_db()
@@ -47,7 +48,7 @@ def search_audit(
     target_id: str | None = None,
     since: str | None = None,
     until: str | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     _init_db()
     clauses: list[str] = []
     params: list[str] = []
@@ -74,7 +75,7 @@ def search_audit(
     return [_row_to_dict(r) for r in rows]
 
 
-def _row_to_dict(row: tuple) -> dict:
+def _row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
     d = dict(zip(_FIELDS, row, strict=True))
     d["detail"] = json.loads(d["detail"]) if d["detail"] else None
     return d

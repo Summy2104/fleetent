@@ -7,7 +7,6 @@ import hmac
 import json
 from unittest.mock import AsyncMock, patch
 
-import pytest
 import yaml
 from starlette.testclient import TestClient
 
@@ -19,8 +18,14 @@ def _make_sig(secret: str, body: bytes) -> str:
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
-def _yaml_with_source(tmp_path, source_id="test-src", secret=None, user_id="u-1",
-                       agent_name=None, message_template=None) -> object:
+def _yaml_with_source(
+    tmp_path,
+    source_id="test-src",
+    secret=None,
+    user_id="u-1",
+    agent_name=None,
+    message_template=None,
+) -> object:
     """Write a webhooks.yaml with one source and return the path."""
     entry: dict = {"id": source_id, "user_id": user_id}
     if secret:
@@ -37,17 +42,19 @@ def _yaml_with_source(tmp_path, source_id="test-src", secret=None, user_id="u-1"
 # ── 202 / 404 / 403 ──────────────────────────────────────────────────────────
 
 
-def test_webhook_known_source_returns_202(tmp_path, monkeypatch):
+def test_webhook_known_source_returns_202(tmp_path, monkeypatch, isolated_schedule_db):
     monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", _yaml_with_source(tmp_path))
 
-    with patch("fleetent.im_gateway.normalizer.route", new=AsyncMock()):
-        with TestClient(srv.app) as client:
-            resp = client.post("/webhook/test-src", json={"event": "push"})
+    with (
+        patch("fleetent.im_gateway.normalizer.route", new=AsyncMock()),
+        TestClient(srv.app) as client,
+    ):
+        resp = client.post("/webhook/test-src", json={"event": "push"})
 
     assert resp.status_code == 202
 
 
-def test_webhook_unknown_source_returns_404(tmp_path, monkeypatch):
+def test_webhook_unknown_source_returns_404(tmp_path, monkeypatch, isolated_schedule_db):
     monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", _yaml_with_source(tmp_path))
 
     with TestClient(srv.app) as client:
@@ -56,9 +63,8 @@ def test_webhook_unknown_source_returns_404(tmp_path, monkeypatch):
     assert resp.status_code == 404
 
 
-def test_webhook_invalid_signature_returns_403(tmp_path, monkeypatch):
-    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH",
-                        _yaml_with_source(tmp_path, secret="mysecret"))
+def test_webhook_invalid_signature_returns_403(tmp_path, monkeypatch, isolated_schedule_db):
+    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", _yaml_with_source(tmp_path, secret="mysecret"))
 
     with TestClient(srv.app) as client:
         resp = client.post(
@@ -70,9 +76,8 @@ def test_webhook_invalid_signature_returns_403(tmp_path, monkeypatch):
     assert resp.status_code == 403
 
 
-def test_webhook_missing_signature_returns_403(tmp_path, monkeypatch):
-    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH",
-                        _yaml_with_source(tmp_path, secret="mysecret"))
+def test_webhook_missing_signature_returns_403(tmp_path, monkeypatch, isolated_schedule_db):
+    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", _yaml_with_source(tmp_path, secret="mysecret"))
 
     with TestClient(srv.app) as client:
         resp = client.post("/webhook/test-src", json={"event": "push"})
@@ -80,32 +85,33 @@ def test_webhook_missing_signature_returns_403(tmp_path, monkeypatch):
     assert resp.status_code == 403
 
 
-def test_webhook_valid_signature_returns_202(tmp_path, monkeypatch):
-    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH",
-                        _yaml_with_source(tmp_path, secret="mysecret"))
+def test_webhook_valid_signature_returns_202(tmp_path, monkeypatch, isolated_schedule_db):
+    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", _yaml_with_source(tmp_path, secret="mysecret"))
 
     body = json.dumps({"event": "push"}).encode()
     sig = _make_sig("mysecret", body)
 
-    with patch("fleetent.im_gateway.normalizer.route", new=AsyncMock()):
-        with TestClient(srv.app) as client:
-            resp = client.post(
-                "/webhook/test-src",
-                content=body,
-                headers={"content-type": "application/json",
-                         "x-hub-signature-256": sig},
-            )
+    with (
+        patch("fleetent.im_gateway.normalizer.route", new=AsyncMock()),
+        TestClient(srv.app) as client,
+    ):
+        resp = client.post(
+            "/webhook/test-src",
+            content=body,
+            headers={"content-type": "application/json", "x-hub-signature-256": sig},
+        )
 
     assert resp.status_code == 202
 
 
-def test_webhook_no_secret_accepts_without_signature(tmp_path, monkeypatch):
-    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH",
-                        _yaml_with_source(tmp_path, secret=None))
+def test_webhook_no_secret_accepts_without_signature(tmp_path, monkeypatch, isolated_schedule_db):
+    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", _yaml_with_source(tmp_path, secret=None))
 
-    with patch("fleetent.im_gateway.normalizer.route", new=AsyncMock()):
-        with TestClient(srv.app) as client:
-            resp = client.post("/webhook/test-src", json={"event": "push"})
+    with (
+        patch("fleetent.im_gateway.normalizer.route", new=AsyncMock()),
+        TestClient(srv.app) as client,
+    ):
+        resp = client.post("/webhook/test-src", json={"event": "push"})
 
     assert resp.status_code == 202
 
@@ -115,11 +121,13 @@ def test_webhook_no_secret_accepts_without_signature(tmp_path, monkeypatch):
 
 async def test_webhook_dispatches_normalized_message(monkeypatch):
     import asyncio
+
     from httpx import ASGITransport, AsyncClient
 
     # Directly populate sources — AsyncClient doesn't trigger lifespan
-    source = wr.WebhookSource(id="test-src", user_id="webhook-user",
-                               message_template="event: {event}")
+    source = wr.WebhookSource(
+        id="test-src", user_id="webhook-user", message_template="event: {event}"
+    )
     monkeypatch.setitem(srv._webhook_sources, "test-src", source)
 
     route_mock = AsyncMock()
@@ -141,6 +149,7 @@ async def test_webhook_dispatches_normalized_message(monkeypatch):
 
 async def test_webhook_reply_func_is_noop(monkeypatch):
     import asyncio
+
     from httpx import ASGITransport, AsyncClient
 
     source = wr.WebhookSource(id="test-src", user_id="u-1")

@@ -16,7 +16,7 @@ _EXTRACT_SYSTEM = (
     "You are a memory extractor. From the conversation below, extract facts about the user "
     "worth remembering long-term (name, preferences, goals, ongoing context). "
     "Return a JSON array of short fact strings. "
-    'If nothing is worth remembering, return []. '
+    "If nothing is worth remembering, return []. "
     'Example: ["User prefers Chinese replies", "User is learning agent development"]'
 )
 

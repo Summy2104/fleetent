@@ -8,6 +8,7 @@ from fleetent.im_gateway.normalizer import NormalizedMessage, route
 @pytest.fixture
 def mock_session_mgr(monkeypatch):
     import fleetent.session_mgr as sm
+
     monkeypatch.setattr(sm, "load", AsyncMock(return_value=[]))
     monkeypatch.setattr(sm, "save", AsyncMock())
     return sm
@@ -16,16 +17,18 @@ def mock_session_mgr(monkeypatch):
 @pytest.fixture
 def mock_agent_loop(monkeypatch):
     import fleetent.agent_loop as al
+
     monkeypatch.setattr(al, "run", AsyncMock(return_value="agent response"))
     return al
 
 
 @pytest.fixture
 def mock_memory_skill(monkeypatch):
+    import fleetent.im_gateway.normalizer as norm
+    import fleetent.im_user_store as ius
     import fleetent.memory_layer as ml
     import fleetent.skill_registry as sr
-    import fleetent.im_user_store as ius
-    import fleetent.im_gateway.normalizer as norm
+
     monkeypatch.setattr(ml, "load_memories", lambda **kwargs: "")
     monkeypatch.setattr(sr, "match", lambda text: None)
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
@@ -132,17 +135,20 @@ async def test_reject_command_resolves_gate(mock_session_mgr, mock_agent_loop, m
 
 async def test_slack_dm_session_id():
     from fleetent.im_gateway.slack import _derive_session_id
+
     assert _derive_session_id(user_id="U123", channel_type="im", thread_ts=None) == "user:U123"
 
 
 async def test_slack_thread_session_id():
     from fleetent.im_gateway.slack import _derive_session_id
+
     result = _derive_session_id(user_id="U123", channel_type="channel", thread_ts="T456")
     assert result == "thread:T456"
 
 
 async def test_slack_channel_no_thread():
     from fleetent.im_gateway.slack import _derive_session_id
+
     # No thread_ts in a channel message → use user session as fallback
     result = _derive_session_id(user_id="U123", channel_type="channel", thread_ts=None)
     # Should return something non-None (either user: or create a new thread)
@@ -151,11 +157,13 @@ async def test_slack_channel_no_thread():
 
 async def test_telegram_private_session_id():
     from fleetent.im_gateway.telegram import _derive_session_id
+
     assert _derive_session_id(chat_type="private", user_id=12345, reply_to_id=None) == "user:12345"
 
 
 async def test_telegram_group_reply_session_id():
     from fleetent.im_gateway.telegram import _derive_session_id
+
     assert _derive_session_id(chat_type="group", user_id=12345, reply_to_id=999) == "thread:999"
 
 
@@ -212,8 +220,8 @@ async def test_route_uses_agent_system_prompt_and_allowed_tools(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
     """route() should pass agent's system_prompt and allowed_tools when an agent is assigned."""
-    from fleetent.agent_store import Agent
     import fleetent.im_gateway.normalizer as norm
+    from fleetent.agent_store import Agent
 
     fake_agent = Agent(
         id=1,
@@ -221,7 +229,9 @@ async def test_route_uses_agent_system_prompt_and_allowed_tools(
         system_prompt="You are a restricted agent.",
         allowed_tools=["calculate"],
     )
-    monkeypatch.setattr(norm, "get_agent_for_context", lambda platform, channel_id, user_id: fake_agent)
+    monkeypatch.setattr(
+        norm, "get_agent_for_context", lambda platform, channel_id, user_id: fake_agent
+    )
 
     reply_calls: list[str] = []
 
@@ -276,7 +286,6 @@ async def test_route_blocked_user_gets_rejection_not_agent(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
     """User with allowed=False receives rejection message; agent_loop is NOT called."""
-    import fleetent.im_gateway.normalizer as norm
     import fleetent.im_user_store as ius
 
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: False)
@@ -307,14 +316,18 @@ async def test_route_channel_agent_takes_priority(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
     """Channel-level agent is used when bound, regardless of user binding."""
-    from fleetent.agent_store import Agent
     import fleetent.im_gateway.normalizer as norm
     import fleetent.im_user_store as ius
+    from fleetent.agent_store import Agent
 
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
 
-    channel_agent = Agent(id=10, name="channel-bot", system_prompt="Channel sys.", allowed_tools=["shell"])
-    monkeypatch.setattr(norm, "get_agent_for_context", lambda platform, channel_id, user_id: channel_agent)
+    channel_agent = Agent(
+        id=10, name="channel-bot", system_prompt="Channel sys.", allowed_tools=["shell"]
+    )
+    monkeypatch.setattr(
+        norm, "get_agent_for_context", lambda platform, channel_id, user_id: channel_agent
+    )
 
     reply_calls: list[str] = []
 

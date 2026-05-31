@@ -46,6 +46,7 @@ async def route(msg: NormalizedMessage) -> None:
     m = _APPROVAL_RE.match(msg.text.strip())
     if m:
         from fleetent.permission_gate import _default_gate
+
         decision = "approved" if m.group(1).lower() == "approve" else "rejected"
         approval_id = m.group(2)
         found = await _default_gate.resolve(
@@ -54,7 +55,9 @@ async def route(msg: NormalizedMessage) -> None:
             approver_user_id=msg.user_id,
         )
         if found:
-            await msg.reply_func(f"{'✅' if decision == 'approved' else '❌'} {approval_id} {decision}")
+            await msg.reply_func(
+                f"{'✅' if decision == 'approved' else '❌'} {approval_id} {decision}"
+            )
         else:
             await msg.reply_func(f"⚠️ approval {approval_id} not found or already expired")
         return
@@ -63,9 +66,7 @@ async def route(msg: NormalizedMessage) -> None:
     # connector has allowlist_enforced off, this always passes (backward compatible).
     from fleetent import im_channel_allowlist
 
-    if not im_channel_allowlist.is_allowed(
-        msg.platform, msg.channel_id, msg.workspace_id or None
-    ):
+    if not im_channel_allowlist.is_allowed(msg.platform, msg.channel_id, msg.workspace_id or None):
         await msg.reply_func(_REJECTION_MSG)
         return
 
@@ -103,7 +104,9 @@ async def route(msg: NormalizedMessage) -> None:
         history.append({"role": "user", "content": msg.text})
 
         response = await agent_loop.run(
-            messages=history, user_id=msg.user_id, reply_func=msg.reply_func,
+            messages=history,
+            user_id=msg.user_id,
+            reply_func=msg.reply_func,
             allowed_tools=allowed_tools,
         )
 

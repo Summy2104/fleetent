@@ -1,4 +1,5 @@
 """End-to-end integration tests for the full IM message pipeline."""
+
 from __future__ import annotations
 
 import json
@@ -37,9 +38,11 @@ async def test_full_slack_message_pipeline(isolated_db):
 
     # Mock agent_loop.run to return deterministic response and mutate messages in-place
     with patch("fleetent.agent_loop.run", new_callable=AsyncMock) as mock_run:
+
         async def fake_run(messages, **kwargs):
             messages.append({"role": "assistant", "content": "Hello from agent"})
             return "Hello from agent"
+
         mock_run.side_effect = fake_run
 
         msg = NormalizedMessage(
@@ -98,9 +101,7 @@ async def test_permission_gate_approved_tool_executes(isolated_db):
 
     # Verify approvals table has approved row
     conn = sqlite3.connect(isolated_db / "users.db")
-    row = conn.execute(
-        "SELECT status FROM approvals WHERE id = ?", ("test-appr-1",)
-    ).fetchone()
+    row = conn.execute("SELECT status FROM approvals WHERE id = ?", ("test-appr-1",)).fetchone()
     conn.close()
     assert row[0] == "approved"
 
@@ -133,9 +134,11 @@ async def test_session_history_accumulates_across_messages(isolated_db):
         reply_calls.append(text)
 
     with patch("fleetent.agent_loop.run", new_callable=AsyncMock) as mock_run:
+
         async def fake_run(messages, **kwargs):
             messages.append({"role": "assistant", "content": "response"})
             return "response"
+
         mock_run.side_effect = fake_run
 
         for text in ["message one", "message two"]:
@@ -152,5 +155,5 @@ async def test_session_history_accumulates_across_messages(isolated_db):
     # After two messages: system + user1 + assistant1 + user2 + assistant2 = 5 entries
     history = await session_mgr.load("user:U999")
     assert len(history) == 5
-    assert history[1]["content"] == "message one"   # history[0] is system message
+    assert history[1]["content"] == "message one"  # history[0] is system message
     assert history[3]["content"] == "message two"

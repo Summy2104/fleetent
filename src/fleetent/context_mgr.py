@@ -9,7 +9,8 @@ ContextConfig = dict[str, Any]
 
 def _default_config() -> ContextConfig:
     from fleetent.config import Settings
-    s = Settings()
+
+    s = Settings()  # type: ignore[call-arg]
     return {
         "max_tokens": s.context_max_tokens,
         "compress_threshold": s.context_compress_threshold,

@@ -1,7 +1,12 @@
 import pytest
 from openai import AsyncOpenAI, OpenAI
 
-from fleetent.model_router import ROUTES, RouteConfig, get_async_client_and_config, get_client_and_config
+from fleetent.model_router import (
+    ROUTES,
+    RouteConfig,
+    get_async_client_and_config,
+    get_client_and_config,
+)
 
 
 def test_routes_define_default_and_memory_extraction():
@@ -50,6 +55,7 @@ def test_get_async_client_and_config_memory_route(monkeypatch):
 
 
 # --- fallbacks ---
+
 
 def test_route_config_fallbacks_default_empty():
     cfg = RouteConfig(base_url="https://api.test.com", model="m", api_key_env="K", max_tokens=512)

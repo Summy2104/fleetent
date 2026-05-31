@@ -1,4 +1,5 @@
 import datetime
+from typing import Any
 
 from fleetent.user_store import (
     DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching
@@ -39,9 +40,7 @@ def check_allowed_by_user_id(user_id: str) -> bool:
     """Return True if user is not in im_users (HTTP API user) or is explicitly allowed."""
     _init_db()
     with _conn() as conn:
-        row = conn.execute(
-            "SELECT allowed FROM im_users WHERE user_id = ?", (user_id,)
-        ).fetchone()
+        row = conn.execute("SELECT allowed FROM im_users WHERE user_id = ?", (user_id,)).fetchone()
     if row is None:
         return True
     return bool(row[0])
@@ -60,7 +59,9 @@ def block_user(im_user_id: int) -> None:
 
 
 def block_im_user(
-    im_user_id: int, reason: str | None = None, actor: str | None = None,
+    im_user_id: int,
+    reason: str | None = None,
+    actor: str | None = None,
     batch_id: str | None = None,
 ) -> None:
     """Block a single IM identity (admin workbench). Audited."""
@@ -70,13 +71,19 @@ def block_im_user(
     with _conn() as conn:
         conn.execute("UPDATE im_users SET allowed = 0 WHERE id = ?", (im_user_id,))
     audit_log.write_audit(
-        actor, "block_im_user", target_type="im_user", target_id=str(im_user_id),
-        detail={"reason": reason}, batch_id=batch_id,
+        actor,
+        "block_im_user",
+        target_type="im_user",
+        target_id=str(im_user_id),
+        detail={"reason": reason},
+        batch_id=batch_id,
     )
 
 
 def restore_im_user(
-    im_user_id: int, reason: str | None = None, actor: str | None = None,
+    im_user_id: int,
+    reason: str | None = None,
+    actor: str | None = None,
     batch_id: str | None = None,
 ) -> None:
     """Restore a single IM identity (admin workbench). Audited."""
@@ -86,8 +93,12 @@ def restore_im_user(
     with _conn() as conn:
         conn.execute("UPDATE im_users SET allowed = 1 WHERE id = ?", (im_user_id,))
     audit_log.write_audit(
-        actor, "restore_im_user", target_type="im_user", target_id=str(im_user_id),
-        detail={"reason": reason}, batch_id=batch_id,
+        actor,
+        "restore_im_user",
+        target_type="im_user",
+        target_id=str(im_user_id),
+        detail={"reason": reason},
+        batch_id=batch_id,
     )
 
 
@@ -100,7 +111,7 @@ def batch_block_im(im_user_ids: list[int], reason: str, actor: str | None = None
     return batch_id
 
 
-def list_im_identities(user_id: str) -> list[dict]:
+def list_im_identities(user_id: str) -> list[dict[str, Any]]:
     """All IM identities (across platforms) belonging to one internal User."""
     _init_db()
     with _conn() as conn:
@@ -115,7 +126,7 @@ def list_im_identities(user_id: str) -> list[dict]:
     ]
 
 
-def list_pending() -> list[dict]:
+def list_pending() -> list[dict[str, Any]]:
     _init_db()
     with _conn() as conn:
         rows = conn.execute(
@@ -123,8 +134,7 @@ def list_pending() -> list[dict]:
             " FROM im_users WHERE allowed = 0 ORDER BY created_at"
         ).fetchall()
     return [
-        {"id": r[0], "platform": r[1], "platform_user_id": r[2], "created_at": r[3]}
-        for r in rows
+        {"id": r[0], "platform": r[1], "platform_user_id": r[2], "created_at": r[3]} for r in rows
     ]
 
 
@@ -143,9 +153,7 @@ def _init_db() -> None:
         )
         # Migrate: add allowed column to existing tables
         try:
-            conn.execute(
-                "ALTER TABLE im_users ADD COLUMN allowed BOOLEAN NOT NULL DEFAULT 0"
-            )
+            conn.execute("ALTER TABLE im_users ADD COLUMN allowed BOOLEAN NOT NULL DEFAULT 0")
             # Existing users were already active before allowlist — grant access
             conn.execute("UPDATE im_users SET allowed = 1 WHERE allowed = 0")
         except Exception:

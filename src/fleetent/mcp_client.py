@@ -26,14 +26,16 @@ _exit_stack: AsyncExitStack | None = None
 @dataclass
 class McpServerConfig:
     id: str
-    transport: str = "http"         # "http" | "stdio"
+    transport: str = "http"  # "http" | "stdio"
     # HTTP fields
     url: str = ""
-    auth_type: str = "none"         # "none" | "api_key" | "oauth2"
+    auth_type: str = "none"  # "none" | "api_key" | "oauth2"
     api_key_env: str = ""
     # stdio fields
-    command: str = ""               # e.g. "npx" or "python"
-    args: list[str] = field(default_factory=list)  # e.g. ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    command: str = ""  # e.g. "npx" or "python"
+    args: list[str] = field(
+        default_factory=list
+    )  # e.g. ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
     env: dict[str, str] = field(default_factory=dict)  # extra env vars for the subprocess
 
 
@@ -59,10 +61,13 @@ async def close() -> None:
 
 
 async def register_all(servers: list[McpServerConfig]) -> None:
+    from fleetent.observability.startup_diagnostics import log_mcp_server_unreachable
+
     for server in servers:
         try:
             await _register_server(server)
         except Exception as exc:
+            log_mcp_server_unreachable(server.id, str(exc))
             logger.warning("mcp_server_unavailable server_id=%s error=%s", server.id, exc)
 
 
@@ -98,7 +103,9 @@ async def _register_stdio_server(server: McpServerConfig) -> None:
         tool_name = _make_tool_name(server.id, tool_def.name)
         _register_tool_stdio(server, tool_name, tool_def)
 
-    logger.info("mcp_server_registered server_id=%s transport=stdio tool_count=%d", server.id, len(tools))
+    logger.info(
+        "mcp_server_registered server_id=%s transport=stdio tool_count=%d", server.id, len(tools)
+    )
 
 
 async def _register_http_server(server: McpServerConfig) -> None:
@@ -124,13 +131,19 @@ async def _register_http_server(server: McpServerConfig) -> None:
         _register_tool_http(server, tool_name, tool_def)
 
     _server_registry[server.id] = server
-    logger.info("mcp_server_registered server_id=%s transport=http tool_count=%d", server.id, len(tools))
+    logger.info(
+        "mcp_server_registered server_id=%s transport=http tool_count=%d", server.id, len(tools)
+    )
 
 
 def _register_tool_stdio(server: McpServerConfig, tool_name: str, tool_def: Any) -> None:
     import fleetent.tool_registry as tr
 
-    input_schema = tool_def.inputSchema if hasattr(tool_def, "inputSchema") else {"type": "object", "properties": {}}
+    input_schema = (
+        tool_def.inputSchema
+        if hasattr(tool_def, "inputSchema")
+        else {"type": "object", "properties": {}}
+    )
 
     async def call(**kwargs: object) -> str:
         return await _call_stdio_tool(server.id, tool_def.name, dict(kwargs))
@@ -171,7 +184,7 @@ async def _call_stdio_tool(server_id: str, tool_name: str, args: dict[str, Any])
         raise KeyError(f"No active stdio session for MCP server: {server_id}")
     result = await session.call_tool(tool_name, args)
     if result.content:
-        return result.content[0].text
+        return str(result.content[0].text)
     return ""
 
 
@@ -205,7 +218,7 @@ async def _call_http_tool(server_id: str, tool_name: str, args: dict[str, Any]) 
     if isinstance(result, dict):
         contents = result.get("content", [])
         if contents and isinstance(contents[0], dict):
-            return contents[0].get("text", str(result))
+            return str(contents[0].get("text", str(result)))
     return str(result) if result is not None else ""
 
 

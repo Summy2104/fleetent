@@ -3,6 +3,7 @@
 import datetime
 import hashlib
 import secrets
+from typing import Any
 
 from fleetent.user_store import (
     DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching
@@ -20,7 +21,7 @@ def _now() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
 
 
-def create_invite(email: str, ttl_seconds: int = 86400) -> tuple[str, dict]:
+def create_invite(email: str, ttl_seconds: int = 86400) -> tuple[str, dict[str, Any]]:
     """Create a one-time invite for an email. Returns (token shown once, metadata)."""
     _init_db()
     token = secrets.token_urlsafe(24)

@@ -23,9 +23,19 @@ def _columns(db_path):
 
 def test_table_columns(db):
     assert {
-        "id", "user_id", "key_hash", "prefix", "scope", "note",
-        "expires_at", "revoked_at", "created_at", "last_used_at",
-        "last_ip", "last_ua", "call_count",
+        "id",
+        "user_id",
+        "key_hash",
+        "prefix",
+        "scope",
+        "note",
+        "expires_at",
+        "revoked_at",
+        "created_at",
+        "last_used_at",
+        "last_ip",
+        "last_ua",
+        "call_count",
     } <= _columns(db)
 
 
