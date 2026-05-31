@@ -29,8 +29,10 @@
 - ✅ **alembic DB migration**：schema 版本管理
   - 升级时自动执行 migration，不需要手动改表
 
-- ✅ **SQLite 零运维**：默认存储，无需独立数据库服务
+- ✅ **SQLite-first 默认存储**：无需独立数据库服务
   - 数据在 data/ 目录，挂载 volume 持久化
+  - 当前不要求 PostgreSQL；数据库访问边界需避免把业务层写死到 SQLite
+  - 不引入 ORM；schema lifecycle 由 alembic 统一管理
 
 ## 规划中（v1.0）
 
@@ -47,6 +49,10 @@
 
 - [ ] **升级脚本**：新版本部署时自动执行 alembic upgrade head
   - 升级前自动备份 SQLite 文件
+
+- [ ] **统一 database_url 配置**：以 SQLite 为默认后端，保留后续 PostgreSQL 接入空间
+  - 默认值指向本机 `data/users.db`
+  - 业务 store 通过统一 DB runtime 获取连接和事务，不直接依赖 SQLite 文件路径
 
 ## 验收标准
 
@@ -73,4 +79,4 @@
 ## 待决问题
 
 - [ ] License key 的发放和管理方案（负责人：待认领）
-- [ ] on-premises 支持 PostgreSQL 的时间节点：SQLAlchemy 迁移 vs 直接重写（负责人：待认领）
+- [ ] PostgreSQL 作为可选生产后端的时间节点与 OpenSpec change 范围（负责人：待认领）

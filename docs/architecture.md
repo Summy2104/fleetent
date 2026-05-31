@@ -126,7 +126,7 @@ flowchart TD
 |------|------|------|
 | 部署结构 | 模块化单体，单进程 | on-premises 天敌是复杂度，微服务带来不必要运维负担 |
 | LLM 调用 | 直接调 SDK，不用框架 | LangChain 频繁 breaking change，debug 困难 |
-| 数据库 | SQLite（可升 PostgreSQL）| 零运维，on-premises 友好；直接用 aiosqlite，不引入 ORM |
+| 数据库 | SQLite-first，不引入 ORM；通过 DB runtime + store 边界保留 PostgreSQL 迁移空间 | 初期零运维、on-premises 友好；手写 SQL 更可审计。业务层禁止直接依赖 SQLite 文件路径、连接实现或方言细节 |
 | Session 存储 | JSON 文件 + asyncio.Lock | 可调试；原子写（.tmp → rename）防损坏 |
 | 工具审批 | asyncio.Event 门控 | 无轮询，优雅等待；重启后调用 cleanup_stale_approvals() 清理孤儿 |
 | 代码执行隔离 | Docker CLI（当前）→ microsandbox microVM（v1.0 目标） | 每个沙箱独立 Linux 内核，无命名空间逃逸风险；< 100ms 启动；无需 dockerd |
