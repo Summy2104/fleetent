@@ -29,6 +29,9 @@ docs/
 
 **功能描述**：「现状」和「规划中」每条只写可观察的行为，不写内部实现细节。有必要时加子 bullet 补充边界和约束。
 
+**模块归属**：每份 capability 文档应声明 owning package、public API、owned tables、config namespace
+和 cross-module dependencies。没有持久化或配置时写「无」，不要省略。
+
 **验收标准**：只写用户或调用方能观察到的行为（端到端视角）。单元级断言写在 OpenSpec 的测试任务里，不在这里。
 
 **漂移处理**：实施过程中设计有变化，同步更新文档对应 section。文档是活的，不是归档记录。

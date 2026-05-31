@@ -10,6 +10,12 @@
 - 依赖：列出这个域依赖哪些其他域或外部系统
 - 被依赖：哪些域会调用这个域
 
+**模块归属**：
+- owning package：例如 `runtime` / `governance` / `platform` / `channels` / `intelligence` / `integrations` / `observability` / `infrastructure`
+- public API：列出允许其他模块 import / 调用的函数、dataclass 或 service interface；无则写「无」
+- owned tables：列出本模块拥有的持久化表；无则写「无」
+- config namespace：列出本模块拥有的配置命名空间；无则写「无」
+
 ## 关键流程
 
 > 可选。流程复杂、文字难以描述清楚时才加。用 Mermaid 图展示数据流向或触发关系。

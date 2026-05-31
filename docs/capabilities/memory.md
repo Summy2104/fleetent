@@ -27,6 +27,12 @@ fleetent 的记忆系统借鉴认知科学的四类记忆划分，每类由不�
 - 依赖：model_router（`memory_extraction` task，默认轻量模型，可通过 config 覆盖）、vector_store（向量索引）、config
 - 被依赖：long_term_ctx（检索注入内容）、reflection（读取现有记忆、写回优化结果）
 
+**模块归属**：
+- owning package：`intelligence.memory_layer`
+- public API：`search(user_id, query, limit)`、`extract_and_update(user_id, conversation)`、`MemoryItem`
+- owned tables：`memory_items`
+- config namespace：`memory.*`
+
 ## 关键流程
 
 两条独立流程，分别在对话结束后和对话开始前触发。
@@ -177,4 +183,3 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
 - [ ] 冲突判断粒度：同 type 下全量比较，还是只对语义相似度超过阈值的条目做冲突检测？（负责人：待认领）
 - [ ] context TTL 起算点：首次提及时间，还是最后一次提及时间？（负责人：待认领）
 - [ ] 记忆条数上限：v1.0 先设软监控阈值（超出记告警日志），还是直接按 type 设硬上限？如设硬上限，identity / preferences 各多少合适？超出时由 reflection 批量合并，还是 memory_layer 内联驱逐？（负责人：待认领）
-

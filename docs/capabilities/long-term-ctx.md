@@ -15,6 +15,12 @@
 - 依赖：memory_layer（search）、knowledge_base（search）、config（token 预算上限）
 - 被依赖：agent_loop（每次对话开始前调用）
 
+**模块归属**：
+- owning package：`intelligence.long_term_ctx`
+- public API：`build_context(user_id, query, agent_id, available_tokens)`
+- owned tables：无
+- config namespace：`long_term_ctx.*`
+
 ## 关键流程
 
 ```mermaid

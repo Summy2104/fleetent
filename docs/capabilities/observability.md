@@ -14,6 +14,12 @@
 - 依赖：`eval_logger`、`config`
 - 被依赖：`agent_loop`（写 trace）、`server.py`（未来的统计 API）
 
+**模块归属**：
+- owning package：`observability`
+- public API：`log_run(...)`、`log(...)`；规划中新增 trace / usage 查询 API
+- owned tables：现状无（trace 为 `data/traces.jsonl`）；若迁移到 SQLite，则由 observability owns trace / log / usage 相关表
+- config namespace：`observability.*`
+
 ## 关键流程
 
 两条独立流程：请求结束后写 trace，管理员随时查询日志。

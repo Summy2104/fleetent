@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Define the database runtime boundary used by store modules.
+
+## Requirements
 
 ### Requirement: Database runtime configuration
 系统 SHALL 通过统一配置项 `database_url` 决定数据库 runtime 后端。当前版本 SHALL 默认使用

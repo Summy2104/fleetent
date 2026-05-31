@@ -15,6 +15,12 @@
 - 依赖：embedding 模型（本地自托管，bge-m3 或 multilingual-e5）、向量后端（sqlite-vec 或 Qdrant）、config
 - 被依赖：memory_layer（记忆条目的写入与检索）、knowledge_base（文档 chunk 的写入与检索）
 
+**模块归属**：
+- owning package：`intelligence.vector_store`
+- public API：`upsert(id, text, namespace)`、`search(query, namespace, limit)`、`delete(id, namespace)`、`SearchResult`
+- owned tables：无（sqlite-vec backend 的物理表由 vector_store backend adapter 管理）
+- config namespace：`vector_store.*`、`embedding.*`
+
 ## 关键流程
 
 ```mermaid

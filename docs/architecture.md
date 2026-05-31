@@ -30,6 +30,33 @@ graph TD
 
 ## 模块地图
 
+### 目标 package map
+
+fleetent 采用模块化单体：单进程、单仓库、统一部署，但代码按能力边界组织。现有平铺模块可渐进迁移；
+新增模块优先进入目标 package。
+
+```
+src/fleetent/
+  runtime/          ← agent_loop、context_mgr、sub_agent
+  governance/       ← agent_policy、permission_gate、agent 能力边界
+  platform/         ← user / agent / API key / admin / auth control plane
+  channels/         ← im_gateway、webhook_router、cron_scheduler、schedule_store
+  intelligence/     ← memory_layer、knowledge_base、long_term_ctx、vector_store、reflection
+  integrations/     ← mcp_client、sandbox_client、connectors
+  observability/    ← eval_logger、trace、log、usage、diagnostics
+  infrastructure/   ← config、db runtime、底层 adapter
+```
+
+迁移规则：
+
+- 新代码进入 owning package；旧平铺模块在被大幅触碰时迁移。
+- 跨模块调用只能使用 public API，不 import 另一模块的 internal implementation。
+- 每张持久化表有且只有一个 owner module；其他模块通过 owner public API 访问。
+- 每个模块拥有稳定配置命名空间，例如 `memory.*`、`knowledge_base.*`、`observability.*`。
+- 平铺模块迁移期间可以保留 re-export shim，但 shim 不承载业务逻辑。
+
+### 当前模块地图
+
 ```
 src/fleetent/
   server.py          ← FastAPI：POST /chat (SSE)、GET /health、Bearer 认证
@@ -131,7 +158,7 @@ flowchart TD
 | 工具审批 | asyncio.Event 门控 | 无轮询，优雅等待；重启后调用 cleanup_stale_approvals() 清理孤儿 |
 | 代码执行隔离 | Docker CLI（当前）→ microsandbox microVM（v1.0 目标） | 每个沙箱独立 Linux 内核，无命名空间逃逸风险；< 100ms 启动；无需 dockerd |
 | MCP 工具命名 | `{server}__{tool}` 双下划线 | 避免与内置工具名冲突，来源可追溯 |
-| 记忆提取 | Haiku 异步，不阻塞响应 | 廉价且快；JSONL 存储，top-20 条注入下次请求 |
+| 记忆提取 | Haiku 异步，不阻塞响应 | 廉价且快；现状为 JSONL 存储与 top-20 注入，v1.0 由 long_term_ctx 统一协调检索与注入 |
 
 ---
 

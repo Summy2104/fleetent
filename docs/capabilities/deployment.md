@@ -31,7 +31,8 @@
 
 - ✅ **SQLite-first 默认存储**：无需独立数据库服务
   - 数据在 data/ 目录，挂载 volume 持久化
-  - 当前不要求 PostgreSQL；数据库访问边界需避免把业务层写死到 SQLite
+  - 当前不要求 PostgreSQL；数据库访问通过统一 DB runtime 边界，避免把业务层写死到 SQLite
+  - `database_url` 默认指向 `sqlite:///data/users.db`；非 SQLite backend 当前 fail fast
   - 不引入 ORM；schema lifecycle 由 alembic 统一管理
 
 ## 规划中（v1.0）
@@ -50,7 +51,7 @@
 - [ ] **升级脚本**：新版本部署时自动执行 alembic upgrade head
   - 升级前自动备份 SQLite 文件
 
-- [ ] **统一 database_url 配置**：以 SQLite 为默认后端，保留后续 PostgreSQL 接入空间
+- ✅ **统一 database_url 配置**：以 SQLite 为默认后端，保留后续 PostgreSQL 接入空间
   - 默认值指向本机 `data/users.db`
   - 业务 store 通过统一 DB runtime 获取连接和事务，不直接依赖 SQLite 文件路径
 

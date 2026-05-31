@@ -19,6 +19,12 @@
 - 依赖：`traces` 表（情节记忆数据源，SQLite）、memory_layer（读取与写回）、skill_registry（读取现有 skill）、knowledge_base（只读，查询召回质量）、permission_gate（prod 环境 skill 变更审批）、config
 - 被依赖：cron_scheduler（定期触发）
 
+**模块归属**：
+- owning package：`intelligence.reflection`
+- public API：`run_memory_reflection(user_id)`、`run_skill_reflection(agent_id)`、`run_kb_reflection(scope)`
+- owned tables：`skill_proposals`、`kb_reflection_reports`
+- config namespace：`reflection.*`
+
 ## 关键流程
 
 三条反射流程相互独立，分别调度，可安全并发。

@@ -14,6 +14,12 @@
 - 依赖：vector_store（向量索引）、model_router（`kb_extraction` task，实体提取）、config
 - 被依赖：long_term_ctx（检索注入内容）、reflection（只读，观察召回质量）
 
+**模块归属**：
+- owning package：`intelligence.knowledge_base`
+- public API：`ingest(filename, content, format, scope)`、`search(query, scope, limit)`、`graph_search(query, scope, depth)`、`delete(document_id)`、`DataSource`
+- owned tables：`documents`、`chunks`、`chunks_fts`、`entities`、`relations`
+- config namespace：`knowledge_base.*`
+
 ## 关键流程
 
 ```mermaid

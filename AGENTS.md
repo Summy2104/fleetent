@@ -34,9 +34,25 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`。
 
 `tasks.md` 中测试任务必须在对应实现任务之前。
 
+OpenSpec proposal / design 进入 implementation 前必须声明模块边界影响：
+
+- owning package（例如 `runtime` / `platform` / `intelligence` / `observability`）。
+- public API surface（允许其他模块 import / 调用的函数、dataclass、service interface）。
+- owned tables（新增或修改的持久化表；无则写无）。
+- config namespace（新增配置所属命名空间；无则写无）。
+- cross-module dependencies（依赖哪些模块 public API，是否触碰共享契约）。
+- migration / shim plan（移动平铺模块时如何保留 re-export 兼容和迁移 import）。
+
 ## Project Structure & Module Organization
 
-核心代码在 `src/fleetent/`。关键模块包括：`agent_loop.py`（tool-use 循环）、`model_router.py`（模型路由）、`tool_registry.py` / `tools.py`（工具注册与内置工具）、`server.py`（FastAPI）、`admin.py`（管理 CLI）、`im_gateway/`（Slack / Telegram 适配器）。
+核心代码在 `src/fleetent/`。当前仍有 legacy 平铺模块，新增代码优先按模块化单体 package 组织：
+`runtime/`、`governance/`、`platform/`、`channels/`、`intelligence/`、`integrations/`、
+`observability/`、`infrastructure/`。平铺模块在被大幅触碰时迁移，旧 import 路径可暂时保留
+re-export shim，但 shim 不承载业务逻辑。
+
+关键 legacy 模块包括：`agent_loop.py`（tool-use 循环）、`model_router.py`（模型路由）、
+`tool_registry.py` / `tools.py`（工具注册与内置工具）、`server.py`（FastAPI）、`admin.py`（管理 CLI）、
+`im_gateway/`（Slack / Telegram 适配器）。
 
 测试在 `tests/`，命名为 `test_<module>.py`。配置样例在 `config/`，Alembic 迁移在 `migrations/`，技能在 `skills/`，文档在 `docs/`。`data/` 是本地运行数据，测试不得直接触碰。
 
@@ -45,6 +61,7 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`。
 - `uv sync`：安装依赖。
 - `uv run pytest`：运行完整测试。
 - `uv run pytest -x -q`：fail-fast 测试，TDD 循环使用。
+- `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py`：检查已迁移 package 是否跨模块 import internal 实现。
 - `uv run ruff format src tests`：格式化。
 - `uv run ruff check src tests`：lint。
 - `uv run mypy src`：严格类型检查。
@@ -63,6 +80,7 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`。
 - 新增或改造数据库代码必须经过统一 DB runtime / store 边界；不得继续扩散 `sqlite3.connect`、`DB_PATH` re-export、SQLite 专属方言到业务层。
 - store 层 SQL 使用 named parameters（如 `:user_id`），不要新增 `?` 占位符风格。
 - schema lifecycle 由 Alembic 管理；不要在新 store 中复制 `_init_db()` 建表/补列模式。
+- 已迁移 package 的 internal 实现不得被其他 package import；跨模块调用必须走 public API。
 - 禁止不可注入的全局可变状态；legacy 路径常量在迁移前必须方便 `monkeypatch` 隔离。
 - 禁止云托管专有服务破坏数据主权；基础设施组件必须可 self-host。
 
