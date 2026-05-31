@@ -54,6 +54,35 @@ def test_read_file_missing_file():
 # ── run_code ─────────────────────────────────────────────────────────────────
 
 
+def _make_manager(mock_client, scope=None):
+    """Build a SandboxManager with injected resources/clock around a mock client."""
+    from fleetent.sandbox_config import SandboxResources
+    from fleetent.sandbox_manager import SandboxManager, Scope
+
+    return SandboxManager(
+        client=mock_client,
+        scope=scope or Scope.SESSION,
+        idle_hours=2.0,
+        resources_by_scope={
+            Scope.SESSION: SandboxResources(),
+            Scope.AGENT: SandboxResources(read_only=False),
+        },
+    )
+
+
+def _mock_lifecycle_client(create_id="cid-1"):
+    """A mock SandboxClient supporting acquire's find/create lifecycle."""
+    from unittest.mock import AsyncMock
+
+    client = AsyncMock()
+    client.find_workspace = AsyncMock(return_value=None)
+    client.create_workspace = AsyncMock(return_value=create_id)
+    client.destroy_workspace = AsyncMock()
+    client.commit_workspace = AsyncMock()
+    client.image_exists = AsyncMock(return_value=False)
+    return client
+
+
 @pytest.mark.asyncio
 async def test_run_code_returns_stdout(monkeypatch):
     from unittest.mock import AsyncMock
@@ -61,16 +90,14 @@ async def test_run_code_returns_stdout(monkeypatch):
     import fleetent.tools as tl
     from fleetent.sandbox_client import ExecResult
 
-    mock_client = AsyncMock()
-    mock_client.create_workspace = AsyncMock(return_value="cid-123")
-    mock_client.exec = AsyncMock(return_value=ExecResult(stdout="42\n", stderr="", exit_code=0))
-    mock_client.destroy_workspace = AsyncMock()
-
-    monkeypatch.setattr(tl, "SandboxClient", lambda **kw: mock_client)
+    client = _mock_lifecycle_client("cid-123")
+    client.exec = AsyncMock(return_value=ExecResult(stdout="42\n", stderr="", exit_code=0))
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
 
     result = await tl.run_code(code="print(6 * 7)")
     assert result == "42"
-    mock_client.destroy_workspace.assert_called_once_with("cid-123")
+    # SB2: normal completion does NOT destroy the workspace (reuse is the point).
+    client.destroy_workspace.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -80,14 +107,11 @@ async def test_run_code_includes_stderr(monkeypatch):
     import fleetent.tools as tl
     from fleetent.sandbox_client import ExecResult
 
-    mock_client = AsyncMock()
-    mock_client.create_workspace = AsyncMock(return_value="cid-456")
-    mock_client.exec = AsyncMock(
+    client = _mock_lifecycle_client("cid-456")
+    client.exec = AsyncMock(
         return_value=ExecResult(stdout="", stderr="NameError: name 'x' is not defined", exit_code=1)
     )
-    mock_client.destroy_workspace = AsyncMock()
-
-    monkeypatch.setattr(tl, "SandboxClient", lambda **kw: mock_client)
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
 
     result = await tl.run_code(code="print(x)")
     assert "[stderr]" in result
@@ -96,65 +120,56 @@ async def test_run_code_includes_stderr(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_code_destroys_workspace_on_error(monkeypatch):
-    """destroy_workspace must be called even when exec raises."""
+async def test_run_code_does_not_destroy_on_exec_error(monkeypatch):
+    """An exec error propagates but the workspace is left for reuse (no destroy)."""
     from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
 
-    mock_client = AsyncMock()
-    mock_client.create_workspace = AsyncMock(return_value="cid-789")
-    mock_client.exec = AsyncMock(side_effect=RuntimeError("docker died"))
-    mock_client.destroy_workspace = AsyncMock()
-
-    monkeypatch.setattr(tl, "SandboxClient", lambda **kw: mock_client)
+    client = _mock_lifecycle_client("cid-789")
+    client.exec = AsyncMock(side_effect=RuntimeError("docker died"))
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
 
     with pytest.raises(RuntimeError):
         await tl.run_code(code="print('hi')")
 
-    mock_client.destroy_workspace.assert_called_once_with("cid-789")
+    client.destroy_workspace.assert_not_called()
 
 
 # ── run_code cancellation orchestration (AR19 D3b) ───────────────────────────
 
 
-async def test_run_code_normal_path_unchanged_with_live_token(monkeypatch):
-    """A live (never-cancelled) token leaves the normal path byte-identical."""
+async def test_run_code_normal_path_does_not_destroy_with_live_token(monkeypatch):
+    """A live (never-cancelled) token reuses the workspace without destroying it."""
     from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
     from fleetent.cancellation import CancelToken
     from fleetent.sandbox_client import ExecResult
 
-    mock_client = AsyncMock()
-    mock_client.create_workspace = AsyncMock(return_value="cid-ok")
-    mock_client.exec = AsyncMock(return_value=ExecResult(stdout="42\n", stderr="", exit_code=0))
-    mock_client.destroy_workspace = AsyncMock()
-    monkeypatch.setattr(tl, "SandboxClient", lambda **kw: mock_client)
+    client = _mock_lifecycle_client("cid-ok")
+    client.exec = AsyncMock(return_value=ExecResult(stdout="42\n", stderr="", exit_code=0))
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
 
     result = await tl.run_code(code="print(6 * 7)", cancel_token=CancelToken())
     assert result == "42"
-    # No mid-run destroy: only the finally fallback fires, exactly once.
-    mock_client.destroy_workspace.assert_called_once_with("cid-ok")
+    client.destroy_workspace.assert_not_called()
 
 
 async def test_run_code_aborts_and_destroys_on_cancel(monkeypatch):
-    """A pre-cancelled token forces destroy and returns a cancel result without
-    waiting on a slow exec indefinitely."""
+    """A pre-cancelled token still hard-destroys the container (AR19 abort) even
+    though normal completion no longer destroys."""
     import asyncio
-    from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
     from fleetent.cancellation import CancelToken
 
     async def never_returns(ws_id, command):
-        await asyncio.Event().wait()  # would hang forever if awaited to completion
+        await asyncio.Event().wait()
 
-    mock_client = AsyncMock()
-    mock_client.create_workspace = AsyncMock(return_value="cid-cancel")
-    mock_client.exec = never_returns
-    mock_client.destroy_workspace = AsyncMock()
-    monkeypatch.setattr(tl, "SandboxClient", lambda **kw: mock_client)
+    client = _mock_lifecycle_client("cid-cancel")
+    client.exec = never_returns
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
 
     token = CancelToken()
     token.cancel()
@@ -163,14 +178,45 @@ async def test_run_code_aborts_and_destroys_on_cancel(monkeypatch):
         tl.run_code(code="while True: pass", cancel_token=token), timeout=2.0
     )
     assert "cancel" in result.lower()
-    mock_client.destroy_workspace.assert_any_call("cid-cancel")
+    client.destroy_workspace.assert_any_call("cid-cancel")
+
+
+async def test_run_code_cancel_forgets_registry_then_reacquires(monkeypatch):
+    """After a cancel hard-destroys the container, the manager registry is cleared
+    so the next acquire (find miss) rebuilds a fresh container."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    import fleetent.tools as tl
+    from fleetent.cancellation import CancelToken
+    from fleetent.sandbox_client import ExecResult
+
+    async def never_returns(ws_id, command):
+        await asyncio.Event().wait()
+
+    client = _mock_lifecycle_client("cid-first")
+    client.exec = never_returns
+    mgr = _make_manager(client)
+    monkeypatch.setattr(tl, "_MANAGER", mgr)
+
+    from fleetent.tool_registry import ToolContext
+
+    ctx = ToolContext(agent_name="a", features={}, session_id="sess-9")
+    token = CancelToken()
+    token.cancel()
+    await asyncio.wait_for(tl.run_code(code="x", cancel_token=token, tool_context=ctx), timeout=2.0)
+
+    # Registry was cleared for the destroyed container; a fresh acquire re-creates.
+    client.exec = AsyncMock(return_value=ExecResult(stdout="ok\n", stderr="", exit_code=0))
+    client.create_workspace = AsyncMock(return_value="cid-second")
+    result = await tl.run_code(code="print(1)", tool_context=ctx)
+    assert result == "ok"
+    client.create_workspace.assert_awaited_once()
 
 
 async def test_run_code_cancel_path_finally_does_not_double_raise(monkeypatch):
-    """destroy_workspace raising in the finally fallback must not surface as an
-    unhandled error on the cancel path (idempotent destroy contract)."""
+    """A destroy hiccup on the cancel path must not surface as an unhandled error."""
     import asyncio
-    from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
     from fleetent.cancellation import CancelToken
@@ -178,13 +224,9 @@ async def test_run_code_cancel_path_finally_does_not_double_raise(monkeypatch):
     async def never_returns(ws_id, command):
         await asyncio.Event().wait()
 
-    mock_client = AsyncMock()
-    mock_client.create_workspace = AsyncMock(return_value="cid-x")
-    mock_client.exec = never_returns
-    # Real SandboxClient.destroy is idempotent; here we only assert run_code does
-    # not propagate a destroy hiccup as an exception out of the cancel path.
-    mock_client.destroy_workspace = AsyncMock()
-    monkeypatch.setattr(tl, "SandboxClient", lambda **kw: mock_client)
+    client = _mock_lifecycle_client("cid-x")
+    client.exec = never_returns
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
 
     token = CancelToken()
     token.cancel()
@@ -241,39 +283,37 @@ def test_read_skill_refuses_audit_blocked(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_code_uses_session_id_from_tool_context(monkeypatch):
-    """run_code names its workspace after the context's session_id when present (SB3 D5)."""
+    """run_code keys its session-scope workspace on the context's session_id (SB3 D5)."""
     from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
     from fleetent.sandbox_client import ExecResult
     from fleetent.tool_registry import ToolContext
 
-    mock_client = AsyncMock()
-    mock_client.create_workspace = AsyncMock(return_value="cid-ctx")
-    mock_client.exec = AsyncMock(return_value=ExecResult(stdout="ok\n", stderr="", exit_code=0))
-    mock_client.destroy_workspace = AsyncMock()
-    monkeypatch.setattr(tl, "SandboxClient", lambda **kw: mock_client)
+    client = _mock_lifecycle_client("cid-ctx")
+    client.exec = AsyncMock(return_value=ExecResult(stdout="ok\n", stderr="", exit_code=0))
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
 
     ctx = ToolContext(agent_name="a", features={"code_execution": True}, session_id="sess-7")
     result = await tl.run_code(code="print(1)", tool_context=ctx)
     assert result == "ok"
-    mock_client.create_workspace.assert_called_once_with("sess-7")
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["name"] == "sandbox-session-sess-7"
 
 
 @pytest.mark.asyncio
 async def test_run_code_degrades_safely_without_tool_context(monkeypatch):
-    """run_code without context falls back to the default workspace key, not raising."""
+    """run_code without context falls back to the default key, not raising."""
     from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
     from fleetent.sandbox_client import ExecResult
 
-    mock_client = AsyncMock()
-    mock_client.create_workspace = AsyncMock(return_value="cid-default")
-    mock_client.exec = AsyncMock(return_value=ExecResult(stdout="hi\n", stderr="", exit_code=0))
-    mock_client.destroy_workspace = AsyncMock()
-    monkeypatch.setattr(tl, "SandboxClient", lambda **kw: mock_client)
+    client = _mock_lifecycle_client("cid-default")
+    client.exec = AsyncMock(return_value=ExecResult(stdout="hi\n", stderr="", exit_code=0))
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
 
     result = await tl.run_code(code="print(1)")
     assert result == "hi"
-    mock_client.create_workspace.assert_called_once_with("run-code")
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["name"] == "sandbox-session-run-code"

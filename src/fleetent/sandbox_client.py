@@ -11,6 +11,11 @@ logger = logging.getLogger(__name__)
 
 _SAFE_NAME = re.compile(r"[^a-zA-Z0-9_.-]")
 
+# Single source of truth for the container-name prefix. Defined here (the lowest
+# layer) so SB2's naming rule and SB8's orphan enumeration share one constant
+# without a circular import. SB2 builds `sandbox-{scope}-{key}` atop it.
+SANDBOX_NAME_PREFIX = "sandbox-"
+
 
 @dataclass
 class ExecResult:
@@ -69,25 +74,31 @@ class SandboxClient:
         return flags
 
     async def create_workspace(
-        self, session_id: str, resources: SandboxResources | None = None
+        self,
+        name: str,
+        resources: SandboxResources | None = None,
+        image: str | None = None,
     ) -> str:
         """Start an isolated container, return container ID as workspace_id.
 
-        Resource limits are taken per call from `resources` (SB2 needs one client
-        to build both read-only session and writable agent containers), defaulting
-        to `SandboxResources()` — byte-equivalent to the pre-SB4 hardcoded command.
+        `name` is used verbatim as the container name — name derivation (scope
+        prefix + sanitisation) is the caller/manager's responsibility under the
+        converged signature. `resources` carries the per-call resource tier (SB2
+        builds read-only session and writable agent containers from one client),
+        defaulting to `SandboxResources()`. `image` overrides the base image so
+        agent scope can boot from a committed dependency image; None keeps the
+        client's default base image.
         """
         if resources is None:
             resources = SandboxResources()
-        safe = _SAFE_NAME.sub("-", session_id)[:48]
         proc = await asyncio.create_subprocess_exec(
             "docker",
             "run",
             "-d",
             "--name",
-            f"sandbox-{safe}",
+            name,
             *self._resource_flags(resources),
-            self._image,
+            image or self._image,
             "sleep",
             "infinity",
             stdout=asyncio.subprocess.PIPE,
@@ -97,8 +108,70 @@ class SandboxClient:
         if proc.returncode != 0:
             raise RuntimeError(f"docker run failed: {stderr.decode().strip()}")
         container_id = stdout.decode().strip()
-        logger.info("sandbox_created", session_id=session_id, container_id=container_id[:12])
+        logger.info("sandbox_created name=%s container_id=%s", name, container_id[:12])
         return container_id
+
+    async def find_workspace(self, name: str) -> str | None:
+        """Return the id of a running container named `name`, or None if absent.
+
+        Used by SB2 to reuse an existing scope container before creating a new
+        one. Filters by exact name; an empty `docker ps -q` output means no match.
+        """
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "ps",
+            "-q",
+            "--filter",
+            f"name=^{name}$",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        container_id = stdout.decode().strip()
+        return container_id or None
+
+    async def commit_workspace(self, workspace_id: str, image_tag: str) -> None:
+        """Commit a container to an image so its installed deps survive a destroy.
+
+        SB2 calls this on agent-scope containers before idle destroy so the next
+        acquire can boot from the committed image instead of reinstalling. Raises
+        on a non-zero commit so the caller does not destroy under the false belief
+        that dependencies were captured.
+        """
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "commit",
+            workspace_id,
+            image_tag,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"docker commit failed: {stderr.decode().strip()}")
+        logger.info("sandbox_committed container_id=%s tag=%s", workspace_id[:12], image_tag)
+
+    async def image_exists(self, image_tag: str) -> bool:
+        """Return whether a local image with `image_tag` exists (never raising).
+
+        SB2 uses this to decide whether an agent-scope acquire can boot from a
+        previously committed dependency image or must fall back to the default
+        base image. `docker image inspect` exits non-zero when absent.
+        """
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker",
+                "image",
+                "inspect",
+                image_tag,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate()
+        except (FileNotFoundError, OSError) as exc:
+            logger.warning("docker_image_inspect_failed tag=%s error=%s", image_tag, exc)
+            return False
+        return proc.returncode == 0
 
     async def exec(self, workspace_id: str, command: str) -> ExecResult:
         """Execute a shell command inside the running container."""

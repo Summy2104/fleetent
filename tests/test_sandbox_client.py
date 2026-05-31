@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fleetent.sandbox_client import ExecResult, SandboxClient
+from fleetent.sandbox_client import SandboxClient
 from fleetent.sandbox_config import NetworkPolicy, SandboxResources
 
 
@@ -27,32 +27,94 @@ async def test_create_workspace_returns_container_id(client):
     with patch(
         "asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(stdout=fake_id))
     ):
-        ws_id = await client.create_workspace("session-1")
+        ws_id = await client.create_workspace("sandbox-session-1", resources=SandboxResources())
     assert ws_id == "abc123def456"
 
 
 async def test_create_workspace_raises_on_docker_failure(client):
     mock_proc = _mock_proc(stderr="image not found", returncode=125)
-    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)):
-        with pytest.raises(RuntimeError, match="docker run failed"):
-            await client.create_workspace("session-bad")
+    with (
+        patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)),
+        pytest.raises(RuntimeError, match="docker run failed"),
+    ):
+        await client.create_workspace("sandbox-session-bad", resources=SandboxResources())
 
 
-async def test_create_workspace_sanitizes_session_id(client):
-    """Special characters in session_id are replaced with dashes in container name."""
+async def test_create_workspace_uses_name_verbatim(client):
+    """The container name is taken from the `name` arg as-is (sanitisation is the
+    caller/manager's job under the converged signature), not derived here."""
+    argv = await _capture_create_workspace(client, name="sandbox-session-already-safe")
+    assert argv[argv.index("--name") + 1] == "sandbox-session-already-safe"
+
+
+async def test_create_workspace_uses_image_arg(client):
+    """An explicit `image` overrides the client default base image in docker run."""
+    argv = await _capture_create_workspace(client, image="fleetent-sandbox-agent-bot:latest")
+    assert "fleetent-sandbox-agent-bot:latest" in argv
+    assert "python:3.12-slim" not in argv
+
+
+async def test_create_workspace_image_none_uses_client_default(client):
+    """image=None falls back to the client's default base image."""
+    argv = await _capture_create_workspace(client, image=None)
+    assert "python:3.12-slim" in argv
+
+
+async def test_find_workspace_returns_id_when_present(client):
+    """docker ps -q --filter name=... yields the container id when one matches."""
     captured: list[list[str]] = []
 
     async def fake_exec(*args, **kwargs):
         captured.append(list(args))
-        return _mock_proc(stdout="cid\n")
+        return _mock_proc(stdout="abc123\n")
 
     with patch("asyncio.create_subprocess_exec", fake_exec):
-        await client.create_workspace("user:U123/channel#abc")
+        ws_id = await client.find_workspace("sandbox-session-1")
 
-    name_arg = captured[0][captured[0].index("--name") + 1]
-    assert ":" not in name_arg
-    assert "/" not in name_arg
-    assert "#" not in name_arg
+    assert ws_id == "abc123"
+    assert captured[0][:2] == ["docker", "ps"]
+    assert "name=^sandbox-session-1$" in captured[0]
+
+
+async def test_find_workspace_returns_none_when_absent(client):
+    """Empty docker ps output means no matching container -> None."""
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(stdout="\n"))):
+        ws_id = await client.find_workspace("sandbox-session-missing")
+    assert ws_id is None
+
+
+async def test_commit_workspace_calls_docker_commit(client):
+    captured: list[list[str]] = []
+
+    async def fake_exec(*args, **kwargs):
+        captured.append(list(args))
+        return _mock_proc(stdout="sha256:deadbeef\n")
+
+    with patch("asyncio.create_subprocess_exec", fake_exec):
+        await client.commit_workspace("container-xyz", "fleetent-sandbox-agent-bot:latest")
+
+    assert captured[0][:2] == ["docker", "commit"]
+    assert "container-xyz" in captured[0]
+    assert "fleetent-sandbox-agent-bot:latest" in captured[0]
+
+
+async def test_commit_workspace_raises_on_failure(client):
+    mock_proc = _mock_proc(stderr="no such container", returncode=1)
+    with (
+        patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)),
+        pytest.raises(RuntimeError, match="docker commit failed"),
+    ):
+        await client.commit_workspace("gone", "tag:latest")
+
+
+async def test_image_exists_true_when_inspect_succeeds(client):
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(returncode=0))):
+        assert await client.image_exists("fleetent-sandbox-agent-bot:latest") is True
+
+
+async def test_image_exists_false_when_inspect_fails(client):
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(returncode=1))):
+        assert await client.image_exists("fleetent-sandbox-agent-bot:latest") is False
 
 
 async def test_exec_returns_result(client):
@@ -114,7 +176,11 @@ async def test_docker_available_false_when_cli_missing(client):
 
 
 async def _capture_create_workspace(
-    client: SandboxClient, *, resources: SandboxResources | None = None
+    client: SandboxClient,
+    *,
+    resources: SandboxResources | None = None,
+    name: str = "sandbox-session-1",
+    image: str | None = None,
 ) -> list[str]:
     """Run create_workspace under a mocked subprocess and return the argv."""
     captured: list[list[str]] = []
@@ -124,10 +190,7 @@ async def _capture_create_workspace(
         return _mock_proc(stdout="cid\n")
 
     with patch("asyncio.create_subprocess_exec", fake_exec):
-        if resources is None:
-            await client.create_workspace("session-1")
-        else:
-            await client.create_workspace("session-1", resources=resources)
+        await client.create_workspace(name, resources=resources or SandboxResources(), image=image)
     return captured[0]
 
 
