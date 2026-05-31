@@ -4,6 +4,7 @@ import os
 import pytest
 import structlog
 
+import fleetent.session_index as session_index
 import fleetent.session_mgr as session_mgr
 from fleetent.config import Settings
 
@@ -25,8 +26,59 @@ def sessions_dir(tmp_path, monkeypatch):
     return d
 
 
+@pytest.fixture(autouse=True)
+def index_db(tmp_path, monkeypatch):
+    # Isolate the metadata index DB for every test: save() now writes to it as a
+    # side effect, and tests must never touch the real data/users.db.
+    monkeypatch.setattr(session_index, "DB_PATH", tmp_path / "x.db")
+    return tmp_path / "x.db"
+
+
 def _set_mtime(path, mtime: float) -> None:
     os.utime(path, (mtime, mtime))
+
+
+# --- 7. save() records metadata after successful atomic write ---
+
+
+async def test_save_records_metadata(sessions_dir, index_db):
+    messages = [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}]
+    await session_mgr.save("sess-1", messages, user_id="u1", agent_name="bot")
+    meta = session_index.get("sess-1")
+    assert meta is not None
+    assert meta["message_count"] == 2
+    assert meta["user_id"] == "u1"
+    assert meta["agent_name"] == "bot"
+
+
+async def test_save_backward_compatible_two_args(sessions_dir, index_db):
+    """Existing two-arg callers still work; metadata gets NULL user/agent."""
+    await session_mgr.save("sess-1", [{"role": "user", "content": "x"}])
+    assert (await session_mgr.load("sess-1")) == [{"role": "user", "content": "x"}]
+    meta = session_index.get("sess-1")
+    assert meta is not None
+    assert meta["message_count"] == 1
+    assert meta["user_id"] is None
+    assert meta["agent_name"] is None
+
+
+# --- 8. index failure must not break message persistence ---
+
+
+async def test_save_index_failure_does_not_break_message_write(sessions_dir, index_db, monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("index down")
+
+    monkeypatch.setattr(session_index, "record_activity", boom)
+
+    messages = [{"role": "user", "content": "x"}]
+    # Must not raise despite the index failure.
+    await session_mgr.save("sess-1", messages)
+
+    # Message file is intact.
+    assert (await session_mgr.load("sess-1")) == messages
+    # Index has no row (write failed and was swallowed).
+    assert session_index.get("sess-1") is None
 
 
 async def test_load_nonexistent_returns_empty(sessions_dir):

@@ -202,3 +202,18 @@
 
 **影响:** 670 passed;mypy 69=68+S1 的 _default_config Settings()(既有模式非新)。
 **⚠️ 需 zy 核实:** save() 对带 `/` session_id 不建子目录的既有 bug(本次未修,建议后续修);TTL 触发器后续接张亮 cron。
+
+## session-metadata-index (S2) — feat/session-metadata-index
+
+**实现:** 新建 session_index.py(sessions 表:session_id PK/user_id/created_at/updated_at/message_count/agent_name;record_activity 用 ON CONFLICT upsert 首次 created_at 固定/冲突刷 updated_at;get/list_by_user[updated_at DESC]/count/total_message_count);save() 加可选 user_id/agent_name,原子写成功后调 record_activity,**try/except 故障隔离**(索引失败 log.warning 吞掉、不回滚消息)。
+
+**⚠️ 重要偏离(需 zy 核实):change 设计与 CLAUDE.md 说"用 aiosqlite",但 aiosqlite 实际未安装(ModuleNotFoundError),且全仓 store(user_store/agent_store/schedule_store)都用同步 `sqlite3`。** 为守"无新依赖"硬约束 + 与现有 store 一致,session_index 也用同步 sqlite3(非 aiosqlite)。→ **CLAUDE.md 的 aiosqlite 说法与现实不符**;zy 定:保持 sqlite3(匹配现状,推荐)还是真引入 aiosqlite(加依赖、store 改 async)。
+
+**自解冲突:**
+1. aiosqlite 未装 → 用 sqlite3 复刻 sibling store 模式(见上)。
+2. save 写索引 DB 会污染 data/ → test 的 index_db fixture 设 autouse 隔离到 tmp_path。
+
+**向后兼容/故障隔离:** save 两参调用不破(新参默认 None→元数据 NULL);record_activity 异常不破坏消息写入(守卫测试验证)。
+
+**影响:** 680 passed;session_index mypy 0 错。
+**⚠️ 需 zy 核实:** **sqlite3 vs aiosqlite 偏离**(CLAUDE.md 不符现实);元数据要完整需 agent_loop/normalizer 透传 user_id/agent_name(逐步补)。
