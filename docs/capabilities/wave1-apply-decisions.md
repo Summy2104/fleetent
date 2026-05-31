@@ -123,12 +123,13 @@
 
 **文件缺失/损坏:** 缺失/空 → 用内置默认(开箱即用,不报错);YAML 解析失败/顶层非 mapping/缺必填/类型非法/内联 api_key → `raise ValueError`(fail loud,含路径+route 名),不静默回落。
 
-**加载时机:** **每次调用 `get_*` 都 `_load_routes()` 读盘**——为让测试 monkeypatch ROUTES_PATH 在调用前生效。
-
 **自解冲突:** 既有测试用 `monkeypatch.setitem(ROUTES,...)` → 保留 ROUTES 为 in-memory 有效表作 _load_routes() 合并基,无文件时返回 dict(ROUTES),setitem 仍被尊重,既满足"来源改 _load_routes()"又零回归。
 
 **影响:** 596 passed;mypy model_router 0 错。
-**⚠️ 需 zy 核实/后续优化:** **每次 LLM 调用都读盘 YAML**(为可测试性选每次加载)——生产高频下建议加可注入缓存(design Risk 已记为后续优化点)。fail-loud vs 缺失回落的边界是否认可。
+
+**✅ zy review 决定(2026-05-31):**
+1. **加缓存(原"每次读盘"已修)**:拆出 `_load_file_routes()`,**只缓存昂贵的文件解析**(磁盘读 + YAML parse + 校验),按 `(path, mtime, size)` 键控;`_load_routes()` 仍每次 `dict(ROUTES)` 合并 in-memory 表(便宜、且让 `setitem`/运行时改 ROUTES 仍可见)。稳态热路径(文件未变)跳过磁盘+parse;改路径/改文件内容(mtime 或 size 变)→ 自动重解析。`monkeypatch ROUTES_PATH`(各测试独立 tmp 路径)天然命 miss 重解析,可测试性不受损。新增测试 `test_load_routes_caches_file_parse_until_mtime_changes`(缓存命中)+ `test_load_routes_in_memory_routes_edits_stay_visible_through_cache`(合并仍每次做)。734 passed,ruff/mypy 干净。
+2. **fail-loud 边界认可**:文件不存在=回落内置默认;文件存在但坏(YAML 错/顶层非 mapping/缺必填/类型非法/内联 api_key)=raise。
 
 ## skill-yaml-frontmatter (SK2) — feat/skill-yaml-frontmatter
 

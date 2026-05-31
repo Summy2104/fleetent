@@ -663,3 +663,48 @@ def test_no_hot_reload_module_has_no_watcher():
     src = inspect.getsource(model_router)
     assert "watchdog" not in src
     assert "watch" not in src.lower() or "watcher" not in src.lower()
+
+
+# --- file parse is cached by (path, mtime); hot path skips disk + YAML ---
+
+
+def test_load_routes_caches_file_parse_until_mtime_changes(monkeypatch, tmp_path):
+    p = tmp_path / "routes.yaml"
+    _write_yaml(
+        p,
+        {"default": {"base_url": "b", "model": "m1", "api_key_env": "K", "max_tokens": 1}},
+    )
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    monkeypatch.setattr(model_router, "_file_routes_cache", None, raising=False)
+
+    parses = {"n": 0}
+    real = model_router.yaml.safe_load
+
+    def counting(text: str) -> object:
+        parses["n"] += 1
+        return real(text)
+
+    monkeypatch.setattr(model_router.yaml, "safe_load", counting)
+
+    assert _load_routes()["default"].model == "m1"
+    assert _load_routes()["default"].model == "m1"
+    assert parses["n"] == 1, "second load with unchanged file must hit the cache, not reparse"
+
+
+def test_load_routes_in_memory_routes_edits_stay_visible_through_cache(monkeypatch, tmp_path):
+    # The file parse is cached, but the in-memory ROUTES base must still merge each
+    # call so existing setitem-based tests and runtime edits keep working.
+    p = tmp_path / "routes.yaml"
+    _write_yaml(
+        p,
+        {"default": {"base_url": "b", "model": "m1", "api_key_env": "K", "max_tokens": 1}},
+    )
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    monkeypatch.setattr(model_router, "_file_routes_cache", None, raising=False)
+    _load_routes()  # warm the cache
+    monkeypatch.setitem(
+        model_router.ROUTES,
+        "extra",
+        RouteConfig(base_url="b2", model="m2", api_key_env="K2", max_tokens=2),
+    )
+    assert _load_routes()["extra"].model == "m2"
