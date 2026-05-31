@@ -11,6 +11,7 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setattr(im_user_store, "DB_PATH", db_path)
     # Also need to monkeypatch user_store DB_PATH since im_user_store creates users too
     import fleetent.user_store as user_store
+
     monkeypatch.setattr(user_store, "DB_PATH", db_path)
     im_user_store._init_db()
     return db_path
@@ -46,6 +47,7 @@ def test_unique_constraint(db):
 
 
 # --- allowlist tests (v1.0: default-allow) ---
+
 
 def test_get_or_create_new_user_is_allowed_by_default(db):
     user = im_user_store.get_or_create("slack", "U999")

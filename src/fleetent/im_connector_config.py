@@ -1,7 +1,7 @@
 """Connector credential resolution: DB config first, .env fallback, with masked reads."""
 
 import json
-from typing import Any
+from typing import Any, cast
 
 from fleetent import im_connector_store
 
@@ -23,14 +23,14 @@ def get_settings() -> Any:
     """Return the app Settings. Wrapped so tests can monkeypatch the .env source."""
     from fleetent.config import Settings
 
-    return Settings()
+    return Settings()  # type: ignore[call-arg]
 
 
 def resolve(platform: str) -> dict[str, str]:
     """Resolve a connector's credentials: DB config if present, else .env fallback."""
     row = im_connector_store.get_connector(platform)
     if row and row["config"]:
-        return json.loads(row["config"])
+        return cast(dict[str, str], json.loads(row["config"]))
     return _env_fallback(platform)
 
 
@@ -53,9 +53,7 @@ def seed_from_env(force: bool = False) -> list[str]:
             continue
         cfg = _env_fallback(platform)
         if cfg:
-            im_connector_store.upsert_connector(
-                platform, config=json.dumps(cfg), enabled=True
-            )
+            im_connector_store.upsert_connector(platform, config=json.dumps(cfg), enabled=True)
             seeded.append(platform)
         else:
             im_connector_store.upsert_connector(platform, status="unconfigured")

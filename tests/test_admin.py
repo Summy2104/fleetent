@@ -194,7 +194,6 @@ def test_set_default_agent_clear(tmp_path, monkeypatch):
 # ── schedule admin commands ───────────────────────────────────────────────────
 
 
-
 @pytest.fixture(autouse=False)
 def tmp_sched_db(isolated_schedule_db):
     return isolated_schedule_db

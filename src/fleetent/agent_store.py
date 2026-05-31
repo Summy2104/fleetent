@@ -106,7 +106,7 @@ def get_agent_for_channel(platform: str, channel_id: str) -> Agent | None:
 def _get_default_agent_name() -> str | None:
     from fleetent.config import Settings
 
-    return Settings().default_agent_name
+    return Settings().default_agent_name  # type: ignore[call-arg]
 
 
 def get_default_agent() -> Agent | None:

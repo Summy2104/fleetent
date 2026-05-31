@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import time
+from contextlib import suppress
 
 import httpx
 
@@ -48,10 +49,8 @@ def parse_sse(text: str) -> list[dict]:
     events = []
     for line in text.splitlines():
         if line.startswith("data: "):
-            try:
+            with suppress(json.JSONDecodeError):
                 events.append(json.loads(line[6:]))
-            except json.JSONDecodeError:
-                pass
     return events
 
 
@@ -151,7 +150,7 @@ def test_calculate_tool(client: httpx.Client) -> None:
     assert "calculate" in tools, f"calculate not called, tools={tools}"
     content = done_content(events) or ""
     assert "56" in content, f"result '56' not in reply: {content}"
-    ok(f"calculate called → reply contains '56'")
+    ok("calculate called → reply contains '56'")
 
 
 def test_get_time_tool(client: httpx.Client) -> None:
@@ -176,19 +175,19 @@ def test_session_memory(client: httpx.Client) -> None:
     events = chat(client, "我的幸运数字是多少？")
     content = done_content(events) or ""
     assert "42" in content, f"'42' not found in reply: {content}"
-    ok(f"session memory works → reply contains '42'")
+    ok("session memory works → reply contains '42'")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
 TESTS = [
-    ("Health check",        test_health),
-    ("Invalid API key",     test_invalid_key),
-    ("Basic chat",          test_basic_chat),
-    ("Tool: calculate",     test_calculate_tool),
-    ("Tool: get_time",      test_get_time_tool),
-    ("Tool: read_file",     test_read_file_tool),
-    ("Session memory",      test_session_memory),
+    ("Health check", test_health),
+    ("Invalid API key", test_invalid_key),
+    ("Basic chat", test_basic_chat),
+    ("Tool: calculate", test_calculate_tool),
+    ("Tool: get_time", test_get_time_tool),
+    ("Tool: read_file", test_read_file_tool),
+    ("Session memory", test_session_memory),
 ]
 
 

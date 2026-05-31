@@ -40,6 +40,7 @@ def test_list_identities_merges_platforms(db):
     # Same internal user bound to two platforms (simulate by reusing user_id).
     u = im_user_store.get_or_create("slack", "M1")
     import sqlite3
+
     with sqlite3.connect(db) as conn:
         conn.execute(
             "INSERT INTO im_users (platform, platform_user_id, user_id, allowed, created_at)"

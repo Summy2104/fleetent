@@ -30,8 +30,12 @@ def block_user(
     if user.email:
         _ban_registration(user.email, reason, batch_id)
     audit_log.write_audit(
-        actor, "block_user", target_type="user", target_id=user_id,
-        detail={"reason": reason}, batch_id=batch_id,
+        actor,
+        "block_user",
+        target_type="user",
+        target_id=user_id,
+        detail={"reason": reason},
+        batch_id=batch_id,
     )
 
 

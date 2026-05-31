@@ -4,9 +4,7 @@ import hashlib
 import hmac
 import json
 
-import pytest
 import yaml
-
 
 # ── load_sources ─────────────────────────────────────────────────────────────
 
@@ -15,12 +13,21 @@ def test_load_sources_returns_sources_from_yaml(tmp_path):
     from fleetent import webhook_router as wr
 
     cfg = tmp_path / "webhooks.yaml"
-    cfg.write_text(yaml.dump({
-        "sources": [
-            {"id": "gh", "user_id": "u-1", "secret": "s3cr3t", "agent_name": "devops",
-             "message_template": "push: {ref}"},
-        ]
-    }))
+    cfg.write_text(
+        yaml.dump(
+            {
+                "sources": [
+                    {
+                        "id": "gh",
+                        "user_id": "u-1",
+                        "secret": "s3cr3t",
+                        "agent_name": "devops",
+                        "message_template": "push: {ref}",
+                    },
+                ]
+            }
+        )
+    )
     sources = wr.load_sources(cfg)
     assert "gh" in sources
     s = sources["gh"]
@@ -53,10 +60,16 @@ def test_load_sources_multiple_entries(tmp_path):
     from fleetent import webhook_router as wr
 
     cfg = tmp_path / "webhooks.yaml"
-    cfg.write_text(yaml.dump({"sources": [
-        {"id": "a", "user_id": "u-1"},
-        {"id": "b", "user_id": "u-2"},
-    ]}))
+    cfg.write_text(
+        yaml.dump(
+            {
+                "sources": [
+                    {"id": "a", "user_id": "u-1"},
+                    {"id": "b", "user_id": "u-2"},
+                ]
+            }
+        )
+    )
     sources = wr.load_sources(cfg)
     assert set(sources.keys()) == {"a", "b"}
 
@@ -135,6 +148,7 @@ def test_verify_signature_missing_header_returns_false_when_secret_set():
 def test_verify_signature_uses_compare_digest(monkeypatch):
     """Ensure timing-safe comparison is used (compare_digest, not ==)."""
     import fleetent.webhook_router as wr
+
     calls: list = []
 
     original = hmac.compare_digest

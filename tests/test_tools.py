@@ -53,11 +53,13 @@ def test_read_file_missing_file():
 
 # ── run_code ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_run_code_returns_stdout(monkeypatch):
     from unittest.mock import AsyncMock
-    from fleetent.sandbox_client import ExecResult
+
     import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
 
     mock_client = AsyncMock()
     mock_client.create_workspace = AsyncMock(return_value="cid-123")
@@ -74,8 +76,9 @@ async def test_run_code_returns_stdout(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_code_includes_stderr(monkeypatch):
     from unittest.mock import AsyncMock
-    from fleetent.sandbox_client import ExecResult
+
     import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
 
     mock_client = AsyncMock()
     mock_client.create_workspace = AsyncMock(return_value="cid-456")
@@ -96,6 +99,7 @@ async def test_run_code_includes_stderr(monkeypatch):
 async def test_run_code_destroys_workspace_on_error(monkeypatch):
     """destroy_workspace must be called even when exec raises."""
     from unittest.mock import AsyncMock
+
     import fleetent.tools as tl
 
     mock_client = AsyncMock()

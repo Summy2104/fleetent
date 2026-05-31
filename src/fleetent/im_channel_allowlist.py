@@ -1,6 +1,8 @@
 """IM channel/workspace allowlist: stores allowed scopes and enforces them per platform."""
 
 import datetime
+import sqlite3
+from typing import Any
 
 from fleetent import im_connector_store
 from fleetent.user_store import (
@@ -44,7 +46,7 @@ def remove_entry(entry_id: int) -> None:
         conn.execute("DELETE FROM im_channel_allowlist WHERE id = ?", (entry_id,))
 
 
-def list_entries(platform: str | None = None) -> list[dict]:
+def list_entries(platform: str | None = None) -> list[dict[str, Any]]:
     _init_db()
     with _conn() as conn:
         if platform is None:
@@ -79,7 +81,7 @@ def is_allowed(platform: str, channel_id: str, workspace_id: str | None = None) 
     return False
 
 
-def _has_allow(conn, platform: str, scope_type: str, scope_id: str) -> bool:
+def _has_allow(conn: sqlite3.Connection, platform: str, scope_type: str, scope_id: str) -> bool:
     row = conn.execute(
         """SELECT 1 FROM im_channel_allowlist
            WHERE platform = ? AND scope_type = ? AND scope_id = ? AND allowed = 1""",

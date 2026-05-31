@@ -13,8 +13,11 @@ import fleetent.user_store as user_store
 def db(tmp_path, monkeypatch):
     monkeypatch.setattr(user_store, "DB_PATH", tmp_path / "users.db")
     monkeypatch.setattr(ics, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setattr(icc, "get_settings", lambda: SimpleNamespace(
-        slack_bot_token="", slack_app_token="", telegram_bot_token=""))
+    monkeypatch.setattr(
+        icc,
+        "get_settings",
+        lambda: SimpleNamespace(slack_bot_token="", slack_app_token="", telegram_bot_token=""),
+    )
     ics._init_db()
     return tmp_path / "users.db"
 
@@ -23,6 +26,7 @@ def _blocking_factory(started: asyncio.Event):
     async def run(config):
         started.set()
         await asyncio.Event().wait()  # run until cancelled
+
     return run
 
 

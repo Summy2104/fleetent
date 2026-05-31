@@ -11,6 +11,14 @@ def test_settings_defaults():
     assert s.database_url == "sqlite:///data/users.db"
 
 
+def test_observability_logging_defaults():
+    s = Settings(anthropic_api_key="test-key")
+
+    assert s.observability.logging.console_level == "info"
+    assert s.observability.logging.file_level == "debug"
+    assert s.observability.logging.directory == "data/logs"
+
+
 def test_settings_env_override(monkeypatch):
     monkeypatch.setenv("MICROSANDBOX_URL", "http://localhost:9999")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")

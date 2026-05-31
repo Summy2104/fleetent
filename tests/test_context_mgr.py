@@ -4,10 +4,7 @@ from fleetent.context_mgr import _keep_tail, estimate_tokens, maybe_compress
 def _make_messages(n: int) -> list[dict]:
     return [
         {"role": "system", "content": "You are helpful."},
-        *[
-            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 500}
-            for i in range(n)
-        ],
+        *[{"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 500} for i in range(n)],
     ]
 
 
@@ -48,9 +45,7 @@ def test_compress_triggers_above_threshold(monkeypatch):
     assert result is not big_msgs  # new list
     roles = [m["role"] for m in result if isinstance(m, dict)]
     assert roles[0] == "system"  # system prompt preserved first
-    assert any(
-        "Summary" in str(m.get("content", "")) for m in result
-    )  # summary injected
+    assert any("Summary" in str(m.get("content", "")) for m in result)  # summary injected
     assert len([m for m in result if m.get("role") != "system"]) <= 5  # summary + keep_recent
 
 

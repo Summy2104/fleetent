@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from collections.abc import AsyncGenerator
-from typing import Any
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import yaml
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -17,11 +16,18 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from fleetent import api_key_store, mcp_client, quota, user_admin_api, user_store
-from fleetent.auth import seed_builtin_admin
-from fleetent.cron_scheduler import CronScheduler
 from fleetent.agent_loop import run_stream
-from fleetent.config import Settings
+from fleetent.auth import seed_builtin_admin
+from fleetent.config import Settings, configure_logging
+from fleetent.cron_scheduler import CronScheduler
 from fleetent.mcp_client import McpServerConfig
+from fleetent.model_router import ROUTES
+from fleetent.observability.startup_diagnostics import (
+    diagnose_database_writable,
+    diagnose_provider_keys,
+    log_config_failed,
+    log_config_loaded,
+)
 from fleetent.permission_gate import _default_gate, cleanup_stale_approvals, list_approvals
 from fleetent.skill_registry import scan as scan_skills
 
@@ -35,8 +41,6 @@ _webhook_sources: dict[str, Any] = {}
 async def _start_slack_adapter(app_token: str) -> None:
     """Start Slack Socket Mode adapter as a background task."""
     try:
-        from typing import Any
-
         from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 
         from fleetent.im_gateway.slack import create_app as create_slack_app
@@ -51,8 +55,6 @@ async def _start_slack_adapter(app_token: str) -> None:
 async def _start_telegram_adapter() -> None:
     """Start Telegram polling adapter as a background task."""
     try:
-        from typing import Any
-
         from fleetent.im_gateway.telegram import create_app as create_telegram_app
 
         tg_app: Any = create_telegram_app()
@@ -67,7 +69,15 @@ async def _start_telegram_adapter() -> None:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     scan_skills()
     cleanup_stale_approvals()
-    settings = Settings()
+    try:
+        settings = Settings()  # type: ignore[call-arg]
+    except Exception as exc:
+        log_config_failed(exc)
+        raise
+    configure_logging(settings)
+    log_config_loaded()
+    diagnose_database_writable(settings.database_url)
+    diagnose_provider_keys(ROUTES.values())
 
     # Seed the built-in admin on first boot; log the one-time initial password.
     admin_seed = seed_builtin_admin()
@@ -90,6 +100,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Load webhook sources from config/webhooks.yaml if present
     from fleetent import webhook_router as _wr
+
     _webhook_sources.clear()
     if _WEBHOOK_YAML_PATH.exists():
         _webhook_sources.update(_wr.load_sources(_WEBHOOK_YAML_PATH))
@@ -118,7 +129,7 @@ class ChatRequest(BaseModel):
     message: str
 
 
-async def _authenticate(authorization: str = Header()) -> tuple[user_store.User, dict]:
+async def _authenticate(authorization: str = Header()) -> tuple[user_store.User, dict[str, Any]]:
     """Resolve a Bearer API key to (User, key_metadata). Raises 401 if invalid/blocked."""
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Bearer token required")
@@ -130,8 +141,8 @@ async def _authenticate(authorization: str = Header()) -> tuple[user_store.User,
 
 
 @app.get("/health")
-async def health() -> dict:  # type: ignore[type-arg]
-    settings = Settings()
+async def health() -> dict[str, Any]:
+    settings = Settings()  # type: ignore[call-arg]
     return {
         "status": "ok",
         "adapters": {
@@ -142,7 +153,7 @@ async def health() -> dict:  # type: ignore[type-arg]
 
 
 @app.get("/approvals")
-async def get_approvals(status: str | None = None) -> list:  # type: ignore[type-arg]
+async def get_approvals(status: str | None = None) -> list[dict[str, Any]]:
     return list_approvals(status=status)
 
 
@@ -152,7 +163,7 @@ class ApprovalRequest(BaseModel):
 
 
 @app.post("/approvals/{approval_id}/resolve")
-async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # type: ignore[type-arg]
+async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict[str, str]:
     if req.decision not in ("approved", "rejected"):
         raise HTTPException(status_code=400, detail="decision must be 'approved' or 'rejected'")
     found = await _default_gate.resolve(
@@ -169,7 +180,7 @@ async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # t
 async def chat(
     req: ChatRequest,
     request: Request,
-    auth_result: tuple[user_store.User, dict] = Depends(_authenticate),
+    auth_result: tuple[user_store.User, dict[str, Any]] = Depends(_authenticate),
     x_platform: str | None = Header(default=None),
     x_channel_id: str | None = Header(default=None),
 ) -> StreamingResponse:

@@ -20,8 +20,10 @@ def test_totp_roundtrip_fixed_time():
 
 def test_totp_wrong_code_rejected():
     secret = auth.generate_totp_secret()
-    assert auth.verify_totp(secret, "000000", t=1_000_000) is False or \
-        auth.totp(secret, t=1_000_000) == "000000"
+    assert (
+        auth.verify_totp(secret, "000000", t=1_000_000) is False
+        or auth.totp(secret, t=1_000_000) == "000000"
+    )
 
 
 def test_totp_window_tolerance():
@@ -37,8 +39,10 @@ def test_enable_and_verify_user_2fa(db):
     assert user_store.get_by_id(u.id).totp_secret == secret
     code = auth.totp(secret, t=1_000_000)
     assert auth.verify_user_2fa(u.id, code, t=1_000_000) is True
-    assert auth.verify_user_2fa(u.id, "999999", t=1_000_000) is False or \
-        auth.totp(secret, t=1_000_000) == "999999"
+    assert (
+        auth.verify_user_2fa(u.id, "999999", t=1_000_000) is False
+        or auth.totp(secret, t=1_000_000) == "999999"
+    )
 
 
 def test_user_without_2fa_fails_verify(db):

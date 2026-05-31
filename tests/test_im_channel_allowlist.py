@@ -22,7 +22,15 @@ def _columns(db_path):
 
 
 def test_table_columns(db):
-    assert {"id", "platform", "scope_type", "scope_id", "allowed", "note", "created_at"} <= _columns(db)
+    assert {
+        "id",
+        "platform",
+        "scope_type",
+        "scope_id",
+        "allowed",
+        "note",
+        "created_at",
+    } <= _columns(db)
 
 
 def test_add_entry_and_list(db):

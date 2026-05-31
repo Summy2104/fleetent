@@ -1,5 +1,3 @@
-import datetime
-
 import pytest
 
 import fleetent.api_key_store as aks

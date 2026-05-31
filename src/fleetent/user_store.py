@@ -6,6 +6,7 @@ import sqlite3
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 DB_PATH = Path("data/users.db")
 
@@ -47,7 +48,7 @@ def create_user(name: str, email: str | None = None) -> User:
     return user
 
 
-def authenticate(plaintext: str) -> tuple[User, dict] | None:
+def authenticate(plaintext: str) -> tuple[User, dict[str, Any]] | None:
     """Resolve a plaintext API key to (User, key_metadata).
 
     Checks the api_keys table first (validity handled there), then falls back to the
@@ -98,9 +99,7 @@ def migrate_api_keys() -> list[str]:
     moved: list[str] = []
     with _conn() as conn:
         users = conn.execute("SELECT id, api_key FROM users WHERE api_key IS NOT NULL").fetchall()
-        existing = {
-            r[0] for r in conn.execute("SELECT key_hash FROM api_keys").fetchall()
-        }
+        existing = {r[0] for r in conn.execute("SELECT key_hash FROM api_keys").fetchall()}
     for user_id, api_key in users:
         if api_key_store._hash(api_key) in existing:
             continue
@@ -126,9 +125,7 @@ def get_by_id(user_id: str) -> User | None:
     """Look up a user by id. Returns None if not found."""
     _init_db()
     with _conn() as conn:
-        row = conn.execute(
-            f"SELECT {_FULL_COLS} FROM users WHERE id = ?", (user_id,)
-        ).fetchone()
+        row = conn.execute(f"SELECT {_FULL_COLS} FROM users WHERE id = ?", (user_id,)).fetchone()
     return User(*row) if row else None
 
 
@@ -136,9 +133,7 @@ def get_by_email(email: str) -> User | None:
     """Look up a user by email. Returns None if not found."""
     _init_db()
     with _conn() as conn:
-        row = conn.execute(
-            f"SELECT {_FULL_COLS} FROM users WHERE email = ?", (email,)
-        ).fetchone()
+        row = conn.execute(f"SELECT {_FULL_COLS} FROM users WHERE email = ?", (email,)).fetchone()
     return User(*row) if row else None
 
 
@@ -146,9 +141,7 @@ def list_users() -> list[User]:
     """Return all users ordered by created_at."""
     _init_db()
     with _conn() as conn:
-        rows = conn.execute(
-            f"SELECT {_FULL_COLS} FROM users ORDER BY created_at"
-        ).fetchall()
+        rows = conn.execute(f"SELECT {_FULL_COLS} FROM users ORDER BY created_at").fetchall()
     return [User(*row) for row in rows]
 
 
@@ -231,10 +224,10 @@ def create_web_user(
     return result
 
 
-def bulk_import_users(rows: list[dict]) -> dict:
+def bulk_import_users(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Create users from parsed rows. Returns {created: [ids], failed: [{email, error}]}."""
     created: list[str] = []
-    failed: list[dict] = []
+    failed: list[dict[str, str]] = []
     for row in rows:
         email = row.get("email", "")
         try:

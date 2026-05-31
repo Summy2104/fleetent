@@ -11,13 +11,14 @@ import os
 import secrets
 import struct
 import time
+from typing import Any, cast
 
 from fleetent import user_store
 
 BUILTIN_ADMIN_NAME = "admin"
 
 # Login sessions: token -> {"user_id": str, "last_active": float}
-_SESSIONS: dict[str, dict] = {}
+_SESSIONS: dict[str, dict[str, Any]] = {}
 
 # scrypt cost parameters
 _N, _R, _P, _DKLEN = 2**14, 8, 1, 32
@@ -79,7 +80,7 @@ def validate_session(token: str, idle_timeout: float) -> str | None:
         _SESSIONS.pop(token, None)
         return None
     session["last_active"] = _clock()
-    return session["user_id"]
+    return cast(str, session["user_id"])
 
 
 def logout(token: str) -> None:

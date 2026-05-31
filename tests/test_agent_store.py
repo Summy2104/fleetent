@@ -7,6 +7,7 @@ import fleetent.agent_store as agent_store
 def db(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_store, "DB_PATH", tmp_path / "users.db")
     import fleetent.user_store as user_store
+
     monkeypatch.setattr(user_store, "DB_PATH", tmp_path / "users.db")
     agent_store._init_db()
     return tmp_path / "users.db"
@@ -45,6 +46,7 @@ def test_get_agent_for_user_unassigned(db):
 
 # --- channel_agents tests ---
 
+
 def test_assign_and_get_agent_for_channel(db):
     agent = agent_store.create_agent("ch-agent", "Channel prompt.", [])
     agent_store.assign_channel("slack", "C123", agent.id)
@@ -81,6 +83,7 @@ def test_platform_isolation(db):
 
 
 # --- default agent tests ---
+
 
 def test_get_default_agent_returns_agent_when_configured(db, monkeypatch):
     agent = agent_store.create_agent("basic", "Basic prompt.", [])

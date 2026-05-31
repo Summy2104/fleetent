@@ -1,11 +1,12 @@
 """Tests for SandboxClient (Docker-backed implementation)."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fleetent.sandbox_client import ExecResult, SandboxClient
+from fleetent.sandbox_client import SandboxClient
 
 
 def _mock_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> MagicMock:
@@ -22,16 +23,20 @@ def client():
 
 async def test_create_workspace_returns_container_id(client):
     fake_id = "abc123def456\n"
-    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(stdout=fake_id))):
+    with patch(
+        "asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(stdout=fake_id))
+    ):
         ws_id = await client.create_workspace("session-1")
     assert ws_id == "abc123def456"
 
 
 async def test_create_workspace_raises_on_docker_failure(client):
     mock_proc = _mock_proc(stderr="image not found", returncode=125)
-    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)):
-        with pytest.raises(RuntimeError, match="docker run failed"):
-            await client.create_workspace("session-bad")
+    with (
+        patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)),
+        pytest.raises(RuntimeError, match="docker run failed"),
+    ):
+        await client.create_workspace("session-bad")
 
 
 async def test_create_workspace_sanitizes_session_id(client):

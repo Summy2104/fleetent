@@ -1,20 +1,17 @@
 """Core agent loop: send → tool_calls? → dispatch → repeat → final reply."""
 
+import asyncio
+import json
 import time
-from collections.abc import AsyncGenerator
+import uuid
+from collections.abc import AsyncGenerator, Callable, Coroutine
 from typing import Any, cast
 
 from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
 from openai.types.chat import ChatCompletionChunk
 
-import asyncio
-import inspect
-import json
-import uuid
-from collections.abc import Callable, Coroutine
-from typing import Any
-
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
+from fleetent.agent_policy import check_tool_access
 from fleetent.context_mgr import maybe_compress
 from fleetent.eval_logger import log_run
 from fleetent.memory_layer import extract_and_save, load_memories
@@ -24,7 +21,6 @@ from fleetent.skill_registry import load as load_skill
 from fleetent.skill_registry import match as match_skill
 from fleetent.skill_registry import scan as scan_skills
 from fleetent.sub_agent import SubAgentExecutor
-from fleetent.agent_policy import check_tool_access
 from fleetent.tool_registry import dispatch, get_risk_level, get_schemas
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
@@ -45,8 +41,8 @@ async def _call_with_fallback(
         try:
             resp = await client.chat.completions.create(
                 model=model,
-                messages=messages,  # type: ignore[arg-type]
-                tools=schemas,  # type: ignore[arg-type]
+                messages=messages,
+                tools=schemas,
                 max_tokens=cfg.max_tokens,
             )
             return resp, model
@@ -73,8 +69,8 @@ async def _stream_with_fallback(
         try:
             stream = await client.chat.completions.create(
                 model=model,
-                messages=messages,  # type: ignore[arg-type]
-                tools=schemas,  # type: ignore[arg-type]
+                messages=messages,
+                tools=schemas,
                 max_tokens=cfg.max_tokens,
                 stream=True,
                 stream_options={"include_usage": True},
@@ -111,8 +107,11 @@ async def run(
     client, cfg = get_async_client_and_config("default")
 
     # Determine effective tool schemas (exclude sub_agent for child agents)
-    schemas = [s for s in get_schemas() if s["function"]["name"] != _SUB_AGENT_TOOL] \
-        if is_sub_agent else get_schemas()
+    schemas = (
+        [s for s in get_schemas() if s["function"]["name"] != _SUB_AGENT_TOOL]
+        if is_sub_agent
+        else get_schemas()
+    )
 
     # Filter by agent-level allowed_tools if specified
     if allowed_tools is not None:
@@ -126,7 +125,9 @@ async def run(
 
     while True:
         messages = maybe_compress(messages)
-        response, model_used = await _call_with_fallback(client, cfg, messages, schemas, models_to_try)
+        response, model_used = await _call_with_fallback(
+            client, cfg, messages, schemas, models_to_try
+        )
         models_to_try = [model_used]  # stick with the winning model for subsequent turns
         choice = response.choices[0]
         msg = choice.message
@@ -139,22 +140,34 @@ async def run(
             if not hasattr(tc, "function"):
                 continue
             if tc.function.name == _SUB_AGENT_TOOL and not is_sub_agent:
-                args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
-                tasks = json.loads(args["tasks"]) if isinstance(args.get("tasks"), str) else args.get("tasks", [])
+                args = (
+                    json.loads(tc.function.arguments)
+                    if isinstance(tc.function.arguments, str)
+                    else tc.function.arguments
+                )
+                tasks = (
+                    json.loads(args["tasks"])
+                    if isinstance(args.get("tasks"), str)
+                    else args.get("tasks", [])
+                )
                 sub_results = await SubAgentExecutor().run(
                     tasks=tasks,
                     parent_user_id=user_id,
                     parent_agent_id=None,
                     parent_session_id="",
                 )
-                result = "\n".join(
+                tool_result = "\n".join(
                     f"[{r.name}] {'ERROR: ' + r.error if r.error else r.result}"
                     for r in sub_results
                 )
             else:
                 risk = get_risk_level(tc.function.name)
                 if risk in ("medium", "high") and reply_func is not None:
-                    tool_args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+                    tool_args = (
+                        json.loads(tc.function.arguments)
+                        if isinstance(tc.function.arguments, str)
+                        else tc.function.arguments
+                    )
                     approval_id = str(uuid.uuid4())[:8]
                     decision = await _default_gate.request_approval(
                         approval_id=approval_id,
@@ -165,16 +178,28 @@ async def run(
                         reply_func=reply_func,
                     )
                     if decision != "approved":
-                        result = f"tool execution {decision}: user did not approve {tc.function.name}"
+                        tool_result = (
+                            f"tool execution {decision}: user did not approve {tc.function.name}"
+                        )
                     else:
-                        result = dispatch(tc.function.name, tc.function.arguments, is_sub_agent=is_sub_agent)
-                        if inspect.iscoroutine(result):
-                            result = await result
+                        dispatch_result = dispatch(
+                            tc.function.name, tc.function.arguments, is_sub_agent=is_sub_agent
+                        )
+                        tool_result = (
+                            dispatch_result
+                            if isinstance(dispatch_result, str)
+                            else await dispatch_result
+                        )
                 else:
-                    result = dispatch(tc.function.name, tc.function.arguments, is_sub_agent=is_sub_agent)
-                    if inspect.iscoroutine(result):
-                        result = await result
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+                    dispatch_result = dispatch(
+                        tc.function.name, tc.function.arguments, is_sub_agent=is_sub_agent
+                    )
+                    tool_result = (
+                        dispatch_result
+                        if isinstance(dispatch_result, str)
+                        else await dispatch_result
+                    )
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": tool_result})
 
     reply = (msg.content if msg is not None else None) or ""
     usage = response.usage if response else None
@@ -182,14 +207,22 @@ async def run(
         (m["content"] for m in messages if isinstance(m, dict) and m.get("role") == "user"),
         "",
     )
-    log_run(user_input, reply, messages, time.monotonic() - start, usage, model_used=model_used, user_id=user_id, agent_name=agent_name)
+    log_run(
+        user_input,
+        reply,
+        messages,
+        time.monotonic() - start,
+        usage,
+        model_used=model_used,
+        user_id=user_id,
+        agent_name=agent_name,
+    )
     extract_and_save(user_input, messages, user_id=user_id)
     return reply
 
 
 def run_sync(user_input: str, user_id: str = "default", system_prompt: str = _SYSTEM) -> str:
     """Synchronous wrapper around run() for CLI use."""
-    import asyncio
 
     scan_skills()
     memory_ctx = load_memories(user_id=user_id)
@@ -252,7 +285,9 @@ async def run_stream(
 
         stream_schemas = get_schemas()
         if allowed_tools is not None:
-            stream_schemas = [s for s in stream_schemas if check_tool_access(s["function"]["name"], allowed_tools)]
+            stream_schemas = [
+                s for s in stream_schemas if check_tool_access(s["function"]["name"], allowed_tools)
+            ]
 
         try:
             stream, model_used = await _stream_with_fallback(
@@ -317,9 +352,10 @@ async def run_stream(
 
     yield {"type": "done", "content": reply}
 
-    from openai.types import CompletionUsage as _CU
-    stream_usage: _CU | None = (
-        _CU(
+    from openai.types import CompletionUsage
+
+    stream_usage: CompletionUsage | None = (
+        CompletionUsage(
             prompt_tokens=total_prompt_tokens,
             completion_tokens=total_completion_tokens,
             total_tokens=total_prompt_tokens + total_completion_tokens,
@@ -327,5 +363,14 @@ async def run_stream(
         if total_prompt_tokens or total_completion_tokens
         else None
     )
-    log_run(user_input, reply, messages, time.monotonic() - start, usage=stream_usage, model_used=model_used, user_id=user_id, agent_name=agent_name)
+    log_run(
+        user_input,
+        reply,
+        messages,
+        time.monotonic() - start,
+        usage=stream_usage,
+        model_used=model_used,
+        user_id=user_id,
+        agent_name=agent_name,
+    )
     extract_and_save(user_input, messages, user_id=user_id)

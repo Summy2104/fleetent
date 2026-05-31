@@ -42,7 +42,8 @@ def test_viewer_can_read_but_not_write(client):
     token, _ = _session_for("viewer")
     assert client.get("/admin/users", headers=_hdr(token)).status_code == 200
     r = client.post(
-        "/admin/users", headers=_hdr(token),
+        "/admin/users",
+        headers=_hdr(token),
         json={"email": "x@x.com", "name": "X"},
     )
     assert r.status_code == 403
@@ -51,7 +52,8 @@ def test_viewer_can_read_but_not_write(client):
 def test_admin_create_and_list_user(client):
     token, _ = _session_for("admin")
     r = client.post(
-        "/admin/users", headers=_hdr(token),
+        "/admin/users",
+        headers=_hdr(token),
         json={"email": "a@x.com", "name": "Alice", "password": "pw"},
     )
     assert r.status_code == 201
@@ -89,11 +91,17 @@ def test_im_user_block_restore(client):
     token, _ = _session_for("admin")
     u = im_user_store.get_or_create("slack", "U1")
     im_id = im_user_store.list_im_identities(u.id)[0]["id"]
-    assert client.post(
-        f"/admin/im-users/{im_id}/block", headers=_hdr(token), json={"reason": "x"}
-    ).status_code == 200
+    assert (
+        client.post(
+            f"/admin/im-users/{im_id}/block", headers=_hdr(token), json={"reason": "x"}
+        ).status_code
+        == 200
+    )
     assert im_user_store.check_allowed_by_user_id(u.id) is False
-    assert client.post(
-        f"/admin/im-users/{im_id}/restore", headers=_hdr(token), json={"reason": "ok"}
-    ).status_code == 200
+    assert (
+        client.post(
+            f"/admin/im-users/{im_id}/restore", headers=_hdr(token), json={"reason": "ok"}
+        ).status_code
+        == 200
+    )
     assert im_user_store.check_allowed_by_user_id(u.id) is True

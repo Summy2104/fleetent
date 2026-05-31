@@ -24,7 +24,9 @@ def _env(monkeypatch, **kw):
 
 def test_resolve_prefers_db_config(db, monkeypatch):
     _env(monkeypatch, slack_bot_token="xoxb-from-env")
-    ics.upsert_connector("slack", config=json.dumps({"bot_token": "xoxb-db", "app_token": "xapp-db"}))
+    ics.upsert_connector(
+        "slack", config=json.dumps({"bot_token": "xoxb-db", "app_token": "xapp-db"})
+    )
     assert icc.resolve("slack") == {"bot_token": "xoxb-db", "app_token": "xapp-db"}
 
 

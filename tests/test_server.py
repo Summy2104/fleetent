@@ -6,7 +6,7 @@ from fleetent.server import app
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, isolated_schedule_db):
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
     return TestClient(app)
 
@@ -40,7 +40,7 @@ def test_chat_invalid_token(client):
     assert resp.status_code == 401
 
 
-def test_chat_valid_token_streams(tmp_path, monkeypatch):
+def test_chat_valid_token_streams(tmp_path, monkeypatch, isolated_schedule_db):
     import fleetent.server as srv
     import fleetent.user_store as us2
 
@@ -77,7 +77,7 @@ def test_require_auth_non_bearer_scheme(client):
     assert resp.status_code == 401
 
 
-def test_chat_stream_exception_yields_error_event(tmp_path, monkeypatch):
+def test_chat_stream_exception_yields_error_event(tmp_path, monkeypatch, isolated_schedule_db):
     import fleetent.server as srv
     import fleetent.user_store as us2
 
@@ -100,18 +100,24 @@ def test_chat_stream_exception_yields_error_event(tmp_path, monkeypatch):
     assert "boom" in resp.text
 
 
-def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch):
+def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch, isolated_schedule_db):
     """/chat with x-platform + x-channel-id uses the channel-bound agent."""
+    import fleetent.agent_store as ag
     import fleetent.server as srv
     import fleetent.user_store as us2
-    import fleetent.agent_store as ag
 
     monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
     monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
 
     captured: dict = {}
 
-    async def fake_stream(msg: str, user_id: str, system_prompt: str | None = None, allowed_tools=None, agent_name: str | None = None):  # type: ignore[misc]
+    async def fake_stream(
+        msg: str,
+        user_id: str,
+        system_prompt: str | None = None,
+        allowed_tools=None,
+        agent_name: str | None = None,
+    ):  # type: ignore[misc]
         captured["system_prompt"] = system_prompt
         captured["allowed_tools"] = allowed_tools
         captured["agent_name"] = agent_name
@@ -140,9 +146,12 @@ def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch):
 
 # ── cron scheduler lifespan ───────────────────────────────────────────────────
 
-def test_lifespan_starts_and_stops_cron_scheduler(tmp_path, monkeypatch):
+
+def test_lifespan_starts_and_stops_cron_scheduler(tmp_path, monkeypatch, isolated_schedule_db):
     from unittest.mock import AsyncMock, patch
+
     from starlette.testclient import TestClient
+
     import fleetent.server as srv
 
     monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", tmp_path / "webhooks.yaml")

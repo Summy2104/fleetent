@@ -25,14 +25,23 @@ class SandboxClient:
         """Start an isolated container, return container ID as workspace_id."""
         safe = _SAFE_NAME.sub("-", session_id)[:48]
         proc = await asyncio.create_subprocess_exec(
-            "docker", "run", "-d",
-            "--name", f"sandbox-{safe}",
-            "--network", "none",
-            "--memory", "256m",
-            "--cpus", "0.5",
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            f"sandbox-{safe}",
+            "--network",
+            "none",
+            "--memory",
+            "256m",
+            "--cpus",
+            "0.5",
             "--read-only",
-            "--tmpfs", "/tmp",
-            self._image, "sleep", "infinity",
+            "--tmpfs",
+            "/tmp",
+            self._image,
+            "sleep",
+            "infinity",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -40,13 +49,18 @@ class SandboxClient:
         if proc.returncode != 0:
             raise RuntimeError(f"docker run failed: {stderr.decode().strip()}")
         container_id = stdout.decode().strip()
-        logger.info("sandbox_created", session_id=session_id, container_id=container_id[:12])
+        logger.info("sandbox_created session_id=%s container_id=%s", session_id, container_id[:12])
         return container_id
 
     async def exec(self, workspace_id: str, command: str) -> ExecResult:
         """Execute a shell command inside the running container."""
         proc = await asyncio.create_subprocess_exec(
-            "docker", "exec", workspace_id, "sh", "-c", command,
+            "docker",
+            "exec",
+            workspace_id,
+            "sh",
+            "-c",
+            command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -60,9 +74,12 @@ class SandboxClient:
     async def destroy_workspace(self, workspace_id: str) -> None:
         """Stop and remove the container."""
         proc = await asyncio.create_subprocess_exec(
-            "docker", "rm", "-f", workspace_id,
+            "docker",
+            "rm",
+            "-f",
+            workspace_id,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
         await proc.communicate()
-        logger.info("sandbox_destroyed", container_id=workspace_id[:12])
+        logger.info("sandbox_destroyed container_id=%s", workspace_id[:12])

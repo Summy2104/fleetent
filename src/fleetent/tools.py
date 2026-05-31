@@ -70,10 +70,13 @@ async def run_code(code: str) -> str:
 
 
 @tool(risk_level="high")
-def schedule_task(name: str, cron_expr: str, message: str, timezone: str = "UTC", user_id: str = "default") -> str:
+def schedule_task(
+    name: str, cron_expr: str, message: str, timezone: str = "UTC", user_id: str = "default"
+) -> str:
     """Create a recurring cron task that runs the agent with the given message.
     cron_expr is a standard 5-field expression e.g. '0 9 * * 1-5'."""
-    from fleetent import schedule_store, cron_scheduler
+    from fleetent import schedule_store
+
     task = schedule_store.create(
         name=name,
         cron_expr=cron_expr,
@@ -90,6 +93,7 @@ def schedule_task(name: str, cron_expr: str, message: str, timezone: str = "UTC"
 def cancel_task(task_id: str) -> str:
     """Cancel a scheduled cron task by its id."""
     from fleetent import schedule_store
+
     deleted = schedule_store.delete(task_id)
     if not deleted:
         return f"error: task {task_id!r} not found"

@@ -66,8 +66,7 @@ class PermissionGate:
 
         timeout = self._medium_timeout if risk_level == "medium" else self._high_timeout
         await reply_func(
-            f"Tool `{tool_name}` requires approval (risk: {risk_level}). "
-            f"Approval ID: {approval_id}"
+            f"Tool `{tool_name}` requires approval (risk: {risk_level}). Approval ID: {approval_id}"
         )
 
         try:
@@ -100,7 +99,10 @@ class PermissionGate:
         decision: Literal["approved", "rejected"],
         approver_user_id: str,
     ) -> bool:
-        """Resolve an approval request. Returns True if the request was found, False if expired/unknown."""
+        """Resolve an approval request.
+
+        Returns True if the request was found, False if expired or unknown.
+        """
         event = self._events.get(approval_id)
         if event is None:
             return False
@@ -117,7 +119,7 @@ class PermissionGate:
 _default_gate: PermissionGate = PermissionGate()
 
 
-def list_approvals(status: str | None = None) -> list[dict]:  # type: ignore[type-arg]
+def list_approvals(status: str | None = None) -> list[dict[str, Any]]:
     """Return approvals from DB, optionally filtered by status."""
     _init_db()
     with _conn() as conn:
@@ -134,9 +136,18 @@ def list_approvals(status: str | None = None) -> list[dict]:  # type: ignore[typ
                 "requester_user_id, approver_user_id, created_at, resolved_at "
                 "FROM approvals ORDER BY created_at DESC LIMIT 50",
             ).fetchall()
-    cols = ["id", "tool_name", "risk_level", "tool_args", "status",
-            "requester_user_id", "approver_user_id", "created_at", "resolved_at"]
-    return [dict(zip(cols, r)) for r in rows]
+    cols = [
+        "id",
+        "tool_name",
+        "risk_level",
+        "tool_args",
+        "status",
+        "requester_user_id",
+        "approver_user_id",
+        "created_at",
+        "resolved_at",
+    ]
+    return [dict(zip(cols, r, strict=True)) for r in rows]
 
 
 def cleanup_stale_approvals() -> None:
