@@ -28,7 +28,12 @@ def _wire(monkeypatch):
     captured: dict[str, str] = {}
 
     async def fake_create(*, model, messages, **kw):
-        captured["system"] = messages[0]["content"]
+        # Base system is the stable cacheable prefix (messages[0]); memory/skill
+        # are carried in a separate following system message (prompt-cache reorder).
+        # Join all system messages to assert presence regardless of which one holds it.
+        captured["system"] = "\n\n".join(
+            str(m["content"]) for m in messages if m.get("role") == "system"
+        )
         return _stream_chunks("ok", None)
 
     client.chat.completions.create = fake_create

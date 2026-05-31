@@ -228,3 +228,17 @@
 
 **影响:** 701 passed;mypy 69 无新模式。Session 轨(S1/S2/S4)全完。
 **需 zy 核实:** 1024MB/10000 默认;容错的扣减语义。触发器(同 S1)待后续接张亮 cron。
+
+## prompt-cache-optimization — feat/prompt-cache-optimization
+
+**实现:** `_assemble_prompt()` 重排——base system 作 messages[0] 稳定可缓存前缀,可变 memory_ctx+skill 合并为 messages[1] 独立 system 消息(无则省略);run_sync/run_stream 两处改走它,功能等价。`_extract_cache_tokens(usage)` 尽力取 Anthropic(cache_read/creation)+OpenAI(prompt_tokens_details.cached_tokens),缺失 None;log_run 加 cache_tokens 字段。不注入 cache_control(后端无关、自动前缀缓存)。AR12 的 _compress 已统一保留所有 system 头部,base system 在内(守卫测试锁)。
+
+**自解冲突:**
+1. skill-binding 测试断言 messages[0] 含 skill → skill 现在 messages[1],改为 join 所有 system 消息断言(符合 spec"skill 在 base system 之后")。
+2. 流式合成 CompletionUsage 无缓存字段 → 从带 usage 的原始 chunk 提取。
+3. AR12 协调:_compress 保留全部 system 头部,无需改 context_mgr,加守卫。
+
+**⚠️ normalizer 待办(张亮域):** `im_gateway/normalizer.py` 有同样"memory/skill 在 system 最前"缓存杀手,本 change 未改(属张亮 im_gateway 域)——**待张亮协调重排,否则 IM 路径仍命不中前缀缓存**。
+
+**影响:** 712 passed,mypy 无新增。
+**需 zy 核实:** memory/skill 后置为独立 system 消息(messages[1])的形态;normalizer 同样重排需张亮做。
