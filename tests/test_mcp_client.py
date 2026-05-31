@@ -1399,3 +1399,390 @@ def test_mcp_yaml_example_oauth2_entry_loads():
     assert s.token_url
     assert s.client_id
     assert s.client_secret_env
+
+
+# === MCP3: connection health checking & reconnect =========================
+#
+# Health states (D2): per-server, isolated, default healthy, resettable.
+# D1: connection-level disconnects map to AR5 mcp_disconnect by reading
+# CLASSIFICATION_TABLE directly (NOT via classify()).
+# D5: degraded/unavailable -> tool calls return an "unavailable" string.
+# D7: HTTP 404 is session expiry (MCP2), never a connection disconnect (MCP3).
+
+
+def test_health_state_defaults_to_healthy():
+    server = McpServerConfig(id="h1", url="http://h1.test")
+    assert mcp_client.get_health(server) is mcp_client.HealthState.healthy
+
+
+def test_health_state_is_injectable_and_resettable():
+    server = McpServerConfig(id="h2", url="http://h2.test")
+    mcp_client.set_health(server, mcp_client.HealthState.degraded)
+    assert mcp_client.get_health(server) is mcp_client.HealthState.degraded
+    mcp_client.reset_health(server)
+    assert mcp_client.get_health(server) is mcp_client.HealthState.healthy
+
+
+def test_health_state_isolated_per_server():
+    a = McpServerConfig(id="a", url="http://a.test")
+    b = McpServerConfig(id="b", url="http://b.test")
+    mcp_client.set_health(a, mcp_client.HealthState.unavailable)
+    assert mcp_client.get_health(a) is mcp_client.HealthState.unavailable
+    assert mcp_client.get_health(b) is mcp_client.HealthState.healthy
+
+
+def test_health_state_not_module_level_global():
+    """Health must live on the server instance, not a module-level mutable dict."""
+    assert not hasattr(mcp_client, "_health_states")
+    assert not hasattr(mcp_client, "_HEALTH")
+
+
+# --- D1: disconnect exception -> mcp_disconnect via CLASSIFICATION_TABLE ---
+
+
+def test_disconnect_error_recognized_httpx():
+    assert mcp_client._is_disconnect_error(httpx.ConnectError("down"))
+    assert mcp_client._is_disconnect_error(httpx.ConnectTimeout("slow"))
+    assert mcp_client._is_disconnect_error(httpx.ReadError("eof"))
+
+
+def test_disconnect_error_rejects_http_status_error():
+    """An HTTPStatusError (e.g. 404/401) is NOT a connection-level disconnect."""
+    req = httpx.Request("POST", "http://x.test/")
+    resp = httpx.Response(404, request=req)
+    exc = httpx.HTTPStatusError("nf", request=req, response=resp)
+    assert not mcp_client._is_disconnect_error(exc)
+
+
+def test_disconnect_maps_to_mcp_disconnect_reading_table_directly():
+    """D1: mcp_client decides mcp_disconnect itself and reads CLASSIFICATION_TABLE,
+    yielding should_retry=True — without going through classify()."""
+    from fleetent.error_classifier import ErrorCategory
+
+    classification = mcp_client._disconnect_classification()
+    assert classification.category is ErrorCategory.mcp_disconnect
+    assert classification.should_retry is True
+
+
+def test_guard_classify_of_disconnect_is_unknown_not_mcp_disconnect():
+    """Guard: classify() does NOT recognize disconnect exceptions; it returns unknown.
+    This proves MCP3 cannot rely on classify() for the mcp_disconnect mapping (D1)."""
+    from fleetent.error_classifier import ErrorCategory, classify
+
+    for exc in (
+        httpx.ConnectError("down"),
+        httpx.ConnectTimeout("slow"),
+        httpx.ReadError("eof"),
+    ):
+        result = classify(exc)
+        assert result.category is ErrorCategory.unknown
+        assert result.category is not ErrorCategory.mcp_disconnect
+
+
+@pytest.mark.asyncio
+async def test_http_disconnect_turns_server_degraded(monkeypatch):
+    """A connection-level disconnect on a tool call transitions the server to degraded."""
+    import respx
+
+    server = McpServerConfig(id="dc", url="http://dc.test", auth_type="none")
+    monkeypatch.setitem(mcp_client._server_registry, "dc", server)
+    monkeypatch.setattr(mcp_client, "_schedule_reconnect", lambda s: None)
+
+    with respx.mock:
+        respx.post("http://dc.test/").mock(side_effect=httpx.ConnectError("down"))
+        result = await mcp_client.call_tool("dc", "compute", {})
+
+    assert mcp_client.get_health(server) is mcp_client.HealthState.degraded
+    assert "unavailable" in result.lower() or "不可用" in result
+
+
+@pytest.mark.asyncio
+async def test_stdio_disconnect_turns_server_degraded(monkeypatch):
+    """A dead/missing stdio session is a connection disconnect -> degraded + unavailable text."""
+    from unittest.mock import AsyncMock
+
+    server = McpServerConfig(id="sd", transport="stdio", command="x")
+    monkeypatch.setitem(mcp_client._server_registry, "sd", server)
+    monkeypatch.setattr(mcp_client, "_schedule_reconnect", lambda s: None)
+
+    session = AsyncMock()
+    session.call_tool = AsyncMock(side_effect=ConnectionError("broken pipe / EOF"))
+    monkeypatch.setitem(mcp_client._active_sessions, "sd", session)
+
+    result = await mcp_client.call_tool("sd", "do", {})
+
+    assert mcp_client.get_health(server) is mcp_client.HealthState.degraded
+    assert "unavailable" in result.lower() or "不可用" in result
+
+
+# --- D5: degraded/unavailable tool calls short-circuit to unavailable text ---
+
+
+@pytest.mark.asyncio
+async def test_degraded_tool_call_returns_unavailable_without_network(monkeypatch):
+    """A degraded server's tool call returns the unavailable string and makes no request."""
+    import respx
+
+    server = McpServerConfig(id="deg", url="http://deg.test", auth_type="none")
+    monkeypatch.setitem(mcp_client._server_registry, "deg", server)
+    mcp_client.set_health(server, mcp_client.HealthState.degraded)
+
+    route = respx.post("http://deg.test/")
+    with respx.mock:
+        respx.post("http://deg.test/").mock(return_value=httpx.Response(200))
+        result = await mcp_client.call_tool("deg", "compute", {})
+
+    assert not route.called
+    assert "unavailable" in result.lower() or "不可用" in result
+
+
+@pytest.mark.asyncio
+async def test_unavailable_tool_call_returns_unavailable_without_network(monkeypatch):
+    import respx
+
+    server = McpServerConfig(id="un", url="http://un.test", auth_type="none")
+    monkeypatch.setitem(mcp_client._server_registry, "un", server)
+    mcp_client.set_health(server, mcp_client.HealthState.unavailable)
+
+    route = respx.post("http://un.test/")
+    with respx.mock:
+        respx.post("http://un.test/").mock(return_value=httpx.Response(200))
+        result = await mcp_client.call_tool("un", "compute", {})
+
+    assert not route.called
+    assert "unavailable" in result.lower() or "不可用" in result
+
+
+@pytest.mark.asyncio
+async def test_degraded_does_not_affect_other_healthy_server(monkeypatch):
+    """One server degraded does not block tool calls on another healthy server."""
+    import respx
+
+    bad = McpServerConfig(id="bad", url="http://bad.test", auth_type="none")
+    good = McpServerConfig(id="good", url="http://good.test", auth_type="none")
+    monkeypatch.setitem(mcp_client._server_registry, "bad", bad)
+    monkeypatch.setitem(mcp_client._server_registry, "good", good)
+    mcp_client.set_health(bad, mcp_client.HealthState.degraded)
+
+    with respx.mock:
+        respx.post("http://good.test/").mock(
+            side_effect=_make_streamable_handler(tool_result_text="good-ok")
+        )
+        result = await mcp_client.call_tool("good", "compute", {})
+
+    assert result == "good-ok"
+    assert mcp_client.get_health(good) is mcp_client.HealthState.healthy
+
+
+# --- D7: 404 session expiry is NOT an MCP3 disconnect (stays MCP2) ---
+
+
+@pytest.mark.asyncio
+async def test_404_session_expiry_does_not_degrade(monkeypatch):
+    """HTTP 404 triggers MCP2 rebuild and must NOT mark the server degraded (D7)."""
+    import respx
+
+    server = McpServerConfig(id="d7", url="http://d7.test", auth_type="none")
+    server.session_id = "sess-stale"
+    monkeypatch.setitem(mcp_client._server_registry, "d7", server)
+
+    with respx.mock:
+        respx.post("http://d7.test/").mock(
+            side_effect=_make_session_expiry_handler(
+                expire_times=1, new_session_id="sess-fresh", captured=[]
+            )
+        )
+        result = await mcp_client.call_tool("d7", "compute", {"x": 1})
+
+    assert result == "ok"
+    assert mcp_client.get_health(server) is mcp_client.HealthState.healthy
+
+
+# --- D4: exponential backoff sequence ---
+
+
+def test_backoff_sequence_doubles_and_caps():
+    """1 -> 2 -> 4 -> ... capped at the configured ceiling, base/cap injectable."""
+    seq = [mcp_client._backoff_delay(n, base=1.0, cap=60.0) for n in range(8)]
+    assert seq[:7] == [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 60.0]
+    assert seq[7] == 60.0  # stays capped
+
+
+def test_backoff_sequence_short_injectable_values():
+    seq = [mcp_client._backoff_delay(n, base=0.01, cap=0.05) for n in range(5)]
+    assert seq == [0.01, 0.02, 0.04, 0.05, 0.05]
+
+
+# --- D4: reconnect success restores healthy; failure threshold -> unavailable ---
+
+
+@pytest.mark.asyncio
+async def test_reconnect_success_restores_healthy_and_resets_attempts(monkeypatch):
+    """A successful reconnect returns the server to healthy and zeroes the attempt count."""
+    server = McpServerConfig(id="rc", url="http://rc.test", auth_type="none")
+    monkeypatch.setitem(mcp_client._server_registry, "rc", server)
+    mcp_client.set_health(server, mcp_client.HealthState.degraded)
+    server._reconnect_attempts = 3
+
+    async def fake_register(s):
+        return None
+
+    monkeypatch.setattr(mcp_client, "_register_server", fake_register)
+
+    await mcp_client._attempt_reconnect(server)
+
+    assert mcp_client.get_health(server) is mcp_client.HealthState.healthy
+    assert server._reconnect_attempts == 0
+
+
+@pytest.mark.asyncio
+async def test_reconnect_failure_increments_attempts_stays_degraded(monkeypatch):
+    server = McpServerConfig(id="rf", url="http://rf.test", auth_type="none")
+    monkeypatch.setitem(mcp_client._server_registry, "rf", server)
+    mcp_client.set_health(server, mcp_client.HealthState.degraded)
+
+    async def fake_register(s):
+        raise httpx.ConnectError("still down")
+
+    monkeypatch.setattr(mcp_client, "_register_server", fake_register)
+    monkeypatch.setattr(mcp_client, "_RECONNECT_MAX_ATTEMPTS", 5)
+
+    await mcp_client._attempt_reconnect(server)
+
+    assert server._reconnect_attempts == 1
+    assert mcp_client.get_health(server) is mcp_client.HealthState.degraded
+
+
+@pytest.mark.asyncio
+async def test_reconnect_failure_reaching_threshold_marks_unavailable(monkeypatch):
+    server = McpServerConfig(id="ru", url="http://ru.test", auth_type="none")
+    monkeypatch.setitem(mcp_client._server_registry, "ru", server)
+    mcp_client.set_health(server, mcp_client.HealthState.degraded)
+    server._reconnect_attempts = 2  # one more failure hits threshold of 3
+
+    async def fake_register(s):
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(mcp_client, "_register_server", fake_register)
+    monkeypatch.setattr(mcp_client, "_RECONNECT_MAX_ATTEMPTS", 3)
+
+    await mcp_client._attempt_reconnect(server)
+
+    assert mcp_client.get_health(server) is mcp_client.HealthState.unavailable
+
+
+@pytest.mark.asyncio
+async def test_manual_reconnect_recovers_unavailable_server(monkeypatch):
+    """Manual reconnect entry re-tries an unavailable server and can restore it."""
+    server = McpServerConfig(id="man", url="http://man.test", auth_type="none")
+    monkeypatch.setitem(mcp_client._server_registry, "man", server)
+    mcp_client.set_health(server, mcp_client.HealthState.unavailable)
+    server._reconnect_attempts = 9
+
+    async def fake_register(s):
+        return None
+
+    monkeypatch.setattr(mcp_client, "_register_server", fake_register)
+
+    await mcp_client.reconnect("man")
+
+    assert mcp_client.get_health(server) is mcp_client.HealthState.healthy
+    assert server._reconnect_attempts == 0
+
+
+# --- D3: periodic probe detects disconnect and triggers reconnect ---
+
+
+@pytest.mark.asyncio
+async def test_probe_http_unreachable_marks_degraded_and_triggers_reconnect(monkeypatch):
+    """Probe failure (HTTP unreachable) -> degraded + reconnect scheduled."""
+    import respx
+
+    server = McpServerConfig(id="pb", url="http://pb.test", auth_type="none")
+    monkeypatch.setitem(mcp_client._server_registry, "pb", server)
+
+    scheduled: list = []
+    monkeypatch.setattr(mcp_client, "_schedule_reconnect", lambda s: scheduled.append(s.id))
+
+    with respx.mock:
+        respx.post("http://pb.test/").mock(side_effect=httpx.ConnectError("down"))
+        await mcp_client._probe_once(server)
+
+    assert mcp_client.get_health(server) is mcp_client.HealthState.degraded
+    assert scheduled == ["pb"]
+
+
+@pytest.mark.asyncio
+async def test_probe_http_healthy_stays_healthy(monkeypatch):
+    import respx
+
+    server = McpServerConfig(id="pok", url="http://pok.test", auth_type="none")
+    monkeypatch.setitem(mcp_client._server_registry, "pok", server)
+    monkeypatch.setattr(mcp_client, "_schedule_reconnect", lambda s: None)
+
+    with respx.mock:
+        respx.post("http://pok.test/").mock(
+            side_effect=_make_streamable_handler(tool_result_text="ok")
+        )
+        await mcp_client._probe_once(server)
+
+    assert mcp_client.get_health(server) is mcp_client.HealthState.healthy
+
+
+@pytest.mark.asyncio
+async def test_probe_stdio_dead_session_marks_degraded(monkeypatch):
+    """A missing stdio session means the subprocess is gone -> degraded."""
+    server = McpServerConfig(id="ps", transport="stdio", command="x")
+    monkeypatch.setitem(mcp_client._server_registry, "ps", server)
+    monkeypatch.setattr(mcp_client, "_schedule_reconnect", lambda s: None)
+    mcp_client._active_sessions.pop("ps", None)
+
+    await mcp_client._probe_once(server)
+
+    assert mcp_client.get_health(server) is mcp_client.HealthState.degraded
+
+
+@pytest.mark.asyncio
+async def test_probe_skips_unavailable_server(monkeypatch):
+    """An unavailable server is not auto-probed/reconnected (needs manual reconnect)."""
+    import respx
+
+    server = McpServerConfig(id="pu", url="http://pu.test", auth_type="none")
+    monkeypatch.setitem(mcp_client._server_registry, "pu", server)
+    mcp_client.set_health(server, mcp_client.HealthState.unavailable)
+
+    scheduled: list = []
+    monkeypatch.setattr(mcp_client, "_schedule_reconnect", lambda s: scheduled.append(s.id))
+
+    route = respx.post("http://pu.test/")
+    with respx.mock:
+        respx.post("http://pu.test/").mock(return_value=httpx.Response(200))
+        await mcp_client._probe_once(server)
+
+    assert not route.called
+    assert scheduled == []
+    assert mcp_client.get_health(server) is mcp_client.HealthState.unavailable
+
+
+# --- D6: background prober task lifecycle ---
+
+
+@pytest.mark.asyncio
+async def test_start_health_monitor_creates_task_and_stop_cancels_it():
+    """start_health_monitor returns a running task; stop_health_monitor cancels it cleanly."""
+    task = mcp_client.start_health_monitor(interval=0.01)
+    assert task is not None
+    assert not task.done()
+    await mcp_client.stop_health_monitor()
+    assert task.done()
+
+
+@pytest.mark.asyncio
+async def test_close_cancels_health_monitor(monkeypatch):
+    """close() cancels the background health monitor, leaving no residual task."""
+    monkeypatch.setattr(mcp_client, "_server_registry", {})
+    monkeypatch.setattr(mcp_client, "_exit_stack", None)
+    task = mcp_client.start_health_monitor(interval=0.01)
+    await mcp_client.close()
+    assert task.done()
+    assert mcp_client._health_monitor_task is None

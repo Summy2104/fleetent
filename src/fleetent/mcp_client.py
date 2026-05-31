@@ -16,15 +16,43 @@ import json
 import logging
 import os
 import time
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass, field
-from typing import Any
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from fleetent.error_classifier import ErrorClassification
 
 logger = logging.getLogger(__name__)
 
 _server_registry: dict[str, McpServerConfig] = {}
 _active_sessions: dict[str, Any] = {}  # server_id -> mcp.ClientSession (stdio only)
 _exit_stack: AsyncExitStack | None = None
+
+# --- MCP3: connection health & reconnect tunables (injectable defaults) ----
+# Reconnect backoff (D4): 1s -> 2s -> 4s -> ... capped at 60s; after this many
+# consecutive failed reconnects a server is marked permanently unavailable.
+# These are module-level *constants* (read-only defaults), not mutable per-server
+# state — per-server state (health, attempt count) lives on the server instance.
+_PROBE_INTERVAL = 30.0  # seconds between background health probes (D3)
+_BACKOFF_BASE = 1.0  # seconds; first reconnect delay (D4)
+_BACKOFF_CAP = 60.0  # seconds; reconnect backoff ceiling (D4)
+_RECONNECT_MAX_ATTEMPTS = 5  # consecutive failures -> unavailable (D4)
+
+_UNAVAILABLE_RESULT_PREFIX = "MCP server"  # tool result text on degraded/unavailable (D5)
+
+# Single background health-monitor task (server-process lifespan only, D6).
+_health_monitor_task: asyncio.Task[None] | None = None
+
+
+class HealthState(StrEnum):
+    """Connection health of an MCP server (D2). str-valued for trace output."""
+
+    healthy = "healthy"  # connection live, tools callable
+    degraded = "degraded"  # disconnect detected, reconnecting in background
+    unavailable = "unavailable"  # reconnect threshold hit; auto-reconnect stopped
+
 
 # Refresh slightly before the server-stated expiry to avoid a "valid at check, expired at
 # the server" race (D4). Conservative TTL used when the token response omits expires_in.
@@ -121,6 +149,10 @@ class McpServerConfig:
     )
     _refresh_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
     _auth_unavailable: bool = field(default=False, repr=False, compare=False)
+    # MCP3 connection-health state, held per-server (D2: never module-level global).
+    _health: HealthState = field(default=HealthState.healthy, repr=False, compare=False)
+    _reconnect_attempts: int = field(default=0, repr=False, compare=False)
+    _reconnect_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
 
 
 def _next_request_id(server: McpServerConfig) -> int:
@@ -131,6 +163,210 @@ def _next_request_id(server: McpServerConfig) -> int:
 
 def _make_tool_name(server_id: str, tool_name: str) -> str:
     return f"{server_id}__{tool_name}"
+
+
+# === MCP3: connection health & reconnect ===================================
+
+
+def get_health(server: McpServerConfig) -> HealthState:
+    """Current connection health of a server (D2)."""
+    return server._health
+
+
+def set_health(server: McpServerConfig, state: HealthState) -> None:
+    """Set a server's connection health (D2: per-server, injectable for tests)."""
+    server._health = state
+
+
+def reset_health(server: McpServerConfig) -> None:
+    """Reset a server to healthy with a zeroed reconnect counter (D2)."""
+    server._health = HealthState.healthy
+    server._reconnect_attempts = 0
+
+
+def _is_disconnect_error(exc: BaseException) -> bool:
+    """Whether an exception is a connection-level disconnect (D1/D7).
+
+    Connection-level means the transport itself failed: the HTTP endpoint is
+    unreachable / the read stream broke, or a stdio subprocess died. This is
+    distinct from a session-level 404 (MCP2) — an ``HTTPStatusError`` carries a
+    response and is explicitly NOT treated as a disconnect here, so 404 session
+    expiry never enters the MCP3 reconnect/degrade path.
+    """
+    import httpx
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        return False
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadError)):
+        return True
+    if isinstance(exc, (httpx.TransportError, httpx.TimeoutException)):
+        return True
+    # stdio: a dead subprocess / closed pipe surfaces as a connection/OS-level error.
+    return isinstance(exc, (ConnectionError, BrokenPipeError, EOFError, OSError))
+
+
+def _disconnect_classification() -> ErrorClassification:
+    """Read AR5's mcp_disconnect classification directly (D1).
+
+    The disconnect→category decision is mcp_client's own domain knowledge; we then
+    consume AR5's read-only ``should_retry`` flag straight from CLASSIFICATION_TABLE.
+    We deliberately do NOT call ``error_classifier.classify()`` — it only recognizes
+    ``APIStatusError`` and would return ``unknown`` for a disconnect exception.
+    """
+    from fleetent.error_classifier import CLASSIFICATION_TABLE, ErrorCategory
+
+    return CLASSIFICATION_TABLE[ErrorCategory.mcp_disconnect]
+
+
+def _unavailable_result(server_id: str) -> str:
+    """Tool-call result text when a server is degraded/unavailable (D5)."""
+    return (
+        f"{_UNAVAILABLE_RESULT_PREFIX} '{server_id}' is temporarily unavailable "
+        f"(connection lost; reconnecting in the background)."
+    )
+
+
+def _handle_disconnect(server: McpServerConfig) -> str:
+    """Map a caught disconnect to AR5 mcp_disconnect and degrade + schedule reconnect (D1).
+
+    Reads the mcp_disconnect classification's ``should_retry``: when true (it is, per
+    AR5), transitions the server to ``degraded`` and kicks off a background reconnect.
+    Returns the user-facing unavailable text (D5).
+    """
+    classification = _disconnect_classification()
+    if classification.should_retry and server._health is HealthState.healthy:
+        set_health(server, HealthState.degraded)
+        _schedule_reconnect(server)
+    return _unavailable_result(server.id)
+
+
+def _backoff_delay(
+    attempt: int, *, base: float = _BACKOFF_BASE, cap: float = _BACKOFF_CAP
+) -> float:
+    """Exponential backoff delay for reconnect attempt ``attempt`` (0-based), capped (D4)."""
+    return min(base * (2.0**attempt), cap)
+
+
+async def _attempt_reconnect(server: McpServerConfig) -> None:
+    """One reconnect attempt (D4): re-register on success, count failures, cap to unavailable.
+
+    Idempotent / deduplicated via the server's reconnect lock so concurrent triggers
+    coalesce into a single in-flight reconnect.
+    """
+    if server._reconnect_lock.locked():
+        return
+    async with server._reconnect_lock:
+        try:
+            await _register_server(server)
+        except Exception as exc:  # noqa: BLE001 — reconnect failure is expected; counted below
+            server._reconnect_attempts += 1
+            if server._reconnect_attempts >= _RECONNECT_MAX_ATTEMPTS:
+                set_health(server, HealthState.unavailable)
+                logger.warning(
+                    "mcp_server_unavailable server_id=%s attempts=%d error=%s",
+                    server.id,
+                    server._reconnect_attempts,
+                    exc,
+                )
+            else:
+                logger.info(
+                    "mcp_reconnect_failed server_id=%s attempt=%d error=%s",
+                    server.id,
+                    server._reconnect_attempts,
+                    exc,
+                )
+            return
+        reset_health(server)
+        logger.info("mcp_server_reconnected server_id=%s", server.id)
+
+
+async def _reconnect_with_backoff(server: McpServerConfig) -> None:
+    """Background reconnect loop with exponential backoff until healthy or unavailable (D4)."""
+    while server._health is HealthState.degraded:
+        delay = _backoff_delay(server._reconnect_attempts)
+        await asyncio.sleep(delay)
+        await _attempt_reconnect(server)
+
+
+def _schedule_reconnect(server: McpServerConfig) -> None:
+    """Kick off a background reconnect loop for a degraded server (D4/D6).
+
+    Fire-and-forget asyncio task; dedup is enforced inside ``_attempt_reconnect`` via
+    the per-server reconnect lock so concurrent callers do not stack reconnects.
+    """
+    asyncio.create_task(_reconnect_with_backoff(server))
+
+
+async def reconnect(server_id: str) -> None:
+    """Manual reconnect entry point (D4): retry an unavailable/degraded server once.
+
+    Clears the failure count so a previously ``unavailable`` server gets a fresh attempt.
+    """
+    server = _server_registry.get(server_id)
+    if server is None:
+        raise KeyError(f"Unknown MCP server: {server_id}")
+    server._reconnect_attempts = 0
+    set_health(server, HealthState.degraded)
+    await _attempt_reconnect(server)
+
+
+async def _probe_once(server: McpServerConfig) -> None:
+    """Probe one server's liveness (D3): HTTP light request / stdio session check.
+
+    Auto-probe skips ``unavailable`` servers (they need a manual reconnect). On a
+    detected disconnect the server is degraded and a background reconnect scheduled.
+    """
+    if server._health is not HealthState.healthy:
+        return  # degraded already reconnecting; unavailable needs manual reconnect
+    if server.transport == "stdio":
+        if _active_sessions.get(server.id) is None:
+            set_health(server, HealthState.degraded)
+            _schedule_reconnect(server)
+        return
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await _post_jsonrpc(client, server, "tools/list", {})
+    except Exception as exc:  # noqa: BLE001 — probe maps disconnects; other errors logged
+        if _is_disconnect_error(exc):
+            set_health(server, HealthState.degraded)
+            _schedule_reconnect(server)
+        else:
+            logger.debug("mcp_probe_non_disconnect server_id=%s error=%s", server.id, exc)
+
+
+async def _health_monitor_loop(interval: float) -> None:
+    """Periodically probe all registered servers (D3/D6: bare asyncio, no cron)."""
+    while True:
+        await asyncio.sleep(interval)
+        for server in list(_server_registry.values()):
+            await _probe_once(server)
+
+
+def start_health_monitor(*, interval: float = _PROBE_INTERVAL) -> asyncio.Task[None]:
+    """Start the background health-monitor task (D6: server lifespan only, not CLI).
+
+    Implemented as a bare ``asyncio.create_task`` loop — deliberately NOT routed through
+    cron_scheduler/APScheduler (D6: decoupled from the deferred user-level scheduler).
+    """
+    global _health_monitor_task
+    if _health_monitor_task is not None and not _health_monitor_task.done():
+        return _health_monitor_task
+    _health_monitor_task = asyncio.create_task(_health_monitor_loop(interval))
+    return _health_monitor_task
+
+
+async def stop_health_monitor() -> None:
+    """Cancel the background health-monitor task, leaving no residual task (D6)."""
+    global _health_monitor_task
+    if _health_monitor_task is None:
+        return
+    _health_monitor_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await _health_monitor_task
+    _health_monitor_task = None
 
 
 def _extract_jsonrpc_from_sse(body: str, request_id: int) -> dict[str, Any]:
@@ -193,6 +429,7 @@ async def close() -> None:
     logged at debug and never block shutdown.
     """
     global _exit_stack
+    await stop_health_monitor()  # MCP3: cancel background prober, leave no residual task (D6)
     await _close_http_sessions()
     if _exit_stack is not None:
         await _exit_stack.__aexit__(None, None, None)
@@ -609,10 +846,20 @@ def _register_tool_http(server: McpServerConfig, tool_name: str, tool_def: dict[
 
 
 async def _call_stdio_tool(server_id: str, tool_name: str, args: dict[str, Any]) -> str:
+    server = _server_registry.get(server_id)
+    # D5: short-circuit degraded/unavailable servers without touching the subprocess.
+    if server is not None and server._health is not HealthState.healthy:
+        return _unavailable_result(server_id)
+
     session = _active_sessions.get(server_id)
     if session is None:
         raise KeyError(f"No active stdio session for MCP server: {server_id}")
-    result = await session.call_tool(tool_name, args)
+    try:
+        result = await session.call_tool(tool_name, args)
+    except Exception as exc:  # noqa: BLE001 — disconnects map to mcp_disconnect (D1); rest re-raised
+        if server is not None and _is_disconnect_error(exc):
+            return _handle_disconnect(server)
+        raise
     if result.content:
         return result.content[0].text
     return ""
@@ -631,12 +878,21 @@ async def _call_http_tool(server_id: str, tool_name: str, args: dict[str, Any]) 
             f"OAuth2 credentials."
         )
 
+    # D5: short-circuit degraded/unavailable servers without making a network request.
+    if server._health is not HealthState.healthy:
+        return _unavailable_result(server_id)
+
     import httpx
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        obj = await _post_jsonrpc(
-            client, server, "tools/call", {"name": tool_name, "arguments": args}
-        )
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            obj = await _post_jsonrpc(
+                client, server, "tools/call", {"name": tool_name, "arguments": args}
+            )
+    except Exception as exc:  # noqa: BLE001 — disconnects map to mcp_disconnect (D1); rest re-raised
+        if _is_disconnect_error(exc):
+            return _handle_disconnect(server)
+        raise
 
     result = obj.get("result")
     if isinstance(result, dict):
