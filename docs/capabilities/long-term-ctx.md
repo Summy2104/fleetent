@@ -6,13 +6,15 @@
 ## 概述
 
 统一协调长期上下文的检索与注入，是 memory 和 knowledge_base 与 agent_loop 之间的胶水层。
+当前推进策略是先让 knowledge_base 作为可选 provider 接入：KB 未实现、未启用或无结果时，
+long-term-ctx 仍可基于 memory 正常工作。
 
-**负责**：并行查询 memory 和 knowledge_base、合并结果、控制注入的 token 预算、格式化为 system prompt 可用的文本，并返回来源摘要供 observability 记录。
+**负责**：查询 memory 和可选 knowledge_base、合并结果、控制注入的 token 预算、格式化为 system prompt 可用的文本，并返回来源摘要供 observability 记录。
 
 **不负责**：存储任何数据、记忆提取（→ memory）、文档索引（→ knowledge_base）、in-session 上下文压缩（→ context_mgr）、trace 持久化（→ observability）。
 
 **调用关系**：
-- 依赖：memory_layer（search）、knowledge_base（search）、config（token 预算上限）
+- 依赖：memory_layer（search）、knowledge_base optional provider（search）、config（token 预算上限）
 - 被依赖：agent_loop（每次对话开始前调用）
 
 **模块归属**：
@@ -27,17 +29,18 @@
 flowchart TD
     A[agent_loop 调用 build_context] --> B[并行检索]
     B --> C[memory_layer.search]
-    B --> D[knowledge_base.search\n向量检索]
-    B --> E[knowledge_base.graph_search\n图增强检索，关系型 query 时触发]
-    C --> F[合并结果]
-    D --> F
-    E --> F
-    F --> G[按相关度排序，memory 条目优先]
-    G --> H{超出 token 预算？}
-    H -->|是| I[截断低优先级条目]
-    H -->|否| J[格式化为注入文本]
-    I --> J
-    J --> K[返回 BuiltContext\ntext + sources]
+    B --> D{knowledge provider\n已启用?}
+    D -->|是| E[knowledge_base.search\n向量检索]
+    D -->|否| F[空 knowledge 结果]
+    C --> G[合并结果]
+    E --> G
+    F --> G
+    G --> H[按相关度排序，memory 条目优先]
+    H --> I{超出 token 预算？}
+    I -->|是| J[截断低优先级条目]
+    I -->|否| K[格式化为注入文本]
+    J --> K
+    K --> L[返回 BuiltContext\ntext + sources]
 ```
 
 ## 接口定义
@@ -63,12 +66,13 @@ async def build_context(
     agent_id: str,
     available_tokens: int,
 ) -> BuiltContext:
-    """并行检索 memory 和 knowledge_base，合并后返回注入文本和来源摘要。
+    """检索 memory 和可选 knowledge_base，合并后返回注入文本和来源摘要。
 
     available_tokens: 调用方（agent_loop）传入的当前可用 token 数，
         build_context.text 不超过此值与 config 预算上限中的较小值。
         为 0 时直接返回空 text 和空 sources，不发起检索。
-    任意一侧检索无结果时正常降级，不报错。
+    任意一侧检索无结果时正常降级，不报错；knowledge_base 未实现或未启用时
+    视为空 knowledge 结果。
     """
 ```
 
@@ -78,8 +82,9 @@ async def build_context(
 
 ## 规划中（v1.0）
 
-- [ ] **并行检索**：asyncio.gather 同时调用 memory_layer.search()、knowledge_base.search() 和（按需）knowledge_base.graph_search()，不串行等待
-  - graph_search 触发条件见待决问题
+- [ ] **可选检索**：调用 memory_layer.search()；knowledge_base 仅在 provider 已启用时调用
+  - knowledge_base 未实现、未启用或返回空结果时不影响 memory 注入
+  - graph_search 暂不接入，等 knowledge-base graph search spec 再定义
 
 - [ ] **优先级合并**：memory 条目优先于 knowledge 条目
   - 同等相关度时，用户个人记忆排在通用文档前
@@ -122,15 +127,16 @@ async def build_context(
 ## 测试边界
 
 **需要单元测试的行为**：
-- 并行调用：memory 和 knowledge_base 的 search 通过 asyncio.gather 并发，非串行
+- 可选调用：available_tokens 为 0 时不调用 provider；knowledge provider disabled 时不调用 KB
+- provider 调用：memory search 被调用；knowledge provider 启用时才调用 knowledge search
 - token 预算截断：超出上限时正确截断，且 memory 条目先于 knowledge 条目保留
 - 单侧空结果：任意一侧返回空列表时不报错，正常合并另一侧结果
-- 格式化输出：memory 区段和 knowledge 区段分区正确，无结果的区段不出现在输出中
+- 格式化输出：memory 区段和 knowledge 区段分区正确，无结果或 disabled provider 的区段不出现在输出中
 - 来源摘要：返回 sources 仅包含被实际注入的结果，供 agent-runtime 交给 observability 记录
 
 **需要 mock 的依赖**：
 - `memory_layer.search`：隔离 memory 模块，控制返回内容和数量
-- `knowledge_base.search`：隔离 knowledge_base 模块
+- `knowledge_base.search` 或 null provider：隔离 knowledge_base 模块
 - `config`：注入测试用 token 预算上限
 
 ## 待决问题
@@ -138,4 +144,5 @@ async def build_context(
 - [ ] token 预算默认值：config 中配置的 token 上限设多少？与 `available_tokens` 取 min 时，两者的典型比例是多少？（负责人：待认领）
 - [ ] memory 与 knowledge 的 token 分配：各自固定比例，还是完全按相关度动态分配？（负责人：待认领）
 - [ ] 格式化模板：memory 和 knowledge 区段的具体格式由谁定义，是否需要可配置？（负责人：待认领）
-- [ ] graph_search 触发决策：由调用方传入 query_type 标记，还是 long_term_ctx 内部判断（如关键词检测）？（与 knowledge-base 待决问题对齐，负责人：待认领）
+- [ ] knowledge provider 注入方式：通过 config 开关、依赖注入参数，还是模块级 provider registry？（负责人：待认领）
+- [ ] graph_search 触发决策：等 knowledge-base graph search 进入实现前再定；本阶段不接入 graph_search。（负责人：待认领）
