@@ -158,3 +158,17 @@
 **实现:** scan() 行 34 `MINI_AGENT_SKILLS_DIR` → `FLEETENT_SKILLS_DIR`(默认 "skills" 不变);不留旧名兼容。一行改动 + 2 测试(新名生效、旧名不再生效)。
 **自解:** "旧名不生效"测试最初误用 _write_skill(总写 skills/),chdir 后默认 "skills" 命中 → 改为把 skill 放非 "skills" 的 oldspot/ 目录,旧名指向它、默认 "skills" 不存在 → 正确验证旧名被忽略。
 **影响:** 621 passed,ruff 干净,旧名 src 零残留。zy 核实:不留旧名兼容(pre-1.0 可接受)。
+
+## builtin-skills — feat/builtin-skills
+
+**实现:** `BUILTIN_SKILLS_DIR=Path(__file__).parent/"builtin_skills"`(可 monkeypatch);scan 经 `_scan_dir(base,*,builtin)` 扫内置+用户两目录,SkillEntry 加 `builtin: bool`;新建 src/fleetent/builtin_skills/getting-started/SKILL.md 示例;config 加 `disabled_skills: list[str]=[]`;match() 加可选 disabled_skills 参数(参数>Settings>默认),跳过 (name in disabled_skills) 或 (enabled_by_default false[本次接线 SK2 解析的字段]),记 `skill_disabled_skipped`{name,reason,builtin};load() 不受禁用约束。
+
+**与 SK8 协调(方案一):** scan 只发现+打 builtin 标记,**不引入覆盖/来源优先**;同名冲突全交 SK8 路径排序+告警;替换内置走禁用开关。守卫 test_scan_no_source_priority_override_logic。
+
+**自解冲突:**
+1. 示例内置 skill 泄漏进所有测试 → autouse reset_registry 默认 monkeypatch BUILTIN_SKILLS_DIR 到不存在的 tmp,保持既有行为;builtin 测试 opt-in。
+2. match 新 logger.info 在 configure_logging 后崩 → 禁用路径测试包 capture_logs(既有约定)。
+3. 测试数据 skill 名 `on` 被 YAML 强转 True → 改名 enabled。
+
+**影响:** 636 passed;mypy 68=67+1,+1 是 _resolve_disabled_skills 的 Settings() call-arg(同 context_mgr D4 既有模式,非新模式)。实现了 roadmap SK6 的全局禁用层。
+**需 zy 核实:** 默认 disabled_skills 空、enabled_by_default 缺省 True 下行为不变(守卫已验);内置示例 skill 内容。
