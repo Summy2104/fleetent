@@ -62,11 +62,16 @@ def _apply_override(cfg: RouteConfig, override: RouteOverride | None) -> RouteCo
         fallbacks = ()
     # Deep-merge params by key: override keys replace same-named base keys,
     # uncovered base keys carry over (D2). None override params inherit base.
-    if override.params is None:
-        params = cfg.params
-    else:
-        merged = {**cfg.params, **override.params}
-        params = {k: v for k, v in merged.items() if k not in _RESERVED_PARAM_KEYS}
+    params = cfg.params if override.params is None else {**cfg.params, **override.params}
+    # A reserved key in params would collide with the explicit create() kwargs.
+    # Fail loud rather than silently dropping it, so a config mistake surfaces
+    # instead of the key being quietly ignored.
+    reserved = set(params) & _RESERVED_PARAM_KEYS
+    if reserved:
+        raise ValueError(
+            f"params must not contain reserved key(s) {sorted(reserved)}; "
+            "these are controlled by the route config, not params"
+        )
     return RouteConfig(
         base_url=override.base_url if override.base_url is not None else cfg.base_url,
         model=override.model if override.model is not None else cfg.model,
@@ -161,26 +166,53 @@ def _build_route(name: str, raw: Any) -> RouteConfig:
     )
 
 
-def _load_routes() -> dict[str, RouteConfig]:
-    """Resolve the effective route table: built-in defaults merged with the file.
+# Parsed-file cache keyed on (path, mtime, size). The expensive work (disk read +
+# YAML parse + per-route validation) runs only when the file's path or contents
+# change; the in-memory ROUTES merge below still runs every call so runtime edits
+# stay visible. No hot reload / no background polling: the key is recomputed lazily
+# on each call from a single stat().
+_file_routes_cache: tuple[tuple[str, float, int], dict[str, RouteConfig]] | None = None
 
-    Missing file is normal (returns the in-memory defaults unchanged). A present
-    but corrupt / malformed file fails loud rather than silently masking misconfig.
-    No hot reload: the file is read on each call, not watched.
+
+def _load_file_routes() -> dict[str, RouteConfig]:
+    """Parse the routes file into RouteConfigs, cached by (path, mtime, size).
+
+    Returns an empty mapping when the file is absent or empty. A present-but-corrupt
+    file raises (fail loud). On the steady-state hot path (unchanged file) this skips
+    the disk read, YAML parse, and validation entirely.
     """
-    base = dict(ROUTES)
+    global _file_routes_cache
     if not ROUTES_PATH.exists():
-        return base
+        _file_routes_cache = None
+        return {}
+    stat = ROUTES_PATH.stat()
+    key = (str(ROUTES_PATH), stat.st_mtime, stat.st_size)
+    if _file_routes_cache is not None and _file_routes_cache[0] == key:
+        return _file_routes_cache[1]
     try:
         raw = yaml.safe_load(ROUTES_PATH.read_text())
     except yaml.YAMLError as exc:
         raise ValueError(f"failed to parse routes file {ROUTES_PATH}: {exc}") from exc
     if raw is None:
-        return base
-    if not isinstance(raw, dict):
+        parsed: dict[str, RouteConfig] = {}
+    elif not isinstance(raw, dict):
         raise ValueError(f"routes file {ROUTES_PATH}: top level must be a mapping, got {type(raw)}")
-    for name, entry in raw.items():
-        base[str(name)] = _build_route(str(name), entry)
+    else:
+        parsed = {str(name): _build_route(str(name), entry) for name, entry in raw.items()}
+    _file_routes_cache = (key, parsed)
+    return parsed
+
+
+def _load_routes() -> dict[str, RouteConfig]:
+    """Resolve the effective route table: built-in defaults merged with the file.
+
+    Missing file is normal (returns the in-memory defaults unchanged). A present
+    but corrupt / malformed file fails loud rather than silently masking misconfig.
+    The file parse is cached by (path, mtime, size); the in-memory ROUTES merge
+    runs each call so runtime ROUTES edits stay visible.
+    """
+    base = dict(ROUTES)
+    base.update(_load_file_routes())
     return base
 
 

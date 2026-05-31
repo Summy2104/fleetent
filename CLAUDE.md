@@ -95,7 +95,7 @@ src/fleetent/
 以下做法**明确禁止**，不需讨论：
 
 - **禁止引入 AI 框架**：LangChain / LlamaIndex / LangGraph——直接调 SDK，不要框架抽象
-- **禁止 ORM**：不用 SQLAlchemy，用 aiosqlite 直接写 SQL
+- **禁止 ORM**：不作 ORM 数据访问，用标准库 `sqlite3` 直接写 SQL（同步；全仓 store 一致）。SQLAlchemy 仅供 alembic 迁移声明 schema 用，不引入 ORM 层；`aiosqlite` 未引入（无此依赖）
 - **禁止全局可变状态**：模块级路径常量（`DB_PATH` / `SESSIONS_DIR` 等）必须可通过 `monkeypatch` 注入，方便测试隔离
 - **新依赖必须经过讨论**：区分三类——
   - 基础设施服务（PostgreSQL、Redis、Qdrant 等）：可引入，需在 PR 中说明必要性和自托管方案

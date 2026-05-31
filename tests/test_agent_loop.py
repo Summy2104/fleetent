@@ -101,7 +101,7 @@ def mock_client(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "load_memories", lambda **kw: "")
-    monkeypatch.setattr(al, "match_skill", lambda _: None)
+    monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     # Avoid instantiating Settings() (needs an API key) in the default-limits path.
     monkeypatch.setattr(
         al,
@@ -566,7 +566,7 @@ def mock_client_fb(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "load_memories", lambda **kw: "")
-    monkeypatch.setattr(al, "match_skill", lambda _: None)
+    monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
         al,
         "resolve_limits",
@@ -993,7 +993,7 @@ async def test_run_stream_routes_to_vision_with_images(monkeypatch):
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
     monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(al, "load_memories", lambda **kw: "")
-    monkeypatch.setattr(al, "match_skill", lambda _: None)
+    monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
         al,
         "resolve_limits",
@@ -1269,7 +1269,7 @@ def _wire_loop(monkeypatch, client, cfg):
     monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "load_memories", lambda **kw: "")
-    monkeypatch.setattr(al, "match_skill", lambda _: None)
+    monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
         al,
         "resolve_limits",
@@ -1342,8 +1342,8 @@ async def test_stream_empty_params_byte_identical(monkeypatch):
 # ── prompt-cache-optimization: stable cacheable prefix ───────────────────────
 
 
-def _capture_stream_wire(monkeypatch, *, memory: str, skill: str | None) -> dict:
-    """Wire run_stream with a given memory ctx + matched skill, capturing messages."""
+def _capture_stream_wire(monkeypatch, *, memory: str, catalog: str) -> dict:
+    """Wire run_stream with a given memory ctx + skills catalog, capturing messages."""
     client = AsyncMock()
     cfg = MagicMock()
     cfg.model = "test-model"
@@ -1363,9 +1363,7 @@ def _capture_stream_wire(monkeypatch, *, memory: str, skill: str | None) -> dict
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
     monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(al, "load_memories", lambda **kw: memory)
-    monkeypatch.setattr(al, "match_skill", lambda _: "deploy" if skill else None)
-    monkeypatch.setattr(al, "load_skill", lambda _: skill or "")
-    monkeypatch.setattr(al, "check_skill_access", lambda *a, **kw: True)
+    monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: catalog)
     monkeypatch.setattr(
         al,
         "resolve_limits",
@@ -1381,40 +1379,36 @@ _BASE = "You are a helpful assistant with access to tools. Use them when needed.
 
 
 async def test_run_stream_base_system_prefix_stable_across_variable_content(monkeypatch):
-    # Two runs differ only in memory + matched skill; the base system message
-    # (messages[0]) must be byte-identical so the auto prefix cache can hit.
-    cap1 = _capture_stream_wire(monkeypatch, memory="mem-A", skill="SKILL-A")
-    _ = [e async for e in al.run_stream("deploy please", allowed_skills=["deploy"])]
+    # The skills catalog is part of the stable prefix; only memory varies. The
+    # base system message (messages[0] = base + catalog) must be byte-identical
+    # across runs so the auto prefix cache can hit.
+    cap1 = _capture_stream_wire(monkeypatch, memory="mem-A", catalog="CATALOG-X")
+    _ = [e async for e in al.run_stream("deploy please")]
     first = cap1["messages"][0]
 
-    cap2 = _capture_stream_wire(monkeypatch, memory="mem-B-different", skill="SKILL-B-other")
-    _ = [e async for e in al.run_stream("deploy please", allowed_skills=["deploy"])]
+    cap2 = _capture_stream_wire(monkeypatch, memory="mem-B-different", catalog="CATALOG-X")
+    _ = [e async for e in al.run_stream("deploy please")]
     second = cap2["messages"][0]
 
     assert first["role"] == "system"
-    assert first["content"] == _BASE
+    assert first["content"] == f"{_BASE}\n\nCATALOG-X"
     assert second["content"] == first["content"]
 
 
-async def test_run_stream_memory_and_skill_still_in_prompt_after_base(monkeypatch):
-    # Functional equivalence: memory + skill are still delivered to the LLM,
-    # positioned after the base system message (not inside messages[0]).
-    cap = _capture_stream_wire(monkeypatch, memory="REMEMBER-X", skill="DEPLOY-SKILL-BODY")
-    _ = [e async for e in al.run_stream("deploy please", allowed_skills=["deploy"])]
+async def test_run_stream_catalog_in_prefix_memory_after_base(monkeypatch):
+    # The skills catalog rides in the stable prefix (messages[0]); the variable
+    # memory is delivered after it, never inside messages[0].
+    cap = _capture_stream_wire(monkeypatch, memory="REMEMBER-X", catalog="CATALOG-BODY")
+    _ = [e async for e in al.run_stream("deploy please")]
     msgs = cap["messages"]
-    full = "".join(str(m.get("content") or "") for m in msgs)
-    assert "REMEMBER-X" in full
-    assert "DEPLOY-SKILL-BODY" in full
-    # Base system must not itself carry the variable content.
+    assert "CATALOG-BODY" in msgs[0]["content"]
     assert "REMEMBER-X" not in msgs[0]["content"]
-    assert "DEPLOY-SKILL-BODY" not in msgs[0]["content"]
-    # Variable content sits after the base system prefix.
     assert any("REMEMBER-X" in str(m.get("content") or "") for m in msgs[1:])
 
 
 async def test_run_stream_no_variable_content_is_single_base_system(monkeypatch):
-    # No memory, no skill → just the stable base system + user message.
-    cap = _capture_stream_wire(monkeypatch, memory="", skill=None)
+    # No memory, no catalog → just the stable base system + user message.
+    cap = _capture_stream_wire(monkeypatch, memory="", catalog="")
     _ = [e async for e in al.run_stream("hi")]
     msgs = cap["messages"]
     system_msgs = [m for m in msgs if m["role"] == "system"]
@@ -1430,25 +1424,22 @@ def test_run_sync_base_system_prefix_stable_across_variable_content(monkeypatch)
         return "done"
 
     monkeypatch.setattr(al, "scan_skills", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "check_skill_access", lambda *a, **kw: True)
-    monkeypatch.setattr(al, "match_skill", lambda _: "deploy")
+    monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "CATALOG-X")
     monkeypatch.setattr(al, "run", fake_run)
 
     monkeypatch.setattr(al, "load_memories", lambda **kw: "mem-A")
-    monkeypatch.setattr(al, "load_skill", lambda _: "SKILL-A")
-    al.run_sync("deploy please", allowed_skills=["deploy"])
+    al.run_sync("deploy please")
 
     monkeypatch.setattr(al, "load_memories", lambda **kw: "mem-B-bigger-different")
-    monkeypatch.setattr(al, "load_skill", lambda _: "SKILL-B-other")
-    al.run_sync("deploy please", allowed_skills=["deploy"])
+    al.run_sync("deploy please")
 
     run1, run2 = captured["runs"]
     assert run1[0]["role"] == "system"
-    assert run1[0]["content"] == _BASE
+    assert run1[0]["content"] == f"{_BASE}\n\nCATALOG-X"
     assert run2[0]["content"] == run1[0]["content"]
-    # Memory + skill still present, after the base system.
+    # Memory still present, after the base+catalog prefix.
     full1 = "".join(str(m.get("content") or "") for m in run1)
-    assert "mem-A" in full1 and "SKILL-A" in full1
+    assert "mem-A" in full1
     assert "mem-A" not in run1[0]["content"]
 
 

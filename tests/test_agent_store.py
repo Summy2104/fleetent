@@ -82,50 +82,6 @@ def test_platform_isolation(db):
     assert agent_store.get_agent_for_channel("telegram", "C5") is None
 
 
-# --- allowed_skills / blocked_skills (agent-skill-binding) ---
-
-
-def test_create_agent_defaults_skills_to_none(db):
-    agent_store.create_agent("no-skills", "p", ["shell"])
-    found = agent_store.get_by_name("no-skills")
-    assert found is not None
-    assert found.allowed_skills is None
-    assert found.blocked_skills is None
-
-
-def test_create_agent_persists_allowed_and_blocked_skills(db):
-    agent_store.create_agent(
-        "hr", "p", ["shell"], allowed_skills=["hr-*"], blocked_skills=["hr-payroll"]
-    )
-    found = agent_store.get_by_name("hr")
-    assert found is not None
-    assert found.allowed_skills == ["hr-*"]
-    assert found.blocked_skills == ["hr-payroll"]
-
-
-def test_create_agent_empty_allowed_skills_round_trips(db):
-    agent_store.create_agent("locked", "p", [], allowed_skills=[])
-    found = agent_store.get_by_name("locked")
-    assert found is not None
-    assert found.allowed_skills == []
-
-
-def test_get_agent_for_user_reads_skills(db):
-    agent = agent_store.create_agent("u-agent", "p", [], allowed_skills=["ops-*"])
-    agent_store.assign_user("user-skill", agent.id)
-    found = agent_store.get_agent_for_user("user-skill")
-    assert found is not None
-    assert found.allowed_skills == ["ops-*"]
-
-
-def test_get_agent_for_channel_reads_skills(db):
-    agent = agent_store.create_agent("c-agent", "p", [], allowed_skills=["ops-*"])
-    agent_store.assign_channel("slack", "Cskill", agent.id)
-    found = agent_store.get_agent_for_channel("slack", "Cskill")
-    assert found is not None
-    assert found.allowed_skills == ["ops-*"]
-
-
 # --- default agent tests ---
 
 

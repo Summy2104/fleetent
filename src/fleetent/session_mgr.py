@@ -18,6 +18,10 @@ _BYTES_PER_MB = 1024 * 1024
 
 _locks: dict[str, asyncio.Lock] = {}
 
+# Wall-clock of the last maintenance scan, for the save()-triggered time gate.
+# Module-level so the gate survives across calls; reset by tests for determinism.
+_last_cleanup_at: float | None = None
+
 
 def _default_config() -> dict[str, float]:
     from fleetent.config import Settings
@@ -27,7 +31,31 @@ def _default_config() -> dict[str, float]:
         "ttl_seconds": s.session_ttl_days * _SECONDS_PER_DAY,
         "max_total_bytes": s.session_max_total_mb * _BYTES_PER_MB,
         "max_count": s.session_max_count,
+        "cleanup_interval_seconds": s.session_cleanup_interval_seconds,
     }
+
+
+def maybe_run_maintenance(*, _now: float | None = None) -> list[str]:
+    """Run TTL cleanup + capacity enforcement at most once per interval (internal trigger).
+
+    Called opportunistically from save() so expired sessions are pruned and disk
+    capacity is bounded as a side effect of normal session activity — no external
+    scheduler/cron is required. Both passes (TTL first, then capacity) are time-gated
+    together to run at most once per `session_cleanup_interval_seconds`, so the common
+    save path stays cheap.
+
+    Returns the session_ids removed this run (expired + capacity-evicted), or [] when
+    the gate is closed.
+    """
+    global _last_cleanup_at
+    now = time.time() if _now is None else _now
+    interval = _default_config()["cleanup_interval_seconds"]
+    if _last_cleanup_at is not None and now - _last_cleanup_at < interval:
+        return []
+    _last_cleanup_at = now
+    removed = cleanup_expired(_now=now)
+    removed += enforce_capacity()
+    return removed
 
 
 def is_expired(mtime: float, now: float, ttl_seconds: float) -> bool:
@@ -216,8 +244,10 @@ async def save(
     user_id: str | None = None,
     agent_name: str | None = None,
 ) -> None:
-    SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     path = SESSIONS_DIR / f"{session_id}.json"
+    # Create the target's parent (not just SESSIONS_DIR): session_ids may contain
+    # "/" (e.g. IM platform/channel/user), nesting the file in subdirectories.
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(messages, ensure_ascii=False))
     tmp.replace(path)
@@ -236,3 +266,12 @@ async def save(
         )
     except Exception as exc:  # noqa: BLE001 — auxiliary index must not break persistence
         logger.warning("session_index_update_failed", session_id=session_id, error=str(exc))
+
+    # Internal maintenance trigger (no external cron): opportunistically prune
+    # expired sessions and enforce disk capacity as a side effect of activity,
+    # time-gated to stay cheap. Fault-isolated — maintenance must never break the
+    # just-completed persistence.
+    try:
+        maybe_run_maintenance()
+    except Exception as exc:  # noqa: BLE001 — maintenance must not break persistence
+        logger.warning("session_maintenance_trigger_failed", session_id=session_id, error=str(exc))

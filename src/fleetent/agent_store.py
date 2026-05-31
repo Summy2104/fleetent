@@ -17,47 +17,20 @@ class Agent:
     name: str
     system_prompt: str
     allowed_tools: list[str]
-    # opt-in skill whitelist (fnmatch); None = not declared → no skill injected.
-    allowed_skills: list[str] | None = None
-    # fnmatch patterns excluded after the whitelist hits; None/[] = no exclusion.
-    blocked_skills: list[str] | None = None
-
-
-def _dump_opt(value: list[str] | None) -> str | None:
-    """JSON-encode an optional skill list, preserving None as SQL NULL."""
-    return None if value is None else json.dumps(value)
-
-
-def _load_opt(value: str | None) -> list[str] | None:
-    """Decode an optional skill list column, mapping SQL NULL back to None."""
-    if value is None:
-        return None
-    result: list[str] = json.loads(value)
-    return result
 
 
 def create_agent(
     name: str,
     system_prompt: str,
     allowed_tools: list[str],
-    allowed_skills: list[str] | None = None,
-    blocked_skills: list[str] | None = None,
 ) -> Agent:
     _init_db()
     now = datetime.datetime.now(datetime.UTC).isoformat()
     with _conn() as conn:
         cursor = conn.execute(
-            "INSERT INTO agents"
-            " (name, system_prompt, allowed_tools, allowed_skills, blocked_skills, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                name,
-                system_prompt,
-                json.dumps(allowed_tools),
-                _dump_opt(allowed_skills),
-                _dump_opt(blocked_skills),
-                now,
-            ),
+            "INSERT INTO agents (name, system_prompt, allowed_tools, created_at)"
+            " VALUES (?, ?, ?, ?)",
+            (name, system_prompt, json.dumps(allowed_tools), now),
         )
         agent_id = cursor.lastrowid
     assert agent_id is not None
@@ -66,12 +39,10 @@ def create_agent(
         name=name,
         system_prompt=system_prompt,
         allowed_tools=allowed_tools,
-        allowed_skills=allowed_skills,
-        blocked_skills=blocked_skills,
     )
 
 
-_SELECT_COLS = "id, name, system_prompt, allowed_tools, allowed_skills, blocked_skills"
+_SELECT_COLS = "id, name, system_prompt, allowed_tools"
 
 
 def _join_cols(alias: str) -> str:
@@ -85,8 +56,6 @@ def _row_to_agent(row: tuple[Any, ...]) -> Agent:
         name=row[1],
         system_prompt=row[2],
         allowed_tools=json.loads(row[3]),
-        allowed_skills=_load_opt(row[4]),
-        blocked_skills=_load_opt(row[5]),
     )
 
 
@@ -172,21 +141,6 @@ def get_default_agent() -> Agent | None:
     return get_by_name(name)
 
 
-def _ensure_skill_columns(conn: Any) -> None:
-    """Backfill the agent-skill-binding columns on a pre-existing agents table.
-
-    The `agents` table may already exist from the alembic 001 migration (or the
-    legacy schema) without the skill columns. SQLite has no IF NOT EXISTS for
-    ADD COLUMN, so probe `table_info` and add only what is missing — idempotent
-    and safe to run on every `_init_db()` call.
-    """
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)")}
-    if "allowed_skills" not in cols:
-        conn.execute("ALTER TABLE agents ADD COLUMN allowed_skills TEXT")
-    if "blocked_skills" not in cols:
-        conn.execute("ALTER TABLE agents ADD COLUMN blocked_skills TEXT")
-
-
 def _init_db() -> None:
     with _conn() as conn:
         conn.execute(
@@ -195,12 +149,9 @@ def _init_db() -> None:
                 name           TEXT UNIQUE NOT NULL,
                 system_prompt  TEXT NOT NULL,
                 allowed_tools  TEXT NOT NULL,
-                allowed_skills TEXT,
-                blocked_skills TEXT,
                 created_at     TEXT NOT NULL
             )"""
         )
-        _ensure_skill_columns(conn)
         conn.execute(
             """CREATE TABLE IF NOT EXISTS user_agents (
                 user_id   TEXT NOT NULL,
