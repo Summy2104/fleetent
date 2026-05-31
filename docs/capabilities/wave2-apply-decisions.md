@@ -787,3 +787,53 @@ SB9（sandbox 轨末环）：`run_code` 执行结果写入 trace。
 1. **取消路径不写 trace**：本 change 决定取消时不记 trace（无真实 exec metadata）。若运营需统计取消频率，未来可考虑用一个独立 `kind`（如 `sandbox_cancelled`）记录——本 change 不做，待确认是否需要。
 2. **user_id 维度缺失**：因 ToolContext 无 user_id，sandbox_exec trace 暂无 user_id 维度（仅 agent_name + scope）。若需按用户统计 run_code，需在 SB3 给 ToolContext 加 user_id 并接通——属跨 change，未做。
 3. **elapsed 仅测 exec**：依 design D4/Open Question 取「仅 exec 时长」，容器获取时长归 SB2，未含在内。
+
+## plugin-tools (AR7) — feat/plugin-tools
+
+第三个工具来源（插件目录）：企业团队在 `plugins/{name}/` 放 `plugin.yaml` + `__init__.py`（含 `@tool`），平台启动扫描加载 `enabled: true` 的插件，工具加 `{插件名}__{工具名}` 命名空间，agent 经 `plugins` 白名单授权。
+
+**前置核实结论（tasks 1.x）：**
+- 1.1 `tool_registry._registry` 为 `dict[name, (callable, schema)]`（行 32）、`_risk_levels` 为 `dict[name, str]`（行 33）。改键需同步迁移**两处**（`_registry` + `_risk_levels`）并改 `schema["function"]["name"]`。`@tool` 注册时键 = 函数名（行 57-58）。
+- 1.2 `mcp_client._make_tool_name`（行 164-165）= `f"{server_id}__{tool_name}"`（双下划线）；MCP 直接写 `tr._registry[...]`（行 500-501）。插件改键**沿用同一双下划线格式**。
+- 1.3 `Agent` 现字段 `id/name/system_prompt/allowed_tools/features`（dataclass 行 14-23）。读写点：`create_agent`、`_row_to_agent`（被 `get_by_name`/`get_agent_for_user`/`get_agent_for_channel` 复用）、`_SELECT_COLS`、`_init_db` DDL。
+- 1.4 **真实授权门 = agent_loop 暴露给 LLM 前的 schema 过滤**（`run()` 行 519-520、`run_stream()` 行 849-851 调 `check_tool_access`）。`dispatch` 内的 `check_tool_access` 分支（行 118-122）在生产路径**死分支**——`_safe_dispatch` 从不传 `allowed_tools`。故 plugins 展开并入 server 构造的 `allowed_tools`、经 schema 过滤生效，**不改 `check_tool_access` 签名、不碰 dispatch**。
+- 1.5 `skill_registry._resolve_skills_dir`（行 54-58）现状**已读 `FLEETENT_SKILLS_DIR`**（CLAUDE.md 的改名已落地，artifact 里的 `MINI_AGENT_` 已过时）。插件随此约定用 **`FLEETENT_PLUGINS_DIR`**。lifespan 调用点 server.py 行 71（`scan_skills()`）。
+- 1.6 **plugins 加列走 alembic**（同 SB3 features，zy 指示）：`_init_db` 的 CREATE TABLE 内联 `plugins TEXT NOT NULL DEFAULT '[]'`（新库/测试天然有列）；新增 alembic `003_add_agent_plugins`（`op.add_column`，供现有生产库），**非运行时 PRAGMA+ALTER**。
+
+**实现（改/建文件）：**
+- **建** `src/fleetent/plugin_loader.py`：`PLUGINS_DIR="./plugins"`（模块级可 monkeypatch）、`_resolve_plugins_dir`（arg > `FLEETENT_PLUGINS_DIR` env > 默认）、`PluginMeta`（frozen：name/enabled/path[+version/description]）、`expand_plugin_patterns(plugins)->["{name}__*",...]`、`load_plugins(plugins_dir=None)->list[PluginMeta]`（扫子目录→读 manifest→enabled 过滤→唯一性校验→importlib 导入→`_namespace_new_keys` 改键）。
+- **建** `migrations/versions/003_add_agent_plugins.py`：`revision="003"`, `down_revision="002"`, `upgrade()` `op.add_column("agents", sa.Column("plugins", sa.Text(), nullable=False, server_default="[]"))`, `downgrade()` `op.drop_column`。参照 002。
+- **改** `src/fleetent/agent_store.py`：`Agent` 加 `plugins: list[str]=field(default_factory=list)`；`create_agent` 加 `plugins` 形参 + INSERT；`_SELECT_COLS` 加 `plugins`；`_row_to_agent` `json.loads(row[5] or "[]")`；`_init_db` CREATE TABLE 加列。**仅** plugins 相关最小改动，不动其它（撞车风险，见下）。
+- **改** `src/fleetent/server.py`：import `expand_plugin_patterns, load_plugins`；lifespan `scan_skills()` 后调 `load_plugins()`；行 ~229 `allowed_tools = agent.allowed_tools + expand_plugin_patterns(agent.plugins) if agent else None`。
+- **改** `src/fleetent/agent_loop.py`：`run_sync` 在 `scan_skills()` 后局部 import 并调 `load_plugins()`（CLI 加载时机，见下）。
+- **改** 测试：`tests/test_plugin_loader.py`（新建，22 例）、`tests/test_agent_store.py`（+4 plugins 例）、`tests/test_server.py`（+plugins 并入 allowed_tools、+lifespan load_plugins）、`tests/test_agent_loop.py`（+run_sync load_plugins）。
+
+**plugin_loader 改键三要点：**
+- **只对本插件包内键**：`_namespace_new_keys` 仅改写 (a) import 前 registry 不存在的新键 **且** (b) callable `__module__` 属于本插件包（`owner == package or owner.startswith(f"{package}.")`）。排除插件 `__init__.py` 间接 import 的注册副作用模块（如 `fleetent.tools` 或第三方 helper）带来的既有/外来工具键——避免污染内置/MCP 工具键。守卫测试 `test_indirect_import_does_not_namespace_foreign_tools` 已验证（去掉 owner 过滤即变红）。
+- **双下划线命名空间**：`{插件名}__{工具名}`，与 MCP 一致。
+- **命名空间全局唯一校验（D6）**：`_reserved_namespaces()` = MCP `_server_registry` 键 ∪ 内置工具命名空间前缀（`key.split("__",1)[0]` 或裸键）；`taken` 累加已加载插件名。插件名冲突（与 MCP server_id / 内置前缀 / 另一插件）→ `logger.warning("plugin_namespace_conflict")` + 跳过、**不 import、不改写既有键**。改键时目标命名空间名已存在→ `logger.warning("plugin_tool_name_conflict")` + 跳过该工具。
+
+**D3 授权（plugins 展开经 schema 过滤）：** agent 的 `plugins` 经 `expand_plugin_patterns` 展开为 `{name}__*` 并入 server 构造的 `allowed_tools`，交由 agent_loop 暴露给 LLM 前的 schema 过滤（`check_tool_access`）判定。未授权插件工具不出现在 LLM 工具列表。**不改 `check_tool_access` 签名、不依赖 dispatch 死分支**。测试用 `check_tool_access` 直接断言 schema 可见性（授权可见、未授权被过滤）。
+
+**D4 容错 + D5 加载时机：**
+- 每插件 `_load_one` 全程 try/except（仿 `mcp_client.register_all`）：manifest 缺失/非法 YAML/顶层非 mapping/缺 name → `logger.warning("plugin_manifest_invalid")` + 跳过；import 抛异常 → `logger.warning("plugin_import_failed")` + 跳过。单插件失败不中断遍历，目录不存在返回 `[]`。不吞异常（均以 warning log）。
+- **server**：lifespan `scan_skills()` 后调 `load_plugins()`（启动一次）。
+- **CLI（自解 Open Question）**：`run_sync` 已每次调用 `scan_skills()`，**为一致性也每次调 `load_plugins()`**（局部 import 避免顶层循环依赖）。CLI 不解析 agent、`allowed_tools=None`，故插件工具在 CLI 路径**不受 agent 级授权门控、全部暴露**——与 CLI 暴露全部内置工具的现状一致（CLI 无 per-agent 授权语义）。
+
+**自解冲突 / 决策：**
+- **env 前缀**：artifact 称 skill 现用 `MINI_AGENT_`，但核实发现 `skill_registry` **已改为 `FLEETENT_SKILLS_DIR`**。插件直接用 `FLEETENT_PLUGINS_DIR`，与现状一致。
+- **enabled 缺省**：manifest 无 `enabled` 字段 → 视为 `False`（`parsed.get("enabled", False)`），保守不加载（避免误把未声明启用的目录当插件 import）。disabled 插件仍返回 meta（供 introspect），但不 import。
+- **plugins NOT NULL 的 NULL-行测试**：列为 `NOT NULL DEFAULT '[]'`（alembic `op.add_column(nullable=False, server_default="[]")` 会回填既有行为 `'[]'`，真实 NULL 不会出现）。`_row_to_agent` 仍保留 `or "[]"` 防御性兜底；NULL-行测试改为直接对 `_row_to_agent` 传 `row[5]=None` 验证兜底（无法对 NOT NULL 列写 NULL）。
+- **load_plugins 返回值语义**：返回所有 manifest 解析成功的插件 meta（含 disabled），便于 introspect 已发现什么。
+
+**验证：**
+- pytest：1149 → **1177 passed**（+28：plugin_loader 22、agent_store 4、server 2（plugins 并入 + lifespan）、agent_loop 1（run_sync load）；无回归）。每批严格 TDD 先红后绿；owner-filter 守卫测试经「去掉过滤→变红」反向验证为 load-bearing。
+- ruff（自有/改动文件）：`plugin_loader.py`/`003_*.py`/`test_plugin_loader.py`/`test_agent_store.py`/`agent_store.py` 全绿；`server.py`(4)、`agent_loop.py`(1) 残留 ruff 错误经 `git show HEAD` 对比为**基线既有**（N814/I001/F401，非本 change 引入）；`test_server.py` 经排序内联 import 回到基线 2 个 I001（均既有函数）。
+- mypy `src`：74 → **74**（无新增错误模式；plugin_loader.py 零 mypy 错误）。
+
+### 需 zy / 张亮 核实
+
+1. **【需张亮复核迁移】** plugins 列按 zy 指示走 **alembic 003 迁移**（`op.add_column`，非运行时 ALTER），CREATE TABLE 内联。`003_add_agent_plugins.py` 的 revision 链（003→002→001）、`server_default="[]"` 回填既有行——**需张亮（agents 表 / db-migration 邻域 owner）复核迁移**。
+2. **【需张亮签字 / 归档闸门】** 本 change 在 Modified Capabilities 声明 MODIFY 张亮的 `agent-definition` spec（Agent/agents 表加 plugins + allowed_tools 通配纳入 plugins 展开）。apply 阶段**只实现代码，未手动改 `openspec/specs/agent-definition/spec.md` 主 spec**（archive 时 sync）。change 目录下 specs/ delta 为 propose 时所写，未动。**agent-definition spec MODIFY 需张亮签字后方可归档**。
+3. **【agent_store 撞车风险】** 张亮活跃于 agents 表邻域（features/SB3）。本 change **仅**加 `plugins` 列 + `Agent.plugins` + 最小读写改动，未动其它字段/查询。merge 时需关注与张亮 agents 表改动的冲突。
+4. **CLI 加载时机**：自解为「`run_sync` 每次调 `load_plugins()` + CLI 无 agent 授权门控、插件工具全暴露」。若需 CLI 也按某默认 agent 的 plugins 授权，需 zy 确认（本 change 维持 CLI 暴露全部工具的现状）。

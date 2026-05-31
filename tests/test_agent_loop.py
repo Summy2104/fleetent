@@ -2276,6 +2276,27 @@ async def test_run_stream_all_includes_run_code(mock_client, monkeypatch):
     assert _tool_names_sent(mock_client) == {"run_code", "calculate"}
 
 
+def test_run_sync_loads_plugins(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    import fleetent.plugin_loader as pl
+    import fleetent.sandbox_enablement as se
+
+    async def fake_run(messages, **kw):
+        return "done"
+
+    monkeypatch.setattr(al, "scan_skills", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "")
+    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
+    monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "run", fake_run)
+    monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.OFF))
+    load_mock = MagicMock(return_value=[])
+    monkeypatch.setattr(pl, "load_plugins", load_mock)
+    al.run_sync("hi")
+    load_mock.assert_called_once()
+
+
 def test_run_sync_passes_effective_sandbox_mode(monkeypatch):
     from unittest.mock import AsyncMock
 
