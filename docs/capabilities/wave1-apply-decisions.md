@@ -61,3 +61,15 @@
 
 **影响：** 489 passed,ruff/mypy 无新增。解锁 prompt-cache(其依赖 AR12 的 system 头部保留)。
 **需 zy 核实：** 非法配置 raise(非 clamp);_SUMMARY_OVERHEAD_TOKENS=512 估算;force 参数 vs 独立函数的入口形态。
+
+## mcp-http-streamable (MCP1) — feat/mcp-http-streamable
+
+**实现(方案A:替换非标 http 为标准 Streamable HTTP,transport 值仍 "http"):** 重写 `_register_http_server`(initialize 握手 → 存 Mcp-Session-Id → tools/list)与 `_call_http_tool`(tools/call + session id + 递增 id + Content-Type 分流);纯函数 `_extract_jsonrpc_from_sse(body,request_id)`(忽略注释、拼多行 data、按 id 过滤);session_id 与 _request_id 按 McpServerConfig 实例持有(field repr/compare=False,无全局可变态);Accept 协商;复用 transport=="http" 分支/命名空间/register_all 降级/Bearer 认证。
+
+**自解冲突:**
+1. protocolVersion 取规范最新 `2025-06-18`(design Open Question)。
+2. initialize 后补发 best-effort `notifications/initialized`(失败仅 debug log 不阻断),兼容要/不要该通知的服务。
+3. JSON 单响应不强制 id 匹配(无多事件干扰);SSE 严格按 id 过滤。
+
+**影响:** 509 passed;mcp_client 的 2 个 no-any-return 为既有同模式,无新增。stdio 路径无回归。
+**需 zy 核实:** protocolVersion=2025-06-18、是否所有目标 MCP server 都接受/需要 notifications/initialized。
