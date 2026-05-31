@@ -103,3 +103,16 @@
 
 **影响:** 558 passed;provider_health 的 Settings() call-arg 是 9 个模块共享的既有模式、非新增。含守卫 test_non_health/400_never_marks_unavailable。
 **需 zy 核实:** 3/60s 默认值;全冷却"探测全量"兜底策略;新增 conftest.py autouse 重置对其它测试无副作用(558 passed 佐证)。
+
+## model-parameter-config — feat/model-parameter-config
+
+**实现:** RouteConfig 加 `params: dict[str,Any]=field(default_factory=dict)`、RouteOverride 加 `params: dict|None=None`;`_apply_override` 对 params 深合并 `{**cfg.params, **override.params}`(override None 沿用 base);`_call/_stream_with_fallback` 的 create 追加 `**cfg.params`;max_tokens 仍一等字段。通用 dict 非枚举字段。
+
+**重复 kwarg 守卫(双层):** 模块级 `_RESERVED_PARAM_KEYS={max_tokens,model,messages,tools}`,`_apply_override` 合并后剔除这些键(防运行时 override.params 误带保留键致 create() 重复 kwarg TypeError);单测固化内置 ROUTES 各 entry params 不含保留键。
+
+**自解冲突:**
+1. mock_client 的 cfg 是 MagicMock → `**MagicMock().params` 安全展开为空,既有测试零影响;新增透传测试用真实 RouteConfig。
+2. 运行时剔除保留键(而非仅校验报错):override.params 是用户输入风险更高,剔除既挡 TypeError 又不影响合法 params。
+
+**影响:** 576 passed;mypy 67=基线(MR3 的 provider_health 贡献 1),无新增模式。解锁 model-routes-externalize。
+**需 zy 核实:** 保留键运行时剔除(而非报错)的策略。

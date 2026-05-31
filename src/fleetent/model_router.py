@@ -5,9 +5,15 @@ maintains no state, and knows nothing about agents, tools, or memory.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from openai import AsyncOpenAI, OpenAI
+
+# Reserved create() kwargs that params MUST NOT carry: they are passed as
+# explicit keyword args, so a same-named key in params would raise a duplicate
+# keyword TypeError (D3). Stripped during merge as a defensive guard.
+_RESERVED_PARAM_KEYS = frozenset({"max_tokens", "model", "messages", "tools"})
 
 
 @dataclass(frozen=True)
@@ -17,6 +23,10 @@ class RouteConfig:
     api_key_env: str
     max_tokens: int
     fallbacks: tuple[str, ...] = ()
+    # Per task_type default sampling params (e.g. temperature/top_p), passed
+    # through to create() as **params. MUST NOT contain max_tokens/model/
+    # messages/tools (would collide with those explicit kwargs).
+    params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -28,6 +38,9 @@ class RouteOverride:
     max_tokens: int | None = None
     api_key_env: str | None = None
     fallbacks: tuple[str, ...] | None = None
+    # Per-call sampling param override; deep-merged onto RouteConfig.params
+    # (None = inherit the route's params unchanged).
+    params: dict[str, Any] | None = None
 
 
 def _apply_override(cfg: RouteConfig, override: RouteOverride | None) -> RouteConfig:
@@ -45,12 +58,20 @@ def _apply_override(cfg: RouteConfig, override: RouteOverride | None) -> RouteCo
         fallbacks = override.fallbacks
     elif override.model is not None:
         fallbacks = ()
+    # Deep-merge params by key: override keys replace same-named base keys,
+    # uncovered base keys carry over (D2). None override params inherit base.
+    if override.params is None:
+        params = cfg.params
+    else:
+        merged = {**cfg.params, **override.params}
+        params = {k: v for k, v in merged.items() if k not in _RESERVED_PARAM_KEYS}
     return RouteConfig(
         base_url=override.base_url if override.base_url is not None else cfg.base_url,
         model=override.model if override.model is not None else cfg.model,
         api_key_env=override.api_key_env if override.api_key_env is not None else cfg.api_key_env,
         max_tokens=override.max_tokens if override.max_tokens is not None else cfg.max_tokens,
         fallbacks=fallbacks,
+        params=params,
     )
 
 

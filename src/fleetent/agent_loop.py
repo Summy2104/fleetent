@@ -109,6 +109,7 @@ async def _call_with_fallback(
                 messages=messages,  # type: ignore[arg-type]
                 tools=schemas,  # type: ignore[arg-type]
                 max_tokens=cfg.max_tokens,
+                **cfg.params,
             )
             cache.record_success(model)
             return resp, model
@@ -146,6 +147,7 @@ async def _stream_with_fallback(
                 max_tokens=cfg.max_tokens,
                 stream=True,
                 stream_options={"include_usage": True},
+                **cfg.params,
             )
             cache.record_success(model)
             return stream, model
