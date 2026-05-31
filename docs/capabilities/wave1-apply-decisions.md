@@ -245,6 +245,10 @@
 **影响:** 680 passed;session_index mypy 0 错。
 **⚠️ 需 zy 核实:** **sqlite3 vs aiosqlite 偏离**(CLAUDE.md 不符现实);元数据要完整需 agent_loop/normalizer 透传 user_id/agent_name(逐步补)。
 
+**✅ zy review 决定(2026-05-31):**
+1. **保持 sqlite3**(匹配全仓现状,不引入 aiosqlite 依赖)。**已修正 CLAUDE.md**:原"用 aiosqlite 直接写 SQL"→"用标准库 sqlite3 直接写 SQL(同步;全仓一致);SQLAlchemy 仅供 alembic 迁移,不作 ORM;aiosqlite 未引入"。后续开发/AI 不再被错误指引误导。
+2. **元数据渐进补齐认可**:user_id/agent_name 由 agent_loop/normalizer 逐步透传。
+
 ## session-disk-management (S4) — feat/session-disk-management
 
 **实现:** `enforce_capacity(max_total_bytes=None,max_count=None)`:rglob 扫描收集 (session_id,size,mtime)、跳过 .json.tmp、带 `/` 还原;两维度**或触发、且停止**(is_over_capacity 任一超→True,while 循环淘汰至两者皆不超);按 mtime 升序最旧优先删;维度 ≤0 关闭(不触发不停止),两维都关→返回空;删除容错(失败 log.warning 跳过、扣减累计防级联超删);触发原因+淘汰数汇总日志。config 加 session_max_total_mb=1024/session_max_count=10000;扩展 S1 的 _default_config(保留 ttl_seconds + 加 max_total_bytes/max_count)。纯原语,触发器留后续。
