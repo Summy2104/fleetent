@@ -4,7 +4,7 @@ import datetime
 import uuid
 from pathlib import Path
 
-from fleetent import image_gen_client
+from fleetent import image_gen_client, vision_client
 from fleetent.sandbox_client import SandboxClient
 from fleetent.tool_registry import tool
 
@@ -12,6 +12,19 @@ from fleetent.tool_registry import tool
 # loop (never inline base64). Injectable module-level constant (no global mutable
 # state): tests monkeypatch this to an isolated tmp path.
 GENERATED_DIR: Path = Path("data/generated")
+
+# Inbound images are written here, then a short reference (path) travels in the
+# main context; analyze_image reads bytes back by reference. Injectable like
+# GENERATED_DIR (no global mutable state) so tests isolate it to a tmp path.
+UPLOADS_DIR: Path = Path("data/uploads")
+
+# Map common image mimes to file extensions for stored uploads.
+_MIME_EXT = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
 
 
 def _save_image(data: bytes) -> str:
@@ -24,6 +37,25 @@ def _save_image(data: bytes) -> str:
     path = GENERATED_DIR / f"{uuid.uuid4().hex}.png"
     path.write_bytes(data)
     return str(path)
+
+
+def _save_upload(data: bytes, mime: str) -> str:
+    """Write inbound image bytes to UPLOADS_DIR/{uuid4}.{ext} and return a ref.
+
+    The reference is a path string (never base64), keeping the main context and
+    trace free of image payloads; analyze_image reads the bytes back via this
+    same reference.
+    """
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    ext = _MIME_EXT.get(mime, ".bin")
+    path = UPLOADS_DIR / f"{uuid.uuid4().hex}{ext}"
+    path.write_bytes(data)
+    return str(path)
+
+
+def _read_upload(ref: str) -> bytes:
+    """Read image bytes back from an uploads reference (path)."""
+    return Path(ref).read_bytes()
 
 
 @tool
@@ -145,6 +177,27 @@ async def generate_image(prompt: str, size: str = "") -> str:
         return f"error: image generation failed: {exc}"
     ref = _save_image(data)
     return f"image generated: {ref}"
+
+
+@tool(risk_level="low")
+async def analyze_image(ref: str, instruction: str) -> str:
+    """Understand an image on demand via the self-hosted vision endpoint.
+
+    `ref` is a stored-image reference (a path produced when an inbound image was
+    saved); `instruction` is what to look for (e.g. "read the invoice total").
+    Returns a structured text description, never inline base64. Use this to
+    re-examine or compare images already in the conversation. On invalid ref,
+    unconfigured endpoint, or endpoint failure, returns an explicit error result
+    for the AI to handle rather than raising and breaking the loop.
+    """
+    try:
+        data = _read_upload(ref)
+    except OSError as exc:
+        return f"error: cannot read image reference {ref!r}: {exc}"
+    try:
+        return await vision_client.analyze(data, instruction)
+    except vision_client.VisionError as exc:
+        return f"error: image analysis failed: {exc}"
 
 
 @tool

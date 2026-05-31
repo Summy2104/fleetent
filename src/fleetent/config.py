@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # proprietary services (DALL·E / Midjourney) are forbidden by data sovereignty.
     image_gen_url: str = ""
     image_gen_model: str = "default"
+    # Self-hosted, OpenAI-compatible vision endpoint (any VLM behind a compat
+    # layer). Empty = unconfigured; the analyze_image tool returns an explicit
+    # failure rather than silently succeeding. Cloud-hosted proprietary VLMs are
+    # forbidden by data sovereignty.
+    vision_url: str = ""
+    vision_model: str = "default"
 
 
 def configure_logging(settings: Settings) -> None:
