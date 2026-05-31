@@ -93,3 +93,20 @@ async def test_destroy_workspace_is_idempotent_when_container_absent(client):
     with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)):
         await client.destroy_workspace("already-gone")
         await client.destroy_workspace("already-gone")
+
+
+async def test_docker_available_true_on_zero_returncode(client):
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(returncode=0))):
+        assert await client.docker_available() is True
+
+
+async def test_docker_available_false_on_nonzero_returncode(client):
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(returncode=1))):
+        assert await client.docker_available() is False
+
+
+async def test_docker_available_false_when_cli_missing(client):
+    with patch(
+        "asyncio.create_subprocess_exec", AsyncMock(side_effect=FileNotFoundError("docker"))
+    ):
+        assert await client.docker_available() is False

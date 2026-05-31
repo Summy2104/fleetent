@@ -1,6 +1,6 @@
 import datetime
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from fleetent.user_store import (
@@ -17,20 +17,26 @@ class Agent:
     name: str
     system_prompt: str
     allowed_tools: list[str]
+    # Extensible per-agent capability switches (SB3 owner). Currently carries
+    # `code_execution: bool | None`; SB5 reuses the same JSON column for
+    # `sandbox_env`. Stored as a JSON TEXT column, mirroring `allowed_tools`.
+    features: dict[str, Any] = field(default_factory=dict)
 
 
 def create_agent(
     name: str,
     system_prompt: str,
     allowed_tools: list[str],
+    features: dict[str, Any] | None = None,
 ) -> Agent:
     _init_db()
     now = datetime.datetime.now(datetime.UTC).isoformat()
+    features = features or {}
     with _conn() as conn:
         cursor = conn.execute(
-            "INSERT INTO agents (name, system_prompt, allowed_tools, created_at)"
-            " VALUES (?, ?, ?, ?)",
-            (name, system_prompt, json.dumps(allowed_tools), now),
+            "INSERT INTO agents (name, system_prompt, allowed_tools, features, created_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (name, system_prompt, json.dumps(allowed_tools), json.dumps(features), now),
         )
         agent_id = cursor.lastrowid
     assert agent_id is not None
@@ -39,10 +45,11 @@ def create_agent(
         name=name,
         system_prompt=system_prompt,
         allowed_tools=allowed_tools,
+        features=features,
     )
 
 
-_SELECT_COLS = "id, name, system_prompt, allowed_tools"
+_SELECT_COLS = "id, name, system_prompt, allowed_tools, features"
 
 
 def _join_cols(alias: str) -> str:
@@ -56,6 +63,8 @@ def _row_to_agent(row: tuple[Any, ...]) -> Agent:
         name=row[1],
         system_prompt=row[2],
         allowed_tools=json.loads(row[3]),
+        # `or "{}"` guards a legacy row whose features value is NULL.
+        features=json.loads(row[4] or "{}"),
     )
 
 
@@ -144,11 +153,16 @@ def get_default_agent() -> Agent | None:
 def _init_db() -> None:
     with _conn() as conn:
         conn.execute(
+            # `features` is created inline here so fresh / test (tmp_path) DBs
+            # always carry it. Per the zy override, existing production DBs are
+            # upgraded by alembic migration 002 (op.add_column), NOT a runtime
+            # PRAGMA+ALTER in _init_db. See docs/capabilities/wave2-apply-decisions.md.
             """CREATE TABLE IF NOT EXISTS agents (
                 id             INTEGER PRIMARY KEY,
                 name           TEXT UNIQUE NOT NULL,
                 system_prompt  TEXT NOT NULL,
                 allowed_tools  TEXT NOT NULL,
+                features       TEXT,
                 created_at     TEXT NOT NULL
             )"""
         )

@@ -120,7 +120,7 @@ async def route(msg: NormalizedMessage) -> None:
         await msg.reply_func(_REJECTION_MSG)
         return
 
-    from fleetent import agent_loop, session_mgr
+    from fleetent import agent_loop, sandbox_enablement, session_mgr
     from fleetent.memory_layer import load_memories
     from fleetent.skill_registry import available_skills_prompt, collect_disabled_trace
 
@@ -131,6 +131,9 @@ async def route(msg: NormalizedMessage) -> None:
         agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
         base_system = agent.system_prompt if agent else _SYSTEM
         allowed_tools = agent.allowed_tools if agent else None
+        agent_features = agent.features if agent else None
+        # SB3: gate run_code on the IM path too; mode is resolved once per process.
+        sandbox_mode = await sandbox_enablement.get_effective_mode()
 
         # Build the system message ordered stable→variable for prefix caching:
         # base system + the <available_skills> catalog (stable) first, per-user
@@ -155,6 +158,9 @@ async def route(msg: NormalizedMessage) -> None:
             reply_func=msg.reply_func,
             allowed_tools=allowed_tools,
             disabled_skills_trace=disabled_trace,
+            sandbox_mode=sandbox_mode,
+            agent_features=agent_features,
+            session_id=msg.session_id,
         )
 
         # agent_loop.run() already appended the assistant message to history in-place.

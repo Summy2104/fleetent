@@ -103,3 +103,54 @@ async def test_mcp_yaml_missing_skipped_gracefully(tmp_path, monkeypatch):
 
     assert resp.status_code == 200
     mock_register.assert_not_called()
+
+
+def test_health_exposes_sandbox_mode_when_docker_available(tmp_path, monkeypatch):
+    """When Docker is available, /health reports the configured effective mode."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    import fleetent.sandbox_client as sc
+    import fleetent.sandbox_enablement as se
+    import fleetent.server as srv
+
+    monkeypatch.setattr(srv, "load_sandbox_mode", lambda: se.Mode.ALL)
+    monkeypatch.setattr(sc.SandboxClient, "docker_available", AsyncMock(return_value=True))
+
+    with TestClient(srv.app) as client:
+        resp = client.get("/health")
+
+    data = resp.json()
+    assert data["sandbox"]["mode"] == "all"
+    assert data["sandbox"].get("docker_available") is True
+
+
+def test_health_degrades_sandbox_mode_when_docker_unavailable(tmp_path, monkeypatch):
+    """Docker unavailable degrades the effective mode to off, surfaced in /health."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    import fleetent.sandbox_client as sc
+    import fleetent.sandbox_enablement as se
+    import fleetent.server as srv
+
+    monkeypatch.setattr(srv, "load_sandbox_mode", lambda: se.Mode.ALL)
+    monkeypatch.setattr(sc.SandboxClient, "docker_available", AsyncMock(return_value=False))
+
+    with TestClient(srv.app) as client:
+        resp = client.get("/health")
+
+    data = resp.json()
+    assert data["sandbox"]["mode"] == "off"
+    assert data["sandbox"].get("docker_available") is False
+    # Degradation reason surfaced for ops.
+    assert "docker unavailable" in data["sandbox"].get("note", "").lower()
+
+
+def test_lifespan_does_not_crash_when_docker_unavailable(tmp_path, monkeypatch):
+    """Platform boots normally even when the Docker probe fails (graceful degrade)."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    import fleetent.sandbox_client as sc
+    import fleetent.server as srv
+
+    monkeypatch.setattr(sc.SandboxClient, "docker_available", AsyncMock(return_value=False))
+
+    with TestClient(srv.app) as client:
+        resp = client.get("/health")
+    assert resp.status_code == 200

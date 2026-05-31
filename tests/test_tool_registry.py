@@ -173,3 +173,62 @@ def test_schema_unaffected_for_tool_without_token():
     schema = next(s for s in schemas if s["function"]["name"] == "schema_plain")
     props = schema["function"]["parameters"]["properties"]
     assert set(props) == {"x", "y"}
+
+
+def test_dispatch_injects_tool_context_into_opt_in_tool():
+    from fleetent.tool_registry import ToolContext
+
+    received: dict[str, object] = {}
+
+    @tool_registry.tool
+    def ctx_tool(x: str, tool_context=None) -> str:
+        """A tool that opts into receiving the execution context."""
+        received["ctx"] = tool_context
+        return x
+
+    ctx = ToolContext(agent_name="a", features={"code_execution": True}, session_id="s1")
+    result = tool_registry.dispatch("ctx_tool", '{"x": "v"}', tool_context=ctx)
+    assert result == "v"
+    assert received["ctx"] is ctx
+
+
+def test_dispatch_does_not_inject_context_into_non_opt_in_tool():
+    from fleetent.tool_registry import ToolContext
+
+    @tool_registry.tool
+    def plain_ctx_tool(x: str) -> str:
+        """A tool that does not declare tool_context."""
+        return x
+
+    ctx = ToolContext(agent_name="a", features={}, session_id="s")
+    # Passing context must not break a tool that did not opt in.
+    result = tool_registry.dispatch("plain_ctx_tool", '{"x": "v"}', tool_context=ctx)
+    assert result == "v"
+
+
+def test_dispatch_without_context_passes_none_to_opt_in_tool():
+    received: dict[str, object] = {}
+
+    @tool_registry.tool
+    def ctx_tool2(x: str, tool_context=None) -> str:
+        """Opt-in context tool dispatched without context."""
+        received["ctx"] = tool_context
+        return x
+
+    result = tool_registry.dispatch("ctx_tool2", '{"x": "v"}')
+    assert result == "v"
+    assert received["ctx"] is None
+
+
+def test_schema_excludes_tool_context_param():
+    @tool_registry.tool
+    def schema_ctx(x: str, tool_context=None) -> str:
+        """Opt-in context tool — context must not leak into the LLM schema."""
+        return x
+
+    schemas = tool_registry.get_schemas()
+    schema = next(s for s in schemas if s["function"]["name"] == "schema_ctx")
+    params = schema["function"]["parameters"]
+    assert "tool_context" not in params["properties"]
+    assert "tool_context" not in params["required"]
+    assert "x" in params["properties"]

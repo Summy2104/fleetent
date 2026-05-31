@@ -23,6 +23,8 @@ from fleetent.agent_loop import run_stream
 from fleetent.config import Settings
 from fleetent.mcp_client import McpServerConfig
 from fleetent.permission_gate import _default_gate, cleanup_stale_approvals, list_approvals
+from fleetent.sandbox_client import SandboxClient
+from fleetent.sandbox_enablement import Mode, load_sandbox_mode, resolve_effective_mode
 from fleetent.skill_registry import scan as scan_skills
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     scan_skills()
     cleanup_stale_approvals()
     settings = Settings()
+
+    # SB3: probe Docker once at startup, resolve the effective code-execution mode,
+    # and stash it on app.state for /chat and /health. Docker unavailable degrades
+    # the mode to off without blocking startup (the probe itself never raises).
+    configured_mode = load_sandbox_mode()
+    docker_available = await SandboxClient().docker_available()
+    effective_mode = resolve_effective_mode(configured_mode, docker_available)
+    app.state.sandbox_mode = effective_mode
+    app.state.sandbox_docker_available = docker_available
+    if docker_available:
+        logger.info("sandbox_mode_effective mode=%s", effective_mode.value)
+    else:
+        logger.warning(
+            "sandbox_mode_effective mode=%s (docker unavailable; configured=%s)",
+            effective_mode.value,
+            configured_mode.value,
+        )
 
     # Seed the built-in admin on first boot; log the one-time initial password.
     admin_seed = seed_builtin_admin()
@@ -133,14 +152,22 @@ async def _authenticate(authorization: str = Header()) -> tuple[user_store.User,
 
 
 @app.get("/health")
-async def health() -> dict:  # type: ignore[type-arg]
+async def health(request: Request) -> dict:  # type: ignore[type-arg]
     settings = Settings()
+    # SB3: surface the effective sandbox mode resolved at startup; default to off
+    # when the state is somehow unset (e.g. lifespan not run) so we never crash.
+    mode: Mode = getattr(request.app.state, "sandbox_mode", Mode.OFF)
+    docker_available: bool = getattr(request.app.state, "sandbox_docker_available", False)
+    sandbox: dict[str, Any] = {"mode": mode.value, "docker_available": docker_available}
+    if not docker_available:
+        sandbox["note"] = "off (docker unavailable)"
     return {
         "status": "ok",
         "adapters": {
             "slack": bool(settings.slack_bot_token),
             "telegram": bool(settings.telegram_bot_token),
         },
+        "sandbox": sandbox,
     }
 
 
@@ -189,6 +216,9 @@ async def chat(
     system_prompt = agent.system_prompt if agent else None
     allowed_tools = agent.allowed_tools if agent else None
     agent_name = agent.name if agent else None
+    agent_features = agent.features if agent else None
+    # SB3: effective mode resolved at startup gates run_code's schema visibility.
+    sandbox_mode: Mode = getattr(request.app.state, "sandbox_mode", Mode.OFF)
 
     # API-key scope: the key may be restricted to specific agents.
     if agent_name is not None and not api_key_store.check_scope(key_meta["scope"], agent_name):
@@ -209,13 +239,15 @@ async def chat(
 
     async def _stream() -> AsyncGenerator[str, None]:
         try:
-            kwargs: dict[str, Any] = {"user_id": user_id}
+            kwargs: dict[str, Any] = {"user_id": user_id, "sandbox_mode": sandbox_mode}
             if system_prompt is not None:
                 kwargs["system_prompt"] = system_prompt
             if allowed_tools is not None:
                 kwargs["allowed_tools"] = allowed_tools
             if agent_name is not None:
                 kwargs["agent_name"] = agent_name
+            if agent_features is not None:
+                kwargs["agent_features"] = agent_features
             async for event in run_stream(req.message, **kwargs):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as exc:

@@ -21,6 +21,30 @@ class SandboxClient:
     def __init__(self, image: str = "python:3.12-slim") -> None:
         self._image = image
 
+    async def docker_available(self) -> bool:
+        """Probe whether the Docker CLI is usable (D2), never raising.
+
+        Runs a lightweight `docker version` and inspects only the return code. A
+        missing CLI (FileNotFoundError) or any non-zero / failed probe logs a
+        warning and returns False so the platform degrades to OFF instead of
+        crashing at startup.
+        """
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker",
+                "version",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate()
+        except (FileNotFoundError, OSError) as exc:
+            logger.warning("docker_probe_failed error=%s", exc)
+            return False
+        if proc.returncode != 0:
+            logger.warning("docker_probe_nonzero returncode=%s", proc.returncode)
+            return False
+        return True
+
     async def create_workspace(self, session_id: str) -> str:
         """Start an isolated container, return container ID as workspace_id."""
         safe = _SAFE_NAME.sub("-", session_id)[:48]

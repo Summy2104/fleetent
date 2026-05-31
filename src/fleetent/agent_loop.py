@@ -27,6 +27,7 @@ from fleetent.model_router import RouteConfig, RouteOverride, get_async_client_a
 from fleetent.multimodal import build_message_with_images, has_image_block
 from fleetent.permission_gate import _default_gate
 from fleetent.provider_health import ProviderHealthCache, get_health_cache
+from fleetent.sandbox_enablement import Mode, is_code_execution_enabled
 from fleetent.skill_registry import available_skills_prompt, collect_disabled_trace
 from fleetent.skill_registry import scan as scan_skills
 from fleetent.sub_agent import SubAgentExecutor
@@ -38,13 +39,40 @@ from fleetent.termination import (
     TerminationController,
     resolve_limits,
 )
-from fleetent.tool_registry import dispatch, get_risk_level, get_schemas
+from fleetent.tool_registry import ToolContext, dispatch, get_risk_level, get_schemas
 
 logger = structlog.get_logger(__name__)
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
 
 _SUB_AGENT_TOOL = "sub_agent"
+
+# The single code-execution tool gated by the SB3 three-state mode. Filtered out
+# of an agent's schema (the one enablement point, D1) when code execution is not
+# enabled for that (mode, features) pair.
+_RUN_CODE_TOOL = "run_code"
+
+
+def _filter_code_execution(
+    schemas: list[Any],
+    sandbox_mode: Mode | None,
+    agent_features: dict[str, Any] | None,
+) -> list[Any]:
+    """Drop `run_code` from schemas when code execution is disabled (SB3 D1).
+
+    The single enablement point: both the global `off` gate and the agent-level
+    `code_execution=false` gate collapse into this filter, sitting alongside the
+    existing `allowed_tools` schema filter. `sandbox_mode is None` means the caller
+    opted out of SB3 gating entirely — schemas pass through byte-identical, keeping
+    existing callers' behaviour unchanged.
+    """
+    if sandbox_mode is None:
+        return schemas
+    code_execution = (agent_features or {}).get("code_execution")
+    if is_code_execution_enabled(sandbox_mode, code_execution):
+        return schemas
+    return [s for s in schemas if s["function"]["name"] != _RUN_CODE_TOOL]
+
 
 # Corrective warning injected when the loop-detection checker first flags a
 # suspected loop (AR4 D3/D4). Plain `user` role (D4) so it is not merged with the
@@ -159,15 +187,23 @@ async def _safe_dispatch(
     arguments: str | dict[str, Any],
     is_sub_agent: bool,
     cancel_token: CancelToken | None = None,
+    tool_context: ToolContext | None = None,
 ) -> tuple[str, bool]:
     """Dispatch a tool, normalizing a crash into (error_text, failed=True).
 
     Returning instead of raising keeps a tool crash from killing the loop and
-    lets the consecutive-failures checker observe it. The cancel token is passed
-    out-of-band; dispatch injects it only into tools that opt in (AR19 D3).
+    lets the consecutive-failures checker observe it. The cancel token and the
+    execution context are passed out-of-band; dispatch injects each only into
+    tools that opt in (AR19 D3 / SB3 D5).
     """
     try:
-        result = dispatch(name, arguments, is_sub_agent=is_sub_agent, cancel_token=cancel_token)
+        result = dispatch(
+            name,
+            arguments,
+            is_sub_agent=is_sub_agent,
+            cancel_token=cancel_token,
+            tool_context=tool_context,
+        )
         if inspect.iscoroutine(result):
             result = await result
         return result, False
@@ -445,6 +481,9 @@ async def run(
     loop_repeat_threshold: int | None = None,
     loop_ignore_arg_keys: list[str] | None = None,
     cancel_token: CancelToken | None = None,
+    sandbox_mode: Mode | None = None,
+    agent_features: dict[str, Any] | None = None,
+    session_id: str | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -479,6 +518,17 @@ async def run(
     # Filter by agent-level allowed_tools if specified
     if allowed_tools is not None:
         schemas = [s for s in schemas if check_tool_access(s["function"]["name"], allowed_tools)]
+
+    # SB3 D1: the single code-execution enablement point — drop run_code from this
+    # agent's schema when the (mode, features) pair disables it (alongside the
+    # allowed_tools filter above).
+    schemas = _filter_code_execution(schemas, sandbox_mode, agent_features)
+
+    # SB3 D5: execution-time context channel for run_code (session/agent/features),
+    # injected out-of-band only into tools that opt in; harmless for the rest.
+    tool_context = ToolContext(
+        agent_name=agent_name, features=agent_features or {}, session_id=session_id
+    )
 
     start = time.monotonic()
     response = None
@@ -602,12 +652,16 @@ async def run(
                         )
                     else:
                         result, failed = await _safe_dispatch(
-                            tc.function.name, tc.function.arguments, is_sub_agent, token
+                            tc.function.name,
+                            tc.function.arguments,
+                            is_sub_agent,
+                            token,
+                            tool_context,
                         )
                         state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
                 else:
                     result, failed = await _safe_dispatch(
-                        tc.function.name, tc.function.arguments, is_sub_agent, token
+                        tc.function.name, tc.function.arguments, is_sub_agent, token, tool_context
                     )
                     state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
@@ -670,14 +724,21 @@ def run_sync(
         system_prompt, skills_catalog, memory_ctx, {"role": "user", "content": user_input}
     )
 
-    return asyncio.run(
-        run(
+    async def _run() -> str:
+        # SB3: resolve the effective mode (one-time Docker probe, cached) inside the
+        # CLI's own event loop so run_code's schema visibility is gated for the CLI too.
+        from fleetent import sandbox_enablement
+
+        sandbox_mode = await sandbox_enablement.get_effective_mode()
+        return await run(
             messages,
             user_id=user_id,
             system_prompt=system_prompt,
             disabled_skills_trace=disabled_trace,
+            sandbox_mode=sandbox_mode,
         )
-    )
+
+    return asyncio.run(_run())
 
 
 async def run_stream(
@@ -695,6 +756,9 @@ async def run_stream(
     loop_repeat_threshold: int | None = None,
     loop_ignore_arg_keys: list[str] | None = None,
     cancel_token: CancelToken | None = None,
+    sandbox_mode: Mode | None = None,
+    agent_features: dict[str, Any] | None = None,
+    session_id: str | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -711,6 +775,11 @@ async def run_stream(
     memory_ctx = load_memories(user_id=user_id)
     skills_catalog = available_skills_prompt()
     disabled_trace = collect_disabled_trace() or None
+
+    # SB3 D5: execution-time context channel (session/agent/features) for opt-in tools.
+    tool_context = ToolContext(
+        agent_name=agent_name, features=agent_features or {}, session_id=session_id
+    )
 
     if images:
         user_msg = build_message_with_images(user_input, images)
@@ -781,6 +850,8 @@ async def run_stream(
             stream_schemas = [
                 s for s in stream_schemas if check_tool_access(s["function"]["name"], allowed_tools)
             ]
+        # SB3 D1: code-execution enablement point, mirroring run().
+        stream_schemas = _filter_code_execution(stream_schemas, sandbox_mode, agent_features)
 
         try:
             stream, model_used = await _stream_with_fallback(
@@ -852,7 +923,7 @@ async def run_stream(
             name = func["name"]
             args = func["arguments"]
             yield {"type": "tool_call", "name": name, "args": args}
-            result, failed = await _safe_dispatch(name, args, False, token)
+            result, failed = await _safe_dispatch(name, args, False, token, tool_context)
             state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             yield {"type": "tool_result", "name": name, "content": result}
             messages.append({"role": "tool", "tool_call_id": tc_data["id"], "content": result})

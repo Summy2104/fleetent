@@ -237,3 +237,43 @@ def test_read_skill_refuses_audit_blocked(tmp_path, monkeypatch):
     assert "Ignore all previous instructions" not in result
     assert "audit" in result.lower() or "blocked" in result.lower()
     sr._index.clear()
+
+
+@pytest.mark.asyncio
+async def test_run_code_uses_session_id_from_tool_context(monkeypatch):
+    """run_code names its workspace after the context's session_id when present (SB3 D5)."""
+    from unittest.mock import AsyncMock
+
+    import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
+    from fleetent.tool_registry import ToolContext
+
+    mock_client = AsyncMock()
+    mock_client.create_workspace = AsyncMock(return_value="cid-ctx")
+    mock_client.exec = AsyncMock(return_value=ExecResult(stdout="ok\n", stderr="", exit_code=0))
+    mock_client.destroy_workspace = AsyncMock()
+    monkeypatch.setattr(tl, "SandboxClient", lambda **kw: mock_client)
+
+    ctx = ToolContext(agent_name="a", features={"code_execution": True}, session_id="sess-7")
+    result = await tl.run_code(code="print(1)", tool_context=ctx)
+    assert result == "ok"
+    mock_client.create_workspace.assert_called_once_with("sess-7")
+
+
+@pytest.mark.asyncio
+async def test_run_code_degrades_safely_without_tool_context(monkeypatch):
+    """run_code without context falls back to the default workspace key, not raising."""
+    from unittest.mock import AsyncMock
+
+    import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
+
+    mock_client = AsyncMock()
+    mock_client.create_workspace = AsyncMock(return_value="cid-default")
+    mock_client.exec = AsyncMock(return_value=ExecResult(stdout="hi\n", stderr="", exit_code=0))
+    mock_client.destroy_workspace = AsyncMock()
+    monkeypatch.setattr(tl, "SandboxClient", lambda **kw: mock_client)
+
+    result = await tl.run_code(code="print(1)")
+    assert result == "hi"
+    mock_client.create_workspace.assert_called_once_with("run-code")
