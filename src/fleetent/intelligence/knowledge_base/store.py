@@ -1,7 +1,10 @@
+import re
 from datetime import UTC, datetime
 
 from fleetent.db import Row, SQLiteDatabase
 from fleetent.intelligence.knowledge_base.models import KnowledgeChunk, KnowledgeDocument
+
+_TOKEN_RE = re.compile(r"[A-Za-z0-9]+|[\u4e00-\u9fff]")
 
 
 class KnowledgeStore:
@@ -66,6 +69,18 @@ class KnowledgeStore:
                         "created_at": _format_datetime(_now()),
                     },
                 )
+                transaction.execute(
+                    """
+                    INSERT INTO knowledge_chunks_fts (chunk_id, tenant_id, kb_id, content)
+                    VALUES (:chunk_id, :tenant_id, :kb_id, :content)
+                    """,
+                    {
+                        "chunk_id": chunk.id,
+                        "tenant_id": chunk.tenant_id,
+                        "kb_id": chunk.kb_id,
+                        "content": chunk.content,
+                    },
+                )
 
     def get_chunks_by_ids(self, tenant_id: str, chunk_ids: list[str]) -> list[KnowledgeChunk]:
         if not chunk_ids:
@@ -116,8 +131,66 @@ class KnowledgeStore:
         ).fetchall()
         return [_row_to_chunk(row, score=0.0) for row in rows]
 
+    def search_keyword(
+        self,
+        query: str,
+        tenant_id: str,
+        kb_ids: list[str],
+        limit: int,
+    ) -> list[KnowledgeChunk]:
+        if limit <= 0 or not kb_ids:
+            return []
+        fts_query = _fts_query(query)
+        if not fts_query:
+            return []
+        placeholders = ", ".join(f":kb_id_{index}" for index in range(len(kb_ids)))
+        params: dict[str, object] = {f"kb_id_{index}": kb_id for index, kb_id in enumerate(kb_ids)}
+        params.update(
+            {
+                "query": fts_query,
+                "tenant_id": tenant_id,
+                "limit": limit,
+            }
+        )
+        rows = self._database.execute(
+            f"""
+            SELECT
+                chunk.id,
+                chunk.document_id,
+                chunk.tenant_id,
+                chunk.kb_id,
+                chunk.position,
+                chunk.content,
+                document.filename,
+                document.source,
+                document.source_url,
+                bm25(knowledge_chunks_fts) AS rank
+            FROM knowledge_chunks_fts
+            JOIN knowledge_chunks AS chunk ON chunk.id = knowledge_chunks_fts.chunk_id
+            JOIN knowledge_documents AS document ON document.id = chunk.document_id
+            WHERE knowledge_chunks_fts MATCH :query
+              AND knowledge_chunks_fts.tenant_id = :tenant_id
+              AND knowledge_chunks_fts.kb_id IN ({placeholders})
+            ORDER BY rank ASC, chunk.position ASC, chunk.id ASC
+            LIMIT :limit
+            """,
+            params,
+        ).fetchall()
+        return [_row_to_chunk(row, score=-float(row["rank"])) for row in rows]
+
     def delete_document(self, document_id: str) -> None:
         with self._database.transaction() as transaction:
+            transaction.execute(
+                """
+                DELETE FROM knowledge_chunks_fts
+                WHERE chunk_id IN (
+                    SELECT id
+                    FROM knowledge_chunks
+                    WHERE document_id = :document_id
+                )
+                """,
+                {"document_id": document_id},
+            )
             transaction.execute(
                 """
                 DELETE FROM knowledge_chunks
@@ -155,3 +228,28 @@ def _now() -> datetime:
 
 def _format_datetime(value: datetime) -> str:
     return value.isoformat()
+
+
+def _fts_query(query: str) -> str:
+    tokens = _TOKEN_RE.findall(query)
+    terms: list[str] = []
+    pending_cjk: list[str] = []
+    for token in tokens:
+        if _is_cjk(token):
+            pending_cjk.append(token)
+            continue
+        terms.extend(_cjk_terms(pending_cjk))
+        pending_cjk = []
+        terms.append(token)
+    terms.extend(_cjk_terms(pending_cjk))
+    return " ".join(f'"{term}"' for term in terms)
+
+
+def _cjk_terms(chars: list[str]) -> list[str]:
+    if len(chars) <= 1:
+        return chars
+    return ["".join(chars[index : index + 2]) for index in range(len(chars) - 1)]
+
+
+def _is_cjk(token: str) -> bool:
+    return len(token) == 1 and "\u4e00" <= token <= "\u9fff"

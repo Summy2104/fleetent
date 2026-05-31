@@ -1,11 +1,15 @@
 import uuid
 from dataclasses import replace
+from typing import Literal
 
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.intelligence import vector_store
 from fleetent.intelligence.knowledge_base.models import KnowledgeChunk, KnowledgeDocument
 from fleetent.intelligence.knowledge_base.store import KnowledgeStore
+
+SearchMode = Literal["vector", "keyword", "hybrid"]
+_SEARCH_MODES: set[str] = {"vector", "keyword", "hybrid"}
 
 
 async def ingest_text(
@@ -66,9 +70,12 @@ async def search(
     tenant_id: str | None = None,
     kb_ids: list[str] | None = None,
     limit: int = 10,
+    mode: SearchMode = "vector",
 ) -> list[KnowledgeChunk]:
-    """Search knowledge chunks using vector-only retrieval."""
+    """Search knowledge chunks using vector, keyword, or hybrid retrieval."""
 
+    if mode not in _SEARCH_MODES:
+        raise ValueError(f"unsupported knowledge search mode: {mode}")
     if limit <= 0:
         return []
 
@@ -76,15 +83,30 @@ async def search(
     resolved_tenant_id = tenant_id or settings.default_tenant_id
     resolved_kb_ids = kb_ids or [settings.default_kb_id]
     store = KnowledgeStore(_database())
+    if mode == "keyword":
+        return store.search_keyword(query, resolved_tenant_id, resolved_kb_ids, limit)
+    if mode == "hybrid":
+        return await _search_hybrid(query, resolved_tenant_id, resolved_kb_ids, limit, store)
+
+    return await _search_vector(query, resolved_tenant_id, resolved_kb_ids, limit, store)
+
+
+async def _search_vector(
+    query: str,
+    tenant_id: str,
+    kb_ids: list[str],
+    limit: int,
+    store: KnowledgeStore,
+) -> list[KnowledgeChunk]:
     score_by_id: dict[str, float] = {}
-    for kb_id in resolved_kb_ids:
-        namespace = vector_store.knowledge_namespace(resolved_tenant_id, kb_id)
+    for kb_id in kb_ids:
+        namespace = vector_store.knowledge_namespace(tenant_id, kb_id)
         vector_results = await vector_store.search(query, namespace, limit)
         for result in vector_results:
             score_by_id[result.id] = max(score_by_id.get(result.id, result.score), result.score)
 
-    chunks = store.get_chunks_by_ids(resolved_tenant_id, list(score_by_id))
-    requested_kbs = set(resolved_kb_ids)
+    chunks = store.get_chunks_by_ids(tenant_id, list(score_by_id))
+    requested_kbs = set(kb_ids)
     scored_chunks = [
         replace(chunk, score=score_by_id[chunk.id])
         for chunk in chunks
@@ -94,6 +116,32 @@ async def search(
         scored_chunks,
         key=lambda chunk: (-chunk.score, chunk.position, chunk.id),
     )[:limit]
+
+
+async def _search_hybrid(
+    query: str,
+    tenant_id: str,
+    kb_ids: list[str],
+    limit: int,
+    store: KnowledgeStore,
+) -> list[KnowledgeChunk]:
+    vector_chunks = await _search_vector(query, tenant_id, kb_ids, limit, store)
+    keyword_chunks = store.search_keyword(query, tenant_id, kb_ids, limit)
+    chunk_by_id = {chunk.id: chunk for chunk in vector_chunks}
+    chunk_by_id.update({chunk.id: chunk for chunk in keyword_chunks})
+
+    rrf_scores: dict[str, float] = {}
+    for rank, chunk in enumerate(vector_chunks, start=1):
+        rrf_scores[chunk.id] = rrf_scores.get(chunk.id, 0.0) + _rrf_score(rank)
+    for rank, chunk in enumerate(keyword_chunks, start=1):
+        rrf_scores[chunk.id] = rrf_scores.get(chunk.id, 0.0) + _rrf_score(rank)
+
+    fused = [
+        replace(chunk_by_id[chunk_id], score=score)
+        for chunk_id, score in rrf_scores.items()
+        if chunk_id in chunk_by_id
+    ]
+    return sorted(fused, key=lambda chunk: (-chunk.score, chunk.position, chunk.id))[:limit]
 
 
 async def delete(document_id: str) -> None:
@@ -132,3 +180,7 @@ def _settings() -> Settings:
 
 def _database() -> SQLiteDatabase:
     return create_database(_settings().database_url)
+
+
+def _rrf_score(rank: int, k: int = 60) -> float:
+    return 1.0 / (k + rank)

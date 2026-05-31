@@ -6,9 +6,9 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**当前负责**：手动 text / markdown 内容导入、deterministic chunking、向量索引构建、按 tenant + knowledge base 隔离召回相关文档片段。
+**当前负责**：手动 text / markdown 内容导入、deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、按 tenant + knowledge base 隔离召回相关文档片段。
 
-**后续负责**：数据源接入与文档获取、文档解析、混合检索、实体与关系提取、图谱存储、同步规划。
+**后续负责**：数据源接入与文档获取、文档解析、实体与关系提取、图谱存储、同步规划。
 
 **不负责**：注入 system prompt 的协调与 token 预算（→ long_term_ctx）、用户个人记忆（→ memory）。
 
@@ -18,8 +18,8 @@
 
 **模块归属**：
 - owning package：`intelligence.knowledge_base`
-- public API：`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit)`、`delete(document_id)`
-- owned tables：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`
+- public API：`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`delete(document_id)`
+- owned tables：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`、`knowledge_chunks_fts`
 - config namespace：`knowledge_base.*`
 
 ## 关键流程
@@ -39,9 +39,15 @@ flowchart TD
         F --> C[返回 KnowledgeDocument]
     end
 
-    subgraph vector_search["当前检索流程（由 long_term_ctx 触发）"]
-        K[search query + tenant_id + kb_ids] --> L[按 kb namespace 分别调用 vector_store.search]
-        L --> M[回查 knowledge_chunks / knowledge_documents]
+    subgraph search["当前检索流程（由 long_term_ctx 或调用方触发）"]
+        K[search query + tenant_id + kb_ids + mode] --> L{mode}
+        L -->|vector| V[按 kb namespace 分别调用 vector_store.search]
+        L -->|keyword| F[SQLite FTS5 / BM25 keyword search]
+        L -->|hybrid| H[获取 vector + keyword candidates]
+        V --> M[回查 knowledge_chunks / knowledge_documents]
+        F --> M
+        H --> R[RRF 融合去重]
+        R --> M
         M --> N[按 score DESC、position ASC、id ASC 稳定排序]
         N --> O[返回 KnowledgeChunk 列表]
     end
@@ -71,6 +77,15 @@ knowledge_chunks (
   content     TEXT,              -- chunk 文本
   position    INTEGER,           -- chunk 在文档中的顺序
   created_at  DATETIME
+)
+
+-- 关键词索引，由 knowledge-base 模块通过 Alembic 管理
+knowledge_chunks_fts USING fts5 (
+  chunk_id    UNINDEXED,
+  tenant_id   UNINDEXED,
+  kb_id       UNINDEXED,
+  content,
+  tokenize='unicode61'
 )
 ```
 
@@ -120,27 +135,35 @@ async def search(
     tenant_id: str,
     kb_ids: list[str],
     limit: int = 10,
+    mode: Literal["vector", "keyword", "hybrid"] = "vector",
 ) -> list[KnowledgeChunk]:
-    """向量相似度检索，返回最相关的文档片段。适合事实型问答。由 long_term_ctx 调用。"""
+    """按指定模式检索文档片段，默认保持 vector-only 兼容行为。"""
 
 
 async def delete(document_id: str) -> None:
     """删除文档及其所有 chunk 和对应向量。"""
 ```
 
+`mode` 取值：
+- `vector`：仅调用 `vector_store.search`，适合语义相似度召回。
+- `keyword`：仅使用 SQLite FTS5 / BM25，适合产品编号、错误码、专有名词等精确词召回。
+- `hybrid`：同时取 vector 与 keyword candidates，用 RRF 融合去重后返回。
+
+hybrid search 当前不调用 rerank provider，不包含 query planner、graph search，也不依赖 OpenSearch / Elasticsearch / LanceDB。
+
 ## 现状
 
-**已完成最小 core 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入。
+**已完成 core + hybrid 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、基础 Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入；`knowledge-base-hybrid-search` 增加了 knowledge-base-owned SQLite FTS5 keyword index、keyword mode、hybrid mode 和 RRF 融合。
 
 团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移设计资产和小块算法**，而非从零重写或整体搬运。
 
-迁移评估见 [knowledge-bridge 迁移计划](../knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：已先完成 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环；后续再依次推进 parser、local connector、hybrid search、sync planner、Confluence / Google Drive connector、graph search 和 retrieval audit。
+迁移评估见 [knowledge-bridge 迁移计划](../knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：已先完成 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环，并完成 `knowledge-base-hybrid-search` 的 SQLite FTS5 / BM25 与 RRF 融合；后续再依次推进 parser、local connector、sync planner、Confluence / Google Drive connector、graph search 和 retrieval audit。
 
 当前未实现内容：
 - 无 parser framework，仅接受调用方传入的 plain text / markdown string
 - 无 local directory、Confluence、Google Drive connector
 - 无 sync planner、后台 job、admin UI、REST upload API
-- 无 BM25 / FTS5 / hybrid / rerank / query planner
+- 无 rerank / query planner
 - 无 graph_search、entities、relations 或 `kb_extraction`
 
 **后续可迁移参考（knowledge-bridge 已实现，但需按 fleetent specs 分批适配）**：
@@ -164,7 +187,7 @@ async def delete(document_id: str) -> None:
 ## 当前缺口
 
 - parser / connector / sync 能力尚未开始：当前只接受调用方传入的 text / markdown string。
-- 检索仍是 vector-only：没有 BM25、hybrid、rerank、graph 或 benchmark fixture。
+- 检索已支持 SQLite FTS5/BM25 keyword mode 与 RRF hybrid mode；尚未实现 rerank、query planner、graph 或 benchmark fixture。
 - 外部数据源暂未接入：local directory、Confluence、Google Drive 均未实现。
 - long-term-ctx 只支持内置默认 KB provider；还没有 agent 到多 KB 的绑定策略。
 
@@ -216,7 +239,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
   - 提取在后台执行，与分块并行触发
 
 - [ ] **混合检索（Hybrid Search）**：BM25 关键词检索与向量语义检索并行，RRF 融合排序后返回
-  - 对外接口不变：`search(query: str, tenant_id: str, kb_ids: list[str]) → list[KnowledgeChunk]`
+  - 对外接口兼容扩展：`search(query: str, tenant_id: str, kb_ids: list[str], mode="hybrid") → list[KnowledgeChunk]`
   - BM25 擅长精确词匹配（产品编号、人名、专有名词），当前实现使用 SQLite FTS5（内置，无需额外服务）
   - 向量检索负责语义相似度和同义词
   - RRF（Reciprocal Rank Fusion）合并两路排序结果，无需调权重参数
@@ -266,6 +289,8 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - ingest_text 保存 document、生成 deterministic chunks，并逐 chunk 调用 vector_store.upsert
 - 空内容 fail fast
 - search 按 `kb:{tenant_id}:{kb_id}` namespace 调用 vector_store，支持多 kb 合并与稳定排序
+- keyword search 可命中产品编号、错误码等精确词，并保持 tenant/kb 隔离
+- hybrid search 合并 vector 与 keyword candidates，同一 chunk 去重并通过 RRF 提升双命中结果
 - knowledge base 隔离：不同 `tenant_id + kb_id` 的检索结果互不干扰
 - delete 级联：删除文档后对应 chunk 和 vector entries 均被清理
 - long-term-ctx 在 `knowledge_base.enabled=true` 时调用内置 provider；disabled 或无结果时降级
