@@ -3,7 +3,7 @@
 - [ ] 1.1 核实 MCP1 `_base_headers`（mcp_client.py 行 165-174）的 `auth_type` 分支：`"api_key"` 如何从 `api_key_env` 取静态 key 附 `Bearer`、`"none"` 不附；确认该函数为**同步** `def _base_headers(server) -> dict`（`api_key` 分支仅 `os.environ.get`，无 await）。据此定 `"oauth2"` 的插入方案（D6a）：取/刷新 token 是 async，必须在请求构造前 `await` resolve token 再传入头拼装（首选保持 `_base_headers` 同步），不能在同步函数内 await；核实所有调 `_base_headers` 的请求构造点（`_post_jsonrpc` 行 189、initialize、notification）
 - [ ] 1.2 核实 `McpServerConfig`（行 28-44）字段风格，确定 OAuth2 配置字段（token_url / client_id / client_secret_env / scope）的命名与默认值，与 `auth_type` / `api_key_env` 一致
 - [ ] 1.3 核实自托管授权服务器（如 Keycloak）的 client_credentials token 端点请求/响应格式、错误响应（`invalid_client` / `invalid_grant` 的 HTTP 状态与错误体），据此定取 token 与认证失败判据；确认 token 端点为客户内网地址、无云依赖
-- [ ] 1.4 核实 token 存储隔离方式：默认内存按 server 隔离；如持久化则参照 user_store 的 aiosqlite + 可 monkeypatch `DB_PATH` 模式，隔离到 tmp_path
+- [ ] 1.4 核实 token 存储隔离方式：默认内存按 server 隔离；如持久化则参照 user_store 的 stdlib sqlite3 + 可 monkeypatch `DB_PATH` 模式，隔离到 tmp_path
 - [ ] 1.5 确认默认无新依赖（手写 client_credentials 复用 httpx）；如评估需 OAuth2 库则记录必要性与自托管/纯客户端确认（design D2）
 
 ## 2. OAuth2 配置字段（mcp_client.py）
@@ -14,7 +14,7 @@
 ## 3. token 存储（按 server 隔离、可注入）
 
 - [ ] 3.1 Write failing tests：token 存储按 server 隔离持有（access token + 绝对过期时刻 + 可选 refresh token）；不同 server 互不影响；存储后端可注入（默认内存）；可重置以便测试；不进模块级可变全局。如持久化则隔离到 tmp_path。看到红
-- [ ] 3.2 Implement token 存储（默认内存、按 server 隔离、可注入；持久化时 aiosqlite 裸 SQL + 可 monkeypatch 路径），看到绿
+- [ ] 3.2 Implement token 存储（默认内存、按 server 隔离、可注入；持久化时 stdlib sqlite3 裸 SQL + 可 monkeypatch 路径），看到绿
 
 ## 4. client_credentials 取 token 并以 Bearer 附加
 

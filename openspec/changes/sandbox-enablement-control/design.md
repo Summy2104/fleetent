@@ -13,7 +13,7 @@
 
 **依赖/归档顺序**：本 change 是 SB2（scope `acquire` 需 session_id/agent_name）与 SB5（agent_env 注入）的前置——三项共享资源在本 change 落地后，SB2/SB5 方可基于其上实现。建议归档顺序 SB3 在 SB2/SB5 之前。
 
-约束（CLAUDE.md）：禁止 ORM（agent_store 用 aiosqlite 裸 SQL）；禁止全局可变状态（mode/DB 路径常量可 monkeypatch）；判定逻辑做成纯函数易单测；新模块 import → 常量 → 数据类 → 函数；mypy strict；TDD Hard Gate；测试 mock Docker CLI、隔离 SQLite 到 tmp_path；不吞异常（探测失败要 log）。
+约束（CLAUDE.md）：禁止 ORM（agent_store 用 stdlib sqlite3 裸 SQL）；禁止全局可变状态（mode/DB 路径常量可 monkeypatch）；判定逻辑做成纯函数易单测；新模块 import → 常量 → 数据类 → 函数；mypy strict；TDD Hard Gate；测试 mock Docker CLI、隔离 SQLite 到 tmp_path；不吞异常（探测失败要 log）。
 
 ## Goals / Non-Goals
 

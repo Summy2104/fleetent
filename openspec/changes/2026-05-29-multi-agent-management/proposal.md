@@ -44,7 +44,7 @@
 - **代码**：
   - 新增：`agent_admin_api.py`（FastAPI router）、`agent_runtime.py`（version snapshot + isolation resolver）
   - 修改：`agent_store.py`（多 schema + 版本 API）、`server.py`（mount admin router）、`admin.py`（CLI 新命令）、`agent_loop.py`（接受 AgentSnapshot）、`skill_registry.py`（支持非全局 dir）、`memory_layer.py`（支持 namespace 后缀）、`model_router.py`（支持 per-call overrides）、`session_mgr.py`（持久化 agent_version_id）、`user_store.py`（is_admin 列）
-- **依赖**：无新增依赖（FastAPI、APScheduler、aiosqlite 已在）。
+- **依赖**：无新增依赖（FastAPI、APScheduler、stdlib sqlite3 已在）。
 - **数据**：`data/users.db` 新增 `agent_versions` 表，`agents` 加 `active_version_id` / `deleted_at` 列，`users` 加 `is_admin` 列，`channel_agents` 加 `bound_version_id` 列（审计）。memories 路径变成 `data/users/{user_id}/memories/{namespace}.jsonl`，旧文件通过 migration 步骤迁移到 `default` namespace。
 - **破坏性**：
   - `Agent` 数据类字段扩展，原 `system_prompt` / `allowed_tools` 仍存在并继续可用（从 active version 解包）。

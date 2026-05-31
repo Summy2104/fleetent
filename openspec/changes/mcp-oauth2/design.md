@@ -4,7 +4,7 @@ MCP1（mcp-http-streamable，已合入）的 `_base_headers`（mcp_client.py 行
 
 CLAUDE.md 基础设施原则：所有外部服务组件必须可自托管，数据不出客户内网；云托管专有身份服务（如某些 SaaS IdP 云端）禁止。OAuth2 在本平台的定位是：平台作为 **OAuth2 客户端**，向**客户内网自托管的授权服务器 token 端点**（如自托管 Keycloak / 内部网关的 OAuth2 端点）取 token，用于认证对 MCP server 的请求。
 
-约束（CLAUDE.md）：禁止 AI 框架；禁止 ORM（aiosqlite 裸 SQL）；**禁止全局可变状态**（token 缓存按 server 隔离、可注入/重置；持久化路径可 monkeypatch）；外部 HTTP（token 端点、MCP server）用 respx mock、不发真实请求；token 存储隔离到 tmp_path 或内存；不吞异常；行长 100；mypy strict；TDD Hard Gate；新依赖须说明必要性与自托管方案。
+约束（CLAUDE.md）：禁止 AI 框架；禁止 ORM（stdlib sqlite3 裸 SQL）；**禁止全局可变状态**（token 缓存按 server 隔离、可注入/重置；持久化路径可 monkeypatch）；外部 HTTP（token 端点、MCP server）用 respx mock、不发真实请求；token 存储隔离到 tmp_path 或内存；不吞异常；行长 100；mypy strict；TDD Hard Gate；新依赖须说明必要性与自托管方案。
 
 ## Goals / Non-Goals
 
@@ -34,7 +34,7 @@ client_credentials 流程足够简单（POST 表单 → 解析 JSON），用 MCP
 **Alternatives**：①引入 `authlib`——被否（本 change 不需要其复杂能力）；保留为未来交互式授权的备选，届时须确认其无云依赖、可对接自托管端点。
 
 ### D3：token 存储按 server 隔离、可注入，默认内存
-access token + 过期时刻（由 `expires_in` 计算的绝对时间）+ 可选 refresh token 缓存按 server 实例隔离持有（沿用 MCP1/MCP2/MCP3「状态落 server 而非全局」原则），存储后端可注入：默认内存（按 server 隔离的字段/映射经实例持有），如需跨重启持久化则用 aiosqlite 裸 SQL、`DB_PATH` 可 monkeypatch（遵循 user_store 模式）。
+access token + 过期时刻（由 `expires_in` 计算的绝对时间）+ 可选 refresh token 缓存按 server 实例隔离持有（沿用 MCP1/MCP2/MCP3「状态落 server 而非全局」原则），存储后端可注入：默认内存（按 server 隔离的字段/映射经实例持有），如需跨重启持久化则用 stdlib sqlite3 裸 SQL、`DB_PATH` 可 monkeypatch（遵循 user_store 模式）。
 **为何**：CLAUDE.md 禁止全局可变状态、要求测试隔离；默认内存即满足单进程运行期缓存与刷新；持久化为可选（OAuth2 client_credentials 重启重取代价低，未必需持久化）。可注入存储让测试用内存桩、不碰 `data/`。
 **Alternatives**：①模块级 `dict[server_id, token]`——被否，全局可变状态违反 CLAUDE.md；②总是持久化到 SQLite——被否，client_credentials 重取廉价，强制持久化是过度设计；持久化设为可选。
 
