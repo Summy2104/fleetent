@@ -10,7 +10,7 @@ payload 是否脱敏/截断、query 与 usage 聚合是否稳定。
 
 ## What Changes
 
-- 新增 observability contract tests，覆盖一次 agent run 的关键 trace contract。
+- 新增 `tests/integration/` 下的 observability contract tests，覆盖一次 agent run 的关键 trace contract。
 - 验证 non-streaming run：
   - 有 long-term context sources 时写入 `injected_context`
   - 完成时写入 `agent_run_completed`
