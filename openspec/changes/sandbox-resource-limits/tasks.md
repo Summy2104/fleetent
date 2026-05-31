@@ -2,12 +2,12 @@
 
 - [ ] 1.1 核实 `SandboxClient.create_workspace`（sandbox_client.py 行 27-44）硬编码的资源标志（`--network none --memory 256m --cpus 0.5 --read-only --tmpfs /tmp`），确定哪些参数化、哪些保留（`--read-only --tmpfs` 保留）
 - [ ] 1.2 核实 yaml 加载惯例：`model_router.ROUTES_PATH` + `yaml.safe_load(path.read_text())` 模式与路径常量可 monkeypatch；`config/settings.yaml` 的 `sandbox:` 段由 SB3 建（owner），本 change 向其追加 `resources` 子段，与 `sandbox.mode`（SB3）/`scope`（SB2）共处同段
-- [ ] 1.3 确认 `SandboxClient.__init__` 现仅接收 `image`，扩展 `resources` 入参（可选、缺省回退默认）不破坏既有 `test_sandbox_client.py`
+- [ ] 1.3 确认 `SandboxClient.__init__` 现仅接收 `image`、`create_workspace` 现签名；resources 下沉到 `create_workspace` 按次入参（可选、缺省回退默认），不在 `__init__` 固定资源策略，不破坏既有 `test_sandbox_client.py`
 
 ## 2. 资源配置数据结构与默认值（sandbox_config.py）
 
-- [ ] 2.1 Write failing tests：`NetworkPolicy` 枚举含 `none`/`public_only`/`allow_all`；`SandboxResources` 默认值为 `memory=256` / `cpus=0.5` / `network=none` / `exec_timeout=30`。运行 `uv run pytest -x -q` 看到红
-- [ ] 2.2 Implement `NetworkPolicy`（StrEnum）与 `SandboxResources`（dataclass 带默认值），看到绿
+- [ ] 2.1 Write failing tests：`NetworkPolicy` 枚举含 `none`/`public_only`/`allow_all`；`SandboxResources` 默认值为 `memory=256` / `cpus=0.5` / `network=none` / `exec_timeout=30` / `read_only=True`。运行 `uv run pytest -x -q` 看到红
+- [ ] 2.2 Implement `NetworkPolicy`（StrEnum）与 `SandboxResources`（dataclass 带默认值，含 `read_only: bool = True`），看到绿
 
 ## 3. 配置加载与回退（sandbox_config.py）
 
@@ -15,12 +15,15 @@
 - [ ] 3.2 Implement `load_sandbox_resources`（有则覆盖、缺则默认、无文件全默认），看到绿
 - [ ] 3.3 Write failing tests：非法配置（memory<=0 / cpus<=0 / network 非枚举值）安全回退默认或明确抛 `ValueError`，不静默吞。看到红
 - [ ] 3.4 Implement 校验逻辑（非法 log 后回退或抛错），看到绿
+- [ ] 3.5 Write failing tests：`exec_timeout` 超范围被 clamp 到 [1,600]（`exec_timeout=0 → 1`、`exec_timeout=1000 → 600`、边界内不变）。看到红
+- [ ] 3.6 Implement `exec_timeout` 范围 clamp [1,600]，看到绿
 
 ## 4. 资源值映射到 docker run（sandbox_client.py）
 
-- [ ] 4.1 Write failing tests：`SandboxClient(resources=...)` 创建容器时 `memory→--memory {n}m`、`cpus→--cpus {n}`、`network=none→--network none`、`allow_all→不加 --network none`、`public_only→--network <预置网络>`；`--read-only --tmpfs /tmp` 始终保留。捕获 `asyncio.create_subprocess_exec` 参数断言。看到红
-- [ ] 4.2 Implement：`__init__` 接收 `resources`（None 回退默认），`create_workspace` 据其构造 docker run 参数，看到绿
-- [ ] 4.3 Write failing test：不传 `resources` 时 `create_workspace` 命令与现状等价（既有用例不回归）。看到红/绿确认兼容
+- [ ] 4.1 Write failing tests：`create_workspace(resources=...)` 创建容器时 `memory→--memory {n}m`、`cpus→--cpus {n}`、`network=none→--network none`、`allow_all→不加 --network none`、`public_only→--network <预置网络>`；`read_only=True→含 --read-only`、`read_only=False→不含 --read-only`；`--tmpfs /tmp` 始终保留。捕获 `asyncio.create_subprocess_exec` 参数断言。看到红
+- [ ] 4.2 Implement：`create_workspace` 按次接收 `resources`（None 回退默认），据其构造 docker run 参数；**不在** `__init__` 固定资源策略，看到绿
+- [ ] 4.3 Write failing test：同一 `SandboxClient` 先后传只读档位、可写档位两次 `create_workspace`，两次命令分别匹配各自档位（per-scope 不串）。看到红
+- [ ] 4.4 Write failing test：不传 `resources` 时 `create_workspace` 命令与现状等价（默认含 `--read-only`，既有用例不回归）。看到红/绿确认兼容
 
 ## 5. exec_timeout 承载（不实现终止）
 

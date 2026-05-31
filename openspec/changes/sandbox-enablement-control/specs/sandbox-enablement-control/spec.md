@@ -2,27 +2,27 @@
 
 ### Requirement: 全局三态 mode 控制代码执行能力
 
-平台 SHALL 提供全局沙箱 `mode`，取值 `off` / `selective` / `all`，默认 `all`。`mode=off` 时 `run_code` 工具 MUST NOT 注册（AI 不可见该能力）；`mode=selective` 时仅授权 agent 可用；`mode=all` 时默认所有 agent 可用。
+平台 SHALL 提供全局沙箱 `mode`，取值 `off` / `selective` / `all`，默认 `all`。两个 gate（全局 `mode=off` 与 agent 级 `code_execution=false`）MUST 统一在 agent 主循环现有的工具 schema 过滤点生效（即 `get_schemas()` + `check_tool_access` 同一处，与 `allowed_tools` 过滤共用一条路径）：被关闭的能力 MUST NOT 出现在该 agent 的工具 schema 中，从而 AI 不可见该能力。`mode=off` 时对所有 agent 隐藏 `run_code`；`mode=selective` 时仅授权 agent 的 schema 含 `run_code`；`mode=all` 时默认所有 agent 的 schema 含 `run_code`。判定 MUST 由单一纯函数依据生效 mode 与该 agent 的 `code_execution` 给出，schema 过滤点仅消费判定结果。
 
-#### Scenario: off 模式下工具不注册
+#### Scenario: off 模式下不进任何 agent 的 schema
 - **WHEN** 生效 mode 为 `off`
-- **THEN** 工具 schema 中不包含 `run_code`，AI 无从感知代码执行能力存在
+- **THEN** 任何 agent 的工具 schema 中都不包含 `run_code`，AI 无从感知代码执行能力存在
 
 #### Scenario: all 模式默认全员可用
 - **WHEN** 生效 mode 为 `all` 且某 agent 未显式声明 `code_execution`
-- **THEN** 该 agent 可调用 `run_code`
+- **THEN** 该 agent 的工具 schema 中包含 `run_code`，该 agent 可调用
 
 ### Requirement: agent 级 code_execution 开关
 
-agent 定义 SHALL 支持 `features.code_execution` 开关，取值真 / 假 / 未声明。`selective` 模式下仅 `code_execution` 为真的 agent 可用代码执行；`all` 模式下未声明视为可用、显式为假则关闭。判定 MUST 由单一纯函数依据 mode 与该开关给出，调用入口仅消费判定结果。
+agent 定义 SHALL 支持 `features.code_execution` 开关，取值真 / 假 / 未声明。`selective` 模式下仅 `code_execution` 为真的 agent 可用代码执行；`all` 模式下未声明视为可用、显式为假则关闭。该开关 MUST 与全局 `mode` 一同在 schema 过滤点生效——被关闭意味着 `run_code` 不出现在该 agent 的工具 schema 中，而非在调用入口返回拒绝文本。判定 MUST 由与全局 mode 共用的同一纯函数依据 mode 与该开关给出。
 
-#### Scenario: selective 模式仅授权 agent 可用
+#### Scenario: selective 模式仅授权 agent 的 schema 含 run_code
 - **WHEN** 生效 mode 为 `selective`，某 agent 未声明或声明 `code_execution=false`
-- **THEN** 该 agent 调用 `run_code` 被拒绝并被告知能力不可用，不进入沙箱执行
+- **THEN** 该 agent 的工具 schema 中不包含 `run_code`，AI 无从调用；声明 `code_execution=true` 的 agent 的 schema 中则包含
 
-#### Scenario: all 模式下 agent 显式关闭
+#### Scenario: all 模式下 agent 显式关闭不进其 schema
 - **WHEN** 生效 mode 为 `all`，某 agent 显式声明 `code_execution=false`
-- **THEN** 该 agent 调用 `run_code` 被拒绝；其它未关闭的 agent 不受影响
+- **THEN** 该 agent 的工具 schema 中不包含 `run_code`；其它未关闭的 agent 的 schema 不受影响、仍含 `run_code`
 
 ### Requirement: Docker 不可用时自动降级为 off
 
@@ -50,15 +50,15 @@ agent 存储 SHALL 在 agent 定义上提供一个 `features` 配置容器（JSO
 
 ### Requirement: run_code 调用可获取 agent 与 session 上下文
 
-工具调用链 SHALL 提供一条把当前 agent 标识 / agent features / session 标识从 agent 主循环经工具分发传递到 `run_code` 的上下文通道。`run_code` 的启用判定 MUST 依据该通道提供的 agent features，而非仅全局默认。
+工具调用链 SHALL 提供一条把当前 agent 标识 / agent features / session 标识从 agent 主循环经工具分发传递到 `run_code` 的上下文通道。该通道服务于沙箱**执行期**的上下文需求——SB2 的 scope `acquire` 需要 session_id / agent_name 才能定位/复用工作区，SB5 在执行时需要 agent features 才能注入 `sandbox_env`。该通道 MUST NOT 被用作启用 gate 的依据：启用判定已在 schema 过滤点完成（那里已知 agent features），抵达 `run_code` 的调用一律视为已通过 gate。
 
 #### Scenario: agent 上下文抵达 run_code
 - **WHEN** 某 agent 触发 `run_code` 工具调用
-- **THEN** `run_code` 能取得该 agent 的 features（含 `code_execution`），据此进行启用判定
+- **THEN** `run_code` 能取得该 agent 的标识 / features / session_id，供执行期（SB2 scope、SB5 env 注入）消费
 
 #### Scenario: 缺省上下文安全降级
 - **WHEN** 调用链未提供 agent 上下文（如无 agent 绑定的直接调用）
-- **THEN** 启用判定退回全局 mode 默认，不因缺上下文抛异常
+- **THEN** `run_code` 以缺省上下文执行、不因缺上下文抛异常
 
 ### Requirement: 沙箱客户端提供 Docker 可用性探测
 

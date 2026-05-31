@@ -10,6 +10,10 @@
 
 约束（CLAUDE.md）：禁止全局可变状态；新模块 import → 常量 → 数据类 → 函数；mypy strict；行长 100；TDD Hard Gate；测试 mock Docker CLI、不发真实 docker；不吞异常（清理失败要 log）；不引入未经讨论的新依赖（明确不引入调度器）。
 
+**部署前提（本 change 及整条沙箱轨的明确假设）**：**单个平台实例独占一个 Docker daemon**。即一台宿主上只有一个 fleetent 实例对该 Docker 创建/销毁 `sandbox-*` 容器，没有同伴实例共享同一 Docker 宿主。这是「启动期全删 `sandbox-*` 安全」成立的根本前提——基于此，启动期本进程尚未创建任何 `sandbox-*` 容器，则当前 Docker 中所有 `sandbox-*` 容器必然是本实例上次异常退出遗留的孤儿，全删不会伤及任何活跃容器。
+
+**明确不支持（未来工作）**：多实例 HA（多个 fleetent 实例共享同一 Docker 宿主）。在该拓扑下「启动期全删 `sandbox-*`」会误删同伴实例正在使用的活跃容器；且 `sandbox-agent-{name}`（SB2）的命名会跨实例撞名。要支持多实例共享 Docker，需要为容器名引入实例标识（如 `sandbox-{instance_id}-...`）并按实例标识过滤清理范围——超出本 change，列为未来工作。
+
 ## Goals / Non-Goals
 
 **Goals:**
@@ -20,7 +24,8 @@
 
 **Non-Goals:**
 - 不引入调度器、不做定期/周期清理（roadmap 暂缓）。
-- 不区分「活跃容器 vs 孤儿容器」做精细判断——启动期所有 `sandbox-*` 容器都是前次遗留（本进程尚未创建任何容器），全部回收即可。
+- 不区分「活跃容器 vs 孤儿容器」做精细判断——在「单实例独占 Docker」前提下（见 Context 部署前提），启动期所有 `sandbox-*` 容器都是前次遗留（本进程尚未创建任何容器），全部回收即可。
+- **不支持多实例 HA（多实例共享同一 Docker 宿主）**——该拓扑下全删会误删同伴实例的活跃容器、且 `sandbox-agent-{name}` 跨实例撞名，列为未来工作（见 Context 部署前提）。
 - 不实现 scope（SB2）、mode（SB3）、资源（SB4）、密钥（SB5）、trace（SB9）。
 
 ## Decisions
@@ -28,7 +33,7 @@
 ### D1：清理函数独立模块，复用 SandboxClient 的枚举与销毁
 新增 `src/fleetent/sandbox_cleanup.py`：
 - 引用单一前缀常量 `SANDBOX_NAME_PREFIX = "sandbox-"`——**定义在 `sandbox_client.py`**（已与 SB2 收口统一，见 Context），本模块 `from fleetent.sandbox_client import SANDBOX_NAME_PREFIX`，不在本模块或 manager 重复定义。
-- `cleanup_orphans(client: SandboxClient) -> int`：`names = await client.list_containers(SANDBOX_NAME_PREFIX)`；逐个 `await client.destroy_workspace(name)`；返回成功销毁数；Docker 不可用（`list_containers` 返回空）时返回 0。
+- `cleanup_orphans(client: SandboxClient) -> int`：`names = await client.list_containers(SANDBOX_NAME_PREFIX)`；逐个 `await client.destroy_workspace(name)`；返回成功销毁数；Docker 不可用（`list_containers` 返回空）时返回 0。完成后 log 清理计数与被删容器名列表供审计（写 trace 与 SB9 协调）。
 
 **为何**：清理是「枚举 + 销毁」的组合，枚举/销毁都是 Docker CLI 操作，归 `SandboxClient`；编排逻辑独立成 `sandbox_cleanup` 便于被 lifespan 与 admin 复用。前缀常量单一来源避免与 SB2 命名漂移。
 **Alternatives**：把清理塞进 `SandboxClient`——可行但清理是「跨容器编排」而非单容器操作，独立函数职责更清晰，也便于 mock 测试编排逻辑。
@@ -45,19 +50,21 @@
 
 ### D4：lifespan 启动期触发，失败不阻断
 `server.py` lifespan 启动段调用 `cleanup_orphans()`，包在 try/except 中：异常 log 警告后继续启动（与 sandbox.md「Docker 不可用 → 降级 → 平台就绪」一致）。
-**为何**：清理是尽力而为的资源回收，不应成为启动的硬依赖；与 SB3 的启动期 Docker 降级在同一启动段协调（先探测 Docker → 降级 mode → 若可用则清理孤儿）。
-**Open**：清理与 SB3 Docker 探测的先后/合并——建议「探测一次，结果同时用于 mode 降级与是否执行清理」，避免重复探测（见 Open Questions）。
+**为何**：清理是尽力而为的资源回收，不应成为启动的硬依赖；与 SB3 的启动期 Docker 降级在同一启动段协调。
+**已采纳**：与 SB3 Docker 探测**合并为一次探测**——启动期只探测一次 Docker 可用性，结果同时用于 SB3 的 mode 降级与本 change 是否执行清理（可用才清理，不可用则跳过且 SB3 降级 mode）。避免重复子进程调用，亦保证清理与降级对同一探测结果一致（见 Open Questions）。
+**审计**：`cleanup_orphans` 至少 log 清理计数与被删容器名列表，供运维审计/排障；写入 trace 的形态与 SB9 协调。
 
 ## Risks / Trade-offs
 
 - [误删运维自己的非 fleetent 容器] → 严格 `sandbox-` 前缀 + Python 侧 `startswith` 二次校验；spec 用 scenario 钉死「非前缀容器不被删」。
-- [启动期清理删掉本进程稍后要用的容器] → 启动期本进程尚未创建任何 `sandbox-*` 容器，所有此前缀容器都是遗留孤儿，全删安全；SB2 的活跃容器在启动后才创建。
+- [启动期清理删掉本进程稍后要用的容器] → 在「单实例独占 Docker」前提下（见 Context 部署前提），启动期本进程尚未创建任何 `sandbox-*` 容器，所有此前缀容器都是本实例前次遗留的孤儿，全删安全；SB2 的活跃容器在启动后才创建。
+- [多实例共享同一 Docker 宿主时误删同伴实例活跃容器] → 本 change 不支持该拓扑（见 Non-Goals 与部署前提）；前提即「单实例独占 Docker」，多实例 HA 列为未来工作（需实例标识隔离命名与清理范围）。
 - [Docker 不可用时清理报错阻断启动] → `list_containers` 返回空、`cleanup_orphans` 返回 0、lifespan try/except 兜底；spec 覆盖「Docker 不可用安全跳过」。
 - [前缀常量与 SB2 命名规则漂移] → 单一常量来源（SB2 导出 / 本模块定义二选一，落地时统一），两处引用同一常量。
 
 ## Open Questions
 
 - ~~前缀常量归属~~ **已定**：定义在最底层的 `sandbox_client.py` 供 SB2/SB8 import，避免循环依赖（与 SB2 design 一致收口）。
-- 与 SB3 启动期 Docker 探测合并：探测一次结果复用（可用才清理），还是各自独立探测？建议合并以省一次子进程调用。
+- ~~与 SB3 启动期 Docker 探测合并~~ **已采纳合并**：启动期**只探测一次** Docker 可用性，探测结果**同时用于** SB3 的 mode 降级与本 change 是否执行清理——Docker 可用才执行 `cleanup_orphans`，不可用则跳过清理（同时 SB3 降级 mode）。省去重复子进程调用，且清理与降级对同一探测结果保持一致。落地接线见 tasks §4.1（lifespan 中复用 SB3 探测结果）。
+- ~~清理是否记录被删容器供审计~~ **已定**：清理至少 log **计数 + 被删容器名列表**，便于运维审计与排障。写入 trace 的形态与 SB9 协调（SB9 落地后将清理记录纳入 trace）。
 - 按需触发是否需要 admin CLI 子命令（如 `fleetent-admin sandbox-cleanup`）？本 change 提供函数入口，CLI 暴露可作为 SB8 的可选收尾或独立小改动。
-- 清理是否记录每个被删容器的名称到日志/trace 供审计？（建议至少 log 计数与名称列表；写 trace 与 SB9 协调）

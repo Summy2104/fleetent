@@ -1,6 +1,6 @@
 ## Context
 
-`scan()`（skill_registry.py 行 31-56）：解析 `skills_dir`（默认环境变量 `MINI_AGENT_SKILLS_DIR`，见 skill_registry.py:34，或 `skills`）→ `_index.clear()` → `glob("*/SKILL.md")` 逐个解析填充模块级 `_index`。它在 FastAPI lifespan 启动时跑一次（`server.py` 行 68），CLI 路径 `run_sync()` 每次跑（`agent_loop.py` 行 408 的 `scan_skills()`；`run()` 行 234 不扫描、不注入 Skill）。HTTP 服务进程长驻，启动后 `_index` 不再更新——除非重启。
+`scan()`（skill_registry.py 行 38）：解析 `skills_dir`（默认环境变量 `FLEETENT_SKILLS_DIR`，见 skill_registry.py:48，或 `skills`）→ `_index.clear()`（行 49，**就地清空**）→ 对 **builtin（`BUILTIN_SKILLS_DIR`）+ 用户 `skills/` 两个源** 各 `rglob("SKILL.md")` 逐个解析填充模块级 `_index`。它在 FastAPI lifespan 启动时跑一次（`server.py` 行 68），CLI 路径 `run_sync()` 每次跑（`agent_loop.py` 行 408 的 `scan_skills()`；`run()` 行 234 不扫描、不注入 Skill）。HTTP 服务进程长驻，启动后 `_index` 不再更新——除非重启。
 
 **统一 apply / 归档序**（Track G 全局决策）：本轨顺序 SK4（本 change）→ SK5 → SK1 → SK3 → SK6，SK4 最先实施。本 change 抽出的统一构建逻辑 `_build_index` 是后续 SK5（审计闸门接在构建逻辑内）的承载点；本 capability 为纯 ADDED。
 
@@ -31,6 +31,7 @@ session_mgr 的原子写（`.json.tmp → rename`）确立了项目「构建完�
 
 ### D1：抽出纯构建逻辑 `_build_index(skills_dir) -> dict[str, SkillEntry]`
 把 `scan()` 中「遍历目录 + 解析 frontmatter + 组装 `SkillEntry`」的逻辑抽成一个**不触碰全局 `_index`** 的纯构建函数，返回一个全新的 `dict[str, SkillEntry]`。`scan()`（启动/CLI）与 `reload()`（运行期）都调用它，区别仅在如何把结果落到全局索引。
+**须覆盖两个源**：`scan()` 现扫 **builtin（`BUILTIN_SKILLS_DIR`）+ 用户 `skills/` 两个源**（行 50-51 各调一次 `_scan_dir`），`_build_index(skills_dir)` 必须保持同一覆盖面——内部对 builtin 与用户目录各扫一遍、合并进同一个新 dict（同名冲突沿用现有 SK8 path-sort 策略），不能只认 `skills_dir` 一个源。语义：`_build_index(d)` 返回的 dict 等价于「`scan(d)` 后的 `_index` 内容」，只是落在新 dict 而非全局。
 **为何**：构建与「发布到全局」解耦后，重扫可以先安全地构建好新索引，再决定是否替换；消除 `clear()+填充` 的就地耦合，是原子切换与失败保留的前提。
 **Alternatives**：直接在 `scan()` 里加 `reload` 标志走不同分支——被否，就地 `clear()` 仍在路径上、难以同时满足「无半空窗口」「失败保留旧索引」。
 
@@ -39,6 +40,7 @@ session_mgr 的原子写（`.json.tmp → rename`）确立了项目「构建完�
 **为何**：Python 模块级名称的整体重绑定是原子的——任一读取要么看到旧索引、要么看到新索引，绝不会看到半空中间态。这满足「重扫期间继续用旧索引、完成后原子切换」。
 **Alternatives**：加锁保护 `_index` 的逐项更新——被否，引入并发复杂度且仍有半空窗口；原子整体替换更简单且天然无窗口。
 **注**：读取方需通过「访问模块级当前索引引用」而非在函数定义时捕获旧引用，确保替换后读到新索引；实现首步核实各读取函数对 `_index` 的引用方式（见 Open Questions）。
+**实现注记（原子替换安全性）**：已核实当前无任何模块 `from skill_registry import _index`（各调用方都 import `match`/`load`/`scan` 等函数，经函数间接访问模块级 `_index`），因此整体重绑定模块级名称对所有读取方即时可见、不存在外部持有旧引用的别名——原子整体替换安全。据此，`reload()` 的替换 MUST 用 `global _index; _index = new_index`（**重绑定模块全局名**），而非 `_index.clear()+update()` 之类的就地 mutation——后者会重新引入半空窗口、丧失失败保留旧索引的能力。
 
 ### D3：重扫失败保留旧索引 + 结构化告警
 `reload()` 在 `_build_index()` 抛错或目录不可用时：**不替换**模块级索引（旧索引原样保留），记录一条结构化 warning（含 skills_dir 与失败原因），返回失败结果摘要。服务继续用旧 Skill，不降级为空。
@@ -58,7 +60,7 @@ Skill 注入发生在请求处理早期（`run_sync()` 行 408-415 的 `scan→m
 ## Risks / Trade-offs
 
 - [`load()` 读盘时该 SKILL.md 被删/改] → `load()` 按 `path` 现读文件，重扫替换的是索引引用而非文件；极端竞态（in-flight 请求 load 时文件已被删）属文件级而非索引级问题，本 change 不保证文件原子性，沿用现有 `load` 行为（读失败按既有异常处理，不吞）。
-- [读取函数若在定义时捕获了旧 `_index` 引用，原子替换不生效] → 实现首步核实并确保所有读取经「当前模块级索引」访问；加测试断言 `reload` 后 `match`/`list_skills` 反映新内容。
+- [读取函数若在定义时捕获了旧 `_index` 引用，原子替换不生效] → 实现首步核实并确保所有读取经「当前模块级索引」访问；加测试断言 `reload` 后 `match`/`list_skills` 反映新内容。已核实无任何模块 `from skill_registry import _index`（全 import `match`/`load`/`scan` 函数）→ 不存在外部持有旧索引别名，重绑定模块全局名（`global _index; _index = new`）对所有读取方即时可见，原子整体替换安全。
 - [全量重扫成本] → Skill 数量小、重扫是低频管理操作，全量重扫可接受；不引入增量 diff 的复杂度。
 - [并发重扫] → 两次 `reload()` 并发各自构建新索引、各自原子替换，最后赢者生效，无半空；如需串行化可后续加锁，本次接受「最后写赢」语义。
 

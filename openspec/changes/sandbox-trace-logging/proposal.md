@@ -6,7 +6,9 @@
 
 ## What Changes
 
-- 在 `eval_logger.py` 新增**沙箱执行 trace 出口** `log_sandbox_exec(...)`：append 一条 JSONL 记录，字段含执行时长（秒）、退出码、stdout/stderr 字节大小、使用的沙箱 scope 类型（`session`/`agent`，由 SB2 提供；SB2 未落地前可记 `None`/默认）、可选 agent / user 标识。
+- 在 `eval_logger.py` 新增**沙箱执行 trace 出口** `log_sandbox_exec(...)`：append 一条 JSONL 记录，字段含执行时长（秒）、退出码、stdout/stderr 字节大小、使用的沙箱 scope 类型（`session`/`agent`，由 SB2 提供；SB2 未落地前可记 `None`/默认）、可选 agent / user 标识，并带 `kind: "sandbox_exec"` 类型标记。
+- **统一 trace taxonomy**：趁当前**没有任何程序消费 traces.jsonl**（只写不读），把 `kind` 类型标记**追加**到既有 `log_run`（`kind: "agent_run"`）与 `log`（`kind: "im_message"`）记录上，为未来 traces 入库/eval 工具提供统一判别维度。纯增量、零风险——既有调用方与字段语义不变。
+- **合并重复路径常量**：`eval_logger` 里 `_LOG_PATH`（`log_run` 用）与 `TRACE_PATH`（`log` 用）是两个常量指向同一文件 `data/traces.jsonl`，合并为单一常量，消除「测试只 monkeypatch 一个、另一个漏隔离」的漏洞；`log_sandbox_exec` 复用该统一常量。
 - 改造 `run_code` 工具：执行前后测量耗时，执行后调用 `log_sandbox_exec` 写入 trace；trace 写入失败 MUST NOT 影响代码执行结果返回（trace 是旁路观测，不阻断主流程）。
 - trace **不记录代码原文与完整输出内容**（避免日志膨胀与敏感信息落盘），只记录大小与元数据；与 `eval_logger` 既有「不写 base64 图片原文」的克制原则一致。
 
@@ -21,8 +23,8 @@
 ## Impact
 
 - **代码**：
-  - 修改 `src/fleetent/eval_logger.py`：新增 `log_sandbox_exec(elapsed_s, exit_code, stdout_bytes, stderr_bytes, sandbox_scope=None, agent_name=None, user_id=None)`，append 到既有 `_LOG_PATH` JSONL（复用 `_LOG_PATH.parent.mkdir` + append 写法），记录类型标记（如 `kind: "sandbox_exec"`）便于区分。
+  - 修改 `src/fleetent/eval_logger.py`：①把 `_LOG_PATH`（行 12）与 `TRACE_PATH`（行 13）两个指向 `data/traces.jsonl` 的常量合并为单一常量；②给 `log_run` 记录追加 `kind: "agent_run"`、给 `log` 记录追加 `kind: "im_message"`；③新增 `log_sandbox_exec(elapsed_s, exit_code, stdout_bytes, stderr_bytes, sandbox_scope=None, agent_name=None, user_id=None)`，append 到统一常量指向的 JSONL（复用 `mkdir` + append 写法），带 `kind: "sandbox_exec"` 标记。
   - 修改 `src/fleetent/tools.py`：`run_code` 用 `time.monotonic()` 测耗时，执行后计算输出字节大小并调用 `log_sandbox_exec`；写入包在 try/except，失败 log 警告不影响返回。
 - **配置**：无新增配置。
-- **测试**：扩充 `tests/test_eval_logger.py` 覆盖 `log_sandbox_exec` 写入字段与类型标记、可选字段省略；扩充 `tests/test_tools.py`（或对应 run_code 测试）断言执行后写入 trace、trace 失败不影响返回。`_LOG_PATH` `monkeypatch` 到 tmp_path 隔离，Docker/SandboxClient mock。
-- **不影响**：`log_run` / `log` 既有 trace 行为与字段；SB2 scope、SB3 mode、SB4 资源、SB5 密钥、SB8 清理；不引入新依赖。SB2 未落地时 `sandbox_scope` 记 `None`，落地后由 SB2 提供真实 scope。
+- **测试**：扩充 `tests/test_eval_logger.py` 覆盖 `log_sandbox_exec` 写入字段与类型标记、可选字段省略，以及 `log_run`/`log` 新增 `kind` 字段且既有字段向后兼容；扩充 `tests/test_tools.py`（或对应 run_code 测试）断言执行后写入 trace、trace 失败不影响返回。trace 路径 `monkeypatch` 到 tmp_path 隔离（合并为单一常量后只需 monkeypatch 一处），Docker/SandboxClient mock。
+- **不影响**：`log_run` / `log` 既有字段与写入语义（仅**追加** `kind`，不改动或删除任何既有字段）；SB2 scope、SB3 mode、SB4 资源、SB5 密钥、SB8 清理；不引入新依赖。SB2 未落地时 `sandbox_scope` 记 `None`，落地后由 SB2 提供真实 scope。
