@@ -13,7 +13,7 @@ from openai.types.chat import ChatCompletionChunk
 
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent import model_router
-from fleetent.agent_policy import check_skill_access, check_tool_access
+from fleetent.agent_policy import check_tool_access
 from fleetent.context_mgr import maybe_compress
 from fleetent.error_classifier import classify
 from fleetent.eval_logger import log_run
@@ -23,8 +23,7 @@ from fleetent.model_router import RouteConfig, RouteOverride, get_async_client_a
 from fleetent.multimodal import build_message_with_images, has_image_block
 from fleetent.permission_gate import _default_gate
 from fleetent.provider_health import ProviderHealthCache, get_health_cache
-from fleetent.skill_registry import load as load_skill
-from fleetent.skill_registry import match as match_skill
+from fleetent.skill_registry import available_skills_prompt
 from fleetent.skill_registry import scan as scan_skills
 from fleetent.sub_agent import SubAgentExecutor
 from fleetent.termination import (
@@ -228,45 +227,26 @@ def _accumulate_repairs(total: dict[str, int], report: HygieneReport) -> None:
         total[kind.value] = total.get(kind.value, 0) + count
 
 
-def _matched_skill_content(
-    user_input: str,
-    allowed_skills: list[str] | None,
-    blocked_skills: list[str] | None,
-) -> str | None:
-    """Match a skill for `user_input`, then gate it by the agent's binding.
-
-    The keyword `match` still runs over the full index; the per-agent filter is
-    applied between match and load so a skill outside the agent's whitelist (or
-    inside its blocklist) is never loaded or injected. opt-in: when
-    `allowed_skills is None` (agent declared no whitelist), nothing is injected.
-    """
-    matched = match_skill(user_input)
-    if matched is None:
-        return None
-    if not check_skill_access(matched, allowed_skills, blocked_skills):
-        return None
-    return load_skill(matched)
-
-
 def _assemble_prompt(
     base_system: str,
+    skills_catalog: str,
     memory_ctx: str,
-    skill_content: str | None,
     user_msg: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Order messages stable→variable so the auto prefix cache can hit (D2).
 
-    The base system prompt is the first, byte-stable message (the cacheable
-    prefix). Per-request/per-turn variable content (memory injection, matched
-    skill) is carried in a *separate* second system message after it, so changing
-    memory/skill never rewrites the base prefix. When there is no variable
-    content the second message is omitted (prefix stays maximal). The set of
-    content delivered to the model is unchanged — only its position moves.
+    The cacheable prefix is the first system message: the base system prompt plus
+    the <available_skills> catalog (already including its scan instruction), which
+    is stable across requests — it changes only when the deployment's skill set
+    does. Per-request variable content (memory injection) is carried in a separate
+    second system message after it, so changing memory never rewrites the base
+    prefix. Either variable section is omitted when empty so the prefix stays
+    maximal.
     """
-    messages: list[dict[str, Any]] = [{"role": "system", "content": base_system}]
-    variable_parts = [p for p in (memory_ctx, skill_content) if p]
-    if variable_parts:
-        messages.append({"role": "system", "content": "\n\n".join(variable_parts)})
+    base = f"{base_system}\n\n{skills_catalog}" if skills_catalog else base_system
+    messages: list[dict[str, Any]] = [{"role": "system", "content": base}]
+    if memory_ctx:
+        messages.append({"role": "system", "content": memory_ctx})
     messages.append(user_msg)
     return messages
 
@@ -303,8 +283,6 @@ async def run(
     is_sub_agent: bool = False,
     reply_func: ReplyFunc | None = None,
     allowed_tools: list[str] | None = None,
-    allowed_skills: list[str] | None = None,
-    blocked_skills: list[str] | None = None,
     agent_name: str | None = None,
     max_turns: int | None = None,
     max_consecutive_failures: int | None = None,
@@ -315,12 +293,10 @@ async def run(
     When is_sub_agent=True the sub_agent tool is excluded from the tool schema
     so child agents cannot spawn further sub-agents.
     When allowed_tools is set, only matching tools (fnmatch patterns) are exposed.
-    allowed_skills / blocked_skills accompany allowed_tools for callers that
-    build messages themselves; run() receives prebuilt messages and does not
-    re-run skill injection here — the binding is applied by the message-building
-    entry points (run_sync / run_stream / im_gateway), which is the sole match→
-    load site. The params are accepted so the agent binding can travel the same
-    path as allowed_tools without callers special-casing run().
+    Skills are surfaced to the model as an <available_skills> catalog inside the
+    prebuilt system prompt; run() does no skill injection itself — the catalog is
+    assembled by the message-building entry points (run_sync / run_stream /
+    im_gateway) and the model loads full content on demand via the read_skill tool.
     max_turns / max_consecutive_failures override the deployment defaults.
     force_model forces this run's LLM calls onto a specific model via a
     request-level routing override (MR1); None keeps task_type routing unchanged.
@@ -480,23 +456,19 @@ def run_sync(
     user_input: str,
     user_id: str = "default",
     system_prompt: str = _SYSTEM,
-    allowed_skills: list[str] | None = None,
-    blocked_skills: list[str] | None = None,
 ) -> str:
     """Synchronous wrapper around run() for CLI use.
 
-    opt-in skill binding: the CLI has no agent binding, so allowed_skills
-    defaults to None and no skill is injected (behavior change from the prior
-    global injection). Mitigation via a configured default agent is an Open
-    Question (design D5), not implemented here.
+    Skills are offered as an <available_skills> catalog in the system prompt; the
+    model loads any it needs via the read_skill tool. The CLI scans skills on each
+    call so freshly added skills are picked up.
     """
-
     scan_skills()
     memory_ctx = load_memories(user_id=user_id)
-    skill_content = _matched_skill_content(user_input, allowed_skills, blocked_skills)
+    skills_catalog = available_skills_prompt()
 
     messages = _assemble_prompt(
-        system_prompt, memory_ctx, skill_content, {"role": "user", "content": user_input}
+        system_prompt, skills_catalog, memory_ctx, {"role": "user", "content": user_input}
     )
 
     return asyncio.run(run(messages, user_id=user_id, system_prompt=system_prompt))
@@ -507,8 +479,6 @@ async def run_stream(
     user_id: str = "default",
     system_prompt: str = _SYSTEM,
     allowed_tools: list[str] | None = None,
-    allowed_skills: list[str] | None = None,
-    blocked_skills: list[str] | None = None,
     agent_name: str | None = None,
     max_turns: int | None = None,
     max_consecutive_failures: int | None = None,
@@ -528,13 +498,13 @@ async def run_stream(
     performed on the streaming path, so approval_rejected does not apply here.
     """
     memory_ctx = load_memories(user_id=user_id)
-    skill_content = _matched_skill_content(user_input, allowed_skills, blocked_skills)
+    skills_catalog = available_skills_prompt()
 
     if images:
         user_msg = build_message_with_images(user_input, images)
     else:
         user_msg = {"role": "user", "content": user_input}
-    messages: list[Any] = _assemble_prompt(system_prompt, memory_ctx, skill_content, user_msg)
+    messages: list[Any] = _assemble_prompt(system_prompt, skills_catalog, memory_ctx, user_msg)
 
     # Route to vision when images are present; raises before any LLM call if
     # images are present but no vision route is configured (D6, option A).

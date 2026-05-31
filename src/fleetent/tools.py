@@ -46,6 +46,21 @@ def calculate(expression: str) -> str:
 
 
 @tool
+def read_skill(name: str) -> str:
+    """Read a skill's full instructions by name (from the <available_skills> list).
+
+    When a skill in the available_skills catalog matches the task, call this with
+    its <name> to load the full SKILL.md, then follow it. Returns an error string
+    if no skill with that name is registered.
+    """
+    from fleetent import skill_registry
+
+    if name not in skill_registry._index:
+        return f"error: no skill named {name!r}"
+    return skill_registry.load(name)
+
+
+@tool
 def read_file(path: str) -> str:
     """Read a local file and return its contents (first 2000 chars)."""
     try:

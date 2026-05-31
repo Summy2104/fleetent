@@ -108,14 +108,14 @@
 
 **实现:** RouteConfig 加 `params: dict[str,Any]=field(default_factory=dict)`、RouteOverride 加 `params: dict|None=None`;`_apply_override` 对 params 深合并 `{**cfg.params, **override.params}`(override None 沿用 base);`_call/_stream_with_fallback` 的 create 追加 `**cfg.params`;max_tokens 仍一等字段。通用 dict 非枚举字段。
 
-**重复 kwarg 守卫(双层):** 模块级 `_RESERVED_PARAM_KEYS={max_tokens,model,messages,tools}`,`_apply_override` 合并后剔除这些键(防运行时 override.params 误带保留键致 create() 重复 kwarg TypeError);单测固化内置 ROUTES 各 entry params 不含保留键。
+**重复 kwarg 守卫(双层):** 模块级 `_RESERVED_PARAM_KEYS={max_tokens,model,messages,tools}`,`_apply_override` 合并后**校验**这些键;单测固化内置 ROUTES 各 entry params 不含保留键。
 
 **自解冲突:**
 1. mock_client 的 cfg 是 MagicMock → `**MagicMock().params` 安全展开为空,既有测试零影响;新增透传测试用真实 RouteConfig。
-2. 运行时剔除保留键(而非仅校验报错):override.params 是用户输入风险更高,剔除既挡 TypeError 又不影响合法 params。
 
 **影响:** 576 passed;mypy 67=基线(MR3 的 provider_health 贡献 1),无新增模式。解锁 model-routes-externalize。
-**需 zy 核实:** 保留键运行时剔除(而非报错)的策略。
+
+**✅ zy review 决定(2026-05-31,改原"运行时剔除"为"报错"):** 保留键(max_tokens/model/messages/tools)出现在 params 里 → `_apply_override` **raise ValueError**(含具体键名),不再静默剔除——让用户知道配置错了、该键不生效,而非被悄悄忽略。校验对合并后的 params 生效(同时覆盖 override.params 与 routes.yaml 的 cfg.params)。测试 `test_apply_override_reserved_key_in_params_raises` 替换原 strip 测试。732 passed,ruff/mypy 干净。
 
 ## model-routes-externalize — feat/model-routes-externalize
 
@@ -123,12 +123,13 @@
 
 **文件缺失/损坏:** 缺失/空 → 用内置默认(开箱即用,不报错);YAML 解析失败/顶层非 mapping/缺必填/类型非法/内联 api_key → `raise ValueError`(fail loud,含路径+route 名),不静默回落。
 
-**加载时机:** **每次调用 `get_*` 都 `_load_routes()` 读盘**——为让测试 monkeypatch ROUTES_PATH 在调用前生效。
-
 **自解冲突:** 既有测试用 `monkeypatch.setitem(ROUTES,...)` → 保留 ROUTES 为 in-memory 有效表作 _load_routes() 合并基,无文件时返回 dict(ROUTES),setitem 仍被尊重,既满足"来源改 _load_routes()"又零回归。
 
 **影响:** 596 passed;mypy model_router 0 错。
-**⚠️ 需 zy 核实/后续优化:** **每次 LLM 调用都读盘 YAML**(为可测试性选每次加载)——生产高频下建议加可注入缓存(design Risk 已记为后续优化点)。fail-loud vs 缺失回落的边界是否认可。
+
+**✅ zy review 决定(2026-05-31):**
+1. **加缓存(原"每次读盘"已修)**:拆出 `_load_file_routes()`,**只缓存昂贵的文件解析**(磁盘读 + YAML parse + 校验),按 `(path, mtime, size)` 键控;`_load_routes()` 仍每次 `dict(ROUTES)` 合并 in-memory 表(便宜、且让 `setitem`/运行时改 ROUTES 仍可见)。稳态热路径(文件未变)跳过磁盘+parse;改路径/改文件内容(mtime 或 size 变)→ 自动重解析。`monkeypatch ROUTES_PATH`(各测试独立 tmp 路径)天然命 miss 重解析,可测试性不受损。新增测试 `test_load_routes_caches_file_parse_until_mtime_changes`(缓存命中)+ `test_load_routes_in_memory_routes_edits_stay_visible_through_cache`(合并仍每次做)。734 passed,ruff/mypy 干净。
+2. **fail-loud 边界认可**:文件不存在=回落内置默认;文件存在但坏(YAML 错/顶层非 mapping/缺必填/类型非法/内联 api_key)=raise。
 
 ## skill-yaml-frontmatter (SK2) — feat/skill-yaml-frontmatter
 
@@ -140,7 +141,13 @@
 3. env 变量名 MINI_AGENT_SKILLS_DIR 未改(属 SK9 范畴,不越界)。
 
 **影响:** 610 passed;skill_registry mypy 0 错。解锁 SK7/SK8/SK9/builtin-skills/agent-skill-binding。
-**需 zy 核实:** SkillEntry 结构(对外契约保持);失败跳过 + warning 策略。
+
+**✅ zy review 决定(2026-05-31):**
+1. **①SkillEntry dataclass、②用户 skill 解析失败→跳过+告警:均认可保持**(理由见对话:tuple 6 字段已撑不住、dataclass 对齐仓库风格;跳过+告警是故障隔离唯一正解,静默吞=不可调试、整体崩=爆炸半径灾难)。warning 现额外带 `source`(builtin/user)字段,内置 skill 失败也可见(内置不 fail-loud、统一跳过)。
+2. **增强已实现:加载失败汇总**。新增模块级 `_load_errors` + 公开 `load_errors()->[{path,reason,source}]`(供 admin/health 查询,始终可查、不经日志);scan 结束**仅在有失败时**打一条 `skill_scan_complete`{loaded,failed} 汇总(warning 级)。新增测试:`test_load_errors_records_each_failed_skill`/`test_load_errors_reset_on_each_scan`/`test_scan_emits_summary_with_loaded_and_failed_counts`/`test_scan_clean_emits_no_summary_log`。738 passed。
+
+**⚠️⚠️ review 中发现的真 bug(标记给 zy,共享日志基建,疑似常乐 observability 域):** `config.configure_logging`(config.py:38)把 `structlog.stdlib.add_logger_name`(读 `logger.name`)与 `PrintLoggerFactory()`(产出的 PrintLogger **无** `.name`)配在一起——**任何一条日志走这套配置都会 `AttributeError: 'PrintLogger' object has no attribute 'name'`**。旧代码因 scan() 仅在失败时才 log、服务正常启动从不 log,坑一直隐藏;一度因我加无条件汇总日志引爆 53 个 server 测试(已改"仅失败时 log"规避,零新增风险——剩余风险与既有 logger.warning 相同)。**建议后续修 configure_logging:add_logger_name 需配 stdlib LoggerFactory,或换 PrintLogger 兼容的处理器。** 非本次 SK2 范围,未擅自动。
+**✅ 已在 S1(16/20)修复(2026-05-31):** configure_logging 删除 add_logger_name(它与 PrintLoggerFactory 不兼容),根因消除——生产任何日志不再崩。详见 S1 节第 4 点。
 
 ## skill-nested-scan (SK7) — feat/skill-nested-scan
 
@@ -189,7 +196,20 @@
 **自解冲突:** get_agent_for_channel 别名 a/ca 冲突→改 ca_a;旧表无新列→_ensure_skill_columns ADD COLUMN 兜底;ruff SIM103 内联。
 
 **影响:** 658 passed,迁移测试 5 passed,mypy 68=基线。
-**⚠️ 需 zy + 张亮 核实:** agent_store 字段命名/语义/迁移;opt-in 对 CLI 的行为变更(默认 agent 白名单缓解未做)。
+
+**✅✅ zy review 重大决定(2026-05-31)——整个 agent-skill-binding 推翻重做为 openclaw 式 read-on-demand,删除全部跨张亮 DB 改动:**
+
+关键认知(扭转设计):**skill 不是授权边界,tool 才是。** skill 只是指令文档,模型读了也越不过 `allowed_tools` + 审批那道真正的墙。给 skill 做"DB 表 + 硬 allowlist"是把低风险指令当高风险能力治理,过度设计。
+
+新设计(参考 /opt/gopath/src/github.com/openclaw/openclaw):
+- **注入模型**:框架把已启用 skill 渲染成 `<available_skills>` 清单(name/description/location)+ `## Skills` mandatory 指令,注入 system prompt 的**稳定前缀区**(对 prompt-cache 友好);模型按需调新增 `read_skill(name)` 工具读全文。**放弃关键词自动匹配 + 全文自动注入。**
+- **绑定**:用哪些 skill 由 admin 在 agent 的 `system_prompt` 里 prose 圈定;首版目录=全部已启用 skill(减 `disabled_skills`);结构化逐 agent 收窄留后续(取决于张亮 agent 定义 DB-vs-配置)。
+
+落地(在 fix/wave1-review-corrections,TDD):新增 `skill_registry.available_skills_prompt()`(+3 测试)、`tools.read_skill`(+2 测试);`agent_loop._assemble_prompt` 改注入目录(稳定前缀),删 `_matched_skill_content`/match/load/allowed_skills/blocked_skills,prompt-cache stream/sync 测试重写;删 `agent_policy.check_skill_access`;`normalizer` 删关键词注入改注入目录,**顺带修了 12/20 prompt-cache 标记的"normalizer memory/skill 在 system 最前 缓存杀手"**(现按 base+catalog 稳定→memory 变量排序);**回退张亮 agent_store**(删字段/`_dump_opt`/`_load_opt`/create_agent 参数/`_ensure_skill_columns`/CREATE 列)、**删迁移 002**、改 test_agent_store/test_migrations、删 test_skill_policy.py + test_agent_loop_skill_binding.py。
+
+净效果:**跨张亮 governance 纠葛归零、代码更少、与 tool/prompt-cache 架构对齐**。721 passed,ruff 净(仅既有 baseline),mypy 71=71 零新增。
+**需 zy 核实:** 首版目录=全部已启用 skill(逐 agent 结构化收窄留后续);read_skill 不 gate 禁用(与已批准"load() 不受禁用约束"一致,目录只列启用项)。
+**已无需张亮:** DB 表/迁移改动全部回退,不再触碰 governance 域。
 
 ## session-ttl-cleanup (S1) — feat/session-ttl-cleanup
 
@@ -202,6 +222,13 @@
 
 **影响:** 670 passed;mypy 69=68+S1 的 _default_config Settings()(既有模式非新)。
 **⚠️ 需 zy 核实:** save() 对带 `/` session_id 不建子目录的既有 bug(本次未修,建议后续修);TTL 触发器后续接张亮 cron。
+
+**✅ zy review 决定(2026-05-31,在 fix/wave1-review-corrections,TDD):**
+1. **修了 save() 的 `/` bug**:`save()` 改为 `path.parent.mkdir(parents=True)`(不再只 mkdir SESSIONS_DIR),含 `/` 的 session_id 正常落子目录。新增 `test_save_and_load_roundtrip_slash_session_id`。
+2. **TTL 默认 30 天:认可。**
+3. **触发器改"从内置操作"、不依赖张亮 cron**:新增 `maybe_run_cleanup(*, _now=None)`——save() 末尾**故障隔离**调用它,**时间门控**(config 加 `session_cleanup_interval_seconds=3600`,经 `_default_config`),每 interval 最多跑一次全量 rglob,清理作为"写 session"的副作用发生。不动 server lifespan(避免 test_server 未隔离 SESSIONS_DIR 删真实数据)。新增 3 个门控测试 + save 故障隔离测试;test_session_mgr autouse 默认把门 GATE 关闭(避免触发器误删测试的人工老化 fixture),触发器测试自行开门。
+4. **⚠️⚠️ 顺带修了 SK2(10/20)标记的 configure_logging 真 bug**:`config.configure_logging` 删掉 `structlog.stdlib.add_logger_name`(它读 `logger.name`,而 PrintLoggerFactory 的 PrintLogger 无 `.name`→**每条日志 emit 时 AttributeError**)。这是真实生产 bug(configure_logging 后任何日志都崩),之前因 happy path 不 log 而潜伏;本次 save()→cleanup 的 `logger.info` 引爆了它(19 个 integration/server 测试),已从根上修复。新增 `test_configure_logging_then_log_does_not_raise`。**需常乐(observability)知会**:已删 add_logger_name,日志输出不再带 logger-name 字段(要的话需配 stdlib LoggerFactory)。
+影响:727 passed,ruff/mypy 71=71 零新增。
 
 ## session-metadata-index (S2) — feat/session-metadata-index
 
@@ -218,6 +245,10 @@
 **影响:** 680 passed;session_index mypy 0 错。
 **⚠️ 需 zy 核实:** **sqlite3 vs aiosqlite 偏离**(CLAUDE.md 不符现实);元数据要完整需 agent_loop/normalizer 透传 user_id/agent_name(逐步补)。
 
+**✅ zy review 决定(2026-05-31):**
+1. **保持 sqlite3**(匹配全仓现状,不引入 aiosqlite 依赖)。**已修正 CLAUDE.md**:原"用 aiosqlite 直接写 SQL"→"用标准库 sqlite3 直接写 SQL(同步;全仓一致);SQLAlchemy 仅供 alembic 迁移,不作 ORM;aiosqlite 未引入"。后续开发/AI 不再被错误指引误导。
+2. **元数据渐进补齐认可**:user_id/agent_name 由 agent_loop/normalizer 逐步透传。
+
 ## session-disk-management (S4) — feat/session-disk-management
 
 **实现:** `enforce_capacity(max_total_bytes=None,max_count=None)`:rglob 扫描收集 (session_id,size,mtime)、跳过 .json.tmp、带 `/` 还原;两维度**或触发、且停止**(is_over_capacity 任一超→True,while 循环淘汰至两者皆不超);按 mtime 升序最旧优先删;维度 ≤0 关闭(不触发不停止),两维都关→返回空;删除容错(失败 log.warning 跳过、扣减累计防级联超删);触发原因+淘汰数汇总日志。config 加 session_max_total_mb=1024/session_max_count=10000;扩展 S1 的 _default_config(保留 ttl_seconds + 加 max_total_bytes/max_count)。纯原语,触发器留后续。
@@ -229,6 +260,8 @@
 **影响:** 701 passed;mypy 69 无新模式。Session 轨(S1/S2/S4)全完。
 **需 zy 核实:** 1024MB/10000 默认;容错的扣减语义。触发器(同 S1)待后续接张亮 cron。
 
+**✅ zy review 决定(2026-05-31):** ①1024MB/10000 默认认可;②容错扣减语义认可;③**触发器挂进 S1 的内置触发器,不依赖张亮 cron**——S1 的 `maybe_run_cleanup` 更名 `maybe_run_maintenance`,现一次门控内**先 TTL 清理(cleanup_expired)再容量管理(enforce_capacity)**,save() 触发。enforce_capacity 不再是死原语。新增 `test_maybe_run_maintenance_also_enforces_capacity`。728 passed,ruff/mypy 71=71 零新增。Session 轨全部"活起来",无需 cron。
+
 ## prompt-cache-optimization — feat/prompt-cache-optimization
 
 **实现:** `_assemble_prompt()` 重排——base system 作 messages[0] 稳定可缓存前缀,可变 memory_ctx+skill 合并为 messages[1] 独立 system 消息(无则省略);run_sync/run_stream 两处改走它,功能等价。`_extract_cache_tokens(usage)` 尽力取 Anthropic(cache_read/creation)+OpenAI(prompt_tokens_details.cached_tokens),缺失 None;log_run 加 cache_tokens 字段。不注入 cache_control(后端无关、自动前缀缓存)。AR12 的 _compress 已统一保留所有 system 头部,base system 在内(守卫测试锁)。
@@ -239,9 +272,12 @@
 3. AR12 协调:_compress 保留全部 system 头部,无需改 context_mgr,加守卫。
 
 **⚠️ normalizer 待办(张亮域):** `im_gateway/normalizer.py` 有同样"memory/skill 在 system 最前"缓存杀手,本 change 未改(属张亮 im_gateway 域)——**待张亮协调重排,否则 IM 路径仍命不中前缀缓存**。
+**✅ 已在 agent-skill-binding 重做(15/20)中顺带修复(2026-05-31):** normalizer 重写时把单条 system 消息改为 base+catalog(稳定)→memory(变量)排序,前缀字节稳定可命中缓存。无需再等张亮。
 
 **影响:** 712 passed,mypy 无新增。
 **需 zy 核实:** memory/skill 后置为独立 system 消息(messages[1])的形态;normalizer 同样重排需张亮做。
+
+**✅ zy review 确认(2026-05-31):** 核实点已被 15/20 重构消化——`_assemble_prompt` 演进为 base+catalog(稳定前缀)→memory(messages[1]),skill 改 read_skill 工具不再走 messages 注入;**normalizer 缓存杀手已在 15/20 顺带修复,无需张亮**。`_extract_cache_tokens` + log_run cache_tokens 字段保留不变。无遗留。
 
 ## image-generation-tool — feat/image-generation-tool
 
@@ -255,3 +291,21 @@
 
 **影响:** 732 passed;mypy 无新模式。守卫:test_generate_image_result_has_no_base64 / test_tool_result_message_in_trace_has_no_base64。
 **需 zy 核实:** image_gen_url 默认空(部署须配自托管端点);引用形态 "image generated: <path>"。
+
+**✅ zy review 确认(2026-05-31):** ①image_gen_url 默认空、未配时返回明确失败文本(不崩不中断 loop):认可;②返回短引用 "image generated: <path>"、绝不回 base64:认可。无改动。
+
+---
+
+## review 收尾(2026-05-31)
+
+20/20 决策日志全部与 zy 逐条过完。review 期间产生的修正全部在 `fix/wave1-review-corrections` 分支(基于 feature/zhangyang),计 8 个提交:
+1. model-param 保留键改报错(原静默剔除)
+2. model-routes 文件解析按 (path,mtime,size) 缓存
+3. skill SK2 加载失败汇总(load_errors + 仅失败时 summary 日志)
+4. **agent-skill-binding 推翻重做为 openclaw read-on-demand**(删 DB 表/迁移/check_skill_access,加 available_skills_prompt + read_skill 工具;顺带修 normalizer 缓存杀手)
+5. session-ttl-cleanup:修 save() `/` bug + 内置 maybe_run_maintenance 触发器(不依赖 cron)+ **修 configure_logging 的 PrintLogger 崩溃真 bug**
+6. CLAUDE.md 修正 aiosqlite→sqlite3
+7. session-disk-management:enforce_capacity 并入内置触发器
+(注:部分提交合并了多项)
+
+仍需 zy/他人后续关注:S2 sqlite3(已确认保持,CLAUDE.md 已改);configure_logging 删 add_logger_name 需知会常乐 observability;逐 agent skill 结构化收窄 + vision-as-tool 待 propose(见 deferred 备查)。

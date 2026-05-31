@@ -53,11 +53,13 @@ def test_read_file_missing_file():
 
 # ── run_code ─────────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_run_code_returns_stdout(monkeypatch):
     from unittest.mock import AsyncMock
-    from fleetent.sandbox_client import ExecResult
+
     import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
 
     mock_client = AsyncMock()
     mock_client.create_workspace = AsyncMock(return_value="cid-123")
@@ -74,8 +76,9 @@ async def test_run_code_returns_stdout(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_code_includes_stderr(monkeypatch):
     from unittest.mock import AsyncMock
-    from fleetent.sandbox_client import ExecResult
+
     import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
 
     mock_client = AsyncMock()
     mock_client.create_workspace = AsyncMock(return_value="cid-456")
@@ -96,6 +99,7 @@ async def test_run_code_includes_stderr(monkeypatch):
 async def test_run_code_destroys_workspace_on_error(monkeypatch):
     """destroy_workspace must be called even when exec raises."""
     from unittest.mock import AsyncMock
+
     import fleetent.tools as tl
 
     mock_client = AsyncMock()
@@ -109,3 +113,31 @@ async def test_run_code_destroys_workspace_on_error(monkeypatch):
         await tl.run_code(code="print('hi')")
 
     mock_client.destroy_workspace.assert_called_once_with("cid-789")
+
+
+# --- read_skill: model loads a skill's full SKILL.md on demand (openclaw model) ---
+
+
+def test_read_skill_returns_full_content(tmp_path, monkeypatch):
+    from fleetent import skill_registry as sr
+
+    monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "_nb")
+    d = tmp_path / "skills" / "deploy"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(
+        "---\nname: deploy\ndescription: how to deploy.\n---\nStep 1: do it."
+    )
+    sr.scan(str(tmp_path / "skills"))
+    result = tool_registry.dispatch("read_skill", '{"name": "deploy"}')
+    assert "Step 1: do it." in result
+    sr._index.clear()
+
+
+def test_read_skill_unknown_name_returns_error(tmp_path, monkeypatch):
+    from fleetent import skill_registry as sr
+
+    monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "_nb")
+    sr.scan(str(tmp_path / "skills"))
+    result = tool_registry.dispatch("read_skill", '{"name": "does-not-exist"}')
+    assert "error" in result.lower()
+    sr._index.clear()
