@@ -19,7 +19,7 @@ graph TD
     A["接入层\nserver.py · im_gateway · webhook_router"]
     B["编排层\nagent_loop · sub_agent"]
     C["能力层\nmodel_router · tool_registry · long_term_ctx\nmemory_layer · vector_store · reflection\nskill_registry · context_mgr · mcp_client\nsandbox_client · permission_gate · cron_scheduler"]
-    D["基础层\nuser_store · agent_store · im_user_store\nsession_mgr · schedule_store · observability\nagent_policy · config · admin"]
+    D["横切基础能力\nobservability · config · database runtime\nuser_store · agent_store · im_user_store\nsession_mgr · schedule_store · agent_policy · admin"]
 
     A --> B --> C --> D
 ```
@@ -46,6 +46,14 @@ src/fleetent/
   observability/    ← trace、log、usage、diagnostics
   infrastructure/   ← config、db runtime、底层 adapter
 ```
+
+能力边界说明：
+
+- `intelligence/*` 负责 agent 的长期知识、记忆、检索、反思与上下文注入；其中 `vector_store`
+  暂时同时承载向量后端与 embedding / rerank provider 边界，等多个模块直接复用 provider 后再评估是否抽出。
+- `observability/*` 是横切基础能力，不归入 intelligence；它记录 logs、traces、usage 和 source attribution，
+  供 agent-runtime、platform、reflection 等模块读取。
+- `infrastructure/*` 只承载 config、database runtime 和底层 adapter，不拥有业务表或业务语义。
 
 迁移规则：
 
@@ -75,6 +83,7 @@ src/fleetent/
   intelligence/
     vector_store/    ← 向量索引基础设施：in-memory / SQLite backend，embedding / rerank provider
     long_term_ctx.py ← 长期上下文调度：memory provider 已接入，knowledge_base provider 预留
+    reflection.py    ← 反思报告：读取 traces / memory，只生成建议，不自动写回
   mcp_client.py      ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
   sandbox_client.py  ← Docker CLI 封装：隔离 Python 执行
   permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
