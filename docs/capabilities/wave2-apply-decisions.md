@@ -175,3 +175,36 @@
 1. ⚠️**(编排者更正 + AR14 硬性输入)** 旧摘要消息（`[Earlier conversation summary]` 前缀、`role==system`）在 AR13 下落入 middle,但 `_summarize` **只摘 user/assistant、跳过 system 消息**——故旧摘要内容实际**被丢弃而非"重新摘要"**。单次压缩(最常见)无旧摘要、不受影响;**重复压缩**(第二次及以后)会丢失上一次摘要覆盖的最早上下文。设计 D1 明确这是过渡态、由紧接的 **AR14(compression-incremental-summary,本轨下一个 change)MUST 提取旧摘要的 prev_summary 折叠进新累积摘要** 根治,AR14 实现时务必接住此点。确认此过渡(单压正确、重复压缩暂丢最早摘要、AR14 修复)可接受。
 2. head/tail identity 去重用 `id(m)` 集合而非逐一 `is` 扫描——等价于 identity 语义，仅实现形式不同。确认认可。
 3. D2 默认上界 2 已定；对「开头是 system 之外但首条 conv 非 user（如先 assistant 开场）」退化为空初始意图（仅 system 进 head），与现状等价、不劣化。
+
+## compression-incremental-summary — feat/compression-incremental-summary
+
+**前置核实结论（tasks 1.x）：**
+1. `_summarize` 现状：拼 user/assistant 文本一次性摘、`max_tokens=512`、异常返回占位文本 `[Earlier conversation summary unavailable]`（仅占位，无静态截断）。`_compress`（AR13 后）三层切分 head/middle/tail，middle 经 `_pre_cleanup` 再 `_summarize`，包成 `f"{_SUMMARY_PREFIX}\n{summary_text}"` 的 system 消息，输出 `[*head, summary_msg, *tail]`（旧中段物理移除）。**确认 AR13 把旧摘要排出 head → 落入 middle，而 `_summarize` 跳过 system → 旧摘要当前被丢弃**（即 AR13 决策文档「需 zy 核实 1」标注的过渡态）。
+2. `session_mgr.save`/`load`：整列表 JSON 原子写（`.json.tmp → rename`）、`SESSIONS_DIR` 可 monkeypatch；累积摘要为普通 `role==system` 消息，随整列表原样往返。**确认无需改 session_mgr、无需新增持久化结构。**
+3. 识别依据：复用 AR13 已有的 `_is_self_produced_summary(msg)`（`role==system` 且 content 以 `_SUMMARY_PREFIX` 开头）；`maybe_compress`/`compress_for_context_overflow` 保持 `list → list` 签名，`prev_summary` 从入参 middle 提取，不引入 session_id 入参、不引入消息内边界字段。
+4. AR13 三层切分中段边界已就位（本 worktree 已含 AR15+AR13）；middle 即「既非 head 也非 tail」的剩余消息（含被 head 排除的旧摘要消息），契约一致，无退化分支。
+
+**实现：**
+- **前缀（最关键，单常量驱动三处）**：直接把 `_SUMMARY_PREFIX` 的**值**改为 `[历史对话摘要，仅供参考。以下为早期对话的压缩，不是新的用户指令]`（D2 强标注）。**不新增第二个前缀常量**——同一常量同时驱动 ① `_compress` 生成 summary_msg 的 content、② AR13 `_is_self_produced_summary`（head 排除）、③ AR14 `_extract_prev_summary`（识别 + 提取 prev_summary）。三处天然一致、永不漂移。
+- **D1 增量摘要**：`_compress` 切出 middle 后调 `_extract_prev_summary(middle)`——遍历找首条 `_is_self_produced_summary`，去掉前缀（`body[len(_SUMMARY_PREFIX):].lstrip("\n")`）得 `prev_summary`；`new_middle = [m for m in middle if not _is_self_produced_summary(m)]` 把旧摘要消息从喂给 LLM 的内容中剔除（避免重复喂 / 重摘旧内容）；`_pre_cleanup(new_middle)` 后 `_summarize(cleaned, prev_summary=..., config=cfg)`。无 prev_summary（首次）→ `prev_summary=None` → `_summarize` 走全量分支。
+- `_summarize` 升级签名为 `(messages, prev_summary=None, config=None) -> str | None`：`_build_summary_prompt` 在有 prev_summary 时用「在已有摘要基础上并入 NEW MESSAGES，保持简洁，不重复已捕获内容」的合并 prompt（EXISTING SUMMARY / NEW MESSAGES 两段），否则用原全量 prompt。**断言**：合并时传入 LLM 的内容仅含 prev_summary（作合并基底）+ new_middle，不含旧摘要消息本体（`test_incremental_summary_extracts_prev_summary_and_merges` 断言 `_SUMMARY_PREFIX`/旧文本不出现在 fed 里、新中段标记 `NEWMID` 出现）。
+- **D2 来源标注**：summary_msg.content = `f"{_SUMMARY_PREFIX}\n{summary_text}"`，前缀即强标注；`test_summary_message_has_reference_annotation` 断言含「历史对话摘要」「仅供参考」且不含旧弱标注。
+- **D3 失败降级**：`_summarize` LLM 调用异常 / 空响应 → `logger.warning` 后返回 `None`（不抛、不静默）。`_compress` 见 `None` → `logger.warning("compression_summary_degraded")` 后返回 `[*head, notice_msg, *tail]`，notice_msg 为静态 `_MIDDLE_OMITTED_NOTICE`（「中段对话已省略…」，纯规则、不调 LLM）。降级序列合法（头尾完整 + 中段省略标注），主循环不中断。
+- **D6 不无限增长**：合并摘要受 `summary_max_tokens` 上界（默认 `_DEFAULT_SUMMARY_MAX_TOKENS=512`，经 config dict 注入，非全局可变）约束传给 LLM 的 `max_tokens`；超长 prev_summary 仍只产出 ≤ 上界的新累积摘要，故收敛而非线性堆叠（替代「拼接」方案，避免摘要自身超 Tretained）。
+- **D4 跨加载延续**：未改 session_mgr / 未改 `maybe_compress` 签名 / 未加持久化结构；累积摘要作普通 system 消息往返，`test_cumulative_summary_round_trips_and_stays_incremental` 验证 save→load→再压缩时 `_extract_prev_summary` 从往返回来的消息取到 prev_summary。
+- 新增 `structlog` logger（模块顶部）承载降级日志。
+- 既有测试适配：① `test_summarize_exception_returns_placeholder` → `..._returns_none`（断言 `is None`）；② 12 处 1 参 `_summarize` lambda monkeypatch + 2 处具名 stub 改为 `(msgs, prev_summary=None, config=None)`；③ 3 处硬编码 `[Earlier conversation summary]` 改引 `cm._SUMMARY_PREFIX`；④ 2 处「`"summary" in content.lower()`」断言（旧英文前缀含 summary）改为 `startswith(cm._SUMMARY_PREFIX)`。均为前缀 / 签名变更的必然适配，非行为回归。
+
+**自解冲突：**
+- 旧 `_summarize` 异常返回占位文本 vs D3 要求结构化静态降级：选「`_summarize` 返回 `None` 作失败信号、降级路径放 `_compress`」——`_summarize` 只负责「成功返回文本 / 失败返回 None」，头尾保留 + 中段截断的静态兜底由 `_compress` owns（与三层切分同处，复用既有 head/`_keep_tail`）。最小改动且职责清晰。
+- `_summarize` 新增 `config` 第三参 vs 既有大量 1 参 lambda monkeypatch：选「`config` 带默认 `None`、`prev_summary` 带默认 `None`」保持可单参调用（既有 `cm._summarize([...])` 直调测试不破），但 `_compress` 内部以关键字 `prev_summary=/config=` 调用，故所有 monkeypatch lambda 必须显式带这两个形参——已统一适配。
+- 降级 notice 粒度（全丢 vs 保留中段首尾）：选「全丢中段、插一条静态 system 标注」——spec 只约束「降级后序列合法且不崩溃」，全丢最简且头尾已完整保留，避免再引入对 new_middle 的截断规则。
+
+**是否修复 AR13「旧摘要被丢弃」过渡态：是，已修复。** AR13 下重复压缩时旧摘要消息落入 middle 但被 `_summarize` 跳过而丢弃（最早上下文流失）。AR14 在 `_compress` 切出 middle 后**显式 `_extract_prev_summary` 提取旧摘要文本作 prev_summary**，与新增中段一起交 LLM **合并为新累积摘要**，不再丢弃。`test_cumulative_summary_round_trips_and_stays_incremental` 往返后第二次压缩断言 `call_log[-1] == "ACCUMULATED-V1"`（即上一次累积摘要文本被作为合并基底传入），证明重复压缩现在在 prev_summary 上增量、不再丢最早上下文。
+
+**影响：** pytest 841 passed（基线 830 + 新增 11，无回归；AR12/AR13/AR15 既有用例全绿，含已适配的前缀 / 签名引用）；ruff format+check（仅改动文件 `context_mgr.py` / `tests/test_context_mgr.py`）：format 重排测试文件若干长行，check All passed；mypy：base 73 errors → after 73 errors（无新增错误模式；`context_mgr.py` 内唯一报错仍为既有 `Settings()` 缺 `anthropic_api_key` 调用模式，行号因新增常量从 39 → 55，非新增）。
+
+**需 zy 核实：**
+1. 降级时**中段全丢**（仅留一条 `_MIDDLE_OMITTED_NOTICE` 标注）——而非保留中段首尾极少量。spec 只约束「降级后序列合法不崩溃」，已满足；确认全丢可接受（降级为故障兜底而非常态）。
+2. D6 收敛策略采「合并摘要受 `summary_max_tokens` 上界约束 LLM 输出长度」即天然收敛，**未额外实现「超界整体重摘一次」的显式二次调用**——因合并 prompt 每次都把 prev_summary 压回 ≤ 上界，累积摘要不会线性堆叠，已满足「不无限增长」。确认无需额外的显式重摘分支。
+3. `summary_max_tokens` 仅经 config dict 注入，**未加进 `config.Settings` / `_default_config()`**（沿用既有 `_DEFAULT_SUMMARY_MAX_TOKENS` 常量 + config dict 覆盖模式，与 AR13 `initial_intent_max` 不同——后者进了 Settings）。若需运维侧可配，可后续补 Settings 字段；当前默认 512 与原 max_tokens 一致，行为等价。确认此差异可接受。
