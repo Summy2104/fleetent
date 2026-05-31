@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     context_tretained_ratio: float = 0.6
     context_keep_recent: int = 10
     session_ttl_days: int = 30
+    session_max_total_mb: int = 1024
+    session_max_count: int = 10000
     agent_max_turns: int = 50
     agent_max_consecutive_failures: int = 3
     provider_failure_threshold: int = 3
