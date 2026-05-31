@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     context_keep_recent: int = 10
     log_format: str = "console"
     default_agent_name: str | None = None
+    database_url: str = "sqlite:///data/users.db"
 
 
 def configure_logging(settings: Settings) -> None:

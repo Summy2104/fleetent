@@ -8,6 +8,7 @@ def test_settings_defaults():
     assert s.microsandbox_url == "http://host.docker.internal:7777"
     assert s.permission_gate_medium_timeout_seconds == 300
     assert s.permission_gate_high_timeout_seconds == 3600
+    assert s.database_url == "sqlite:///data/users.db"
 
 
 def test_settings_env_override(monkeypatch):
