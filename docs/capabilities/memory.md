@@ -108,6 +108,8 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
 - 删除旧 JSONL memory 兼容和 `load_memories()` 直接注入路径
 
 当前定位：已完成结构化语义记忆地基，但记忆质量、冲突合并和真实 embedding 效果仍未闭环。
+下一步先推进 `memory-update-merge-actions`，补齐 create / update / delete / ignore action
+以及有限 memory snapshot 输入；效果评估、retention 和真实 embedding 后置。
 
 ## 规划中（v1.0）
 
@@ -140,8 +142,8 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
 
 ## 下一批候选 specs
 
-- `memory-extraction-evaluation`
 - `memory-update-merge-actions`
+- `memory-extraction-evaluation`
 - `memory-retention-and-compaction`
 - `memory-real-embedding-provider`
 
