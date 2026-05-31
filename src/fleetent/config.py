@@ -18,6 +18,7 @@ class ObservabilitySettings(BaseModel):
 
 class VectorStoreSettings(BaseModel):
     backend: str = "memory"
+    database_url: str | None = None
 
 
 class EmbeddingSettings(BaseModel):

@@ -1,19 +1,28 @@
 from fleetent.config import Settings
-from fleetent.intelligence.vector_store.backend import SearchResult, create_vector_backend
+from fleetent.intelligence.vector_store.backend import (
+    SearchResult,
+    VectorBackend,
+    create_vector_backend,
+)
 from fleetent.intelligence.vector_store.embeddings import (
     EmbeddingProvider,
     create_embedding_provider,
 )
 
 _embedding: EmbeddingProvider
-_backend = create_vector_backend(Settings(anthropic_api_key="").vector_store)
+_backend: VectorBackend
 
 
 def _configure(settings: Settings) -> None:
     global _embedding, _backend
 
     _embedding = create_embedding_provider(settings.embedding)
-    _backend = create_vector_backend(settings.vector_store)
+    _backend = _create_vector_backend(settings)
+
+
+def _create_vector_backend(settings: Settings) -> VectorBackend:
+    database_url = settings.vector_store.database_url or settings.database_url
+    return create_vector_backend(settings.vector_store, database_url=database_url)
 
 
 _configure(Settings(anthropic_api_key=""))

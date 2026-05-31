@@ -12,13 +12,13 @@
 **不负责**：业务数据存储（→ memory / knowledge_base）、检索结果的业务过滤（如 TTL 过期判断，由调用方处理）、注入协调（→ long_term_ctx）。
 
 **调用关系**：
-- 依赖：embedding 模型（本地自托管，bge-m3 或 multilingual-e5）、向量后端（sqlite-vec 或 Qdrant）、config
+- 依赖：embedding 模型（当前 deterministic，后续本地自托管 bge-m3 或 multilingual-e5）、向量后端（memory 或普通 SQLite persistent backend；sqlite-vec / Qdrant 后置）、config
 - 被依赖：memory_layer（记忆条目的写入与检索）、knowledge_base（文档 chunk 的写入与检索）
 
 **模块归属**：
 - owning package：`intelligence.vector_store`
 - public API：`upsert(id, text, namespace)`、`search(query, namespace, limit)`、`delete(id, namespace)`、`SearchResult`
-- owned tables：无（sqlite-vec backend 的物理表由 vector_store backend adapter 管理）
+- owned tables：`vector_items`（SQLite persistent backend owns）
 - config namespace：`vector_store.*`、`embedding.*`、`rerank.*`
 
 ## 关键流程
@@ -71,9 +71,11 @@ async def delete(id: str, namespace: str) -> None:
   OpenAI-style `/v1/embeddings`
 - rerank provider abstraction：disabled / deterministic / HTTP provider 已定义，供后续 retrieval 流程使用
 - in-memory vector backend，支持 namespace 隔离、upsert 覆盖、delete、score 排序
+- 普通 SQLite persistent backend，使用 `vector_items` 表持久化 namespace-scoped vectors，检索时在 Python 内做 cosine similarity
 - `vector_store.*` / `embedding.*` / `rerank.*` 基础配置命名空间
+- `vector_store.database_url` 可选配置；未配置时 SQLite backend 复用全局 `Settings.database_url`
 
-当前定位：可支持 memory-layer、long-term-ctx 和测试场景，不是生产级向量检索后端。
+当前定位：可支持 memory-layer、long-term-ctx 和测试场景；SQLite backend 解决重启后索引丢失问题，但不是大规模 ANN 检索后端。
 rerank provider 目前只提供边界，尚未接入 knowledge-base search。
 
 ## 规划中（v1.0）
@@ -84,14 +86,19 @@ rerank provider 目前只提供边界，尚未接入 knowledge-base search。
 - [ ] **sqlite-vec 后端**：轻量内嵌实现，适合开发环境和小规模部署
   - 无需额外服务，随主进程启动
 
+- [x] **普通 SQLite persistent 后端**：不依赖 native extension，适合 on-premises MVP 和小规模部署
+  - 向量以 JSON 存储，按 namespace 检索，Python 内计算 cosine similarity
+
 - [ ] **Qdrant 后端**：生产级实现，Docker 自托管
   - 通过 config 切换，接口不变
+
+- [ ] **OpenSearch / Elasticsearch adapter**：后置评估，更适合 knowledge-base lexical / hybrid search
 
 - [x] **namespace 隔离**：不同来源的向量逻辑隔离，检索时不跨 namespace 返回结果
 
 ## 当前缺口
 
-- 持久化后端未实现：进程重启后 in-memory 向量丢失。
+- sqlite-vec / Qdrant 未实现：当前持久化后端是普通 SQLite + Python cosine，不提供 ANN 性能。
 - 真实 embedding 可通过 HTTP provider 接入，但当前默认仍是 deterministic，需部署自托管
   embedding endpoint 后显式配置。
 - rerank 尚未接入 knowledge-base search；当前只定义 provider abstraction。

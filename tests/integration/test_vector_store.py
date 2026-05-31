@@ -1,6 +1,10 @@
 import pytest
 
 
+def _sqlite_database_url(path):
+    return f"sqlite:///{path}"
+
+
 def _l2_norm(vector):
     return sum(value * value for value in vector) ** 0.5
 
@@ -244,3 +248,187 @@ def test_unsupported_embedding_backend_fails_fast():
 
     with pytest.raises(ValueError, match="Unsupported embedding.backend 'bge-m3'.*deterministic"):
         create_embedding_backend(EmbeddingSettings(backend="bge-m3"))
+
+
+async def test_sqlite_backend_first_use_creates_vector_items_schema(tmp_path):
+    import aiosqlite
+
+    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+
+    database_path = tmp_path / "vectors.db"
+    backend = SQLiteVectorBackend(database_url=_sqlite_database_url(database_path))
+
+    await backend.upsert("id-1", [1.0, 0.0], namespace="mem:user-1")
+
+    async with aiosqlite.connect(database_path) as db:
+        columns = await db.execute_fetchall("PRAGMA table_info(vector_items)")
+        indexes = await db.execute_fetchall("PRAGMA index_list(vector_items)")
+
+    assert {column[1] for column in columns} == {
+        "namespace",
+        "id",
+        "dimensions",
+        "vector_json",
+        "updated_at",
+    }
+    assert any(index[1] == "idx_vector_items_namespace" for index in indexes)
+
+
+async def test_sqlite_backend_persists_vectors_across_backend_instances(tmp_path):
+    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+
+    database_url = _sqlite_database_url(tmp_path / "vectors.db")
+    await SQLiteVectorBackend(database_url=database_url).upsert(
+        "id-1", [1.0, 0.0], namespace="mem:user-1"
+    )
+
+    results = await SQLiteVectorBackend(database_url=database_url).search(
+        [1.0, 0.0], namespace="mem:user-1"
+    )
+
+    assert [result.id for result in results] == ["id-1"]
+
+
+async def test_sqlite_backend_overwrites_same_namespace_and_id(tmp_path):
+    import aiosqlite
+
+    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+
+    database_path = tmp_path / "vectors.db"
+    backend = SQLiteVectorBackend(database_url=_sqlite_database_url(database_path))
+
+    await backend.upsert("same-id", [1.0, 0.0], namespace="mem:user-1")
+    await backend.upsert("same-id", [0.0, 1.0], namespace="mem:user-1")
+
+    results = await backend.search([0.0, 1.0], namespace="mem:user-1")
+    async with aiosqlite.connect(database_path) as db:
+        count_rows = await db.execute_fetchall(
+            "SELECT COUNT(*) FROM vector_items WHERE namespace = :namespace AND id = :id",
+            {"namespace": "mem:user-1", "id": "same-id"},
+        )
+
+    assert [result.id for result in results] == ["same-id"]
+    assert count_rows[0][0] == 1
+
+
+async def test_sqlite_backend_search_is_namespace_scoped(tmp_path):
+    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+
+    backend = SQLiteVectorBackend(database_url=_sqlite_database_url(tmp_path / "vectors.db"))
+    await backend.upsert("id-a", [1.0, 0.0], namespace="mem:a")
+    await backend.upsert("id-b", [1.0, 0.0], namespace="mem:b")
+
+    results = await backend.search([1.0, 0.0], namespace="mem:a")
+
+    assert [result.id for result in results] == ["id-a"]
+
+
+async def test_sqlite_backend_search_respects_limit(tmp_path):
+    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+
+    backend = SQLiteVectorBackend(database_url=_sqlite_database_url(tmp_path / "vectors.db"))
+    await backend.upsert("id-1", [1.0, 0.0], namespace="mem:user-1")
+    await backend.upsert("id-2", [0.9, 0.1], namespace="mem:user-1")
+
+    assert await backend.search([1.0, 0.0], namespace="mem:user-1", limit=0) == []
+    assert len(await backend.search([1.0, 0.0], namespace="mem:user-1", limit=1)) == 1
+
+
+async def test_sqlite_backend_delete_is_namespace_scoped(tmp_path):
+    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+
+    backend = SQLiteVectorBackend(database_url=_sqlite_database_url(tmp_path / "vectors.db"))
+    await backend.upsert("same-id", [1.0, 0.0], namespace="mem:a")
+    await backend.upsert("same-id", [1.0, 0.0], namespace="mem:b")
+
+    await backend.delete("same-id", namespace="mem:a")
+
+    assert await backend.search([1.0, 0.0], namespace="mem:a") == []
+    assert [result.id for result in await backend.search([1.0, 0.0], namespace="mem:b")] == [
+        "same-id"
+    ]
+
+
+async def test_sqlite_backend_search_sorts_by_score_desc_then_id_asc(tmp_path):
+    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+
+    backend = SQLiteVectorBackend(database_url=_sqlite_database_url(tmp_path / "vectors.db"))
+    await backend.upsert("b", [1.0, 0.0], namespace="mem:ordering")
+    await backend.upsert("a", [1.0, 0.0], namespace="mem:ordering")
+    await backend.upsert("c", [0.0, 1.0], namespace="mem:ordering")
+
+    results = await backend.search([1.0, 0.0], namespace="mem:ordering")
+
+    assert [result.id for result in results] == ["a", "b", "c"]
+
+
+async def test_sqlite_backend_search_skips_dimension_mismatch(tmp_path):
+    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+
+    backend = SQLiteVectorBackend(database_url=_sqlite_database_url(tmp_path / "vectors.db"))
+    await backend.upsert("valid", [1.0, 0.0], namespace="mem:user-1")
+    await backend.upsert("wrong-dimension", [1.0, 0.0, 0.0], namespace="mem:user-1")
+
+    results = await backend.search([1.0, 0.0], namespace="mem:user-1")
+
+    assert [result.id for result in results] == ["valid"]
+
+
+async def test_sqlite_backend_search_skips_corrupt_vector_json(tmp_path):
+    import aiosqlite
+
+    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+
+    database_path = tmp_path / "vectors.db"
+    backend = SQLiteVectorBackend(database_url=_sqlite_database_url(database_path))
+    await backend.upsert("valid", [1.0, 0.0], namespace="mem:user-1")
+
+    async with aiosqlite.connect(database_path) as db:
+        await db.execute(
+            """
+            INSERT INTO vector_items (namespace, id, dimensions, vector_json, updated_at)
+            VALUES (:namespace, :id, :dimensions, :vector_json, CURRENT_TIMESTAMP)
+            """,
+            {
+                "namespace": "mem:user-1",
+                "id": "corrupt",
+                "dimensions": 2,
+                "vector_json": "not-json",
+            },
+        )
+        await db.commit()
+
+    results = await backend.search([1.0, 0.0], namespace="mem:user-1")
+
+    assert [result.id for result in results] == ["valid"]
+
+
+async def test_sqlite_backend_upsert_rejects_empty_vector(tmp_path):
+    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+
+    backend = SQLiteVectorBackend(database_url=_sqlite_database_url(tmp_path / "vectors.db"))
+
+    with pytest.raises(ValueError, match="vector must not be empty"):
+        await backend.upsert("id-1", [], namespace="mem:user-1")
+
+
+async def test_runtime_public_api_uses_sqlite_backend_with_global_database_url(
+    tmp_path, monkeypatch
+):
+    from fleetent.config import Settings
+    from fleetent.intelligence.vector_store import runtime
+
+    settings = Settings(
+        anthropic_api_key="",
+        database_url=_sqlite_database_url(tmp_path / "vectors.db"),
+        vector_store={"backend": "sqlite"},
+    )
+    monkeypatch.setattr(runtime, "_backend", runtime._create_vector_backend(settings))
+
+    await runtime.upsert("id-1", "python debugging", namespace="mem:user-1")
+    assert [result.id for result in await runtime.search("python", namespace="mem:user-1")] == [
+        "id-1"
+    ]
+
+    await runtime.delete("id-1", namespace="mem:user-1")
+    assert await runtime.search("python", namespace="mem:user-1") == []

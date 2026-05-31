@@ -23,6 +23,7 @@ def test_vector_store_defaults():
     s = Settings(anthropic_api_key="test-key")
 
     assert s.vector_store.backend == "memory"
+    assert s.vector_store.database_url is None
     assert s.embedding.backend == "deterministic"
     assert s.embedding.dimensions == 64
     assert s.embedding.endpoint == ""
@@ -39,6 +40,49 @@ def test_rerank_defaults():
     assert s.rerank.model == ""
     assert s.rerank.api_key_env == ""
     assert s.rerank.timeout_seconds == 10.0
+
+
+def test_vector_store_accepts_sqlite_backend_with_optional_database_url():
+    s = Settings(
+        anthropic_api_key="test-key",
+        vector_store={"backend": "sqlite", "database_url": "sqlite:///tmp/vector.db"},
+    )
+
+    assert s.vector_store.backend == "sqlite"
+    assert s.vector_store.database_url == "sqlite:///tmp/vector.db"
+
+
+def test_sqlite_vector_backend_uses_global_database_url_when_not_configured(tmp_path):
+    from fleetent.intelligence.vector_store.backend import (
+        SQLiteVectorBackend,
+        create_vector_backend,
+    )
+
+    database_url = f"sqlite:///{tmp_path / 'app.db'}"
+    s = Settings(
+        anthropic_api_key="test-key",
+        database_url=database_url,
+        vector_store={"backend": "sqlite"},
+    )
+
+    backend = create_vector_backend(
+        s.vector_store,
+        database_url=s.vector_store.database_url or s.database_url,
+    )
+
+    assert isinstance(backend, SQLiteVectorBackend)
+    assert backend.database_url == database_url
+
+
+def test_sqlite_vector_backend_rejects_non_sqlite_database_url():
+    from fleetent.config import VectorStoreSettings
+    from fleetent.intelligence.vector_store.backend import create_vector_backend
+
+    with pytest.raises(ValueError, match="local sqlite database_url"):
+        create_vector_backend(
+            VectorStoreSettings(backend="sqlite", database_url="postgresql://db/app"),
+            database_url="postgresql://db/app",
+        )
 
 
 def test_settings_env_override(monkeypatch):
