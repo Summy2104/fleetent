@@ -188,13 +188,15 @@ async def _safe_dispatch(
     is_sub_agent: bool,
     cancel_token: CancelToken | None = None,
     tool_context: ToolContext | None = None,
+    user_id: str | None = None,
 ) -> tuple[str, bool]:
     """Dispatch a tool, normalizing a crash into (error_text, failed=True).
 
     Returning instead of raising keeps a tool crash from killing the loop and
     lets the consecutive-failures checker observe it. The cancel token and the
     execution context are passed out-of-band; dispatch injects each only into
-    tools that opt in (AR19 D3 / SB3 D5).
+    tools that opt in (AR19 D3 / SB3 D5). `user_id` is threaded so connector
+    tools can resolve per-user credentials at dispatch time.
     """
     try:
         result = dispatch(
@@ -203,6 +205,7 @@ async def _safe_dispatch(
             is_sub_agent=is_sub_agent,
             cancel_token=cancel_token,
             tool_context=tool_context,
+            user_id=user_id,
         )
         if inspect.iscoroutine(result):
             result = await result
@@ -657,11 +660,17 @@ async def run(
                             is_sub_agent,
                             token,
                             tool_context,
+                            user_id=user_id,
                         )
                         state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
                 else:
                     result, failed = await _safe_dispatch(
-                        tc.function.name, tc.function.arguments, is_sub_agent, token, tool_context
+                        tc.function.name,
+                        tc.function.arguments,
+                        is_sub_agent,
+                        token,
+                        tool_context,
+                        user_id=user_id,
                     )
                     state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
@@ -930,7 +939,9 @@ async def run_stream(
             name = func["name"]
             args = func["arguments"]
             yield {"type": "tool_call", "name": name, "args": args}
-            result, failed = await _safe_dispatch(name, args, False, token, tool_context)
+            result, failed = await _safe_dispatch(
+                name, args, False, token, tool_context, user_id=user_id
+            )
             state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             yield {"type": "tool_result", "name": name, "content": result}
             messages.append({"role": "tool", "tool_call_id": tc_data["id"], "content": result})

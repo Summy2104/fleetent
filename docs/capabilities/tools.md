@@ -68,11 +68,10 @@ async def dispatch(tool_name: str, args: dict, user_id: str, agent_id: str) -> s
 - ✅ **schema 导出**：`get_schemas()` 返回所有注册工具的 JSON Schema，import 副作用注册
 - ✅ **dispatch**：参数反序列化 → agent_policy 检查 → 调用 → 结果序列化
 - ✅ **risk_level 映射**：`low` / `medium` / `high`，`permission_gate` 据此决定是否触发审批
-- ⚡ **connector 声明**：`@tool(connector=...)` 声明已有，凭证注入逻辑待 connectors 模块实现后接通
+- ✅ **connector 声明**：`@tool(connector=..., scopes=[...])` 记录到 `_connectors`（与 `_risk_levels` 平行），不进 LLM schema；`get_connector(name)` 查询
+- ✅ **connector 注入接通**：`dispatch` 调 `connectors.get_credential(user_id, connector, scopes)`——`Credential` 注入隐藏 keyword-only `client` 参数；`NeedsConsent` 短路返回 consent URL 提示串，不执行工具。`connectors`（工具 OAuth 凭证）与 `im_connector_*`（IM 平台连接适配器）无关，勿混用。默认 provider 永远返回 `NeedsConsent`（真实 OAuth 存储/刷新由后续 connector-oauth-store change 经可注入 provider 缝提供）
 
 ## 规划中（v1.0）
-
-- [ ] **connector 注入接通**：`dispatch` 中完整实现 `connectors.get_credential` 调用 + client 注入，目前凭证注入路径尚未打通
 - [ ] **工具超时保护**：每次 `dispatch` 设置 per-tool 超时（可在 `@tool` 声明，默认 30s），超时后返回 `tool_timeout` 错误给 LLM
 - [ ] **参数消毒**：dispatch 前校验 args 符合工具 JSON Schema，非法参数返回错误给 LLM 而非直接调用
 - [ ] **工具结果截断**：输出超过阈值（如 10k tokens）时截断 + 写 breadcrumb，避免工具结果撑爆 context
