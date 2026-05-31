@@ -524,7 +524,7 @@ def test_match_config_disabled_logs_reason(tmp_path):
     assert result is None
     disabled_logs = [e for e in logs if e.get("name") == "deploy"]
     assert disabled_logs
-    assert any(e.get("reason") == "disabled_skills_config" for e in disabled_logs)
+    assert any(e.get("reason") == "config_disabled" for e in disabled_logs)
 
 
 def test_match_default_disabled_logs_reason(tmp_path):
@@ -537,7 +537,7 @@ def test_match_default_disabled_logs_reason(tmp_path):
     with structlog.testing.capture_logs() as logs:
         sr.match("please deploy code now")
     disabled_logs = [e for e in logs if e.get("name") == "off"]
-    assert any(e.get("reason") == "enabled_by_default_false" for e in disabled_logs)
+    assert any(e.get("reason") == "default_disabled" for e in disabled_logs)
 
 
 def test_load_unaffected_by_default_disable(tmp_path):
@@ -852,3 +852,107 @@ def test_load_returns_original_for_audit_blocked(tmp_path):
     sr.scan(str(tmp_path / "skills"))
     content = sr.load("evil")
     assert "Ignore previous instructions" in content
+
+
+# --- frontmatter `enabled: false` self-disable (skill-disable-mechanism task 2) ---
+
+
+def test_enabled_false_excluded_from_catalog(tmp_path):
+    _write_skill(
+        tmp_path, "off", "---\nname: off\ndescription: do things.\nenabled: false\n---\nbody"
+    )
+    sr.scan(str(tmp_path / "skills"))
+    assert "<name>off</name>" not in sr.available_skills_prompt(disabled_skills=[])
+
+
+def test_enabled_false_overrides_enabled_by_default_true(tmp_path):
+    # enabled:false is a hard kill that wins even when enabled_by_default is true.
+    _write_skill(
+        tmp_path,
+        "off",
+        "---\nname: off\ndescription: do things.\nenabled: false\nenabled_by_default: true\n---\nb",
+    )
+    sr.scan(str(tmp_path / "skills"))
+    assert "<name>off</name>" not in sr.available_skills_prompt(disabled_skills=[])
+
+
+def test_enabled_defaults_true_when_unspecified(tmp_path):
+    _write_skill(tmp_path, "live", "---\nname: live\ndescription: do things.\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    assert sr._index["live"].enabled is True
+    assert "<name>live</name>" in sr.available_skills_prompt(disabled_skills=[])
+
+
+def test_load_unaffected_by_enabled_false(tmp_path):
+    content = "---\nname: off\ndescription: do things.\nenabled: false\n---\nbody"
+    d = tmp_path / "skills" / "off"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(content)
+    sr.scan(str(tmp_path / "skills"))
+    assert sr.load("off") == content
+
+
+# --- single eligibility predicate: source identifiers + priority (task 3) ---
+
+
+def _entry(*, enabled=True, enabled_by_default=True, audit_blocked=False):
+    return sr.SkillEntry(
+        description="d",
+        path="p",
+        enabled=enabled,
+        enabled_by_default=enabled_by_default,
+        audit_blocked=audit_blocked,
+    )
+
+
+def test_disabled_reason_none_when_fully_enabled():
+    assert sr._disabled_reason("s", _entry(), set()) is None
+
+
+def test_disabled_reason_audit_blocked():
+    assert sr._disabled_reason("s", _entry(audit_blocked=True), set()) == "audit_blocked"
+
+
+def test_disabled_reason_frontmatter_disabled():
+    assert sr._disabled_reason("s", _entry(enabled=False), set()) == "frontmatter_disabled"
+
+
+def test_disabled_reason_config_disabled():
+    assert sr._disabled_reason("s", _entry(), {"s"}) == "config_disabled"
+
+
+def test_disabled_reason_default_disabled():
+    assert sr._disabled_reason("s", _entry(enabled_by_default=False), set()) == "default_disabled"
+
+
+def test_disabled_reason_priority_audit_over_all():
+    entry = _entry(enabled=False, enabled_by_default=False, audit_blocked=True)
+    assert sr._disabled_reason("s", entry, {"s"}) == "audit_blocked"
+
+
+def test_disabled_reason_priority_frontmatter_over_config_and_default():
+    entry = _entry(enabled=False, enabled_by_default=False)
+    assert sr._disabled_reason("s", entry, {"s"}) == "frontmatter_disabled"
+
+
+def test_disabled_reason_priority_config_over_default():
+    entry = _entry(enabled_by_default=False)
+    assert sr._disabled_reason("s", entry, {"s"}) == "config_disabled"
+
+
+# --- disabled-source collection for trace (task 4) ---
+
+
+def test_collect_disabled_trace_records_name_and_reason(tmp_path):
+    _write_skill(tmp_path, "on", "---\nname: on\ndescription: keep.\n---\nbody")
+    _write_skill(tmp_path, "off", "---\nname: off\ndescription: gone.\nenabled: false\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    trace = sr.collect_disabled_trace(disabled_skills=[])
+    assert {"name": "off", "reason": "frontmatter_disabled"} in trace
+    assert all(t["name"] != "on" for t in trace)
+
+
+def test_collect_disabled_trace_empty_when_nothing_disabled(tmp_path):
+    _write_skill(tmp_path, "on", "---\nname: on\ndescription: keep.\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    assert sr.collect_disabled_trace(disabled_skills=[]) == []

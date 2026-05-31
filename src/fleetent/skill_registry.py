@@ -29,6 +29,10 @@ class SkillEntry:
     platforms: list[str] = field(default_factory=list)
     version: str | None = None
     enabled_by_default: bool = True
+    # Author-level hard kill from frontmatter `enabled: false`; wins over
+    # enabled_by_default (a default-state hint). Excludes the skill from the
+    # catalog; load() ignores it (manual access stays open).
+    enabled: bool = True
     builtin: bool = False
     # Set when the SKILL.md body or description hits a `severe` injection pattern
     # (skill-injection-audit). The entry stays in `_index` but is excluded from the
@@ -195,6 +199,7 @@ def _scan_dir(
             platforms=_as_str_list(frontmatter.get("platforms")),
             version=_as_opt_str(frontmatter.get("version")),
             enabled_by_default=bool(frontmatter.get("enabled_by_default", True)),
+            enabled=bool(frontmatter.get("enabled", True)),
             builtin=builtin,
             audit_blocked=blocked,
         )
@@ -274,14 +279,26 @@ def _resolve_disabled_skills(disabled_skills: list[str] | None) -> set[str]:
 
 
 def _disabled_reason(name: str, entry: SkillEntry, disabled: set[str]) -> str | None:
-    """Return the disable reason for a skill, or None when it is enabled.
+    """Return the first matching disable source identifier, or None when eligible.
 
-    Config force-disable takes priority over the author's default-state intent.
+    This is the single eligibility predicate that decides whether a skill enters
+    the `available_skills_prompt` catalog; every catalog/match filter routes
+    through it so the four disable sources are judged in exactly one place.
+    Sources are checked in priority order — security first, author intent next,
+    operator config, then the author's default-state hint:
+    `audit_blocked` > `frontmatter_disabled` (`enabled: false`) >
+    `config_disabled` (`disabled_skills`) > `default_disabled`
+    (`enabled_by_default: false`). The returned identifier is the highest-priority
+    match and is the value recorded in the run trace.
     """
+    if entry.audit_blocked:
+        return "audit_blocked"
+    if not entry.enabled:
+        return "frontmatter_disabled"
     if name in disabled:
-        return "disabled_skills_config"
+        return "config_disabled"
     if not entry.enabled_by_default:
-        return "enabled_by_default_false"
+        return "default_disabled"
     return None
 
 
@@ -306,17 +323,17 @@ def available_skills_prompt(disabled_skills: list[str] | None = None) -> str:
     catalog listing each enabled skill's name, description, and SKILL.md location,
     so the model can discover what exists and load the full file on demand via the
     read_skill tool — instead of the platform auto-injecting full content. A skill
-    is omitted when disabled (config force-disable or enabled_by_default false),
-    mirroring match()'s eligibility, or when `audit_blocked` (a severe injection
-    hit, so its name/description never reach the prompt). Returns "" when nothing
-    is enabled, so the
-    caller can drop the section entirely (keeping the cache prefix maximal).
+    is omitted when the single eligibility predicate (`_disabled_reason`) reports
+    any disable source — `audit_blocked`, `enabled: false`, config force-disable,
+    or `enabled_by_default: false` — so its name/description never reach the prompt.
+    Returns "" when nothing is enabled, so the caller can drop the section entirely
+    (keeping the cache prefix maximal).
     """
     disabled = _resolve_disabled_skills(disabled_skills)
     entries = [
         (name, entry)
         for name, entry in _index.items()
-        if _disabled_reason(name, entry, disabled) is None and not entry.audit_blocked
+        if _disabled_reason(name, entry, disabled) is None
     ]
     if not entries:
         return ""
@@ -329,6 +346,24 @@ def available_skills_prompt(disabled_skills: list[str] | None = None) -> str:
         lines.append("  </skill>")
     lines.append("</available_skills>")
     return "\n".join(lines)
+
+
+def collect_disabled_trace(disabled_skills: list[str] | None = None) -> list[dict[str, str]]:
+    """Return skills excluded from the catalog as ``[{"name", "reason"}]``.
+
+    Reuses the single eligibility predicate (`_disabled_reason`) over the same
+    index `available_skills_prompt` renders, so the trace records exactly the
+    skills the model could not see and why (highest-priority source). Returns an
+    empty list when every skill is eligible, letting the injection chain omit the
+    trace field entirely for the common no-disable run.
+    """
+    disabled = _resolve_disabled_skills(disabled_skills)
+    trace: list[dict[str, str]] = []
+    for name, entry in _index.items():
+        reason = _disabled_reason(name, entry, disabled)
+        if reason is not None:
+            trace.append({"name": name, "reason": reason})
+    return trace
 
 
 def load(name: str) -> str:

@@ -23,7 +23,7 @@ from fleetent.model_router import RouteConfig, RouteOverride, get_async_client_a
 from fleetent.multimodal import build_message_with_images, has_image_block
 from fleetent.permission_gate import _default_gate
 from fleetent.provider_health import ProviderHealthCache, get_health_cache
-from fleetent.skill_registry import available_skills_prompt
+from fleetent.skill_registry import available_skills_prompt, collect_disabled_trace
 from fleetent.skill_registry import scan as scan_skills
 from fleetent.sub_agent import SubAgentExecutor
 from fleetent.termination import (
@@ -287,6 +287,7 @@ async def run(
     max_turns: int | None = None,
     max_consecutive_failures: int | None = None,
     force_model: str | None = None,
+    disabled_skills_trace: list[dict[str, str]] | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -447,6 +448,7 @@ async def run(
         stop_reason=stop_reason,
         hygiene_repairs=hygiene_repairs or None,
         cache_tokens=_extract_cache_tokens(usage),
+        disabled_skills_trace=disabled_skills_trace,
     )
     extract_and_save(user_input, messages, user_id=user_id)
     return reply
@@ -466,12 +468,20 @@ def run_sync(
     scan_skills()
     memory_ctx = load_memories(user_id=user_id)
     skills_catalog = available_skills_prompt()
+    disabled_trace = collect_disabled_trace() or None
 
     messages = _assemble_prompt(
         system_prompt, skills_catalog, memory_ctx, {"role": "user", "content": user_input}
     )
 
-    return asyncio.run(run(messages, user_id=user_id, system_prompt=system_prompt))
+    return asyncio.run(
+        run(
+            messages,
+            user_id=user_id,
+            system_prompt=system_prompt,
+            disabled_skills_trace=disabled_trace,
+        )
+    )
 
 
 async def run_stream(
@@ -499,6 +509,7 @@ async def run_stream(
     """
     memory_ctx = load_memories(user_id=user_id)
     skills_catalog = available_skills_prompt()
+    disabled_trace = collect_disabled_trace() or None
 
     if images:
         user_msg = build_message_with_images(user_input, images)
@@ -647,5 +658,6 @@ async def run_stream(
         stop_reason=stop_reason,
         hygiene_repairs=hygiene_repairs or None,
         cache_tokens=cache_tokens,
+        disabled_skills_trace=disabled_trace,
     )
     extract_and_save(user_input, messages, user_id=user_id)
