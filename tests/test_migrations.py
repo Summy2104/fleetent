@@ -30,6 +30,22 @@ def test_upgrade_creates_tables(tmp_path):
     assert "user_agents" in tables
     assert "approvals" in tables
     assert "scheduled_tasks" in tables
+    assert "traces" in tables
+
+
+def test_upgrade_creates_trace_indexes(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    indexes = {row[1] for row in conn.execute("PRAGMA index_list(traces)")}
+    conn.close()
+
+    assert indexes >= {
+        "idx_traces_run_id",
+        "idx_traces_user_ts",
+        "idx_traces_agent_ts",
+        "idx_traces_tenant_event_ts",
+    }
 
 
 def test_downgrade_removes_tables(tmp_path):

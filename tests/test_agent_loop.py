@@ -86,7 +86,7 @@ def mock_client(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
-    monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "record_trace_event", lambda event: None)
     monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "load_memories", lambda **kw: "")
@@ -379,7 +379,7 @@ def mock_client_fb(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
-    monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "record_trace_event", lambda event: None)
     monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "load_memories", lambda **kw: "")
@@ -447,34 +447,45 @@ async def test_run_stream_exhausted_yields_error(mock_client_fb):
     assert any(e["type"] == "error" for e in events)
 
 
-# ── log fields: user_id, agent_name, streaming usage ─────────────────────────
+# ── agent trace fields: user_id, agent_name, streaming usage ─────────────────
 
 
-async def test_run_passes_user_id_to_log_run(mock_client, monkeypatch):
+async def test_run_records_agent_run_completed_trace_with_user_id(mock_client, monkeypatch):
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
     captured: dict = {}
-    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    monkeypatch.setattr(al, "record_trace_event", lambda event: captured.update(event=event))
     await al.run([{"role": "user", "content": "hi"}], user_id="user-99")
-    assert captured.get("user_id") == "user-99"
+    event = captured["event"]
+    assert event.event_type == "agent_run_completed"
+    assert event.user_id == "user-99"
+    assert event.payload["input"] == "hi"
+    assert event.payload["reply"] == "ok"
 
 
-async def test_run_passes_agent_name_to_log_run(mock_client, monkeypatch):
+async def test_run_records_agent_name_in_completed_trace(mock_client, monkeypatch):
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
     captured: dict = {}
-    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    monkeypatch.setattr(al, "record_trace_event", lambda event: captured.update(event=event))
     await al.run([{"role": "user", "content": "hi"}], agent_name="support-bot")
-    assert captured.get("agent_name") == "support-bot"
+    event = captured["event"]
+    assert event.agent_id == "support-bot"
+    assert event.payload["agent_name"] == "support-bot"
 
 
-async def test_run_stream_passes_user_id_and_agent_name_to_log_run(mock_client, monkeypatch):
+async def test_run_stream_records_user_id_and_agent_name_in_completed_trace(
+    mock_client, monkeypatch
+):
     mock_client.chat.completions.create = AsyncMock(
         return_value=_stream_chunks("hi", finish="stop")
     )
     captured: dict = {}
-    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    monkeypatch.setattr(al, "record_trace_event", lambda event: captured.update(event=event))
     [_ async for _ in al.run_stream("hi", user_id="user-7", agent_name="myagent")]
-    assert captured.get("user_id") == "user-7"
-    assert captured.get("agent_name") == "myagent"
+    event = captured["event"]
+    assert event.event_type == "agent_run_completed"
+    assert event.user_id == "user-7"
+    assert event.agent_id == "myagent"
+    assert event.payload["agent_name"] == "myagent"
 
 
 async def test_run_stream_captures_usage_from_stream(mock_client, monkeypatch):
@@ -482,9 +493,16 @@ async def test_run_stream_captures_usage_from_stream(mock_client, monkeypatch):
         return_value=_stream_chunks_with_usage(100, 50, "hello")
     )
     captured: dict = {}
-    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    monkeypatch.setattr(al, "record_trace_event", lambda event: captured.update(event=event))
     [_ async for _ in al.run_stream("hi")]
-    usage = captured.get("usage")
-    assert usage is not None
-    assert usage.prompt_tokens == 100
-    assert usage.completion_tokens == 50
+    usage = captured["event"].payload["tokens"]
+    assert usage == {"prompt": 100, "completion": 50, "total": 150}
+
+
+async def test_agent_run_does_not_create_jsonl_trace_file(mock_client, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+
+    await al.run([{"role": "user", "content": "hi"}])
+
+    assert not (tmp_path / "data" / "traces.jsonl").exists()

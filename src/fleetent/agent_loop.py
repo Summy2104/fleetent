@@ -13,9 +13,9 @@ from openai.types.chat import ChatCompletionChunk
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent.agent_policy import check_tool_access
 from fleetent.context_mgr import maybe_compress
-from fleetent.eval_logger import log_run
 from fleetent.memory_layer import extract_and_save, load_memories
 from fleetent.model_router import RouteConfig, get_async_client_and_config
+from fleetent.observability import TraceEvent, record_trace_event
 from fleetent.permission_gate import _default_gate
 from fleetent.skill_registry import load as load_skill
 from fleetent.skill_registry import match as match_skill
@@ -87,6 +87,54 @@ async def _stream_with_fallback(
 
 
 ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
+
+
+def _record_agent_run_completed(
+    *,
+    user_input: str,
+    reply: str,
+    messages: list[Any],
+    elapsed_s: float,
+    usage: Any | None,
+    model_used: str,
+    user_id: str,
+    agent_name: str | None,
+) -> None:
+    payload: dict[str, Any] = {
+        "input": user_input,
+        "reply": reply,
+        "messages": [_serialize_message(message) for message in messages],
+        "elapsed_s": round(elapsed_s, 3),
+        "tokens": (
+            {
+                "prompt": usage.prompt_tokens,
+                "completion": usage.completion_tokens,
+                "total": usage.total_tokens,
+            }
+            if usage
+            else None
+        ),
+        "model_used": model_used,
+    }
+    if agent_name is not None:
+        payload["agent_name"] = agent_name
+    record_trace_event(
+        TraceEvent(
+            run_id=str(uuid.uuid4()),
+            event_type="agent_run_completed",
+            payload=payload,
+            user_id=user_id,
+            agent_id=agent_name,
+        )
+    )
+
+
+def _serialize_message(message: Any) -> Any:
+    if isinstance(message, dict):
+        return message
+    if hasattr(message, "model_dump"):
+        return message.model_dump()
+    return str(message)
 
 
 async def run(
@@ -207,12 +255,12 @@ async def run(
         (m["content"] for m in messages if isinstance(m, dict) and m.get("role") == "user"),
         "",
     )
-    log_run(
-        user_input,
-        reply,
-        messages,
-        time.monotonic() - start,
-        usage,
+    _record_agent_run_completed(
+        user_input=user_input,
+        reply=reply,
+        messages=messages,
+        elapsed_s=time.monotonic() - start,
+        usage=usage,
         model_used=model_used,
         user_id=user_id,
         agent_name=agent_name,
@@ -363,11 +411,11 @@ async def run_stream(
         if total_prompt_tokens or total_completion_tokens
         else None
     )
-    log_run(
-        user_input,
-        reply,
-        messages,
-        time.monotonic() - start,
+    _record_agent_run_completed(
+        user_input=user_input,
+        reply=reply,
+        messages=messages,
+        elapsed_s=time.monotonic() - start,
         usage=stream_usage,
         model_used=model_used,
         user_id=user_id,
