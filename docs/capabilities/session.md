@@ -8,7 +8,7 @@ session 持久化层，管理对话上下文的读写、并发保护和生命周
 
 **负责**：session 消息历史的读写、并发锁、原子持久化、TTL 过期与清理（规划中）。
 
-**不负责**：session 内消息的压缩（→ context_mgr）、执行记录写入（→ eval_logger）、IM 平台 thread/channel 与 session 的映射（→ im-gateway）、定时任务触发逻辑（→ cron_scheduler）。
+**不负责**：session 内消息的压缩（→ context_mgr）、执行记录写入（→ observability）、IM 平台 thread/channel 与 session 的映射（→ im-gateway）、定时任务触发逻辑（→ cron_scheduler）。
 
 **调用关系**：
 - 依赖：无（纯文件 I/O）

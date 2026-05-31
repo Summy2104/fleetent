@@ -6,7 +6,7 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**负责**：数据源接入与文档获取、文档解析与分块、向量索引构建、实体与关系提取、图谱存储、按查询召回相关文档片段（支持混合检索和图增强检索）。
+**负责**：数据源接入与文档获取、文档解析与分块、向量索引构建、实体与关系提取、图谱存储、按 tenant + knowledge base 隔离召回相关文档片段（支持混合检索和图增强检索）。
 
 **不负责**：注入 system prompt 的协调与 token 预算（→ long_term_ctx）、用户个人记忆（→ memory）。
 
@@ -16,7 +16,7 @@
 
 **模块归属**：
 - owning package：`intelligence.knowledge_base`
-- public API：`ingest(filename, content, format, scope)`、`search(query, scope, limit)`、`graph_search(query, scope, depth)`、`delete(document_id)`、`DataSource`
+- public API：`ingest(filename, content, format, tenant_id, kb_id)`、`search(query, tenant_id, kb_ids, limit)`、`graph_search(query, tenant_id, kb_ids, depth)`、`delete(document_id)`、`DataSource`
 - owned tables：`documents`、`chunks`、`chunks_fts`、`entities`、`relations`
 - config namespace：`knowledge_base.*`
 
@@ -26,7 +26,7 @@
 flowchart TD
     subgraph connector["连接器流程（定时或手动触发）"]
         C1[DataSource.list_documents] --> C2[DataSource.fetch]
-        C2 --> C3[knowledge_base.ingest\nfilename + content + format + scope]
+        C2 --> C3[knowledge_base.ingest\nfilename + content + format + tenant_id + kb_id]
     end
 
     subgraph ingest["导入流程（异步，导入请求立即返回）"]
@@ -35,15 +35,15 @@ flowchart TD
         B --> D[后台：分块]
         D --> E[写入 chunks 表]
         E --> E2[同步写入 chunks_fts\nBM25 索引]
-        E --> F[vector_store.upsert\nchunk_id + content + scope]
+        E --> F[vector_store.upsert\nchunk_id + content + namespace]
         D --> G[LLM 提取实体与关系]
         G --> H[写入 entities 表]
         G --> I[写入 relations 表]
-        H --> J[vector_store.upsert\nentity_id + description + scope]
+        H --> J[vector_store.upsert\nentity_id + description + namespace]
     end
 
     subgraph hybrid_search["混合检索（由 long_term_ctx 触发）"]
-        K[search query + scope] --> L[并行]
+        K[search query + tenant_id + kb_ids] --> L[并行]
         L --> L1[vector_store.search\n语义检索]
         L --> L2[BM25 检索\n关键词精确匹配\n实现：SQLite FTS5]
         L1 --> M[RRF 融合排序]
@@ -52,7 +52,7 @@ flowchart TD
     end
 
     subgraph graph_search["图增强检索（关系型查询）"]
-        O[graph_search query + scope] --> P[vector_store.search entities]
+        O[graph_search query + tenant_id + kb_ids] --> P[vector_store.search entities]
         P --> Q[匹配相关实体]
         Q --> R[遍历 relations 表\n按 depth 展开]
         R --> S[收集关联 chunk]
@@ -67,7 +67,8 @@ flowchart TD
 documents (
   id          TEXT PRIMARY KEY,  -- UUID
   filename    TEXT,
-  scope       TEXT,              -- tenant_id 或 agent_id，用于隔离
+  tenant_id   TEXT,              -- 租户标识；私有化单企业部署默认 "default"
+  kb_id       TEXT,              -- 租户内知识库标识，如 "global" / "sales" / "support"
   format      TEXT,              -- "markdown" | "text" | "pdf"
   source      TEXT,              -- 来源标识（"upload" | "confluence" | "local_dir" | ...）
   source_url  TEXT,              -- 原始文档 URL 或路径（可选，供溯源用）
@@ -98,7 +99,8 @@ entities (
   name        TEXT,              -- 实体名称
   type        TEXT,              -- 实体类型（person / org / concept / product / ...）
   description TEXT,              -- 实体描述，作为 embedding 文本
-  scope       TEXT,              -- 与 documents.scope 一致，用于隔离
+  tenant_id   TEXT,              -- 与 documents.tenant_id 一致，用于隔离
+  kb_id       TEXT,              -- 与 documents.kb_id 一致，用于隔离
   created_at  DATETIME
 )
 
@@ -113,9 +115,11 @@ relations (
 )
 ```
 
-向量 embedding 存储在 vector_store，namespace 格式为 `kb_{scope}`：
+向量 embedding 存储在 vector_store，namespace 格式为 `kb:{tenant_id}:{kb_id}`：
 - chunk 向量：以 `chunk.id` 为 key
 - entity 向量：以 `entity.id` 为 key（用于图检索入口定位）
+
+知识库身份由 `tenant_id + kb_id` 共同决定。v1.0 即使主要面向私有化单企业部署，也保留 `tenant_id` 字段，默认值为 `"default"`；同一企业内可同时存在公司全局知识库和多个部门知识库。Agent 通过配置绑定一个或多个 `kb_id`，检索时在这些 namespace 内分别查询后合并排序。
 
 ## 接口定义
 
@@ -154,15 +158,31 @@ class KnowledgeGraphResult:
     relations: list[str]           # 关系描述列表（如 "A 负责 B"，展示用）
 
 
-async def ingest(filename: str, content: bytes, format: str, scope: str) -> str:
+async def ingest(
+    filename: str,
+    content: bytes,
+    format: str,
+    tenant_id: str,
+    kb_id: str,
+) -> str:
     """导入文档，异步执行分块、embedding 和图提取。立即返回 document_id，后台处理不阻塞。"""
 
 
-async def search(query: str, scope: str, limit: int = 10) -> list[KnowledgeChunk]:
+async def search(
+    query: str,
+    tenant_id: str,
+    kb_ids: list[str],
+    limit: int = 10,
+) -> list[KnowledgeChunk]:
     """向量相似度检索，返回最相关的文档片段。适合事实型问答。由 long_term_ctx 调用。"""
 
 
-async def graph_search(query: str, scope: str, depth: int = 2) -> KnowledgeGraphResult:
+async def graph_search(
+    query: str,
+    tenant_id: str,
+    kb_ids: list[str],
+    depth: int = 2,
+) -> KnowledgeGraphResult:
     """图增强检索：定位相关实体后按关系展开，返回关联片段与关系链。适合关系型查询。由 long_term_ctx 调用。"""
 
 
@@ -220,13 +240,13 @@ async def delete(document_id: str) -> None:
   - 提取在后台执行，与分块并行触发
 
 - [ ] **混合检索（Hybrid Search）**：BM25 关键词检索与向量语义检索并行，RRF 融合排序后返回
-  - 对外接口不变：`search(query: str, scope: str) → list[KnowledgeChunk]`
+  - 对外接口不变：`search(query: str, tenant_id: str, kb_ids: list[str]) → list[KnowledgeChunk]`
   - BM25 擅长精确词匹配（产品编号、人名、专有名词），当前实现使用 SQLite FTS5（内置，无需额外服务）
   - 向量检索负责语义相似度和同义词
   - RRF（Reciprocal Rank Fusion）合并两路排序结果，无需调权重参数
 
 - [ ] **图增强检索**：从相关实体出发，按关系图谱展开，收集关联 chunk
-  - 对外接口：`graph_search(query: str, scope: str, depth: int) → KnowledgeGraphResult`
+  - 对外接口：`graph_search(query: str, tenant_id: str, kb_ids: list[str], depth: int) → KnowledgeGraphResult`
   - 适合关系型查询（"X 和 Y 是什么关系？"、"谁负责 Z？"）
   - depth 控制关系展开层数，默认 2 层，防止结果爆炸
   - 图数据存储在 SQLite（entities + relations 表），不需要独立图数据库
@@ -250,9 +270,9 @@ async def delete(document_id: str) -> None:
 - Then：API 立即返回 document_id，分块与 embedding 在后台执行
 
 **场景 3：作用域隔离**
-- Given：agent A 和 agent B 分别绑定不同 scope 的知识库
+- Given：agent A 和 agent B 分别绑定同一 tenant 下不同 `kb_id` 的知识库
 - When：两个 agent 分别检索相同 query
-- Then：各自只召回自己 scope 内的文档片段，互不干扰
+- Then：各自只召回自己绑定知识库内的文档片段，互不干扰
 
 **场景 4：文档删除**
 - Given：已导入并可检索的文档
@@ -268,13 +288,13 @@ async def delete(document_id: str) -> None:
 
 **需要单元测试的行为**：
 - 导入异步性：ingest() 立即返回，分块、embedding 和图提取均在后台执行
-- scope 隔离：不同 scope 的检索结果（向量和图）互不干扰
+- knowledge base 隔离：不同 `tenant_id + kb_id` 的检索结果（向量和图）互不干扰
 - delete 级联：删除文档后对应 chunk、entity、relation 均不出现在检索结果中
 - chunk 来源关联：KnowledgeChunk 返回正确的 filename 和 position
 - BM25 精确匹配：含精确关键词的 chunk 在 search() 结果中排名靠前
 - RRF 融合：向量和 BM25 各自命中的 chunk 都出现在合并结果中，不互相覆盖
 - 图遍历 depth：graph_search(depth=1) 只返回直接关联实体，不展开二级
-- graph_search scope 隔离：不同 scope 的实体和关系不互通
+- graph_search 隔离：不同 `tenant_id + kb_id` 的实体和关系不互通
 
 **需要 mock 的依赖**：
 - `vector_store`：隔离向量索引读写

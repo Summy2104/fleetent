@@ -48,7 +48,7 @@ class SearchResult:
 
 async def upsert(id: str, text: str, namespace: str) -> None:
     """将文本 embedding 后写入向量索引。id 已存在时覆盖更新。
-    namespace 用于隔离来源，memory 用 'mem_{user_id}'，knowledge 用 'kb_{tenant_id}'。
+    namespace 用于隔离来源，memory 用 'mem:{user_id}'，knowledge 用 'kb:{tenant_id}:{kb_id}'。
     """
 
 
@@ -118,4 +118,4 @@ async def delete(id: str, namespace: str) -> None:
   - in-process：部署简单，但 bge-m3 约 500MB-1GB 内存、冷启动 30-60s，影响主进程重启体验
   - HTTP sidecar：多 fleetent 实例可共享同一 embedding 服务，主进程重启不影响 embedding；两者均完全自托管
   - 建议接口设计为 HTTP endpoint，开发时用本地 `infinity_emb`，生产时独立部署——现在决定，后续不改接口（负责人：待认领）
-- [ ] namespace 命名规范：`mem_{user_id}` 和 `kb_{tenant_id}` 是否最终方案？（负责人：待认领）
+- [x] namespace 命名规范：memory 使用 `mem:{user_id}`；knowledge 使用 `kb:{tenant_id}:{kb_id}`。同一租户内允许多个知识库，并保留全局知识库与部门知识库并存的空间。

@@ -17,7 +17,7 @@ fleetent 的记忆系统借鉴认知科学的四类记忆划分，每类由不�
 | 类型 | 内容 | 存储位置 | 负责模块 |
 |------|------|---------|---------|
 | **语义记忆** | 用户身份、偏好、临时状态等跨 session 事实 | SQLite `memory_items` + vector_store | `memory_layer`（本模块）|
-| **情节记忆** | 对话与工具执行的完整历史轨迹 | SQLite `traces` 表 | `eval_logger` |
+| **情节记忆** | 对话与工具执行的完整历史轨迹 | SQLite `traces` 表 | `observability` |
 | **程序记忆** | agent 完成特定任务的技能与方法 | `skills/` 目录 | `skill_registry` |
 | **工作记忆** | 当前 session 的对话上下文（session 结束即释放） | 内存 | `context_mgr` |
 

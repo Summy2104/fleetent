@@ -7,9 +7,9 @@
 
 统一协调长期上下文的检索与注入，是 memory 和 knowledge_base 与 agent_loop 之间的胶水层。
 
-**负责**：并行查询 memory 和 knowledge_base、合并结果、控制注入的 token 预算、格式化为 system prompt 可用的文本。
+**负责**：并行查询 memory 和 knowledge_base、合并结果、控制注入的 token 预算、格式化为 system prompt 可用的文本，并返回来源摘要供 observability 记录。
 
-**不负责**：存储任何数据、记忆提取（→ memory）、文档索引（→ knowledge_base）、in-session 上下文压缩（→ context_mgr）。
+**不负责**：存储任何数据、记忆提取（→ memory）、文档索引（→ knowledge_base）、in-session 上下文压缩（→ context_mgr）、trace 持久化（→ observability）。
 
 **调用关系**：
 - 依赖：memory_layer（search）、knowledge_base（search）、config（token 预算上限）
@@ -37,23 +37,37 @@ flowchart TD
     H -->|是| I[截断低优先级条目]
     H -->|否| J[格式化为注入文本]
     I --> J
-    J --> K[返回 str]
+    J --> K[返回 BuiltContext\ntext + sources]
 ```
 
 ## 接口定义
 
 ```python
+@dataclass
+class ContextSource:
+    source_type: str  # "memory" | "knowledge"
+    source_id: str
+    score: float
+    metadata: dict[str, str]
+
+
+@dataclass
+class BuiltContext:
+    text: str
+    sources: list[ContextSource]
+
+
 async def build_context(
     user_id: str,
     query: str,
     agent_id: str,
     available_tokens: int,
-) -> str:
-    """并行检索 memory 和 knowledge_base，合并后返回注入 system prompt 的文本。
+) -> BuiltContext:
+    """并行检索 memory 和 knowledge_base，合并后返回注入文本和来源摘要。
 
     available_tokens: 调用方（agent_loop）传入的当前可用 token 数，
-        build_context 的输出不超过此值与 config 预算上限中的较小值。
-        为 0 时直接返回空字符串，不发起检索。
+        build_context.text 不超过此值与 config 预算上限中的较小值。
+        为 0 时直接返回空 text 和空 sources，不发起检索。
     任意一侧检索无结果时正常降级，不报错。
     """
 ```
@@ -83,27 +97,27 @@ async def build_context(
 **场景 1：两侧均有结果**
 - Given：用户有相关记忆，知识库有相关文档
 - When：agent_loop 调用 build_context
-- Then：返回文本同时包含记忆区段和文档区段
+- Then：返回的 BuiltContext.text 同时包含记忆区段和文档区段，BuiltContext.sources 包含对应来源摘要
 
 **场景 2：token 预算截断**
 - Given：memory 和 knowledge_base 检索结果合计超出 token 预算上限
 - When：build_context 合并结果
-- Then：返回文本不超过预算上限，memory 条目优先保留，knowledge 条目被截断
+- Then：BuiltContext.text 不超过预算上限，memory 条目优先保留，knowledge 条目被截断
 
 **场景 3：单侧无结果**
 - Given：knowledge_base 无与当前 query 相关的内容
 - When：build_context 调用
-- Then：正常返回 memory 内容，不因 knowledge_base 无结果而报错或返回空
+- Then：正常返回包含 memory 内容的 BuiltContext，不因 knowledge_base 无结果而报错或返回空
 
 **场景 4：两侧均无结果**
 - Given：用户无历史记忆，知识库为空
 - When：build_context 调用
-- Then：返回空字符串，agent_loop 正常继续
+- Then：返回空 text 和空 sources，agent_loop 正常继续
 
 **场景 5：可用 token 预算为零**
 - Given：agent_loop 当前 context 已接近上限，传入 `available_tokens=0`
 - When：build_context 调用
-- Then：不发起任何检索，直接返回空字符串；agent_loop 正常继续，不因注入失败报错
+- Then：不发起任何检索，直接返回空 text 和空 sources；agent_loop 正常继续，不因注入失败报错
 
 ## 测试边界
 
@@ -112,6 +126,7 @@ async def build_context(
 - token 预算截断：超出上限时正确截断，且 memory 条目先于 knowledge 条目保留
 - 单侧空结果：任意一侧返回空列表时不报错，正常合并另一侧结果
 - 格式化输出：memory 区段和 knowledge 区段分区正确，无结果的区段不出现在输出中
+- 来源摘要：返回 sources 仅包含被实际注入的结果，供 agent-runtime 交给 observability 记录
 
 **需要 mock 的依赖**：
 - `memory_layer.search`：隔离 memory 模块，控制返回内容和数量

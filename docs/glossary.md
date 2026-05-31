@@ -56,7 +56,7 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 | 术语 | 定义 | 禁止混用 |
 |------|------|---------|
 | **语义记忆** | 跨 session 的用户事实，按 `identity`/`preferences`/`context` 三类结构化存储于 `memory_items` 表，由 `memory_layer` 负责 | 不用 "semantic memory"（英文只在代码注释中使用）|
-| **情节记忆** | 对话与工具执行的完整历史轨迹，append-only 写入 `traces` 表，由 `eval_logger` 负责 | 不用 "episodic memory"、"execution log"（traces 是正式名词）|
+| **情节记忆** | 对话与工具执行的完整历史轨迹，写入 `traces` 表，由 `observability` 负责 | 不用 "episodic memory"、"execution log"（traces 是正式名词）|
 | **程序记忆** | agent 完成特定任务的技能与方法，存储为 `skills/` 目录，由 `skill_registry` 负责 | 不用 "procedural memory"、"knowledge"（knowledge 指企业文档知识库）|
 | **工作记忆** | 当前 session 的对话上下文，存储在内存中，session 结束即释放，由 `context_mgr` 负责 | 不用 "working memory"、"context window"（context window 是 LLM 的技术概念）|
 | **identity** | 语义记忆子类型：用户的身份事实（姓名、职位、技能），永久有效，新值覆盖旧值 | 保持英文，与代码 type 字段对齐 |
@@ -70,7 +70,7 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 
 | 术语 | 定义 | 禁止混用 |
 |------|------|---------|
-| **knowledge base（KB）** | 企业文档知识库，按 scope 隔离，由 `knowledge_base` 模块管理。与用户个人的语义记忆并列，由 `long_term_ctx` 统一调度注入 | 不用 "knowledge"（单独使用时过于宽泛）、"RAG 知识库"（RAG 是技术手段，不是业务概念）|
+| **knowledge base（KB）** | 企业文档知识库，按 `tenant_id + kb_id` 隔离，由 `knowledge_base` 模块管理。与用户个人的语义记忆并列，由 `long_term_ctx` 统一调度注入 | 不用 "knowledge"（单独使用时过于宽泛）、"RAG 知识库"（RAG 是技术手段，不是业务概念）|
 | **chunk** | 文档分块后的最小检索单元，保留来源文档信息（filename、position）| 保持英文，与代码字段对齐 |
 | **entity** | 从文档中 LLM 提取的命名实体（人名、组织、概念、产品等），用于图增强检索 | 保持英文 |
 | **relation** | 两个 entity 之间的关系描述，从文档中 LLM 提取，存储为有向边 | 保持英文 |
@@ -88,7 +88,7 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 | **混合检索（Hybrid Search）** | BM25 和向量检索并行执行，通过 RRF 融合排序后返回结果 | 不用 "hybrid retrieval" |
 | **RRF** | Reciprocal Rank Fusion，将多路检索结果按倒数排名融合的算法，无需人工调节权重 | 保持缩写 |
 | **图增强检索** | 从匹配实体出发，按关系图谱展开，收集关联 chunk，适合关系型查询（"谁负责 X？"）| 不用 "graph RAG"、"knowledge graph search" |
-| **namespace** | vector_store 内部的向量分区标识，格式为 `mem_{user_id}`（记忆向量）或 `kb_{scope}`（知识库向量）。不同 namespace 的向量物理隔离，检索不跨 namespace | 不用 "scope"（scope 是业务层概念，namespace 是 vector_store 内部概念）|
+| **namespace** | vector_store 内部的向量分区标识，格式为 `mem:{user_id}`（记忆向量）或 `kb:{tenant_id}:{kb_id}`（知识库向量）。不同 namespace 的向量物理隔离，检索不跨 namespace | 不用 "scope"（scope 是业务层概念，namespace 是 vector_store 内部概念）|
 
 ---
 

@@ -35,6 +35,11 @@
   - `database_url` 默认指向 `sqlite:///data/users.db`；非 SQLite backend 当前 fail fast
   - 不引入 ORM；schema lifecycle 由 alembic 统一管理
 
+- ✅ **observability 数据落点已明确**：运行观测数据按用途分层持久化
+  - agent traces v1.0 使用 SQLite `traces` 表，通过 DB runtime 访问
+  - 程序日志写入 `data/logs/` 下的日期文件，随 `data/` volume 持久化
+  - 日志轮转、trace retention 与备份策略由 observability / deployment 后续共同定义
+
 ## 规划中（v1.0）
 
 - [ ] **on-premises 安装包**：完整的一键部署方案

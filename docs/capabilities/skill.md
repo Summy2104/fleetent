@@ -81,7 +81,7 @@ flowchart TD
 - [ ] **禁用机制**：管理员可显式关闭特定 Skill，使其不参与匹配和注入
   - 全局禁用：对所有 agent 生效
   - agent 级禁用：只对指定 agent 生效
-  - 禁用状态记录在运行日志中，便于排查「为什么这个 Skill 没有生效」
+  - 禁用状态记录在 observability trace event 中，便于排查「为什么这个 Skill 没有生效」
 
 - [ ] **深层嵌套目录支持**：递归扫描 `skills/` 下任意层级的 `SKILL.md` 文件
 

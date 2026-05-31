@@ -6,7 +6,7 @@
 
 系统自我改进机制，定期分析 agent 执行历史，优化记忆质量、改进 skill、并识别知识库缺口。
 
-**负责**：读取 traces 发现规律、清理/合并低质量记忆、生成或改进 skill、上报知识库问题。
+**负责**：通过 observability trace API 读取 agent 执行历史，发现规律、清理/合并低质量记忆、生成或改进 skill、上报知识库问题。
 
 **不负责**：实时处理（异步定期触发，不在请求链路上）、skill 的运行时注入（→ agent-runtime）、修改知识库文档内容（只上报，不写回）。
 
@@ -16,7 +16,7 @@
 - **knowledge base reflection**：per-tenant，观察知识库使用质量，上报缺口与问题，不自动写回
 
 **调用关系**：
-- 依赖：`traces` 表（情节记忆数据源，SQLite）、memory_layer（读取与写回）、skill_registry（读取现有 skill）、knowledge_base（只读，查询召回质量）、permission_gate（prod 环境 skill 变更审批）、config
+- 依赖：observability（`query_trace_events(query)` 读取情节记忆事件）、memory_layer（读取与写回）、skill_registry（读取现有 skill）、knowledge_base（只读，查询召回质量）、permission_gate（prod 环境 skill 变更审批）、config
 - 被依赖：cron_scheduler（定期触发）
 
 **模块归属**：
@@ -29,7 +29,7 @@
 
 三条反射流程相互独立，分别调度，可安全并发。
 
-**并发安全说明**：三条流程的写入目标完全不重叠——memory reflection 写 `memory_items`，skill reflection 写 `skill_proposals`（prod）或 `skills/` 文件（dev），kb reflection 写 `kb_reflection_reports`。三者读取 `traces` 表时均为只读，不互相阻塞。memory reflection 写 `memory_items` 的同时，`long_term_ctx` 可能正在读取同一表；`memory_layer` 自身的并发控制负责保证读写安全，reflection 不额外加锁。
+**并发安全说明**：三条流程的写入目标完全不重叠——memory reflection 写 `memory_items`，skill reflection 写 `skill_proposals`（prod）或 `skills/` 文件（dev），kb reflection 写 `kb_reflection_reports`。三者通过 observability public API 只读 trace events，不直接读取 traces 表，也不互相阻塞。memory reflection 写 `memory_items` 的同时，`long_term_ctx` 可能正在读取同一表；`memory_layer` 自身的并发控制负责保证读写安全，reflection 不额外加锁。
 
 ```mermaid
 flowchart TD
@@ -40,7 +40,7 @@ flowchart TD
     end
 
     subgraph skill["skill reflection（per-agent，定期触发）"]
-        E[cron_scheduler] --> F[读取 traces 表\n按 agent_id + 时间窗口过滤]
+        E[cron_scheduler] --> F[调用 observability.query_trace_events\n按 agent_id + 时间窗口过滤]
         F --> G[LLM 分析：高频 pattern / 低效 skill]
         G --> H{环境？}
         H -->|dev| I[直接更新 skills/ 文件]
@@ -50,7 +50,7 @@ flowchart TD
     end
 
     subgraph kb["knowledge base reflection（per-tenant，定期触发）"]
-        L[cron_scheduler] --> M[读取检索质量日志]
+        L[cron_scheduler] --> M[调用 observability.query_trace_events\n读取检索质量事件]
         M --> N[分析：低召回 / 未命中 / 陈旧 chunk]
         N --> O[写入 kb_reflection_reports 表]
         O --> P[管理员查看并决策\n知识库内容不自动修改]
@@ -94,7 +94,7 @@ async def run_memory_reflection(user_id: str) -> None:
 
 
 async def run_skill_reflection(agent_id: str) -> None:
-    """分析 agent traces，生成 skill 变更提案（prod）或直接更新 skill 文件（dev）。"""
+    """分析 agent trace events，生成 skill 变更提案（prod）或直接更新 skill 文件（dev）。"""
 
 
 async def run_kb_reflection(scope: str) -> None:
@@ -180,9 +180,10 @@ async def run_kb_reflection(scope: str) -> None:
 
 **需要 mock 的依赖**：
 - `model_router.get_async_client_and_config`：隔离所有 LLM 分析调用
+- `observability.query_trace_events`：注入可控的历史 trace events
 - `memory_layer`：注入可控的记忆数据，隔离写回操作
 - `skill_registry`：隔离 skill 文件读写
-- SQLite DB 路径：`monkeypatch` 到 `tmp_path`
+- SQLite DB 路径：仅 reflection 自有表需要 `monkeypatch` 到 `tmp_path`
 
 ## 待决问题
 

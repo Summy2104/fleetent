@@ -19,7 +19,7 @@ graph TD
     A["接入层\nserver.py · im_gateway · webhook_router"]
     B["编排层\nagent_loop · sub_agent"]
     C["能力层\nmodel_router · tool_registry · long_term_ctx\nskill_registry · context_mgr · mcp_client\nsandbox_client · permission_gate · cron_scheduler"]
-    D["基础层\nuser_store · agent_store · im_user_store\nsession_mgr · schedule_store · eval_logger\nagent_policy · config · admin"]
+    D["基础层\nuser_store · agent_store · im_user_store\nsession_mgr · schedule_store · observability\nagent_policy · config · admin"]
 
     A --> B --> C --> D
 ```
@@ -43,7 +43,7 @@ src/fleetent/
   channels/         ← im_gateway、webhook_router、cron_scheduler、schedule_store
   intelligence/     ← memory_layer、knowledge_base、long_term_ctx、vector_store、reflection
   integrations/     ← mcp_client、sandbox_client、connectors
-  observability/    ← eval_logger、trace、log、usage、diagnostics
+  observability/    ← trace、log、usage、diagnostics
   infrastructure/   ← config、db runtime、底层 adapter
 ```
 
@@ -82,7 +82,7 @@ src/fleetent/
   im_user_store.py   ← (platform, platform_user_id) → 内部 User；allowlist
   session_mgr.py     ← JSON session 持久化；per-session asyncio.Lock
   schedule_store.py  ← SQLite：定时任务定义与状态持久化
-  eval_logger.py     ← append-only JSONL trace 日志
+  observability/     ← trace、log、usage、diagnostics
   agent_policy.py    ← fnmatch 工具访问检查
   config.py          ← pydantic-settings；加载 .env + config/settings.yaml
   admin.py           ← CLI 管理工具
@@ -104,7 +104,7 @@ flowchart TD
     E -->|tool_calls| G["permission_gate\nmedium/high 风险审批"]
     G --> H["tool dispatch\n执行工具"]
     H --> E
-    E -->|stop| I["eval_logger\n写 trace"]
+    E -->|stop| I["observability\n写 trace event"]
     I --> J["long_term_ctx（规划中）\n异步提取事实"]
     J --> K["SSE done"]
 ```

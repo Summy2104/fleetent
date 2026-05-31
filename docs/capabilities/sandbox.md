@@ -8,7 +8,7 @@
 
 **负责**：容器生命周期管理、启用控制、资源限制、环境变量过滤、输出截断、孤儿容器清理。
 
-**不负责**：决定是否执行代码（→ agent_loop）、工具访问控制（→ agent_policy）、执行结果写入 trace（→ eval_logger）。
+**不负责**：决定是否执行代码（→ agent_loop）、工具访问控制（→ agent_policy）、执行结果写入 trace（→ observability）。
 
 **调用关系**：
 - 依赖：config（sandbox 配置参数）、agent_store（agent 级别 `features.code_execution` 开关）
@@ -57,7 +57,7 @@ flowchart TD
 - ⚡ **文件系统隔离**：`--read-only` 模式，整个文件系统只读，`/tmp` 目录可写
   - 当前缺失：无符号链接攻击防护
 
-- ⚡ **执行过程可观测**：返回 stdout / stderr / exit_code，但未写入运行日志（trace）
+- ⚡ **执行过程可观测**：返回 stdout / stderr / exit_code，但未写入 observability trace event
 
 ## 规划中（v1.0）
 
@@ -106,7 +106,7 @@ flowchart TD
 
 - [ ] **孤儿沙箱清理**：平台启动时检测并销毁上次崩溃遗留的 microsandbox 实例
 
-- [ ] **执行结果写入 trace**：记录执行时长、退出码、输出大小、使用的沙箱类型
+- [ ] **执行结果写入 trace**：通过 observability 记录执行时长、退出码、输出大小、使用的沙箱类型
 
 ## 验收标准
 
