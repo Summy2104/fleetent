@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from fleetent import memory_layer
 from fleetent.config import Settings
+from fleetent.intelligence import knowledge_base
 
 _MEMORY_LIMIT = 10
 _KNOWLEDGE_LIMIT = 10
@@ -52,11 +53,7 @@ async def build_context(
         return BuiltContext(text="", sources=[])
 
     memories = await memory_layer.search(user_id, query, limit=_MEMORY_LIMIT)
-    knowledge_results = (
-        await _knowledge_provider(user_id, query, agent_id, _KNOWLEDGE_LIMIT)
-        if _knowledge_provider is not None
-        else []
-    )
+    knowledge_results = await _search_knowledge(user_id, query, agent_id, _KNOWLEDGE_LIMIT)
     if not memories and not knowledge_results:
         return BuiltContext(text="", sources=[])
 
@@ -110,6 +107,27 @@ def _item_content(item: object) -> str:
     return str(getattr(item, "content", ""))
 
 
+async def _search_knowledge(
+    user_id: str,
+    query: str,
+    agent_id: str,
+    limit: int,
+) -> list[object]:
+    if _knowledge_provider is not None:
+        return await _knowledge_provider(user_id, query, agent_id, limit)
+
+    settings = Settings(anthropic_api_key="")
+    if not settings.knowledge_base.enabled:
+        return []
+    results = await knowledge_base.search(
+        query,
+        tenant_id=settings.knowledge_base.default_tenant_id,
+        kb_ids=[settings.knowledge_base.default_kb_id],
+        limit=limit,
+    )
+    return list(results)
+
+
 def _knowledge_source(item: object) -> ContextSource:
     raw_metadata = getattr(item, "metadata", {})
     metadata: dict[str, str] = (
@@ -117,6 +135,12 @@ def _knowledge_source(item: object) -> ContextSource:
         if isinstance(raw_metadata, dict)
         else {}
     )
+    if not metadata and hasattr(item, "filename"):
+        metadata = {
+            "filename": str(getattr(item, "filename", "")),
+            "document_id": str(getattr(item, "document_id", "")),
+            "kb_id": str(getattr(item, "kb_id", "")),
+        }
     return ContextSource(
         source_type="knowledge",
         source_id=str(getattr(item, "id", "")),

@@ -6,18 +6,20 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**负责**：数据源接入与文档获取、文档解析与分块、向量索引构建、实体与关系提取、图谱存储、按 tenant + knowledge base 隔离召回相关文档片段（支持混合检索和图增强检索）。
+**当前负责**：手动 text / markdown 内容导入、deterministic chunking、向量索引构建、按 tenant + knowledge base 隔离召回相关文档片段。
+
+**后续负责**：数据源接入与文档获取、文档解析、混合检索、实体与关系提取、图谱存储、同步规划。
 
 **不负责**：注入 system prompt 的协调与 token 预算（→ long_term_ctx）、用户个人记忆（→ memory）。
 
 **调用关系**：
-- 依赖：vector_store（向量索引）、model_router（`kb_extraction` task，实体提取）、config
+- 依赖：vector_store（向量索引）、config
 - 被依赖：long_term_ctx（检索注入内容）、reflection（只读，观察召回质量）
 
 **模块归属**：
 - owning package：`intelligence.knowledge_base`
-- public API：`ingest(filename, content, format, tenant_id, kb_id)`、`search(query, tenant_id, kb_ids, limit)`、`graph_search(query, tenant_id, kb_ids, depth)`、`delete(document_id)`、`DataSource`
-- owned tables：`documents`、`chunks`、`chunks_fts`、`entities`、`relations`
+- public API：`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit)`、`delete(document_id)`
+- owned tables：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`
 - config namespace：`knowledge_base.*`
 
 ## 关键流程
@@ -29,143 +31,88 @@ flowchart TD
         C2 --> C3[knowledge_base.ingest\nfilename + content + format + tenant_id + kb_id]
     end
 
-    subgraph ingest["导入流程（异步，导入请求立即返回）"]
-        A[ingest 调用] --> B[写入 documents 表]
-        B --> C[立即返回 document_id]
-        B --> D[后台：分块]
-        D --> E[写入 chunks 表]
-        E --> E2[同步写入 chunks_fts\nBM25 索引]
+    subgraph ingest["当前导入流程（同步最小闭环）"]
+        A[ingest_text 调用] --> B[写入 knowledge_documents 表]
+        B --> D[deterministic chunking]
+        D --> E[写入 knowledge_chunks 表]
         E --> F[vector_store.upsert\nchunk_id + content + namespace]
-        D --> G[LLM 提取实体与关系]
-        G --> H[写入 entities 表]
-        G --> I[写入 relations 表]
-        H --> J[vector_store.upsert\nentity_id + description + namespace]
+        F --> C[返回 KnowledgeDocument]
     end
 
-    subgraph hybrid_search["混合检索（由 long_term_ctx 触发）"]
-        K[search query + tenant_id + kb_ids] --> L[并行]
-        L --> L1[vector_store.search\n语义检索]
-        L --> L2[BM25 检索\n关键词精确匹配\n实现：SQLite FTS5]
-        L1 --> M[RRF 融合排序]
-        L2 --> M
-        M --> N[返回 KnowledgeChunk 列表]
+    subgraph vector_search["当前检索流程（由 long_term_ctx 触发）"]
+        K[search query + tenant_id + kb_ids] --> L[按 kb namespace 分别调用 vector_store.search]
+        L --> M[回查 knowledge_chunks / knowledge_documents]
+        M --> N[按 score DESC、position ASC、id ASC 稳定排序]
+        N --> O[返回 KnowledgeChunk 列表]
     end
 
-    subgraph graph_search["图增强检索（关系型查询）"]
-        O[graph_search query + tenant_id + kb_ids] --> P[vector_store.search entities]
-        P --> Q[匹配相关实体]
-        Q --> R[遍历 relations 表\n按 depth 展开]
-        R --> S[收集关联 chunk]
-        S --> T[返回 KnowledgeGraphResult]
-    end
 ```
 
 ## 数据模型
 
 ```sql
 -- 文档元数据
-documents (
+knowledge_documents (
   id          TEXT PRIMARY KEY,  -- UUID
   filename    TEXT,
   tenant_id   TEXT,              -- 租户标识；私有化单企业部署默认 "default"
   kb_id       TEXT,              -- 租户内知识库标识，如 "global" / "sales" / "support"
-  format      TEXT,              -- "markdown" | "text" | "pdf"
-  source      TEXT,              -- 来源标识（"upload" | "confluence" | "local_dir" | ...）
+  source      TEXT,              -- 来源标识（当前默认 "manual"）
   source_url  TEXT,              -- 原始文档 URL 或路径（可选，供溯源用）
-  created_at  DATETIME,
-  updated_at  DATETIME
+  created_at  DATETIME
 )
 
 -- 分块内容
-chunks (
-  id          TEXT PRIMARY KEY,  -- UUID，同时作为 vector_store 的 key
-  document_id TEXT,              -- → documents.id
+knowledge_chunks (
+  id          TEXT PRIMARY KEY,  -- document_id:chunk:{position}，同时作为 vector_store 的 key
+  document_id TEXT,              -- → knowledge_documents.id
+  tenant_id   TEXT,
+  kb_id       TEXT,
   content     TEXT,              -- chunk 文本
   position    INTEGER,           -- chunk 在文档中的顺序
-  created_at  DATETIME
-)
-
--- 全文索引（SQLite FTS5 虚拟表，与 chunks 表同步写入）
-chunks_fts USING fts5 (
-  content,                       -- 索引 chunks.content
-  content="chunks",              -- 关联原表，content rowid 对应 chunks rowid
-  tokenize="unicode61"           -- 支持中英文混合
-)
-
--- 实体（从文档中 LLM 提取）
-entities (
-  id          TEXT PRIMARY KEY,  -- UUID，同时作为 vector_store 的 key
-  document_id TEXT,              -- → documents.id，来源文档
-  name        TEXT,              -- 实体名称
-  type        TEXT,              -- 实体类型（person / org / concept / product / ...）
-  description TEXT,              -- 实体描述，作为 embedding 文本
-  tenant_id   TEXT,              -- 与 documents.tenant_id 一致，用于隔离
-  kb_id       TEXT,              -- 与 documents.kb_id 一致，用于隔离
-  created_at  DATETIME
-)
-
--- 关系（实体间关系，从文档中 LLM 提取）
-relations (
-  id          TEXT PRIMARY KEY,  -- UUID
-  source_id   TEXT,              -- → entities.id
-  target_id   TEXT,              -- → entities.id
-  relation    TEXT,              -- 关系描述（如 "负责" / "属于" / "依赖"）
-  document_id TEXT,              -- → documents.id，关系来源文档
   created_at  DATETIME
 )
 ```
 
 向量 embedding 存储在 vector_store，namespace 格式为 `kb:{tenant_id}:{kb_id}`：
 - chunk 向量：以 `chunk.id` 为 key
-- entity 向量：以 `entity.id` 为 key（用于图检索入口定位）
 
-知识库身份由 `tenant_id + kb_id` 共同决定。v1.0 即使主要面向私有化单企业部署，也保留 `tenant_id` 字段，默认值为 `"default"`；同一企业内可同时存在公司全局知识库和多个部门知识库。Agent 通过配置绑定一个或多个 `kb_id`，检索时在这些 namespace 内分别查询后合并排序。
+知识库身份由 `tenant_id + kb_id` 共同决定。当前默认 `tenant_id="default"`、`kb_id="global"`；检索时在指定 namespace 内分别查询后合并排序。
 
 ## 接口定义
 
 ```python
 @dataclass
-class DocumentRef:
-    id: str        # 数据源内的唯一标识（如 Confluence page_id）
-    filename: str  # 文件名或标题
-    format: str    # "markdown" | "text" | "pdf" | "html"
-    url: str       # 原始文档 URL 或路径（供溯源）
-
-
-class DataSource:
-    """数据源连接器基类，每种数据源实现此接口。"""
-
-    async def list_documents(self) -> list[DocumentRef]:
-        """列举数据源中所有可导入的文档。"""
-
-    async def fetch(self, ref: DocumentRef) -> bytes:
-        """获取文档原始内容。"""
+class KnowledgeDocument:
+    id: str
+    tenant_id: str
+    kb_id: str
+    filename: str
+    source: str
+    source_url: str | None
 
 
 @dataclass
 class KnowledgeChunk:
     id: str
     document_id: str
+    tenant_id: str
+    kb_id: str
     filename: str
     content: str
+    position: int
     score: float  # vector_store 返回的相似度分数
 
 
-@dataclass
-class KnowledgeGraphResult:
-    chunks: list[KnowledgeChunk]   # 关联的文档片段
-    entities: list[str]            # 匹配到的实体名称（展示用）
-    relations: list[str]           # 关系描述列表（如 "A 负责 B"，展示用）
-
-
-async def ingest(
+async def ingest_text(
     filename: str,
-    content: bytes,
-    format: str,
-    tenant_id: str,
-    kb_id: str,
-) -> str:
-    """导入文档，异步执行分块、embedding 和图提取。立即返回 document_id，后台处理不阻塞。"""
+    content: str,
+    tenant_id: str | None = None,
+    kb_id: str | None = None,
+    source: str = "manual",
+    source_url: str | None = None,
+) -> KnowledgeDocument:
+    """导入 plain text / markdown 内容，同步完成分块与向量索引。"""
 
 
 async def search(
@@ -177,33 +124,24 @@ async def search(
     """向量相似度检索，返回最相关的文档片段。适合事实型问答。由 long_term_ctx 调用。"""
 
 
-async def graph_search(
-    query: str,
-    tenant_id: str,
-    kb_ids: list[str],
-    depth: int = 2,
-) -> KnowledgeGraphResult:
-    """图增强检索：定位相关实体后按关系展开，返回关联片段与关系链。适合关系型查询。由 long_term_ctx 调用。"""
-
-
 async def delete(document_id: str) -> None:
-    """删除文档及其所有 chunk、实体、关系和对应向量。"""
+    """删除文档及其所有 chunk 和对应向量。"""
 ```
 
 ## 现状
 
-**仅完成迁移规划**：`2026-05-31-knowledge-bridge-migration-plan` 已归档。
+**已完成最小 core 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入。
 
 团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移设计资产和小块算法**，而非从零重写或整体搬运。
 
-迁移评估见 [knowledge-bridge 迁移计划](../knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：先做 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环，再依次推进 parser、local connector、hybrid search、sync planner、Confluence / Google Drive connector、graph search 和 retrieval audit。当前迁移评估 change 只产出文档，不迁移 parser / connector 代码，不实现 tables、ingest 或 search。
+迁移评估见 [knowledge-bridge 迁移计划](../knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：已先完成 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环；后续再依次推进 parser、local connector、hybrid search、sync planner、Confluence / Google Drive connector、graph search 和 retrieval audit。
 
 当前未实现内容：
-- 无 `intelligence.knowledge_base` runtime package
-- 无 knowledge-base Alembic tables
-- 无 ingest / parser / chunker / search API
-- 无 connector、sync planner、hybrid search、graph search
-- long-term-ctx 目前只通过 optional/null provider 为 KB 预留接入点
+- 无 parser framework，仅接受调用方传入的 plain text / markdown string
+- 无 local directory、Confluence、Google Drive connector
+- 无 sync planner、后台 job、admin UI、REST upload API
+- 无 BM25 / FTS5 / hybrid / rerank / query planner
+- 无 graph_search、entities、relations 或 `kb_extraction`
 
 **后续可迁移参考（knowledge-bridge 已实现，但需按 fleetent specs 分批适配）**：
 - ✅ 文档解析思路：text / Markdown / HTML / section-first 归并优先；PDF / DOCX / PPTX / Google Docs / Google Sheets 后续逐项评估依赖；图片 / VLM 暂缓
@@ -225,15 +163,13 @@ async def delete(document_id: str) -> None:
 
 ## 当前缺口
 
-- 运行时核心能力尚未开始：缺少 KB、document、chunk 的数据模型和 public API。
-- 最小闭环尚未打通：无法手动导入 text/markdown，也无法通过 `knowledge_base.search()` 返回 chunk。
-- 真实检索质量无法评估：没有 chunking、vector indexing、BM25 或 benchmark fixture。
+- parser / connector / sync 能力尚未开始：当前只接受调用方传入的 text / markdown string。
+- 检索仍是 vector-only：没有 BM25、hybrid、rerank、graph 或 benchmark fixture。
 - 外部数据源暂未接入：local directory、Confluence、Google Drive 均未实现。
-- 与 long-term-ctx 的 provider contract 还需要在 `knowledge-base-core` 中正式落地。
+- long-term-ctx 只支持内置默认 KB provider；还没有 agent 到多 KB 的绑定策略。
 
 ## 下一批候选 specs
 
-- `knowledge-base-core`
 - `knowledge-base-parsers-basic`
 - `knowledge-base-connectors-local`
 - `knowledge-base-hybrid-search`
@@ -304,41 +240,38 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - When：用户提问与文档内容相关
 - Then：long_term_ctx 通过 knowledge_base.search() 召回相关片段，agent 回答中体现文档内容
 
-**场景 2：导入不阻塞**
-- Given：管理员上传一份较大的 PDF
-- When：导入请求返回
-- Then：API 立即返回 document_id，分块与 embedding 在后台执行
+**场景 2：导入生成稳定 chunks**
+- Given：调用方导入一段 text / markdown 内容
+- When：chunk_size 和 chunk_overlap 固定
+- Then：生成的 chunk 内容和 position 保持 deterministic
 
 **场景 3：作用域隔离**
-- Given：agent A 和 agent B 分别绑定同一 tenant 下不同 `kb_id` 的知识库
-- When：两个 agent 分别检索相同 query
-- Then：各自只召回自己绑定知识库内的文档片段，互不干扰
+- Given：不同 tenant 或不同 `kb_id` 中存在相似内容
+- When：调用 search(query, tenant_id, kb_ids)
+- Then：只召回指定 tenant 和 kb 范围内的文档片段
 
 **场景 4：文档删除**
 - Given：已导入并可检索的文档
-- When：管理员调用 delete(document_id)
-- Then：该文档的所有 chunk 及其实体、关系不再出现在任何检索结果中
-
-**场景 5：图增强检索返回关系链**
-- Given：知识库中有文档描述 "Alice 负责项目 Orion，Bob 是 Alice 的上级"
-- When：用户提问 "谁可以审批 Orion 项目？"
-- Then：graph_search 通过实体 "Orion" → 关系 "负责" → "Alice" → 关系 "上级" → "Bob" 展开，返回包含 Bob 和审批信息的相关 chunk
+- When：调用 delete(document_id)
+- Then：该文档的所有 chunk 不再出现在检索结果中，对应 vector entries 被删除
 
 ## 测试边界
 
 **需要单元测试的行为**：
-- 导入异步性：ingest() 立即返回，分块、embedding 和图提取均在后台执行
-- knowledge base 隔离：不同 `tenant_id + kb_id` 的检索结果（向量和图）互不干扰
-- delete 级联：删除文档后对应 chunk、entity、relation 均不出现在检索结果中
-- chunk 来源关联：KnowledgeChunk 返回正确的 filename 和 position
-- BM25 精确匹配：含精确关键词的 chunk 在 search() 结果中排名靠前
-- RRF 融合：向量和 BM25 各自命中的 chunk 都出现在合并结果中，不互相覆盖
-- 图遍历 depth：graph_search(depth=1) 只返回直接关联实体，不展开二级
-- graph_search 隔离：不同 `tenant_id + kb_id` 的实体和关系不互通
+- public API 可导入：`KnowledgeDocument`、`KnowledgeChunk`、`ingest_text()`、`search()`、`delete()`
+- 配置默认值：`knowledge_base.enabled=false`，默认 tenant/kb 与 chunk 参数稳定
 
-**需要 mock 的依赖**：
+**需要集成测试的行为**：
+- Alembic fresh upgrade 创建 `knowledge_bases`、`knowledge_documents`、`knowledge_chunks`
+- ingest_text 保存 document、生成 deterministic chunks，并逐 chunk 调用 vector_store.upsert
+- 空内容 fail fast
+- search 按 `kb:{tenant_id}:{kb_id}` namespace 调用 vector_store，支持多 kb 合并与稳定排序
+- knowledge base 隔离：不同 `tenant_id + kb_id` 的检索结果互不干扰
+- delete 级联：删除文档后对应 chunk 和 vector entries 均被清理
+- long-term-ctx 在 `knowledge_base.enabled=true` 时调用内置 provider；disabled 或无结果时降级
+
+**需要 mock / monkeypatch 的依赖**：
 - `vector_store`：隔离向量索引读写
-- `model_router.get_async_client_and_config`：隔离实体提取 LLM 调用
 - SQLite DB 路径：`monkeypatch` 到 `tmp_path`，绝不触碰 data/
 
 ## 待决问题
