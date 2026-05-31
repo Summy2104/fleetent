@@ -59,6 +59,9 @@ def main() -> None:
     p_rm_sched = sub.add_parser("remove-schedule", help="Remove a scheduled task by id")
     p_rm_sched.add_argument("--task-id", required=True, help="Task UUID")
 
+    # --- skill commands ---
+    sub.add_parser("reload-skills", help="Rescan skills and atomically refresh the index")
+
     # --- default agent command ---
     p_default = sub.add_parser("set-default-agent", help="Set or clear the default agent")
     p_default_group = p_default.add_mutually_exclusive_group(required=True)
@@ -95,6 +98,7 @@ def main() -> None:
 
     elif args.cmd == "list-pending":
         import fleetent.im_user_store as ius
+
         pending = ius.list_pending()
         if not pending:
             print("No pending users.")
@@ -106,8 +110,10 @@ def main() -> None:
 
     elif args.cmd == "approve-user":
         import fleetent.im_user_store as ius
+
         ius._init_db()
         from fleetent.user_store import _conn as conn_fn
+
         with conn_fn() as conn:
             row = conn.execute(
                 "SELECT id FROM im_users WHERE id = ?", (args.im_user_id,)
@@ -128,6 +134,7 @@ def main() -> None:
 
     elif args.cmd == "seed-builtin-admin":
         from fleetent.auth import seed_builtin_admin
+
         result = seed_builtin_admin()
         if result is None:
             print("Built-in admin already exists.")
@@ -139,6 +146,7 @@ def main() -> None:
 
     elif args.cmd == "assign-channel":
         from fleetent.agent_store import assign_channel, get_by_name
+
         agent = get_by_name(args.agent_name)
         if agent is None:
             print(f"Error: Agent {args.agent_name!r} not found.", file=sys.stderr)
@@ -148,11 +156,13 @@ def main() -> None:
 
     elif args.cmd == "unassign-channel":
         from fleetent.agent_store import unassign_channel
+
         unassign_channel(args.platform, args.channel_id)
         print(f"Channel {args.platform}/{args.channel_id} unassigned.")
 
     elif args.cmd == "list-schedules":
         from fleetent import schedule_store
+
         tasks = schedule_store.list_tasks()
         if not tasks:
             print("No scheduled tasks")
@@ -163,6 +173,7 @@ def main() -> None:
 
     elif args.cmd == "add-schedule":
         from fleetent import schedule_store
+
         task = schedule_store.create(
             name=args.name,
             cron_expr=args.cron,
@@ -176,11 +187,25 @@ def main() -> None:
 
     elif args.cmd == "remove-schedule":
         from fleetent import schedule_store
+
         deleted = schedule_store.delete(args.task_id)
         if not deleted:
             print(f"Error: task {args.task_id!r} not found.", file=sys.stderr)
             sys.exit(1)
         print(f"Task {args.task_id!r} removed.")
+
+    elif args.cmd == "reload-skills":
+        from fleetent import skill_registry
+
+        summary = skill_registry.reload()
+        if summary["status"] == "ok":
+            print(f"Skills reloaded: ok (loaded={summary['loaded']}, failed={summary['failed']})")
+        else:
+            print(
+                f"Skills reload failed: {summary['reason']} (skills_dir={summary['skills_dir']})",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     elif args.cmd == "set-default-agent":
         _set_default_agent(args)
