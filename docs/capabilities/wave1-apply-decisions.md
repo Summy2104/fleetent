@@ -73,3 +73,17 @@
 
 **影响:** 509 passed;mcp_client 的 2 个 no-any-return 为既有同模式,无新增。stdio 路径无回归。
 **需 zy 核实:** protocolVersion=2025-06-18、是否所有目标 MCP server 都接受/需要 notifications/initialized。
+
+## request-routing-override (MR1) — feat/request-routing-override
+
+**实现:** `RouteOverride` frozen dataclass(5 字段全可选);`_apply_override(cfg,override)` 纯函数(非 None 替换;设 model 且未给 fallbacks→清空;override=None 返回同对象);get_(async_)client_and_config 加 override 参数、共用 _apply_override;run/run_stream 加 force_model→RouteOverride(model=force_model),override 生效时 models_to_try=[cfg.model];trace 复用 model_used。
+
+**与 AR21 _select_route 整合:** 仍 `route=_select_route(messages)` 选 task_type(vision/default),override 叠加其上;`force_model=None` 走纯位置调用(不传 override kwarg,以免破坏只接单参的现有 mock 测试),非 None 才传 override=。
+
+**自解冲突:**
+1. 现状是 AR21 _select_route 而非 design 写的硬编码 "default" → override 叠加在 _select_route 结果之上。
+2. force_model=None 必须不传 override kwarg(现有 mock/spy 只接单参)→ None 分支纯位置调用。
+3. models_to_try 显式 [cfg.model](override 时 fallbacks 已被清空,显式写让 D3 意图存活)。
+
+**影响:** 533 passed,mypy 66=baseline 无新增。含守卫 test_override_none_is_byte_identical_routing。解锁 model-parameter-config。
+**需 zy 核实:** force_model 与 vision route 叠加语义(force_model 会强制覆盖 vision route 的模型)。
