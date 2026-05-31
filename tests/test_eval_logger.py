@@ -127,6 +127,7 @@ def test_serialize_fallback_str():
 
 # --- model_used ---
 
+
 def test_log_run_model_used_written_to_trace(tmp_path, monkeypatch):
     import fleetent.eval_logger as el
 
@@ -145,7 +146,29 @@ def test_log_run_model_used_omitted_when_not_provided(tmp_path, monkeypatch):
     assert "model_used" not in entry
 
 
+# --- error_category ---
+
+
+def test_log_run_error_category_written_to_trace(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    el.log_run("hi", "hello", [], 0.1, error_category="rate_limit")
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert entry["error_category"] == "rate_limit"
+
+
+def test_log_run_error_category_omitted_when_not_provided(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    el.log_run("hi", "hello", [], 0.1)
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert "error_category" not in entry
+
+
 # --- user_id ---
+
 
 def test_log_run_user_id_written(tmp_path, monkeypatch):
     import fleetent.eval_logger as el
@@ -166,6 +189,7 @@ def test_log_run_user_id_omitted_when_not_provided(tmp_path, monkeypatch):
 
 
 # --- agent_name ---
+
 
 def test_log_run_agent_name_written(tmp_path, monkeypatch):
     import fleetent.eval_logger as el
