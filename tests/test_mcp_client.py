@@ -571,3 +571,376 @@ def test_next_request_id_isolated_between_servers():
     # b has its own counter, unaffected by a's two advances
     assert b1 == a1
     assert a2 == a1 + 1
+
+
+# --- MCP2: session lifecycle helpers (open / reuse / expire) ---
+
+
+def test_session_expire_clears_session_id():
+    from fleetent.mcp_client import _expire_session
+
+    server = McpServerConfig(id="exp", url="http://exp.test")
+    server.session_id = "sess-old"
+    _expire_session(server)
+    assert server.session_id is None
+
+
+def test_session_reuse_echoes_session_id_when_present():
+    """_base_headers (reuse semantics) includes Mcp-Session-Id when set."""
+    server = McpServerConfig(id="reuse", url="http://reuse.test")
+    server.session_id = "sess-1"
+    headers = mcp_client._base_headers(server)
+    assert headers["Mcp-Session-Id"] == "sess-1"
+
+
+def test_session_reuse_omits_session_id_when_absent():
+    server = McpServerConfig(id="reuse2", url="http://reuse2.test")
+    assert server.session_id is None
+    headers = mcp_client._base_headers(server)
+    assert "Mcp-Session-Id" not in headers
+
+
+@pytest.mark.asyncio
+async def test_open_session_writes_session_id_from_initialize(monkeypatch):
+    """_open_session sends initialize and stores the Mcp-Session-Id from the response."""
+    import respx
+
+    server = McpServerConfig(id="open", url="http://open.test", auth_type="none")
+    captured: list = []
+
+    import httpx as _httpx
+
+    async with _httpx.AsyncClient(timeout=10.0) as client:
+        with respx.mock:
+            respx.post("http://open.test/").mock(
+                side_effect=_make_streamable_handler(session_id="sess-new", captured=captured)
+            )
+            await mcp_client._open_session(client, server)
+
+    assert server.session_id == "sess-new"
+    methods = [json.loads(r.content).get("method") for r in captured]
+    assert "initialize" in methods
+    assert "notifications/initialized" in methods
+
+
+# --- MCP2: session expiry transparent rebuild (tools/call) ---
+
+
+def _make_session_expiry_handler(
+    *,
+    expire_times: int,
+    new_session_id: str,
+    captured: list[httpx.Request],
+    expiry_status: int = 404,
+    tool_result_text: str = "ok",
+):
+    """Handler that returns `expire_status` for the first `expire_times` tools/call requests
+    (those carrying any Mcp-Session-Id), then serves a normal result. initialize assigns
+    `new_session_id`.
+    """
+    import httpx as _httpx
+
+    state = {"expired_seen": 0}
+
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        captured.append(request)
+        payload = json.loads(request.content)
+        method = payload.get("method")
+        req_id = payload.get("id")
+        if method == "notifications/initialized":
+            return _httpx.Response(202)
+        if method == "initialize":
+            return _httpx.Response(
+                200,
+                headers={"Mcp-Session-Id": new_session_id},
+                json={"jsonrpc": "2.0", "id": req_id, "result": {"protocolVersion": "x"}},
+            )
+        if method in ("tools/call", "tools/list"):
+            if state["expired_seen"] < expire_times:
+                state["expired_seen"] += 1
+                return _httpx.Response(expiry_status)
+            if method == "tools/list":
+                return _httpx.Response(
+                    200, json={"jsonrpc": "2.0", "id": req_id, "result": {"tools": []}}
+                )
+            return _httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {"content": [{"type": "text", "text": tool_result_text}]},
+                },
+            )
+        return _httpx.Response(400)
+
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_call_tool_404_triggers_rebuild_and_retries(monkeypatch):
+    """tools/call hitting 404 expires the session, re-initializes, and retries once."""
+    import respx
+
+    server = McpServerConfig(id="rb", url="http://rb.test", auth_type="none")
+    server.session_id = "sess-stale"
+    monkeypatch.setitem(mcp_client._server_registry, "rb", server)
+
+    captured: list = []
+
+    with respx.mock:
+        respx.post("http://rb.test/").mock(
+            side_effect=_make_session_expiry_handler(
+                expire_times=1, new_session_id="sess-fresh", captured=captured
+            )
+        )
+        result = await mcp_client.call_tool("rb", "compute", {"x": 1})
+
+    assert result == "ok"
+    assert server.session_id == "sess-fresh"
+    methods = [json.loads(r.content).get("method") for r in captured]
+    assert "initialize" in methods
+    # final tools/call carried the fresh session id
+    tool_calls = [r for r in captured if json.loads(r.content).get("method") == "tools/call"]
+    assert tool_calls[-1].headers.get("mcp-session-id") == "sess-fresh"
+
+
+@pytest.mark.asyncio
+async def test_register_tools_list_404_triggers_rebuild(monkeypatch):
+    """tools/list during registration hitting 404 triggers rebuild and completes."""
+    import respx
+
+    import fleetent.tool_registry as tr
+
+    server = McpServerConfig(id="rblist", url="http://rblist.test", auth_type="none")
+    captured: list = []
+
+    import httpx as _httpx
+
+    state = {"list_seen": 0}
+
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        captured.append(request)
+        payload = json.loads(request.content)
+        method = payload.get("method")
+        req_id = payload.get("id")
+        if method == "notifications/initialized":
+            return _httpx.Response(202)
+        if method == "initialize":
+            return _httpx.Response(
+                200,
+                headers={"Mcp-Session-Id": "sess-list"},
+                json={"jsonrpc": "2.0", "id": req_id, "result": {}},
+            )
+        if method == "tools/list":
+            if state["list_seen"] == 0:
+                state["list_seen"] += 1
+                return _httpx.Response(404)
+            return _httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {"tools": [{"name": "t", "inputSchema": {"type": "object"}}]},
+                },
+            )
+        return _httpx.Response(400)
+
+    with respx.mock:
+        respx.post("http://rblist.test/").mock(side_effect=handler)
+        await mcp_client._register_server(server)
+
+    assert "rblist__t" in tr._registry
+
+
+@pytest.mark.asyncio
+async def test_rebuild_at_most_once_second_404_raises(monkeypatch):
+    """Two consecutive 404s: the retry's 404 is not rebuilt again, error propagates."""
+    import respx
+
+    server = McpServerConfig(id="loop", url="http://loop.test", auth_type="none")
+    server.session_id = "sess-loop"
+    monkeypatch.setitem(mcp_client._server_registry, "loop", server)
+
+    captured: list = []
+
+    with respx.mock:
+        respx.post("http://loop.test/").mock(
+            side_effect=_make_session_expiry_handler(
+                expire_times=2, new_session_id="sess-loop2", captured=captured
+            )
+        )
+        with pytest.raises(httpx.HTTPStatusError):
+            await mcp_client.call_tool("loop", "compute", {})
+
+    # initialize attempted exactly once (one rebuild), not repeatedly
+    methods = [json.loads(r.content).get("method") for r in captured]
+    assert methods.count("initialize") == 1
+
+
+@pytest.mark.asyncio
+async def test_register_tools_list_at_most_one_rebuild(monkeypatch):
+    """tools/list path: two 404s also rebuild at most once, then propagate."""
+    import respx
+
+    server = McpServerConfig(id="loop2", url="http://loop2.test", auth_type="none")
+    captured: list = []
+
+    import httpx as _httpx
+
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        captured.append(request)
+        payload = json.loads(request.content)
+        method = payload.get("method")
+        req_id = payload.get("id")
+        if method == "notifications/initialized":
+            return _httpx.Response(202)
+        if method == "initialize":
+            return _httpx.Response(
+                200,
+                headers={"Mcp-Session-Id": "sess-x"},
+                json={"jsonrpc": "2.0", "id": req_id, "result": {}},
+            )
+        if method == "tools/list":
+            return _httpx.Response(404)
+        return _httpx.Response(400)
+
+    with respx.mock:
+        respx.post("http://loop2.test/").mock(side_effect=handler)
+        with pytest.raises(httpx.HTTPStatusError):
+            await mcp_client._register_server(server)
+
+    methods = [json.loads(r.content).get("method") for r in captured]
+    assert methods.count("initialize") == 2  # original handshake + one rebuild
+
+
+@pytest.mark.asyncio
+async def test_auth_401_does_not_trigger_rebuild(monkeypatch):
+    """401 is an auth error: no expire, no re-initialize, error propagates."""
+    import respx
+
+    server = McpServerConfig(id="auth401", url="http://auth401.test", auth_type="none")
+    server.session_id = "sess-keep"
+    monkeypatch.setitem(mcp_client._server_registry, "auth401", server)
+
+    captured: list = []
+
+    import httpx as _httpx
+
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        captured.append(request)
+        payload = json.loads(request.content)
+        method = payload.get("method")
+        if method == "tools/call":
+            return _httpx.Response(401)
+        return _httpx.Response(400)
+
+    with respx.mock:
+        respx.post("http://auth401.test/").mock(side_effect=handler)
+        with pytest.raises(httpx.HTTPStatusError):
+            await mcp_client.call_tool("auth401", "compute", {})
+
+    methods = [json.loads(r.content).get("method") for r in captured]
+    assert "initialize" not in methods
+    assert server.session_id == "sess-keep"
+
+
+@pytest.mark.asyncio
+async def test_auth_403_does_not_trigger_rebuild(monkeypatch):
+    """403 is an auth error: no rebuild, session preserved."""
+    import respx
+
+    server = McpServerConfig(id="auth403", url="http://auth403.test", auth_type="none")
+    server.session_id = "sess-keep3"
+    monkeypatch.setitem(mcp_client._server_registry, "auth403", server)
+
+    import httpx as _httpx
+
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        return _httpx.Response(403)
+
+    with respx.mock:
+        respx.post("http://auth403.test/").mock(side_effect=handler)
+        with pytest.raises(httpx.HTTPStatusError):
+            await mcp_client.call_tool("auth403", "compute", {})
+
+    assert server.session_id == "sess-keep3"
+
+
+# --- MCP2: close() sends DELETE for active HTTP sessions ---
+
+
+@pytest.mark.asyncio
+async def test_close_sends_delete_for_active_http_session(monkeypatch):
+    """close() sends DELETE with Mcp-Session-Id for http servers holding a session id."""
+    import respx
+
+    server = McpServerConfig(id="del", url="http://del.test", auth_type="none")
+    server.session_id = "sess-del"
+    monkeypatch.setattr(mcp_client, "_server_registry", {"del": server})
+    monkeypatch.setattr(mcp_client, "_exit_stack", None)
+
+    captured: list = []
+
+    import httpx as _httpx
+
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        captured.append(request)
+        return _httpx.Response(200)
+
+    with respx.mock:
+        respx.delete("http://del.test/").mock(side_effect=handler)
+        await mcp_client.close()
+
+    assert len(captured) == 1
+    assert captured[0].headers.get("mcp-session-id") == "sess-del"
+    assert server.session_id is None
+
+
+@pytest.mark.asyncio
+async def test_close_no_delete_when_no_session_id(monkeypatch):
+    """close() does not send DELETE for http servers without a session id."""
+    import respx
+
+    server = McpServerConfig(id="nodel", url="http://nodel.test", auth_type="none")
+    assert server.session_id is None
+    monkeypatch.setattr(mcp_client, "_server_registry", {"nodel": server})
+    monkeypatch.setattr(mcp_client, "_exit_stack", None)
+
+    route = respx.delete("http://nodel.test/")
+    with respx.mock:
+        respx.delete("http://nodel.test/").mock(return_value=httpx.Response(200))
+        await mcp_client.close()
+
+    assert not route.called
+
+
+@pytest.mark.asyncio
+async def test_close_delete_failure_does_not_raise(monkeypatch):
+    """DELETE failure during close() is swallowed (best-effort); session id still cleared."""
+    import respx
+
+    server = McpServerConfig(id="delfail", url="http://delfail.test", auth_type="none")
+    server.session_id = "sess-fail"
+    monkeypatch.setattr(mcp_client, "_server_registry", {"delfail": server})
+    monkeypatch.setattr(mcp_client, "_exit_stack", None)
+
+    with respx.mock:
+        respx.delete("http://delfail.test/").mock(side_effect=httpx.ConnectError("down"))
+        await mcp_client.close()  # must not raise
+
+    assert server.session_id is None
+
+
+@pytest.mark.asyncio
+async def test_close_skips_stdio_servers(monkeypatch):
+    """close() does not attempt DELETE against stdio servers."""
+    import respx
+
+    stdio_server = McpServerConfig(id="std", transport="stdio", command="x")
+    stdio_server.session_id = "should-not-matter"
+    monkeypatch.setattr(mcp_client, "_server_registry", {"std": stdio_server})
+    monkeypatch.setattr(mcp_client, "_exit_stack", None)
+
+    with respx.mock:
+        # No routes registered; any HTTP call would raise. close() must not make one.
+        await mcp_client.close()
