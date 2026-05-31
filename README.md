@@ -273,7 +273,7 @@ uv run mypy src                  # type-check
 
 # Smoke tests against a live server
 uvicorn fleetent.server:app &
-uv run python tests/smoke/smoke.py
+uv run python tests/e2e/test_smoke.py
 ```
 
 ## Internals
