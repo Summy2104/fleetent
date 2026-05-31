@@ -11,20 +11,20 @@ hybrid search 后续也可能需要 rerank。Embedding 和 rerank 都不是 chat
 ## What Changes
 
 - 定义 `EmbeddingProvider` abstraction：
-  - `embed(text: str) -> list[float]`
+  - `async embed(text: str) -> list[float]`
   - 保留 deterministic embedding provider。
   - 新增 HTTP embedding provider，兼容 OpenAI-style `/v1/embeddings` 响应格式。
 - 定义 `RerankProvider` abstraction：
-  - `rerank(query: str, documents: list[str], top_n: int | None = None) -> list[RerankResult]`
+  - `async rerank(query: str, documents: list[str], top_n: int | None = None) -> list[RerankResult]`
   - 新增 `RerankResult(index, score)` 数据结构。
   - 默认 `disabled` rerank provider，调用时明确失败。
   - 新增 deterministic/test rerank provider，用于测试。
   - 新增 HTTP rerank provider，兼容常见 `{model, query, documents, top_n}` 请求格式。
 - 扩展配置：
   - `embedding.backend` 继续默认为 `deterministic`。
-  - 新增 `embedding.endpoint`、`embedding.model`、`embedding.api_key`、`embedding.timeout_seconds`。
+  - 新增 `embedding.endpoint`、`embedding.model`、`embedding.api_key_env`、`embedding.timeout_seconds`。
   - 新增 `rerank.backend`，默认 `disabled`。
-  - 新增 `rerank.endpoint`、`rerank.model`、`rerank.api_key`、`rerank.timeout_seconds`。
+  - 新增 `rerank.endpoint`、`rerank.model`、`rerank.api_key_env`、`rerank.timeout_seconds`。
 - `vector_store.upsert()` / `search()` public API 不变，继续通过 embedding provider 获取向量。
 - 不把 rerank 接入 knowledge-base search；只提供 provider 边界，供后续 specs 使用。
 
@@ -87,7 +87,7 @@ hybrid search 后续也可能需要 rerank。Embedding 和 rerank 都不是 chat
   - 新增 provider-level classes / factories：`EmbeddingProvider`、`RerankProvider`、`RerankResult`。
   - `vector_store.upsert()` / `search()` / `delete()` 不变。
 - **owned tables**：无。
-- **config namespace**：扩展 `embedding.*`，新增 `rerank.*`。
+- **config namespace**：扩展 `embedding.*`，新增 `rerank.*`；API key 只通过 env var 名称引用，不直接写入配置。
 - **cross-module dependencies**：不依赖 knowledge-base；后续 knowledge-base 可依赖 rerank public API。
 - **migration / shim plan**：无数据迁移；deterministic embedding 继续作为默认兼容路径。
 
@@ -109,3 +109,4 @@ hybrid search 后续也可能需要 rerank。Embedding 和 rerank 都不是 chat
   - 不把 rerank 接入 knowledge-base search。
   - 不做 hybrid search、sqlite-vec、Qdrant 或 retrieval evaluation。
   - 不重构 `model_router`。
+  - 不实现 embedding / rerank fallback 链；provider 不可用时 fail fast，不静默回退 deterministic。

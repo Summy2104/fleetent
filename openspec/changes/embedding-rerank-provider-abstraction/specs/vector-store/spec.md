@@ -11,7 +11,7 @@ in-memory vector backend、deterministic embedding backend，并默认禁用 rer
 
 #### Scenario: HTTP embedding config exists
 - **WHEN** 读取默认 settings
-- **THEN** embedding 配置包含 endpoint、model、api_key 和 timeout_seconds 字段
+- **THEN** embedding 配置包含 endpoint、model、api_key_env 和 timeout_seconds 字段
 
 #### Scenario: Default rerank config
 - **WHEN** 未显式配置 rerank
@@ -19,11 +19,13 @@ in-memory vector backend、deterministic embedding backend，并默认禁用 rer
 
 #### Scenario: HTTP rerank config exists
 - **WHEN** 读取默认 settings
-- **THEN** rerank 配置包含 endpoint、model、api_key 和 timeout_seconds 字段
+- **THEN** rerank 配置包含 endpoint、model、api_key_env 和 timeout_seconds 字段
 
 #### Scenario: Unsupported provider backend fails fast
 - **WHEN** 配置了当前不支持的 vector、embedding 或 rerank backend
 - **THEN** 初始化失败，并明确说明当前支持的 backend
+
+## ADDED Requirements
 
 ### Requirement: Embedding provider abstraction
 系统 SHALL 提供可替换的 embedding provider，用于将文本转换为向量。
@@ -39,7 +41,7 @@ in-memory vector backend、deterministic embedding backend，并默认禁用 rer
 #### Scenario: HTTP embedding request shape
 - **WHEN** HTTP embedding provider embed 非空文本
 - **THEN** 系统向 configured endpoint 发送包含 model 和 input list 的请求
-- **AND** api_key 非空时发送 Authorization Bearer header
+- **AND** `api_key_env` 非空且对应环境变量存在时发送 Authorization Bearer header
 
 #### Scenario: HTTP embedding response shape
 - **WHEN** HTTP embedding provider 收到 `data[0].embedding`
@@ -54,6 +56,7 @@ in-memory vector backend、deterministic embedding backend，并默认禁用 rer
 #### Scenario: HTTP embedding errors are explicit
 - **WHEN** HTTP embedding 返回非 2xx、超时、malformed JSON、缺失 embedding 或维度不匹配
 - **THEN** 系统抛出明确的 embedding provider error
+- **AND** 不静默 fallback 到 deterministic embedding
 
 ### Requirement: Rerank provider abstraction
 系统 SHALL 提供可替换的 rerank provider，用于后续 knowledge-base retrieval 对候选文档重排。
@@ -75,7 +78,7 @@ in-memory vector backend、deterministic embedding backend，并默认禁用 rer
 #### Scenario: HTTP rerank request shape
 - **WHEN** HTTP rerank provider rerank documents
 - **THEN** 系统向 configured endpoint 发送 model、query、documents 和 top_n
-- **AND** api_key 非空时发送 Authorization Bearer header
+- **AND** `api_key_env` 非空且对应环境变量存在时发送 Authorization Bearer header
 
 #### Scenario: HTTP rerank response shape
 - **WHEN** HTTP rerank provider 收到 `results[{index, score}]`
@@ -84,6 +87,7 @@ in-memory vector backend、deterministic embedding backend，并默认禁用 rer
 #### Scenario: HTTP rerank errors are explicit
 - **WHEN** HTTP rerank 返回非 2xx、超时、malformed JSON、越界 index 或非数字 score
 - **THEN** 系统抛出明确的 rerank provider error
+- **AND** 不静默 fallback 到 deterministic rerank
 
 ### Requirement: Vector store runtime uses embedding provider
 `vector_store.upsert()` 和 `vector_store.search()` SHALL 使用配置的 embedding provider，
