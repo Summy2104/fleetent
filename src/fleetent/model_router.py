@@ -62,11 +62,16 @@ def _apply_override(cfg: RouteConfig, override: RouteOverride | None) -> RouteCo
         fallbacks = ()
     # Deep-merge params by key: override keys replace same-named base keys,
     # uncovered base keys carry over (D2). None override params inherit base.
-    if override.params is None:
-        params = cfg.params
-    else:
-        merged = {**cfg.params, **override.params}
-        params = {k: v for k, v in merged.items() if k not in _RESERVED_PARAM_KEYS}
+    params = cfg.params if override.params is None else {**cfg.params, **override.params}
+    # A reserved key in params would collide with the explicit create() kwargs.
+    # Fail loud rather than silently dropping it, so a config mistake surfaces
+    # instead of the key being quietly ignored.
+    reserved = set(params) & _RESERVED_PARAM_KEYS
+    if reserved:
+        raise ValueError(
+            f"params must not contain reserved key(s) {sorted(reserved)}; "
+            "these are controlled by the route config, not params"
+        )
     return RouteConfig(
         base_url=override.base_url if override.base_url is not None else cfg.base_url,
         model=override.model if override.model is not None else cfg.model,

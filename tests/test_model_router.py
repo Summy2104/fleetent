@@ -325,14 +325,13 @@ def test_builtin_routes_params_exclude_reserved_keys():
         assert not (set(cfg.params) & reserved), f"route '{name}' params has reserved key"
 
 
-def test_apply_override_strips_reserved_keys_from_params():
-    # Guard D3: a reserved key in override.params would collide with the
-    # explicit create() kwargs (duplicate kwarg TypeError); it must be dropped.
+def test_apply_override_reserved_key_in_params_raises():
+    # Guard D3: a reserved key in params would collide with the explicit create()
+    # kwargs. Rather than silently dropping it (which hides a config mistake), fail
+    # loud so the operator learns the key has no effect here.
     cfg = RouteConfig(base_url="b", model="m", api_key_env="K", max_tokens=512)
-    result = _apply_override(
-        cfg, RouteOverride(params={"max_tokens": 99, "model": "x", "temperature": 0.5})
-    )
-    assert result.params == {"temperature": 0.5}
+    with pytest.raises(ValueError, match="max_tokens"):
+        _apply_override(cfg, RouteOverride(params={"max_tokens": 99, "temperature": 0.5}))
 
 
 # --- end-to-end priority: override params > task_type params > provider default ---

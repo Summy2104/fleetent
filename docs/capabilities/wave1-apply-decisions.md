@@ -108,14 +108,14 @@
 
 **实现:** RouteConfig 加 `params: dict[str,Any]=field(default_factory=dict)`、RouteOverride 加 `params: dict|None=None`;`_apply_override` 对 params 深合并 `{**cfg.params, **override.params}`(override None 沿用 base);`_call/_stream_with_fallback` 的 create 追加 `**cfg.params`;max_tokens 仍一等字段。通用 dict 非枚举字段。
 
-**重复 kwarg 守卫(双层):** 模块级 `_RESERVED_PARAM_KEYS={max_tokens,model,messages,tools}`,`_apply_override` 合并后剔除这些键(防运行时 override.params 误带保留键致 create() 重复 kwarg TypeError);单测固化内置 ROUTES 各 entry params 不含保留键。
+**重复 kwarg 守卫(双层):** 模块级 `_RESERVED_PARAM_KEYS={max_tokens,model,messages,tools}`,`_apply_override` 合并后**校验**这些键;单测固化内置 ROUTES 各 entry params 不含保留键。
 
 **自解冲突:**
 1. mock_client 的 cfg 是 MagicMock → `**MagicMock().params` 安全展开为空,既有测试零影响;新增透传测试用真实 RouteConfig。
-2. 运行时剔除保留键(而非仅校验报错):override.params 是用户输入风险更高,剔除既挡 TypeError 又不影响合法 params。
 
 **影响:** 576 passed;mypy 67=基线(MR3 的 provider_health 贡献 1),无新增模式。解锁 model-routes-externalize。
-**需 zy 核实:** 保留键运行时剔除(而非报错)的策略。
+
+**✅ zy review 决定(2026-05-31,改原"运行时剔除"为"报错"):** 保留键(max_tokens/model/messages/tools)出现在 params 里 → `_apply_override` **raise ValueError**(含具体键名),不再静默剔除——让用户知道配置错了、该键不生效,而非被悄悄忽略。校验对合并后的 params 生效(同时覆盖 override.params 与 routes.yaml 的 cfg.params)。测试 `test_apply_override_reserved_key_in_params_raises` 替换原 strip 测试。732 passed,ruff/mypy 干净。
 
 ## model-routes-externalize — feat/model-routes-externalize
 
