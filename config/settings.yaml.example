@@ -4,6 +4,17 @@ log_format: console  # "console" | "json"
 microsandbox_url: http://host.docker.internal:7777
 permission_gate_medium_timeout_seconds: 300
 permission_gate_high_timeout_seconds: 3600
+
+# Sandbox / code-execution governance (SB3 owns this section skeleton; SB2 adds
+# scope/idle_hours, SB4 adds resources). Three-state code-execution control:
+#   off       — no agent's tool schema includes run_code (AI never sees it)
+#   selective — only agents with features.code_execution: true see run_code
+#   all       — every agent sees run_code unless it sets code_execution: false
+# Docker being unavailable at startup degrades the effective mode to off
+# (surfaced in the startup log and GET /health as "off (docker unavailable)").
+# NOTE: quote "off" so YAML keeps it a string rather than the boolean false.
+sandbox:
+  mode: all  # off | selective | all
 # Max leading user messages kept whole as initial intent during compression (AR13).
 compression_initial_intent_max: 2
 # Coarse loop detection (AR4): repeats of one tool (same args, or same successful

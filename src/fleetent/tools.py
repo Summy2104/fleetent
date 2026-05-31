@@ -8,7 +8,7 @@ from pathlib import Path
 from fleetent import image_gen_client, vision_client
 from fleetent.cancellation import CancelToken
 from fleetent.sandbox_client import ExecResult, SandboxClient
-from fleetent.tool_registry import tool
+from fleetent.tool_registry import ToolContext, tool
 
 # How often the cancel watcher polls the token while exec runs (seconds). Small
 # enough that cancellation is observed promptly, large enough to stay cheap.
@@ -147,15 +147,27 @@ async def _exec_or_cancel(
 
 
 @tool(risk_level="medium")
-async def run_code(code: str, cancel_token: CancelToken | None = None) -> str:
+async def run_code(
+    code: str,
+    cancel_token: CancelToken | None = None,
+    tool_context: ToolContext | None = None,
+) -> str:
     """Execute Python code in an isolated Docker container and return the output.
 
     The container has no network access and limited memory (256 MB).
     State does not persist between calls.
     """
     token = cancel_token if cancel_token is not None else CancelToken()
+    # SB3 D5: when an execution context is supplied, key the workspace on its
+    # session id so SB2 can later locate/reuse it; degrade to the default key
+    # when called without a context (direct/unbound call) — never raise here.
+    workspace_key = (
+        tool_context.session_id
+        if tool_context is not None and tool_context.session_id
+        else "run-code"
+    )
     client = SandboxClient()
-    ws_id = await client.create_workspace("run-code")
+    ws_id = await client.create_workspace(workspace_key)
     try:
         command = f"python3 -c {__import__('shlex').quote(code)}"
         result = await _exec_or_cancel(client, ws_id, command, token)

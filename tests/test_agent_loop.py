@@ -2179,3 +2179,119 @@ async def test_run_stream_grace_call_fails_after_partial_delta(mock_client):
     deltas = [e["content"] for e in events if e["type"] == "text_delta"]
     assert "部分总结" in "".join(deltas)
     assert events[-1]["type"] == "done"
+
+
+# ── SB3: code-execution schema filtering ─────────────────────────────────────
+
+
+def _schema(name: str) -> dict:
+    return {"type": "function", "function": {"name": name, "parameters": {}}}
+
+
+def _tool_names_sent(client) -> set[str]:
+    tools = client.chat.completions.create.call_args.kwargs["tools"]
+    return {t["function"]["name"] for t in tools}
+
+
+async def test_run_off_mode_excludes_run_code(mock_client, monkeypatch):
+    from fleetent.sandbox_enablement import Mode
+
+    monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    await al.run([{"role": "user", "content": "hi"}], sandbox_mode=Mode.OFF)
+    assert _tool_names_sent(mock_client) == {"calculate"}
+
+
+async def test_run_selective_excludes_run_code_when_not_opted_in(mock_client, monkeypatch):
+    from fleetent.sandbox_enablement import Mode
+
+    monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    await al.run(
+        [{"role": "user", "content": "hi"}], sandbox_mode=Mode.SELECTIVE, agent_features={}
+    )
+    assert _tool_names_sent(mock_client) == {"calculate"}
+
+
+async def test_run_selective_includes_run_code_when_opted_in(mock_client, monkeypatch):
+    from fleetent.sandbox_enablement import Mode
+
+    monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    await al.run(
+        [{"role": "user", "content": "hi"}],
+        sandbox_mode=Mode.SELECTIVE,
+        agent_features={"code_execution": True},
+    )
+    assert _tool_names_sent(mock_client) == {"run_code", "calculate"}
+
+
+async def test_run_all_includes_run_code_when_unset(mock_client, monkeypatch):
+    from fleetent.sandbox_enablement import Mode
+
+    monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    await al.run([{"role": "user", "content": "hi"}], sandbox_mode=Mode.ALL, agent_features={})
+    assert _tool_names_sent(mock_client) == {"run_code", "calculate"}
+
+
+async def test_run_all_excludes_run_code_when_explicit_false(mock_client, monkeypatch):
+    from fleetent.sandbox_enablement import Mode
+
+    monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    await al.run(
+        [{"role": "user", "content": "hi"}],
+        sandbox_mode=Mode.ALL,
+        agent_features={"code_execution": False},
+    )
+    assert _tool_names_sent(mock_client) == {"calculate"}
+
+
+async def test_run_no_sandbox_mode_does_not_filter_run_code(mock_client, monkeypatch):
+    # Backward compatible: callers that don't pass a mode keep run_code visible.
+    monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    await al.run([{"role": "user", "content": "hi"}])
+    assert _tool_names_sent(mock_client) == {"run_code", "calculate"}
+
+
+async def test_run_stream_off_mode_excludes_run_code(mock_client, monkeypatch):
+    from fleetent.sandbox_enablement import Mode
+
+    monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("done"))
+    async for _ in al.run_stream("hi", sandbox_mode=Mode.OFF):
+        pass
+    assert _tool_names_sent(mock_client) == {"calculate"}
+
+
+async def test_run_stream_all_includes_run_code(mock_client, monkeypatch):
+    from fleetent.sandbox_enablement import Mode
+
+    monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("done"))
+    async for _ in al.run_stream("hi", sandbox_mode=Mode.ALL, agent_features={}):
+        pass
+    assert _tool_names_sent(mock_client) == {"run_code", "calculate"}
+
+
+def test_run_sync_passes_effective_sandbox_mode(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    import fleetent.sandbox_enablement as se
+
+    captured: dict = {}
+
+    async def fake_run(messages, **kw):
+        captured.update(kw)
+        return "done"
+
+    monkeypatch.setattr(al, "scan_skills", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "")
+    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
+    monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "run", fake_run)
+    monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.OFF))
+    al.run_sync("hi")
+    assert captured.get("sandbox_mode") is se.Mode.OFF

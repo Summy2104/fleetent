@@ -7,9 +7,27 @@ The agent loop calls get_schemas() for the API payload and dispatch() to execute
 import inspect
 import json
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any, overload
 
 ToolSchema = dict[str, Any]
+
+
+@dataclass
+class ToolContext:
+    """Execution-time context passed out-of-band to opt-in tools (SB3 D5).
+
+    Carries the calling agent's identity, its feature switches, and the session
+    id to tools that need them at execution time (SB2 scope acquire, SB5 env
+    injection). It is NOT an enablement gate — the gate runs at schema-build time
+    (agent_loop); a tool reaching dispatch is already authorised. SB2/SB5 reuse
+    this channel rather than each re-threading the dispatch signature.
+    """
+
+    agent_name: str | None = None
+    features: dict[str, Any] = field(default_factory=dict)
+    session_id: str | None = None
+
 
 _registry: dict[str, tuple[Callable[..., Any], ToolSchema]] = {}
 _risk_levels: dict[str, str] = {}
@@ -63,10 +81,22 @@ _SUB_AGENT_TOOL = "sub_agent"
 # it is never surfaced as a model-provided argument.
 _CANCEL_TOKEN_PARAM = "cancel_token"
 
+# Like the cancel token: an out-of-band parameter a tool opts into by declaring
+# `tool_context`. Injected at dispatch time, excluded from the LLM-facing schema.
+_TOOL_CONTEXT_PARAM = "tool_context"
+
+# Out-of-band parameter names never surfaced in the LLM schema.
+_OUT_OF_BAND_PARAMS = frozenset({_CANCEL_TOKEN_PARAM, _TOOL_CONTEXT_PARAM})
+
 
 def _accepts_cancel_token(fn: Callable[..., Any]) -> bool:
     """True if `fn` declares the out-of-band cancel-token parameter (opt-in)."""
     return _CANCEL_TOKEN_PARAM in inspect.signature(fn).parameters
+
+
+def _accepts_tool_context(fn: Callable[..., Any]) -> bool:
+    """True if `fn` declares the out-of-band tool-context parameter (opt-in)."""
+    return _TOOL_CONTEXT_PARAM in inspect.signature(fn).parameters
 
 
 def dispatch(
@@ -75,12 +105,13 @@ def dispatch(
     allowed_tools: list[str] | None = None,
     is_sub_agent: bool = False,
     cancel_token: Any = None,
+    tool_context: ToolContext | None = None,
 ) -> str:
     """Execute a registered tool by name with JSON-encoded arguments.
 
-    `cancel_token` is injected out-of-band (not an LLM-provided argument) only
-    for tools that opt in by declaring a `cancel_token` parameter; for all other
-    tools the call is byte-identical to one made without a token.
+    `cancel_token` and `tool_context` are injected out-of-band (not LLM-provided
+    arguments) only for tools that opt in by declaring the matching parameter; for
+    all other tools the call is byte-identical to one made without them.
     """
     if is_sub_agent and name == _SUB_AGENT_TOOL:
         raise PermissionError("sub_agent tool is not available inside a sub-agent")
@@ -97,6 +128,8 @@ def dispatch(
     )
     if cancel_token is not None and _accepts_cancel_token(fn):
         kwargs[_CANCEL_TOKEN_PARAM] = cancel_token
+    if tool_context is not None and _accepts_tool_context(fn):
+        kwargs[_TOOL_CONTEXT_PARAM] = tool_context
     result = fn(**kwargs)
     return result  # type: ignore[no-any-return]
 
@@ -107,10 +140,10 @@ def _build_schema(fn: Callable[..., Any]) -> ToolSchema:
     properties: dict[str, dict[str, str]] = {}
     required: list[str] = []
     for param_name, param in sig.parameters.items():
-        # Exclude the out-of-band cancel token (AR19 D3): it is injected at
-        # dispatch time, not provided by the LLM, so it must not appear in the
-        # tool's parameter schema (otherwise it would be a required string field).
-        if param_name == _CANCEL_TOKEN_PARAM:
+        # Exclude out-of-band params (cancel_token AR19 D3, tool_context SB3 D5):
+        # injected at dispatch time, not provided by the LLM, so they must not
+        # appear in the parameter schema (else they'd be required string fields).
+        if param_name in _OUT_OF_BAND_PARAMS:
             continue
         properties[param_name] = {"type": _py_type_to_json(param.annotation)}
         if param.default is inspect.Parameter.empty:

@@ -511,3 +511,54 @@ class CancellationChecker:                       # TerminationChecker
 2. **断连异常类型集合是否完备**（自解冲突 1）：stdio 子进程死亡的真实异常形态（取决于 `mcp` SDK 的 `ClientSession.call_tool` 在管道断时抛什么）未对真实子进程实测（测试用 mock）。若 SDK 以其他异常类型（非 `ConnectionError`/`OSError` 族）表达会话失活，需扩 `_is_disconnect_error`。
 3. **per-server 重连锁 vs 全局并发**（design Open Question）：本次按「锁 locked 即早返回、至多一个在途」实现；若高并发实测出现重复重连或竞态，再加排队/全局协调。
 4. **降级文本语言**（自解冲突 2）：当前英文。若产品要求面向终端用户的中文不可用提示，调 `_unavailable_result`。
+
+## 14. sandbox-enablement-control (SB3)：代码执行能力三态启用控制
+
+> 沙箱治理轨三项共享资源 owner：`agent_store.features` JSON 列 / `config/settings.yaml` 的 `sandbox:` 段骨架 / run_code 执行期上下文通道。SB2/SB4/SB5 复用。
+
+**前置核实（tasks 1.x 结论）：**
+- 1.1：`agent_loop.run()`（实际 `schemas`+`allowed_tools` 过滤在 ~480-481 行）与 `run_stream()`（~780-783 行 `stream_schemas`）确已按 `allowed_tools` 经 `check_tool_access` 做 per-agent schema 过滤。两个 gate（全局 off / agent 级 `code_execution=false`）在**同处**追加 `is_code_execution_enabled` 过滤即可，不条件化注册、不在调用入口拒绝。`run_code` 仍按 import 副作用全局注册（注册路径未动）。
+- 1.2/1.3：`Agent` 原仅 `id/name/system_prompt/allowed_tools`；`_init_db` 用 `CREATE TABLE IF NOT EXISTS`。`tool_registry.dispatch` 与 `run_code` 原不透传 agent/session 上下文，确需补通道。`_safe_dispatch` 调 `dispatch` 未传 `allowed_tools` → `dispatch` 内 `check_tool_access` 在主循环是死代码（design Risk，**本 change 不修**，仅标注）。
+- 1.4：仓库无集中的 `config/settings.yaml` 段加载器（`admin.py` 仅引用路径常量）。本 change 作为 `sandbox:` 段首个落地者，在 `sandbox_enablement.py` 内建轻量加载器（仿 `model_router` 的 `ROUTES_PATH` 注入式常量惯例），并在 `config/settings.yaml.example` 写入段骨架。
+
+**⚠️ 显著记录：agent_store.features 列改用 alembic 迁移（002），非运行时 ALTER（zy 指示，覆盖 change 的 D3 / tasks 4.3-4.4）：**
+- 落地方式：`_init_db` 的 `CREATE TABLE IF NOT EXISTS agents (...)` **直接含 `features TEXT`**（新库 / 测试 tmp_path 走此条，天然有列）；**不**在 `_init_db` 加 `PRAGMA table_info`+运行时 `ALTER`。
+- 现有生产库由**新增 alembic 迁移 `migrations/versions/002_add_agent_features.py`** 升级：`revision="002"`、`down_revision="001"`、`upgrade()` = `op.add_column("agents", sa.Column("features", sa.Text(), nullable=True))`、`downgrade()` = `op.drop_column("agents", "features")`，仿 001 手写迁移风格（`target_metadata=None`、`sqlalchemy.url=sqlite:///data/users.db`）。
+- 读取统一 `json.loads(row[4] or "{}")` 兜底（列存在但旧行 NULL）。
+- 理由：避免「运行时 ALTER + 冗余迁移两条腿」（agent-skill-binding 的教训）。
+- 测试：`test_alembic_002_upgrade_adds_features_to_legacy_table` 用 `MigrationContext`+`Operations` 绑定真实 sqlite 连接，对「无 features 列的旧库」实际驱动 002 的 `upgrade()`/`downgrade()`（验证 add_column / drop_column 真实生效，现代 SQLite 3.35+ 支持 DROP COLUMN）；另 `test_init_db_create_table_includes_features_column` 验证新库 CREATE TABLE 含列、`test_agent_features_null_row_falls_back_to_empty` 验证 NULL 兜底。
+- **agent_store 撞车风险**：张亮正活跃在 agent_store/agents 表邻域。本 change **只**加 `features` 列、`Agent.features` 字段（`dataclasses.field(default_factory=dict)`）、`_SELECT_COLS`/`_row_to_agent`/`create_agent` 读写 SQL 的最小改动，**不动** agents 表其它列 / 其它 store 逻辑。
+
+**D1 三态判定纯函数 + 单一生效点（schema 过滤）：**
+- 新建 `src/fleetent/sandbox_enablement.py`：`Mode(StrEnum)` = `OFF/SELECTIVE/ALL`；`resolve_effective_mode(configured, docker_available)`（docker 不可用一律 OFF）；`is_code_execution_enabled(mode, code_execution)`（OFF→False；SELECTIVE→`is True`；ALL→`is not False`，即 None/True 开、显式 False 关）。纯函数，无副作用。
+- 生效点：`agent_loop._filter_code_execution(schemas, sandbox_mode, agent_features)` 在 `run()`/`run_stream()` 现有 `allowed_tools` 过滤**同处**追加——判定 False 则把 `run_code` 从该 agent 的 schemas 剔除。`run()`/`run_stream()` 新增入参 `sandbox_mode: Mode | None`、`agent_features`、`session_id`。**`sandbox_mode is None` → 不过滤**（向后兼容：未传 mode 的既有调用 byte-identical，run_code 仍可见）。不条件化注册、不返回拒绝文本。
+
+**D2 Docker 探测 + 降级 + /health 暴露：**
+- `SandboxClient.docker_available()`：`docker version`（仅看 returncode），`FileNotFoundError`/`OSError`/非零 → log warning + 返回 False，不抛。
+- 服务端 `lifespan` 启动期探测一次 → `resolve_effective_mode` → 存 `app.state.sandbox_mode` / `app.state.sandbox_docker_available`；可用 `logger.info`、降级 `logger.warning(... docker unavailable; configured=...)`，平台正常启动。
+- `GET /health` 暴露 `{"sandbox": {"mode": <effective>, "docker_available": bool, "note"?: "off (docker unavailable)"}}`。
+- 非服务端调用方（IM gateway / CLI）无 app.state：`sandbox_enablement.get_effective_mode()` 提供进程级单值缓存（`_effective_mode_cache`，可 monkeypatch 到 None），首次探测 Docker 一次后缓存，避免 per-message 探测（D2 启动期一次性意图）。这是本模块唯一的可变模块状态，仿 `model_router` 文件缓存。
+
+**D5 run_code 上下文通道（本 change owner，为执行期 SB2/SB5 而建，非 gate）：**
+- `tool_registry.ToolContext` dataclass（`agent_name` / `features` / `session_id`），仿 cancel_token 的 out-of-band 注入：新增 `_TOOL_CONTEXT_PARAM="tool_context"`，`dispatch` 仅对声明 `tool_context` 形参的工具注入、`_build_schema` 经 `_OUT_OF_BAND_PARAMS` 排除（不进 LLM schema）。未声明 `tool_context` 的既有工具调用 byte-identical（守卫测试 `test_dispatch_does_not_inject_context_into_non_opt_in_tool`）。
+- `agent_loop` 在 `run()`/`run_stream()` 构造 `ToolContext` 并经 `_safe_dispatch`→`dispatch` 透传；`run_code` 据 `tool_context.session_id` 命名 workspace（供 SB2 定位/复用），**缺省上下文安全降级**到 `"run-code"` 默认 key，不抛（`test_run_code_degrades_safely_without_tool_context`）。
+- 接线：server `/chat`、IM normalizer、CLI `run_sync` 均传 `sandbox_mode`/`agent_features`(+`session_id`)。
+
+**自解冲突（C·全自主，最小改动）：**
+1. **YAML `off` 解析为布尔 False**：`load_sandbox_mode` 显式把 `False`→`Mode.OFF`、`True`→`Mode.ALL`（设置文件示例注释提示给 `off` 加引号）；非法值 log warning 后回退 `Mode.ALL`。
+2. **`sandbox_mode is None` 不过滤**：design 未明示「未传 mode」语义；为不回归既有 992 用例的 run_code 可见性，取「None=调用方未启用 SB3 gate，schemas 透传」。真实调用方（server/CLI/IM）都会传 effective mode，故生产路径恒经 gate。
+3. **降级态非服务端缓存** `get_effective_mode()`：design 仅说服务端 lifespan 一次性探测；IM/CLI 无 lifespan，按 D2「启动期一次」精神用进程级缓存（可注入清空），而非每消息探测（被否的 alternative）。
+4. **alembic downgrade 用 `op.drop_column`**：现代 SQLite（3.35+）原生支持 `ALTER TABLE DROP COLUMN`，测试实测 upgrade/downgrade 均通过；若目标部署 SQLite < 3.35，需改 batch_alter_table（标注待复核）。
+5. **死代码 `_safe_dispatch` 未传 `allowed_tools`**：design Risk 已述，本 change 代码执行访问控制同样仅靠 schema 过滤这一层（与现状一致），不修死代码、不扩范围，仅标注。
+
+**影响：**
+- 改/建文件：新建 `src/fleetent/sandbox_enablement.py`、`migrations/versions/002_add_agent_features.py`、`tests/test_sandbox_enablement.py`、`tests/test_normalizer_sandbox.py`；改 `sandbox_client.py`（+`docker_available`）、`agent_store.py`（+features 列/字段/读写）、`tool_registry.py`（+`ToolContext`/`tool_context` 注入/schema 排除）、`tools.py`（`run_code` 取 ctx.session_id）、`agent_loop.py`（filter 生效点 + ctx 通道 + run()/run_stream()/run_sync 入参）、`server.py`（lifespan 探测 + /health + /chat 接线）、`im_gateway/normalizer.py`（接线）、`config/settings.yaml.example`（`sandbox:` 段骨架）。
+- pytest：base **992 → after 1035 passed**（净 +43，分布 test_sandbox_enablement +15、test_agent_store +5、test_sandbox_client +3、test_tool_registry +4、test_tools +2、test_agent_loop +9、test_server +1、test_server_lifespan +3、test_normalizer_sandbox +1）。无回归。
+- ruff：本 change 改/建文件 format+check 全绿（新增的 `test_agent_store` 迁移测试改用 `@contextlib.contextmanager` 避 N801、in-function import 排序修正）；`server.py`/`tools.py` 的既有 HEAD 遗留 ruff 项（I001/F401/N814/SIM117）已 `git stash` 对照确认为既有，且把 format 顺带改的无关行（webhook import 空行、schedule_task 签名换行）**已还原**。
+- mypy：base **76 → after 76**，无新增错误模式（新模块 `sandbox_enablement.py` 零 mypy 错误；`sandbox_client.py`/`agent_store.py` 既有的 stdlib-logger kwargs 与 `Settings()` call-arg 项为 HEAD 遗留，仅行号位移）。
+
+**需 zy / 张亮核实：**
+1. **【需张亮复核】agent_store.features 用 alembic 002 迁移**（覆盖 D3/tasks 4.3-4.4 的运行时 ALTER）：002 迁移脚本写法、与张亮在 agents 表邻域工作的**撞车风险**、downgrade 的 `op.drop_column` 对目标部署 SQLite 版本（需 ≥3.35）的兼容性。
+2. **`sandbox_mode is None → 不过滤` 的兼容语义**（自解冲突 2）：是否认可「未传 mode = 不 gate」而非「默认 all」。生产调用方都传 mode，但若希望防御性默认，可改 None→ALL。
+3. **非服务端 `get_effective_mode()` 进程缓存**（自解冲突 3）：IM/CLI 用进程级单值缓存。若部署期望 IM/CLI 也随服务端 app.state 走同一 mode、或运行期 Docker 状态变化需重探，再调整。
+4. **死代码 `_safe_dispatch` 不传 allowed_tools**（design Risk）：本 change 未修；若要补「调用层防御纵深」需另开 change。
