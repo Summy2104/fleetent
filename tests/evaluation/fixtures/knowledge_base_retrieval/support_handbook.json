@@ -1,0 +1,36 @@
+{
+  "name": "support handbook vector retrieval",
+  "documents": [
+    {
+      "filename": "payroll-escalation.md",
+      "content": "Payroll incidents require HR operations escalation within four business hours."
+    },
+    {
+      "filename": "vpn-access.md",
+      "content": "VPN access issues are handled by infrastructure support after identity verification."
+    },
+    {
+      "filename": "database-failover.md",
+      "content": "Database failover incidents require platform escalation and a post-incident review."
+    }
+  ],
+  "queries": [
+    {
+      "text": "payroll incidents HR operations",
+      "top_k": 1,
+      "expected_chunks": ["Payroll incidents require HR operations escalation"],
+      "forbidden_chunks": ["Database failover incidents"]
+    },
+    {
+      "text": "database failover platform escalation",
+      "top_k": 1,
+      "expected_chunks": ["Database failover incidents require platform escalation"],
+      "forbidden_chunks": ["Payroll incidents require HR operations escalation"]
+    }
+  ],
+  "expected_chunks": [
+    "Payroll incidents require HR operations escalation",
+    "Database failover incidents require platform escalation"
+  ],
+  "forbidden_chunks": []
+}
