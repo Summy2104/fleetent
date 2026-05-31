@@ -31,7 +31,7 @@ _STOP_WORDS = {"the", "a", "an", "when", "use", "for", "to", "and", "or", "is", 
 def scan(skills_dir: str | None = None) -> None:
     """Scan skills directory and build name → SkillEntry index."""
     if skills_dir is None:
-        skills_dir = os.environ.get("MINI_AGENT_SKILLS_DIR", "skills")
+        skills_dir = os.environ.get("FLEETENT_SKILLS_DIR", "skills")
     _index.clear()
     base = Path(skills_dir)
     if not base.is_dir():
