@@ -31,6 +31,7 @@ def test_upgrade_creates_tables(tmp_path):
     assert "approvals" in tables
     assert "scheduled_tasks" in tables
     assert "traces" in tables
+    assert "memory_items" in tables
 
 
 def test_upgrade_creates_trace_indexes(tmp_path):
@@ -45,6 +46,19 @@ def test_upgrade_creates_trace_indexes(tmp_path):
         "idx_traces_user_ts",
         "idx_traces_agent_ts",
         "idx_traces_tenant_event_ts",
+    }
+
+
+def test_upgrade_creates_memory_item_indexes(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    indexes = {row[1] for row in conn.execute("PRAGMA index_list(memory_items)")}
+    conn.close()
+
+    assert indexes >= {
+        "idx_memory_items_user_type",
+        "idx_memory_items_user_expires",
     }
 
 
@@ -119,6 +133,17 @@ def test_column_structure(tmp_path):
         "enabled",
         "source",
         "created_at",
+    }
+
+    memory_cols = {row[1] for row in conn.execute("PRAGMA table_info(memory_items)")}
+    assert memory_cols >= {
+        "id",
+        "user_id",
+        "type",
+        "content",
+        "created_at",
+        "updated_at",
+        "expires_at",
     }
     conn.close()
 

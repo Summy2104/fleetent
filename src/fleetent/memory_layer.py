@@ -1,86 +1,140 @@
-"""Cross-session memory: extract facts after each run, inject before the next."""
+"""Structured per-user semantic memory store."""
 
 import json
-import time
-from pathlib import Path
-from typing import Any
+import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal, cast
 
-from fleetent.model_router import get_client_and_config
+from fleetent.config import Settings
+from fleetent.db import SQLiteDatabase, create_database
+from fleetent.intelligence import vector_store
+from fleetent.model_router import get_async_client_and_config
 
-
-def _mem_path(user_id: str = "default") -> Path:
-    return Path(f"data/users/{user_id}/memories.jsonl")
-
+MemoryType = Literal["identity", "preferences", "context"]
 
 _EXTRACT_SYSTEM = (
-    "You are a memory extractor. From the conversation below, extract facts about the user "
-    "worth remembering long-term (name, preferences, goals, ongoing context). "
-    "Return a JSON array of short fact strings. "
-    "If nothing is worth remembering, return []. "
-    'Example: ["User prefers Chinese replies", "User is learning agent development"]'
+    "Extract user semantic memories from the conversation. Return a JSON array of actions. "
+    "Use action=create with type identity, preferences, or context and non-empty content. "
+    "Use action=ignore for facts that should not be remembered."
 )
+_VALID_TYPES = {"identity", "preferences", "context"}
+_CONTEXT_TTL = timedelta(days=30)
 
 
-def load_memories(user_id: str = "default", n: int = 20) -> str:
-    """Return the last n memories as a formatted string for the system prompt.
+@dataclass(frozen=True)
+class MemoryItem:
+    """A structured semantic memory item."""
 
-    Returns empty string if no memories exist yet.
-    """
-    mem_path = _mem_path(user_id)
-    if not mem_path.exists():
-        return ""
-    lines = mem_path.read_text(encoding="utf-8").splitlines()
-    recent = lines[-n:] if len(lines) > n else lines
-    facts: list[str] = []
-    for line in recent:
-        try:
-            entry = json.loads(line)
-            if isinstance(entry, dict) and isinstance(entry.get("text"), str):
-                facts.append(f"- {entry['text']}")
-        except json.JSONDecodeError:
-            continue
-    if not facts:
-        return ""
-    return "[Memory]\n" + "\n".join(facts)
+    id: str
+    user_id: str
+    type: MemoryType
+    content: str
+    created_at: datetime
+    updated_at: datetime
+    expires_at: datetime | None
 
 
-def extract_and_save(user_input: str, messages: list[Any], user_id: str = "default") -> None:
-    """Call a cheap LLM to extract memorable facts and append them to JSONL."""
-    client, cfg = get_client_and_config("memory_extraction")
-    convo = _messages_to_text(messages)
-
-    response = client.chat.completions.create(
+async def extract_and_update(user_id: str, conversation: list[dict[str, Any]]) -> None:
+    """Extract structured memories from conversation and update the memory store."""
+    client, cfg = get_async_client_and_config("memory_extraction")
+    response = await client.chat.completions.create(
         model=cfg.model,
         messages=[
             {"role": "system", "content": _EXTRACT_SYSTEM},
-            {"role": "user", "content": convo},
+            {"role": "user", "content": _conversation_to_text(conversation)},
         ],
         max_tokens=cfg.max_tokens,
     )
-
     raw = _strip_markdown_fence(response.choices[0].message.content or "[]")
     try:
-        parsed = json.loads(raw)
+        actions = json.loads(raw)
     except json.JSONDecodeError:
         return
-
-    if not isinstance(parsed, list):
-        return
-    facts = [f for f in parsed if isinstance(f, str) and f.strip()]
-    if not facts:
+    if not isinstance(actions, list):
         return
 
-    mem_path = _mem_path(user_id)
-    mem_path.parent.mkdir(parents=True, exist_ok=True)
-    ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    with mem_path.open("a", encoding="utf-8") as f:
-        for fact in facts:
-            entry: dict[str, str] = {"ts": ts, "text": fact.strip(), "source_input": user_input}
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    now = datetime.now(UTC).replace(microsecond=0)
+    for action in actions:
+        if not isinstance(action, dict) or action.get("action") != "create":
+            continue
+        content = action.get("content")
+        raw_type = action.get("type")
+        if not isinstance(content, str) or not content.strip() or raw_type not in _VALID_TYPES:
+            continue
+        memory_type = cast(MemoryType, raw_type)
+        item = MemoryItem(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            type=memory_type,
+            content=content.strip(),
+            created_at=now,
+            updated_at=now,
+            expires_at=_expires_at(memory_type, now),
+        )
+        _insert_memory(item)
+        await vector_store.upsert(item.id, item.content, vector_store.memory_namespace(user_id))
+
+
+async def search(user_id: str, query: str, limit: int = 10) -> list[MemoryItem]:
+    """Return semantically relevant, non-expired memory items."""
+    vector_results = await vector_store.search(query, vector_store.memory_namespace(user_id), limit)
+    ids = [result.id for result in vector_results]
+    if not ids:
+        return []
+
+    placeholders = ", ".join(f":id_{index}" for index in range(len(ids)))
+    params = {f"id_{index}": id for index, id in enumerate(ids)}
+    params["user_id"] = user_id
+    rows = (
+        _database()
+        .execute(
+            f"""
+        SELECT id, user_id, type, content, created_at, updated_at, expires_at
+        FROM memory_items
+        WHERE user_id = :user_id AND id IN ({placeholders})
+        """,
+            params,
+        )
+        .fetchall()
+    )
+    by_id = {row["id"]: _row_to_memory_item(row) for row in rows}
+    now = datetime.now(UTC).replace(microsecond=0)
+    return [
+        item
+        for id in ids
+        if (item := by_id.get(id)) is not None
+        and (item.expires_at is None or item.expires_at >= now)
+    ]
+
+
+def _insert_memory(item: MemoryItem) -> None:
+    _database().execute(
+        """
+        INSERT INTO memory_items (
+            id, user_id, type, content, created_at, updated_at, expires_at
+        )
+        VALUES (
+            :id, :user_id, :type, :content, :created_at, :updated_at, :expires_at
+        )
+        """,
+        {
+            "id": item.id,
+            "user_id": item.user_id,
+            "type": item.type,
+            "content": item.content,
+            "created_at": _format_datetime(item.created_at),
+            "updated_at": _format_datetime(item.updated_at),
+            "expires_at": _format_datetime(item.expires_at),
+        },
+    )
+
+
+def _database() -> SQLiteDatabase:
+    return create_database(Settings(anthropic_api_key="").database_url)
 
 
 def _strip_markdown_fence(text: str) -> str:
-    """Remove ```json ... ``` or ``` ... ``` wrappers that LLMs sometimes add."""
     text = text.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[-1]
@@ -88,17 +142,49 @@ def _strip_markdown_fence(text: str) -> str:
     return text.strip()
 
 
-def _messages_to_text(messages: list[Any]) -> str:
-    """Flatten messages to plain text, skipping system and tool messages."""
+def _expires_at(memory_type: MemoryType, now: datetime) -> datetime | None:
+    if memory_type == "context":
+        return now + _CONTEXT_TTL
+    return None
+
+
+def _format_datetime(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()
+
+
+def _parse_datetime(value: object) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    raise TypeError(f"expected datetime string, got {type(value).__name__}")
+
+
+def _parse_optional_datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
+    return _parse_datetime(value)
+
+
+def _row_to_memory_item(row: dict[str, Any]) -> MemoryItem:
+    return MemoryItem(
+        id=str(row["id"]),
+        user_id=str(row["user_id"]),
+        type=cast(MemoryType, row["type"]),
+        content=str(row["content"]),
+        created_at=_parse_datetime(row["created_at"]),
+        updated_at=_parse_datetime(row["updated_at"]),
+        expires_at=_parse_optional_datetime(row["expires_at"]),
+    )
+
+
+def _conversation_to_text(conversation: list[dict[str, Any]]) -> str:
     lines: list[str] = []
-    for msg in messages:
-        if isinstance(msg, dict):
-            role, content = msg.get("role", ""), str(msg.get("content", ""))
-        elif hasattr(msg, "role"):
-            role, content = msg.role, str(msg.content or "")
-        else:
+    for message in conversation:
+        role = str(message.get("role", ""))
+        if role in {"system", "tool"}:
             continue
-        if role in ("system", "tool"):
-            continue
-        lines.append(f"{role}: {content}")
+        lines.append(f"{role}: {message.get('content', '')}")
     return "\n".join(lines)
