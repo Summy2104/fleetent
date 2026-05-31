@@ -1,0 +1,32 @@
+image: python:3.12
+
+definitions:
+  caches:
+    uv: ~/.cache/uv
+
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: unit tests
+          caches:
+            - uv
+          script:
+            - pip install uv
+            - export ANTHROPIC_API_KEY=test-key
+            - uv sync --frozen --group dev
+            - uv run alembic upgrade head
+            - uv run pytest
+
+  branches:
+    main:
+      - step:
+          name: main verification
+          caches:
+            - uv
+          script:
+            - pip install uv
+            - export ANTHROPIC_API_KEY=test-key
+            - uv sync --frozen --group dev
+            - uv run alembic upgrade head
+            - uv run pytest
