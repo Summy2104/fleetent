@@ -181,6 +181,7 @@ async def _capture_create_workspace(
     resources: SandboxResources | None = None,
     name: str = "sandbox-session-1",
     image: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> list[str]:
     """Run create_workspace under a mocked subprocess and return the argv."""
     captured: list[list[str]] = []
@@ -190,7 +191,9 @@ async def _capture_create_workspace(
         return _mock_proc(stdout="cid\n")
 
     with patch("asyncio.create_subprocess_exec", fake_exec):
-        await client.create_workspace(name, resources=resources or SandboxResources(), image=image)
+        await client.create_workspace(
+            name, resources=resources or SandboxResources(), image=image, env=env
+        )
     return captured[0]
 
 
@@ -263,3 +266,37 @@ async def test_create_workspace_default_command_matches_current_behaviour(client
     assert argv[argv.index("--cpus") + 1] == "0.5"
     assert "--read-only" in argv
     assert argv[argv.index("--tmpfs") + 1] == "/tmp"
+
+
+async def test_create_workspace_injects_env_as_e_flag(client):
+    """env entries become `-e KEY=VALUE` on docker run (SB5 D3)."""
+    argv = await _capture_create_workspace(client, env={"DATA_DIR": "/x"})
+    e_idxs = [i for i, a in enumerate(argv) if a == "-e"]
+    values = [argv[i + 1] for i in e_idxs]
+    assert "DATA_DIR=/x" in values
+
+
+async def test_create_workspace_env_none_omits_e_flag(client):
+    """env=None reproduces current behaviour: no -e flags."""
+    argv = await _capture_create_workspace(client, env=None)
+    assert "-e" not in argv
+
+
+async def test_create_workspace_env_empty_omits_e_flag(client):
+    """An empty env mapping equally adds no -e flags."""
+    argv = await _capture_create_workspace(client, env={})
+    assert "-e" not in argv
+
+
+async def test_create_workspace_defensive_filters_sensitive_env(client):
+    """Even if a caller mistakenly passes a sensitive-named var, it is dropped
+    before docker run (SB5 D3 defence-in-depth — do not trust the caller)."""
+    argv = await _capture_create_workspace(
+        client, env={"MY_TOKEN": "leak", "DB_PASSWORD": "leak", "DATA_DIR": "/x"}
+    )
+    joined = " ".join(argv)
+    assert "MY_TOKEN" not in joined
+    assert "DB_PASSWORD" not in joined
+    assert "leak" not in joined
+    e_idxs = [i for i, a in enumerate(argv) if a == "-e"]
+    assert [argv[i + 1] for i in e_idxs] == ["DATA_DIR=/x"]

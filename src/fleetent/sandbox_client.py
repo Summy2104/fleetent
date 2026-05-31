@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 
 from fleetent.sandbox_config import NetworkPolicy, SandboxResources
+from fleetent.sandbox_secrets import is_sensitive_name
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +74,30 @@ class SandboxClient:
         flags += ["--tmpfs", "/tmp"]
         return flags
 
+    @staticmethod
+    def _env_flags(env: dict[str, str] | None) -> list[str]:
+        """Map an env mapping to `-e KEY=VALUE` flags with a defensive filter.
+
+        The caller is expected to pass a `build_sandbox_env` output (already
+        filtered), but SB5 D3 demands defence-in-depth: re-run `is_sensitive_name`
+        here so a sensitive-named var never reaches the container even if the
+        caller errs. None/empty yields no flags (current behaviour).
+        """
+        if not env:
+            return []
+        flags: list[str] = []
+        for key, value in env.items():
+            if is_sensitive_name(key):
+                continue
+            flags += ["-e", f"{key}={value}"]
+        return flags
+
     async def create_workspace(
         self,
         name: str,
         resources: SandboxResources | None = None,
         image: str | None = None,
+        env: dict[str, str] | None = None,
     ) -> str:
         """Start an isolated container, return container ID as workspace_id.
 
@@ -87,7 +107,8 @@ class SandboxClient:
         builds read-only session and writable agent containers from one client),
         defaulting to `SandboxResources()`. `image` overrides the base image so
         agent scope can boot from a committed dependency image; None keeps the
-        client's default base image.
+        client's default base image. `env` carries already-filtered non-sensitive
+        variables to inject as `-e` (SB5); None/empty keeps the clean environment.
         """
         if resources is None:
             resources = SandboxResources()
@@ -98,6 +119,7 @@ class SandboxClient:
             "--name",
             name,
             *self._resource_flags(resources),
+            *self._env_flags(env),
             image or self._image,
             "sleep",
             "infinity",

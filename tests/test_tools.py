@@ -317,3 +317,67 @@ async def test_run_code_degrades_safely_without_tool_context(monkeypatch):
     assert result == "hi"
     _, kwargs = client.create_workspace.call_args
     assert kwargs["name"] == "sandbox-session-run-code"
+
+
+@pytest.mark.asyncio
+async def test_run_code_injects_agent_sandbox_env(monkeypatch):
+    """run_code reads agent `features.sandbox_env` and injects it (SB5 D4)."""
+    from unittest.mock import AsyncMock
+
+    import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
+    from fleetent.tool_registry import ToolContext
+
+    client = _mock_lifecycle_client("cid-env")
+    client.exec = AsyncMock(return_value=ExecResult(stdout="ok\n", stderr="", exit_code=0))
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
+
+    ctx = ToolContext(
+        agent_name="a", features={"sandbox_env": {"DATA_DIR": "/x"}}, session_id="sess-e"
+    )
+    await tl.run_code(code="print(1)", tool_context=ctx)
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["env"] == {"DATA_DIR": "/x"}
+
+
+@pytest.mark.asyncio
+async def test_run_code_sandbox_env_filters_sensitive(monkeypatch):
+    """A sensitive-named var declared in features.sandbox_env never reaches the
+    container — build_sandbox_env's unified filter applies (SB5 D2)."""
+    from unittest.mock import AsyncMock
+
+    import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
+    from fleetent.tool_registry import ToolContext
+
+    client = _mock_lifecycle_client("cid-env2")
+    client.exec = AsyncMock(return_value=ExecResult(stdout="ok\n", stderr="", exit_code=0))
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
+
+    ctx = ToolContext(
+        agent_name="a",
+        features={"sandbox_env": {"MY_TOKEN": "leak", "REGION": "eu"}},
+        session_id="sess-f",
+    )
+    await tl.run_code(code="print(1)", tool_context=ctx)
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["env"] == {"REGION": "eu"}
+
+
+@pytest.mark.asyncio
+async def test_run_code_no_sandbox_env_passes_empty(monkeypatch):
+    """Without a declared sandbox_env, run_code injects an empty env (clean)."""
+    from unittest.mock import AsyncMock
+
+    import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
+    from fleetent.tool_registry import ToolContext
+
+    client = _mock_lifecycle_client("cid-env3")
+    client.exec = AsyncMock(return_value=ExecResult(stdout="ok\n", stderr="", exit_code=0))
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
+
+    ctx = ToolContext(agent_name="a", features={}, session_id="sess-g")
+    await tl.run_code(code="print(1)", tool_context=ctx)
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["env"] == {}

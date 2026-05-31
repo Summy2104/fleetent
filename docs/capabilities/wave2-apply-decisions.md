@@ -654,3 +654,44 @@ SB4 已让 create 收 `resources`（派生名 `sandbox-{清洗 session_id}`）�
 2. **agent_scope override 是否应认 SB4 owner 而非本 change 自解析**：本 change 在 sandbox_config 自加 `build_resources_by_scope` 读 agent_scope。若团队认为该字段解析应归 SB4，可后移；当前作为消费方就近实现。
 3. **`_MANAGER` 单进程单例 scope 固定**：所有 run_code 共用 `manager.scope`（进程级配置），不支持「不同 agent 不同 scope」。design 的 scope 是全局配置项，符合现状；若未来要 per-agent scope 需扩展。
 4. **commit 镜像累积/清理策略**（Open Question）：仅销毁前 commit 一次，未实现镜像保留/清理（保留最近一份 vs 累积），待认领。
+
+## 17. sandbox-secret-injection (SB5)：沙箱环境变量受控注入 + 统一名称过滤
+
+**范围**：「干净环境 + 防泄漏」。不注入合法凭据、不加 allowlist、不扫描变量值（仅按名过滤）。复用 SB3 的 `features.sandbox_env`，不另立列/字段。
+
+### 实现要点
+
+- **D1 名称过滤纯函数**（新建 `src/fleetent/sandbox_secrets.py`）：`SENSITIVE_TOKENS: tuple[str, ...] = ("TOKEN","KEY","SECRET","PASSWORD","PASSWD","CREDENTIAL","PRIVATE","AUTH")`，模块级常量可 monkeypatch 扩展（可扩展的最小集、非穷尽）。`is_sensitive_name(name) -> bool` 对 `name.upper()` 做子串 `in` 判定。保守取向：`MONKEY`/`TURKEY`（含 `KEY`）也判敏感——宁可少注入不可泄漏，spec scenario 钉死。
+
+- **D2 三层合并 + 统一过滤管线**：`build_sandbox_env(host_env=None, agent_env=None, runtime_env=None, include_host=False) -> dict[str, str]`。优先级 host < agent < runtime（后覆盖前同名键）。host 仅 `include_host=True` 才纳入（默认 `False`=干净环境，host_env 缺省取 `os.environ`）。**合并后对全集统一 `is_sensitive_name` 过滤**（单一过滤点，任何来源的敏感名都剔除，难绕过）。
+
+- **D3 create_workspace 注入 + 防御性二次过滤**：`create_workspace(name, resources, image, env)` 新增 `env: dict[str, str] | None = None`。新增 `_env_flags(env)` 静态方法把每项转 `-e {k}={v}`，**注入前再跑一次 `is_sensitive_name` 兜底剔除**（纵深防御，不信任调用方）；None/空返回 `[]`（与现状等价，docker run 不带 `-e`）。`_env_flags` 插在 `*self._resource_flags(...)` 与 `image` 之间。
+
+- **D4 注入来源仅限 agent `features.sandbox_env`（钉死）**：run_code 经 SB3 上下文通道取 `tool_context.features.get("sandbox_env")` 作 `agent_env` 传 `build_sandbox_env(agent_env=...)`（host 不传、`include_host` 默认 False）。`runtime_env` 形参保留作管线完整性，但**无任何调用方接入**（不接受运行时/AI 在 run_code 传 env，缩小攻击面）。
+
+### env 经 acquire → create_workspace 串接（本 change 自行串接）
+
+最小改动：给 `SandboxManager.acquire(scope, session_id, agent_name, env=None)` 加可选 `env` 形参，在新建分支透传到 `create_workspace(..., env=env)`；reuse / re-adopt（registry hit、find_workspace 命中）分支不重新注入——复用容器保留创建时的 env（与 SB2 复用语义一致）。`env=None` 时 acquire/create_workspace 行为与 SB2 等价，既有用例不破。
+
+run_code 调用链：`run_code` 读 `tool_context.features`（无 context 时 `{}`）→ `agent_env = features.get("sandbox_env")` → `env = build_sandbox_env(agent_env=agent_env)` → `manager.acquire(scope, session_id, agent_name, env=env)`。无 `sandbox_env` 时 `agent_env=None`，`build_sandbox_env` 返回 `{}`（空映射，等价干净环境）。
+
+### 宿主 ANTHROPIC_API_KEY 不泄漏守卫
+
+`config.Settings.anthropic_api_key` 经 `os.environ` 的 `ANTHROPIC_API_KEY`，名称含 `KEY` → `is_sensitive_name` 命中剔除。即便 `include_host=True` 或某来源显式写入 `ANTHROPIC_API_KEY`，统一过滤都剔除；create_workspace 内还有防御性二次过滤兜底。单测 `test_build_sandbox_env_host_anthropic_key_never_leaks` 把该键写入 host/agent/runtime 三处并断言输出不含。
+
+### 1.x 前置核实结论
+
+- 1.1：`create_workspace`（SB2 收敛签名）当前 docker run 不带 `-e`，加 `env` 形参 None/空与现状等价——已核实。
+- 1.2：宿主 `ANTHROPIC_API_KEY` 含 `KEY`，被过滤规则命中剔除——已核实。
+- 1.3：agent 注入承载位 = SB3 `agent_store.features` 列下 `sandbox_env` 键；`ToolContext.features`（SB3 D5）已就位，docstring 已预留 "SB5 env injection"，上下文通道已通——已核实。
+
+### 自解冲突 / 决策
+
+- **acquire 复用分支不重注入 env**：reuse/re-adopt 容器保留创建时 env，符合 SB2「容器复用」语义；只在新建分支注入。最小改动且不破坏既有复用测试。
+- **`features.get("sandbox_env")` 返回 Any**：`ToolContext.features` 为 `dict[str, Any]`，`get` 返回 `Any`，直接传 `build_sandbox_env(agent_env=...)`（形参 `dict[str,str]|None`）mypy 不报错（Any 可赋值）；不额外加运行时类型转换（信任 SB3 承载位约定 + create_workspace 防御过滤兜底）。
+- **`_env_flags` 做成 `@staticmethod`**：与既有 `_resource_flags` 风格一致，纯映射无实例状态。
+
+**需 zy 核实**
+
+1. **复用容器的 env 变更不生效**：agent 改了 `features.sandbox_env` 后，已在 registry 的 session/agent 容器不会重建注入新 env，需等容器销毁重建（release_session / sweep_idle）才生效。当前可接受（env 多为静态配置），若需热更新需扩展。
+2. **`-e` 明文出现在宿主 `docker run` 进程参数**（design D3 已记 trade-off）：仅非敏感变量经此路径，敏感已过滤；占位符级方案留后续。

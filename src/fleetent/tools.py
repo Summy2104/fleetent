@@ -9,6 +9,7 @@ from fleetent import image_gen_client, vision_client
 from fleetent.cancellation import CancelToken
 from fleetent.sandbox_client import ExecResult, SandboxClient
 from fleetent.sandbox_manager import SandboxManager
+from fleetent.sandbox_secrets import build_sandbox_env
 from fleetent.tool_registry import ToolContext, tool
 
 # How often the cancel watcher polls the token while exec runs (seconds). Small
@@ -184,7 +185,13 @@ async def run_code(
     )
     agent_name = tool_context.agent_name if tool_context is not None else None
     scope = manager.scope
-    ws_id = await manager.acquire(scope, session_id, agent_name or "default")
+    # SB5 D4: the only injection source is the agent's predeclared
+    # `features.sandbox_env`; build_sandbox_env filters sensitive names (and host
+    # env is not passed). runtime_env is left unwired — no AI/user-supplied env.
+    features = tool_context.features if tool_context is not None else {}
+    agent_env = features.get("sandbox_env")
+    env = build_sandbox_env(agent_env=agent_env)
+    ws_id = await manager.acquire(scope, session_id, agent_name or "default", env=env)
     command = f"python3 -c {__import__('shlex').quote(code)}"
     # SB2 D4: normal completion does NOT destroy — reuse is the point; destruction
     # is owned by release_session / sweep_idle. AR19's cancel path still hard-aborts
