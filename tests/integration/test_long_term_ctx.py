@@ -4,6 +4,8 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from fleetent.config import KnowledgeBaseSettings, Settings
+from fleetent.intelligence.knowledge_base import KnowledgeChunk
 from fleetent.memory_layer import MemoryItem
 
 
@@ -116,6 +118,85 @@ async def test_missing_knowledge_provider_does_not_block_memory_context(monkeypa
 
     assert "User works on fleetent" in result.text
     assert "[Knowledge]" not in result.text
+
+
+async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enabled(monkeypatch):
+    from fleetent.intelligence import long_term_ctx
+
+    settings = Settings(
+        anthropic_api_key="test-key",
+        knowledge_base=KnowledgeBaseSettings(
+            enabled=True,
+            default_tenant_id="tenant-a",
+            default_kb_id="global",
+        ),
+    )
+    chunk = KnowledgeChunk(
+        id="chunk-1",
+        document_id="doc-1",
+        tenant_id="tenant-a",
+        kb_id="global",
+        filename="guide.md",
+        content="Fleetent can ingest markdown knowledge.",
+        position=0,
+        score=0.82,
+        source="manual",
+        source_url=None,
+    )
+    knowledge_search = AsyncMock(return_value=[chunk])
+    monkeypatch.setattr(long_term_ctx.memory_layer, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx, "Settings", lambda anthropic_api_key="": settings)
+    monkeypatch.setattr(long_term_ctx.knowledge_base, "search", knowledge_search)
+    long_term_ctx.set_knowledge_provider(None)
+
+    result = await long_term_ctx.build_context(
+        user_id="user-1",
+        query="markdown",
+        agent_id="agent-1",
+        available_tokens=300,
+    )
+
+    knowledge_search.assert_awaited_once_with(
+        "markdown",
+        tenant_id="tenant-a",
+        kb_ids=["global"],
+        limit=10,
+    )
+    assert "[Knowledge]" in result.text
+    assert "Fleetent can ingest markdown knowledge." in result.text
+    assert result.sources == [
+        long_term_ctx.ContextSource(
+            source_type="knowledge",
+            source_id="chunk-1",
+            score=0.82,
+            metadata={"filename": "guide.md", "document_id": "doc-1", "kb_id": "global"},
+        )
+    ]
+
+
+async def test_builtin_knowledge_provider_disabled_does_not_call_knowledge_base(monkeypatch):
+    from fleetent.intelligence import long_term_ctx
+
+    settings = Settings(
+        anthropic_api_key="test-key",
+        knowledge_base=KnowledgeBaseSettings(enabled=False),
+    )
+    knowledge_search = AsyncMock(return_value=[])
+    monkeypatch.setattr(long_term_ctx.memory_layer, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx, "Settings", lambda anthropic_api_key="": settings)
+    monkeypatch.setattr(long_term_ctx.knowledge_base, "search", knowledge_search)
+    long_term_ctx.set_knowledge_provider(None)
+
+    result = await long_term_ctx.build_context(
+        user_id="user-1",
+        query="markdown",
+        agent_id="agent-1",
+        available_tokens=300,
+    )
+
+    knowledge_search.assert_not_awaited()
+    assert result.text == ""
+    assert result.sources == []
 
 
 async def test_empty_knowledge_results_are_omitted(monkeypatch):

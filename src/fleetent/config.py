@@ -42,6 +42,14 @@ class LongTermContextSettings(BaseModel):
     max_tokens: int = 2_048
 
 
+class KnowledgeBaseSettings(BaseModel):
+    enabled: bool = False
+    default_tenant_id: str = "default"
+    default_kb_id: str = "global"
+    chunk_size: int = 1_000
+    chunk_overlap: int = 200
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -63,6 +71,7 @@ class Settings(BaseSettings):
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     rerank: RerankSettings = Field(default_factory=RerankSettings)
     long_term_ctx: LongTermContextSettings = Field(default_factory=LongTermContextSettings)
+    knowledge_base: KnowledgeBaseSettings = Field(default_factory=KnowledgeBaseSettings)
 
 
 def configure_logging(settings: Settings) -> None:
