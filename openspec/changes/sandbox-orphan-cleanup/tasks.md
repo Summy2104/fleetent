@@ -1,7 +1,7 @@
 ## 1. 前置核实（实现前的事实确认，无代码改动）
 
 - [ ] 1.1 核实 `SandboxClient` 容器命名前缀 `sandbox-`（sandbox_client.py 行 29）与销毁路径 `destroy_workspace`（`docker rm -f`，行 60-68），确认清理可复用销毁
-- [ ] 1.2 核实 `server.py` lifespan（行 66-67）作为启动钩子的现状（现有启动逻辑），确定清理调用的插入点，且与 SB3 Docker 探测/降级协调（探测复用还是独立）
+- [ ] 1.2 核实 `server.py` lifespan（行 66-67）作为启动钩子的现状（现有启动逻辑），确定清理调用的插入点；与 SB3 Docker 探测/降级协调——**已采纳合并**：复用 SB3 的一次探测结果驱动是否清理（可用才清理），核实 SB3 探测结果在 lifespan 中可被复用的形态
 - [ ] 1.3 确认前缀常量 `SANDBOX_NAME_PREFIX = "sandbox-"` 定义在 `sandbox_client.py`（已定调，与 SB2 收口统一），本 change `import` 复用，不重复定义
 
 ## 2. 枚举容器能力（sandbox_client.py）
@@ -18,8 +18,10 @@
 
 ## 4. 启动期触发接线（server.py）
 
-- [ ] 4.1 Write failing tests：平台启动（lifespan）调用 `cleanup_orphans` 一次；清理抛异常时记录警告且启动不被阻断（mock `cleanup_orphans` 抛异常 + 断言启动完成）。看到红
-- [ ] 4.2 Implement：lifespan 启动段 try/except 调用 `cleanup_orphans`，失败 log 警告继续启动，看到绿
+- [ ] 4.1 Write failing tests：平台启动（lifespan）调用 `cleanup_orphans` 一次；清理抛异常时记录警告且启动不被阻断（mock `cleanup_orphans` 抛异常 + 断言启动完成）；**复用 SB3 启动期 Docker 探测结果**——Docker 探测可用时才调用 `cleanup_orphans`、不可用时跳过清理（断言不重复探测 Docker，探测结果同时驱动 SB3 mode 降级与是否清理）。看到红
+- [ ] 4.2 Implement：lifespan 启动段在 SB3 Docker 探测之后、复用其探测结果——可用才 try/except 调用 `cleanup_orphans`（失败 log 警告继续启动），不可用则跳过清理（mode 由 SB3 降级），看到绿
+- [ ] 4.3 Write failing test：`cleanup_orphans` 完成后 log 清理计数与被删容器名列表（审计），断言日志含计数与名称。看到红
+- [ ] 4.4 Implement：在 `cleanup_orphans` 中补审计 log（计数 + 被删容器名列表；写 trace 与 SB9 协调），看到绿
 
 ## 5. 按需触发入口
 

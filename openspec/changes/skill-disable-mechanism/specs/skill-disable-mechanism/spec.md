@@ -22,7 +22,7 @@ skill_registry SHALL 支持 Skill 经 frontmatter `enabled` 字段（布尔，�
 
 ### Requirement: 禁用来源写入运行日志
 
-当某 Skill 因任一禁用来源未参与注入、而其本可被关键词命中时，skill_registry / 注入链 SHALL 将该 Skill 及其禁用来源标识写入该次运行的运行日志（trace），便于事后查询「为什么这个 Skill 没有生效」。未发生任何 Skill 禁用的正常运行 MUST NOT 写入该字段。
+当某 Skill 因任一禁用来源未参与注入、而其本可被关键词命中时，skill_registry / 注入链 SHALL 将该 Skill 及其禁用来源标识写入该次运行的运行日志（trace），便于事后查询「为什么这个 Skill 没有生效」。禁用来源标识取值集合 SHALL 涵盖 frontmatter 自禁用、配置名单禁用、默认态关闭、per-agent 黑名单，以及安全审计 severe 拒绝（`audit_blocked`）——后者由并行的安全审计机制（SK5）判定，本机制仅识别并记录来源，统一纳入同一「为什么这个 Skill 没生效」trace。未发生任何 Skill 禁用的正常运行 MUST NOT 写入该字段。
 
 #### Scenario: frontmatter 自禁用写入禁用来源
 - **WHEN** 某 `enabled: false` 的 Skill 本可被用户输入命中，但因禁用未注入
@@ -33,5 +33,17 @@ skill_registry SHALL 支持 Skill 经 frontmatter `enabled` 字段（布尔，�
 - **THEN** trace 记录中不包含禁用来源字段
 
 #### Scenario: 多来源禁用记录对应来源
-- **WHEN** 某 Skill 因配置名单、默认态关闭或 per-agent 黑名单（由并行机制判定）而被禁用并跳过
+- **WHEN** 某 Skill 因配置名单、默认态关闭、per-agent 黑名单或安全审计 severe 拒绝（`audit_blocked`，均由并行机制判定）而被禁用并跳过
 - **THEN** trace 记录中以对应的禁用来源标识记录该 Skill，本机制仅识别并记录来源、不重新实现这些来源的判定
+
+### Requirement: 注入裁决经单一 injectable 谓词
+
+某 Skill 「当前是否可被自动注入」SHALL 由单一谓词 `injectable(skill, request)` 裁决：命中 ∧ `enabled` ∧ 不在 `disabled_skills` ∧ 非默认态关闭 ∧ 过 per-agent 绑定 ∧ 非安全审计 severe 拒绝（`audit_blocked`）。L1（前置/基线注入）与 L2（关键词匹配注入）以及全部注入点 MUST 通过同一谓词裁决，MUST NOT 各自实现独立的启用过滤，以保证不同注入路径对同一 Skill 给出一致的启用结论。
+
+#### Scenario: L1 与 L2 对被禁用 Skill 给出一致结论
+- **WHEN** 某 Skill 被任一禁用来源（如 `enabled: false` 或安全审计拒绝）排除
+- **THEN** 无论该 Skill 经 L1 还是 L2 路径，均不被注入（L1 不得绕过禁用 / 审计判定）
+
+#### Scenario: 所有注入点共享同一裁决
+- **WHEN** 同一 Skill 在不同注入点（如 run_sync / run_stream / IM 路径）被评估
+- **THEN** 各注入点对其是否注入的结论一致，因为它们查询的是同一 `injectable` 谓词

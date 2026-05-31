@@ -17,11 +17,12 @@ sandbox:
 
 ## What Changes
 
-- 引入**沙箱资源配置**数据结构 `SandboxResources`：`memory`（MB）/ `cpus` / `network`（`none`/`public_only`/`allow_all`）/ `exec_timeout`（秒）。
+- 引入**沙箱资源配置**数据结构 `SandboxResources`：`memory`（MB）/ `cpus` / `network`（`none`/`public_only`/`allow_all`）/ `exec_timeout`（秒）/ `read_only`（bool）。`read_only` 纳入资源档位、可配置：默认 `True` 保 session 只读现状，agent scope 由 SB2 传 `False`（SB2 拥有 scope→档位映射）。
 - 从配置加载（建议 `config/settings.yaml` 的 `sandbox.resources` 段，或 `config.Settings` 的对应字段，与既有惯例对齐）；**未配置时使用安全默认值**（`memory=256`、`cpus=0.5`、`network=none`、`exec_timeout=30`），且 `network=none` 为默认推荐值。
-- `network` 三态映射到 Docker：`none → --network none`；`public_only` 与 `allow_all` 的具体网络后端映射在 design 中确定（默认与推荐仍是 `none`）。
-- `SandboxClient.create_workspace` 不再硬编码资源标志，改为接收 `SandboxResources` 并据此构造 `docker run` 参数。
-- `exec_timeout` 字段本 change 仅**承载并传递**（写入配置 → 传入 client），实际「超时强制终止」是波次 3（依赖 cancel token）范围，本 change 不实现 `docker kill` 终止逻辑。
+- `network` 三态映射到 Docker：`none → --network none`；`public_only` 与 `allow_all` 的具体网络后端映射在 design 中确定（默认与推荐仍是 `none`）。`network` 三态模型本 change **不改**（已知风险经评审决定不动）。
+- `read_only` 映射到 Docker：`True → --read-only`、`False →` 不加 `--read-only`；`--tmpfs /tmp` 始终保留。
+- `SandboxClient.create_workspace` 不再硬编码资源标志，改为**按次接收** `SandboxResources` 并据此构造 `docker run` 参数；**不再**在 `SandboxClient.__init__` 固定一套资源策略（SB2 单 client 需 per-scope 造只读/可写两种容器）。
+- `exec_timeout` 字段本 change **承载并传递**（写入配置 → 传入 client）且做范围校验 **clamp 到 [1, 600]**；实际「超时强制终止」（`docker kill`）是波次 3（依赖 cancel token）范围，本 change 不实现终止逻辑。
 
 ## Capabilities
 
@@ -38,7 +39,7 @@ sandbox:
 
 - **代码**：
   - 新增/扩展配置：`SandboxResources` 数据结构 + 加载逻辑（建议 `src/fleetent/sandbox_config.py`，或并入 `config.py` 的 Settings 与 yaml 加载，按既有惯例定）。
-  - 修改 `src/fleetent/sandbox_client.py`：`SandboxClient.__init__` 或 `create_workspace` 接收 `SandboxResources`；`docker run` 参数据其构造；缺省回退默认值。
+  - 修改 `src/fleetent/sandbox_client.py`：`create_workspace` 按次接收 `SandboxResources`（不在 `__init__` 固定）；`docker run` 参数据其构造；缺省回退默认值。
 - **配置**：新增 `sandbox.resources`（`memory` / `cpus` / `network` / `exec_timeout`）配置段，全部可选，缺省用安全默认值。
 - **测试**：新增 `tests/test_sandbox_config.py`（加载 + 默认值 + 校验）；扩充 `tests/test_sandbox_client.py` 断言配置值正确出现在 `docker run` 参数、未配置时为默认值。Docker CLI 全部 mock，yaml 路径 `monkeypatch` 到 tmp_path。
 - **不影响**：SB2 生命周期 scope、SB3 启用 mode、agent_loop、permission_gate；不引入新依赖（`yaml` 已在用）。

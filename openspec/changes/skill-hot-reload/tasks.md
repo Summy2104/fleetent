@@ -6,8 +6,8 @@
 
 ## 2. 抽出纯构建逻辑（_build_index）
 
-- [ ] 2.1 Write failing tests for `_build_index(skills_dir)`：`tests/test_skill_registry.py` 断言其返回一个新的 `dict[str, SkillEntry]`，内容反映目录中的 Skill，且**不**修改全局 `_index`（调用前后全局索引不变）。运行 `uv run pytest -x -q` 看到红
-- [ ] 2.2 Implement `_build_index`：从 `scan` 抽出「遍历+解析+组装」逻辑，返回新 dict，不触碰全局 `_index`；`scan` 改为调用它再落到全局。看到绿
+- [ ] 2.1 Write failing tests for `_build_index(skills_dir)`：`tests/test_skill_registry.py` 断言其返回一个新的 `dict[str, SkillEntry]`，内容反映目录中的 Skill，且**不**修改全局 `_index`（调用前后全局索引不变）；并断言其**覆盖 builtin（`BUILTIN_SKILLS_DIR`）+ 用户两源**——返回 dict 同时含 builtin Skill 与用户 `skills/` 下的 Skill（与 `scan` 现有两源覆盖一致）。运行 `uv run pytest -x -q` 看到红
+- [ ] 2.2 Implement `_build_index`：从 `scan` 抽出「遍历+解析+组装」逻辑，对 builtin 与用户目录各扫一遍合并成同一个新 dict，返回该 dict，不触碰全局 `_index`；`scan` 改为调用它再落到全局。看到绿
 
 ## 3. reload() 原子整体替换
 

@@ -2,7 +2,8 @@
 
 - [ ] 1.1 核实范围划界：builtin-skills 已覆盖 `disabled_skills` 全局禁用 + `enabled_by_default` 默认态；agent-skill-binding 已覆盖 per-agent 白/黑名单。确认本 change 只做 `enabled` 自禁用 + 禁用来源 trace，不重复二者
 - [ ] 1.2 核实 SK2 frontmatter 解析路径（skill_registry.py 行 39-56），确认 `enabled` 字段可经 `bool(frontmatter.get("enabled", True))` 填充 `SkillEntry`
-- [ ] 1.3 确认 `log_run` 签名（eval_logger.py 行 20），新增末位可选 kw（`disabled_skills_trace=None`）即向后兼容；**核实注入/trace 断链事实**：注入在 `run_sync()`（行 408-415）/ `run_stream()`（行 451-453），`log_run` 调用在 `run()`（行 389）/ `run_stream()`（行 589），`run_sync` 经 `run()` 委托且 `run()` 当前无参数承载禁用来源——确认需给 `run()` 新增 `disabled_skills_trace` 透传参数（类比 `agent_name`）；确认 SK3 的 `match_all` 候选中间产物结构以便叠加禁用来源标注；确认 builtin-skills / agent-skill-binding 的禁用判定接口形态以便叠加来源识别
+- [ ] 1.3 确认 `log_run` 签名（eval_logger.py 行 20），新增末位可选 kw（`disabled_skills_trace=None`）即向后兼容；**核实注入/trace 断链事实**：注入在 `run_sync()`（行 408-415）/ `run_stream()`（行 451-453），`log_run` 调用在 `run()`（行 389）/ `run_stream()`（行 589），`run_sync` 经 `run()` 委托且 `run()` 当前无参数承载禁用来源——确认需给 `run()` 新增 `disabled_skills_trace` 透传参数（类比 `agent_name`）；确认 SK3 的 `match_all` 候选中间产物结构以便叠加禁用来源标注；确认 builtin-skills / agent-skill-binding / skill-security-audit（SK5）的禁用 / 审计判定接口形态以便叠加来源识别（含 `audit_blocked`）
+- [ ] 1.4 核实**注入点清单与 `injectable` 单一谓词**（协调点②）：盘点全部注入点——`run_sync()`、`run_stream()`、`im_gateway/normalizer.py` 的 IM 路径，以及 L1（SK1 前置/基线注入）与 L2（关键词匹配注入）；确认它们当前是否各自实现启用过滤，确定收敛为单一共享 `injectable(skill, request)` 谓词的接口位置。**标注已知 gap**：D3a 的 trace 透传当前仅覆盖 `run_sync`/`run_stream`，normalizer IM 路径不写 `disabled_skills_trace`——记为已知 gap，随 D5 注入收敛一并解决
 
 ## 2. frontmatter enabled 自禁用字段
 
@@ -23,13 +24,20 @@
 - [ ] 4.5 Write failing tests：`run_sync()` 注入时跳过被 `enabled: false` 禁用且本可命中的 Skill，经 `run()` 透传后该次运行 trace 含 `{skill: frontmatter_disabled}`；`run_stream()` 路径在同一函数体内就近收集并传入行 589 的 `log_run`，trace 同样含来源；无禁用的正常运行不写该字段。mock `get_async_client_and_config`，skills 目录隔离 `tmp_path`。看到红
 - [ ] 4.6 Implement：`run_sync()` 收集被禁用 Skill 及来源 → 调 `run(..., disabled_skills_trace=...)` 透传；`run_stream()` 就近收集 → 传入行 589 的 `log_run`；来源标识对齐 design（frontmatter_disabled 等）。看到绿
 
-## 5. 与既有禁用来源叠加（不重复实现）
+## 5. 与既有禁用来源叠加（不重复实现，含 audit_blocked）
 
-- [ ] 5.1 Write failing tests：当 builtin-skills / agent-skill-binding 的判定可用时，被这些来源禁用的 Skill 在 trace 中记为对应来源（`config_disabled` / `default_disabled` / `agent_blocked`）；本 change 不重新判定这些来源，仅识别并记录。看到红
-- [ ] 5.2 Implement：叠加裁决按 OR 语义汇总来源；第 2-4 条来源复用并行 change 的判定结果（未合入时该来源恒不命中），仅第 1 条由本 change 判定。看到绿
+- [ ] 5.1 Write failing tests：当 builtin-skills / agent-skill-binding / skill-security-audit（SK5）的判定可用时，被这些来源禁用的 Skill 在 trace 中记为对应来源（`config_disabled` / `default_disabled` / `agent_blocked` / `audit_blocked`）；本 change 不重新判定这些来源，仅识别并记录。看到红
+- [ ] 5.2 Implement：叠加裁决按 OR 语义汇总来源；第 2-5 条来源复用并行 change 的判定结果（未合入时该来源恒不命中），仅第 1 条由本 change 判定；SK5 审计拒绝映射为 `audit_blocked`。看到绿
 
-## 6. 收尾
+## 6. 注入裁决收敛为单一 injectable 谓词（协调点②）
 
-- [ ] 6.1 全量 `uv run pytest`（带 `ANTHROPIC_API_KEY`），无回归
-- [ ] 6.2 `uv run ruff format src tests && uv run ruff check src tests` 全绿
-- [ ] 6.3 `uv run mypy src` 无新增错误
+- [ ] 6.1 Write failing tests：定义 / 调用单一谓词 `injectable(skill, request)`（命中 ∧ `enabled` ∧ ¬`disabled_skills` ∧ 非 `default_disabled` ∧ 过 agent 绑定 ∧ ¬`audit_blocked`）——被任一来源禁用的 Skill `injectable` 为假；L1（SK1 前置/基线注入）与 L2（关键词匹配注入）查询同一谓词，对同一被禁 / 被审计 Skill 给出一致「不注入」结论（覆盖 L1 注入被禁 / 被审计 Skill 的绕过）。mock 各来源判定。看到红
+- [ ] 6.2 Implement：实现单一 `injectable` 共享函数（基于 SK3 `match_all` 候选的命中 + exclusive + 禁用来源 + audit_blocked 累积标注），L1 与 L2 均改为经它裁决，禁用来源就近收集。看到绿
+- [ ] 6.3 Write failing tests：`run_sync()`、`run_stream()`、`im_gateway/normalizer.py` 三个注入点均经同一 `injectable` 共享函数；normalizer IM 路径经收敛后其禁用 trace 随之被覆盖（此前为已知 gap）。mock `get_async_client_and_config`，skills 目录隔离 `tmp_path`。看到红
+- [ ] 6.4 Implement：三个注入点收敛为调用同一共享注入函数，IM 路径禁用 trace 随注入收敛一并覆盖（解决 1.4 标注的已知 gap）。看到绿
+
+## 7. 收尾
+
+- [ ] 7.1 全量 `uv run pytest`（带 `ANTHROPIC_API_KEY`），无回归
+- [ ] 7.2 `uv run ruff format src tests && uv run ruff check src tests` 全绿
+- [ ] 7.3 `uv run mypy src` 无新增错误

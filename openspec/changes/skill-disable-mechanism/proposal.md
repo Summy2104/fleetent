@@ -16,7 +16,7 @@ docs/capabilities/skill.md「规划中」的**禁用机制**含三个子诉求�
 
 - 引入 **frontmatter `enabled` 字段**（布尔，缺省 `true`，经 SK2 的通用 YAML 解析能力承载入 `SkillEntry`）：`enabled: false` 的 Skill 被视为**显式禁用**，不被自动注入，**优先于** `enabled_by_default` 的默认态判定（自禁用是硬关停）。
 - **禁用判定基于 SK3 的 `match_all` 候选中间产物，保留「本可命中但被禁」信息**：原 `match()` 一旦把禁用 Skill `continue` 排除，注入链就无从知道「本可命中但被禁」、也就写不出 trace。本 change**对齐 SK3 的 `match_all` 共享中间产物**——禁用判定作用在 `match_all` 返回的逐项带标注的候选上（每项带「命中 / 禁用来源」标注）：最终 `match()`/注入链**不返回禁用项**，但中间产物**保留**这些「命中但被禁用 + 来源」信息供 trace 收集。SK3 是该 `match_all` 中间产物结构的 owner，本 change 在其上叠加禁用来源标注。
-- **禁用来源写入 trace**：某 Skill 因禁用未注入时，把禁用来源标识（如 `frontmatter_disabled` / `config_disabled` / `default_disabled` / `agent_blocked`）写入该次运行的运行日志（trace），供「为什么这个 Skill 没生效」的事后查询。复用 `eval_logger` 既有 trace 出口，新增可选字段（默认空，向后兼容）。
+- **禁用来源写入 trace**：某 Skill 因禁用未注入时，把禁用来源标识（`frontmatter_disabled` / `config_disabled` / `default_disabled` / `agent_blocked` / `audit_blocked`）写入该次运行的运行日志（trace），供「为什么这个 Skill 没生效」的事后查询。复用 `eval_logger` 既有 trace 出口，新增可选字段（默认空，向后兼容）。其中 `audit_blocked` 是 SK5（安全审计）的 **severe 拒绝**来源——对「这个 Skill 为什么没生效」的排查，被审计拒绝同样是一个原因，故纳入同一禁用来源 trace（与 SK6 自身的四个来源并列为第 5 个来源；判定归 SK5，本 change 仅识别并记录来源）。
 - **不改** builtin-skills 的 `disabled_skills` 配置语义与 agent-skill-binding 的白名单语义；本 change 的 `enabled` 与禁用来源记录与二者**叠加生效**（任一来源命中即禁用），并在 design 明确叠加裁决顺序。
 - `load()` 按名显式加载**不受** `enabled` 约束（与 builtin-skills 一致：禁用只约束自动匹配注入，不影响显式加载契约）。
 
@@ -45,3 +45,4 @@ docs/capabilities/skill.md「规划中」的**禁用机制**含三个子诉求�
 - **统一 apply / 归档序**：SK4 → SK5 → SK1 → SK3 → SK6（本 change，最后）。SK6 排在 SK3 之后，**复用 SK3 owner 的 `match_all` 候选中间产物**叠加禁用来源标注（保留「命中但被禁」供 trace）；排在 SK1 之后，禁用作用于 L1/L2 注入基线。
 - **与 `builtin-skills` 叠加（不重复）**：复用其禁用过滤骨架与 `disabled_skills` / `enabled_by_default` 语义；本 change 仅叠加 `enabled` 硬关停与禁用来源 trace。
 - **与 `agent-skill-binding` 叠加（不重复）**：per-agent 白/黑名单由其负责；本 change 在禁用来源 trace 中识别 `agent_blocked` 来源以统一可观察性，但不重新实现白名单判定。
+- **与 `skill-security-audit`（SK5）叠加（不重复）**：SK5 的审计 severe 拒绝由其负责；本 change 在禁用来源 trace 中识别 `audit_blocked` 来源以统一可观察性，把「被审计拒绝」纳入同一「为什么这个 Skill 没生效」trace，但不重新实现审计判定。
