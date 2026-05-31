@@ -1122,3 +1122,135 @@ async def test_run_stream_force_model_trace_records_forced_model(mock_client, mo
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
     _ = [e async for e in al.run_stream("hi", force_model="claude-haiku-4-5")]
     assert captured["model_used"] == "claude-haiku-4-5"
+
+
+# ── provider health cache integration (MR3) ──────────────────────────────────
+
+
+class _FakeClock:
+    def __init__(self, start: float = 1000.0) -> None:
+        self.t = start
+
+    def __call__(self) -> float:
+        return self.t
+
+    def advance(self, dt: float) -> None:
+        self.t += dt
+
+
+def _install_health_cache(monkeypatch, *, failure_threshold=1, cooldown_seconds=60, clock=None):
+    import fleetent.provider_health as ph
+
+    clock = clock or _FakeClock()
+    cache = ph.ProviderHealthCache(
+        failure_threshold=failure_threshold, cooldown_seconds=cooldown_seconds, now=clock
+    )
+    monkeypatch.setattr(ph, "_cache", cache)
+    return cache, clock
+
+
+async def test_call_records_failure_on_switchable_error(mock_client_fb, monkeypatch):
+    cache, _ = _install_health_cache(monkeypatch, failure_threshold=3)
+    mock_client_fb.chat.completions.create = AsyncMock(
+        side_effect=[_mk_http_error(429, RateLimitError), _text_resp("ok")]
+    )
+    await al.run([{"role": "user", "content": "hi"}])
+    assert cache._state("primary-model").consecutive_failures == 1
+
+
+async def test_call_success_records_success(mock_client_fb, monkeypatch):
+    cache, _ = _install_health_cache(monkeypatch, failure_threshold=3)
+    cache.record_failure("primary-model")
+    cache.record_failure("primary-model")
+    mock_client_fb.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    await al.run([{"role": "user", "content": "hi"}])
+    assert cache._state("primary-model").consecutive_failures == 0
+
+
+async def test_call_skips_cooling_provider(mock_client_fb, monkeypatch):
+    cache, _ = _install_health_cache(monkeypatch, failure_threshold=1, cooldown_seconds=60)
+    cache.record_failure("primary-model")  # primary now in cooldown
+    mock_client_fb.chat.completions.create = AsyncMock(return_value=_text_resp("from fb"))
+    result = await al.run([{"role": "user", "content": "hi"}])
+    assert result == "from fb"
+    calls = mock_client_fb.chat.completions.create.call_args_list
+    # primary skipped entirely; only the fallback model was called.
+    assert all(c.kwargs["model"] == "fallback-model" for c in calls)
+
+
+async def test_call_half_open_retries_after_cooldown(mock_client_fb, monkeypatch):
+    cache, clock = _install_health_cache(monkeypatch, failure_threshold=1, cooldown_seconds=60)
+    cache.record_failure("primary-model")
+    clock.advance(60)  # cooldown elapsed → half-open
+    mock_client_fb.chat.completions.create = AsyncMock(return_value=_text_resp("primary ok"))
+    result = await al.run([{"role": "user", "content": "hi"}])
+    assert result == "primary ok"
+    calls = mock_client_fb.chat.completions.create.call_args_list
+    assert calls[0].kwargs["model"] == "primary-model"
+
+
+async def test_non_health_status_error_never_marks_unavailable(mock_client_fb, monkeypatch):
+    # 401 → should_switch_model=False → must NOT count as a provider failure.
+    cache, _ = _install_health_cache(monkeypatch, failure_threshold=1)
+    mock_client_fb.chat.completions.create = AsyncMock(side_effect=_mk_http_error(401))
+    with pytest.raises(APIStatusError):
+        await al.run([{"role": "user", "content": "hi"}])
+    assert cache._state("primary-model").consecutive_failures == 0
+    assert cache.is_available("primary-model") is True
+
+
+async def test_400_never_marks_unavailable(mock_client_fb, monkeypatch):
+    cache, _ = _install_health_cache(monkeypatch, failure_threshold=1)
+    mock_client_fb.chat.completions.create = AsyncMock(side_effect=_mk_http_error(400))
+    with pytest.raises(APIStatusError):
+        await al.run([{"role": "user", "content": "hi"}])
+    assert cache.is_available("primary-model") is True
+
+
+async def test_call_all_cooling_does_not_return_empty(mock_client_fb, monkeypatch):
+    # Both candidates in cooldown; loop must not silently succeed with no call.
+    cache, _ = _install_health_cache(monkeypatch, failure_threshold=1, cooldown_seconds=60)
+    cache.record_failure("primary-model")
+    cache.record_failure("fallback-model")
+    mock_client_fb.chat.completions.create = AsyncMock(
+        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+    )
+    with pytest.raises(RateLimitError):
+        await al.run([{"role": "user", "content": "hi"}])
+    # Fell back to probing the cooling candidates rather than returning empty.
+    assert mock_client_fb.chat.completions.create.call_count >= 1
+
+
+# ── run_stream() provider health integration ─────────────────────────────────
+
+
+async def test_stream_skips_cooling_provider(mock_client_fb, monkeypatch):
+    cache, _ = _install_health_cache(monkeypatch, failure_threshold=1, cooldown_seconds=60)
+    cache.record_failure("primary-model")
+    mock_client_fb.chat.completions.create = AsyncMock(
+        return_value=_stream_chunks("streamed", finish="stop")
+    )
+    events = [e async for e in al.run_stream("hi")]
+    text = "".join(e["content"] for e in events if e["type"] == "text_delta")
+    assert "streamed" in text
+    calls = mock_client_fb.chat.completions.create.call_args_list
+    assert all(c.kwargs["model"] == "fallback-model" for c in calls)
+
+
+async def test_stream_records_success(mock_client_fb, monkeypatch):
+    cache, _ = _install_health_cache(monkeypatch, failure_threshold=3)
+    cache.record_failure("primary-model")
+    mock_client_fb.chat.completions.create = AsyncMock(
+        return_value=_stream_chunks("ok", finish="stop")
+    )
+    _ = [e async for e in al.run_stream("hi")]
+    assert cache._state("primary-model").consecutive_failures == 0
+
+
+async def test_stream_records_failure_on_switchable(mock_client_fb, monkeypatch):
+    cache, _ = _install_health_cache(monkeypatch, failure_threshold=3)
+    mock_client_fb.chat.completions.create = AsyncMock(
+        side_effect=[_mk_http_error(429, RateLimitError), _stream_chunks("ok", finish="stop")]
+    )
+    _ = [e async for e in al.run_stream("hi")]
+    assert cache._state("primary-model").consecutive_failures == 1

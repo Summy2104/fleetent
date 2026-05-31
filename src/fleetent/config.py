@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     context_keep_recent: int = 10
     agent_max_turns: int = 50
     agent_max_consecutive_failures: int = 3
+    provider_failure_threshold: int = 3
+    provider_cooldown_seconds: int = 60
     log_format: str = "console"
     default_agent_name: str | None = None
 
