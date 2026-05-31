@@ -14,6 +14,7 @@ from openai.types.chat import ChatCompletionChunk
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent import model_router
 from fleetent.agent_policy import check_tool_access
+from fleetent.cancellation import CancellationChecker, CancelToken
 from fleetent.context_mgr import maybe_compress
 from fleetent.error_classifier import classify
 from fleetent.eval_logger import log_run
@@ -73,6 +74,7 @@ def _build_controller(
     include_approval: bool,
     loop_repeat_threshold: int | None = None,
     loop_ignore_arg_keys: list[str] | None = None,
+    cancel_token: CancelToken | None = None,
 ) -> tuple[TerminationController, LoopDetectionChecker]:
     """Assemble the termination controller with the active checkers.
 
@@ -80,10 +82,16 @@ def _build_controller(
     established termination priority (max_turns / consecutive_failures /
     approval_rejected) is unchanged. Returns the checker too so the loop can read
     its derived history window.
+
+    The cancellation checker (AR19) registers first so an already-cancelled token
+    short-circuits before any other reason; with a never-cancelling default token
+    it can never fire, keeping the no-token path byte-identical.
     """
     mt, mcf = resolve_limits(max_turns, max_consecutive_failures)
     threshold, ignore_keys = _resolve_loop_config(loop_repeat_threshold, loop_ignore_arg_keys)
     controller = TerminationController()
+    if cancel_token is not None:
+        controller.register(CancellationChecker(cancel_token))
     controller.register(MaxTurnsChecker(mt))
     controller.register(ConsecutiveFailuresChecker(mcf))
     if include_approval:
@@ -106,15 +114,19 @@ def _maybe_inject_loop_warning(messages: list[Any], state: LoopState) -> None:
 
 
 async def _safe_dispatch(
-    name: str, arguments: str | dict[str, Any], is_sub_agent: bool
+    name: str,
+    arguments: str | dict[str, Any],
+    is_sub_agent: bool,
+    cancel_token: CancelToken | None = None,
 ) -> tuple[str, bool]:
     """Dispatch a tool, normalizing a crash into (error_text, failed=True).
 
     Returning instead of raising keeps a tool crash from killing the loop and
-    lets the consecutive-failures checker observe it.
+    lets the consecutive-failures checker observe it. The cancel token is passed
+    out-of-band; dispatch injects it only into tools that opt in (AR19 D3).
     """
     try:
-        result = dispatch(name, arguments, is_sub_agent=is_sub_agent)
+        result = dispatch(name, arguments, is_sub_agent=is_sub_agent, cancel_token=cancel_token)
         if inspect.iscoroutine(result):
             result = await result
         return result, False
@@ -337,6 +349,7 @@ async def run(
     disabled_skills_trace: list[dict[str, str]] | None = None,
     loop_repeat_threshold: int | None = None,
     loop_ignore_arg_keys: list[str] | None = None,
+    cancel_token: CancelToken | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -380,12 +393,15 @@ async def run(
     models_to_try = [cfg.model] if force_model is not None else [cfg.model, *cfg.fallbacks]
     model_used = cfg.model
 
+    # None → a never-cancelling default token, keeping the no-token path identical.
+    token = cancel_token if cancel_token is not None else CancelToken()
     controller, loop_checker = _build_controller(
         max_turns,
         max_consecutive_failures,
         include_approval=True,
         loop_repeat_threshold=loop_repeat_threshold,
         loop_ignore_arg_keys=loop_ignore_arg_keys,
+        cancel_token=token,
     )
     state = LoopState()
     stop_reason = StopReason.normal
@@ -482,12 +498,12 @@ async def run(
                         )
                     else:
                         result, failed = await _safe_dispatch(
-                            tc.function.name, tc.function.arguments, is_sub_agent
+                            tc.function.name, tc.function.arguments, is_sub_agent, token
                         )
                         state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
                 else:
                     result, failed = await _safe_dispatch(
-                        tc.function.name, tc.function.arguments, is_sub_agent
+                        tc.function.name, tc.function.arguments, is_sub_agent, token
                     )
                     state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
@@ -562,6 +578,7 @@ async def run_stream(
     force_model: str | None = None,
     loop_repeat_threshold: int | None = None,
     loop_ignore_arg_keys: list[str] | None = None,
+    cancel_token: CancelToken | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -603,12 +620,14 @@ async def run_stream(
     total_completion_tokens = 0
     cache_tokens: dict[str, int] | None = None
 
+    token = cancel_token if cancel_token is not None else CancelToken()
     controller, loop_checker = _build_controller(
         max_turns,
         max_consecutive_failures,
         include_approval=False,
         loop_repeat_threshold=loop_repeat_threshold,
         loop_ignore_arg_keys=loop_ignore_arg_keys,
+        cancel_token=token,
     )
     state = LoopState()
     stop_reason = StopReason.normal
@@ -704,7 +723,7 @@ async def run_stream(
             name = func["name"]
             args = func["arguments"]
             yield {"type": "tool_call", "name": name, "args": args}
-            result, failed = await _safe_dispatch(name, args, False)
+            result, failed = await _safe_dispatch(name, args, False, token)
             state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             yield {"type": "tool_result", "name": name, "content": result}
             messages.append({"role": "tool", "tool_call_id": tc_data["id"], "content": result})

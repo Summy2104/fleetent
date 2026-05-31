@@ -253,3 +253,66 @@
 1. **sub_agent / approval-rejected 分支记 `success=True`（not failed=True）**：sub_agent 视作有进展（与其重置 consecutive_failures 一致）；approval-rejected 不计失败（由 approval_rejected 原因码优先终止）。确认此归类符合「信号 B 只计成功且有进展」语义、不致 sub_agent 反复同结果被误判循环（实际 sub_agent 极少在窗口内反复同 digest，风险低）。
 2. **警告文案**（`_LOOP_WARNING_TEXT`）措辞定死为「检测到你正在重复调用同一工具且似乎没有进展，请改用其它方式或直接给出当前结论。」，与 design D3 示例一致。确认无需调整。
 3. **`loop_detect_ignore_arg_keys` 仅剔除顶层 key**（不递归嵌套）：design D2 表述「剔除指定键」，实现按顶层 dict 键剔除。确认顶层粒度足够（嵌套易变键场景留信号 B 兜底）。
+
+## 9. cancellation-propagation (AR19)：贯穿主循环与工具调用的单向 cancel token 通路
+
+**前置核实（tasks 1.x，无代码改动）：**
+- **1.1 AR1 接口**：`termination.py` 的 `TerminationChecker` Protocol、`TerminationController.register`/`should_stop`、`StopReason.cancelled`（行 63）均已存在；本 change 仅新增 `CancellationChecker` + 透传 token，不改 AR1 既有判定。
+- **1.2 主循环检查点**：`run()`（行 290 区域）与 `run_stream()`（行 487 区域）每轮开头 `controller.should_stop(state)`，是循环体第一步——已取消 token 在「下一次 LLM 调用前」即被捕获（`run()` 检查点在 LLM 调用之前；`run_stream()` 检查点也在 `_stream_with_fallback` 之前，仅 `state.turn += 1` 在其后，不影响首轮拦截）。
+- **1.3 工具调度链**：`dispatch`（行 61）唯一外部调用点是 `_safe_dispatch`（行 108）；`_safe_dispatch` 在 `run()` 有两处调用（approved 分支、非 gated 分支）、`run_stream()` 一处。token 注入位置即此三处 + `_safe_dispatch→dispatch`。
+- **1.4 容器生命周期**：`run_code`（tools.py 行 123）内 `client = SandboxClient(); ws_id = await client.create_workspace(...)`——`ws_id` 局部于 `run_code`，`SandboxClient` 实例不持有；故硬中止编排归 `run_code`（它持 `ws_id`），`SandboxClient` 仅保证 `destroy_workspace` 幂等。现状 `destroy_workspace` 用 DEVNULL 且不检查 returncode，已天然幂等（`rm -f` 失败不抛），本 change 将该保证文档化为契约。
+- **1.5 `_build_schema` 排除 + dispatch opt-in**：`_build_schema`（行 85）遍历 `inspect.signature` 全部形参，无默认值进 `required`；选定判据为「形参名 == `cancel_token`」识别 opt-in，`_build_schema` 跳过该形参（properties/required 均不含）、`dispatch` 仅对声明该形参的工具追加 `cancel_token=` kwarg。未声明的存量工具签名与 schema 字节级不变。
+
+**实现：**
+- **新建 `src/fleetent/cancellation.py`**（import→常量→数据类→类）：
+  - `CancelToken`（dataclass）：`deadline: float | None = None`（基于 `time.monotonic()` 的绝对截止）+ `_cancelled: bool = False`。`cancel()` 幂等置 `_cancelled=True`；`is_cancelled()` = `_cancelled or (deadline is not None and monotonic() >= deadline)`，合并「显式取消」与「超 deadline」为单一查询出口。`CancelToken()` 永不取消（默认值用）、`CancelToken(deadline=...)` 带硬截止。
+  - `CancellationChecker(token)`：实现 `TerminationChecker`，`check()` 在 `token.is_cancelled()` 时返 `StopReason.cancelled` 否则 None。
+  - 常量 `CANCEL_TOKEN_PARAM = "cancel_token"`（对外发布的 opt-in 形参名约定）。
+- **`tool_registry.py`**：常量 `_CANCEL_TOKEN_PARAM = "cancel_token"`；`_accepts_cancel_token(fn)`（`inspect.signature` 判形参名）；`dispatch` 新增 `cancel_token: Any = None`，仅当 `cancel_token is not None and _accepts_cancel_token(fn)` 时把 `kwargs["cancel_token"] = cancel_token`；`_build_schema` 遍历时 `if param_name == _CANCEL_TOKEN_PARAM: continue` 跳过。
+- **`agent_loop.py`**：import `CancellationChecker, CancelToken`；`_build_controller` 新增 kwarg `cancel_token: CancelToken | None = None`，非 None 时**首位**注册 `CancellationChecker`（短路优先级最高）；`_safe_dispatch` 新增 `cancel_token` 形参透传 `dispatch`；`run()`/`run_stream()` 各新增 `cancel_token: CancelToken | None = None`，None → 构造永不取消默认 token，传入 `_build_controller` 与三处 `_safe_dispatch`。
+- **`tools.py`**：常量 `_CANCEL_POLL_INTERVAL = 0.05`；新增 `_exec_or_cancel(client, ws_id, command, token)`——`exec_task = create_task(client.exec(...))`，循环：token 取消则 `exec_task.cancel()` + `gather(..., return_exceptions=True)` + `client.destroy_workspace(ws_id)` 返回 None；否则 `asyncio.wait({exec_task}, timeout=poll)`，exec 完成即返回 result。`run_code` 新增 `cancel_token: CancelToken | None = None`（None→默认 token），调 `_exec_or_cancel`，result 为 None 时返回 `"code execution cancelled"`；`finally` 仍兜底 `destroy_workspace`（幂等，已销毁则 no-op）。正常路径不销毁中途容器、行为不变。
+- **`sandbox_client.py`**：`destroy_workspace` docstring 文档化幂等契约（实现已天然幂等，未改逻辑）。
+
+**自解冲突：**
+1. **opt-in 判据选「形参名 cancel_token」而非 `@tool` 注册标记** —— design D3 允许「注册标记 或 形参名约定」二选一。选形参名约定：零侵入（工具只需声明形参即可既被注入又自动从 schema 排除，单一判据 `_accepts_cancel_token` 同时服务 dispatch 与 `_build_schema`），无需扩展 `@tool` 装饰器签名 / 注册表结构。与 design「按 `@tool` 注册标记或形参名 `cancel_token` 约定识别」一致。
+2. **`CancellationChecker` 注册位置选首位** —— design 未强制顺序；选首位使「已取消」短路优先于 max_turns 等，符合「取消是最高优先的外部意图」直觉，且默认永不取消 token 下该 checker 永不触发，不改无 token 路径的既有优先级（max_turns/consecutive_failures/approval_rejected/loop_detected 相对顺序不变）。
+3. **`destroy_workspace` 幂等已天然成立，6.2 测试直接绿** —— TDD 下「该测试未经实现即绿」。判定：现状 DEVNULL + 不检查 returncode 即是幂等的实现，6.2 测试是对既有可观察行为的契约固化（spec MODIFY sandbox-client 要求「提供幂等强制销毁」）。未为凑红而引入多余逻辑；改为补 docstring 把幂等从「偶然」提升为「契约」。
+4. **`dispatch` 的 `cancel_token` 类型注解用 `Any`** —— tool_registry 不依赖 cancellation 模块（避免循环 import：cancellation 已 import termination，tools 已 import cancellation+tool_registry）。`dispatch` 只透传不解引用 token，用 `Any` 注解保持 tool_registry 对 CancelToken 零依赖、不引入新 import 边。
+5. **`run_stream` 取消后收尾** —— 取消在检查点命中即 `break`，正常落到 `yield {"type":"done",...}` 出口，不泄漏半截事件（测试 `test_run_stream_cancelled_stops_before_llm_and_finishes_clean` 守卫 `events[-1]["type"]=="done"`）。
+6. **D5 trace** —— `cancelled` 经现有 `log_run(..., stop_reason=stop_reason)` 出口写，复用既有 `ts`/`elapsed_s`，未新增 trace 字段/出口（测试 `test_run_cancelled_logs_stop_reason_cancelled` 守卫）。
+
+**CancelToken 接口最终形态（对外契约，波次 3 T2/SB7 依赖，锁定）：**
+```python
+@dataclass
+class CancelToken:
+    deadline: float | None = None   # 绝对 time.monotonic() 截止；None 无截止
+    _cancelled: bool = False
+    def cancel(self) -> None: ...               # 幂等置已取消
+    def is_cancelled(self) -> bool: ...         # _cancelled 或 已超 deadline → True
+# CancelToken() 永不取消（默认值）；CancelToken(deadline=now+timeout) 即超时语义
+CANCEL_TOKEN_PARAM = "cancel_token"             # 工具 opt-in 形参名约定
+class CancellationChecker:                       # TerminationChecker
+    def __init__(self, token: CancelToken) -> None: ...
+    def check(self, state) -> StopReason | None: ...  # cancelled / None
+```
+波次 3 仅以 `CancelToken(deadline=time.monotonic()+timeout)` 复用，不改接口。
+
+**token 带外注入 + `_build_schema` 排除如何实现、存量工具是否真不变：**
+- 注入：`dispatch` 仅对声明 `cancel_token` 形参的工具（`_accepts_cancel_token`）追加 `cancel_token=` kwarg；其余工具调用 `fn(**kwargs)` 字节级不变（测试 `test_dispatch_does_not_inject_token_into_non_opt_in_tool` 守卫）。
+- 排除：`_build_schema` 跳过名为 `cancel_token` 的形参，故 opt-in 工具的 LLM-facing schema 的 properties/required 均不含 token（`test_schema_excludes_cancel_token_param` 守卫），不会被当 string 必填字段误导 LLM；未声明 token 的工具 schema 完全不变（`test_schema_unaffected_for_tool_without_token` 守卫）。
+- **存量工具真不变**：全量 874 基线用例无回归（含所有未 opt-in 工具的 dispatch/schema 用例）。当前唯一 opt-in 工具是 `run_code`。
+
+**run_code 硬中止编排 + destroy 幂等如何实现：**
+- 编排（`_exec_or_cancel`）：`exec_task = create_task(client.exec)`；轮询（poll 0.05s）观察 `token.is_cancelled()`，取消时 `exec_task.cancel()` + `gather(return_exceptions=True)`（吞 CancelledError，不静默业务异常）+ `client.destroy_workspace(ws_id)` 强制 `docker rm -f` 中止悬挂 exec、返回 None → `run_code` 返回 `"code execution cancelled"`。正常路径：exec 先完成即返回 result，不销毁中途容器。
+- destroy 幂等：`SandboxClient.destroy_workspace` 用 DEVNULL 且不检查 returncode，`rm -f` 对已删容器报错也不抛；故取消路径销毁后，`run_code` 的 `finally` 兜底二次 destroy 不重复抛（测试 `test_destroy_workspace_is_idempotent_when_container_absent`、`test_run_code_cancel_path_finally_does_not_double_raise` 守卫）。
+
+**影响：**
+- pytest：base **874 passed → after 897 passed**（新增 23：test_cancellation 8 + test_tool_registry 5 + test_tools 3 + test_sandbox_client 1 + test_agent_loop 6）。AR1/AR4 既有终止用例全绿；不传 token 的现有用例字节级不变（`test_run_default_no_token_behaves_normally` 显式守卫）。
+- ruff（仅 format/check 改动文件：`cancellation.py`/`tool_registry.py`/`tools.py`/`sandbox_client.py`/`agent_loop.py` + 5 测试文件）：新建/主改文件 **All checks passed**。残留报错（`agent_loop.py:740` N814 `_CU`、`tools.py` cron_scheduler F401、`test_sandbox_client.py` ExecResult F401 + SIM117）经 `git stash` 验证为**基线即存在**（HEAD 同位置同错，7 errors），非本 change 引入；format 仅对这些既有文件做了等价长行重排（无功能改动）。
+- mypy：base **74 errors → after 74 errors**，错误码分布不变（`cancellation.py` 新增 0 错误，checked 50→51 files），**无新增错误模式**。
+
+**需 zy 核实：**
+1. **opt-in 判据用形参名 `cancel_token` 约定**（非 `@tool` 注册标记）：与 design D3「注册标记 或 形参名约定」二选一，选了形参名（最小侵入、单一判据复用于 dispatch + `_build_schema`）。确认接受此约定为对外契约的一部分（波次 3 工具若要接 token，需把执行体形参命名为 `cancel_token`）。
+2. **取消结果文案 `"code execution cancelled"`**：`run_code` 取消时返回此固定串。确认措辞，及是否需要更结构化的取消标记（当前 cooperative 语义下作普通 tool_result 回喂 LLM，下一检查点由 `cancelled` 截停）。
+3. **poll 间隔 `_CANCEL_POLL_INTERVAL = 0.05s`**：轮询观察 token 取消。确认该粒度（取消响应延迟 ≤ 50ms，CPU 开销可忽略）符合预期；若波次 3 偏好事件驱动可后续替换为 deadline 计算超时 + 事件，本 change 留轮询实现。
+4. **`CancellationChecker` 注册于 controller 首位**（取消优先级最高）：design 未强制，确认此优先级语义。

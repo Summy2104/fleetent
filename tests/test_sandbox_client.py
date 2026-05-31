@@ -1,4 +1,5 @@
 """Tests for SandboxClient (Docker-backed implementation)."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,7 +23,9 @@ def client():
 
 async def test_create_workspace_returns_container_id(client):
     fake_id = "abc123def456\n"
-    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(stdout=fake_id))):
+    with patch(
+        "asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(stdout=fake_id))
+    ):
         ws_id = await client.create_workspace("session-1")
     assert ws_id == "abc123def456"
 
@@ -79,3 +82,14 @@ async def test_destroy_workspace_calls_docker_rm(client):
         await client.destroy_workspace("container-abc")
 
     assert captured[0][:4] == ["docker", "rm", "-f", "container-abc"]
+
+
+async def test_destroy_workspace_is_idempotent_when_container_absent(client):
+    """A second destroy (container already gone / rm -f already ran) must not raise."""
+    # docker rm -f on a missing container exits non-zero; destroy_workspace must
+    # swallow that so the cancel path's destroy + finally's fallback destroy
+    # cannot double-raise (AR19 D3b).
+    mock_proc = _mock_proc(stderr="Error: No such container: gone", returncode=1)
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)):
+        await client.destroy_workspace("already-gone")
+        await client.destroy_workspace("already-gone")

@@ -1,12 +1,18 @@
 """Built-in tools. Import this module to register them with the tool registry."""
 
+import asyncio
 import datetime
 import uuid
 from pathlib import Path
 
 from fleetent import image_gen_client, vision_client
-from fleetent.sandbox_client import SandboxClient
+from fleetent.cancellation import CancelToken
+from fleetent.sandbox_client import ExecResult, SandboxClient
 from fleetent.tool_registry import tool
+
+# How often the cancel watcher polls the token while exec runs (seconds). Small
+# enough that cancellation is observed promptly, large enough to stay cheap.
+_CANCEL_POLL_INTERVAL = 0.05
 
 # Generated images are written here, then a short reference is returned to the
 # loop (never inline base64). Injectable module-level constant (no global mutable
@@ -119,17 +125,42 @@ def write_file(path: str, content: str) -> str:
         return f"error: {exc}"
 
 
+async def _exec_or_cancel(
+    client: SandboxClient, ws_id: str, command: str, cancel_token: CancelToken
+) -> ExecResult | None:
+    """Run exec, but force-destroy the container and abort if the token cancels.
+
+    Returns the ExecResult on normal completion, or None when cancellation (or a
+    passed deadline) is observed first — in which case the container is destroyed
+    with `docker rm -f` (AR19 D3b) rather than left hanging on a blocked exec.
+    """
+    exec_task = asyncio.create_task(client.exec(ws_id, command))
+    while True:
+        if cancel_token.is_cancelled():
+            exec_task.cancel()
+            await asyncio.gather(exec_task, return_exceptions=True)
+            await client.destroy_workspace(ws_id)
+            return None
+        done, _ = await asyncio.wait({exec_task}, timeout=_CANCEL_POLL_INTERVAL)
+        if exec_task in done:
+            return exec_task.result()
+
+
 @tool(risk_level="medium")
-async def run_code(code: str) -> str:
+async def run_code(code: str, cancel_token: CancelToken | None = None) -> str:
     """Execute Python code in an isolated Docker container and return the output.
 
     The container has no network access and limited memory (256 MB).
     State does not persist between calls.
     """
+    token = cancel_token if cancel_token is not None else CancelToken()
     client = SandboxClient()
     ws_id = await client.create_workspace("run-code")
     try:
-        result = await client.exec(ws_id, f"python3 -c {__import__('shlex').quote(code)}")
+        command = f"python3 -c {__import__('shlex').quote(code)}"
+        result = await _exec_or_cancel(client, ws_id, command, token)
+        if result is None:
+            return "code execution cancelled"
         parts = []
         if result.stdout:
             parts.append(result.stdout.rstrip())
@@ -139,6 +170,7 @@ async def run_code(code: str) -> str:
             parts.append(f"[exit {result.exit_code}]")
         return "\n".join(parts) if parts else "(no output)"
     finally:
+        # Idempotent (D3b): a no-op when the cancel path already destroyed it.
         await client.destroy_workspace(ws_id)
 
 

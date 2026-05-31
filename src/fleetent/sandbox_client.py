@@ -25,14 +25,23 @@ class SandboxClient:
         """Start an isolated container, return container ID as workspace_id."""
         safe = _SAFE_NAME.sub("-", session_id)[:48]
         proc = await asyncio.create_subprocess_exec(
-            "docker", "run", "-d",
-            "--name", f"sandbox-{safe}",
-            "--network", "none",
-            "--memory", "256m",
-            "--cpus", "0.5",
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            f"sandbox-{safe}",
+            "--network",
+            "none",
+            "--memory",
+            "256m",
+            "--cpus",
+            "0.5",
             "--read-only",
-            "--tmpfs", "/tmp",
-            self._image, "sleep", "infinity",
+            "--tmpfs",
+            "/tmp",
+            self._image,
+            "sleep",
+            "infinity",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -46,7 +55,12 @@ class SandboxClient:
     async def exec(self, workspace_id: str, command: str) -> ExecResult:
         """Execute a shell command inside the running container."""
         proc = await asyncio.create_subprocess_exec(
-            "docker", "exec", workspace_id, "sh", "-c", command,
+            "docker",
+            "exec",
+            workspace_id,
+            "sh",
+            "-c",
+            command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -58,9 +72,18 @@ class SandboxClient:
         )
 
     async def destroy_workspace(self, workspace_id: str) -> None:
-        """Stop and remove the container."""
+        """Stop and remove the container; idempotent (AR19 D3b).
+
+        `docker rm -f` on an already-removed container exits non-zero; this
+        method deliberately ignores the return code so a repeat destroy — the
+        cancel path's forced `rm -f` followed by `run_code`'s `finally` fallback
+        — never raises on the second call.
+        """
         proc = await asyncio.create_subprocess_exec(
-            "docker", "rm", "-f", workspace_id,
+            "docker",
+            "rm",
+            "-f",
+            workspace_id,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )

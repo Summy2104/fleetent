@@ -57,14 +57,31 @@ def get_schemas() -> list[ToolSchema]:
 
 _SUB_AGENT_TOOL = "sub_agent"
 
+# Runtime out-of-band parameter (AR19 D3): a tool opts into receiving the cancel
+# token by declaring a parameter with this name. `dispatch` injects the token
+# only for such tools; `_build_schema` excludes it from the LLM-facing schema so
+# it is never surfaced as a model-provided argument.
+_CANCEL_TOKEN_PARAM = "cancel_token"
+
+
+def _accepts_cancel_token(fn: Callable[..., Any]) -> bool:
+    """True if `fn` declares the out-of-band cancel-token parameter (opt-in)."""
+    return _CANCEL_TOKEN_PARAM in inspect.signature(fn).parameters
+
 
 def dispatch(
     name: str,
     arguments_json: str | dict[str, Any],
     allowed_tools: list[str] | None = None,
     is_sub_agent: bool = False,
+    cancel_token: Any = None,
 ) -> str:
-    """Execute a registered tool by name with JSON-encoded arguments."""
+    """Execute a registered tool by name with JSON-encoded arguments.
+
+    `cancel_token` is injected out-of-band (not an LLM-provided argument) only
+    for tools that opt in by declaring a `cancel_token` parameter; for all other
+    tools the call is byte-identical to one made without a token.
+    """
     if is_sub_agent and name == _SUB_AGENT_TOOL:
         raise PermissionError("sub_agent tool is not available inside a sub-agent")
     if allowed_tools is not None:
@@ -78,6 +95,8 @@ def dispatch(
     kwargs: dict[str, Any] = (
         arguments_json if isinstance(arguments_json, dict) else json.loads(arguments_json)
     )
+    if cancel_token is not None and _accepts_cancel_token(fn):
+        kwargs[_CANCEL_TOKEN_PARAM] = cancel_token
     result = fn(**kwargs)
     return result  # type: ignore[no-any-return]
 
@@ -88,6 +107,11 @@ def _build_schema(fn: Callable[..., Any]) -> ToolSchema:
     properties: dict[str, dict[str, str]] = {}
     required: list[str] = []
     for param_name, param in sig.parameters.items():
+        # Exclude the out-of-band cancel token (AR19 D3): it is injected at
+        # dispatch time, not provided by the LLM, so it must not appear in the
+        # tool's parameter schema (otherwise it would be a required string field).
+        if param_name == _CANCEL_TOKEN_PARAM:
+            continue
         properties[param_name] = {"type": _py_type_to_json(param.annotation)}
         if param.default is inspect.Parameter.empty:
             required.append(param_name)
