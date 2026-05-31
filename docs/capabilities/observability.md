@@ -228,10 +228,14 @@ def get_logger(component: str) -> Logger:
 - [ ] **注入来源摘要**：记录最终注入 prompt 的 `InjectedContextTrace`
   - 默认不保存完整 memory / KB content
   - metadata 包含 `kb_id`、`document_id`、`chunk_id`、`memory_type` 等可追溯字段
+  - 复用现有 `traces` 表，event_type 为 `injected_context`
+  - 与同一次 `agent_run_completed` 事件复用同一个 `run_id`
+  - `BuiltContext.sources` 为空时不写空事件
 
-- [ ] **候选结果 debug preview**：debug / trace 级别可记录被截断候选的短 preview
+- [ ] **候选结果 debug preview（后续）**：debug / trace 级别可记录被截断候选的短 preview
   - preview 长度有限
   - 必须经过脱敏
+  - 不包含在 `observability-source-attribution` 首个 implementation change 中
 
 ### P1：metrics / usage
 
@@ -269,7 +273,12 @@ def get_logger(component: str) -> Logger:
 **场景 6：注入来源摘要可追溯**
 - Given：long_term_ctx 注入了一个 memory 和一个 KB chunk
 - When：agent run 写 trace
-- Then：`injected_context` 事件包含两个 source summary，不包含完整 KB / memory content
+- Then：`injected_context` 事件包含两个 source summary，不包含完整 KB / memory content，并与本次 `agent_run_completed` 使用同一个 run_id
+
+**场景 6a：无注入来源时不写空事件**
+- Given：long_term_ctx 返回空 sources
+- When：agent run 写 trace
+- Then：系统不写入空的 `injected_context` 事件
 
 **场景 7：脱敏生效**
 - Given：工具参数中包含 Bearer token 和 password 字段
@@ -283,7 +292,8 @@ def get_logger(component: str) -> Logger:
 - 脱敏规则覆盖 token / password / secret / email / phone
 - `record_trace_event()` 写入 traces 表并序列化 payload
 - `query_trace_events()` 按 run / user / agent / event_type / 时间过滤
-- `record_injected_context()` 不写完整 content
+- `record_injected_context()` 写入 `injected_context` trace event，且不写完整 content
+- `record_injected_context()` 在 sources 为空时不写空事件
 - `log_run()` / `log()` / `fleetent.eval_logger` 被删除，不再作为 public API
 
 **需要 mock 的依赖**：
