@@ -1,120 +1,202 @@
-import json
-from unittest.mock import MagicMock, patch
-
-import pytest
+import sqlite3
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from fleetent import memory_layer
+from fleetent.intelligence import vector_store
+from tests.test_migrations import apply_migrations
 
 
-@pytest.fixture(autouse=True)
-def patch_mem_path(tmp_path, monkeypatch):
-    """Redirect _mem_path to tmp_path so tests don't touch real data/."""
-
-    def _patched(user_id: str = "default") -> object:
-        return tmp_path / user_id / "memories.jsonl"
-
-    monkeypatch.setattr(memory_layer, "_mem_path", _patched)
+def test_memory_layer_public_api_exports_semantic_store_contract():
+    assert memory_layer.MemoryItem
+    assert callable(memory_layer.extract_and_update)
+    assert callable(memory_layer.search)
+    assert not hasattr(memory_layer, "load_memories")
 
 
-def _write_memories(path, facts: list[str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        for fact in facts:
-            f.write(json.dumps({"ts": "2026-01-01T00:00:00Z", "text": fact}) + "\n")
+def _patch_database(tmp_path, monkeypatch):
+    db_path = tmp_path / "memory.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    return db_path
 
 
-def test_load_memories_empty_when_no_file():
-    result = memory_layer.load_memories(user_id="alice")
-    assert result == ""
+def _patch_extraction(monkeypatch, content: str) -> AsyncMock:
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace()))
+    create = AsyncMock(
+        return_value=SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+        )
+    )
+    client.chat.completions.create = create
+    cfg = SimpleNamespace(model="test-memory-model", max_tokens=512)
+    monkeypatch.setattr(memory_layer, "get_async_client_and_config", lambda _: (client, cfg))
+    return create
 
 
-def test_load_memories_returns_formatted_string(tmp_path):
-    path = tmp_path / "alice" / "memories.jsonl"
-    _write_memories(path, ["Likes Python", "Speaks Chinese"])
-    result = memory_layer.load_memories(user_id="alice")
-    assert "[Memory]" in result
-    assert "Likes Python" in result
-    assert "Speaks Chinese" in result
+def _memory_rows(db_path):
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        return [dict(row) for row in conn.execute("SELECT * FROM memory_items ORDER BY content")]
 
 
-def test_load_memories_truncates_to_n(tmp_path):
-    path = tmp_path / "alice" / "memories.jsonl"
-    facts = [f"fact {i}" for i in range(30)]
-    _write_memories(path, facts)
-    result = memory_layer.load_memories(user_id="alice", n=5)
-    lines = [line for line in result.splitlines() if line.startswith("- ")]
-    assert len(lines) == 5
-    assert "fact 29" in result  # last one present
-    assert "fact 0" not in result  # earliest truncated
-
-
-def test_load_memories_skips_malformed_lines(tmp_path):
-    path = tmp_path / "alice" / "memories.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as f:
-        f.write("not json\n")
-        f.write(json.dumps({"ts": "x", "text": "valid fact"}) + "\n")
-        f.write(json.dumps({"ts": "x", "no_text": True}) + "\n")
-    result = memory_layer.load_memories(user_id="alice")
-    assert "valid fact" in result
-    assert "not json" not in result
-
-
-def test_load_memories_user_id_isolation(tmp_path):
-    path_a = tmp_path / "alice" / "memories.jsonl"
-    path_b = tmp_path / "bob" / "memories.jsonl"
-    _write_memories(path_a, ["Alice memory"])
-    _write_memories(path_b, ["Bob memory"])
-    assert "Alice memory" in memory_layer.load_memories(user_id="alice")
-    assert "Bob memory" not in memory_layer.load_memories(user_id="alice")
-    assert "Bob memory" in memory_layer.load_memories(user_id="bob")
-
-
-def test_extract_and_save_writes_facts(tmp_path):
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value.choices[
-        0
-    ].message.content = '["User is learning Python", "Prefers short answers"]'
-    mock_config = MagicMock()
-    mock_config.model = "test-model"
-    mock_config.max_tokens = 512
-
-    patch_target = "fleetent.memory_layer.get_client_and_config"
-    with patch(patch_target, return_value=(mock_client, mock_config)):
-        memory_layer.extract_and_save(
-            "how do I learn Python?",
-            [{"role": "user", "content": "how do I learn Python?"}],
-            user_id="alice",
+def _insert_memory_row(
+    db_path,
+    *,
+    id: str,
+    user_id: str = "alice",
+    type: str = "identity",
+    content: str,
+    expires_at: str | None = None,
+) -> None:
+    now = datetime.now(UTC).replace(microsecond=0).isoformat()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO memory_items (
+                id, user_id, type, content, created_at, updated_at, expires_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (id, user_id, type, content, now, now, expires_at),
         )
 
-    result = memory_layer.load_memories(user_id="alice")
-    assert "User is learning Python" in result
-    assert "Prefers short answers" in result
+
+async def test_extract_and_update_writes_create_actions(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    _patch_extraction(
+        monkeypatch,
+        """
+        [
+          {"action": "create", "type": "identity", "content": "User is a backend engineer"},
+          {"action": "create", "type": "preferences", "content": "User prefers concise replies"}
+        ]
+        """,
+    )
+
+    await memory_layer.extract_and_update(
+        "alice", [{"role": "user", "content": "I am a backend engineer"}]
+    )
+
+    rows = _memory_rows(db_path)
+    assert [row["content"] for row in rows] == [
+        "User is a backend engineer",
+        "User prefers concise replies",
+    ]
+    assert {row["user_id"] for row in rows} == {"alice"}
 
 
-def test_extract_and_save_handles_empty_list(tmp_path):
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value.choices[0].message.content = "[]"
-    mock_config = MagicMock()
-    mock_config.model = "test-model"
-    mock_config.max_tokens = 512
+async def test_extract_and_update_ignores_ignore_actions(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    _patch_extraction(
+        monkeypatch,
+        """[{"action": "ignore", "reason": "one-off request"}]""",
+    )
 
-    patch_target = "fleetent.memory_layer.get_client_and_config"
-    with patch(patch_target, return_value=(mock_client, mock_config)):
-        memory_layer.extract_and_save("hello", [], user_id="alice")
+    await memory_layer.extract_and_update(
+        "alice", [{"role": "user", "content": "Use bullets only this time"}]
+    )
 
-    assert memory_layer.load_memories(user_id="alice") == ""
+    assert _memory_rows(db_path) == []
 
 
-def test_extract_and_save_handles_malformed_json(tmp_path):
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value.choices[0].message.content = "not json"
-    mock_config = MagicMock()
-    mock_config.model = "test-model"
-    mock_config.max_tokens = 512
+async def test_extract_and_update_applies_type_ttl_rules(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    _patch_extraction(
+        monkeypatch,
+        """
+        [
+          {"action": "create", "type": "identity", "content": "User is a backend engineer"},
+          {"action": "create", "type": "preferences", "content": "User prefers Chinese"},
+          {"action": "create", "type": "context", "content": "User is working on billing"}
+        ]
+        """,
+    )
+    before = datetime.now(UTC).replace(microsecond=0) + timedelta(days=30)
 
-    patch_target = "fleetent.memory_layer.get_client_and_config"
-    with patch(patch_target, return_value=(mock_client, mock_config)):
-        memory_layer.extract_and_save("hello", [], user_id="alice")
+    await memory_layer.extract_and_update("alice", [{"role": "user", "content": "facts"}])
 
-    assert memory_layer.load_memories(user_id="alice") == ""
+    after = datetime.now(UTC).replace(microsecond=0) + timedelta(days=30)
+    rows = {row["type"]: row for row in _memory_rows(db_path)}
+    assert rows["identity"]["expires_at"] is None
+    assert rows["preferences"]["expires_at"] is None
+    context_expires = datetime.fromisoformat(rows["context"]["expires_at"])
+    assert before <= context_expires <= after
+
+
+async def test_extract_and_update_ignores_invalid_memory_type(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    _patch_extraction(
+        monkeypatch,
+        """[{"action": "create", "type": "project", "content": "User works on billing"}]""",
+    )
+
+    await memory_layer.extract_and_update("alice", [{"role": "user", "content": "facts"}])
+
+    assert _memory_rows(db_path) == []
+
+
+async def test_extract_and_update_upserts_created_memory_to_vector_store(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    upsert = AsyncMock()
+    monkeypatch.setattr(vector_store, "upsert", upsert)
+    _patch_extraction(
+        monkeypatch,
+        """[{"action": "create", "type": "identity", "content": "User is a backend engineer"}]""",
+    )
+
+    await memory_layer.extract_and_update(
+        "alice", [{"role": "user", "content": "I am a backend engineer"}]
+    )
+
+    [row] = _memory_rows(db_path)
+    upsert.assert_awaited_once_with(
+        row["id"], "User is a backend engineer", vector_store.memory_namespace("alice")
+    )
+
+
+async def test_search_uses_vector_ids_and_filters_expired_memory(tmp_path, monkeypatch):
+    db_path = _patch_database(tmp_path, monkeypatch)
+    expired = (datetime.now(UTC).replace(microsecond=0) - timedelta(days=1)).isoformat()
+    _insert_memory_row(db_path, id="mem-1", content="User likes Python")
+    _insert_memory_row(db_path, id="mem-2", content="User debugs FastAPI")
+    _insert_memory_row(
+        db_path,
+        id="mem-expired",
+        type="context",
+        content="User is working on an old project",
+        expires_at=expired,
+    )
+    vector_search = AsyncMock(
+        return_value=[
+            vector_store.SearchResult(id="mem-2", score=0.9),
+            vector_store.SearchResult(id="missing", score=0.8),
+            vector_store.SearchResult(id="mem-expired", score=0.7),
+            vector_store.SearchResult(id="mem-1", score=0.6),
+        ]
+    )
+    monkeypatch.setattr(vector_store, "search", vector_search)
+
+    results = await memory_layer.search("alice", "python debugging", limit=4)
+
+    vector_search.assert_awaited_once_with("python debugging", "mem:alice", 4)
+    assert [item.id for item in results] == ["mem-2", "mem-1"]
+    assert [item.content for item in results] == ["User debugs FastAPI", "User likes Python"]
+
+
+async def test_extract_and_update_does_not_write_legacy_jsonl(tmp_path, monkeypatch):
+    _patch_database(tmp_path, monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(vector_store, "upsert", AsyncMock())
+    _patch_extraction(
+        monkeypatch,
+        """[{"action": "create", "type": "identity", "content": "User is a backend engineer"}]""",
+    )
+
+    await memory_layer.extract_and_update(
+        "alice", [{"role": "user", "content": "I am a backend engineer"}]
+    )
+
+    assert not (tmp_path / "data" / "users" / "alice" / "memories.jsonl").exists()

@@ -26,10 +26,8 @@ def mock_agent_loop(monkeypatch):
 def mock_memory_skill(monkeypatch):
     import fleetent.im_gateway.normalizer as norm
     import fleetent.im_user_store as ius
-    import fleetent.memory_layer as ml
     import fleetent.skill_registry as sr
 
-    monkeypatch.setattr(ml, "load_memories", lambda **kwargs: "")
     monkeypatch.setattr(sr, "match", lambda text: None)
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
     monkeypatch.setattr(norm, "get_agent_for_context", lambda platform, channel_id, user_id: None)
@@ -59,6 +57,7 @@ async def test_route_loads_history_calls_agent_saves_replies(
     # system message inserted + user message appended → messages passed to run()
     call_messages = mock_agent_loop.run.call_args[1]["messages"]
     assert call_messages[0]["role"] == "system"
+    assert "[Memory]" not in call_messages[0]["content"]
     assert call_messages[-1] == {"role": "user", "content": "hello"}
     mock_session_mgr.save.assert_called_once()
     assert reply_calls == ["agent response"]

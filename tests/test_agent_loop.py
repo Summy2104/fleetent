@@ -87,9 +87,7 @@ def mock_client(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
     monkeypatch.setattr(al, "record_trace_event", lambda event: None)
-    monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
-    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
     monkeypatch.setattr(al, "match_skill", lambda _: None)
     return client
 
@@ -188,6 +186,16 @@ async def test_run_stream_yields_text_deltas_and_done(mock_client):
     done = [e for e in events if e["type"] == "done"]
     assert len(done) == 1
     assert done[0]["content"] == "hello"
+
+
+async def test_run_stream_does_not_inject_memory_prompt(mock_client):
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("hello"))
+
+    [_ async for _ in al.run_stream("say hello")]
+
+    messages = mock_client.chat.completions.create.await_args.kwargs["messages"]
+    assert messages[0]["role"] == "system"
+    assert "[Memory]" not in messages[0]["content"]
 
 
 async def test_run_stream_done_on_empty_response(mock_client):
@@ -380,9 +388,7 @@ def mock_client_fb(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
     monkeypatch.setattr(al, "record_trace_event", lambda event: None)
-    monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
-    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
     monkeypatch.setattr(al, "match_skill", lambda _: None)
     return client
 

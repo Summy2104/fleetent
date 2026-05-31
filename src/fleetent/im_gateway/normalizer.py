@@ -76,7 +76,6 @@ async def route(msg: NormalizedMessage) -> None:
         return
 
     from fleetent import agent_loop, session_mgr
-    from fleetent.memory_layer import load_memories
     from fleetent.skill_registry import load as load_skill
     from fleetent.skill_registry import match as match_skill
 
@@ -88,9 +87,8 @@ async def route(msg: NormalizedMessage) -> None:
         base_system = agent.system_prompt if agent else _SYSTEM
         allowed_tools = agent.allowed_tools if agent else None
 
-        # Build fresh system message: memories + matching skill
-        memory_ctx = load_memories(user_id=msg.user_id)
-        system_content = f"{memory_ctx}\n\n{base_system}" if memory_ctx else base_system
+        # Build fresh system message with the matching skill.
+        system_content = base_system
         matched = match_skill(msg.text)
         if matched:
             system_content = f"{system_content}\n\n{load_skill(matched)}"
