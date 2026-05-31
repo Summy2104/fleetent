@@ -35,6 +35,8 @@
 - **WHEN** LLM 返回非法 JSON、未知 action、非法 type、空 content、缺失 target_id 或不属于当前用户的 target_id
 - **THEN** 系统跳过对应输出，不向 agent_runtime 抛出异常
 
+## ADDED Requirements
+
 ### Requirement: Existing memory snapshot for extraction
 `extract_and_update()` SHALL 在调用 memory_extraction 模型时提供有限的现有 memory snapshot，
 供模型判断 create、update、delete 或 ignore。

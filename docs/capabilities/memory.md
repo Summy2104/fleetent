@@ -101,15 +101,17 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
 已实现内容：
 - `memory_items` SQLite 表，存储 `identity` / `preferences` / `context` 三类语义记忆
 - `MemoryItem`、`extract_and_update(user_id, conversation)`、`search(user_id, query, limit)` public API
-- `extract_and_update()` 调用 `memory_extraction` task，只处理 `create` / `ignore`
+- `extract_and_update()` 调用 `memory_extraction` task，处理 `create` / `update` / `delete` / `ignore`
+- memory extraction 输入包含有限 existing memory snapshot：identity 20、preferences 30、context 20
+- `update` / `delete` 仅允许作用于当前用户 snapshot 内的合法 `target_id`
+- context update 刷新 30 天 TTL，identity / preferences update 后不过期
 - context 记忆默认 30 天 TTL，identity / preferences 默认不过期
 - 写入 memory 后同步写入 vector_store，namespace 为 `mem:{user_id}`
 - `search()` 通过 vector_store 查相关 memory ids，回查 SQLite 并过滤过期 context
 - 删除旧 JSONL memory 兼容和 `load_memories()` 直接注入路径
 
-当前定位：已完成结构化语义记忆地基，但记忆质量、冲突合并和真实 embedding 效果仍未闭环。
-下一步先推进 `memory-update-merge-actions`，补齐 create / update / delete / ignore action
-以及有限 memory snapshot 输入；效果评估、retention 和真实 embedding 后置。
+当前定位：已完成结构化语义记忆地基和基础维护动作，但记忆提取质量、retention 策略和真实
+embedding 效果仍未闭环。下一步优先做 `memory-extraction-evaluation`。
 
 ## 规划中（v1.0）
 
@@ -118,7 +120,7 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
   - `preferences`：工作偏好（风格、输出格式偏好）— 长期有效
   - `context`：临时状态（当前项目、进行中任务）— TTL 30 天，过期自动失效
 
-- [ ] **冲突检测与合并**：新提取的事实与已有同类记忆比较，按类型规则决定处理方式
+- [x] **冲突检测与合并**：新提取的事实与已有同类记忆比较，按类型规则决定处理方式
   - `identity` / `context`：新覆盖旧（身份和状态以最新为准）
   - `preferences`：区分**明确陈述**（"我以后都想要..."）和**一次性请求**（"这次帮我..."）
     - 明确陈述 → 更新记忆
@@ -134,15 +136,12 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
 
 ## 当前缺口
 
-- 只支持 `create` / `ignore`，没有 update / merge / delete 动作。
-- 冲突处理尚未真正实现：旧记忆不会被自动替换或合并。
 - 提取质量缺少自动化评估：误记、漏记、一次性请求误存等风险无法量化。
 - 真实 embedding 未接入，语义检索质量还不能代表生产效果。
 - memory 条数增长策略未定义：没有硬上限、软告警或 compaction 机制。
 
 ## 下一批候选 specs
 
-- `memory-update-merge-actions`
 - `memory-extraction-evaluation`
 - `memory-retention-and-compaction`
 - `memory-real-embedding-provider`
