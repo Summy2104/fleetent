@@ -316,3 +316,55 @@ class CancellationChecker:                       # TerminationChecker
 2. **取消结果文案 `"code execution cancelled"`**：`run_code` 取消时返回此固定串。确认措辞，及是否需要更结构化的取消标记（当前 cooperative 语义下作普通 tool_result 回喂 LLM，下一检查点由 `cancelled` 截停）。
 3. **poll 间隔 `_CANCEL_POLL_INTERVAL = 0.05s`**：轮询观察 token 取消。确认该粒度（取消响应延迟 ≤ 50ms，CPU 开销可忽略）符合预期；若波次 3 偏好事件驱动可后续替换为 deadline 计算超时 + 事件，本 change 留轮询实现。
 4. **`CancellationChecker` 注册于 controller 首位**（取消优先级最高）：design 未强制，确认此优先级语义。
+
+---
+
+## 10. iteration-budget-grace-call (AR2)
+
+**改/建文件：**
+- 新建 `src/fleetent/budget.py`（`BudgetConfig`/`BudgetUsage`/`BudgetChecker`/`MODEL_PRICING`/`DEFAULT_PRICING`/`NO_LIMIT`/`grace_max_tokens`）；对外计量契约（波次 3 AR18/MR2 依赖）。
+- 修改 `src/fleetent/agent_loop.py`：`_build_controller` 退役 `MaxTurnsChecker`、注册 `BudgetChecker`，返回三元组 `(controller, loop_checker, budget_checker)`；`run()`/`run_stream()` 新增 `max_tokens`/`max_cost_usd` 参数、逐轮 `usage.add(...)`、`budget_exceeded` 终止时 Grace Call 收尾（非流式 `_grace_call`，流式内联）；新增 `_resolve_budget_config`/`_budget_add`/`_grace_call` 与 `_GRACE_CALL_TEXT` 常量、`logger`。
+- 修改 `src/fleetent/termination.py`：删除已退役的 `MaxTurnsChecker` 类（不再注册，仅其单测引用），保留 `StopReason.max_turns` 枚举成员（更新注释为"compat / 不再产出"）。
+- 修改 `src/fleetent/config.py`：新增 `agent_max_tokens`(-1)/`agent_max_cost_usd`(-1.0)/`agent_grace_call_token_ratio`(0.05)/`agent_grace_call_min_tokens`(512)。
+- 修改 `src/fleetent/eval_logger.py`：`log_run` 末位 kw `budget_dimension: str | None = None`（仅非 None 写）。
+- 修改 `config/settings.yaml.example`：补四个预算/Grace Call 字段示例。
+- 测试：新建 `tests/test_budget.py`（22 例）；`tests/test_agent_loop.py` 新增 10 例 + 迁移 5 例；`tests/test_termination.py` 迁移 3 例 + 1 兼容例；`tests/test_config.py` +2 例。
+
+**契约最终形态 + BudgetUsage 如何逐轮更新：**
+- `BudgetConfig(frozen)`：`max_turns:int / max_tokens:int / max_cost_usd:float`，各以 `NO_LIMIT=-1` 表"无上限"；`exhausted_dimension(usage)` 按 `turns→tokens→cost_usd` 顺序返回首个达上限的维度名或 None。
+- `BudgetUsage`（可变）：`turns/tokens/cost_usd`；`add(prompt_tokens, completion_tokens, model)` 是唯一累计入口——`turns += 1`、`tokens += prompt+completion`、`cost_usd += token/1000 × 单价`（查 `MODEL_PRICING`，表外用 `DEFAULT_PRICING`）。
+- `BudgetChecker(config, usage)` 实现 AR1 `TerminationChecker`；任一维度达上限返 `StopReason.budget_exceeded` 并记 `triggered_dimension`。
+- **逐轮更新落点（设计决策：usage 旁挂 + 显式 add）**：`BudgetUsage` 由 `run()`/`run_stream()` 各自 new 一个 per-run 实例，**传进 `_build_controller`** 给 `BudgetChecker` 持有引用；主循环每轮 LLM 调用返回后**显式调用同一 usage 的 add**（`run()`：`_budget_add(usage, response.usage, model)` 在 `state.turn += 1` 后；`run_stream()`：逐 chunk 累计该轮 `turn_prompt/completion_tokens`，内层 stream 结束后 `usage.add(...)` 结算）。checker 与主循环共享同一 usage 对象，下一检查点即据累计值判定。未用 `LoopState` 承载 usage（design D1 备选②），保持累计逻辑/单价换算内聚在 budget.py、可独立单测。
+
+**§6b 退役 MaxTurnsChecker + 迁移的用例：**
+- 退役：`_build_controller` 不再注册 `MaxTurnsChecker`，改注册 `BudgetChecker`（位置仍在 Cancellation 之后、ConsecutiveFailures 之前，优先级语义不变）；`MaxTurnsChecker` 类已删（唯一引用是自身单测）；`StopReason.max_turns` 枚举保留。
+- 迁移（test_agent_loop.py，5 例）：`test_run_stops_at_max_turns`（断言改为 3 次调用[2 主 +1 grace]、result=grace 总结）、`test_build_controller_empty_history_yields_only_active_reasons`（用新签名 + 断言含 `budget_exceeded`）、`test_run_logs_stop_reason_max_turns`→`..._budget_exceeded_on_turns`（断言 `budget_exceeded`+`budget_dimension=="turns"`）、`test_run_stream_logs_stop_reason_max_turns`→同上流式版、`test_run_stream_stops_at_max_turns`（3 次调用、done 收尾）。
+- 迁移（test_termination.py，3 例）：`test_max_turns_checker_*`（at/above/below limit）→ `test_step_budget_*`（用 `BudgetChecker` + step `BudgetConfig` 断言 `budget_exceeded` + `triggered_dimension=="turns"`）；新增 `test_stop_reason_max_turns_member_retained_for_compat`；保留 `StopReason.max_turns` 存在性/str 值用例（21/34/35/198 行）与把它当任意 stub 值的 controller-ordering 用例（不涉及"循环产出"语义）。
+
+**Grace Call 如何实现：**
+- `run()`（非流式 `_grace_call`）：终止 `stop_reason==budget_exceeded` 时，取 `budget_checker.triggered_dimension`，对 messages 追加 `_GRACE_CALL_TEXT`（"请用一段话总结…不要再调用工具"），以 `grace_max_tokens(budget_config.max_tokens)` 为 `max_tokens` 发起最后一次 `create`，输出作 reply。**降级**：`except Exception` 或 summary 为空 → 返回 `partial_reply`（终止前累积的 `msg.content`），`logger.warning` 记降级，不重试不崩溃。
+- `run_stream()`（流式，内联）：命中后不直接 `done`，而是追加 grace 指令、以 reserved 上限**再发起一次流式 create**，逐 chunk `yield text_delta` 流出总结，再统一 `yield done`+`log_run(budget_dimension=...)`。**两类降级**：①未 yield 任何 delta 即失败（`any_delta==False`）→ 把 `partial_reply` 补发一次 `text_delta`（若非空）后 done；②已 yield 部分 delta 后失败（`any_delta==True`）→ 保留已流出内容（无法收回）、`logger.warning` 记降级、不回滚不重试、直接 done。两路都保证收到 done、不悬挂半截循环。
+- Grace Call 自身 usage **不**计入主 `BudgetUsage`（D4/D6：用预留维度，主循环不为它调 add）。
+
+**压缩豁免如何确认（D4 默认成立）：**
+- 核实 `context_mgr.maybe_compress` 内部摘要 LLM 走它自己的 `get_client_and_config("memory_extraction")` + `client.chat.completions.create`（context_mgr.py:273/280），其 token **不流经** `agent_loop` 主循环的 `response.usage` / `_budget_add` / `BudgetUsage.add`。因此无需主动识别排除——只要不把压缩 token 接进 `usage.add` 即豁免。单测 `test_run_compression_tokens_not_counted_in_budget` 守卫：`maybe_compress` 被多次调用但 `BudgetUsage.tokens` 仅等于主循环单轮 token。
+
+**自解冲突（C·全自主，最小改动）：**
+1. **`grace_max_tokens` 基于 `BudgetConfig.max_tokens`（非 `cfg.max_tokens`）**：design D3 明确预留比例针对"主任务 token 预算"，故 `_grace_call` 形参收 `budget_max_tokens` 传 `budget_config.max_tokens`，不用 route 的输出上限。
+2. **`MaxTurnsChecker` 类整体删除**（非仅退役注册）：proposal/tasks 未强制删类，但删后唯一引用仅其自身单测；保留即死代码，故删类、迁移单测、保留枚举。最小改动且与"步数并入 BudgetChecker"一致。
+3. **`budget_dimension` 多维同超时的报告顺序**：`exhausted_dimension` 固定 `turns→tokens→cost_usd`，多维同超报 turns（确定性，便于 trace 统计）。
+4. **`DEFAULT_PRICING` 取值** = `(0.015, 0.075)`（= 表内最贵 opus 档），注释"表外回退、宁高勿漏"、绝不计 0。
+5. **流式 Grace Call 直接调 `client.chat.completions.create`（不走 `_stream_with_fallback`）**：与非流式 `_grace_call` 对称、且避免对 frozen `RouteConfig` 做 `dataclasses.replace`（mock cfg 是 MagicMock）；reserved 上限通过显式 `max_tokens=reserved` 传入。
+6. **`_budget_add` 容错**：`response.usage` 缺失/非 int 时按 0 token 计、但仍 +1 turn——步数维度永不因 usage 缺失而停止累计。
+
+**影响：**
+- pytest：base **897 → after 932 passed**（净 +35 = test_budget +22 + test_agent_loop 新增 10 + test_termination 新增 1[兼容例] + test_config +2；迁移 8 例[test_agent_loop 5 + test_termination 3]为原地改写、不计净增）。AR4/AR19 既有用例全绿。
+- ruff（仅本 change 改/建文件）：format **All unchanged**（无无关重排）；check 仅剩 `agent_loop.py` `_CU` N814——`git stash -u` 验证为基线即存在（HEAD 同位置），非本 change 引入。
+- mypy：base **74 → after 76**，净 +2 均为 `Settings` `call-arg`（budget.py `_grace_defaults` + agent_loop.py `_resolve_budget_config` 的 `Settings()` 调用，与既有 `_default_config`/`_resolve_loop_config` 同模式），**无新增错误模式**。
+
+**需 zy 核实：**
+1. **预算默认 token/cost 维度为 `NO_LIMIT`（-1）**：不传 `max_tokens`/`max_cost_usd` 且未配 Settings 时，token/成本维度不生效，行为退化为纯步数预算（`agent_max_turns=50`）。确认这是期望的"向后兼容"默认（既有部署不被新维度意外拦截）。
+2. **`MODEL_PRICING` 单价取值**：sonnet (0.003/0.015)、haiku (0.001/0.005)、opus (0.015/0.075) 美元/1K tokens 为静态估算值。确认与当前供应商实际单价大致吻合（仅用于止损估算、非账单）；`DEFAULT_PRICING=(0.015,0.075)` 表外保守回退是否过高需调。
+3. **删除 `MaxTurnsChecker` 类**（见自解冲突 2）：确认接受删类而非保留空壳；若波次 3 或外部代码仍 import 该类需改回保留。
+4. **Grace Call 指令文案 `_GRACE_CALL_TEXT`** 与"一段话总结"的长度约束依赖 reserved token 上限（默认 floor=512）：确认措辞与默认配额。
+5. **`grace_max_tokens(NO_LIMIT)` 回退到 floor**：主 token 预算无上限时 Grace Call 仍以 floor(512) 为上限。确认该兜底语义。

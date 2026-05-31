@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from fleetent.budget import BudgetChecker, BudgetConfig, BudgetUsage
 from fleetent.config import Settings
 from fleetent.termination import (
     ApprovalRejectedChecker,
     ConsecutiveFailuresChecker,
     LoopState,
-    MaxTurnsChecker,
     StopReason,
     TerminationController,
     resolve_limits,
@@ -164,22 +164,38 @@ def test_resolve_limits_partial_override() -> None:
     assert limits == (10, 3)
 
 
-# ── MaxTurnsChecker ─────────────────────────────────────────────────────────────
+# ── step dimension carried by BudgetChecker (AR2; MaxTurnsChecker retired) ──────
+#
+# The step dimension is now one of the three budget dimensions. Reaching the turn
+# cap surfaces as StopReason.budget_exceeded (not max_turns), produced by
+# BudgetChecker reading BudgetUsage.turns. StopReason.max_turns is retained as an
+# enum member (compat / historical traces) but the loop no longer produces it.
 
 
-def test_max_turns_checker_stops_at_limit() -> None:
-    checker = MaxTurnsChecker(max_turns=3)
-    assert checker.check(LoopState(turn=3)) == StopReason.max_turns
+def _step_budget(max_turns: int) -> BudgetConfig:
+    return BudgetConfig(max_turns=max_turns, max_tokens=-1, max_cost_usd=-1.0)
 
 
-def test_max_turns_checker_stops_above_limit() -> None:
-    checker = MaxTurnsChecker(max_turns=3)
-    assert checker.check(LoopState(turn=4)) == StopReason.max_turns
+def test_step_budget_stops_at_limit() -> None:
+    checker = BudgetChecker(_step_budget(3), BudgetUsage(turns=3))
+    assert checker.check(LoopState()) == StopReason.budget_exceeded
+    assert checker.triggered_dimension == "turns"
 
 
-def test_max_turns_checker_passes_below_limit() -> None:
-    checker = MaxTurnsChecker(max_turns=3)
-    assert checker.check(LoopState(turn=2)) is None
+def test_step_budget_stops_above_limit() -> None:
+    checker = BudgetChecker(_step_budget(3), BudgetUsage(turns=4))
+    assert checker.check(LoopState()) == StopReason.budget_exceeded
+
+
+def test_step_budget_passes_below_limit() -> None:
+    checker = BudgetChecker(_step_budget(3), BudgetUsage(turns=2))
+    assert checker.check(LoopState()) is None
+
+
+def test_stop_reason_max_turns_member_retained_for_compat() -> None:
+    # Retained so historical traces and existing references stay readable, even
+    # though the loop no longer produces it (design D2).
+    assert StopReason.max_turns == "max_turns"
 
 
 # ── ConsecutiveFailuresChecker ──────────────────────────────────────────────────

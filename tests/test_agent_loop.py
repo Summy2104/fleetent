@@ -164,11 +164,16 @@ async def test_run_dispatches_tool_then_gets_final_reply(mock_client):
 
 
 async def test_run_stops_at_max_turns(mock_client):
-    # LLM keeps requesting tools forever; max_turns must break the loop.
-    mock_client.chat.completions.create = AsyncMock(return_value=_tool_resp("get_time"))
+    # AR2: the step dimension now flows through the budget; reaching max_turns stops
+    # with budget_exceeded and a Grace Call (one extra LLM call) instead of a hard
+    # cut. The LLM keeps requesting tools; the loop runs 2 turns then the grace call.
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_tool_resp("get_time"), _tool_resp("get_time"), _text_resp("summary")]
+    )
     result = await al.run([{"role": "user", "content": "go"}], max_turns=2)
-    assert mock_client.chat.completions.create.call_count == 2
-    assert result == ""
+    # 2 main turns + 1 grace call
+    assert mock_client.chat.completions.create.call_count == 3
+    assert result == "summary"
 
 
 async def test_run_stops_on_consecutive_failures(mock_client):
@@ -231,12 +236,25 @@ async def test_run_approval_rejected_terminates(mock_client, monkeypatch):
 def test_build_controller_empty_history_yields_only_active_reasons():
     # With no tool history the loop-detection checker stays silent, so even with
     # every state flag tripped only active reasons can fire (priority unchanged).
-    controller, _ = al._build_controller(1, 1, include_approval=True, loop_repeat_threshold=3)
+    # AR2: the step dimension is now carried by the budget checker, so the step
+    # limit surfaces as budget_exceeded rather than max_turns.
+    from fleetent.budget import BudgetConfig, BudgetUsage
+
+    config = BudgetConfig(max_turns=1, max_tokens=-1, max_cost_usd=-1.0)
+    usage = BudgetUsage(turns=99)
+    controller, _, _ = al._build_controller(
+        1,
+        1,
+        include_approval=True,
+        budget_config=config,
+        budget_usage=usage,
+        loop_repeat_threshold=3,
+    )
     reason = controller.should_stop(
         LoopState(turn=99, consecutive_failures=99, approval_rejected=True)
     )
     assert reason in {
-        StopReason.max_turns,
+        StopReason.budget_exceeded,
         StopReason.consecutive_failures,
         StopReason.approval_rejected,
     }
@@ -253,22 +271,27 @@ async def test_run_logs_stop_reason_normal(mock_client):
     assert captured.get("stop_reason") == StopReason.normal
 
 
-async def test_run_logs_stop_reason_max_turns(mock_client):
-    captured: dict = {}
-    mock_client.chat.completions.create = AsyncMock(return_value=_tool_resp("t"))
-    with patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)):
-        await al.run([{"role": "user", "content": "x"}], max_turns=1)
-    assert captured.get("stop_reason") == StopReason.max_turns
-
-
-async def test_run_stream_logs_stop_reason_max_turns(mock_client):
+async def test_run_logs_stop_reason_budget_exceeded_on_turns(mock_client):
+    # AR2: the step dimension now logs budget_exceeded + budget_dimension="turns"
+    # (max_turns is retired from the loop's produced reasons). A Grace Call follows.
     captured: dict = {}
     mock_client.chat.completions.create = AsyncMock(
-        side_effect=lambda *a, **k: _looping_tool_stream()
+        side_effect=[_tool_resp("t"), _text_resp("summary")]
     )
     with patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)):
+        await al.run([{"role": "user", "content": "x"}], max_turns=1)
+    assert captured.get("stop_reason") == StopReason.budget_exceeded
+    assert captured.get("budget_dimension") == "turns"
+
+
+async def test_run_stream_logs_stop_reason_budget_exceeded_on_turns(mock_client):
+    captured: dict = {}
+    streams = [_looping_tool_stream(), _text_stream("summary")]
+    mock_client.chat.completions.create = AsyncMock(side_effect=lambda *a, **k: streams.pop(0))
+    with patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)):
         _ = [e async for e in al.run_stream("go", max_turns=1)]
-    assert captured.get("stop_reason") == StopReason.max_turns
+    assert captured.get("stop_reason") == StopReason.budget_exceeded
+    assert captured.get("budget_dimension") == "turns"
 
 
 # ── cancellation (AR19) ────────────────────────────────────────────────────
@@ -478,11 +501,12 @@ def _looping_tool_stream():
 
 
 async def test_run_stream_stops_at_max_turns(mock_client):
-    mock_client.chat.completions.create = AsyncMock(
-        side_effect=lambda *a, **k: _looping_tool_stream()
-    )
+    # AR2: step limit → budget_exceeded + streaming Grace Call (one extra LLM call).
+    streams = [_looping_tool_stream(), _looping_tool_stream(), _text_stream("summary")]
+    mock_client.chat.completions.create = AsyncMock(side_effect=lambda *a, **k: streams.pop(0))
     events = [e async for e in al.run_stream("go", max_turns=2)]
-    assert mock_client.chat.completions.create.call_count == 2
+    # 2 main turns + 1 grace call
+    assert mock_client.chat.completions.create.call_count == 3
     assert events[-1]["type"] == "done"
 
 
@@ -1897,3 +1921,261 @@ async def test_run_warning_survives_same_round_compression(mock_client, monkeypa
         for msgs in captured_messages
     )
     assert found, "loop warning must remain visible to the LLM even when compression fires"
+
+
+# ── AR2: three-dimensional budget + Grace Call ─────────────────────────────────
+
+
+def _tool_resp_usage(prompt: int, completion: int, name: str = "loop_tool") -> MagicMock:
+    """A tool-call response carrying real integer usage (for budget accumulation)."""
+    resp = _tool_resp(name)
+    resp.usage.prompt_tokens = prompt
+    resp.usage.completion_tokens = completion
+    resp.usage.total_tokens = prompt + completion
+    return resp
+
+
+def _text_resp_usage(text: str, prompt: int = 1, completion: int = 1) -> MagicMock:
+    resp = _text_resp(text)
+    resp.usage.prompt_tokens = prompt
+    resp.usage.completion_tokens = completion
+    resp.usage.total_tokens = prompt + completion
+    return resp
+
+
+async def test_run_accumulates_usage_each_turn_not_just_last(mock_client):
+    # Three tool turns then text; the run accumulates per-turn rather than reading
+    # only the final response.usage. Assert via the BudgetUsage handed to the loop.
+    seen: dict = {}
+    real_checker = al.BudgetChecker
+
+    def spy_checker(config, usage):
+        seen["usage"] = usage
+        return real_checker(config, usage)
+
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _tool_resp_usage(10, 5),
+            _tool_resp_usage(20, 7),
+            _text_resp_usage("done", 30, 9),
+        ]
+    )
+    with patch.object(al, "BudgetChecker", spy_checker):
+        result = await al.run([{"role": "user", "content": "go"}])
+    assert result == "done"
+    # tokens = sum of all three turns, not just the last
+    assert seen["usage"].tokens == (10 + 5) + (20 + 7) + (30 + 9)
+    assert seen["usage"].turns == 3
+
+
+async def test_run_compression_tokens_not_counted_in_budget(mock_client):
+    # maybe_compress is mocked to a pass-through; its internal LLM (in context_mgr)
+    # never flows through usage.add. Confirm only main-loop turns are counted.
+    seen: dict = {}
+    real_checker = al.BudgetChecker
+
+    def spy_checker(config, usage):
+        seen["usage"] = usage
+        return real_checker(config, usage)
+
+    compress_calls = {"n": 0}
+
+    def counting_compress(msgs):
+        compress_calls["n"] += 1
+        return msgs
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp_usage("hi", 11, 3))
+    with (
+        patch.object(al, "BudgetChecker", spy_checker),
+        patch.object(al, "maybe_compress", counting_compress),
+    ):
+        await al.run([{"role": "user", "content": "go"}])
+    assert compress_calls["n"] >= 1
+    # exactly one main-loop turn counted; compression added nothing
+    assert seen["usage"].tokens == 11 + 3
+    assert seen["usage"].turns == 1
+
+
+async def test_run_token_budget_triggers_grace_call(mock_client):
+    # Each turn burns 100 tokens; cap at 100 → exhausted after turn 1 → grace call.
+    grace_text = "进展总结：已完成 X。"
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _tool_resp_usage(60, 40),  # turn 1: 100 tokens → over cap
+            _text_resp_usage(grace_text, 1, 1),  # grace call output
+        ]
+    )
+    captured: dict = {}
+    with patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)):
+        result = await al.run([{"role": "user", "content": "go"}], max_tokens=100)
+    assert result == grace_text
+    assert captured.get("stop_reason") == StopReason.budget_exceeded
+    assert captured.get("budget_dimension") == "tokens"
+    # one main turn + one grace call
+    assert mock_client.chat.completions.create.call_count == 2
+
+
+async def test_run_grace_call_uses_reserved_token_cap(mock_client):
+    # The grace call must pass a reserved max_tokens (not the full cfg.max_tokens).
+    grace_max = {"val": None}
+    orig_create = AsyncMock(
+        side_effect=[_tool_resp_usage(200, 0), _text_resp_usage("summary", 1, 1)]
+    )
+
+    async def capture_create(*a, **kw):
+        # the second call is the grace call; capture its max_tokens
+        if orig_create.await_count == 1:
+            grace_max["val"] = kw.get("max_tokens")
+        return await orig_create(*a, **kw)
+
+    mock_client.chat.completions.create = capture_create
+    await al.run([{"role": "user", "content": "go"}], max_tokens=100)
+    assert grace_max["val"] == 512  # floor, since 100 * 0.05 < 512
+
+
+async def test_run_grace_call_failure_returns_partial_result(mock_client):
+    # Grace call raises → fall back to the last assistant text accumulated.
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_tool_resp_usage(200, 0), RuntimeError("grace boom")]
+    )
+    captured: dict = {}
+    with patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)):
+        result = await al.run([{"role": "user", "content": "go"}], max_tokens=100)
+    # No assistant text was produced (only a tool call), so partial result is "".
+    assert result == ""
+    assert captured.get("stop_reason") == StopReason.budget_exceeded
+
+
+async def test_run_turns_budget_produces_budget_exceeded_with_grace(mock_client):
+    # Step dimension now flows through BudgetChecker → budget_exceeded + grace call,
+    # not the retired max_turns hard cut.
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_tool_resp_usage(1, 1), _tool_resp_usage(1, 1), _text_resp_usage("done", 1, 1)]
+    )
+    captured: dict = {}
+    with patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)):
+        result = await al.run([{"role": "user", "content": "go"}], max_turns=2)
+    assert captured.get("stop_reason") == StopReason.budget_exceeded
+    assert captured.get("budget_dimension") == "turns"
+    assert result == "done"  # grace summary, not a hard-cut empty
+
+
+# ── AR2: run_stream budget + streaming Grace Call ──────────────────────────────
+
+
+def _looping_tool_stream_usage(prompt: int, completion: int):
+    """A streaming tool-call turn that also reports usage (for budget accrual)."""
+
+    async def _gen():
+        c = MagicMock()
+        c.usage = None
+        c.choices = [MagicMock()]
+        c.choices[0].delta.content = None
+        tc_delta = MagicMock()
+        tc_delta.index = 0
+        tc_delta.id = "tc-1"
+        tc_delta.function.name = "loop_tool"
+        tc_delta.function.arguments = "{}"
+        c.choices[0].delta.tool_calls = [tc_delta]
+        c.choices[0].finish_reason = "tool_calls"
+        yield c
+        u = MagicMock()
+        u.choices = []
+        u.usage = MagicMock()
+        u.usage.prompt_tokens = prompt
+        u.usage.completion_tokens = completion
+        u.usage.total_tokens = prompt + completion
+        yield u
+
+    return _gen()
+
+
+def _text_stream(*parts: str):
+    async def _gen():
+        for i, p in enumerate(parts):
+            c = MagicMock()
+            c.usage = None
+            c.choices = [MagicMock()]
+            c.choices[0].delta.content = p
+            c.choices[0].delta.tool_calls = None
+            c.choices[0].finish_reason = "stop" if i == len(parts) - 1 else None
+            yield c
+
+    return _gen()
+
+
+async def test_run_stream_accumulates_usage_each_turn(mock_client):
+    seen: dict = {}
+    real_checker = al.BudgetChecker
+
+    def spy_checker(config, usage):
+        seen["usage"] = usage
+        return real_checker(config, usage)
+
+    # two tool turns then a budget cap that is high enough not to trip until later;
+    # we only assert per-turn accrual, so let it loop twice then finish.
+    streams = [
+        _looping_tool_stream_usage(10, 5),
+        _looping_tool_stream_usage(20, 7),
+        _text_stream("done"),
+    ]
+    mock_client.chat.completions.create = AsyncMock(side_effect=lambda *a, **k: streams.pop(0))
+    with patch.object(al, "BudgetChecker", spy_checker):
+        events = [e async for e in al.run_stream("go")]
+    assert events[-1]["type"] == "done"
+    assert seen["usage"].tokens == (10 + 5) + (20 + 7) + 0  # text turn had no usage chunk
+    assert seen["usage"].turns == 3
+
+
+async def test_run_stream_budget_triggers_streaming_grace_call(mock_client):
+    # turn 1 burns 100 tokens (cap 100) → budget_exceeded → streaming grace call.
+    streams = [
+        _looping_tool_stream_usage(60, 40),
+        _text_stream("总结：", "已完成 X。"),  # grace call streamed summary
+    ]
+    mock_client.chat.completions.create = AsyncMock(side_effect=lambda *a, **k: streams.pop(0))
+    captured: dict = {}
+    with patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)):
+        events = [e async for e in al.run_stream("go", max_tokens=100)]
+    deltas = [e["content"] for e in events if e["type"] == "text_delta"]
+    assert "".join(deltas) == "总结：已完成 X。"
+    assert events[-1]["type"] == "done"
+    assert captured.get("stop_reason") == StopReason.budget_exceeded
+    assert captured.get("budget_dimension") == "tokens"
+
+
+async def test_run_stream_grace_call_fails_before_any_delta(mock_client):
+    # Grace call stream raises immediately → degrade to last accumulated text.
+    call = {"n": 0}
+
+    def side(*a, **k):
+        call["n"] += 1
+        if call["n"] == 1:
+            return _looping_tool_stream_usage(200, 0)
+        raise RuntimeError("grace stream boom")
+
+    mock_client.chat.completions.create = AsyncMock(side_effect=side)
+    events = [e async for e in al.run_stream("go", max_tokens=100)]
+    # No prior assistant text → done with whatever partial (empty here), but stream
+    # must still terminate cleanly with a done event.
+    assert events[-1]["type"] == "done"
+
+
+async def test_run_stream_grace_call_fails_after_partial_delta(mock_client):
+    # Grace call yields one delta then errors mid-stream → keep what streamed, done.
+    async def _partial_then_boom():
+        c = MagicMock()
+        c.usage = None
+        c.choices = [MagicMock()]
+        c.choices[0].delta.content = "部分总结"
+        c.choices[0].delta.tool_calls = None
+        c.choices[0].finish_reason = None
+        yield c
+        raise RuntimeError("mid-stream boom")
+
+    streams = [_looping_tool_stream_usage(200, 0), _partial_then_boom()]
+    mock_client.chat.completions.create = AsyncMock(side_effect=lambda *a, **k: streams.pop(0))
+    events = [e async for e in al.run_stream("go", max_tokens=100)]
+    deltas = [e["content"] for e in events if e["type"] == "text_delta"]
+    assert "部分总结" in "".join(deltas)
+    assert events[-1]["type"] == "done"
