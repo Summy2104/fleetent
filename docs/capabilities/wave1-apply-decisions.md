@@ -87,3 +87,19 @@
 
 **影响:** 533 passed,mypy 66=baseline 无新增。含守卫 test_override_none_is_byte_identical_routing。解锁 model-parameter-config。
 **需 zy 核实:** force_model 与 vision route 叠加语义(force_model 会强制覆盖 vision route 的模型)。
+
+## provider-health-probe-cache (MR3) — feat/provider-health-probe
+
+**实现:** 新增 provider_health.py(`ProviderState`/`ProviderHealthCache`,可注入 now 假时钟,三态断路器:闭合→开启→半开;构造参数>Settings>默认;`get_health_cache()` 惰性单例+可 monkeypatch);config 加 provider_failure_threshold=3/provider_cooldown_seconds=60;_call/_stream_with_fallback 用 is_available 过滤冷却 provider、成功 record_success、失败 record_failure。
+
+**复用 AR5 classify(A 方案):** record_failure 紧跟在 AR5 的 `if not classify(exc).should_switch_model: raise` 之后——仅当 should_switch_model(429/503)才计失败;4xx/auth/unknown 先 raise、不碰缓存。单点叠加、无重复状态码逻辑。
+
+**D4 全冷却兜底:** `_candidates()` 过滤后若全空 → 返回原全量列表(探测冷却中 provider 作最后尝试),保住"耗尽即 raise"契约(test_call_all_cooling_does_not_return_empty 验证)。
+
+**自解冲突:**
+1. 新增 `tests/conftest.py` autouse fixture 每测试重置 _cache(防跨测试 cooldown 泄漏到顺序相关的 fallback 用例)——共享测试基建文件,影响全测试但仅做隔离重置。
+2. 单例惰性构造(get_health_cache),避免 import 时实例化 Settings。
+3. D4 选"探测全量"而非直接 raise(对齐既有 exhaustion 测试)。
+
+**影响:** 558 passed;provider_health 的 Settings() call-arg 是 9 个模块共享的既有模式、非新增。含守卫 test_non_health/400_never_marks_unavailable。
+**需 zy 核实:** 3/60s 默认值;全冷却"探测全量"兜底策略;新增 conftest.py autouse 重置对其它测试无副作用(558 passed 佐证)。

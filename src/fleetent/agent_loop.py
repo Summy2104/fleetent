@@ -22,6 +22,7 @@ from fleetent.message_hygiene import HygieneReport, MessageContractError, saniti
 from fleetent.model_router import RouteConfig, RouteOverride, get_async_client_and_config
 from fleetent.multimodal import build_message_with_images, has_image_block
 from fleetent.permission_gate import _default_gate
+from fleetent.provider_health import ProviderHealthCache, get_health_cache
 from fleetent.skill_registry import load as load_skill
 from fleetent.skill_registry import match as match_skill
 from fleetent.skill_registry import scan as scan_skills
@@ -75,6 +76,17 @@ async def _safe_dispatch(
         return f"tool execution error: {exc}", True
 
 
+def _candidates(models: list[str], cache: ProviderHealthCache) -> list[str]:
+    """Models to actually try, skipping those in cooldown (MR3, design D4).
+
+    When every candidate is cooling we fall back to the full original list rather
+    than skip all of them: probing the cooling providers preserves the existing
+    "providers exhausted → raise" contract instead of silently returning nothing.
+    """
+    available = [m for m in models if cache.is_available(m)]
+    return available or models
+
+
 async def _call_with_fallback(
     client: AsyncOpenAI,
     cfg: RouteConfig,
@@ -82,9 +94,15 @@ async def _call_with_fallback(
     schemas: list[Any],
     models: list[str],
 ) -> tuple[Any, str]:
-    """Try each model in order on 429/503; return (response, model_used)."""
+    """Try each model in order on 429/503; return (response, model_used).
+
+    Providers currently in cooldown (per the health cache, MR3) are skipped so a
+    known-bad provider no longer costs its timeout on every request. A successful
+    call closes that provider's breaker; a switchable failure records against it.
+    """
+    cache = get_health_cache()
     last_exc: Exception | None = None
-    for model in models:
+    for model in _candidates(models, cache):
         try:
             resp = await client.chat.completions.create(
                 model=model,
@@ -92,12 +110,15 @@ async def _call_with_fallback(
                 tools=schemas,  # type: ignore[arg-type]
                 max_tokens=cfg.max_tokens,
             )
+            cache.record_success(model)
             return resp, model
         except Exception as exc:
             # Classification owns the "should we switch models?" decision; the
-            # loop no longer hardcodes status codes here (design D5).
+            # loop no longer hardcodes status codes here (design D5). Only a
+            # switchable failure (429/503) counts against the provider's breaker.
             if not classify(exc).should_switch_model:
                 raise
+            cache.record_failure(model)
             last_exc = exc
     raise last_exc  # type: ignore[misc]
 
@@ -109,9 +130,14 @@ async def _stream_with_fallback(
     schemas: list[Any],
     models: list[str],
 ) -> tuple[Any, str]:
-    """Try each model in order on 429/503 for streaming; return (stream, model_used)."""
+    """Try each model in order on 429/503 for streaming; return (stream, model_used).
+
+    Shares the health cache with `_call_with_fallback`: cooling providers are
+    skipped, successes close the breaker, switchable failures record against it.
+    """
+    cache = get_health_cache()
     last_exc: Exception | None = None
-    for model in models:
+    for model in _candidates(models, cache):
         try:
             stream = await client.chat.completions.create(
                 model=model,
@@ -121,10 +147,12 @@ async def _stream_with_fallback(
                 stream=True,
                 stream_options={"include_usage": True},
             )
+            cache.record_success(model)
             return stream, model
         except Exception as exc:
             if not classify(exc).should_switch_model:
                 raise
+            cache.record_failure(model)
             last_exc = exc
     raise last_exc  # type: ignore[misc]
 
