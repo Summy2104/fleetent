@@ -4,6 +4,23 @@
 系统 SHALL 提供 vector store、embedding 和 rerank 配置默认值。当前版本 SHALL 默认使用
 in-memory vector backend、deterministic embedding backend，并默认禁用 rerank。
 
+#### Scenario: Default embedding config
+- **WHEN** 未显式配置 embedding
+- **THEN** `embedding.backend` 默认为 `deterministic`
+- **AND** `embedding.dimensions` 默认为 64
+
+#### Scenario: HTTP embedding config exists
+- **WHEN** 读取默认 settings
+- **THEN** embedding 配置包含 endpoint、model、api_key_env 和 timeout_seconds 字段
+
+#### Scenario: Default rerank config
+- **WHEN** 未显式配置 rerank
+- **THEN** `rerank.backend` 默认为 `disabled`
+
+#### Scenario: HTTP rerank config exists
+- **WHEN** 读取默认 settings
+- **THEN** rerank 配置包含 endpoint、model、api_key_env 和 timeout_seconds 字段
+
 #### Scenario: SQLite vector backend can be configured
 - **WHEN** `vector_store.backend="sqlite"`
 - **THEN** 系统创建 SQLite persistent vector backend
@@ -18,8 +35,8 @@ in-memory vector backend、deterministic embedding backend，并默认禁用 rer
 - **WHEN** `vector_store.backend="sqlite"` 且 database_url 不是本地 sqlite URL
 - **THEN** 系统 fail fast，并说明只支持本地 sqlite URL
 
-#### Scenario: Unsupported vector backend fails fast
-- **WHEN** 配置了当前不支持的 vector backend
+#### Scenario: Unsupported provider backend fails fast
+- **WHEN** 配置了当前不支持的 vector、embedding 或 rerank backend
 - **THEN** 初始化失败，并明确说明当前支持的 backend
 
 ## ADDED Requirements

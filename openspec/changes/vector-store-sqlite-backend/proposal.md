@@ -9,8 +9,7 @@ Qdrant、OpenSearch / Elasticsearch adapter 留出边界。
 
 ## What Changes
 
-- 以 `embedding-rerank-provider-abstraction` 合并后的 runtime/provider 结构为基线执行；如果该 change 尚未合并，
-  本 change 不应并行修改同一组文件。
+- 以已合并的 `embedding-rerank-provider-abstraction` runtime/provider 结构为基线执行。
 - 新增 `vector_store.backend = "sqlite"`。
 - 新增可选 `vector_store.database_url`：
   - 未配置时复用全局 `Settings.database_url`。
