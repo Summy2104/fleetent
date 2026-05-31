@@ -68,13 +68,13 @@ src/fleetent/
   skill_registry.py  ← 扫描 skills/，关键词匹配，注入 system prompt
   context_mgr.py     ← in-session token 压缩，keep_tail identity check
   memory_layer.py    ← 跨 session 事实：Haiku 提取 → JSONL → 注入
-  user_store.py      ← SQLite 用户/API key 管理
+  user_store.py      ← 用户/API key 持久化（当前 SQLite-first）
   eval_logger.py     ← append-only JSONL 追踪日志
   server.py          ← FastAPI：POST /chat (SSE)，GET /health，Bearer 认证
   admin.py           ← CLI：create-user, list-users, rotate-key 等
   config.py          ← pydantic-settings；加载 .env + config/settings.yaml
   agent_policy.py    ← fnmatch tool 访问检查（allowed_tools 白名单）
-  agent_store.py     ← SQLite：agent 定义 + 用户绑定 + channel 绑定
+  agent_store.py     ← agent 定义 + 用户绑定 + channel 绑定（当前 SQLite-first）
   im_user_store.py   ← (platform, platform_user_id) → 内部 User；allowlist 管理
   session_mgr.py     ← JSON session 持久化；per-session asyncio.Lock
   permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
@@ -82,7 +82,7 @@ src/fleetent/
   mcp_client.py      ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
   sub_agent.py       ← asyncio.gather 并行子 agent；最大深度 1
   cron_scheduler.py  ← APScheduler 定时任务；server 启动时初始化
-  schedule_store.py  ← SQLite：定时任务定义与状态持久化
+  schedule_store.py  ← 定时任务定义与状态持久化（当前 SQLite-first）
   webhook_router.py  ← Webhook 来源配置加载、签名验证、消息提取
   im_gateway/
     normalizer.py    ← NormalizedMessage dataclass；统一路由 pipeline
@@ -95,8 +95,11 @@ src/fleetent/
 以下做法**明确禁止**，不需讨论：
 
 - **禁止引入 AI 框架**：LangChain / LlamaIndex / LangGraph——直接调 SDK，不要框架抽象
-- **禁止 ORM**：不用 SQLAlchemy，用 aiosqlite 直接写 SQL
-- **禁止全局可变状态**：模块级路径常量（`DB_PATH` / `SESSIONS_DIR` 等）必须可通过 `monkeypatch` 注入，方便测试隔离
+- **禁止 ORM**：数据库策略是 SQLite-first，不是 SQLite-only；手写 SQL 通过 store 边界保持可审计
+- **禁止扩散 SQLite 细节**：新增或改造数据库代码必须经过统一 DB runtime / store 边界，不得继续扩散 `sqlite3.connect`、`DB_PATH` re-export、SQLite 专属方言到业务层
+- **SQL 参数规范**：store 层 SQL 使用 named parameters（如 `:user_id`），不要新增 `?` 占位符风格
+- **schema lifecycle 归 Alembic**：不要在新 store 中复制 `_init_db()` 建表/补列模式
+- **禁止全局可变状态**：legacy 模块级路径常量（`DB_PATH` / `SESSIONS_DIR` 等）在迁移前必须可通过 `monkeypatch` 注入，方便测试隔离
 - **新依赖必须经过讨论**：区分三类——
   - 基础设施服务（PostgreSQL、Redis、Qdrant 等）：可引入，需在 PR 中说明必要性和自托管方案
   - AI 框架（LangChain / LlamaIndex / LangGraph）：永久禁止，无论何种理由
@@ -126,7 +129,7 @@ data/
 
 ### 隔离模式
 
-- `monkeypatch.setattr(module, "DB_PATH", tmp_path / "x.db")` — SQLite 隔离
+- 数据库测试优先使用统一 DB fixture 或 `tmp_path` 隔离；legacy store 迁移前可 `monkeypatch.setattr(module, "DB_PATH", tmp_path / "x.db")`
 - `monkeypatch.setattr(memory_layer, "_mem_path", ...)` — 记忆文件隔离
 - `patch("fleetent.memory_layer.get_client_and_config", ...)` — LLM 调用隔离
 - 所有 async 测试自动收集：`asyncio_mode = auto`（pytest.ini），无需 `@pytest.mark.asyncio`
@@ -134,7 +137,7 @@ data/
 ### Mock 策略
 
 - **LLM 调用必须 mock**：patch `get_client_and_config`，单元测试不允许真实 API 调用
-- **SQLite 必须隔离**：monkeypatch `DB_PATH` 到 `tmp_path`
+- **数据库必须隔离**：使用 `tmp_path` / 统一 DB fixture；legacy store 迁移前 monkeypatch `DB_PATH` 到 `tmp_path`
 - **文件路径必须隔离**：sessions、memories 路径同上
 - **外部 HTTP**（MCP、sandbox）：用 `respx` 或 `unittest.mock` mock，不发真实请求
 

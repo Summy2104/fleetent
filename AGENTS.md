@@ -59,15 +59,18 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`。
 - 注释只解释“为什么”，不复述“做什么”。
 - 新模块结构：import → 可注入常量/配置 → dataclass → 函数。
 - 禁止引入 LangChain / LlamaIndex / LangGraph。
-- 禁止 ORM；使用 `aiosqlite` 直接写 SQL。
-- 禁止不可注入的全局可变状态；路径常量必须方便 `monkeypatch` 隔离。
+- 禁止 ORM；数据库策略是 SQLite-first，不是 SQLite-only。
+- 新增或改造数据库代码必须经过统一 DB runtime / store 边界；不得继续扩散 `sqlite3.connect`、`DB_PATH` re-export、SQLite 专属方言到业务层。
+- store 层 SQL 使用 named parameters（如 `:user_id`），不要新增 `?` 占位符风格。
+- schema lifecycle 由 Alembic 管理；不要在新 store 中复制 `_init_db()` 建表/补列模式。
+- 禁止不可注入的全局可变状态；legacy 路径常量在迁移前必须方便 `monkeypatch` 隔离。
 - 禁止云托管专有服务破坏数据主权；基础设施组件必须可 self-host。
 
 ## Testing Guidelines
 
 pytest 配置为 `asyncio_mode = auto`，async 测试无需 `@pytest.mark.asyncio`。
 
-测试必须隔离外部依赖：LLM 调用 patch `get_client_and_config`，SQLite 路径用 `tmp_path + monkeypatch`，MCP / sandbox / 外部 HTTP 用 `respx` 或 `unittest.mock`。每个测试函数只测一个行为；`permission_gate` 测试使用短超时：`PermissionGate(medium_timeout=0.1)`。
+测试必须隔离外部依赖：LLM 调用 patch `get_client_and_config`，数据库测试用 `tmp_path` 或统一 DB fixture 隔离（legacy store 迁移前可 monkeypatch `DB_PATH`），MCP / sandbox / 外部 HTTP 用 `respx` 或 `unittest.mock`。每个测试函数只测一个行为；`permission_gate` 测试使用短超时：`PermissionGate(medium_timeout=0.1)`。
 
 ## Gotchas
 
