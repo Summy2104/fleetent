@@ -13,6 +13,7 @@ from openai.types.chat import ChatCompletionChunk
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent.agent_policy import check_tool_access
 from fleetent.context_mgr import maybe_compress
+from fleetent.intelligence.long_term_ctx import build_context
 from fleetent.model_router import RouteConfig, get_async_client_and_config
 from fleetent.observability import TraceEvent, record_trace_event
 from fleetent.permission_gate import _default_gate
@@ -25,6 +26,7 @@ from fleetent.tool_registry import dispatch, get_risk_level, get_schemas
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
 
 _SUB_AGENT_TOOL = "sub_agent"
+_LONG_TERM_CONTEXT_HEADER = "[Long-term context]"
 
 
 async def _call_with_fallback(
@@ -136,6 +138,25 @@ def _serialize_message(message: Any) -> Any:
     return str(message)
 
 
+def _first_user_content(messages: list[Any]) -> str:
+    for message in messages:
+        if isinstance(message, dict) and message.get("role") == "user":
+            content = message.get("content", "")
+            return content if isinstance(content, str) else str(content)
+    return ""
+
+
+def _append_system_context(messages: list[Any], system_prompt: str, context_text: str) -> None:
+    if not context_text:
+        return
+    addition = f"{_LONG_TERM_CONTEXT_HEADER}\n{context_text}"
+    for message in messages:
+        if isinstance(message, dict) and message.get("role") == "system":
+            message["content"] = f"{message.get('content', '')}\n\n{addition}"
+            return
+    messages.insert(0, {"role": "system", "content": f"{system_prompt}\n\n{addition}"})
+
+
 async def run(
     messages: list[dict[str, Any]],
     user_id: str = "default",
@@ -152,6 +173,9 @@ async def run(
     When allowed_tools is set, only matching tools (fnmatch patterns) are exposed.
     """
     client, cfg = get_async_client_and_config("default")
+    user_input = _first_user_content(messages)
+    built_context = await build_context(user_id, user_input, agent_name or "", cfg.max_tokens)
+    _append_system_context(messages, system_prompt, built_context.text)
 
     # Determine effective tool schemas (exclude sub_agent for child agents)
     schemas = (
@@ -310,6 +334,8 @@ async def run_stream(
         {"role": "system", "content": full_system},
         {"role": "user", "content": user_input},
     ]
+    built_context = await build_context(user_id, user_input, agent_name or "", cfg.max_tokens)
+    _append_system_context(messages, full_system, built_context.text)
 
     start = time.monotonic()
     reply = ""
