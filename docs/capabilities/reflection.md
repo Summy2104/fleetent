@@ -83,11 +83,21 @@ async def run_reflection(scope: str) -> ReflectionReport:
 
 ## 现状
 
-尚未实现。
+**foundation 已完成**：`2026-05-31-reflection-foundation` 已归档。
+
+已实现内容：
+- `ReflectionReport`、`ReflectionFinding`、`run_reflection(scope)` public API
+- `reflection_reports` SQLite 表
+- 只通过 observability public API 读取 traces
+- 只读 memory-layer 信号，不自动修改 memory
+- 支持三类 finding：`memory_candidate`、`memory_conflict`、`skill_opportunity`
+- 保存 report 时不保存完整 trace transcript
+
+当前定位：已具备“生成建议报告”的地基，但报告质量、消费方式和自动应用机制都未完成。
 
 ## 规划中（v1.0）
 
-- [ ] **reflection foundation**：生成结构化建议报告，不自动应用
+- [x] **reflection foundation**：生成结构化建议报告，不自动应用
   - `memory_candidate`：可能应该进入 memory 的重复事实
   - `memory_conflict`：可能冲突的用户事实
   - `skill_opportunity`：可沉淀为 skill 的重复任务模式
@@ -168,3 +178,30 @@ async def run_reflection(scope: str) -> ReflectionReport:
 - [ ] finding 生成策略：第一阶段完全 deterministic，还是允许调用轻量模型做摘要归纳？（负责人：待认领）
 - [ ] report 查看入口：先只提供 admin CLI，还是直接接 platform 页面？（负责人：待认领）
 - [ ] 后续 skill proposal 存储：复用 permission_gate 表，还是单独的提案表？（负责人：待认领）
+
+## 当前缺口
+
+- finding 规则仍然很初级，主要依赖 deterministic payload 字段和简单模式。
+- 没有 report 消费闭环：管理员、自动评估、后续 job 都还没有使用 report。
+- 没有自动化效果评估：无法量化 finding 的准确率、误报率和漏报率。
+- 不会自动维护 memory，不会生成 skill proposal，不接 knowledge-base。
+
+## 下一批候选 specs
+
+- `reflection-report-evaluation`
+- `reflection-report-consumption`
+- `memory-reflection-maintenance`
+- `skill-reflection-proposals`
+- `knowledge-base-reflection-reports`
+
+## 自动化效果验证缺口
+
+- 构造 trace fixture，标注 expected findings，评估 finding precision / recall。
+- 构造负样本，避免重复事实、普通任务被误判为 proposal。
+- 构造 transcript redaction fixture，验证 report 不泄露完整对话。
+- 后续接入真实 LLM summary 前，需要 golden dataset 防止回归。
+
+## 服务化 / 目录边界判断
+
+reflection 更像离线 job / worker，未来可以独立调度甚至独立服务化。但当前应先保持在
+`intelligence.reflection` 内，等 report schema、评估集和应用策略稳定后再拆 worker。

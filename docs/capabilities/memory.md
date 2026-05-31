@@ -96,18 +96,22 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
 
 ## 现状
 
-- ✅ **事实提取**：对话结束后异步提取用户相关事实，写入 JSONL
-  - 使用 model_router 的 `memory_extraction` task，默认路由到轻量模型
-  - 提取不阻塞主响应，在 SSE done 之后异步执行
-  - 存储路径：data/users/{user_id}/memories.jsonl
+**foundation 已完成**：`2026-05-31-memory-sqlite-semantic-store` 已归档。
 
-- ✅ **记忆注入**：每次 run() 开始前加载最近 20 条记忆注入 system prompt
-  - 固定 top-20，无检索，无排序
-  - v1.0 后注入由 long_term_ctx 统一协调，memory_layer 只暴露 search() 接口
+已实现内容：
+- `memory_items` SQLite 表，存储 `identity` / `preferences` / `context` 三类语义记忆
+- `MemoryItem`、`extract_and_update(user_id, conversation)`、`search(user_id, query, limit)` public API
+- `extract_and_update()` 调用 `memory_extraction` task，只处理 `create` / `ignore`
+- context 记忆默认 30 天 TTL，identity / preferences 默认不过期
+- 写入 memory 后同步写入 vector_store，namespace 为 `mem:{user_id}`
+- `search()` 通过 vector_store 查相关 memory ids，回查 SQLite 并过滤过期 context
+- 删除旧 JSONL memory 兼容和 `load_memories()` 直接注入路径
+
+当前定位：已完成结构化语义记忆地基，但记忆质量、冲突合并和真实 embedding 效果仍未闭环。
 
 ## 规划中（v1.0）
 
-- [ ] **结构化记忆类型**：按类型区分存储，取代 free-text JSONL 平铺
+- [x] **结构化记忆类型**：按类型区分存储，取代 free-text JSONL 平铺
   - `identity`：身份事实（姓名、职位、技能）— 永久有效
   - `preferences`：工作偏好（风格、输出格式偏好）— 长期有效
   - `context`：临时状态（当前项目、进行中任务）— TTL 30 天，过期自动失效
@@ -119,12 +123,39 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
     - 一次性请求 → 不更新记忆，当前 session 上下文处理即可
   - 判断在提取 prompt 内完成，LLM 输出 `update` 或 `ignore`，不额外调用
 
-- [ ] **向量相似度检索**：通过共享 vector_store 对记忆条目建立向量索引
+- [x] **向量相似度检索**：通过共享 vector_store 对记忆条目建立向量索引
   - 对外接口：`search(user_id: str, query: str) → list[MemoryItem]`
   - 由 long_term_ctx 在对话开始时调用
 
 - [ ] **embedding 模型**：自托管本地模型（bge-m3 或 multilingual-e5）
   - 禁止使用 OpenAI Embeddings 等云托管专有服务
+
+## 当前缺口
+
+- 只支持 `create` / `ignore`，没有 update / merge / delete 动作。
+- 冲突处理尚未真正实现：旧记忆不会被自动替换或合并。
+- 提取质量缺少自动化评估：误记、漏记、一次性请求误存等风险无法量化。
+- 真实 embedding 未接入，语义检索质量还不能代表生产效果。
+- memory 条数增长策略未定义：没有硬上限、软告警或 compaction 机制。
+
+## 下一批候选 specs
+
+- `memory-extraction-evaluation`
+- `memory-update-merge-actions`
+- `memory-retention-and-compaction`
+- `memory-real-embedding-provider`
+
+## 自动化效果验证缺口
+
+- 构造带标准答案的多轮对话 fixture，评估提取 precision / recall。
+- 区分长期偏好和一次性请求，验证误存率。
+- 构造冲突事实序列，验证 update / merge 行为。
+- 构造 query -> expected memory fixture，评估检索命中率。
+
+## 服务化 / 目录边界判断
+
+memory-layer 应继续作为模块化单体内的 `intelligence.memory_layer` 边界。未来如果要独立服务化，
+更可能拆出的是“memory evaluation / maintenance job”，而不是最早拆运行时读写路径。
 
 ## 验收标准
 

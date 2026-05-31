@@ -176,41 +176,49 @@ def get_logger(component: str) -> Logger:
 
 ## 现状
 
-- ✅ **legacy eval_logger API**：`log_run()` / `log()` 已存在，当前仍是 append-only JSONL 语义
-  - v1.0 迁移时删除旧 API 和 `fleetent.eval_logger` shim，不做向后兼容
-  - 不保留 `data/traces.jsonl` 兼容写入，也不做旧 JSONL 导入
+**P0 foundation 已完成**：
+- `2026-05-31-observability-structured-logging`
+- `2026-05-31-observability-sqlite-agent-traces`
+- `2026-05-31-observability-usage-summary`
+- `2026-05-31-observability-source-attribution`
 
-- ✅ **流式 token 统计**：流式响应模式下已能记录完整 input/output token 用量
+已实现内容：
+- structured logger：七级日志、console/file 双通道、JSONL 文件、error 文件、脱敏和启动诊断
+- SQLite traces：`TraceEvent`、`TraceQuery`、`record_trace_event()`、`query_trace_events()`
+- 删除旧 JSONL trace API 和 `fleetent.eval_logger` shim，不保留向后兼容
+- agent run completion trace：`agent_run_completed`
+- usage summary：按 user / agent / tenant / session / time / model 聚合
+- source attribution：`InjectedContextTrace`、`record_injected_context()`、`injected_context` event
 
-- ✅ **模块化位置**：当前 `eval_logger` 已迁入 `fleetent.observability`，旧 import path 作为 shim；v1.0 traces change 将删除该 shim
+当前定位：具备基础日志、trace、usage 和来源归因能力，但还不是完整的 request trace / APM 系统。
 
 ## 规划中（v1.0）
 
 ### P0-A：observability-structured-logging
 
-- [ ] **七级日志**：`silent` / `fatal` / `error` / `warn` / `info` / `debug` / `trace`
+- [x] **七级日志**：`silent` / `fatal` / `error` / `warn` / `info` / `debug` / `trace`
   - console 和 file 可分别配置 level
   - `fatal` / `error` 额外记录异常文件、行号与 stack
 
-- [ ] **双通道输出**：console human-readable，文件 JSONL
+- [x] **双通道输出**：console human-readable，文件 JSONL
   - `data/logs/YYYY-MM-DD.log`：全量结构化日志
   - `data/logs/YYYY-MM-DD.error.log`：warn / error / fatal
   - 任一通道写入失败不影响另一通道
 
-- [ ] **启动诊断**：服务启动失败或降级时输出具体组件、原因和建议
+- [x] **启动诊断**：服务启动失败或降级时输出具体组件、原因和建议
   - 覆盖 config 解析、database 不可写、API key 缺失、MCP server 不可达
 
-- [ ] **脱敏基线**：日志写入前脱敏 API key、Bearer token、password / secret / token 字段、手机号、邮箱
+- [x] **脱敏基线**：日志写入前脱敏 API key、Bearer token、password / secret / token 字段、手机号、邮箱
 
 ### P0-B：observability-sqlite-agent-traces
 
-- [ ] **SQLite traces 表**：agent run trace 主存储迁到 SQLite
+- [x] **SQLite traces 表**：agent run trace 主存储迁到 SQLite
   - `traces` 由 observability owns
   - 删除 `log_run()` / `log()` public API，不做兼容 wrapper
   - 删除 `fleetent.eval_logger` shim 和 `TRACE_PATH`
   - 删除 JSONL trace 写入路径，不做旧文件导入
 
-- [ ] **统一 TraceEvent API**：`record_trace_event()` / `query_trace_events()` / `TraceQuery`
+- [x] **统一 TraceEvent API**：`record_trace_event()` / `query_trace_events()` / `TraceQuery`
   - reflection 和 platform 不直接读表或文件
   - 支持按 run / user / agent / tenant / event_type / time range 查询
   - `log` 命名只留给 structured logging，不再用于 agent trace
@@ -225,7 +233,7 @@ def get_logger(component: str) -> Logger:
 
 ### P0-C：source attribution summary
 
-- [ ] **注入来源摘要**：记录最终注入 prompt 的 `InjectedContextTrace`
+- [x] **注入来源摘要**：记录最终注入 prompt 的 `InjectedContextTrace`
   - 默认不保存完整 memory / KB content
   - metadata 包含 `kb_id`、`document_id`、`chunk_id`、`memory_type` 等可追溯字段
   - 复用现有 `traces` 表，event_type 为 `injected_context`
@@ -239,9 +247,37 @@ def get_logger(component: str) -> Logger:
 
 ### P1：metrics / usage
 
-- [ ] **用量查询**：从 `traces` 聚合 per-user、per-agent、per-session、global token 用量
+- [x] **用量查询**：从 `traces` 聚合 per-user、per-agent、per-session、global token 用量
 - [ ] **性能统计**：从 `traces` 聚合 LLM 耗时、工具耗时、错误率、fallback 次数
 - [ ] **预算查询接口**：供 agent-runtime 查询当前 run / session / 用户 / agent 用量
+
+## 当前缺口
+
+- trace event 覆盖不完整：LLM call、tool call、permission、fallback、context compression、sub-agent span 等还未系统记录。
+- request_id / span 语义仍需强化：当前已能共享 run_id，但完整 trace tree 尚未完成。
+- usage summary 有 token / elapsed 基础聚合，但还缺错误率、fallback、工具耗时等质量指标。
+- logs / traces retention、导出、备份和告警策略未定义。
+- 没有平台 UI 或 admin 查询体验。
+
+## 下一批候选 specs
+
+- `observability-runtime-event-coverage`
+- `observability-request-trace-tree`
+- `observability-retention-policy`
+- `observability-performance-summary`
+- `platform-trace-view`
+
+## 自动化效果验证缺口
+
+- 构造完整 agent run fixture，验证事件流覆盖用户输入、模型、工具、上下文、完成事件。
+- 验证同一次 run 的 `injected_context` 与 `agent_run_completed` 可按 run_id 串起来。
+- 验证脱敏 / 截断规则对大 payload 和敏感字段稳定生效。
+- 验证 usage / performance 聚合在缺失字段、旧 trace、异常 run 下的容错。
+
+## 服务化 / 目录边界判断
+
+observability 当前应继续作为进程内基础设施模块。未来如果 trace 量变大，可把 trace storage / query
+拆成独立服务或外部数据库，但现在更重要的是稳定事件 schema 和查询 API。
 
 ## 验收标准
 

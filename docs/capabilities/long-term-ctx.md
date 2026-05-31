@@ -78,24 +78,61 @@ async def build_context(
 
 ## 现状
 
-尚未实现。
+**foundation 已完成**：`2026-05-31-long-term-context-foundation` 已归档。
+
+已实现内容：
+- `BuiltContext`、`ContextSource`、`build_context(user_id, query, agent_id, available_tokens)` public API
+- memory-layer semantic search 接入
+- optional/null knowledge provider，KB 未启用时不阻塞 memory 注入
+- token budget 基础截断
+- agent-runtime 在 `run()` / `run_stream()` / `run_sync()` 构造 prompt 前调用 long-term-ctx
+- `BuiltContext.sources` 供 observability source attribution 记录
+
+当前定位：已恢复长期上下文注入链路，但上下文选择策略仍处于基础阶段。
 
 ## 规划中（v1.0）
 
-- [ ] **可选检索**：调用 memory_layer.search()；knowledge_base 仅在 provider 已启用时调用
+- [x] **可选检索**：调用 memory_layer.search()；knowledge_base 仅在 provider 已启用时调用
   - knowledge_base 未实现、未启用或返回空结果时不影响 memory 注入
   - graph_search 暂不接入，等 knowledge-base graph search spec 再定义
 
-- [ ] **优先级合并**：memory 条目优先于 knowledge 条目
+- [x] **优先级合并**：memory 条目优先于 knowledge 条目
   - 同等相关度时，用户个人记忆排在通用文档前
 
-- [ ] **token 预算控制**：注入文本总量不超过 config 配置的上限
+- [x] **token 预算控制**：注入文本总量不超过 config 配置的上限
   - 超出时从低优先级截断，保证高相关内容优先注入
 
-- [ ] **格式化输出**：将两类结果分区段格式化
+- [x] **格式化输出**：将两类结果分区段格式化
   - memory 区段：用户相关事实
   - knowledge 区段：相关文档片段
   - 任意一侧无结果时省略对应区段，不输出空占位
+
+## 当前缺口
+
+- KB provider 只是 optional 接口，knowledge-base runtime 尚未实现。
+- token budget 仍偏粗：缺少真实 token estimator、分段截断和更细的优先级策略。
+- memory / knowledge 的比例分配还未验证。
+- 格式模板未产品化，缺少不同 agent / tenant 的可配置策略。
+- graph_search 未接入。
+
+## 下一批候选 specs
+
+- `long-term-context-evaluation`
+- `long-term-context-budget-policy`
+- `long-term-context-template-config`
+- `knowledge-provider-contract`
+
+## 自动化效果验证缺口
+
+- 构造 query + memory fixture，评估注入内容是否提升回答质量。
+- 验证过多 memory 时预算截断是否保留高价值信息。
+- 验证无 KB、空 memory、低预算等降级路径。
+- 后续 KB 接入后，评估 memory 与 knowledge 混合注入的收益和干扰。
+
+## 服务化 / 目录边界判断
+
+long-term-ctx 更适合作为 agent-runtime 内部协调模块，不建议早期拆服务。它的价值在于稳定调用
+memory / knowledge / observability 的接口，未来可以独立成 package，但不应成为独立进程的第一候选。
 
 ## 验收标准
 

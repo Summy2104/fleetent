@@ -62,11 +62,20 @@ async def delete(id: str, namespace: str) -> None:
 
 ## 现状
 
-尚未实现。
+**foundation 已完成**：`2026-05-31-vector-store-foundation` 已归档。
+
+已实现内容：
+- `fleetent.intelligence.vector_store` public API：`upsert()`、`search()`、`delete()`、`SearchResult`
+- namespace helper：`memory_namespace(user_id)`、`knowledge_namespace(tenant_id, kb_id)`
+- deterministic embedding backend，用于测试和本地开发
+- in-memory vector backend，支持 namespace 隔离、upsert 覆盖、delete、score 排序
+- `vector_store.*` / `embedding.*` 基础配置命名空间
+
+当前定位：可支持 memory-layer、long-term-ctx 和测试场景，不是生产级向量检索后端。
 
 ## 规划中（v1.0）
 
-- [ ] **统一抽象接口**：upsert / search / delete 三个接口，后端实现可替换
+- [x] **统一抽象接口**：upsert / search / delete 三个接口，后端实现可替换
   - 调用方不感知后端类型，切换后端不影响上层代码
 
 - [ ] **sqlite-vec 后端**：轻量内嵌实现，适合开发环境和小规模部署
@@ -75,7 +84,32 @@ async def delete(id: str, namespace: str) -> None:
 - [ ] **Qdrant 后端**：生产级实现，Docker 自托管
   - 通过 config 切换，接口不变
 
-- [ ] **namespace 隔离**：不同来源的向量物理隔离，检索时不跨 namespace 返回结果
+- [x] **namespace 隔离**：不同来源的向量逻辑隔离，检索时不跨 namespace 返回结果
+
+## 当前缺口
+
+- 持久化后端未实现：进程重启后 in-memory 向量丢失。
+- 真实 embedding 未接入：当前 deterministic embedding 只能验证链路，不能代表语义检索质量。
+- 缺少向量后端迁移 / 重建策略：memory 或 KB 重建索引的运维流程未定义。
+- 缺少检索质量评估集：无法量化不同 embedding / backend 的召回质量差异。
+
+## 下一批候选 specs
+
+- `vector-store-sqlite-vec-backend`
+- `embedding-http-provider`
+- `vector-store-reindex-jobs`
+- `vector-store-retrieval-evaluation`
+
+## 自动化效果验证缺口
+
+- 构造中英文 query / document fixture，评估 top-k 命中率。
+- 对比 deterministic / real embedding 的召回质量，避免只验证接口正确。
+- 对 namespace、delete、overwrite 做持久化后端回归测试。
+
+## 服务化 / 目录边界判断
+
+vector-store 未来有独立服务潜力，尤其是 embedding provider 和 Qdrant 管理。但当前应保持模块化单体内的
+`intelligence.vector_store` package：先稳定 public API 和 backend adapter，再决定是否拆成 sidecar 或独立服务。
 
 ## 验收标准
 

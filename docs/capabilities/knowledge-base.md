@@ -192,9 +192,18 @@ async def delete(document_id: str) -> None:
 
 ## 现状
 
+**仅完成迁移规划**：`2026-05-31-knowledge-bridge-migration-plan` 已归档。
+
 团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移设计资产和小块算法**，而非从零重写或整体搬运。
 
 迁移评估见 [knowledge-bridge 迁移计划](../knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：先做 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环，再依次推进 parser、local connector、hybrid search、sync planner、Confluence / Google Drive connector、graph search 和 retrieval audit。当前迁移评估 change 只产出文档，不迁移 parser / connector 代码，不实现 tables、ingest 或 search。
+
+当前未实现内容：
+- 无 `intelligence.knowledge_base` runtime package
+- 无 knowledge-base Alembic tables
+- 无 ingest / parser / chunker / search API
+- 无 connector、sync planner、hybrid search、graph search
+- long-term-ctx 目前只通过 optional/null provider 为 KB 预留接入点
 
 **后续可迁移参考（knowledge-bridge 已实现，但需按 fleetent specs 分批适配）**：
 - ✅ 文档解析思路：text / Markdown / HTML / section-first 归并优先；PDF / DOCX / PPTX / Google Docs / Google Sheets 后续逐项评估依赖；图片 / VLM 暂缓
@@ -213,6 +222,35 @@ async def delete(document_id: str) -> None:
 **全新实现（knowledge-bridge 没有）**：
 - 实体与关系提取（`kb_extraction` task）
 - 图谱存储（entities / relations 表）与 `graph_search()`
+
+## 当前缺口
+
+- 运行时核心能力尚未开始：缺少 KB、document、chunk 的数据模型和 public API。
+- 最小闭环尚未打通：无法手动导入 text/markdown，也无法通过 `knowledge_base.search()` 返回 chunk。
+- 真实检索质量无法评估：没有 chunking、vector indexing、BM25 或 benchmark fixture。
+- 外部数据源暂未接入：local directory、Confluence、Google Drive 均未实现。
+- 与 long-term-ctx 的 provider contract 还需要在 `knowledge-base-core` 中正式落地。
+
+## 下一批候选 specs
+
+- `knowledge-base-core`
+- `knowledge-base-parsers-basic`
+- `knowledge-base-connectors-local`
+- `knowledge-base-hybrid-search`
+- `knowledge-base-retrieval-evaluation`
+
+## 自动化效果验证缺口
+
+- 构造小型企业文档 fixture，覆盖中文、英文、标题层级、表格文本和重复内容。
+- 验证 chunking 后 query 能命中 expected chunk。
+- 对比 vector-only、BM25-only、hybrid RRF 的召回质量。
+- 验证 tenant + kb namespace 隔离。
+
+## 服务化 / 目录边界判断
+
+knowledge-base 是未来最有独立服务潜力的模块，因为它会包含连接器、同步任务、解析、索引和检索。
+但当前应先在 modular monolith 内建立 `intelligence.knowledge_base` 目录和 public API，等 ingest/search/sync
+边界稳定后再考虑独立进程或服务。
 
 ## 规划中（v1.0）
 

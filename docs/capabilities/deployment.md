@@ -40,6 +40,8 @@
   - 程序日志写入 `data/logs/` 下的日期文件，随 `data/` volume 持久化
   - 日志轮转、trace retention 与备份策略由 observability / deployment 后续共同定义
 
+当前定位：已有本地开发和基础 Docker 部署地基，但还不是面向客户交付的一键 on-prem 安装包。
+
 ## 规划中（v1.0）
 
 - [ ] **on-premises 安装包**：完整的一键部署方案
@@ -59,6 +61,33 @@
 - ✅ **统一 database_url 配置**：以 SQLite 为默认后端，保留后续 PostgreSQL 接入空间
   - 默认值指向本机 `data/users.db`
   - 业务 store 通过统一 DB runtime 获取连接和事务，不直接依赖 SQLite 文件路径
+
+## 当前缺口
+
+- 缺少完整安装包：初始化、配置校验、迁移、启动、健康检查未形成一键流程。
+- 缺少升级脚本：新版本部署时自动备份、执行 migration、回滚策略未定义。
+- 缺少日志 / trace retention 和备份策略。
+- License key 机制未设计。
+- PostgreSQL 可选后端未实现，仅保留边界。
+
+## 下一批候选 specs
+
+- `deployment-onprem-install-package`
+- `deployment-upgrade-and-backup`
+- `deployment-retention-policy`
+- `deployment-license-key`
+- `database-postgresql-adapter`
+
+## 自动化效果验证缺口
+
+- 在临时目录中跑 install / upgrade smoke test，验证配置、migration、启动诊断。
+- 用 docker compose fixture 验证服务能启动、健康检查通过、日志和数据库路径可写。
+- 验证升级脚本在失败时不会破坏已有 SQLite 数据。
+
+## 服务化 / 目录边界判断
+
+deployment 本身不是业务服务，但会决定未来哪些模块可以外置。当前应先沉淀 scripts / packaging /
+config validation 目录，服务拆分要等运行模块边界稳定后再做。
 
 ## 验收标准
 

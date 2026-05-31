@@ -88,3 +88,14 @@ tables、config namespace 变化和 cross-module dependencies。
 - **WHEN** 两个 active changes 都需要修改同一个 public API 或 owned table
 - **THEN** 在两个 implementation 窗口继续前，先指定其中一个 change 作为 contract owner
 
+### Requirement: Intelligence capability status documentation
+系统 SHALL 保持常乐负责模块的 capability 文档与已归档 OpenSpec changes 和当前实现状态一致。
+
+#### Scenario: Status sections are current
+- **WHEN** 读者查看 memory、long-term-ctx、knowledge-base、vector-store、reflection、observability 或 deployment capability 文档
+- **THEN** 文档说明当前已完成的 foundation、尚未完成的缺口和下一批候选 specs
+
+#### Scenario: Runtime behavior is unchanged
+- **WHEN** 本 change 完成
+- **THEN** 仓库不包含运行时代码或数据库 schema 变更
+
