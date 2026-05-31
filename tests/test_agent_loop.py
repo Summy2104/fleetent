@@ -825,6 +825,52 @@ async def test_run_no_hygiene_repairs_when_clean(mock_client, monkeypatch):
     assert captured.get("hygiene_repairs") is None
 
 
+async def test_run_forwards_disabled_skills_trace_to_log_run(mock_client, monkeypatch):
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    trace = [{"name": "off", "reason": "frontmatter_disabled"}]
+    await al.run([{"role": "user", "content": "hi"}], disabled_skills_trace=trace)
+    assert captured.get("disabled_skills_trace") == trace
+
+
+async def test_run_no_disabled_skills_trace_when_none(mock_client, monkeypatch):
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    await al.run([{"role": "user", "content": "hi"}])
+    assert captured.get("disabled_skills_trace") is None
+
+
+def test_run_sync_collects_disabled_skills_trace(monkeypatch):
+    captured: dict = {}
+
+    async def fake_run(messages, **kw):
+        captured.update(kw)
+        return "done"
+
+    monkeypatch.setattr(al, "scan_skills", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "")
+    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
+    monkeypatch.setattr(al, "run", fake_run)
+    trace = [{"name": "off", "reason": "frontmatter_disabled"}]
+    monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **kw: trace)
+    al.run_sync("hi")
+    assert captured.get("disabled_skills_trace") == trace
+
+
+async def test_run_stream_logs_disabled_skills_trace(mock_client, monkeypatch):
+    captured: dict = {}
+    trace = [{"name": "off", "reason": "config_disabled"}]
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **kw: trace)
+    monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "")
+    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok"))
+    _ = [e async for e in al.run_stream("hi")]
+    assert captured.get("disabled_skills_trace") == trace
+
+
 async def test_run_stream_calls_sanitize_before_llm(mock_client, monkeypatch):
     order: list[str] = []
     real_sanitize = al.sanitize

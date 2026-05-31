@@ -91,3 +91,29 @@
 1. severe 日志与 suspicious 同用 `logger.warning`(severe 未单独升 error)是否认可;若要分级(severe→error)可在 `_audit_skill` 按 severity 切换。
 2. 规则表初始 8 条覆盖面是否够用作 v1.0 起点;中文规则仅覆盖"忽略指令"族,其余类(伪装 system/shell)未做中文变体——按需在 `_RULES` 追加。
 3. `read_skill` 拒绝文本以 `error:` 前缀返回(与既有 `error: no skill named` 一致),措辞含 "blocked by the static injection audit",是否符合预期对模型/运维的提示口径。
+
+## skill-disable-mechanism — feat/skill-disable-mechanism
+
+**前置核实结论(tasks 1.x):** 地基为 read-on-demand（已落地 SK4 hot-reload + SK5 injection-audit）。`SkillEntry` 已含 `enabled_by_default`/`audit_blocked`，本 change 新增 `enabled: bool=True`。`_disabled_reason(name, entry, disabled)` 现状仅覆盖 `disabled_skills`（返回 `"disabled_skills_config"`）与 `enabled_by_default:false`（返回 `"enabled_by_default_false"`），**未**覆盖 `enabled` 与 `audit_blocked`——`available_skills_prompt` 当时把 `audit_blocked` 作为 `_disabled_reason(...) is None and not entry.audit_blocked` 的单独一项过滤。`eval_logger.log_run` 已是可选字段模式（`stop_reason`/`error_category`/`hygiene_repairs`/`cache_tokens`，`if x is not None: entry[...]=x`），照此加 `disabled_skills_trace`。注入链三处入口（`agent_loop.run_sync`、`agent_loop.run_stream`、`im_gateway/normalizer`）都先调 `available_skills_prompt()` 再最终 `log_run`；其中 `run_sync`/`normalizer` 的 `log_run` 在 `run()` 内部，`run_stream` 自身直接 `log_run`。
+
+**实现:**
+- D1：`SkillEntry.enabled: bool=True`，`_scan_dir` 经 `bool(frontmatter.get("enabled", True))` 填充。
+- D2：`_disabled_reason` 扩展为覆盖全部 4 来源的单一资格谓词，按优先级返回首个命中标识或 None：`audit_blocked` > `frontmatter_disabled`（`enabled:false`）> `config_disabled`（`disabled_skills`）> `default_disabled`（`enabled_by_default:false`）。`available_skills_prompt` 改为**纯经** `_disabled_reason(...) is None` 过滤（去掉单独的 `and not entry.audit_blocked`，audit 已并入谓词）。
+- D3：新增 `collect_disabled_trace(disabled_skills=None) -> list[{"name","reason"}]`，复用同一谓词遍历 `_index` 收集被排除项；保留 `available_skills_prompt` 签名/语义不变（既有调用方与 test_agent_loop monkeypatch 不受影响）。`eval_logger.log_run` 加可选 `disabled_skills_trace`（**仅非空才写** `if disabled_skills_trace:`，空列表也不写，向后兼容）。`agent_loop.run()` 加 `disabled_skills_trace` 参数透传 `log_run`；`run_sync` 收集后传入 `run()`；`run_stream` 本地收集传入自身 `log_run`；`normalizer` 收集后经 `run()` 传入。
+
+**自解冲突（来源标识改名）:**
+1. **来源标识改名（核心）**：现状返回串 `"disabled_skills_config"` / `"enabled_by_default_false"` 与 spec/design 的标识 `config_disabled` / `default_disabled` 不一致。统一为 spec 四标识（`audit_blocked`/`frontmatter_disabled`/`config_disabled`/`default_disabled`）。grep 全仓确认旧串仅 2 处依赖：`tests/test_skill_registry.py:527`（`disabled_skills_config`→`config_disabled`）、`:540`（`enabled_by_default_false`→`default_disabled`），均为 `match()` 的 `skill_disabled_skipped` 日志断言，一并改到新串；`src` 无其他调用方读取该串。无残留。注：任务简报里写的现状串是 `"config_disabled"`，但实际代码是 `"disabled_skills_config"`——以代码为准处理。
+2. **trace 收集函数选型**：未改 `available_skills_prompt` 返回 `(prompt, trace)` 元组（会破坏 3 处既有调用方与多处 test monkeypatch），而是新增独立 `collect_disabled_trace`，两者共用 `_disabled_reason`，最小改动。
+3. **空列表不写**：`log_run` 用 `if disabled_skills_trace:`（truthy）而非 `is not None`，使空 `[]` 也省略字段；入口处用 `collect_disabled_trace() or None` 双重保险。
+
+**trace 收集接入点:** 三处注入链全部接入——`agent_loop.run_sync`（收集后传 `run(...)`）、`agent_loop.run_stream`（本地收集，传自身 `log_run`）、`im_gateway/normalizer.handle`（收集后经 `agent_loop.run(...)` 传入）。`run()` 新增 `disabled_skills_trace` 参数承接。
+
+**影响:** 798 passed（基线 780 + 新增 18：test_skill_registry 14 含 enabled/谓词/collect + 2 处旧串断言更新；test_agent_loop 4 trace 接入）。
+- ruff：我改/建的 `skill_registry.py`/`eval_logger.py`/`agent_loop.py`/`normalizer.py`/两个测试文件 `format`+`check`——format 重排了 1 个测试文件；check 仅报 `agent_loop.py:638` 的 N814（`CompletionUsage as _CU`），属 HEAD 既有（grandfathered，非本次引入）。
+- mypy：base 73 → after 73 errors（checked 49 源文件），无新增错误模式。
+
+**需 zy 核实:**
+1. 来源标识从 `disabled_skills_config`/`enabled_by_default_false` 改名为 spec 的 `config_disabled`/`default_disabled`——这改变了 `match()` 的 `skill_disabled_skipped` 日志里 `reason` 字段取值（运维若有日志查询/告警依赖旧串需同步）。是否认可统一到 spec 口径。
+2. `disabled_skills_trace` 写入语义为「仅非空才写」，无禁用的运行完全不写该字段（向后兼容）；trace 项形如 `{"name","reason"}`，reason 取最高优先命中来源——是否符合事后排查的字段口径。
+3. `normalizer` 也接入了 trace 收集（spec 未点名 IM 路径，但为口径一致一并接入）——是否认可。
+

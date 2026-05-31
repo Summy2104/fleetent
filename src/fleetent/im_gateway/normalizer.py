@@ -122,7 +122,7 @@ async def route(msg: NormalizedMessage) -> None:
 
     from fleetent import agent_loop, session_mgr
     from fleetent.memory_layer import load_memories
-    from fleetent.skill_registry import available_skills_prompt
+    from fleetent.skill_registry import available_skills_prompt, collect_disabled_trace
 
     async with session_mgr.session_lock(msg.session_id):
         history = await session_mgr.load(msg.session_id)
@@ -136,6 +136,7 @@ async def route(msg: NormalizedMessage) -> None:
         # base system + the <available_skills> catalog (stable) first, per-user
         # memory last. The model loads any skill it needs on demand via read_skill.
         catalog = available_skills_prompt()
+        disabled_trace = collect_disabled_trace() or None
         memory_ctx = load_memories(user_id=msg.user_id)
         parts = [base_system, catalog, memory_ctx]
         system_content = "\n\n".join(p for p in parts if p)
@@ -153,6 +154,7 @@ async def route(msg: NormalizedMessage) -> None:
             user_id=msg.user_id,
             reply_func=msg.reply_func,
             allowed_tools=allowed_tools,
+            disabled_skills_trace=disabled_trace,
         )
 
         # agent_loop.run() already appended the assistant message to history in-place.
