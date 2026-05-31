@@ -261,6 +261,7 @@ def get_logger(component: str) -> Logger:
 
 ## 下一批候选 specs
 
+- `observability-contract-tests`
 - `observability-runtime-event-coverage`
 - `observability-request-trace-tree`
 - `observability-retention-policy`
@@ -273,6 +274,9 @@ def get_logger(component: str) -> Logger:
 - 验证同一次 run 的 `injected_context` 与 `agent_run_completed` 可按 run_id 串起来。
 - 验证脱敏 / 截断规则对大 payload 和敏感字段稳定生效。
 - 验证 usage / performance 聚合在缺失字段、旧 trace、异常 run 下的容错。
+
+第一批自动化验证优先做 `observability-contract-tests`，它不评估语义质量，只验证 trace contract。
+memory / reflection / long-term-ctx / knowledge-base 的效果评估应依赖这些稳定 trace 证据。
 
 ## 服务化 / 目录边界判断
 
