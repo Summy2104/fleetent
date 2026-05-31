@@ -406,3 +406,52 @@ class CancellationChecker:                       # TerminationChecker
 1. **4xx 会话失效兜底标识**（自解冲突 1）：`Mcp-Session-Invalid` 头 + 响应体关键词为推测口径，未对照真实自托管 MCP server 实测。若目标 server 用特定 JSON-RPC error code（如 -32001）表达会话失效，需改 `_has_session_invalid_marker` 改读 body 的 JSON-RPC error。404 主路径不受影响。
 2. **DELETE 会话端点路径**（Open Question 2）：按规范取同 POST 端点 `{url}/`。若目标 server 用独立会话端点需调整。
 3. **并发无锁**（Open Question 3）：沿用 design 决定不加锁，最坏多一次 initialize。高并发实测出现交错问题再加 per-server 锁。
+
+## 12. mcp-oauth2 (MCP5)
+
+**改/建文件：**
+- 修改 `src/fleetent/mcp_client.py`：`McpServerConfig` 新增 OAuth2 字段（`token_url` / `client_id` / `client_secret_env` / `scope`）与按 server 实例持有的 OAuth2 运行态字段（`_token_store` / `_refresh_lock` / `_auth_unavailable`，均 `repr=False, compare=False`）；新增 `_now`（可注入时钟）、`OAuthToken` 数据类、`OAuthAuthUnavailableError`、`_InMemoryTokenStore`（按 server 隔离）、`_default_token_store`、`_clear_oauth_auth_state`、`_token_is_valid`、`_is_transient_token_error`、`_is_auth_error_response`、`_fetch_client_credentials_token`、`_resolve_oauth_token`、`_bearer_for`；`_base_headers` 增 keyword-only `bearer` 入参（保持同步、纯拼装）；`_open_session` / `_post_jsonrpc` / `_post_notification` / `_close_http_sessions` 的请求构造前先 `await _bearer_for(server)` 再传入 `_base_headers(server, bearer=...)`；`_call_http_tool` 增 D8 短路；`_register_server` 对 oauth2 调 `_clear_oauth_auth_state`（恢复触发）。
+- 修改 `config/mcp.yaml.example`：新增 `internal-gateway` 的 oauth2 示例，注释强调 token_url 为客户内网自托管授权服务器、secret 经环境变量、无云依赖。
+- 修改 `tests/test_mcp_client.py`：新增 20 例（config 字段 2 + token 存储 3 + 取 token/Bearer 3 + 自动刷新/边界/并发锁 6 + 认证失败 sticky/瞬时/恢复/D8 短路 5 + 配置示例 1）。
+
+**前置核实结论（tasks 1.x）：**
+- 1.1 `_base_headers` 现状为**同步** `def`，`api_key` 分支仅 `os.environ.get`；调用点为 `_open_session`（initialize）、`_post_jsonrpc`、`_post_notification`、`_close_http_sessions`（DELETE）。采用 D6a 方案 a：调用点先 `await _bearer_for(server)` 再传 `_base_headers(server, bearer=...)`，`_base_headers` 保持同步。
+- 1.2 OAuth2 字段命名与 `auth_type` / `api_key_env` 同风格，`str` 默认 `""`；secret 经 `client_secret_env` 环境变量引用不明文。
+- 1.3 错误判据：401 一律真认证错误；400/403 仅当响应体 `error ∈ {invalid_client, invalid_grant, unauthorized_client}` 才判真认证错误；5xx / 网络 / 超时为瞬时。
+- 1.4 token 存储默认内存，按 server 实例隔离（`_InMemoryTokenStore` 经 `_token_store` 字段持有）；未启用 sqlite 持久化（client_credentials 重取廉价，design D3 允许持久化为可选，本 change 取默认内存）。
+
+**D6a token resolve 落点（方案 a）+ `_base_headers` 是否同步：**
+- token resolve 在**每个调 `_base_headers` 的 async 请求构造点之前** `await _bearer_for(server)`（`_open_session` / `_post_jsonrpc` / `_post_notification` / `_close_http_sessions`）。`_bearer_for` 对 `auth_type=="oauth2"` 返回 resolve 后的 access token，否则返回 `None`。`_base_headers` **保持同步**，新增 keyword-only `bearer`：`bearer` 非空时拼 `Authorization: Bearer <bearer>`，否则回落到既有 api_key 分支。绝不在 `_base_headers` 内 `await` / `asyncio.run` / 阻塞拿 token。none/api_key/session_id 分支可观察行为不变（oauth2 时 bearer 由外部传入，api_key 分支不被触发）。
+
+**token 存储按 server 隔离、不进全局如何实现：**
+- `_InMemoryTokenStore` 实例经 `McpServerConfig._token_store = field(default_factory=_default_token_store, repr=False, compare=False)` 随每个 server 实例创建并持有，无任何模块级 token dict/缓存。每个 server 默认各自一份 store（测试 `s1._token_store is not s2._token_store` 验证）；store 内部按 `server_id` 键仅为单 store 内记账。可注入：测试可直接构造 `_InMemoryTokenStore` 或替换实例字段;`clear` 支持重置。
+
+**D9 per-server 锁 + double-check：**
+- `McpServerConfig._refresh_lock = field(default_factory=asyncio.Lock, ...)` 随 server 实例持有（不进模块级全局，`s1._refresh_lock is not s2._refresh_lock`）。`_resolve_oauth_token`：先无锁快速读缓存，命中有效直接返回；否则 `async with server._refresh_lock` 进临界区**再次** `get` + `_token_is_valid` double-check（等锁的并发请求拿锁后命中已刷新 token、直接复用），仅 double-check 仍无效时才 `_fetch_client_credentials_token`。5 路并发 + 慢 token 端点测得端点命中 == 1。不同 server 各自锁，互不阻塞。
+
+**D5 瞬时 vs 真认证错误区分 + 恢复触发：**
+- `_is_auth_error_response`：401 → 真认证错误；400/403 且响应体 `error ∈ {invalid_client, invalid_grant, unauthorized_client}` → 真认证错误。命中即 `_fetch_client_credentials_token` 抛 `OAuthAuthUnavailableError`，`_resolve_oauth_token` 捕获后置 `server._auth_unavailable = True`（sticky）并重抛，后续 resolve 直接短路抛错、不再打端点（测得端点命中 == 1）。
+- 瞬时错误：5xx 经 `resp.raise_for_status()` 抛 `httpx.HTTPStatusError`、网络/超时为 `httpx.TransportError`/`TimeoutException`，**不**被 `OAuthAuthUnavailableError` 捕获分支命中，故 `_auth_unavailable` 保持 False、原样上抛（可重试）；下次 resolve 可正常再取并成功。`_is_transient_token_error` 提供瞬时判定辅助（5xx / TransportError / TimeoutException）。
+- 恢复触发：`_register_server` 对 oauth2 调 `_clear_oauth_auth_state`（清 sticky 标志 + 清缓存 token），即配置重载 / 重新注册清除 sticky；不做定时退避。
+
+**D8 认证不可用期间工具调用（自包含、不依赖 MCP3）：**
+- `_call_http_tool` 入口：`server.auth_type == "oauth2" and server._auth_unavailable` 时直接 `return` 一段「authentication unavailable: re-authorize / check OAuth2 credentials」文本结果——不取 token、不发 HTTP、不抛（测得 token 端点与 MCP 端点均未命中）。独立 auth 标志，正交于 MCP3 连接健康态，无 MCP3 依赖。其他 server 不受影响。
+
+**自解冲突（C·全自主，最小改动）：**
+1. **400/403 + error body 才判真认证错误**（Open Question 1，无真实 Keycloak 实测）：401 无条件真错；400/403 须响应体 `error` 命中白名单，避免把普通 400/403 误判为凭据错误而长期 sticky。保守口径。
+2. **无 expires_in 默认 TTL = 300s、安全余量 30s**（Open Question 2）：常量 `_OAUTH_DEFAULT_TTL` / `_OAUTH_EXPIRY_SAFETY_MARGIN`，过期时刻 = `_now() + ttl - margin`。保守短 TTL，确保下次调用前重取。
+3. **不做 MCP server 401 兜底刷新**（Open Question 3）：本 change 主路径按过期时刻预刷新；MCP server 返回 401 触发刷新重试为可选增强，未实现（401 经既有 `raise_for_status` 上抛，不被会话失效逻辑误判，MCP2 `_is_session_expired` 已对 401/403 返回 False）。
+4. **refresh_token 为防御性附注**：`OAuthToken` 存了 `refresh_token`，但刷新主路径恒为重跑 client_credentials；缺失（RFC 6749 §4.4 正常情况）不判失败。未实现 refresh_token grant 分支（目标服务器为标准 client_credentials，无 refresh_token），避免为未触发路径写死逻辑。
+5. **time 源经模块级 `_now()` 函数**：非模块级可变状态（函数引用，测试 monkeypatch 替换），满足 D4「当前时间源可注入」且不硬编码 `time.time()`。
+
+**影响：**
+- pytest：base **946 → after 966 passed**（净 +20，全在 `tests/test_mcp_client.py`）。MCP1/MCP2 既有用例全绿；none/api_key 路径行为不变（新增用例验证 none/api_key 不触发 token 端点）。
+- ruff（仅本 change 改/建文件 `mcp_client.py` / `test_mcp_client.py` / `mcp.yaml.example`）：format 已应用、check `All checks passed`。
+- mypy：base **76 → after 76**，无新增错误模式。`mcp_client.py` 仅余 2 个既有 `no-any-return`（`_call_stdio_tool` / `_call_http_tool` 返回，HEAD 即存在，行号因新增代码从 392/412 位移至 617/645）。
+
+**需 zy 核实：**
+1. **真认证错误判据**（自解冲突 1）：401 + 400/403 error 白名单 `{invalid_client, invalid_grant, unauthorized_client}` 为推测口径，未对照真实自托管 Keycloak 实测。若目标授权服务器以其他形态（如特定 HTTP 码 / error 值）表达凭据错误，需调 `_is_auth_error_response`。
+2. **默认 TTL / 安全余量取值**（自解冲突 2）：300s / 30s 为保守默认（常量可改）。若目标 server 颁发的 token 显著长寿且总返回 expires_in，则默认 TTL 几无触发。
+3. **MCP server 401 兜底刷新**（自解冲突 3）：未实现，主路径按过期时刻预刷新。若目标 server 存在「客户端时钟与服务端不一致致 token 提前被拒」场景，需补一次 401 触发刷新重试。
+4. **refresh_token grant 分支**（自解冲突 4）：未实现（标准 client_credentials 无 refresh_token）。若某非标准授权服务器返回 refresh_token 且期望优先用之，需补 refresh_token grant。
+5. **token 持久化**：本 change 取默认内存（重启重取），未启用 sqlite 持久化。若需跨重启复用 token，按 design D3 补 stdlib sqlite3 + 可 monkeypatch `DB_PATH` 后端。
