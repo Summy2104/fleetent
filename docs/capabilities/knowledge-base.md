@@ -6,7 +6,7 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**当前负责**：手动 text / markdown 内容导入、deterministic chunking、向量索引构建、按 tenant + knowledge base 隔离召回相关文档片段。
+**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML 解析，deterministic chunking、向量索引构建、按 tenant + knowledge base 隔离召回相关文档片段。
 
 **后续负责**：数据源接入与文档获取、文档解析、混合检索、实体与关系提取、图谱存储、同步规划。
 
@@ -18,7 +18,7 @@
 
 **模块归属**：
 - owning package：`intelligence.knowledge_base`
-- public API：`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit)`、`delete(document_id)`
+- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit)`、`delete(document_id)`
 - owned tables：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`
 - config namespace：`knowledge_base.*`
 
@@ -70,6 +70,7 @@ knowledge_chunks (
   kb_id       TEXT,
   content     TEXT,              -- chunk 文本
   position    INTEGER,           -- chunk 在文档中的顺序
+  metadata_json TEXT,             -- JSON section context，如 title/path/level
   created_at  DATETIME
 )
 ```
@@ -102,6 +103,35 @@ class KnowledgeChunk:
     content: str
     position: int
     score: float  # vector_store 返回的相似度分数
+    metadata: dict[str, str]  # section context，旧 chunk 默认为 {}
+
+
+@dataclass
+class ParsedSection:
+    title: str
+    text: str
+    level: int
+    metadata: dict[str, str]
+
+
+@dataclass
+class ParsedDocument:
+    filename: str
+    format: str
+    sections: list[ParsedSection]
+    metadata: dict[str, str]
+
+
+def parse_text(filename: str, content: str) -> ParsedDocument:
+    """解析 plain text，过滤空白内容并生成 body section。"""
+
+
+def parse_markdown(filename: str, content: str) -> ParsedDocument:
+    """解析 Markdown heading hierarchy，保留 fenced code block。"""
+
+
+def parse_html(filename: str, content: str) -> ParsedDocument:
+    """解析 lightweight HTML，移除 script/style 并把简单 table 转为文本。"""
 
 
 async def ingest_text(
@@ -113,6 +143,16 @@ async def ingest_text(
     source_url: str | None = None,
 ) -> KnowledgeDocument:
     """导入 plain text / markdown 内容，同步完成分块与向量索引。"""
+
+
+async def ingest_parsed(
+    parsed: ParsedDocument,
+    tenant_id: str | None = None,
+    kb_id: str | None = None,
+    source: str = "manual",
+    source_url: str | None = None,
+) -> KnowledgeDocument:
+    """导入 parser 输出的 sections，并在 chunk metadata 中保留 section title/path/level。"""
 
 
 async def search(
@@ -130,14 +170,13 @@ async def delete(document_id: str) -> None:
 
 ## 现状
 
-**已完成最小 core 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入。
+**已完成最小 core 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入。`knowledge-base-parsers-basic` 增加了无 AI 框架依赖的 plain text / Markdown / lightweight HTML parser，并提供 parsed ingest adapter。
 
 团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移设计资产和小块算法**，而非从零重写或整体搬运。
 
 迁移评估见 [knowledge-bridge 迁移计划](../knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：已先完成 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环；后续再依次推进 parser、local connector、hybrid search、sync planner、Confluence / Google Drive connector、graph search 和 retrieval audit。
 
 当前未实现内容：
-- 无 parser framework，仅接受调用方传入的 plain text / markdown string
 - 无 local directory、Confluence、Google Drive connector
 - 无 sync planner、后台 job、admin UI、REST upload API
 - 无 BM25 / FTS5 / hybrid / rerank / query planner
@@ -197,11 +236,11 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
   - **Google Drive**：通过 Drive API v3 拉取文件，使用 `google-api-python-client`；Google Docs 通过 Export API 导出为 HTML 再解析；需要 per-tenant OAuth 2.0 token 存储与刷新
   - 新增数据源只需实现 `DataSource` 接口，不改核心导入逻辑
 
-- [ ] **文档解析**：将原始文件内容转换为干净文本，再进入分块流程
+- [x] **基础文档解析**：将原始 text / Markdown / lightweight HTML 转换为 parsed sections，再进入分块流程
   - Markdown / 纯文本：直接处理，无需额外依赖
-  - PDF：使用 `pymupdf`（轻量，仅处理 PDF）
-  - HTML（来自 Confluence 等）：使用 `beautifulsoup4` 清洗标签
-  - 解析结果统一为纯文本，再交给分块逻辑
+  - HTML：使用标准库 lightweight parser，移除 script/style，提取 heading/body/table 文本
+  - PDF / Office / image / VLM 解析不在当前能力范围内，后续单独评估依赖与数据主权影响
+  - parsed section metadata 会随 chunk 保留 section title/path/level
 
 - [ ] **文档导入**：解析后的文本写入知识库
   - 导入后异步处理（分块 + embedding + 图提取），不阻塞调用方
