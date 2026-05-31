@@ -147,6 +147,7 @@
 2. **增强已实现:加载失败汇总**。新增模块级 `_load_errors` + 公开 `load_errors()->[{path,reason,source}]`(供 admin/health 查询,始终可查、不经日志);scan 结束**仅在有失败时**打一条 `skill_scan_complete`{loaded,failed} 汇总(warning 级)。新增测试:`test_load_errors_records_each_failed_skill`/`test_load_errors_reset_on_each_scan`/`test_scan_emits_summary_with_loaded_and_failed_counts`/`test_scan_clean_emits_no_summary_log`。738 passed。
 
 **⚠️⚠️ review 中发现的真 bug(标记给 zy,共享日志基建,疑似常乐 observability 域):** `config.configure_logging`(config.py:38)把 `structlog.stdlib.add_logger_name`(读 `logger.name`)与 `PrintLoggerFactory()`(产出的 PrintLogger **无** `.name`)配在一起——**任何一条日志走这套配置都会 `AttributeError: 'PrintLogger' object has no attribute 'name'`**。旧代码因 scan() 仅在失败时才 log、服务正常启动从不 log,坑一直隐藏;一度因我加无条件汇总日志引爆 53 个 server 测试(已改"仅失败时 log"规避,零新增风险——剩余风险与既有 logger.warning 相同)。**建议后续修 configure_logging:add_logger_name 需配 stdlib LoggerFactory,或换 PrintLogger 兼容的处理器。** 非本次 SK2 范围,未擅自动。
+**✅ 已在 S1(16/20)修复(2026-05-31):** configure_logging 删除 add_logger_name(它与 PrintLoggerFactory 不兼容),根因消除——生产任何日志不再崩。详见 S1 节第 4 点。
 
 ## skill-nested-scan (SK7) — feat/skill-nested-scan
 
@@ -221,6 +222,13 @@
 
 **影响:** 670 passed;mypy 69=68+S1 的 _default_config Settings()(既有模式非新)。
 **⚠️ 需 zy 核实:** save() 对带 `/` session_id 不建子目录的既有 bug(本次未修,建议后续修);TTL 触发器后续接张亮 cron。
+
+**✅ zy review 决定(2026-05-31,在 fix/wave1-review-corrections,TDD):**
+1. **修了 save() 的 `/` bug**:`save()` 改为 `path.parent.mkdir(parents=True)`(不再只 mkdir SESSIONS_DIR),含 `/` 的 session_id 正常落子目录。新增 `test_save_and_load_roundtrip_slash_session_id`。
+2. **TTL 默认 30 天:认可。**
+3. **触发器改"从内置操作"、不依赖张亮 cron**:新增 `maybe_run_cleanup(*, _now=None)`——save() 末尾**故障隔离**调用它,**时间门控**(config 加 `session_cleanup_interval_seconds=3600`,经 `_default_config`),每 interval 最多跑一次全量 rglob,清理作为"写 session"的副作用发生。不动 server lifespan(避免 test_server 未隔离 SESSIONS_DIR 删真实数据)。新增 3 个门控测试 + save 故障隔离测试;test_session_mgr autouse 默认把门 GATE 关闭(避免触发器误删测试的人工老化 fixture),触发器测试自行开门。
+4. **⚠️⚠️ 顺带修了 SK2(10/20)标记的 configure_logging 真 bug**:`config.configure_logging` 删掉 `structlog.stdlib.add_logger_name`(它读 `logger.name`,而 PrintLoggerFactory 的 PrintLogger 无 `.name`→**每条日志 emit 时 AttributeError**)。这是真实生产 bug(configure_logging 后任何日志都崩),之前因 happy path 不 log 而潜伏;本次 save()→cleanup 的 `logger.info` 引爆了它(19 个 integration/server 测试),已从根上修复。新增 `test_configure_logging_then_log_does_not_raise`。**需常乐(observability)知会**:已删 add_logger_name,日志输出不再带 logger-name 字段(要的话需配 stdlib LoggerFactory)。
+影响:727 passed,ruff/mypy 71=71 零新增。
 
 ## session-metadata-index (S2) — feat/session-metadata-index
 

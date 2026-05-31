@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     session_ttl_days: int = 30
     session_max_total_mb: int = 1024
     session_max_count: int = 10000
+    # How often the internal save()-triggered maintenance may run a full cleanup
+    # scan (seconds). Time-gated so the rglob stays cheap under message volume.
+    session_cleanup_interval_seconds: float = 3600.0
     agent_max_turns: int = 50
     agent_max_consecutive_failures: int = 3
     provider_failure_threshold: int = 3
@@ -36,9 +39,11 @@ class Settings(BaseSettings):
 
 
 def configure_logging(settings: Settings) -> None:
+    # NOTE: structlog.stdlib.add_logger_name reads `logger.name`, which only exists
+    # on stdlib loggers — the PrintLogger from PrintLoggerFactory below has none, so
+    # including it crashed every log call at emit time. It is intentionally omitted.
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
-        structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),

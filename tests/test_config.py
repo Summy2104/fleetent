@@ -29,6 +29,19 @@ def test_configure_logging_does_not_raise(monkeypatch):
     configure_logging(s)  # should not raise
 
 
+def test_configure_logging_then_log_does_not_raise(monkeypatch):
+    # Regression: add_logger_name read logger.name, but PrintLoggerFactory loggers
+    # have no .name, so EVERY log call crashed after configure_logging() ran.
+    import structlog
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    try:
+        configure_logging(Settings())
+        structlog.get_logger("test").info("hello", k="v")  # must not raise
+    finally:
+        structlog.reset_defaults()
+
+
 def test_default_agent_name_defaults_to_none():
     s = Settings(anthropic_api_key="test-key")
     assert s.default_agent_name is None

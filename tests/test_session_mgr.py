@@ -34,6 +34,17 @@ def index_db(tmp_path, monkeypatch):
     return tmp_path / "x.db"
 
 
+@pytest.fixture(autouse=True)
+def _reset_cleanup_gate(monkeypatch):
+    # save() opportunistically triggers maybe_run_cleanup(); default the time gate
+    # CLOSED (just-ran) so ordinary save tests don't get a cleanup side effect that
+    # would prune their artificially-aged fixtures. Tests of the trigger itself open
+    # the gate explicitly. Production behaviour is unchanged (cleanup ~once/interval).
+    import time as _t
+
+    monkeypatch.setattr(session_mgr, "_last_cleanup_at", _t.time())
+
+
 def _set_mtime(path, mtime: float) -> None:
     os.utime(path, (mtime, mtime))
 
@@ -161,7 +172,12 @@ def test_default_config_returns_ttl_seconds(monkeypatch):
         lambda: type(
             "S",
             (),
-            {"session_ttl_days": 30, "session_max_total_mb": 1024, "session_max_count": 10000},
+            {
+                "session_ttl_days": 30,
+                "session_max_total_mb": 1024,
+                "session_max_count": 10000,
+                "session_cleanup_interval_seconds": 3600.0,
+            },
         )(),
     )
     cfg = session_mgr._default_config()
@@ -317,7 +333,12 @@ def test_default_config_returns_capacity_limits(monkeypatch):
         lambda: type(
             "S",
             (),
-            {"session_ttl_days": 30, "session_max_total_mb": 2, "session_max_count": 5},
+            {
+                "session_ttl_days": 30,
+                "session_max_total_mb": 2,
+                "session_max_count": 5,
+                "session_cleanup_interval_seconds": 3600.0,
+            },
         )(),
     )
     cfg = session_mgr._default_config()
@@ -546,3 +567,62 @@ async def test_enforce_capacity_unlink_failure_does_not_abort_batch(sessions_dir
     assert (sessions_dir / "bad.json").exists()
     assert (sessions_dir / "good.json").exists()
     assert (sessions_dir / "keep.json").exists()
+
+
+# --- save() handles session_ids containing "/" (subdirectories) ---
+
+
+async def test_save_and_load_roundtrip_slash_session_id(sessions_dir):
+    # IM session_ids can contain "/"; save() must create the subdirectory rather
+    # than raising FileNotFoundError.
+    sid = "slack/C123/u456"
+    messages = [{"role": "user", "content": "hi"}]
+    await session_mgr.save(sid, messages)
+    assert await session_mgr.load(sid) == messages
+
+
+# --- internal maintenance trigger (no cron): time-gated cleanup ---
+
+
+def _write_session(sessions_dir, sid: str, mtime: float):
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    p = sessions_dir / f"{sid}.json"
+    p.write_text("[]")
+    _set_mtime(p, mtime)
+    return p
+
+
+def test_maybe_run_cleanup_first_call_runs(sessions_dir, monkeypatch):
+    now = 2_000_000.0
+    monkeypatch.setattr(session_mgr, "_last_cleanup_at", None)
+    ttl = session_mgr._default_config()["ttl_seconds"]
+    _write_session(sessions_dir, "old", now - ttl - 10)
+    assert session_mgr.maybe_run_cleanup(_now=now) == ["old"]
+
+
+def test_maybe_run_cleanup_throttled_within_interval(sessions_dir, monkeypatch):
+    now = 2_000_000.0
+    monkeypatch.setattr(session_mgr, "_last_cleanup_at", now)
+    ttl = session_mgr._default_config()["ttl_seconds"]
+    _write_session(sessions_dir, "old", now - ttl - 10)
+    assert session_mgr.maybe_run_cleanup(_now=now + 5) == []
+    assert (sessions_dir / "old.json").exists()
+
+
+def test_maybe_run_cleanup_runs_again_after_interval(sessions_dir, monkeypatch):
+    now = 2_000_000.0
+    interval = session_mgr._default_config()["cleanup_interval_seconds"]
+    monkeypatch.setattr(session_mgr, "_last_cleanup_at", now)
+    later = now + interval + 1
+    ttl = session_mgr._default_config()["ttl_seconds"]
+    _write_session(sessions_dir, "old", later - ttl - 10)
+    assert session_mgr.maybe_run_cleanup(_now=later) == ["old"]
+
+
+async def test_save_succeeds_when_maintenance_fails(sessions_dir, monkeypatch):
+    def boom(**kw):
+        raise RuntimeError("cleanup broke")
+
+    monkeypatch.setattr(session_mgr, "maybe_run_cleanup", boom)
+    await session_mgr.save("s", [{"role": "user", "content": "x"}])
+    assert (sessions_dir / "s.json").exists()
