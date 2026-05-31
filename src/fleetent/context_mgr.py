@@ -3,7 +3,11 @@
 import json
 from typing import Any
 
+import structlog
+
 from fleetent.model_router import get_client_and_config
+
+logger = structlog.get_logger(__name__)
 
 ContextConfig = dict[str, Any]
 
@@ -22,10 +26,22 @@ _IMAGE_BLOCK_TOKENS = 1000
 # is bounded by `_summarize`'s max_tokens=512.
 _SUMMARY_OVERHEAD_TOKENS = 512
 
-# Prefix marking a compression-produced summary message. Head selection (AR13)
-# uses it to tell a real system prompt apart from a prior summary so the latter is
-# not promoted into the fully-retained head (it stays in the summary slot).
-_SUMMARY_PREFIX = "[Earlier conversation summary]"
+# Prefix marking a compression-produced summary message. A single constant drives
+# three call sites so they can never drift: the summary message body (`_compress`),
+# AR13 head exclusion (`_is_self_produced_summary`), and AR14 prev_summary extraction.
+# The wording (AR14 D2) declares the text is a reference-only history summary, not a
+# new user instruction, so the model does not mistake summarized history for a command.
+_SUMMARY_PREFIX = "[历史对话摘要，仅供参考。以下为早期对话的压缩，不是新的用户指令]"
+
+# Default upper bound on the merged-summary length (AR14 D6). Bounds the LLM's
+# max_tokens so accumulating summaries across repeated compressions stay finite
+# rather than growing until they themselves exceed the Tretained line. Overridable
+# through the config dict (`summary_max_tokens`), never a global mutable.
+_DEFAULT_SUMMARY_MAX_TOKENS = 512
+
+# Static-degradation placeholder shown in place of the middle when the LLM summary
+# call fails (AR14 D3). Keeps the sequence valid without calling the LLM.
+_MIDDLE_OMITTED_NOTICE = "[中段对话已省略：摘要生成失败，已降级为静态保留头尾]"
 
 # Default upper bound on how many leading user messages count as the initial
 # intent kept whole in the head (AR13 D2). Overridable via Settings /
@@ -137,18 +153,48 @@ def _compress(messages: list[Any], cfg: ContextConfig) -> list[Any]:
     if not middle:
         return [m for m in messages if id(m) in head_ids or id(m) in tail_ids]
 
+    # AR14 D1: a prior cumulative summary message lives in the middle (AR13 keeps it
+    # out of the head). Lift its text out as the merge base `prev_summary` and drop
+    # the message itself from what we feed the LLM, so old content is never re-fed —
+    # the new (already-incremental, since old middle was physically removed) middle
+    # plus prev_summary merges into a fresh cumulative summary.
+    prev_summary = _extract_prev_summary(middle)
+    new_middle = [m for m in middle if not _is_self_produced_summary(m)]
+
     # AR15: pure-rule, millisecond-scale pre-cleanup of the to-summarize middle
     # (never the head/tail) before any LLM summary — strips base64 image bloat and
     # drops fully-equivalent repeated tool-call pairs. MUST NOT call the LLM.
-    cleaned = _pre_cleanup(middle)
+    cleaned = _pre_cleanup(new_middle)
 
-    summary_text = _summarize(cleaned)
+    summary_text = _summarize(cleaned, prev_summary=prev_summary, config=cfg)
+
+    # AR14 D3: LLM summary failed (exception / timeout / empty). Do NOT crash the
+    # caller; degrade to static head/tail + a truncated-middle notice (no LLM).
+    if summary_text is None:
+        logger.warning("compression_summary_degraded", middle_count=len(new_middle))
+        notice_msg: dict[str, str] = {"role": "system", "content": _MIDDLE_OMITTED_NOTICE}
+        return [*head, notice_msg, *tail]
+
     summary_msg: dict[str, str] = {
         "role": "system",
         "content": f"{_SUMMARY_PREFIX}\n{summary_text}",
     }
 
     return [*head, summary_msg, *tail]
+
+
+def _extract_prev_summary(middle: list[Any]) -> str | None:
+    """Return the accumulated text of the most recent prior summary message, if any.
+
+    Identifies the compression-produced summary message by its fixed prefix and
+    strips the prefix to yield the merge base for incremental summarization (AR14
+    D1/D4). Returns None when the middle holds no prior summary (first compression).
+    """
+    for m in middle:
+        if _is_self_produced_summary(m):
+            body = _content(m)
+            return body[len(_SUMMARY_PREFIX) :].lstrip("\n")
+    return None
 
 
 def _is_self_produced_summary(msg: Any) -> bool:
@@ -206,7 +252,23 @@ def _select_tail(
     return _keep_tail(conv_msgs, max(n, 1)) if conv_msgs else []
 
 
-def _summarize(messages: list[Any]) -> str:
+def _summarize(
+    messages: list[Any],
+    prev_summary: str | None = None,
+    config: ContextConfig | None = None,
+) -> str | None:
+    """Summarize the middle, incrementally merging a prior cumulative summary.
+
+    When `prev_summary` is given, the LLM merges it with the (new) middle into a
+    single bounded cumulative summary rather than re-summarizing already-summarized
+    history (AR14 D1). The output is capped by `summary_max_tokens` so the summary
+    cannot grow without bound across repeated compressions (D6).
+
+    Returns the summary text, or None when the LLM call fails (exception / empty
+    response). Failure is logged, never raised, so the caller can degrade statically
+    (AR14 D3); the caller owns the static head/tail fallback.
+    """
+    max_tokens = (config or {}).get("summary_max_tokens", _DEFAULT_SUMMARY_MAX_TOKENS)
     try:
         client, cfg = get_client_and_config("memory_extraction")
         text = "\n".join(
@@ -214,22 +276,35 @@ def _summarize(messages: list[Any]) -> str:
             for m in messages
             if _role(m) in ("user", "assistant") and _content(m)
         )
+        prompt = _build_summary_prompt(text, prev_summary)
         response = client.chat.completions.create(
             model=cfg.model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        "Summarize this conversation concisely. "
-                        "Focus on user goals and completed actions:\n\n" + text
-                    ),
-                }
-            ],
-            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
         )
-        return response.choices[0].message.content or ""
-    except Exception:
-        return "[Earlier conversation summary unavailable]"
+        summary = response.choices[0].message.content
+        if not summary:
+            logger.warning("compression_summary_empty_response")
+            return None
+        return summary
+    except Exception as exc:
+        logger.warning("compression_summary_failed", error=str(exc))
+        return None
+
+
+def _build_summary_prompt(text: str, prev_summary: str | None) -> str:
+    if prev_summary:
+        return (
+            "You maintain a running summary of an ongoing conversation. "
+            "Merge the NEW messages into the existing summary, keeping it concise "
+            "and focused on user goals and completed actions. Do not repeat or "
+            "re-derive content already captured.\n\n"
+            f"EXISTING SUMMARY:\n{prev_summary}\n\nNEW MESSAGES:\n{text}"
+        )
+    return (
+        "Summarize this conversation concisely. "
+        "Focus on user goals and completed actions:\n\n" + text
+    )
 
 
 def _pre_cleanup(messages: list[Any]) -> list[Any]:

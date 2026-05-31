@@ -32,7 +32,9 @@ def test_compress_triggers_above_threshold(monkeypatch):
     # Patch _summarize so we don't call the real LLM in tests
     import fleetent.context_mgr as cm
 
-    monkeypatch.setattr(cm, "_summarize", lambda msgs: "Summary: user asked things.")
+    monkeypatch.setattr(
+        cm, "_summarize", lambda msgs, prev_summary=None, config=None: "Summary: user asked things."
+    )
 
     # Build messages big enough to exceed threshold
     big_msgs = [
@@ -60,7 +62,7 @@ def test_compress_triggers_above_threshold(monkeypatch):
 def test_no_compress_when_at_or_below_tmax(monkeypatch):
     import fleetent.context_mgr as cm
 
-    monkeypatch.setattr(cm, "_summarize", lambda msgs: "Summary.")
+    monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "Summary.")
     msgs = [
         {"role": "system", "content": "sys"},
         *[{"role": "user", "content": "x" * 2000} for _ in range(2)],
@@ -74,7 +76,7 @@ def test_no_compress_when_at_or_below_tmax(monkeypatch):
 def test_compress_triggers_when_above_tmax(monkeypatch):
     import fleetent.context_mgr as cm
 
-    monkeypatch.setattr(cm, "_summarize", lambda msgs: "Summary.")
+    monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "Summary.")
     big_msgs = [
         {"role": "system", "content": "sys"},
         *[
@@ -90,7 +92,7 @@ def test_compress_triggers_when_above_tmax(monkeypatch):
 def test_compress_falls_back_to_tretained_target(monkeypatch):
     import fleetent.context_mgr as cm
 
-    monkeypatch.setattr(cm, "_summarize", lambda msgs: "S")
+    monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "S")
     # Many large messages; keep_recent alone (10) would stay well over tretained.
     big_msgs = [
         {"role": "system", "content": "sys"},
@@ -108,7 +110,7 @@ def test_compress_falls_back_to_tretained_target(monkeypatch):
 def test_compress_keeps_tool_pair_whole_even_above_target(monkeypatch):
     import fleetent.context_mgr as cm
 
-    monkeypatch.setattr(cm, "_summarize", lambda msgs: "S")
+    monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "S")
     caller = {"role": "assistant", "content": "c" * 4000}
     tool_res = {"role": "tool", "content": "r" * 4000}
     big_msgs = [
@@ -131,7 +133,7 @@ def test_compress_keeps_tool_pair_whole_even_above_target(monkeypatch):
 def test_compress_spacing_below_tmax_after_compress(monkeypatch):
     import fleetent.context_mgr as cm
 
-    monkeypatch.setattr(cm, "_summarize", lambda msgs: "S")
+    monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "S")
     big_msgs = [
         {"role": "system", "content": "sys"},
         *[
@@ -154,7 +156,7 @@ def test_illegal_config_tretained_ge_tmax_raises():
 def test_manual_force_compress_below_tmax(monkeypatch):
     import fleetent.context_mgr as cm
 
-    monkeypatch.setattr(cm, "_summarize", lambda msgs: "S")
+    monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "S")
     # Small conversation, nowhere near tmax; force must still compress.
     msgs = [
         {"role": "system", "content": "sys"},
@@ -164,13 +166,13 @@ def test_manual_force_compress_below_tmax(monkeypatch):
     assert maybe_compress(msgs, config=config) is msgs  # auto: no trigger
     forced = maybe_compress(msgs, config=config, force=True)
     assert forced is not msgs
-    assert any("summary" in str(m.get("content", "")).lower() for m in forced)
+    assert any(str(m.get("content", "")).startswith(cm._SUMMARY_PREFIX) for m in forced)
 
 
 def test_context_overflow_entrypoint_compresses(monkeypatch):
     import fleetent.context_mgr as cm
 
-    monkeypatch.setattr(cm, "_summarize", lambda msgs: "S")
+    monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "S")
     msgs = [
         {"role": "system", "content": "sys"},
         *[{"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 200} for i in range(20)],
@@ -178,7 +180,7 @@ def test_context_overflow_entrypoint_compresses(monkeypatch):
     config = {"max_tokens": 100_000, "tmax_ratio": 0.8, "tretained_ratio": 0.6, "keep_recent": 4}
     result = compress_for_context_overflow(msgs, config=config)
     assert result is not msgs
-    assert any("summary" in str(m.get("content", "")).lower() for m in result)
+    assert any(str(m.get("content", "")).startswith(cm._SUMMARY_PREFIX) for m in result)
 
 
 def test_keep_tail_identity_not_equality():
@@ -238,15 +240,17 @@ def test_summarize_calls_llm_and_returns_content(monkeypatch):
     assert result == "Summary here"
 
 
-def test_summarize_exception_returns_placeholder(monkeypatch):
+def test_summarize_exception_returns_none(monkeypatch):
     import fleetent.context_mgr as cm
 
     def raise_exc(_task):
         raise RuntimeError("no key")
 
     monkeypatch.setattr(cm, "get_client_and_config", raise_exc)
+    # AR14 D3: LLM failure signals degradation via None (never raises); the caller
+    # owns the static head/tail fallback.
     result = cm._summarize([{"role": "user", "content": "hello"}])
-    assert "unavailable" in result
+    assert result is None
 
 
 def test_keep_tail_tool_at_index_zero_stops_extending():
@@ -296,7 +300,7 @@ def test_compress_preserves_base_system_cacheable_prefix(monkeypatch):
     # summarized. The variable memory/skill system message is also kept at head.
     import fleetent.context_mgr as cm
 
-    monkeypatch.setattr(cm, "_summarize", lambda msgs: "Summary.")
+    monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "Summary.")
     base = "You are a helpful assistant with access to tools. Use them when needed."
     variable = "memory + matched skill"
     big_msgs = [
@@ -655,7 +659,7 @@ def test_compress_runs_pre_cleanup_before_summarize(monkeypatch):
 
     captured: dict[str, list] = {}
 
-    def _fake_summarize(msgs):
+    def _fake_summarize(msgs, prev_summary=None, config=None):
         captured["to_summarize"] = msgs
         return "S"
 
@@ -761,10 +765,10 @@ def test_initial_intent_returns_same_objects():
 
 
 def test_select_head_excludes_self_produced_summary():
-    from fleetent.context_mgr import _select_head
+    from fleetent.context_mgr import _SUMMARY_PREFIX, _select_head
 
     real_sys = {"role": "system", "content": "You are helpful."}
-    prior_summary = {"role": "system", "content": "[Earlier conversation summary]\nold stuff"}
+    prior_summary = {"role": "system", "content": f"{_SUMMARY_PREFIX}\nold stuff"}
     intent = {"role": "user", "content": "translate these files"}
     messages = [real_sys, prior_summary, intent, {"role": "assistant", "content": "ok"}]
     head = _select_head(messages, 2)
@@ -800,7 +804,7 @@ def test_compress_preserves_initial_intent_and_excludes_it_from_summary(monkeypa
 
     captured: dict[str, list] = {}
 
-    def _fake_summarize(msgs):
+    def _fake_summarize(msgs, prev_summary=None, config=None):
         captured["to_summarize"] = msgs
         return "S"
 
@@ -830,7 +834,9 @@ def test_compress_preserves_initial_intent_and_excludes_it_from_summary(monkeypa
 def test_compress_three_layer_order(monkeypatch):
     import fleetent.context_mgr as cm
 
-    monkeypatch.setattr(cm, "_summarize", lambda msgs: "MID-SUMMARY")
+    monkeypatch.setattr(
+        cm, "_summarize", lambda msgs, prev_summary=None, config=None: "MID-SUMMARY"
+    )
     intent = {"role": "user", "content": "do the task"}
     big_msgs = [
         {"role": "system", "content": "sys"},
@@ -860,8 +866,10 @@ def test_compress_three_layer_order(monkeypatch):
 def test_compress_prior_summary_not_promoted_to_head(monkeypatch):
     import fleetent.context_mgr as cm
 
-    monkeypatch.setattr(cm, "_summarize", lambda msgs: "NEW-SUMMARY")
-    prior = {"role": "system", "content": "[Earlier conversation summary]\nprior stuff"}
+    monkeypatch.setattr(
+        cm, "_summarize", lambda msgs, prev_summary=None, config=None: "NEW-SUMMARY"
+    )
+    prior = {"role": "system", "content": f"{cm._SUMMARY_PREFIX}\nprior stuff"}
     intent = {"role": "user", "content": "the real ask"}
     big_msgs = [
         {"role": "system", "content": "sys"},
@@ -884,8 +892,7 @@ def test_compress_prior_summary_not_promoted_to_head(monkeypatch):
     summary_msgs = [
         m
         for m in result
-        if m.get("role") == "system"
-        and str(m.get("content", "")).startswith("[Earlier conversation summary]")
+        if m.get("role") == "system" and str(m.get("content", "")).startswith(cm._SUMMARY_PREFIX)
     ]
     assert len(summary_msgs) == 1
     assert not any(m is prior for m in result)
@@ -897,7 +904,7 @@ def test_compress_prior_summary_not_promoted_to_head(monkeypatch):
 def test_large_head_shrinks_tail_but_keeps_floor(monkeypatch):
     import fleetent.context_mgr as cm
 
-    monkeypatch.setattr(cm, "_summarize", lambda msgs: "S")
+    monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "S")
     # A big initial-intent message inflates the head; the tail must shrink in
     # response, but the 1-message tail floor (with tool-pair integrity) still holds.
     big_intent = {"role": "user", "content": "INTENT " + "y" * 8000}
@@ -933,7 +940,7 @@ def test_short_conversation_no_empty_summary(monkeypatch):
 
     summarize_calls = {"n": 0}
 
-    def _spy_summarize(msgs):
+    def _spy_summarize(msgs, prev_summary=None, config=None):
         summarize_calls["n"] += 1
         return ""
 
@@ -953,15 +960,13 @@ def test_short_conversation_no_empty_summary(monkeypatch):
     result = cm.maybe_compress(msgs, config=config, force=True)
     # middle empty → no summary message injected and no LLM call
     assert summarize_calls["n"] == 0
-    assert not any(
-        str(m.get("content", "")).startswith("[Earlier conversation summary]") for m in result
-    )
+    assert not any(str(m.get("content", "")).startswith(cm._SUMMARY_PREFIX) for m in result)
 
 
 def test_head_tail_overlap_deduped_by_identity(monkeypatch):
     import fleetent.context_mgr as cm
 
-    monkeypatch.setattr(cm, "_summarize", lambda msgs: "S")
+    monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "S")
     intent = {"role": "user", "content": "the only ask"}
     assistant = {"role": "assistant", "content": "reply"}
     msgs = [
@@ -982,3 +987,308 @@ def test_head_tail_overlap_deduped_by_identity(monkeypatch):
     assert sum(1 for m in result if m is assistant) == 1
     # original order preserved
     assert result.index(intent) < result.index(assistant)
+
+
+# --- AR14: source annotation on the summary message (D2) ---
+
+
+def test_summary_message_has_reference_annotation(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    monkeypatch.setattr(
+        cm, "_summarize", lambda msgs, prev_summary=None, config=None: "MID-SUMMARY"
+    )
+    intent = {"role": "user", "content": "do the task"}
+    big_msgs = [
+        {"role": "system", "content": "sys"},
+        intent,
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 2000}
+            for i in range(60)
+        ],
+    ]
+    config = {
+        "max_tokens": 10_000,
+        "tmax_ratio": 0.5,
+        "tretained_ratio": 0.3,
+        "keep_recent": 4,
+        "initial_intent_max": 2,
+    }
+    result = cm.maybe_compress(big_msgs, config=config)
+    summary_msgs = [
+        m
+        for m in result
+        if m.get("role") == "system" and "MID-SUMMARY" in str(m.get("content", ""))
+    ]
+    assert len(summary_msgs) == 1
+    content = str(summary_msgs[0]["content"])
+    # The annotation declares the text is a reference-only history summary, not a new instruction.
+    assert "历史对话摘要" in content
+    assert "仅供参考" in content
+    # The weak legacy prefix must be gone.
+    assert "[Earlier conversation summary]" not in content
+
+
+def test_summary_prefix_constant_carries_reference_wording():
+    import fleetent.context_mgr as cm
+
+    assert "历史对话摘要" in cm._SUMMARY_PREFIX
+    assert "仅供参考" in cm._SUMMARY_PREFIX
+
+
+# --- AR14: incremental summary = prev_summary + current middle (D1) ---
+
+
+def test_incremental_summary_extracts_prev_summary_and_merges(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    captured: dict[str, object] = {}
+
+    def _fake_summarize(messages, prev_summary=None, config=None):
+        captured["messages"] = messages
+        captured["prev_summary"] = prev_summary
+        return "MERGED"
+
+    monkeypatch.setattr(cm, "_summarize", _fake_summarize)
+    prior = {"role": "system", "content": f"{cm._SUMMARY_PREFIX}\nOLD-ACCUMULATED-TEXT"}
+    intent = {"role": "user", "content": "the real ask"}
+    big_msgs = [
+        {"role": "system", "content": "sys"},
+        prior,
+        intent,
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "NEWMID" + "x" * 2000}
+            for i in range(60)
+        ],
+    ]
+    config = {
+        "max_tokens": 10_000,
+        "tmax_ratio": 0.5,
+        "tretained_ratio": 0.3,
+        "keep_recent": 4,
+        "initial_intent_max": 2,
+    }
+    cm.maybe_compress(big_msgs, config=config)
+    # prev_summary was extracted (prefix stripped) and passed as the merge base
+    assert captured["prev_summary"] == "OLD-ACCUMULATED-TEXT"
+    # the prior summary message itself is NOT re-fed as ordinary content to the LLM
+    fed = str(captured["messages"])
+    assert "OLD-ACCUMULATED-TEXT" not in fed
+    assert cm._SUMMARY_PREFIX not in fed
+    # current (new) middle IS fed
+    assert "NEWMID" in fed
+
+
+def test_first_compression_has_no_prev_summary(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    captured: dict[str, object] = {}
+
+    def _fake_summarize(messages, prev_summary=None, config=None):
+        captured["prev_summary"] = prev_summary
+        return "S"
+
+    monkeypatch.setattr(cm, "_summarize", _fake_summarize)
+    intent = {"role": "user", "content": "the real ask"}
+    big_msgs = [
+        {"role": "system", "content": "sys"},
+        intent,
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 2000}
+            for i in range(60)
+        ],
+    ]
+    config = {
+        "max_tokens": 10_000,
+        "tmax_ratio": 0.5,
+        "tretained_ratio": 0.3,
+        "keep_recent": 4,
+        "initial_intent_max": 2,
+    }
+    cm.maybe_compress(big_msgs, config=config)
+    assert captured["prev_summary"] is None
+
+
+def test_summarize_merges_prev_summary_into_prompt(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import fleetent.context_mgr as cm
+
+    mock_client = MagicMock()
+    mock_cfg = MagicMock()
+    mock_cfg.model = "haiku"
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = "merged summary"
+    mock_client.chat.completions.create.return_value = mock_response
+    monkeypatch.setattr(cm, "get_client_and_config", lambda _: (mock_client, mock_cfg))
+
+    result = cm._summarize(
+        [{"role": "user", "content": "new turn"}], prev_summary="existing summary base"
+    )
+    assert result == "merged summary"
+    sent = str(mock_client.chat.completions.create.call_args)
+    assert "existing summary base" in sent
+    assert "new turn" in sent
+
+
+# --- AR14: summary failure degradation = static head/tail + truncated middle (D3) ---
+
+
+def test_summary_failure_does_not_raise_and_returns_valid_sequence(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    def _boom(messages, prev_summary=None, config=None):
+        return None  # signal LLM failure
+
+    monkeypatch.setattr(cm, "_summarize", _boom)
+    intent = {"role": "user", "content": "the real ask"}
+    big_msgs = [
+        {"role": "system", "content": "sys"},
+        intent,
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 2000}
+            for i in range(60)
+        ],
+    ]
+    config = {
+        "max_tokens": 10_000,
+        "tmax_ratio": 0.5,
+        "tretained_ratio": 0.3,
+        "keep_recent": 4,
+        "initial_intent_max": 2,
+    }
+    result = cm.maybe_compress(big_msgs, config=config)  # MUST NOT raise
+    # head retained
+    assert any(m is intent for m in result)
+    assert result[0]["content"] == "sys"
+    # a degradation marker stands in for the dropped middle, no LLM summary text
+    assert any("省略" in str(m.get("content", "")) for m in result)
+    # tail retained (last messages present)
+    assert big_msgs[-1] in result
+
+
+def test_summary_real_exception_degrades(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    # _summarize itself swallows the LLM exception and returns None (logged).
+    def raise_exc(_task):
+        raise RuntimeError("no key")
+
+    monkeypatch.setattr(cm, "get_client_and_config", raise_exc)
+    out = cm._summarize([{"role": "user", "content": "hi"}])
+    assert out is None
+
+
+def test_summary_empty_response_degrades(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import fleetent.context_mgr as cm
+
+    mock_client = MagicMock()
+    mock_cfg = MagicMock()
+    mock_cfg.model = "haiku"
+    mock_response = MagicMock()
+    mock_response.choices[0].message.content = ""  # empty response
+    mock_client.chat.completions.create.return_value = mock_response
+    monkeypatch.setattr(cm, "get_client_and_config", lambda _: (mock_client, mock_cfg))
+
+    out = cm._summarize([{"role": "user", "content": "hi"}])
+    assert out is None
+
+
+def test_summary_failure_is_logged(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    events: list[str] = []
+    monkeypatch.setattr(cm.logger, "warning", lambda event, **kw: events.append(event))
+
+    def raise_exc(_task):
+        raise RuntimeError("no key")
+
+    monkeypatch.setattr(cm, "get_client_and_config", raise_exc)
+    cm._summarize([{"role": "user", "content": "hi"}])
+    assert events  # failure was logged, not silently swallowed
+
+
+# --- AR14: cumulative summary persists across save/load and stays incremental (D4) ---
+
+
+async def test_cumulative_summary_round_trips_and_stays_incremental(monkeypatch, tmp_path):
+    import fleetent.context_mgr as cm
+    import fleetent.session_mgr as sm
+
+    monkeypatch.setattr(sm, "SESSIONS_DIR", tmp_path)
+    monkeypatch.setattr(sm, "maybe_run_maintenance", lambda *a, **k: [])
+
+    call_log: list[object] = []
+
+    def _fake_summarize(messages, prev_summary=None, config=None):
+        call_log.append(prev_summary)
+        return "ACCUMULATED-V1" if prev_summary is None else "ACCUMULATED-V2"
+
+    monkeypatch.setattr(cm, "_summarize", _fake_summarize)
+
+    config = {
+        "max_tokens": 10_000,
+        "tmax_ratio": 0.5,
+        "tretained_ratio": 0.3,
+        "keep_recent": 4,
+        "initial_intent_max": 2,
+    }
+    intent = {"role": "user", "content": "the real ask"}
+    msgs = [
+        {"role": "system", "content": "sys"},
+        intent,
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 2000}
+            for i in range(60)
+        ],
+    ]
+    first = cm.maybe_compress(msgs, config=config)
+    assert any("ACCUMULATED-V1" in str(m.get("content", "")) for m in first)
+
+    await sm.save("sess1", first)
+    loaded = await sm.load("sess1")
+    # the summary message round-trips as a plain system message, no new persistence struct
+    assert not any((tmp_path / n).exists() for n in ("sess1.boundary", "sess1.summary"))
+
+    # grow loaded so a second compression fires, then compress again
+    loaded = loaded + [
+        {"role": "user" if i % 2 == 0 else "assistant", "content": "y" * 2000} for i in range(60)
+    ]
+    cm.maybe_compress(loaded, config=config)
+    # second compression saw the prev_summary extracted from the round-tripped message
+    assert call_log[-1] == "ACCUMULATED-V1"
+
+
+# --- AR14: cumulative summary does not grow unbounded (D6) ---
+
+
+def test_cumulative_summary_reconsolidates_when_over_bound(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import fleetent.context_mgr as cm
+
+    mock_client = MagicMock()
+    mock_cfg = MagicMock()
+    mock_cfg.model = "haiku"
+    captured_max_tokens: list[int] = []
+
+    def _create(**kwargs):
+        captured_max_tokens.append(kwargs.get("max_tokens"))
+        resp = MagicMock()
+        resp.choices[0].message.content = "bounded summary"
+        return resp
+
+    mock_client.chat.completions.create.side_effect = _create
+    monkeypatch.setattr(cm, "get_client_and_config", lambda _: (mock_client, mock_cfg))
+
+    huge_prev = "Z" * 100_000
+    out = cm._summarize(
+        [{"role": "user", "content": "new"}],
+        prev_summary=huge_prev,
+        config={"summary_max_tokens": 256},
+    )
+    assert out == "bounded summary"
+    # the configurable upper bound was honored
+    assert captured_max_tokens[-1] == 256
