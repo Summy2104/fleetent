@@ -222,3 +222,148 @@ def test_override_none_is_byte_identical_routing(monkeypatch):
     assert cfg_none.model == ROUTES["default"].model
     assert cfg_none.base_url == ROUTES["default"].base_url
     assert cfg_none.fallbacks == ROUTES["default"].fallbacks
+
+
+# --- RouteConfig.params (task_type default sampling params) ---
+
+
+def test_route_config_params_default_empty():
+    cfg = RouteConfig(base_url="https://api.test.com", model="m", api_key_env="K", max_tokens=512)
+    assert cfg.params == {}
+
+
+def test_route_config_params_explicit():
+    cfg = RouteConfig(
+        base_url="https://api.test.com",
+        model="m",
+        api_key_env="K",
+        max_tokens=512,
+        params={"temperature": 0.0, "top_p": 0.9},
+    )
+    assert cfg.params == {"temperature": 0.0, "top_p": 0.9}
+
+
+def test_route_config_params_independent_instances():
+    # default_factory must give each instance its own dict, not a shared one.
+    a = RouteConfig(base_url="b", model="m", api_key_env="K", max_tokens=1)
+    b = RouteConfig(base_url="b", model="m", api_key_env="K", max_tokens=1)
+    a.params["temperature"] = 0.5
+    assert b.params == {}
+
+
+# --- RouteOverride.params ---
+
+
+def test_route_override_params_default_none():
+    assert RouteOverride().params is None
+
+
+def test_route_override_params_frozen():
+    o = RouteOverride(params={"temperature": 0.0})
+    with pytest.raises((AttributeError, TypeError)):
+        o.params = {}  # type: ignore[misc]
+
+
+# --- _apply_override params deep merge ---
+
+
+def test_apply_override_params_overrides_key_keeps_others():
+    cfg = RouteConfig(
+        base_url="b",
+        model="m",
+        api_key_env="K",
+        max_tokens=1,
+        params={"temperature": 0.7, "top_p": 0.9},
+    )
+    result = _apply_override(cfg, RouteOverride(params={"temperature": 0.0}))
+    assert result.params == {"temperature": 0.0, "top_p": 0.9}
+
+
+def test_apply_override_params_adds_new_key():
+    cfg = RouteConfig(
+        base_url="b", model="m", api_key_env="K", max_tokens=1, params={"temperature": 0.7}
+    )
+    result = _apply_override(cfg, RouteOverride(params={"top_p": 0.5}))
+    assert result.params == {"temperature": 0.7, "top_p": 0.5}
+
+
+def test_apply_override_params_none_keeps_base_params():
+    cfg = RouteConfig(
+        base_url="b", model="m", api_key_env="K", max_tokens=1, params={"temperature": 0.7}
+    )
+    result = _apply_override(cfg, RouteOverride(model="other"))
+    assert result.params == {"temperature": 0.7}
+
+
+def test_apply_override_empty_params_keeps_base_params():
+    cfg = RouteConfig(
+        base_url="b", model="m", api_key_env="K", max_tokens=1, params={"temperature": 0.7}
+    )
+    result = _apply_override(cfg, RouteOverride(params={}))
+    assert result.params == {"temperature": 0.7}
+
+
+def test_apply_override_params_does_not_mutate_base():
+    cfg = RouteConfig(
+        base_url="b", model="m", api_key_env="K", max_tokens=1, params={"temperature": 0.7}
+    )
+    _apply_override(cfg, RouteOverride(params={"temperature": 0.0}))
+    assert cfg.params == {"temperature": 0.7}
+
+
+# --- D3 guard: built-in ROUTES params must not carry max_tokens ---
+
+
+def test_builtin_routes_params_exclude_reserved_keys():
+    reserved = {"max_tokens", "model", "messages", "tools"}
+    for name, cfg in ROUTES.items():
+        assert not (set(cfg.params) & reserved), f"route '{name}' params has reserved key"
+
+
+def test_apply_override_strips_reserved_keys_from_params():
+    # Guard D3: a reserved key in override.params would collide with the
+    # explicit create() kwargs (duplicate kwarg TypeError); it must be dropped.
+    cfg = RouteConfig(base_url="b", model="m", api_key_env="K", max_tokens=512)
+    result = _apply_override(
+        cfg, RouteOverride(params={"max_tokens": 99, "model": "x", "temperature": 0.5})
+    )
+    assert result.params == {"temperature": 0.5}
+
+
+# --- end-to-end priority: override params > task_type params > provider default ---
+
+
+def test_get_async_client_and_config_params_deep_merge(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setitem(
+        ROUTES,
+        "default",
+        RouteConfig(
+            base_url="https://api.anthropic.com/v1/",
+            model="claude-sonnet-4-5",
+            api_key_env="ANTHROPIC_API_KEY",
+            max_tokens=4096,
+            params={"temperature": 0.7, "top_p": 0.9},
+        ),
+    )
+    _, cfg = get_async_client_and_config(
+        "default", override=RouteOverride(params={"temperature": 0.0})
+    )
+    assert cfg.params == {"temperature": 0.0, "top_p": 0.9}
+
+
+def test_get_async_client_and_config_no_override_uses_task_type_params(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setitem(
+        ROUTES,
+        "default",
+        RouteConfig(
+            base_url="https://api.anthropic.com/v1/",
+            model="claude-sonnet-4-5",
+            api_key_env="ANTHROPIC_API_KEY",
+            max_tokens=4096,
+            params={"temperature": 0.3},
+        ),
+    )
+    _, cfg = get_async_client_and_config("default")
+    assert cfg.params == {"temperature": 0.3}

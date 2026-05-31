@@ -1254,3 +1254,86 @@ async def test_stream_records_failure_on_switchable(mock_client_fb, monkeypatch)
     )
     _ = [e async for e in al.run_stream("hi")]
     assert cache._state("primary-model").consecutive_failures == 1
+
+
+# ── sampling params pass-through (model-parameter-config) ─────────────────────
+
+
+def _wire_loop(monkeypatch, client, cfg):
+    """Wire a real RouteConfig (with params) through the loop, mocking the rest."""
+    monkeypatch.setenv(cfg.api_key_env, "k")
+    monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(al, "get_schemas", lambda: [])
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
+    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
+    monkeypatch.setattr(al, "match_skill", lambda _: None)
+    monkeypatch.setattr(
+        al,
+        "resolve_limits",
+        lambda max_turns=None, max_consecutive_failures=None, config=None: (
+            max_turns if max_turns is not None else 50,
+            max_consecutive_failures if max_consecutive_failures is not None else 3,
+        ),
+    )
+
+
+def _cfg_with_params(params: dict, fallbacks: tuple = ()) -> RouteConfig:
+    return RouteConfig(
+        base_url="https://api.test.com",
+        model="primary-model",
+        api_key_env="TEST_KEY",
+        max_tokens=512,
+        fallbacks=fallbacks,
+        params=params,
+    )
+
+
+async def test_call_passes_params_alongside_max_tokens(monkeypatch):
+    client = AsyncMock()
+    client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    _wire_loop(monkeypatch, client, _cfg_with_params({"temperature": 0.0, "top_p": 0.9}))
+    await al.run([{"role": "user", "content": "hi"}])
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["temperature"] == 0.0
+    assert kwargs["top_p"] == 0.9
+    assert kwargs["max_tokens"] == 512
+
+
+async def test_call_empty_params_sends_no_sampling_kwargs(monkeypatch):
+    client = AsyncMock()
+    client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    _wire_loop(monkeypatch, client, _cfg_with_params({}))
+    await al.run([{"role": "user", "content": "hi"}])
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert set(kwargs) == {"model", "messages", "tools", "max_tokens"}
+
+
+async def test_stream_passes_params_alongside_max_tokens(monkeypatch):
+    client = AsyncMock()
+    client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok", finish="stop"))
+    _wire_loop(monkeypatch, client, _cfg_with_params({"temperature": 0.2}))
+    _ = [e async for e in al.run_stream("hi")]
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["temperature"] == 0.2
+    assert kwargs["max_tokens"] == 512
+    assert kwargs["stream"] is True
+    assert kwargs["stream_options"] == {"include_usage": True}
+
+
+async def test_stream_empty_params_byte_identical(monkeypatch):
+    client = AsyncMock()
+    client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok", finish="stop"))
+    _wire_loop(monkeypatch, client, _cfg_with_params({}))
+    _ = [e async for e in al.run_stream("hi")]
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert set(kwargs) == {
+        "model",
+        "messages",
+        "tools",
+        "max_tokens",
+        "stream",
+        "stream_options",
+    }
