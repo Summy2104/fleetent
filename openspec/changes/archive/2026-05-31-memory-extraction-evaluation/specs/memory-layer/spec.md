@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Memory extraction evaluation fixtures
-系统 SHALL 提供 memory extraction evaluation fixtures，用于验证提取动作和最终 memory 状态。
+系统 SHALL 提供 memory extraction evaluation fixtures，用于通过 mock actions 驱动提取流程，并验证最终 memory 状态。
 
 #### Scenario: Fixture schema is explicit
 - **WHEN** evaluation runner 加载 fixture
@@ -38,31 +38,31 @@
 
 #### Scenario: Identity create is covered
 - **WHEN** 用户首次提供稳定身份事实
-- **THEN** evaluation 包含 expected create identity action
+- **THEN** evaluation 验证最终存在对应的 identity memory
 
 #### Scenario: Identity update is covered
 - **WHEN** 用户修正已有身份事实
-- **THEN** evaluation 包含 expected update identity action
+- **THEN** evaluation 验证最终 identity memory 已更新为新事实
 
 #### Scenario: Context update is covered
 - **WHEN** 用户更新当前项目或临时状态
-- **THEN** evaluation 包含 expected update context action
+- **THEN** evaluation 验证最终 context memory 已更新为新状态
 
 #### Scenario: Preference create is covered
 - **WHEN** 用户明确表达长期偏好
-- **THEN** evaluation 包含 expected create preferences action
+- **THEN** evaluation 验证最终存在对应的 preferences memory
 
 #### Scenario: One-off preference request is covered
 - **WHEN** 用户只提出一次性格式或输出要求
-- **THEN** evaluation 包含 expected ignore action
+- **THEN** evaluation 验证最终不存在对应的一次性 preferences memory
 
 #### Scenario: Explicit forget is covered
 - **WHEN** 用户明确要求忘记某条记忆
-- **THEN** evaluation 包含 expected delete action
+- **THEN** evaluation 验证最终不存在被遗忘的 memory
 
 #### Scenario: Noisy conversation ignore is covered
 - **WHEN** 对话没有可记忆事实或内容噪声较多
-- **THEN** evaluation 包含 expected ignore action
+- **THEN** evaluation 验证最终不新增 memory
 
 ### Requirement: Optional real LLM memory extraction evaluation
 系统 SHALL 提供显式启用的真实 LLM memory extraction evaluation 入口，且默认跳过。
