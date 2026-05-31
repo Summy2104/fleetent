@@ -5,6 +5,8 @@ import logging
 import re
 from dataclasses import dataclass
 
+from fleetent.sandbox_config import NetworkPolicy, SandboxResources
+
 logger = logging.getLogger(__name__)
 
 _SAFE_NAME = re.compile(r"[^a-zA-Z0-9_.-]")
@@ -45,8 +47,38 @@ class SandboxClient:
             return False
         return True
 
-    async def create_workspace(self, session_id: str) -> str:
-        """Start an isolated container, return container ID as workspace_id."""
+    @staticmethod
+    def _resource_flags(resources: SandboxResources) -> list[str]:
+        """Map SandboxResources to docker run flags (D2).
+
+        `exec_timeout` is deliberately absent — it is a per-exec timeout carried
+        for wave-3 forced termination, not a `docker run` concern. `--tmpfs /tmp`
+        is always present (writable scratch independent of read_only). `public_only`
+        has no provisioned network here, so it degrades to `--network none` rather
+        than silently allowing the default bridge.
+        """
+        flags = ["--memory", f"{resources.memory}m", "--cpus", str(resources.cpus)]
+        if resources.network is NetworkPolicy.NONE:
+            flags += ["--network", "none"]
+        elif resources.network is NetworkPolicy.PUBLIC_ONLY:
+            logger.warning("sandbox_public_only_network_unprovisioned falling_back_to=none")
+            flags += ["--network", "none"]
+        if resources.read_only:
+            flags.append("--read-only")
+        flags += ["--tmpfs", "/tmp"]
+        return flags
+
+    async def create_workspace(
+        self, session_id: str, resources: SandboxResources | None = None
+    ) -> str:
+        """Start an isolated container, return container ID as workspace_id.
+
+        Resource limits are taken per call from `resources` (SB2 needs one client
+        to build both read-only session and writable agent containers), defaulting
+        to `SandboxResources()` — byte-equivalent to the pre-SB4 hardcoded command.
+        """
+        if resources is None:
+            resources = SandboxResources()
         safe = _SAFE_NAME.sub("-", session_id)[:48]
         proc = await asyncio.create_subprocess_exec(
             "docker",
@@ -54,15 +86,7 @@ class SandboxClient:
             "-d",
             "--name",
             f"sandbox-{safe}",
-            "--network",
-            "none",
-            "--memory",
-            "256m",
-            "--cpus",
-            "0.5",
-            "--read-only",
-            "--tmpfs",
-            "/tmp",
+            *self._resource_flags(resources),
             self._image,
             "sleep",
             "infinity",

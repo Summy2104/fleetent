@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fleetent.sandbox_client import ExecResult, SandboxClient
+from fleetent.sandbox_config import NetworkPolicy, SandboxResources
 
 
 def _mock_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> MagicMock:
@@ -110,3 +111,92 @@ async def test_docker_available_false_when_cli_missing(client):
         "asyncio.create_subprocess_exec", AsyncMock(side_effect=FileNotFoundError("docker"))
     ):
         assert await client.docker_available() is False
+
+
+async def _capture_create_workspace(
+    client: SandboxClient, *, resources: SandboxResources | None = None
+) -> list[str]:
+    """Run create_workspace under a mocked subprocess and return the argv."""
+    captured: list[list[str]] = []
+
+    async def fake_exec(*args, **kwargs):
+        captured.append(list(args))
+        return _mock_proc(stdout="cid\n")
+
+    with patch("asyncio.create_subprocess_exec", fake_exec):
+        if resources is None:
+            await client.create_workspace("session-1")
+        else:
+            await client.create_workspace("session-1", resources=resources)
+    return captured[0]
+
+
+async def test_create_workspace_maps_memory_and_cpus(client):
+    res = SandboxResources(memory=1024, cpus=2.0)
+    argv = await _capture_create_workspace(client, resources=res)
+    assert argv[argv.index("--memory") + 1] == "1024m"
+    assert argv[argv.index("--cpus") + 1] == "2.0"
+
+
+async def test_create_workspace_network_none_adds_network_none(client):
+    res = SandboxResources(network=NetworkPolicy.NONE)
+    argv = await _capture_create_workspace(client, resources=res)
+    assert argv[argv.index("--network") + 1] == "none"
+
+
+async def test_create_workspace_allow_all_omits_network_flag(client):
+    res = SandboxResources(network=NetworkPolicy.ALLOW_ALL)
+    argv = await _capture_create_workspace(client, resources=res)
+    assert "--network" not in argv
+
+
+async def test_create_workspace_public_only_falls_back_to_none(client):
+    """public_only network is not provisioned, so it degrades to --network none
+    rather than silently allowing the default bridge."""
+    res = SandboxResources(network=NetworkPolicy.PUBLIC_ONLY)
+    argv = await _capture_create_workspace(client, resources=res)
+    assert argv[argv.index("--network") + 1] == "none"
+
+
+async def test_create_workspace_read_only_true_adds_flag(client):
+    res = SandboxResources(read_only=True)
+    argv = await _capture_create_workspace(client, resources=res)
+    assert "--read-only" in argv
+
+
+async def test_create_workspace_read_only_false_omits_flag(client):
+    res = SandboxResources(read_only=False)
+    argv = await _capture_create_workspace(client, resources=res)
+    assert "--read-only" not in argv
+
+
+async def test_create_workspace_always_keeps_tmpfs(client):
+    res = SandboxResources(read_only=False, network=NetworkPolicy.ALLOW_ALL)
+    argv = await _capture_create_workspace(client, resources=res)
+    assert argv[argv.index("--tmpfs") + 1] == "/tmp"
+
+
+async def test_create_workspace_exec_timeout_not_in_docker_run(client):
+    """exec_timeout is carried for wave-3 only; it must not reach docker run."""
+    res = SandboxResources(exec_timeout=120)
+    argv = await _capture_create_workspace(client, resources=res)
+    assert "120" not in argv
+    assert "--stop-timeout" not in argv
+
+
+async def test_create_workspace_per_scope_does_not_bleed(client):
+    """The same client builds read-only then writable containers independently."""
+    read_only = await _capture_create_workspace(client, resources=SandboxResources(read_only=True))
+    writable = await _capture_create_workspace(client, resources=SandboxResources(read_only=False))
+    assert "--read-only" in read_only
+    assert "--read-only" not in writable
+
+
+async def test_create_workspace_default_command_matches_current_behaviour(client):
+    """No resources arg reproduces the pre-SB4 hardcoded command exactly."""
+    argv = await _capture_create_workspace(client)
+    assert argv[argv.index("--network") + 1] == "none"
+    assert argv[argv.index("--memory") + 1] == "256m"
+    assert argv[argv.index("--cpus") + 1] == "0.5"
+    assert "--read-only" in argv
+    assert argv[argv.index("--tmpfs") + 1] == "/tmp"
