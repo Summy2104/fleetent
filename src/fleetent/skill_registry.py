@@ -8,6 +8,8 @@ from typing import Any
 import structlog
 import yaml
 
+from fleetent import skill_audit
+
 logger = structlog.get_logger(__name__)
 
 
@@ -28,6 +30,10 @@ class SkillEntry:
     version: str | None = None
     enabled_by_default: bool = True
     builtin: bool = False
+    # Set when the SKILL.md body or description hits a `severe` injection pattern
+    # (skill-injection-audit). The entry stays in `_index` but is excluded from the
+    # catalog and refused by read_skill; load() ignores this flag (manual triage).
+    audit_blocked: bool = False
 
 
 _index: dict[str, SkillEntry] = {}
@@ -151,7 +157,8 @@ def _scan_dir(
     if not base.is_dir():
         return
     for skill_md in base.rglob("SKILL.md"):
-        frontmatter = _parse_frontmatter(skill_md.read_text(encoding="utf-8"))
+        raw = skill_md.read_text(encoding="utf-8")
+        frontmatter = _parse_frontmatter(raw)
         if frontmatter is None:
             reason = "missing --- boundary, invalid YAML, or non-mapping top level"
             source = "builtin" if builtin else "user"
@@ -179,15 +186,55 @@ def _scan_dir(
             )
             if existing.path <= path:
                 continue
+        description = str(frontmatter.get("description", ""))
+        blocked = _audit_skill(path, _body_after_frontmatter(raw), description)
         index[name] = SkillEntry(
-            description=str(frontmatter.get("description", "")),
+            description=description,
             path=path,
             tags=_as_str_list(frontmatter.get("tags")),
             platforms=_as_str_list(frontmatter.get("platforms")),
             version=_as_opt_str(frontmatter.get("version")),
             enabled_by_default=bool(frontmatter.get("enabled_by_default", True)),
             builtin=builtin,
+            audit_blocked=blocked,
         )
+
+
+def _body_after_frontmatter(raw: str) -> str:
+    """Return the SKILL.md content following the closing frontmatter delimiter.
+
+    Falls back to the whole text when no `---`-delimited frontmatter is present,
+    so the audit never silently skips content it should scan.
+    """
+    if not raw.startswith("---"):
+        return raw
+    parts = raw.split("---", 2)
+    return parts[2] if len(parts) >= 3 else raw
+
+
+def _audit_skill(path: str, body: str, description: str) -> bool:
+    """Run the static injection audit and record one structured log per hit.
+
+    Returns True when any `severe` pattern hit (the caller sets `audit_blocked`).
+    `severe` hits log at warning with disposition "blocked"; `suspicious` hits log
+    at warning with disposition "allowed" so a startup scan surfaces both on the
+    console while the skill stays usable.
+    """
+    hits = skill_audit.audit(body, description)
+    if not hits:
+        return False
+    blocked = skill_audit.has_severe(hits)
+    for hit in hits:
+        disposition = "blocked" if hit.severity == skill_audit.SEVERE else "allowed"
+        logger.warning(
+            "skill_audit_hit",
+            path=path,
+            rule_id=hit.rule_id,
+            severity=hit.severity,
+            field=hit.field,
+            disposition=disposition,
+        )
+    return blocked
 
 
 def match(user_input: str, disabled_skills: list[str] | None = None) -> str | None:
@@ -260,14 +307,16 @@ def available_skills_prompt(disabled_skills: list[str] | None = None) -> str:
     so the model can discover what exists and load the full file on demand via the
     read_skill tool — instead of the platform auto-injecting full content. A skill
     is omitted when disabled (config force-disable or enabled_by_default false),
-    mirroring match()'s eligibility. Returns "" when nothing is enabled, so the
+    mirroring match()'s eligibility, or when `audit_blocked` (a severe injection
+    hit, so its name/description never reach the prompt). Returns "" when nothing
+    is enabled, so the
     caller can drop the section entirely (keeping the cache prefix maximal).
     """
     disabled = _resolve_disabled_skills(disabled_skills)
     entries = [
         (name, entry)
         for name, entry in _index.items()
-        if _disabled_reason(name, entry, disabled) is None
+        if _disabled_reason(name, entry, disabled) is None and not entry.audit_blocked
     ]
     if not entries:
         return ""

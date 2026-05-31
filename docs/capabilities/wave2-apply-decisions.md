@@ -60,3 +60,34 @@
 2. 自解冲突 #2:"用户目录缺失不算 reload 失败、只有 build 抛异常才保留旧索引"——这一对 spec D3"目录消失"措辞的收敛是否认可。
 3. `reload()` 返回 dict 形态(自解冲突 #3)是否认可作为后续 API 的契约基础。
 4. 并发 `reload()` 沿用 design"最后写赢"语义,本 change 未加锁(与 design Risks 一致)。
+
+## skill-injection-audit — feat/skill-injection-audit
+
+**前置核实结论(tasks 1.x):** 两个注入面已按 read-on-demand 落地并核实:`skill_registry.available_skills_prompt`(清单面,拼 name/description/location,经 `_disabled_reason` 过滤)与 `tools.read_skill`(全文面,经 `skill_registry.load` 取正文)。`SkillEntry`(SK2)字段确认;入索引点是 `_scan_dir` 组装条目处,`scan()` 与 `reload()` 都经 `_build_index → _scan_dir`,故审计对两条路径都生效。`load()` 无禁用检查(既有口径:load 是排查出口,不受清单/禁用约束),审计沿用此口径。
+
+**实现:**
+- 新增 `src/fleetent/skill_audit.py`:模块级不可变 `_RULES: tuple[_Rule, ...]`(每条 `_Rule`=frozen dataclass:`rule_id`/`severity`/预编译正则);`audit(content, description) -> list[Hit]`(`Hit`=frozen dataclass,带 `rule_id`/`severity`/`field`("content"|"description")/`match`),正文与 description 都检,纯静态、不调 LLM、无 I/O;`has_severe(hits)` 辅助判断。
+- `SkillEntry` 加 `audit_blocked: bool = False`。`_scan_dir` 组装条目前调 `_audit_skill(path, body, description)`:`_body_after_frontmatter` 切出正文,跑 `audit`,**每条命中**写结构化日志 `skill_audit_hit`(path/rule_id/severity/field/disposition),有 severe 命中则置 `audit_blocked=True`(条目仍留 `_index`)。日志均走 `logger.warning`(启动扫描即控制台告警,severe/suspicious 都可见)。
+- `available_skills_prompt`:过滤条件叠加 `and not entry.audit_blocked`(与 disabled 同处)。
+- `read_skill`:改为先取 `entry = _index.get(name)`,`audit_blocked` 在 `load()` **之前**短路返回拒绝文本(`error: skill 'X' was blocked by the static injection audit`),不返回正文。
+- `load()` 不变,忽略 `audit_blocked`,仍按名返回原文供人工排查。
+
+**规则表覆盖(注入类/严重度):**
+- severe — `ignore_previous_instructions`(英文 ignore/disregard/forget previous instructions 族)、`ignore_previous_instructions_zh`(中文 忽略/无视/忘记 之前/上述 指令族)、`fake_system_directive`(`<system>` 标签 / `system prompt:` 伪装系统指令)、`role_reassignment`(you are now unrestricted/jailbroken/DAN/developer mode)、`pipe_to_shell`(`curl|wget ... | sh/bash`)、`remote_eval_exec`(`eval/exec(requests|urllib|os.popen|subprocess`)。
+- suspicious — `no_restrictions`(no/without restrictions/limitations/guardrails)、`reveal_system_prompt`(reveal/print/repeat/show your system prompt)。
+- 覆盖 docs/proposal 列举的高危类(忽略指令 / 伪装 system / shell 注入),初始集,后续可在 `_RULES` 末尾追加(design Open Question)。
+
+**自解冲突:**
+1. 正文来源:`audit` 需正文,而 `_scan_dir` 原只 `read_text` 一次喂 `_parse_frontmatter`。最小改动:把 `read_text` 结果存 `raw` 复用,新增 `_body_after_frontmatter(raw)`(切 `---` 后第三段;无 frontmatter 兜底返回全文,审计不漏内容),不重复读盘。
+2. 日志级别:spec 只对 suspicious 明确"启动控制台告警",severe 只要求"审计日志"。统一用 `logger.warning` 记两者——severe 至少同等严重,且启动扫描时运维应都看到;测试只断言 event/severity/disposition/path,不锁级别。
+3. `read_skill` 原用 `name not in _index` 判存在;改为取一次 `entry` 同时支撑存在性 + audit_blocked 两个分支,避免二次查 `_index`(对齐 design "拒绝在 load 前短路、复用既有索引查询")。
+4. 未引入 `severity` 的字符串字面量类型别名(保持 `str`),与既有 store/registry 代码风格一致,避免过度工程;规则表是 SoT。
+
+**影响:** 780 passed(基线 759 + 新增 21:skill_audit 11 + skill_registry 9 + tools 1)。
+- ruff:我新建/改的 `skill_audit.py`/`skill_registry.py`/三个测试文件 `ruff format`+`check` 全绿;`tools.py` 仅 `read_skill` 逻辑改动(diff 已收敛为仅此函数),其 2 个 `cron_scheduler` unused-import 警告是 HEAD 既有(grandfathered,非本次引入)。
+- mypy:base 73 errors → after 73 errors(checked 48→49 源文件,新增 `skill_audit.py` 零错),无新增错误模式;新模块公开函数完整注解(mypy strict)。
+
+**需 zy 核实:**
+1. severe 日志与 suspicious 同用 `logger.warning`(severe 未单独升 error)是否认可;若要分级(severe→error)可在 `_audit_skill` 按 severity 切换。
+2. 规则表初始 8 条覆盖面是否够用作 v1.0 起点;中文规则仅覆盖"忽略指令"族,其余类(伪装 system/shell)未做中文变体——按需在 `_RULES` 追加。
+3. `read_skill` 拒绝文本以 `error:` 前缀返回(与既有 `error: no skill named` 一致),措辞含 "blocked by the static injection audit",是否符合预期对模型/运维的提示口径。
