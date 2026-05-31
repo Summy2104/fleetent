@@ -19,7 +19,7 @@ from fleetent.error_classifier import classify
 from fleetent.eval_logger import log_run
 from fleetent.memory_layer import extract_and_save, load_memories
 from fleetent.message_hygiene import HygieneReport, MessageContractError, sanitize
-from fleetent.model_router import RouteConfig, get_async_client_and_config
+from fleetent.model_router import RouteConfig, RouteOverride, get_async_client_and_config
 from fleetent.multimodal import build_message_with_images, has_image_block
 from fleetent.permission_gate import _default_gate
 from fleetent.skill_registry import load as load_skill
@@ -165,8 +165,7 @@ def _select_route(messages: list[Any]) -> str:
         return "default"
     if "vision" not in model_router.ROUTES:
         raise RuntimeError(
-            "消息含图片但未配置 vision 路由（model_router.ROUTES 缺少 'vision'），"
-            "无法处理图片输入"
+            "消息含图片但未配置 vision 路由（model_router.ROUTES 缺少 'vision'），无法处理图片输入"
         )
     return "vision"
 
@@ -212,6 +211,7 @@ async def run(
     agent_name: str | None = None,
     max_turns: int | None = None,
     max_consecutive_failures: int | None = None,
+    force_model: str | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -219,10 +219,18 @@ async def run(
     so child agents cannot spawn further sub-agents.
     When allowed_tools is set, only matching tools (fnmatch patterns) are exposed.
     max_turns / max_consecutive_failures override the deployment defaults.
+    force_model forces this run's LLM calls onto a specific model via a
+    request-level routing override (MR1); None keeps task_type routing unchanged.
     """
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
-    client, cfg = get_async_client_and_config(_select_route(messages))
+    # force_model layers a request-level override onto that route (MR1); when
+    # None the call stays byte-identical to task_type routing.
+    route = _select_route(messages)
+    if force_model is None:
+        client, cfg = get_async_client_and_config(route)
+    else:
+        client, cfg = get_async_client_and_config(route, override=RouteOverride(model=force_model))
 
     # Determine effective tool schemas (exclude sub_agent for child agents)
     schemas = (
@@ -238,7 +246,9 @@ async def run(
     start = time.monotonic()
     response = None
     msg: Any = None
-    models_to_try = [cfg.model, *cfg.fallbacks]
+    # Override forces a single model with no fallback (D3); cfg.fallbacks is
+    # already empty here, but be explicit so the intent survives refactors.
+    models_to_try = [cfg.model] if force_model is not None else [cfg.model, *cfg.fallbacks]
     model_used = cfg.model
 
     controller = _build_controller(max_turns, max_consecutive_failures, include_approval=True)
@@ -391,6 +401,7 @@ async def run_stream(
     max_turns: int | None = None,
     max_consecutive_failures: int | None = None,
     images: list[tuple[bytes, str]] | None = None,
+    force_model: str | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -422,11 +433,17 @@ async def run_stream(
 
     # Route to vision when images are present; raises before any LLM call if
     # images are present but no vision route is configured (D6, option A).
-    client, cfg = get_async_client_and_config(_select_route(messages))
+    # force_model layers a request-level override (MR1); None keeps task_type
+    # routing byte-identical.
+    route = _select_route(messages)
+    if force_model is None:
+        client, cfg = get_async_client_and_config(route)
+    else:
+        client, cfg = get_async_client_and_config(route, override=RouteOverride(model=force_model))
 
     start = time.monotonic()
     reply = ""
-    models_to_try = [cfg.model, *cfg.fallbacks]
+    models_to_try = [cfg.model] if force_model is not None else [cfg.model, *cfg.fallbacks]
     model_used = cfg.model
     total_prompt_tokens = 0
     total_completion_tokens = 0

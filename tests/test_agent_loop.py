@@ -136,9 +136,9 @@ async def test_run_mutates_caller_messages_in_place(mock_client):
     history: list = [{"role": "user", "content": "hi"}]
     await al.run(history)
     # the assistant reply must be present in the caller's own list (for session save)
-    assert any(
-        isinstance(m, dict) and m.get("role") == "assistant" for m in history
-    ), "run() must append the assistant turn to the caller's messages list in place"
+    assert any(isinstance(m, dict) and m.get("role") == "assistant" for m in history), (
+        "run() must append the assistant turn to the caller's messages list in place"
+    )
 
 
 async def test_run_dispatches_tool_then_gets_final_reply(mock_client):
@@ -961,10 +961,7 @@ async def test_run_stream_passes_images_through(mock_client):
         return _stream_chunks("ok", None)
 
     mock_client.chat.completions.create = capture_create
-    events = [
-        e
-        async for e in al.run_stream("what is this", images=[(b"PNGDATA", "image/png")])
-    ]
+    events = [e async for e in al.run_stream("what is this", images=[(b"PNGDATA", "image/png")])]
     user_msg = next(m for m in captured["messages"] if m.get("role") == "user")
     assert isinstance(user_msg["content"], list)
     assert any(b.get("type") == "image_url" for b in user_msg["content"])
@@ -1017,3 +1014,111 @@ async def test_run_stream_raises_when_image_but_no_vision_route(mock_client, mon
     with pytest.raises(RuntimeError, match="vision|视觉"):
         _ = [e async for e in al.run_stream("x", images=[(b"D", "image/png")])]
     create.assert_not_called()
+
+
+# ── force_model / request-routing-override (MR1) ─────────────────────────────
+
+
+def _route_spy(monkeypatch, calls: list[dict], fallbacks: tuple[str, ...] = ()):
+    """Patch get_async_client_and_config with a spy recording (task_type, override).
+
+    The returned cfg.model reflects override.model when set, mirroring the real
+    router's _apply_override result so the loop's models_to_try uses it.
+    """
+    client = AsyncMock()
+
+    def spy(task_type, override=None):
+        cfg = MagicMock()
+        cfg.model = override.model if override is not None and override.model else "test-model"
+        cfg.max_tokens = 512
+        cfg.fallbacks = () if (override is not None and override.model) else fallbacks
+        calls.append({"task_type": task_type, "override": override})
+        return client, cfg
+
+    monkeypatch.setattr(al, "get_async_client_and_config", spy)
+    return client
+
+
+async def test_run_force_model_none_passes_no_override(mock_client, monkeypatch):
+    calls: list[dict] = []
+    client = _route_spy(monkeypatch, calls, fallbacks=("fb-1",))
+    client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    await al.run([{"role": "user", "content": "hi"}], force_model=None)
+    assert calls[0]["override"] is None
+
+
+async def test_run_force_model_passes_override(mock_client, monkeypatch):
+    from fleetent.model_router import RouteOverride
+
+    calls: list[dict] = []
+    client = _route_spy(monkeypatch, calls)
+    client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    await al.run([{"role": "user", "content": "hi"}], force_model="claude-haiku-4-5")
+    assert calls[0]["override"] == RouteOverride(model="claude-haiku-4-5")
+
+
+async def test_run_force_model_used_for_every_llm_call(mock_client, monkeypatch):
+    calls: list[dict] = []
+    client = _route_spy(monkeypatch, calls, fallbacks=("fb-1",))
+    # Two turns: tool call then final reply; both must use the forced model.
+    client.chat.completions.create = AsyncMock(side_effect=[_tool_resp("echo"), _text_resp("done")])
+    monkeypatch.setattr(al, "get_schemas", lambda: [])
+    monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: "r")
+    await al.run([{"role": "user", "content": "hi"}], force_model="claude-haiku-4-5")
+    create_calls = client.chat.completions.create.call_args_list
+    assert all(c.kwargs["model"] == "claude-haiku-4-5" for c in create_calls)
+
+
+async def test_run_force_model_trace_records_forced_model(mock_client, monkeypatch):
+    calls: list[dict] = []
+    client = _route_spy(monkeypatch, calls)
+    client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    await al.run([{"role": "user", "content": "hi"}], force_model="claude-haiku-4-5")
+    assert captured["model_used"] == "claude-haiku-4-5"
+
+
+async def test_run_no_force_model_trace_records_default(mock_client, monkeypatch):
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    await al.run([{"role": "user", "content": "hi"}])
+    assert captured["model_used"] == "test-model"
+
+
+async def test_run_stream_force_model_none_passes_no_override(mock_client, monkeypatch):
+    calls: list[dict] = []
+    client = _route_spy(monkeypatch, calls, fallbacks=("fb-1",))
+    client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok", finish="stop"))
+    _ = [e async for e in al.run_stream("hi", force_model=None)]
+    assert calls[0]["override"] is None
+
+
+async def test_run_stream_force_model_passes_override(mock_client, monkeypatch):
+    from fleetent.model_router import RouteOverride
+
+    calls: list[dict] = []
+    client = _route_spy(monkeypatch, calls)
+    client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok", finish="stop"))
+    _ = [e async for e in al.run_stream("hi", force_model="claude-haiku-4-5")]
+    assert calls[0]["override"] == RouteOverride(model="claude-haiku-4-5")
+
+
+async def test_run_stream_force_model_used_for_llm_call(mock_client, monkeypatch):
+    calls: list[dict] = []
+    client = _route_spy(monkeypatch, calls, fallbacks=("fb-1",))
+    client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok", finish="stop"))
+    _ = [e async for e in al.run_stream("hi", force_model="claude-haiku-4-5")]
+    create_calls = client.chat.completions.create.call_args_list
+    assert all(c.kwargs["model"] == "claude-haiku-4-5" for c in create_calls)
+
+
+async def test_run_stream_force_model_trace_records_forced_model(mock_client, monkeypatch):
+    calls: list[dict] = []
+    client = _route_spy(monkeypatch, calls)
+    client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok", finish="stop"))
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    _ = [e async for e in al.run_stream("hi", force_model="claude-haiku-4-5")]
+    assert captured["model_used"] == "claude-haiku-4-5"
