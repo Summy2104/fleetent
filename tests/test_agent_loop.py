@@ -76,6 +76,8 @@ async def _stream_chunks_with_usage(prompt: int, completion: int, *contents: str
 @pytest.fixture
 def mock_client(monkeypatch) -> AsyncMock:
     """Patch all external I/O in agent_loop, return the mock LLM client."""
+    from fleetent.intelligence.long_term_ctx import BuiltContext
+
     client = AsyncMock()
     cfg = MagicMock()
     cfg.model = "test-model"
@@ -89,6 +91,9 @@ def mock_client(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "record_trace_event", lambda event: None)
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "match_skill", lambda _: None)
+    monkeypatch.setattr(
+        al, "build_context", AsyncMock(return_value=BuiltContext(text="", sources=[]))
+    )
     return client
 
 
@@ -173,6 +178,34 @@ async def test_run_not_sub_agent_includes_sub_agent_in_schemas(mock_client):
     assert "sub_agent" in names
 
 
+async def test_run_injects_long_term_context_before_model_call(mock_client, monkeypatch):
+    from fleetent.intelligence.long_term_ctx import BuiltContext
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    build_context = AsyncMock(
+        return_value=BuiltContext(text="Remember user preference", sources=[])
+    )
+    monkeypatch.setattr(al, "build_context", build_context)
+
+    await al.run(
+        [
+            {"role": "system", "content": "base system"},
+            {"role": "user", "content": "what should I use?"},
+        ],
+        user_id="user-1",
+        agent_name="agent-1",
+    )
+
+    build_context.assert_awaited_once_with(
+        "user-1",
+        "what should I use?",
+        "agent-1",
+        512,
+    )
+    messages = mock_client.chat.completions.create.await_args.kwargs["messages"]
+    assert messages[0]["content"] == "base system\n\n[Long-term context]\nRemember user preference"
+
+
 # ── run_stream() ──────────────────────────────────────────────────────────────
 
 
@@ -242,6 +275,51 @@ async def test_run_stream_tool_call_yields_tool_events(mock_client):
 
     tool_event = next(e for e in events if e["type"] == "tool_call")
     assert tool_event["name"] == "get_time"
+
+
+async def test_run_stream_injects_long_term_context_before_model_call(mock_client, monkeypatch):
+    from fleetent.intelligence.long_term_ctx import BuiltContext
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok"))
+    build_context = AsyncMock(
+        return_value=BuiltContext(text="Use private deployment docs", sources=[])
+    )
+    monkeypatch.setattr(al, "build_context", build_context)
+
+    [_ async for _ in al.run_stream("how deploy?", user_id="user-1", agent_name="agent-1")]
+
+    build_context.assert_awaited_once_with("user-1", "how deploy?", "agent-1", 512)
+    messages = mock_client.chat.completions.create.await_args.kwargs["messages"]
+    assert "Use private deployment docs" in messages[0]["content"]
+
+
+async def test_run_stream_omits_empty_long_term_context(mock_client, monkeypatch):
+    from fleetent.intelligence.long_term_ctx import BuiltContext
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok"))
+    build_context = AsyncMock(return_value=BuiltContext(text="", sources=[]))
+    monkeypatch.setattr(al, "build_context", build_context)
+
+    [_ async for _ in al.run_stream("say hello")]
+
+    messages = mock_client.chat.completions.create.await_args.kwargs["messages"]
+    assert "[Long-term context]" not in messages[0]["content"]
+
+
+def test_run_sync_calls_long_term_context(mock_client, monkeypatch):
+    from fleetent.intelligence.long_term_ctx import BuiltContext
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    build_context = AsyncMock(return_value=BuiltContext(text="CLI memory", sources=[]))
+    monkeypatch.setattr(al, "build_context", build_context)
+    monkeypatch.setattr(al, "scan_skills", lambda: None)
+
+    result = al.run_sync("hello", user_id="user-1")
+
+    assert result == "ok"
+    build_context.assert_awaited_once_with("user-1", "hello", "", 512)
+    messages = mock_client.chat.completions.create.await_args.kwargs["messages"]
+    assert "CLI memory" in messages[0]["content"]
 
 
 async def test_run_sub_agent_tool_intercepted_and_executed(mock_client):
@@ -375,6 +453,8 @@ def _mk_http_error(status: int, cls=APIStatusError) -> APIStatusError:
 @pytest.fixture
 def mock_client_fb(monkeypatch) -> AsyncMock:
     """mock_client variant with one fallback model configured."""
+    from fleetent.intelligence.long_term_ctx import BuiltContext
+
     client = AsyncMock()
     cfg = RouteConfig(
         base_url="https://api.test.com",
@@ -390,6 +470,9 @@ def mock_client_fb(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "record_trace_event", lambda event: None)
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "match_skill", lambda _: None)
+    monkeypatch.setattr(
+        al, "build_context", AsyncMock(return_value=BuiltContext(text="", sources=[]))
+    )
     return client
 
 

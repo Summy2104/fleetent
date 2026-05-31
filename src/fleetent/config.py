@@ -25,6 +25,10 @@ class EmbeddingSettings(BaseModel):
     dimensions: int = 64
 
 
+class LongTermContextSettings(BaseModel):
+    max_tokens: int = 2_048
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -44,6 +48,7 @@ class Settings(BaseSettings):
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     vector_store: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    long_term_ctx: LongTermContextSettings = Field(default_factory=LongTermContextSettings)
 
 
 def configure_logging(settings: Settings) -> None:
