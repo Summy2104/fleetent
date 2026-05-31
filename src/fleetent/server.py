@@ -88,6 +88,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as exc:
             logger.warning("mcp_yaml_load_failed path=%s error=%s", _MCP_YAML_PATH, exc)
 
+    # MCP3: start the connection-health monitor (bare asyncio task, not cron_scheduler).
+    mcp_client.start_health_monitor()
+
     # Load webhook sources from config/webhooks.yaml if present
     from fleetent import webhook_router as _wr
     _webhook_sources.clear()

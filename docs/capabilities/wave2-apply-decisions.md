@@ -455,3 +455,59 @@ class CancellationChecker:                       # TerminationChecker
 3. **MCP server 401 兜底刷新**（自解冲突 3）：未实现，主路径按过期时刻预刷新。若目标 server 存在「客户端时钟与服务端不一致致 token 提前被拒」场景，需补一次 401 触发刷新重试。
 4. **refresh_token grant 分支**（自解冲突 4）：未实现（标准 client_credentials 无 refresh_token）。若某非标准授权服务器返回 refresh_token 且期望优先用之，需补 refresh_token grant。
 5. **token 持久化**：本 change 取默认内存（重启重取），未启用 sqlite 持久化。若需跨重启复用 token，按 design D3 补 stdlib sqlite3 + 可 monkeypatch `DB_PATH` 后端。
+
+## 13. mcp-health-reconnect (MCP3)
+
+**改/建文件：**
+- 修改 `src/fleetent/mcp_client.py`：新增 `HealthState` StrEnum（`healthy`/`degraded`/`unavailable`）；模块级**只读**调参常量 `_PROBE_INTERVAL`/`_BACKOFF_BASE`/`_BACKOFF_CAP`/`_RECONNECT_MAX_ATTEMPTS`（默认值内置，非可变状态）；`_health_monitor_task`（单后台 task 句柄）；`McpServerConfig` 新增按 server 持有的健康运行态 `_health`/`_reconnect_attempts`/`_reconnect_lock`（均 `repr=False, compare=False`）；新增 `get_health`/`set_health`/`reset_health`、`_is_disconnect_error`、`_disconnect_classification`、`_unavailable_result`、`_handle_disconnect`、`_backoff_delay`、`_attempt_reconnect`、`_reconnect_with_backoff`、`_schedule_reconnect`、`reconnect`（手动入口）、`_probe_once`、`_health_monitor_loop`、`start_health_monitor`、`stop_health_monitor`；`_call_http_tool` / `_call_stdio_tool` 增 D5 降级短路 + D1 断连捕获；`close()` 首行调 `stop_health_monitor()`。
+- 修改 `src/fleetent/server.py`：lifespan 在 `register_all` 之后调 `mcp_client.start_health_monitor()`（裸 asyncio task，不挂 cron）；关停经既有 `mcp_client.close()` 取消（close 内 `stop_health_monitor`）。
+- 修改 `tests/test_mcp_client.py`：新增 26 例（健康三态隔离/默认/重置/不进全局 4 + D1 断连识别/拒 HTTPStatusError/直接读表/classify 守卫 4 + 断连转 degraded http+stdio 2 + D5 降级短路 http/unavailable/不影响他服务 3 + D7 404 不降级 1 + D4 退避序列 2 + 重连成功恢复/失败累计/达阈值 unavailable/手动重连 4 + D3 探活 http 不可达/http 健康/stdio 死/跳过 unavailable 4 + D6 monitor 启停取消/close 取消 2）。
+
+**前置核实结论（tasks 1.x）：**
+- 1.1 `CLASSIFICATION_TABLE[ErrorCategory.mcp_disconnect].should_retry == True`（error_classifier.py 行 91，未改）。`classify()`/`_categorize()` 仅识别 `APIStatusError`，断连异常（httpx ConnectError 等、stdio EOF）一律落 `unknown`，**绝不**产出 `mcp_disconnect`。故 D1 定为：mcp_client 侧自判 `mcp_disconnect`、直接读表，**不经 `classify()`**。
+- 1.2 断连异常形态：HTTP 走 httpx `ConnectError`/`ConnectTimeout`/`ReadError`（及更广的 `TransportError`/`TimeoutException`）；stdio 子进程死/管道断表现为 `ConnectionError`/`BrokenPipeError`/`EOFError`/`OSError`（`session.call_tool` 抛出，或 `_active_sessions` 无 session）。
+- 1.3/1.4 `register_all`（行 224）/ `close()`（行 187）/ server.py lifespan（行 67，注册点 87、关停点 110）为启停接入点；lifespan 既有裸 `asyncio.create_task`（Slack/Telegram adapter）先例，探活用同款裸 task 即可，无需新调度依赖、**不挂 cron_scheduler**。
+- 1.5 与 MCP2 边界：`_is_session_expired`（行 438）对 404 返 True → `_post_jsonrpc`（行 525）同请求重建会话；404 是 HTTP 响应（`HTTPStatusError`/正常 4xx 响应对象），**不是连接异常**，故 `_is_disconnect_error` 对 `HTTPStatusError` 显式返 False，404 永不进 MCP3 降级路径。
+
+**D1 断连异常如何映射 mcp_disconnect（直接读表、不经 classify）+ 守卫：**
+- `_is_disconnect_error(exc)`：先 `isinstance(exc, httpx.HTTPStatusError) → return False`（带响应的状态错误是会话/认证层，非连接层，D7 关键），再判 httpx `ConnectError`/`ConnectTimeout`/`ReadError`/`TransportError`/`TimeoutException` 及 stdio 的 `ConnectionError`/`BrokenPipeError`/`EOFError`/`OSError` → True。
+- `_disconnect_classification()`：`from fleetent.error_classifier import CLASSIFICATION_TABLE, ErrorCategory`（函数内 import），`return CLASSIFICATION_TABLE[ErrorCategory.mcp_disconnect]`——**直接索引表**取 `ErrorClassification`，拿到 `should_retry=True`。**全程不调 `classify()`**（喂断连异常给它只得 `unknown`，是死分支）。返回类型标注 `ErrorClassification`（`TYPE_CHECKING` import + `from __future__ import annotations` 前向引用，避免运行期循环 import）。
+- `_handle_disconnect(server)`：读 `_disconnect_classification().should_retry`，为真且当前 `healthy` 时转 `degraded` 并 `_schedule_reconnect`，返回 D5 不可用文本。工具调用路径 `_call_http_tool`/`_call_stdio_tool` 在 `try` 内捕获，`_is_disconnect_error` 命中才走 `_handle_disconnect`，否则原样 `raise`（不吞非断连异常）。
+- 守卫用例 `test_guard_classify_of_disconnect_is_unknown_not_mcp_disconnect`：对 `ConnectError`/`ConnectTimeout`/`ReadError` 断言 `classify(exc).category is ErrorCategory.unknown` 且 `is not ErrorCategory.mcp_disconnect`，证实 MCP3 不依赖也不能依赖 `classify()` 识别断连。另 `test_disconnect_maps_to_mcp_disconnect_reading_table_directly` 断言 mcp_client 侧读表得 `mcp_disconnect` + `should_retry True`。AR5 表标志位**未改**。
+
+**健康三态按 server 持有、不进全局如何实现：**
+- 状态字段 `_health`（默认 `HealthState.healthy`）/ `_reconnect_attempts`（默认 0）/ `_reconnect_lock`（`default_factory=asyncio.Lock`）经 `McpServerConfig` 的 `field(..., repr=False, compare=False)` 随每个 server 实例创建并持有——**无任何模块级 `dict[str, HealthState]` 全局**。`get_health`/`set_health`/`reset_health` 直接读写 server 实例字段。守卫用例 `test_health_state_not_module_level_global` 断言 `mcp_client` 模块上 `not hasattr "_health_states"` 且 `not hasattr "_HEALTH"`。不同 server 状态互不影响（`test_health_state_isolated_per_server`）。`_PROBE_INTERVAL` 等是只读默认常量（非每 server 可变态），测试经 `monkeypatch.setattr` 注入短值；退避基数/上限经 `_backoff_delay(..., base=, cap=)` 关键字参数直接注入，不真实长 sleep。
+
+**探活/重连后台任务接 lifespan（裸 asyncio、不挂 cron）+ 关停取消：**
+- `start_health_monitor(*, interval=_PROBE_INTERVAL)`：幂等（已有未完成 task 则复用），`asyncio.create_task(_health_monitor_loop(interval))` 存入模块级 `_health_monitor_task` 句柄并返回。`_health_monitor_loop` 为 `while True: await asyncio.sleep(interval); for server in list(_server_registry.values()): await _probe_once(server)`——纯裸 asyncio 常驻循环，**MUST NOT 经 cron_scheduler/APScheduler**（与张亮 scheduling 域已暂缓的用户级定时任务解耦，MCP3 自包含于 MCP 域）。
+- server.py lifespan 在 `register_all` 之后调 `start_health_monitor()`；关停经既有 `mcp_client.close()`——`close()` 首行 `await stop_health_monitor()`：`cancel()` + `with suppress(asyncio.CancelledError): await task` + 句柄置 None，不残留 task（`test_close_cancels_health_monitor` / `test_start_health_monitor_creates_task_and_stop_cancels_it` 验证 `task.done()` 且句柄 None）。
+- CLI 一次性 `run()` **不**调 `start_health_monitor`（仅服务端常驻，与 skill scan 同理）；CLI 下断连靠 D1 调用时映射发现（design D6 CLI 降级澄清），与服务端最终行为一致，差别仅「何时发现断连」。
+
+**D3 探活 / D4 退避重连 / D5 降级 / 并发去重：**
+- `_probe_once(server)`：非 `healthy` 直接 return（degraded 已在重连、unavailable 需手动）；stdio 检查 `_active_sessions.get(id) is None` → degraded + `_schedule_reconnect`；http 用 `_post_jsonrpc(client, server, "tools/list", {})` 轻量探活，异常经 `_is_disconnect_error` 判定，断连才 degraded + 重连（非断连仅 debug log，不误降级）。探活跳过 `unavailable`（`test_probe_skips_unavailable_server` 验证不发请求、不调度）。
+- `_backoff_delay(attempt, base, cap) = min(base * 2**attempt, cap)`：序列 1→2→4→8→16→32→60→60（封顶保持，`test_backoff_sequence_doubles_and_caps`）；可注入短值（0.01/0.05）。
+- `_attempt_reconnect(server)`：`_reconnect_lock.locked()` 时直接 return（**幂等/去重，同一服务同一时刻至多一个在途重连**，仿 session_mgr per-session Lock）；持锁内 `await _register_server(server)`，成功 `reset_health`（回 healthy + 计数清零），失败 `_reconnect_attempts += 1`，达 `_RECONNECT_MAX_ATTEMPTS` 转 `unavailable` 停自动重连。`_reconnect_with_backoff` 为 `while degraded: sleep(_backoff_delay(attempts)); _attempt_reconnect`。`_schedule_reconnect` = 裸 `create_task(_reconnect_with_backoff)`。
+- `reconnect(server_id)`：手动入口，清 `_reconnect_attempts`、置 degraded、`_attempt_reconnect` 一次——使 `unavailable` 服务重新尝试并可恢复 healthy（`test_manual_reconnect_recovers_unavailable_server`）。
+- D5 降级反馈：`_call_http_tool` / `_call_stdio_tool` 入口处 `server._health is not HealthState.healthy` 时直接 `return _unavailable_result(server_id)`（英文「temporarily unavailable」字符串，与 `_call_*_tool` 返回 str 类型一致），**不进真实网络/子进程**、不抛、不卡（`test_degraded_tool_call_returns_unavailable_without_network` 断言 route 未命中）。其他健康服务不受影响（`test_degraded_does_not_affect_other_healthy_server`）。
+
+**D7 404 会话过期 vs 连接级断连边界如何区分：**
+- 顺序：工具调用失败先按 MCP2 在 `_post_jsonrpc` 内判 `_is_session_expired`（404 / 带 session-invalid marker 的 4xx）→ 同请求 `_open_session` 重建一次重试（不归 mcp_disconnect、不降级）；只有抛出的是**连接级异常**（`_is_disconnect_error` True）才进 MCP3 `_handle_disconnect` 降级/重连。
+- 关键实现点：`_is_disconnect_error` 对 `httpx.HTTPStatusError` 显式 return False——404 既走 MCP2 重建路径，即便重建后再 404 经 `raise_for_status` 抛 `HTTPStatusError` 也**不**被判为断连，不进 MCP3 降级。`test_404_session_expiry_does_not_degrade` 断言 404 重建成功后 server 仍 `healthy`。401/403 同理（`HTTPStatusError`，非连接异常），不降级。
+
+**自解冲突（C·全自主，最小改动）：**
+1. **断连异常类型集合**（design 列举 httpx ConnectError/ConnectTimeout/ReadError「等」+ stdio「会话失活/EOF」，未穷举）：`_is_disconnect_error` 取「httpx `TransportError`/`TimeoutException` 全族（含三个具体子类）+ stdio `ConnectionError`/`BrokenPipeError`/`EOFError`/`OSError`」，且**先**排除 `HTTPStatusError`（D7 必需）。从宽覆盖连接层、从严排除响应层，避免漏判断连或误判 404。
+2. **降级文本语言**：用英文「MCP server '<id>' is temporarily unavailable (...)」，与既有 D8 oauth2 不可用文本（同为英文）风格一致；测试断言兼容中英（`"unavailable" in lower() or "不可用"`）。
+3. **探活间隔 30s / 退避基数 1s 上限 60s / 阈值 5**：design 仅给「默认值内置、可注入」与 1→2→4→60s 序列；阈值 5、间隔 30s 为内置默认（`_RECONNECT_MAX_ATTEMPTS`/`_PROBE_INTERVAL` 常量可改）。属 design Open Question「阈值几次、间隔是否同频」的本次取值，零配置可用。
+4. **并发去重用 `_reconnect_lock.locked()` 早返回**（design 接受「必要时按 server 加重连锁」）：本次即加 per-server `asyncio.Lock`，locked 时直接 return 实现「至多一个在途重连」，不额外排队。
+5. **探活非断连异常仅 debug log 不降级**：`_probe_once` http 分支若异常非断连（如偶发 4xx/解析错误），不误转 degraded，仅 debug log——避免把非连接问题当断连触发无谓重连。
+
+**影响：**
+- pytest：base **966 → after 992 passed**（净 +26，全在 `tests/test_mcp_client.py`）。MCP1/MCP2/MCP5 既有用例全绿；AR5 表标志位未改；含「`classify(断连异常)` 仍为 `unknown`」守卫。
+- ruff（仅本 change 改/建文件 `mcp_client.py` / `test_mcp_client.py` / `server.py`）：format 已应用、check `All checks passed`（`mcp_client.py` / `test_mcp_client.py`）；`server.py` 仅本 change 3 行新增、无新增 ruff 错误（既有 4 项 F401/I001 为 HEAD 遗留，已 `git stash` 对照确认）。
+- mypy：base **76 → after 76**，无新增错误模式。`mcp_client.py` 仅余 2 个既有 `no-any-return`（`_call_stdio_tool` / `_call_http_tool` 返回，HEAD 即存在，行号因新增代码位移至 861/898）。
+
+**需 zy 核实：**
+1. **探活间隔 / 退避阈值默认值**（自解冲突 3，design Open Question）：间隔 30s、阈值 5 次、退避 1→60s 为内置默认。若部署希望可调，按 design 在 `config/mcp.yaml` per-server/全局加可选字段（本次未加，可注入参数 + 默认已零配置可用）。
+2. **断连异常类型集合是否完备**（自解冲突 1）：stdio 子进程死亡的真实异常形态（取决于 `mcp` SDK 的 `ClientSession.call_tool` 在管道断时抛什么）未对真实子进程实测（测试用 mock）。若 SDK 以其他异常类型（非 `ConnectionError`/`OSError` 族）表达会话失活，需扩 `_is_disconnect_error`。
+3. **per-server 重连锁 vs 全局并发**（design Open Question）：本次按「锁 locked 即早返回、至多一个在途」实现；若高并发实测出现重复重连或竞态，再加排队/全局协调。
+4. **降级文本语言**（自解冲突 2）：当前英文。若产品要求面向终端用户的中文不可用提示，调 `_unavailable_result`。
