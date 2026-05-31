@@ -242,3 +242,16 @@
 
 **影响:** 712 passed,mypy 无新增。
 **需 zy 核实:** memory/skill 后置为独立 system 消息(messages[1])的形态;normalizer 同样重排需张亮做。
+
+## image-generation-tool — feat/image-generation-tool
+
+**实现:** 新建 image_gen_client.py `generate(prompt,*,size,settings)->bytes`(AsyncOpenAI(base_url=image_gen_url) 调 images.generate response_format=b64_json,b64 优先、回 url 则内网 httpx fetch,`ImageGenError`);tools.py 加 `GENERATED_DIR`(默认 data/generated,可注入)+ `_save_image`(uuid4.png)+ `generate_image` `@tool(risk_level="low")`(async,经 _safe_dispatch await):调 client→存盘→**返回短引用"image generated: <path>"、绝不返回 base64**,端点失败/未配置→明确失败结果文本(不静默成功、不中断循环);config 加 image_gen_url=""/image_gen_model="default"。自托管 OpenAI 兼容 images 端点。
+
+**自解冲突:**
+1. dispatch 不 await,_safe_dispatch 处理 async(同 run_code),无需改 registry。
+2. SDK size 用 Omit/omit sentinel + 显式 kwargs(避免 call-overload/type:ignore)。
+3. 自托管端点常忽略 auth → 传占位 api_key="image-gen"。
+4. ruff format 误改 schedule_task 等 → 还原,仅留本 change 加性 diff(tools.py 3 个 lint 错为既有 baseline)。
+
+**影响:** 732 passed;mypy 无新模式。守卫:test_generate_image_result_has_no_base64 / test_tool_result_message_in_trace_has_no_base64。
+**需 zy 核实:** image_gen_url 默认空(部署须配自托管端点);引用形态 "image generated: <path>"。

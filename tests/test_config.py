@@ -59,3 +59,27 @@ def test_context_dual_threshold_env_override(monkeypatch):
 def test_context_compress_threshold_removed():
     s = Settings(anthropic_api_key="test-key")
     assert not hasattr(s, "context_compress_threshold")
+
+
+def test_image_gen_url_default_empty():
+    s = Settings(anthropic_api_key="test-key")
+    assert s.image_gen_url == ""
+
+
+def test_image_gen_url_from_env(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("IMAGE_GEN_URL", "http://localhost:9000/v1/")
+    s = Settings()
+    assert s.image_gen_url == "http://localhost:9000/v1/"
+
+
+def test_image_gen_model_default():
+    s = Settings(anthropic_api_key="test-key")
+    assert s.image_gen_model == "default"
+
+
+def test_image_gen_model_from_env(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("IMAGE_GEN_MODEL", "sdxl")
+    s = Settings()
+    assert s.image_gen_model == "sdxl"
