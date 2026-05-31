@@ -13,7 +13,6 @@ from openai.types.chat import ChatCompletionChunk
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent.agent_policy import check_tool_access
 from fleetent.context_mgr import maybe_compress
-from fleetent.memory_layer import extract_and_save, load_memories
 from fleetent.model_router import RouteConfig, get_async_client_and_config
 from fleetent.observability import TraceEvent, record_trace_event
 from fleetent.permission_gate import _default_gate
@@ -265,7 +264,6 @@ async def run(
         user_id=user_id,
         agent_name=agent_name,
     )
-    extract_and_save(user_input, messages, user_id=user_id)
     return reply
 
 
@@ -273,8 +271,7 @@ def run_sync(user_input: str, user_id: str = "default", system_prompt: str = _SY
     """Synchronous wrapper around run() for CLI use."""
 
     scan_skills()
-    memory_ctx = load_memories(user_id=user_id)
-    full_system = f"{memory_ctx}\n\n{system_prompt}" if memory_ctx else system_prompt
+    full_system = system_prompt
 
     matched = match_skill(user_input)
     if matched:
@@ -303,8 +300,7 @@ async def run_stream(
     """
     client, cfg = get_async_client_and_config("default")
 
-    memory_ctx = load_memories(user_id=user_id)
-    full_system = f"{memory_ctx}\n\n{system_prompt}" if memory_ctx else system_prompt
+    full_system = system_prompt
 
     matched = match_skill(user_input)
     if matched:
@@ -421,4 +417,3 @@ async def run_stream(
         user_id=user_id,
         agent_name=agent_name,
     )
-    extract_and_save(user_input, messages, user_id=user_id)
