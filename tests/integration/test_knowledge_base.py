@@ -205,6 +205,40 @@ async def test_ingest_parsed_preserves_section_metadata_on_chunks(monkeypatch, t
     }
 
 
+async def test_ingest_text_indexes_each_chunk_for_keyword_search(monkeypatch, tmp_path):
+    database = _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=40, chunk_overlap=0)
+
+    from fleetent.intelligence.knowledge_base import runtime
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+
+    document = await runtime.ingest_text(
+        filename="ops.txt",
+        content="Restart service when ERR42 appears.",
+        tenant_id="tenant-a",
+        kb_id="support",
+    )
+
+    rows = database.execute(
+        """
+        SELECT chunk_id, tenant_id, kb_id, content
+        FROM knowledge_chunks_fts
+        WHERE knowledge_chunks_fts MATCH :query
+        """,
+        {"query": "ERR42"},
+    ).fetchall()
+
+    assert rows == [
+        {
+            "chunk_id": f"{document.id}:chunk:0",
+            "tenant_id": "tenant-a",
+            "kb_id": "support",
+            "content": "Restart service when ERR42 appears.",
+        }
+    ]
+
+
 async def test_search_queries_vector_store_by_knowledge_namespace(monkeypatch, tmp_path):
     _patch_runtime_database(monkeypatch, tmp_path)
     _patch_runtime_settings(monkeypatch, chunk_size=20, chunk_overlap=0)
@@ -315,6 +349,235 @@ async def test_search_is_tenant_isolated(monkeypatch, tmp_path):
     assert [chunk.document_id for chunk in results] == [tenant_a_doc.id]
 
 
+async def test_keyword_search_finds_exact_product_ids_and_error_codes(monkeypatch, tmp_path):
+    _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=120, chunk_overlap=0)
+
+    from fleetent.intelligence.knowledge_base import runtime
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    document = await runtime.ingest_text(
+        filename="runbook.md",
+        content="Product FT-9000 reports ERR-42 when the pressure valve is locked.",
+        tenant_id="tenant-a",
+        kb_id="support",
+    )
+
+    results = await runtime.search(
+        "FT-9000 ERR-42",
+        tenant_id="tenant-a",
+        kb_ids=["support"],
+        limit=5,
+        mode="keyword",
+    )
+
+    assert [(chunk.id, chunk.content) for chunk in results] == [
+        (
+            f"{document.id}:chunk:0",
+            "Product FT-9000 reports ERR-42 when the pressure valve is locked.",
+        )
+    ]
+
+
+async def test_keyword_search_filters_by_tenant_and_kb(monkeypatch, tmp_path):
+    _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=120, chunk_overlap=0)
+
+    from fleetent.intelligence.knowledge_base import runtime
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    tenant_a_global = await runtime.ingest_text(
+        filename="a-global.md",
+        content="Shared incident keyword ALPHA-777 belongs to tenant a global.",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+    await runtime.ingest_text(
+        filename="a-private.md",
+        content="Shared incident keyword ALPHA-777 belongs to tenant a private.",
+        tenant_id="tenant-a",
+        kb_id="private",
+    )
+    await runtime.ingest_text(
+        filename="b-global.md",
+        content="Shared incident keyword ALPHA-777 belongs to tenant b global.",
+        tenant_id="tenant-b",
+        kb_id="global",
+    )
+
+    results = await runtime.search(
+        "ALPHA-777",
+        tenant_id="tenant-a",
+        kb_ids=["global"],
+        limit=10,
+        mode="keyword",
+    )
+
+    assert [chunk.document_id for chunk in results] == [tenant_a_global.id]
+    assert [chunk.tenant_id for chunk in results] == ["tenant-a"]
+    assert [chunk.kb_id for chunk in results] == ["global"]
+
+
+async def test_keyword_search_respects_limit_and_stable_ordering(monkeypatch, tmp_path):
+    _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=30, chunk_overlap=0)
+
+    from fleetent.intelligence.knowledge_base import runtime
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    document = await runtime.ingest_text(
+        filename="ordered.md",
+        content="MATCH first sentence. MATCH second sentence. MATCH third sentence.",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+
+    results = await runtime.search(
+        "MATCH",
+        tenant_id="tenant-a",
+        kb_ids=["global"],
+        limit=2,
+        mode="keyword",
+    )
+
+    assert [(chunk.id, chunk.position) for chunk in results] == [
+        (f"{document.id}:chunk:0", 0),
+        (f"{document.id}:chunk:1", 1),
+    ]
+
+
+async def test_hybrid_search_merges_vector_and_keyword_candidates(monkeypatch, tmp_path):
+    _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=120, chunk_overlap=0)
+
+    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.intelligence.vector_store import SearchResult
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    vector_doc = await runtime.ingest_text(
+        filename="semantic.md",
+        content="Semantic troubleshooting guide for restart failures.",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+    keyword_doc = await runtime.ingest_text(
+        filename="keyword.md",
+        content="Exact error code ZX-404 requires a firmware reset.",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+
+    async def vector_search(query: str, namespace: str, limit: int):
+        return [SearchResult(id=f"{vector_doc.id}:chunk:0", score=0.7)]
+
+    monkeypatch.setattr(runtime.vector_store, "search", vector_search)
+
+    results = await runtime.search(
+        "ZX-404",
+        tenant_id="tenant-a",
+        kb_ids=["global"],
+        limit=5,
+        mode="hybrid",
+    )
+
+    assert {chunk.id for chunk in results} == {
+        f"{vector_doc.id}:chunk:0",
+        f"{keyword_doc.id}:chunk:0",
+    }
+
+
+async def test_hybrid_search_deduplicates_and_boosts_dual_matches(monkeypatch, tmp_path):
+    _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=120, chunk_overlap=0)
+
+    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.intelligence.vector_store import SearchResult
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    vector_only_doc = await runtime.ingest_text(
+        filename="vector-only.md",
+        content="General semantic guide for service failures.",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+    dual_doc = await runtime.ingest_text(
+        filename="dual.md",
+        content="Service failure ERROR500 has exact recovery steps.",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+
+    async def vector_search(query: str, namespace: str, limit: int):
+        return [
+            SearchResult(id=f"{vector_only_doc.id}:chunk:0", score=0.99),
+            SearchResult(id=f"{dual_doc.id}:chunk:0", score=0.2),
+        ]
+
+    monkeypatch.setattr(runtime.vector_store, "search", vector_search)
+
+    results = await runtime.search(
+        "ERROR500",
+        tenant_id="tenant-a",
+        kb_ids=["global"],
+        limit=5,
+        mode="hybrid",
+    )
+
+    assert [chunk.id for chunk in results] == [
+        f"{dual_doc.id}:chunk:0",
+        f"{vector_only_doc.id}:chunk:0",
+    ]
+
+
+async def test_hybrid_search_degrades_when_one_side_is_empty(monkeypatch, tmp_path):
+    _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=120, chunk_overlap=0)
+
+    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.intelligence.vector_store import SearchResult
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    keyword_doc = await runtime.ingest_text(
+        filename="keyword-only.md",
+        content="Keyword-only code KWD123 appears in this chunk.",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+    vector_doc = await runtime.ingest_text(
+        filename="vector-only.md",
+        content="Semantic-only content is available through vector search.",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+
+    async def vector_empty(query: str, namespace: str, limit: int):
+        return []
+
+    monkeypatch.setattr(runtime.vector_store, "search", vector_empty)
+    keyword_results = await runtime.search(
+        "KWD123",
+        tenant_id="tenant-a",
+        kb_ids=["global"],
+        limit=5,
+        mode="hybrid",
+    )
+
+    async def vector_only(query: str, namespace: str, limit: int):
+        return [SearchResult(id=f"{vector_doc.id}:chunk:0", score=0.8)]
+
+    monkeypatch.setattr(runtime.vector_store, "search", vector_only)
+    vector_results = await runtime.search(
+        "no-keyword-hit",
+        tenant_id="tenant-a",
+        kb_ids=["global"],
+        limit=5,
+        mode="hybrid",
+    )
+
+    assert [chunk.id for chunk in keyword_results] == [f"{keyword_doc.id}:chunk:0"]
+    assert [chunk.id for chunk in vector_results] == [f"{vector_doc.id}:chunk:0"]
+
+
 async def test_delete_removes_document_chunks_and_vector_entries(monkeypatch, tmp_path):
     database = _patch_runtime_database(monkeypatch, tmp_path)
     _patch_runtime_settings(monkeypatch, chunk_size=5, chunk_overlap=1)
@@ -356,5 +619,38 @@ async def test_delete_removes_document_chunks_and_vector_entries(monkeypatch, tm
     ]
 
 
+async def test_delete_removes_keyword_index_entries(monkeypatch, tmp_path):
+    database = _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=40, chunk_overlap=0)
+
+    from fleetent.intelligence.knowledge_base import runtime
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    monkeypatch.setattr(runtime.vector_store, "delete", _noop_delete)
+    document = await runtime.ingest_text(
+        filename="delete-keyword.md",
+        content="Delete searchable ERR99 from keyword index.",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+
+    await runtime.delete(document.id)
+
+    rows = database.execute(
+        """
+        SELECT chunk_id
+        FROM knowledge_chunks_fts
+        WHERE knowledge_chunks_fts MATCH :query
+        """,
+        {"query": "ERR99"},
+    ).fetchall()
+
+    assert rows == []
+
+
 async def _noop_upsert(chunk_id: str, content: str, namespace: str) -> None:
+    return None
+
+
+async def _noop_delete(chunk_id: str, namespace: str) -> None:
     return None

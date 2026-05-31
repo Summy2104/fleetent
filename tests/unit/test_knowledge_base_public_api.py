@@ -1,3 +1,8 @@
+import inspect
+
+import pytest
+
+
 def test_knowledge_base_public_api_is_importable():
     from fleetent.intelligence.knowledge_base import (
         KnowledgeChunk,
@@ -44,3 +49,18 @@ def test_parse_text_returns_parsed_document_shape():
         ],
         metadata={"filename": "notes.txt", "format": "text"},
     )
+
+
+def test_search_accepts_search_mode_with_vector_default():
+    from fleetent.intelligence.knowledge_base import search
+
+    signature = inspect.signature(search)
+
+    assert signature.parameters["mode"].default == "vector"
+
+
+async def test_search_rejects_unsupported_mode_before_backend_access():
+    from fleetent.intelligence.knowledge_base import search
+
+    with pytest.raises(ValueError, match="unsupported knowledge search mode: graph"):
+        await search("query", mode="graph")

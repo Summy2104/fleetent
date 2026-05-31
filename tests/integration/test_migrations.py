@@ -36,6 +36,7 @@ def test_upgrade_creates_tables(tmp_path):
     assert "knowledge_bases" in tables
     assert "knowledge_documents" in tables
     assert "knowledge_chunks" in tables
+    assert "knowledge_chunks_fts" in tables
 
 
 def test_upgrade_creates_trace_indexes(tmp_path):
@@ -64,6 +65,24 @@ def test_upgrade_creates_memory_item_indexes(tmp_path):
         "idx_memory_items_user_type",
         "idx_memory_items_user_expires",
     }
+
+
+def test_upgrade_creates_knowledge_base_fts_index(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    fts_sql = conn.execute(
+        """
+        SELECT sql
+        FROM sqlite_master
+        WHERE name = 'knowledge_chunks_fts'
+        """,
+    ).fetchone()[0]
+    conn.close()
+
+    assert "CREATE VIRTUAL TABLE" in fts_sql
+    assert "fts5" in fts_sql.lower()
+    assert "chunk_id UNINDEXED" in fts_sql
 
 
 def test_downgrade_removes_tables(tmp_path):
