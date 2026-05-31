@@ -9,7 +9,9 @@ from typing import Any
 
 from openai.types import CompletionUsage
 
-_LOG_PATH = Path("data/traces.jsonl")
+# Single trace path constant for all three writers (log_run / log /
+# log_sandbox_exec). One injectable module-level path means tests monkeypatch
+# exactly one attribute to isolate every write (no leaked second alias).
 TRACE_PATH = Path("data/traces.jsonl")
 
 # Matches a base64 data URL so an image block can be summarized as
@@ -36,6 +38,7 @@ def log_run(
     """Append one run record to the JSONL trace file."""
     entry: dict[str, Any] = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "kind": "agent_run",
         "input": user_input,
         "reply": reply,
         "messages": [_serialize(m) for m in messages],
@@ -68,8 +71,8 @@ def log_run(
         entry["cache_tokens"] = cache_tokens
     if disabled_skills_trace:
         entry["disabled_skills_trace"] = disabled_skills_trace
-    _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with _LOG_PATH.open("a", encoding="utf-8") as f:
+    TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with TRACE_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
@@ -86,6 +89,7 @@ def log(
     """Append one IM-aware trace entry to the JSONL trace file."""
     entry: dict[str, Any] = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "kind": "im_message",
         "user_id": user_id,
         "messages": [_serialize(m) for m in messages],
         "reply": response,
@@ -100,6 +104,40 @@ def log(
         entry["thread_id"] = thread_id
     if message_id is not None:
         entry["message_id"] = message_id
+    TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with TRACE_PATH.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def log_sandbox_exec(
+    elapsed_s: float,
+    exit_code: int,
+    stdout_bytes: int,
+    stderr_bytes: int,
+    sandbox_scope: str | None = None,
+    agent_name: str | None = None,
+    user_id: str | None = None,
+) -> None:
+    """Append one sandbox-execution trace entry to the JSONL trace file.
+
+    Records only metadata (sizes, timing, exit code) — never the code source or
+    raw stdout/stderr content — consistent with the module's "no raw payloads"
+    principle and to avoid log bloat / sensitive data on disk.
+    """
+    entry: dict[str, Any] = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "kind": "sandbox_exec",
+        "elapsed_s": round(elapsed_s, 3),
+        "exit_code": exit_code,
+        "stdout_bytes": stdout_bytes,
+        "stderr_bytes": stderr_bytes,
+    }
+    if sandbox_scope is not None:
+        entry["sandbox_scope"] = sandbox_scope
+    if agent_name is not None:
+        entry["agent_name"] = agent_name
+    if user_id is not None:
+        entry["user_id"] = user_id
     TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with TRACE_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")

@@ -235,6 +235,88 @@ async def test_run_code_cancel_path_finally_does_not_double_raise(monkeypatch):
     assert "cancel" in result.lower()
 
 
+# ── run_code trace logging (SB9) ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_code_logs_sandbox_exec_metadata(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
+
+    client = _mock_lifecycle_client("cid-trace")
+    client.exec = AsyncMock(return_value=ExecResult(stdout="héllo\n", stderr="warn", exit_code=2))
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
+    spy = MagicMock()
+    monkeypatch.setattr(tl.eval_logger, "log_sandbox_exec", spy)
+
+    result = await tl.run_code(code="print('héllo')")
+
+    # Return text format is unchanged by trace logging.
+    assert "héllo" in result
+    spy.assert_called_once()
+    kwargs = spy.call_args.kwargs
+    assert kwargs["exit_code"] == 2
+    assert kwargs["stdout_bytes"] == len("héllo\n".encode())
+    assert kwargs["stderr_bytes"] == len(b"warn")
+    assert kwargs["elapsed_s"] >= 0.0
+    # SB2 scope value (session) is passed as the real scope string, not None.
+    assert kwargs["sandbox_scope"] == "session"
+
+
+@pytest.mark.asyncio
+async def test_run_code_does_not_log_trace_on_cancel(monkeypatch):
+    import asyncio
+    from unittest.mock import MagicMock
+
+    import fleetent.tools as tl
+    from fleetent.cancellation import CancelToken
+
+    async def never_returns(ws_id, command):
+        await asyncio.Event().wait()
+
+    client = _mock_lifecycle_client("cid-cancel-trace")
+    client.exec = never_returns
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
+    spy = MagicMock()
+    monkeypatch.setattr(tl.eval_logger, "log_sandbox_exec", spy)
+
+    token = CancelToken()
+    token.cancel()
+    result = await asyncio.wait_for(
+        tl.run_code(code="while True: pass", cancel_token=token), timeout=2.0
+    )
+
+    assert "cancel" in result.lower()
+    # No ExecResult on cancel → no meaningful exec metadata → no trace.
+    spy.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_code_trace_failure_does_not_block_result(monkeypatch, caplog):
+    import logging
+    from unittest.mock import AsyncMock, MagicMock
+
+    import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
+
+    client = _mock_lifecycle_client("cid-trace-fail")
+    client.exec = AsyncMock(return_value=ExecResult(stdout="42\n", stderr="", exit_code=0))
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
+    spy = MagicMock(side_effect=OSError("disk full"))
+    monkeypatch.setattr(tl.eval_logger, "log_sandbox_exec", spy)
+
+    with caplog.at_level(logging.WARNING):
+        result = await tl.run_code(code="print(6 * 7)")
+
+    # Trace write failed but the code execution result is returned unchanged.
+    assert result == "42"
+    assert any(
+        "trace" in r.message.lower() or "sandbox" in r.message.lower() for r in caplog.records
+    )
+
+
 # --- read_skill: model loads a skill's full SKILL.md on demand (openclaw model) ---
 
 

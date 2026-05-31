@@ -75,7 +75,7 @@ def test_trace_with_message_id(tmp_path, monkeypatch):
 def test_log_run_writes_entry(tmp_path, monkeypatch):
     import fleetent.eval_logger as el
 
-    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
     el.log_run(
         user_input="ping",
         reply="pong",
@@ -95,7 +95,7 @@ def test_log_run_with_usage(tmp_path, monkeypatch):
 
     import fleetent.eval_logger as el
 
-    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
     usage = MagicMock()
     usage.prompt_tokens = 10
     usage.completion_tokens = 5
@@ -131,7 +131,7 @@ def test_serialize_fallback_str():
 def test_log_run_model_used_written_to_trace(tmp_path, monkeypatch):
     import fleetent.eval_logger as el
 
-    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1, model_used="claude-haiku-4-5")
     entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
     assert entry["model_used"] == "claude-haiku-4-5"
@@ -140,7 +140,7 @@ def test_log_run_model_used_written_to_trace(tmp_path, monkeypatch):
 def test_log_run_model_used_omitted_when_not_provided(tmp_path, monkeypatch):
     import fleetent.eval_logger as el
 
-    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1)
     entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
     assert "model_used" not in entry
@@ -152,7 +152,7 @@ def test_log_run_model_used_omitted_when_not_provided(tmp_path, monkeypatch):
 def test_log_run_error_category_written_to_trace(tmp_path, monkeypatch):
     import fleetent.eval_logger as el
 
-    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1, error_category="rate_limit")
     entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
     assert entry["error_category"] == "rate_limit"
@@ -161,7 +161,7 @@ def test_log_run_error_category_written_to_trace(tmp_path, monkeypatch):
 def test_log_run_error_category_omitted_when_not_provided(tmp_path, monkeypatch):
     import fleetent.eval_logger as el
 
-    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1)
     entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
     assert "error_category" not in entry
@@ -173,7 +173,7 @@ def test_log_run_error_category_omitted_when_not_provided(tmp_path, monkeypatch)
 def test_log_run_user_id_written(tmp_path, monkeypatch):
     import fleetent.eval_logger as el
 
-    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1, user_id="user-42")
     entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
     assert entry["user_id"] == "user-42"
@@ -182,7 +182,7 @@ def test_log_run_user_id_written(tmp_path, monkeypatch):
 def test_log_run_user_id_omitted_when_not_provided(tmp_path, monkeypatch):
     import fleetent.eval_logger as el
 
-    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1)
     entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
     assert "user_id" not in entry
@@ -194,7 +194,7 @@ def test_log_run_user_id_omitted_when_not_provided(tmp_path, monkeypatch):
 def test_log_run_agent_name_written(tmp_path, monkeypatch):
     import fleetent.eval_logger as el
 
-    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1, agent_name="support-bot")
     entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
     assert entry["agent_name"] == "support-bot"
@@ -203,7 +203,7 @@ def test_log_run_agent_name_written(tmp_path, monkeypatch):
 def test_log_run_agent_name_omitted_when_not_provided(tmp_path, monkeypatch):
     import fleetent.eval_logger as el
 
-    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1)
     entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
     assert "agent_name" not in entry
@@ -215,7 +215,7 @@ def test_log_run_agent_name_omitted_when_not_provided(tmp_path, monkeypatch):
 def test_log_run_hygiene_repairs_written(tmp_path, monkeypatch):
     import fleetent.eval_logger as el
 
-    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1, hygiene_repairs={"merged_same_role": 2})
     entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
     assert entry["hygiene_repairs"] == {"merged_same_role": 2}
@@ -224,10 +224,150 @@ def test_log_run_hygiene_repairs_written(tmp_path, monkeypatch):
 def test_log_run_hygiene_repairs_omitted_when_not_provided(tmp_path, monkeypatch):
     import fleetent.eval_logger as el
 
-    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
     el.log_run("hi", "hello", [], 0.1)
     entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
     assert "hygiene_repairs" not in entry
+
+
+# --- D6: merged trace path constant (single isolation point) ---
+
+
+def test_log_run_and_log_share_single_trace_constant(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    # The merged constant must be the only path both writers use, so monkeypatching
+    # it once isolates every write. A second alias constant would reintroduce the
+    # "isolated one, leaked the other" gap D6 closes.
+    assert not hasattr(el, "_LOG_PATH")
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    el.log_run("ping", "pong", [], 0.1)
+    el.log(user_id="u1", messages=[{"role": "user", "content": "hi"}], response="ok")
+
+    lines = (tmp_path / "traces.jsonl").read_text().strip().splitlines()
+    assert len(lines) == 2
+
+
+# --- D5: unified taxonomy (kind) ---
+
+
+def test_log_run_includes_kind_agent_run(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    el.log_run("hi", "hello", [], 0.1)
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert entry["kind"] == "agent_run"
+
+
+def test_log_run_kind_is_pure_addition(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    el.log_run("ping", "pong", [{"role": "user", "content": "ping"}], 0.5, user_id="u-1")
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    # Existing fields keep their values/structure; only `kind` is added.
+    assert entry["input"] == "ping"
+    assert entry["reply"] == "pong"
+    assert entry["elapsed_s"] == 0.5
+    assert entry["tokens"] is None
+    assert entry["user_id"] == "u-1"
+    assert "ts" in entry
+    assert set(entry) == {
+        "ts",
+        "input",
+        "reply",
+        "messages",
+        "elapsed_s",
+        "tokens",
+        "user_id",
+        "kind",
+    }
+
+
+def test_log_includes_kind_im_message(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    el.log(user_id="u1", messages=[{"role": "user", "content": "hi"}], response="ok")
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert entry["kind"] == "im_message"
+
+
+def test_log_kind_is_pure_addition(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    el.log(
+        user_id="u1", messages=[{"role": "user", "content": "hi"}], response="ok", platform="slack"
+    )
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert entry["user_id"] == "u1"
+    assert entry["reply"] == "ok"
+    assert entry["platform"] == "slack"
+    assert "ts" in entry
+    assert set(entry) == {"ts", "user_id", "messages", "reply", "platform", "kind"}
+
+
+# --- D1/D2: log_sandbox_exec ---
+
+
+def test_log_sandbox_exec_writes_required_fields(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    el.log_sandbox_exec(elapsed_s=1.23456, exit_code=0, stdout_bytes=42, stderr_bytes=7)
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert entry["kind"] == "sandbox_exec"
+    assert entry["elapsed_s"] == 1.235
+    assert entry["exit_code"] == 0
+    assert entry["stdout_bytes"] == 42
+    assert entry["stderr_bytes"] == 7
+    assert "ts" in entry
+
+
+def test_log_sandbox_exec_optional_fields_omitted_when_none(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    el.log_sandbox_exec(elapsed_s=0.5, exit_code=0, stdout_bytes=1, stderr_bytes=0)
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert "sandbox_scope" not in entry
+    assert "agent_name" not in entry
+    assert "user_id" not in entry
+
+
+def test_log_sandbox_exec_optional_fields_written_when_present(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    el.log_sandbox_exec(
+        elapsed_s=0.5,
+        exit_code=1,
+        stdout_bytes=10,
+        stderr_bytes=20,
+        sandbox_scope="session",
+        agent_name="support-bot",
+        user_id="u-7",
+    )
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert entry["sandbox_scope"] == "session"
+    assert entry["agent_name"] == "support-bot"
+    assert entry["user_id"] == "u-7"
+
+
+def test_log_sandbox_exec_records_only_metadata_not_content(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    el.log_sandbox_exec(elapsed_s=0.5, exit_code=0, stdout_bytes=999, stderr_bytes=5)
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    # Only size metadata — never raw code, stdout, or stderr text.
+    assert "stdout" not in entry
+    assert "stderr" not in entry
+    assert "code" not in entry
+    assert set(entry) == {"ts", "kind", "elapsed_s", "exit_code", "stdout_bytes", "stderr_bytes"}
 
 
 def test_serialize_image_block_replaced_with_placeholder():

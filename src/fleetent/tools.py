@@ -2,15 +2,19 @@
 
 import asyncio
 import datetime
+import logging
+import time
 import uuid
 from pathlib import Path
 
-from fleetent import image_gen_client, vision_client
+from fleetent import eval_logger, image_gen_client, vision_client
 from fleetent.cancellation import CancelToken
 from fleetent.sandbox_client import ExecResult, SandboxClient
 from fleetent.sandbox_manager import SandboxManager
 from fleetent.sandbox_secrets import build_sandbox_env
 from fleetent.tool_registry import ToolContext, tool
+
+logger = logging.getLogger(__name__)
 
 # How often the cancel watcher polls the token while exec runs (seconds). Small
 # enough that cancellation is observed promptly, large enough to stay cheap.
@@ -197,10 +201,29 @@ async def run_code(
     # is owned by release_session / sweep_idle. AR19's cancel path still hard-aborts
     # by destroying the container; we then drop the registry entry so a later acquire
     # rebuilds (find_workspace miss) rather than handing back a destroyed container.
+    # SB9 D4: time only the exec (not container acquisition); container-lifecycle
+    # timing is SB2's concern. exit_code / byte sizes come from the ExecResult.
+    start = time.monotonic()
     result = await _exec_or_cancel(manager.client, ws_id, command, token)
+    elapsed = time.monotonic() - start
     if result is None:
         manager.forget(manager.container_name(scope, session_id, agent_name or "default"))
+        # Cancelled exec yields no ExecResult, hence no exit code or output sizes
+        # to record — skip the trace rather than log placeholder metadata.
         return "code execution cancelled"
+    # SB9 D3: trace is side-channel observability; a write failure MUST NOT block
+    # the user from receiving the execution result. Catch + warn, never re-raise.
+    try:
+        eval_logger.log_sandbox_exec(
+            elapsed_s=elapsed,
+            exit_code=result.exit_code,
+            stdout_bytes=len(result.stdout.encode("utf-8")),
+            stderr_bytes=len(result.stderr.encode("utf-8")),
+            sandbox_scope=scope.value,
+            agent_name=agent_name,
+        )
+    except Exception:
+        logger.warning("sandbox_exec trace write failed", exc_info=True)
     parts = []
     if result.stdout:
         parts.append(result.stdout.rstrip())

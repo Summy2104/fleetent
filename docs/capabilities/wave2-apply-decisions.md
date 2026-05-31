@@ -756,3 +756,34 @@ run_code 调用链：`run_code` 读 `tool_context.features`（无 context 时 `{
 
 1. **审计写 trace 待 SB9**：当前仅 `logger.info` 计数+名单，未写 traces 表；SB9 落地后是否将清理记录纳入 trace（design D4 已记「与 SB9 协调」）。
 2. **admin CLI 子命令**：design Open Question 提到 `fleetent-admin sandbox-cleanup` 按需入口，本 change 仅提供函数入口未加 CLI 子命令——是否需作为 SB8 收尾补一个 admin 子命令。
+
+## sandbox-trace-logging — feat/sandbox-trace-logging
+
+SB9（sandbox 轨末环）：`run_code` 执行结果写入 trace。
+
+**前置核实结论（tasks 1.x）：**
+- 1.1 `eval_logger` 的 `_LOG_PATH`（行 12，log_run 用）与 `TRACE_PATH`（行 13，log 用）取值完全相同（`Path("data/traces.jsonl")`），既有 append 写法一致（`parent.mkdir(parents=True, exist_ok=True)` + `json.dumps(..., ensure_ascii=False) + "\n"`），可选字段为 `if x is not None: entry[...]=x` 模式——可安全合并为单一常量并复用写法。
+- 1.2 `log_run`/`log` 既有记录**均无 `kind` 字段**；`traces.jsonl` 全仓**只写不读**（无任何消费者）——追加 `kind` 为纯增量、零回归。
+- 1.3 `run_code` 经 `_exec_or_cancel` 返回 `ExecResult`（含 `stdout`/`stderr`/`exit_code`），耗时用 `time.monotonic()` 包 exec、字节大小用 `len(s.encode("utf-8"))`，均在现路径廉价算出，**无需改 `SandboxClient`**。
+- 1.4 `sandbox_scope` 来源：SB2 已合，`manager.scope` 是 `Scope` 枚举（非 None），取其 `.value`（`"session"`/`"agent"`）传入——传真实 scope 值，不传 None。
+
+**实现：**
+- `eval_logger.py`：①合并路径常量（见下）；②`log_run` entry 追加 `kind: "agent_run"`、`log` entry 追加 `kind: "im_message"`（紧跟 `ts` 之后，既有字段一个不动）；③新增 `log_sandbox_exec(elapsed_s, exit_code, stdout_bytes, stderr_bytes, sandbox_scope=None, agent_name=None, user_id=None)`，append `{"ts", "kind":"sandbox_exec", "elapsed_s":round(.,3), "exit_code", "stdout_bytes", "stderr_bytes"}`，可选三字段非 None 才写（同 log_run 模式），复用统一常量 mkdir+append 写法。
+- `tools.py`：`run_code` 顶部 `import time`/`import logging`、`from fleetent import eval_logger`、模块级 `logger`；`start=time.monotonic()` 包住 `_exec_or_cancel`、`elapsed=monotonic()-start`（仅测 exec，不含 acquire）；exec 后调 `log_sandbox_exec`（`stdout_bytes/stderr_bytes` 用 `len(.encode("utf-8"))`、`sandbox_scope=scope.value`、`agent_name=agent_name`），包 try/except，失败 `logger.warning(..., exc_info=True)` 不 re-raise。
+
+**自解冲突 / 决策：**
+- **常量合并如何保向后兼容**：D6 要单一隔离点，但既有测试两处分别 monkeypatch `_LOG_PATH`（11 处）与 `TRACE_PATH`（3 处）。若保留 `_LOG_PATH = TRACE_PATH` 别名，仍是两个模块属性 → monkeypatch 其一不影响另一，隔离漏洞照旧、违背 D6 本意。故**取消 `_LOG_PATH`，保留 `TRACE_PATH` 为唯一常量**，`log_run`/`log`/`log_sandbox_exec` 三处统一引用它；同步把 `test_eval_logger.py` 11 处 `_LOG_PATH` monkeypatch 更新为 `TRACE_PATH`（指令明确允许「更新引用确保单一隔离点」）。新增断言 `not hasattr(el, "_LOG_PATH")` 守卫第二常量不再复活。
+- **取消路径是否写 trace**：**不写**。取消时 `_exec_or_cancel` 返回 None，没有 `ExecResult`，无真实 `exit_code`/输出字节；`elapsed` 此时是「取消检测延迟」而非执行时长。写占位 metadata 会污染 `sandbox_exec` 的语义（其字段应恒为真实 exec 结果），故取消路径直接 return，不写 trace。加测试 `test_run_code_does_not_log_trace_on_cancel` 断言取消时 `log_sandbox_exec` 不被调用。
+- **sandbox_scope 取 manager.scope 真实值**：SB2 已合，`manager.scope` 为 `Scope` 枚举（非 None），传 `scope.value`（字符串 `"session"`/`"agent"`），非 design 早期假设的 None。测试断言 `sandbox_scope == "session"`。
+- **user_id 不传**：`log_sandbox_exec` 形参含可选 `user_id`，但 `ToolContext`（SB3 所有）当前**无 `user_id` 字段**，run_code 执行上下文拿不到。给 ToolContext 加字段属改 SB3、超出本 change 范围（「不改 SB3」），故 run_code 调用**省略 user_id**（可选字段省略即不写入）；保留 `log_sandbox_exec` 的 user_id 形参供未来接通。
+
+**验证：**
+- pytest：1137 → **1149 passed**（+12 新增：eval_logger 9、tools 3；无回归）。
+- ruff（自有文件 `eval_logger.py` + `test_eval_logger.py` + `test_tools.py`）：format + check 全绿。`tools.py` 残留 2 个 I001/F401（`schedule_task` 内 `cron_scheduler` 未用导入）经 `git stash` 验证为**基线既有**，非本 change 引入，未触碰。
+- mypy `src`：74 → **74**（无新增错误模式）。
+
+### 需 zy 核实
+
+1. **取消路径不写 trace**：本 change 决定取消时不记 trace（无真实 exec metadata）。若运营需统计取消频率，未来可考虑用一个独立 `kind`（如 `sandbox_cancelled`）记录——本 change 不做，待确认是否需要。
+2. **user_id 维度缺失**：因 ToolContext 无 user_id，sandbox_exec trace 暂无 user_id 维度（仅 agent_name + scope）。若需按用户统计 run_code，需在 SB3 给 ToolContext 加 user_id 并接通——属跨 change，未做。
+3. **elapsed 仅测 exec**：依 design D4/Open Question 取「仅 exec 时长」，容器获取时长归 SB2，未含在内。
