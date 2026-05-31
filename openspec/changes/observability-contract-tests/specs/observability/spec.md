@@ -3,6 +3,11 @@
 ### Requirement: Observability contract test coverage
 系统 SHALL 通过自动化 contract tests 验证 agent run 的核心 observability 事件链路。
 
+#### Scenario: Contract tests live in integration layer
+- **WHEN** 新增 observability contract tests
+- **THEN** 测试文件位于 `tests/integration/`
+- **AND** 不向平铺 `tests/` 根目录新增 contract test
+
 #### Scenario: Non-streaming run trace contract is tested
 - **WHEN** `agent_loop.run()` 完成且注入了 long-term context sources
 - **THEN** 测试覆盖 `injected_context` 与 `agent_run_completed` 两类事件

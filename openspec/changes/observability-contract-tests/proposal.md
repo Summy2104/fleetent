@@ -11,6 +11,7 @@ payload 是否脱敏/截断、query 与 usage 聚合是否稳定。
 ## What Changes
 
 - 新增 `tests/integration/` 下的 observability contract tests，覆盖一次 agent run 的关键 trace contract。
+- 依赖 `test-suite-organization` 先完成测试目录分层；本 change 不再向平铺 `tests/` 新增测试文件。
 - 验证 non-streaming run：
   - 有 long-term context sources 时写入 `injected_context`
   - 完成时写入 `agent_run_completed`
@@ -30,7 +31,7 @@ payload 是否脱敏/截断、query 与 usage 聚合是否稳定。
 ## Impact
 
 - **代码**：不修改运行时代码，除非测试暴露现有 contract bug。
-- **测试**：新增或重组 observability contract tests。
+- **测试**：新增 `tests/integration/` 下的 observability contract tests。
 - **数据**：无 schema 变更。
 - **不包含**：
   - 不新增 trace event type。
