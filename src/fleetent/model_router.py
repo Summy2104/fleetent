@@ -6,8 +6,10 @@ maintains no state, and knows nothing about agents, tools, or memory.
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+import yaml
 from openai import AsyncOpenAI, OpenAI
 
 # Reserved create() kwargs that params MUST NOT carry: they are passed as
@@ -75,7 +77,10 @@ def _apply_override(cfg: RouteConfig, override: RouteOverride | None) -> RouteCo
     )
 
 
-ROUTES: dict[str, RouteConfig] = {
+# Built-in fallback route table. Used as-is when no routes file exists (open
+# out of the box), and as the merge base when a file is present (file keys
+# override same-named built-ins; uncovered built-in keys are preserved).
+DEFAULT_ROUTES: dict[str, RouteConfig] = {
     "default": RouteConfig(
         base_url="https://api.anthropic.com/v1/",
         model="claude-sonnet-4-5",
@@ -101,6 +106,83 @@ ROUTES: dict[str, RouteConfig] = {
     # keep working unchanged.
 }
 
+# Deployment-level routes file. Injectable module-level constant (no global
+# mutable state): tests monkeypatch this to an isolated tmp path. Missing file
+# is a normal state (built-in defaults are used); no hot reload.
+ROUTES_PATH: Path = Path("config/routes.yaml")
+
+# In-memory effective table; the merge base for _load_routes(). Tests that
+# mutate routing (monkeypatch.setitem) operate on this.
+ROUTES: dict[str, RouteConfig] = dict(DEFAULT_ROUTES)
+
+# Allowed YAML keys per route. api_key is intentionally absent: keys are never
+# inlined, only referenced by env var name (api_key_env).
+_ALLOWED_ROUTE_KEYS = frozenset(
+    {"base_url", "model", "api_key_env", "max_tokens", "fallbacks", "params"}
+)
+
+
+def _build_route(name: str, raw: Any) -> RouteConfig:
+    """Construct a RouteConfig from one YAML route entry, failing loud on misuse."""
+    if not isinstance(raw, dict):
+        raise ValueError(f"route '{name}' in {ROUTES_PATH}: expected a mapping, got {type(raw)}")
+    extra = set(raw) - _ALLOWED_ROUTE_KEYS
+    if extra:
+        raise ValueError(
+            f"route '{name}' in {ROUTES_PATH}: unknown field(s) {sorted(extra)}; "
+            "keys are referenced via api_key_env, never inlined"
+        )
+    for required in ("base_url", "model", "api_key_env", "max_tokens"):
+        if required not in raw:
+            raise ValueError(
+                f"route '{name}' in {ROUTES_PATH}: missing required field '{required}'"
+            )
+    if not isinstance(raw["base_url"], str):
+        raise ValueError(f"route '{name}' in {ROUTES_PATH}: 'base_url' must be a string")
+    if not isinstance(raw["model"], str):
+        raise ValueError(f"route '{name}' in {ROUTES_PATH}: 'model' must be a string")
+    if not isinstance(raw["api_key_env"], str):
+        raise ValueError(f"route '{name}' in {ROUTES_PATH}: 'api_key_env' must be a string")
+    if not isinstance(raw["max_tokens"], int) or isinstance(raw["max_tokens"], bool):
+        raise ValueError(f"route '{name}' in {ROUTES_PATH}: 'max_tokens' must be an int")
+    fallbacks_raw = raw.get("fallbacks", [])
+    if not isinstance(fallbacks_raw, list) or not all(isinstance(f, str) for f in fallbacks_raw):
+        raise ValueError(f"route '{name}' in {ROUTES_PATH}: 'fallbacks' must be a list of strings")
+    params = raw.get("params", {})
+    if not isinstance(params, dict):
+        raise ValueError(f"route '{name}' in {ROUTES_PATH}: 'params' must be a mapping")
+    return RouteConfig(
+        base_url=raw["base_url"],
+        model=raw["model"],
+        api_key_env=raw["api_key_env"],
+        max_tokens=raw["max_tokens"],
+        fallbacks=tuple(fallbacks_raw),
+        params=dict(params),
+    )
+
+
+def _load_routes() -> dict[str, RouteConfig]:
+    """Resolve the effective route table: built-in defaults merged with the file.
+
+    Missing file is normal (returns the in-memory defaults unchanged). A present
+    but corrupt / malformed file fails loud rather than silently masking misconfig.
+    No hot reload: the file is read on each call, not watched.
+    """
+    base = dict(ROUTES)
+    if not ROUTES_PATH.exists():
+        return base
+    try:
+        raw = yaml.safe_load(ROUTES_PATH.read_text())
+    except yaml.YAMLError as exc:
+        raise ValueError(f"failed to parse routes file {ROUTES_PATH}: {exc}") from exc
+    if raw is None:
+        return base
+    if not isinstance(raw, dict):
+        raise ValueError(f"routes file {ROUTES_PATH}: top level must be a mapping, got {type(raw)}")
+    for name, entry in raw.items():
+        base[str(name)] = _build_route(str(name), entry)
+    return base
+
 
 def get_client_and_config(
     task_type: str = "default", override: RouteOverride | None = None
@@ -110,7 +192,8 @@ def get_client_and_config(
     An optional `override` is field-merged onto the task_type route result
     before the client is built (see `_apply_override`).
     """
-    cfg = _apply_override(ROUTES.get(task_type, ROUTES["default"]), override)
+    routes = _load_routes()
+    cfg = _apply_override(routes.get(task_type, routes["default"]), override)
     api_key = os.environ.get(cfg.api_key_env)
     if not api_key:
         raise RuntimeError(f"Missing env var {cfg.api_key_env} for route '{task_type}'")
@@ -126,6 +209,7 @@ def get_async_client_and_config(
     An optional `override` is field-merged onto the task_type route result
     before the client is built (see `_apply_override`).
     """
-    cfg = _apply_override(ROUTES.get(task_type, ROUTES["default"]), override)
+    routes = _load_routes()
+    cfg = _apply_override(routes.get(task_type, routes["default"]), override)
     api_key = os.environ.get(cfg.api_key_env, "")
     return AsyncOpenAI(base_url=cfg.base_url, api_key=api_key), cfg

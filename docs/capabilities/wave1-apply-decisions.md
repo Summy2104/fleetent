@@ -116,3 +116,16 @@
 
 **影响:** 576 passed;mypy 67=基线(MR3 的 provider_health 贡献 1),无新增模式。解锁 model-routes-externalize。
 **需 zy 核实:** 保留键运行时剔除(而非报错)的策略。
+
+## model-routes-externalize — feat/model-routes-externalize
+
+**实现:** 现硬编码 ROUTES 提为内置 `DEFAULT_ROUTES`(含 default/memory_extraction/**vision**);`ROUTES_PATH`(默认 config/routes.yaml,可 monkeypatch);`_load_routes()` 用 yaml.safe_load 读盘、`_build_route()` 校验字段(必填 base_url/model/api_key_env/max_tokens、类型校验、拒绝内联 api_key)并覆盖/合并内置默认;get_(async_)client_and_config 改用 _load_routes() 取表,对外签名/回落/缺 key 语义不变。密钥仍走 env(YAML 只写 api_key_env)。
+
+**文件缺失/损坏:** 缺失/空 → 用内置默认(开箱即用,不报错);YAML 解析失败/顶层非 mapping/缺必填/类型非法/内联 api_key → `raise ValueError`(fail loud,含路径+route 名),不静默回落。
+
+**加载时机:** **每次调用 `get_*` 都 `_load_routes()` 读盘**——为让测试 monkeypatch ROUTES_PATH 在调用前生效。
+
+**自解冲突:** 既有测试用 `monkeypatch.setitem(ROUTES,...)` → 保留 ROUTES 为 in-memory 有效表作 _load_routes() 合并基,无文件时返回 dict(ROUTES),setitem 仍被尊重,既满足"来源改 _load_routes()"又零回归。
+
+**影响:** 596 passed;mypy model_router 0 错。
+**⚠️ 需 zy 核实/后续优化:** **每次 LLM 调用都读盘 YAML**(为可测试性选每次加载)——生产高频下建议加可注入缓存(design Risk 已记为后续优化点)。fail-loud vs 缺失回落的边界是否认可。
