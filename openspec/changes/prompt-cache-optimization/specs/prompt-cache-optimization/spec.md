@@ -2,15 +2,17 @@
 
 ### Requirement: 稳定可缓存提示前缀
 
-提示组装 SHALL 将稳定的基础 system prompt 置于消息序列最前作为可缓存前缀，将每请求/每轮可变的内容（记忆注入、命中的 skill）置于其后。可变内容的变化 MUST NOT 改变基础 system 前缀，使自动前缀缓存得以在跨请求间命中。提示中包含的内容集合（基础 system、记忆、skill）MUST 保持功能等价，仅调整其在序列中的位置。
+提示组装 SHALL 将稳定的基础 system prompt 置于消息序列最前作为可缓存前缀，将每请求/每轮可变的内容（记忆注入）置于其后。可变内容的变化 MUST NOT 改变基础 system 前缀，使自动前缀缓存得以在跨请求间命中。
+
+> 注:可用 Skill 清单(`<available_skills>`)亦属稳定前缀的一部分,与基础 system 同处可缓存前缀(它仅随 Skill 集变化、对逐条请求稳定)——见 `skill-read-on-demand`。本 requirement 聚焦「基础 system + 稳定内容在前、逐请求可变的记忆在后」。
 
 #### Scenario: 基础 system 前缀稳定于可变内容之前
-- **WHEN** 两次请求的记忆注入或命中 skill 不同、但基础 system 相同
-- **THEN** 两次组装出的消息序列的基础 system 前缀部分逐字相同，差异仅出现在其后的可变内容
+- **WHEN** 两次请求的记忆注入不同、但基础 system 与 Skill 集相同
+- **THEN** 两次组装出的消息序列的稳定前缀部分逐字相同，差异仅出现在其后的可变记忆内容
 
-#### Scenario: 记忆与 skill 仍生效（功能等价）
-- **WHEN** 某请求有记忆上下文且命中某 skill
-- **THEN** 记忆内容与该 skill 内容仍包含在发给 LLM 的提示中（位于基础 system 之后），其对模型的影响与重排前等价
+#### Scenario: 记忆仍生效（功能等价）
+- **WHEN** 某请求有记忆上下文
+- **THEN** 记忆内容仍包含在发给 LLM 的提示中（位于稳定前缀之后），其对模型的影响与重排前等价
 
 ### Requirement: 缓存命中指标写入 trace
 

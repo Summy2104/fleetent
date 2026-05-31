@@ -51,3 +51,17 @@ TTL 时长 SHALL 来自 `Settings.session_ttl_days`（env 可配，默认 30 天
 #### Scenario: 清理操作写入系统日志
 - **WHEN** 清理函数执行并删除了过期 session
 - **THEN** 系统日志记录被清理的 session 及清理汇总信息
+
+### Requirement: 内置维护触发(无需外部调度)
+
+session 维护 SHALL 由系统本身的 session 写入操作(`save()`)机会式触发,而非依赖外部定时器/cron。触发 MUST 时间门控:在配置的间隔(`Settings.session_cleanup_interval_seconds`)内最多执行一次完整维护扫描,以使常态写入路径廉价。触发 MUST 故障隔离:维护过程中的任何异常 MUST NOT 破坏已完成的 session 持久化。一次维护 MUST 先执行 TTL 过期清理、再执行容量管理(见 `session-disk-management`)。
+
+> 注:review 决定(2026-05-31)由内置触发取代原"触发器留后续接 cron"——清理/容量作为 session 活动的副作用发生,不引入外部调度依赖。
+
+#### Scenario: 写入时机会式触发、间隔内至多一次
+- **WHEN** 在配置间隔内连续多次 `save()`
+- **THEN** 完整维护扫描在该间隔内至多执行一次,其余 `save()` 跳过维护扫描
+
+#### Scenario: 维护失败不破坏持久化
+- **WHEN** `save()` 触发的维护过程抛出异常
+- **THEN** 该异常被记录并吞掉,刚写入的 session 文件保持完好
