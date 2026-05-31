@@ -248,6 +248,51 @@ def _matched_skill_content(
     return load_skill(matched)
 
 
+def _assemble_prompt(
+    base_system: str,
+    memory_ctx: str,
+    skill_content: str | None,
+    user_msg: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Order messages stable→variable so the auto prefix cache can hit (D2).
+
+    The base system prompt is the first, byte-stable message (the cacheable
+    prefix). Per-request/per-turn variable content (memory injection, matched
+    skill) is carried in a *separate* second system message after it, so changing
+    memory/skill never rewrites the base prefix. When there is no variable
+    content the second message is omitted (prefix stays maximal). The set of
+    content delivered to the model is unchanged — only its position moves.
+    """
+    messages: list[dict[str, Any]] = [{"role": "system", "content": base_system}]
+    variable_parts = [p for p in (memory_ctx, skill_content) if p]
+    if variable_parts:
+        messages.append({"role": "system", "content": "\n\n".join(variable_parts)})
+    messages.append(user_msg)
+    return messages
+
+
+def _extract_cache_tokens(usage: Any) -> dict[str, int] | None:
+    """Best-effort pull of prompt-cache metrics off a usage object (D3).
+
+    Reads Anthropic-style top-level fields (`cache_read_input_tokens`,
+    `cache_creation_input_tokens`) and the OpenAI-style nested
+    `prompt_tokens_details.cached_tokens`. Backends that report none of these
+    yield None so the trace simply omits the field — never an error.
+    """
+    if usage is None:
+        return None
+    found: dict[str, int] = {}
+    for field in ("cache_read_input_tokens", "cache_creation_input_tokens"):
+        value = getattr(usage, field, None)
+        if isinstance(value, int):
+            found[field] = value
+    details = getattr(usage, "prompt_tokens_details", None)
+    cached = getattr(details, "cached_tokens", None) if details is not None else None
+    if isinstance(cached, int):
+        found["cached_tokens"] = cached
+    return found or None
+
+
 ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
 
 
@@ -425,6 +470,7 @@ async def run(
         agent_name=agent_name,
         stop_reason=stop_reason,
         hygiene_repairs=hygiene_repairs or None,
+        cache_tokens=_extract_cache_tokens(usage),
     )
     extract_and_save(user_input, messages, user_id=user_id)
     return reply
@@ -447,16 +493,11 @@ def run_sync(
 
     scan_skills()
     memory_ctx = load_memories(user_id=user_id)
-    full_system = f"{memory_ctx}\n\n{system_prompt}" if memory_ctx else system_prompt
-
     skill_content = _matched_skill_content(user_input, allowed_skills, blocked_skills)
-    if skill_content:
-        full_system = f"{full_system}\n\n{skill_content}"
 
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": full_system},
-        {"role": "user", "content": user_input},
-    ]
+    messages = _assemble_prompt(
+        system_prompt, memory_ctx, skill_content, {"role": "user", "content": user_input}
+    )
 
     return asyncio.run(run(messages, user_id=user_id, system_prompt=system_prompt))
 
@@ -487,20 +528,13 @@ async def run_stream(
     performed on the streaming path, so approval_rejected does not apply here.
     """
     memory_ctx = load_memories(user_id=user_id)
-    full_system = f"{memory_ctx}\n\n{system_prompt}" if memory_ctx else system_prompt
-
     skill_content = _matched_skill_content(user_input, allowed_skills, blocked_skills)
-    if skill_content:
-        full_system = f"{full_system}\n\n{skill_content}"
 
     if images:
         user_msg = build_message_with_images(user_input, images)
     else:
         user_msg = {"role": "user", "content": user_input}
-    messages: list[Any] = [
-        {"role": "system", "content": full_system},
-        user_msg,
-    ]
+    messages: list[Any] = _assemble_prompt(system_prompt, memory_ctx, skill_content, user_msg)
 
     # Route to vision when images are present; raises before any LLM call if
     # images are present but no vision route is configured (D6, option A).
@@ -518,6 +552,7 @@ async def run_stream(
     model_used = cfg.model
     total_prompt_tokens = 0
     total_completion_tokens = 0
+    cache_tokens: dict[str, int] | None = None
 
     controller = _build_controller(max_turns, max_consecutive_failures, include_approval=False)
     state = LoopState()
@@ -566,6 +601,9 @@ async def run_stream(
             if chunk.usage:
                 total_prompt_tokens += chunk.usage.prompt_tokens
                 total_completion_tokens += chunk.usage.completion_tokens
+                chunk_cache = _extract_cache_tokens(chunk.usage)
+                if chunk_cache is not None:
+                    cache_tokens = chunk_cache
             if not chunk.choices:
                 continue
             choice = chunk.choices[0]
@@ -638,5 +676,6 @@ async def run_stream(
         agent_name=agent_name,
         stop_reason=stop_reason,
         hygiene_repairs=hygiene_repairs or None,
+        cache_tokens=cache_tokens,
     )
     extract_and_save(user_input, messages, user_id=user_id)

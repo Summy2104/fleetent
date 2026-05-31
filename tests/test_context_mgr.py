@@ -288,3 +288,29 @@ def test_default_config_returns_dual_threshold_keys(monkeypatch):
     assert "compress_threshold" not in cfg
     assert cfg["max_tokens"] == 200_000
     assert cfg["keep_recent"] == 10
+
+
+def test_compress_preserves_base_system_cacheable_prefix(monkeypatch):
+    # prompt-cache coordination: base system (messages[0], the cacheable prefix)
+    # must survive compression byte-for-byte; only the conversation tail is
+    # summarized. The variable memory/skill system message is also kept at head.
+    import fleetent.context_mgr as cm
+
+    monkeypatch.setattr(cm, "_summarize", lambda msgs: "Summary.")
+    base = "You are a helpful assistant with access to tools. Use them when needed."
+    variable = "memory + matched skill"
+    big_msgs = [
+        {"role": "system", "content": base},
+        {"role": "system", "content": variable},
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 2000}
+            for i in range(50)
+        ],
+    ]
+    config = {"max_tokens": 10_000, "tmax_ratio": 0.5, "tretained_ratio": 0.3, "keep_recent": 4}
+    result = maybe_compress(big_msgs, config=config)
+
+    assert result is not big_msgs
+    assert result[0]["role"] == "system"
+    assert result[0]["content"] == base  # cacheable prefix unchanged
+    assert any(m["content"] == variable for m in result if m.get("role") == "system")

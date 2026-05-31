@@ -29,6 +29,7 @@ def log_run(
     stop_reason: str | None = None,
     error_category: str | None = None,
     hygiene_repairs: dict[str, int] | None = None,
+    cache_tokens: dict[str, int] | None = None,
 ) -> None:
     """Append one run record to the JSONL trace file."""
     entry: dict[str, Any] = {
@@ -59,6 +60,8 @@ def log_run(
         entry["error_category"] = error_category
     if hygiene_repairs is not None:
         entry["hygiene_repairs"] = hygiene_repairs
+    if cache_tokens is not None:
+        entry["cache_tokens"] = cache_tokens
     _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _LOG_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")

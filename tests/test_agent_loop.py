@@ -1337,3 +1337,228 @@ async def test_stream_empty_params_byte_identical(monkeypatch):
         "stream",
         "stream_options",
     }
+
+
+# ── prompt-cache-optimization: stable cacheable prefix ───────────────────────
+
+
+def _capture_stream_wire(monkeypatch, *, memory: str, skill: str | None) -> dict:
+    """Wire run_stream with a given memory ctx + matched skill, capturing messages."""
+    client = AsyncMock()
+    cfg = MagicMock()
+    cfg.model = "test-model"
+    cfg.max_tokens = 512
+    cfg.fallbacks = ()
+    cfg.params = {}
+    captured: dict = {}
+
+    async def fake_create(*, model, messages, **kw):
+        captured["messages"] = [dict(m) for m in messages]
+        return _stream_chunks("ok", None)
+
+    client.chat.completions.create = fake_create
+    monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(al, "get_schemas", lambda: [])
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "load_memories", lambda **kw: memory)
+    monkeypatch.setattr(al, "match_skill", lambda _: "deploy" if skill else None)
+    monkeypatch.setattr(al, "load_skill", lambda _: skill or "")
+    monkeypatch.setattr(al, "check_skill_access", lambda *a, **kw: True)
+    monkeypatch.setattr(
+        al,
+        "resolve_limits",
+        lambda max_turns=None, max_consecutive_failures=None, config=None: (
+            max_turns if max_turns is not None else 50,
+            max_consecutive_failures if max_consecutive_failures is not None else 3,
+        ),
+    )
+    return captured
+
+
+_BASE = "You are a helpful assistant with access to tools. Use them when needed."
+
+
+async def test_run_stream_base_system_prefix_stable_across_variable_content(monkeypatch):
+    # Two runs differ only in memory + matched skill; the base system message
+    # (messages[0]) must be byte-identical so the auto prefix cache can hit.
+    cap1 = _capture_stream_wire(monkeypatch, memory="mem-A", skill="SKILL-A")
+    _ = [e async for e in al.run_stream("deploy please", allowed_skills=["deploy"])]
+    first = cap1["messages"][0]
+
+    cap2 = _capture_stream_wire(monkeypatch, memory="mem-B-different", skill="SKILL-B-other")
+    _ = [e async for e in al.run_stream("deploy please", allowed_skills=["deploy"])]
+    second = cap2["messages"][0]
+
+    assert first["role"] == "system"
+    assert first["content"] == _BASE
+    assert second["content"] == first["content"]
+
+
+async def test_run_stream_memory_and_skill_still_in_prompt_after_base(monkeypatch):
+    # Functional equivalence: memory + skill are still delivered to the LLM,
+    # positioned after the base system message (not inside messages[0]).
+    cap = _capture_stream_wire(monkeypatch, memory="REMEMBER-X", skill="DEPLOY-SKILL-BODY")
+    _ = [e async for e in al.run_stream("deploy please", allowed_skills=["deploy"])]
+    msgs = cap["messages"]
+    full = "".join(str(m.get("content") or "") for m in msgs)
+    assert "REMEMBER-X" in full
+    assert "DEPLOY-SKILL-BODY" in full
+    # Base system must not itself carry the variable content.
+    assert "REMEMBER-X" not in msgs[0]["content"]
+    assert "DEPLOY-SKILL-BODY" not in msgs[0]["content"]
+    # Variable content sits after the base system prefix.
+    assert any("REMEMBER-X" in str(m.get("content") or "") for m in msgs[1:])
+
+
+async def test_run_stream_no_variable_content_is_single_base_system(monkeypatch):
+    # No memory, no skill → just the stable base system + user message.
+    cap = _capture_stream_wire(monkeypatch, memory="", skill=None)
+    _ = [e async for e in al.run_stream("hi")]
+    msgs = cap["messages"]
+    system_msgs = [m for m in msgs if m["role"] == "system"]
+    assert len(system_msgs) == 1
+    assert system_msgs[0]["content"] == _BASE
+
+
+def test_run_sync_base_system_prefix_stable_across_variable_content(monkeypatch):
+    captured: dict = {}
+
+    async def fake_run(messages, **kw):
+        captured.setdefault("runs", []).append([dict(m) for m in messages])
+        return "done"
+
+    monkeypatch.setattr(al, "scan_skills", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "check_skill_access", lambda *a, **kw: True)
+    monkeypatch.setattr(al, "match_skill", lambda _: "deploy")
+    monkeypatch.setattr(al, "run", fake_run)
+
+    monkeypatch.setattr(al, "load_memories", lambda **kw: "mem-A")
+    monkeypatch.setattr(al, "load_skill", lambda _: "SKILL-A")
+    al.run_sync("deploy please", allowed_skills=["deploy"])
+
+    monkeypatch.setattr(al, "load_memories", lambda **kw: "mem-B-bigger-different")
+    monkeypatch.setattr(al, "load_skill", lambda _: "SKILL-B-other")
+    al.run_sync("deploy please", allowed_skills=["deploy"])
+
+    run1, run2 = captured["runs"]
+    assert run1[0]["role"] == "system"
+    assert run1[0]["content"] == _BASE
+    assert run2[0]["content"] == run1[0]["content"]
+    # Memory + skill still present, after the base system.
+    full1 = "".join(str(m.get("content") or "") for m in run1)
+    assert "mem-A" in full1 and "SKILL-A" in full1
+    assert "mem-A" not in run1[0]["content"]
+
+
+# ── prompt-cache-optimization: cache metrics into trace ──────────────────────
+
+
+async def test_run_logs_cache_tokens_from_usage(mock_client, monkeypatch):
+    resp = _text_resp("ok")
+    resp.usage.prompt_tokens = 200
+    resp.usage.completion_tokens = 10
+    resp.usage.total_tokens = 210
+    resp.usage.cache_read_input_tokens = 150
+    resp.usage.cache_creation_input_tokens = 50
+    # Anthropic-style usage has no prompt_tokens_details.
+    resp.usage.prompt_tokens_details = None
+    mock_client.chat.completions.create = AsyncMock(return_value=resp)
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    await al.run([{"role": "user", "content": "hi"}])
+    ct = captured.get("cache_tokens")
+    assert ct is not None
+    assert ct.get("cache_read_input_tokens") == 150
+    assert ct.get("cache_creation_input_tokens") == 50
+
+
+async def test_run_logs_openai_cached_tokens_from_usage(mock_client, monkeypatch):
+    resp = _text_resp("ok")
+    resp.usage.prompt_tokens = 200
+    resp.usage.completion_tokens = 10
+    resp.usage.total_tokens = 210
+    # OpenAI-style nested cached_tokens; no Anthropic-style fields.
+    del resp.usage.cache_read_input_tokens
+    del resp.usage.cache_creation_input_tokens
+    details = MagicMock()
+    details.cached_tokens = 128
+    resp.usage.prompt_tokens_details = details
+    mock_client.chat.completions.create = AsyncMock(return_value=resp)
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    await al.run([{"role": "user", "content": "hi"}])
+    ct = captured.get("cache_tokens")
+    assert ct is not None
+    assert ct.get("cached_tokens") == 128
+
+
+async def _stream_chunks_with_cache_usage(*contents: str | None):
+    async for chunk in _stream_chunks(*contents):
+        yield chunk
+    u = MagicMock()
+    u.choices = []
+    u.usage = MagicMock(
+        spec=[
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "cache_read_input_tokens",
+            "cache_creation_input_tokens",
+        ]
+    )
+    u.usage.prompt_tokens = 300
+    u.usage.completion_tokens = 20
+    u.usage.total_tokens = 320
+    u.usage.cache_read_input_tokens = 256
+    u.usage.cache_creation_input_tokens = 44
+    yield u
+
+
+async def test_run_stream_logs_cache_tokens_from_usage_chunk(mock_client, monkeypatch):
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_stream_chunks_with_cache_usage("hello")
+    )
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    [_ async for _ in al.run_stream("hi")]
+    ct = captured.get("cache_tokens")
+    assert ct is not None
+    assert ct.get("cache_read_input_tokens") == 256
+    assert ct.get("cache_creation_input_tokens") == 44
+
+
+async def test_run_stream_no_cache_tokens_when_usage_lacks_fields(mock_client, monkeypatch):
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_stream_chunks_with_usage(100, 50, "hello")
+    )
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    [_ async for _ in al.run_stream("hi")]
+    assert captured.get("cache_tokens") is None
+
+
+async def test_run_no_cache_tokens_when_usage_lacks_fields(mock_client, monkeypatch):
+    resp = _text_resp("ok")
+    resp.usage = MagicMock(spec=["prompt_tokens", "completion_tokens", "total_tokens"])
+    resp.usage.prompt_tokens = 10
+    resp.usage.completion_tokens = 5
+    resp.usage.total_tokens = 15
+    mock_client.chat.completions.create = AsyncMock(return_value=resp)
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    await al.run([{"role": "user", "content": "hi"}])
+    assert captured.get("cache_tokens") is None
+
+
+# ── prompt-cache-optimization: backend-agnostic guard (no cache_control) ─────
+
+
+async def test_run_does_not_inject_cache_control_marker(mock_client):
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    await al.run([{"role": "user", "content": "hi"}])
+    kwargs = mock_client.chat.completions.create.call_args.kwargs
+    assert "cache_control" not in kwargs
+    serialized = repr(kwargs.get("messages"))
+    assert "cache_control" not in serialized
