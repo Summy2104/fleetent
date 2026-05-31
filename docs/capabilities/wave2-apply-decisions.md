@@ -117,3 +117,34 @@
 2. `disabled_skills_trace` 写入语义为「仅非空才写」，无禁用的运行完全不写该字段（向后兼容）；trace 项形如 `{"name","reason"}`，reason 取最高优先命中来源——是否符合事后排查的字段口径。
 3. `normalizer` 也接入了 trace 收集（spec 未点名 IM 路径，但为口径一致一并接入）——是否认可。
 
+## compression-pre-cleanup — feat/compression-pre-cleanup
+
+**前置核实结论（tasks 1.x）:**
+- **1.1 接入点**：`_compress`（context_mgr.py 行 108-130）确定 `to_summarize` 中段后调 `_summarize`。`_summarize`（行 156-179）只摘 `user`/`assistant`、不摘 `tool`，经 `_content(m)` 对整条 content 做 `str(...)`（非 per-block）——含 image 块的 content list 被整体字符串化（含 base64）。确认清理接入点为「`_summarize` 之前对中段做规则替换」：插入 `cleaned = _pre_cleanup(to_summarize)`，再 `_summarize(cleaned)`。清理只作用于中段（不含头尾 system/tail），与 AR12 触发/目标线判定解耦。
+- **1.2 image 判据**：`estimate_tokens`/`_estimate_message_tokens`（行 53）判据为 `isinstance(block, dict) and block.get("type")=="image_url"`，`_IMAGE_BLOCK_TOKENS=1000`。清理沿用**同一判据**（`_is_image_block`），不改估算口径。
+- **1.3 工具调用消息实际结构（D3 必核）**：核 `agent_loop.py`。assistant 工具调用消息 = `{"role":"assistant","content":None,"tool_calls":[{"id":<str>,"type":"function","function":{"name":<str>,"arguments":<str>}}]}`（行 614-623）；工具结果消息 = `{"role":"tool","tool_call_id":<id>,"content":<str>}`（行 434、634）。`arguments` 是 **JSON 字符串**；result `content` 是字符串；一条 assistant 可含多个 tool_call block（`tool_calls` 是 list），各自对应一条 `role=="tool"` 消息，按 `tool_call_id` 关联。
+  - **规范化判等粒度**：判等键 = `(工具名, 规范化参数, 结果内容)` 三者全等。参数规范化 = `json.loads` 后 `json.dumps(sort_keys=True, ensure_ascii=False)`——**忽略 key 顺序与空白**；非法 JSON 兜底为原字符串（不崩）。结果内容用 tool 消息的 `_content(...)` 原文严格比对。
+  - **多 tool_call 消息处置**：block 粒度判等；**仅当某 assistant 消息全部 block 都在更新位置找到等价重复，才删整条 assistant + 其全部 tool_result**；否则整条保留（连同未去重 block）。删除时连带删除被删 block 的 tool_result（按 id），保证无孤立 tool_result。
+- **1.4 占位块形态**：除 `image_url` 外，messages 中未见其它二进制占位形态（codebase grep 仅 image_url）。判据沿用 `type=="image_url"`。尺寸来源：块上 `width`/`height` 字段（均在才用 `{w}×{h}`），缺失兜底 `未知尺寸`。**无时间戳维度**——messages dict 由 `msg.model_dump()` 产生，无 timestamp 来源（与 design Open 一致），占位简化为 `[图片：{尺寸}]`。
+
+**实现:** `src/fleetent/context_mgr.py`：
+- 新增纯函数 `_pre_cleanup(messages)`（先逐条 `_replace_image_blocks` 替图，再 `_dedup_tool_calls` 去重）；在 `_compress` 内 `_summarize` 前调用。
+- `_replace_image_blocks`：list-content 内 image 块换成 `{"type":"text","text":"[图片：{尺寸}]"}`；不改入参（命中才新建 dict/list，未命中原样返回）。
+- `_dedup_tool_calls`：从后往前扫，把后出现的 block 判等键存入 `seen_keys`；某 assistant 消息全部 block 键都已 seen 即整删，连带删其 tool_result。判等键经 `_tool_call_key`+`_normalize_args`。
+- 常量 `_IMAGE_SIZE_UNKNOWN="未知尺寸"`。
+测试：`tests/test_context_mgr.py` 新增 15 个用例（图片替换/尺寸/兜底/不可变/合法文本块；去重保留最新/结果异/参数异/规范化等价/多block部分等价保留/多block全等价整删/无孤立result；清理 0 调 LLM；`_compress` 清理在摘要前且 base64 不进摘要输入）。
+
+**自解冲突:**
+1. **占位时间戳维度**：agent-runtime.md 列 `[图片：{尺寸}，{时间戳}]`，但 messages dict 无 timestamp 来源（1.4 核实），按 design 决议简化为 `[图片：{尺寸}]`，不补时间戳。
+2. **参数规范化粒度（D3 Open）**：design 留待核实——据 1.3「arguments 是 JSON 字符串」结论，定为 `json.loads`→`json.dumps(sort_keys=True)` 忽略 key 顺序/空白；非 JSON 兜底原串。属严格全等的合理规范化（同语义参数视为相等），不做模糊判等。
+3. **去重单位（D3 必核）**：按 block 粒度，仅全 block 等价才整删消息，否则保留整条——避免误删非重复 block 或留孤立 tool_result。
+
+**影响:** 813 passed（基线 798 + 新增 15），无回归。
+- ruff（仅我改/建文件 `context_mgr.py`/`test_context_mgr.py`）：format 重排 2 文件，check 全绿。
+- mypy `src`：base 73 → after 73 errors，无新增错误模式（context_mgr 唯一报错为既有 line 29 `Settings()` call-arg，遗留）。
+
+**需 zy 核实:**
+1. 参数规范化忽略 key 顺序/空白（`sort_keys=True`）——同语义不同书写的重复调用会被判等去重。是否认可（vs 纯字节级全等）。
+2. 结果内容用 tool 消息 `content` 原文严格比对（不做 trim/normalize）——结果有微小差异即不去重。是否符合预期。
+3. 占位省略时间戳维度（messages 无 timestamp 来源）——若后续调用方会注入时间戳，再决定是否补回 `{时间戳}` 维度。
+

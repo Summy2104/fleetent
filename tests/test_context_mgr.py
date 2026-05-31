@@ -314,3 +314,376 @@ def test_compress_preserves_base_system_cacheable_prefix(monkeypatch):
     assert result[0]["role"] == "system"
     assert result[0]["content"] == base  # cacheable prefix unchanged
     assert any(m["content"] == variable for m in result if m.get("role") == "system")
+
+
+# --- AR15: compression pre-cleanup (image placeholder replacement) ---
+
+
+def test_pre_cleanup_replaces_image_block_with_placeholder():
+    from fleetent.context_mgr import _pre_cleanup
+
+    big_b64 = "A" * 100_000
+    msgs = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "look at this"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{big_b64}"},
+                },
+            ],
+        }
+    ]
+    cleaned = _pre_cleanup(msgs)
+    serialized = str(cleaned)
+    assert big_b64 not in serialized  # base64 stripped
+    assert "[图片：" in serialized  # placeholder injected
+    assert "look at this" in serialized  # surrounding text preserved
+
+
+def test_pre_cleanup_image_placeholder_uses_dimensions_when_available():
+    from fleetent.context_mgr import _pre_cleanup
+
+    msgs = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,AAAA"},
+                    "width": 640,
+                    "height": 480,
+                },
+            ],
+        }
+    ]
+    cleaned = _pre_cleanup(msgs)
+    assert "640" in str(cleaned)
+    assert "480" in str(cleaned)
+
+
+def test_pre_cleanup_image_placeholder_fallback_when_size_missing():
+    from fleetent.context_mgr import _pre_cleanup
+
+    msgs = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+            ],
+        }
+    ]
+    cleaned = _pre_cleanup(msgs)
+    assert "未知尺寸" in str(cleaned)
+
+
+def test_pre_cleanup_does_not_mutate_input():
+    from fleetent.context_mgr import _pre_cleanup
+
+    block = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+    msgs = [{"role": "user", "content": [block]}]
+    _pre_cleanup(msgs)
+    # original block untouched (pure function, no side effects)
+    assert msgs[0]["content"][0] is block
+    assert block["type"] == "image_url"
+
+
+def test_pre_cleanup_image_replacement_is_valid_text_block():
+    from fleetent.context_mgr import _content, _pre_cleanup
+
+    msgs = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+            ],
+        }
+    ]
+    cleaned = _pre_cleanup(msgs)
+    # after _content str()-ification, no base64 / image_url type leaks into summary input
+    rendered = _content(cleaned[0])
+    assert "image_url" not in rendered
+    assert "[图片：" in rendered
+
+
+def test_pre_cleanup_leaves_plain_text_messages_unchanged():
+    from fleetent.context_mgr import _pre_cleanup
+
+    msgs = [{"role": "user", "content": "just text"}]
+    cleaned = _pre_cleanup(msgs)
+    assert cleaned[0]["content"] == "just text"
+
+
+# --- AR15: compression pre-cleanup (duplicate tool-call dedup) ---
+
+
+def _assistant_tc(call_id: str, name: str, arguments: str) -> dict:
+    return {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {"id": call_id, "type": "function", "function": {"name": name, "arguments": arguments}}
+        ],
+    }
+
+
+def _tool_result(call_id: str, content: str) -> dict:
+    return {"role": "tool", "tool_call_id": call_id, "content": content}
+
+
+def test_dedup_removes_earlier_identical_tool_pair():
+    from fleetent.context_mgr import _pre_cleanup
+
+    msgs = [
+        _assistant_tc("a1", "read_file", '{"path": "/x"}'),
+        _tool_result("a1", "contents-of-x"),
+        {"role": "user", "content": "and again?"},
+        _assistant_tc("a2", "read_file", '{"path": "/x"}'),
+        _tool_result("a2", "contents-of-x"),
+    ]
+    cleaned = _pre_cleanup(msgs)
+    # earlier equivalent pair removed; latest kept
+    call_ids = [
+        tc["id"]
+        for m in cleaned
+        if m.get("role") == "assistant" and m.get("tool_calls")
+        for tc in m["tool_calls"]
+    ]
+    assert "a1" not in call_ids
+    assert "a2" in call_ids
+    # no orphaned tool_result for the removed call
+    result_ids = [m["tool_call_id"] for m in cleaned if m.get("role") == "tool"]
+    assert "a1" not in result_ids
+    assert "a2" in result_ids
+
+
+def test_dedup_keeps_when_results_differ():
+    from fleetent.context_mgr import _pre_cleanup
+
+    msgs = [
+        _assistant_tc("a1", "read_file", '{"path": "/x"}'),
+        _tool_result("a1", "old-contents"),
+        _assistant_tc("a2", "read_file", '{"path": "/x"}'),
+        _tool_result("a2", "new-contents"),
+    ]
+    cleaned = _pre_cleanup(msgs)
+    call_ids = [
+        tc["id"]
+        for m in cleaned
+        if m.get("role") == "assistant" and m.get("tool_calls")
+        for tc in m["tool_calls"]
+    ]
+    assert "a1" in call_ids and "a2" in call_ids
+
+
+def test_dedup_keeps_when_args_differ():
+    from fleetent.context_mgr import _pre_cleanup
+
+    msgs = [
+        _assistant_tc("a1", "read_file", '{"path": "/x"}'),
+        _tool_result("a1", "same"),
+        _assistant_tc("a2", "read_file", '{"path": "/y"}'),
+        _tool_result("a2", "same"),
+    ]
+    cleaned = _pre_cleanup(msgs)
+    call_ids = [
+        tc["id"]
+        for m in cleaned
+        if m.get("role") == "assistant" and m.get("tool_calls")
+        for tc in m["tool_calls"]
+    ]
+    assert "a1" in call_ids and "a2" in call_ids
+
+
+def test_dedup_args_normalized_ignores_key_order_and_whitespace():
+    from fleetent.context_mgr import _pre_cleanup
+
+    msgs = [
+        _assistant_tc("a1", "search", '{"q": "foo", "limit": 10}'),
+        _tool_result("a1", "hits"),
+        _assistant_tc("a2", "search", '{ "limit":10 ,  "q":"foo" }'),
+        _tool_result("a2", "hits"),
+    ]
+    cleaned = _pre_cleanup(msgs)
+    call_ids = [
+        tc["id"]
+        for m in cleaned
+        if m.get("role") == "assistant" and m.get("tool_calls")
+        for tc in m["tool_calls"]
+    ]
+    assert "a1" not in call_ids  # normalized equal -> earlier removed
+    assert "a2" in call_ids
+
+
+def test_dedup_multi_block_assistant_kept_when_only_some_equivalent():
+    from fleetent.context_mgr import _pre_cleanup
+
+    multi = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "b1",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": '{"p":1}'},
+            },
+            {
+                "id": "b2",
+                "type": "function",
+                "function": {"name": "list_dir", "arguments": '{"d":2}'},
+            },
+        ],
+    }
+    msgs = [
+        multi,
+        _tool_result("b1", "r1"),
+        _tool_result("b2", "r2"),
+        # later: only read_file/{"p":1} repeats with same result
+        _assistant_tc("c1", "read_file", '{"p":1}'),
+        _tool_result("c1", "r1"),
+    ]
+    cleaned = _pre_cleanup(msgs)
+    # multi-block assistant must be kept whole (only b1 was equivalent, b2 was not)
+    assert multi in cleaned
+    result_ids = [m["tool_call_id"] for m in cleaned if m.get("role") == "tool"]
+    assert "b1" in result_ids and "b2" in result_ids  # no orphaned/missing result
+    assert "c1" in result_ids
+
+
+def test_dedup_multi_block_assistant_removed_when_all_equivalent():
+    from fleetent.context_mgr import _pre_cleanup
+
+    multi = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "b1",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": '{"p":1}'},
+            },
+            {
+                "id": "b2",
+                "type": "function",
+                "function": {"name": "list_dir", "arguments": '{"d":2}'},
+            },
+        ],
+    }
+    later = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "c1",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": '{"p":1}'},
+            },
+            {
+                "id": "c2",
+                "type": "function",
+                "function": {"name": "list_dir", "arguments": '{"d":2}'},
+            },
+        ],
+    }
+    msgs = [
+        multi,
+        _tool_result("b1", "r1"),
+        _tool_result("b2", "r2"),
+        later,
+        _tool_result("c1", "r1"),
+        _tool_result("c2", "r2"),
+    ]
+    cleaned = _pre_cleanup(msgs)
+    assert multi not in cleaned  # all blocks equivalent -> earlier whole message removed
+    assert later in cleaned
+    result_ids = [m["tool_call_id"] for m in cleaned if m.get("role") == "tool"]
+    assert "b1" not in result_ids and "b2" not in result_ids  # no orphans
+    assert "c1" in result_ids and "c2" in result_ids
+
+
+def test_dedup_produces_no_orphan_tool_results():
+    from fleetent.context_mgr import _pre_cleanup
+
+    msgs = [
+        _assistant_tc("a1", "ping", "{}"),
+        _tool_result("a1", "pong"),
+        _assistant_tc("a2", "ping", "{}"),
+        _tool_result("a2", "pong"),
+    ]
+    cleaned = _pre_cleanup(msgs)
+    kept_call_ids = {
+        tc["id"]
+        for m in cleaned
+        if m.get("role") == "assistant" and m.get("tool_calls")
+        for tc in m["tool_calls"]
+    }
+    for m in cleaned:
+        if m.get("role") == "tool":
+            assert m["tool_call_id"] in kept_call_ids  # every result has its caller
+
+
+# --- AR15: pre-cleanup MUST NOT call the LLM (D4) ---
+
+
+def test_pre_cleanup_never_calls_llm(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    calls = {"n": 0}
+
+    def _spy(_task):
+        calls["n"] += 1
+        raise AssertionError("pre-cleanup must not call the LLM")
+
+    monkeypatch.setattr(cm, "get_client_and_config", _spy)
+    msgs = [
+        {
+            "role": "user",
+            "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}],
+        },
+        _assistant_tc("a1", "read_file", '{"path": "/x"}'),
+        _tool_result("a1", "x"),
+        _assistant_tc("a2", "read_file", '{"path": "/x"}'),
+        _tool_result("a2", "x"),
+    ]
+    cm._pre_cleanup(msgs)
+    assert calls["n"] == 0
+
+
+def test_compress_runs_pre_cleanup_before_summarize(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    captured: dict[str, list] = {}
+
+    def _fake_summarize(msgs):
+        captured["to_summarize"] = msgs
+        return "S"
+
+    monkeypatch.setattr(cm, "_summarize", _fake_summarize)
+    # get_client_and_config must never be hit by the cleanup path
+    monkeypatch.setattr(
+        cm,
+        "get_client_and_config",
+        lambda _t: (_ for _ in ()).throw(AssertionError("cleanup called LLM")),
+    )
+
+    big_b64 = "A" * 50_000
+    img_msg = {
+        "role": "user",
+        "content": [
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{big_b64}"}}
+        ],
+    }
+    big_msgs = [
+        {"role": "system", "content": "sys"},
+        img_msg,
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 2000}
+            for i in range(60)
+        ],
+    ]
+    config = {"max_tokens": 10_000, "tmax_ratio": 0.5, "tretained_ratio": 0.3, "keep_recent": 4}
+    cm.maybe_compress(big_msgs, config=config)
+    # the image base64 must have been cleaned out of the summary input
+    assert big_b64 not in str(captured["to_summarize"])
+    assert "[图片：" in str(captured["to_summarize"])
