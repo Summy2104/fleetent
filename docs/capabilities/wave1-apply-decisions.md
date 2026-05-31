@@ -277,6 +277,8 @@
 **影响:** 712 passed,mypy 无新增。
 **需 zy 核实:** memory/skill 后置为独立 system 消息(messages[1])的形态;normalizer 同样重排需张亮做。
 
+**✅ zy review 确认(2026-05-31):** 核实点已被 15/20 重构消化——`_assemble_prompt` 演进为 base+catalog(稳定前缀)→memory(messages[1]),skill 改 read_skill 工具不再走 messages 注入;**normalizer 缓存杀手已在 15/20 顺带修复,无需张亮**。`_extract_cache_tokens` + log_run cache_tokens 字段保留不变。无遗留。
+
 ## image-generation-tool — feat/image-generation-tool
 
 **实现:** 新建 image_gen_client.py `generate(prompt,*,size,settings)->bytes`(AsyncOpenAI(base_url=image_gen_url) 调 images.generate response_format=b64_json,b64 优先、回 url 则内网 httpx fetch,`ImageGenError`);tools.py 加 `GENERATED_DIR`(默认 data/generated,可注入)+ `_save_image`(uuid4.png)+ `generate_image` `@tool(risk_level="low")`(async,经 _safe_dispatch await):调 client→存盘→**返回短引用"image generated: <path>"、绝不返回 base64**,端点失败/未配置→明确失败结果文本(不静默成功、不中断循环);config 加 image_gen_url=""/image_gen_model="default"。自托管 OpenAI 兼容 images 端点。
@@ -289,3 +291,21 @@
 
 **影响:** 732 passed;mypy 无新模式。守卫:test_generate_image_result_has_no_base64 / test_tool_result_message_in_trace_has_no_base64。
 **需 zy 核实:** image_gen_url 默认空(部署须配自托管端点);引用形态 "image generated: <path>"。
+
+**✅ zy review 确认(2026-05-31):** ①image_gen_url 默认空、未配时返回明确失败文本(不崩不中断 loop):认可;②返回短引用 "image generated: <path>"、绝不回 base64:认可。无改动。
+
+---
+
+## review 收尾(2026-05-31)
+
+20/20 决策日志全部与 zy 逐条过完。review 期间产生的修正全部在 `fix/wave1-review-corrections` 分支(基于 feature/zhangyang),计 8 个提交:
+1. model-param 保留键改报错(原静默剔除)
+2. model-routes 文件解析按 (path,mtime,size) 缓存
+3. skill SK2 加载失败汇总(load_errors + 仅失败时 summary 日志)
+4. **agent-skill-binding 推翻重做为 openclaw read-on-demand**(删 DB 表/迁移/check_skill_access,加 available_skills_prompt + read_skill 工具;顺带修 normalizer 缓存杀手)
+5. session-ttl-cleanup:修 save() `/` bug + 内置 maybe_run_maintenance 触发器(不依赖 cron)+ **修 configure_logging 的 PrintLogger 崩溃真 bug**
+6. CLAUDE.md 修正 aiosqlite→sqlite3
+7. session-disk-management:enforce_capacity 并入内置触发器
+(注:部分提交合并了多项)
+
+仍需 zy/他人后续关注:S2 sqlite3(已确认保持,CLAUDE.md 已改);configure_logging 删 add_logger_name 需知会常乐 observability;逐 agent skill 结构化收窄 + vision-as-tool 待 propose(见 deferred 备查)。
