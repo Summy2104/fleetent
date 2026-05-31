@@ -1,10 +1,15 @@
 """In-session context compression: summarize old history when token limit approaches."""
 
+import json
 from typing import Any
 
 from fleetent.model_router import get_client_and_config
 
 ContextConfig = dict[str, Any]
+
+# Fallback shown when an image block carries no usable size metadata. Cleanup
+# must never crash on missing fields, so a placeholder is always produced.
+_IMAGE_SIZE_UNKNOWN = "未知尺寸"
 
 # Fixed token estimate per image block (AR21). A real backend bills an image by
 # its pixel dimensions (Anthropic caps around ~1600 tokens); 1000 is a
@@ -111,7 +116,12 @@ def _compress(messages: list[Any], cfg: ContextConfig) -> list[Any]:
     tail = _select_tail(conv_msgs, keep_recent, target, system_msgs)
     to_summarize = conv_msgs[: len(conv_msgs) - len(tail)]
 
-    summary_text = _summarize(to_summarize)
+    # AR15: pure-rule, millisecond-scale pre-cleanup of the to-summarize middle
+    # (never the head/tail) before any LLM summary — strips base64 image bloat and
+    # drops fully-equivalent repeated tool-call pairs. MUST NOT call the LLM.
+    cleaned = _pre_cleanup(to_summarize)
+
+    summary_text = _summarize(cleaned)
     summary_msg: dict[str, str] = {
         "role": "system",
         "content": f"[Earlier conversation summary]\n{summary_text}",
@@ -167,6 +177,128 @@ def _summarize(messages: list[Any]) -> str:
         return response.choices[0].message.content or ""
     except Exception:
         return "[Earlier conversation summary unavailable]"
+
+
+def _pre_cleanup(messages: list[Any]) -> list[Any]:
+    """Pure-rule pre-summary cleanup of the to-summarize middle (AR15).
+
+    Replaces image/binary content blocks with short text placeholders and drops
+    fully-equivalent repeated tool-call pairs, keeping the latest occurrence. The
+    input is never mutated and no LLM is ever called. The result is a new message
+    list that stays valid for the LLM (no orphaned tool_result).
+    """
+    return _dedup_tool_calls([_replace_image_blocks(m) for m in messages])
+
+
+def _replace_image_blocks(msg: Any) -> Any:
+    """Return msg with any image/binary content blocks swapped for text placeholders.
+
+    Only list-shaped `content` is rewritten; the original message and its blocks
+    are left untouched (a new dict/list is built when a replacement is needed).
+    """
+    if not isinstance(msg, dict):
+        return msg
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return msg
+    if not any(_is_image_block(b) for b in content):
+        return msg
+    new_content = [
+        {"type": "text", "text": f"[图片：{_image_size(b)}]"} if _is_image_block(b) else b
+        for b in content
+    ]
+    return {**msg, "content": new_content}
+
+
+def _is_image_block(block: Any) -> bool:
+    # Same identification used by estimate_tokens; the estimate口径 is unchanged.
+    return isinstance(block, dict) and block.get("type") == "image_url"
+
+
+def _image_size(block: dict[str, Any]) -> str:
+    width = block.get("width")
+    height = block.get("height")
+    if width is not None and height is not None:
+        return f"{width}×{height}"
+    return _IMAGE_SIZE_UNKNOWN
+
+
+def _dedup_tool_calls(messages: list[Any]) -> list[Any]:
+    """Drop earlier tool-call assistant messages whose every block is later repeated.
+
+    Equivalence is per tool_call block: same tool name + normalized arguments +
+    identical result content (matched via tool_call_id). An assistant tool-call
+    message is removed (with all its tool_results) only when *every* one of its
+    blocks has an equivalent block at a later position; otherwise it is kept whole
+    so no non-duplicate block is lost and no tool_result is orphaned.
+    """
+    results_by_id = {
+        m["tool_call_id"]: _content(m)
+        for m in messages
+        if _role(m) == "tool" and isinstance(m, dict) and "tool_call_id" in m
+    }
+
+    # Walk back-to-front so a block's "later" duplicates are the ones already seen.
+    seen_keys: set[tuple[str, str, str]] = set()
+    drop_message_ids: list[set[str]] = [set() for _ in messages]
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        blocks = _tool_call_blocks(m)
+        if not blocks:
+            continue
+        keys = [_tool_call_key(b, results_by_id) for b in blocks]
+        if keys and all(k in seen_keys for k in keys):
+            drop_message_ids[i] = {b["id"] for b in blocks if isinstance(b.get("id"), str)}
+        seen_keys.update(keys)
+
+    dropped_call_ids = {cid for ids in drop_message_ids for cid in ids}
+
+    out: list[Any] = []
+    for i, m in enumerate(messages):
+        if drop_message_ids[i]:
+            continue  # whole assistant tool-call message: every block was repeated later
+        if _role(m) == "tool" and isinstance(m, dict) and m.get("tool_call_id") in dropped_call_ids:
+            continue  # its caller was dropped; drop the now-orphaned result too
+        out.append(m)
+    return out
+
+
+def _tool_call_blocks(msg: Any) -> list[dict[str, Any]]:
+    if not isinstance(msg, dict) or msg.get("role") != "assistant":
+        return []
+    calls = msg.get("tool_calls")
+    if not isinstance(calls, list):
+        return []
+    return [c for c in calls if isinstance(c, dict)]
+
+
+def _tool_call_key(block: dict[str, Any], results_by_id: dict[str, str]) -> tuple[str, str, str]:
+    raw_func = block.get("function")
+    func: dict[str, Any] = raw_func if isinstance(raw_func, dict) else {}
+    name = str(func.get("name", ""))
+    args = _normalize_args(func.get("arguments"))
+    call_id = block.get("id")
+    result = results_by_id.get(call_id, "") if isinstance(call_id, str) else ""
+    return (name, args, result)
+
+
+def _normalize_args(arguments: Any) -> str:
+    """Canonicalize tool-call arguments for strict equality, ignoring key order/whitespace.
+
+    JSON objects are re-serialized with sorted keys; non-JSON arguments fall back to
+    their string form so malformed data never crashes the dedup pass.
+    """
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+        except (ValueError, TypeError):
+            return arguments
+    else:
+        parsed = arguments
+    try:
+        return json.dumps(parsed, sort_keys=True, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(parsed)
 
 
 def _keep_tail(msgs: list[Any], n: int) -> list[Any]:
