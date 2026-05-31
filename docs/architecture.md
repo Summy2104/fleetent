@@ -18,7 +18,7 @@
 graph TD
     A["接入层\nserver.py · im_gateway · webhook_router"]
     B["编排层\nagent_loop · sub_agent"]
-    C["能力层\nmodel_router · tool_registry · long_term_ctx\nskill_registry · context_mgr · mcp_client\nsandbox_client · permission_gate · cron_scheduler"]
+    C["能力层\nmodel_router · tool_registry · long_term_ctx\nmemory_layer · vector_store · reflection\nskill_registry · context_mgr · mcp_client\nsandbox_client · permission_gate · cron_scheduler"]
     D["基础层\nuser_store · agent_store · im_user_store\nsession_mgr · schedule_store · observability\nagent_policy · config · admin"]
 
     A --> B --> C --> D
@@ -71,7 +71,10 @@ src/fleetent/
   tools.py           ← 内置工具（import 即注册，副作用）
   skill_registry.py  ← 扫描 skills/，关键词匹配，注入 system prompt
   context_mgr.py     ← in-session token 压缩
-  memory_layer.py    ← 长期上下文：Haiku 提取事实 → SQLite → 注入（能力层称 long_term_ctx）
+  memory_layer.py    ← 结构化语义记忆：提取动作 → SQLite memory_items → vector_store 索引
+  intelligence/
+    vector_store/    ← 向量索引基础设施：in-memory / SQLite backend，embedding / rerank provider
+    long_term_ctx.py ← 长期上下文调度：memory provider 已接入，knowledge_base provider 预留
   mcp_client.py      ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
   sandbox_client.py  ← Docker CLI 封装：隔离 Python 执行
   permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
@@ -105,7 +108,7 @@ flowchart TD
     G --> H["tool dispatch\n执行工具"]
     H --> E
     E -->|stop| I["observability\n写 trace event"]
-    I --> J["long_term_ctx（规划中）\n异步提取事实"]
+    I --> J["long_term_ctx\n异步提取与后续注入"]
     J --> K["SSE done"]
 ```
 
@@ -158,7 +161,7 @@ flowchart TD
 | 工具审批 | asyncio.Event 门控 | 无轮询，优雅等待；重启后调用 cleanup_stale_approvals() 清理孤儿 |
 | 代码执行隔离 | Docker CLI（当前）→ microsandbox microVM（v1.0 目标） | 每个沙箱独立 Linux 内核，无命名空间逃逸风险；< 100ms 启动；无需 dockerd |
 | MCP 工具命名 | `{server}__{tool}` 双下划线 | 避免与内置工具名冲突，来源可追溯 |
-| 记忆提取 | Haiku 异步，不阻塞响应 | 廉价且快；现状为 JSONL 存储与 top-20 注入，v1.0 由 long_term_ctx 统一协调检索与注入 |
+| 记忆提取 | 轻量模型异步提取，不阻塞响应 | 结构化语义记忆写入 SQLite `memory_items`，通过 vector_store 建索引；v1.0 由 long_term_ctx 统一协调检索与注入 |
 
 ---
 
@@ -179,10 +182,10 @@ flowchart TD
 | [scheduling.md](capabilities/scheduling.md) | Cron 定时任务、Webhook 事件触发 | P1 | agent-runtime · session · im-gateway | 张亮 | 部分完成 |
 | [connectors.md](capabilities/connectors.md) | 数据源连接器（Confluence / Google Drive 等） | P2 | user-center | 张亮 | 未开始 |
 | [user-center.md](capabilities/user-center.md) | 用户中心、多租户管理 | P1 | - | 张亮 | 部分完成 |
-| [memory.md](capabilities/memory.md) | 跨 session 记忆（语义 / 情节 / 程序 / 工作） | P1 | model-router | 常乐 | 基础完成 |
-| [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入 | P1 | memory · knowledge-base | 常乐 | 基础完成 |
+| [memory.md](capabilities/memory.md) | 跨 session 语义记忆、提取动作、检索与评估基线 | P1 | model-router · vector-store · observability | 常乐 | 基础完成 |
+| [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入，memory provider 已接入 | P1 | memory · knowledge-base | 常乐 | 基础完成 |
 | [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、混合检索 | P1 | vector-store | 常乐 | 已设计 |
-| [vector-store.md](capabilities/vector-store.md) | 向量索引基础设施 | P1 | - | 常乐 | 基础完成 |
+| [vector-store.md](capabilities/vector-store.md) | 向量索引、SQLite backend、embedding / rerank provider | P1 | deployment | 常乐 | 基础完成 |
 | [reflection.md](capabilities/reflection.md) | 记忆 / Skill / 知识库反思与自进化 | P2 | memory · skill · knowledge-base | 常乐 | 基础完成 |
 | [observability.md](capabilities/observability.md) | 评估日志、数据统计、链路追踪 | P0 | - | 常乐 | 基础完成 |
 | [deployment.md](capabilities/deployment.md) | on-premises 打包、配置管理 | P0 | - | 常乐 | 部分完成 |

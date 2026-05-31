@@ -107,8 +107,8 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 | 术语 | 定义 | 禁止混用 |
 |------|------|---------|
 | **trace** | 一次完整 agent 运行的记录，包含 user_id、agent_name、消息列表、工具调用、token 用量、耗时等，append-only 写入 `traces` 表 | 不用 "log"（log 是系统日志，trace 是业务执行记录）、"history" |
-| **vector_store** | 统一的向量索引基础设施，提供 upsert/search/delete 接口，后端可切换（sqlite-vec 或 Qdrant） | 不用 "向量数据库"（向量数据库是后端实现，vector_store 是抽象层）|
-| **embedding** | 将文本转换为向量的过程，或指转换后的向量本身。embedding 模型自托管，不使用云托管 API | 保持英文，与行业通用用法一致 |
+| **vector_store** | 统一的向量索引基础设施，提供 upsert/search/delete 接口；当前支持 in-memory 与普通 SQLite persistent backend，后续可扩展 sqlite-vec / Qdrant | 不用 "向量数据库"（向量数据库是后端实现，vector_store 是抽象层）|
+| **embedding** | 将文本转换为向量的过程，或指转换后的向量本身。当前支持 deterministic 测试 provider 与 OpenAI-style HTTP provider；生产默认应指向自托管模型服务 | 保持英文，与行业通用用法一致 |
 
 ---
 

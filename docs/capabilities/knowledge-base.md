@@ -214,8 +214,8 @@ async def delete(document_id: str) -> None:
 - ✅ 同步规划器动作模型：SKIP / UPSERT_METADATA_ONLY / REEMBED / RECHUNK_LOCAL / REFETCH_AND_REINDEX / DELETE_LOCAL
 
 **需要重写（深度耦合 LlamaIndex 或违反 fleetent 约束）**：
-- 向量存储：LanceDB → fleetent `vector_store`（sqlite-vec / Qdrant）
-- Embedding：OpenAI Embeddings API（云托管，禁止）→ 自托管 bge-m3 / multilingual-e5
+- 向量存储：LanceDB → fleetent `vector_store` public API（当前可用普通 SQLite persistent backend；sqlite-vec / Qdrant 后置）
+- Embedding：OpenAI Embeddings API（云托管，禁止默认）→ fleetent HTTP embedding provider，生产配置指向自托管 bge-m3 / multilingual-e5 等模型服务
 - 分块器：逻辑参考 knowledge-bridge，但 `TextNode` 类型替换为 fleetent 自定义 dataclass
 - 检索引擎：逻辑参考，接口对齐 `search()` / `graph_search()`
 

@@ -110,8 +110,8 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
 - `search()` 通过 vector_store 查相关 memory ids，回查 SQLite 并过滤过期 context
 - 删除旧 JSONL memory 兼容和 `load_memories()` 直接注入路径
 
-当前定位：已完成结构化语义记忆地基和基础维护动作，但记忆提取质量、retention 策略和真实
-embedding 效果仍未闭环。下一步优先做 `memory-extraction-evaluation`。
+当前定位：已完成结构化语义记忆地基、基础维护动作和第一批 memory extraction evaluation 基线。
+retention 策略和真实 embedding 检索效果仍未闭环。
 
 ## 规划中（v1.0）
 
@@ -131,20 +131,22 @@ embedding 效果仍未闭环。下一步优先做 `memory-extraction-evaluation`
   - 对外接口：`search(user_id: str, query: str) → list[MemoryItem]`
   - 由 long_term_ctx 在对话开始时调用
 
-- [ ] **embedding 模型**：自托管本地模型（bge-m3 或 multilingual-e5）
-  - 禁止使用 OpenAI Embeddings 等云托管专有服务
+- [x] **memory extraction evaluation 基线**：使用 JSON fixtures、mock actions 和最终 memory 状态断言，覆盖 create / update / delete / ignore 关键场景
+
+- [ ] **真实 embedding 检索效果验证**：通过已定义的 HTTP embedding provider 接入自托管模型后评估召回质量
+  - 默认仍使用 deterministic provider；生产配置必须显式指向自托管 embedding endpoint
 
 ## 当前缺口
 
-- 提取质量缺少自动化评估：误记、漏记、一次性请求误存等风险无法量化。
-- 真实 embedding 未接入，语义检索质量还不能代表生产效果。
+- 提取质量已有 mock evaluation 基线，但还缺少真实 LLM 回归样本和长期趋势统计。
+- 真实 embedding provider 边界已定义，但尚未配置自托管模型 endpoint，语义检索质量还不能代表生产效果。
 - memory 条数增长策略未定义：没有硬上限、软告警或 compaction 机制。
 
 ## 下一批候选 specs
 
-- `memory-extraction-evaluation`
 - `memory-retention-and-compaction`
-- `memory-real-embedding-provider`
+- `memory-real-embedding-evaluation`
+- `memory-extraction-real-llm-regression`
 
 ## 自动化效果验证缺口
 

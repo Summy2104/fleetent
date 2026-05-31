@@ -154,14 +154,14 @@ vector-store 未来有独立服务潜力，尤其是 embedding provider 和 Qdra
 - search 返回结果按 score 降序排列
 
 **需要 mock 的依赖**：
-- embedding 模型：mock 返回固定长度的随机向量，隔离模型加载
-- 向量后端：单元测试用 sqlite-vec in-memory，不依赖 Qdrant 服务
+- embedding provider：测试使用 deterministic provider 或 HTTP mock，隔离真实模型服务
+- 向量后端：测试使用 in-memory backend 或 tmp SQLite DB，不依赖 Qdrant / sqlite-vec native extension
 
 ## 待决问题
 
-- [ ] 默认后端选型：开发用 sqlite-vec，生产用 Qdrant，通过 config 切换——确认这是唯一方案还是需要其他选项？（负责人：待认领）
-- [ ] embedding 模型运行方式：in-process（fleetent 主进程内加载 bge-m3）还是 HTTP sidecar（`infinity_emb` / `text-embeddings-inference` 独立进程，vector_store 调 HTTP 接口）？
+- [x] 默认后端选型（MVP）：普通 SQLite persistent backend，避免 sqlite-vec native extension 的安装和 on-premises 兼容风险；sqlite-vec / Qdrant 后置评估。
+- [x] embedding / rerank provider 边界：使用 HTTP provider 适配自托管或第三方 OpenAI-style API，默认仍为 deterministic / disabled，禁止静默 fallback。
+- [ ] embedding 模型部署方式：自托管 HTTP sidecar 的具体运行时选型（`infinity_emb` / `text-embeddings-inference` / 其他）和运维配置。
   - in-process：部署简单，但 bge-m3 约 500MB-1GB 内存、冷启动 30-60s，影响主进程重启体验
   - HTTP sidecar：多 fleetent 实例可共享同一 embedding 服务，主进程重启不影响 embedding；两者均完全自托管
-  - 建议接口设计为 HTTP endpoint，开发时用本地 `infinity_emb`，生产时独立部署——现在决定，后续不改接口（负责人：待认领）
 - [x] namespace 命名规范：memory 使用 `mem:{user_id}`；knowledge 使用 `kb:{tenant_id}:{kb_id}`。同一租户内允许多个知识库，并保留全局知识库与部门知识库并存的空间。

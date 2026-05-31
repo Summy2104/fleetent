@@ -38,7 +38,7 @@
 | 架构边界 | 独立 REST / CLI / MCP proxy 服务 | modular monolith；knowledge-base 属于 `intelligence.knowledge_base`，由 platform/admin/long_term_ctx 调用 | 不引入 standalone REST service boundary；后续用 fleetent public API 和现有 HTTP/admin 边界 |
 | AI 框架 | 依赖 `llama-index-core` 类型、reader、node | 禁止 LlamaIndex / LangChain / LangGraph | 所有 `BaseReader`、`Document`、`TextNode`、`NodeWithScore` 相关代码重写 |
 | 向量存储 | LanceDB 直接存储向量与 FTS 字段 | 使用 fleetent `vector_store` 边界，不能让业务层直连 LanceDB | vector search 走 public `vector_store` API；词法检索先用 SQLite FTS5 / BM25 |
-| Embedding | OpenAI SDK 和 OpenAI-compatible embeddings | 禁止云托管 embeddings 作为默认能力 | 后续 spec 使用自托管模型、sidecar 或 deterministic 测试 embedder；经 model/config 边界注入 |
+| Embedding | OpenAI SDK 和 OpenAI-compatible embeddings | 禁止云托管 embeddings 作为默认能力 | 使用 fleetent `embedding.*` HTTP provider 边界接入自托管模型服务；默认 deterministic provider 仅用于本地和测试 |
 | 数据库 | metadata store 自建表、补列迁移、`sqlite3.connect`、`?` 参数 | Alembic 管 schema；store SQL 用 named parameters；业务层不扩散 sqlite3 | 不迁移 store 实现；只迁移字段语义和状态机 |
 | 知识库身份 | `agent_id -> kb_ids` query scope | `tenant_id + kb_id`，agent 绑定一个或多个 kb | query scope 重写为 tenant-aware binding；默认 tenant 为 `default` |
 | 数据主权 | 可配置 OpenAI-compatible、Google Drive OAuth、VLM | on-premises 优先，禁止云托管专有服务破坏数据主权 | 外部 SaaS 连接器可作为可选数据源；模型能力默认 self-host |
@@ -67,7 +67,7 @@
 | 能力 | 为什么有价值 | 为什么必须重写 | 推荐落点 |
 | --- | --- | --- | --- |
 | vector store 写入和搜索 | 已验证 chunk/entity key、metadata、hybrid search 需要的字段 | LanceDB direct dependency 违反 fleetent `vector_store` 边界 | `knowledge-base-core` 使用 existing `vector_store` public API |
-| embedding 调用 | 区分 query embedding 和 document embedding，支持模型维度漂移 | OpenAI Embeddings 不能作为默认能力 | 后续通过 self-host embedding sidecar 或 model_router/config 注入 |
+| embedding 调用 | 区分 query embedding 和 document embedding，支持模型维度漂移 | OpenAI Embeddings 不能作为默认能力 | 通过已定义的 HTTP embedding provider 接入 self-host embedding sidecar；KB spec 只消费 provider 边界 |
 | chunker / node parser | section-aware chunking 和 parent expansion 思路有用 | `TextNode`、`KBNodeParser`、LlamaIndex metadata 绑定 | `knowledge-base-core` 定义 deterministic chunk dataclass |
 | retrieval engine | naive/BM25/hybrid/RRF、candidate_k、metadata filters 有参考价值 | `NodeWithScore`、LanceDB FTS/hybrid、OpenAI query planner 绑定 | `knowledge-base-hybrid-search` 重写 search orchestration |
 | query scope | 一个 agent 绑定多个 KB 的产品模型有价值 | fleetent 以 `tenant_id + kb_id` 和 agent binding 为隔离单位 | `knowledge-base-core` 先定义 namespace 和 binding 约定 |
@@ -124,13 +124,13 @@
 
 依赖：
 
-- `vector_store` public API 可按 namespace upsert/search/delete。
+- `vector_store` public API 可按 namespace upsert/search/delete，且已有普通 SQLite persistent backend。
 - DB runtime/store 边界已可承载 Alembic 管理的 tables。
 - `knowledge_base.*` config namespace 明确默认 tenant、默认 kb、chunk size、embedding provider。
 
 风险：
 
-- `vector_store` 当前 API 若不支持 namespace 或 metadata filter，需要先补公共契约。
+- `vector_store` 当前 API 已支持 namespace；metadata filter 不属于 vector_store MVP，KB 业务过滤应先由 KB store 负责。
 - Alembic 表设计要避免后续 parser/connector/sync 字段频繁破坏兼容。
 - embedding 默认路径必须 self-host 或 deterministic test double，不能落到 OpenAI Embeddings。
 
