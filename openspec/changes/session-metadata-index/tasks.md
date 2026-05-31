@@ -1,6 +1,6 @@
 ## 1. 前置核实（实现前的事实确认，无代码改动）
 
-- [x] 1.1 核实 `users.db` 既有表与 aiosqlite 访问模式（参照 `user_store.py` / `agent_store.py` 的 `DB_PATH` 注入、建表 DDL、`aiosqlite.connect` 直接写 SQL；禁止 ORM）
+- [x] 1.1 核实 `users.db` 既有表与 stdlib sqlite3 访问模式（参照 `user_store.py` / `agent_store.py` 的 `DB_PATH` 注入、建表 DDL、`sqlite3.connect` 直接写 SQL；禁止 ORM）
 - [x] 1.2 核实 `session_mgr.save()` 现签名 `(session_id, messages)`（行 37）与原子写流程（行 38-42），确认新增可选参数 `user_id` / `agent_name` 向后兼容
 - [x] 1.3 确认 SQLite 测试隔离方式：`monkeypatch session_index.DB_PATH → tmp_path / "x.db"`（CLAUDE.md 测试规范）
 

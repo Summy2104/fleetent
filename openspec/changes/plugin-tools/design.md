@@ -8,7 +8,7 @@
 
 插件工具是第三个来源。它要既复用 `@tool`（让插件作者只需理解一个装饰器，符合 tools.md「`@tool` 是工具作者唯一需要理解的接口」），又像 MCP 一样加命名空间前缀避免插件间/与内置工具重名，还要受 agent 级授权约束。
 
-约束（CLAUDE.md）：禁止 AI 框架；禁止 ORM（`agents` 表用 aiosqlite/sqlite 直接 SQL）；禁止全局可变状态（`PLUGINS_DIR` 为模块级常量，测试可 monkeypatch）；新模块结构 import → 常量 → 数据类 → 函数；mypy strict；行长 100；TDD Hard Gate；测试隔离插件目录到 `tmp_path`；不吞异常（容错跳过处必须 `logger.warning`）。本功能无需新依赖。
+约束（CLAUDE.md）：禁止 AI 框架；禁止 ORM（`agents` 表用 stdlib sqlite3 直接 SQL）；禁止全局可变状态（`PLUGINS_DIR` 为模块级常量，测试可 monkeypatch）；新模块结构 import → 常量 → 数据类 → 函数；mypy strict；行长 100；TDD Hard Gate；测试隔离插件目录到 `tmp_path`；不吞异常（容错跳过处必须 `logger.warning`）。本功能无需新依赖。
 
 依赖顺序：本 change 复用既有的 `tool_registry`（`@tool` 注册 + `_registry` 命名空间约定）、`agent_policy.check_tool_access`、`agent_loop` 的工具 schema 过滤（暴露给 LLM 前的真实授权门）、`agent_store.Agent`/`agents` 表、`server.py` lifespan（与 `scan_skills()` 并列的加载时机），以及 `mcp_client` 既有的 `{server_id}__{tool_name}` 命名空间约定。修改触及 capability `agent-definition`（`Agent`/`agents` 表加 `plugins`、把 plugins 展开纳入 `allowed_tools` 判定）；加列方式与 `db-migration` capability 相关，需前置核实加列走 alembic 还是 `_init_db`。无新增依赖。
 

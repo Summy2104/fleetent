@@ -6,7 +6,7 @@
 
 ## What Changes
 
-- 在 `users.db` 新增 **`sessions` 表**（aiosqlite 直接建表，**禁止 ORM**），存储每个 session 的轻量元数据：`session_id`（主键）、`user_id`、`created_at`、`updated_at`（最后活跃时间）、`message_count`、`agent_name`。
+- 在 `users.db` 新增 **`sessions` 表**（stdlib sqlite3 直接建表，**禁止 ORM**），存储每个 session 的轻量元数据：`session_id`（主键）、`user_id`、`created_at`、`updated_at`（最后活跃时间）、`message_count`、`agent_name`。
 - 新增 `session_index.py` 模块，提供元数据**写入/更新**与**查询**函数：
   - `record_activity(session_id, user_id, message_count, agent_name)`：upsert 元数据；首次写入 `created_at`，每次写入刷新 `updated_at`。
   - `get(session_id)`：返回单个 session 的元数据（不存在返回 None）。
@@ -19,7 +19,7 @@
 ## Capabilities
 
 ### New Capabilities
-- `session-metadata-index`: 每个 session 的轻量元数据索引（创建时间、最后活跃时间、消息数、user_id、agent_name），存于 `users.db` 的 `sessions` 表（aiosqlite，无 ORM）；提供 upsert 写入与按 user / 全系统统计的查询；与消息文件物理分离、互不影响。
+- `session-metadata-index`: 每个 session 的轻量元数据索引（创建时间、最后活跃时间、消息数、user_id、agent_name），存于 `users.db` 的 `sessions` 表（stdlib sqlite3，无 ORM）；提供 upsert 写入与按 user / 全系统统计的查询；与消息文件物理分离、互不影响。
 
 ### Modified Capabilities
 <!-- 无既有 spec 的需求级行为变更。session_mgr.save() 在原子写成功后追加一次索引更新副作用，消息持久化行为本身不变。 -->
@@ -27,9 +27,9 @@
 ## Impact
 
 - **代码**：
-  - 新增 `src/fleetent/session_index.py`（`DB_PATH` 常量可注入、建表 DDL、upsert 与查询函数；aiosqlite，无 ORM）。
+  - 新增 `src/fleetent/session_index.py`（`DB_PATH` 常量可注入、建表 DDL、upsert 与查询函数；stdlib sqlite3，无 ORM）。
   - 修改 `src/fleetent/session_mgr.py`：`save()` 在原子写成功后调用 `session_index.record_activity`（异常捕获，不回滚消息写入）。
 - **数据**：`users.db` 新增 `sessions` 表（与 `users` / `im_users` / `agents` 等同库，见 CLAUDE.md 数据目录）。
 - **配置**：无新 Settings 字段（仅复用 `DB_PATH`）。
 - **测试**：新增 `tests/test_session_index.py`；monkeypatch `session_index.DB_PATH → tmp_path / "x.db"`（SQLite 隔离，对齐 CLAUDE.md 测试规范）；`session_mgr` 集成测试 monkeypatch `SESSIONS_DIR` 与 `session_index.DB_PATH`。
-- **不影响**：`load()` / `session_lock()` 既有行为；原子写契约；不引入新依赖（aiosqlite 已是项目既有 SQLite 访问方式）。
+- **不影响**：`load()` / `session_lock()` 既有行为；原子写契约；不引入新依赖（stdlib sqlite3 已是项目既有 SQLite 访问方式）。

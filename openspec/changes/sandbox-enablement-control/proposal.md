@@ -35,7 +35,7 @@
 - **代码**：
   - 新增 `src/fleetent/sandbox_enablement.py`（`Mode` 枚举 + `is_code_execution_enabled()` 纯函数 + 启动期 `resolve_effective_mode(configured_mode, docker_available)`）。
   - 修改 `src/fleetent/sandbox_client.py`：增加 `docker_available() -> bool`（探测 `docker` CLI，失败返回 False，不抛异常）。
-  - 修改 `src/fleetent/agent_store.py`（**features 列 owner**）：`Agent` 数据类增加 `features: dict[str, Any]`（默认空 dict）；建表/读写 SQL 增加 `features` 列（裸 aiosqlite SQL）；`_init_db` 现用 `CREATE TABLE IF NOT EXISTS`，对已存在的旧表不会加列 → **必须显式 `ALTER TABLE agents ADD COLUMN features TEXT` 迁移**（否则旧库读 `row[features]` 越界），旧行读取 `json.loads(row[...] or "{}")` 回退 `{}`。
+  - 修改 `src/fleetent/agent_store.py`（**features 列 owner**）：`Agent` 数据类增加 `features: dict[str, Any]`（默认空 dict）；建表/读写 SQL 增加 `features` 列（裸 stdlib sqlite3 SQL）；`_init_db` 现用 `CREATE TABLE IF NOT EXISTS`，对已存在的旧表不会加列 → **必须显式 `ALTER TABLE agents ADD COLUMN features TEXT` 迁移**（否则旧库读 `row[features]` 越界），旧行读取 `json.loads(row[...] or "{}")` 回退 `{}`。
   - **run_code 上下文通道改造（本 change owner，为执行期需求而建）**：修改 `src/fleetent/agent_loop.py`（调用 `dispatch` 处透传 agent/session 上下文）→ `src/fleetent/tool_registry.py`（`dispatch` 增加上下文入参并向下传递）→ `src/fleetent/tools.py`（`run_code` 据上下文取 session_id/agent_name/features 供执行期使用，非用作启用 gate）。SB2/SB5 复用此通道。
   - **schema 过滤点接线**：修改 `src/fleetent/agent_loop.py` 的 `run()` / `run_stream()` 在现有 `allowed_tools` 过滤处（`agent_loop.py:346-347` / `584-586`）追加基于 `is_code_execution_enabled(effective_mode, agent_features)` 的过滤——不可用则把 `run_code` 从该 agent 的 schema 剔除。生效 mode + agent features 经 `run()` / `run_stream()` 新增入参传入。不改 `tool_registry` 注册路径、不做条件化注册、不在调用入口加拒绝文本。
   - 修改 server 启动 / `/health`：启动期探测 Docker → `resolve_effective_mode`，把生效 mode 注入 `run()`/`run_stream()` 调用方；启动日志与 `/health` 暴露生效 mode（降级时 `sandbox mode=off (docker unavailable)`）。
