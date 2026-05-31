@@ -73,11 +73,42 @@ def test_column_structure(tmp_path):
 
     # agents columns
     agent_cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)")}
-    assert agent_cols >= {"id", "name", "system_prompt", "allowed_tools", "created_at"}
+    assert agent_cols >= {
+        "id",
+        "name",
+        "system_prompt",
+        "allowed_tools",
+        "allowed_skills",
+        "blocked_skills",
+        "created_at",
+    }
 
     # approvals columns
     approval_cols = {row[1] for row in conn.execute("PRAGMA table_info(approvals)")}
-    assert approval_cols >= {"id", "session_id", "requester_user_id", "risk_level",
-                             "tool_name", "tool_args", "status", "approver_user_id",
-                             "created_at", "resolved_at"}
+    assert approval_cols >= {
+        "id",
+        "session_id",
+        "requester_user_id",
+        "risk_level",
+        "tool_name",
+        "tool_args",
+        "status",
+        "approver_user_id",
+        "created_at",
+        "resolved_at",
+    }
     conn.close()
+
+
+def test_downgrade_removes_skill_columns(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    cfg = Config()
+    cfg.set_main_option("script_location", "migrations")
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db}")
+    command.downgrade(cfg, "001")
+    agent_cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)")}
+    conn.close()
+    assert "allowed_skills" not in agent_cols
+    assert "blocked_skills" not in agent_cols

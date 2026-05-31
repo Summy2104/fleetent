@@ -172,3 +172,21 @@
 
 **影响:** 636 passed;mypy 68=67+1,+1 是 _resolve_disabled_skills 的 Settings() call-arg(同 context_mgr D4 既有模式,非新模式)。实现了 roadmap SK6 的全局禁用层。
 **需 zy 核实:** 默认 disabled_skills 空、enabled_by_default 缺省 True 下行为不变(守卫已验);内置示例 skill 内容。
+
+## agent-skill-binding — feat/agent-skill-binding  ⚠️⚠️ 跨张亮 governance 域,务必复核
+
+**实现:** `agent_policy.check_skill_access(skill, allowed, blocked)` 纯函数(复用 check_tool_access fnmatch,opt-in:allowed None→False);agent_loop 加 `_matched_skill_content()`(match→过滤→load 单点),run_sync/run_stream/run 加 allowed_skills/blocked_skills 参数(run 仅透传);normalizer 从 agent 读绑定过滤注入。
+
+**⚠️⚠️ 动了张亮的 agent_store(待张亮复核):**
+- `Agent` dataclass 加 `allowed_skills: list[str]|None=None`、`blocked_skills: list[str]|None=None`(可选、向后兼容)。
+- `agents` 表加两列 `allowed_skills TEXT`/`blocked_skills TEXT`(nullable;NULL=未声明 opt-in,[]=显式空白名单);_init_db CREATE 含新列 + `_ensure_skill_columns()` ALTER 兜底旧表。
+- create_agent/get_by_name/get_agent_for_user/get_agent_for_channel 读写新列。
+- **新增 alembic 迁移 `migrations/versions/002_add_agent_skill_columns.py`**(up 加列/down 回滚)。
+- 字段命名 allowed_skills/blocked_skills + 缺省语义(None=opt-in 不注入、[]=显式空)按 design D1/D3 默认落定——**需张亮确认是否符合 governance 域约定**。
+
+**opt-in 行为变更:** CLI run_sync 无绑定→不注入任何 skill(相对此前全局注入)。既有测试不依赖全局注入(mock_client 把 match_skill mock 成 None),故无回归;新增守卫锁 opt-in。默认 agent 配置白名单的缓解(D5)本次不实现。
+
+**自解冲突:** get_agent_for_channel 别名 a/ca 冲突→改 ca_a;旧表无新列→_ensure_skill_columns ADD COLUMN 兜底;ruff SIM103 内联。
+
+**影响:** 658 passed,迁移测试 5 passed,mypy 68=基线。
+**⚠️ 需 zy + 张亮 核实:** agent_store 字段命名/语义/迁移;opt-in 对 CLI 的行为变更(默认 agent 白名单缓解未做)。

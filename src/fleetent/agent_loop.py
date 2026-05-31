@@ -13,7 +13,7 @@ from openai.types.chat import ChatCompletionChunk
 
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent import model_router
-from fleetent.agent_policy import check_tool_access
+from fleetent.agent_policy import check_skill_access, check_tool_access
 from fleetent.context_mgr import maybe_compress
 from fleetent.error_classifier import classify
 from fleetent.eval_logger import log_run
@@ -228,6 +228,26 @@ def _accumulate_repairs(total: dict[str, int], report: HygieneReport) -> None:
         total[kind.value] = total.get(kind.value, 0) + count
 
 
+def _matched_skill_content(
+    user_input: str,
+    allowed_skills: list[str] | None,
+    blocked_skills: list[str] | None,
+) -> str | None:
+    """Match a skill for `user_input`, then gate it by the agent's binding.
+
+    The keyword `match` still runs over the full index; the per-agent filter is
+    applied between match and load so a skill outside the agent's whitelist (or
+    inside its blocklist) is never loaded or injected. opt-in: when
+    `allowed_skills is None` (agent declared no whitelist), nothing is injected.
+    """
+    matched = match_skill(user_input)
+    if matched is None:
+        return None
+    if not check_skill_access(matched, allowed_skills, blocked_skills):
+        return None
+    return load_skill(matched)
+
+
 ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
 
 
@@ -238,6 +258,8 @@ async def run(
     is_sub_agent: bool = False,
     reply_func: ReplyFunc | None = None,
     allowed_tools: list[str] | None = None,
+    allowed_skills: list[str] | None = None,
+    blocked_skills: list[str] | None = None,
     agent_name: str | None = None,
     max_turns: int | None = None,
     max_consecutive_failures: int | None = None,
@@ -248,6 +270,12 @@ async def run(
     When is_sub_agent=True the sub_agent tool is excluded from the tool schema
     so child agents cannot spawn further sub-agents.
     When allowed_tools is set, only matching tools (fnmatch patterns) are exposed.
+    allowed_skills / blocked_skills accompany allowed_tools for callers that
+    build messages themselves; run() receives prebuilt messages and does not
+    re-run skill injection here — the binding is applied by the message-building
+    entry points (run_sync / run_stream / im_gateway), which is the sole match→
+    load site. The params are accepted so the agent binding can travel the same
+    path as allowed_tools without callers special-casing run().
     max_turns / max_consecutive_failures override the deployment defaults.
     force_model forces this run's LLM calls onto a specific model via a
     request-level routing override (MR1); None keeps task_type routing unchanged.
@@ -402,16 +430,27 @@ async def run(
     return reply
 
 
-def run_sync(user_input: str, user_id: str = "default", system_prompt: str = _SYSTEM) -> str:
-    """Synchronous wrapper around run() for CLI use."""
+def run_sync(
+    user_input: str,
+    user_id: str = "default",
+    system_prompt: str = _SYSTEM,
+    allowed_skills: list[str] | None = None,
+    blocked_skills: list[str] | None = None,
+) -> str:
+    """Synchronous wrapper around run() for CLI use.
+
+    opt-in skill binding: the CLI has no agent binding, so allowed_skills
+    defaults to None and no skill is injected (behavior change from the prior
+    global injection). Mitigation via a configured default agent is an Open
+    Question (design D5), not implemented here.
+    """
 
     scan_skills()
     memory_ctx = load_memories(user_id=user_id)
     full_system = f"{memory_ctx}\n\n{system_prompt}" if memory_ctx else system_prompt
 
-    matched = match_skill(user_input)
-    if matched:
-        skill_content = load_skill(matched)
+    skill_content = _matched_skill_content(user_input, allowed_skills, blocked_skills)
+    if skill_content:
         full_system = f"{full_system}\n\n{skill_content}"
 
     messages: list[dict[str, Any]] = [
@@ -427,6 +466,8 @@ async def run_stream(
     user_id: str = "default",
     system_prompt: str = _SYSTEM,
     allowed_tools: list[str] | None = None,
+    allowed_skills: list[str] | None = None,
+    blocked_skills: list[str] | None = None,
     agent_name: str | None = None,
     max_turns: int | None = None,
     max_consecutive_failures: int | None = None,
@@ -448,9 +489,9 @@ async def run_stream(
     memory_ctx = load_memories(user_id=user_id)
     full_system = f"{memory_ctx}\n\n{system_prompt}" if memory_ctx else system_prompt
 
-    matched = match_skill(user_input)
-    if matched:
-        full_system = f"{full_system}\n\n{load_skill(matched)}"
+    skill_content = _matched_skill_content(user_input, allowed_skills, blocked_skills)
+    if skill_content:
+        full_system = f"{full_system}\n\n{skill_content}"
 
     if images:
         user_msg = build_message_with_images(user_input, images)
