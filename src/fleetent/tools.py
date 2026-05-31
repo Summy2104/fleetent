@@ -83,12 +83,18 @@ def read_skill(name: str) -> str:
 
     When a skill in the available_skills catalog matches the task, call this with
     its <name> to load the full SKILL.md, then follow it. Returns an error string
-    if no skill with that name is registered.
+    if no skill with that name is registered, or a refusal if the skill failed the
+    static injection audit (its content never reaches the model this way).
     """
     from fleetent import skill_registry
 
-    if name not in skill_registry._index:
+    entry = skill_registry._index.get(name)
+    if entry is None:
         return f"error: no skill named {name!r}"
+    if entry.audit_blocked:
+        # Refuse before load(): a severe injection hit means the body must not
+        # reach the model. load() itself still returns it for manual triage.
+        return f"error: skill {name!r} was blocked by the static injection audit"
     return skill_registry.load(name)
 
 
