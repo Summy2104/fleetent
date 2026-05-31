@@ -208,3 +208,48 @@
 1. 降级时**中段全丢**（仅留一条 `_MIDDLE_OMITTED_NOTICE` 标注）——而非保留中段首尾极少量。spec 只约束「降级后序列合法不崩溃」，已满足；确认全丢可接受（降级为故障兜底而非常态）。
 2. D6 收敛策略采「合并摘要受 `summary_max_tokens` 上界约束 LLM 输出长度」即天然收敛，**未额外实现「超界整体重摘一次」的显式二次调用**——因合并 prompt 每次都把 prev_summary 压回 ≤ 上界，累积摘要不会线性堆叠，已满足「不无限增长」。确认无需额外的显式重摘分支。
 3. `summary_max_tokens` 仅经 config dict 注入，**未加进 `config.Settings` / `_default_config()`**（沿用既有 `_DEFAULT_SUMMARY_MAX_TOKENS` 常量 + config dict 覆盖模式，与 AR13 `initial_intent_max` 不同——后者进了 Settings）。若需运维侧可配，可后续补 Settings 字段；当前默认 512 与原 max_tokens 一致，行为等价。确认此差异可接受。
+
+---
+
+## 8. loop-detection (AR4)：主循环粗粒度循环检测 checker
+
+**前置核实结论（tasks 1.x）：**
+1. **AR1 接口（1.1）**：`termination.py` 现状已含 `StopReason.loop_detected`（保留原因码，无需新增枚举）、`LoopState`（@dataclass）、`TerminationChecker` Protocol（`check(state: LoopState) -> StopReason | None`）、`TerminationController.register`/`should_stop`（顺序评估、首个非 None 即返回）。本 change 仅新增 checker + 扩展 `LoopState`，未改 Protocol/Controller 语义。
+2. **主循环工具落点（1.2）**：`run()` 工具分发后 `messages.append({"role":"tool", "tool_call_id":tc.id, "content":result})` 处可同时拿到 `tc.function.name`/`tc.function.arguments`/`result`/`failed`（`_safe_dispatch` 归一化字符串 + failed 标志）四者。三条分支（sub_agent / approval-rejected / 普通 dispatch）中只有两条 dispatch 分支设 `failed`，已在循环体引入 `failed = False` 默认（覆盖 sub_agent=成功、approval-rejected=不计 failed），保证四元组成功标志在所有分支可取。`run_stream()` 同理在 `_safe_dispatch` 后落点可取 `name/args/result/failed`。
+3. **`_build_controller` 注册顺序（1.3）**：在 `MaxTurnsChecker`/`ConsecutiveFailuresChecker`/`ApprovalRejectedChecker` **之后** `register(LoopDetectionChecker(...))`。`should_stop` 首个非 None 即返回 → 既有三者优先级不变；空历史时 checker 恒返回 None，对既有用例零影响（既有 `test_build_controller_*` 适配为解包元组后断言不变）。
+4. **message_hygiene / 压缩可见性（1.4）**：`_fix_consecutive_same_role` 只对相邻同角色 user/assistant 文本合并；警告用 `user` 角色且紧跟一批 `tool` 结果之后（前一条非 user），不触发同角色合并，独立可见。`maybe_compress` 的 `_keep_tail` 按尾窗保留，但销毁式压缩可能丢中段——故 D4b 落点选「压缩**之后**、sanitize/LLM 调用**之前** append 警告」，使其必在送 LLM 序列中（见实现）。
+5. **config 字段（1.5）**：`config.Settings` 加 `agent_loop_repeat_threshold: int = 3`、`loop_detect_ignore_arg_keys: list[str] = []` 即经 `.env`/`settings.yaml` 覆盖（pydantic-settings env 大写自动映射，已测 `AGENT_LOOP_REPEAT_THRESHOLD` override）。
+
+**实现：**
+- **新建 `src/fleetent/loop_detector.py`**（结构 import→常量→纯函数→checker 类）：
+  - `arg_fingerprint(arguments, ignore_keys=())`：JSON 解析→（非空 ignore_keys 时剔除顶层键）→`json.dumps(sort_keys=True)`→sha256；解析失败对原始串取 sha256。键序无关、易变键可选剔除。
+  - `result_digest(result)`：`len ≤ 2KB` 全量、否则取首尾各 `_DIGEST_EDGE_BYTES=1024` 字符拼接，再 sha256。常数级、字节级比对。
+  - `LoopDetectionChecker(repeat_threshold, ignore_arg_keys=())`：`window` 属性 = 派生常量 `max(2*threshold, 6)`（不暴露配置）；`ignore_arg_keys` 属性供主循环算指纹用。
+- **`termination.py` 扩展 `LoopState`**（默认空 / False，向后兼容）：`tool_history: list[ToolCallRecord]`（四元组 `(tool_name, arg_fingerprint, result_digest, success)`）、`loop_warning_requested: bool=False`、`loop_warning_injected: bool=False`；新增 `record_tool_call(..., *, window)` 方法 append 后 FIFO 截断到 window（`del self.tool_history[:-window]`），不保留全量。新增 `ToolCallRecord` 类型别名。
+- **`agent_loop.py` 接入**：`_LOOP_WARNING_TEXT` 常量（D4 文案）；`_resolve_loop_config`（call param > Settings > 默认，lazy import Settings）；`_build_controller` 改为返回 `(controller, loop_checker)` 元组并末位注册 checker；`_maybe_inject_loop_warning(messages, state)` 在 `loop_warning_requested and not loop_warning_injected` 时 append `{"role":"user","content":_LOOP_WARNING_TEXT}` 并置 `loop_warning_injected=True`（幂等）。`run()`/`run_stream()` 两路径：① 解包 `_build_controller`；② `maybe_compress` **之后** 调 `_maybe_inject_loop_warning`（D4b）；③ 每次工具调用落点后 `state.record_tool_call(name, arg_fingerprint(args, loop_checker.ignore_arg_keys), result_digest(result), not failed, window=loop_checker.window)`。
+- **config.py / settings.yaml.example**：加两字段 + 注释示例。
+
+**双信号 + 两段式落地：**
+- **信号 A（精确重复）**：`_has_repeat` 在尾窗内 `Counter((tool, fp))`，任一计数 ≥ threshold 即命中。
+- **信号 B（结果停滞）**：尾窗内 `Counter((tool, digest) for ... if ok)`（**仅成功**调用计入，失败被排除，避免与 consecutive_failures 双重计数），任一计数 ≥ threshold 即命中，**不论参数是否变化**。
+- **两段式**：`check()` 中 `_has_repeat` 命中后——若 `loop_warning_injected` 已 True → 返回 `StopReason.loop_detected`（第二段终止）；否则置 `loop_warning_requested=True`、返回 None（第一段请求警告，不终止）。
+- **警告角色/可见性（D4/D4b）**：角色定死 `user`（不会被 `_fix_consecutive_same_role` 与首位 system 合并）。D4b 落点：警告在 `maybe_compress` 之后、`sanitize`/LLM 调用之前 append——即便该轮触发销毁式压缩，警告也在压缩产物**之上**追加，必出现在送 LLM 序列中。`test_run_warning_survives_same_round_compression` 用「压缩丢弃除首条 system 外全部消息」的 mock 守卫：断言压缩后某次 LLM 调用的 messages 仍含 `user` 角色警告文本。
+
+**checker 如何「请求注入警告」（返回值/信号设计）：** checker 不直接改 messages（保持纯判定、只读 + 写状态标志）。它通过在 `LoopState` 上置 `loop_warning_requested=True` 并返回 `None`（不终止）来「请求」；主循环在下一段 `_maybe_inject_loop_warning` 读该标志决定是否 append 警告并置 `loop_warning_injected`。即「checker 写请求标志 / 主循环执行注入」的状态驱动协议，沿用 AR1「标志位驱动循环」模式，判定逻辑全在 checker 内、主循环只记录历史 + 按请求注入。
+
+**自解冲突：**
+1. **`_build_controller` 返回值由 controller 改为 `(controller, loop_checker)` 元组** —— 主循环记录历史时需 checker 的 `window`/`ignore_arg_keys` 派生量。选返回元组而非另设全局/重复解析配置（禁止全局可变状态）。两处调用与 1 处既有测试已适配（`controller, _ = ...` / `controller, loop_checker = ...`）。
+2. **多分支 `failed` 标志缺失** —— sub_agent 与 approval-rejected 分支原不设 `failed`。引入循环体级 `failed = False` 默认：sub_agent 记为成功（与其 `consecutive_failures=0` 语义一致、视作有进展）、approval-rejected 记为「非失败」（其终止由 approval_rejected 优先处理，不应喂信号 B）。最小改动，不动既有 consecutive_failures 计数语义。
+3. **checker 私有 `_ignore_arg_keys` 外部访问** —— 主循环需读以算指纹。加只读 `ignore_arg_keys`/`window` property，避免下划线私有属性跨模块访问，符合风格。
+4. **Settings 调用触发 mypy `[call-arg]`** —— `_resolve_loop_config` lazy `Settings()` 与既有 `termination._default_config`/`context_mgr._default_config` 同模式，属既有遗留错误模式（`Missing named argument "anthropic_api_key"`），非新模式。
+5. **`record_tool_call` 的 window 注入** —— window 不存模块级常量（禁止全局可变状态），由 checker 派生属性按调用传入，per-run 隔离。
+
+**影响：**
+- pytest：base **841 passed → after 874 passed**（新增 33：test_loop_detector 20 + test_termination 6 + test_config 3 + test_agent_loop 6−2 复用... 实测净 +33；AR1 既有终止用例全绿不破，含适配后的 `test_build_controller_*`）。
+- ruff（仅改动文件 `loop_detector.py`/`termination.py`/`agent_loop.py`/`config.py` + 4 个测试文件 + `settings.yaml.example`）：format 重排 3 文件；check —— 新建/改动文件 **All passed**，唯一报错为 `agent_loop.py:721` 的 `PLC0415`（`from openai.types import CompletionUsage` 函数内 import），经 `git stash` 验证为 **基线即存在**（HEAD 同位置同错），非本 change 引入。
+- mypy：base **73 errors → after 74 errors**。新增 1 条为既有 `Missing named argument "anthropic_api_key" for "Settings"` 模式的又一处（13→14，源自 `_resolve_loop_config` 的 `Settings()`），**无新增错误模式（错误类型）**。
+
+**需 zy 核实：**
+1. **sub_agent / approval-rejected 分支记 `success=True`（not failed=True）**：sub_agent 视作有进展（与其重置 consecutive_failures 一致）；approval-rejected 不计失败（由 approval_rejected 原因码优先终止）。确认此归类符合「信号 B 只计成功且有进展」语义、不致 sub_agent 反复同结果被误判循环（实际 sub_agent 极少在窗口内反复同 digest，风险低）。
+2. **警告文案**（`_LOOP_WARNING_TEXT`）措辞定死为「检测到你正在重复调用同一工具且似乎没有进展，请改用其它方式或直接给出当前结论。」，与 design D3 示例一致。确认无需调整。
+3. **`loop_detect_ignore_arg_keys` 仅剔除顶层 key**（不递归嵌套）：design D2 表述「剔除指定键」，实现按顶层 dict 键剔除。确认顶层粒度足够（嵌套易变键场景留信号 B 兜底）。

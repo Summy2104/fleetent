@@ -8,11 +8,16 @@ plug in by registering a checker rather than editing the loop body.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol
 
 LimitConfig = dict[str, int]
+
+# One observed tool call: (tool_name, arg_fingerprint, result_digest, success).
+# Carried on LoopState so the loop-detection checker (AR4) can read recent
+# history; success gates signal B (only successful, identical results count).
+ToolCallRecord = tuple[str, str, str, bool]
 
 
 def _default_config() -> LimitConfig:
@@ -65,6 +70,29 @@ class LoopState:
     turn: int = 0
     consecutive_failures: int = 0
     approval_rejected: bool = False
+    # Loop-detection state (AR4). Defaults keep this backward-compatible: an
+    # empty history and unset flags leave every existing checker unaffected.
+    tool_history: list[ToolCallRecord] = field(default_factory=list)
+    loop_warning_requested: bool = False
+    loop_warning_injected: bool = False
+
+    def record_tool_call(
+        self,
+        tool_name: str,
+        arg_fingerprint: str,
+        result_digest: str,
+        success: bool,
+        *,
+        window: int,
+    ) -> None:
+        """Append one tool call and FIFO-truncate the history to `window` entries.
+
+        Keeping only the recent window bounds memory and scopes "how long ago a
+        repeat still counts as the same loop" to the detection window (design D3).
+        """
+        self.tool_history.append((tool_name, arg_fingerprint, result_digest, success))
+        if len(self.tool_history) > window:
+            del self.tool_history[:-window]
 
 
 class TerminationChecker(Protocol):
