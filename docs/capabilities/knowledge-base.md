@@ -192,15 +192,17 @@ async def delete(document_id: str) -> None:
 
 ## 现状
 
-团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移代码**，而非从零重写。
+团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移设计资产和小块算法**，而非从零重写或整体搬运。
 
-**可直接迁移（knowledge-bridge 已实现，无 LlamaIndex 依赖）**：
-- ✅ 文档解析器：HTML / Markdown / PDF / DOCX / PPTX / Google Docs / Google Sheets / 图片（换输出类型即可）
-- ✅ Confluence 连接器：分页、增量同步、限速逻辑
-- ✅ Google Drive 连接器：OAuth 2.0 认证、Service Account、变更 token 增量同步、Webhook
-- ✅ 本地目录连接器
-- ✅ 中文 BM25 分词：jieba + RagFlow 方式（`retrieval/lexical.py`）
-- ✅ 同步规划器：6 种动作模型（SKIP / UPSERT_METADATA_ONLY / REEMBED / RECHUNK_LOCAL / REFETCH_AND_REINDEX / DELETE_LOCAL）
+迁移评估见 [knowledge-bridge 迁移计划](../knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：先做 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环，再依次推进 parser、local connector、hybrid search、sync planner、Confluence / Google Drive connector、graph search 和 retrieval audit。当前迁移评估 change 只产出文档，不迁移 parser / connector 代码，不实现 tables、ingest 或 search。
+
+**后续可迁移参考（knowledge-bridge 已实现，但需按 fleetent specs 分批适配）**：
+- ✅ 文档解析思路：text / Markdown / HTML / section-first 归并优先；PDF / DOCX / PPTX / Google Docs / Google Sheets 后续逐项评估依赖；图片 / VLM 暂缓
+- ✅ Confluence 连接器算法：分页、增量 token、限速和 429 backoff；接口必须重写为 fleetent `DataSource`
+- ✅ Google Drive 连接器算法：OAuth 2.0、Service Account、change token、删除确认；Webhook 暂缓
+- ✅ 本地目录连接器：遍历、后缀映射、mtime/hash 变更检测；去掉 LlamaIndex `BaseReader`
+- ✅ 中文 BM25 分词思路：jieba + CJK bigram（`retrieval/lexical.py`），在 SQLite FTS5 下重新验证
+- ✅ 同步规划器动作模型：SKIP / UPSERT_METADATA_ONLY / REEMBED / RECHUNK_LOCAL / REFETCH_AND_REINDEX / DELETE_LOCAL
 
 **需要重写（深度耦合 LlamaIndex 或违反 fleetent 约束）**：
 - 向量存储：LanceDB → fleetent `vector_store`（sqlite-vec / Qdrant）
