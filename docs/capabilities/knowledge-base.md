@@ -6,7 +6,7 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML 解析，deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、按 tenant + knowledge base 隔离召回相关文档片段，以及手动运行的 deterministic retrieval evaluation。
+**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML 解析，local directory 手动同步，deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、按 tenant + knowledge base 隔离召回相关文档片段，以及手动运行的 deterministic retrieval evaluation。
 
 **后续负责**：数据源接入与文档获取、文档解析、实体与关系提取、图谱存储、同步规划。
 
@@ -18,15 +18,15 @@
 
 **模块归属**：
 - owning package：`intelligence.knowledge_base`
-- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`delete(document_id)`
-- owned tables：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`、`knowledge_chunks_fts`
+- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`delete(document_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`sync_local_directory(config, tenant_id, kb_id)`
+- owned tables：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`、`knowledge_chunks_fts`、`knowledge_source_states`
 - config namespace：`knowledge_base.*`
 
 ## 关键流程
 
 ```mermaid
 flowchart TD
-    subgraph connector["连接器流程（定时或手动触发）"]
+    subgraph connector["连接器流程（手动触发）"]
         C1[DataSource.list_documents] --> C2[DataSource.fetch]
         C2 --> C3[knowledge_base.ingest\nfilename + content + format + tenant_id + kb_id]
     end
@@ -87,6 +87,19 @@ knowledge_chunks_fts USING fts5 (
   kb_id       UNINDEXED,
   content,
   tokenize='unicode61'
+)
+
+-- local directory source state
+knowledge_source_states (
+  source_id    TEXT,
+  tenant_id    TEXT,
+  kb_id        TEXT,
+  source_path  TEXT,
+  mtime_ns     INTEGER,
+  content_hash TEXT,
+  document_id  TEXT,
+  updated_at   DATETIME,
+  PRIMARY KEY (source_id, tenant_id, kb_id, source_path)
 )
 ```
 
@@ -182,6 +195,31 @@ async def search(
 
 async def delete(document_id: str) -> None:
     """删除文档及其所有 chunk 和对应向量。"""
+
+
+@dataclass
+class DocumentRef:
+    id: str
+    filename: str
+    format: str
+    path: str | None
+    url: str | None
+    metadata: dict[str, str]
+
+
+@dataclass
+class LocalDirectorySourceConfig:
+    source_id: str
+    root_path: str | Path
+    allowed_roots: list[str | Path]
+
+
+async def sync_local_directory(
+    config: LocalDirectorySourceConfig,
+    tenant_id: str,
+    kb_id: str,
+) -> LocalSyncSummary:
+    """从显式 allowlist root 下递归扫描 .txt/.md/.html/.htm 文件并导入指定 KB。"""
 ```
 
 `mode` 取值：
@@ -193,14 +231,14 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 
 ## 现状
 
-**已完成 core + parser + hybrid 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、基础 Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入；`knowledge-base-parsers-basic` 增加了无 AI 框架依赖的 plain text / Markdown / lightweight HTML parser，并提供 parsed ingest adapter；`knowledge-base-hybrid-search` 增加了 knowledge-base-owned SQLite FTS5 keyword index、keyword mode、hybrid mode 和 RRF 融合。
+**已完成 core + parser + hybrid + local connector 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、基础 Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入；`knowledge-base-parsers-basic` 增加了无 AI 框架依赖的 plain text / Markdown / lightweight HTML parser，并提供 parsed ingest adapter；`knowledge-base-hybrid-search` 增加了 knowledge-base-owned SQLite FTS5 keyword index、keyword mode、hybrid mode 和 RRF 融合；`knowledge-base-connectors-local` 增加了 DataSource / DocumentRef 边界、显式 root allowlist 的 local directory source、`.txt` / `.md` / `.html` / `.htm` 格式映射、source path / mtime / content hash 状态记录，以及手动 `sync_local_directory`。
 
 团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移设计资产和小块算法**，而非从零重写或整体搬运。
 
-迁移评估见 [knowledge-bridge 迁移计划](../knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：已先完成 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环，并完成 `knowledge-base-parsers-basic` 的基础解析器、`knowledge-base-hybrid-search` 的 SQLite FTS5 / BM25 与 RRF 融合；后续再依次推进 local connector、sync planner、Confluence / Google Drive connector、graph search 和 retrieval audit。
+迁移评估见 [knowledge-bridge 迁移计划](../knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：已先完成 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环，并完成 `knowledge-base-parsers-basic` 的基础解析器、`knowledge-base-hybrid-search` 的 SQLite FTS5 / BM25 与 RRF 融合、`knowledge-base-connectors-local` 的 local directory 手动同步；后续再依次推进 sync planner、Confluence / Google Drive connector、graph search 和 retrieval audit。
 
 当前未实现内容：
-- 无 local directory、Confluence、Google Drive connector
+- 无 Confluence、Google Drive connector
 - 无 sync planner、后台 job、admin UI、REST upload API
 - 无 rerank / query planner
 - 无 graph_search、entities、relations 或 `kb_extraction`
@@ -227,14 +265,14 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 ## 当前缺口
 
 - parser 已支持 text / Markdown / lightweight HTML；PDF / Office / image / VLM 解析尚未实现。
-- connector / sync 能力尚未开始：当前只接受调用方传入内容。
+- local directory 已支持手动 sync；尚未实现 sync planner、后台 job 或第三方 connector。
 - 检索已支持 SQLite FTS5/BM25 keyword mode 与 RRF hybrid mode；尚未实现 rerank、query planner 或 graph。
-- 外部数据源暂未接入：local directory、Confluence、Google Drive 均未实现。
+- 外部 SaaS 数据源暂未接入：Confluence、Google Drive 均未实现。
 - long-term-ctx 只支持内置默认 KB provider；还没有 agent 到多 KB 的绑定策略。
 
 ## 下一批候选 specs
 
-- `knowledge-base-connectors-local`
+- `knowledge-base-sync-planner`
 
 ## 自动化效果验证
 
@@ -327,7 +365,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 ## 测试边界
 
 **需要单元测试的行为**：
-- public API 可导入：`KnowledgeDocument`、`KnowledgeChunk`、`ingest_text()`、`search()`、`delete()`
+- public API 可导入：`KnowledgeDocument`、`KnowledgeChunk`、`ingest_text()`、`search()`、`delete()`、`DocumentRef`、`DataSource`、`sync_local_directory()`
 - 配置默认值：`knowledge_base.enabled=false`，默认 tenant/kb 与 chunk 参数稳定
 
 **需要集成测试的行为**：
