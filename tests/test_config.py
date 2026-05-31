@@ -39,3 +39,23 @@ def test_default_agent_name_from_env(monkeypatch):
     monkeypatch.setenv("DEFAULT_AGENT_NAME", "basic")
     s = Settings()
     assert s.default_agent_name == "basic"
+
+
+def test_context_dual_threshold_defaults():
+    s = Settings(anthropic_api_key="test-key")
+    assert s.context_tmax_ratio == 0.8
+    assert s.context_tretained_ratio == 0.6
+
+
+def test_context_dual_threshold_env_override(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("CONTEXT_TMAX_RATIO", "0.9")
+    monkeypatch.setenv("CONTEXT_TRETAINED_RATIO", "0.5")
+    s = Settings()
+    assert s.context_tmax_ratio == 0.9
+    assert s.context_tretained_ratio == 0.5
+
+
+def test_context_compress_threshold_removed():
+    s = Settings(anthropic_api_key="test-key")
+    assert not hasattr(s, "context_compress_threshold")
