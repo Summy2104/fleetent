@@ -25,6 +25,20 @@ def test_vector_store_defaults():
     assert s.vector_store.backend == "memory"
     assert s.embedding.backend == "deterministic"
     assert s.embedding.dimensions == 64
+    assert s.embedding.endpoint == ""
+    assert s.embedding.model == ""
+    assert s.embedding.api_key_env == ""
+    assert s.embedding.timeout_seconds == 10.0
+
+
+def test_rerank_defaults():
+    s = Settings(anthropic_api_key="test-key")
+
+    assert s.rerank.backend == "disabled"
+    assert s.rerank.endpoint == ""
+    assert s.rerank.model == ""
+    assert s.rerank.api_key_env == ""
+    assert s.rerank.timeout_seconds == 10.0
 
 
 def test_settings_env_override(monkeypatch):

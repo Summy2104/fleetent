@@ -19,7 +19,7 @@
 - owning package：`intelligence.vector_store`
 - public API：`upsert(id, text, namespace)`、`search(query, namespace, limit)`、`delete(id, namespace)`、`SearchResult`
 - owned tables：无（sqlite-vec backend 的物理表由 vector_store backend adapter 管理）
-- config namespace：`vector_store.*`、`embedding.*`
+- config namespace：`vector_store.*`、`embedding.*`、`rerank.*`
 
 ## 关键流程
 
@@ -67,11 +67,14 @@ async def delete(id: str, namespace: str) -> None:
 已实现内容：
 - `fleetent.intelligence.vector_store` public API：`upsert()`、`search()`、`delete()`、`SearchResult`
 - namespace helper：`memory_namespace(user_id)`、`knowledge_namespace(tenant_id, kb_id)`
-- deterministic embedding backend，用于测试和本地开发
+- embedding provider abstraction：deterministic provider 用于测试和本地开发，HTTP provider 兼容
+  OpenAI-style `/v1/embeddings`
+- rerank provider abstraction：disabled / deterministic / HTTP provider 已定义，供后续 retrieval 流程使用
 - in-memory vector backend，支持 namespace 隔离、upsert 覆盖、delete、score 排序
-- `vector_store.*` / `embedding.*` 基础配置命名空间
+- `vector_store.*` / `embedding.*` / `rerank.*` 基础配置命名空间
 
 当前定位：可支持 memory-layer、long-term-ctx 和测试场景，不是生产级向量检索后端。
+rerank provider 目前只提供边界，尚未接入 knowledge-base search。
 
 ## 规划中（v1.0）
 
@@ -89,14 +92,16 @@ async def delete(id: str, namespace: str) -> None:
 ## 当前缺口
 
 - 持久化后端未实现：进程重启后 in-memory 向量丢失。
-- 真实 embedding 未接入：当前 deterministic embedding 只能验证链路，不能代表语义检索质量。
+- 真实 embedding 可通过 HTTP provider 接入，但当前默认仍是 deterministic，需部署自托管
+  embedding endpoint 后显式配置。
+- rerank 尚未接入 knowledge-base search；当前只定义 provider abstraction。
 - 缺少向量后端迁移 / 重建策略：memory 或 KB 重建索引的运维流程未定义。
 - 缺少检索质量评估集：无法量化不同 embedding / backend 的召回质量差异。
 
 ## 下一批候选 specs
 
 - `vector-store-sqlite-vec-backend`
-- `embedding-http-provider`
+- `rerank-kb-search-integration`
 - `vector-store-reindex-jobs`
 - `vector-store-retrieval-evaluation`
 
