@@ -19,6 +19,14 @@ def test_observability_logging_defaults():
     assert s.observability.logging.directory == "data/logs"
 
 
+def test_vector_store_defaults():
+    s = Settings(anthropic_api_key="test-key")
+
+    assert s.vector_store.backend == "memory"
+    assert s.embedding.backend == "deterministic"
+    assert s.embedding.dimensions == 64
+
+
 def test_settings_env_override(monkeypatch):
     monkeypatch.setenv("MICROSANDBOX_URL", "http://localhost:9999")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
