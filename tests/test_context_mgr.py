@@ -674,8 +674,13 @@ def test_compress_runs_pre_cleanup_before_summarize(monkeypatch):
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{big_b64}"}}
         ],
     }
+    # AR13: head retains the leading user-intent run, so the image is placed in the
+    # summarized middle (after an assistant turn breaks the intent run) to exercise
+    # the AR15 pre-cleanup-before-summarize path.
     big_msgs = [
         {"role": "system", "content": "sys"},
+        {"role": "user", "content": "kick off"},
+        {"role": "assistant", "content": "ack"},
         img_msg,
         *[
             {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 2000}
@@ -687,3 +692,293 @@ def test_compress_runs_pre_cleanup_before_summarize(monkeypatch):
     # the image base64 must have been cleaned out of the summary input
     assert big_b64 not in str(captured["to_summarize"])
     assert "[图片：" in str(captured["to_summarize"])
+
+
+# --- AR13: initial-intent recognition (D2) ---
+
+
+def test_initial_intent_takes_leading_user_run():
+    from fleetent.context_mgr import _initial_intent
+
+    conv = [
+        {"role": "user", "content": "hi"},
+        {"role": "user", "content": "translate these files"},
+        {"role": "assistant", "content": "ok"},
+        {"role": "user", "content": "thanks"},
+    ]
+    intent = _initial_intent(conv, 2)
+    assert [m["content"] for m in intent] == ["hi", "translate these files"]
+
+
+def test_initial_intent_stops_at_first_non_user():
+    from fleetent.context_mgr import _initial_intent
+
+    conv = [
+        {"role": "user", "content": "do X"},
+        {"role": "assistant", "content": "ok"},
+        {"role": "user", "content": "and Y"},
+    ]
+    intent = _initial_intent(conv, 5)
+    assert [m["content"] for m in intent] == ["do X"]
+
+
+def test_initial_intent_respects_upper_bound():
+    from fleetent.context_mgr import _initial_intent
+
+    conv = [{"role": "user", "content": f"u{i}"} for i in range(5)]
+    intent = _initial_intent(conv, 2)
+    assert [m["content"] for m in intent] == ["u0", "u1"]
+
+
+def test_initial_intent_empty_when_leading_is_non_user():
+    from fleetent.context_mgr import _initial_intent
+
+    conv = [
+        {"role": "assistant", "content": "hello"},
+        {"role": "user", "content": "later"},
+    ]
+    assert _initial_intent(conv, 2) == []
+
+
+def test_initial_intent_empty_when_no_user():
+    from fleetent.context_mgr import _initial_intent
+
+    conv = [{"role": "assistant", "content": "hello"}]
+    assert _initial_intent(conv, 2) == []
+
+
+def test_initial_intent_returns_same_objects():
+    from fleetent.context_mgr import _initial_intent
+
+    m0 = {"role": "user", "content": "a"}
+    m1 = {"role": "user", "content": "b"}
+    conv = [m0, m1, {"role": "assistant", "content": "x"}]
+    intent = _initial_intent(conv, 2)
+    assert intent[0] is m0 and intent[1] is m1
+
+
+# --- AR13: head selection excludes self-produced summary messages (D1) ---
+
+
+def test_select_head_excludes_self_produced_summary():
+    from fleetent.context_mgr import _select_head
+
+    real_sys = {"role": "system", "content": "You are helpful."}
+    prior_summary = {"role": "system", "content": "[Earlier conversation summary]\nold stuff"}
+    intent = {"role": "user", "content": "translate these files"}
+    messages = [real_sys, prior_summary, intent, {"role": "assistant", "content": "ok"}]
+    head = _select_head(messages, 2)
+    assert real_sys in head
+    assert intent in head
+    assert prior_summary not in head  # self-produced summary must NOT be promoted to head
+
+
+def test_select_head_orders_system_then_intent():
+    from fleetent.context_mgr import _select_head
+
+    real_sys = {"role": "system", "content": "sys"}
+    intent = {"role": "user", "content": "do the thing"}
+    messages = [real_sys, intent, {"role": "assistant", "content": "ok"}]
+    head = _select_head(messages, 2)
+    assert head[0] is real_sys
+    assert head[1] is intent
+
+
+def test_default_config_carries_initial_intent_max(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    from fleetent.context_mgr import _default_config
+
+    cfg = _default_config()
+    assert cfg["initial_intent_max"] == 2
+
+
+# --- AR13: three-layer split in _compress (D1, D3) ---
+
+
+def test_compress_preserves_initial_intent_and_excludes_it_from_summary(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    captured: dict[str, list] = {}
+
+    def _fake_summarize(msgs):
+        captured["to_summarize"] = msgs
+        return "S"
+
+    monkeypatch.setattr(cm, "_summarize", _fake_summarize)
+    intent = {"role": "user", "content": "INITIAL-INTENT translate three files to Japanese"}
+    big_msgs = [
+        {"role": "system", "content": "sys"},
+        intent,
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 2000}
+            for i in range(60)
+        ],
+    ]
+    config = {
+        "max_tokens": 10_000,
+        "tmax_ratio": 0.5,
+        "tretained_ratio": 0.3,
+        "keep_recent": 4,
+        "initial_intent_max": 2,
+    }
+    result = cm.maybe_compress(big_msgs, config=config)
+    # initial intent kept whole in result, never fed to the summary
+    assert any(m is intent for m in result)
+    assert "INITIAL-INTENT" not in str(captured["to_summarize"])
+
+
+def test_compress_three_layer_order(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    monkeypatch.setattr(cm, "_summarize", lambda msgs: "MID-SUMMARY")
+    intent = {"role": "user", "content": "do the task"}
+    big_msgs = [
+        {"role": "system", "content": "sys"},
+        intent,
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 2000}
+            for i in range(60)
+        ],
+    ]
+    config = {
+        "max_tokens": 10_000,
+        "tmax_ratio": 0.5,
+        "tretained_ratio": 0.3,
+        "keep_recent": 4,
+        "initial_intent_max": 2,
+    }
+    result = cm.maybe_compress(big_msgs, config=config)
+    contents = [str(m.get("content", "")) for m in result]
+    sys_idx = contents.index("sys")
+    intent_idx = next(i for i, m in enumerate(result) if m is intent)
+    summary_idx = next(i for i, c in enumerate(contents) if "MID-SUMMARY" in c)
+    # head (system, then intent) precedes the summary, which precedes the tail
+    assert sys_idx < intent_idx < summary_idx
+    assert summary_idx < len(result) - 1  # at least one tail message after summary
+
+
+def test_compress_prior_summary_not_promoted_to_head(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    monkeypatch.setattr(cm, "_summarize", lambda msgs: "NEW-SUMMARY")
+    prior = {"role": "system", "content": "[Earlier conversation summary]\nprior stuff"}
+    intent = {"role": "user", "content": "the real ask"}
+    big_msgs = [
+        {"role": "system", "content": "sys"},
+        prior,
+        intent,
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 2000}
+            for i in range(60)
+        ],
+    ]
+    config = {
+        "max_tokens": 10_000,
+        "tmax_ratio": 0.5,
+        "tretained_ratio": 0.3,
+        "keep_recent": 4,
+        "initial_intent_max": 2,
+    }
+    result = cm.maybe_compress(big_msgs, config=config)
+    # exactly one summary-prefixed system message remains (the fresh one), prior is gone
+    summary_msgs = [
+        m
+        for m in result
+        if m.get("role") == "system"
+        and str(m.get("content", "")).startswith("[Earlier conversation summary]")
+    ]
+    assert len(summary_msgs) == 1
+    assert not any(m is prior for m in result)
+
+
+# --- AR13: head counts toward Tretained projection (D3) ---
+
+
+def test_large_head_shrinks_tail_but_keeps_floor(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    monkeypatch.setattr(cm, "_summarize", lambda msgs: "S")
+    # A big initial-intent message inflates the head; the tail must shrink in
+    # response, but the 1-message tail floor (with tool-pair integrity) still holds.
+    big_intent = {"role": "user", "content": "INTENT " + "y" * 8000}
+    big_msgs = [
+        {"role": "system", "content": "sys"},
+        big_intent,
+        {"role": "assistant", "content": "ack"},
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 4000}
+            for i in range(60)
+        ],
+    ]
+    config = {
+        "max_tokens": 10_000,
+        "tmax_ratio": 0.8,
+        "tretained_ratio": 0.6,
+        "keep_recent": 10,
+        "initial_intent_max": 2,
+    }
+    result = cm.maybe_compress(big_msgs, config=config)
+    # big_intent kept whole in head
+    assert any(m is big_intent for m in result)
+    # tail (non-head, non-summary, non-system messages) shrank to the floor
+    tail = [m for m in result if m.get("role") != "system" and m is not big_intent]
+    assert len(tail) >= 1
+
+
+# --- AR13: degenerate fallback (D4) ---
+
+
+def test_short_conversation_no_empty_summary(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    summarize_calls = {"n": 0}
+
+    def _spy_summarize(msgs):
+        summarize_calls["n"] += 1
+        return ""
+
+    monkeypatch.setattr(cm, "_summarize", _spy_summarize)
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "do X"},
+        {"role": "assistant", "content": "done"},
+    ]
+    config = {
+        "max_tokens": 100_000,
+        "tmax_ratio": 0.8,
+        "tretained_ratio": 0.6,
+        "keep_recent": 10,
+        "initial_intent_max": 2,
+    }
+    result = cm.maybe_compress(msgs, config=config, force=True)
+    # middle empty → no summary message injected and no LLM call
+    assert summarize_calls["n"] == 0
+    assert not any(
+        str(m.get("content", "")).startswith("[Earlier conversation summary]") for m in result
+    )
+
+
+def test_head_tail_overlap_deduped_by_identity(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    monkeypatch.setattr(cm, "_summarize", lambda msgs: "S")
+    intent = {"role": "user", "content": "the only ask"}
+    assistant = {"role": "assistant", "content": "reply"}
+    msgs = [
+        {"role": "system", "content": "sys"},
+        intent,
+        assistant,
+    ]
+    config = {
+        "max_tokens": 100_000,
+        "tmax_ratio": 0.8,
+        "tretained_ratio": 0.6,
+        "keep_recent": 10,
+        "initial_intent_max": 2,
+    }
+    result = cm.maybe_compress(msgs, config=config, force=True)
+    # intent is both head and (selected) tail; must appear exactly once
+    assert sum(1 for m in result if m is intent) == 1
+    assert sum(1 for m in result if m is assistant) == 1
+    # original order preserved
+    assert result.index(intent) < result.index(assistant)

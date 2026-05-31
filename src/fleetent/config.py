@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     context_tmax_ratio: float = 0.8
     context_tretained_ratio: float = 0.6
     context_keep_recent: int = 10
+    # Upper bound on leading user messages kept whole as the initial intent in the
+    # compression head (AR13 D2). 2 covers the common "lead-in + real ask" split
+    # opening, especially on IM channels. Optional; default preserves existing
+    # deployments.
+    compression_initial_intent_max: int = 2
     session_ttl_days: int = 30
     session_max_total_mb: int = 1024
     session_max_count: int = 10000

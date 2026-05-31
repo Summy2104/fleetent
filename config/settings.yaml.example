@@ -4,3 +4,5 @@ log_format: console  # "console" | "json"
 microsandbox_url: http://host.docker.internal:7777
 permission_gate_medium_timeout_seconds: 300
 permission_gate_high_timeout_seconds: 3600
+# Max leading user messages kept whole as initial intent during compression (AR13).
+compression_initial_intent_max: 2
