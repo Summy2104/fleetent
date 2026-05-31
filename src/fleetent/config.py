@@ -11,7 +11,6 @@ class Settings(BaseSettings):
     slack_bot_token: str = ""
     slack_app_token: str = ""
     telegram_bot_token: str = ""
-    microsandbox_url: str = "http://host.docker.internal:7777"
     permission_gate_medium_timeout_seconds: int = 300
     permission_gate_high_timeout_seconds: int = 3600
     context_max_tokens: int = 200_000
