@@ -98,3 +98,78 @@ def test_schema_type_mapping():
     assert props["n"]["type"] == "integer"
     assert props["f"]["type"] == "number"
     assert props["b"]["type"] == "boolean"
+
+
+# ── cancel-token out-of-band injection (AR19 D3) ─────────────────────────────
+
+
+def test_dispatch_injects_token_into_opt_in_tool():
+    from fleetent.cancellation import CancelToken
+
+    received: dict[str, object] = {}
+
+    @tool_registry.tool
+    def opt_in_tool(x: str, cancel_token=None) -> str:
+        """A tool that opts into receiving the token."""
+        received["token"] = cancel_token
+        return x
+
+    token = CancelToken()
+    result = tool_registry.dispatch("opt_in_tool", '{"x": "v"}', cancel_token=token)
+    assert result == "v"
+    assert received["token"] is token
+
+
+def test_dispatch_does_not_inject_token_into_non_opt_in_tool():
+    from fleetent.cancellation import CancelToken
+
+    @tool_registry.tool
+    def plain_tool(x: str) -> str:
+        """A tool that does not declare cancel_token."""
+        return x
+
+    # Passing a token must not break or alter a tool that did not opt in.
+    token = CancelToken()
+    result = tool_registry.dispatch("plain_tool", '{"x": "v"}', cancel_token=token)
+    assert result == "v"
+
+
+def test_dispatch_without_token_passes_none_default_to_opt_in_tool():
+    received: dict[str, object] = {}
+
+    @tool_registry.tool
+    def opt_in_tool2(x: str, cancel_token=None) -> str:
+        """Opt-in tool dispatched without a token."""
+        received["token"] = cancel_token
+        return x
+
+    result = tool_registry.dispatch("opt_in_tool2", '{"x": "v"}')
+    assert result == "v"
+    # No token supplied → the tool's own default (None) is used; nothing injected.
+    assert received["token"] is None
+
+
+def test_schema_excludes_cancel_token_param():
+    @tool_registry.tool
+    def schema_opt_in(x: str, cancel_token=None) -> str:
+        """Opt-in tool — token must not leak into the LLM schema."""
+        return x
+
+    schemas = tool_registry.get_schemas()
+    schema = next(s for s in schemas if s["function"]["name"] == "schema_opt_in")
+    params = schema["function"]["parameters"]
+    assert "cancel_token" not in params["properties"]
+    assert "cancel_token" not in params["required"]
+    assert "x" in params["properties"]
+
+
+def test_schema_unaffected_for_tool_without_token():
+    @tool_registry.tool
+    def schema_plain(x: str, y: str = "d") -> str:
+        """Tool without token — schema unchanged."""
+        return x
+
+    schemas = tool_registry.get_schemas()
+    schema = next(s for s in schemas if s["function"]["name"] == "schema_plain")
+    props = schema["function"]["parameters"]["properties"]
+    assert set(props) == {"x", "y"}

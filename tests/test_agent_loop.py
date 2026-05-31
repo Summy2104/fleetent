@@ -271,6 +271,87 @@ async def test_run_stream_logs_stop_reason_max_turns(mock_client):
     assert captured.get("stop_reason") == StopReason.max_turns
 
 
+# ── cancellation (AR19) ────────────────────────────────────────────────────
+
+
+async def test_run_cancelled_stops_before_llm_call(mock_client):
+    from fleetent.cancellation import CancelToken
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("hi"))
+    token = CancelToken()
+    token.cancel()
+    reply = await al.run([{"role": "user", "content": "x"}], cancel_token=token)
+    assert reply == ""
+    # Checkpoint hit before the first LLM call: the model is never invoked.
+    assert mock_client.chat.completions.create.call_count == 0
+
+
+async def test_run_cancelled_logs_stop_reason_cancelled(mock_client):
+    from fleetent.cancellation import CancelToken
+
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("hi"))
+    token = CancelToken()
+    token.cancel()
+    with patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)):
+        await al.run([{"role": "user", "content": "x"}], cancel_token=token)
+    assert captured.get("stop_reason") == StopReason.cancelled
+
+
+async def test_run_default_no_token_behaves_normally(mock_client):
+    # Not passing a token must leave behavior byte-identical to the status quo.
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("hello"))
+    reply = await al.run([{"role": "user", "content": "x"}])
+    assert reply == "hello"
+    assert mock_client.chat.completions.create.call_count == 1
+
+
+async def test_run_threads_token_to_dispatch(mock_client):
+    from fleetent.cancellation import CancelToken
+
+    seen: dict = {}
+
+    def _capture_dispatch(name, args, **kw):
+        seen["cancel_token"] = kw.get("cancel_token")
+        return f"{name}_result"
+
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_tool_resp("get_time"), _text_resp("done")]
+    )
+    token = CancelToken()
+    with patch.object(al, "dispatch", _capture_dispatch):
+        await al.run([{"role": "user", "content": "x"}], cancel_token=token)
+    assert seen["cancel_token"] is token
+
+
+async def test_run_stream_cancelled_stops_before_llm_and_finishes_clean(mock_client):
+    from fleetent.cancellation import CancelToken
+
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=lambda *a, **k: _looping_tool_stream()
+    )
+    token = CancelToken()
+    token.cancel()
+    events = [e async for e in al.run_stream("go", cancel_token=token)]
+    assert mock_client.chat.completions.create.call_count == 0
+    # Cancellation hits the checkpoint and the stream still closes via `done`.
+    assert events[-1]["type"] == "done"
+
+
+async def test_run_stream_cancelled_logs_stop_reason(mock_client):
+    from fleetent.cancellation import CancelToken
+
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=lambda *a, **k: _looping_tool_stream()
+    )
+    token = CancelToken()
+    token.cancel()
+    with patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)):
+        _ = [e async for e in al.run_stream("go", cancel_token=token)]
+    assert captured.get("stop_reason") == StopReason.cancelled
+
+
 async def test_run_is_sub_agent_filters_sub_agent_from_schemas(mock_client):
     schemas_used: list[list] = []
 
