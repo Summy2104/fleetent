@@ -152,7 +152,7 @@ def _redact_value(value: Any, key: str | None = None) -> Any:
     normalized_key = key.lower() if key is not None else None
     if normalized_key == "token_estimate":
         return value
-    if normalized_key is not None and any(marker in normalized_key for marker in _SENSITIVE_KEYS):
+    if normalized_key is not None and _is_sensitive_key(normalized_key):
         return "[REDACTED:token]"
     if isinstance(value, str):
         return _redact_text(value)
@@ -166,6 +166,16 @@ def _redact_value(value: Any, key: str | None = None) -> Any:
     if isinstance(value, tuple):
         return tuple(_redact_value(item) for item in value)
     return value
+
+
+def _is_sensitive_key(normalized_key: str) -> bool:
+    if normalized_key == "token":
+        return True
+    if normalized_key.endswith("_token") or normalized_key.endswith("-token"):
+        return True
+    return any(
+        marker in normalized_key for marker in ("password", "secret", "api_key", "authorization")
+    )
 
 
 def _redact_text(value: str) -> str:
