@@ -141,3 +141,8 @@
 
 **影响:** 610 passed;skill_registry mypy 0 错。解锁 SK7/SK8/SK9/builtin-skills/agent-skill-binding。
 **需 zy 核实:** SkillEntry 结构(对外契约保持);失败跳过 + warning 策略。
+
+## skill-nested-scan (SK7) — feat/skill-nested-scan
+
+**实现:** `scan()` 的 `glob("*/SKILL.md")` → `rglob("SKILL.md")` 递归任意层级;其余(SkillEntry 索引、name 回落 parent.name、目录不存在安全返回、SK2 失败跳过)不变;同名冲突留 SK8。一行改动 + 4 个嵌套测试。
+**影响:** 614 passed,无冲突无红线,skill_registry mypy 0 错。

@@ -36,7 +36,7 @@ def scan(skills_dir: str | None = None) -> None:
     base = Path(skills_dir)
     if not base.is_dir():
         return
-    for skill_md in base.glob("*/SKILL.md"):
+    for skill_md in base.rglob("SKILL.md"):
         frontmatter = _parse_frontmatter(skill_md.read_text(encoding="utf-8"))
         if frontmatter is None:
             logger.warning(

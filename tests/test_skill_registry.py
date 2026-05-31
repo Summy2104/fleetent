@@ -228,3 +228,46 @@ def test_scan_scalar_tag_normalized_to_list(tmp_path):
     _write_skill(tmp_path, "s", "---\nname: s\ndescription: d.\ntags: crm\n---\nbody")
     sr.scan(str(tmp_path / "skills"))
     assert sr._index["s"].tags == ["crm"]
+
+
+# --- nested recursive scan (SK7) ---
+
+
+def test_scan_discovers_deeply_nested_skill(tmp_path):
+    nested = tmp_path / "skills" / "crm" / "contracts"
+    nested.mkdir(parents=True)
+    (nested / "SKILL.md").write_text(
+        "---\nname: contracts\ndescription: Use when user wants to review contracts.\n---\nbody"
+    )
+    sr.scan(str(tmp_path / "skills"))
+    assert "contracts" in sr._index
+    assert Path(sr._index["contracts"].path).exists()
+
+
+def test_scan_includes_mixed_level_skills(tmp_path):
+    top = tmp_path / "skills" / "deploy"
+    top.mkdir(parents=True)
+    (top / "SKILL.md").write_text(
+        "---\nname: deploy\ndescription: Use when user wants to deploy code.\n---\nbody"
+    )
+    deep = tmp_path / "skills" / "team-a" / "billing"
+    deep.mkdir(parents=True)
+    (deep / "SKILL.md").write_text(
+        "---\nname: billing\ndescription: Use when user wants to handle billing.\n---\nbody"
+    )
+    sr.scan(str(tmp_path / "skills"))
+    assert "deploy" in sr._index
+    assert "billing" in sr._index
+
+
+def test_scan_nested_name_falls_back_to_parent_dir(tmp_path):
+    nested = tmp_path / "skills" / "crm" / "contracts"
+    nested.mkdir(parents=True)
+    (nested / "SKILL.md").write_text("---\ndescription: no explicit name here.\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    assert "contracts" in sr._index
+
+
+def test_scan_missing_dir_returns_empty(tmp_path):
+    sr.scan(str(tmp_path / "does-not-exist"))
+    assert sr._index == {}
