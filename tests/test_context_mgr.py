@@ -129,3 +129,23 @@ def test_keep_tail_tool_at_index_zero_stops_extending():
     msgs = [tool_msg]  # tool at index 0 — idx==0, must break
     tail = _keep_tail(msgs, 2)
     assert tail[0] is tool_msg
+
+
+def test_estimate_tokens_image_block_uses_fixed_placeholder():
+    # A large base64 image block must not inflate the estimate by its length.
+    big_b64 = "A" * 100_000
+    img_msg = {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "hi"},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{big_b64}"}},
+        ],
+    }
+    tokens = estimate_tokens([img_msg])
+    # Far below the 25k tokens the raw base64 would otherwise contribute.
+    assert tokens < 2000
+
+
+def test_estimate_tokens_text_unchanged():
+    msgs = [{"role": "user", "content": "a" * 400}]
+    assert estimate_tokens(msgs) > 100

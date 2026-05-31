@@ -71,3 +71,9 @@ def test_route_config_fallbacks_immutable():
     cfg = RouteConfig(base_url="https://api.test.com", model="m", api_key_env="K", max_tokens=512)
     with pytest.raises((AttributeError, TypeError)):
         cfg.fallbacks = ("x",)  # type: ignore[misc]
+
+
+def test_routes_define_vision():
+    # AR21: vision task_type maps to a vision-capable chat provider.
+    assert "vision" in ROUTES
+    assert ROUTES["vision"].model

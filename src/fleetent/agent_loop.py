@@ -12,6 +12,7 @@ from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
 from openai.types.chat import ChatCompletionChunk
 
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
+from fleetent import model_router
 from fleetent.agent_policy import check_tool_access
 from fleetent.context_mgr import maybe_compress
 from fleetent.error_classifier import classify
@@ -19,6 +20,7 @@ from fleetent.eval_logger import log_run
 from fleetent.memory_layer import extract_and_save, load_memories
 from fleetent.message_hygiene import HygieneReport, MessageContractError, sanitize
 from fleetent.model_router import RouteConfig, get_async_client_and_config
+from fleetent.multimodal import build_message_with_images, has_image_block
 from fleetent.permission_gate import _default_gate
 from fleetent.skill_registry import load as load_skill
 from fleetent.skill_registry import match as match_skill
@@ -127,11 +129,46 @@ async def _stream_with_fallback(
     raise last_exc  # type: ignore[misc]
 
 
+def _content_to_text(content: Any) -> str:
+    """Reduce a message content to text: str passes through; block arrays keep
+    only their text blocks (AR21 — never stringify base64 image blocks)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            b["text"]
+            for b in content
+            if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)
+        )
+    return ""
+
+
 def _first_user_input(messages: list[Any]) -> str:
     return next(
-        (m["content"] for m in messages if isinstance(m, dict) and m.get("role") == "user"),
+        (
+            _content_to_text(m.get("content"))
+            for m in messages
+            if isinstance(m, dict) and m.get("role") == "user"
+        ),
         "",
     )
+
+
+def _select_route(messages: list[Any]) -> str:
+    """Pick the task_type for this run: vision when an image block is present.
+
+    Raises when images are present but no `vision` route is configured (D6,
+    option A) so the loop fails locally rather than sending an image to a
+    non-vision model.
+    """
+    if not has_image_block(messages):
+        return "default"
+    if "vision" not in model_router.ROUTES:
+        raise RuntimeError(
+            "消息含图片但未配置 vision 路由（model_router.ROUTES 缺少 'vision'），"
+            "无法处理图片输入"
+        )
+    return "vision"
 
 
 def _log_run_error(
@@ -183,7 +220,9 @@ async def run(
     When allowed_tools is set, only matching tools (fnmatch patterns) are exposed.
     max_turns / max_consecutive_failures override the deployment defaults.
     """
-    client, cfg = get_async_client_and_config("default")
+    # Image-bearing messages route to the vision model (D6); raises here if
+    # images are present but no vision route is configured, before any LLM call.
+    client, cfg = get_async_client_and_config(_select_route(messages))
 
     # Determine effective tool schemas (exclude sub_agent for child agents)
     schemas = (
@@ -306,10 +345,7 @@ async def run(
 
     reply = (msg.content if msg is not None else None) or ""
     usage = response.usage if response else None
-    user_input = next(
-        (m["content"] for m in messages if isinstance(m, dict) and m.get("role") == "user"),
-        "",
-    )
+    user_input = _first_user_input(messages)
     log_run(
         user_input,
         reply,
@@ -354,17 +390,20 @@ async def run_stream(
     agent_name: str | None = None,
     max_turns: int | None = None,
     max_consecutive_failures: int | None = None,
+    images: list[tuple[bytes, str]] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
     Event types: tool_call, tool_result, text_delta, done.
     text_delta events stream as tokens arrive from the LLM.
 
+    When `images` (a list of (bytes, mime)) is given, the user message is built
+    as a content-block array (text + image_url blocks, base64-inlined) and the
+    run routes to the vision model (AR21). Plain-text input is unchanged.
+
     Termination covers max_turns / consecutive_failures; approval gating is not
     performed on the streaming path, so approval_rejected does not apply here.
     """
-    client, cfg = get_async_client_and_config("default")
-
     memory_ctx = load_memories(user_id=user_id)
     full_system = f"{memory_ctx}\n\n{system_prompt}" if memory_ctx else system_prompt
 
@@ -372,10 +411,18 @@ async def run_stream(
     if matched:
         full_system = f"{full_system}\n\n{load_skill(matched)}"
 
+    if images:
+        user_msg = build_message_with_images(user_input, images)
+    else:
+        user_msg = {"role": "user", "content": user_input}
     messages: list[Any] = [
         {"role": "system", "content": full_system},
-        {"role": "user", "content": user_input},
+        user_msg,
     ]
+
+    # Route to vision when images are present; raises before any LLM call if
+    # images are present but no vision route is configured (D6, option A).
+    client, cfg = get_async_client_and_config(_select_route(messages))
 
     start = time.monotonic()
     reply = ""

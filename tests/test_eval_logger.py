@@ -228,3 +228,28 @@ def test_log_run_hygiene_repairs_omitted_when_not_provided(tmp_path, monkeypatch
     el.log_run("hi", "hello", [], 0.1)
     entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
     assert "hygiene_repairs" not in entry
+
+
+def test_serialize_image_block_replaced_with_placeholder():
+    import base64
+
+    from fleetent.eval_logger import _serialize
+
+    raw = b"x" * 5000
+    b64 = base64.b64encode(raw).decode("ascii")
+    msg = {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "see this"},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+        ],
+    }
+    out = _serialize(msg)
+    serialized = str(out)
+    assert b64 not in serialized
+    # Placeholder records mime and byte size.
+    assert "image/png" in serialized
+    assert str(len(raw)) in serialized
+    # Text block survives untouched.
+    text_blocks = [b for b in out["content"] if b.get("type") == "text"]
+    assert any(b["text"] == "see this" for b in text_blocks)
