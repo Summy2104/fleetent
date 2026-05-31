@@ -1,13 +1,18 @@
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 from openai import AsyncOpenAI, OpenAI
 
+from fleetent import model_router
 from fleetent.model_router import (
+    DEFAULT_ROUTES,
     ROUTES,
     RouteConfig,
     RouteOverride,
     _apply_override,
+    _load_routes,
     get_async_client_and_config,
     get_client_and_config,
 )
@@ -367,3 +372,295 @@ def test_get_async_client_and_config_no_override_uses_task_type_params(monkeypat
     )
     _, cfg = get_async_client_and_config("default")
     assert cfg.params == {"temperature": 0.3}
+
+
+# --- DEFAULT_ROUTES built-in fallback + ROUTES_PATH (externalize) ---
+
+
+def test_default_routes_contains_builtin_keys():
+    assert "default" in DEFAULT_ROUTES
+    assert "memory_extraction" in DEFAULT_ROUTES
+    assert "vision" in DEFAULT_ROUTES
+
+
+def test_default_routes_vision_present():
+    # AR21: vision must remain a built-in default route.
+    assert DEFAULT_ROUTES["vision"].model
+
+
+def test_routes_path_is_injectable_path():
+    assert isinstance(model_router.ROUTES_PATH, Path)
+
+
+def test_routes_path_default_points_at_config():
+    assert Path("config/routes.yaml") == model_router.ROUTES_PATH
+
+
+# --- _load_routes: load from YAML ---
+
+
+def _write_yaml(path: Path, data: dict) -> None:
+    path.write_text(yaml.safe_dump(data))
+
+
+def test_load_routes_reads_file_fields(monkeypatch, tmp_path):
+    p = tmp_path / "routes.yaml"
+    _write_yaml(
+        p,
+        {
+            "default": {
+                "base_url": "https://vllm.internal/v1/",
+                "model": "local-llama",
+                "api_key_env": "VLLM_KEY",
+                "max_tokens": 2048,
+                "fallbacks": ["fb-1", "fb-2"],
+                "params": {"temperature": 0.0},
+            }
+        },
+    )
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    routes = _load_routes()
+    cfg = routes["default"]
+    assert cfg.base_url == "https://vllm.internal/v1/"
+    assert cfg.model == "local-llama"
+    assert cfg.api_key_env == "VLLM_KEY"
+    assert cfg.max_tokens == 2048
+    assert cfg.fallbacks == ("fb-1", "fb-2")
+    assert cfg.params == {"temperature": 0.0}
+
+
+def test_load_routes_fallbacks_default_empty_when_omitted(monkeypatch, tmp_path):
+    p = tmp_path / "routes.yaml"
+    _write_yaml(
+        p,
+        {
+            "default": {
+                "base_url": "https://x/v1/",
+                "model": "m",
+                "api_key_env": "K",
+                "max_tokens": 10,
+            }
+        },
+    )
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    cfg = _load_routes()["default"]
+    assert cfg.fallbacks == ()
+    assert cfg.params == {}
+
+
+# --- _load_routes: file missing -> built-in defaults (no error) ---
+
+
+def test_load_routes_missing_file_returns_defaults(monkeypatch, tmp_path):
+    monkeypatch.setattr(model_router, "ROUTES_PATH", tmp_path / "absent.yaml")
+    routes = _load_routes()
+    assert "default" in routes
+    assert "memory_extraction" in routes
+    assert "vision" in routes
+
+
+def test_load_routes_missing_file_does_not_raise(monkeypatch, tmp_path):
+    monkeypatch.setattr(model_router, "ROUTES_PATH", tmp_path / "absent.yaml")
+    _load_routes()  # must not raise
+
+
+# --- _load_routes: partial file merges onto built-in defaults ---
+
+
+def test_load_routes_partial_overrides_and_keeps_builtin(monkeypatch, tmp_path):
+    p = tmp_path / "routes.yaml"
+    _write_yaml(
+        p,
+        {
+            "default": {
+                "base_url": "https://override/v1/",
+                "model": "overridden",
+                "api_key_env": "OV_KEY",
+                "max_tokens": 100,
+            }
+        },
+    )
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    routes = _load_routes()
+    assert routes["default"].model == "overridden"
+    # built-in keys not in the file are preserved.
+    assert routes["memory_extraction"].model == DEFAULT_ROUTES["memory_extraction"].model
+    assert routes["vision"].model == DEFAULT_ROUTES["vision"].model
+
+
+# --- _load_routes: corrupt / invalid -> fail loud ---
+
+
+def test_load_routes_corrupt_yaml_raises_pointing_at_file(monkeypatch, tmp_path):
+    p = tmp_path / "routes.yaml"
+    p.write_text("default: [unclosed")
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    with pytest.raises(Exception) as exc:
+        _load_routes()
+    assert str(p) in str(exc.value)
+
+
+def test_load_routes_top_level_not_mapping_raises(monkeypatch, tmp_path):
+    p = tmp_path / "routes.yaml"
+    p.write_text("- a\n- b\n")
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    with pytest.raises(ValueError) as exc:
+        _load_routes()
+    assert str(p) in str(exc.value)
+
+
+def test_load_routes_missing_required_field_raises_naming_route(monkeypatch, tmp_path):
+    p = tmp_path / "routes.yaml"
+    _write_yaml(
+        p,
+        {"default": {"base_url": "https://x/v1/", "model": "m", "api_key_env": "K"}},
+    )  # missing max_tokens
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    with pytest.raises(ValueError) as exc:
+        _load_routes()
+    assert "default" in str(exc.value)
+
+
+def test_load_routes_field_wrong_type_raises_naming_route(monkeypatch, tmp_path):
+    p = tmp_path / "routes.yaml"
+    _write_yaml(
+        p,
+        {
+            "default": {
+                "base_url": "https://x/v1/",
+                "model": "m",
+                "api_key_env": "K",
+                "max_tokens": "not-an-int",
+            }
+        },
+    )
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    with pytest.raises(ValueError) as exc:
+        _load_routes()
+    assert "default" in str(exc.value)
+
+
+def test_load_routes_route_value_not_mapping_raises(monkeypatch, tmp_path):
+    p = tmp_path / "routes.yaml"
+    p.write_text("default: just-a-string\n")
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    with pytest.raises(ValueError) as exc:
+        _load_routes()
+    assert "default" in str(exc.value)
+
+
+def test_load_routes_rejects_inline_api_key(monkeypatch, tmp_path):
+    # Keys must never be inlined; only api_key_env (env var name) is accepted.
+    p = tmp_path / "routes.yaml"
+    _write_yaml(
+        p,
+        {
+            "default": {
+                "base_url": "https://x/v1/",
+                "model": "m",
+                "api_key_env": "K",
+                "max_tokens": 10,
+                "api_key": "sk-secret-should-not-be-here",
+            }
+        },
+    )
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    with pytest.raises(ValueError) as exc:
+        _load_routes()
+    assert "default" in str(exc.value)
+
+
+# --- get_*_client_and_config wired through _load_routes (api_key_env via env) ---
+
+
+def test_get_client_and_config_uses_file_route(monkeypatch, tmp_path):
+    p = tmp_path / "routes.yaml"
+    _write_yaml(
+        p,
+        {
+            "default": {
+                "base_url": "https://vllm.internal/v1/",
+                "model": "local-llama",
+                "api_key_env": "VLLM_KEY",
+                "max_tokens": 2048,
+            }
+        },
+    )
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    monkeypatch.setenv("VLLM_KEY", "secret-from-env")
+    with patch("fleetent.model_router.OpenAI") as mk:
+        client, cfg = get_client_and_config("default")
+    assert cfg.model == "local-llama"
+    assert mk.call_args.kwargs["api_key"] == "secret-from-env"
+    # api key must not appear on the RouteConfig itself.
+    assert not hasattr(cfg, "api_key")
+
+
+def test_get_client_and_config_file_route_missing_key_raises(monkeypatch, tmp_path):
+    p = tmp_path / "routes.yaml"
+    _write_yaml(
+        p,
+        {
+            "default": {
+                "base_url": "https://vllm.internal/v1/",
+                "model": "local-llama",
+                "api_key_env": "VLLM_KEY",
+                "max_tokens": 2048,
+            }
+        },
+    )
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    monkeypatch.delenv("VLLM_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(RuntimeError, match="VLLM_KEY"):
+        get_client_and_config("default")
+
+
+def test_get_async_client_and_config_uses_file_route(monkeypatch, tmp_path):
+    p = tmp_path / "routes.yaml"
+    _write_yaml(
+        p,
+        {
+            "memory_extraction": {
+                "base_url": "https://x/v1/",
+                "model": "tiny-model",
+                "api_key_env": "ANTHROPIC_API_KEY",
+                "max_tokens": 256,
+            }
+        },
+    )
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    _, cfg = get_async_client_and_config("memory_extraction")
+    assert cfg.model == "tiny-model"
+    assert cfg.max_tokens == 256
+
+
+def test_get_client_and_config_unknown_falls_back_to_default_from_file(monkeypatch, tmp_path):
+    p = tmp_path / "routes.yaml"
+    _write_yaml(
+        p,
+        {
+            "default": {
+                "base_url": "https://file-default/v1/",
+                "model": "file-default-model",
+                "api_key_env": "ANTHROPIC_API_KEY",
+                "max_tokens": 4096,
+            }
+        },
+    )
+    monkeypatch.setattr(model_router, "ROUTES_PATH", p)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    _, cfg = get_client_and_config("totally_unknown")
+    assert cfg.model == "file-default-model"
+
+
+# --- no hot reload: ROUTES_PATH is a module-level injectable constant ---
+
+
+def test_no_hot_reload_module_has_no_watcher():
+    import inspect
+
+    src = inspect.getsource(model_router)
+    assert "watchdog" not in src
+    assert "watch" not in src.lower() or "watcher" not in src.lower()
