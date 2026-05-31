@@ -164,6 +164,50 @@ def _disabled_reason(name: str, entry: SkillEntry, disabled: set[str]) -> str | 
     return None
 
 
+# Mandatory scan instruction that precedes the <available_skills> catalog. Skills
+# are surfaced as a discoverable list (name/description/location); the model loads
+# the full SKILL.md on demand via read_skill rather than the platform auto-injecting
+# content. Stable across requests, so it sits in the cacheable system prefix.
+_SKILLS_INSTRUCTION = (
+    "## Skills\n"
+    "The following skills provide specialized instructions for specific tasks. "
+    "When exactly one skill's description clearly matches the task, call the "
+    "`read_skill` tool with its <name> to load the full SKILL.md, then follow it. "
+    "If several could apply, pick the most specific one. If none clearly apply, "
+    "do not read any."
+)
+
+
+def available_skills_prompt(disabled_skills: list[str] | None = None) -> str:
+    """Render the enabled skills as an openclaw-style skills section for the prompt.
+
+    Returns the mandatory scan instruction followed by an <available_skills>
+    catalog listing each enabled skill's name, description, and SKILL.md location,
+    so the model can discover what exists and load the full file on demand via the
+    read_skill tool — instead of the platform auto-injecting full content. A skill
+    is omitted when disabled (config force-disable or enabled_by_default false),
+    mirroring match()'s eligibility. Returns "" when nothing is enabled, so the
+    caller can drop the section entirely (keeping the cache prefix maximal).
+    """
+    disabled = _resolve_disabled_skills(disabled_skills)
+    entries = [
+        (name, entry)
+        for name, entry in _index.items()
+        if _disabled_reason(name, entry, disabled) is None
+    ]
+    if not entries:
+        return ""
+    lines = [_SKILLS_INSTRUCTION, "", "<available_skills>"]
+    for name, entry in entries:
+        lines.append("  <skill>")
+        lines.append(f"    <name>{name}</name>")
+        lines.append(f"    <description>{entry.description}</description>")
+        lines.append(f"    <location>{entry.path}</location>")
+        lines.append("  </skill>")
+    lines.append("</available_skills>")
+    return "\n".join(lines)
+
+
 def load(name: str) -> str:
     """Return full SKILL.md content for the named skill."""
     return Path(_index[name].path).read_text(encoding="utf-8")

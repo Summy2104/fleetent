@@ -195,7 +195,20 @@
 **自解冲突:** get_agent_for_channel 别名 a/ca 冲突→改 ca_a;旧表无新列→_ensure_skill_columns ADD COLUMN 兜底;ruff SIM103 内联。
 
 **影响:** 658 passed,迁移测试 5 passed,mypy 68=基线。
-**⚠️ 需 zy + 张亮 核实:** agent_store 字段命名/语义/迁移;opt-in 对 CLI 的行为变更(默认 agent 白名单缓解未做)。
+
+**✅✅ zy review 重大决定(2026-05-31)——整个 agent-skill-binding 推翻重做为 openclaw 式 read-on-demand,删除全部跨张亮 DB 改动:**
+
+关键认知(扭转设计):**skill 不是授权边界,tool 才是。** skill 只是指令文档,模型读了也越不过 `allowed_tools` + 审批那道真正的墙。给 skill 做"DB 表 + 硬 allowlist"是把低风险指令当高风险能力治理,过度设计。
+
+新设计(参考 /opt/gopath/src/github.com/openclaw/openclaw):
+- **注入模型**:框架把已启用 skill 渲染成 `<available_skills>` 清单(name/description/location)+ `## Skills` mandatory 指令,注入 system prompt 的**稳定前缀区**(对 prompt-cache 友好);模型按需调新增 `read_skill(name)` 工具读全文。**放弃关键词自动匹配 + 全文自动注入。**
+- **绑定**:用哪些 skill 由 admin 在 agent 的 `system_prompt` 里 prose 圈定;首版目录=全部已启用 skill(减 `disabled_skills`);结构化逐 agent 收窄留后续(取决于张亮 agent 定义 DB-vs-配置)。
+
+落地(在 fix/wave1-review-corrections,TDD):新增 `skill_registry.available_skills_prompt()`(+3 测试)、`tools.read_skill`(+2 测试);`agent_loop._assemble_prompt` 改注入目录(稳定前缀),删 `_matched_skill_content`/match/load/allowed_skills/blocked_skills,prompt-cache stream/sync 测试重写;删 `agent_policy.check_skill_access`;`normalizer` 删关键词注入改注入目录,**顺带修了 12/20 prompt-cache 标记的"normalizer memory/skill 在 system 最前 缓存杀手"**(现按 base+catalog 稳定→memory 变量排序);**回退张亮 agent_store**(删字段/`_dump_opt`/`_load_opt`/create_agent 参数/`_ensure_skill_columns`/CREATE 列)、**删迁移 002**、改 test_agent_store/test_migrations、删 test_skill_policy.py + test_agent_loop_skill_binding.py。
+
+净效果:**跨张亮 governance 纠葛归零、代码更少、与 tool/prompt-cache 架构对齐**。721 passed,ruff 净(仅既有 baseline),mypy 71=71 零新增。
+**需 zy 核实:** 首版目录=全部已启用 skill(逐 agent 结构化收窄留后续);read_skill 不 gate 禁用(与已批准"load() 不受禁用约束"一致,目录只列启用项)。
+**已无需张亮:** DB 表/迁移改动全部回退,不再触碰 governance 域。
 
 ## session-ttl-cleanup (S1) — feat/session-ttl-cleanup
 
@@ -245,6 +258,7 @@
 3. AR12 协调:_compress 保留全部 system 头部,无需改 context_mgr,加守卫。
 
 **⚠️ normalizer 待办(张亮域):** `im_gateway/normalizer.py` 有同样"memory/skill 在 system 最前"缓存杀手,本 change 未改(属张亮 im_gateway 域)——**待张亮协调重排,否则 IM 路径仍命不中前缀缓存**。
+**✅ 已在 agent-skill-binding 重做(15/20)中顺带修复(2026-05-31):** normalizer 重写时把单条 system 消息改为 base+catalog(稳定)→memory(变量)排序,前缀字节稳定可命中缓存。无需再等张亮。
 
 **影响:** 712 passed,mypy 无新增。
 **需 zy 核实:** memory/skill 后置为独立 system 消息(messages[1])的形态;normalizer 同样重排需张亮做。

@@ -76,10 +76,8 @@ async def route(msg: NormalizedMessage) -> None:
         return
 
     from fleetent import agent_loop, session_mgr
-    from fleetent.agent_policy import check_skill_access
     from fleetent.memory_layer import load_memories
-    from fleetent.skill_registry import load as load_skill
-    from fleetent.skill_registry import match as match_skill
+    from fleetent.skill_registry import available_skills_prompt
 
     async with session_mgr.session_lock(msg.session_id):
         history = await session_mgr.load(msg.session_id)
@@ -88,17 +86,14 @@ async def route(msg: NormalizedMessage) -> None:
         agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
         base_system = agent.system_prompt if agent else _SYSTEM
         allowed_tools = agent.allowed_tools if agent else None
-        allowed_skills = agent.allowed_skills if agent else None
-        blocked_skills = agent.blocked_skills if agent else None
 
-        # Build fresh system message: memories + matching skill. opt-in: a skill
-        # is injected only when the resolved agent whitelists it (and does not
-        # block it); an unbound context (no agent) injects nothing.
+        # Build the system message ordered stable→variable for prefix caching:
+        # base system + the <available_skills> catalog (stable) first, per-user
+        # memory last. The model loads any skill it needs on demand via read_skill.
+        catalog = available_skills_prompt()
         memory_ctx = load_memories(user_id=msg.user_id)
-        system_content = f"{memory_ctx}\n\n{base_system}" if memory_ctx else base_system
-        matched = match_skill(msg.text)
-        if matched and check_skill_access(matched, allowed_skills, blocked_skills):
-            system_content = f"{system_content}\n\n{load_skill(matched)}"
+        parts = [base_system, catalog, memory_ctx]
+        system_content = "\n\n".join(p for p in parts if p)
 
         # Replace existing system message or insert at position 0
         if history and isinstance(history[0], dict) and history[0].get("role") == "system":
