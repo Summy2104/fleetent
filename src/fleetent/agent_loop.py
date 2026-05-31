@@ -5,7 +5,7 @@ import json
 import time
 import uuid
 from collections.abc import AsyncGenerator, Callable, Coroutine
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
 from openai.types.chat import ChatCompletionChunk
@@ -13,9 +13,14 @@ from openai.types.chat import ChatCompletionChunk
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent.agent_policy import check_tool_access
 from fleetent.context_mgr import maybe_compress
-from fleetent.intelligence.long_term_ctx import build_context
+from fleetent.intelligence.long_term_ctx import ContextSource, build_context
 from fleetent.model_router import RouteConfig, get_async_client_and_config
-from fleetent.observability import TraceEvent, record_trace_event
+from fleetent.observability import (
+    InjectedContextTrace,
+    TraceEvent,
+    record_injected_context,
+    record_trace_event,
+)
 from fleetent.permission_gate import _default_gate
 from fleetent.skill_registry import load as load_skill
 from fleetent.skill_registry import match as match_skill
@@ -92,6 +97,7 @@ ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
 
 def _record_agent_run_completed(
     *,
+    run_id: str,
     user_input: str,
     reply: str,
     messages: list[Any],
@@ -121,12 +127,30 @@ def _record_agent_run_completed(
         payload["agent_name"] = agent_name
     record_trace_event(
         TraceEvent(
-            run_id=str(uuid.uuid4()),
+            run_id=run_id,
             event_type="agent_run_completed",
             payload=payload,
             user_id=user_id,
             agent_id=agent_name,
         )
+    )
+
+
+def _record_injected_context(run_id: str, sources: list[ContextSource]) -> None:
+    if not sources:
+        return
+    record_injected_context(
+        run_id,
+        [
+            InjectedContextTrace(
+                source_id=source.source_id,
+                source_type=cast(Literal["memory", "knowledge"], source.source_type),
+                score=source.score,
+                token_estimate=int(getattr(source, "token_estimate", 0)),
+                metadata=source.metadata,
+            )
+            for source in sources
+        ],
     )
 
 
@@ -173,9 +197,11 @@ async def run(
     When allowed_tools is set, only matching tools (fnmatch patterns) are exposed.
     """
     client, cfg = get_async_client_and_config("default")
+    run_id = str(uuid.uuid4())
     user_input = _first_user_content(messages)
     built_context = await build_context(user_id, user_input, agent_name or "", cfg.max_tokens)
     _append_system_context(messages, system_prompt, built_context.text)
+    _record_injected_context(run_id, built_context.sources)
 
     # Determine effective tool schemas (exclude sub_agent for child agents)
     schemas = (
@@ -279,6 +305,7 @@ async def run(
         "",
     )
     _record_agent_run_completed(
+        run_id=run_id,
         user_input=user_input,
         reply=reply,
         messages=messages,
@@ -323,6 +350,7 @@ async def run_stream(
     text_delta events stream as tokens arrive from the LLM.
     """
     client, cfg = get_async_client_and_config("default")
+    run_id = str(uuid.uuid4())
 
     full_system = system_prompt
 
@@ -336,6 +364,7 @@ async def run_stream(
     ]
     built_context = await build_context(user_id, user_input, agent_name or "", cfg.max_tokens)
     _append_system_context(messages, full_system, built_context.text)
+    _record_injected_context(run_id, built_context.sources)
 
     start = time.monotonic()
     reply = ""
@@ -434,6 +463,7 @@ async def run_stream(
         else None
     )
     _record_agent_run_completed(
+        run_id=run_id,
         user_input=user_input,
         reply=reply,
         messages=messages,

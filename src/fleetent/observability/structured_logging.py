@@ -149,7 +149,10 @@ def _today() -> str:
 
 
 def _redact_value(value: Any, key: str | None = None) -> Any:
-    if key is not None and any(marker in key.lower() for marker in _SENSITIVE_KEYS):
+    normalized_key = key.lower() if key is not None else None
+    if normalized_key == "token_estimate":
+        return value
+    if normalized_key is not None and any(marker in normalized_key for marker in _SENSITIVE_KEYS):
         return "[REDACTED:token]"
     if isinstance(value, str):
         return _redact_text(value)

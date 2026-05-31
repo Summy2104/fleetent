@@ -5,7 +5,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from fleetent.observability import TraceEvent, TraceQuery, query_trace_events, record_trace_event
+from fleetent.observability import (
+    InjectedContextTrace,
+    TraceEvent,
+    TraceQuery,
+    query_trace_events,
+    record_injected_context,
+    record_trace_event,
+)
 from tests.test_migrations import apply_migrations
 
 
@@ -24,6 +31,23 @@ def test_trace_event_public_api_can_be_constructed():
     assert query.run_id == "run-1"
     assert callable(record_trace_event)
     assert callable(query_trace_events)
+
+
+def test_injected_context_trace_public_api_can_be_constructed():
+    source = InjectedContextTrace(
+        source_id="memory-1",
+        source_type="memory",
+        score=0.87,
+        token_estimate=42,
+        metadata={"memory_type": "preference"},
+    )
+
+    assert source.source_id == "memory-1"
+    assert source.source_type == "memory"
+    assert source.score == 0.87
+    assert source.token_estimate == 42
+    assert source.metadata == {"memory_type": "preference"}
+    assert callable(record_injected_context)
 
 
 def test_legacy_eval_logger_and_trace_log_names_are_not_public():
@@ -69,6 +93,156 @@ def test_record_trace_event_persists_payload_and_generates_defaults(trace_db):
     assert json.loads(row[4]) == {"reply": "done"}
     assert row[5] == "user-1"
     assert row[6] == "default"
+
+
+def test_record_injected_context_persists_injected_context_event(trace_db):
+    record_injected_context(
+        "run-ctx",
+        [
+            InjectedContextTrace(
+                source_id="memory-1",
+                source_type="memory",
+                score=0.91,
+                token_estimate=0,
+                metadata={"memory_type": "preference"},
+            )
+        ],
+    )
+
+    events = list(query_trace_events(TraceQuery(run_id="run-ctx", event_type="injected_context")))
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.run_id == "run-ctx"
+    assert event.event_type == "injected_context"
+    assert event.payload == {
+        "sources": [
+            {
+                "source_id": "memory-1",
+                "source_type": "memory",
+                "score": 0.91,
+                "token_estimate": 0,
+                "metadata": {"memory_type": "preference"},
+            }
+        ]
+    }
+
+
+def test_record_injected_context_persists_summary_without_raw_content_fields(trace_db):
+    record_injected_context(
+        "run-safe",
+        [
+            InjectedContextTrace(
+                source_id="knowledge-1",
+                source_type="knowledge",
+                score=0.74,
+                token_estimate=31,
+                metadata={
+                    "kb_id": "kb-1",
+                    "document_id": "doc-1",
+                    "chunk_id": "chunk-1",
+                    "content": "full knowledge content",
+                    "text": "raw text",
+                    "transcript": "full conversation",
+                },
+            )
+        ],
+    )
+
+    with sqlite3.connect(trace_db) as conn:
+        raw_payload = conn.execute("SELECT payload_json FROM traces").fetchone()[0]
+
+    assert "full knowledge content" not in raw_payload
+    assert "raw text" not in raw_payload
+    assert "full conversation" not in raw_payload
+    payload = json.loads(raw_payload)
+    source = payload["sources"][0]
+    assert source == {
+        "source_id": "knowledge-1",
+        "source_type": "knowledge",
+        "score": 0.74,
+        "token_estimate": 31,
+        "metadata": {
+            "kb_id": "kb-1",
+            "document_id": "doc-1",
+            "chunk_id": "chunk-1",
+        },
+    }
+
+
+def test_record_injected_context_skips_empty_sources(monkeypatch):
+    from fleetent.observability import traces
+
+    calls: list[TraceEvent] = []
+    monkeypatch.setattr(traces, "record_trace_event", calls.append)
+
+    record_injected_context("run-empty", [])
+
+    assert calls == []
+
+
+def test_query_trace_events_can_filter_injected_context_events(trace_db):
+    record_trace_event(
+        TraceEvent(
+            run_id="run-complete",
+            event_type="agent_run_completed",
+            payload={"reply": "done"},
+        )
+    )
+    record_injected_context(
+        "run-context",
+        [
+            InjectedContextTrace(
+                source_id="memory-1",
+                source_type="memory",
+                score=1.0,
+                token_estimate=9,
+                metadata={"memory_type": "fact"},
+            )
+        ],
+    )
+
+    events = list(query_trace_events(TraceQuery(event_type="injected_context")))
+
+    assert [event.run_id for event in events] == ["run-context"]
+    assert events[0].payload["sources"][0]["source_id"] == "memory-1"
+
+
+def test_record_injected_context_redacts_sensitive_metadata(trace_db):
+    record_injected_context(
+        "run-sensitive",
+        [
+            InjectedContextTrace(
+                source_id="memory-sensitive",
+                source_type="memory",
+                score=1.0,
+                token_estimate=12,
+                metadata={
+                    "token": "sk-sensitive",
+                    "password": "plain-password",
+                    "secret": "ma-" + "a" * 64,
+                    "owner_email": "alice@example.com",
+                    "owner_phone": "13800138000",
+                },
+            )
+        ],
+    )
+
+    event = next(query_trace_events(TraceQuery(event_type="injected_context")))
+    metadata = event.payload["sources"][0]["metadata"]
+    raw_payload = json.dumps(event.payload)
+
+    assert "sk-sensitive" not in raw_payload
+    assert "plain-password" not in raw_payload
+    assert "alice@example.com" not in raw_payload
+    assert "13800138000" not in raw_payload
+    assert metadata == {
+        "token": "[REDACTED:token]",
+        "password": "[REDACTED:token]",
+        "secret": "[REDACTED:token]",
+        "owner_email": "[REDACTED:email]",
+        "owner_phone": "[REDACTED:phone]",
+    }
 
 
 def test_query_trace_events_filters_by_run_user_agent_tenant_event_time_and_limit(trace_db):

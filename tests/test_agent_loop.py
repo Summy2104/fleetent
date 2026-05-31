@@ -206,6 +206,95 @@ async def test_run_injects_long_term_context_before_model_call(mock_client, monk
     assert messages[0]["content"] == "base system\n\n[Long-term context]\nRemember user preference"
 
 
+async def test_run_shares_run_id_between_injected_context_and_completion(mock_client, monkeypatch):
+    from fleetent.intelligence.long_term_ctx import BuiltContext, ContextSource
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    monkeypatch.setattr(
+        al,
+        "build_context",
+        AsyncMock(
+            return_value=BuiltContext(
+                text="Remember user preference",
+                sources=[
+                    ContextSource(
+                        source_type="memory",
+                        source_id="memory-1",
+                        score=0.91,
+                        metadata={"type": "preference"},
+                    )
+                ],
+            )
+        ),
+    )
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+
+    def capture_injected_context(run_id, sources):
+        events.append(
+            TraceEvent(
+                run_id=run_id,
+                event_type="injected_context",
+                payload={"sources": sources},
+            )
+        )
+
+    monkeypatch.setattr(al, "record_injected_context", capture_injected_context)
+
+    await al.run([{"role": "user", "content": "hi"}])
+
+    injected = next(event for event in events if event.event_type == "injected_context")
+    completed = next(event for event in events if event.event_type == "agent_run_completed")
+    assert injected.run_id == completed.run_id
+
+
+async def test_run_records_injected_context_sources(mock_client, monkeypatch):
+    from fleetent.intelligence.long_term_ctx import BuiltContext, ContextSource
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    monkeypatch.setattr(
+        al,
+        "build_context",
+        AsyncMock(
+            return_value=BuiltContext(
+                text="Use private deployment docs",
+                sources=[
+                    ContextSource(
+                        source_type="knowledge",
+                        source_id="chunk-1",
+                        score=0.82,
+                        metadata={
+                            "kb_id": "kb-1",
+                            "document_id": "doc-1",
+                            "chunk_id": "chunk-1",
+                        },
+                    )
+                ],
+            )
+        ),
+    )
+    calls: list[tuple[str, list]] = []
+    monkeypatch.setattr(
+        al, "record_injected_context", lambda run_id, sources: calls.append((run_id, sources))
+    )
+
+    await al.run([{"role": "user", "content": "how deploy?"}])
+
+    assert len(calls) == 1
+    assert calls[0][0]
+    source = calls[0][1][0]
+    assert source.source_id == "chunk-1"
+    assert source.source_type == "knowledge"
+    assert source.score == 0.82
+    assert source.token_estimate == 0
+    assert source.metadata == {
+        "kb_id": "kb-1",
+        "document_id": "doc-1",
+        "chunk_id": "chunk-1",
+    }
+
+
 # ── run_stream() ──────────────────────────────────────────────────────────────
 
 
@@ -293,6 +382,88 @@ async def test_run_stream_injects_long_term_context_before_model_call(mock_clien
     assert "Use private deployment docs" in messages[0]["content"]
 
 
+async def test_run_stream_shares_run_id_between_injected_context_and_completion(
+    mock_client, monkeypatch
+):
+    from fleetent.intelligence.long_term_ctx import BuiltContext, ContextSource
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok"))
+    monkeypatch.setattr(
+        al,
+        "build_context",
+        AsyncMock(
+            return_value=BuiltContext(
+                text="Use private deployment docs",
+                sources=[
+                    ContextSource(
+                        source_type="knowledge",
+                        source_id="chunk-1",
+                        score=0.82,
+                        metadata={"kb_id": "kb-1"},
+                    )
+                ],
+            )
+        ),
+    )
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+
+    def capture_injected_context(run_id, sources):
+        events.append(
+            TraceEvent(
+                run_id=run_id,
+                event_type="injected_context",
+                payload={"sources": sources},
+            )
+        )
+
+    monkeypatch.setattr(al, "record_injected_context", capture_injected_context)
+
+    [_ async for _ in al.run_stream("how deploy?")]
+
+    injected = next(event for event in events if event.event_type == "injected_context")
+    completed = next(event for event in events if event.event_type == "agent_run_completed")
+    assert injected.run_id == completed.run_id
+
+
+async def test_run_stream_records_injected_context_sources(mock_client, monkeypatch):
+    from fleetent.intelligence.long_term_ctx import BuiltContext, ContextSource
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok"))
+    monkeypatch.setattr(
+        al,
+        "build_context",
+        AsyncMock(
+            return_value=BuiltContext(
+                text="Remember deploy docs",
+                sources=[
+                    ContextSource(
+                        source_type="memory",
+                        source_id="memory-1",
+                        score=1.0,
+                        metadata={"type": "fact"},
+                    )
+                ],
+            )
+        ),
+    )
+    calls: list[tuple[str, list]] = []
+    monkeypatch.setattr(
+        al, "record_injected_context", lambda run_id, sources: calls.append((run_id, sources))
+    )
+
+    [_ async for _ in al.run_stream("how deploy?")]
+
+    assert len(calls) == 1
+    source = calls[0][1][0]
+    assert source.source_id == "memory-1"
+    assert source.source_type == "memory"
+    assert source.score == 1.0
+    assert source.token_estimate == 0
+    assert source.metadata == {"type": "fact"}
+
+
 async def test_run_stream_omits_empty_long_term_context(mock_client, monkeypatch):
     from fleetent.intelligence.long_term_ctx import BuiltContext
 
@@ -304,6 +475,23 @@ async def test_run_stream_omits_empty_long_term_context(mock_client, monkeypatch
 
     messages = mock_client.chat.completions.create.await_args.kwargs["messages"]
     assert "[Long-term context]" not in messages[0]["content"]
+
+
+async def test_agent_runtime_skips_empty_injected_context_sources(mock_client, monkeypatch):
+    from fleetent.intelligence.long_term_ctx import BuiltContext
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    monkeypatch.setattr(
+        al, "build_context", AsyncMock(return_value=BuiltContext(text="", sources=[]))
+    )
+    calls: list[tuple[str, list]] = []
+    monkeypatch.setattr(
+        al, "record_injected_context", lambda run_id, sources: calls.append((run_id, sources))
+    )
+
+    await al.run([{"role": "user", "content": "hi"}])
+
+    assert calls == []
 
 
 def test_run_sync_calls_long_term_context(mock_client, monkeypatch):
