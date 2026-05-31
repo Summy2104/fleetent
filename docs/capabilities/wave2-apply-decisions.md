@@ -837,3 +837,30 @@ SB9（sandbox 轨末环）：`run_code` 执行结果写入 trace。
 2. **【需张亮签字 / 归档闸门】** 本 change 在 Modified Capabilities 声明 MODIFY 张亮的 `agent-definition` spec（Agent/agents 表加 plugins + allowed_tools 通配纳入 plugins 展开）。apply 阶段**只实现代码，未手动改 `openspec/specs/agent-definition/spec.md` 主 spec**（archive 时 sync）。change 目录下 specs/ delta 为 propose 时所写，未动。**agent-definition spec MODIFY 需张亮签字后方可归档**。
 3. **【agent_store 撞车风险】** 张亮活跃于 agents 表邻域（features/SB3）。本 change **仅**加 `plugins` 列 + `Agent.plugins` + 最小读写改动，未动其它字段/查询。merge 时需关注与张亮 agents 表改动的冲突。
 4. **CLI 加载时机**：自解为「`run_sync` 每次调 `load_plugins()` + CLI 无 agent 授权门控、插件工具全暴露」。若需 CLI 也按某默认 agent 的 plugins 授权，需 zy 确认（本 change 维持 CLI 暴露全部工具的现状）。
+
+## 21. connector-credential-injection（T1：dispatch 接通 connector 凭证注入）
+
+**范围**：纯地基——`@tool` 声明 connector/scopes、新建 `connectors.py` 契约 + provider 缝、`dispatch` 注入隐藏 `client` / `NeedsConsent` 短路、`user_id` 向后兼容。真实 OAuth 存储/刷新是后续 connector-oauth-store change。
+
+**前置核实（tasks 1.x）：**
+- **1.1** `_build_schema` 现状**未**排除 keyword-only / `client`：REPL 验证 `def t(q, *, client)` 的 schema `properties` 含 `client` 且进 `required`。→ 需补过滤（见下）。
+- **1.2** dispatch 调用点：`agent_loop._safe_dispatch`（行 ~200）唯一直接调 `dispatch` 处；其下游 3 个 `_safe_dispatch` 调用点（run 审批分支、run 非审批分支、run_stream）均在 `user_id` 作用域内。`sub_agent.py` 不直接调 dispatch（经 agent_loop）。新增末位 kw `user_id=None` 向后兼容，无既有调用点报错。
+- **1.3** `eval_logger._serialize` / `log_run` 写的是 messages（assistant tool_calls 的 arguments + tool role 的 content=dispatch 返回值）；注入的 `client` 既不在 LLM arguments、也不写回 kwargs、也不进返回值 → 天然不入 trace。加 `test_no_credential_in_trace` 守卫。
+
+**自解决策：**
+- **client 不进 schema 用 `_OUT_OF_BAND_PARAMS`（非 keyword-only kind 判定）**：与现状机制一致——现有代码已用模块级 `_OUT_OF_BAND_PARAMS` frozenset 排除 `cancel_token`/`tool_context`。最小一致做法是新增模块级常量 `_CLIENT_PARAM = "client"` 并并入该 frozenset，`_build_schema` 的既有 `if param_name in _OUT_OF_BAND_PARAMS: continue` 同时覆盖三者。**否决** D4 备选的 `param.kind == KEYWORD_ONLY` 判定：会改既有过滤口径、且 cancel_token/tool_context 当前是普通带默认值参数（非 keyword-only），统一按名字排除更一致、侵入更小。代价：tool 必须用名为 `client` 的参数接注入（约定固定名，与 cancel_token/tool_context 同模式）。
+- **provider 缝默认 `NeedsConsent`**：`connectors._default_provider` 永远返回 `NeedsConsent`（真实 OAuth 未实现）。`_provider` 为模块级可 monkeypatch 名字（非全局可变单例）；额外提供 `set_provider()`（`global _provider`，供后续 OAuth store change 接入，测试以 monkeypatch 为主）。`get_credential(user_id=None,...)` 不咨询 provider、直接返回 `NeedsConsent`（安全降级，D6）。
+- **凭证不泄漏守卫（D5 双保险）**：①`Credential.secret` 字段 `field(repr=False)` + 自定义 `__repr__`/`__str__` 固定输出 `Credential(connector=..., client=<redacted>)`，不含 secret 文本；②`dispatch` 注入的 `client` 经 `fn(**kwargs, client=cred.client)` 带外传入，不写回 `kwargs`、不进返回值；③守卫测试：`test_dispatch_does_not_leak_secret_in_result`（返回值无 secret）+ `test_no_credential_in_trace`（完整 dispatch → `eval_logger._serialize` 序列化 messages，断言 JSON blob 无 secret）。dispatch / connectors 自身抛出的异常消息不含凭证（NeedsConsent 提示串只含 connector 名 + consent_url，无 secret）。
+- **NeedsConsent 提示串格式**：`"connector '{connector}' requires authorization before this tool can run. Ask the user to grant access here: {consent_url}"`——含 connector 名 + consent_url，不含 secret，LLM 可据此引导用户授权。
+- **connector 元数据平行存储（D1）**：模块级 `_connectors: dict[str, tuple[str, list[str]]]`（与 `_risk_levels` 平行）+ `get_connector(name) -> tuple[str,list[str]]|None`。`scopes` 缺省 `[]`。不进 LLM schema。`@tool` 新增 `connector`/`scopes` kw（含 overload 签名更新）。test_tool_registry 的 `clean_registry` fixture 扩展为同时快照/恢复 `_connectors`（防注册泄漏）。
+- **dispatch 流程（D3）**：access control 通过 → 注入 cancel_token/tool_context（现状不变）→ `get_connector(name)`：None → 现状 `fn(**kwargs)`（无 connector 工具行为字节级不变、不调 get_credential）；非 None → `connectors.get_credential(user_id, connector, scopes)`，`NeedsConsent` 短路返回提示串、不调用工具，`Credential` → `fn(**kwargs, client=cred.client)`。`connectors` 在 dispatch 内局部 import（避免顶层循环依赖、与 agent_policy 局部 import 同模式）。
+
+**验证：**
+- pytest：1177 → **1195 passed**（+18：test_connectors 7、test_tool_registry 10（connector 元数据 3 + client 不进 schema 1 + dispatch 注入/短路/不泄漏 6，去重后实际 +10）、test_agent_loop 1（_safe_dispatch 透传 user_id））。每批严格 TDD 先红后绿。
+- ruff（自有/改动文件）：`connectors.py`/`tool_registry.py`/`test_connectors.py`/`test_tool_registry.py`/`test_agent_loop.py` 全绿。`agent_loop.py` 残留 1 个 N814（`CompletionUsage as _CU`，行号经 git show HEAD 对比为**基线既有**，非本 change 引入，且不在本 change 改动行）。
+- mypy `src`：74 → **74**（无新增错误模式；connectors.py / tool_registry.py 零 mypy 错误；agent_loop.py 8→8 同模式，仅行号位移）。
+
+**需 zy / 张亮 核实：**
+1. NeedsConsent 提示串文案（英文 + connector 名 + consent_url）是否符合 LLM 引导授权预期——本次定稿，后续 connector-oauth-store 可调整。
+2. `client` 固定参数名约定（与 cancel_token/tool_context 同走 `_OUT_OF_BAND_PARAMS` 名字排除）——若后续需多 client 或自定义注入名，需扩展机制。
+3. `set_provider()` 用 `global _provider`：本 change 测试全部走 monkeypatch（不调 set_provider 改全局），`set_provider` 仅为后续 OAuth store change 预留接入点；若团队认为 `set_provider` 也算「全局可变状态」红线，可移除只留 monkeypatch 缝。

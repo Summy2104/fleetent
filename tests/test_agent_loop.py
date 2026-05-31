@@ -2316,3 +2316,18 @@ def test_run_sync_passes_effective_sandbox_mode(monkeypatch):
     monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.OFF))
     al.run_sync("hi")
     assert captured.get("sandbox_mode") is se.Mode.OFF
+
+
+async def test_safe_dispatch_forwards_user_id():
+    """_safe_dispatch threads user_id into dispatch (connector credential isolation)."""
+    captured: dict[str, object] = {}
+
+    def _fake_dispatch(name, arguments, **kwargs):
+        captured.update(kwargs)
+        return "ok"
+
+    with patch.object(al, "dispatch", _fake_dispatch):
+        result, failed = await al._safe_dispatch("some_tool", "{}", False, user_id="user-42")
+    assert result == "ok"
+    assert failed is False
+    assert captured.get("user_id") == "user-42"

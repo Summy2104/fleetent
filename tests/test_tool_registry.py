@@ -7,9 +7,12 @@ from fleetent import tool_registry
 def clean_registry():
     """Isolate each test — snapshot and restore the registry."""
     before = dict(tool_registry._registry)
+    before_connectors = dict(tool_registry._connectors)
     yield
     tool_registry._registry.clear()
     tool_registry._registry.update(before)
+    tool_registry._connectors.clear()
+    tool_registry._connectors.update(before_connectors)
 
 
 def test_tool_decorator_registers_function():
@@ -232,3 +235,194 @@ def test_schema_excludes_tool_context_param():
     assert "tool_context" not in params["properties"]
     assert "tool_context" not in params["required"]
     assert "x" in params["properties"]
+
+
+# --- connector metadata (D1) ---
+
+
+def test_tool_records_connector_metadata():
+    @tool_registry.tool(connector="google-drive", scopes=["drive.readonly"])
+    def gd_tool(query: str) -> str:
+        """Search drive."""
+        return query
+
+    assert tool_registry.get_connector("gd_tool") == ("google-drive", ["drive.readonly"])
+
+
+def test_get_connector_none_when_undeclared():
+    @tool_registry.tool
+    def plain_tool(x: str) -> str:
+        """No connector."""
+        return x
+
+    assert tool_registry.get_connector("plain_tool") is None
+
+
+def test_connector_scopes_not_in_schema():
+    @tool_registry.tool(connector="github", scopes=["repo"])
+    def gh_tool(q: str) -> str:
+        """Search github."""
+        return q
+
+    schema = next(s for s in tool_registry.get_schemas() if s["function"]["name"] == "gh_tool")
+    params = schema["function"]["parameters"]
+    assert "connector" not in params["properties"]
+    assert "scopes" not in params["properties"]
+    assert set(params["properties"]) == {"q"}
+
+
+# --- keyword-only hidden client excluded from schema (D4) ---
+
+
+def test_keyword_only_client_not_in_schema():
+    @tool_registry.tool
+    def needs_client(query: str, *, client) -> str:
+        """Tool with hidden client."""
+        return query
+
+    schema = next(s for s in tool_registry.get_schemas() if s["function"]["name"] == "needs_client")
+    params = schema["function"]["parameters"]
+    assert "client" not in params["properties"]
+    assert "client" not in params["required"]
+    assert "query" in params["properties"]
+
+
+# --- connector credential injection at dispatch (D3/D5/D6) ---
+
+
+def test_dispatch_injects_client_for_connector_tool(monkeypatch):
+    from fleetent import connectors
+
+    received: dict[str, object] = {}
+    sentinel_client = object()
+
+    @tool_registry.tool(connector="github", scopes=["repo"])
+    def gh_search(q: str, *, client) -> str:
+        """Search github."""
+        received["client"] = client
+        received["q"] = q
+        return "results"
+
+    def _provider(user_id, connector, scopes):
+        assert (user_id, connector, scopes) == ("u1", "github", ["repo"])
+        return connectors.Credential(connector="github", client=sentinel_client)
+
+    monkeypatch.setattr(connectors, "_provider", _provider)
+    result = tool_registry.dispatch("gh_search", '{"q": "term"}', user_id="u1")
+    assert result == "results"
+    assert received["client"] is sentinel_client
+    assert received["q"] == "term"
+
+
+def test_dispatch_non_connector_tool_does_not_call_get_credential(monkeypatch):
+    from fleetent import connectors
+
+    called = {"v": False}
+
+    def _boom(*a, **k):
+        called["v"] = True
+        raise AssertionError("get_credential must not be called for non-connector tools")
+
+    monkeypatch.setattr(connectors, "get_credential", _boom)
+
+    @tool_registry.tool
+    def plain_no_conn(x: str) -> str:
+        """No connector declared."""
+        return x
+
+    result = tool_registry.dispatch("plain_no_conn", '{"x": "v"}', user_id="u1")
+    assert result == "v"
+    assert called["v"] is False
+
+
+def test_dispatch_short_circuits_on_needs_consent(monkeypatch):
+    from fleetent import connectors
+
+    ran = {"v": False}
+
+    @tool_registry.tool(connector="google-drive", scopes=["drive"])
+    def gd_search(q: str, *, client) -> str:
+        """Search drive."""
+        ran["v"] = True
+        return "should not run"
+
+    def _provider(user_id, connector, scopes):
+        return connectors.NeedsConsent(connector="google-drive", consent_url="https://auth/gd")
+
+    monkeypatch.setattr(connectors, "_provider", _provider)
+    result = tool_registry.dispatch("gd_search", '{"q": "x"}', user_id="u1")
+    assert ran["v"] is False
+    assert "https://auth/gd" in result
+    assert "google-drive" in result
+
+
+def test_dispatch_connector_tool_without_user_id_short_circuits(monkeypatch):
+    ran = {"v": False}
+
+    @tool_registry.tool(connector="github", scopes=["repo"])
+    def gh_no_uid(q: str, *, client) -> str:
+        """Search github."""
+        ran["v"] = True
+        return "x"
+
+    # Default provider would never be consulted without user_id; degrade to consent.
+    result = tool_registry.dispatch("gh_no_uid", '{"q": "x"}')
+    assert ran["v"] is False
+    assert "github" in result
+
+
+def test_dispatch_does_not_leak_secret_in_result(monkeypatch):
+    from fleetent import connectors
+
+    secret = "ya29.TOP-SECRET-abc"
+
+    @tool_registry.tool(connector="github", scopes=["repo"])
+    def gh_echo(q: str, *, client) -> str:
+        """Echo."""
+        return f"ran with q={q}"
+
+    def _provider(user_id, connector, scopes):
+        return connectors.Credential(connector="github", client=object(), secret=secret)
+
+    monkeypatch.setattr(connectors, "_provider", _provider)
+    result = tool_registry.dispatch("gh_echo", '{"q": "v"}', user_id="u1")
+    assert secret not in result
+
+
+def test_no_credential_in_trace(monkeypatch):
+    """Full dispatch + eval_logger serialization carries no secret (D5 guard)."""
+    from fleetent import connectors, eval_logger
+
+    secret = "ya29.TRACE-LEAK-test"
+
+    @tool_registry.tool(connector="github", scopes=["repo"])
+    def gh_trace(q: str, *, client) -> str:
+        """Echo for trace test."""
+        return f"done: {q}"
+
+    def _provider(user_id, connector, scopes):
+        return connectors.Credential(connector="github", client=object(), secret=secret)
+
+    monkeypatch.setattr(connectors, "_provider", _provider)
+    args_json = '{"q": "hello"}'
+    result = tool_registry.dispatch("gh_trace", args_json, user_id="u1")
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "gh_trace", "arguments": args_json},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": result},
+    ]
+    serialized = [eval_logger._serialize(m) for m in messages]
+    import json as _json
+
+    blob = _json.dumps(serialized)
+    assert secret not in blob
