@@ -148,9 +148,29 @@ embedding 效果仍未闭环。下一步优先做 `memory-extraction-evaluation`
 
 ## 自动化效果验证缺口
 
-- 构造带标准答案的多轮对话 fixture，评估提取 precision / recall。
-- 区分长期偏好和一次性请求，验证误存率。
-- 构造冲突事实序列，验证 update / merge 行为。
+- `tests/evaluation/` 已建立 memory extraction evaluation 基线。
+- fixture 使用 JSON 格式，显式声明 `name`、`initial_memories`、`conversation`、`mock_actions`、
+  `expected_memories` 和 `forbidden_memories`。
+- 默认 evaluation 使用 mock LLM：`mock_actions` 驱动 `extract_and_update()`，runner 断言最终
+  `memory_items` 状态包含 `expected_memories` 且不包含 `forbidden_memories`。SQLite 使用
+  `tmp_path`，model_router 与 vector_store 均隔离，不触碰 `data/`。
+- 默认命令：`uv run pytest tests/evaluation -x -q`。该命令只运行 deterministic mock
+  evaluation，真实 LLM fixture case 默认 skip。
+- 手动真实 LLM evaluation：设置 `FLEETENT_EVAL_REAL_LLM=1` 并提供 provider API key 后运行
+  `uv run pytest tests/evaluation/test_memory_extraction_eval.py -q`。runner 会使用真实
+  `memory_extraction` 路由，但仍使用 tmp SQLite 与 mock vector_store；缺少 provider API key
+  时 skip。该模式用于 prompt 或模型变更后的人工质量检查，不进入默认 PR gate。
+
+已覆盖的第一批提取场景：
+- identity create
+- identity update
+- context update + TTL refresh
+- preferences create
+- one-off preference request ignore
+- explicit forget / delete
+- noisy or invalid conversation ignore
+
+仍未覆盖：
 - 构造 query -> expected memory fixture，评估检索命中率。
 
 ## 服务化 / 目录边界判断

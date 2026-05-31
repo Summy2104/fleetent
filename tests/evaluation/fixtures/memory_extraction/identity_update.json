@@ -1,0 +1,38 @@
+{
+  "name": "identity update",
+  "initial_memories": [
+    {
+      "id": "mem-identity-role",
+      "type": "identity",
+      "content": "User is a backend engineer"
+    }
+  ],
+  "conversation": [
+    {
+      "role": "user",
+      "content": "Actually, I moved into a platform engineering role."
+    }
+  ],
+  "mock_actions": [
+    {
+      "action": "update",
+      "target_id": "mem-identity-role",
+      "type": "identity",
+      "content": "User is a platform engineer"
+    }
+  ],
+  "expected_memories": [
+    {
+      "id": "mem-identity-role",
+      "type": "identity",
+      "content": "User is a platform engineer",
+      "expires_at": "absent"
+    }
+  ],
+  "forbidden_memories": [
+    {
+      "type": "identity",
+      "content": "User is a backend engineer"
+    }
+  ]
+}
