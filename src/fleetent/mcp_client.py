@@ -106,12 +106,39 @@ async def get_exit_stack() -> AsyncExitStack:
 
 
 async def close() -> None:
-    """Close all stdio connections. Call on server shutdown."""
+    """Close all connections on shutdown.
+
+    Closes stdio connections and proactively releases active Streamable HTTP sessions
+    by sending a DELETE (with the Mcp-Session-Id header) to each http server's session
+    endpoint, then clears its local session id. The DELETE is best-effort: failures are
+    logged at debug and never block shutdown.
+    """
     global _exit_stack
+    await _close_http_sessions()
     if _exit_stack is not None:
         await _exit_stack.__aexit__(None, None, None)
         _exit_stack = None
     _active_sessions.clear()
+
+
+async def _close_http_sessions() -> None:
+    """Send DELETE for each active HTTP session (best-effort), then expire it locally."""
+    active = [
+        s for s in _server_registry.values() if s.transport == "http" and s.session_id is not None
+    ]
+    if not active:
+        return
+
+    import httpx
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for server in active:
+            try:
+                await client.delete(f"{server.url}/", headers=_base_headers(server))
+            except Exception as exc:  # noqa: BLE001 — DELETE is best-effort on shutdown
+                logger.debug("mcp_session_delete_failed server_id=%s error=%s", server.id, exc)
+            finally:
+                _expire_session(server)
 
 
 async def register_all(servers: list[McpServerConfig]) -> None:
@@ -186,16 +213,95 @@ def _parse_jsonrpc_response(resp: Any, request_id: int) -> dict[str, Any]:
     return data
 
 
+def _is_session_expired(resp: Any) -> bool:
+    """Whether an HTTP response indicates an expired/invalid Mcp-Session-Id (D1).
+
+    HTTP 404 is the primary anchor for a server rejecting a stale session. Other 4xx
+    statuses are treated as session expiry only when an explicit session-invalid marker
+    is present in the response (header or body). 401/403 are authentication errors and
+    MUST NOT be treated as session expiry — they propagate so callers/MCP5 can handle
+    them rather than triggering a session rebuild.
+    """
+    status = resp.status_code
+    if status == 404:
+        return True
+    if status in (401, 403):
+        return False
+    if 400 <= status < 500:
+        return _has_session_invalid_marker(resp)
+    return False
+
+
+def _has_session_invalid_marker(resp: Any) -> bool:
+    """Whether a 4xx response carries an explicit session-invalid marker (header/body)."""
+    if resp.headers.get("Mcp-Session-Invalid"):
+        return True
+    try:
+        body = resp.text.lower()
+    except Exception:  # noqa: BLE001 — marker detection must not mask the real error
+        return False
+    return "session" in body and ("expired" in body or "invalid" in body or "not found" in body)
+
+
+async def _open_session(client: Any, server: McpServerConfig) -> None:
+    """Open a session: send initialize, store the Mcp-Session-Id, send initialized.
+
+    This is the handshake shared by initial registration and session rebuild; the
+    session id lives on the server instance (no module-level session table).
+    """
+    request_id = _next_request_id(server)
+    init_resp = await client.post(
+        f"{server.url}/",
+        json={
+            "jsonrpc": "2.0",
+            "method": "initialize",
+            "params": {
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": CLIENT_INFO,
+            },
+            "id": request_id,
+        },
+        headers=_base_headers(server),
+    )
+    init_resp.raise_for_status()
+    session_id = init_resp.headers.get("Mcp-Session-Id")
+    if session_id:
+        server.session_id = session_id
+    _parse_jsonrpc_response(init_resp, request_id)
+    await _post_notification(client, server, "notifications/initialized")
+
+
+def _expire_session(server: McpServerConfig) -> None:
+    """Clear the server's local session id ahead of a rebuild or on close."""
+    server.session_id = None
+
+
 async def _post_jsonrpc(
-    client: Any, server: McpServerConfig, method: str, params: dict[str, Any]
+    client: Any,
+    server: McpServerConfig,
+    method: str,
+    params: dict[str, Any],
+    *,
+    _allow_session_retry: bool = True,
 ) -> dict[str, Any]:
-    """Send a JSON-RPC request and return the matched JSON-RPC response object."""
+    """Send a JSON-RPC request and return the matched JSON-RPC response object.
+
+    On a session-expiry response (D1), the session is expired, re-opened via initialize,
+    and the original request is retried exactly once (guarded by _allow_session_retry).
+    Session-expiry detection happens before raise_for_status so the 404/4xx branch is
+    reachable (D1a).
+    """
     request_id = _next_request_id(server)
     resp = await client.post(
         f"{server.url}/",
         json={"jsonrpc": "2.0", "method": method, "params": params, "id": request_id},
         headers=_base_headers(server),
     )
+    if _allow_session_retry and _is_session_expired(resp):
+        _expire_session(server)
+        await _open_session(client, server)
+        return await _post_jsonrpc(client, server, method, params, _allow_session_retry=False)
     resp.raise_for_status()
     obj = _parse_jsonrpc_response(resp, request_id)
     if "error" in obj:
@@ -221,29 +327,7 @@ async def _register_http_server(server: McpServerConfig) -> None:
     import httpx
 
     async with httpx.AsyncClient(timeout=10.0) as client:
-        request_id = _next_request_id(server)
-        init_resp = await client.post(
-            f"{server.url}/",
-            json={
-                "jsonrpc": "2.0",
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": PROTOCOL_VERSION,
-                    "capabilities": {},
-                    "clientInfo": CLIENT_INFO,
-                },
-                "id": request_id,
-            },
-            headers=_base_headers(server),
-        )
-        init_resp.raise_for_status()
-        session_id = init_resp.headers.get("Mcp-Session-Id")
-        if session_id:
-            server.session_id = session_id
-        _parse_jsonrpc_response(init_resp, request_id)
-
-        await _post_notification(client, server, "notifications/initialized")
-
+        await _open_session(client, server)
         list_obj = await _post_jsonrpc(client, server, "tools/list", {})
 
     tools = list_obj.get("result", {}).get("tools", [])

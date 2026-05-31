@@ -368,3 +368,41 @@ class CancellationChecker:                       # TerminationChecker
 3. **删除 `MaxTurnsChecker` 类**（见自解冲突 2）：确认接受删类而非保留空壳；若波次 3 或外部代码仍 import 该类需改回保留。
 4. **Grace Call 指令文案 `_GRACE_CALL_TEXT`** 与"一段话总结"的长度约束依赖 reserved token 上限（默认 floor=512）：确认措辞与默认配额。
 5. **`grace_max_tokens(NO_LIMIT)` 回退到 floor**：主 token 预算无上限时 Grace Call 仍以 floor(512) 为上限。确认该兜底语义。
+
+## 11. mcp-session-management (MCP2)
+
+**改/建文件：**
+- 修改 `src/fleetent/mcp_client.py`：新增会话生命周期辅助 `_open_session`（initialize + 写 session_id + notifications/initialized，握手抽出供注册与重建复用）、`_expire_session`（置 None）、`_is_session_expired` / `_has_session_invalid_marker`（D1 失效识别）；`_post_jsonrpc` 增 `_allow_session_retry` 入参与失效重建分支；`close()` 新增 `_close_http_sessions`（对活跃 HTTP 会话发 DELETE）。`_register_http_server` 的内联握手替换为调用 `_open_session`。
+- 修改 `tests/test_mcp_client.py`：新增 14 例（生命周期 4 + 调用期重建/重试 1 + 注册期重建 1 + 至多一次×2 + 认证不重建×2 + close DELETE×4）。
+
+**前置核实结论（tasks 1.x）：**
+- 1.1 握手/回携/raise 插入点：`_register_http_server`（原行 220）发 initialize、`init_resp.raise_for_status()` 后从响应头取 `Mcp-Session-Id` 写 `server.session_id`；`_base_headers`（原行 166）有 session_id 时回携；`_post_jsonrpc`（原行 189）`resp.raise_for_status()`（原行 199）——失效检测须前移到此 raise 之前（采用 D1a 方案 a）。
+- 1.2 失效响应特征：404 为主锚点；401/403 判为认证错误**不**重建（上抛）；其余 4xx 仅当响应头 `Mcp-Session-Invalid` 或响应体含 session+(expired/invalid/not found) 标识才判失效。
+- 1.3 `close()`（原行 108）仅清 stdio `_active_sessions`；`_server_registry` 为模块级 dict，可 `.values()` 遍历，按 `transport=="http" and session_id is not None` 筛活跃 HTTP 会话。
+- 1.4 DELETE 端点：同 POST 端点 `{url}/`，携 `Mcp-Session-Id` 头（复用 `_base_headers`），符合 Streamable HTTP 规范。
+
+**D1a 失效检测落点（方案 a·前移）：**
+- 在 `_post_jsonrpc` 中 `resp = await client.post(...)` 之后、`resp.raise_for_status()` **之前**，先 `_is_session_expired(resp)` 判定。命中且允许重试则进入重建分支（不 raise）；不命中再走原 `resp.raise_for_status()` → 解析 → JSON-RPC error 检查。不保留"先 raise 后看码"的不可达分支。
+
+**重建至多一次守卫如何落在共享请求层：**
+- 守卫即 `_post_jsonrpc` 的 `_allow_session_retry: bool = True` keyword-only 入参。命中失效且 `_allow_session_retry` 为 True：`_expire_session` → `_open_session`（写新 id + initialized）→ **递归调用自身**重发原 method/params（分配新递增 request id），但递归时传 `_allow_session_retry=False`。重试仍失效不再进重建分支，落到 `raise_for_status()` 上抛。因 `tools/call`（`_call_http_tool`）与 `tools/list`（`_register_http_server`）都经 `_post_jsonrpc`，调用期/注册期对称生效，与路径无关。
+
+**close DELETE + 生命周期收口如何实现：**
+- `close()` 在原 stdio 清理之前先 `await _close_http_sessions()`：筛 `_server_registry` 中活跃 HTTP 会话，新建一个 `httpx.AsyncClient`，对每个 server `client.delete(f"{url}/", headers=_base_headers(server))`（带 Mcp-Session-Id），`try/except Exception → logger.debug`（best-effort，不抛、不阻断），`finally` 调 `_expire_session` 置空 session_id。无活跃会话直接 return（不建 client、不发请求）；stdio server 因 `transport!="http"` 被跳过。
+- 生命周期收口：open/expire 为显式函数，reuse 沿用 `_base_headers` 回携，close 经 `_close_http_sessions`；状态仍持于 `McpServerConfig.session_id`，未引入新数据类/模块级会话表/锁。重建路径复用 `_open_session` 而非复制握手。
+
+**自解冲突（C·全自主，最小改动）：**
+1. **4xx 兜底判据的具体标识**（Open Question 1，目标 server 未在手边实测）：实现为响应头 `Mcp-Session-Invalid` 或响应体（小写）含 `session` 且含 `expired`/`invalid`/`not found` 之一。保守口径，避免把普通 400 误判为会话失效;404 仍是主路径，绝大多数标准 server 走 404，兜底仅为非 404 server 留口。
+2. **重试用递归而非循环**：`_post_jsonrpc` 递归一层传 `_allow_session_retry=False`，比显式 while/计数器更短且天然"至多一次"，无新增可变状态。
+3. **DELETE 失败后仍 `_expire_session`**：放在 `finally`，即便 DELETE 失败（服务端不可达）也清本地 session_id——关停后实例不应再带陈旧 id；与"best-effort 释放"语义一致。
+4. **不引入 per-server 锁**（design 明确接受无锁、最坏多一次重建有界）：未加锁。
+
+**影响：**
+- pytest：base **932 → after 946 passed**（净 +14，全在 `tests/test_mcp_client.py`）。MCP1 既有用例（注册/回携/SSE/降级/请求 id）全绿，会话有效路径不破。
+- ruff（仅本 change 改/建文件）：format 仅 `mcp_client.py` 折叠了一处列表推导（本 change 新增的 `_close_http_sessions`，非无关行）；check `All checks passed`。
+- mypy：base **76 → after 76**，无新增。`mcp_client.py` 仅余 2 个既有 `no-any-return`（`_call_stdio_tool`/`_call_http_tool` 返回，HEAD 即存在），非本 change 引入。
+
+**需 zy 核实：**
+1. **4xx 会话失效兜底标识**（自解冲突 1）：`Mcp-Session-Invalid` 头 + 响应体关键词为推测口径，未对照真实自托管 MCP server 实测。若目标 server 用特定 JSON-RPC error code（如 -32001）表达会话失效，需改 `_has_session_invalid_marker` 改读 body 的 JSON-RPC error。404 主路径不受影响。
+2. **DELETE 会话端点路径**（Open Question 2）：按规范取同 POST 端点 `{url}/`。若目标 server 用独立会话端点需调整。
+3. **并发无锁**（Open Question 3）：沿用 design 决定不加锁，最坏多一次 initialize。高并发实测出现交错问题再加 per-server 锁。
