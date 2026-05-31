@@ -152,7 +152,7 @@ async def run_reflection(scope: str) -> ReflectionReport:
 - Then：保存的 payload 包含 finding summary、evidence ids 和 metadata，不包含完整对话 transcript
 
 **场景 6：knowledge-base 不可用时不阻塞**
-- Given：knowledge-base 未实现或未启用
+- Given：knowledge-base 未启用或不可用
 - When：run_reflection 执行
 - Then：系统仍可基于 traces 和 memory 返回 report
 
@@ -165,7 +165,7 @@ async def run_reflection(scope: str) -> ReflectionReport:
 - memory 只读：生成 memory_candidate / memory_conflict 不修改 memory_items
 - skill 只读：生成 skill_opportunity 不创建、更新或删除 skills/ 文件
 - report 持久化：reflection_reports 表存在，payload 不保存完整 transcript
-- knowledge-base 非依赖：KB 未实现或未启用时 run_reflection 正常返回
+- knowledge-base 非依赖：KB 未启用或不可用时 run_reflection 正常返回
 
 **需要 mock 的依赖**：
 - `observability.query_trace_events`：注入可控的历史 trace events

@@ -192,8 +192,8 @@ flowchart TD
 | [connectors.md](capabilities/connectors.md) | 数据源连接器（Confluence / Google Drive 等） | P2 | user-center | 张亮 | 未开始 |
 | [user-center.md](capabilities/user-center.md) | 用户中心、多租户管理 | P1 | - | 张亮 | 部分完成 |
 | [memory.md](capabilities/memory.md) | 跨 session 语义记忆、提取动作、检索与评估基线 | P1 | model-router · vector-store · observability | 常乐 | 基础完成 |
-| [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入，memory provider 已接入 | P1 | memory · knowledge-base | 常乐 | 基础完成 |
-| [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、混合检索 | P1 | vector-store | 常乐 | 已设计 |
+| [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入，memory / knowledge-base provider 已接入 | P1 | memory · knowledge-base | 常乐 | 基础完成 |
+| [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、local directory 导入、混合检索 | P1 | vector-store | 常乐 | 基础完成 |
 | [vector-store.md](capabilities/vector-store.md) | 向量索引、SQLite backend、embedding / rerank provider | P1 | deployment | 常乐 | 基础完成 |
 | [reflection.md](capabilities/reflection.md) | 记忆 / Skill / 知识库反思与自进化 | P2 | memory · skill · knowledge-base | 常乐 | 基础完成 |
 | [observability.md](capabilities/observability.md) | 评估日志、数据统计、链路追踪 | P0 | - | 常乐 | 基础完成 |

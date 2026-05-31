@@ -75,7 +75,7 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 | **entity** | 从文档中 LLM 提取的命名实体（人名、组织、概念、产品等），用于图增强检索 | 保持英文 |
 | **relation** | 两个 entity 之间的关系描述，从文档中 LLM 提取，存储为有向边 | 保持英文 |
 | **connector** | 数据源连接器，实现 `DataSource` 接口，负责从外部系统（Confluence、Google Drive、本地目录等）拉取文档 | 不用 "adapter"、"integration" |
-| **ingest** | 将文档导入知识库的完整过程：解析 → 分块 → embedding → 图提取，全程异步执行 | 不用 "import"、"upload"（upload 特指文件直传这一种 ingest 方式）|
+| **ingest** | 将文档导入知识库的过程：解析 → 分块 → embedding / 索引写入；图提取属于后续 graph search 阶段 | 不用 "import"、"upload"（upload 特指文件直传这一种 ingest 方式）|
 
 ---
 

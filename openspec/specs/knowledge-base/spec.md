@@ -1,7 +1,8 @@
 # knowledge-base Specification
 
 ## Purpose
-TBD - created by archiving change 2026-05-31-knowledge-bridge-migration-plan. Update Purpose after archive.
+Provide tenant-scoped enterprise document ingestion, parsing, indexing, retrieval, local source sync,
+and retrieval evaluation for agent long-term context.
 ## Requirements
 ### Requirement: KnowledgeBridge migration plan
 系统 SHALL 在实现 fleetent knowledge-base 运行时代码前，产出 `knowledge-bridge` 到 fleetent 的迁移计划。
@@ -47,3 +48,331 @@ TBD - created by archiving change 2026-05-31-knowledge-bridge-migration-plan. Up
 - **WHEN** 读者查看 migration plan
 - **THEN** 可以看到 parser、connector、hybrid search、graph search 和 sync planner 后续 specs 的建议顺序
 
+### Requirement: Knowledge-base runtime foundation
+系统 SHALL 提供 `intelligence.knowledge_base` runtime package，用于手动导入文本内容、建立 chunk
+索引并按 tenant + kb 隔离检索。
+
+#### Scenario: Public API is importable
+- **WHEN** 调用方导入 `KnowledgeDocument`、`KnowledgeChunk`、`ingest_text`、`search` 和 `delete`
+- **THEN** 导入成功
+
+#### Scenario: Knowledge-base config defaults
+- **WHEN** 未显式配置 knowledge_base
+- **THEN** `knowledge_base.enabled` 默认为 false
+- **AND** `default_tenant_id` 默认为 `"default"`
+- **AND** `default_kb_id` 默认为 `"global"`
+- **AND** chunk size 和 overlap 有稳定默认值
+
+#### Scenario: Knowledge-base owns schema
+- **WHEN** Alembic upgrade 到 head
+- **THEN** 数据库包含 knowledge-base-owned `knowledge_bases`、`knowledge_documents` 和 `knowledge_chunks`
+- **AND** migration 标明 owner module 是 knowledge-base
+
+### Requirement: Manual text ingest and chunk indexing
+系统 SHALL 支持手动导入 text / markdown 内容，生成 deterministic chunks 并写入 vector_store。
+
+#### Scenario: Ingest creates document and chunks
+- **WHEN** 调用 `ingest_text(filename, content, tenant_id, kb_id, source, source_url)`
+- **THEN** 系统创建 document record
+- **AND** 系统按 deterministic chunking 创建有序 chunks
+
+#### Scenario: Empty content is rejected
+- **WHEN** 导入内容为空或全空白
+- **THEN** 系统 fail fast
+
+#### Scenario: Chunks are indexed in vector store
+- **WHEN** ingest 创建 chunk
+- **THEN** 系统调用 `vector_store.upsert(chunk_id, chunk_content, knowledge_namespace(tenant_id, kb_id))`
+
+#### Scenario: Ingest is tenant and kb scoped
+- **WHEN** 同一 filename 被导入不同 tenant 或 kb
+- **THEN** records 与 vector namespace 相互隔离
+
+### Requirement: Vector-only knowledge search
+系统 SHALL 提供 vector-only `search(query, tenant_id, kb_ids, limit)`，返回相关 `KnowledgeChunk`。
+
+#### Scenario: Search returns chunks with metadata
+- **WHEN** query 命中已导入 chunks
+- **THEN** 返回的 `KnowledgeChunk` 包含 chunk id、document id、filename、content、score、tenant_id 和 kb_id
+
+#### Scenario: Search supports multiple knowledge bases
+- **WHEN** `kb_ids` 包含多个 kb
+- **THEN** 系统分别查询对应 namespace 并合并结果
+
+#### Scenario: Search is tenant isolated
+- **WHEN** tenant A 和 tenant B 有相似内容
+- **THEN** tenant A 的 search 不返回 tenant B 的 chunks
+
+#### Scenario: Search respects limit and stable ordering
+- **WHEN** search 返回多条候选
+- **THEN** 返回数量不超过 limit
+- **AND** 结果按 score DESC、chunk position ASC、chunk id ASC 稳定排序
+
+### Requirement: Knowledge document deletion
+系统 SHALL 支持删除 document 及其 chunks 和 vector index entries。
+
+#### Scenario: Delete removes document chunks
+- **WHEN** 调用 `delete(document_id)`
+- **THEN** document 和关联 chunks 不再被 search 返回
+
+#### Scenario: Delete removes vector entries
+- **WHEN** 删除 document
+- **THEN** 系统为该 document 的每个 chunk 调用 `vector_store.delete(chunk_id, namespace)`
+
+#### Scenario: Delete is idempotent
+- **WHEN** 删除不存在或已删除的 document
+- **THEN** 系统不报错
+
+### Requirement: Basic parser public API
+系统 SHALL 提供无 AI 框架依赖的基础 parser API，将 text、Markdown 和 lightweight HTML 转换为
+structured parsed sections。
+
+#### Scenario: Parser API is importable
+- **WHEN** 调用方导入 `ParsedSection`、`ParsedDocument`、`parse_text`、`parse_markdown` 和 `parse_html`
+- **THEN** 导入成功
+
+#### Scenario: Parsed document shape
+- **WHEN** parser 返回 `ParsedDocument`
+- **THEN** 结果包含 filename、format、sections 和 metadata
+- **AND** 每个 section 包含 title、text、level 和 metadata
+
+### Requirement: Text parser
+系统 SHALL 支持 plain text parser，用于无结构文本导入。
+
+#### Scenario: Text body section
+- **WHEN** 解析非空 text
+- **THEN** parser 返回一个 body section
+
+#### Scenario: Empty text rejected
+- **WHEN** text 内容为空或全空白
+- **THEN** parser fail fast
+
+### Requirement: Markdown parser
+系统 SHALL 支持基础 Markdown section parser。
+
+#### Scenario: Markdown headings create sections
+- **WHEN** Markdown 包含多级 heading
+- **THEN** parser 按 heading 生成 sections
+- **AND** section metadata 保留 heading path
+
+#### Scenario: Fenced code blocks are preserved
+- **WHEN** Markdown fenced code block 内包含 `#`
+- **THEN** parser 不把 code block 内容误识别为 heading
+
+#### Scenario: Empty sections are removed
+- **WHEN** heading 下没有有效文本
+- **THEN** parser 不输出空 section
+
+### Requirement: Lightweight HTML parser
+系统 SHALL 支持 lightweight HTML parser，用于后续 Confluence / HTML 文档适配。
+
+#### Scenario: Unsafe or non-content elements are ignored
+- **WHEN** HTML 包含 script 或 style
+- **THEN** parser 输出不包含这些内容
+
+#### Scenario: HTML headings and body text create sections
+- **WHEN** HTML 包含 title、heading 和段落
+- **THEN** parser 输出对应 sections
+
+#### Scenario: Simple tables become searchable text
+- **WHEN** HTML 包含简单 table
+- **THEN** parser 将 table cells 转为可检索文本
+
+### Requirement: Parsed ingest adapter
+系统 SHALL 允许 core ingest 消费 parsed sections 并保留 section metadata。
+
+#### Scenario: Parsed sections are ingested
+- **WHEN** 调用 parsed ingest API
+- **THEN** 系统为 parsed sections 生成 chunks 并写入 vector_store
+
+#### Scenario: Chunk metadata includes section context
+- **WHEN** parsed section 生成 chunk
+- **THEN** chunk metadata 保留 section title 或 heading path
+
+### Requirement: Parser dependency boundary
+基础 parser SHALL 不引入 LlamaIndex、LangChain、docling、PDF/Office parser 或 VLM 依赖。
+
+#### Scenario: No AI framework parser dependency
+- **WHEN** basic parser change 完成
+- **THEN** runtime dependency 不包含 LlamaIndex、LangChain 或 docling
+
+### Requirement: Knowledge-base search modes
+系统 SHALL 支持 vector、keyword 和 hybrid 三种 knowledge-base search mode。
+
+#### Scenario: Vector mode remains available
+- **WHEN** 调用 `search(..., mode="vector")`
+- **THEN** 系统使用 vector_store 检索 chunks
+
+#### Scenario: Keyword mode is available
+- **WHEN** 调用 `search(..., mode="keyword")`
+- **THEN** 系统使用 SQLite FTS5 / BM25 检索 chunks
+
+#### Scenario: Hybrid mode is available
+- **WHEN** 调用 `search(..., mode="hybrid")`
+- **THEN** 系统同时使用 vector 和 keyword candidates 并融合排序
+
+#### Scenario: Unsupported search mode fails fast
+- **WHEN** 调用方传入未知 mode
+- **THEN** 系统 fail fast
+
+### Requirement: Keyword indexing
+系统 SHALL 为 knowledge chunks 维护 SQLite FTS5 keyword index。
+
+#### Scenario: Ingest updates keyword index
+- **WHEN** ingest 创建 chunk
+- **THEN** chunk content 可被 keyword search 命中
+
+#### Scenario: Delete removes keyword index entries
+- **WHEN** document 被删除
+- **THEN** 关联 chunks 不再被 keyword search 返回
+
+#### Scenario: Keyword index is tenant and kb scoped
+- **WHEN** 不同 tenant 或 kb 存在相同关键词
+- **THEN** keyword search 只返回查询范围内的 chunks
+
+### Requirement: Keyword retrieval behavior
+系统 SHALL 支持适合企业文档的精确词检索。
+
+#### Scenario: Exact identifiers are searchable
+- **WHEN** chunk 包含产品编号、错误码或专有名词
+- **THEN** keyword search 可以命中该 chunk
+
+#### Scenario: Keyword search respects limit
+- **WHEN** keyword search 找到多条结果
+- **THEN** 返回数量不超过 limit
+
+#### Scenario: Keyword search returns KnowledgeChunk
+- **WHEN** keyword search 返回结果
+- **THEN** result shape 仍为 `KnowledgeChunk`
+
+### Requirement: Hybrid RRF fusion
+系统 SHALL 使用 RRF 或等价稳定策略融合 vector 和 keyword candidates。
+
+#### Scenario: Hybrid deduplicates chunks
+- **WHEN** 同一 chunk 同时出现在 vector 和 keyword candidates
+- **THEN** hybrid result 只包含一次该 chunk
+
+#### Scenario: Hybrid boosts dual matches
+- **WHEN** 一个 chunk 同时被 vector 和 keyword 命中
+- **THEN** 该 chunk 排名优先于只被单侧弱命中的候选
+
+#### Scenario: Hybrid degrades when one side is empty
+- **WHEN** vector 或 keyword 单侧无结果
+- **THEN** hybrid search 仍返回另一侧结果
+
+### Requirement: Hybrid search excludes advanced retrieval
+hybrid search SHALL NOT implement reranker, query planner, graph search or external search backend.
+
+#### Scenario: No rerank dependency
+- **WHEN** hybrid search 执行
+- **THEN** 系统不调用 rerank provider
+
+### Requirement: Knowledge-base connector boundary
+系统 SHALL 提供 DataSource / DocumentRef 边界，供不同文档来源接入 knowledge-base ingest。
+
+#### Scenario: Connector API is importable
+- **WHEN** 调用方导入 `DocumentRef` 和 `DataSource`
+- **THEN** 导入成功
+
+#### Scenario: DocumentRef shape
+- **WHEN** connector 返回 `DocumentRef`
+- **THEN** ref 包含 id、filename、format、path 或 url、metadata
+
+### Requirement: Local directory data source
+系统 SHALL 支持从显式允许的本地目录列举和读取文档。
+
+#### Scenario: Local source only scans allowlisted root
+- **WHEN** 配置 local directory source
+- **THEN** connector 只读取该 root 下文件
+
+#### Scenario: Path traversal is rejected
+- **WHEN** 请求读取 allowlisted root 外的路径
+- **THEN** 系统 fail fast
+
+#### Scenario: Supported local formats
+- **WHEN** local directory 包含 `.txt`、`.md`、`.html` 或 `.htm`
+- **THEN** connector 返回对应 `DocumentRef`
+
+#### Scenario: Unsupported local formats are skipped
+- **WHEN** local directory 包含不支持后缀
+- **THEN** connector 跳过该文件并在 sync summary 中体现
+
+### Requirement: Local manual sync
+系统 SHALL 提供手动 local directory sync，将支持的文件解析并导入指定 tenant/kb。
+
+#### Scenario: Manual sync ingests supported files
+- **WHEN** 调用 local sync API
+- **THEN** 系统读取支持文件，调用 parser，并通过 core ingest 写入 KB
+
+#### Scenario: Manual sync is tenant and kb scoped
+- **WHEN** 同一目录同步到不同 tenant/kb
+- **THEN** 文档和 chunks 写入对应 KB scope
+
+#### Scenario: Manual sync returns summary
+- **WHEN** local sync 完成
+- **THEN** 返回 scanned、ingested、skipped、failed 等摘要计数
+
+### Requirement: Local source state
+系统 SHALL 记录本地文件状态，避免未变化文件重复 ingest。
+
+#### Scenario: Unchanged files are skipped
+- **WHEN** 文件 path、mtime 和 content hash 均未变化
+- **THEN** 下一次 sync 不重复 ingest
+
+#### Scenario: Changed files are reingested
+- **WHEN** 文件内容 hash 变化
+- **THEN** 下一次 sync 重新 ingest 该文件
+
+### Requirement: Local connector excludes advanced sync
+local connector SHALL NOT implement scheduler, Confluence, Google Drive, ACL enforcement or multi-worker
+runtime.
+
+#### Scenario: No scheduler dependency
+- **WHEN** local sync 完成
+- **THEN** 没有新增后台 scheduler 或 worker 进程要求
+
+### Requirement: Knowledge-base retrieval evaluation fixtures
+系统 SHALL 提供 deterministic retrieval evaluation fixtures，用于验证 KB ingest/chunking/search 质量基线。
+
+#### Scenario: Fixture schema is explicit
+- **WHEN** evaluation runner 加载 fixture
+- **THEN** fixture 包含 name、documents、queries、expected_chunks 和 forbidden_chunks
+
+#### Scenario: Invalid fixture is rejected
+- **WHEN** fixture 缺失必需字段
+- **THEN** evaluation runner 报告 fixture validation failure
+
+### Requirement: Deterministic retrieval evaluation
+系统 SHALL 默认使用 deterministic embedding 和 isolated storage 运行 KB retrieval evaluation。
+
+#### Scenario: Runner ingests documents
+- **WHEN** evaluation case 运行
+- **THEN** runner 将 fixture documents 导入 tmp knowledge-base store
+
+#### Scenario: Expected chunks are validated
+- **WHEN** query 运行完成
+- **THEN** runner 验证 expected chunks 或 snippets 出现在 top-k 结果中
+
+#### Scenario: Forbidden chunks are rejected
+- **WHEN** query 运行完成
+- **THEN** runner 验证 forbidden chunks 或 snippets 不出现在结果中
+
+#### Scenario: Evaluation isolates storage
+- **WHEN** evaluation case 运行
+- **THEN** SQLite 使用 tmp path
+- **AND** 不触碰 `data/`
+
+### Requirement: Optional real embedding retrieval evaluation
+系统 SHALL 提供显式启用的真实 embedding retrieval evaluation，默认跳过。
+
+#### Scenario: Real embedding evaluation is skipped by default
+- **WHEN** 未设置 `FLEETENT_EVAL_REAL_EMBEDDING=1`
+- **THEN** real embedding evaluation case 被 skip
+
+#### Scenario: Real embedding evaluation requires provider credentials
+- **WHEN** 设置 `FLEETENT_EVAL_REAL_EMBEDDING=1` 但缺少 provider credentials
+- **THEN** real embedding evaluation case 被 skip
+
+#### Scenario: Real embedding evaluation is manually runnable
+- **WHEN** 设置 `FLEETENT_EVAL_REAL_EMBEDDING=1` 且 provider 配置完整
+- **THEN** runner 可以使用真实 HTTP embedding provider 运行 fixture

@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Knowledge-base runtime foundation
 系统 SHALL 提供 `intelligence.knowledge_base` runtime package，用于手动导入文本内容、建立 chunk

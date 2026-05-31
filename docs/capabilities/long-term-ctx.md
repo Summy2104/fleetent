@@ -6,7 +6,7 @@
 ## 概述
 
 统一协调长期上下文的检索与注入，是 memory 和 knowledge_base 与 agent_loop 之间的胶水层。
-当前推进策略是先让 knowledge_base 作为可选 provider 接入：KB 未实现、未启用或无结果时，
+当前推进策略是让 knowledge_base 作为可选 provider 接入：KB 未启用、未配置或无结果时，
 long-term-ctx 仍可基于 memory 正常工作。
 
 **负责**：查询 memory 和可选 knowledge_base、合并结果、控制注入的 token 预算、格式化为 system prompt 可用的文本，并返回来源摘要供 observability 记录。
@@ -83,7 +83,7 @@ async def build_context(
 已实现内容：
 - `BuiltContext`、`ContextSource`、`build_context(user_id, query, agent_id, available_tokens)` public API
 - memory-layer semantic search 接入
-- optional/null knowledge provider，KB 未启用时不阻塞 memory 注入
+- knowledge-base provider 接入；KB 未启用、未配置或无结果时不阻塞 memory 注入
 - token budget 基础截断
 - agent-runtime 在 `run()` / `run_stream()` / `run_sync()` 构造 prompt 前调用 long-term-ctx
 - `BuiltContext.sources` 供 observability source attribution 记录
@@ -93,7 +93,7 @@ async def build_context(
 ## 规划中（v1.0）
 
 - [x] **可选检索**：调用 memory_layer.search()；knowledge_base 仅在 provider 已启用时调用
-  - knowledge_base 未实现、未启用或返回空结果时不影响 memory 注入
+  - knowledge_base 未启用、未配置或返回空结果时不影响 memory 注入
   - graph_search 暂不接入，等 knowledge-base graph search spec 再定义
 
 - [x] **优先级合并**：memory 条目优先于 knowledge 条目
@@ -109,7 +109,7 @@ async def build_context(
 
 ## 当前缺口
 
-- KB provider 只是 optional 接口，knowledge-base runtime 尚未实现。
+- KB provider 已接入当前 knowledge-base search；尚未支持 agent 到多个 KB 的绑定策略。
 - token budget 仍偏粗：缺少真实 token estimator、分段截断和更细的优先级策略。
 - memory / knowledge 的比例分配还未验证。
 - 格式模板未产品化，缺少不同 agent / tenant 的可配置策略。

@@ -3,7 +3,6 @@
 ## Purpose
 Coordinate long-term context retrieval and prompt injection across semantic memory and
 optional knowledge providers without owning storage or knowledge-base runtime behavior.
-
 ## Requirements
 ### Requirement: Long-term context public API
 系统 SHALL 提供 `BuiltContext`、`ContextSource` 和
@@ -39,7 +38,7 @@ agent prompt 的长期上下文。
 - **THEN** `BuiltContext.text` 不包含空的 memory 区段
 
 ### Requirement: Optional knowledge provider
-系统 SHALL 将 knowledge-base 作为可选 provider；knowledge-base 未实现、未启用或返回空结果时，
+系统 SHALL 将 knowledge-base 作为可选 provider；knowledge-base 未启用、未配置或返回空结果时，
 long-term-ctx 仍正常返回可用上下文。
 
 #### Scenario: Knowledge provider disabled
@@ -55,6 +54,11 @@ long-term-ctx 仍正常返回可用上下文。
 - **WHEN** knowledge provider 返回相关 chunks
 - **THEN** `BuiltContext.text` 包含 knowledge 区段
 - **AND** `BuiltContext.sources` 包含 `source_type="knowledge"` 的来源摘要
+
+#### Scenario: Built-in provider uses knowledge-base search
+- **WHEN** `knowledge_base.enabled=true`
+- **THEN** long-term-ctx 可以通过 built-in provider 调用 `knowledge_base.search()`
+- **AND** provider 返回的 source id 对应 chunk id
 
 ### Requirement: Context merge and budget control
 系统 SHALL 合并 memory 与 knowledge 结果，并保证注入文本不超过可用 token 预算与配置上限中的较小值。

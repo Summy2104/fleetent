@@ -104,6 +104,8 @@
 
 ## 后续 fleetent KB specs 拆分和推荐顺序
 
+状态说明：第一批 `knowledge-base-core`、`knowledge-base-parsers-basic`、`knowledge-base-connectors-local`、`knowledge-base-hybrid-search` 和 `knowledge-base-retrieval-evaluation` 已合入 `main`。下表保留为迁移路线和后续拆分边界参考。
+
 | 顺序 | spec | owning package | 最小范围 | 依赖 | 不包含 |
 | --- | --- | --- | --- | --- | --- |
 | 1 | `knowledge-base-core` | `intelligence.knowledge_base` | `tenant_id + kb_id`、documents/chunks Alembic 表、manual text/markdown ingest、deterministic chunking、vector_store indexing、`search()` 返回 `KnowledgeChunk` | fleetent DB runtime/store、`vector_store` public API、config namespace | parser 迁移、connector、hybrid BM25、graph search、sync planner |
@@ -202,4 +204,4 @@
 
 ## 后续实施建议
 
-下一个 KB implementation spec 建议是 `knowledge-base-core`。它应以“手动 text/markdown ingest -> chunks -> vector_store -> search 返回 `KnowledgeChunk`”为唯一闭环，并把 parser、connector、hybrid、graph、sync 都排除在外。完成后再用 `knowledge-base-parsers-basic` 和 `knowledge-base-connectors-local` 扩大输入面。
+第一批 KB foundation 已完成并合入。下一批建议优先讨论 `knowledge-base-sync-planner`，把当前 local directory manual sync 的状态记录提升为可规划、可重试、幂等的同步动作模型；随后再推进 Confluence / Google Drive connector。`knowledge-base-retrieval-audit` 可并行评估，但默认不保存 raw query 或 chunk content。
