@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 
 from fleetent.db import Row, SQLiteDatabase
@@ -50,10 +51,12 @@ class KnowledgeStore:
                 transaction.execute(
                     """
                     INSERT INTO knowledge_chunks (
-                        id, document_id, tenant_id, kb_id, position, content, created_at
+                        id, document_id, tenant_id, kb_id, position, content,
+                        metadata_json, created_at
                     )
                     VALUES (
-                        :id, :document_id, :tenant_id, :kb_id, :position, :content, :created_at
+                        :id, :document_id, :tenant_id, :kb_id, :position, :content,
+                        :metadata_json, :created_at
                     )
                     """,
                     {
@@ -63,6 +66,7 @@ class KnowledgeStore:
                         "kb_id": chunk.kb_id,
                         "position": chunk.position,
                         "content": chunk.content,
+                        "metadata_json": _dump_metadata(chunk.metadata),
                         "created_at": _format_datetime(_now()),
                     },
                 )
@@ -82,6 +86,7 @@ class KnowledgeStore:
                     chunk.kb_id,
                     chunk.position,
                     chunk.content,
+                    chunk.metadata_json,
                     document.filename,
                     document.source,
                     document.source_url
@@ -104,6 +109,7 @@ class KnowledgeStore:
                     chunk.kb_id,
                     chunk.position,
                     chunk.content,
+                    chunk.metadata_json,
                     document.filename,
                     document.source,
                     document.source_url
@@ -146,6 +152,9 @@ def _row_to_chunk(row: Row, score: float) -> KnowledgeChunk:
         score=score,
         source=str(row["source"]),
         source_url=str(row["source_url"]) if row["source_url"] is not None else None,
+        metadata=_load_metadata(
+            str(row["metadata_json"]) if row["metadata_json"] is not None else None
+        ),
     )
 
 
@@ -155,3 +164,16 @@ def _now() -> datetime:
 
 def _format_datetime(value: datetime) -> str:
     return value.isoformat()
+
+
+def _dump_metadata(metadata: dict[str, str]) -> str:
+    return json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+
+
+def _load_metadata(metadata_json: str | None) -> dict[str, str]:
+    if not metadata_json:
+        return {}
+    raw_metadata = json.loads(metadata_json)
+    if not isinstance(raw_metadata, dict):
+        return {}
+    return {str(key): str(value) for key, value in raw_metadata.items()}

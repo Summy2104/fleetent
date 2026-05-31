@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -27,3 +27,4 @@ class KnowledgeChunk:
     score: float
     source: str
     source_url: str | None
+    metadata: dict[str, str] = field(default_factory=dict)

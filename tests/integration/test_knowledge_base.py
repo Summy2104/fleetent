@@ -118,6 +118,93 @@ async def test_ingest_text_indexes_each_chunk_in_vector_store(monkeypatch, tmp_p
     ]
 
 
+async def test_ingest_parsed_creates_chunks_from_sections(monkeypatch, tmp_path):
+    database = _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=100, chunk_overlap=0)
+
+    from fleetent.intelligence.knowledge_base import ParsedDocument, ParsedSection, runtime
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    parsed = ParsedDocument(
+        filename="guide.md",
+        format="markdown",
+        sections=[
+            ParsedSection(
+                title="Intro",
+                text="Welcome",
+                level=1,
+                metadata={"path": "Intro"},
+            ),
+            ParsedSection(
+                title="Install",
+                text="Run setup",
+                level=2,
+                metadata={"path": "Intro > Install"},
+            ),
+        ],
+        metadata={"filename": "guide.md", "format": "markdown"},
+    )
+
+    document = await runtime.ingest_parsed(
+        parsed,
+        tenant_id="tenant-a",
+        kb_id="global",
+        source="manual",
+        source_url="https://example.test/guide",
+    )
+
+    chunk_rows = database.execute(
+        """
+        SELECT position, content
+        FROM knowledge_chunks
+        WHERE document_id = :document_id
+        ORDER BY position ASC
+        """,
+        {"document_id": document.id},
+    ).fetchall()
+
+    assert [row["content"] for row in chunk_rows] == ["Welcome", "Run setup"]
+    assert [row["position"] for row in chunk_rows] == [0, 1]
+
+
+async def test_ingest_parsed_preserves_section_metadata_on_chunks(monkeypatch, tmp_path):
+    _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=100, chunk_overlap=0)
+
+    from fleetent.intelligence.knowledge_base import ParsedDocument, ParsedSection, runtime
+    from fleetent.intelligence.vector_store import SearchResult
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    parsed = ParsedDocument(
+        filename="guide.md",
+        format="markdown",
+        sections=[
+            ParsedSection(
+                title="Install",
+                text="Run setup",
+                level=2,
+                metadata={"path": "Intro > Install"},
+            )
+        ],
+        metadata={"filename": "guide.md", "format": "markdown"},
+    )
+    document = await runtime.ingest_parsed(parsed, tenant_id="tenant-a", kb_id="global")
+
+    async def vector_search(query: str, namespace: str, limit: int):
+        return [SearchResult(id=f"{document.id}:chunk:0", score=0.9)]
+
+    monkeypatch.setattr(runtime.vector_store, "search", vector_search)
+
+    results = await runtime.search("setup", tenant_id="tenant-a", kb_ids=["global"])
+
+    assert results[0].metadata == {
+        "document_format": "markdown",
+        "section_level": "2",
+        "section_path": "Intro > Install",
+        "section_title": "Install",
+    }
+
+
 async def test_search_queries_vector_store_by_knowledge_namespace(monkeypatch, tmp_path):
     _patch_runtime_database(monkeypatch, tmp_path)
     _patch_runtime_settings(monkeypatch, chunk_size=20, chunk_overlap=0)
