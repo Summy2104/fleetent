@@ -46,9 +46,23 @@ def scan(skills_dir: str | None = None) -> None:
             )
             continue
         name = frontmatter.get("name") or skill_md.parent.name
+        path = str(skill_md)
+        existing = _index.get(name)
+        if existing is not None:
+            # Deterministic selection independent of traversal order: the
+            # SKILL.md whose path string sorts first wins; warn on every loser.
+            kept_path, dropped_path = sorted((existing.path, path))
+            logger.warning(
+                "skill_name_conflict",
+                name=name,
+                kept_path=kept_path,
+                dropped_path=dropped_path,
+            )
+            if existing.path <= path:
+                continue
         _index[name] = SkillEntry(
             description=str(frontmatter.get("description", "")),
-            path=str(skill_md),
+            path=path,
             tags=_as_str_list(frontmatter.get("tags")),
             platforms=_as_str_list(frontmatter.get("platforms")),
             version=_as_opt_str(frontmatter.get("version")),

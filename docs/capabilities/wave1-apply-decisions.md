@@ -146,3 +146,9 @@
 
 **实现:** `scan()` 的 `glob("*/SKILL.md")` → `rglob("SKILL.md")` 递归任意层级;其余(SkillEntry 索引、name 回落 parent.name、目录不存在安全返回、SK2 失败跳过)不变;同名冲突留 SK8。一行改动 + 4 个嵌套测试。
 **影响:** 614 passed,无冲突无红线,skill_registry mypy 0 错。
+
+## skill-name-conflict-warning (SK8) — feat/skill-name-conflict
+
+**实现:** scan 写 _index 前 `_index.get(name)` 检测同名;冲突→structlog warning `skill_name_conflict`{name,kept_path,dropped_path}(由两路径 sorted 派生、与到达顺序无关);确定性选定=路径字符串排序靠前者胜(`if existing.path <= path: continue`);多重同名逐对告警;无冲突零变化不告警。来源无关(方案一),builtin-skills 统一交本 change。6 个测试(含遍历顺序无关守卫)。
+**自解冲突:** 用不同父目录+显式同 name 稳定触发冲突;两个 scan 调用包进 capture_logs(structlog stdlib 处理器在 capture 外报 PrintLogger 属性,既有约定)。
+**影响:** 619 passed,skill_registry mypy 0 错,无红线。

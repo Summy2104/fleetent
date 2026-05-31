@@ -271,3 +271,82 @@ def test_scan_nested_name_falls_back_to_parent_dir(tmp_path):
 def test_scan_missing_dir_returns_empty(tmp_path):
     sr.scan(str(tmp_path / "does-not-exist"))
     assert sr._index == {}
+
+
+# --- name conflict warning + deterministic selection (SK8) ---
+
+
+def _write_named_skill(tmp_path, dirname, name, description="conflict skill."):
+    d = tmp_path / "skills" / dirname
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {description}\n---\nbody")
+
+
+def test_scan_same_name_conflict_warns_with_both_paths(tmp_path):
+    _write_named_skill(tmp_path, "alpha", "dup")
+    _write_named_skill(tmp_path, "beta", "dup")
+    with structlog.testing.capture_logs() as logs:
+        sr.scan(str(tmp_path / "skills"))
+    warnings = [e for e in logs if e["log_level"] == "warning"]
+    conflict = [e for e in warnings if e.get("name") == "dup"]
+    assert len(conflict) == 1
+    entry = conflict[0]
+    paths = {str(entry.get("kept_path")), str(entry.get("dropped_path"))}
+    assert any(p.endswith("/alpha/SKILL.md") for p in paths)
+    assert any(p.endswith("/beta/SKILL.md") for p in paths)
+
+
+def test_scan_conflict_keeps_path_sorted_first(tmp_path):
+    _write_named_skill(tmp_path, "alpha", "dup")
+    _write_named_skill(tmp_path, "beta", "dup")
+    with structlog.testing.capture_logs():
+        sr.scan(str(tmp_path / "skills"))
+    assert "dup" in sr._index
+    assert sr._index["dup"].path.endswith("/alpha/SKILL.md")
+
+
+def test_scan_conflict_winner_independent_of_arrival_order(tmp_path, monkeypatch):
+    _write_named_skill(tmp_path, "alpha", "dup")
+    _write_named_skill(tmp_path, "beta", "dup")
+    base = tmp_path / "skills"
+    alpha = base / "alpha" / "SKILL.md"
+    beta = base / "beta" / "SKILL.md"
+
+    real_rglob = Path.rglob
+
+    def reversed_rglob(self, pattern):
+        return list(reversed(list(real_rglob(self, pattern))))
+
+    with structlog.testing.capture_logs():
+        monkeypatch.setattr(Path, "rglob", reversed_rglob)
+        sr.scan(str(base))
+        winner_reversed = sr._index["dup"].path
+
+        monkeypatch.setattr(Path, "rglob", real_rglob)
+        sr.scan(str(base))
+        winner_forward = sr._index["dup"].path
+
+    assert winner_reversed == winner_forward
+    assert winner_forward == str(alpha)
+    assert winner_forward != str(beta)
+
+
+def test_scan_triple_conflict_warns_per_loser(tmp_path):
+    _write_named_skill(tmp_path, "aaa", "trip")
+    _write_named_skill(tmp_path, "bbb", "trip")
+    _write_named_skill(tmp_path, "ccc", "trip")
+    with structlog.testing.capture_logs() as logs:
+        sr.scan(str(tmp_path / "skills"))
+    conflict = [e for e in logs if e["log_level"] == "warning" and e.get("name") == "trip"]
+    assert len(conflict) == 2
+    assert sr._index["trip"].path.endswith("/aaa/SKILL.md")
+
+
+def test_scan_distinct_names_no_conflict_warning(tmp_path):
+    _write_named_skill(tmp_path, "alpha", "one")
+    _write_named_skill(tmp_path, "beta", "two")
+    with structlog.testing.capture_logs() as logs:
+        sr.scan(str(tmp_path / "skills"))
+    assert "one" in sr._index
+    assert "two" in sr._index
+    assert not [e for e in logs if e["log_level"] == "warning" and "name" in e]
