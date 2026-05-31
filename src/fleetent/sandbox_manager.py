@@ -92,13 +92,23 @@ class SandboxManager:
         assert self.resources_by_scope is not None
         return self.resources_by_scope[scope]
 
-    async def acquire(self, scope: Scope, session_id: str, agent_name: str) -> str:
+    async def acquire(
+        self,
+        scope: Scope,
+        session_id: str,
+        agent_name: str,
+        env: dict[str, str] | None = None,
+    ) -> str:
         """Return a workspace id for (scope, key), reusing or creating as needed.
 
         The key is the session id for `session` scope, the agent name for `agent`
         scope. A registry hit refreshes last_used; a live container found by name
         is re-adopted; otherwise a new container is created with the scope's tier
         (and, for agent scope, a committed dependency image when one exists).
+
+        `env` (SB5) is the already-filtered injection mapping threaded to
+        create_workspace on a fresh create; reused/re-adopted containers keep the
+        env they were created with. None preserves SB2's clean-environment default.
         """
         key = session_id if scope is Scope.SESSION else agent_name
         name = _container_name(scope, key)
@@ -116,7 +126,7 @@ class SandboxManager:
 
         image = await self._image_for(scope, key)
         workspace_id = await self.client.create_workspace(
-            name=name, resources=self.resources_for(scope), image=image
+            name=name, resources=self.resources_for(scope), image=image, env=env
         )
         self._registry[name] = _Entry(workspace_id, scope, key, now)
         return workspace_id

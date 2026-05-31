@@ -204,3 +204,24 @@ async def test_acquire_agent_falls_back_to_default_image_when_absent():
     await mgr.acquire(Scope.AGENT, session_id="s1", agent_name="bot")
     _, kwargs = client.create_workspace.call_args
     assert kwargs["image"] is None
+
+
+# --- SB5: env passthrough ---------------------------------------------------
+
+
+async def test_acquire_passes_env_to_create_workspace():
+    """acquire threads an optional `env` mapping to create_workspace (SB5)."""
+    client = _mock_client()
+    mgr = _manager(client)
+    await mgr.acquire(Scope.SESSION, "s1", "bot", env={"DATA_DIR": "/x"})
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["env"] == {"DATA_DIR": "/x"}
+
+
+async def test_acquire_env_defaults_to_none():
+    """Omitting env keeps SB2's behaviour: create_workspace receives env=None."""
+    client = _mock_client()
+    mgr = _manager(client)
+    await mgr.acquire(Scope.SESSION, "s1", "bot")
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["env"] is None
