@@ -189,6 +189,8 @@ def get_logger(component: str) -> Logger:
 - agent run completion trace：`agent_run_completed`
 - usage summary：按 user / agent / tenant / session / time / model 聚合
 - source attribution：`InjectedContextTrace`、`record_injected_context()`、`injected_context` event
+- observability contract tests：覆盖 agent run 的 `injected_context` / `agent_run_completed` 事件链路、
+  source attribution payload safety、trace query 和 usage aggregation contract
 
 当前定位：具备基础日志、trace、usage 和来源归因能力，但还不是完整的 request trace / APM 系统。
 
@@ -261,7 +263,6 @@ def get_logger(component: str) -> Logger:
 
 ## 下一批候选 specs
 
-- `observability-contract-tests`
 - `observability-runtime-event-coverage`
 - `observability-request-trace-tree`
 - `observability-retention-policy`
@@ -271,12 +272,10 @@ def get_logger(component: str) -> Logger:
 ## 自动化效果验证缺口
 
 - 构造完整 agent run fixture，验证事件流覆盖用户输入、模型、工具、上下文、完成事件。
-- 验证同一次 run 的 `injected_context` 与 `agent_run_completed` 可按 run_id 串起来。
+- 扩展完整 agent run fixture，验证事件流覆盖用户输入、模型、工具、上下文、完成事件。
 - 验证脱敏 / 截断规则对大 payload 和敏感字段稳定生效。
 - 验证 usage / performance 聚合在缺失字段、旧 trace、异常 run 下的容错。
-
-第一批自动化验证优先做 `observability-contract-tests`，它不评估语义质量，只验证 trace contract。
-memory / reflection / long-term-ctx / knowledge-base 的效果评估应依赖这些稳定 trace 证据。
+memory / reflection / long-term-ctx / knowledge-base 的效果评估应依赖已完成的 trace contract 证据。
 
 ## 服务化 / 目录边界判断
 
