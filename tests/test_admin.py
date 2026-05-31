@@ -1,12 +1,11 @@
 from io import StringIO
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from fleetent import admin, user_store
-import fleetent.im_user_store as im_user_store
 import fleetent.agent_store as agent_store
+import fleetent.im_user_store as im_user_store
+from fleetent import admin, user_store
 
 
 @pytest.fixture(autouse=True)
@@ -79,6 +78,7 @@ def test_rotate_key_not_found_exits_nonzero():
 
 # --- allowlist admin commands ---
 
+
 def test_list_pending_no_users():
     out, _, code = run_admin("list-pending")
     assert code == 0
@@ -140,6 +140,7 @@ def test_seed_builtin_admin():
 
 # --- channel agent admin commands ---
 
+
 def test_assign_channel():
     ag = agent_store.create_agent("mybot", "Bot prompt.", [])
     out, _, code = run_admin(
@@ -169,6 +170,7 @@ def test_unassign_channel():
 
 # --- set-default-agent command ---
 
+
 def test_set_default_agent(tmp_path, monkeypatch):
     settings_yaml = tmp_path / "settings.yaml"
     settings_yaml.write_text("")
@@ -191,14 +193,11 @@ def test_set_default_agent_clear(tmp_path, monkeypatch):
 
 # ── schedule admin commands ───────────────────────────────────────────────────
 
-import fleetent.schedule_store as schedule_store_mod
 
 
 @pytest.fixture(autouse=False)
-def tmp_sched_db(tmp_path, monkeypatch):
-    db = tmp_path / "sched.db"
-    monkeypatch.setattr(schedule_store_mod, "DB_PATH", db)
-    return db
+def tmp_sched_db(isolated_schedule_db):
+    return isolated_schedule_db
 
 
 def test_list_schedules_empty(tmp_sched_db):
@@ -210,18 +209,31 @@ def test_list_schedules_empty(tmp_sched_db):
 def test_add_schedule_prints_task_id(tmp_sched_db):
     out, _, code = run_admin(
         "add-schedule",
-        "--name", "standup",
-        "--cron", "0 9 * * 1-5",
-        "--user-id", "u-1",
-        "--message", "run standup",
+        "--name",
+        "standup",
+        "--cron",
+        "0 9 * * 1-5",
+        "--user-id",
+        "u-1",
+        "--message",
+        "run standup",
     )
     assert code == 0
     assert len(out.strip()) == 36  # UUID printed
 
 
 def test_list_schedules_shows_task(tmp_sched_db):
-    run_admin("add-schedule", "--name", "daily", "--cron", "0 9 * * *",
-              "--user-id", "u-1", "--message", "go")
+    run_admin(
+        "add-schedule",
+        "--name",
+        "daily",
+        "--cron",
+        "0 9 * * *",
+        "--user-id",
+        "u-1",
+        "--message",
+        "go",
+    )
     out, _, code = run_admin("list-schedules")
     assert code == 0
     assert "daily" in out
@@ -230,8 +242,9 @@ def test_list_schedules_shows_task(tmp_sched_db):
 
 
 def test_remove_schedule_success(tmp_sched_db):
-    out, _, _ = run_admin("add-schedule", "--name", "x", "--cron", "* * * * *",
-                           "--user-id", "u-1", "--message", "hi")
+    out, _, _ = run_admin(
+        "add-schedule", "--name", "x", "--cron", "* * * * *", "--user-id", "u-1", "--message", "hi"
+    )
     task_id = out.strip()
     _, _, code = run_admin("remove-schedule", "--task-id", task_id)
     assert code == 0

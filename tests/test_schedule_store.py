@@ -3,8 +3,11 @@
 import fleetent.schedule_store as ss
 
 
-def test_create_returns_dict_with_uuid_id(tmp_path, monkeypatch):
-    monkeypatch.setattr(ss, "DB_PATH", tmp_path / "test.db")
+def test_schedule_store_does_not_expose_legacy_db_path():
+    assert not hasattr(ss, "DB_PATH")
+
+
+def test_create_returns_dict_with_uuid_id(isolated_schedule_db):
     task = ss.create(
         name="daily",
         cron_expr="0 9 * * 1-5",
@@ -23,8 +26,7 @@ def test_create_returns_dict_with_uuid_id(tmp_path, monkeypatch):
     assert task["enabled"] == 1
 
 
-def test_list_tasks_returns_all_rows(tmp_path, monkeypatch):
-    monkeypatch.setattr(ss, "DB_PATH", tmp_path / "test.db")
+def test_list_tasks_returns_all_rows(isolated_schedule_db):
     ss.create("a", "* * * * *", "UTC", "u-1", None, "msg-a", "dynamic")
     ss.create("b", "0 0 * * *", "UTC", "u-2", "bot", "msg-b", "static")
     tasks = ss.list_tasks()
@@ -33,20 +35,17 @@ def test_list_tasks_returns_all_rows(tmp_path, monkeypatch):
     assert names == {"a", "b"}
 
 
-def test_delete_removes_task(tmp_path, monkeypatch):
-    monkeypatch.setattr(ss, "DB_PATH", tmp_path / "test.db")
+def test_delete_removes_task(isolated_schedule_db):
     task = ss.create("x", "* * * * *", "UTC", "u-1", None, "msg", "dynamic")
     deleted = ss.delete(task["id"])
     assert deleted is True
     assert ss.list_tasks() == []
 
 
-def test_delete_nonexistent_returns_false(tmp_path, monkeypatch):
-    monkeypatch.setattr(ss, "DB_PATH", tmp_path / "test.db")
+def test_delete_nonexistent_returns_false(isolated_schedule_db):
     result = ss.delete("00000000-0000-0000-0000-000000000000")
     assert result is False
 
 
-def test_list_tasks_empty_db(tmp_path, monkeypatch):
-    monkeypatch.setattr(ss, "DB_PATH", tmp_path / "test.db")
+def test_list_tasks_empty_db(isolated_schedule_db):
     assert ss.list_tasks() == []

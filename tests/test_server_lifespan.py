@@ -13,7 +13,7 @@ import fleetent.user_store as us
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, isolated_schedule_db):
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
     return TestClient(app_module().app)
 
@@ -24,7 +24,7 @@ def app_module():
     return srv
 
 
-def test_health_includes_adapter_status(tmp_path, monkeypatch):
+def test_health_includes_adapter_status(tmp_path, monkeypatch, isolated_schedule_db):
     """Health endpoint returns adapter presence flags; both False when no tokens."""
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
@@ -43,7 +43,7 @@ def test_health_includes_adapter_status(tmp_path, monkeypatch):
     assert data["adapters"]["telegram"] is False
 
 
-def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch):
+def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch, isolated_schedule_db):
     """Health endpoint shows True for adapters whose env tokens are present."""
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-fake")
@@ -66,7 +66,7 @@ def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch):
     assert data["adapters"]["telegram"] is True
 
 
-async def test_mcp_yaml_loaded_if_exists(tmp_path, monkeypatch):
+async def test_mcp_yaml_loaded_if_exists(tmp_path, monkeypatch, isolated_schedule_db):
     """Lifespan calls register_all with servers from config/mcp.yaml."""
     import fleetent.mcp_client as mcp_mod
     import fleetent.server as srv
@@ -88,7 +88,7 @@ async def test_mcp_yaml_loaded_if_exists(tmp_path, monkeypatch):
     assert servers_arg[0].id == "test"
 
 
-async def test_mcp_yaml_missing_skipped_gracefully(tmp_path, monkeypatch):
+async def test_mcp_yaml_missing_skipped_gracefully(tmp_path, monkeypatch, isolated_schedule_db):
     """Lifespan skips MCP loading if config/mcp.yaml doesn't exist."""
     import fleetent.mcp_client as mcp_mod
     import fleetent.server as srv

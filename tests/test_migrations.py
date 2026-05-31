@@ -29,6 +29,7 @@ def test_upgrade_creates_tables(tmp_path):
     assert "agents" in tables
     assert "user_agents" in tables
     assert "approvals" in tables
+    assert "scheduled_tasks" in tables
 
 
 def test_downgrade_removes_tables(tmp_path):
@@ -77,7 +78,40 @@ def test_column_structure(tmp_path):
 
     # approvals columns
     approval_cols = {row[1] for row in conn.execute("PRAGMA table_info(approvals)")}
-    assert approval_cols >= {"id", "session_id", "requester_user_id", "risk_level",
-                             "tool_name", "tool_args", "status", "approver_user_id",
-                             "created_at", "resolved_at"}
+    assert approval_cols >= {
+        "id",
+        "session_id",
+        "requester_user_id",
+        "risk_level",
+        "tool_name",
+        "tool_args",
+        "status",
+        "approver_user_id",
+        "created_at",
+        "resolved_at",
+    }
+
+    schedule_cols = {row[1] for row in conn.execute("PRAGMA table_info(scheduled_tasks)")}
+    assert schedule_cols >= {
+        "id",
+        "name",
+        "cron_expr",
+        "timezone",
+        "user_id",
+        "agent_name",
+        "message",
+        "enabled",
+        "source",
+        "created_at",
+    }
     conn.close()
+
+
+def test_migrated_schedule_store_does_not_create_schema():
+    schedule_source = Path("src/fleetent/schedule_store.py").read_text()
+    runtime_source = Path("src/fleetent/db.py").read_text()
+
+    assert "CREATE TABLE IF NOT EXISTS" not in schedule_source
+    assert "PRAGMA table_info" not in schedule_source
+    assert "CREATE TABLE IF NOT EXISTS" not in runtime_source
+    assert "PRAGMA table_info" not in runtime_source
