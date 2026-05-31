@@ -96,9 +96,29 @@ async def load(session_id: str) -> list[dict[str, object]]:
     return list(json.loads(path.read_text()))
 
 
-async def save(session_id: str, messages: list[dict[str, object]]) -> None:
+async def save(
+    session_id: str,
+    messages: list[dict[str, object]],
+    user_id: str | None = None,
+    agent_name: str | None = None,
+) -> None:
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     path = SESSIONS_DIR / f"{session_id}.json"
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(messages, ensure_ascii=False))
     tmp.replace(path)
+
+    # Best-effort metadata index update: the message file is the source of truth
+    # and is already durably written, so an index failure is logged and swallowed
+    # rather than rolling back the successful save.
+    from fleetent import session_index
+
+    try:
+        session_index.record_activity(
+            session_id,
+            user_id=user_id,
+            message_count=len(messages),
+            agent_name=agent_name,
+        )
+    except Exception as exc:  # noqa: BLE001 — auxiliary index must not break persistence
+        logger.warning("session_index_update_failed", session_id=session_id, error=str(exc))
