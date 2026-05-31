@@ -9,6 +9,8 @@ Qdrant、OpenSearch / Elasticsearch adapter 留出边界。
 
 ## What Changes
 
+- 以 `embedding-rerank-provider-abstraction` 合并后的 runtime/provider 结构为基线执行；如果该 change 尚未合并，
+  本 change 不应并行修改同一组文件。
 - 新增 `vector_store.backend = "sqlite"`。
 - 新增可选 `vector_store.database_url`：
   - 未配置时复用全局 `Settings.database_url`。
@@ -47,6 +49,8 @@ vector_store。
 - **owned tables**：`vector_items` 由 vector_store SQLite backend owns。
 - **config namespace**：扩展 `vector_store.*`，新增 `vector_store.database_url`。
 - **cross-module dependencies**：继续只依赖 config 和 database runtime；不依赖 memory / knowledge-base。
+- **factory boundary**：SQLite backend 接收已经解析好的 effective SQLite database URL，不在 backend 内部重新创建
+  `Settings`。
 - **migration / shim plan**：无 Alembic migration；SQLite backend 启动或首次使用时自建 backend-owned table。
 
 ## Impact

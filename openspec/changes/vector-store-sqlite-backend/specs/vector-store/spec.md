@@ -11,6 +11,8 @@ in-memory vector backend、deterministic embedding backend，并默认禁用 rer
 #### Scenario: SQLite backend database URL default
 - **WHEN** `vector_store.backend="sqlite"` 且未配置 `vector_store.database_url`
 - **THEN** SQLite vector backend 使用全局 `Settings.database_url`
+- **AND** backend 接收 runtime 解析后的 effective database URL
+- **AND** backend 内部不重新创建 `Settings`
 
 #### Scenario: SQLite backend rejects unsupported database URL
 - **WHEN** `vector_store.backend="sqlite"` 且 database_url 不是本地 sqlite URL

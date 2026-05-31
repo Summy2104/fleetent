@@ -4,20 +4,21 @@
 - [ ] 0.2 确认不实现 Qdrant、OpenSearch / Elasticsearch adapter
 - [ ] 0.3 确认不改变 `vector_store.upsert()` / `search()` / `delete()` public API
 - [ ] 0.4 确认测试使用 tmp SQLite DB，不触碰 `data/`
+- [ ] 0.5 确认基于已合并的 `embedding-rerank-provider-abstraction` runtime/provider 结构执行
 
 ## 1. 配置与 factory
 
 - [ ] 1.1 Write failing tests: `VectorStoreSettings` 支持 `backend="sqlite"` 和可选 `database_url`
 - [ ] 1.2 Write failing tests: 未配置 `vector_store.database_url` 时 sqlite backend 复用全局 `Settings.database_url`
 - [ ] 1.3 Write failing tests: 非 sqlite database_url fail fast
-- [ ] 1.4 实现 config / backend factory 调整
+- [ ] 1.4 实现 config / backend factory 调整：factory 接收已解析的 effective database_url，不在 backend 内部创建 `Settings`
 - [ ] 1.5 运行 `uv run pytest tests/unit -x -q`，确认 1.1-1.3 红测转绿
 
 ## 2. SQLite backend schema
 
 - [ ] 2.1 Write failing tests: sqlite backend 首次使用时创建 `vector_items` 表和 namespace 索引
 - [ ] 2.2 Write failing tests: schema 包含 namespace、id、dimensions、vector_json、updated_at
-- [ ] 2.3 实现 SQLite backend schema 初始化
+- [ ] 2.3 使用 `aiosqlite` + direct SQL 实现 SQLite backend schema 初始化
 - [ ] 2.4 运行 `uv run pytest tests/integration -x -q`，确认 2.1/2.2 红测转绿
 
 ## 3. Upsert / search / delete contract
