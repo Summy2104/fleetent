@@ -11,9 +11,11 @@ Stdio connections are kept alive via a module-level AsyncExitStack.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import time
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import Any
@@ -24,6 +26,71 @@ _server_registry: dict[str, McpServerConfig] = {}
 _active_sessions: dict[str, Any] = {}  # server_id -> mcp.ClientSession (stdio only)
 _exit_stack: AsyncExitStack | None = None
 
+# Refresh slightly before the server-stated expiry to avoid a "valid at check, expired at
+# the server" race (D4). Conservative TTL used when the token response omits expires_in.
+_OAUTH_EXPIRY_SAFETY_MARGIN = 30.0  # seconds
+_OAUTH_DEFAULT_TTL = 300.0  # seconds, when expires_in is missing
+
+
+def _now() -> float:
+    """Current wall-clock time source for token-expiry decisions (D4: injectable).
+
+    Indirected through this function so tests can monkeypatch a deterministic clock
+    instead of relying on real time.time().
+    """
+    return time.time()
+
+
+@dataclass
+class OAuthToken:
+    access_token: str
+    expires_at: float  # absolute wall-clock time (seconds), per _now()
+    refresh_token: str | None = None
+
+
+class OAuthAuthUnavailableError(RuntimeError):
+    """Raised when an oauth2 server's credentials/authorization are unusable (D5).
+
+    Signals a sticky "authentication unavailable" condition (token endpoint returned
+    401 / invalid_client / invalid_grant): retrying with the same credentials is futile,
+    so callers stop and surface re-authorization guidance.
+    """
+
+
+class _InMemoryTokenStore:
+    """Per-server in-memory OAuth token cache (D3).
+
+    Each oauth2 server instance holds its own store, so there is no module-level mutable
+    token table. The keying by server_id is internal bookkeeping within one store.
+    """
+
+    def __init__(self) -> None:
+        self._tokens: dict[str, OAuthToken] = {}
+
+    def get(self, server_id: str) -> OAuthToken | None:
+        return self._tokens.get(server_id)
+
+    def set(
+        self,
+        server_id: str,
+        *,
+        access_token: str,
+        expires_at: float,
+        refresh_token: str | None,
+    ) -> None:
+        self._tokens[server_id] = OAuthToken(
+            access_token=access_token,
+            expires_at=expires_at,
+            refresh_token=refresh_token,
+        )
+
+    def clear(self, server_id: str) -> None:
+        self._tokens.pop(server_id, None)
+
+
+def _default_token_store() -> _InMemoryTokenStore:
+    return _InMemoryTokenStore()
+
 
 @dataclass
 class McpServerConfig:
@@ -33,6 +100,12 @@ class McpServerConfig:
     url: str = ""
     auth_type: str = "none"  # "none" | "api_key" | "oauth2"
     api_key_env: str = ""
+    # OAuth2 fields (auth_type == "oauth2"); token_url points at a customer-internal,
+    # self-hosted authorization server — never a cloud identity service.
+    token_url: str = ""
+    client_id: str = ""
+    client_secret_env: str = ""  # env var holding the client secret (not stored in plaintext)
+    scope: str = ""
     # stdio fields
     command: str = ""  # e.g. "npx" or "python"
     args: list[str] = field(
@@ -42,6 +115,12 @@ class McpServerConfig:
     # Streamable HTTP runtime state (per-server, not module-level global)
     session_id: str | None = None  # assigned by server via Mcp-Session-Id on initialize
     _request_id: int = field(default=0, repr=False, compare=False)  # monotonic JSON-RPC id
+    # OAuth2 runtime state, held per-server instance (D3/D5/D9: never module-level global)
+    _token_store: _InMemoryTokenStore = field(
+        default_factory=_default_token_store, repr=False, compare=False
+    )
+    _refresh_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
+    _auth_unavailable: bool = field(default=False, repr=False, compare=False)
 
 
 def _next_request_id(server: McpServerConfig) -> int:
@@ -134,7 +213,8 @@ async def _close_http_sessions() -> None:
     async with httpx.AsyncClient(timeout=10.0) as client:
         for server in active:
             try:
-                await client.delete(f"{server.url}/", headers=_base_headers(server))
+                bearer = await _bearer_for(server)
+                await client.delete(f"{server.url}/", headers=_base_headers(server, bearer=bearer))
             except Exception as exc:  # noqa: BLE001 — DELETE is best-effort on shutdown
                 logger.debug("mcp_session_delete_failed server_id=%s error=%s", server.id, exc)
             finally:
@@ -150,6 +230,8 @@ async def register_all(servers: list[McpServerConfig]) -> None:
 
 
 async def _register_server(server: McpServerConfig) -> None:
+    if server.auth_type == "oauth2":
+        _clear_oauth_auth_state(server)  # (re-)registration clears sticky auth state (D5)
     if server.transport == "stdio":
         await _register_stdio_server(server)
     else:
@@ -190,16 +272,156 @@ PROTOCOL_VERSION = "2025-06-18"
 CLIENT_INFO = {"name": "fleetent", "version": "1.0"}
 
 
-def _base_headers(server: McpServerConfig) -> dict[str, str]:
-    """Build request headers: Accept negotiation, optional Bearer auth, session id echo."""
+def _base_headers(server: McpServerConfig, *, bearer: str | None = None) -> dict[str, str]:
+    """Build request headers: Accept negotiation, optional Bearer auth, session id echo.
+
+    Stays synchronous and pure assembly (D6a method a): the api_key Bearer is read from
+    the environment here, while the oauth2 Bearer is resolved asynchronously by the caller
+    before header construction and passed in via ``bearer`` — never fetched inside this
+    sync function.
+    """
     headers: dict[str, str] = {"Accept": "application/json, text/event-stream"}
-    if server.auth_type == "api_key" and server.api_key_env:
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+    elif server.auth_type == "api_key" and server.api_key_env:
         key = os.environ.get(server.api_key_env, "")
         if key:
             headers["Authorization"] = f"Bearer {key}"
     if server.session_id:
         headers["Mcp-Session-Id"] = server.session_id
     return headers
+
+
+def _clear_oauth_auth_state(server: McpServerConfig) -> None:
+    """Clear sticky auth-unavailable flag and cached token (D5 recovery trigger).
+
+    Called on (re-)registration / config reload so updated credentials take effect on the
+    next resolve. Recovery is by this explicit signal, not by timed backoff.
+    """
+    server._auth_unavailable = False
+    server._token_store.clear(server.id)
+
+
+def _token_is_valid(token: OAuthToken | None) -> bool:
+    if token is None:
+        return False
+    return _now() < token.expires_at
+
+
+def _is_transient_token_error(exc: Exception) -> bool:
+    """Whether a token-endpoint failure is transient (D5: must NOT be sticky).
+
+    5xx / network / timeout errors mean the authorization server hiccupped, not that the
+    credentials are wrong — these are retryable. Only genuine auth errors (401 /
+    invalid_client / invalid_grant) are sticky and surface as OAuthAuthUnavailableError.
+    """
+    import httpx
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return isinstance(exc, (httpx.TransportError, httpx.TimeoutException))
+
+
+def _is_auth_error_response(resp: Any) -> bool:
+    """Whether a token-endpoint response indicates a genuine credential/auth error (D5)."""
+    if resp.status_code == 401:
+        return True
+    if resp.status_code in (400, 403):
+        try:
+            err = resp.json().get("error")
+        except Exception:  # noqa: BLE001 — non-JSON 4xx still classified below
+            err = None
+        return err in ("invalid_client", "invalid_grant", "unauthorized_client")
+    return False
+
+
+async def _fetch_client_credentials_token(server: McpServerConfig) -> OAuthToken:
+    """POST grant_type=client_credentials to the token endpoint and parse the token (D1).
+
+    Raises OAuthAuthUnavailableError on a genuine auth error (sticky). Transient failures
+    (5xx / network / timeout) propagate as httpx errors so callers treat them as retryable.
+    """
+    import httpx
+
+    secret = os.environ.get(server.client_secret_env, "") if server.client_secret_env else ""
+    data: dict[str, str] = {
+        "grant_type": "client_credentials",
+        "client_id": server.client_id,
+        "client_secret": secret,
+    }
+    if server.scope:
+        data["scope"] = server.scope
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(server.token_url, data=data)
+
+    if _is_auth_error_response(resp):
+        raise OAuthAuthUnavailableError(
+            f"OAuth2 authentication unavailable for server '{server.id}': token endpoint "
+            f"rejected the credentials (status={resp.status_code}). Re-authorize or check the "
+            f"OAuth2 credentials (client_id / {server.client_secret_env})."
+        )
+    resp.raise_for_status()  # transient 5xx surfaces as retryable HTTPStatusError
+
+    body = resp.json()
+    access_token = body.get("access_token")
+    if not access_token:
+        raise OAuthAuthUnavailableError(
+            f"OAuth2 token response for server '{server.id}' has no access_token."
+        )
+    expires_in = body.get("expires_in")
+    ttl = float(expires_in) if expires_in is not None else _OAUTH_DEFAULT_TTL
+    expires_at = _now() + ttl - _OAUTH_EXPIRY_SAFETY_MARGIN
+    return OAuthToken(
+        access_token=access_token,
+        expires_at=expires_at,
+        refresh_token=body.get("refresh_token"),
+    )
+
+
+async def _resolve_oauth_token(server: McpServerConfig) -> str:
+    """Resolve a valid access token for an oauth2 server, refreshing if needed (D4/D9).
+
+    Short-circuits if the server is already marked auth-unavailable (D5/D8). Serializes
+    fetch/refresh through the server's own asyncio.Lock and double-checks the cached token
+    inside the lock so concurrent callers coalesce into a single token request (D9).
+    On a genuine auth error sets the sticky flag; transient errors propagate without it.
+    """
+    if server._auth_unavailable:
+        raise OAuthAuthUnavailableError(
+            f"OAuth2 authentication unavailable for server '{server.id}'. Re-authorize or "
+            f"check the OAuth2 credentials."
+        )
+
+    cached = server._token_store.get(server.id)
+    if _token_is_valid(cached):
+        assert cached is not None
+        return cached.access_token
+
+    async with server._refresh_lock:
+        cached = server._token_store.get(server.id)
+        if _token_is_valid(cached):
+            assert cached is not None
+            return cached.access_token
+        try:
+            token = await _fetch_client_credentials_token(server)
+        except OAuthAuthUnavailableError:
+            server._auth_unavailable = True  # sticky: stop retrying with bad credentials
+            raise
+        server._token_store.set(
+            server.id,
+            access_token=token.access_token,
+            expires_at=token.expires_at,
+            refresh_token=token.refresh_token,
+        )
+        return token.access_token
+
+
+async def _bearer_for(server: McpServerConfig) -> str | None:
+    """Resolve the oauth2 Bearer ahead of sync header assembly (D6a); None otherwise."""
+    if server.auth_type == "oauth2":
+        return await _resolve_oauth_token(server)
+    return None
 
 
 def _parse_jsonrpc_response(resp: Any, request_id: int) -> dict[str, Any]:
@@ -250,6 +472,7 @@ async def _open_session(client: Any, server: McpServerConfig) -> None:
     session id lives on the server instance (no module-level session table).
     """
     request_id = _next_request_id(server)
+    bearer = await _bearer_for(server)
     init_resp = await client.post(
         f"{server.url}/",
         json={
@@ -262,7 +485,7 @@ async def _open_session(client: Any, server: McpServerConfig) -> None:
             },
             "id": request_id,
         },
-        headers=_base_headers(server),
+        headers=_base_headers(server, bearer=bearer),
     )
     init_resp.raise_for_status()
     session_id = init_resp.headers.get("Mcp-Session-Id")
@@ -293,10 +516,11 @@ async def _post_jsonrpc(
     reachable (D1a).
     """
     request_id = _next_request_id(server)
+    bearer = await _bearer_for(server)
     resp = await client.post(
         f"{server.url}/",
         json={"jsonrpc": "2.0", "method": method, "params": params, "id": request_id},
-        headers=_base_headers(server),
+        headers=_base_headers(server, bearer=bearer),
     )
     if _allow_session_retry and _is_session_expired(resp):
         _expire_session(server)
@@ -312,10 +536,11 @@ async def _post_jsonrpc(
 async def _post_notification(client: Any, server: McpServerConfig, method: str) -> None:
     """Send a JSON-RPC notification (no id, no response expected); tolerate failures."""
     try:
+        bearer = await _bearer_for(server)
         await client.post(
             f"{server.url}/",
             json={"jsonrpc": "2.0", "method": method},
-            headers=_base_headers(server),
+            headers=_base_headers(server, bearer=bearer),
         )
     except Exception as exc:  # noqa: BLE001 — notification is best-effort
         logger.debug(
@@ -397,6 +622,14 @@ async def _call_http_tool(server_id: str, tool_name: str, args: dict[str, Any]) 
     server = _server_registry.get(server_id)
     if server is None:
         raise KeyError(f"Unknown MCP server: {server_id}")
+
+    # D8: an oauth2 server already marked auth-unavailable returns an error result directly —
+    # no token fetch, no request, no raise. Orthogonal to MCP3 connection health.
+    if server.auth_type == "oauth2" and server._auth_unavailable:
+        return (
+            f"MCP server '{server_id}' authentication unavailable: re-authorize or check the "
+            f"OAuth2 credentials."
+        )
 
     import httpx
 

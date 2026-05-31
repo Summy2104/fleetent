@@ -944,3 +944,458 @@ async def test_close_skips_stdio_servers(monkeypatch):
     with respx.mock:
         # No routes registered; any HTTP call would raise. close() must not make one.
         await mcp_client.close()
+
+
+# === MCP5: OAuth2 authentication ===========================================
+
+
+def _token_handler(
+    captured: list | None = None,
+    access_token: str = "tok-1",
+    expires_in: int | None = 3600,
+    refresh_token: str | None = None,
+    status: int = 200,
+    error: str | None = None,
+):
+    """Build a respx side_effect for an OAuth2 token endpoint (client_credentials)."""
+    import httpx as _httpx
+
+    def handler(request: _httpx.Request) -> _httpx.Response:
+        if captured is not None:
+            captured.append(request)
+        if error is not None or status >= 400:
+            body: dict = {}
+            if error is not None:
+                body["error"] = error
+            return _httpx.Response(status, json=body)
+        body = {"access_token": access_token, "token_type": "Bearer"}
+        if expires_in is not None:
+            body["expires_in"] = expires_in
+        if refresh_token is not None:
+            body["refresh_token"] = refresh_token
+        return _httpx.Response(200, json=body)
+
+    return handler
+
+
+def _oauth_server(server_id: str = "osvr", url: str = "http://o.test") -> McpServerConfig:
+    return McpServerConfig(
+        id=server_id,
+        url=url,
+        auth_type="oauth2",
+        token_url="http://auth.test/token",
+        client_id="cid",
+        client_secret_env="OSVR_SECRET",
+    )
+
+
+# --- 2. config fields ---
+
+
+def test_oauth2_config_fields_defaults():
+    """McpServerConfig exposes OAuth2 fields with empty defaults."""
+    s = McpServerConfig(id="x")
+    assert s.token_url == ""
+    assert s.client_id == ""
+    assert s.client_secret_env == ""
+    assert s.scope == ""
+
+
+def test_oauth2_config_fields_set():
+    s = McpServerConfig(
+        id="x",
+        auth_type="oauth2",
+        token_url="http://auth.test/token",
+        client_id="cid",
+        client_secret_env="SECRET_ENV",
+        scope="mcp.read",
+    )
+    assert s.auth_type == "oauth2"
+    assert s.token_url == "http://auth.test/token"
+    assert s.client_id == "cid"
+    assert s.client_secret_env == "SECRET_ENV"
+    assert s.scope == "mcp.read"
+
+
+# --- 3. token store (per-server isolated, injectable) ---
+
+
+def test_token_store_per_server_isolation(monkeypatch):
+    from fleetent.mcp_client import _InMemoryTokenStore
+
+    store_a = _InMemoryTokenStore()
+    store_b = _InMemoryTokenStore()
+    store_a.set("a", access_token="ta", expires_at=100.0, refresh_token=None)
+    assert store_a.get("a") is not None
+    assert store_a.get("a").access_token == "ta"
+    assert store_b.get("a") is None  # different store, isolated
+
+
+def test_token_store_reset(monkeypatch):
+    from fleetent.mcp_client import _InMemoryTokenStore
+
+    store = _InMemoryTokenStore()
+    store.set("a", access_token="ta", expires_at=100.0, refresh_token=None)
+    store.clear("a")
+    assert store.get("a") is None
+
+
+def test_token_store_not_module_global():
+    """The default token store is held per-server-instance, not a module-level dict."""
+    s1 = _oauth_server("s1")
+    s2 = _oauth_server("s2")
+    assert s1._token_store is not s2._token_store
+
+
+# --- 4. client_credentials fetch + Bearer attach ---
+
+
+@pytest.mark.asyncio
+async def test_oauth2_fetches_token_and_attaches_bearer(monkeypatch):
+    import respx
+
+    from fleetent.mcp_client import _register_server
+
+    monkeypatch.setenv("OSVR_SECRET", "shh")
+    server = _oauth_server()
+    captured_mcp: list = []
+    captured_tok: list = []
+
+    with respx.mock:
+        respx.post("http://auth.test/token").mock(
+            side_effect=_token_handler(captured=captured_tok, access_token="ACCESS-1")
+        )
+        respx.post("http://o.test/").mock(
+            side_effect=_make_streamable_handler(tools=[], captured=captured_mcp)
+        )
+        await _register_server(server)
+
+    # token endpoint hit with client_credentials grant
+    assert len(captured_tok) >= 1
+    tok_body = captured_tok[0].content.decode()
+    assert "grant_type=client_credentials" in tok_body
+    assert "client_id=cid" in tok_body
+    assert "client_secret=shh" in tok_body
+    # MCP request carries the access token as Bearer
+    assert captured_mcp[0].headers.get("authorization") == "Bearer ACCESS-1"
+
+
+@pytest.mark.asyncio
+async def test_oauth2_includes_scope_when_set(monkeypatch):
+    import respx
+
+    from fleetent.mcp_client import _register_server
+
+    monkeypatch.setenv("OSVR_SECRET", "shh")
+    server = _oauth_server()
+    server.scope = "mcp.read mcp.write"
+    captured_tok: list = []
+
+    with respx.mock:
+        respx.post("http://auth.test/token").mock(side_effect=_token_handler(captured=captured_tok))
+        respx.post("http://o.test/").mock(side_effect=_make_streamable_handler(tools=[]))
+        await _register_server(server)
+
+    assert "scope=" in captured_tok[0].content.decode()
+
+
+@pytest.mark.asyncio
+async def test_none_and_api_key_unaffected_no_token_call(monkeypatch):
+    """none/api_key servers never hit a token endpoint (no oauth behavior leak)."""
+    import respx
+
+    from fleetent.mcp_client import _register_server
+
+    server = McpServerConfig(id="plain", url="http://plain.test", auth_type="none")
+    with respx.mock:
+        route = respx.post("http://auth.test/token").mock(side_effect=_token_handler())
+        respx.post("http://plain.test/").mock(side_effect=_make_streamable_handler(tools=[]))
+        await _register_server(server)
+    assert not route.called
+
+
+# --- 5. auto refresh ---
+
+
+@pytest.mark.asyncio
+async def test_oauth2_refreshes_when_expired(monkeypatch):
+    """An expired cached token triggers a re-fetch via client_credentials on next resolve."""
+    import respx
+
+    import fleetent.mcp_client as mcp
+    from fleetent.mcp_client import _resolve_oauth_token
+
+    monkeypatch.setenv("OSVR_SECRET", "shh")
+    server = _oauth_server()
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(mcp, "_now", lambda: clock["now"])
+    captured_tok: list = []
+
+    with respx.mock:
+        respx.post("http://auth.test/token").mock(
+            side_effect=_token_handler(captured=captured_tok, access_token="A", expires_in=100)
+        )
+        t1 = await _resolve_oauth_token(server)
+        assert t1 == "A"
+        # advance past expiry (incl. safety margin)
+        clock["now"] = 1000.0 + 100 + 10
+        respx.post("http://auth.test/token").mock(
+            side_effect=_token_handler(captured=captured_tok, access_token="B", expires_in=100)
+        )
+        t2 = await _resolve_oauth_token(server)
+        assert t2 == "B"
+    assert len(captured_tok) == 2
+
+
+@pytest.mark.asyncio
+async def test_oauth2_cached_token_reused_when_valid(monkeypatch):
+    import respx
+
+    import fleetent.mcp_client as mcp
+    from fleetent.mcp_client import _resolve_oauth_token
+
+    monkeypatch.setenv("OSVR_SECRET", "shh")
+    server = _oauth_server()
+    monkeypatch.setattr(mcp, "_now", lambda: 1000.0)
+    captured_tok: list = []
+
+    with respx.mock:
+        respx.post("http://auth.test/token").mock(
+            side_effect=_token_handler(captured=captured_tok, access_token="A", expires_in=3600)
+        )
+        await _resolve_oauth_token(server)
+        await _resolve_oauth_token(server)
+    assert len(captured_tok) == 1
+
+
+@pytest.mark.asyncio
+async def test_oauth2_missing_refresh_token_is_normal(monkeypatch):
+    """client_credentials response with no refresh_token is normal; re-fetch on expiry."""
+    import respx
+
+    import fleetent.mcp_client as mcp
+    from fleetent.mcp_client import _resolve_oauth_token
+
+    monkeypatch.setenv("OSVR_SECRET", "shh")
+    server = _oauth_server()
+    clock = {"now": 0.0}
+    monkeypatch.setattr(mcp, "_now", lambda: clock["now"])
+
+    with respx.mock:
+        respx.post("http://auth.test/token").mock(
+            side_effect=_token_handler(access_token="A", expires_in=10, refresh_token=None)
+        )
+        await _resolve_oauth_token(server)
+        clock["now"] = 100.0
+        respx.post("http://auth.test/token").mock(
+            side_effect=_token_handler(access_token="C", expires_in=10)
+        )
+        t = await _resolve_oauth_token(server)
+    assert t == "C"  # refetched, not failed for missing refresh_token
+
+
+@pytest.mark.asyncio
+async def test_oauth2_no_expires_in_uses_conservative_ttl(monkeypatch):
+    """Missing expires_in yields a bounded TTL (token still usable immediately)."""
+    import respx
+
+    import fleetent.mcp_client as mcp
+    from fleetent.mcp_client import _resolve_oauth_token
+
+    monkeypatch.setenv("OSVR_SECRET", "shh")
+    server = _oauth_server()
+    monkeypatch.setattr(mcp, "_now", lambda: 0.0)
+
+    with respx.mock:
+        respx.post("http://auth.test/token").mock(
+            side_effect=_token_handler(access_token="A", expires_in=None)
+        )
+        t = await _resolve_oauth_token(server)
+    assert t == "A"
+    cached = server._token_store.get(server.id)
+    assert cached is not None
+    assert cached.expires_at > 0.0  # a finite, future expiry was set
+
+
+@pytest.mark.asyncio
+async def test_oauth2_concurrent_resolve_single_token_call(monkeypatch):
+    """Concurrent resolves on an expired token coalesce into one token fetch (D9)."""
+    import asyncio
+
+    import respx
+
+    import fleetent.mcp_client as mcp
+    from fleetent.mcp_client import _resolve_oauth_token
+
+    monkeypatch.setenv("OSVR_SECRET", "shh")
+    server = _oauth_server()
+    monkeypatch.setattr(mcp, "_now", lambda: 0.0)
+    captured_tok: list = []
+
+    async def slow_handler(request):
+        import httpx as _httpx
+
+        captured_tok.append(request)
+        await asyncio.sleep(0.02)
+        return _httpx.Response(
+            200, json={"access_token": "A", "expires_in": 3600, "token_type": "Bearer"}
+        )
+
+    with respx.mock:
+        respx.post("http://auth.test/token").mock(side_effect=slow_handler)
+        results = await asyncio.gather(*[_resolve_oauth_token(server) for _ in range(5)])
+
+    assert all(r == "A" for r in results)
+    assert len(captured_tok) == 1
+
+
+@pytest.mark.asyncio
+async def test_oauth2_per_server_lock_isolated(monkeypatch):
+    """Different servers hold their own lock; both fetch independently."""
+    import respx
+
+    import fleetent.mcp_client as mcp
+    from fleetent.mcp_client import _resolve_oauth_token
+
+    monkeypatch.setenv("OSVR_SECRET", "shh")
+    monkeypatch.setenv("OTHER_SECRET", "shh2")
+    s1 = _oauth_server("s1", "http://s1.test")
+    s2 = McpServerConfig(
+        id="s2",
+        url="http://s2.test",
+        auth_type="oauth2",
+        token_url="http://auth2.test/token",
+        client_id="cid2",
+        client_secret_env="OTHER_SECRET",
+    )
+    monkeypatch.setattr(mcp, "_now", lambda: 0.0)
+
+    with respx.mock:
+        respx.post("http://auth.test/token").mock(side_effect=_token_handler(access_token="A1"))
+        respx.post("http://auth2.test/token").mock(side_effect=_token_handler(access_token="A2"))
+        t1 = await _resolve_oauth_token(s1)
+        t2 = await _resolve_oauth_token(s2)
+    assert t1 == "A1"
+    assert t2 == "A2"
+    assert s1._refresh_lock is not s2._refresh_lock
+
+
+# --- 6. auth failure: sticky unavailable ---
+
+
+@pytest.mark.asyncio
+async def test_oauth2_invalid_client_marks_unavailable(monkeypatch):
+    """401/invalid_client sets sticky auth-unavailable and surfaces re-auth guidance."""
+    import respx
+
+    import fleetent.mcp_client as mcp
+    from fleetent.mcp_client import OAuthAuthUnavailableError, _resolve_oauth_token
+
+    monkeypatch.setenv("OSVR_SECRET", "shh")
+    server = _oauth_server()
+    monkeypatch.setattr(mcp, "_now", lambda: 0.0)
+
+    with respx.mock:
+        route = respx.post("http://auth.test/token").mock(
+            side_effect=_token_handler(status=401, error="invalid_client")
+        )
+        with pytest.raises(OAuthAuthUnavailableError) as exc:
+            await _resolve_oauth_token(server)
+        assert (
+            "re" in str(exc.value).lower() or "授权" in str(exc.value) or "凭据" in str(exc.value)
+        )
+        # second resolve must not hit the endpoint again (sticky, no retry)
+        with pytest.raises(OAuthAuthUnavailableError):
+            await _resolve_oauth_token(server)
+    assert route.call_count == 1
+    assert server._auth_unavailable is True
+
+
+@pytest.mark.asyncio
+async def test_oauth2_transient_5xx_not_sticky(monkeypatch):
+    """5xx is transient: not sticky; next resolve can succeed."""
+    import respx
+
+    import fleetent.mcp_client as mcp
+    from fleetent.mcp_client import _resolve_oauth_token
+
+    monkeypatch.setenv("OSVR_SECRET", "shh")
+    server = _oauth_server()
+    monkeypatch.setattr(mcp, "_now", lambda: 0.0)
+
+    with respx.mock:
+        respx.post("http://auth.test/token").mock(side_effect=_token_handler(status=503))
+        with pytest.raises(httpx.HTTPStatusError):
+            await _resolve_oauth_token(server)
+        assert server._auth_unavailable is False
+        respx.post("http://auth.test/token").mock(side_effect=_token_handler(access_token="OK"))
+        t = await _resolve_oauth_token(server)
+    assert t == "OK"
+
+
+@pytest.mark.asyncio
+async def test_oauth2_transient_network_error_not_sticky(monkeypatch):
+    import respx
+
+    import fleetent.mcp_client as mcp
+    from fleetent.mcp_client import _resolve_oauth_token
+
+    monkeypatch.setenv("OSVR_SECRET", "shh")
+    server = _oauth_server()
+    monkeypatch.setattr(mcp, "_now", lambda: 0.0)
+
+    with respx.mock:
+        respx.post("http://auth.test/token").mock(side_effect=httpx.ConnectError("down"))
+        with pytest.raises(httpx.ConnectError):
+            await _resolve_oauth_token(server)
+    assert server._auth_unavailable is False
+
+
+def test_oauth2_recovery_clears_sticky_on_reregister(monkeypatch):
+    """Re-registration / config reload clears the sticky auth-unavailable flag."""
+    from fleetent.mcp_client import _clear_oauth_auth_state
+
+    server = _oauth_server()
+    server._auth_unavailable = True
+    _clear_oauth_auth_state(server)
+    assert server._auth_unavailable is False
+
+
+@pytest.mark.asyncio
+async def test_oauth2_unavailable_short_circuits_tool_call(monkeypatch):
+    """A tool call on an auth-unavailable oauth2 server returns an error result, no HTTP."""
+    import respx
+
+    import fleetent.mcp_client as mcp
+
+    monkeypatch.setenv("OSVR_SECRET", "shh")
+    server = _oauth_server("callee", "http://callee.test")
+    server._auth_unavailable = True
+    monkeypatch.setitem(mcp._server_registry, "callee", server)
+
+    with respx.mock:
+        tok = respx.post("http://auth.test/token").mock(side_effect=_token_handler())
+        mcpr = respx.post("http://callee.test/").mock(side_effect=_make_streamable_handler())
+        result = await mcp.call_tool("callee", "do", {})
+    assert not tok.called
+    assert not mcpr.called
+    assert "authentication" in result.lower() or "认证" in result or "auth" in result.lower()
+
+
+# --- 7. config example ---
+
+
+def test_mcp_yaml_example_oauth2_entry_loads():
+    """The oauth2 example in config/mcp.yaml.example constructs a valid McpServerConfig."""
+    from pathlib import Path
+
+    import yaml
+
+    raw = yaml.safe_load(Path("config/mcp.yaml.example").read_text())
+    oauth_entries = [s for s in raw["servers"] if s.get("auth_type") == "oauth2"]
+    assert oauth_entries, "expected an oauth2 example server"
+    s = McpServerConfig(**oauth_entries[0])
+    assert s.auth_type == "oauth2"
+    assert s.token_url
+    assert s.client_id
+    assert s.client_secret_env
