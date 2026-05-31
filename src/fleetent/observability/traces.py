@@ -6,13 +6,14 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fleetent.db import create_database
 from fleetent.observability.structured_logging import _redact_value
 
 _MAX_STRING_LENGTH = 2048
 _MAX_SEQUENCE_LENGTH = 50
+_RAW_CONTENT_KEYS = frozenset({"content", "text", "transcript"})
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,44 @@ class TraceQuery:
     start_ts: datetime | None = None
     end_ts: datetime | None = None
     limit: int = 100
+
+
+@dataclass(frozen=True)
+class InjectedContextTrace:
+    """Summary of a source injected into an agent prompt."""
+
+    source_id: str
+    source_type: Literal["memory", "knowledge"]
+    score: float
+    token_estimate: int
+    metadata: dict[str, str]
+
+
+def record_injected_context(run_id: str, sources: list[InjectedContextTrace]) -> None:
+    """Record source summaries for long-term context injected into a prompt."""
+    if not sources:
+        return
+    record_trace_event(
+        TraceEvent(
+            run_id=run_id,
+            event_type="injected_context",
+            payload={"sources": [_source_summary(source) for source in sources]},
+        )
+    )
+
+
+def _source_summary(source: InjectedContextTrace) -> dict[str, Any]:
+    return {
+        "source_id": source.source_id,
+        "source_type": source.source_type,
+        "score": source.score,
+        "token_estimate": source.token_estimate,
+        "metadata": {
+            key: value
+            for key, value in source.metadata.items()
+            if key.lower() not in _RAW_CONTENT_KEYS
+        },
+    }
 
 
 def record_trace_event(event: TraceEvent) -> None:
