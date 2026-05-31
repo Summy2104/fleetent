@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     log_format: str = "console"
     default_agent_name: str | None = None
     disabled_skills: list[str] = []
+    # Self-hosted, OpenAI-compatible images endpoint (e.g. SD-WebUI / ComfyUI /
+    # Flux behind a compat layer). Empty = unconfigured; the generate_image tool
+    # returns an explicit failure rather than silently succeeding. Cloud-hosted
+    # proprietary services (DALL·E / Midjourney) are forbidden by data sovereignty.
+    image_gen_url: str = ""
+    image_gen_model: str = "default"
 
 
 def configure_logging(settings: Settings) -> None:

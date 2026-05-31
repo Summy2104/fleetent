@@ -1,9 +1,29 @@
 """Built-in tools. Import this module to register them with the tool registry."""
 
 import datetime
+import uuid
+from pathlib import Path
 
+from fleetent import image_gen_client
 from fleetent.sandbox_client import SandboxClient
 from fleetent.tool_registry import tool
+
+# Generated images are written here, then a short reference is returned to the
+# loop (never inline base64). Injectable module-level constant (no global mutable
+# state): tests monkeypatch this to an isolated tmp path.
+GENERATED_DIR: Path = Path("data/generated")
+
+
+def _save_image(data: bytes) -> str:
+    """Write image bytes to GENERATED_DIR/{uuid4}.png and return a short reference.
+
+    The reference is a path string (never base64), keeping the tool result and
+    trace free of image payloads.
+    """
+    GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+    path = GENERATED_DIR / f"{uuid.uuid4().hex}.png"
+    path.write_bytes(data)
+    return str(path)
 
 
 @tool
@@ -94,6 +114,22 @@ def cancel_task(task_id: str) -> str:
     if not deleted:
         return f"error: task {task_id!r} not found"
     return f"Scheduled task {task_id!r} removed"
+
+
+@tool(risk_level="low")
+async def generate_image(prompt: str, size: str = "") -> str:
+    """Generate an image from a text prompt via the self-hosted images endpoint.
+
+    Returns a short reference (file path) to the saved image, never inline base64.
+    On endpoint failure/timeout, returns an explicit error result for the AI to
+    handle rather than raising and breaking the loop.
+    """
+    try:
+        data = await image_gen_client.generate(prompt, size=size or None)
+    except image_gen_client.ImageGenError as exc:
+        return f"error: image generation failed: {exc}"
+    ref = _save_image(data)
+    return f"image generated: {ref}"
 
 
 @tool
