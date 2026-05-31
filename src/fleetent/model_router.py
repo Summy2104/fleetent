@@ -32,6 +32,14 @@ ROUTES: dict[str, RouteConfig] = {
         api_key_env="ANTHROPIC_API_KEY",
         max_tokens=1024,
     ),
+    # AR21: messages carrying image blocks route here. Maps to a vision-capable
+    # chat provider; self-hostable backends can repoint base_url/model.
+    "vision": RouteConfig(
+        base_url="https://api.anthropic.com/v1/",
+        model="claude-sonnet-4-5",
+        api_key_env="ANTHROPIC_API_KEY",
+        max_tokens=4096,
+    ),
     # Acceptance: flip "default" base_url + model to a different provider
     # (e.g. self-hosted vLLM or OpenAI) and the rest of the system must
     # keep working unchanged.

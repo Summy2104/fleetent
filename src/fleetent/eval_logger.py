@@ -1,6 +1,8 @@
 """Append-only JSONL trace logger for agent runs."""
 
+import base64
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -9,6 +11,10 @@ from openai.types import CompletionUsage
 
 _LOG_PATH = Path("data/traces.jsonl")
 TRACE_PATH = Path("data/traces.jsonl")
+
+# Matches a base64 data URL so an image block can be summarized as
+# "[图片：{mime}，{bytes}字节]" instead of writing the full base64 string.
+_DATA_URL_RE = re.compile(r"^data:(?P<mime>[^;]+);base64,(?P<b64>.*)$", re.DOTALL)
 
 
 def log_run(
@@ -92,7 +98,30 @@ def log(
 
 def _serialize(msg: Any) -> Any:
     if isinstance(msg, dict):
-        return msg
+        return _placeholder_images(msg)
     if hasattr(msg, "model_dump"):
-        return msg.model_dump()
+        return _placeholder_images(msg.model_dump())
     return str(msg)
+
+
+def _placeholder_images(msg: dict[str, Any]) -> dict[str, Any]:
+    """Replace image_url blocks with a compact placeholder; never write base64."""
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return msg
+    new_content = [
+        _placeholder_block(block) if isinstance(block, dict) else block for block in content
+    ]
+    return {**msg, "content": new_content}
+
+
+def _placeholder_block(block: dict[str, Any]) -> dict[str, Any]:
+    if block.get("type") != "image_url":
+        return block
+    url = (block.get("image_url") or {}).get("url", "")
+    match = _DATA_URL_RE.match(url) if isinstance(url, str) else None
+    if not match:
+        return {"type": "text", "text": "[图片]"}
+    mime = match.group("mime")
+    n_bytes = len(base64.b64decode(match.group("b64"), validate=False))
+    return {"type": "text", "text": f"[图片：{mime}，{n_bytes}字节]"}

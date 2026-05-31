@@ -842,3 +842,178 @@ async def test_run_stream_calls_sanitize_before_llm(mock_client, monkeypatch):
     mock_client.chat.completions.create = AsyncMock(side_effect=create)
     [e async for e in al.run_stream("hi")]
     assert order.index("sanitize") < order.index("llm")
+
+
+# ── run() multimodal (AR21) ─────────────────────────────────────────────────────
+
+_IMG_BLOCK = {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}}
+
+
+async def test_run_passes_image_blocks_through_to_llm(mock_client):
+    captured: dict = {}
+
+    async def capture_create(*a, **kw):
+        captured["messages"] = kw["messages"]
+        return _text_resp("ok")
+
+    mock_client.chat.completions.create = capture_create
+    msg_content = [{"type": "text", "text": "what is this"}, _IMG_BLOCK]
+    await al.run([{"role": "user", "content": msg_content}])
+    sent = captured["messages"]
+    user_msg = next(m for m in sent if m.get("role") == "user")
+    assert isinstance(user_msg["content"], list)
+    assert any(b.get("type") == "image_url" for b in user_msg["content"])
+
+
+async def test_run_extracts_text_block_as_user_input(mock_client, monkeypatch):
+    captured: dict = {}
+    monkeypatch.setattr(
+        al, "log_run", lambda user_input, *a, **kw: captured.__setitem__("input", user_input)
+    )
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    content = [{"type": "text", "text": "describe the screenshot"}, _IMG_BLOCK]
+    await al.run([{"role": "user", "content": content}])
+    assert captured["input"] == "describe the screenshot"
+
+
+async def test_run_str_content_regression(mock_client):
+    # Plain-text path must be unchanged: no image block, default route.
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("plain"))
+    result = await al.run([{"role": "user", "content": "just text"}])
+    assert result == "plain"
+
+
+async def test_run_routes_to_vision_when_image_present(monkeypatch):
+    seen: list[str] = []
+    client = AsyncMock()
+    cfg = MagicMock()
+    cfg.model = "vision-model"
+    cfg.max_tokens = 512
+    cfg.fallbacks = ()
+    client.chat.completions.create = AsyncMock(return_value=_text_resp("seen"))
+
+    def spy(task_type):
+        seen.append(task_type)
+        return client, cfg
+
+    monkeypatch.setattr(al, "get_async_client_and_config", spy)
+    monkeypatch.setattr(al, "get_schemas", lambda: [])
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        al,
+        "resolve_limits",
+        lambda max_turns=None, max_consecutive_failures=None, config=None: (50, 3),
+    )
+    await al.run([{"role": "user", "content": [{"type": "text", "text": "x"}, _IMG_BLOCK]}])
+    assert "vision" in seen
+    assert "default" not in seen
+
+
+async def test_run_uses_default_route_for_text(mock_client, monkeypatch):
+    seen: list[str] = []
+    client = mock_client
+    cfg = MagicMock()
+    cfg.model = "test-model"
+    cfg.max_tokens = 512
+    cfg.fallbacks = ()
+
+    def spy(t):
+        seen.append(t)
+        return client, cfg
+
+    monkeypatch.setattr(al, "get_async_client_and_config", spy)
+    client.chat.completions.create = AsyncMock(return_value=_text_resp("t"))
+    await al.run([{"role": "user", "content": "hello"}])
+    assert seen == ["default"]
+
+
+async def test_run_raises_when_image_but_no_vision_route(mock_client, monkeypatch):
+    from fleetent import model_router
+
+    routes_no_vision = {k: v for k, v in model_router.ROUTES.items() if k != "vision"}
+    monkeypatch.setattr(model_router, "ROUTES", routes_no_vision)
+    create = AsyncMock(return_value=_text_resp("should not happen"))
+    mock_client.chat.completions.create = create
+    with pytest.raises(RuntimeError, match="vision|视觉"):
+        await al.run([{"role": "user", "content": [_IMG_BLOCK]}])
+    create.assert_not_called()
+
+
+async def test_image_message_passes_sanitize(mock_client):
+    # AR6 coordination: list-type content must survive sanitize() without error.
+    from fleetent.message_hygiene import sanitize
+
+    messages = [{"role": "user", "content": [{"type": "text", "text": "hi"}, _IMG_BLOCK]}]
+    clean, report = sanitize(messages)
+    assert clean[0]["content"] == messages[0]["content"]
+
+
+# ── run_stream() multimodal (AR21) ──────────────────────────────────────────────
+
+
+async def test_run_stream_passes_images_through(mock_client):
+    captured: dict = {}
+
+    async def capture_create(*a, **kw):
+        captured["messages"] = kw["messages"]
+        return _stream_chunks("ok", None)
+
+    mock_client.chat.completions.create = capture_create
+    events = [
+        e
+        async for e in al.run_stream("what is this", images=[(b"PNGDATA", "image/png")])
+    ]
+    user_msg = next(m for m in captured["messages"] if m.get("role") == "user")
+    assert isinstance(user_msg["content"], list)
+    assert any(b.get("type") == "image_url" for b in user_msg["content"])
+    assert any(e["type"] == "done" for e in events)
+
+
+async def test_run_stream_text_path_unchanged(mock_client):
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("hi", None))
+    events = [e async for e in al.run_stream("plain text")]
+    assert [e["content"] for e in events if e["type"] == "text_delta"] == ["hi"]
+
+
+async def test_run_stream_routes_to_vision_with_images(monkeypatch):
+    seen: list[str] = []
+    client = AsyncMock()
+    cfg = MagicMock()
+    cfg.model = "vision-model"
+    cfg.max_tokens = 512
+    cfg.fallbacks = ()
+    client.chat.completions.create = AsyncMock(return_value=_stream_chunks("x", None))
+
+    def spy(t):
+        seen.append(t)
+        return client, cfg
+
+    monkeypatch.setattr(al, "get_async_client_and_config", spy)
+    monkeypatch.setattr(al, "get_schemas", lambda: [])
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
+    monkeypatch.setattr(al, "match_skill", lambda _: None)
+    monkeypatch.setattr(
+        al,
+        "resolve_limits",
+        lambda max_turns=None, max_consecutive_failures=None, config=None: (50, 3),
+    )
+    _ = [e async for e in al.run_stream("desc", images=[(b"D", "image/png")])]
+    assert "vision" in seen
+    assert "default" not in seen
+
+
+async def test_run_stream_raises_when_image_but_no_vision_route(mock_client, monkeypatch):
+    from fleetent import model_router
+
+    routes_no_vision = {k: v for k, v in model_router.ROUTES.items() if k != "vision"}
+    monkeypatch.setattr(model_router, "ROUTES", routes_no_vision)
+    create = MagicMock()
+    mock_client.chat.completions.create = create
+    with pytest.raises(RuntimeError, match="vision|视觉"):
+        _ = [e async for e in al.run_stream("x", images=[(b"D", "image/png")])]
+    create.assert_not_called()

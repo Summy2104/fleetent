@@ -31,3 +31,19 @@
 
 **影响：** 450 passed。run() 现保证就地改调用方 messages（IM 持久化正常）。
 **需 zy 核实：** 上述就地赋值修复（run() mutation 契约）是否认可；MessageContractError→unknown 的处理是否认可。
+
+## multimodal-input (AR21) — feat/multimodal-input
+
+**实现：** 新增 multimodal.py（is_multimodal_content/build_image_block(base64)/build_message_with_images/has_image_block/非图片归一化占位）；agent_loop content 放宽 str|list、user_input 取文本块、`_select_route` 按 has_image_block 选 vision/default 路由；context_mgr.estimate_tokens 图片块计固定 1000 token；eval_logger._serialize 图片块→`[图片:mime,字节]` 占位；model_router ROUTES 加 vision task_type。
+
+**D6 视觉路由（方案A）：** 含图片但 ROUTES 无 vision → `RuntimeError`（LLM 调用前，运行时查 `model_router.ROUTES` 以便 monkeypatch）。run/run_stream 共用。
+
+**自解冲突：**
+1. get_async_client_and_config 对未知 task_type 静默回落 default → 无法检测"无 vision 路由"。解：在 `_select_route` 显式 `"vision" not in model_router.ROUTES` 检查（引模块属性、非 bound import，便于测试 monkeypatch）。
+2. run_stream 是 user_input:str 无 messages → 加可选 `images: list[tuple[bytes,str]]` 参数，经 build_message_with_images 构造;server.py 接入属后续(Non-Goal)。
+3. 每图占位 token = 1000（保守常量；Anthropic 按像素约 ≤1600，避免 100KB base64 误加 ~25k token）。
+
+**AR6 协调：** sanitize 只看 role/tool_call 配对、不索引 content，list content 原样通过；加守卫 `test_image_message_passes_sanitize`。run() 的 messages[:] 就地改未破坏。
+
+**影响：** 477 passed，ruff/mypy 无新增。
+**需 zy 核实：** 每图 1000 token 占位是否合理;vision task_type 默认指向(本次用 Sonnet vision,部署可改);run_stream 的 images 参数形态。

@@ -6,6 +6,12 @@ from fleetent.model_router import get_client_and_config
 
 ContextConfig = dict[str, Any]
 
+# Fixed token estimate per image block (AR21). A real backend bills an image by
+# its pixel dimensions (Anthropic caps around ~1600 tokens); 1000 is a
+# conservative constant that avoids charging the multi-thousand-char base64
+# string, which would falsely trip the compression threshold.
+_IMAGE_BLOCK_TOKENS = 1000
+
 
 def _default_config() -> ContextConfig:
     from fleetent.config import Settings
@@ -18,8 +24,26 @@ def _default_config() -> ContextConfig:
 
 
 def estimate_tokens(messages: list[Any]) -> int:
-    """Rough token count: 1 token ≈ 4 chars."""
-    return sum(len(str(m)) for m in messages) // 4
+    """Rough token count: 1 token ≈ 4 chars; image blocks count a fixed placeholder.
+
+    Image content blocks carry base64 strings that are huge but cheap for the
+    model; counting their characters would falsely inflate the estimate, so each
+    image block is charged a fixed `_IMAGE_BLOCK_TOKENS` instead.
+    """
+    return sum(_estimate_message_tokens(m) for m in messages)
+
+
+def _estimate_message_tokens(msg: Any) -> int:
+    content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+    if not isinstance(content, list):
+        return len(str(msg)) // 4
+    total = 0
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "image_url":
+            total += _IMAGE_BLOCK_TOKENS
+        else:
+            total += len(str(block)) // 4
+    return total
 
 
 def maybe_compress(
