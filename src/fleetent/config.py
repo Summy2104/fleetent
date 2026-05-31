@@ -23,6 +23,18 @@ class VectorStoreSettings(BaseModel):
 class EmbeddingSettings(BaseModel):
     backend: str = "deterministic"
     dimensions: int = 64
+    endpoint: str = ""
+    model: str = ""
+    api_key_env: str = ""
+    timeout_seconds: float = 10.0
+
+
+class RerankSettings(BaseModel):
+    backend: str = "disabled"
+    endpoint: str = ""
+    model: str = ""
+    api_key_env: str = ""
+    timeout_seconds: float = 10.0
 
 
 class LongTermContextSettings(BaseModel):
@@ -48,6 +60,7 @@ class Settings(BaseSettings):
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     vector_store: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    rerank: RerankSettings = Field(default_factory=RerankSettings)
     long_term_ctx: LongTermContextSettings = Field(default_factory=LongTermContextSettings)
 
 

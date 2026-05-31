@@ -1,0 +1,162 @@
+import hashlib
+import os
+from dataclasses import dataclass
+from typing import Protocol
+
+import httpx
+
+from fleetent.config import RerankSettings
+
+
+@dataclass(frozen=True)
+class RerankResult:
+    index: int
+    score: float
+
+
+class RerankProvider(Protocol):
+    async def rerank(
+        self, query: str, documents: list[str], top_n: int | None = None
+    ) -> list[RerankResult]:
+        """Return ranked document indexes and scores."""
+
+
+class RerankProviderError(RuntimeError):
+    """Raised when a rerank provider cannot return valid results."""
+
+
+class DisabledRerankProvider:
+    async def rerank(
+        self, query: str, documents: list[str], top_n: int | None = None
+    ) -> list[RerankResult]:
+        """Fail because rerank is intentionally disabled."""
+        raise RerankProviderError("Rerank provider is disabled")
+
+
+class DeterministicRerankProvider:
+    async def rerank(
+        self, query: str, documents: list[str], top_n: int | None = None
+    ) -> list[RerankResult]:
+        """Return stable scores for tests without external services."""
+        limit = len(documents) if top_n is None else max(0, min(top_n, len(documents)))
+        scored = [
+            RerankResult(index=index, score=_deterministic_score(query, document))
+            for index, document in enumerate(documents)
+        ]
+        return sorted(scored, key=lambda result: (-result.score, result.index))[:limit]
+
+
+@dataclass(frozen=True)
+class HttpRerankProvider:
+    endpoint: str
+    model: str
+    api_key_env: str = ""
+    timeout_seconds: float = 10.0
+
+    def __post_init__(self) -> None:
+        if not self.endpoint.strip():
+            raise ValueError("rerank.endpoint must not be empty for http backend")
+
+    async def rerank(
+        self, query: str, documents: list[str], top_n: int | None = None
+    ) -> list[RerankResult]:
+        """Return rerank results from an HTTP endpoint."""
+        payload = {
+            "model": self.model,
+            "query": query,
+            "documents": documents,
+            "top_n": top_n,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.post(
+                    self.endpoint,
+                    json=payload,
+                    headers=_authorization_header(self.api_key_env),
+                )
+        except httpx.TimeoutException as exc:
+            raise RerankProviderError("HTTP rerank request timed out") from exc
+        except httpx.HTTPError as exc:
+            raise RerankProviderError(f"HTTP rerank request failed: {exc}") from exc
+
+        if response.status_code < 200 or response.status_code >= 300:
+            raise RerankProviderError(
+                f"HTTP rerank provider returned status {response.status_code}"
+            )
+
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise RerankProviderError("HTTP rerank provider returned malformed JSON") from exc
+
+        return _extract_results(body, document_count=len(documents))
+
+
+def create_rerank_provider(settings: RerankSettings) -> RerankProvider:
+    if settings.backend == "disabled":
+        return DisabledRerankProvider()
+    if settings.backend == "deterministic":
+        return DeterministicRerankProvider()
+    if settings.backend == "http":
+        return HttpRerankProvider(
+            endpoint=settings.endpoint,
+            model=settings.model,
+            api_key_env=settings.api_key_env,
+            timeout_seconds=settings.timeout_seconds,
+        )
+    raise ValueError(
+        f"Unsupported rerank.backend {settings.backend!r}. "
+        "Supported rerank backends: disabled, deterministic, http"
+    )
+
+
+def _authorization_header(api_key_env: str) -> dict[str, str]:
+    if not api_key_env:
+        return {}
+    api_key = os.environ.get(api_key_env)
+    if not api_key:
+        return {}
+    return {"Authorization": f"Bearer {api_key}"}
+
+
+def _deterministic_score(query: str, document: str) -> float:
+    query_terms = set(query.lower().split())
+    document_terms = set(document.lower().split())
+    if query_terms or document_terms:
+        overlap = len(query_terms & document_terms)
+        union = len(query_terms | document_terms)
+        lexical_score = overlap / union if union else 0.0
+    else:
+        lexical_score = 0.0
+
+    digest = hashlib.blake2b(f"{query}\0{document}".encode(), digest_size=8).digest()
+    tie_breaker = int.from_bytes(digest, byteorder="big") / float(2**64)
+    return min(1.0, lexical_score + tie_breaker * 0.000001)
+
+
+def _extract_results(body: object, document_count: int) -> list[RerankResult]:
+    if not isinstance(body, dict):
+        raise RerankProviderError("HTTP rerank provider response missing results")
+
+    results = body.get("results")
+    if not isinstance(results, list):
+        raise RerankProviderError("HTTP rerank provider response missing results")
+
+    parsed: list[RerankResult] = []
+    for item in results:
+        if not isinstance(item, dict):
+            raise RerankProviderError("HTTP rerank provider response has invalid result")
+
+        index = item.get("index")
+        if not isinstance(index, int):
+            raise RerankProviderError("HTTP rerank provider result index is invalid")
+        if index < 0 or index >= document_count:
+            raise RerankProviderError(f"HTTP rerank provider result index {index} out of range")
+
+        score = item.get("score")
+        if not isinstance(score, int | float):
+            raise RerankProviderError("HTTP rerank provider result score is invalid")
+
+        parsed.append(RerankResult(index=index, score=float(score)))
+
+    return parsed

@@ -60,30 +60,30 @@ def test_knowledge_namespace_rejects_empty_parts(tenant_id, kb_id, message):
         knowledge_namespace(tenant_id, kb_id)
 
 
-def test_deterministic_embedding_is_stable_with_default_dimensions():
+async def test_deterministic_embedding_is_stable_with_default_dimensions():
     from fleetent.intelligence.vector_store.embeddings import DeterministicEmbedding
 
     embedding = DeterministicEmbedding()
 
-    assert embedding.embed("Python debugging") == embedding.embed("Python debugging")
-    assert len(embedding.embed("Python debugging")) == 64
+    assert await embedding.embed("Python debugging") == await embedding.embed("Python debugging")
+    assert len(await embedding.embed("Python debugging")) == 64
 
 
-def test_deterministic_embedding_normalizes_non_empty_text():
+async def test_deterministic_embedding_normalizes_non_empty_text():
     from fleetent.intelligence.vector_store.embeddings import DeterministicEmbedding
 
-    vector = DeterministicEmbedding().embed("Python debugging")
+    vector = await DeterministicEmbedding().embed("Python debugging")
 
     assert _l2_norm(vector) == pytest.approx(1.0)
 
 
-def test_deterministic_embedding_returns_stable_zero_vector_for_empty_text():
+async def test_deterministic_embedding_returns_stable_zero_vector_for_empty_text():
     from fleetent.intelligence.vector_store.embeddings import DeterministicEmbedding
 
     embedding = DeterministicEmbedding(dimensions=4)
 
-    assert embedding.embed("") == [0.0, 0.0, 0.0, 0.0]
-    assert embedding.embed("   ") == [0.0, 0.0, 0.0, 0.0]
+    assert await embedding.embed("") == [0.0, 0.0, 0.0, 0.0]
+    assert await embedding.embed("   ") == [0.0, 0.0, 0.0, 0.0]
 
 
 async def test_upsert_then_search_returns_id_and_score():
@@ -98,6 +98,75 @@ async def test_upsert_then_search_returns_id_and_score():
     assert [field.name for field in fields(SearchResult)] == ["id", "score"]
     assert "id-1" in [result.id for result in results]
     assert all(isinstance(result.score, float) for result in results)
+
+
+async def test_upsert_uses_configured_http_embedding_provider():
+    import httpx
+    import respx
+
+    from fleetent.config import EmbeddingSettings, Settings
+    from fleetent.intelligence.vector_store import runtime
+    from fleetent.intelligence.vector_store.backend import InMemoryVectorBackend
+
+    runtime._configure(
+        Settings(
+            anthropic_api_key="",
+            embedding=EmbeddingSettings(
+                backend="http",
+                dimensions=2,
+                endpoint="http://runtime-embedding.test/v1/upsert-embeddings",
+                model="bge-m3",
+            ),
+        )
+    )
+
+    try:
+        with respx.mock:
+            route = respx.post("http://runtime-embedding.test/v1/upsert-embeddings").mock(
+                return_value=httpx.Response(200, json={"data": [{"embedding": [1.0, 0.0]}]})
+            )
+
+            await runtime.upsert("id-http", "python debugging", namespace="mem:http-upsert")
+
+        assert route.called
+        assert isinstance(runtime._backend, InMemoryVectorBackend)
+        assert runtime._backend._vectors["mem:http-upsert"]["id-http"] == [1.0, 0.0]
+    finally:
+        runtime._configure(Settings(anthropic_api_key=""))
+
+
+async def test_search_uses_configured_http_embedding_provider():
+    import httpx
+    import respx
+
+    from fleetent.config import EmbeddingSettings, Settings
+    from fleetent.intelligence.vector_store import runtime
+
+    runtime._configure(
+        Settings(
+            anthropic_api_key="",
+            embedding=EmbeddingSettings(
+                backend="http",
+                dimensions=2,
+                endpoint="http://runtime-embedding.test/v1/search-embeddings",
+                model="bge-m3",
+            ),
+        )
+    )
+
+    try:
+        with respx.mock:
+            route = respx.post("http://runtime-embedding.test/v1/search-embeddings").mock(
+                return_value=httpx.Response(200, json={"data": [{"embedding": [1.0, 0.0]}]})
+            )
+
+            await runtime.upsert("id-http", "stored text", namespace="mem:http-search")
+            results = await runtime.search("query text", namespace="mem:http-search")
+
+        assert route.call_count == 2
+        assert [result.id for result in results] == ["id-http"]
+    finally:
+        runtime._configure(Settings(anthropic_api_key=""))
 
 
 async def test_search_limit_is_respected():
