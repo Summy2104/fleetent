@@ -1,0 +1,39 @@
+{
+  "name": "context update with ttl refresh",
+  "initial_memories": [
+    {
+      "id": "mem-context-project",
+      "type": "context",
+      "content": "User is working on the billing migration",
+      "expires_at": "future"
+    }
+  ],
+  "conversation": [
+    {
+      "role": "user",
+      "content": "The billing migration is done. I am now working on the payments rollout."
+    }
+  ],
+  "mock_actions": [
+    {
+      "action": "update",
+      "target_id": "mem-context-project",
+      "type": "context",
+      "content": "User is working on the payments rollout"
+    }
+  ],
+  "expected_memories": [
+    {
+      "id": "mem-context-project",
+      "type": "context",
+      "content": "User is working on the payments rollout",
+      "expires_at": "present"
+    }
+  ],
+  "forbidden_memories": [
+    {
+      "type": "context",
+      "content": "User is working on the billing migration"
+    }
+  ]
+}

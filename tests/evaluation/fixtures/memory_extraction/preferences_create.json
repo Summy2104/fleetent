@@ -1,0 +1,25 @@
+{
+  "name": "preferences create",
+  "initial_memories": [],
+  "conversation": [
+    {
+      "role": "user",
+      "content": "Going forward, I prefer concise answers with concrete next steps."
+    }
+  ],
+  "mock_actions": [
+    {
+      "action": "create",
+      "type": "preferences",
+      "content": "User prefers concise answers with concrete next steps"
+    }
+  ],
+  "expected_memories": [
+    {
+      "type": "preferences",
+      "content": "User prefers concise answers with concrete next steps",
+      "expires_at": "absent"
+    }
+  ],
+  "forbidden_memories": []
+}

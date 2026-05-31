@@ -1,0 +1,30 @@
+{
+  "name": "explicit forget delete",
+  "initial_memories": [
+    {
+      "id": "mem-context-secret",
+      "type": "context",
+      "content": "User is evaluating Vendor X",
+      "expires_at": "future"
+    }
+  ],
+  "conversation": [
+    {
+      "role": "user",
+      "content": "Forget that I was evaluating Vendor X."
+    }
+  ],
+  "mock_actions": [
+    {
+      "action": "delete",
+      "target_id": "mem-context-secret"
+    }
+  ],
+  "expected_memories": [],
+  "forbidden_memories": [
+    {
+      "type": "context",
+      "content": "User is evaluating Vendor X"
+    }
+  ]
+}
