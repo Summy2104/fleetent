@@ -2,11 +2,11 @@
 
 `session_mgr.py`（共 43 行）只持久化 session 的消息历史 JSON（`save()` 行 37-42），不记录任何元数据。docs/capabilities/session.md 第 69 行：「无创建时间、最后活跃时间等索引，无法按时间排序或统计」；第 79-81 行规划「session 轻量元数据索引」，并明确「存于 `users.db` 的 `sessions` 表，不增加 session 文件本身体积」。
 
-`users.db` 是 SQLite 主库（CLAUDE.md 数据目录），既有 `users` / `im_users` / `agents` / `traces` / `memory_items` 等表，访问方式统一为 aiosqlite 直接写 SQL（CLAUDE.md Forbidden Patterns：禁止 ORM）。本 change 在同库新增 `sessions` 表。
+`users.db` 是 SQLite 主库（CLAUDE.md 数据目录），既有 `users` / `im_users` / `agents` / `traces` / `memory_items` 等表，访问方式统一为 stdlib sqlite3 直接写 SQL（CLAUDE.md Forbidden Patterns：禁止 ORM）。本 change 在同库新增 `sessions` 表。
 
 本 change 与 `session-ttl-cleanup`、`session-disk-management` 互补但独立：TTL/LRU 当前各自用文件 mtime 做判定，本元数据索引为它们提供更丰富、可查询的依据（后续可由它们改用索引替代全盘扫描），但本 change 不修改那两者。
 
-约束（CLAUDE.md）：禁止 AI 框架；禁止 ORM（用 aiosqlite 直接写 SQL）；禁止全局可变状态（`DB_PATH` 必须可 monkeypatch 注入）；新模块结构为 import → 常量 → 数据类 → 函数；mypy strict；行长 100；TDD Hard Gate；SQLite 测试隔离 `monkeypatch DB_PATH → tmp_path`。
+约束（CLAUDE.md）：禁止 AI 框架；禁止 ORM（用 stdlib sqlite3 直接写 SQL）；禁止全局可变状态（`DB_PATH` 必须可 monkeypatch 注入）；新模块结构为 import → 常量 → 数据类 → 函数；mypy strict；行长 100；TDD Hard Gate；SQLite 测试隔离 `monkeypatch DB_PATH → tmp_path`。
 
 ## Goals / Non-Goals
 
@@ -25,13 +25,13 @@
 
 ## Decisions
 
-### D1：用 aiosqlite 在 users.db 建 sessions 表，禁止 ORM
+### D1：用 stdlib sqlite3 在 users.db 建 sessions 表，禁止 ORM
 新增 `src/fleetent/session_index.py`：
 - `DB_PATH = Path("data/users.db")`（模块级可注入常量，对齐其它 store 模块）。
 - 建表 DDL（`CREATE TABLE IF NOT EXISTS sessions (...)`）：`session_id TEXT PRIMARY KEY` / `user_id TEXT` / `created_at REAL` / `updated_at REAL` / `message_count INTEGER` / `agent_name TEXT`。`created_at` / `updated_at` 用 epoch 秒（`time.time()`）。
-- 所有读写经 `aiosqlite.connect(DB_PATH)` 直接写 SQL。
+- 所有读写经 `sqlite3.connect(DB_PATH)` 直接写 SQL。
 
-**为何**：CLAUDE.md 明令禁止 ORM、统一用 aiosqlite；session.md 第 81 行指定存于 `users.db` 的 `sessions` 表。SQLite 索引天然支持按 user / 时间排序与聚合统计，优于 JSON 索引文件。
+**为何**：CLAUDE.md 明令禁止 ORM、统一用 stdlib sqlite3；session.md 第 81 行指定存于 `users.db` 的 `sessions` 表。SQLite 索引天然支持按 user / 时间排序与聚合统计，优于 JSON 索引文件。
 **Alternatives**：①轻量 JSON 索引文件（单文件存全部元数据）——被否，并发写需自己加锁、统计需全量加载、与 session.md「存于 users.db」明确冲突；②复用 traces 表——被否，语义不同（traces 是 append-only 运行日志，session 元数据是 per-session 可变 upsert）。
 
 ### D2：upsert 语义与 created_at / updated_at
@@ -60,7 +60,7 @@
 
 - [索引与消息文件不一致（save 成功但索引更新失败）] → D3 保证消息为准、索引可容忍短暂滞后；下次同 session 的 save 会 upsert 补正；不一致仅影响统计精度，不影响对话功能。
 - [既有 save() 调用方未传 user_id / agent_name 导致元数据不全] → 新增参数为可选、向后兼容；元数据相应字段 NULL 不影响按 session_id 的查询；agent_loop 接入透传后逐步补全。
-- [sessions 表与 users.db 其它表共库的写竞争] → aiosqlite 默认 WAL/串行写足以应对 session 级低频写；与既有 store 模块同库同模式，无新增风险。
+- [sessions 表与 users.db 其它表共库的写竞争] → stdlib sqlite3 默认 WAL/串行写足以应对 session 级低频写；与既有 store 模块同库同模式，无新增风险。
 - [message_count 仅为条数、非 token 量] → session.md 提及「总 token 估算」为可选增强；本次先落 message_count，token 估算作为后续可加字段，schema 预留扩展空间（新增列即可）。
 
 ## Open Questions

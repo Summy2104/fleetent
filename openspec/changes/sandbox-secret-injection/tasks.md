@@ -6,8 +6,8 @@
 
 ## 2. 名称过滤规则（sandbox_secrets.py）
 
-- [ ] 2.1 Write failing tests：`is_sensitive_name` 对 `API_TOKEN`/`token`/`MyKey`/`db_secret` 等大小写各异、含 `TOKEN`/`KEY`/`SECRET` 子串的名称返回 True；对 `PATH`/`HOME`/`LANG` 返回 False。运行 `uv run pytest -x -q` 看到红
-- [ ] 2.2 Implement `SENSITIVE_TOKENS` 常量与 `is_sensitive_name`（`upper()` 子串匹配），看到绿
+- [ ] 2.1 Write failing tests：`is_sensitive_name` 对 `API_TOKEN`/`token`/`MyKey`/`db_secret` 等大小写各异、含 `TOKEN`/`KEY`/`SECRET` 子串的名称返回 True；对**新增子串**也命中——`DB_PASSWORD`/`MYSQL_PASSWD`/`AWS_CREDENTIAL`/`PRIVATE_PEM`/`BASIC_AUTH`（含 `PASSWORD`/`PASSWD`/`CREDENTIAL`/`PRIVATE`/`AUTH`）返回 True；对 `PATH`/`HOME`/`LANG` 返回 False。运行 `uv run pytest -x -q` 看到红
+- [ ] 2.2 Implement `SENSITIVE_TOKENS` 常量（`TOKEN`/`KEY`/`SECRET`/`PASSWORD`/`PASSWD`/`CREDENTIAL`/`PRIVATE`/`AUTH`，可扩展的最小集）与 `is_sensitive_name`（`upper()` 子串匹配），看到绿
 
 ## 3. 三层合并过滤管线（sandbox_secrets.py）
 
@@ -18,8 +18,8 @@
 
 ## 4. create_workspace 注入与防御性二次过滤（sandbox_client.py）
 
-- [ ] 4.1 Write failing tests：`create_workspace(env={"DATA_DIR": "/x"})` 在 docker run 中出现 `-e DATA_DIR=/x`；`env=None`/空时无 `-e`（与现状等价）；防御性：即便误传含 `KEY` 的键，docker 命令中不出现该键。捕获 `asyncio.create_subprocess_exec` 参数断言。看到红
-- [ ] 4.2 Implement：`create_workspace` 接收 `env`，按项转 `-e`，注入前再跑 `is_sensitive_name` 兜底剔除，看到绿
+- [ ] 4.1 Write failing tests：`create_workspace(name, resources, image, env={"DATA_DIR": "/x"})`（env 与 resources/image 同属 per-create 参数）在 docker run 中出现 `-e DATA_DIR=/x`；`env=None`/空时无 `-e`（与现状等价）；防御性：即便误传含 `KEY`/`PASSWORD` 的键，docker 命令中不出现该键。捕获 `asyncio.create_subprocess_exec` 参数断言。看到红
+- [ ] 4.2 Implement：`create_workspace(name, resources, image, env)` 接收 `env`，按项转 `-e`，注入前再跑 `is_sensitive_name` 兜底剔除，看到绿
 
 ## 5. 收尾
 

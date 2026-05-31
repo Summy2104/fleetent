@@ -51,12 +51,13 @@ error-classification（AR5）已确立「把可查询字段写入 trace（`log_r
 2. 命中 `disabled_skills` 配置名单 → 来源 `config_disabled`（builtin-skills 提供判定，本 change 仅识别来源）
 3. `enabled_by_default is False` 且未被显式启用 → 来源 `default_disabled`（builtin-skills 提供判定）
 4. 未通过 per-agent 白名单 / 命中黑名单 → 来源 `agent_blocked`（agent-skill-binding 提供判定）
-本 change **只新增第 1 条的判定**，第 2-4 条复用并行 change 的既有判定；统一在 `match_all` 候选标注里汇总「被禁用 Skill → 来源」，注入链据此写 trace。
+5. 被 SK5 安全审计 severe 拒绝 → 来源 `audit_blocked`（skill-security-audit / SK5 提供判定，本 change 仅识别来源）
+本 change **只新增第 1 条的判定**，第 2-5 条复用并行 change 的既有判定；统一在 `match_all` 候选标注里汇总「被禁用 Skill → 来源」，注入链据此写 trace。第 5 条 `audit_blocked` 是协调点①：对「这个 Skill 为什么没生效」的排查，被 SK5 审计拒绝与配置禁用同样是「没生效」的原因，故纳入同一禁用来源 trace。
 **为何**：禁用是「任一来源命中即禁用」的 OR 叠加；候选中间产物保留禁用项才能让 trace 回答「本可命中但凭什么被禁」。不重新实现 2-4 条避免与并行 change 重叠。
 **Alternatives**：①仍在 `match()` 里 `continue` 丢弃禁用项——被否，丢弃后注入链拿不到「本可命中」信息，trace 无从写；②把全部禁用判定集中重写到本 change——被否，与 builtin-skills / agent-skill-binding 重叠，违反范围划界。
 
 ### D3：禁用来源写入 trace（复用 AR5 范式）
-`eval_logger.log_run`（行 20）新增末位可选字段 `disabled_skills_trace: dict[str, str] | None = None`（键=Skill 名、值=禁用来源标识；默认 None 向后兼容，None 不写入 entry）。注入链在「跳过被 `match_all` 候选标注为禁用、但本可命中的 Skill」时收集 `{skill_name: 来源}`，运行结束经 `log_run` 写入。
+`eval_logger.log_run`（行 20）新增末位可选字段 `disabled_skills_trace: dict[str, str] | None = None`（键=Skill 名、值=禁用来源标识，取值集合 `frontmatter_disabled` / `config_disabled` / `default_disabled` / `agent_blocked` / `audit_blocked`；默认 None 向后兼容，None 不写入 entry）。注入链在「跳过被 `match_all` 候选标注为禁用（含被 SK5 审计 `audit_blocked`）、但本可命中的 Skill」时收集 `{skill_name: 来源}`，运行结束经 `log_run` 写入。
 **为何**：落实 skill.md 第③条「禁用状态记录在运行日志中，便于排查」；复用 AR5 已验证的「log_run 新增可选 kw、默认 None 向后兼容」，改动最小、不破坏既有 trace 调用。
 **Alternatives**：①只记即时 structlog（builtin-skills 已做）——被否，那是「发生时的日志行」，不是「按某次运行可查询的 trace 字段」，无法回答「**这次运行**为什么这个 Skill 没生效」；②单建禁用审计表——被否，trace 已是 append-only 运行轨迹的单一出口，复用即可。
 
@@ -72,6 +73,33 @@ error-classification（AR5）已确立「把可查询字段写入 trace（`log_r
 **为何**：与 builtin-skills「禁用只约束自动匹配，不影响显式加载契约」一致；显式加载常用于排查 / 管理，禁用不应阻断。
 **Alternatives**：禁用即 `load` 失败——被否，破坏既有 `load` 契约且妨碍排查。
 
+### D5：显式定义单一 `injectable` 谓词，L1 / L2 与三个注入点都查同一谓词（协调点②，全轨收敛结论）
+全轨把「一个 Skill 当前是否可被自动注入」收敛为**单一谓词**，作为唯一裁决源：
+
+```
+injectable(skill, request) =
+    命中(skill, request)              # 关键词命中（SK3 候选）
+  ∧ skill.enabled                     # frontmatter 非硬关停（SK6，本 change）
+  ∧ skill.name ∉ disabled_skills      # 非全局配置禁用（builtin-skills）
+  ∧ ¬default_disabled(skill)          # 非「默认态关闭且未被显式启用」（builtin-skills）
+  ∧ passes_agent_binding(skill)       # 过 per-agent 白名单 / 不在黑名单（agent-skill-binding）
+  ∧ ¬audit_blocked(skill)             # 非 SK5 审计 severe 拒绝（skill-security-audit）
+```
+
+`injectable` 为假 ⇔ 上述某项失败，该失败项即对应一个禁用来源（D2/D3 的五来源集合），写入 `disabled_skills_trace`。
+
+- **单一裁决源**：SK3 owner 的 `match_all` 候选结构累积四方信息——命中(SK3) + `exclusive`(SK3) + 禁用来源(SK6：`frontmatter_disabled` / 复用 `config_disabled` / `default_disabled` / `agent_blocked`) + `audit_blocked`(SK5)，共同构成 `injectable` 这个**单一谓词**。注入裁决不得在 `match_all` 之外另起一套判定。
+- **L1(SK1) 与 L2 都查同一谓词**：L1（SK1 的注入基线，含轻量/前置注入）与 L2（关键词匹配注入）**MUST** 通过同一个 `injectable` 谓词决定某 Skill 是否注入。这样**同时解掉 L1 注入被禁 / 被审计 Skill 的绕过**——若只在 L2 过滤，L1 仍可能注入一个已 `enabled: false` 或被 SK5 拒绝的 Skill。
+- **三个注入点都经它**：当前三个注入点（`run_sync()`、`run_stream()`，以及 `im_gateway/normalizer.py` 的 IM 路径）**MUST** 都经 `injectable` 共享函数裁决，不得各自实现一份过滤。
+
+**为何**：单一谓词 + 单一裁决源消除「不同注入点对同一 Skill 给出不同启用结论」的不一致；把 SK1/SK5/SK6 与 builtin-skills/agent-skill-binding 的判定收拢到一处，禁用来源 trace 也自然只在这一处收集。
+**Alternatives**：每个注入点各写一份过滤——被否，必然漂移（L1 绕过即是例证），且禁用来源 trace 会重复/遗漏。
+
+### D6：normalizer IM 路径的禁用 trace 当前不写（已知 gap，与「注入收敛为单一共享函数」一并解决）（minor）
+**事实**：D3a 的 trace 透传覆盖的是 `run_sync()` 经 `run()` 委托 + `run_stream()` 两条路径；`im_gateway/normalizer.py` 的 IM 注入路径**当前不会写 `disabled_skills_trace`**——透传链未覆盖 normalizer。
+**处置**：作为**已知 gap 显式标注**，不在本 change 单独打补丁，而是与 D5「三个注入点收敛为单一共享 `injectable` 函数」**一并解决**——当 normalizer 改为经同一共享注入函数（内含禁用来源收集）后，IM 路径的禁用 trace 随之自动覆盖。
+**诚实标注**：`enabled` 自禁用（D1）是 roadmap（docs/capabilities/skill.md）之外的新增，proposal/design 已诚实标注，**保持**不变。
+
 ## Risks / Trade-offs
 
 - [与并行 change 的合入顺序耦合：本 change 复用 builtin-skills / agent-skill-binding 的判定] → 本 change 只硬依赖 SK2；第 2-4 条来源识别在对应 change 未合入时降级为「该来源恒不命中」，`enabled` 自禁用（第 1 条）与 trace 写入独立可用；design 标注协调点，叠加判定按「能拿到的来源」工作。
@@ -81,5 +109,5 @@ error-classification（AR5）已确立「把可查询字段写入 trace（`log_r
 
 ## Open Questions
 
-- 禁用来源标识的最终取值集合（`frontmatter_disabled` / `config_disabled` / `default_disabled` / `agent_blocked`）与 trace 字段结构——实现首步结合 builtin-skills / agent-skill-binding 已落地的判定接口确定，确保来源可被各 change 统一填充。（trace 的写入路径已由 D3/D3a 定死：`log_run` 新增 `disabled_skills_trace` 字段，`run()` 新增同名透传参数，`run_sync` 透传、`run_stream` 就近传入。）
+- 禁用来源标识的最终取值集合（`frontmatter_disabled` / `config_disabled` / `default_disabled` / `agent_blocked` / `audit_blocked`）与 trace 字段结构——实现首步结合 builtin-skills / agent-skill-binding / skill-security-audit（SK5）已落地的判定接口确定，确保来源可被各 change 统一填充。（trace 的写入路径已由 D3/D3a 定死：`log_run` 新增 `disabled_skills_trace` 字段，`run()` 新增同名透传参数，`run_sync` 透传、`run_stream` 就近传入；IM 路径见 D6 已知 gap，随 D5 注入收敛一并覆盖。）
 - 是否需要运行期（非 frontmatter）动态禁用单个 Skill 的开关——本 change 不做（禁用经 frontmatter 静态声明 + builtin-skills 的配置名单），如运维需要运行期单 Skill 开关可后续在热加载之上扩展。

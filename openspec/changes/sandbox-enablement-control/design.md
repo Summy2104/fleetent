@@ -13,7 +13,7 @@
 
 **依赖/归档顺序**：本 change 是 SB2（scope `acquire` 需 session_id/agent_name）与 SB5（agent_env 注入）的前置——三项共享资源在本 change 落地后，SB2/SB5 方可基于其上实现。建议归档顺序 SB3 在 SB2/SB5 之前。
 
-约束（CLAUDE.md）：禁止 ORM（agent_store 用 aiosqlite 裸 SQL）；禁止全局可变状态（mode/DB 路径常量可 monkeypatch）；判定逻辑做成纯函数易单测；新模块 import → 常量 → 数据类 → 函数；mypy strict；TDD Hard Gate；测试 mock Docker CLI、隔离 SQLite 到 tmp_path；不吞异常（探测失败要 log）。
+约束（CLAUDE.md）：禁止 ORM（agent_store 用 stdlib sqlite3 裸 SQL）；禁止全局可变状态（mode/DB 路径常量可 monkeypatch）；判定逻辑做成纯函数易单测；新模块 import → 常量 → 数据类 → 函数；mypy strict；TDD Hard Gate；测试 mock Docker CLI、隔离 SQLite 到 tmp_path；不吞异常（探测失败要 log）。
 
 ## Goals / Non-Goals
 
@@ -31,7 +31,7 @@
 
 ## Decisions
 
-### D1：三态判定为纯函数，与「注册」「调用拒绝」两个生效点分离
+### D1：两个 gate 统一在现有 schema 过滤点生效（纯函数判定）
 新增 `src/fleetent/sandbox_enablement.py`：
 - `Mode`：`str` 枚举，`OFF="off"` / `SELECTIVE="selective"` / `ALL="all"`。
 - `resolve_effective_mode(configured: Mode, docker_available: bool) -> Mode`：`docker_available=False` 一律返回 `OFF`，否则返回 configured。
@@ -40,12 +40,22 @@
   - `SELECTIVE` → `code_execution is True`；
   - `ALL` → `code_execution is not False`（None 或 True 都开，显式 False 才关）。
 
-**两个生效点**：
-1. **注册点**（启动期/CLI run 时）：生效 mode 为 `OFF` → 不注册 `run_code`（AI 不可见，对应 sandbox.md「完全不知道能力存在」）。
-2. **调用拒绝点**（`run_code` 调用入口，已注册前提下）：按当前 agent 的 `features.code_execution` 经 `is_code_execution_enabled` 判定，不可用则返回拒绝文本而不执行。
+**单一生效点 = schema 过滤点**：两个 gate（全局 `off` 与 agent 级 `code_execution=false`）都表现为 `run_code` **不进该 agent 的工具 schema**，与现有 `allowed_tools` 过滤同处一条路径——核实确认 `agent_loop.run()`（`agent_loop.py:346-347`）与 `run_stream()`（`agent_loop.py:584-586`）已经在按 `allowed_tools` 做 per-agent schema 过滤：
 
-**为何**：`off` 的语义是「AI 看不见」，只能在注册层实现（不注册即不进 schema）；而 `selective`/`all` 下工具已注册，agent 级开关只能在调用入口拦截。两点对应 sandbox.md 两层控制，分离后判定逻辑收敛到一个纯函数，两个生效点都只读它。
-**Alternatives**：①只在调用入口统一拦截、`off` 也注册但拒绝——被否，违反「AI 完全不知道能力存在」（schema 里仍会出现 run_code）；②每个 agent 动态构建独立 schema——被否，注册是全局 import 副作用，per-agent schema 改造范围过大，agent 级控制用调用入口拦截已足够。
+```python
+# agent_loop.py:345-347（run），run_stream 同构
+if allowed_tools is not None:
+    schemas = [s for s in schemas if check_tool_access(s["function"]["name"], allowed_tools)]
+```
+
+本 change 在同一处追加一个基于 `is_code_execution_enabled(effective_mode, agent_features.get("code_execution"))` 的过滤：判定为 False 则把 `run_code` 从该 agent 的 `schemas` 列表剔除。`off`（全局）与 agent 级 `code_execution=false` 经 `resolve_effective_mode` + `is_code_execution_enabled` 统一收敛到这一个判定，二者表现一致——都是「不出现在该 agent 的 schema 中」。
+
+- **不做条件化注册**：`run_code` 仍按 import 副作用全局注册到 `_registry`，`off` 不再「不注册」，而是「不进 schema」。
+- **不返回拒绝文本**：agent 级关闭不再在 `run_code` 调用入口拦截返回拒绝文本——能力既不在 schema 中，AI 无从发起该调用。
+- 生效 mode 与 agent features 经 `run()` / `run_stream()` 新增入参（与 `allowed_tools` 并列）传到该过滤点。
+
+**为何**：`agent_loop.py` 已经在按 `allowed_tools` 做 per-agent schema 过滤（`check_tool_access`），所以原 D1 alternative-② 否决「per-agent 动态 schema」、称其「改造范围过大」的理由**不成立**——这条路径本就存在，本 change 只是在同一处多挂一个判定，改造面极小。把两个 gate 都收口到此处的好处：(1) `off` 与 agent 级关闭语义统一（都=AI 看不见），不再一个在注册层、一个在调用层；(2) 判定逻辑收敛到一个纯函数，过滤点只读它；(3) 避免「条件化注册」破坏 import 副作用注册模型，也避免调用入口的拒绝文本路径（见下方 Risk：该路径在主循环本就是死代码）。
+**Alternatives**：①`off` 也注册并出现在 schema、调用入口返回拒绝文本——被否，违反 sandbox.md「AI 完全不知道能力存在」，且依赖调用入口的 `check_tool_access`（在主循环是死代码，见 Risk）；②据 mode 条件化注册（`off` 时不 import / 不注册 `run_code`）——被否，破坏 import 即注册的全局模型、与「per-agent 不同 mode/features」不兼容（注册是进程级、单点），而 schema 过滤天然支持 per-agent 差异。
 
 ### D2：Docker 可用性探测放在 SandboxClient，启动期调用一次
 `SandboxClient.docker_available() -> bool`：执行轻量探测（`docker version` 或 `docker info`，仅看 returncode），任何异常（FileNotFoundError / 非零退出）返回 False 并 log 警告，不抛。启动期（server lifespan / CLI run）先探测，再 `resolve_effective_mode`。
@@ -64,11 +74,11 @@
 **为何**：默认 `all` 保持现状「所有 agent 可用」的可观察行为不变（叠加 Docker 探测降级作为安全兜底）。`sandbox.mode` 写入 `config/settings.yaml` 的 `sandbox:` 段——**本 change 作为首个落地者建立该 `sandbox:` 段骨架**，SB2 追加 `scope`/`idle_hours`、SB4 追加 `resources`，三方共用同一段。
 
 ### D5：run_code 上下文通道由本 change 拥有并实现（已定调，非 Open Question）
-核实确认 `tool_registry.dispatch(name, arguments_json, allowed_tools, is_sub_agent)` 与 `run_code(code)` 当前都**不**透传 agent/session 上下文——调用拒绝点要按当前 agent 的 `features.code_execution` 判定，必须有一条上下文通道。本 change **确定需补该通道**并拥有其实现：
-- 改造范围（写入 Impact）：`agent_loop.py`（调用 `_safe_dispatch`/`dispatch` 处带上当前 agent 标识、agent features、session_id）→ `tool_registry.dispatch`（增加上下文入参并向被调工具传递，对不需要上下文的工具透明）→ `tools.run_code`（据上下文取 features 做启用判定）。
-- 缺省上下文（无 agent 绑定的直接调用）安全降级为全局 mode 默认，不抛异常。
+核实确认 `tool_registry.dispatch(name, arguments_json, allowed_tools, is_sub_agent)` 与 `run_code(code)` 当前都**不**透传 agent/session 上下文。本 change **确定需补该通道**并拥有其实现：
+- 改造范围（写入 Impact）：`agent_loop.py`（调用 `_safe_dispatch`/`dispatch` 处带上当前 agent 标识、agent features、session_id）→ `tool_registry.dispatch`（增加上下文入参并向被调工具传递，对不需要上下文的工具透明）→ `tools.run_code`（据上下文取 session_id / agent_name / features 供执行期使用）。
+- 缺省上下文（无 agent 绑定的直接调用）安全降级、不抛异常。
 
-**为何**：启用判定的「调用拒绝点」依赖 agent features，没有上下文通道就无法实现 agent 级开关。该通道是 SB 治理轨多个 change 的共享改造（SB2 的 scope `acquire` 需 session_id/agent_name，SB5 的 agent_env 需 agent features），由本 change 统一拥有、单点改造，SB2/SB5 复用，避免各自重造 dispatch 签名。
+**为何**：上下文通道是**为执行需求而建**，而非为启用 gate——SB2 的 scope `acquire` 需要 session_id / agent_name 才能定位与复用工作区，SB5 在执行时需要 agent features 才能注入 `sandbox_env`，这些都发生在 `run_code` 真正执行的时刻。启用 gate **已移到 schema 构建处**（见 D1），那里已知该 agent 的 features，无需再靠这条通道；抵达 `run_code` 的调用一律视为已通过 gate。该通道是 SB 治理轨多个 change 的共享执行期改造，由本 change 统一拥有、单点改造，SB2/SB5 复用，避免各自重造 dispatch 签名。
 **Alternatives**：每个 change 各改 dispatch——被否，dispatch 签名是单点，多方各改会冲突；用模块级全局存当前 agent——被否，违反 CLAUDE.md「禁止全局可变状态」且并发不安全（per-session 上下文）。
 
 ## Risks / Trade-offs
@@ -77,9 +87,13 @@
 - [agent_store 加列对旧库的兼容] → 读取统一 `or "{}"` 回退；建表用 `IF NOT EXISTS` + 迁移核实（Open Question）；扩充 test_agent_store 覆盖旧行读取。
 - [注册点降级判定与运行期 Docker 故障不一致] → 启动期降级为主路径；运行期故障走执行错误路径，本 change 不承接（未来错误分类）。
 - [`is_code_execution_enabled` 的 None 语义（ALL 下 None 视为开）易被误读] → spec 用独立 scenario 钉死「未声明在 all 下默认开、在 selective 下默认关」，并加单测覆盖三态 × {True/False/None}。
+- [**既有缺陷：`dispatch` 内的 `check_tool_access` 在主循环是死代码**] → 核实确认 `agent_loop._safe_dispatch`（`agent_loop.py:62-76`）调 `dispatch(name, arguments, is_sub_agent=is_sub_agent)` 时**未传 `allowed_tools`**，因此 `tool_registry.dispatch` 内的 `allowed_tools is not None` 分支（`tool_registry.py:70-74`，即调用层的 `check_tool_access` 拒绝）在主循环路径上**永不触发**，属既有死代码（访问控制实际只靠 schema 过滤这一层在生效）。本 change 的代码执行访问控制**同样仅靠 schema 过滤这一层**（与现状一致），不依赖调用层。若要补「调用层防御纵深」（schema 漏过时仍在 dispatch 拦截），需另行修复 `_safe_dispatch` 向 `dispatch` 透传 `allowed_tools` + agent features——**标注在此，不在本 change 强做**，以免扩大范围。
 
 ## Open Questions
 
-- `off` 降级后是否需要在 `/health` 或启动日志显式暴露「sandbox mode=off (docker unavailable)」供运维探活？（建议是，待确认 health 输出格式）
+（无）
 
-> 已定调（不再是 OQ）：① 旧库 schema 迁移——确认需显式 `ALTER TABLE ADD COLUMN`（D3）；② run_code 上下文通道——确认需补，本 change 拥有并实现（D5）。
+> 已定调（不再是 OQ）：
+> ① 旧库 schema 迁移——确认需显式 `ALTER TABLE ADD COLUMN`（D3）；
+> ② run_code 上下文通道——确认需补，本 change 拥有并实现（D5）；
+> ③ 降级态暴露——**定为「做」**：`off`（含 Docker 不可用降级）的生效 mode MUST 在启动日志与 `/health` 输出中显式暴露 `sandbox mode=off (docker unavailable)`（或可用时 `sandbox mode=<effective>`）供运维探活。tasks.md §7 补对应 write→impl 任务对。

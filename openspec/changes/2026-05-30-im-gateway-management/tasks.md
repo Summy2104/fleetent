@@ -10,7 +10,7 @@
 ## 0. 前置检查
 
 - [ ] 0.1 确认 `agent-admin-api` change 的 `users.is_admin` 守卫已存在（合入或同分支）；若缺失，先补一个最小 admin 守卫供 `/admin/im/*` 复用
-- [ ] 0.2 确认 `slack-bolt`、`python-telegram-bot`、FastAPI、aiosqlite 已在依赖中（无需新增）
+- [ ] 0.2 确认 `slack-bolt`、`python-telegram-bot`、FastAPI、stdlib sqlite3 已在依赖中（无需新增）
 
 ## 1. im_connector_store — 注册表与状态上报
 

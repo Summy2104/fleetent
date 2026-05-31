@@ -10,7 +10,7 @@ MCP1（mcp-http-streamable，已合入）的标准 HTTP 传输只支持两种认
 
 - **OAuth2 客户端认证（client_credentials 优先）**：`auth_type: "oauth2"` 的服务，平台按 OAuth2 标准向配置的 **token 端点**（客户内网自托管授权服务器）请求 access token，并以 `Authorization: Bearer <access_token>` 附加到对该 MCP server 的请求头。首选 `client_credentials` 授权类型（服务到服务、无人值守，适配 on-prem 无头部署）。
 - **Token 自动刷新**：access token 临近/已过期时（依 `expires_in`）自动刷新——**主路径为重跑 client_credentials**（RFC 6749 §4.4 下 client_credentials 响应通常不含 refresh_token，凭据在手直接重取即可）；`refresh_token` 仅作防御性附注（若授权服务器非标准返回则优先用之），缺失时不视为失败、直接重取。刷新对工具调用透明；获取/刷新失败不静默使用过期 token。
-- **Token 存储可注入、可隔离**：access token（及过期时间、可选 refresh token）的存储位置可注入（默认内存，按 server 隔离；若需持久化用 aiosqlite 裸 SQL，路径可 monkeypatch），不进模块级可变全局，测试隔离到 `tmp_path`。
+- **Token 存储可注入、可隔离**：access token（及过期时间、可选 refresh token）的存储位置可注入（默认内存，按 server 隔离；若需持久化用 stdlib sqlite3 裸 SQL，路径可 monkeypatch），不进模块级可变全局，测试隔离到 `tmp_path`。
 - **认证失败处理**：token 获取/刷新返回认证错误（如 token 端点 401/`invalid_client`）时，标记该服务认证不可用并提示「需重新授权 / 检查 OAuth2 凭据」，不反复无效重试打爆 token 端点。
 - **配置扩展（self-hostable）**：`config/mcp.yaml` 的 per-server 增加 OAuth2 字段——token 端点 URL、client_id、client_secret（经环境变量引用，不明文入库）、scope（可选）。token 端点指向客户内网授权服务器，无云托管依赖。
 - **复用 MCP1 地基**：OAuth2 只替换 `Authorization` 头的来源（从静态 env key 换为动态 access token）；`initialize` / `tools/list` / `tools/call`、SSE/JSON 解析、`{server_id}__{tool_name}` 命名空间、`register_all` 降级均不变。注意取/刷新 token 是 async，而 `_base_headers(server) -> dict` 当前为同步函数：本 change 在请求构造前先 `await` resolve token、再传入头拼装（保持 `_base_headers` 同步），不是同步函数内直接换值（详见 design D6a）。
@@ -30,7 +30,7 @@ MCP1（mcp-http-streamable，已合入）的标准 HTTP 传输只支持两种认
     - `auth_type == "oauth2"` 时为请求附加动态 access token：因取/刷新 token 是 async 而 `_base_headers` 同步，在请求构造前 `await` resolve token 再传入 `_base_headers` 拼装（D6a 首选方案 a，保持 `_base_headers` 同步），其余 `none`/`api_key` 分支不变。
     - 引入 OAuth2 token 获取/刷新逻辑（按 OAuth2 标准向 token 端点 POST，解析 `access_token` / `expires_in` / 可选 `refresh_token`）；token 存储按 server 隔离持有（不进全局可变状态），存储后端可注入。
     - `McpServerConfig` 增加 OAuth2 配置字段（token 端点、client_id、client_secret env 引用、scope），与既有 `auth_type` / `api_key_env` 风格一致。
-  - 可能新增轻量 token 存储模块（若持久化）：用 aiosqlite 裸 SQL，`DB_PATH` 可 monkeypatch（遵循 user_store 等既有模式）；默认内存存储则无需新模块。
+  - 可能新增轻量 token 存储模块（若持久化）：用 stdlib sqlite3 裸 SQL，`DB_PATH` 可 monkeypatch（遵循 user_store 等既有模式）；默认内存存储则无需新模块。
 - **配置**：`config/mcp.yaml` per-server 新增 OAuth2 字段（token_url、client_id、client_secret_env、scope）；`config/mcp.yaml.example` 补 oauth2 示例。token 端点为客户内网授权服务器地址，无云托管专有服务。
 - **测试**：扩展 `tests/test_mcp_client.py`（及如有 token 存储模块则新增其测试），用例覆盖：oauth2 服务取 token 并以 Bearer 附加、token 过期自动刷新、刷新对工具调用透明、获取/刷新认证失败标记服务认证不可用并提示重新授权、token 存储按 server 隔离。token 端点 HTTP 用 `respx` mock，**不发真实请求**；token 存储隔离到 `tmp_path`（如持久化）或内存（按 server 隔离）。
 - **新依赖说明**：优先**不引入** OAuth2 库——`client_credentials` 是「向 token 端点 POST 表单、解析 JSON」的简单流程，复用 `httpx`（MCP1 已用）手写即可，避免新依赖（CLAUDE.md 新依赖须讨论）。若实现中确需 OAuth2 库（如 `authlib`），须在 design/PR 说明必要性并确认其纯客户端、无云托管依赖、可自托管 token 端点对接；本 change 默认方案为无新依赖手写 client_credentials。
