@@ -145,7 +145,68 @@ def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch):
     assert captured.get("allowed_tools") == ["shell"]
 
 
+def test_chat_merges_agent_plugins_into_allowed_tools(tmp_path, monkeypatch):
+    """An agent's plugins expand to `{name}__*` patterns merged into allowed_tools."""
+    import fleetent.agent_store as ag
+    import fleetent.server as srv
+    import fleetent.user_store as us2
+
+    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
+
+    captured: dict = {}
+
+    async def fake_stream(
+        msg: str,
+        user_id: str,
+        system_prompt: str | None = None,
+        allowed_tools=None,
+        agent_name: str | None = None,
+        **kwargs,
+    ):  # type: ignore[misc]
+        captured["allowed_tools"] = allowed_tools
+        yield {"type": "done", "content": "ok"}
+
+    monkeypatch.setattr(srv, "run_stream", fake_stream)
+
+    user = us2.create_user("PluginTester")
+    agent = ag.create_agent("plugin-bot", "Sys.", ["shell"], plugins=["crm_tools", "billing"])
+    ag.assign_channel("slack", "C-PLUG", agent.id)
+
+    with TestClient(srv.app) as c:
+        resp = c.post(
+            "/chat",
+            json={"message": "hi"},
+            headers={
+                "Authorization": f"Bearer {user.api_key}",
+                "x-platform": "slack",
+                "x-channel-id": "C-PLUG",
+            },
+        )
+    assert resp.status_code == 200
+    allowed = captured.get("allowed_tools")
+    assert allowed is not None
+    assert "shell" in allowed
+    assert "crm_tools__*" in allowed
+    assert "billing__*" in allowed
+
+
 # ── cron scheduler lifespan ───────────────────────────────────────────────────
+
+
+def test_lifespan_loads_plugins(tmp_path, monkeypatch):
+    """Startup invokes plugin_loader.load_plugins() once, alongside scan_skills."""
+    from unittest.mock import patch
+
+    import fleetent.server as srv
+
+    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", tmp_path / "webhooks.yaml")
+    monkeypatch.setattr(srv, "_MCP_YAML_PATH", tmp_path / "mcp.yaml")
+
+    with patch("fleetent.server.load_plugins") as mock_load:
+        with TestClient(srv.app):
+            pass
+    mock_load.assert_called_once()
 
 
 def test_lifespan_starts_and_stops_cron_scheduler(tmp_path, monkeypatch):

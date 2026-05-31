@@ -25,6 +25,7 @@ from fleetent.mcp_client import McpServerConfig
 from fleetent.permission_gate import _default_gate, cleanup_stale_approvals, list_approvals
 from fleetent.sandbox_cleanup import cleanup_orphans
 from fleetent.sandbox_client import SandboxClient
+from fleetent.plugin_loader import expand_plugin_patterns, load_plugins
 from fleetent.sandbox_enablement import Mode, load_sandbox_mode, resolve_effective_mode
 from fleetent.skill_registry import scan as scan_skills
 
@@ -69,6 +70,9 @@ async def _start_telegram_adapter() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     scan_skills()
+    # AR7: load enabled plugins once at startup (same lifecycle as scan_skills /
+    # mcp register_all). A missing plugins/ dir or a bad plugin never aborts boot.
+    load_plugins()
     cleanup_stale_approvals()
     settings = Settings()
 
@@ -124,6 +128,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Load webhook sources from config/webhooks.yaml if present
     from fleetent import webhook_router as _wr
+
     _webhook_sources.clear()
     if _WEBHOOK_YAML_PATH.exists():
         _webhook_sources.update(_wr.load_sources(_WEBHOOK_YAML_PATH))
@@ -226,7 +231,10 @@ async def chat(
         user_id=user_id,
     )
     system_prompt = agent.system_prompt if agent else None
-    allowed_tools = agent.allowed_tools if agent else None
+    # AR7: an agent's plugin allowlist expands to `{name}__*` namespace patterns
+    # merged into allowed_tools, so the agent_loop schema filter exposes only the
+    # authorised plugins' namespaced tools to the LLM.
+    allowed_tools = agent.allowed_tools + expand_plugin_patterns(agent.plugins) if agent else None
     agent_name = agent.name if agent else None
     agent_features = agent.features if agent else None
     # SB3: effective mode resolved at startup gates run_code's schema visibility.

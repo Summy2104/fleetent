@@ -716,6 +716,13 @@ def run_sync(
     call so freshly added skills are picked up.
     """
     scan_skills()
+    # AR7: load enabled plugins each CLI invocation, mirroring scan_skills (so a
+    # freshly added plugin is picked up). The CLI passes no allowed_tools, so
+    # plugin tools are exposed un-gated here — consistent with how the CLI exposes
+    # all builtin tools (no per-agent authorization on the CLI path).
+    from fleetent.plugin_loader import load_plugins
+
+    load_plugins()
     memory_ctx = load_memories(user_id=user_id)
     skills_catalog = available_skills_prompt()
     disabled_trace = collect_disabled_trace() or None

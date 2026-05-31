@@ -132,6 +132,37 @@ def test_agent_features_null_row_falls_back_to_empty(db):
     assert found.features == {}
 
 
+def test_agent_plugins_default_empty(db):
+    agent = agent_store.create_agent("p1", "p", ["shell"])
+    assert agent.plugins == []
+    found = agent_store.get_by_name("p1")
+    assert found is not None
+    assert found.plugins == []
+
+
+def test_agent_plugins_roundtrip(db):
+    agent_store.create_agent("p2", "p", ["shell"], plugins=["crm_tools", "billing"])
+    found = agent_store.get_by_name("p2")
+    assert found is not None
+    assert found.plugins == ["crm_tools", "billing"]
+
+
+def test_agent_plugins_null_row_falls_back_to_empty(db):
+    # A legacy row whose plugins value is NULL (defensive `or "[]"` guard in
+    # _row_to_agent). The column is NOT NULL with a '[]' backfill, so a real NULL
+    # cannot be written; exercise the row-mapping fallback directly.
+    row = (1, "legacy", "prompt", "[]", None, None)
+    agent = agent_store._row_to_agent(row)
+    assert agent.plugins == []
+
+
+def test_init_db_create_table_includes_plugins_column(db):
+    import sqlite3
+
+    cols = {row[1] for row in sqlite3.connect(db).execute("PRAGMA table_info(agents)").fetchall()}
+    assert "plugins" in cols
+
+
 def test_init_db_create_table_includes_features_column(db):
     """New / test DBs go through CREATE TABLE which already carries `features`.
 
