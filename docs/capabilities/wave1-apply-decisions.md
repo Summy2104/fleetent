@@ -152,3 +152,9 @@
 **实现:** scan 写 _index 前 `_index.get(name)` 检测同名;冲突→structlog warning `skill_name_conflict`{name,kept_path,dropped_path}(由两路径 sorted 派生、与到达顺序无关);确定性选定=路径字符串排序靠前者胜(`if existing.path <= path: continue`);多重同名逐对告警;无冲突零变化不告警。来源无关(方案一),builtin-skills 统一交本 change。6 个测试(含遍历顺序无关守卫)。
 **自解冲突:** 用不同父目录+显式同 name 稳定触发冲突;两个 scan 调用包进 capture_logs(structlog stdlib 处理器在 capture 外报 PrintLogger 属性,既有约定)。
 **影响:** 619 passed,skill_registry mypy 0 错,无红线。
+
+## skill-env-var-rename (SK9) — feat/skill-env-var
+
+**实现:** scan() 行 34 `MINI_AGENT_SKILLS_DIR` → `FLEETENT_SKILLS_DIR`(默认 "skills" 不变);不留旧名兼容。一行改动 + 2 测试(新名生效、旧名不再生效)。
+**自解:** "旧名不生效"测试最初误用 _write_skill(总写 skills/),chdir 后默认 "skills" 命中 → 改为把 skill 放非 "skills" 的 oldspot/ 目录,旧名指向它、默认 "skills" 不存在 → 正确验证旧名被忽略。
+**影响:** 621 passed,ruff 干净,旧名 src 零残留。zy 核实:不留旧名兼容(pre-1.0 可接受)。

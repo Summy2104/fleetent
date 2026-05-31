@@ -350,3 +350,38 @@ def test_scan_distinct_names_no_conflict_warning(tmp_path):
     assert "one" in sr._index
     assert "two" in sr._index
     assert not [e for e in logs if e["log_level"] == "warning" and "name" in e]
+
+
+# env var rename (SK9)
+def test_scan_uses_fleetent_skills_dir_env(tmp_path, monkeypatch):
+    _write_skill(tmp_path, "alpha", """\
+        ---
+        name: alpha
+        description: alpha skill
+        ---
+        body
+        """)
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(tmp_path / "skills"))
+    monkeypatch.delenv("MINI_AGENT_SKILLS_DIR", raising=False)
+    sr.scan()
+    assert "alpha" in sr._index
+
+
+def test_scan_ignores_old_env_var_name(tmp_path, monkeypatch):
+    # skill lives in a NON-"skills" dir; only the old env var points at it.
+    skilldir = tmp_path / "oldspot" / "beta"
+    skilldir.mkdir(parents=True)
+    (skilldir / "SKILL.md").write_text(
+        textwrap.dedent("""\
+        ---
+        name: beta
+        description: beta skill
+        ---
+        body
+        """)
+    )
+    monkeypatch.delenv("FLEETENT_SKILLS_DIR", raising=False)
+    monkeypatch.setenv("MINI_AGENT_SKILLS_DIR", str(tmp_path / "oldspot"))
+    monkeypatch.chdir(tmp_path)  # old name ignored -> default "skills" (absent here)
+    sr.scan()
+    assert "beta" not in sr._index
