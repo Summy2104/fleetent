@@ -207,3 +207,24 @@ def test_log_run_agent_name_omitted_when_not_provided(tmp_path, monkeypatch):
     el.log_run("hi", "hello", [], 0.1)
     entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
     assert "agent_name" not in entry
+
+
+# --- hygiene_repairs (AR6) ---
+
+
+def test_log_run_hygiene_repairs_written(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    el.log_run("hi", "hello", [], 0.1, hygiene_repairs={"merged_same_role": 2})
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert entry["hygiene_repairs"] == {"merged_same_role": 2}
+
+
+def test_log_run_hygiene_repairs_omitted_when_not_provided(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "_LOG_PATH", tmp_path / "traces.jsonl")
+    el.log_run("hi", "hello", [], 0.1)
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip())
+    assert "hygiene_repairs" not in entry

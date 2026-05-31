@@ -18,6 +18,9 @@ def _text_resp(text: str | None = "reply") -> MagicMock:
     msg = MagicMock()
     msg.content = text
     msg.tool_calls = None
+    # model_dump() must yield a real dict: the loop appends it to messages and
+    # the hygiene layer (AR6) operates on dict messages.
+    msg.model_dump = lambda: {"role": "assistant", "content": text}
 
     choice = MagicMock()
     choice.finish_reason = "stop"
@@ -38,6 +41,13 @@ def _tool_resp(name: str, args: str = "{}", call_id: str = "tc-1") -> MagicMock:
     msg = MagicMock()
     msg.content = None
     msg.tool_calls = [tc]
+    msg.model_dump = lambda: {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {"id": call_id, "type": "function", "function": {"name": name, "arguments": args}}
+        ],
+    }
 
     choice = MagicMock()
     choice.finish_reason = "tool_calls"
@@ -119,6 +129,18 @@ async def test_run_returns_empty_string_when_content_is_none(mock_client):
     assert result == ""
 
 
+async def test_run_mutates_caller_messages_in_place(mock_client):
+    # im_gateway.normalizer passes `history` to run() then save()s it, relying on
+    # run() appending the conversation in-place. sanitize/compress must not detach it.
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("hi there"))
+    history: list = [{"role": "user", "content": "hi"}]
+    await al.run(history)
+    # the assistant reply must be present in the caller's own list (for session save)
+    assert any(
+        isinstance(m, dict) and m.get("role") == "assistant" for m in history
+    ), "run() must append the assistant turn to the caller's messages list in place"
+
+
 async def test_run_dispatches_tool_then_gets_final_reply(mock_client):
     dispatched: list[str] = []
 
@@ -187,8 +209,12 @@ async def test_run_success_resets_failure_count(mock_client):
     assert mock_client.chat.completions.create.call_count == 4
 
 
-async def test_run_approval_rejected_terminates(mock_client):
+async def test_run_approval_rejected_terminates(mock_client, monkeypatch):
     mock_client.chat.completions.create = AsyncMock(return_value=_tool_resp("danger"))
+    # The hygiene layer (AR6) returns a fresh list, so run() no longer mutates the
+    # caller's input; inspect the messages handed to the trace instead.
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update({"messages": a[2]}))
     msgs = [{"role": "user", "content": "go"}]
     with (
         patch.object(al, "get_risk_level", lambda name: "high"),
@@ -199,7 +225,7 @@ async def test_run_approval_rejected_terminates(mock_client):
     assert mock_client.chat.completions.create.call_count == 1
     assert result == ""
     # rejected tool still has a placeholder tool_result (message contract intact)
-    assert any(isinstance(m, dict) and m.get("role") == "tool" for m in msgs)
+    assert any(isinstance(m, dict) and m.get("role") == "tool" for m in captured["messages"])
 
 
 def test_build_controller_never_yields_reserved_reasons():
@@ -706,3 +732,113 @@ async def test_run_stream_logs_error_category_on_exhaustion(mock_client_fb, monk
     events = [e async for e in al.run_stream("hi")]
     assert any(e["type"] == "error" for e in events)
     assert captured.get("error_category") == "rate_limit"
+
+
+# ── message hygiene integration (AR6) ───────────────────────────────────────
+
+
+async def test_run_calls_sanitize_after_compress_before_llm(mock_client, monkeypatch):
+    order: list[str] = []
+    monkeypatch.setattr(al, "maybe_compress", lambda m: (order.append("compress"), m)[1])
+
+    real_sanitize = al.sanitize
+
+    def traced_sanitize(m):
+        order.append("sanitize")
+        return real_sanitize(m)
+
+    monkeypatch.setattr(al, "sanitize", traced_sanitize)
+
+    async def create(*a, **kw):
+        order.append("llm")
+        return _text_resp("hi")
+
+    mock_client.chat.completions.create = AsyncMock(side_effect=create)
+    await al.run([{"role": "user", "content": "hi"}])
+    assert order[:3] == ["compress", "sanitize", "llm"]
+
+
+async def test_run_sends_repaired_sequence_to_llm(mock_client):
+    sent: dict = {}
+
+    async def create(*a, **kw):
+        sent["messages"] = kw["messages"]
+        return _text_resp("ok")
+
+    mock_client.chat.completions.create = AsyncMock(side_effect=create)
+    # adjacent same-role user messages → must be merged before reaching the LLM
+    await al.run(
+        [
+            {"role": "user", "content": "one"},
+            {"role": "user", "content": "two"},
+        ]
+    )
+    user_msgs = [m for m in sent["messages"] if m.get("role") == "user"]
+    assert len(user_msgs) == 1
+
+
+async def test_run_unrepairable_blocks_llm_call(mock_client, monkeypatch):
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("never"))
+    # tool message missing tool_call_id → MessageContractError, no LLM call
+    await al.run(
+        [
+            {"role": "user", "content": "hi"},
+            {"role": "tool", "content": "broken"},
+        ]
+    )
+    assert mock_client.chat.completions.create.call_count == 0
+
+
+async def test_run_unrepairable_writes_error_trace(mock_client, monkeypatch):
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("x"))
+    await al.run(
+        [
+            {"role": "user", "content": "hi"},
+            {"role": "tool", "content": "broken"},
+        ]
+    )
+    assert captured.get("error_category") == "unknown"
+
+
+async def test_run_passes_hygiene_repairs_to_trace(mock_client, monkeypatch):
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    await al.run(
+        [
+            {"role": "user", "content": "one"},
+            {"role": "user", "content": "two"},
+        ]
+    )
+    assert captured.get("hygiene_repairs")
+    assert "merged_same_role" in captured["hygiene_repairs"]
+
+
+async def test_run_no_hygiene_repairs_when_clean(mock_client, monkeypatch):
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    await al.run([{"role": "user", "content": "hi"}])
+    assert captured.get("hygiene_repairs") is None
+
+
+async def test_run_stream_calls_sanitize_before_llm(mock_client, monkeypatch):
+    order: list[str] = []
+    real_sanitize = al.sanitize
+
+    def traced_sanitize(m):
+        order.append("sanitize")
+        return real_sanitize(m)
+
+    monkeypatch.setattr(al, "sanitize", traced_sanitize)
+
+    async def create(*a, **kw):
+        order.append("llm")
+        return _stream_chunks("ok", None)
+
+    mock_client.chat.completions.create = AsyncMock(side_effect=create)
+    [e async for e in al.run_stream("hi")]
+    assert order.index("sanitize") < order.index("llm")

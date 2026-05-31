@@ -17,6 +17,7 @@ from fleetent.context_mgr import maybe_compress
 from fleetent.error_classifier import classify
 from fleetent.eval_logger import log_run
 from fleetent.memory_layer import extract_and_save, load_memories
+from fleetent.message_hygiene import HygieneReport, MessageContractError, sanitize
 from fleetent.model_router import RouteConfig, get_async_client_and_config
 from fleetent.permission_gate import _default_gate
 from fleetent.skill_registry import load as load_skill
@@ -155,6 +156,12 @@ def _log_run_error(
     )
 
 
+def _accumulate_repairs(total: dict[str, int], report: HygieneReport) -> None:
+    """Fold one turn's hygiene report into the run-wide repair tally (for trace)."""
+    for kind, count in report.repairs.items():
+        total[kind.value] = total.get(kind.value, 0) + count
+
+
 ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
 
 
@@ -198,6 +205,7 @@ async def run(
     controller = _build_controller(max_turns, max_consecutive_failures, include_approval=True)
     state = LoopState()
     stop_reason = StopReason.normal
+    hygiene_repairs: dict[str, int] = {}
 
     while True:
         forced = controller.should_stop(state)
@@ -205,7 +213,19 @@ async def run(
             stop_reason = forced
             break
 
-        messages = maybe_compress(messages)
+        # In-place content assignment (messages[:] = ...) keeps the caller's list
+        # reference live: callers (e.g. im_gateway.normalizer) rely on run() mutating
+        # the passed `messages` so session_mgr.save() persists the full conversation.
+        # Rebinding (messages = ...) would detach it and lose appended turns.
+        messages[:] = maybe_compress(messages)
+        try:
+            clean, report = sanitize(messages)
+        except MessageContractError as exc:
+            # Unrepairable sequence: fail locally before the LLM call (design D3).
+            _log_run_error(exc, messages, start, model_used, user_id, agent_name)
+            return ""
+        messages[:] = clean
+        _accumulate_repairs(hygiene_repairs, report)
         try:
             response, model_used = await _call_with_fallback(
                 client, cfg, messages, schemas, models_to_try
@@ -300,6 +320,7 @@ async def run(
         user_id=user_id,
         agent_name=agent_name,
         stop_reason=stop_reason,
+        hygiene_repairs=hygiene_repairs or None,
     )
     extract_and_save(user_input, messages, user_id=user_id)
     return reply
@@ -366,6 +387,7 @@ async def run_stream(
     controller = _build_controller(max_turns, max_consecutive_failures, include_approval=False)
     state = LoopState()
     stop_reason = StopReason.normal
+    hygiene_repairs: dict[str, int] = {}
 
     while True:
         forced = controller.should_stop(state)
@@ -374,6 +396,13 @@ async def run_stream(
             break
         state.turn += 1
         messages = maybe_compress(messages)
+        try:
+            messages, report = sanitize(messages)
+        except MessageContractError as exc:
+            yield {"type": "error", "content": str(exc)}
+            _log_run_error(exc, messages, start, model_used, user_id, agent_name)
+            return
+        _accumulate_repairs(hygiene_repairs, report)
 
         # Accumulate streaming response
         reply_parts: list[str] = []
@@ -473,5 +502,6 @@ async def run_stream(
         user_id=user_id,
         agent_name=agent_name,
         stop_reason=stop_reason,
+        hygiene_repairs=hygiene_repairs or None,
     )
     extract_and_save(user_input, messages, user_id=user_id)
