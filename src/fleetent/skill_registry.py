@@ -32,6 +32,12 @@ class SkillEntry:
 
 _index: dict[str, SkillEntry] = {}
 
+# Skills skipped during the last scan() because their SKILL.md could not be parsed.
+# A malformed skill is isolated (skipped, never crashes the scan) but recorded here
+# and summarized so operators can answer "why didn't this skill load?" — surface via
+# load_errors() from an admin command or health check.
+_load_errors: list[dict[str, str]] = []
+
 _STOP_WORDS = {"the", "a", "an", "when", "use", "for", "to", "and", "or", "is", "are", "want"}
 
 
@@ -47,8 +53,23 @@ def scan(skills_dir: str | None = None) -> None:
     if skills_dir is None:
         skills_dir = os.environ.get("FLEETENT_SKILLS_DIR", "skills")
     _index.clear()
+    _load_errors.clear()
     _scan_dir(BUILTIN_SKILLS_DIR, builtin=True)
     _scan_dir(Path(skills_dir), builtin=False)
+    # Emit the summary only when something failed: a clean scan stays silent (the
+    # common startup path), and the actionable "N skills failed to load" line is the
+    # only one logged. Counts also available structured via load_errors().
+    if _load_errors:
+        logger.warning("skill_scan_complete", loaded=len(_index), failed=len(_load_errors))
+
+
+def load_errors() -> list[dict[str, str]]:
+    """Return the skills skipped during the last scan() as {path, reason, source}.
+
+    Empty when every SKILL.md parsed cleanly. Lets an admin command or health check
+    surface load failures beyond the per-skill warning logs.
+    """
+    return list(_load_errors)
 
 
 def _scan_dir(base: Path, *, builtin: bool) -> None:
@@ -58,11 +79,15 @@ def _scan_dir(base: Path, *, builtin: bool) -> None:
     for skill_md in base.rglob("SKILL.md"):
         frontmatter = _parse_frontmatter(skill_md.read_text(encoding="utf-8"))
         if frontmatter is None:
+            reason = "missing --- boundary, invalid YAML, or non-mapping top level"
+            source = "builtin" if builtin else "user"
             logger.warning(
                 "skill_frontmatter_parse_failed",
                 path=str(skill_md),
-                reason="missing --- boundary, invalid YAML, or non-mapping top level",
+                reason=reason,
+                source=source,
             )
+            _load_errors.append({"path": str(skill_md), "reason": reason, "source": source})
             continue
         name = frontmatter.get("name") or skill_md.parent.name
         path = str(skill_md)

@@ -189,6 +189,55 @@ def test_scan_valid_skill_does_not_warn(tmp_path):
     assert not [e for e in logs if e["log_level"] == "warning"]
 
 
+# --- load-failure summary (review enhancement) ---
+
+
+def test_load_errors_records_each_failed_skill(tmp_path):
+    _write_skill(tmp_path, "good", "---\nname: good\ndescription: fine.\n---\nbody")
+    _write_skill(tmp_path, "bad", "---\nname: [unclosed\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    assert "good" in sr._index
+    errors = sr.load_errors()
+    assert len(errors) == 1
+    assert "bad" in errors[0]["path"]
+    assert errors[0]["reason"]  # a non-empty reason is recorded
+    assert errors[0]["source"] == "user"
+
+
+def test_load_errors_reset_on_each_scan(tmp_path):
+    _write_skill(tmp_path, "bad", "---\nname: [unclosed\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    assert len(sr.load_errors()) == 1
+    # A subsequent clean scan must not accumulate stale failures.
+    clean = tmp_path / "clean"
+    (clean / "ok").mkdir(parents=True)
+    (clean / "ok" / "SKILL.md").write_text("---\nname: ok\ndescription: fine.\n---\nb")
+    sr.scan(str(clean))
+    assert sr.load_errors() == []
+
+
+def test_scan_emits_summary_with_loaded_and_failed_counts(tmp_path):
+    _write_skill(tmp_path, "good", "---\nname: good\ndescription: fine.\n---\nbody")
+    _write_skill(tmp_path, "bad", "---\nname: [unclosed\n---\nbody")
+    with structlog.testing.capture_logs() as logs:
+        sr.scan(str(tmp_path / "skills"))
+    summary = [e for e in logs if e["event"] == "skill_scan_complete"]
+    assert len(summary) == 1
+    assert summary[0]["loaded"] == 1
+    assert summary[0]["failed"] == 1
+
+
+def test_scan_clean_emits_no_summary_log(tmp_path):
+    # A clean scan must stay silent: the server lifespan scans on every startup,
+    # and an unconditional log there trips a polluted-structlog landmine (a
+    # PrintLogger lacks .name for stdlib add_logger_name). Only failures log.
+    _write_skill(tmp_path, "ok", "---\nname: ok\ndescription: fine.\n---\nbody")
+    with structlog.testing.capture_logs() as logs:
+        sr.scan(str(tmp_path / "skills"))
+    assert sr.load_errors() == []
+    assert not [e for e in logs if e["event"] == "skill_scan_complete"]
+
+
 # --- extended fields (task 4) ---
 
 

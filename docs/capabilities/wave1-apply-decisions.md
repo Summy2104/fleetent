@@ -141,7 +141,12 @@
 3. env 变量名 MINI_AGENT_SKILLS_DIR 未改(属 SK9 范畴,不越界)。
 
 **影响:** 610 passed;skill_registry mypy 0 错。解锁 SK7/SK8/SK9/builtin-skills/agent-skill-binding。
-**需 zy 核实:** SkillEntry 结构(对外契约保持);失败跳过 + warning 策略。
+
+**✅ zy review 决定(2026-05-31):**
+1. **①SkillEntry dataclass、②用户 skill 解析失败→跳过+告警:均认可保持**(理由见对话:tuple 6 字段已撑不住、dataclass 对齐仓库风格;跳过+告警是故障隔离唯一正解,静默吞=不可调试、整体崩=爆炸半径灾难)。warning 现额外带 `source`(builtin/user)字段,内置 skill 失败也可见(内置不 fail-loud、统一跳过)。
+2. **增强已实现:加载失败汇总**。新增模块级 `_load_errors` + 公开 `load_errors()->[{path,reason,source}]`(供 admin/health 查询,始终可查、不经日志);scan 结束**仅在有失败时**打一条 `skill_scan_complete`{loaded,failed} 汇总(warning 级)。新增测试:`test_load_errors_records_each_failed_skill`/`test_load_errors_reset_on_each_scan`/`test_scan_emits_summary_with_loaded_and_failed_counts`/`test_scan_clean_emits_no_summary_log`。738 passed。
+
+**⚠️⚠️ review 中发现的真 bug(标记给 zy,共享日志基建,疑似常乐 observability 域):** `config.configure_logging`(config.py:38)把 `structlog.stdlib.add_logger_name`(读 `logger.name`)与 `PrintLoggerFactory()`(产出的 PrintLogger **无** `.name`)配在一起——**任何一条日志走这套配置都会 `AttributeError: 'PrintLogger' object has no attribute 'name'`**。旧代码因 scan() 仅在失败时才 log、服务正常启动从不 log,坑一直隐藏;一度因我加无条件汇总日志引爆 53 个 server 测试(已改"仅失败时 log"规避,零新增风险——剩余风险与既有 logger.warning 相同)。**建议后续修 configure_logging:add_logger_name 需配 stdlib LoggerFactory,或换 PrintLogger 兼容的处理器。** 非本次 SK2 范围,未擅自动。
 
 ## skill-nested-scan (SK7) — feat/skill-nested-scan
 
