@@ -32,6 +32,7 @@ def test_upgrade_creates_tables(tmp_path):
     assert "scheduled_tasks" in tables
     assert "traces" in tables
     assert "memory_items" in tables
+    assert "reflection_reports" in tables
 
 
 def test_upgrade_creates_trace_indexes(tmp_path):
@@ -144,6 +145,15 @@ def test_column_structure(tmp_path):
         "created_at",
         "updated_at",
         "expires_at",
+    }
+    reflection_cols = {row[1] for row in conn.execute("PRAGMA table_info(reflection_reports)")}
+    assert reflection_cols >= {
+        "id",
+        "scope",
+        "time_window_start",
+        "time_window_end",
+        "findings_json",
+        "created_at",
     }
     conn.close()
 
