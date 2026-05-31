@@ -35,15 +35,17 @@ def _default_config() -> dict[str, float]:
     }
 
 
-def maybe_run_cleanup(*, _now: float | None = None) -> list[str]:
-    """Run TTL cleanup at most once per configured interval (internal trigger).
+def maybe_run_maintenance(*, _now: float | None = None) -> list[str]:
+    """Run TTL cleanup + capacity enforcement at most once per interval (internal trigger).
 
-    Called opportunistically from save() so expired sessions are pruned as a side
-    effect of normal session activity — no external scheduler/cron is required.
-    The full rglob scan is time-gated to run at most once per
-    `session_cleanup_interval_seconds`, so the common save path stays cheap.
+    Called opportunistically from save() so expired sessions are pruned and disk
+    capacity is bounded as a side effect of normal session activity — no external
+    scheduler/cron is required. Both passes (TTL first, then capacity) are time-gated
+    together to run at most once per `session_cleanup_interval_seconds`, so the common
+    save path stays cheap.
 
-    Returns the session_ids deleted this run, or [] when the gate is closed.
+    Returns the session_ids removed this run (expired + capacity-evicted), or [] when
+    the gate is closed.
     """
     global _last_cleanup_at
     now = time.time() if _now is None else _now
@@ -51,7 +53,9 @@ def maybe_run_cleanup(*, _now: float | None = None) -> list[str]:
     if _last_cleanup_at is not None and now - _last_cleanup_at < interval:
         return []
     _last_cleanup_at = now
-    return cleanup_expired(_now=now)
+    removed = cleanup_expired(_now=now)
+    removed += enforce_capacity()
+    return removed
 
 
 def is_expired(mtime: float, now: float, ttl_seconds: float) -> bool:
@@ -264,9 +268,10 @@ async def save(
         logger.warning("session_index_update_failed", session_id=session_id, error=str(exc))
 
     # Internal maintenance trigger (no external cron): opportunistically prune
-    # expired sessions as a side effect of activity, time-gated to stay cheap.
-    # Fault-isolated — maintenance must never break the just-completed persistence.
+    # expired sessions and enforce disk capacity as a side effect of activity,
+    # time-gated to stay cheap. Fault-isolated — maintenance must never break the
+    # just-completed persistence.
     try:
-        maybe_run_cleanup()
+        maybe_run_maintenance()
     except Exception as exc:  # noqa: BLE001 — maintenance must not break persistence
-        logger.warning("session_cleanup_trigger_failed", session_id=session_id, error=str(exc))
+        logger.warning("session_maintenance_trigger_failed", session_id=session_id, error=str(exc))

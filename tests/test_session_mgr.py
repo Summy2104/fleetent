@@ -36,7 +36,7 @@ def index_db(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _reset_cleanup_gate(monkeypatch):
-    # save() opportunistically triggers maybe_run_cleanup(); default the time gate
+    # save() opportunistically triggers maybe_run_maintenance(); default the time gate
     # CLOSED (just-ran) so ordinary save tests don't get a cleanup side effect that
     # would prune their artificially-aged fixtures. Tests of the trigger itself open
     # the gate explicitly. Production behaviour is unchanged (cleanup ~once/interval).
@@ -592,37 +592,59 @@ def _write_session(sessions_dir, sid: str, mtime: float):
     return p
 
 
-def test_maybe_run_cleanup_first_call_runs(sessions_dir, monkeypatch):
+def test_maybe_run_maintenance_first_call_runs(sessions_dir, monkeypatch):
     now = 2_000_000.0
     monkeypatch.setattr(session_mgr, "_last_cleanup_at", None)
     ttl = session_mgr._default_config()["ttl_seconds"]
     _write_session(sessions_dir, "old", now - ttl - 10)
-    assert session_mgr.maybe_run_cleanup(_now=now) == ["old"]
+    assert session_mgr.maybe_run_maintenance(_now=now) == ["old"]
 
 
-def test_maybe_run_cleanup_throttled_within_interval(sessions_dir, monkeypatch):
+def test_maybe_run_maintenance_throttled_within_interval(sessions_dir, monkeypatch):
     now = 2_000_000.0
     monkeypatch.setattr(session_mgr, "_last_cleanup_at", now)
     ttl = session_mgr._default_config()["ttl_seconds"]
     _write_session(sessions_dir, "old", now - ttl - 10)
-    assert session_mgr.maybe_run_cleanup(_now=now + 5) == []
+    assert session_mgr.maybe_run_maintenance(_now=now + 5) == []
     assert (sessions_dir / "old.json").exists()
 
 
-def test_maybe_run_cleanup_runs_again_after_interval(sessions_dir, monkeypatch):
+def test_maybe_run_maintenance_runs_again_after_interval(sessions_dir, monkeypatch):
     now = 2_000_000.0
     interval = session_mgr._default_config()["cleanup_interval_seconds"]
     monkeypatch.setattr(session_mgr, "_last_cleanup_at", now)
     later = now + interval + 1
     ttl = session_mgr._default_config()["ttl_seconds"]
     _write_session(sessions_dir, "old", later - ttl - 10)
-    assert session_mgr.maybe_run_cleanup(_now=later) == ["old"]
+    assert session_mgr.maybe_run_maintenance(_now=later) == ["old"]
+
+
+def test_maybe_run_maintenance_also_enforces_capacity(sessions_dir, monkeypatch):
+    # The internal trigger runs TTL cleanup AND capacity enforcement in one gated
+    # pass. Here nothing is TTL-expired but max_count=1, so the two oldest are evicted.
+    monkeypatch.setattr(session_mgr, "_last_cleanup_at", None)
+    monkeypatch.setattr(
+        session_mgr,
+        "_default_config",
+        lambda: {
+            "ttl_seconds": 10**12,
+            "max_total_bytes": 10**12,
+            "max_count": 1,
+            "cleanup_interval_seconds": 3600.0,
+        },
+    )
+    _write_session(sessions_dir, "old1", 100.0)
+    _write_session(sessions_dir, "old2", 200.0)
+    _write_session(sessions_dir, "newest", 300.0)
+    removed = session_mgr.maybe_run_maintenance(_now=10**9)
+    assert set(removed) == {"old1", "old2"}
+    assert (sessions_dir / "newest.json").exists()
 
 
 async def test_save_succeeds_when_maintenance_fails(sessions_dir, monkeypatch):
     def boom(**kw):
         raise RuntimeError("cleanup broke")
 
-    monkeypatch.setattr(session_mgr, "maybe_run_cleanup", boom)
+    monkeypatch.setattr(session_mgr, "maybe_run_maintenance", boom)
     await session_mgr.save("s", [{"role": "user", "content": "x"}])
     assert (sessions_dir / "s.json").exists()

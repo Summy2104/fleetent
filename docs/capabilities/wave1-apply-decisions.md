@@ -260,6 +260,8 @@
 **影响:** 701 passed;mypy 69 无新模式。Session 轨(S1/S2/S4)全完。
 **需 zy 核实:** 1024MB/10000 默认;容错的扣减语义。触发器(同 S1)待后续接张亮 cron。
 
+**✅ zy review 决定(2026-05-31):** ①1024MB/10000 默认认可;②容错扣减语义认可;③**触发器挂进 S1 的内置触发器,不依赖张亮 cron**——S1 的 `maybe_run_cleanup` 更名 `maybe_run_maintenance`,现一次门控内**先 TTL 清理(cleanup_expired)再容量管理(enforce_capacity)**,save() 触发。enforce_capacity 不再是死原语。新增 `test_maybe_run_maintenance_also_enforces_capacity`。728 passed,ruff/mypy 71=71 零新增。Session 轨全部"活起来",无需 cron。
+
 ## prompt-cache-optimization — feat/prompt-cache-optimization
 
 **实现:** `_assemble_prompt()` 重排——base system 作 messages[0] 稳定可缓存前缀,可变 memory_ctx+skill 合并为 messages[1] 独立 system 消息(无则省略);run_sync/run_stream 两处改走它,功能等价。`_extract_cache_tokens(usage)` 尽力取 Anthropic(cache_read/creation)+OpenAI(prompt_tokens_details.cached_tokens),缺失 None;log_run 加 cache_tokens 字段。不注入 cache_control(后端无关、自动前缀缓存)。AR12 的 _compress 已统一保留所有 system 头部,base system 在内(守卫测试锁)。
