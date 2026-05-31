@@ -148,3 +148,30 @@
 2. 结果内容用 tool 消息 `content` 原文严格比对（不做 trim/normalize）——结果有微小差异即不去重。是否符合预期。
 3. 占位省略时间戳维度（messages 无 timestamp 来源）——若后续调用方会注入时间戳，再决定是否补回 `{时间戳}` 维度。
 
+
+## compression-layered-retention — feat/compression-layered-retention
+
+**前置核实结论（tasks 1.x）：**
+1. `_compress` 现状（核实于 context_mgr.py）：`system_msgs = [非 system 之外]` / `conv_msgs` 二分；`tail = _select_tail(conv_msgs, keep_recent, target, system_msgs)`；`to_summarize = conv_msgs[:len-len(tail)]`；组装 `[*system_msgs, summary_msg, *tail]`。摘要消息 content 以 `[Earlier conversation summary]` 前缀。
+2. `_select_tail` 的 `fixed = estimate_tokens(system_msgs) + _SUMMARY_OVERHEAD_TOKENS(512)`，从 `keep_recent` 向下收缩到投影 `<= target`，下界 `_keep_tail(conv_msgs, max(n,1))` 即 1 条；扩展为「头部完整层」后投影口径自洽（只是 `fixed` 的被估对象由 system 改为 head）。
+3. `_keep_tail` 用 `m is tail[0]`（identity check）保 tool-pair 完整；头部去重（D4）同样用 `id(m)` 集合（identity），不用 `==`。
+4. `config.Settings` 为 pydantic `BaseSettings`，加 `compression_initial_intent_max: int = 2`（带默认、可选，env `COMPRESSION_INITIAL_INTENT_MAX` 覆盖）；`_default_config()` 透传为 config dict 的 `initial_intent_max` 键。现有 `tests/test_context_mgr.py` 开头样例首条多为 `system`，其后接 user/assistant 交替——开头连续 user 段通常 1 条，默认上界 2 不会误纳更多。
+
+**实现：**
+- D1 三层切分：`_compress` 重构为 `head = _select_head(messages, max_intent)`、`tail = _select_tail(conv_msgs, ..., head)`、`middle = messages 中 id 既不在 head 也不在 tail 的剩余`；组装 `[*head, summary_msg, *tail]`。
+- `_select_head`：真 system 提示（`role=="system"` 且 **content 不以 `[Earlier conversation summary]` 前缀**）+ `_initial_intent(conv_msgs, max_intent)`（开头连续 user 段，遇首条非 user 即停，受上界约束，返回**原对象**以保 identity 去重有效），按原顺序。
+- **head 如何排除自产摘要**：新增常量 `_SUMMARY_PREFIX = "[Earlier conversation summary]"` 与 `_is_self_produced_summary(msg)`（`role=="system"` 且 `_content(msg).startswith(_SUMMARY_PREFIX)`）。`_select_head` 的 system 过滤排除该类消息，使上一次压缩产出的摘要消息**不被提升进 head**；它既不在 head 也（一般）不在 tail，于是落入 `middle` → 进 `_pre_cleanup` → `_summarize`，即仍留在摘要槽（AR13 场景下按既有方式被重新摘要；AR14 合入后由 AR14 提取其 `prev_summary` 折叠）。
+- **middle 如何接 _pre_cleanup**：middle 即「既非 head 也非 tail」的剩余消息（含被排除的旧摘要消息、中段早期对话），原封交 `_pre_cleanup(middle)`（AR15 保留，纯规则、不调 LLM）再 `_summarize`。摘要消息 content 改用 `f"{_SUMMARY_PREFIX}\n{summary_text}"`（与原字面量等价，集中常量）。
+- D3：`_select_tail` 第 4 参由 `system_msgs` 改名 `head`，`fixed = estimate_tokens(head) + _SUMMARY_OVERHEAD_TOKENS`；head 较大时尾部相应收缩，仍保 1 条下界与 tool-pair 完整。
+- D4 退化兜底：`middle` 为空时**不生成空摘要消息**，直接返回 `[m for m in messages if id(m) in head_ids or id(m) in tail_ids]`（按 messages 原顺序遍历，天然去重 + 保序，head/tail 重叠的同一条只保留单份）。
+- D2 配置：`config.py` 加字段 + `_default_config` 透传 `initial_intent_max`；`config/settings.yaml.example` 补注释示例（该文件存在）。
+
+**自解冲突：**
+- AR15 既有用例 `test_compress_runs_pre_cleanup_before_summarize`：原把含 base64 图片的**首条 user 消息**置于会话开头，AR13 下该消息成为受保护 head（初始意图）而不再进摘要，断言「base64 已从摘要输入清出」失败。**最小改动**：在该测试中于图片消息前插入「user 引子 + assistant 应答」，使 assistant 打断初始意图连续 user 段，图片消息落入被摘要的 middle，从而仍验证 AR15「pre-cleanup 先于 summarize」语义（不削弱断言）。这是规格强制的行为变更（head 不进摘要），非回归。
+
+**影响：** pytest 830 passed（基线 813 + 新增 17，无回归，AR12/AR15 既有用例全绿）；ruff format+check：改动文件全绿（context_mgr.py / tests 经 format 各重排 1 处长行，check All passed）；mypy：base 73 errors → after 73 errors（无新增错误模式；`context_mgr.py` 内唯一 mypy 报错为既有 `Settings()` 缺 `anthropic_api_key` 调用模式，行号因新增常量上移，非新增）。
+
+**需 zy 核实：**
+1. ⚠️**(编排者更正 + AR14 硬性输入)** 旧摘要消息（`[Earlier conversation summary]` 前缀、`role==system`）在 AR13 下落入 middle,但 `_summarize` **只摘 user/assistant、跳过 system 消息**——故旧摘要内容实际**被丢弃而非"重新摘要"**。单次压缩(最常见)无旧摘要、不受影响;**重复压缩**(第二次及以后)会丢失上一次摘要覆盖的最早上下文。设计 D1 明确这是过渡态、由紧接的 **AR14(compression-incremental-summary,本轨下一个 change)MUST 提取旧摘要的 prev_summary 折叠进新累积摘要** 根治,AR14 实现时务必接住此点。确认此过渡(单压正确、重复压缩暂丢最早摘要、AR14 修复)可接受。
+2. head/tail identity 去重用 `id(m)` 集合而非逐一 `is` 扫描——等价于 identity 语义，仅实现形式不同。确认认可。
+3. D2 默认上界 2 已定；对「开头是 system 之外但首条 conv 非 user（如先 assistant 开场）」退化为空初始意图（仅 system 进 head），与现状等价、不劣化。

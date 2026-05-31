@@ -69,6 +69,18 @@ def test_context_dual_threshold_env_override(monkeypatch):
     assert s.context_tretained_ratio == 0.5
 
 
+def test_context_initial_intent_max_default():
+    s = Settings(anthropic_api_key="test-key")
+    assert s.compression_initial_intent_max == 2
+
+
+def test_context_initial_intent_max_env_override(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("COMPRESSION_INITIAL_INTENT_MAX", "3")
+    s = Settings()
+    assert s.compression_initial_intent_max == 3
+
+
 def test_context_compress_threshold_removed():
     s = Settings(anthropic_api_key="test-key")
     assert not hasattr(s, "context_compress_threshold")

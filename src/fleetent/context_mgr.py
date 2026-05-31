@@ -22,6 +22,16 @@ _IMAGE_BLOCK_TOKENS = 1000
 # is bounded by `_summarize`'s max_tokens=512.
 _SUMMARY_OVERHEAD_TOKENS = 512
 
+# Prefix marking a compression-produced summary message. Head selection (AR13)
+# uses it to tell a real system prompt apart from a prior summary so the latter is
+# not promoted into the fully-retained head (it stays in the summary slot).
+_SUMMARY_PREFIX = "[Earlier conversation summary]"
+
+# Default upper bound on how many leading user messages count as the initial
+# intent kept whole in the head (AR13 D2). Overridable via Settings /
+# `compression_initial_intent_max`, injectable through the config dict.
+_DEFAULT_INITIAL_INTENT_MAX = 2
+
 
 def _default_config() -> ContextConfig:
     from fleetent.config import Settings
@@ -32,6 +42,7 @@ def _default_config() -> ContextConfig:
         "tmax_ratio": s.context_tmax_ratio,
         "tretained_ratio": s.context_tretained_ratio,
         "keep_recent": s.context_keep_recent,
+        "initial_intent_max": s.compression_initial_intent_max,
     }
 
 
@@ -108,43 +119,85 @@ def compress_for_context_overflow(
 def _compress(messages: list[Any], cfg: ContextConfig) -> list[Any]:
     keep_recent = cfg["keep_recent"]
     target = int(cfg["max_tokens"] * cfg["tretained_ratio"])
+    max_intent = cfg.get("initial_intent_max", _DEFAULT_INITIAL_INTENT_MAX)
 
-    # Keep the cacheable system head out of compression (prompt-cache relies on it).
-    system_msgs = [m for m in messages if _role(m) == "system"]
+    # AR13 three-layer split (D1): head fully retained (system prompts + initial
+    # user intent, excluding any prior self-produced summary), tail fully retained
+    # (recent messages), middle summarized.
+    head = _select_head(messages, max_intent)
     conv_msgs = [m for m in messages if _role(m) != "system"]
+    tail = _select_tail(conv_msgs, keep_recent, target, head)
 
-    tail = _select_tail(conv_msgs, keep_recent, target, system_msgs)
-    to_summarize = conv_msgs[: len(conv_msgs) - len(tail)]
+    head_ids = {id(m) for m in head}
+    tail_ids = {id(m) for m in tail}
+    middle = [m for m in messages if id(m) not in head_ids and id(m) not in tail_ids]
+
+    # D4 degenerate fallback: head and tail already cover everything → no empty
+    # summary message; return head+tail deduped by identity, original order.
+    if not middle:
+        return [m for m in messages if id(m) in head_ids or id(m) in tail_ids]
 
     # AR15: pure-rule, millisecond-scale pre-cleanup of the to-summarize middle
     # (never the head/tail) before any LLM summary — strips base64 image bloat and
     # drops fully-equivalent repeated tool-call pairs. MUST NOT call the LLM.
-    cleaned = _pre_cleanup(to_summarize)
+    cleaned = _pre_cleanup(middle)
 
     summary_text = _summarize(cleaned)
     summary_msg: dict[str, str] = {
         "role": "system",
-        "content": f"[Earlier conversation summary]\n{summary_text}",
+        "content": f"{_SUMMARY_PREFIX}\n{summary_text}",
     }
 
-    return [*system_msgs, summary_msg, *tail]
+    return [*head, summary_msg, *tail]
+
+
+def _is_self_produced_summary(msg: Any) -> bool:
+    """True for a compression-produced summary message (system + summary prefix)."""
+    return _role(msg) == "system" and _content(msg).startswith(_SUMMARY_PREFIX)
+
+
+def _initial_intent(conv_msgs: list[Any], max_intent: int) -> list[Any]:
+    """Leading run of `user` messages (the initial task intent), capped at max_intent.
+
+    Stops at the first non-`user` message; returns the original message objects so
+    identity-based dedup against the tail stays valid.
+    """
+    intent: list[Any] = []
+    for m in conv_msgs:
+        if _role(m) != "user" or len(intent) >= max_intent:
+            break
+        intent.append(m)
+    return intent
+
+
+def _select_head(messages: list[Any], max_intent: int) -> list[Any]:
+    """Fully-retained head: real system prompts + leading user intent, original order.
+
+    Compression-produced summary messages are excluded from the head so they are
+    not both retained here and folded into the summary slot (D1 AR14 hand-off).
+    """
+    system_msgs = [m for m in messages if _role(m) == "system" and not _is_self_produced_summary(m)]
+    conv_msgs = [m for m in messages if _role(m) != "system"]
+    intent = _initial_intent(conv_msgs, max_intent)
+    return [*system_msgs, *intent]
 
 
 def _select_tail(
     conv_msgs: list[Any],
     keep_recent: int,
     target: int,
-    system_msgs: list[Any],
+    head: list[Any],
 ) -> list[Any]:
     """Pick the largest tail (down to a 1-message floor) whose estimate fits target.
 
-    Starts from `keep_recent` and shrinks while the projected total (system head +
-    summary placeholder + tail) exceeds the Tretained target line. `_keep_tail`
-    keeps tool_call/tool_result pairs whole, so the realized estimate MAY end up
-    slightly above target — that upper-bound relaxation is accepted (D3).
+    Starts from `keep_recent` and shrinks while the projected total (fully-retained
+    head + summary placeholder + tail) exceeds the Tretained target line. The head
+    (system prompts + initial intent, AR13 D3) is fixed, so its tokens count toward
+    the projection. `_keep_tail` keeps tool_call/tool_result pairs whole, so the
+    realized estimate MAY end up slightly above target — that relaxation is accepted.
     """
     n = min(keep_recent, len(conv_msgs)) if conv_msgs else 0
-    fixed = estimate_tokens(system_msgs) + _SUMMARY_OVERHEAD_TOKENS
+    fixed = estimate_tokens(head) + _SUMMARY_OVERHEAD_TOKENS
     while n > 1:
         tail = _keep_tail(conv_msgs, n)
         if fixed + estimate_tokens(tail) <= target:
