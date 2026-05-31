@@ -33,3 +33,30 @@
 1. `attachments` 形态定为 `list[tuple[bytes, mime]]`(自解冲突 #1):是否认可。本 change 未让 slack/telegram 适配器真正抽图入 attachments(仍 `[]`),即"入站图片自动抽取"在 IM 端尚无真实数据源——是否需要后续 change 补适配器抽图,还是本 change 应一并接上。
 2. 首次抽取直接产出纯文本 content(不经 image_url 块,自解冲突 #2):是否认可这一"比剥离更彻底"的落地,即 IM 路径的图永不以 base64 块进 history。
 3. uploads 生命周期/清理本 change 未实现(按 design Open Question 既定:只存盘,清理留后续)。
+
+## skill-hot-reload — feat/skill-hot-reload
+
+**前置核实结论(tasks 1.x):**
+1. `scan()` 用 `_index.clear()` 就地清空(原行 55)后再 `_scan_dir` 逐个填充,确认运行期复用会有半空窗口 + 填充中途抛错则旧索引永久丢失 → 不能直接复用。
+2. 触发时机:`scan()` 仅在 `server.py:68` lifespan 与 `agent_loop.py:466` 的 `run_sync()` 内跑;`run()` 不扫描。本 change 只新增运行期 `reload()`,不改任何既有触发时机。
+3. 读取方引用方式:`match`/`load`/`list_skills`/`available_skills_prompt` 均在函数体内经模块级 `_index` 访问(非 def 时捕获);`tools.py:90` 经 `skill_registry._index` 模块属性查找;全仓**无任何** `from skill_registry import _index`。→ `global _index; _index = new` 整体重绑定对所有读取方即时可见,原子替换安全。
+
+**实现:**
+- `skill_registry.py`:抽出 `_build_index(skills_dir, errors=None) -> dict[str, SkillEntry]` 纯构建函数(覆盖 builtin + 用户两源,不触碰全局);`_scan_dir` 改签名为接收 `index`/`errors` 形参(不再 mutate 模块全局),同时服务 `scan()` 与 `_build_index()` 两路径。`scan()` 改为调 `_build_index` 再 `clear()+update()` 落到全局(启动/CLI 行为不变)。新增 `reload(skills_dir=None) -> dict`:构建成功才 `global _index, _load_errors; _index = new_index`(单次重绑定,原子);失败(build 抛异常)不替换、记 `skill_reload_failed` 结构化 warning(含 skills_dir+reason)、返回 `{"status":"failed",...}`;成功返回 `{"status":"ok","loaded":N,"failed":M}`。
+- `admin.py`:新增 `reload-skills` 子命令(沿用 `add_parser`),调 `reload()` 打印成功/失败摘要,失败 `sys.exit(1)`。
+- D4(in-flight)无需改实现:`_assemble_prompt` 已把 catalog 字符串快照进该请求私有 messages,原子替换不回改——仅加确认测试。
+
+**自解冲突:**
+1. **`_build_index` 签名 vs `_load_errors`**:D1 规定签名 `-> dict[str, SkillEntry]`,但 `scan()` 需继续填充 `load_errors()`。取最小改动:`_build_index` 严格返回 dict(符合 D1),通过可选 `errors` 出参收集跳过的坏 Skill;`scan()` 传入一个本地 list 再落到 `_load_errors`,`reload()` 同理用本地 list 并在成功时一并重绑定 `_load_errors`。保持 D1 签名语义且不丢失既有 SK2 错误汇总能力。
+2. **"目录不可用"是否算失败**:spec D3 文字含"目录消失",但现 `_scan_dir` 对不存在目录是 early-return(正常"无用户 Skill"语义,builtin 仍扫),不抛异常。若把"用户目录缺失"当失败会破坏 builtin-only 的合法部署。据此:失败路径定义为 `_build_index` **抛异常**(真正不可恢复,如读盘 OSError);用户目录单纯缺失走正常空结果,不触发保留逻辑。失败测试用 monkeypatch 让 `_build_index` 抛 `OSError` 来覆盖真实失败语义。
+3. **`reload()` 返回结构**:spec/design 未规定具体返回形态,自定 `{"status","loaded","failed"}` / `{"status","skills_dir","reason"}` dict,供 CLI 直接渲染、未来 API 复用。
+
+**影响:** 759 passed(base 746 + 13 新)。ruff:自改 src 文件(`skill_registry.py`/`admin.py`)format+check 全绿;自加测试(`test_skill_registry.py`/`test_agent_loop.py`)check 全绿;`test_admin.py` 有 3 个**既有** lint(unused `Path` import + 一处 E402,主分支同样报)未动,非本 change 引入。mypy:base 73 errors → after 73 errors,**无新增**——`admin.py` 一度因复用 `result` 变量名(与 `seed_builtin_admin` 分支的 `tuple|None` 冲突)新增 7 个错误,已改名 `summary` 消除;`skill_registry.py` 仅余 1 个**既有** `Settings()` call-arg(主分支同样 1 个,同既有模式)。未跑仓库级 `ruff format src tests`(按铁律只动自己的文件)。
+
+**管理 API 端点:** **未做,仅做 CLI**。理由:既有管理动作端点在 `user_admin_api.py`,用的是 `Session <token>` 认证 + admin 角色 + audit_log,且该 router 刻意不 import agent loop;`server.py` 的 Bearer 端点(`/chat`)是 user-agent 调用语义,非 admin 动作。指令要求"server.py 已有清晰 Bearer 认证端点骨架可低成本复用"才一并加——实际无此低成本 Bearer admin 骨架(admin 动作走 Session,不是 Bearer)。在 Session-auth router 里加 reload 需引入 skill_registry 依赖 + 接 audit_log,属中等 surface,且 D5 明确 API 是 Open Question(CLI 先行)。故 CLI 先行,API 留后续 change(若运维需要,接 `user_admin_api.py` Session-auth + `_require_admin` + audit_log)。
+
+**需 zy 核实:**
+1. 管理 API 端点缺席是否认可(理由见上);如需,后续接 `user_admin_api.py` 的 Session-auth 而非 Bearer。
+2. 自解冲突 #2:"用户目录缺失不算 reload 失败、只有 build 抛异常才保留旧索引"——这一对 spec D3"目录消失"措辞的收敛是否认可。
+3. `reload()` 返回 dict 形态(自解冲突 #3)是否认可作为后续 API 的契约基础。
+4. 并发 `reload()` 沿用 design"最后写赢"语义,本 change 未加锁(与 design Risks 一致)。

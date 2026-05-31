@@ -1553,3 +1553,50 @@ async def test_run_does_not_inject_cache_control_marker(mock_client):
     assert "cache_control" not in kwargs
     serialized = repr(kwargs.get("messages"))
     assert "cache_control" not in serialized
+
+
+# ── skill-hot-reload: in-flight request keeps its injected skill (task 5) ──────
+
+
+async def test_run_stream_injected_skill_survives_concurrent_reload(
+    mock_client, monkeypatch, tmp_path
+):
+    """A request that already injected the skill catalog is unaffected by a reload.
+
+    The catalog is taken once at the start of run_stream and copied into the
+    request's private system prompt; an atomic index swap mid-flight (D2/D4)
+    cannot rewrite that already-built prompt.
+    """
+    import fleetent.skill_registry as sr
+
+    skill_dir = tmp_path / "skills" / "deploy"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: deploy\ndescription: deploy code to servers.\n---\nDeploy it."
+    )
+    monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "_no_builtin")
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(tmp_path / "skills"))
+    sr.scan()
+    # Use the real catalog renderer (the fixture stubbed it out to "").
+    monkeypatch.setattr(al, "available_skills_prompt", sr.available_skills_prompt)
+
+    captured: dict = {}
+
+    async def _capturing_create(*_a, **kwargs):
+        captured["messages"] = kwargs["messages"]
+        # Simulate a reload landing while this request is in flight.
+        import shutil
+
+        shutil.rmtree(skill_dir)
+        sr.reload()
+        return _stream_chunks("ok")
+
+    mock_client.chat.completions.create = _capturing_create
+
+    _ = [e async for e in al.run_stream("please deploy code to servers")]
+
+    system_text = "\n".join(m["content"] for m in captured["messages"] if m.get("role") == "system")
+    # Reload dropped the skill from the global index, but the in-flight request's
+    # already-injected prompt still carries it.
+    assert "<name>deploy</name>" in system_text
+    assert sr.match("please deploy code to servers") is None

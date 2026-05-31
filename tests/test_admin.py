@@ -79,6 +79,7 @@ def test_rotate_key_not_found_exits_nonzero():
 
 # --- allowlist admin commands ---
 
+
 def test_list_pending_no_users():
     out, _, code = run_admin("list-pending")
     assert code == 0
@@ -140,6 +141,7 @@ def test_seed_builtin_admin():
 
 # --- channel agent admin commands ---
 
+
 def test_assign_channel():
     ag = agent_store.create_agent("mybot", "Bot prompt.", [])
     out, _, code = run_admin(
@@ -168,6 +170,7 @@ def test_unassign_channel():
 
 
 # --- set-default-agent command ---
+
 
 def test_set_default_agent(tmp_path, monkeypatch):
     settings_yaml = tmp_path / "settings.yaml"
@@ -210,18 +213,31 @@ def test_list_schedules_empty(tmp_sched_db):
 def test_add_schedule_prints_task_id(tmp_sched_db):
     out, _, code = run_admin(
         "add-schedule",
-        "--name", "standup",
-        "--cron", "0 9 * * 1-5",
-        "--user-id", "u-1",
-        "--message", "run standup",
+        "--name",
+        "standup",
+        "--cron",
+        "0 9 * * 1-5",
+        "--user-id",
+        "u-1",
+        "--message",
+        "run standup",
     )
     assert code == 0
     assert len(out.strip()) == 36  # UUID printed
 
 
 def test_list_schedules_shows_task(tmp_sched_db):
-    run_admin("add-schedule", "--name", "daily", "--cron", "0 9 * * *",
-              "--user-id", "u-1", "--message", "go")
+    run_admin(
+        "add-schedule",
+        "--name",
+        "daily",
+        "--cron",
+        "0 9 * * *",
+        "--user-id",
+        "u-1",
+        "--message",
+        "go",
+    )
     out, _, code = run_admin("list-schedules")
     assert code == 0
     assert "daily" in out
@@ -230,8 +246,9 @@ def test_list_schedules_shows_task(tmp_sched_db):
 
 
 def test_remove_schedule_success(tmp_sched_db):
-    out, _, _ = run_admin("add-schedule", "--name", "x", "--cron", "* * * * *",
-                           "--user-id", "u-1", "--message", "hi")
+    out, _, _ = run_admin(
+        "add-schedule", "--name", "x", "--cron", "* * * * *", "--user-id", "u-1", "--message", "hi"
+    )
     task_id = out.strip()
     _, _, code = run_admin("remove-schedule", "--task-id", task_id)
     assert code == 0
@@ -240,3 +257,36 @@ def test_remove_schedule_success(tmp_sched_db):
 def test_remove_schedule_not_found_exits_nonzero(tmp_sched_db):
     _, _, code = run_admin("remove-schedule", "--task-id", "no-such-id")
     assert code != 0
+
+
+# --- reload-skills command (skill-hot-reload task 6) ---
+
+
+def test_reload_skills_prints_success_summary(tmp_path, monkeypatch):
+    import fleetent.skill_registry as sr
+
+    skill_dir = tmp_path / "skills" / "deploy"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: deploy\ndescription: deploy code.\n---\nbody")
+    monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "_no_builtin")
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(tmp_path / "skills"))
+
+    out, _, code = run_admin("reload-skills")
+    assert code == 0
+    assert "1" in out  # loaded count surfaced
+    assert "ok" in out.lower()
+
+
+def test_reload_skills_reports_failure(tmp_path, monkeypatch):
+    import fleetent.skill_registry as sr
+
+    monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "_no_builtin")
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(tmp_path / "skills"))
+
+    def _boom(*_a, **_k):
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(sr, "_build_index", _boom)
+    out, err, code = run_admin("reload-skills")
+    assert code != 0
+    assert "fail" in (out + err).lower()

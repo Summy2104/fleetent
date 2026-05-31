@@ -41,6 +41,39 @@ _load_errors: list[dict[str, str]] = []
 _STOP_WORDS = {"the", "a", "an", "when", "use", "for", "to", "and", "or", "is", "are", "want"}
 
 
+def _resolve_skills_dir(skills_dir: str | None) -> str:
+    """Return the user skills directory, falling back to env then the default."""
+    if skills_dir is None:
+        return os.environ.get("FLEETENT_SKILLS_DIR", "skills")
+    return skills_dir
+
+
+def _build_index(
+    skills_dir: str | None = None,
+    errors: list[dict[str, str]] | None = None,
+) -> dict[str, SkillEntry]:
+    """Build a fresh skill index from builtin + user directories without touching globals.
+
+    Traverses both the package builtin directory (`BUILTIN_SKILLS_DIR`) and the
+    user `skills/` directory with the same frontmatter parsing, merging both
+    sources into one new dict. Source is recorded on each entry via `builtin`;
+    same-name conflicts (within or across sources) are resolved by
+    `skill-name-conflict-warning` (SK8) path-sort, never by source priority.
+
+    Returns the new index. The module-level `_index` is never mutated —
+    decoupling construction from publication is what lets `reload()` build
+    safely and only then swap atomically (or, on failure, keep the old index).
+    When `errors` is provided, skipped (unparseable) skills are appended to it
+    so `scan()` can keep populating `load_errors()`.
+    """
+    resolved = _resolve_skills_dir(skills_dir)
+    index: dict[str, SkillEntry] = {}
+    sink: list[dict[str, str]] = errors if errors is not None else []
+    _scan_dir(BUILTIN_SKILLS_DIR, index, sink, builtin=True)
+    _scan_dir(Path(resolved), index, sink, builtin=False)
+    return index
+
+
 def scan(skills_dir: str | None = None) -> None:
     """Scan platform builtin and user skills directories, building name → SkillEntry.
 
@@ -50,17 +83,48 @@ def scan(skills_dir: str | None = None) -> None:
     resolved by `skill-name-conflict-warning` (SK8) path-sort, never by source
     priority — this change introduces no override rule of its own.
     """
-    if skills_dir is None:
-        skills_dir = os.environ.get("FLEETENT_SKILLS_DIR", "skills")
+    new_errors: list[dict[str, str]] = []
+    new_index = _build_index(skills_dir, new_errors)
     _index.clear()
+    _index.update(new_index)
     _load_errors.clear()
-    _scan_dir(BUILTIN_SKILLS_DIR, builtin=True)
-    _scan_dir(Path(skills_dir), builtin=False)
+    _load_errors.extend(new_errors)
     # Emit the summary only when something failed: a clean scan stays silent (the
     # common startup path), and the actionable "N skills failed to load" line is the
     # only one logged. Counts also available structured via load_errors().
     if _load_errors:
         logger.warning("skill_scan_complete", loaded=len(_index), failed=len(_load_errors))
+
+
+def reload(skills_dir: str | None = None) -> dict[str, Any]:
+    """Rescan skills at runtime and atomically swap in the new index.
+
+    Builds a brand-new index via `_build_index` and, only on success, rebinds
+    the module-level `_index` to it in a single assignment (D2). Because the
+    rebind is atomic, any concurrent read sees either the complete old index or
+    the complete new one — never a half-filled intermediate. On any error
+    (missing directory, parse-time crash) the old index is left untouched and a
+    structured warning is logged (D3); the service keeps serving the old skills
+    rather than degrading to empty.
+
+    Returns a summary: ``{"status": "ok", "loaded": N, "failed": M}`` on success,
+    or ``{"status": "failed", "skills_dir": ..., "reason": ...}`` on failure.
+    """
+    global _index, _load_errors
+    resolved = _resolve_skills_dir(skills_dir)
+    new_errors: list[dict[str, str]] = []
+    try:
+        new_index = _build_index(resolved, new_errors)
+    except Exception as exc:
+        logger.warning("skill_reload_failed", skills_dir=resolved, reason=str(exc))
+        return {"status": "failed", "skills_dir": resolved, "reason": str(exc)}
+    # Atomic publication: a single name rebind, visible at once to every reader
+    # (all access `_index` through the module, none capture it at def time).
+    _index = new_index
+    _load_errors = new_errors
+    if new_errors:
+        logger.warning("skill_reload_complete", loaded=len(new_index), failed=len(new_errors))
+    return {"status": "ok", "loaded": len(new_index), "failed": len(new_errors)}
 
 
 def load_errors() -> list[dict[str, str]]:
@@ -72,8 +136,18 @@ def load_errors() -> list[dict[str, str]]:
     return list(_load_errors)
 
 
-def _scan_dir(base: Path, *, builtin: bool) -> None:
-    """Index every SKILL.md under base, tagging entries with their source."""
+def _scan_dir(
+    base: Path,
+    index: dict[str, SkillEntry],
+    errors: list[dict[str, str]],
+    *,
+    builtin: bool,
+) -> None:
+    """Index every SKILL.md under base into `index`, tagging entries with their source.
+
+    Operates on the passed-in `index`/`errors` so the same traversal serves both
+    the in-place `scan()` path and the build-then-swap `_build_index()` path.
+    """
     if not base.is_dir():
         return
     for skill_md in base.rglob("SKILL.md"):
@@ -87,11 +161,11 @@ def _scan_dir(base: Path, *, builtin: bool) -> None:
                 reason=reason,
                 source=source,
             )
-            _load_errors.append({"path": str(skill_md), "reason": reason, "source": source})
+            errors.append({"path": str(skill_md), "reason": reason, "source": source})
             continue
         name = frontmatter.get("name") or skill_md.parent.name
         path = str(skill_md)
-        existing = _index.get(name)
+        existing = index.get(name)
         if existing is not None:
             # Deterministic selection independent of traversal order and source:
             # the SKILL.md whose path string sorts first wins; warn on every
@@ -105,7 +179,7 @@ def _scan_dir(base: Path, *, builtin: bool) -> None:
             )
             if existing.path <= path:
                 continue
-        _index[name] = SkillEntry(
+        index[name] = SkillEntry(
             description=str(frontmatter.get("description", "")),
             path=path,
             tags=_as_str_list(frontmatter.get("tags")),

@@ -644,3 +644,123 @@ def test_available_skills_prompt_excludes_disabled(tmp_path):
 def test_available_skills_prompt_empty_when_no_skills(tmp_path):
     sr.scan(str(tmp_path / "skills"))  # absent dir → empty index
     assert sr.available_skills_prompt(disabled_skills=[]) == ""
+
+
+# --- _build_index: pure construction, no global mutation (skill-hot-reload task 2) ---
+
+
+def test_build_index_returns_new_dict_reflecting_skills(tmp_path):
+    _write_skill(tmp_path, "deploy", "---\nname: deploy\ndescription: deploy code.\n---\nbody")
+    index = sr._build_index(str(tmp_path / "skills"))
+    assert isinstance(index, dict)
+    assert "deploy" in index
+    assert isinstance(index["deploy"], sr.SkillEntry)
+
+
+def test_build_index_does_not_touch_global_index(tmp_path):
+    _write_skill(tmp_path, "deploy", "---\nname: deploy\ndescription: deploy code.\n---\nbody")
+    before = dict(sr._index)
+    index = sr._build_index(str(tmp_path / "skills"))
+    # Global index untouched; the result is a distinct object.
+    assert sr._index == before
+    assert index is not sr._index
+
+
+def test_build_index_covers_builtin_and_user_sources(tmp_path, monkeypatch):
+    builtin_dir = tmp_path / "builtin"
+    bd = builtin_dir / "core"
+    bd.mkdir(parents=True)
+    (bd / "SKILL.md").write_text("---\nname: core\ndescription: builtin core.\n---\nbody")
+    monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", builtin_dir)
+    _write_skill(tmp_path, "userskill", "---\nname: userskill\ndescription: a user one.\n---\nb")
+
+    index = sr._build_index(str(tmp_path / "skills"))
+    assert "core" in index and index["core"].builtin is True
+    assert "userskill" in index and index["userskill"].builtin is False
+
+
+def test_build_index_collects_errors_into_sink(tmp_path):
+    _write_skill(tmp_path, "bad", "---\nname: [unclosed\n---\nbody")
+    sink: list[dict[str, str]] = []
+    sr._build_index(str(tmp_path / "skills"), sink)
+    assert len(sink) == 1
+    assert sink[0]["source"] == "user"
+
+
+# --- reload(): atomic whole-index swap (skill-hot-reload task 3) ---
+
+
+def test_reload_picks_up_newly_added_skill(tmp_path):
+    sr.scan(str(tmp_path / "skills"))
+    assert sr.match("please deploy code now") is None
+    _write_skill(tmp_path, "deploy", "---\nname: deploy\ndescription: deploy code please.\n---\nb")
+    result = sr.reload(str(tmp_path / "skills"))
+    assert result["status"] == "ok"
+    assert sr.match("please deploy code now") == "deploy"
+
+
+def test_reload_drops_removed_skill(tmp_path):
+    _write_skill(tmp_path, "deploy", "---\nname: deploy\ndescription: deploy code please.\n---\nb")
+    sr.scan(str(tmp_path / "skills"))
+    assert "deploy" in sr._index
+    import shutil
+
+    shutil.rmtree(tmp_path / "skills" / "deploy")
+    sr.reload(str(tmp_path / "skills"))
+    assert "deploy" not in sr._index
+
+
+def test_reload_rebinds_index_as_new_object(tmp_path):
+    _write_skill(tmp_path, "a", "---\nname: a\ndescription: alpha skill.\n---\nb")
+    sr.scan(str(tmp_path / "skills"))
+    old_obj = sr._index
+    sr.reload(str(tmp_path / "skills"))
+    # D2: reload rebinds the module global to a brand-new dict, never mutating
+    # the old one in place (which would reintroduce a half-empty window).
+    assert sr._index is not old_obj
+
+
+def test_reload_returns_summary_counts(tmp_path):
+    _write_skill(tmp_path, "a", "---\nname: a\ndescription: alpha skill.\n---\nb")
+    _write_skill(tmp_path, "b", "---\nname: b\ndescription: beta skill.\n---\nb")
+    result = sr.reload(str(tmp_path / "skills"))
+    assert result["status"] == "ok"
+    assert result["loaded"] == 2
+    assert result["failed"] == 0
+
+
+# --- reload() failure preserves old index + warns (skill-hot-reload task 4) ---
+
+
+def test_reload_failure_preserves_old_index(tmp_path, monkeypatch):
+    _write_skill(tmp_path, "deploy", "---\nname: deploy\ndescription: deploy code please.\n---\nb")
+    sr.scan(str(tmp_path / "skills"))
+    kept = sr._index
+
+    def _boom(*_a, **_k):
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(sr, "_build_index", _boom)
+    result = sr.reload(str(tmp_path / "skills"))
+    # Old index object is untouched; old skills still matchable/loadable.
+    assert sr._index is kept
+    assert "deploy" in sr._index
+    assert sr.match("please deploy code now") == "deploy"
+    assert result["status"] == "failed"
+
+
+def test_reload_failure_logs_structured_warning(tmp_path, monkeypatch):
+    _write_skill(tmp_path, "deploy", "---\nname: deploy\ndescription: deploy code please.\n---\nb")
+    sr.scan(str(tmp_path / "skills"))
+
+    def _boom(*_a, **_k):
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(sr, "_build_index", _boom)
+    with structlog.testing.capture_logs() as logs:
+        sr.reload(str(tmp_path / "skills"))
+    failed = [e for e in logs if e["event"] == "skill_reload_failed"]
+    assert len(failed) == 1
+    assert failed[0]["log_level"] == "warning"
+    assert "skills_dir" in failed[0]
+    assert "disk gone" in failed[0]["reason"]
