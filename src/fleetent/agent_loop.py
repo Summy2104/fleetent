@@ -1,20 +1,18 @@
 """Core agent loop: send → tool_calls? → dispatch → repeat → final reply."""
 
+import asyncio
+import inspect
+import json
 import time
-from collections.abc import AsyncGenerator
+import uuid
+from collections.abc import AsyncGenerator, Callable, Coroutine
 from typing import Any, cast
 
 from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
 from openai.types.chat import ChatCompletionChunk
 
-import asyncio
-import inspect
-import json
-import uuid
-from collections.abc import Callable, Coroutine
-from typing import Any
-
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
+from fleetent.agent_policy import check_tool_access
 from fleetent.context_mgr import maybe_compress
 from fleetent.eval_logger import log_run
 from fleetent.memory_layer import extract_and_save, load_memories
@@ -24,12 +22,53 @@ from fleetent.skill_registry import load as load_skill
 from fleetent.skill_registry import match as match_skill
 from fleetent.skill_registry import scan as scan_skills
 from fleetent.sub_agent import SubAgentExecutor
-from fleetent.agent_policy import check_tool_access
+from fleetent.termination import (
+    ApprovalRejectedChecker,
+    ConsecutiveFailuresChecker,
+    LoopState,
+    MaxTurnsChecker,
+    StopReason,
+    TerminationController,
+    resolve_limits,
+)
 from fleetent.tool_registry import dispatch, get_risk_level, get_schemas
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
 
 _SUB_AGENT_TOOL = "sub_agent"
+
+
+def _build_controller(
+    max_turns: int | None,
+    max_consecutive_failures: int | None,
+    *,
+    include_approval: bool,
+) -> TerminationController:
+    """Assemble the termination controller with the active checkers."""
+    mt, mcf = resolve_limits(max_turns, max_consecutive_failures)
+    controller = TerminationController()
+    controller.register(MaxTurnsChecker(mt))
+    controller.register(ConsecutiveFailuresChecker(mcf))
+    if include_approval:
+        controller.register(ApprovalRejectedChecker())
+    return controller
+
+
+async def _safe_dispatch(
+    name: str, arguments: str | dict[str, Any], is_sub_agent: bool
+) -> tuple[str, bool]:
+    """Dispatch a tool, normalizing a crash into (error_text, failed=True).
+
+    Returning instead of raising keeps a tool crash from killing the loop and
+    lets the consecutive-failures checker observe it.
+    """
+    try:
+        result = dispatch(name, arguments, is_sub_agent=is_sub_agent)
+        if inspect.iscoroutine(result):
+            result = await result
+        return result, False
+    except Exception as exc:  # normalized for the loop; not swallowed silently
+        return f"tool execution error: {exc}", True
 
 
 async def _call_with_fallback(
@@ -101,18 +140,24 @@ async def run(
     reply_func: ReplyFunc | None = None,
     allowed_tools: list[str] | None = None,
     agent_name: str | None = None,
+    max_turns: int | None = None,
+    max_consecutive_failures: int | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
     When is_sub_agent=True the sub_agent tool is excluded from the tool schema
     so child agents cannot spawn further sub-agents.
     When allowed_tools is set, only matching tools (fnmatch patterns) are exposed.
+    max_turns / max_consecutive_failures override the deployment defaults.
     """
     client, cfg = get_async_client_and_config("default")
 
     # Determine effective tool schemas (exclude sub_agent for child agents)
-    schemas = [s for s in get_schemas() if s["function"]["name"] != _SUB_AGENT_TOOL] \
-        if is_sub_agent else get_schemas()
+    schemas = (
+        [s for s in get_schemas() if s["function"]["name"] != _SUB_AGENT_TOOL]
+        if is_sub_agent
+        else get_schemas()
+    )
 
     # Filter by agent-level allowed_tools if specified
     if allowed_tools is not None:
@@ -124,9 +169,21 @@ async def run(
     models_to_try = [cfg.model, *cfg.fallbacks]
     model_used = cfg.model
 
+    controller = _build_controller(max_turns, max_consecutive_failures, include_approval=True)
+    state = LoopState()
+    stop_reason = StopReason.normal
+
     while True:
+        forced = controller.should_stop(state)
+        if forced is not None:
+            stop_reason = forced
+            break
+
         messages = maybe_compress(messages)
-        response, model_used = await _call_with_fallback(client, cfg, messages, schemas, models_to_try)
+        response, model_used = await _call_with_fallback(
+            client, cfg, messages, schemas, models_to_try
+        )
+        state.turn += 1
         models_to_try = [model_used]  # stick with the winning model for subsequent turns
         choice = response.choices[0]
         msg = choice.message
@@ -139,8 +196,16 @@ async def run(
             if not hasattr(tc, "function"):
                 continue
             if tc.function.name == _SUB_AGENT_TOOL and not is_sub_agent:
-                args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
-                tasks = json.loads(args["tasks"]) if isinstance(args.get("tasks"), str) else args.get("tasks", [])
+                args = (
+                    json.loads(tc.function.arguments)
+                    if isinstance(tc.function.arguments, str)
+                    else tc.function.arguments
+                )
+                tasks = (
+                    json.loads(args["tasks"])
+                    if isinstance(args.get("tasks"), str)
+                    else args.get("tasks", [])
+                )
                 sub_results = await SubAgentExecutor().run(
                     tasks=tasks,
                     parent_user_id=user_id,
@@ -151,10 +216,15 @@ async def run(
                     f"[{r.name}] {'ERROR: ' + r.error if r.error else r.result}"
                     for r in sub_results
                 )
+                state.consecutive_failures = 0
             else:
                 risk = get_risk_level(tc.function.name)
                 if risk in ("medium", "high") and reply_func is not None:
-                    tool_args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+                    tool_args = (
+                        json.loads(tc.function.arguments)
+                        if isinstance(tc.function.arguments, str)
+                        else tc.function.arguments
+                    )
                     approval_id = str(uuid.uuid4())[:8]
                     decision = await _default_gate.request_approval(
                         approval_id=approval_id,
@@ -165,15 +235,22 @@ async def run(
                         reply_func=reply_func,
                     )
                     if decision != "approved":
-                        result = f"tool execution {decision}: user did not approve {tc.function.name}"
+                        # Rejection terminates at the next checkpoint; the placeholder
+                        # tool_result keeps the message sequence valid for the LLM.
+                        state.approval_rejected = True
+                        result = (
+                            f"tool execution {decision}: user did not approve {tc.function.name}"
+                        )
                     else:
-                        result = dispatch(tc.function.name, tc.function.arguments, is_sub_agent=is_sub_agent)
-                        if inspect.iscoroutine(result):
-                            result = await result
+                        result, failed = await _safe_dispatch(
+                            tc.function.name, tc.function.arguments, is_sub_agent
+                        )
+                        state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
                 else:
-                    result = dispatch(tc.function.name, tc.function.arguments, is_sub_agent=is_sub_agent)
-                    if inspect.iscoroutine(result):
-                        result = await result
+                    result, failed = await _safe_dispatch(
+                        tc.function.name, tc.function.arguments, is_sub_agent
+                    )
+                    state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
 
     reply = (msg.content if msg is not None else None) or ""
@@ -182,14 +259,23 @@ async def run(
         (m["content"] for m in messages if isinstance(m, dict) and m.get("role") == "user"),
         "",
     )
-    log_run(user_input, reply, messages, time.monotonic() - start, usage, model_used=model_used, user_id=user_id, agent_name=agent_name)
+    log_run(
+        user_input,
+        reply,
+        messages,
+        time.monotonic() - start,
+        usage,
+        model_used=model_used,
+        user_id=user_id,
+        agent_name=agent_name,
+        stop_reason=stop_reason,
+    )
     extract_and_save(user_input, messages, user_id=user_id)
     return reply
 
 
 def run_sync(user_input: str, user_id: str = "default", system_prompt: str = _SYSTEM) -> str:
     """Synchronous wrapper around run() for CLI use."""
-    import asyncio
 
     scan_skills()
     memory_ctx = load_memories(user_id=user_id)
@@ -214,11 +300,16 @@ async def run_stream(
     system_prompt: str = _SYSTEM,
     allowed_tools: list[str] | None = None,
     agent_name: str | None = None,
+    max_turns: int | None = None,
+    max_consecutive_failures: int | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
     Event types: tool_call, tool_result, text_delta, done.
     text_delta events stream as tokens arrive from the LLM.
+
+    Termination covers max_turns / consecutive_failures; approval gating is not
+    performed on the streaming path, so approval_rejected does not apply here.
     """
     client, cfg = get_async_client_and_config("default")
 
@@ -241,7 +332,16 @@ async def run_stream(
     total_prompt_tokens = 0
     total_completion_tokens = 0
 
+    controller = _build_controller(max_turns, max_consecutive_failures, include_approval=False)
+    state = LoopState()
+    stop_reason = StopReason.normal
+
     while True:
+        forced = controller.should_stop(state)
+        if forced is not None:
+            stop_reason = forced
+            break
+        state.turn += 1
         messages = maybe_compress(messages)
 
         # Accumulate streaming response
@@ -252,7 +352,9 @@ async def run_stream(
 
         stream_schemas = get_schemas()
         if allowed_tools is not None:
-            stream_schemas = [s for s in stream_schemas if check_tool_access(s["function"]["name"], allowed_tools)]
+            stream_schemas = [
+                s for s in stream_schemas if check_tool_access(s["function"]["name"], allowed_tools)
+            ]
 
         try:
             stream, model_used = await _stream_with_fallback(
@@ -311,13 +413,15 @@ async def run_stream(
             name = func["name"]
             args = func["arguments"]
             yield {"type": "tool_call", "name": name, "args": args}
-            result = dispatch(name, args)
+            result, failed = await _safe_dispatch(name, args, False)
+            state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             yield {"type": "tool_result", "name": name, "content": result}
             messages.append({"role": "tool", "tool_call_id": tc_data["id"], "content": result})
 
     yield {"type": "done", "content": reply}
 
     from openai.types import CompletionUsage as _CU
+
     stream_usage: _CU | None = (
         _CU(
             prompt_tokens=total_prompt_tokens,
@@ -327,5 +431,15 @@ async def run_stream(
         if total_prompt_tokens or total_completion_tokens
         else None
     )
-    log_run(user_input, reply, messages, time.monotonic() - start, usage=stream_usage, model_used=model_used, user_id=user_id, agent_name=agent_name)
+    log_run(
+        user_input,
+        reply,
+        messages,
+        time.monotonic() - start,
+        usage=stream_usage,
+        model_used=model_used,
+        user_id=user_id,
+        agent_name=agent_name,
+        stop_reason=stop_reason,
+    )
     extract_and_save(user_input, messages, user_id=user_id)

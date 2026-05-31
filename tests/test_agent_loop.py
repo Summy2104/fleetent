@@ -1,4 +1,5 @@
 """Unit tests for agent_loop.run() and run_stream()."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -8,7 +9,7 @@ from openai import APIStatusError, RateLimitError
 
 import fleetent.agent_loop as al
 from fleetent.model_router import RouteConfig
-
+from fleetent.termination import LoopState, StopReason
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -91,6 +92,15 @@ def mock_client(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "load_memories", lambda **kw: "")
     monkeypatch.setattr(al, "match_skill", lambda _: None)
+    # Avoid instantiating Settings() (needs an API key) in the default-limits path.
+    monkeypatch.setattr(
+        al,
+        "resolve_limits",
+        lambda max_turns=None, max_consecutive_failures=None, config=None: (
+            max_turns if max_turns is not None else 50,
+            max_consecutive_failures if max_consecutive_failures is not None else 3,
+        ),
+    )
     return client
 
 
@@ -128,6 +138,113 @@ async def test_run_dispatches_tool_then_gets_final_reply(mock_client):
     assert mock_client.chat.completions.create.call_count == 2
 
 
+# ── run() termination ──────────────────────────────────────────────────────────
+
+
+async def test_run_stops_at_max_turns(mock_client):
+    # LLM keeps requesting tools forever; max_turns must break the loop.
+    mock_client.chat.completions.create = AsyncMock(return_value=_tool_resp("get_time"))
+    result = await al.run([{"role": "user", "content": "go"}], max_turns=2)
+    assert mock_client.chat.completions.create.call_count == 2
+    assert result == ""
+
+
+async def test_run_stops_on_consecutive_failures(mock_client):
+    mock_client.chat.completions.create = AsyncMock(return_value=_tool_resp("boom"))
+
+    def failing_dispatch(name: str, args: str, **kw) -> str:
+        raise RuntimeError("tool crashed")
+
+    with patch.object(al, "dispatch", failing_dispatch):
+        await al.run(
+            [{"role": "user", "content": "go"}],
+            max_consecutive_failures=2,
+            max_turns=50,
+        )
+    assert mock_client.chat.completions.create.call_count == 2
+
+
+async def test_run_success_resets_failure_count(mock_client):
+    # fail, success, fail, then text — with threshold 2 the success reset prevents a stop.
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_tool_resp("a"), _tool_resp("b"), _tool_resp("c"), _text_resp("done")]
+    )
+    calls = {"n": 0}
+
+    def dispatch_seq(name: str, args: str, **kw) -> str:
+        calls["n"] += 1
+        if calls["n"] in (1, 3):
+            raise RuntimeError("fail")
+        return "ok"
+
+    with patch.object(al, "dispatch", dispatch_seq):
+        result = await al.run(
+            [{"role": "user", "content": "go"}],
+            max_consecutive_failures=2,
+            max_turns=50,
+        )
+    assert result == "done"
+    assert mock_client.chat.completions.create.call_count == 4
+
+
+async def test_run_approval_rejected_terminates(mock_client):
+    mock_client.chat.completions.create = AsyncMock(return_value=_tool_resp("danger"))
+    msgs = [{"role": "user", "content": "go"}]
+    with (
+        patch.object(al, "get_risk_level", lambda name: "high"),
+        patch.object(al._default_gate, "request_approval", AsyncMock(return_value="rejected")),
+    ):
+        result = await al.run(msgs, reply_func=AsyncMock(), max_turns=50)
+    # one LLM call, then terminated at next checkpoint — not a second call
+    assert mock_client.chat.completions.create.call_count == 1
+    assert result == ""
+    # rejected tool still has a placeholder tool_result (message contract intact)
+    assert any(isinstance(m, dict) and m.get("role") == "tool" for m in msgs)
+
+
+def test_build_controller_never_yields_reserved_reasons():
+    # Reserved reasons (loop_detected/budget_exceeded/cancelled) have no checker,
+    # so even with every state flag tripped only active reasons can fire.
+    controller = al._build_controller(1, 1, include_approval=True)
+    reason = controller.should_stop(
+        LoopState(turn=99, consecutive_failures=99, approval_rejected=True)
+    )
+    assert reason in {
+        StopReason.max_turns,
+        StopReason.consecutive_failures,
+        StopReason.approval_rejected,
+    }
+
+
+# ── stop_reason in trace ───────────────────────────────────────────────────────
+
+
+async def test_run_logs_stop_reason_normal(mock_client):
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("hi"))
+    with patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)):
+        await al.run([{"role": "user", "content": "x"}])
+    assert captured.get("stop_reason") == StopReason.normal
+
+
+async def test_run_logs_stop_reason_max_turns(mock_client):
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(return_value=_tool_resp("t"))
+    with patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)):
+        await al.run([{"role": "user", "content": "x"}], max_turns=1)
+    assert captured.get("stop_reason") == StopReason.max_turns
+
+
+async def test_run_stream_logs_stop_reason_max_turns(mock_client):
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=lambda *a, **k: _looping_tool_stream()
+    )
+    with patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)):
+        _ = [e async for e in al.run_stream("go", max_turns=1)]
+    assert captured.get("stop_reason") == StopReason.max_turns
+
+
 async def test_run_is_sub_agent_filters_sub_agent_from_schemas(mock_client):
     schemas_used: list[list] = []
 
@@ -137,10 +254,14 @@ async def test_run_is_sub_agent_filters_sub_agent_from_schemas(mock_client):
 
     mock_client.chat.completions.create = capture
 
-    with patch.object(al, "get_schemas", return_value=[
-        {"function": {"name": "sub_agent"}},
-        {"function": {"name": "get_time"}},
-    ]):
+    with patch.object(
+        al,
+        "get_schemas",
+        return_value=[
+            {"function": {"name": "sub_agent"}},
+            {"function": {"name": "get_time"}},
+        ],
+    ):
         await al.run([{"role": "user", "content": "go"}], is_sub_agent=True)
 
     names = [s["function"]["name"] for s in schemas_used[0]]
@@ -157,10 +278,14 @@ async def test_run_not_sub_agent_includes_sub_agent_in_schemas(mock_client):
 
     mock_client.chat.completions.create = capture
 
-    with patch.object(al, "get_schemas", return_value=[
-        {"function": {"name": "sub_agent"}},
-        {"function": {"name": "get_time"}},
-    ]):
+    with patch.object(
+        al,
+        "get_schemas",
+        return_value=[
+            {"function": {"name": "sub_agent"}},
+            {"function": {"name": "get_time"}},
+        ],
+    ):
         await al.run([{"role": "user", "content": "go"}])
 
     names = [s["function"]["name"] for s in schemas_used[0]]
@@ -171,9 +296,7 @@ async def test_run_not_sub_agent_includes_sub_agent_in_schemas(mock_client):
 
 
 async def test_run_stream_yields_text_deltas_and_done(mock_client):
-    mock_client.chat.completions.create = AsyncMock(
-        return_value=_stream_chunks("hel", "lo", None)
-    )
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("hel", "lo", None))
 
     events = [e async for e in al.run_stream("say hello")]
 
@@ -216,9 +339,7 @@ async def test_run_stream_tool_call_yields_tool_events(mock_client):
         c.choices[0].finish_reason = "stop"
         yield c
 
-    mock_client.chat.completions.create = AsyncMock(
-        side_effect=[tool_stream(), text_stream()]
-    )
+    mock_client.chat.completions.create = AsyncMock(side_effect=[tool_stream(), text_stream()])
 
     events = [e async for e in al.run_stream("what time?")]
 
@@ -232,6 +353,46 @@ async def test_run_stream_tool_call_yields_tool_events(mock_client):
     assert tool_event["name"] == "get_time"
 
 
+def _looping_tool_stream():
+    async def _gen():
+        c = MagicMock()
+        c.choices = [MagicMock()]
+        c.choices[0].delta.content = None
+        tc_delta = MagicMock()
+        tc_delta.index = 0
+        tc_delta.id = "tc-1"
+        tc_delta.function.name = "loop_tool"
+        tc_delta.function.arguments = "{}"
+        c.choices[0].delta.tool_calls = [tc_delta]
+        c.choices[0].finish_reason = "tool_calls"
+        yield c
+
+    return _gen()
+
+
+async def test_run_stream_stops_at_max_turns(mock_client):
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=lambda *a, **k: _looping_tool_stream()
+    )
+    events = [e async for e in al.run_stream("go", max_turns=2)]
+    assert mock_client.chat.completions.create.call_count == 2
+    assert events[-1]["type"] == "done"
+
+
+async def test_run_stream_stops_on_consecutive_failures(mock_client):
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=lambda *a, **k: _looping_tool_stream()
+    )
+
+    def failing_dispatch(name: str, args: str, **kw) -> str:
+        raise RuntimeError("tool crashed")
+
+    with patch.object(al, "dispatch", failing_dispatch):
+        events = [e async for e in al.run_stream("go", max_consecutive_failures=2, max_turns=50)]
+    assert mock_client.chat.completions.create.call_count == 2
+    assert events[-1]["type"] == "done"
+
+
 async def test_run_sub_agent_tool_intercepted_and_executed(mock_client):
     """sub_agent tool call is intercepted by agent_loop, not passed to dispatch."""
     from fleetent.sub_agent import SubAgentResult
@@ -239,12 +400,16 @@ async def test_run_sub_agent_tool_intercepted_and_executed(mock_client):
     tasks_json = '[{"name": "t1", "prompt": "do it"}]'
     mock_client.chat.completions.create = AsyncMock(
         side_effect=[
-            _tool_resp("sub_agent", f'{{"tasks": "{tasks_json.replace(chr(34), chr(92)+chr(34))}"}}'  ),
+            _tool_resp(
+                "sub_agent", f'{{"tasks": "{tasks_json.replace(chr(34), chr(92) + chr(34))}"}}'
+            ),
             _text_resp("all done"),
         ]
     )
 
-    fake_results = [SubAgentResult(name="t1", result="task result", error=None, parent_session_id="")]
+    fake_results = [
+        SubAgentResult(name="t1", result="task result", error=None, parent_session_id="")
+    ]
 
     with patch.object(al, "SubAgentExecutor") as mock_executor_cls:
         mock_instance = AsyncMock()
@@ -262,6 +427,7 @@ async def test_run_sub_agent_tool_intercepted_and_executed(mock_client):
 async def test_run_sub_agent_result_formatted_in_tool_message(mock_client):
     """Sub-agent results are formatted as [name] result lines in the tool message."""
     import json as _json
+
     from fleetent.sub_agent import SubAgentResult
 
     tasks = [{"name": "fetch", "prompt": "get data"}]
@@ -344,6 +510,7 @@ async def test_run_allowed_tools_supports_wildcard(mock_client, monkeypatch):
 
 # ── fallback helpers ──────────────────────────────────────────────────────────
 
+
 def _mk_http_error(status: int, cls=APIStatusError) -> APIStatusError:
     r = MagicMock()
     r.status_code = status
@@ -374,6 +541,14 @@ def mock_client_fb(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "load_memories", lambda **kw: "")
     monkeypatch.setattr(al, "match_skill", lambda _: None)
+    monkeypatch.setattr(
+        al,
+        "resolve_limits",
+        lambda max_turns=None, max_consecutive_failures=None, config=None: (
+            max_turns if max_turns is not None else 50,
+            max_consecutive_failures if max_consecutive_failures is not None else 3,
+        ),
+    )
     return client
 
 
@@ -408,9 +583,7 @@ async def test_run_exhausted_fallbacks_raises(mock_client_fb):
 
 
 async def test_run_401_not_retried(mock_client_fb):
-    mock_client_fb.chat.completions.create = AsyncMock(
-        side_effect=_mk_http_error(401)
-    )
+    mock_client_fb.chat.completions.create = AsyncMock(side_effect=_mk_http_error(401))
     with pytest.raises(APIStatusError) as exc_info:
         await al.run([{"role": "user", "content": "hi"}])
     assert exc_info.value.status_code == 401

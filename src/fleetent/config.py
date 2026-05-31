@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     context_max_tokens: int = 200_000
     context_compress_threshold: float = 0.8
     context_keep_recent: int = 10
+    agent_max_turns: int = 50
+    agent_max_consecutive_failures: int = 3
     log_format: str = "console"
     default_agent_name: str | None = None
 
