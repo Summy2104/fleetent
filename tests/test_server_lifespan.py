@@ -154,3 +154,58 @@ def test_lifespan_does_not_crash_when_docker_unavailable(tmp_path, monkeypatch):
     with TestClient(srv.app) as client:
         resp = client.get("/health")
     assert resp.status_code == 200
+
+
+# ── SB8 orphan cleanup wiring ─────────────────────────────────────────────────
+
+
+def test_lifespan_runs_cleanup_once_when_docker_available(tmp_path, monkeypatch):
+    """Docker available -> orphan cleanup is invoked exactly once at startup."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    import fleetent.sandbox_client as sc
+    import fleetent.server as srv
+
+    monkeypatch.setattr(sc.SandboxClient, "docker_available", AsyncMock(return_value=True))
+    cleanup = AsyncMock(return_value=2)
+    monkeypatch.setattr(srv, "cleanup_orphans", cleanup)
+
+    with TestClient(srv.app) as client:
+        client.get("/health")
+
+    cleanup.assert_awaited_once()
+
+
+def test_lifespan_skips_cleanup_when_docker_unavailable(tmp_path, monkeypatch):
+    """Docker unavailable -> cleanup is skipped (reuses the SB3 probe result, no
+    second probe drives the decision)."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    import fleetent.sandbox_client as sc
+    import fleetent.server as srv
+
+    probe = AsyncMock(return_value=False)
+    monkeypatch.setattr(sc.SandboxClient, "docker_available", probe)
+    cleanup = AsyncMock(return_value=0)
+    monkeypatch.setattr(srv, "cleanup_orphans", cleanup)
+
+    with TestClient(srv.app) as client:
+        resp = client.get("/health")
+
+    assert resp.status_code == 200
+    cleanup.assert_not_awaited()
+    # SB3 probe is the single source of the availability decision (one probe).
+    probe.assert_awaited_once()
+
+
+def test_lifespan_cleanup_failure_does_not_block_startup(tmp_path, monkeypatch):
+    """A cleanup error is logged but the platform still boots (D4 best-effort)."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    import fleetent.sandbox_client as sc
+    import fleetent.server as srv
+
+    monkeypatch.setattr(sc.SandboxClient, "docker_available", AsyncMock(return_value=True))
+    monkeypatch.setattr(srv, "cleanup_orphans", AsyncMock(side_effect=RuntimeError("docker boom")))
+
+    with TestClient(srv.app) as client:
+        resp = client.get("/health")
+
+    assert resp.status_code == 200

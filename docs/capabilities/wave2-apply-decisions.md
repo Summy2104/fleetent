@@ -695,3 +695,64 @@ run_code 调用链：`run_code` 读 `tool_context.features`（无 context 时 `{
 
 1. **复用容器的 env 变更不生效**：agent 改了 `features.sandbox_env` 后，已在 registry 的 session/agent 容器不会重建注入新 env，需等容器销毁重建（release_session / sweep_idle）才生效。当前可接受（env 多为静态配置），若需热更新需扩展。
 2. **`-e` 明文出现在宿主 `docker run` 进程参数**（design D3 已记 trade-off）：仅非敏感变量经此路径，敏感已过滤；占位符级方案留后续。
+
+## sandbox-orphan-cleanup (SB8)
+
+孤儿沙箱容器清理：平台启动时触发一次 + 提供按需手动触发入口，**不引入调度器**。复用 SB2 的 `SANDBOX_NAME_PREFIX`。
+
+### 改/建文件
+
+- 新建 `src/fleetent/sandbox_cleanup.py`：`cleanup_orphans(client: SandboxClient) -> int`。
+- 改 `src/fleetent/sandbox_client.py`：新增 `list_containers(name_prefix: str) -> list[str]`（插在 `find_workspace` 与 `commit_workspace` 之间）。
+- 改 `src/fleetent/server.py` lifespan：复用 SB3 探测结果，可用才调清理。
+- 新建 `tests/test_sandbox_cleanup.py`；扩 `tests/test_sandbox_client.py`、`tests/test_server_lifespan.py`。
+
+### D1 清理独立模块
+
+`sandbox_cleanup.cleanup_orphans` 为纯编排：`names = await client.list_containers(SANDBOX_NAME_PREFIX)` → 逐个 `startswith` 校验后 `await client.destroy_workspace(name)` → 返回成功销毁计数。空列表/Docker 不可用（`list_containers` 返回空）→ 返回 0。前缀常量 `from fleetent.sandbox_client import SANDBOX_NAME_PREFIX`，**不在本模块重复定义**（单一事实来源）。
+
+### D2 list_containers
+
+`docker ps -a --filter name={prefix} --format {{.Names}}`，按 `splitlines()` 解析、过滤空行。`-a` 含已停止容器（孤儿可能 exited 未删）。失败安全降级（与 `docker_available` 同风格）：`FileNotFoundError`/`OSError` → log warning 返回 `[]`；非零 returncode → log warning（含 stderr）返回 `[]`，**不抛**。
+
+### D3 前缀二次校验防误删
+
+`docker --filter name=` 是**子串匹配**，可能误纳入名字中段含 `sandbox-` 的无关容器（如 `my-sandbox-backup`）。故对 `list_containers` 返回的每个名称，销毁前在 Python 侧再校验 `name.startswith(SANDBOX_NAME_PREFIX)`，不满足则 log warning 跳过、不计数、不销毁。单测 `test_cleanup_orphans_skips_names_without_prefix` 钉死：混入 `my-sandbox-backup`/`not-related` 时只销毁真前缀容器、计数为 1。
+
+### D4 lifespan 复用 SB3 探测结果（不重复探测）+ 失败不阻断
+
+**关键接线**：SB3 原本 inline `await SandboxClient().docker_available()`，改为先建 `sandbox_client = SandboxClient()` 实例、`docker_available = await sandbox_client.docker_available()`（**只探测一次**）。该 `docker_available` 结果同时驱动 SB3 的 `resolve_effective_mode` 与本 change 是否清理。SB8 紧跟其后：`if docker_available: try: await cleanup_orphans(sandbox_client) except Exception: log warning 继续`。
+
+- **不重复探测**：复用同一 `sandbox_client` 实例与同一 `docker_available` 布尔，无第二次 `docker version` 子进程。单测 `test_lifespan_skips_cleanup_when_docker_unavailable` 用 `probe.assert_awaited_once()` 钉死「探测仅一次」。
+- **失败不阻断**：`cleanup_orphans` 抛异常被 try/except 捕获，log `sandbox_orphan_cleanup_failed` warning 后继续启动（`/health` 仍 200）。单测 `test_lifespan_cleanup_failure_does_not_block_startup` 验证。
+- **Docker 不可用跳过清理**：`docker_available=False` 时整段跳过（mode 由 SB3 降级 OFF），不调 `cleanup_orphans`。单测 `test_lifespan_skips_cleanup_when_docker_unavailable` 验证 `cleanup.assert_not_awaited()`。
+
+### 审计 log
+
+`cleanup_orphans` 结束 `logger.info("sandbox_cleanup_done count=%d destroyed=%s", len(destroyed), destroyed)`——**计数 + 被删容器名列表**。被跳过的非前缀名单独 `logger.warning("sandbox_cleanup_skipped_non_prefix name=%s")`。写入 trace 的形态待 SB9 落地后协调（本 change 仅 log）。单测 `test_cleanup_orphans_logs_count_and_names` 断言日志含计数与各名称。
+
+### 按需触发入口
+
+`cleanup_orphans(client)` 是可独立调用的纯函数，不依赖 server/lifespan/调度器，返回计数供 admin/运维手动触发。单测 `test_cleanup_orphans_callable_standalone_returns_count` 验证（仅传 mock client 即可调用）。admin CLI 子命令暴露为可选收尾（design Open Question），**本 change 不实现**。
+
+### 1.x 前置核实结论
+
+- 1.1：前缀 `SANDBOX_NAME_PREFIX = "sandbox-"`（sandbox_client.py 行 18，SB2 定义）；`destroy_workspace`（行 217，`docker rm -f` 幂等，已忽略 returncode）——已核实，清理直接复用销毁。
+- 1.2：lifespan 行 69；SB3 探测在行 78（原 inline）。改造形态：提取 `sandbox_client` 实例变量，`docker_available` 布尔可在同函数后续复用——已核实，SB8 紧随其后接线。
+- 1.3：前缀常量定义在 `sandbox_client.py`，本 change `import` 复用、不重复定义——已核实。
+
+### 自解冲突 / 决策
+
+- **复用 SB3 client 实例**：将 SB3 的匿名 `SandboxClient()` 提升为 `sandbox_client` 命名变量，供 `cleanup_orphans` 复用同一实例（client 无状态廉价，复用纯为可读性与「同一探测结果」语义）。最小改动，SB3 既有用例不破（探测仍一次、mode/health 行为不变）。
+- **空行/格式**：`ruff format` 误在 `from fleetent import webhook_router as _wr` 后插空行（非本 change 触碰行），已还原。server.py 既有 ruff 错误（`os`/`typing.Any` 未用、import 排序）为遗留，stash 验证基线同样报 4 条，未触碰。
+
+### 基线对比
+
+- pytest：1123 → **1137 passed**（+14 新增，无回归）。
+- ruff（自有文件 `sandbox_cleanup.py`/`sandbox_client.py` 及三测试文件）：format + check 全绿。
+- mypy `src`：74 → **74**（无新增错误模式；新建 `sandbox_cleanup.py` 无 mypy 错误，checked files 56→57）。
+
+### 需 zy 核实
+
+1. **审计写 trace 待 SB9**：当前仅 `logger.info` 计数+名单，未写 traces 表；SB9 落地后是否将清理记录纳入 trace（design D4 已记「与 SB9 协调」）。
+2. **admin CLI 子命令**：design Open Question 提到 `fleetent-admin sandbox-cleanup` 按需入口，本 change 仅提供函数入口未加 CLI 子命令——是否需作为 SB8 收尾补一个 admin 子命令。

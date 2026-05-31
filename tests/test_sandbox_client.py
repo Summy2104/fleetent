@@ -300,3 +300,47 @@ async def test_create_workspace_defensive_filters_sensitive_env(client):
     assert "leak" not in joined
     e_idxs = [i for i, a in enumerate(argv) if a == "-e"]
     assert [argv[i + 1] for i in e_idxs] == ["DATA_DIR=/x"]
+
+
+# ── list_containers (SB8 orphan enumeration) ──────────────────────────────────
+
+
+async def test_list_containers_parses_names(client):
+    """docker ps -a --filter name=<prefix> --format {{.Names}} -> name list."""
+    captured: list[list[str]] = []
+
+    async def fake_exec(*args, **kwargs):
+        captured.append(list(args))
+        return _mock_proc(stdout="sandbox-session-1\nsandbox-agent-bot\n")
+
+    with patch("asyncio.create_subprocess_exec", fake_exec):
+        names = await client.list_containers("sandbox-")
+
+    assert names == ["sandbox-session-1", "sandbox-agent-bot"]
+    assert captured[0][:3] == ["docker", "ps", "-a"]
+    assert "name=sandbox-" in captured[0]
+    assert "{{.Names}}" in captured[0]
+
+
+async def test_list_containers_empty_output_returns_empty_list(client):
+    """No matching containers -> empty list (blank stdout)."""
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(stdout="\n"))):
+        names = await client.list_containers("sandbox-")
+    assert names == []
+
+
+async def test_list_containers_nonzero_returns_empty_list(client):
+    """A non-zero docker exit degrades to an empty list without raising."""
+    mock_proc = _mock_proc(stderr="cannot connect to docker daemon", returncode=1)
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_proc)):
+        names = await client.list_containers("sandbox-")
+    assert names == []
+
+
+async def test_list_containers_returns_empty_when_cli_missing(client):
+    """A missing docker CLI degrades to an empty list, never raising."""
+    with patch(
+        "asyncio.create_subprocess_exec", AsyncMock(side_effect=FileNotFoundError("docker"))
+    ):
+        names = await client.list_containers("sandbox-")
+    assert names == []
