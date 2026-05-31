@@ -1,0 +1,29 @@
+{
+  "name": "tenant knowledge isolation",
+  "documents": [
+    {
+      "filename": "engineering-handbook.md",
+      "tenant_id": "tenant-a",
+      "kb_id": "engineering",
+      "content": "Atlas release approvals are owned by the engineering enablement team."
+    },
+    {
+      "filename": "finance-handbook.md",
+      "tenant_id": "tenant-b",
+      "kb_id": "finance",
+      "content": "Atlas budget approvals are owned by the finance planning team."
+    }
+  ],
+  "queries": [
+    {
+      "text": "Atlas release approvals engineering enablement",
+      "tenant_id": "tenant-a",
+      "kb_ids": ["engineering"],
+      "top_k": 3,
+      "expected_chunks": ["Atlas release approvals are owned by the engineering enablement team"],
+      "forbidden_chunks": ["Atlas budget approvals are owned by the finance planning team"]
+    }
+  ],
+  "expected_chunks": ["Atlas release approvals are owned by the engineering enablement team"],
+  "forbidden_chunks": ["Atlas budget approvals are owned by the finance planning team"]
+}

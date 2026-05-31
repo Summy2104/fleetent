@@ -6,7 +6,7 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**当前负责**：手动 text / markdown 内容导入、deterministic chunking、向量索引构建、按 tenant + knowledge base 隔离召回相关文档片段。
+**当前负责**：手动 text / markdown 内容导入、deterministic chunking、向量索引构建、按 tenant + knowledge base 隔离召回相关文档片段，以及手动运行的 deterministic retrieval evaluation。
 
 **后续负责**：数据源接入与文档获取、文档解析、混合检索、实体与关系提取、图谱存储、同步规划。
 
@@ -142,6 +142,7 @@ async def delete(document_id: str) -> None:
 - 无 sync planner、后台 job、admin UI、REST upload API
 - 无 BM25 / FTS5 / hybrid / rerank / query planner
 - 无 graph_search、entities、relations 或 `kb_extraction`
+- 无 production ranking dashboard、reranker evaluation 或 query planner evaluation
 
 **后续可迁移参考（knowledge-bridge 已实现，但需按 fleetent specs 分批适配）**：
 - ✅ 文档解析思路：text / Markdown / HTML / section-first 归并优先；PDF / DOCX / PPTX / Google Docs / Google Sheets 后续逐项评估依赖；图片 / VLM 暂缓
@@ -175,10 +176,18 @@ async def delete(document_id: str) -> None:
 - `knowledge-base-hybrid-search`
 - `knowledge-base-retrieval-evaluation`
 
+## 自动化效果验证
+
+已提供 `tests/evaluation/knowledge_base_retrieval_eval.py` 和 `tests/evaluation/fixtures/knowledge_base_retrieval/*.json`：
+
+- fixture schema 固定为 `name`、`documents`、`queries`、`expected_chunks`、`forbidden_chunks`。
+- 默认 runner 使用 deterministic embedding、tmp SQLite DB 和 tmp SQLite vector backend，不调用外部服务，不触碰 `data/`。
+- runner 会 ingest fixture documents，执行 query，并断言 expected chunk/snippet 出现在 top-k，forbidden chunk/snippet 不出现在结果中。
+- 真实 embedding evaluation 默认 skip；只有设置 `FLEETENT_EVAL_REAL_EMBEDDING=1` 且提供 endpoint、model 和 API key 时才手动运行。
+
 ## 自动化效果验证缺口
 
-- 构造小型企业文档 fixture，覆盖中文、英文、标题层级、表格文本和重复内容。
-- 验证 chunking 后 query 能命中 expected chunk。
+- 扩展小型企业文档 fixture，覆盖更多中文、标题层级、表格文本和重复内容。
 - 对比 vector-only、BM25-only、hybrid RRF 的召回质量。
 - 验证 tenant + kb namespace 隔离。
 
@@ -269,6 +278,12 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - knowledge base 隔离：不同 `tenant_id + kb_id` 的检索结果互不干扰
 - delete 级联：删除文档后对应 chunk 和 vector entries 均被清理
 - long-term-ctx 在 `knowledge_base.enabled=true` 时调用内置 provider；disabled 或无结果时降级
+
+**需要 evaluation 测试的行为**：
+- fixture loader 对 `name`、`documents`、`queries`、`expected_chunks`、`forbidden_chunks` 缺失 fail fast
+- deterministic runner 使用 tmp SQLite DB 和 tmp vector backend ingest fixture documents
+- vector-only query top-k 包含 expected chunk/snippet，且不包含 forbidden chunk/snippet
+- real embedding evaluation 默认 skip，缺少 provider credentials 时也 skip
 
 **需要 mock / monkeypatch 的依赖**：
 - `vector_store`：隔离向量索引读写
