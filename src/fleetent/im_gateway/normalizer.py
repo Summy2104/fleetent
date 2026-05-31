@@ -41,6 +41,51 @@ def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> Agent
     return agent_store.get_default_agent()
 
 
+_IMAGE_MIME_PREFIX = "image/"
+
+
+def _image_attachments(attachments: list[Any]) -> list[tuple[bytes, str]]:
+    """Pick out `(bytes, mime)` image attachments; ignore non-image entries."""
+    images: list[tuple[bytes, str]] = []
+    for att in attachments:
+        if (
+            isinstance(att, tuple)
+            and len(att) == 2
+            and isinstance(att[0], (bytes, bytearray))
+            and isinstance(att[1], str)
+            and att[1].startswith(_IMAGE_MIME_PREFIX)
+        ):
+            images.append((bytes(att[0]), att[1]))
+    return images
+
+
+async def _build_user_content(msg: NormalizedMessage) -> str:
+    """Build the user message content, extracting images first (D3).
+
+    With no image attachments this is just the user text. With images, each is
+    saved to uploads, analyzed once (user text as instruction), and the message
+    becomes the user text plus the structured analysis and on-disk references —
+    base64 never enters the main context, so the loop routes to the text model.
+    Look-back is left to the model via analyze_image on the same references.
+    """
+    from fleetent import tools, vision_client
+
+    images = _image_attachments(msg.attachments)
+    if not images:
+        return msg.text
+
+    instruction = msg.text or "Describe this image."
+    sections = [msg.text] if msg.text else []
+    for data, mime in images:
+        ref = tools._save_upload(data, mime)
+        try:
+            analysis = await vision_client.analyze(data, instruction)
+        except vision_client.VisionError as exc:
+            analysis = f"(image analysis failed: {exc})"
+        sections.append(f"[图片 {ref}]\n{analysis}")
+    return "\n\n".join(sections)
+
+
 async def route(msg: NormalizedMessage) -> None:
     # Approval commands bypass the agent loop entirely
     m = _APPROVAL_RE.match(msg.text.strip())
@@ -101,7 +146,7 @@ async def route(msg: NormalizedMessage) -> None:
         else:
             history.insert(0, {"role": "system", "content": system_content})
 
-        history.append({"role": "user", "content": msg.text})
+        history.append({"role": "user", "content": await _build_user_content(msg)})
 
         response = await agent_loop.run(
             messages=history,
