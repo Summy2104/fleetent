@@ -217,3 +217,14 @@
 
 **影响:** 680 passed;session_index mypy 0 错。
 **⚠️ 需 zy 核实:** **sqlite3 vs aiosqlite 偏离**(CLAUDE.md 不符现实);元数据要完整需 agent_loop/normalizer 透传 user_id/agent_name(逐步补)。
+
+## session-disk-management (S4) — feat/session-disk-management
+
+**实现:** `enforce_capacity(max_total_bytes=None,max_count=None)`:rglob 扫描收集 (session_id,size,mtime)、跳过 .json.tmp、带 `/` 还原;两维度**或触发、且停止**(is_over_capacity 任一超→True,while 循环淘汰至两者皆不超);按 mtime 升序最旧优先删;维度 ≤0 关闭(不触发不停止),两维都关→返回空;删除容错(失败 log.warning 跳过、扣减累计防级联超删);触发原因+淘汰数汇总日志。config 加 session_max_total_mb=1024/session_max_count=10000;扩展 S1 的 _default_config(保留 ttl_seconds + 加 max_total_bytes/max_count)。纯原语,触发器留后续。
+
+**自解冲突:**
+1. S1 的 _default_config stub 测试因新字段失效 → 补两字段进 stub。
+2. 容错按"每次淘汰尝试"扣减累计(非仅成功时),防卡住文件级联超删健康 session。
+
+**影响:** 701 passed;mypy 69 无新模式。Session 轨(S1/S2/S4)全完。
+**需 zy 核实:** 1024MB/10000 默认;容错的扣减语义。触发器(同 S1)待后续接张亮 cron。

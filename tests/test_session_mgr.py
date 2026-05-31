@@ -154,9 +154,15 @@ def test_default_config_returns_ttl_seconds(monkeypatch):
         session_mgr._default_config,
     )
     # Avoid instantiating real Settings (anthropic_api_key required): patch loader.
+    # _default_config() now also reads the capacity fields, so the stub must
+    # provide them too.
     monkeypatch.setattr(
         "fleetent.config.Settings",
-        lambda: type("S", (), {"session_ttl_days": 30})(),
+        lambda: type(
+            "S",
+            (),
+            {"session_ttl_days": 30, "session_max_total_mb": 1024, "session_max_count": 10000},
+        )(),
     )
     cfg = session_mgr._default_config()
     assert cfg["ttl_seconds"] == 30 * 86400
@@ -291,3 +297,252 @@ async def test_cleanup_param_overrides_default_config(sessions_dir, monkeypatch)
 
     assert removed == []
     assert (sessions_dir / "old.json").exists()
+
+
+# --- Capacity config: Settings fields + _default_config ---
+
+
+def test_settings_has_session_max_total_mb_default():
+    assert Settings.model_fields["session_max_total_mb"].default == 1024
+
+
+def test_settings_has_session_max_count_default():
+    assert Settings.model_fields["session_max_count"].default == 10000
+
+
+def test_default_config_returns_capacity_limits(monkeypatch):
+    # Avoid instantiating real Settings (anthropic_api_key required): patch loader.
+    monkeypatch.setattr(
+        "fleetent.config.Settings",
+        lambda: type(
+            "S",
+            (),
+            {"session_ttl_days": 30, "session_max_total_mb": 2, "session_max_count": 5},
+        )(),
+    )
+    cfg = session_mgr._default_config()
+    assert cfg["max_total_bytes"] == 2 * 1024 * 1024
+    assert cfg["max_count"] == 5
+    # TTL still present (extends, not replaces).
+    assert cfg["ttl_seconds"] == 30 * 86400
+
+
+# --- is_over_capacity pure function ---
+
+
+def test_is_over_capacity_size_over():
+    assert session_mgr.is_over_capacity(101, 1, max_total_bytes=100, max_count=10) is True
+
+
+def test_is_over_capacity_count_over():
+    assert session_mgr.is_over_capacity(10, 11, max_total_bytes=100, max_count=10) is True
+
+
+def test_is_over_capacity_neither_over():
+    assert session_mgr.is_over_capacity(50, 5, max_total_bytes=100, max_count=10) is False
+
+
+def test_is_over_capacity_size_dimension_disabled():
+    # max_total_bytes=0 disables the size dimension; huge total does not trigger.
+    assert session_mgr.is_over_capacity(10_000, 5, max_total_bytes=0, max_count=10) is False
+
+
+def test_is_over_capacity_count_dimension_disabled():
+    assert session_mgr.is_over_capacity(50, 10_000, max_total_bytes=100, max_count=0) is False
+
+
+def test_is_over_capacity_both_disabled():
+    assert session_mgr.is_over_capacity(10_000, 10_000, max_total_bytes=0, max_count=0) is False
+
+
+# --- enforce_capacity: size dimension LRU eviction ---
+
+
+async def test_enforce_capacity_evicts_oldest_until_size_under_limit(sessions_dir):
+    # Three sessions of ~equal size; oldest must go first.
+    for sid, mtime in (("old", 100.0), ("mid", 200.0), ("new", 300.0)):
+        await session_mgr.save(sid, [{"role": "user", "content": "x" * 50}])
+        _set_mtime(sessions_dir / f"{sid}.json", mtime)
+
+    sizes = {p.name: p.stat().st_size for p in sessions_dir.glob("*.json")}
+    total = sum(sizes.values())
+    # Limit allows only two files: must drop exactly the oldest one.
+    limit = total - 1
+
+    removed = session_mgr.enforce_capacity(max_total_bytes=limit, max_count=0)
+
+    assert removed == ["old"]
+    assert not (sessions_dir / "old.json").exists()
+    assert (sessions_dir / "mid.json").exists()
+    assert (sessions_dir / "new.json").exists()
+
+
+async def test_enforce_capacity_no_eviction_when_under_size_limit(sessions_dir):
+    await session_mgr.save("a", [{"role": "user", "content": "x"}])
+    _set_mtime(sessions_dir / "a.json", 100.0)
+
+    removed = session_mgr.enforce_capacity(max_total_bytes=10_000_000, max_count=0)
+
+    assert removed == []
+    assert (sessions_dir / "a.json").exists()
+
+
+async def test_enforce_capacity_empty_dir_returns_empty(sessions_dir):
+    removed = session_mgr.enforce_capacity(max_total_bytes=100, max_count=100)
+    assert removed == []
+
+
+async def test_enforce_capacity_does_not_over_evict(sessions_dir):
+    # Two small + one large; dropping just the oldest large should suffice.
+    await session_mgr.save("big_old", [{"role": "user", "content": "x" * 500}])
+    await session_mgr.save("small_mid", [{"role": "user", "content": "y"}])
+    await session_mgr.save("small_new", [{"role": "user", "content": "z"}])
+    _set_mtime(sessions_dir / "big_old.json", 100.0)
+    _set_mtime(sessions_dir / "small_mid.json", 200.0)
+    _set_mtime(sessions_dir / "small_new.json", 300.0)
+
+    sizes = {p.name: p.stat().st_size for p in sessions_dir.glob("*.json")}
+    # Limit fits the two small ones but not the big one.
+    limit = sizes["small_mid.json"] + sizes["small_new.json"]
+
+    removed = session_mgr.enforce_capacity(max_total_bytes=limit, max_count=0)
+
+    assert removed == ["big_old"]
+    assert (sessions_dir / "small_mid.json").exists()
+    assert (sessions_dir / "small_new.json").exists()
+
+
+# --- enforce_capacity: count dimension + dimension disabling ---
+
+
+async def test_enforce_capacity_evicts_oldest_until_count_under_limit(sessions_dir):
+    for sid, mtime in (("a", 100.0), ("b", 200.0), ("c", 300.0), ("d", 400.0)):
+        await session_mgr.save(sid, [{"role": "user", "content": "x"}])
+        _set_mtime(sessions_dir / f"{sid}.json", mtime)
+
+    removed = session_mgr.enforce_capacity(max_total_bytes=0, max_count=2)
+
+    # 4 files, max 2 -> drop the two oldest (a, b) in order.
+    assert removed == ["a", "b"]
+    assert not (sessions_dir / "a.json").exists()
+    assert not (sessions_dir / "b.json").exists()
+    assert (sessions_dir / "c.json").exists()
+    assert (sessions_dir / "d.json").exists()
+
+
+async def test_enforce_capacity_both_dimensions_disabled_evicts_nothing(sessions_dir):
+    for sid in ("a", "b", "c"):
+        await session_mgr.save(sid, [{"role": "user", "content": "x" * 100}])
+
+    removed = session_mgr.enforce_capacity(max_total_bytes=0, max_count=0)
+
+    assert removed == []
+    assert len(list(sessions_dir.glob("*.json"))) == 3
+
+
+async def test_enforce_capacity_disabled_dimension_not_a_stop_condition(sessions_dir):
+    # Count is over (3 > 2) but size dimension is disabled; eviction driven by count.
+    for sid, mtime in (("a", 100.0), ("b", 200.0), ("c", 300.0)):
+        await session_mgr.save(sid, [{"role": "user", "content": "x"}])
+        _set_mtime(sessions_dir / f"{sid}.json", mtime)
+
+    removed = session_mgr.enforce_capacity(max_total_bytes=0, max_count=2)
+
+    assert removed == ["a"]
+
+
+async def test_enforce_capacity_evicts_until_both_constraints_satisfied(sessions_dir):
+    # Size limit alone would drop 1; count limit forces dropping more.
+    for sid, mtime in (("a", 100.0), ("b", 200.0), ("c", 300.0), ("d", 400.0)):
+        await session_mgr.save(sid, [{"role": "user", "content": "x"}])
+        _set_mtime(sessions_dir / f"{sid}.json", mtime)
+
+    sizes = {p.name: p.stat().st_size for p in sessions_dir.glob("*.json")}
+    total = sum(sizes.values())
+    # Size limit only needs one dropped, but count=1 forces dropping three.
+    removed = session_mgr.enforce_capacity(max_total_bytes=total - 1, max_count=1)
+
+    assert removed == ["a", "b", "c"]
+    assert (sessions_dir / "d.json").exists()
+
+
+# --- enforce_capacity: fall back to _default_config ---
+
+
+async def test_enforce_capacity_falls_back_to_default_config(sessions_dir, monkeypatch):
+    monkeypatch.setattr(
+        session_mgr,
+        "_default_config",
+        lambda: {"ttl_seconds": 100.0, "max_total_bytes": 0.0, "max_count": 2.0},
+    )
+    for sid, mtime in (("a", 100.0), ("b", 200.0), ("c", 300.0)):
+        await session_mgr.save(sid, [{"role": "user", "content": "x"}])
+        _set_mtime(sessions_dir / f"{sid}.json", mtime)
+
+    removed = session_mgr.enforce_capacity()
+
+    assert removed == ["a"]
+
+
+# --- enforce_capacity: skip tmp + slash session_id restore ---
+
+
+async def test_enforce_capacity_skips_json_tmp(sessions_dir):
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    tmp = sessions_dir / "writing.json.tmp"
+    tmp.write_text("[]")
+    _set_mtime(tmp, 1.0)
+    await session_mgr.save("a", [{"role": "user", "content": "x"}])
+    _set_mtime(sessions_dir / "a.json", 100.0)
+
+    # Force eviction by count; tmp must not be counted or deleted.
+    removed = session_mgr.enforce_capacity(max_total_bytes=0, max_count=0)
+
+    assert tmp.exists()
+    assert removed == []
+
+
+async def test_enforce_capacity_slash_session_id_restored(sessions_dir):
+    sid = "u123/dm:U08XYZ"
+    path = sessions_dir / f"{sid}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[]")
+    _set_mtime(path, 100.0)
+    await session_mgr.save("newer", [{"role": "user", "content": "x"}])
+    _set_mtime(sessions_dir / "newer.json", 300.0)
+
+    removed = session_mgr.enforce_capacity(max_total_bytes=0, max_count=1)
+
+    assert removed == [sid]
+    assert not (sessions_dir / f"{sid}.json").exists()
+    assert (sessions_dir / "newer.json").exists()
+
+
+# --- enforce_capacity: delete fault tolerance ---
+
+
+async def test_enforce_capacity_unlink_failure_does_not_abort_batch(sessions_dir, monkeypatch):
+    # bad is oldest (tried first and fails); good is next-oldest and must still be deleted.
+    for sid, mtime in (("bad", 100.0), ("good", 200.0), ("keep", 300.0)):
+        await session_mgr.save(sid, [{"role": "user", "content": "x"}])
+        _set_mtime(sessions_dir / f"{sid}.json", mtime)
+
+    real_unlink = session_mgr.Path.unlink
+
+    def flaky_unlink(self, *args, **kwargs):
+        if self.name == "bad.json":
+            raise OSError("boom")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(session_mgr.Path, "unlink", flaky_unlink)
+
+    # Limit allows two files -> exactly one eviction is attempted (the oldest, bad).
+    # bad's unlink fails but the batch must not abort or over-evict healthy sessions;
+    # the accumulator is decremented per eviction attempt so a stuck file does not
+    # cascade into deleting good/keep.
+    removed = session_mgr.enforce_capacity(max_total_bytes=0, max_count=2)
+
+    assert removed == []  # bad's deletion failed, so it is not reported as removed
+    assert (sessions_dir / "bad.json").exists()
+    assert (sessions_dir / "good.json").exists()
+    assert (sessions_dir / "keep.json").exists()

@@ -14,6 +14,7 @@ logger = structlog.get_logger(__name__)
 SESSIONS_DIR = Path("data/sessions")
 
 _SECONDS_PER_DAY = 86_400
+_BYTES_PER_MB = 1024 * 1024
 
 _locks: dict[str, asyncio.Lock] = {}
 
@@ -22,7 +23,11 @@ def _default_config() -> dict[str, float]:
     from fleetent.config import Settings
 
     s = Settings()
-    return {"ttl_seconds": s.session_ttl_days * _SECONDS_PER_DAY}
+    return {
+        "ttl_seconds": s.session_ttl_days * _SECONDS_PER_DAY,
+        "max_total_bytes": s.session_max_total_mb * _BYTES_PER_MB,
+        "max_count": s.session_max_count,
+    }
 
 
 def is_expired(mtime: float, now: float, ttl_seconds: float) -> bool:
@@ -74,6 +79,115 @@ def cleanup_expired(
         logger.info("session_cleanup_deleted", session_id=session_id)
 
     logger.info("session_cleanup_done", removed_count=len(removed), ttl_seconds=ttl_seconds)
+    return removed
+
+
+def is_over_capacity(
+    total_bytes: float,
+    count: float,
+    max_total_bytes: float,
+    max_count: float,
+) -> bool:
+    """Return True when an enabled capacity dimension exceeds its limit.
+
+    A limit of 0 (or any non-positive value) disables that dimension: it is
+    neither used to detect over-capacity nor as a stop condition. When both
+    dimensions are disabled the system is never over capacity.
+    """
+    if max_total_bytes > 0 and total_bytes > max_total_bytes:
+        return True
+    return max_count > 0 and count > max_count
+
+
+def _scan_sessions() -> list[tuple[str, int, float]]:
+    """Collect `(session_id, size, mtime)` for every persisted session file.
+
+    Recurses `SESSIONS_DIR` so session_ids containing `/` (stored in
+    subdirectories) are restored; `.json.tmp` atomic-write temporaries are
+    excluded so they are neither counted nor evicted.
+    """
+    if not SESSIONS_DIR.exists():
+        return []
+
+    entries: list[tuple[str, int, float]] = []
+    for path in SESSIONS_DIR.rglob("*.json"):
+        if path.name.endswith(".json.tmp"):
+            continue
+        stat = path.stat()
+        session_id = path.relative_to(SESSIONS_DIR).with_suffix("").as_posix()
+        entries.append((session_id, stat.st_size, stat.st_mtime))
+    return entries
+
+
+def enforce_capacity(
+    max_total_bytes: float | None = None,
+    max_count: float | None = None,
+) -> list[str]:
+    """Evict oldest sessions (LRU by mtime) until both capacity limits hold.
+
+    Two independent limits: total session-file bytes and total session count.
+    Either exceeding its limit triggers eviction; sessions are deleted in
+    ascending mtime order (least-recently-active first) until both *enabled*
+    limits are satisfied. A limit of 0 (or None falling back to a 0 default)
+    disables that dimension. When both are disabled nothing is evicted.
+
+    Deletion is fault-tolerant: a single file's failure is logged and skipped
+    without aborting the batch, and the running accumulators are decremented
+    per eviction attempt so a stuck file does not cascade into over-eviction
+    of healthy sessions. `.json.tmp` temporaries are never touched.
+
+    Args:
+        max_total_bytes: Total-size limit in bytes; falls back to
+            `_default_config()` when None. Non-positive disables the dimension.
+        max_count: Max session count; falls back to `_default_config()` when
+            None. Non-positive disables the dimension.
+
+    Returns:
+        The session_ids of the files that were successfully deleted, in
+        eviction (oldest-first) order.
+    """
+    if max_total_bytes is None:
+        max_total_bytes = _default_config()["max_total_bytes"]
+    if max_count is None:
+        max_count = _default_config()["max_count"]
+
+    entries = _scan_sessions()
+    total_bytes = float(sum(size for _, size, _ in entries))
+    count = float(len(entries))
+
+    if not is_over_capacity(total_bytes, count, max_total_bytes, max_count):
+        return []
+
+    reasons: list[str] = []
+    if max_total_bytes > 0 and total_bytes > max_total_bytes:
+        reasons.append("total_bytes")
+    if max_count > 0 and count > max_count:
+        reasons.append("count")
+
+    removed: list[str] = []
+    for session_id, size, _ in sorted(entries, key=lambda e: e[2]):
+        if not is_over_capacity(total_bytes, count, max_total_bytes, max_count):
+            break
+        # Decrement on attempt so a failed deletion cannot cascade-evict healthy
+        # sessions; the stuck file is simply skipped and retried on the next run.
+        total_bytes -= size
+        count -= 1
+        path = SESSIONS_DIR / f"{session_id}.json"
+        try:
+            path.unlink()
+        except OSError as exc:
+            logger.warning("session_capacity_delete_failed", session_id=session_id, error=str(exc))
+            continue
+        removed.append(session_id)
+        logger.info("session_capacity_evicted", session_id=session_id)
+
+    logger.info(
+        "session_capacity_done",
+        evicted_count=len(removed),
+        reasons=reasons,
+        max_total_bytes=max_total_bytes,
+        max_count=max_count,
+    )
     return removed
 
 
