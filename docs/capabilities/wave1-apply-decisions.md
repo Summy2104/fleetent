@@ -47,3 +47,17 @@
 
 **影响：** 477 passed，ruff/mypy 无新增。
 **需 zy 核实：** 每图 1000 token 占位是否合理;vision task_type 默认指向(本次用 Sonnet vision,部署可改);run_stream 的 images 参数形态。
+
+## compression-dual-threshold (AR12) — feat/compression-dual-threshold
+
+**实现：** context_mgr 双阈值——`tmax_ratio`(触发,默认0.8)/`tretained_ratio`(目标,默认0.6);`maybe_compress(..., force=False)` 触发改读 tmax、force 实现手动 /compact;新增 `compress_for_context_overflow()` 错误触发入口;`_select_tail` 按目标线动态收缩尾部、tool-pair 完整性优先(可略超目标线、不截断 tool 对);system 头部继续单独保留(prompt-cache 依赖不破坏)。复用 AR21 改过的 estimate_tokens。
+
+**D5 移除 context_compress_threshold：** config.py 删字段 + 新增 context_tmax_ratio/context_tretained_ratio;_default_config 改返回新键;.env.example 迁移(CONTEXT_COMPRESS_THRESHOLD→CONTEXT_TMAX_RATIO + 新增 CONTEXT_TRETAINED_RATIO);测试键更新 + 加 `test_context_compress_threshold_removed` 守卫。src 零残留。
+
+**自解冲突：**
+1. 非法配置(tretained≥tmax)选 **raise ValueError** 而非 clamp(spec 二选一,raise 更明确可断言)。
+2. 摘要占位 token 用 `_SUMMARY_OVERHEAD_TOKENS=512`(对齐 _summarize 的 max_tokens=512)投影尾部,避免压后超目标。
+3. 手动触发用 `force` 参数(最小侵入)、错误触发用独立函数 `compress_for_context_overflow`(语义清晰,design D4 留作实现决策)。
+
+**影响：** 489 passed,ruff/mypy 无新增。解锁 prompt-cache(其依赖 AR12 的 system 头部保留)。
+**需 zy 核实：** 非法配置 raise(非 clamp);_SUMMARY_OVERHEAD_TOKENS=512 估算;force 参数 vs 独立函数的入口形态。

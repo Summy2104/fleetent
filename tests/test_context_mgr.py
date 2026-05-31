@@ -1,13 +1,17 @@
-from fleetent.context_mgr import _keep_tail, estimate_tokens, maybe_compress
+import pytest
+
+from fleetent.context_mgr import (
+    _keep_tail,
+    compress_for_context_overflow,
+    estimate_tokens,
+    maybe_compress,
+)
 
 
 def _make_messages(n: int) -> list[dict]:
     return [
         {"role": "system", "content": "You are helpful."},
-        *[
-            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 500}
-            for i in range(n)
-        ],
+        *[{"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 500} for i in range(n)],
     ]
 
 
@@ -40,7 +44,8 @@ def test_compress_triggers_above_threshold(monkeypatch):
     ]
     config = {
         "max_tokens": 10_000,
-        "compress_threshold": 0.5,
+        "tmax_ratio": 0.5,
+        "tretained_ratio": 0.3,
         "keep_recent": 4,
     }
     result = maybe_compress(big_msgs, config=config)
@@ -48,10 +53,132 @@ def test_compress_triggers_above_threshold(monkeypatch):
     assert result is not big_msgs  # new list
     roles = [m["role"] for m in result if isinstance(m, dict)]
     assert roles[0] == "system"  # system prompt preserved first
-    assert any(
-        "Summary" in str(m.get("content", "")) for m in result
-    )  # summary injected
+    assert any("Summary" in str(m.get("content", "")) for m in result)  # summary injected
     assert len([m for m in result if m.get("role") != "system"]) <= 5  # summary + keep_recent
+
+
+def test_no_compress_when_at_or_below_tmax(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    monkeypatch.setattr(cm, "_summarize", lambda msgs: "Summary.")
+    msgs = [
+        {"role": "system", "content": "sys"},
+        *[{"role": "user", "content": "x" * 2000} for _ in range(2)],
+    ]
+    # estimate well under tmax line; must return same object untouched
+    config = {"max_tokens": 10_000, "tmax_ratio": 0.8, "tretained_ratio": 0.6, "keep_recent": 4}
+    result = maybe_compress(msgs, config=config)
+    assert result is msgs
+
+
+def test_compress_triggers_when_above_tmax(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    monkeypatch.setattr(cm, "_summarize", lambda msgs: "Summary.")
+    big_msgs = [
+        {"role": "system", "content": "sys"},
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 2000}
+            for i in range(50)
+        ],
+    ]
+    config = {"max_tokens": 10_000, "tmax_ratio": 0.5, "tretained_ratio": 0.3, "keep_recent": 4}
+    result = maybe_compress(big_msgs, config=config)
+    assert result is not big_msgs
+
+
+def test_compress_falls_back_to_tretained_target(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    monkeypatch.setattr(cm, "_summarize", lambda msgs: "S")
+    # Many large messages; keep_recent alone (10) would stay well over tretained.
+    big_msgs = [
+        {"role": "system", "content": "sys"},
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 4000}
+            for i in range(60)
+        ],
+    ]
+    config = {"max_tokens": 10_000, "tmax_ratio": 0.8, "tretained_ratio": 0.6, "keep_recent": 10}
+    result = maybe_compress(big_msgs, config=config)
+    target = int(10_000 * 0.6)
+    assert estimate_tokens(result) <= target
+
+
+def test_compress_keeps_tool_pair_whole_even_above_target(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    monkeypatch.setattr(cm, "_summarize", lambda msgs: "S")
+    caller = {"role": "assistant", "content": "c" * 4000}
+    tool_res = {"role": "tool", "content": "r" * 4000}
+    big_msgs = [
+        {"role": "system", "content": "sys"},
+        *[{"role": "user", "content": "x" * 4000} for _ in range(30)],
+        caller,
+        tool_res,
+    ]
+    # tretained tiny so a single message already exceeds it; tool pair must stay whole.
+    config = {"max_tokens": 10_000, "tmax_ratio": 0.8, "tretained_ratio": 0.05, "keep_recent": 1}
+    result = maybe_compress(big_msgs, config=config)
+    # The orphaned tool result must be preceded by its caller (no truncation mid-pair).
+    non_system = [m for m in result if m.get("role") != "system"]
+    assert tool_res in non_system
+    if tool_res in non_system:
+        idx = non_system.index(tool_res)
+        assert non_system[idx - 1] is caller
+
+
+def test_compress_spacing_below_tmax_after_compress(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    monkeypatch.setattr(cm, "_summarize", lambda msgs: "S")
+    big_msgs = [
+        {"role": "system", "content": "sys"},
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 4000}
+            for i in range(60)
+        ],
+    ]
+    config = {"max_tokens": 10_000, "tmax_ratio": 0.8, "tretained_ratio": 0.6, "keep_recent": 10}
+    result = maybe_compress(big_msgs, config=config)
+    trigger = int(10_000 * 0.8)
+    assert estimate_tokens(result) < trigger  # spacing: won't immediately re-trigger
+
+
+def test_illegal_config_tretained_ge_tmax_raises():
+    config = {"max_tokens": 10_000, "tmax_ratio": 0.6, "tretained_ratio": 0.6, "keep_recent": 4}
+    with pytest.raises(ValueError):
+        maybe_compress([{"role": "user", "content": "hi"}], config=config)
+
+
+def test_manual_force_compress_below_tmax(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    monkeypatch.setattr(cm, "_summarize", lambda msgs: "S")
+    # Small conversation, nowhere near tmax; force must still compress.
+    msgs = [
+        {"role": "system", "content": "sys"},
+        *[{"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 200} for i in range(20)],
+    ]
+    config = {"max_tokens": 100_000, "tmax_ratio": 0.8, "tretained_ratio": 0.6, "keep_recent": 4}
+    assert maybe_compress(msgs, config=config) is msgs  # auto: no trigger
+    forced = maybe_compress(msgs, config=config, force=True)
+    assert forced is not msgs
+    assert any("summary" in str(m.get("content", "")).lower() for m in forced)
+
+
+def test_context_overflow_entrypoint_compresses(monkeypatch):
+    import fleetent.context_mgr as cm
+
+    monkeypatch.setattr(cm, "_summarize", lambda msgs: "S")
+    msgs = [
+        {"role": "system", "content": "sys"},
+        *[{"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 200} for i in range(20)],
+    ]
+    config = {"max_tokens": 100_000, "tmax_ratio": 0.8, "tretained_ratio": 0.6, "keep_recent": 4}
+    result = compress_for_context_overflow(msgs, config=config)
+    assert result is not msgs
+    assert any("summary" in str(m.get("content", "")).lower() for m in result)
 
 
 def test_keep_tail_identity_not_equality():
@@ -149,3 +276,15 @@ def test_estimate_tokens_image_block_uses_fixed_placeholder():
 def test_estimate_tokens_text_unchanged():
     msgs = [{"role": "user", "content": "a" * 400}]
     assert estimate_tokens(msgs) > 100
+
+
+def test_default_config_returns_dual_threshold_keys(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    from fleetent.context_mgr import _default_config
+
+    cfg = _default_config()
+    assert cfg["tmax_ratio"] == 0.8
+    assert cfg["tretained_ratio"] == 0.6
+    assert "compress_threshold" not in cfg
+    assert cfg["max_tokens"] == 200_000
+    assert cfg["keep_recent"] == 10
