@@ -190,3 +190,15 @@
 
 **影响:** 658 passed,迁移测试 5 passed,mypy 68=基线。
 **⚠️ 需 zy + 张亮 核实:** agent_store 字段命名/语义/迁移;opt-in 对 CLI 的行为变更(默认 agent 白名单缓解未做)。
+
+## session-ttl-cleanup (S1) — feat/session-ttl-cleanup
+
+**实现:** `is_expired(mtime,now,ttl)` 纯函数;`cleanup_expired(ttl_seconds=None,*,_now=None)`:rglob("*.json") 递归(带 `/` 的 session_id 经 `path.relative_to(SESSIONS_DIR).with_suffix("").as_posix()` 还原)、跳过 .json.tmp、过期删除返回 session_id 列表、单文件失败容错 log.warning 继续、汇总 log;最后活跃用文件 mtime;config 加 session_ttl_days=30 + _default_config;参数>Settings>默认。**纯清理原语,触发器(cron,跨张亮 scheduling)留后续**。
+
+**自解冲突:**
+1. 加 `_now` keyword-only 测试钩子(伪造 mtime 还需可控"现在"做确定性断言,不 sleep)。
+2. **发现 save() 既有局限:save() 只 mkdir(SESSIONS_DIR),不为含 `/` 的 session_id 建子目录 → `save("u123/dm:...")` 会 FileNotFoundError**。本 change 不碰 save(测试直接建子目录文件);**此为 save 既有 bug,标记供 zy 后续处理**。
+3. test structlog 全局污染(test_config 的 configure_logging 残留)→ test_session_mgr autouse `structlog.reset_defaults()` 隔离。
+
+**影响:** 670 passed;mypy 69=68+S1 的 _default_config Settings()(既有模式非新)。
+**⚠️ 需 zy 核实:** save() 对带 `/` session_id 不建子目录的既有 bug(本次未修,建议后续修);TTL 触发器后续接张亮 cron。
