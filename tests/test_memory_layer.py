@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 from fleetent import memory_layer
 from fleetent.intelligence import vector_store
-from tests.test_migrations import apply_migrations
+from tests.integration.test_migrations import apply_migrations
 
 
 def test_memory_layer_public_api_exports_semantic_store_contract():

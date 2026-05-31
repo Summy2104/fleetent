@@ -3,9 +3,9 @@
 Smoke tests for fleetent. Requires a running server with ANTHROPIC_API_KEY set.
 
 Usage:
-  uv run python tests/smoke/smoke.py                        # auto-creates test user
-  MINI_AGENT_TEST_KEY=ma-xxx uv run python tests/smoke/smoke.py   # use existing key
-  MINI_AGENT_BASE_URL=http://host:8000 uv run python tests/smoke/smoke.py
+  uv run python tests/e2e/test_smoke.py                        # auto-creates test user
+  MINI_AGENT_TEST_KEY=ma-xxx uv run python tests/e2e/test_smoke.py   # use existing key
+  MINI_AGENT_BASE_URL=http://host:8000 uv run python tests/e2e/test_smoke.py
 """
 
 from __future__ import annotations
@@ -15,9 +15,16 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from contextlib import suppress
 
 import httpx
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("FLEETENT_RUN_E2E") != "1",
+    reason="set FLEETENT_RUN_E2E=1 and start the service to run smoke e2e tests",
+)
 
 BASE_URL = os.getenv("MINI_AGENT_BASE_URL", "http://localhost:8000")
 
@@ -98,6 +105,14 @@ def get_api_key() -> str:
 
     print(f"{RED}Could not parse api_key from admin output:{RESET}\n{result.stdout}")
     sys.exit(1)
+
+
+@pytest.fixture
+def client() -> Iterator[httpx.Client]:
+    api_key = get_api_key()
+    headers = {"Authorization": f"Bearer {api_key}"}
+    with httpx.Client(base_url=BASE_URL, headers=headers) as test_client:
+        yield test_client
 
 
 # ── test cases ────────────────────────────────────────────────────────────────

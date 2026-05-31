@@ -3,7 +3,7 @@ import sqlite3
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
-from tests.test_migrations import apply_migrations
+from tests.integration.test_migrations import apply_migrations
 
 
 async def test_reflection_public_api_is_importable():

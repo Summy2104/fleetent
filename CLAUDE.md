@@ -143,9 +143,16 @@ data/
 
 ### 测试文件约定
 
-- 命名：`tests/test_{模块名}.py`，一模块一文件
+- 测试按成本和依赖范围分层：
+  - `tests/unit/`：单模块行为，mock LLM、数据库、HTTP、sandbox 等外部依赖，作为新增单元测试默认位置
+  - `tests/integration/`：多模块协作、SQLite/Alembic/FastAPI、observability trace / usage / logging 等需要真实本地组件的测试
+  - `tests/e2e/`：启动服务或走 CLI/HTTP/IM 完整链路的端到端测试；默认不进入 PR 门禁，真实服务 smoke 需显式开启
+  - `tests/evaluation/`：memory、reflection、long-term context、knowledge-base 等效果评估；不得接入真实 LLM / embedding 服务作为默认测试
+- `tests/` 根目录保留兼容期，现有平铺测试可继续被 `uv run pytest` 收集；后续新增测试不得继续平铺到根目录
+- 命名：`test_{模块名}.py`，一模块一文件
 - 每个测试函数只测一个行为，不在同一函数里断言多个不相关的事情
 - `permission_gate` 测试必须传短超时：`PermissionGate(medium_timeout=0.1)`
+- TDD 红绿循环优先运行最近相关分层命令，例如 `uv run pytest tests/unit -x -q` 或 `uv run pytest tests/integration -x -q`；收尾必须运行 `uv run pytest -x -q`
 
 ---
 
@@ -167,6 +174,10 @@ data/
 uv sync                          # 安装依赖
 uv run pytest                    # 运行测试
 uv run pytest -x -q              # fail-fast
+uv run pytest tests/unit         # 单元测试
+uv run pytest tests/integration  # 集成测试
+uv run pytest tests/e2e          # 端到端测试
+uv run pytest tests/evaluation   # 效果评估测试
 uv run ruff check src tests      # lint
 uv run mypy src                  # 类型检查
 uv run fleetent "hello"        # CLI

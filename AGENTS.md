@@ -66,6 +66,10 @@ re-export shim，但 shim 不承载业务逻辑。
 - `uv sync`：安装依赖。
 - `uv run pytest`：运行完整测试。
 - `uv run pytest -x -q`：fail-fast 测试，TDD 循环使用。
+- `uv run pytest tests/unit` / `make test-unit`：运行快速单元测试。
+- `uv run pytest tests/integration` / `make test-integration`：运行集成测试。
+- `uv run pytest tests/e2e` / `make test-e2e`：运行端到端测试；真实服务 smoke 需显式开启。
+- `uv run pytest tests/evaluation` / `make test-evaluation`：运行效果评估测试。
 - `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py`：检查已迁移 package 是否跨模块 import internal 实现。
 - `uv run ruff format src tests`：格式化。
 - `uv run ruff check src tests`：lint。
@@ -92,6 +96,17 @@ re-export shim，但 shim 不承载业务逻辑。
 ## Testing Guidelines
 
 pytest 配置为 `asyncio_mode = auto`，async 测试无需 `@pytest.mark.asyncio`。
+
+测试按成本和依赖范围分层：
+
+- `tests/unit/`：单模块行为，mock LLM、数据库、HTTP、sandbox 等外部依赖，作为新增单元测试默认位置。
+- `tests/integration/`：多模块协作、SQLite/Alembic/FastAPI、observability trace / usage / logging 等需要真实本地组件的测试。
+- `tests/e2e/`：启动服务或走 CLI/HTTP/IM 完整链路的端到端测试；默认不进入 PR 门禁，真实服务 smoke 需显式开启。
+- `tests/evaluation/`：memory、reflection、long-term context、knowledge-base 等效果评估；不得接入真实 LLM / embedding 服务作为默认测试。
+- `tests/` 根目录保留兼容期，现有平铺测试可继续被 `uv run pytest` 收集；后续新增测试不得继续平铺到根目录。
+
+TDD 红绿循环优先运行最近相关分层命令，例如 `uv run pytest tests/unit -x -q` 或
+`uv run pytest tests/integration -x -q`；收尾必须运行 `uv run pytest -x -q`。
 
 测试必须隔离外部依赖：LLM 调用 patch `get_client_and_config`，数据库测试用 `tmp_path` 或统一 DB fixture 隔离（legacy store 迁移前可 monkeypatch `DB_PATH`），MCP / sandbox / 外部 HTTP 用 `respx` 或 `unittest.mock`。每个测试函数只测一个行为；`permission_gate` 测试使用短超时：`PermissionGate(medium_timeout=0.1)`。
 

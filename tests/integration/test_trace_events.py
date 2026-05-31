@@ -13,7 +13,7 @@ from fleetent.observability import (
     record_injected_context,
     record_trace_event,
 )
-from tests.test_migrations import apply_migrations
+from tests.integration.test_migrations import apply_migrations
 
 
 def test_trace_event_public_api_can_be_constructed():
