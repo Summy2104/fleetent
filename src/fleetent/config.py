@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     session_cleanup_interval_seconds: float = 3600.0
     agent_max_turns: int = 50
     agent_max_consecutive_failures: int = 3
+    # Coarse loop detection (AR4): how many times one tool may repeat (same args,
+    # signal A; or same successful result, signal B) within the detection window
+    # before a hit. First hit warns the model; a repeat after that force-stops with
+    # `loop_detected`. The detection window is derived from this and not separately
+    # configurable, so the observable threshold semantics cannot drift.
+    agent_loop_repeat_threshold: int = 3
+    # Optional escape hatch: top-level argument keys stripped before computing the
+    # signal-A fingerprint (e.g. a volatile timestamp/attempt counter). Empty by
+    # default; signal B already covers volatile-argument blind spots.
+    loop_detect_ignore_arg_keys: list[str] = []
     provider_failure_threshold: int = 3
     provider_cooldown_seconds: int = 60
     log_format: str = "console"

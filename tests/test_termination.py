@@ -55,6 +55,37 @@ def test_loop_state_is_mutable() -> None:
     assert state.approval_rejected is True
 
 
+def test_loop_state_loop_detection_fields_default_empty() -> None:
+    # Backward-compatible: history empty, warning flags False so existing
+    # checkers and callers that never touch them are unaffected.
+    state = LoopState()
+    assert state.tool_history == []
+    assert state.loop_warning_requested is False
+    assert state.loop_warning_injected is False
+
+
+def test_loop_state_tool_history_holds_four_tuples() -> None:
+    state = LoopState()
+    state.tool_history.append(("read_file", "fp", "digest", True))
+    assert state.tool_history == [("read_file", "fp", "digest", True)]
+
+
+def test_loop_state_history_fifo_truncated_to_window() -> None:
+    # FIFO truncation keeps only the most recent `window` entries.
+    state = LoopState()
+    for i in range(20):
+        state.record_tool_call(f"t{i}", "fp", "d", True, window=6)
+    assert len(state.tool_history) == 6
+    assert state.tool_history[0][0] == "t14"
+    assert state.tool_history[-1][0] == "t19"
+
+
+def test_loop_state_record_tool_call_appends() -> None:
+    state = LoopState()
+    state.record_tool_call("read_file", "fp-x", "d1", True, window=6)
+    assert state.tool_history == [("read_file", "fp-x", "d1", True)]
+
+
 # ── TerminationController ───────────────────────────────────────────────────────
 
 

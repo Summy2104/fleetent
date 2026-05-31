@@ -228,10 +228,10 @@ async def test_run_approval_rejected_terminates(mock_client, monkeypatch):
     assert any(isinstance(m, dict) and m.get("role") == "tool" for m in captured["messages"])
 
 
-def test_build_controller_never_yields_reserved_reasons():
-    # Reserved reasons (loop_detected/budget_exceeded/cancelled) have no checker,
-    # so even with every state flag tripped only active reasons can fire.
-    controller = al._build_controller(1, 1, include_approval=True)
+def test_build_controller_empty_history_yields_only_active_reasons():
+    # With no tool history the loop-detection checker stays silent, so even with
+    # every state flag tripped only active reasons can fire (priority unchanged).
+    controller, _ = al._build_controller(1, 1, include_approval=True, loop_repeat_threshold=3)
     reason = controller.should_stop(
         LoopState(turn=99, consecutive_failures=99, approval_rejected=True)
     )
@@ -1646,3 +1646,173 @@ async def test_run_stream_injected_skill_survives_concurrent_reload(
     # already-injected prompt still carries it.
     assert "<name>deploy</name>" in system_text
     assert sr.match("please deploy code to servers") is None
+
+
+# ── loop detection (AR4) ─────────────────────────────────────────────────────
+
+
+def _tool_resp_seq(name: str, args: str, n: int) -> list[MagicMock]:
+    """n tool-call responses for `name`/`args` with unique call ids per turn."""
+    return [_tool_resp(name, args=args, call_id=f"tc-{i}") for i in range(n)]
+
+
+async def test_run_signal_a_warns_then_terminates(mock_client):
+    # Same tool + same args repeatedly. threshold=2 → window 6.
+    # turn1,2: warning requested (history 1,2 → 2 repeats) then injected.
+    # turn3,4: repeat after warning injected → loop_detected.
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=_tool_resp_seq("read_file", '{"path": "a"}', 10)
+    )
+    with (
+        patch.object(al, "dispatch", lambda name, args, **kw: "same result"),
+        patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)),
+    ):
+        result = await al.run(
+            [{"role": "user", "content": "go"}],
+            max_turns=50,
+            loop_repeat_threshold=2,
+        )
+    assert captured.get("stop_reason") == StopReason.loop_detected
+    assert result == ""
+    # Force-stopped well before max_turns.
+    assert mock_client.chat.completions.create.call_count < 10
+
+
+async def test_run_signal_a_injects_user_warning(mock_client):
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=_tool_resp_seq("read_file", '{"path": "a"}', 10)
+    )
+    with (
+        patch.object(al, "dispatch", lambda name, args, **kw: "same result"),
+        patch.object(al, "log_run", lambda *a, **kw: captured.update({"messages": a[2]})),
+    ):
+        await al.run(
+            [{"role": "user", "content": "go"}],
+            max_turns=50,
+            loop_repeat_threshold=2,
+        )
+    warnings = [
+        m
+        for m in captured["messages"]
+        if isinstance(m, dict) and m.get("role") == "user" and "重复" in str(m.get("content", ""))
+    ]
+    assert warnings, "expected a user-role loop warning message injected into the history"
+
+
+async def test_run_signal_b_warns_then_terminates(mock_client):
+    # Same tool, DIFFERENT args each turn, but identical successful result.
+    captured: dict = {}
+    responses = [
+        _tool_resp("search", args=f'{{"q": "term-{i}"}}', call_id=f"tc-{i}") for i in range(10)
+    ]
+    mock_client.chat.completions.create = AsyncMock(side_effect=responses)
+    with (
+        patch.object(al, "dispatch", lambda name, args, **kw: "identical stagnant result"),
+        patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)),
+    ):
+        await al.run(
+            [{"role": "user", "content": "go"}],
+            max_turns=50,
+            loop_repeat_threshold=2,
+        )
+    assert captured.get("stop_reason") == StopReason.loop_detected
+
+
+async def test_run_no_loop_when_args_and_results_vary(mock_client):
+    # Different args AND different results each turn → never a loop; runs to a
+    # final text reply normally.
+    captured: dict = {}
+    responses = [
+        _tool_resp("search", args=f'{{"q": "term-{i}"}}', call_id=f"tc-{i}") for i in range(4)
+    ] + [_text_resp("done")]
+    mock_client.chat.completions.create = AsyncMock(side_effect=responses)
+    calls = {"n": 0}
+
+    def varying_dispatch(name: str, args: str, **kw) -> str:
+        calls["n"] += 1
+        return f"result-{calls['n']}"
+
+    with (
+        patch.object(al, "dispatch", varying_dispatch),
+        patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)),
+    ):
+        result = await al.run(
+            [{"role": "user", "content": "go"}],
+            max_turns=50,
+            loop_repeat_threshold=2,
+        )
+    assert result == "done"
+    assert captured.get("stop_reason") == StopReason.normal
+
+
+async def test_run_stream_signal_a_terminates(mock_client):
+    captured: dict = {}
+
+    def looping_stream(*a, **k):
+        async def _gen():
+            c = MagicMock()
+            c.usage = None
+            c.choices = [MagicMock()]
+            c.choices[0].delta.content = None
+            tc_delta = MagicMock()
+            tc_delta.index = 0
+            tc_delta.id = "tc-x"
+            tc_delta.function.name = "read_file"
+            tc_delta.function.arguments = '{"path": "a"}'
+            c.choices[0].delta.tool_calls = [tc_delta]
+            c.choices[0].finish_reason = "tool_calls"
+            yield c
+
+        return _gen()
+
+    mock_client.chat.completions.create = AsyncMock(side_effect=looping_stream)
+    with (
+        patch.object(al, "dispatch", lambda name, args, **kw: "same result"),
+        patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)),
+    ):
+        events = [e async for e in al.run_stream("go", max_turns=50, loop_repeat_threshold=2)]
+    assert captured.get("stop_reason") == StopReason.loop_detected
+    assert events[-1]["type"] == "done"
+    # No extra event type is yielded for the injected warning.
+    assert all(e["type"] in {"tool_call", "tool_result", "text_delta", "done"} for e in events)
+
+
+async def test_run_warning_survives_same_round_compression(mock_client, monkeypatch):
+    # D4b: the round that injects the warning also triggers maybe_compress. The
+    # warning must still reach the next LLM call (not be swallowed by the summary).
+    captured_messages: list = []
+
+    def recording_compress(msgs):
+        # Simulate a compression that drops everything but a system summary,
+        # keeping only the leading system head — i.e. a destructive compaction.
+        return [m for m in msgs if isinstance(m, dict) and m.get("role") == "system"][:1] or msgs
+
+    # Capture the messages sent to the LLM on each call.
+    orig_create = AsyncMock(side_effect=_tool_resp_seq("read_file", '{"path": "a"}', 10))
+
+    async def capturing_create(**kwargs):
+        captured_messages.append(list(kwargs.get("messages", [])))
+        return await orig_create(**kwargs)
+
+    mock_client.chat.completions.create = capturing_create
+    monkeypatch.setattr(al, "maybe_compress", recording_compress)
+
+    with patch.object(al, "dispatch", lambda name, args, **kw: "same result"):
+        await al.run(
+            [{"role": "user", "content": "go"}],
+            max_turns=50,
+            loop_repeat_threshold=2,
+        )
+
+    # Some LLM call after the warning was injected must include the warning text,
+    # as a user-role message, despite the destructive same-round compression.
+    found = any(
+        any(
+            isinstance(m, dict) and m.get("role") == "user" and "重复" in str(m.get("content", ""))
+            for m in msgs
+        )
+        for msgs in captured_messages
+    )
+    assert found, "loop warning must remain visible to the LLM even when compression fires"

@@ -17,6 +17,7 @@ from fleetent.agent_policy import check_tool_access
 from fleetent.context_mgr import maybe_compress
 from fleetent.error_classifier import classify
 from fleetent.eval_logger import log_run
+from fleetent.loop_detector import LoopDetectionChecker, arg_fingerprint, result_digest
 from fleetent.memory_layer import extract_and_save, load_memories
 from fleetent.message_hygiene import HygieneReport, MessageContractError, sanitize
 from fleetent.model_router import RouteConfig, RouteOverride, get_async_client_and_config
@@ -41,21 +42,67 @@ _SYSTEM = "You are a helpful assistant with access to tools. Use them when neede
 
 _SUB_AGENT_TOOL = "sub_agent"
 
+# Corrective warning injected when the loop-detection checker first flags a
+# suspected loop (AR4 D3/D4). Plain `user` role (D4) so it is not merged with the
+# leading system prompt by message_hygiene and stays visible on the next turn.
+_LOOP_WARNING_TEXT = (
+    "检测到你正在重复调用同一工具且似乎没有进展，请改用其它方式或直接给出当前结论。"
+)
+
+
+def _resolve_loop_config(
+    repeat_threshold: int | None,
+    ignore_arg_keys: list[str] | None,
+) -> tuple[int, list[str]]:
+    """Resolve loop-detection settings: call param > Settings > default (D3)."""
+    if repeat_threshold is not None and ignore_arg_keys is not None:
+        return repeat_threshold, ignore_arg_keys
+    from fleetent.config import Settings
+
+    s = Settings()
+    return (
+        repeat_threshold if repeat_threshold is not None else s.agent_loop_repeat_threshold,
+        ignore_arg_keys if ignore_arg_keys is not None else list(s.loop_detect_ignore_arg_keys),
+    )
+
 
 def _build_controller(
     max_turns: int | None,
     max_consecutive_failures: int | None,
     *,
     include_approval: bool,
-) -> TerminationController:
-    """Assemble the termination controller with the active checkers."""
+    loop_repeat_threshold: int | None = None,
+    loop_ignore_arg_keys: list[str] | None = None,
+) -> tuple[TerminationController, LoopDetectionChecker]:
+    """Assemble the termination controller with the active checkers.
+
+    The loop-detection checker (AR4) registers AFTER the existing checkers so the
+    established termination priority (max_turns / consecutive_failures /
+    approval_rejected) is unchanged. Returns the checker too so the loop can read
+    its derived history window.
+    """
     mt, mcf = resolve_limits(max_turns, max_consecutive_failures)
+    threshold, ignore_keys = _resolve_loop_config(loop_repeat_threshold, loop_ignore_arg_keys)
     controller = TerminationController()
     controller.register(MaxTurnsChecker(mt))
     controller.register(ConsecutiveFailuresChecker(mcf))
     if include_approval:
         controller.register(ApprovalRejectedChecker())
-    return controller
+    loop_checker = LoopDetectionChecker(threshold, ignore_keys)
+    controller.register(loop_checker)
+    return controller, loop_checker
+
+
+def _maybe_inject_loop_warning(messages: list[Any], state: LoopState) -> None:
+    """Append the corrective warning when the checker requested it (D3/D4/D4b).
+
+    Called right before the next LLM call (after any compression this round) so a
+    same-round `maybe_compress` cannot swallow the warning. Idempotent within a run:
+    once injected, `loop_warning_injected` gates re-injection.
+    """
+    if state.loop_warning_requested and not state.loop_warning_injected:
+        messages.append({"role": "user", "content": _LOOP_WARNING_TEXT})
+        state.loop_warning_injected = True
 
 
 async def _safe_dispatch(
@@ -288,6 +335,8 @@ async def run(
     max_consecutive_failures: int | None = None,
     force_model: str | None = None,
     disabled_skills_trace: list[dict[str, str]] | None = None,
+    loop_repeat_threshold: int | None = None,
+    loop_ignore_arg_keys: list[str] | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -331,7 +380,13 @@ async def run(
     models_to_try = [cfg.model] if force_model is not None else [cfg.model, *cfg.fallbacks]
     model_used = cfg.model
 
-    controller = _build_controller(max_turns, max_consecutive_failures, include_approval=True)
+    controller, loop_checker = _build_controller(
+        max_turns,
+        max_consecutive_failures,
+        include_approval=True,
+        loop_repeat_threshold=loop_repeat_threshold,
+        loop_ignore_arg_keys=loop_ignore_arg_keys,
+    )
     state = LoopState()
     stop_reason = StopReason.normal
     hygiene_repairs: dict[str, int] = {}
@@ -347,6 +402,9 @@ async def run(
         # the passed `messages` so session_mgr.save() persists the full conversation.
         # Rebinding (messages = ...) would detach it and lose appended turns.
         messages[:] = maybe_compress(messages)
+        # D4b: inject the loop warning AFTER compression so a same-round compaction
+        # cannot swallow it; it must be present in the sequence sent to the LLM.
+        _maybe_inject_loop_warning(messages, state)
         try:
             clean, report = sanitize(messages)
         except MessageContractError as exc:
@@ -375,6 +433,7 @@ async def run(
         for tc in msg.tool_calls or []:
             if not hasattr(tc, "function"):
                 continue
+            failed = False
             if tc.function.name == _SUB_AGENT_TOOL and not is_sub_agent:
                 args = (
                     json.loads(tc.function.arguments)
@@ -432,6 +491,13 @@ async def run(
                     )
                     state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+            state.record_tool_call(
+                tc.function.name,
+                arg_fingerprint(tc.function.arguments, loop_checker.ignore_arg_keys),
+                result_digest(result),
+                not failed,
+                window=loop_checker.window,
+            )
 
     reply = (msg.content if msg is not None else None) or ""
     usage = response.usage if response else None
@@ -494,6 +560,8 @@ async def run_stream(
     max_consecutive_failures: int | None = None,
     images: list[tuple[bytes, str]] | None = None,
     force_model: str | None = None,
+    loop_repeat_threshold: int | None = None,
+    loop_ignore_arg_keys: list[str] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -535,7 +603,13 @@ async def run_stream(
     total_completion_tokens = 0
     cache_tokens: dict[str, int] | None = None
 
-    controller = _build_controller(max_turns, max_consecutive_failures, include_approval=False)
+    controller, loop_checker = _build_controller(
+        max_turns,
+        max_consecutive_failures,
+        include_approval=False,
+        loop_repeat_threshold=loop_repeat_threshold,
+        loop_ignore_arg_keys=loop_ignore_arg_keys,
+    )
     state = LoopState()
     stop_reason = StopReason.normal
     hygiene_repairs: dict[str, int] = {}
@@ -547,6 +621,8 @@ async def run_stream(
             break
         state.turn += 1
         messages = maybe_compress(messages)
+        # D4b: inject the loop warning after compression, before sanitize/LLM call.
+        _maybe_inject_loop_warning(messages, state)
         try:
             messages, report = sanitize(messages)
         except MessageContractError as exc:
@@ -632,6 +708,13 @@ async def run_stream(
             state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             yield {"type": "tool_result", "name": name, "content": result}
             messages.append({"role": "tool", "tool_call_id": tc_data["id"], "content": result})
+            state.record_tool_call(
+                name,
+                arg_fingerprint(args, loop_checker.ignore_arg_keys),
+                result_digest(result),
+                not failed,
+                window=loop_checker.window,
+            )
 
     yield {"type": "done", "content": reply}
 

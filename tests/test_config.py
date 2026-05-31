@@ -86,6 +86,23 @@ def test_context_compress_threshold_removed():
     assert not hasattr(s, "context_compress_threshold")
 
 
+def test_agent_loop_repeat_threshold_default():
+    s = Settings(anthropic_api_key="test-key")
+    assert s.agent_loop_repeat_threshold == 3
+
+
+def test_agent_loop_repeat_threshold_env_override(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("AGENT_LOOP_REPEAT_THRESHOLD", "5")
+    s = Settings()
+    assert s.agent_loop_repeat_threshold == 5
+
+
+def test_loop_detect_ignore_arg_keys_default_empty():
+    s = Settings(anthropic_api_key="test-key")
+    assert s.loop_detect_ignore_arg_keys == []
+
+
 def test_image_gen_url_default_empty():
     s = Settings(anthropic_api_key="test-key")
     assert s.image_gen_url == ""

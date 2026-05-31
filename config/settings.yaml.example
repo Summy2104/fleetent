@@ -6,3 +6,11 @@ permission_gate_medium_timeout_seconds: 300
 permission_gate_high_timeout_seconds: 3600
 # Max leading user messages kept whole as initial intent during compression (AR13).
 compression_initial_intent_max: 2
+# Coarse loop detection (AR4): repeats of one tool (same args, or same successful
+# result) within the detection window before a hit. First hit warns the model;
+# a repeat after that force-stops with loop_detected. The window is derived from
+# this value and is not separately configurable.
+agent_loop_repeat_threshold: 3
+# Optional escape hatch: argument keys stripped before the signal-A fingerprint
+# (e.g. a volatile timestamp). Empty by default.
+loop_detect_ignore_arg_keys: []
