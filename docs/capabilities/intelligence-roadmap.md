@@ -54,7 +54,7 @@ spec 零散推进后失去全貌。
 | Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution | evaluation 基线；budget policy | 个性化 budget、agent-specific policy |
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告 | report evaluation；maintenance actions 的边界设计 | 自动 skill proposal、自动 memory maintenance |
 | Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction | reindex jobs；真实 embedding / rerank evaluation；rerank 接入 KB search | sqlite-vec、Qdrant、OpenSearch adapter |
-| Knowledge base | 基础完成 | local ingest、parser、chunking、vector + BM25 + hybrid retrieval、evaluation fixture | sync planner；KB scope/binding；rerank integration；reindex flow | Confluence / Google Drive connectors、graph retrieval |
+| Knowledge base | 基础完成 | local ingest、parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture | KB scope/binding；rerank integration；reindex flow | Confluence / Google Drive connectors、graph retrieval |
 | Deployment / config | 部分完成 | `settings.yaml`、MCP dedicated server file、legacy config fail-fast | backup / upgrade；config docs 对 intelligence runtime prerequisites 的收敛 | config center、Admin UI、hot reload |
 
 ## 依赖顺序
@@ -127,7 +127,7 @@ flowchart TD
 
 完成标准：
 
-- KB sync 有 plan/run separation、幂等状态和失败恢复。
+- KB sync 有 plan/execute separation、幂等状态和失败隔离。
 - embedding / backend 切换后可重建 memory / KB index。
 - 本地 SQLite / config / data 目录有最小备份与升级流程。
 
@@ -187,7 +187,7 @@ flowchart TD
 
 - Observability 能解释一次 agent run 的主要行为、成本、耗时和错误。
 - Memory 能跨 session 提取、更新、检索，并有 retention 边界。
-- Knowledge base 能导入本地企业文档、混合检索，并能计划同步和重建索引。
+- Knowledge base 能导入本地企业文档、混合检索，并能计划/执行同步；vector store 能重建索引。
 - Long-term context 能从 memory / KB 中选择上下文，并有 evaluation 证明注入效果。
 - Reflection 能生成可评估的报告，但自动写回保持关闭或受控。
 - Vector store 能持久化索引，并支持 embedding / backend 变更后的 reindex。
