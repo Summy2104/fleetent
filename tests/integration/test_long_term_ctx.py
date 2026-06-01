@@ -170,6 +170,7 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
             source_id="chunk-1",
             score=0.82,
             metadata={"filename": "guide.md", "document_id": "doc-1", "kb_id": "global"},
+            token_estimate=len("- Fleetent can ingest markdown knowledge."),
         )
     ]
 

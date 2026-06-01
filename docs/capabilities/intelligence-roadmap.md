@@ -51,7 +51,7 @@ spec 零散推进后失去全貌。
 | --- | --- | --- | --- | --- |
 | Observability foundation | 基础完成 | structured logs、SQLite traces、usage summary、performance summary、source attribution、runtime event coverage、contract tests | 形成面向运维排障的查询入口 | OTel / Prometheus、dashboard UI、告警 |
 | Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation、retention / compaction API | 自动维护触发与趋势统计 | 自动反思维护、长期质量趋势 |
-| Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture | budget policy | 个性化 budget、agent-specific policy |
+| Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture、deterministic budget policy | agent / tenant 级 budget 策略 | 真实 tokenizer、个性化 budget、agent-specific policy |
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告、deterministic report evaluation | maintenance actions 的边界设计 | 自动 skill proposal、自动 memory maintenance |
 | Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API、combined embedding evaluation | rerank evaluation；rerank 接入 KB search | 后台 reindex job runtime、sqlite-vec、Qdrant、OpenSearch adapter |
 | Knowledge base | 基础完成 | local ingest、parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator、combined embedding evaluation | KB scope/binding；connector MVP 范围决策 | Confluence / Google Drive connectors、graph retrieval |
@@ -176,6 +176,7 @@ flowchart TD
 已完成的 M4 spec：
 
 - `memory-retention-and-compaction`：提供 per-user dry-run/apply 维护 API，覆盖 expired context、per-type over-limit 和 exact duplicate compaction；不做 Shared Memory、scheduler 或 reflection 自动写回。
+- `long-term-context-budget-policy`：提供 effective budget、memory / knowledge source budget、source top-k、query intent / explicit conflict preference 和 BudgetMetadata decision attribution；不做 LLM-driven selection、summarization、memory 写回或 connector ACL 策略。
 
 ### M4b：企业知识源接入
 

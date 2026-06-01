@@ -49,3 +49,8 @@ knowledge_base:
 
 long_term_ctx:
   max_tokens: 2048
+  memory_max_tokens: 1024
+  knowledge_max_tokens: 1024
+  memory_top_k: 10
+  knowledge_top_k: 10
+  conflict_preference: auto

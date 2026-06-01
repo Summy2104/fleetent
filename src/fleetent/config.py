@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import structlog
 import yaml
@@ -72,6 +72,11 @@ class RerankSettings(BaseModel):
 
 class LongTermContextSettings(BaseModel):
     max_tokens: int = 2_048
+    memory_max_tokens: int = 1_024
+    knowledge_max_tokens: int = 1_024
+    memory_top_k: int = 10
+    knowledge_top_k: int = 10
+    conflict_preference: Literal["auto", "memory", "knowledge"] = "auto"
 
 
 class KnowledgeBaseSettings(BaseModel):
