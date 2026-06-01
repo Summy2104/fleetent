@@ -7,55 +7,52 @@ import hmac
 import json
 from unittest.mock import AsyncMock, patch
 
-import yaml
+import pytest
 from starlette.testclient import TestClient
 
 import fleetent.server as srv
 import fleetent.webhook_router as wr
+from fleetent.config import WebhooksSettings
 
 
 def _make_sig(secret: str, body: bytes) -> str:
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
-def _yaml_with_source(
-    tmp_path,
+def _source(
     source_id="test-src",
     secret=None,
     user_id="u-1",
     agent_name=None,
     message_template=None,
-) -> object:
-    """Write a webhooks.yaml with one source and return the path."""
-    entry: dict = {"id": source_id, "user_id": user_id}
-    if secret:
-        entry["secret"] = secret
-    if agent_name:
-        entry["agent_name"] = agent_name
-    if message_template:
-        entry["message_template"] = message_template
-    p = tmp_path / "webhooks.yaml"
-    p.write_text(yaml.dump({"sources": [entry]}))
-    return p
+) -> wr.WebhookSource:
+    return wr.WebhookSource(
+        id=source_id,
+        user_id=user_id,
+        secret=secret,
+        agent_name=agent_name,
+        message_template=message_template,
+    )
 
 
 # ── 202 / 404 / 403 ──────────────────────────────────────────────────────────
 
 
 def test_webhook_known_source_returns_202(tmp_path, monkeypatch, isolated_schedule_db):
-    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", _yaml_with_source(tmp_path))
+    srv._webhook_sources.clear()
 
     with (
         patch("fleetent.im_gateway.normalizer.route", new=AsyncMock()),
         TestClient(srv.app) as client,
     ):
+        monkeypatch.setitem(srv._webhook_sources, "test-src", _source())
         resp = client.post("/webhook/test-src", json={"event": "push"})
 
     assert resp.status_code == 202
 
 
 def test_webhook_unknown_source_returns_404(tmp_path, monkeypatch, isolated_schedule_db):
-    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", _yaml_with_source(tmp_path))
+    srv._webhook_sources.clear()
 
     with TestClient(srv.app) as client:
         resp = client.post("/webhook/unknown-src", json={})
@@ -64,9 +61,10 @@ def test_webhook_unknown_source_returns_404(tmp_path, monkeypatch, isolated_sche
 
 
 def test_webhook_invalid_signature_returns_403(tmp_path, monkeypatch, isolated_schedule_db):
-    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", _yaml_with_source(tmp_path, secret="mysecret"))
+    srv._webhook_sources.clear()
 
     with TestClient(srv.app) as client:
+        monkeypatch.setitem(srv._webhook_sources, "test-src", _source(secret="mysecret"))
         resp = client.post(
             "/webhook/test-src",
             json={"event": "push"},
@@ -77,16 +75,17 @@ def test_webhook_invalid_signature_returns_403(tmp_path, monkeypatch, isolated_s
 
 
 def test_webhook_missing_signature_returns_403(tmp_path, monkeypatch, isolated_schedule_db):
-    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", _yaml_with_source(tmp_path, secret="mysecret"))
+    srv._webhook_sources.clear()
 
     with TestClient(srv.app) as client:
+        monkeypatch.setitem(srv._webhook_sources, "test-src", _source(secret="mysecret"))
         resp = client.post("/webhook/test-src", json={"event": "push"})
 
     assert resp.status_code == 403
 
 
 def test_webhook_valid_signature_returns_202(tmp_path, monkeypatch, isolated_schedule_db):
-    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", _yaml_with_source(tmp_path, secret="mysecret"))
+    srv._webhook_sources.clear()
 
     body = json.dumps({"event": "push"}).encode()
     sig = _make_sig("mysecret", body)
@@ -95,6 +94,7 @@ def test_webhook_valid_signature_returns_202(tmp_path, monkeypatch, isolated_sch
         patch("fleetent.im_gateway.normalizer.route", new=AsyncMock()),
         TestClient(srv.app) as client,
     ):
+        monkeypatch.setitem(srv._webhook_sources, "test-src", _source(secret="mysecret"))
         resp = client.post(
             "/webhook/test-src",
             content=body,
@@ -105,15 +105,56 @@ def test_webhook_valid_signature_returns_202(tmp_path, monkeypatch, isolated_sch
 
 
 def test_webhook_no_secret_accepts_without_signature(tmp_path, monkeypatch, isolated_schedule_db):
-    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", _yaml_with_source(tmp_path, secret=None))
+    srv._webhook_sources.clear()
 
     with (
         patch("fleetent.im_gateway.normalizer.route", new=AsyncMock()),
         TestClient(srv.app) as client,
     ):
+        monkeypatch.setitem(srv._webhook_sources, "test-src", _source(secret=None))
         resp = client.post("/webhook/test-src", json={"event": "push"})
 
     assert resp.status_code == 202
+
+
+def test_legacy_webhooks_yaml_fails_fast(tmp_path, monkeypatch, isolated_schedule_db):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "webhooks.yaml").write_text("sources: []\n")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(RuntimeError, match="runtime API / store"), TestClient(srv.app):
+        pass
+
+
+def test_webhooks_disabled_rejects_before_dispatch(monkeypatch):
+    srv._webhook_sources.clear()
+    monkeypatch.setitem(srv._webhook_sources, "test-src", _source())
+    monkeypatch.setattr(srv.app.state, "webhook_settings", WebhooksSettings(enabled=False))
+    route_mock = AsyncMock()
+
+    with patch("fleetent.im_gateway.normalizer.route", new=route_mock):
+        resp = TestClient(srv.app).post("/webhook/test-src", json={"event": "push"})
+
+    assert resp.status_code == 503
+    route_mock.assert_not_called()
+
+
+def test_webhook_max_body_size_rejects_before_dispatch(monkeypatch):
+    srv._webhook_sources.clear()
+    monkeypatch.setitem(srv._webhook_sources, "test-src", _source())
+    monkeypatch.setattr(srv.app.state, "webhook_settings", WebhooksSettings(max_body_bytes=5))
+    route_mock = AsyncMock()
+
+    with patch("fleetent.im_gateway.normalizer.route", new=route_mock):
+        resp = TestClient(srv.app).post(
+            "/webhook/test-src",
+            content=b'{"event":"push"}',
+            headers={"content-type": "application/json"},
+        )
+
+    assert resp.status_code == 413
+    route_mock.assert_not_called()
 
 
 # ── background task dispatch ──────────────────────────────────────────────────

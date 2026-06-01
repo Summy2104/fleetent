@@ -11,6 +11,94 @@ def test_settings_defaults():
     assert s.database_url == "sqlite:///data/users.db"
 
 
+def test_settings_loads_non_secret_values_from_settings_yaml(tmp_path, monkeypatch):
+    import fleetent.config as cfg
+
+    settings_yaml = tmp_path / "settings.yaml"
+    settings_yaml.write_text(
+        "\n".join(
+            [
+                "database_url: sqlite:///tmp/fleetent.db",
+                "log_format: json",
+                "observability:",
+                "  logging:",
+                "    console_level: warning",
+                "vector_store:",
+                "  backend: sqlite",
+                "embedding:",
+                "  dimensions: 128",
+                "knowledge_base:",
+                "  enabled: true",
+            ]
+        )
+    )
+    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
+
+    s = Settings(anthropic_api_key="test-key")
+
+    assert s.database_url == "sqlite:///tmp/fleetent.db"
+    assert s.log_format == "json"
+    assert s.observability.logging.console_level == "warning"
+    assert s.vector_store.backend == "sqlite"
+    assert s.embedding.dimensions == 128
+    assert s.knowledge_base.enabled is True
+
+
+def test_settings_env_overrides_settings_yaml(tmp_path, monkeypatch):
+    import fleetent.config as cfg
+
+    settings_yaml = tmp_path / "settings.yaml"
+    settings_yaml.write_text(
+        "\n".join(
+            [
+                "database_url: sqlite:///tmp/from-yaml.db",
+                "log_format: json",
+            ]
+        )
+    )
+    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///tmp/from-env.db")
+
+    s = Settings()
+
+    assert s.database_url == "sqlite:///tmp/from-env.db"
+    assert s.log_format == "json"
+
+
+def test_settings_missing_yaml_file_uses_typed_defaults(tmp_path, monkeypatch):
+    import fleetent.config as cfg
+
+    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", tmp_path / "missing.yaml")
+
+    s = Settings(anthropic_api_key="test-key")
+
+    assert s.database_url == "sqlite:///data/users.db"
+    assert s.log_format == "console"
+
+
+def test_settings_yaml_does_not_load_secret_values(tmp_path, monkeypatch):
+    import fleetent.config as cfg
+
+    settings_yaml = tmp_path / "settings.yaml"
+    settings_yaml.write_text(
+        "\n".join(
+            [
+                "anthropic_api_key: should-not-load",
+                "slack_bot_token: xoxb-should-not-load",
+                "database_url: sqlite:///tmp/fleetent.db",
+            ]
+        )
+    )
+    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-env")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ValueError, match="anthropic_api_key.*slack_bot_token.*env/.env"):
+        Settings()
+
+
 def test_observability_logging_defaults():
     s = Settings(anthropic_api_key="test-key")
 

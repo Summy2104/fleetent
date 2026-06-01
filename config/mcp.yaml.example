@@ -1,7 +1,0 @@
-# MCP server connections — copy to config/mcp.yaml and fill in values
-# This file is gitignored; never commit credentials
-servers:
-  - id: github
-    url: https://mcp.github.example.com
-    auth_type: api_key          # none | api_key | oauth2
-    api_key_env: GITHUB_MCP_KEY # env var holding the key

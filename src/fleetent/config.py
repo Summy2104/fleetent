@@ -1,8 +1,38 @@
 import logging
+from pathlib import Path
+from typing import Any
 
 import structlog
 from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    YamlConfigSettingsSource,
+)
+
+SETTINGS_YAML_PATH = Path("config/settings.yaml")
+YAML_SECRET_FIELDS = frozenset(
+    {
+        "anthropic_api_key",
+        "slack_bot_token",
+        "slack_app_token",
+        "telegram_bot_token",
+    }
+)
+
+
+class SecretRejectingYamlSettingsSource(YamlConfigSettingsSource):
+    def __call__(self) -> dict[str, Any]:
+        data = super().__call__()
+        secret_fields = sorted(key for key in data if key in YAML_SECRET_FIELDS)
+        if secret_fields:
+            fields = ", ".join(secret_fields)
+            raise ValueError(
+                f"Secret fields cannot appear in config/settings.yaml: {fields}. "
+                "Move these values to env/.env."
+            )
+        return data
 
 
 class LoggingSettings(BaseModel):
@@ -50,8 +80,33 @@ class KnowledgeBaseSettings(BaseModel):
     chunk_overlap: int = 200
 
 
+class McpServerSettings(BaseModel):
+    id: str
+    transport: str = "http"
+    url: str = ""
+    auth_type: str = "none"
+    api_key_env: str = ""
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+class McpSettings(BaseModel):
+    servers: list[McpServerSettings] = Field(default_factory=list)
+
+
+class SchedulingSettings(BaseModel):
+    enabled: bool = True
+    default_timezone: str = "UTC"
+
+
+class WebhooksSettings(BaseModel):
+    enabled: bool = True
+    max_body_bytes: int = 1_048_576
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", extra="ignore")
 
     anthropic_api_key: str
     slack_bot_token: str = ""
@@ -72,6 +127,29 @@ class Settings(BaseSettings):
     rerank: RerankSettings = Field(default_factory=RerankSettings)
     long_term_ctx: LongTermContextSettings = Field(default_factory=LongTermContextSettings)
     knowledge_base: KnowledgeBaseSettings = Field(default_factory=KnowledgeBaseSettings)
+    mcp: McpSettings = Field(default_factory=McpSettings)
+    scheduling: SchedulingSettings = Field(default_factory=SchedulingSettings)
+    webhooks: WebhooksSettings = Field(default_factory=WebhooksSettings)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        yaml_settings = SecretRejectingYamlSettingsSource(
+            settings_cls, yaml_file=SETTINGS_YAML_PATH
+        )
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            yaml_settings,
+            file_secret_settings,
+        )
 
 
 def configure_logging(settings: Settings) -> None:

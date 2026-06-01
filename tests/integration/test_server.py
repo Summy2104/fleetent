@@ -154,8 +154,6 @@ def test_lifespan_starts_and_stops_cron_scheduler(tmp_path, monkeypatch, isolate
 
     import fleetent.server as srv
 
-    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", tmp_path / "webhooks.yaml")
-
     start_mock = AsyncMock()
     shutdown_mock = AsyncMock()
 

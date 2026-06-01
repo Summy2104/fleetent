@@ -88,8 +88,8 @@ src/fleetent/
   mcp_client.py      ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
   sandbox_client.py  ← Docker CLI 封装：隔离 Python 执行
   permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
-  cron_scheduler.py  ← APScheduler 定时任务；server 启动时初始化
-  webhook_router.py  ← Webhook 来源配置加载、签名验证、消息提取
+  cron_scheduler.py  ← APScheduler 定时任务；从 SQLite 动态任务恢复调度
+  webhook_router.py  ← Webhook 签名验证、消息提取
   user_store.py      ← SQLite 用户/API key 管理
   agent_store.py     ← SQLite：agent 定义 + 用户绑定 + channel 绑定
   im_user_store.py   ← (platform, platform_user_id) → 内部 User；allowlist
@@ -141,7 +141,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["POST /webhook/{source_id}"] --> B["webhook_router\n加载来源配置"]
+    A["POST /webhook/{source_id}"] --> B["server.py\n查找运行时来源"]
     B --> C{"签名验证\nHMAC-SHA256"}
     C -->|失败| D["403 拒绝"]
     C -->|通过| E["extract_message\n模板提取 / JSON 序列化"]
