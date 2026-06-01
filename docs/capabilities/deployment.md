@@ -29,7 +29,7 @@
     - `env_file: .env.production`（密钥通过 env_file 注入，不写入镜像）
 
 - ✅ **alembic DB migration**：schema 版本管理
-  - 升级时自动执行 migration，不需要手动改表
+  - 升级脚本在 SQLite 备份成功后执行 `alembic upgrade head`，不需要手动改表
 
 - ✅ **SQLite-first 默认存储**：无需独立数据库服务
   - 数据在 data/ 目录，挂载 volume 持久化
@@ -43,7 +43,39 @@
   - 程序日志写入 `data/logs/` 下的日期文件，随 `data/` volume 持久化
   - 日志轮转、trace retention 与备份策略由 observability / deployment 后续共同定义
 
+- ✅ **SQLite 升级备份脚本**：`scripts/upgrade.py`
+  - `--database-url` 优先于 `DATABASE_URL`，`DATABASE_URL` 优先于 `Settings().database_url`
+  - 当前只支持本地 SQLite database URL；非 SQLite、远程 SQLite、`:memory:` 都会 fail fast
+  - 默认备份写入 `data/backups/YYYYMMDD-HHMMSS/fleetent.db`
+  - `--backup-dir` 可覆盖备份根目录，便于自定义部署和测试
+  - `--dry-run` 只校验 database URL 并输出 backup / migration 计划，不要求 DB 文件存在，不创建备份，不运行 Alembic
+  - `--backup-only` 只创建备份，不运行 Alembic
+  - 非 dry-run 模式下 DB 文件不存在会 fail fast；backup 成功后才会运行 migration
+  - migration 失败时不会自动 rollback；已创建 backup 会保留，脚本返回非 0
+
 当前定位：已有本地开发和基础 Docker 部署地基，但还不是面向客户交付的一键 on-prem 安装包。
+
+## 升级与恢复
+
+本地 SQLite-first 部署升级入口：
+
+```bash
+uv run python scripts/upgrade.py
+```
+
+常用选项：
+
+```bash
+uv run python scripts/upgrade.py --dry-run
+uv run python scripts/upgrade.py --backup-only
+uv run python scripts/upgrade.py --database-url sqlite:///data/fleetent.db --backup-dir data/backups
+```
+
+如果 migration 失败，脚本不会自动 rollback。手动恢复步骤：
+
+1. 停止 fleetent 服务。
+2. 用脚本输出的 backup DB 文件替换当前 DB 文件，例如将 `data/backups/YYYYMMDD-HHMMSS/fleetent.db` 复制回 `data/fleetent.db`。
+3. 重启 fleetent 服务。
 
 ## 规划中（v1.0）
 
@@ -58,8 +90,8 @@
 - [ ] **多环境配置**：dev / staging / prod 配置文件分离
   - 通过 FLEETENT_ENV 环境变量切换
 
-- [ ] **升级脚本**：新版本部署时自动执行 alembic upgrade head
-  - 升级前自动备份 SQLite 文件
+- [x] **升级脚本**：新版本部署时执行 `alembic upgrade head`
+  - 升级前自动备份 SQLite 文件；migration 失败不自动 rollback
 
 - ✅ **统一 database_url 配置**：以 SQLite 为默认后端，保留后续 PostgreSQL 接入空间
   - 默认值指向本机 `data/fleetent.db`
@@ -68,7 +100,7 @@
 ## 当前缺口
 
 - 缺少完整安装包：初始化、配置校验、迁移、启动、健康检查未形成一键流程。
-- 缺少升级脚本：新版本部署时自动备份、执行 migration、回滚策略未定义。
+- 升级脚本已覆盖本地 SQLite backup / migration；完整发布包和自动 rollback 不在当前范围内。
 - 缺少日志 / trace retention 和备份策略。
 - License key 机制未设计。
 - PostgreSQL 可选后端未实现，仅保留边界。
@@ -76,7 +108,6 @@
 ## 下一批候选 specs
 
 - `deployment-onprem-install-package`
-- `deployment-upgrade-and-backup`
 - `deployment-retention-policy`
 - `deployment-license-key`
 - `database-postgresql-adapter`
