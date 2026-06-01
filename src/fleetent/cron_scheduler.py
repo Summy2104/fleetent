@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -17,15 +18,42 @@ logger = logging.getLogger(__name__)
 _CRON_YAML_PATH = Path("config/cron.yaml")
 
 
-async def _agent_run(messages: list[dict[str, Any]], user_id: str, agent_name: str | None = None) -> str:
+async def _agent_run(
+    messages: list[dict[str, Any]], user_id: str, agent_name: str | None = None
+) -> str:
     from fleetent import agent_loop
+
     return await agent_loop.run(messages, user_id=user_id, agent_name=agent_name)
 
 
 async def _fire(task: dict[str, Any]) -> None:
-    """Construct messages and dispatch agent run for a cron task."""
-    messages = [{"role": "user", "content": task["message"]}]
-    await _agent_run(messages, user_id=task["user_id"], agent_name=task.get("agent_name"))
+    """Run a cron task with session binding (S3).
+
+    Fixed semantics (task carries `session_id`): reuse that session, accumulating
+    context across fires. Independent semantics (no `session_id`, default): derive
+    a unique `cron/{id}/{uuid}` session each fire so fires never see each other.
+    Runs under a per-session lock so a fixed session is not clobbered by concurrent
+    fires (or other sources sharing the id).
+    """
+    from fleetent import session_mgr
+
+    sid = task.get("session_id") or f"cron/{task['id']}/{uuid.uuid4().hex}"
+    async with session_mgr.session_lock(sid):
+        history = await session_mgr.load(sid)
+        messages: list[dict[str, Any]] = [
+            *history,
+            {"role": "user", "content": task["message"]},
+        ]
+        # Pass a copy: agent_loop.run mutates its list in place (appends assistant
+        # turns), so we append the reply to our own list once and avoid duplicating
+        # the final assistant message.
+        reply = await _agent_run(
+            list(messages), user_id=task["user_id"], agent_name=task.get("agent_name")
+        )
+        messages.append({"role": "assistant", "content": reply})
+        await session_mgr.save(
+            sid, messages, user_id=task["user_id"], agent_name=task.get("agent_name")
+        )
 
 
 def load_cron_yaml(path: Path) -> list[dict[str, Any]]:
@@ -36,17 +64,20 @@ def load_cron_yaml(path: Path) -> list[dict[str, Any]]:
     jobs = []
     for entry in raw.get("jobs", []):
         try:
-            jobs.append({
-                "id": entry["id"],
-                "name": entry["name"],
-                "cron_expr": entry["cron"],
-                "timezone": entry.get("timezone", "UTC"),
-                "user_id": entry["user_id"],
-                "agent_name": entry.get("agent_name"),
-                "message": entry["message"],
-                "enabled": 1,
-                "source": "static",
-            })
+            jobs.append(
+                {
+                    "id": entry["id"],
+                    "name": entry["name"],
+                    "cron_expr": entry["cron"],
+                    "timezone": entry.get("timezone", "UTC"),
+                    "user_id": entry["user_id"],
+                    "agent_name": entry.get("agent_name"),
+                    "message": entry["message"],
+                    "enabled": 1,
+                    "source": "static",
+                    "session_id": entry.get("session_id"),
+                }
+            )
         except KeyError as exc:
             logger.warning("cron_yaml_skip_entry id=%s missing_field=%s", entry.get("id"), exc)
     return jobs
@@ -90,6 +121,7 @@ class CronScheduler:
 
     async def shutdown(self) -> None:
         import asyncio
+
         if self._scheduler.running:
             self._scheduler.shutdown(wait=False)
             await asyncio.sleep(0)

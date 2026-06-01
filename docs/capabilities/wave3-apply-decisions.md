@@ -27,7 +27,7 @@
 | 8 | B | compression-trace | AR16 | ✅ 已完成 |
 | 9 | B | compression-anti-flap | AR17 | ✅ 已完成 |
 | 10 | E | mcp-degradation | MCP4 | ✅ 已完成 |
-| 11 | H | scheduled-task-session-binding | S3 | ⬜ |
+| 11 | H | scheduled-task-session-binding | S3 | ✅ 已完成 |
 | 12 | A | cost-budget-control | AR18 | ⬜ |
 | 13 | D | cost-aware-routing | MR2 | ⬜ |
 
@@ -300,5 +300,29 @@
 1. strict 仅暴露 `unavailable_strict_server_ids()` 判定、agent_loop 集成留后续（自解决策 #4）是否认可。
 2. strict 启动失败用进程级 `_failed_strict_servers` 跟踪（自解决策 #3）是否认可。
 3. silent 暂等同 degrade（通知通道未实现）是否认可。
+
+---
+
+## scheduled-task-session-binding（S3）— feat/scheduled-task-session-binding
+
+**实现：**
+- `schedule_store.py`：`scheduled_tasks` 加可空列 `session_id TEXT`；`create` 增可选参数 `session_id: str | None = None`（写入 + 纳入返回字典）；`list_tasks` 经 `SELECT *` 自动带出。
+- `cron_scheduler.py`：`load_cron_yaml` 增 `"session_id": entry.get("session_id")` 映射；`_fire` 重写：`sid = task.get("session_id") or f"cron/{task['id']}/{uuid4().hex}"`，在 `session_mgr.session_lock(sid)` 下 `load` → `messages=[*history, user]` → `_agent_run` → 追加 assistant reply → `save(sid, messages, user_id, agent_name)`。
+
+**自解决策：**
+1. **传副本给 `agent_loop.run`、reply 只手动 append 一次**：`agent_loop.run` 原地改传入的 messages（追加 assistant turns），若直接传 `messages` 再手动 append reply 会**重复**最终 assistant 消息。故 `_agent_run(list(messages), ...)`（副本），把 reply append 到 `_fire` 自己的 `messages` 再 save——dup-free，且与 mock（不改 messages）兼容。session 持久化 user + 最终 reply 两条会话轮（不落工具脚手架），干净可观测。
+2. **默认独立语义（session_id NULL）**（design D1）：与现状零行为变化、无泄漏；固定复用需显式配 session_id。
+3. **统一走 session_lock**（D3）：固定语义防并发覆盖；独立语义每次 sid 不同等价无竞争，代码单一。
+
+**影响：**
+- 改 `schedule_store.py`/`cron_scheduler.py`；新增 `tests/test_scheduled_task_session_binding.py`（6 测试）。
+- 测试：**全量 1340 passed，0 失败，零回归**。
+- ruff：我编辑的两文件 `ruff format` 顺手修了 2 个**预存** E501（基线 8 错→6 错），**零新增**；剩余 6 个（F401 `asyncio` 局部导入、F811 `DB_PATH` 重定义、I001 import 排序）均为 HEAD 既有 grandfathered（stash 对比基线确认），未触碰其所在行。
+- mypy：76 → 76，无新增。
+
+**需 zy 核实：**
+1. `_fire` 传副本给 run + reply 手动 append（自解决策 #1）是否认可——避免 run 原地改 messages 致 assistant 重复；session 仅持久化 user+最终 reply。
+2. 默认独立语义、固定复用需显式配 `session_id`（D1）是否认可。
+3. 旧库升级加列 `session_id TEXT` 由 db-migration 走 ALTER TABLE（design D4）——本 change 未含迁移脚本，按既有迁移能力处理。
 
 ---
