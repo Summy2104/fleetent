@@ -1,0 +1,45 @@
+{
+  "name": "combined memory and knowledge injection",
+  "user_id": "user-1",
+  "agent_id": "agent-1",
+  "query": "Help me prepare a concise payroll escalation note.",
+  "available_tokens": 500,
+  "memories": [
+    {
+      "id": "mem-1",
+      "type": "preferences",
+      "content": "User prefers concise answers."
+    }
+  ],
+  "knowledge": [
+    {
+      "id": "kb-1",
+      "content": "Payroll incidents are escalated to HR operations.",
+      "score": 0.9,
+      "metadata": {
+        "title": "Support handbook"
+      }
+    }
+  ],
+  "expected_text": [
+    "User prefers concise answers.",
+    "Payroll incidents are escalated to HR operations."
+  ],
+  "forbidden_text": ["Database failover incidents"],
+  "expected_sources": [
+    {
+      "source_type": "memory",
+      "source_id": "mem-1"
+    },
+    {
+      "source_type": "knowledge",
+      "source_id": "kb-1"
+    }
+  ],
+  "forbidden_sources": [
+    {
+      "source_type": "knowledge",
+      "source_id": "kb-2"
+    }
+  ]
+}

@@ -51,7 +51,7 @@ spec 零散推进后失去全貌。
 | --- | --- | --- | --- | --- |
 | Observability foundation | 基础完成 | structured logs、SQLite traces、usage summary、performance summary、source attribution、runtime event coverage、contract tests | 形成面向运维排障的查询入口 | OTel / Prometheus、dashboard UI、告警 |
 | Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation | retention / compaction；真实 embedding 检索评估 | 自动反思维护、长期质量趋势 |
-| Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution | evaluation 基线；budget policy | 个性化 budget、agent-specific policy |
+| Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture | budget policy | 个性化 budget、agent-specific policy |
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告 | report evaluation；maintenance actions 的边界设计 | 自动 skill proposal、自动 memory maintenance |
 | Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API | 真实 embedding / rerank evaluation；rerank 接入 KB search | 后台 reindex job runtime、sqlite-vec、Qdrant、OpenSearch adapter |
 | Knowledge base | 基础完成 | local ingest、parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator | KB scope/binding；KB retrieval 真实 embedding / rerank evaluation；connector MVP 范围决策 | Confluence / Google Drive connectors、graph retrieval |
@@ -150,6 +150,10 @@ flowchart TD
 - 默认 evaluation 不依赖真实 LLM / embedding；真实模型评估通过显式环境变量手动开启。
 - 每个 evaluation fixture 有 expected / forbidden 输出，能回归质量变化。
 - `memory-and-kb-real-embedding-evaluation` 同时覆盖 memory semantic retrieval 和 KB retrieval，不默认连接外部模型。
+
+已完成的 M3 spec：
+
+- `long-term-context-evaluation`：基于 fake memory / knowledge provider 的 deterministic fixture，覆盖注入 text/source 的 expected / forbidden assertions；真实 provider smoke 默认 skip。
 
 ### M4：可维护、可演进
 

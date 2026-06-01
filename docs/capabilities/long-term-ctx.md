@@ -87,8 +87,10 @@ async def build_context(
 - token budget 基础截断
 - agent-runtime 在 `run()` / `run_stream()` / `run_sync()` 构造 prompt 前调用 long-term-ctx
 - `BuiltContext.sources` 供 observability source attribution 记录
+- deterministic evaluation fixture / runner 覆盖 memory-only、KB-only、mixed injection 和低预算 omission
+- real-provider smoke 仅在 `FLEETENT_EVAL_REAL_LONG_TERM_CONTEXT=1` 且凭据完整时手动运行；默认 skip
 
-当前定位：已恢复长期上下文注入链路，但上下文选择策略仍处于基础阶段。
+当前定位：已恢复长期上下文注入链路，并有基础 evaluation 回归；上下文选择策略仍处于基础阶段。
 
 ## 规划中（v1.0）
 
@@ -107,6 +109,10 @@ async def build_context(
   - knowledge 区段：相关文档片段
   - 任意一侧无结果时省略对应区段，不输出空占位
 
+- [x] **evaluation 基线**：`tests/evaluation/test_long_term_context_eval.py` 使用 fake provider 验证注入行为
+  - 默认不调用真实 LLM、embedding、KB connector 或 SaaS
+  - fixture 使用 expected / forbidden text 和 source assertions 回归质量变化
+
 ## 当前缺口
 
 - KB provider 已接入当前 knowledge-base search；尚未支持 agent 到多个 KB 的绑定策略。
@@ -122,12 +128,12 @@ async def build_context(
 - `long-term-context-template-config`
 - `knowledge-provider-contract`
 
-## 自动化效果验证缺口
+## 自动化效果验证
 
-- 构造 query + memory fixture，评估注入内容是否提升回答质量。
-- 验证过多 memory 时预算截断是否保留高价值信息。
-- 验证无 KB、空 memory、低预算等降级路径。
-- 后续 KB 接入后，评估 memory 与 knowledge 混合注入的收益和干扰。
+- 已有 deterministic fixture 验证 memory-only、KB-only、memory + KB 混合注入和低预算 omission。
+- 默认 evaluation 使用 fake provider，不依赖真实外部服务，不触碰 `data/`。
+- 真实 provider smoke 保持手动 opt-in；缺凭据或未设置 `FLEETENT_EVAL_REAL_LONG_TERM_CONTEXT=1` 时 skip。
+- 尚未做 LLM-graded answer-quality evaluation；如需要，必须单独 spec 并显式 opt-in。
 
 ## 服务化 / 目录边界判断
 
@@ -170,6 +176,12 @@ memory / knowledge / observability 的接口，未来可以独立成 package，�
 - 单侧空结果：任意一侧返回空列表时不报错，正常合并另一侧结果
 - 格式化输出：memory 区段和 knowledge 区段分区正确，无结果或 disabled provider 的区段不出现在输出中
 - 来源摘要：返回 sources 仅包含被实际注入的结果，供 agent-runtime 交给 observability 记录
+
+**需要 evaluation 测试的行为**：
+- fixture schema：缺少必需字段或 source assertion 格式非法时失败
+- deterministic runner：fake memory / knowledge provider 输入能产生 expected text 和 expected sources
+- forbidden assertions：不应注入的 text/source 不出现在 BuiltContext 中
+- smoke guard：真实 provider smoke 默认 skip，只有显式环境变量和凭据完整时运行
 
 **需要 mock 的依赖**：
 - `memory_layer.search`：隔离 memory 模块，控制返回内容和数量

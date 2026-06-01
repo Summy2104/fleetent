@@ -1,0 +1,38 @@
+{
+  "name": "insufficient budget omits knowledge",
+  "user_id": "user-1",
+  "agent_id": "agent-1",
+  "query": "How should you answer me?",
+  "available_tokens": 80,
+  "memories": [
+    {
+      "id": "mem-1",
+      "type": "preferences",
+      "content": "User prefers concise answers."
+    }
+  ],
+  "knowledge": [
+    {
+      "id": "kb-1",
+      "content": "Knowledge chunk too large too large too large too large too large too large too large.",
+      "score": 0.95,
+      "metadata": {
+        "title": "Large support handbook"
+      }
+    }
+  ],
+  "expected_text": ["User prefers concise answers."],
+  "forbidden_text": ["Knowledge chunk too large"],
+  "expected_sources": [
+    {
+      "source_type": "memory",
+      "source_id": "mem-1"
+    }
+  ],
+  "forbidden_sources": [
+    {
+      "source_type": "knowledge",
+      "source_id": "kb-1"
+    }
+  ]
+}
