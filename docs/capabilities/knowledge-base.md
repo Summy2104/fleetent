@@ -6,7 +6,7 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML 解析，local directory 手动同步与 sync planner，deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、按 tenant + knowledge base 隔离召回相关文档片段，以及手动运行的 deterministic retrieval evaluation。
+**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML 解析，local directory 手动同步与 sync planner，deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、按 tenant + knowledge base 隔离召回相关文档片段，向 vector_store reindex 暴露当前可索引 chunks，以及手动运行的 deterministic retrieval evaluation。
 
 **后续负责**：第三方数据源接入与文档获取、更丰富的文档解析、实体与关系提取、图谱存储。
 
@@ -18,7 +18,7 @@
 
 **模块归属**：
 - owning package：`intelligence.knowledge_base`
-- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`delete(document_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`SyncAction`、`SyncPlan`、`SyncPlanItem`、`SyncPlanSummary`、`SyncExecutionSummary`、`plan_local_directory_sync(config, tenant_id, kb_id)`、`execute_sync_plan(plan)`、`sync_local_directory(config, tenant_id, kb_id)`
+- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`delete(document_id)`、`iter_indexable_knowledge_chunks(tenant_id, kb_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`SyncAction`、`SyncPlan`、`SyncPlanItem`、`SyncPlanSummary`、`SyncExecutionSummary`、`plan_local_directory_sync(config, tenant_id, kb_id)`、`execute_sync_plan(plan)`、`sync_local_directory(config, tenant_id, kb_id)`
 - owned tables：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`、`knowledge_chunks_fts`、`knowledge_source_states`
 - config namespace：`knowledge_base.*`
 
@@ -199,6 +199,10 @@ async def delete(document_id: str) -> None:
     """删除文档及其所有 chunk 和对应向量。"""
 
 
+def iter_indexable_knowledge_chunks(tenant_id: str, kb_id: str) -> Iterator[IndexableItem]:
+    """枚举指定 tenant/kb 当前应存在于 vector_store 的 chunks，namespace 为 kb:{tenant_id}:{kb_id}。"""
+
+
 @dataclass
 class DocumentRef:
     id: str
@@ -274,7 +278,7 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 
 当前未实现内容：
 - 无 Confluence、Google Drive connector
-- 无后台 job、admin UI、REST upload API
+- 无后台 job、admin UI、REST upload API；vector rebuild 目前通过 vector_store 同步 public API 触发
 - 无 rerank / query planner
 - 无 graph_search、entities、relations 或 `kb_extraction`
 - 无 production ranking dashboard、reranker evaluation 或 query planner evaluation
@@ -304,10 +308,12 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 - 检索已支持 SQLite FTS5/BM25 keyword mode 与 RRF hybrid mode；尚未实现 rerank、query planner 或 graph。
 - 外部 SaaS 数据源暂未接入：Confluence、Google Drive 均未实现。
 - long-term-ctx 只支持内置默认 KB provider；还没有 agent 到多 KB 的绑定策略。
+- 后台 vector index rebuild job runtime 尚未实现；当前只提供同步 vector_store reindex public API。
 
 ## 下一批候选 specs
 
-- `vector-store-reindex-jobs`
+- `knowledge-base-connectors-confluence`
+- `knowledge-base-connectors-google-drive`
 
 ## 自动化效果验证
 
@@ -401,7 +407,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 ## 测试边界
 
 **需要单元测试的行为**：
-- public API 可导入：`KnowledgeDocument`、`KnowledgeChunk`、`ingest_text()`、`search()`、`delete()`、`DocumentRef`、`DataSource`、sync planner dataclasses、`plan_local_directory_sync()`、`execute_sync_plan()`、`sync_local_directory()`
+- public API 可导入：`KnowledgeDocument`、`KnowledgeChunk`、`ingest_text()`、`search()`、`delete()`、`iter_indexable_knowledge_chunks()`、`DocumentRef`、`DataSource`、sync planner dataclasses、`plan_local_directory_sync()`、`execute_sync_plan()`、`sync_local_directory()`
 - 配置默认值：`knowledge_base.enabled=false`，默认 tenant/kb 与 chunk 参数稳定
 
 **需要集成测试的行为**：
@@ -417,6 +423,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - local sync planner 为 new / changed / unchanged / missing source 生成确定性动作
 - execute_sync_plan 只在 item 成功后更新 source state，单 item 失败不阻断后续 item
 - sync_local_directory 通过 planner + executor 执行；本地文件删除后对应 KB document 和 chunks 被删除
+- iter_indexable_knowledge_chunks 按 tenant/kb 隔离返回当前 chunks，namespace 为 `kb:{tenant_id}:{kb_id}`
 
 **需要 evaluation 测试的行为**：
 - fixture loader 对 `name`、`documents`、`queries`、`expected_chunks`、`forbidden_chunks` 缺失 fail fast

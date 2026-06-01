@@ -53,8 +53,8 @@ spec 零散推进后失去全貌。
 | Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation | retention / compaction；真实 embedding 检索评估 | 自动反思维护、长期质量趋势 |
 | Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution | evaluation 基线；budget policy | 个性化 budget、agent-specific policy |
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告 | report evaluation；maintenance actions 的边界设计 | 自动 skill proposal、自动 memory maintenance |
-| Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction | reindex jobs；真实 embedding / rerank evaluation；rerank 接入 KB search | sqlite-vec、Qdrant、OpenSearch adapter |
-| Knowledge base | 基础完成 | local ingest、parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture | KB scope/binding；rerank integration；reindex flow | Confluence / Google Drive connectors、graph retrieval |
+| Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API | 真实 embedding / rerank evaluation；rerank 接入 KB search | 后台 reindex job runtime、sqlite-vec、Qdrant、OpenSearch adapter |
+| Knowledge base | 基础完成 | local ingest、parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator | KB scope/binding；rerank integration | Confluence / Google Drive connectors、graph retrieval |
 | Deployment / config | 部分完成 | `settings.yaml`、MCP dedicated server file、legacy config fail-fast | backup / upgrade；config docs 对 intelligence runtime prerequisites 的收敛 | config center、Admin UI、hot reload |
 
 ## 依赖顺序
@@ -90,7 +90,7 @@ flowchart TD
 
 - `observability-runtime-event-coverage` 是 long-term context evaluation、reflection evaluation 和 performance summary 的前置。
 - `knowledge-base-sync-planner` 是 Confluence / Google Drive connector 和 vector reindex jobs 的前置。
-- `vector-store-reindex-jobs` 是真实 embedding / rerank evaluation 的前置。
+- `vector-store-reindex-jobs` 已提供同步 rebuild API，是真实 embedding / rerank evaluation 的前置。
 - `long-term-context-evaluation` 先于 `long-term-context-budget-policy`。
 - `memory-retention-and-compaction` 先于 `memory-reflection-maintenance`。
 
@@ -122,13 +122,13 @@ flowchart TD
 建议 specs：
 
 1. `knowledge-base-sync-planner`
-2. `vector-store-reindex-jobs`
+2. `vector-store-reindex-jobs`（同步 public API；不含后台 job platform）
 3. `deployment-upgrade-and-backup`
 
 完成标准：
 
 - KB sync 有 plan/execute separation、幂等状态和失败隔离。
-- embedding / backend 切换后可重建 memory / KB index。
+- embedding / backend 切换后可通过同步 public API 重建 memory / KB index。
 - 本地 SQLite / config / data 目录有最小备份与升级流程。
 
 ### M3：可评估

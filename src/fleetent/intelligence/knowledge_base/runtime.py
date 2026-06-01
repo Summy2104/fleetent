@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import uuid
+from collections.abc import Iterator
 from dataclasses import replace
 from typing import Literal
 
@@ -244,6 +247,28 @@ async def delete(document_id: str) -> None:
             vector_store.knowledge_namespace(chunk.tenant_id, chunk.kb_id),
         )
     store.delete_document(document_id)
+
+
+def iter_indexable_knowledge_chunks(
+    tenant_id: str, kb_id: str
+) -> Iterator[vector_store.IndexableItem]:
+    """Yield current knowledge chunks that should exist in vector_store."""
+    namespace = vector_store.knowledge_namespace(tenant_id, kb_id)
+    store = KnowledgeStore(_database())
+    for chunk in store.iter_indexable_chunks(tenant_id, kb_id):
+        metadata = {
+            "document_id": chunk.document_id,
+            "filename": chunk.filename,
+            "source": chunk.source,
+        }
+        if chunk.source_url is not None:
+            metadata["source_url"] = chunk.source_url
+        yield vector_store.IndexableItem(
+            id=chunk.id,
+            content=chunk.content,
+            namespace=namespace,
+            metadata=metadata,
+        )
 
 
 def _chunk_text(content: str, chunk_size: int, chunk_overlap: int) -> list[str]:
