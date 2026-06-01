@@ -15,7 +15,7 @@ def test_settings_defaults():
     assert s.microsandbox_url == "http://host.docker.internal:7777"
     assert s.permission_gate_medium_timeout_seconds == 300
     assert s.permission_gate_high_timeout_seconds == 3600
-    assert s.database_url == "sqlite:///data/users.db"
+    assert s.database_url == "sqlite:///data/fleetent.db"
 
 
 def test_settings_loads_non_secret_values_from_settings_yaml(tmp_path, monkeypatch):
@@ -81,6 +81,20 @@ def test_settings_example_excludes_mcp_server_definitions():
     assert "mcp-github" not in example
 
 
+def test_settings_example_uses_default_fleetent_database_url():
+    example = (Path(__file__).parents[2] / "config" / "settings.yaml.example").read_text()
+
+    assert "database_url: sqlite:///data/fleetent.db" in example
+    assert "database_url: sqlite:///data/users.db" not in example
+
+
+def test_alembic_ini_uses_default_fleetent_database_url():
+    alembic_ini = (Path(__file__).parents[2] / "alembic.ini").read_text()
+
+    assert "sqlalchemy.url = sqlite:///data/fleetent.db" in alembic_ini
+    assert "sqlalchemy.url = sqlite:///data/users.db" not in alembic_ini
+
+
 def test_mcp_servers_example_documents_server_list_format():
     example = (Path(__file__).parents[2] / "config" / "mcp.servers.yaml.example").read_text()
 
@@ -119,7 +133,7 @@ def test_settings_missing_yaml_file_uses_typed_defaults(tmp_path, monkeypatch):
 
     s = Settings(anthropic_api_key="test-key")
 
-    assert s.database_url == "sqlite:///data/users.db"
+    assert s.database_url == "sqlite:///data/fleetent.db"
     assert s.log_format == "console"
 
 
