@@ -34,11 +34,13 @@ from fleetent.sub_agent import SubAgentExecutor
 from fleetent.termination import (
     ApprovalRejectedChecker,
     ConsecutiveFailuresChecker,
+    GuardrailChecker,
     LoopState,
     StopReason,
     TerminationController,
     resolve_limits,
 )
+from fleetent.tool_guardrails import GuardrailAction, evaluate_guardrail
 from fleetent.tool_registry import (
     ToolContext,
     dispatch,
@@ -89,6 +91,13 @@ _LOOP_WARNING_TEXT = (
     "检测到你正在重复调用同一工具且似乎没有进展，请改用其它方式或直接给出当前结论。"
 )
 
+# Placeholder tool_result content when the AR10 guardrail short-circuits a call:
+# it both keeps the message sequence valid (every tool_call needs a tool_result)
+# and feeds the correction back to the model so it changes approach.
+_GUARDRAIL_FEEDBACK_TEXT = (
+    "已跳过本次工具调用：检测到相同工具、相同参数连续重复多次。请改用其它方式或直接给出当前结论。"
+)
+
 # Appended as a final `user` message when a budget dimension is exhausted (AR2 D3):
 # the Grace Call asks the model to summarize progress in one go without further
 # tool use, so the user gets a graceful conclusion instead of a half-cut reply.
@@ -127,6 +136,15 @@ def _resolve_loop_config(
         repeat_threshold if repeat_threshold is not None else s.agent_loop_repeat_threshold,
         ignore_arg_keys if ignore_arg_keys is not None else list(s.loop_detect_ignore_arg_keys),
     )
+
+
+def _resolve_guardrail_threshold(guardrail_repeat_threshold: int | None) -> int:
+    """Resolve the AR10 guardrail threshold: call param > Settings > default (D1)."""
+    if guardrail_repeat_threshold is not None:
+        return guardrail_repeat_threshold
+    from fleetent.config import Settings
+
+    return Settings().guardrail_repeat_threshold
 
 
 def _build_controller(
@@ -168,6 +186,7 @@ def _build_controller(
     controller.register(ConsecutiveFailuresChecker(mcf))
     if include_approval:
         controller.register(ApprovalRejectedChecker())
+    controller.register(GuardrailChecker())
     loop_checker = LoopDetectionChecker(threshold, ignore_keys)
     controller.register(loop_checker)
     return controller, loop_checker, budget_checker
@@ -493,6 +512,7 @@ async def run(
     disabled_skills_trace: list[dict[str, str]] | None = None,
     loop_repeat_threshold: int | None = None,
     loop_ignore_arg_keys: list[str] | None = None,
+    guardrail_repeat_threshold: int | None = None,
     cancel_token: CancelToken | None = None,
     sandbox_mode: Mode | None = None,
     agent_features: dict[str, Any] | None = None,
@@ -568,6 +588,7 @@ async def run(
     state = LoopState()
     stop_reason = StopReason.normal
     hygiene_repairs: dict[str, int] = {}
+    guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold)
 
     while True:
         forced = controller.should_stop(state)
@@ -615,6 +636,27 @@ async def run(
 
         for tc in msg.tool_calls or []:
             if not hasattr(tc, "function"):
+                continue
+            # AR10: strict back-to-back repeat guard, checked before dispatch. On the
+            # Nth identical call short-circuit (skip execution, feed correction); a
+            # further repeat trips a loop_detected stop at the next checkpoint.
+            tc_fp = arg_fingerprint(tc.function.arguments, loop_checker.ignore_arg_keys)
+            action = evaluate_guardrail(state, tc.function.name, tc_fp, guardrail_threshold)
+            if action is not GuardrailAction.proceed:
+                if action is GuardrailAction.short_circuit:
+                    state.loop_warning_injected = True
+                else:
+                    state.guardrail_tripped = True
+                messages.append(
+                    {"role": "tool", "tool_call_id": tc.id, "content": _GUARDRAIL_FEEDBACK_TEXT}
+                )
+                state.record_tool_call(
+                    tc.function.name,
+                    tc_fp,
+                    result_digest(_GUARDRAIL_FEEDBACK_TEXT),
+                    True,
+                    window=loop_checker.window,
+                )
                 continue
             failed = False
             if tc.function.name == _SUB_AGENT_TOOL and not is_sub_agent:
@@ -786,6 +828,7 @@ async def run_stream(
     force_model: str | None = None,
     loop_repeat_threshold: int | None = None,
     loop_ignore_arg_keys: list[str] | None = None,
+    guardrail_repeat_threshold: int | None = None,
     cancel_token: CancelToken | None = None,
     sandbox_mode: Mode | None = None,
     agent_features: dict[str, Any] | None = None,
@@ -852,6 +895,7 @@ async def run_stream(
     state = LoopState()
     stop_reason = StopReason.normal
     hygiene_repairs: dict[str, int] = {}
+    guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold)
 
     while True:
         forced = controller.should_stop(state)
@@ -954,6 +998,30 @@ async def run_stream(
             name = func["name"]
             args = func["arguments"]
             yield {"type": "tool_call", "name": name, "args": args}
+            # AR10 guardrail (see run()): short-circuit / stop strict repeats.
+            tc_fp = arg_fingerprint(args, loop_checker.ignore_arg_keys)
+            action = evaluate_guardrail(state, name, tc_fp, guardrail_threshold)
+            if action is not GuardrailAction.proceed:
+                if action is GuardrailAction.short_circuit:
+                    state.loop_warning_injected = True
+                else:
+                    state.guardrail_tripped = True
+                yield {"type": "tool_result", "name": name, "content": _GUARDRAIL_FEEDBACK_TEXT}
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc_data["id"],
+                        "content": _GUARDRAIL_FEEDBACK_TEXT,
+                    }
+                )
+                state.record_tool_call(
+                    name,
+                    tc_fp,
+                    result_digest(_GUARDRAIL_FEEDBACK_TEXT),
+                    True,
+                    window=loop_checker.window,
+                )
+                continue
             result, failed = await _safe_dispatch(
                 name, args, False, token, tool_context, user_id=user_id
             )

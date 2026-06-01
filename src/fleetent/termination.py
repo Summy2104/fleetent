@@ -78,6 +78,11 @@ class LoopState:
     tool_history: list[ToolCallRecord] = field(default_factory=list)
     loop_warning_requested: bool = False
     loop_warning_injected: bool = False
+    # Per-call guardrail state (AR10): the strict back-to-back repeat streak plus a
+    # trip flag the GuardrailChecker reads. Defaults keep this backward-compatible.
+    last_call_fingerprint: tuple[str, str] | None = None
+    consecutive_repeat: int = 0
+    guardrail_tripped: bool = False
 
     def record_tool_call(
         self,
@@ -139,3 +144,15 @@ class ApprovalRejectedChecker:
 
     def check(self, state: LoopState) -> StopReason | None:
         return StopReason.approval_rejected if state.approval_rejected else None
+
+
+class GuardrailChecker:
+    """Stop when the per-call tool guardrail tripped (AR10), reusing loop_detected.
+
+    The guardrail runs before dispatch (in the loop body) and sets `guardrail_
+    tripped` on its second strict-consecutive hit; this checker turns that flag
+    into a `loop_detected` stop at the next checkpoint, like ApprovalRejected.
+    """
+
+    def check(self, state: LoopState) -> StopReason | None:
+        return StopReason.loop_detected if state.guardrail_tripped else None

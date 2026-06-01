@@ -2395,3 +2395,57 @@ async def test_run_stream_truncates_messages_but_sse_keeps_original(mock_client,
     assert tool_results[0]["content"] == big  # SSE event keeps the full result
     tool_msgs = [m for s in seen for m in s if m.get("role") == "tool"]
     assert len(tool_msgs[-1]["content"].encode("utf-8")) <= 500  # messages copy truncated
+
+
+# ── tool-call guardrail integration (AR10) ───────────────────────────────────
+
+
+async def test_run_guardrail_short_circuits_then_stops(mock_client, monkeypatch):
+    from fleetent.termination import StopReason
+
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+    calls = {"n": 0}
+
+    def _disp(name, args, **kw):
+        calls["n"] += 1
+        return "same-result"
+
+    monkeypatch.setattr(al, "dispatch", _disp)
+    # LLM keeps emitting the identical tool call forever.
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=lambda *a, **k: _tool_resp("loop_tool")
+    )
+    # Disable AR4 (high threshold) to isolate the AR10 per-call guardrail.
+    await al.run(
+        [{"role": "user", "content": "x"}],
+        guardrail_repeat_threshold=3,
+        loop_repeat_threshold=100,
+        max_turns=50,
+    )
+    # Calls 1,2 execute; 3rd is short-circuited (not dispatched); 4th trips the stop.
+    assert calls["n"] == 2
+    assert captured.get("stop_reason") == StopReason.loop_detected
+
+
+async def test_run_guardrail_injects_placeholder_tool_result(mock_client, monkeypatch):
+    # The short-circuited tool_call must still get a tool_result (message validity).
+    seen: list = []
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs: seen.append(list(msgs)) or msgs)
+    monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: "same-result")
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=lambda *a, **k: _tool_resp("loop_tool")
+    )
+    await al.run(
+        [{"role": "user", "content": "x"}],
+        guardrail_repeat_threshold=3,
+        loop_repeat_threshold=100,
+        max_turns=50,
+    )
+    # Every assistant tool_call id must have a matching tool message (no orphans).
+    final = seen[-1]
+    tool_ids = {m["tool_call_id"] for m in final if m.get("role") == "tool"}
+    for m in final:
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            for tcd in m["tool_calls"]:
+                assert tcd["id"] in tool_ids
