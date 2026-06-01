@@ -109,6 +109,7 @@ class KnowledgeStore:
                 JOIN knowledge_documents AS document ON document.id = chunk.document_id
                 WHERE chunk.tenant_id = :tenant_id
                   AND chunk.id IN ({placeholders})
+                  AND document.archived_at IS NULL
                 """,
             params,
         ).fetchall()
@@ -131,6 +132,7 @@ class KnowledgeStore:
                 FROM knowledge_chunks AS chunk
                 JOIN knowledge_documents AS document ON document.id = chunk.document_id
                 WHERE chunk.document_id = :document_id
+                  AND document.archived_at IS NULL
                 ORDER BY chunk.position ASC
                 """,
             {"document_id": document_id},
@@ -155,6 +157,7 @@ class KnowledgeStore:
                 JOIN knowledge_documents AS document ON document.id = chunk.document_id
                 WHERE chunk.tenant_id = :tenant_id
                   AND chunk.kb_id = :kb_id
+                  AND document.archived_at IS NULL
                 ORDER BY chunk.document_id ASC, chunk.position ASC, chunk.id ASC
                 """,
             {"tenant_id": tenant_id, "kb_id": kb_id},
@@ -202,12 +205,42 @@ class KnowledgeStore:
             WHERE knowledge_chunks_fts MATCH :query
               AND knowledge_chunks_fts.tenant_id = :tenant_id
               AND knowledge_chunks_fts.kb_id IN ({placeholders})
+              AND document.archived_at IS NULL
             ORDER BY rank ASC, chunk.position ASC, chunk.id ASC
             LIMIT :limit
             """,
             params,
         ).fetchall()
         return [_row_to_chunk(row, score=-float(row["rank"])) for row in rows]
+
+    def archive_document(self, document_id: str) -> None:
+        with self._database.transaction() as transaction:
+            transaction.execute(
+                """
+                DELETE FROM knowledge_chunks_fts
+                WHERE chunk_id IN (
+                    SELECT id
+                    FROM knowledge_chunks
+                    WHERE document_id = :document_id
+                )
+                """,
+                {"document_id": document_id},
+            )
+            transaction.execute(
+                """
+                DELETE FROM knowledge_chunks
+                WHERE document_id = :document_id
+                """,
+                {"document_id": document_id},
+            )
+            transaction.execute(
+                """
+                UPDATE knowledge_documents
+                SET archived_at = :archived_at
+                WHERE id = :document_id
+                """,
+                {"document_id": document_id, "archived_at": _format_datetime(_now())},
+            )
 
     def delete_document(self, document_id: str) -> None:
         with self._database.transaction() as transaction:

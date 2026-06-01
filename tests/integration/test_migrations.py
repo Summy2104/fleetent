@@ -207,6 +207,7 @@ def test_column_structure(tmp_path):
         "filename",
         "source",
         "source_url",
+        "archived_at",
         "created_at",
     }
     chunk_cols = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_chunks)")}

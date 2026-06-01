@@ -249,6 +249,19 @@ async def delete(document_id: str) -> None:
     store.delete_document(document_id)
 
 
+async def archive(document_id: str) -> None:
+    """Archive a knowledge document without deleting the document record."""
+
+    store = KnowledgeStore(_database())
+    chunks = store.get_document_chunks(document_id)
+    for chunk in chunks:
+        await vector_store.delete(
+            chunk.id,
+            vector_store.knowledge_namespace(chunk.tenant_id, chunk.kb_id),
+        )
+    store.archive_document(document_id)
+
+
 def iter_indexable_knowledge_chunks(
     tenant_id: str, kb_id: str
 ) -> Iterator[vector_store.IndexableItem]:

@@ -26,6 +26,9 @@ class SyncAction(StrEnum):
     REINGEST_CHANGED = "reingest_changed"
     SKIP_UNCHANGED = "skip_unchanged"
     DELETE_MISSING = "delete_missing"
+    ARCHIVE_MISSING = "archive_missing"
+    SKIP_UNSUPPORTED = "skip_unsupported"
+    AUTH_FAILED = "auth_failed"
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,9 @@ class SyncPlanSummary:
     unsupported: int = 0
     unchanged: int = 0
     deleted: int = 0
+    archived: int = 0
+    changed: int = 0
+    auth_failed: int = 0
 
 
 @dataclass(frozen=True)
@@ -53,6 +59,9 @@ class SyncExecutionSummary:
     unsupported: int = 0
     unchanged: int = 0
     deleted: int = 0
+    archived: int = 0
+    changed: int = 0
+    auth_failed: int = 0
 
 
 @dataclass(frozen=True)

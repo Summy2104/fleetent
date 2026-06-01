@@ -185,8 +185,8 @@ flowchart TD
 
 建议 specs：
 
-1. `knowledge-base-connectors-confluence`
-2. `knowledge-base-connectors-google-drive`
+1. `knowledge-base-connectors-google-drive`
+2. `knowledge-base-connectors-confluence`
 
 完成标准：
 
@@ -196,6 +196,10 @@ flowchart TD
 
 是否将 Confluence / Google Drive connector 纳入 MVP，需要在 connector spec 前单独确认。当前 KB MVP baseline 是
 local directory + sync planner + hybrid retrieval + reindex。
+
+已完成的 M4b spec：
+
+- `knowledge-base-connectors-google-drive`：提供 folder-scoped Google Drive connector config、OAuth `credential_ref`、fake client 默认测试路径、Google Docs HTML export、text / Markdown / HTML parser dispatch、planner / executor 分离、missing archive 语义和 opt-in smoke scaffold；不做 service account / domain-wide delegation、per-user Drive ACL、Sheets / Slides 结构化解析、scheduler 或真实 Google API 默认测试。
 
 ## Goal 自动推进边界
 
