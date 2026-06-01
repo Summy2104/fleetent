@@ -47,6 +47,70 @@ class MemoryItem:
     expires_at: datetime | None
 
 
+@dataclass(frozen=True)
+class MemoryMaintenancePolicy:
+    """Per-user semantic memory retention and compaction limits."""
+
+    max_identity: int = 20
+    max_preferences: int = 30
+    max_context: int = 20
+    compact_duplicates: bool = True
+
+
+@dataclass(frozen=True)
+class MemoryCompactionCandidate:
+    """Duplicate memory group that can be compacted deterministically."""
+
+    type: MemoryType
+    canonical_id: str
+    duplicate_ids: list[str]
+    reason: str
+
+
+@dataclass(frozen=True)
+class MemoryMaintenanceSummary:
+    """Summary returned by one memory maintenance run."""
+
+    user_id: str
+    dry_run: bool
+    expired_count: int
+    over_limit_count: int
+    compacted_count: int
+    deleted_ids: list[str]
+    compaction_candidates: list[MemoryCompactionCandidate]
+
+
+async def run_memory_maintenance(
+    user_id: str,
+    *,
+    policy: MemoryMaintenancePolicy | None = None,
+    dry_run: bool = True,
+) -> MemoryMaintenanceSummary:
+    """Run per-user semantic memory retention and compaction maintenance."""
+    policy = policy or MemoryMaintenancePolicy()
+    _validate_maintenance_request(user_id, policy)
+    expired_ids = _expired_context_ids(user_id)
+    over_limit_ids = _over_limit_ids(user_id, policy)
+    compaction_candidates = (
+        _duplicate_compaction_candidates(user_id) if policy.compact_duplicates else []
+    )
+    duplicate_ids = [id for candidate in compaction_candidates for id in candidate.duplicate_ids]
+    deleted_ids = _dedupe_ids([*expired_ids, *over_limit_ids, *duplicate_ids])
+    if not dry_run:
+        for id in deleted_ids:
+            _delete_memory(user_id, id)
+            await vector_store.delete(id, vector_store.memory_namespace(user_id))
+    return MemoryMaintenanceSummary(
+        user_id=user_id,
+        dry_run=dry_run,
+        expired_count=len(expired_ids),
+        over_limit_count=len(over_limit_ids),
+        compacted_count=len(duplicate_ids),
+        deleted_ids=deleted_ids,
+        compaction_candidates=compaction_candidates,
+    )
+
+
 async def extract_and_update(user_id: str, conversation: list[dict[str, Any]]) -> None:
     """Extract structured memories from conversation and update the memory store."""
     snapshot = _memory_snapshot(user_id)
@@ -317,6 +381,117 @@ def _row_to_memory_item(row: dict[str, Any]) -> MemoryItem:
         updated_at=_parse_datetime(row["updated_at"]),
         expires_at=_parse_optional_datetime(row["expires_at"]),
     )
+
+
+def _validate_maintenance_request(user_id: str, policy: MemoryMaintenancePolicy) -> None:
+    if not user_id.strip():
+        raise ValueError("user_id must not be empty")
+    limits = {
+        "max_identity": policy.max_identity,
+        "max_preferences": policy.max_preferences,
+        "max_context": policy.max_context,
+    }
+    for name, limit in limits.items():
+        if limit < 0:
+            raise ValueError(f"{name} must be greater than or equal to 0")
+
+
+def _expired_context_ids(user_id: str) -> list[str]:
+    now = datetime.now(UTC).replace(microsecond=0)
+    rows = (
+        _database()
+        .execute(
+            """
+            SELECT id
+            FROM memory_items
+            WHERE user_id = :user_id
+              AND type = 'context'
+              AND expires_at IS NOT NULL
+              AND expires_at < :now
+            ORDER BY updated_at ASC, id ASC
+            """,
+            {"user_id": user_id, "now": _format_datetime(now)},
+        )
+        .fetchall()
+    )
+    return [str(row["id"]) for row in rows]
+
+
+def _over_limit_ids(user_id: str, policy: MemoryMaintenancePolicy) -> list[str]:
+    result: list[str] = []
+    limits: dict[MemoryType, int] = {
+        "identity": policy.max_identity,
+        "preferences": policy.max_preferences,
+        "context": policy.max_context,
+    }
+    for memory_type, limit in limits.items():
+        rows = (
+            _database()
+            .execute(
+                """
+                SELECT id
+                FROM memory_items
+                WHERE user_id = :user_id AND type = :type
+                ORDER BY updated_at DESC, id ASC
+                """,
+                {"user_id": user_id, "type": memory_type},
+            )
+            .fetchall()
+        )
+        result.extend(str(row["id"]) for row in rows[limit:])
+    return result
+
+
+def _dedupe_ids(ids: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for id in ids:
+        if id in seen:
+            continue
+        seen.add(id)
+        result.append(id)
+    return result
+
+
+def _duplicate_compaction_candidates(user_id: str) -> list[MemoryCompactionCandidate]:
+    rows = (
+        _database()
+        .execute(
+            """
+            SELECT id, type, content, updated_at
+            FROM memory_items
+            WHERE user_id = :user_id
+            ORDER BY type ASC, updated_at DESC, id ASC
+            """,
+            {"user_id": user_id},
+        )
+        .fetchall()
+    )
+    groups: dict[tuple[MemoryType, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        memory_type = cast(MemoryType, row["type"])
+        key = (memory_type, _normalize_memory_content(str(row["content"])))
+        groups.setdefault(key, []).append(row)
+
+    candidates: list[MemoryCompactionCandidate] = []
+    for (memory_type, _normalized), items in groups.items():
+        if len(items) < 2:
+            continue
+        canonical = items[0]
+        duplicates = items[1:]
+        candidates.append(
+            MemoryCompactionCandidate(
+                type=memory_type,
+                canonical_id=str(canonical["id"]),
+                duplicate_ids=[str(item["id"]) for item in duplicates],
+                reason="duplicate_normalized_content",
+            )
+        )
+    return candidates
+
+
+def _normalize_memory_content(content: str) -> str:
+    return " ".join(content.split()).casefold()
 
 
 def _extraction_user_message(

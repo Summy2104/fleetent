@@ -115,8 +115,8 @@ def iter_indexable_memories(user_id: str) -> Iterator[IndexableItem]:
 - `iter_indexable_memories(user_id)` public API 返回当前未过期 memory source records，供 vector_store 同步 reindex 使用
 - 删除旧 JSONL memory 兼容和 `load_memories()` 直接注入路径
 
-当前定位：已完成结构化语义记忆地基、基础维护动作、第一批 memory extraction evaluation 基线，以及与 KB
-共用 embedding / vector-store 路径的 deterministic retrieval evaluation。retention 策略仍未闭环。
+当前定位：已完成结构化语义记忆地基、基础维护动作、第一批 memory extraction evaluation 基线、与 KB
+共用 embedding / vector-store 路径的 deterministic retrieval evaluation，以及显式 per-user retention / compaction 维护 API。
 
 ## 规划中（v1.0）
 
@@ -142,16 +142,20 @@ def iter_indexable_memories(user_id: str) -> Iterator[IndexableItem]:
   - 默认使用 deterministic provider 和 tmp SQLite / tmp vector DB
   - 真实 HTTP embedding 仅在 `FLEETENT_EVAL_REAL_EMBEDDING=1` 且 endpoint / model / API key / dimensions 完整时手动运行
 
+- [x] **retention / compaction 维护 API**：按 user_id 显式运行，不自动调度
+  - dry-run 报告 expired context、per-type over-limit rows 和 duplicate compaction candidates
+  - apply 删除 eligible memory rows，并调用 `vector_store.delete(id, mem:{user_id})`
+  - duplicate compaction 只处理同 user / 同 type 的 normalized exact duplicates，不做 LLM summary / rewrite
+
 ## 当前缺口
 
 - 提取质量已有 mock evaluation 基线，但还缺少真实 LLM 回归样本和长期趋势统计。
 - 真实 embedding provider 边界已定义且有手动 evaluation 入口；尚未选择或部署自托管模型 endpoint。
-- memory 条数增长策略未定义：没有硬上限、软告警或 compaction 机制。
+- memory 条数已有显式维护 API；尚未接入 scheduler、admin UI、长期趋势统计或 reflection 自动维护。
 - reindex 入口由 vector_store 提供；memory 只暴露 source iterator，不承担 job history / worker / scheduler。
 
 ## 下一批候选 specs
 
-- `memory-retention-and-compaction`
 - `memory-extraction-real-llm-regression`
 - `memory-extraction-real-llm-regression`
 

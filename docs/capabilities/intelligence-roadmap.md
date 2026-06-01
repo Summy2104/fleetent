@@ -50,7 +50,7 @@ spec 零散推进后失去全貌。
 | 能力 | 当前状态 | 已有基础 | MVP 必补缺口 | 非 MVP 增强 |
 | --- | --- | --- | --- | --- |
 | Observability foundation | 基础完成 | structured logs、SQLite traces、usage summary、performance summary、source attribution、runtime event coverage、contract tests | 形成面向运维排障的查询入口 | OTel / Prometheus、dashboard UI、告警 |
-| Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation | retention / compaction | 自动反思维护、长期质量趋势 |
+| Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation、retention / compaction API | 自动维护触发与趋势统计 | 自动反思维护、长期质量趋势 |
 | Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture | budget policy | 个性化 budget、agent-specific policy |
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告、deterministic report evaluation | maintenance actions 的边界设计 | 自动 skill proposal、自动 memory maintenance |
 | Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API、combined embedding evaluation | rerank evaluation；rerank 接入 KB search | 后台 reindex job runtime、sqlite-vec、Qdrant、OpenSearch adapter |
@@ -172,6 +172,10 @@ flowchart TD
 - memory 有 retention、compaction 和容量边界。
 - long-term context 有可解释的 token budget 策略。
 - reflection 的建议能进入受控 maintenance 流程，而不是自动无约束改写。
+
+已完成的 M4 spec：
+
+- `memory-retention-and-compaction`：提供 per-user dry-run/apply 维护 API，覆盖 expired context、per-type over-limit 和 exact duplicate compaction；不做 Shared Memory、scheduler 或 reflection 自动写回。
 
 ### M4b：企业知识源接入
 
