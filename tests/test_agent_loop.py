@@ -96,7 +96,7 @@ def mock_client(monkeypatch) -> AsyncMock:
 
     monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
     monkeypatch.setattr(al, "get_schemas", lambda: [])
-    monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
     monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
@@ -674,7 +674,7 @@ def mock_client_fb(monkeypatch) -> AsyncMock:
     monkeypatch.setenv("TEST_KEY", "k")
     monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
     monkeypatch.setattr(al, "get_schemas", lambda: [])
-    monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
     monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
@@ -852,7 +852,7 @@ async def test_run_stream_logs_error_category_on_exhaustion(mock_client_fb, monk
 
 async def test_run_calls_sanitize_after_compress_before_llm(mock_client, monkeypatch):
     order: list[str] = []
-    monkeypatch.setattr(al, "maybe_compress", lambda m: (order.append("compress"), m)[1])
+    monkeypatch.setattr(al, "maybe_compress", lambda m, **kw: (order.append("compress"), m)[1])
 
     real_sanitize = al.sanitize
 
@@ -1057,7 +1057,7 @@ async def test_run_routes_to_vision_when_image_present(monkeypatch):
 
     monkeypatch.setattr(al, "get_async_client_and_config", spy)
     monkeypatch.setattr(al, "get_schemas", lambda: [])
-    monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
     monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(
@@ -1148,7 +1148,7 @@ async def test_run_stream_routes_to_vision_with_images(monkeypatch):
 
     monkeypatch.setattr(al, "get_async_client_and_config", spy)
     monkeypatch.setattr(al, "get_schemas", lambda: [])
-    monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
     monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(al, "load_memories", lambda **kw: "")
@@ -1423,7 +1423,7 @@ def _wire_loop(monkeypatch, client, cfg):
     monkeypatch.setenv(cfg.api_key_env, "k")
     monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
     monkeypatch.setattr(al, "get_schemas", lambda: [])
-    monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
     monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
@@ -1518,7 +1518,7 @@ def _capture_stream_wire(monkeypatch, *, memory: str, catalog: str) -> dict:
     client.chat.completions.create = fake_create
     monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
     monkeypatch.setattr(al, "get_schemas", lambda: [])
-    monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
     monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
     monkeypatch.setattr(al, "load_memories", lambda **kw: memory)
@@ -1897,7 +1897,7 @@ async def test_run_warning_survives_same_round_compression(mock_client, monkeypa
     # warning must still reach the next LLM call (not be swallowed by the summary).
     captured_messages: list = []
 
-    def recording_compress(msgs):
+    def recording_compress(msgs, **kw):
         # Simulate a compression that drops everything but a system summary,
         # keeping only the leading system head — i.e. a destructive compaction.
         return [m for m in msgs if isinstance(m, dict) and m.get("role") == "system"][:1] or msgs
@@ -1988,7 +1988,7 @@ async def test_run_compression_tokens_not_counted_in_budget(mock_client):
 
     compress_calls = {"n": 0}
 
-    def counting_compress(msgs):
+    def counting_compress(msgs, **kw):
         compress_calls["n"] += 1
         return msgs
 
@@ -2348,7 +2348,7 @@ async def test_run_truncates_large_tool_result(mock_client, monkeypatch):
     import fleetent.tool_result_truncation as trt
 
     seen: list = []
-    monkeypatch.setattr(al, "maybe_compress", lambda msgs: seen.append(list(msgs)) or msgs)
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: seen.append(list(msgs)) or msgs)
     monkeypatch.setattr(trt, "MAX_TOOL_RESULT_BYTES", 500)
     big = "Z" * 100_000
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: big)
@@ -2367,7 +2367,7 @@ async def test_run_self_truncating_tool_exempt(mock_client, monkeypatch):
     import fleetent.tool_result_truncation as trt
 
     seen: list = []
-    monkeypatch.setattr(al, "maybe_compress", lambda msgs: seen.append(list(msgs)) or msgs)
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: seen.append(list(msgs)) or msgs)
     monkeypatch.setattr(trt, "MAX_TOOL_RESULT_BYTES", 500)
     big = "Z" * 100_000
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: big)
@@ -2384,7 +2384,7 @@ async def test_run_stream_truncates_messages_but_sse_keeps_original(mock_client,
     import fleetent.tool_result_truncation as trt
 
     seen: list = []
-    monkeypatch.setattr(al, "maybe_compress", lambda msgs: seen.append(list(msgs)) or msgs)
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: seen.append(list(msgs)) or msgs)
     monkeypatch.setattr(trt, "MAX_TOOL_RESULT_BYTES", 500)
     big = "Z" * 100_000
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: big)
@@ -2431,7 +2431,7 @@ async def test_run_guardrail_short_circuits_then_stops(mock_client, monkeypatch)
 async def test_run_guardrail_injects_placeholder_tool_result(mock_client, monkeypatch):
     # The short-circuited tool_call must still get a tool_result (message validity).
     seen: list = []
-    monkeypatch.setattr(al, "maybe_compress", lambda msgs: seen.append(list(msgs)) or msgs)
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: seen.append(list(msgs)) or msgs)
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: "same-result")
     mock_client.chat.completions.create = AsyncMock(
         side_effect=lambda *a, **k: _tool_resp("loop_tool")

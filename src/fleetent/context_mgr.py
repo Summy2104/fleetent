@@ -1,10 +1,13 @@
 """In-session context compression: summarize old history when token limit approaches."""
 
+import hashlib
 import json
+import time
 from typing import Any
 
 import structlog
 
+from fleetent import eval_logger
 from fleetent.model_router import get_client_and_config
 
 logger = structlog.get_logger(__name__)
@@ -103,6 +106,9 @@ def maybe_compress(
     config: ContextConfig | None = None,
     *,
     force: bool = False,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    agent_name: str | None = None,
 ) -> list[Any]:
     """Compress when over the Tmax trigger line; return a new list, else return as-is.
 
@@ -113,15 +119,26 @@ def maybe_compress(
             whether the Tmax trigger line is currently exceeded.
     """
     cfg = _resolve_config(config)
-    trigger = int(cfg["max_tokens"] * cfg["tmax_ratio"])
-    if not force and estimate_tokens(messages) <= trigger:
+    trigger_line = int(cfg["max_tokens"] * cfg["tmax_ratio"])
+    if not force and estimate_tokens(messages) <= trigger_line:
         return messages
-    return _compress(messages, cfg)
+    return _compress(
+        messages,
+        cfg,
+        trigger="manual" if force else "tmax",
+        session_id=session_id,
+        user_id=user_id,
+        agent_name=agent_name,
+    )
 
 
 def compress_for_context_overflow(
     messages: list[Any],
     config: ContextConfig | None = None,
+    *,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    agent_name: str | None = None,
 ) -> list[Any]:
     """Compress entrypoint for an LLM "context too long" error, regardless of Tmax.
 
@@ -129,10 +146,53 @@ def compress_for_context_overflow(
     (Non-Goal here); this only performs the unconditional compression to Tretained.
     """
     cfg = _resolve_config(config)
-    return _compress(messages, cfg)
+    return _compress(
+        messages,
+        cfg,
+        trigger="context_overflow",
+        session_id=session_id,
+        user_id=user_id,
+        agent_name=agent_name,
+    )
 
 
-def _compress(messages: list[Any], cfg: ContextConfig) -> list[Any]:
+def _summary_fingerprint(text: str) -> str:
+    """Short stable hash of a summary body — enough to tell summaries apart without
+    ever writing the (possibly sensitive) body to the append-only trace (AR16 D2)."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _resolve_summary_model() -> str | None:
+    """Resolve the summary route's model name for the trace (AR16 D4), defensively:
+    observability must never break compression, so a resolution failure → None."""
+    try:
+        _, scfg = get_client_and_config("memory_extraction")
+        return str(scfg.model)
+    except Exception as exc:  # observability only — never propagate
+        logger.warning("compression_summary_model_resolve_failed", error=str(exc))
+        return None
+
+
+def _log_compression_safe(**kwargs: Any) -> None:
+    """Write the compression trace, swallowing (but logging) any failure (AR16 D5)."""
+    try:
+        eval_logger.log_compression(**kwargs)
+    except Exception as exc:  # observability must not become a failure point
+        logger.warning("compression_trace_failed", error=str(exc))
+
+
+def _compress(
+    messages: list[Any],
+    cfg: ContextConfig,
+    *,
+    trigger: str = "tmax",
+    session_id: str | None = None,
+    user_id: str | None = None,
+    agent_name: str | None = None,
+) -> list[Any]:
+    t0 = time.monotonic()
+    tokens_before = estimate_tokens(messages)
+    messages_before = len(messages)
     keep_recent = cfg["keep_recent"]
     target = int(cfg["max_tokens"] * cfg["tretained_ratio"])
     max_intent = cfg.get("initial_intent_max", _DEFAULT_INITIAL_INTENT_MAX)
@@ -151,7 +211,23 @@ def _compress(messages: list[Any], cfg: ContextConfig) -> list[Any]:
     # D4 degenerate fallback: head and tail already cover everything → no empty
     # summary message; return head+tail deduped by identity, original order.
     if not middle:
-        return [m for m in messages if id(m) in head_ids or id(m) in tail_ids]
+        result = [m for m in messages if id(m) in head_ids or id(m) in tail_ids]
+        _log_compression_safe(
+            trigger=trigger,
+            outcome="no_middle",
+            tokens_before=tokens_before,
+            tokens_after=estimate_tokens(result),
+            messages_before=messages_before,
+            messages_after=len(result),
+            head_count=len(head),
+            tail_count=len(tail),
+            dropped_count=0,
+            elapsed_s=time.monotonic() - t0,
+            session_id=session_id,
+            user_id=user_id,
+            agent_name=agent_name,
+        )
+        return result
 
     # AR14 D1: a prior cumulative summary message lives in the middle (AR13 keeps it
     # out of the head). Lift its text out as the merge base `prev_summary` and drop
@@ -173,14 +249,48 @@ def _compress(messages: list[Any], cfg: ContextConfig) -> list[Any]:
     if summary_text is None:
         logger.warning("compression_summary_degraded", middle_count=len(new_middle))
         notice_msg: dict[str, str] = {"role": "system", "content": _MIDDLE_OMITTED_NOTICE}
-        return [*head, notice_msg, *tail]
+        result = [*head, notice_msg, *tail]
+        _log_compression_safe(
+            trigger=trigger,
+            outcome="degraded",
+            tokens_before=tokens_before,
+            tokens_after=estimate_tokens(result),
+            messages_before=messages_before,
+            messages_after=len(result),
+            head_count=len(head),
+            tail_count=len(tail),
+            dropped_count=len(middle),
+            elapsed_s=time.monotonic() - t0,
+            session_id=session_id,
+            user_id=user_id,
+            agent_name=agent_name,
+        )
+        return result
 
     summary_msg: dict[str, str] = {
         "role": "system",
         "content": f"{_SUMMARY_PREFIX}\n{summary_text}",
     }
-
-    return [*head, summary_msg, *tail]
+    result = [*head, summary_msg, *tail]
+    _log_compression_safe(
+        trigger=trigger,
+        outcome="summarized",
+        tokens_before=tokens_before,
+        tokens_after=estimate_tokens(result),
+        messages_before=messages_before,
+        messages_after=len(result),
+        head_count=len(head),
+        tail_count=len(tail),
+        dropped_count=len(middle),
+        elapsed_s=time.monotonic() - t0,
+        summary_model=_resolve_summary_model(),
+        summary_fingerprint=_summary_fingerprint(summary_text),
+        summary_len=len(summary_text),
+        session_id=session_id,
+        user_id=user_id,
+        agent_name=agent_name,
+    )
+    return result
 
 
 def _extract_prev_summary(middle: list[Any]) -> str | None:

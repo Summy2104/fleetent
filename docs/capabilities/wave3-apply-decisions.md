@@ -24,7 +24,7 @@
 | 5 | C | tool-call-guardrails | AR10 | ✅ 已完成 |
 | 6 | F | sandbox-output-truncation | SB6 | ✅ 已完成 |
 | 7 | F | sandbox-exec-timeout | SB7 | ✅ 已完成 |
-| 8 | B | compression-trace | AR16 | ⬜ |
+| 8 | B | compression-trace | AR16 | ✅ 已完成 |
 | 9 | B | compression-anti-flap | AR17 | ⬜ |
 | 10 | E | mcp-degradation | MCP4 | ⬜ |
 | 11 | H | scheduled-task-session-binding | S3 | ⬜ |
@@ -217,5 +217,35 @@
 1. **（最重要）** abort 路径 kill 后仍 destroy（自解决策 #1）是否认可——纯 kill 会致撞名回归，故保留移除清理；这对 D2「替代」做了"优雅终止取代暴力终止、移除保留"的收敛解释。
 2. `_KILL_GRACE_SECONDS=5.0` 固定宽限 + 无条件 SIGKILL（不轮询 inspect）是否认可。
 3. 超时文案「沙箱执行超时…」与外部取消文案「code execution cancelled」区分是否认可。
+
+---
+
+## compression-trace（AR16）— feat/compression-trace
+
+**实现：**
+- `eval_logger.py`：新增 `log_compression(...)`（`kind: "compression"`，必填 trigger/outcome/前后 token 与消息数/head·tail·dropped 计数/elapsed_s，可选 summary_model/fingerprint/len/user_id/agent_name/session_id「非 None 才写」），复用 `TRACE_PATH` 单一出口与既有写法。
+- `context_mgr.py`：`_compress` 增内部参数 `trigger`/`session_id`/`user_id`/`agent_name`；入口采 `t0`/`tokens_before`/`messages_before`；三返回分支（no_middle/degraded/summarized）return 前各采 after 指标 + 调 `_log_compression_safe`（恰好一条 trace）。`maybe_compress`（force→manual / 否则 tmax）与 `compress_for_context_overflow`（context_overflow）透传 trigger + 归因。新增 `_summary_fingerprint`（sha256 前 16 hex，标准库）、`_resolve_summary_model`（复用 `get_client_and_config("memory_extraction").model`，防御式 try/except→None）、`_log_compression_safe`（try/except 包裹，写失败仅 warning）。
+- `agent_loop.py`：run/run_stream 两处 `maybe_compress(...)` 传入 `session_id`/`user_id`/`agent_name`。
+
+**自解决策：**
+1. **`summary_model` 经 `get_client_and_config` 复用解析、不改 `_summarize` 签名**（design D4），并加防御 try/except（可观测性不得破坏压缩）。
+2. **摘要只记指纹 + 长度、绝不落正文**（design D2），用 sha256 前 16 hex。
+3. **写失败不破坏压缩**（design D5）：`_log_compression_safe` try/except + warning。
+4. **dropped_count = len(middle)**（被压缩/丢弃的中段消息数）；no_middle 分支为 0。
+
+**遇到的问题与处理：**
+- **既有 context_mgr 压缩测试未隔离 TRACE_PATH**：`_compress` 现写 trace 会触碰真实 `data/`（违反 CLAUDE.md）。处理：给 `test_context_mgr.py` 加 **autouse fixture** 统一把 `eval_logger.TRACE_PATH` 隔离到 tmp_path，一处覆盖全文件。
+- **`maybe_compress` 新增可选 kwargs 后，agent_loop 带 kwargs 调用，致 11+2 处测试 mock（旧位置参数签名 `lambda msgs:` / `def recording_compress(msgs)`）抛 TypeError**：真实函数向后兼容（kwargs 默认 None），仅 mock 替身需接受新 kwargs。已给全部 mock 加 `**kw`。这是 mock 签名跟进，非掩盖 bug。
+
+**影响：**
+- 改 `eval_logger.py`/`context_mgr.py`/`agent_loop.py`；`tests/test_eval_logger.py`（+3）、`tests/test_context_mgr.py`（+7 及 autouse 隔离 fixture）、`tests/test_agent_loop.py`（13 处 compress mock 加 `**kw`）。
+- 测试：**全量 1304 passed，0 失败，零回归**。
+- ruff：我改/建文件 format+check 全绿（`agent_loop.py` N814 `CompletionUsage as _CU` 为 HEAD 既有 grandfathered）。
+- mypy：76 → 76，无新增。
+
+**需 zy 核实：**
+1. 摘要仅记 sha256 前 16 hex 指纹 + 长度、不落正文（自解决策 #2）是否认可。
+2. `summary_model` 经路由复用解析 + 防御 try/except（自解决策 #1）是否认可。
+3. 给 `test_context_mgr.py` 加 autouse TRACE_PATH 隔离、给 13 处 compress mock 加 `**kw` 是否认可。
 
 ---

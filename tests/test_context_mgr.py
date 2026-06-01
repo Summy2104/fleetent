@@ -1292,3 +1292,117 @@ def test_cumulative_summary_reconsolidates_when_over_bound(monkeypatch):
     assert out == "bounded summary"
     # the configurable upper bound was honored
     assert captured_max_tokens[-1] == 256
+
+
+# ── AR16: compression trace ──────────────────────────────────────────────────
+
+
+import json as _json  # noqa: E402
+
+import fleetent.context_mgr as _cm  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolate_trace(tmp_path, monkeypatch):
+    # Compression now writes a trace; isolate TRACE_PATH so no test touches data/.
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+
+
+def _compression_entries(tmp_path):
+    p = tmp_path / "traces.jsonl"
+    if not p.exists():
+        return []
+    return [
+        e
+        for line in p.read_text().strip().splitlines()
+        if (e := _json.loads(line))["kind"] == "compression"
+    ]
+
+
+_BIG = {
+    "max_tokens": 10_000,
+    "tmax_ratio": 0.5,
+    "tretained_ratio": 0.3,
+    "keep_recent": 4,
+}
+
+
+def _big_msgs():
+    return [
+        {"role": "system", "content": "sys"},
+        *[
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 2000}
+            for i in range(100)
+        ],
+    ]
+
+
+def test_summarized_writes_one_compression_trace(tmp_path, monkeypatch):
+    monkeypatch.setattr(_cm, "_summarize", lambda m, prev_summary=None, config=None: "S")
+    maybe_compress(_big_msgs(), config=_BIG, force=True, session_id="sess-x")
+    entries = _compression_entries(tmp_path)
+    assert len(entries) == 1
+    e = entries[0]
+    assert e["outcome"] == "summarized"
+    assert e["trigger"] == "manual"
+    assert e["session_id"] == "sess-x"
+    assert e["tokens_before"] > e["tokens_after"]
+    assert e["summary_fingerprint"] and e["summary_len"] > 0
+
+
+def test_trigger_tmax_when_auto(tmp_path, monkeypatch):
+    monkeypatch.setattr(_cm, "_summarize", lambda m, prev_summary=None, config=None: "S")
+    maybe_compress(_big_msgs(), config=_BIG)  # force=False, over tmax
+    assert _compression_entries(tmp_path)[0]["trigger"] == "tmax"
+
+
+def test_trigger_context_overflow(tmp_path, monkeypatch):
+    monkeypatch.setattr(_cm, "_summarize", lambda m, prev_summary=None, config=None: "S")
+    compress_for_context_overflow(_big_msgs(), config=_BIG)
+    assert _compression_entries(tmp_path)[0]["trigger"] == "context_overflow"
+
+
+def test_session_id_omitted_when_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(_cm, "_summarize", lambda m, prev_summary=None, config=None: "S")
+    maybe_compress(_big_msgs(), config=_BIG, force=True)
+    assert "session_id" not in _compression_entries(tmp_path)[0]
+
+
+def test_degraded_branch_writes_trace(tmp_path, monkeypatch):
+    monkeypatch.setattr(_cm, "_summarize", lambda m, prev_summary=None, config=None: None)
+    maybe_compress(_big_msgs(), config=_BIG, force=True)
+    e = _compression_entries(tmp_path)[0]
+    assert e["outcome"] == "degraded"
+    assert "summary_fingerprint" not in e
+    assert "summary_model" not in e
+
+
+def test_no_middle_branch_writes_trace(tmp_path, monkeypatch):
+    monkeypatch.setattr(_cm, "_summarize", lambda m, prev_summary=None, config=None: "S")
+    small = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+    ]
+    cfg = {**_BIG, "keep_recent": 10}  # tail covers all conv msgs → empty middle
+    maybe_compress(small, config=cfg, force=True)
+    e = _compression_entries(tmp_path)[0]
+    assert e["outcome"] == "no_middle"
+    assert e["dropped_count"] == 0
+
+
+def test_trace_failure_does_not_break_compression(tmp_path, monkeypatch):
+    monkeypatch.setattr(_cm, "_summarize", lambda m, prev_summary=None, config=None: "S")
+
+    import fleetent.eval_logger as el
+
+    def boom(**kw):
+        raise RuntimeError("trace disk full")
+
+    monkeypatch.setattr(el, "log_compression", boom)
+    # Compression must still return a valid compressed list, not raise.
+    result = maybe_compress(_big_msgs(), config=_BIG, force=True)
+    assert result is not None
+    assert any("S" in str(m.get("content", "")) for m in result if isinstance(m, dict))
