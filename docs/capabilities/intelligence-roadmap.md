@@ -229,6 +229,14 @@ hybrid retrieval 和 reindex；真实 SaaS smoke 仍需显式环境变量和凭�
 4. 真实 SaaS connector 生产凭据管理：涉及 secret manager、token 轮换、授权失败恢复和审计。
 5. 自动 scheduler / worker / sync history：会改变 connector 运行方式和运维面。
 
+当前质量加固 spec：
+
+- `intelligence-unit-test-hardening`：MVP foundation 后的测试质量加固，不改变 runtime 行为或 MVP 功能范围；目标是把
+  常乐负责模块的 scoped unit coverage 从约 64% 提升到至少 75%，优先补齐 observability 聚合、
+  vector provider payload / error parsing、reflection / memory 决策逻辑和 connector fake-client failure
+  branches。DB runtime、source-of-truth rebuild、connector sync 和效果评估仍以 integration / evaluation tests
+  为权威验证层。
+
 ## 并行策略
 
 已完成批次中的并行原则：
