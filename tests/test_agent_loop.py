@@ -240,7 +240,7 @@ def test_build_controller_empty_history_yields_only_active_reasons():
     # limit surfaces as budget_exceeded rather than max_turns.
     from fleetent.budget import BudgetConfig, BudgetUsage
 
-    config = BudgetConfig(max_turns=1, max_tokens=-1, max_cost_usd=-1.0)
+    config = BudgetConfig(max_turns=1, max_tokens=-1)
     usage = BudgetUsage(turns=99)
     controller, _, _ = al._build_controller(
         1,

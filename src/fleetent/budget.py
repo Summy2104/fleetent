@@ -1,14 +1,9 @@
-"""Three-dimensional iteration budget (AR2): turns / tokens / USD cost.
+"""Two-dimensional iteration budget (AR2): turns / tokens.
 
-This module is the published metering contract for wave 3 (AR18 layered budgets,
-MR2 cost-aware routing): the dimension set ``{turns, tokens, cost_usd}`` and the
-``BudgetUsage.add(...)`` accumulation口径 are stable. A frozen ``BudgetConfig``
-carries the per-run limits; a mutable ``BudgetUsage`` is the single accumulation
-entry point; ``BudgetChecker`` plugs the "any dimension exhausted" judgement into
-the AR1 termination framework via ``StopReason.budget_exceeded``.
-
-Dollar cost is an *estimate* for loss-prevention, not billing: it uses a static,
-injectable in-module price table — no cloud pricing API (data sovereignty).
+A frozen ``BudgetConfig`` carries the per-run limits; a mutable ``BudgetUsage`` is
+the single accumulation entry point; ``BudgetChecker`` plugs the "any dimension
+exhausted" judgement into the AR1 termination framework via
+``StopReason.budget_exceeded``.
 """
 
 from __future__ import annotations
@@ -21,42 +16,26 @@ from fleetent.termination import LoopState, StopReason
 # exhaustion regardless of usage.
 NO_LIMIT = -1
 
-# Static price table: model → (input_price, output_price) in USD per 1K tokens.
-# Module-level and monkeypatchable for tests; never queries a cloud pricing API.
-MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "claude-sonnet-4-5": (0.003, 0.015),
-    "claude-haiku-4-5": (0.001, 0.005),
-    "claude-opus-4-5": (0.015, 0.075),
-}
-
-# Fallback for models not in MODEL_PRICING. Conservative (never zero): a model
-# off the table must still incur cost, otherwise the cost dimension is toothless
-# for it. Set at/above the priciest listed model — "off-table fallback: 宁高勿漏".
-DEFAULT_PRICING: tuple[float, float] = (0.015, 0.075)
-
 # Order in which dimensions are reported when several are simultaneously over.
-_DIMENSION_ORDER: tuple[str, str, str] = ("turns", "tokens", "cost_usd")
+_DIMENSION_ORDER: tuple[str, str] = ("turns", "tokens")
 
 
 @dataclass(frozen=True)
 class BudgetConfig:
-    """Per-run budget caps across three dimensions (frozen: config never mutates).
+    """Per-run budget caps across two dimensions (frozen: config never mutates).
 
     Any dimension set to ``NO_LIMIT`` is unlimited and never triggers exhaustion.
     """
 
     max_turns: int
     max_tokens: int
-    max_cost_usd: float
 
     def exhausted_dimension(self, usage: BudgetUsage) -> str | None:
-        """Return the first dimension (turns→tokens→cost_usd) at/over its cap, else None."""
+        """Return the first dimension (turns→tokens) at/over its cap, else None."""
         if self.max_turns != NO_LIMIT and usage.turns >= self.max_turns:
             return "turns"
         if self.max_tokens != NO_LIMIT and usage.tokens >= self.max_tokens:
             return "tokens"
-        if self.max_cost_usd != NO_LIMIT and usage.cost_usd >= self.max_cost_usd:
-            return "cost_usd"
         return None
 
 
@@ -71,16 +50,11 @@ class BudgetUsage:
 
     turns: int = 0
     tokens: int = 0
-    cost_usd: float = 0.0
 
-    def add(self, prompt_tokens: int, completion_tokens: int, model: str) -> None:
-        """Accumulate one main-loop turn: +1 turn, +tokens, +cost estimated from price table."""
+    def add(self, prompt_tokens: int, completion_tokens: int) -> None:
+        """Accumulate one main-loop turn: +1 turn, +tokens."""
         self.turns += 1
         self.tokens += prompt_tokens + completion_tokens
-        in_price, out_price = MODEL_PRICING.get(model, DEFAULT_PRICING)
-        self.cost_usd += (prompt_tokens / 1000.0) * in_price + (
-            completion_tokens / 1000.0
-        ) * out_price
 
 
 class BudgetChecker:
