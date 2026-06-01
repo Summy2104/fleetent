@@ -36,6 +36,9 @@ _risk_levels: dict[str, str] = {}
 _timeouts: dict[str, float] = {}
 # Global default tool timeout (seconds), module-level so tests/deploys can inject it.
 DEFAULT_TOOL_TIMEOUT = 30.0
+# Tools that cap their own output (T4 D5): name set. Such tools are exempt from the
+# generic tool-result truncation (e.g. run_code, whose output SB6 already caps).
+_self_truncating: set[str] = set()
 # Connector metadata parallel to _risk_levels (D1): name -> (connector, scopes).
 # Governance/dispatch-time runtime data; deliberately kept out of the LLM schema.
 _connectors: dict[str, tuple[str, list[str]]] = {}
@@ -52,6 +55,7 @@ def tool(
     connector: str | None = None,
     scopes: list[str] | None = None,
     timeout: float | None = None,
+    self_truncates: bool = False,
 ) -> Callable[[Callable[..., str]], Callable[..., str]]: ...
 
 
@@ -62,6 +66,7 @@ def tool(
     connector: str | None = None,
     scopes: list[str] | None = None,
     timeout: float | None = None,
+    self_truncates: bool = False,
 ) -> Any:
     """Register a function as a callable tool.
 
@@ -79,6 +84,8 @@ def tool(
             _connectors[target.__name__] = (connector, scopes or [])
         if timeout is not None:
             _timeouts[target.__name__] = timeout
+        if self_truncates:
+            _self_truncating.add(target.__name__)
         return target
 
     if fn is not None:
@@ -104,6 +111,11 @@ def get_timeout(name: str) -> float | None:
 def get_effective_timeout(name: str) -> float:
     """Effective timeout: the per-tool override if declared, else the global default."""
     return _timeouts.get(name, DEFAULT_TOOL_TIMEOUT)
+
+
+def is_self_truncating(name: str) -> bool:
+    """Whether the tool caps its own output and is exempt from T4 truncation."""
+    return name in _self_truncating
 
 
 def get_schemas() -> list[ToolSchema]:

@@ -2339,3 +2339,59 @@ async def test_safe_dispatch_forwards_user_id():
     assert result == "ok"
     assert failed is False
     assert captured.get("user_id") == "user-42"
+
+
+# ── tool-result truncation integration (T4) ──────────────────────────────────
+
+
+async def test_run_truncates_large_tool_result(mock_client, monkeypatch):
+    import fleetent.tool_result_truncation as trt
+
+    seen: list = []
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs: seen.append(list(msgs)) or msgs)
+    monkeypatch.setattr(trt, "MAX_TOOL_RESULT_BYTES", 500)
+    big = "Z" * 100_000
+    monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: big)
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_tool_resp("get_time"), _text_resp("done")]
+    )
+    await al.run([{"role": "user", "content": "x"}])
+    tool_msgs = [m for s in seen for m in s if m.get("role") == "tool"]
+    assert tool_msgs
+    content = tool_msgs[-1]["content"]
+    assert len(content.encode("utf-8")) <= 500
+    assert "截断" in content
+
+
+async def test_run_self_truncating_tool_exempt(mock_client, monkeypatch):
+    import fleetent.tool_result_truncation as trt
+
+    seen: list = []
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs: seen.append(list(msgs)) or msgs)
+    monkeypatch.setattr(trt, "MAX_TOOL_RESULT_BYTES", 500)
+    big = "Z" * 100_000
+    monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: big)
+    # run_code declares self_truncates=True → exempt from T4 truncation.
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_tool_resp("run_code"), _text_resp("done")]
+    )
+    await al.run([{"role": "user", "content": "x"}])
+    tool_msgs = [m for s in seen for m in s if m.get("role") == "tool"]
+    assert tool_msgs[-1]["content"] == big
+
+
+async def test_run_stream_truncates_messages_but_sse_keeps_original(mock_client, monkeypatch):
+    import fleetent.tool_result_truncation as trt
+
+    seen: list = []
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs: seen.append(list(msgs)) or msgs)
+    monkeypatch.setattr(trt, "MAX_TOOL_RESULT_BYTES", 500)
+    big = "Z" * 100_000
+    monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: big)
+    streams = [_looping_tool_stream(), _text_stream("done")]
+    mock_client.chat.completions.create = AsyncMock(side_effect=lambda *a, **k: streams.pop(0))
+    events = [e async for e in al.run_stream("go")]
+    tool_results = [e for e in events if e["type"] == "tool_result"]
+    assert tool_results[0]["content"] == big  # SSE event keeps the full result
+    tool_msgs = [m for s in seen for m in s if m.get("role") == "tool"]
+    assert len(tool_msgs[-1]["content"].encode("utf-8")) <= 500  # messages copy truncated
