@@ -511,3 +511,81 @@ async def test_session_persistence_keeps_plaintext_tool_call_args(tmp_path, monk
     await sm.save("sess-1", [msg])
     loaded = await sm.load("sess-1")
     assert loaded[0]["tool_calls"][0]["function"]["arguments"] == '{"api_key": "sk-secret"}'
+
+
+# ── log_compression (AR16) ───────────────────────────────────────────────────
+
+
+def test_log_compression_writes_kind_and_fields(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    el.log_compression(
+        trigger="manual",
+        outcome="summarized",
+        tokens_before=1000,
+        tokens_after=300,
+        messages_before=20,
+        messages_after=5,
+        head_count=2,
+        tail_count=2,
+        dropped_count=16,
+        elapsed_s=0.12,
+        summary_model="gpt-x",
+        summary_fingerprint="abc123",
+        summary_len=240,
+        session_id="sess-9",
+    )
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip().splitlines()[-1])
+    assert entry["kind"] == "compression"
+    assert entry["trigger"] == "manual"
+    assert entry["outcome"] == "summarized"
+    assert entry["tokens_before"] == 1000 and entry["tokens_after"] == 300
+    assert entry["dropped_count"] == 16
+    assert entry["summary_model"] == "gpt-x"
+    assert entry["summary_fingerprint"] == "abc123"
+    assert entry["session_id"] == "sess-9"
+
+
+def test_log_compression_optional_fields_omitted_when_none(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    el.log_compression(
+        trigger="tmax",
+        outcome="degraded",
+        tokens_before=900,
+        tokens_after=400,
+        messages_before=15,
+        messages_after=4,
+        head_count=2,
+        tail_count=2,
+        dropped_count=11,
+        elapsed_s=0.05,
+    )
+    entry = json.loads((tmp_path / "traces.jsonl").read_text().strip().splitlines()[-1])
+    for f in ("summary_model", "summary_fingerprint", "summary_len", "session_id", "user_id"):
+        assert f not in entry
+
+
+def test_log_compression_never_records_summary_body(tmp_path, monkeypatch):
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    secret = "SECRET SUMMARY BODY do not log"
+    el.log_compression(
+        trigger="tmax",
+        outcome="summarized",
+        tokens_before=10,
+        tokens_after=5,
+        messages_before=3,
+        messages_after=2,
+        head_count=1,
+        tail_count=1,
+        dropped_count=1,
+        elapsed_s=0.01,
+        summary_fingerprint="ff00",
+        summary_len=len(secret),
+    )
+    raw = (tmp_path / "traces.jsonl").read_text()
+    assert secret not in raw  # only fingerprint + length, never the body

@@ -600,7 +600,9 @@ async def run(
         # reference live: callers (e.g. im_gateway.normalizer) rely on run() mutating
         # the passed `messages` so session_mgr.save() persists the full conversation.
         # Rebinding (messages = ...) would detach it and lose appended turns.
-        messages[:] = maybe_compress(messages)
+        messages[:] = maybe_compress(
+            messages, session_id=session_id, user_id=user_id, agent_name=agent_name
+        )
         # D4b: inject the loop warning AFTER compression so a same-round compaction
         # cannot swallow it; it must be present in the sequence sent to the LLM.
         _maybe_inject_loop_warning(messages, state)
@@ -903,7 +905,9 @@ async def run_stream(
             stop_reason = forced
             break
         state.turn += 1
-        messages = maybe_compress(messages)
+        messages = maybe_compress(
+            messages, session_id=session_id, user_id=user_id, agent_name=agent_name
+        )
         # D4b: inject the loop warning after compression, before sanitize/LLM call.
         _maybe_inject_loop_warning(messages, state)
         try:

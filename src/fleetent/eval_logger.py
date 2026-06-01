@@ -148,6 +148,62 @@ def log_sandbox_exec(
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+def log_compression(
+    trigger: str,
+    outcome: str,
+    tokens_before: int,
+    tokens_after: int,
+    messages_before: int,
+    messages_after: int,
+    head_count: int,
+    tail_count: int,
+    dropped_count: int,
+    elapsed_s: float,
+    summary_model: str | None = None,
+    summary_fingerprint: str | None = None,
+    summary_len: int | None = None,
+    user_id: str | None = None,
+    agent_name: str | None = None,
+    session_id: str | None = None,
+) -> None:
+    """Append one context-compression trace entry (AR16).
+
+    Records only metadata and a summary fingerprint — never raw messages or the
+    summary body — consistent with the module's "no raw payloads" principle. A
+    `kind: "compression"` makes every compression event independently queryable
+    (one run may compress multiple times).
+    """
+    entry: dict[str, Any] = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "kind": "compression",
+        "trigger": trigger,
+        "outcome": outcome,
+        "tokens_before": tokens_before,
+        "tokens_after": tokens_after,
+        "messages_before": messages_before,
+        "messages_after": messages_after,
+        "head_count": head_count,
+        "tail_count": tail_count,
+        "dropped_count": dropped_count,
+        "elapsed_s": round(elapsed_s, 3),
+    }
+    if summary_model is not None:
+        entry["summary_model"] = summary_model
+    if summary_fingerprint is not None:
+        entry["summary_fingerprint"] = summary_fingerprint
+    if summary_len is not None:
+        entry["summary_len"] = summary_len
+    if user_id is not None:
+        entry["user_id"] = user_id
+    if agent_name is not None:
+        entry["agent_name"] = agent_name
+    if session_id is not None:
+        entry["session_id"] = session_id
+    TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with TRACE_PATH.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
 def _serialize(msg: Any) -> Any:
     if isinstance(msg, dict):
         return _redact_tool_calls(_placeholder_images(msg))
