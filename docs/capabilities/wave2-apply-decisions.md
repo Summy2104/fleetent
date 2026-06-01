@@ -864,3 +864,37 @@ SB9（sandbox 轨末环）：`run_code` 执行结果写入 trace。
 1. NeedsConsent 提示串文案（英文 + connector 名 + consent_url）是否符合 LLM 引导授权预期——本次定稿，后续 connector-oauth-store 可调整。
 2. `client` 固定参数名约定（与 cancel_token/tool_context 同走 `_OUT_OF_BAND_PARAMS` 名字排除）——若后续需多 client 或自定义注入名，需扩展机制。
 3. `set_provider()` 用 `global _provider`：本 change 测试全部走 monkeypatch（不调 set_provider 改全局），`set_provider` 仅为后续 OAuth store change 预留接入点；若团队认为 `set_provider` 也算「全局可变状态」红线，可移除只留 monkeypatch 缝。
+
+
+## [review 调整] AR2 拆成本维度
+
+背景：AR2（iteration-budget-grace-call，已合 PR#63）原实现三维预算 turns/tokens/cost_usd。项目负责人 review 后决定**彻底拆掉成本（cost_usd / 美元成本）维度**，预算只保留 **turns + tokens 两维**。原因：成本估算单价表维护成本高、负责人不需要这个维度。本调整是「已合并 change 的 review 后调整」，非新 OpenSpec change，AR2 尚未归档故同步更新其 artifacts 以保归档一致。
+
+**删了哪些符号（src）：**
+- `budget.py`：删 `MODEL_PRICING`、`DEFAULT_PRICING` 常量；`_DIMENSION_ORDER` 由 `("turns","tokens","cost_usd")` 改为 `("turns","tokens")`；`BudgetConfig` 删 `max_cost_usd` 字段、`exhausted_dimension` 删 cost_usd 分支；`BudgetUsage` 删 `cost_usd` 字段、`add` 删成本换算；模块 docstring 由「three-dimensional turns/tokens/USD cost」改为「two-dimensional turns/tokens」、删 MR2 成本口径复用措辞。`BudgetChecker` 不变。
+- `agent_loop.py`：`_resolve_budget_config` 删 `max_cost_usd` 参数与分支；`run()` / `run_stream()` 删 `max_cost_usd` 形参；`_budget_add` 与 run_stream 逐轮累计调用点适配 `add` 新签名；`_build_controller` docstring 由三维改两维。budget_dimension trace 只会是 turns/tokens。
+- `config.py`：删 `agent_max_cost_usd` 字段；`config/settings.yaml.example` 删 `agent_max_cost_usd` 行与三维注释。
+
+**`model` 形参去留决定：删掉**。成本删后 `BudgetUsage.add(prompt_tokens, completion_tokens, model)` 的 `model` 不再用于任何换算，故删形参，签名变 `add(prompt_tokens, completion_tokens)`。影响面仅两处调用点（`agent_loop._budget_add` 和 run_stream 逐轮累计），均已更新；`_budget_add` 也随之删去其 `model` 形参。删比保留「未用形参」更干净，无残留死参数。
+
+**与波次 3 MR2/AR18 脱钩**：原 AR2 把三维（含成本）作为「对外契约」发布，设想被波次 3 的 AR18（分层预算）/ MR2（成本感知路由）复用。本调整移除该契约中的成本维度；MR2/AR18 将**自行定义成本口径**，不再复用 AR2 接口。spec.md 中「预算计量维度接口对外契约」requirement 已整条删除。
+
+**AR2 artifacts 已同步更新**：proposal.md（三维→两维、删成本/单价/MR2 复用措辞，加 review 调整注）、design.md（Context 加 review 注、Goals/Non-Goals 改写、D1 改两维、D5 整条改为「review 后移除」存根、D6 改两维、Risks/Open Questions 删成本项）、specs/agent-iteration-budget/spec.md（「三维迭代预算」→「两维迭代预算」、删成本 scenario、删「对外契约」requirement、豁免/budget_exceeded/max_turns 需求改两维）、tasks.md（已完成 checkbox 保持 [x]，涉成本/MODEL_PRICING 的 task 标注「(review 后移除：成本维度已拆)」）。
+
+**验证**：pytest 1195 → **1194 passed**（test_budget.py 删 5 个成本相关用例 [add 成本换算 2、表外默认单价 1、单价表 monkeypatch 1、cost 维度耗尽 1]、加 4 个守卫用例 [BudgetConfig 无 max_cost_usd、BudgetUsage 无 cost_usd、budget 模块无 MODEL_PRICING/DEFAULT_PRICING、add 两参累计]；test_config.py 删 agent_max_cost_usd 断言、改为 `not hasattr` 守卫；test_agent_loop.py / test_termination.py 适配 BudgetConfig 两参构造）。ruff（改动文件）全绿（agent_loop.py 残留 1 个 N814 为基线既有、非本次引入）。mypy `src`：74 → **74**（无新增错误模式）。`grep -rn "cost_usd|MODEL_PRICING|max_cost_usd|DEFAULT_PRICING" src/` 为空。不 commit / 不建 PR。
+
+## [review 调整] SB2 release_session 接线
+
+背景：SB2（sandbox-lifecycle，已合 PR#69）实现了 `SandboxManager.release_session(session_id)`（销毁该 session 的 session-scope 沙箱容器）与 `sweep_idle()`，但 design Open Question 决定**只提供入口、本波次不接线**。负责人 review 后决定：本波次把 `release_session` 接到 session 回收路径，使 session-scope 容器随会话清理自动回收。本调整是「已合并 change 的 review 后调整」，非新 OpenSpec change。
+
+**接线落点**：`session_mgr.save()`（async）末尾已有 best-effort 的 `maybe_run_maintenance()` 调用（TTL cleanup + 容量驱逐，**返回被移除的 session_ids**，此前丢弃返回值）。现改为接住返回值：`removed = maybe_run_maintenance()`，随后 `await _release_sandboxes(removed)`。语义：被 TTL/容量回收的 session，其 session-scope 沙箱容器一并回收。`release_session` 对无 session-scope 容器的 session 是 no-op，安全。
+
+**新增辅助**：`session_mgr._release_sandboxes(session_ids: list[str]) -> None`（async）。对每个 id `await manager.release_session(id)`。
+
+**lazy import 方向**：`_release_sandboxes` 内 `from fleetent.tools import _get_manager`（lazy，函数体内），耦合方向 session_mgr → tools/sandbox_manager，避免顶层 import 环（tools 间接依赖链不在模块加载期闭合）。manager 单例经 `tools._get_manager()` 取得，测试可 monkeypatch。lazy import 即满足无环、无需改为可注入回调方案。
+
+**best-effort 守卫**：`_release_sandboxes` 整体包一层 try/except，失败 `logger.warning("sandbox_release_failed", session_ids=..., error=...)` **不 re-raise**，与既有 session_index / maintenance 的 best-effort 风格一致。该调用还嵌在 `save()` 既有 maintenance try/except 内，双重保护——沙箱回收失败绝不破坏已完成的会话持久化。空列表早返回，无移除时不触达 manager。
+
+**sweep_idle 仍未接**：本次**不接** `sweep_idle`（agent-scope 容器空闲回收），仍留待调度器（cron_scheduler）按 SB2 原 design 处理。
+
+**验证**：pytest 1194 → **1197 passed**（test_session_mgr.py 新增 3 个用例：removed 非空时按序 release、removed 为空时不 release、release_session 抛异常时 save 仍成功且批次在首个失败处止于守卫）。既有 save/maintenance 用例不破。ruff（改动文件 session_mgr.py / test_session_mgr.py）format+check 全绿。mypy `src`：74 → **74**（无新增错误模式）。不 commit / 不建 PR。

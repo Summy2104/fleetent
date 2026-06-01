@@ -272,6 +272,28 @@ async def save(
     # time-gated to stay cheap. Fault-isolated — maintenance must never break the
     # just-completed persistence.
     try:
-        maybe_run_maintenance()
+        removed = maybe_run_maintenance()
+        await _release_sandboxes(removed)
     except Exception as exc:  # noqa: BLE001 — maintenance must not break persistence
         logger.warning("session_maintenance_trigger_failed", session_id=session_id, error=str(exc))
+
+
+async def _release_sandboxes(session_ids: list[str]) -> None:
+    """Reclaim session-scope sandbox containers for maintenance-removed sessions.
+
+    Lazy-imports the sandbox manager (tools depends on session_mgr indirectly, so a
+    top-level import would close an import cycle). Best-effort: a release failure is
+    logged and swallowed, never propagated into the save path that already persisted.
+    release_session is a no-op for sessions without a session-scope container.
+    """
+    if not session_ids:
+        return
+    from fleetent.tools import _get_manager
+
+    manager = _get_manager()
+    # Per-id isolation: one stuck container must not block reclaiming the others.
+    for session_id in session_ids:
+        try:
+            await manager.release_session(session_id)
+        except Exception as exc:  # noqa: BLE001 — sandbox reclaim must not break persistence
+            logger.warning("sandbox_release_failed", session_id=session_id, error=str(exc))

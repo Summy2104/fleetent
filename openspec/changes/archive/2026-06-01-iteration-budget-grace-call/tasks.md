@@ -5,17 +5,17 @@
 - [x] 1.3 核实压缩调用落点：`maybe_compress`（agent_loop.py 行 299 / 492）内部 LLM 调用的 token 是否流经主循环 `response.usage` / 累计入口，确认 D4「压缩豁免在当前架构下默认成立（不流经 `BudgetUsage.add`，无需主动排除）」属实
 - [x] 1.4 核实 `log_run` 签名（eval_logger.py），确认新增末位 kw `budget_dimension: str | None = None` 向后兼容
 - [x] 1.5 核实 `config.Settings` 字段添加方式（config.py 行 7-25），确认新增预算上限 + Grace Call 比例/保底下限字段经 `.env` / `config/settings.yaml` 覆盖
-- [x] 1.6 核实模型可用名（`model_router.ROUTES` / cfg.model），据此定 `MODEL_PRICING` 单价表的 key；表外模型口径已在 design D5 定死为「保守默认单价 `DEFAULT_PRICING`，绝不计 0」，本步仅确认默认单价取值覆盖主流模型上限
+- [x] 1.6 ~~核实模型可用名（`model_router.ROUTES` / cfg.model），据此定 `MODEL_PRICING` 单价表的 key；表外模型口径已在 design D5 定死为「保守默认单价 `DEFAULT_PRICING`，绝不计 0」，本步仅确认默认单价取值覆盖主流模型上限~~（review 后移除：成本维度已拆，无单价表）
 - [x] 1.7 核实 `run_stream()` 现状收尾结构：确认检查点命中后直接走 `log_run`（行 589）、**无**「break 后再发一次流式 LLM 并 `text_delta` 流出」结构，据此确认 D7 流式 Grace Call 收尾的插入点与降级分支落点
 
-## 2. 预算配置、用量累计与成本估算（budget.py，对外契约）
+## 2. 预算配置与用量累计（budget.py）
 
-- [x] 2.1 Write failing tests：`tests/test_budget.py` 断言 `BudgetConfig` 含 `max_turns` / `max_tokens` / `max_cost_usd`（各支持「无上限」哨兵）；`BudgetUsage` 初始零用量。看到红
+- [x] 2.1 Write failing tests：`tests/test_budget.py` 断言 `BudgetConfig` 含 `max_turns` / `max_tokens`（各支持「无上限」哨兵）；`BudgetUsage` 初始零用量。看到红（review 后移除：原断言 `max_cost_usd` 已删）
 - [x] 2.2 Implement `BudgetConfig`（frozen）与 `BudgetUsage`（可变累计器），看到绿
-- [x] 2.3 Write failing tests：`MODEL_PRICING` 静态表 + `BudgetUsage.add(prompt, completion, model)` 按单价换算累加成本、累加 token 与步数；表外模型按 D5 选定口径处理；单价表可 monkeypatch。看到红
-- [x] 2.4 Implement 单价表与 `add()` 换算，看到绿
-- [x] 2.5 Write failing tests：「将耗尽」判定——任一维度（turns / tokens / cost_usd）达上限即判定耗尽，并能报出触发维度；无上限维度不触发。看到红
-- [x] 2.6 Implement 三维判定（含触发维度），看到绿
+- [x] 2.3 ~~Write failing tests：`MODEL_PRICING` 静态表 + `BudgetUsage.add(prompt, completion, model)` 按单价换算累加成本；表外模型按 D5 选定口径处理；单价表可 monkeypatch~~（review 后移除：成本维度已拆。保留 `BudgetUsage.add(prompt, completion)` 仅累加 token 与步数的测试）
+- [x] 2.4 ~~Implement 单价表与 `add()` 换算~~（review 后移除：成本维度已拆。`add()` 仅累加 token 与步数）
+- [x] 2.5 Write failing tests：「将耗尽」判定——任一维度（turns / tokens）达上限即判定耗尽，并能报出触发维度；无上限维度不触发。看到红（review 后移除：原 cost_usd 维度断言已删）
+- [x] 2.6 Implement 两维判定（含触发维度），看到绿
 
 ## 3. BudgetChecker（接入 AR1 框架）
 
@@ -29,7 +29,7 @@
 
 ## 5. 主循环接入预算 + Grace Call（agent_loop.py）
 
-- [x] 5.1 Write failing tests for 逐轮计量与豁免：`run()` 在**每轮** LLM 调用返回后即把该轮 usage 累计进 `BudgetUsage`（步数 / token / 成本），而非循环末取一次（断言多轮后累计值 = 各轮之和，而非仅最后一轮）；压缩等系统内部调用产生的 token **不**进入 `BudgetUsage`（断言压缩不改变累计值）。mock `get_async_client_and_config`。看到红
+- [x] 5.1 Write failing tests for 逐轮计量与豁免：`run()` 在**每轮** LLM 调用返回后即把该轮 usage 累计进 `BudgetUsage`（步数 / token），而非循环末取一次（断言多轮后累计值 = 各轮之和，而非仅最后一轮）；压缩等系统内部调用产生的 token **不**进入 `BudgetUsage`（断言压缩不改变累计值）。mock `get_async_client_and_config`。看到红（review 后移除：原含成本维度累计）
 - [x] 5.2 Implement `run()` 每轮 LLM 调用返回后 `usage.add(...)`（D1 落点）+ `_build_controller` 退役 `MaxTurnsChecker`、注册 `BudgetChecker` + 压缩 token 不接入累计（D4 默认豁免），看到绿
 - [x] 5.3 Write failing tests for Grace Call 正常路径：预算将耗尽触发 `budget_exceeded` 时，发起一次额外 LLM 调用（带预留 token 上限 + 总结指令），其输出作为最终回复；`log_run(stop_reason=budget_exceeded, budget_dimension=...)`。看到红
 - [x] 5.4 Implement Grace Call 收尾（最后一次 LLM 调用 + trace 写入触发维度），看到绿
