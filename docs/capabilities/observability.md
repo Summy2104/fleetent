@@ -229,9 +229,10 @@ def get_logger(component: str) -> Logger:
   - 不引入 OpenTelemetry SDK
   - sub_agent 继承父 `run_id` 并生成子 span
 
-- [ ] **运行事件覆盖**：记录用户输入、LLM 调用、工具调用、fallback、审批、上下文压缩、最终回复
+- [ ] **运行事件覆盖**（`observability-runtime-event-coverage`）：记录 run lifecycle、LLM 调用、工具调用、fallback、审批、上下文压缩、最终回复
   - 大 payload 可截断并写入截断标记
   - 工具参数 / 返回值写入前脱敏
+  - 只定义 runtime event 覆盖，不在本阶段实现 performance rollup API
 
 ### P0-C：source attribution summary
 
@@ -255,7 +256,7 @@ def get_logger(component: str) -> Logger:
 
 ## 当前缺口
 
-- trace event 覆盖不完整：LLM call、tool call、permission、fallback、context compression、sub-agent span 等还未系统记录。
+- trace event 覆盖不完整：LLM call、tool call、permission、fallback、context compression、final reply、sub-agent span 等还未系统记录。
 - request_id / span 语义仍需强化：当前已能共享 run_id，但完整 trace tree 尚未完成。
 - usage summary 有 token / elapsed 基础聚合，但还缺错误率、fallback、工具耗时等质量指标。
 - logs / traces retention、导出、备份和告警策略未定义。

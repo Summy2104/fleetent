@@ -110,6 +110,10 @@ flowchart TD
 - LLM call、tool call、fallback、permission、context compression、final reply 都有 trace event。
 - 可以按 run / user / agent / session 查询关键耗时、token、错误、fallback 和工具调用摘要。
 
+当前活动 spec：
+
+- `observability-runtime-event-coverage`：补齐事件源，不做聚合 API。
+
 ### M2：可同步、可重建
 
 目标：KB 与 vector store 从“能导入”升级为“能维护和运维”。
