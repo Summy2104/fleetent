@@ -81,8 +81,9 @@ src/fleetent/
   context_mgr.py     ← in-session token 压缩
   memory_layer.py    ← 结构化语义记忆：提取动作 → SQLite memory_items → vector_store 索引
   intelligence/
+    knowledge_base/  ← 企业文档知识库：解析、导入、local sync、vector / keyword / hybrid search
     vector_store/    ← 向量索引基础设施：in-memory / SQLite backend，embedding / rerank provider
-    long_term_ctx.py ← 长期上下文调度：memory provider 已接入，knowledge_base provider 预留
+    long_term_ctx.py ← 长期上下文调度：memory / knowledge_base provider 已接入
     reflection.py    ← 反思报告：读取 traces / memory，只生成建议，不自动写回
   mcp_client.py      ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
   sandbox_client.py  ← Docker CLI 封装：隔离 Python 执行

@@ -300,7 +300,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - [ ] **数据源连接器**：通过统一 `DataSource` 接口接入不同来源的文档
   - **文件直传**：管理员通过 API 直接上传文件（Markdown / 纯文本 / PDF）
   - **Confluence Server/DC**：通过 Confluence REST API 拉取页面，使用 `atlassian-python-api`
-  - **本地目录**：扫描指定目录，监听文件变更，适合 NFS / 共享盘场景
+  - ✅ **本地目录**：已支持显式 allowlist root 下 `.txt` / `.md` / `.html` / `.htm` 的手动 sync；文件监听和后台调度后置
   - **Google Drive**：通过 Drive API v3 拉取文件，使用 `google-api-python-client`；Google Docs 通过 Export API 导出为 HTML 再解析；需要 per-tenant OAuth 2.0 token 存储与刷新
   - 新增数据源只需实现 `DataSource` 接口，不改核心导入逻辑
 
@@ -310,11 +310,12 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
   - PDF / Office / image / VLM 解析不在当前能力范围内，后续单独评估依赖与数据主权影响
   - parsed section metadata 会随 chunk 保留 section title/path/level
 
-- [ ] **文档导入**：解析后的文本写入知识库
-  - 导入后异步处理（分块 + embedding + 图提取），不阻塞调用方
+- [x] **文档导入**：解析后的文本写入知识库
+  - 当前已支持 `ingest_text()` / `ingest_parsed()` 同步导入、保存 document/chunk，并进入 vector / keyword 索引
+  - 后续异步处理和图提取不在当前 foundation 范围内
 
-- [ ] **分块与向量索引**：文档内容分块后写入 vector_store
-  - 每个 chunk 保留来源文档信息（filename、position）
+- [x] **分块与向量索引**：文档内容分块后写入 vector_store
+  - 每个 chunk 保留来源文档信息（filename、position）和 parser section metadata
   - 分块策略见待决问题
 
 - [ ] **实体与关系提取**：分块完成后，用 LLM 从文档提取实体和关系写入图谱
@@ -322,7 +323,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
   - entity 描述同时写入 vector_store，用于图检索的入口定位
   - 提取在后台执行，与分块并行触发
 
-- [ ] **混合检索（Hybrid Search）**：BM25 关键词检索与向量语义检索并行，RRF 融合排序后返回
+- [x] **混合检索（Hybrid Search）**：BM25 关键词检索与向量语义检索并行，RRF 融合排序后返回
   - 对外接口兼容扩展：`search(query: str, tenant_id: str, kb_ids: list[str], mode="hybrid") → list[KnowledgeChunk]`
   - BM25 擅长精确词匹配（产品编号、人名、专有名词），当前实现使用 SQLite FTS5（内置，无需额外服务）
   - 向量检索负责语义相似度和同义词
