@@ -55,7 +55,7 @@ spec 零散推进后失去全貌。
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告 | report evaluation；maintenance actions 的边界设计 | 自动 skill proposal、自动 memory maintenance |
 | Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API | 真实 embedding / rerank evaluation；rerank 接入 KB search | 后台 reindex job runtime、sqlite-vec、Qdrant、OpenSearch adapter |
 | Knowledge base | 基础完成 | local ingest、parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator | KB scope/binding；rerank integration | Confluence / Google Drive connectors、graph retrieval |
-| Deployment / config | 部分完成 | `settings.yaml`、MCP dedicated server file、legacy config fail-fast | backup / upgrade；config docs 对 intelligence runtime prerequisites 的收敛 | config center、Admin UI、hot reload |
+| Deployment / config | 基础完成 | `settings.yaml`、MCP dedicated server file、legacy config fail-fast、本地 SQLite upgrade / backup 脚本 | config docs 对 intelligence runtime prerequisites 的收敛 | config center、Admin UI、hot reload |
 
 ## 依赖顺序
 
@@ -74,7 +74,7 @@ flowchart TD
     MEM_RET[memory-retention-and-compaction]
     MEM_REF[memory-reflection-maintenance]
 
-    BACKUP[deployment-upgrade-and-backup]
+    BACKUP[deployment-upgrade-and-backup 已完成]
 
     O --> OPS
     O --> LTC_E
@@ -123,13 +123,13 @@ flowchart TD
 
 1. `knowledge-base-sync-planner`
 2. `vector-store-reindex-jobs`（同步 public API；不含后台 job platform）
-3. `deployment-upgrade-and-backup`
+3. `deployment-upgrade-and-backup`（已完成：本地 SQLite backup / dry-run / backup-only / Alembic upgrade）
 
 完成标准：
 
 - KB sync 有 plan/execute separation、幂等状态和失败隔离。
 - embedding / backend 切换后可通过同步 public API 重建 memory / KB index。
-- 本地 SQLite / config / data 目录有最小备份与升级流程。
+- 本地 SQLite / config / data 目录有最小备份与升级流程；migration 失败保留 backup，恢复由 operator 手动执行。
 
 ### M3：可评估
 
@@ -172,7 +172,7 @@ flowchart TD
 
 - `observability-runtime-event-coverage` 和 `knowledge-base-sync-planner`
 - `memory-retention-and-compaction` 和 `knowledge-base-sync-planner`
-- `deployment-upgrade-and-backup` 和 intelligence specs
+- 已完成的 `deployment-upgrade-and-backup` 不阻塞 intelligence specs
 
 不建议提前做：
 
