@@ -1,7 +1,10 @@
 """Structured per-user semantic memory store."""
 
+from __future__ import annotations
+
 import json
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
@@ -147,6 +150,36 @@ async def search(user_id: str, query: str, limit: int = 10) -> list[MemoryItem]:
         if (item := by_id.get(id)) is not None
         and (item.expires_at is None or item.expires_at >= now)
     ]
+
+
+def iter_indexable_memories(user_id: str) -> Iterator[vector_store.IndexableItem]:
+    """Yield current memory records that should exist in vector_store."""
+    namespace = vector_store.memory_namespace(user_id)
+    now = datetime.now(UTC).replace(microsecond=0)
+    rows = (
+        _database()
+        .execute(
+            """
+            SELECT id, type, content
+            FROM memory_items
+            WHERE user_id = :user_id
+              AND (expires_at IS NULL OR expires_at >= :now)
+            ORDER BY updated_at ASC, id ASC
+            """,
+            {
+                "user_id": user_id,
+                "now": _format_datetime(now),
+            },
+        )
+        .fetchall()
+    )
+    for row in rows:
+        yield vector_store.IndexableItem(
+            id=str(row["id"]),
+            content=str(row["content"]),
+            namespace=namespace,
+            metadata={"type": str(row["type"])},
+        )
 
 
 def _insert_memory(item: MemoryItem) -> None:

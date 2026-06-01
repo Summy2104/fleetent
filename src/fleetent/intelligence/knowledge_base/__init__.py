@@ -8,7 +8,13 @@ from fleetent.intelligence.knowledge_base.parsers import (
     parse_markdown,
     parse_text,
 )
-from fleetent.intelligence.knowledge_base.runtime import delete, ingest_parsed, ingest_text, search
+from fleetent.intelligence.knowledge_base.runtime import (
+    delete,
+    ingest_parsed,
+    ingest_text,
+    iter_indexable_knowledge_chunks,
+    search,
+)
 from fleetent.intelligence.knowledge_base.sync_planner import (
     SyncAction,
     SyncExecutionSummary,
@@ -33,6 +39,7 @@ __all__ = [
     "execute_sync_plan",
     "ingest_parsed",
     "ingest_text",
+    "iter_indexable_knowledge_chunks",
     "parse_html",
     "parse_markdown",
     "parse_text",

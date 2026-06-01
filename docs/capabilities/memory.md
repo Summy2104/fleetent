@@ -6,7 +6,7 @@
 
 per-user 语义记忆的提取、存储与检索，让 agent 在多次对话中积累用户知识、越用越懂用户。
 
-**负责**：从对话中提取用户相关事实，按类型结构化存储，支持向量相似度检索。
+**负责**：从对话中提取用户相关事实，按类型结构化存储，支持向量相似度检索，并向 vector_store reindex 暴露当前可索引记忆。
 
 **不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、记忆质量的定期优化（→ reflection）。
 
@@ -29,7 +29,7 @@ fleetent 的记忆系统借鉴认知科学的四类记忆划分，每类由不�
 
 **模块归属**：
 - owning package：`intelligence.memory_layer`
-- public API：`search(user_id, query, limit)`、`extract_and_update(user_id, conversation)`、`MemoryItem`
+- public API：`search(user_id, query, limit)`、`extract_and_update(user_id, conversation)`、`iter_indexable_memories(user_id)`、`MemoryItem`
 - owned tables：`memory_items`
 - config namespace：`memory.*`
 
@@ -92,6 +92,10 @@ async def search(user_id: str, query: str, limit: int = 10) -> list[MemoryItem]:
 
 async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
     """从对话中提取事实，冲突检测后写入。SSE done 后异步调用，不阻塞响应。"""
+
+
+def iter_indexable_memories(user_id: str) -> Iterator[IndexableItem]:
+    """枚举当前应存在于 vector_store 的用户记忆。返回 namespace 为 mem:{user_id}，并排除过期记忆。"""
 ```
 
 ## 现状
@@ -108,6 +112,7 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
 - context 记忆默认 30 天 TTL，identity / preferences 默认不过期
 - 写入 memory 后同步写入 vector_store，namespace 为 `mem:{user_id}`
 - `search()` 通过 vector_store 查相关 memory ids，回查 SQLite 并过滤过期 context
+- `iter_indexable_memories(user_id)` public API 返回当前未过期 memory source records，供 vector_store 同步 reindex 使用
 - 删除旧 JSONL memory 兼容和 `load_memories()` 直接注入路径
 
 当前定位：已完成结构化语义记忆地基、基础维护动作和第一批 memory extraction evaluation 基线。
@@ -141,6 +146,7 @@ retention 策略和真实 embedding 检索效果仍未闭环。
 - 提取质量已有 mock evaluation 基线，但还缺少真实 LLM 回归样本和长期趋势统计。
 - 真实 embedding provider 边界已定义，但尚未配置自托管模型 endpoint，语义检索质量还不能代表生产效果。
 - memory 条数增长策略未定义：没有硬上限、软告警或 compaction 机制。
+- reindex 入口由 vector_store 提供；memory 只暴露 source iterator，不承担 job history / worker / scheduler。
 
 ## 下一批候选 specs
 

@@ -48,6 +48,12 @@ async def delete(id: str, namespace: str) -> None:
     await _backend.delete(id, namespace)
 
 
+async def clear_namespace(namespace: str) -> None:
+    """Delete all vectors in namespace."""
+    _validate_namespace(namespace)
+    await _backend.clear_namespace(namespace)
+
+
 def _validate_id(id: str) -> None:
     if not id.strip():
         raise ValueError("id must not be empty")

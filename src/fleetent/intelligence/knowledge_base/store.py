@@ -137,6 +137,30 @@ class KnowledgeStore:
         ).fetchall()
         return [_row_to_chunk(row, score=0.0) for row in rows]
 
+    def iter_indexable_chunks(self, tenant_id: str, kb_id: str) -> list[KnowledgeChunk]:
+        rows = self._database.execute(
+            """
+                SELECT
+                    chunk.id,
+                    chunk.document_id,
+                    chunk.tenant_id,
+                    chunk.kb_id,
+                    chunk.position,
+                    chunk.content,
+                    chunk.metadata_json,
+                    document.filename,
+                    document.source,
+                    document.source_url
+                FROM knowledge_chunks AS chunk
+                JOIN knowledge_documents AS document ON document.id = chunk.document_id
+                WHERE chunk.tenant_id = :tenant_id
+                  AND chunk.kb_id = :kb_id
+                ORDER BY chunk.document_id ASC, chunk.position ASC, chunk.id ASC
+                """,
+            {"tenant_id": tenant_id, "kb_id": kb_id},
+        ).fetchall()
+        return [_row_to_chunk(row, score=0.0) for row in rows]
+
     def search_keyword(
         self,
         query: str,

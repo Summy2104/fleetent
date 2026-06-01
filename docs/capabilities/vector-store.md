@@ -7,7 +7,7 @@
 
 共享向量索引基础设施，为 memory 和 knowledge_base 提供统一的 embedding 写入与相似度检索能力。
 
-**负责**：文本 embedding、向量写入与更新、top-k 相似度检索、按 namespace 隔离不同来源的向量。
+**负责**：文本 embedding、向量写入与更新、top-k 相似度检索、按 namespace 隔离不同来源的向量、按 source of truth 同步重建指定 namespace。
 
 **不负责**：业务数据存储（→ memory / knowledge_base）、检索结果的业务过滤（如 TTL 过期判断，由调用方处理）、注入协调（→ long_term_ctx）。
 
@@ -17,7 +17,7 @@
 
 **模块归属**：
 - owning package：`intelligence.vector_store`
-- public API：`upsert(id, text, namespace)`、`search(query, namespace, limit)`、`delete(id, namespace)`、`SearchResult`
+- public API：`upsert(id, text, namespace)`、`search(query, namespace, limit)`、`delete(id, namespace)`、`clear_namespace(namespace)`、`reindex(ReindexRequest)`、`SearchResult`、`IndexableItem`、`ReindexSummary`
 - owned tables：`vector_items`（SQLite persistent backend owns）
 - config namespace：`vector_store.*`、`embedding.*`、`rerank.*`
 
@@ -58,6 +58,43 @@ async def search(query: str, namespace: str, limit: int = 10) -> list[SearchResu
 
 async def delete(id: str, namespace: str) -> None:
     """删除指定条目的向量。记忆过期或文档删除时由调用方触发。"""
+
+
+async def clear_namespace(namespace: str) -> None:
+    """删除指定 namespace 下的全部向量。用于同步 rebuild 前清理旧索引。"""
+
+
+@dataclass
+class IndexableItem:
+    id: str
+    content: str
+    namespace: str
+    metadata: dict[str, str]
+
+
+@dataclass
+class ReindexRequest:
+    owner: str              # "memory" | "knowledge_base"
+    mode: str = "rebuild"   # 当前仅支持 rebuild
+    user_id: str | None = None
+    tenant_id: str = "default"
+    kb_id: str | None = None
+    dry_run: bool = False
+
+
+@dataclass
+class ReindexSummary:
+    owner: str
+    namespace: str
+    dry_run: bool
+    scanned: int
+    reindexed: int
+    skipped: int
+    failed: int
+
+
+def reindex(request: ReindexRequest) -> ReindexSummary:
+    """同步重建 memory 或 knowledge-base 的目标 vector namespace。"""
 ```
 
 ## 现状
@@ -65,7 +102,7 @@ async def delete(id: str, namespace: str) -> None:
 **foundation 已完成**：`2026-05-31-vector-store-foundation` 已归档。
 
 已实现内容：
-- `fleetent.intelligence.vector_store` public API：`upsert()`、`search()`、`delete()`、`SearchResult`
+- `fleetent.intelligence.vector_store` public API：`upsert()`、`search()`、`delete()`、`clear_namespace()`、`reindex()`、`SearchResult`、`IndexableItem`、`ReindexRequest`、`ReindexSummary`
 - namespace helper：`memory_namespace(user_id)`、`knowledge_namespace(tenant_id, kb_id)`
 - embedding provider abstraction：deterministic provider 用于测试和本地开发，HTTP provider 兼容
   OpenAI-style `/v1/embeddings`
@@ -74,6 +111,7 @@ async def delete(id: str, namespace: str) -> None:
 - 普通 SQLite persistent backend，使用 `vector_items` 表持久化 namespace-scoped vectors，检索时在 Python 内做 cosine similarity
 - `vector_store.*` / `embedding.*` / `rerank.*` 基础配置命名空间
 - `vector_store.database_url` 可选配置；未配置时 SQLite backend 复用全局 `Settings.database_url`
+- 同步 reindex 边界支持 memory / knowledge-base 的 dry-run 和 rebuild；`rebuild` 先清空目标 namespace，再逐条 upsert 当前 source records，单条失败计入 failed 并继续后续 item
 
 当前定位：可支持 memory-layer、long-term-ctx 和测试场景；SQLite backend 解决重启后索引丢失问题，但不是大规模 ANN 检索后端。
 rerank provider 目前只提供边界，尚未接入 knowledge-base search。
@@ -96,20 +134,22 @@ rerank provider 目前只提供边界，尚未接入 knowledge-base search。
 
 - [x] **namespace 隔离**：不同来源的向量逻辑隔离，检索时不跨 namespace 返回结果
 
+- [x] **同步 reindex 边界**：memory / knowledge-base 可从 source of truth 重建目标 namespace
+  - 不包含后台 job、scheduler、worker、持久 job history 或 admin dashboard
+
 ## 当前缺口
 
 - sqlite-vec / Qdrant 未实现：当前持久化后端是普通 SQLite + Python cosine，不提供 ANN 性能。
 - 真实 embedding 可通过 HTTP provider 接入，但当前默认仍是 deterministic，需部署自托管
   embedding endpoint 后显式配置。
 - rerank 尚未接入 knowledge-base search；当前只定义 provider abstraction。
-- 缺少向量后端迁移 / 重建策略：memory 或 KB 重建索引的运维流程未定义。
+- reindex 当前是同步 public API，尚未提供后台 job runtime、操作历史或管理界面。
 - 缺少检索质量评估集：无法量化不同 embedding / backend 的召回质量差异。
 
 ## 下一批候选 specs
 
 - `vector-store-sqlite-vec-backend`
 - `rerank-kb-search-integration`
-- `vector-store-reindex-jobs`
 - `vector-store-retrieval-evaluation`
 
 ## 自动化效果验证缺口
@@ -144,6 +184,11 @@ vector-store 未来有独立服务潜力，尤其是 embedding provider 和 Qdra
 - Given：某 id 已写入向量
 - When：delete 该 id 后检索
 - Then：该条目不再出现在任何检索结果中
+
+**场景 5：rebuild 清理旧向量**
+- Given：目标 namespace 中存在 stale vector，source of truth 中只存在当前记录
+- When：调用同步 `reindex(ReindexRequest(..., mode="rebuild"))`
+- Then：reindex 先清空目标 namespace，再写入当前记录；后续检索只返回当前记录
 
 ## 测试边界
 
