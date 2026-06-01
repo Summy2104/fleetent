@@ -2,7 +2,7 @@
 
 - [ ] 0.1 确认本 change 只做 Python public API，不做 HTTP / admin CLI / dashboard
 - [ ] 0.2 确认不新增 rollup 表，不直接 SQL 查询 traces
-- [ ] 0.3 确认依赖 `observability-runtime-event-coverage` 产出的 runtime events
+- [ ] 0.3 确认依赖已归档的 `observability-runtime-event-coverage` 产出的 runtime events
 
 ## 1. Public API shape
 
@@ -13,8 +13,8 @@
 
 ## 2. Run-level metrics
 
-- [ ] 2.1 Write failing tests: 聚合 `agent_run_started`、`agent_run_completed`、`agent_run_failed`
-- [ ] 2.2 Write failing tests: 计算 run_count、completed_count、failed_count、failure_rate
+- [ ] 2.1 Write failing tests: 聚合 terminal events `agent_run_completed` 和 `agent_run_failed`
+- [ ] 2.2 Write failing tests: 计算 run_count、completed_count、failed_count、failure_rate，其中 run_count = completed_count + failed_count
 - [ ] 2.3 Write failing tests: 计算 avg_elapsed_s、p50_elapsed_s、p95_elapsed_s
 - [ ] 2.4 Implement: run-level aggregation and percentile helper
 - [ ] 2.5 Verify green: 运行 `uv run pytest tests/integration/test_performance_summary.py -x -q`
@@ -38,9 +38,10 @@
 ## 5. Filters and tolerance
 
 - [ ] 5.1 Write failing tests: 支持 user_id、agent_id、tenant_id、session_id、start_ts、end_ts、limit 过滤
-- [ ] 5.2 Write failing tests: 缺失字段、非法 elapsed、旧 trace 和不完整事件流不抛错
-- [ ] 5.3 Implement: filtering through `query_trace_events()` and tolerant payload parsing
-- [ ] 5.4 Verify green: 运行 `uv run pytest tests/integration/test_performance_summary.py -x -q`
+- [ ] 5.2 Write failing tests: session_id 过滤在读取 trace API 后按 `TraceEvent.session_id` 过滤，不要求 `TraceQuery` 新增 session_id 字段
+- [ ] 5.3 Write failing tests: 缺失字段、非法 elapsed、旧 trace 和不完整事件流不抛错
+- [ ] 5.4 Implement: filtering through `query_trace_events()` and tolerant payload parsing
+- [ ] 5.5 Verify green: 运行 `uv run pytest tests/integration/test_performance_summary.py -x -q`
 
 ## 6. Docs and final verification
 
