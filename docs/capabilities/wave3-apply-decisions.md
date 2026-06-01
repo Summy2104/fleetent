@@ -21,7 +21,7 @@
 | 2 | A | sub-agent-lifecycle | AR20 | ✅ 已完成 |
 | 3 | C | tool-timeout | T2 | ✅ 已完成 |
 | 4 | C | tool-result-truncation | T4 | ✅ 已完成 |
-| 5 | C | tool-call-guardrails | AR10 | ⬜ |
+| 5 | C | tool-call-guardrails | AR10 | ✅ 已完成 |
 | 6 | F | sandbox-output-truncation | SB6 | ⬜ |
 | 7 | F | sandbox-exec-timeout | SB7 | ⬜ |
 | 8 | B | compression-trace | AR16 | ⬜ |
@@ -139,5 +139,33 @@
 1. T4 默认阈值 40KB（~10k tokens）+ `run_code` 经 `self_truncates` 豁免、SB6 独占（自解决策 #2）是否认可。
 2. breadcrumb 中文文案与「原始/省略字节数」格式是否认可。
 3. trace 随截断变小、不另存完整原文（自解决策 #3）是否认可。
+
+---
+
+## tool-call-guardrails（AR10）— feat/tool-call-guardrails
+
+**实现：**
+- 新增 `src/fleetent/tool_guardrails.py`：`GuardrailAction`（proceed/short_circuit/stop）+ `evaluate_guardrail(state, tool_name, fingerprint, threshold)`：在 `LoopState` 上维护严格背靠背连续计数（相同 `(tool, fingerprint)` +1、相异重置为 1），达阈值且未警告→short_circuit，已警告再来→stop。参数指纹复用 `loop_detector.arg_fingerprint`（与 AR4 同一判定）。
+- `termination.py`：`LoopState` 增 `last_call_fingerprint`/`consecutive_repeat`/`guardrail_tripped`（默认值，向后兼容）；新增 `GuardrailChecker`（读 `guardrail_tripped` → `StopReason.loop_detected`，仿 `ApprovalRejectedChecker`，不新增枚举），在 `_build_controller` 注册（approval 之后、loop_checker 之前）。
+- `config.py`：`guardrail_repeat_threshold: int = 3`（与 `agent_loop_repeat_threshold` 对齐）。
+- `agent_loop.py`：`_resolve_guardrail_threshold`（call > Settings > 默认）；`run()`/`run_stream()` 各加 `guardrail_repeat_threshold` 参数并在循环前解析；两处 tc 循环在 dispatch 前调 `evaluate_guardrail`：非 proceed 则跳过执行、补占位 tool_result（content=`_GUARDRAIL_FEEDBACK_TEXT`）、short_circuit 置 `loop_warning_injected`、stop 置 `guardrail_tripped`，并 `record_tool_call` 后 `continue`。run_stream 同时发 `tool_result` SSE 事件（feedback 文案）。
+
+**自解决策（Q3 已在 design D1 钉死，无遗留 OQ）：**
+1. **阈值默认 3**：与 AR4 `agent_loop_repeat_threshold` 对齐，运维只需理解一个"重复次数"直觉值（差异在计数方式：AR4 窗口 vs AR10 严格连续）。
+2. **强制停止复用 `StopReason.loop_detected`**：不新增 `guardrail_tripped` 枚举；粒度差异靠 trace 来源元数据区分（design D3）。
+3. **首次命中=短路+占位 tool_result**：不走 AR4 的 `_maybe_inject_loop_warning`（per-call 警告由占位 tool_result 承载）；置 `loop_warning_injected` 仅为与 AR4 协调避免重复警告。
+4. **接入点=dispatch 前的 tc 循环**：与 design D2 一致；占位 tool_result 保消息序列合法（仿 approval_rejected 不变式）。
+5. **stop 经状态 flag + GuardrailChecker 在下个 checkpoint 触发**（而非 tc 循环内直接 break），与终止框架范式一致（should_stop 在轮顶，不会多发 LLM 调用）。
+
+**影响：**
+- 新增 `tool_guardrails.py`、`tests/test_tool_guardrails.py`（9 测试）；改 `termination.py`/`config.py`/`agent_loop.py`、`tests/test_agent_loop.py`（+2 集成）。
+- 测试：**全量 1276 passed，0 失败，零回归**。
+- ruff：我新建/改文件 format+check 全绿（`agent_loop.py:1088` N814 `CompletionUsage as _CU` 为 HEAD 既有 grandfathered，非本 change）。
+- mypy：75 → 76（+1）。该 +1 为 `agent_loop.py:147` `_resolve_guardrail_threshold` 的 `Settings()` call-arg，与 `_resolve_loop_config`/`_resolve_budget_config`/`termination._default_config` 完全同款既有模式（运行时 env 提供 key），非新增错误模式。
+
+**需 zy 核实：**
+1. 阈值默认 3、与 AR4 对齐、可经 `guardrail_repeat_threshold` 注入（Q3 决策）是否认可。
+2. 占位 tool_result 文案 `_GUARDRAIL_FEEDBACK_TEXT`（中文）是否认可。
+3. stop 经 `GuardrailChecker` 在下个 checkpoint 归一为 `loop_detected`（自解决策 #2/#5）是否认可。
 
 ---

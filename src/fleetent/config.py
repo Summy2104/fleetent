@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     # `loop_detected`. The detection window is derived from this and not separately
     # configurable, so the observable threshold semantics cannot drift.
     agent_loop_repeat_threshold: int = 3
+    # AR10 per-call guardrail: strict back-to-back identical calls before tripping.
+    # Aligned with agent_loop_repeat_threshold so ops reason about one repeat count.
+    guardrail_repeat_threshold: int = 3
     # Optional escape hatch: top-level argument keys stripped before computing the
     # signal-A fingerprint (e.g. a volatile timestamp/attempt counter). Empty by
     # default; signal B already covers volatile-argument blind spots.
