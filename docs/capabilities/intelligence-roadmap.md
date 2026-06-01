@@ -49,7 +49,7 @@ spec 零散推进后失去全貌。
 
 | 能力 | 当前状态 | 已有基础 | MVP 必补缺口 | 非 MVP 增强 |
 | --- | --- | --- | --- | --- |
-| Observability foundation | 基础完成 | structured logs、SQLite traces、usage summary、source attribution、runtime event coverage、contract tests | 形成可查询的 performance summary | OTel / Prometheus、dashboard UI、告警 |
+| Observability foundation | 基础完成 | structured logs、SQLite traces、usage summary、performance summary、source attribution、runtime event coverage、contract tests | 形成面向运维排障的查询入口 | OTel / Prometheus、dashboard UI、告警 |
 | Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation | retention / compaction；真实 embedding 检索评估 | 自动反思维护、长期质量趋势 |
 | Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution | evaluation 基线；budget policy | 个性化 budget、agent-specific policy |
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告 | report evaluation；maintenance actions 的边界设计 | 自动 skill proposal、自动 memory maintenance |
