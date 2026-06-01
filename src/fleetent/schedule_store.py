@@ -31,7 +31,8 @@ def _init_db() -> None:
                 message    TEXT NOT NULL,
                 enabled    INTEGER NOT NULL DEFAULT 1,
                 source     TEXT NOT NULL DEFAULT 'dynamic',
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                session_id TEXT
             )
         """)
 
@@ -44,6 +45,7 @@ def create(
     agent_name: str | None,
     message: str,
     source: str = "dynamic",
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     _init_db()
     task_id = str(uuid.uuid4())
@@ -51,9 +53,21 @@ def create(
     with _conn() as conn:
         conn.execute(
             """INSERT INTO scheduled_tasks
-               (id, name, cron_expr, timezone, user_id, agent_name, message, enabled, source, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
-            (task_id, name, cron_expr, timezone, user_id, agent_name, message, source, now),
+               (id, name, cron_expr, timezone, user_id, agent_name, message, enabled, source,
+                created_at, session_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)""",
+            (
+                task_id,
+                name,
+                cron_expr,
+                timezone,
+                user_id,
+                agent_name,
+                message,
+                source,
+                now,
+                session_id,
+            ),
         )
     return {
         "id": task_id,
@@ -66,15 +80,14 @@ def create(
         "enabled": 1,
         "source": source,
         "created_at": now,
+        "session_id": session_id,
     }
 
 
 def list_tasks() -> list[dict[str, Any]]:
     _init_db()
     with _conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM scheduled_tasks WHERE enabled = 1"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM scheduled_tasks WHERE enabled = 1").fetchall()
     return [dict(r) for r in rows]
 
 
