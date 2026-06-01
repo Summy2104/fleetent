@@ -535,3 +535,90 @@ def test_run_code_self_truncates_exempt_from_t4():
     import fleetent.tools  # noqa: F401
 
     assert tr.is_self_truncating("run_code") is True
+
+
+# ── SB7: sandbox exec timeout ────────────────────────────────────────────────
+
+
+def test_sandbox_timeout_classification_reads_ar5_table():
+    import fleetent.tools as tl
+    from fleetent.error_classifier import CLASSIFICATION_TABLE, ErrorCategory
+
+    c = tl._sandbox_timeout_classification()
+    assert c == CLASSIFICATION_TABLE[ErrorCategory.sandbox_timeout]
+    assert c.category is ErrorCategory.sandbox_timeout
+
+
+def _timeout_manager(client, exec_timeout):
+    from fleetent.sandbox_config import SandboxResources
+    from fleetent.sandbox_manager import SandboxManager, Scope
+
+    return SandboxManager(
+        client=client,
+        scope=Scope.SESSION,
+        idle_hours=2.0,
+        resources_by_scope={
+            Scope.SESSION: SandboxResources(exec_timeout=exec_timeout),
+            Scope.AGENT: SandboxResources(read_only=False),
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_code_sandbox_timeout_kills_and_classifies(monkeypatch):
+    import asyncio
+
+    import fleetent.tools as tl
+
+    async def never_returns(ws_id, command):
+        await asyncio.Event().wait()
+
+    client = _mock_lifecycle_client("cid-timeout")
+    client.exec = never_returns
+    monkeypatch.setattr(tl, "_MANAGER", _timeout_manager(client, exec_timeout=0))
+    monkeypatch.setattr("fleetent.sandbox_client._KILL_GRACE_SECONDS", 0.001)
+
+    result = await asyncio.wait_for(tl.run_code(code="while True: pass"), timeout=2.0)
+    assert "超时" in result  # sandbox-timeout text, not the generic cancel text
+    client.kill_workspace.assert_any_call("cid-timeout")  # docker kill sequence used
+
+
+@pytest.mark.asyncio
+async def test_run_code_external_cancel_kills_but_not_timeout(monkeypatch):
+    import asyncio
+
+    import fleetent.tools as tl
+    from fleetent.cancellation import CancelToken
+
+    async def never_returns(ws_id, command):
+        await asyncio.Event().wait()
+
+    client = _mock_lifecycle_client("cid-cancel2")
+    client.exec = never_returns
+    monkeypatch.setattr(tl, "_MANAGER", _timeout_manager(client, exec_timeout=30))
+    monkeypatch.setattr("fleetent.sandbox_client._KILL_GRACE_SECONDS", 0.001)
+
+    token = CancelToken()
+    token.cancel()  # external cancel before the (30s) sandbox deadline
+    result = await asyncio.wait_for(
+        tl.run_code(code="while True: pass", cancel_token=token), timeout=2.0
+    )
+    assert "超时" not in result  # NOT a sandbox timeout
+    assert "cancel" in result.lower()  # existing cancel semantics
+    client.kill_workspace.assert_any_call("cid-cancel2")  # both paths docker-kill
+
+
+@pytest.mark.asyncio
+async def test_run_code_within_timeout_returns_normally(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
+
+    client = _mock_lifecycle_client("cid-ok")
+    client.exec = AsyncMock(return_value=ExecResult(stdout="42\n", stderr="", exit_code=0))
+    monkeypatch.setattr(tl, "_MANAGER", _timeout_manager(client, exec_timeout=30))
+
+    result = await tl.run_code(code="print(42)")
+    assert result == "42"
+    client.kill_workspace.assert_not_called()  # no forced termination within budget
