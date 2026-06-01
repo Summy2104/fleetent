@@ -2449,3 +2449,43 @@ async def test_run_guardrail_injects_placeholder_tool_result(mock_client, monkey
         if m.get("role") == "assistant" and m.get("tool_calls"):
             for tcd in m["tool_calls"]:
                 assert tcd["id"] in tool_ids
+
+
+# ── AR17: anti-flap load/save at run boundary ────────────────────────────────
+
+
+async def test_run_loads_and_saves_flap_state(mock_client, monkeypatch, tmp_path):
+    import fleetent.context_mgr as cm
+    from fleetent.context_mgr import AntiFlapState
+
+    monkeypatch.setattr(cm, "DB_PATH", tmp_path / "users.db")
+    cm.save_anti_flap_state("sess-flap", AntiFlapState(turns_since_last_compress=7))
+
+    captured: dict = {}
+
+    def fake_apply(messages, state, config=None, **kw):
+        captured["in_turns"] = state.turns_since_last_compress
+        return messages, AntiFlapState(turns_since_last_compress=99, auto_disabled=True)
+
+    monkeypatch.setattr(al, "apply_anti_flap", fake_apply)
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("done"))
+
+    await al.run([{"role": "user", "content": "x"}], session_id="sess-flap")
+
+    assert captured["in_turns"] == 7  # loaded prior state from users.db
+    saved = cm.load_anti_flap_state("sess-flap")
+    assert saved.turns_since_last_compress == 99 and saved.auto_disabled is True  # saved back
+
+
+async def test_run_without_session_id_does_not_touch_flap_db(mock_client, monkeypatch, tmp_path):
+    import fleetent.context_mgr as cm
+
+    monkeypatch.setattr(cm, "DB_PATH", tmp_path / "users.db")
+    called = {"apply": 0}
+    monkeypatch.setattr(
+        al, "apply_anti_flap", lambda *a, **k: called.__setitem__("apply", called["apply"] + 1)
+    )
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("done"))
+    await al.run([{"role": "user", "content": "x"}])  # no session_id
+    assert called["apply"] == 0  # ungated AR12 path; anti-flap not engaged
+    assert not (tmp_path / "users.db").exists()  # no DB created

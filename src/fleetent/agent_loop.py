@@ -17,7 +17,13 @@ from fleetent import model_router
 from fleetent.agent_policy import check_tool_access
 from fleetent.budget import BudgetChecker, BudgetConfig, BudgetUsage, grace_max_tokens
 from fleetent.cancellation import CancellationChecker, CancelToken
-from fleetent.context_mgr import maybe_compress
+from fleetent.context_mgr import (
+    AntiFlapState,
+    apply_anti_flap,
+    load_anti_flap_state,
+    maybe_compress,
+    save_anti_flap_state,
+)
 from fleetent.error_classifier import classify
 from fleetent.eval_logger import log_run
 from fleetent.loop_detector import LoopDetectionChecker, arg_fingerprint, result_digest
@@ -145,6 +151,49 @@ def _resolve_guardrail_threshold(guardrail_repeat_threshold: int | None) -> int:
     from fleetent.config import Settings
 
     return Settings().guardrail_repeat_threshold
+
+
+def _load_flap_state(session_id: str | None) -> AntiFlapState | None:
+    """Load per-session anti-flap state (AR17); None disables gating (CLI / no session).
+
+    Defensive: a persistence failure degrades to ungated AR12 compression rather
+    than breaking the run.
+    """
+    if not session_id:
+        return None
+    try:
+        return load_anti_flap_state(session_id)
+    except Exception as exc:  # observability/governance must not break the run
+        logger.warning("anti_flap_load_failed", session_id=session_id, error=str(exc))
+        return None
+
+
+def _save_flap_state(session_id: str | None, state: AntiFlapState | None) -> None:
+    if not session_id or state is None:
+        return
+    try:
+        save_anti_flap_state(session_id, state)
+    except Exception as exc:
+        logger.warning("anti_flap_save_failed", session_id=session_id, error=str(exc))
+
+
+def _gated_compress(
+    messages: list[Any],
+    flap_state: AntiFlapState | None,
+    *,
+    session_id: str | None,
+    user_id: str | None,
+    agent_name: str | None,
+) -> tuple[list[Any], AntiFlapState | None]:
+    """Auto-compress one turn: anti-flap gated when a session state exists, else AR12."""
+    if flap_state is not None:
+        return apply_anti_flap(
+            messages, flap_state, session_id=session_id, user_id=user_id, agent_name=agent_name
+        )
+    return (
+        maybe_compress(messages, session_id=session_id, user_id=user_id, agent_name=agent_name),
+        None,
+    )
 
 
 def _build_controller(
@@ -589,6 +638,7 @@ async def run(
     stop_reason = StopReason.normal
     hygiene_repairs: dict[str, int] = {}
     guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold)
+    flap_state = _load_flap_state(session_id)
 
     while True:
         forced = controller.should_stop(state)
@@ -600,9 +650,10 @@ async def run(
         # reference live: callers (e.g. im_gateway.normalizer) rely on run() mutating
         # the passed `messages` so session_mgr.save() persists the full conversation.
         # Rebinding (messages = ...) would detach it and lose appended turns.
-        messages[:] = maybe_compress(
-            messages, session_id=session_id, user_id=user_id, agent_name=agent_name
+        _compressed, flap_state = _gated_compress(
+            messages, flap_state, session_id=session_id, user_id=user_id, agent_name=agent_name
         )
+        messages[:] = _compressed
         # D4b: inject the loop warning AFTER compression so a same-round compaction
         # cannot swallow it; it must be present in the sequence sent to the LLM.
         _maybe_inject_loop_warning(messages, state)
@@ -754,6 +805,7 @@ async def run(
         )
     usage = response.usage if response else None
     user_input = _first_user_input(messages)
+    _save_flap_state(session_id, flap_state)
     log_run(
         user_input,
         reply,
@@ -898,6 +950,7 @@ async def run_stream(
     stop_reason = StopReason.normal
     hygiene_repairs: dict[str, int] = {}
     guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold)
+    flap_state = _load_flap_state(session_id)
 
     while True:
         forced = controller.should_stop(state)
@@ -905,8 +958,8 @@ async def run_stream(
             stop_reason = forced
             break
         state.turn += 1
-        messages = maybe_compress(
-            messages, session_id=session_id, user_id=user_id, agent_name=agent_name
+        messages, flap_state = _gated_compress(
+            messages, flap_state, session_id=session_id, user_id=user_id, agent_name=agent_name
         )
         # D4b: inject the loop warning after compression, before sanitize/LLM call.
         _maybe_inject_loop_warning(messages, state)
@@ -1100,6 +1153,7 @@ async def run_stream(
         if total_prompt_tokens or total_completion_tokens
         else None
     )
+    _save_flap_state(session_id, flap_state)
     log_run(
         user_input,
         reply,

@@ -25,7 +25,7 @@
 | 6 | F | sandbox-output-truncation | SB6 | ✅ 已完成 |
 | 7 | F | sandbox-exec-timeout | SB7 | ✅ 已完成 |
 | 8 | B | compression-trace | AR16 | ✅ 已完成 |
-| 9 | B | compression-anti-flap | AR17 | ⬜ |
+| 9 | B | compression-anti-flap | AR17 | ✅ 已完成 |
 | 10 | E | mcp-degradation | MCP4 | ⬜ |
 | 11 | H | scheduled-task-session-binding | S3 | ⬜ |
 | 12 | A | cost-budget-control | AR18 | ⬜ |
@@ -247,5 +247,32 @@
 1. 摘要仅记 sha256 前 16 hex 指纹 + 长度、不落正文（自解决策 #2）是否认可。
 2. `summary_model` 经路由复用解析 + 防御 try/except（自解决策 #1）是否认可。
 3. 给 `test_context_mgr.py` 加 autouse TRACE_PATH 隔离、给 13 处 compress mock 加 `**kw` 是否认可。
+
+---
+
+## compression-anti-flap（AR17）— feat/compression-anti-flap
+
+**实现：**
+- `config.py`：`context_flap_window=3`/`context_min_savings_ratio=0.10`/`context_min_interval_turns=1`；`context_mgr._default_config()` 注入三键。
+- `context_mgr.py`：`AntiFlapState`（dataclass：recent_savings 元组滑窗 / turns_since_last_compress / auto_disabled）；`apply_anti_flap(messages, state, config, *, attribution) -> (messages, new_state)`（自动门控：熔断或未越线→advance turns；最小间隔未满→skip；否则 `_compress` + 算节省率 + 滑窗 + 连续低节省熔断告警；functional `replace`，不就地改写）；`init_anti_flap_db`/`load_anti_flap_state`/`save_anti_flap_state`（`users.db` 姊妹表 `session_anti_flap` keyed by session_id，标准库 sqlite3，DB_PATH 可 monkeypatch）。
+- `agent_loop.py`：`_load_flap_state`/`_save_flap_state`（防御式，DB 失败降级不崩 run）、`_gated_compress`（有 session 状态→apply_anti_flap，否则 maybe_compress=AR12）；run/run_stream 在 run 边界 load（开始）/save（log_run 前），逐 turn 经 `_gated_compress` 透传回收 `flap_state`。
+
+**自解决策（重要，需核实）：**
+1. **新增 `apply_anti_flap` 专用函数承载门控路径，`maybe_compress` 保持不变**（而非给 maybe_compress 加 state 参数返 union）。理由：state 传入则需返回 (messages, state)，会把 maybe_compress 的 `list→list` 契约变成 union，破坏既有全部调用方/测试与 mypy（需 overload gymnastics）。专用函数零风险、干净 tuple；force/overflow 不走它即天然满足 D4 豁免。spec scenarios 是行为性的（"自动压缩入口"），由 maybe_compress(state 无=AR12) + apply_anti_flap(门控) 两函数共同满足，未违反任何 spec 要求。
+2. **最小间隔判定用 increment-first**：`advanced = turns+1`；`advanced < min_interval → skip`。使默认 `min_interval=1` 时首次越线即压缩（保 AR12 首压行为），`min_interval≥2` 才产生真实间隔。
+3. **持久化用姊妹表 `session_anti_flap`**（而非给 session-metadata-index 的 `sessions` 表加列），keeps 该 change schema/语义不动；recent_savings 以 JSON 存。
+4. **gating 仅在 session_id 存在时激活**（CLI 无 session→None→AR12 原样），故既有 agent_loop 测试（均不传 session_id）零影响。
+5. **熔断为结构化告警 + 状态标志、不抛异常**（D5）。
+
+**影响：**
+- 改 `config.py`/`context_mgr.py`/`agent_loop.py`；`tests/test_context_mgr.py`（+12 含持久化/熔断/间隔/跨run）、`tests/test_agent_loop.py`（+2 边界 load/save）。
+- 测试：**全量 1318 passed，0 失败，零回归**。
+- ruff：我改/建文件 format+check 全绿（`agent_loop.py` N814 grandfathered）。
+- mypy：76 → 76，无新增（`context_mgr.py:65` 的 `Settings()` 为 `_default_config` 既有调用，非本 change 引入）。
+
+**需 zy 核实：**
+1. **（最重要）** 新增 `apply_anti_flap` 专用函数而非改 `maybe_compress` 签名返 union（自解决策 #1）是否认可——这是对 design「maybe_compress 新增 state 入参」字面的收敛（保契约/类型/兼容）。
+2. 最小间隔 increment-first 语义（默认 1 → 首压即时、无间隔，靠熔断兜底）（自解决策 #2）是否认可。
+3. 持久化用姊妹表 `session_anti_flap`（自解决策 #3）是否认可；session 删除/过期时的清理本 change 未挂（design Open Question，留后续）。
 
 ---
