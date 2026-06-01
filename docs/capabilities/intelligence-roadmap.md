@@ -302,6 +302,101 @@ public API、测试基线和 OpenSpec 批次已经完成。它不等同于可以
 4. `deployment-pilot-install-checklist`：沉淀 pilot 部署、升级、备份、恢复、健康检查和回滚清单。
 5. `data-retention-and-diagnostics-policy`：定义 logs / traces / connector state 的 retention、导出、脱敏和备份边界。
 
+### Pilot 后增强 / Knowledge Quality Track
+
+以下 specs 不是 Pilot MVP 的前置，但属于 capability 原规划中的重要知识库质量能力，需要进入 roadmap，
+避免后续只做运维化而丢掉知识库增强方向：
+
+1. `knowledge-base-entity-relation-extraction`：定义 entities / relations 表、`kb_extraction` task 输入输出、
+   deterministic / fake extractor 测试路径；不默认调用真实 LLM。
+2. `knowledge-base-graph-search`：基于 entities / relations 做关系展开，返回关联 chunks，并提供 evaluation
+   fixture 验证关系型问题的召回效果。
+3. `knowledge-base-file-parsers-advanced`：补 PDF / Office / Google Sheets / Slides 等企业常见文件解析；
+   image / VLM 解析仍需单独评估依赖、成本和数据主权影响。
+4. `rerank-kb-search-integration`：把已有 rerank provider 接入 KB search，对 hybrid / graph candidates 做重排；
+   默认 deterministic，真实 rerank provider 显式 opt-in。
+5. `knowledge-base-query-planner`：在 vector / keyword / hybrid / graph / rerank 之间做查询策略选择；该 spec
+   最容易引入 LLM 不稳定性，因此排在 entity extraction、graph search 和 rerank 接入之后。
+
+建议依赖顺序：
+
+```mermaid
+flowchart TD
+    KB_BIND[knowledge-base-agent-kb-binding]
+    PARSERS[knowledge-base-file-parsers-advanced]
+    ENTITY[knowledge-base-entity-relation-extraction]
+    GRAPH[knowledge-base-graph-search]
+    RERANK[rerank-kb-search-integration]
+    PLANNER[knowledge-base-query-planner]
+
+    PARSERS --> ENTITY
+    ENTITY --> GRAPH
+    GRAPH --> PLANNER
+    RERANK --> PLANNER
+    KB_BIND --> PLANNER
+```
+
+### Pilot 后增强 / Reflection and Evolution Track
+
+以下 specs 不直接阻塞 Pilot MVP，但会把 reflection 从“报告 / User Memory maintenance”扩展到知识库和
+skill 演进，属于原 capability 里需要提高优先级的能力：
+
+1. `reflection-knowledge-base-reports`：基于 retrieval traces、source attribution、KB sync 状态和用户问题，
+   发现知识库缺口、过期文档、低命中主题和可能需要补充的来源；默认只生成报告，不自动写回 KB。
+2. `skill-reflection-proposals`：基于 trace / tool usage / repeated tasks 发现可沉淀为 skill 的机会，生成
+   owner-reviewed proposal；不自动创建或修改 skill。
+3. `reflection-trend-summary`：对 reflection findings 做长期趋势统计，用于判断 memory / KB / skill 改进是否有效。
+
+建议依赖顺序：
+
+```mermaid
+flowchart TD
+    OBS_Q[observability-admin-query-api]
+    KB_OPS[knowledge-base-connector-operations]
+    KB_REPORT[reflection-knowledge-base-reports]
+    SKILL_PROP[skill-reflection-proposals]
+    REF_TREND[reflection-trend-summary]
+
+    OBS_Q --> KB_REPORT
+    KB_OPS --> KB_REPORT
+    OBS_Q --> SKILL_PROP
+    KB_REPORT --> REF_TREND
+    SKILL_PROP --> REF_TREND
+```
+
+### Pilot 后增强 / Memory and Context Evolution Track
+
+以下 specs 不直接阻塞 Pilot MVP，但属于 memory / long-term context 从个人记忆扩展到团队协作语境时必须
+进入 roadmap 的能力：
+
+1. `shared-memory`：定义 User Memory 之外的共享记忆实体、scope ownership、确认主体和写入 / 更新 / 删除
+   lifecycle。默认不让管理员代批用户个人记忆，也不把企业共识直接混入 User Memory。
+2. `long-term-context-agent-tenant-policy`：在 User Memory、Shared Memory 和 Knowledge Base 之间定义
+   agent / tenant 级 provider 策略、budget 策略和冲突偏好。
+3. `memory-quality-trend-summary`：跟踪 memory extraction、retention、proposal apply 后的质量趋势，判断记忆维护是否有效。
+
+建议依赖顺序：
+
+```mermaid
+flowchart TD
+    USER_MEM[User Memory proposal lifecycle]
+    SHARED[shared-memory]
+    LTC_POLICY[long-term-context-agent-tenant-policy]
+    MEM_TREND[memory-quality-trend-summary]
+
+    USER_MEM --> SHARED
+    SHARED --> LTC_POLICY
+    SHARED --> MEM_TREND
+```
+
+### Capability 完整度 / v1.1+
+
+以下能力保留在完整 capability roadmap 中，但不建议进入 Pilot MVP 或 Knowledge Quality 首批：
+
+- `knowledge-base-document-acl`：同一 KB 内文档级权限过滤，复杂度和安全风险高；Pilot 阶段先用多 KB + agent binding。
+- image / VLM parsing：放在 advanced parser 之后单独评估，不默认进入首批文件解析。
+- `vector-store-ann-backend`：sqlite-vec / Qdrant / OpenSearch adapter，等数据规模和性能瓶颈明确后再做。
+
 ## 后续维护规则
 
 - 新增 intelligence 相关 spec 前，必须在本 roadmap 中标明所属批次和解锁关系。
