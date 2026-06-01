@@ -54,8 +54,8 @@ PR 门禁 SHALL 优先运行快速且稳定的测试层，避免 e2e 或 evaluat
 
 #### Scenario: Evaluation remains manually runnable
 - **WHEN** 开发者运行 `uv run pytest tests/evaluation`
-- **THEN** deterministic memory 和 knowledge-base evaluation 可以被手动执行
-- **AND** 真实模型 evaluation 只有在显式设置对应 `FLEETENT_EVAL_*` 环境变量时运行
+- **THEN** deterministic memory、knowledge-base 和 long-term context evaluation 可以被手动执行
+- **AND** 真实模型或真实 provider evaluation 只有在显式设置对应 `FLEETENT_EVAL_*` 环境变量时运行
 
 ### Requirement: Agent guidance matches test layers
 项目级 agent 指南 SHALL 说明测试目录分层，保证 AI agent 和团队成员按同一规范写测试。
