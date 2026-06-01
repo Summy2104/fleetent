@@ -54,6 +54,10 @@ TBD - created by archiving change configuration-foundation. Update Purpose after
 
 #### Scenario: Runtime objects stay out of settings
 - **WHEN** 查看 `config/settings.yaml.example`
-- **THEN** 文件不包含 cron jobs、webhook sources、agent definitions、user bindings、memory items、
-  knowledge documents 或 reindex jobs
+- **THEN** 文件不包含 cron jobs、webhook sources、MCP server definitions、agent definitions、
+  user bindings、memory items、knowledge documents 或 reindex jobs
+
+#### Scenario: MCP settings are global policy only
+- **WHEN** 查看 `config/settings.yaml.example`
+- **THEN** `mcp` namespace 只包含全局策略字段，不包含 `servers`
 
