@@ -26,7 +26,7 @@
 | 7 | F | sandbox-exec-timeout | SB7 | ✅ 已完成 |
 | 8 | B | compression-trace | AR16 | ✅ 已完成 |
 | 9 | B | compression-anti-flap | AR17 | ✅ 已完成 |
-| 10 | E | mcp-degradation | MCP4 | ⬜ |
+| 10 | E | mcp-degradation | MCP4 | ✅ 已完成 |
 | 11 | H | scheduled-task-session-binding | S3 | ⬜ |
 | 12 | A | cost-budget-control | AR18 | ⬜ |
 | 13 | D | cost-aware-routing | MR2 | ⬜ |
@@ -274,5 +274,31 @@
 1. **（最重要）** 新增 `apply_anti_flap` 专用函数而非改 `maybe_compress` 签名返 union（自解决策 #1）是否认可——这是对 design「maybe_compress 新增 state 入参」字面的收敛（保契约/类型/兼容）。
 2. 最小间隔 increment-first 语义（默认 1 → 首压即时、无间隔，靠熔断兜底）（自解决策 #2）是否认可。
 3. 持久化用姊妹表 `session_anti_flap`（自解决策 #3）是否认可；session 删除/过期时的清理本 change 未挂（design Open Question，留后续）。
+
+---
+
+## mcp-degradation（MCP4）— feat/mcp-degradation
+
+**实现：**
+- `mcp_client.py`：`is_server_available(server)`（连接 healthy AND 非 oauth2-认证不可用，D1）；`McpServerConfig.degrade_mode: str = "degrade"` + `__post_init__` 经 `_validate_degrade_mode` 校验非法值回退 degrade（log，不静默）；`_schema_visibility(tool_name)`（解析 `{server_id}__{tool}`、查 `_server_registry`、调 is_server_available；非 MCP/未知 server→True）；`install_schema_filter()`（把谓词注入 tool_registry）；`unavailable_strict_server_ids()`（注册的 strict+不可用 ∪ 启动失败的 strict）；`register_all` 清空 `_failed_strict_servers`、strict 启动失败入该集合、末尾 `install_schema_filter()`。
+- `tool_registry.py`：可注入 `_schema_visibility_filter`（默认 None=不过滤）+ `set_schema_visibility_filter`；`get_schemas()` 按谓词过滤（过滤视图，不删 `_registry`）。
+
+**自解决策：**
+1. **过滤经可注入钩子**（D4）避免分层倒置：tool_registry 只认谓词，MCP 细节留 mcp_client；默认 None 保证非 MCP/既有零回归。
+2. **摘除=过滤视图、不删注册项**（D2）：恢复（健康 reset / 认证清除）= 谓词翻真，工具自动重现，无需重注册。
+3. **strict 启动失败用 `_failed_strict_servers` 跟踪**（D5）：未注册的 strict server 也纳入 strict 查询；与 `_server_registry` 同属进程级 registry 域（非任意全局可变态），register_all 每次清空重算。
+4. **strict 仅暴露判定入口 `unavailable_strict_server_ids()`，不改 agent_loop**（任务 4.6/D3）：agent_loop 据 agent 的 allowed_tools 与 `{id}__*` 命名空间相交决定终止，属后续集成，本 change 不动 agent_loop。
+5. **silent 当前等同 degrade**（通知通道未落地，design 前向声明）。
+
+**影响：**
+- 改 `mcp_client.py`/`tool_registry.py`；新增 `tests/test_mcp_degradation.py`（16 测试）。
+- 测试：**全量 1334 passed，0 失败，零回归**。
+- ruff：我改/建文件 format+check 全绿。
+- mypy：76 → 76，无新增。
+
+**需 zy 核实：**
+1. strict 仅暴露 `unavailable_strict_server_ids()` 判定、agent_loop 集成留后续（自解决策 #4）是否认可。
+2. strict 启动失败用进程级 `_failed_strict_servers` 跟踪（自解决策 #3）是否认可。
+3. silent 暂等同 degrade（通知通道未实现）是否认可。
 
 ---

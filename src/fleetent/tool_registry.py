@@ -118,9 +118,27 @@ def is_self_truncating(name: str) -> bool:
     return name in _self_truncating
 
 
+# Optional visibility predicate (MCP4 D4): given a tool name, return whether its
+# schema should be exposed to the LLM. None = expose all (default; non-MCP / no
+# degradation). Injected by mcp_client; an injection point, not mutable business
+# state — the predicate reads live server health each call.
+_schema_visibility_filter: Callable[[str], bool] | None = None
+
+
+def set_schema_visibility_filter(fn: Callable[[str], bool] | None) -> None:
+    """Install (or clear with None) the schema visibility predicate (MCP4 D4)."""
+    global _schema_visibility_filter
+    _schema_visibility_filter = fn
+
+
 def get_schemas() -> list[ToolSchema]:
-    """Return OpenAI-format tool schemas for all registered tools."""
-    return [schema for _, schema in _registry.values()]
+    """Return OpenAI-format tool schemas for registered tools the filter allows.
+
+    The filter is a view: a hidden tool stays in `_registry`, so recovery (the
+    predicate flipping back to True) re-exposes it with no re-registration.
+    """
+    flt = _schema_visibility_filter
+    return [schema for name, (_fn, schema) in _registry.items() if flt is None or flt(name)]
 
 
 _SUB_AGENT_TOOL = "sub_agent"
