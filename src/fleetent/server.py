@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from fleetent import api_key_store, mcp_client, quota, user_admin_api, user_store
 from fleetent.agent_loop import run_stream
 from fleetent.auth import seed_builtin_admin
-from fleetent.config import Settings, WebhooksSettings, configure_logging
+from fleetent.config import Settings, WebhooksSettings, configure_logging, load_mcp_server_settings
 from fleetent.cron_scheduler import CronScheduler
 from fleetent.mcp_client import McpServerConfig
 from fleetent.model_router import ROUTES
@@ -91,12 +91,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if LEGACY_MCP_CONFIG_PATH.exists():
         raise RuntimeError(
             "Legacy config/mcp.yaml is no longer supported; move MCP servers to "
-            "config/settings.yaml under mcp.servers."
+            "config/mcp.servers.yaml."
         )
 
-    if settings.mcp.servers:
-        servers = [McpServerConfig(**server.model_dump()) for server in settings.mcp.servers]
-        await mcp_client.register_all(servers)
+    if settings.mcp.enabled:
+        server_settings = load_mcp_server_settings()
+        if server_settings:
+            servers = [McpServerConfig(**server.model_dump()) for server in server_settings]
+            await mcp_client.register_all(servers)
 
     if LEGACY_WEBHOOK_CONFIG_PATH.exists():
         raise RuntimeError(

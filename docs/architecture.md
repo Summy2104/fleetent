@@ -97,7 +97,7 @@ src/fleetent/
   schedule_store.py  ← SQLite：定时任务定义与状态持久化
   observability/     ← trace、log、usage、diagnostics
   agent_policy.py    ← fnmatch 工具访问检查
-  config.py          ← pydantic-settings；加载 .env + config/settings.yaml
+  config.py          ← pydantic-settings；加载 .env + config/settings.yaml；读取 config/mcp.servers.yaml
   admin.py           ← CLI 管理工具
 ```
 

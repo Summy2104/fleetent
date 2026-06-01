@@ -11,20 +11,7 @@ observability:
     json_file: true
 
 mcp:
-  servers:
-    # - id: github
-    #   transport: http
-    #   url: http://mcp-github.internal:8080
-    #   auth_type: api_key
-    #   api_key_env: GITHUB_MCP_API_KEY
-    # - id: filesystem
-    #   transport: stdio
-    #   command: npx
-    #   args:
-    #     - -y
-    #     - "@modelcontextprotocol/server-filesystem"
-    #     - /data/shared
-    #   env: {}
+  enabled: true
 
 scheduling:
   enabled: true
