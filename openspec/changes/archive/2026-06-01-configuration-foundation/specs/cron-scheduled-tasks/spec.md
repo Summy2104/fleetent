@@ -12,17 +12,6 @@ APScheduler on every server startup. Cron jobs SHALL NOT be loaded from YAML fil
 - **WHEN** `config/cron.yaml` exists
 - **THEN** scheduler startup fails fast instead of loading static jobs
 
-### Requirement: Scheduler global settings
-The scheduler SHALL read deployment-level runtime settings from `config/settings.yaml`.
-
-#### Scenario: Scheduler disabled
-- **WHEN** `scheduling.enabled=false`
-- **THEN** server startup does not start APScheduler
-
-#### Scenario: Default timezone is configured
-- **WHEN** a persisted task does not define timezone
-- **THEN** scheduler uses `scheduling.default_timezone`
-
 ## REMOVED Requirements
 
 ### Requirement: Static tasks loaded from config/cron.yaml
@@ -35,3 +24,16 @@ At server startup, the system SHALL load task definitions from `config/cron.yaml
 #### Scenario: Missing config file is silently skipped
 - **WHEN** `config/cron.yaml` does not exist
 - **THEN** the server starts without error and no static jobs are scheduled
+
+## ADDED Requirements
+
+### Requirement: Scheduler global settings
+The scheduler SHALL read deployment-level runtime settings from `config/settings.yaml`.
+
+#### Scenario: Scheduler disabled
+- **WHEN** `scheduling.enabled=false`
+- **THEN** server startup does not start APScheduler
+
+#### Scenario: Default timezone is configured
+- **WHEN** a persisted task does not define timezone
+- **THEN** scheduler uses `scheduling.default_timezone`

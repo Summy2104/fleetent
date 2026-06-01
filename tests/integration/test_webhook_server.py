@@ -15,6 +15,11 @@ import fleetent.webhook_router as wr
 from fleetent.config import WebhooksSettings
 
 
+@pytest.fixture(autouse=True)
+def isolate_runtime_config_files(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+
 def _make_sig(secret: str, body: bytes) -> str:
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 

@@ -3,6 +3,11 @@ import pytest
 from fleetent.config import Settings, configure_logging
 
 
+@pytest.fixture(autouse=True)
+def isolate_settings_dotenv(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+
 def test_settings_defaults():
     s = Settings(anthropic_api_key="test-key")
     assert s.microsandbox_url == "http://host.docker.internal:7777"

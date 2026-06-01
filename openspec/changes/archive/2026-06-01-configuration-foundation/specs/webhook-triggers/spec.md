@@ -12,6 +12,8 @@ configuration-foundation and SHALL be handled by a later webhook source manageme
 - **WHEN** no runtime source is registered for a source id
 - **THEN** `POST /webhook/{source_id}` returns 404
 
+## ADDED Requirements
+
 ### Requirement: Webhook global settings
 Webhook trigger runtime SHALL read deployment-level policy from `config/settings.yaml`.
 

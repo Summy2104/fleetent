@@ -5,6 +5,11 @@ import fleetent.user_store as us
 from fleetent.server import app
 
 
+@pytest.fixture(autouse=True)
+def isolate_runtime_config_files(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch, isolated_schedule_db):
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
