@@ -251,14 +251,16 @@ def get_logger(component: str) -> Logger:
 ### P1：metrics / usage
 
 - [x] **用量查询**：从 `traces` 聚合 per-user、per-agent、per-session、global token 用量
-- [ ] **性能统计**：从 `traces` 聚合 LLM 耗时、工具耗时、错误率、fallback 次数
+- [ ] **性能统计**（`observability-performance-summary`）：从 `traces` 聚合 LLM 耗时、工具耗时、错误率、fallback 次数和审批等待耗时
+  - 先提供 Python public API，不新增 rollup 表
+  - 后续 platform / dashboard 通过该 API 或后续 HTTP endpoint 读取
 - [ ] **预算查询接口**：供 agent-runtime 查询当前 run / session / 用户 / agent 用量
 
 ## 当前缺口
 
 - trace event 覆盖不完整：LLM call、tool call、permission、fallback、context compression、final reply、sub-agent span 等还未系统记录。
 - request_id / span 语义仍需强化：当前已能共享 run_id，但完整 trace tree 尚未完成。
-- usage summary 有 token / elapsed 基础聚合，但还缺错误率、fallback、工具耗时等质量指标。
+- usage summary 有 token / elapsed 基础聚合，但还缺错误率、fallback、工具耗时、审批等待等质量指标。
 - logs / traces retention、导出、备份和告警策略未定义。
 - 没有平台 UI 或 admin 查询体验。
 

@@ -113,6 +113,7 @@ flowchart TD
 当前活动 spec：
 
 - `observability-runtime-event-coverage`：补齐事件源，不做聚合 API。
+- `observability-performance-summary`：基于 runtime events 提供 Python 聚合查询 API，不做 UI / rollup。
 
 ### M2：可同步、可重建
 
