@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from fleetent.config import Settings, configure_logging
@@ -47,6 +49,45 @@ def test_settings_loads_non_secret_values_from_settings_yaml(tmp_path, monkeypat
     assert s.vector_store.backend == "sqlite"
     assert s.embedding.dimensions == 128
     assert s.knowledge_base.enabled is True
+
+
+def test_settings_mcp_namespace_is_global_policy_only():
+    s = Settings(anthropic_api_key="test-key")
+
+    assert s.mcp.enabled is True
+    assert not hasattr(s.mcp, "servers")
+
+
+def test_settings_rejects_mcp_server_definitions():
+    with pytest.raises(Exception, match="servers"):
+        Settings(
+            anthropic_api_key="test-key",
+            mcp={
+                "servers": [
+                    {
+                        "id": "github",
+                        "url": "http://mcp.example.com",
+                    }
+                ]
+            },
+        )
+
+
+def test_settings_example_excludes_mcp_server_definitions():
+    example = (Path(__file__).parents[2] / "config" / "settings.yaml.example").read_text()
+
+    assert "mcp:" in example
+    assert "servers:" not in example
+    assert "mcp-github" not in example
+
+
+def test_mcp_servers_example_documents_server_list_format():
+    example = (Path(__file__).parents[2] / "config" / "mcp.servers.yaml.example").read_text()
+
+    assert "servers:" in example
+    assert "id: github" in example
+    assert "transport: http" in example
+    assert "transport: stdio" in example
 
 
 def test_settings_env_overrides_settings_yaml(tmp_path, monkeypatch):

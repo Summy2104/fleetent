@@ -3,7 +3,8 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from pydantic import BaseModel, Field
+import yaml
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -12,6 +13,7 @@ from pydantic_settings import (
 )
 
 SETTINGS_YAML_PATH = Path("config/settings.yaml")
+MCP_SERVERS_YAML_PATH = Path("config/mcp.servers.yaml")
 YAML_SECRET_FIELDS = frozenset(
     {
         "anthropic_api_key",
@@ -91,8 +93,14 @@ class McpServerSettings(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
 
 
-class McpSettings(BaseModel):
+class McpServersFile(BaseModel):
     servers: list[McpServerSettings] = Field(default_factory=list)
+
+
+class McpSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
 
 
 class SchedulingSettings(BaseModel):
@@ -187,3 +195,17 @@ def configure_logging(settings: Settings) -> None:
         level=logging.INFO,
         handlers=[logging.StreamHandler()],
     )
+
+
+def load_mcp_server_settings(
+    path: Path | None = None,
+) -> list[McpServerSettings]:
+    """Load static MCP server definitions from the dedicated server config file."""
+    config_path = path or MCP_SERVERS_YAML_PATH
+    if not config_path.exists():
+        return []
+
+    raw = yaml.safe_load(config_path.read_text()) or {}
+    if not isinstance(raw, dict):
+        raise ValueError("config/mcp.servers.yaml must contain a mapping with a servers list")
+    return McpServersFile.model_validate(raw).servers

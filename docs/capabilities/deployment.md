@@ -17,7 +17,8 @@
 ## 现状
 
 - ✅ **pydantic-settings 配置体系**：.env + config/settings.yaml 双源加载
-  - `config/settings.yaml` 是唯一非敏感应用配置文件，环境变量和 `.env` 优先级高于 YAML
+  - `config/settings.yaml` 是统一非敏感应用策略配置文件，环境变量和 `.env` 优先级高于 YAML
+  - MCP server definitions 独立放在 `config/mcp.servers.yaml`；`settings.yaml` 只保留 `mcp.enabled` 这类全局策略
   - 密钥不进 YAML、不进 DB、不进 git，仅通过 env var 注入；YAML 中只保存 `api_key_env` 这类环境变量名引用
   - 旧 `config/mcp.yaml`、`config/cron.yaml`、`config/webhooks.yaml` 存在时启动 fail fast，避免静默使用过期配置
 
