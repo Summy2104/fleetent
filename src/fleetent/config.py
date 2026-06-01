@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     # opening, especially on IM channels. Optional; default preserves existing
     # deployments.
     compression_initial_intent_max: int = 2
+    # Auto-compression anti-flap (AR17). Circuit-break auto compression after
+    # `context_flap_window` consecutive compressions all saving less than
+    # `context_min_savings_ratio`; keep at least `context_min_interval_turns`
+    # new turns between auto compressions.
+    context_flap_window: int = 3
+    context_min_savings_ratio: float = 0.10
+    context_min_interval_turns: int = 1
     session_ttl_days: int = 30
     session_max_total_mb: int = 1024
     session_max_count: int = 10000

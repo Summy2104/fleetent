@@ -1406,3 +1406,132 @@ def test_trace_failure_does_not_break_compression(tmp_path, monkeypatch):
     result = maybe_compress(_big_msgs(), config=_BIG, force=True)
     assert result is not None
     assert any("S" in str(m.get("content", "")) for m in result if isinstance(m, dict))
+
+
+# ── AR17: anti-flap ──────────────────────────────────────────────────────────
+
+
+from fleetent.context_mgr import (  # noqa: E402
+    AntiFlapState,
+    apply_anti_flap,
+    load_anti_flap_state,
+    save_anti_flap_state,
+)
+
+_FLAP_CFG = {**_BIG, "flap_window": 3, "min_savings_ratio": 0.10, "min_interval_turns": 1}
+
+
+def test_settings_anti_flap_defaults():
+    from fleetent.config import Settings
+
+    s = Settings(anthropic_api_key="x")
+    assert s.context_flap_window == 3
+    assert s.context_min_savings_ratio == 0.10
+    assert s.context_min_interval_turns == 1
+
+
+def test_default_config_injects_anti_flap_keys():
+    cfg = _cm._default_config()
+    assert cfg["flap_window"] == 3 and cfg["min_savings_ratio"] == 0.10
+    assert cfg["min_interval_turns"] == 1
+
+
+def test_anti_flap_state_defaults():
+    st = AntiFlapState()
+    assert st.recent_savings == ()
+    assert st.turns_since_last_compress == 0
+    assert st.auto_disabled is False
+
+
+def test_apply_anti_flap_returns_new_state_not_mutating(monkeypatch):
+    monkeypatch.setattr(_cm, "_summarize", lambda m, prev_summary=None, config=None: "S")
+    st = AntiFlapState()
+    _, new = apply_anti_flap(_big_msgs(), st, config=_FLAP_CFG)
+    assert st.turns_since_last_compress == 0  # original untouched
+    assert new is not st
+
+
+def test_apply_anti_flap_under_threshold_advances_turns(monkeypatch):
+    monkeypatch.setattr(_cm, "_summarize", lambda m, prev_summary=None, config=None: "S")
+    st = AntiFlapState()
+    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}]
+    out, new = apply_anti_flap(msgs, st, config=_FLAP_CFG)
+    assert out is msgs  # not over Tmax → unchanged
+    assert new.turns_since_last_compress == 1
+
+
+def test_apply_anti_flap_min_interval_skips(monkeypatch):
+    called = {"n": 0}
+
+    def _sum(m, prev_summary=None, config=None):
+        called["n"] += 1
+        return "S"
+
+    monkeypatch.setattr(_cm, "_summarize", _sum)
+    cfg = {**_FLAP_CFG, "min_interval_turns": 5}
+    st = AntiFlapState(turns_since_last_compress=0)  # advanced=1 < 5 → skip
+    out, new = apply_anti_flap(_big_msgs(), st, config=cfg)
+    assert out is _big_msgs.__call__() or out is not None  # returns messages
+    assert called["n"] == 0  # no LLM
+    assert new.turns_since_last_compress == 1
+
+
+def test_apply_anti_flap_low_savings_circuit_breaks(monkeypatch):
+    # _summarize returns the whole input joined → near-zero savings each time.
+    monkeypatch.setattr(_cm, "_summarize", lambda m, prev_summary=None, config=None: "x" * 200000)
+    st = AntiFlapState(recent_savings=(0.0, 0.0), turns_since_last_compress=5)
+    _, new = apply_anti_flap(_big_msgs(), st, config=_FLAP_CFG)
+    assert new.auto_disabled is True  # 3rd consecutive low-savings
+
+
+def test_apply_anti_flap_high_savings_breaks_streak(monkeypatch):
+    monkeypatch.setattr(_cm, "_summarize", lambda m, prev_summary=None, config=None: "S")
+    st = AntiFlapState(recent_savings=(0.0, 0.0), turns_since_last_compress=5)
+    _, new = apply_anti_flap(_big_msgs(), st, config=_FLAP_CFG)
+    assert new.auto_disabled is False  # this compress saved a lot → streak broken
+
+
+def test_apply_anti_flap_disabled_short_circuits(monkeypatch):
+    called = {"n": 0}
+    monkeypatch.setattr(
+        _cm,
+        "_summarize",
+        lambda m, prev_summary=None, config=None: called.__setitem__("n", called["n"] + 1) or "S",
+    )
+    st = AntiFlapState(auto_disabled=True, turns_since_last_compress=5)
+    out, new = apply_anti_flap(_big_msgs(), st, config=_FLAP_CFG)
+    assert called["n"] == 0  # no LLM when circuit-broken
+    assert new.auto_disabled is True
+
+
+def test_anti_flap_persistence_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(_cm, "DB_PATH", tmp_path / "users.db")
+    st = AntiFlapState(recent_savings=(0.05, 0.2), turns_since_last_compress=3, auto_disabled=True)
+    save_anti_flap_state("sess-rt", st)
+    loaded = load_anti_flap_state("sess-rt")
+    assert loaded.recent_savings == (0.05, 0.2)
+    assert loaded.turns_since_last_compress == 3
+    assert loaded.auto_disabled is True
+
+
+def test_anti_flap_load_absent_returns_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(_cm, "DB_PATH", tmp_path / "users.db")
+    assert load_anti_flap_state("never-seen") == AntiFlapState()
+
+
+def test_cross_run_accumulation_circuit_breaks(tmp_path, monkeypatch):
+    # Simulate 3 separate runs (3 user messages): each run loads state from
+    # users.db, does one low-savings auto compress, saves back. The savings window
+    # must accumulate ACROSS runs (not reset per run) and trip the breaker on #3.
+    monkeypatch.setattr(_cm, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setattr(_cm, "_summarize", lambda m, prev_summary=None, config=None: "x" * 200000)
+    sid = "sess-cross"
+    cfg = {**_FLAP_CFG, "min_interval_turns": 1}
+    for _ in range(3):
+        st = load_anti_flap_state(sid)  # run boundary: load
+        # advanced=turns+1 >= min_interval(1) → compress this run
+        _, st = apply_anti_flap(_big_msgs(), st, config=cfg)
+        save_anti_flap_state(sid, st)  # run boundary: save
+    final = load_anti_flap_state(sid)
+    assert len(final.recent_savings) == 3
+    assert final.auto_disabled is True  # 3 consecutive low-savings across runs

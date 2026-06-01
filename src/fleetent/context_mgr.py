@@ -2,13 +2,20 @@
 
 import hashlib
 import json
+import sqlite3
 import time
+from dataclasses import dataclass, replace
 from typing import Any
 
 import structlog
 
 from fleetent import eval_logger
 from fleetent.model_router import get_client_and_config
+from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatch
+
+_DEFAULT_FLAP_WINDOW = 3
+_DEFAULT_MIN_SAVINGS_RATIO = 0.10
+_DEFAULT_MIN_INTERVAL_TURNS = 1
 
 logger = structlog.get_logger(__name__)
 
@@ -62,6 +69,9 @@ def _default_config() -> ContextConfig:
         "tretained_ratio": s.context_tretained_ratio,
         "keep_recent": s.context_keep_recent,
         "initial_intent_max": s.compression_initial_intent_max,
+        "flap_window": s.context_flap_window,
+        "min_savings_ratio": s.context_min_savings_ratio,
+        "min_interval_turns": s.context_min_interval_turns,
     }
 
 
@@ -562,3 +572,142 @@ def _content(msg: Any) -> str:
     if isinstance(msg, dict):
         return str(msg.get("content", ""))
     return str(getattr(msg, "content", "") or "")
+
+
+# ── AR17: auto-compression anti-flap ─────────────────────────────────────────
+
+
+@dataclass
+class AntiFlapState:
+    """Per-session anti-flap memory: recent auto-compression savings ratios, turns
+    since the last auto compression, and whether auto compression is circuit-broken.
+
+    Updated functionally (dataclasses.replace, never in place) so callers thread it
+    explicitly; persisted per session_id in users.db, not in the message array.
+    """
+
+    recent_savings: tuple[float, ...] = ()
+    turns_since_last_compress: int = 0
+    auto_disabled: bool = False
+
+
+def apply_anti_flap(
+    messages: list[Any],
+    state: AntiFlapState,
+    config: ContextConfig | None = None,
+    *,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    agent_name: str | None = None,
+) -> tuple[list[Any], AntiFlapState]:
+    """Auto-compression with anti-flap gating; returns (messages, updated state).
+
+    Gates the AR12 auto path: a circuit breaker (consecutive low-savings) and a
+    minimum-interval hysteresis window. Manual (`maybe_compress(force=True)`) and
+    context-overflow entrypoints deliberately do NOT call this (D4 exemption).
+    """
+    cfg = _resolve_config(config)
+    flap_window = int(cfg.get("flap_window", _DEFAULT_FLAP_WINDOW))
+    min_savings = float(cfg.get("min_savings_ratio", _DEFAULT_MIN_SAVINGS_RATIO))
+    min_interval = int(cfg.get("min_interval_turns", _DEFAULT_MIN_INTERVAL_TURNS))
+
+    trigger_line = int(cfg["max_tokens"] * cfg["tmax_ratio"])
+    over_tmax = estimate_tokens(messages) > trigger_line
+    advanced = state.turns_since_last_compress + 1
+
+    # Circuit-broken or not over the line → no compression; just advance turns.
+    if state.auto_disabled or not over_tmax:
+        return messages, replace(state, turns_since_last_compress=advanced)
+
+    # Minimum-interval hysteresis: too soon since the last auto compression.
+    if advanced < min_interval:
+        return messages, replace(state, turns_since_last_compress=advanced)
+
+    before = estimate_tokens(messages)
+    result = _compress(
+        messages,
+        cfg,
+        trigger="tmax",
+        session_id=session_id,
+        user_id=user_id,
+        agent_name=agent_name,
+    )
+    after = estimate_tokens(result)
+    savings = (before - after) / before if before > 0 else 0.0
+    window = (*state.recent_savings, savings)[-flap_window:]
+    auto_disabled = len(window) == flap_window and all(s < min_savings for s in window)
+    if auto_disabled and not state.auto_disabled:
+        logger.warning(
+            "compression_auto_flap_disabled",
+            recent_savings=window,
+            min_savings_ratio=min_savings,
+            flap_window=flap_window,
+            session_id=session_id,
+        )
+    return result, AntiFlapState(
+        recent_savings=window, turns_since_last_compress=0, auto_disabled=auto_disabled
+    )
+
+
+def _anti_flap_conn() -> sqlite3.Connection:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    return sqlite3.connect(DB_PATH)
+
+
+def init_anti_flap_db() -> None:
+    """Create the per-session anti-flap sister table, idempotently.
+
+    A sister table keyed by session_id (not new columns on session-metadata-index's
+    `sessions` table) keeps that change's schema/semantics untouched.
+    """
+    with _anti_flap_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS session_anti_flap (
+              session_id        TEXT PRIMARY KEY,
+              recent_savings    TEXT NOT NULL,
+              turns_since       INTEGER NOT NULL,
+              auto_disabled     INTEGER NOT NULL
+            )
+            """
+        )
+
+
+def load_anti_flap_state(session_id: str) -> AntiFlapState:
+    """Load a session's AntiFlapState from users.db, or a fresh default if absent."""
+    init_anti_flap_db()
+    with _anti_flap_conn() as conn:
+        row = conn.execute(
+            "SELECT recent_savings, turns_since, auto_disabled "
+            "FROM session_anti_flap WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+    if row is None:
+        return AntiFlapState()
+    return AntiFlapState(
+        recent_savings=tuple(json.loads(row[0])),
+        turns_since_last_compress=row[1],
+        auto_disabled=bool(row[2]),
+    )
+
+
+def save_anti_flap_state(session_id: str, state: AntiFlapState) -> None:
+    """Persist a session's AntiFlapState to users.db (insert or replace)."""
+    init_anti_flap_db()
+    with _anti_flap_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO session_anti_flap (session_id, recent_savings, turns_since, auto_disabled)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+              recent_savings=excluded.recent_savings,
+              turns_since=excluded.turns_since,
+              auto_disabled=excluded.auto_disabled
+            """,
+            (
+                session_id,
+                json.dumps(list(state.recent_savings)),
+                state.turns_since_last_compress,
+                int(state.auto_disabled),
+            ),
+        )
