@@ -20,7 +20,7 @@
 | 1 | C | tool-arg-sanitization | T3 | ✅ 已完成 |
 | 2 | A | sub-agent-lifecycle | AR20 | ✅ 已完成 |
 | 3 | C | tool-timeout | T2 | ✅ 已完成 |
-| 4 | C | tool-result-truncation | T4 | ⬜ |
+| 4 | C | tool-result-truncation | T4 | ✅ 已完成 |
 | 5 | C | tool-call-guardrails | AR10 | ⬜ |
 | 6 | F | sandbox-output-truncation | SB6 | ⬜ |
 | 7 | F | sandbox-exec-timeout | SB7 | ⬜ |
@@ -114,5 +114,30 @@
 1. 全局默认用模块常量、未加 Settings/yaml 字段（自解决策 #1）是否认可。
 2. 归类接入点 D2-a（扩展 `_categorize`）是否认可。
 3. `test_run_threads_token_to_dispatch` 断言由「`is token`」改为「`parent is token` + deadline + 取消传播」是否认可。
+
+---
+
+## tool-result-truncation（T4）— feat/tool-result-truncation
+
+**实现：**
+- 新增 `src/fleetent/tool_result_truncation.py`：纯函数 `truncate_tool_result(result, max_bytes=None)` + 模块级 `MAX_TOOL_RESULT_BYTES = 40_000`（~10k tokens，可 monkeypatch）。超阈值时头尾保留 + 中间 breadcrumb `[...工具结果已截断：原始 {orig} 字节，省略中间 {omitted} 字节...]`；字节口径 `len(encode("utf-8"))`（与 SB6 一致）；切点回退到完整 UTF-8 字符边界（`_head_bytes`/`_tail_bytes` 逐字节回退解码），保证合法 UTF-8 且总字节 ≤ 阈值。
+- `tool_registry.py`：新增 `_self_truncating: set[str]` + `@tool(self_truncates=False)` 参数 + `is_self_truncating(name)`（平行于 `_risk_levels`/`_timeouts`，不进 schema）。`tools.py` 给 `run_code` 声明 `self_truncates=True`。
+- `agent_loop.py`：`run()`（工具消息写回）与 `run_stream()`（写回，SSE 事件仍发原始 result）两处，对非 `self_truncates` 工具的 `result` 在 `messages.append` 前调 `truncate_tool_result`；`dispatch()` 返回值不变（`loop_detector.result_digest`、`tool_result` SSE 事件仍见完整结果）。
+
+**自解决策：**
+1. **breadcrumb 预算的轻微循环依赖**：breadcrumb 文本含 `{orig}`/`{omitted}` 数字、其位数影响 breadcrumb 字节长度→影响头尾预算→影响 omitted。解法：用 `omitted ≤ orig`（位数不超 orig）以 `format(orig, omitted=orig)` 作 breadcrumb 长度**上界**预留 `reserve`，再分头尾预算；最终 breadcrumb 实际字节 ≤ reserve，保证 `head+breadcrumb+tail ≤ limit` 恒成立。
+2. **`run_code` 经 `self_truncates` 对 T4 豁免**（design D5）：不抬高 T4 默认迁就 sandbox 60KB，不二次截、无双 breadcrumb、无数值耦合——SB6 独占 run_code 截断，T4 管其余工具。
+3. **trace 随截断变小**（design D4）：trace 序列化的是已截断的 messages（= LLM 实际所见），不另存完整原文，符合 eval_logger「只记元数据/样本」克制原则；breadcrumb 的原始/省略字节数即审计所需大小元数据。
+
+**影响：**
+- 新增 `tool_result_truncation.py`、`tests/test_tool_result_truncation.py`（11 测试）；改 `tool_registry.py`/`tools.py`/`agent_loop.py`、`tests/test_agent_loop.py`（+3 集成测试）。
+- 测试：**全量 1265 passed，0 失败，零回归**。
+- ruff：我新建/改文件 format+check 全绿；`agent_loop.py:1020` N814（`CompletionUsage as _CU`）与 `tools.py:243` 的 F401/E501（`schedule_task`/`cancel_task`）均为 HEAD 既有 grandfathered（wave2 已记），非本 change 引入，未触碰。
+- mypy：75 → 75，无新增。
+
+**需 zy 核实：**
+1. T4 默认阈值 40KB（~10k tokens）+ `run_code` 经 `self_truncates` 豁免、SB6 独占（自解决策 #2）是否认可。
+2. breadcrumb 中文文案与「原始/省略字节数」格式是否认可。
+3. trace 随截断变小、不另存完整原文（自解决策 #3）是否认可。
 
 ---

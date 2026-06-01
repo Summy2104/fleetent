@@ -45,7 +45,9 @@ from fleetent.tool_registry import (
     get_effective_timeout,
     get_risk_level,
     get_schemas,
+    is_self_truncating,
 )
+from fleetent.tool_result_truncation import truncate_tool_result
 
 logger = structlog.get_logger(__name__)
 
@@ -681,7 +683,13 @@ async def run(
                         user_id=user_id,
                     )
                     state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+            # T4: cap the result written to messages (self-truncating tools like
+            # run_code manage their own size — SB6 — so they're exempt). dispatch's
+            # return value is untouched, so loop_detector / SSE still see the full result.
+            tool_content = (
+                result if is_self_truncating(tc.function.name) else truncate_tool_result(result)
+            )
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": tool_content})
             state.record_tool_call(
                 tc.function.name,
                 arg_fingerprint(tc.function.arguments, loop_checker.ignore_arg_keys),
@@ -951,7 +959,11 @@ async def run_stream(
             )
             state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             yield {"type": "tool_result", "name": name, "content": result}
-            messages.append({"role": "tool", "tool_call_id": tc_data["id"], "content": result})
+            # T4: truncate the messages copy only; the SSE event above kept the full result.
+            tool_content = result if is_self_truncating(name) else truncate_tool_result(result)
+            messages.append(
+                {"role": "tool", "tool_call_id": tc_data["id"], "content": tool_content}
+            )
             state.record_tool_call(
                 name,
                 arg_fingerprint(args, loop_checker.ignore_arg_keys),

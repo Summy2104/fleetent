@@ -166,7 +166,7 @@ async def _exec_or_cancel(
             return exec_task.result()
 
 
-@tool(risk_level="medium")
+@tool(risk_level="medium", self_truncates=True)
 async def run_code(
     code: str,
     cancel_token: CancelToken | None = None,
