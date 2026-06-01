@@ -19,6 +19,7 @@
 - public API：
   - logs：`get_logger(component)`
   - traces：`record_trace_event(event)`、`query_trace_events(query)`、`record_injected_context(run_id, sources)`
+  - summaries：`get_usage_summary(query)`、`get_performance_summary(query)`
 - owned tables：`traces`；后续 `audit_events` / `usage_rollups` 如落库也由 observability owns
 - config namespace：`observability.*`
 
@@ -188,9 +189,11 @@ def get_logger(component: str) -> Logger:
 - 删除旧 JSONL trace API 和 `fleetent.eval_logger` shim，不保留向后兼容
 - agent run completion trace：`agent_run_completed`
 - usage summary：按 user / agent / tenant / session / time / model 聚合
+- performance summary：按 user / agent / tenant / session / time 聚合 run、LLM、fallback、tool 和
+  permission 等运行性能指标
 - source attribution：`InjectedContextTrace`、`record_injected_context()`、`injected_context` event
 - observability contract tests：覆盖 agent run 的 `injected_context` / `agent_run_completed` 事件链路、
-  source attribution payload safety、trace query 和 usage aggregation contract
+  source attribution payload safety、trace query、usage aggregation 和 performance aggregation contract
 
 当前定位：具备基础日志、trace、usage 和来源归因能力，但还不是完整的 request trace / APM 系统。
 
@@ -251,9 +254,10 @@ def get_logger(component: str) -> Logger:
 ### P1：metrics / usage
 
 - [x] **用量查询**：从 `traces` 聚合 per-user、per-agent、per-session、global token 用量
-- [ ] **性能统计**（`observability-performance-summary`）：从 `traces` 聚合 LLM 耗时、工具耗时、错误率、fallback 次数和审批等待耗时
+- [x] **性能统计**（`observability-performance-summary`）：从 trace events 聚合 LLM 耗时、工具耗时、错误率、fallback 次数和审批等待耗时
   - 先提供 Python public API，不新增 rollup 表
-  - 后续 platform / dashboard 通过该 API 或后续 HTTP endpoint 读取
+  - 通过 `query_trace_events()` 读取数据，session 过滤在 API 读取后按 trace event 执行
+  - 后续 platform / dashboard 可通过该 API 或后续 HTTP endpoint 读取
 - [ ] **预算查询接口**：供 agent-runtime 查询当前 run / session / 用户 / agent 用量
 
 ## 当前缺口
