@@ -6,7 +6,7 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML 解析，local directory 与 Google Drive folder 手动同步、sync planner、deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、按 tenant + knowledge base 隔离召回相关文档片段，向 vector_store reindex 暴露当前可索引 chunks，以及手动运行的 deterministic retrieval evaluation / combined memory+KB embedding evaluation。
+**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML 解析，local directory、Google Drive folder 与 Confluence Cloud 手动同步、sync planner、deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、按 tenant + knowledge base 隔离召回相关文档片段，向 vector_store reindex 暴露当前可索引 chunks，以及手动运行的 deterministic retrieval evaluation / combined memory+KB embedding evaluation。
 
 **后续负责**：第三方数据源接入与文档获取、更丰富的文档解析、实体与关系提取、图谱存储。
 
@@ -18,7 +18,7 @@
 
 **模块归属**：
 - owning package：`intelligence.knowledge_base`
-- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`delete(document_id)`、`archive(document_id)`、`iter_indexable_knowledge_chunks(tenant_id, kb_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`GoogleDriveConnectorConfig`、`SyncAction`、`SyncPlan`、`SyncPlanItem`、`SyncPlanSummary`、`SyncExecutionSummary`、`plan_local_directory_sync(config, tenant_id, kb_id)`、`execute_sync_plan(plan)`、`sync_local_directory(config, tenant_id, kb_id)`、`plan_google_drive_sync(config, client)`、`sync_google_drive(config, client)`
+- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`delete(document_id)`、`archive(document_id)`、`iter_indexable_knowledge_chunks(tenant_id, kb_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`GoogleDriveConnectorConfig`、`ConfluenceConnectorConfig`、`SyncAction`、`SyncPlan`、`SyncPlanItem`、`SyncPlanSummary`、`SyncExecutionSummary`、`plan_local_directory_sync(config, tenant_id, kb_id)`、`execute_sync_plan(plan)`、`sync_local_directory(config, tenant_id, kb_id)`、`plan_google_drive_sync(config, client)`、`sync_google_drive(config, client)`、`plan_confluence_sync(config, client)`、`sync_confluence(config, client)`
 - owned tables：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`、`knowledge_chunks_fts`、`knowledge_source_states`
 - config namespace：`knowledge_base.*`
 
@@ -35,6 +35,10 @@ flowchart TD
         G2 --> G3[GoogleDriveSyncPlan\nnew / changed / unchanged / unsupported / archive_missing]
         G3 --> G4[sync_google_drive executor]
         G4 --> G5[ingest_parsed / archive / skip]
+        F1[Confluence scope] --> F2[plan_confluence_sync]
+        F2 --> F3[ConfluenceSyncPlan\nnew / changed / unchanged / archive_missing]
+        F3 --> F4[sync_confluence executor]
+        F4 --> F5[ingest_parsed / archive / skip]
     end
 
     subgraph ingest["当前导入流程（同步最小闭环）"]
@@ -285,6 +289,28 @@ async def plan_google_drive_sync(config: GoogleDriveConnectorConfig, *, client: 
 
 async def sync_google_drive(config: GoogleDriveConnectorConfig, *, client: GoogleDriveClient) -> GoogleDriveSyncSummary:
     """通过 planner + executor 手动同步 Google Drive folder。"""
+
+
+@dataclass
+class ConfluenceConnectorConfig:
+    connector_id: str
+    tenant_id: str
+    kb_id: str
+    base_url: str
+    username: str
+    credential_ref: str
+    scope_type: Literal["space", "page"]
+    space_key: str | None = None
+    page_id: str | None = None
+    include_children: bool = False
+
+
+async def plan_confluence_sync(config: ConfluenceConnectorConfig, *, client: ConfluenceClient) -> ConfluenceSyncPlan:
+    """按 space / page scope 生成确定性计划；不边扫描边写 KB。"""
+
+
+async def sync_confluence(config: ConfluenceConnectorConfig, *, client: ConfluenceClient) -> ConfluenceSyncSummary:
+    """通过 planner + executor 手动同步 Confluence Cloud pages。"""
 ```
 
 `mode` 取值：
@@ -296,14 +322,13 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 
 ## 现状
 
-**已完成 core + parser + hybrid + local connector + sync planner + Google Drive connector 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、基础 Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入；`knowledge-base-parsers-basic` 增加了无 AI 框架依赖的 plain text / Markdown / lightweight HTML parser，并提供 parsed ingest adapter；`knowledge-base-hybrid-search` 增加了 knowledge-base-owned SQLite FTS5 keyword index、keyword mode、hybrid mode 和 RRF 融合；`knowledge-base-connectors-local` 增加了 DataSource / DocumentRef 边界、显式 root allowlist 的 local directory source、`.txt` / `.md` / `.html` / `.htm` 格式映射、source path / mtime / content hash 状态记录，以及手动 `sync_local_directory`；`knowledge-base-sync-planner` 增加了 plan / execute 分离、`ingest_new` / `reingest_changed` / `skip_unchanged` / `delete_missing` 动作模型；`knowledge-base-connectors-google-drive` 增加指定 folder scope、OAuth `credential_ref`、fake-client default path、Google Docs HTML export、text / Markdown / HTML parser dispatch、`archive_missing` 和 opt-in smoke scaffold。
+**已完成 core + parser + hybrid + local connector + sync planner + Google Drive / Confluence connector 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、基础 Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入；`knowledge-base-parsers-basic` 增加了无 AI 框架依赖的 plain text / Markdown / lightweight HTML parser，并提供 parsed ingest adapter；`knowledge-base-hybrid-search` 增加了 knowledge-base-owned SQLite FTS5 keyword index、keyword mode、hybrid mode 和 RRF 融合；`knowledge-base-connectors-local` 增加了 DataSource / DocumentRef 边界、显式 root allowlist 的 local directory source、`.txt` / `.md` / `.html` / `.htm` 格式映射、source path / mtime / content hash 状态记录，以及手动 `sync_local_directory`；`knowledge-base-sync-planner` 增加了 plan / execute 分离、`ingest_new` / `reingest_changed` / `skip_unchanged` / `delete_missing` 动作模型；`knowledge-base-connectors-google-drive` 增加指定 folder scope、OAuth `credential_ref`、fake-client default path、Google Docs HTML export、text / Markdown / HTML parser dispatch、`archive_missing` 和 opt-in smoke scaffold；`knowledge-base-connectors-confluence` 增加 Cloud API token `credential_ref`、space / page / page+children scope、storage HTML parser dispatch、bounded 429 retry、`archive_missing` 和 opt-in smoke scaffold。
 
 团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移设计资产和小块算法**，而非从零重写或整体搬运。
 
-迁移评估见 [knowledge-bridge 迁移计划](../knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：已先完成 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环，并完成 `knowledge-base-parsers-basic` 的基础解析器、`knowledge-base-hybrid-search` 的 SQLite FTS5 / BM25 与 RRF 融合、`knowledge-base-connectors-local` 的 local directory 手动同步、sync planner、Google Drive connector；后续再依次推进 Confluence connector、graph search 和 retrieval audit。
+迁移评估见 [knowledge-bridge 迁移计划](../knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：已先完成 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环，并完成 `knowledge-base-parsers-basic` 的基础解析器、`knowledge-base-hybrid-search` 的 SQLite FTS5 / BM25 与 RRF 融合、`knowledge-base-connectors-local` 的 local directory 手动同步、sync planner、Google Drive connector、Confluence connector；后续再推进 graph search 和 retrieval audit。
 
 当前未实现内容：
-- 无 Confluence connector
 - 无后台 job、admin UI、REST upload API；vector rebuild 目前通过 vector_store 同步 public API 触发
 - 无 rerank / query planner
 - 无 graph_search、entities、relations 或 `kb_extraction`
@@ -311,6 +336,7 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 - Google Drive 不做 service account / domain-wide delegation，不做最终提问用户到 Drive document ACL 的实时映射；OAuth token 通过 connector 的 `credential_ref` 引用，MVP 可指向本地 token 文件，生产部署需保护文件权限和备份策略，后续可迁移到 credential store / secret manager。
 - Google Drive missing / 不可见默认归档 KB document 并移除 chunks / vector entries，不物理删除 `knowledge_documents` 行。
 - Google Docs MVP 只通过 export HTML 后走 HTML parser；Google Sheets / Slides 结构化解析后置，当前作为 unsupported 跳过。
+- Confluence 只支持 Cloud API token + `credential_ref`，不做 Server / Data Center、多认证模式或最终用户 Confluence page ACL 映射；missing / 不可见默认 archive，不物理删除 `knowledge_documents` 行。
 
 **后续可迁移参考（knowledge-bridge 已实现，但需按 fleetent specs 分批适配）**：
 - ✅ 文档解析思路：text / Markdown / HTML / section-first 归并优先；PDF / DOCX / PPTX / Google Docs / Google Sheets 后续逐项评估依赖；图片 / VLM 暂缓
@@ -333,15 +359,15 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 ## 当前缺口
 
 - parser 已支持 text / Markdown / lightweight HTML；PDF / Office / image / VLM 解析尚未实现。
-- local directory 与 Google Drive 已支持 plan + execute 手动 sync；尚未实现后台 job。
+- local directory、Google Drive 与 Confluence 已支持 plan + execute 手动 sync；尚未实现后台 job。
 - 检索已支持 SQLite FTS5/BM25 keyword mode 与 RRF hybrid mode；尚未实现 rerank、query planner 或 graph。
-- 外部 SaaS 数据源暂未接入：Confluence 尚未实现；Google Drive 已有 fake-client 默认路径和手动 opt-in smoke scaffold。
+- 外部 SaaS 数据源已有 fake-client 默认路径和手动 opt-in smoke scaffold；真实 Google Drive / Confluence API client 不进入默认测试路径。
 - long-term-ctx 只支持内置默认 KB provider；还没有 agent 到多 KB 的绑定策略。
 - 后台 vector index rebuild job runtime 尚未实现；当前只提供同步 vector_store reindex public API。
 
 ## 下一批候选 specs
 
-- `knowledge-base-connectors-confluence`
+- 后续 connector 增强 specs：Drive / Confluence 真实 client wiring、ACL 映射、scheduler / sync history、附件 / PDF / Office 解析
 
 ## 自动化效果验证
 
@@ -455,6 +481,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - Google Drive connector 通过 OAuth `credential_ref` 绑定 connector 授权，只扫描指定 folder，不做 service account / domain-wide delegation 或最终用户 Drive ACL 映射
 - Google Drive sync 通过 planner + executor 执行；missing / 不可见 source 默认 archive KB document，不物理删除 document row
 - Google Drive 默认测试使用 fake client；真实 smoke 只有 `FLEETENT_GOOGLE_DRIVE_SMOKE=1` 且 credential_ref / folder id 齐全时才运行，否则 skip
+- Confluence connector 只支持 Cloud API token + `credential_ref`，按 space / page scope 同步 storage HTML；默认测试使用 fake client，真实 smoke 只有 `FLEETENT_CONFLUENCE_SMOKE=1` 且 base URL / username / credential_ref / scope 齐全时才运行，否则 skip
 - iter_indexable_knowledge_chunks 按 tenant/kb 隔离返回当前 chunks，namespace 为 `kb:{tenant_id}:{kb_id}`
 
 **需要 evaluation 测试的行为**：

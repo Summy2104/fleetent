@@ -1,5 +1,12 @@
 """Knowledge-base runtime public API."""
 
+from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    ConfluenceConnectorConfig,
+    ConfluenceSyncPlan,
+    ConfluenceSyncSummary,
+    plan_confluence_sync,
+    sync_confluence,
+)
 from fleetent.intelligence.knowledge_base.connectors.google_drive import (
     GoogleDriveConnectorConfig,
     GoogleDriveSyncPlan,
@@ -34,6 +41,9 @@ from fleetent.intelligence.knowledge_base.sync_planner import (
 )
 
 __all__ = [
+    "ConfluenceConnectorConfig",
+    "ConfluenceSyncPlan",
+    "ConfluenceSyncSummary",
     "GoogleDriveConnectorConfig",
     "GoogleDriveSyncPlan",
     "GoogleDriveSyncSummary",
@@ -55,8 +65,10 @@ __all__ = [
     "parse_html",
     "parse_markdown",
     "parse_text",
+    "plan_confluence_sync",
     "plan_google_drive_sync",
     "plan_local_directory_sync",
     "search",
+    "sync_confluence",
     "sync_google_drive",
 ]
