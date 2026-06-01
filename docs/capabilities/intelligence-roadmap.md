@@ -54,8 +54,8 @@ spec 零散推进后失去全貌。
 | Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution | evaluation 基线；budget policy | 个性化 budget、agent-specific policy |
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告 | report evaluation；maintenance actions 的边界设计 | 自动 skill proposal、自动 memory maintenance |
 | Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API | 真实 embedding / rerank evaluation；rerank 接入 KB search | 后台 reindex job runtime、sqlite-vec、Qdrant、OpenSearch adapter |
-| Knowledge base | 基础完成 | local ingest、parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator | KB scope/binding；rerank integration | Confluence / Google Drive connectors、graph retrieval |
-| Deployment / config | 部分完成 | `settings.yaml`、MCP dedicated server file、legacy config fail-fast | backup / upgrade；config docs 对 intelligence runtime prerequisites 的收敛 | config center、Admin UI、hot reload |
+| Knowledge base | 基础完成 | local ingest、parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator | KB scope/binding；KB retrieval 真实 embedding / rerank evaluation；connector MVP 范围决策 | Confluence / Google Drive connectors、graph retrieval |
+| Deployment / config | 基础完成 | `settings.yaml`、MCP dedicated server file、legacy config fail-fast、本地 SQLite upgrade / backup 脚本 | config docs 对 intelligence runtime prerequisites 的收敛 | config center、Admin UI、hot reload |
 
 ## 依赖顺序
 
@@ -67,19 +67,21 @@ flowchart TD
     REF_E[reflection-report-evaluation]
 
     KB_SYNC[knowledge-base-sync-planner]
-    KB_CONN[knowledge-base-connectors]
+    KB_CONF[knowledge-base-connectors-confluence]
+    KB_GDRIVE[knowledge-base-connectors-google-drive]
     REINDEX[vector-store-reindex-jobs]
     EMB_E[memory-and-kb-real-embedding-evaluation]
 
     MEM_RET[memory-retention-and-compaction]
     MEM_REF[memory-reflection-maintenance]
 
-    BACKUP[deployment-upgrade-and-backup]
+    BACKUP[deployment-upgrade-and-backup 已完成]
 
     O --> OPS
     O --> LTC_E
     O --> REF_E
-    KB_SYNC --> KB_CONN
+    KB_SYNC --> KB_CONF
+    KB_SYNC --> KB_GDRIVE
     KB_SYNC --> REINDEX
     REINDEX --> EMB_E
     LTC_E --> LTC_B[long-term-context-budget-policy]
@@ -93,6 +95,7 @@ flowchart TD
 - `vector-store-reindex-jobs` 已提供同步 rebuild API，是真实 embedding / rerank evaluation 的前置。
 - `long-term-context-evaluation` 先于 `long-term-context-budget-policy`。
 - `memory-retention-and-compaction` 先于 `memory-reflection-maintenance`。
+- Confluence / Google Drive connector 涉及企业数据源认证、权限、同步删除语义和数据边界，进入真实实现前需要人工确认。
 
 ## 推荐实施批次
 
@@ -123,13 +126,13 @@ flowchart TD
 
 1. `knowledge-base-sync-planner`
 2. `vector-store-reindex-jobs`（同步 public API；不含后台 job platform）
-3. `deployment-upgrade-and-backup`
+3. `deployment-upgrade-and-backup`（已完成：本地 SQLite backup / dry-run / backup-only / Alembic upgrade）
 
 完成标准：
 
 - KB sync 有 plan/execute separation、幂等状态和失败隔离。
 - embedding / backend 切换后可通过同步 public API 重建 memory / KB index。
-- 本地 SQLite / config / data 目录有最小备份与升级流程。
+- 本地 SQLite / config / data 目录有最小备份与升级流程；migration 失败保留 backup，恢复由 operator 手动执行。
 
 ### M3：可评估
 
@@ -146,6 +149,7 @@ flowchart TD
 - `tests/evaluation/` 能评估 memory extraction、KB retrieval、long-term context injection 和 reflection findings。
 - 默认 evaluation 不依赖真实 LLM / embedding；真实模型评估通过显式环境变量手动开启。
 - 每个 evaluation fixture 有 expected / forbidden 输出，能回归质量变化。
+- `memory-and-kb-real-embedding-evaluation` 同时覆盖 memory semantic retrieval 和 KB retrieval，不默认连接外部模型。
 
 ### M4：可维护、可演进
 
@@ -156,15 +160,52 @@ flowchart TD
 1. `memory-retention-and-compaction`
 2. `long-term-context-budget-policy`
 3. `memory-reflection-maintenance`
-4. `knowledge-base-connectors-confluence`
-5. `knowledge-base-connectors-google-drive`
 
 完成标准：
 
 - memory 有 retention、compaction 和容量边界。
 - long-term context 有可解释的 token budget 策略。
 - reflection 的建议能进入受控 maintenance 流程，而不是自动无约束改写。
+
+### M4b：企业知识源接入
+
+目标：把 KB 从 local directory baseline 扩展到客户真实企业知识源，同时不绕过 sync planner 和数据边界。
+
+建议 specs：
+
+1. `knowledge-base-connectors-confluence`
+2. `knowledge-base-connectors-google-drive`
+
+完成标准：
+
 - 外部 connector 基于 sync planner 接入，不绕过 KB public API。
+- connector 明确认证方式、权限边界、source metadata、删除语义和失败恢复行为。
+- 默认测试不连接真实 SaaS；真实 connector smoke 通过显式环境变量手动开启。
+
+是否将 Confluence / Google Drive connector 纳入 MVP，需要在 connector spec 前单独确认。当前 KB MVP baseline 是
+local directory + sync planner + hybrid retrieval + reindex。
+
+## Goal 自动推进边界
+
+适合在 goal 中按依赖顺序自动设计、review、执行、合并归档的 specs：
+
+1. `long-term-context-evaluation`
+2. `memory-retention-and-compaction`
+3. `reflection-report-evaluation`
+4. `memory-and-kb-real-embedding-evaluation`
+
+这些 specs 的默认范围应保持为 evaluation / lifecycle / 运维地基，不改变 runtime 默认行为，不默认调用真实外部模型，
+不自动删除或改写用户数据。
+
+需要人工确认后再推进真实实现的 specs：
+
+1. `long-term-context-budget-policy`：会改变 memory / KB / recent conversation 的注入策略和 token 分配。
+2. `memory-reflection-maintenance`：涉及 reflection 对 memory 的合并、压缩、删除或写回权限。
+3. `knowledge-base-connectors-confluence`：涉及企业数据源认证、权限、删除语义和数据边界。
+4. `knowledge-base-connectors-google-drive`：涉及企业数据源认证、权限、删除语义和数据边界。
+
+如果 connector spec 只定义 connector contract / fake connector / fixture，而不接真实 Confluence 或 Google Drive，
+可以先自动推进；一旦进入真实 SaaS API、OAuth / service account、ACL 或客户数据同步行为，必须人工确认。
 
 ## 并行策略
 
@@ -172,7 +213,10 @@ flowchart TD
 
 - `observability-runtime-event-coverage` 和 `knowledge-base-sync-planner`
 - `memory-retention-and-compaction` 和 `knowledge-base-sync-planner`
-- `deployment-upgrade-and-backup` 和 intelligence specs
+- 已完成的 `deployment-upgrade-and-backup` 不阻塞 intelligence specs
+- `long-term-context-evaluation` 和 `reflection-report-evaluation`
+- `memory-retention-and-compaction` 和 `long-term-context-evaluation`
+- connector contract / fake connector 设计可以和 evaluation specs 并行，但真实 connector 实现前需要人工确认
 
 不建议提前做：
 
@@ -180,6 +224,7 @@ flowchart TD
 - `long-term-context-budget-policy` 早于 `long-term-context-evaluation`
 - `memory-reflection-maintenance` 早于 `memory-retention-and-compaction`
 - reflection 自动化写回早于 `reflection-report-evaluation`
+- `rerank-kb-search-integration` 早于 `memory-and-kb-real-embedding-evaluation`
 
 ## MVP-ready 判定
 
@@ -188,6 +233,7 @@ flowchart TD
 - Observability 能解释一次 agent run 的主要行为、成本、耗时和错误。
 - Memory 能跨 session 提取、更新、检索，并有 retention 边界。
 - Knowledge base 能导入本地企业文档、混合检索，并能计划/执行同步；vector store 能重建索引。
+  Confluence / Google Drive 是否属于 MVP-ready 条件，需要在 connector specs 前单独确认。
 - Long-term context 能从 memory / KB 中选择上下文，并有 evaluation 证明注入效果。
 - Reflection 能生成可评估的报告，但自动写回保持关闭或受控。
 - Vector store 能持久化索引，并支持 embedding / backend 变更后的 reindex。
