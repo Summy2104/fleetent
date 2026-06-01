@@ -52,7 +52,7 @@ spec 零散推进后失去全貌。
 | Observability foundation | 基础完成 | structured logs、SQLite traces、usage summary、performance summary、source attribution、runtime event coverage、contract tests | 形成面向运维排障的查询入口 | OTel / Prometheus、dashboard UI、告警 |
 | Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation | retention / compaction；真实 embedding 检索评估 | 自动反思维护、长期质量趋势 |
 | Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture | budget policy | 个性化 budget、agent-specific policy |
-| Reflection | 基础完成 | 读取 trace / memory 生成建议报告 | report evaluation；maintenance actions 的边界设计 | 自动 skill proposal、自动 memory maintenance |
+| Reflection | 基础完成 | 读取 trace / memory 生成建议报告、deterministic report evaluation | maintenance actions 的边界设计 | 自动 skill proposal、自动 memory maintenance |
 | Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API | 真实 embedding / rerank evaluation；rerank 接入 KB search | 后台 reindex job runtime、sqlite-vec、Qdrant、OpenSearch adapter |
 | Knowledge base | 基础完成 | local ingest、parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator | KB scope/binding；KB retrieval 真实 embedding / rerank evaluation；connector MVP 范围决策 | Confluence / Google Drive connectors、graph retrieval |
 | Deployment / config | 基础完成 | `settings.yaml`、MCP dedicated server file、legacy config fail-fast、本地 SQLite upgrade / backup 脚本 | config docs 对 intelligence runtime prerequisites 的收敛 | config center、Admin UI、hot reload |
@@ -154,6 +154,7 @@ flowchart TD
 已完成的 M3 spec：
 
 - `long-term-context-evaluation`：基于 fake memory / knowledge provider 的 deterministic fixture，覆盖注入 text/source 的 expected / forbidden assertions；真实 provider smoke 默认 skip。
+- `reflection-report-evaluation`：基于 fake observability / memory signals 的 deterministic fixture，覆盖 expected / forbidden findings 和 persisted transcript redaction；真实 route smoke 默认 skip。
 
 ### M4：可维护、可演进
 

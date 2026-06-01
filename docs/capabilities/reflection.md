@@ -92,8 +92,10 @@ async def run_reflection(scope: str) -> ReflectionReport:
 - 只读 memory-layer 信号，不自动修改 memory
 - 支持三类 finding：`memory_candidate`、`memory_conflict`、`skill_opportunity`
 - 保存 report 时不保存完整 trace transcript
+- deterministic evaluation fixture / runner 覆盖 expected / forbidden findings 和 persisted transcript redaction
+- real-route smoke 仅在 `FLEETENT_EVAL_REAL_REFLECTION=1` 且显式本地 fixture/config 完整时手动运行；默认 skip
 
-当前定位：已具备“生成建议报告”的地基，但报告质量、消费方式和自动应用机制都未完成。
+当前定位：已具备“生成建议报告”的地基和基础 evaluation 回归；消费方式和自动应用机制都未完成。
 
 ## 规划中（v1.0）
 
@@ -101,6 +103,11 @@ async def run_reflection(scope: str) -> ReflectionReport:
   - `memory_candidate`：可能应该进入 memory 的重复事实
   - `memory_conflict`：可能冲突的用户事实
   - `skill_opportunity`：可沉淀为 skill 的重复任务模式
+
+- [x] **report evaluation 基线**：`tests/evaluation/test_reflection_report_eval.py` 使用 fake trace / memory signals 验证 report
+  - 覆盖 expected / forbidden findings
+  - 验证 persisted report 不保存 raw transcript snippets
+  - 默认不调用真实 LLM、embedding、KB connector 或 SaaS
 
 - [ ] **memory reflection maintenance（后续）**：定期清理与合并 per-user 记忆
   - 清理过期 context 类记忆（超过 TTL 且未被再次提及）
@@ -183,7 +190,7 @@ async def run_reflection(scope: str) -> ReflectionReport:
 
 - finding 规则仍然很初级，主要依赖 deterministic payload 字段和简单模式。
 - 没有 report 消费闭环：管理员、自动评估、后续 job 都还没有使用 report。
-- 没有自动化效果评估：无法量化 finding 的准确率、误报率和漏报率。
+- 已有 deterministic report evaluation；尚未量化长期 precision / recall 趋势。
 - 不会自动维护 memory，不会生成 skill proposal，不接 knowledge-base。
 
 ## 下一批候选 specs
@@ -194,12 +201,12 @@ async def run_reflection(scope: str) -> ReflectionReport:
 - `skill-reflection-proposals`
 - `knowledge-base-reflection-reports`
 
-## 自动化效果验证缺口
+## 自动化效果验证
 
-- 构造 trace fixture，标注 expected findings，评估 finding precision / recall。
-- 构造负样本，避免重复事实、普通任务被误判为 proposal。
-- 构造 transcript redaction fixture，验证 report 不泄露完整对话。
-- 后续接入真实 LLM summary 前，需要 golden dataset 防止回归。
+- 已有 trace / memory fixture，标注 expected findings 和 forbidden findings。
+- 已有负样本，避免单次普通任务被误判为 proposal。
+- 已有 transcript redaction fixture，验证 persisted report 不泄露完整对话。
+- 后续接入真实 LLM summary 前，需要扩展 golden dataset 和显式 opt-in smoke。
 
 ## 服务化 / 目录边界判断
 

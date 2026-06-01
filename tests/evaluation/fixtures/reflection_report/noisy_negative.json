@@ -1,0 +1,30 @@
+{
+  "name": "noisy traces produce no findings",
+  "scope": "user-1",
+  "trace_events": [
+    {
+      "id": "trace-1",
+      "run_id": "run-1",
+      "event_type": "agent_run_completed",
+      "payload": {
+        "user_input": "Please answer this one-off question",
+        "task_pattern": "single support answer"
+      },
+      "user_id": "user-1"
+    }
+  ],
+  "memory_signals": [],
+  "expected_findings": [],
+  "forbidden_findings": [
+    {
+      "type": "memory_candidate"
+    },
+    {
+      "type": "memory_conflict"
+    },
+    {
+      "type": "skill_opportunity"
+    }
+  ],
+  "forbidden_persisted_text": []
+}
