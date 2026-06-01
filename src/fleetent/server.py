@@ -10,7 +10,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-import yaml
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
@@ -18,7 +17,7 @@ from pydantic import BaseModel
 from fleetent import api_key_store, mcp_client, quota, user_admin_api, user_store
 from fleetent.agent_loop import run_stream
 from fleetent.auth import seed_builtin_admin
-from fleetent.config import Settings, configure_logging
+from fleetent.config import Settings, WebhooksSettings, configure_logging
 from fleetent.cron_scheduler import CronScheduler
 from fleetent.mcp_client import McpServerConfig
 from fleetent.model_router import ROUTES
@@ -33,8 +32,8 @@ from fleetent.skill_registry import scan as scan_skills
 
 logger = logging.getLogger(__name__)
 
-_MCP_YAML_PATH: Path = Path("config/mcp.yaml")
-_WEBHOOK_YAML_PATH: Path = Path("config/webhooks.yaml")
+LEGACY_MCP_CONFIG_PATH: Path = Path("config/mcp.yaml")
+LEGACY_WEBHOOK_CONFIG_PATH: Path = Path("config/webhooks.yaml")
 _webhook_sources: dict[str, Any] = {}
 
 
@@ -89,21 +88,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             temp_password,
         )
 
-    # Load MCP servers from config/mcp.yaml if present
-    if _MCP_YAML_PATH.exists():
-        try:
-            raw = yaml.safe_load(_MCP_YAML_PATH.read_text())
-            servers = [McpServerConfig(**s) for s in raw.get("servers", [])]
-            await mcp_client.register_all(servers)
-        except Exception as exc:
-            logger.warning("mcp_yaml_load_failed path=%s error=%s", _MCP_YAML_PATH, exc)
+    if LEGACY_MCP_CONFIG_PATH.exists():
+        raise RuntimeError(
+            "Legacy config/mcp.yaml is no longer supported; move MCP servers to "
+            "config/settings.yaml under mcp.servers."
+        )
 
-    # Load webhook sources from config/webhooks.yaml if present
-    from fleetent import webhook_router as _wr
+    if settings.mcp.servers:
+        servers = [McpServerConfig(**server.model_dump()) for server in settings.mcp.servers]
+        await mcp_client.register_all(servers)
 
+    if LEGACY_WEBHOOK_CONFIG_PATH.exists():
+        raise RuntimeError(
+            "Legacy config/webhooks.yaml is no longer supported; webhook source management "
+            "will move to a runtime API / store."
+        )
+
+    app.state.webhook_settings = settings.webhooks
     _webhook_sources.clear()
-    if _WEBHOOK_YAML_PATH.exists():
-        _webhook_sources.update(_wr.load_sources(_WEBHOOK_YAML_PATH))
 
     # Start IM adapters as background tasks if tokens are configured
     if settings.slack_bot_token and settings.slack_app_token:
@@ -112,7 +114,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.telegram_bot_token:
         asyncio.create_task(_start_telegram_adapter())
 
-    cron = CronScheduler()
+    cron = CronScheduler(settings=settings.scheduling)
     await cron.start()
 
     yield
@@ -238,11 +240,18 @@ async def webhook(source_id: str, request: Request) -> Response:
     from fleetent import webhook_router as wr
     from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
+    webhook_settings = getattr(request.app.state, "webhook_settings", WebhooksSettings())
+    if not webhook_settings.enabled:
+        raise HTTPException(status_code=503, detail="webhooks disabled")
+
     source = _webhook_sources.get(source_id)
     if source is None:
         raise HTTPException(status_code=404, detail=f"webhook source {source_id!r} not configured")
 
     body = await request.body()
+    if len(body) > webhook_settings.max_body_bytes:
+        raise HTTPException(status_code=413, detail="webhook body too large")
+
     sig_header = request.headers.get("x-hub-signature-256")
     if not wr.verify_signature(source.secret, body, sig_header):
         raise HTTPException(status_code=403, detail="invalid signature")

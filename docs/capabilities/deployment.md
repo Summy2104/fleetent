@@ -17,8 +17,9 @@
 ## 现状
 
 - ✅ **pydantic-settings 配置体系**：.env + config/settings.yaml 双源加载
-  - 类型安全，环境变量优先级高于 yaml
-  - 密钥不进 DB，不进 git，仅通过 env var 注入
+  - `config/settings.yaml` 是唯一非敏感应用配置文件，环境变量和 `.env` 优先级高于 YAML
+  - 密钥不进 YAML、不进 DB、不进 git，仅通过 env var 注入；YAML 中只保存 `api_key_env` 这类环境变量名引用
+  - 旧 `config/mcp.yaml`、`config/cron.yaml`、`config/webhooks.yaml` 存在时启动 fail fast，避免静默使用过期配置
 
 - ✅ **Dockerfile**：单容器部署
   - 当前已有 Dockerfile 和 docker-compose.yml，关键配置：
