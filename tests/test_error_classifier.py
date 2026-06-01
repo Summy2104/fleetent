@@ -214,3 +214,14 @@ def test_classify_never_yields_reserved() -> None:
     ]
     for exc in reachable:
         assert classify(exc).category not in reserved
+
+
+def test_timeout_error_classified_as_tool_timeout():
+    # T2 wires the reserved tool_timeout code to its error source. asyncio.wait_for
+    # raises TimeoutError (asyncio.TimeoutError is an alias for it on 3.11+).
+    from fleetent.error_classifier import CLASSIFICATION_TABLE, ErrorCategory, classify
+
+    c = classify(TimeoutError())
+    assert c.category is ErrorCategory.tool_timeout
+    # Flags must match the AR5 table entry, not be redefined.
+    assert c == CLASSIFICATION_TABLE[ErrorCategory.tool_timeout]

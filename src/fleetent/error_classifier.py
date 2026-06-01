@@ -105,6 +105,11 @@ def classify(error: Exception) -> ErrorClassification:
 
 
 def _categorize(error: Exception) -> ErrorCategory:
+    # Tool-call timeout (T2): asyncio.TimeoutError is TimeoutError on 3.11+. The
+    # Anthropic SDK's request timeout is APITimeoutError (not a TimeoutError
+    # subclass), so this maps only genuine await-layer tool timeouts.
+    if isinstance(error, TimeoutError):
+        return ErrorCategory.tool_timeout
     if isinstance(error, APIStatusError):
         # Context overflow is identified by the error-body `code`, since it
         # surfaces as a generic 400 indistinguishable from other bad requests

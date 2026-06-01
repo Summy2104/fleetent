@@ -31,6 +31,11 @@ class ToolContext:
 
 _registry: dict[str, tuple[Callable[..., Any], ToolSchema]] = {}
 _risk_levels: dict[str, str] = {}
+# Per-tool timeout metadata parallel to _risk_levels (T2): name -> seconds. Absent
+# means "use the global default". Like risk_level it never enters the LLM schema.
+_timeouts: dict[str, float] = {}
+# Global default tool timeout (seconds), module-level so tests/deploys can inject it.
+DEFAULT_TOOL_TIMEOUT = 30.0
 # Connector metadata parallel to _risk_levels (D1): name -> (connector, scopes).
 # Governance/dispatch-time runtime data; deliberately kept out of the LLM schema.
 _connectors: dict[str, tuple[str, list[str]]] = {}
@@ -46,6 +51,7 @@ def tool(
     risk_level: str = "none",
     connector: str | None = None,
     scopes: list[str] | None = None,
+    timeout: float | None = None,
 ) -> Callable[[Callable[..., str]], Callable[..., str]]: ...
 
 
@@ -55,6 +61,7 @@ def tool(
     risk_level: str = "none",
     connector: str | None = None,
     scopes: list[str] | None = None,
+    timeout: float | None = None,
 ) -> Any:
     """Register a function as a callable tool.
 
@@ -70,6 +77,8 @@ def tool(
         _risk_levels[target.__name__] = risk_level
         if connector is not None:
             _connectors[target.__name__] = (connector, scopes or [])
+        if timeout is not None:
+            _timeouts[target.__name__] = timeout
         return target
 
     if fn is not None:
@@ -85,6 +94,16 @@ def get_risk_level(name: str) -> str:
 def get_connector(name: str) -> tuple[str, list[str]] | None:
     """Return the (connector, scopes) declared for a tool, or None if undeclared."""
     return _connectors.get(name)
+
+
+def get_timeout(name: str) -> float | None:
+    """Return the per-tool timeout (seconds) declared via @tool(timeout=...), or None."""
+    return _timeouts.get(name)
+
+
+def get_effective_timeout(name: str) -> float:
+    """Effective timeout: the per-tool override if declared, else the global default."""
+    return _timeouts.get(name, DEFAULT_TOOL_TIMEOUT)
 
 
 def get_schemas() -> list[ToolSchema]:

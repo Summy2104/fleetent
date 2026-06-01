@@ -39,7 +39,13 @@ from fleetent.termination import (
     TerminationController,
     resolve_limits,
 )
-from fleetent.tool_registry import ToolContext, dispatch, get_risk_level, get_schemas
+from fleetent.tool_registry import (
+    ToolContext,
+    dispatch,
+    get_effective_timeout,
+    get_risk_level,
+    get_schemas,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -193,18 +199,27 @@ async def _safe_dispatch(
     tools that opt in (AR19 D3 / SB3 D5). `user_id` is threaded so connector
     tools can resolve per-user credentials at dispatch time.
     """
+    # T2: race the tool against its effective timeout. The per-tool token carries
+    # its own deadline AND links the run-level token via `parent`, so the tool
+    # observes both its timeout and a session-wide cancel. asyncio.wait_for is the
+    # hard "stop waiting" guarantee even for tools that never poll the token.
+    timeout = get_effective_timeout(name)
+    child = CancelToken(deadline=time.monotonic() + timeout, parent=cancel_token)
     try:
         result = dispatch(
             name,
             arguments,
             is_sub_agent=is_sub_agent,
-            cancel_token=cancel_token,
+            cancel_token=child,
             tool_context=tool_context,
             user_id=user_id,
         )
         if inspect.iscoroutine(result):
-            result = await result
+            result = await asyncio.wait_for(result, timeout=timeout)
         return result, False
+    except TimeoutError:  # asyncio.wait_for timeout → tool_timeout (AR5 reserved code)
+        child.cancel()
+        return f"tool execution timed out after {timeout}s", True
     except Exception as exc:  # normalized for the loop; not swallowed silently
         return f"tool execution error: {exc}", True
 
