@@ -6,9 +6,9 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML 解析，local directory 手动同步，deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、按 tenant + knowledge base 隔离召回相关文档片段，以及手动运行的 deterministic retrieval evaluation。
+**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML 解析，local directory 手动同步与 sync planner，deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、按 tenant + knowledge base 隔离召回相关文档片段，以及手动运行的 deterministic retrieval evaluation。
 
-**后续负责**：数据源接入与文档获取、文档解析、实体与关系提取、图谱存储、同步规划。
+**后续负责**：第三方数据源接入与文档获取、更丰富的文档解析、实体与关系提取、图谱存储。
 
 **不负责**：注入 system prompt 的协调与 token 预算（→ long_term_ctx）、用户个人记忆（→ memory）。
 
@@ -18,7 +18,7 @@
 
 **模块归属**：
 - owning package：`intelligence.knowledge_base`
-- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`delete(document_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`sync_local_directory(config, tenant_id, kb_id)`
+- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`delete(document_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`SyncAction`、`SyncPlan`、`SyncPlanItem`、`SyncPlanSummary`、`SyncExecutionSummary`、`plan_local_directory_sync(config, tenant_id, kb_id)`、`execute_sync_plan(plan)`、`sync_local_directory(config, tenant_id, kb_id)`
 - owned tables：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`、`knowledge_chunks_fts`、`knowledge_source_states`
 - config namespace：`knowledge_base.*`
 
@@ -27,8 +27,10 @@
 ```mermaid
 flowchart TD
     subgraph connector["连接器流程（手动触发）"]
-        C1[DataSource.list_documents] --> C2[DataSource.fetch]
-        C2 --> C3[knowledge_base.ingest\nfilename + content + format + tenant_id + kb_id]
+        C1[DataSource.list_documents] --> C2[plan_local_directory_sync]
+        C2 --> C3[SyncPlan\nnew / changed / unchanged / missing]
+        C3 --> C4[execute_sync_plan]
+        C4 --> C5[ingest_parsed / delete / skip]
     end
 
     subgraph ingest["当前导入流程（同步最小闭环）"]
@@ -214,6 +216,39 @@ class LocalDirectorySourceConfig:
     allowed_roots: list[str | Path]
 
 
+class SyncAction(str, Enum):
+    INGEST_NEW = "ingest_new"
+    REINGEST_CHANGED = "reingest_changed"
+    SKIP_UNCHANGED = "skip_unchanged"
+    DELETE_MISSING = "delete_missing"
+
+
+@dataclass
+class SyncPlanItem:
+    action: SyncAction
+    source_id: str
+    tenant_id: str
+    kb_id: str
+    source_path: str
+    filename: str
+    document_format: str
+    mtime_ns: int | None
+    content_hash: str | None
+    document_id: str | None
+
+
+async def plan_local_directory_sync(
+    config: LocalDirectorySourceConfig,
+    tenant_id: str,
+    kb_id: str,
+) -> SyncPlan:
+    """扫描 local source 并生成确定性计划；允许读取和 hash source 文档，但不写 KB 或 source state。"""
+
+
+async def execute_sync_plan(plan: SyncPlan) -> SyncExecutionSummary:
+    """按计划执行 ingest / reingest / delete / skip；单 item 失败只计入 failed 并继续后续 item。"""
+
+
 async def sync_local_directory(
     config: LocalDirectorySourceConfig,
     tenant_id: str,
@@ -231,7 +266,7 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 
 ## 现状
 
-**已完成 core + parser + hybrid + local connector 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、基础 Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入；`knowledge-base-parsers-basic` 增加了无 AI 框架依赖的 plain text / Markdown / lightweight HTML parser，并提供 parsed ingest adapter；`knowledge-base-hybrid-search` 增加了 knowledge-base-owned SQLite FTS5 keyword index、keyword mode、hybrid mode 和 RRF 融合；`knowledge-base-connectors-local` 增加了 DataSource / DocumentRef 边界、显式 root allowlist 的 local directory source、`.txt` / `.md` / `.html` / `.htm` 格式映射、source path / mtime / content hash 状态记录，以及手动 `sync_local_directory`。
+**已完成 core + parser + hybrid + local connector + sync planner 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、基础 Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入；`knowledge-base-parsers-basic` 增加了无 AI 框架依赖的 plain text / Markdown / lightweight HTML parser，并提供 parsed ingest adapter；`knowledge-base-hybrid-search` 增加了 knowledge-base-owned SQLite FTS5 keyword index、keyword mode、hybrid mode 和 RRF 融合；`knowledge-base-connectors-local` 增加了 DataSource / DocumentRef 边界、显式 root allowlist 的 local directory source、`.txt` / `.md` / `.html` / `.htm` 格式映射、source path / mtime / content hash 状态记录，以及手动 `sync_local_directory`；`knowledge-base-sync-planner` 增加了 plan / execute 分离、`ingest_new` / `reingest_changed` / `skip_unchanged` / `delete_missing` 动作模型、source-side missing 默认删除对应 KB document，并保持幂等性基于 `knowledge_source_states`。
 
 团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移设计资产和小块算法**，而非从零重写或整体搬运。
 
@@ -239,7 +274,7 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 
 当前未实现内容：
 - 无 Confluence、Google Drive connector
-- 无 sync planner、后台 job、admin UI、REST upload API
+- 无后台 job、admin UI、REST upload API
 - 无 rerank / query planner
 - 无 graph_search、entities、relations 或 `kb_extraction`
 - 无 production ranking dashboard、reranker evaluation 或 query planner evaluation
@@ -250,7 +285,7 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 - ✅ Google Drive 连接器算法：OAuth 2.0、Service Account、change token、删除确认；Webhook 暂缓
 - ✅ 本地目录连接器：遍历、后缀映射、mtime/hash 变更检测；去掉 LlamaIndex `BaseReader`
 - ✅ 中文 BM25 分词思路：jieba + CJK bigram（`retrieval/lexical.py`），在 SQLite FTS5 下重新验证
-- ✅ 同步规划器动作模型：SKIP / UPSERT_METADATA_ONLY / REEMBED / RECHUNK_LOCAL / REFETCH_AND_REINDEX / DELETE_LOCAL
+- ✅ 同步规划器动作模型：已在 fleetent 内落地 local source 的 new / changed / unchanged / missing 基础动作；更细粒度 metadata-only / rechunk / reembed / refetch 动作后续按 reindex specs 评估
 
 **需要重写（深度耦合 LlamaIndex 或违反 fleetent 约束）**：
 - 向量存储：LanceDB → fleetent `vector_store` public API（当前可用普通 SQLite persistent backend；sqlite-vec / Qdrant 后置）
@@ -265,14 +300,14 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 ## 当前缺口
 
 - parser 已支持 text / Markdown / lightweight HTML；PDF / Office / image / VLM 解析尚未实现。
-- local directory 已支持手动 sync；尚未实现 sync planner、后台 job 或第三方 connector。
+- local directory 已支持 plan + execute 手动 sync；尚未实现后台 job 或第三方 connector。
 - 检索已支持 SQLite FTS5/BM25 keyword mode 与 RRF hybrid mode；尚未实现 rerank、query planner 或 graph。
 - 外部 SaaS 数据源暂未接入：Confluence、Google Drive 均未实现。
 - long-term-ctx 只支持内置默认 KB provider；还没有 agent 到多 KB 的绑定策略。
 
 ## 下一批候选 specs
 
-- `knowledge-base-sync-planner`
+- `vector-store-reindex-jobs`
 
 ## 自动化效果验证
 
@@ -366,7 +401,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 ## 测试边界
 
 **需要单元测试的行为**：
-- public API 可导入：`KnowledgeDocument`、`KnowledgeChunk`、`ingest_text()`、`search()`、`delete()`、`DocumentRef`、`DataSource`、`sync_local_directory()`
+- public API 可导入：`KnowledgeDocument`、`KnowledgeChunk`、`ingest_text()`、`search()`、`delete()`、`DocumentRef`、`DataSource`、sync planner dataclasses、`plan_local_directory_sync()`、`execute_sync_plan()`、`sync_local_directory()`
 - 配置默认值：`knowledge_base.enabled=false`，默认 tenant/kb 与 chunk 参数稳定
 
 **需要集成测试的行为**：
@@ -379,6 +414,9 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - knowledge base 隔离：不同 `tenant_id + kb_id` 的检索结果互不干扰
 - delete 级联：删除文档后对应 chunk 和 vector entries 均被清理
 - long-term-ctx 在 `knowledge_base.enabled=true` 时调用内置 provider；disabled 或无结果时降级
+- local sync planner 为 new / changed / unchanged / missing source 生成确定性动作
+- execute_sync_plan 只在 item 成功后更新 source state，单 item 失败不阻断后续 item
+- sync_local_directory 通过 planner + executor 执行；本地文件删除后对应 KB document 和 chunks 被删除
 
 **需要 evaluation 测试的行为**：
 - fixture loader 对 `name`、`documents`、`queries`、`expected_chunks`、`forbidden_chunks` 缺失 fail fast
