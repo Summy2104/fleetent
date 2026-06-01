@@ -648,3 +648,48 @@ async def test_save_succeeds_when_maintenance_fails(sessions_dir, monkeypatch):
     monkeypatch.setattr(session_mgr, "maybe_run_maintenance", boom)
     await session_mgr.save("s", [{"role": "user", "content": "x"}])
     assert (sessions_dir / "s.json").exists()
+
+
+# --- review adjustment: maintenance-removed sessions release their sandboxes ---
+
+
+class _SpyManager:
+    def __init__(self, *, raise_on=None):
+        self.released: list[str] = []
+        self._raise_on = raise_on
+
+    async def release_session(self, session_id: str) -> None:
+        self.released.append(session_id)
+        if self._raise_on is not None and session_id == self._raise_on:
+            raise RuntimeError("docker exploded")
+
+
+def _install_spy_manager(monkeypatch, manager):
+    import fleetent.tools as tools
+
+    monkeypatch.setattr(tools, "_get_manager", lambda: manager)
+    return manager
+
+
+async def test_save_releases_sandboxes_for_removed_sessions(sessions_dir, monkeypatch):
+    monkeypatch.setattr(session_mgr, "maybe_run_maintenance", lambda **kw: ["a", "b"])
+    spy = _install_spy_manager(monkeypatch, _SpyManager())
+    await session_mgr.save("s", [{"role": "user", "content": "x"}])
+    assert spy.released == ["a", "b"]
+
+
+async def test_save_no_removed_sessions_does_not_release(sessions_dir, monkeypatch):
+    monkeypatch.setattr(session_mgr, "maybe_run_maintenance", lambda **kw: [])
+    spy = _install_spy_manager(monkeypatch, _SpyManager())
+    await session_mgr.save("s", [{"role": "user", "content": "x"}])
+    assert spy.released == []
+
+
+async def test_save_succeeds_when_release_session_raises(sessions_dir, monkeypatch):
+    monkeypatch.setattr(session_mgr, "maybe_run_maintenance", lambda **kw: ["a", "b"])
+    spy = _install_spy_manager(monkeypatch, _SpyManager(raise_on="a"))
+    await session_mgr.save("s", [{"role": "user", "content": "x"}])
+    # Persistence must survive a best-effort release failure.
+    assert (sessions_dir / "s.json").exists()
+    # Per-id isolation: a raise on "a" is logged and swallowed, "b" still attempted.
+    assert spy.released == ["a", "b"]
