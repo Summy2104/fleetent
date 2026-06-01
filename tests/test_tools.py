@@ -463,3 +463,75 @@ async def test_run_code_no_sandbox_env_passes_empty(monkeypatch):
     await tl.run_code(code="print(1)", tool_context=ctx)
     _, kwargs = client.create_workspace.call_args
     assert kwargs["env"] == {}
+
+
+# ── SB6: run_code output truncation ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_code_truncates_stdout(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    import fleetent.sandbox_output_truncation as sot
+    import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
+
+    monkeypatch.setattr(sot, "MAX_STDOUT_BYTES", 500)
+    big = "Z" * 100_000
+    client = _mock_lifecycle_client("cid-trunc")
+    client.exec = AsyncMock(return_value=ExecResult(stdout=big, stderr="", exit_code=0))
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
+
+    result = await tl.run_code(code="print('big')")
+    assert len(result.encode("utf-8")) <= 600  # stdout capped (+ small assembly overhead)
+    assert "截断" in result
+
+
+@pytest.mark.asyncio
+async def test_run_code_truncates_stderr_independently(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    import fleetent.sandbox_output_truncation as sot
+    import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
+
+    monkeypatch.setattr(sot, "MAX_STDERR_BYTES", 300)
+    client = _mock_lifecycle_client("cid-err")
+    client.exec = AsyncMock(
+        return_value=ExecResult(stdout="small ok", stderr="E" * 50_000, exit_code=1)
+    )
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
+
+    result = await tl.run_code(code="boom")
+    assert "small ok" in result  # stdout within budget, untouched
+    assert "截断" in result  # stderr truncated
+
+
+@pytest.mark.asyncio
+async def test_run_code_trace_records_original_bytes(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    import fleetent.eval_logger as el
+    import fleetent.sandbox_output_truncation as sot
+    import fleetent.tools as tl
+    from fleetent.sandbox_client import ExecResult
+
+    monkeypatch.setattr(sot, "MAX_STDOUT_BYTES", 500)
+    captured: dict = {}
+    monkeypatch.setattr(el, "log_sandbox_exec", lambda **kw: captured.update(kw))
+    big = "Z" * 100_000
+    client = _mock_lifecycle_client("cid-trace")
+    client.exec = AsyncMock(return_value=ExecResult(stdout=big, stderr="", exit_code=0))
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
+
+    await tl.run_code(code="print('big')")
+    # Trace keeps the ORIGINAL byte size, not the truncated one.
+    assert captured["stdout_bytes"] == len(big.encode("utf-8"))
+
+
+def test_run_code_self_truncates_exempt_from_t4():
+    # SB6 owns run_code truncation; T4 must skip it (declared self_truncates).
+    import fleetent.tool_registry as tr
+    import fleetent.tools  # noqa: F401
+
+    assert tr.is_self_truncating("run_code") is True

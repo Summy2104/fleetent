@@ -22,7 +22,7 @@
 | 3 | C | tool-timeout | T2 | ✅ 已完成 |
 | 4 | C | tool-result-truncation | T4 | ✅ 已完成 |
 | 5 | C | tool-call-guardrails | AR10 | ✅ 已完成 |
-| 6 | F | sandbox-output-truncation | SB6 | ⬜ |
+| 6 | F | sandbox-output-truncation | SB6 | ✅ 已完成 |
 | 7 | F | sandbox-exec-timeout | SB7 | ⬜ |
 | 8 | B | compression-trace | AR16 | ⬜ |
 | 9 | B | compression-anti-flap | AR17 | ⬜ |
@@ -167,5 +167,30 @@
 1. 阈值默认 3、与 AR4 对齐、可经 `guardrail_repeat_threshold` 注入（Q3 决策）是否认可。
 2. 占位 tool_result 文案 `_GUARDRAIL_FEEDBACK_TEXT`（中文）是否认可。
 3. stop 经 `GuardrailChecker` 在下个 checkpoint 归一为 `loop_detected`（自解决策 #2/#5）是否认可。
+
+---
+
+## sandbox-output-truncation（SB6）— feat/sandbox-output-truncation
+
+**实现：**
+- 新增 `src/fleetent/sandbox_output_truncation.py`：`truncate_stream(text, max_bytes=None)` + 模块级 `MAX_STDOUT_BYTES = 50*1024`、`MAX_STDERR_BYTES = 10*1024`（可 monkeypatch）。头尾保留 + 中间说明 `[...沙箱输出已截断：原始 {orig} 字节，省略中间 {omitted} 字节...]`，UTF-8 字节口径、多字节安全切分、总字节 ≤ 阈值（与 T4 同形）。
+- `tools.py`：`run_code` 拼装前对 `result.stdout` 用 `MAX_STDOUT_BYTES`、`result.stderr` 用 `MAX_STDERR_BYTES` 分别 `truncate_stream`；trace（`log_sandbox_exec`）仍记**原始**字节、`ExecResult` 不改。两流各自独立限额。
+
+**自解决策：**
+1. **截断在 run_code 拼装侧、不在 `SandboxClient.exec` 内**（design D1）：exec 是底层原语，其 ExecResult 还供 trace/其它消费者，在 exec 内截断会污染 trace 原始口径、越权。
+2. **stdout/stderr 各自阈值**（50KB/10KB，sandbox.md）：两流量级不同，不合并用单一阈值。
+3. **run_code 经 `self_truncates` 对 T4 豁免、SB6 独占**（design D3）：T4 时已给 run_code 声明 `self_truncates=True`，本 change 验证该边界（不二次截、无双 breadcrumb、无阈值耦合）。
+4. **monkeypatch 友好**：`tools.py` 经 `import sandbox_output_truncation as sot` 在调用时读 `sot.MAX_STDOUT_BYTES`/`sot.MAX_STDERR_BYTES`（而非 `from ... import` 绑定值），使测试 monkeypatch 模块属性即时生效。
+5. **trace 记原始字节**（design D4）：返回 AI 的副本截断、trace 记真实规模，二者目标相反分别处理。
+
+**影响：**
+- 新增 `sandbox_output_truncation.py`、`tests/test_sandbox_output_truncation.py`（9 测试）；改 `tools.py`、`tests/test_tools.py`（+4 集成）。
+- 测试：**全量 1288 passed，0 失败，零回归**。
+- ruff：我新建/改文件 format+check 全绿（已修我引入的 import 排序 I001）；`tools.py:249` 的 F401（`cron_scheduler` 未用，在 `schedule_task`）为 HEAD 既有 grandfathered（wave2 已记），非本 change，未触碰。
+- mypy：76 → 76，无新增，新模块零错误。
+
+**需 zy 核实：**
+1. 截断在 run_code 拼装侧、两流各自阈值 50KB/10KB（自解决策 #1/#2）是否认可。
+2. 说明文案（中文）与 trace 记原始字节（自解决策 #5）是否认可。
 
 ---

@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 from fleetent import eval_logger, image_gen_client, vision_client
+from fleetent import sandbox_output_truncation as sot
 from fleetent.cancellation import CancelToken
 from fleetent.sandbox_client import ExecResult, SandboxClient
 from fleetent.sandbox_manager import SandboxManager
@@ -224,11 +225,16 @@ async def run_code(
         )
     except Exception:
         logger.warning("sandbox_exec trace write failed", exc_info=True)
+    # SB6: cap each stream for the AI-facing result (trace above kept original
+    # bytes). stdout/stderr have independent budgets. run_code is exempt from T4
+    # (declared self_truncates) so this is the sole truncation of its output.
     parts = []
-    if result.stdout:
-        parts.append(result.stdout.rstrip())
-    if result.stderr:
-        parts.append(f"[stderr] {result.stderr.rstrip()}")
+    stdout = sot.truncate_stream(result.stdout, sot.MAX_STDOUT_BYTES)
+    if stdout:
+        parts.append(stdout.rstrip())
+    stderr = sot.truncate_stream(result.stderr, sot.MAX_STDERR_BYTES)
+    if stderr:
+        parts.append(f"[stderr] {stderr.rstrip()}")
     if result.exit_code != 0:
         parts.append(f"[exit {result.exit_code}]")
     return "\n".join(parts) if parts else "(no output)"
@@ -240,7 +246,7 @@ def schedule_task(
 ) -> str:
     """Create a recurring cron task that runs the agent with the given message.
     cron_expr is a standard 5-field expression e.g. '0 9 * * 1-5'."""
-    from fleetent import schedule_store, cron_scheduler
+    from fleetent import cron_scheduler, schedule_store
 
     task = schedule_store.create(
         name=name,
