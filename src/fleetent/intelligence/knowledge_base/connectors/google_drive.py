@@ -183,19 +183,23 @@ async def plan_google_drive_sync(
     seen_paths: set[str] = set()
     items: list[SyncPlanItem] = []
     file_by_path: dict[str, GoogleDriveFile] = {}
+    failed = 0
 
     for file in files:
-        source_path = google_drive_source_path(file)
-        seen_paths.add(source_path)
-        file_by_path[source_path] = file
-        document_format = google_drive_document_format(file)
-        if document_format is None:
-            items.append(_plan_item(config, file, SyncAction.SKIP_UNSUPPORTED, ""))
-            continue
-        fingerprint = google_drive_fingerprint(file)
-        state = existing_states.get(source_path)
-        action = _remote_action_for_state(state, _modified_time_ns(file), fingerprint)
-        items.append(_plan_item(config, file, action, document_format, state))
+        try:
+            source_path = google_drive_source_path(file)
+            seen_paths.add(source_path)
+            file_by_path[source_path] = file
+            document_format = google_drive_document_format(file)
+            if document_format is None:
+                items.append(_plan_item(config, file, SyncAction.SKIP_UNSUPPORTED, ""))
+                continue
+            fingerprint = google_drive_fingerprint(file)
+            state = existing_states.get(source_path)
+            action = _remote_action_for_state(state, _modified_time_ns(file), fingerprint)
+            items.append(_plan_item(config, file, action, document_format, state))
+        except Exception:
+            failed += 1
 
     for state in existing_states.values():
         if state.source_path in seen_paths:
@@ -222,6 +226,7 @@ async def plan_google_drive_sync(
         summary=SyncPlanSummary(
             scanned=len(files),
             planned=len(items),
+            failed=failed,
             ingested=sum(1 for item in items if item.action is SyncAction.INGEST_NEW),
             changed=sum(1 for item in items if item.action is SyncAction.REINGEST_CHANGED),
             unchanged=sum(1 for item in items if item.action is SyncAction.SKIP_UNCHANGED),

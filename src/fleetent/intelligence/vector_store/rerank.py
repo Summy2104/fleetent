@@ -80,8 +80,10 @@ class HttpRerankProvider:
             raise RerankProviderError(f"HTTP rerank request failed: {exc}") from exc
 
         if response.status_code < 200 or response.status_code >= 300:
+            detail = _error_detail(response)
+            suffix = f": {detail}" if detail else ""
             raise RerankProviderError(
-                f"HTTP rerank provider returned status {response.status_code}"
+                f"HTTP rerank provider returned status {response.status_code}{suffix}"
             )
 
         try:
@@ -117,6 +119,24 @@ def _authorization_header(api_key_env: str) -> dict[str, str]:
     if not api_key:
         return {}
     return {"Authorization": f"Bearer {api_key}"}
+
+
+def _error_detail(response: httpx.Response) -> str:
+    try:
+        body = response.json()
+    except ValueError:
+        return ""
+    if not isinstance(body, dict):
+        return ""
+    error = body.get("error")
+    if isinstance(error, str):
+        return error
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str):
+            return message
+    message = body.get("message")
+    return message if isinstance(message, str) else ""
 
 
 def _deterministic_score(query: str, document: str) -> float:

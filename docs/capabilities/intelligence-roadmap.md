@@ -47,7 +47,7 @@ spec 零散推进后失去全貌。
 
 ## 当前能力地图
 
-| 能力 | 当前状态 | 已有基础 | MVP 必补缺口 | 非 MVP 增强 |
+| 能力 | 当前状态 | 已有基础 | Pilot MVP 必补缺口 | 非 MVP 增强 |
 | --- | --- | --- | --- | --- |
 | Observability foundation | 基础完成 | structured logs、SQLite traces、usage summary、performance summary、source attribution、runtime event coverage、contract tests | 形成面向运维排障的查询入口 | OTel / Prometheus、dashboard UI、告警 |
 | Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation、retention / compaction API、owner-approved reflection maintenance apply API | scheduler / review UI 与趋势统计 | 长期质量趋势 |
@@ -229,13 +229,13 @@ hybrid retrieval 和 reindex；真实 SaaS smoke 仍需显式环境变量和凭�
 4. 真实 SaaS connector 生产凭据管理：涉及 secret manager、token 轮换、授权失败恢复和审计。
 5. 自动 scheduler / worker / sync history：会改变 connector 运行方式和运维面。
 
-当前质量加固 spec：
+已完成的质量加固 spec：
 
-- `intelligence-unit-test-hardening`：MVP foundation 后的测试质量加固，不改变 runtime 行为或 MVP 功能范围；目标是把
-  常乐负责模块的 scoped unit coverage 从约 64% 提升到至少 75%，优先补齐 observability 聚合、
-  vector provider payload / error parsing、reflection / memory 决策逻辑和 connector fake-client failure
-  branches。DB runtime、source-of-truth rebuild、connector sync 和效果评估仍以 integration / evaluation tests
-  为权威验证层。
+- `intelligence-unit-test-hardening`：MVP foundation 后的测试质量加固，不改变 runtime 行为或 MVP 功能范围；
+  常乐负责模块的 scoped unit coverage 已从约 64% 提升到 76%，相关全量 scoped coverage 为 94%。
+  本轮补齐了 observability 聚合容错、vector provider payload / error parsing、reflection / memory
+  决策边界和 connector fake-client failure branches。DB runtime、source-of-truth rebuild、connector sync
+  和效果评估仍以 integration / evaluation tests 为权威验证层；不新增仓库级 CI coverage gate。
 
 ## 并行策略
 
@@ -256,9 +256,22 @@ hybrid retrieval 和 reindex；真实 SaaS smoke 仍需显式环境变量和凭�
 - reflection 自动化写回早于 owner-approved proposal review 入口。
 - `rerank-kb-search-integration` 早于 rerank evaluation。
 
-## MVP-ready 判定
+## MVP 标准分层
 
-常乐负责的模块可以认为 MVP-ready，当且仅当：
+本 roadmap 中早期使用的 MVP-ready 更接近 **MVP Foundation**，表示常乐负责模块的核心能力、存储边界、
+public API、测试基线和 OpenSpec 批次已经完成。它不等同于可以直接发布给真实客户小范围试用。
+
+常乐对 MVP 的产品化目标应定义为 **Pilot MVP**：可以部署到生产或准生产环境，给少量真实用户试用，并且
+具备基础配置、排障、回滚和验收闭环。
+
+| 层级 | 含义 | 当前判断 |
+| --- | --- | --- |
+| MVP Foundation | 核心模块、API、存储、测试、评估、边界完成 | 常乐负责模块基本完成 |
+| Pilot MVP | 可部署到真实环境，小范围用户可用，可配置、可排障、可恢复 | 尚未完成，需要补 production-readiness specs |
+
+### MVP Foundation 判定
+
+常乐负责的模块可以认为 MVP Foundation ready，当且仅当：
 
 - Observability 能解释一次 agent run 的主要行为、成本、耗时和错误。
 - Memory 能跨 session 提取、更新、检索，并有 retention 边界。
@@ -267,6 +280,27 @@ hybrid retrieval 和 reindex；真实 SaaS smoke 仍需显式环境变量和凭�
 - Reflection 能生成可评估的报告，但自动写回保持关闭或受控。
 - Vector store 能持久化索引，并支持 embedding / backend 变更后的 reindex。
 - 默认测试不依赖外部 LLM / embedding / SaaS；真实模型效果验证有手动开关和 fixture。
+
+### Pilot MVP 判定
+
+常乐负责模块要达到生产小范围试用标准，还需要满足：
+
+- 部署可用：有明确的安装 / 升级 / 备份 / 恢复流程，配置校验能在启动前暴露问题。
+- 运维可排障：工程师或 operator 能通过 admin CLI、HTTP endpoint 或 platform UI 查询 run trace、usage、performance、错误和 connector sync 状态。
+- 管理员可配置：能配置 agent 到 KB 的绑定、Google Drive / Confluence credential reference、同步范围和同步触发方式。
+- 真实试用闭环：有 pilot acceptance checklist，覆盖用户入口、默认 agent、知识库同步、常见失败、回滚和问题上报路径。
+- 数据治理可控：secret 不落库、不进日志；trace / logs retention、脱敏、备份范围和删除策略明确。
+- 外部依赖可控：真实 LLM / embedding / SaaS connector 都有显式配置、smoke test 和失败降级说明，不依赖隐式默认云服务。
+
+### Pilot MVP 候选 specs
+
+下一步如果目标是生产小范围试用，优先级应从继续扩展 intelligence 功能转向 production-readiness：
+
+1. `observability-admin-query-api`：提供最小 run trace / usage / performance 查询入口，避免排障必须手写 SQL。
+2. `knowledge-base-agent-kb-binding`：定义 agent / tenant 到一个或多个 KB 的绑定策略和默认可见范围。
+3. `knowledge-base-connector-operations`：补 connector sync 手动触发、状态查询、失败摘要和真实 SaaS smoke 操作说明。
+4. `deployment-pilot-install-checklist`：沉淀 pilot 部署、升级、备份、恢复、健康检查和回滚清单。
+5. `data-retention-and-diagnostics-policy`：定义 logs / traces / connector state 的 retention、导出、脱敏和备份边界。
 
 ## 后续维护规则
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -366,3 +367,188 @@ async def test_proposal_lifecycle_events_are_recorded(tmp_path, monkeypatch):
     ]
     assert {event.user_id for event in events} == {"user-1"}
     assert all(event.payload["proposal_id"] == proposal.id for event in events)
+
+
+async def test_extract_ignores_unsupported_shared_memory_or_kb_actions(tmp_path, monkeypatch):
+    from fleetent import memory_layer
+
+    db_path = tmp_path / "memory.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    monkeypatch.setattr(memory_layer.vector_store, "upsert", AsyncMock())
+    _patch_extraction(
+        monkeypatch,
+        """
+        [
+          {
+            "action": "create",
+            "type": "preferences",
+            "target": "shared_memory",
+            "content": "Team uses GitHub Flow."
+          },
+          {
+            "action": "create",
+            "type": "context",
+            "target": "knowledge_base",
+            "content": "Project runbook lives in Confluence."
+          }
+        ]
+        """,
+    )
+
+    await memory_layer.extract_and_update("user-1", [{"role": "user", "content": "facts"}])
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT content FROM memory_items").fetchall()
+
+    assert rows == []
+    memory_layer.vector_store.upsert.assert_not_awaited()
+
+
+async def test_context_update_refreshes_ttl_and_rejects_cross_type_target(tmp_path, monkeypatch):
+    from fleetent import memory_layer
+
+    db_path = tmp_path / "memory.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    monkeypatch.setattr(memory_layer.vector_store, "upsert", AsyncMock())
+    created_at = datetime(2026, 5, 1, tzinfo=UTC).isoformat()
+    old_expiry = (datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)).isoformat()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO memory_items (
+                id, user_id, type, content, created_at, updated_at, expires_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "context-1",
+                "user-1",
+                "context",
+                "User is working on billing",
+                created_at,
+                created_at,
+                old_expiry,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO memory_items (
+                id, user_id, type, content, created_at, updated_at, expires_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "identity-1",
+                "user-1",
+                "identity",
+                "User is an engineer",
+                created_at,
+                created_at,
+                None,
+            ),
+        )
+    before = datetime.now(UTC).replace(microsecond=0) + timedelta(days=30)
+    _patch_extraction(
+        monkeypatch,
+        """
+        [
+          {
+            "action": "update",
+            "target_id": "context-1",
+            "type": "context",
+            "content": "User is working on billing migration"
+          },
+          {
+            "action": "update",
+            "target_id": "identity-1",
+            "type": "context",
+            "content": "Wrong cross-type update"
+          }
+        ]
+        """,
+    )
+
+    await memory_layer.extract_and_update("user-1", [{"role": "user", "content": "facts"}])
+
+    after = datetime.now(UTC).replace(microsecond=0) + timedelta(days=30)
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        context = dict(
+            conn.execute(
+                "SELECT content, expires_at FROM memory_items WHERE id = ?", ("context-1",)
+            ).fetchone()
+        )
+        identity = dict(
+            conn.execute(
+                "SELECT content, expires_at FROM memory_items WHERE id = ?", ("identity-1",)
+            ).fetchone()
+        )
+
+    assert context["content"] == "User is working on billing migration"
+    assert before <= datetime.fromisoformat(context["expires_at"]) <= after
+    assert identity["content"] == "User is an engineer"
+    assert identity["expires_at"] is None
+
+
+def test_reflection_finding_filters_existing_and_single_evidence_memory_candidates():
+    from fleetent import memory_layer, observability
+    from fleetent.intelligence import reflection
+
+    existing = [
+        memory_layer.MemoryItem(
+            id="mem-1",
+            user_id="user-1",
+            type="preferences",
+            content="User prefers concise replies",
+            created_at=datetime(2026, 6, 2, tzinfo=UTC),
+            updated_at=datetime(2026, 6, 2, tzinfo=UTC),
+            expires_at=None,
+        )
+    ]
+    events = [
+        observability.TraceEvent(
+            id="trace-1",
+            run_id="run-1",
+            event_type="agent_run_completed",
+            payload={"memory_fact": "User prefers concise replies"},
+        ),
+        observability.TraceEvent(
+            id="trace-2",
+            run_id="run-2",
+            event_type="agent_run_completed",
+            payload={"memory_fact": "User likes incident reviews"},
+        ),
+        observability.TraceEvent(
+            id="trace-3",
+            run_id="run-3",
+            event_type="agent_run_completed",
+            payload={"memory_fact": "User likes incident reviews"},
+        ),
+        observability.TraceEvent(
+            id="trace-4",
+            run_id="run-4",
+            event_type="agent_run_completed",
+            payload={"memory_fact": "User has one-off request"},
+        ),
+    ]
+
+    findings = reflection._generate_findings(events, existing)
+
+    assert [finding.metadata["fact"] for finding in findings] == ["User likes incident reviews"]
+
+
+def _patch_extraction(monkeypatch, content: str) -> AsyncMock:
+    from fleetent import memory_layer
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace()))
+    create = AsyncMock(
+        return_value=SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+        )
+    )
+    client.chat.completions.create = create
+    cfg = SimpleNamespace(model="test-memory-model", max_tokens=512)
+    monkeypatch.setattr(memory_layer, "get_async_client_and_config", lambda _: (client, cfg))
+    return create

@@ -145,6 +145,79 @@ async def test_google_drive_listing_marks_supported_and_unsupported_mime_types()
     assert plan.summary.unsupported == 2
 
 
+async def test_google_drive_malformed_file_metadata_is_counted_as_failed():
+    from fleetent.intelligence.knowledge_base import GoogleDriveConnectorConfig
+    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+        FakeGoogleDriveClient,
+        GoogleDriveFile,
+        plan_google_drive_sync,
+    )
+
+    plan = await plan_google_drive_sync(
+        GoogleDriveConnectorConfig(
+            connector_id="gdrive-team",
+            tenant_id="tenant-a",
+            kb_id="support",
+            folder_id="folder-1",
+            credential_ref="token.json",
+        ),
+        client=FakeGoogleDriveClient(
+            files_by_folder={
+                "folder-1": [
+                    GoogleDriveFile(
+                        id="bad-file",
+                        name="Bad metadata",
+                        mime_type="text/plain",
+                        modified_time="not-a-timestamp",
+                    )
+                ]
+            }
+        ),
+    )
+
+    assert plan.items == []
+    assert plan.summary.scanned == 1
+    assert plan.summary.failed == 1
+
+
+async def test_google_drive_export_or_download_failure_is_counted_per_item():
+    from fleetent.intelligence.knowledge_base import GoogleDriveConnectorConfig
+    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+        FakeGoogleDriveClient,
+        GoogleDriveFile,
+        execute_google_drive_sync_plan,
+        plan_google_drive_sync,
+    )
+
+    client = FakeGoogleDriveClient(
+        files_by_folder={
+            "folder-1": [
+                GoogleDriveFile(
+                    id="doc-1",
+                    name="Runbook",
+                    mime_type="application/vnd.google-apps.document",
+                    modified_time="2026-06-02T00:00:00+00:00",
+                )
+            ]
+        },
+        exports={},
+    )
+    config = GoogleDriveConnectorConfig(
+        connector_id="gdrive-team",
+        tenant_id="tenant-a",
+        kb_id="support",
+        folder_id="folder-1",
+        credential_ref="token.json",
+    )
+
+    plan = await plan_google_drive_sync(config, client=client)
+    summary = await execute_google_drive_sync_plan(plan, client=client)
+
+    assert summary.planned == 1
+    assert summary.ingested == 0
+    assert summary.failed == 1
+
+
 @pytest.mark.parametrize(
     ("filename", "mime_type", "expected_format"),
     [

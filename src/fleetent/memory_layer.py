@@ -136,6 +136,8 @@ async def extract_and_update(user_id: str, conversation: list[dict[str, Any]]) -
     for action in actions:
         if not isinstance(action, dict):
             continue
+        if _targets_non_user_memory(action):
+            continue
         action_name = action.get("action")
         if action_name == "delete":
             target_id = action.get("target_id")
@@ -568,6 +570,15 @@ def _duplicate_compaction_candidates(user_id: str) -> list[MemoryCompactionCandi
 
 def _normalize_memory_content(content: str) -> str:
     return " ".join(content.split()).casefold()
+
+
+def _targets_non_user_memory(action: dict[str, Any]) -> bool:
+    markers = {"shared_memory", "knowledge_base", "kb", "project_memory", "team_memory"}
+    for key in ("target", "target_scope", "memory_scope", "destination"):
+        value = action.get(key)
+        if isinstance(value, str) and value.strip().casefold() in markers:
+            return True
+    return False
 
 
 def _extraction_user_message(

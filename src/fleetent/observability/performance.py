@@ -282,7 +282,7 @@ def _to_float(value: object) -> float | None:
             parsed = float(str(value))
         except (TypeError, ValueError):
             return None
-    return parsed if isfinite(parsed) else None
+    return parsed if isfinite(parsed) and parsed >= 0 else None
 
 
 def _average(samples: list[float]) -> float:

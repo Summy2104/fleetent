@@ -206,14 +206,18 @@ async def plan_confluence_sync(
     seen_paths: set[str] = set()
     page_by_path: dict[str, ConfluencePage] = {}
     items: list[SyncPlanItem] = []
+    failed = 0
     for page in pages:
-        source_path = confluence_source_path(page)
-        seen_paths.add(source_path)
-        page_by_path[source_path] = page
-        fingerprint = confluence_fingerprint(page)
-        state = existing_states.get(source_path)
-        action = _remote_action_for_state(state, _modified_time_ns(page), fingerprint)
-        items.append(_plan_item(config, page, action, state))
+        try:
+            source_path = confluence_source_path(page)
+            seen_paths.add(source_path)
+            page_by_path[source_path] = page
+            fingerprint = confluence_fingerprint(page)
+            state = existing_states.get(source_path)
+            action = _remote_action_for_state(state, _modified_time_ns(page), fingerprint)
+            items.append(_plan_item(config, page, action, state))
+        except Exception:
+            failed += 1
 
     for state in existing_states.values():
         if state.source_path in seen_paths:
@@ -240,6 +244,7 @@ async def plan_confluence_sync(
         summary=SyncPlanSummary(
             scanned=len(pages),
             planned=len(items),
+            failed=failed,
             ingested=sum(1 for item in items if item.action is SyncAction.INGEST_NEW),
             changed=sum(1 for item in items if item.action is SyncAction.REINGEST_CHANGED),
             unchanged=sum(1 for item in items if item.action is SyncAction.SKIP_UNCHANGED),

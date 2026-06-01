@@ -121,6 +121,79 @@ async def test_confluence_page_scope_lists_page_and_optional_descendants():
     ]
 
 
+async def test_confluence_malformed_page_metadata_is_counted_as_failed():
+    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+        ConfluencePage,
+        FakeConfluenceClient,
+        plan_confluence_sync,
+    )
+
+    plan = await plan_confluence_sync(
+        _space_config(),
+        client=FakeConfluenceClient(
+            space_pages={
+                "ENG": [
+                    [
+                        ConfluencePage(
+                            id="bad-page",
+                            title="Bad metadata",
+                            space_key="ENG",
+                            storage_html="<p>Body</p>",
+                            version=1,
+                            modified_time="not-a-timestamp",
+                        )
+                    ]
+                ]
+            }
+        ),
+    )
+
+    assert plan.items == []
+    assert plan.summary.scanned == 1
+    assert plan.summary.failed == 1
+
+
+async def test_confluence_archive_missing_failure_is_counted_per_item(monkeypatch):
+    from fleetent.intelligence.knowledge_base import SyncAction
+    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+        ConfluenceSyncPlan,
+        FakeConfluenceClient,
+        execute_confluence_sync_plan,
+    )
+    from fleetent.intelligence.knowledge_base.sync_planner import SyncPlanItem, SyncPlanSummary
+
+    async def fail_archive(document_id: str) -> None:
+        raise RuntimeError(f"cannot archive {document_id}")
+
+    from fleetent.intelligence.knowledge_base import runtime
+
+    monkeypatch.setattr(runtime, "archive", fail_archive)
+    plan = ConfluenceSyncPlan(
+        config=_space_config(),
+        items=[
+            SyncPlanItem(
+                action=SyncAction.ARCHIVE_MISSING,
+                source_id="conf-eng",
+                tenant_id="tenant-a",
+                kb_id="engineering",
+                source_path="confluence://missing",
+                filename="missing",
+                document_format="html",
+                mtime_ns=1,
+                content_hash="old",
+                document_id="kb-doc-1",
+            )
+        ],
+        pages={},
+        summary=SyncPlanSummary(scanned=0, planned=1, archived=1),
+    )
+
+    summary = await execute_confluence_sync_plan(plan, client=FakeConfluenceClient())
+
+    assert summary.archived == 0
+    assert summary.failed == 1
+
+
 def test_parse_confluence_page_uses_storage_html_and_metadata():
     from fleetent.intelligence.knowledge_base.connectors.confluence import (
         ConfluencePage,

@@ -66,7 +66,11 @@ async def test_http_embedding_sends_openai_payload_and_authorization(monkeypatch
     assert vector == [0.1, 0.2, 0.3]
     assert captured is not None
     assert captured.headers["authorization"] == "Bearer secret-token"
-    assert json.loads(captured.content) == {"model": "bge-m3", "input": ["hello world"]}
+    assert json.loads(captured.content) == {
+        "model": "bge-m3",
+        "input": ["hello world"],
+        "dimensions": 3,
+    }
 
 
 async def test_http_embedding_empty_text_returns_zero_vector_without_request():
