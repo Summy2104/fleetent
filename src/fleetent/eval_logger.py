@@ -9,10 +9,15 @@ from typing import Any
 
 from openai.types import CompletionUsage
 
+from fleetent import sandbox_secrets
+
 # Single trace path constant for all three writers (log_run / log /
 # log_sandbox_exec). One injectable module-level path means tests monkeypatch
 # exactly one attribute to isolate every write (no leaked second alias).
 TRACE_PATH = Path("data/traces.jsonl")
+
+# Placeholder written in place of a sensitive-named tool_call argument value.
+REDACTED_PLACEHOLDER = "[REDACTED]"
 
 # Matches a base64 data URL so an image block can be summarized as
 # "[图片：{mime}，{bytes}字节]" instead of writing the full base64 string.
@@ -145,10 +150,49 @@ def log_sandbox_exec(
 
 def _serialize(msg: Any) -> Any:
     if isinstance(msg, dict):
-        return _placeholder_images(msg)
+        return _redact_tool_calls(_placeholder_images(msg))
     if hasattr(msg, "model_dump"):
-        return _placeholder_images(msg.model_dump())
+        return _redact_tool_calls(_placeholder_images(msg.model_dump()))
     return str(msg)
+
+
+def _redact_tool_calls(msg: dict[str, Any]) -> dict[str, Any]:
+    """Redact sensitive-named tool_call argument values before they hit trace.
+
+    The real leak vector is the assistant message's ``tool_calls[].function.
+    arguments`` (LLM-produced JSON) landing in the append-only trace. Reusing
+    the SB5 single source of truth (``sandbox_secrets.is_sensitive_name``), any
+    top-level argument whose NAME is sensitive has its value replaced. Same
+    layer/idiom as ``_placeholder_images``: produces a new representation, never
+    mutating the runtime object; only the to-be-persisted trace shape changes.
+    Name-only — values are never scanned (known SB5 limitation).
+    """
+    tool_calls = msg.get("tool_calls")
+    if not isinstance(tool_calls, list):
+        return msg
+    return {**msg, "tool_calls": [_redact_tool_call(tc) for tc in tool_calls]}
+
+
+def _redact_tool_call(tc: Any) -> Any:
+    if not isinstance(tc, dict):
+        return tc
+    fn = tc.get("function")
+    if not isinstance(fn, dict):
+        return tc
+    raw_args = fn.get("arguments")
+    if not isinstance(raw_args, str):
+        return tc
+    try:
+        parsed = json.loads(raw_args)
+    except (json.JSONDecodeError, ValueError):
+        return tc  # Malformed JSON: degrade to existing behavior, never raise.
+    if not isinstance(parsed, dict):
+        return tc
+    redacted = {
+        k: (REDACTED_PLACEHOLDER if sandbox_secrets.is_sensitive_name(k) else v)
+        for k, v in parsed.items()
+    }
+    return {**tc, "function": {**fn, "arguments": json.dumps(redacted, ensure_ascii=False)}}
 
 
 def _placeholder_images(msg: dict[str, Any]) -> dict[str, Any]:

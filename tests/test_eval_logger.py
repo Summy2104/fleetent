@@ -393,3 +393,121 @@ def test_serialize_image_block_replaced_with_placeholder():
     # Text block survives untouched.
     text_blocks = [b for b in out["content"] if b.get("type") == "text"]
     assert any(b["text"] == "see this" for b in text_blocks)
+
+
+def _assistant_tool_call_msg(arguments: str):
+    return {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "fetch", "arguments": arguments},
+            }
+        ],
+    }
+
+
+def test_serialize_redacts_sensitive_tool_call_arg():
+    import json as _json
+
+    from fleetent.eval_logger import REDACTED_PLACEHOLDER, _serialize
+
+    msg = _assistant_tool_call_msg('{"api_key": "sk-secret", "password": "hunter2"}')
+    out = _serialize(msg)
+    args = _json.loads(out["tool_calls"][0]["function"]["arguments"])
+    assert args["api_key"] == REDACTED_PLACEHOLDER
+    assert args["password"] == REDACTED_PLACEHOLDER
+    assert "sk-secret" not in str(out)
+    assert "hunter2" not in str(out)
+
+
+def test_serialize_keeps_nonsensitive_tool_call_arg():
+    import json as _json
+
+    from fleetent.eval_logger import _serialize
+
+    msg = _assistant_tool_call_msg('{"query": "weather", "path": "/tmp/x"}')
+    out = _serialize(msg)
+    args = _json.loads(out["tool_calls"][0]["function"]["arguments"])
+    assert args["query"] == "weather"
+    assert args["path"] == "/tmp/x"
+
+
+def test_serialize_mixed_sensitive_and_plain_tool_call_args():
+    import json as _json
+
+    from fleetent.eval_logger import REDACTED_PLACEHOLDER, _serialize
+
+    msg = _assistant_tool_call_msg('{"api_key": "sk-secret", "query": "weather"}')
+    out = _serialize(msg)
+    args = _json.loads(out["tool_calls"][0]["function"]["arguments"])
+    assert args["api_key"] == REDACTED_PLACEHOLDER
+    assert args["query"] == "weather"
+
+
+def test_serialize_message_without_tool_calls_unchanged():
+    from fleetent.eval_logger import _serialize
+
+    msg = {"role": "user", "content": "just text"}
+    assert _serialize(msg) == {"role": "user", "content": "just text"}
+
+
+def test_serialize_invalid_json_arguments_degrades_without_raising():
+    from fleetent.eval_logger import _serialize
+
+    msg = _assistant_tool_call_msg("not valid json {{{")
+    out = _serialize(msg)
+    # Unparseable arguments degrade to existing behavior: left as-is, no raise.
+    assert out["tool_calls"][0]["function"]["arguments"] == "not valid json {{{"
+
+
+def test_serialize_does_not_mutate_original_tool_call_msg():
+    msg = _assistant_tool_call_msg('{"api_key": "sk-secret"}')
+    from fleetent.eval_logger import _serialize
+
+    _serialize(msg)
+    # Original object keeps the plaintext value — runtime context untouched.
+    assert msg["tool_calls"][0]["function"]["arguments"] == '{"api_key": "sk-secret"}'
+
+
+def test_serialize_reuses_sandbox_secrets_rule(monkeypatch):
+    import json as _json
+
+    import fleetent.sandbox_secrets as ss
+    from fleetent.eval_logger import REDACTED_PLACEHOLDER, _serialize
+
+    # A name not normally sensitive becomes sensitive once the shared rule is
+    # extended at the single source of truth (sandbox_secrets), proving reuse.
+    monkeypatch.setattr(ss, "SENSITIVE_TOKENS", ("WIDGET",))
+    msg = _assistant_tool_call_msg('{"widget_id": "leak-me", "api_key": "kept"}')
+    out = _serialize(msg)
+    args = _json.loads(out["tool_calls"][0]["function"]["arguments"])
+    assert args["widget_id"] == REDACTED_PLACEHOLDER
+    # api_key no longer matches the patched rule, so it survives.
+    assert args["api_key"] == "kept"
+
+
+def test_serialize_name_only_does_not_scan_value():
+    import json as _json
+
+    from fleetent.eval_logger import _serialize
+
+    # Known limitation (same as SB5): a benign-named param embedding a secret in
+    # its VALUE is not redacted — only names are filtered, values never scanned.
+    msg = _assistant_tool_call_msg('{"note": "my key is sk-deadbeef"}')
+    out = _serialize(msg)
+    args = _json.loads(out["tool_calls"][0]["function"]["arguments"])
+    assert args["note"] == "my key is sk-deadbeef"
+
+
+async def test_session_persistence_keeps_plaintext_tool_call_args(tmp_path, monkeypatch):
+    # Redaction lives only in the trace serialization path; session writes raw.
+    import fleetent.session_mgr as sm
+
+    monkeypatch.setattr(sm, "SESSIONS_DIR", tmp_path / "sessions")
+    msg = _assistant_tool_call_msg('{"api_key": "sk-secret"}')
+    await sm.save("sess-1", [msg])
+    loaded = await sm.load("sess-1")
+    assert loaded[0]["tool_calls"][0]["function"]["arguments"] == '{"api_key": "sk-secret"}'
