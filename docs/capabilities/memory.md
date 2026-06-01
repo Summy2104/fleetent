@@ -115,8 +115,8 @@ def iter_indexable_memories(user_id: str) -> Iterator[IndexableItem]:
 - `iter_indexable_memories(user_id)` public API 返回当前未过期 memory source records，供 vector_store 同步 reindex 使用
 - 删除旧 JSONL memory 兼容和 `load_memories()` 直接注入路径
 
-当前定位：已完成结构化语义记忆地基、基础维护动作和第一批 memory extraction evaluation 基线。
-retention 策略和真实 embedding 检索效果仍未闭环。
+当前定位：已完成结构化语义记忆地基、基础维护动作、第一批 memory extraction evaluation 基线，以及与 KB
+共用 embedding / vector-store 路径的 deterministic retrieval evaluation。retention 策略仍未闭环。
 
 ## 规划中（v1.0）
 
@@ -138,20 +138,21 @@ retention 策略和真实 embedding 检索效果仍未闭环。
 
 - [x] **memory extraction evaluation 基线**：使用 JSON fixtures、mock actions 和最终 memory 状态断言，覆盖 create / update / delete / ignore 关键场景
 
-- [ ] **真实 embedding 检索效果验证**：通过已定义的 HTTP embedding provider 接入自托管模型后评估召回质量
-  - 默认仍使用 deterministic provider；生产配置必须显式指向自托管 embedding endpoint
+- [x] **embedding 检索效果验证入口**：通过 combined memory/KB fixture 验证 memory semantic retrieval
+  - 默认使用 deterministic provider 和 tmp SQLite / tmp vector DB
+  - 真实 HTTP embedding 仅在 `FLEETENT_EVAL_REAL_EMBEDDING=1` 且 endpoint / model / API key / dimensions 完整时手动运行
 
 ## 当前缺口
 
 - 提取质量已有 mock evaluation 基线，但还缺少真实 LLM 回归样本和长期趋势统计。
-- 真实 embedding provider 边界已定义，但尚未配置自托管模型 endpoint，语义检索质量还不能代表生产效果。
+- 真实 embedding provider 边界已定义且有手动 evaluation 入口；尚未选择或部署自托管模型 endpoint。
 - memory 条数增长策略未定义：没有硬上限、软告警或 compaction 机制。
 - reindex 入口由 vector_store 提供；memory 只暴露 source iterator，不承担 job history / worker / scheduler。
 
 ## 下一批候选 specs
 
 - `memory-retention-and-compaction`
-- `memory-real-embedding-evaluation`
+- `memory-extraction-real-llm-regression`
 - `memory-extraction-real-llm-regression`
 
 ## 自动化效果验证缺口
@@ -179,7 +180,7 @@ retention 策略和真实 embedding 检索效果仍未闭环。
 - noisy or invalid conversation ignore
 
 仍未覆盖：
-- 构造 query -> expected memory fixture，评估检索命中率。
+- 长期 precision / recall 趋势和真实生产语料评估。
 
 ## 服务化 / 目录边界判断
 

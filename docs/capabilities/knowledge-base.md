@@ -6,7 +6,7 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML 解析，local directory 手动同步与 sync planner，deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、按 tenant + knowledge base 隔离召回相关文档片段，向 vector_store reindex 暴露当前可索引 chunks，以及手动运行的 deterministic retrieval evaluation。
+**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML 解析，local directory 手动同步与 sync planner，deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、按 tenant + knowledge base 隔离召回相关文档片段，向 vector_store reindex 暴露当前可索引 chunks，以及手动运行的 deterministic retrieval evaluation / combined memory+KB embedding evaluation。
 
 **后续负责**：第三方数据源接入与文档获取、更丰富的文档解析、实体与关系提取、图谱存储。
 
@@ -322,7 +322,8 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 - fixture schema 固定为 `name`、`documents`、`queries`、`expected_chunks`、`forbidden_chunks`。
 - 默认 runner 使用 deterministic embedding、tmp SQLite DB 和 tmp SQLite vector backend，不调用外部服务，不触碰 `data/`。
 - runner 会 ingest fixture documents，执行 query，并断言 expected chunk/snippet 出现在 top-k，forbidden chunk/snippet 不出现在结果中。
-- 真实 embedding evaluation 默认 skip；只有设置 `FLEETENT_EVAL_REAL_EMBEDDING=1` 且提供 endpoint、model 和 API key 时才手动运行。
+- 真实 embedding evaluation 默认 skip；只有设置 `FLEETENT_EVAL_REAL_EMBEDDING=1` 且提供 endpoint、model、API key 和 dimensions 时才手动运行。
+- combined memory+KB embedding evaluation 使用 tmp SQLite / tmp vector DB，并通过 `vector_store.reindex()` 重建 KB index 后验证 expected / forbidden snippets。
 
 ## 自动化效果验证缺口
 
@@ -429,7 +430,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - fixture loader 对 `name`、`documents`、`queries`、`expected_chunks`、`forbidden_chunks` 缺失 fail fast
 - deterministic runner 使用 tmp SQLite DB 和 tmp vector backend ingest fixture documents
 - vector-only query top-k 包含 expected chunk/snippet，且不包含 forbidden chunk/snippet
-- real embedding evaluation 默认 skip，缺少 provider credentials 时也 skip
+- real embedding evaluation 默认 skip，缺少 provider credentials/config 时也 skip
 
 **需要 mock / monkeypatch 的依赖**：
 - `vector_store`：隔离向量索引读写

@@ -112,6 +112,7 @@ def reindex(request: ReindexRequest) -> ReindexSummary:
 - `vector_store.*` / `embedding.*` / `rerank.*` 基础配置命名空间
 - `vector_store.database_url` 可选配置；未配置时 SQLite backend 复用全局 `Settings.database_url`
 - 同步 reindex 边界支持 memory / knowledge-base 的 dry-run 和 rebuild；`rebuild` 先清空目标 namespace，再逐条 upsert 当前 source records，单条失败计入 failed 并继续后续 item
+- combined memory+KB embedding evaluation 使用 deterministic embedding 默认验证 memory 和 KB 都能通过 reindex 后检索；真实 HTTP embedding smoke 显式 opt-in
 
 当前定位：可支持 memory-layer、long-term-ctx 和测试场景；SQLite backend 解决重启后索引丢失问题，但不是大规模 ANN 检索后端。
 rerank provider 目前只提供边界，尚未接入 knowledge-base search。
@@ -144,18 +145,18 @@ rerank provider 目前只提供边界，尚未接入 knowledge-base search。
   embedding endpoint 后显式配置。
 - rerank 尚未接入 knowledge-base search；当前只定义 provider abstraction。
 - reindex 当前是同步 public API，尚未提供后台 job runtime、操作历史或管理界面。
-- 缺少检索质量评估集：无法量化不同 embedding / backend 的召回质量差异。
+- 已有 combined memory+KB embedding evaluation 入口；尚缺长期趋势统计、rerank 质量评估和生产规模 ANN 后端评估。
 
 ## 下一批候选 specs
 
 - `vector-store-sqlite-vec-backend`
 - `rerank-kb-search-integration`
-- `vector-store-retrieval-evaluation`
+- `rerank-kb-search-integration`
 
 ## 自动化效果验证缺口
 
 - 构造中英文 query / document fixture，评估 top-k 命中率。
-- 对比 deterministic / real embedding 的召回质量，避免只验证接口正确。
+- 扩展 combined fixtures，对比 deterministic / real embedding 的召回质量，避免只验证接口正确。
 - 对 namespace、delete、overwrite 做持久化后端回归测试。
 
 ## 服务化 / 目录边界判断
