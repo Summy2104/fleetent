@@ -27,6 +27,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _server_registry: dict[str, McpServerConfig] = {}
+# Ids of strict-mode servers that failed to register at startup (MCP4 D5): not in
+# _server_registry (never registered) yet still strict-unavailable for the query.
+_failed_strict_servers: set[str] = set()
 _active_sessions: dict[str, Any] = {}  # server_id -> mcp.ClientSession (stdio only)
 _exit_stack: AsyncExitStack | None = None
 
@@ -124,6 +127,10 @@ def _default_token_store() -> _InMemoryTokenStore:
 class McpServerConfig:
     id: str
     transport: str = "http"  # "http" | "stdio"
+    # Degradation policy when this server is unavailable (MCP4): "degrade" (drop
+    # its tools, others continue), "strict" (fail bound agents loudly), "silent"
+    # (drop + log only). Invalid values fall back to "degrade" in __post_init__.
+    degrade_mode: str = "degrade"
     # HTTP fields
     url: str = ""
     auth_type: str = "none"  # "none" | "api_key" | "oauth2"
@@ -153,6 +160,62 @@ class McpServerConfig:
     _health: HealthState = field(default=HealthState.healthy, repr=False, compare=False)
     _reconnect_attempts: int = field(default=0, repr=False, compare=False)
     _reconnect_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        _validate_degrade_mode(self)
+
+
+_VALID_DEGRADE_MODES = ("degrade", "strict", "silent")
+
+
+def _validate_degrade_mode(server: McpServerConfig) -> None:
+    """Fall back an invalid degrade_mode to 'degrade' (logged, never silently)."""
+    if server.degrade_mode not in _VALID_DEGRADE_MODES:
+        logger.warning(
+            "mcp_invalid_degrade_mode server_id=%s value=%r falling_back=degrade",
+            server.id,
+            server.degrade_mode,
+        )
+        server.degrade_mode = "degrade"
+
+
+def is_server_available(server: McpServerConfig) -> bool:
+    """Whether a server's tools may be exposed now: connection healthy AND, for
+    oauth2, auth available (MCP4 D1). Pure read of per-server state, no side effects."""
+    return server._health is HealthState.healthy and not (
+        server.auth_type == "oauth2" and server._auth_unavailable
+    )
+
+
+def _schema_visibility(tool_name: str) -> bool:
+    """Visibility predicate for tool_registry (MCP4 D2/D4): hide tools of an
+    unavailable MCP server. Non-MCP tools and unknown servers are always visible."""
+    if "__" not in tool_name:
+        return True
+    server_id = tool_name.split("__", 1)[0]
+    server = _server_registry.get(server_id)
+    if server is None:
+        return True
+    return is_server_available(server)
+
+
+def install_schema_filter() -> None:
+    """Wire the MCP visibility predicate into tool_registry (MCP4 D4)."""
+    from fleetent import tool_registry
+
+    tool_registry.set_schema_visibility_filter(_schema_visibility)
+
+
+def unavailable_strict_server_ids() -> set[str]:
+    """Ids of strict-mode servers currently unavailable — registered-but-unavailable
+    plus startup-failed strict servers (MCP4 D3/D5). agent_loop intersects these with
+    an agent's allowed_tools `{id}__*` namespace to decide a strict failure stop."""
+    registered = {
+        sid
+        for sid, s in _server_registry.items()
+        if s.degrade_mode == "strict" and not is_server_available(s)
+    }
+    return registered | set(_failed_strict_servers)
 
 
 def _next_request_id(server: McpServerConfig) -> int:
@@ -459,11 +522,20 @@ async def _close_http_sessions() -> None:
 
 
 async def register_all(servers: list[McpServerConfig]) -> None:
+    _failed_strict_servers.clear()  # recompute startup-failed strict set each registration
     for server in servers:
         try:
             await _register_server(server)
         except Exception as exc:
+            # Startup failure = unregistered = tools never visible (MCP4 D5); platform
+            # start is NOT blocked. A strict server's failure is tracked so bound
+            # agents can be stopped with a clear error (unavailable_strict_server_ids).
             logger.warning("mcp_server_unavailable server_id=%s error=%s", server.id, exc)
+            if server.degrade_mode == "strict":
+                _failed_strict_servers.add(server.id)
+    # MCP4 D4: expose the visibility filter so unavailable servers' tools drop out
+    # of get_schemas() (recovery re-exposes them, no re-registration).
+    install_schema_filter()
 
 
 async def _register_server(server: McpServerConfig) -> None:
