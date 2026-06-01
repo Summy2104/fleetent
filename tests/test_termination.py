@@ -173,7 +173,7 @@ def test_resolve_limits_partial_override() -> None:
 
 
 def _step_budget(max_turns: int) -> BudgetConfig:
-    return BudgetConfig(max_turns=max_turns, max_tokens=-1, max_cost_usd=-1.0)
+    return BudgetConfig(max_turns=max_turns, max_tokens=-1)
 
 
 def test_step_budget_stops_at_limit() -> None:

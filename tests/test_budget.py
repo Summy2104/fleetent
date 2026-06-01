@@ -1,4 +1,4 @@
-"""Unit tests for the three-dimensional iteration budget (AR2)."""
+"""Unit tests for the two-dimensional iteration budget (AR2: turns / tokens)."""
 
 from __future__ import annotations
 
@@ -8,8 +8,6 @@ import pytest
 
 from fleetent import budget as bud
 from fleetent.budget import (
-    DEFAULT_PRICING,
-    MODEL_PRICING,
     NO_LIMIT,
     BudgetChecker,
     BudgetConfig,
@@ -21,21 +19,20 @@ from fleetent.termination import LoopState, StopReason
 # ── BudgetConfig / BudgetUsage shape ───────────────────────────────────────────
 
 
-def test_budget_config_holds_three_dimensions() -> None:
-    cfg = BudgetConfig(max_turns=10, max_tokens=1000, max_cost_usd=1.0)
+def test_budget_config_holds_two_dimensions() -> None:
+    cfg = BudgetConfig(max_turns=10, max_tokens=1000)
     assert cfg.max_turns == 10
     assert cfg.max_tokens == 1000
-    assert cfg.max_cost_usd == 1.0
 
 
 def test_budget_config_is_frozen() -> None:
-    cfg = BudgetConfig(max_turns=10, max_tokens=1000, max_cost_usd=1.0)
+    cfg = BudgetConfig(max_turns=10, max_tokens=1000)
     with pytest.raises(FrozenInstanceError):
         cfg.max_turns = 5  # type: ignore[misc]
 
 
 def test_budget_config_supports_no_limit_sentinel() -> None:
-    cfg = BudgetConfig(max_turns=NO_LIMIT, max_tokens=NO_LIMIT, max_cost_usd=NO_LIMIT)
+    cfg = BudgetConfig(max_turns=NO_LIMIT, max_tokens=NO_LIMIT)
     assert cfg.max_turns == NO_LIMIT
 
 
@@ -43,84 +40,67 @@ def test_budget_usage_starts_at_zero() -> None:
     usage = BudgetUsage()
     assert usage.turns == 0
     assert usage.tokens == 0
-    assert usage.cost_usd == 0.0
 
 
-# ── BudgetUsage.add: token + turn + cost accumulation ───────────────────────────
+# ── cost dimension is gone (review-removed) ─────────────────────────────────────
+
+
+def test_budget_config_has_no_cost_dimension() -> None:
+    assert not hasattr(BudgetConfig(max_turns=1, max_tokens=1), "max_cost_usd")
+
+
+def test_budget_usage_has_no_cost_dimension() -> None:
+    assert not hasattr(BudgetUsage(), "cost_usd")
+
+
+def test_budget_module_has_no_pricing_tables() -> None:
+    assert not hasattr(bud, "MODEL_PRICING")
+    assert not hasattr(bud, "DEFAULT_PRICING")
+
+
+# ── BudgetUsage.add: token + turn accumulation ──────────────────────────────────
 
 
 def test_usage_add_accumulates_turns_and_tokens() -> None:
     usage = BudgetUsage()
-    usage.add(100, 50, "claude-sonnet-4-5")
-    usage.add(200, 80, "claude-sonnet-4-5")
+    usage.add(100, 50)
+    usage.add(200, 80)
     assert usage.turns == 2
     assert usage.tokens == 100 + 50 + 200 + 80
-
-
-def test_usage_add_computes_cost_from_pricing_table() -> None:
-    usage = BudgetUsage()
-    model = "claude-sonnet-4-5"
-    in_price, out_price = MODEL_PRICING[model]
-    usage.add(1000, 1000, model)
-    # prices are USD per 1K tokens
-    expected = in_price + out_price
-    assert usage.cost_usd == pytest.approx(expected)
-
-
-def test_usage_add_unknown_model_uses_default_pricing_never_zero() -> None:
-    usage = BudgetUsage()
-    usage.add(1000, 1000, "some-unlisted-model-xyz")
-    in_price, out_price = DEFAULT_PRICING
-    assert in_price > 0 and out_price > 0
-    assert usage.cost_usd == pytest.approx(in_price + out_price)
-    assert usage.cost_usd > 0
-
-
-def test_pricing_table_is_monkeypatchable(monkeypatch) -> None:
-    monkeypatch.setitem(MODEL_PRICING, "fake-model", (1.0, 2.0))
-    usage = BudgetUsage()
-    usage.add(1000, 1000, "fake-model")
-    assert usage.cost_usd == pytest.approx(3.0)
 
 
 # ── "about to exhaust" judgement + triggering dimension ─────────────────────────
 
 
 def test_exhausted_when_turns_reach_limit() -> None:
-    cfg = BudgetConfig(max_turns=3, max_tokens=NO_LIMIT, max_cost_usd=NO_LIMIT)
+    cfg = BudgetConfig(max_turns=3, max_tokens=NO_LIMIT)
     usage = BudgetUsage(turns=3)
     assert cfg.exhausted_dimension(usage) == "turns"
 
 
 def test_exhausted_when_tokens_reach_limit() -> None:
-    cfg = BudgetConfig(max_turns=NO_LIMIT, max_tokens=500, max_cost_usd=NO_LIMIT)
+    cfg = BudgetConfig(max_turns=NO_LIMIT, max_tokens=500)
     usage = BudgetUsage(tokens=500)
     assert cfg.exhausted_dimension(usage) == "tokens"
 
 
-def test_exhausted_when_cost_reaches_limit() -> None:
-    cfg = BudgetConfig(max_turns=NO_LIMIT, max_tokens=NO_LIMIT, max_cost_usd=0.5)
-    usage = BudgetUsage(cost_usd=0.5)
-    assert cfg.exhausted_dimension(usage) == "cost_usd"
-
-
 def test_not_exhausted_below_all_limits() -> None:
-    cfg = BudgetConfig(max_turns=10, max_tokens=1000, max_cost_usd=1.0)
-    usage = BudgetUsage(turns=5, tokens=500, cost_usd=0.5)
+    cfg = BudgetConfig(max_turns=10, max_tokens=1000)
+    usage = BudgetUsage(turns=5, tokens=500)
     assert cfg.exhausted_dimension(usage) is None
 
 
 def test_no_limit_dimension_never_triggers() -> None:
-    cfg = BudgetConfig(max_turns=NO_LIMIT, max_tokens=NO_LIMIT, max_cost_usd=NO_LIMIT)
-    usage = BudgetUsage(turns=10**9, tokens=10**9, cost_usd=10.0**9)
+    cfg = BudgetConfig(max_turns=NO_LIMIT, max_tokens=NO_LIMIT)
+    usage = BudgetUsage(turns=10**9, tokens=10**9)
     assert cfg.exhausted_dimension(usage) is None
 
 
 def test_turns_dimension_checked_first() -> None:
     # When several dimensions are simultaneously over, the reported dimension is
-    # deterministic: turns > tokens > cost_usd.
-    cfg = BudgetConfig(max_turns=1, max_tokens=1, max_cost_usd=0.0)
-    usage = BudgetUsage(turns=5, tokens=5, cost_usd=5.0)
+    # deterministic: turns > tokens.
+    cfg = BudgetConfig(max_turns=1, max_tokens=1)
+    usage = BudgetUsage(turns=5, tokens=5)
     assert cfg.exhausted_dimension(usage) == "turns"
 
 
@@ -128,21 +108,21 @@ def test_turns_dimension_checked_first() -> None:
 
 
 def test_budget_checker_returns_budget_exceeded_when_over() -> None:
-    cfg = BudgetConfig(max_turns=2, max_tokens=NO_LIMIT, max_cost_usd=NO_LIMIT)
+    cfg = BudgetConfig(max_turns=2, max_tokens=NO_LIMIT)
     usage = BudgetUsage(turns=2)
     checker = BudgetChecker(cfg, usage)
     assert checker.check(LoopState()) == StopReason.budget_exceeded
 
 
 def test_budget_checker_returns_none_when_under() -> None:
-    cfg = BudgetConfig(max_turns=10, max_tokens=NO_LIMIT, max_cost_usd=NO_LIMIT)
+    cfg = BudgetConfig(max_turns=10, max_tokens=NO_LIMIT)
     usage = BudgetUsage(turns=2)
     checker = BudgetChecker(cfg, usage)
     assert checker.check(LoopState()) is None
 
 
 def test_budget_checker_exposes_triggered_dimension() -> None:
-    cfg = BudgetConfig(max_turns=NO_LIMIT, max_tokens=100, max_cost_usd=NO_LIMIT)
+    cfg = BudgetConfig(max_turns=NO_LIMIT, max_tokens=100)
     usage = BudgetUsage(tokens=100)
     checker = BudgetChecker(cfg, usage)
     checker.check(LoopState())

@@ -90,24 +90,19 @@ _GRACE_CALL_TEXT = "已达到本次任务的预算上限。请用一段话总结
 def _resolve_budget_config(
     max_turns: int | None,
     max_tokens: int | None,
-    max_cost_usd: float | None,
 ) -> BudgetConfig:
-    """Resolve the three-dimensional budget: call param > Settings > default (D1).
+    """Resolve the two-dimensional budget: call param > Settings > default (D1).
 
     The step dimension reuses the existing max_turns resolution (resolve_limits);
-    token / cost come from Settings (NO_LIMIT by default) unless overridden.
+    the token dimension comes from Settings (NO_LIMIT by default) unless overridden.
     """
     mt, _ = resolve_limits(max_turns, None)
-    if max_tokens is not None and max_cost_usd is not None:
-        return BudgetConfig(max_turns=mt, max_tokens=max_tokens, max_cost_usd=max_cost_usd)
+    if max_tokens is not None:
+        return BudgetConfig(max_turns=mt, max_tokens=max_tokens)
     from fleetent.config import Settings
 
     s = Settings()
-    return BudgetConfig(
-        max_turns=mt,
-        max_tokens=max_tokens if max_tokens is not None else s.agent_max_tokens,
-        max_cost_usd=max_cost_usd if max_cost_usd is not None else s.agent_max_cost_usd,
-    )
+    return BudgetConfig(max_turns=mt, max_tokens=s.agent_max_tokens)
 
 
 def _resolve_loop_config(
@@ -140,7 +135,7 @@ def _build_controller(
     """Assemble the termination controller with the active checkers.
 
     The budget checker (AR2) replaces the retired MaxTurnsChecker: the step
-    dimension is now one of three budget dimensions (turns / tokens / cost), and
+    dimension is now one of two budget dimensions (turns / tokens), and
     any exhausted dimension produces `budget_exceeded` (not `max_turns`). The
     `StopReason.max_turns` enum member is retained but the loop no longer produces
     it (design D2). The budget checker reads the same per-run `budget_usage` the
@@ -262,7 +257,7 @@ async def _call_with_fallback(
     raise last_exc  # type: ignore[misc]
 
 
-def _budget_add(usage: BudgetUsage, response_usage: Any, model: str) -> None:
+def _budget_add(usage: BudgetUsage, response_usage: Any) -> None:
     """Fold one main-loop turn into the budget accumulator (D1).
 
     Reads prompt/completion tokens off the response usage; a missing or non-int
@@ -274,7 +269,6 @@ def _budget_add(usage: BudgetUsage, response_usage: Any, model: str) -> None:
     usage.add(
         prompt if isinstance(prompt, int) else 0,
         completion if isinstance(completion, int) else 0,
-        model,
     )
 
 
@@ -478,7 +472,6 @@ async def run(
     max_turns: int | None = None,
     max_consecutive_failures: int | None = None,
     max_tokens: int | None = None,
-    max_cost_usd: float | None = None,
     force_model: str | None = None,
     disabled_skills_trace: list[dict[str, str]] | None = None,
     loop_repeat_threshold: int | None = None,
@@ -543,7 +536,7 @@ async def run(
 
     # None → a never-cancelling default token, keeping the no-token path identical.
     token = cancel_token if cancel_token is not None else CancelToken()
-    budget_config = _resolve_budget_config(max_turns, max_tokens, max_cost_usd)
+    budget_config = _resolve_budget_config(max_turns, max_tokens)
     budget_usage = BudgetUsage()
     controller, loop_checker, budget_checker = _build_controller(
         max_turns,
@@ -594,7 +587,7 @@ async def run(
         # BudgetChecker judges on up-to-date usage at the next checkpoint — not on a
         # single end-of-loop response.usage. Compression's internal LLM never reaches
         # here, so it is exempt by construction (D4).
-        _budget_add(budget_usage, response.usage, model_used)
+        _budget_add(budget_usage, response.usage)
         models_to_try = [model_used]  # stick with the winning model for subsequent turns
         choice = response.choices[0]
         msg = choice.message
@@ -766,7 +759,6 @@ async def run_stream(
     max_turns: int | None = None,
     max_consecutive_failures: int | None = None,
     max_tokens: int | None = None,
-    max_cost_usd: float | None = None,
     images: list[tuple[bytes, str]] | None = None,
     force_model: str | None = None,
     loop_repeat_threshold: int | None = None,
@@ -822,7 +814,7 @@ async def run_stream(
     cache_tokens: dict[str, int] | None = None
 
     token = cancel_token if cancel_token is not None else CancelToken()
-    budget_config = _resolve_budget_config(max_turns, max_tokens, max_cost_usd)
+    budget_config = _resolve_budget_config(max_turns, max_tokens)
     budget_usage = BudgetUsage()
     controller, loop_checker, budget_checker = _build_controller(
         max_turns,
@@ -914,9 +906,9 @@ async def run_stream(
                 finish_reason = choice.finish_reason
 
         # D1: settle this turn's usage into the per-run accumulator now (step +
-        # tokens + cost), so the BudgetChecker judges between turns rather than only
+        # tokens), so the BudgetChecker judges between turns rather than only
         # at the end of the whole run. Compression's LLM never reaches here (D4).
-        budget_usage.add(turn_prompt_tokens, turn_completion_tokens, model_used)
+        budget_usage.add(turn_prompt_tokens, turn_completion_tokens)
 
         if finish_reason != "tool_calls":
             reply = "".join(reply_parts)
