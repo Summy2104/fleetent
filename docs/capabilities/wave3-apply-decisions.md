@@ -3,23 +3,32 @@
 > 全自主 apply 期间，遇到的冲突 / Open Question 及其自解决策记录，供 zy 最后核实。
 > 每个 change 一节：遇到什么、怎么解的、影响。
 > 执行顺序见 `v1.0-roadmap.md` 波次 3；硬约束 AR18(cost-budget-control) → MR2(cost-aware-routing)。
+> **顺序修订（见下方「执行顺序自解决策」）**：AR20 提前到第 2 位，因其提供 T2/SB7 依赖的 `CancelToken.parent` 原语。
 
-## 执行进度
+## 执行顺序自解决策（2026-06-01）
+
+执行 #2 原定 tool-timeout(T2) 时核实发现：T2 与 SB7 的 spec 均**强制**依赖 `CancelToken.parent` 字段（run 级取消经 `parent` 链接传播到在途工具），而该 `parent` 原语在各 spec 中被明确**归属于 AR20（sub-agent-lifecycle）对 AR19 `cancellation.py` 的增量补全**（见 `sub-agent-lifecycle/design.md` D3）。当前 `cancellation.py` 的 `CancelToken` 只有 `deadline`、无 `parent`。
+
+- **冲突**：原顺序把 AR20 排第 12，但 T2(#2)/SB7(#6) 依赖它先落地。roadmap 依赖列只标 T2 dep=AR5·AR19，未含 AR20——这是 spec 作者后续引入的更细耦合。
+- **决策**：把 **sub-agent-lifecycle(AR20) 提前为 #2**，先落地 `parent` 原语 + `sub_agent_runs` 表，再做 T2、SB7。其余顺序与轨道分组不变；AR18→MR2 硬约束仍满足。
+- **核实**：`compression-trace` 的 "parent" 仅指 `TRACE_PATH.parent`（文件路径），与 CancelToken 无关，不受影响。
+
+## 执行进度（修订后顺序）
 
 | # | 阶段/轨 | change | roadmap | 状态 |
 |---|---|---|---|---|
 | 1 | C | tool-arg-sanitization | T3 | ✅ 已完成 |
-| 2 | C | tool-timeout | T2 | ⬜ |
-| 3 | C | tool-result-truncation | T4 | ⬜ |
-| 4 | C | tool-call-guardrails | AR10 | ⬜ |
-| 5 | F | sandbox-output-truncation | SB6 | ⬜ |
-| 6 | F | sandbox-exec-timeout | SB7 | ⬜ |
-| 7 | B | compression-trace | AR16 | ⬜ |
-| 8 | B | compression-anti-flap | AR17 | ⬜ |
-| 9 | E | mcp-degradation | MCP4 | ⬜ |
-| 10 | H | scheduled-task-session-binding | S3 | ⬜ |
-| 11 | A | cost-budget-control | AR18 | ⬜ |
-| 12 | A | sub-agent-lifecycle | AR20 | ⬜ |
+| 2 | A | sub-agent-lifecycle | AR20 | 🔵 进行中 |
+| 3 | C | tool-timeout | T2 | ⬜ |
+| 4 | C | tool-result-truncation | T4 | ⬜ |
+| 5 | C | tool-call-guardrails | AR10 | ⬜ |
+| 6 | F | sandbox-output-truncation | SB6 | ⬜ |
+| 7 | F | sandbox-exec-timeout | SB7 | ⬜ |
+| 8 | B | compression-trace | AR16 | ⬜ |
+| 9 | B | compression-anti-flap | AR17 | ⬜ |
+| 10 | E | mcp-degradation | MCP4 | ⬜ |
+| 11 | H | scheduled-task-session-binding | S3 | ⬜ |
+| 12 | A | cost-budget-control | AR18 | ⬜ |
 | 13 | D | cost-aware-routing | MR2 | ⬜ |
 
 ---
