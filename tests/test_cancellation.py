@@ -61,3 +61,34 @@ def test_checker_returns_none_when_token_live():
     from fleetent.termination import LoopState
 
     assert checker.check(LoopState()) is None
+
+
+# ── parent linkage (AR20 incremental add to AR19) ────────────────────────────
+
+
+def test_parent_cancel_propagates_to_child():
+    parent = CancelToken()
+    child = CancelToken(deadline=time.monotonic() + 100, parent=parent)
+    assert child.is_cancelled() is False
+    parent.cancel()
+    assert child.is_cancelled() is True
+
+
+def test_parent_none_default_preserves_existing_semantics():
+    # No parent: behaves exactly as before (own _cancelled / own deadline only).
+    token = CancelToken()
+    assert token.is_cancelled() is False
+    token.cancel()
+    assert token.is_cancelled() is True
+
+
+def test_child_own_deadline_independent_of_live_parent():
+    parent = CancelToken()  # never cancelled
+    child = CancelToken(deadline=time.monotonic() - 1, parent=parent)  # own deadline passed
+    assert child.is_cancelled() is True
+
+
+def test_live_parent_does_not_cancel_live_child():
+    parent = CancelToken()
+    child = CancelToken(parent=parent)
+    assert child.is_cancelled() is False
