@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 
 _SAFE_NAME = re.compile(r"[^a-zA-Z0-9_.-]")
 
+# Grace window between SIGTERM and the unconditional SIGKILL of the docker-kill
+# sequence (SB7). Module-level so tests inject a tiny value; no global mutable state.
+_KILL_GRACE_SECONDS = 5.0
+
 # Single source of truth for the container-name prefix. Defined here (the lowest
 # layer) so SB2's naming rule and SB8's orphan enumeration share one constant
 # without a circular import. SB2 builds `sandbox-{scope}-{key}` atop it.
@@ -269,3 +273,36 @@ class SandboxClient:
         )
         await proc.communicate()
         logger.info("sandbox_destroyed", container_id=workspace_id[:12])
+
+    async def kill_workspace(self, workspace_id: str) -> None:
+        """Forcefully terminate a container: SIGTERM, fixed grace, then SIGKILL (SB7).
+
+        The graceful two-stage sequence (sandbox.md: "SIGTERM, 5s then SIGKILL")
+        gives the container's process a chance to exit cleanly. The grace window
+        is a fixed wait with NO `docker inspect` polling; the trailing SIGKILL is
+        unconditional (harmless/idempotent on an already-stopped container). This
+        only stops the process — container removal stays with SB2's lifecycle.
+        """
+        await self._docker_kill(workspace_id, "SIGTERM")
+        await asyncio.sleep(_KILL_GRACE_SECONDS)
+        await self._docker_kill(workspace_id, "SIGKILL")
+
+    async def _docker_kill(self, workspace_id: str, signal: str) -> None:
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "kill",
+            f"--signal={signal}",
+            workspace_id,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.communicate()
+        if proc.returncode not in (0, None):
+            # Best-effort: a nonzero code (e.g. SIGKILL on an already-stopped
+            # container) must not crash the timeout path. Log and move on.
+            logger.warning(
+                "docker_kill_nonzero signal=%s container_id=%s returncode=%s",
+                signal,
+                workspace_id[:12],
+                proc.returncode,
+            )

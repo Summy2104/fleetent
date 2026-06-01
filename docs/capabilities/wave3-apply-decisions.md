@@ -23,7 +23,7 @@
 | 4 | C | tool-result-truncation | T4 | ✅ 已完成 |
 | 5 | C | tool-call-guardrails | AR10 | ✅ 已完成 |
 | 6 | F | sandbox-output-truncation | SB6 | ✅ 已完成 |
-| 7 | F | sandbox-exec-timeout | SB7 | ⬜ |
+| 7 | F | sandbox-exec-timeout | SB7 | ✅ 已完成 |
 | 8 | B | compression-trace | AR16 | ⬜ |
 | 9 | B | compression-anti-flap | AR17 | ⬜ |
 | 10 | E | mcp-degradation | MCP4 | ⬜ |
@@ -192,5 +192,30 @@
 **需 zy 核实：**
 1. 截断在 run_code 拼装侧、两流各自阈值 50KB/10KB（自解决策 #1/#2）是否认可。
 2. 说明文案（中文）与 trace 记原始字节（自解决策 #5）是否认可。
+
+---
+
+## sandbox-exec-timeout（SB7）— feat/sandbox-exec-timeout
+
+**实现：**
+- `sandbox_client.py`：新增 `kill_workspace(id)`（`_docker_kill` SIGTERM → 固定宽限 `_KILL_GRACE_SECONDS=5.0`（可 monkeypatch）→ 无条件 SIGKILL，宽限期内不 `docker inspect` 轮询；非零码 log 警告不崩）+ 模块常量。
+- `tools.py`：`_exec_or_cancel` abort 分支改为 `kill_workspace` + `destroy_workspace`；`run_code` 取 `manager.resources_for(scope).exec_timeout`，构造 `child = CancelToken(deadline=start+exec_timeout, parent=token)` 传入轮询（复用 AR20 `parent` 原语合并沙箱 deadline 与外部 token，单 token 判定）；result 为 None 时按 `child.deadline` 是否已过区分：已过→`sandbox_timeout`（读 `_sandbox_timeout_classification()` = AR5 表，log 警告）+ 返回「沙箱执行超时」文本；否则→既有「code execution cancelled」。新增 `_sandbox_timeout_classification()`（镜像 `mcp_client._disconnect_classification`，直接读表）。
+
+**自解决策（重要，需核实）：**
+1. **abort 路径 = `kill_workspace` + `destroy_workspace`（kill 后仍 rm），而非纯 kill 替代**：design D2 字面是「kill_workspace 替代 destroy_workspace」。但核实发现 `docker run` **无 `--rm`**、`find_workspace` 只查运行中容器、`run_code` abort 后 `manager.forget` → 若纯 kill（容器停而不删），下次 `acquire` 必 `find` miss → `create_workspace` 撞**停止的同名容器** → RuntimeError（既有 `test_run_code_cancel_forgets_registry_then_reacquires` 即覆盖此重建路径）。故采「kill 优雅终止进程（SB7 新增）+ rm 移除（既有清理，幂等）」：既满足 D2「`docker kill` 序列优雅终止」取代旧的暴力 `rm -f`-as-terminator，又保住 design D2 自述「容器去留沿用 SB2 既有约定（abort 即移除）」、避免撞名回归。**这是对 D2「替代」字面的收敛——以"优雅终止 means 取代暴力 means、移除清理保留"理解，而非"完全不移除"。**
+2. **超时 vs 取消区分**：按 `child.deadline` 是否已过（与 AR20 `timed_out` vs `cancelled` 逐字镜像），两路径共用 `kill_workspace`，归类/文本不同。
+3. **归类直接读表**（D3 方案 a，镜像 mcp_client）：`sandbox_timeout` 三标志均 False，不新建码、不改语义；接入后该预留码可达。
+4. **kill 宽限期=固定等待 + 无条件 SIGKILL**（design D2）：不 `docker inspect` 轮询，对已停容器再 SIGKILL 幂等无害，省 CLI 往返。
+
+**影响：**
+- 改 `sandbox_client.py`/`tools.py`；`tests/test_sandbox_client.py`（+2 kill 序列）、`tests/test_tools.py`（+4：分类 + 超时/取消/正常）。
+- 测试：**全量 1294 passed，0 失败，零回归**（既有取消测试 `aborts_and_destroys_on_cancel`/`forgets_registry_then_reacquires` 因 kill+destroy 仍 destroy 而继续通过）。
+- ruff：我改/建文件 format+check 全绿；`tools.py` 的 F401（`cron_scheduler`，schedule_task）为 HEAD 既有 grandfathered。
+- mypy：76 → 76，无新增。
+
+**需 zy 核实：**
+1. **（最重要）** abort 路径 kill 后仍 destroy（自解决策 #1）是否认可——纯 kill 会致撞名回归，故保留移除清理；这对 D2「替代」做了"优雅终止取代暴力终止、移除保留"的收敛解释。
+2. `_KILL_GRACE_SECONDS=5.0` 固定宽限 + 无条件 SIGKILL（不轮询 inspect）是否认可。
+3. 超时文案「沙箱执行超时…」与外部取消文案「code execution cancelled」区分是否认可。
 
 ---

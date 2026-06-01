@@ -344,3 +344,36 @@ async def test_list_containers_returns_empty_when_cli_missing(client):
     ):
         names = await client.list_containers("sandbox-")
     assert names == []
+
+
+# ── SB7: docker kill sequence ────────────────────────────────────────────────
+
+
+async def test_kill_workspace_sigterm_then_sigkill(client, monkeypatch):
+    import fleetent.sandbox_client as sc
+
+    monkeypatch.setattr(sc, "_KILL_GRACE_SECONDS", 0.001)
+    calls: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        calls.append(args)
+        return _mock_proc()
+
+    with patch("asyncio.create_subprocess_exec", fake_exec):
+        await client.kill_workspace("cid-x")
+
+    flat = [str(a) for c in calls for a in c]
+    assert "--signal=SIGTERM" in flat
+    assert "--signal=SIGKILL" in flat
+    # SIGTERM precedes SIGKILL; no docker inspect polling in the grace window.
+    assert flat.index("--signal=SIGTERM") < flat.index("--signal=SIGKILL")
+    assert not any("inspect" in f for f in flat)
+
+
+async def test_kill_workspace_nonzero_does_not_raise(client, monkeypatch):
+    import fleetent.sandbox_client as sc
+
+    monkeypatch.setattr(sc, "_KILL_GRACE_SECONDS", 0.001)
+    # SIGKILL on an already-stopped container returns nonzero — must not raise.
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(returncode=1))):
+        await client.kill_workspace("cid-stopped")  # no exception

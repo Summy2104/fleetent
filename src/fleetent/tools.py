@@ -10,6 +10,7 @@ from pathlib import Path
 from fleetent import eval_logger, image_gen_client, vision_client
 from fleetent import sandbox_output_truncation as sot
 from fleetent.cancellation import CancelToken
+from fleetent.error_classifier import CLASSIFICATION_TABLE, ErrorCategory, ErrorClassification
 from fleetent.sandbox_client import ExecResult, SandboxClient
 from fleetent.sandbox_manager import SandboxManager
 from fleetent.sandbox_secrets import build_sandbox_env
@@ -20,6 +21,21 @@ logger = logging.getLogger(__name__)
 # How often the cancel watcher polls the token while exec runs (seconds). Small
 # enough that cancellation is observed promptly, large enough to stay cheap.
 _CANCEL_POLL_INTERVAL = 0.05
+
+# Returned (not raised) when a sandbox exec exceeds its exec_timeout deadline (SB7),
+# so the conversation can continue. Distinct from the external-cancel text.
+_SANDBOX_TIMEOUT_TEXT = "沙箱执行超时：代码执行超过沙箱时限，容器已被强制终止。"
+
+
+def _sandbox_timeout_classification() -> ErrorClassification:
+    """Read AR5's sandbox_timeout classification directly (SB7 D3).
+
+    The timeout→category decision is the sandbox's own domain knowledge; we then
+    consume AR5's read-only flags straight from CLASSIFICATION_TABLE rather than
+    calling classify() (which only recognizes APIStatusError).
+    """
+    return CLASSIFICATION_TABLE[ErrorCategory.sandbox_timeout]
+
 
 # Process-wide sandbox lifecycle manager (SB2). Lazily built on first run_code so
 # config is read once, not per call; injectable (tests monkeypatch this to an
@@ -149,17 +165,23 @@ def write_file(path: str, content: str) -> str:
 async def _exec_or_cancel(
     client: SandboxClient, ws_id: str, command: str, cancel_token: CancelToken
 ) -> ExecResult | None:
-    """Run exec, but force-destroy the container and abort if the token cancels.
+    """Run exec, aborting if the token cancels or its deadline passes.
 
     Returns the ExecResult on normal completion, or None when cancellation (or a
-    passed deadline) is observed first — in which case the container is destroyed
-    with `docker rm -f` (AR19 D3b) rather than left hanging on a blocked exec.
+    passed deadline) is observed first — in which case the container is terminated
+    gracefully (SB7: SIGTERM → grace → SIGKILL) and then removed, rather than left
+    hanging on a blocked exec. The caller distinguishes timeout from external
+    cancel by whether the token's own deadline has passed.
     """
     exec_task = asyncio.create_task(client.exec(ws_id, command))
     while True:
         if cancel_token.is_cancelled():
             exec_task.cancel()
             await asyncio.gather(exec_task, return_exceptions=True)
+            # SB7: terminate the container process gracefully (SIGTERM → SIGKILL)
+            # rather than the violent rm -f, then remove it (idempotent) so the
+            # registry forget below cannot collide with a lingering stopped name.
+            await client.kill_workspace(ws_id)
             await client.destroy_workspace(ws_id)
             return None
         done, _ = await asyncio.wait({exec_task}, timeout=_CANCEL_POLL_INTERVAL)
@@ -204,13 +226,29 @@ async def run_code(
     # rebuilds (find_workspace miss) rather than handing back a destroyed container.
     # SB9 D4: time only the exec (not container acquisition); container-lifecycle
     # timing is SB2's concern. exit_code / byte sizes come from the ExecResult.
+    # SB7: merge the sandbox exec_timeout deadline with the external token via the
+    # AR20 `parent` link, so a single token reflects "own timeout OR external/parent
+    # cancel". On trigger we tell the two apart by whether this child's own deadline
+    # has passed (timeout) or not (external cancel) — mirrors AR20's timed_out vs
+    # cancelled split.
+    exec_timeout = manager.resources_for(scope).exec_timeout
     start = time.monotonic()
-    result = await _exec_or_cancel(manager.client, ws_id, command, token)
+    child = CancelToken(deadline=start + exec_timeout, parent=token)
+    result = await _exec_or_cancel(manager.client, ws_id, command, child)
     elapsed = time.monotonic() - start
     if result is None:
         manager.forget(manager.container_name(scope, session_id, agent_name or "default"))
-        # Cancelled exec yields no ExecResult, hence no exit code or output sizes
-        # to record — skip the trace rather than log placeholder metadata.
+        # Cancelled/timed-out exec yields no ExecResult; skip the trace rather than
+        # log placeholder metadata. Distinguish sandbox timeout from external cancel.
+        if child.deadline is not None and time.monotonic() >= child.deadline:
+            classification = _sandbox_timeout_classification()  # AR5 sandbox_timeout (D3)
+            logger.warning(
+                "sandbox_exec_timeout container=%s category=%s should_retry=%s",
+                ws_id[:12],
+                ErrorCategory.sandbox_timeout.value,
+                classification.should_retry,
+            )
+            return _SANDBOX_TIMEOUT_TEXT
         return "code execution cancelled"
     # SB9 D3: trace is side-channel observability; a write failure MUST NOT block
     # the user from receiving the execution result. Catch + warn, never re-raise.
