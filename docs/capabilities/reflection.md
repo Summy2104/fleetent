@@ -4,35 +4,34 @@
 
 ## 概述
 
-系统自我改进机制，定期分析 agent 执行历史，先生成结构化改进建议，再逐步扩展到半自动或自动维护。
-第一阶段只做只读分析与 report 输出，不自动修改 memory、skills 或 knowledge-base。
+系统自我改进机制，定期分析 agent 执行历史，先生成结构化改进建议，再通过受控 proposal lifecycle 进入维护流程。
+reflection 默认不直接修改 User Memory、skills 或 knowledge-base。
 
-**负责**：通过 observability trace API 读取 agent 执行历史，发现规律并生成结构化 reflection report。
+**负责**：通过 observability trace API 读取 agent 执行历史，发现规律并生成结构化 reflection report；为 User Memory 生成 owner-approved maintenance proposals。
 
-**不负责**：实时处理（异步定期触发，不在请求链路上）、skill 的运行时注入（→ agent-runtime）、修改知识库文档内容（只上报，不写回）。
+**不负责**：实时处理（异步定期触发，不在请求链路上）、skill 的运行时注入（→ agent-runtime）、修改知识库文档内容（只上报，不写回）、Shared Memory 实现、管理员默认替用户确认 User Memory 修改。
 
 **三个作用目标**：
-- **memory reflection**：per-user，第一阶段只生成 memory_candidate / memory_conflict 建议
+- **memory reflection**：per-user，生成 memory_candidate / memory_conflict 建议，并可转成 owner-scoped maintenance proposal
 - **skill reflection**：per-agent，第一阶段只生成 skill_opportunity 建议
 - **knowledge base reflection**：per-tenant，后续阶段观察知识库使用质量，上报缺口与问题，不自动写回
 
 **调用关系**：
-- 依赖：observability（`query_trace_events(query)` 读取情节记忆事件）、memory_layer（只读信号）、config
+- 依赖：observability（`query_trace_events(query)` 读取情节记忆事件）、memory_layer（只读信号 + 已批准 proposal 的 public mutation API）、config
 - 被依赖：cron_scheduler（定期触发）
 
 **模块归属**：
 - owning package：`intelligence.reflection`
-- public API：`run_reflection(scope)`；后续扩展 `run_memory_reflection(user_id)`、`run_skill_reflection(agent_id)`、`run_kb_reflection(scope)`
-- owned tables：`reflection_reports`；后续 `skill_proposals`、`kb_reflection_reports`
+- public API：`run_reflection(scope)`、`generate_memory_maintenance_proposals(user_id, findings)`、proposal create / approve / reject / apply API；后续扩展 `run_skill_reflection(agent_id)`、`run_kb_reflection(scope)`
+- owned tables：`reflection_reports`、`memory_maintenance_proposals`；后续 `skill_proposals`、`kb_reflection_reports`
 - config namespace：`reflection.*`
 
 ## 关键流程
 
-第一阶段只有一条只读 report 流程。后续 memory、skill、knowledge base 三条反射流程再拆成独立 specs。
+当前有两条流程：只读 report 生成，以及 User Memory maintenance proposal lifecycle。skill、knowledge base 三条反射应用流程后续再拆成独立 specs。
 
-**并发安全说明**：第一阶段只写 reflection-owned `reflection_reports`，通过 observability public API
-只读 trace events，通过 memory_layer public API 读取 memory 信号，不直接读取或修改 `traces` /
-`memory_items` / `skills/`。因此 reflection 不影响请求链路，也不和 long_term_ctx 的 memory 读取竞争写锁。
+**并发安全说明**：reflection 只写 reflection-owned `reflection_reports` / `memory_maintenance_proposals`，通过 observability public API
+只读 trace events，通过 memory_layer public API 读取 memory 信号。proposal 创建不修改 User Memory；apply 阶段只通过 memory_layer public mutation API 修改 owner-scoped User Memory，不直接写 `memory_items` / `skills/`。
 
 ```mermaid
 flowchart TD
@@ -41,7 +40,11 @@ flowchart TD
     C --> D[分析重复事实 / 冲突事实 / 高频任务模式]
     D --> E[生成 ReflectionReport]
     E --> F[保存 reflection_reports]
-    F --> G[管理员或后续自动化流程查看]
+    F --> G{memory finding?}
+    G -->|是| H[生成 memory_maintenance_proposals]
+    G -->|否| I[管理员或后续流程查看 report]
+    H --> J[owner approve / reject\n或显式 low-risk auto apply]
+    J --> K[通过 memory_layer public API apply]
 ```
 
 ## 数据模型
@@ -54,6 +57,22 @@ reflection_reports (
   time_window_end   DATETIME,
   findings_json TEXT,             -- finding summary、evidence ids、metadata，不保存完整 transcript
   created_at   DATETIME
+)
+
+memory_maintenance_proposals (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT,              -- User Memory owner
+  action       TEXT,              -- mark_stale | merge | rewrite | compact | delete | suggest_shared_memory_or_kb
+  target_memory_ids_json TEXT,
+  proposed_content TEXT,
+  metadata_patch_json TEXT,
+  risk         TEXT,              -- low | medium | high
+  reason       TEXT,
+  evidence_ids_json TEXT,
+  status       TEXT,              -- pending | approved | rejected | applied | expired
+  created_at   DATETIME,
+  updated_at   DATETIME,
+  expires_at   DATETIME
 )
 ```
 
@@ -79,6 +98,13 @@ class ReflectionReport:
 
 async def run_reflection(scope: str) -> ReflectionReport:
     """读取 traces 和 memory 只读信号，生成结构化建议报告；不自动应用建议。"""
+
+
+def generate_memory_maintenance_proposals(
+    user_id: str,
+    findings: list[ReflectionFinding],
+) -> list[MemoryMaintenanceProposal]:
+    """将 memory finding 转成 pending User Memory maintenance proposals，不修改 memory。"""
 ```
 
 ## 现状
@@ -88,14 +114,18 @@ async def run_reflection(scope: str) -> ReflectionReport:
 已实现内容：
 - `ReflectionReport`、`ReflectionFinding`、`run_reflection(scope)` public API
 - `reflection_reports` SQLite 表
+- `memory_maintenance_proposals` SQLite 表和 proposal lifecycle API
 - 只通过 observability public API 读取 traces
-- 只读 memory-layer 信号，不自动修改 memory
+- 只读 memory-layer 信号；proposal apply 只通过 memory-layer public API
 - 支持三类 finding：`memory_candidate`、`memory_conflict`、`skill_opportunity`
+- 支持 `pending` / `approved` / `rejected` / `applied` / `expired` proposal 状态
+- 支持 owner approval、low-risk explicit auto policy、high-risk delete approval gate
+- 支持 `suggest_shared_memory_or_kb`，用于团队共识 / 项目惯例 / 客户背景等不属于 User Memory 的内容
 - 保存 report 时不保存完整 trace transcript
 - deterministic evaluation fixture / runner 覆盖 expected / forbidden findings 和 persisted transcript redaction
 - real-route smoke 仅在 `FLEETENT_EVAL_REAL_REFLECTION=1` 且显式本地 fixture/config 完整时手动运行；默认 skip
 
-当前定位：已具备“生成建议报告”的地基和基础 evaluation 回归；消费方式和自动应用机制都未完成。
+当前定位：已具备“生成建议报告”和 User Memory 维护 proposal lifecycle；UI / scheduler / skill proposal / KB reflection apply 尚未完成。
 
 ## 规划中（v1.0）
 
@@ -109,10 +139,11 @@ async def run_reflection(scope: str) -> ReflectionReport:
   - 验证 persisted report 不保存 raw transcript snippets
   - 默认不调用真实 LLM、embedding、KB connector 或 SaaS
 
-- [ ] **memory reflection maintenance（后续）**：定期清理与合并 per-user 记忆
-  - 清理过期 context 类记忆（超过 TTL 且未被再次提及）
-  - 合并语义重复条目
-  - 修正已知冲突（比较 identity / preferences 类条目间的矛盾）
+- [x] **memory reflection maintenance**：将 memory_candidate / memory_conflict 转成 User Memory maintenance proposals
+  - proposal 归属 `user_id`，默认需要 owner approval
+  - rejected / expired proposal 不可 apply
+  - high-risk `delete` 不能 low-risk auto apply
+  - `suggest_shared_memory_or_kb` 不写 User Memory
 
 - [ ] **skill reflection proposals（后续）**：分析 per-agent traces，生成、改进或删除 skill
   - `create`：发现高频重复的 prompt pattern，提炼为新 skill
@@ -127,7 +158,7 @@ async def run_reflection(scope: str) -> ReflectionReport:
   - 所有 knowledge base reflection 结果均以建议形式输出，执行由人决定
 
 - [ ] **生效机制（后续）**：按作用目标和环境区分
-  - memory reflection：直接写回（自动维护）
+  - memory reflection：owner-approved proposal lifecycle；低风险自动维护必须由用户显式开启
   - skill reflection：dev 直接写入，prod 走 permission_gate 审批
   - knowledge base reflection：仅上报，永远不自动写回
 
@@ -189,9 +220,9 @@ async def run_reflection(scope: str) -> ReflectionReport:
 ## 当前缺口
 
 - finding 规则仍然很初级，主要依赖 deterministic payload 字段和简单模式。
-- 没有 report 消费闭环：管理员、自动评估、后续 job 都还没有使用 report。
+- report 到 User Memory maintenance proposal 的闭环已建立；管理员 / 用户 review UI、scheduler、长期趋势统计还没有完成。
 - 已有 deterministic report evaluation；尚未量化长期 precision / recall 趋势。
-- 不会自动维护 memory，不会生成 skill proposal，不接 knowledge-base。
+- 不会默认自动维护 memory，不会生成 skill proposal，不接 knowledge-base。
 
 ## 下一批候选 specs
 

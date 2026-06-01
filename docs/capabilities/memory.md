@@ -4,11 +4,11 @@
 
 ## 概述
 
-per-user 语义记忆的提取、存储与检索，让 agent 在多次对话中积累用户知识、越用越懂用户。
+User Memory 的提取、存储与检索，让 agent 在多次对话中积累单个用户授权范围内的长期事实。
 
-**负责**：从对话中提取用户相关事实，按类型结构化存储，支持向量相似度检索，并向 vector_store reindex 暴露当前可索引记忆。
+**负责**：从对话中提取用户相关事实，按类型结构化存储，支持向量相似度检索，并向 vector_store reindex 暴露当前可索引记忆。当前 `memory_layer` 实现的是 User Memory，不是团队 / 租户 / 项目级 Shared Memory。
 
-**不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、记忆质量的定期优化（→ reflection）。
+**不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、Shared Memory、未经 owner 确认的 reflection 写回。
 
 ### 记忆系统全局架构
 
@@ -21,15 +21,15 @@ fleetent 的记忆系统借鉴认知科学的四类记忆划分，每类由不�
 | **程序记忆** | agent 完成特定任务的技能与方法 | `skills/` 目录 | `skill_registry` |
 | **工作记忆** | 当前 session 的对话上下文（session 结束即释放） | 内存 | `context_mgr` |
 
-本模块（`memory_layer`）只负责**语义记忆**，即按 `identity` / `preferences` / `context` 三类结构化存储的用户事实。其余三类由各自模块独立管理，`reflection` 跨模块读取情节记忆（traces）与语义记忆（memory_items）来做质量优化。
+本模块（`memory_layer`）只负责**User Memory 中的语义记忆**，即按 `identity` / `preferences` / `context` 三类结构化存储的用户事实。其 owner 是 `user_id`，vector namespace 是 `mem:{user_id}`。其余三类由各自模块独立管理，`reflection` 跨模块读取情节记忆（traces）与 User Memory 来生成维护建议；真正改写、合并、标记 stale 或删除 User Memory 必须通过 owner-approved maintenance proposal 或用户显式开启的低风险自动策略。
 
 **调用关系**：
 - 依赖：model_router（`memory_extraction` task，默认轻量模型，可通过 config 覆盖）、vector_store（向量索引）、config
-- 被依赖：long_term_ctx（检索注入内容）、reflection（读取现有记忆、写回优化结果）
+- 被依赖：long_term_ctx（检索注入内容）、reflection（读取现有记忆、通过受控 public API 应用已批准维护 proposal）
 
 **模块归属**：
 - owning package：`intelligence.memory_layer`
-- public API：`search(user_id, query, limit)`、`extract_and_update(user_id, conversation)`、`iter_indexable_memories(user_id)`、`MemoryItem`
+- public API：`search(user_id, query, limit)`、`extract_and_update(user_id, conversation)`、`iter_indexable_memories(user_id)`、`update_user_memory_content()`、`mark_user_memory_stale()`、`delete_user_memory()`、`merge_user_memories()`、`MemoryItem`
 - owned tables：`memory_items`
 - config namespace：`memory.*`
 
@@ -96,6 +96,14 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
 
 def iter_indexable_memories(user_id: str) -> Iterator[IndexableItem]:
     """枚举当前应存在于 vector_store 的用户记忆。返回 namespace 为 mem:{user_id}，并排除过期记忆。"""
+
+
+async def update_user_memory_content(user_id: str, memory_id: str, content: str) -> None:
+    """通过 User Memory public API 改写单条 owner-scoped memory。"""
+
+
+async def mark_user_memory_stale(user_id: str, memory_id: str) -> None:
+    """通过 User Memory public API 将单条 memory 标记为 stale，并从 vector_store 移除。"""
 ```
 
 ## 现状
@@ -113,6 +121,7 @@ def iter_indexable_memories(user_id: str) -> Iterator[IndexableItem]:
 - 写入 memory 后同步写入 vector_store，namespace 为 `mem:{user_id}`
 - `search()` 通过 vector_store 查相关 memory ids，回查 SQLite 并过滤过期 context
 - `iter_indexable_memories(user_id)` public API 返回当前未过期 memory source records，供 vector_store 同步 reindex 使用
+- reflection maintenance apply 只通过 memory-layer public mutation API，不直接写 `memory_items`
 - 删除旧 JSONL memory 兼容和 `load_memories()` 直接注入路径
 
 当前定位：已完成结构化语义记忆地基、基础维护动作、第一批 memory extraction evaluation 基线、与 KB
@@ -147,11 +156,16 @@ def iter_indexable_memories(user_id: str) -> Iterator[IndexableItem]:
   - apply 删除 eligible memory rows，并调用 `vector_store.delete(id, mem:{user_id})`
   - duplicate compaction 只处理同 user / 同 type 的 normalized exact duplicates，不做 LLM summary / rewrite
 
+- [x] **reflection maintenance owner boundary**：reflection 可生成 User Memory maintenance proposal
+  - proposal 绑定 `user_id`，默认只有 owner 可以 approve / reject / apply
+  - low-risk 自动 apply 必须显式开启，且不允许 delete / merge / rewrite / compact
+  - 疑似团队共识、项目惯例、客户背景或组织经验只生成 `suggest_shared_memory_or_kb`，不写入 User Memory
+
 ## 当前缺口
 
 - 提取质量已有 mock evaluation 基线，但还缺少真实 LLM 回归样本和长期趋势统计。
 - 真实 embedding provider 边界已定义且有手动 evaluation 入口；尚未选择或部署自托管模型 endpoint。
-- memory 条数已有显式维护 API；尚未接入 scheduler、admin UI、长期趋势统计或 reflection 自动维护。
+- memory 条数已有显式维护 API；reflection proposal lifecycle 已建立，但尚未接入 scheduler、admin UI 或长期趋势统计。
 - reindex 入口由 vector_store 提供；memory 只暴露 source iterator，不承担 job history / worker / scheduler。
 
 ## 下一批候选 specs
