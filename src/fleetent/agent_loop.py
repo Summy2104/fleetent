@@ -40,10 +40,24 @@ async def _call_with_fallback(
     messages: list[Any],
     schemas: list[Any],
     models: list[str],
+    *,
+    run_id: str,
+    user_id: str,
+    agent_name: str | None,
 ) -> tuple[Any, str]:
     """Try each model in order on 429/503; return (response, model_used)."""
     last_exc: Exception | None = None
-    for model in models:
+    for index, model in enumerate(models):
+        attempt_start = time.monotonic()
+        _record_llm_call_started(
+            run_id=run_id,
+            model=model,
+            messages=messages,
+            schemas=schemas,
+            streaming=False,
+            user_id=user_id,
+            agent_name=agent_name,
+        )
         try:
             resp = await client.chat.completions.create(
                 model=model,
@@ -51,14 +65,67 @@ async def _call_with_fallback(
                 tools=schemas,
                 max_tokens=cfg.max_tokens,
             )
+            _record_llm_call_completed(
+                run_id=run_id,
+                model=model,
+                finish_reason=resp.choices[0].finish_reason if resp.choices else None,
+                usage=getattr(resp, "usage", None),
+                elapsed_s=time.monotonic() - attempt_start,
+                user_id=user_id,
+                agent_name=agent_name,
+            )
             return resp, model
         except RateLimitError as exc:
+            _record_llm_call_failed(
+                run_id=run_id,
+                model=model,
+                exc=exc,
+                elapsed_s=time.monotonic() - attempt_start,
+                user_id=user_id,
+                agent_name=agent_name,
+            )
             last_exc = exc
         except APIStatusError as exc:
             if exc.status_code == 503:
+                _record_llm_call_failed(
+                    run_id=run_id,
+                    model=model,
+                    exc=exc,
+                    elapsed_s=time.monotonic() - attempt_start,
+                    user_id=user_id,
+                    agent_name=agent_name,
+                )
                 last_exc = exc
             else:
+                _record_llm_call_failed(
+                    run_id=run_id,
+                    model=model,
+                    exc=exc,
+                    elapsed_s=time.monotonic() - attempt_start,
+                    user_id=user_id,
+                    agent_name=agent_name,
+                )
                 raise
+        except Exception as exc:
+            _record_llm_call_failed(
+                run_id=run_id,
+                model=model,
+                exc=exc,
+                elapsed_s=time.monotonic() - attempt_start,
+                user_id=user_id,
+                agent_name=agent_name,
+            )
+            raise
+        if index + 1 < len(models):
+            _record_model_fallback_triggered(
+                run_id=run_id,
+                from_model=model,
+                to_model=models[index + 1],
+                reason=last_exc,
+                attempt_index=index + 1,
+                user_id=user_id,
+                agent_name=agent_name,
+            )
     raise last_exc  # type: ignore[misc]
 
 
@@ -68,10 +135,24 @@ async def _stream_with_fallback(
     messages: list[Any],
     schemas: list[Any],
     models: list[str],
+    *,
+    run_id: str,
+    user_id: str,
+    agent_name: str | None,
 ) -> tuple[Any, str]:
     """Try each model in order on 429/503 for streaming; return (stream, model_used)."""
     last_exc: Exception | None = None
-    for model in models:
+    for index, model in enumerate(models):
+        attempt_start = time.monotonic()
+        _record_llm_call_started(
+            run_id=run_id,
+            model=model,
+            messages=messages,
+            schemas=schemas,
+            streaming=True,
+            user_id=user_id,
+            agent_name=agent_name,
+        )
         try:
             stream = await client.chat.completions.create(
                 model=model,
@@ -81,18 +162,463 @@ async def _stream_with_fallback(
                 stream=True,
                 stream_options={"include_usage": True},
             )
+            _record_llm_call_completed(
+                run_id=run_id,
+                model=model,
+                finish_reason=None,
+                usage=None,
+                elapsed_s=time.monotonic() - attempt_start,
+                user_id=user_id,
+                agent_name=agent_name,
+            )
             return stream, model
         except RateLimitError as exc:
+            _record_llm_call_failed(
+                run_id=run_id,
+                model=model,
+                exc=exc,
+                elapsed_s=time.monotonic() - attempt_start,
+                user_id=user_id,
+                agent_name=agent_name,
+            )
             last_exc = exc
         except APIStatusError as exc:
             if exc.status_code == 503:
+                _record_llm_call_failed(
+                    run_id=run_id,
+                    model=model,
+                    exc=exc,
+                    elapsed_s=time.monotonic() - attempt_start,
+                    user_id=user_id,
+                    agent_name=agent_name,
+                )
                 last_exc = exc
             else:
+                _record_llm_call_failed(
+                    run_id=run_id,
+                    model=model,
+                    exc=exc,
+                    elapsed_s=time.monotonic() - attempt_start,
+                    user_id=user_id,
+                    agent_name=agent_name,
+                )
                 raise
+        except Exception as exc:
+            _record_llm_call_failed(
+                run_id=run_id,
+                model=model,
+                exc=exc,
+                elapsed_s=time.monotonic() - attempt_start,
+                user_id=user_id,
+                agent_name=agent_name,
+            )
+            raise
+        if index + 1 < len(models):
+            _record_model_fallback_triggered(
+                run_id=run_id,
+                from_model=model,
+                to_model=models[index + 1],
+                reason=last_exc,
+                attempt_index=index + 1,
+                user_id=user_id,
+                agent_name=agent_name,
+            )
     raise last_exc  # type: ignore[misc]
 
 
 ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
+
+
+def _record_runtime_event(
+    *,
+    run_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+    user_id: str,
+    agent_name: str | None,
+) -> None:
+    record_trace_event(
+        TraceEvent(
+            run_id=run_id,
+            event_type=event_type,
+            payload=payload,
+            user_id=user_id,
+            agent_id=agent_name,
+        )
+    )
+
+
+def _record_agent_run_started(
+    *,
+    run_id: str,
+    user_id: str,
+    agent_name: str | None,
+    entrypoint: Literal["run", "run_stream"],
+) -> None:
+    payload: dict[str, Any] = {
+        "user_id": user_id,
+        "entrypoint": entrypoint,
+    }
+    if agent_name is not None:
+        payload["agent_name"] = agent_name
+    _record_runtime_event(
+        run_id=run_id,
+        event_type="agent_run_started",
+        payload=payload,
+        user_id=user_id,
+        agent_name=agent_name,
+    )
+
+
+def _record_agent_run_failed(
+    *,
+    run_id: str,
+    exc: Exception,
+    elapsed_s: float,
+    user_id: str,
+    agent_name: str | None,
+    entrypoint: Literal["run", "run_stream"],
+) -> None:
+    _record_runtime_event(
+        run_id=run_id,
+        event_type="agent_run_failed",
+        payload={
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+            "elapsed_s": round(elapsed_s, 3),
+            "entrypoint": entrypoint,
+        },
+        user_id=user_id,
+        agent_name=agent_name,
+    )
+
+
+def _record_llm_call_started(
+    *,
+    run_id: str,
+    model: str,
+    messages: list[Any],
+    schemas: list[Any],
+    streaming: bool,
+    user_id: str,
+    agent_name: str | None,
+) -> None:
+    _record_runtime_event(
+        run_id=run_id,
+        event_type="llm_call_started",
+        payload={
+            "model": model,
+            "task_type": "default",
+            "streaming": streaming,
+            "message_count": len(messages),
+            "tool_schema_count": len(schemas),
+        },
+        user_id=user_id,
+        agent_name=agent_name,
+    )
+
+
+def _record_llm_call_completed(
+    *,
+    run_id: str,
+    model: str,
+    finish_reason: str | None,
+    usage: Any | None,
+    elapsed_s: float,
+    user_id: str,
+    agent_name: str | None,
+) -> None:
+    payload: dict[str, Any] = {
+        "model": model,
+        "finish_reason": finish_reason,
+        "elapsed_s": round(elapsed_s, 3),
+    }
+    tokens = _token_usage_payload(usage)
+    if tokens is not None:
+        payload["tokens"] = tokens
+    _record_runtime_event(
+        run_id=run_id,
+        event_type="llm_call_completed",
+        payload=payload,
+        user_id=user_id,
+        agent_name=agent_name,
+    )
+
+
+def _record_llm_call_failed(
+    *,
+    run_id: str,
+    model: str,
+    exc: Exception,
+    elapsed_s: float,
+    user_id: str,
+    agent_name: str | None,
+) -> None:
+    _record_runtime_event(
+        run_id=run_id,
+        event_type="llm_call_failed",
+        payload={
+            "model": model,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+            "elapsed_s": round(elapsed_s, 3),
+        },
+        user_id=user_id,
+        agent_name=agent_name,
+    )
+
+
+def _record_model_fallback_triggered(
+    *,
+    run_id: str,
+    from_model: str,
+    to_model: str,
+    reason: Exception | None,
+    attempt_index: int,
+    user_id: str,
+    agent_name: str | None,
+) -> None:
+    reason_text = ""
+    if reason is not None:
+        reason_text = f"{type(reason).__name__}: {reason}"
+    _record_runtime_event(
+        run_id=run_id,
+        event_type="model_fallback_triggered",
+        payload={
+            "from_model": from_model,
+            "to_model": to_model,
+            "reason": reason_text,
+            "attempt_index": attempt_index,
+        },
+        user_id=user_id,
+        agent_name=agent_name,
+    )
+
+
+def _token_usage_payload(usage: Any | None) -> dict[str, Any] | None:
+    if usage is None:
+        return None
+    return {
+        "prompt": usage.prompt_tokens,
+        "completion": usage.completion_tokens,
+        "total": usage.total_tokens,
+    }
+
+
+def _record_tool_call_started(
+    *,
+    run_id: str,
+    tool_name: str,
+    tool_call_id: str,
+    risk_level: str,
+    arguments: Any,
+    user_id: str,
+    agent_name: str | None,
+) -> None:
+    _record_runtime_event(
+        run_id=run_id,
+        event_type="tool_call_started",
+        payload={
+            "tool_name": tool_name,
+            "tool_call_id": tool_call_id,
+            "risk_level": risk_level,
+            "argument_summary": _argument_summary(arguments),
+        },
+        user_id=user_id,
+        agent_name=agent_name,
+    )
+
+
+def _record_tool_call_completed(
+    *,
+    run_id: str,
+    tool_name: str,
+    tool_call_id: str,
+    result: Any,
+    elapsed_s: float,
+    user_id: str,
+    agent_name: str | None,
+) -> None:
+    _record_runtime_event(
+        run_id=run_id,
+        event_type="tool_call_completed",
+        payload={
+            "tool_name": tool_name,
+            "tool_call_id": tool_call_id,
+            "elapsed_s": round(elapsed_s, 3),
+            "result_summary": _result_summary(result),
+        },
+        user_id=user_id,
+        agent_name=agent_name,
+    )
+
+
+def _record_tool_call_failed(
+    *,
+    run_id: str,
+    tool_name: str,
+    tool_call_id: str,
+    exc: Exception,
+    elapsed_s: float,
+    user_id: str,
+    agent_name: str | None,
+) -> None:
+    _record_runtime_event(
+        run_id=run_id,
+        event_type="tool_call_failed",
+        payload={
+            "tool_name": tool_name,
+            "tool_call_id": tool_call_id,
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+            "elapsed_s": round(elapsed_s, 3),
+        },
+        user_id=user_id,
+        agent_name=agent_name,
+    )
+
+
+def _record_permission_requested(
+    *,
+    run_id: str,
+    approval_id: str,
+    tool_name: str,
+    risk_level: str,
+    requester_user_id: str,
+    agent_name: str | None,
+) -> None:
+    _record_runtime_event(
+        run_id=run_id,
+        event_type="permission_requested",
+        payload={
+            "approval_id": approval_id,
+            "tool_name": tool_name,
+            "risk_level": risk_level,
+            "requester_user_id": requester_user_id,
+        },
+        user_id=requester_user_id,
+        agent_name=agent_name,
+    )
+
+
+def _record_permission_resolved(
+    *,
+    run_id: str,
+    approval_id: str,
+    tool_name: str,
+    risk_level: str,
+    decision: str,
+    elapsed_s: float,
+    requester_user_id: str,
+    agent_name: str | None,
+) -> None:
+    _record_runtime_event(
+        run_id=run_id,
+        event_type="permission_resolved",
+        payload={
+            "approval_id": approval_id,
+            "tool_name": tool_name,
+            "risk_level": risk_level,
+            "decision": decision,
+            "elapsed_s": round(elapsed_s, 3),
+        },
+        user_id=requester_user_id,
+        agent_name=agent_name,
+    )
+
+
+def _record_context_compression_completed(
+    *,
+    run_id: str,
+    before_message_count: int,
+    after_message_count: int,
+    elapsed_s: float,
+    user_id: str,
+    agent_name: str | None,
+) -> None:
+    _record_runtime_event(
+        run_id=run_id,
+        event_type="context_compression_completed",
+        payload={
+            "reason": "runtime_message_compression",
+            "before_message_count": before_message_count,
+            "after_message_count": after_message_count,
+            "elapsed_s": round(elapsed_s, 3),
+        },
+        user_id=user_id,
+        agent_name=agent_name,
+    )
+
+
+def _record_final_reply_emitted(
+    *,
+    run_id: str,
+    reply: str,
+    elapsed_s: float,
+    user_id: str,
+    agent_name: str | None,
+) -> None:
+    _record_runtime_event(
+        run_id=run_id,
+        event_type="final_reply_emitted",
+        payload={
+            "reply_length": len(reply),
+            "elapsed_s": round(elapsed_s, 3),
+        },
+        user_id=user_id,
+        agent_name=agent_name,
+    )
+
+
+def _maybe_compress_with_trace(
+    *,
+    run_id: str,
+    messages: list[Any],
+    user_id: str,
+    agent_name: str | None,
+) -> list[Any]:
+    before_count = len(messages)
+    compression_start = time.monotonic()
+    compressed = maybe_compress(messages)
+    if compressed is not messages and compressed != messages:
+        _record_context_compression_completed(
+            run_id=run_id,
+            before_message_count=before_count,
+            after_message_count=len(compressed),
+            elapsed_s=time.monotonic() - compression_start,
+            user_id=user_id,
+            agent_name=agent_name,
+        )
+    return compressed
+
+
+def _argument_summary(arguments: Any) -> dict[str, Any]:
+    parsed = _parse_json_if_string(arguments)
+    if isinstance(parsed, dict):
+        return {
+            "type": "object",
+            "keys": sorted(str(key) for key in parsed),
+            "field_count": len(parsed),
+            "truncated": False,
+        }
+    if isinstance(parsed, list):
+        return {"type": "array", "item_count": len(parsed), "truncated": False}
+    value = "" if parsed is None else str(parsed)
+    return {"type": type(parsed).__name__, "length": len(value), "truncated": False}
+
+
+def _result_summary(result: Any) -> dict[str, Any]:
+    value = "" if result is None else str(result)
+    return {"type": type(result).__name__, "length": len(value), "truncated": False}
+
+
+def _parse_json_if_string(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
 
 
 def _record_agent_run_completed(
@@ -198,124 +724,219 @@ async def run(
     """
     client, cfg = get_async_client_and_config("default")
     run_id = str(uuid.uuid4())
-    user_input = _first_user_content(messages)
-    built_context = await build_context(user_id, user_input, agent_name or "", cfg.max_tokens)
-    _append_system_context(messages, system_prompt, built_context.text)
-    _record_injected_context(run_id, built_context.sources)
-
-    # Determine effective tool schemas (exclude sub_agent for child agents)
-    schemas = (
-        [s for s in get_schemas() if s["function"]["name"] != _SUB_AGENT_TOOL]
-        if is_sub_agent
-        else get_schemas()
-    )
-
-    # Filter by agent-level allowed_tools if specified
-    if allowed_tools is not None:
-        schemas = [s for s in schemas if check_tool_access(s["function"]["name"], allowed_tools)]
-
     start = time.monotonic()
-    response = None
-    msg: Any = None
-    models_to_try = [cfg.model, *cfg.fallbacks]
-    model_used = cfg.model
-
-    while True:
-        messages = maybe_compress(messages)
-        response, model_used = await _call_with_fallback(
-            client, cfg, messages, schemas, models_to_try
-        )
-        models_to_try = [model_used]  # stick with the winning model for subsequent turns
-        choice = response.choices[0]
-        msg = choice.message
-        messages.append(msg.model_dump())  # dict for JSON serializability (session persistence)
-
-        if choice.finish_reason != "tool_calls":
-            break
-
-        for tc in msg.tool_calls or []:
-            if not hasattr(tc, "function"):
-                continue
-            if tc.function.name == _SUB_AGENT_TOOL and not is_sub_agent:
-                args = (
-                    json.loads(tc.function.arguments)
-                    if isinstance(tc.function.arguments, str)
-                    else tc.function.arguments
-                )
-                tasks = (
-                    json.loads(args["tasks"])
-                    if isinstance(args.get("tasks"), str)
-                    else args.get("tasks", [])
-                )
-                sub_results = await SubAgentExecutor().run(
-                    tasks=tasks,
-                    parent_user_id=user_id,
-                    parent_agent_id=None,
-                    parent_session_id="",
-                )
-                tool_result = "\n".join(
-                    f"[{r.name}] {'ERROR: ' + r.error if r.error else r.result}"
-                    for r in sub_results
-                )
-            else:
-                risk = get_risk_level(tc.function.name)
-                if risk in ("medium", "high") and reply_func is not None:
-                    tool_args = (
-                        json.loads(tc.function.arguments)
-                        if isinstance(tc.function.arguments, str)
-                        else tc.function.arguments
-                    )
-                    approval_id = str(uuid.uuid4())[:8]
-                    decision = await _default_gate.request_approval(
-                        approval_id=approval_id,
-                        risk_level=risk,
-                        tool_name=tc.function.name,
-                        tool_args=tool_args,
-                        requester_user_id=user_id,
-                        reply_func=reply_func,
-                    )
-                    if decision != "approved":
-                        tool_result = (
-                            f"tool execution {decision}: user did not approve {tc.function.name}"
-                        )
-                    else:
-                        dispatch_result = dispatch(
-                            tc.function.name, tc.function.arguments, is_sub_agent=is_sub_agent
-                        )
-                        tool_result = (
-                            dispatch_result
-                            if isinstance(dispatch_result, str)
-                            else await dispatch_result
-                        )
-                else:
-                    dispatch_result = dispatch(
-                        tc.function.name, tc.function.arguments, is_sub_agent=is_sub_agent
-                    )
-                    tool_result = (
-                        dispatch_result
-                        if isinstance(dispatch_result, str)
-                        else await dispatch_result
-                    )
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": tool_result})
-
-    reply = (msg.content if msg is not None else None) or ""
-    usage = response.usage if response else None
-    user_input = next(
-        (m["content"] for m in messages if isinstance(m, dict) and m.get("role") == "user"),
-        "",
-    )
-    _record_agent_run_completed(
+    _record_agent_run_started(
         run_id=run_id,
-        user_input=user_input,
-        reply=reply,
-        messages=messages,
-        elapsed_s=time.monotonic() - start,
-        usage=usage,
-        model_used=model_used,
         user_id=user_id,
         agent_name=agent_name,
+        entrypoint="run",
     )
-    return reply
+    user_input = _first_user_content(messages)
+    try:
+        built_context = await build_context(user_id, user_input, agent_name or "", cfg.max_tokens)
+        _append_system_context(messages, system_prompt, built_context.text)
+        _record_injected_context(run_id, built_context.sources)
+
+        # Determine effective tool schemas (exclude sub_agent for child agents)
+        schemas = (
+            [s for s in get_schemas() if s["function"]["name"] != _SUB_AGENT_TOOL]
+            if is_sub_agent
+            else get_schemas()
+        )
+
+        # Filter by agent-level allowed_tools if specified
+        if allowed_tools is not None:
+            schemas = [
+                s for s in schemas if check_tool_access(s["function"]["name"], allowed_tools)
+            ]
+
+        response = None
+        msg: Any = None
+        models_to_try = [cfg.model, *cfg.fallbacks]
+        model_used = cfg.model
+
+        while True:
+            messages = _maybe_compress_with_trace(
+                run_id=run_id,
+                messages=messages,
+                user_id=user_id,
+                agent_name=agent_name,
+            )
+            response, model_used = await _call_with_fallback(
+                client,
+                cfg,
+                messages,
+                schemas,
+                models_to_try,
+                run_id=run_id,
+                user_id=user_id,
+                agent_name=agent_name,
+            )
+            models_to_try = [model_used]  # stick with the winning model for subsequent turns
+            choice = response.choices[0]
+            msg = choice.message
+            messages.append(msg.model_dump())  # dict for JSON serializability (session persistence)
+
+            if choice.finish_reason != "tool_calls":
+                break
+
+            for tc in msg.tool_calls or []:
+                if not hasattr(tc, "function"):
+                    continue
+                tool_name = tc.function.name
+                tool_call_id = tc.id
+                risk = get_risk_level(tool_name)
+                tool_start = time.monotonic()
+                _record_tool_call_started(
+                    run_id=run_id,
+                    tool_name=tool_name,
+                    tool_call_id=tool_call_id,
+                    risk_level=risk,
+                    arguments=tc.function.arguments,
+                    user_id=user_id,
+                    agent_name=agent_name,
+                )
+                try:
+                    if tool_name == _SUB_AGENT_TOOL and not is_sub_agent:
+                        args = (
+                            json.loads(tc.function.arguments)
+                            if isinstance(tc.function.arguments, str)
+                            else tc.function.arguments
+                        )
+                        tasks = (
+                            json.loads(args["tasks"])
+                            if isinstance(args.get("tasks"), str)
+                            else args.get("tasks", [])
+                        )
+                        sub_results = await SubAgentExecutor().run(
+                            tasks=tasks,
+                            parent_user_id=user_id,
+                            parent_agent_id=None,
+                            parent_session_id="",
+                        )
+                        tool_result = "\n".join(
+                            f"[{r.name}] {'ERROR: ' + r.error if r.error else r.result}"
+                            for r in sub_results
+                        )
+                    else:
+                        if risk in ("medium", "high") and reply_func is not None:
+                            tool_args = (
+                                json.loads(tc.function.arguments)
+                                if isinstance(tc.function.arguments, str)
+                                else tc.function.arguments
+                            )
+                            approval_id = str(uuid.uuid4())[:8]
+                            approval_start = time.monotonic()
+                            _record_permission_requested(
+                                run_id=run_id,
+                                approval_id=approval_id,
+                                tool_name=tool_name,
+                                risk_level=risk,
+                                requester_user_id=user_id,
+                                agent_name=agent_name,
+                            )
+                            decision = await _default_gate.request_approval(
+                                approval_id=approval_id,
+                                risk_level=risk,
+                                tool_name=tool_name,
+                                tool_args=tool_args,
+                                requester_user_id=user_id,
+                                reply_func=reply_func,
+                            )
+                            _record_permission_resolved(
+                                run_id=run_id,
+                                approval_id=approval_id,
+                                tool_name=tool_name,
+                                risk_level=risk,
+                                decision=decision,
+                                elapsed_s=time.monotonic() - approval_start,
+                                requester_user_id=user_id,
+                                agent_name=agent_name,
+                            )
+                            if decision != "approved":
+                                tool_result = (
+                                    f"tool execution {decision}: user did not approve {tool_name}"
+                                )
+                            else:
+                                dispatch_result = dispatch(
+                                    tool_name,
+                                    tc.function.arguments,
+                                    is_sub_agent=is_sub_agent,
+                                )
+                                tool_result = (
+                                    dispatch_result
+                                    if isinstance(dispatch_result, str)
+                                    else await dispatch_result
+                                )
+                        else:
+                            dispatch_result = dispatch(
+                                tool_name, tc.function.arguments, is_sub_agent=is_sub_agent
+                            )
+                            tool_result = (
+                                dispatch_result
+                                if isinstance(dispatch_result, str)
+                                else await dispatch_result
+                            )
+                except Exception as exc:
+                    _record_tool_call_failed(
+                        run_id=run_id,
+                        tool_name=tool_name,
+                        tool_call_id=tool_call_id,
+                        exc=exc,
+                        elapsed_s=time.monotonic() - tool_start,
+                        user_id=user_id,
+                        agent_name=agent_name,
+                    )
+                    raise
+                _record_tool_call_completed(
+                    run_id=run_id,
+                    tool_name=tool_name,
+                    tool_call_id=tool_call_id,
+                    result=tool_result,
+                    elapsed_s=time.monotonic() - tool_start,
+                    user_id=user_id,
+                    agent_name=agent_name,
+                )
+                messages.append(
+                    {"role": "tool", "tool_call_id": tool_call_id, "content": tool_result}
+                )
+
+        reply = (msg.content if msg is not None else None) or ""
+        usage = response.usage if response else None
+        user_input = next(
+            (m["content"] for m in messages if isinstance(m, dict) and m.get("role") == "user"),
+            "",
+        )
+        elapsed_s = time.monotonic() - start
+        _record_final_reply_emitted(
+            run_id=run_id,
+            reply=reply,
+            elapsed_s=elapsed_s,
+            user_id=user_id,
+            agent_name=agent_name,
+        )
+        _record_agent_run_completed(
+            run_id=run_id,
+            user_input=user_input,
+            reply=reply,
+            messages=messages,
+            elapsed_s=elapsed_s,
+            usage=usage,
+            model_used=model_used,
+            user_id=user_id,
+            agent_name=agent_name,
+        )
+        return reply
+    except Exception as exc:
+        _record_agent_run_failed(
+            run_id=run_id,
+            exc=exc,
+            elapsed_s=time.monotonic() - start,
+            user_id=user_id,
+            agent_name=agent_name,
+            entrypoint="run",
+        )
+        raise
 
 
 def run_sync(user_input: str, user_id: str = "default", system_prompt: str = _SYSTEM) -> str:
@@ -351,6 +972,13 @@ async def run_stream(
     """
     client, cfg = get_async_client_and_config("default")
     run_id = str(uuid.uuid4())
+    start = time.monotonic()
+    _record_agent_run_started(
+        run_id=run_id,
+        user_id=user_id,
+        agent_name=agent_name,
+        entrypoint="run_stream",
+    )
 
     full_system = system_prompt
 
@@ -366,7 +994,6 @@ async def run_stream(
     _append_system_context(messages, full_system, built_context.text)
     _record_injected_context(run_id, built_context.sources)
 
-    start = time.monotonic()
     reply = ""
     models_to_try = [cfg.model, *cfg.fallbacks]
     model_used = cfg.model
@@ -374,7 +1001,12 @@ async def run_stream(
     total_completion_tokens = 0
 
     while True:
-        messages = maybe_compress(messages)
+        messages = _maybe_compress_with_trace(
+            run_id=run_id,
+            messages=messages,
+            user_id=user_id,
+            agent_name=agent_name,
+        )
 
         # Accumulate streaming response
         reply_parts: list[str] = []
@@ -390,10 +1022,25 @@ async def run_stream(
 
         try:
             stream, model_used = await _stream_with_fallback(
-                client, cfg, messages, stream_schemas, models_to_try
+                client,
+                cfg,
+                messages,
+                stream_schemas,
+                models_to_try,
+                run_id=run_id,
+                user_id=user_id,
+                agent_name=agent_name,
             )
             models_to_try = [model_used]
         except (RateLimitError, APIStatusError) as exc:
+            _record_agent_run_failed(
+                run_id=run_id,
+                exc=exc,
+                elapsed_s=time.monotonic() - start,
+                user_id=user_id,
+                agent_name=agent_name,
+                entrypoint="run_stream",
+            )
             yield {"type": "error", "content": str(exc)}
             return
 
@@ -444,11 +1091,51 @@ async def run_stream(
             func: dict[str, str] = tc_data["function"]
             name = func["name"]
             args = func["arguments"]
+            tool_start = time.monotonic()
+            risk = get_risk_level(name)
+            _record_tool_call_started(
+                run_id=run_id,
+                tool_name=name,
+                tool_call_id=tc_data["id"],
+                risk_level=risk,
+                arguments=args,
+                user_id=user_id,
+                agent_name=agent_name,
+            )
             yield {"type": "tool_call", "name": name, "args": args}
-            result = dispatch(name, args)
+            try:
+                result = dispatch(name, args)
+            except Exception as exc:
+                _record_tool_call_failed(
+                    run_id=run_id,
+                    tool_name=name,
+                    tool_call_id=tc_data["id"],
+                    exc=exc,
+                    elapsed_s=time.monotonic() - tool_start,
+                    user_id=user_id,
+                    agent_name=agent_name,
+                )
+                raise
+            _record_tool_call_completed(
+                run_id=run_id,
+                tool_name=name,
+                tool_call_id=tc_data["id"],
+                result=result,
+                elapsed_s=time.monotonic() - tool_start,
+                user_id=user_id,
+                agent_name=agent_name,
+            )
             yield {"type": "tool_result", "name": name, "content": result}
             messages.append({"role": "tool", "tool_call_id": tc_data["id"], "content": result})
 
+    elapsed_s = time.monotonic() - start
+    _record_final_reply_emitted(
+        run_id=run_id,
+        reply=reply,
+        elapsed_s=elapsed_s,
+        user_id=user_id,
+        agent_name=agent_name,
+    )
     yield {"type": "done", "content": reply}
 
     from openai.types import CompletionUsage
@@ -467,7 +1154,7 @@ async def run_stream(
         user_input=user_input,
         reply=reply,
         messages=messages,
-        elapsed_s=time.monotonic() - start,
+        elapsed_s=elapsed_s,
         usage=stream_usage,
         model_used=model_used,
         user_id=user_id,

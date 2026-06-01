@@ -229,7 +229,7 @@ def get_logger(component: str) -> Logger:
   - 不引入 OpenTelemetry SDK
   - sub_agent 继承父 `run_id` 并生成子 span
 
-- [ ] **运行事件覆盖**（`observability-runtime-event-coverage`）：记录 run lifecycle、LLM 调用、工具调用、fallback、审批、上下文压缩、最终回复
+- [x] **运行事件覆盖**（`observability-runtime-event-coverage`）：记录 run lifecycle、LLM 调用、工具调用、fallback、审批、上下文压缩、最终回复
   - 大 payload 可截断并写入截断标记
   - 工具参数 / 返回值写入前脱敏
   - 只定义 runtime event 覆盖，不在本阶段实现 performance rollup API
