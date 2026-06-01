@@ -326,7 +326,7 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 
 团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移设计资产和小块算法**，而非从零重写或整体搬运。
 
-迁移评估见 [knowledge-bridge 迁移计划](../knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：已先完成 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环，并完成 `knowledge-base-parsers-basic` 的基础解析器、`knowledge-base-hybrid-search` 的 SQLite FTS5 / BM25 与 RRF 融合、`knowledge-base-connectors-local` 的 local directory 手动同步、sync planner、Google Drive connector、Confluence connector；后续再推进 graph search 和 retrieval audit。
+历史迁移评估见 [knowledge-bridge 迁移计划](../archive/knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：已先完成 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环，并完成 `knowledge-base-parsers-basic` 的基础解析器、`knowledge-base-hybrid-search` 的 SQLite FTS5 / BM25 与 RRF 融合、`knowledge-base-connectors-local` 的 local directory 手动同步、sync planner、Google Drive connector、Confluence connector；后续再推进 graph search 和 retrieval audit。
 
 当前未实现内容：
 - 无后台 job、admin UI、REST upload API；vector rebuild 目前通过 vector_store 同步 public API 触发
@@ -393,12 +393,12 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 
 ## 规划中（v1.0）
 
-- [ ] **数据源连接器**：通过统一 `DataSource` 接口接入不同来源的文档
-  - **文件直传**：管理员通过 API 直接上传文件（Markdown / 纯文本 / PDF）
-  - **Confluence Server/DC**：通过 Confluence REST API 拉取页面，使用 `atlassian-python-api`
+- [x] **数据源连接器 baseline**：通过统一 source / sync planner 边界接入不同来源的文档
   - ✅ **本地目录**：已支持显式 allowlist root 下 `.txt` / `.md` / `.html` / `.htm` 的手动 sync；文件监听和后台调度后置
-  - **Google Drive**：通过 Drive API v3 拉取文件，使用 `google-api-python-client`；Google Docs 通过 Export API 导出为 HTML 再解析；需要 per-tenant OAuth 2.0 token 存储与刷新
-  - 新增数据源只需实现 `DataSource` 接口，不改核心导入逻辑
+  - ✅ **Google Drive**：已支持指定 folder scope、OAuth `credential_ref`、Google Docs HTML export、text / Markdown / HTML parser dispatch、fake-client 默认测试和手动 opt-in smoke；不做 service account / domain-wide delegation、最终用户 Drive ACL、Sheets / Slides 结构化解析
+  - ✅ **Confluence Cloud**：已支持 Cloud API token `credential_ref`、space / page / page+children scope、storage HTML parser dispatch、bounded 429 retry、fake-client 默认测试和手动 opt-in smoke；不做 Server / Data Center、最终用户 page ACL、attachments / comments
+  - remote source missing / 不可见默认 archive KB document，不物理删除 `knowledge_documents` 行
+  - **文件直传 / REST upload**、后台调度、sync history、文档级 ACL 和更多格式解析后置
 
 - [x] **基础文档解析**：将原始 text / Markdown / lightweight HTML 转换为 parsed sections，再进入分块流程
   - Markdown / 纯文本：直接处理，无需额外依赖
@@ -503,7 +503,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - [ ] graph_search 与 search 的调用决策：由 long_term_ctx 根据 query 类型选择，还是总是并行调用两者再合并？（负责人：待认领）
 - [ ] 图提取时机：与分块同批次触发，还是分块后单独排队？大文档图提取耗时较长，影响何时可检索。（负责人：待认领）
 - [ ] PDF 解析库选型：`pymupdf`（轻量，仅 PDF）还是 `unstructured`（重但覆盖更多格式）？如需支持 DOCX/PPTX 等格式，`unstructured` 更合适。（负责人：待认领）
-- [ ] Confluence 连接器认证方式：API Token（Confluence Cloud）vs Basic Auth（Server/DC）？优先支持哪种？（负责人：待认领）
-- [ ] Google Drive OAuth token 存储：token 存在哪里（SQLite per-tenant）？刷新失败时如何通知管理员重新授权？（负责人：待认领）
-- [ ] 数据源同步策略：连接器是全量重新导入，还是增量同步（只处理变更文档）？（负责人：待认领）
+- [x] Confluence 连接器认证方式：已定 MVP 只支持 Confluence Cloud API token + `credential_ref`；Server / Data Center 后置。
+- [x] Google Drive OAuth token 存储：已定 MVP 使用 connector-level `credential_ref`，可指向本地 token 文件；后续再迁移 credential store / secret manager。
+- [x] 数据源同步策略：已定所有 connector 通过 planner + executor 执行；remote missing 默认 archive，不物理删除。
 - [ ] 文档级 ACL（v2.0）：当前用多 KB + agent 绑定控制访问。如需更细粒度（同一 KB 内不同文档对不同用户可见），需引入文档级权限字段和检索时过滤逻辑。（负责人：待认领）

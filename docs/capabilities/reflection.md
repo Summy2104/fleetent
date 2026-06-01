@@ -226,11 +226,10 @@ def generate_memory_maintenance_proposals(
 
 ## 下一批候选 specs
 
-- `reflection-report-evaluation`
 - `reflection-report-consumption`
-- `memory-reflection-maintenance`
 - `skill-reflection-proposals`
 - `knowledge-base-reflection-reports`
+- `reflection-trend-summary`
 
 ## 自动化效果验证
 

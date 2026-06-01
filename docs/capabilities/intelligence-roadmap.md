@@ -31,7 +31,7 @@ spec 零散推进后失去全貌。
 
 - agent-runtime：产生 runtime events，是 observability 的主要数据源。
 - platform / governance：后续展示 trace、审批、用户和 agent 绑定。
-- connectors：知识库外部数据源接入的实现归属。
+- connectors：用户级外部工具授权与凭证层；KB 数据源 connector 归 knowledge-base 能力域管理。
 
 ## 状态定义
 
@@ -54,7 +54,7 @@ spec 零散推进后失去全貌。
 | Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture、deterministic budget policy | agent / tenant 级 budget 策略 | 真实 tokenizer、个性化 budget、agent-specific policy |
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告、deterministic report evaluation、User Memory maintenance proposal lifecycle | review UI / scheduler / trend summary | 自动 skill proposal、KB reflection reports |
 | Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API、combined embedding evaluation | rerank evaluation；rerank 接入 KB search | 后台 reindex job runtime、sqlite-vec、Qdrant、OpenSearch adapter |
-| Knowledge base | 基础完成 | local ingest、parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator、combined embedding evaluation | KB scope/binding；connector MVP 范围决策 | Confluence / Google Drive connectors、graph retrieval |
+| Knowledge base | 基础完成 | local ingest、parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator、combined embedding evaluation、Google Drive / Confluence connector baseline | agent 到多 KB 绑定；真实 SaaS smoke 与生产凭据管理 | graph retrieval、document-level ACL、scheduler / sync history、attachments / Office / PDF |
 | Deployment / config | 基础完成 | `settings.yaml`、MCP dedicated server file、legacy config fail-fast、本地 SQLite upgrade / backup 脚本 | config docs 对 intelligence runtime prerequisites 的收敛 | config center、Admin UI、hot reload |
 
 ## 依赖顺序
@@ -134,6 +134,12 @@ flowchart TD
 - embedding / backend 切换后可通过同步 public API 重建 memory / KB index。
 - 本地 SQLite / config / data 目录有最小备份与升级流程；migration 失败保留 backup，恢复由 operator 手动执行。
 
+已完成的 M2 spec：
+
+- `knowledge-base-sync-planner`：提供 sync action model、plan / execute separation、幂等 source state 更新、单 item 失败隔离，以及 local / remote connector 复用的同步执行边界。
+- `vector-store-reindex-jobs`：提供 memory / knowledge-base 同步 reindex public API、dry-run、rebuild 清空目标 namespace 后重建索引，以及单条失败计数继续执行。
+- `deployment-upgrade-and-backup`：提供本地 SQLite upgrade / backup 脚本、dry-run、backup-only、Alembic upgrade 前备份和 migration 失败保留 backup。
+
 ### M3：可评估
 
 目标：核心 intelligence 能力的效果不只靠人工感觉判断。
@@ -194,54 +200,53 @@ flowchart TD
 - connector 明确认证方式、权限边界、source metadata、删除语义和失败恢复行为。
 - 默认测试不连接真实 SaaS；真实 connector smoke 通过显式环境变量手动开启。
 
-是否将 Confluence / Google Drive connector 纳入 MVP，需要在 connector spec 前单独确认。当前 KB MVP baseline 是
-local directory + sync planner + hybrid retrieval + reindex。
+当前 KB MVP baseline 包含 local directory + Google Drive folder + Confluence Cloud scope 的手动 sync、sync planner、
+hybrid retrieval 和 reindex；真实 SaaS smoke 仍需显式环境变量和凭据手动开启。
 
 已完成的 M4b spec：
 
 - `knowledge-base-connectors-google-drive`：提供 folder-scoped Google Drive connector config、OAuth `credential_ref`、fake client 默认测试路径、Google Docs HTML export、text / Markdown / HTML parser dispatch、planner / executor 分离、missing archive 语义和 opt-in smoke scaffold；不做 service account / domain-wide delegation、per-user Drive ACL、Sheets / Slides 结构化解析、scheduler 或真实 Google API 默认测试。
 - `knowledge-base-connectors-confluence`：提供 Confluence Cloud API token `credential_ref`、space / page / page+children scope、fake client 默认测试路径、storage HTML parser dispatch、bounded 429 retry、planner / executor 分离、missing archive 语义和 opt-in smoke scaffold；不做 Server / Data Center、per-user page ACL、attachments / comments、scheduler 或真实 Confluence API 默认测试。
 
-## Goal 自动推进边界
+## Goal 推进结果与后续边界
 
-适合在 goal 中按依赖顺序自动设计、review、执行、合并归档的 specs：
+本轮 M3 / M4 / M4b goal 已按依赖顺序完成并归档：
 
 1. `long-term-context-evaluation`
-2. `memory-retention-and-compaction`
-3. `reflection-report-evaluation`
-4. `memory-and-kb-real-embedding-evaluation`
+2. `reflection-report-evaluation`
+3. `memory-and-kb-real-embedding-evaluation`
+4. `memory-retention-and-compaction`
+5. `long-term-context-budget-policy`
+6. `memory-reflection-maintenance`
+7. `knowledge-base-connectors-google-drive`
+8. `knowledge-base-connectors-confluence`
 
-这些 specs 的默认范围应保持为 evaluation / lifecycle / 运维地基，不改变 runtime 默认行为，不默认调用真实外部模型，
-不自动删除或改写用户数据。
+后续仍需要人工确认后再推进的方向：
 
-需要人工确认后再推进真实实现的 specs：
-
-1. `long-term-context-budget-policy`：会改变 memory / KB / recent conversation 的注入策略和 token 分配。
-2. `memory-reflection-maintenance`：涉及 reflection 对 memory 的合并、压缩、删除或写回权限。
-3. `knowledge-base-connectors-confluence`：涉及企业数据源认证、权限、删除语义和数据边界。
-4. `knowledge-base-connectors-google-drive`：涉及企业数据源认证、权限、删除语义和数据边界。
-
-如果 connector spec 只定义 connector contract / fake connector / fixture，而不接真实 Confluence 或 Google Drive，
-可以先自动推进；一旦进入真实 SaaS API、OAuth / service account、ACL 或客户数据同步行为，必须人工确认。
+1. Shared Memory：涉及 Memory 能力域扩展、scope ownership、确认主体和 long-term-ctx 第三类 provider。
+2. agent / tenant 到多 KB 绑定策略：会改变用户查询可见范围和 KB 访问控制。
+3. document-level ACL：会把 Google Drive / Confluence 权限映射到检索过滤，复杂度和安全风险都高。
+4. 真实 SaaS connector 生产凭据管理：涉及 secret manager、token 轮换、授权失败恢复和审计。
+5. 自动 scheduler / worker / sync history：会改变 connector 运行方式和运维面。
 
 ## 并行策略
 
-可以并行：
+已完成批次中的并行原则：
 
 - `observability-runtime-event-coverage` 和 `knowledge-base-sync-planner`
 - `memory-retention-and-compaction` 和 `knowledge-base-sync-planner`
 - 已完成的 `deployment-upgrade-and-backup` 不阻塞 intelligence specs
 - `long-term-context-evaluation` 和 `reflection-report-evaluation`
 - `memory-retention-and-compaction` 和 `long-term-context-evaluation`
-- connector contract / fake connector 设计可以和 evaluation specs 并行，但真实 connector 实现前需要人工确认
+- connector contract / fake connector 设计可以和 evaluation specs 并行；真实 SaaS smoke 仍保持显式 opt-in
 
-不建议提前做：
+后续仍不建议提前做：
 
-- Confluence / Google Drive connector 早于 `knowledge-base-sync-planner`
-- `long-term-context-budget-policy` 早于 `long-term-context-evaluation`
-- `memory-reflection-maintenance` 早于 `memory-retention-and-compaction`
-- reflection 自动化写回早于 `reflection-report-evaluation`
-- `rerank-kb-search-integration` 早于 `memory-and-kb-real-embedding-evaluation`
+- Shared Memory 早于 User Memory ownership / proposal lifecycle 稳定。
+- document-level ACL 早于 agent / KB 绑定策略。
+- connector scheduler / worker 早于手动 sync observability 与失败恢复。
+- reflection 自动化写回早于 owner-approved proposal review 入口。
+- `rerank-kb-search-integration` 早于 rerank evaluation。
 
 ## MVP-ready 判定
 
@@ -249,8 +254,7 @@ local directory + sync planner + hybrid retrieval + reindex。
 
 - Observability 能解释一次 agent run 的主要行为、成本、耗时和错误。
 - Memory 能跨 session 提取、更新、检索，并有 retention 边界。
-- Knowledge base 能导入本地企业文档、混合检索，并能计划/执行同步；vector store 能重建索引。
-  Confluence / Google Drive 是否属于 MVP-ready 条件，需要在 connector specs 前单独确认。
+- Knowledge base 能导入本地企业文档，能通过 Google Drive / Confluence connector 手动同步企业文档，支持混合检索，并能计划/执行同步；vector store 能重建索引。
 - Long-term context 能从 memory / KB 中选择上下文，并有 evaluation 证明注入效果。
 - Reflection 能生成可评估的报告，但自动写回保持关闭或受控。
 - Vector store 能持久化索引，并支持 embedding / backend 变更后的 reindex。

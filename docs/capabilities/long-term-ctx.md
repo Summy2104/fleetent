@@ -147,10 +147,10 @@ async def build_context(
 
 ## 下一批候选 specs
 
-- `long-term-context-evaluation`
-- `long-term-context-budget-policy`
 - `long-term-context-template-config`
 - `knowledge-provider-contract`
+- `long-term-context-agent-tenant-policy`
+- `long-term-context-real-tokenizer`
 
 ## 自动化效果验证
 

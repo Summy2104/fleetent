@@ -5,15 +5,15 @@ Provide tenant-scoped enterprise document ingestion, parsing, indexing, retrieva
 and retrieval evaluation for agent long-term context.
 ## Requirements
 ### Requirement: KnowledgeBridge migration plan
-系统 SHALL 在实现 fleetent knowledge-base 运行时代码前，产出 `knowledge-bridge` 到 fleetent 的迁移计划。
+系统 SHALL 保留 `knowledge-bridge` 到 fleetent 的历史迁移计划，作为后续知识库增强的参考资料。
 
 #### Scenario: Migration plan document exists
 - **WHEN** 本 change 完成
-- **THEN** 仓库包含 `docs/knowledge-bridge-migration-plan.md`
+- **THEN** 仓库包含 `docs/archive/knowledge-bridge-migration-plan.md`
 
 #### Scenario: Migration plan links from capability doc
 - **WHEN** 读者查看 `docs/capabilities/knowledge-base.md`
-- **THEN** 文档链接到 migration plan，并说明 knowledge-base 将按拆分 specs 渐进实现
+- **THEN** 文档链接到 archived migration plan，并说明 knowledge-base 将按拆分 specs 渐进实现
 
 ### Requirement: Migration asset classification
 迁移计划 SHALL 将 `knowledge-bridge` 资产分为可直接迁移、可参考但需重写、暂缓迁移和不迁移。

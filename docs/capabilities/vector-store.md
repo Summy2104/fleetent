@@ -151,7 +151,7 @@ rerank provider 目前只提供边界，尚未接入 knowledge-base search。
 
 - `vector-store-sqlite-vec-backend`
 - `rerank-kb-search-integration`
-- `rerank-kb-search-integration`
+- `vector-store-reindex-job-runtime`
 
 ## 自动化效果验证缺口
 

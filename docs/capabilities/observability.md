@@ -262,23 +262,20 @@ def get_logger(component: str) -> Logger:
 
 ## 当前缺口
 
-- trace event 覆盖不完整：LLM call、tool call、permission、fallback、context compression、final reply、sub-agent span 等还未系统记录。
-- request_id / span 语义仍需强化：当前已能共享 run_id，但完整 trace tree 尚未完成。
-- usage summary 有 token / elapsed 基础聚合，但还缺错误率、fallback、工具耗时、审批等待等质量指标。
+- runtime event coverage 已覆盖 run lifecycle、LLM call、tool call、permission、fallback、context compression 和 final reply；但 request_id / span 语义仍需强化，完整 trace tree 尚未完成。
 - logs / traces retention、导出、备份和告警策略未定义。
-- 没有平台 UI 或 admin 查询体验。
+- usage / performance summary 目前是 Python public API；还没有 platform UI、admin 查询入口或 HTTP 查询端点。
+- 尚未接入 OpenTelemetry / Prometheus，也没有独立 metrics store 或 rollup 表。
 
 ## 下一批候选 specs
 
-- `observability-runtime-event-coverage`
 - `observability-request-trace-tree`
 - `observability-retention-policy`
-- `observability-performance-summary`
+- `observability-admin-query-api`
 - `platform-trace-view`
 
 ## 自动化效果验证缺口
 
-- 构造完整 agent run fixture，验证事件流覆盖用户输入、模型、工具、上下文、完成事件。
 - 扩展完整 agent run fixture，验证事件流覆盖用户输入、模型、工具、上下文、完成事件。
 - 验证脱敏 / 截断规则对大 payload 和敏感字段稳定生效。
 - 验证 usage / performance 聚合在缺失字段、旧 trace、异常 run 下的容错。

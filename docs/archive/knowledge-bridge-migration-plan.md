@@ -104,7 +104,7 @@
 
 ## 后续 fleetent KB specs 拆分和推荐顺序
 
-状态说明：第一批 `knowledge-base-core`、`knowledge-base-parsers-basic`、`knowledge-base-connectors-local`、`knowledge-base-hybrid-search` 和 `knowledge-base-retrieval-evaluation` 已合入 `main`。下表保留为迁移路线和后续拆分边界参考。
+状态说明：`knowledge-base-core`、`knowledge-base-parsers-basic`、`knowledge-base-connectors-local`、`knowledge-base-hybrid-search`、`knowledge-base-retrieval-evaluation`、`knowledge-base-sync-planner`、`knowledge-base-connectors-google-drive` 和 `knowledge-base-connectors-confluence` 已合入 `main`。下表保留为迁移路线和后续拆分边界参考。
 
 | 顺序 | spec | owning package | 最小范围 | 依赖 | 不包含 |
 | --- | --- | --- | --- | --- | --- |
@@ -113,12 +113,12 @@
 | 3 | `knowledge-base-connectors-local` | `intelligence.knowledge_base.connectors` | local directory `DataSource`、manual sync run、mtime/hash 变更检测 | core ingest、basic parsers | Confluence/Drive、后台调度器、多 worker |
 | 4 | `knowledge-base-hybrid-search` | `intelligence.knowledge_base.retrieval` | SQLite FTS5 / BM25、中文 lexical strategy、RRF 融合、`limit`/namespace 过滤 | core chunks table、vector_store search | reranker、query planner、graph search |
 | 5 | `knowledge-base-sync-planner` | `intelligence.knowledge_base.sync` | sync action model、plan/run separation、idempotent execution 状态 | core store、local connector | webhooks、多 worker、跨源调度 |
-| 6 | `knowledge-base-connectors-confluence` | `intelligence.knowledge_base.connectors` | Confluence Server/DC list/fetch、分页、限速、增量 token、scope rules | sync planner、basic parsers | Cloud-only behavior、ACL enforcement |
-| 7 | `knowledge-base-connectors-google-drive` | `intelligence.knowledge_base.connectors` | Drive file/folder scope、OAuth/service account、change token、Google Docs/Sheets export | sync planner、parser specs、token store decision | webhook、shared-drive edge hardening、spreadsheet LLM interpreter |
+| 6 | `knowledge-base-connectors-google-drive` | `intelligence.knowledge_base.connectors` | folder-scoped Drive sync、OAuth `credential_ref`、Google Docs HTML export、fake client 默认测试、missing archive | sync planner、basic parsers | service account/domain-wide delegation、per-user Drive ACL、Sheets/Slides 结构化解析、webhook |
+| 7 | `knowledge-base-connectors-confluence` | `intelligence.knowledge_base.connectors` | Confluence Cloud API token `credential_ref`、space/page/page+children scope、storage HTML、限速与 429 backoff、missing archive | sync planner、basic parsers | Server/Data Center、per-user page ACL、attachments/comments、webhook |
 | 8 | `knowledge-base-graph-search` | `intelligence.knowledge_base.graph` | entities/relations Alembic 表、`kb_extraction` task、entity vector indexing、`graph_search()` | core ingest/search、model_router task routing | ontology UI、GraphRAG framework、cross-tenant graph |
 | 9 | `knowledge-base-retrieval-audit` | `observability` + `intelligence.knowledge_base` public events | retrieval summary, latency, result ids, score, query hash/redaction, retention | search API stable | raw query/chunk content storage by default |
 
-推荐顺序把 `knowledge-base-hybrid-search` 放在 Confluence/Drive 之前，是为了让本地和手动 ingest 先形成可评估的检索质量闭环，再扩大数据源范围。
+推荐顺序已执行：先完成 core / parser / local / hybrid / sync planner，再扩大到 Google Drive 和 Confluence remote connector。后续重点转向 graph search、retrieval audit、scheduler / sync history、文档级 ACL 和更多文件格式解析。
 
 ## 第一批 specs 的依赖、风险和不包含范围
 
@@ -204,4 +204,4 @@
 
 ## 后续实施建议
 
-第一批 KB foundation 已完成并合入。下一批建议优先讨论 `knowledge-base-sync-planner`，把当前 local directory manual sync 的状态记录提升为可规划、可重试、幂等的同步动作模型；随后再推进 Confluence / Google Drive connector。`knowledge-base-retrieval-audit` 可并行评估，但默认不保存 raw query 或 chunk content。
+KB foundation、sync planner、Google Drive connector 和 Confluence connector 已完成并合入。下一批建议优先讨论 `knowledge-base-graph-search`、`knowledge-base-retrieval-audit`、connector scheduler / sync history、文档级 ACL 或 PDF / Office / Google Sheets 解析；retrieval audit 默认不保存 raw query 或 chunk content。

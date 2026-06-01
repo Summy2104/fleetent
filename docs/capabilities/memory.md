@@ -171,7 +171,8 @@ async def mark_user_memory_stale(user_id: str, memory_id: str) -> None:
 ## 下一批候选 specs
 
 - `memory-extraction-real-llm-regression`
-- `memory-extraction-real-llm-regression`
+- `memory-quality-trend-summary`
+- `memory-maintenance-scheduler-or-review-ui`
 
 ## 自动化效果验证缺口
 
