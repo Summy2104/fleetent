@@ -33,9 +33,15 @@ class CancelToken:
         deadline: Absolute `time.monotonic()` value past which the token is
             considered cancelled. None means no deadline (cancellation only via
             an explicit `cancel()` call). The default token never cancels.
+        parent: Optional upstream token (AR20 incremental add). When set,
+            `is_cancelled()` also reflects the parent's cancellation, letting a
+            child token merge "own deadline" with "external/parent cancel"
+            without a watchdog. Default None preserves prior single-source
+            semantics for every existing caller.
     """
 
     deadline: float | None = None
+    parent: CancelToken | None = None
     _cancelled: bool = False
 
     def cancel(self) -> None:
@@ -43,10 +49,12 @@ class CancelToken:
         self._cancelled = True
 
     def is_cancelled(self) -> bool:
-        """True once explicitly cancelled or the monotonic deadline has passed."""
+        """True once explicitly cancelled, the deadline passed, or the parent is."""
         if self._cancelled:
             return True
-        return self.deadline is not None and time.monotonic() >= self.deadline
+        if self.deadline is not None and time.monotonic() >= self.deadline:
+            return True
+        return self.parent is not None and self.parent.is_cancelled()
 
 
 class CancellationChecker:

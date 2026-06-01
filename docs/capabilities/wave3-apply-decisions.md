@@ -18,7 +18,7 @@
 | # | 阶段/轨 | change | roadmap | 状态 |
 |---|---|---|---|---|
 | 1 | C | tool-arg-sanitization | T3 | ✅ 已完成 |
-| 2 | A | sub-agent-lifecycle | AR20 | 🔵 进行中 |
+| 2 | A | sub-agent-lifecycle | AR20 | ✅ 已完成 |
 | 3 | C | tool-timeout | T2 | ⬜ |
 | 4 | C | tool-result-truncation | T4 | ⬜ |
 | 5 | C | tool-call-guardrails | AR10 | ⬜ |
@@ -54,3 +54,35 @@
 1. 占位符定为 `[REDACTED]`（自解决策 #1）是否认可。
 2. 不加"曾脱敏"布尔标记（自解决策 #2）是否认可；如需，后续接 trace entry 层。
 3. 仅脱敏顶层键、不递归嵌套（自解决策 #3）是否够用作 v1.0 起点。
+
+## sub-agent-lifecycle（AR20）— feat/sub-agent-lifecycle
+
+**实现：**
+- 新增 `src/fleetent/sub_agent_lifecycle.py`：`SubAgentState`（StrEnum，6 态）、`SubAgentLifecycle`（dataclass，对应 `sub_agent_runs` 一行）、`validate_transition`（合法迁移表 + 非法 raise `ValueError`）、`init_db`/`upsert`/`query_by_parent`（标准库 `sqlite3`，`DB_PATH` 从 `user_store` re-export 可 monkeypatch，复用 `_conn` 惯例）、`resolve_timeout`（优先级 call > config(Settings) > 默认 300）。
+- `cancellation.py`：`CancelToken` 增量加可选 `parent: CancelToken | None = None`，`is_cancelled()` 在自身 `_cancelled`/deadline 外 OR 上 `parent.is_cancelled()`（纯加法，默认 None，既有用法零影响）——AR20 对 AR19 的增量补全。
+- `config.py`：新增 `sub_agent_timeout_seconds: int = 300`（env-first，同 `agent_max_turns` 款式）。
+- `sub_agent.py`：`SubAgentExecutor.run` 新增可选 kwarg `timeout_seconds`/`cancel_token`（缺省与现状等价）；`_run_one` 在各生命周期点写记录，构造 `CancelToken(deadline=now+timeout, parent=batch_token)` 透传 `agent_loop.run(cancel_token=...)`；据 `child.is_cancelled()` + deadline 是否已过区分 `timed_out`（自身超时）/`cancelled`（父/外部取消）；异常记 `failed`。
+
+**自解决策（记录供核实）：**
+1. **顺序前置**：AR20 由 #12 提前到 #2，因 T2/SB7 依赖其 `parent` 原语（见上方「执行顺序自解决策」）。
+2. **热路径少写一次 fsync**：正常路径首条持久化记录直接是 `running`（created_at + started_at 同时落），`pending` 仅在「启动前即被外部取消」分支持久化（pending→cancelled、started_at 为 None）。理由：正常路径 pending→running 之间无 await、几乎瞬时，独立进程几乎不可能恰好查到 pending；省一次同步 sqlite commit（fsync）对并发延迟有实质改善（见下）。所有 spec scenario 要求的可观测终态均保留。
+3. **`timed_out` vs `cancelled` 区分**：`agent_loop.run` 因 token 取消是优雅返回（非抛异常），故在其返回后检查 `child.is_cancelled()`；`child.deadline` 已过记 `timed_out`，否则（父/外部触发）记 `cancelled`，与 design D3 一致。
+4. **`SubAgentResult` 契约不变**：`timed_out`/`cancelled` 任务 `error` 仍为 None、`result` 为 agent_loop 返回的部分结果；运行态可观测性全部落 `sub_agent_runs` 表（旁路增强），不改批返回语义，既有 `test_sub_agent.py` 不回归。
+
+**遇到的问题与处理：**
+- **既有计时测试 `test_tasks_run_concurrently_not_sequentially`**：(a) 该测试原**未隔离 DB**，我新增的持久化会写真实 `data/users.db` → 已加 `monkeypatch DB_PATH` 到 tmp_path 修正隔离；(b) 同步 sqlite 持久化（CLAUDE.md 强制同步、每次 commit 一次 fsync）使并行 elapsed 从 ~0.05 升到 ~0.10，触发原 `elapsed < 0.09` 的过紧代理阈值。处理：先按自解决策 #2 把热路径写入降到最少（init + 每任务 2 写），再把绝对阈值放宽到 `< 0.13`（仍能区分并行 ~0.10 与完全串行 ~0.15+），并加注释说明——**并发性的权威断言是 130-131 行「两任务启动时间差 < 0.02s」**（串行则差 >0.05s），绝对时间只作宽松上限。
+- **circular import（预存）**：`sub_agent ↔ agent_loop` 互相 import 导致 `test_sub_agent.py` 无法单独运行（基线即如此），需在全量套件或与 `test_agent_loop.py` 同跑。本 change 未触碰该结构，不修既有问题。
+
+**影响：**
+- 新增 `sub_agent_lifecycle.py`、`tests/test_sub_agent_lifecycle.py`（16 测试）；改 `cancellation.py`/`config.py`/`sub_agent.py`、`tests/test_cancellation.py`（+4）/`tests/test_sub_agent.py`（+6 及 1 处既有测试加 DB 隔离 + 阈值放宽）。
+- 测试：**全量 `ANTHROPIC_API_KEY=test-key uv run pytest` → 1237 passed，0 失败，零回归**。
+- ruff：仅改动文件 format+check 全绿。
+- mypy：74 → 75（+1）。该 +1 为 `sub_agent_lifecycle.py:79` 的 `Settings()` call-arg，与 `termination.py:28`、`context_mgr.py:55` 完全同款的**既有错误模式实例**（运行时由 env 提供 `anthropic_api_key`），非新增错误模式，沿用 wave2 先例口径，不以不一致的 inline ignore 抑制。
+
+**需 zy 核实：**
+1. 顺序前置 AR20（自解决策 #1）是否认可。
+2. 热路径不单独持久化 `pending`、仅在 pre-cancel 分支持久化（自解决策 #2）是否认可——以一次 fsync 换取 pending 态的极短可观测窗口。
+3. 既有并发测试阈值由 `0.09` 放宽到 `0.13` + 加 DB 隔离（并发性改由启动重叠断言权威保证）是否认可。
+4. mypy +1（既有 `Settings()` 模式实例）是否认可。
+
+---

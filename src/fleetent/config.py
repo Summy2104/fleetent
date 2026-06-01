@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     session_cleanup_interval_seconds: float = 3600.0
     agent_max_turns: int = 50
     agent_max_consecutive_failures: int = 3
+    # Per sub-agent wall-clock timeout (AR20). A sub-agent runs a full agent_loop
+    # round (multi-turn LLM + tools), an order longer than a single tool call, so
+    # this guard is orthogonal to the main task budget. 300s balances "fits a real
+    # sub-task" against "surfaces a hang fast".
+    sub_agent_timeout_seconds: int = 300
     # Two-dimensional iteration budget (AR2). max_turns reuses agent_max_turns
     # above (the step dimension is folded into the budget). -1 = unlimited; the
     # token dimension defaults to unlimited so existing deployments keep
