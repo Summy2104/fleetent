@@ -1,0 +1,91 @@
+## ADDED Requirements
+
+### Requirement: SQLite upgrade entry point
+系统 SHALL 提供 `scripts/upgrade.py` 作为 SQLite-first on-prem upgrade entry point。
+
+#### Scenario: Upgrade script exists
+- **WHEN** operator 查看仓库 scripts
+- **THEN** 存在 `scripts/upgrade.py`
+
+#### Scenario: Upgrade script reads effective database URL
+- **WHEN** operator 运行 upgrade script
+- **THEN** script 使用 effective `database_url` 定位 SQLite DB 文件
+- **AND** `--database-url` 优先于 `DATABASE_URL`
+- **AND** `DATABASE_URL` 环境变量可以覆盖默认 settings
+
+#### Scenario: Backup directory override
+- **WHEN** operator 运行 upgrade script with `--backup-dir`
+- **THEN** script 使用该目录作为 backup root，而不是默认 `data/backups`
+
+#### Scenario: Unsupported database URL fails fast
+- **WHEN** database_url 不是本地 SQLite URL
+- **THEN** script fail fast
+- **AND** 不创建 backup
+- **AND** 不运行 Alembic migration
+
+### Requirement: Pre-migration SQLite backup
+upgrade script SHALL 在运行 Alembic migration 前创建 SQLite DB 文件备份。
+
+#### Scenario: Backup is created before migration
+- **WHEN** operator 运行默认 upgrade
+- **THEN** script 在 `data/backups/YYYYMMDD-HHMMSS/fleetent.db` 创建 DB 备份
+- **AND** backup 成功后才运行 `alembic upgrade head`
+
+#### Scenario: Backup directory is created
+- **WHEN** backup directory 不存在
+- **THEN** script 创建该目录
+
+#### Scenario: Missing database file fails fast
+- **WHEN** database_url 指向的 SQLite DB 文件不存在
+- **THEN** script fail fast
+- **AND** 错误信息说明 database file 不存在
+- **AND** 不运行 Alembic migration
+
+### Requirement: Upgrade dry run
+upgrade script SHALL 支持 dry-run，用于显示将执行的 backup 和 migration 操作而不修改文件系统。
+
+#### Scenario: Dry run does not write or migrate
+- **WHEN** operator 运行 `scripts/upgrade.py --dry-run`
+- **THEN** script 输出将备份的 DB 路径和 migration 命令
+- **AND** 不要求 SQLite DB 文件已经存在
+- **AND** 不创建 backup 文件
+- **AND** 不运行 Alembic migration
+
+### Requirement: Backup-only mode
+upgrade script SHALL 支持 backup-only，用于只创建 SQLite DB 备份而不运行 migration。
+
+#### Scenario: Backup-only skips migration
+- **WHEN** operator 运行 `scripts/upgrade.py --backup-only`
+- **THEN** script 创建 backup
+- **AND** 不运行 Alembic migration
+
+### Requirement: Migration failure handling
+upgrade script SHALL 在 migration 失败时保留 backup 并返回非 0 exit code。
+
+#### Scenario: Alembic failure keeps backup
+- **WHEN** backup 成功但 `alembic upgrade head` 失败
+- **THEN** script 返回非 0 exit code
+- **AND** 已创建 backup 保留在 backup directory
+- **AND** script 输出手动恢复提示
+
+#### Scenario: Backup failure prevents migration
+- **WHEN** backup 创建失败
+- **THEN** script 返回非 0 exit code
+- **AND** 不运行 Alembic migration
+
+### Requirement: Manual restore documentation
+部署文档 SHALL 说明 upgrade 失败后的手动恢复步骤。
+
+#### Scenario: Restore steps are documented
+- **WHEN** operator 查看 deployment 文档
+- **THEN** 文档说明恢复步骤：停止服务、用备份 DB 替换当前 DB、重启服务
+- **AND** 文档说明 migration 失败不会自动 rollback
+
+### Requirement: Upgrade excludes install package scope
+deployment upgrade SHALL NOT introduce full install package, license, PostgreSQL backup, retention policy, UI,
+API, scheduler, or worker behavior.
+
+#### Scenario: Upgrade remains local script
+- **WHEN** 本 change 完成
+- **THEN** upgrade 能力通过 local script 提供
+- **AND** 不新增 Admin API、HTTP endpoint、dashboard、scheduler 或 worker
