@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-DB_PATH = Path("data/users.db")
+DB_PATH = Path("data/fleetent.db")
 
 
 @dataclass

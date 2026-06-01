@@ -128,7 +128,7 @@ class Settings(BaseSettings):
     context_keep_recent: int = 10
     log_format: str = "console"
     default_agent_name: str | None = None
-    database_url: str = "sqlite:///data/users.db"
+    database_url: str = "sqlite:///data/fleetent.db"
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     vector_store: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)

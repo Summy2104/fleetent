@@ -141,7 +141,7 @@ async def test_forbidden_chunks_are_rejected_after_fixture_run(tmp_path, monkeyp
 
 async def test_runner_isolates_sqlite_and_vector_store_from_data_dir(tmp_path, monkeypatch) -> None:
     fixture = load_fixtures()[0]
-    data_db = Path("data/users.db").resolve()
+    data_db = Path("data/fleetent.db").resolve()
 
     result = await run_deterministic_fixture(fixture, tmp_path, monkeypatch)
 

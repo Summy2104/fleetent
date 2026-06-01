@@ -150,7 +150,7 @@ def query_trace_events(query: TraceQuery) -> Iterator[TraceEvent]:
 
 
 def _database_url() -> str:
-    return os.environ.get("DATABASE_URL", "sqlite:///data/users.db")
+    return os.environ.get("DATABASE_URL", "sqlite:///data/fleetent.db")
 
 
 def _prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:

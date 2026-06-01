@@ -18,9 +18,9 @@ def test_create_database_from_sqlite_url(tmp_path):
 
 
 def test_create_database_from_relative_sqlite_url():
-    database = db.create_database("sqlite:///data/users.db")
+    database = db.create_database("sqlite:///data/fleetent.db")
 
-    assert database.path == Path("data/users.db")
+    assert database.path == Path("data/fleetent.db")
 
 
 def test_create_database_rejects_unsupported_backend():

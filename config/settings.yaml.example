@@ -1,6 +1,6 @@
 # Non-secret application settings. Environment variables and .env override this file.
 
-database_url: sqlite:///data/users.db
+database_url: sqlite:///data/fleetent.db
 log_format: console
 
 observability:
