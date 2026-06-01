@@ -12,9 +12,10 @@
 docs/
   README.md                       ← 本文件：导航 + 写作规范
   strategy.md                     ← 战略背景：为什么做、卖什么、与竞品的差异
-  architecture.md                 ← 总体架构：系统定位、模块关系、数据流、关键决策
+    architecture.md                 ← 总体架构：系统定位、模块关系、数据流、关键决策
   capabilities/
     _template.md                  ← 能力域文档模板（新建时复制）
+    intelligence-roadmap.md        ← 常乐负责模块的能力地图、MVP 缺口、实施批次
     agent-runtime.md              ← 核心循环、工具、Skill、MCP、沙箱
     im-gateway.md                 ← Slack / Telegram / WhatsApp 接入
     memory.md                     ← 记忆系统、自进化

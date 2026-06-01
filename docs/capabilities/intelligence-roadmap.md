@@ -1,0 +1,196 @@
+# intelligence-roadmap
+
+> 这份文档是常乐负责能力域的总控板，用来决定后续 OpenSpec 的优先级、依赖顺序和验收边界。
+
+## 目标
+
+把 intelligence / observability / deployment 中由常乐负责或强依赖的模块放到同一张路线图里管理，避免按
+spec 零散推进后失去全貌。
+
+本路线图回答三个问题：
+
+- 当前每个能力域做到什么程度。
+- MVP 前还必须补哪些缺口。
+- 后续 specs 应该按什么依赖顺序和批次推进。
+
+## 范围
+
+纳入本路线图的能力域：
+
+| 能力域 | 文档 | 负责范围 |
+| --- | --- | --- |
+| Observability | [observability.md](observability.md) | logs、agent traces、source attribution、usage / performance summary |
+| Memory | [memory.md](memory.md) | semantic memory、extraction、merge/update/delete、retention / compaction |
+| Long-term Context | [long-term-ctx.md](long-term-ctx.md) | memory / KB context selection、token budget、prompt injection |
+| Reflection | [reflection.md](reflection.md) | 从 trace / memory / KB 中发现改进建议 |
+| Vector Store | [vector-store.md](vector-store.md) | vector backend、embedding / rerank provider、reindex |
+| Knowledge Base | [knowledge-base.md](knowledge-base.md) | document ingest、local sync、hybrid retrieval、connectors |
+| Deployment / Config | [deployment.md](deployment.md) | on-prem config、backup / upgrade、module runtime prerequisites |
+
+不纳入本路线图直接管理，但会作为依赖引用：
+
+- agent-runtime：产生 runtime events，是 observability 的主要数据源。
+- platform / governance：后续展示 trace、审批、用户和 agent 绑定。
+- connectors：知识库外部数据源接入的实现归属。
+
+## 状态定义
+
+后续能力状态固定使用以下 5 种，避免状态描述漂移：
+
+| 状态 | 含义 |
+| --- | --- |
+| 已实现 | 关键用户路径已经完成，默认测试覆盖，短期只需维护 |
+| 基础完成 | public API / store / 配置边界已建立，但效果验证、运维或生产化仍有缺口 |
+| 部分完成 | 已有可用能力，但关键链路或边界仍明显缺失 |
+| 仅设计 | 文档和 spec 已有方向，但没有可依赖实现 |
+| 未开始 | 尚未进入设计或实现 |
+
+## 当前能力地图
+
+| 能力 | 当前状态 | 已有基础 | MVP 必补缺口 | 非 MVP 增强 |
+| --- | --- | --- | --- | --- |
+| Observability foundation | 基础完成 | structured logs、SQLite traces、usage summary、source attribution、contract tests | 补齐 runtime event coverage；形成可查询的 performance summary | OTel / Prometheus、dashboard UI、告警 |
+| Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation | retention / compaction；真实 embedding 检索评估 | 自动反思维护、长期质量趋势 |
+| Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution | evaluation 基线；budget policy | 个性化 budget、agent-specific policy |
+| Reflection | 基础完成 | 读取 trace / memory 生成建议报告 | report evaluation；maintenance actions 的边界设计 | 自动 skill proposal、自动 memory maintenance |
+| Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction | reindex jobs；真实 embedding / rerank evaluation；rerank 接入 KB search | sqlite-vec、Qdrant、OpenSearch adapter |
+| Knowledge base | 基础完成 | local ingest、parser、chunking、vector + BM25 + hybrid retrieval、evaluation fixture | sync planner；KB scope/binding；rerank integration；reindex flow | Confluence / Google Drive connectors、graph retrieval |
+| Deployment / config | 部分完成 | `settings.yaml`、MCP dedicated server file、legacy config fail-fast | backup / upgrade；config docs 对 intelligence runtime prerequisites 的收敛 | config center、Admin UI、hot reload |
+
+## 依赖顺序
+
+```mermaid
+flowchart TD
+    O[observability-runtime-event-coverage]
+    OPS[observability-performance-summary]
+    LTC_E[long-term-context-evaluation]
+    REF_E[reflection-report-evaluation]
+
+    KB_SYNC[knowledge-base-sync-planner]
+    KB_CONN[knowledge-base-connectors]
+    REINDEX[vector-store-reindex-jobs]
+    EMB_E[memory-and-kb-real-embedding-evaluation]
+
+    MEM_RET[memory-retention-and-compaction]
+    MEM_REF[memory-reflection-maintenance]
+
+    BACKUP[deployment-upgrade-and-backup]
+
+    O --> OPS
+    O --> LTC_E
+    O --> REF_E
+    KB_SYNC --> KB_CONN
+    KB_SYNC --> REINDEX
+    REINDEX --> EMB_E
+    LTC_E --> LTC_B[long-term-context-budget-policy]
+    MEM_RET --> MEM_REF
+```
+
+关键约束：
+
+- `observability-runtime-event-coverage` 是 long-term context evaluation、reflection evaluation 和 performance summary 的前置。
+- `knowledge-base-sync-planner` 是 Confluence / Google Drive connector 和 vector reindex jobs 的前置。
+- `vector-store-reindex-jobs` 是真实 embedding / rerank evaluation 的前置。
+- `long-term-context-evaluation` 先于 `long-term-context-budget-policy`。
+- `memory-retention-and-compaction` 先于 `memory-reflection-maintenance`。
+
+## 推荐实施批次
+
+### M1：可观测、可排查
+
+目标：每次 agent 运行的关键行为都有可查询证据，工程师能定位问题。
+
+建议 specs：
+
+1. `observability-runtime-event-coverage`
+2. `observability-performance-summary`
+
+完成标准：
+
+- LLM call、tool call、fallback、permission、context compression、final reply 都有 trace event。
+- 可以按 run / user / agent / session 查询关键耗时、token、错误、fallback 和工具调用摘要。
+
+### M2：可同步、可重建
+
+目标：KB 与 vector store 从“能导入”升级为“能维护和运维”。
+
+建议 specs：
+
+1. `knowledge-base-sync-planner`
+2. `vector-store-reindex-jobs`
+3. `deployment-upgrade-and-backup`
+
+完成标准：
+
+- KB sync 有 plan/run separation、幂等状态和失败恢复。
+- embedding / backend 切换后可重建 memory / KB index。
+- 本地 SQLite / config / data 目录有最小备份与升级流程。
+
+### M3：可评估
+
+目标：核心 intelligence 能力的效果不只靠人工感觉判断。
+
+建议 specs：
+
+1. `long-term-context-evaluation`
+2. `reflection-report-evaluation`
+3. `memory-and-kb-real-embedding-evaluation`
+
+完成标准：
+
+- `tests/evaluation/` 能评估 memory extraction、KB retrieval、long-term context injection 和 reflection findings。
+- 默认 evaluation 不依赖真实 LLM / embedding；真实模型评估通过显式环境变量手动开启。
+- 每个 evaluation fixture 有 expected / forbidden 输出，能回归质量变化。
+
+### M4：可维护、可演进
+
+目标：长期运行后不会因为记忆、知识库和反思数据增长而失控。
+
+建议 specs：
+
+1. `memory-retention-and-compaction`
+2. `long-term-context-budget-policy`
+3. `memory-reflection-maintenance`
+4. `knowledge-base-connectors-confluence`
+5. `knowledge-base-connectors-google-drive`
+
+完成标准：
+
+- memory 有 retention、compaction 和容量边界。
+- long-term context 有可解释的 token budget 策略。
+- reflection 的建议能进入受控 maintenance 流程，而不是自动无约束改写。
+- 外部 connector 基于 sync planner 接入，不绕过 KB public API。
+
+## 并行策略
+
+可以并行：
+
+- `observability-runtime-event-coverage` 和 `knowledge-base-sync-planner`
+- `memory-retention-and-compaction` 和 `knowledge-base-sync-planner`
+- `deployment-upgrade-and-backup` 和 intelligence specs
+
+不建议提前做：
+
+- Confluence / Google Drive connector 早于 `knowledge-base-sync-planner`
+- `long-term-context-budget-policy` 早于 `long-term-context-evaluation`
+- `memory-reflection-maintenance` 早于 `memory-retention-and-compaction`
+- reflection 自动化写回早于 `reflection-report-evaluation`
+
+## MVP-ready 判定
+
+常乐负责的模块可以认为 MVP-ready，当且仅当：
+
+- Observability 能解释一次 agent run 的主要行为、成本、耗时和错误。
+- Memory 能跨 session 提取、更新、检索，并有 retention 边界。
+- Knowledge base 能导入本地企业文档、混合检索，并能计划同步和重建索引。
+- Long-term context 能从 memory / KB 中选择上下文，并有 evaluation 证明注入效果。
+- Reflection 能生成可评估的报告，但自动写回保持关闭或受控。
+- Vector store 能持久化索引，并支持 embedding / backend 变更后的 reindex。
+- 默认测试不依赖外部 LLM / embedding / SaaS；真实模型效果验证有手动开关和 fixture。
+
+## 后续维护规则
+
+- 新增 intelligence 相关 spec 前，必须在本 roadmap 中标明所属批次和解锁关系。
+- capability 文档状态变化时，同步更新本 roadmap 的“当前能力地图”。
+- 每完成一个批次，重新评估下一批是否仍然是最高优先级。
+- 不把探索性想法直接推进为实现 spec；先确认它解决哪个 MVP 缺口。
