@@ -344,7 +344,15 @@ async def test_run_threads_token_to_dispatch(mock_client):
     token = CancelToken()
     with patch.object(al, "dispatch", _capture_dispatch):
         await al.run([{"role": "user", "content": "x"}], cancel_token=token)
-    assert seen["cancel_token"] is token
+    # T2: dispatch now receives a per-tool token carrying its own deadline and
+    # linking the run-level token via `parent` (so the tool observes both its
+    # timeout and a session-wide cancel), instead of the run-level token directly.
+    tok = seen["cancel_token"]
+    assert isinstance(tok, CancelToken)
+    assert tok.parent is token
+    assert tok.deadline is not None
+    token.cancel()
+    assert tok.is_cancelled() is True  # run-level cancel still reaches the tool
 
 
 async def test_run_stream_cancelled_stops_before_llm_and_finishes_clean(mock_client):

@@ -19,7 +19,7 @@
 |---|---|---|---|---|
 | 1 | C | tool-arg-sanitization | T3 | ✅ 已完成 |
 | 2 | A | sub-agent-lifecycle | AR20 | ✅ 已完成 |
-| 3 | C | tool-timeout | T2 | ⬜ |
+| 3 | C | tool-timeout | T2 | ✅ 已完成 |
 | 4 | C | tool-result-truncation | T4 | ⬜ |
 | 5 | C | tool-call-guardrails | AR10 | ⬜ |
 | 6 | F | sandbox-output-truncation | SB6 | ⬜ |
@@ -84,5 +84,35 @@
 2. 热路径不单独持久化 `pending`、仅在 pre-cancel 分支持久化（自解决策 #2）是否认可——以一次 fsync 换取 pending 态的极短可观测窗口。
 3. 既有并发测试阈值由 `0.09` 放宽到 `0.13` + 加 DB 隔离（并发性改由启动重叠断言权威保证）是否认可。
 4. mypy +1（既有 `Settings()` 模式实例）是否认可。
+
+---
+
+## tool-timeout（T2）— feat/tool-timeout
+
+**实现：**
+- `tool_registry.py`：新增平行元数据 `_timeouts: dict[str, float]` + 模块级常量 `DEFAULT_TOOL_TIMEOUT = 30.0`（可 monkeypatch）；`@tool` 增可选 `timeout: float | None`（写入 `_timeouts`）；`get_timeout(name)`（per-tool 或 None）、`get_effective_timeout(name)`（per-tool 覆盖，否则全局默认）。timeout 是装饰器元数据、非函数参数，天然不进 `_build_schema` 导出的 schema（与 `risk_level`/`connector` 一致）。
+- `error_classifier._categorize`：识别 `TimeoutError` → `ErrorCategory.tool_timeout`（接入 AR5 预留码，使其首次可达；`isinstance(error, TimeoutError)` 在 `APIStatusError` 判定前）。
+- `agent_loop._safe_dispatch`：解析 `get_effective_timeout(name)`，构造 `child = CancelToken(deadline=now+t, parent=run_cancel_token)` 注入工具（取代直接注入 run 级 token），coroutine 结果经 `asyncio.wait_for(coro, t)` 竞速；超时捕获 `TimeoutError` → `child.cancel()` + 返回 `("tool execution timed out after {t}s", failed=True)`；其余异常仍归一为 `tool execution error`。
+
+**自解决策（针对 design Open Questions）：**
+1. **全局默认承载位置**：定为 `tool_registry.DEFAULT_TOOL_TIMEOUT` **模块级常量**（最简、天然可 monkeypatch，满足 spec「默认 30s、可注入/可覆盖」）。**未**新增 `Settings`/settings.yaml 字段——运维 yaml 配置按 design 留作后续（如需，加 `Settings.tool_timeout_seconds` 透传该常量），本 change 不引入。
+2. **tool_timeout 归类接入点**：采用 **D2-a**（扩展 `_categorize` 识别 `TimeoutError`），而非 D2-b（工具层读表）。理由：D2-a 使 `classify(TimeoutError())` 直接可达 tool_timeout、最易测且语义单一；`APITimeoutError`（Anthropic SDK 请求超时）非 `TimeoutError` 子类，不会被误归类，无副作用。
+3. **per-tool token 经 parent 链接 run 级 token**（design D1 核心）：注入工具的不再是 run 级 token 本身，而是 `CancelToken(deadline, parent=run_token)`，使工具**同时**响应自身超时与 run 级取消。复用 AR20 补全的 `parent` 原语，不另造组合机制。
+
+**遇到的问题与处理：**
+- **既有测试 `test_run_threads_token_to_dispatch` 断言注入的是 run 级 token 身份（`is token`）**——该断言对应旧契约。T2 的 design D1 有意改契约（注入带 parent 链接的 child）。已更新该测试：断言注入的是 `CancelToken`、`parent is token`、`deadline is not None`，并新增「`token.cancel()` 后 child `is_cancelled()` 为真」验证 run 级取消仍经 parent 传播到工具——保留测试本意（取消能到达工具）且反映新契约。
+- **`sub_agent` 工具不受影响**：它是同步 `def`（非 coroutine），不经 `asyncio.wait_for` 包裹，30s 默认不会误杀其内部 300s 子 agent 批次。`run_code`（async）套 30s 默认符合 tools.md「默认 30s」，非回归。
+- **SB7 边界**：本 change 仅做 await 层竞速 + cancel token，**不** `docker kill`；容器侧硬终止留给 SB7。测试以普通 async 工具超时验证 await 层停止 + `tool_timeout` 归类，不涉沙箱。
+
+**影响：**
+- 改 `tool_registry.py`/`error_classifier.py`/`agent_loop.py`；新增 `tests/test_tool_timeout.py`（13 测试），`tests/test_error_classifier.py`（+1）、`tests/test_agent_loop.py`（更新 1 既有测试）。
+- 测试：**全量 1251 passed，0 失败，零回归**。
+- ruff：仅改动文件 format+check 全绿（`agent_loop.py:1008` 的 N814 `CompletionUsage as _CU` 为 HEAD 既有 grandfathered，非本 change 引入，未触碰）。
+- mypy：75 → 75，无新增。
+
+**需 zy 核实：**
+1. 全局默认用模块常量、未加 Settings/yaml 字段（自解决策 #1）是否认可。
+2. 归类接入点 D2-a（扩展 `_categorize`）是否认可。
+3. `test_run_threads_token_to_dispatch` 断言由「`is token`」改为「`parent is token` + deadline + 取消传播」是否认可。
 
 ---
