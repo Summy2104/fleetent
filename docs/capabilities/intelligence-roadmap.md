@@ -47,7 +47,7 @@ spec 零散推进后失去全貌。
 
 ## 当前能力地图
 
-| 能力 | 当前状态 | 已有基础 | Pilot MVP 必补缺口 | 非 MVP 增强 |
+| 能力 | 当前状态 | 已有基础 | Pilot 后缺口 | 非 MVP 增强 |
 | --- | --- | --- | --- | --- |
 | Observability foundation | 基础完成 | structured logs、SQLite traces、usage summary、performance summary、source attribution、runtime event coverage、admin query CLI、diagnostics export / manual retention、contract tests | platform UI / HTTP 查询入口 | OTel / Prometheus、dashboard UI、告警 |
 | Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation、retention / compaction API、owner-approved reflection maintenance apply API | scheduler / review UI 与趋势统计 | 长期质量趋势 |
@@ -267,7 +267,7 @@ public API、测试基线和 OpenSpec 批次已经完成。它不等同于可以
 | 层级 | 含义 | 当前判断 |
 | --- | --- | --- |
 | MVP Foundation | 核心模块、API、存储、测试、评估、边界完成 | 常乐负责模块基本完成 |
-| Pilot MVP | 可部署到真实环境，小范围用户可用，可配置、可排障、可恢复 | 尚未完成，需要补 production-readiness specs |
+| Pilot MVP | 可部署到真实环境，小范围用户可用，可配置、可排障、可恢复 | 常乐负责模块已基础完成，等待真实环境 smoke 和试用验收 |
 
 ### MVP Foundation 判定
 
@@ -292,15 +292,22 @@ public API、测试基线和 OpenSpec 批次已经完成。它不等同于可以
 - 数据治理可控：secret 不落库、不进日志；trace / logs retention、脱敏、备份范围和删除策略明确。
 - 外部依赖可控：真实 LLM / embedding / SaaS connector 都有显式配置、smoke test 和失败降级说明，不依赖隐式默认云服务。
 
-### Pilot MVP 候选 specs
+### Pilot MVP 已完成 specs
 
-下一步如果目标是生产小范围试用，优先级应从继续扩展 intelligence 功能转向 production-readiness：
+面向生产小范围试用的 production-readiness specs 已完成：
 
 1. `observability-admin-query-api`：提供最小 run trace / usage / performance 查询入口，避免排障必须手写 SQL。（已完成 admin CLI）
 2. `knowledge-base-agent-kb-binding`：定义 agent / tenant 到一个或多个 KB 的绑定策略和默认可见范围。（已完成）
 3. `knowledge-base-connector-operations`：补 connector sync 手动触发、状态查询、失败摘要和真实 SaaS smoke 操作说明。（已完成基础 CLI / latest status）
 4. `deployment-pilot-install-checklist`：沉淀 pilot 部署、升级、备份、恢复、健康检查和回滚清单。（已完成）
 5. `data-retention-and-diagnostics-policy`：定义 logs / traces / connector state 的 retention、导出、脱敏和备份边界。（已完成）
+
+Pilot MVP 后仍需真实环境验证：
+
+- 使用真实 LLM / embedding provider 跑 smoke。
+- 使用真实 Google Drive / Confluence credential_ref 跑 connector check / sync smoke。
+- 按 `docs/deployment/pilot-install-checklist.md` 完成一次准生产安装、升级、备份、恢复和诊断包导出演练。
+- 根据试用反馈决定是否补 HTTP / UI 管理入口、credential store、scheduler / worker 或 full sync history。
 
 ### Pilot 后增强 / Knowledge Quality Track
 

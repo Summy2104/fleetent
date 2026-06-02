@@ -195,7 +195,8 @@ def get_logger(component: str) -> Logger:
 - source attribution：`InjectedContextTrace`、`record_injected_context()`、`injected_context` event
 - knowledge-base scope diagnostics：agent 没有显式 KB 绑定且默认 KB 为空时记录 `knowledge_base.agent_kb_scope_empty`
 - admin query CLI：`fleetent-admin observability traces|usage|performance` 提供 run trace、用量和性能排障入口
-- diagnostics export / retention：`export_diagnostics()` 生成本地脱敏诊断包；`plan_diagnostics_retention()` /
+- diagnostics export / retention：`export_diagnostics()` 生成本地脱敏诊断包，包含 logs、traces、usage / performance
+  summary、connector 配置摘要和 latest status；`plan_diagnostics_retention()` /
   `apply_diagnostics_retention()` 只处理 logs、traces 和 diagnostics export 包，默认 disabled，不清理业务数据或备份
 - observability contract tests：覆盖 agent run 的 `injected_context` / `agent_run_completed` 事件链路、
   source attribution payload safety、trace query、usage aggregation 和 performance aggregation contract

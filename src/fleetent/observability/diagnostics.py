@@ -205,8 +205,29 @@ def _write_traces(archive: zipfile.ZipFile, start_ts: datetime, end_ts: datetime
 
 def _write_connector_status(archive: zipfile.ZipFile, settings: Settings) -> None:
     connectors = list_configured_connectors(settings=settings)
+    status_payload = []
+    for connector in connectors:
+        connector_id = getattr(connector, "connector_id", None)
+        latest_status = None
+        if connector_id:
+            try:
+                latest_status = get_connector_status(str(connector_id), settings=settings)
+            except Exception as exc:
+                latest_status = {
+                    "connector_id": str(connector_id),
+                    "last_status": "status_unavailable",
+                    "last_error": str(exc),
+                }
+        status_payload.append(
+            {
+                "connector": _safe_dataclass(connector),
+                "status": _safe_dataclass(latest_status) if latest_status is not None else None,
+            }
+        )
     _write_json(
-        archive, "knowledge_connectors/status.json", [_safe_dataclass(item) for item in connectors]
+        archive,
+        "knowledge_connectors/status.json",
+        status_payload,
     )
 
 
@@ -216,6 +237,14 @@ def list_configured_connectors(settings: Settings | None = None) -> list[object]
     )
 
     return list(list_kb_connectors(settings=settings))
+
+
+def get_connector_status(connector_id: str, settings: Settings | None = None) -> object:
+    from fleetent.intelligence.knowledge_base.operations import (
+        get_connector_status as get_kb_connector_status,
+    )
+
+    return get_kb_connector_status(connector_id, settings=settings)
 
 
 def _event_json(event: TraceEvent) -> str:
@@ -286,8 +315,15 @@ def _sanitize(value: str) -> str:
 
 
 def _truncate(value: Any) -> Any:
-    if isinstance(value, str) and len(value) > _MAX_TEXT_LENGTH:
-        return {"value": value[:_MAX_TEXT_LENGTH], "truncated": True, "original_length": len(value)}
+    if isinstance(value, str):
+        sanitized = _sanitize(value)
+        if len(sanitized) > _MAX_TEXT_LENGTH:
+            return {
+                "value": sanitized[:_MAX_TEXT_LENGTH],
+                "truncated": True,
+                "original_length": len(sanitized),
+            }
+        return sanitized
     if isinstance(value, dict):
         return {str(key): _truncate(item) for key, item in value.items()}
     if isinstance(value, list):

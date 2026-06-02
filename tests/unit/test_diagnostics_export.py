@@ -122,6 +122,62 @@ def test_export_diagnostics_includes_connector_environment_and_config(monkeypatc
     assert config["diagnostics"]["retention_enabled"] is False
 
 
+def test_export_diagnostics_includes_latest_connector_status(monkeypatch, tmp_path):
+    from fleetent.intelligence.knowledge_base.operations import (
+        ConnectorStatus,
+        ConnectorSummary,
+    )
+    from fleetent.observability import diagnostics
+    from fleetent.observability.diagnostics import DiagnosticsExportRequest, export_diagnostics
+
+    monkeypatch.setattr(
+        diagnostics,
+        "list_configured_connectors",
+        lambda settings=None: [
+            ConnectorSummary(
+                connector_id="eng-drive",
+                connector_type="google_drive",
+                enabled=True,
+                tenant_id="default",
+                kb_id="engineering",
+                scope="folder:folder-1",
+                credential_ref_summary="file:google.json",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        diagnostics,
+        "get_connector_status",
+        lambda connector_id, settings=None: ConnectorStatus(
+            connector_id=connector_id,
+            connector_type="google_drive",
+            tenant_id="default",
+            kb_id="engineering",
+            last_status="sync_failed",
+            last_started_at=None,
+            last_finished_at=None,
+            last_summary={"failed": 1, "token": "secret-value"},
+            last_error="credential secret-value failed",
+        ),
+    )
+
+    package = export_diagnostics(
+        DiagnosticsExportRequest(
+            output_dir=tmp_path,
+            include_logs=False,
+            include_traces=False,
+            settings=Settings(anthropic_api_key="test-key"),
+        )
+    )
+
+    with zipfile.ZipFile(package.path) as archive:
+        connector_status = archive.read("knowledge_connectors/status.json").decode()
+
+    assert "sync_failed" in connector_status
+    assert "failed" in connector_status
+    assert "secret-value" not in connector_status
+
+
 def test_export_diagnostics_excludes_business_data_and_database_files(tmp_path):
     from fleetent.observability.diagnostics import DiagnosticsExportRequest, export_diagnostics
 

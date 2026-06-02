@@ -41,7 +41,8 @@
 - ✅ **observability 数据落点已明确**：运行观测数据按用途分层持久化
   - agent traces v1.0 使用 SQLite `traces` 表，通过 DB runtime 访问
   - 程序日志写入 `data/logs/` 下的日期文件，随 `data/` volume 持久化
-  - 日志轮转、trace retention 与备份策略由 observability / deployment 后续共同定义
+  - logs / traces / diagnostics export 已支持手动 retention dry-run / apply，默认不自动清理
+  - SQLite backups 不在 diagnostics retention 范围内，备份保留由部署方管理
 
 - ✅ **SQLite 升级备份脚本**：`scripts/upgrade.py`
   - `--database-url` 优先于 `DATABASE_URL`，`DATABASE_URL` 优先于 `Settings().database_url`
@@ -191,7 +192,7 @@ uv run fleetent-admin observability performance --agent-id agent-1 --limit 100
 ## 下一批候选 specs
 
 - `deployment-onprem-install-package`
-- `deployment-retention-policy`
+- `deployment-backup-retention-policy`
 - `deployment-license-key`
 - `database-postgresql-adapter`
 
