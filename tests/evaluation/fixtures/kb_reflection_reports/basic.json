@@ -1,0 +1,46 @@
+{
+  "scope": "tenant-a",
+  "events": [
+    {
+      "id": "trace-missing",
+      "run_id": "run-missing",
+      "event_type": "kb_retrieval",
+      "payload": {
+        "query": "missing deployment runbook",
+        "result_count": 0,
+        "transcript": "RAW SECRET TRANSCRIPT"
+      }
+    },
+    {
+      "id": "trace-graph-gap",
+      "run_id": "run-graph-gap",
+      "event_type": "kb_retrieval",
+      "payload": {
+        "query": "Which service depends on Billing API?",
+        "graph_result_count": 0,
+        "graph_evidence_count": 0
+      }
+    }
+  ],
+  "connectors": [
+    {
+      "connector_id": "drive-main"
+    }
+  ],
+  "connector_statuses": [
+    {
+      "connector_id": "drive-main",
+      "status": "failed",
+      "error_summary": "credential expired"
+    }
+  ],
+  "expected_findings": [
+    "missing_knowledge",
+    "entity_graph_gap",
+    "connector_sync_issue"
+  ],
+  "forbidden_findings": [
+    "stale_document"
+  ],
+  "forbidden_raw_text": "RAW SECRET TRANSCRIPT"
+}

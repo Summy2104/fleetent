@@ -7,14 +7,14 @@
 系统自我改进机制，定期分析 agent 执行历史，先生成结构化改进建议，再通过受控 proposal lifecycle 进入维护流程。
 reflection 默认不直接修改 User Memory、skills 或 knowledge-base。
 
-**负责**：通过 observability trace API 读取 agent 执行历史，发现规律并生成结构化 reflection report；为 User Memory 生成 owner-approved maintenance proposals。
+**负责**：通过 observability trace API 读取 agent 执行历史，发现规律并生成结构化 reflection report；为 User Memory 生成 owner-approved maintenance proposals；通过 `run_kb_reflection_report()` 生成 Knowledge Base 质量只读报告。
 
 **不负责**：实时处理（异步定期触发，不在请求链路上）、skill 的运行时注入（→ agent-runtime）、修改知识库文档内容（只上报，不写回）、Shared Memory 实现、管理员默认替用户确认 User Memory 修改。
 
 **三个作用目标**：
 - **memory reflection**：per-user，生成 memory_candidate / memory_conflict 建议，并可转成 owner-scoped maintenance proposal
 - **skill reflection**：per-agent，第一阶段只生成 skill_opportunity 建议
-- **knowledge base reflection**：per-tenant，后续阶段观察知识库使用质量，上报缺口与问题，不自动写回
+- **knowledge base reflection**：per-tenant，观察知识库使用质量，上报缺口与问题；只读报告，不自动写 KB、不触发 sync
 
 **调用关系**：
 - 依赖：observability（`query_trace_events(query)` 读取情节记忆事件）、`fleetent.intelligence.memory`（只读信号 + 已批准 proposal 的 public mutation API）、config
@@ -22,8 +22,8 @@ reflection 默认不直接修改 User Memory、skills 或 knowledge-base。
 
 **模块归属**：
 - owning package：`intelligence.reflection`
-- public API：`run_reflection(scope)`、`generate_memory_maintenance_proposals(user_id, findings)`、proposal create / approve / reject / apply API；后续扩展 `run_skill_reflection(agent_id)`、`run_kb_reflection(scope)`
-- owned tables：`reflection_reports`、`memory_maintenance_proposals`；后续 `skill_proposals`、`kb_reflection_reports`
+- public API：`run_reflection(scope)`、`generate_memory_maintenance_proposals(user_id, findings)`、proposal create / approve / reject / apply API、`KnowledgeBaseReflectionReport`、`KnowledgeBaseReflectionFinding`、`run_kb_reflection_report(scope)`；后续扩展 `run_skill_reflection(agent_id)`
+- owned tables：`reflection_reports`、`memory_maintenance_proposals`、`kb_reflection_reports`；后续 `skill_proposals`
 - config namespace：`reflection.*`
 
 ## 关键流程
@@ -74,6 +74,16 @@ memory_maintenance_proposals (
   updated_at   DATETIME,
   expires_at   DATETIME
 )
+
+kb_reflection_reports (
+  id           TEXT PRIMARY KEY,
+  scope        TEXT,              -- tenant / kb scope
+  time_window_start DATETIME,
+  time_window_end   DATETIME,
+  findings_json TEXT,             -- finding summary、evidence ids、metadata，不保存完整 transcript / document body
+  signal_summary_json TEXT,
+  created_at   DATETIME
+)
 ```
 
 ## 接口定义
@@ -100,6 +110,27 @@ async def run_reflection(scope: str) -> ReflectionReport:
     """读取 traces 和 memory 只读信号，生成结构化建议报告；不自动应用建议。"""
 
 
+@dataclass
+class KnowledgeBaseReflectionFinding:
+    type: Literal[
+        "missing_knowledge",
+        "stale_document",
+        "low_retrieval_quality",
+        "connector_sync_issue",
+        "entity_graph_gap",
+        "insufficient_signal",
+    ]
+    severity: Literal["low", "medium", "high"]
+    affected_resource: str
+    evidence_refs: list[str]
+    recommendation: str
+    metadata: dict[str, str]
+
+
+async def run_kb_reflection_report(scope: str) -> KnowledgeBaseReflectionReport:
+    """读取 observability 与 knowledge-base public API，生成只读报告；不自动写 KB，不触发 sync。"""
+
+
 def generate_memory_maintenance_proposals(
     user_id: str,
     findings: list[ReflectionFinding],
@@ -115,6 +146,7 @@ def generate_memory_maintenance_proposals(
 - `ReflectionReport`、`ReflectionFinding`、`run_reflection(scope)` public API
 - `reflection_reports` SQLite 表
 - `memory_maintenance_proposals` SQLite 表和 proposal lifecycle API
+- `kb_reflection_reports` SQLite 表和 `run_kb_reflection_report()` public API
 - 只通过 observability public API 读取 traces
 - 只读 `fleetent.intelligence.memory` 信号；proposal apply 只通过 memory public API
 - 支持三类 finding：`memory_candidate`、`memory_conflict`、`skill_opportunity`
@@ -123,9 +155,10 @@ def generate_memory_maintenance_proposals(
 - 支持 `suggest_shared_memory_or_kb`，用于团队共识 / 项目惯例 / 客户背景等不属于 User Memory 的内容
 - 保存 report 时不保存完整 trace transcript
 - deterministic evaluation fixture / runner 覆盖 expected / forbidden findings 和 persisted transcript redaction
+- KB reflection 支持 `missing_knowledge`、`stale_document`、`low_retrieval_quality`、`connector_sync_issue`、`entity_graph_gap` findings；报告只读，不自动写 KB、不触发 sync，也不创建 KB mutation proposal
 - real-route smoke 仅在 `FLEETENT_EVAL_REAL_REFLECTION=1` 且显式本地 fixture/config 完整时手动运行；默认 skip
 
-当前定位：已具备“生成建议报告”和 User Memory 维护 proposal lifecycle；UI / scheduler / skill proposal / KB reflection apply 尚未完成。
+当前定位：已具备“生成建议报告”、User Memory 维护 proposal lifecycle 和 KB 质量只读报告；UI / scheduler / skill proposal 尚未完成。
 
 ## 规划中（v1.0）
 
@@ -151,11 +184,11 @@ def generate_memory_maintenance_proposals(
   - `delete`：skill 长期未被触发、与其他 skill 高度重复、或持续产生负面效果时，提议删除
   - skill 可以是单文件，也可以是含脚本、模板的多级目录；`snapshot` 字段统一存储整个目录的文件快照（JSON），审批时展示完整新状态，应用时直接覆盖写入
 
-- [ ] **knowledge base reflection（后续）**：观察知识库使用质量，只上报不写回
+- [x] **knowledge base reflection**：观察知识库使用质量，只上报不写回
   - 知识空白检测：用户频繁提问但召回质量差 → 上报"该类内容可能缺失"
   - 陈旧内容检测：某些 chunk 长期未被召回，或与近期对话明显矛盾 → 标记待管理员审查
   - 高频共现提示：多个文档频繁被一起召回 → 建议管理员补充整合文档
-  - 所有 knowledge base reflection 结果均以建议形式输出，执行由人决定
+  - 所有 knowledge base reflection 结果均以只读报告输出，执行由人决定
 
 - [ ] **生效机制（后续）**：按作用目标和环境区分
   - memory reflection：owner-approved proposal lifecycle；低风险自动维护必须由用户显式开启

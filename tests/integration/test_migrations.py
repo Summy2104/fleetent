@@ -44,6 +44,7 @@ def test_upgrade_creates_tables(tmp_path):
     assert "kb_entities" in tables
     assert "kb_entity_mentions" in tables
     assert "kb_relations" in tables
+    assert "kb_reflection_reports" in tables
 
 
 def test_upgrade_creates_trace_indexes(tmp_path):
@@ -244,6 +245,18 @@ def test_column_structure(tmp_path):
         "failed_count",
         "error_summary",
         "metadata_json",
+    }
+    kb_reflection_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(kb_reflection_reports)")
+    }
+    assert kb_reflection_cols >= {
+        "id",
+        "scope",
+        "time_window_start",
+        "time_window_end",
+        "findings_json",
+        "signal_summary_json",
+        "created_at",
     }
     entity_cols = {row[1] for row in conn.execute("PRAGMA table_info(kb_entities)")}
     assert entity_cols >= {

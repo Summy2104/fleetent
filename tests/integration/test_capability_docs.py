@@ -58,3 +58,18 @@ def test_capability_docs_describe_query_planner_scope():
         assert "规则型" in content
         assert "不改 `search()`" in content
         assert "不接 LLM planner" in content
+
+
+def test_capability_docs_describe_kb_reflection_reports_scope():
+    reflection_doc = Path("docs/capabilities/reflection.md").read_text(encoding="utf-8")
+    kb_doc = Path("docs/capabilities/knowledge-base.md").read_text(encoding="utf-8")
+    roadmap = Path("docs/capabilities/owner-capability-roadmap.md").read_text(encoding="utf-8")
+
+    for content in [reflection_doc, kb_doc, roadmap]:
+        assert "run_kb_reflection_report" in content
+        assert "kb_reflection_reports" in content
+        assert "missing_knowledge" in content
+        assert "connector_sync_issue" in content
+        assert "只读报告" in content
+        assert "不自动写 KB" in content
+        assert "不触发 sync" in content

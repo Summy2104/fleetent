@@ -359,8 +359,9 @@ flowchart TD
 以下 specs 不直接阻塞 Pilot MVP，但会把 reflection 从“报告 / User Memory maintenance”扩展到知识库和
 skill 演进，属于原 capability 里需要提高优先级的能力：
 
-1. `reflection-knowledge-base-reports`：基于 retrieval traces、source attribution、KB sync 状态和用户问题，
-   发现知识库缺口、过期文档、低命中主题和可能需要补充的来源；默认只生成报告，不自动写回 KB。
+1. `reflection-knowledge-base-reports`：已完成 `run_kb_reflection_report` 只读报告和
+   reflection-owned `kb_reflection_reports` 持久化；基于 retrieval traces、source attribution、KB sync 状态和用户问题，
+   发现 `missing_knowledge`、过期文档、低命中主题、`connector_sync_issue` 和 entity graph gap；不自动写 KB、不触发 sync。
 2. `skill-reflection-proposals`：基于 trace / tool usage / repeated tasks 发现可沉淀为 skill 的机会，生成
    owner-reviewed proposal；不自动创建或修改 skill。
 3. `reflection-trend-summary`：对 reflection findings 做长期趋势统计，用于判断 memory / KB / skill 改进是否有效。

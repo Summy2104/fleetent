@@ -9,9 +9,18 @@ from typing import Any, Literal, cast
 from fleetent import observability
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.intelligence import memory
+from fleetent.intelligence import knowledge_base, memory
 
 FindingType = Literal["memory_candidate", "memory_conflict", "skill_opportunity"]
+KnowledgeBaseFindingType = Literal[
+    "missing_knowledge",
+    "stale_document",
+    "low_retrieval_quality",
+    "connector_sync_issue",
+    "entity_graph_gap",
+    "insufficient_signal",
+]
+KnowledgeBaseFindingSeverity = Literal["low", "medium", "high"]
 MaintenanceAction = Literal[
     "mark_stale",
     "merge",
@@ -45,6 +54,30 @@ class ReflectionReport:
     time_window: tuple[datetime, datetime]
     findings: list[ReflectionFinding]
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class KnowledgeBaseReflectionFinding:
+    """A read-only Knowledge Base quality finding."""
+
+    type: KnowledgeBaseFindingType
+    severity: KnowledgeBaseFindingSeverity
+    affected_resource: str
+    evidence_refs: list[str]
+    recommendation: str
+    metadata: dict[str, str]
+
+
+@dataclass(frozen=True)
+class KnowledgeBaseReflectionReport:
+    """A Knowledge Base quality report for one scope and time window."""
+
+    id: str
+    scope: str
+    time_window: tuple[datetime, datetime]
+    findings: list[KnowledgeBaseReflectionFinding]
+    created_at: datetime
+    signal_summary: dict[str, int | str]
 
 
 @dataclass(frozen=True)
@@ -92,6 +125,45 @@ async def run_reflection(scope: str) -> ReflectionReport:
         created_at=now,
     )
     _save_report(report)
+    return report
+
+
+async def run_kb_reflection_report(scope: str) -> KnowledgeBaseReflectionReport:
+    """Generate a read-only Knowledge Base quality report."""
+    now = datetime.now(UTC).replace(microsecond=0)
+    start = now - timedelta(days=7)
+    events = list(
+        observability.query_trace_events(
+            observability.TraceQuery(tenant_id=scope, start_ts=start, end_ts=now)
+        )
+    )
+    findings = _generate_kb_findings(events)
+    findings.extend(_connector_findings())
+    if not events and not findings:
+        findings.append(
+            KnowledgeBaseReflectionFinding(
+                type="insufficient_signal",
+                severity="low",
+                affected_resource=f"tenant:{scope}",
+                evidence_refs=[],
+                recommendation="Enable KB retrieval traces or connector status checks.",
+                metadata={"reason": "no_kb_signals"},
+            )
+        )
+
+    report = KnowledgeBaseReflectionReport(
+        id=str(uuid.uuid4()),
+        scope=scope,
+        time_window=(start, now),
+        findings=findings,
+        created_at=now,
+        signal_summary={
+            "trace_count": len(events),
+            "finding_count": len(findings),
+            "scope": scope,
+        },
+    )
+    _save_kb_reflection_report(report)
     return report
 
 
@@ -321,18 +393,55 @@ def _save_report(report: ReflectionReport) -> None:
     )
 
 
+def _save_kb_reflection_report(report: KnowledgeBaseReflectionReport) -> None:
+    database = _database()
+    if not database.path.exists():
+        return
+    if not _has_table(database, "kb_reflection_reports"):
+        return
+    database.execute(
+        """
+        INSERT INTO kb_reflection_reports (
+            id, scope, time_window_start, time_window_end, findings_json,
+            signal_summary_json, created_at
+        )
+        VALUES (
+            :id, :scope, :time_window_start, :time_window_end, :findings_json,
+            :signal_summary_json, :created_at
+        )
+        """,
+        {
+            "id": report.id,
+            "scope": report.scope,
+            "time_window_start": report.time_window[0].isoformat(),
+            "time_window_end": report.time_window[1].isoformat(),
+            "findings_json": _kb_findings_json(report.findings),
+            "signal_summary_json": json.dumps(
+                report.signal_summary,
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            "created_at": report.created_at.isoformat(),
+        },
+    )
+
+
 def _database() -> SQLiteDatabase:
     return create_database(Settings(anthropic_api_key="").database_url)
 
 
 def _has_reflection_reports_table(database: SQLiteDatabase) -> bool:
+    return _has_table(database, "reflection_reports")
+
+
+def _has_table(database: SQLiteDatabase, name: str) -> bool:
     row = database.execute(
         """
         SELECT name
         FROM sqlite_master
         WHERE type = :type AND name = :name
         """,
-        {"type": "table", "name": "reflection_reports"},
+        {"type": "table", "name": name},
     ).fetchone()
     return row is not None
 
@@ -340,6 +449,164 @@ def _has_reflection_reports_table(database: SQLiteDatabase) -> bool:
 def _findings_json(findings: list[ReflectionFinding]) -> str:
     payload = [asdict(finding) for finding in findings]
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _kb_findings_json(findings: list[KnowledgeBaseReflectionFinding]) -> str:
+    payload = [asdict(finding) for finding in findings]
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _generate_kb_findings(
+    events: list[observability.TraceEvent],
+) -> list[KnowledgeBaseReflectionFinding]:
+    findings: list[KnowledgeBaseReflectionFinding] = []
+    for event in events:
+        payload = event.payload
+        event_id = event.id or event.run_id
+        query = str(payload.get("query") or payload.get("question") or "unknown query")
+        if _int_payload(payload, "result_count") == 0:
+            findings.append(
+                _kb_finding(
+                    "missing_knowledge",
+                    "high",
+                    f"query:{query}",
+                    [event_id],
+                    "Add or sync KB content that answers this repeated zero-result query.",
+                    {"query": query},
+                )
+            )
+            continue
+        if payload.get("stale_document_id"):
+            findings.append(
+                _kb_finding(
+                    "stale_document",
+                    "medium",
+                    f"document:{payload['stale_document_id']}",
+                    [event_id],
+                    "Review and refresh the stale source document.",
+                    {"query": query},
+                )
+            )
+        if _low_quality_signal(payload):
+            findings.append(
+                _kb_finding(
+                    "low_retrieval_quality",
+                    "medium",
+                    f"query:{query}",
+                    [event_id],
+                    "Improve source attribution, chunking, or retrieval ranking for this topic.",
+                    {"query": query},
+                )
+            )
+        if _graph_gap_signal(query, payload):
+            findings.append(
+                _kb_finding(
+                    "entity_graph_gap",
+                    "medium",
+                    f"query:{query}",
+                    [event_id],
+                    "Run entity extraction or add relation evidence for this relationship query.",
+                    {"query": query},
+                )
+            )
+    return findings
+
+
+def _connector_findings() -> list[KnowledgeBaseReflectionFinding]:
+    findings: list[KnowledgeBaseReflectionFinding] = []
+    try:
+        connectors = knowledge_base.list_configured_connectors()
+    except Exception:
+        return [
+            _kb_finding(
+                "insufficient_signal",
+                "low",
+                "knowledge_base:connectors",
+                [],
+                "Check knowledge-base availability before running KB reflection.",
+                {"reason": "knowledge_base_unavailable"},
+            )
+        ]
+    for connector in connectors:
+        connector_id = str(getattr(connector, "connector_id", "unknown"))
+        try:
+            status = knowledge_base.get_connector_status(connector_id)
+        except Exception:
+            findings.append(
+                _kb_finding(
+                    "insufficient_signal",
+                    "low",
+                    f"connector:{connector_id}",
+                    [connector_id],
+                    "Check connector status API availability before running KB reflection.",
+                    {"reason": "connector_status_unavailable"},
+                )
+            )
+            continue
+        status_value = str(getattr(status, "status", "unknown"))
+        error_summary = str(getattr(status, "error_summary", "") or "")
+        if status_value in {"failed", "stale"} or error_summary:
+            findings.append(
+                _kb_finding(
+                    "connector_sync_issue",
+                    "high" if status_value == "failed" else "medium",
+                    f"connector:{connector_id}",
+                    [connector_id],
+                    "Inspect connector credentials, scope, and latest sync failure.",
+                    {"status": status_value, "error_summary": error_summary[:200]},
+                )
+            )
+    return findings
+
+
+def _kb_finding(
+    finding_type: KnowledgeBaseFindingType,
+    severity: KnowledgeBaseFindingSeverity,
+    affected_resource: str,
+    evidence_refs: list[str],
+    recommendation: str,
+    metadata: dict[str, str],
+) -> KnowledgeBaseReflectionFinding:
+    return KnowledgeBaseReflectionFinding(
+        type=finding_type,
+        severity=severity,
+        affected_resource=affected_resource,
+        evidence_refs=evidence_refs,
+        recommendation=recommendation,
+        metadata=metadata,
+    )
+
+
+def _low_quality_signal(payload: dict[str, Any]) -> bool:
+    top_score = payload.get("top_score")
+    if isinstance(top_score, int | float) and float(top_score) < 0.3:
+        return True
+    if _int_payload(payload, "source_attribution_count") == 0:
+        return True
+    return bool(payload.get("user_correction"))
+
+
+def _graph_gap_signal(query: str, payload: dict[str, Any]) -> bool:
+    normalized = query.casefold()
+    relation_like = any(
+        marker in normalized
+        for marker in ("depends on", "dependency", "relation", "relationship", "connected to")
+    )
+    if not relation_like:
+        return False
+    return (
+        _int_payload(payload, "graph_result_count") == 0
+        or _int_payload(payload, "graph_evidence_count") == 0
+    )
+
+
+def _int_payload(payload: dict[str, Any], key: str) -> int | None:
+    value = payload.get(key)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    return None
 
 
 def _insert_maintenance_proposal(proposal: MemoryMaintenanceProposal) -> None:
