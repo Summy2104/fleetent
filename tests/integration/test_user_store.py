@@ -4,15 +4,12 @@ import pytest
 
 import fleetent.agent_store as agent_store
 import fleetent.api_key_store as api_key_store
-import fleetent.audit_log as audit_log
-import fleetent.blocklist as blocklist
 import fleetent.im_channel_allowlist as im_channel_allowlist
 import fleetent.im_connector_store as im_connector_store
 import fleetent.im_user_store as im_user_store
 import fleetent.invite_store as invite_store
-import fleetent.permission_gate as permission_gate
-import fleetent.quota as quota
 from fleetent import user_store
+from fleetent.governance import audit_log, blocklist, permission_gate, quota
 
 DEFAULT_USER_STORE_DB_PATH = user_store.DB_PATH
 DEFAULT_LEGACY_RE_EXPORT_DB_PATHS = {

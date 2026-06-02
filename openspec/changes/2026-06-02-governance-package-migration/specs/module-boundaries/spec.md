@@ -28,6 +28,11 @@
 - **THEN** 该访问由 `fleetent.governance` package 内的实现负责
 - **AND** 本 change 不新增数据库 schema
 
+#### Scenario: Platform and channels use governance public API
+- **WHEN** platform 或 channels 模块需要 audit log、blocklist、quota 或 permission gate 能力
+- **THEN** 它们通过 `fleetent.governance` canonical public API 调用
+- **AND** legacy 顶层 shim 不承载可被 monkeypatch 的治理状态
+
 #### Scenario: Runtime uses governance through public API
 - **WHEN** agent runtime 需要权限审批或工具访问策略
 - **THEN** 它通过 `fleetent.governance` public API 调用治理能力

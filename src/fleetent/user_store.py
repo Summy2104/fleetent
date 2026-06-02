@@ -206,7 +206,7 @@ def create_web_user(
 ) -> User:
     """Create a web user (admin-initiated). Rejects duplicate or registration-blocked emails."""
     _init_db()
-    from fleetent import blocklist
+    from fleetent.governance import blocklist
 
     if blocklist.is_registration_blocked(email):
         raise PermissionError(f"email blocked from registration: {email}")

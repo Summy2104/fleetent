@@ -20,6 +20,7 @@
 | --- | --- | --- |
 | `intelligence/` | long-term context、reflection、knowledge-base、vector-store | 已形成主要边界 |
 | `observability/` | structured logging、traces、usage / performance、diagnostics | 已形成主要边界 |
+| `governance/` | permission gate、quota、audit log、blocklist、agent policy | 已有 implementation spec |
 | `im_gateway/` | IM 消息归一化与 Slack / Telegram adapter | 已有目录，但 channels 相关 store 仍在顶层 |
 
 主要平铺热点：
@@ -95,7 +96,23 @@ src/fleetent/platform/admin_cli/
 - 不新增 HTTP API。
 - 不引入权限模型。
 
-### 2. `memory-layer-package-migration`
+### 2. `governance-package-migration`
+
+状态：已有 implementation spec `2026-06-02-governance-package-migration`，负责把权限审批、quota、
+audit log、blocklist、agent policy 迁入 `fleetent.governance`，并保留 legacy 顶层 import shim。
+
+保留：
+
+- `fleetent.permission_gate`、`fleetent.quota`、`fleetent.audit_log`、`fleetent.blocklist`、
+  `fleetent.agent_policy` 作为 thin shim。
+- 既有数据库表、配置 namespace 和业务语义不变。
+
+不做：
+
+- 不新增 Alembic migration。
+- 不迁移 runtime、platform、channels、infrastructure 其他模块。
+
+### 3. `memory-layer-package-migration`
 
 将 `memory_layer.py` 迁入 `intelligence/memory/`，拆分 models、store、extraction、maintenance。
 
@@ -115,7 +132,7 @@ src/fleetent/intelligence/memory/
 - `fleetent.memory_layer` 作为 re-export shim。
 - `MemoryItem`、`create`、`search`、`run_memory_maintenance` 等 public API 不变。
 
-### 3. `runtime-package-migration`
+### 4. `runtime-package-migration`
 
 将 agent runtime 相关代码迁入 `runtime/`。这一步影响面最大，必须单独做。
 
@@ -136,7 +153,7 @@ src/fleetent/runtime/
 - `context_mgr._keep_tail()` 使用 identity check，不得顺手重构行为。
 - 旧 `fleetent.agent_loop` 必须保留 shim，避免 server / tests / CLI 同步大改。
 
-### 4. `platform-user-center-package-migration`
+### 5. `platform-user-center-package-migration`
 
 迁移 user / API key / agent store / auth 相关模块。
 
@@ -151,7 +168,7 @@ src/fleetent/runtime/
 
 这部分和 platform / user-center v1.0 owner 强相关，执行前需要确认 owner 和业务边界。
 
-### 5. `channels-package-migration`
+### 6. `channels-package-migration`
 
 迁移 IM / webhook / schedule 入口。
 
@@ -169,7 +186,7 @@ src/fleetent/runtime/
 
 这一步应等 user identity / channel binding 边界稳定后再做。
 
-### 6. `integrations-and-infrastructure-package-migration`
+### 7. `integrations-and-infrastructure-package-migration`
 
 后置迁移：
 

@@ -45,7 +45,7 @@ async def route(msg: NormalizedMessage) -> None:
     # Approval commands bypass the agent loop entirely
     m = _APPROVAL_RE.match(msg.text.strip())
     if m:
-        from fleetent.permission_gate import _default_gate
+        from fleetent.governance.permission_gate import _default_gate
 
         decision = "approved" if m.group(1).lower() == "approve" else "rejected"
         approval_id = m.group(2)

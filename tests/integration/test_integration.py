@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import fleetent.agent_store as agent_store
+import fleetent.governance.permission_gate as permission_gate
 import fleetent.im_user_store as im_user_store
-import fleetent.permission_gate as permission_gate
 import fleetent.session_mgr as session_mgr
 import fleetent.user_store as user_store
 
@@ -77,7 +77,7 @@ async def test_permission_gate_approved_tool_executes(isolated_db):
     """Tool with medium risk + approval → executes successfully."""
     import asyncio
 
-    from fleetent.permission_gate import PermissionGate
+    from fleetent.governance.permission_gate import PermissionGate
 
     gate = PermissionGate(medium_timeout=1.0, high_timeout=1.0)
     reply_func = AsyncMock()

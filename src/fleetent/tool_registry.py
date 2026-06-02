@@ -71,7 +71,7 @@ def dispatch(
     if is_sub_agent and name == _SUB_AGENT_TOOL:
         raise PermissionError("sub_agent tool is not available inside a sub-agent")
     if allowed_tools is not None:
-        from fleetent.agent_policy import check_tool_access
+        from fleetent.governance.agent_policy import check_tool_access
 
         if not check_tool_access(name, allowed_tools):
             raise PermissionError(f"Tool '{name}' not permitted by agent policy")

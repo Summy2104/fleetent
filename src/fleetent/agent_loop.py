@@ -11,8 +11,9 @@ from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
 from openai.types.chat import ChatCompletionChunk
 
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
-from fleetent.agent_policy import check_tool_access
 from fleetent.context_mgr import maybe_compress
+from fleetent.governance.agent_policy import check_tool_access
+from fleetent.governance.permission_gate import _default_gate
 from fleetent.intelligence.long_term_ctx import ContextSource, build_context
 from fleetent.model_router import RouteConfig, get_async_client_and_config
 from fleetent.observability import (
@@ -21,7 +22,6 @@ from fleetent.observability import (
     record_injected_context,
     record_trace_event,
 )
-from fleetent.permission_gate import _default_gate
 from fleetent.skill_registry import load as load_skill
 from fleetent.skill_registry import match as match_skill
 from fleetent.skill_registry import scan as scan_skills
