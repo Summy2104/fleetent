@@ -76,16 +76,16 @@ def test_pilot_runbook_exists_and_covers_step_by_step_flow():
         "## 1. 确认代码版本和工作区",
         "## 2. 准备配置和 Secret",
         "## 3. 安装依赖",
-        "## 4. SQLite Dry-run、备份和升级",
+        "## 4. SQLite 升级、备份和恢复点",
         "## 5. 启动服务和基础 Health Check",
         "## 6. Observability 和 Diagnostics",
-        "## 7. Memory 验收",
-        "## 8. Long-term Context 验收",
-        "## 9. Reflection 验收",
-        "## 10. Knowledge Base Local 验收",
-        "## 11. Google Drive Connector 验收",
-        "## 12. Confluence Connector 验收",
-        "## 13. Vector Store / Embedding / Rerank 验收",
+        "## 7. Memory 场景验收",
+        "## 8. Long-term Context 场景验收",
+        "## 9. Reflection 场景验收",
+        "## 10. Knowledge Base Local 场景验收",
+        "## 11. Google Drive Connector 场景验收",
+        "## 12. Confluence Connector 场景验收",
+        "## 13. Vector Store / Embedding / Rerank 场景验收",
         "## 14. 汇总判定",
     ]
     for section in required_sections:
@@ -96,6 +96,13 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
     content = Path("docs/deployment/pilot-runbook.md").read_text(encoding="utf-8")
 
     required_phrases = [
+        "自动化测试只能作为辅助证据",
+        "验收目标",
+        "用户场景",
+        "准备数据",
+        "应该看到什么",
+        "通过标准",
+        "失败判断",
         "uv sync --frozen --group dev",
         "uv run python scripts/upgrade.py --dry-run",
         "uv run python scripts/upgrade.py --backup-only",
@@ -110,7 +117,6 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
         "uv run fleetent-admin kb connectors check <google_drive_connector_id>",
         "uv run fleetent-admin kb connectors check <confluence_connector_id>",
         "FLEETENT_EVAL_REAL_EMBEDDING=1",
-        "失败处理",
         "skipped: credentials not configured",
     ]
     for phrase in required_phrases:
