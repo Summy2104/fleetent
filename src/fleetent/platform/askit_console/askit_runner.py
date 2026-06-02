@@ -118,6 +118,39 @@ def mask_output(text: str) -> str:
     return _SENSITIVE_RE.sub(lambda m: f"{m.group(1)}=****", text)
 
 
+_PR_URL_RE = re.compile(r"https?://\S+")
+_RYG_RE = re.compile(r"(?i)^(GREEN|YELLOW|RED)\s*:\s*(.*)$")
+
+
+def extract_pr_url(text: str) -> str | None:
+    """Pull the first PR/URL out of `override promote` output, if any."""
+    match = _PR_URL_RE.search(text)
+    return match.group(0) if match else None
+
+
+def parse_cron_diff(text: str) -> dict[str, list[str]]:
+    """Categorize a `cron diff` into added (+) / missing (-) / changed (~) task names."""
+    buckets: dict[str, list[str]] = {"added": [], "missing": [], "changed": []}
+    marker = {"+": "added", "-": "missing", "~": "changed"}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line[:1] in marker:
+            name = line[1:].strip()
+            if name:
+                buckets[marker[line[0]]].append(name)
+    return buckets
+
+
+def parse_doctor(text: str) -> list[dict[str, str]]:
+    """Turn `doctor` output lines tagged GREEN/YELLOW/RED into a structured RYG list."""
+    items: list[dict[str, str]] = []
+    for raw in text.splitlines():
+        match = _RYG_RE.match(raw.strip())
+        if match:
+            items.append({"level": match.group(1).lower(), "message": match.group(2).strip()})
+    return items
+
+
 def run_subprocess(argv: list[str]) -> tuple[str, str, int]:
     """Execute askit. Placeholder seam — monkeypatched in tests; wired on host."""
     raise RuntimeError("askit subprocess not wired in this environment")

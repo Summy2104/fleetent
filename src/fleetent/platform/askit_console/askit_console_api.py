@@ -20,12 +20,19 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from fleetent import audit_log, auth, user_store
+from fleetent.platform.agent_management_console import agent_admin_store
 from fleetent.platform.askit_console import askit_runner, askit_task_store
 
 router = APIRouter(prefix="/admin/askit")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
+
+# Commands that mutate state and demand a second confirmation beyond role checks.
+_CONFIRM_COMMANDS = {("cron", "install"), ("cron", "remove")}
+# High-risk operations that additionally require a current 2FA code when the actor
+# has a second factor configured (spec: Deploy / Migrations / promote).
+_TWO_FA_COMMANDS = {("override", "promote")}
 
 
 # --- seam: deploy check gate --------------------------------------------------
@@ -55,6 +62,18 @@ def _current_user(authorization: str | None) -> user_store.User:
 
 def _is_admin(user: user_store.User) -> bool:
     return auth.has_role(user, _ADMIN_ROLES)
+
+
+def _needs_2fa(series: str, command: str) -> bool:
+    return askit_runner.is_high_risk(series) or (series, command) in _TWO_FA_COMMANDS
+
+
+def _enforce_2fa(user: user_store.User, code: str | None) -> None:
+    """Require a valid TOTP for high-risk ops when the actor has 2FA configured."""
+    if not user.totp_secret:
+        return
+    if not code or not auth.verify_user_2fa(user.id, code):
+        raise HTTPException(status_code=403, detail="2FA verification required")
 
 
 class RunBody(BaseModel):
@@ -88,6 +107,7 @@ async def run_command(
     body: RunBody,
     authorization: str | None = Header(None),
     x_confirm: str | None = Header(None),
+    x_2fa_code: str | None = Header(None, alias="X-2FA-Code"),
 ) -> dict[str, Any]:
     user = _current_user(authorization)
     if not askit_runner.is_known(body.series, body.command):
@@ -109,6 +129,14 @@ async def run_command(
             raise HTTPException(
                 status_code=428, detail="confirmation required for high-risk command"
             )
+
+    # mutating cron commands need a second confirmation before they run
+    if (body.series, body.command) in _CONFIRM_COMMANDS and not confirmed:
+        raise HTTPException(status_code=428, detail="confirmation required")
+
+    # high-risk operations also require a current 2FA factor when the actor has one
+    if _needs_2fa(body.series, body.command):
+        _enforce_2fa(user, x_2fa_code)
 
     # deploy is gated on a green check
     if body.series == "deploy" and body.command == "deploy" and not last_check_ok(body.workspace):
@@ -141,24 +169,61 @@ async def _execute(body: RunBody, params: dict[str, Any], user_id: str) -> dict[
             seq += 1
     status = "succeeded" if result["exit_code"] == 0 else "failed"
     askit_task_store.finish_task(task_id, status, result["exit_code"])
-    audit_log.write_audit(
-        user_id,
-        f"askit.{body.series}.{body.command}",
-        "askit_task",
-        task_id,
-        detail={
-            "exit_code": result["exit_code"],
-            "dry_run": params.get("dry-run", False),
-            "askit_version": result["askit_version"],
-        },
-    )
-    return {
+
+    succeeded = result["exit_code"] == 0
+    response: dict[str, Any] = {
         "task_id": task_id,
         "status": status,
         "exit_code": result["exit_code"],
         "argv": result["argv"],
         "dry_run": params.get("dry-run", False),
     }
+    detail: dict[str, Any] = {
+        "exit_code": result["exit_code"],
+        "dry_run": params.get("dry-run", False),
+        "askit_version": result["askit_version"],
+    }
+
+    # Surface structured renderings the UI needs and run provenance/drift side effects.
+    # All parsing is over masked stdout, so secrets never reach the response or audit.
+    pr_url = _apply_side_effects(body, params, succeeded, result["stdout"], response)
+    if pr_url is not None:
+        detail["pr_url"] = pr_url
+
+    audit_log.write_audit(
+        user_id, f"askit.{body.series}.{body.command}", "askit_task", task_id, detail=detail
+    )
+    return response
+
+
+def _apply_side_effects(
+    body: RunBody, params: dict[str, Any], succeeded: bool, stdout: str, response: dict[str, Any]
+) -> str | None:
+    """Enrich the response and run provenance/drift effects; return a PR url if produced."""
+    if body.series == "cron" and body.command == "diff":
+        response["cron_diff"] = askit_runner.parse_cron_diff(stdout)
+    if body.series == "env" and body.command in {"doctor", "env-doctor", "mcp-doctor"}:
+        response["diagnostics"] = askit_runner.parse_doctor(stdout)
+
+    agent = params.get("agent")
+    if not succeeded or not isinstance(agent, str):
+        return None
+
+    if body.series == "override":
+        if body.command == "sync":
+            agent_admin_store.mark_drift(agent)
+        elif body.command == "promote":
+            pr_url = askit_runner.extract_pr_url(stdout)
+            agent_admin_store.clear_drift(agent)
+            response["pr_url"] = pr_url
+            return pr_url
+        elif body.command == "decompile":
+            # ad-hoc -> managed is a flag flip on the same row; agent_id is untouched
+            agent_admin_store.set_provenance(agent, "managed")
+    elif body.series == "deploy" and body.command == "deploy":
+        # spec deploy overwrites any discarded drift and clears the mark
+        agent_admin_store.clear_drift(agent)
+    return None
 
 
 @router.get("/tasks/{task_id}")

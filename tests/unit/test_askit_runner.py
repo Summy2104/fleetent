@@ -59,3 +59,28 @@ def test_serial_command_detection():
     assert r.is_serial("override", "promote") is True
     assert r.is_serial("build", "check") is False
     assert r.is_serial("override", "review") is False
+
+
+def test_extract_pr_url():
+    assert r.extract_pr_url("promoted\nPR: https://git.example.com/pr/7 done") == (
+        "https://git.example.com/pr/7"
+    )
+    assert r.extract_pr_url("no link here") is None
+
+
+def test_parse_cron_diff():
+    diff = r.parse_cron_diff("+ added-task\n- missing-task\n~ changed-task\nuntouched")
+    assert diff == {
+        "added": ["added-task"],
+        "missing": ["missing-task"],
+        "changed": ["changed-task"],
+    }
+
+
+def test_parse_doctor_ryg():
+    items = r.parse_doctor("GREEN: ok\nYELLOW: warn\nRED: fail\nplain line")
+    assert items == [
+        {"level": "green", "message": "ok"},
+        {"level": "yellow", "message": "warn"},
+        {"level": "red", "message": "fail"},
+    ]

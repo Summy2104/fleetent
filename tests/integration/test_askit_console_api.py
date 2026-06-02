@@ -320,3 +320,201 @@ def test_confirmed_migration_runs_without_dry_run_and_audits(client, monkeypatch
     tid = r.json()["task_id"]
     entries = audit.search_audit(action="askit.migrations.migrate-env")
     assert any(e["target_id"] == tid and e["detail"]["dry_run"] is False for e in entries)
+
+
+# --- high-risk 2FA (任务 7.5/7.6, 场景 80-82) --------------------------------
+
+
+def test_high_risk_deploy_requires_2fa_when_enabled(client):
+    token, uid = _session_for("admin")
+    auth.enable_2fa(uid)  # actor now has a second factor configured
+    r = client.post(
+        "/admin/askit/run",
+        headers=_hdr(token, confirm=True),  # confirmed but no X-2FA-Code
+        json={"series": "deploy", "command": "deploy", "workspace": "prod"},
+    )
+    assert r.status_code == 403
+
+
+def test_high_risk_deploy_passes_with_valid_2fa(client):
+    token, uid = _session_for("admin")
+    secret = auth.enable_2fa(uid)
+    headers = _hdr(token, confirm=True)
+    headers["X-2FA-Code"] = auth.totp(secret)
+    r = client.post(
+        "/admin/askit/run",
+        headers=headers,
+        json={"series": "deploy", "command": "deploy", "workspace": "prod"},
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == "succeeded"
+
+
+def test_promote_requires_2fa_when_enabled(client):
+    token, uid = _session_for("admin")
+    auth.enable_2fa(uid)
+    r = client.post(
+        "/admin/askit/run",
+        headers=_hdr(token, confirm=True),
+        json={"series": "override", "command": "promote", "workspace": "dev"},
+    )
+    assert r.status_code == 403
+
+
+def test_high_risk_without_2fa_configured_not_blocked(client):
+    token, _ = _session_for("admin")  # no 2FA enabled for this actor
+    headers = _hdr(token, confirm=True)
+    headers["X-2FA-Code"] = ""  # nothing to verify against
+    r = client.post(
+        "/admin/askit/run",
+        headers=headers,
+        json={"series": "deploy", "command": "deploy", "workspace": "prod"},
+    )
+    assert r.status_code == 200
+
+
+# --- cron diff + second confirmation (任务 9.3/9.4, 场景 51-54) ---------------
+
+
+def test_cron_install_requires_confirm(client):
+    token, _ = _session_for("admin")
+    denied = client.post(
+        "/admin/askit/run",
+        headers=_hdr(token),  # no confirm
+        json={"series": "cron", "command": "install", "workspace": "dev"},
+    )
+    assert denied.status_code == 428
+    ok = client.post(
+        "/admin/askit/run",
+        headers=_hdr(token, confirm=True),
+        json={"series": "cron", "command": "install", "workspace": "dev"},
+    )
+    assert ok.status_code == 200
+
+
+def test_cron_diff_highlights_added_missing_changed(client, monkeypatch):
+    out = "+ nightly-build\n- stale-task\n~ hourly-sync\nunchanged-task"
+    monkeypatch.setattr(runner, "run_subprocess", lambda argv: (out, "", 0))
+    token, _ = _session_for("viewer")  # diff is read-only
+    r = client.post(
+        "/admin/askit/run",
+        headers=_hdr(token),
+        json={"series": "cron", "command": "diff", "workspace": "dev"},
+    )
+    assert r.status_code == 200
+    diff = r.json()["cron_diff"]
+    assert diff["added"] == ["nightly-build"]
+    assert diff["missing"] == ["stale-task"]
+    assert diff["changed"] == ["hourly-sync"]
+
+
+# --- redacted RYG diagnostics (任务 9.3/9.4, 场景 56-62) ----------------------
+
+
+def test_env_doctor_returns_ryg_and_masks_secrets(client, monkeypatch):
+    out = "GREEN: python ok\nYELLOW: cache stale\nRED: API_TOKEN=supersecret missing scope"
+    monkeypatch.setattr(runner, "run_subprocess", lambda argv: (out, "", 0))
+    token, _ = _session_for("viewer")  # doctor is read-only
+    r = client.post(
+        "/admin/askit/run",
+        headers=_hdr(token),
+        json={"series": "env", "command": "env-doctor", "workspace": "dev"},
+    )
+    assert r.status_code == 200
+    diag = r.json()["diagnostics"]
+    levels = {d["level"] for d in diag}
+    assert levels == {"green", "yellow", "red"}
+    # the sensitive value must not appear in the structured diagnostics or persisted logs
+    assert "supersecret" not in r.text
+    tid = r.json()["task_id"]
+    logs = client.get(f"/admin/askit/tasks/{tid}", headers=_hdr(token)).json()["logs"]
+    assert all("supersecret" not in log["line"] for log in logs)
+
+
+# --- provenance / drift linkage + decompile + PR link (任务 3.3/3.4, 8.x) -----
+
+
+def test_override_sync_marks_drift_on_managed_agent(client):
+    agent_state.set_provenance("ops-bot", "managed")
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/askit/run",
+        headers=_hdr(token),
+        json={
+            "series": "override",
+            "command": "sync",
+            "workspace": "dev",
+            "params": {"agent": "ops-bot"},
+        },
+    )
+    assert r.status_code == 200
+    assert agent_state.get_state("ops-bot")["drift"] == 1
+
+
+def test_promote_clears_drift_and_returns_pr_link(client, monkeypatch):
+    agent_state.set_provenance("ops-bot", "managed")
+    agent_state.mark_drift("ops-bot")
+    out = "promoted override\nPR: https://git.example.com/fleet/pr/42"
+    monkeypatch.setattr(runner, "run_subprocess", lambda argv: (out, "", 0))
+    token, uid = _session_for("admin")
+    r = client.post(
+        "/admin/askit/run",
+        headers=_hdr(token, confirm=True),
+        json={
+            "series": "override",
+            "command": "promote",
+            "workspace": "dev",
+            "params": {"agent": "ops-bot"},
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["pr_url"] == "https://git.example.com/fleet/pr/42"
+    assert agent_state.get_state("ops-bot")["drift"] == 0
+    entries = audit.search_audit(action="askit.override.promote")
+    assert any(e["detail"].get("pr_url") == "https://git.example.com/fleet/pr/42" for e in entries)
+
+
+def test_discard_keeps_drift_until_deploy_restores(client):
+    agent_state.set_provenance("ops-bot", "managed")
+    agent_state.mark_drift("ops-bot")
+    token, _ = _session_for("admin")
+    client.post(
+        "/admin/askit/run",
+        headers=_hdr(token),
+        json={
+            "series": "override",
+            "command": "discard",
+            "workspace": "dev",
+            "params": {"agent": "ops-bot"},
+        },
+    )
+    assert agent_state.get_state("ops-bot")["drift"] == 1  # discard alone does not clear
+    client.post(
+        "/admin/askit/run",
+        headers=_hdr(token, confirm=True),
+        json={
+            "series": "deploy",
+            "command": "deploy",
+            "workspace": "dev",
+            "params": {"agent": "ops-bot"},
+        },
+    )
+    assert agent_state.get_state("ops-bot")["drift"] == 0  # spec deploy restores + clears
+
+
+def test_decompile_flips_provenance_keeping_identity(client):
+    agent_state.set_provenance("tmp-bot", "adhoc")  # ad-hoc agent
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/askit/run",
+        headers=_hdr(token),
+        json={
+            "series": "override",
+            "command": "decompile",
+            "workspace": "dev",
+            "params": {"agent": "tmp-bot"},
+        },
+    )
+    assert r.status_code == 200
+    # flag flip only — same name row, no rebuild; provenance becomes managed
+    assert agent_state.get_state("tmp-bot")["provenance"] == "managed"
