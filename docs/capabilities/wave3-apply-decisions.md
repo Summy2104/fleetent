@@ -466,3 +466,18 @@ zy 复核全部 13 个 change 后，对 cost 维度做出整体决策：**cost �
 - ① `_fire` 存什么：**改——存完整对话**。不再传副本+手动追加 reply，而是把真实消息列表交给 `run`（就地补全 user+工具调用步骤+最终回复），直接 `save` 整个列表；下次固定 session 触发能看到完整上下文（含工具步骤）。测试 mock 改为模拟"run 就地追加"。
 - ② 默认独立 session 语义、固定复用需显式配 `session_id`：**认可，保持**。
 - ③ 旧库加列 `session_id` 的迁移脚本：**保持现状——不补**（新装库建表即带该列；旧库该列靠后续/其他机制，本 change 不写迁移脚本）。
+
+### AR18 cost-budget-control（评审后为 turns/tokens 用量分层预算）
+- ① cost 维度归属：**已失效**（cost 整体删除，见「评审后修订」）。
+- ② `MODEL_PRICING` 占位单价：**已失效**（cost 删除）。
+- ③ 各层默认窗口（session=lifetime / user·agent=weekly / global=monthly）+ 无 cap 默认休眠：**认可，保持**。
+- ④ `headroom()` 留后续：**已失效**（headroom 随 cost 删除）。
+
+---
+
+## 复核完成（2026-06-02）
+
+zy 已逐条复核全部 13 个 change 的自解决策。结论汇总：
+- **保持不变**（认可）：绝大多数项（占位符/文案/阈值/顺序/测试调整/边界等）。
+- **评审后改动并已实现**：T3（加 `secrets_redacted` 审计标记）、T2（默认超时加配置开关）、MCP4（strict 停机接通 + silent/degrade 日志级别区分）、S3（改存完整对话）、cost 整体删除（AR18 仅留 turns/tokens；MR2 回退）。
+- 期间远程合入他人 AR3「工具并行调度」(Wave 4)，已干净合并，全量 1391 passed / 0。
