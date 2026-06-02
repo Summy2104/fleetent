@@ -179,7 +179,7 @@ flowchart TD
 
 | 文档 | 覆盖范围 | 优先级 | 依赖的模块 | 负责人 | 状态 |
 |------|---------|:------:|-----------|-----|------|
-| [intelligence-roadmap.md](capabilities/intelligence-roadmap.md) | 常乐负责模块总控板、MVP 缺口、实施批次 | P0 | observability · memory · long-term-ctx · reflection · vector-store · knowledge-base · deployment | 常乐 | 基础完成 |
+| [owner-capability-roadmap.md](capabilities/owner-capability-roadmap.md) | 常乐负责模块总控板、MVP 缺口、实施批次 | P0 | observability · memory · long-term-ctx · reflection · vector-store · knowledge-base · deployment | 常乐 | 基础完成 |
 | [agent-runtime.md](capabilities/agent-runtime.md) | 核心循环、工具调度、上下文压缩、运行治理 | P0 | model-router · tools · session · skill · governance · observability | 张洋 | 部分完成 |
 | [model-router.md](capabilities/model-router.md) | task_type 路由、provider 配置、fallback 链 | P0 | deployment | 张洋 | 部分完成 |
 | [tools.md](capabilities/tools.md) | @tool 装饰器、schema 构建、dispatch、内置工具集 | P0 | governance · connectors | 张洋 | 部分完成 |
