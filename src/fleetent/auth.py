@@ -16,6 +16,8 @@ from typing import Any, cast
 from fleetent import user_store
 
 BUILTIN_ADMIN_NAME = "admin"
+# Fixed default credentials for on-prem first run. INSECURE — change after deploy.
+BUILTIN_ADMIN_PASSWORD = "admin"
 
 # Login sessions: token -> {"user_id": str, "last_active": float}
 _SESSIONS: dict[str, dict[str, Any]] = {}
@@ -56,10 +58,10 @@ def seed_builtin_admin() -> tuple[user_store.User, str] | None:
     """
     if user_store.get_builtin_admin() is not None:
         return None
-    temp_password = secrets.token_urlsafe(12)
+    temp_password = BUILTIN_ADMIN_PASSWORD
     user = user_store.create_user(name=BUILTIN_ADMIN_NAME, email=None)
     user_store.set_role(user.id, "built_in_admin")
-    user_store.set_password(user.id, hash_password(temp_password), must_reset=True)
+    user_store.set_password(user.id, hash_password(temp_password), must_reset=False)
     refreshed = user_store.get_by_id(user.id)
     assert refreshed is not None
     return refreshed, temp_password
