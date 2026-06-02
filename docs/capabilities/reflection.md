@@ -22,8 +22,8 @@ reflection 默认不直接修改 User Memory、skills 或 knowledge-base。
 
 **模块归属**：
 - owning package：`intelligence.reflection`
-- public API：`run_reflection(scope)`、`generate_memory_maintenance_proposals(user_id, findings)`、proposal create / approve / reject / apply API、`KnowledgeBaseReflectionReport`、`KnowledgeBaseReflectionFinding`、`run_kb_reflection_report(scope)`；后续扩展 `run_skill_reflection(agent_id)`
-- owned tables：`reflection_reports`、`memory_maintenance_proposals`、`kb_reflection_reports`；后续 `skill_proposals`
+- public API：`run_reflection(scope)`、`generate_memory_maintenance_proposals(user_id, findings)`、proposal create / approve / reject / apply API、`KnowledgeBaseReflectionReport`、`KnowledgeBaseReflectionFinding`、`run_kb_reflection_report(scope)`、`SkillProposal`、`generate_skill_proposals()`、`approve_skill_proposal()`、`reject_skill_proposal()`、`apply_skill_proposal()`；后续扩展 `run_skill_reflection(agent_id)`
+- owned tables：`reflection_reports`、`memory_maintenance_proposals`、`kb_reflection_reports`、`skill_proposals`
 - config namespace：`reflection.*`
 
 ## 关键流程
@@ -84,6 +84,19 @@ kb_reflection_reports (
   signal_summary_json TEXT,
   created_at   DATETIME
 )
+
+skill_proposals (
+  id           TEXT PRIMARY KEY,
+  type         TEXT,              -- create_skill | update_skill | deprecate_skill
+  target_skill TEXT,
+  reason       TEXT,
+  evidence_refs_json TEXT,
+  suggested_draft TEXT,
+  suggested_diff TEXT,
+  status       TEXT,              -- pending | approved | rejected | applied
+  created_at   DATETIME,
+  updated_at   DATETIME
+)
 ```
 
 ## 接口定义
@@ -131,6 +144,18 @@ async def run_kb_reflection_report(scope: str) -> KnowledgeBaseReflectionReport:
     """读取 observability 与 knowledge-base public API，生成只读报告；不自动写 KB，不触发 sync。"""
 
 
+@dataclass
+class SkillProposal:
+    type: Literal["create_skill", "update_skill", "deprecate_skill"]
+    target_skill: str
+    status: Literal["pending", "approved", "rejected", "applied"]
+    evidence_refs: list[str]
+
+
+def generate_skill_proposals(...) -> list[SkillProposal]:
+    """从 skill_opportunity 和 tool/skill usage 信号生成 pending 提案；不自动改 skill。"""
+
+
 def generate_memory_maintenance_proposals(
     user_id: str,
     findings: list[ReflectionFinding],
@@ -147,6 +172,7 @@ def generate_memory_maintenance_proposals(
 - `reflection_reports` SQLite 表
 - `memory_maintenance_proposals` SQLite 表和 proposal lifecycle API
 - `kb_reflection_reports` SQLite 表和 `run_kb_reflection_report()` public API
+- `skill_proposals` SQLite 表和 `SkillProposal` lifecycle API；支持 `create_skill`、`update_skill`、`deprecate_skill`
 - 只通过 observability public API 读取 traces
 - 只读 `fleetent.intelligence.memory` 信号；proposal apply 只通过 memory public API
 - 支持三类 finding：`memory_candidate`、`memory_conflict`、`skill_opportunity`
@@ -156,9 +182,10 @@ def generate_memory_maintenance_proposals(
 - 保存 report 时不保存完整 trace transcript
 - deterministic evaluation fixture / runner 覆盖 expected / forbidden findings 和 persisted transcript redaction
 - KB reflection 支持 `missing_knowledge`、`stale_document`、`low_retrieval_quality`、`connector_sync_issue`、`entity_graph_gap` findings；报告只读，不自动写 KB、不触发 sync，也不创建 KB mutation proposal
+- Skill reflection proposals 默认生成 `pending` 提案，不自动改 skill；只有 approved proposal 才能通过 skill public boundary apply
 - real-route smoke 仅在 `FLEETENT_EVAL_REAL_REFLECTION=1` 且显式本地 fixture/config 完整时手动运行；默认 skip
 
-当前定位：已具备“生成建议报告”、User Memory 维护 proposal lifecycle 和 KB 质量只读报告；UI / scheduler / skill proposal 尚未完成。
+当前定位：已具备“生成建议报告”、User Memory 维护 proposal lifecycle、KB 质量只读报告和 Skill proposal lifecycle；UI / scheduler 尚未完成。
 
 ## 规划中（v1.0）
 
@@ -178,10 +205,11 @@ def generate_memory_maintenance_proposals(
   - high-risk `delete` 不能 low-risk auto apply
   - `suggest_shared_memory_or_kb` 不写 User Memory
 
-- [ ] **skill reflection proposals（后续）**：分析 per-agent traces，生成、改进或删除 skill
-  - `create`：发现高频重复的 prompt pattern，提炼为新 skill
-  - `update`：识别现有 skill 的低效用法，生成改进版本
-  - `delete`：skill 长期未被触发、与其他 skill 高度重复、或持续产生负面效果时，提议删除
+- [x] **skill reflection proposals**：分析 per-agent traces，生成、改进或删除 skill
+  - `create_skill`：发现高频重复的 prompt pattern，提炼为新 skill
+  - `update_skill`：识别现有 skill 的低效用法，生成改进版本
+  - `deprecate_skill`：skill 长期未被触发、与其他 skill 高度重复、或持续产生负面效果时，提议删除
+  - 所有 proposal 初始为 `pending`；不自动改 skill，apply 只能通过 skill public boundary
   - skill 可以是单文件，也可以是含脚本、模板的多级目录；`snapshot` 字段统一存储整个目录的文件快照（JSON），审批时展示完整新状态，应用时直接覆盖写入
 
 - [x] **knowledge base reflection**：观察知识库使用质量，只上报不写回

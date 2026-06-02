@@ -73,3 +73,18 @@ def test_capability_docs_describe_kb_reflection_reports_scope():
         assert "只读报告" in content
         assert "不自动写 KB" in content
         assert "不触发 sync" in content
+
+
+def test_capability_docs_describe_skill_reflection_proposals_scope():
+    reflection_doc = Path("docs/capabilities/reflection.md").read_text(encoding="utf-8")
+    skill_doc = Path("docs/capabilities/skill.md").read_text(encoding="utf-8")
+    roadmap = Path("docs/capabilities/owner-capability-roadmap.md").read_text(encoding="utf-8")
+
+    for content in [reflection_doc, skill_doc, roadmap]:
+        assert "SkillProposal" in content
+        assert "skill_proposals" in content
+        assert "create_skill" in content
+        assert "update_skill" in content
+        assert "deprecate_skill" in content
+        assert "pending" in content
+        assert "不自动改 skill" in content

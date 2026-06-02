@@ -45,6 +45,7 @@ def test_upgrade_creates_tables(tmp_path):
     assert "kb_entity_mentions" in tables
     assert "kb_relations" in tables
     assert "kb_reflection_reports" in tables
+    assert "skill_proposals" in tables
 
 
 def test_upgrade_creates_trace_indexes(tmp_path):
@@ -257,6 +258,25 @@ def test_column_structure(tmp_path):
         "findings_json",
         "signal_summary_json",
         "created_at",
+    }
+    skill_proposal_cols = {row[1] for row in conn.execute("PRAGMA table_info(skill_proposals)")}
+    assert skill_proposal_cols >= {
+        "id",
+        "type",
+        "target_skill",
+        "reason",
+        "evidence_refs_json",
+        "risk_level",
+        "suggested_draft",
+        "suggested_diff",
+        "status",
+        "reviewer_user_id",
+        "reviewed_at",
+        "rejection_reason",
+        "actor_user_id",
+        "applied_at",
+        "created_at",
+        "updated_at",
     }
     entity_cols = {row[1] for row in conn.execute("PRAGMA table_info(kb_entities)")}
     assert entity_cols >= {

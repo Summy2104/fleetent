@@ -1,0 +1,51 @@
+{
+  "findings": [
+    {
+      "type": "skill_opportunity",
+      "summary": "Repeated task pattern may become a skill: summarize Jira progress",
+      "evidence_ids": ["trace-create-a", "trace-create-b"],
+      "metadata": {
+        "pattern": "summarize Jira progress",
+        "transcript": "RAW SKILL TRANSCRIPT"
+      }
+    },
+    {
+      "type": "skill_opportunity",
+      "summary": "Single ordinary task should not become a skill",
+      "evidence_ids": ["trace-noise"],
+      "metadata": {
+        "pattern": "one-off note"
+      }
+    }
+  ],
+  "skill_signals": [
+    {
+      "skill_name": "incident-runbook",
+      "trigger_count": 10,
+      "failure_count": 5,
+      "reason": "rollback step is missing"
+    },
+    {
+      "skill_name": "legacy-summary",
+      "trigger_count": 0,
+      "days_unused": 120,
+      "reason": "no recent usage"
+    },
+    {
+      "skill_name": "healthy-skill",
+      "trigger_count": 4,
+      "failure_count": 0,
+      "reason": "healthy"
+    }
+  ],
+  "expected_proposals": [
+    ["create_skill", "summarize-jira-progress"],
+    ["update_skill", "incident-runbook"],
+    ["deprecate_skill", "legacy-summary"]
+  ],
+  "forbidden_proposals": [
+    ["create_skill", "one-off-note"],
+    ["update_skill", "healthy-skill"]
+  ],
+  "forbidden_raw_text": "RAW SKILL TRANSCRIPT"
+}

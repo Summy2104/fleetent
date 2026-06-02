@@ -363,7 +363,8 @@ skill 演进，属于原 capability 里需要提高优先级的能力：
    reflection-owned `kb_reflection_reports` 持久化；基于 retrieval traces、source attribution、KB sync 状态和用户问题，
    发现 `missing_knowledge`、过期文档、低命中主题、`connector_sync_issue` 和 entity graph gap；不自动写 KB、不触发 sync。
 2. `skill-reflection-proposals`：基于 trace / tool usage / repeated tasks 发现可沉淀为 skill 的机会，生成
-   owner-reviewed proposal；不自动创建或修改 skill。
+   `SkillProposal` 并持久化到 `skill_proposals`；类型包括 `create_skill`、`update_skill`、`deprecate_skill`，
+   初始状态为 `pending`，owner-reviewed 后才可 apply；不自动改 skill。
 3. `reflection-trend-summary`：对 reflection findings 做长期趋势统计，用于判断 memory / KB / skill 改进是否有效。
 
 建议依赖顺序：

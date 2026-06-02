@@ -1,6 +1,8 @@
 """Reflection report public API."""
 
 import json
+import os
+import re
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -21,6 +23,9 @@ KnowledgeBaseFindingType = Literal[
     "insufficient_signal",
 ]
 KnowledgeBaseFindingSeverity = Literal["low", "medium", "high"]
+SkillProposalType = Literal["create_skill", "update_skill", "deprecate_skill"]
+SkillProposalStatus = Literal["pending", "approved", "rejected", "applied"]
+SkillProposalRisk = Literal["low", "medium", "high"]
 MaintenanceAction = Literal[
     "mark_stale",
     "merge",
@@ -104,6 +109,28 @@ class MemoryMaintenanceProposal:
     created_at: datetime
     updated_at: datetime
     expires_at: datetime | None
+
+
+@dataclass(frozen=True)
+class SkillProposal:
+    """Owner-reviewed proposal to create, update, or deprecate a Skill."""
+
+    id: str
+    type: SkillProposalType
+    target_skill: str
+    reason: str
+    evidence_refs: list[str]
+    risk_level: SkillProposalRisk
+    suggested_draft: str | None
+    suggested_diff: str | None
+    status: SkillProposalStatus
+    created_at: datetime
+    updated_at: datetime
+    reviewer_user_id: str | None = None
+    reviewed_at: datetime | None = None
+    rejection_reason: str | None = None
+    actor_user_id: str | None = None
+    applied_at: datetime | None = None
 
 
 async def run_reflection(scope: str) -> ReflectionReport:
@@ -228,6 +255,137 @@ def generate_memory_maintenance_proposals(
                 )
             )
     return proposals
+
+
+def generate_skill_proposals(
+    *,
+    findings: list[ReflectionFinding] | None = None,
+    skill_signals: list[dict[str, object]] | None = None,
+) -> list[SkillProposal]:
+    """Generate pending Skill proposals without applying them."""
+    proposals: list[SkillProposal] = []
+    for finding in findings or []:
+        if finding.type != "skill_opportunity" or len(finding.evidence_ids) < 2:
+            continue
+        pattern = finding.metadata.get("pattern") or finding.summary.rsplit(":", 1)[-1].strip()
+        target_skill = _skill_name(pattern)
+        proposals.append(
+            _create_skill_proposal(
+                proposal_type="create_skill",
+                target_skill=target_skill,
+                reason=finding.summary,
+                evidence_refs=finding.evidence_ids,
+                risk_level="medium",
+                suggested_draft=_skill_draft(target_skill, pattern, finding.summary),
+                suggested_diff=None,
+            )
+        )
+
+    for signal in skill_signals or []:
+        skill_name = str(signal.get("skill_name", "")).strip()
+        if not skill_name:
+            continue
+        trigger_count = _int_signal(signal, "trigger_count")
+        failure_count = _int_signal(signal, "failure_count")
+        days_unused = _int_signal(signal, "days_unused")
+        reason = str(signal.get("reason") or "deterministic skill quality signal")
+        if trigger_count >= 5 and failure_count >= max(3, trigger_count // 3):
+            proposals.append(
+                _create_skill_proposal(
+                    proposal_type="update_skill",
+                    target_skill=skill_name,
+                    reason=reason,
+                    evidence_refs=[skill_name],
+                    risk_level="medium",
+                    suggested_draft=None,
+                    suggested_diff=_skill_diff(skill_name, reason),
+                )
+            )
+        elif trigger_count == 0 and days_unused >= 90:
+            proposals.append(
+                _create_skill_proposal(
+                    proposal_type="deprecate_skill",
+                    target_skill=skill_name,
+                    reason=reason,
+                    evidence_refs=[skill_name],
+                    risk_level="low",
+                    suggested_draft=None,
+                    suggested_diff=(
+                        f"Mark skill {skill_name!r} deprecated after {days_unused} unused days."
+                    ),
+                )
+            )
+    return proposals
+
+
+def get_skill_proposal(proposal_id: str) -> SkillProposal:
+    """Load one Skill proposal by id."""
+    proposal = _get_skill_proposal(proposal_id)
+    if proposal is None:
+        raise ValueError("skill proposal does not exist")
+    return proposal
+
+
+def approve_skill_proposal(proposal_id: str, *, reviewer_user_id: str) -> SkillProposal:
+    """Approve a pending Skill proposal."""
+    proposal = get_skill_proposal(proposal_id)
+    _require_skill_proposal_status(proposal, {"pending"})
+    now = datetime.now(UTC).replace(microsecond=0)
+    updated = _replace_skill_proposal(
+        proposal,
+        status="approved",
+        reviewer_user_id=reviewer_user_id,
+        reviewed_at=now,
+        updated_at=now,
+    )
+    _update_skill_proposal(updated)
+    return updated
+
+
+def reject_skill_proposal(
+    proposal_id: str,
+    *,
+    reviewer_user_id: str,
+    reason: str,
+) -> SkillProposal:
+    """Reject a pending Skill proposal."""
+    proposal = get_skill_proposal(proposal_id)
+    _require_skill_proposal_status(proposal, {"pending"})
+    now = datetime.now(UTC).replace(microsecond=0)
+    updated = _replace_skill_proposal(
+        proposal,
+        status="rejected",
+        reviewer_user_id=reviewer_user_id,
+        reviewed_at=now,
+        rejection_reason=reason,
+        updated_at=now,
+    )
+    _update_skill_proposal(updated)
+    return updated
+
+
+async def apply_skill_proposal(proposal_id: str, *, actor_user_id: str) -> SkillProposal:
+    """Apply an approved Skill proposal through the Skill boundary."""
+    proposal = get_skill_proposal(proposal_id)
+    if proposal.status == "rejected":
+        raise ValueError("cannot apply rejected skill proposal")
+    _require_skill_proposal_status(proposal, {"approved"})
+    await apply_skill_proposal_to_boundary(proposal)
+    now = datetime.now(UTC).replace(microsecond=0)
+    updated = _replace_skill_proposal(
+        proposal,
+        status="applied",
+        actor_user_id=actor_user_id,
+        applied_at=now,
+        updated_at=now,
+    )
+    _update_skill_proposal(updated)
+    return updated
+
+
+async def apply_skill_proposal_to_boundary(proposal: SkillProposal) -> None:
+    """Apply a Skill proposal through the Skill management boundary."""
+    raise RuntimeError("skill proposal apply boundary is not configured")
 
 
 def create_memory_maintenance_proposal(
@@ -625,6 +783,182 @@ def _insert_maintenance_proposal(proposal: MemoryMaintenanceProposal) -> None:
         """,
         _proposal_params(proposal),
     )
+
+
+def _create_skill_proposal(
+    *,
+    proposal_type: SkillProposalType,
+    target_skill: str,
+    reason: str,
+    evidence_refs: list[str],
+    risk_level: SkillProposalRisk,
+    suggested_draft: str | None,
+    suggested_diff: str | None,
+) -> SkillProposal:
+    now = datetime.now(UTC).replace(microsecond=0)
+    proposal = SkillProposal(
+        id=str(uuid.uuid4()),
+        type=proposal_type,
+        target_skill=target_skill,
+        reason=reason,
+        evidence_refs=list(evidence_refs),
+        risk_level=risk_level,
+        suggested_draft=suggested_draft,
+        suggested_diff=suggested_diff,
+        status="pending",
+        created_at=now,
+        updated_at=now,
+    )
+    _insert_skill_proposal(proposal)
+    return proposal
+
+
+def _insert_skill_proposal(proposal: SkillProposal) -> None:
+    database = _database()
+    if not database.path.exists() or not _has_table(database, "skill_proposals"):
+        return
+    database.execute(
+        """
+        INSERT INTO skill_proposals (
+            id, type, target_skill, reason, evidence_refs_json, risk_level,
+            suggested_draft, suggested_diff, status, reviewer_user_id, reviewed_at,
+            rejection_reason, actor_user_id, applied_at, created_at, updated_at
+        )
+        VALUES (
+            :id, :type, :target_skill, :reason, :evidence_refs_json, :risk_level,
+            :suggested_draft, :suggested_diff, :status, :reviewer_user_id, :reviewed_at,
+            :rejection_reason, :actor_user_id, :applied_at, :created_at, :updated_at
+        )
+        """,
+        _skill_proposal_params(proposal),
+    )
+
+
+def _update_skill_proposal(proposal: SkillProposal) -> None:
+    _database().execute(
+        """
+        UPDATE skill_proposals
+        SET status = :status,
+            reviewer_user_id = :reviewer_user_id,
+            reviewed_at = :reviewed_at,
+            rejection_reason = :rejection_reason,
+            actor_user_id = :actor_user_id,
+            applied_at = :applied_at,
+            updated_at = :updated_at
+        WHERE id = :id
+        """,
+        _skill_proposal_params(proposal),
+    )
+
+
+def _get_skill_proposal(proposal_id: str) -> SkillProposal | None:
+    row = (
+        _database()
+        .execute(
+            """
+            SELECT *
+            FROM skill_proposals
+            WHERE id = :id
+            """,
+            {"id": proposal_id},
+        )
+        .fetchone()
+    )
+    return _skill_proposal_from_row(row) if row is not None else None
+
+
+def _skill_proposal_params(proposal: SkillProposal) -> dict[str, object]:
+    return {
+        "id": proposal.id,
+        "type": proposal.type,
+        "target_skill": proposal.target_skill,
+        "reason": proposal.reason,
+        "evidence_refs_json": json.dumps(proposal.evidence_refs, sort_keys=True),
+        "risk_level": proposal.risk_level,
+        "suggested_draft": proposal.suggested_draft,
+        "suggested_diff": proposal.suggested_diff,
+        "status": proposal.status,
+        "reviewer_user_id": proposal.reviewer_user_id,
+        "reviewed_at": proposal.reviewed_at.isoformat() if proposal.reviewed_at else None,
+        "rejection_reason": proposal.rejection_reason,
+        "actor_user_id": proposal.actor_user_id,
+        "applied_at": proposal.applied_at.isoformat() if proposal.applied_at else None,
+        "created_at": proposal.created_at.isoformat(),
+        "updated_at": proposal.updated_at.isoformat(),
+    }
+
+
+def _skill_proposal_from_row(row: dict[str, Any]) -> SkillProposal:
+    return SkillProposal(
+        id=str(row["id"]),
+        type=cast(SkillProposalType, row["type"]),
+        target_skill=str(row["target_skill"]),
+        reason=str(row["reason"]),
+        evidence_refs=list(json.loads(row["evidence_refs_json"])),
+        risk_level=cast(SkillProposalRisk, row["risk_level"]),
+        suggested_draft=cast(str | None, row["suggested_draft"]),
+        suggested_diff=cast(str | None, row["suggested_diff"]),
+        status=cast(SkillProposalStatus, row["status"]),
+        reviewer_user_id=cast(str | None, row["reviewer_user_id"]),
+        reviewed_at=_parse_optional_datetime(row["reviewed_at"]),
+        rejection_reason=cast(str | None, row["rejection_reason"]),
+        actor_user_id=cast(str | None, row["actor_user_id"]),
+        applied_at=_parse_optional_datetime(row["applied_at"]),
+        created_at=datetime.fromisoformat(row["created_at"]),
+        updated_at=datetime.fromisoformat(row["updated_at"]),
+    )
+
+
+def _replace_skill_proposal(proposal: SkillProposal, **changes: object) -> SkillProposal:
+    data = asdict(proposal)
+    data.update(changes)
+    return SkillProposal(**data)
+
+
+def _require_skill_proposal_status(
+    proposal: SkillProposal,
+    allowed: set[SkillProposalStatus],
+) -> None:
+    if proposal.status not in allowed:
+        expected = ", ".join(sorted(allowed))
+        raise ValueError(f"skill proposal must be {expected}, got {proposal.status}")
+
+
+def _skill_name(pattern: str) -> str:
+    words = re.findall(r"[a-z0-9]+", pattern.casefold())
+    return "-".join(words[:6]) or "generated-skill"
+
+
+def _skill_draft(skill_name: str, pattern: str, reason: str) -> str:
+    return (
+        "---\n"
+        f"name: {skill_name}\n"
+        f"description: Deterministic draft for {pattern}.\n"
+        "---\n"
+        f"## Purpose\n{reason}\n\n"
+        "## Procedure\n- Review the evidence traces.\n- Encode the repeated workflow safely.\n"
+    )
+
+
+def _skill_diff(skill_name: str, reason: str) -> str:
+    return f"Update {skill_name!r}: {reason}"
+
+
+def _int_signal(signal: dict[str, object], key: str) -> int:
+    value = signal.get(key)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    return 0
+
+
+def _real_skill_draft_enabled() -> bool:
+    return os.getenv("FLEETENT_REFLECTION_REAL_SKILL_DRAFT", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 def _update_maintenance_proposal(proposal: MemoryMaintenanceProposal) -> None:
