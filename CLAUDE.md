@@ -49,9 +49,17 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 - 完成后将该 task 标记为 `[x]`
 - 跳过任何一步 = 违反流程
 
-**4. merge / PR，清理 worktree**
+**4. opsx:archive** — 所有 checkbox 为 `[x]` 后，在**当前功能分支**归档并同步 specs
 
-**5. opsx:archive** — 所有 checkbox 为 `[x]` 后归档，同步 specs
+- 归档先于合并决策：archive 表示"实现完成"，spec 同步随同一分支进入后续 PR，便于一并 review
+- 不是"已上线"——归档不代表已部署到 main
+
+**5. 推送分支 + 清理 worktree**
+
+- 清理前提（三条全满足）：分支已推送到 remote（或已建 PR）、worktree 干净、无未提交改动
+- 任一不满足不得清理 worktree，避免丢失未推送的工作
+
+**6. 后续决定 merge 或 PR** — 在主仓库基于已推送分支进行，与 worktree 生命周期解耦
 
 ---
 

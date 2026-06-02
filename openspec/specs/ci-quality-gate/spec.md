@@ -70,7 +70,7 @@ PR 门禁 SHALL 优先运行快速且稳定的测试层，避免 e2e 或 evaluat
 
 #### Scenario: Scoped unit coverage reaches hardening target
 - **WHEN** `intelligence-unit-test-hardening` 完成
-- **THEN** scoped unit coverage for `fleetent.intelligence`、`fleetent.observability`、`fleetent.memory_layer`、`fleetent.config` 和 `scripts.upgrade` 至少达到 75%
+- **THEN** scoped unit coverage for `fleetent.intelligence`、`fleetent.observability`、`fleetent.config` 和 `scripts.upgrade` 至少达到 75%
 - **AND** 该目标只作为本 change 的完成标准，不自动变成仓库级 CI coverage gate
 
 #### Scenario: Unit tests focus on pure and boundary logic

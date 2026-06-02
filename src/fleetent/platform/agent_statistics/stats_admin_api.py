@@ -17,7 +17,8 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Response
 from pydantic import BaseModel
 
-from fleetent import audit_log, auth, schedule_store, user_store
+from fleetent import auth, schedule_store, user_store
+from fleetent.governance import audit_log
 from fleetent.platform.agent_statistics import stats_store
 
 router = APIRouter(prefix="/admin/stats")

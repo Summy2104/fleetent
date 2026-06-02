@@ -1,5 +1,8 @@
 # Pilot MVP 安装清单
 
+本清单是 [pilot-runbook.md](pilot-runbook.md) 的安装阶段参考。第一次测试环境部署和验收时，优先按
+runbook 的顺序执行；本清单用于核对安装、升级、备份、回滚和问题上报边界。
+
 ## 适用范围
 
 本清单用于 fleetent Pilot MVP 的 on-premises 小范围试用部署。目标是让 operator 能按顺序完成安装、

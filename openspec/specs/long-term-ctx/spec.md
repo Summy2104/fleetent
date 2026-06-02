@@ -26,15 +26,15 @@ agent prompt 的长期上下文。
 - **AND** 系统不调用 memory provider 或 knowledge provider
 
 ### Requirement: Memory context retrieval
-`build_context()` SHALL 调用 memory-layer semantic search 并将结果格式化为 memory 区段。
+`build_context()` SHALL 调用 `fleetent.intelligence.memory` semantic search 并将结果格式化为 memory 区段。
 
 #### Scenario: Memory results are included
-- **WHEN** memory-layer 返回相关 memory items
+- **WHEN** `fleetent.intelligence.memory` 返回相关 memory items
 - **THEN** `BuiltContext.text` 包含 memory 区段
 - **AND** `BuiltContext.sources` 包含 `source_type="memory"` 的来源摘要
 
 #### Scenario: Empty memory results are omitted
-- **WHEN** memory-layer 返回空结果
+- **WHEN** `fleetent.intelligence.memory` 返回空结果
 - **THEN** `BuiltContext.text` 不包含空的 memory 区段
 
 ### Requirement: Optional knowledge provider

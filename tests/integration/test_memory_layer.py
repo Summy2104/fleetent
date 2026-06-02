@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from fleetent import memory_layer
+from fleetent.intelligence import memory as memory_layer
 from fleetent.intelligence import vector_store
 from fleetent.intelligence.memory import extraction, store
 from fleetent.intelligence.memory.models import MemoryItem

@@ -24,7 +24,7 @@
 
 - ✅ **Dockerfile**：单容器部署
   - 当前已有 Dockerfile 和 docker-compose.yml，关键配置：
-    - `extra_hosts: host.docker.internal:host-gateway`（Linux 宿主机访问，sandbox_client 通过此地址调用宿主机工具进程）
+    - `extra_hosts: host.docker.internal:host-gateway`（Linux 宿主机访问，`fleetent.integrations.sandbox` 通过此地址调用宿主机工具进程）
     - `volumes: ./data:/app/data, ./config:/app/config`（持久化用户数据和配置）
     - `env_file: .env.production`（密钥通过 env_file 注入，不写入镜像）
 
@@ -75,6 +75,11 @@
 - ✅ **Pilot install checklist**：[pilot-install-checklist.md](../deployment/pilot-install-checklist.md)
   - 覆盖前置条件、配置与 secret 边界、升级 / 备份、启动、健康检查、KB connector、observability、
     diagnostics、回滚、验收和问题上报包
+
+- ✅ **Pilot acceptance guide**：[pilot-acceptance-guide.md](../deployment/pilot-acceptance-guide.md)
+  - 用于安装完成后的测试环境人工验收，覆盖 Go / Conditional Go / No-Go 判定、SQLite restore drill、
+    observability / diagnostics、memory、long-term context、reflection、KB local / SaaS connector、
+    vector reindex、真实外部依赖 skipped / failed / passed 记录和验收报告模板
 
 当前定位：已有本地开发和基础 Docker 部署地基，但还不是面向客户交付的一键 on-prem 安装包。
 

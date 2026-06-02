@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.intelligence.knowledge_base import KnowledgeChunk
-from fleetent.memory_layer import MemoryItem
+from fleetent.intelligence.memory import MemoryItem
 
 
 async def test_public_api_is_importable():

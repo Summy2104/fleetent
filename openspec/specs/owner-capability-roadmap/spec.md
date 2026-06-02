@@ -42,3 +42,28 @@ owner-capability-roadmap SHALL track unit test hardening as a post-foundation qu
 #### Scenario: Roadmap records remaining test strategy
 - **WHEN** `intelligence-unit-test-hardening` is archived
 - **THEN** roadmap docs record the final scoped unit coverage and keep integration / evaluation tests as authoritative for DB runtime, source-of-truth rebuild, connector sync and effect evaluation
+
+### Requirement: Owner roadmap tracks Pilot acceptance entrypoint
+owner-capability-roadmap SHALL identify the Pilot acceptance guide as the entrypoint for validating 常乐负责模块 in a test environment.
+
+#### Scenario: Roadmap links Pilot acceptance guide
+- **WHEN** 读者查看 `docs/capabilities/owner-capability-roadmap.md`
+- **THEN** roadmap 指向 `docs/deployment/pilot-acceptance-guide.md`
+- **AND** 说明该指南用于真实测试环境验收，而不是替代自动化测试
+
+#### Scenario: Roadmap separates acceptance from enhancements
+- **WHEN** 读者查看 Pilot 后增强列表
+- **THEN** roadmap 明确增强 specs 可以与 Pilot 验收并行推进
+- **AND** Pilot 后增强不默认阻塞第一次 Pilot 验收
+
+### Requirement: Owner roadmap uses owner scope rather than intelligence package scope
+owner-capability-roadmap SHALL describe 常乐负责或强依赖的 capability modules，而不是 `src/fleetent/intelligence/` package 的专属路线图。
+
+#### Scenario: Owner roadmap is not confused with intelligence package
+- **WHEN** 读者查看 `docs/capabilities/owner-capability-roadmap.md`
+- **THEN** 文档说明其范围是常乐负责或强依赖的 capability modules
+- **AND** 不把该 roadmap 描述成 `src/fleetent/intelligence/` package 的代码目录规划
+
+#### Scenario: Owner roadmap reflects package migrations
+- **WHEN** 读者查看 owner roadmap 的当前能力地图或后续缺口
+- **THEN** 已完成 package migrations 后的 canonical package 名称保持一致

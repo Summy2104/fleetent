@@ -13,7 +13,7 @@
 
 **调用关系**：
 - 依赖：embedding 模型（当前 deterministic，后续本地自托管 bge-m3 或 multilingual-e5）、向量后端（memory 或普通 SQLite persistent backend；sqlite-vec / Qdrant 后置）、config
-- 被依赖：memory_layer（记忆条目的写入与检索）、knowledge_base（文档 chunk 的写入与检索）
+- 被依赖：`fleetent.intelligence.memory`（记忆条目的写入与检索）、knowledge_base（文档 chunk 的写入与检索）
 
 **模块归属**：
 - owning package：`intelligence.vector_store`
@@ -114,7 +114,7 @@ def reindex(request: ReindexRequest) -> ReindexSummary:
 - 同步 reindex 边界支持 memory / knowledge-base 的 dry-run 和 rebuild；`rebuild` 先清空目标 namespace，再逐条 upsert 当前 source records，单条失败计入 failed 并继续后续 item
 - combined memory+KB embedding evaluation 使用 deterministic embedding 默认验证 memory 和 KB 都能通过 reindex 后检索；真实 HTTP embedding smoke 显式 opt-in
 
-当前定位：可支持 memory-layer、long-term-ctx 和测试场景；SQLite backend 解决重启后索引丢失问题，但不是大规模 ANN 检索后端。
+当前定位：可支持 `fleetent.intelligence.memory`、long-term-ctx 和测试场景；SQLite backend 解决重启后索引丢失问题，但不是大规模 ANN 检索后端。
 rerank provider 目前只提供边界，尚未接入 knowledge-base search。
 
 ## 规划中（v1.0）

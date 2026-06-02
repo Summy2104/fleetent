@@ -1,6 +1,7 @@
-import ast
 import importlib
-from pathlib import Path
+import sys
+
+import pytest
 
 GOVERNANCE_PUBLIC_APIS = {
     "permission_gate": {
@@ -48,27 +49,17 @@ def test_governance_package_and_canonical_modules_import():
         importlib.import_module(f"fleetent.governance.{module_name}")
 
 
-def test_legacy_governance_imports_reexport_canonical_public_api():
+def test_governance_canonical_public_api_remains_available():
     for module_name, public_names in GOVERNANCE_PUBLIC_APIS.items():
         canonical = importlib.import_module(f"fleetent.governance.{module_name}")
-        legacy = importlib.import_module(f"fleetent.{module_name}")
 
-        assert set(legacy.__all__) == public_names
         for public_name in public_names:
-            assert getattr(legacy, public_name) is getattr(canonical, public_name)
+            assert getattr(canonical, public_name)
 
 
-def test_legacy_governance_shims_only_reexport_public_names():
-    root = Path(__file__).parents[2] / "src" / "fleetent"
+@pytest.mark.parametrize("module_name", GOVERNANCE_PUBLIC_APIS)
+def test_legacy_governance_imports_are_removed(module_name: str) -> None:
+    sys.modules.pop(f"fleetent.{module_name}", None)
 
-    for module_name, public_names in GOVERNANCE_PUBLIC_APIS.items():
-        module_path = root / f"{module_name}.py"
-        tree = ast.parse(module_path.read_text())
-        statements = [node for node in tree.body if not isinstance(node, ast.Expr)]
-
-        assert len(statements) == 2
-        assert isinstance(statements[0], ast.ImportFrom)
-        assert statements[0].module == f"fleetent.governance.{module_name}"
-        assert {alias.name for alias in statements[0].names} == public_names
-        assert isinstance(statements[1], ast.Assign)
-        assert statements[1].targets[0].id == "__all__"
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module(f"fleetent.{module_name}")

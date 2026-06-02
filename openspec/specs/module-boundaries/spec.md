@@ -22,7 +22,7 @@ TBD - created by archiving change define-module-boundaries-and-code-organization
 
 #### Scenario: 跨模块 import 使用 public API
 - **WHEN** `long_term_ctx` 需要检索用户记忆
-- **THEN** 它 import 并调用 `memory_layer` 的 public API，而不是 import memory store internal
+- **THEN** 它 import 并调用 `fleetent.intelligence.memory` 的 public API，而不是 import memory store internal
 
 #### Scenario: internal 实现可局部调整
 - **WHEN** 某模块重组 internal parser、store、worker 或 adapter 文件
@@ -68,9 +68,9 @@ public DTO。其他模块 MUST NOT 直接 query 或 mutate 另一个模块 owned
 现有平铺模块 SHALL 渐进迁移。当模块移动到 package 后，旧 import 路径 MAY 保留为 compatibility shim；
 shim 只 re-export public names，不包含业务逻辑。
 
-#### Scenario: 迁移期间旧 import 继续可用
-- **WHEN** `fleetent.memory_layer` 被迁移到 intelligence package
-- **THEN** `fleetent.memory_layer` 可以暂时保留为 re-export public API 的 shim
+#### Scenario: cleanup 后 legacy import 可移除
+- **WHEN** 已迁移 package 的 first-party imports 都切换到 canonical path
+- **THEN** 后续 cleanup spec 可以删除对应 legacy shim
 
 #### Scenario: shim 不承载业务逻辑
 - **WHEN** compatibility shim 存在
@@ -100,25 +100,20 @@ tables、config namespace 变化和 cross-module dependencies。
 - **THEN** 仓库不包含运行时代码或数据库 schema 变更
 
 ### Requirement: Admin CLI package split
-系统 SHALL 将 admin CLI 实现迁入 `platform.admin_cli` package，同时保持现有 `fleetent-admin` 入口兼容。
+系统 SHALL expose the admin CLI through `platform.admin_cli` canonical package paths only; the legacy
+`fleetent.admin` shim SHALL NOT remain importable.
 
 #### Scenario: New admin CLI package entrypoint exists
 - **WHEN** 调用方导入 `fleetent.platform.admin_cli.main.main`
 - **THEN** 导入成功
 
-#### Scenario: Legacy admin entrypoint remains compatible
-- **WHEN** 调用方导入 `fleetent.admin.main`
-- **THEN** 导入成功
-- **AND** 行为等价于新的 `fleetent.platform.admin_cli.main.main`
+#### Scenario: Legacy admin entrypoint is removed
+- **WHEN** 调用方导入 `fleetent.admin`
+- **THEN** 导入失败并显示该 legacy module 不再存在
 
-#### Scenario: Console script remains unchanged
+#### Scenario: Console script points to canonical entrypoint
 - **WHEN** 查看 `pyproject.toml`
-- **THEN** `fleetent-admin` 仍指向 `fleetent.admin:main`
-
-#### Scenario: Admin shim does not contain business logic
-- **WHEN** 查看 `src/fleetent/admin.py`
-- **THEN** 文件只 re-export admin CLI entrypoint
-- **AND** 不包含命令业务处理逻辑
+- **THEN** `fleetent-admin` 指向 `fleetent.platform.admin_cli.main:main`
 
 ### Requirement: Admin CLI command domains
 admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
@@ -141,7 +136,8 @@ admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 - **AND** 通过 `handle(args)` 处理自身命令并返回是否已处理
 
 ### Requirement: Governance package migration
-系统 SHALL 将治理域实现迁入 `fleetent.governance` package，并保持 legacy 顶层 import 路径兼容。
+系统 SHALL expose governance implementation through `fleetent.governance` canonical package paths only;
+legacy top-level governance shim modules SHALL NOT remain importable.
 
 #### Scenario: Governance package exists
 - **WHEN** 调用方导入 `fleetent.governance`
@@ -151,17 +147,9 @@ admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 - **WHEN** 调用方导入 `fleetent.governance.permission_gate`、`fleetent.governance.quota`、`fleetent.governance.audit_log`、`fleetent.governance.blocklist` 或 `fleetent.governance.agent_policy`
 - **THEN** 导入成功
 
-#### Scenario: Legacy governance imports remain compatible
+#### Scenario: Legacy governance imports are removed
 - **WHEN** 调用方导入 `fleetent.permission_gate`、`fleetent.quota`、`fleetent.audit_log`、`fleetent.blocklist` 或 `fleetent.agent_policy`
-- **THEN** 导入成功
-- **AND** 旧路径暴露迁移前的 public API
-
-#### Scenario: Governance shims do not contain business logic
-- **WHEN** 查看 legacy 顶层 governance 文件
-- **THEN** 文件只 re-export `fleetent.governance.*` 的 public names
-- **AND** 不访问数据库
-- **AND** 不读取配置
-- **AND** 不承载业务逻辑
+- **THEN** 导入失败并显示该 legacy module 不再存在
 
 #### Scenario: Governance owns existing governance data responsibilities
 - **WHEN** quota、audit log 或 blocklist 访问既有持久化数据
@@ -171,7 +159,7 @@ admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 #### Scenario: Platform and channels use governance public API
 - **WHEN** platform 或 channels 模块需要 audit log、blocklist、quota 或 permission gate 能力
 - **THEN** 它们通过 `fleetent.governance` canonical public API 调用
-- **AND** legacy 顶层 shim 不承载可被 monkeypatch 的治理状态
+- **AND** legacy 顶层 shim 不存在
 
 #### Scenario: Runtime uses governance through public API
 - **WHEN** agent runtime 需要权限审批或工具访问策略
@@ -204,7 +192,8 @@ admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 - **THEN** 仓库不包含运行时代码、数据库 schema 或配置行为变更
 
 ### Requirement: Integrations package migration
-系统 SHALL 将外部能力接入实现迁入 `fleetent.integrations` package，并保持 legacy 顶层 import 路径兼容。
+系统 SHALL expose external capability integrations through `fleetent.integrations` canonical package paths
+only; legacy top-level integrations shim modules SHALL NOT remain importable.
 
 #### Scenario: Integrations package exists
 - **WHEN** 调用方导入 `fleetent.integrations`
@@ -220,24 +209,13 @@ admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 - **THEN** 导入成功
 - **AND** canonical path 暴露 sandbox client public API
 
-#### Scenario: Legacy MCP import remains compatible
+#### Scenario: Legacy MCP import is removed
 - **WHEN** 调用方导入 `fleetent.mcp_client`
-- **THEN** 导入成功
-- **AND** 旧路径暴露迁移前 MCP public API
-- **AND** 旧路径与 `fleetent.integrations.mcp.client` 共享同一 MCP registry 状态
+- **THEN** 导入失败并显示该 legacy module 不再存在
 
-#### Scenario: Legacy sandbox import remains compatible
+#### Scenario: Legacy sandbox import is removed
 - **WHEN** 调用方导入 `fleetent.sandbox_client`
-- **THEN** 导入成功
-- **AND** 旧路径暴露迁移前 sandbox public API
-- **AND** 旧路径暴露的 class object 与 `fleetent.integrations.sandbox.client` 相同
-
-#### Scenario: Integrations shims do not contain business logic
-- **WHEN** 查看 legacy 顶层 `mcp_client.py` 或 `sandbox_client.py`
-- **THEN** 文件只 re-export `fleetent.integrations.*` 的 public names
-- **AND** 不创建 MCP session
-- **AND** 不创建 Docker subprocess
-- **AND** 不承载业务逻辑或 module-level runtime state
+- **THEN** 导入失败并显示该 legacy module 不再存在
 
 #### Scenario: Runtime and server use integrations through public API
 - **WHEN** server 注册 MCP servers 或 tools 创建 sandbox client
@@ -245,28 +223,21 @@ admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 - **AND** integrations package 不反向 import agent runtime entrypoint
 
 ### Requirement: Memory layer package migration
-系统 SHALL 将 User Memory 实现迁入 `fleetent.intelligence.memory` package，并保持 legacy `fleetent.memory_layer` import 路径兼容。
+系统 SHALL expose User Memory implementation through `fleetent.intelligence.memory` canonical package paths
+only; the legacy `fleetent.memory_layer` shim SHALL NOT remain importable.
 
 #### Scenario: Memory canonical package exists
 - **WHEN** 调用方导入 `fleetent.intelligence.memory`
 - **THEN** 导入成功
 
-#### Scenario: Memory canonical package exposes public API
-- **WHEN** 调用方从 `fleetent.intelligence.memory` 导入 memory public API
-- **THEN** `MemoryItem`、`MemoryType`、`extract_and_update()`、`search()`、public operations 和 `run_memory_maintenance()` 可用
-
-#### Scenario: Legacy memory import remains compatible
-- **WHEN** 调用方导入 `fleetent.memory_layer`
+#### Scenario: Memory canonical package exports public API
+- **WHEN** 调用方从 `fleetent.intelligence.memory` 导入 `MemoryItem`、`MemoryType`、`extract_and_update`、`search`、public operations 或 `run_memory_maintenance`
 - **THEN** 导入成功
-- **AND** 旧路径暴露迁移前的 memory public API
+- **AND** public object 行为与迁移前保持一致
 
-#### Scenario: Memory shim does not contain business logic
-- **WHEN** 查看 legacy 顶层 `memory_layer.py`
-- **THEN** 文件只 re-export `fleetent.intelligence.memory` 的 public names
-- **AND** 不访问数据库
-- **AND** 不调用 LLM
-- **AND** 不调用 vector store
-- **AND** 不承载 memory 业务逻辑
+#### Scenario: Legacy memory import is removed
+- **WHEN** 调用方导入 `fleetent.memory_layer`
+- **THEN** 导入失败并显示该 legacy module 不再存在
 
 #### Scenario: Memory package owns memory items data access
 - **WHEN** memory 功能访问既有 `memory_items` table
@@ -287,3 +258,31 @@ admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 - **THEN** 它们通过 `fleetent.intelligence.memory` public API 调用 memory 能力
 - **AND** memory package 不反向 import runtime entrypoint
 
+### Requirement: Capability docs use canonical package names
+系统 SHALL 在当前架构文档和 capability docs 中使用已迁移模块的 canonical package 名称，而不是把已删除 legacy path 描述为主要实现位置或可用 public API。
+
+#### Scenario: Current docs reference canonical memory package
+- **WHEN** 读者查看当前 memory、long-term context、reflection 或 vector-store capability docs
+- **THEN** 文档使用 `fleetent.intelligence.memory` 或 `intelligence.memory` 表示 User Memory public API
+
+#### Scenario: Current docs reference canonical integrations packages
+- **WHEN** 读者查看当前 MCP、sandbox、connectors 或 architecture docs
+- **THEN** 文档使用 `fleetent.integrations.mcp` 和 `fleetent.integrations.sandbox` 表示外部能力接入实现
+
+#### Scenario: Current docs reference canonical governance package
+- **WHEN** 读者查看当前 governance、tools、IM gateway 或 platform capability docs
+- **THEN** 文档使用 `fleetent.governance` 下的 public API 表示权限、审批、quota、audit 和 blocklist 能力
+
+#### Scenario: Current docs reference canonical admin CLI entrypoint
+- **WHEN** 读者查看当前 platform 或 architecture docs
+- **THEN** 文档使用 `fleetent.platform.admin_cli` 或 `fleetent-admin` console script 表示 admin CLI 入口
+- **AND** 不把 `fleetent.admin` 描述为当前实现入口
+
+#### Scenario: Deleted legacy paths are not described as current APIs
+- **WHEN** 当前 docs 描述 memory、governance、integrations 或 admin CLI
+- **THEN** 文档不把已删除 legacy import path 描述为仍可用 public API
+
+#### Scenario: Historical archive docs remain historical
+- **WHEN** 搜索 `docs/archive/**` 或 `openspec/changes/archive/**`
+- **THEN** 历史记录可以保留 legacy 模块名
+- **AND** 本 change 不要求重写历史设计记录

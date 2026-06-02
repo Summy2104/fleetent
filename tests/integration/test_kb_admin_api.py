@@ -12,8 +12,8 @@ from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import fleetent.audit_log as audit
 import fleetent.auth as auth
+import fleetent.governance.audit_log as audit
 import fleetent.platform.knowledge_base_management.agent_kbs_store as kbs_store
 import fleetent.platform.knowledge_base_management.kb_admin_api as api
 import fleetent.user_store as user_store

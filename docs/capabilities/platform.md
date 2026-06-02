@@ -234,9 +234,9 @@ flowchart TD
 
 - [ ] **审计日志**：所有平台管理操作（建删用户、轮换 / 撤销 key、审批 / 加黑 IM 用户、调整配额、改角色）记录"谁、何时、对什么资源、做了什么"，UI 内可检索与导出；删除用户 / 撤销 key / 批量封禁等高危动作要求二次确认
 
-- [ ] **会话与 trace 浏览**：按用户 / channel / 时间 / 关键词检索历史对话，单会话展开完整 transcript 与逐轮工具调用、permission_gate 决策、模型路由、memory 命中；通过 observability trace 查询 API 渲染为可筛选、可下钻的事件流
+- [ ] **会话与 trace 浏览**：按用户 / channel / 时间 / 关键词检索历史对话，单会话展开完整 transcript 与逐轮工具调用、governance.permission_gate 决策、模型路由、memory 命中；通过 observability trace 查询 API 渲染为可筛选、可下钻的事件流
 
-- [ ] **系统健康仪表盘**：首页一屏可见各 IM 平台连接状态、API 错误率与延迟、活跃 session 数、permission_gate 待审批积压、定时任务执行情况；新申请、超限告警、平台断线等关键事件按时间倒序滚动
+- [ ] **系统健康仪表盘**：首页一屏可见各 IM 平台连接状态、API 错误率与延迟、活跃 session 数、governance.permission_gate 待审批积压、定时任务执行情况；新申请、超限告警、平台断线等关键事件按时间倒序滚动
 
 ### Agent 管理（v1.0）
 
@@ -260,7 +260,7 @@ flowchart TD
 
 - [ ] **绑定管理（UI 化）**：在 Agent 详情页可视化管理 user→agent、channel→agent 绑定与"设为默认 Agent"，等价于现有 CLI 的 `assign-channel` / `unassign-channel` / `set-default-agent`，并展示该 Agent 当前被哪些用户 / channel 引用（与删除保护共用同一引用视图）
 
-- [ ] **按 Agent 观测与用量**：Agent 详情页一屏可见该 Agent 的调用次数、token / 成本用量曲线、错误率、平均时延、permission_gate 触发与审批通过率、最近会话列表，可下钻到单会话 trace（数据源为 observability 的 traces，本页只做按 agent_id 的聚合视图）
+- [ ] **按 Agent 观测与用量**：Agent 详情页一屏可见该 Agent 的调用次数、token / 成本用量曲线、错误率、平均时延、governance.permission_gate 触发与审批通过率、最近会话列表，可下钻到单会话 trace（数据源为 observability 的 traces，本页只做按 agent_id 的聚合视图）
 
 - [ ] **Agent 管理权限与审计**：Agent 的增删改、启停、绑定、改模型配置均**仅 admin 角色可操作**，viewer 仅可浏览列表与观测；删除（归档）等高危动作要求二次确认；所有动作写审计日志（谁、何时、对哪个 Agent、做了什么）
 
@@ -369,15 +369,15 @@ flowchart TD
 #### 试运行 playground
 
 - [ ] **选 Agent 起会话**：admin 在 playground 下拉选择任一启用中的 Agent（含临管 / 受管），即时开启一段**隔离的试运行会话**——该会话标记 `origin=playground`，不计入该 Agent 的对外用量统计、不与任何真实用户 / channel 绑定，可随时丢弃
-- [ ] **流式对话与逐轮可观察**：发送消息后以 SSE 流式看到回复（语义同 `/chat`），同时右栏实时展开本轮的可观察细节——命中的 system prompt / 注入的 Skill / 知识库召回片段、每次工具调用的入参 / 出参、permission_gate 决策、模型路由与 fallback、token 与耗时；便于 admin 验证"为什么这样回答"
+- [ ] **流式对话与逐轮可观察**：发送消息后以 SSE 流式看到回复（语义同 `/chat`），同时右栏实时展开本轮的可观察细节——命中的 system prompt / 注入的 Skill / 知识库召回片段、每次工具调用的入参 / 出参、governance.permission_gate 决策、模型路由与 fallback、token 与耗时；便于 admin 验证"为什么这样回答"
 - [ ] **试运行参数覆盖**：playground 内可临时覆盖该次会话的 task_type / 模型（对齐 [model-router](./model-router.md) 的请求级路由覆盖）、temperature、是否启用某些 Skill / 知识库，仅作用于当前试运行会话，不改 Agent 持久配置
-- [ ] **审批旁路开关（受控）**：playground 会话默认仍走 permission_gate；admin 可对自己的试运行会话开启"自动批准 medium 风险"以快速迭代（high 风险仍需显式确认），该旁路仅对 `origin=playground` 会话生效、写审计，绝不影响真实用户会话
+- [ ] **审批旁路开关（受控）**：playground 会话默认仍走 governance.permission_gate；admin 可对自己的试运行会话开启"自动批准 medium 风险"以快速迭代（high 风险仍需显式确认），该旁路仅对 `origin=playground` 会话生效、写审计，绝不影响真实用户会话
 - [ ] **试运行结果留存与分享**：可将一段满意 / 有问题的试运行会话"固定"保存并附备注，或导出为 JSON / Markdown 供回归对照；未固定的 playground 会话超过保留期自动清理
 
 #### 用户会话管理面
 
 - [ ] **会话列表与检索**：列出全部真实会话（web + IM），按用户 / Agent / channel / 平台 / 时间 / 关键词 / 状态（活跃 / 空闲 / 已结束）筛选与排序，每行显示发起用户、所属 Agent、来源 channel、轮数、最近活跃、token 用量、是否含未决审批
-- [ ] **会话详情与逐轮回放**：打开单会话看到完整 transcript 与逐轮工具调用、permission_gate 决策、模型路由、memory / 知识库命中（只读回放部分复用「会话与 trace 浏览」，本页在其上叠加写操作入口）
+- [ ] **会话详情与逐轮回放**：打开单会话看到完整 transcript 与逐轮工具调用、governance.permission_gate 决策、模型路由、memory / 知识库命中（只读回放部分复用「会话与 trace 浏览」，本页在其上叠加写操作入口）
 - [ ] **会话接管（人工干预）**：admin 可"接管"一段活跃会话，**暂停 agent 自动回复**并以人工身份向该会话注入一条消息（IM 会话经 im-gateway 投递回原平台），用于异常会话的人工兜底；接管与释放均写审计并对终端用户标注"已转人工 / 已恢复自动"（具体提示语载体由 im-gateway 域决定）
 - [ ] **强制结束 / 清空 / 重置**：admin 可强制结束一段会话（不再接受新轮）、清空某会话上下文（等价于 im-gateway 的 `/new`，由 [session](./session.md) 执行实际清空）、或重置到某一轮之前；高危动作二次确认并写审计
 - [ ] **批量与配额联动**：可按筛选结果批量结束 / 清空异常会话；展示各会话 token 用量并与「用量与配额」联动，便于定位异常激增会话
@@ -480,7 +480,7 @@ flowchart TD
 #### MCP server
 
 - [ ] **MCP server 列表与连接状态**：列出所有已配置的 MCP server（stdio / HTTP transport）、其连接状态（已连接 / 启动时降级屏蔽 / 探活失败重连中 / 标记永久不可用，对齐 mcp 的降级与健康维护语义）、注册出的工具数与 `server__{tool}` 命名空间清单、最近一次握手 / 探活时间
-- [ ] **工具注册可见**：展开某 MCP server 查看它注册的工具列表（名称 / 描述 / 入参 schema 概要），便于 admin 在配 Agent 的 allowed_tools 时知道有哪些 `server__*` 工具可白名单（白名单与访问控制本身归 governance / agent_policy）
+- [ ] **工具注册可见**：展开某 MCP server 查看它注册的工具列表（名称 / 描述 / 入参 schema 概要），便于 admin 在配 Agent 的 allowed_tools 时知道有哪些 `server__*` 工具可白名单（白名单与访问控制本身归 `fleetent.governance.agent_policy`）
 - [ ] **连接健康与手动重连**：UI 展示各 server 的探活与指数退避重连状态，提供"手动重连 / 重新握手"按钮；连接失败 / 降级不阻断平台启动（语义由 mcp 保证），本页只做状态呈现与手动触发
 - [ ] **MCP 环境诊断入口**：提供触发 `mcp doctor`（经 askit 编排控制台「环境与连接器」系列）的快捷入口，把 MCP 健康检查结论渲染为红 / 黄 / 绿清单，敏感认证值脱敏
 - [ ] **connector 管理权限与审计**：connector 配置增改、代用户解绑、MCP server 手动重连 / 配置变更均**仅 admin 角色可操作**，viewer 仅可浏览目录、授权状态总览与连接状态；代用户解绑、批量离职联动撤销等高危动作要求二次确认；所有写操作写审计（谁、何时、对哪个 connector / user / MCP server、做了什么）；任何视图均不明文展示 client_secret / token / refresh token
@@ -570,7 +570,7 @@ flowchart TD
 
 ### 统计面板（Agent 维度）（v1.0）
 
-> 一个以 **Agent 为主视角的统计分析面板**，回答"每个 agent 用得多不多、快不快、稳不稳、贵不贵、被谁用"。它是 platform 的**聚合视图**，原始 trace 数据归 [observability](./observability.md)（traces）、审批数据归 permission_gate、绑定数据归 agent_store；本面板只做按 agent_id 的聚合与下钻，不重复定义采集语义。与「系统健康仪表盘」（平台级实时态）和 Agent 详情页「按 Agent 观测」（单 agent）互补——本面板是**跨 agent、可对比、可下钻**的分析层。
+> 一个以 **Agent 为主视角的统计分析面板**，回答"每个 agent 用得多不多、快不快、稳不稳、贵不贵、被谁用"。它是 platform 的**聚合视图**，原始 trace 数据归 [observability](./observability.md)（traces）、审批数据归 governance.permission_gate、绑定数据归 agent_store；本面板只做按 agent_id 的聚合与下钻，不重复定义采集语义。与「系统健康仪表盘」（平台级实时态）和 Agent 详情页「按 Agent 观测」（单 agent）互补——本面板是**跨 agent、可对比、可下钻**的分析层。
 >
 > 标注：✅ = 现有 trace 字段直接可出；🟡 = 需从 trace 的 messages 解析；⏳ = 依赖 v1.0 新字段（budget 成本、agent-runtime 终止码 / 错误分类、skill 命中日志），字段就绪前 UI 以"待数据接入"占位、就绪后自动点亮。
 
@@ -580,13 +580,13 @@ flowchart TD
 
 - [ ] **② 性能与可靠性**：响应时延（平均 / P50 / P95）、每会话平均轮数 ✅；错误率 / 失败率、**终止原因分布**（max_turns / budget_exceeded / cancelled / approval_rejected / loop_detected / consecutive_failures）、model fallback 触发率、上下文压缩触发次数 ⏳
 
-- [ ] **③ 工具与治理**：Top 工具调用排行、每次运行平均工具数 🟡；工具失败率 / 超时率 ⏳；**allowed_tools 覆盖率**——列出该 agent 配了白名单却从未被调用的工具，驱动最小权限收窄 🟡；permission_gate 触发数与审批**通过 / 拒绝 / 超时率** ✅（approvals）
+- [ ] **③ 工具与治理**：Top 工具调用排行、每次运行平均工具数 🟡；工具失败率 / 超时率 ⏳；**allowed_tools 覆盖率**——列出该 agent 配了白名单却从未被调用的工具，驱动最小权限收窄 🟡；governance.permission_gate 触发数与审批**通过 / 拒绝 / 超时率** ✅（approvals）
 
 - [ ] **④ 模型 · Skill · 绑定**：按模型的调用 / token / 成本分布、task_type 分布 ✅；该 agent 的 skill 命中 Top、memory 命中率、sub_agent 调用数与子任务成功率 ⏳；绑定用户数 / channel 数、是否默认 agent、受管 / 临管来源分布 ✅
 
 - [ ] **⑤ 下钻维度（按用户 / channel / 模型 / 时间切片）**：任一 agent 指标都可沿这四个维度切片。重点支持 **per-user 视图**——在选定 agent 下，各用户的 **token 用量、调用频率（次数 / 活跃天数）、最近活跃**排行；并支持反向"按用户"看某用户在所有 agent 上的用量与频率汇总。用于识别重度用户、分配配额、定位异常激增 ✅（user_id 现有）
 
-- [ ] **⑥ 请求级全链路追踪（Request Trace）**：从 per-user 排行可一路下钻——**用户 → 该用户的请求列表（按时间 / agent / channel 筛选）→ 单个请求的完整链路**。单请求链路按时间序展开一个**事件流**：用户输入 → 每轮 LLM 调用（模型、token、耗时、是否触发 fallback）→ 每次工具调用的入参 / 出参 / 耗时 / 成功失败 → permission_gate 审批决策 → memory 命中 → 上下文压缩事件 → sub_agent 派生（经 `parent_session_id` 关联，可就地展开子 agent 的完整子链路）→ 最终回复；每个节点可展开 / 折叠、可复制原始 JSON。与「会话与 trace 浏览」（会话级 transcript）互补：本视图聚焦**单个请求**的纵深链路与跨 agent 调用链
+- [ ] **⑥ 请求级全链路追踪（Request Trace）**：从 per-user 排行可一路下钻——**用户 → 该用户的请求列表（按时间 / agent / channel 筛选）→ 单个请求的完整链路**。单请求链路按时间序展开一个**事件流**：用户输入 → 每轮 LLM 调用（模型、token、耗时、是否触发 fallback）→ 每次工具调用的入参 / 出参 / 耗时 / 成功失败 → governance.permission_gate 审批决策 → memory 命中 → 上下文压缩事件 → sub_agent 派生（经 `parent_session_id` 关联，可就地展开子 agent 的完整子链路）→ 最终回复；每个节点可展开 / 折叠、可复制原始 JSON。与「会话与 trace 浏览」（会话级 transcript）互补：本视图聚焦**单个请求**的纵深链路与跨 agent 调用链
   - 数据现状：单请求的对话与工具入出参已在 trace 的 `messages` 中 ✅；sub_agent 子链路经 `parent_session_id` 可关联 ✅
   - ⏳ **依赖：单请求关联 ID（request_id）**——需由 agent-runtime / observability 为每次运行生成稳定 request_id 并贯穿主循环与所有子事件（工具调用、审批、模型路由、memory、压缩、sub_agent），HTTP 路径还需补 session_id；platform 仅按 request_id 聚合渲染，不负责发射（见「待决问题」与 [observability](./observability.md) / [agent-runtime](./agent-runtime.md)）
 
@@ -598,7 +598,7 @@ flowchart TD
 flowchart LR
     subgraph src["数据源（各归原域）"]
         TR["traces<br/>tokens / elapsed_s / model_used<br/>user_id / agent_name"]
-        AP["approvals<br/>permission_gate 决策"]
+        AP["approvals<br/>governance.permission_gate 决策"]
         ASr["agent_store<br/>绑定 / 来源"]
     end
     src --> AGG["platform 聚合<br/>按 agent_id"]
@@ -620,7 +620,7 @@ flowchart LR
   - **主机资源**：宿主机 CPU、内存、磁盘（用量 / inode）、负载、网络 IO
   - **fleetent 进程 + sandbox 容器**：进程级 CPU / 内存 / 文件句柄、活跃 sandbox 容器数、容器 OOM / 超时被杀次数
   - **依赖基础设施**：自托管 PostgreSQL / Redis / Qdrant / RabbitMQ 的存活、连接数、内存 / 磁盘占用、队列积压
-  - **应用层指标**：API 错误率 / 延迟、permission_gate 待审批积压、活跃 session、定时任务执行（复用「系统健康仪表盘」数据）
+  - **应用层指标**：API 错误率 / 延迟、governance.permission_gate 待审批积压、活跃 session、定时任务执行（复用「系统健康仪表盘」数据）
 
 - [ ] **内置轻量采集**：平台自带轻量采集器周期性读取上述指标，**无外部依赖、全部在内网**；采集间隔与指标留存期可配置；采集器自身故障时在 UI 标"采集中断"并告警，不静默丢数
 
@@ -908,7 +908,7 @@ flowchart LR
 **场景 31：单会话 trace 可见（v1.0）**
 - Given：一段含工具调用与审批的会话
 - When：打开该会话的 trace 视图
-- Then：按时间序展示模型输出、工具入参 / 出参、permission_gate 决策、memory 命中
+- Then：按时间序展示模型输出、工具入参 / 出参、governance.permission_gate 决策、memory 命中
 
 **场景 32：仪表盘总览（v1.0）**
 - Given：多平台运行中，其中一个平台已断线
@@ -1151,7 +1151,7 @@ flowchart LR
 - Then：成本、终止原因分布等 ⏳ 指标显示"待数据接入"占位而非报错；其余 ✅ 指标正常展示；相关字段上线后这些指标自动点亮
 
 **场景 80：审批统计可见（v1.0）**
-- Given："ops-bot" 在周期内触发过若干次 permission_gate
+- Given："ops-bot" 在周期内触发过若干次 governance.permission_gate
 - When：查看「工具与治理」组
 - Then：展示该 agent 的审批触发数与通过 / 拒绝 / 超时率
 
@@ -1168,7 +1168,7 @@ flowchart LR
 **场景 83：单请求全链路事件流（v1.0）**
 - Given：选中 Alice 的某一条请求
 - When：打开其请求级全链路视图
-- Then：按时间序展开事件流——用户输入、各轮 LLM 调用（模型 / token / 耗时 / fallback）、每次工具调用入参与出参、permission_gate 决策、memory 命中、压缩事件、最终回复；各节点可展开折叠并复制原始 JSON
+- Then：按时间序展开事件流——用户输入、各轮 LLM 调用（模型 / token / 耗时 / fallback）、每次工具调用入参与出参、governance.permission_gate 决策、memory 命中、压缩事件、最终回复；各节点可展开折叠并复制原始 JSON
 
 **场景 84：sub_agent 子链路就地展开（v1.0）**
 - Given：该请求过程中派生了 sub_agent
@@ -1248,7 +1248,7 @@ flowchart LR
 **场景 99：playground 审批旁路不影响真实会话（v1.0）**
 - Given：admin 对自己的 playground 会话开启"自动批准 medium 风险"
 - When：该会话触发一个 medium 风险工具，且同时存在一个真实用户会话也触发 medium 风险工具
-- Then：playground 会话自动放行并写审计；真实用户会话仍正常进入 permission_gate 等待审批，旁路不波及
+- Then：playground 会话自动放行并写审计；真实用户会话仍正常进入 governance.permission_gate 等待审批，旁路不波及
 
 **场景 100：admin 接管活跃会话并人工注入（v1.0）**
 - Given：用户 Alice 的一段 IM 会话正在进行
@@ -1372,8 +1372,8 @@ flowchart LR
 
 > 以下为后台管理多机器实例集群时的待决问题。当前实现有多处单机假设，集群化的地基（状态外置）属 session / scheduling / deployment 域，platform 侧只承担"把整个 fleet 当一个逻辑系统来管"的控制面与节点维度。本组在 v1.0 范围未定，按需评估或延期。
 
-- [ ] **集群状态外置（前置地基）**：SQLite（fleetent.db）、JSON sessions + per-session `asyncio.Lock`、permission_gate 的 `asyncio.Event`、APScheduler 进程内调度、observability traces 均为单机部署假设。多机共享同一份事实需迁到自托管基础设施：fleetent.db → PostgreSQL；sessions → PostgreSQL / Redis；per-session 锁 → 分布式锁（Redis / PG advisory lock）；traces → 集中表或共享数据库后端。无此步则多机只是各跑各的。（负责人：待认领）
-- [ ] **跨节点审批信令**：一个在途请求只活在某一台节点，但审批动作可能落在另一台后台。permission_gate 的 `asyncio.Event` 需改为跨节点唤醒（Redis pub/sub 或 PG LISTEN/NOTIFY），或把 approval / cancel 路由到持有该请求的 owning node（配合 request_id）。（负责人：待认领）
+- [ ] **集群状态外置（前置地基）**：SQLite（fleetent.db）、JSON sessions + per-session `asyncio.Lock`、governance.permission_gate 的 `asyncio.Event`、APScheduler 进程内调度、observability traces 均为单机部署假设。多机共享同一份事实需迁到自托管基础设施：fleetent.db → PostgreSQL；sessions → PostgreSQL / Redis；per-session 锁 → 分布式锁（Redis / PG advisory lock）；traces → 集中表或共享数据库后端。无此步则多机只是各跑各的。（负责人：待认领）
+- [ ] **跨节点审批信令**：一个在途请求只活在某一台节点，但审批动作可能落在另一台后台。governance.permission_gate 的 `asyncio.Event` 需改为跨节点唤醒（Redis pub/sub 或 PG LISTEN/NOTIFY），或把 approval / cancel 路由到持有该请求的 owning node（配合 request_id）。（负责人：待认领）
 - [ ] **单例协调任务的 leader 选举**：cron_scheduler 与 reflection 定期任务必须全集群只跑一次，否则每台节点重复触发同一任务。需 leader 选举或共享 jobstore + 互斥锁。（负责人：待认领）
 - [ ] **节点注册表与控制面**：后台是否演进为无状态控制面（任一节点提供同一 Admin UI，读写共享状态，管整个 fleet）？是否新增「节点 / 实例管理」面——实例注册（node_id / host / 版本 / 心跳 / 状态）、集群拓扑、drain / 滚动重启、版本偏移告警？（负责人：待认领）
 - [ ] **监控告警的节点维度**：「资源监控与告警」需从单机扩为按节点上报 + 集群汇总；告警规则作用域扩到 单节点 / 节点组 / 集群聚合，区分"单节点挂"与"集群整体降级"；抑制规则上提到节点层级（节点宕机抑制其上容器 / 进程的次生告警）。（负责人：待认领）

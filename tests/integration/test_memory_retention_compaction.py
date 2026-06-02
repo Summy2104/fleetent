@@ -39,7 +39,7 @@ def _memory_ids(db_path) -> list[str]:
 
 
 async def test_apply_deletes_expired_context_rows_and_vectors(tmp_path, monkeypatch):
-    from fleetent import memory_layer
+    from fleetent.intelligence import memory as memory_layer
 
     db_path = _patch_database(tmp_path, monkeypatch)
     _insert_memory(
@@ -75,7 +75,7 @@ async def test_apply_deletes_expired_context_rows_and_vectors(tmp_path, monkeypa
 
 
 async def test_apply_deletes_older_over_limit_rows_and_vectors(tmp_path, monkeypatch):
-    from fleetent import memory_layer
+    from fleetent.intelligence import memory as memory_layer
 
     db_path = _patch_database(tmp_path, monkeypatch)
     _insert_memory(
@@ -114,7 +114,7 @@ async def test_apply_deletes_older_over_limit_rows_and_vectors(tmp_path, monkeyp
 async def test_apply_duplicate_compaction_removes_duplicates_but_keeps_canonical(
     tmp_path, monkeypatch
 ):
-    from fleetent import memory_layer
+    from fleetent.intelligence import memory as memory_layer
 
     db_path = _patch_database(tmp_path, monkeypatch)
     _insert_memory(
@@ -151,7 +151,7 @@ async def test_apply_duplicate_compaction_removes_duplicates_but_keeps_canonical
 
 
 async def test_apply_is_scoped_to_requested_user_and_vector_namespace(tmp_path, monkeypatch):
-    from fleetent import memory_layer
+    from fleetent.intelligence import memory as memory_layer
 
     db_path = _patch_database(tmp_path, monkeypatch)
     _insert_memory(

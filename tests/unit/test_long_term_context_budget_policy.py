@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from fleetent.config import LongTermContextSettings, Settings
-from fleetent.memory_layer import MemoryItem
+from fleetent.intelligence.memory import MemoryItem
 
 
 def _memory(memory_id: str, content: str) -> MemoryItem:

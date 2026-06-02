@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from fleetent.memory_layer import MemoryItem
+from fleetent.intelligence.memory import MemoryItem
 
 REQUIRED_FIXTURE_FIELDS = (
     "name",

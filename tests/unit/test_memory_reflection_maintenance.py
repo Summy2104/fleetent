@@ -364,7 +364,7 @@ async def test_proposal_lifecycle_events_are_recorded(tmp_path, monkeypatch):
 
 
 async def test_extract_ignores_unsupported_shared_memory_or_kb_actions(tmp_path, monkeypatch):
-    from fleetent import memory_layer
+    from fleetent.intelligence import memory as memory_layer
 
     db_path = tmp_path / "memory.db"
     apply_migrations(db_path)
@@ -400,7 +400,7 @@ async def test_extract_ignores_unsupported_shared_memory_or_kb_actions(tmp_path,
 
 
 async def test_context_update_refreshes_ttl_and_rejects_cross_type_target(tmp_path, monkeypatch):
-    from fleetent import memory_layer
+    from fleetent.intelligence import memory as memory_layer
 
     db_path = tmp_path / "memory.db"
     apply_migrations(db_path)
@@ -487,7 +487,8 @@ async def test_context_update_refreshes_ttl_and_rejects_cross_type_target(tmp_pa
 
 
 def test_reflection_finding_filters_existing_and_single_evidence_memory_candidates():
-    from fleetent import memory_layer, observability
+    from fleetent import observability
+    from fleetent.intelligence import memory as memory_layer
     from fleetent.intelligence import reflection
 
     existing = [

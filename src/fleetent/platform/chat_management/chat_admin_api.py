@@ -23,7 +23,8 @@ from fastapi import APIRouter, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from fleetent import audit_log, auth, user_store
+from fleetent import auth, user_store
+from fleetent.governance import audit_log
 from fleetent.platform.chat_management import session_admin_store, transcript_export
 
 router = APIRouter(prefix="/admin")

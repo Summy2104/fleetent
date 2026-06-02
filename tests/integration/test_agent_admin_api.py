@@ -14,8 +14,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import fleetent.agent_store as agent_store
-import fleetent.audit_log as audit
 import fleetent.auth as auth
+import fleetent.governance.audit_log as audit
 import fleetent.platform.agent_management_console.agent_admin_api as api
 import fleetent.user_store as user_store
 

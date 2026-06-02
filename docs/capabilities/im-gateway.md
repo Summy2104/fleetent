@@ -11,7 +11,7 @@
 **不负责**：agent 逻辑与工具调用（→ agent_loop）、用户账号管理（→ user_store）、消息持久化（→ session_mgr）、session 生命周期（→ session）。
 
 **调用关系**：
-- 依赖：im_user_store、agent_store、agent_loop、permission_gate
+- 依赖：im_user_store、agent_store、agent_loop、`fleetent.governance.permission_gate`
 - 被依赖：无（入口层）
 
 ## 现状
@@ -38,7 +38,7 @@
   - 裸跑：使用默认 system prompt，全部工具可用
 
 - ✅ **审批命令路由**：用户发送 "approve {id}" 或 "reject {id}"
-  - 直接路由到 permission_gate.resolve()，不经过 agent_loop
+  - 直接路由到 `fleetent.governance.permission_gate.resolve()`，不经过 agent_loop
 
 - ✅ **HTTP API channel 绑定**：透传 x-platform / x-channel-id 请求头
   - 支持通过 HTTP API 模拟 IM 场景的 channel 绑定
@@ -165,7 +165,7 @@ im_users (
 
 **场景 5：平台不支持某能力时自动降级**
 - Given：一个声明不支持 reaction 的平台
-- When：permission_gate 试图用 reaction 审批
+- When：`fleetent.governance.permission_gate` 试图用 reaction 审批
 - Then：自动降级到按钮或纯文字 approve，不抛出 SDK 异常
 
 **场景 6：agent 主动向指定频道发消息**
@@ -225,7 +225,7 @@ im_users (
 
 **场景 17：按钮审批**
 - Given：agent 触发 medium 风险工具
-- When：permission_gate 等待审批
+- When：`fleetent.governance.permission_gate` 等待审批
 - Then：审批人收到带"批准/拒绝"按钮的消息，点击后工具继续或中止；不需要打字 approve
 
 **场景 18：长消息分片**
