@@ -19,11 +19,11 @@ Define structured per-user semantic memory storage, extraction, vector indexing,
 `search(user_id, query, limit)` public API。
 
 #### Scenario: Public API is importable
-- **WHEN** 调用方从 memory_layer 导入 `MemoryItem`、`extract_and_update` 和 `search`
+- **WHEN** 调用方从 `fleetent.intelligence.memory` 导入 `MemoryItem`、`extract_and_update` 和 `search`
 - **THEN** 导入成功
 
 #### Scenario: Legacy load_memories is removed
-- **WHEN** 调用方从 memory_layer 导入 `load_memories`
+- **WHEN** 调用方从 `fleetent.intelligence.memory` 导入 `load_memories`
 - **THEN** 导入失败或该名称不存在
 
 ### Requirement: No JSONL memory compatibility
@@ -106,7 +106,7 @@ Define structured per-user semantic memory storage, extraction, vector indexing,
 - **THEN** `search()` 跳过该 id
 
 ### Requirement: Agent runtime no longer injects memory directly
-agent-runtime SHALL 不再直接调用 memory_layer 加载最近 memory 并注入 system prompt。
+agent-runtime SHALL 不再直接绕过 `fleetent.intelligence.memory` public API 加载最近 memory 并注入 system prompt。
 
 #### Scenario: Agent run does not call load_memories
 - **WHEN** agent_loop 执行 run 或 run_stream
@@ -231,7 +231,7 @@ agent-runtime SHALL 不再直接调用 memory_layer 加载最近 memory 并注�
 - **THEN** pipeline 不默认运行真实 LLM evaluation
 
 ### Requirement: Memory indexable iterator
-memory-layer SHALL provide public API through `fleetent.intelligence.memory` for enumerating the current
+`fleetent.intelligence.memory` SHALL provide public API for enumerating the current
 memory source records that should be written to vector_store for a user.
 
 #### Scenario: Memory indexable API is importable
@@ -283,7 +283,7 @@ vector-store embedding / reindex 路径后的召回行为。
 - **THEN** runner 验证 forbidden memory snippets 不出现在 `fleetent.intelligence.memory.search()` top-k 结果中
 
 ### Requirement: Memory retention maintenance public API
-memory-layer SHALL provide a per-user public API for dry-run and apply memory retention maintenance through
+`fleetent.intelligence.memory` SHALL provide a per-user public API for dry-run and apply memory retention maintenance through
 `fleetent.intelligence.memory`.
 
 #### Scenario: Maintenance API is importable
@@ -300,7 +300,7 @@ memory-layer SHALL provide a per-user public API for dry-run and apply memory re
 - **AND** vector deletion namespace is `mem:{user_a}`
 
 ### Requirement: Memory retention dry-run
-memory-layer SHALL support dry-run retention maintenance that reports eligible rows without mutation.
+`fleetent.intelligence.memory` SHALL support dry-run retention maintenance that reports eligible rows without mutation.
 
 #### Scenario: Dry-run reports expired context rows
 - **WHEN** user has context memory with `expires_at` before now
@@ -317,7 +317,7 @@ memory-layer SHALL support dry-run retention maintenance that reports eligible r
 - **AND** vector_store.delete is not called
 
 ### Requirement: Memory retention apply
-memory-layer SHALL delete eligible per-user memory rows and matching vectors when retention maintenance is applied.
+`fleetent.intelligence.memory` SHALL delete eligible per-user memory rows and matching vectors when retention maintenance is applied.
 
 #### Scenario: Apply deletes expired context rows
 - **WHEN** user has context memory with `expires_at` before now
@@ -332,7 +332,7 @@ memory-layer SHALL delete eligible per-user memory rows and matching vectors whe
 - **AND** older over-limit rows are deleted
 
 ### Requirement: Memory duplicate compaction
-memory-layer SHALL provide deterministic duplicate compaction candidates within the same user and memory type.
+`fleetent.intelligence.memory` SHALL provide deterministic duplicate compaction candidates within the same user and memory type.
 
 #### Scenario: Duplicate candidate is reported
 - **WHEN** user has multiple memories of the same type with identical normalized content
@@ -348,10 +348,10 @@ memory-layer SHALL provide deterministic duplicate compaction candidates within 
 - **AND** canonical id remains
 
 ### Requirement: Memory domain terminology
-Memory SHALL be treated as a capability domain, while the current memory-layer implementation SHALL be identified as User Memory.
+Memory SHALL be treated as a capability domain, while the current `fleetent.intelligence.memory` implementation SHALL be identified as User Memory.
 
-#### Scenario: Current memory-layer is User Memory
-- **WHEN** 文档或 spec 描述当前 `memory_layer`
+#### Scenario: Current memory implementation is User Memory
+- **WHEN** 文档或 spec 描述当前 `fleetent.intelligence.memory`
 - **THEN** 它被描述为 per-user semantic memory / User Memory
 - **AND** 不暗示 Memory 能力域只能包含单用户记忆
 
@@ -373,16 +373,16 @@ User Memory SHALL remain scoped by `user_id` in this change.
 - **THEN** namespace 仍为 `mem:{user_id}`
 
 ### Requirement: User Memory controlled mutation boundary
-memory-layer SHALL expose public mutation behavior that allows reflection to apply approved User Memory maintenance without direct SQL access.
+`fleetent.intelligence.memory` SHALL expose public mutation behavior that allows reflection to apply approved User Memory maintenance without direct SQL access.
 
 #### Scenario: Reflection can apply approved changes through public API
 - **WHEN** reflection 应用 approved User Memory maintenance proposal
-- **THEN** 它可以通过 memory-layer public API 执行对应 mutation
-- **AND** memory-layer 继续校验 target memory 属于当前 user_id
+- **THEN** 它可以通过 `fleetent.intelligence.memory` public API 执行对应 mutation
+- **AND** `fleetent.intelligence.memory` 继续校验 target memory 属于当前 user_id
 
 #### Scenario: Cross-user mutation is rejected
 - **WHEN** mutation target 不属于当前 user_id
-- **THEN** memory-layer 拒绝该 mutation
+- **THEN** `fleetent.intelligence.memory` 拒绝该 mutation
 - **AND** 不修改任何 User Memory
 
 ### Requirement: Memory package preserves user memory behavior

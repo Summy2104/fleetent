@@ -8,11 +8,14 @@
 
 **负责**：MCP 服务连接与维护、工具自动注册、认证管理、故障降级。
 
-**不负责**：工具的业务逻辑（→ tool_registry 执行层）、LLM 决策调用哪个工具（→ agent_loop）、工具访问控制（→ agent_policy）。
+**不负责**：工具的业务逻辑（→ tool_registry 执行层）、LLM 决策调用哪个工具（→ agent_loop）、工具访问控制（→ `fleetent.governance.agent_policy`）。
 
 **调用关系**：
 - 依赖：config（全局 MCP 策略、服务地址与认证配置）
 - 被依赖：tool_registry（注册 MCP 工具供 agent_loop 调用）
+
+**模块归属**：
+- owning package：`fleetent.integrations.mcp`
 
 ## 关键流程
 

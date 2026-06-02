@@ -22,7 +22,7 @@ TBD - created by archiving change define-module-boundaries-and-code-organization
 
 #### Scenario: 跨模块 import 使用 public API
 - **WHEN** `long_term_ctx` 需要检索用户记忆
-- **THEN** 它 import 并调用 `memory_layer` 的 public API，而不是 import memory store internal
+- **THEN** 它 import 并调用 `fleetent.intelligence.memory` 的 public API，而不是 import memory store internal
 
 #### Scenario: internal 实现可局部调整
 - **WHEN** 某模块重组 internal parser、store、worker 或 adapter 文件

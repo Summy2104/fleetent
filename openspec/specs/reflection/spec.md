@@ -29,10 +29,10 @@ reflection SHALL 只通过 observability public API 读取 agent run history。
 - **AND** 不抛出异常
 
 ### Requirement: Memory input is read-only
-reflection SHALL 可以读取 memory-layer 信号用于分析，但本阶段不得自动修改 memory。
+reflection SHALL 可以读取 `fleetent.intelligence.memory` 信号用于分析，但本阶段不得自动修改 memory。
 
 #### Scenario: Memory signal can be used
-- **WHEN** memory-layer 返回与 trace 相关的 memory 信号
+- **WHEN** `fleetent.intelligence.memory` 返回与 trace 相关的 memory 信号
 - **THEN** reflection 可以将其用于 finding 生成
 
 #### Scenario: Reflection does not write memory
@@ -101,7 +101,7 @@ reflection foundation SHALL 只生成建议，不自动应用建议。
 
 #### Scenario: Runner injects fake memory signals
 - **WHEN** evaluation case 运行
-- **THEN** runner 使用 fixture memory_signals patch `memory_layer.search()`
+- **THEN** runner 使用 fixture memory_signals patch `fleetent.intelligence.memory.search()`
 
 #### Scenario: Expected findings are validated
 - **WHEN** evaluation case 运行完成
@@ -224,9 +224,9 @@ reflection SHALL NOT write team、tenant、project or customer shared context in
 - **AND** 系统不把 team 或 tenant 内容写入 `memory_items.user_id`
 
 ### Requirement: Maintenance apply uses Memory public API
-reflection SHALL apply approved User Memory proposals through memory-layer public API instead of direct SQL.
+reflection SHALL apply approved User Memory proposals through `fleetent.intelligence.memory` public API instead of direct SQL.
 
 #### Scenario: Apply does not write memory table directly
 - **WHEN** approved proposal 被应用
-- **THEN** reflection 调用 memory-layer public API 修改 User Memory
+- **THEN** reflection 调用 `fleetent.intelligence.memory` public API 修改 User Memory
 - **AND** reflection 不直接写 `memory_items` 表

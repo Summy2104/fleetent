@@ -133,7 +133,7 @@ MCP server 是**独立运行的东西**(远程服务 / 本地子进程),不是 i
 | **老 SSE(两端点)** | token 绑在**建连接时** → 每用户一条 SSE 连接(**连接池**) | Atlassian `/v1/sse` |
 | **stdio** | 不看请求 token,用 env 凭证 | 本地社区 server |
 
-→ 优先选 **HTTP**(每请求注入,mcp_client 改一行);**SSE** 要维护 per-user 连接池(key=`(user, server)`,建连注入 token,空闲淘汰,refresh 时重连)。
+→ 优先选 **HTTP**（每请求注入，`fleetent.integrations.mcp` 增加按请求 header 注入）；**SSE** 要维护 per-user 连接池（key=`(user, server)`，建连注入 token，空闲淘汰，refresh 时重连）。
 
 ### 单 token vs 两 token —— 决定你能不能直接注入
 
@@ -153,7 +153,7 @@ MCP server 是**独立运行的东西**(远程服务 / 本地子进程),不是 i
 ### connectors 这侧的契约
 
 - HTTP transport:dispatch 每请求调 `connectors.get_credential(user, server)` 取 token,塞 `Authorization`
-- SSE transport:连接池属 mcp_client(agent-runtime),**connectors 只负责提供 per-user token**,建连/重连时由 mcp_client 取用
+- SSE transport：连接池属 `fleetent.integrations.mcp`（agent-runtime），**connectors 只负责提供 per-user token**，建连/重连时由 `fleetent.integrations.mcp` 取用
 - 不论 transport,**token 的 consent / 存储 / refresh / revoke 始终在 connectors**,MCP server 不替平台管(厂商 server 只是"拿 token 去取数")
 
 ## 模块图
