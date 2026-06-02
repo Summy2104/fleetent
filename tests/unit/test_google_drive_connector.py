@@ -138,11 +138,11 @@ async def test_google_drive_listing_marks_supported_and_unsupported_mime_types()
 
     assert [item.action for item in plan.items] == [
         SyncAction.INGEST_NEW,
-        SyncAction.SKIP_UNSUPPORTED,
-        SyncAction.SKIP_UNSUPPORTED,
+        SyncAction.INGEST_NEW,
+        SyncAction.INGEST_NEW,
     ]
-    assert plan.items[0].document_format == "html"
-    assert plan.summary.unsupported == 2
+    assert [item.document_format for item in plan.items] == ["html", "xlsx", "pptx"]
+    assert plan.summary.unsupported == 0
 
 
 async def test_google_drive_malformed_file_metadata_is_counted_as_failed():
@@ -225,6 +225,24 @@ async def test_google_drive_export_or_download_failure_is_counted_per_item():
         ("guide.md", "text/markdown", "markdown"),
         ("page.html", "text/html", "html"),
         ("README.md", "text/plain", "markdown"),
+        ("Sheet", "application/vnd.google-apps.spreadsheet", "xlsx"),
+        ("Slides", "application/vnd.google-apps.presentation", "pptx"),
+        ("report.pdf", "application/pdf", "pdf"),
+        (
+            "guide.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "docx",
+        ),
+        (
+            "deck.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "pptx",
+        ),
+        (
+            "book.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "xlsx",
+        ),
     ],
 )
 def test_google_drive_format_detection(filename, mime_type, expected_format):
@@ -277,3 +295,100 @@ def test_google_drive_parser_dispatch_uses_export_or_download():
     assert docs.sections[0].title == "Runbook"
     assert markdown.format == "markdown"
     assert markdown.sections[0].title == "Guide"
+
+
+def test_google_drive_advanced_parser_dispatch_uses_registry(monkeypatch):
+    from fleetent.intelligence.knowledge_base.connectors import google_drive
+    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+        FakeGoogleDriveClient,
+        GoogleDriveFile,
+        parse_google_drive_file,
+    )
+    from fleetent.intelligence.knowledge_base.parsers import ParsedDocument, ParsedSection
+
+    calls = []
+
+    def fake_parse_document(filename: str, content: bytes | str, mime_type: str | None = None):
+        calls.append((filename, content, mime_type))
+        return ParsedDocument(
+            filename=filename,
+            format=filename.rsplit(".", 1)[1],
+            sections=[
+                ParsedSection(
+                    title="body",
+                    text="advanced text",
+                    level=0,
+                    metadata={"path": "body"},
+                )
+            ],
+            metadata={"filename": filename},
+        )
+
+    monkeypatch.setattr(google_drive, "parse_document", fake_parse_document)
+    client = FakeGoogleDriveClient(
+        exports={
+            "sheet-1": b"xlsx export",
+            "slide-1": b"pptx export",
+        },
+        downloads={
+            "pdf-1": b"pdf bytes",
+            "docx-1": b"docx bytes",
+        },
+    )
+
+    sheet = parse_google_drive_file(
+        client,
+        GoogleDriveFile(
+            id="sheet-1",
+            name="Planning Sheet",
+            mime_type="application/vnd.google-apps.spreadsheet",
+            modified_time="2026-06-02T00:00:00+00:00",
+        ),
+    )
+    slide = parse_google_drive_file(
+        client,
+        GoogleDriveFile(
+            id="slide-1",
+            name="Pilot Slides",
+            mime_type="application/vnd.google-apps.presentation",
+            modified_time="2026-06-02T00:00:00+00:00",
+        ),
+    )
+    pdf = parse_google_drive_file(
+        client,
+        GoogleDriveFile(
+            id="pdf-1",
+            name="report.pdf",
+            mime_type="application/pdf",
+            modified_time="2026-06-02T00:00:00+00:00",
+        ),
+    )
+    docx = parse_google_drive_file(
+        client,
+        GoogleDriveFile(
+            id="docx-1",
+            name="guide.docx",
+            mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            modified_time="2026-06-02T00:00:00+00:00",
+        ),
+    )
+
+    assert [sheet.format, slide.format, pdf.format, docx.format] == ["xlsx", "pptx", "pdf", "docx"]
+    assert calls == [
+        (
+            "Planning Sheet.xlsx",
+            b"xlsx export",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+        (
+            "Pilot Slides.pptx",
+            b"pptx export",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ),
+        ("report.pdf", b"pdf bytes", "application/pdf"),
+        (
+            "guide.docx",
+            b"docx bytes",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ),
+    ]

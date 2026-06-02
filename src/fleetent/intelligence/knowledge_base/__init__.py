@@ -37,9 +37,14 @@ from fleetent.intelligence.knowledge_base.operations import (
 from fleetent.intelligence.knowledge_base.parsers import (
     ParsedDocument,
     ParsedSection,
+    parse_document,
+    parse_docx,
     parse_html,
     parse_markdown,
+    parse_pdf,
+    parse_pptx,
     parse_text,
+    parse_xlsx,
 )
 from fleetent.intelligence.knowledge_base.runtime import (
     archive,
@@ -95,7 +100,12 @@ __all__ = [
     "list_configured_connectors",
     "parse_html",
     "parse_markdown",
+    "parse_document",
+    "parse_docx",
+    "parse_pdf",
+    "parse_pptx",
     "parse_text",
+    "parse_xlsx",
     "plan_confluence_sync",
     "plan_google_drive_sync",
     "plan_local_directory_sync",

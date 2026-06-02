@@ -1,7 +1,9 @@
 import hashlib
+import json
 
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.db import create_database
+from fleetent.intelligence.knowledge_base.parsers import ParsedDocument, ParsedSection
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -228,7 +230,7 @@ async def test_sync_local_directory_summary_matches_plan_execution(monkeypatch, 
     root = tmp_path / "docs"
     root.mkdir()
     (root / "runbook.md").write_text("# Runbook\nSync", encoding="utf-8")
-    (root / "archive.pdf").write_bytes(b"%PDF")
+    (root / "archive.bin").write_bytes(b"binary")
 
     from fleetent.intelligence.knowledge_base.connectors import (
         LocalDirectorySourceConfig,
@@ -252,6 +254,61 @@ async def test_sync_local_directory_summary_matches_plan_execution(monkeypatch, 
     assert summary.unsupported == 1
     assert summary.unchanged == 0
     assert summary.deleted == 0
+
+
+async def test_execute_local_advanced_file_uses_registry_and_preserves_section_metadata(
+    monkeypatch,
+    tmp_path,
+):
+    database = _patch_knowledge_runtime(monkeypatch, tmp_path)
+    root = tmp_path / "docs"
+    root.mkdir()
+    document_path = root / "report.pdf"
+    document_path.write_bytes(b"%PDF fake")
+
+    from fleetent.intelligence.knowledge_base import (
+        execute_sync_plan,
+        plan_local_directory_sync,
+        sync_planner,
+    )
+    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+
+    def fake_parse_document(filename: str, content: bytes | str, mime_type: str | None = None):
+        assert filename == "report.pdf"
+        assert content == b"%PDF fake"
+        assert mime_type is None
+        return ParsedDocument(
+            filename=filename,
+            format="pdf",
+            sections=[
+                ParsedSection(
+                    title="Page 2",
+                    text="Advanced parser text",
+                    level=0,
+                    metadata={"path": "Page 2", "page_number": "2"},
+                )
+            ],
+            metadata={"filename": filename, "format": "pdf"},
+        )
+
+    monkeypatch.setattr(sync_planner, "parse_document", fake_parse_document)
+    config = LocalDirectorySourceConfig(
+        source_id="local-docs",
+        root_path=root,
+        allowed_roots=[root],
+    )
+    plan = await plan_local_directory_sync(config, tenant_id="tenant-a", kb_id="support")
+
+    summary = await execute_sync_plan(plan)
+
+    row = database.execute("SELECT content, metadata_json FROM knowledge_chunks").fetchone()
+    metadata = json.loads(row["metadata_json"])
+    assert summary.ingested == 1
+    assert summary.failed == 0
+    assert row["content"] == "Advanced parser text"
+    assert metadata["document_format"] == "pdf"
+    assert metadata["section_path"] == "Page 2"
+    assert metadata["page_number"] == "2"
 
 
 async def test_repeated_sync_is_idempotent_and_reports_unchanged(monkeypatch, tmp_path):

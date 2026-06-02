@@ -12,9 +12,14 @@ def test_knowledge_base_public_api_is_importable():
         delete,
         ingest_parsed,
         ingest_text,
+        parse_document,
+        parse_docx,
         parse_html,
         parse_markdown,
+        parse_pdf,
+        parse_pptx,
         parse_text,
+        parse_xlsx,
         search,
     )
 
@@ -24,9 +29,14 @@ def test_knowledge_base_public_api_is_importable():
     assert ParsedSection is not None
     assert callable(ingest_text)
     assert callable(ingest_parsed)
+    assert callable(parse_document)
     assert callable(parse_text)
     assert callable(parse_markdown)
     assert callable(parse_html)
+    assert callable(parse_pdf)
+    assert callable(parse_docx)
+    assert callable(parse_pptx)
+    assert callable(parse_xlsx)
     assert callable(search)
     assert callable(delete)
 

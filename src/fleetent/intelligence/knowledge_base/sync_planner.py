@@ -13,10 +13,10 @@ from fleetent.intelligence.knowledge_base.connectors.state import (
 from fleetent.intelligence.knowledge_base.connectors.sync import LocalDirectorySourceConfig
 from fleetent.intelligence.knowledge_base.parsers import (
     ParsedDocument,
-    parse_html,
-    parse_markdown,
-    parse_text,
+    parse_document,
 )
+
+_SUPPORTED_LOCAL_FORMATS = {"text", "markdown", "html", "pdf", "docx", "pptx", "xlsx"}
 
 
 class SyncAction(StrEnum):
@@ -259,6 +259,8 @@ def _action_for_state(
 
 
 def _parse_item(source: LocalDirectoryDataSource, item: SyncPlanItem) -> ParsedDocument:
+    if item.document_format not in _SUPPORTED_LOCAL_FORMATS:
+        raise ValueError(f"unsupported local document format: {item.document_format}")
     content = source.fetch(
         DocumentRef(
             id=f"local:{item.source_path}",
@@ -268,11 +270,4 @@ def _parse_item(source: LocalDirectoryDataSource, item: SyncPlanItem) -> ParsedD
             metadata={"source_path": item.source_path},
         )
     )
-    text = content.decode("utf-8")
-    if item.document_format == "text":
-        return parse_text(item.filename, text)
-    if item.document_format == "markdown":
-        return parse_markdown(item.filename, text)
-    if item.document_format == "html":
-        return parse_html(item.filename, text)
-    raise ValueError(f"unsupported local document format: {item.document_format}")
+    return parse_document(item.filename, content)

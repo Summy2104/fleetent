@@ -166,7 +166,7 @@ async def test_sync_local_directory_skips_unsupported_extensions(monkeypatch, tm
     root = tmp_path / "docs"
     root.mkdir()
     (root / "runbook.md").write_text("# Runbook\nSupported", encoding="utf-8")
-    (root / "archive.pdf").write_bytes(b"%PDF")
+    (root / "archive.bin").write_bytes(b"binary")
 
     from fleetent.intelligence.knowledge_base.connectors import (
         LocalDirectorySourceConfig,

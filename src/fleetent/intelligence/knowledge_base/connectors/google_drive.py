@@ -13,6 +13,7 @@ from fleetent.intelligence.knowledge_base.connectors.state import (
 )
 from fleetent.intelligence.knowledge_base.parsers import (
     ParsedDocument,
+    parse_document,
     parse_html,
     parse_markdown,
     parse_text,
@@ -26,6 +27,9 @@ from fleetent.intelligence.knowledge_base.sync_planner import (
 GOOGLE_DOC_MIME = "application/vnd.google-apps.document"
 GOOGLE_SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 GOOGLE_SLIDE_MIME = "application/vnd.google-apps.presentation"
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 @dataclass(frozen=True)
@@ -46,6 +50,12 @@ class GoogleDriveConnectorConfig:
         "text/markdown",
         "text/x-markdown",
         "text/html",
+        GOOGLE_SHEET_MIME,
+        GOOGLE_SLIDE_MIME,
+        "application/pdf",
+        DOCX_MIME,
+        PPTX_MIME,
+        XLSX_MIME,
     )
 
 
@@ -107,7 +117,7 @@ class GoogleDriveClient(Protocol):
     def download(self, file_id: str) -> bytes:
         """Download a binary/text file."""
 
-    def export(self, file_id: str, mime_type: str) -> str:
+    def export(self, file_id: str, mime_type: str) -> bytes | str:
         """Export a Google-native file as the requested MIME type."""
 
 
@@ -128,7 +138,7 @@ class FakeGoogleDriveClient:
 
     files_by_folder: dict[str, list[GoogleDriveFile]] = field(default_factory=dict)
     downloads: dict[str, bytes] = field(default_factory=dict)
-    exports: dict[str, str] = field(default_factory=dict)
+    exports: dict[str, bytes | str] = field(default_factory=dict)
     auth_failed: bool = False
 
     def list_files(self, folder_id: str, *, recursive: bool) -> list[GoogleDriveFile]:
@@ -140,8 +150,8 @@ class FakeGoogleDriveClient:
     def download(self, file_id: str) -> bytes:
         return self.downloads[file_id]
 
-    def export(self, file_id: str, mime_type: str) -> str:
-        if mime_type != "text/html":
+    def export(self, file_id: str, mime_type: str) -> bytes | str:
+        if mime_type not in {"text/html", XLSX_MIME, PPTX_MIME}:
             raise ValueError(f"unsupported export MIME type: {mime_type}")
         return self.exports[file_id]
 
@@ -245,7 +255,18 @@ def parse_google_drive_file(
     if document_format is None:
         raise ValueError(f"unsupported Google Drive MIME type: {file.mime_type}")
     if file.mime_type == GOOGLE_DOC_MIME:
-        return parse_html(_filename_for_file(file, "html"), client.export(file.id, "text/html"))
+        return parse_html(
+            _filename_for_file(file, "html"),
+            _exported_text(client.export(file.id, "text/html")),
+        )
+    if file.mime_type == GOOGLE_SHEET_MIME:
+        content = client.export(file.id, XLSX_MIME)
+        return parse_document(_filename_for_file(file, "xlsx"), content, mime_type=XLSX_MIME)
+    if file.mime_type == GOOGLE_SLIDE_MIME:
+        content = client.export(file.id, PPTX_MIME)
+        return parse_document(_filename_for_file(file, "pptx"), content, mime_type=PPTX_MIME)
+    if document_format in {"pdf", "docx", "pptx", "xlsx"}:
+        return parse_document(file.name, client.download(file.id), mime_type=file.mime_type)
     content = client.download(file.id).decode("utf-8")
     if document_format == "text":
         return parse_text(file.name, content)
@@ -350,12 +371,24 @@ def google_drive_document_format(file: GoogleDriveFile) -> str | None:
     name = file.name.casefold()
     if file.mime_type == GOOGLE_DOC_MIME:
         return "html"
+    if file.mime_type == GOOGLE_SHEET_MIME:
+        return "xlsx"
+    if file.mime_type == GOOGLE_SLIDE_MIME:
+        return "pptx"
     if file.mime_type == "text/plain":
         return "markdown" if name.endswith((".md", ".markdown")) else "text"
     if file.mime_type in {"text/markdown", "text/x-markdown"}:
         return "markdown"
     if file.mime_type == "text/html" or name.endswith((".html", ".htm")):
         return "html"
+    if file.mime_type == "application/pdf" or name.endswith(".pdf"):
+        return "pdf"
+    if file.mime_type == DOCX_MIME or name.endswith(".docx"):
+        return "docx"
+    if file.mime_type == PPTX_MIME or name.endswith(".pptx"):
+        return "pptx"
+    if file.mime_type == XLSX_MIME or name.endswith(".xlsx"):
+        return "xlsx"
     return None
 
 
@@ -411,7 +444,17 @@ def _modified_time_ns(file: GoogleDriveFile) -> int:
 def _filename_for_file(file: GoogleDriveFile, document_format: str) -> str:
     if file.mime_type == GOOGLE_DOC_MIME and not file.name.casefold().endswith(".html"):
         return f"{file.name}.html"
+    if file.mime_type == GOOGLE_SHEET_MIME and not file.name.casefold().endswith(".xlsx"):
+        return f"{file.name}.xlsx"
+    if file.mime_type == GOOGLE_SLIDE_MIME and not file.name.casefold().endswith(".pptx"):
+        return f"{file.name}.pptx"
     return file.name
+
+
+def _exported_text(content: bytes | str) -> str:
+    if isinstance(content, str):
+        return content
+    return content.decode("utf-8")
 
 
 def _credential_path(credential_ref: str) -> Path:

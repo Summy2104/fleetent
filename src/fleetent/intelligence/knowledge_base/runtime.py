@@ -80,6 +80,9 @@ async def ingest_parsed(
             "section_path": section.metadata.get("path", section.title),
             "section_title": section.title,
         }
+        for key, value in section.metadata.items():
+            if key != "path":
+                section_metadata[key] = value
         for chunk_content in _chunk_text(
             normalized_text, settings.chunk_size, settings.chunk_overlap
         ):
