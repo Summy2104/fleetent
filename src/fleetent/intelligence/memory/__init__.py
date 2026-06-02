@@ -10,6 +10,10 @@ from fleetent.intelligence.memory.models import (
     MemoryMaintenancePolicy,
     MemoryMaintenanceSummary,
     MemoryType,
+    SharedMemoryItem,
+    SharedMemoryScopeType,
+    SharedMemoryStatus,
+    SharedMemoryType,
 )
 from fleetent.intelligence.memory.operations import (
     delete_user_memory,
@@ -19,6 +23,15 @@ from fleetent.intelligence.memory.operations import (
     update_user_memory_content,
 )
 from fleetent.intelligence.memory.search import search
+from fleetent.intelligence.memory.shared import (
+    apply_shared_memory_proposal,
+    archive_shared_memory,
+    create_shared_memory,
+    iter_indexable_shared_memories,
+    list_shared_memory,
+    search_shared_memory,
+    update_shared_memory,
+)
 
 __all__ = [
     "MemoryCompactionCandidate",
@@ -26,12 +39,23 @@ __all__ = [
     "MemoryMaintenancePolicy",
     "MemoryMaintenanceSummary",
     "MemoryType",
+    "SharedMemoryItem",
+    "SharedMemoryScopeType",
+    "SharedMemoryStatus",
+    "SharedMemoryType",
+    "apply_shared_memory_proposal",
+    "archive_shared_memory",
+    "create_shared_memory",
     "delete_user_memory",
     "extract_and_update",
+    "iter_indexable_shared_memories",
     "iter_indexable_memories",
+    "list_shared_memory",
     "mark_user_memory_stale",
     "merge_user_memories",
     "run_memory_maintenance",
     "search",
+    "search_shared_memory",
+    "update_shared_memory",
     "update_user_memory_content",
 ]

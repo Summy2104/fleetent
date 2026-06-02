@@ -26,6 +26,8 @@ class ReindexRequest:
     user_id: str | None = None
     tenant_id: str = "default"
     kb_id: str | None = None
+    scope_type: str | None = None
+    scope_id: str | None = None
     dry_run: bool = False
 
 
@@ -62,7 +64,7 @@ def reindex(request: ReindexRequest) -> ReindexSummary:
 
 
 def _validate_request(request: ReindexRequest) -> None:
-    if request.owner not in {"memory", "knowledge_base"}:
+    if request.owner not in {"memory", "knowledge_base", "shared_memory"}:
         raise ValueError(f"unsupported reindex owner: {request.owner}")
     if request.mode != "rebuild":
         raise ValueError(f"unsupported reindex mode: {request.mode}")
@@ -70,11 +72,18 @@ def _validate_request(request: ReindexRequest) -> None:
         raise ValueError("user_id is required for memory reindex")
     if request.owner == "knowledge_base" and not (request.kb_id and request.kb_id.strip()):
         raise ValueError("kb_id is required for knowledge_base reindex")
+    if request.owner == "shared_memory":
+        if not (request.scope_type and request.scope_type.strip()):
+            raise ValueError("scope_type is required for shared_memory reindex")
+        if not (request.scope_id and request.scope_id.strip()):
+            raise ValueError("scope_id is required for shared_memory reindex")
 
 
 def _namespace_for_request(request: ReindexRequest) -> str:
     if request.owner == "memory":
         return namespaces.memory_namespace(request.user_id or "")
+    if request.owner == "shared_memory":
+        return namespaces.shared_namespace(request.scope_type or "", request.scope_id or "")
     return namespaces.knowledge_namespace(request.tenant_id, request.kb_id or "")
 
 
@@ -83,6 +92,15 @@ def _items_for_request(request: ReindexRequest) -> list[IndexableItem]:
         from fleetent.intelligence import memory
 
         return list(memory.iter_indexable_memories(request.user_id or ""))
+    if request.owner == "shared_memory":
+        from fleetent.intelligence import memory
+
+        return list(
+            memory.iter_indexable_shared_memories(
+                request.scope_type or "",
+                request.scope_id or "",
+            )
+        )
     return list(
         knowledge_base.iter_indexable_knowledge_chunks(request.tenant_id, request.kb_id or "")
     )

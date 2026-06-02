@@ -46,6 +46,7 @@ def test_upgrade_creates_tables(tmp_path):
     assert "kb_relations" in tables
     assert "kb_reflection_reports" in tables
     assert "skill_proposals" in tables
+    assert "shared_memory_items" in tables
 
 
 def test_upgrade_creates_trace_indexes(tmp_path):
@@ -203,6 +204,20 @@ def test_column_structure(tmp_path):
         "created_at",
         "updated_at",
         "expires_at",
+    }
+    shared_memory_cols = {row[1] for row in conn.execute("PRAGMA table_info(shared_memory_items)")}
+    assert shared_memory_cols >= {
+        "id",
+        "scope_type",
+        "scope_id",
+        "type",
+        "content",
+        "status",
+        "source",
+        "source_ref",
+        "created_by",
+        "created_at",
+        "updated_at",
     }
 
     kb_cols = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_bases)")}

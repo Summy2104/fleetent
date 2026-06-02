@@ -88,3 +88,17 @@ def test_capability_docs_describe_skill_reflection_proposals_scope():
         assert "deprecate_skill" in content
         assert "pending" in content
         assert "不自动改 skill" in content
+
+
+def test_capability_docs_describe_shared_memory_scope():
+    memory_doc = Path("docs/capabilities/memory.md").read_text(encoding="utf-8")
+    long_term_doc = Path("docs/capabilities/long-term-ctx.md").read_text(encoding="utf-8")
+    roadmap = Path("docs/capabilities/owner-capability-roadmap.md").read_text(encoding="utf-8")
+
+    for content in [memory_doc, long_term_doc, roadmap]:
+        assert "Shared Memory" in content
+        assert "shared_memory_items" in content
+        assert "shared:{scope_type}:{scope_id}" in content
+        assert "team" in content
+        assert "tenant" in content
+        assert "不接 prompt 注入" in content

@@ -28,10 +28,16 @@ def test_public_api_is_importable():
 
 
 def test_namespace_helpers_return_fixed_formats():
-    from fleetent.intelligence.vector_store import knowledge_namespace, memory_namespace
+    from fleetent.intelligence.vector_store import (
+        knowledge_namespace,
+        memory_namespace,
+        shared_namespace,
+    )
 
     assert memory_namespace("u1") == "mem:u1"
     assert knowledge_namespace("default", "global") == "kb:default:global"
+    assert shared_namespace("team", "eng") == "shared:team:eng"
+    assert shared_namespace("tenant", "acme") == "shared:tenant:acme"
 
 
 @pytest.mark.parametrize(

@@ -13,6 +13,10 @@ long-term-ctx 仍可基于 memory 正常工作。
 
 **不负责**：存储任何数据、记忆提取（→ memory）、文档索引（→ knowledge_base）、in-session 上下文压缩（→ context_mgr）、trace 持久化（→ observability）。
 
+Shared Memory 已有 `shared_memory_items` 数据层和 `shared:{scope_type}:{scope_id}` vector namespace，但
+long-term-ctx 当前不消费 Shared Memory，不接 prompt 注入；team / tenant scope 的启用策略、budget 和冲突优先级
+由后续 `long-term-context-agent-tenant-policy` 定义。
+
 **调用关系**：
 - 依赖：`fleetent.intelligence.memory`（search）、knowledge_base optional provider（resolve_agent_kb_ids / search）、config（token 预算上限和来源分配策略）
 - 被依赖：agent_loop（每次对话开始前调用）
@@ -142,6 +146,7 @@ async def build_context(
 ## 当前缺口
 
 - KB provider 已接入 agent 到多个 KB 的绑定策略；尚未支持 agent / tenant 级 memory 与 KB budget 策略。
+- Shared Memory 已提供 team / tenant 数据层，但尚未作为第三类 provider 接入 long-term-ctx；当前不接 prompt 注入。
 - token 估算仍使用 deterministic 近似值，尚未接入真实 tokenizer。
 - memory / knowledge 的默认比例已可配置，但尚未做 agent / tenant 级策略。
 - 格式模板未产品化，缺少不同 agent / tenant 的可配置策略。

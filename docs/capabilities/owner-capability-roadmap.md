@@ -49,8 +49,8 @@
 | 能力 | 当前状态 | 已有基础 | Pilot 后缺口 | 非 MVP 增强 |
 | --- | --- | --- | --- | --- |
 | Observability foundation | 基础完成 | structured logs、SQLite traces、usage summary、performance summary、source attribution、runtime event coverage、admin query CLI、diagnostics export / manual retention、contract tests | platform UI / HTTP 查询入口 | OTel / Prometheus、dashboard UI、告警 |
-| Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation、retention / compaction API、owner-approved reflection maintenance apply API | scheduler / review UI 与趋势统计 | 长期质量趋势 |
-| Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture、deterministic budget policy | agent / tenant 级 budget 策略 | 真实 tokenizer、个性化 budget、agent-specific policy |
+| Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation、retention / compaction API、owner-approved reflection maintenance apply API、Shared Memory `shared_memory_items`、team / tenant scope、`shared:{scope_type}:{scope_id}` namespace | scheduler / review UI 与趋势统计；Shared Memory 不接 prompt 注入 | 长期质量趋势 |
+| Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture、deterministic budget policy；Shared Memory 数据层存在但不接 prompt 注入 | agent / tenant 级 budget 策略；Shared Memory provider policy | 真实 tokenizer、个性化 budget、agent-specific policy |
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告、deterministic report evaluation、User Memory maintenance proposal lifecycle | review UI / scheduler / trend summary | 自动 skill proposal、KB reflection reports |
 | Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API、combined embedding evaluation | rerank evaluation；rerank 接入 KB search | 后台 reindex job runtime、sqlite-vec、Qdrant、OpenSearch adapter |
 | Knowledge base | 基础完成 | local ingest、parser registry、PDF / DOCX / PPTX / XLSX parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator、combined embedding evaluation、Google Drive / Confluence connector baseline、Google Sheets / Slides export parsing、entity extraction schema + explicit run、`kb_extraction_runs`、`kb_entities`、独立于 search 的 `graph_search` depth 0/1 graph evidence、agent 到多 KB 绑定、connector operations CLI / latest status | 真实 SaaS smoke 与生产凭据管理；query planner / rerank 尚未接入 graph candidates | document-level ACL、scheduler / full sync history、attachments / OCR / VLM |
@@ -183,6 +183,7 @@ flowchart TD
 - `memory-retention-and-compaction`：提供 per-user dry-run/apply 维护 API，覆盖 expired context、per-type over-limit 和 exact duplicate compaction；不做 Shared Memory、scheduler 或 reflection 自动写回。
 - `long-term-context-budget-policy`：提供 effective budget、memory / knowledge source budget、source top-k、query intent / explicit conflict preference 和 BudgetMetadata decision attribution；不做 LLM-driven selection、summarization、memory 写回或 connector ACL 策略。
 - `memory-reflection-maintenance`：提供 reflection-owned User Memory maintenance proposals、owner approval / reject / apply lifecycle、低风险显式自动策略和 observability 事件；不做 Shared Memory、管理员默认代批、UI、skill proposal 或 KB 写回。
+- `shared-memory`：提供独立 `shared_memory_items` 数据层、`SharedMemoryItem` public API、team / tenant scope、`shared:{scope_type}:{scope_id}` vector namespace、reflection proposal apply 和最小 admin CLI；不接 prompt 注入。
 
 ### M4b：企业知识源接入
 
@@ -222,7 +223,7 @@ hybrid retrieval 和 reindex；真实 SaaS smoke 仍需显式环境变量和凭�
 
 后续仍需要人工确认后再推进的方向：
 
-1. Shared Memory：涉及 Memory 能力域扩展、scope ownership、确认主体和 long-term-ctx 第三类 provider。
+1. Shared Memory prompt policy：数据层已完成，但 long-term-ctx 第三类 provider、scope ownership 默认策略和 budget 仍需单独定义。
 2. agent / tenant 到多 KB 绑定策略：会改变用户查询可见范围和 KB 访问控制。
 3. document-level ACL：会把 Google Drive / Confluence 权限映射到检索过滤，复杂度和安全风险都高。
 4. 真实 SaaS connector 生产凭据管理：涉及 secret manager、token 轮换、授权失败恢复和审计。
@@ -389,8 +390,9 @@ flowchart TD
 以下 specs 不直接阻塞 Pilot MVP，但属于 memory / long-term context 从个人记忆扩展到团队协作语境时必须
 进入 roadmap 的能力：
 
-1. `shared-memory`：定义 User Memory 之外的共享记忆实体、scope ownership、确认主体和写入 / 更新 / 删除
-   lifecycle。默认不让管理员代批用户个人记忆，也不把企业共识直接混入 User Memory。
+1. `shared-memory`：已完成 User Memory 之外的共享记忆实体、`shared_memory_items` 表、team / tenant scope、
+   `shared:{scope_type}:{scope_id}` vector namespace、写入 / 更新 / 删除 lifecycle、reflection proposal apply 和最小 admin CLI；
+   不接 prompt 注入，默认不让管理员代批用户个人记忆，也不把企业共识直接混入 User Memory。
 2. `long-term-context-agent-tenant-policy`：在 User Memory、Shared Memory 和 Knowledge Base 之间定义
    agent / tenant 级 provider 策略、budget 策略和冲突偏好。
 3. `memory-quality-trend-summary`：跟踪 memory extraction、retention、proposal apply 后的质量趋势，判断记忆维护是否有效。
