@@ -1,3 +1,12 @@
+> **实施进度（opsx:apply，主体完成）**
+> 已按 TDD 实现并通过（沙箱 3.10 + `.pth` UTC shim；不 import agent_loop）：
+> - 决策落定：0.2 会话元数据走独立 `session_meta` 表（迁移 `014`：origin/status/takeover/pinned/agent_name/user_id/channel），transcript 仍在 session_mgr JSON。agent-runtime(SSE/run_stream/overrides)、session(load)、im-gateway(投递) 走 sync 接缝。
+> - 数据层：`session_admin_store.py`（db runtime：upsert_meta/get_meta/set_status/set_takeover/clear_takeover/set_pinned/is_taken_over/list_meta[默认排除 playground]/list_unpinned_playground）。
+> - session_mgr 扩展：新增 `clear` / `inject_message`（复用 `session_lock` + 原子写，load/save 语义不变）。
+> - 管理 API：`chat_admin_api.py`（`/admin/chat/*` + `/admin/sessions/*`）——playground 起隔离会话（origin=playground 不入真实列表）、消息（overrides 透传 + 仅 playground 审批旁路写审计 + 非 playground 409）、pin/export、会话列表检索/详情回放、接管+人工注入（IM 投递回原平台）+ 释放、强制结束/清空/重置（二次确认）、批量处置（共享 batch_id）。
+> - 接线：`server.py` mount。权限 `auth.has_role`（admin 写/viewer 只读）+ `audit_log` 审计。
+> - 测试：新增 20 个（store+hooks 10 + api 10），覆盖场景 97–102；`ruff format/check` 通过。SSE 实流包装 + 全量 + mypy + 冒烟需 host 3.12。
+
 ## 0. 前置
 
 - [ ] 0.1 确认新模块落点：`chat_admin_api.py`（`/admin/chat/*` playground + `/admin/sessions/*` 会话治理，仿 `user_admin_api.py`，复用 `auth.require_role` + `audit_log`）

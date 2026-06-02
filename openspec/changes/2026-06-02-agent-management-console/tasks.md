@@ -1,3 +1,12 @@
+> **实施进度（opsx:apply，主体完成）**
+> 已按 TDD 实现并通过（沙箱 3.10 + `.pth` UTC shim；不 import agent_loop）：
+> - **关键决策（偏离原设计）**：multi-agent-management（版本/deleted_at/agent_admin_api）尚未落地，为避免硬依赖未实现的迁移，status/provenance/drift 改放**侧表 `agent_admin_state`**（迁移 `015`，仿 skill_admin_state），而非 ALTER 旧 `agents` 表；待 multi-agent 落地后与其 deleted_at 归一。
+> - 数据层：`agent_admin_store.py`（db runtime：get_state/enable/disable/archive/restore/set_provenance/mark_drift[仅 managed]/clear_drift/list_states/references[查 user_agents+channel_agents]/is_referenced）。`agent_templates.py`（内置只读 readonly-qa/ops/support，deepcopy 防改源）。
+> - 管理 API：`agent_console_api.py`（`/admin/agents/*` + `/admin/agent-templates`）——列表、启停、归档（引用保护 409 + 二次确认）、恢复、克隆（复制定义不带绑定 + adhoc + 重名 409）、模板列出、按 agent 观测。agent_store(get/create) 与 observability 走可注入接缝。
+> - 接线：`server.py` mount。权限 `auth.require_role`（admin 写/viewer 只读）+ `audit_log`。
+> - 测试：新增 18 个（store+templates 9 + api 9），覆盖场景 36-46 的管理面增量（纯 CRUD/版本归 multi-agent）；`ruff format/check` 通过。
+> - **host follow-up**：`/chat` 对 disabled/archived agent 的拒绝路由（任务 8，热路径含 agent_loop，3.10 不可测）；observability 按 agent 聚合真实数据源；与 multi-agent-management 落地后的 status/deleted_at 归一。
+
 ## 0. 前置（开放决策）
 
 - [ ] 0.1 `agents` 表加 `status` / `provenance` / `drift` 列的 **Alembic 迁移**：确认与 `2026-05-29-multi-agent-management` 的 `active_version_id` / `deleted_at` 迁移先后顺序与 revision 链；回填规则（`status=enabled`，已 `deleted_at` 非空回填 `archived`；`provenance=adhoc`；`drift=0`）。

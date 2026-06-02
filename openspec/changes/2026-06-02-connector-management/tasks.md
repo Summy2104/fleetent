@@ -1,3 +1,11 @@
+> **实施进度（opsx:apply，主体完成）**
+> 已按 TDD 实现并通过（沙箱 3.10 + `.pth` UTC shim；不 import agent_loop）：
+> - 决策落定：0.2 新建 `connectors` 配置表（迁移 `013`，`id`/`display_name`/`protocol`/`oauth_config` JSON/`enabled`），**client_secret 永不入表**（store add/edit 主动剥离）。0.4 脱敏在 API 层统一递归 `_mask`（覆盖 secret/token/refresh/api_key/password）。connectors / mcp / governance 运行语义走 mock 接缝（follow-up）。
+> - 数据层：`connector_config_store.py`（db runtime + named params：add/edit/get/list，secret 剥离）。
+> - 管理 API：`connector_admin_api.py`（`/admin/connectors/*` + `/admin/mcp/*`）——OAuth 目录 CRUD（仅 oauth2，非 oauth 422，secret 脱敏）、per-user 授权矩阵（四态 + token 脱敏）、**不可代 consent**（无代授权路由，矩阵返回提示）、代 revoke（二次确认 + admin）、离职联动结果、凭证生命周期、MCP server 列表（连接/降级/重连中/永久不可用）、`server__{tool}` 命名空间、手动重连、mcp doctor（脱敏）。
+> - 接线：`server.py` mount。权限 `auth.has_role`（admin 写/viewer 只读）+ `audit_log` 审计。
+> - 测试：新增 19 个（store 5 + api 14），覆盖场景 109–114；`ruff format/check` 通过。全量 + mypy + 冒烟需 host 3.12。
+
 ## 0. 前置
 
 - [ ] 0.1 确认新模块边界：`connector_admin_api.py`（`/admin/connectors/*` + `/admin/mcp/*`，仿 `user_admin_api.py`，不 import `agent_loop`）；是否拆出 `connector_config_store.py` 承载 connector 配置 store

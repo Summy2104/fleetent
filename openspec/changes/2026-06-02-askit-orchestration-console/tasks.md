@@ -1,3 +1,14 @@
+> **实施进度（opsx:apply，主体完成）**
+> 已按 TDD 实现并通过（沙箱 3.10 + `.pth` UTC shim；不 import agent_loop）：
+> - **关键决策（偏离原设计）**：与 agent-management-console 一致，provenance/drift 复用侧表 `agent_admin_store`（managed≡spec_owned / adhoc≡db_only），不再 ALTER agents 表，避免重复依赖未落地的 multi-agent 迁移。
+> - 数据层：迁移 `017`（askit_tasks / askit_task_logs / askit_workspaces）+ `askit_task_store.py`（任务/日志/工作区 + per-workspace `asyncio.Lock` 串行）。
+> - `askit_runner.py`（纯）：八系列→命令映射 + 参数白名单（拒注入）+ 输出脱敏 + 固定版本读出；子进程经 `run_subprocess` 接缝（mock）。
+> - `agent_apply_api.py`（`/admin/agents/apply` + `:batch`）：幂等 upsert（按 name，已存在只更新 mutable、保持 agent_id、bindings 不动）、adopt 收编（adhoc→managed 保持 id）、新建即 managed；agent_store get/create/update 走接缝。
+> - `askit_console_api.py`（`/admin/askit/*`）：系列列表、触发(记任务+日志+退出码+审计)、deploy check 闸门(409)、migrations 默认 dry-run、高危二次确认、readonly 命令 viewer 可跑/写操作 admin、任务历史回看。
+> - 接线：`server.py` mount apply + console。
+> - 测试：新增 28 个（runner 单测 8 + apply/console 20），覆盖场景 58–73；`ruff format/check` 通过。
+> - **跨仓 follow-up**：ai-skills-toolkit 新增 fleetent target（renderer+deployer，deployer 调本 apply API）；真实 askit 子进程版本固定与 git-backed 工作区/远程 endpoint 部署；高危 2FA 接 `auth` TOTP；override review 的 PR 链接回填。
+
 ## 0. 前置（开放决策，实施前确认）
 
 - [ ] 0.1 新模块落点确认：`askit_console_api.py`（`/admin/askit/*` 路由）、`askit_runner.py`（askit CLI 子进程封装）、`askit_task_store.py`（异步任务 + 工作区串行队列）、`agent_apply_api.py`（agents 幂等 apply API）。是否合并 runner 与 task_store 待评审。

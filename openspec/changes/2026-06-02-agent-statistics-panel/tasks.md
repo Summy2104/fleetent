@@ -1,3 +1,12 @@
+> **实施进度（opsx:apply，主体完成）**
+> 已按 TDD 实现并通过（沙箱 3.10 + `.pth` UTC shim；不 import agent_loop）：
+> - 决策落定：0.2 起步用**纯聚合 + 直接查询**，无物化表/无 Alembic。聚合逻辑放纯函数模块 `stats_store.py`（对 trace 记录列表运算，零 IO，单测覆盖），API 经可注入接缝 `fetch_traces`/`fetch_approvals`/`agent_allowed_tools`/`pricing_table`/`schedule_report` 拉数据。
+> - 纯聚合：用量、性能(p50/p95)、Top 工具、allowed_tools 覆盖率(fnmatch)、审批通过/拒绝/超时率、多 agent 稳定排序、per-user 排行、成本(token×单价，未配=未配置，无单价表=待数据接入)、请求列表、按 request_id 事件流、缺 request_id 会话级退化、sub_agent 经 parent_session_id 展开。
+> - 管理 API：`stats_admin_api.py`（`/admin/stats/*` 只读）——overview/compare/tools/per-user(viewer 脱敏)/users/{id}/requests/requests/{id}/sessions/{id}/trace 退化/export/reports。viewer+admin 只读，reports 仅 admin。
+> - 接线：`server.py` mount。导出/周报写 `audit_log`。
+> - 测试：新增 27 个（stats_store 单测 15 + api 12），覆盖场景 74–85；`ruff format/check` 通过。
+> - **host follow-up**：`fetch_traces`/approvals/allowed_tools/pricing/schedule 接真实 observability·agent_store·model-provider·scheduling；⏳ trace 字段(终止码/错误分类/fallback/压缩/skill·memory 命中)与 request_id 贯穿由 agent-runtime·observability 发射。
+
 ## 0. 前置（开放决策，实施前确认）
 
 - [ ] 0.1 新模块落点：聚合 API 走新 `stats_admin_api.py`（`/admin/stats/*`，仿 `user_admin_api.py`，复用 `auth.require_role` / `auth.has_role` + `audit_log.write_audit`，**不 import `agent_loop`** 以便 TestClient 隔离）；聚合查询走新 `stats_store.py`（只读聚合边界）还是直接复用 observability 既有读接口——确认边界划法

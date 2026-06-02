@@ -1,3 +1,11 @@
+> **实施进度（opsx:apply，主体完成）**
+> 已按 TDD 实现并通过（沙箱 3.10 + `.pth` UTC shim；不 import agent_loop）：
+> - 决策落定：0.3/0.4 KB 主表与归档列归 knowledge-base 引擎域，本 change **只建 `agent_kbs` 绑定表**（迁移 `012`）。引擎调用（list/create/edit/archive/ingest_text/sync/documents/chunks/delete/search/eval/observation）走 sync 接缝（`kb_*`），默认占位 + host 侧按 0.5 确认签名后桥接 async 引擎；测试 mock。
+> - 数据层：`agent_kbs_store.py`（db runtime + named params：bind/unbind/list_agents_for_kb/list_kbs_for_agent/is_kb_bound；(tenant_id,kb_id,agent_id) 复合主键 + 租户隔离）。
+> - 管理 API：`kb_admin_api.py`（`/admin/kb/*`）——列表（引擎+绑定聚合）、建库（租户内重名 409）、改描述、归档（绑定保护 409 + 二次确认）、文档导入（透传 ingest_text）、目录同步（二次确认）、文档列表/分块预览、单文档删除级联（二次确认）、检索测试台（mode 校验 + 透传 search，viewer 只读可跑）、KB↔Agent 矩阵（双向，反查 `/admin/kb/by-agent/{id}` 避开 /admin/agents 归属）、评估入口（只读）、按 kb 观测。
+> - 接线：`server.py` mount `/admin/kb`。权限 `auth.has_role`（admin 写/viewer 只读）+ `audit_log` 审计。
+> - 测试：新增 22 个（store 6 + api 16），覆盖场景 103–108；`ruff format/check` 通过。全量 + mypy + 冒烟 + admin.html「知识库」标签需 host 3.12。
+
 ## 0. 前置
 
 - [ ] 0.1 确认新模块落点：`kb_admin_api.py`（`/admin/kb/*` + `/admin/agents/{agent_id}/kbs` 反查，仿 `user_admin_api.py`，复用登录会话 + `auth.has_role`/`require_role` + `audit_log`，**不 import agent_loop**）

@@ -15,11 +15,19 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from fleetent import (
+    agent_apply_api,
+    agent_console_api,
     api_key_store,
+    askit_console_api,
+    chat_admin_api,
+    connector_admin_api,
+    kb_admin_api,
     mcp_client,
+    monitor_admin_api,
     provider_admin_api,
     quota,
     skill_admin_api,
+    stats_admin_api,
     user_admin_api,
     user_store,
 )
@@ -137,6 +145,14 @@ app = FastAPI(title="fleetent", lifespan=lifespan)
 app.include_router(user_admin_api.router)
 app.include_router(skill_admin_api.router)
 app.include_router(provider_admin_api.router)
+app.include_router(kb_admin_api.router)
+app.include_router(connector_admin_api.router)
+app.include_router(chat_admin_api.router)
+app.include_router(agent_console_api.router)
+app.include_router(stats_admin_api.router)
+app.include_router(monitor_admin_api.router)
+app.include_router(agent_apply_api.router)
+app.include_router(askit_console_api.router)
 
 
 class ChatRequest(BaseModel):

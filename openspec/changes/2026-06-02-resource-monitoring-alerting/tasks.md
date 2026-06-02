@@ -1,3 +1,13 @@
+> **实施进度（opsx:apply，主体完成）**
+> 已按 TDD 实现并通过（沙箱 3.10 + `.pth` UTC shim；不 import agent_loop）：
+> - 决策落定：0.3 选 **(a) 轻量本地表** `metric_samples`（SQLite-first，全内网，禁云 APM）；0.4 表 `metric_samples`/`alert_rules`/`alerts`/`maintenance_windows` 走迁移 `016`；0.7 脱敏统一 `_mask`（SMTP 密码/Webhook 密钥/IM token）。采集源(主机/进程/容器/基础设施)与 IM 推送走可注入接缝（host follow-up）。
+> - 数据层：`monitoring_store.py`（时序 record/query/purge_before 留存清理；alert_rules CRUD + severity 校验；alerts create/dedup(find_active)/状态机/ack；maintenance_windows）。
+> - 告警逻辑：`alerting.py` 纯函数——阈值×持续时间评估（持续命中触发、瞬时尖峰不触发，需窗口起点前样本佐证持续）、维护窗判定、主机宕机抑制容器次生、critical 未 ack 升级判定。
+> - 管理 API：`monitor_admin_api.py`（`/admin/monitoring/*` + `/admin/alerts/*`）——仪表盘(实时+历史)、规则 CRUD、告警中心 list/ack/silence、维护窗、多通道 dispatch(email/im/webhook/in_app 带重试+失败记录+脱敏)。
+> - 接线：`server.py` mount。权限 viewer 只读/admin 写 + `audit_log`。默认路径不出网（仅显式 dispatch 才调通道，且接缝 mock）。
+> - 测试：新增 23 个（store+alerting 10 + api 13），覆盖场景 86–96；`ruff format/check` 通过。
+> - **host follow-up**：四层真实采集器（/proc·psutil·sandbox_client docker stats·基础设施内网 stats）+ lifespan 启动采集/评估周期 + 真实 SMTP/IM/Webhook 通道。
+
 ## 0. 前置（开放决策，实施前需评审定稿）
 
 - [ ] 0.1 确认新模块边界：`monitoring.py`（四层采集器 + 时序读写边界）、`alerting.py`（规则评估 / 降噪 / 抑制 / 状态机 / 升级 / 维护窗 / 多通道 + 重试）、`monitor_admin_api.py`（`/admin/monitoring/*` + `/admin/alerts/*`，仿 `user_admin_api.py`，不 import `agent_loop`）
