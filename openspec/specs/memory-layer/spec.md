@@ -231,10 +231,11 @@ agent-runtime SHALL 不再直接调用 memory_layer 加载最近 memory 并注�
 - **THEN** pipeline 不默认运行真实 LLM evaluation
 
 ### Requirement: Memory indexable iterator
-memory-layer SHALL 提供 public API，用于枚举指定用户当前应写入 vector_store 的 memory source records。
+memory-layer SHALL provide public API through `fleetent.intelligence.memory` for enumerating the current
+memory source records that should be written to vector_store for a user.
 
 #### Scenario: Memory indexable API is importable
-- **WHEN** 调用方从 `fleetent.memory_layer` 导入 `iter_indexable_memories`
+- **WHEN** 调用方从 `fleetent.intelligence.memory` 导入 `iter_indexable_memories`
 - **THEN** 导入成功
 
 #### Scenario: Memory indexable items are user scoped
@@ -253,11 +254,12 @@ memory-layer SHALL 提供 public API，用于枚举指定用户当前应写入 v
 - **AND** item.content 等于 memory item content
 
 ### Requirement: Memory indexable iterator is a public boundary
-vector_store reindex SHALL consume memory indexable records through memory-layer public API, not direct SQL.
+vector_store reindex SHALL consume memory indexable records through `fleetent.intelligence.memory` public
+API, not direct SQL.
 
 #### Scenario: Reindex does not query memory table directly
 - **WHEN** memory reindex 执行
-- **THEN** reindex code 调用 `memory_layer.iter_indexable_memories()`
+- **THEN** reindex code 调用 `fleetent.intelligence.memory.iter_indexable_memories()`
 - **AND** 不直接访问 `memory_items` 表
 
 ### Requirement: Memory semantic retrieval embedding evaluation
@@ -274,17 +276,18 @@ vector-store embedding / reindex 路径后的召回行为。
 
 #### Scenario: Expected memory snippets are retrieved
 - **WHEN** memory query 运行完成
-- **THEN** runner 验证 expected memory snippets 出现在 `memory_layer.search()` top-k 结果中
+- **THEN** runner 验证 expected memory snippets 出现在 `fleetent.intelligence.memory.search()` top-k 结果中
 
 #### Scenario: Forbidden memory snippets are rejected
 - **WHEN** memory query 运行完成
-- **THEN** runner 验证 forbidden memory snippets 不出现在 `memory_layer.search()` top-k 结果中
+- **THEN** runner 验证 forbidden memory snippets 不出现在 `fleetent.intelligence.memory.search()` top-k 结果中
 
 ### Requirement: Memory retention maintenance public API
-memory-layer SHALL provide a per-user public API for dry-run and apply memory retention maintenance.
+memory-layer SHALL provide a per-user public API for dry-run and apply memory retention maintenance through
+`fleetent.intelligence.memory`.
 
 #### Scenario: Maintenance API is importable
-- **WHEN** 调用方从 `fleetent.memory_layer` 导入 maintenance policy、summary、candidate dataclasses 和 `run_memory_maintenance`
+- **WHEN** 调用方从 `fleetent.intelligence.memory` 导入 maintenance policy、summary、candidate dataclasses 和 `run_memory_maintenance`
 - **THEN** 导入成功
 
 #### Scenario: Invalid maintenance request fails fast

@@ -68,9 +68,9 @@ public DTO。其他模块 MUST NOT 直接 query 或 mutate 另一个模块 owned
 现有平铺模块 SHALL 渐进迁移。当模块移动到 package 后，旧 import 路径 MAY 保留为 compatibility shim；
 shim 只 re-export public names，不包含业务逻辑。
 
-#### Scenario: 迁移期间旧 import 继续可用
-- **WHEN** `fleetent.memory_layer` 被迁移到 intelligence package
-- **THEN** `fleetent.memory_layer` 可以暂时保留为 re-export public API 的 shim
+#### Scenario: cleanup 后 legacy import 可移除
+- **WHEN** 已迁移 package 的 first-party imports 都切换到 canonical path
+- **THEN** 后续 cleanup spec 可以删除对应 legacy shim
 
 #### Scenario: shim 不承载业务逻辑
 - **WHEN** compatibility shim 存在
@@ -223,28 +223,21 @@ only; legacy top-level integrations shim modules SHALL NOT remain importable.
 - **AND** integrations package 不反向 import agent runtime entrypoint
 
 ### Requirement: Memory layer package migration
-系统 SHALL 将 User Memory 实现迁入 `fleetent.intelligence.memory` package，并保持 legacy `fleetent.memory_layer` import 路径兼容。
+系统 SHALL expose User Memory implementation through `fleetent.intelligence.memory` canonical package paths
+only; the legacy `fleetent.memory_layer` shim SHALL NOT remain importable.
 
 #### Scenario: Memory canonical package exists
 - **WHEN** 调用方导入 `fleetent.intelligence.memory`
 - **THEN** 导入成功
 
-#### Scenario: Memory canonical package exposes public API
-- **WHEN** 调用方从 `fleetent.intelligence.memory` 导入 memory public API
-- **THEN** `MemoryItem`、`MemoryType`、`extract_and_update()`、`search()`、public operations 和 `run_memory_maintenance()` 可用
-
-#### Scenario: Legacy memory import remains compatible
-- **WHEN** 调用方导入 `fleetent.memory_layer`
+#### Scenario: Memory canonical package exports public API
+- **WHEN** 调用方从 `fleetent.intelligence.memory` 导入 `MemoryItem`、`MemoryType`、`extract_and_update`、`search`、public operations 或 `run_memory_maintenance`
 - **THEN** 导入成功
-- **AND** 旧路径暴露迁移前的 memory public API
+- **AND** public object 行为与迁移前保持一致
 
-#### Scenario: Memory shim does not contain business logic
-- **WHEN** 查看 legacy 顶层 `memory_layer.py`
-- **THEN** 文件只 re-export `fleetent.intelligence.memory` 的 public names
-- **AND** 不访问数据库
-- **AND** 不调用 LLM
-- **AND** 不调用 vector store
-- **AND** 不承载 memory 业务逻辑
+#### Scenario: Legacy memory import is removed
+- **WHEN** 调用方导入 `fleetent.memory_layer`
+- **THEN** 导入失败并显示该 legacy module 不再存在
 
 #### Scenario: Memory package owns memory items data access
 - **WHEN** memory 功能访问既有 `memory_items` table
@@ -264,4 +257,3 @@ only; legacy top-level integrations shim modules SHALL NOT remain importable.
 - **WHEN** long-term context、reflection 或 vector reindex 需要读取 User Memory
 - **THEN** 它们通过 `fleetent.intelligence.memory` public API 调用 memory 能力
 - **AND** memory package 不反向 import runtime entrypoint
-
