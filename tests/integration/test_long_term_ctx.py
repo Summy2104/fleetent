@@ -30,7 +30,7 @@ async def test_zero_token_budget_returns_empty_context_without_provider_calls(mo
 
     memory_search = AsyncMock()
     knowledge_search = AsyncMock()
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", memory_search)
+    monkeypatch.setattr(long_term_ctx.memory, "search", memory_search)
     long_term_ctx.set_knowledge_provider(knowledge_search)
 
     result = await long_term_ctx.build_context(
@@ -50,7 +50,7 @@ async def test_build_context_calls_memory_search_with_user_query_and_limit(monke
     from fleetent.intelligence import long_term_ctx
 
     memory_search = AsyncMock(return_value=[])
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", memory_search)
+    monkeypatch.setattr(long_term_ctx.memory, "search", memory_search)
     long_term_ctx.set_knowledge_provider(None)
 
     await long_term_ctx.build_context(
@@ -76,7 +76,7 @@ async def test_memory_results_are_formatted_with_memory_source_summary(monkeypat
         updated_at=now,
         expires_at=None,
     )
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", AsyncMock(return_value=[memory]))
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[memory]))
     long_term_ctx.set_knowledge_provider(None)
 
     result = await long_term_ctx.build_context(
@@ -106,7 +106,7 @@ async def test_missing_knowledge_provider_does_not_block_memory_context(monkeypa
         updated_at=now,
         expires_at=None,
     )
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", AsyncMock(return_value=[memory]))
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[memory]))
     long_term_ctx.set_knowledge_provider(None)
 
     result = await long_term_ctx.build_context(
@@ -145,7 +145,7 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
     )
     knowledge_search = AsyncMock(return_value=[chunk])
     resolve_agent_kb_ids = Mock(return_value=["global"])
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
     monkeypatch.setattr(long_term_ctx, "Settings", lambda anthropic_api_key="": settings)
     monkeypatch.setattr(long_term_ctx.knowledge_base, "resolve_agent_kb_ids", resolve_agent_kb_ids)
     monkeypatch.setattr(long_term_ctx.knowledge_base, "search", knowledge_search)
@@ -186,7 +186,7 @@ async def test_builtin_knowledge_provider_disabled_does_not_call_knowledge_base(
         knowledge_base=KnowledgeBaseSettings(enabled=False),
     )
     knowledge_search = AsyncMock(return_value=[])
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
     monkeypatch.setattr(long_term_ctx, "Settings", lambda anthropic_api_key="": settings)
     monkeypatch.setattr(long_term_ctx.knowledge_base, "search", knowledge_search)
     long_term_ctx.set_knowledge_provider(None)
@@ -206,7 +206,7 @@ async def test_builtin_knowledge_provider_disabled_does_not_call_knowledge_base(
 async def test_empty_knowledge_results_are_omitted(monkeypatch):
     from fleetent.intelligence import long_term_ctx
 
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
     knowledge_search = AsyncMock(return_value=[])
     long_term_ctx.set_knowledge_provider(knowledge_search)
 
@@ -242,7 +242,7 @@ async def test_memory_and_knowledge_results_are_included_with_sources(monkeypatc
         score=0.8,
         metadata={"title": "Deployment guide"},
     )
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", AsyncMock(return_value=[memory]))
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[memory]))
     long_term_ctx.set_knowledge_provider(AsyncMock(return_value=[knowledge]))
 
     result = await long_term_ctx.build_context(
@@ -279,7 +279,7 @@ async def test_budget_pressure_keeps_memory_and_omits_low_priority_knowledge(mon
         score=0.95,
         metadata={"title": "Large doc"},
     )
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", AsyncMock(return_value=[memory]))
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[memory]))
     long_term_ctx.set_knowledge_provider(AsyncMock(return_value=[knowledge]))
 
     result = await long_term_ctx.build_context(

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 from fleetent import memory_layer
 from fleetent.intelligence import vector_store
+from fleetent.intelligence.memory import extraction
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -32,7 +33,7 @@ def _patch_extraction(monkeypatch, content: str) -> AsyncMock:
     )
     client.chat.completions.create = create
     cfg = SimpleNamespace(model="test-memory-model", max_tokens=512)
-    monkeypatch.setattr(memory_layer, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(extraction, "get_async_client_and_config", lambda _: (client, cfg))
     return create
 
 

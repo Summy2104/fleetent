@@ -4,9 +4,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
-from fleetent import memory_layer
 from fleetent.config import Settings
-from fleetent.intelligence import knowledge_base
+from fleetent.intelligence import knowledge_base, memory
 
 _MEMORY_LIMIT = 10
 _KNOWLEDGE_LIMIT = 10
@@ -113,7 +112,7 @@ async def build_context(
         )
 
     policy = _resolve_policy(available_tokens)
-    memories = await memory_layer.search(user_id, query, limit=_MEMORY_LIMIT)
+    memories = await memory.search(user_id, query, limit=_MEMORY_LIMIT)
     knowledge_results = await _search_knowledge(user_id, query, agent_id, _KNOWLEDGE_LIMIT)
     if not memories and not knowledge_results:
         return BuiltContext(
@@ -290,14 +289,14 @@ def _render_context(candidates: list[_ContextCandidate]) -> str:
     return "\n".join(lines)
 
 
-def _memory_candidate(memory: memory_layer.MemoryItem) -> _ContextCandidate:
-    line = f"- {memory.content}"
+def _memory_candidate(memory_item: memory.MemoryItem) -> _ContextCandidate:
+    line = f"- {memory_item.content}"
     return _ContextCandidate(
         source=ContextSource(
             source_type="memory",
-            source_id=memory.id,
+            source_id=memory_item.id,
             score=1.0,
-            metadata={"type": memory.type},
+            metadata={"type": memory_item.type},
             token_estimate=len(line),
         ),
         line=line,

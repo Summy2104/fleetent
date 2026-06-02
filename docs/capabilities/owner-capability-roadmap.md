@@ -1,11 +1,10 @@
-# intelligence-roadmap
+# owner-capability-roadmap
 
 > 这份文档是常乐负责能力域的总控板，用来决定后续 OpenSpec 的优先级、依赖顺序和验收边界。
 
 ## 目标
 
-把 intelligence / observability / deployment 中由常乐负责或强依赖的模块放到同一张路线图里管理，避免按
-spec 零散推进后失去全貌。
+把常乐负责或强依赖的能力模块放到同一张路线图里管理，避免按 spec 零散推进后失去全貌。
 
 本路线图回答三个问题：
 
