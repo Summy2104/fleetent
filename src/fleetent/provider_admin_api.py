@@ -209,7 +209,10 @@ def add_provider(body: ProviderBody, authorization: str | None = Header(None)) -
         body.id,
         detail={"base_url": body.base_url, "model": body.model},
     )
-    return _serialize(provider_admin_store.get_provider(body.id))
+    created = provider_admin_store.get_provider(body.id)
+    if created is None:
+        raise HTTPException(status_code=500, detail="provider not found after add")
+    return _serialize(created)
 
 
 @router.put("/{provider_id}")
@@ -221,7 +224,10 @@ def edit_provider(
         raise HTTPException(status_code=404, detail="provider not found")
     provider_admin_store.edit_provider(provider_id, **body.model_dump(exclude_unset=True))
     audit_log.write_audit(user.id, "provider.edit", "provider", provider_id)
-    return _serialize(provider_admin_store.get_provider(provider_id))
+    edited = provider_admin_store.get_provider(provider_id)
+    if edited is None:
+        raise HTTPException(status_code=500, detail="provider not found after edit")
+    return _serialize(edited)
 
 
 @router.delete("/{provider_id}")
@@ -265,6 +271,8 @@ def set_pricing(
     provider_admin_store.set_pricing(provider_id, body.input_price_per_1k, body.output_price_per_1k)
     audit_log.write_audit(user.id, "provider.pricing_set", "provider", provider_id)
     p = provider_admin_store.get_provider(provider_id)
+    if p is None:
+        raise HTTPException(status_code=500, detail="provider not found after pricing update")
     return {
         "id": provider_id,
         "input_price_per_1k": _cost_label(p["input_price_per_1k"]),

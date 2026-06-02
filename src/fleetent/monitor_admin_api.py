@@ -71,7 +71,8 @@ def dispatch_notification(
     """Send an alert over each configured channel with bounded retry. in_app always
     succeeds (it writes to the alert center). Returns sent / failed channel lists."""
     config = config or {}
-    sent, failed = [], []
+    sent: list[str] = []
+    failed: list[dict[str, str | None]] = []
     for channel in channels:
         ok = False
         last_error = None
@@ -89,9 +90,10 @@ def dispatch_notification(
                 break
             except Exception as exc:  # noqa: BLE001 — record + continue to next channel
                 last_error = str(exc)
-        (sent if ok else failed).append(
-            channel if ok else {"channel": channel, "error": last_error}
-        )
+        if ok:
+            sent.append(channel)
+        else:
+            failed.append({"channel": channel, "error": last_error})
     return {"sent": sent, "failed": failed}
 
 

@@ -227,7 +227,7 @@ def set_status(skill_name: str, status: str) -> None:
     """Set lifecycle status: active / archived / quarantined."""
     if status not in {"active", "archived", "quarantined"}:
         raise ValueError(f"unknown status: {status}")
-    extra = {"status": status}
+    extra: dict[str, str | None] = {"status": status}
     extra["archived_at"] = _now() if status == "archived" else None
     _upsert_state(skill_name, extra)
 

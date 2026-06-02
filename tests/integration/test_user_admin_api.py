@@ -57,23 +57,35 @@ def test_login_success_and_me(client):
 
 def test_login_bad_password_401(client):
     user_store.create_web_user("a@x.com", "A", password_hash=auth.hash_password("right"))
-    assert client.post("/admin/login", json={"email": "a@x.com", "password": "wrong"}).status_code == 401
+    assert (
+        client.post("/admin/login", json={"email": "a@x.com", "password": "wrong"}).status_code
+        == 401
+    )
 
 
 def test_blocked_account_cannot_login(client):
     u = user_store.create_web_user("b@x.com", "B", password_hash=auth.hash_password("pw"))
     user_store.set_status(u.id, "blocked")
-    assert client.post("/admin/login", json={"email": "b@x.com", "password": "pw"}).status_code == 403
+    assert (
+        client.post("/admin/login", json={"email": "b@x.com", "password": "pw"}).status_code == 403
+    )
 
 
 def test_must_reset_gate_then_change_password(client):
     u = user_store.create_web_user(
         "m@x.com", "M", password_hash=auth.hash_password("temp"), must_reset=True, role="admin"
     )
-    token = client.post("/admin/login", json={"email": "m@x.com", "password": "temp"}).json()["token"]
+    token = client.post("/admin/login", json={"email": "m@x.com", "password": "temp"}).json()[
+        "token"
+    ]
     hdr = _hdr(token)
     assert client.get("/admin/users", headers=hdr).status_code == 403  # gated
-    assert client.post("/admin/change-password", json={"new_password": "newpw"}, headers=hdr).status_code == 200
+    assert (
+        client.post(
+            "/admin/change-password", json={"new_password": "newpw"}, headers=hdr
+        ).status_code
+        == 200
+    )
     assert client.get("/admin/users", headers=hdr).status_code == 200  # gate cleared
     assert user_store.get_by_id(u.id).must_reset == 0
 

@@ -12,7 +12,7 @@ Only the connector config catalog is persisted here. Secrets/tokens are never re
 plaintext — masking is applied in the serialization layer. Never imports the agent loop.
 """
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
@@ -95,6 +95,13 @@ def _mask(value: Any) -> Any:
     return value
 
 
+def _mask_dict(value: dict[str, Any] | None) -> dict[str, Any]:
+    """Mask a dict-or-None result, returning an empty dict when absent."""
+    if value is None:
+        return {}
+    return cast(dict[str, Any], _mask(value))
+
+
 # --- auth helpers -------------------------------------------------------------
 
 
@@ -164,7 +171,7 @@ def authorization_matrix(authorization: str | None = Header(None)) -> dict[str, 
 @router.get("/connectors/offboarding/{user_id}")
 def offboarding_result(user_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     _current_user(authorization)
-    return _mask(connectors_offboarding_result(user_id))
+    return _mask_dict(connectors_offboarding_result(user_id))
 
 
 @router.get("/connectors")
@@ -188,7 +195,7 @@ def add_connector(body: ConnectorBody, authorization: str | None = Header(None))
         enabled=body.enabled,
     )
     audit_log.write_audit(user.id, "connector.add", "connector", body.id)
-    return _mask(connector_config_store.get_connector(body.id))
+    return _mask_dict(connector_config_store.get_connector(body.id))
 
 
 @router.put("/connectors/{connector_id}")
@@ -200,7 +207,7 @@ def edit_connector(
         raise HTTPException(status_code=404, detail="connector not found")
     connector_config_store.edit_connector(connector_id, **body.model_dump(exclude_unset=True))
     audit_log.write_audit(user.id, "connector.edit", "connector", connector_id)
-    return _mask(connector_config_store.get_connector(connector_id))
+    return _mask_dict(connector_config_store.get_connector(connector_id))
 
 
 @router.get("/connectors/{connector_id}/lifecycle")
@@ -222,7 +229,7 @@ def revoke_grant(
     audit_log.write_audit(
         user.id, "connector.revoke", "connector", connector_id, detail={"target_user": user_id}
     )
-    return _mask(result)
+    return _mask_dict(result)
 
 
 # --- MCP servers --------------------------------------------------------------
@@ -231,7 +238,7 @@ def revoke_grant(
 @router.get("/mcp/doctor")
 def mcp_doctor_view(authorization: str | None = Header(None)) -> dict[str, Any]:
     _current_user(authorization)
-    return _mask(mcp_doctor())
+    return _mask_dict(mcp_doctor())
 
 
 @router.get("/mcp/servers")

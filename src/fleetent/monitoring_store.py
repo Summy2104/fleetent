@@ -144,7 +144,9 @@ def find_active_alert(rule_id: str, target: str | None) -> dict[str, Any] | None
     return dict(row) if row else None
 
 
-def create_alert(rule_id: str, target: str | None, severity: str, snapshot: dict | None) -> str:
+def create_alert(
+    rule_id: str, target: str | None, severity: str, snapshot: dict[str, Any] | None
+) -> str:
     aid = uuid.uuid4().hex[:12]
     now = _now()
     with _database().transaction() as conn:

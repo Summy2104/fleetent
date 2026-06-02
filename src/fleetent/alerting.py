@@ -19,7 +19,7 @@ def _parse(ts: str) -> datetime.datetime:
 
 
 def breach(value: float, comparator: str, threshold: float) -> bool:
-    return _COMPARATORS[comparator](value, threshold)
+    return bool(_COMPARATORS[comparator](value, threshold))
 
 
 def evaluate(rule: dict[str, Any], samples: list[dict[str, Any]], now: datetime.datetime) -> bool:
