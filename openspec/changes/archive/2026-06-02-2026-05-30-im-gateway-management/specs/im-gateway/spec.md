@@ -17,6 +17,8 @@ The system SHALL automatically reconnect if the IM SDK connection drops, AND SHA
 - **WHEN** an adapter is connected and serving
 - **THEN** it periodically calls `heartbeat(platform)` so `last_heartbeat_at` stays fresh
 
+## ADDED Requirements
+
 ### Requirement: Adapter startup is connector-driven and credentials come from the registry
 Adapters SHALL be started and stopped by the connector manager (not hardcoded in server lifespan), and SHALL obtain credentials via `im_connector_config.resolve(platform)` (DB-first, `.env` fallback) rather than reading `config.Settings` directly.
 

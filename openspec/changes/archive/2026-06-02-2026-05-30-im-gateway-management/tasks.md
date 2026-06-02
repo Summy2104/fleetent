@@ -9,8 +9,8 @@
 
 ## 0. 前置检查
 
-- [ ] 0.1 确认 `agent-admin-api` change 的 `users.is_admin` 守卫已存在（合入或同分支）；若缺失，先补一个最小 admin 守卫供 `/admin/im/*` 复用
-- [ ] 0.2 确认 `slack-bolt`、`python-telegram-bot`、FastAPI、aiosqlite 已在依赖中（无需新增）
+- [x] 0.1 确认 `agent-admin-api` change 的 `users.is_admin` 守卫已存在（合入或同分支）；若缺失，先补一个最小 admin 守卫供 `/admin/im/*` 复用
+- [x] 0.2 确认 `slack-bolt`、`python-telegram-bot`、FastAPI、aiosqlite 已在依赖中（无需新增）
 
 ## 1. im_connector_store — 注册表与状态上报
 
@@ -48,35 +48,35 @@
 
 ## 5. im_gateway 适配器改造（MODIFIED）
 
-- [ ] 5.1 Write failing tests: Slack / Telegram adapter 在连接 / 断线 / 错误时调用 `report_status` 对应值，连接中周期 `heartbeat`（mock store，不连真实平台）
-- [ ] 5.2 改 `im_gateway/slack.py`、`telegram.py`：接入状态上报；凭据改经 `im_connector_config.resolve(platform)` 取得（不再直接读 `Settings`）
+- [x] 5.1 Write failing tests: Slack / Telegram adapter 在连接 / 断线 / 错误时调用 `report_status` 对应值，连接中周期 `heartbeat`（mock store，不连真实平台）
+- [x] 5.2 改 `im_gateway/slack.py`、`telegram.py`：接入状态上报；凭据改经 `im_connector_config.resolve(platform)` 取得（不再直接读 `Settings`）
 - [x] 5.3 Write failing tests: `normalizer.route` 在 user 检查之前调用 `im_channel_allowlist.is_allowed`；不通过时回拒绝提示且不进 `get_agent_for_context`；通过时继续既有流程；`NormalizedMessage` 字段与 thread-first 行为不变
 - [x] 5.4 改 `normalizer.route`：最前置 channel 白名单校验（已加 `NormalizedMessage.workspace_id`）
 
 ## 6. server 生命周期与路由挂载
 
-- [ ] 6.1 Write failing tests: lifespan 启动时经 `im_connector_manager.start_all_enabled()` 启动连接器（mock manager，断言被调用且不再硬编码起 adapter）
-- [ ] 6.2 改 `server.py`：lifespan 改为 manager 驱动；优雅关闭时 `stop` 所有运行连接器
-- [ ] 6.3 改 `server.py`：mount `/admin/im` router（带 is_admin 守卫）
+- [x] 6.1 Write failing tests: lifespan 启动时经 `im_connector_manager.start_all_enabled()` 启动连接器（mock manager，断言被调用且不再硬编码起 adapter）
+- [x] 6.2 改 `server.py`：lifespan 改为 manager 驱动；优雅关闭时 `stop` 所有运行连接器
+- [x] 6.3 改 `server.py`：mount `/admin/im` router（带 is_admin 守卫）
 
 ## 7. im_admin_api — /admin/im REST
 
-- [ ] 7.1 Write failing tests: 非 admin 访问 `/admin/im/connectors` 返回 403；admin 返回连接器列表（config 脱敏）
-- [ ] 7.2 实现 `im_admin_api.py`：`GET /admin/im/connectors`、`GET /admin/im/connectors/{platform}`
-- [ ] 7.3 Write failing tests: `PATCH /admin/im/connectors/{platform}` 改 config / allowlist_enforced；`POST .../enable` 置 enabled=1 且调 manager.start；`POST .../disable` 置 0 且 manager.stop
-- [ ] 7.4 实现 connector PATCH / enable / disable / status 端点
-- [ ] 7.5 Write failing tests: `GET /admin/im/allowlist?platform=` 列表；`POST /admin/im/allowlist` 增；`DELETE /admin/im/allowlist/{id}` 删
-- [ ] 7.6 实现 allowlist CRUD 端点
+- [x] 7.1 Write failing tests: 非 admin 访问 `/admin/im/connectors` 返回 403；admin 返回连接器列表（config 脱敏）
+- [x] 7.2 实现 `im_admin_api.py`：`GET /admin/im/connectors`、`GET /admin/im/connectors/{platform}`
+- [x] 7.3 Write failing tests: `PATCH /admin/im/connectors/{platform}` 改 config / allowlist_enforced；`POST .../enable` 置 enabled=1 且调 manager.start；`POST .../disable` 置 0 且 manager.stop
+- [x] 7.4 实现 connector PATCH / enable / disable / status 端点
+- [x] 7.5 Write failing tests: `GET /admin/im/allowlist?platform=` 列表；`POST /admin/im/allowlist` 增；`DELETE /admin/im/allowlist/{id}` 删
+- [x] 7.6 实现 allowlist CRUD 端点
 
 ## 8. admin CLI 命令
 
-- [ ] 8.1 Write failing tests: `im-connector list` 打印各平台 status（脱敏）；`im-connector enable/disable --platform p` 切换；`im-connector set-config --platform p ...` 写 config；`seed-connectors` 迁入 .env
-- [ ] 8.2 在 `admin.py` 增 `im-connector` 子命令组 + `seed-connectors`
-- [ ] 8.3 Write failing tests: `im-channel allow --platform p --scope-type channel --scope-id C` 增条目；`im-channel disallow --id n` 删；`im-channel list --platform p` 列
-- [ ] 8.4 在 `admin.py` 增 `im-channel` 子命令组
+- [x] 8.1 Write failing tests: `im-connector list` 打印各平台 status（脱敏）；`im-connector enable/disable --platform p` 切换；`im-connector set-config --platform p ...` 写 config；`seed-connectors` 迁入 .env
+- [x] 8.2 在 `admin.py` 增 `im-connector` 子命令组 + `seed-connectors`
+- [x] 8.3 Write failing tests: `im-channel allow --platform p --scope-type channel --scope-id C` 增条目；`im-channel disallow --id n` 删；`im-channel list --platform p` 列
+- [x] 8.4 在 `admin.py` 增 `im-channel` 子命令组
 
 ## 9. 验证与收尾
 
-- [ ] 9.1 全量 `uv run pytest -x -q` 绿
-- [ ] 9.2 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过
-- [ ] 9.3 手动冒烟：seed-connectors → enable slack → 健康仪表盘/`GET /admin/im/connectors` 看到 connected → 配 channel 白名单并 enforce → 未列 channel 被拒、已列放行
+- [x] 9.1 全量 `uv run pytest -x -q` 绿
+- [x] 9.2 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过
+- [x] 9.3 手动冒烟：seed-connectors → enable slack → 健康仪表盘/`GET /admin/im/connectors` 看到 connected → 配 channel 白名单并 enforce → 未列 channel 被拒、已列放行

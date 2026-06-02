@@ -175,17 +175,16 @@ async def test_telegram_group_no_reply_falls_back_to_user_session():
 
 
 async def test_slack_create_app_returns_app_object(monkeypatch):
-    """create_app() instantiates a bolt App and registers the message handler."""
+    """create_app(config) instantiates a bolt App and registers the message handler."""
     from unittest.mock import MagicMock, patch
 
     mock_app_instance = MagicMock()
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-fake")
 
     # AsyncApp is imported inside create_app() via `from slack_bolt.async_app import AsyncApp`
     with patch("slack_bolt.async_app.AsyncApp", return_value=mock_app_instance) as mock_app_cls:
         import fleetent.im_gateway.slack as slack_mod
 
-        result = slack_mod.create_app()
+        result = slack_mod.create_app({"bot_token": "xoxb-fake", "app_token": "xapp-fake"})
 
     assert result is mock_app_instance
     mock_app_cls.assert_called_once_with(token="xoxb-fake")
@@ -193,10 +192,8 @@ async def test_slack_create_app_returns_app_object(monkeypatch):
 
 
 async def test_telegram_create_app_returns_application_object(monkeypatch):
-    """create_app() builds a telegram Application and registers a message handler."""
+    """create_app(config) builds a telegram Application and registers a message handler."""
     from unittest.mock import MagicMock, patch
-
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg-fake-token")
 
     mock_app = MagicMock()
     mock_builder = MagicMock()
@@ -209,7 +206,7 @@ async def test_telegram_create_app_returns_application_object(monkeypatch):
         mock_cls.builder.return_value = mock_builder
         import fleetent.im_gateway.telegram as tg_mod
 
-        result = tg_mod.create_app()
+        result = tg_mod.create_app({"bot_token": "tg-fake-token"})
 
     assert result is mock_app
     mock_app.add_handler.assert_called_once()

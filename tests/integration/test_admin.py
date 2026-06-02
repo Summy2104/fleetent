@@ -668,3 +668,83 @@ def test_observability_cli_invalid_time_exits_nonzero():
 
     assert code != 0
     assert "invalid timestamp" in err
+
+
+# --- im-connector / im-channel CLI (IM gateway management) --------------------
+
+
+def _seed_slack_connector():
+    import fleetent.platform.im_gateway_management.im_connector_store as store
+
+    store.upsert_connector("slack", config='{"bot_token": "xoxb-secret123"}', enabled=True)
+
+
+def test_im_connector_list_shows_masked_config():
+    _seed_slack_connector()
+
+    out, _, code = run_admin("im-connector", "list")
+
+    assert code == 0
+    assert "slack" in out
+    assert "t123" in out  # last 4 retained
+    assert "xoxb-secret" not in out  # raw token never printed
+
+
+def test_im_connector_enable_disable_toggles_flag():
+    import fleetent.platform.im_gateway_management.im_connector_store as store
+
+    _seed_slack_connector()
+
+    _, _, code = run_admin("im-connector", "disable", "--platform", "slack")
+    assert code == 0
+    assert store.get_connector("slack")["enabled"] == 0
+
+    _, _, code = run_admin("im-connector", "enable", "--platform", "slack")
+    assert code == 0
+    assert store.get_connector("slack")["enabled"] == 1
+
+
+def test_im_connector_set_config_writes_config():
+    import fleetent.platform.im_gateway_management.im_connector_config as cfg
+
+    out, _, code = run_admin(
+        "im-connector", "set-config", "--platform", "slack", "--set", "bot_token=new-tok"
+    )
+
+    assert code == 0
+    assert cfg.resolve("slack")["bot_token"] == "new-tok"
+
+
+def test_seed_connectors_imports_env_tokens(monkeypatch):
+    import fleetent.platform.im_gateway_management.im_connector_store as store
+
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-env")
+    monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-env")
+
+    out, _, code = run_admin("seed-connectors")
+
+    assert code == 0
+    assert "slack" in out
+    assert store.get_connector("slack")["enabled"] == 1
+
+
+def test_im_channel_allow_list_disallow():
+    import fleetent.platform.im_gateway_management.im_connector_store as store
+
+    store.upsert_connector("slack", config='{"bot_token": "x"}', enabled=True)
+
+    _, _, code = run_admin(
+        "im-channel", "allow", "--platform", "slack", "--scope-type", "channel", "--scope-id", "C1"
+    )
+    assert code == 0
+
+    out, _, code = run_admin("im-channel", "list", "--platform", "slack")
+    assert code == 0
+    assert "C1" in out
+
+    import fleetent.platform.im_gateway_management.im_channel_allowlist as allowlist
+
+    entry_id = allowlist.list_entries("slack")[0]["id"]
+    _, _, code = run_admin("im-channel", "disallow", "--id", str(entry_id))
+    assert code == 0
+    assert allowlist.list_entries("slack") == []

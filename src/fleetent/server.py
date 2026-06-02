@@ -26,6 +26,8 @@ from fleetent.governance.permission_gate import (
     cleanup_stale_approvals,
     list_approvals,
 )
+from fleetent.im_gateway import slack as slack_adapter
+from fleetent.im_gateway import telegram as telegram_adapter
 from fleetent.integrations import mcp as mcp_client
 from fleetent.integrations.mcp import McpServerConfig
 from fleetent.model_router import ROUTES
@@ -40,6 +42,7 @@ from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.askit_console import agent_apply_api, askit_console_api
 from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import connector_admin_api
+from fleetent.platform.im_gateway_management import im_admin_api, im_connector_manager
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.resource_monitoring import collectors, monitor_admin_api
@@ -76,31 +79,12 @@ def _admin_login_url(router_prefix: str) -> str:
     return f"http://{display_host}:{port}{router_prefix}/ui"
 
 
-async def _start_slack_adapter(app_token: str) -> None:
-    """Start Slack Socket Mode adapter as a background task."""
-    try:
-        from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
-
-        from fleetent.im_gateway.slack import create_app as create_slack_app
-
-        slack_app: Any = create_slack_app()
-        handler = AsyncSocketModeHandler(slack_app, app_token)
-        await handler.start_async()  # type: ignore[no-untyped-call]
-    except Exception as exc:
-        logger.warning("slack_adapter_start_failed error=%s", exc)
-
-
-async def _start_telegram_adapter() -> None:
-    """Start Telegram polling adapter as a background task."""
-    try:
-        from fleetent.im_gateway.telegram import create_app as create_telegram_app
-
-        tg_app: Any = create_telegram_app()
-        await tg_app.initialize()
-        await tg_app.start()
-        await tg_app.updater.start_polling()
-    except Exception as exc:
-        logger.warning("telegram_adapter_start_failed error=%s", exc)
+_connector_manager = im_connector_manager.ConnectorManager(
+    factories={
+        "slack": slack_adapter.run,
+        "telegram": telegram_adapter.run,
+    }
+)
 
 
 @asynccontextmanager
@@ -150,12 +134,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.webhook_settings = settings.webhooks
     _webhook_sources.clear()
 
-    # Start IM adapters as background tasks if tokens are configured
-    if settings.slack_bot_token and settings.slack_app_token:
-        asyncio.create_task(_start_slack_adapter(settings.slack_app_token))
-
-    if settings.telegram_bot_token:
-        asyncio.create_task(_start_telegram_adapter())
+    # IM connectors are driven by the registry via the manager: only enabled platforms
+    # with usable config start. Wire the admin-API seams to this running manager so
+    # enable/disable endpoints can drive lifecycle without importing the loop.
+    loop = asyncio.get_running_loop()
+    im_admin_api.start_connector = lambda platform: asyncio.run_coroutine_threadsafe(
+        _connector_manager.start(platform), loop
+    ).result()
+    im_admin_api.stop_connector = lambda platform: asyncio.run_coroutine_threadsafe(
+        _connector_manager.stop(platform), loop
+    ).result()
+    await _connector_manager.start_all_enabled()
 
     cron = CronScheduler(settings=settings.scheduling)
     await cron.start()
@@ -168,6 +157,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
+    for platform in list(_connector_manager.running()):
+        await _connector_manager.stop(platform)
     await cron.shutdown()
     await mcp_client.close()
 
@@ -178,6 +169,7 @@ app.include_router(skill_admin_api.router)
 app.include_router(provider_admin_api.router)
 app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
+app.include_router(im_admin_api.router)
 app.include_router(chat_admin_api.router)
 app.include_router(agent_console_api.router)
 app.include_router(stats_admin_api.router)
