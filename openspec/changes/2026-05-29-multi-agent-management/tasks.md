@@ -72,11 +72,11 @@
 
 ## 11. agent_admin_api — 版本与绑定 REST
 
-- [ ] 11.1 Write failing tests: `GET /admin/agents/{name}/versions` admin/viewer 可读返回 version desc 列表含 `is_active`；未认证 401；`POST /admin/agents/{name}/versions/{v}/activate` admin 切换 active、viewer 403、不存在 version 404
-- [ ] 11.2 新建 `agent_admin_api.py`（Session 认证 + role guard，复用 `_current_user`/`_is_admin` 模式）：实现 versions list + activate 端点
-- [ ] 11.3 Write failing tests: bindings 四端点（POST/DELETE user、POST/DELETE channel）权限校验 + 数据库副作用；POST channel 同时写 `bound_version_id`
-- [ ] 11.4 实现 bindings 四端点
-- [ ] 11.5 在 `server.py` mount `agent_admin_api.router`
+- [x] 11.1 Write failing tests: `GET /admin/agents/{name}/versions` admin/viewer 可读返回 version desc 列表含 `is_active`；未认证 401；`POST /admin/agents/{name}/versions/{v}/activate` admin 切换 active、viewer 403、不存在 version 404
+- [x] 11.2 新建 `agent_admin_api.py`（Session 认证 + role guard，复用 `_current_user`/`_is_admin` 模式）：实现 versions list + activate 端点
+- [x] 11.3 Write failing tests: bindings 四端点（POST/DELETE user、POST/DELETE channel）权限校验 + 数据库副作用；POST channel 同时写 `bound_version_id`
+- [x] 11.4 实现 bindings 四端点
+- [x] 11.5 在 `server.py` mount `agent_admin_api.router`
 
 ## 12. CLI 新命令
 

@@ -343,6 +343,13 @@ def assign_user(user_id: str, agent_id: int) -> None:
     )
 
 
+def unassign_user(user_id: str, agent_id: int) -> None:
+    _db().execute(
+        "DELETE FROM user_agents WHERE user_id = :user_id AND agent_id = :agent_id",
+        {"user_id": user_id, "agent_id": agent_id},
+    )
+
+
 def get_agent_for_user(user_id: str) -> Agent | None:
     db = _db()
     row = db.execute(

@@ -37,7 +37,7 @@ from fleetent.observability.startup_diagnostics import (
     log_config_failed,
     log_config_loaded,
 )
-from fleetent.platform.agent_management_console import agent_console_api
+from fleetent.platform.agent_management_console import agent_admin_api, agent_console_api
 from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.askit_console import agent_apply_api, askit_console_api
 from fleetent.platform.chat_management import chat_admin_api
@@ -172,6 +172,7 @@ app.include_router(connector_admin_api.router)
 app.include_router(im_admin_api.router)
 app.include_router(chat_admin_api.router)
 app.include_router(agent_console_api.router)
+app.include_router(agent_admin_api.router)
 app.include_router(stats_admin_api.router)
 app.include_router(monitor_admin_api.router)
 app.include_router(agent_apply_api.router)
