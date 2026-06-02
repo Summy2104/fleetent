@@ -19,6 +19,7 @@ data/
 .env
 .env.local
 .env.production
+secrets/
 
 # Worktrees
 .worktrees/
@@ -35,4 +36,3 @@ config/mcp.yaml
 .DS_Store
 
 .coverage
-

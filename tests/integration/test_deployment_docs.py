@@ -1,6 +1,86 @@
 from pathlib import Path
 
 
+def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
+    env_example = Path(".env.example")
+    gitignore = Path(".gitignore").read_text(encoding="utf-8")
+
+    assert env_example.exists()
+    content = env_example.read_text(encoding="utf-8")
+    assert "FLEETENT_AUTO_UPGRADE=false" in content
+    assert "ANTHROPIC_API_KEY=" in content
+    assert "OPENAI_API_KEY=" in content
+    assert "sk-" not in content
+    assert "ma-" not in content
+    assert "xoxb-" not in content
+    assert "\n.env\n" in f"\n{gitignore}\n"
+    assert "\nsecrets/\n" in f"\n{gitignore}\n"
+
+
+def test_secrets_documentation_describes_flat_untracked_directory():
+    content = Path("docs/deployment/secrets.md").read_text(encoding="utf-8")
+
+    required_phrases = [
+        "secrets/",
+        "平铺",
+        "不进 git",
+        "google-drive-token.json",
+        "confluence-api-token",
+        "credential_ref",
+        "file:///app/secrets/google-drive-token.json",
+    ]
+    for phrase in required_phrases:
+        assert phrase in content
+
+
+def test_settings_example_uses_flat_container_secret_reference():
+    content = Path("config/settings.yaml.example").read_text(encoding="utf-8")
+
+    assert 'credential_ref: "file:///app/secrets/google-drive-token.json"' in content
+    assert "/etc/fleetent/secrets" not in content
+    assert "google-drive-eng-token.json" not in content
+
+
+def test_dockerfile_includes_deployment_runtime_assets_and_port():
+    content = Path("Dockerfile").read_text(encoding="utf-8")
+
+    required_phrases = [
+        "COPY scripts/ ./scripts/",
+        "COPY config/*.yaml.example ./config/",
+        "COPY .env.example ./",
+        'ENTRYPOINT ["./scripts/docker_entrypoint.sh"]',
+        "EXPOSE 8765",
+    ]
+    for phrase in required_phrases:
+        assert phrase in content
+
+
+def test_docker_compose_uses_local_env_mounts_and_port():
+    content = Path("docker-compose.yml").read_text(encoding="utf-8")
+
+    required_phrases = [
+        "env_file: .env",
+        "- ./data:/app/data",
+        "- ./config:/app/config",
+        "- ./secrets:/app/secrets:ro",
+        '"8765:8765"',
+        "host.docker.internal:host-gateway",
+    ]
+    for phrase in required_phrases:
+        assert phrase in content
+    assert ".env.production" not in content
+
+
+def test_legacy_mcp_yaml_is_not_tracked_or_required_by_deployment_docs():
+    tracked_files = set(Path(".").glob("config/mcp.yaml"))
+    deployment_docs = "\n".join(
+        path.read_text(encoding="utf-8") for path in Path("docs/deployment").glob("*.md")
+    )
+
+    assert not tracked_files
+    assert "config/mcp.yaml" not in deployment_docs
+
+
 def test_pilot_install_checklist_exists_and_covers_required_sections():
     checklist = Path("docs/deployment/pilot-install-checklist.md")
 
@@ -28,11 +108,11 @@ def test_pilot_install_checklist_contains_required_commands():
     content = Path("docs/deployment/pilot-install-checklist.md").read_text(encoding="utf-8")
 
     required_commands = [
-        "uv sync",
-        "uv run python scripts/upgrade.py --dry-run",
-        "alembic upgrade head",
-        "uv run uvicorn fleetent.server:app",
-        "GET /health",
+        "docker compose run --rm fleetent uv run fleetent-admin init-config",
+        "docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run",
+        "docker compose run --rm fleetent uv run python scripts/upgrade.py",
+        "docker compose up -d",
+        "curl -fsS http://127.0.0.1:8765/health",
         "uv run fleetent-admin kb connectors list",
         "uv run fleetent-admin kb connectors check",
         "uv run fleetent-admin kb connectors sync",
@@ -103,12 +183,12 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
         "应该看到什么",
         "通过标准",
         "失败判断",
-        "uv sync --frozen --group dev",
-        "uv run python scripts/upgrade.py --dry-run",
-        "uv run python scripts/upgrade.py --backup-only",
-        "uv run python scripts/upgrade.py",
-        "uv run uvicorn fleetent.server:app",
-        "curl -fsS http://127.0.0.1:8000/health",
+        "docker compose run --rm fleetent uv run fleetent-admin init-config",
+        "docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run",
+        "docker compose run --rm fleetent uv run python scripts/upgrade.py --backup-only",
+        "docker compose run --rm fleetent uv run python scripts/upgrade.py",
+        "docker compose up -d",
+        "curl -fsS http://127.0.0.1:8765/health",
         "uv run fleetent-admin observability traces",
         "uv run fleetent-admin diagnostics export",
         "uv run pytest tests/evaluation/test_memory_extraction_eval.py -q",
@@ -121,3 +201,23 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
     ]
     for phrase in required_phrases:
         assert phrase in content
+
+
+def test_deployment_docs_are_docker_compose_first_and_use_port_8765():
+    docs = {
+        path: path.read_text(encoding="utf-8")
+        for path in [
+            Path("docs/deployment/pilot-install-checklist.md"),
+            Path("docs/deployment/pilot-acceptance-guide.md"),
+            Path("docs/deployment/pilot-runbook.md"),
+            Path("docs/capabilities/deployment.md"),
+        ]
+    }
+
+    for content in docs.values():
+        assert "Docker Compose" in content
+        assert "8765" in content
+        assert "127.0.0.1:8000" not in content
+    combined = "\n".join(docs.values())
+    assert "Pilot 默认" in combined
+    assert "uv run uvicorn fleetent.server:app` 只作为开发模式" in combined

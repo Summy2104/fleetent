@@ -62,7 +62,7 @@ knowledge_base:
         kb_id: engineering
         folder_id: "google-drive-folder-id"
         recursive: true
-        credential_ref: "file:///etc/fleetent/secrets/google-drive-eng-token.json"
+        credential_ref: "file:///app/secrets/google-drive-token.json"
   confluence:
     connectors:
       - connector_id: eng-confluence

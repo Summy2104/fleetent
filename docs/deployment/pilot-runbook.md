@@ -4,6 +4,8 @@
 模块 owner 使用的人工验收手册：每一步都说明要证明什么能力、模拟什么场景、应该看到什么证据，以及失败时
 如何分类。
 
+Pilot 默认部署入口是 Docker Compose；源码环境下的 `uv run uvicorn fleetent.server:app` 只作为开发模式。
+
 相关文档：
 
 - [pilot-install-checklist.md](pilot-install-checklist.md)：安装、升级、备份和回滚清单。
@@ -99,28 +101,23 @@ git status --short
 ```bash
 test -f config/settings.yaml
 test -f config/mcp.servers.yaml || true
-test ! -f config/mcp.yaml
-test ! -f config/cron.yaml
-test ! -f config/webhooks.yaml
 ```
 
 人工检查：
 
 - `config/settings.yaml` 里只有 `database_url`、默认 agent、diagnostics、connector、provider 等非敏感配置。
 - Google Drive / Confluence credential 使用 `credential_ref`，例如 `env:FLEETENT_CONNECTOR_TOKEN`
-  或 `file:///etc/fleetent/secrets/google-drive-token.json`。
+  或 `file:///app/secrets/google-drive-token.json`。
 - `credential_ref` 指向的文件权限由部署方保护。
 - `config/mcp.servers.yaml` 只定义 MCP server，不保存 token payload。
 
 应该看到什么：
 
 - 配置文件可读取。
-- 旧配置文件不存在。
 - 验收记录只写 credential ref，不写 credential 内容。
 
 失败判断：
 
-- 旧配置文件存在：先迁移或删除旧文件，不允许新旧配置并存。
 - 配置文件包含真实 token：记录为 No-Go 候选。
 - credential_ref 指向文件不存在或权限过宽：记录为配置问题，修正后复测。
 
@@ -134,21 +131,24 @@ test ! -f config/webhooks.yaml
 操作步骤：
 
 ```bash
-uv sync --frozen --group dev
-uv run fleetent --help
-uv run fleetent-admin --help
+docker compose build fleetent
+docker compose run --rm fleetent uv run fleetent --help
+docker compose run --rm fleetent uv run fleetent-admin --help
+docker compose run --rm fleetent uv run fleetent-admin init-config
 ```
 
 应该看到什么：
 
-- 依赖安装成功。
+- 镜像构建成功。
 - `fleetent --help` 能显示 agent CLI 用法。
 - `fleetent-admin --help` 能显示管理命令。
+- `.env`、`config/settings.yaml`、`config/mcp.servers.yaml`、`data/`、`data/logs/`、
+  `data/diagnostics/` 和 `secrets/` 已初始化；如果文件已存在，命令会跳过。
 
 失败判断：
 
-- 本地 `.venv` 损坏：删除 `.venv` 后重新执行 `uv sync --frozen --group dev`。
-- `uv run` 找不到命令：检查 `pyproject.toml` 的 `[project.scripts]` 和 lock 文件。
+- 镜像构建失败：检查 Dockerfile、`uv.lock` 和网络代理。
+- `uv run` 找不到命令：检查镜像内 `pyproject.toml` 的 `[project.scripts]` 和 lock 文件。
 - 这一步失败属于部署 blocker，因为后续验收无法执行。
 
 ## 4. SQLite 升级、备份和恢复点
@@ -162,9 +162,9 @@ uv run fleetent-admin --help
 操作步骤：
 
 ```bash
-uv run python scripts/upgrade.py --dry-run
-uv run python scripts/upgrade.py --backup-only
-uv run python scripts/upgrade.py
+docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run
+docker compose run --rm fleetent uv run python scripts/upgrade.py --backup-only
+docker compose run --rm fleetent uv run python scripts/upgrade.py
 ```
 
 应该看到什么：
@@ -199,16 +199,18 @@ uv run python scripts/upgrade.py
 启动服务：
 
 ```bash
-uv run uvicorn fleetent.server:app --host 0.0.0.0 --port 8000
+docker compose up -d
 ```
 
 另开终端检查：
 
 ```bash
-curl -fsS http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8765/health
 uv run fleetent-admin observability traces --limit 5
 uv run fleetent "hello"
 ```
+
+`uv run uvicorn fleetent.server:app` 只作为开发模式保留，不作为 Pilot 默认部署入口。
 
 应该看到什么：
 
@@ -734,10 +736,10 @@ retest_result:
 
 CLI 命令不可用：
 
-1. 运行 `uv sync --frozen --group dev`。
-2. 运行 `uv run fleetent-admin --help`。
+1. 运行 `docker compose build fleetent`。
+2. 运行 `docker compose run --rm fleetent uv run fleetent-admin --help`。
 3. 检查 `pyproject.toml` 的 `[project.scripts]`。
-4. 本地 `.venv` 异常时删除 `.venv` 后重建。
+4. 如镜像缓存异常，重新构建镜像后复测。
 
 KB connector 失败：
 
