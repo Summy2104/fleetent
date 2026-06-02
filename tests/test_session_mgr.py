@@ -693,3 +693,123 @@ async def test_save_succeeds_when_release_session_raises(sessions_dir, monkeypat
     assert (sessions_dir / "s.json").exists()
     # Per-id isolation: a raise on "a" is logged and swallowed, "b" still attempted.
     assert spy.released == ["a", "b"]
+
+
+# Internal periodic session maintenance (process-internal asyncio trigger, no cron).
+# Mirrors the MCP3 health-monitor pattern: resident loop + idempotent start +
+# cancel-clean stop + module-level task handle (resettable in tests).
+
+
+@pytest.fixture(autouse=True)
+def _reset_maintenance_task():
+    session_mgr._maintenance_task = None
+    yield
+    task = session_mgr._maintenance_task
+    if task is not None and not task.done():
+        task.cancel()
+    session_mgr._maintenance_task = None
+
+
+async def test_start_session_maintenance_creates_task_and_stop_cancels_it():
+    task = session_mgr.start_session_maintenance(interval=0.01)
+    assert task is not None
+    assert not task.done()
+    await session_mgr.stop_session_maintenance()
+    assert task.done()
+    assert session_mgr._maintenance_task is None
+
+
+async def test_stop_session_maintenance_noop_when_no_task():
+    assert session_mgr._maintenance_task is None
+    await session_mgr.stop_session_maintenance()  # must not raise
+    assert session_mgr._maintenance_task is None
+
+
+async def test_start_session_maintenance_is_idempotent():
+    first = session_mgr.start_session_maintenance(interval=0.01)
+    second = session_mgr.start_session_maintenance(interval=0.01)
+    assert first is second
+    await session_mgr.stop_session_maintenance()
+
+
+async def test_loop_periodically_calls_maybe_run_maintenance(monkeypatch):
+    calls = 0
+
+    def _count(**kw):
+        nonlocal calls
+        calls += 1
+        return []
+
+    monkeypatch.setattr(session_mgr, "maybe_run_maintenance", _count)
+    session_mgr.start_session_maintenance(interval=0.001)
+    # Let the loop spin several iterations, then verify it ran more than once.
+    for _ in range(50):
+        if calls >= 2:
+            break
+        await asyncio.sleep(0.005)
+    await session_mgr.stop_session_maintenance()
+    assert calls >= 2
+
+
+async def test_loop_releases_sandboxes_of_removed_sessions(monkeypatch):
+    # The loop is the silent-period case (save() not running), so it MUST also
+    # release removed sessions' sandbox containers — not just delete their files.
+    monkeypatch.setattr(session_mgr, "maybe_run_maintenance", lambda **kw: ["expired-x"])
+    released: list[str] = []
+
+    async def _spy(ids: list[str]) -> None:
+        released.extend(ids)
+
+    monkeypatch.setattr(session_mgr, "_release_sandboxes", _spy)
+    session_mgr.start_session_maintenance(interval=0.001)
+    for _ in range(50):
+        if "expired-x" in released:
+            break
+        await asyncio.sleep(0.005)
+    await session_mgr.stop_session_maintenance()
+    assert "expired-x" in released  # loop reclaimed the removed session's container
+
+
+async def test_loop_continues_after_a_maintenance_failure(monkeypatch):
+    calls = 0
+
+    def _boom_then_ok(**kw):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("disk hiccup")
+        return []
+
+    warnings: list[str] = []
+    monkeypatch.setattr(session_mgr, "maybe_run_maintenance", _boom_then_ok)
+    monkeypatch.setattr(
+        session_mgr.logger, "warning", lambda *a, **kw: warnings.append(a[0] if a else "")
+    )
+    session_mgr.start_session_maintenance(interval=0.001)
+    # The first iteration raises; the loop must survive and keep calling.
+    for _ in range(50):
+        if calls >= 2:
+            break
+        await asyncio.sleep(0.005)
+    task = session_mgr._maintenance_task
+    await session_mgr.stop_session_maintenance()
+    assert calls >= 2  # loop did not die on the first failure
+    assert warnings  # the failure was logged (not swallowed silently)
+    # Loop only ended via our cancel, never via the raised exception.
+    assert task is not None and task.cancelled()
+
+
+def test_cli_run_sync_does_not_start_maintenance_task(monkeypatch):
+    import fleetent.agent_loop as al
+
+    async def fake_run(messages, **kw):
+        return "done"
+
+    monkeypatch.setattr(al, "scan_skills", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "")
+    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
+    monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "run", fake_run)
+    assert session_mgr._maintenance_task is None
+    al.run_sync("hi")
+    assert session_mgr._maintenance_task is None

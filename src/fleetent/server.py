@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from fleetent import api_key_store, mcp_client, quota, user_admin_api, user_store
+from fleetent import api_key_store, mcp_client, quota, session_mgr, user_admin_api, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.cron_scheduler import CronScheduler
 from fleetent.agent_loop import run_stream
@@ -126,6 +126,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # MCP3: start the connection-health monitor (bare asyncio task, not cron_scheduler).
     mcp_client.start_health_monitor()
 
+    # Periodic session maintenance: trigger TTL cleanup + capacity eviction on an
+    # interval so idle (no-save) periods are still maintained. Bare asyncio task,
+    # deliberately NOT routed through cron_scheduler (lead direction; MCP3 precedent).
+    session_mgr.start_session_maintenance()
+
     # Load webhook sources from config/webhooks.yaml if present
     from fleetent import webhook_router as _wr
 
@@ -146,6 +151,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     await cron.shutdown()
+    await session_mgr.stop_session_maintenance()
     await mcp_client.close()
 
 
