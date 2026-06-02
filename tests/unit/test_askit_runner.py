@@ -2,7 +2,7 @@
 
 import pytest
 
-from fleetent import askit_runner as r
+from fleetent.platform.askit_console import askit_runner as r
 
 
 def test_build_command_known():

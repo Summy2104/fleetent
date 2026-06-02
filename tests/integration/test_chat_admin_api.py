@@ -14,8 +14,8 @@ from fastapi.testclient import TestClient
 
 import fleetent.audit_log as audit
 import fleetent.auth as auth
-import fleetent.chat_admin_api as api
-import fleetent.session_admin_store as store
+import fleetent.platform.chat_management.chat_admin_api as api
+import fleetent.platform.chat_management.session_admin_store as store
 import fleetent.user_store as user_store
 
 

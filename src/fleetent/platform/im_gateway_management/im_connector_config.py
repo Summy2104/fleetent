@@ -3,7 +3,7 @@
 import json
 from typing import Any, cast
 
-from fleetent import im_connector_store
+from fleetent.platform.im_gateway_management import im_connector_store
 
 # Credential keys per platform, and how they map to .env (config.Settings) fields.
 PLATFORM_CONFIG_KEYS: dict[str, list[str]] = {

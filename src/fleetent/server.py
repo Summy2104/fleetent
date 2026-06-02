@@ -15,21 +15,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from fleetent import (
-    agent_apply_api,
-    agent_console_api,
-    api_key_store,
-    askit_console_api,
-    chat_admin_api,
-    connector_admin_api,
-    kb_admin_api,
-    monitor_admin_api,
-    provider_admin_api,
-    skill_admin_api,
-    stats_admin_api,
-    user_admin_api,
-    user_store,
-)
+from fleetent import user_store
 from fleetent.agent_loop import run_stream
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, WebhooksSettings, configure_logging, load_mcp_server_settings
@@ -49,6 +35,16 @@ from fleetent.observability.startup_diagnostics import (
     log_config_failed,
     log_config_loaded,
 )
+from fleetent.platform.agent_management_console import agent_console_api
+from fleetent.platform.agent_statistics import stats_admin_api
+from fleetent.platform.askit_console import agent_apply_api, askit_console_api
+from fleetent.platform.chat_management import chat_admin_api
+from fleetent.platform.connector_management import connector_admin_api
+from fleetent.platform.knowledge_base_management import kb_admin_api
+from fleetent.platform.model_provider_management import provider_admin_api
+from fleetent.platform.resource_monitoring import monitor_admin_api
+from fleetent.platform.skill_management import skill_admin_api
+from fleetent.platform.user_management import api_key_store, user_admin_api
 from fleetent.skill_registry import scan as scan_skills
 
 logger = logging.getLogger(__name__)

@@ -1,10 +1,10 @@
 import pytest
 
-import fleetent.api_key_store as aks
 import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
 import fleetent.governance.blocklist as blocklist
 import fleetent.im_user_store as im_user_store
+import fleetent.platform.user_management.api_key_store as aks
 import fleetent.user_store as user_store
 
 

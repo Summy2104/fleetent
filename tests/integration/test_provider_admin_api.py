@@ -14,8 +14,8 @@ from fastapi.testclient import TestClient
 
 import fleetent.audit_log as audit
 import fleetent.auth as auth
-import fleetent.provider_admin_api as api
-import fleetent.provider_admin_store as store
+import fleetent.platform.model_provider_management.provider_admin_api as api
+import fleetent.platform.model_provider_management.provider_admin_store as store
 import fleetent.user_store as user_store
 
 

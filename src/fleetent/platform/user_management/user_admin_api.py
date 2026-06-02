@@ -12,19 +12,15 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from fleetent import (
-    api_key_store,
-    auth,
-    im_user_store,
-    user_store,
-)
+from fleetent import auth, im_user_store, user_store
 from fleetent.governance import audit_log, blocklist
+from fleetent.platform.user_management import api_key_store
 
 router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
-_UI_PATH = Path(__file__).parent / "static" / "admin.html"
+_UI_PATH = Path(__file__).parents[2] / "static" / "admin.html"
 
 
 def _session_user(authorization: str | None, allow_must_reset: bool = False) -> user_store.User:

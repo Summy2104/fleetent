@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from fleetent import im_connector_config, im_connector_store
+from fleetent.platform.im_gateway_management import im_connector_config, im_connector_store
 
 # A factory is an async runner: given the resolved config dict, it runs the adapter
 # until cancelled (long-lived). The adapter reports its own connected/heartbeat status.

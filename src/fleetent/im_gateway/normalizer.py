@@ -64,7 +64,7 @@ async def route(msg: NormalizedMessage) -> None:
 
     # Channel allowlist gate — checked before any user-level check. When the platform's
     # connector has allowlist_enforced off, this always passes (backward compatible).
-    from fleetent import im_channel_allowlist
+    from fleetent.platform.im_gateway_management import im_channel_allowlist
 
     if not im_channel_allowlist.is_allowed(msg.platform, msg.channel_id, msg.workspace_id or None):
         await msg.reply_func(_REJECTION_MSG)

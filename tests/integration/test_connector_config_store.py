@@ -7,7 +7,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-from fleetent import connector_config_store as store
+from fleetent.platform.connector_management import connector_config_store as store
 
 
 def apply_migrations(db_path: Path) -> None:

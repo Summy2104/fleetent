@@ -7,8 +7,8 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-from fleetent import agent_admin_store as store
-from fleetent import agent_templates
+from fleetent.platform.agent_management_console import agent_admin_store as store
+from fleetent.platform.agent_management_console import agent_templates
 
 
 def apply_migrations(db_path: Path) -> None:

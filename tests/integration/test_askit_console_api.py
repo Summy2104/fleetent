@@ -8,12 +8,12 @@ from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import fleetent.agent_admin_store as agent_state
-import fleetent.agent_apply_api as apply_api
-import fleetent.askit_console_api as console
-import fleetent.askit_runner as runner
 import fleetent.audit_log as audit
 import fleetent.auth as auth
+import fleetent.platform.agent_management_console.agent_admin_store as agent_state
+import fleetent.platform.askit_console.agent_apply_api as apply_api
+import fleetent.platform.askit_console.askit_console_api as console
+import fleetent.platform.askit_console.askit_runner as runner
 import fleetent.user_store as user_store
 
 

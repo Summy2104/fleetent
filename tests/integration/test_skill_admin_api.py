@@ -15,8 +15,8 @@ from fastapi.testclient import TestClient
 
 import fleetent.audit_log as audit
 import fleetent.auth as auth
-import fleetent.skill_admin_api as api
-import fleetent.skill_admin_store as store
+import fleetent.platform.skill_management.skill_admin_api as api
+import fleetent.platform.skill_management.skill_admin_store as store
 import fleetent.user_store as user_store
 
 

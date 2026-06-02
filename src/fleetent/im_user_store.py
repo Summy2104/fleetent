@@ -136,8 +136,12 @@ def list_all() -> list[dict[str, Any]]:
         ).fetchall()
     return [
         {
-            "id": r[0], "platform": r[1], "platform_user_id": r[2],
-            "user_id": r[3], "allowed": bool(r[4]), "created_at": r[5],
+            "id": r[0],
+            "platform": r[1],
+            "platform_user_id": r[2],
+            "user_id": r[3],
+            "allowed": bool(r[4]),
+            "created_at": r[5],
         }
         for r in rows
     ]

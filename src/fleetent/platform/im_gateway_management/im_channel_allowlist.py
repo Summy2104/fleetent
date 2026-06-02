@@ -4,7 +4,7 @@ import datetime
 import sqlite3
 from typing import Any
 
-from fleetent import im_connector_store
+from fleetent.platform.im_gateway_management import im_connector_store
 from fleetent.user_store import (
     DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching
 )

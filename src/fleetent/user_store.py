@@ -55,7 +55,7 @@ def authenticate(plaintext: str) -> tuple[User, dict[str, Any]] | None:
     legacy users.api_key column for keys not yet migrated. Returns None if the key is
     invalid/revoked/expired or the owning user is blocked.
     """
-    from fleetent import api_key_store
+    from fleetent.platform.user_management import api_key_store
 
     _init_db()
     meta = api_key_store.resolve(plaintext)
@@ -92,7 +92,7 @@ def migrate_api_keys() -> list[str]:
 
     Returns the list of user ids whose keys were migrated this run.
     """
-    from fleetent import api_key_store
+    from fleetent.platform.user_management import api_key_store
 
     _init_db()
     api_key_store._init_db()

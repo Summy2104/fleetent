@@ -15,7 +15,8 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import askit_runner, askit_task_store, audit_log, auth, user_store
+from fleetent import audit_log, auth, user_store
+from fleetent.platform.askit_console import askit_runner, askit_task_store
 
 router = APIRouter(prefix="/admin/askit")
 

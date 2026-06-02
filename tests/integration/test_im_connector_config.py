@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import fleetent.im_connector_config as icc
-import fleetent.im_connector_store as ics
+import fleetent.platform.im_gateway_management.im_connector_config as icc
+import fleetent.platform.im_gateway_management.im_connector_store as ics
 import fleetent.user_store as user_store
 
 

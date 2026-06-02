@@ -38,7 +38,8 @@ def create_invite(email: str, ttl_seconds: int = 86400) -> tuple[str, dict[str, 
 
 def accept_invite(token: str, password_hash: str) -> object:
     """Validate a token, create the user with the password, issue the first key, burn the token."""
-    from fleetent import api_key_store, user_store
+    from fleetent import user_store
+    from fleetent.platform.user_management import api_key_store
 
     _init_db()
     now_iso = _now().isoformat()

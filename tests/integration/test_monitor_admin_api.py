@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 
 import fleetent.audit_log as audit
 import fleetent.auth as auth
-import fleetent.monitor_admin_api as api
-import fleetent.monitoring_store as store
+import fleetent.platform.resource_monitoring.monitor_admin_api as api
+import fleetent.platform.resource_monitoring.monitoring_store as store
 import fleetent.user_store as user_store
 
 

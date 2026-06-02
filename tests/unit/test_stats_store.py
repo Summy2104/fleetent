@@ -1,6 +1,6 @@
 """Unit tests for stats_store pure aggregators (no DB / no IO)."""
 
-from fleetent import stats_store as s
+from fleetent.platform.agent_statistics import stats_store as s
 
 
 def _t(**kw):
