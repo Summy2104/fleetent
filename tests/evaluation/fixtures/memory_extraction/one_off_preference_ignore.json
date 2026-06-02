@@ -1,0 +1,23 @@
+{
+  "name": "one-off preference request ignore",
+  "initial_memories": [],
+  "conversation": [
+    {
+      "role": "user",
+      "content": "For this answer only, use a short bullet list."
+    }
+  ],
+  "mock_actions": [
+    {
+      "action": "ignore",
+      "reason": "one-off formatting request"
+    }
+  ],
+  "expected_memories": [],
+  "forbidden_memories": [
+    {
+      "type": "preferences",
+      "content": "User prefers short bullet lists"
+    }
+  ]
+}

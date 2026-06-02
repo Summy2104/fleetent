@@ -26,10 +26,8 @@ flowchart TD
     AL["agent_loop.run"]
 
     subgraph active["主动触发"]
-        CY["config/cron.yaml 静态任务"]
         DB[("schedule_store SQLite")]
         AP[APScheduler]
-        CY -->|"启动时加载"| AP
         DB -->|"启动时恢复"| AP
         AP -->|"到点触发"| FIRE
     end
@@ -106,12 +104,12 @@ scheduled_tasks (
   agent_name  TEXT,              -- 指定执行 agent，NULL 时用默认 agent
   message     TEXT NOT NULL,     -- 触发时注入的消息内容
   enabled     INTEGER NOT NULL,  -- 1=启用，0=禁用（规划中暂停功能使用）
-  source      TEXT NOT NULL,     -- "dynamic" | "tool" | "static"
+  source      TEXT NOT NULL,     -- "dynamic" | "tool"
   created_at  TEXT NOT NULL
 )
 ```
 
-Webhook 来源配置存 `config/webhooks.yaml`（非数据库），字段：`id`、`user_id`、`secret`、`agent_name`、`message_template`。
+Cron jobs 和 webhook sources 不写入 `config/settings.yaml`。Cron jobs 通过 SQLite-backed runtime management 创建和恢复；webhook source management 将由后续独立 change 接入 runtime API / store。`settings.yaml` 只保存 `scheduling.enabled`、`scheduling.default_timezone`、`webhooks.enabled`、`webhooks.max_body_bytes` 等全局策略。
 
 ## 接口定义
 
@@ -150,14 +148,16 @@ def extract_message(template: str | None, payload: Any) -> str:
   - `fleetent-admin add-schedule --cron <expr> ...`：CLI 创建任务
   - `fleetent-admin remove-schedule --id <task_id>`：CLI 删除任务
 
-- ✅ **任务持久化**：任务定义存 SQLite（`data/users.db`），server 重启后自动恢复调度
+- ✅ **任务持久化**：任务定义存 SQLite（`data/fleetent.db`），server 重启后自动恢复调度
 
-- ✅ **静态任务配置**：`config/cron.yaml` 中定义 `jobs` 列表，server 启动时自动加载；SQLite 中同名 id 的任务优先级更高
+- ✅ **全局调度配置**：`config/settings.yaml` 中只保存 `scheduling.enabled` 和 `scheduling.default_timezone`
+  - 旧 `config/cron.yaml` 不再读取；文件存在时启动失败并提示通过 SQLite-backed runtime management 创建任务
 
 ### Webhook
 
 - ✅ **Webhook 接入**：`POST /webhook/{source_id}` 接收外部事件，触发对应 agent
-  - 来源配置文件：`config/webhooks.yaml`，字段：`id`、`user_id`、`secret`、`agent_name`、`message_template`
+  - YAML source 配置已移除；未注册运行时 source 时返回 404
+  - 旧 `config/webhooks.yaml` 不再读取；文件存在时启动失败并提示后续通过 runtime API / store 管理来源
 
 - ✅ **HMAC-SHA256 签名验证**（`X-Hub-Signature-256` 头）
   - 来源未配置 `secret` 时跳过验签，直接放行（信任内网来源）
@@ -165,6 +165,10 @@ def extract_message(template: str | None, payload: Any) -> str:
 
 - ✅ **消息提取**：支持 `message_template` 从 payload 中提取字段（`{key}` / `{key[subkey]}` 语法）
   - 提取失败时降级为 JSON 序列化整个 payload
+
+- ✅ **全局 Webhook 策略**：`config/settings.yaml` 中保存 `webhooks.enabled` 和 `webhooks.max_body_bytes`
+  - 禁用时请求在分发前被拒绝
+  - 超过最大 body 大小时请求在分发前被拒绝
 
 ## 规划中（v1.0）
 
@@ -220,7 +224,7 @@ def extract_message(template: str | None, payload: Any) -> str:
 - [ ] **官方平台适配**：内置主流平台的 Webhook 解析与验签
   - **Slack**：`X-Slack-Signature` + `X-Slack-Request-Timestamp` 验签；自动处理 URL verification challenge
   - **GitHub**：`X-Hub-Signature-256` 验签；按 `X-GitHub-Event` 头路由，支持 `event_filter` 配置
-  - 在 `config/webhooks.yaml` 中声明 `type: slack` / `type: github`，框架自动套用对应解析逻辑
+  - Webhook source management 后续通过 runtime API / store 声明 `type: slack` / `type: github`，框架自动套用对应解析逻辑
 
 - [ ] **异步处理**：收到请求立即返回 202 Accepted，agent 执行在后台进行
 
@@ -258,18 +262,8 @@ def extract_message(template: str | None, payload: Any) -> str:
 - When：用户请求"每天早上 9 点发送日报"
 - Then：任务创建成功，`list-schedules` 可查到；server 重启后仍然存在并自动触发
 
-**场景 1a：静态任务配置加载**
-- Given：`config/cron.yaml` 中定义了一个 job，`id=daily-report`
-- When：server 启动
-- Then：`list-schedules` 中出现 `id=daily-report` 的任务，调度正常
-
-**场景 1b：SQLite 优先于 YAML**
-- Given：`config/cron.yaml` 和 SQLite 中均有 `id=daily-report`，内容不同
-- When：server 启动
-- Then：以 SQLite 中的定义为准
-
 **场景 2：Webhook 触发 agent**
-- Given：配置来源 `id=github`、`secret=xxx`、`agent_name=dev-bot`
+- Given：运行时已注册来源 `id=github`、`secret=xxx`、`agent_name=dev-bot`
 - When：GitHub 发送 `POST /webhook/github`，签名正确
 - Then：dev-bot 收到提取后的消息内容，执行并回写结果
 
@@ -279,7 +273,7 @@ def extract_message(template: str | None, payload: Any) -> str:
 - Then：返回 403，不触发 agent
 
 **场景 4：无 secret 来源**
-- Given：来源未配置 `secret`（内网服务）
+- Given：运行时来源未配置 `secret`（内网服务）
 - When：发送 `POST /webhook/{source_id}`
 - Then：跳过签名验证，直接触发 agent
 
@@ -431,13 +425,13 @@ def extract_message(template: str | None, payload: Any) -> str:
 - `verify_signature`：secret 为 None 时直接放行；签名正确时返回 True；签名错误时返回 False
 - `extract_message`：模板为 None 时返回 json.dumps；字段存在时正确替换；字段缺失时降级为 json.dumps
 - `schedule_store.create`：写入 SQLite 后 `list_tasks` 可查到；`delete` 后不再出现
-- `load_cron_yaml`：缺少必填字段的条目跳过并记录 warning；文件不存在时返回空列表
-- `CronScheduler`：SQLite 中的任务 id 与 YAML 冲突时 SQLite 优先
+- `CronScheduler`：只从 SQLite 恢复任务；旧 `config/cron.yaml` 存在时 fail fast
+- `CronScheduler`：遵守 `scheduling.enabled` 和 `scheduling.default_timezone`
 
 **需要 mock 的依赖**：
 - `agent_loop.run`：隔离 LLM 调用，只验证触发行为
 - SQLite DB 路径（`schedule_store.DB_PATH`）：`monkeypatch` 到 `tmp_path`
-- `config/cron.yaml` 路径（`cron_scheduler._CRON_YAML_PATH`）：`monkeypatch` 到临时文件
+- `config/settings.yaml` 路径：`monkeypatch` 到临时文件，仅注入全局 scheduling/webhooks 策略
 - APScheduler：测试注册逻辑时可 mock `_scheduler.add_job`，不实际启动定时器
 
 ## 待决问题

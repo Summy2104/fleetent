@@ -46,8 +46,8 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 | **tool 调用** | agent_loop 执行一次 tool 的完整过程：LLM 输出 tool_call → dispatch → 执行 → 返回结果 | 统一用"调用"，不用 "dispatch"、"invoke"、"execute"（这三个是调用链内部的动词，对外统称"调用"）|
 | **dispatch** | `tool_registry` 内部根据 tool_name 找到对应函数并执行的步骤，是 tool 调用链的内部环节 | 仅在 tool_registry 实现相关的上下文使用 |
 | **allowed_tools** | agent 配置中的工具白名单，使用 fnmatch 语法，如 `read_*`、`web_search`。agent 只能调用白名单内的工具 | 不用 "tool_whitelist"、"permitted_tools" |
-| **permission_gate** | 针对 medium/high 风险工具调用的人工审批门，通过 asyncio.Event 实现阻塞等待 | 不用 "approval gate"、"human-in-the-loop"（后者范围更广）|
-| **风险等级** | 工具的操作风险分类：`low`（只读）、`medium`（可撤销写入）、`high`（不可逆操作）。medium/high 需要 permission_gate 审批 | 保持 low/medium/high 三级，不用 "safe/unsafe" |
+| **permission_gate** | 针对 medium/high 风险工具调用的人工审批门，当前实现位置为 `fleetent.governance.permission_gate`，通过 asyncio.Event 实现阻塞等待 | 不用 "approval gate"、"human-in-the-loop"（后者范围更广）|
+| **风险等级** | 工具的操作风险分类：`low`（只读）、`medium`（可撤销写入）、`high`（不可逆操作）。medium/high 需要 `fleetent.governance.permission_gate` 审批 | 保持 low/medium/high 三级，不用 "safe/unsafe" |
 
 ---
 
@@ -55,8 +55,8 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 
 | 术语 | 定义 | 禁止混用 |
 |------|------|---------|
-| **语义记忆** | 跨 session 的用户事实，按 `identity`/`preferences`/`context` 三类结构化存储于 `memory_items` 表，由 `memory_layer` 负责 | 不用 "semantic memory"（英文只在代码注释中使用）|
-| **情节记忆** | 对话与工具执行的完整历史轨迹，append-only 写入 `traces` 表，由 `eval_logger` 负责 | 不用 "episodic memory"、"execution log"（traces 是正式名词）|
+| **语义记忆** | 跨 session 的用户事实，按 `identity`/`preferences`/`context` 三类结构化存储于 `memory_items` 表，由 `fleetent.intelligence.memory` 负责 | 不用 "semantic memory"（英文只在代码注释中使用）|
+| **情节记忆** | 对话与工具执行的完整历史轨迹，写入 `traces` 表，由 `observability` 负责 | 不用 "episodic memory"、"execution log"（traces 是正式名词）|
 | **程序记忆** | agent 完成特定任务的技能与方法，存储为 `skills/` 目录，由 `skill_registry` 负责 | 不用 "procedural memory"、"knowledge"（knowledge 指企业文档知识库）|
 | **工作记忆** | 当前 session 的对话上下文，存储在内存中，session 结束即释放，由 `context_mgr` 负责 | 不用 "working memory"、"context window"（context window 是 LLM 的技术概念）|
 | **identity** | 语义记忆子类型：用户的身份事实（姓名、职位、技能），永久有效，新值覆盖旧值 | 保持英文，与代码 type 字段对齐 |
@@ -70,12 +70,12 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 
 | 术语 | 定义 | 禁止混用 |
 |------|------|---------|
-| **knowledge base（KB）** | 企业文档知识库，按 scope 隔离，由 `knowledge_base` 模块管理。与用户个人的语义记忆并列，由 `long_term_ctx` 统一调度注入 | 不用 "knowledge"（单独使用时过于宽泛）、"RAG 知识库"（RAG 是技术手段，不是业务概念）|
+| **knowledge base（KB）** | 企业文档知识库，按 `tenant_id + kb_id` 隔离，由 `knowledge_base` 模块管理。与用户个人的语义记忆并列，由 `long_term_ctx` 统一调度注入 | 不用 "knowledge"（单独使用时过于宽泛）、"RAG 知识库"（RAG 是技术手段，不是业务概念）|
 | **chunk** | 文档分块后的最小检索单元，保留来源文档信息（filename、position）| 保持英文，与代码字段对齐 |
 | **entity** | 从文档中 LLM 提取的命名实体（人名、组织、概念、产品等），用于图增强检索 | 保持英文 |
 | **relation** | 两个 entity 之间的关系描述，从文档中 LLM 提取，存储为有向边 | 保持英文 |
 | **connector** | 数据源连接器，实现 `DataSource` 接口，负责从外部系统（Confluence、Google Drive、本地目录等）拉取文档 | 不用 "adapter"、"integration" |
-| **ingest** | 将文档导入知识库的完整过程：解析 → 分块 → embedding → 图提取，全程异步执行 | 不用 "import"、"upload"（upload 特指文件直传这一种 ingest 方式）|
+| **ingest** | 将文档导入知识库的过程：解析 → 分块 → embedding / 索引写入；图提取属于后续 graph search 阶段 | 不用 "import"、"upload"（upload 特指文件直传这一种 ingest 方式）|
 
 ---
 
@@ -88,7 +88,7 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 | **混合检索（Hybrid Search）** | BM25 和向量检索并行执行，通过 RRF 融合排序后返回结果 | 不用 "hybrid retrieval" |
 | **RRF** | Reciprocal Rank Fusion，将多路检索结果按倒数排名融合的算法，无需人工调节权重 | 保持缩写 |
 | **图增强检索** | 从匹配实体出发，按关系图谱展开，收集关联 chunk，适合关系型查询（"谁负责 X？"）| 不用 "graph RAG"、"knowledge graph search" |
-| **namespace** | vector_store 内部的向量分区标识，格式为 `mem_{user_id}`（记忆向量）或 `kb_{scope}`（知识库向量）。不同 namespace 的向量物理隔离，检索不跨 namespace | 不用 "scope"（scope 是业务层概念，namespace 是 vector_store 内部概念）|
+| **namespace** | vector_store 内部的向量分区标识，格式为 `mem:{user_id}`（记忆向量）或 `kb:{tenant_id}:{kb_id}`（知识库向量）。不同 namespace 的向量物理隔离，检索不跨 namespace | 不用 "scope"（scope 是业务层概念，namespace 是 vector_store 内部概念）|
 
 ---
 
@@ -107,8 +107,8 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 | 术语 | 定义 | 禁止混用 |
 |------|------|---------|
 | **trace** | 一次完整 agent 运行的记录，包含 user_id、agent_name、消息列表、工具调用、token 用量、耗时等，append-only 写入 `traces` 表 | 不用 "log"（log 是系统日志，trace 是业务执行记录）、"history" |
-| **vector_store** | 统一的向量索引基础设施，提供 upsert/search/delete 接口，后端可切换（sqlite-vec 或 Qdrant） | 不用 "向量数据库"（向量数据库是后端实现，vector_store 是抽象层）|
-| **embedding** | 将文本转换为向量的过程，或指转换后的向量本身。embedding 模型自托管，不使用云托管 API | 保持英文，与行业通用用法一致 |
+| **vector_store** | 统一的向量索引基础设施，提供 upsert/search/delete 接口；当前支持 in-memory 与普通 SQLite persistent backend，后续可扩展 sqlite-vec / Qdrant | 不用 "向量数据库"（向量数据库是后端实现，vector_store 是抽象层）|
+| **embedding** | 将文本转换为向量的过程，或指转换后的向量本身。当前支持 deterministic 测试 provider 与 OpenAI-style HTTP provider；生产默认应指向自托管模型服务 | 保持英文，与行业通用用法一致 |
 
 ---
 

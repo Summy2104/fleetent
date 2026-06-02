@@ -9,12 +9,12 @@ agent 工具执行前的治理层：在 agent 即将调用某个工具的那一�
 边界（明确不做）：
 - 不判断"操作的人是不是本人" → **user-center**（已验证身份是前提）
 - 不判断"外部资源的行级权限"（如某文档该不该给看）→ **per-user auth / 下游系统**
-- 不存储审计日志 → **observability**（governance 只产生决策，落盘是 observability 的事）
+- 不存储审计日志 → **observability / platform audit**（governance 只产生决策事件，落盘与查询是 observability 的事）
 
 **调用关系**：
-- 依赖：agent_store、agent_policy、permission_gate、user-center（确认人身份）
+- 依赖：agent_store、`fleetent.governance.agent_policy`、`fleetent.governance.permission_gate`、user-center（确认人身份）
 - 被依赖：agent_loop（工具访问检查、审批门）、normalizer（agent 解析）
-- 产出：决策结果交 observability 留痕
+- 产出：决策结果作为 audit / security event 交 observability 留痕
 
 ## 现状
 
@@ -41,7 +41,7 @@ agent 工具执行前的治理层：在 agent 即将调用某个工具的那一�
 | **时序** | 同步 —— 人就在会话里，几秒内响应 |
 | **作用域** | **限定在 session 内**，是会话流里的一个对话回合（类似 agent 问澄清问题），不是跨会话的权限子系统 |
 | **超时** | fail-closed：超时未确认按"未批准"处理，中止该工具 |
-| **留痕** | 确认 / 取消结果交 observability 审计 |
+| **留痕** | 确认 / 取消结果交 observability audit event |
 
 明确不做（留口，v1 之外）：
 - ❌ **外部 / 双人审批（dual-control）**：需要任务注册中心（挂起-恢复基础设施），太重。仅组织级影响 / 强合规场景才需要
@@ -56,12 +56,12 @@ graph TD
 
     subgraph GOV["governance"]
         STORE["agent_store<br/>agent 定义 + user/channel 绑定"]
-        ACCESS["agent_policy<br/>fnmatch 工具访问检查"]
-        GATE["permission_gate<br/>不可逆操作 · 会话内自我确认"]
+        ACCESS["fleetent.governance.agent_policy<br/>fnmatch 工具访问检查"]
+        GATE["fleetent.governance.permission_gate<br/>不可逆操作 · 会话内自我确认"]
     end
 
     UC["user-center<br/>(身份)"]
-    OBS["observability<br/>(审计留痕)"]
+    OBS["observability<br/>(audit event)"]
 
     NORM -->|解析用哪个 agent| STORE
     AL -->|工具是否在白名单| ACCESS
@@ -123,7 +123,7 @@ channel_agents (
   PRIMARY KEY (platform, channel_id)
 )
 
--- 不可逆操作审批记录（会话内自我确认 + 审计留痕）
+-- 不可逆操作审批记录（会话内自我确认 + audit event 留痕）
 approvals (
   id                TEXT PRIMARY KEY,
   session_id        TEXT,       -- 审批限定在此 session 内
@@ -168,7 +168,7 @@ approvals (
 **场景 6：审批决策留痕**
 - Given：一次不可逆操作的自我确认（无论确认 / 取消 / 超时）
 - When：决策产生
-- Then：结果落到 observability 审计，可按 user_id / session_id 追溯"谁在何时确认/取消了什么操作"
+- Then：结果以 audit / security event 形式交给 observability，可按 user_id / session_id 追溯"谁在何时确认/取消了什么操作"
 
 **场景 7（边界）：governance 不管行级权限**
 - Given：agent 的 allowed_tools 包含 drive.search，用户已绑定 Drive
@@ -200,12 +200,12 @@ graph LR
 **需要单元测试的行为**：
 - 工具访问控制：allowed_tools fnmatch 匹配，白名单外的工具被拒绝且原因回给 LLM
 - Agent 解析优先级：channel binding → user binding → default agent 的查找顺序
-- permission_gate 超时 fail-closed：超时时状态变为 timeout，不放行工具
+- `fleetent.governance.permission_gate` 超时 fail-closed：超时时状态变为 timeout，不放行工具
 - 审批状态机：pending → approved / rejected / timeout 的转换正确，不可跨状态跳转
 
 **需要 mock 的依赖**：
 - `agent_store`：注入可控的 agent 定义与 user/channel 绑定数据
-- `permission_gate`：使用短超时（`PermissionGate(medium_timeout=0.1)`）
+- `fleetent.governance.permission_gate`：使用短超时（`PermissionGate(medium_timeout=0.1)`）
 - SQLite DB 路径：`monkeypatch` 到 `tmp_path`
 
 ## 待决问题

@@ -8,7 +8,7 @@ session 持久化层，管理对话上下文的读写、并发保护和生命周
 
 **负责**：session 消息历史的读写、并发锁、原子持久化、TTL 过期与清理（规划中）。
 
-**不负责**：session 内消息的压缩（→ context_mgr）、执行记录写入（→ eval_logger）、IM 平台 thread/channel 与 session 的映射（→ im-gateway）、定时任务触发逻辑（→ cron_scheduler）。
+**不负责**：session 内消息的压缩（→ context_mgr）、执行记录写入（→ observability）、IM 平台 thread/channel 与 session 的映射（→ im-gateway）、定时任务触发逻辑（→ cron_scheduler）。
 
 **调用关系**：
 - 依赖：无（纯文件 I/O）
@@ -78,7 +78,7 @@ session_id 是 session 的唯一标识，格式因来源而异：
 
 - [ ] **session 轻量元数据索引**：存储每个 session 的基本信息，支持管理和统计
   - 记录：创建时间、最后活跃时间、消息数、总 token 估算、关联 agent
-  - 存于 `users.db` 的 `sessions` 表，不增加 session 文件本身体积
+  - 存于 `fleetent.db` 的 `sessions` 表，不增加 session 文件本身体积
 
 - [ ] **定时任务 session 绑定语义**（解决 scheduling.md 待决问题）
   - `session_id` 指定时：复用该 session 的完整历史上下文（适合持续性任务，如每日报告）

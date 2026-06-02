@@ -15,7 +15,7 @@ from openai.types.chat import ChatCompletionChunk
 
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent import model_router
-from fleetent.agent_policy import check_tool_access
+from fleetent.governance.agent_policy import check_tool_access
 from fleetent.budget import BudgetChecker, BudgetConfig, BudgetUsage, grace_max_tokens
 from fleetent.cancellation import CancellationChecker, CancelToken
 from fleetent.context_mgr import (
@@ -32,7 +32,7 @@ from fleetent.memory_layer import extract_and_save, load_memories
 from fleetent.message_hygiene import HygieneReport, MessageContractError, sanitize
 from fleetent.model_router import RouteConfig, RouteOverride, get_async_client_and_config
 from fleetent.multimodal import build_message_with_images, has_image_block
-from fleetent.permission_gate import _default_gate
+from fleetent.governance.permission_gate import _default_gate
 from fleetent.provider_health import ProviderHealthCache, get_health_cache
 from fleetent.sandbox_enablement import Mode, is_code_execution_enabled
 from fleetent.skill_registry import available_skills_prompt, collect_disabled_trace

@@ -4,15 +4,16 @@
 TBD - created by archiving change webhook-triggers. Update Purpose after archive.
 ## Requirements
 ### Requirement: Webhook source configuration
-The system SHALL load webhook source definitions from `config/webhooks.yaml` at startup. Each source SHALL have a unique `id` and a `user_id` referencing a valid internal user. `secret`, `agent_name`, and `message_template` are optional. If the file does not exist, the webhook feature SHALL be silently disabled.
+Webhook sources SHALL NOT be loaded from YAML files. Runtime source management is out of scope for
+configuration-foundation and SHALL be handled by a later webhook source management change.
 
-#### Scenario: Valid config loaded at startup
-- **WHEN** `config/webhooks.yaml` exists with at least one source entry
-- **THEN** `POST /webhook/{source_id}` routes are available for each configured source id
+#### Scenario: Old webhook YAML is not loaded
+- **WHEN** `config/webhooks.yaml` exists
+- **THEN** server startup fails fast instead of loading webhook sources
 
-#### Scenario: Missing config file does not crash
-- **WHEN** `config/webhooks.yaml` does not exist
-- **THEN** the server starts successfully and webhook routes return 404
+#### Scenario: Missing webhook source returns 404
+- **WHEN** no runtime source is registered for a source id
+- **THEN** `POST /webhook/{source_id}` returns 404
 
 ### Requirement: Webhook endpoint accepts POST requests
 `POST /webhook/{source_id}` SHALL accept a JSON body from any caller. The endpoint SHALL return 202 Accepted immediately. If `source_id` is not found in the loaded configuration, the endpoint SHALL return 404.
@@ -72,4 +73,15 @@ The `reply_func` passed to `normalizer.route()` for webhook-triggered runs SHALL
 #### Scenario: reply_func is no-op
 - **WHEN** the agent run completes after a webhook trigger
 - **THEN** no outbound HTTP call or IM message is sent; the result appears in eval trace
+
+### Requirement: Webhook global settings
+Webhook trigger runtime SHALL read deployment-level policy from `config/settings.yaml`.
+
+#### Scenario: Webhooks disabled
+- **WHEN** `webhooks.enabled=false`
+- **THEN** webhook endpoints reject requests without dispatching agent runs
+
+#### Scenario: Max body size is configured
+- **WHEN** request body size exceeds `webhooks.max_body_bytes`
+- **THEN** the webhook endpoint rejects the request before dispatch
 

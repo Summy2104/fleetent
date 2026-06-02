@@ -8,11 +8,13 @@
 
 **负责**：主循环执行（LLM 调用 → 工具调度 → 迭代）、内置工具管理、上下文压缩、sub_agent 并行、成本预算管控、取消传播、错误分类。
 
-**不负责**：MCP 外部工具连接（→ [mcp](./mcp.md)）、沙箱代码执行（→ [sandbox](./sandbox.md)）、Skill 管理（→ [skill](./skill.md)）、长期记忆注入（→ long_term_ctx）、工具注册与访问控制（→ tool_registry / agent_policy）。
+**不负责**：MCP 外部工具连接（→ [mcp](./mcp.md)）、沙箱代码执行（→ [sandbox](./sandbox.md)）、Skill 管理（→ [skill](./skill.md)）、长期记忆注入（→ long_term_ctx）、工具注册与访问控制（→ tool_registry / `fleetent.governance.agent_policy`）。
 
 **调用关系**：
-- 依赖：model_router、tool_registry、skill_registry、context_mgr、long_term_ctx、eval_logger、session_mgr
+- 依赖：model_router、tool_registry、skill_registry、context_mgr、long_term_ctx、observability、session_mgr
 - 被依赖：server.py（HTTP 路径）、normalizer（IM 路径）、cron_scheduler（定时路径）
+
+**观测边界**：agent-runtime 产生 run / model / tool / context / termination 事件；observability 负责 trace schema、持久化和查询接口。agent-runtime 不直接决定 trace 的存储介质。
 
 ## 关键流程
 
@@ -88,7 +90,7 @@ flowchart TD
   - `approval_rejected`：高风险操作被人工拒绝 → 停止当次任务
   - `loop_detected`：检测到无意义重复操作
   - `consecutive_failures`：连续多次工具调用或 AI 请求失败
-  - 终止原因码写入运行日志，用于统计「任务为何失败」和生成面向用户的提示
+  - 终止原因码写入 observability trace event，用于统计「任务为何失败」和生成面向用户的提示
 
 - [ ] **迭代预算与 Grace Call**：任意预算维度耗尽时优雅停止
   - 三维预算：执行步数上限 / token 用量上限 / 美元成本上限
@@ -126,7 +128,7 @@ flowchart TD
   - 连续两条同一角色消息 → 合并或插入占位消息
   - 有工具调用但缺少对应结果 → 补充「工具执行失败」占位结果
   - 有工具结果但找不到对应调用 → 移除孤立结果
-  - 修复动作必须写入运行日志；修复失败尽早报错，不传不合法消息给 LLM
+  - 修复动作必须写入 observability trace event；修复失败尽早报错，不传不合法消息给 LLM
 
 ### 工具层增强
 
@@ -170,7 +172,7 @@ flowchart TD
   - 图片/二进制占位块兜底替换为 `[图片：{尺寸}，{时间戳}]`
   - 同工具 + 同参数多次调用且结果相同 → 只保留最新一条
 
-- [ ] **压缩过程可追溯**：每次压缩写入运行日志，记录：触发原因、压缩前后消息数/token 数、压缩耗时、使用的摘要模型
+- [ ] **压缩过程可追溯**：每次压缩写入 observability trace event，记录：触发原因、压缩前后消息数/token 数、压缩耗时、使用的摘要模型
 
 - [ ] **压缩反抖动**：连续 3 次压缩节省率均低于 10% → 关闭自动压缩并告警（提示扩大 context 上限或拆分任务）
 

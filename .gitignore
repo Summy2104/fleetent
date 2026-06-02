@@ -10,8 +10,10 @@ __pycache__/
 # Runtime data — keep repo clean and avoid leaking conversations
 data/*.jsonl
 data/*.db
+data/logs/
 data/users/
 data/sessions/
+data/
 
 # Env
 .env
@@ -33,3 +35,4 @@ config/mcp.yaml
 .DS_Store
 
 .coverage
+

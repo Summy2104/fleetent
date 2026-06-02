@@ -9,6 +9,7 @@ import fnmatch
 import hashlib
 import json
 import secrets
+from typing import Any, cast
 
 from fleetent.user_store import (
     DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching
@@ -37,7 +38,7 @@ def issue_key(
     scope: list[str] | None = None,
     note: str | None = None,
     expires_at: str | None = None,
-) -> tuple[str, dict]:
+) -> tuple[str, dict[str, Any]]:
     """Create a new key. Returns (plaintext shown once, metadata dict without plaintext)."""
     _init_db()
     plaintext = f"ma-{secrets.token_hex(32)}"
@@ -52,7 +53,9 @@ def issue_key(
         )
         key_id = cursor.lastrowid
     assert key_id is not None
-    return plaintext, _get(key_id)
+    meta = _get(key_id)
+    assert meta is not None
+    return plaintext, meta
 
 
 def revoke_key(key_id: int) -> None:
@@ -61,7 +64,7 @@ def revoke_key(key_id: int) -> None:
         conn.execute("UPDATE api_keys SET revoked_at = ? WHERE id = ?", (_now(), key_id))
 
 
-def rotate_key(key_id: int) -> tuple[str, dict]:
+def rotate_key(key_id: int) -> tuple[str, dict[str, Any]]:
     """Revoke the key and issue a replacement for the same user with the same scope/note."""
     meta = _get(key_id)
     if meta is None:
@@ -72,7 +75,7 @@ def rotate_key(key_id: int) -> tuple[str, dict]:
     )
 
 
-def list_keys(user_id: str) -> list[dict]:
+def list_keys(user_id: str) -> list[dict[str, Any]]:
     _init_db()
     with _conn() as conn:
         rows = conn.execute(
@@ -81,7 +84,7 @@ def list_keys(user_id: str) -> list[dict]:
     return [_row_to_dict(r) for r in rows]
 
 
-def resolve(plaintext: str) -> dict | None:
+def resolve(plaintext: str) -> dict[str, Any] | None:
     """Return the key metadata if the key exists, is not revoked, and is not expired."""
     _init_db()
     with _conn() as conn:
@@ -114,15 +117,15 @@ def check_scope(scope: list[str], agent_name: str) -> bool:
     return any(fnmatch.fnmatch(agent_name, pattern) for pattern in scope)
 
 
-def _get(key_id: int) -> dict | None:
+def _get(key_id: int) -> dict[str, Any] | None:
     with _conn() as conn:
         row = conn.execute(f"SELECT {_COLS} FROM api_keys WHERE id = ?", (key_id,)).fetchone()
     return _row_to_dict(row) if row else None
 
 
-def _row_to_dict(row: tuple) -> dict:
+def _row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
     d = dict(zip(_FIELDS, row, strict=True))
-    d["scope"] = json.loads(d["scope"]) if d["scope"] else ["*"]
+    d["scope"] = cast(list[str], json.loads(d["scope"])) if d["scope"] else ["*"]
     return d
 
 

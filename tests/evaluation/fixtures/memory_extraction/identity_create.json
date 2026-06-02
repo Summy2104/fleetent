@@ -1,0 +1,25 @@
+{
+  "name": "identity create",
+  "initial_memories": [],
+  "conversation": [
+    {
+      "role": "user",
+      "content": "For context, I am a backend engineer."
+    }
+  ],
+  "mock_actions": [
+    {
+      "action": "create",
+      "type": "identity",
+      "content": "User is a backend engineer"
+    }
+  ],
+  "expected_memories": [
+    {
+      "type": "identity",
+      "content": "User is a backend engineer",
+      "expires_at": "absent"
+    }
+  ],
+  "forbidden_memories": []
+}

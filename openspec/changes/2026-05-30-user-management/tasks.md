@@ -7,6 +7,8 @@
 >
 > **仅剩 3.12 验证**：Task 12.3 全量 `uv run pytest -x -q`、12.4 `ruff`/`mypy`、12.5 手动冒烟。token 精确配额需 `agent_loop` 暴露 usage 事件（follow-up），当前 `/chat` 按调用计数 + 预检。
 >
+> **Web UI（追加，超出原 backend-only 范围）**：新增登录/会话 HTTP 端点（`POST /admin/login`、`/logout`、`GET /admin/me`、`POST /admin/change-password`，含 must-reset 服务端门）+ `GET /admin/im-users` 列表 + 单文件零依赖管理控制台 `src/fleetent/static/admin.html`（vanilla JS，登录→用户/IM/审计三标签，调 `/admin/*` JSON API），由 `GET /admin/ui` 提供。沙箱 TestClient 验证通过（test_user_admin_api 12 passed，含 login/must-reset/UI 路由）。测试已随仓库重构迁到 `tests/integration/`。
+>
 > **认证模型**：以 `role` 取代 `agent-admin-api` 的布尔 `is_admin`（兼容映射 `is_admin == role in {admin, built_in_admin}`）。
 > **git**：沙箱 `.git/index.lock` 残留无权清除，改动需宿主机 commit。
 

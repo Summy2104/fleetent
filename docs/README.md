@@ -12,9 +12,10 @@
 docs/
   README.md                       ← 本文件：导航 + 写作规范
   strategy.md                     ← 战略背景：为什么做、卖什么、与竞品的差异
-  architecture.md                 ← 总体架构：系统定位、模块关系、数据流、关键决策
+    architecture.md                 ← 总体架构：系统定位、模块关系、数据流、关键决策
   capabilities/
     _template.md                  ← 能力域文档模板（新建时复制）
+    owner-capability-roadmap.md        ← 常乐负责模块的能力地图、MVP 缺口、实施批次
     agent-runtime.md              ← 核心循环、工具、Skill、MCP、沙箱
     im-gateway.md                 ← Slack / Telegram / WhatsApp 接入
     memory.md                     ← 记忆系统、自进化
@@ -23,11 +24,18 @@ docs/
     platform.md                   ← 用户管理、API 认证、admin CLI
     observability.md              ← 评估日志、数据统计、链路追踪
     deployment.md                 ← on-premises 打包、配置
+  deployment/
+    pilot-runbook.md              ← Pilot 部署与人工验收一步步执行流程
+    pilot-install-checklist.md    ← Pilot 安装、升级、备份、健康检查和问题上报清单
+    pilot-acceptance-guide.md     ← Pilot 测试环境人工验收、Go / No-Go 判定和报告模板
 ```
 
 ## 写作规范
 
 **功能描述**：「现状」和「规划中」每条只写可观察的行为，不写内部实现细节。有必要时加子 bullet 补充边界和约束。
+
+**模块归属**：每份 capability 文档应声明 owning package、public API、owned tables、config namespace
+和 cross-module dependencies。没有持久化或配置时写「无」，不要省略。
 
 **验收标准**：只写用户或调用方能观察到的行为（端到端视角）。单元级断言写在 OpenSpec 的测试任务里，不在这里。
 

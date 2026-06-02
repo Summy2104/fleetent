@@ -1,6 +1,7 @@
 """SQLite-backed registry of IM platform connectors and their connection status."""
 
 import datetime
+from typing import Any
 
 from fleetent.user_store import (
     DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching
@@ -90,7 +91,7 @@ def set_allowlist_enforced(platform: str, enforced: bool) -> None:
     _set_flag(platform, "allowlist_enforced", enforced)
 
 
-def get_connector(platform: str) -> dict | None:
+def get_connector(platform: str) -> dict[str, Any] | None:
     _init_db()
     with _conn() as conn:
         row = conn.execute(
@@ -99,12 +100,10 @@ def get_connector(platform: str) -> dict | None:
     return _row_to_dict(row) if row else None
 
 
-def list_connectors() -> list[dict]:
+def list_connectors() -> list[dict[str, Any]]:
     _init_db()
     with _conn() as conn:
-        rows = conn.execute(
-            f"SELECT {_COLS} FROM im_connectors ORDER BY platform"
-        ).fetchall()
+        rows = conn.execute(f"SELECT {_COLS} FROM im_connectors ORDER BY platform").fetchall()
     return [_row_to_dict(r) for r in rows]
 
 
@@ -115,7 +114,7 @@ _COLS = (
 _FIELDS = [c.strip() for c in _COLS.split(",")]
 
 
-def _row_to_dict(row: tuple) -> dict:
+def _row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
     return dict(zip(_FIELDS, row, strict=True))
 
 

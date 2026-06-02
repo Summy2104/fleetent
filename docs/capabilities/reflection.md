@@ -4,183 +4,241 @@
 
 ## 概述
 
-系统自我改进机制，定期分析 agent 执行历史，优化记忆质量、改进 skill、并识别知识库缺口。
+系统自我改进机制，定期分析 agent 执行历史，先生成结构化改进建议，再通过受控 proposal lifecycle 进入维护流程。
+reflection 默认不直接修改 User Memory、skills 或 knowledge-base。
 
-**负责**：读取 traces 发现规律、清理/合并低质量记忆、生成或改进 skill、上报知识库问题。
+**负责**：通过 observability trace API 读取 agent 执行历史，发现规律并生成结构化 reflection report；为 User Memory 生成 owner-approved maintenance proposals。
 
-**不负责**：实时处理（异步定期触发，不在请求链路上）、skill 的运行时注入（→ agent-runtime）、修改知识库文档内容（只上报，不写回）。
+**不负责**：实时处理（异步定期触发，不在请求链路上）、skill 的运行时注入（→ agent-runtime）、修改知识库文档内容（只上报，不写回）、Shared Memory 实现、管理员默认替用户确认 User Memory 修改。
 
 **三个作用目标**：
-- **memory reflection**：per-user，优化 memory_layer 中的记忆质量
-- **skill reflection**：per-agent，基于 traces 生成或改进 skills/
-- **knowledge base reflection**：per-tenant，观察知识库使用质量，上报缺口与问题，不自动写回
+- **memory reflection**：per-user，生成 memory_candidate / memory_conflict 建议，并可转成 owner-scoped maintenance proposal
+- **skill reflection**：per-agent，第一阶段只生成 skill_opportunity 建议
+- **knowledge base reflection**：per-tenant，后续阶段观察知识库使用质量，上报缺口与问题，不自动写回
 
 **调用关系**：
-- 依赖：`traces` 表（情节记忆数据源，SQLite）、memory_layer（读取与写回）、skill_registry（读取现有 skill）、knowledge_base（只读，查询召回质量）、permission_gate（prod 环境 skill 变更审批）、config
+- 依赖：observability（`query_trace_events(query)` 读取情节记忆事件）、`fleetent.intelligence.memory`（只读信号 + 已批准 proposal 的 public mutation API）、config
 - 被依赖：cron_scheduler（定期触发）
+
+**模块归属**：
+- owning package：`intelligence.reflection`
+- public API：`run_reflection(scope)`、`generate_memory_maintenance_proposals(user_id, findings)`、proposal create / approve / reject / apply API；后续扩展 `run_skill_reflection(agent_id)`、`run_kb_reflection(scope)`
+- owned tables：`reflection_reports`、`memory_maintenance_proposals`；后续 `skill_proposals`、`kb_reflection_reports`
+- config namespace：`reflection.*`
 
 ## 关键流程
 
-三条反射流程相互独立，分别调度，可安全并发。
+当前有两条流程：只读 report 生成，以及 User Memory maintenance proposal lifecycle。skill、knowledge base 三条反射应用流程后续再拆成独立 specs。
 
-**并发安全说明**：三条流程的写入目标完全不重叠——memory reflection 写 `memory_items`，skill reflection 写 `skill_proposals`（prod）或 `skills/` 文件（dev），kb reflection 写 `kb_reflection_reports`。三者读取 `traces` 表时均为只读，不互相阻塞。memory reflection 写 `memory_items` 的同时，`long_term_ctx` 可能正在读取同一表；`memory_layer` 自身的并发控制负责保证读写安全，reflection 不额外加锁。
+**并发安全说明**：reflection 只写 reflection-owned `reflection_reports` / `memory_maintenance_proposals`，通过 observability public API
+只读 trace events，通过 `fleetent.intelligence.memory` public API 读取 memory 信号。proposal 创建不修改 User Memory；apply 阶段只通过 `fleetent.intelligence.memory` public mutation API 修改 owner-scoped User Memory，不直接写 `memory_items` / `skills/`。
 
 ```mermaid
 flowchart TD
-    subgraph mem["memory reflection（per-user，定期触发）"]
-        A[cron_scheduler] --> B[读取 memory_items]
-        B --> C[LLM 分析：过期 / 重复 / 冲突]
-        C --> D[写回清理后的记忆]
-    end
-
-    subgraph skill["skill reflection（per-agent，定期触发）"]
-        E[cron_scheduler] --> F[读取 traces 表\n按 agent_id + 时间窗口过滤]
-        F --> G[LLM 分析：高频 pattern / 低效 skill]
-        G --> H{环境？}
-        H -->|dev| I[直接更新 skills/ 文件]
-        H -->|prod| J[写入 skill_proposals 表\n状态 pending]
-        J --> K[permission_gate 审批]
-        K -->|approve| I
-    end
-
-    subgraph kb["knowledge base reflection（per-tenant，定期触发）"]
-        L[cron_scheduler] --> M[读取检索质量日志]
-        M --> N[分析：低召回 / 未命中 / 陈旧 chunk]
-        N --> O[写入 kb_reflection_reports 表]
-        O --> P[管理员查看并决策\n知识库内容不自动修改]
-    end
+    A[cron_scheduler 或 admin 触发] --> B[调用 observability.query_trace_events\n按 scope + time window 过滤]
+    B --> C["读取 fleetent.intelligence.memory 只读信号"]
+    C --> D[分析重复事实 / 冲突事实 / 高频任务模式]
+    D --> E[生成 ReflectionReport]
+    E --> F[保存 reflection_reports]
+    F --> G{memory finding?}
+    G -->|是| H[生成 memory_maintenance_proposals]
+    G -->|否| I[管理员或后续流程查看 report]
+    H --> J[owner approve / reject\n或显式 low-risk auto apply]
+    J --> K["通过 fleetent.intelligence.memory public API apply"]
 ```
 
 ## 数据模型
 
 ```sql
--- skill 变更提案（dev 直接跳过，prod 需要审批）
-skill_proposals (
+reflection_reports (
   id           TEXT PRIMARY KEY,  -- UUID
-  agent_id     TEXT,              -- 目标 agent
-  skill_path   TEXT,              -- skill 目录相对路径，如 "summarizer" 或 "tools/code_runner"
-  action       TEXT,              -- "create" | "update" | "delete"
-  snapshot     TEXT,              -- JSON {files: {rel_path: content}}；delete 时为 NULL
-  rationale    TEXT,              -- 变更理由（来自 LLM 分析）
-  status       TEXT,              -- "pending" | "approved" | "rejected"
-  created_at   DATETIME,
-  resolved_at  DATETIME
+  scope        TEXT,              -- user_id / agent_id / tenant_id / global
+  time_window_start DATETIME,
+  time_window_end   DATETIME,
+  findings_json TEXT,             -- finding summary、evidence ids、metadata，不保存完整 transcript
+  created_at   DATETIME
 )
 
--- knowledge base 反射上报
-kb_reflection_reports (
-  id           TEXT PRIMARY KEY,  -- UUID
-  scope        TEXT,              -- tenant_id 或 agent_id
-  report_type  TEXT,              -- "gap" | "stale" | "co_occurrence"
-  description  TEXT,              -- 上报描述
-  evidence     TEXT,              -- 证据 JSON（查询样本、低分 chunk ID 等）
-  status       TEXT,              -- "pending" | "reviewed"
+memory_maintenance_proposals (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT,              -- User Memory owner
+  action       TEXT,              -- mark_stale | merge | rewrite | compact | delete | suggest_shared_memory_or_kb
+  target_memory_ids_json TEXT,
+  proposed_content TEXT,
+  metadata_patch_json TEXT,
+  risk         TEXT,              -- low | medium | high
+  reason       TEXT,
+  evidence_ids_json TEXT,
+  status       TEXT,              -- pending | approved | rejected | applied | expired
   created_at   DATETIME,
-  reviewed_at  DATETIME
+  updated_at   DATETIME,
+  expires_at   DATETIME
 )
 ```
 
 ## 接口定义
 
 ```python
-async def run_memory_reflection(user_id: str) -> None:
-    """清理并合并指定用户的记忆：移除过期条目、合并重复、修正冲突。由 cron_scheduler 触发。"""
+@dataclass
+class ReflectionFinding:
+    type: Literal["memory_candidate", "memory_conflict", "skill_opportunity"]
+    summary: str
+    evidence_ids: list[str]
+    metadata: dict[str, str]
 
 
-async def run_skill_reflection(agent_id: str) -> None:
-    """分析 agent traces，生成 skill 变更提案（prod）或直接更新 skill 文件（dev）。"""
+@dataclass
+class ReflectionReport:
+    id: str
+    scope: str
+    time_window: tuple[datetime, datetime]
+    findings: list[ReflectionFinding]
+    created_at: datetime
 
 
-async def run_kb_reflection(scope: str) -> None:
-    """分析知识库检索质量，将缺口 / 陈旧内容写入 kb_reflection_reports。不修改知识库内容。"""
+async def run_reflection(scope: str) -> ReflectionReport:
+    """读取 traces 和 memory 只读信号，生成结构化建议报告；不自动应用建议。"""
+
+
+def generate_memory_maintenance_proposals(
+    user_id: str,
+    findings: list[ReflectionFinding],
+) -> list[MemoryMaintenanceProposal]:
+    """将 memory finding 转成 pending User Memory maintenance proposals，不修改 memory。"""
 ```
 
 ## 现状
 
-尚未实现。
+**foundation 已完成**：`2026-05-31-reflection-foundation` 已归档。
+
+已实现内容：
+- `ReflectionReport`、`ReflectionFinding`、`run_reflection(scope)` public API
+- `reflection_reports` SQLite 表
+- `memory_maintenance_proposals` SQLite 表和 proposal lifecycle API
+- 只通过 observability public API 读取 traces
+- 只读 `fleetent.intelligence.memory` 信号；proposal apply 只通过 memory public API
+- 支持三类 finding：`memory_candidate`、`memory_conflict`、`skill_opportunity`
+- 支持 `pending` / `approved` / `rejected` / `applied` / `expired` proposal 状态
+- 支持 owner approval、low-risk explicit auto policy、high-risk delete approval gate
+- 支持 `suggest_shared_memory_or_kb`，用于团队共识 / 项目惯例 / 客户背景等不属于 User Memory 的内容
+- 保存 report 时不保存完整 trace transcript
+- deterministic evaluation fixture / runner 覆盖 expected / forbidden findings 和 persisted transcript redaction
+- real-route smoke 仅在 `FLEETENT_EVAL_REAL_REFLECTION=1` 且显式本地 fixture/config 完整时手动运行；默认 skip
+
+当前定位：已具备“生成建议报告”和 User Memory 维护 proposal lifecycle；UI / scheduler / skill proposal / KB reflection apply 尚未完成。
 
 ## 规划中（v1.0）
 
-- [ ] **memory reflection**：定期清理与合并 per-user 记忆
-  - 清理过期 context 类记忆（超过 TTL 且未被再次提及）
-  - 合并语义重复条目
-  - 修正已知冲突（比较 identity / preferences 类条目间的矛盾）
+- [x] **reflection foundation**：生成结构化建议报告，不自动应用
+  - `memory_candidate`：可能应该进入 memory 的重复事实
+  - `memory_conflict`：可能冲突的用户事实
+  - `skill_opportunity`：可沉淀为 skill 的重复任务模式
 
-- [ ] **skill reflection**：分析 per-agent traces，生成、改进或删除 skill
+- [x] **report evaluation 基线**：`tests/evaluation/test_reflection_report_eval.py` 使用 fake trace / memory signals 验证 report
+  - 覆盖 expected / forbidden findings
+  - 验证 persisted report 不保存 raw transcript snippets
+  - 默认不调用真实 LLM、embedding、KB connector 或 SaaS
+
+- [x] **memory reflection maintenance**：将 memory_candidate / memory_conflict 转成 User Memory maintenance proposals
+  - proposal 归属 `user_id`，默认需要 owner approval
+  - rejected / expired proposal 不可 apply
+  - high-risk `delete` 不能 low-risk auto apply
+  - `suggest_shared_memory_or_kb` 不写 User Memory
+
+- [ ] **skill reflection proposals（后续）**：分析 per-agent traces，生成、改进或删除 skill
   - `create`：发现高频重复的 prompt pattern，提炼为新 skill
   - `update`：识别现有 skill 的低效用法，生成改进版本
   - `delete`：skill 长期未被触发、与其他 skill 高度重复、或持续产生负面效果时，提议删除
   - skill 可以是单文件，也可以是含脚本、模板的多级目录；`snapshot` 字段统一存储整个目录的文件快照（JSON），审批时展示完整新状态，应用时直接覆盖写入
 
-- [ ] **knowledge base reflection**：观察知识库使用质量，只上报不写回
+- [ ] **knowledge base reflection（后续）**：观察知识库使用质量，只上报不写回
   - 知识空白检测：用户频繁提问但召回质量差 → 上报"该类内容可能缺失"
   - 陈旧内容检测：某些 chunk 长期未被召回，或与近期对话明显矛盾 → 标记待管理员审查
   - 高频共现提示：多个文档频繁被一起召回 → 建议管理员补充整合文档
   - 所有 knowledge base reflection 结果均以建议形式输出，执行由人决定
 
-- [ ] **生效机制**：按作用目标和环境区分
-  - memory reflection：直接写回（自动维护）
-  - skill reflection：dev 直接写入，prod 走 permission_gate 审批
+- [ ] **生效机制（后续）**：按作用目标和环境区分
+  - memory reflection：owner-approved proposal lifecycle；低风险自动维护必须由用户显式开启
+  - skill reflection：dev 直接写入，prod 走 `fleetent.governance.permission_gate` 审批
   - knowledge base reflection：仅上报，永远不自动写回
 
 ## 验收标准
 
-**场景 1：过期记忆清理**
+**场景 1：候选记忆建议**
 - Given：用户有一条 context 类记忆超过 TTL，且近期对话未再提及
-- When：memory reflection 定期任务触发
-- Then：该记忆从存储中移除，后续检索不再返回
+- When：run_reflection 定期任务触发
+- Then：报告中出现 memory_conflict 或 memory_candidate 类型的建议，但不删除该记忆
 
-**场景 2：冲突记忆合并**
+**场景 2：冲突记忆建议**
 - Given：用户记忆中存在两条语义矛盾的 identity 条目
-- When：memory reflection 定期任务触发
-- Then：两条合并为一条，保留更新的信息
+- When：run_reflection 定期任务触发
+- Then：报告中出现 memory_conflict finding，包含证据 id 和摘要；memory_items 不被修改
 
-**场景 3：skill 改进提案生成（prod）**
+**场景 3：skill opportunity 识别**
 - Given：某 agent 的 traces 中反复出现同类任务模式
-- When：skill reflection 定期任务触发
-- Then：生成一条 skill 变更提案，状态为 pending；管理员 approve 后 skill 更新生效
+- When：run_reflection 定期任务触发
+- Then：报告中出现 skill_opportunity finding；系统不创建 skill proposal，也不写 skill 文件
 
-**场景 4：skill 直接生效（dev）**
-- Given：dev 环境，skill reflection 识别到可改进的 skill
-- When：skill reflection 定期任务触发
-- Then：skill 文件直接更新，无需审批
+**场景 4：无 trace 时返回空报告**
+- Given：指定 scope 和时间窗口内没有 trace events
+- When：run_reflection 执行
+- Then：返回 findings 为空的 ReflectionReport，不抛出异常
 
-**场景 5：skill 删除提案（prod）**
-- Given：某 agent 的某个 skill 在过去 N 天 traces 中从未被触发
-- When：skill reflection 定期任务触发
-- Then：生成一条 action 为 "delete" 的提案，snapshot 为 NULL，管理员 approve 后 skill 目录被删除
+**场景 5：报告持久化不保存完整 transcript**
+- Given：trace events 中包含用户输入和 agent 回复
+- When：reflection report 被保存
+- Then：保存的 payload 包含 finding summary、evidence ids 和 metadata，不包含完整对话 transcript
 
-**场景 6：知识空白上报**
-- Given：用户连续多次提问某类话题，knowledge_base.search() 返回的 chunk 相关度持续低于阈值
-- When：knowledge base reflection 定期任务触发
-- Then：生成一条上报记录，注明话题类型和问题频次，管理员可查看
-
-**场景 7：陈旧内容标记**
-- Given：某个 chunk 在过去 N 天内从未被召回
-- When：knowledge base reflection 定期任务触发
-- Then：该 chunk 被标记为"待审查"，管理员可决定保留或删除，知识库内容本身不被自动修改
+**场景 6：knowledge-base 不可用时不阻塞**
+- Given：knowledge-base 未启用或不可用
+- When：run_reflection 执行
+- Then：系统仍可基于 traces 和 memory 返回 report
 
 ## 测试边界
 
 **需要单元测试的行为**：
-- memory reflection 过期清理：TTL 超期条目被移除，未超期条目保留
-- memory reflection 冲突合并：两条矛盾 identity 条目合并为一，不产生重复
-- skill reflection prod create/update：生成 skill_proposals 记录（snapshot 含完整文件），状态 pending，不直接写文件
-- skill reflection prod delete：生成 skill_proposals 记录（snapshot 为 NULL），状态 pending，不直接删文件
-- skill reflection dev 路径：skill 文件直接写入或删除，不写 proposals 表
-- snapshot 完整性：create/update 的 snapshot 包含 skill 目录下所有文件，不遗漏
-- kb reflection 上报：低召回查询触发 gap 类型报告，写入 kb_reflection_reports
-- reflection 不阻塞：三个 run_*() 函数均为 fire-and-forget，不阻塞调度器
+- public API：ReflectionReport、ReflectionFinding、run_reflection 可导入
+- trace 输入：run_reflection 通过 observability.query_trace_events 读取 traces
+- 空输入：没有 trace events 时返回空 findings report
+- memory 只读：生成 memory_candidate / memory_conflict 不修改 memory_items
+- skill 只读：生成 skill_opportunity 不创建、更新或删除 skills/ 文件
+- report 持久化：reflection_reports 表存在，payload 不保存完整 transcript
+- knowledge-base 非依赖：KB 未启用或不可用时 run_reflection 正常返回
 
 **需要 mock 的依赖**：
-- `model_router.get_async_client_and_config`：隔离所有 LLM 分析调用
-- `memory_layer`：注入可控的记忆数据，隔离写回操作
-- `skill_registry`：隔离 skill 文件读写
-- SQLite DB 路径：`monkeypatch` 到 `tmp_path`
+- `observability.query_trace_events`：注入可控的历史 trace events
+- `fleetent.intelligence.memory`：注入可控的记忆数据，确认不发生写回
+- SQLite DB 路径：仅 reflection 自有表需要 `monkeypatch` 到 `tmp_path`
 
 ## 待决问题
 
-- [x] 触发频率：已决定分开调度，频率各异（memory reflection 每日，skill / kb reflection 每周），由 cron_scheduler 独立配置
-- [ ] skill reflection 触发条件：需要多少条 traces 样本才触发一次分析？（负责人：待认领）
-- [ ] skill 变更提案存储：复用现有 permission_gate 表，还是单独的提案表？（负责人：待认领）
-- [ ] knowledge base reflection 上报的输出形式：写入独立日志表，还是通过 IM 通知管理员？（负责人：待认领）
+- [ ] run_reflection 默认 time window：使用最近 7 天、最近 30 天，还是由调用方必传？（负责人：待认领）
+- [ ] finding 生成策略：第一阶段完全 deterministic，还是允许调用轻量模型做摘要归纳？（负责人：待认领）
+- [ ] report 查看入口：先只提供 admin CLI，还是直接接 platform 页面？（负责人：待认领）
+- [ ] 后续 skill proposal 存储：复用 `fleetent.governance.permission_gate` 表，还是单独的提案表？（负责人：待认领）
+
+## 当前缺口
+
+- finding 规则仍然很初级，主要依赖 deterministic payload 字段和简单模式。
+- report 到 User Memory maintenance proposal 的闭环已建立；管理员 / 用户 review UI、scheduler、长期趋势统计还没有完成。
+- 已有 deterministic report evaluation；尚未量化长期 precision / recall 趋势。
+- 不会默认自动维护 memory，不会生成 skill proposal，不接 knowledge-base。
+
+## 下一批候选 specs
+
+- `reflection-report-consumption`
+- `skill-reflection-proposals`
+- `knowledge-base-reflection-reports`
+- `reflection-trend-summary`
+
+## 自动化效果验证
+
+- 已有 trace / memory fixture，标注 expected findings 和 forbidden findings。
+- 已有负样本，避免单次普通任务被误判为 proposal。
+- 已有 transcript redaction fixture，验证 persisted report 不泄露完整对话。
+- 后续接入真实 LLM summary 前，需要扩展 golden dataset 和显式 opt-in smoke。
+
+## 服务化 / 目录边界判断
+
+reflection 更像离线 job / worker，未来可以独立调度甚至独立服务化。但当前应先保持在
+`intelligence.reflection` 内，等 report schema、评估集和应用策略稳定后再拆 worker。

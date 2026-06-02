@@ -1,0 +1,43 @@
+{
+  "name": "memory conflict finding",
+  "scope": "user-1",
+  "trace_events": [
+    {
+      "id": "trace-1",
+      "run_id": "run-1",
+      "event_type": "agent_run_completed",
+      "payload": {
+        "user_input": "Please remember my profile"
+      },
+      "user_id": "user-1"
+    }
+  ],
+  "memory_signals": [
+    {
+      "id": "mem-1",
+      "type": "identity",
+      "content": "User location is Shanghai"
+    },
+    {
+      "id": "mem-2",
+      "type": "identity",
+      "content": "User location is Beijing"
+    }
+  ],
+  "expected_findings": [
+    {
+      "type": "memory_conflict",
+      "summary_contains": "Conflicting memory signals for location",
+      "evidence_ids": ["mem-1", "mem-2"],
+      "metadata": {
+        "field": "location"
+      }
+    }
+  ],
+  "forbidden_findings": [
+    {
+      "type": "skill_opportunity"
+    }
+  ],
+  "forbidden_persisted_text": []
+}

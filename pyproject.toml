@@ -17,11 +17,12 @@ dependencies = [
     "mcp>=1.0.0",
     "pyyaml>=6.0.3",
     "apscheduler>=3.10",
+    "aiosqlite>=0.22.1",
 ]
 
 [project.scripts]
 fleetent = "fleetent.__main__:main"
-fleetent-admin = "fleetent.admin:main"
+fleetent-admin = "fleetent.platform.admin_cli.main:main"
 
 [build-system]
 requires = ["hatchling"]

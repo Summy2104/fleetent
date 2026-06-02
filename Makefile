@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install test t lint fmt check typecheck serve admin
+.PHONY: help install test t test-unit test-integration test-e2e test-evaluation lint fmt check typecheck serve admin
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -14,6 +14,18 @@ test: ## Run full test suite
 
 t: ## Run tests (fail-fast, quiet)
 	uv run pytest -x -q
+
+test-unit: ## Run unit tests
+	uv run pytest tests/unit
+
+test-integration: ## Run integration tests
+	uv run pytest tests/integration
+
+test-e2e: ## Run end-to-end tests
+	uv run pytest tests/e2e
+
+test-evaluation: ## Run evaluation tests
+	uv run pytest tests/evaluation
 
 lint: ## Check code style with ruff
 	uv run ruff check src tests

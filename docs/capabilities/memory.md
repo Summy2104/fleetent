@@ -4,11 +4,11 @@
 
 ## 概述
 
-per-user 语义记忆的提取、存储与检索，让 agent 在多次对话中积累用户知识、越用越懂用户。
+User Memory 的提取、存储与检索，让 agent 在多次对话中积累单个用户授权范围内的长期事实。
 
-**负责**：从对话中提取用户相关事实，按类型结构化存储，支持向量相似度检索。
+**负责**：从对话中提取用户相关事实，按类型结构化存储，支持向量相似度检索，并向 vector_store reindex 暴露当前可索引记忆。当前 `fleetent.intelligence.memory` 实现的是 User Memory，不是团队 / 租户 / 项目级 Shared Memory。
 
-**不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、记忆质量的定期优化（→ reflection）。
+**不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、Shared Memory、未经 owner 确认的 reflection 写回。
 
 ### 记忆系统全局架构
 
@@ -16,16 +16,22 @@ fleetent 的记忆系统借鉴认知科学的四类记忆划分，每类由不�
 
 | 类型 | 内容 | 存储位置 | 负责模块 |
 |------|------|---------|---------|
-| **语义记忆** | 用户身份、偏好、临时状态等跨 session 事实 | SQLite `memory_items` + vector_store | `memory_layer`（本模块）|
-| **情节记忆** | 对话与工具执行的完整历史轨迹 | SQLite `traces` 表 | `eval_logger` |
+| **语义记忆** | 用户身份、偏好、临时状态等跨 session 事实 | SQLite `memory_items` + vector_store | `fleetent.intelligence.memory`（本模块）|
+| **情节记忆** | 对话与工具执行的完整历史轨迹 | SQLite `traces` 表 | `observability` |
 | **程序记忆** | agent 完成特定任务的技能与方法 | `skills/` 目录 | `skill_registry` |
 | **工作记忆** | 当前 session 的对话上下文（session 结束即释放） | 内存 | `context_mgr` |
 
-本模块（`memory_layer`）只负责**语义记忆**，即按 `identity` / `preferences` / `context` 三类结构化存储的用户事实。其余三类由各自模块独立管理，`reflection` 跨模块读取情节记忆（traces）与语义记忆（memory_items）来做质量优化。
+本模块（`fleetent.intelligence.memory`）只负责**User Memory 中的语义记忆**，即按 `identity` / `preferences` / `context` 三类结构化存储的用户事实。其 owner 是 `user_id`，vector namespace 是 `mem:{user_id}`。其余三类由各自模块独立管理，`reflection` 跨模块读取情节记忆（traces）与 User Memory 来生成维护建议；真正改写、合并、标记 stale 或删除 User Memory 必须通过 owner-approved maintenance proposal 或用户显式开启的低风险自动策略。
 
 **调用关系**：
 - 依赖：model_router（`memory_extraction` task，默认轻量模型，可通过 config 覆盖）、vector_store（向量索引）、config
-- 被依赖：long_term_ctx（检索注入内容）、reflection（读取现有记忆、写回优化结果）
+- 被依赖：long_term_ctx（检索注入内容）、reflection（读取现有记忆、通过受控 public API 应用已批准维护 proposal）
+
+**模块归属**：
+- owning package：`fleetent.intelligence.memory`
+- public API：`search(user_id, query, limit)`、`extract_and_update(user_id, conversation)`、`iter_indexable_memories(user_id)`、`update_user_memory_content()`、`mark_user_memory_stale()`、`delete_user_memory()`、`merge_user_memories()`、`MemoryItem`
+- owned tables：`memory_items`
+- config namespace：`memory.*`
 
 ## 关键流程
 
@@ -86,39 +92,119 @@ async def search(user_id: str, query: str, limit: int = 10) -> list[MemoryItem]:
 
 async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
     """从对话中提取事实，冲突检测后写入。SSE done 后异步调用，不阻塞响应。"""
+
+
+def iter_indexable_memories(user_id: str) -> Iterator[IndexableItem]:
+    """枚举当前应存在于 vector_store 的用户记忆。返回 namespace 为 mem:{user_id}，并排除过期记忆。"""
+
+
+async def update_user_memory_content(user_id: str, memory_id: str, content: str) -> None:
+    """通过 User Memory public API 改写单条 owner-scoped memory。"""
+
+
+async def mark_user_memory_stale(user_id: str, memory_id: str) -> None:
+    """通过 User Memory public API 将单条 memory 标记为 stale，并从 vector_store 移除。"""
 ```
 
 ## 现状
 
-- ✅ **事实提取**：对话结束后异步提取用户相关事实，写入 JSONL
-  - 使用 model_router 的 `memory_extraction` task，默认路由到轻量模型
-  - 提取不阻塞主响应，在 SSE done 之后异步执行
-  - 存储路径：data/users/{user_id}/memories.jsonl
+**foundation 已完成**：`2026-05-31-memory-sqlite-semantic-store` 已归档。
 
-- ✅ **记忆注入**：每次 run() 开始前加载最近 20 条记忆注入 system prompt
-  - 固定 top-20，无检索，无排序
-  - v1.0 后注入由 long_term_ctx 统一协调，memory_layer 只暴露 search() 接口
+已实现内容：
+- `memory_items` SQLite 表，存储 `identity` / `preferences` / `context` 三类语义记忆
+- `MemoryItem`、`extract_and_update(user_id, conversation)`、`search(user_id, query, limit)` public API
+- `extract_and_update()` 调用 `memory_extraction` task，处理 `create` / `update` / `delete` / `ignore`
+- memory extraction 输入包含有限 existing memory snapshot：identity 20、preferences 30、context 20
+- `update` / `delete` 仅允许作用于当前用户 snapshot 内的合法 `target_id`
+- context update 刷新 30 天 TTL，identity / preferences update 后不过期
+- context 记忆默认 30 天 TTL，identity / preferences 默认不过期
+- 写入 memory 后同步写入 vector_store，namespace 为 `mem:{user_id}`
+- `search()` 通过 vector_store 查相关 memory ids，回查 SQLite 并过滤过期 context
+- `iter_indexable_memories(user_id)` public API 返回当前未过期 memory source records，供 vector_store 同步 reindex 使用
+- reflection maintenance apply 只通过 `fleetent.intelligence.memory` public mutation API，不直接写 `memory_items`
+- 删除旧 JSONL memory 兼容和 `load_memories()` 直接注入路径
+
+当前定位：已完成结构化语义记忆地基、基础维护动作、第一批 memory extraction evaluation 基线、与 KB
+共用 embedding / vector-store 路径的 deterministic retrieval evaluation，以及显式 per-user retention / compaction 维护 API。
 
 ## 规划中（v1.0）
 
-- [ ] **结构化记忆类型**：按类型区分存储，取代 free-text JSONL 平铺
+- [x] **结构化记忆类型**：按类型区分存储，取代 free-text JSONL 平铺
   - `identity`：身份事实（姓名、职位、技能）— 永久有效
   - `preferences`：工作偏好（风格、输出格式偏好）— 长期有效
   - `context`：临时状态（当前项目、进行中任务）— TTL 30 天，过期自动失效
 
-- [ ] **冲突检测与合并**：新提取的事实与已有同类记忆比较，按类型规则决定处理方式
+- [x] **冲突检测与合并**：新提取的事实与已有同类记忆比较，按类型规则决定处理方式
   - `identity` / `context`：新覆盖旧（身份和状态以最新为准）
   - `preferences`：区分**明确陈述**（"我以后都想要..."）和**一次性请求**（"这次帮我..."）
     - 明确陈述 → 更新记忆
     - 一次性请求 → 不更新记忆，当前 session 上下文处理即可
   - 判断在提取 prompt 内完成，LLM 输出 `update` 或 `ignore`，不额外调用
 
-- [ ] **向量相似度检索**：通过共享 vector_store 对记忆条目建立向量索引
+- [x] **向量相似度检索**：通过共享 vector_store 对记忆条目建立向量索引
   - 对外接口：`search(user_id: str, query: str) → list[MemoryItem]`
   - 由 long_term_ctx 在对话开始时调用
 
-- [ ] **embedding 模型**：自托管本地模型（bge-m3 或 multilingual-e5）
-  - 禁止使用 OpenAI Embeddings 等云托管专有服务
+- [x] **memory extraction evaluation 基线**：使用 JSON fixtures、mock actions 和最终 memory 状态断言，覆盖 create / update / delete / ignore 关键场景
+
+- [x] **embedding 检索效果验证入口**：通过 combined memory/KB fixture 验证 memory semantic retrieval
+  - 默认使用 deterministic provider 和 tmp SQLite / tmp vector DB
+  - 真实 HTTP embedding 仅在 `FLEETENT_EVAL_REAL_EMBEDDING=1` 且 endpoint / model / API key / dimensions 完整时手动运行
+
+- [x] **retention / compaction 维护 API**：按 user_id 显式运行，不自动调度
+  - dry-run 报告 expired context、per-type over-limit rows 和 duplicate compaction candidates
+  - apply 删除 eligible memory rows，并调用 `vector_store.delete(id, mem:{user_id})`
+  - duplicate compaction 只处理同 user / 同 type 的 normalized exact duplicates，不做 LLM summary / rewrite
+
+- [x] **reflection maintenance owner boundary**：reflection 可生成 User Memory maintenance proposal
+  - proposal 绑定 `user_id`，默认只有 owner 可以 approve / reject / apply
+  - low-risk 自动 apply 必须显式开启，且不允许 delete / merge / rewrite / compact
+  - 疑似团队共识、项目惯例、客户背景或组织经验只生成 `suggest_shared_memory_or_kb`，不写入 User Memory
+
+## 当前缺口
+
+- 提取质量已有 mock evaluation 基线，但还缺少真实 LLM 回归样本和长期趋势统计。
+- 真实 embedding provider 边界已定义且有手动 evaluation 入口；尚未选择或部署自托管模型 endpoint。
+- memory 条数已有显式维护 API；reflection proposal lifecycle 已建立，但尚未接入 scheduler、admin UI 或长期趋势统计。
+- reindex 入口由 vector_store 提供；memory 只暴露 source iterator，不承担 job history / worker / scheduler。
+
+## 下一批候选 specs
+
+- `memory-extraction-real-llm-regression`
+- `memory-quality-trend-summary`
+- `memory-maintenance-scheduler-or-review-ui`
+
+## 自动化效果验证缺口
+
+- `tests/evaluation/` 已建立 memory extraction evaluation 基线。
+- fixture 使用 JSON 格式，显式声明 `name`、`initial_memories`、`conversation`、`mock_actions`、
+  `expected_memories` 和 `forbidden_memories`。
+- 默认 evaluation 使用 mock LLM：`mock_actions` 驱动 `extract_and_update()`，runner 断言最终
+  `memory_items` 状态包含 `expected_memories` 且不包含 `forbidden_memories`。SQLite 使用
+  `tmp_path`，model_router 与 vector_store 均隔离，不触碰 `data/`。
+- 默认命令：`uv run pytest tests/evaluation -x -q`。该命令只运行 deterministic mock
+  evaluation，真实 LLM fixture case 默认 skip。
+- 手动真实 LLM evaluation：设置 `FLEETENT_EVAL_REAL_LLM=1` 并提供 provider API key 后运行
+  `uv run pytest tests/evaluation/test_memory_extraction_eval.py -q`。runner 会使用真实
+  `memory_extraction` 路由，但仍使用 tmp SQLite 与 mock vector_store；缺少 provider API key
+  时 skip。该模式用于 prompt 或模型变更后的人工质量检查，不进入默认 PR gate。
+
+已覆盖的第一批提取场景：
+- identity create
+- identity update
+- context update + TTL refresh
+- preferences create
+- one-off preference request ignore
+- explicit forget / delete
+- noisy or invalid conversation ignore
+
+仍未覆盖：
+- 长期 precision / recall 趋势和真实生产语料评估。
+
+## 服务化 / 目录边界判断
+
+User Memory 应继续作为模块化单体内的 `fleetent.intelligence.memory` 边界。未来如果要独立服务化，
+更可能拆出的是“memory evaluation / maintenance job”，而不是最早拆运行时读写路径。
 
 ## 验收标准
 
@@ -139,7 +225,7 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
 
 **场景 4：向量检索（v1.0）**
 - Given：用户有 50 条历史记忆，当前话题是"Python 调试"
-- When：long_term_ctx 调用 memory_layer.search()
+- When：long_term_ctx 调用 `fleetent.intelligence.memory.search()`
 - Then：返回与"Python 调试"相关的记忆条目，而非固定最近 20 条
 
 **场景 5：context 类记忆过期（v1.0）**
@@ -176,5 +262,4 @@ async def extract_and_update(user_id: str, conversation: list[dict]) -> None:
 
 - [ ] 冲突判断粒度：同 type 下全量比较，还是只对语义相似度超过阈值的条目做冲突检测？（负责人：待认领）
 - [ ] context TTL 起算点：首次提及时间，还是最后一次提及时间？（负责人：待认领）
-- [ ] 记忆条数上限：v1.0 先设软监控阈值（超出记告警日志），还是直接按 type 设硬上限？如设硬上限，identity / preferences 各多少合适？超出时由 reflection 批量合并，还是 memory_layer 内联驱逐？（负责人：待认领）
-
+- [ ] 记忆条数上限：v1.0 先设软监控阈值（超出记告警日志），还是直接按 type 设硬上限？如设硬上限，identity / preferences 各多少合适？超出时由 reflection 批量合并，还是 memory 模块内联驱逐？（负责人：待认领）

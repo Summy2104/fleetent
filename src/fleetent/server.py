@@ -16,13 +16,41 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from fleetent import api_key_store, mcp_client, quota, session_mgr, user_admin_api, user_store
+from fleetent import (
+    agent_apply_api,
+    agent_console_api,
+    api_key_store,
+    askit_console_api,
+    chat_admin_api,
+    connector_admin_api,
+    kb_admin_api,
+    mcp_client,
+    monitor_admin_api,
+    provider_admin_api,
+    session_mgr,
+    skill_admin_api,
+    stats_admin_api,
+    user_admin_api,
+    user_store,
+)
 from fleetent.auth import seed_builtin_admin
 from fleetent.cron_scheduler import CronScheduler
 from fleetent.agent_loop import run_stream
-from fleetent.config import Settings
+from fleetent.config import Settings, configure_logging
+from fleetent.governance import quota
+from fleetent.governance.permission_gate import (
+    _default_gate,
+    cleanup_stale_approvals,
+    list_approvals,
+)
 from fleetent.mcp_client import McpServerConfig
-from fleetent.permission_gate import _default_gate, cleanup_stale_approvals, list_approvals
+from fleetent.model_router import ROUTES
+from fleetent.observability.startup_diagnostics import (
+    diagnose_database_writable,
+    diagnose_provider_keys,
+    log_config_failed,
+    log_config_loaded,
+)
 from fleetent.sandbox_cleanup import cleanup_orphans
 from fleetent.sandbox_client import SandboxClient
 from fleetent.plugin_loader import expand_plugin_patterns, load_plugins
@@ -74,7 +102,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # mcp register_all). A missing plugins/ dir or a bad plugin never aborts boot.
     load_plugins()
     cleanup_stale_approvals()
-    settings = Settings()
+    try:
+        settings = Settings()  # type: ignore[call-arg]
+    except Exception as exc:
+        log_config_failed(exc)
+        raise
+    configure_logging(settings)
+    log_config_loaded()
+    diagnose_database_writable(settings.database_url)
+    diagnose_provider_keys(ROUTES.values())
 
     # SB3: probe Docker once at startup, resolve the effective code-execution mode,
     # and stash it on app.state for /chat and /health. Docker unavailable degrades
@@ -145,7 +181,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.telegram_bot_token:
         asyncio.create_task(_start_telegram_adapter())
 
-    cron = CronScheduler()
+    cron = CronScheduler(settings=settings.scheduling)
     await cron.start()
 
     yield
@@ -157,6 +193,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title="fleetent", lifespan=lifespan)
 app.include_router(user_admin_api.router)
+app.include_router(skill_admin_api.router)
+app.include_router(provider_admin_api.router)
+app.include_router(kb_admin_api.router)
+app.include_router(connector_admin_api.router)
+app.include_router(chat_admin_api.router)
+app.include_router(agent_console_api.router)
+app.include_router(stats_admin_api.router)
+app.include_router(monitor_admin_api.router)
+app.include_router(agent_apply_api.router)
+app.include_router(askit_console_api.router)
 
 
 class ChatRequest(BaseModel):

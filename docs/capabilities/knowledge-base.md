@@ -6,179 +6,412 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**负责**：数据源接入与文档获取、文档解析与分块、向量索引构建、实体与关系提取、图谱存储、按查询召回相关文档片段（支持混合检索和图增强检索）。
+**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML 解析，local directory、Google Drive folder 与 Confluence Cloud 手动同步、connector list/check/status/sync 操作入口、sync planner、deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、按 tenant + knowledge base 隔离召回相关文档片段，agent 到一个或多个 KB 的绑定与有效 KB 范围解析，向 vector_store reindex 暴露当前可索引 chunks，以及手动运行的 deterministic retrieval evaluation / combined memory+KB embedding evaluation。
+
+**后续负责**：第三方数据源接入与文档获取、更丰富的文档解析、实体与关系提取、图谱存储。
 
 **不负责**：注入 system prompt 的协调与 token 预算（→ long_term_ctx）、用户个人记忆（→ memory）。
 
 **调用关系**：
-- 依赖：vector_store（向量索引）、model_router（`kb_extraction` task，实体提取）、config
+- 依赖：vector_store（向量索引）、config
 - 被依赖：long_term_ctx（检索注入内容）、reflection（只读，观察召回质量）
+
+**模块归属**：
+- owning package：`intelligence.knowledge_base`
+- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`delete(document_id)`、`archive(document_id)`、`iter_indexable_knowledge_chunks(tenant_id, kb_id)`、`AgentKnowledgeBaseBinding`、`bind_agent_to_kb(tenant_id, agent_id, kb_id)`、`unbind_agent_from_kb(tenant_id, agent_id, kb_id)`、`list_agent_kb_bindings(tenant_id, agent_id)`、`resolve_agent_kb_ids(tenant_id, agent_id)`、`ConnectorSummary`、`ConnectorCheckResult`、`ConnectorSyncResult`、`ConnectorStatus`、`list_configured_connectors()`、`check_connector(connector_id)`、`run_connector_sync(connector_id, dry_run)`、`get_connector_status(connector_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`GoogleDriveConnectorConfig`、`ConfluenceConnectorConfig`、`SyncAction`、`SyncPlan`、`SyncPlanItem`、`SyncPlanSummary`、`SyncExecutionSummary`、`plan_local_directory_sync(config, tenant_id, kb_id)`、`execute_sync_plan(plan)`、`sync_local_directory(config, tenant_id, kb_id)`、`plan_google_drive_sync(config, client)`、`sync_google_drive(config, client)`、`plan_confluence_sync(config, client)`、`sync_confluence(config, client)`
+- owned tables：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`、`knowledge_chunks_fts`、`knowledge_source_states`、`knowledge_base_agent_bindings`、`knowledge_connector_status`
+- config namespace：`knowledge_base.*`
 
 ## 关键流程
 
 ```mermaid
 flowchart TD
-    subgraph connector["连接器流程（定时或手动触发）"]
-        C1[DataSource.list_documents] --> C2[DataSource.fetch]
-        C2 --> C3[knowledge_base.ingest\nfilename + content + format + scope]
+    subgraph connector["连接器流程（手动触发）"]
+        C1[DataSource.list_documents] --> C2[plan_local_directory_sync]
+        C2 --> C3[SyncPlan\nnew / changed / unchanged / missing]
+        C3 --> C4[execute_sync_plan]
+        C4 --> C5[ingest_parsed / delete / skip]
+        G1[Google Drive folder] --> G2[plan_google_drive_sync]
+        G2 --> G3[GoogleDriveSyncPlan\nnew / changed / unchanged / unsupported / archive_missing]
+        G3 --> G4[sync_google_drive executor]
+        G4 --> G5[ingest_parsed / archive / skip]
+        F1[Confluence scope] --> F2[plan_confluence_sync]
+        F2 --> F3[ConfluenceSyncPlan\nnew / changed / unchanged / archive_missing]
+        F3 --> F4[sync_confluence executor]
+        F4 --> F5[ingest_parsed / archive / skip]
     end
 
-    subgraph ingest["导入流程（异步，导入请求立即返回）"]
-        A[ingest 调用] --> B[写入 documents 表]
-        B --> C[立即返回 document_id]
-        B --> D[后台：分块]
-        D --> E[写入 chunks 表]
-        E --> E2[同步写入 chunks_fts\nBM25 索引]
-        E --> F[vector_store.upsert\nchunk_id + content + scope]
-        D --> G[LLM 提取实体与关系]
-        G --> H[写入 entities 表]
-        G --> I[写入 relations 表]
-        H --> J[vector_store.upsert\nentity_id + description + scope]
+    subgraph ingest["当前导入流程（同步最小闭环）"]
+        A[ingest_text 调用] --> B[写入 knowledge_documents 表]
+        B --> D[deterministic chunking]
+        D --> E[写入 knowledge_chunks 表]
+        E --> F[vector_store.upsert\nchunk_id + content + namespace]
+        F --> C[返回 KnowledgeDocument]
     end
 
-    subgraph hybrid_search["混合检索（由 long_term_ctx 触发）"]
-        K[search query + scope] --> L[并行]
-        L --> L1[vector_store.search\n语义检索]
-        L --> L2[BM25 检索\n关键词精确匹配\n实现：SQLite FTS5]
-        L1 --> M[RRF 融合排序]
-        L2 --> M
-        M --> N[返回 KnowledgeChunk 列表]
+    subgraph search["当前检索流程（由 long_term_ctx 或调用方触发）"]
+        K[search query + tenant_id + kb_ids + mode] --> L{mode}
+        L -->|vector| V[按 kb namespace 分别调用 vector_store.search]
+        L -->|keyword| F[SQLite FTS5 / BM25 keyword search]
+        L -->|hybrid| H[获取 vector + keyword candidates]
+        V --> M[回查 knowledge_chunks / knowledge_documents]
+        F --> M
+        H --> R[RRF 融合去重]
+        R --> M
+        M --> N[按 score DESC、position ASC、id ASC 稳定排序]
+        N --> O[返回 KnowledgeChunk 列表]
     end
 
-    subgraph graph_search["图增强检索（关系型查询）"]
-        O[graph_search query + scope] --> P[vector_store.search entities]
-        P --> Q[匹配相关实体]
-        Q --> R[遍历 relations 表\n按 depth 展开]
-        R --> S[收集关联 chunk]
-        S --> T[返回 KnowledgeGraphResult]
-    end
 ```
 
 ## 数据模型
 
 ```sql
 -- 文档元数据
-documents (
+knowledge_documents (
   id          TEXT PRIMARY KEY,  -- UUID
   filename    TEXT,
-  scope       TEXT,              -- tenant_id 或 agent_id，用于隔离
-  format      TEXT,              -- "markdown" | "text" | "pdf"
-  source      TEXT,              -- 来源标识（"upload" | "confluence" | "local_dir" | ...）
+  tenant_id   TEXT,              -- 租户标识；私有化单企业部署默认 "default"
+  kb_id       TEXT,              -- 租户内知识库标识，如 "global" / "sales" / "support"
+  source      TEXT,              -- 来源标识（当前默认 "manual"）
   source_url  TEXT,              -- 原始文档 URL 或路径（可选，供溯源用）
-  created_at  DATETIME,
-  updated_at  DATETIME
+  archived_at DATETIME,          -- remote connector missing 时归档；NULL 表示可检索
+  created_at  DATETIME
 )
 
 -- 分块内容
-chunks (
-  id          TEXT PRIMARY KEY,  -- UUID，同时作为 vector_store 的 key
-  document_id TEXT,              -- → documents.id
+knowledge_chunks (
+  id          TEXT PRIMARY KEY,  -- document_id:chunk:{position}，同时作为 vector_store 的 key
+  document_id TEXT,              -- → knowledge_documents.id
+  tenant_id   TEXT,
+  kb_id       TEXT,
   content     TEXT,              -- chunk 文本
   position    INTEGER,           -- chunk 在文档中的顺序
+  metadata_json TEXT,             -- JSON section context，如 title/path/level
   created_at  DATETIME
 )
 
--- 全文索引（SQLite FTS5 虚拟表，与 chunks 表同步写入）
-chunks_fts USING fts5 (
-  content,                       -- 索引 chunks.content
-  content="chunks",              -- 关联原表，content rowid 对应 chunks rowid
-  tokenize="unicode61"           -- 支持中英文混合
+-- 关键词索引，由 knowledge-base 模块通过 Alembic 管理
+knowledge_chunks_fts USING fts5 (
+  chunk_id    UNINDEXED,
+  tenant_id   UNINDEXED,
+  kb_id       UNINDEXED,
+  content,
+  tokenize='unicode61'
 )
 
--- 实体（从文档中 LLM 提取）
-entities (
-  id          TEXT PRIMARY KEY,  -- UUID，同时作为 vector_store 的 key
-  document_id TEXT,              -- → documents.id，来源文档
-  name        TEXT,              -- 实体名称
-  type        TEXT,              -- 实体类型（person / org / concept / product / ...）
-  description TEXT,              -- 实体描述，作为 embedding 文本
-  scope       TEXT,              -- 与 documents.scope 一致，用于隔离
-  created_at  DATETIME
+-- local directory source state
+knowledge_source_states (
+  source_id    TEXT,
+  tenant_id    TEXT,
+  kb_id        TEXT,
+  source_path  TEXT,
+  mtime_ns     INTEGER,
+  content_hash TEXT,
+  document_id  TEXT,
+  updated_at   DATETIME,
+  PRIMARY KEY (source_id, tenant_id, kb_id, source_path)
 )
 
--- 关系（实体间关系，从文档中 LLM 提取）
-relations (
-  id          TEXT PRIMARY KEY,  -- UUID
-  source_id   TEXT,              -- → entities.id
-  target_id   TEXT,              -- → entities.id
-  relation    TEXT,              -- 关系描述（如 "负责" / "属于" / "依赖"）
-  document_id TEXT,              -- → documents.id，关系来源文档
-  created_at  DATETIME
+-- agent 到 KB 的显式绑定；不强制外键，允许先绑定后创建 / 同步 KB
+knowledge_base_agent_bindings (
+  tenant_id  TEXT NOT NULL,
+  agent_id   TEXT NOT NULL,
+  kb_id      TEXT NOT NULL,
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY (tenant_id, agent_id, kb_id)
+)
+
+-- connector 最近一次运行状态；只保存摘要，不保存完整历史或 credential payload
+knowledge_connector_status (
+  connector_id       TEXT PRIMARY KEY,
+  connector_type     TEXT NOT NULL,
+  tenant_id          TEXT NOT NULL,
+  kb_id              TEXT NOT NULL,
+  last_status        TEXT NOT NULL,
+  last_started_at    DATETIME,
+  last_finished_at   DATETIME,
+  last_summary_json  TEXT NOT NULL,
+  last_error         TEXT,
+  updated_at         DATETIME NOT NULL
 )
 ```
 
-向量 embedding 存储在 vector_store，namespace 格式为 `kb_{scope}`：
+向量 embedding 存储在 vector_store，namespace 格式为 `kb:{tenant_id}:{kb_id}`：
 - chunk 向量：以 `chunk.id` 为 key
-- entity 向量：以 `entity.id` 为 key（用于图检索入口定位）
+
+知识库身份由 `tenant_id + kb_id` 共同决定。当前默认 `tenant_id="default"`、`kb_id="global"`；检索时在指定 namespace 内分别查询后合并排序。
 
 ## 接口定义
 
 ```python
 @dataclass
-class DocumentRef:
-    id: str        # 数据源内的唯一标识（如 Confluence page_id）
-    filename: str  # 文件名或标题
-    format: str    # "markdown" | "text" | "pdf" | "html"
-    url: str       # 原始文档 URL 或路径（供溯源）
-
-
-class DataSource:
-    """数据源连接器基类，每种数据源实现此接口。"""
-
-    async def list_documents(self) -> list[DocumentRef]:
-        """列举数据源中所有可导入的文档。"""
-
-    async def fetch(self, ref: DocumentRef) -> bytes:
-        """获取文档原始内容。"""
+class KnowledgeDocument:
+    id: str
+    tenant_id: str
+    kb_id: str
+    filename: str
+    source: str
+    source_url: str | None
 
 
 @dataclass
 class KnowledgeChunk:
     id: str
     document_id: str
+    tenant_id: str
+    kb_id: str
     filename: str
     content: str
+    position: int
     score: float  # vector_store 返回的相似度分数
+    metadata: dict[str, str]  # section context，旧 chunk 默认为 {}
 
 
 @dataclass
-class KnowledgeGraphResult:
-    chunks: list[KnowledgeChunk]   # 关联的文档片段
-    entities: list[str]            # 匹配到的实体名称（展示用）
-    relations: list[str]           # 关系描述列表（如 "A 负责 B"，展示用）
+class ParsedSection:
+    title: str
+    text: str
+    level: int
+    metadata: dict[str, str]
 
 
-async def ingest(filename: str, content: bytes, format: str, scope: str) -> str:
-    """导入文档，异步执行分块、embedding 和图提取。立即返回 document_id，后台处理不阻塞。"""
+@dataclass
+class ParsedDocument:
+    filename: str
+    format: str
+    sections: list[ParsedSection]
+    metadata: dict[str, str]
 
 
-async def search(query: str, scope: str, limit: int = 10) -> list[KnowledgeChunk]:
-    """向量相似度检索，返回最相关的文档片段。适合事实型问答。由 long_term_ctx 调用。"""
+def parse_text(filename: str, content: str) -> ParsedDocument:
+    """解析 plain text，过滤空白内容并生成 body section。"""
 
 
-async def graph_search(query: str, scope: str, depth: int = 2) -> KnowledgeGraphResult:
-    """图增强检索：定位相关实体后按关系展开，返回关联片段与关系链。适合关系型查询。由 long_term_ctx 调用。"""
+def parse_markdown(filename: str, content: str) -> ParsedDocument:
+    """解析 Markdown heading hierarchy，保留 fenced code block。"""
+
+
+def parse_html(filename: str, content: str) -> ParsedDocument:
+    """解析 lightweight HTML，移除 script/style 并把简单 table 转为文本。"""
+
+
+async def ingest_text(
+    filename: str,
+    content: str,
+    tenant_id: str | None = None,
+    kb_id: str | None = None,
+    source: str = "manual",
+    source_url: str | None = None,
+) -> KnowledgeDocument:
+    """导入 plain text / markdown 内容，同步完成分块与向量索引。"""
+
+
+async def ingest_parsed(
+    parsed: ParsedDocument,
+    tenant_id: str | None = None,
+    kb_id: str | None = None,
+    source: str = "manual",
+    source_url: str | None = None,
+) -> KnowledgeDocument:
+    """导入 parser 输出的 sections，并在 chunk metadata 中保留 section title/path/level。"""
+
+
+async def search(
+    query: str,
+    tenant_id: str,
+    kb_ids: list[str],
+    limit: int = 10,
+    mode: Literal["vector", "keyword", "hybrid"] = "vector",
+) -> list[KnowledgeChunk]:
+    """按指定模式检索文档片段，默认保持 vector-only 兼容行为。"""
 
 
 async def delete(document_id: str) -> None:
-    """删除文档及其所有 chunk、实体、关系和对应向量。"""
+    """删除文档及其所有 chunk 和对应向量。"""
+
+
+def iter_indexable_knowledge_chunks(tenant_id: str, kb_id: str) -> Iterator[IndexableItem]:
+    """枚举指定 tenant/kb 当前应存在于 vector_store 的 chunks，namespace 为 kb:{tenant_id}:{kb_id}。"""
+
+
+@dataclass
+class DocumentRef:
+    id: str
+    filename: str
+    format: str
+    path: str | None
+    url: str | None
+    metadata: dict[str, str]
+
+
+@dataclass
+class LocalDirectorySourceConfig:
+    source_id: str
+    root_path: str | Path
+    allowed_roots: list[str | Path]
+
+
+class SyncAction(str, Enum):
+    INGEST_NEW = "ingest_new"
+    REINGEST_CHANGED = "reingest_changed"
+    SKIP_UNCHANGED = "skip_unchanged"
+    DELETE_MISSING = "delete_missing"
+    ARCHIVE_MISSING = "archive_missing"
+    SKIP_UNSUPPORTED = "skip_unsupported"
+    AUTH_FAILED = "auth_failed"
+
+
+@dataclass
+class SyncPlanItem:
+    action: SyncAction
+    source_id: str
+    tenant_id: str
+    kb_id: str
+    source_path: str
+    filename: str
+    document_format: str
+    mtime_ns: int | None
+    content_hash: str | None
+    document_id: str | None
+
+
+async def plan_local_directory_sync(
+    config: LocalDirectorySourceConfig,
+    tenant_id: str,
+    kb_id: str,
+) -> SyncPlan:
+    """扫描 local source 并生成确定性计划；允许读取和 hash source 文档，但不写 KB 或 source state。"""
+
+
+async def execute_sync_plan(plan: SyncPlan) -> SyncExecutionSummary:
+    """按计划执行 ingest / reingest / delete / skip；单 item 失败只计入 failed 并继续后续 item。"""
+
+
+async def sync_local_directory(
+    config: LocalDirectorySourceConfig,
+    tenant_id: str,
+    kb_id: str,
+) -> LocalSyncSummary:
+    """从显式 allowlist root 下递归扫描 .txt/.md/.html/.htm 文件并导入指定 KB。"""
+
+
+@dataclass
+class GoogleDriveConnectorConfig:
+    connector_id: str
+    tenant_id: str
+    kb_id: str
+    folder_id: str
+    credential_ref: str
+    recursive: bool = True
+
+
+async def plan_google_drive_sync(config: GoogleDriveConnectorConfig, *, client: GoogleDriveClient) -> GoogleDriveSyncPlan:
+    """只列举指定 Google Drive folder 并生成确定性计划；不边扫描边写 KB。"""
+
+
+async def sync_google_drive(config: GoogleDriveConnectorConfig, *, client: GoogleDriveClient) -> GoogleDriveSyncSummary:
+    """通过 planner + executor 手动同步 Google Drive folder。"""
+
+
+@dataclass
+class ConfluenceConnectorConfig:
+    connector_id: str
+    tenant_id: str
+    kb_id: str
+    base_url: str
+    username: str
+    credential_ref: str
+    scope_type: Literal["space", "page"]
+    space_key: str | None = None
+    page_id: str | None = None
+    include_children: bool = False
+
+
+async def plan_confluence_sync(config: ConfluenceConnectorConfig, *, client: ConfluenceClient) -> ConfluenceSyncPlan:
+    """按 space / page scope 生成确定性计划；不边扫描边写 KB。"""
+
+
+async def sync_confluence(config: ConfluenceConnectorConfig, *, client: ConfluenceClient) -> ConfluenceSyncSummary:
+    """通过 planner + executor 手动同步 Confluence Cloud pages。"""
+
+
+@dataclass
+class AgentKnowledgeBaseBinding:
+    tenant_id: str
+    agent_id: str
+    kb_id: str
+    created_at: datetime
+
+
+def bind_agent_to_kb(tenant_id: str, agent_id: str, kb_id: str) -> AgentKnowledgeBaseBinding:
+    """把 agent 绑定到一个 KB；重复绑定幂等，不要求 KB 已存在。"""
+
+
+def unbind_agent_from_kb(tenant_id: str, agent_id: str, kb_id: str) -> None:
+    """解除 agent 到 KB 的绑定；不存在时幂等。"""
+
+
+def list_agent_kb_bindings(tenant_id: str, agent_id: str) -> list[AgentKnowledgeBaseBinding]:
+    """列出 agent 的显式 KB 绑定。"""
+
+
+def resolve_agent_kb_ids(tenant_id: str, agent_id: str) -> list[str]:
+    """解析 agent 有效 KB 范围；有显式绑定时使用绑定，否则回退默认 KB，默认 KB 为空时返回空列表。"""
+
+
+def list_configured_connectors() -> list[ConnectorSummary]:
+    """列出 settings 中配置的 Google Drive / Confluence connector 安全摘要。"""
+
+
+async def check_connector(connector_id: str) -> ConnectorCheckResult:
+    """检查 connector credential_ref 和 remote scope，失败详情脱敏。"""
+
+
+async def run_connector_sync(connector_id: str, dry_run: bool = False) -> ConnectorSyncResult:
+    """手动执行 connector dry-run 或真实 sync，并写入最近一次 status。"""
+
+
+def get_connector_status(connector_id: str) -> ConnectorStatus:
+    """读取 connector 最近一次 check / dry-run / sync 状态；未运行返回 never_run。"""
 ```
+
+`mode` 取值：
+- `vector`：仅调用 `vector_store.search`，适合语义相似度召回。
+- `keyword`：仅使用 SQLite FTS5 / BM25，适合产品编号、错误码、专有名词等精确词召回。
+- `hybrid`：同时取 vector 与 keyword candidates，用 RRF 融合去重后返回。
+
+hybrid search 当前不调用 rerank provider，不包含 query planner、graph search，也不依赖 OpenSearch / Elasticsearch / LanceDB。
 
 ## 现状
 
-团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移代码**，而非从零重写。
+**已完成 core + parser + hybrid + local connector + sync planner + Google Drive / Confluence connector + agent KB binding + connector operations 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、基础 Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入；`knowledge-base-parsers-basic` 增加了无 AI 框架依赖的 plain text / Markdown / lightweight HTML parser，并提供 parsed ingest adapter；`knowledge-base-hybrid-search` 增加了 knowledge-base-owned SQLite FTS5 keyword index、keyword mode、hybrid mode 和 RRF 融合；`knowledge-base-connectors-local` 增加了 DataSource / DocumentRef 边界、显式 root allowlist 的 local directory source、`.txt` / `.md` / `.html` / `.htm` 格式映射、source path / mtime / content hash 状态记录，以及手动 `sync_local_directory`；`knowledge-base-sync-planner` 增加了 plan / execute 分离、`ingest_new` / `reingest_changed` / `skip_unchanged` / `delete_missing` 动作模型；`knowledge-base-connectors-google-drive` 增加指定 folder scope、OAuth `credential_ref`、fake-client default path、Google Docs HTML export、text / Markdown / HTML parser dispatch、`archive_missing` 和 opt-in smoke scaffold；`knowledge-base-connectors-confluence` 增加 Cloud API token `credential_ref`、space / page / page+children scope、storage HTML parser dispatch、bounded 429 retry、`archive_missing` 和 opt-in smoke scaffold；`knowledge-base-agent-kb-binding` 增加 agent 到多个 KB 的显式绑定、默认 KB 回退和空范围诊断；`knowledge-base-connector-operations` 增加 `fleetent-admin kb connectors list/check/status/sync`、credential_ref 检查、dry-run、最近一次 status 和失败摘要脱敏。
 
-**可直接迁移（knowledge-bridge 已实现，无 LlamaIndex 依赖）**：
-- ✅ 文档解析器：HTML / Markdown / PDF / DOCX / PPTX / Google Docs / Google Sheets / 图片（换输出类型即可）
-- ✅ Confluence 连接器：分页、增量同步、限速逻辑
-- ✅ Google Drive 连接器：OAuth 2.0 认证、Service Account、变更 token 增量同步、Webhook
-- ✅ 本地目录连接器
-- ✅ 中文 BM25 分词：jieba + RagFlow 方式（`retrieval/lexical.py`）
-- ✅ 同步规划器：6 种动作模型（SKIP / UPSERT_METADATA_ONLY / REEMBED / RECHUNK_LOCAL / REFETCH_AND_REINDEX / DELETE_LOCAL）
+团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移设计资产和小块算法**，而非从零重写或整体搬运。
+
+历史迁移评估见 [knowledge-bridge 迁移计划](../archive/knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：已先完成 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环，并完成 `knowledge-base-parsers-basic` 的基础解析器、`knowledge-base-hybrid-search` 的 SQLite FTS5 / BM25 与 RRF 融合、`knowledge-base-connectors-local` 的 local directory 手动同步、sync planner、Google Drive connector、Confluence connector；后续再推进 graph search 和 retrieval audit。
+
+当前未实现内容：
+- 无后台 job、admin UI、REST upload API；vector rebuild 目前通过 vector_store 同步 public API 触发
+- 无 rerank / query planner
+- 无 graph_search、entities、relations 或 `kb_extraction`
+- 无 production ranking dashboard、reranker evaluation 或 query planner evaluation
+- Google Drive 不做 service account / domain-wide delegation，不做最终提问用户到 Drive document ACL 的实时映射；OAuth token 通过 connector 的 `credential_ref` 引用，MVP 可指向本地 token 文件，生产部署需保护文件权限和备份策略，后续可迁移到 credential store / secret manager。
+- Google Drive missing / 不可见默认归档 KB document 并移除 chunks / vector entries，不物理删除 `knowledge_documents` 行。
+- Google Docs MVP 只通过 export HTML 后走 HTML parser；Google Sheets / Slides 结构化解析后置，当前作为 unsupported 跳过。
+- Confluence 只支持 Cloud API token + `credential_ref`，不做 Server / Data Center、多认证模式或最终用户 Confluence page ACL 映射；missing / 不可见默认 archive，不物理删除 `knowledge_documents` 行。
+
+**后续可迁移参考（knowledge-bridge 已实现，但需按 fleetent specs 分批适配）**：
+- ✅ 文档解析思路：text / Markdown / HTML / section-first 归并优先；PDF / DOCX / PPTX / Google Docs / Google Sheets 后续逐项评估依赖；图片 / VLM 暂缓
+- ✅ Confluence 连接器算法：分页、增量 token、限速和 429 backoff；接口必须重写为 fleetent `DataSource`
+- ✅ Google Drive 连接器算法：OAuth 2.0 用户授权、folder listing、Docs HTML export；service account / domain-wide delegation、change token、Webhook 暂缓
+- ✅ 本地目录连接器：遍历、后缀映射、mtime/hash 变更检测；去掉 LlamaIndex `BaseReader`
+- ✅ 中文 BM25 分词思路：jieba + CJK bigram（`retrieval/lexical.py`），在 SQLite FTS5 下重新验证
+- ✅ 同步规划器动作模型：已在 fleetent 内落地 local source 的 new / changed / unchanged / missing 基础动作；更细粒度 metadata-only / rechunk / reembed / refetch 动作后续按 reindex specs 评估
 
 **需要重写（深度耦合 LlamaIndex 或违反 fleetent 约束）**：
-- 向量存储：LanceDB → fleetent `vector_store`（sqlite-vec / Qdrant）
-- Embedding：OpenAI Embeddings API（云托管，禁止）→ 自托管 bge-m3 / multilingual-e5
+- 向量存储：LanceDB → fleetent `vector_store` public API（当前可用普通 SQLite persistent backend；sqlite-vec / Qdrant 后置）
+- Embedding：OpenAI Embeddings API（云托管，禁止默认）→ fleetent HTTP embedding provider，生产配置指向自托管 bge-m3 / multilingual-e5 等模型服务
 - 分块器：逻辑参考 knowledge-bridge，但 `TextNode` 类型替换为 fleetent 自定义 dataclass
 - 检索引擎：逻辑参考，接口对齐 `search()` / `graph_search()`
 
@@ -186,26 +419,62 @@ async def delete(document_id: str) -> None:
 - 实体与关系提取（`kb_extraction` task）
 - 图谱存储（entities / relations 表）与 `graph_search()`
 
+## 当前缺口
+
+- parser 已支持 text / Markdown / lightweight HTML；PDF / Office / image / VLM 解析尚未实现。
+- local directory、Google Drive 与 Confluence 已支持 plan + execute 手动 sync，并可通过 admin CLI 列出、检查、dry-run、同步和查看最近一次 status；尚未实现后台 job。
+- 检索已支持 SQLite FTS5/BM25 keyword mode 与 RRF hybrid mode；尚未实现 rerank、query planner 或 graph。
+- 外部 SaaS 数据源已有 fake-client 默认路径和手动 opt-in smoke scaffold；真实 Google Drive / Confluence API client 不进入默认测试路径。
+- long-term-ctx 已通过 `resolve_agent_kb_ids()` 使用 agent KB binding；尚未实现 document-level ACL。
+- 后台 vector index rebuild job runtime 尚未实现；当前只提供同步 vector_store reindex public API。
+
+## 下一批候选 specs
+
+- 后续 connector 增强 specs：Drive / Confluence 真实 client wiring、ACL 映射、scheduler / full sync history、附件 / PDF / Office 解析
+
+## 自动化效果验证
+
+已提供 `tests/evaluation/knowledge_base_retrieval_eval.py` 和 `tests/evaluation/fixtures/knowledge_base_retrieval/*.json`：
+
+- fixture schema 固定为 `name`、`documents`、`queries`、`expected_chunks`、`forbidden_chunks`。
+- 默认 runner 使用 deterministic embedding、tmp SQLite DB 和 tmp SQLite vector backend，不调用外部服务，不触碰 `data/`。
+- runner 会 ingest fixture documents，执行 query，并断言 expected chunk/snippet 出现在 top-k，forbidden chunk/snippet 不出现在结果中。
+- 真实 embedding evaluation 默认 skip；只有设置 `FLEETENT_EVAL_REAL_EMBEDDING=1` 且提供 endpoint、model、API key 和 dimensions 时才手动运行。
+- combined memory+KB embedding evaluation 使用 tmp SQLite / tmp vector DB，并通过 `vector_store.reindex()` 重建 KB index 后验证 expected / forbidden snippets。
+
+## 自动化效果验证缺口
+
+- 扩展小型企业文档 fixture，覆盖更多中文、标题层级、表格文本和重复内容。
+- 对比 vector-only、BM25-only、hybrid RRF 的召回质量。
+- 验证 tenant + kb namespace 隔离。
+
+## 服务化 / 目录边界判断
+
+knowledge-base 是未来最有独立服务潜力的模块，因为它会包含连接器、同步任务、解析、索引和检索。
+但当前应先在 modular monolith 内建立 `intelligence.knowledge_base` 目录和 public API，等 ingest/search/sync
+边界稳定后再考虑独立进程或服务。
+
 ## 规划中（v1.0）
 
-- [ ] **数据源连接器**：通过统一 `DataSource` 接口接入不同来源的文档
-  - **文件直传**：管理员通过 API 直接上传文件（Markdown / 纯文本 / PDF）
-  - **Confluence Server/DC**：通过 Confluence REST API 拉取页面，使用 `atlassian-python-api`
-  - **本地目录**：扫描指定目录，监听文件变更，适合 NFS / 共享盘场景
-  - **Google Drive**：通过 Drive API v3 拉取文件，使用 `google-api-python-client`；Google Docs 通过 Export API 导出为 HTML 再解析；需要 per-tenant OAuth 2.0 token 存储与刷新
-  - 新增数据源只需实现 `DataSource` 接口，不改核心导入逻辑
+- [x] **数据源连接器 baseline**：通过统一 source / sync planner 边界接入不同来源的文档
+  - ✅ **本地目录**：已支持显式 allowlist root 下 `.txt` / `.md` / `.html` / `.htm` 的手动 sync；文件监听和后台调度后置
+  - ✅ **Google Drive**：已支持指定 folder scope、OAuth `credential_ref`、Google Docs HTML export、text / Markdown / HTML parser dispatch、fake-client 默认测试和手动 opt-in smoke；不做 service account / domain-wide delegation、最终用户 Drive ACL、Sheets / Slides 结构化解析
+  - ✅ **Confluence Cloud**：已支持 Cloud API token `credential_ref`、space / page / page+children scope、storage HTML parser dispatch、bounded 429 retry、fake-client 默认测试和手动 opt-in smoke；不做 Server / Data Center、最终用户 page ACL、attachments / comments
+  - remote source missing / 不可见默认 archive KB document，不物理删除 `knowledge_documents` 行
+  - **文件直传 / REST upload**、后台调度、sync history、文档级 ACL 和更多格式解析后置
 
-- [ ] **文档解析**：将原始文件内容转换为干净文本，再进入分块流程
+- [x] **基础文档解析**：将原始 text / Markdown / lightweight HTML 转换为 parsed sections，再进入分块流程
   - Markdown / 纯文本：直接处理，无需额外依赖
-  - PDF：使用 `pymupdf`（轻量，仅处理 PDF）
-  - HTML（来自 Confluence 等）：使用 `beautifulsoup4` 清洗标签
-  - 解析结果统一为纯文本，再交给分块逻辑
+  - HTML：使用标准库 lightweight parser，移除 script/style，提取 heading/body/table 文本
+  - PDF / Office / image / VLM 解析不在当前能力范围内，后续单独评估依赖与数据主权影响
+  - parsed section metadata 会随 chunk 保留 section title/path/level
 
-- [ ] **文档导入**：解析后的文本写入知识库
-  - 导入后异步处理（分块 + embedding + 图提取），不阻塞调用方
+- [x] **文档导入**：解析后的文本写入知识库
+  - 当前已支持 `ingest_text()` / `ingest_parsed()` 同步导入、保存 document/chunk，并进入 vector / keyword 索引
+  - 后续异步处理和图提取不在当前 foundation 范围内
 
-- [ ] **分块与向量索引**：文档内容分块后写入 vector_store
-  - 每个 chunk 保留来源文档信息（filename、position）
+- [x] **分块与向量索引**：文档内容分块后写入 vector_store
+  - 每个 chunk 保留来源文档信息（filename、position）和 parser section metadata
   - 分块策略见待决问题
 
 - [ ] **实体与关系提取**：分块完成后，用 LLM 从文档提取实体和关系写入图谱
@@ -213,21 +482,21 @@ async def delete(document_id: str) -> None:
   - entity 描述同时写入 vector_store，用于图检索的入口定位
   - 提取在后台执行，与分块并行触发
 
-- [ ] **混合检索（Hybrid Search）**：BM25 关键词检索与向量语义检索并行，RRF 融合排序后返回
-  - 对外接口不变：`search(query: str, scope: str) → list[KnowledgeChunk]`
+- [x] **混合检索（Hybrid Search）**：BM25 关键词检索与向量语义检索并行，RRF 融合排序后返回
+  - 对外接口兼容扩展：`search(query: str, tenant_id: str, kb_ids: list[str], mode="hybrid") → list[KnowledgeChunk]`
   - BM25 擅长精确词匹配（产品编号、人名、专有名词），当前实现使用 SQLite FTS5（内置，无需额外服务）
   - 向量检索负责语义相似度和同义词
   - RRF（Reciprocal Rank Fusion）合并两路排序结果，无需调权重参数
 
 - [ ] **图增强检索**：从相关实体出发，按关系图谱展开，收集关联 chunk
-  - 对外接口：`graph_search(query: str, scope: str, depth: int) → KnowledgeGraphResult`
+  - 对外接口：`graph_search(query: str, tenant_id: str, kb_ids: list[str], depth: int) → KnowledgeGraphResult`
   - 适合关系型查询（"X 和 Y 是什么关系？"、"谁负责 Z？"）
   - depth 控制关系展开层数，默认 2 层，防止结果爆炸
   - 图数据存储在 SQLite（entities + relations 表），不需要独立图数据库
 
-- [ ] **作用域隔离**：通过多 KB + agent 绑定实现访问控制
+- [x] **作用域隔离**：通过多 KB + agent 绑定实现访问控制
   - 按内容敏感度或部门建立多个 KB（如 Company-Wide / Engineering / HR / Finance）
-  - agent 绑定到一个或多个 KB，检索时只访问绑定的 KB
+  - agent 绑定到一个或多个 KB，检索时只访问绑定的 KB；未配置显式绑定时只访问默认 KB
   - 公共内容放 Company-Wide KB，多个 agent 同时绑定；部门内容放部门 KB，只有对应 agent 可见
   - 真正高度敏感的数据（个人薪资、绩效记录等）不进知识库，由结构化系统管理
 
@@ -238,41 +507,54 @@ async def delete(document_id: str) -> None:
 - When：用户提问与文档内容相关
 - Then：long_term_ctx 通过 knowledge_base.search() 召回相关片段，agent 回答中体现文档内容
 
-**场景 2：导入不阻塞**
-- Given：管理员上传一份较大的 PDF
-- When：导入请求返回
-- Then：API 立即返回 document_id，分块与 embedding 在后台执行
+**场景 2：导入生成稳定 chunks**
+- Given：调用方导入一段 text / markdown 内容
+- When：chunk_size 和 chunk_overlap 固定
+- Then：生成的 chunk 内容和 position 保持 deterministic
 
 **场景 3：作用域隔离**
-- Given：agent A 和 agent B 分别绑定不同 scope 的知识库
-- When：两个 agent 分别检索相同 query
-- Then：各自只召回自己 scope 内的文档片段，互不干扰
+- Given：不同 tenant 或不同 `kb_id` 中存在相似内容
+- When：调用 search(query, tenant_id, kb_ids)
+- Then：只召回指定 tenant 和 kb 范围内的文档片段
 
 **场景 4：文档删除**
 - Given：已导入并可检索的文档
-- When：管理员调用 delete(document_id)
-- Then：该文档的所有 chunk 及其实体、关系不再出现在任何检索结果中
-
-**场景 5：图增强检索返回关系链**
-- Given：知识库中有文档描述 "Alice 负责项目 Orion，Bob 是 Alice 的上级"
-- When：用户提问 "谁可以审批 Orion 项目？"
-- Then：graph_search 通过实体 "Orion" → 关系 "负责" → "Alice" → 关系 "上级" → "Bob" 展开，返回包含 Bob 和审批信息的相关 chunk
+- When：调用 delete(document_id)
+- Then：该文档的所有 chunk 不再出现在检索结果中，对应 vector entries 被删除
 
 ## 测试边界
 
 **需要单元测试的行为**：
-- 导入异步性：ingest() 立即返回，分块、embedding 和图提取均在后台执行
-- scope 隔离：不同 scope 的检索结果（向量和图）互不干扰
-- delete 级联：删除文档后对应 chunk、entity、relation 均不出现在检索结果中
-- chunk 来源关联：KnowledgeChunk 返回正确的 filename 和 position
-- BM25 精确匹配：含精确关键词的 chunk 在 search() 结果中排名靠前
-- RRF 融合：向量和 BM25 各自命中的 chunk 都出现在合并结果中，不互相覆盖
-- 图遍历 depth：graph_search(depth=1) 只返回直接关联实体，不展开二级
-- graph_search scope 隔离：不同 scope 的实体和关系不互通
+- public API 可导入：`KnowledgeDocument`、`KnowledgeChunk`、`ingest_text()`、`search()`、`delete()`、`iter_indexable_knowledge_chunks()`、`AgentKnowledgeBaseBinding`、`bind_agent_to_kb()`、`unbind_agent_from_kb()`、`list_agent_kb_bindings()`、`resolve_agent_kb_ids()`、`DocumentRef`、`DataSource`、sync planner dataclasses、`plan_local_directory_sync()`、`execute_sync_plan()`、`sync_local_directory()`
+- 配置默认值：`knowledge_base.enabled=false`，默认 tenant/kb 与 chunk 参数稳定
 
-**需要 mock 的依赖**：
+**需要集成测试的行为**：
+- Alembic fresh upgrade 创建 `knowledge_bases`、`knowledge_documents`、`knowledge_chunks`
+- ingest_text 保存 document、生成 deterministic chunks，并逐 chunk 调用 vector_store.upsert
+- 空内容 fail fast
+- search 按 `kb:{tenant_id}:{kb_id}` namespace 调用 vector_store，支持多 kb 合并与稳定排序
+- keyword search 可命中产品编号、错误码等精确词，并保持 tenant/kb 隔离
+- hybrid search 合并 vector 与 keyword candidates，同一 chunk 去重并通过 RRF 提升双命中结果
+- knowledge base 隔离：不同 `tenant_id + kb_id` 的检索结果互不干扰
+- delete 级联：删除文档后对应 chunk 和 vector entries 均被清理
+- long-term-ctx 在 `knowledge_base.enabled=true` 时调用内置 provider；disabled 或无结果时降级
+- local sync planner 为 new / changed / unchanged / missing source 生成确定性动作
+- execute_sync_plan 只在 item 成功后更新 source state，单 item 失败不阻断后续 item
+- sync_local_directory 通过 planner + executor 执行；本地文件删除后对应 KB document 和 chunks 被删除
+- Google Drive connector 通过 OAuth `credential_ref` 绑定 connector 授权，只扫描指定 folder，不做 service account / domain-wide delegation 或最终用户 Drive ACL 映射
+- Google Drive sync 通过 planner + executor 执行；missing / 不可见 source 默认 archive KB document，不物理删除 document row
+- Google Drive 默认测试使用 fake client；真实 smoke 只有 `FLEETENT_GOOGLE_DRIVE_SMOKE=1` 且 credential_ref / folder id 齐全时才运行，否则 skip
+- Confluence connector 只支持 Cloud API token + `credential_ref`，按 space / page scope 同步 storage HTML；默认测试使用 fake client，真实 smoke 只有 `FLEETENT_CONFLUENCE_SMOKE=1` 且 base URL / username / credential_ref / scope 齐全时才运行，否则 skip
+- iter_indexable_knowledge_chunks 按 tenant/kb 隔离返回当前 chunks，namespace 为 `kb:{tenant_id}:{kb_id}`
+
+**需要 evaluation 测试的行为**：
+- fixture loader 对 `name`、`documents`、`queries`、`expected_chunks`、`forbidden_chunks` 缺失 fail fast
+- deterministic runner 使用 tmp SQLite DB 和 tmp vector backend ingest fixture documents
+- vector-only query top-k 包含 expected chunk/snippet，且不包含 forbidden chunk/snippet
+- real embedding evaluation 默认 skip，缺少 provider credentials/config 时也 skip
+
+**需要 mock / monkeypatch 的依赖**：
 - `vector_store`：隔离向量索引读写
-- `model_router.get_async_client_and_config`：隔离实体提取 LLM 调用
 - SQLite DB 路径：`monkeypatch` 到 `tmp_path`，绝不触碰 data/
 
 ## 待决问题
@@ -284,7 +566,7 @@ async def delete(document_id: str) -> None:
 - [ ] graph_search 与 search 的调用决策：由 long_term_ctx 根据 query 类型选择，还是总是并行调用两者再合并？（负责人：待认领）
 - [ ] 图提取时机：与分块同批次触发，还是分块后单独排队？大文档图提取耗时较长，影响何时可检索。（负责人：待认领）
 - [ ] PDF 解析库选型：`pymupdf`（轻量，仅 PDF）还是 `unstructured`（重但覆盖更多格式）？如需支持 DOCX/PPTX 等格式，`unstructured` 更合适。（负责人：待认领）
-- [ ] Confluence 连接器认证方式：API Token（Confluence Cloud）vs Basic Auth（Server/DC）？优先支持哪种？（负责人：待认领）
-- [ ] Google Drive OAuth token 存储：token 存在哪里（SQLite per-tenant）？刷新失败时如何通知管理员重新授权？（负责人：待认领）
-- [ ] 数据源同步策略：连接器是全量重新导入，还是增量同步（只处理变更文档）？（负责人：待认领）
+- [x] Confluence 连接器认证方式：已定 MVP 只支持 Confluence Cloud API token + `credential_ref`；Server / Data Center 后置。
+- [x] Google Drive OAuth token 存储：已定 MVP 使用 connector-level `credential_ref`，可指向本地 token 文件；后续再迁移 credential store / secret manager。
+- [x] 数据源同步策略：已定所有 connector 通过 planner + executor 执行；remote missing 默认 archive，不物理删除。
 - [ ] 文档级 ACL（v2.0）：当前用多 KB + agent 绑定控制访问。如需更细粒度（同一 KB 内不同文档对不同用户可见），需引入文档级权限字段和检索时过滤逻辑。（负责人：待认领）

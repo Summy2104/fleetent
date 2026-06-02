@@ -49,9 +49,17 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 - 完成后将该 task 标记为 `[x]`
 - 跳过任何一步 = 违反流程
 
-**4. merge / PR，清理 worktree**
+**4. opsx:archive** — 所有 checkbox 为 `[x]` 后，在**当前功能分支**归档并同步 specs
 
-**5. opsx:archive** — 所有 checkbox 为 `[x]` 后归档，同步 specs
+- 归档先于合并决策：archive 表示"实现完成"，spec 同步随同一分支进入后续 PR，便于一并 review
+- 不是"已上线"——归档不代表已部署到 main
+
+**5. 推送分支 + 清理 worktree**
+
+- 清理前提（三条全满足）：分支已推送到 remote（或已建 PR）、worktree 干净、无未提交改动
+- 任一不满足不得清理 worktree，避免丢失未推送的工作
+
+**6. 后续决定 merge 或 PR** — 在主仓库基于已推送分支进行，与 worktree 生命周期解耦
 
 ---
 
@@ -68,13 +76,13 @@ src/fleetent/
   skill_registry.py  ← 扫描 skills/，关键词匹配，注入 system prompt
   context_mgr.py     ← in-session token 压缩，keep_tail identity check
   memory_layer.py    ← 跨 session 事实：Haiku 提取 → JSONL → 注入
-  user_store.py      ← SQLite 用户/API key 管理
+  user_store.py      ← 用户/API key 持久化（当前 SQLite-first）
   eval_logger.py     ← append-only JSONL 追踪日志
   server.py          ← FastAPI：POST /chat (SSE)，GET /health，Bearer 认证
   admin.py           ← CLI：create-user, list-users, rotate-key 等
   config.py          ← pydantic-settings；加载 .env + config/settings.yaml
   agent_policy.py    ← fnmatch tool 访问检查（allowed_tools 白名单）
-  agent_store.py     ← SQLite：agent 定义 + 用户绑定 + channel 绑定
+  agent_store.py     ← agent 定义 + 用户绑定 + channel 绑定（当前 SQLite-first）
   im_user_store.py   ← (platform, platform_user_id) → 内部 User；allowlist 管理
   session_mgr.py     ← JSON session 持久化；per-session asyncio.Lock
   permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
@@ -82,7 +90,7 @@ src/fleetent/
   mcp_client.py      ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
   sub_agent.py       ← asyncio.gather 并行子 agent；最大深度 1
   cron_scheduler.py  ← APScheduler 定时任务；server 启动时初始化
-  schedule_store.py  ← SQLite：定时任务定义与状态持久化
+  schedule_store.py  ← 定时任务定义与状态持久化（当前 SQLite-first）
   webhook_router.py  ← Webhook 来源配置加载、签名验证、消息提取
   im_gateway/
     normalizer.py    ← NormalizedMessage dataclass；统一路由 pipeline
@@ -95,8 +103,11 @@ src/fleetent/
 以下做法**明确禁止**，不需讨论：
 
 - **禁止引入 AI 框架**：LangChain / LlamaIndex / LangGraph——直接调 SDK，不要框架抽象
-- **禁止 ORM**：不作 ORM 数据访问，用标准库 `sqlite3` 直接写 SQL（同步；全仓 store 一致）。SQLAlchemy 仅供 alembic 迁移声明 schema 用，不引入 ORM 层；`aiosqlite` 未引入（无此依赖）
-- **禁止全局可变状态**：模块级路径常量（`DB_PATH` / `SESSIONS_DIR` 等）必须可通过 `monkeypatch` 注入，方便测试隔离
+- **禁止 ORM**：数据库策略是 SQLite-first，不是 SQLite-only；手写 SQL 通过 store 边界保持可审计
+- **禁止扩散 SQLite 细节**：新增或改造数据库代码必须经过统一 DB runtime / store 边界，不得继续扩散 `sqlite3.connect`、`DB_PATH` re-export、SQLite 专属方言到业务层
+- **SQL 参数规范**：store 层 SQL 使用 named parameters（如 `:user_id`），不要新增 `?` 占位符风格
+- **schema lifecycle 归 Alembic**：不要在新 store 中复制 `_init_db()` 建表/补列模式
+- **禁止全局可变状态**：legacy 模块级路径常量（`DB_PATH` / `SESSIONS_DIR` 等）在迁移前必须可通过 `monkeypatch` 注入，方便测试隔离
 - **新依赖必须经过讨论**：区分三类——
   - 基础设施服务（PostgreSQL、Redis、Qdrant 等）：可引入，需在 PR 中说明必要性和自托管方案
   - AI 框架（LangChain / LlamaIndex / LangGraph）：永久禁止，无论何种理由
@@ -126,7 +137,7 @@ data/
 
 ### 隔离模式
 
-- `monkeypatch.setattr(module, "DB_PATH", tmp_path / "x.db")` — SQLite 隔离
+- 数据库测试优先使用统一 DB fixture 或 `tmp_path` 隔离；legacy store 迁移前可 `monkeypatch.setattr(module, "DB_PATH", tmp_path / "x.db")`
 - `monkeypatch.setattr(memory_layer, "_mem_path", ...)` — 记忆文件隔离
 - `patch("fleetent.memory_layer.get_client_and_config", ...)` — LLM 调用隔离
 - 所有 async 测试自动收集：`asyncio_mode = auto`（pytest.ini），无需 `@pytest.mark.asyncio`
@@ -134,15 +145,22 @@ data/
 ### Mock 策略
 
 - **LLM 调用必须 mock**：patch `get_client_and_config`，单元测试不允许真实 API 调用
-- **SQLite 必须隔离**：monkeypatch `DB_PATH` 到 `tmp_path`
+- **数据库必须隔离**：使用 `tmp_path` / 统一 DB fixture；legacy store 迁移前 monkeypatch `DB_PATH` 到 `tmp_path`
 - **文件路径必须隔离**：sessions、memories 路径同上
 - **外部 HTTP**（MCP、sandbox）：用 `respx` 或 `unittest.mock` mock，不发真实请求
 
 ### 测试文件约定
 
-- 命名：`tests/test_{模块名}.py`，一模块一文件
+- 测试按成本和依赖范围分层：
+  - `tests/unit/`：单模块行为，mock LLM、数据库、HTTP、sandbox 等外部依赖，作为新增单元测试默认位置
+  - `tests/integration/`：多模块协作、SQLite/Alembic/FastAPI、observability trace / usage / logging 等需要真实本地组件的测试
+  - `tests/e2e/`：启动服务或走 CLI/HTTP/IM 完整链路的端到端测试；默认不进入 PR 门禁，真实服务 smoke 需显式开启
+  - `tests/evaluation/`：memory、reflection、long-term context、knowledge-base 等效果评估；不得接入真实 LLM / embedding 服务作为默认测试
+- 历史平铺测试已迁移到分层目录；不得继续向 `tests/` 根目录新增 `test_*.py`
+- 命名：`test_{模块名}.py`，一模块一文件
 - 每个测试函数只测一个行为，不在同一函数里断言多个不相关的事情
 - `permission_gate` 测试必须传短超时：`PermissionGate(medium_timeout=0.1)`
+- TDD 红绿循环优先运行最近相关分层命令，例如 `uv run pytest tests/unit -x -q` 或 `uv run pytest tests/integration -x -q`；收尾必须运行 `uv run pytest -x -q`
 
 ---
 
@@ -164,11 +182,15 @@ data/
 uv sync                          # 安装依赖
 uv run pytest                    # 运行测试
 uv run pytest -x -q              # fail-fast
+uv run pytest tests/unit         # 单元测试
+uv run pytest tests/integration  # 集成测试
+uv run pytest tests/e2e          # 端到端测试
+uv run pytest tests/evaluation   # 效果评估测试
 uv run ruff check src tests      # lint
 uv run mypy src                  # 类型检查
 uv run fleetent "hello"        # CLI
 uv run fleetent-admin create-user --name "Alice"  # 用户管理
-uvicorn fleetent.server:app --reload  # HTTP 服务（端口 8000）
+uvicorn fleetent.server:app --reload --port 8765  # HTTP 服务（默认端口 8765）
 ```
 
 ---

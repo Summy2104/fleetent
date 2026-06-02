@@ -18,8 +18,8 @@
 graph TD
     A["接入层\nserver.py · im_gateway · webhook_router"]
     B["编排层\nagent_loop · sub_agent"]
-    C["能力层\nmodel_router · tool_registry · long_term_ctx\nskill_registry · context_mgr · mcp_client\nsandbox_client · permission_gate · cron_scheduler"]
-    D["基础层\nuser_store · agent_store · im_user_store\nsession_mgr · schedule_store · eval_logger\nagent_policy · config · admin"]
+    C["能力层\nmodel_router · tool_registry · intelligence.long_term_ctx\nintelligence.memory · intelligence.vector_store · intelligence.reflection\nskill_registry · context_mgr · integrations.mcp\nintegrations.sandbox · governance.permission_gate · cron_scheduler"]
+    D["横切基础能力\nobservability · config · database runtime\nuser_store · agent_store · im_user_store\nsession_mgr · schedule_store · governance.agent_policy · platform.admin_cli"]
 
     A --> B --> C --> D
 ```
@@ -29,6 +29,41 @@ graph TD
 ---
 
 ## 模块地图
+
+### 目标 package map
+
+fleetent 采用模块化单体：单进程、单仓库、统一部署，但代码按能力边界组织。现有平铺模块可渐进迁移；
+新增模块优先进入目标 package。
+
+```
+src/fleetent/
+  runtime/          ← agent_loop、context_mgr、sub_agent
+  governance/       ← agent_policy、permission_gate、agent 能力边界
+  platform/         ← user / agent / API key / admin / auth control plane
+  channels/         ← im_gateway、webhook_router、cron_scheduler、schedule_store
+  intelligence/     ← memory、knowledge_base、long_term_ctx、vector_store、reflection
+  integrations/     ← mcp、sandbox、connectors
+  observability/    ← trace、log、usage、diagnostics
+  infrastructure/   ← config、db runtime、底层 adapter
+```
+
+能力边界说明：
+
+- `intelligence/*` 负责 agent 的长期知识、记忆、检索、反思与上下文注入；其中 `vector_store`
+  暂时同时承载向量后端与 embedding / rerank provider 边界，等多个模块直接复用 provider 后再评估是否抽出。
+- `observability/*` 是横切基础能力，不归入 intelligence；它记录 logs、traces、usage 和 source attribution，
+  供 agent-runtime、platform、reflection 等模块读取。
+- `infrastructure/*` 只承载 config、database runtime 和底层 adapter，不拥有业务表或业务语义。
+
+迁移规则：
+
+- 新代码进入 owning package；旧平铺模块在被大幅触碰时迁移。
+- 跨模块调用只能使用 public API，不 import 另一模块的 internal implementation。
+- 每张持久化表有且只有一个 owner module；其他模块通过 owner public API 访问。
+- 每个模块拥有稳定配置命名空间，例如 `memory.*`、`knowledge_base.*`、`observability.*`。
+- 平铺模块迁移期间可以保留 re-export shim，但 shim 不承载业务逻辑。
+
+### 当前模块地图
 
 ```
 src/fleetent/
@@ -44,21 +79,29 @@ src/fleetent/
   tools.py           ← 内置工具（import 即注册，副作用）
   skill_registry.py  ← 扫描 skills/，关键词匹配，注入 system prompt
   context_mgr.py     ← in-session token 压缩
-  memory_layer.py    ← 长期上下文：Haiku 提取事实 → SQLite → 注入（能力层称 long_term_ctx）
-  mcp_client.py      ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
-  sandbox_client.py  ← Docker CLI 封装：隔离 Python 执行
-  permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
-  cron_scheduler.py  ← APScheduler 定时任务；server 启动时初始化
-  webhook_router.py  ← Webhook 来源配置加载、签名验证、消息提取
+  intelligence/
+    memory/         ← 结构化语义记忆：提取动作 → SQLite memory_items → vector_store 索引
+    knowledge_base/ ← 企业文档知识库：解析、导入、local / Google Drive / Confluence sync、vector / keyword / hybrid search
+    vector_store/   ← 向量索引基础设施：in-memory / SQLite backend，embedding / rerank provider
+    long_term_ctx.py ← 长期上下文调度：memory / knowledge_base provider 已接入
+    reflection.py   ← 反思报告：读取 traces / memory，只生成建议，不自动写回
+  integrations/
+    mcp/            ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
+    sandbox/        ← Docker CLI 封装：隔离 Python 执行
+  governance/
+    permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
+    agent_policy.py    ← fnmatch 工具访问检查
+  cron_scheduler.py  ← APScheduler 定时任务；从 SQLite 动态任务恢复调度
+  webhook_router.py  ← Webhook 签名验证、消息提取
   user_store.py      ← SQLite 用户/API key 管理
   agent_store.py     ← SQLite：agent 定义 + 用户绑定 + channel 绑定
   im_user_store.py   ← (platform, platform_user_id) → 内部 User；allowlist
   session_mgr.py     ← JSON session 持久化；per-session asyncio.Lock
   schedule_store.py  ← SQLite：定时任务定义与状态持久化
-  eval_logger.py     ← append-only JSONL trace 日志
-  agent_policy.py    ← fnmatch 工具访问检查
-  config.py          ← pydantic-settings；加载 .env + config/settings.yaml
-  admin.py           ← CLI 管理工具
+  observability/     ← trace、log、usage、diagnostics
+  config.py          ← pydantic-settings；加载 .env + config/settings.yaml；读取 config/mcp.servers.yaml
+  platform/
+    admin_cli/       ← CLI 管理工具；console script 为 fleetent-admin
 ```
 
 ---
@@ -74,11 +117,11 @@ flowchart TD
     C --> D["注入记忆\n匹配 Skill"]
     D --> E["LLM streaming call\n含 fallback 链"]
     E -->|text_delta| F["SSE 流式输出"]
-    E -->|tool_calls| G["permission_gate\nmedium/high 风险审批"]
+    E -->|tool_calls| G["governance.permission_gate\nmedium/high 风险审批"]
     G --> H["tool dispatch\n执行工具"]
     H --> E
-    E -->|stop| I["eval_logger\n写 trace"]
-    I --> J["long_term_ctx（规划中）\n异步提取事实"]
+    E -->|stop| I["observability\n写 trace event"]
+    I --> J["long_term_ctx\n异步提取与后续注入"]
     J --> K["SSE done"]
 ```
 
@@ -89,7 +132,7 @@ flowchart TD
     A["IM 消息"] --> B["平台适配器\nSlack / Telegram"]
     B --> C["im_user_store\n身份映射 / 自动创建"]
     C --> D["normalizer.route"]
-    D -->|approve/reject 命令| E["permission_gate.resolve\n审批结果"]
+    D -->|approve/reject 命令| E["governance.permission_gate.resolve\n审批结果"]
     D -->|普通消息| F{"allowlist 检查"}
     F -->|未审批| G["拒绝\n提示联系管理员"]
     F -->|已审批| H["agent 解析\nchannel → user → default → 裸跑"]
@@ -101,7 +144,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["POST /webhook/{source_id}"] --> B["webhook_router\n加载来源配置"]
+    A["POST /webhook/{source_id}"] --> B["server.py\n查找运行时来源"]
     B --> C{"签名验证\nHMAC-SHA256"}
     C -->|失败| D["403 拒绝"]
     C -->|通过| E["extract_message\n模板提取 / JSON 序列化"]
@@ -126,36 +169,37 @@ flowchart TD
 |------|------|------|
 | 部署结构 | 模块化单体，单进程 | on-premises 天敌是复杂度，微服务带来不必要运维负担 |
 | LLM 调用 | 直接调 SDK，不用框架 | LangChain 频繁 breaking change，debug 困难 |
-| 数据库 | SQLite（可升 PostgreSQL）| 零运维，on-premises 友好；直接用 aiosqlite，不引入 ORM |
+| 数据库 | SQLite-first，不引入 ORM；通过 DB runtime + store 边界保留 PostgreSQL 迁移空间 | 初期零运维、on-premises 友好；手写 SQL 更可审计。业务层禁止直接依赖 SQLite 文件路径、连接实现或方言细节 |
 | Session 存储 | JSON 文件 + asyncio.Lock | 可调试；原子写（.tmp → rename）防损坏 |
 | 工具审批 | asyncio.Event 门控 | 无轮询，优雅等待；重启后调用 cleanup_stale_approvals() 清理孤儿 |
 | 代码执行隔离 | Docker CLI（当前）→ microsandbox microVM（v1.0 目标） | 每个沙箱独立 Linux 内核，无命名空间逃逸风险；< 100ms 启动；无需 dockerd |
 | MCP 工具命名 | `{server}__{tool}` 双下划线 | 避免与内置工具名冲突，来源可追溯 |
-| 记忆提取 | Haiku 异步，不阻塞响应 | 廉价且快；JSONL 存储，top-20 条注入下次请求 |
+| 记忆提取 | 轻量模型异步提取，不阻塞响应 | 结构化语义记忆写入 SQLite `memory_items`，通过 vector_store 建索引；v1.0 由 long_term_ctx 统一协调检索与注入 |
 
 ---
 
 ## 能力域文档索引
 
-| 文档 | 覆盖范围 | 负责人 |
-|------|---------|-----|
-| [agent-runtime.md](capabilities/agent-runtime.md) | 核心循环、工具调度、上下文压缩、运行治理 | 张洋  |
-| [model-router.md](capabilities/model-router.md) | task_type 路由、provider 配置、fallback 链 | 张洋  |
-| [tools.md](capabilities/tools.md) | @tool 装饰器、schema 构建、dispatch、内置工具集 | 张洋  |
-| [mcp.md](capabilities/mcp.md) | MCP 外部工具集成（stdio / HTTP） | 张洋  |
-| [sandbox.md](capabilities/sandbox.md) | 安全代码执行（microsandbox microVM） | 张洋  |
-| [skill.md](capabilities/skill.md) | Skill 发现、匹配、注入 | 张洋  |
-| [im-gateway.md](capabilities/im-gateway.md) | Slack / Telegram / WhatsApp 接入、用户映射 | 张亮  |
-| [platform.md](capabilities/platform.md) | 用户管理、API 认证、admin CLI | 张亮  |
-| [memory.md](capabilities/memory.md) | 跨 session 记忆（语义 / 情节 / 程序 / 工作） | 常乐  |
-| [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入 | 常乐  |
-| [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、混合检索 | 常乐  |
-| [vector-store.md](capabilities/vector-store.md) | 向量索引基础设施 | 常乐  |
-| [connectors.md](capabilities/connectors.md) | 数据源连接器（Confluence / Google Drive 等） | 张亮  |
-| [reflection.md](capabilities/reflection.md) | 记忆 / Skill / 知识库反思与自进化 | 常乐  |
-| [session.md](capabilities/session.md) | session 持久化、并发保护、生命周期管理 | 张洋  |
-| [governance.md](capabilities/governance.md) | 权限审批、工具白名单、agent 定义与分配 | 张亮  |
-| [scheduling.md](capabilities/scheduling.md) | Cron 定时任务、Webhook 事件触发 | 张亮  |
-| [observability.md](capabilities/observability.md) | 评估日志、数据统计、链路追踪 | 常乐  |
-| [user-center.md](capabilities/user-center.md) | 用户中心、多租户管理 | 张亮  |
-| [deployment.md](capabilities/deployment.md) | on-premises 打包、配置管理 | 常乐  |
+| 文档 | 覆盖范围 | 优先级 | 依赖的模块 | 负责人 | 状态 |
+|------|---------|:------:|-----------|-----|------|
+| [owner-capability-roadmap.md](capabilities/owner-capability-roadmap.md) | 常乐负责模块总控板、MVP 缺口、实施批次 | P0 | observability · memory · long-term-ctx · reflection · vector-store · knowledge-base · deployment | 常乐 | 基础完成 |
+| [agent-runtime.md](capabilities/agent-runtime.md) | 核心循环、工具调度、上下文压缩、运行治理 | P0 | model-router · tools · session · skill · governance · observability | 张洋 | 部分完成 |
+| [model-router.md](capabilities/model-router.md) | task_type 路由、provider 配置、fallback 链 | P0 | deployment | 张洋 | 部分完成 |
+| [tools.md](capabilities/tools.md) | @tool 装饰器、schema 构建、dispatch、内置工具集 | P0 | governance · connectors | 张洋 | 部分完成 |
+| [mcp.md](capabilities/mcp.md) | MCP 外部工具集成（stdio / HTTP） | P1 | connectors | 张洋 | 部分完成 |
+| [sandbox.md](capabilities/sandbox.md) | 安全代码执行（microsandbox microVM） | P1 | - | 张洋 | 部分完成 |
+| [skill.md](capabilities/skill.md) | Skill 发现、匹配、注入 | P1 | - | 张洋 | 部分完成 |
+| [session.md](capabilities/session.md) | session 持久化、并发保护、生命周期管理 | P0 | - | 张洋 | 已实现 |
+| [im-gateway.md](capabilities/im-gateway.md) | Slack / Telegram / WhatsApp 接入、用户映射 | P0 | session · governance · user-center | 张亮 | 部分完成 |
+| [platform.md](capabilities/platform.md) | 用户管理、API 认证、admin CLI | P1 | user-center | 张亮 | 部分完成 |
+| [governance.md](capabilities/governance.md) | 权限审批、工具白名单、agent 定义与分配 | P0 | session | 张亮 | 部分完成 |
+| [scheduling.md](capabilities/scheduling.md) | Cron 定时任务、Webhook 事件触发 | P1 | agent-runtime · session · im-gateway | 张亮 | 部分完成 |
+| [connectors.md](capabilities/connectors.md) | 用户级外部工具授权连接器；区别于 knowledge-base 数据源 connector | P2 | user-center | 张亮 | 未开始 |
+| [user-center.md](capabilities/user-center.md) | 用户中心、多租户管理 | P1 | - | 张亮 | 部分完成 |
+| [memory.md](capabilities/memory.md) | 跨 session 语义记忆、提取动作、检索与评估基线 | P1 | model-router · vector-store · observability | 常乐 | 基础完成 |
+| [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入，memory / knowledge-base provider 已接入 | P1 | memory · knowledge-base | 常乐 | 基础完成 |
+| [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、local / Google Drive / Confluence 同步、混合检索 | P1 | vector-store | 常乐 | 基础完成 |
+| [vector-store.md](capabilities/vector-store.md) | 向量索引、SQLite backend、embedding / rerank provider | P1 | deployment | 常乐 | 基础完成 |
+| [reflection.md](capabilities/reflection.md) | 记忆 / Skill / 知识库反思与自进化 | P2 | memory · skill · knowledge-base | 常乐 | 基础完成 |
+| [observability.md](capabilities/observability.md) | 评估日志、数据统计、链路追踪 | P0 | - | 常乐 | 基础完成 |
+| [deployment.md](capabilities/deployment.md) | on-premises 打包、配置管理、SQLite upgrade / backup | P0 | - | 常乐 | 基础完成 |

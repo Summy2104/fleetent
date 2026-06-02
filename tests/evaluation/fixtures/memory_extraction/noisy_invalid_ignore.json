@@ -1,0 +1,31 @@
+{
+  "name": "noisy invalid conversation ignore",
+  "initial_memories": [],
+  "conversation": [
+    {
+      "role": "user",
+      "content": "asdf, never mind. Actually ignore that. The previous message was a typo."
+    },
+    {
+      "role": "assistant",
+      "content": "No problem."
+    }
+  ],
+  "mock_actions": [
+    {
+      "action": "ignore",
+      "reason": "no stable user fact"
+    }
+  ],
+  "expected_memories": [],
+  "forbidden_memories": [
+    {
+      "type": "identity",
+      "content": "User said asdf"
+    },
+    {
+      "type": "preferences",
+      "content": "User prefers typos"
+    }
+  ]
+}

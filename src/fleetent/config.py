@@ -1,36 +1,198 @@
 import logging
+from pathlib import Path
+from typing import Any, Literal
 
 import structlog
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import yaml
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    YamlConfigSettingsSource,
+)
+
+SETTINGS_YAML_PATH = Path("config/settings.yaml")
+MCP_SERVERS_YAML_PATH = Path("config/mcp.servers.yaml")
+YAML_SECRET_FIELDS = frozenset(
+    {
+        "anthropic_api_key",
+        "slack_bot_token",
+        "slack_app_token",
+        "telegram_bot_token",
+    }
+)
+
+
+class SecretRejectingYamlSettingsSource(YamlConfigSettingsSource):
+    def __call__(self) -> dict[str, Any]:
+        data = super().__call__()
+        secret_fields = sorted(key for key in data if key in YAML_SECRET_FIELDS)
+        if secret_fields:
+            fields = ", ".join(secret_fields)
+            raise ValueError(
+                f"Secret fields cannot appear in config/settings.yaml: {fields}. "
+                "Move these values to env/.env."
+            )
+        return data
+
+
+class LoggingSettings(BaseModel):
+    console_level: str = "info"
+    file_level: str = "debug"
+    directory: str = "data/logs"
+    json_file: bool = True
+
+
+class ObservabilitySettings(BaseModel):
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
+
+
+class DiagnosticsRetentionSettings(BaseModel):
+    enabled: bool = False
+    logs_days: int | None = None
+    traces_days: int | None = None
+    diagnostic_exports_days: int | None = None
+
+
+class DiagnosticsSettings(BaseModel):
+    export_dir: str = "data/diagnostics"
+    retention: DiagnosticsRetentionSettings = Field(default_factory=DiagnosticsRetentionSettings)
+
+
+class VectorStoreSettings(BaseModel):
+    backend: str = "memory"
+    database_url: str | None = None
+
+
+class EmbeddingSettings(BaseModel):
+    backend: str = "deterministic"
+    dimensions: int = 64
+    endpoint: str = ""
+    model: str = ""
+    api_key_env: str = ""
+    timeout_seconds: float = 10.0
+
+
+class RerankSettings(BaseModel):
+    backend: str = "disabled"
+    endpoint: str = ""
+    model: str = ""
+    api_key_env: str = ""
+    timeout_seconds: float = 10.0
+
+
+class LongTermContextSettings(BaseModel):
+    max_tokens: int = 2_048
+    memory_max_tokens: int = 1_024
+    knowledge_max_tokens: int = 1_024
+    memory_top_k: int = 10
+    knowledge_top_k: int = 10
+    conflict_preference: Literal["auto", "memory", "knowledge"] = "auto"
+
+
+class KnowledgeBaseSettings(BaseModel):
+    enabled: bool = False
+    default_tenant_id: str = "default"
+    default_kb_id: str = "global"
+    chunk_size: int = 1_000
+    chunk_overlap: int = 200
+    google_drive: "GoogleDriveConnectorsSettings" = Field(
+        default_factory=lambda: GoogleDriveConnectorsSettings()
+    )
+    confluence: "ConfluenceConnectorsSettings" = Field(
+        default_factory=lambda: ConfluenceConnectorsSettings()
+    )
+
+
+class GoogleDriveConnectorSettings(BaseModel):
+    connector_id: str
+    tenant_id: str
+    kb_id: str
+    folder_id: str
+    credential_ref: str
+    enabled: bool = True
+    recursive: bool = True
+
+
+class GoogleDriveConnectorsSettings(BaseModel):
+    connectors: list[GoogleDriveConnectorSettings] = Field(default_factory=list)
+
+
+class ConfluenceConnectorSettings(BaseModel):
+    connector_id: str
+    tenant_id: str
+    kb_id: str
+    base_url: str
+    username: str
+    credential_ref: str
+    enabled: bool = True
+    scope_type: Literal["space", "page"] | None = None
+    space_key: str | None = None
+    page_id: str | None = None
+    include_children: bool = False
+
+
+class ConfluenceConnectorsSettings(BaseModel):
+    connectors: list[ConfluenceConnectorSettings] = Field(default_factory=list)
+
+
+class McpServerSettings(BaseModel):
+    id: str
+    transport: str = "http"
+    url: str = ""
+    auth_type: str = "none"
+    api_key_env: str = ""
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+class McpServersFile(BaseModel):
+    servers: list[McpServerSettings] = Field(default_factory=list)
+
+
+class McpSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+
+
+class SchedulingSettings(BaseModel):
+    enabled: bool = True
+    default_timezone: str = "UTC"
+
+
+class WebhooksSettings(BaseModel):
+    enabled: bool = True
+    max_body_bytes: int = 1_048_576
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", extra="ignore")
 
     anthropic_api_key: str
     slack_bot_token: str = ""
     slack_app_token: str = ""
     telegram_bot_token: str = ""
+    microsandbox_url: str = "http://host.docker.internal:7777"
     permission_gate_medium_timeout_seconds: int = 300
     permission_gate_high_timeout_seconds: int = 3600
     context_max_tokens: int = 200_000
+    context_compress_threshold: float = 0.8
+    context_keep_recent: int = 10
+    log_format: str = "console"
+    default_agent_name: str | None = None
+    database_url: str = "sqlite:///data/fleetent.db"
+    # ── runtime tuning fields merged from feature/zhangyang (flat, per D1) ──
+    # Compression dual-threshold (AR12) + layered retention (AR13) + anti-flap (AR17).
     context_tmax_ratio: float = 0.8
     context_tretained_ratio: float = 0.6
-    context_keep_recent: int = 10
-    # Upper bound on leading user messages kept whole as the initial intent in the
-    # compression head (AR13 D2). 2 covers the common "lead-in + real ask" split
-    # opening, especially on IM channels. Optional; default preserves existing
-    # deployments.
     compression_initial_intent_max: int = 2
-    # Auto-compression anti-flap (AR17). Circuit-break auto compression after
-    # `context_flap_window` consecutive compressions all saving less than
-    # `context_min_savings_ratio`; keep at least `context_min_interval_turns`
-    # new turns between auto compressions.
     context_flap_window: int = 3
     context_min_savings_ratio: float = 0.10
     context_min_interval_turns: int = 1
-    # Cross-run layered budget caps (AR18). Default NO_LIMIT (-1 / -1.0) = unlimited,
-    # backward-compatible. task scope is per-run (AR2), not configured here.
+    # Cross-run layered budget caps (AR18). -1 = unlimited (backward-compatible).
     agent_budget_session_turns: int = -1
     agent_budget_session_tokens: int = -1
     agent_budget_user_turns: int = -1
@@ -39,78 +201,82 @@ class Settings(BaseSettings):
     agent_budget_agent_tokens: int = -1
     agent_budget_global_turns: int = -1
     agent_budget_global_tokens: int = -1
-    # Per-scope accounting windows (AR18). session is fixed lifetime (no field).
     agent_budget_user_window: str = "weekly"
     agent_budget_agent_window: str = "weekly"
     agent_budget_global_window: str = "monthly"
+    # Session disk management (S1/S2/S4) + internal maintenance loop.
     session_ttl_days: int = 30
     session_max_total_mb: int = 1024
     session_max_count: int = 10000
-    # How often the internal save()-triggered maintenance may run a full cleanup
-    # scan (seconds). Time-gated so the rglob stays cheap under message volume.
     session_cleanup_interval_seconds: float = 3600.0
+    # Agent loop / budget / loop-detection / guardrails (AR2/AR4/AR10/AR20/T2/AR3).
     agent_max_turns: int = 50
     agent_max_consecutive_failures: int = 3
-    # Per sub-agent wall-clock timeout (AR20). A sub-agent runs a full agent_loop
-    # round (multi-turn LLM + tools), an order longer than a single tool call, so
-    # this guard is orthogonal to the main task budget. 300s balances "fits a real
-    # sub-task" against "surfaces a hang fast".
     sub_agent_timeout_seconds: int = 300
-    # Global default per-tool timeout (T2). Per-tool @tool(timeout=) overrides it.
     tool_default_timeout_seconds: float = 30.0
-    # Two-dimensional iteration budget (AR2). max_turns reuses agent_max_turns
-    # above (the step dimension is folded into the budget). -1 = unlimited; the
-    # token dimension defaults to unlimited so existing deployments keep
-    # behaving as a pure step budget until configured.
     agent_max_tokens: int = -1
-    # Grace Call reserved budget (AR2 D3): on budget exhaustion the loop spends a
-    # last LLM call summarizing progress, capped at max(round(max_tokens*ratio),
-    # min_tokens). Floor guards a tiny main budget from reserving ~0 tokens.
     agent_grace_call_token_ratio: float = 0.05
     agent_grace_call_min_tokens: int = 512
-    # Coarse loop detection (AR4): how many times one tool may repeat (same args,
-    # signal A; or same successful result, signal B) within the detection window
-    # before a hit. First hit warns the model; a repeat after that force-stops with
-    # `loop_detected`. The detection window is derived from this and not separately
-    # configurable, so the observable threshold semantics cannot drift.
     agent_loop_repeat_threshold: int = 3
-    # AR10 per-call guardrail: strict back-to-back identical calls before tripping.
-    # Aligned with agent_loop_repeat_threshold so ops reason about one repeat count.
     guardrail_repeat_threshold: int = 3
-    # AR3 D7: max number of tools dispatched concurrently within one LLM round.
-    # 8 fits typical single-round tool_calls counts while keeping a round from
-    # exhausting downstream (HTTP / sandbox / MCP) resources; >cap splits into
-    # serial batches. <=1 degrades to fully-sequential execution (status quo).
     agent_tool_parallel_max: int = 8
-    # Optional escape hatch: top-level argument keys stripped before computing the
-    # signal-A fingerprint (e.g. a volatile timestamp/attempt counter). Empty by
-    # default; signal B already covers volatile-argument blind spots.
     loop_detect_ignore_arg_keys: list[str] = []
+    # Provider health circuit breaker (MR3, model_router fallback).
     provider_failure_threshold: int = 3
     provider_cooldown_seconds: int = 60
-    log_format: str = "console"
-    default_agent_name: str | None = None
+    # Skill disable list + self-hosted image/vision endpoints (data-sovereignty).
     disabled_skills: list[str] = []
-    # Self-hosted, OpenAI-compatible images endpoint (e.g. SD-WebUI / ComfyUI /
-    # Flux behind a compat layer). Empty = unconfigured; the generate_image tool
-    # returns an explicit failure rather than silently succeeding. Cloud-hosted
-    # proprietary services (DALL·E / Midjourney) are forbidden by data sovereignty.
     image_gen_url: str = ""
     image_gen_model: str = "default"
-    # Self-hosted, OpenAI-compatible vision endpoint (any VLM behind a compat
-    # layer). Empty = unconfigured; the analyze_image tool returns an explicit
-    # failure rather than silently succeeding. Cloud-hosted proprietary VLMs are
-    # forbidden by data sovereignty.
     vision_url: str = ""
     vision_model: str = "default"
+    observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    diagnostics: DiagnosticsSettings = Field(default_factory=DiagnosticsSettings)
+    vector_store: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    rerank: RerankSettings = Field(default_factory=RerankSettings)
+    long_term_ctx: LongTermContextSettings = Field(default_factory=LongTermContextSettings)
+    knowledge_base: KnowledgeBaseSettings = Field(default_factory=KnowledgeBaseSettings)
+    mcp: McpSettings = Field(default_factory=McpSettings)
+    scheduling: SchedulingSettings = Field(default_factory=SchedulingSettings)
+    webhooks: WebhooksSettings = Field(default_factory=WebhooksSettings)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        yaml_settings = SecretRejectingYamlSettingsSource(
+            settings_cls, yaml_file=SETTINGS_YAML_PATH
+        )
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            yaml_settings,
+            file_secret_settings,
+        )
 
 
 def configure_logging(settings: Settings) -> None:
-    # NOTE: structlog.stdlib.add_logger_name reads `logger.name`, which only exists
-    # on stdlib loggers — the PrintLogger from PrintLoggerFactory below has none, so
-    # including it crashed every log call at emit time. It is intentionally omitted.
+    from fleetent.observability.structured_logging import configure_structured_logging
+
+    configure_structured_logging(
+        console_level=settings.observability.logging.console_level,
+        file_level=settings.observability.logging.file_level,
+        directory=settings.observability.logging.directory,
+    )
+
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
+        # NOTE (from feature/zhangyang Wave-1 fix): structlog.stdlib.add_logger_name
+        # reads `logger.name`, which only exists on stdlib loggers — the PrintLogger
+        # from PrintLoggerFactory below has none, so including it crashed every log
+        # call at emit time. It is intentionally omitted.
         structlog.stdlib.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
@@ -134,3 +300,17 @@ def configure_logging(settings: Settings) -> None:
         level=logging.INFO,
         handlers=[logging.StreamHandler()],
     )
+
+
+def load_mcp_server_settings(
+    path: Path | None = None,
+) -> list[McpServerSettings]:
+    """Load static MCP server definitions from the dedicated server config file."""
+    config_path = path or MCP_SERVERS_YAML_PATH
+    if not config_path.exists():
+        return []
+
+    raw = yaml.safe_load(config_path.read_text()) or {}
+    if not isinstance(raw, dict):
+        raise ValueError("config/mcp.servers.yaml must contain a mapping with a servers list")
+    return McpServersFile.model_validate(raw).servers

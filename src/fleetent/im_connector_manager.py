@@ -2,18 +2,19 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from fleetent import im_connector_config, im_connector_store
 
 # A factory is an async runner: given the resolved config dict, it runs the adapter
 # until cancelled (long-lived). The adapter reports its own connected/heartbeat status.
-AdapterFactory = Callable[[dict], Awaitable[None]]
+AdapterFactory = Callable[[dict[str, str]], Awaitable[None]]
 
 
 class ConnectorManager:
     def __init__(self, factories: dict[str, AdapterFactory] | None = None) -> None:
         self._factories: dict[str, AdapterFactory] = factories or {}
-        self._tasks: dict[str, asyncio.Task] = {}
+        self._tasks: dict[str, asyncio.Task[Any]] = {}
 
     async def start(self, platform: str) -> None:
         """Start a connector if it has a factory and usable config; else mark unconfigured."""
@@ -28,7 +29,7 @@ class ConnectorManager:
         im_connector_store.report_status(platform, "connecting")
         self._tasks[platform] = asyncio.create_task(self._run(platform, factory, config))
 
-    async def _run(self, platform: str, factory: AdapterFactory, config: dict) -> None:
+    async def _run(self, platform: str, factory: AdapterFactory, config: dict[str, str]) -> None:
         try:
             await factory(config)
         except asyncio.CancelledError:

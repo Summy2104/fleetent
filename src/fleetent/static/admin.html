@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fleetent · Admin</title>
+<style>
+  :root { --bg:#0f1115; --panel:#181b22; --line:#262b35; --fg:#e6e8eb; --muted:#9aa3b2;
+          --accent:#4f8cff; --danger:#e5534b; --ok:#3fb950; --warn:#d29922; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+  header { display:flex; align-items:center; gap:16px; padding:12px 20px; border-bottom:1px solid var(--line); background:var(--panel); }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  header .spacer { flex:1; }
+  .muted { color:var(--muted); }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:6px 12px; cursor:pointer; font-size:13px; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); }
+  button.danger { background:var(--danger); }
+  button.small { padding:3px 8px; font-size:12px; }
+  input, select { background:#0c0e12; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:6px 8px; font-size:13px; }
+  .wrap { max-width:1100px; margin:0 auto; padding:20px; }
+  .tabs { display:flex; gap:4px; margin-bottom:16px; }
+  .tabs button { background:transparent; color:var(--muted); border-bottom:2px solid transparent; border-radius:0; padding:8px 14px; }
+  .tabs button.active { color:var(--fg); border-bottom-color:var(--accent); }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border-radius:8px; overflow:hidden; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); font-size:13px; vertical-align:middle; }
+  th { color:var(--muted); font-weight:500; }
+  .pill { padding:1px 8px; border-radius:10px; font-size:11px; border:1px solid var(--line); }
+  .pill.active { color:var(--ok); } .pill.blocked,.pill.disabled { color:var(--danger); }
+  .pill.admin,.pill.built_in_admin { color:var(--accent); } .pill.viewer { color:var(--muted); }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .login { max-width:360px; margin:80px auto; }
+  .login h2 { margin-top:0; }
+  .err { color:var(--danger); min-height:18px; }
+  .hidden { display:none; }
+  .actions { display:flex; gap:6px; flex-wrap:wrap; }
+  code { background:#0c0e12; padding:2px 6px; border-radius:4px; font-size:12px; word-break:break-all; }
+</style>
+</head>
+<body>
+
+<div id="login-view" class="login">
+  <div class="card">
+    <h2>fleetent Admin</h2>
+    <div class="row" style="flex-direction:column; align-items:stretch; gap:10px;">
+      <input id="login-email" placeholder="email" autocomplete="username">
+      <input id="login-password" type="password" placeholder="password" autocomplete="current-password">
+      <button onclick="doLogin()">Sign in</button>
+      <div id="login-err" class="err"></div>
+    </div>
+  </div>
+</div>
+
+<div id="reset-view" class="login hidden">
+  <div class="card">
+    <h2>Set a new password</h2>
+    <p class="muted">Your account requires a password reset before continuing.</p>
+    <div class="row" style="flex-direction:column; align-items:stretch; gap:10px;">
+      <input id="reset-password" type="password" placeholder="new password">
+      <button onclick="doChangePassword()">Update password</button>
+      <div id="reset-err" class="err"></div>
+    </div>
+  </div>
+</div>
+
+<div id="app-view" class="hidden">
+  <header>
+    <h1>fleetent · Admin</h1>
+    <span id="whoami" class="muted"></span>
+    <span class="spacer"></span>
+    <button class="ghost small" onclick="doLogout()">Sign out</button>
+  </header>
+  <div class="wrap">
+    <div class="tabs">
+      <button data-tab="users" class="active" onclick="switchTab('users')">Users</button>
+      <button data-tab="im" onclick="switchTab('im')">IM Users</button>
+      <button data-tab="audit" onclick="switchTab('audit')">Audit</button>
+    </div>
+
+    <section id="tab-users">
+      <div class="card" id="create-card">
+        <div class="row">
+          <input id="nu-email" placeholder="email">
+          <input id="nu-name" placeholder="name">
+          <input id="nu-password" type="password" placeholder="initial password (optional)">
+          <select id="nu-role"><option value="viewer">viewer</option><option value="admin">admin</option></select>
+          <button onclick="createUser()">Create user</button>
+        </div>
+        <div id="users-err" class="err"></div>
+      </div>
+      <table>
+        <thead><tr><th>Email / Name</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="users-body"></tbody>
+      </table>
+    </section>
+
+    <section id="tab-im" class="hidden">
+      <table>
+        <thead><tr><th>Platform</th><th>Platform user</th><th>Internal user</th><th>State</th><th>Actions</th></tr></thead>
+        <tbody id="im-body"></tbody>
+      </table>
+    </section>
+
+    <section id="tab-audit" class="hidden">
+      <div class="card row">
+        <input id="audit-action" placeholder="filter by action (e.g. block_user)">
+        <button onclick="loadAudit()">Search</button>
+      </div>
+      <table>
+        <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
+        <tbody id="audit-body"></tbody>
+      </table>
+    </section>
+  </div>
+</div>
+
+<script>
+let TOKEN = null;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => (s == null ? "" : String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function api(method, path, body) {
+  const headers = {};
+  if (TOKEN) headers["Authorization"] = "Session " + TOKEN;
+  if (body) headers["Content-Type"] = "application/json";
+  const res = await fetch("/admin" + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+  return data;
+}
+
+async function doLogin() {
+  $("login-err").textContent = "";
+  try {
+    const r = await api("POST", "/login", { email: $("login-email").value, password: $("login-password").value });
+    TOKEN = r.token;
+    if (r.must_reset) { show("reset-view"); return; }
+    enterApp();
+  } catch (e) { $("login-err").textContent = e.message; }
+}
+
+async function doChangePassword() {
+  $("reset-err").textContent = "";
+  try {
+    await api("POST", "/change-password", { new_password: $("reset-password").value });
+    enterApp();
+  } catch (e) { $("reset-err").textContent = e.message; }
+}
+
+async function doLogout() { try { await api("POST", "/logout"); } catch (e) {} TOKEN = null; show("login-view"); }
+
+async function enterApp() {
+  const me = await api("GET", "/me");
+  $("whoami").textContent = (me.email || me.id) + " · " + me.role;
+  if (me.role === "viewer") $("create-card").classList.add("hidden");
+  show("app-view");
+  switchTab("users");
+}
+
+function show(view) {
+  for (const v of ["login-view", "reset-view", "app-view"]) $(v).classList.toggle("hidden", v !== view);
+}
+
+function switchTab(tab) {
+  for (const b of document.querySelectorAll(".tabs button")) b.classList.toggle("active", b.dataset.tab === tab);
+  $("tab-users").classList.toggle("hidden", tab !== "users");
+  $("tab-im").classList.toggle("hidden", tab !== "im");
+  $("tab-audit").classList.toggle("hidden", tab !== "audit");
+  if (tab === "users") loadUsers();
+  if (tab === "im") loadIm();
+  if (tab === "audit") loadAudit();
+}
+
+async function loadUsers() {
+  const users = await api("GET", "/users");
+  $("users-body").innerHTML = users.map(u => `
+    <tr>
+      <td>${esc(u.email || "—")}<br><span class="muted">${esc(u.name)}</span></td>
+      <td><span class="pill ${u.role}">${esc(u.role)}</span></td>
+      <td><span class="pill ${u.status}">${esc(u.status)}</span></td>
+      <td class="actions">
+        <select class="small" onchange="setRole('${u.id}', this.value)">
+          ${["viewer","admin"].map(r => `<option ${u.role===r?"selected":""} value="${r}">${r}</option>`).join("")}
+        </select>
+        ${u.status === "blocked"
+          ? `<button class="small ghost" onclick="unblock('${u.id}')">Unblock</button>`
+          : `<button class="small danger" onclick="block('${u.id}')">Block</button>`}
+        <button class="small ghost" onclick="viewKeys('${u.id}')">Keys</button>
+        <button class="small danger" onclick="del('${u.id}')">Delete</button>
+      </td>
+    </tr>`).join("") || `<tr><td colspan="4" class="muted">No users.</td></tr>`;
+}
+
+async function createUser() {
+  $("users-err").textContent = "";
+  try {
+    await api("POST", "/users", {
+      email: $("nu-email").value, name: $("nu-name").value,
+      password: $("nu-password").value || null, role: $("nu-role").value,
+    });
+    $("nu-email").value = $("nu-name").value = $("nu-password").value = "";
+    loadUsers();
+  } catch (e) { $("users-err").textContent = e.message; }
+}
+
+async function setRole(id, role) { try { await api("PATCH", `/users/${id}/role`, { role }); loadUsers(); } catch (e) { alert(e.message); } }
+async function block(id) { const reason = prompt("Reason for blocking?"); if (reason === null) return; try { await api("POST", `/users/${id}/block`, { reason }); loadUsers(); } catch (e) { alert(e.message); } }
+async function unblock(id) { try { await api("POST", `/users/${id}/unblock`); loadUsers(); } catch (e) { alert(e.message); } }
+async function del(id) { if (!confirm("Delete this user?")) return; try { await api("DELETE", `/users/${id}`); loadUsers(); } catch (e) { alert(e.message); } }
+
+async function viewKeys(id) {
+  const keys = await api("GET", `/users/${id}/keys`);
+  const lines = keys.map(k => `${k.prefix}…  scope=${JSON.stringify(k.scope)}  calls=${k.call_count}  ${k.revoked_at ? "[revoked]" : ""}  (id ${k.id})`).join("\n") || "(none)";
+  if (confirm(`Keys for user:\n\n${lines}\n\nIssue a new key?`)) {
+    const scope = prompt("Scope (comma-separated agent names, * for all)", "*");
+    if (scope === null) return;
+    const r = await api("POST", `/users/${id}/keys`, { scope: scope.split(",").map(s => s.trim()).filter(Boolean) });
+    prompt("New API key (copy now, shown once):", r.plaintext);
+  }
+}
+
+async function loadIm() {
+  const rows = await api("GET", "/im-users");
+  $("im-body").innerHTML = rows.map(r => `
+    <tr>
+      <td>${esc(r.platform)}</td>
+      <td>${esc(r.platform_user_id)}</td>
+      <td class="muted">${esc((r.user_id||"").slice(0,8))}</td>
+      <td><span class="pill ${r.allowed ? "active" : "blocked"}">${r.allowed ? "allowed" : "blocked"}</span></td>
+      <td class="actions">
+        ${r.allowed
+          ? `<button class="small danger" onclick="imBlock(${r.id})">Block</button>`
+          : `<button class="small ghost" onclick="imRestore(${r.id})">Restore</button>`}
+      </td>
+    </tr>`).join("") || `<tr><td colspan="5" class="muted">No IM users.</td></tr>`;
+}
+
+async function imBlock(id) { const reason = prompt("Reason?"); if (reason === null) return; try { await api("POST", `/im-users/${id}/block`, { reason }); loadIm(); } catch (e) { alert(e.message); } }
+async function imRestore(id) { try { await api("POST", `/im-users/${id}/restore`, { reason: "" }); loadIm(); } catch (e) { alert(e.message); } }
+
+async function loadAudit() {
+  const action = $("audit-action").value.trim();
+  const rows = await api("GET", "/audit" + (action ? `?action=${encodeURIComponent(action)}` : ""));
+  $("audit-body").innerHTML = rows.map(r => `
+    <tr>
+      <td class="muted">${esc(r.created_at)}</td>
+      <td>${esc(r.actor_user_id || "—")}</td>
+      <td>${esc(r.action)}</td>
+      <td>${esc(r.target_type || "")} ${esc((r.target_id||"").slice(0,12))}</td>
+      <td><code>${esc(JSON.stringify(r.detail))}</code></td>
+    </tr>`).join("") || `<tr><td colspan="5" class="muted">No audit entries.</td></tr>`;
+}
+
+show("login-view");
+</script>
+</body>
+</html>
