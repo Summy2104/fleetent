@@ -1,11 +1,11 @@
-"""Five-layer cost/usage budget control (AR18): task/session/user/agent/global.
+"""Five-layer turns/tokens budget control (AR18): task/session/user/agent/global.
 
-AR2's `budget.py` is the per-run turns/tokens budget; its cost dimension was
-review-removed (and is test-guarded), so the cost machinery lives here. This
-module adds cross-run, layered budgets persisted in `users.db` keyed by
-(scope, key, period), reusing AR2's NO_LIMIT sentinel and turns/tokens
-accumulation semantics while owning the cost dimension and per-token pricing.
-Standard-library sqlite3 only; injectable clock and DB_PATH for tests.
+AR2's `budget.py` is the per-run turns/tokens budget. This module adds cross-run,
+layered turns/tokens budgets persisted in `users.db` keyed by (scope, key, period),
+reusing AR2's NO_LIMIT sentinel and turns/tokens accumulation semantics. The cost
+dimension was dropped (post-review: cost tracking has no real meaning here), so
+this is purely a usage (turns/tokens) governance layer. Standard-library sqlite3
+only; injectable clock and DB_PATH for tests.
 """
 
 from __future__ import annotations
@@ -18,20 +18,6 @@ from enum import StrEnum
 
 from fleetent.budget import NO_LIMIT
 from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatch
-
-# Per-token USD pricing (prompt, completion). Conservative placeholders; ops can
-# extend MODEL_PRICING. DEFAULT_PRICING applies to unknown / None models.
-MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "claude-opus-4-8": (1.5e-5, 7.5e-5),
-    "claude-sonnet-4-6": (3.0e-6, 1.5e-5),
-    "claude-haiku-4-5": (8.0e-7, 4.0e-6),
-    "gpt-4o": (2.5e-6, 1.0e-5),
-}
-DEFAULT_PRICING: tuple[float, float] = (1.0e-6, 2.0e-6)
-
-
-def _price(model: str | None) -> tuple[float, float]:
-    return MODEL_PRICING.get(model, DEFAULT_PRICING) if model else DEFAULT_PRICING
 
 
 class BudgetScope(StrEnum):
@@ -90,35 +76,29 @@ def period_for(window: BudgetWindow, now: datetime) -> str:
 
 @dataclass
 class ScopeUsage:
-    """Mutable accumulator: turns/tokens (AR2 semantics) + the cost dimension."""
+    """Mutable accumulator: turns/tokens (AR2 semantics)."""
 
     turns: int = 0
     tokens: int = 0
-    cost_usd: float = 0.0
 
-    def add(self, prompt_tokens: int, completion_tokens: int, model: str | None = None) -> None:
+    def add(self, prompt_tokens: int, completion_tokens: int) -> None:
         self.turns += 1
         self.tokens += prompt_tokens + completion_tokens
-        prompt_price, completion_price = _price(model)
-        self.cost_usd += prompt_tokens * prompt_price + completion_tokens * completion_price
 
 
 @dataclass(frozen=True)
 class ScopeBudget:
-    """A scope's caps across turns/tokens/cost. NO_LIMIT means unlimited."""
+    """A scope's caps across turns/tokens. NO_LIMIT means unlimited."""
 
     max_turns: int = NO_LIMIT
     max_tokens: int = NO_LIMIT
-    max_cost_usd: float = NO_LIMIT
 
     def exhausted_dimension(self, usage: ScopeUsage) -> str | None:
-        """First dimension (turns→tokens→cost) at/over its cap, else None."""
+        """First dimension (turns→tokens) at/over its cap, else None."""
         if self.max_turns != NO_LIMIT and usage.turns >= self.max_turns:
             return "turns"
         if self.max_tokens != NO_LIMIT and usage.tokens >= self.max_tokens:
             return "tokens"
-        if self.max_cost_usd != NO_LIMIT and usage.cost_usd >= self.max_cost_usd:
-            return "cost"
         return None
 
 
@@ -135,8 +115,7 @@ class LayeredBudgetConfig:
         """Whether any scope caps any dimension. False ⇒ layered budget is dormant
         (no checker, no store writes) so default deployments behave exactly as before."""
         return any(
-            b.max_turns != NO_LIMIT or b.max_tokens != NO_LIMIT or b.max_cost_usd != NO_LIMIT
-            for b in self.per_scope.values()
+            b.max_turns != NO_LIMIT or b.max_tokens != NO_LIMIT for b in self.per_scope.values()
         )
 
     @classmethod
@@ -150,7 +129,6 @@ class LayeredBudgetConfig:
             per[scope] = ScopeBudget(
                 max_turns=getattr(s, f"agent_budget_{name}_turns", NO_LIMIT),
                 max_tokens=getattr(s, f"agent_budget_{name}_tokens", NO_LIMIT),
-                max_cost_usd=getattr(s, f"agent_budget_{name}_cost_usd", float(NO_LIMIT)),
             )
         return cls(per_scope=per)
 
@@ -170,7 +148,6 @@ def init_db() -> None:
               period    TEXT NOT NULL,
               turns     INTEGER NOT NULL,
               tokens    INTEGER NOT NULL,
-              cost_usd  REAL NOT NULL,
               PRIMARY KEY (scope, key, period)
             )
             """
@@ -198,50 +175,36 @@ class BudgetStore:
         key: str,
         prompt_tokens: int,
         completion_tokens: int,
-        model: str | None = None,
         *,
         now: datetime,
     ) -> None:
         if scope not in CROSS_RUN_SCOPES:
             raise ValueError(f"scope {scope} is per-run (AR2), not persisted")
         delta = ScopeUsage()
-        delta.add(prompt_tokens, completion_tokens, model)
+        delta.add(prompt_tokens, completion_tokens)
         period = self._period(scope, now)
         with _conn() as conn:
             conn.execute(
                 """
-                INSERT INTO budget_usage (scope, key, period, turns, tokens, cost_usd)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO budget_usage (scope, key, period, turns, tokens)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(scope, key, period) DO UPDATE SET
                   turns = turns + excluded.turns,
-                  tokens = tokens + excluded.tokens,
-                  cost_usd = cost_usd + excluded.cost_usd
+                  tokens = tokens + excluded.tokens
                 """,
-                (scope.value, key, period, delta.turns, delta.tokens, delta.cost_usd),
+                (scope.value, key, period, delta.turns, delta.tokens),
             )
 
     def get(self, scope: BudgetScope, key: str, *, now: datetime) -> ScopeUsage:
         period = self._period(scope, now)
         with _conn() as conn:
             row = conn.execute(
-                "SELECT turns, tokens, cost_usd FROM budget_usage "
-                "WHERE scope = ? AND key = ? AND period = ?",
+                "SELECT turns, tokens FROM budget_usage WHERE scope = ? AND key = ? AND period = ?",
                 (scope.value, key, period),
             ).fetchone()
         if row is None:
             return ScopeUsage()
-        return ScopeUsage(turns=row[0], tokens=row[1], cost_usd=row[2])
-
-
-def _scope_keys(
-    session_id: str | None, user_id: str | None, agent_id: str | None
-) -> dict[BudgetScope, str | None]:
-    return {
-        BudgetScope.session: session_id,
-        BudgetScope.user: user_id,
-        BudgetScope.agent: agent_id,
-        BudgetScope.global_: GLOBAL_KEY,
-    }
+        return ScopeUsage(turns=row[0], tokens=row[1])
 
 
 class LayeredBudgetChecker:
@@ -278,45 +241,6 @@ class LayeredBudgetChecker:
                 self.triggered_dimension = dimension
                 return StopReason.budget_exceeded
         return None
-
-
-@dataclass(frozen=True)
-class BudgetHeadroom:
-    """Read-only snapshot of cost headroom across the configured cost-capped scopes."""
-
-    cost_remaining_ratio: float
-    tightest_scope: str | None
-
-
-def headroom(
-    config: LayeredBudgetConfig,
-    store: BudgetStore,
-    session_id: str | None,
-    user_id: str | None,
-    agent_id: str | None,
-    *,
-    clock: Callable[[], datetime],
-) -> BudgetHeadroom:
-    """Tightest cost headroom over scopes that have a cost cap and a present key.
-
-    Returns (1.0, None) when no scope has a cost cap (or none has a key)."""
-    now = clock()
-    keys = _scope_keys(session_id, user_id, agent_id)
-    tightest_ratio = 1.0
-    tightest_scope: str | None = None
-    for scope in CROSS_RUN_SCOPES:
-        key = keys.get(scope)
-        if key is None:
-            continue
-        cap = config.for_scope(scope).max_cost_usd
-        if cap == NO_LIMIT or cap <= 0:
-            continue
-        used = store.get(scope, key, now=now).cost_usd
-        ratio = max(0.0, (cap - used) / cap)
-        if ratio < tightest_ratio:
-            tightest_ratio = ratio
-            tightest_scope = scope.value
-    return BudgetHeadroom(cost_remaining_ratio=tightest_ratio, tightest_scope=tightest_scope)
 
 
 def utc_now() -> datetime:

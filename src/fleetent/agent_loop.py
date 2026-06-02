@@ -218,7 +218,7 @@ def _setup_layered_budget(
 
 
 def _layered_budget_add(
-    store: Any, keys: dict[Any, str | None], prompt: int, completion: int, model: str | None
+    store: Any, keys: dict[Any, str | None], prompt: int, completion: int
 ) -> None:
     """Fold one main-loop turn into each cross-run scope with a present key (AR18)."""
     if store is None:
@@ -230,7 +230,7 @@ def _layered_budget_add(
         key = keys.get(scope)
         if key is None:
             continue
-        store.add(scope, key, prompt or 0, completion or 0, model, now=now)
+        store.add(scope, key, prompt or 0, completion or 0, now=now)
 
 
 def _build_controller(
@@ -726,7 +726,6 @@ async def run(
             layered_keys,
             getattr(response.usage, "prompt_tokens", 0),
             getattr(response.usage, "completion_tokens", 0),
-            model_used,
         )
         models_to_try = [model_used]  # stick with the winning model for subsequent turns
         choice = response.choices[0]
@@ -1094,9 +1093,7 @@ async def run_stream(
         # tokens), so the BudgetChecker judges between turns rather than only
         # at the end of the whole run. Compression's LLM never reaches here (D4).
         budget_usage.add(turn_prompt_tokens, turn_completion_tokens)
-        _layered_budget_add(
-            layered_store, layered_keys, turn_prompt_tokens, turn_completion_tokens, model_used
-        )
+        _layered_budget_add(layered_store, layered_keys, turn_prompt_tokens, turn_completion_tokens)
 
         if finish_reason != "tool_calls":
             reply = "".join(reply_parts)
