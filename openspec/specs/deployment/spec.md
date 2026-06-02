@@ -155,3 +155,11 @@ API, scheduler, or worker behavior.
 #### Scenario: Checklist excludes secrets
 - **WHEN** operator 阅读 checklist 或准备问题上报包
 - **THEN** checklist 明确禁止把真实 secret、token、credential payload 写入 settings、日志、trace、diagnostics package、issue 或测试 fixture
+
+### Requirement: Fleetent admin command compatibility
+部署 SHALL 继续提供 `fleetent-admin` 作为管理员和 operator 的本机 CLI 入口。
+
+#### Scenario: Fleetent admin command remains available
+- **WHEN** operator 按部署文档运行 `uv run fleetent-admin`
+- **THEN** CLI 使用新的 `platform.admin_cli` 实现
+- **AND** 对 operator 暴露的命令名、参数和输出保持兼容
