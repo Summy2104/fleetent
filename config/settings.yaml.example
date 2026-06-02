@@ -10,6 +10,14 @@ observability:
     directory: data/logs
     json_file: true
 
+diagnostics:
+  export_dir: data/diagnostics
+  retention:
+    enabled: false
+    logs_days:
+    traces_days:
+    diagnostic_exports_days:
+
 mcp:
   enabled: true
 

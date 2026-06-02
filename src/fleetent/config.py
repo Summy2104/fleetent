@@ -48,6 +48,18 @@ class ObservabilitySettings(BaseModel):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
 
+class DiagnosticsRetentionSettings(BaseModel):
+    enabled: bool = False
+    logs_days: int | None = None
+    traces_days: int | None = None
+    diagnostic_exports_days: int | None = None
+
+
+class DiagnosticsSettings(BaseModel):
+    export_dir: str = "data/diagnostics"
+    retention: DiagnosticsRetentionSettings = Field(default_factory=DiagnosticsRetentionSettings)
+
+
 class VectorStoreSettings(BaseModel):
     backend: str = "memory"
     database_url: str | None = None
@@ -173,6 +185,7 @@ class Settings(BaseSettings):
     default_agent_name: str | None = None
     database_url: str = "sqlite:///data/fleetent.db"
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    diagnostics: DiagnosticsSettings = Field(default_factory=DiagnosticsSettings)
     vector_store: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     rerank: RerankSettings = Field(default_factory=RerankSettings)

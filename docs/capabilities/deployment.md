@@ -60,6 +60,12 @@
   - `sync <connector_id>` 手动执行同步并写入最近一次 status
   - `status <connector_id>` 查询最近一次 dry-run / sync 结果；输出不包含 credential payload、token、secret 或文档正文
 
+- ✅ **Diagnostics export / retention CLI**：`fleetent-admin diagnostics ...`
+  - `export` 生成本地脱敏诊断包，包含 manifest、logs、trace / usage / performance 摘要、connector status、environment 和 config summary
+  - `retention dry-run` 只展示将删除的 logs、traces 和 diagnostics export 包候选
+  - `retention apply` 只有显式开启 `diagnostics.retention.enabled=true` 后才删除诊断数据
+  - retention 不删除 memory、KB 文档 / chunks、connector source state、SQLite 主库或 SQLite backups
+
 当前定位：已有本地开发和基础 Docker 部署地基，但还不是面向客户交付的一键 on-prem 安装包。
 
 ## 升级与恢复
@@ -108,6 +114,29 @@ uv run fleetent-admin kb connectors status eng-drive
 - `scope_unreachable`：检查 folder / space / page id、connector 账号权限和企业网络出口。
 - `sync_failed`：先查看 `status` 的脱敏失败摘要，再用 `--dry-run` 缩小失败范围。
 
+## Diagnostics 与 Retention
+
+诊断包导出：
+
+```bash
+uv run fleetent-admin diagnostics export
+uv run fleetent-admin diagnostics export --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59
+```
+
+诊断包默认写入 `data/diagnostics`。包内数据会二次脱敏，并排除 memory 内容、KB 文档正文 / chunks、
+SQLite 主库、SQLite backups 和 connector credential 文件内容。
+
+手动 retention：
+
+```bash
+uv run fleetent-admin diagnostics retention dry-run
+uv run fleetent-admin diagnostics retention apply
+```
+
+默认 `diagnostics.retention.enabled=false`，因此 `apply` 会拒绝执行。只有在 `config/settings.yaml` 中显式
+开启并设置对应 days 字段后，才会删除超过天数的 logs、traces 或 diagnostics export 包。SQLite backups
+不在 diagnostics retention 范围内，备份保留策略由部署方单独管理。
+
 ## 规划中（v1.0）
 
 - [ ] **on-premises 安装包**：完整的一键部署方案
@@ -132,7 +161,7 @@ uv run fleetent-admin kb connectors status eng-drive
 
 - 缺少完整安装包：初始化、配置校验、迁移、启动、健康检查未形成一键流程。
 - 升级脚本已覆盖本地 SQLite backup / migration；完整发布包和自动 rollback 不在当前范围内。
-- 缺少日志 / trace retention 和备份策略。
+- 日志 / trace / diagnostics export 已有手动 retention；SQLite backups 自动保留策略仍由部署方管理。
 - License key 机制未设计。
 - PostgreSQL 可选后端未实现，仅保留边界。
 

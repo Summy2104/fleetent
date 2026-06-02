@@ -7,6 +7,7 @@
 让 fleetent 的运行状态、agent 执行轨迹、成本与质量信号可查、可分析、可排障。面向工程师、运维人员、管理员和后续 reflection 系统，不面向最终用户。
 
 **负责**：结构化程序日志、agent run traces、来源归因摘要、用量 / 性能统计查询、启动诊断与脱敏基线。
+还包括 Pilot 运维使用的本地脱敏 diagnostics export，以及手动 diagnostics retention dry-run / apply。
 
 **不负责**：业务逻辑正确性（→ agent-runtime / 各业务模块）、资源监控与告警通知 UI（→ platform）、基础设施采集器（→ deployment / platform）、外部 APM / OTel 集成（后续独立评估）。
 
@@ -193,6 +194,8 @@ def get_logger(component: str) -> Logger:
   permission 等运行性能指标
 - source attribution：`InjectedContextTrace`、`record_injected_context()`、`injected_context` event
 - knowledge-base scope diagnostics：agent 没有显式 KB 绑定且默认 KB 为空时记录 `knowledge_base.agent_kb_scope_empty`
+- diagnostics export / retention：`export_diagnostics()` 生成本地脱敏诊断包；`plan_diagnostics_retention()` /
+  `apply_diagnostics_retention()` 只处理 logs、traces 和 diagnostics export 包，默认 disabled，不清理业务数据或备份
 - observability contract tests：覆盖 agent run 的 `injected_context` / `agent_run_completed` 事件链路、
   source attribution payload safety、trace query、usage aggregation 和 performance aggregation contract
 
@@ -264,14 +267,14 @@ def get_logger(component: str) -> Logger:
 ## 当前缺口
 
 - runtime event coverage 已覆盖 run lifecycle、LLM call、tool call、permission、fallback、context compression 和 final reply；但 request_id / span 语义仍需强化，完整 trace tree 尚未完成。
-- logs / traces retention、导出、备份和告警策略未定义。
+- logs / traces / diagnostics export 已有手动 retention dry-run / apply；默认不设置保留天数，不自动清理。
+- 备份保留策略仍由部署方管理；observability retention 不删除 SQLite backups。
 - usage / performance summary 目前是 Python public API；还没有 platform UI、admin 查询入口或 HTTP 查询端点。
 - 尚未接入 OpenTelemetry / Prometheus，也没有独立 metrics store 或 rollup 表。
 
 ## 下一批候选 specs
 
 - `observability-request-trace-tree`
-- `observability-retention-policy`
 - `observability-admin-query-api`
 - `platform-trace-view`
 

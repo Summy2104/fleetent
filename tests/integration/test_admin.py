@@ -363,3 +363,76 @@ def test_kb_connectors_cli_output_is_sanitized(monkeypatch):
     assert code == 0
     assert "sync_failed" in out
     assert "secret-value" not in out
+
+
+def test_diagnostics_export_cli_outputs_package_path(monkeypatch, tmp_path):
+    from fleetent.observability import diagnostics
+
+    package_path = tmp_path / "diagnostics.zip"
+
+    def export_diagnostics(request):
+        return diagnostics.DiagnosticsExportPackage(path=package_path)
+
+    monkeypatch.setattr(diagnostics, "export_diagnostics", export_diagnostics)
+
+    out, _, code = run_admin("diagnostics", "export", "--output-dir", str(tmp_path))
+
+    assert code == 0
+    assert str(package_path) in out
+
+
+def test_diagnostics_retention_dry_run_cli_outputs_candidates(monkeypatch):
+    from fleetent.observability import diagnostics
+
+    monkeypatch.setattr(
+        diagnostics,
+        "plan_diagnostics_retention",
+        lambda: diagnostics.DiagnosticsRetentionPlan(
+            log_files=[diagnostics.Path("data/logs/old.log")],
+            trace_count=3,
+            diagnostic_exports=[diagnostics.Path("data/diagnostics/old.zip")],
+        ),
+    )
+
+    out, _, code = run_admin("diagnostics", "retention", "dry-run")
+
+    assert code == 0
+    assert "logs=1" in out
+    assert "traces=3" in out
+    assert "exports=1" in out
+
+
+def test_diagnostics_retention_apply_disabled_cli_exits_nonzero(monkeypatch):
+    from fleetent.observability import diagnostics
+
+    monkeypatch.setattr(
+        diagnostics,
+        "apply_diagnostics_retention",
+        lambda: diagnostics.DiagnosticsRetentionResult(
+            applied=False,
+            deleted_logs=0,
+            deleted_traces=0,
+            deleted_exports=0,
+            failures=[],
+            message="diagnostics retention disabled",
+        ),
+    )
+
+    _, err, code = run_admin("diagnostics", "retention", "apply")
+
+    assert code != 0
+    assert "disabled" in err
+
+
+def test_diagnostics_cli_output_is_sanitized(monkeypatch, tmp_path):
+    from fleetent.observability import diagnostics
+
+    def export_diagnostics(request):
+        return diagnostics.DiagnosticsExportPackage(path=tmp_path / "token-secret-value.zip")
+
+    monkeypatch.setattr(diagnostics, "export_diagnostics", export_diagnostics)
+
+    out, _, code = run_admin("diagnostics", "export")
+
+    assert code == 0
+    assert "secret-value" not in out

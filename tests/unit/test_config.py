@@ -201,6 +201,39 @@ def test_knowledge_base_defaults():
     assert s.knowledge_base.chunk_overlap < s.knowledge_base.chunk_size
 
 
+def test_diagnostics_defaults_are_conservative():
+    s = Settings(anthropic_api_key="test-key")
+
+    assert s.diagnostics.export_dir == "data/diagnostics"
+    assert s.diagnostics.retention.enabled is False
+    assert s.diagnostics.retention.logs_days is None
+    assert s.diagnostics.retention.traces_days is None
+    assert s.diagnostics.retention.diagnostic_exports_days is None
+
+
+def test_diagnostics_retention_days_are_opt_in():
+    s = Settings(
+        anthropic_api_key="test-key",
+        diagnostics={"retention": {"enabled": True, "logs_days": 7}},
+    )
+
+    assert s.diagnostics.retention.enabled is True
+    assert s.diagnostics.retention.logs_days == 7
+    assert s.diagnostics.retention.traces_days is None
+    assert s.diagnostics.retention.diagnostic_exports_days is None
+
+
+def test_settings_example_includes_diagnostics_without_default_deletion():
+    example = (Path(__file__).parents[2] / "config" / "settings.yaml.example").read_text()
+
+    assert "diagnostics:" in example
+    assert "export_dir: data/diagnostics" in example
+    assert "enabled: false" in example
+    assert "logs_days:" in example
+    assert "traces_days:" in example
+    assert "diagnostic_exports_days:" in example
+
+
 def test_vector_store_accepts_sqlite_backend_with_optional_database_url():
     s = Settings(
         anthropic_api_key="test-key",

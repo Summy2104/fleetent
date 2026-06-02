@@ -34,7 +34,7 @@ from fleetent.observability.structured_logging import _redact_value
 
 ConnectorType = Literal["google_drive", "confluence"]
 _SECRET_WORD_RE = re.compile(
-    r"\b(token|secret|password|api[_-]?key|authorization|credential)\s+([^\s,;]+)",
+    r"\b(token|secret|password|api[_-]?key|authorization|credential)[\s:=_-]+([^\s,;]+)",
     re.IGNORECASE,
 )
 
