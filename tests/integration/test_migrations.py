@@ -263,6 +263,87 @@ def test_downgrade_removes_namespace_column(tmp_path):
     assert "memory_items" not in tables
 
 
+def _upgrade_to(db_path: Path, revision: str) -> None:
+    cfg = Config()
+    cfg.set_main_option("script_location", "migrations")
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.upgrade(cfg, revision)
+
+
+def test_agent_versions_table_and_columns(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    av_cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_versions)")}
+    agent_cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)")}
+    chan_cols = {row[1] for row in conn.execute("PRAGMA table_info(channel_agents)")}
+    conn.close()
+    assert "agent_versions" in tables
+    assert "channel_agents" in tables
+    assert av_cols >= {
+        "id",
+        "agent_id",
+        "version",
+        "system_prompt",
+        "allowed_tools",
+        "skills_dir",
+        "mcp_server_ids",
+        "model_overrides",
+        "memory_namespace",
+        "created_at",
+    }
+    assert "active_version_id" in agent_cols
+    assert "bound_version_id" in chan_cols
+
+
+def test_agent_v1_backfill_for_existing_rows(tmp_path):
+    db = tmp_path / "test.db"
+    _upgrade_to(db, "026")
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """
+        INSERT INTO agents (name, system_prompt, allowed_tools, created_at)
+        VALUES ('legacy', 'You are legacy.', '["shell"]', '2026-01-01T00:00:00+00:00')
+        """
+    )
+    conn.commit()
+    agent_id = conn.execute("SELECT id FROM agents WHERE name='legacy'").fetchone()[0]
+    conn.close()
+
+    _upgrade_to(db, "027")
+
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    agent = conn.execute("SELECT * FROM agents WHERE id=?", (agent_id,)).fetchone()
+    version = conn.execute(
+        "SELECT * FROM agent_versions WHERE agent_id=?", (agent_id,)
+    ).fetchone()
+    n_versions = conn.execute(
+        "SELECT COUNT(*) FROM agent_versions WHERE agent_id=?", (agent_id,)
+    ).fetchone()[0]
+    conn.close()
+
+    assert agent["active_version_id"] == version["id"]
+    assert version["version"] == 1
+    assert version["system_prompt"] == "You are legacy."
+    assert version["allowed_tools"] == '["shell"]'
+    assert version["mcp_server_ids"] is None
+    assert version["memory_namespace"] == "default"
+    assert n_versions == 1
+
+
+def test_downgrade_removes_agent_versions(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    downgrade_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.close()
+    assert "agent_versions" not in tables
+    assert "agents" not in tables
+
+
 def test_migrated_schedule_store_does_not_create_schema():
     schedule_source = Path("src/fleetent/schedule_store.py").read_text()
     runtime_source = Path("src/fleetent/db.py").read_text()

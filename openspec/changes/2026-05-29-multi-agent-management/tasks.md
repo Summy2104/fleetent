@@ -2,10 +2,10 @@
 
 ## 1. Schema 迁移（Alembic）
 
-- [ ] 1.1 Write failing tests: 迁移 upgrade 后 `agent_versions` 表存在（列 id / agent_id / version / system_prompt / allowed_tools / skills_dir / mcp_server_ids / model_overrides / memory_namespace / created_at）；`agents` 表有 `active_version_id` 列；`channel_agents` 表有 `bound_version_id` 列；downgrade 干净回滚
-- [ ] 1.2 新建 Alembic 迁移 `027_add_agent_versions`（基于 026_add_memory_namespace）：建表 + 加列；named params 风格；不复制 store `_init_db` 建表
-- [ ] 1.3 Write failing tests: 存量 `agents` 行（无 active_version_id）在 backfill 后获得 version=1（mirror system_prompt/allowed_tools，mcp_server_ids=NULL 表示"全部"，memory_namespace='default'），active_version_id 填好；幂等重跑不重复建版本
-- [ ] 1.4 在迁移中实现幂等 `_backfill_v1_versions()`（data migration 段），对存量行补 v1
+- [x] 1.1 Write failing tests: 迁移 upgrade 后 `agent_versions` 表存在（列 id / agent_id / version / system_prompt / allowed_tools / skills_dir / mcp_server_ids / model_overrides / memory_namespace / created_at）；`agents` 表有 `active_version_id` 列；`channel_agents` 表有 `bound_version_id` 列；downgrade 干净回滚
+- [x] 1.2 新建 Alembic 迁移 `027_add_agent_versions`（基于 026_add_memory_namespace）：建表 + 加列；named params 风格；不复制 store `_init_db` 建表
+- [x] 1.3 Write failing tests: 存量 `agents` 行（无 active_version_id）在 backfill 后获得 version=1（mirror system_prompt/allowed_tools，mcp_server_ids=NULL 表示"全部"，memory_namespace='default'），active_version_id 填好；幂等重跑不重复建版本
+- [x] 1.4 在迁移中实现幂等 `_backfill_v1_versions()`（data migration 段），对存量行补 v1
 
 ## 2. agent_store — 版本数据访问
 
