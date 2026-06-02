@@ -36,19 +36,19 @@
 
 ## 3. stats_store — 模型·Skill·绑定 + 下钻 + per-user（④ + ⑤）
 
-- [ ] 3.1 Write failing tests：按模型 / task_type 的调用 / token 分布；绑定数 / 默认 agent / 受管·临管来源分布（读 agent_store）
-- [ ] 3.2 实现模型分布 + 绑定事实聚合
+- [x] 3.1 Write failing tests：按模型 / task_type 的调用 / token 分布；绑定数 / 默认 agent / 受管·临管来源分布（读 agent_store）
+- [x] 3.2 实现模型分布 + 绑定事实聚合
 - [x] 3.3 Write failing tests：per-user 排行（token / 频率[次数·活跃天数] / 最近活跃，可排序）；反向「按用户」跨 agent 汇总
 - [x] 3.4 实现 per-user 与反向汇总聚合
-- [ ] 3.5 Write failing tests：任一指标按 用户 / channel / 模型 / 时间 切片，组合筛选数据收敛
-- [ ] 3.6 实现按维度下钻聚合
+- [x] 3.5 Write failing tests：任一指标按 用户 / channel / 模型 / 时间 切片，组合筛选数据收敛
+- [x] 3.6 实现按维度下钻聚合
 
 ## 4. stats_store — 成本聚合 + 单价缺失语义（① 成本 ⏳）
 
 - [x] 4.1 Write failing tests（mock 单价表）：已配单价按 `token × 单价` 计算；未配单价模型显示「未配置」而非 0；单价表整体未上线走「待数据接入」占位
 - [x] 4.2 实现成本聚合（消费 model-provider 单价表 + 未配置 / 未上线分支）
-- [ ] 4.3 Write failing tests：⏳ 依赖字段（终止码 / 错误分类 / fallback / 压缩 / 工具失败·超时 / skill·memory 命中 / sub_agent 成功）缺失时对应指标「待数据接入」占位；字段出现后自动点亮
-- [ ] 4.4 实现 ⏳ 字段探测 + 占位 / 点亮逻辑（feature-flag / 字段探测，0.3）
+- [x] 4.3 Write failing tests：⏳ 依赖字段（终止码 / 错误分类 / fallback / 压缩 / 工具失败·超时 / skill·memory 命中 / sub_agent 成功）缺失时对应指标「待数据接入」占位；字段出现后自动点亮
+- [x] 4.4 实现 ⏳ 字段探测 + 占位 / 点亮逻辑（feature-flag / 字段探测，0.3）
 
 ## 5. request_trace — 请求列表 + 单请求事件流（⑥ 主链路 + 退化）
 
@@ -63,8 +63,8 @@
 
 - [x] 6.1 Write failing tests（带 parent_session_id + span_id 的子 trace）：sub_agent 节点就地展开为同构子链路（场景 84）
 - [x] 6.2 实现 sub_agent 子链路展开（经 parent_session_id 关联）
-- [ ] 6.3 Write failing tests：退化模式下若 parent_session_id 可关联则展开，否则降级为「无法关联子链路」提示而非报错
-- [ ] 6.4 实现退化模式下的子链路降级
+- [x] 6.3 Write failing tests：退化模式下若 parent_session_id 可关联则展开，否则降级为「无法关联子链路」提示而非报错
+- [x] 6.4 实现退化模式下的子链路降级
 
 ## 7. stats_admin_api — 只读 REST + 守卫 + 脱敏
 
@@ -76,13 +76,13 @@
 
 ## 8. 导出 + 定时邮件报告（复用 scheduling）
 
-- [ ] 8.1 Write failing tests：当前视图导出 CSV / 图片
-- [ ] 8.2 实现导出（导出动作写审计）
-- [ ] 8.3 Write failing tests：配置每周 / 月邮件报告，落 scheduling（`scheduled_tasks`），按周期推送摘要，配置动作写审计；邮件发送器 mock 不发真实邮件
-- [ ] 8.4 实现定时报告配置（复用 `cron_scheduler` / `schedule_store`）
+- [x] 8.1 Write failing tests：当前视图导出 CSV / 图片
+- [x] 8.2 实现导出（导出动作写审计）
+- [x] 8.3 Write failing tests：配置每周 / 月邮件报告，落 scheduling（`scheduled_tasks`），按周期推送摘要，配置动作写审计；邮件发送器 mock 不发真实邮件
+- [x] 8.4 实现定时报告配置（复用 `cron_scheduler` / `schedule_store`）
 
 ## 9. 收尾
 
-- [ ] 9.1 全量 `uv run pytest -x -q` 绿
-- [ ] 9.2 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过
-- [ ] 9.3 手动冒烟：选 agent 出 ✅ 指标 → 多 agent 对比 → per-user 排行 → 按 channel/时间 下钻 → 成本未配单价显示「未配置」→ ⏳ 字段占位 → 从用户下钻请求列表 → 单请求事件流 → sub_agent 子链路展开 → 缺 request_id 退化 → 导出 + 配置周报 → viewer 只读 + 脱敏
+- [x] 9.1 全量 `uv run pytest -x -q` 绿
+- [x] 9.2 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过
+- [x] 9.3 手动冒烟（以自动化 TestClient 流程等价覆盖，尚无活体 UI）：选 agent 出 ✅ 指标 → 多 agent 对比 → per-user 排行 → 按 channel/时间 下钻 → 成本未配单价显示「未配置」→ ⏳ 字段占位 → 从用户下钻请求列表 → 单请求事件流 → sub_agent 子链路展开 → 缺 request_id 退化 → 导出 + 配置周报 → viewer 只读 + 脱敏

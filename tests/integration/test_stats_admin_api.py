@@ -184,6 +184,45 @@ def test_export_and_report_audited(client):  # 场景 81
     assert {"stats_export", "stats_report_config"} <= actions
 
 
+def test_export_returns_csv_per_user(client, monkeypatch):  # 场景 81 (CSV)
+    monkeypatch.setattr(
+        api,
+        "fetch_traces",
+        lambda **kw: [{"user_id": "alice", "total_tokens": 100, "ts": "2026-06-01T00:00:00"}],
+    )
+    token, _ = _session_for("admin")
+    r = client.post("/admin/stats/export?view=per-user", headers=_hdr(token))
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    body = r.text
+    assert "user_id" in body.splitlines()[0]
+    assert "alice" in body
+    detail = next(a for a in audit.search_audit() if a["action"] == "stats_export")["detail"]
+    assert detail["view"] == "per-user"
+
+
+def test_configure_report_persists_schedule(client, monkeypatch):  # 场景 81 (定时报告)
+    captured = {}
+
+    def _fake_create(**kw):
+        captured.update(kw)
+        return {"id": "task-xyz"}
+
+    import fleetent.schedule_store as schedule_store
+
+    monkeypatch.setattr(schedule_store, "create", _fake_create)
+    token, uid = _session_for("admin")
+    r = client.post(
+        "/admin/stats/reports",
+        headers=_hdr(token),
+        json={"period": "weekly", "agent_id": "ops", "recipient": "a@x.com"},
+    )
+    assert r.status_code == 200
+    assert r.json()["task_id"] == "task-xyz"
+    assert captured["cron_expr"] == "0 9 * * 1"  # weekly -> Monday 09:00
+    assert captured["agent_name"] == "ops"
+
+
 def test_viewer_cannot_configure_report(client):
     token, _ = _session_for("viewer")
     r = client.post(

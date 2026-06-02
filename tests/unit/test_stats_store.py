@@ -157,3 +157,85 @@ def test_expand_subagents():
     stream = s.build_event_stream(traces, "r1")
     s.expand_subagents(stream, traces)
     assert stream["events"][0]["sub_agent_chain"][0]["kind"] == "child"
+
+
+# --- model / task_type distribution + binding facts (任务 3.1/3.2) ------------
+
+
+def test_model_distribution_by_model_and_task_type():
+    traces = [
+        _t(model_used="gpt-4o", task_type="chat", total_tokens=100),
+        _t(model_used="gpt-4o", task_type="chat", total_tokens=50),
+        _t(model_used="claude", task_type="code", total_tokens=200),
+    ]
+    dist = s.model_distribution(traces)
+    assert dist["by_model"]["gpt-4o"] == {"calls": 2, "total_tokens": 150}
+    assert dist["by_task_type"]["code"] == {"calls": 1, "total_tokens": 200}
+
+
+def test_binding_facts_counts_and_provenance():
+    states = [
+        {"agent_name": "a", "provenance": "managed"},
+        {"agent_name": "b", "provenance": "adhoc"},
+        {"agent_name": "c", "provenance": "adhoc"},
+    ]
+    facts = s.binding_facts(bindings=4, default_agent="a", states=states)
+    assert facts["bindings"] == 4
+    assert facts["default_agent"] == "a"
+    assert facts["provenance"] == {"managed": 1, "adhoc": 2}
+
+
+# --- dimension drill-down (任务 3.5/3.6) --------------------------------------
+
+
+def test_slice_traces_combined_filters_converge():
+    traces = [
+        _t(user_id="u1", channel="c1", model_used="m1", ts="2026-06-01T00:00:00"),
+        _t(user_id="u1", channel="c2", model_used="m1", ts="2026-06-02T00:00:00"),
+        _t(user_id="u2", channel="c1", model_used="m2", ts="2026-06-03T00:00:00"),
+    ]
+    out = s.slice_traces(traces, user_id="u1", channel="c1")
+    assert len(out) == 1 and out[0]["channel"] == "c1"
+    # time window narrows further
+    windowed = s.slice_traces(traces, since="2026-06-02T00:00:00", until="2026-06-02T23:59:59")
+    assert [t["user_id"] for t in windowed] == ["u1"]
+
+
+# --- ⏳ field readiness detection (任务 4.3/4.4) ------------------------------
+
+
+def test_field_readiness_placeholder_until_present():
+    traces = [_t(stop_reason="end_turn"), _t(elapsed_s=1.0)]
+    readiness = s.field_readiness(traces, ["stop_reason", "error_class", "fallback"])
+    assert readiness["stop_reason"] == "ready"  # present in at least one trace
+    assert readiness["error_class"] == s.PENDING_DATA  # never emitted
+    assert readiness["fallback"] == s.PENDING_DATA
+
+
+# --- CSV export serialization (任务 8.1/8.2) ---------------------------------
+
+
+def test_rows_to_csv_serializes_header_and_values():
+    rows = [
+        {"user_id": "u1", "total_tokens": 100, "calls": 2},
+        {"user_id": "u2", "total_tokens": 50, "calls": 1},
+    ]
+    lines = s.rows_to_csv(rows).strip().splitlines()
+    assert lines[0] == "user_id,total_tokens,calls"
+    assert lines[1] == "u1,100,2"
+    assert lines[2] == "u2,50,1"
+
+
+def test_rows_to_csv_empty_returns_blank():
+    assert s.rows_to_csv([]) == ""
+
+
+# --- sub_agent degradation (任务 6.3/6.4) ------------------------------------
+
+
+def test_expand_subagents_degraded_note_when_unlinkable():
+    traces = [_t(session_id="s1", request_id="r1", ts="t0")]  # no children, no parent links
+    stream = s.build_event_stream(traces, "r1")
+    out = s.expand_subagents(stream, traces, note_when_empty=True)
+    assert out["events"][0].get("sub_agent_chain") is None
+    assert out.get("sub_agent_note") == "无法关联子链路"

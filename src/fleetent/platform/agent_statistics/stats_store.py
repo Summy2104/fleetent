@@ -9,7 +9,9 @@ Trace records are read defensively with .get() so partial / ⏳-not-yet-emitted 
 degrade to placeholders rather than errors.
 """
 
+import csv
 import fnmatch
+import io
 from collections import Counter, defaultdict
 from typing import Any
 
@@ -205,11 +207,89 @@ def build_event_stream_degraded(
     }
 
 
-def expand_subagents(stream: dict[str, Any], traces: list[dict[str, Any]]) -> dict[str, Any]:
+def expand_subagents(
+    stream: dict[str, Any], traces: list[dict[str, Any]], note_when_empty: bool = False
+) -> dict[str, Any]:
     """Attach sub_agent child chains, linked by parent_session_id."""
+    linked = False
     for event in stream.get("events", []):
         sid = event.get("session_id")
         children = [t for t in traces if t.get("parent_session_id") == sid]
         if children:
             event["sub_agent_chain"] = sorted(children, key=lambda t: t.get("ts") or "")
+            linked = True
+    if note_when_empty and not linked:
+        stream["sub_agent_note"] = "无法关联子链路"
     return stream
+
+
+def model_distribution(traces: list[dict[str, Any]]) -> dict[str, Any]:
+    """Calls / tokens split by model and by task_type."""
+
+    def _bucket(key: str) -> dict[str, dict[str, int]]:
+        out: dict[str, dict[str, int]] = defaultdict(lambda: {"calls": 0, "total_tokens": 0})
+        for t in traces:
+            label = t.get(key, "unknown")
+            rec = out[label]
+            rec["calls"] += 1
+            rec["total_tokens"] += int(t.get("total_tokens", t.get("tokens", 0)))
+        return dict(out)
+
+    return {"by_model": _bucket("model_used"), "by_task_type": _bucket("task_type")}
+
+
+def binding_facts(
+    bindings: int, default_agent: str | None, states: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Binding count + default agent + provenance breakdown across agent states."""
+    provenance = Counter(st.get("provenance", "adhoc") for st in states)
+    return {
+        "bindings": bindings,
+        "default_agent": default_agent,
+        "provenance": dict(provenance),
+    }
+
+
+def slice_traces(
+    traces: list[dict[str, Any]],
+    user_id: str | None = None,
+    channel: str | None = None,
+    model: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> list[dict[str, Any]]:
+    """Filter traces by any combination of dimensions; ts bounds inclusive."""
+    out = []
+    for t in traces:
+        if user_id is not None and t.get("user_id") != user_id:
+            continue
+        if channel is not None and t.get("channel") != channel:
+            continue
+        if model is not None and t.get("model_used") != model:
+            continue
+        ts = t.get("ts")
+        if since is not None and (ts is None or ts < since):
+            continue
+        if until is not None and (ts is None or ts > until):
+            continue
+        out.append(t)
+    return out
+
+
+def rows_to_csv(rows: list[dict[str, Any]]) -> str:
+    """Serialize aggregation rows to CSV; header from first row's keys. Empty => ''."""
+    if not rows:
+        return ""
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+    writer.writeheader()
+    writer.writerows(rows)
+    return buf.getvalue()
+
+
+def field_readiness(traces: list[dict[str, Any]], fields: list[str]) -> dict[str, str]:
+    """A field is 'ready' once any trace carries it; else 待数据接入 placeholder."""
+    return {
+        field: "ready" if any(t.get(field) is not None for t in traces) else PENDING_DATA
+        for field in fields
+    }
