@@ -59,7 +59,7 @@ async def test_run_code_returns_stdout(monkeypatch):
     from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox import ExecResult
 
     mock_client = AsyncMock()
     mock_client.create_workspace = AsyncMock(return_value="cid-123")
@@ -78,7 +78,7 @@ async def test_run_code_includes_stderr(monkeypatch):
     from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox import ExecResult
 
     mock_client = AsyncMock()
     mock_client.create_workspace = AsyncMock(return_value="cid-456")
