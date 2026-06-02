@@ -146,6 +146,12 @@ def list_unpinned_playground(before: str) -> list[str]:
     return [r["session_id"] for r in rows]
 
 
+def delete_meta(session_id: str) -> None:
+    """Drop a session's governance metadata (retention cleanup)."""
+    with _database().transaction() as conn:
+        conn.execute("DELETE FROM session_meta WHERE session_id = :sid", {"sid": session_id})
+
+
 _UPDATABLE = {"status", "takeover_actor", "takeover_at", "pinned", "pin_note"}
 
 

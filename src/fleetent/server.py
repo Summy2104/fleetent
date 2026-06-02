@@ -162,6 +162,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     cron.add_interval_job(
         _run_monitoring_cycle, collectors.COLLECT_INTERVAL_SECONDS, "monitoring_collect"
     )
+    cron.add_interval_job(
+        _run_playground_retention, _PLAYGROUND_RETENTION_INTERVAL_SECONDS, "playground_retention"
+    )
 
     yield
 
@@ -207,6 +210,21 @@ def _run_monitoring_cycle() -> None:
             step()
         except Exception:  # noqa: BLE001 — keep the periodic job alive
             logger.exception("monitoring_cycle_step_failed step=%s", step.__name__)
+
+
+_PLAYGROUND_RETENTION_INTERVAL_SECONDS = 24 * 3600
+
+
+def _run_playground_retention() -> None:
+    """Daily sweep: drop unpinned, expired playground sessions. Failures are isolated."""
+    import os
+
+    if not os.environ.get("DATABASE_URL"):
+        return
+    try:
+        chat_admin_api.purge_expired_playground()
+    except Exception:  # noqa: BLE001 — keep the periodic job alive
+        logger.exception("playground_retention_failed")
 
 
 def agent_routing_status(agent_name: str) -> str:

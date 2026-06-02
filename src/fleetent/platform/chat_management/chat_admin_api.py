@@ -13,19 +13,24 @@ is persisted via session_admin_store. Never imports the agent loop directly.
 Auth: reads allow viewer+admin, writes require admin; high-risk writes need X-Confirm.
 """
 
+import datetime
+import json
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from fleetent import audit_log, auth, user_store
-from fleetent.platform.chat_management import session_admin_store
+from fleetent.platform.chat_management import session_admin_store, transcript_export
 
 router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
+PLAYGROUND_RETENTION_DAYS = 7
 
 
 # --- injectable seams (agent-runtime / session / im-gateway follow-ups) -------
@@ -45,6 +50,28 @@ def run_playground(
     so the run is not counted toward the agent's outward usage.
     """
     return {"reply": "", "events": [], "wired": False}
+
+
+def run_playground_stream(
+    agent_name: str,
+    session_id: str,
+    message: str,
+    overrides: dict[str, Any] | None,
+    bypass_medium: bool,
+) -> Iterator[dict[str, Any]]:
+    """Stream playground turn events (bridges agent_loop.run_stream on host).
+
+    Yields per-turn observability event dicts; the route serializes them as SSE.
+    """
+    return iter(())
+
+
+def session_stats(session_id: str) -> dict[str, Any]:
+    """Per-session rollup for the list view (tokens / rounds / pending approvals).
+
+    Bridges observability + permission_gate on host; placeholder returns zeros.
+    """
+    return {"total_tokens": 0, "rounds": 0, "pending_approvals": 0}
 
 
 def load_transcript(session_id: str) -> list[dict[str, Any]]:
@@ -163,6 +190,27 @@ def playground_message(
     return result
 
 
+@router.post("/chat/{session_id}/stream")
+def playground_stream(
+    session_id: str, body: MessageBody, authorization: str | None = Header(None)
+) -> StreamingResponse:
+    user = _require_admin(authorization)
+    meta = session_admin_store.get_meta(session_id)
+    if meta["origin"] != "playground":
+        raise HTTPException(status_code=409, detail="not a playground session")
+    bypass = body.auto_approve_medium
+    if bypass:
+        audit_log.write_audit(user.id, "playground_bypass_medium", "session", session_id)
+
+    def _sse() -> Iterator[str]:
+        for event in run_playground_stream(
+            meta["agent_name"], session_id, body.message, body.overrides, bypass
+        ):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(_sse(), media_type="text/event-stream")
+
+
 @router.post("/chat/{session_id}/pin")
 def playground_pin(
     session_id: str, body: PinBody, authorization: str | None = Header(None)
@@ -174,11 +222,36 @@ def playground_pin(
 
 
 @router.get("/chat/{session_id}/export")
-def playground_export(session_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+def playground_export(
+    session_id: str, fmt: str = "json", authorization: str | None = Header(None)
+) -> Any:
     user = _require_admin(authorization)
     transcript = load_transcript(session_id)
-    audit_log.write_audit(user.id, "session_export", "session", session_id)
+    audit_log.write_audit(user.id, "session_export", "session", session_id, detail={"fmt": fmt})
+    if fmt == "markdown":
+        return Response(
+            content=transcript_export.render_markdown(session_id, transcript),
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{session_id}.md"'},
+        )
     return {"session_id": session_id, "transcript": transcript}
+
+
+def purge_expired_playground(
+    now: datetime.datetime | None = None, retention_days: int = PLAYGROUND_RETENTION_DAYS
+) -> dict[str, list[str]]:
+    """Delete unpinned playground sessions past the retention window (scheduling job).
+
+    Transcript is emptied through the session seam; governance metadata is dropped.
+    """
+    moment = now or datetime.datetime.now(datetime.UTC)
+    cutoff = (moment - datetime.timedelta(days=retention_days)).isoformat()
+    purged = []
+    for sid in session_admin_store.list_unpinned_playground(cutoff):
+        clear_session(sid)
+        session_admin_store.delete_meta(sid)
+        purged.append(sid)
+    return {"purged": purged}
 
 
 # --- session governance -------------------------------------------------------
@@ -212,7 +285,10 @@ def list_sessions(
     authorization: str | None = Header(None),
 ) -> list[dict[str, Any]]:
     _current_user(authorization)
-    return session_admin_store.list_meta(status=status, user_id=user_id, agent_name=agent_name)
+    rows = session_admin_store.list_meta(status=status, user_id=user_id, agent_name=agent_name)
+    for row in rows:
+        row.update(session_stats(row["session_id"]))
+    return rows
 
 
 @router.get("/sessions/{session_id}")

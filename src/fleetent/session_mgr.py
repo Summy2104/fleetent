@@ -48,6 +48,13 @@ async def clear(session_id: str) -> None:
         await save(session_id, [])
 
 
+async def reset(session_id: str, keep_turns: int) -> None:
+    """Truncate a transcript to its first ``keep_turns`` messages, under the lock."""
+    async with session_lock(session_id):
+        messages = await load(session_id)
+        await save(session_id, messages[:keep_turns])
+
+
 async def inject_message(session_id: str, role: str, content: str) -> None:
     """Append a single message to a session's transcript atomically under the lock.
 

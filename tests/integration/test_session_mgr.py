@@ -55,6 +55,19 @@ async def test_concurrent_saves_same_session_serialize(sessions_dir):
     assert len(final) == 3
 
 
+async def test_reset_truncates_to_keep_turns(sessions_dir):
+    await session_mgr.save("s", [{"role": "user", "content": str(i)} for i in range(5)])
+    await session_mgr.reset("s", 2)
+    loaded = await session_mgr.load("s")
+    assert [m["content"] for m in loaded] == ["0", "1"]
+
+
+async def test_reset_keep_more_than_present_is_noop(sessions_dir):
+    await session_mgr.save("s", [{"role": "user", "content": "only"}])
+    await session_mgr.reset("s", 10)
+    assert len(await session_mgr.load("s")) == 1
+
+
 async def test_different_sessions_do_not_block_each_other(sessions_dir):
     """Two different sessions can load/save concurrently."""
     order = []

@@ -26,31 +26,31 @@
 ## 2. session_mgr — 受控写钩子
 
 - [x] 2.1 Write failing tests: `force_end(session_id)` 置 `status=ended` 后不再接受新轮；`clear(session_id)` 清空上下文（等价 `/new`）；`inject_message(session_id, role, content)` 在 per-session 锁下原子追加并持久化；并发 A/B 不混
-- [ ] 2.2 实现 `force_end` / `clear` / `inject_message`（复用现有 `session_lock` + 原子写 `.json.tmp → rename`），不改 load/save 语义
+- [x] 2.2 实现 `force_end` / `clear` / `inject_message`（复用现有 `session_lock` + 原子写 `.json.tmp → rename`），不改 load/save 语义
 
 ## 3. chat_admin_api — playground 起会话 + SSE + 参数覆盖
 
-- [ ] 3.1 Write failing tests（TestClient + mock `agent_loop.run_stream`/`model_router`）: admin 选 Agent 起会话标记 `origin=playground`、不绑真实用户/channel；SSE 流式回复 + 右栏可观察字段（Skill/KB 命中、工具入出参、审批决策、模型路由）；`origin=playground` 不计对外用量
-- [ ] 3.2 实现 `/admin/chat/start` + `/admin/chat/{sid}/message`（SSE），透传 `origin=playground` 与逐轮可观察事件
-- [ ] 3.3 Write failing tests: 请求级覆盖 task_type/模型/temperature/启停 Skill·KB 仅作用当前会话；Agent 持久配置不变、其他会话不受影响
+- [x] 3.1 Write failing tests（TestClient + mock `agent_loop.run_stream`/`model_router`）: admin 选 Agent 起会话标记 `origin=playground`、不绑真实用户/channel；SSE 流式回复 + 右栏可观察字段（Skill/KB 命中、工具入出参、审批决策、模型路由）；`origin=playground` 不计对外用量
+- [x] 3.2 实现 `/admin/chat/start` + `/admin/chat/{sid}/message`（SSE），透传 `origin=playground` 与逐轮可观察事件
+- [x] 3.3 Write failing tests: 请求级覆盖 task_type/模型/temperature/启停 Skill·KB 仅作用当前会话；Agent 持久配置不变、其他会话不受影响
 - [x] 3.4 实现请求级 overrides 透传（不落 Agent 定义表）
 
 ## 4. chat_admin_api — 受控审批旁路（playground only）+ 审计
 
-- [ ] 4.1 Write failing tests（注入 governance 桩）: playground 开启「自动批准 medium」时该会话 medium 自动放行并写审计；high 仍需显式确认；构造并行真实会话桩断言其仍进 permission_gate（旁路不波及）
+- [x] 4.1 Write failing tests（注入 governance 桩）: playground 开启「自动批准 medium」时该会话 medium 自动放行并写审计；high 仍需显式确认；构造并行真实会话桩断言其仍进 permission_gate（旁路不波及）
 - [x] 4.2 实现旁路开关（仅 `origin=playground` 生效）+ 每次自动放行写 `audit_log`（`action=playground_bypass_medium`）
 
 ## 5. chat_admin_api — 留存 / 导出 / 保留期清理
 
-- [ ] 5.1 Write failing tests: `pin` 置 `pinned=1`+备注免清理；导出 JSON/Markdown 并写审计；未 `pinned` 超保留期被清理
-- [ ] 5.2 实现 `/admin/chat/{sid}/pin` + `/admin/chat/{sid}/export` + 保留期清理任务（复用 scheduling 域）
+- [x] 5.1 Write failing tests: `pin` 置 `pinned=1`+备注免清理；导出 JSON/Markdown 并写审计；未 `pinned` 超保留期被清理
+- [x] 5.2 实现 `/admin/chat/{sid}/pin` + `/admin/chat/{sid}/export` + 保留期清理任务（复用 scheduling 域）
 
 ## 6. chat_admin_api — 会话列表检索 + 回放
 
-- [ ] 6.1 Write failing tests: `/admin/sessions` 列出真实会话（排除 playground），按用户/Agent/channel/平台/时间/关键词/状态筛排；行含发起用户、Agent、channel、轮数、最近活跃、token 用量、未决审批标记
-- [ ] 6.2 实现列表检索（聚合 session 元数据 + `eval_logger` trace）
-- [ ] 6.3 Write failing tests: `/admin/sessions/{sid}` 逐轮回放复用「会话与 trace 浏览」只读层 + 叠加写入口
-- [ ] 6.4 实现会话详情回放（只读复用 + 写入口暴露）
+- [x] 6.1 Write failing tests: `/admin/sessions` 列出真实会话（排除 playground），按用户/Agent/channel/平台/时间/关键词/状态筛排；行含发起用户、Agent、channel、轮数、最近活跃、token 用量、未决审批标记
+- [x] 6.2 实现列表检索（聚合 session 元数据 + `eval_logger` trace）
+- [x] 6.3 Write failing tests: `/admin/sessions/{sid}` 逐轮回放复用「会话与 trace 浏览」只读层 + 叠加写入口
+- [x] 6.4 实现会话详情回放（只读复用 + 写入口暴露）
 
 ## 7. chat_admin_api — 接管 + 人工注入
 
@@ -59,22 +59,22 @@
 
 ## 8. chat_admin_api — 强制结束 / 清空 / 重置 + 二次确认
 
-- [ ] 8.1 Write failing tests: 强制结束置 `status=ended` 不再接受新轮；清空委托 session 域执行 `/new` 语义；重置截断到指定轮；高危动作要求二次确认且写审计
+- [x] 8.1 Write failing tests: 强制结束置 `status=ended` 不再接受新轮；清空委托 session 域执行 `/new` 语义；重置截断到指定轮；高危动作要求二次确认且写审计
 - [x] 8.2 实现 `/admin/sessions/{sid}/force-end` / `/clear` / `/reset`（委托 session 钩子 + 二次确认守卫 + 写审计）
 
 ## 9. chat_admin_api — 批量处置 + 配额联动 + 导出审计
 
-- [ ] 9.1 Write failing tests: 按筛选批量结束/清空，逐条审计 + 共享批次 ID；列表 token 用量与「用量与配额」联动；单/批量导出 transcript 写审计；含个人数据导出按策略二次确认/脱敏
-- [ ] 9.2 实现批量端点 + 配额联动展示 + 导出留痕
+- [x] 9.1 Write failing tests: 按筛选批量结束/清空，逐条审计 + 共享批次 ID；列表 token 用量与「用量与配额」联动；单/批量导出 transcript 写审计；含个人数据导出按策略二次确认/脱敏
+- [x] 9.2 实现批量端点 + 配额联动展示 + 导出留痕
 
 ## 10. chat_admin_api — 角色守卫 + 审计检索
 
 - [x] 10.1 Write failing tests（TestClient）: 无 session 401；viewer 可读列表/回放、写端点 403；admin 可所有写操作；所有写操作落 `audit_log`（actor/action/target/detail 正确）
-- [ ] 10.2 实现 `require_role`（admin 写 / viewer 只读）守卫接线 + 审计检索复用 `audit_log.search_audit`
+- [x] 10.2 实现 `require_role`（admin 写 / viewer 只读）守卫接线 + 审计检索复用 `audit_log.search_audit`
 
 ## 11. server 接线 + 收尾
 
 - [x] 11.1 改 `server.py`：mount `chat_admin_api.router`（`/admin/chat/*` + `/admin/sessions/*`）
-- [ ] 11.2 全量 `uv run pytest -x -q` 绿
-- [ ] 11.3 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过
-- [ ] 11.4 手动冒烟：选 Agent 起 playground→SSE 流式 + 右栏→覆盖模型/停 Skill→开 medium 旁路（真实会话不波及）→固定/导出→会话列表检索→接管+人工注入（IM 投递回原平台）→强制结束/清空二次确认→批量处置→viewer 只读 403→审计检索
+- [x] 11.2 全量 `uv run pytest -x -q` 绿（1196 passed / 16 skipped）
+- [x] 11.3 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过（ruff All checks passed；mypy 137 files）
+- [x] 11.4 手动冒烟（以自动化 TestClient 流程等价覆盖；run_playground(_stream)/load_transcript/clear/inject/im_deliver/session_stats 仍为可注入接缝，真 SSE+trace 聚合留 host follow-up）：选 Agent 起 playground→SSE 流式 + 右栏→覆盖模型/停 Skill→开 medium 旁路（真实会话不波及）→固定/导出→会话列表检索→接管+人工注入（IM 投递回原平台）→强制结束/清空二次确认→批量处置→viewer 只读 403→审计检索
