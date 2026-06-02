@@ -59,7 +59,7 @@ def test_indexable_item_public_shape_is_importable():
 
 
 def test_iter_indexable_memories_returns_current_user_items(tmp_path, monkeypatch):
-    from fleetent import memory_layer
+    from fleetent.intelligence import memory as memory_layer
 
     db_path = _patch_database(tmp_path, monkeypatch)
     _insert_memory_row(
@@ -83,7 +83,7 @@ def test_iter_indexable_memories_returns_current_user_items(tmp_path, monkeypatc
 
 
 def test_iter_indexable_memories_excludes_expired_context(tmp_path, monkeypatch):
-    from fleetent import memory_layer
+    from fleetent.intelligence import memory as memory_layer
 
     db_path = _patch_database(tmp_path, monkeypatch)
     _insert_memory_row(
