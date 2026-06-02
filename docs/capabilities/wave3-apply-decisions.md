@@ -461,3 +461,8 @@ zy 复核全部 13 个 change 后，对 cost 维度做出整体决策：**cost �
 - ① strict 集成：**改——现在就接通 strict 停机**（agent_loop：agent 绑定了 strict-且-不可用服务时以明确错误终止）。
 - ② strict 启动失败用进程级集合跟踪：**认可，保持**。
 - ③ silent vs degrade：**改——现在就做区别**（无通知通道下，用日志级别区分：degrade=warning 显著、silent=debug 安静）。
+
+### S3 scheduled-task-session-binding
+- ① `_fire` 存什么：**改——存完整对话**。不再传副本+手动追加 reply，而是把真实消息列表交给 `run`（就地补全 user+工具调用步骤+最终回复），直接 `save` 整个列表；下次固定 session 触发能看到完整上下文（含工具步骤）。测试 mock 改为模拟"run 就地追加"。
+- ② 默认独立 session 语义、固定复用需显式配 `session_id`：**认可，保持**。
+- ③ 旧库加列 `session_id` 的迁移脚本：**保持现状——不补**（新装库建表即带该列；旧库该列靠后续/其他机制，本 change 不写迁移脚本）。
