@@ -14,7 +14,21 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from fleetent import api_key_store, user_admin_api, user_store
+from fleetent import (
+    agent_apply_api,
+    agent_console_api,
+    api_key_store,
+    askit_console_api,
+    chat_admin_api,
+    connector_admin_api,
+    kb_admin_api,
+    monitor_admin_api,
+    provider_admin_api,
+    skill_admin_api,
+    stats_admin_api,
+    user_admin_api,
+    user_store,
+)
 from fleetent.agent_loop import run_stream
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, WebhooksSettings, configure_logging, load_mcp_server_settings
@@ -133,6 +147,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title="fleetent", lifespan=lifespan)
 app.include_router(user_admin_api.router)
+app.include_router(skill_admin_api.router)
+app.include_router(provider_admin_api.router)
+app.include_router(kb_admin_api.router)
+app.include_router(connector_admin_api.router)
+app.include_router(chat_admin_api.router)
+app.include_router(agent_console_api.router)
+app.include_router(stats_admin_api.router)
+app.include_router(monitor_admin_api.router)
+app.include_router(agent_apply_api.router)
+app.include_router(askit_console_api.router)
 
 
 class ChatRequest(BaseModel):

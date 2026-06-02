@@ -40,3 +40,20 @@ async def save(session_id: str, messages: list[dict[str, object]]) -> None:
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(messages, ensure_ascii=False))
     tmp.replace(path)
+
+
+async def clear(session_id: str) -> None:
+    """Empty a session's transcript (admin clear / IM `/new`), under the session lock."""
+    async with session_lock(session_id):
+        await save(session_id, [])
+
+
+async def inject_message(session_id: str, role: str, content: str) -> None:
+    """Append a single message to a session's transcript atomically under the lock.
+
+    Used by the admin console to inject a human-agent reply during a takeover.
+    """
+    async with session_lock(session_id):
+        messages = await load(session_id)
+        messages.append({"role": role, "content": content})
+        await save(session_id, messages)

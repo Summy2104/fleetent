@@ -182,7 +182,7 @@ uv run ruff check src tests      # lint
 uv run mypy src                  # 类型检查
 uv run fleetent "hello"        # CLI
 uv run fleetent-admin create-user --name "Alice"  # 用户管理
-uvicorn fleetent.server:app --reload  # HTTP 服务（端口 8000）
+uvicorn fleetent.server:app --reload --port 8765  # HTTP 服务（默认端口 8765）
 ```
 
 ---

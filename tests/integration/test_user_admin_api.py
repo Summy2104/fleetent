@@ -38,6 +38,65 @@ def test_no_auth_401(client):
     assert client.get("/admin/users").status_code == 401
 
 
+def test_ui_served(client):
+    r = client.get("/admin/ui")
+    assert r.status_code == 200
+    assert "fleetent" in r.text and "Admin" in r.text
+
+
+def test_login_success_and_me(client):
+    u = user_store.create_web_user("log@x.com", "Logger", password_hash=auth.hash_password("pw"))
+    user_store.set_role(u.id, "admin")
+    r = client.post("/admin/login", json={"email": "log@x.com", "password": "pw"})
+    assert r.status_code == 200
+    token = r.json()["token"]
+    assert r.json()["must_reset"] is False
+    me = client.get("/admin/me", headers=_hdr(token))
+    assert me.json()["email"] == "log@x.com"
+
+
+def test_login_bad_password_401(client):
+    user_store.create_web_user("a@x.com", "A", password_hash=auth.hash_password("right"))
+    assert (
+        client.post("/admin/login", json={"email": "a@x.com", "password": "wrong"}).status_code
+        == 401
+    )
+
+
+def test_blocked_account_cannot_login(client):
+    u = user_store.create_web_user("b@x.com", "B", password_hash=auth.hash_password("pw"))
+    user_store.set_status(u.id, "blocked")
+    assert (
+        client.post("/admin/login", json={"email": "b@x.com", "password": "pw"}).status_code == 403
+    )
+
+
+def test_must_reset_gate_then_change_password(client):
+    u = user_store.create_web_user(
+        "m@x.com", "M", password_hash=auth.hash_password("temp"), must_reset=True, role="admin"
+    )
+    token = client.post("/admin/login", json={"email": "m@x.com", "password": "temp"}).json()[
+        "token"
+    ]
+    hdr = _hdr(token)
+    assert client.get("/admin/users", headers=hdr).status_code == 403  # gated
+    assert (
+        client.post(
+            "/admin/change-password", json={"new_password": "newpw"}, headers=hdr
+        ).status_code
+        == 200
+    )
+    assert client.get("/admin/users", headers=hdr).status_code == 200  # gate cleared
+    assert user_store.get_by_id(u.id).must_reset == 0
+
+
+def test_im_users_list(client):
+    token, _ = _session_for("admin")
+    im_user_store.get_or_create("slack", "U_LIST")
+    rows = client.get("/admin/im-users", headers=_hdr(token)).json()
+    assert any(r["platform_user_id"] == "U_LIST" for r in rows)
+
+
 def test_viewer_can_read_but_not_write(client):
     token, _ = _session_for("viewer")
     assert client.get("/admin/users", headers=_hdr(token)).status_code == 200

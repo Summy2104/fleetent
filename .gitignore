@@ -13,6 +13,7 @@ data/*.db
 data/logs/
 data/users/
 data/sessions/
+data/
 
 # Env
 .env
@@ -34,3 +35,4 @@ config/mcp.yaml
 .DS_Store
 
 .coverage
+

@@ -5,7 +5,7 @@ Smoke tests for fleetent. Requires a running server with ANTHROPIC_API_KEY set.
 Usage:
   uv run python tests/e2e/test_smoke.py                        # auto-creates test user
   MINI_AGENT_TEST_KEY=ma-xxx uv run python tests/e2e/test_smoke.py   # use existing key
-  MINI_AGENT_BASE_URL=http://host:8000 uv run python tests/e2e/test_smoke.py
+  MINI_AGENT_BASE_URL=http://host:8765 uv run python tests/e2e/test_smoke.py
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.skipif(
     reason="set FLEETENT_RUN_E2E=1 and start the service to run smoke e2e tests",
 )
 
-BASE_URL = os.getenv("MINI_AGENT_BASE_URL", "http://localhost:8000")
+BASE_URL = os.getenv("MINI_AGENT_BASE_URL", "http://localhost:8765")
 
 # ── ANSI colours ──────────────────────────────────────────────────────────────
 
