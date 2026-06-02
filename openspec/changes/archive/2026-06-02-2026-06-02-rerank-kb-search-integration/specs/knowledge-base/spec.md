@@ -20,9 +20,14 @@
 - **THEN** 系统不调用 rerank provider
 - **AND** 返回当前 hybrid fused ranking
 
-### Requirement: Knowledge-base search excludes advanced retrieval by default
-knowledge-base search SHALL NOT implement query planner, graph search or external search backend as part
-of default vector、keyword 或 hybrid search。
+### Requirement: Hybrid search excludes advanced retrieval
+knowledge-base search SHALL NOT implement rerank provider, query planner, graph search or external search
+backend as part of default vector、keyword 或 hybrid search。
+
+#### Scenario: Hybrid search does not rerank by default
+- **WHEN** 调用 `search(..., mode="hybrid")` 且未传入 `rerank=True`
+- **THEN** 系统不调用 rerank provider
+- **AND** 返回当前 hybrid fused ranking
 
 #### Scenario: Graph search remains separate
 - **WHEN** 调用 `search(...)`
