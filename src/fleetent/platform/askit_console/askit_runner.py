@@ -88,6 +88,11 @@ def is_high_risk(series: str) -> bool:
     return series in HIGH_RISK_SERIES
 
 
+def is_serial(series: str, command: str) -> bool:
+    """Whether this command mutates a workspace and must run serially within it."""
+    return (series, command) in SERIAL_COMMANDS
+
+
 def build_command(series: str, command: str, params: dict[str, Any] | None = None) -> list[str]:
     """Build an allowlisted argv. Rejects unknown series/command and odd param values."""
     if not is_known(series, command):

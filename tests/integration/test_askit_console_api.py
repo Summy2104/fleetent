@@ -233,3 +233,90 @@ def test_run_failure_records_exit_code(client, monkeypatch):
     )
     assert r.json()["status"] == "failed"
     assert r.json()["exit_code"] == 2
+
+
+# --- workspace serial lock (场景 67) + streamed logs (场景 63) ----------------
+
+
+def test_serial_write_command_uses_workspace_lock(client, monkeypatch):
+    import contextlib
+
+    import fleetent.platform.askit_console.askit_task_store as store
+
+    seen: list[str] = []
+    real = store.workspace_lock
+
+    @contextlib.asynccontextmanager
+    async def spy(workspace):
+        seen.append(workspace or "_default")
+        async with real(workspace):
+            yield
+
+    monkeypatch.setattr(store, "workspace_lock", spy)
+    token, _ = _session_for("admin")
+    client.post(
+        "/admin/askit/run",
+        headers=_hdr(token),
+        json={"series": "build", "command": "build", "workspace": "dev"},
+    )
+    assert "dev" in seen
+
+
+def test_readonly_command_skips_workspace_lock(client, monkeypatch):
+    import contextlib
+
+    import fleetent.platform.askit_console.askit_task_store as store
+
+    seen: list[str] = []
+    real = store.workspace_lock
+
+    @contextlib.asynccontextmanager
+    async def spy(workspace):
+        seen.append(workspace or "_default")
+        async with real(workspace):
+            yield
+
+    monkeypatch.setattr(store, "workspace_lock", spy)
+    token, _ = _session_for("viewer")
+    client.post(
+        "/admin/askit/run",
+        headers=_hdr(token),
+        json={"series": "build", "command": "check", "workspace": "dev"},
+    )
+    assert seen == []
+
+
+def test_task_log_stream_replays_logs_and_exit(client, monkeypatch):  # 场景 63
+    monkeypatch.setattr(runner, "run_subprocess", lambda argv: ("line-a\nline-b", "err-c", 0))
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/askit/run",
+        headers=_hdr(token),
+        json={"series": "build", "command": "build", "workspace": "dev"},
+    )
+    tid = r.json()["task_id"]
+    stream = client.get(f"/admin/askit/tasks/{tid}/stream", headers=_hdr(token))
+    assert stream.status_code == 200
+    body = stream.text
+    assert "line-a" in body
+    assert "line-b" in body
+    assert "err-c" in body
+    assert '"exit_code": 0' in body
+
+
+def test_confirmed_migration_runs_without_dry_run_and_audits(client, monkeypatch):  # 场景 65
+    seen: dict = {}
+    monkeypatch.setattr(
+        runner, "run_subprocess", lambda argv: seen.update(argv=argv) or ("ok", "", 0)
+    )
+    token, uid = _session_for("admin")
+    r = client.post(
+        "/admin/askit/run",
+        headers=_hdr(token, confirm=True),  # explicit confirm cancels the default dry-run
+        json={"series": "migrations", "command": "migrate-env"},
+    )
+    assert r.json()["dry_run"] is False
+    assert "--dry-run" not in seen["argv"]
+    tid = r.json()["task_id"]
+    entries = audit.search_audit(action="askit.migrations.migrate-env")
+    assert any(e["target_id"] == tid and e["detail"]["dry_run"] is False for e in entries)

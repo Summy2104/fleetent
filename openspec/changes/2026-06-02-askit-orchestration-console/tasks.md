@@ -53,21 +53,21 @@
 
 - [x] 5.1 Write failing tests: `askit_tasks` / `askit_task_logs` / `askit_workspaces` 表（Alembic，named params，路径可 monkeypatch）；任务记系列/命令/参数(脱敏)/工作区/env/状态/退出码/产物·PR 链接/发起人
 - [x] 5.2 新建 `askit_task_store.py` + Alembic 迁移建表
-- [ ] 5.3 Write failing tests: 同工作区写操作（build/deploy/promote/migrate）串行排队不并发；只读操作可并发（短超时）
-- [ ] 5.4 实现 per-workspace `asyncio.Lock` 串行队列 + 排队状态
+- [x] 5.3 Write failing tests: 同工作区写操作（build/deploy/promote/migrate）串行排队不并发；只读操作可并发（短超时）
+- [x] 5.4 实现 per-workspace `asyncio.Lock` 串行队列 + 排队状态
 
 ## 6. askit_console_api — 按系列触发 / 流式日志 / 历史
 
 - [x] 6.1 Write failing tests（TestClient）: `/admin/askit/series` 返回八系列分组（操作 + 上次状态 + 耗时）
 - [x] 6.2 实现 `askit_console_api.py` 系列列表 + 触发端点（异步任务）
-- [ ] 6.3 Write failing tests: 触发 build 流式回流 stdout/stderr（SSE）、结束含退出码与失败摘要；写审计 + 历史；历史回看持久化日志
-- [ ] 6.4 实现流式日志端点（复用 server 流式约定）+ 历史回看端点
+- [x] 6.3 Write failing tests: 触发 build 流式回流 stdout/stderr（SSE）、结束含退出码与失败摘要；写审计 + 历史；历史回看持久化日志
+- [x] 6.4 实现流式日志端点（复用 server 流式约定）+ 历史回看端点
 
 ## 7. 部署 check 闸门 + dry-run + 高危 2FA
 
 - [x] 7.1 Write failing tests: 硬门槛开启且最近 check 检出 drift 时 deploy 被阻止并提示先过 check；check 通过后可发起
 - [x] 7.2 实现部署前 check 绿灯闸门
-- [ ] 7.3 Write failing tests: `--dry-run` 仅输出文件计划不落盘；取消 dry-run 需二次确认；迁移默认 dry-run、确认后才写且记审计
+- [x] 7.3 Write failing tests: `--dry-run` 仅输出文件计划不落盘；取消 dry-run 需二次确认；迁移默认 dry-run、确认后才写且记审计
 - [x] 7.4 实现 dry-run 开关 + 迁移默认 dry-run
 - [ ] 7.5 Write failing tests: 高危系列（部署/迁移/promote/跨环境 promote）要求二次确认 + 当次 2FA（复用 `auth` TOTP）
 - [ ] 7.6 实现高危守卫接线（复用 `auth` 2FA）
@@ -82,7 +82,7 @@
 ## 9. 权限守卫 + cron diff + 脱敏诊断
 
 - [x] 9.1 Write failing tests: viewer 可触发只读（lint/check/diff/doctor）看日志历史；作者/部署/依赖/迁移写操作 viewer 403；admin 可写
-- [ ] 9.2 实现 `auth.require_role` 守卫接线（admin 写 / viewer 只读）
+- [x] 9.2 实现 `auth.require_role` 守卫接线（admin 写 / viewer 只读）
 - [ ] 9.3 Write failing tests: cron `diff` 高亮新增/缺失/变更；install/remove 二次确认；env doctor 红黄绿清单 + 敏感变量脱敏
 - [ ] 9.4 实现 cron diff 渲染 + 诊断红黄绿 + 脱敏展示接线
 

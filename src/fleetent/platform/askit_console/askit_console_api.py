@@ -10,9 +10,13 @@ Auth: read-only commands (lint/check/diff/doctor/review) allow viewer+admin; all
 other (write) commands require admin.
 """
 
+import asyncio
+import json
+from collections.abc import Iterator
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from fleetent import audit_log, auth, user_store
@@ -80,7 +84,7 @@ def list_series(authorization: str | None = Header(None)) -> list[dict[str, Any]
 
 
 @router.post("/run")
-def run_command(
+async def run_command(
     body: RunBody,
     authorization: str | None = Header(None),
     x_confirm: str | None = Header(None),
@@ -110,15 +114,26 @@ def run_command(
     if body.series == "deploy" and body.command == "deploy" and not last_check_ok(body.workspace):
         raise HTTPException(status_code=409, detail="deploy blocked: latest check is not green")
 
+    # Serial (workspace-mutating) commands queue behind the per-workspace lock; read-only
+    # and non-mutating commands run without it so they can proceed concurrently.
+    if askit_runner.is_serial(body.series, body.command):
+        async with askit_task_store.workspace_lock(body.workspace or "_default"):
+            return await _execute(body, params, user.id)
+    return await _execute(body, params, user.id)
+
+
+async def _execute(body: RunBody, params: dict[str, Any], user_id: str) -> dict[str, Any]:
     task_id = askit_task_store.create_task(
         body.series,
         body.command,
         params=params,
         workspace=body.workspace,
         env=body.env,
-        created_by=user.id,
+        created_by=user_id,
     )
-    result = askit_runner.run(body.series, body.command, params)
+    # askit is a blocking subprocess; run it off the event loop so concurrent read-only
+    # commands are not stalled by a long-running one.
+    result = await asyncio.to_thread(askit_runner.run, body.series, body.command, params)
     seq = 0
     for stream in ("stdout", "stderr"):
         for line in (result.get(stream) or "").splitlines():
@@ -127,7 +142,7 @@ def run_command(
     status = "succeeded" if result["exit_code"] == 0 else "failed"
     askit_task_store.finish_task(task_id, status, result["exit_code"])
     audit_log.write_audit(
-        user.id,
+        user_id,
         f"askit.{body.series}.{body.command}",
         "askit_task",
         task_id,
@@ -153,6 +168,27 @@ def task_detail(task_id: str, authorization: str | None = Header(None)) -> dict[
     if task is None:
         raise HTTPException(status_code=404, detail="task not found")
     return {"task": task, "logs": askit_task_store.get_logs(task_id)}
+
+
+@router.get("/tasks/{task_id}/stream")
+def task_log_stream(task_id: str, authorization: str | None = Header(None)) -> StreamingResponse:
+    """Replay a task's persisted log lines as SSE, then a final event with the exit code.
+
+    Tasks run to completion synchronously before the run endpoint returns, so this
+    streams the stored history (history-replay) rather than tailing a live process.
+    """
+    _current_user(authorization)
+    task = askit_task_store.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+
+    def _events() -> Iterator[str]:
+        for log in askit_task_store.get_logs(task_id):
+            yield f"data: {json.dumps(log)}\n\n"
+        end = {"event": "end", "status": task["status"], "exit_code": task["exit_code"]}
+        yield f"data: {json.dumps(end)}\n\n"
+
+    return StreamingResponse(_events(), media_type="text/event-stream")
 
 
 @router.get("/tasks")

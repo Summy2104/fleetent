@@ -51,3 +51,11 @@ def test_run_uses_subprocess_seam(monkeypatch):
     assert "xyz" not in out["stdout"]  # masked
     assert out["argv"] == ["askit", "build"]
     assert out["askit_version"] == r.ASKIT_VERSION
+
+
+def test_serial_command_detection():
+    assert r.is_serial("build", "build") is True
+    assert r.is_serial("deploy", "deploy") is True
+    assert r.is_serial("override", "promote") is True
+    assert r.is_serial("build", "check") is False
+    assert r.is_serial("override", "review") is False
