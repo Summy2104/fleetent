@@ -6,6 +6,8 @@ import pytest
 import fleetent.agent_store as agent_store
 import fleetent.im_user_store as im_user_store
 from fleetent import admin, user_store
+from fleetent.platform.admin_cli import agents as admin_cli_agents
+from fleetent.platform.admin_cli.main import main as admin_cli_main
 
 
 @pytest.fixture(autouse=True)
@@ -30,6 +32,15 @@ def run_admin(*args: str) -> tuple[str, str, int]:
         except SystemExit as e:
             exit_code = int(e.code or 0)
     return stdout.getvalue(), stderr.getvalue(), exit_code
+
+
+def test_admin_platform_entrypoint_is_importable():
+    assert callable(admin_cli_main)
+
+
+def test_legacy_admin_entrypoint_reexports_platform_entrypoint():
+    assert admin.main is admin_cli_main
+    assert not hasattr(admin, "_SETTINGS_YAML")
 
 
 def test_create_user_prints_id_and_key():
@@ -174,7 +185,7 @@ def test_unassign_channel():
 def test_set_default_agent(tmp_path, monkeypatch):
     settings_yaml = tmp_path / "settings.yaml"
     settings_yaml.write_text("")
-    monkeypatch.setattr(admin, "_SETTINGS_YAML", settings_yaml)
+    monkeypatch.setattr(admin_cli_agents, "_SETTINGS_YAML", settings_yaml)
     agent_store.create_agent("basic", "Basic.", [])
     out, _, code = run_admin("set-default-agent", "--agent-name", "basic")
     assert code == 0
@@ -184,7 +195,7 @@ def test_set_default_agent(tmp_path, monkeypatch):
 def test_set_default_agent_clear(tmp_path, monkeypatch):
     settings_yaml = tmp_path / "settings.yaml"
     settings_yaml.write_text("default_agent_name: basic\n")
-    monkeypatch.setattr(admin, "_SETTINGS_YAML", settings_yaml)
+    monkeypatch.setattr(admin_cli_agents, "_SETTINGS_YAML", settings_yaml)
     out, _, code = run_admin("set-default-agent", "--clear")
     assert code == 0
     content = settings_yaml.read_text()

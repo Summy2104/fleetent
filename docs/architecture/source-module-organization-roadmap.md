@@ -65,11 +65,15 @@ entrypoints / platform / channels
 优先级最高。`admin.py` 已经承载用户、IM、schedule、agent、KB connectors、diagnostics 和 observability
 多类命令，是当前最容易产生并行冲突的文件。
 
+状态：已有 implementation spec `2026-06-02-admin-cli-module-split`，负责把实际 CLI 实现迁入
+`platform.admin_cli`，并保留 `fleetent.admin.main` 薄 shim。
+
 建议目标：
 
 ```text
 src/fleetent/platform/admin_cli/
   __init__.py
+  common.py
   main.py
   users.py
   im.py

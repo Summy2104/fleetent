@@ -35,3 +35,8 @@ admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 #### Scenario: Existing admin CLI behavior is preserved
 - **WHEN** 运行现有 admin CLI integration tests
 - **THEN** 用户、IM、agent/channel、schedule、KB connector、diagnostics 和 observability 命令行为保持不变
+
+#### Scenario: Command modules expose a small registration contract
+- **WHEN** 查看 `platform.admin_cli` 的命令域模块
+- **THEN** 每个模块通过 `register(subparsers)` 注册自身命令
+- **AND** 通过 `handle(args)` 处理自身命令并返回是否已处理
