@@ -170,6 +170,50 @@ def _resolve_default_tool_timeout() -> float:
     return Settings().tool_default_timeout_seconds
 
 
+def _agent_bound_to_server(server_id: str, allowed_tools: list[str] | None) -> bool:
+    """Whether this agent can use any of a server's `{id}__*` tools (MCP4 D3).
+
+    allowed_tools=None means every tool is permitted → bound to every server.
+    Otherwise bound iff some registered tool in the namespace passes the whitelist.
+    A startup-failed server has no registered tools, so it only binds an all-tools
+    agent (allowed_tools=None) — a documented limitation."""
+    if allowed_tools is None:
+        return True
+    from fleetent.tool_registry import _registry
+
+    prefix = f"{server_id}__"
+    return any(
+        name.startswith(prefix) and check_tool_access(name, allowed_tools) for name in _registry
+    )
+
+
+def _strict_blocked_servers(allowed_tools: list[str] | None) -> list[str]:
+    """Handle MCP degradation for this agent (MCP4): return strict-mode unavailable
+    servers the agent is bound to (→ stop); log degrade(warning)/silent(debug) for
+    bound non-strict unavailable servers. No MCP servers → empty, zero overhead."""
+    from fleetent import mcp_client
+
+    strict_blocked: list[str] = []
+    for server_id, mode in mcp_client.unavailable_servers():
+        if not _agent_bound_to_server(server_id, allowed_tools):
+            continue
+        if mode == "strict":
+            strict_blocked.append(server_id)
+        elif mode == "silent":
+            logger.debug("mcp_degraded_silent", server_id=server_id)
+        else:
+            logger.warning("mcp_degraded", server_id=server_id)
+    return strict_blocked
+
+
+def _strict_unavailable_reply(blocked: list[str]) -> str:
+    return (
+        "无法运行：所依赖的 MCP 服务（"
+        + ", ".join(blocked)
+        + "）当前不可用，且其降级模式为 strict（严格）。已终止本次运行。"
+    )
+
+
 def _load_flap_state(session_id: str | None) -> AntiFlapState | None:
     """Load per-session anti-flap state (AR17); None disables gating (CLI / no session).
 
@@ -943,6 +987,23 @@ async def run(
     )
 
     start = time.monotonic()
+    # MCP4: a strict-mode MCP server the agent is bound to is unavailable → stop up
+    # front with a clear error (rather than run without its tools). Also logs
+    # degrade/silent degradations for bound servers. No MCP servers → no-op.
+    strict_blocked = _strict_blocked_servers(allowed_tools)
+    if strict_blocked:
+        reply = _strict_unavailable_reply(strict_blocked)
+        log_run(
+            _first_user_input(messages),
+            reply,
+            messages,
+            time.monotonic() - start,
+            None,
+            user_id=user_id,
+            agent_name=agent_name,
+            stop_reason=StopReason.mcp_strict_unavailable,
+        )
+        return reply
     response = None
     msg: Any = None
     # Override forces a single model with no fallback (D3); cfg.fallbacks is
@@ -1197,6 +1258,23 @@ async def run_stream(
 
     start = time.monotonic()
     reply = ""
+    # MCP4: stop up front when a bound strict MCP server is unavailable (see run()).
+    strict_blocked = _strict_blocked_servers(allowed_tools)
+    if strict_blocked:
+        reply = _strict_unavailable_reply(strict_blocked)
+        yield {"type": "text_delta", "content": reply}
+        log_run(
+            _first_user_input(messages),
+            reply,
+            messages,
+            time.monotonic() - start,
+            None,
+            user_id=user_id,
+            agent_name=agent_name,
+            stop_reason=StopReason.mcp_strict_unavailable,
+        )
+        yield {"type": "done", "content": reply}
+        return
     models_to_try = [cfg.model] if force_model is not None else [cfg.model, *cfg.fallbacks]
     model_used = cfg.model
     total_prompt_tokens = 0

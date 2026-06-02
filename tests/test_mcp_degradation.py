@@ -153,3 +153,50 @@ async def test_register_all_strict_startup_failure_tracked(monkeypatch):
     # Platform start not blocked; healthy server registered; strict failure tracked.
     assert "okserver" in mc._server_registry
     assert "failstrict" in mc.unavailable_strict_server_ids()
+
+
+# ── MCP4 review: unavailable_servers + strict stop + degrade/silent logging ──
+
+
+def test_unavailable_servers_lists_modes(monkeypatch):
+    ok = McpServerConfig(id="ok")
+    deg = McpServerConfig(id="deg", degrade_mode="degrade")
+    deg._health = HealthState.unavailable
+    sil = McpServerConfig(id="sil", degrade_mode="silent")
+    sil._health = HealthState.unavailable
+    st = McpServerConfig(id="st", degrade_mode="strict")
+    st._health = HealthState.unavailable
+    monkeypatch.setattr(mc, "_server_registry", {"ok": ok, "deg": deg, "sil": sil, "st": st})
+    monkeypatch.setattr(mc, "_failed_strict_servers", {"failst"})
+    got = dict(mc.unavailable_servers())
+    assert got == {"deg": "degrade", "sil": "silent", "st": "strict", "failst": "strict"}
+
+
+def test_agent_bound_to_server(monkeypatch):
+    import fleetent.agent_loop as al
+
+    monkeypatch.setattr(mc, "_server_registry", {})
+    monkeypatch.setitem(tr._registry, "srv__tool", (lambda: "x", {}))
+    assert al._agent_bound_to_server("srv", None) is True  # all tools → bound
+    assert al._agent_bound_to_server("srv", ["srv__*"]) is True
+    assert al._agent_bound_to_server("srv", ["other__*"]) is False
+
+
+def test_degrade_silent_log_levels(monkeypatch):
+    import fleetent.agent_loop as al
+
+    deg = McpServerConfig(id="deg", degrade_mode="degrade")
+    deg._health = HealthState.unavailable
+    sil = McpServerConfig(id="sil", degrade_mode="silent")
+    sil._health = HealthState.unavailable
+    monkeypatch.setattr(mc, "_server_registry", {"deg": deg, "sil": sil})
+    monkeypatch.setattr(mc, "_failed_strict_servers", set())
+
+    from unittest.mock import MagicMock
+
+    spy = MagicMock()
+    monkeypatch.setattr(al, "logger", spy)
+    blocked = al._strict_blocked_servers(None)  # None → bound to both
+    assert blocked == []  # neither is strict
+    assert spy.warning.called  # degrade → warning (prominent)
+    assert spy.debug.called  # silent → debug (quiet) — the distinction
