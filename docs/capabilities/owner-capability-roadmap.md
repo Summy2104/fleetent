@@ -411,6 +411,18 @@ flowchart TD
     SHARED --> MEM_TREND
 ```
 
+#### 第二阶段增强设计评估（2026-06-02）
+
+1. `reflection-trend-summary`：已具备设计条件并创建 OpenSpec design change。依据是 reflection reports、
+   KB reflection reports、User Memory maintenance proposals 和 `SkillProposal` lifecycle 均已落库且脱敏；
+   第一版设计为只读趋势聚合，不自动写 Memory / KB / Skill。
+2. `long-term-context-agent-tenant-policy`：已具备设计条件并创建 OpenSpec design change。依据是 long-term-ctx
+   已有 deterministic budget policy、KB agent binding 已稳定、Shared Memory 数据层已完成；第一版设计默认保持当前行为，
+   Shared Memory 仅在显式 policy 启用时进入 prompt 注入。
+3. `memory-quality-trend-summary`：已具备设计条件并创建 OpenSpec design change。依据是 `memory_items`、
+   `shared_memory_items`、retention / compaction dry-run 和 memory proposal lifecycle 均可只读聚合；第一版设计不触发
+   extraction、不自动维护 memory。
+
 ### Capability 完整度 / v1.1+
 
 以下能力保留在完整 capability roadmap 中，但不建议进入 Pilot MVP 或 Knowledge Quality 首批：
