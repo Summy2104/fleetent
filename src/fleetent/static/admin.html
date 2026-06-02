@@ -30,13 +30,10 @@
   .pill.admin,.pill.built_in_admin { color:var(--accent); } .pill.viewer { color:var(--muted); }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
   .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-  .login { width:440px; max-width:calc(100% - 32px); margin:0 auto; min-height:100vh; display:flex; flex-direction:column; justify-content:center; }
+  .login { width:360px; max-width:calc(100% - 32px); margin:0 auto; min-height:100vh; display:flex; flex-direction:column; justify-content:center; }
   .login.hidden { display:none; }
-  .login .card { padding:36px 32px; border-radius:14px; box-shadow:0 12px 40px rgba(0,0,0,.45); }
-  .login h2 { margin:0 0 6px; text-align:center; font-size:34px; font-weight:700; letter-spacing:-.5px; }
-  .login input { padding:12px 14px; font-size:15px; border-radius:8px; }
-  .login button { padding:12px; font-size:15px; border-radius:8px; }
-  .login .muted { text-align:center; margin:0 0 22px; }
+  .login h2 { margin:0 0 4px; text-align:center; }
+  .login .muted { text-align:center; margin:0 0 12px; }
   .err { color:var(--danger); min-height:18px; }
   .hidden { display:none; }
   .actions { display:flex; gap:6px; flex-wrap:wrap; }
@@ -47,9 +44,9 @@
 
 <div id="login-view" class="login">
   <div class="card">
-    <h2>Login</h2>
+    <h2>Fleetent</h2>
     <p class="muted">Sign in to the fleetent Admin console</p>
-    <div class="row" style="flex-direction:column; align-items:stretch; gap:14px;">
+    <div class="row" style="flex-direction:column; align-items:stretch; gap:10px;">
       <input id="login-email" placeholder="Username" autocomplete="username">
       <input id="login-password" type="password" placeholder="Password" autocomplete="current-password">
       <button onclick="doLogin()">Log in</button>
@@ -62,7 +59,7 @@
   <div class="card">
     <h2>Set a new password</h2>
     <p class="muted">Your account requires a password reset before continuing.</p>
-    <div class="row" style="flex-direction:column; align-items:stretch; gap:14px;">
+    <div class="row" style="flex-direction:column; align-items:stretch; gap:10px;">
       <input id="reset-password" type="password" placeholder="new password">
       <button onclick="doChangePassword()">Update password</button>
       <div id="reset-err" class="err"></div>
