@@ -19,7 +19,9 @@
 | 3 | 核心三方合并（tool_registry / agent_loop / config / server / store） | ⏳ |
 | 4 | Alembic 迁移链重排 + 新表收编 | ⏳ |
 | 5 | 测试归位 + conftest 合并 | ⏳ |
-| 6 | docs / openspec 并集 + CLAUDE.md 统一 | ⏳ |
+| 6 | docs / openspec 并集 + CLAUDE.md 统一 | ✅(CLAUDE/docs 已处理；openspec 取并集自动完成) |
+
+**最终测试**：`uv run pytest` → **2064 passed / 15 failed / 4 errors / 16 skipped**（合并前各分支分别测各自代码；本数为合并后统一套件）。collection 干净无错误，`fleetent.server` 等核心模块 import 正常，alembic 单一 head（028）。15 failed + 4 errors **全部映射到已记录决策的预期后果或待审设计分歧**（见下方分类），无意外破坏。
 
 ---
 
@@ -78,7 +80,54 @@ git 把 main 对 `mcp_client.py→integrations/mcp/client.py`、`sandbox_client.
 
 ## 问题记录（Issue Log）
 
-<!-- 遇到的问题按 I1、I2… 追加，含现象 + 处置 -->
+- **I1 — `memory_layer.py` 被合并误删**：main 的 "shim cleanup" 删了它，张洋 agent_loop 仍 import。处置：从 5376d39 恢复扁平版（D3 共存）。
+- **I2 — `integrations.*` 结构断言测试**：3 个 main 测试断言 integrations 包存在 / 扁平 mcp/sandbox 不可导入，与 D4 矛盾。处置：删除（test_integrations_imports、test_legacy_shim_cleanup、integration/test_mcp_client）。
+- **I3 — 全局 ValidationError（曾 ~450 处）**：`Settings.anthropic_api_key` 必填，合并后无全局测试 env。处置：conftest 加 autouse fixture 设 `ANTHROPIC_API_KEY`（修复 ~200+ 测试）。
+- **I4 — alembic 多 head/重复 revision**：两边 002/003/004 撞号。处置：张洋 002→026 / 003→027 / 004→028，链接 main head 025（阶段4）。
+- **I5 — `no such table: scheduled_tasks`（曾 36 处）**：main CronScheduler（D6）需迁移表，张洋 server 测试未建表。处置：server lifespan `cron.start/shutdown` 改 best-effort（与 sandbox/IM 同款容错）。
+- **I6 — `webhook_router.load_sources` 缺失**：合并取了 main 的 webhook_router（无 load_sources），但张洋 server.py 启动调用它。处置：恢复张洋 webhook_router（唯一消费者是 server.py）。
+- **I7 — `session_mgr.clear/inject_message` 缺失**：main chat_admin_api 依赖，张洋 session_mgr 无。处置：从 main 嫁接两函数。**踩坑**：首次嫁接误插入 `save()` 体中段，把 save 的 metadata/maintenance 尾巴孤立进 inject_message → test_session_mgr 4 挂；已重做为干净独立函数修复。
+- **I8 — skill_admin_api `_validate_frontmatter` 崩 None**：张洋 `_parse_frontmatter` 对非法 frontmatter 返回 None（main 返回 {}）。处置：`or {}` 兜底。
+
+---
+
+## 剩余 15 failed + 4 errors —— 全部为已记录决策的预期后果（待张洋审核）
+
+> 这些**不是意外破坏**，而是合并取舍/延后接线的直接体现。保留为失败状态是刻意的——它们正是后续工作的"规格信号"，请逐条决定如何处置。
+
+### 类 A：D5 智能层/可观测未接进 agent_loop（6）—— 后续接线任务
+- `test_observability_agent_contracts`（4 errors）：断言 agent_loop 调用 `observability.record_injected_context`。
+- `test_long_term_context_runtime`（2）：断言 agent_loop 调用 `long_term_ctx.build_context`。
+- **处置建议**：实现 D5 后续项——把 main 的 `build_context` + observability trace 埋点接进张洋 agent_loop。届时自动转绿。
+
+### 类 B：D6 取 main 调度器、丢张洋 S3 会话绑定（6）—— 后续 feature 重嫁接
+- `test_scheduled_task_session_binding`（6）：断言 schedule_store.DB_PATH / load_cron_yaml / session_id 列（张洋 S3）。
+- **处置建议**：在 main 的 db.py 调度器上重新实现 S3 会话绑定，或确认放弃该 feature 后删除这些测试。
+
+### 类 C：D3 trace/memory 双系统共存（3）—— 断言"已删除"与共存决策冲突
+- `test_trace_events::test_legacy_eval_logger_..._not_public`
+- `test_memory_legacy_import_cleanup::test_legacy_memory_layer_module_is_not_importable`
+- `test_memory_package_imports::test_legacy_memory_layer_is_removed`
+- **处置建议**：做 trace/memory 统一（弃 eval_logger/memory_layer 改用 observability/intelligence）后这些转绿；或确认长期共存则删除这些断言。
+
+### 类 D：Webhook 设计分歧（4）—— 需产品/架构定夺
+- `test_webhook_server`（3）：main 设计 = 拒绝 legacy `webhooks.yaml`（fail-fast）+ `webhook_settings` 开关/体积门控；张洋设计 = 从 `webhooks.yaml` 加载。**二者根本互斥**（不能既加载又 fail-fast）。
+- `test_webhook_router::test_yaml_source_loader_is_removed`（1）：断言 load_sources 已删（我们恢复了它）。
+- **处置建议**：定夺 webhook 走 main 的运行时 API 还是张洋的 yaml；二选一后对齐实现与测试。
+
+---
+
+## 后续工作清单（FOLLOW-UP，按优先级）
+
+1. **[高] 智能层接线**：`agent_loop` 调用 `intelligence/long_term_ctx.build_context()` 注入 KB+记忆；接 `observability` trace 埋点。（解类 A）
+2. **[高] trace/memory 统一**：评估弃用扁平 `eval_logger.py` / `memory_layer.py`，全面改用 `observability/traces` + `intelligence/memory`。（解 D3 共存 + 类 C）
+3. **[中] S3 会话绑定重嫁接**：在 main db.py 调度器上重做定时任务 session 绑定。（解类 B）
+4. **[中] Webhook 设计定夺**：main 运行时 API vs 张洋 yaml。（解类 D）
+5. **[中] DB schema 收编**：张洋裸 `CREATE TABLE`（budget_usage/sub_agent_runs/session_anti_flap 等）纳入 alembic 声明。
+6. **[低] mcp/sandbox 是否归 `integrations/` 包**：当前扁平（D4）。若要严格 main 规范，机械迁移 + 改 import。
+7. **[低] 测试精确归类**：迁入 `tests/unit/` 的 34 个文件按 unit/integration 精确归位。
+8. **[低] `reload-skills` CLI 子命令**：main admin_cli 未含，`skill_registry.reload()` 仍在。
+9. **[低] CLAUDE.md / capability docs 与混合架构对齐**（扁平 mcp/sandbox + main 包结构并存的现状描述）。
 
 ---
 
