@@ -99,12 +99,12 @@ src/fleetent/platform/admin_cli/
 ### 2. `governance-package-migration`
 
 状态：已有 implementation spec `2026-06-02-governance-package-migration`，负责把权限审批、quota、
-audit log、blocklist、agent policy 迁入 `fleetent.governance`，并保留 legacy 顶层 import shim。
+audit log、blocklist、agent policy 迁入 `fleetent.governance`；legacy 顶层 import shim 已进入 cleanup
+批次。
 
 保留：
 
-- `fleetent.permission_gate`、`fleetent.quota`、`fleetent.audit_log`、`fleetent.blocklist`、
-  `fleetent.agent_policy` 作为 thin shim。
+- canonical `fleetent.governance.*` public API。
 - 既有数据库表、配置 namespace 和业务语义不变。
 
 不做：
@@ -195,7 +195,7 @@ src/fleetent/runtime/
 
 状态：`mcp_client.py` 和 `sandbox_client.py` 已有 implementation spec
 `2026-06-02-integrations-package-migration`，负责迁入 `fleetent.integrations.mcp` 和
-`fleetent.integrations.sandbox`，并保留 legacy 顶层 import shim。
+`fleetent.integrations.sandbox`；legacy 顶层 import shim 已进入 cleanup 批次。
 
 后置迁移：
 
