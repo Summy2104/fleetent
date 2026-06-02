@@ -30,8 +30,8 @@
 
 ## 5. Per-agent MCP 白名单 + allowed_tools 双重过滤
 
-- [ ] 5.1 Write failing tests: `filter_tool_schemas(schemas, allowed_tools, mcp_server_ids)`：先按 allowed_tools fnmatch，再按 mcp 白名单前缀；`mcp_server_ids=["github"]` 保留 `github__*` 排除 `gitlab__*`；`mcp_server_ids=[]` 排除所有含 `__` 的工具；`mcp_server_ids=None` 不按 mcp 过滤
-- [ ] 5.2 在 `agent_runtime.py` 实现 `filter_tool_schemas`
+- [x] 5.1 Write failing tests: `filter_tool_schemas(schemas, allowed_tools, mcp_server_ids)`：先按 allowed_tools fnmatch，再按 mcp 白名单前缀；`mcp_server_ids=["github"]` 保留 `github__*` 排除 `gitlab__*`；`mcp_server_ids=[]` 排除所有含 `__` 的工具；`mcp_server_ids=None` 不按 mcp 过滤
+- [x] 5.2 在 `agent_runtime.py` 实现 `filter_tool_schemas`
 
 ## 6. Per-agent 模型路由 overrides
 
