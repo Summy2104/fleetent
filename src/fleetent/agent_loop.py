@@ -163,6 +163,13 @@ def _resolve_parallel_max() -> int:
     return Settings().agent_tool_parallel_max
 
 
+def _resolve_default_tool_timeout() -> float:
+    """Global default per-tool timeout from Settings (T2), resolved once per run."""
+    from fleetent.config import Settings
+
+    return Settings().tool_default_timeout_seconds
+
+
 def _load_flap_state(session_id: str | None) -> AntiFlapState | None:
     """Load per-session anti-flap state (AR17); None disables gating (CLI / no session).
 
@@ -228,7 +235,7 @@ def _setup_layered_budget(
 
 
 def _layered_budget_add(
-    store: Any, keys: dict[Any, str | None], prompt: int, completion: int, model: str | None
+    store: Any, keys: dict[Any, str | None], prompt: int, completion: int
 ) -> None:
     """Fold one main-loop turn into each cross-run scope with a present key (AR18)."""
     if store is None:
@@ -240,7 +247,7 @@ def _layered_budget_add(
         key = keys.get(scope)
         if key is None:
             continue
-        store.add(scope, key, prompt or 0, completion or 0, model, now=now)
+        store.add(scope, key, prompt or 0, completion or 0, now=now)
 
 
 def _build_controller(
@@ -307,6 +314,7 @@ async def _safe_dispatch(
     cancel_token: CancelToken | None = None,
     tool_context: ToolContext | None = None,
     user_id: str | None = None,
+    default_timeout: float | None = None,
 ) -> tuple[str, bool]:
     """Dispatch a tool, normalizing a crash into (error_text, failed=True).
 
@@ -320,7 +328,7 @@ async def _safe_dispatch(
     # its own deadline AND links the run-level token via `parent`, so the tool
     # observes both its timeout and a session-wide cancel. asyncio.wait_for is the
     # hard "stop waiting" guarantee even for tools that never poll the token.
-    timeout = get_effective_timeout(name)
+    timeout = get_effective_timeout(name, default_timeout)
     child = CancelToken(deadline=time.monotonic() + timeout, parent=cancel_token)
     try:
         result = dispatch(
@@ -394,12 +402,14 @@ async def _run_serial_group(
     token: CancelToken,
     tool_context: ToolContext,
     user_id: str,
+    default_tool_timeout: float | None = None,
 ) -> list[tuple[str, bool]]:
     """Dispatch a same-resource-key group strictly in order (D5).
 
     Same-container stateful tools collapse into one sequential coroutine so the
     batch's gather still sees a single awaitable per group; results stay aligned
-    to the group's slot order.
+    to the group's slot order. T2's configurable default timeout flows to each
+    `_safe_dispatch`.
     """
     out: list[tuple[str, bool]] = []
     for slot in slots:
@@ -408,7 +418,13 @@ async def _run_serial_group(
         else:
             out.append(
                 await _safe_dispatch(
-                    slot.name, slot.args, is_sub_agent, token, tool_context, user_id=user_id
+                    slot.name,
+                    slot.args,
+                    is_sub_agent,
+                    token,
+                    tool_context,
+                    user_id=user_id,
+                    default_timeout=default_tool_timeout,
                 )
             )
     return out
@@ -422,6 +438,7 @@ async def _execute_pending(
     tool_context: ToolContext,
     user_id: str,
     parallel_max: int,
+    default_tool_timeout: float | None = None,
 ) -> dict[str, tuple[str, bool]]:
     """Phase two (D1/D5/D7): run pending slots concurrently, return id→(text,failed).
 
@@ -460,6 +477,7 @@ async def _execute_pending(
                     token=token,
                     tool_context=tool_context,
                     user_id=user_id,
+                    default_tool_timeout=default_tool_timeout,
                 )
                 for group in batch
             )
@@ -951,6 +969,7 @@ async def run(
     hygiene_repairs: dict[str, int] = {}
     guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold)
     parallel_max = _resolve_parallel_max()
+    default_tool_timeout = _resolve_default_tool_timeout()
     flap_state = _load_flap_state(session_id)
     layered_checker, layered_store, layered_keys = _setup_layered_budget(
         session_id, user_id, agent_name
@@ -1002,7 +1021,6 @@ async def run(
             layered_keys,
             getattr(response.usage, "prompt_tokens", 0),
             getattr(response.usage, "completion_tokens", 0),
-            model_used,
         )
         models_to_try = [model_used]  # stick with the winning model for subsequent turns
         choice = response.choices[0]
@@ -1034,6 +1052,7 @@ async def run(
             tool_context=tool_context,
             user_id=user_id,
             parallel_max=parallel_max,
+            default_tool_timeout=default_tool_timeout,
         )
         _backfill_slots(slots, results, messages=messages, state=state, loop_checker=loop_checker)
 
@@ -1202,6 +1221,7 @@ async def run_stream(
     hygiene_repairs: dict[str, int] = {}
     guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold)
     parallel_max = _resolve_parallel_max()
+    default_tool_timeout = _resolve_default_tool_timeout()
     flap_state = _load_flap_state(session_id)
     layered_checker, layered_store, layered_keys = _setup_layered_budget(
         session_id, user_id, agent_name
@@ -1290,9 +1310,7 @@ async def run_stream(
         # tokens), so the BudgetChecker judges between turns rather than only
         # at the end of the whole run. Compression's LLM never reaches here (D4).
         budget_usage.add(turn_prompt_tokens, turn_completion_tokens)
-        _layered_budget_add(
-            layered_store, layered_keys, turn_prompt_tokens, turn_completion_tokens, model_used
-        )
+        _layered_budget_add(layered_store, layered_keys, turn_prompt_tokens, turn_completion_tokens)
 
         if finish_reason != "tool_calls":
             reply = "".join(reply_parts)
@@ -1353,6 +1371,7 @@ async def run_stream(
             tool_context=tool_context,
             user_id=user_id,
             parallel_max=parallel_max,
+            default_tool_timeout=default_tool_timeout,
         )
         for slot in slots:
             content, failed = (

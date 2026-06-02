@@ -7,7 +7,6 @@ import pytest
 import fleetent.layered_budget as lb
 from fleetent.budget import NO_LIMIT
 from fleetent.layered_budget import (
-    BudgetHeadroom,
     BudgetScope,
     BudgetStore,
     BudgetWindow,
@@ -15,7 +14,6 @@ from fleetent.layered_budget import (
     LayeredBudgetConfig,
     ScopeBudget,
     ScopeUsage,
-    headroom,
     period_for,
 )
 from fleetent.termination import StopReason
@@ -45,7 +43,7 @@ def test_scope_order_narrow_to_wide():
 def test_unconfigured_scope_is_unlimited():
     cfg = LayeredBudgetConfig()
     sb = cfg.for_scope(BudgetScope.user)
-    assert (sb.max_turns, sb.max_tokens, sb.max_cost_usd) == (NO_LIMIT, NO_LIMIT, NO_LIMIT)
+    assert (sb.max_turns, sb.max_tokens) == (NO_LIMIT, NO_LIMIT)
 
 
 def test_from_settings_only_overrides_configured(monkeypatch):
@@ -57,17 +55,16 @@ def test_from_settings_only_overrides_configured(monkeypatch):
     assert cfg.for_scope(BudgetScope.user).max_turns == NO_LIMIT  # not configured → unlimited
 
 
-# ── ScopeUsage.add matches AR2 turns/tokens + cost (group 3) ─────────────────
+# ── ScopeUsage.add matches AR2 turns/tokens (group 3) ────────────────────────
 
 
 def test_scope_usage_add_turns_tokens_match_ar2():
     from fleetent.budget import BudgetUsage
 
     layered, ar2 = ScopeUsage(), BudgetUsage()
-    layered.add(100, 50, model="gpt-4o")
+    layered.add(100, 50)
     ar2.add(100, 50)
     assert (layered.turns, layered.tokens) == (ar2.turns, ar2.tokens)
-    assert layered.cost_usd > 0  # cost is the added dimension
 
 
 # ── BudgetStore accumulation + isolation (group 3) ───────────────────────────
@@ -77,9 +74,9 @@ def test_store_add_then_get(tmp_path, monkeypatch):
     monkeypatch.setattr(lb, "DB_PATH", tmp_path / "users.db")
     now = datetime(2026, 6, 1, tzinfo=UTC)
     store = BudgetStore()
-    store.add(BudgetScope.user, "u1", 100, 50, "gpt-4o", now=now)
+    store.add(BudgetScope.user, "u1", 100, 50, now=now)
     u = store.get(BudgetScope.user, "u1", now=now)
-    assert u.turns == 1 and u.tokens == 150 and u.cost_usd > 0
+    assert u.turns == 1 and u.tokens == 150
 
 
 def test_store_monotonic_accumulate_and_key_isolation(tmp_path, monkeypatch):
@@ -102,7 +99,7 @@ def test_store_rejects_task_scope(tmp_path, monkeypatch):
 def test_get_absent_returns_zero(tmp_path, monkeypatch):
     monkeypatch.setattr(lb, "DB_PATH", tmp_path / "users.db")
     u = BudgetStore().get(BudgetScope.user, "nope", now=datetime(2026, 6, 1, tzinfo=UTC))
-    assert (u.turns, u.tokens, u.cost_usd) == (0, 0, 0.0)
+    assert (u.turns, u.tokens) == (0, 0)
 
 
 # ── period windows (group 3.7-3.12) ──────────────────────────────────────────
@@ -176,45 +173,6 @@ def test_checker_skips_missing_key(tmp_path, monkeypatch):
     cfg = LayeredBudgetConfig({BudgetScope.user: ScopeBudget(max_tokens=1)})
     chk = LayeredBudgetChecker(cfg, store, {BudgetScope.user: None}, clock=_clock(now))
     assert chk.check(None) is None  # no user key → user scope skipped
-
-
-# ── headroom (group 7) ───────────────────────────────────────────────────────
-
-
-def test_headroom_tightest_scope(tmp_path, monkeypatch):
-    monkeypatch.setattr(lb, "DB_PATH", tmp_path / "users.db")
-    now = datetime(2026, 6, 1, tzinfo=UTC)
-    store = BudgetStore()
-    store.add(BudgetScope.user, "u1", 0, 0, now=now)
-    # force a cost via direct add with model
-    store.add(BudgetScope.user, "u1", 1_000_000, 0, "gpt-4o", now=now)  # ~2.5 USD
-    cfg = LayeredBudgetConfig({BudgetScope.user: ScopeBudget(max_cost_usd=10.0)})
-    hr = headroom(cfg, store, None, "u1", None, clock=_clock(now))
-    assert hr.tightest_scope == "user"
-    assert 0.0 <= hr.cost_remaining_ratio < 1.0
-
-
-def test_headroom_no_cost_cap_full(tmp_path, monkeypatch):
-    monkeypatch.setattr(lb, "DB_PATH", tmp_path / "users.db")
-    now = datetime(2026, 6, 1, tzinfo=UTC)
-    hr = headroom(LayeredBudgetConfig(), BudgetStore(), "s", "u", "a", clock=_clock(now))
-    assert hr == BudgetHeadroom(cost_remaining_ratio=1.0, tightest_scope=None)
-
-
-def test_headroom_skips_missing_key(tmp_path, monkeypatch):
-    monkeypatch.setattr(lb, "DB_PATH", tmp_path / "users.db")
-    now = datetime(2026, 6, 1, tzinfo=UTC)
-    cfg = LayeredBudgetConfig({BudgetScope.user: ScopeBudget(max_cost_usd=1.0)})
-    hr = headroom(cfg, BudgetStore(), None, None, None, clock=_clock(now))  # no user key
-    assert hr.tightest_scope is None  # user scope skipped
-
-
-def test_headroom_frozen():
-    from dataclasses import FrozenInstanceError
-
-    hr = BudgetHeadroom(cost_remaining_ratio=0.5, tightest_scope="user")
-    with pytest.raises(FrozenInstanceError):
-        hr.cost_remaining_ratio = 0.1  # type: ignore[misc]
 
 
 # ── agent_loop wiring (group 6) ──────────────────────────────────────────────

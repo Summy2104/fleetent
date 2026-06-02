@@ -147,3 +147,25 @@ async def test_timeout_is_plain_await_stop_no_sandbox(monkeypatch):
     from fleetent.error_classifier import ErrorCategory, classify
 
     assert classify(TimeoutError()).category is ErrorCategory.tool_timeout
+
+
+# ── T2 review: global default timeout configurable via Settings ──────────────
+
+
+def test_settings_tool_default_timeout_default_30():
+    from fleetent.config import Settings
+
+    assert Settings(anthropic_api_key="x").tool_default_timeout_seconds == 30.0
+
+
+def test_get_effective_timeout_honors_passed_default(monkeypatch):
+    _register(monkeypatch, "_eff_def", lambda: "x")  # no per-tool timeout
+    assert tr.get_effective_timeout("_eff_def", 12.5) == 12.5  # uses supplied default
+    assert tr.get_effective_timeout("_eff_def") == tr.DEFAULT_TOOL_TIMEOUT  # falls back
+
+
+def test_resolve_default_tool_timeout_reads_settings(monkeypatch):
+    import fleetent.agent_loop as al
+
+    monkeypatch.setenv("TOOL_DEFAULT_TIMEOUT_SECONDS", "55")
+    assert al._resolve_default_tool_timeout() == 55.0  # ops-configurable via env/settings

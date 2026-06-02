@@ -28,8 +28,8 @@
 | 9 | B | compression-anti-flap | AR17 | ✅ 已完成 |
 | 10 | E | mcp-degradation | MCP4 | ✅ 已完成 |
 | 11 | H | scheduled-task-session-binding | S3 | ✅ 已完成 |
-| 12 | A | cost-budget-control | AR18 | ✅ 已完成 |
-| 13 | D | cost-aware-routing | MR2 | ✅ 已完成 |
+| 12 | A | cost-budget-control | AR18 | ✅ 已完成（评审后：cost 删，保留 turns/tokens 五层） |
+| 13 | D | cost-aware-routing | MR2 | ⛔ 评审后回退/删除（无 cost 信号） |
 
 ---
 
@@ -380,3 +380,50 @@
 3. headroom 由 agent_loop 调 AR18 `headroom()` 取标量后透传给 `get_(async_)client_and_config` 的接线——**本 change 仅落地 model_router 接入点与 policy，agent_loop 实际透传 headroom 的接线属后续**（与 AR18 headroom 的消费端对齐）。是否认可此分界。
 
 ---
+
+---
+
+## 评审后修订（2026-06-02，zy 复核决定）
+
+zy 复核全部 13 个 change 后，对 cost 维度做出整体决策：**cost 统计无实际意义，删除该功能**。据此回退：
+
+### 修订 1 — AR18 删除 cost 维度，仅保留 turns/tokens 五层预算
+- `layered_budget.py`：移除 `ScopeUsage.cost_usd`、`ScopeBudget.max_cost_usd`、`MODEL_PRICING`/`DEFAULT_PRICING`/`_price`、`add()` 的 `model` 参数、`exhausted_dimension` 的 cost 分支、`BudgetHeadroom`、`headroom()`、`_scope_keys`；`budget_usage` 表去掉 `cost_usd` 列。**保留**五层 turns/tokens 预算、BudgetStore、窗口、LayeredBudgetChecker（用量分层预算独立成立）。
+- `config.py`：移除 4 个 `agent_budget_*_cost_usd` 字段（保留 turns/tokens 上限与窗口字段）。
+- `agent_loop.py`：`_layered_budget_add` 去掉 `model` 参数（仅累计 turns/tokens）。`budget_scope` 日志字段保留（仍标注触发的 turns/tokens 层级）。
+- 主 spec `openspec/specs/agent-cost-budget/spec.md`：重写为 turns/tokens 版，Purpose 注明 cost 经评审移除；删除「暴露预算剩余只读快照」（headroom）整条 Requirement。
+- AR2 `budget.py` 始终未被触碰（其 cost 维度本就被 review 删除并有守卫测试，与本次决定一致）。
+
+### 修订 2 — MR2（cost-aware-routing）整体删除/回退
+- MR2 100% 靠 cost 剩余（headroom）触发降级；cost 删除后无任何输入信号，故整体回退。
+- 删除 `src/fleetent/cost_aware_routing.py`、`tests/test_cost_aware_routing.py`、主 spec `openspec/specs/cost-aware-routing/`。
+- `model_router.py`：`get_(async_)client_and_config` 回退到 pre-MR2（移除 `headroom`/`policy` 入参、`_resolve_base`、TYPE_CHECKING import），路由逐字节回到 MR2 前。
+- `config.py`：移除 `cost_aware_routing_enabled`/`cost_aware_degrade_below`/`cost_aware_degrade_target`。
+- 归档目录 `changes/archive/2026-06-01-cost-aware-routing/` 作为历史保留，但其能力已撤销（主 spec 已删）。
+
+### 连带说明
+- q2（headroom 透传后续接线）与 q3（占位单价/阈值）随 cost 删除一并失效，无需处理。
+- 影响：**全量 `ANTHROPIC_API_KEY=test-key uv run pytest` → 1357 passed，0 失败**（删 MR2 14 测试 + AR18 cost 测试若干）。ruff 全绿（仅 `agent_loop.py` N814 grandfathered）。mypy 77（= 基线 76 + `layered_budget.from_settings` 的 `Settings()` call-arg 既有模式）。
+- 其余 11 个 change 及 AR18 的 turns/tokens 五层预算保持不变，均已 zy 认可。
+
+---
+
+## 复核逐条结论（2026-06-02，zy 逐条过）
+
+> zy 决定逐条复核所有「需 zy 核实」项。本节记录每条结论；认可者保持不变，需改者记改动。
+
+### T3 tool-arg-sanitization
+- ① 占位符 `[REDACTED]`：**认可，保持**。
+- ② 加 entry 级「曾脱敏」布尔标记：**改——已实现**。`eval_logger` 新增 `_has_redacted_tool_calls`，`log_run`/`log` 在检测到敏感名 tool_call 参数时写 `secrets_redacted: true`（仅 True 才写、不落值），审计可知"曾出现敏感参数"。+3 测试。
+- ③ 仅脱敏顶层键、不递归：**认可，保持**。
+
+### AR20 sub-agent-lifecycle
+- ① 顺序提前到 #2：**认可，保持**。
+- ② 正常路径不单独持久化 `pending`（省一次落盘）：**认可，保持**。
+- ③ 并发测试阈值 0.09→0.13（并发性由启动时间差<0.02s 权威保证）：**认可，保持**。
+- ④ mypy +1（`Settings()` 既有模式）：**认可，保持**。
+
+### T2 tool-timeout
+- ① 全局默认超时承载：**改——已加配置开关**。新增 `Settings.tool_default_timeout_seconds=30.0`；`agent_loop` 每次运行经 `_resolve_default_tool_timeout()` 读一次、下传给 `_safe_dispatch` → `get_effective_timeout(name, default)`；单工具 `@tool(timeout=)` 仍可覆盖。+3 测试。
+- ② 超时归到已有 `tool_timeout` 类别（扩展 `_categorize` 认 `TimeoutError`）：**认可，保持**。
+- ③ 唯一改既有测试（注入 token 由"run token 本身"变"连着自身超时+run 取消的新 token"）：**认可，保持**。
