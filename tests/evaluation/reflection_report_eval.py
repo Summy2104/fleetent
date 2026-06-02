@@ -79,7 +79,7 @@ async def run_deterministic_fixture(
     fixture: Mapping[str, Any], tmp_path: Path, monkeypatch: Any
 ) -> ReflectionEvaluationResult:
     """Run one fixture through run_reflection() with deterministic fake inputs."""
-    from fleetent import memory_layer, observability
+    from fleetent import observability
     from fleetent.intelligence import reflection
 
     validate_fixture(fixture)
@@ -103,7 +103,7 @@ async def run_deterministic_fixture(
         return memory_signals[:limit]
 
     monkeypatch.setattr(observability, "query_trace_events", query_trace_events)
-    monkeypatch.setattr(memory_layer, "search", search_memory)
+    monkeypatch.setattr(reflection.memory, "search", search_memory)
 
     report = await reflection.run_reflection(str(fixture["scope"]))
     persisted_findings_json = _persisted_findings_json(db_path, report.id)

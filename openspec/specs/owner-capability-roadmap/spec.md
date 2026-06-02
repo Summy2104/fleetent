@@ -1,14 +1,16 @@
-# intelligence-roadmap Specification
+# owner-capability-roadmap Specification
 
 ## Purpose
-Define the cross-capability roadmap used to manage 常乐负责或强依赖的 intelligence-related modules,
-including status, MVP gaps, implementation batches, dependencies, and MVP-ready criteria.
+Define the cross-capability roadmap used to manage capability modules owned by or strongly
+dependent on 常乐, including status, MVP gaps, implementation batches, dependencies, and
+MVP-ready criteria.
 ## Requirements
-### Requirement: Intelligence capability roadmap
-The project SHALL maintain a roadmap document for 常乐负责或强依赖的 intelligence-related modules.
+### Requirement: Owner capability roadmap
+The project SHALL maintain a roadmap document for capability modules owned by or strongly
+dependent on 常乐.
 
 #### Scenario: Roadmap lists covered capabilities
-- **WHEN** a maintainer opens `docs/capabilities/intelligence-roadmap.md`
+- **WHEN** a maintainer opens `docs/capabilities/owner-capability-roadmap.md`
 - **THEN** it lists observability、memory、long-term context、reflection、vector store、knowledge base、
   evaluation-related work and deployment/config dependencies
 
@@ -30,7 +32,7 @@ The project SHALL maintain a roadmap document for 常乐负责或强依赖的 in
   reflection、vector store and evaluation readiness
 
 ### Requirement: Unit test hardening is tracked after MVP foundation
-intelligence-roadmap SHALL track unit test hardening as a post-foundation quality item rather than a new runtime feature.
+owner-capability-roadmap SHALL track unit test hardening as a post-foundation quality item rather than a new runtime feature.
 
 #### Scenario: Roadmap records unit hardening scope
 - **WHEN** `intelligence-unit-test-hardening` is proposed

@@ -107,7 +107,7 @@ async def test_effective_budget_uses_available_tokens_and_configured_maximum(mon
         long_term_ctx=LongTermContextSettings(max_tokens=35),
     )
     monkeypatch.setattr(long_term_ctx, "Settings", lambda anthropic_api_key="": settings)
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", AsyncMock(return_value=[memory]))
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[memory]))
     long_term_ctx.set_knowledge_provider(AsyncMock(return_value=[]))
 
     result = await long_term_ctx.build_context(
@@ -126,7 +126,7 @@ async def test_zero_available_tokens_short_circuits_with_metadata(monkeypatch):
 
     memory_search = AsyncMock(return_value=[])
     knowledge_search = AsyncMock(return_value=[])
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", memory_search)
+    monkeypatch.setattr(long_term_ctx.memory, "search", memory_search)
     long_term_ctx.set_knowledge_provider(knowledge_search)
 
     result = await long_term_ctx.build_context(
@@ -176,7 +176,7 @@ async def test_source_token_budgets_are_applied_per_source_type(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        long_term_ctx.memory_layer,
+        long_term_ctx.memory,
         "search",
         AsyncMock(
             return_value=[
@@ -226,7 +226,7 @@ async def test_source_top_k_limits_are_applied_per_source_type(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        long_term_ctx.memory_layer,
+        long_term_ctx.memory,
         "search",
         AsyncMock(return_value=[_memory("mem-a", "A memory."), _memory("mem-b", "B memory.")]),
     )
@@ -266,7 +266,7 @@ async def test_total_budget_excludes_candidates_that_do_not_fit(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        long_term_ctx.memory_layer,
+        long_term_ctx.memory,
         "search",
         AsyncMock(return_value=[_memory("mem-1", "Short memory.")]),
     )
@@ -303,7 +303,7 @@ async def test_equal_score_candidates_use_stable_source_id_tie_breaker(monkeypat
             knowledge_top_k=10,
         ),
     )
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
     long_term_ctx.set_knowledge_provider(
         AsyncMock(
             return_value=[
@@ -339,7 +339,7 @@ async def test_factual_queries_prefer_knowledge_when_budget_forces_a_choice(monk
         ),
     )
     monkeypatch.setattr(
-        long_term_ctx.memory_layer,
+        long_term_ctx.memory,
         "search",
         AsyncMock(return_value=[_memory("mem-1", "Old.")]),
     )
@@ -371,7 +371,7 @@ async def test_personal_history_queries_prefer_memory_when_budget_forces_a_choic
         ),
     )
     monkeypatch.setattr(
-        long_term_ctx.memory_layer,
+        long_term_ctx.memory,
         "search",
         AsyncMock(return_value=[_memory("mem-1", "Old.")]),
     )
@@ -403,7 +403,7 @@ async def test_explicit_conflict_preference_overrides_auto_intent(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        long_term_ctx.memory_layer,
+        long_term_ctx.memory,
         "search",
         AsyncMock(return_value=[_memory("mem-1", "Old.")]),
     )
@@ -434,7 +434,7 @@ async def test_included_sources_have_budget_decision_metadata(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        long_term_ctx.memory_layer,
+        long_term_ctx.memory,
         "search",
         AsyncMock(return_value=[_memory("mem-1", "Short memory.")]),
     )
@@ -469,7 +469,7 @@ async def test_below_relevance_threshold_sources_are_excluded_with_reason(monkey
             knowledge_top_k=10,
         ),
     )
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
     long_term_ctx.set_knowledge_provider(
         AsyncMock(return_value=[_knowledge("doc-low", "Unrelated.", score=0.0)])
     )

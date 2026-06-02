@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from fleetent.intelligence.memory import extraction
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -136,14 +137,13 @@ def test_pending_proposal_can_be_approved_or_rejected(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("status", ["rejected", "expired"])
 async def test_rejected_or_expired_proposal_cannot_apply(tmp_path, monkeypatch, status):
-    from fleetent import memory_layer
     from fleetent.intelligence import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
     update_memory = AsyncMock()
-    monkeypatch.setattr(memory_layer, "update_user_memory_content", update_memory)
+    monkeypatch.setattr(reflection.memory, "update_user_memory_content", update_memory)
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="user-1",
         action="rewrite",
@@ -168,14 +168,13 @@ async def test_rejected_or_expired_proposal_cannot_apply(tmp_path, monkeypatch, 
 
 
 async def test_apply_approved_proposal_updates_status_to_applied(tmp_path, monkeypatch):
-    from fleetent import memory_layer
     from fleetent.intelligence import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
     update_memory = AsyncMock()
-    monkeypatch.setattr(memory_layer, "update_user_memory_content", update_memory)
+    monkeypatch.setattr(reflection.memory, "update_user_memory_content", update_memory)
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="user-1",
         action="rewrite",
@@ -197,14 +196,13 @@ async def test_apply_approved_proposal_updates_status_to_applied(tmp_path, monke
 
 
 async def test_apply_requires_owner_for_default_path(tmp_path, monkeypatch):
-    from fleetent import memory_layer
     from fleetent.intelligence import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
     delete_memory = AsyncMock()
-    monkeypatch.setattr(memory_layer, "delete_user_memory", delete_memory)
+    monkeypatch.setattr(reflection.memory, "delete_user_memory", delete_memory)
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="user-1",
         action="delete",
@@ -226,14 +224,13 @@ async def test_apply_requires_owner_for_default_path(tmp_path, monkeypatch):
 
 
 async def test_high_risk_delete_cannot_be_auto_applied(tmp_path, monkeypatch):
-    from fleetent import memory_layer
     from fleetent.intelligence import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
     delete_memory = AsyncMock()
-    monkeypatch.setattr(memory_layer, "delete_user_memory", delete_memory)
+    monkeypatch.setattr(reflection.memory, "delete_user_memory", delete_memory)
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="user-1",
         action="delete",
@@ -254,14 +251,13 @@ async def test_high_risk_delete_cannot_be_auto_applied(tmp_path, monkeypatch):
 
 
 async def test_low_risk_mark_stale_can_auto_apply_when_policy_enabled(tmp_path, monkeypatch):
-    from fleetent import memory_layer
     from fleetent.intelligence import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
     mark_stale = AsyncMock()
-    monkeypatch.setattr(memory_layer, "mark_user_memory_stale", mark_stale)
+    monkeypatch.setattr(reflection.memory, "mark_user_memory_stale", mark_stale)
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="user-1",
         action="mark_stale",
@@ -284,14 +280,13 @@ async def test_low_risk_mark_stale_can_auto_apply_when_policy_enabled(tmp_path, 
 
 @pytest.mark.parametrize("action", ["merge", "rewrite", "compact"])
 async def test_medium_risk_actions_need_owner_approval(tmp_path, monkeypatch, action):
-    from fleetent import memory_layer
     from fleetent.intelligence import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
-    monkeypatch.setattr(memory_layer, "update_user_memory_content", AsyncMock())
-    monkeypatch.setattr(memory_layer, "merge_user_memories", AsyncMock())
+    monkeypatch.setattr(reflection.memory, "update_user_memory_content", AsyncMock())
+    monkeypatch.setattr(reflection.memory, "merge_user_memories", AsyncMock())
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="user-1",
         action=action,
@@ -310,14 +305,13 @@ async def test_medium_risk_actions_need_owner_approval(tmp_path, monkeypatch, ac
 
 
 async def test_suggest_shared_memory_or_kb_does_not_write_user_memory(tmp_path, monkeypatch):
-    from fleetent import memory_layer
     from fleetent.intelligence import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
     update_memory = AsyncMock()
-    monkeypatch.setattr(memory_layer, "update_user_memory_content", update_memory)
+    monkeypatch.setattr(reflection.memory, "update_user_memory_content", update_memory)
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="user-1",
         action="suggest_shared_memory_or_kb",
@@ -339,13 +333,13 @@ async def test_suggest_shared_memory_or_kb_does_not_write_user_memory(tmp_path, 
 
 
 async def test_proposal_lifecycle_events_are_recorded(tmp_path, monkeypatch):
-    from fleetent import memory_layer, observability
+    from fleetent import observability
     from fleetent.intelligence import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
-    monkeypatch.setattr(memory_layer, "update_user_memory_content", AsyncMock())
+    monkeypatch.setattr(reflection.memory, "update_user_memory_content", AsyncMock())
     events: list[observability.TraceEvent] = []
     monkeypatch.setattr(observability, "record_trace_event", events.append)
     proposal = reflection.create_memory_maintenance_proposal(
@@ -375,7 +369,7 @@ async def test_extract_ignores_unsupported_shared_memory_or_kb_actions(tmp_path,
     db_path = tmp_path / "memory.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
-    monkeypatch.setattr(memory_layer.vector_store, "upsert", AsyncMock())
+    monkeypatch.setattr(extraction.vector_store, "upsert", AsyncMock())
     _patch_extraction(
         monkeypatch,
         """
@@ -402,7 +396,7 @@ async def test_extract_ignores_unsupported_shared_memory_or_kb_actions(tmp_path,
         rows = conn.execute("SELECT content FROM memory_items").fetchall()
 
     assert rows == []
-    memory_layer.vector_store.upsert.assert_not_awaited()
+    extraction.vector_store.upsert.assert_not_awaited()
 
 
 async def test_context_update_refreshes_ttl_and_rejects_cross_type_target(tmp_path, monkeypatch):
@@ -411,7 +405,7 @@ async def test_context_update_refreshes_ttl_and_rejects_cross_type_target(tmp_pa
     db_path = tmp_path / "memory.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
-    monkeypatch.setattr(memory_layer.vector_store, "upsert", AsyncMock())
+    monkeypatch.setattr(extraction.vector_store, "upsert", AsyncMock())
     created_at = datetime(2026, 5, 1, tzinfo=UTC).isoformat()
     old_expiry = (datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)).isoformat()
     with sqlite3.connect(db_path) as conn:
@@ -540,7 +534,6 @@ def test_reflection_finding_filters_existing_and_single_evidence_memory_candidat
 
 
 def _patch_extraction(monkeypatch, content: str) -> AsyncMock:
-    from fleetent import memory_layer
 
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace()))
     create = AsyncMock(
@@ -550,5 +543,5 @@ def _patch_extraction(monkeypatch, content: str) -> AsyncMock:
     )
     client.chat.completions.create = create
     cfg = SimpleNamespace(model="test-memory-model", max_tokens=512)
-    monkeypatch.setattr(memory_layer, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(extraction, "get_async_client_and_config", lambda _: (client, cfg))
     return create

@@ -1,5 +1,6 @@
 import sqlite3
 
+from fleetent.intelligence.memory import maintenance
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -59,7 +60,7 @@ async def test_apply_deletes_expired_context_rows_and_vectors(tmp_path, monkeypa
     async def delete_vector(id: str, namespace: str) -> None:
         vector_deletes.append((id, namespace))
 
-    monkeypatch.setattr(memory_layer.vector_store, "delete", delete_vector)
+    monkeypatch.setattr(maintenance.vector_store, "delete", delete_vector)
 
     summary = await memory_layer.run_memory_maintenance(
         "user-1",
@@ -96,7 +97,7 @@ async def test_apply_deletes_older_over_limit_rows_and_vectors(tmp_path, monkeyp
     async def delete_vector(id: str, namespace: str) -> None:
         vector_deletes.append((id, namespace))
 
-    monkeypatch.setattr(memory_layer.vector_store, "delete", delete_vector)
+    monkeypatch.setattr(maintenance.vector_store, "delete", delete_vector)
 
     summary = await memory_layer.run_memory_maintenance(
         "user-1",
@@ -135,7 +136,7 @@ async def test_apply_duplicate_compaction_removes_duplicates_but_keeps_canonical
     async def delete_vector(id: str, namespace: str) -> None:
         vector_deletes.append((id, namespace))
 
-    monkeypatch.setattr(memory_layer.vector_store, "delete", delete_vector)
+    monkeypatch.setattr(maintenance.vector_store, "delete", delete_vector)
 
     summary = await memory_layer.run_memory_maintenance(
         "user-1",
@@ -174,7 +175,7 @@ async def test_apply_is_scoped_to_requested_user_and_vector_namespace(tmp_path, 
     async def delete_vector(id: str, namespace: str) -> None:
         vector_deletes.append((id, namespace))
 
-    monkeypatch.setattr(memory_layer.vector_store, "delete", delete_vector)
+    monkeypatch.setattr(maintenance.vector_store, "delete", delete_vector)
 
     summary = await memory_layer.run_memory_maintenance(
         "user-a",

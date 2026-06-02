@@ -110,7 +110,7 @@ async def run_deterministic_fixture(
         knowledge_queries.append((user_id, query, agent_id, limit))
         return knowledge[:limit]
 
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", search_memory)
+    monkeypatch.setattr(long_term_ctx.memory, "search", search_memory)
     long_term_ctx.set_knowledge_provider(search_knowledge)
     try:
         built = await long_term_ctx.build_context(
