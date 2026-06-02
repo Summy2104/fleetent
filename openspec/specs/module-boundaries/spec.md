@@ -141,7 +141,8 @@ admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 - **AND** 通过 `handle(args)` 处理自身命令并返回是否已处理
 
 ### Requirement: Governance package migration
-系统 SHALL 将治理域实现迁入 `fleetent.governance` package，并保持 legacy 顶层 import 路径兼容。
+系统 SHALL expose governance implementation through `fleetent.governance` canonical package paths only;
+legacy top-level governance shim modules SHALL NOT remain importable.
 
 #### Scenario: Governance package exists
 - **WHEN** 调用方导入 `fleetent.governance`
@@ -151,17 +152,9 @@ admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 - **WHEN** 调用方导入 `fleetent.governance.permission_gate`、`fleetent.governance.quota`、`fleetent.governance.audit_log`、`fleetent.governance.blocklist` 或 `fleetent.governance.agent_policy`
 - **THEN** 导入成功
 
-#### Scenario: Legacy governance imports remain compatible
+#### Scenario: Legacy governance imports are removed
 - **WHEN** 调用方导入 `fleetent.permission_gate`、`fleetent.quota`、`fleetent.audit_log`、`fleetent.blocklist` 或 `fleetent.agent_policy`
-- **THEN** 导入成功
-- **AND** 旧路径暴露迁移前的 public API
-
-#### Scenario: Governance shims do not contain business logic
-- **WHEN** 查看 legacy 顶层 governance 文件
-- **THEN** 文件只 re-export `fleetent.governance.*` 的 public names
-- **AND** 不访问数据库
-- **AND** 不读取配置
-- **AND** 不承载业务逻辑
+- **THEN** 导入失败并显示该 legacy module 不再存在
 
 #### Scenario: Governance owns existing governance data responsibilities
 - **WHEN** quota、audit log 或 blocklist 访问既有持久化数据
@@ -171,7 +164,7 @@ admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 #### Scenario: Platform and channels use governance public API
 - **WHEN** platform 或 channels 模块需要 audit log、blocklist、quota 或 permission gate 能力
 - **THEN** 它们通过 `fleetent.governance` canonical public API 调用
-- **AND** legacy 顶层 shim 不承载可被 monkeypatch 的治理状态
+- **AND** legacy 顶层 shim 不存在
 
 #### Scenario: Runtime uses governance through public API
 - **WHEN** agent runtime 需要权限审批或工具访问策略
@@ -204,7 +197,8 @@ admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 - **THEN** 仓库不包含运行时代码、数据库 schema 或配置行为变更
 
 ### Requirement: Integrations package migration
-系统 SHALL 将外部能力接入实现迁入 `fleetent.integrations` package，并保持 legacy 顶层 import 路径兼容。
+系统 SHALL expose external capability integrations through `fleetent.integrations` canonical package paths
+only; legacy top-level integrations shim modules SHALL NOT remain importable.
 
 #### Scenario: Integrations package exists
 - **WHEN** 调用方导入 `fleetent.integrations`
@@ -220,24 +214,13 @@ admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
 - **THEN** 导入成功
 - **AND** canonical path 暴露 sandbox client public API
 
-#### Scenario: Legacy MCP import remains compatible
+#### Scenario: Legacy MCP import is removed
 - **WHEN** 调用方导入 `fleetent.mcp_client`
-- **THEN** 导入成功
-- **AND** 旧路径暴露迁移前 MCP public API
-- **AND** 旧路径与 `fleetent.integrations.mcp.client` 共享同一 MCP registry 状态
+- **THEN** 导入失败并显示该 legacy module 不再存在
 
-#### Scenario: Legacy sandbox import remains compatible
+#### Scenario: Legacy sandbox import is removed
 - **WHEN** 调用方导入 `fleetent.sandbox_client`
-- **THEN** 导入成功
-- **AND** 旧路径暴露迁移前 sandbox public API
-- **AND** 旧路径暴露的 class object 与 `fleetent.integrations.sandbox.client` 相同
-
-#### Scenario: Integrations shims do not contain business logic
-- **WHEN** 查看 legacy 顶层 `mcp_client.py` 或 `sandbox_client.py`
-- **THEN** 文件只 re-export `fleetent.integrations.*` 的 public names
-- **AND** 不创建 MCP session
-- **AND** 不创建 Docker subprocess
-- **AND** 不承载业务逻辑或 module-level runtime state
+- **THEN** 导入失败并显示该 legacy module 不再存在
 
 #### Scenario: Runtime and server use integrations through public API
 - **WHEN** server 注册 MCP servers 或 tools 创建 sandbox client

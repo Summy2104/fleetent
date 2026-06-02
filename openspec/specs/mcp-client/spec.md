@@ -40,18 +40,21 @@ The agent_loop and LLM SHALL be unaware of whether a tool is local or from an MC
 
 #### Scenario: LLM tool call routing
 - **WHEN** LLM calls `github__create_issue` in its tool_use block
-- **THEN** `tool_registry.dispatch` routes it to `mcp_client.call_tool("github", "create_issue", args, user_id)` transparently
+- **THEN** `tool_registry.dispatch` routes it to `fleetent.integrations.mcp.call_tool("github", "create_issue", args, user_id)` transparently
 
 ### Requirement: Module interface
-The mcp_client module SHALL expose `register_all` and `call_tool` as its primary interface.
+The MCP integration module SHALL expose `register_all` and `call_tool` through
+`fleetent.integrations.mcp` as its primary interface.
 
 #### Scenario: register_all called at startup
 - **WHEN** service starts
-- **THEN** `mcp_client.register_all(servers: list[McpServerConfig])` is called once, registering all tools
+- **THEN** `fleetent.integrations.mcp.register_all(servers: list[McpServerConfig])` is called once,
+  registering all tools
 
 #### Scenario: call_tool invoked per dispatch
 - **WHEN** a MCP tool is dispatched
-- **THEN** `mcp_client.call_tool(server_id, tool_name, args, user_id)` forwards the call to the appropriate MCP server
+- **THEN** `fleetent.integrations.mcp.call_tool(server_id, tool_name, args, user_id)` forwards the call to
+  the appropriate MCP server
 
 ### Requirement: Dedicated MCP server definition file
 MCP server definitions SHALL live in `config/mcp.servers.yaml`, not in `config/settings.yaml`.
