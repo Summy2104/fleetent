@@ -79,6 +79,8 @@ def log_run(
         entry["cache_tokens"] = cache_tokens
     if disabled_skills_trace:
         entry["disabled_skills_trace"] = disabled_skills_trace
+    if _has_redacted_tool_calls(messages):
+        entry["secrets_redacted"] = True
     TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with TRACE_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -112,6 +114,8 @@ def log(
         entry["thread_id"] = thread_id
     if message_id is not None:
         entry["message_id"] = message_id
+    if _has_redacted_tool_calls(messages):
+        entry["secrets_redacted"] = True
     TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with TRACE_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -205,6 +209,31 @@ def log_compression(
     TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with TRACE_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def _has_redacted_tool_calls(messages: list[Any]) -> bool:
+    """Whether any message carries a sensitive-named tool_call arg that gets redacted
+    in the trace (T3). Used to set an audit-only `secrets_redacted` marker on the
+    entry — surfaces "a secret was present" without writing the value itself."""
+    return any(_msg_has_sensitive_tool_arg(m) for m in messages)
+
+
+def _msg_has_sensitive_tool_arg(msg: Any) -> bool:
+    m = msg if isinstance(msg, dict) else (msg.model_dump() if hasattr(msg, "model_dump") else None)
+    if not isinstance(m, dict) or not isinstance(m.get("tool_calls"), list):
+        return False
+    for tc in m["tool_calls"]:
+        fn = tc.get("function") if isinstance(tc, dict) else None
+        raw = fn.get("arguments") if isinstance(fn, dict) else None
+        if not isinstance(raw, str):
+            continue
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(parsed, dict) and any(sandbox_secrets.is_sensitive_name(k) for k in parsed):
+            return True
+    return False
 
 
 def _serialize(msg: Any) -> Any:

@@ -405,3 +405,14 @@ zy 复核全部 13 个 change 后，对 cost 维度做出整体决策：**cost �
 - q2（headroom 透传后续接线）与 q3（占位单价/阈值）随 cost 删除一并失效，无需处理。
 - 影响：**全量 `ANTHROPIC_API_KEY=test-key uv run pytest` → 1357 passed，0 失败**（删 MR2 14 测试 + AR18 cost 测试若干）。ruff 全绿（仅 `agent_loop.py` N814 grandfathered）。mypy 77（= 基线 76 + `layered_budget.from_settings` 的 `Settings()` call-arg 既有模式）。
 - 其余 11 个 change 及 AR18 的 turns/tokens 五层预算保持不变，均已 zy 认可。
+
+---
+
+## 复核逐条结论（2026-06-02，zy 逐条过）
+
+> zy 决定逐条复核所有「需 zy 核实」项。本节记录每条结论；认可者保持不变，需改者记改动。
+
+### T3 tool-arg-sanitization
+- ① 占位符 `[REDACTED]`：**认可，保持**。
+- ② 加 entry 级「曾脱敏」布尔标记：**改——已实现**。`eval_logger` 新增 `_has_redacted_tool_calls`，`log_run`/`log` 在检测到敏感名 tool_call 参数时写 `secrets_redacted: true`（仅 True 才写、不落值），审计可知"曾出现敏感参数"。+3 测试。
+- ③ 仅脱敏顶层键、不递归：**认可，保持**。
