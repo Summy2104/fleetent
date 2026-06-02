@@ -29,6 +29,24 @@ class Settings(BaseSettings):
     context_flap_window: int = 3
     context_min_savings_ratio: float = 0.10
     context_min_interval_turns: int = 1
+    # Cross-run layered budget caps (AR18). Default NO_LIMIT (-1 / -1.0) = unlimited,
+    # backward-compatible. task scope is per-run (AR2), not configured here.
+    agent_budget_session_turns: int = -1
+    agent_budget_session_tokens: int = -1
+    agent_budget_session_cost_usd: float = -1.0
+    agent_budget_user_turns: int = -1
+    agent_budget_user_tokens: int = -1
+    agent_budget_user_cost_usd: float = -1.0
+    agent_budget_agent_turns: int = -1
+    agent_budget_agent_tokens: int = -1
+    agent_budget_agent_cost_usd: float = -1.0
+    agent_budget_global_turns: int = -1
+    agent_budget_global_tokens: int = -1
+    agent_budget_global_cost_usd: float = -1.0
+    # Per-scope accounting windows (AR18). session is fixed lifetime (no field).
+    agent_budget_user_window: str = "weekly"
+    agent_budget_agent_window: str = "weekly"
+    agent_budget_global_window: str = "monthly"
     session_ttl_days: int = 30
     session_max_total_mb: int = 1024
     session_max_count: int = 10000

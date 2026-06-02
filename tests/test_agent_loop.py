@@ -2489,3 +2489,37 @@ async def test_run_without_session_id_does_not_touch_flap_db(mock_client, monkey
     await al.run([{"role": "user", "content": "x"}])  # no session_id
     assert called["apply"] == 0  # ungated AR12 path; anti-flap not engaged
     assert not (tmp_path / "users.db").exists()  # no DB created
+
+
+# ── AR18: layered budget wiring ──────────────────────────────────────────────
+
+
+async def test_run_layered_budget_trips_and_logs_scope(mock_client, monkeypatch, tmp_path):
+    import fleetent.layered_budget as lbud
+    from fleetent.termination import StopReason
+
+    monkeypatch.setattr(lbud, "DB_PATH", tmp_path / "users.db")
+    # Tiny user-token cap → second checkpoint trips via the layered checker.
+    capped = lbud.LayeredBudgetConfig({lbud.BudgetScope.user: lbud.ScopeBudget(max_tokens=1)})
+    monkeypatch.setattr(
+        lbud.LayeredBudgetConfig, "from_settings", classmethod(lambda cls, s=None: capped)
+    )
+    captured: dict = {}
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
+
+    # Always return a tool call carrying usage, so the budget is the SOLE terminator
+    # (no StopIteration). The tiny user cap trips at the checkpoint after turn 1.
+    def _resp(*a, **k):
+        r = _tool_resp("get_time")
+        r.usage = MagicMock(prompt_tokens=10, completion_tokens=5)
+        return r
+
+    mock_client.chat.completions.create = AsyncMock(side_effect=_resp)
+
+    await al.run([{"role": "user", "content": "x"}], user_id="u1", session_id="s1", max_turns=50)
+    assert captured.get("stop_reason") == StopReason.budget_exceeded
+    assert captured.get("budget_scope") == "user"  # layered user scope reported
+    from datetime import UTC, datetime
+
+    used = lbud.BudgetStore().get(lbud.BudgetScope.user, "u1", now=datetime.now(UTC))
+    assert used.tokens >= 15  # store accumulated across the turn(s)

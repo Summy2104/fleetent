@@ -28,7 +28,7 @@
 | 9 | B | compression-anti-flap | AR17 | ✅ 已完成 |
 | 10 | E | mcp-degradation | MCP4 | ✅ 已完成 |
 | 11 | H | scheduled-task-session-binding | S3 | ✅ 已完成 |
-| 12 | A | cost-budget-control | AR18 | ⬜ |
+| 12 | A | cost-budget-control | AR18 | ✅ 已完成 |
 | 13 | D | cost-aware-routing | MR2 | ⬜ |
 
 ---
@@ -324,5 +324,33 @@
 1. `_fire` 传副本给 run + reply 手动 append（自解决策 #1）是否认可——避免 run 原地改 messages 致 assistant 重复；session 仅持久化 user+最终 reply。
 2. 默认独立语义、固定复用需显式配 `session_id`（D1）是否认可。
 3. 旧库升级加列 `session_id TEXT` 由 db-migration 走 ALTER TABLE（design D4）——本 change 未含迁移脚本，按既有迁移能力处理。
+
+---
+
+## cost-budget-control（AR18）— feat/cost-budget-control
+
+**实现：**
+- 新模块 `layered_budget.py`：`BudgetScope`（task/session/user/agent/global）+ `SCOPE_ORDER`/`CROSS_RUN_SCOPES`；`ScopeUsage`（turns/tokens/cost_usd + `add(prompt,completion,model)`）；`ScopeBudget`（max_turns/tokens/cost_usd，NO_LIMIT 默认，`exhausted_dimension` turns→tokens→cost）；`MODEL_PRICING`/`DEFAULT_PRICING`（每 token USD）；`LayeredBudgetConfig`（per_scope + `from_settings` + `has_any_cap`）；`BudgetWindow`（lifetime/daily/weekly/monthly）+ `period_for`；`BudgetStore`（`users.db` 表 `budget_usage(scope,key,period PK)`，`add`/`get`，task 拒绝，可注入 clock/DB_PATH，跨周期涌现式重置）；`LayeredBudgetChecker`（4 跨运行层由窄到宽，key 缺失跳过，记 triggered_scope/dimension）；`BudgetHeadroom` + `headroom()`。
+- `config.py`：12 个跨运行层上限字段（默认 NO_LIMIT）+ 3 个窗口字段。
+- `eval_logger.py`：`log_run` 加可选 `budget_scope`。
+- `agent_loop.py`：`_setup_layered_budget`（无 cap → 休眠：不注册 checker、不写 DB）、`_layered_budget_add`；run/run_stream 注册 LayeredBudgetChecker、每轮 store.add（与 AR2 `_budget_add` 并存）、budget_exceeded 时 log `budget_scope`。
+
+**自解决策（最重要，务必核实）：**
+1. **不碰 `budget.py`，cost 机制全在 `layered_budget.py`**：AR18 的 spec/tasks 假设 cost 维度在 AR2 `budget.py`（`max_cost_usd`/`MODEL_PRICING`/`add(model)`），**但实际 cost 是 AR2 review 主动删除的**——`budget.py` 有 3 个守卫测试（`test_budget_config_has_no_cost_dimension`/`..._usage_...`/`..._no_pricing_tables`）断言其无 cost/pricing。故**不重新给 budget.py 加 cost**（会破坏 review 决定 + 3 个守卫测试），改为 AR18 自有模块实现完整 cost 机制，复用 AR2 的 `NO_LIMIT` 与 turns/tokens 语义（`ScopeUsage.add` 的 turns/tokens 与 `BudgetUsage.add` 同输入同结果，仅多 cost 维度）。AR2 边界测试全绿、五层成本预算照常落地。
+2. **默认休眠**：`has_any_cap()` 为假（所有层 NO_LIMIT，默认）时完全不启用——不注册 checker、不写 `budget_usage` 表，既有 agent_loop 测试（默认 Settings、无 cap）零影响、不触碰 `data/`。仅运维显式配置上限才激活。
+3. **task 层不落盘**：task 是 per-run（AR2 管），`BudgetStore.add(task,...)` 抛 `ValueError`；只 session/user/agent/global 跨运行持久化。
+4. **触发归一为 AR2 `budget_exceeded` → Grace Call**：层级超限复用既有收尾路径，额外经 `log_run(budget_scope=...)` 记录触发层级。
+
+**影响：**
+- 新增 `layered_budget.py`、`tests/test_layered_budget.py`（20 测试）；改 `config.py`/`eval_logger.py`/`agent_loop.py`、`tests/test_agent_loop.py`（+1 接线测试）。
+- 测试：**全量 1361 passed，0 失败，零回归**（AR2 budget 守卫测试全绿）。
+- ruff：我改/建文件 format+check 全绿（`agent_loop.py` N814 grandfathered）。
+- mypy：76 → 77（+1）。该 +1 为 `layered_budget.py:146` `from_settings` 的 `Settings()` call-arg，与全仓既有 `_default_config`/`_resolve_*` 同款模式，非新增错误模式。
+
+**需 zy 核实：**
+1. **（最重要）** 不复活 `budget.py` 的 cost（被 review 删除 + 守卫），改在 `layered_budget.py` 自实现 cost（自解决策 #1）是否认可——这是对 AR18 spec「复用 AR2 cost」前提的修正。
+2. `MODEL_PRICING` 占位单价（claude/gpt 每 token USD）是否需按实际定价校准。
+3. 各层默认窗口（session=lifetime / user·agent=weekly / global=monthly）与默认休眠（无 cap 不启用）是否认可。
+4. `headroom()` 只读快照已实现但 agent_loop 尚未消费（供上层/后续提示用）——是否认可留作 API/提示后续接入。
 
 ---
