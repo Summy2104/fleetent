@@ -43,7 +43,7 @@ async def test_run_entity_extraction_document_scope_writes_summary_entities_and_
         ("system", "Billing API"),
         ("system", "Data Warehouse"),
     }
-    assert len(mentions.fetchall()) >= 4
+    assert len(mentions.fetchall()) >= 3
     relation = relations.fetchone()
     assert relation["relation_type"] == "depends_on"
     assert relation["evidence_document_id"] == document.id

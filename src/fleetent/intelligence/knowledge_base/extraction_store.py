@@ -252,6 +252,8 @@ class KnowledgeEntityStore:
             )
             mentions_written = 0
             for entity in entities:
+                if entity.metadata.get("mention") == "false":
+                    continue
                 canonical = entity_by_key[(entity.entity_type, entity.normalized_name)]
                 transaction.execute(
                     """

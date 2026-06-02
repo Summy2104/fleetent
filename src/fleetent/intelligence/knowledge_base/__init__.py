@@ -31,6 +31,13 @@ from fleetent.intelligence.knowledge_base.extraction_store import (
     KnowledgeEntity,
     KnowledgeExtractionRun,
 )
+from fleetent.intelligence.knowledge_base.graph_search import (
+    EntityRef,
+    GraphSearchChunk,
+    GraphSearchResult,
+    RelationRef,
+    graph_search,
+)
 from fleetent.intelligence.knowledge_base.models import KnowledgeChunk, KnowledgeDocument
 from fleetent.intelligence.knowledge_base.operations import (
     ConnectorCheckResult,
@@ -90,10 +97,14 @@ __all__ = [
     "ExtractedEntity",
     "ExtractedRelation",
     "ExtractionResult",
+    "EntityRef",
+    "GraphSearchChunk",
+    "GraphSearchResult",
     "KnowledgeChunk",
     "KnowledgeDocument",
     "KnowledgeEntity",
     "KnowledgeExtractionRun",
+    "RelationRef",
     "ParsedDocument",
     "ParsedSection",
     "SyncAction",
@@ -108,6 +119,7 @@ __all__ = [
     "execute_sync_plan",
     "get_connector_config",
     "get_connector_status",
+    "graph_search",
     "ingest_parsed",
     "ingest_text",
     "iter_indexable_knowledge_chunks",

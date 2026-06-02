@@ -108,15 +108,23 @@ def deterministic_extract(text: str, document_id: str, chunk_id: str) -> Extract
     relations: list[ExtractedRelation] = []
     entity_by_name: dict[str, ExtractedEntity] = {}
 
-    def entity_for(name: str, entity_type: str = "concept") -> ExtractedEntity:
+    def entity_for(
+        name: str,
+        entity_type: str = "concept",
+        *,
+        mention: bool = True,
+    ) -> ExtractedEntity:
         normalized = normalize_entity_name(name)
         existing = entity_by_name.get(normalized)
         if existing is not None:
             return existing
+        metadata = {"document_id": document_id, "chunk_id": chunk_id}
+        if not mention:
+            metadata["mention"] = "false"
         entity = ExtractedEntity(
             entity_type=entity_type,
             name=name.strip(),
-            metadata={"document_id": document_id, "chunk_id": chunk_id},
+            metadata=metadata,
         )
         entity_by_name[normalized] = entity
         entities.append(entity)
@@ -136,8 +144,8 @@ def deterministic_extract(text: str, document_id: str, chunk_id: str) -> Extract
             relations.append(
                 ExtractedRelation(
                     relation_type="depends_on",
-                    source=entity_for(source_name, "system"),
-                    target=entity_for(target_name, "system"),
+                    source=entity_for(source_name, "system", mention=False),
+                    target=entity_for(target_name, "system", mention=False),
                     evidence_text=line,
                     document_id=document_id,
                     chunk_id=chunk_id,
@@ -149,8 +157,8 @@ def deterministic_extract(text: str, document_id: str, chunk_id: str) -> Extract
             relations.append(
                 ExtractedRelation(
                     relation_type="defines",
-                    source=entity_for(source_name, "term"),
-                    target=entity_for(target_name, "concept"),
+                    source=entity_for(source_name, "term", mention=False),
+                    target=entity_for(target_name, "concept", mention=False),
                     evidence_text=line,
                     document_id=document_id,
                     chunk_id=chunk_id,
@@ -162,8 +170,8 @@ def deterministic_extract(text: str, document_id: str, chunk_id: str) -> Extract
             relations.append(
                 ExtractedRelation(
                     relation_type="conflicts_with",
-                    source=entity_for(source_name, "system"),
-                    target=entity_for(target_name, "system"),
+                    source=entity_for(source_name, "system", mention=False),
+                    target=entity_for(target_name, "system", mention=False),
                     evidence_text=line,
                     document_id=document_id,
                     chunk_id=chunk_id,

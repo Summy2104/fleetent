@@ -25,7 +25,7 @@ def test_owner_roadmap_marks_advanced_file_parsers_complete():
     assert "PDF / DOCX / PPTX / XLSX" in content
 
 
-def test_capability_docs_describe_entity_extraction_and_graph_search_gap():
+def test_capability_docs_describe_entity_extraction():
     kb_doc = Path("docs/capabilities/knowledge-base.md").read_text(encoding="utf-8")
     roadmap = Path("docs/capabilities/owner-capability-roadmap.md").read_text(encoding="utf-8")
 
@@ -34,4 +34,15 @@ def test_capability_docs_describe_entity_extraction_and_graph_search_gap():
         assert "kb_extraction_runs" in content
         assert "kb_entities" in content
         assert "explicit run" in content
-        assert "graph search 仍未实现" in content
+
+
+def test_capability_docs_describe_graph_search_scope():
+    kb_doc = Path("docs/capabilities/knowledge-base.md").read_text(encoding="utf-8")
+    roadmap = Path("docs/capabilities/owner-capability-roadmap.md").read_text(encoding="utf-8")
+
+    for content in [kb_doc, roadmap]:
+        assert "graph_search" in content
+        assert "depth 0/1" in content
+        assert "graph evidence" in content
+        assert "独立于 search" in content
+        assert "不接 query planner / rerank" in content
