@@ -1,3 +1,12 @@
+> **实施进度（opsx:apply，主体完成）**
+> 已按 TDD 实现并通过（沙箱 Python 3.10 + `.pth` 的 `datetime.UTC` shim；新模块不 import agent_loop）：
+> - 数据层：迁移 `010_add_skill_admin_tables`（`agent_skills` / `skill_provenance` / `skill_admin_state`，升级 head + 降级 base 均通过）；`skill_admin_store.py`（db runtime + named params：绑定矩阵 / provenance+drift / immutable 判定 / 管理态 status·global_enabled·audit_verdict·forced）。
+> - 管理 API：`skill_admin_api.py`（`/admin/skills/*`）——列表检索、上传/编辑门控（frontmatter 422 + 审计三级分流 pass/suspicious/rejected→隔离 + 热加载）、全局启停、重扫描、归档软删除+引用保护+恢复、Skill↔Agent 矩阵、强制上线、按 skill 观测、reflection 提案收件箱（list/diff/approve/reject）、provenance promote/discard。引擎 / reflection / askit 语义经可注入接缝（`engine_*` / `reflection_*` / `askit_override`），缺口域用文档化占位、测试 monkeypatch。
+> - 接线：`server.py` mount `/admin/skills` router（运行时需 3.12）。权限复用 `auth.has_role`（admin 写 / viewer 只读）+ 高危 `X-Confirm` 二次确认；写操作经 `audit_log.write_audit`。
+> - 测试：新增 38 个（`test_skill_admin_store.py` 18 + `test_skill_admin_api.py` 20），连同共享底座 + 迁移共 70 passed；`ruff format` + `ruff check` 通过。覆盖 platform.md 场景 47–57。
+>
+> **仅剩 3.12 验证**：全量 `uv run pytest -x -q`、`mypy src`、手动冒烟需在 host（3.12）执行（沙箱无法下载 3.12，import 链路含 agent_loop 的 PEP 695）。引擎侧 follow-up（skill 域 audit/global-disable、reflection 提案应用/snapshot、askit override）按接缝契约待对应域补齐。
+
 ## 0. 前置
 
 待人审决策（不阻塞 propose，但实施前需确认）：

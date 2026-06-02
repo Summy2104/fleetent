@@ -1,3 +1,11 @@
+> **实施进度（opsx:apply，主体完成）**
+> 已按 TDD 实现并通过（沙箱 3.10 + `.pth` UTC shim；不 import agent_loop）：
+> - 决策落定：0.2 选 **(b) 新建表**作为管理面单一来源（model_router 仍是无状态薄工厂、无 settings.yaml provider 配置，故无双写问题）；model_router 运行时改读该表属 model-router 域 follow-up。0.5 脱敏在 API 序列化层统一 `_serialize`（api_key 输出 `****`，编辑留空 = 不变更）。
+> - 数据层：迁移 `011_add_model_provider_tables`（`model_providers` 含 base_url/model/api_key/max_tokens/temperature/extra_params + 可空单价；`model_routes` task_type+provider+priority）。`provider_admin_store.py`（db runtime + named params：CRUD、`set_route_order`/`get_route_providers`、`set_pricing`、删 provider 联动清路由）。**单价 NULL=未配置，区别于显式 0.0**。
+> - 管理 API：`provider_admin_api.py`（`/admin/providers/*`）——CRUD（脱敏）、连通性测试、task_type 路由编排（顺序=fallback 优先级）、未知 task_type 回落 default 明示、fallback 链预演、健康探针视图、单价维护、按 provider 观测（成本用单价、未配显示「未配置」）。连通性/健康/观测经可注入接缝（model-router/observability follow-up）。
+> - 接线：`server.py` mount `/admin/providers`。权限 `auth.has_role`（admin 写/viewer 只读）+ `audit_log` 审计。
+> - 测试：新增 24 个（store 9 + api 15），覆盖场景 115–120；`ruff format/check` 通过。全量 + mypy + 冒烟需 host 3.12。
+
 ## 0. 前置
 
 - [ ] 0.1 确认新模块边界：`provider_admin_api.py`（`/admin/providers/*`，仿 `user_admin_api.py`，复用 `auth.has_role` / `require_role` + `audit_log.write_audit`，不 import `agent_loop` 以便 TestClient 隔离测试）
