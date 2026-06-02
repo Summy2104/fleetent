@@ -24,15 +24,15 @@ uv run fleetent "What time is it, and what is 123 * 456?"
 **HTTP server mode (multi-user, Bearer auth):**
 
 ```bash
-# Start the server
-uvicorn fleetent.server:app --reload
+# Start the server (default port 8765)
+uvicorn fleetent.server:app --reload --port 8765
 
 # Create a user and get an API key
 uv run fleetent-admin create-user --name "Alice"
 # → api_key: ma-abc123...
 
 # Chat via SSE
-curl -s http://localhost:8000/chat \
+curl -s http://localhost:8765/chat \
   -H "Authorization: Bearer ma-abc123..." \
   -H "Content-Type: application/json" \
   -d '{"message": "What is 7 * 8?"}' | grep "^data:"
@@ -125,7 +125,7 @@ Authorization: Bearer ma-<64hex>
 Streams a Server-Sent Events response:
 
 ```bash
-curl -s http://localhost:8000/chat \
+curl -s http://localhost:8765/chat \
   -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
   -d '{"message": "What is the current time?"}'
