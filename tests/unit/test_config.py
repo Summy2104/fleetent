@@ -1,6 +1,13 @@
+from pathlib import Path
+
 import pytest
 
 from fleetent.config import Settings, configure_logging
+
+
+@pytest.fixture(autouse=True)
+def isolate_settings_dotenv(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
 
 
 def test_settings_defaults():
@@ -9,6 +16,133 @@ def test_settings_defaults():
     assert s.permission_gate_medium_timeout_seconds == 300
     assert s.permission_gate_high_timeout_seconds == 3600
     assert s.database_url == "sqlite:///data/users.db"
+
+
+def test_settings_loads_non_secret_values_from_settings_yaml(tmp_path, monkeypatch):
+    import fleetent.config as cfg
+
+    settings_yaml = tmp_path / "settings.yaml"
+    settings_yaml.write_text(
+        "\n".join(
+            [
+                "database_url: sqlite:///tmp/fleetent.db",
+                "log_format: json",
+                "observability:",
+                "  logging:",
+                "    console_level: warning",
+                "vector_store:",
+                "  backend: sqlite",
+                "embedding:",
+                "  dimensions: 128",
+                "knowledge_base:",
+                "  enabled: true",
+            ]
+        )
+    )
+    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
+
+    s = Settings(anthropic_api_key="test-key")
+
+    assert s.database_url == "sqlite:///tmp/fleetent.db"
+    assert s.log_format == "json"
+    assert s.observability.logging.console_level == "warning"
+    assert s.vector_store.backend == "sqlite"
+    assert s.embedding.dimensions == 128
+    assert s.knowledge_base.enabled is True
+
+
+def test_settings_mcp_namespace_is_global_policy_only():
+    s = Settings(anthropic_api_key="test-key")
+
+    assert s.mcp.enabled is True
+    assert not hasattr(s.mcp, "servers")
+
+
+def test_settings_rejects_mcp_server_definitions():
+    with pytest.raises(Exception, match="servers"):
+        Settings(
+            anthropic_api_key="test-key",
+            mcp={
+                "servers": [
+                    {
+                        "id": "github",
+                        "url": "http://mcp.example.com",
+                    }
+                ]
+            },
+        )
+
+
+def test_settings_example_excludes_mcp_server_definitions():
+    example = (Path(__file__).parents[2] / "config" / "settings.yaml.example").read_text()
+
+    assert "mcp:" in example
+    assert "servers:" not in example
+    assert "mcp-github" not in example
+
+
+def test_mcp_servers_example_documents_server_list_format():
+    example = (Path(__file__).parents[2] / "config" / "mcp.servers.yaml.example").read_text()
+
+    assert "servers:" in example
+    assert "id: github" in example
+    assert "transport: http" in example
+    assert "transport: stdio" in example
+
+
+def test_settings_env_overrides_settings_yaml(tmp_path, monkeypatch):
+    import fleetent.config as cfg
+
+    settings_yaml = tmp_path / "settings.yaml"
+    settings_yaml.write_text(
+        "\n".join(
+            [
+                "database_url: sqlite:///tmp/from-yaml.db",
+                "log_format: json",
+            ]
+        )
+    )
+    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///tmp/from-env.db")
+
+    s = Settings()
+
+    assert s.database_url == "sqlite:///tmp/from-env.db"
+    assert s.log_format == "json"
+
+
+def test_settings_missing_yaml_file_uses_typed_defaults(tmp_path, monkeypatch):
+    import fleetent.config as cfg
+
+    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", tmp_path / "missing.yaml")
+
+    s = Settings(anthropic_api_key="test-key")
+
+    assert s.database_url == "sqlite:///data/users.db"
+    assert s.log_format == "console"
+
+
+def test_settings_yaml_does_not_load_secret_values(tmp_path, monkeypatch):
+    import fleetent.config as cfg
+
+    settings_yaml = tmp_path / "settings.yaml"
+    settings_yaml.write_text(
+        "\n".join(
+            [
+                "anthropic_api_key: should-not-load",
+                "slack_bot_token: xoxb-should-not-load",
+                "database_url: sqlite:///tmp/fleetent.db",
+            ]
+        )
+    )
+    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-env")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ValueError, match="anthropic_api_key.*slack_bot_token.*env/.env"):
+        Settings()
 
 
 def test_observability_logging_defaults():

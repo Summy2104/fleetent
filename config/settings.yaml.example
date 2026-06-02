@@ -1,6 +1,51 @@
-# Optional overrides — values here are the defaults
-# All can be overridden via environment variables
-log_format: console  # "console" | "json"
-microsandbox_url: http://host.docker.internal:7777
-permission_gate_medium_timeout_seconds: 300
-permission_gate_high_timeout_seconds: 3600
+# Non-secret application settings. Environment variables and .env override this file.
+
+database_url: sqlite:///data/users.db
+log_format: console
+
+observability:
+  logging:
+    console_level: info
+    file_level: debug
+    directory: data/logs
+    json_file: true
+
+mcp:
+  enabled: true
+
+scheduling:
+  enabled: true
+  default_timezone: UTC
+
+webhooks:
+  enabled: true
+  max_body_bytes: 1048576
+
+vector_store:
+  backend: memory
+  database_url:
+
+embedding:
+  backend: deterministic
+  dimensions: 64
+  endpoint: ""
+  model: ""
+  api_key_env: ""
+  timeout_seconds: 10.0
+
+rerank:
+  backend: disabled
+  endpoint: ""
+  model: ""
+  api_key_env: ""
+  timeout_seconds: 10.0
+
+knowledge_base:
+  enabled: false
+  default_tenant_id: default
+  default_kb_id: global
+  chunk_size: 1000
+  chunk_overlap: 200
+
+long_term_ctx:
+  max_tokens: 2048

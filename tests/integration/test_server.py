@@ -5,6 +5,11 @@ import fleetent.user_store as us
 from fleetent.server import app
 
 
+@pytest.fixture(autouse=True)
+def isolate_runtime_config_files(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch, isolated_schedule_db):
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
@@ -153,8 +158,6 @@ def test_lifespan_starts_and_stops_cron_scheduler(tmp_path, monkeypatch, isolate
     from starlette.testclient import TestClient
 
     import fleetent.server as srv
-
-    monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", tmp_path / "webhooks.yaml")
 
     start_mock = AsyncMock()
     shutdown_mock = AsyncMock()

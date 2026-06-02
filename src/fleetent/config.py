@@ -1,8 +1,40 @@
 import logging
+from pathlib import Path
+from typing import Any
 
 import structlog
-from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import yaml
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    YamlConfigSettingsSource,
+)
+
+SETTINGS_YAML_PATH = Path("config/settings.yaml")
+MCP_SERVERS_YAML_PATH = Path("config/mcp.servers.yaml")
+YAML_SECRET_FIELDS = frozenset(
+    {
+        "anthropic_api_key",
+        "slack_bot_token",
+        "slack_app_token",
+        "telegram_bot_token",
+    }
+)
+
+
+class SecretRejectingYamlSettingsSource(YamlConfigSettingsSource):
+    def __call__(self) -> dict[str, Any]:
+        data = super().__call__()
+        secret_fields = sorted(key for key in data if key in YAML_SECRET_FIELDS)
+        if secret_fields:
+            fields = ", ".join(secret_fields)
+            raise ValueError(
+                f"Secret fields cannot appear in config/settings.yaml: {fields}. "
+                "Move these values to env/.env."
+            )
+        return data
 
 
 class LoggingSettings(BaseModel):
@@ -50,8 +82,39 @@ class KnowledgeBaseSettings(BaseModel):
     chunk_overlap: int = 200
 
 
+class McpServerSettings(BaseModel):
+    id: str
+    transport: str = "http"
+    url: str = ""
+    auth_type: str = "none"
+    api_key_env: str = ""
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+class McpServersFile(BaseModel):
+    servers: list[McpServerSettings] = Field(default_factory=list)
+
+
+class McpSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+
+
+class SchedulingSettings(BaseModel):
+    enabled: bool = True
+    default_timezone: str = "UTC"
+
+
+class WebhooksSettings(BaseModel):
+    enabled: bool = True
+    max_body_bytes: int = 1_048_576
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", extra="ignore")
 
     anthropic_api_key: str
     slack_bot_token: str = ""
@@ -72,6 +135,29 @@ class Settings(BaseSettings):
     rerank: RerankSettings = Field(default_factory=RerankSettings)
     long_term_ctx: LongTermContextSettings = Field(default_factory=LongTermContextSettings)
     knowledge_base: KnowledgeBaseSettings = Field(default_factory=KnowledgeBaseSettings)
+    mcp: McpSettings = Field(default_factory=McpSettings)
+    scheduling: SchedulingSettings = Field(default_factory=SchedulingSettings)
+    webhooks: WebhooksSettings = Field(default_factory=WebhooksSettings)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        yaml_settings = SecretRejectingYamlSettingsSource(
+            settings_cls, yaml_file=SETTINGS_YAML_PATH
+        )
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            yaml_settings,
+            file_secret_settings,
+        )
 
 
 def configure_logging(settings: Settings) -> None:
@@ -109,3 +195,17 @@ def configure_logging(settings: Settings) -> None:
         level=logging.INFO,
         handlers=[logging.StreamHandler()],
     )
+
+
+def load_mcp_server_settings(
+    path: Path | None = None,
+) -> list[McpServerSettings]:
+    """Load static MCP server definitions from the dedicated server config file."""
+    config_path = path or MCP_SERVERS_YAML_PATH
+    if not config_path.exists():
+        return []
+
+    raw = yaml.safe_load(config_path.read_text()) or {}
+    if not isinstance(raw, dict):
+        raise ValueError("config/mcp.servers.yaml must contain a mapping with a servers list")
+    return McpServersFile.model_validate(raw).servers

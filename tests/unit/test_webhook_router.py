@@ -1,77 +1,16 @@
-"""Unit tests for webhook_router: config loading, payload extraction, signature verification."""
+"""Unit tests for webhook_router: payload extraction and signature verification."""
 
 import hashlib
 import hmac
 import json
 
-import yaml
-
-# ── load_sources ─────────────────────────────────────────────────────────────
+# ── removed YAML source loading ───────────────────────────────────────────────
 
 
-def test_load_sources_returns_sources_from_yaml(tmp_path):
+def test_yaml_source_loader_is_removed():
     from fleetent import webhook_router as wr
 
-    cfg = tmp_path / "webhooks.yaml"
-    cfg.write_text(
-        yaml.dump(
-            {
-                "sources": [
-                    {
-                        "id": "gh",
-                        "user_id": "u-1",
-                        "secret": "s3cr3t",
-                        "agent_name": "devops",
-                        "message_template": "push: {ref}",
-                    },
-                ]
-            }
-        )
-    )
-    sources = wr.load_sources(cfg)
-    assert "gh" in sources
-    s = sources["gh"]
-    assert s.id == "gh"
-    assert s.user_id == "u-1"
-    assert s.secret == "s3cr3t"
-    assert s.agent_name == "devops"
-    assert s.message_template == "push: {ref}"
-
-
-def test_load_sources_missing_file_returns_empty(tmp_path):
-    from fleetent import webhook_router as wr
-
-    sources = wr.load_sources(tmp_path / "nonexistent.yaml")
-    assert sources == {}
-
-
-def test_load_sources_optional_fields_default_to_none(tmp_path):
-    from fleetent import webhook_router as wr
-
-    cfg = tmp_path / "webhooks.yaml"
-    cfg.write_text(yaml.dump({"sources": [{"id": "bare", "user_id": "u-2"}]}))
-    s = wr.load_sources(cfg)["bare"]
-    assert s.secret is None
-    assert s.agent_name is None
-    assert s.message_template is None
-
-
-def test_load_sources_multiple_entries(tmp_path):
-    from fleetent import webhook_router as wr
-
-    cfg = tmp_path / "webhooks.yaml"
-    cfg.write_text(
-        yaml.dump(
-            {
-                "sources": [
-                    {"id": "a", "user_id": "u-1"},
-                    {"id": "b", "user_id": "u-2"},
-                ]
-            }
-        )
-    )
-    sources = wr.load_sources(cfg)
-    assert set(sources.keys()) == {"a", "b"}
+    assert not hasattr(wr, "load_sources")
 
 
 # ── extract_message ───────────────────────────────────────────────────────────
