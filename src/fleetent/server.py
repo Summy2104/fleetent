@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -55,6 +56,28 @@ logger = logging.getLogger(__name__)
 LEGACY_MCP_CONFIG_PATH: Path = Path("config/mcp.yaml")
 LEGACY_WEBHOOK_CONFIG_PATH: Path = Path("config/webhooks.yaml")
 _webhook_sources: dict[str, Any] = {}
+
+
+def _admin_login_url(router_prefix: str) -> str:
+    """Build the full admin login URL from the uvicorn CLI args.
+
+    The bind address is owned by uvicorn, not the app, so derive it from argv.
+    Falls back to uvicorn's own defaults (127.0.0.1:8000).
+    """
+    host, port = "127.0.0.1", 8000
+    args = sys.argv
+    for i, arg in enumerate(args):
+        if arg == "--host" and i + 1 < len(args):
+            host = args[i + 1]
+        elif arg.startswith("--host="):
+            host = arg.split("=", 1)[1]
+        elif arg == "--port" and i + 1 < len(args):
+            port = int(args[i + 1])
+        elif arg.startswith("--port="):
+            port = int(arg.split("=", 1)[1])
+    # 0.0.0.0 binds all interfaces but is not directly reachable; show loopback.
+    display_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
+    return f"http://{display_host}:{port}{router_prefix}/ui"
 
 
 async def _start_slack_adapter(app_token: str) -> None:
@@ -108,7 +131,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             temp_password,
         )
 
-    logger.info("admin_login_route path=%s", f"{user_admin_api.router.prefix}/ui")
+    logger.info("admin_login_url url=%s", _admin_login_url(user_admin_api.router.prefix))
 
     if LEGACY_MCP_CONFIG_PATH.exists():
         raise RuntimeError(
