@@ -39,6 +39,7 @@ def test_upgrade_creates_tables(tmp_path):
     assert "knowledge_chunks" in tables
     assert "knowledge_chunks_fts" in tables
     assert "knowledge_base_agent_bindings" in tables
+    assert "knowledge_connector_status" in tables
 
 
 def test_upgrade_creates_trace_indexes(tmp_path):

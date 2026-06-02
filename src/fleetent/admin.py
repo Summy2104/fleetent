@@ -1,7 +1,9 @@
 """Admin CLI for user management. Usage: uv run fleetent-admin <command>"""
 
 import argparse
+import asyncio
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 import yaml
@@ -64,6 +66,20 @@ def main() -> None:
     p_default_group = p_default.add_mutually_exclusive_group(required=True)
     p_default_group.add_argument("--agent-name", help="Agent name to set as default")
     p_default_group.add_argument("--clear", action="store_true", help="Clear default agent")
+
+    # --- knowledge-base connector operations ---
+    p_kb = sub.add_parser("kb", help="Knowledge-base administration")
+    kb_sub = p_kb.add_subparsers(dest="kb_cmd", required=True)
+    p_kb_connectors = kb_sub.add_parser("connectors", help="Knowledge-base connectors")
+    kb_connectors_sub = p_kb_connectors.add_subparsers(dest="connector_cmd", required=True)
+    kb_connectors_sub.add_parser("list", help="List configured connectors")
+    p_connector_check = kb_connectors_sub.add_parser("check", help="Check connector health")
+    p_connector_check.add_argument("connector_id")
+    p_connector_status = kb_connectors_sub.add_parser("status", help="Show connector status")
+    p_connector_status.add_argument("connector_id")
+    p_connector_sync = kb_connectors_sub.add_parser("sync", help="Run connector sync")
+    p_connector_sync.add_argument("connector_id")
+    p_connector_sync.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args()
 
@@ -194,6 +210,9 @@ def main() -> None:
     elif args.cmd == "set-default-agent":
         _set_default_agent(args)
 
+    elif args.cmd == "kb":
+        _handle_kb(args)
+
 
 def _set_default_agent(args: argparse.Namespace) -> None:
     data: dict[str, object] = {}
@@ -209,6 +228,67 @@ def _set_default_agent(args: argparse.Namespace) -> None:
 
     _SETTINGS_YAML.parent.mkdir(parents=True, exist_ok=True)
     _SETTINGS_YAML.write_text(yaml.safe_dump(data))
+
+
+def _handle_kb(args: argparse.Namespace) -> None:
+    if args.kb_cmd == "connectors":
+        _handle_kb_connectors(args)
+
+
+def _handle_kb_connectors(args: argparse.Namespace) -> None:
+    from fleetent.intelligence.knowledge_base import operations
+
+    if args.connector_cmd == "list":
+        connectors = operations.list_configured_connectors()
+        if not connectors:
+            print("No connectors configured.")
+            return
+        print(f"{'ID':<24}  {'TYPE':<14}  {'ENABLED':<7}  {'TENANT':<12}  {'KB':<16}  SCOPE")
+        for item in connectors:
+            print(
+                f"{item.connector_id:<24}  {item.connector_type:<14}  "
+                f"{str(item.enabled):<7}  {item.tenant_id:<12}  {item.kb_id:<16}  {item.scope}"
+            )
+        return
+
+    if args.connector_cmd == "check":
+        check_result = asyncio.run(operations.check_connector(args.connector_id))
+        print(f"connector_id={check_result.connector_id}")
+        print(f"status={check_result.status}")
+        print(f"message={_sanitize_cli_value(check_result.message)}")
+        return
+
+    if args.connector_cmd == "status":
+        status = operations.get_connector_status(args.connector_id)
+        print(f"connector_id={status.connector_id}")
+        print(f"status={status.last_status}")
+        if status.last_summary:
+            print(_summary_line(status.last_summary))
+        if status.last_error:
+            print(f"error={_sanitize_cli_value(status.last_error)}")
+        return
+
+    if args.connector_cmd == "sync":
+        sync_result = asyncio.run(
+            operations.run_connector_sync(args.connector_id, dry_run=args.dry_run)
+        )
+        print(f"connector_id={sync_result.connector_id}")
+        print(f"status={sync_result.status}")
+        if sync_result.summary:
+            print(_summary_line(sync_result.summary))
+        if sync_result.error:
+            print(f"error={_sanitize_cli_value(sync_result.error)}")
+
+
+def _summary_line(summary: Mapping[str, object]) -> str:
+    return " ".join(f"{key}={_sanitize_cli_value(value)}" for key, value in sorted(summary.items()))
+
+
+def _sanitize_cli_value(value: object) -> str:
+    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.observability.structured_logging import _redact_value
+
+    return operations._sanitize_text(str(_redact_value(value)))
 
 
 if __name__ == "__main__":

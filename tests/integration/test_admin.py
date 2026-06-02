@@ -252,3 +252,114 @@ def test_remove_schedule_success(tmp_sched_db):
 def test_remove_schedule_not_found_exits_nonzero(tmp_sched_db):
     _, _, code = run_admin("remove-schedule", "--task-id", "no-such-id")
     assert code != 0
+
+
+def test_kb_connectors_list_outputs_configured_connectors(monkeypatch):
+    from fleetent.intelligence.knowledge_base import operations
+
+    monkeypatch.setattr(
+        operations,
+        "list_configured_connectors",
+        lambda: [
+            operations.ConnectorSummary(
+                connector_id="eng-drive",
+                connector_type="google_drive",
+                enabled=True,
+                tenant_id="default",
+                kb_id="engineering",
+                scope="folder:folder-1",
+                credential_ref_summary="file:google.json",
+            )
+        ],
+    )
+
+    out, _, code = run_admin("kb", "connectors", "list")
+
+    assert code == 0
+    assert "eng-drive" in out
+    assert "google_drive" in out
+
+
+def test_kb_connectors_check_outputs_status(monkeypatch):
+    from fleetent.intelligence.knowledge_base import operations
+
+    async def check_connector(connector_id: str):
+        return operations.ConnectorCheckResult(
+            connector_id=connector_id,
+            status="ok",
+            message="connector is reachable",
+        )
+
+    monkeypatch.setattr(operations, "check_connector", check_connector)
+
+    out, _, code = run_admin("kb", "connectors", "check", "eng-drive")
+
+    assert code == 0
+    assert "ok" in out
+    assert "eng-drive" in out
+
+
+def test_kb_connectors_status_outputs_never_run(monkeypatch):
+    from fleetent.intelligence.knowledge_base import operations
+
+    monkeypatch.setattr(
+        operations,
+        "get_connector_status",
+        lambda connector_id: operations.ConnectorStatus(
+            connector_id=connector_id,
+            connector_type="google_drive",
+            tenant_id="default",
+            kb_id="engineering",
+            last_status="never_run",
+            last_started_at=None,
+            last_finished_at=None,
+            last_summary={},
+            last_error=None,
+        ),
+    )
+
+    out, _, code = run_admin("kb", "connectors", "status", "eng-drive")
+
+    assert code == 0
+    assert "never_run" in out
+
+
+def test_kb_connectors_sync_dry_run_outputs_summary(monkeypatch):
+    from fleetent.intelligence.knowledge_base import operations
+
+    async def run_connector_sync(connector_id: str, *, dry_run: bool = False):
+        assert dry_run is True
+        return operations.ConnectorSyncResult(
+            connector_id=connector_id,
+            status="dry_run_ok",
+            summary={"planned": 1},
+            error=None,
+        )
+
+    monkeypatch.setattr(operations, "run_connector_sync", run_connector_sync)
+
+    out, _, code = run_admin("kb", "connectors", "sync", "eng-drive", "--dry-run")
+
+    assert code == 0
+    assert "dry_run_ok" in out
+    assert "planned=1" in out
+
+
+def test_kb_connectors_cli_output_is_sanitized(monkeypatch):
+    from fleetent.intelligence.knowledge_base import operations
+
+    async def run_connector_sync(connector_id: str, *, dry_run: bool = False):
+        return operations.ConnectorSyncResult(
+            connector_id=connector_id,
+            status="sync_failed",
+            summary={"failed": 1},
+            error="token secret-value failed",
+        )
+
+    monkeypatch.setattr(operations, "run_connector_sync", run_connector_sync)
+
+    out, _, code = run_admin("kb", "connectors", "sync", "eng-drive")
+
+    assert code == 0
+    assert "sync_failed" in out
+    assert "secret-value" not in out

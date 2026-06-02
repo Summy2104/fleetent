@@ -53,6 +53,13 @@
   - 非 dry-run 模式下 DB 文件不存在会 fail fast；backup 成功后才会运行 migration
   - migration 失败时不会自动 rollback；已创建 backup 会保留，脚本返回非 0
 
+- ✅ **Pilot connector operations CLI**：`fleetent-admin kb connectors ...`
+  - `list` 列出 settings 中的 Google Drive / Confluence connector 安全摘要
+  - `check <connector_id>` 检查 `credential_ref` 与 remote scope，返回 credential_missing / credential_invalid / auth_failed / scope_unreachable / ok
+  - `sync <connector_id> --dry-run` 生成同步计划，不写 KB、source state 或 vector index
+  - `sync <connector_id>` 手动执行同步并写入最近一次 status
+  - `status <connector_id>` 查询最近一次 dry-run / sync 结果；输出不包含 credential payload、token、secret 或文档正文
+
 当前定位：已有本地开发和基础 Docker 部署地基，但还不是面向客户交付的一键 on-prem 安装包。
 
 ## 升级与恢复
@@ -76,6 +83,30 @@ uv run python scripts/upgrade.py --database-url sqlite:///data/fleetent.db --bac
 1. 停止 fleetent 服务。
 2. 用脚本输出的 backup DB 文件替换当前 DB 文件，例如将 `data/backups/YYYYMMDD-HHMMSS/fleetent.db` 复制回 `data/fleetent.db`。
 3. 重启 fleetent 服务。
+
+## Connector 运维
+
+Pilot 环境中，Google Drive / Confluence connector 的真实 credential 不写入 `settings.yaml`；配置文件只保存
+`credential_ref`，例如 `file:///etc/fleetent/secrets/google-drive-token.json` 或
+`env:FLEETENT_CONFLUENCE_API_TOKEN`。对应文件权限、环境变量注入和备份策略由部署方保护。
+
+常用操作：
+
+```bash
+uv run fleetent-admin kb connectors list
+uv run fleetent-admin kb connectors check eng-drive
+uv run fleetent-admin kb connectors sync eng-drive --dry-run
+uv run fleetent-admin kb connectors sync eng-drive
+uv run fleetent-admin kb connectors status eng-drive
+```
+
+排障方向：
+
+- `credential_missing`：检查 `credential_ref` 指向的文件是否存在，或环境变量是否已注入服务进程。
+- `credential_invalid`：检查 credential 文件格式或 env var 内容，不要把真实 payload 复制到日志或 issue。
+- `auth_failed`：重新授权或轮换外部 SaaS credential，再运行 `check`。
+- `scope_unreachable`：检查 folder / space / page id、connector 账号权限和企业网络出口。
+- `sync_failed`：先查看 `status` 的脱敏失败摘要，再用 `--dry-run` 缩小失败范围。
 
 ## 规划中（v1.0）
 

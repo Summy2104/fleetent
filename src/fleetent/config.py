@@ -85,6 +85,44 @@ class KnowledgeBaseSettings(BaseModel):
     default_kb_id: str = "global"
     chunk_size: int = 1_000
     chunk_overlap: int = 200
+    google_drive: "GoogleDriveConnectorsSettings" = Field(
+        default_factory=lambda: GoogleDriveConnectorsSettings()
+    )
+    confluence: "ConfluenceConnectorsSettings" = Field(
+        default_factory=lambda: ConfluenceConnectorsSettings()
+    )
+
+
+class GoogleDriveConnectorSettings(BaseModel):
+    connector_id: str
+    tenant_id: str
+    kb_id: str
+    folder_id: str
+    credential_ref: str
+    enabled: bool = True
+    recursive: bool = True
+
+
+class GoogleDriveConnectorsSettings(BaseModel):
+    connectors: list[GoogleDriveConnectorSettings] = Field(default_factory=list)
+
+
+class ConfluenceConnectorSettings(BaseModel):
+    connector_id: str
+    tenant_id: str
+    kb_id: str
+    base_url: str
+    username: str
+    credential_ref: str
+    enabled: bool = True
+    scope_type: Literal["space", "page"] | None = None
+    space_key: str | None = None
+    page_id: str | None = None
+    include_children: bool = False
+
+
+class ConfluenceConnectorsSettings(BaseModel):
+    connectors: list[ConfluenceConnectorSettings] = Field(default_factory=list)
 
 
 class McpServerSettings(BaseModel):
