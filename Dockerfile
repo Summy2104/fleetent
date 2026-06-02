@@ -19,6 +19,6 @@ COPY alembic.ini ./
 # Create data and config dirs
 RUN mkdir -p data config
 
-EXPOSE 8000
+EXPOSE 8765
 
-CMD ["uv", "run", "uvicorn", "fleetent.server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "fleetent.server:app", "--host", "0.0.0.0", "--port", "8765"]

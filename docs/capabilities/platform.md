@@ -6,12 +6,12 @@
 
 ## 概述
 
-多用户管理、API 认证和管理员操作，并向上扩展为统一的 Admin Web 后台——涵盖用户 / IM、Agent、Skill 管理，askit 编排与 fleetent 自管理，跨 agent 统计与单请求全链路追踪，以及资源监控与告警。是 fleetent 作为多租户平台的基础层与运维控制面。
+多用户管理、API 认证和管理员操作，并向上扩展为统一的 Admin Web 后台——涵盖用户 / IM、Agent、Skill、聊天（试运行 + 会话管理）、知识库、connector、model_provider 管理，askit 编排与 fleetent 自管理，跨 agent 统计与单请求全链路追踪，以及资源监控与告警。是 fleetent 作为多租户平台的基础层与运维控制面。
 
 **调用关系**：
-- 依赖：user-center（用户创建、禁用、拉黑等写操作均通过 user-center 接口，不直接写 users 表）、user_store / im_user_store（只读，供 Bearer token 认证查询）、agent_store（Agent 定义与绑定的读写，供 Admin UI 的 Agent 管理页）、skill_registry（Skill 索引读取与热加载触发，供 Admin UI 的 Skill 管理页）、reflection（读取 skill_proposals 待审提案，供 Skill 提案审批入口）、askit（外部 spec 编译 / 部署工具链，供 Admin UI 的 askit 编排控制台调用，详见「askit 编排控制台」）
+- 依赖：user-center（用户创建、禁用、拉黑等写操作均通过 user-center 接口，不直接写 users 表）、user_store / im_user_store（只读，供 Bearer token 认证查询）、agent_store（Agent 定义与绑定的读写，供 Admin UI 的 Agent 管理页）、skill_registry（Skill 索引读取与热加载触发，供 Admin UI 的 Skill 管理页）、reflection（读取 skill_proposals 待审提案，供 Skill 提案审批入口）、session_mgr（只读 / 接管，供 Admin UI 的聊天会话管理页）、agent_loop（admin 试运行聊天经统一 run 入口发起）、knowledge_base（知识库的导入 / 检索 / 删除，供 Admin UI 的知识库管理页）、connectors（per-user OAuth 授权状态与凭证生命周期，供 Admin UI 的 connector 管理页）、mcp（MCP server 连接状态与工具注册，供 connector 管理页的 MCP 子视图）、model_router（provider / 模型路由配置与单价表的读写，供 Admin UI 的 model_provider 管理页）、askit（外部 spec 编译 / 部署工具链，供 Admin UI 的 askit 编排控制台调用，详见「askit 编排控制台」）
 - 被依赖：server.py（认证）、normalizer（用户查找）、admin CLI
-- **职责边界**：platform 只提供 Agent / Skill / askit 操作的**管理面**（Admin UI 上的增删改查、启停、绑定 / 分配、按系列触发与观测）；它们的**运行语义**——Agent 的 allowed_tools 校验、审批、路由解析归 [governance](./governance.md) / [agent-runtime](./agent-runtime.md)；Skill 的扫描 / 匹配 / 注入 / 禁用 / 安全审计归 [skill](./skill.md)，AI 自动生成的 Skill 提案与审批流归 [reflection](./reflection.md)；askit 的 spec 编译 / 校验 / 部署 / 覆盖回流等语义归 **ai-skills-toolkit 外部工具域**。本模块只交叉引用、不重复定义这些语义
+- **职责边界**：platform 只提供 Agent / Skill / 聊天 / 知识库 / connector / model_provider / askit 操作的**管理面**（Admin UI 上的增删改查、启停、绑定 / 分配、按系列触发与观测）；它们的**运行语义**——Agent 的 allowed_tools 校验、审批、路由解析归 [governance](./governance.md) / [agent-runtime](./agent-runtime.md)；Skill 的扫描 / 匹配 / 注入 / 禁用 / 安全审计归 [skill](./skill.md)，AI 自动生成的 Skill 提案与审批流归 [reflection](./reflection.md)；聊天会话的并发锁 / 原子持久化 / 上下文压缩归 [session](./session.md) / agent-runtime；知识库的解析 / 分块 / 索引 / 检索归 [knowledge-base](./knowledge-base.md)；connector 的 OAuth consent / 凭证刷新 / 注入归 [connectors](./connectors.md)，MCP 服务连接 / 工具注册 / 降级归 [mcp](./mcp.md)；model_provider 的 task_type 路由 / fallback / client 实例化归 [model-router](./model-router.md)；askit 的 spec 编译 / 校验 / 部署 / 覆盖回流等语义归 **ai-skills-toolkit 外部工具域**。本模块只交叉引用、不重复定义这些语义
 - **不涉及**：config（属 deployment 域）
 
 ## 架构总览
@@ -37,6 +37,10 @@ flowchart TD
         F1["用户 / IM 管理"]
         F2["Agent 管理"]
         F3["Skill 管理 + 提案审批"]
+        F7["聊天<br/>试运行 + 会话管理"]
+        F8["知识库管理"]
+        F9["connector 管理<br/>OAuth + MCP"]
+        F10["model_provider 管理"]
         F4["统计面板<br/>跨 agent / 单请求全链路"]
         F5["askit 编排控制台"]
         F6["资源监控与告警"]
@@ -47,6 +51,11 @@ flowchart TD
         SKR["skill<br/>匹配 / 注入 / 禁用"]
         REF["reflection<br/>skill 提案"]
         OBS["observability<br/>traces"]
+        SES["session<br/>会话持久化 / 锁"]
+        KB["knowledge-base<br/>导入 / 检索"]
+        CON["connectors<br/>OAuth / 凭证"]
+        MCP["mcp<br/>服务连接 / 工具注册"]
+        MR["model-router<br/>task_type 路由 / fallback"]
         ASKIT["askit<br/>ai-skills-toolkit"]
     end
     subgraph MONT["监控目标"]
@@ -64,6 +73,12 @@ flowchart TD
     F2 -.-> AS
     F3 -.-> SK
     F3 -.提案.-> REF
+    F7 -.试运行 run / 会话接管.-> ART
+    F7 -.会话读写.-> SES
+    F8 -.导入 / 检索 / 删除.-> KB
+    F9 -.授权状态 / 凭证生命周期.-> CON
+    F9 -.MCP 连接 / 工具.-> MCP
+    F10 -.路由配置 / 单价表.-> MR
     F4 -.聚合.-> OBS
     F5 -.编排 / 受管 deploy.-> ASKIT
     F6 -.内置采集.-> T
@@ -343,6 +358,214 @@ flowchart TD
         Q -->|approve| R["reflection 应用生效 + 写审计"]
         Q -->|reject| S["关闭提案 + 写审计"]
     end
+```
+
+### 聊天（试运行 + 会话管理）（v1.0）
+
+> 设计哲学借鉴市面成熟 agent 后台的「调试台 + 会话治理」双形态（Dify 的 Debug & Preview、Coze 的 Bot 调试对话、Bedrock 的 Test 窗口，以及客服 / 工单系统的会话接管面）：后台聊天有两个互补入口——**admin 试运行 playground**（admin 选定 Agent 直接对话，验证 prompt / 工具 / 知识库召回，不污染真实用户数据），和**用户会话管理面**（浏览、检索、接管、干预真实用户与 IM 用户产生的会话）。本模块只写**管理面与操作面的可观察行为**；聊天真正运行时的 while tool-use 循环、模型路由、审批由 [agent-runtime](./agent-runtime.md) / [governance](./governance.md) 负责，会话消息的并发锁 / 原子持久化 / TTL 由 [session](./session.md) 负责，单会话 transcript 的纯只读浏览复用上文「会话与 trace 浏览」，本节聚焦**可交互的试运行**与**可写的会话治理**。
+>
+> **与「会话与 trace 浏览」的边界**：「会话与 trace 浏览」是**事后只读**的逐轮回放（含 trace 节点）；本节的会话管理面允许**写操作**——接管、注入消息、强制结束、清空、导出，是运营干预入口而非纯审计入口。
+
+#### 试运行 playground
+
+- [ ] **选 Agent 起会话**：admin 在 playground 下拉选择任一启用中的 Agent（含临管 / 受管），即时开启一段**隔离的试运行会话**——该会话标记 `origin=playground`，不计入该 Agent 的对外用量统计、不与任何真实用户 / channel 绑定，可随时丢弃
+- [ ] **流式对话与逐轮可观察**：发送消息后以 SSE 流式看到回复（语义同 `/chat`），同时右栏实时展开本轮的可观察细节——命中的 system prompt / 注入的 Skill / 知识库召回片段、每次工具调用的入参 / 出参、permission_gate 决策、模型路由与 fallback、token 与耗时；便于 admin 验证"为什么这样回答"
+- [ ] **试运行参数覆盖**：playground 内可临时覆盖该次会话的 task_type / 模型（对齐 [model-router](./model-router.md) 的请求级路由覆盖）、temperature、是否启用某些 Skill / 知识库，仅作用于当前试运行会话，不改 Agent 持久配置
+- [ ] **审批旁路开关（受控）**：playground 会话默认仍走 permission_gate；admin 可对自己的试运行会话开启"自动批准 medium 风险"以快速迭代（high 风险仍需显式确认），该旁路仅对 `origin=playground` 会话生效、写审计，绝不影响真实用户会话
+- [ ] **试运行结果留存与分享**：可将一段满意 / 有问题的试运行会话"固定"保存并附备注，或导出为 JSON / Markdown 供回归对照；未固定的 playground 会话超过保留期自动清理
+
+#### 用户会话管理面
+
+- [ ] **会话列表与检索**：列出全部真实会话（web + IM），按用户 / Agent / channel / 平台 / 时间 / 关键词 / 状态（活跃 / 空闲 / 已结束）筛选与排序，每行显示发起用户、所属 Agent、来源 channel、轮数、最近活跃、token 用量、是否含未决审批
+- [ ] **会话详情与逐轮回放**：打开单会话看到完整 transcript 与逐轮工具调用、permission_gate 决策、模型路由、memory / 知识库命中（只读回放部分复用「会话与 trace 浏览」，本页在其上叠加写操作入口）
+- [ ] **会话接管（人工干预）**：admin 可"接管"一段活跃会话，**暂停 agent 自动回复**并以人工身份向该会话注入一条消息（IM 会话经 im-gateway 投递回原平台），用于异常会话的人工兜底；接管与释放均写审计并对终端用户标注"已转人工 / 已恢复自动"（具体提示语载体由 im-gateway 域决定）
+- [ ] **强制结束 / 清空 / 重置**：admin 可强制结束一段会话（不再接受新轮）、清空某会话上下文（等价于 im-gateway 的 `/new`，由 [session](./session.md) 执行实际清空）、或重置到某一轮之前；高危动作二次确认并写审计
+- [ ] **批量与配额联动**：可按筛选结果批量结束 / 清空异常会话；展示各会话 token 用量并与「用量与配额」联动，便于定位异常激增会话
+- [ ] **导出与留痕**：单会话或批量导出 transcript（JSON / Markdown），导出动作写审计；含个人数据的导出按部署方策略可要求二次确认 / 脱敏
+- [ ] **聊天管理权限与审计**：试运行 playground、会话接管 / 注入 / 强制结束 / 清空 / 重置 / 导出均**仅 admin 角色可操作**，viewer 仅可只读浏览会话与回放；接管、清空、强制结束等高危动作要求二次确认；所有写操作记审计（谁、何时、对哪个会话、做了什么）
+
+| 操作 | admin | viewer | CLI |
+|------|:-----:|:------:|:---:|
+| 浏览会话列表 / 回放 | ✅ | ✅ | ❌ |
+| 试运行 playground 对话 | ✅ | ❌ | ❌ |
+| 接管会话 / 人工注入消息 | ✅ | ❌ | ❌ |
+| 强制结束 / 清空 / 重置会话 | ✅ | ❌ | ❌ |
+| 导出会话 transcript | ✅ | 部分（按策略脱敏） | ❌ |
+
+```mermaid
+flowchart TD
+    A["admin 进入聊天"] --> B{"入口"}
+    B -->|试运行| C["选 Agent + 可选参数覆盖"]
+    C --> D["origin=playground 隔离会话"]
+    D --> E["SSE 流式回复<br/>右栏: Skill/KB 召回 / 工具入出参 / 审批 / 路由"]
+    E --> F{"满意?"}
+    F -->|固定保存 + 备注| G["留存 / 导出 JSON·MD"]
+    F -->|丢弃| H["超保留期自动清理"]
+
+    B -->|会话管理| I["会话列表检索<br/>web + IM"]
+    I --> J["打开单会话回放"]
+    J --> K{"干预动作"}
+    K -->|接管| L["暂停自动回复<br/>人工注入消息 + 写审计"]
+    K -->|强制结束/清空/重置| M["二次确认<br/>session 执行 + 写审计"]
+    K -->|导出| N["JSON·MD + 写审计"]
+    L -->|释放| O["恢复 agent 自动回复"]
+```
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    Admin->>platform: playground 发送消息(选定 agent + 覆盖参数)
+    platform->>agent-runtime: run(origin=playground, overrides)
+    agent-runtime->>governance: 工具调用前校验(可选 medium 自动批准)
+    governance-->>agent-runtime: 放行 / 待审批
+    agent-runtime-->>platform: SSE 流 + 逐轮可观察事件
+    platform-->>Admin: 流式回复 + 右栏细节(Skill/KB/工具/路由)
+    Note over platform,session: playground 会话不计入对外用量,可丢弃
+```
+
+### 知识库管理（v1.0）
+
+> 设计哲学借鉴市面成熟的「企业知识库后台」（Dify 的 Knowledge、Coze 的知识库、各 RAG 平台的文档集 + 检索测试台）：**知识库（KB）与文档是后台里可创建、可导入、可检索测试、可按 Agent 绑定的一等公民**，领域专家无需写代码即可把企业文档喂给 agent。本模块只写**管理面的可观察行为**；KB 真正的解析 / 分块 / 向量与关键词索引 / vector·keyword·hybrid 检索 / 租户隔离召回由 [knowledge-base](./knowledge-base.md) 负责，向量索引底座由 [vector-store](./vector-store.md) 负责，召回内容注入 system prompt 的协调与 token 预算由 [long-term-ctx](./long-term-ctx.md) 负责，本节只提供这些能力的 UI 入口并交叉引用。
+>
+> **多租户口径**：KB 按 `tenant_id + kb_id` 隔离（私有化单企业部署 `tenant_id` 默认 `default`）。本页的创建 / 检索 / 绑定均在当前租户下进行，跨租户可见性由部署方策略决定。
+
+- [ ] **知识库列表与检索**：列出当前租户下所有 KB（如 `global` / `sales` / `support`）的 kb_id、描述、文档数 / 分块数、最近导入时间、被哪些 Agent 绑定、占用的向量命名空间概况；支持按 kb_id / 描述搜索与排序
+- [ ] **创建 / 编辑 / 删除知识库**：admin 可在 UI 新建一个 kb_id（租户内唯一，重名拒绝）并填描述；删除走**软删除（归档）**——归档后不再参与召回、从绑定列表隐去，但文档与历史保留，删除前做**绑定保护**：若仍被任一 Agent 绑定则阻止并列出占用方，要求先解绑
+- [ ] **文档导入（多入口）**：支持在 UI 直接粘贴 / 上传 text、Markdown、轻量 HTML 内容导入（对齐 knowledge-base 当前 `ingest_text` / `parse_*` 能力），以及配置 **local directory 数据源**并手动触发同步（对齐 `sync_local_directory`）；导入即触发 deterministic chunking 与索引构建，UI 展示每个文档的解析 / 分块 / 入库结果
+- [ ] **文档列表与生命周期**：单 KB 内列出所有文档的 filename、source / source_url、分块数、创建时间；可查看某文档的分块预览（content + section context）、单独删除某文档（级联清理其 chunks 与向量，对齐 `delete(document_id)`）；删除写审计
+- [ ] **检索测试台（Retrieval Playground）**：admin 输入查询、选 KB（可多选）、选检索模式（vector / keyword / hybrid）、设 top-k，即时看到召回的分块列表及其 score、所属文档、position、section context；用于验证"这个问题能不能召回到对的内容"，并与「聊天试运行」互补（一个测召回、一个测端到端回答）
+- [ ] **召回质量评估入口**：提供手动运行 deterministic retrieval evaluation 的 UI 入口（对齐 knowledge-base 的手动评估能力），展示评估批次的命中 / 排序指标；评估为只读分析，不改索引
+- [ ] **按 Agent 绑定（KB ↔ Agent）**：可视化管理"哪些 KB 对哪个 Agent 可见"——在 Agent 详情页勾选可用 KB，或在 KB 详情页查看 / 调整绑定它的 Agent 列表；绑定关系供 long-term-ctx 在召回注入时按 Agent 限定 kb 范围（实际注入语义以 long-term-ctx 为准），并供删除绑定保护复用
+- [ ] **按 KB 观测**：KB 详情页展示该 KB 的召回命中次数 / 趋势、被哪些会话引用、长期零召回的文档高亮（呼应内容陈旧治理），可下钻到引用该 KB 的会话 trace（数据源为 observability，本页只做按 kb 的聚合视图）
+- [ ] **知识库管理权限与审计**：KB / 文档的创建 / 导入 / 删除 / 归档 / 按 Agent 绑定均**仅 admin 角色可操作**，viewer 仅可浏览列表、文档与检索测试结果；删除 KB / 删除文档 / 触发目录全量重同步等高危动作要求二次确认；所有写操作写审计（谁、何时、对哪个 KB / 文档、做了什么）
+
+| 操作 | admin | viewer | CLI |
+|------|:-----:|:------:|:---:|
+| 浏览 KB / 文档 / 检索测试 | ✅ | ✅ | 部分（list 只读） |
+| 创建 / 编辑 / 归档 KB | ✅ | ❌ | ❌ |
+| 导入 / 删除文档、触发同步 | ✅ | ❌ | ❌ |
+| 运行召回质量评估 | ✅ | ✅（只读看结果） | ✅ |
+| 按 Agent 绑定 KB | ✅ | ❌ | ❌ |
+
+```mermaid
+flowchart TD
+    A["admin 知识库管理"] --> B{"动作"}
+    B -->|新建 KB| C["填 kb_id(租户内唯一) + 描述"]
+    B -->|导入文档| D["粘贴/上传 text·md·html<br/>或配 local directory 同步"]
+    D --> E["knowledge-base: 解析 → chunking → 索引"]
+    E --> F["vector-store 写向量 + FTS 关键词索引"]
+    B -->|检索测试| G["输入 query + 选 KB + 模式(vector/keyword/hybrid)"]
+    G --> H["knowledge-base.search<br/>展示召回分块 + score + section"]
+    B -->|绑定| I["KB ↔ Agent 矩阵<br/>供 long-term-ctx 限定召回范围"]
+
+    Del["删除 KB"] --> J{"仍被 Agent 绑定?"}
+    J -->|是| K["阻止 + 列出占用方"]
+    J -->|否| L["归档 + 写审计(文档保留)"]
+```
+
+### connector 管理（v1.0）
+
+> 设计哲学借鉴市面成熟的「集成中心 / 连接器后台」（Dify 的工具与凭证、Coze 的插件授权、Zapier / n8n 的 connections 管理）：**connector 是后台里可配置、可观测授权状态、可代用户解绑、可健康巡检的一等公民**，让 admin 一屏看清"哪些外部系统接入了、谁授权了、连得通吗"。本模块涵盖**两类接入**——(1) **per-user OAuth connector**（Google Drive / GitHub / Notion 等，凭证按用户隔离），(2) **MCP server**（把企业系统能力注册为工具）。本模块只写**管理面的可观察行为**；OAuth consent / 凭证加密存储 / 自动 refresh / 注入 / 离职联动由 [connectors](./connectors.md) 负责，MCP 服务连接 / 工具自动注册 / 故障降级由 [mcp](./mcp.md) 负责，工具的访问控制归 [governance](./governance.md)，本节只提供这些能力的 UI 入口并交叉引用。
+>
+> **接入硬约束（来自 connectors 域）**：OAuth connector 仅接受 OAuth 2.x，不支持 OAuth 的系统不在接入范围；本页不绕过该约束。
+
+#### OAuth connector
+
+- [ ] **connector 目录与配置**：列出已声明的所有 OAuth connector，每个展示其 id、authorize / token endpoint、scopes、client_id（client_secret 等敏感值脱敏）、已授权用户数、最近授权 / 刷新时间；admin 可新增 / 编辑一个 connector 配置（加新外部系统 = 加一个 connector，不改核心代码），保存即生效
+- [ ] **per-user 授权状态总览**：以 (user, connector) 矩阵展示每个用户对每个 connector 的授权状态——未授权 / 已授权（scope 列表）/ 凭证失效需重新授权（refresh token 过期）/ 凭证错误（refresh 网络失败可重试），对齐 connectors 的 `NeedsConsent` / `CredentialError` 区分；支持按用户或按 connector 两个视角切换
+- [ ] **代用户解绑（revoke）**：admin 可对某 (user, connector) 主动解绑——删除凭证并调用外部系统 revoke endpoint（语义由 connectors 执行）；用于离职 / 疑似泄露处置，解绑写审计；**admin 不能代用户完成首次 consent**（OAuth 同意必须本人浏览器跳转完成），UI 对此给出明确提示
+- [ ] **离职 / 禁用联动可视**：展示 user-center 禁用某用户时由 connectors 自动撤销其全部 connector 凭证的结果（哪些被 revoke、是否成功），便于审计离职处置是否干净
+- [ ] **凭证生命周期观测**：按 connector 展示 access token 自动刷新成功 / 失败率、refresh token 过期导致的重新授权次数，定位"为什么某 connector 老是要重新授权"
+
+#### MCP server
+
+- [ ] **MCP server 列表与连接状态**：列出所有已配置的 MCP server（stdio / HTTP transport）、其连接状态（已连接 / 启动时降级屏蔽 / 探活失败重连中 / 标记永久不可用，对齐 mcp 的降级与健康维护语义）、注册出的工具数与 `server__{tool}` 命名空间清单、最近一次握手 / 探活时间
+- [ ] **工具注册可见**：展开某 MCP server 查看它注册的工具列表（名称 / 描述 / 入参 schema 概要），便于 admin 在配 Agent 的 allowed_tools 时知道有哪些 `server__*` 工具可白名单（白名单与访问控制本身归 governance / agent_policy）
+- [ ] **连接健康与手动重连**：UI 展示各 server 的探活与指数退避重连状态，提供"手动重连 / 重新握手"按钮；连接失败 / 降级不阻断平台启动（语义由 mcp 保证），本页只做状态呈现与手动触发
+- [ ] **MCP 环境诊断入口**：提供触发 `mcp doctor`（经 askit 编排控制台「环境与连接器」系列）的快捷入口，把 MCP 健康检查结论渲染为红 / 黄 / 绿清单，敏感认证值脱敏
+- [ ] **connector 管理权限与审计**：connector 配置增改、代用户解绑、MCP server 手动重连 / 配置变更均**仅 admin 角色可操作**，viewer 仅可浏览目录、授权状态总览与连接状态；代用户解绑、批量离职联动撤销等高危动作要求二次确认；所有写操作写审计（谁、何时、对哪个 connector / user / MCP server、做了什么）；任何视图均不明文展示 client_secret / token / refresh token
+
+| 操作 | admin | viewer | CLI |
+|------|:-----:|:------:|:---:|
+| 浏览 connector / 授权状态 / MCP 状态 | ✅ | ✅ | 部分（list 只读） |
+| 新增 / 编辑 connector 配置 | ✅ | ❌ | ❌ |
+| 代用户解绑（revoke）凭证 | ✅ | ❌ | ❌ |
+| 新增 / 编辑 MCP server 配置 | ✅ | ❌ | ❌ |
+| 手动重连 MCP / 触发 mcp doctor | ✅ | ✅（只读看诊断） | ✅ |
+
+```mermaid
+flowchart LR
+    subgraph oauth["OAuth connector（per-user）"]
+        D1["connector 目录<br/>endpoint / scopes / client_id(脱敏)"]
+        D2["(user, connector) 授权矩阵<br/>未授权 / 已授权 / 失效 / 错误"]
+        D3["代用户 revoke + 离职联动"]
+    end
+    subgraph mcpv["MCP server"]
+        M1["server 列表 + 连接状态<br/>已连 / 降级 / 重连中 / 永久不可用"]
+        M2["注册工具 server__{tool}"]
+        M3["手动重连 / mcp doctor"]
+    end
+    D1 -.授权状态查询.-> CON["connectors 域"]
+    D3 -.revoke endpoint.-> CON
+    M1 -.连接 / 降级.-> MCP["mcp 域"]
+    M2 -.工具注册.-> TR["tool_registry → governance 白名单"]
+```
+
+```mermaid
+flowchart TD
+    A["admin 处置某用户某 connector"] --> B{"动作"}
+    B -->|查看状态| C{"授权态"}
+    C -->|未授权| D["提示: 需用户本人浏览器 consent<br/>admin 不可代授权"]
+    C -->|已授权| E["展示 scopes / 最近刷新"]
+    C -->|失效| F["标记需重新授权(refresh 过期)"]
+    B -->|解绑| G["二次确认 → connectors 删凭证 + 调 revoke endpoint → 写审计"]
+```
+
+### model_provider 管理（v1.0）
+
+> 设计哲学借鉴市面成熟的「模型供应商 / 模型接入后台」（Dify 的 Model Provider 设置、各网关的 provider + 路由配置、OpenRouter 式的多 provider 编排）：**provider 与 task_type 路由是后台里可配置、可测连通、可设 fallback 顺序、可维护单价表的一等公民**，让 admin 无需手改 `config/settings.yaml` 即可新增一个 OpenAI-compatible 端点并接入路由。本模块只写**管理面的可观察行为**；task_type → provider 映射、AsyncOpenAI client 实例化、fallback 链遍历与切换的**运行语义**由 [model-router](./model-router.md) 负责，成本追踪由 [observability](./observability.md) 负责，本节只提供这些能力的 UI 入口并交叉引用。
+>
+> **自托管口径**：provider 的 base_url 可指向任意 OpenAI-compatible 端点（Anthropic / OpenRouter / 本地 Ollama / vLLM 等），符合"基础设施可自托管、数据不出内网"的部署原则；本页对自托管 / 自定义模型同样适用。
+
+- [ ] **provider 列表与配置**：列出所有已配置 provider 的名称、base_url、模型 id、所属 task_type、在各 task_type fallback 链中的优先级、最近连通状态；admin 可新增 / 编辑 / 删除 provider——填 base_url、model、api_key（脱敏存储与展示）、max_tokens、temperature、extra_params（provider 特有参数透传）；保存即生效，无需重启服务（落库语义经 fleetent 配置写入边界）
+- [ ] **task_type → provider 路由编排**：可视化管理每个 task_type（如 `default` / `cheap` / `code`）的 provider 列表，**列表顺序即 fallback 优先级**，admin 可拖拽调整顺序、增删某 task_type 下的 provider；未定义的 task_type 在运行时回落到 `default`（语义以 model-router 为准），UI 对此明示
+- [ ] **连通性测试**：对单个 provider 一键发起轻量探测调用，展示是否可达、握手延迟、返回的模型标识；用于"配完一个新端点先测通再挂到路由上"，测试不计入对外用量
+- [ ] **fallback 链预演**：选定一个 task_type 展示其完整 fallback 顺序，并可模拟"首选不可用"逐级回退的链路（对齐 model-router 的 fallback 遍历语义），帮助 admin 确认降级路径符合预期
+- [ ] **模型单价表维护**：每个模型可维护 input / output 每 1k token 单价（对应「待决问题」已定的"单价表放 model_router 配置"）；单价供「统计面板」成本聚合按 `token × 单价` 计算；**未配置单价的模型在成本视图显示"未配置"而非 0**（自托管 / 自定义模型常无公开价），UI 对未配置项高亮提醒
+- [ ] **健康探针状态可见**：展示 model-router 规划中的健康探针缓存结果——某 provider 连续失败被标记暂时不可用、fallback 时被跳过的状态与恢复时间，便于定位"为什么请求总走到了备选模型"
+- [ ] **按 provider / 模型观测**：展示各 provider / 模型的调用次数、token 用量、成本（单价已配时）、错误率、平均时延、被哪些 task_type / Agent 使用（数据源为 observability，本页只做按 provider·model 的聚合视图，与「统计面板」的 agent 视角互补）
+- [ ] **model_provider 管理权限与审计**：provider 的增删改、task_type 路由编排、单价表维护、连通性测试均**仅 admin 角色可操作**，viewer 仅可浏览配置（密钥脱敏）、路由顺序与观测；删除 provider / 调整生产 task_type 路由 / 改单价等动作写审计；api_key 等敏感值在任何视图均脱敏，绝不明文回显
+
+| 操作 | admin | viewer | CLI |
+|------|:-----:|:------:|:---:|
+| 浏览 provider / 路由 / 观测 | ✅ | ✅（密钥脱敏） | 部分（list 只读） |
+| 新增 / 编辑 / 删除 provider | ✅ | ❌ | ❌ |
+| 编排 task_type → provider 顺序 | ✅ | ❌ | ❌ |
+| 连通性测试 / fallback 预演 | ✅ | ✅（只读看结果） | ❌ |
+| 维护模型单价表 | ✅ | ❌ | ❌ |
+
+```mermaid
+flowchart LR
+    subgraph cfg["model_provider 管理（platform 提供 UI）"]
+        P1["provider 配置<br/>base_url / model / key(脱敏) / 参数"]
+        P2["task_type → provider 路由<br/>顺序 = fallback 优先级"]
+        P3["模型单价表<br/>input/output per 1k(未配显示'未配置')"]
+        P4["连通性测试 + fallback 预演"]
+    end
+    P1 --> MR["model-router<br/>运行时按 task_type 路由 + fallback"]
+    P2 --> MR
+    P3 -.成本聚合 token×单价.-> STAT["统计面板 / observability"]
+    P4 -.探测调用.-> EP["OpenAI-compatible 端点<br/>Anthropic / OpenRouter / 本地"]
+```
+
+```mermaid
+flowchart TD
+    A["admin 新增 provider"] --> B["填 base_url / model / key / 参数"]
+    B --> C["连通性测试"]
+    C -->|可达| D["挂到某 task_type 路由<br/>设 fallback 顺序"]
+    C -->|不可达| E["提示握手失败,不挂路由"]
+    D --> F["可选: 维护该模型单价"]
+    F --> G["保存生效 + 写审计<br/>运行时由 model-router 解释"]
 ```
 
 ### 统计面板（Agent 维度）（v1.0）
@@ -1011,6 +1234,126 @@ flowchart LR
 - Given：v1.0 部署在隔离内网
 - When：资源监控与告警运行
 - Then：指标采集与存储均在内网完成，不依赖任何云托管服务；仅当 admin 显式配置 Webhook / 邮件外发时才产生出网流量
+
+**场景 97：admin 试运行 playground 隔离会话（v1.0）**
+- Given：admin 在聊天 playground 选定 Agent "ops-bot"
+- When：发送一条试运行消息
+- Then：以 SSE 流式返回回复，右栏展开本轮注入的 Skill / 知识库召回、工具入参出参、审批决策、模型路由；该会话标记 origin=playground，不计入 "ops-bot" 的对外用量统计
+
+**场景 98：playground 参数覆盖仅作用当前会话（v1.0）**
+- Given：admin 在 playground 临时把模型覆盖为某 cheap 模型、并临时停用某 Skill
+- When：在该试运行会话内对话
+- Then：本次会话按覆盖后的模型与 Skill 集合运行；Agent 的持久配置不变，其他会话不受影响
+
+**场景 99：playground 审批旁路不影响真实会话（v1.0）**
+- Given：admin 对自己的 playground 会话开启"自动批准 medium 风险"
+- When：该会话触发一个 medium 风险工具，且同时存在一个真实用户会话也触发 medium 风险工具
+- Then：playground 会话自动放行并写审计；真实用户会话仍正常进入 permission_gate 等待审批，旁路不波及
+
+**场景 100：admin 接管活跃会话并人工注入（v1.0）**
+- Given：用户 Alice 的一段 IM 会话正在进行
+- When：admin 点击"接管"，暂停 agent 自动回复并人工注入一条消息
+- Then：该消息经 im-gateway 投递回 Alice 所在平台，agent 在接管期间不自动回复；接管与释放均写审计，释放后恢复自动回复
+
+**场景 101：强制清空会话上下文（v1.0）**
+- Given：某会话上下文异常
+- When：admin 点"清空"并二次确认
+- Then：由 session 执行清空（等价 `/new`），该会话后续从空上下文开始；清空动作写审计
+
+**场景 102：viewer 聊天只读（v1.0）**
+- Given：viewer 角色打开聊天
+- When：尝试发起 playground 对话或接管 / 清空会话
+- Then：相关按钮不可见或返回 403，viewer 仅能浏览会话列表与逐轮回放
+
+**场景 103：admin 创建知识库并导入文档（v1.0）**
+- Given：admin 在知识库管理页，当前租户下无 kb_id "support"
+- When：新建 "support" 并粘贴一段 Markdown 内容导入
+- Then：KB 创建成功，文档完成解析 / 分块 / 索引并出现在文档列表，展示分块数与入库结果，无需重启服务
+
+**场景 104：创建重名知识库被拒（v1.0）**
+- Given：当前租户已存在 kb_id "support"
+- When：admin 再次创建 "support"
+- Then：操作被拒并提示 kb_id 已存在，请求不落库
+
+**场景 105：检索测试台召回验证（v1.0）**
+- Given："support" 已导入若干文档
+- When：admin 在检索测试台输入查询、选该 KB、选 hybrid 模式、设 top-k=5
+- Then：返回不超过 5 条召回分块，每条展示 score、所属文档、position 与 section context，按 score 稳定排序
+
+**场景 106：删除仍被 Agent 绑定的知识库受阻（v1.0）**
+- Given："support" 仍被 Agent "support-bot" 绑定
+- When：admin 点击删除
+- Then：删除被阻止，UI 列出绑定它的 Agent，提示先解绑；请求不落库
+
+**场景 107：删除单个文档级联清理（v1.0）**
+- Given："support" 内有文档 D
+- When：admin 删除 D 并确认
+- Then：D 及其 chunks 与向量被清理，后续检索不再召回 D 的内容；删除写审计
+
+**场景 108：viewer 不可管理知识库（v1.0）**
+- Given：viewer 打开知识库管理页
+- When：尝试创建 KB / 导入文档 / 删除文档
+- Then：相关按钮不可见或返回 403，viewer 仅可浏览 KB、文档与检索测试结果
+
+**场景 109：OAuth connector 授权状态总览（v1.0）**
+- Given：Alice 已授权 google-drive、未授权 github，且其 notion 的 refresh token 已过期
+- When：admin 打开 (user, connector) 授权矩阵筛选 Alice
+- Then：google-drive 显示已授权（含 scopes），github 显示未授权，notion 显示"需重新授权"
+
+**场景 110：admin 不可代用户完成首次 consent（v1.0）**
+- Given：Bob 从未授权 github
+- When：admin 在 connector 管理页尝试为 Bob 授权 github
+- Then：UI 不提供代授权入口，明确提示首次 consent 必须由用户本人浏览器跳转完成
+
+**场景 111：admin 代用户解绑凭证（v1.0）**
+- Given：Alice 已授权 google-drive
+- When：admin 对 (Alice, google-drive) 点"解绑"并二次确认
+- Then：connectors 删除该凭证并调用外部系统 revoke endpoint，Alice 下次用该工具需重新授权；解绑写审计
+
+**场景 112：MCP server 连接状态与降级可见（v1.0）**
+- Given：某 HTTP MCP server 启动握手失败被降级屏蔽
+- When：admin 打开 MCP server 列表
+- Then：该 server 显示"启动时降级屏蔽"、注册工具数为 0，平台其余功能不受影响；点"手动重连"可重新发起握手
+
+**场景 113：MCP 工具命名空间可见（v1.0）**
+- Given：某 MCP server "github" 已连接并注册了工具
+- When：admin 展开该 server
+- Then：列出其工具，命名空间为 `github__{tool}`，供配置 Agent allowed_tools 时参考
+
+**场景 114：connector 敏感值脱敏（v1.0）**
+- Given：某 OAuth connector 配了 client_secret，某用户持有 refresh token
+- When：admin 或 viewer 浏览 connector 配置与授权状态
+- Then：client_secret、access / refresh token 均脱敏展示，任何视图与日志均不明文回显
+
+**场景 115：admin 新增 provider 并测连通（v1.0）**
+- Given：admin 在 model_provider 管理页新增一个指向本地 Ollama 的 OpenAI-compatible provider
+- When：填好 base_url / model 后点"连通性测试"
+- Then：展示是否可达、握手延迟与返回的模型标识；测试不计入对外用量，可达后方可挂到某 task_type 路由
+
+**场景 116：task_type fallback 顺序编排生效（v1.0）**
+- Given：task_type "default" 的 provider 列表为 [A, B]
+- When：admin 将顺序调整为 [B, A] 并保存
+- Then：运行时 "default" 优先用 B，B 不可用时回退到 A（运行语义以 model-router 为准）；调整写审计
+
+**场景 117：未知 task_type 回落提示（v1.0）**
+- Given：UI 中未为 "rare_task" 配置任何 provider
+- When：admin 查看路由编排
+- Then：UI 明示未定义的 task_type 运行时回落到 "default"，不报错
+
+**场景 118：未配单价模型成本显示"未配置"（v1.0）**
+- Given：某自托管模型未维护单价
+- When：在统计面板查看含该模型的成本视图
+- Then：该模型成本显示"未配置"而非 0，model_provider 管理页对该模型单价项高亮提醒
+
+**场景 119：删除 provider 写审计（v1.0）**
+- Given：某 provider 已不再使用
+- When：admin 删除该 provider 并确认
+- Then：provider 从配置与所有 task_type 路由中移除，删除动作写审计
+
+**场景 120：viewer 不可改 provider 配置（v1.0）**
+- Given：viewer 打开 model_provider 管理页
+- When：尝试新增 / 编辑 / 删除 provider 或调整路由顺序
+- Then：相关按钮不可见或返回 403；viewer 仅可浏览配置（密钥脱敏）、路由顺序与观测
 
 ## 待决问题
 

@@ -126,6 +126,23 @@ def list_im_identities(user_id: str) -> list[dict[str, Any]]:
     ]
 
 
+def list_all() -> list[dict[str, Any]]:
+    """All IM identities across all users (for the admin workbench)."""
+    _init_db()
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT id, platform, platform_user_id, user_id, allowed, created_at"
+            " FROM im_users ORDER BY created_at"
+        ).fetchall()
+    return [
+        {
+            "id": r[0], "platform": r[1], "platform_user_id": r[2],
+            "user_id": r[3], "allowed": bool(r[4]), "created_at": r[5],
+        }
+        for r in rows
+    ]
+
+
 def list_pending() -> list[dict[str, Any]]:
     _init_db()
     with _conn() as conn:

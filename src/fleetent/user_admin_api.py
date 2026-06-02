@@ -5,9 +5,11 @@ Authentication uses a login session token in the Authorization header:
 This router does not import the agent loop, so it is testable in isolation.
 """
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from fleetent import (
@@ -22,9 +24,11 @@ router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
+_UI_PATH = Path(__file__).parent / "static" / "admin.html"
 
 
-def _current_user(authorization: str | None) -> user_store.User:
+def _session_user(authorization: str | None, allow_must_reset: bool = False) -> user_store.User:
+    """Resolve the login session to a user. Enforces the must-reset gate by default."""
     if not authorization or not authorization.startswith("Session "):
         raise HTTPException(status_code=401, detail="not authenticated")
     token = authorization.split(" ", 1)[1]
@@ -32,9 +36,17 @@ def _current_user(authorization: str | None) -> user_store.User:
     if user_id is None:
         raise HTTPException(status_code=401, detail="invalid or expired session")
     user = user_store.get_by_id(user_id)
+    if user is None:
+        raise HTTPException(status_code=401, detail="invalid session")
+    if user.must_reset and not allow_must_reset:
+        raise HTTPException(status_code=403, detail="password reset required")
+    return user
+
+
+def _current_user(authorization: str | None) -> user_store.User:
+    user = _session_user(authorization)
     if not auth.has_role(user, {"viewer", *_ADMIN_ROLES}):
         raise HTTPException(status_code=403, detail="forbidden")
-    assert user is not None
     return user
 
 
@@ -43,6 +55,54 @@ def _require_admin(authorization: str | None) -> user_store.User:
     if not auth.has_role(user, _ADMIN_ROLES):
         raise HTTPException(status_code=403, detail="admin required")
     return user
+
+
+class LoginBody(BaseModel):
+    email: str
+    password: str
+
+
+class ChangePasswordBody(BaseModel):
+    new_password: str
+
+
+@router.get("/ui", response_class=HTMLResponse)
+def admin_ui() -> str:
+    """Serve the self-contained admin console (vanilla JS, calls the JSON API)."""
+    return _UI_PATH.read_text(encoding="utf-8")
+
+
+@router.post("/login")
+def login(body: LoginBody) -> dict[str, Any]:
+    user = user_store.get_by_email(body.email)
+    if user is None or not auth.verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    if user.status != "active":
+        raise HTTPException(status_code=403, detail=f"account {user.status}")
+    token = auth.create_session(user.id)
+    return {"token": token, "role": user.role, "must_reset": bool(user.must_reset)}
+
+
+@router.post("/logout")
+def logout(authorization: str | None = Header(None)) -> dict[str, str]:
+    if authorization and authorization.startswith("Session "):
+        auth.logout(authorization.split(" ", 1)[1])
+    return {"status": "logged_out"}
+
+
+@router.get("/me")
+def me(authorization: str | None = Header(None)) -> dict[str, Any]:
+    user = _session_user(authorization, allow_must_reset=True)
+    return {"id": user.id, "email": user.email, "role": user.role, "must_reset": user.must_reset}
+
+
+@router.post("/change-password")
+def change_password(
+    body: ChangePasswordBody, authorization: str | None = Header(None)
+) -> dict[str, str]:
+    user = _session_user(authorization, allow_must_reset=True)
+    user_store.set_password(user.id, auth.hash_password(body.new_password), must_reset=False)
+    return {"status": "password_changed"}
 
 
 class CreateUserBody(BaseModel):
@@ -179,6 +239,12 @@ def revoke_key(key_id: int, authorization: str | None = Header(None)) -> None:
     admin = _require_admin(authorization)
     api_key_store.revoke_key(key_id)
     audit_log.write_audit(admin.id, "revoke_key", target_type="key", target_id=str(key_id))
+
+
+@router.get("/im-users")
+def list_im_users(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
+    _current_user(authorization)
+    return im_user_store.list_all()
 
 
 @router.post("/im-users/{im_user_id}/block")
