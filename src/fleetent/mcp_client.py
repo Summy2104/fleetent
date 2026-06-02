@@ -218,6 +218,20 @@ def unavailable_strict_server_ids() -> set[str]:
     return registered | set(_failed_strict_servers)
 
 
+def unavailable_servers() -> list[tuple[str, str]]:
+    """All currently-unavailable servers as (server_id, degrade_mode) (MCP4).
+
+    Registered-but-unavailable servers report their configured mode; startup-failed
+    strict servers (never registered) report `strict`. Lets agent_loop decide per
+    mode: strict → stop the bound agent, degrade/silent → log (level by mode)."""
+    out = [
+        (sid, s.degrade_mode) for sid, s in _server_registry.items() if not is_server_available(s)
+    ]
+    registered_ids = set(_server_registry)
+    out.extend((sid, "strict") for sid in _failed_strict_servers if sid not in registered_ids)
+    return out
+
+
 def _next_request_id(server: McpServerConfig) -> int:
     """Return the next monotonic JSON-RPC request id for a server (per-server counter)."""
     server._request_id += 1

@@ -2523,3 +2523,40 @@ async def test_run_layered_budget_trips_and_logs_scope(mock_client, monkeypatch,
 
     used = lbud.BudgetStore().get(lbud.BudgetScope.user, "u1", now=datetime.now(UTC))
     assert used.tokens >= 15  # store accumulated across the turn(s)
+
+
+# ── MCP4 review: strict-unavailable stop ─────────────────────────────────────
+
+
+async def test_run_stops_on_bound_strict_unavailable(mock_client, monkeypatch):
+    import fleetent.mcp_client as mc
+    import fleetent.tool_registry as tr
+    from fleetent.mcp_client import HealthState, McpServerConfig
+
+    st = McpServerConfig(id="st", degrade_mode="strict")
+    st._health = HealthState.unavailable
+    monkeypatch.setattr(mc, "_server_registry", {"st": st})
+    monkeypatch.setattr(mc, "_failed_strict_servers", set())
+    monkeypatch.setitem(tr._registry, "st__query", (lambda: "x", {}))
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("should-not-run"))
+
+    reply = await al.run([{"role": "user", "content": "x"}], allowed_tools=["st__*"])
+    assert "不可用" in reply or "strict" in reply  # stopped with a clear error
+    mock_client.chat.completions.create.assert_not_called()  # no LLM call
+
+
+async def test_run_continues_when_strict_not_bound(mock_client, monkeypatch):
+    import fleetent.mcp_client as mc
+    import fleetent.tool_registry as tr
+    from fleetent.mcp_client import HealthState, McpServerConfig
+
+    st = McpServerConfig(id="st", degrade_mode="strict")
+    st._health = HealthState.unavailable
+    monkeypatch.setattr(mc, "_server_registry", {"st": st})
+    monkeypatch.setattr(mc, "_failed_strict_servers", set())
+    monkeypatch.setitem(tr._registry, "st__query", (lambda: "x", {}))
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ran"))
+
+    reply = await al.run([{"role": "user", "content": "x"}], allowed_tools=["other__*"])
+    assert reply == "ran"
+    mock_client.chat.completions.create.assert_called()  # not bound → runs normally

@@ -64,6 +64,9 @@ class StopReason(StrEnum):
     loop_detected = "loop_detected"
     budget_exceeded = "budget_exceeded"
     cancelled = "cancelled"
+    # A strict-mode MCP server the agent is bound to is unavailable (MCP4): the run
+    # stops up front with a clear error rather than proceeding without those tools.
+    mcp_strict_unavailable = "mcp_strict_unavailable"
 
 
 @dataclass
