@@ -33,26 +33,16 @@ class Settings(BaseSettings):
     # backward-compatible. task scope is per-run (AR2), not configured here.
     agent_budget_session_turns: int = -1
     agent_budget_session_tokens: int = -1
-    agent_budget_session_cost_usd: float = -1.0
     agent_budget_user_turns: int = -1
     agent_budget_user_tokens: int = -1
-    agent_budget_user_cost_usd: float = -1.0
     agent_budget_agent_turns: int = -1
     agent_budget_agent_tokens: int = -1
-    agent_budget_agent_cost_usd: float = -1.0
     agent_budget_global_turns: int = -1
     agent_budget_global_tokens: int = -1
-    agent_budget_global_cost_usd: float = -1.0
     # Per-scope accounting windows (AR18). session is fixed lifetime (no field).
     agent_budget_user_window: str = "weekly"
     agent_budget_agent_window: str = "weekly"
     agent_budget_global_window: str = "monthly"
-    # Cost-aware routing (MR2). Disabled by default (no interference). When enabled
-    # AND a degrade_target task_type is set, routing degrades to that cheaper route
-    # once cost headroom drops below the threshold.
-    cost_aware_routing_enabled: bool = False
-    cost_aware_degrade_below: float = 0.2
-    cost_aware_degrade_target: str = ""
     session_ttl_days: int = 30
     session_max_total_mb: int = 1024
     session_max_count: int = 10000
