@@ -194,6 +194,7 @@ def get_logger(component: str) -> Logger:
   permission 等运行性能指标
 - source attribution：`InjectedContextTrace`、`record_injected_context()`、`injected_context` event
 - knowledge-base scope diagnostics：agent 没有显式 KB 绑定且默认 KB 为空时记录 `knowledge_base.agent_kb_scope_empty`
+- admin query CLI：`fleetent-admin observability traces|usage|performance` 提供 run trace、用量和性能排障入口
 - diagnostics export / retention：`export_diagnostics()` 生成本地脱敏诊断包；`plan_diagnostics_retention()` /
   `apply_diagnostics_retention()` 只处理 logs、traces 和 diagnostics export 包，默认 disabled，不清理业务数据或备份
 - observability contract tests：覆盖 agent run 的 `injected_context` / `agent_run_completed` 事件链路、
@@ -229,7 +230,7 @@ def get_logger(component: str) -> Logger:
 
 - [x] **统一 TraceEvent API**：`record_trace_event()` / `query_trace_events()` / `TraceQuery`
   - reflection 和 platform 不直接读表或文件
-  - 支持按 run / user / agent / tenant / event_type / time range 查询
+  - 支持按 run / user / agent / session / tenant / event_type / time range 查询
   - `log` 命名只留给 structured logging，不再用于 agent trace
 
 - [ ] **轻量 span 关联**：记录 `run_id`、`span_id`、`parent_span_id`
@@ -262,6 +263,9 @@ def get_logger(component: str) -> Logger:
   - 先提供 Python public API，不新增 rollup 表
   - 通过 `query_trace_events()` 读取数据，session 过滤在 API 读取后按 trace event 执行
   - 后续 platform / dashboard 可通过该 API 或后续 HTTP endpoint 读取
+- [x] **Admin 查询入口**（`observability-admin-query-api`）：`fleetent-admin observability traces|usage|performance`
+  - trace 查询只输出事件元数据和 payload key summary，不输出 payload 原值
+  - usage / performance 查询复用 observability public API，不直接访问 SQLite 表
 - [ ] **预算查询接口**：供 agent-runtime 查询当前 run / session / 用户 / agent 用量
 
 ## 当前缺口
@@ -269,13 +273,12 @@ def get_logger(component: str) -> Logger:
 - runtime event coverage 已覆盖 run lifecycle、LLM call、tool call、permission、fallback、context compression 和 final reply；但 request_id / span 语义仍需强化，完整 trace tree 尚未完成。
 - logs / traces / diagnostics export 已有手动 retention dry-run / apply；默认不设置保留天数，不自动清理。
 - 备份保留策略仍由部署方管理；observability retention 不删除 SQLite backups。
-- usage / performance summary 目前是 Python public API；还没有 platform UI、admin 查询入口或 HTTP 查询端点。
+- usage / performance summary 已有 Python public API 和 admin CLI；还没有 platform UI 或 HTTP 查询端点。
 - 尚未接入 OpenTelemetry / Prometheus，也没有独立 metrics store 或 rollup 表。
 
 ## 下一批候选 specs
 
 - `observability-request-trace-tree`
-- `observability-admin-query-api`
 - `platform-trace-view`
 
 ## 自动化效果验证缺口

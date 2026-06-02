@@ -436,3 +436,224 @@ def test_diagnostics_cli_output_is_sanitized(monkeypatch, tmp_path):
 
     assert code == 0
     assert "secret-value" not in out
+
+
+def test_observability_traces_cli_queries_public_api_and_hides_payload_values(monkeypatch):
+    from datetime import datetime
+
+    from fleetent import observability
+
+    captured = {}
+
+    def query_trace_events(query):
+        captured["query"] = query
+        return iter(
+            [
+                observability.TraceEvent(
+                    id="evt-1",
+                    ts=datetime.fromisoformat("2026-06-02T01:02:03+00:00"),
+                    run_id="run-1",
+                    event_type="agent_run_completed",
+                    user_id="user-1",
+                    agent_id="agent-1",
+                    session_id="session-1",
+                    payload={
+                        "model_used": "claude",
+                        "token": "secret-value",
+                        "reply": "sensitive reply",
+                    },
+                )
+            ]
+        )
+
+    monkeypatch.setattr(observability, "query_trace_events", query_trace_events)
+
+    out, _, code = run_admin(
+        "observability",
+        "traces",
+        "--run-id",
+        "run-1",
+        "--event-type",
+        "agent_run_completed",
+        "--user-id",
+        "user-1",
+        "--agent-id",
+        "agent-1",
+        "--session-id",
+        "session-1",
+        "--tenant-id",
+        "default",
+        "--from",
+        "2026-06-02T00:00:00+00:00",
+        "--to",
+        "2026-06-02T23:59:59+00:00",
+        "--limit",
+        "20",
+    )
+
+    query = captured["query"]
+    assert code == 0
+    assert query.run_id == "run-1"
+    assert query.event_type == "agent_run_completed"
+    assert query.user_id == "user-1"
+    assert query.agent_id == "agent-1"
+    assert query.session_id == "session-1"
+    assert query.tenant_id == "default"
+    assert query.start_ts == datetime.fromisoformat("2026-06-02T00:00:00+00:00")
+    assert query.end_ts == datetime.fromisoformat("2026-06-02T23:59:59+00:00")
+    assert query.limit == 20
+    assert "agent_run_completed" in out
+    assert "model_used,reply,token" in out
+    assert "secret-value" not in out
+    assert "sensitive reply" not in out
+
+
+def test_observability_usage_cli_queries_public_api_and_outputs_summary(monkeypatch):
+    from datetime import datetime
+
+    from fleetent import observability
+
+    captured = {}
+
+    def get_usage_summary(query):
+        captured["query"] = query
+        return observability.UsageSummary(
+            run_count=2,
+            prompt_tokens=10,
+            completion_tokens=15,
+            total_tokens=25,
+            total_elapsed_s=3.0,
+            avg_elapsed_s=1.5,
+            by_model=[
+                observability.ModelUsage(
+                    model="claude",
+                    run_count=2,
+                    prompt_tokens=10,
+                    completion_tokens=15,
+                    total_tokens=25,
+                    total_elapsed_s=3.0,
+                    avg_elapsed_s=1.5,
+                )
+            ],
+        )
+
+    monkeypatch.setattr(observability, "get_usage_summary", get_usage_summary)
+
+    out, _, code = run_admin(
+        "observability",
+        "usage",
+        "--user-id",
+        "user-1",
+        "--agent-id",
+        "agent-1",
+        "--session-id",
+        "session-1",
+        "--tenant-id",
+        "default",
+        "--from",
+        "2026-06-02T00:00:00+00:00",
+        "--to",
+        "2026-06-02T23:59:59+00:00",
+        "--limit",
+        "50",
+    )
+
+    query = captured["query"]
+    assert code == 0
+    assert query.user_id == "user-1"
+    assert query.agent_id == "agent-1"
+    assert query.session_id == "session-1"
+    assert query.tenant_id == "default"
+    assert query.start_ts == datetime.fromisoformat("2026-06-02T00:00:00+00:00")
+    assert query.end_ts == datetime.fromisoformat("2026-06-02T23:59:59+00:00")
+    assert query.limit == 50
+    assert "run_count=2" in out
+    assert "total_tokens=25" in out
+    assert "model=claude" in out
+
+
+def test_observability_performance_cli_queries_public_api_and_outputs_summary(monkeypatch):
+    from fleetent import observability
+
+    captured = {}
+
+    def get_performance_summary(query):
+        captured["query"] = query
+        return observability.PerformanceSummary(
+            run_count=4,
+            completed_count=3,
+            failed_count=1,
+            failure_rate=0.25,
+            avg_elapsed_s=2.0,
+            p50_elapsed_s=1.5,
+            p95_elapsed_s=4.0,
+            llm_call_count=5,
+            llm_error_count=1,
+            avg_llm_elapsed_s=0.8,
+            p95_llm_elapsed_s=1.4,
+            fallback_count=1,
+            fallback_rate=0.25,
+            tool_call_count=3,
+            tool_error_count=1,
+            avg_tool_elapsed_s=0.6,
+            p95_tool_elapsed_s=1.1,
+            permission_requested_count=2,
+            permission_approved_count=1,
+            permission_rejected_count=0,
+            permission_timeout_count=1,
+            avg_permission_wait_s=5.0,
+            by_model=[
+                observability.ModelPerformance(
+                    model="claude",
+                    call_count=5,
+                    error_count=1,
+                    avg_elapsed_s=0.8,
+                )
+            ],
+            by_tool=[
+                observability.ToolPerformance(
+                    tool_name="search",
+                    call_count=3,
+                    error_count=1,
+                    avg_elapsed_s=0.6,
+                )
+            ],
+            permission=observability.PermissionSummary(
+                requested_count=2,
+                approved_count=1,
+                rejected_count=0,
+                timeout_count=1,
+                avg_wait_s=5.0,
+            ),
+        )
+
+    monkeypatch.setattr(observability, "get_performance_summary", get_performance_summary)
+
+    out, _, code = run_admin(
+        "observability",
+        "performance",
+        "--agent-id",
+        "agent-1",
+        "--limit",
+        "100",
+    )
+
+    query = captured["query"]
+    assert code == 0
+    assert query.agent_id == "agent-1"
+    assert query.limit == 100
+    assert "run_count=4" in out
+    assert "failure_rate=0.250" in out
+    assert "llm_calls=5" in out
+    assert "tool_calls=3" in out
+    assert "fallbacks=1" in out
+    assert "permission_requested=2" in out
+    assert "model=claude" in out
+    assert "tool=search" in out
+
+
+def test_observability_cli_invalid_time_exits_nonzero():
+    _, err, code = run_admin("observability", "usage", "--from", "not-a-time")
+
+    assert code != 0
+    assert "invalid timestamp" in err

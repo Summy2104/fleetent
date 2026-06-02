@@ -287,9 +287,9 @@ def test_performance_summary_maps_supported_filters_to_trace_query(monkeypatch):
     trace_query = captured["query"]
     assert trace_query.user_id == "user-1"
     assert trace_query.agent_id == "agent-1"
+    assert trace_query.session_id == "session-1"
     assert trace_query.tenant_id == "tenant-1"
     assert trace_query.event_type is None
-    assert not hasattr(trace_query, "session_id")
     assert trace_query.start_ts == start_ts
     assert trace_query.end_ts == end_ts
     assert trace_query.limit == 123

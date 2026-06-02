@@ -52,6 +52,7 @@ def get_usage_summary(query: UsageQuery) -> UsageSummary:
         TraceQuery(
             user_id=query.user_id,
             agent_id=query.agent_id,
+            session_id=query.session_id,
             tenant_id=query.tenant_id,
             event_type="agent_run_completed",
             start_ts=query.start_ts,

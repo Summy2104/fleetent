@@ -98,6 +98,7 @@ def get_performance_summary(query: PerformanceQuery) -> PerformanceSummary:
         TraceQuery(
             user_id=query.user_id,
             agent_id=query.agent_id,
+            session_id=query.session_id,
             tenant_id=query.tenant_id,
             start_ts=query.start_ts,
             end_ts=query.end_ts,

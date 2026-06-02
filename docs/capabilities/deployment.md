@@ -66,6 +66,11 @@
   - `retention apply` 只有显式开启 `diagnostics.retention.enabled=true` 后才删除诊断数据
   - retention 不删除 memory、KB 文档 / chunks、connector source state、SQLite 主库或 SQLite backups
 
+- ✅ **Observability admin query CLI**：`fleetent-admin observability ...`
+  - `traces` 查询 agent run trace events，只输出事件元数据和 payload key summary
+  - `usage` 查询 run count、token usage 和 by-model summary
+  - `performance` 查询失败率、延迟、LLM / tool / fallback / permission 指标
+
 当前定位：已有本地开发和基础 Docker 部署地基，但还不是面向客户交付的一键 on-prem 安装包。
 
 ## 升级与恢复
@@ -136,6 +141,20 @@ uv run fleetent-admin diagnostics retention apply
 默认 `diagnostics.retention.enabled=false`，因此 `apply` 会拒绝执行。只有在 `config/settings.yaml` 中显式
 开启并设置对应 days 字段后，才会删除超过天数的 logs、traces 或 diagnostics export 包。SQLite backups
 不在 diagnostics retention 范围内，备份保留策略由部署方单独管理。
+
+## Observability 查询
+
+Pilot 排障优先使用 admin CLI，不直接查询 SQLite：
+
+```bash
+uv run fleetent-admin observability traces --run-id run-1 --limit 20
+uv run fleetent-admin observability traces --event-type agent_run_failed --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59
+uv run fleetent-admin observability usage --user-id user-1 --limit 100
+uv run fleetent-admin observability performance --agent-id agent-1 --limit 100
+```
+
+`traces` 输出只包含 trace 元数据和 payload key summary，不输出 prompt、reply、tool payload 或 credential
+原值。`usage` 和 `performance` 通过 observability public API 聚合数据，不直接访问 `traces` 表。
 
 ## 规划中（v1.0）
 
