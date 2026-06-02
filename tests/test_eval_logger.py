@@ -589,3 +589,36 @@ def test_log_compression_never_records_summary_body(tmp_path, monkeypatch):
     )
     raw = (tmp_path / "traces.jsonl").read_text()
     assert secret not in raw  # only fingerprint + length, never the body
+
+
+def test_log_run_sets_secrets_redacted_flag(tmp_path, monkeypatch):
+    import json as _json
+
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    el.log_run("in", "out", [_assistant_tool_call_msg('{"api_key": "sk-x"}')], 0.1)
+    entry = _json.loads((tmp_path / "traces.jsonl").read_text().strip().splitlines()[-1])
+    assert entry["secrets_redacted"] is True  # audit marker: a sensitive arg was redacted
+
+
+def test_log_run_no_secrets_redacted_field_when_clean(tmp_path, monkeypatch):
+    import json as _json
+
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    el.log_run("in", "out", [_assistant_tool_call_msg('{"query": "hi"}')], 0.1)
+    entry = _json.loads((tmp_path / "traces.jsonl").read_text().strip().splitlines()[-1])
+    assert "secrets_redacted" not in entry  # omitted when nothing was redacted
+
+
+def test_log_sets_secrets_redacted_flag(tmp_path, monkeypatch):
+    import json as _json
+
+    import fleetent.eval_logger as el
+
+    monkeypatch.setattr(el, "TRACE_PATH", tmp_path / "traces.jsonl")
+    el.log("u1", [_assistant_tool_call_msg('{"password": "p"}')], "resp")
+    entry = _json.loads((tmp_path / "traces.jsonl").read_text().strip().splitlines()[-1])
+    assert entry["secrets_redacted"] is True
