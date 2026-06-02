@@ -25,9 +25,12 @@ VALID_TYPES = {"identity", "preferences", "context"}
 CONTEXT_TTL = timedelta(days=30)
 
 
-async def extract_and_update(user_id: str, conversation: list[dict[str, Any]]) -> None:
+async def extract_and_update(
+    user_id: str, conversation: list[dict[str, Any]], namespace: str = "default"
+) -> None:
     """Extract structured memories from conversation and update the memory store."""
-    snapshot = store.memory_snapshot(user_id)
+    snapshot = store.memory_snapshot(user_id, namespace)
+    vector_ns = vector_store.memory_namespace(user_id, namespace)
     client, cfg = get_async_client_and_config("memory_extraction")
     response = await client.chat.completions.create(
         model=cfg.model,
@@ -59,7 +62,7 @@ async def extract_and_update(user_id: str, conversation: list[dict[str, Any]]) -
             if target is None:
                 continue
             store.delete_memory(user_id, target.id)
-            await vector_store.delete(target.id, vector_store.memory_namespace(user_id))
+            await vector_store.delete(target.id, vector_ns)
             continue
         content = action.get("content")
         raw_type = action.get("type")
@@ -79,11 +82,10 @@ async def extract_and_update(user_id: str, conversation: list[dict[str, Any]]) -
                 created_at=target.created_at,
                 updated_at=now,
                 expires_at=expires_at(memory_type, now),
+                namespace=namespace,
             )
             store.update_memory(updated)
-            await vector_store.upsert(
-                updated.id, updated.content, vector_store.memory_namespace(user_id)
-            )
+            await vector_store.upsert(updated.id, updated.content, vector_ns)
             continue
         if action_name != "create":
             continue
@@ -95,9 +97,10 @@ async def extract_and_update(user_id: str, conversation: list[dict[str, Any]]) -
             created_at=now,
             updated_at=now,
             expires_at=expires_at(memory_type, now),
+            namespace=namespace,
         )
         store.insert_memory(item)
-        await vector_store.upsert(item.id, item.content, vector_store.memory_namespace(user_id))
+        await vector_store.upsert(item.id, item.content, vector_ns)
 
 
 def strip_markdown_fence(text: str) -> str:

@@ -47,35 +47,28 @@ An `AgentSnapshot.model_overrides` MAY override fields of `ROUTES[task_type]` fo
 - **THEN** the global `ROUTES[task_type]` is used as-is
 
 ### Requirement: Per-agent memory namespace
-`memory_layer` SHALL store and load memories at `data/users/{user_id}/memories/{namespace}.jsonl`. `AgentSnapshot.memory_namespace` SHALL drive which file is used.
+Per-user semantic memory is stored in the `memory_items` SQLite table. That table SHALL carry a `namespace` column (NOT NULL, default `"default"`), and all memory reads and writes SHALL be scoped by `(user_id, namespace)`. `AgentSnapshot.memory_namespace` SHALL drive which namespace a request uses. The public API `extract_and_update(user_id, conversation, namespace="default")` and `search(user_id, query, namespace="default")` SHALL accept and honor the namespace. The corresponding vector index SHALL be keyed by namespace via `vector_store.memory_namespace(user_id, namespace="default")`, which SHALL return `mem:{user_id}` for the default namespace (preserving existing vectors) and `mem:{user_id}:{namespace}` otherwise.
 
-#### Scenario: Namespaced load/save
-- **WHEN** an agent runs with `memory_namespace="analyst"` for user `u1`
-- **THEN** new memory facts are appended to `data/users/u1/memories/analyst.jsonl`
-- **AND** `load_memories(user_id="u1", namespace="analyst")` returns only those facts
+#### Scenario: Namespaced store/load
+- **WHEN** an agent runs with `memory_namespace="analyst"` for user `u1` and a fact is extracted
+- **THEN** the row is written with `namespace="analyst"`
+- **AND** a `memory_snapshot(user_id="u1", namespace="analyst")` returns only facts in that namespace
 
 #### Scenario: Different namespaces isolate
-- **WHEN** user `u1` interacts first with an agent using `memory_namespace="analyst"`, then with one using `memory_namespace="cs"`
-- **THEN** the `cs` namespace does not include facts written under `analyst`
+- **WHEN** user `u1` has memories under namespace `analyst` and separately under `cs`
+- **THEN** reads scoped to `cs` do not include facts written under `analyst`
 
 #### Scenario: Backwards-compatible default
 - **WHEN** no namespace is specified anywhere
-- **THEN** the default namespace `"default"` is used and the file is `data/users/{user_id}/memories/default.jsonl`
+- **THEN** the default namespace `"default"` is used, and `vector_store.memory_namespace("u1")` returns `mem:u1` unchanged
 
-### Requirement: Migration of pre-namespace memory files
-A one-shot migration script SHALL move any pre-existing `data/users/{user_id}/memories.jsonl` to `data/users/{user_id}/memories/default.jsonl`. The script SHALL be idempotent.
+### Requirement: Memory namespace schema migration
+An Alembic migration SHALL add the `namespace` column to `memory_items` with server default `"default"` so existing rows are backfilled to the default namespace. `downgrade` SHALL drop the column. No filesystem data-move script is required, because memory is stored in SQLite, not per-user JSONL files.
 
-#### Scenario: Legacy file migrated
-- **WHEN** `scripts/migrate_memories_to_namespace.py` is run with `data/users/u1/memories.jsonl` present
-- **THEN** the file is moved to `data/users/u1/memories/default.jsonl` and the old path no longer exists
+#### Scenario: Existing rows backfilled
+- **WHEN** the migration upgrades a database containing pre-existing `memory_items` rows
+- **THEN** every existing row has `namespace = "default"`
 
-#### Scenario: Already migrated is a no-op
-- **WHEN** the migration script is run a second time
-- **THEN** no error occurs and no files are modified
-
-### Requirement: Module path constants remain monkeypatchable
-All new module-level path constants introduced by this change SHALL be defined at module top so tests can override them via `monkeypatch.setattr(module, "CONSTANT", tmp_path)`.
-
-#### Scenario: Memory namespace dir override
-- **WHEN** a test runs `monkeypatch.setattr(memory_layer, "MEMORIES_ROOT", tmp_path)`
-- **THEN** subsequent `load_memories` / `extract_and_save` calls operate under `tmp_path` and do not touch `data/`
+#### Scenario: Downgrade drops column
+- **WHEN** the migration is downgraded
+- **THEN** the `namespace` column no longer exists on `memory_items`

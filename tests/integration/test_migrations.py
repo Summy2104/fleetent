@@ -225,6 +225,44 @@ def test_column_structure(tmp_path):
     conn.close()
 
 
+def test_memory_items_has_namespace_column(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(memory_items)")}
+    conn.close()
+    assert "namespace" in cols
+
+
+def test_memory_namespace_server_default_backfills_existing_rows(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    now = "2026-01-01T00:00:00+00:00"
+    # Insert without specifying namespace: server default must apply.
+    conn.execute(
+        """
+        INSERT INTO memory_items (id, user_id, type, content, created_at, updated_at)
+        VALUES ('m1', 'u1', 'identity', 'fact', ?, ?)
+        """,
+        (now, now),
+    )
+    conn.commit()
+    namespace = conn.execute("SELECT namespace FROM memory_items WHERE id = 'm1'").fetchone()[0]
+    conn.close()
+    assert namespace == "default"
+
+
+def test_downgrade_removes_namespace_column(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    downgrade_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.close()
+    assert "memory_items" not in tables
+
+
 def test_migrated_schedule_store_does_not_create_schema():
     schedule_source = Path("src/fleetent/schedule_store.py").read_text()
     runtime_source = Path("src/fleetent/db.py").read_text()

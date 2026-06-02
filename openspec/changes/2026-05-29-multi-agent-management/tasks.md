@@ -3,7 +3,7 @@
 ## 1. Schema 迁移（Alembic）
 
 - [ ] 1.1 Write failing tests: 迁移 upgrade 后 `agent_versions` 表存在（列 id / agent_id / version / system_prompt / allowed_tools / skills_dir / mcp_server_ids / model_overrides / memory_namespace / created_at）；`agents` 表有 `active_version_id` 列；`channel_agents` 表有 `bound_version_id` 列；downgrade 干净回滚
-- [ ] 1.2 新建 Alembic 迁移 `026_add_agent_versions`（基于最新 revision 025）：建表 + 加列；named params 风格；不复制 store `_init_db` 建表
+- [ ] 1.2 新建 Alembic 迁移 `027_add_agent_versions`（基于 026_add_memory_namespace）：建表 + 加列；named params 风格；不复制 store `_init_db` 建表
 - [ ] 1.3 Write failing tests: 存量 `agents` 行（无 active_version_id）在 backfill 后获得 version=1（mirror system_prompt/allowed_tools，mcp_server_ids=NULL 表示"全部"，memory_namespace='default'），active_version_id 填好；幂等重跑不重复建版本
 - [ ] 1.4 在迁移中实现幂等 `_backfill_v1_versions()`（data migration 段），对存量行补 v1
 
@@ -39,12 +39,18 @@
 - [x] 6.2 Write failing tests: `get_async_client_and_config("default", overrides={"default":{"model":"x"}})` 返回 `model="x"` 其它字段同 ROUTES；overrides 不含该 task_type 时不影响；`get_client_and_config` 同步版本同行为
 - [x] 6.3 修改 `model_router.py`：两函数加 `overrides: dict | None = None`，用 `dataclasses.replace` 合并
 
-## 7. Per-agent memory namespace
+## 7. Per-agent memory namespace（SQLite `memory_items`，非 JSONL）
 
-- [ ] 7.1 Write failing tests: `_mem_path(user_id, namespace="default")` 返回 `data/users/{user_id}/memories/{namespace}.jsonl`；`load_memories(user_id, namespace="x")` 只读对应文件；`extract_and_save(..., namespace="x")` 只写对应文件
-- [ ] 7.2 修改 `memory_layer`：`_mem_path` 加 namespace（默认 default），加 `MEMORIES_ROOT` 模块常量供 monkeypatch
-- [ ] 7.3 Write failing tests: 幂等迁移把 `data/users/u1/memories.jsonl` 移到 `memories/default.jsonl`；目标已存在不覆盖；重跑幂等
-- [ ] 7.4 新建 `scripts/migrate_memories_to_namespace.py`（或 memory_layer 内幂等函数）
+> 现架构 memory 已迁到 SQLite `memory_items` + vector_store namespace；旧 `_mem_path`/JSONL/`load_memories`/`extract_and_save` 不复存在。namespace 改为表上一列，贯穿 store/extraction/search/vector ns。
+
+- [x] 7.1 Write failing test（迁移）：Alembic 升级后 `memory_items` 有 `namespace` 列（NOT NULL default 'default'）；存量行 backfill 为 'default'；downgrade 删列
+- [x] 7.2 新建 Alembic 迁移 `026_add_memory_namespace`（server_default 'default'）
+- [x] 7.3 Write failing tests: `MemoryItem` 加 `namespace`（默认 'default'）；store 读写按 `(user_id, namespace)` 过滤——`insert_memory`/`memory_snapshot(user_id, namespace=)`/`memory_snapshot_by_type`/`memory_items_by_ids` 命名空间隔离
+- [x] 7.4 修改 `intelligence/memory/store.py` + `models.py`：加 namespace 列与参数（默认 'default'，向后兼容）
+- [x] 7.5 Write failing tests: `vector_store.memory_namespace(user_id, namespace="default")` 默认返回 `mem:{user_id}`，非默认返回 `mem:{user_id}:{namespace}`
+- [x] 7.6 修改 `vector_store/namespaces.py`：`memory_namespace` 加 namespace 参数（默认行为不变）
+- [x] 7.7 Write failing tests: `extract_and_update(user_id, conversation, namespace="x")` 写入 namespace='x' 行并 upsert 到对应 vector ns；`search(user_id, query, namespace="x")` 只读该 ns
+- [x] 7.8 修改 `extraction.py` / `search.py`：加 namespace 参数贯穿 snapshot/insert/vector ns（默认 'default'）
 
 ## 8. Session 版本锁定
 
@@ -84,5 +90,5 @@
 - [ ] 13.1 `uv run pytest -x -q` 全绿
 - [ ] 13.2 `uv run ruff format src tests && uv run ruff check src tests`
 - [ ] 13.3 `uv run mypy src` 通过
-- [ ] 13.4 手动验证：create-user + set-role admin → Session 登录 → `POST /admin/agents/apply` 建 agent → CLI `update-agent` 建 v2 → `GET /admin/agents/x/versions` 两版本 → `POST .../1/activate` 回滚 → 期间 SSE `/chat` session 不被打断；跑 memories 迁移在含旧文件的 fixture 上
+- [ ] 13.4 手动验证：create-user + set-role admin → Session 登录 → `POST /admin/agents/apply` 建 agent → CLI `update-agent` 建 v2 → `GET /admin/agents/x/versions` 两版本 → `POST .../1/activate` 回滚 → 期间 SSE `/chat` session 不被打断；验证 `memory_items.namespace` 在两个不同 agent namespace 下隔离
 - [ ] 13.5 自检：实现 task 前都有 failing-test task；spec deltas 与 tasks 对得上；无新 AI 框架 / ORM / 云专有依赖；schema 走 Alembic；认证走 role 体系
