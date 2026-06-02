@@ -161,6 +161,20 @@ def generate_memory_maintenance_proposals(
     findings: list[ReflectionFinding],
 ) -> list[MemoryMaintenanceProposal]:
     """将 memory finding 转成 pending User Memory maintenance proposals，不修改 memory。"""
+
+
+@dataclass
+class ReflectionTrendBucket:
+    start_ts: datetime
+    end_ts: datetime
+    finding_counts: dict[str, int]
+    proposal_status_counts: dict[str, int]
+    applied_count: int
+    rejected_count: int
+
+
+def get_reflection_trend_summary(query: ReflectionTrendQuery) -> ReflectionTrendSummary:
+    """按 UTC day/week 汇总 reflection-owned reports 和 proposal lifecycle；不读取 raw transcript。"""
 ```
 
 ## 现状
@@ -173,11 +187,16 @@ def generate_memory_maintenance_proposals(
 - `memory_maintenance_proposals` SQLite 表和 proposal lifecycle API
 - `kb_reflection_reports` SQLite 表和 `run_kb_reflection_report()` public API
 - `skill_proposals` SQLite 表和 `SkillProposal` lifecycle API；支持 `create_skill`、`update_skill`、`deprecate_skill`
+- `ReflectionTrendQuery` / `ReflectionTrendBucket` / `ReflectionTrendSummary` 和
+  `get_reflection_trend_summary()` on-demand API
 - 只通过 observability public API 读取 traces
 - 只读 `fleetent.intelligence.memory` 信号；proposal apply 只通过 memory public API
 - 支持三类 finding：`memory_candidate`、`memory_conflict`、`skill_opportunity`
 - 支持 `pending` / `approved` / `rejected` / `applied` / `expired` proposal 状态
 - 支持 owner approval、low-risk explicit auto policy、high-risk delete approval gate
+- 支持从 `reflection_reports`、`kb_reflection_reports`、`memory_maintenance_proposals`、
+  `skill_proposals` 读取聚合趋势；只输出 finding type、proposal status/risk/type/action 计数和
+  applied/rejected ratio，不暴露 summary、recommendation、evidence payload 或 transcript
 - 支持 `suggest_shared_memory_or_kb`，用于团队共识 / 项目惯例 / 客户背景等不属于 User Memory 的内容
 - 保存 report 时不保存完整 trace transcript
 - deterministic evaluation fixture / runner 覆盖 expected / forbidden findings 和 persisted transcript redaction
@@ -265,6 +284,7 @@ def generate_memory_maintenance_proposals(
 - skill 只读：生成 skill_opportunity 不创建、更新或删除 skills/ 文件
 - report 持久化：reflection_reports 表存在，payload 不保存完整 transcript
 - knowledge-base 非依赖：KB 未启用或不可用时 run_reflection 正常返回
+- trend summary：按 UTC day/week 聚合 finding type 与 proposal lifecycle 计数，并保留未知 finding type
 
 **需要 mock 的依赖**：
 - `observability.query_trace_events`：注入可控的历史 trace events
@@ -281,7 +301,7 @@ def generate_memory_maintenance_proposals(
 ## 当前缺口
 
 - finding 规则仍然很初级，主要依赖 deterministic payload 字段和简单模式。
-- report 到 User Memory maintenance proposal 的闭环已建立；管理员 / 用户 review UI、scheduler、长期趋势统计还没有完成。
+- report 到 User Memory maintenance proposal 的闭环已建立；管理员 / 用户 review UI、scheduler 还没有完成。
 - 已有 deterministic report evaluation；尚未量化长期 precision / recall 趋势。
 - 不会默认自动维护 memory，不会生成 skill proposal，不接 knowledge-base。
 
@@ -290,13 +310,13 @@ def generate_memory_maintenance_proposals(
 - `reflection-report-consumption`
 - `skill-reflection-proposals`
 - `knowledge-base-reflection-reports`
-- `reflection-trend-summary`
 
 ## 自动化效果验证
 
 - 已有 trace / memory fixture，标注 expected findings 和 forbidden findings。
 - 已有负样本，避免单次普通任务被误判为 proposal。
 - 已有 transcript redaction fixture，验证 persisted report 不泄露完整对话。
+- 已有 trend summary fixture，验证趋势方向、proposal backlog 和 forbidden transcript redaction。
 - 后续接入真实 LLM summary 前，需要扩展 golden dataset 和显式 opt-in smoke。
 
 ## 服务化 / 目录边界判断

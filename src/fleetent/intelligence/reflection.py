@@ -4,7 +4,7 @@ import json
 import os
 import re
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 
@@ -36,6 +36,8 @@ MaintenanceAction = Literal[
 ]
 MaintenanceRisk = Literal["low", "medium", "high"]
 MaintenanceStatus = Literal["pending", "approved", "rejected", "applied", "expired"]
+ReflectionTrendGranularity = Literal["day", "week"]
+ReflectionTrendDomain = Literal["memory", "knowledge_base", "skill"]
 
 _MUTATING_ACTIONS = {"mark_stale", "merge", "rewrite", "compact", "delete"}
 
@@ -131,6 +133,92 @@ class SkillProposal:
     rejection_reason: str | None = None
     actor_user_id: str | None = None
     applied_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class ReflectionTrendQuery:
+    """Query parameters for an on-demand reflection trend summary."""
+
+    scope: str
+    start_ts: datetime
+    end_ts: datetime
+    bucket: ReflectionTrendGranularity = "week"
+    domains: tuple[ReflectionTrendDomain, ...] = ("memory", "knowledge_base", "skill")
+
+
+@dataclass(frozen=True)
+class ReflectionTrendBucket:
+    """Aggregate reflection signals for one UTC trend bucket."""
+
+    start_ts: datetime
+    end_ts: datetime
+    finding_counts: dict[str, int]
+    proposal_status_counts: dict[str, int]
+    applied_count: int
+    rejected_count: int
+    proposal_risk_counts: dict[str, int]
+    proposal_type_counts: dict[str, int]
+    proposal_action_counts: dict[str, int]
+    applied_ratio: float | None = None
+    rejected_ratio: float | None = None
+
+
+@dataclass(frozen=True)
+class ReflectionTrendSummary:
+    """On-demand aggregate trend summary for reflection-owned signals."""
+
+    query: ReflectionTrendQuery
+    buckets: list[ReflectionTrendBucket]
+    top_findings: list[str]
+
+
+def get_reflection_trend_summary(query: ReflectionTrendQuery) -> ReflectionTrendSummary:
+    """Aggregate reflection-owned reports and proposal lifecycle records."""
+    bucket_ranges = _trend_bucket_ranges(query)
+    buckets = [
+        ReflectionTrendBucket(
+            start_ts=start_ts,
+            end_ts=end_ts,
+            finding_counts={},
+            proposal_status_counts={},
+            applied_count=0,
+            rejected_count=0,
+            proposal_risk_counts={},
+            proposal_type_counts={},
+            proposal_action_counts={},
+        )
+        for start_ts, end_ts in bucket_ranges
+    ]
+    total_finding_counts: dict[str, int] = {}
+    if "memory" in query.domains or "skill" in query.domains:
+        _aggregate_report_findings(
+            buckets,
+            bucket_ranges,
+            query,
+            table_name="reflection_reports",
+            total_finding_counts=total_finding_counts,
+        )
+    if "knowledge_base" in query.domains:
+        _aggregate_report_findings(
+            buckets,
+            bucket_ranges,
+            query,
+            table_name="kb_reflection_reports",
+            total_finding_counts=total_finding_counts,
+        )
+    if "memory" in query.domains:
+        _aggregate_memory_proposals(buckets, bucket_ranges, query)
+    if "skill" in query.domains:
+        _aggregate_skill_proposals(buckets, bucket_ranges, query)
+    buckets = [_with_proposal_ratios(bucket) for bucket in buckets]
+    top_findings = [
+        finding_type
+        for finding_type, _count in sorted(
+            total_finding_counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+    ]
+    return ReflectionTrendSummary(query=query, buckets=buckets, top_findings=top_findings)
 
 
 async def run_reflection(scope: str) -> ReflectionReport:
@@ -582,6 +670,190 @@ def _save_kb_reflection_report(report: KnowledgeBaseReflectionReport) -> None:
             "created_at": report.created_at.isoformat(),
         },
     )
+
+
+def _trend_bucket_ranges(query: ReflectionTrendQuery) -> list[tuple[datetime, datetime]]:
+    start_ts = _as_utc(query.start_ts)
+    end_ts = _as_utc(query.end_ts)
+    if end_ts <= start_ts:
+        raise ValueError("trend query end_ts must be after start_ts")
+
+    if query.bucket == "day":
+        step = timedelta(days=1)
+    elif query.bucket == "week":
+        step = timedelta(days=7)
+    else:
+        raise ValueError(f"unsupported trend bucket: {query.bucket}")
+
+    ranges: list[tuple[datetime, datetime]] = []
+    current = start_ts
+    while current < end_ts:
+        next_ts = min(current + step, end_ts)
+        ranges.append((current, next_ts))
+        current = next_ts
+    return ranges
+
+
+def _aggregate_report_findings(
+    buckets: list[ReflectionTrendBucket],
+    bucket_ranges: list[tuple[datetime, datetime]],
+    query: ReflectionTrendQuery,
+    *,
+    table_name: str,
+    total_finding_counts: dict[str, int],
+) -> None:
+    database = _database()
+    if not database.path.exists() or not _has_table(database, table_name):
+        return
+    rows = database.execute(
+        f"""
+        SELECT findings_json, created_at
+        FROM {table_name}
+        WHERE scope = :scope
+          AND created_at >= :start_ts
+          AND created_at < :end_ts
+        ORDER BY created_at ASC
+        """,
+        {
+            "scope": query.scope,
+            "start_ts": _as_utc(query.start_ts).isoformat(),
+            "end_ts": _as_utc(query.end_ts).isoformat(),
+        },
+    ).fetchall()
+    for row in rows:
+        bucket_index = _trend_bucket_index(
+            _parse_datetime(row["created_at"]),
+            bucket_ranges,
+        )
+        if bucket_index is None:
+            continue
+        for finding in _trend_findings_from_json(str(row["findings_json"])):
+            finding_type = finding.get("type")
+            if not isinstance(finding_type, str) or not finding_type:
+                continue
+            _increment_count(buckets[bucket_index].finding_counts, finding_type)
+            _increment_count(total_finding_counts, finding_type)
+
+
+def _aggregate_memory_proposals(
+    buckets: list[ReflectionTrendBucket],
+    bucket_ranges: list[tuple[datetime, datetime]],
+    query: ReflectionTrendQuery,
+) -> None:
+    database = _database()
+    if not database.path.exists() or not _has_table(database, "memory_maintenance_proposals"):
+        return
+    rows = database.execute(
+        """
+        SELECT action, risk, status, created_at
+        FROM memory_maintenance_proposals
+        WHERE user_id = :scope
+          AND created_at >= :start_ts
+          AND created_at < :end_ts
+        ORDER BY created_at ASC
+        """,
+        _trend_time_params(query),
+    ).fetchall()
+    for row in rows:
+        bucket_index = _trend_bucket_index(_parse_datetime(row["created_at"]), bucket_ranges)
+        if bucket_index is None:
+            continue
+        bucket = buckets[bucket_index]
+        status = str(row["status"])
+        _increment_count(bucket.proposal_status_counts, status)
+        _increment_count(bucket.proposal_risk_counts, str(row["risk"]))
+        _increment_count(bucket.proposal_action_counts, str(row["action"]))
+        if status == "applied":
+            _increment_bucket_attr(bucket, "applied_count")
+        if status == "rejected":
+            _increment_bucket_attr(bucket, "rejected_count")
+
+
+def _aggregate_skill_proposals(
+    buckets: list[ReflectionTrendBucket],
+    bucket_ranges: list[tuple[datetime, datetime]],
+    query: ReflectionTrendQuery,
+) -> None:
+    database = _database()
+    if not database.path.exists() or not _has_table(database, "skill_proposals"):
+        return
+    rows = database.execute(
+        """
+        SELECT type, risk_level, status, created_at
+        FROM skill_proposals
+        WHERE created_at >= :start_ts
+          AND created_at < :end_ts
+        ORDER BY created_at ASC
+        """,
+        _trend_time_params(query),
+    ).fetchall()
+    for row in rows:
+        bucket_index = _trend_bucket_index(_parse_datetime(row["created_at"]), bucket_ranges)
+        if bucket_index is None:
+            continue
+        bucket = buckets[bucket_index]
+        status = str(row["status"])
+        _increment_count(bucket.proposal_status_counts, status)
+        _increment_count(bucket.proposal_risk_counts, str(row["risk_level"]))
+        _increment_count(bucket.proposal_type_counts, str(row["type"]))
+        if status == "applied":
+            _increment_bucket_attr(bucket, "applied_count")
+        if status == "rejected":
+            _increment_bucket_attr(bucket, "rejected_count")
+
+
+def _with_proposal_ratios(bucket: ReflectionTrendBucket) -> ReflectionTrendBucket:
+    proposal_count = sum(bucket.proposal_status_counts.values())
+    if proposal_count == 0:
+        return bucket
+    return replace(
+        bucket,
+        applied_ratio=bucket.applied_count / proposal_count,
+        rejected_ratio=bucket.rejected_count / proposal_count,
+    )
+
+
+def _trend_time_params(query: ReflectionTrendQuery) -> dict[str, str]:
+    return {
+        "scope": query.scope,
+        "start_ts": _as_utc(query.start_ts).isoformat(),
+        "end_ts": _as_utc(query.end_ts).isoformat(),
+    }
+
+
+def _trend_findings_from_json(payload: str) -> list[dict[str, object]]:
+    parsed = json.loads(payload)
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, dict)]
+
+
+def _trend_bucket_index(
+    value: datetime,
+    bucket_ranges: list[tuple[datetime, datetime]],
+) -> int | None:
+    normalized = _as_utc(value)
+    for index, (start_ts, end_ts) in enumerate(bucket_ranges):
+        if start_ts <= normalized < end_ts:
+            return index
+    return None
+
+
+def _increment_count(counts: dict[str, int], key: str, amount: int = 1) -> None:
+    counts[key] = counts.get(key, 0) + amount
+
+
+def _increment_bucket_attr(
+    bucket: ReflectionTrendBucket,
+    attr: Literal["applied_count", "rejected_count"],
+) -> None:
+    object.__setattr__(bucket, attr, getattr(bucket, attr) + 1)
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _database() -> SQLiteDatabase:
