@@ -43,7 +43,7 @@ def _memory_ids(db_path) -> list[str]:
 
 
 def test_memory_maintenance_public_api_is_importable():
-    from fleetent.memory_layer import (
+    from fleetent.intelligence.memory import (
         MemoryCompactionCandidate,
         MemoryMaintenancePolicy,
         MemoryMaintenanceSummary,
@@ -65,7 +65,7 @@ def test_memory_maintenance_public_api_is_importable():
     ],
 )
 async def test_memory_maintenance_rejects_negative_limits(policy_kwargs):
-    from fleetent.memory_layer import MemoryMaintenancePolicy, run_memory_maintenance
+    from fleetent.intelligence.memory import MemoryMaintenancePolicy, run_memory_maintenance
 
     with pytest.raises(ValueError, match="must be greater than or equal to 0"):
         await run_memory_maintenance(
@@ -76,7 +76,7 @@ async def test_memory_maintenance_rejects_negative_limits(policy_kwargs):
 
 
 async def test_memory_maintenance_rejects_empty_user_id():
-    from fleetent.memory_layer import MemoryMaintenancePolicy, run_memory_maintenance
+    from fleetent.intelligence.memory import MemoryMaintenancePolicy, run_memory_maintenance
 
     with pytest.raises(ValueError, match="user_id must not be empty"):
         await run_memory_maintenance("", policy=MemoryMaintenancePolicy(), dry_run=True)
@@ -85,7 +85,7 @@ async def test_memory_maintenance_rejects_empty_user_id():
 async def test_dry_run_reports_expired_context_without_deleting_sqlite_or_vectors(
     tmp_path, monkeypatch
 ):
-    from fleetent import memory_layer
+    from fleetent.intelligence import memory as memory_layer
 
     db_path = _patch_database(tmp_path, monkeypatch)
     _insert_memory(
@@ -117,7 +117,7 @@ async def test_dry_run_reports_expired_context_without_deleting_sqlite_or_vector
 async def test_dry_run_reports_over_limit_rows_without_deleting_sqlite_or_vectors(
     tmp_path, monkeypatch
 ):
-    from fleetent import memory_layer
+    from fleetent.intelligence import memory as memory_layer
 
     db_path = _patch_database(tmp_path, monkeypatch)
     _insert_memory(
@@ -156,7 +156,7 @@ async def test_dry_run_reports_over_limit_rows_without_deleting_sqlite_or_vector
 async def test_duplicate_compaction_candidate_groups_same_user_type_normalized_content(
     tmp_path, monkeypatch
 ):
-    from fleetent import memory_layer
+    from fleetent.intelligence import memory as memory_layer
 
     db_path = _patch_database(tmp_path, monkeypatch)
     _insert_memory(
@@ -193,7 +193,7 @@ async def test_duplicate_compaction_candidate_groups_same_user_type_normalized_c
 
 
 async def test_duplicate_compaction_uses_id_as_tie_breaker_for_newest_rows(tmp_path, monkeypatch):
-    from fleetent import memory_layer
+    from fleetent.intelligence import memory as memory_layer
 
     db_path = _patch_database(tmp_path, monkeypatch)
     _insert_memory(

@@ -274,8 +274,8 @@ def _insert_memories(db_path: Path, user_id: str, memories: object) -> None:
 
 
 async def _run_queries(fixture: Mapping[str, Any]) -> list[CombinedQueryResult]:
-    from fleetent import memory_layer
     from fleetent.intelligence import knowledge_base
+    from fleetent.intelligence import memory as memory_layer
 
     results: list[CombinedQueryResult] = []
     for query in fixture["queries"]:

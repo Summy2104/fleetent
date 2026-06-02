@@ -133,7 +133,7 @@ src/fleetent/intelligence/memory/
 
 保留：
 
-- `fleetent.memory_layer` 作为 re-export shim。
+- canonical `fleetent.intelligence.memory` public API。
 - `MemoryItem`、`MemoryType`、`extract_and_update`、`search`、public operations、
   `run_memory_maintenance` 等 public API 不变。
 

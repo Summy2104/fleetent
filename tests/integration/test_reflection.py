@@ -91,7 +91,8 @@ async def test_run_reflection_reads_memory_layer_signals(monkeypatch):
 
 
 async def test_run_reflection_does_not_call_memory_write_api(monkeypatch):
-    from fleetent import memory_layer, observability
+    from fleetent import observability
+    from fleetent.intelligence import memory as memory_layer
     from fleetent.intelligence import reflection
 
     write_memory = AsyncMock()
@@ -139,7 +140,8 @@ async def test_repeated_user_fact_generates_memory_candidate(monkeypatch):
 
 
 async def test_conflicting_memory_signals_generate_memory_conflict(monkeypatch):
-    from fleetent import memory_layer, observability
+    from fleetent import observability
+    from fleetent.intelligence import memory as memory_layer
     from fleetent.intelligence import reflection
 
     now = datetime.now(UTC)
@@ -289,7 +291,8 @@ async def test_run_reflection_persists_report_without_raw_transcript(tmp_path, m
 
 
 async def test_memory_findings_do_not_modify_memory_items_table(tmp_path, monkeypatch):
-    from fleetent import memory_layer, observability
+    from fleetent import observability
+    from fleetent.intelligence import memory as memory_layer
     from fleetent.intelligence import reflection
 
     db_path = tmp_path / "reflection.db"

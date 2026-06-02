@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from fleetent import memory_layer
+from fleetent.intelligence import memory as memory_layer
 from fleetent.intelligence import vector_store
 from fleetent.intelligence.memory import extraction
 from tests.integration.test_migrations import apply_migrations
