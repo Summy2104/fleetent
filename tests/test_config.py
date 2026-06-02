@@ -144,3 +144,25 @@ def test_budget_settings_env_override(monkeypatch):
     assert s.agent_max_tokens == 100000
     assert s.agent_grace_call_token_ratio == 0.1
     assert s.agent_grace_call_min_tokens == 256
+
+
+def test_agent_tool_parallel_max_default():
+    # AR3 D7: single-round tool parallelism cap; 8 balances common parallel
+    # speedup against not exhausting downstream resources.
+    s = Settings(anthropic_api_key="test-key")
+    assert s.agent_tool_parallel_max == 8
+
+
+def test_agent_tool_parallel_max_env_override(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("AGENT_TOOL_PARALLEL_MAX", "3")
+    s = Settings()
+    assert s.agent_tool_parallel_max == 3
+
+
+def test_agent_tool_parallel_max_sequential_when_one_or_less(monkeypatch):
+    # <=1 degrades to fully-sequential execution (the "parallelism off" switch).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("AGENT_TOOL_PARALLEL_MAX", "1")
+    s = Settings()
+    assert s.agent_tool_parallel_max == 1

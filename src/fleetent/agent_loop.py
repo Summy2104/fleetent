@@ -6,6 +6,7 @@ import json
 import time
 import uuid
 from collections.abc import AsyncGenerator, Callable, Coroutine
+from dataclasses import dataclass
 from typing import Any, cast
 
 import structlog
@@ -62,6 +63,8 @@ logger = structlog.get_logger(__name__)
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
 
 _SUB_AGENT_TOOL = "sub_agent"
+
+ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
 
 # The single code-execution tool gated by the SB3 three-state mode. Filtered out
 # of an agent's schema (the one enablement point, D1) when code execution is not
@@ -151,6 +154,13 @@ def _resolve_guardrail_threshold(guardrail_repeat_threshold: int | None) -> int:
     from fleetent.config import Settings
 
     return Settings().guardrail_repeat_threshold
+
+
+def _resolve_parallel_max() -> int:
+    """Resolve the AR3 single-round tool concurrency cap from Settings (D7)."""
+    from fleetent.config import Settings
+
+    return Settings().agent_tool_parallel_max
 
 
 def _load_flap_state(session_id: str | None) -> AntiFlapState | None:
@@ -329,6 +339,274 @@ async def _safe_dispatch(
         return f"tool execution timed out after {timeout}s", True
     except Exception as exc:  # normalized for the loop; not swallowed silently
         return f"tool execution error: {exc}", True
+
+
+# ── AR3: parallel tool dispatch (three-phase: plan → execute → backfill) ────────
+
+
+@dataclass
+class _PlanSlot:
+    """One LLM tool_call's plan outcome, keyed to its original `tool_calls` index.
+
+    The planning phase (serial) produces one slot per `tool_call`. A slot is either
+    a *placeholder* (guardrail short-circuit/stop, approval rejected, or a sub_agent
+    result already computed) carrying its final `(content, failed)`, or *pending*
+    execution carrying the `(name, args)` to dispatch in the parallel phase. The
+    backfill phase (serial, original order) reads each slot and appends the tool
+    message, records the call, and folds `consecutive_failures` — preserving the
+    sequential per-result semantics (D4) regardless of completion order.
+    """
+
+    tc_id: str
+    name: str
+    tc_fp: str
+    # Raw arguments (str or dict) for a pending dispatch; unused for placeholders.
+    args: str | dict[str, Any] = ""
+    # When set, this slot is already resolved (no dispatch). (content, failed).
+    placeholder: tuple[str, bool] | None = None
+    # A custom awaitable factory for non-dispatch pending slots (D6: sub_agent runs
+    # its own SubAgentExecutor inside the batch instead of going through dispatch).
+    runner: Callable[[], Coroutine[Any, Any, tuple[str, bool]]] | None = None
+    # Whether this slot updates consecutive_failures at backfill (D4). Guardrail
+    # and approval-rejected slots leave the counter untouched (status-quo parity).
+    counts_failure: bool = True
+    # Resource key for D5 sandbox serialization; same key → serialized, None → free.
+    resource_key: str | None = None
+
+
+def _resource_key(name: str, session_id: str | None) -> str | None:
+    """D5: the shared-container key for stateful tools, or None for free tools.
+
+    `run_code` reuses the session sandbox container (SB2), so multiple `run_code`
+    calls in one round must serialize on that container to avoid concurrent
+    `docker exec` interfering with shared filesystem/process state. Tools without a
+    shared container return None and run unconstrained in the parallel batch.
+    """
+    if name == _RUN_CODE_TOOL:
+        return f"{_RUN_CODE_TOOL}:{session_id or ''}"
+    return None
+
+
+async def _run_serial_group(
+    slots: list[_PlanSlot],
+    *,
+    is_sub_agent: bool,
+    token: CancelToken,
+    tool_context: ToolContext,
+    user_id: str,
+) -> list[tuple[str, bool]]:
+    """Dispatch a same-resource-key group strictly in order (D5).
+
+    Same-container stateful tools collapse into one sequential coroutine so the
+    batch's gather still sees a single awaitable per group; results stay aligned
+    to the group's slot order.
+    """
+    out: list[tuple[str, bool]] = []
+    for slot in slots:
+        if slot.runner is not None:
+            out.append(await slot.runner())
+        else:
+            out.append(
+                await _safe_dispatch(
+                    slot.name, slot.args, is_sub_agent, token, tool_context, user_id=user_id
+                )
+            )
+    return out
+
+
+async def _execute_pending(
+    pending: list[_PlanSlot],
+    *,
+    is_sub_agent: bool,
+    token: CancelToken,
+    tool_context: ToolContext,
+    user_id: str,
+    parallel_max: int,
+) -> dict[str, tuple[str, bool]]:
+    """Phase two (D1/D5/D7): run pending slots concurrently, return id→(text,failed).
+
+    Slots sharing a D5 resource key are collapsed into one serial coroutine (group),
+    so a group occupies a single gather slot; free slots each occupy their own.
+    Coroutines are split into batches of at most `parallel_max` (D7) run serially;
+    `<=1` degrades to one-at-a-time (status-quo sequential). `asyncio.gather`
+    returns in input order, but results are mapped back by `tc_id` so the backfill
+    phase can index by original `tool_calls` order regardless. `return_exceptions`
+    is NOT set: `_safe_dispatch` already normalizes tool faults, so any escaping
+    exception is a real bug and must propagate (CLAUDE.md: do not swallow).
+    """
+    # Group same-key slots (preserving order); free slots stay singletons.
+    groups: list[list[_PlanSlot]] = []
+    key_to_group: dict[str, list[_PlanSlot]] = {}
+    for slot in pending:
+        if slot.resource_key is None:
+            groups.append([slot])
+            continue
+        group = key_to_group.get(slot.resource_key)
+        if group is None:
+            group = []
+            key_to_group[slot.resource_key] = group
+            groups.append(group)
+        group.append(slot)
+
+    results: dict[str, tuple[str, bool]] = {}
+    batch_size = parallel_max if parallel_max > 1 else 1
+    for start in range(0, len(groups), batch_size):
+        batch = groups[start : start + batch_size]
+        gathered = await asyncio.gather(
+            *(
+                _run_serial_group(
+                    group,
+                    is_sub_agent=is_sub_agent,
+                    token=token,
+                    tool_context=tool_context,
+                    user_id=user_id,
+                )
+                for group in batch
+            )
+        )
+        for group, group_results in zip(batch, gathered, strict=True):
+            for slot, res in zip(group, group_results, strict=True):
+                results[slot.tc_id] = res
+    return results
+
+
+async def _plan_run_slots(
+    tool_calls: list[Any],
+    *,
+    state: LoopState,
+    loop_checker: LoopDetectionChecker,
+    guardrail_threshold: int,
+    is_sub_agent: bool,
+    reply_func: ReplyFunc | None,
+    user_id: str,
+    session_id: str | None,
+) -> list[_PlanSlot]:
+    """Phase one for run() (D2/D3/D6): serial, original order — produce one slot
+    per tool_call. Guardrail and (medium/high) approval are decided here in order;
+    sub_agent becomes a pending slot whose runner self-gathers (D6). The result
+    list preserves original `tool_calls` order so backfill can index 0..N-1.
+    """
+    slots: list[_PlanSlot] = []
+    for tc in tool_calls:
+        if not hasattr(tc, "function"):
+            continue
+        name = tc.function.name
+        tc_fp = arg_fingerprint(tc.function.arguments, loop_checker.ignore_arg_keys)
+        # AR10 guardrail (serial — depends on per-call streak in `state`, D2).
+        action = evaluate_guardrail(state, name, tc_fp, guardrail_threshold)
+        if action is not GuardrailAction.proceed:
+            if action is GuardrailAction.short_circuit:
+                state.loop_warning_injected = True
+            else:
+                state.guardrail_tripped = True
+            slots.append(
+                _PlanSlot(
+                    tc_id=tc.id,
+                    name=name,
+                    tc_fp=tc_fp,
+                    placeholder=(_GUARDRAIL_FEEDBACK_TEXT, False),
+                    counts_failure=False,
+                )
+            )
+            continue
+        if name == _SUB_AGENT_TOOL and not is_sub_agent:
+            args = (
+                json.loads(tc.function.arguments)
+                if isinstance(tc.function.arguments, str)
+                else tc.function.arguments
+            )
+            tasks = (
+                json.loads(args["tasks"])
+                if isinstance(args.get("tasks"), str)
+                else args.get("tasks", [])
+            )
+
+            async def _sub_agent_runner(tasks: Any = tasks) -> tuple[str, bool]:
+                sub_results = await SubAgentExecutor().run(
+                    tasks=tasks,
+                    parent_user_id=user_id,
+                    parent_agent_id=None,
+                    parent_session_id="",
+                )
+                text = "\n".join(
+                    f"[{r.name}] {'ERROR: ' + r.error if r.error else r.result}"
+                    for r in sub_results
+                )
+                return text, False
+
+            slots.append(_PlanSlot(tc_id=tc.id, name=name, tc_fp=tc_fp, runner=_sub_agent_runner))
+            continue
+        risk = get_risk_level(name)
+        if risk in ("medium", "high") and reply_func is not None:
+            tool_args = (
+                json.loads(tc.function.arguments)
+                if isinstance(tc.function.arguments, str)
+                else tc.function.arguments
+            )
+            approval_id = str(uuid.uuid4())[:8]
+            # D3: approvals are requested serially in original order; only approved
+            # tools enter the parallel batch — never concurrent approval prompts.
+            decision = await _default_gate.request_approval(
+                approval_id=approval_id,
+                risk_level=risk,
+                tool_name=name,
+                tool_args=tool_args,
+                requester_user_id=user_id,
+                reply_func=reply_func,
+            )
+            if decision != "approved":
+                state.approval_rejected = True
+                slots.append(
+                    _PlanSlot(
+                        tc_id=tc.id,
+                        name=name,
+                        tc_fp=tc_fp,
+                        placeholder=(
+                            f"tool execution {decision}: user did not approve {name}",
+                            False,
+                        ),
+                        counts_failure=False,
+                    )
+                )
+                continue
+        slots.append(
+            _PlanSlot(
+                tc_id=tc.id,
+                name=name,
+                tc_fp=tc_fp,
+                args=tc.function.arguments,
+                resource_key=_resource_key(name, session_id),
+            )
+        )
+    return slots
+
+
+def _backfill_slots(
+    slots: list[_PlanSlot],
+    results: dict[str, tuple[str, bool]],
+    *,
+    messages: list[Any],
+    state: LoopState,
+    loop_checker: LoopDetectionChecker,
+) -> None:
+    """Phase three (D1/D4): serial, original `tool_calls` order. Append each tool
+    message, record the call into the loop-detection window, and fold
+    `consecutive_failures` per-result — identical to sequential per-tool updates.
+    """
+    for slot in slots:
+        content, failed = slot.placeholder if slot.placeholder is not None else results[slot.tc_id]
+        if slot.counts_failure:
+            state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
+        # T4: cap the messages copy (self-truncating tools manage their own size).
+        tool_content = content if is_self_truncating(slot.name) else truncate_tool_result(content)
+        messages.append({"role": "tool", "tool_call_id": slot.tc_id, "content": tool_content})
+        state.record_tool_call(
+            slot.name,
+            slot.tc_fp,
+            result_digest(content),
+            not failed,
+            window=loop_checker.window,
+        )
 
 
 def _candidates(models: list[str], cache: ProviderHealthCache) -> list[str]:
@@ -580,9 +858,6 @@ def _extract_cache_tokens(usage: Any) -> dict[str, int] | None:
     return found or None
 
 
-ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
-
-
 async def run(
     messages: list[dict[str, Any]],
     user_id: str = "default",
@@ -675,6 +950,7 @@ async def run(
     stop_reason = StopReason.normal
     hygiene_repairs: dict[str, int] = {}
     guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold)
+    parallel_max = _resolve_parallel_max()
     flap_state = _load_flap_state(session_id)
     layered_checker, layered_store, layered_keys = _setup_layered_budget(
         session_id, user_id, agent_name
@@ -736,111 +1012,30 @@ async def run(
         if choice.finish_reason != "tool_calls":
             break
 
-        for tc in msg.tool_calls or []:
-            if not hasattr(tc, "function"):
-                continue
-            # AR10: strict back-to-back repeat guard, checked before dispatch. On the
-            # Nth identical call short-circuit (skip execution, feed correction); a
-            # further repeat trips a loop_detected stop at the next checkpoint.
-            tc_fp = arg_fingerprint(tc.function.arguments, loop_checker.ignore_arg_keys)
-            action = evaluate_guardrail(state, tc.function.name, tc_fp, guardrail_threshold)
-            if action is not GuardrailAction.proceed:
-                if action is GuardrailAction.short_circuit:
-                    state.loop_warning_injected = True
-                else:
-                    state.guardrail_tripped = True
-                messages.append(
-                    {"role": "tool", "tool_call_id": tc.id, "content": _GUARDRAIL_FEEDBACK_TEXT}
-                )
-                state.record_tool_call(
-                    tc.function.name,
-                    tc_fp,
-                    result_digest(_GUARDRAIL_FEEDBACK_TEXT),
-                    True,
-                    window=loop_checker.window,
-                )
-                continue
-            failed = False
-            if tc.function.name == _SUB_AGENT_TOOL and not is_sub_agent:
-                args = (
-                    json.loads(tc.function.arguments)
-                    if isinstance(tc.function.arguments, str)
-                    else tc.function.arguments
-                )
-                tasks = (
-                    json.loads(args["tasks"])
-                    if isinstance(args.get("tasks"), str)
-                    else args.get("tasks", [])
-                )
-                sub_results = await SubAgentExecutor().run(
-                    tasks=tasks,
-                    parent_user_id=user_id,
-                    parent_agent_id=None,
-                    parent_session_id="",
-                )
-                result = "\n".join(
-                    f"[{r.name}] {'ERROR: ' + r.error if r.error else r.result}"
-                    for r in sub_results
-                )
-                state.consecutive_failures = 0
-            else:
-                risk = get_risk_level(tc.function.name)
-                if risk in ("medium", "high") and reply_func is not None:
-                    tool_args = (
-                        json.loads(tc.function.arguments)
-                        if isinstance(tc.function.arguments, str)
-                        else tc.function.arguments
-                    )
-                    approval_id = str(uuid.uuid4())[:8]
-                    decision = await _default_gate.request_approval(
-                        approval_id=approval_id,
-                        risk_level=risk,
-                        tool_name=tc.function.name,
-                        tool_args=tool_args,
-                        requester_user_id=user_id,
-                        reply_func=reply_func,
-                    )
-                    if decision != "approved":
-                        # Rejection terminates at the next checkpoint; the placeholder
-                        # tool_result keeps the message sequence valid for the LLM.
-                        state.approval_rejected = True
-                        result = (
-                            f"tool execution {decision}: user did not approve {tc.function.name}"
-                        )
-                    else:
-                        result, failed = await _safe_dispatch(
-                            tc.function.name,
-                            tc.function.arguments,
-                            is_sub_agent,
-                            token,
-                            tool_context,
-                            user_id=user_id,
-                        )
-                        state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
-                else:
-                    result, failed = await _safe_dispatch(
-                        tc.function.name,
-                        tc.function.arguments,
-                        is_sub_agent,
-                        token,
-                        tool_context,
-                        user_id=user_id,
-                    )
-                    state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
-            # T4: cap the result written to messages (self-truncating tools like
-            # run_code manage their own size — SB6 — so they're exempt). dispatch's
-            # return value is untouched, so loop_detector / SSE still see the full result.
-            tool_content = (
-                result if is_self_truncating(tc.function.name) else truncate_tool_result(result)
-            )
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": tool_content})
-            state.record_tool_call(
-                tc.function.name,
-                arg_fingerprint(tc.function.arguments, loop_checker.ignore_arg_keys),
-                result_digest(result),
-                not failed,
-                window=loop_checker.window,
-            )
+        # AR3 three-phase (D1): plan (serial, original order) → execute (parallel,
+        # gather preserves order, batched by D7 cap, D5 same-container serialized) →
+        # backfill (serial, original order). N=1 collapses to a single slot dispatched
+        # and backfilled identically to the prior sequential path.
+        slots = await _plan_run_slots(
+            list(msg.tool_calls or []),
+            state=state,
+            loop_checker=loop_checker,
+            guardrail_threshold=guardrail_threshold,
+            is_sub_agent=is_sub_agent,
+            reply_func=reply_func,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        pending = [s for s in slots if s.placeholder is None]
+        results = await _execute_pending(
+            pending,
+            is_sub_agent=is_sub_agent,
+            token=token,
+            tool_context=tool_context,
+            user_id=user_id,
+            parallel_max=parallel_max,
+        )
+        _backfill_slots(slots, results, messages=messages, state=state, loop_checker=loop_checker)
 
     reply = (msg.content if msg is not None else None) or ""
     budget_dimension: str | None = None
@@ -1006,6 +1201,7 @@ async def run_stream(
     stop_reason = StopReason.normal
     hygiene_repairs: dict[str, int] = {}
     guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold)
+    parallel_max = _resolve_parallel_max()
     flap_state = _load_flap_state(session_id)
     layered_checker, layered_store, layered_keys = _setup_layered_budget(
         session_id, user_id, agent_name
@@ -1113,13 +1309,16 @@ async def run_stream(
         ]
         messages.append({"role": "assistant", "content": None, "tool_calls": tool_calls_list})
 
-        # Dispatch tool calls
+        # AR3 + D8 three-phase: yield tool_call events in original order while
+        # planning (serial guardrail), execute pending in parallel (gather preserves
+        # order, D7-batched, D5-serialized), then yield tool_result events + backfill
+        # tool messages strictly in original order — never completion order.
+        slots: list[_PlanSlot] = []
         for tc_data in tool_calls_list:
             func: dict[str, str] = tc_data["function"]
             name = func["name"]
             args = func["arguments"]
             yield {"type": "tool_call", "name": name, "args": args}
-            # AR10 guardrail (see run()): short-circuit / stop strict repeats.
             tc_fp = arg_fingerprint(args, loop_checker.ignore_arg_keys)
             action = evaluate_guardrail(state, name, tc_fp, guardrail_threshold)
             if action is not GuardrailAction.proceed:
@@ -1127,36 +1326,50 @@ async def run_stream(
                     state.loop_warning_injected = True
                 else:
                     state.guardrail_tripped = True
-                yield {"type": "tool_result", "name": name, "content": _GUARDRAIL_FEEDBACK_TEXT}
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc_data["id"],
-                        "content": _GUARDRAIL_FEEDBACK_TEXT,
-                    }
-                )
-                state.record_tool_call(
-                    name,
-                    tc_fp,
-                    result_digest(_GUARDRAIL_FEEDBACK_TEXT),
-                    True,
-                    window=loop_checker.window,
+                slots.append(
+                    _PlanSlot(
+                        tc_id=tc_data["id"],
+                        name=name,
+                        tc_fp=tc_fp,
+                        placeholder=(_GUARDRAIL_FEEDBACK_TEXT, False),
+                        counts_failure=False,
+                    )
                 )
                 continue
-            result, failed = await _safe_dispatch(
-                name, args, False, token, tool_context, user_id=user_id
+            slots.append(
+                _PlanSlot(
+                    tc_id=tc_data["id"],
+                    name=name,
+                    tc_fp=tc_fp,
+                    args=args,
+                    resource_key=_resource_key(name, session_id),
+                )
             )
-            state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
-            yield {"type": "tool_result", "name": name, "content": result}
+        pending = [s for s in slots if s.placeholder is None]
+        results = await _execute_pending(
+            pending,
+            is_sub_agent=False,
+            token=token,
+            tool_context=tool_context,
+            user_id=user_id,
+            parallel_max=parallel_max,
+        )
+        for slot in slots:
+            content, failed = (
+                slot.placeholder if slot.placeholder is not None else results[slot.tc_id]
+            )
+            if slot.counts_failure:
+                state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
+            yield {"type": "tool_result", "name": slot.name, "content": content}
             # T4: truncate the messages copy only; the SSE event above kept the full result.
-            tool_content = result if is_self_truncating(name) else truncate_tool_result(result)
-            messages.append(
-                {"role": "tool", "tool_call_id": tc_data["id"], "content": tool_content}
+            tool_content = (
+                content if is_self_truncating(slot.name) else truncate_tool_result(content)
             )
+            messages.append({"role": "tool", "tool_call_id": slot.tc_id, "content": tool_content})
             state.record_tool_call(
-                name,
-                arg_fingerprint(args, loop_checker.ignore_arg_keys),
-                result_digest(result),
+                slot.name,
+                slot.tc_fp,
+                result_digest(content),
                 not failed,
                 window=loop_checker.window,
             )
