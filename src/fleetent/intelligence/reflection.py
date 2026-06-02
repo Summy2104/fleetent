@@ -6,9 +6,10 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 
-from fleetent import memory_layer, observability
+from fleetent import observability
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
+from fleetent.intelligence import memory
 
 FindingType = Literal["memory_candidate", "memory_conflict", "skill_opportunity"]
 MaintenanceAction = Literal[
@@ -459,20 +460,20 @@ def _with_status(
 async def _apply_maintenance_action(proposal: MemoryMaintenanceProposal) -> None:
     if proposal.action == "mark_stale":
         for memory_id in proposal.target_memory_ids:
-            await memory_layer.mark_user_memory_stale(proposal.user_id, memory_id)
+            await memory.mark_user_memory_stale(proposal.user_id, memory_id)
         return
     if proposal.action in {"rewrite", "compact"}:
         content = _require_proposed_content(proposal)
         if not proposal.target_memory_ids:
             raise ValueError("target_memory_ids must not be empty")
-        await memory_layer.update_user_memory_content(
+        await memory.update_user_memory_content(
             proposal.user_id,
             proposal.target_memory_ids[0],
             content,
         )
         return
     if proposal.action == "merge":
-        await memory_layer.merge_user_memories(
+        await memory.merge_user_memories(
             proposal.user_id,
             proposal.target_memory_ids,
             _require_proposed_content(proposal),
@@ -480,7 +481,7 @@ async def _apply_maintenance_action(proposal: MemoryMaintenanceProposal) -> None
         return
     if proposal.action == "delete":
         for memory_id in proposal.target_memory_ids:
-            await memory_layer.delete_user_memory(proposal.user_id, memory_id)
+            await memory.delete_user_memory(proposal.user_id, memory_id)
         return
     if proposal.action == "suggest_shared_memory_or_kb":
         return
@@ -603,11 +604,11 @@ def _parse_optional_datetime(value: object) -> datetime | None:
 
 async def _read_memory_signals(
     scope: str, events: list[observability.TraceEvent]
-) -> list[memory_layer.MemoryItem]:
+) -> list[memory.MemoryItem]:
     query = _events_to_text(events)
     if not query:
         return []
-    return await memory_layer.search(scope, query, limit=10)
+    return await memory.search(scope, query, limit=10)
 
 
 def _events_to_text(events: list[observability.TraceEvent]) -> str:
@@ -634,7 +635,7 @@ def _text_values(value: Any) -> list[str]:
 
 
 def _generate_findings(
-    events: list[observability.TraceEvent], memory_signals: list[memory_layer.MemoryItem]
+    events: list[observability.TraceEvent], memory_signals: list[memory.MemoryItem]
 ) -> list[ReflectionFinding]:
     findings: list[ReflectionFinding] = []
     findings.extend(_memory_candidate_findings(events, memory_signals))
@@ -644,7 +645,7 @@ def _generate_findings(
 
 
 def _memory_candidate_findings(
-    events: list[observability.TraceEvent], memory_signals: list[memory_layer.MemoryItem]
+    events: list[observability.TraceEvent], memory_signals: list[memory.MemoryItem]
 ) -> list[ReflectionFinding]:
     existing = {item.content.strip().casefold() for item in memory_signals}
     by_fact: dict[str, list[str]] = {}
@@ -671,9 +672,9 @@ def _memory_candidate_findings(
 
 
 def _memory_conflict_findings(
-    memory_signals: list[memory_layer.MemoryItem],
+    memory_signals: list[memory.MemoryItem],
 ) -> list[ReflectionFinding]:
-    by_field: dict[str, dict[str, list[memory_layer.MemoryItem]]] = {}
+    by_field: dict[str, dict[str, list[memory.MemoryItem]]] = {}
     for item in memory_signals:
         parsed = _parse_memory_field_value(item.content)
         if parsed is None:

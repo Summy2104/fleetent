@@ -28,7 +28,7 @@
 | 文件 | 行数级别 | 建议归属 | 迁移优先级 |
 | --- | ---: | --- | --- |
 | `admin.py` | 500+ | `platform.admin_cli` | P0 |
-| `memory_layer.py` | 600+ | `intelligence.memory` | P1 |
+| `memory_layer.py` | 已迁移 shim | `intelligence.memory` | 已有 implementation spec |
 | `agent_loop.py` | 1000+ | `runtime.agent_loop` | P1 |
 | `user_store.py` / `api_key_store.py` / `auth.py` / `agent_store.py` | 100-300 | `platform.user_center` / `platform.agent_admin` | P2 |
 | `im_user_store.py` / `im_connector_*` / `im_channel_allowlist.py` | 50-160 | `channels` | P2 |
@@ -114,7 +114,9 @@ audit log、blocklist、agent policy 迁入 `fleetent.governance`，并保留 le
 
 ### 3. `memory-layer-package-migration`
 
-将 `memory_layer.py` 迁入 `intelligence/memory/`，拆分 models、store、extraction、maintenance。
+状态：已有 implementation spec `2026-06-02-memory-layer-package-migration`，负责将
+`memory_layer.py` 迁入 `intelligence/memory/`，拆分 models、store、extraction、search、operations、
+maintenance，并保留 legacy shim。
 
 建议目标：
 
@@ -124,13 +126,16 @@ src/fleetent/intelligence/memory/
   models.py
   store.py
   extraction.py
+  search.py
+  operations.py
   maintenance.py
 ```
 
 保留：
 
 - `fleetent.memory_layer` 作为 re-export shim。
-- `MemoryItem`、`create`、`search`、`run_memory_maintenance` 等 public API 不变。
+- `MemoryItem`、`MemoryType`、`extract_and_update`、`search`、public operations、
+  `run_memory_maintenance` 等 public API 不变。
 
 ### 4. `runtime-package-migration`
 

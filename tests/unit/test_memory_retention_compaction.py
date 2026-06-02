@@ -1,5 +1,6 @@
 import pytest
 
+from fleetent.intelligence.memory import maintenance
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -99,7 +100,7 @@ async def test_dry_run_reports_expired_context_without_deleting_sqlite_or_vector
     async def delete_vector(id: str, namespace: str) -> None:
         vector_deletes.append((id, namespace))
 
-    monkeypatch.setattr(memory_layer.vector_store, "delete", delete_vector)
+    monkeypatch.setattr(maintenance.vector_store, "delete", delete_vector)
 
     summary = await memory_layer.run_memory_maintenance(
         "user-1",
@@ -138,7 +139,7 @@ async def test_dry_run_reports_over_limit_rows_without_deleting_sqlite_or_vector
     async def delete_vector(id: str, namespace: str) -> None:
         vector_deletes.append((id, namespace))
 
-    monkeypatch.setattr(memory_layer.vector_store, "delete", delete_vector)
+    monkeypatch.setattr(maintenance.vector_store, "delete", delete_vector)
 
     summary = await memory_layer.run_memory_maintenance(
         "user-1",

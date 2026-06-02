@@ -69,7 +69,7 @@ async def test_run_reflection_returns_empty_report_when_no_traces(monkeypatch):
 
 
 async def test_run_reflection_reads_memory_layer_signals(monkeypatch):
-    from fleetent import memory_layer, observability
+    from fleetent import observability
     from fleetent.intelligence import reflection
 
     event = observability.TraceEvent(
@@ -81,7 +81,7 @@ async def test_run_reflection_reads_memory_layer_signals(monkeypatch):
     )
     search = AsyncMock(return_value=[])
     monkeypatch.setattr(observability, "query_trace_events", lambda query: [event])
-    monkeypatch.setattr(memory_layer, "search", search)
+    monkeypatch.setattr(reflection.memory, "search", search)
 
     await reflection.run_reflection("user-1")
 
@@ -96,7 +96,7 @@ async def test_run_reflection_does_not_call_memory_write_api(monkeypatch):
 
     write_memory = AsyncMock()
     monkeypatch.setattr(observability, "query_trace_events", lambda query: [])
-    monkeypatch.setattr(memory_layer, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
     monkeypatch.setattr(memory_layer, "extract_and_update", write_memory)
 
     await reflection.run_reflection("user-1")
@@ -105,7 +105,7 @@ async def test_run_reflection_does_not_call_memory_write_api(monkeypatch):
 
 
 async def test_repeated_user_fact_generates_memory_candidate(monkeypatch):
-    from fleetent import memory_layer, observability
+    from fleetent import observability
     from fleetent.intelligence import reflection
 
     events = [
@@ -125,7 +125,7 @@ async def test_repeated_user_fact_generates_memory_candidate(monkeypatch):
         ),
     ]
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(memory_layer, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
 
     report = await reflection.run_reflection("user-1")
 
@@ -176,7 +176,7 @@ async def test_conflicting_memory_signals_generate_memory_conflict(monkeypatch):
             )
         ],
     )
-    monkeypatch.setattr(memory_layer, "search", AsyncMock(return_value=memories))
+    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=memories))
 
     report = await reflection.run_reflection("user-1")
 
@@ -186,7 +186,7 @@ async def test_conflicting_memory_signals_generate_memory_conflict(monkeypatch):
 
 
 async def test_repeated_task_pattern_generates_skill_opportunity(monkeypatch):
-    from fleetent import memory_layer, observability
+    from fleetent import observability
     from fleetent.intelligence import reflection
 
     events = [
@@ -208,7 +208,7 @@ async def test_repeated_task_pattern_generates_skill_opportunity(monkeypatch):
         ),
     ]
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(memory_layer, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
 
     report = await reflection.run_reflection("user-1")
 
@@ -222,7 +222,7 @@ async def test_repeated_task_pattern_generates_skill_opportunity(monkeypatch):
 
 
 async def test_run_reflection_persists_report_without_raw_transcript(tmp_path, monkeypatch):
-    from fleetent import memory_layer, observability
+    from fleetent import observability
     from fleetent.intelligence import reflection
 
     db_path = tmp_path / "reflection.db"
@@ -255,7 +255,7 @@ async def test_run_reflection_persists_report_without_raw_transcript(tmp_path, m
     ]
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(memory_layer, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
 
     report = await reflection.run_reflection("user-1")
 
@@ -353,7 +353,7 @@ async def test_memory_findings_do_not_modify_memory_items_table(tmp_path, monkey
     ]
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(memory_layer, "search", AsyncMock(return_value=memories))
+    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=memories))
 
     await reflection.run_reflection("user-1")
 
@@ -363,7 +363,7 @@ async def test_memory_findings_do_not_modify_memory_items_table(tmp_path, monkey
 
 
 async def test_skill_opportunity_does_not_modify_skills_directory(tmp_path, monkeypatch):
-    from fleetent import memory_layer, observability
+    from fleetent import observability
     from fleetent.intelligence import reflection
 
     skills_dir = tmp_path / "skills"
@@ -393,7 +393,7 @@ async def test_skill_opportunity_does_not_modify_skills_directory(tmp_path, monk
     ]
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(memory_layer, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
 
     await reflection.run_reflection("user-1")
 

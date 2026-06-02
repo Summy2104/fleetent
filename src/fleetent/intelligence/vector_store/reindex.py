@@ -3,7 +3,6 @@ import inspect
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
 
-from fleetent import memory_layer
 from fleetent.intelligence import knowledge_base
 from fleetent.intelligence.vector_store import namespaces, runtime
 
@@ -81,7 +80,9 @@ def _namespace_for_request(request: ReindexRequest) -> str:
 
 def _items_for_request(request: ReindexRequest) -> list[IndexableItem]:
     if request.owner == "memory":
-        return list(memory_layer.iter_indexable_memories(request.user_id or ""))
+        from fleetent.intelligence import memory
+
+        return list(memory.iter_indexable_memories(request.user_id or ""))
     return list(
         knowledge_base.iter_indexable_knowledge_chunks(request.tenant_id, request.kb_id or "")
     )

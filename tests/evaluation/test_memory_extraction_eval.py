@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from fleetent import memory_layer
+from fleetent.intelligence.memory import extraction
 from tests.evaluation.memory_extraction_eval import (
     REQUIRED_FIXTURE_FIELDS,
     FixtureValidationError,
@@ -200,7 +200,7 @@ async def test_real_llm_evaluation_uses_memory_extraction_route_when_enabled(
         route_names.append(route_name)
         return client, cfg
 
-    monkeypatch.setattr(memory_layer, "get_async_client_and_config", get_client)
+    monkeypatch.setattr(extraction, "get_async_client_and_config", get_client)
 
     result = await run_real_llm_fixture(fixture, tmp_path, monkeypatch)
 
