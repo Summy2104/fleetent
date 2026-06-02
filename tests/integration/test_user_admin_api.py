@@ -50,6 +50,15 @@ def test_ui_has_kb_tab(client):
     assert "/kb/search" in r.text
 
 
+def test_ui_persists_session_across_refresh(client):
+    # Session token must survive a page reload: persisted to localStorage on login,
+    # restored on boot. Without this the SPA falls back to the login view every refresh.
+    html = client.get("/admin/ui").text
+    assert "localStorage.setItem" in html  # token saved on login
+    assert "localStorage.getItem" in html  # token restored on boot
+    assert "localStorage.removeItem" in html  # token cleared on logout / 401
+
+
 def test_login_success_and_me(client):
     u = user_store.create_web_user("log@x.com", "Logger", password_hash=auth.hash_password("pw"))
     user_store.set_role(u.id, "admin")
