@@ -4,8 +4,8 @@
     {
       "name": "fleetent",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "uvicorn", "fleetent.server:app", "--port", "8765"],
-      "port": 8765
+      "runtimeArgs": ["run", "uvicorn", "fleetent.server:app", "--port", "8799"],
+      "port": 8799
     }
   ]
 }

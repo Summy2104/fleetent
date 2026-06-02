@@ -33,10 +33,10 @@
   .login { width:440px; max-width:calc(100% - 32px); margin:0 auto; min-height:100vh; display:flex; flex-direction:column; justify-content:center; }
   .login.hidden { display:none; }
   .login .card { padding:36px 32px; border-radius:14px; box-shadow:0 12px 40px rgba(0,0,0,.45); }
-  .login h2 { margin:0 0 20px; text-align:center; font-size:34px; font-weight:700; letter-spacing:-.5px; }
+  .login h2 { margin:0 0 6px; text-align:center; font-size:34px; font-weight:700; letter-spacing:-.5px; }
   .login input { padding:12px 14px; font-size:15px; border-radius:8px; }
   .login button { padding:12px; font-size:15px; border-radius:8px; }
-  .login .muted { text-align:center; }
+  .login .muted { text-align:center; margin:0 0 22px; }
   .err { color:var(--danger); min-height:18px; }
   .hidden { display:none; }
   .actions { display:flex; gap:6px; flex-wrap:wrap; }
@@ -48,10 +48,11 @@
 <div id="login-view" class="login">
   <div class="card">
     <h2>Login</h2>
+    <p class="muted">Sign in to the fleetent Admin console</p>
     <div class="row" style="flex-direction:column; align-items:stretch; gap:14px;">
-      <input id="login-email" placeholder="email" autocomplete="username">
-      <input id="login-password" type="password" placeholder="password" autocomplete="current-password">
-      <button onclick="doLogin()">Sign in</button>
+      <input id="login-email" placeholder="Email address" autocomplete="username">
+      <input id="login-password" type="password" placeholder="Password" autocomplete="current-password">
+      <button onclick="doLogin()">Log in</button>
       <div id="login-err" class="err"></div>
     </div>
   </div>
