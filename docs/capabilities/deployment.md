@@ -76,6 +76,11 @@
   - 覆盖前置条件、配置与 secret 边界、升级 / 备份、启动、健康检查、KB connector、observability、
     diagnostics、回滚、验收和问题上报包
 
+- ✅ **Pilot acceptance guide**：[pilot-acceptance-guide.md](../deployment/pilot-acceptance-guide.md)
+  - 用于安装完成后的测试环境人工验收，覆盖 Go / Conditional Go / No-Go 判定、SQLite restore drill、
+    observability / diagnostics、memory、long-term context、reflection、KB local / SaaS connector、
+    vector reindex、真实外部依赖 skipped / failed / passed 记录和验收报告模板
+
 当前定位：已有本地开发和基础 Docker 部署地基，但还不是面向客户交付的一键 on-prem 安装包。
 
 ## 升级与恢复
