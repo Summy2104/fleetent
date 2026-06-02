@@ -54,8 +54,8 @@
 
 ## 8. Session 版本锁定
 
-- [ ] 8.1 Write failing tests: `load(session_id)` 对老格式（顶层列表）和新格式（`{meta, messages}`）都返回 messages；`load_meta(session_id)` 返回 meta dict 或 `{}`；`save(session_id, messages, meta=None)` 写新格式
-- [ ] 8.2 重构 `session_mgr` 内部存储为 `{meta, messages}`；读时兼容老格式；保留 `load -> list` 签名；新增 `load_meta`
+- [x] 8.1 Write failing tests: `load(session_id)` 对老格式（顶层列表）和新格式（`{meta, messages}`）都返回 messages；`load_meta(session_id)` 返回 meta dict 或 `{}`；`save(session_id, messages, meta=None)` 写新格式
+- [x] 8.2 重构 `session_mgr` 内部存储为 `{meta, messages}`；读时兼容老格式；保留 `load -> list` 签名；新增 `load_meta`
 - [ ] 8.3 Write failing tests: session 首写时 meta 持久化 `agent_id` + `agent_version_id`；之后 activate 不同 version 不影响该 session；新 session 拿当前 active
 
 ## 9. agent_loop 应用 snapshot

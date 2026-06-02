@@ -76,7 +76,7 @@ async def test_full_slack_message_pipeline(isolated_db):
     # Verify session was saved with system + user + assistant
     session_file = isolated_db / "sessions" / "user:U123.json"
     assert session_file.exists()
-    saved = json.loads(session_file.read_text())
+    saved = json.loads(session_file.read_text())["messages"]
     assert len(saved) == 3  # system message + user message + assistant response
     assert saved[-1]["role"] == "assistant"
     assert saved[-1]["content"] == "Hello from agent"
