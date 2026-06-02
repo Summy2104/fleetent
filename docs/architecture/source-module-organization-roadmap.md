@@ -67,7 +67,7 @@ entrypoints / platform / channels
 多类命令，是当前最容易产生并行冲突的文件。
 
 状态：已有 implementation spec `2026-06-02-admin-cli-module-split`，负责把实际 CLI 实现迁入
-`platform.admin_cli`，并保留 `fleetent.admin.main` 薄 shim。
+`platform.admin_cli`；legacy `fleetent.admin` shim 已进入 cleanup 批次。
 
 建议目标：
 
@@ -87,8 +87,8 @@ src/fleetent/platform/admin_cli/
 
 保留：
 
-- `fleetent-admin` console script 行为不变。
-- `fleetent.admin.main` 作为 shim 或入口 re-export。
+- `fleetent-admin` console script 行为不变，并直接指向 `fleetent.platform.admin_cli.main:main`。
+- canonical `fleetent.platform.admin_cli` public entrypoint。
 
 不做：
 

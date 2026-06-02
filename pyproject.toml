@@ -23,7 +23,7 @@ dependencies = [
 
 [project.scripts]
 fleetent = "fleetent.__main__:main"
-fleetent-admin = "fleetent.admin:main"
+fleetent-admin = "fleetent.platform.admin_cli.main:main"
 
 [build-system]
 requires = ["hatchling"]
