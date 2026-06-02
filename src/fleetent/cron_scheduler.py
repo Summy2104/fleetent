@@ -30,10 +30,10 @@ async def _fire(task: dict[str, Any]) -> None:
     """Run a cron task with session binding (S3).
 
     Fixed semantics (task carries `session_id`): reuse that session, accumulating
-    context across fires. Independent semantics (no `session_id`, default): derive
-    a unique `cron/{id}/{uuid}` session each fire so fires never see each other.
-    Runs under a per-session lock so a fixed session is not clobbered by concurrent
-    fires (or other sources sharing the id).
+    the full conversation across fires. Independent semantics (no `session_id`,
+    default): derive a unique `cron/{id}/{uuid}` session each fire so fires never see
+    each other. Runs under a per-session lock so a fixed session is not clobbered by
+    concurrent fires (or other sources sharing the id).
     """
     from fleetent import session_mgr
 
@@ -44,13 +44,10 @@ async def _fire(task: dict[str, Any]) -> None:
             *history,
             {"role": "user", "content": task["message"]},
         ]
-        # Pass a copy: agent_loop.run mutates its list in place (appends assistant
-        # turns), so we append the reply to our own list once and avoid duplicating
-        # the final assistant message.
-        reply = await _agent_run(
-            list(messages), user_id=task["user_id"], agent_name=task.get("agent_name")
-        )
-        messages.append({"role": "assistant", "content": reply})
+        # agent_loop.run mutates `messages` in place into the full conversation
+        # (user + tool-call turns + final assistant). Persist that whole list so the
+        # next fire of a fixed session sees the complete context, not just user+reply.
+        await _agent_run(messages, user_id=task["user_id"], agent_name=task.get("agent_name"))
         await session_mgr.save(
             sid, messages, user_id=task["user_id"], agent_name=task.get("agent_name")
         )
