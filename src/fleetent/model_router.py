@@ -7,10 +7,14 @@ maintains no state, and knows nothing about agents, tools, or memory.
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from openai import AsyncOpenAI, OpenAI
+
+if TYPE_CHECKING:
+    from fleetent.cost_aware_routing import CostAwareRoutingPolicy
+    from fleetent.layered_budget import BudgetHeadroom
 
 # Reserved create() kwargs that params MUST NOT carry: they are passed as
 # explicit keyword args, so a same-named key in params would raise a duplicate
@@ -216,16 +220,40 @@ def _load_routes() -> dict[str, RouteConfig]:
     return base
 
 
+def _resolve_base(
+    routes: dict[str, RouteConfig],
+    task_type: str,
+    headroom: "BudgetHeadroom | None",
+    policy: "CostAwareRoutingPolicy | None",
+) -> RouteConfig:
+    """Base route for task_type, cost-aware degraded when headroom is supplied (MR2).
+
+    headroom None → the plain `routes.get(task_type, default)` lookup, byte-identical
+    to pre-MR2 behaviour (and no cost_aware_routing import). Override merges after.
+    """
+    if headroom is None:
+        return routes.get(task_type, routes["default"])
+    from typing import cast
+
+    from fleetent.cost_aware_routing import resolve_base_route
+
+    return cast(RouteConfig, resolve_base_route(routes, task_type, headroom, policy))
+
+
 def get_client_and_config(
-    task_type: str = "default", override: RouteOverride | None = None
+    task_type: str = "default",
+    override: RouteOverride | None = None,
+    *,
+    headroom: "BudgetHeadroom | None" = None,
+    policy: "CostAwareRoutingPolicy | None" = None,
 ) -> tuple[OpenAI, RouteConfig]:
     """Return (OpenAI client, route config) for the given task type.
 
     An optional `override` is field-merged onto the task_type route result
-    before the client is built (see `_apply_override`).
+    (after any cost-aware degrade) before the client is built.
     """
     routes = _load_routes()
-    cfg = _apply_override(routes.get(task_type, routes["default"]), override)
+    cfg = _apply_override(_resolve_base(routes, task_type, headroom, policy), override)
     api_key = os.environ.get(cfg.api_key_env)
     if not api_key:
         raise RuntimeError(f"Missing env var {cfg.api_key_env} for route '{task_type}'")
@@ -234,14 +262,18 @@ def get_client_and_config(
 
 
 def get_async_client_and_config(
-    task_type: str = "default", override: RouteOverride | None = None
+    task_type: str = "default",
+    override: RouteOverride | None = None,
+    *,
+    headroom: "BudgetHeadroom | None" = None,
+    policy: "CostAwareRoutingPolicy | None" = None,
 ) -> tuple[AsyncOpenAI, RouteConfig]:
     """Return an async OpenAI client and route config for the given task type.
 
     An optional `override` is field-merged onto the task_type route result
-    before the client is built (see `_apply_override`).
+    (after any cost-aware degrade) before the client is built.
     """
     routes = _load_routes()
-    cfg = _apply_override(routes.get(task_type, routes["default"]), override)
+    cfg = _apply_override(_resolve_base(routes, task_type, headroom, policy), override)
     api_key = os.environ.get(cfg.api_key_env, "")
     return AsyncOpenAI(base_url=cfg.base_url, api_key=api_key), cfg

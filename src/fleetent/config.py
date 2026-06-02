@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     agent_budget_user_window: str = "weekly"
     agent_budget_agent_window: str = "weekly"
     agent_budget_global_window: str = "monthly"
+    # Cost-aware routing (MR2). Disabled by default (no interference). When enabled
+    # AND a degrade_target task_type is set, routing degrades to that cheaper route
+    # once cost headroom drops below the threshold.
+    cost_aware_routing_enabled: bool = False
+    cost_aware_degrade_below: float = 0.2
+    cost_aware_degrade_target: str = ""
     session_ttl_days: int = 30
     session_max_total_mb: int = 1024
     session_max_count: int = 10000
