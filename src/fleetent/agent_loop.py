@@ -196,6 +196,43 @@ def _gated_compress(
     )
 
 
+def _setup_layered_budget(
+    session_id: str | None, user_id: str | None, agent_name: str | None
+) -> tuple[Any, Any, dict[Any, str | None]]:
+    """Build the AR18 layered-budget checker/store, or (None, None, {}) when no cap
+    is configured (dormant by default → zero behaviour/DB change for plain runs)."""
+    from fleetent import layered_budget as lbud
+
+    config = lbud.LayeredBudgetConfig.from_settings()
+    if not config.has_any_cap():
+        return None, None, {}
+    store = lbud.BudgetStore()
+    keys: dict[Any, str | None] = {
+        lbud.BudgetScope.session: session_id,
+        lbud.BudgetScope.user: user_id,
+        lbud.BudgetScope.agent: agent_name,
+        lbud.BudgetScope.global_: lbud.GLOBAL_KEY,
+    }
+    checker = lbud.LayeredBudgetChecker(config, store, keys, clock=lbud.utc_now)
+    return checker, store, keys
+
+
+def _layered_budget_add(
+    store: Any, keys: dict[Any, str | None], prompt: int, completion: int, model: str | None
+) -> None:
+    """Fold one main-loop turn into each cross-run scope with a present key (AR18)."""
+    if store is None:
+        return
+    from fleetent import layered_budget as lbud
+
+    now = lbud.utc_now()
+    for scope in lbud.CROSS_RUN_SCOPES:
+        key = keys.get(scope)
+        if key is None:
+            continue
+        store.add(scope, key, prompt or 0, completion or 0, model, now=now)
+
+
 def _build_controller(
     max_turns: int | None,
     max_consecutive_failures: int | None,
@@ -639,6 +676,11 @@ async def run(
     hygiene_repairs: dict[str, int] = {}
     guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold)
     flap_state = _load_flap_state(session_id)
+    layered_checker, layered_store, layered_keys = _setup_layered_budget(
+        session_id, user_id, agent_name
+    )
+    if layered_checker is not None:
+        controller.register(layered_checker)
 
     while True:
         forced = controller.should_stop(state)
@@ -679,6 +721,13 @@ async def run(
         # single end-of-loop response.usage. Compression's internal LLM never reaches
         # here, so it is exempt by construction (D4).
         _budget_add(budget_usage, response.usage)
+        _layered_budget_add(
+            layered_store,
+            layered_keys,
+            getattr(response.usage, "prompt_tokens", 0),
+            getattr(response.usage, "completion_tokens", 0),
+            model_used,
+        )
         models_to_try = [model_used]  # stick with the winning model for subsequent turns
         choice = response.choices[0]
         msg = choice.message
@@ -795,11 +844,17 @@ async def run(
 
     reply = (msg.content if msg is not None else None) or ""
     budget_dimension: str | None = None
+    budget_scope: str | None = None
     if stop_reason == StopReason.budget_exceeded:
         # Grace Call (D3): a final summarizing call instead of a hard cut. Its own
         # usage is NOT folded into budget_usage (D4/D6: it spends the reserved
         # dimension). Failure degrades to the partial reply already accumulated.
         budget_dimension = budget_checker.triggered_dimension
+        # AR18: a layered (cross-run) scope may be the trigger instead of the
+        # per-run AR2 budget; record the scope and its dimension for the trace.
+        if layered_checker is not None and layered_checker.triggered_scope is not None:
+            budget_scope = layered_checker.triggered_scope
+            budget_dimension = budget_dimension or layered_checker.triggered_dimension
         reply = await _grace_call(
             client, cfg, messages, schemas, [model_used], budget_config.max_tokens, reply
         )
@@ -820,6 +875,7 @@ async def run(
         cache_tokens=_extract_cache_tokens(usage),
         disabled_skills_trace=disabled_skills_trace,
         budget_dimension=budget_dimension,
+        budget_scope=budget_scope,
     )
     extract_and_save(user_input, messages, user_id=user_id)
     return reply
@@ -951,6 +1007,11 @@ async def run_stream(
     hygiene_repairs: dict[str, int] = {}
     guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold)
     flap_state = _load_flap_state(session_id)
+    layered_checker, layered_store, layered_keys = _setup_layered_budget(
+        session_id, user_id, agent_name
+    )
+    if layered_checker is not None:
+        controller.register(layered_checker)
 
     while True:
         forced = controller.should_stop(state)
@@ -1033,6 +1094,9 @@ async def run_stream(
         # tokens), so the BudgetChecker judges between turns rather than only
         # at the end of the whole run. Compression's LLM never reaches here (D4).
         budget_usage.add(turn_prompt_tokens, turn_completion_tokens)
+        _layered_budget_add(
+            layered_store, layered_keys, turn_prompt_tokens, turn_completion_tokens, model_used
+        )
 
         if finish_reason != "tool_calls":
             reply = "".join(reply_parts)
@@ -1098,6 +1162,7 @@ async def run_stream(
             )
 
     budget_dimension: str | None = None
+    budget_scope: str | None = None
     if stop_reason == StopReason.budget_exceeded:
         # D7: streaming Grace Call — re-issue one streaming LLM call under the
         # reserved token cap and stream its summary out as text_delta before done.
@@ -1105,6 +1170,9 @@ async def run_stream(
         # then done; (b) failure after partial deltas → keep what streamed (cannot
         # be unsent), record degradation, then done. Both always reach `done`.
         budget_dimension = budget_checker.triggered_dimension
+        if layered_checker is not None and layered_checker.triggered_scope is not None:
+            budget_scope = layered_checker.triggered_scope
+            budget_dimension = budget_dimension or layered_checker.triggered_dimension
         partial_reply = reply
         grace_messages = [*messages, {"role": "user", "content": _GRACE_CALL_TEXT}]
         reserved = grace_max_tokens(budget_config.max_tokens)
@@ -1168,5 +1236,6 @@ async def run_stream(
         cache_tokens=cache_tokens,
         disabled_skills_trace=disabled_trace,
         budget_dimension=budget_dimension,
+        budget_scope=budget_scope,
     )
     extract_and_save(user_input, messages, user_id=user_id)
