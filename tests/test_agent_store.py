@@ -151,9 +151,39 @@ def test_agent_plugins_null_row_falls_back_to_empty(db):
     # A legacy row whose plugins value is NULL (defensive `or "[]"` guard in
     # _row_to_agent). The column is NOT NULL with a '[]' backfill, so a real NULL
     # cannot be written; exercise the row-mapping fallback directly.
-    row = (1, "legacy", "prompt", "[]", None, None)
+    row = (1, "legacy", "prompt", "[]", None, None, None)
     agent = agent_store._row_to_agent(row)
     assert agent.plugins == []
+
+
+def test_agent_allowed_skills_default_empty(db):
+    agent = agent_store.create_agent("s1", "p", ["shell"])
+    assert agent.allowed_skills == []
+    found = agent_store.get_by_name("s1")
+    assert found is not None
+    assert found.allowed_skills == []
+
+
+def test_agent_allowed_skills_roundtrip(db):
+    agent_store.create_agent("s2", "p", ["shell"], allowed_skills=["weather", "billing"])
+    found = agent_store.get_by_name("s2")
+    assert found is not None
+    assert found.allowed_skills == ["weather", "billing"]
+
+
+def test_agent_allowed_skills_null_row_falls_back_to_empty(db):
+    # Legacy row predating the allowed_skills column (NULL); the `or "[]"` guard in
+    # _row_to_agent maps it to []. Empty means no narrowing — backward compatible.
+    row = (1, "legacy", "prompt", "[]", None, None, None)
+    agent = agent_store._row_to_agent(row)
+    assert agent.allowed_skills == []
+
+
+def test_init_db_create_table_includes_allowed_skills_column(db):
+    import sqlite3
+
+    cols = {row[1] for row in sqlite3.connect(db).execute("PRAGMA table_info(agents)").fetchall()}
+    assert "allowed_skills" in cols
 
 
 def test_init_db_create_table_includes_plugins_column(db):

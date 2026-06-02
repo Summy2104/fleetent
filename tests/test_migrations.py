@@ -78,6 +78,7 @@ def test_column_structure(tmp_path):
         "name",
         "system_prompt",
         "allowed_tools",
+        "allowed_skills",
         "created_at",
     }
 

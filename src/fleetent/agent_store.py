@@ -26,6 +26,14 @@ class Agent:
     # `allowed_tools` so the agent_loop schema filter exposes only authorised
     # plugin tools. Stored as a JSON TEXT column, mirroring `allowed_tools`.
     plugins: list[str] = field(default_factory=list)
+    # agent-skill-scoping: per-agent skill catalog narrowing. Names of skills this
+    # agent may SEE in the <available_skills> catalog. EMPTY = no narrowing (every
+    # enabled skill stays visible) — the OPPOSITE default from `plugins`, because
+    # skills are visible to all agents by default whereas plugin tools are not.
+    # Non-empty keeps only listed skills (AND-ed with the disable predicate). This
+    # is catalog visibility, NOT an authorization boundary. Stored as a JSON TEXT
+    # column, mirroring `allowed_tools`.
+    allowed_skills: list[str] = field(default_factory=list)
 
 
 def create_agent(
@@ -34,22 +42,26 @@ def create_agent(
     allowed_tools: list[str],
     features: dict[str, Any] | None = None,
     plugins: list[str] | None = None,
+    allowed_skills: list[str] | None = None,
 ) -> Agent:
     _init_db()
     now = datetime.datetime.now(datetime.UTC).isoformat()
     features = features or {}
     plugins = plugins or []
+    allowed_skills = allowed_skills or []
     with _conn() as conn:
         cursor = conn.execute(
             "INSERT INTO agents"
-            " (name, system_prompt, allowed_tools, features, plugins, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
+            " (name, system_prompt, allowed_tools, features, plugins, allowed_skills,"
+            " created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 system_prompt,
                 json.dumps(allowed_tools),
                 json.dumps(features),
                 json.dumps(plugins),
+                json.dumps(allowed_skills),
                 now,
             ),
         )
@@ -62,10 +74,11 @@ def create_agent(
         allowed_tools=allowed_tools,
         features=features,
         plugins=plugins,
+        allowed_skills=allowed_skills,
     )
 
 
-_SELECT_COLS = "id, name, system_prompt, allowed_tools, features, plugins"
+_SELECT_COLS = "id, name, system_prompt, allowed_tools, features, plugins, allowed_skills"
 
 
 def _join_cols(alias: str) -> str:
@@ -83,6 +96,9 @@ def _row_to_agent(row: tuple[Any, ...]) -> Agent:
         features=json.loads(row[4] or "{}"),
         # `or "[]"` guards a legacy row predating the plugins column (NULL).
         plugins=json.loads(row[5] or "[]"),
+        # `or "[]"` guards a legacy row predating the allowed_skills column (NULL);
+        # [] means no narrowing (backward compatible).
+        allowed_skills=json.loads(row[6] or "[]"),
     )
 
 
@@ -171,11 +187,12 @@ def get_default_agent() -> Agent | None:
 def _init_db() -> None:
     with _conn() as conn:
         conn.execute(
-            # `features` and `plugins` are created inline here so fresh / test
-            # (tmp_path) DBs always carry them. Per the zy override, existing
-            # production DBs are upgraded by alembic migrations (002 features,
-            # 003 plugins via op.add_column), NOT a runtime PRAGMA+ALTER in
-            # _init_db. See docs/capabilities/wave2-apply-decisions.md.
+            # `features`, `plugins` and `allowed_skills` are created inline here so
+            # fresh / test (tmp_path) DBs always carry them. Per the zy override,
+            # existing production DBs are upgraded by alembic migrations (002
+            # features, 003 plugins, 004 allowed_skills via op.add_column), NOT a
+            # runtime PRAGMA+ALTER in _init_db. See
+            # docs/capabilities/wave2-apply-decisions.md.
             """CREATE TABLE IF NOT EXISTS agents (
                 id             INTEGER PRIMARY KEY,
                 name           TEXT UNIQUE NOT NULL,
@@ -183,6 +200,7 @@ def _init_db() -> None:
                 allowed_tools  TEXT NOT NULL,
                 features       TEXT,
                 plugins        TEXT NOT NULL DEFAULT '[]',
+                allowed_skills TEXT NOT NULL DEFAULT '[]',
                 created_at     TEXT NOT NULL
             )"""
         )

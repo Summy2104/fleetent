@@ -237,6 +237,9 @@ async def chat(
     allowed_tools = agent.allowed_tools + expand_plugin_patterns(agent.plugins) if agent else None
     agent_name = agent.name if agent else None
     agent_features = agent.features if agent else None
+    # agent-skill-scoping: per-agent skill-catalog narrowing (empty = no narrowing).
+    # No bound agent → None → run_stream renders the full catalog (existing behavior).
+    allowed_skills = agent.allowed_skills if agent else None
     # SB3: effective mode resolved at startup gates run_code's schema visibility.
     sandbox_mode: Mode = getattr(request.app.state, "sandbox_mode", Mode.OFF)
 
@@ -268,6 +271,8 @@ async def chat(
                 kwargs["agent_name"] = agent_name
             if agent_features is not None:
                 kwargs["agent_features"] = agent_features
+            if allowed_skills is not None:
+                kwargs["allowed_skills"] = allowed_skills
             async for event in run_stream(req.message, **kwargs):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as exc:

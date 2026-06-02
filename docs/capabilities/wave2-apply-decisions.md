@@ -950,3 +950,26 @@ SB9（sandbox 轨末环）：`run_code` 执行结果写入 trace。
 **跨域风险（务必协调）**：`slack.py` / `telegram.py` 属 **im-gateway 域**，张亮的 `im-gateway-management`（connector registry / allowlist / config，**不做图片**）也在此域、同改这两文件。本 change 只动：(1) 两 handler 内 `attachments` 组装、(2) telegram 的 MessageHandler filter（加 PHOTO）、(3) telegram text 取值（加 caption fallback）、(4) slack `event` 形参类型放宽。**不碰 connector 逻辑**。merge 时按关注点分块协调：张亮改的是 connector 注册/鉴权/allowlist 接线，本 change 改的是消息体内附件提取——理论上不重叠，但同文件需手动确认无行级冲突（尤其 `create_app` 顶部 import 与 handler 签名区）。
 
 **验证**：pytest **1391 → 1400 passed**（+9：slack 4[含图下载+鉴权头、非图忽略、无 files 空、下载失败降级]、telegram 5[photo 下载+选最大、caption 取文、纯文本不变、下载失败降级、filter 含 PHOTO]）。改动文件（slack.py / telegram.py / 新建 tests/test_im_attachment.py）ruff format+check 全绿。mypy `src`：**79 → 79** 不变；本 change 文件仅有 slack.py / telegram.py 的 `Settings()` call-arg 既有错误模式（与全仓多处 `Settings()` call-arg 同一既有模式，非新增模式）。外部全 mock（slack httpx 用 respx、telegram `get_file`/`download_as_bytearray` 用 unittest.mock），无真实请求。不 commit / 不建 PR。
+
+---
+
+## [follow-up] agent-skill-scoping
+
+**背景**：技能清单此前对每个 agent 全量可见——`available_skills_prompt()` 把所有「已启用」（未被四来源禁用）的 skill 都渲染进 `<available_skills>`，无论 agent 是否需要。本 follow-up 加 per-agent `allowed_skills` 做「清单可见性收窄」。OpenSpec change `agent-skill-scoping`（新 capability `agent-skill-scoping` 全 ADDED + MODIFY 既有 `agent-definition` 的 storage/Schema 需求）。lead 已授权 agent 全功能为一个原子自实现，本 change **不依赖张亮的 agent 定义决策**，自行落地。
+
+**定位（关键）**：visibility-not-authz。遵守项目铁律「skill 不是授权边界，tool 才是」——`allowed_skills` 只决定哪些 skill 进 `<available_skills>` 清单 / 默认被发现，不构成能力授权。模型即便读了某 SKILL.md，仍越不过 `allowed_tools` 白名单 + 风险审批门。故本 change **不动** tool 访问控制，也**不动** `read_skill` 的按名 `load`（显式按名 load 仍可，与既有「load 不受禁用约束」口径一致）。
+
+**实现要点**：
+- **字段（D1）**：`agent_store.Agent` 加 `allowed_skills: list[str]`（默认空 list），照 `plugins` 同款持久化为 JSON TEXT。`agents` 表 `_init_db` 的 `CREATE TABLE` 内联加 `allowed_skills TEXT NOT NULL DEFAULT '[]'`（fresh/test 库即带列）；既有生产库经 **alembic 004**（`migrations/versions/004_add_agent_allowed_skills.py`，`op.add_column`，`down_revision="003"`，参照 003 plugins，**非运行时裸 ALTER**）。`create_agent` 加入参、`_SELECT_COLS` 追加列、`_row_to_agent` 用 `json.loads(row[6] or "[]")` 兜底旧行（NULL→`[]`）。
+- **空=不限制（D2，与 plugins 相反）**：`allowed_skills` 为空/None → 不收窄，全部已启用 skill 仍可见（=现状，向后兼容）；非空 → 清单只保留命中且未被禁用的 skill。这与 `plugins`（空=无）**有意不对称**——因为 skill 现状默认全可见，取「空=无」会让所有未声明 `allowed_skills` 的既有 agent 突然看不到任何 skill，破坏既有行为；plugin 工具则从来默认不可见。字段 docstring / spec / 本节三处都标注此不对称及理由。
+- **与 disabled 叠加（D3）**：`available_skills_prompt` 加 `allowed_skills: list[str] | None = None` 参数，在既有 entries 过滤点（`if _disabled_reason(...) is None`）叠加一个 AND 条件 `(allowed is None or name in allowed)`，`allowed = set(allowed_skills) if allowed_skills else None`。即「命中 allowed_skills（或为空=不约束）**且**未被任一来源禁用」才进清单。禁用谓词（四来源）不变、是唯一裁判「skill 是否还活着」，收窄是其上的额外过滤；**禁用优先**——被禁用的 skill 即便在 `allowed_skills` 里也不出现。`collect_disabled_trace` 仍跑全 index（只记禁用、不记收窄；收窄不是禁用）。
+- **透传（D4）**：`run()` / `run_stream()` 各加 `allowed_skills: list[str] | None = None` 入参（参照 `agent_features`/`sandbox_mode`）。`run_stream` 内 catalog 构建处 `available_skills_prompt(allowed_skills=allowed_skills)`（server 路径）；`normalizer.route` 在调 `agent_loop.run` 前构建 catalog 处传 `agent.allowed_skills if agent else None`（IM 路径）。server.py 从 `agent.allowed_skills`（无 agent→None）经 kwargs 传 `run_stream`。`run()` 本身不构建 catalog（收预组装 messages），其入参为 API 对称 / 未来 run()-内建 catalog 路径预留，**现状不重复过滤**（避免双重收窄），docstring 标注。CLI（run_sync）无 agent 绑定，维持无参（None=不收窄），与 CLI 暴露全部内置工具的「无 per-agent 授权」口径一致。
+
+**spec delta 放置**：新 capability `agent-skill-scoping`（`specs/agent-skill-scoping/spec.md`）全 `## ADDED Requirements`（字段持久化 / 空=不限制 / 非空收窄 / 与 disabled 叠加 / 仅可见性非授权 / run·run_stream 透传）；MODIFY 既有 `agent-definition`（`specs/agent-definition/spec.md`）的 `## MODIFIED Requirements` 重述「Agent definition storage」与「Schema」两需求加 `allowed_skills`（含旧行向后兼容、空=不限制 与 plugins 相反的标注）。ADDED 与 MODIFIED 分别放新 cap / 既有 cap delta，未混（避免归档 abort）。`openspec validate agent-skill-scoping --strict` 通过。
+
+**自解冲突 / 决策**：
+1. `_row_to_agent` 的 row 元组从 6 列变 7 列（…features, plugins, allowed_skills）；既有 `test_agent_plugins_null_row_falls_back_to_empty` 的 6-tuple 同步补到 7-tuple，否则 `row[6]` 越界。
+2. run() 加入参但现状不施加过滤可能被误读为「无效参数」——docstring 明确「catalog 由调用方预组装，API 对称 / 预留，现状不重复过滤」；测试只断言 run_stream / normalizer 的真实过滤，不对 run() 断言重复过滤。
+3. 收窄叠加在 `_disabled_reason` 过滤点（额外 AND 条件，不改谓词内部）；将来禁用谓词重构只此一处随动。
+
+**验证**：pytest **1400 → 1414 passed**（+14：skill_registry 4[None/空全可见、非空收窄、disabled 优先于 allowed]、agent_store 4[默认空、roundtrip、NULL 兜底、CREATE TABLE 含列]、migrations 1[004 后含 allowed_skills 列]、agent_loop 2[run_stream 透传、默认 None]、server 2[agent 的 allowed_skills 入 run_stream、无 agent 不传]、normalizer 1 文件 2 例[收窄到 agent 的 allowed_skills、无 agent 不收窄]）。改/建文件 ruff format+check 全绿（残留 8 个 ruff 错误经 `git stash` 比对确认全为基线既有：server.py 的 I001/F401×3、agent_loop.py 的 N814、test_server.py 的 I001×2/SIM117；本 change 零新增）。mypy `src`：**79 → 79** 不变，无新增错误模式。alembic 004 升降级在 `tests/test_migrations.py` 既有 upgrade/downgrade 用例覆盖。**不 commit / 不建 PR。**

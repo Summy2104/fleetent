@@ -3065,6 +3065,7 @@ async def test_run_sub_agent_excluded_for_child_agent_depth_guard(mock_client):
     cls.assert_not_called()  # executor never invoked for a child agent
     assert dispatched == ["sub_agent"]
 
+
 # ── MCP4 review: strict-unavailable stop ─────────────────────────────────────
 
 
@@ -3100,3 +3101,37 @@ async def test_run_continues_when_strict_not_bound(mock_client, monkeypatch):
     reply = await al.run([{"role": "user", "content": "x"}], allowed_tools=["other__*"])
     assert reply == "ran"
     mock_client.chat.completions.create.assert_called()  # not bound → runs normally
+
+
+# ── agent-skill-scoping: allowed_skills 透传 ──────────────────────────────────
+
+
+async def test_run_stream_passes_allowed_skills_to_catalog(mock_client, monkeypatch):
+    """run_stream forwards its allowed_skills arg to available_skills_prompt."""
+    captured = {}
+
+    def _spy(*args, **kwargs):
+        captured["allowed_skills"] = kwargs.get("allowed_skills")
+        return ""
+
+    monkeypatch.setattr(al, "available_skills_prompt", _spy)
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("hi", None))
+
+    _ = [e async for e in al.run_stream("go", allowed_skills=["weather"])]
+
+    assert captured["allowed_skills"] == ["weather"]
+
+
+async def test_run_stream_default_allowed_skills_is_none(mock_client, monkeypatch):
+    captured = {}
+
+    def _spy(*args, **kwargs):
+        captured["allowed_skills"] = kwargs.get("allowed_skills")
+        return ""
+
+    monkeypatch.setattr(al, "available_skills_prompt", _spy)
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("hi", None))
+
+    _ = [e async for e in al.run_stream("go")]
+
+    assert captured["allowed_skills"] is None
