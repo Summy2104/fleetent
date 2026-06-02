@@ -33,7 +33,7 @@ Go / Conditional Go / No-Go 标准：
 - 已按 [pilot-install-checklist.md](pilot-install-checklist.md) 完成安装、依赖同步和基础配置。
 - 当前分支、commit SHA、部署包版本和目标环境名称已记录。
 - operator 有测试环境 shell 权限、服务启停权限、`data/` 和 `config/` 读写权限。
-- Python 依赖可用：`uv sync` 已完成，`uv run fleetent-admin --help` 能输出帮助。
+- Docker Compose 可用，且 `docker compose run --rm fleetent uv run fleetent-admin --help` 能输出帮助。
 - 服务端口未被占用，测试环境允许访问企业批准的 LLM / embedding endpoint。
 - 测试数据不包含真实敏感客户数据；如必须使用真实企业数据，先确认数据 owner 和脱敏策略。
 
@@ -58,10 +58,9 @@ environment:
 - `config/settings.yaml` 只包含非敏感策略配置。
 - `config/mcp.servers.yaml` 只包含 MCP server definition 和非敏感引用。
 - Google Drive / Confluence credential 使用 `credential_ref`，例如 `env:FLEETENT_CONNECTOR_TOKEN`
-  或 `file:///etc/fleetent/secrets/google-drive-token.json`。
+  或 `file:///app/secrets/google-drive-token.json`。
 - `.env`、系统环境变量或受控 secret 文件只留在测试环境本机，不进入 git、trace、日志、diagnostics package 或 issue。
 - `database_url` 指向测试环境 SQLite 文件，例如 `sqlite:///data/fleetent.db`。
-- 旧配置文件 `config/mcp.yaml`、`config/cron.yaml`、`config/webhooks.yaml` 不存在；存在时应 fail fast。
 
 建议检查：
 
@@ -69,9 +68,6 @@ environment:
 git status --short
 test -f config/settings.yaml
 test -f config/mcp.servers.yaml || true
-test ! -f config/mcp.yaml
-test ! -f config/cron.yaml
-test ! -f config/webhooks.yaml
 uv run fleetent-admin kb connectors list
 ```
 
@@ -142,27 +138,30 @@ uv run fleetent-admin observability traces --event-type agent_run_failed --limit
 启动服务：
 
 ```bash
-uv run uvicorn fleetent.server:app --host 0.0.0.0 --port 8000
+docker compose up -d
 ```
 
 检查 health：
 
-```text
-GET /health
+```bash
+curl -fsS http://127.0.0.1:8765/health
 ```
 
 检查 CLI：
 
 ```bash
+docker compose run --rm fleetent uv run fleetent-admin init-config --dry-run
 uv run fleetent-admin --help
 uv run fleetent-admin observability traces --limit 5
 uv run fleetent "hello"
 ```
 
+`uv run uvicorn fleetent.server:app` 只作为开发模式保留，不作为 Pilot 默认部署入口。
+
 通过标准：
 
 - 服务启动无配置错误、DB migration 错误或 secret 打印。
-- `GET /health` 返回 200。
+- `/health` 返回 200。
 - `fleetent-admin` 子命令可执行。
 - CLI agent 可完成一次最小 run；如果真实 LLM 未配置，应记录为 `skipped: real LLM route not configured`
   或 `failed`，并说明是否影响 Go 判定。

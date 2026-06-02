@@ -18,8 +18,8 @@ runbook 的顺序执行；本清单用于核对安装、升级、备份、回滚
 
 - 目标机器能访问企业允许的 LLM / embedding endpoint。
 - 目标机器能访问 Pilot 需要的 Google Drive / Confluence scope。
-- 已准备 Python、uv、SQLite、Git 和网络代理配置。
-- 已确认服务端口未被占用，运行用户对 `data/`、`config/`、`logs/` 有读写权限。
+- 已准备 Docker 和 Docker Compose，目标机器可从源码目录构建镜像。
+- 已确认服务端口 `8765` 未被占用，运行用户对 `data/`、`config/`、`secrets/` 有读写权限。
 - 已确认问题上报渠道和回滚负责人。
 
 ## 配置与 Secret 边界
@@ -29,7 +29,7 @@ runbook 的顺序执行；本清单用于核对安装、升级、备份、回滚
 - `config/settings.yaml`：保存 `database_url`、默认 agent、knowledge base、connector scope、diagnostics
   retention 开关等非敏感配置。
 - Google Drive / Confluence credential 使用 `credential_ref`，例如 `env:FLEETENT_CONNECTOR_TOKEN` 或
-  `file:///etc/fleetent/secrets/connector-token.json`。
+  `file:///app/secrets/google-drive-token.json`。
 - 真实 secret 文件、环境变量注入方式和权限由部署方管理。
 
 不要把真实 secret、token、credential payload 写入 settings、日志、trace、diagnostics package、issue 或测试 fixture。
@@ -37,28 +37,28 @@ runbook 的顺序执行；本清单用于核对安装、升级、备份、回滚
 
 ## 安装、升级与备份
 
-安装依赖：
+Pilot 默认使用 Docker Compose。先初始化本地配置和目录：
 
 ```bash
-uv sync
+docker compose run --rm fleetent uv run fleetent-admin init-config
 ```
 
-升级前先 dry-run：
+编辑 `.env`、`config/settings.yaml`，并把真实 secret 文件放入 `secrets/` 后，升级前先 dry-run：
 
 ```bash
-uv run python scripts/upgrade.py --dry-run
+docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run
 ```
 
 dry-run 通过后执行升级脚本。脚本会在 SQLite backup 成功后运行 `alembic upgrade head`：
 
 ```bash
-uv run python scripts/upgrade.py
+docker compose run --rm fleetent uv run python scripts/upgrade.py
 ```
 
 只做备份、不迁移：
 
 ```bash
-uv run python scripts/upgrade.py --backup-only
+docker compose run --rm fleetent uv run python scripts/upgrade.py --backup-only
 ```
 
 验收点：
@@ -73,19 +73,21 @@ uv run python scripts/upgrade.py --backup-only
 启动服务：
 
 ```bash
-uv run uvicorn fleetent.server:app --host 0.0.0.0 --port 8000
+docker compose up -d
 ```
 
 健康检查：
 
-```text
-GET /health
+```bash
+curl -fsS http://127.0.0.1:8765/health
 ```
+
+`uv run uvicorn fleetent.server:app` 只作为开发模式保留，不作为 Pilot 默认部署入口。
 
 验收点：
 
-- 服务在预期端口启动。
-- `GET /health` 返回 200。
+- 服务在 `8765` 端口启动。
+- `/health` 返回 200。
 - 启动日志不包含 API key、Bearer token、password、secret、token 或 credential payload。
 - 启动失败时先查看 structured log 和 diagnostics export，不手写 DB 修改。
 
@@ -210,7 +212,7 @@ uv run fleetent-admin diagnostics retention apply
 
 ## Pilot 验收清单
 
-- [ ] 依赖安装完成，`uv sync` 成功。
+- [ ] Docker Compose 镜像构建完成，`fleetent-admin init-config` 成功。
 - [ ] `scripts/upgrade.py --dry-run` 成功。
 - [ ] SQLite backup 已创建。
 - [ ] 服务启动成功，`GET /health` 返回 200。

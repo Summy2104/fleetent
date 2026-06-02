@@ -1,7 +1,7 @@
 services:
   fleetent:
     build: .
-    env_file: .env.production
+    env_file: .env
     ports:
       - "8765:8765"
     extra_hosts:
@@ -9,4 +9,5 @@ services:
     volumes:
       - ./data:/app/data
       - ./config:/app/config
+      - ./secrets:/app/secrets:ro
     restart: unless-stopped
