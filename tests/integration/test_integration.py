@@ -8,20 +8,29 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import fleetent.agent_store as agent_store
 import fleetent.governance.permission_gate as permission_gate
 import fleetent.im_user_store as im_user_store
 import fleetent.session_mgr as session_mgr
 import fleetent.user_store as user_store
+from tests.integration.test_migrations import apply_migrations
 
 
 @pytest.fixture
 def isolated_db(tmp_path, monkeypatch):
     """Redirect all data paths to tmp_path."""
     db = tmp_path / "users.db"
+    apply_migrations(db)
+    # permission_gate is a legacy store that owns its own approvals schema
+    # (id TEXT, via _init_db on user_store.DB_PATH). Migration 001 declares the
+    # column INTEGER — a known divergence — so drop the migrated copy and let
+    # the legacy store recreate it.
+    conn = sqlite3.connect(db)
+    conn.execute("DROP TABLE IF EXISTS approvals")
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
     monkeypatch.setattr(user_store, "DB_PATH", db)
     monkeypatch.setattr(im_user_store, "DB_PATH", db)
-    monkeypatch.setattr(agent_store, "DB_PATH", db)
     monkeypatch.setattr(permission_gate, "DB_PATH", db)
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
     return tmp_path

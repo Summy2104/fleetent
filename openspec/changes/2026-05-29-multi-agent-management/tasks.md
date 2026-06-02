@@ -9,12 +9,12 @@
 
 ## 2. agent_store — 版本数据访问
 
-- [ ] 2.1 Write failing tests: `create_agent(name, system_prompt, allowed_tools, *, skills_dir=None, mcp_server_ids=None, model_overrides=None, memory_namespace="default")` 单事务插入 agents + agent_versions(version=1) 并设 active_version_id；同名 agent 抛 `ValueError`；返回的 `Agent` 含 `active_version_id`
-- [ ] 2.2 重写 `agent_store.create_agent`（保留旧字段语义）；`Agent` dataclass 加 `active_version_id`
-- [ ] 2.3 Write failing tests: `create_version(name, **partial)` 拷贝当前 active 版本字段、按 partial 覆盖、`version=max+1`，默认更新 active_version_id；`activate=False` 保留旧 active；`activate_version(name, v)`、`list_versions(name)`（version desc + is_active）、`get_by_name_version(name, v)` 行为
-- [ ] 2.4 实现 `create_version` / `activate_version` / `list_versions` / `get_by_name_version`
-- [ ] 2.5 Write failing tests: `get_by_name(name)` 返回的 system_prompt / allowed_tools 来自 active version（改 version 后随之变化）
-- [ ] 2.6 调整 `get_by_name` 从 active version 解包字段（向后兼容签名与返回类型）
+- [x] 2.1 Write failing tests: `create_agent(name, system_prompt, allowed_tools, *, skills_dir=None, mcp_server_ids=None, model_overrides=None, memory_namespace="default")` 单事务插入 agents + agent_versions(version=1) 并设 active_version_id；同名 agent 抛 `ValueError`；返回的 `Agent` 含 `active_version_id`
+- [x] 2.2 重写 `agent_store.create_agent`（保留旧字段语义）；`Agent` dataclass 加 `active_version_id`
+- [x] 2.3 Write failing tests: `create_version(name, **partial)` 拷贝当前 active 版本字段、按 partial 覆盖、`version=max+1`，默认更新 active_version_id；`activate=False` 保留旧 active；`activate_version(name, v)`、`list_versions(name)`（version desc + is_active）、`get_by_name_version(name, v)` 行为
+- [x] 2.4 实现 `create_version` / `activate_version` / `list_versions` / `get_by_name_version`
+- [x] 2.5 Write failing tests: `get_by_name(name)` 返回的 system_prompt / allowed_tools 来自 active version（改 version 后随之变化）
+- [x] 2.6 调整 `get_by_name` 从 active version 解包字段（向后兼容签名与返回类型）
 
 ## 3. agent_runtime — AgentSnapshot 与解析器
 

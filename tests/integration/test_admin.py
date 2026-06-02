@@ -8,14 +8,16 @@ import fleetent.im_user_store as im_user_store
 from fleetent import admin, user_store
 from fleetent.platform.admin_cli import agents as admin_cli_agents
 from fleetent.platform.admin_cli.main import main as admin_cli_main
+from tests.integration.test_migrations import apply_migrations
 
 
 @pytest.fixture(autouse=True)
 def tmp_db(tmp_path, monkeypatch):
     db = tmp_path / "users.db"
+    apply_migrations(db)  # agent_store reads DATABASE_URL via the db boundary
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
     monkeypatch.setattr(user_store, "DB_PATH", db)
     monkeypatch.setattr(im_user_store, "DB_PATH", db)
-    monkeypatch.setattr(agent_store, "DB_PATH", db)
 
 
 def run_admin(*args: str) -> tuple[str, str, int]:

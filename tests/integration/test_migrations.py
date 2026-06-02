@@ -4,17 +4,20 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 
+# Absolute so tests that chdir (e.g. test_server) still find the scripts.
+_MIGRATIONS_DIR = str(Path(__file__).resolve().parents[2] / "migrations")
+
 
 def apply_migrations(db_path: Path) -> None:
     cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
+    cfg.set_main_option("script_location", _MIGRATIONS_DIR)
     cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
     command.upgrade(cfg, "head")
 
 
 def downgrade_migrations(db_path: Path) -> None:
     cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
+    cfg.set_main_option("script_location", _MIGRATIONS_DIR)
     cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
     command.downgrade(cfg, "base")
 
@@ -316,9 +319,7 @@ def test_agent_v1_backfill_for_existing_rows(tmp_path):
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row
     agent = conn.execute("SELECT * FROM agents WHERE id=?", (agent_id,)).fetchone()
-    version = conn.execute(
-        "SELECT * FROM agent_versions WHERE agent_id=?", (agent_id,)
-    ).fetchone()
+    version = conn.execute("SELECT * FROM agent_versions WHERE agent_id=?", (agent_id,)).fetchone()
     n_versions = conn.execute(
         "SELECT COUNT(*) FROM agent_versions WHERE agent_id=?", (agent_id,)
     ).fetchone()[0]

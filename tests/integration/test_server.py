@@ -3,6 +3,16 @@ from fastapi.testclient import TestClient
 
 import fleetent.user_store as us
 from fleetent.server import app
+from tests.integration.test_migrations import apply_migrations
+
+
+def _migrated_db(tmp_path, monkeypatch):
+    """Point user_store (DB_PATH) and agent_store (DATABASE_URL) at one migrated DB."""
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setattr(us, "DB_PATH", db_path)
+    return db_path
 
 
 @pytest.fixture(autouse=True)
@@ -49,7 +59,7 @@ def test_chat_valid_token_streams(tmp_path, monkeypatch, isolated_schedule_db):
     import fleetent.server as srv
     import fleetent.user_store as us2
 
-    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
+    _migrated_db(tmp_path, monkeypatch)
 
     received_user_ids: list[str] = []
 
@@ -78,8 +88,8 @@ def test_chat_over_quota_returns_429(tmp_path, monkeypatch, isolated_schedule_db
     import fleetent.server as srv
     import fleetent.user_store as us2
 
-    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setattr(quota, "DB_PATH", tmp_path / "users.db")
+    db_path = _migrated_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(quota, "DB_PATH", db_path)
 
     events: list[str] = []
     monkeypatch.setattr(srv, "_emit_over_quota_event", lambda uid: events.append(uid))
@@ -118,7 +128,7 @@ def test_chat_stream_exception_yields_error_event(tmp_path, monkeypatch, isolate
     import fleetent.server as srv
     import fleetent.user_store as us2
 
-    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
+    _migrated_db(tmp_path, monkeypatch)
 
     async def error_stream(msg: str, user_id: str):  # type: ignore[misc]
         raise RuntimeError("boom")
@@ -143,8 +153,7 @@ def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch, is
     import fleetent.server as srv
     import fleetent.user_store as us2
 
-    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
+    _migrated_db(tmp_path, monkeypatch)
 
     captured: dict = {}
 
@@ -187,8 +196,7 @@ def test_chat_rejects_disabled_agent(tmp_path, monkeypatch, isolated_schedule_db
     import fleetent.server as srv
     import fleetent.user_store as us2
 
-    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
+    _migrated_db(tmp_path, monkeypatch)
 
     entered = []
 
@@ -223,8 +231,7 @@ def test_chat_rejects_archived_agent(tmp_path, monkeypatch, isolated_schedule_db
     import fleetent.server as srv
     import fleetent.user_store as us2
 
-    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
+    _migrated_db(tmp_path, monkeypatch)
     monkeypatch.setattr(srv, "agent_routing_status", lambda name: "archived")
 
     user = us2.create_user("ArchChan")
