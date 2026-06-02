@@ -11,13 +11,14 @@ Auth: viewer reads dashboards + alert history; admin manages rules / ack / silen
 channels / maintenance.
 """
 
+import datetime
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from fleetent import audit_log, auth, user_store
-from fleetent.platform.resource_monitoring import monitoring_store
+from fleetent.platform.resource_monitoring import alerting, monitoring_store
 
 router = APIRouter(prefix="/admin")
 
@@ -25,6 +26,8 @@ IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
 _SENSITIVE = ("password", "secret", "token", "api_key")
 NOTIFY_MAX_RETRIES = 3
+ESCALATE_AFTER_SECONDS = 900
+_SYSTEM_ACTOR = "__system__"
 
 
 # --- injectable channel seams (no real email/IM/webhook in tests) -------------
@@ -96,6 +99,39 @@ def dispatch_notification(
         else:
             failed.append({"channel": channel, "error": last_error})
     return {"sent": sent, "failed": failed}
+
+
+# --- escalation runtime (critical not acked in time → higher channels) --------
+
+
+def escalate_pending(
+    now: datetime.datetime | None = None,
+    escalate_after_seconds: int = ESCALATE_AFTER_SECONDS,
+    escalation_channels: list[str] | None = None,
+) -> dict[str, list[str]]:
+    """Promote critical alerts that have been notified but unacked past the deadline.
+
+    Dispatches to higher-priority channels, flips status to ``escalated`` (single-point
+    driven), and writes an audit row. Idempotent: an already-escalated alert is skipped by
+    the status filter in ``alerting.should_escalate``.
+    """
+    moment = now or datetime.datetime.now(datetime.UTC)
+    channels = escalation_channels or ["im", "webhook"]
+    escalated: list[str] = []
+    for alert in monitoring_store.list_alerts(severity="critical"):
+        if not alerting.should_escalate(alert, moment, escalate_after_seconds):
+            continue
+        dispatch_notification(alert, channels)
+        monitoring_store.set_alert_status(alert["id"], "escalated")
+        audit_log.write_audit(
+            _SYSTEM_ACTOR,
+            "alert.escalate",
+            "alert",
+            alert["id"],
+            detail=_mask({"channels": channels, "severity": alert["severity"]}),
+        )
+        escalated.append(alert["id"])
+    return {"escalated": escalated}
 
 
 # --- auth helpers -------------------------------------------------------------

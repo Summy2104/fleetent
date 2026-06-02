@@ -200,3 +200,48 @@ def test_rule_list_masks_secrets(client, monkeypatch):
     assert masked["webhook_secret"] == "****"
     assert masked["nested"]["token"] == "****"
     assert masked["url"] == "https://x"
+
+
+# --- escalation runtime (场景 90, tasks 6.3/6.4) ------------------------------
+
+
+def test_escalate_pending_promotes_unacked_critical_and_audits(client, monkeypatch):
+    # a critical alert fired long ago and never acked
+    aid = store.create_alert("rule-1", "host:h1", "critical", {"value": 99})
+    store.set_alert_status(aid, "notified", fired_at="2026-06-01T00:00:00+00:00")
+
+    dispatched = []
+    monkeypatch.setattr(
+        api,
+        "dispatch_notification",
+        lambda alert, channels, config=None: (
+            dispatched.append(channels) or {"sent": channels, "failed": []}
+        ),
+    )
+
+    import datetime
+
+    now = datetime.datetime(2026, 6, 1, 0, 30, tzinfo=datetime.UTC)
+    result = api.escalate_pending(
+        now=now, escalate_after_seconds=600, escalation_channels=["im", "webhook"]
+    )
+
+    assert aid in result["escalated"]
+    assert store.get_alert(aid)["status"] == "escalated"
+    assert dispatched == [["im", "webhook"]]  # promoted to higher channels
+    assert any(row["action"] == "alert.escalate" for row in audit.search_audit())
+
+
+def test_escalate_pending_skips_recent_or_acked(client, monkeypatch):
+    fresh = store.create_alert("rule-1", "host:h2", "critical", {})  # just fired
+    acked = store.create_alert("rule-1", "host:h3", "critical", {})
+    store.set_alert_status(acked, "ack", fired_at="2026-06-01T00:00:00+00:00")
+
+    monkeypatch.setattr(api, "dispatch_notification", lambda *a, **k: {"sent": [], "failed": []})
+    import datetime
+
+    now = datetime.datetime(2026, 6, 1, 0, 30, tzinfo=datetime.UTC)
+    result = api.escalate_pending(now=now, escalate_after_seconds=600, escalation_channels=["im"])
+
+    assert fresh not in result["escalated"]  # too recent
+    assert acked not in result["escalated"]  # already acked

@@ -204,3 +204,27 @@ def test_lifespan_starts_and_stops_cron_scheduler(tmp_path, monkeypatch, isolate
 
     start_mock.assert_called_once()
     shutdown_mock.assert_called_once()
+
+
+def test_lifespan_registers_monitoring_collection_job(tmp_path, monkeypatch, isolated_schedule_db):
+    """server lifespan wires a periodic monitoring collect/evaluate job (task 9.1)."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from starlette.testclient import TestClient
+
+    import fleetent.server as srv
+
+    with patch("fleetent.server.CronScheduler") as mock_cls:
+        instance = mock_cls.return_value
+        instance.start = AsyncMock()
+        instance.shutdown = AsyncMock()
+        instance.add_interval_job = MagicMock()
+
+        with TestClient(srv.app):
+            pass
+
+    job_ids = {
+        c.kwargs.get("job_id", (c.args[2] if len(c.args) > 2 else None))
+        for c in instance.add_interval_job.call_args_list
+    }
+    assert "monitoring_collect" in job_ids
