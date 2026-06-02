@@ -25,8 +25,8 @@
 
 ## 4. Per-agent skills 隔离
 
-- [ ] 4.1 Write failing tests: `SkillIndex(skills_dir)` 实例 scan 后只见该目录 SKILL.md；不污染模块级 `_index`；`match`/`load` 走实例数据
-- [ ] 4.2 在 `skill_registry.py` 新增 `SkillIndex` 类，重构模块级函数复用 `SkillIndex(默认目录)`；保留旧 `scan/match/load/list_skills` 签名
+- [x] 4.1 Write failing tests: `SkillIndex(skills_dir)` 实例 scan 后只见该目录 SKILL.md；不污染模块级 `_index`；`match`/`load` 走实例数据
+- [x] 4.2 在 `skill_registry.py` 新增 `SkillIndex` 类，重构模块级函数复用 `SkillIndex(默认目录)`；保留旧 `scan/match/load/list_skills` 签名
 
 ## 5. Per-agent MCP 白名单 + allowed_tools 双重过滤
 
