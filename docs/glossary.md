@@ -46,8 +46,8 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 | **tool 调用** | agent_loop 执行一次 tool 的完整过程：LLM 输出 tool_call → dispatch → 执行 → 返回结果 | 统一用"调用"，不用 "dispatch"、"invoke"、"execute"（这三个是调用链内部的动词，对外统称"调用"）|
 | **dispatch** | `tool_registry` 内部根据 tool_name 找到对应函数并执行的步骤，是 tool 调用链的内部环节 | 仅在 tool_registry 实现相关的上下文使用 |
 | **allowed_tools** | agent 配置中的工具白名单，使用 fnmatch 语法，如 `read_*`、`web_search`。agent 只能调用白名单内的工具 | 不用 "tool_whitelist"、"permitted_tools" |
-| **permission_gate** | 针对 medium/high 风险工具调用的人工审批门，通过 asyncio.Event 实现阻塞等待 | 不用 "approval gate"、"human-in-the-loop"（后者范围更广）|
-| **风险等级** | 工具的操作风险分类：`low`（只读）、`medium`（可撤销写入）、`high`（不可逆操作）。medium/high 需要 permission_gate 审批 | 保持 low/medium/high 三级，不用 "safe/unsafe" |
+| **permission_gate** | 针对 medium/high 风险工具调用的人工审批门，当前实现位置为 `fleetent.governance.permission_gate`，通过 asyncio.Event 实现阻塞等待 | 不用 "approval gate"、"human-in-the-loop"（后者范围更广）|
+| **风险等级** | 工具的操作风险分类：`low`（只读）、`medium`（可撤销写入）、`high`（不可逆操作）。medium/high 需要 `fleetent.governance.permission_gate` 审批 | 保持 low/medium/high 三级，不用 "safe/unsafe" |
 
 ---
 
@@ -55,7 +55,7 @@ fleetent 平台全局术语定义。所有模块文档应以本表为准，避�
 
 | 术语 | 定义 | 禁止混用 |
 |------|------|---------|
-| **语义记忆** | 跨 session 的用户事实，按 `identity`/`preferences`/`context` 三类结构化存储于 `memory_items` 表，由 `memory_layer` 负责 | 不用 "semantic memory"（英文只在代码注释中使用）|
+| **语义记忆** | 跨 session 的用户事实，按 `identity`/`preferences`/`context` 三类结构化存储于 `memory_items` 表，由 `fleetent.intelligence.memory` 负责 | 不用 "semantic memory"（英文只在代码注释中使用）|
 | **情节记忆** | 对话与工具执行的完整历史轨迹，写入 `traces` 表，由 `observability` 负责 | 不用 "episodic memory"、"execution log"（traces 是正式名词）|
 | **程序记忆** | agent 完成特定任务的技能与方法，存储为 `skills/` 目录，由 `skill_registry` 负责 | 不用 "procedural memory"、"knowledge"（knowledge 指企业文档知识库）|
 | **工作记忆** | 当前 session 的对话上下文，存储在内存中，session 结束即释放，由 `context_mgr` 负责 | 不用 "working memory"、"context window"（context window 是 LLM 的技术概念）|

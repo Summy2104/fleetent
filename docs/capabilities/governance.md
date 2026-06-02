@@ -12,7 +12,7 @@ agent 工具执行前的治理层：在 agent 即将调用某个工具的那一�
 - 不存储审计日志 → **observability / platform audit**（governance 只产生决策事件，落盘与查询是 observability 的事）
 
 **调用关系**：
-- 依赖：agent_store、agent_policy、permission_gate、user-center（确认人身份）
+- 依赖：agent_store、`fleetent.governance.agent_policy`、`fleetent.governance.permission_gate`、user-center（确认人身份）
 - 被依赖：agent_loop（工具访问检查、审批门）、normalizer（agent 解析）
 - 产出：决策结果作为 audit / security event 交 observability 留痕
 
@@ -56,8 +56,8 @@ graph TD
 
     subgraph GOV["governance"]
         STORE["agent_store<br/>agent 定义 + user/channel 绑定"]
-        ACCESS["agent_policy<br/>fnmatch 工具访问检查"]
-        GATE["permission_gate<br/>不可逆操作 · 会话内自我确认"]
+        ACCESS["fleetent.governance.agent_policy<br/>fnmatch 工具访问检查"]
+        GATE["fleetent.governance.permission_gate<br/>不可逆操作 · 会话内自我确认"]
     end
 
     UC["user-center<br/>(身份)"]
@@ -200,12 +200,12 @@ graph LR
 **需要单元测试的行为**：
 - 工具访问控制：allowed_tools fnmatch 匹配，白名单外的工具被拒绝且原因回给 LLM
 - Agent 解析优先级：channel binding → user binding → default agent 的查找顺序
-- permission_gate 超时 fail-closed：超时时状态变为 timeout，不放行工具
+- `fleetent.governance.permission_gate` 超时 fail-closed：超时时状态变为 timeout，不放行工具
 - 审批状态机：pending → approved / rejected / timeout 的转换正确，不可跨状态跳转
 
 **需要 mock 的依赖**：
 - `agent_store`：注入可控的 agent 定义与 user/channel 绑定数据
-- `permission_gate`：使用短超时（`PermissionGate(medium_timeout=0.1)`）
+- `fleetent.governance.permission_gate`：使用短超时（`PermissionGate(medium_timeout=0.1)`）
 - SQLite DB 路径：`monkeypatch` 到 `tmp_path`
 
 ## 待决问题

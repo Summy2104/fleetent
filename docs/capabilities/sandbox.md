@@ -8,11 +8,14 @@
 
 **负责**：容器生命周期管理、启用控制、资源限制、环境变量过滤、输出截断、孤儿容器清理。
 
-**不负责**：决定是否执行代码（→ agent_loop）、工具访问控制（→ agent_policy）、执行结果写入 trace（→ observability）。
+**不负责**：决定是否执行代码（→ agent_loop）、工具访问控制（→ `fleetent.governance.agent_policy`）、执行结果写入 trace（→ observability）。
 
 **调用关系**：
 - 依赖：config（sandbox 配置参数）、agent_store（agent 级别 `features.code_execution` 开关）
 - 被依赖：tool_registry（注册 `run_code` 工具供 agent_loop 调用）
+
+**模块归属**：
+- owning package：`fleetent.integrations.sandbox`
 
 ## 关键流程
 
@@ -49,10 +52,10 @@ flowchart TD
 ## 现状
 
 - ⚡ **Docker 沙箱基本执行**：代码在 Docker 容器内隔离运行，返回 stdout / stderr / exit_code
-  - 当前实现：`sandbox_client.py` 封装 Docker CLI，资源限制（`--network none --memory 256m --cpus 0.5 --read-only`）硬编码
+  - 当前实现：`fleetent.integrations.sandbox` 封装 Docker CLI，资源限制（`--network none --memory 256m --cpus 0.5 --read-only`）硬编码
   - **目标**：迁移至 microsandbox SDK（v0.4.6 已安装），采用 microVM 级别隔离（见规划中）
 
-- ⚡ **资源限制**：限制生效，但参数硬编码在 `sandbox_client.py`，无法通过配置调整
+- ⚡ **资源限制**：限制生效，但参数硬编码在 `fleetent.integrations.sandbox`，无法通过配置调整
 
 - ⚡ **文件系统隔离**：`--read-only` 模式，整个文件系统只读，`/tmp` 目录可写
   - 当前缺失：无符号链接攻击防护

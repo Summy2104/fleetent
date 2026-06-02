@@ -24,7 +24,7 @@
 
 - ✅ **Dockerfile**：单容器部署
   - 当前已有 Dockerfile 和 docker-compose.yml，关键配置：
-    - `extra_hosts: host.docker.internal:host-gateway`（Linux 宿主机访问，sandbox_client 通过此地址调用宿主机工具进程）
+    - `extra_hosts: host.docker.internal:host-gateway`（Linux 宿主机访问，`fleetent.integrations.sandbox` 通过此地址调用宿主机工具进程）
     - `volumes: ./data:/app/data, ./config:/app/config`（持久化用户数据和配置）
     - `env_file: .env.production`（密钥通过 env_file 注入，不写入镜像）
 

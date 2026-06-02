@@ -8,10 +8,10 @@
 
 **负责**：`@tool` 装饰器注册与 schema 导出、工具 dispatch（参数反序列化 → 访问控制 → 凭证注入 → 调用 → 结果序列化）、内置工具集（`tools.py` import 副作用注册）、`risk_level` 映射（供 governance 判断是否触发审批）。
 
-**不负责**：工具访问白名单检查（→ governance / agent_policy）、OAuth 凭证存储与刷新（→ connectors）、工具执行的超时传播（→ agent_loop）、沙箱隔离（→ sandbox）。
+**不负责**：工具访问白名单检查（→ `fleetent.governance.agent_policy`）、OAuth 凭证存储与刷新（→ connectors）、工具执行的超时传播（→ agent_loop）、沙箱隔离（→ sandbox）。
 
 **调用关系**：
-- 依赖：connectors（`@tool(connector=...)` 的凭证注入）、agent_policy（allowed_tools 白名单检查）
+- 依赖：connectors（`@tool(connector=...)` 的凭证注入）、`fleetent.governance.agent_policy`（allowed_tools 白名单检查）
 - 被依赖：agent_loop（schema 获取、工具 dispatch）
 - 副作用：`tools.py` 被 import 时向 `tool_registry` 注册所有内置工具
 
@@ -20,7 +20,7 @@
 ```mermaid
 flowchart TD
     A["agent_loop\nLLM 返回 tool_call"] --> B["tool_registry.dispatch(tool_name, args, user_id)"]
-    B --> C["agent_policy.check\ntool_name 在 allowed_tools?"]
+    B --> C["fleetent.governance.agent_policy.check\ntool_name 在 allowed_tools?"]
     C -->|否| D["返回拒绝原因\n给 LLM"]
     C -->|是| E{"声明了 connector?"}
     E -->|是| F["connectors.get_credential(user_id, connector)"]
@@ -66,8 +66,8 @@ async def dispatch(tool_name: str, args: dict, user_id: str, agent_id: str) -> s
 
 - ✅ **`@tool` 装饰器**：注册工具、构建 JSON Schema、支持 description / risk_level 声明
 - ✅ **schema 导出**：`get_schemas()` 返回所有注册工具的 JSON Schema，import 副作用注册
-- ✅ **dispatch**：参数反序列化 → agent_policy 检查 → 调用 → 结果序列化
-- ✅ **risk_level 映射**：`low` / `medium` / `high`，`permission_gate` 据此决定是否触发审批
+- ✅ **dispatch**：参数反序列化 → `fleetent.governance.agent_policy` 检查 → 调用 → 结果序列化
+- ✅ **risk_level 映射**：`low` / `medium` / `high`，`fleetent.governance.permission_gate` 据此决定是否触发审批
 - ⚡ **connector 声明**：`@tool(connector=...)` 声明已有，凭证注入逻辑待 connectors 模块实现后接通
 
 ## 规划中（v1.0）
@@ -107,7 +107,7 @@ async def dispatch(tool_name: str, args: dict, user_id: str, agent_id: str) -> s
 **场景 6：risk_level medium 触发审批**
 - Given：工具 `delete_file` 声明 `risk_level="medium"`
 - When：agent_loop dispatch 该工具
-- Then：permission_gate 触发会话内自我确认，用户确认后才执行；未确认则中止
+- Then：`fleetent.governance.permission_gate` 触发会话内自我确认，用户确认后才执行；未确认则中止
 
 ## 测试边界
 
@@ -115,13 +115,13 @@ async def dispatch(tool_name: str, args: dict, user_id: str, agent_id: str) -> s
 - `@tool` 注册：装饰后工具出现在 `get_schemas()` 返回列表中，schema 字段正确
 - 隐藏参数过滤：keyword-only 参数不出现在 JSON Schema 的 `properties` 中
 - dispatch 工具不存在：返回错误字符串，不抛 `KeyError`
-- dispatch 访问控制拒绝：agent_policy 返回拒绝时，工具函数不被调用
-- risk_level 传递：`@tool(risk_level="high")` 的工具，dispatch 时 permission_gate 收到正确 risk_level
+- dispatch 访问控制拒绝：`fleetent.governance.agent_policy` 返回拒绝时，工具函数不被调用
+- risk_level 传递：`@tool(risk_level="high")` 的工具，dispatch 时 `fleetent.governance.permission_gate` 收到正确 risk_level
 
 **需要 mock 的依赖**：
-- `agent_policy.check`：控制返回 allowed / denied
+- `fleetent.governance.agent_policy.check`：控制返回 allowed / denied
 - `connectors.get_credential`：控制返回 Credential / NeedsConsent（connector 注入路径测试）
-- `permission_gate`：使用短超时（`PermissionGate(medium_timeout=0.1)`）
+- `fleetent.governance.permission_gate`：使用短超时（`PermissionGate(medium_timeout=0.1)`）
 
 ## 待决问题
 

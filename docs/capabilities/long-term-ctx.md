@@ -14,7 +14,7 @@ long-term-ctx 仍可基于 memory 正常工作。
 **不负责**：存储任何数据、记忆提取（→ memory）、文档索引（→ knowledge_base）、in-session 上下文压缩（→ context_mgr）、trace 持久化（→ observability）。
 
 **调用关系**：
-- 依赖：memory_layer（search）、knowledge_base optional provider（resolve_agent_kb_ids / search）、config（token 预算上限和来源分配策略）
+- 依赖：`fleetent.intelligence.memory`（search）、knowledge_base optional provider（resolve_agent_kb_ids / search）、config（token 预算上限和来源分配策略）
 - 被依赖：agent_loop（每次对话开始前调用）
 
 **模块归属**：
@@ -28,7 +28,7 @@ long-term-ctx 仍可基于 memory 正常工作。
 ```mermaid
 flowchart TD
     A[agent_loop 调用 build_context] --> B[并行检索]
-    B --> C[memory_layer.search]
+    B --> C["fleetent.intelligence.memory.search"]
     B --> D{knowledge provider\n已启用?}
     D -->|是| S[knowledge_base.resolve_agent_kb_ids\n解析 agent KB 范围]
     S --> E[knowledge_base.search\n只检索解析出的 KB]
@@ -103,7 +103,7 @@ async def build_context(
 
 已实现内容：
 - `BuiltContext`、`ContextSource`、`build_context(user_id, query, agent_id, available_tokens)` public API
-- memory-layer semantic search 接入
+- `fleetent.intelligence.memory` semantic search 接入
 - knowledge-base provider 接入；KB 未启用、未配置或无结果时不阻塞 memory 注入
 - knowledge-base provider 通过 `resolve_agent_kb_ids()` 获取 agent 有效 KB 范围；没有显式绑定时只回退默认 KB，空范围时不调用 search
 - token budget 基础截断
@@ -117,7 +117,7 @@ async def build_context(
 
 ## 规划中（v1.0）
 
-- [x] **可选检索**：调用 memory_layer.search()；knowledge_base 仅在 provider 已启用时调用
+- [x] **可选检索**：调用 `fleetent.intelligence.memory.search()`；knowledge_base 仅在 provider 已启用时调用
   - knowledge_base 未启用、未配置或返回空结果时不影响 memory 注入
   - graph_search 暂不接入，等 knowledge-base graph search spec 再定义
 
@@ -210,7 +210,7 @@ memory / knowledge / observability 的接口，未来可以独立成 package，�
 - smoke guard：真实 provider smoke 默认 skip，只有显式环境变量和凭据完整时运行
 
 **需要 mock 的依赖**：
-- `memory_layer.search`：隔离 memory 模块，控制返回内容和数量
+- `fleetent.intelligence.memory.search`：隔离 memory 模块，控制返回内容和数量
 - `knowledge_base.resolve_agent_kb_ids` / `knowledge_base.search` 或 null provider：隔离 knowledge_base 模块
 - `config`：注入测试用 token 预算上限
 

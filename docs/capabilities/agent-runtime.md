@@ -8,7 +8,7 @@
 
 **负责**：主循环执行（LLM 调用 → 工具调度 → 迭代）、内置工具管理、上下文压缩、sub_agent 并行、成本预算管控、取消传播、错误分类。
 
-**不负责**：MCP 外部工具连接（→ [mcp](./mcp.md)）、沙箱代码执行（→ [sandbox](./sandbox.md)）、Skill 管理（→ [skill](./skill.md)）、长期记忆注入（→ long_term_ctx）、工具注册与访问控制（→ tool_registry / agent_policy）。
+**不负责**：MCP 外部工具连接（→ [mcp](./mcp.md)）、沙箱代码执行（→ [sandbox](./sandbox.md)）、Skill 管理（→ [skill](./skill.md)）、长期记忆注入（→ long_term_ctx）、工具注册与访问控制（→ tool_registry / `fleetent.governance.agent_policy`）。
 
 **调用关系**：
 - 依赖：model_router、tool_registry、skill_registry、context_mgr、long_term_ctx、observability、session_mgr

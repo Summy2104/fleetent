@@ -18,8 +18,8 @@
 graph TD
     A["接入层\nserver.py · im_gateway · webhook_router"]
     B["编排层\nagent_loop · sub_agent"]
-    C["能力层\nmodel_router · tool_registry · long_term_ctx\nmemory_layer · vector_store · reflection\nskill_registry · context_mgr · mcp_client\nsandbox_client · permission_gate · cron_scheduler"]
-    D["横切基础能力\nobservability · config · database runtime\nuser_store · agent_store · im_user_store\nsession_mgr · schedule_store · agent_policy · admin"]
+    C["能力层\nmodel_router · tool_registry · intelligence.long_term_ctx\nintelligence.memory · intelligence.vector_store · intelligence.reflection\nskill_registry · context_mgr · integrations.mcp\nintegrations.sandbox · governance.permission_gate · cron_scheduler"]
+    D["横切基础能力\nobservability · config · database runtime\nuser_store · agent_store · im_user_store\nsession_mgr · schedule_store · governance.agent_policy · platform.admin_cli"]
 
     A --> B --> C --> D
 ```
@@ -41,8 +41,8 @@ src/fleetent/
   governance/       ← agent_policy、permission_gate、agent 能力边界
   platform/         ← user / agent / API key / admin / auth control plane
   channels/         ← im_gateway、webhook_router、cron_scheduler、schedule_store
-  intelligence/     ← memory_layer、knowledge_base、long_term_ctx、vector_store、reflection
-  integrations/     ← mcp_client、sandbox_client、connectors
+  intelligence/     ← memory、knowledge_base、long_term_ctx、vector_store、reflection
+  integrations/     ← mcp、sandbox、connectors
   observability/    ← trace、log、usage、diagnostics
   infrastructure/   ← config、db runtime、底层 adapter
 ```
@@ -79,15 +79,18 @@ src/fleetent/
   tools.py           ← 内置工具（import 即注册，副作用）
   skill_registry.py  ← 扫描 skills/，关键词匹配，注入 system prompt
   context_mgr.py     ← in-session token 压缩
-  memory_layer.py    ← 结构化语义记忆：提取动作 → SQLite memory_items → vector_store 索引
   intelligence/
-    knowledge_base/  ← 企业文档知识库：解析、导入、local / Google Drive / Confluence sync、vector / keyword / hybrid search
-    vector_store/    ← 向量索引基础设施：in-memory / SQLite backend，embedding / rerank provider
+    memory/         ← 结构化语义记忆：提取动作 → SQLite memory_items → vector_store 索引
+    knowledge_base/ ← 企业文档知识库：解析、导入、local / Google Drive / Confluence sync、vector / keyword / hybrid search
+    vector_store/   ← 向量索引基础设施：in-memory / SQLite backend，embedding / rerank provider
     long_term_ctx.py ← 长期上下文调度：memory / knowledge_base provider 已接入
-    reflection.py    ← 反思报告：读取 traces / memory，只生成建议，不自动写回
-  mcp_client.py      ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
-  sandbox_client.py  ← Docker CLI 封装：隔离 Python 执行
-  permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
+    reflection.py   ← 反思报告：读取 traces / memory，只生成建议，不自动写回
+  integrations/
+    mcp/            ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
+    sandbox/        ← Docker CLI 封装：隔离 Python 执行
+  governance/
+    permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
+    agent_policy.py    ← fnmatch 工具访问检查
   cron_scheduler.py  ← APScheduler 定时任务；从 SQLite 动态任务恢复调度
   webhook_router.py  ← Webhook 签名验证、消息提取
   user_store.py      ← SQLite 用户/API key 管理
@@ -96,9 +99,9 @@ src/fleetent/
   session_mgr.py     ← JSON session 持久化；per-session asyncio.Lock
   schedule_store.py  ← SQLite：定时任务定义与状态持久化
   observability/     ← trace、log、usage、diagnostics
-  agent_policy.py    ← fnmatch 工具访问检查
   config.py          ← pydantic-settings；加载 .env + config/settings.yaml；读取 config/mcp.servers.yaml
-  admin.py           ← CLI 管理工具
+  platform/
+    admin_cli/       ← CLI 管理工具；console script 为 fleetent-admin
 ```
 
 ---
@@ -114,7 +117,7 @@ flowchart TD
     C --> D["注入记忆\n匹配 Skill"]
     D --> E["LLM streaming call\n含 fallback 链"]
     E -->|text_delta| F["SSE 流式输出"]
-    E -->|tool_calls| G["permission_gate\nmedium/high 风险审批"]
+    E -->|tool_calls| G["governance.permission_gate\nmedium/high 风险审批"]
     G --> H["tool dispatch\n执行工具"]
     H --> E
     E -->|stop| I["observability\n写 trace event"]
@@ -129,7 +132,7 @@ flowchart TD
     A["IM 消息"] --> B["平台适配器\nSlack / Telegram"]
     B --> C["im_user_store\n身份映射 / 自动创建"]
     C --> D["normalizer.route"]
-    D -->|approve/reject 命令| E["permission_gate.resolve\n审批结果"]
+    D -->|approve/reject 命令| E["governance.permission_gate.resolve\n审批结果"]
     D -->|普通消息| F{"allowlist 检查"}
     F -->|未审批| G["拒绝\n提示联系管理员"]
     F -->|已审批| H["agent 解析\nchannel → user → default → 裸跑"]

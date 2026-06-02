@@ -18,7 +18,7 @@
 
 | 目录 | 当前职责 | 判断 |
 | --- | --- | --- |
-| `intelligence/` | long-term context、reflection、knowledge-base、vector-store | 已形成主要边界 |
+| `intelligence/` | memory、long-term context、reflection、knowledge-base、vector-store | 已形成主要边界 |
 | `observability/` | structured logging、traces、usage / performance、diagnostics | 已形成主要边界 |
 | `governance/` | permission gate、quota、audit log、blocklist、agent policy | 已有 implementation spec |
 | `integrations/` | MCP client、sandbox client、外部能力接入 | 已有 implementation spec |
@@ -28,8 +28,8 @@
 
 | 文件 | 行数级别 | 建议归属 | 迁移优先级 |
 | --- | ---: | --- | --- |
-| `admin.py` | 500+ | `platform.admin_cli` | P0 |
-| `memory_layer.py` | 已迁移 shim | `intelligence.memory` | 已有 implementation spec |
+| `admin.py` | 已删除 legacy shim | `platform.admin_cli` | 已完成 cleanup |
+| top-level User Memory file | 已删除 legacy shim | `intelligence.memory` | 已完成 cleanup |
 | `agent_loop.py` | 1000+ | `runtime.agent_loop` | P1 |
 | `user_store.py` / `api_key_store.py` / `auth.py` / `agent_store.py` | 100-300 | `platform.user_center` / `platform.agent_admin` | P2 |
 | `im_user_store.py` / `im_connector_*` / `im_channel_allowlist.py` | 50-160 | `channels` | P2 |
@@ -44,7 +44,7 @@
 | `governance` | 工具权限、审批、quota、blocklist、audit | `permission_gate`、`quota`、`audit_log`、`blocklist` |
 | `channels` | IM / webhook / schedule 等入口适配和渠道身份绑定 | `im_gateway`、`im_user_store`、`webhook_router`、`cron_scheduler` |
 | `intelligence` | memory、long-term context、reflection、knowledge-base、vector-store | 已有目录 |
-| `integrations` | MCP、sandbox、外部系统 connector runtime | `mcp_client`、`sandbox_client` |
+| `integrations` | MCP、sandbox、外部系统 connector runtime | `mcp`、`sandbox` |
 | `observability` | logs、traces、summaries、diagnostics | 已有目录 |
 | `infrastructure` | config、database runtime、migration helpers、deployment primitives | `config`、`db` |
 
@@ -66,8 +66,8 @@ entrypoints / platform / channels
 优先级最高。`admin.py` 已经承载用户、IM、schedule、agent、KB connectors、diagnostics 和 observability
 多类命令，是当前最容易产生并行冲突的文件。
 
-状态：已有 implementation spec `2026-06-02-admin-cli-module-split`，负责把实际 CLI 实现迁入
-`platform.admin_cli`；legacy `fleetent.admin` shim 已进入 cleanup 批次。
+状态：implementation spec `2026-06-02-admin-cli-module-split` 已完成，实际 CLI 实现已迁入
+`platform.admin_cli`；legacy admin shim 已删除。
 
 建议目标：
 
@@ -98,9 +98,8 @@ src/fleetent/platform/admin_cli/
 
 ### 2. `governance-package-migration`
 
-状态：已有 implementation spec `2026-06-02-governance-package-migration`，负责把权限审批、quota、
-audit log、blocklist、agent policy 迁入 `fleetent.governance`；legacy 顶层 import shim 已进入 cleanup
-批次。
+状态：implementation spec `2026-06-02-governance-package-migration` 已完成，权限审批、quota、
+audit log、blocklist、agent policy 已迁入 `fleetent.governance`；legacy 顶层 import shim 已删除。
 
 保留：
 
@@ -114,9 +113,9 @@ audit log、blocklist、agent policy 迁入 `fleetent.governance`；legacy 顶�
 
 ### 3. `memory-layer-package-migration`
 
-状态：已有 implementation spec `2026-06-02-memory-layer-package-migration`，负责将
-`memory_layer.py` 迁入 `intelligence/memory/`，拆分 models、store、extraction、search、operations、
-maintenance，并保留 legacy shim。
+状态：implementation spec `2026-06-02-memory-layer-package-migration` 已完成，已将
+top-level User Memory 实现迁入 `intelligence/memory/`，拆分 models、store、extraction、search、operations、
+maintenance；legacy shim 已删除。
 
 建议目标：
 
@@ -193,9 +192,9 @@ src/fleetent/runtime/
 
 ### 7. `integrations-and-infrastructure-package-migration`
 
-状态：`mcp_client.py` 和 `sandbox_client.py` 已有 implementation spec
-`2026-06-02-integrations-package-migration`，负责迁入 `fleetent.integrations.mcp` 和
-`fleetent.integrations.sandbox`；legacy 顶层 import shim 已进入 cleanup 批次。
+状态：implementation spec `2026-06-02-integrations-package-migration` 已完成，top-level MCP 与 sandbox
+实现已迁入 `fleetent.integrations.mcp` 和 `fleetent.integrations.sandbox`；legacy 顶层
+import shim 已删除。
 
 后置迁移：
 
@@ -217,7 +216,7 @@ src/fleetent/runtime/
 示例：
 
 ```python
-# src/fleetent/memory_layer.py
+# src/fleetent/<legacy_module>.py
 from fleetent.intelligence.memory import MemoryItem, create, search
 
 __all__ = ["MemoryItem", "create", "search"]

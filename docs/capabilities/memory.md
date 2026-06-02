@@ -6,7 +6,7 @@
 
 User Memory 的提取、存储与检索，让 agent 在多次对话中积累单个用户授权范围内的长期事实。
 
-**负责**：从对话中提取用户相关事实，按类型结构化存储，支持向量相似度检索，并向 vector_store reindex 暴露当前可索引记忆。当前 `memory_layer` 实现的是 User Memory，不是团队 / 租户 / 项目级 Shared Memory。
+**负责**：从对话中提取用户相关事实，按类型结构化存储，支持向量相似度检索，并向 vector_store reindex 暴露当前可索引记忆。当前 `fleetent.intelligence.memory` 实现的是 User Memory，不是团队 / 租户 / 项目级 Shared Memory。
 
 **不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、Shared Memory、未经 owner 确认的 reflection 写回。
 
@@ -16,19 +16,19 @@ fleetent 的记忆系统借鉴认知科学的四类记忆划分，每类由不�
 
 | 类型 | 内容 | 存储位置 | 负责模块 |
 |------|------|---------|---------|
-| **语义记忆** | 用户身份、偏好、临时状态等跨 session 事实 | SQLite `memory_items` + vector_store | `memory_layer`（本模块）|
+| **语义记忆** | 用户身份、偏好、临时状态等跨 session 事实 | SQLite `memory_items` + vector_store | `fleetent.intelligence.memory`（本模块）|
 | **情节记忆** | 对话与工具执行的完整历史轨迹 | SQLite `traces` 表 | `observability` |
 | **程序记忆** | agent 完成特定任务的技能与方法 | `skills/` 目录 | `skill_registry` |
 | **工作记忆** | 当前 session 的对话上下文（session 结束即释放） | 内存 | `context_mgr` |
 
-本模块（`memory_layer`）只负责**User Memory 中的语义记忆**，即按 `identity` / `preferences` / `context` 三类结构化存储的用户事实。其 owner 是 `user_id`，vector namespace 是 `mem:{user_id}`。其余三类由各自模块独立管理，`reflection` 跨模块读取情节记忆（traces）与 User Memory 来生成维护建议；真正改写、合并、标记 stale 或删除 User Memory 必须通过 owner-approved maintenance proposal 或用户显式开启的低风险自动策略。
+本模块（`fleetent.intelligence.memory`）只负责**User Memory 中的语义记忆**，即按 `identity` / `preferences` / `context` 三类结构化存储的用户事实。其 owner 是 `user_id`，vector namespace 是 `mem:{user_id}`。其余三类由各自模块独立管理，`reflection` 跨模块读取情节记忆（traces）与 User Memory 来生成维护建议；真正改写、合并、标记 stale 或删除 User Memory 必须通过 owner-approved maintenance proposal 或用户显式开启的低风险自动策略。
 
 **调用关系**：
 - 依赖：model_router（`memory_extraction` task，默认轻量模型，可通过 config 覆盖）、vector_store（向量索引）、config
 - 被依赖：long_term_ctx（检索注入内容）、reflection（读取现有记忆、通过受控 public API 应用已批准维护 proposal）
 
 **模块归属**：
-- owning package：`intelligence.memory_layer`
+- owning package：`fleetent.intelligence.memory`
 - public API：`search(user_id, query, limit)`、`extract_and_update(user_id, conversation)`、`iter_indexable_memories(user_id)`、`update_user_memory_content()`、`mark_user_memory_stale()`、`delete_user_memory()`、`merge_user_memories()`、`MemoryItem`
 - owned tables：`memory_items`
 - config namespace：`memory.*`
@@ -121,7 +121,7 @@ async def mark_user_memory_stale(user_id: str, memory_id: str) -> None:
 - 写入 memory 后同步写入 vector_store，namespace 为 `mem:{user_id}`
 - `search()` 通过 vector_store 查相关 memory ids，回查 SQLite 并过滤过期 context
 - `iter_indexable_memories(user_id)` public API 返回当前未过期 memory source records，供 vector_store 同步 reindex 使用
-- reflection maintenance apply 只通过 memory-layer public mutation API，不直接写 `memory_items`
+- reflection maintenance apply 只通过 `fleetent.intelligence.memory` public mutation API，不直接写 `memory_items`
 - 删除旧 JSONL memory 兼容和 `load_memories()` 直接注入路径
 
 当前定位：已完成结构化语义记忆地基、基础维护动作、第一批 memory extraction evaluation 基线、与 KB
@@ -203,7 +203,7 @@ async def mark_user_memory_stale(user_id: str, memory_id: str) -> None:
 
 ## 服务化 / 目录边界判断
 
-memory-layer 应继续作为模块化单体内的 `intelligence.memory_layer` 边界。未来如果要独立服务化，
+User Memory 应继续作为模块化单体内的 `fleetent.intelligence.memory` 边界。未来如果要独立服务化，
 更可能拆出的是“memory evaluation / maintenance job”，而不是最早拆运行时读写路径。
 
 ## 验收标准
@@ -225,7 +225,7 @@ memory-layer 应继续作为模块化单体内的 `intelligence.memory_layer` �
 
 **场景 4：向量检索（v1.0）**
 - Given：用户有 50 条历史记忆，当前话题是"Python 调试"
-- When：long_term_ctx 调用 memory_layer.search()
+- When：long_term_ctx 调用 `fleetent.intelligence.memory.search()`
 - Then：返回与"Python 调试"相关的记忆条目，而非固定最近 20 条
 
 **场景 5：context 类记忆过期（v1.0）**
@@ -262,4 +262,4 @@ memory-layer 应继续作为模块化单体内的 `intelligence.memory_layer` �
 
 - [ ] 冲突判断粒度：同 type 下全量比较，还是只对语义相似度超过阈值的条目做冲突检测？（负责人：待认领）
 - [ ] context TTL 起算点：首次提及时间，还是最后一次提及时间？（负责人：待认领）
-- [ ] 记忆条数上限：v1.0 先设软监控阈值（超出记告警日志），还是直接按 type 设硬上限？如设硬上限，identity / preferences 各多少合适？超出时由 reflection 批量合并，还是 memory_layer 内联驱逐？（负责人：待认领）
+- [ ] 记忆条数上限：v1.0 先设软监控阈值（超出记告警日志），还是直接按 type 设硬上限？如设硬上限，identity / preferences 各多少合适？超出时由 reflection 批量合并，还是 memory 模块内联驱逐？（负责人：待认领）
