@@ -61,6 +61,20 @@ def test_login_success_and_me(client):
     assert me.json()["email"] == "log@x.com"
 
 
+def test_builtin_admin_login_by_username(client):
+    # Builtin admin is seeded with email=None; login form sends the "Username" field.
+    # admin/admin must resolve the builtin admin by name, not only by email.
+    seeded = auth.seed_builtin_admin()
+    assert seeded is not None
+    r = client.post(
+        "/admin/login",
+        json={"email": auth.BUILTIN_ADMIN_NAME, "password": auth.BUILTIN_ADMIN_PASSWORD},
+    )
+    assert r.status_code == 200
+    assert r.json()["role"] == "built_in_admin"
+    assert r.json()["must_reset"] is True  # default admin must change password first
+
+
 def test_login_bad_password_401(client):
     user_store.create_web_user("a@x.com", "A", password_hash=auth.hash_password("right"))
     assert (

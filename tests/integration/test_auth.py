@@ -25,10 +25,10 @@ def test_seed_builtin_admin(db):
     assert result is not None
     user, temp_password = result
     assert user.role == "built_in_admin"
-    # fixed default credentials admin/admin; no forced reset
+    # fixed default credentials admin/admin; first login forces a password change
     assert user.name == auth.BUILTIN_ADMIN_NAME == "admin"
     assert temp_password == auth.BUILTIN_ADMIN_PASSWORD == "admin"
-    assert user.must_reset == 0
+    assert user.must_reset == 1
     assert auth.verify_password(temp_password, user_store.get_by_id(user.id).password_hash)
     # second seed is a no-op
     assert auth.seed_builtin_admin() is None

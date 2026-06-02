@@ -80,9 +80,25 @@ def admin_ui() -> str:
     return _UI_PATH.read_text(encoding="utf-8")
 
 
+def _resolve_login_user(identifier: str) -> user_store.User | None:
+    """Resolve the login identifier to a user.
+
+    Web users authenticate by email. The built-in admin is seeded with no email, so the
+    login form's "Username" field also resolves it by its fixed built-in name.
+    """
+    user = user_store.get_by_email(identifier)
+    if user is not None:
+        return user
+    if identifier == auth.BUILTIN_ADMIN_NAME:
+        builtin = user_store.get_builtin_admin()
+        if builtin is not None and builtin.name == identifier:
+            return builtin
+    return None
+
+
 @router.post("/login")
 def login(body: LoginBody) -> dict[str, Any]:
-    user = user_store.get_by_email(body.email)
+    user = _resolve_login_user(body.email)
     if user is None or not auth.verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="invalid credentials")
     if user.status != "active":
