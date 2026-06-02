@@ -24,6 +24,9 @@ docs/
     platform.md                   ← 用户管理、API 认证、admin CLI
     observability.md              ← 评估日志、数据统计、链路追踪
     deployment.md                 ← on-premises 打包、配置
+  deployment/
+    pilot-install-checklist.md    ← Pilot 安装、升级、备份、健康检查和问题上报清单
+    pilot-acceptance-guide.md     ← Pilot 测试环境人工验收、Go / No-Go 判定和报告模板
 ```
 
 ## 写作规范

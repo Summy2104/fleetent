@@ -266,7 +266,7 @@ public API、测试基线和 OpenSpec 批次已经完成。它不等同于可以
 | 层级 | 含义 | 当前判断 |
 | --- | --- | --- |
 | MVP Foundation | 核心模块、API、存储、测试、评估、边界完成 | 常乐负责模块基本完成 |
-| Pilot MVP | 可部署到真实环境，小范围用户可用，可配置、可排障、可恢复 | 常乐负责模块已基础完成，等待真实环境 smoke 和试用验收 |
+| Pilot MVP | 可部署到真实环境，小范围用户可用，可配置、可排障、可恢复 | 常乐负责模块已基础完成，验收入口为 [Pilot acceptance guide](../deployment/pilot-acceptance-guide.md) |
 
 ### MVP Foundation 判定
 
@@ -281,6 +281,10 @@ public API、测试基线和 OpenSpec 批次已经完成。它不等同于可以
 - 默认测试不依赖外部 LLM / embedding / SaaS；真实模型效果验证有手动开关和 fixture。
 
 ### Pilot MVP 判定
+
+Pilot MVP 的人工验收入口是 [Pilot acceptance guide](../deployment/pilot-acceptance-guide.md)。该指南用于真实测试环境验收，
+不替代自动化测试；默认测试仍不连接真实 LLM、embedding、Google Drive 或 Confluence，真实外部 smoke 必须显式
+opt-in，未配置时记录为 skipped。
 
 常乐负责模块要达到生产小范围试用标准，还需要满足：
 
@@ -306,9 +310,15 @@ Pilot MVP 后仍需真实环境验证：
 - 使用真实 LLM / embedding provider 跑 smoke。
 - 使用真实 Google Drive / Confluence credential_ref 跑 connector check / sync smoke。
 - 按 `docs/deployment/pilot-install-checklist.md` 完成一次准生产安装、升级、备份、恢复和诊断包导出演练。
+- 按 `docs/deployment/pilot-acceptance-guide.md` 完成 Go / Conditional Go / No-Go 判定，并把问题分类为
+  Pilot blocker、docs gap、enhancement 或 out-of-scope。
 - 根据试用反馈决定是否补 HTTP / UI 管理入口、credential store、scheduler / worker 或 full sync history。
 
 ### Pilot 后增强 / Knowledge Quality Track
+
+Pilot 后增强可以与 Pilot 验收并行推进，但不默认阻塞第一次 Pilot 验收。只有验收报告中被分类为 Pilot
+blocker 的问题才会阻塞 Go；docs gap、enhancement 和 out-of-scope 分别进入文档补齐、后续 spec 或外部 owner
+跟进。
 
 以下 specs 不是 Pilot MVP 的前置，但属于 capability 原规划中的重要知识库质量能力，需要进入 roadmap，
 避免后续只做运维化而丢掉知识库增强方向：
