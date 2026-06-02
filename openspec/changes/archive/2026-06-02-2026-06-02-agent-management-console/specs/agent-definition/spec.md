@@ -1,14 +1,14 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
-### Requirement: Agent definition storage
+### Requirement: Agent console state storage
 
 The agent operational state SHALL store `status` (`enabled` / `disabled` / `archived`, default `enabled`), `provenance` (`managed` / `adhoc`, default `adhoc`), and `drift` (integer boolean, default `0`). `status=archived` SHALL be consistent with the soft-delete marker (archive sets both; restore clears the soft-delete marker and sets `status=enabled`). These columns SHALL be provided via an Alembic migration that backfills existing rows (`status=enabled`, or `status=archived` where already soft-deleted; `provenance=adhoc`, `drift=0`). SQL SHALL use named parameters and go through the store boundary; no ORM.
 
-> Implementation note: to avoid a hard dependency on the not-yet-landed `2026-05-29-multi-agent-management` schema, this state lives in a side table `agent_admin_state` (migration 015, modeled on `skill_admin_state`) keyed by agent name rather than ALTERing the legacy `agents` table; unification with multi-agent's `deleted_at` is deferred to that change.
+> Implementation note: this state lives in a side table `agent_admin_state` (migration 015, modeled on `skill_admin_state`) keyed by agent name rather than ALTERing the `agents` table; this is the "console state" the agent-definition storage requirement defers archival/disable to.
 
 #### Scenario: New columns added with defaults via migration
 - **WHEN** the Alembic migration runs against an existing database
-- **THEN** `agents` gains `status` / `provenance` / `drift` columns; existing rows get `status=enabled` (or `archived` if already soft-deleted), `provenance=adhoc`, `drift=0`
+- **THEN** `agent_admin_state` gains `status` / `provenance` / `drift` columns; existing rows get `status=enabled` (or `archived` if already soft-deleted), `provenance=adhoc`, `drift=0`
 
 #### Scenario: Archive keeps status and deleted_at consistent
 - **WHEN** an agent is archived

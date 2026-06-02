@@ -1,10 +1,8 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
-### Requirement: Admin role flag on users
+### Requirement: Role-based guard for agent lifecycle and console writes
 
-Routes under `/admin/agents/*` SHALL be guarded by `auth.require_role` rather than the boolean `is_admin`. Write operations (create, edit, clone, create-from-template, enable, disable, archive, restore, model change, binding) SHALL require `role in {admin, built_in_admin}`. Read operations (list, detail, observability) SHALL be allowed for `viewer` and above. The compatibility mapping `is_admin == role in {admin, built_in_admin}` (provided by `2026-05-30-user-management`) SHALL hold.
-
-> Supersedes the boolean `is_admin` guard from `2026-05-29-multi-agent-management`.
+The lifecycle, clone, create-from-template, and observability endpoints under `/admin/agents/*` SHALL apply the same role-based Session auth required for the version and binding endpoints: write operations (create, edit, clone, create-from-template, enable, disable, archive, restore, model change, binding) SHALL require `role in {admin, built_in_admin}`; read operations (list, detail, observability) SHALL be allowed for `viewer` and above. No `users.is_admin` column SHALL be introduced; the compatibility mapping `is_admin == role in {admin, built_in_admin}` (provided by `2026-05-30-user-management`) SHALL hold.
 
 #### Scenario: Viewer blocked from agent write
 - **WHEN** a `viewer` sends a create/edit/toggle/archive/clone request to `/admin/agents/*`
@@ -18,9 +16,9 @@ Routes under `/admin/agents/*` SHALL be guarded by `auth.require_role` rather th
 - **WHEN** an `admin` or `built_in_admin` sends a write request to `/admin/agents/*`
 - **THEN** the request is authorized (subject to other validation)
 
-### Requirement: Agent CRUD endpoints
+### Requirement: Agent lifecycle, clone, template, and observability endpoints
 
-The system SHALL expose, in addition to existing CRUD/version/binding endpoints:
+The system SHALL expose, in addition to the existing CRUD/version/binding endpoints:
 - `POST /admin/agents/{name}/enable` and `POST /admin/agents/{name}/disable` to toggle `status`.
 - `POST /admin/agents/{name}/archive` (binding-protected, requires confirmation) and `POST /admin/agents/{name}/restore`.
 - `POST /admin/agents/{name}/clone` to create a copy without bindings.
@@ -28,8 +26,6 @@ The system SHALL expose, in addition to existing CRUD/version/binding endpoints:
 - `GET /admin/agents/{name}/observability` for the per-agent aggregated view.
 
 Every write SHALL emit an `audit_log` entry stamped with the acting user id.
-
-> The CRUD and version endpoints from `2026-05-29-multi-agent-management` remain in force; this change adds lifecycle, clone, template, and observability endpoints on the same router and routes all writes through `audit_log`.
 
 #### Scenario: Disable endpoint stops routing
 - **WHEN** an admin sends `POST /admin/agents/ops-bot/disable`
