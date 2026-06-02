@@ -10,7 +10,7 @@ ContextConfig = dict[str, Any]
 def _default_config() -> ContextConfig:
     from fleetent.config import Settings
 
-    s = Settings()  # type: ignore[call-arg]
+    s = Settings(anthropic_api_key="")
     return {
         "max_tokens": s.context_max_tokens,
         "compress_threshold": s.context_compress_threshold,

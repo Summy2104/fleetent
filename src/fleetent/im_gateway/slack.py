@@ -23,7 +23,7 @@ def create_app() -> object:
 
     from fleetent.config import Settings
 
-    bot_token = Settings().slack_bot_token  # type: ignore[call-arg]
+    bot_token = Settings(anthropic_api_key="").slack_bot_token
     app = AsyncApp(token=bot_token)
 
     @app.event("message")
