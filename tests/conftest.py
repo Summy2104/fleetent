@@ -9,6 +9,18 @@ from fleetent import db
 
 
 @pytest.fixture(autouse=True)
+def _default_required_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provide the required ANTHROPIC_API_KEY for Settings() across the suite.
+
+    Settings.anthropic_api_key is required (CLAUDE.md: "默认路由必需"). Both source
+    branches assumed it lived in the run environment; the merge has no global test
+    env, so set a dummy here. Tests that exercise missing-key behaviour can
+    monkeypatch.delenv it themselves (autouse runs before the test body).
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+
+@pytest.fixture(autouse=True)
 def _reset_provider_health_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     """Give every test a fresh provider health cache.
 

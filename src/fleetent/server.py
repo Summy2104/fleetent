@@ -181,12 +181,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.telegram_bot_token:
         asyncio.create_task(_start_telegram_adapter())
 
+    # Best-effort scheduler start: a missing/locked scheduled_tasks table (e.g. an
+    # unmigrated DB) must not prevent the HTTP API from serving, consistent with the
+    # sandbox-cleanup / IM-adapter best-effort pattern above. Surfaced via warning.
     cron = CronScheduler(settings=settings.scheduling)
-    await cron.start()
+    try:
+        await cron.start()
+    except Exception as exc:
+        logger.warning("cron_scheduler_start_failed error=%s", exc)
 
     yield
 
-    await cron.shutdown()
+    try:
+        await cron.shutdown()
+    except Exception as exc:
+        logger.warning("cron_scheduler_shutdown_failed error=%s", exc)
     await session_mgr.stop_session_maintenance()
     await mcp_client.close()
 

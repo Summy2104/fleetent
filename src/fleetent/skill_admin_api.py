@@ -143,7 +143,9 @@ class BindingBody(BaseModel):
 
 
 def _validate_frontmatter(content: str) -> bool:
-    fm = skill_registry._parse_frontmatter(content)
+    # zhangyang's _parse_frontmatter returns None for absent/invalid frontmatter
+    # (main's returned {}); guard so invalid uploads yield 422 instead of crashing.
+    fm = skill_registry._parse_frontmatter(content) or {}
     return bool(fm.get("name")) and bool(fm.get("description"))
 
 

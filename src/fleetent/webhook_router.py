@@ -4,7 +4,10 @@ import hashlib
 import hmac
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 hmac_compare_digest = hmac.compare_digest
 
@@ -16,6 +19,24 @@ class WebhookSource:
     secret: str | None = None
     agent_name: str | None = None
     message_template: str | None = None
+
+
+def load_sources(path: Path) -> dict[str, WebhookSource]:
+    """Load webhook source definitions from a YAML file. Returns {} if file missing."""
+    if not path.exists():
+        return {}
+    raw = yaml.safe_load(path.read_text()) or {}
+    result: dict[str, WebhookSource] = {}
+    for entry in raw.get("sources", []):
+        src = WebhookSource(
+            id=entry["id"],
+            user_id=entry["user_id"],
+            secret=entry.get("secret"),
+            agent_name=entry.get("agent_name"),
+            message_template=entry.get("message_template"),
+        )
+        result[src.id] = src
+    return result
 
 
 def extract_message(template: str | None, payload: Any) -> str:

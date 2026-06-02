@@ -306,6 +306,24 @@ async def save(
     tmp.write_text(json.dumps(messages, ensure_ascii=False))
     tmp.replace(path)
 
+
+async def clear(session_id: str) -> None:
+    """Empty a session's transcript (admin clear / IM `/new`), under the session lock."""
+    async with session_lock(session_id):
+        await save(session_id, [])
+
+
+async def inject_message(session_id: str, role: str, content: str) -> None:
+    """Append a single message to a session's transcript atomically under the lock.
+
+    Used by the admin console (chat_admin_api) to inject a human-agent reply during a
+    takeover. Grafted from main's session_mgr during the architecture merge.
+    """
+    async with session_lock(session_id):
+        messages = await load(session_id)
+        messages.append({"role": role, "content": content})
+        await save(session_id, messages)
+
     # Best-effort metadata index update: the message file is the source of truth
     # and is already durably written, so an index failure is logged and swallowed
     # rather than rolling back the successful save.

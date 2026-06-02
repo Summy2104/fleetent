@@ -211,10 +211,11 @@ def _load_migration_002():
     from pathlib import Path
 
     path = (
-        Path(__file__).resolve().parents[1]
+        Path(__file__).resolve().parents[2]
         / "migrations"
         / "versions"
-        / "002_add_agent_features.py"
+        # Rebased 002 -> 026 during the architecture merge (after main's head 025).
+        / "026_add_agent_features.py"
     )
     spec = importlib.util.spec_from_file_location("migration_002", path)
     assert spec is not None and spec.loader is not None
@@ -237,8 +238,9 @@ def test_alembic_002_upgrade_adds_features_to_legacy_table(tmp_path):
     from alembic.operations import Operations
 
     migration = _load_migration_002()
-    assert migration.revision == "002"
-    assert migration.down_revision == "001"
+    # Rebased during the architecture merge: 002 -> 026, chained after main's head 025.
+    assert migration.revision == "026"
+    assert migration.down_revision == "025"
 
     dbp = tmp_path / "legacy.db"
     raw = sqlite3.connect(dbp)
