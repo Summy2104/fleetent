@@ -29,15 +29,18 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`。
 1. `opsx:propose`：定义 proposal、specs、design（可选）、tasks；`tasks.md` 必须体现 TDD 顺序。
 2. 建 worktree + 功能分支。
 3. `opsx:apply`：按 task 执行，每个 task 强制 TDD。
-4. merge / PR；确认分支已合入目标主分支且 worktree 干净后，清理 worktree。
-5. `opsx:archive`：所有 checkbox 为 `[x]` 后归档并同步 specs。
+4. `opsx:archive`：所有 checkbox 为 `[x]` 后，在当前功能分支归档并同步 specs。
+5. 推送分支并清理 worktree；后续在主仓库基于已推送分支决定 merge / PR。
 
 `tasks.md` 中所有实现任务必须拆成 TDD 红绿步骤：先 `Write failing tests` 并运行
 `uv run pytest -x -q` 确认红，再实现并运行同一命令确认绿；测试任务必须在对应实现任务之前。
 如果 proposal / tasks 没有体现红绿循环，不能进入 implementation。
 
-worktree 清理必须满足三个条件：对应分支已被目标主分支（通常是 `origin/main`）包含、worktree
-干净、没有未提交或未推送的用户改动。PR 仍需修改、分支未合入或存在未提交改动时不得清理。
+归档先于合并决策：`opsx:archive` 在功能分支上执行，spec 同步随同一分支进入后续 PR，便于一并
+review；archive 表示"实现完成"，不代表已上线到 `main`。
+
+worktree 清理必须满足三个条件：对应分支已推送到 remote（或已建 PR）、worktree 干净、没有未提交
+的用户改动。分支尚未推送或存在未提交改动时不得清理，避免丢失工作。
 
 OpenSpec proposal / design 进入 implementation 前必须声明模块边界影响：
 
