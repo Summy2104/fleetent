@@ -898,3 +898,40 @@ SB9（sandbox 轨末环）：`run_code` 执行结果写入 trace。
 **sweep_idle 仍未接**：本次**不接** `sweep_idle`（agent-scope 容器空闲回收），仍留待调度器（cron_scheduler）按 SB2 原 design 处理。
 
 **验证**：pytest 1194 → **1197 passed**（test_session_mgr.py 新增 3 个用例：removed 非空时按序 release、removed 为空时不 release、release_session 抛异常时 save 仍成功且批次在首个失败处止于守卫）。既有 save/maintenance 用例不破。ruff（改动文件 session_mgr.py / test_session_mgr.py）format+check 全绿。mypy `src`：74 → **74**（无新增错误模式）。不 commit / 不建 PR。
+
+## [波次4] tool-parallel-dispatch (AR3)
+
+把 `agent_loop.run()` / `run_stream()` 同一轮内多个 `tool_calls` 从顺序 dispatch 改为并行调度（`asyncio.gather`）+ 原序回填。D1–D8 owner 已批，照实现。下记落点、最小实现选型、N=1 等价抓基线方式、并发上限分批实现。
+
+**三阶段重构落点（D1/D2）**：在 `_safe_dispatch` 之后新增三阶段脚手架——
+
+- 数据类 `_PlanSlot`：一槽对应一个原 `tool_calls` 索引，携带 `tc_id` / `name` / `tc_fp` / `args`，并以 `placeholder=(content, failed)`（guardrail 短路·拒批）或 `runner`（sub_agent 自 gather）或「待 dispatch」三态表达计划结果；`counts_failure` 标记该槽是否在回填时折叠 `consecutive_failures`（guardrail / 拒批槽不动计数，与现状逐分支一致），`resource_key` 用于 D5 串行化。
+- `_plan_run_slots()`（run() 专用，**阶段一·串行·保原序**）：逐个跑 AR10 `evaluate_guardrail`（依赖 `state` 的 per-call streak，必须串行）→ sub_agent 特例转 `runner` 槽 → medium/high 经 `_default_gate.request_approval` **串行**审批，拒批转 placeholder 槽并置 `approval_rejected`，批准转待执行槽。run_stream 的阶段一**内联**在原 dispatch 循环位置（无审批 / 无 sub_agent 特例，仅 guardrail），且在此处按原序 yield `tool_call` 事件（D8）。
+- `_execute_pending()`（**阶段二·并发**）：对待执行槽 `asyncio.gather`，gather 返回顺序=入参顺序，但额外用 `tc_id → (text, failed)` 字典映射回填，回填阶段按原索引取值，与完成序解耦。**不传 `return_exceptions=True`**（D4：`_safe_dispatch` 已归一化工具异常，真异常应冒泡）。
+- `_backfill_slots()`（run() 用）/ run_stream 内联回填（**阶段三·串行·保原序**）：按原 `tool_calls` 索引逐个折叠 `consecutive_failures`、append `role:"tool"` 消息（T4 截断沿用 `is_self_truncating`）、`record_tool_call`（loop-detection 窗口按原序）。run_stream 在此阶段按原序逐个 yield `tool_result`（全批完成后，非完成序，D8）。
+
+`run()` / `run_stream()` 各在 `guardrail_threshold` 解析后加 `parallel_max = _resolve_parallel_max()`（读 `Settings.agent_tool_parallel_max`，可 monkeypatch）。`ReplyFunc` 类型别名上移到模块顶部（`_plan_run_slots` 注解需在定义前可见；本模块无 `from __future__ import annotations`）。
+
+**为何 `record_tool_call` / `consecutive_failures` 可全部移到回填阶段而不破 guardrail**：核实 `evaluate_guardrail` 只读 `state.last_call_fingerprint` / `consecutive_repeat` / `loop_warning_injected`，**不读** `tool_history`（窗口）；`consecutive_failures` 只在每轮顶部 `controller.should_stop` 检查点被读。故计数 / 窗口记录推迟到回填（串行原序）对计划阶段决策零影响，且与顺序执行逐结果语义字节级一致。guardrail 的 `loop_warning_injected` / `guardrail_tripped` / `approval_rejected` 标志仍在阶段一串行设置，保持原序可见性。
+
+**N=1 等价如何抓基线断言**：基线已有 1375 passed 的 `test_agent_loop.py`（135 例）覆盖 N=1 全路径（普通 dispatch、sub_agent 拦截 + 格式化、审批拒批 + 占位、失败计数、取消 token 派生、流式 tool_call/tool_result 事件序、消息回填内容）。重构后**先跑该套件全绿**作为 N=1 字节级回归锁（messages 内容 / tool_call_id / 事件序 / 计数 / stop_reason 全不变），再补显式 N=1 断言 `test_run_n1_byte_equivalent_messages_and_counts`。三阶段对 N=1 退化为单槽：plan 产一槽 → execute 单元素 gather → backfill 单次回填，路径与原顺序分支等价。
+
+**D3 审批串行 / D4 逐结果计数不吞异常**：审批在 `_plan_run_slots` 阶段一逐个 `await request_approval`（原序），全批准才进阶段二 gather；拒批槽不进批。测试 `test_run_multi_high_risk_approved_serially_then_parallel`（断言两次 approve 都先于任何 dispatch）、`test_run_rejected_tool_excluded_from_batch_others_run`（拒批 x 不 dispatch、y 仍跑、占位 + approval_rejected）。D4：`_execute_pending` 不用 `return_exceptions`；`test_run_single_failure_does_not_break_batch`（a 崩、b 正常返回）、`test_run_consecutive_failures_per_result_trips_terminate`（两失败逐结果累计到 2 触发停）、`test_run_failure_then_success_in_batch_resets_count`（原序 [fail, ok] 末值归 0、阈值 1 不停）。
+
+**D5 沙箱串行化最小实现选型**：选「**同键收敛为一个顺序子协程**」而非 per 键 Lock——`_resource_key(name, session_id)` 对 `run_code` 返回 `f"run_code:{session_id}"`、其余返回 None。`_execute_pending` 先按 `resource_key` 把待执行槽分组（None 各自单例组，同键归一组保序），每组用 `_run_serial_group` 串行 await，**一组占 gather 一个 awaitable 槽**——组内串行、组间与自由工具并行。无需 import 沙箱内部、无锁生命周期管理，可观察行为=同容器不并发 exec。测试 `test_run_same_session_run_code_serialized`（两 run_code start/end 不交叠）、`test_run_non_sandbox_tools_still_parallel`（自由工具 max 并发=2）。
+
+**D7 并发上限分批实现**：`_execute_pending` 把分组后的组列表按 `batch_size = parallel_max if parallel_max > 1 else 1` 切片，逐批 `gather`（批间串行），结果统一进字典；回填仍按原索引。`<=1` → 每批 1 组 = 全顺序（等价现状）。测试 `test_run_parallel_max_one_runs_sequentially`（cap=1 严格 start/end 不交叠的顺序）、`test_run_parallel_max_splits_into_batches_backfill_original_order`（3 工具 cap=2 → 并发峰值 ≤2、回填仍 a,b,c）。
+
+**D6 sub_agent 纳入并行批**：sub_agent 作为 `runner` 槽进 `_execute_pending`（与其它工具同批 gather），其内部仍由 `SubAgentExecutor` 自 gather 子任务；深度 1 守卫（`name == _SUB_AGENT_TOOL and not is_sub_agent`）原样保留——`is_sub_agent=True` 时不转 runner、走普通 dispatch。测试 `test_run_sub_agent_as_one_batch_slot_alongside_other_tool`（sub_agent 与普通工具同轮、原序回填、executor 仍被调一次）、`test_run_sub_agent_excluded_for_child_agent_depth_guard`（子 agent 内 executor 不被调、sub_agent 走 dispatch）。
+
+**D8 流式原序**：run_stream 阶段一按原序 yield `tool_call`，阶段三全批完成后按原索引 yield `tool_result` + append 消息。测试 `test_run_stream_n2_events_in_original_order`（构造 b 先完成、断言 tool_result 仍 a,b 原序）、`test_run_stream_n_tool_calls_match_n_tool_results`（N tool_call ↔ N tool_result）。
+
+**自解冲突 / 决策**：
+1. `_plan_run_slots` 内 sub_agent 的 `_sub_agent_runner` 用默认参数 `tasks=tasks` 绑定闭包，避免循环变量后绑问题。
+2. guardrail / 拒批占位内容回填时仍过 `is_self_truncating`/`truncate_tool_result`——原状直接 append 不截断，但 `_GUARDRAIL_FEEDBACK_TEXT` / 拒批串均远短于截断阈值，`truncate_tool_result` 原样返回 → 字节级等价；统一走回填路径减分支。
+3. D5 资源键仅认 `run_code`（当前唯一「同 session 容器有状态」工具，SB2）；未来新增同类工具在 `_resource_key` 扩展即可，不改调度骨架。
+4. 取消「在途中止」复用 AR19：并行批每个 `_safe_dispatch` 自派生带 deadline 的 child token（parent=run-level token），无需 AR3 额外接线；`test_run_parallel_batch_shares_run_level_token` 断言批内每个 child.parent 同为 run-level token，`test_run_cancel_during_batch_still_backfills_every_tool_call` 断言取消后 N 个 tool_call 仍各回填一条 tool 消息、下检查点 cancelled。
+
+**需 zy 核实**：无阻塞项。`_resource_key` 当前仅串行化 `run_code`（与 design D5「同容器有状态工具」一致）；若后续认定别的内置/插件工具也共享 session 容器状态，需在 `_resource_key` 补名单。
+
+**验证**：pytest **1375 → 1398 passed**（+3 config[默认 8 / env 覆盖 / <=1]、+20 agent_loop[N=1 等价、N>1 并行 + 原序、完成序≠原序、tool_call_id 配对、sanitize 合法、批共享 token、取消全回填、审批串行、拒批排除、失败隔离、逐结果计数、分批、cap=1 顺序、沙箱串行、自由并行、流式原序、N↔N、sub_agent 单槽、深度守卫]）。ruff（改动文件 agent_loop.py / config.py / test_agent_loop.py / test_config.py）format+check 全绿（agent_loop.py 残留 1 个 N814 为基线既有、非本次引入）。mypy `src`：**78 → 79**，+1 为 `_resolve_parallel_max` 内 `Settings()` 的 call-arg（与本文件既有 3 处 `Settings()` call-arg 同一既有错误模式，非新增模式）。不 commit / 不建 PR。

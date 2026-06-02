@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -2524,6 +2525,545 @@ async def test_run_layered_budget_trips_and_logs_scope(mock_client, monkeypatch,
     used = lbud.BudgetStore().get(lbud.BudgetScope.user, "u1", now=datetime.now(UTC))
     assert used.tokens >= 15  # store accumulated across the turn(s)
 
+
+# ── AR3: parallel tool dispatch ────────────────────────────────────────────────
+
+
+def _multi_tool_resp(*specs: tuple[str, str, str]) -> MagicMock:
+    """Assistant response carrying N tool_calls. Each spec is (name, args, id)."""
+    tcs = []
+    dumped = []
+    for name, args, call_id in specs:
+        tc = MagicMock()
+        tc.id = call_id
+        tc.function.name = name
+        tc.function.arguments = args
+        tcs.append(tc)
+        dumped.append(
+            {"id": call_id, "type": "function", "function": {"name": name, "arguments": args}}
+        )
+
+    msg = MagicMock()
+    msg.content = None
+    msg.tool_calls = tcs
+    msg.model_dump = lambda: {"role": "assistant", "content": None, "tool_calls": dumped}
+
+    choice = MagicMock()
+    choice.finish_reason = "tool_calls"
+    choice.message = msg
+
+    resp = MagicMock()
+    resp.choices = [choice]
+    resp.usage = MagicMock()
+    return resp
+
+
+def _multi_tool_stream(*specs: tuple[str, str, str]):
+    """Streaming assistant turn carrying N tool_calls (one delta chunk each)."""
+
+    async def _gen():
+        for i, (name, args, call_id) in enumerate(specs):
+            c = MagicMock()
+            c.usage = None
+            c.choices = [MagicMock()]
+            c.choices[0].delta.content = None
+            tc_delta = MagicMock()
+            tc_delta.index = i
+            tc_delta.id = call_id
+            tc_delta.function.name = name
+            tc_delta.function.arguments = args
+            c.choices[0].delta.tool_calls = [tc_delta]
+            c.choices[0].finish_reason = "tool_calls" if i == len(specs) - 1 else None
+            yield c
+
+    return _gen()
+
+
+def _tool_msgs(messages: list) -> list:
+    return [m for m in messages if isinstance(m, dict) and m.get("role") == "tool"]
+
+
+# 3.x — N=1 equivalence (explicit, beyond the inherited suite)
+
+
+async def test_run_n1_byte_equivalent_messages_and_counts(mock_client):
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_tool_resp("get_time", "{}", "tc-1"), _text_resp("done")]
+    )
+    monkey_dispatch = lambda name, args, **kw: f"{name}_result"  # noqa: E731
+    with (
+        patch.object(al, "dispatch", monkey_dispatch),
+        patch.object(al, "log_run", lambda *a, **kw: captured.update({"messages": a[2]})),
+    ):
+        await al.run([{"role": "user", "content": "x"}])
+    tool_msgs = _tool_msgs(captured["messages"])
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0]["tool_call_id"] == "tc-1"
+    assert tool_msgs[0]["content"] == "get_time_result"
+
+
+# 4.x — N>1 parallel execution + original-order backfill
+
+
+async def test_run_n2_tools_execute_concurrently(mock_client):
+    # Concurrency evidence: tool A blocks on an event that only tool B can set; if
+    # they ran serially (A before B) A would deadlock. Both completing proves overlap.
+    ev = asyncio.Event()
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_multi_tool_resp(("a", "{}", "tc-a"), ("b", "{}", "tc-b")), _text_resp("ok")]
+    )
+
+    async def disp(name, args, **kw):
+        if name == "a":
+            await ev.wait()  # only proceeds once b has run
+            return "a_done"
+        ev.set()
+        return "b_done"
+
+    with patch.object(al, "dispatch", disp):
+        result = await asyncio.wait_for(al.run([{"role": "user", "content": "x"}]), timeout=2.0)
+    assert result == "ok"
+
+
+async def test_run_n2_backfill_in_original_order_not_completion_order(mock_client):
+    # Force the SECOND tool to finish first; messages must still be a-before-b.
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_multi_tool_resp(("a", "{}", "tc-a"), ("b", "{}", "tc-b")), _text_resp("ok")]
+    )
+    a_gate = asyncio.Event()
+
+    async def disp(name, args, **kw):
+        if name == "a":
+            await a_gate.wait()
+            return "a_result"
+        a_gate.set()  # b completes and unblocks a → b finishes before a
+        return "b_result"
+
+    with (
+        patch.object(al, "dispatch", disp),
+        patch.object(al, "log_run", lambda *a, **kw: captured.update({"messages": a[2]})),
+    ):
+        await asyncio.wait_for(al.run([{"role": "user", "content": "x"}]), timeout=2.0)
+    tool_msgs = _tool_msgs(captured["messages"])
+    assert [m["tool_call_id"] for m in tool_msgs] == ["tc-a", "tc-b"]
+    assert [m["content"] for m in tool_msgs] == ["a_result", "b_result"]
+
+
+async def test_run_n2_pairs_tool_call_ids_one_to_one(mock_client):
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _multi_tool_resp(("a", "{}", "id1"), ("b", "{}", "id2"), ("c", "{}", "id3")),
+            _text_resp("ok"),
+        ]
+    )
+    with patch.object(al, "log_run", lambda *a, **kw: captured.update({"messages": a[2]})):
+        await al.run([{"role": "user", "content": "x"}])
+    tool_msgs = _tool_msgs(captured["messages"])
+    assert [m["tool_call_id"] for m in tool_msgs] == ["id1", "id2", "id3"]
+
+
+async def test_run_n2_sequence_passes_sanitize(mock_client):
+    # The assistant(N tool_calls) → N tool messages sequence must survive sanitize
+    # with no contract repair (AR6): the next LLM call sees a well-formed sequence.
+    sent: list = []
+
+    async def capture(**kwargs):
+        sent.append(kwargs.get("messages"))
+        if len(sent) == 1:
+            return _multi_tool_resp(("a", "{}", "tc-a"), ("b", "{}", "tc-b"))
+        return _text_resp("ok")
+
+    mock_client.chat.completions.create = capture
+    await al.run([{"role": "user", "content": "x"}])
+    second_call = sent[1]
+    assistant = next(m for m in second_call if m.get("role") == "assistant" and m.get("tool_calls"))
+    n_calls = len(assistant["tool_calls"])
+    tool_after = [m for m in second_call if m.get("role") == "tool"]
+    assert n_calls == 2
+    assert len(tool_after) == 2
+
+
+# 5.x — cancellation propagation across a parallel batch
+
+
+async def test_run_parallel_batch_shares_run_level_token(mock_client):
+    from fleetent.cancellation import CancelToken
+
+    seen_parents: list = []
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_multi_tool_resp(("a", "{}", "tc-a"), ("b", "{}", "tc-b")), _text_resp("ok")]
+    )
+    token = CancelToken()
+
+    def disp(name, args, **kw):
+        seen_parents.append(kw.get("cancel_token").parent)
+        return f"{name}_r"
+
+    with patch.object(al, "dispatch", disp):
+        await al.run([{"role": "user", "content": "x"}], cancel_token=token)
+    # Every tool in the batch links the same run-level token via its child's parent.
+    assert seen_parents == [token, token]
+
+
+async def test_run_cancel_during_batch_still_backfills_every_tool_call(mock_client):
+    # Token cancelled mid-batch: each tool_call must still get exactly one tool
+    # message (result or normalized failure), so no half tool-pair leaks.
+    from fleetent.cancellation import CancelToken
+
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_multi_tool_resp(("a", "{}", "tc-a"), ("b", "{}", "tc-b"))
+    )
+    token = CancelToken()
+
+    def disp(name, args, **kw):
+        token.cancel()  # cancel as the first tool runs
+        return f"{name}_r"
+
+    with (
+        patch.object(al, "dispatch", disp),
+        patch.object(al, "log_run", lambda *a, **kw: captured.update({"messages": a[2], **kw})),
+    ):
+        await al.run([{"role": "user", "content": "x"}], cancel_token=token)
+    tool_msgs = _tool_msgs(captured["messages"])
+    assert [m["tool_call_id"] for m in tool_msgs] == ["tc-a", "tc-b"]
+    assert captured.get("stop_reason") == StopReason.cancelled
+
+
+# 6.x — multi-risk approval: serial approval, parallel execution
+
+
+async def test_run_multi_high_risk_approved_serially_then_parallel(mock_client):
+    order: list = []
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_multi_tool_resp(("x", "{}", "tc-x"), ("y", "{}", "tc-y")), _text_resp("ok")]
+    )
+
+    async def fake_approval(**kw):
+        order.append(("approve", kw["tool_name"]))
+        return "approved"
+
+    def disp(name, args, **kw):
+        order.append(("dispatch", name))
+        return f"{name}_r"
+
+    with (
+        patch.object(al, "get_risk_level", lambda name: "high"),
+        patch.object(al._default_gate, "request_approval", fake_approval),
+        patch.object(al, "dispatch", disp),
+    ):
+        await al.run([{"role": "user", "content": "x"}], reply_func=AsyncMock())
+    # Both approvals happen (in original order) before any dispatch starts.
+    assert order[0] == ("approve", "x")
+    assert order[1] == ("approve", "y")
+    assert {order[2], order[3]} == {("dispatch", "x"), ("dispatch", "y")}
+
+
+async def test_run_rejected_tool_excluded_from_batch_others_run(mock_client):
+    captured: dict = {}
+    dispatched: list = []
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_multi_tool_resp(("x", "{}", "tc-x"), ("y", "{}", "tc-y"))
+    )
+
+    async def fake_approval(**kw):
+        return "rejected" if kw["tool_name"] == "x" else "approved"
+
+    def disp(name, args, **kw):
+        dispatched.append(name)
+        return f"{name}_r"
+
+    with (
+        patch.object(al, "get_risk_level", lambda name: "high"),
+        patch.object(al._default_gate, "request_approval", fake_approval),
+        patch.object(al, "dispatch", disp),
+        patch.object(al, "log_run", lambda *a, **kw: captured.update({"messages": a[2], **kw})),
+    ):
+        await al.run([{"role": "user", "content": "x"}], reply_func=AsyncMock())
+    assert dispatched == ["y"]  # rejected x never dispatched; y still ran
+    tool_msgs = _tool_msgs(captured["messages"])
+    assert [m["tool_call_id"] for m in tool_msgs] == ["tc-x", "tc-y"]
+    assert "did not approve x" in tool_msgs[0]["content"]
+    assert captured.get("stop_reason") == StopReason.approval_rejected
+
+
+# 7.x — failure isolation + per-result consecutive_failures
+
+
+async def test_run_single_failure_does_not_break_batch(mock_client):
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_multi_tool_resp(("a", "{}", "tc-a"), ("b", "{}", "tc-b")), _text_resp("ok")]
+    )
+
+    def disp(name, args, **kw):
+        if name == "a":
+            raise RuntimeError("boom")
+        return "b_ok"
+
+    with (
+        patch.object(al, "dispatch", disp),
+        patch.object(al, "log_run", lambda *a, **kw: captured.update({"messages": a[2]})),
+    ):
+        result = await al.run([{"role": "user", "content": "x"}])
+    assert result == "ok"
+    tool_msgs = _tool_msgs(captured["messages"])
+    assert "tool execution error" in tool_msgs[0]["content"]
+    assert tool_msgs[1]["content"] == "b_ok"
+
+
+async def test_run_consecutive_failures_per_result_trips_terminate(mock_client):
+    # Two failing tools in one round → consecutive_failures reaches 2 per-result,
+    # tripping the consecutive_failures stop at the next checkpoint (not batch-level).
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_multi_tool_resp(("a", "{}", "tc-a"), ("b", "{}", "tc-b"))
+    )
+
+    def disp(name, args, **kw):
+        raise RuntimeError("fail")
+
+    with (
+        patch.object(al, "dispatch", disp),
+        patch.object(al, "log_run", lambda *a, **kw: captured.update(kw)),
+    ):
+        await al.run([{"role": "user", "content": "x"}], max_consecutive_failures=2)
+    assert captured.get("stop_reason") == StopReason.consecutive_failures
+
+
+async def test_run_failure_then_success_in_batch_resets_count(mock_client):
+    # original order [fail, ok]: per-result folding ends at 0 (ok resets), so with
+    # threshold 1 the run does NOT stop after this round.
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_multi_tool_resp(("a", "{}", "tc-a"), ("b", "{}", "tc-b")), _text_resp("done")]
+    )
+
+    def disp(name, args, **kw):
+        if name == "a":
+            raise RuntimeError("fail")
+        return "ok"
+
+    with patch.object(al, "dispatch", disp):
+        result = await al.run([{"role": "user", "content": "x"}], max_consecutive_failures=1)
+    assert result == "done"  # second LLM call happened → no early stop
+
+
+# 8.x — concurrency cap batching
+
+
+async def test_run_parallel_max_one_runs_sequentially(mock_client):
+    # Cap 1 degrades to sequential: a tool that waits on a later tool's event would
+    # deadlock; assert dispatch order is strictly original order instead.
+    order: list = []
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _multi_tool_resp(("a", "{}", "tc-a"), ("b", "{}", "tc-b"), ("c", "{}", "tc-c")),
+            _text_resp("ok"),
+        ]
+    )
+
+    async def disp(name, args, **kw):
+        order.append(("start", name))
+        await asyncio.sleep(0)
+        order.append(("end", name))
+        return f"{name}_r"
+
+    with (
+        patch.object(al, "_resolve_parallel_max", lambda: 1),
+        patch.object(al, "dispatch", disp),
+    ):
+        await al.run([{"role": "user", "content": "x"}])
+    # Sequential: each tool fully ends before the next starts.
+    assert order == [
+        ("start", "a"),
+        ("end", "a"),
+        ("start", "b"),
+        ("end", "b"),
+        ("start", "c"),
+        ("end", "c"),
+    ]
+
+
+async def test_run_parallel_max_splits_into_batches_backfill_original_order(mock_client):
+    # 3 tools, cap 2 → batch [a,b] then [c]; final backfill still a,b,c.
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _multi_tool_resp(("a", "{}", "tc-a"), ("b", "{}", "tc-b"), ("c", "{}", "tc-c")),
+            _text_resp("ok"),
+        ]
+    )
+    active = {"n": 0, "max": 0}
+
+    async def disp(name, args, **kw):
+        active["n"] += 1
+        active["max"] = max(active["max"], active["n"])
+        await asyncio.sleep(0.01)
+        active["n"] -= 1
+        return f"{name}_r"
+
+    with (
+        patch.object(al, "_resolve_parallel_max", lambda: 2),
+        patch.object(al, "dispatch", disp),
+        patch.object(al, "log_run", lambda *a, **kw: captured.update({"messages": a[2]})),
+    ):
+        await al.run([{"role": "user", "content": "x"}])
+    assert active["max"] <= 2  # never more than the cap concurrently
+    tool_msgs = _tool_msgs(captured["messages"])
+    assert [m["tool_call_id"] for m in tool_msgs] == ["tc-a", "tc-b", "tc-c"]
+
+
+# 9.x — shared sandbox container serialization (D5)
+
+
+async def test_run_same_session_run_code_serialized(mock_client):
+    # Two run_code calls in one round share the session container → must serialize.
+    order: list = []
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _multi_tool_resp(
+                ("run_code", '{"code":"1"}', "tc-1"), ("run_code", '{"code":"2"}', "tc-2")
+            ),
+            _text_resp("ok"),
+        ]
+    )
+
+    async def disp(name, args, **kw):
+        order.append(("start", args))
+        await asyncio.sleep(0.01)
+        order.append(("end", args))
+        return "ok"
+
+    with (
+        patch.object(al, "dispatch", disp),
+        patch.object(al, "is_self_truncating", lambda name: True),
+    ):
+        await al.run([{"role": "user", "content": "x"}], session_id="s1")
+    # Serialized: the first run_code fully ends before the second starts.
+    assert order[0][0] == "start" and order[1][0] == "end"
+    assert order[2][0] == "start" and order[3][0] == "end"
+
+
+async def test_run_non_sandbox_tools_still_parallel(mock_client):
+    active = {"n": 0, "max": 0}
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_multi_tool_resp(("a", "{}", "tc-a"), ("b", "{}", "tc-b")), _text_resp("ok")]
+    )
+
+    async def disp(name, args, **kw):
+        active["n"] += 1
+        active["max"] = max(active["max"], active["n"])
+        await asyncio.sleep(0.01)
+        active["n"] -= 1
+        return "ok"
+
+    with patch.object(al, "dispatch", disp):
+        await al.run([{"role": "user", "content": "x"}], session_id="s1")
+    assert active["max"] == 2  # free tools overlap
+
+
+# 10.x — run_stream parallel-period event order (D8)
+
+
+async def test_run_stream_n2_events_in_original_order(mock_client):
+    captured_streams = [
+        _multi_tool_stream(("a", "{}", "tc-a"), ("b", "{}", "tc-b")),
+        _text_stream("done"),
+    ]
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=lambda *a, **k: captured_streams.pop(0)
+    )
+    b_done = asyncio.Event()
+
+    async def disp(name, args, **kw):
+        if name == "a":
+            await b_done.wait()  # a finishes after b
+            return "a_r"
+        b_done.set()
+        return "b_r"
+
+    with patch.object(al, "dispatch", disp):
+        events = [e async for e in al.run_stream("x")]
+    calls = [e for e in events if e["type"] == "tool_call"]
+    results = [e for e in events if e["type"] == "tool_result"]
+    assert [e["name"] for e in calls] == ["a", "b"]
+    # tool_result is original order even though b completed first.
+    assert [e["name"] for e in results] == ["a", "b"]
+    assert [e["content"] for e in results] == ["a_r", "b_r"]
+
+
+async def test_run_stream_n_tool_calls_match_n_tool_results(mock_client):
+    captured_streams = [
+        _multi_tool_stream(("a", "{}", "tc-a"), ("b", "{}", "tc-b"), ("c", "{}", "tc-c")),
+        _text_stream("done"),
+    ]
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=lambda *a, **k: captured_streams.pop(0)
+    )
+    with patch.object(al, "dispatch", lambda name, args, **kw: f"{name}_r"):
+        events = [e async for e in al.run_stream("x")]
+    n_calls = sum(1 for e in events if e["type"] == "tool_call")
+    n_results = sum(1 for e in events if e["type"] == "tool_result")
+    assert n_calls == 3
+    assert n_results == 3
+
+
+# 11.x — sub_agent as a single parallel-batch slot, depth guard intact (D6)
+
+
+async def test_run_sub_agent_as_one_batch_slot_alongside_other_tool(mock_client):
+    import json as _json
+
+    from fleetent.sub_agent import SubAgentResult
+
+    tasks = [{"name": "t1", "prompt": "do"}]
+    sub_args = _json.dumps({"tasks": _json.dumps(tasks)})
+    captured: dict = {}
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _multi_tool_resp(("sub_agent", sub_args, "tc-s"), ("a", "{}", "tc-a")),
+            _text_resp("ok"),
+        ]
+    )
+    fake = [SubAgentResult(name="t1", result="sub_done", error=None, parent_session_id="")]
+    with (
+        patch.object(al, "SubAgentExecutor") as cls,
+        patch.object(al, "dispatch", lambda name, args, **kw: "a_done"),
+        patch.object(al, "log_run", lambda *a, **kw: captured.update({"messages": a[2]})),
+    ):
+        inst = AsyncMock()
+        inst.run = AsyncMock(return_value=fake)
+        cls.return_value = inst
+        await al.run([{"role": "user", "content": "x"}])
+    inst.run.assert_called_once()  # SubAgentExecutor still owns its own gather
+    tool_msgs = _tool_msgs(captured["messages"])
+    assert [m["tool_call_id"] for m in tool_msgs] == ["tc-s", "tc-a"]
+    assert "[t1] sub_done" in tool_msgs[0]["content"]
+    assert tool_msgs[1]["content"] == "a_done"
+
+
+async def test_run_sub_agent_excluded_for_child_agent_depth_guard(mock_client):
+    # is_sub_agent=True → sub_agent is NOT intercepted; it goes through dispatch
+    # like any tool (depth-1 guard: a child cannot spawn further sub-agents).
+    dispatched: list = []
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_multi_tool_resp(("sub_agent", "{}", "tc-s")), _text_resp("ok")]
+    )
+
+    def disp(name, args, **kw):
+        dispatched.append(name)
+        return "r"
+
+    with (
+        patch.object(al, "SubAgentExecutor") as cls,
+        patch.object(al, "dispatch", disp),
+    ):
+        await al.run([{"role": "user", "content": "x"}], is_sub_agent=True)
+    cls.assert_not_called()  # executor never invoked for a child agent
+    assert dispatched == ["sub_agent"]
 
 # ── MCP4 review: strict-unavailable stop ─────────────────────────────────────
 
