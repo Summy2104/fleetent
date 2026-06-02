@@ -87,8 +87,8 @@
 
 ## 13. 验证
 
-- [ ] 13.1 `uv run pytest -x -q` 全绿
-- [ ] 13.2 `uv run ruff format src tests && uv run ruff check src tests`
-- [ ] 13.3 `uv run mypy src` 通过
-- [ ] 13.4 手动验证：create-user + set-role admin → Session 登录 → `POST /admin/agents/apply` 建 agent → CLI `update-agent` 建 v2 → `GET /admin/agents/x/versions` 两版本 → `POST .../1/activate` 回滚 → 期间 SSE `/chat` session 不被打断；验证 `memory_items.namespace` 在两个不同 agent namespace 下隔离
-- [ ] 13.5 自检：实现 task 前都有 failing-test task；spec deltas 与 tasks 对得上；无新 AI 框架 / ORM / 云专有依赖；schema 走 Alembic；认证走 role 体系
+- [x] 13.1 `uv run pytest -x -q` 全绿
+- [x] 13.2 `uv run ruff format src tests && uv run ruff check src tests`
+- [x] 13.3 `uv run mypy src` 通过
+- [x] 13.4 手动验证：create-user + set-role admin → Session 登录 → `POST /admin/agents/apply` 建 agent → CLI `update-agent` 建 v2 → `GET /admin/agents/x/versions` 两版本 → `POST .../1/activate` 回滚 → 期间 SSE `/chat` session 不被打断；验证 `memory_items.namespace` 在两个不同 agent namespace 下隔离
+- [x] 13.5 自检：实现 task 前都有 failing-test task；spec deltas 与 tasks 对得上；无新 AI 框架 / ORM / 云专有依赖；schema 走 Alembic；认证走 role 体系
