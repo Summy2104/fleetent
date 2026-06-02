@@ -19,7 +19,11 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from fleetent import audit_log, auth, user_store
-from fleetent.platform.agent_management_console import agent_admin_store, agent_templates
+from fleetent.platform.agent_management_console import (
+    agent_admin_store,
+    agent_observability,
+    agent_templates,
+)
 
 router = APIRouter(prefix="/admin")
 
@@ -49,16 +53,11 @@ def references_for(agent_name: str) -> dict[str, Any]:
 
 
 def agent_observability_agg(agent_name: str, window: str) -> dict[str, Any]:
-    """Per-agent aggregation (calls/tokens/cost/error-rate/latency/approvals). Placeholder."""
-    return {
-        "agent_name": agent_name,
-        "window": window,
-        "calls": 0,
-        "tokens": 0,
-        "error_rate": 0.0,
-        "approval_pass_rate": None,
-        "recent_sessions": [],
-    }
+    """Per-agent aggregation (calls/tokens/cost/error-rate/latency/approvals).
+
+    Delegates to the read-only observability roll-up; kept as a seam so tests can mock it.
+    """
+    return agent_observability.aggregate(agent_name, window)
 
 
 # --- auth helpers -------------------------------------------------------------

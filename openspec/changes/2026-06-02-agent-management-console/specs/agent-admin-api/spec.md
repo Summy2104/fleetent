@@ -1,9 +1,10 @@
 ## MODIFIED Requirements
 
 ### Requirement: Admin role flag on users
-> Supersedes the boolean `is_admin` guard from `2026-05-29-multi-agent-management`.
 
 Routes under `/admin/agents/*` SHALL be guarded by `auth.require_role` rather than the boolean `is_admin`. Write operations (create, edit, clone, create-from-template, enable, disable, archive, restore, model change, binding) SHALL require `role in {admin, built_in_admin}`. Read operations (list, detail, observability) SHALL be allowed for `viewer` and above. The compatibility mapping `is_admin == role in {admin, built_in_admin}` (provided by `2026-05-30-user-management`) SHALL hold.
+
+> Supersedes the boolean `is_admin` guard from `2026-05-29-multi-agent-management`.
 
 #### Scenario: Viewer blocked from agent write
 - **WHEN** a `viewer` sends a create/edit/toggle/archive/clone request to `/admin/agents/*`
@@ -18,7 +19,6 @@ Routes under `/admin/agents/*` SHALL be guarded by `auth.require_role` rather th
 - **THEN** the request is authorized (subject to other validation)
 
 ### Requirement: Agent CRUD endpoints
-> The CRUD and version endpoints from `2026-05-29-multi-agent-management` remain in force; this change adds lifecycle, clone, template, and observability endpoints on the same router and routes all writes through `audit_log`.
 
 The system SHALL expose, in addition to existing CRUD/version/binding endpoints:
 - `POST /admin/agents/{name}/enable` and `POST /admin/agents/{name}/disable` to toggle `status`.
@@ -28,6 +28,8 @@ The system SHALL expose, in addition to existing CRUD/version/binding endpoints:
 - `GET /admin/agents/{name}/observability` for the per-agent aggregated view.
 
 Every write SHALL emit an `audit_log` entry stamped with the acting user id.
+
+> The CRUD and version endpoints from `2026-05-29-multi-agent-management` remain in force; this change adds lifecycle, clone, template, and observability endpoints on the same router and routes all writes through `audit_log`.
 
 #### Scenario: Disable endpoint stops routing
 - **WHEN** an admin sends `POST /admin/agents/ops-bot/disable`

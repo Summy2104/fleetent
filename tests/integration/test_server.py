@@ -181,6 +181,69 @@ def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch, is
     assert captured.get("allowed_tools") == ["shell"]
 
 
+def test_chat_rejects_disabled_agent(tmp_path, monkeypatch, isolated_schedule_db):
+    """/chat must refuse a disabled agent and never enter the agent loop (task 8)."""
+    import fleetent.agent_store as ag
+    import fleetent.server as srv
+    import fleetent.user_store as us2
+
+    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
+
+    entered = []
+
+    async def fake_stream(msg, **kwargs):  # type: ignore[misc]
+        entered.append(msg)
+        yield {"type": "done", "content": "ok"}
+
+    monkeypatch.setattr(srv, "run_stream", fake_stream)
+    monkeypatch.setattr(srv, "agent_routing_status", lambda name: "disabled")
+
+    user = us2.create_user("DisabledChan")
+    agent = ag.create_agent("paused-bot", "x", ["shell"])
+    ag.assign_channel("slack", "C-OFF", agent.id)
+
+    with TestClient(srv.app) as c:
+        resp = c.post(
+            "/chat",
+            json={"message": "hi"},
+            headers={
+                "Authorization": f"Bearer {user.api_key}",
+                "x-platform": "slack",
+                "x-channel-id": "C-OFF",
+            },
+        )
+    assert resp.status_code == 403
+    assert "停用" in resp.json()["detail"]
+    assert entered == []  # never reached the agent loop
+
+
+def test_chat_rejects_archived_agent(tmp_path, monkeypatch, isolated_schedule_db):
+    import fleetent.agent_store as ag
+    import fleetent.server as srv
+    import fleetent.user_store as us2
+
+    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setattr(srv, "agent_routing_status", lambda name: "archived")
+
+    user = us2.create_user("ArchChan")
+    agent = ag.create_agent("gone-bot", "x", ["shell"])
+    ag.assign_channel("slack", "C-ARC", agent.id)
+
+    with TestClient(srv.app) as c:
+        resp = c.post(
+            "/chat",
+            json={"message": "hi"},
+            headers={
+                "Authorization": f"Bearer {user.api_key}",
+                "x-platform": "slack",
+                "x-channel-id": "C-ARC",
+            },
+        )
+    assert resp.status_code == 403
+
+
 # ── cron scheduler lifespan ───────────────────────────────────────────────────
 
 

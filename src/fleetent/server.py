@@ -209,6 +209,25 @@ def _run_monitoring_cycle() -> None:
             logger.exception("monitoring_cycle_step_failed step=%s", step.__name__)
 
 
+def agent_routing_status(agent_name: str) -> str:
+    """Lifecycle status of a console-managed agent ('enabled'/'disabled'/'archived').
+
+    Advisory: if no managed DB is configured or the lookup fails, default to 'enabled'
+    so the hot path is never blocked by an observability concern.
+    """
+    import os
+
+    if not os.environ.get("DATABASE_URL"):
+        return "enabled"
+    try:
+        from fleetent.platform.agent_management_console import agent_admin_store
+
+        return str(agent_admin_store.get_state(agent_name)["status"])
+    except Exception:  # noqa: BLE001 — advisory check, never block chat on failure
+        logger.exception("agent_status_lookup_failed agent=%s", agent_name)
+        return "enabled"
+
+
 async def _authenticate(authorization: str = Header()) -> tuple[user_store.User, dict[str, Any]]:
     """Resolve a Bearer API key to (User, key_metadata). Raises 401 if invalid/blocked."""
     if not authorization.startswith("Bearer "):
@@ -277,6 +296,14 @@ async def chat(
     system_prompt = agent.system_prompt if agent else None
     allowed_tools = agent.allowed_tools if agent else None
     agent_name = agent.name if agent else None
+
+    # Lifecycle gate: disabled / archived agents are not routable (no agent loop entry).
+    if agent_name is not None:
+        status = agent_routing_status(agent_name)
+        if status == "disabled":
+            raise HTTPException(status_code=403, detail="该 Agent 已停用")
+        if status == "archived":
+            raise HTTPException(status_code=403, detail="该 Agent 已归档，无法路由")
 
     # API-key scope: the key may be restricted to specific agents.
     if agent_name is not None and not api_key_store.check_scope(key_meta["scope"], agent_name):

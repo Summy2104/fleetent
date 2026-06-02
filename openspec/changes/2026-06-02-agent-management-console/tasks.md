@@ -11,12 +11,12 @@
 
 ## 0. 前置（开放决策）
 
-- [ ] 0.1 `agents` 表加 `status` / `provenance` / `drift` 列的 **Alembic 迁移**：确认与 `2026-05-29-multi-agent-management` 的 `active_version_id` / `deleted_at` 迁移先后顺序与 revision 链；回填规则（`status=enabled`，已 `deleted_at` 非空回填 `archived`；`provenance=adhoc`；`drift=0`）。
-- [ ] 0.2 确认 `status` 与已有 `deleted_at` 的归一口径：archive 同时置两者、restore 同时清两者，避免双真相。
-- [ ] 0.3 确认 `status` 与 `agent_versions` / `active_version_id` 正交（启停/归档不动 active version）。
+- [x] 0.1 决策落定（偏离原设计）：为避免硬依赖未落地的 multi-agent 迁移，status/provenance/drift 走**侧表 `agent_admin_state`**（迁移 015，仿 skill_admin_state），不 ALTER 旧 `agents` 表；与 multi-agent 的 deleted_at 归一留待其落地后处理。
+- [x] 0.2 归一口径：`archive` 置 `status=archived` + `archived_at`；`restore` 清两者回 `enabled`（侧表单点驱动，无双真相）。
+- [x] 0.3 `status` 与 `active_version_id` 正交：启停/归档只动侧表 status，不触 agents/version/绑定（`test_provenance_flip_preserves_status_and_drift` 佐证连续性）。
 - [x] 0.4 确认模板库存放形态：内置只读模块级常量（`agent_templates.py`），**不落库**、不可经 API 编辑。
-- [ ] 0.5 确认权限从 `is_admin` 迁到 `auth.require_role`：`/admin/agents/*` 守卫统一走 role；沿用 user-management 的兼容映射与高危二次确认守卫。
-- [ ] 0.6 确认 observability 是否已暴露"按 agent_id 聚合"查询入口；若无则记为跨域 follow-up，本 change 单测以 mock 聚合源验证。
+- [x] 0.5 权限统一走 `auth.has_role` / `_require_admin`（admin 写 / viewer 读），归档高危带 `X-Confirm` 二次确认，接 `audit_log`。
+- [x] 0.6 observability 已有 `query_trace_events(TraceQuery(agent_id=...))` 按 agent 聚合入口；本 change `agent_observability.aggregate/drill_down` 只读消费，单测 mock 聚合源验证。
 
 ## 1. agent_store — status / provenance / drift 列 + Alembic
 
@@ -47,8 +47,8 @@
 
 ## 6. agent_observability — 按 agent 聚合视图
 
-- [ ] 6.1 Write failing tests: `aggregate(agent_id, window)` 返回调用次数 / token / 成本 / 错误率 / 平均时延 / permission_gate 触发与通过率 / 最近会话列表（mock observability 聚合源）；下钻单会话链路
-- [ ] 6.2 新建 `agent_observability.py`（只读消费 observability traces，不新增采集）→ 转绿
+- [x] 6.1 Write failing tests: `aggregate(agent_id, window)` 返回调用次数 / token / 成本 / 错误率 / 平均时延 / permission 触发与通过率 / 最近会话列表（mock observability 聚合源）；`drill_down(run_id)` 下钻单会话链路 — `tests/unit/test_agent_observability.py`
+- [x] 6.2 新建 `agent_observability.py`（只读消费 `query_trace_events`，不新增采集；成本经可注入 `COST_PER_1K_TOKENS`）→ 转绿；console seam `agent_observability_agg` 委派之
 
 ## 7. agent_admin_api — 启停/归档/恢复/克隆/模板/观测路由 + require_role + 审计
 
@@ -63,16 +63,16 @@
 
 ## 8. server — /chat 对 disabled/archived 拒绝路由
 
-- [ ] 8.1 Write failing tests: 路由到 `disabled` Agent 返回"该 Agent 已停用"、不进 agent_loop；`archived` 视为不可路由；`enabled` 正常
-- [ ] 8.2 在 `/chat` 路由解析处加 status 检查 → 转绿
+- [x] 8.1 Write failing tests: 路由到 `disabled` Agent 返回"该 Agent 已停用"、不进 agent_loop；`archived` 不可路由；`enabled` 正常 — `test_server.py::test_chat_rejects_{disabled,archived}_agent`
+- [x] 8.2 `/chat` 解析处加 `agent_routing_status` 检查（disabled/archived → 403，不进 agent_loop；advisory：无 DATABASE_URL / 查询失败默认 enabled，热路径不被阻断）→ 转绿
 
 ## 9. agent_store — 受管/临管来源 + drift 标志
 
-- [ ] 9.1 Write failing tests: console 创建/克隆/模板创建默认 `provenance=adhoc`；provenance 翻转保持 `agent_id` / active version / 绑定不变；对 `managed` 的 UI 改动置 `drift=1`，对 `adhoc` 不置
-- [ ] 9.2 实现 provenance / drift 标志位维护（不实现回流，回流交 askit）→ 转绿
+- [x] 9.1 Write failing tests: console 克隆默认 `provenance=adhoc`（`agent_console_api` clone）；provenance 翻转保持 status / drift / 绑定不变（`test_provenance_flip_preserves_status_and_drift`）；`mark_drift` 仅对 `managed` 置 `drift=1`，`adhoc` no-op（`test_drift_only_for_managed`）
+- [x] 9.2 provenance / drift 标志位维护已落地（`set_provenance` / `mark_drift` / `clear_drift`，侧表单点）；不实现回流（回流交 askit）→ 转绿
 
 ## 10. 收尾
 
-- [ ] 10.1 分层运行：`uv run pytest tests/unit -x -q` 与 `uv run pytest tests/integration -x -q` 绿
-- [ ] 10.2 全量 `uv run pytest -x -q` 绿
-- [ ] 10.3 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过
+- [x] 10.1 分层运行：`uv run pytest tests/unit -x -q` 与 `uv run pytest tests/integration -x -q` 绿
+- [x] 10.2 全量 `uv run pytest -x -q` 绿（1177 passed / 16 skipped）
+- [x] 10.3 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过（ruff All checks passed；mypy Success: 136 files）
