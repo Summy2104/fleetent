@@ -419,6 +419,18 @@ flowchart TD
 - image / VLM parsing：放在 advanced parser 之后单独评估，不默认进入首批文件解析。
 - `vector-store-ann-backend`：sqlite-vec / Qdrant / OpenSearch adapter，等数据规模和性能瓶颈明确后再做。
 
+#### Future Spec Evaluation（2026-06-02）
+
+1. `knowledge-base-document-acl`：暂缓。当前多 KB + agent binding 已能表达 Pilot 级可见范围；文档级 ACL 会把
+   Google Drive / Confluence 权限映射、检索过滤和审计责任耦合到 retrieval path，安全风险高。进入条件：
+   先完成 agent / tenant KB policy，并有客户明确要求同一 KB 内按用户或群组过滤文档。
+2. image / VLM parsing：暂缓。advanced parser 已覆盖 PDF / DOCX / PPTX / XLSX 和 Google Sheets / Slides
+   export；扫描 PDF、图片和 VLM 会引入 OCR / vision 模型依赖、成本、隐私和数据主权评估。进入条件：
+   真实 Pilot 文档中出现高比例扫描件或图像知识，且能确定自托管 OCR / VLM 路线。
+3. `vector-store-ann-backend`：暂缓。当前 in-memory / SQLite vector backend 足够支持 deterministic evaluation、
+   reindex 和小规模 Pilot；sqlite-vec / Qdrant / OpenSearch adapter 会增加部署面。进入条件：
+   本地 SQLite backend 出现可复现的延迟或容量瓶颈，并有明确自托管运维方案。
+
 ## 后续维护规则
 
 - 新增 intelligence 相关 spec 前，必须在本 roadmap 中标明所属批次和解锁关系。
