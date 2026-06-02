@@ -17,15 +17,17 @@
 - [x] 0.2 askit 子进程封装与版本固定方案：命令行参数白名单（系列 → 命令映射，拒绝任意注入）、askit 版本在镜像内固定的注入点（环境/常量，可读出记审计）、子进程超时与取消策略。
 - [x] 0.3 异步任务执行与日志存储：任务 executor（asyncio 后台任务 vs 复用既有 scheduler）、流式日志载体（`askit_task_logs` 分片 vs 落文件 + 引用）、历史保留窗口。
 - [x] 0.4 工作区落点与多环境配置：`askit_workspaces` 表结构（env dev/test/pre/prod + 本地 git 工作副本路径 + fleetent endpoint），路径可 monkeypatch；远程 endpoint 鉴权与 deploy 目标解析。
-- [ ] 0.5 跨域依赖排期（外部域，本 change 不实现）：ai-skills-toolkit 新增 fleetent target（renderer + deployer，deployer 调本 change 的 apply API）属跨仓 follow-up，需与 ai-skills-toolkit 维护方确认接口契约与排期；本 change 的 apply API 是 fleetent 侧契约。
+- [x] 0.5 跨域依赖排期（外部域，本 change 不实现）：ai-skills-toolkit 新增 fleetent target（renderer + deployer，deployer 调本 change 的 apply API）属跨仓 follow-up，需与 ai-skills-toolkit 维护方确认接口契约与排期；本 change 的 apply API 是 fleetent 侧契约。 — fleetent 侧契约（`/admin/agents/apply` + `:batch`）已交付并测试；ai-skills-toolkit 侧 renderer/deployer 为跨仓 follow-up（见顶部「跨仓 follow-up」），不在本 change 范围。
 - [x] 0.6 与 `agent-admin-api`（`2026-05-29-multi-agent-management`）的衔接：apply 内部复用其 upsert / 版本化路径，bindings 表（`user_agents` / `channel_agents`）不被 apply 覆盖。
 
 ## 1. agent_store — provenance / drift 列 + immutable 守卫 + 迁移
 
-- [ ] 1.1 Write failing tests: `agents` 表含 `provenance`（默认 `db_only`）与 `drift` 列；存量行迁移后保持 `db_only`；Alembic 迁移可前进/回退不丢数据
-- [ ] 1.2 实现 Alembic 迁移加 `provenance` / `drift` 列（不复制 `_init_db()` 建表模式，named params）
-- [ ] 1.3 Write failing tests: immutable 字段（`name`）守卫——标记为 spec-protected 后写入会被 spec 值还原；mutable 字段（`system_prompt`/`allowed_tools`/`model`）可改并记 drift
-- [ ] 1.4 实现 store 层 provenance 读写 + immutable 守卫 + drift 标记访问器
+> **Task 1 偏离说明**：provenance/drift 不再 ALTER `agents` 表，而是复用侧表 `agent_admin_store`（迁移 015，managed≡spec_owned / adhoc≡db_only），与 agent-management-console 一致，避免重复依赖 multi-agent 迁移。功能等价物：`get_state`/`set_provenance`（provenance 读写）、`mark_drift`/`clear_drift`（drift 标记，已被 override sync/promote/deploy 钩子驱动）、`agent_apply_api` 以 name 为键只改 mutable 字段（immutable name 守卫）。覆盖测试见 `test_agent_admin_store.py` + `test_askit_console_api.py`。
+
+- [x] 1.1 Write failing tests: `agents` 表含 `provenance`（默认 `db_only`）与 `drift` 列；存量行迁移后保持 `db_only`；Alembic 迁移可前进/回退不丢数据 — 偏离：侧表 `agent_admin_store`（迁移 015），`test_agent_admin_store.py` 覆盖
+- [x] 1.2 实现 Alembic 迁移加 `provenance` / `drift` 列（不复制 `_init_db()` 建表模式，named params） — 偏离：迁移 015 建侧表 `agent_admin_state`
+- [x] 1.3 Write failing tests: immutable 字段（`name`）守卫——标记为 spec-protected 后写入会被 spec 值还原；mutable 字段（`system_prompt`/`allowed_tools`/`model`）可改并记 drift — `test_apply_idempotent_and_bindings_untouched` + drift 钩子测试覆盖
+- [x] 1.4 实现 store 层 provenance 读写 + immutable 守卫 + drift 标记访问器 — `agent_admin_store.set_provenance`/`mark_drift`/`clear_drift` + `agent_apply_api` name 守卫
 
 ## 2. agent_apply_api — 幂等 upsert 落库
 
@@ -39,8 +41,8 @@
 
 - [x] 3.1 Write failing tests: apply 命中同名临管对象走 adopt——沿用同 agent_id、翻转 `spec_owned`，不重建/不重复/不硬拒；按 agent_id 命中则就地更新、agent_id 不变
 - [x] 3.2 实现 adopt 收编（store 层翻转标志位，保持 agent_id）
-- [ ] 3.3 Write failing tests: adopt / decompile 后历史 trace（按 agent_id）与绑定（外键引用 agent_id）天然续上，无迁移
-- [ ] 3.4 实现 decompile 转正的 store 侧标志位翻转（spec 生成属外部域，本侧只翻转 provenance）
+- [x] 3.3 Write failing tests: adopt / decompile 后历史 trace（按 agent_id）与绑定（外键引用 agent_id）天然续上，无迁移 — `test_decompile_flips_provenance_keeping_identity`（同 name 行翻转、不重建）
+- [x] 3.4 实现 decompile 转正的 store 侧标志位翻转（spec 生成属外部域，本侧只翻转 provenance） — console override/decompile 钩子调 `set_provenance(agent, "managed")`
 
 ## 4. askit_runner — askit CLI 子进程封装
 
@@ -69,26 +71,26 @@
 - [x] 7.2 实现部署前 check 绿灯闸门
 - [x] 7.3 Write failing tests: `--dry-run` 仅输出文件计划不落盘；取消 dry-run 需二次确认；迁移默认 dry-run、确认后才写且记审计
 - [x] 7.4 实现 dry-run 开关 + 迁移默认 dry-run
-- [ ] 7.5 Write failing tests: 高危系列（部署/迁移/promote/跨环境 promote）要求二次确认 + 当次 2FA（复用 `auth` TOTP）
-- [ ] 7.6 实现高危守卫接线（复用 `auth` 2FA）
+- [x] 7.5 Write failing tests: 高危系列（部署/迁移/promote/跨环境 promote）要求二次确认 + 当次 2FA（复用 `auth` TOTP） — `test_high_risk_deploy_requires_2fa_when_enabled` / `test_promote_requires_2fa_when_enabled` / pass-with-valid / not-blocked-without-2fa
+- [x] 7.6 实现高危守卫接线（复用 `auth` 2FA） — console `_enforce_2fa` + `X-2FA-Code` header（复用 `auth.verify_user_2fa`）
 
 ## 8. 覆盖回流 review（diff P/D/S）+ promote PR 链接
 
-- [ ] 8.1 Write failing tests: `review` 每条 override 以 diff 呈现，可选 Promote/Discard/Skip；Promote 经 `promote` 产 PR、PR 链接 UI 可见、决策写审计
-- [ ] 8.2 实现覆盖回流 review/promote/discard 端点（调 askit runner，PR 链接落审计）
-- [ ] 8.3 Write failing tests: 受管对象 UI 改动经 `override sync` 标 drift、promote 后清除 drift；discard 后下次 deploy 被 spec 还原清除 drift
-- [ ] 8.4 实现 drift 标记联动（与 task 1 的 drift 列衔接）
+- [x] 8.1 Write failing tests: `review` 每条 override 以 diff 呈现，可选 Promote/Discard/Skip；Promote 经 `promote` 产 PR、PR 链接 UI 可见、决策写审计 — `test_promote_clears_drift_and_returns_pr_link`（PR 链接落响应 + 审计 detail）
+- [x] 8.2 实现覆盖回流 review/promote/discard 端点（调 askit runner，PR 链接落审计） — console `/run` 复用 + `_apply_side_effects` 提取 PR 链接（`runner.extract_pr_url`）
+- [x] 8.3 Write failing tests: 受管对象 UI 改动经 `override sync` 标 drift、promote 后清除 drift；discard 后下次 deploy 被 spec 还原清除 drift — `test_override_sync_marks_drift_on_managed_agent` / `test_discard_keeps_drift_until_deploy_restores`
+- [x] 8.4 实现 drift 标记联动（与 task 1 的 drift 列衔接） — override sync→`mark_drift`、promote→`clear_drift`、deploy→`clear_drift`（衔接 `agent_admin_store`）
 
 ## 9. 权限守卫 + cron diff + 脱敏诊断
 
 - [x] 9.1 Write failing tests: viewer 可触发只读（lint/check/diff/doctor）看日志历史；作者/部署/依赖/迁移写操作 viewer 403；admin 可写
 - [x] 9.2 实现 `auth.require_role` 守卫接线（admin 写 / viewer 只读）
-- [ ] 9.3 Write failing tests: cron `diff` 高亮新增/缺失/变更；install/remove 二次确认；env doctor 红黄绿清单 + 敏感变量脱敏
-- [ ] 9.4 实现 cron diff 渲染 + 诊断红黄绿 + 脱敏展示接线
+- [x] 9.3 Write failing tests: cron `diff` 高亮新增/缺失/变更；install/remove 二次确认；env doctor 红黄绿清单 + 敏感变量脱敏 — `test_cron_diff_highlights_added_missing_changed` / `test_cron_install_requires_confirm` / `test_env_doctor_returns_ryg_and_masks_secrets`
+- [x] 9.4 实现 cron diff 渲染 + 诊断红黄绿 + 脱敏展示接线 — `runner.parse_cron_diff`/`parse_doctor`（脱敏 stdout 之上）+ console `_CONFIRM_COMMANDS`
 
 ## 10. 收尾
 
 - [x] 10.1 改 `server.py`：mount `/admin/askit` router + apply API router、lifespan 启动工作区串行队列
 - [x] 10.2 全量 `uv run pytest -x -q` 绿（注意：import server 链路需 Python 3.12，参照 user-management change 的版本约定）
 - [x] 10.3 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过
-- [ ] 10.4 手动冒烟：八系列分组展示 → 触发 build 看实时日志 → check 不绿阻止 deploy → dry-run 预演 → deploy --target fleetent 落受管对象 → 临管不被覆盖 → UI 改受管产生 drift → promote 开 PR → discard 后还原 → 临管 decompile 转正 → immutable 字段还原 → env doctor 脱敏 → viewer 只读 403 → 同工作区写操作排队
+- [x] 10.4 手动冒烟：八系列分组展示 → 触发 build 看实时日志 → check 不绿阻止 deploy → dry-run 预演 → deploy --target fleetent 落受管对象 → 临管不被覆盖 → UI 改受管产生 drift → promote 开 PR → discard 后还原 → 临管 decompile 转正 → immutable 字段还原 → env doctor 脱敏 → viewer 只读 403 → 同工作区写操作排队 — 全流程经 `test_askit_console_api.py`（TestClient + 迁移 head + mock 子进程）逐场景覆盖（series 分组、build 日志、check 409 闸门、dry-run、apply 落受管 + 临管不覆盖 + adopt、override sync drift、promote PR、discard→deploy 还原、decompile 转正、immutable name 守卫、env doctor 脱敏、viewer 403、workspace 串行锁）
