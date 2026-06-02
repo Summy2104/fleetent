@@ -2,6 +2,8 @@
 
 本指南用于 Pilot 安装完成后的测试环境人工验收，判断当前 fleetent 是否可以进入小范围真实用户试用。它是
 [pilot-install-checklist.md](pilot-install-checklist.md) 的后续步骤：安装清单负责“装起来”，本指南负责“验证能不能试用”。
+如果需要一份从部署到验收的逐步执行流程，优先使用 [pilot-runbook.md](pilot-runbook.md)；本指南负责定义
+验收标准、Go / No-Go 判定和报告模板。
 
 本指南不替代自动化测试，不要求默认连接真实 LLM、embedding、Google Drive 或 Confluence。真实外部依赖 smoke
 必须显式 opt-in；凭据或环境变量未配置时记录为 `skipped: credentials not configured`，不视为默认失败。
