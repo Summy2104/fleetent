@@ -108,6 +108,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             temp_password,
         )
 
+    logger.info("admin_login_route path=%s", f"{user_admin_api.router.prefix}/ui")
+
     if LEGACY_MCP_CONFIG_PATH.exists():
         raise RuntimeError(
             "Legacy config/mcp.yaml is no longer supported; move MCP servers to "
