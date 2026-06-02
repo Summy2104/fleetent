@@ -29,7 +29,7 @@
 | 10 | E | mcp-degradation | MCP4 | ✅ 已完成 |
 | 11 | H | scheduled-task-session-binding | S3 | ✅ 已完成 |
 | 12 | A | cost-budget-control | AR18 | ✅ 已完成 |
-| 13 | D | cost-aware-routing | MR2 | ⬜ |
+| 13 | D | cost-aware-routing | MR2 | ✅ 已完成 |
 
 ---
 
@@ -352,5 +352,31 @@
 2. `MODEL_PRICING` 占位单价（claude/gpt 每 token USD）是否需按实际定价校准。
 3. 各层默认窗口（session=lifetime / user·agent=weekly / global=monthly）与默认休眠（无 cap 不启用）是否认可。
 4. `headroom()` 只读快照已实现但 agent_loop 尚未消费（供上层/后续提示用）——是否认可留作 API/提示后续接入。
+
+---
+
+## cost-aware-routing（MR2）— feat/cost-aware-routing
+
+**实现：**
+- 新模块 `cost_aware_routing.py`：从 AR18 import `BudgetHeadroom`（仅消费标量，不重定义）；`CostAction`（normal/degrade）；`CostAwareRoutingPolicy`（`enabled`/`degrade_below`/`degrade_target`，`decide(headroom)` 两档：禁用/headroom=None/无 target → normal，剩余 < 阈值 → degrade）+ `from_settings`；`resolve_base_route(routes, task_type, headroom, policy)`（degrade → `routes.get(degrade_target, default)`，未知 target 回退 default + log；normal → 原 `routes.get(task_type, default)`）。duck-typed routes dict，不 import model_router（无环）。
+- `model_router.py`：`get_(async_)client_and_config` 加可选 kwarg `headroom`/`policy`；新增 `_resolve_base`：`headroom is None` → 原 `routes.get(task_type, default)`（**逐字节等价、且不 import cost_aware_routing**），否则经 `resolve_base_route` 降级；override 在 `_apply_override` 中**后于**降级合并（优先级最高）。
+- `config.py`：`cost_aware_routing_enabled=False` / `cost_aware_degrade_below=0.2` / `cost_aware_degrade_target=""`（默认整链不干预）。
+
+**自解决策：**
+1. **`degrade_target` 默认 None → degrade 不可用**（design D2）：避免「开关一开复杂任务悄悄降到便宜模型」的质量悬崖；只有显式配 target 才降级。
+2. **headroom=None 路径零 import、逐字节等价**：`_resolve_base` 在 None 时直接走原查表，连 cost_aware_routing 都不 import，保证所有既有 model_router 调用方零回归。
+3. **不设「重排 fallback 优先低价」中间档**（design D5）：fallback 仅主模型失败时用、常态不省钱且会扭曲可靠性序；v1.0 只 normal/degrade 两档，不读单价表。
+4. **降级走 task_type 查表、不写死便宜模型名**（D3）：复用既有 `routes.get` + override 合并，不污染 model_router 类型。
+
+**影响：**
+- 新增 `cost_aware_routing.py`、`tests/test_cost_aware_routing.py`（14 测试）；改 `model_router.py`/`config.py`。
+- 测试：**全量 1375 passed，0 失败，零回归**。
+- ruff：我改/建文件 format+check 全绿。
+- mypy：77 → 78（+1）。该 +1 为 `cost_aware_routing.py:53` `from_settings` 的 `Settings()` call-arg，与全仓既有模式同款，非新增错误模式。
+
+**需 zy 核实：**
+1. `degrade_target` 默认 None、未配则 degrade 不启用（自解决策 #1）是否认可。
+2. 默认 `degrade_below=0.2` 阈值是否合适。
+3. headroom 由 agent_loop 调 AR18 `headroom()` 取标量后透传给 `get_(async_)client_and_config` 的接线——**本 change 仅落地 model_router 接入点与 policy，agent_loop 实际透传 headroom 的接线属后续**（与 AR18 headroom 的消费端对齐）。是否认可此分界。
 
 ---
