@@ -427,3 +427,37 @@ zy 复核全部 13 个 change 后，对 cost 维度做出整体决策：**cost �
 - ① 全局默认超时承载：**改——已加配置开关**。新增 `Settings.tool_default_timeout_seconds=30.0`；`agent_loop` 每次运行经 `_resolve_default_tool_timeout()` 读一次、下传给 `_safe_dispatch` → `get_effective_timeout(name, default)`；单工具 `@tool(timeout=)` 仍可覆盖。+3 测试。
 - ② 超时归到已有 `tool_timeout` 类别（扩展 `_categorize` 认 `TimeoutError`）：**认可，保持**。
 - ③ 唯一改既有测试（注入 token 由"run token 本身"变"连着自身超时+run 取消的新 token"）：**认可，保持**。
+
+### T4 tool-result-truncation
+- ① 默认 40KB + run_code 经 self_truncates 豁免、SB6 独占：**认可，保持**。
+- ② 截断中文说明文案：**认可，保持**。
+- ③ 存档记截断后内容、不另存原文：**认可，保持**。
+
+### AR10 tool-call-guardrails
+- ① 重复阈值默认 3、与 AR4 对齐、可配：**认可，保持**。
+- ② 跳过提示中文文案：**认可，保持**。
+- ③ 停止归 `loop_detected`、不新造枚举：**认可，保持**。
+
+### SB6 sandbox-output-truncation
+- ① stdout 50KB / stderr 10KB 各自阈值：**认可，保持**。
+- ② 中文说明 + 存档记原始字节：**认可，保持**。
+
+### SB7 sandbox-exec-timeout
+- ① abort 路径 kill 后仍 destroy（防撞名回归）：**认可，保持**。
+- ② 固定宽限 5 秒 + 无条件 SIGKILL（不轮询 inspect）：**认可，保持**。
+- ③ 超时/取消文案区分：**认可，保持**。
+
+### AR16 compression-trace
+- ① 摘要仅记 sha256 前16hex 指纹 + 长度、不落正文：**认可，保持**。
+- ② `summary_model` 防御式解析（出错记空）：**认可，保持**。
+- ③ 测试加 autouse TRACE_PATH 隔离 + 13 处 compress mock 加 `**kw`：**认可，保持**。
+
+### AR17 compression-anti-flap
+- ① 新增 `apply_anti_flap` 专用函数、不改 `maybe_compress` 返 union：**认可，保持**。
+- ② 最小间隔默认 1（首压即时、之后不强制隔开，主靠熔断）：**认可，保持**。
+- ③ 姊妹表 `session_anti_flap` + 过期清理留后续：**认可，保持**。
+
+### MCP4 mcp-degradation
+- ① strict 集成：**改——现在就接通 strict 停机**（agent_loop：agent 绑定了 strict-且-不可用服务时以明确错误终止）。
+- ② strict 启动失败用进程级集合跟踪：**认可，保持**。
+- ③ silent vs degrade：**改——现在就做区别**（无通知通道下，用日志级别区分：degrade=warning 显著、silent=debug 安静）。
