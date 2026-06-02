@@ -161,12 +161,12 @@ def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch, is
         msg: str,
         user_id: str,
         system_prompt: str | None = None,
-        allowed_tools=None,
         agent_name: str | None = None,
+        snapshot=None,
     ):  # type: ignore[misc]
         captured["system_prompt"] = system_prompt
-        captured["allowed_tools"] = allowed_tools
         captured["agent_name"] = agent_name
+        captured["snapshot"] = snapshot
         yield {"type": "done", "content": "ok"}
 
     monkeypatch.setattr(srv, "run_stream", fake_stream)
@@ -187,7 +187,10 @@ def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch, is
         )
     assert resp.status_code == 200
     assert captured.get("system_prompt") == "Channel system."
-    assert captured.get("allowed_tools") == ["shell"]
+    assert captured.get("agent_name") == "channel-bot"
+    assert captured["snapshot"] is not None
+    assert captured["snapshot"].allowed_tools == ["shell"]
+    assert captured["snapshot"].version_id == channel_agent.active_version_id
 
 
 def test_chat_rejects_disabled_agent(tmp_path, monkeypatch, isolated_schedule_db):

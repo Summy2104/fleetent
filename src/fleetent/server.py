@@ -293,19 +293,18 @@ async def chat(
     x_platform: str | None = Header(default=None),
     x_channel_id: str | None = Header(default=None),
 ) -> StreamingResponse:
-    from fleetent.im_gateway.normalizer import get_agent_for_context
+    from fleetent import agent_runtime
 
     user, key_meta = auth_result
     user_id = user.id
 
-    agent = get_agent_for_context(
+    snapshot = agent_runtime.resolve_agent_for_request(
         platform=x_platform or "",
         channel_id=x_channel_id or "",
         user_id=user_id,
     )
-    system_prompt = agent.system_prompt if agent else None
-    allowed_tools = agent.allowed_tools if agent else None
-    agent_name = agent.name if agent else None
+    system_prompt = snapshot.system_prompt if snapshot is not None else None
+    agent_name = snapshot.name if snapshot is not None else None
 
     # Lifecycle gate: disabled / archived agents are not routable (no agent loop entry).
     if agent_name is not None:
@@ -338,10 +337,10 @@ async def chat(
             kwargs: dict[str, Any] = {"user_id": user_id}
             if system_prompt is not None:
                 kwargs["system_prompt"] = system_prompt
-            if allowed_tools is not None:
-                kwargs["allowed_tools"] = allowed_tools
             if agent_name is not None:
                 kwargs["agent_name"] = agent_name
+            if snapshot is not None:
+                kwargs["snapshot"] = snapshot
             async for event in run_stream(req.message, **kwargs):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as exc:

@@ -37,7 +37,7 @@ async def test_agent_runtime_calls_long_term_context_builder_with_existing_signa
     )
     build_context = AsyncMock(return_value=BuiltContext(text="", sources=[]))
 
-    monkeypatch.setattr(agent_loop, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(agent_loop, "get_async_client_and_config", lambda *a, **k: (client, cfg))
     monkeypatch.setattr(agent_loop, "get_schemas", lambda: [])
     monkeypatch.setattr(agent_loop, "maybe_compress", lambda messages: messages)
     monkeypatch.setattr(agent_loop, "match_skill", lambda _: None)
@@ -56,6 +56,7 @@ async def test_agent_runtime_calls_long_term_context_builder_with_existing_signa
         "what should I use?",
         "agent-1",
         321,
+        memory_namespace="default",
     )
 
 

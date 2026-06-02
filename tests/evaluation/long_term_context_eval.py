@@ -102,7 +102,9 @@ async def run_deterministic_fixture(
     memories = [_memory_item(memory, str(fixture["user_id"])) for memory in fixture["memories"]]
     knowledge = [_knowledge_item(item) for item in fixture["knowledge"]]
 
-    async def search_memory(user_id: str, query: str, *, limit: int) -> list[MemoryItem]:
+    async def search_memory(
+        user_id: str, query: str, *, limit: int, namespace: str = "default"
+    ) -> list[MemoryItem]:
         memory_queries.append((user_id, query, limit))
         return memories[:limit]
 

@@ -56,13 +56,13 @@
 
 - [x] 8.1 Write failing tests: `load(session_id)` 对老格式（顶层列表）和新格式（`{meta, messages}`）都返回 messages；`load_meta(session_id)` 返回 meta dict 或 `{}`；`save(session_id, messages, meta=None)` 写新格式
 - [x] 8.2 重构 `session_mgr` 内部存储为 `{meta, messages}`；读时兼容老格式；保留 `load -> list` 签名；新增 `load_meta`
-- [ ] 8.3 Write failing tests: session 首写时 meta 持久化 `agent_id` + `agent_version_id`；之后 activate 不同 version 不影响该 session；新 session 拿当前 active
+- [x] 8.3 Write failing tests: session 首写时 meta 持久化 `agent_id` + `agent_version_id`；之后 activate 不同 version 不影响该 session；新 session 拿当前 active
 
 ## 9. agent_loop 应用 snapshot
 
-- [ ] 9.1 Write failing tests: `run`/`run_stream` 接受 `snapshot: AgentSnapshot | None`，存在时：skills 走 `snapshot.skills_dir`、工具走 `filter_tool_schemas`、模型走 `snapshot.model_overrides`、memory 走 `snapshot.memory_namespace`；为空时维持当前全局行为
-- [ ] 9.2 修改 `agent_loop.run` / `run_stream` / `run_sync` 接受并应用 snapshot（旧 `allowed_tools` / `agent_name` 参数保留为 fallback）
-- [ ] 9.3 修改 `normalizer.route` 与 `/chat`：优先从 session meta 解析 snapshot，否则 `resolve_agent_for_request` 解析并写回 meta
+- [x] 9.1 Write failing tests: `run`/`run_stream` 接受 `snapshot: AgentSnapshot | None`，存在时：skills 走 `snapshot.skills_dir`、工具走 `filter_tool_schemas`、模型走 `snapshot.model_overrides`、memory 走 `snapshot.memory_namespace`；为空时维持当前全局行为
+- [x] 9.2 修改 `agent_loop.run` / `run_stream` / `run_sync` 接受并应用 snapshot（旧 `allowed_tools` / `agent_name` 参数保留为 fallback）
+- [x] 9.3 修改 `normalizer.route` 与 `/chat`：优先从 session meta 解析 snapshot，否则 `resolve_agent_for_request` 解析并写回 meta
 
 ## 10. invoke_agent 工具
 

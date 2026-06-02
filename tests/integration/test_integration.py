@@ -166,3 +166,97 @@ async def test_session_history_accumulates_across_messages(isolated_db):
     assert len(history) == 5
     assert history[1]["content"] == "message one"  # history[0] is system message
     assert history[3]["content"] == "message two"
+
+
+def _capture_snapshot_run():
+    """Return (patch_ctx, captured) where captured['snapshot'] holds the run snapshot."""
+    captured: dict[str, object] = {}
+
+    async def fake_run(messages, **kwargs):
+        captured["snapshot"] = kwargs.get("snapshot")
+        messages.append({"role": "assistant", "content": "ok"})
+        return "ok"
+
+    ctx = patch("fleetent.agent_loop.run", new_callable=AsyncMock)
+    return ctx, captured, fake_run
+
+
+async def _route_text(session_id, user_id, text):
+    from fleetent.im_gateway.normalizer import NormalizedMessage, route
+
+    async def fake_reply(_text: str) -> None:
+        return None
+
+    await route(
+        NormalizedMessage(
+            platform="slack",
+            session_id=session_id,
+            user_id=user_id,
+            text=text,
+            attachments=[],
+            reply_func=fake_reply,
+        )
+    )
+
+
+async def test_route_persists_agent_version_in_session_meta(isolated_db):
+    """First route writes agent_id + agent_version_id into session meta."""
+    import fleetent.agent_store as agent_store
+
+    agent = agent_store.create_agent("billing", "Billing bot.", ["github__*"])
+    agent_store.assign_user("internal-user-3", agent.id)
+
+    ctx, captured, fake_run = _capture_snapshot_run()
+    with ctx as mock_run:
+        mock_run.side_effect = fake_run
+        await _route_text("user:UMETA", "internal-user-3", "hi")
+
+    meta = await session_mgr.load_meta("user:UMETA")
+    assert meta["agent_id"] == agent.id
+    assert meta["agent_version_id"] == agent.active_version_id
+    snapshot = captured["snapshot"]
+    assert snapshot is not None
+    assert snapshot.version_id == agent.active_version_id
+
+
+async def test_route_locks_session_to_version_across_activation(isolated_db):
+    """A session stays pinned to its recorded version even after a new one activates."""
+    import fleetent.agent_store as agent_store
+
+    agent = agent_store.create_agent("ops", "Ops v1.", ["github__*"])
+    agent_store.assign_user("internal-user-4", agent.id)
+    v1_version_id = agent.active_version_id
+
+    ctx, captured, fake_run = _capture_snapshot_run()
+    with ctx as mock_run:
+        mock_run.side_effect = fake_run
+        await _route_text("user:ULOCK", "internal-user-4", "first")
+
+    # Activate v2; the existing session must not follow.
+    agent_store.create_version("ops", system_prompt="Ops v2.")
+
+    ctx2, captured2, fake_run2 = _capture_snapshot_run()
+    with ctx2 as mock_run2:
+        mock_run2.side_effect = fake_run2
+        await _route_text("user:ULOCK", "internal-user-4", "second")
+
+    assert captured2["snapshot"].version_id == v1_version_id
+    meta = await session_mgr.load_meta("user:ULOCK")
+    assert meta["agent_version_id"] == v1_version_id
+
+
+async def test_route_new_session_uses_current_active(isolated_db):
+    """A brand-new session resolves the currently active version."""
+    import fleetent.agent_store as agent_store
+
+    agent = agent_store.create_agent("sales", "Sales v1.", ["github__*"])
+    agent_store.assign_user("internal-user-5", agent.id)
+    agent_store.create_version("sales", system_prompt="Sales v2.")
+    active = agent_store.get_by_name("sales")
+
+    ctx, captured, fake_run = _capture_snapshot_run()
+    with ctx as mock_run:
+        mock_run.side_effect = fake_run
+        await _route_text("user:UNEW", "internal-user-5", "hello")
+
+    assert captured["snapshot"].version_id == active.active_version_id

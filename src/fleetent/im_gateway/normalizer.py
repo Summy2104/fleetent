@@ -75,17 +75,29 @@ async def route(msg: NormalizedMessage) -> None:
         await msg.reply_func(_REJECTION_MSG)
         return
 
-    from fleetent import agent_loop, session_mgr
+    from fleetent import agent_loop, agent_runtime, session_mgr
     from fleetent.skill_registry import load as load_skill
     from fleetent.skill_registry import match as match_skill
 
     async with session_mgr.session_lock(msg.session_id):
         history = await session_mgr.load(msg.session_id)
+        meta = await session_mgr.load_meta(msg.session_id)
 
-        # Resolve agent config: channel → user → default → bare run
-        agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
-        base_system = agent.system_prompt if agent else _SYSTEM
-        allowed_tools = agent.allowed_tools if agent else None
+        # Version lock: an existing session stays pinned to the version recorded in
+        # its meta even if a newer version is later activated. A fresh session
+        # resolves the currently active version (channel > user > default).
+        snapshot = None
+        locked_version_id = meta.get("agent_version_id")
+        if isinstance(locked_version_id, int):
+            snapshot = agent_runtime.load_version(locked_version_id)
+        if snapshot is None:
+            snapshot = agent_runtime.resolve_agent_for_request(
+                msg.platform, msg.channel_id, msg.user_id
+            )
+            if snapshot is not None:
+                meta = {"agent_id": snapshot.agent_id, "agent_version_id": snapshot.version_id}
+
+        base_system = snapshot.system_prompt if snapshot is not None else _SYSTEM
 
         # Build fresh system message with the matching skill.
         system_content = base_system
@@ -105,11 +117,11 @@ async def route(msg: NormalizedMessage) -> None:
             messages=history,
             user_id=msg.user_id,
             reply_func=msg.reply_func,
-            allowed_tools=allowed_tools,
+            snapshot=snapshot,
         )
 
         # agent_loop.run() already appended the assistant message to history in-place.
         # Do NOT append again here — that caused duplicate messages in every session.
-        await session_mgr.save(msg.session_id, history)
+        await session_mgr.save(msg.session_id, history, meta=meta)
 
     await msg.reply_func(response)

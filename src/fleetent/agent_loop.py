@@ -11,8 +11,8 @@ from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
 from openai.types.chat import ChatCompletionChunk
 
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
+from fleetent.agent_runtime import AgentSnapshot, filter_tool_schemas
 from fleetent.context_mgr import maybe_compress
-from fleetent.governance.agent_policy import check_tool_access
 from fleetent.governance.permission_gate import _default_gate
 from fleetent.intelligence.long_term_ctx import ContextSource, build_context
 from fleetent.model_router import RouteConfig, get_async_client_and_config
@@ -22,6 +22,7 @@ from fleetent.observability import (
     record_injected_context,
     record_trace_event,
 )
+from fleetent.skill_registry import SkillIndex
 from fleetent.skill_registry import load as load_skill
 from fleetent.skill_registry import match as match_skill
 from fleetent.skill_registry import scan as scan_skills
@@ -715,14 +716,24 @@ async def run(
     reply_func: ReplyFunc | None = None,
     allowed_tools: list[str] | None = None,
     agent_name: str | None = None,
+    snapshot: AgentSnapshot | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
     When is_sub_agent=True the sub_agent tool is excluded from the tool schema
     so child agents cannot spawn further sub-agents.
-    When allowed_tools is set, only matching tools (fnmatch patterns) are exposed.
+    When a ``snapshot`` is given its per-agent config (allowed_tools, MCP
+    whitelist, model overrides, memory namespace) is applied; otherwise the
+    loop falls back to the global behaviour (and the legacy ``allowed_tools``).
     """
-    client, cfg = get_async_client_and_config("default")
+    eff_allowed = snapshot.allowed_tools if snapshot is not None else allowed_tools
+    mcp_server_ids = snapshot.mcp_server_ids if snapshot is not None else None
+    overrides = snapshot.model_overrides if snapshot is not None else None
+    memory_namespace = snapshot.memory_namespace if snapshot is not None else "default"
+    if snapshot is not None:
+        agent_name = agent_name or snapshot.name
+
+    client, cfg = get_async_client_and_config("default", overrides=overrides)
     run_id = str(uuid.uuid4())
     start = time.monotonic()
     _record_agent_run_started(
@@ -733,7 +744,9 @@ async def run(
     )
     user_input = _first_user_content(messages)
     try:
-        built_context = await build_context(user_id, user_input, agent_name or "", cfg.max_tokens)
+        built_context = await build_context(
+            user_id, user_input, agent_name or "", cfg.max_tokens, memory_namespace=memory_namespace
+        )
         _append_system_context(messages, system_prompt, built_context.text)
         _record_injected_context(run_id, built_context.sources)
 
@@ -743,12 +756,7 @@ async def run(
             if is_sub_agent
             else get_schemas()
         )
-
-        # Filter by agent-level allowed_tools if specified
-        if allowed_tools is not None:
-            schemas = [
-                s for s in schemas if check_tool_access(s["function"]["name"], allowed_tools)
-            ]
+        schemas = filter_tool_schemas(schemas, eff_allowed, mcp_server_ids)
 
         response = None
         msg: Any = None
@@ -939,23 +947,39 @@ async def run(
         raise
 
 
-def run_sync(user_input: str, user_id: str = "default", system_prompt: str = _SYSTEM) -> str:
+def _match_skill_for(user_input: str, snapshot: AgentSnapshot | None) -> str | None:
+    """Return the matched skill body, scoped to the snapshot's skills dir if set."""
+    if snapshot is not None and snapshot.skills_dir:
+        index = SkillIndex(snapshot.skills_dir)
+        name = index.match(user_input)
+        return index.load(name) if name else None
+    name = match_skill(user_input)
+    return load_skill(name) if name else None
+
+
+def run_sync(
+    user_input: str,
+    user_id: str = "default",
+    system_prompt: str = _SYSTEM,
+    snapshot: AgentSnapshot | None = None,
+) -> str:
     """Synchronous wrapper around run() for CLI use."""
 
     scan_skills()
     full_system = system_prompt
 
-    matched = match_skill(user_input)
-    if matched:
-        skill_content = load_skill(matched)
-        full_system = f"{full_system}\n\n{skill_content}"
+    matched = _match_skill_for(user_input, snapshot)
+    if matched is not None:
+        full_system = f"{full_system}\n\n{matched}"
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": full_system},
         {"role": "user", "content": user_input},
     ]
 
-    return asyncio.run(run(messages, user_id=user_id, system_prompt=system_prompt))
+    return asyncio.run(
+        run(messages, user_id=user_id, system_prompt=system_prompt, snapshot=snapshot)
+    )
 
 
 async def run_stream(
@@ -964,13 +988,23 @@ async def run_stream(
     system_prompt: str = _SYSTEM,
     allowed_tools: list[str] | None = None,
     agent_name: str | None = None,
+    snapshot: AgentSnapshot | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
     Event types: tool_call, tool_result, text_delta, done.
     text_delta events stream as tokens arrive from the LLM.
+    When a ``snapshot`` is given its per-agent config (skills dir, allowed_tools,
+    MCP whitelist, model overrides, memory namespace) is applied.
     """
-    client, cfg = get_async_client_and_config("default")
+    eff_allowed = snapshot.allowed_tools if snapshot is not None else allowed_tools
+    mcp_server_ids = snapshot.mcp_server_ids if snapshot is not None else None
+    overrides = snapshot.model_overrides if snapshot is not None else None
+    memory_namespace = snapshot.memory_namespace if snapshot is not None else "default"
+    if snapshot is not None:
+        agent_name = agent_name or snapshot.name
+
+    client, cfg = get_async_client_and_config("default", overrides=overrides)
     run_id = str(uuid.uuid4())
     start = time.monotonic()
     _record_agent_run_started(
@@ -982,15 +1016,17 @@ async def run_stream(
 
     full_system = system_prompt
 
-    matched = match_skill(user_input)
-    if matched:
-        full_system = f"{full_system}\n\n{load_skill(matched)}"
+    matched = _match_skill_for(user_input, snapshot)
+    if matched is not None:
+        full_system = f"{full_system}\n\n{matched}"
 
     messages: list[Any] = [
         {"role": "system", "content": full_system},
         {"role": "user", "content": user_input},
     ]
-    built_context = await build_context(user_id, user_input, agent_name or "", cfg.max_tokens)
+    built_context = await build_context(
+        user_id, user_input, agent_name or "", cfg.max_tokens, memory_namespace=memory_namespace
+    )
     _append_system_context(messages, full_system, built_context.text)
     _record_injected_context(run_id, built_context.sources)
 
@@ -1014,11 +1050,7 @@ async def run_stream(
         tool_calls_acc: dict[int, dict[str, str]] = {}
         finish_reason = "stop"
 
-        stream_schemas = get_schemas()
-        if allowed_tools is not None:
-            stream_schemas = [
-                s for s in stream_schemas if check_tool_access(s["function"]["name"], allowed_tools)
-            ]
+        stream_schemas = filter_tool_schemas(get_schemas(), eff_allowed, mcp_server_ids)
 
         try:
             stream, model_used = await _stream_with_fallback(
