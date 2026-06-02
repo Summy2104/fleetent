@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import structlog
@@ -21,6 +21,10 @@ _locks: dict[str, asyncio.Lock] = {}
 # Wall-clock of the last maintenance scan, for the save()-triggered time gate.
 # Module-level so the gate survives across calls; reset by tests for determinism.
 _last_cleanup_at: float | None = None
+
+# Handle for the process-internal periodic maintenance task (server lifespan only).
+# Module-level + resettable in tests, mirroring mcp_client._health_monitor_task.
+_maintenance_task: asyncio.Task[None] | None = None
 
 
 def _default_config() -> dict[str, float]:
@@ -56,6 +60,56 @@ def maybe_run_maintenance(*, _now: float | None = None) -> list[str]:
     removed = cleanup_expired(_now=now)
     removed += enforce_capacity()
     return removed
+
+
+async def _session_maintenance_loop(interval: float) -> None:
+    """Periodically trigger session cleanup (bare asyncio, no cron_scheduler).
+
+    Reuses maybe_run_maintenance() so TTL/capacity/SB2-release semantics stay in one
+    place. Each iteration is fault-isolated: a single cleanup failure is logged and the
+    loop continues — one failure MUST NOT kill the resident task and silently lose all
+    subsequent periodic cleanups.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            removed = maybe_run_maintenance()
+            # Release removed sessions' sandbox containers too, mirroring save(). The
+            # loop is exactly the silent-period case where save() is NOT running, so
+            # without this, periodically-cleaned sessions would leak their containers.
+            await _release_sandboxes(removed)
+        except Exception as exc:  # noqa: BLE001 — a single failure must not kill the loop
+            logger.warning("session_maintenance_loop_iteration_failed", error=str(exc))
+
+
+def start_session_maintenance(*, interval: float | None = None) -> asyncio.Task[None]:
+    """Start the background session-maintenance task (server lifespan only, not CLI).
+
+    Implemented as a bare ``asyncio.create_task`` loop — deliberately NOT routed through
+    cron_scheduler/APScheduler (decoupled from the deferred user-level scheduler, per the
+    MCP3 health-monitor precedent and lead direction). Idempotent: a running task is
+    returned as-is rather than replaced.
+    """
+    global _maintenance_task
+    if _maintenance_task is not None and not _maintenance_task.done():
+        return _maintenance_task
+    if interval is None:
+        from fleetent.config import Settings
+
+        interval = Settings().session_cleanup_interval_seconds
+    _maintenance_task = asyncio.create_task(_session_maintenance_loop(interval))
+    return _maintenance_task
+
+
+async def stop_session_maintenance() -> None:
+    """Cancel the background session-maintenance task, leaving no residual task."""
+    global _maintenance_task
+    if _maintenance_task is None:
+        return
+    _maintenance_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await _maintenance_task
+    _maintenance_task = None
 
 
 def is_expired(mtime: float, now: float, ttl_seconds: float) -> bool:
