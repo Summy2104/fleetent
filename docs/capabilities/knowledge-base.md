@@ -6,7 +6,7 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML 解析，local directory、Google Drive folder 与 Confluence Cloud 手动同步、sync planner、deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、按 tenant + knowledge base 隔离召回相关文档片段，向 vector_store reindex 暴露当前可索引 chunks，以及手动运行的 deterministic retrieval evaluation / combined memory+KB embedding evaluation。
+**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML 解析，local directory、Google Drive folder 与 Confluence Cloud 手动同步、sync planner、deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、按 tenant + knowledge base 隔离召回相关文档片段，agent 到一个或多个 KB 的绑定与有效 KB 范围解析，向 vector_store reindex 暴露当前可索引 chunks，以及手动运行的 deterministic retrieval evaluation / combined memory+KB embedding evaluation。
 
 **后续负责**：第三方数据源接入与文档获取、更丰富的文档解析、实体与关系提取、图谱存储。
 
@@ -18,8 +18,8 @@
 
 **模块归属**：
 - owning package：`intelligence.knowledge_base`
-- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`delete(document_id)`、`archive(document_id)`、`iter_indexable_knowledge_chunks(tenant_id, kb_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`GoogleDriveConnectorConfig`、`ConfluenceConnectorConfig`、`SyncAction`、`SyncPlan`、`SyncPlanItem`、`SyncPlanSummary`、`SyncExecutionSummary`、`plan_local_directory_sync(config, tenant_id, kb_id)`、`execute_sync_plan(plan)`、`sync_local_directory(config, tenant_id, kb_id)`、`plan_google_drive_sync(config, client)`、`sync_google_drive(config, client)`、`plan_confluence_sync(config, client)`、`sync_confluence(config, client)`
-- owned tables：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`、`knowledge_chunks_fts`、`knowledge_source_states`
+- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`delete(document_id)`、`archive(document_id)`、`iter_indexable_knowledge_chunks(tenant_id, kb_id)`、`AgentKnowledgeBaseBinding`、`bind_agent_to_kb(tenant_id, agent_id, kb_id)`、`unbind_agent_from_kb(tenant_id, agent_id, kb_id)`、`list_agent_kb_bindings(tenant_id, agent_id)`、`resolve_agent_kb_ids(tenant_id, agent_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`GoogleDriveConnectorConfig`、`ConfluenceConnectorConfig`、`SyncAction`、`SyncPlan`、`SyncPlanItem`、`SyncPlanSummary`、`SyncExecutionSummary`、`plan_local_directory_sync(config, tenant_id, kb_id)`、`execute_sync_plan(plan)`、`sync_local_directory(config, tenant_id, kb_id)`、`plan_google_drive_sync(config, client)`、`sync_google_drive(config, client)`、`plan_confluence_sync(config, client)`、`sync_confluence(config, client)`
+- owned tables：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`、`knowledge_chunks_fts`、`knowledge_source_states`、`knowledge_base_agent_bindings`
 - config namespace：`knowledge_base.*`
 
 ## 关键流程
@@ -111,6 +111,15 @@ knowledge_source_states (
   document_id  TEXT,
   updated_at   DATETIME,
   PRIMARY KEY (source_id, tenant_id, kb_id, source_path)
+)
+
+-- agent 到 KB 的显式绑定；不强制外键，允许先绑定后创建 / 同步 KB
+knowledge_base_agent_bindings (
+  tenant_id  TEXT NOT NULL,
+  agent_id   TEXT NOT NULL,
+  kb_id      TEXT NOT NULL,
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY (tenant_id, agent_id, kb_id)
 )
 ```
 
@@ -311,6 +320,30 @@ async def plan_confluence_sync(config: ConfluenceConnectorConfig, *, client: Con
 
 async def sync_confluence(config: ConfluenceConnectorConfig, *, client: ConfluenceClient) -> ConfluenceSyncSummary:
     """通过 planner + executor 手动同步 Confluence Cloud pages。"""
+
+
+@dataclass
+class AgentKnowledgeBaseBinding:
+    tenant_id: str
+    agent_id: str
+    kb_id: str
+    created_at: datetime
+
+
+def bind_agent_to_kb(tenant_id: str, agent_id: str, kb_id: str) -> AgentKnowledgeBaseBinding:
+    """把 agent 绑定到一个 KB；重复绑定幂等，不要求 KB 已存在。"""
+
+
+def unbind_agent_from_kb(tenant_id: str, agent_id: str, kb_id: str) -> None:
+    """解除 agent 到 KB 的绑定；不存在时幂等。"""
+
+
+def list_agent_kb_bindings(tenant_id: str, agent_id: str) -> list[AgentKnowledgeBaseBinding]:
+    """列出 agent 的显式 KB 绑定。"""
+
+
+def resolve_agent_kb_ids(tenant_id: str, agent_id: str) -> list[str]:
+    """解析 agent 有效 KB 范围；有显式绑定时使用绑定，否则回退默认 KB，默认 KB 为空时返回空列表。"""
 ```
 
 `mode` 取值：
@@ -322,7 +355,7 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 
 ## 现状
 
-**已完成 core + parser + hybrid + local connector + sync planner + Google Drive / Confluence connector 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、基础 Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入；`knowledge-base-parsers-basic` 增加了无 AI 框架依赖的 plain text / Markdown / lightweight HTML parser，并提供 parsed ingest adapter；`knowledge-base-hybrid-search` 增加了 knowledge-base-owned SQLite FTS5 keyword index、keyword mode、hybrid mode 和 RRF 融合；`knowledge-base-connectors-local` 增加了 DataSource / DocumentRef 边界、显式 root allowlist 的 local directory source、`.txt` / `.md` / `.html` / `.htm` 格式映射、source path / mtime / content hash 状态记录，以及手动 `sync_local_directory`；`knowledge-base-sync-planner` 增加了 plan / execute 分离、`ingest_new` / `reingest_changed` / `skip_unchanged` / `delete_missing` 动作模型；`knowledge-base-connectors-google-drive` 增加指定 folder scope、OAuth `credential_ref`、fake-client default path、Google Docs HTML export、text / Markdown / HTML parser dispatch、`archive_missing` 和 opt-in smoke scaffold；`knowledge-base-connectors-confluence` 增加 Cloud API token `credential_ref`、space / page / page+children scope、storage HTML parser dispatch、bounded 429 retry、`archive_missing` 和 opt-in smoke scaffold。
+**已完成 core + parser + hybrid + local connector + sync planner + Google Drive / Confluence connector + agent KB binding 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、基础 Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入；`knowledge-base-parsers-basic` 增加了无 AI 框架依赖的 plain text / Markdown / lightweight HTML parser，并提供 parsed ingest adapter；`knowledge-base-hybrid-search` 增加了 knowledge-base-owned SQLite FTS5 keyword index、keyword mode、hybrid mode 和 RRF 融合；`knowledge-base-connectors-local` 增加了 DataSource / DocumentRef 边界、显式 root allowlist 的 local directory source、`.txt` / `.md` / `.html` / `.htm` 格式映射、source path / mtime / content hash 状态记录，以及手动 `sync_local_directory`；`knowledge-base-sync-planner` 增加了 plan / execute 分离、`ingest_new` / `reingest_changed` / `skip_unchanged` / `delete_missing` 动作模型；`knowledge-base-connectors-google-drive` 增加指定 folder scope、OAuth `credential_ref`、fake-client default path、Google Docs HTML export、text / Markdown / HTML parser dispatch、`archive_missing` 和 opt-in smoke scaffold；`knowledge-base-connectors-confluence` 增加 Cloud API token `credential_ref`、space / page / page+children scope、storage HTML parser dispatch、bounded 429 retry、`archive_missing` 和 opt-in smoke scaffold；`knowledge-base-agent-kb-binding` 增加 agent 到多个 KB 的显式绑定、默认 KB 回退和空范围诊断。
 
 团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移设计资产和小块算法**，而非从零重写或整体搬运。
 
@@ -362,7 +395,7 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 - local directory、Google Drive 与 Confluence 已支持 plan + execute 手动 sync；尚未实现后台 job。
 - 检索已支持 SQLite FTS5/BM25 keyword mode 与 RRF hybrid mode；尚未实现 rerank、query planner 或 graph。
 - 外部 SaaS 数据源已有 fake-client 默认路径和手动 opt-in smoke scaffold；真实 Google Drive / Confluence API client 不进入默认测试路径。
-- long-term-ctx 只支持内置默认 KB provider；还没有 agent 到多 KB 的绑定策略。
+- long-term-ctx 已通过 `resolve_agent_kb_ids()` 使用 agent KB binding；尚未实现 document-level ACL。
 - 后台 vector index rebuild job runtime 尚未实现；当前只提供同步 vector_store reindex public API。
 
 ## 下一批候选 specs
@@ -431,9 +464,9 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
   - depth 控制关系展开层数，默认 2 层，防止结果爆炸
   - 图数据存储在 SQLite（entities + relations 表），不需要独立图数据库
 
-- [ ] **作用域隔离**：通过多 KB + agent 绑定实现访问控制
+- [x] **作用域隔离**：通过多 KB + agent 绑定实现访问控制
   - 按内容敏感度或部门建立多个 KB（如 Company-Wide / Engineering / HR / Finance）
-  - agent 绑定到一个或多个 KB，检索时只访问绑定的 KB
+  - agent 绑定到一个或多个 KB，检索时只访问绑定的 KB；未配置显式绑定时只访问默认 KB
   - 公共内容放 Company-Wide KB，多个 agent 同时绑定；部门内容放部门 KB，只有对应 agent 可见
   - 真正高度敏感的数据（个人薪资、绩效记录等）不进知识库，由结构化系统管理
 
@@ -462,7 +495,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 ## 测试边界
 
 **需要单元测试的行为**：
-- public API 可导入：`KnowledgeDocument`、`KnowledgeChunk`、`ingest_text()`、`search()`、`delete()`、`iter_indexable_knowledge_chunks()`、`DocumentRef`、`DataSource`、sync planner dataclasses、`plan_local_directory_sync()`、`execute_sync_plan()`、`sync_local_directory()`
+- public API 可导入：`KnowledgeDocument`、`KnowledgeChunk`、`ingest_text()`、`search()`、`delete()`、`iter_indexable_knowledge_chunks()`、`AgentKnowledgeBaseBinding`、`bind_agent_to_kb()`、`unbind_agent_from_kb()`、`list_agent_kb_bindings()`、`resolve_agent_kb_ids()`、`DocumentRef`、`DataSource`、sync planner dataclasses、`plan_local_directory_sync()`、`execute_sync_plan()`、`sync_local_directory()`
 - 配置默认值：`knowledge_base.enabled=false`，默认 tenant/kb 与 chunk 参数稳定
 
 **需要集成测试的行为**：

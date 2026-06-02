@@ -338,10 +338,16 @@ async def _search_knowledge(
     settings = Settings(anthropic_api_key="")
     if not settings.knowledge_base.enabled:
         return []
+    kb_ids = knowledge_base.resolve_agent_kb_ids(
+        settings.knowledge_base.default_tenant_id,
+        agent_id,
+    )
+    if not kb_ids:
+        return []
     results = await knowledge_base.search(
         query,
         tenant_id=settings.knowledge_base.default_tenant_id,
-        kb_ids=[settings.knowledge_base.default_kb_id],
+        kb_ids=kb_ids,
         limit=limit,
     )
     return list(results)

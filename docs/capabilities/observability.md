@@ -192,6 +192,7 @@ def get_logger(component: str) -> Logger:
 - performance summary：按 user / agent / tenant / session / time 聚合 run、LLM、fallback、tool 和
   permission 等运行性能指标
 - source attribution：`InjectedContextTrace`、`record_injected_context()`、`injected_context` event
+- knowledge-base scope diagnostics：agent 没有显式 KB 绑定且默认 KB 为空时记录 `knowledge_base.agent_kb_scope_empty`
 - observability contract tests：覆盖 agent run 的 `injected_context` / `agent_run_completed` 事件链路、
   source attribution payload safety、trace query、usage aggregation 和 performance aggregation contract
 
@@ -279,6 +280,7 @@ def get_logger(component: str) -> Logger:
 - 扩展完整 agent run fixture，验证事件流覆盖用户输入、模型、工具、上下文、完成事件。
 - 验证脱敏 / 截断规则对大 payload 和敏感字段稳定生效。
 - 验证 usage / performance 聚合在缺失字段、旧 trace、异常 run 下的容错。
+- 验证知识库范围诊断事件不包含用户 query、文档正文或 credential 内容。
 memory / reflection / long-term-ctx / knowledge-base 的效果评估应依赖已完成的 trace contract 证据。
 
 ## 服务化 / 目录边界判断

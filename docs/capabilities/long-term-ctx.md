@@ -14,7 +14,7 @@ long-term-ctx 仍可基于 memory 正常工作。
 **不负责**：存储任何数据、记忆提取（→ memory）、文档索引（→ knowledge_base）、in-session 上下文压缩（→ context_mgr）、trace 持久化（→ observability）。
 
 **调用关系**：
-- 依赖：memory_layer（search）、knowledge_base optional provider（search）、config（token 预算上限和来源分配策略）
+- 依赖：memory_layer（search）、knowledge_base optional provider（resolve_agent_kb_ids / search）、config（token 预算上限和来源分配策略）
 - 被依赖：agent_loop（每次对话开始前调用）
 
 **模块归属**：
@@ -30,7 +30,8 @@ flowchart TD
     A[agent_loop 调用 build_context] --> B[并行检索]
     B --> C[memory_layer.search]
     B --> D{knowledge provider\n已启用?}
-    D -->|是| E[knowledge_base.search\n向量检索]
+    D -->|是| S[knowledge_base.resolve_agent_kb_ids\n解析 agent KB 范围]
+    S --> E[knowledge_base.search\n只检索解析出的 KB]
     D -->|否| F[空 knowledge 结果]
     C --> G[合并结果]
     E --> G
@@ -104,6 +105,7 @@ async def build_context(
 - `BuiltContext`、`ContextSource`、`build_context(user_id, query, agent_id, available_tokens)` public API
 - memory-layer semantic search 接入
 - knowledge-base provider 接入；KB 未启用、未配置或无结果时不阻塞 memory 注入
+- knowledge-base provider 通过 `resolve_agent_kb_ids()` 获取 agent 有效 KB 范围；没有显式绑定时只回退默认 KB，空范围时不调用 search
 - token budget 基础截断
 - 可解释 budget policy：effective budget、memory / KB source budget、source top-k、query intent / explicit conflict preference
 - agent-runtime 在 `run()` / `run_stream()` / `run_sync()` 构造 prompt 前调用 long-term-ctx
@@ -139,7 +141,7 @@ async def build_context(
 
 ## 当前缺口
 
-- KB provider 已接入当前 knowledge-base search；尚未支持 agent 到多个 KB 的绑定策略。
+- KB provider 已接入 agent 到多个 KB 的绑定策略；尚未支持 agent / tenant 级 memory 与 KB budget 策略。
 - token 估算仍使用 deterministic 近似值，尚未接入真实 tokenizer。
 - memory / knowledge 的默认比例已可配置，但尚未做 agent / tenant 级策略。
 - 格式模板未产品化，缺少不同 agent / tenant 的可配置策略。
@@ -148,8 +150,8 @@ async def build_context(
 ## 下一批候选 specs
 
 - `long-term-context-template-config`
-- `knowledge-provider-contract`
 - `long-term-context-agent-tenant-policy`
+- `knowledge-provider-contract`
 - `long-term-context-real-tokenizer`
 
 ## 自动化效果验证
@@ -209,7 +211,7 @@ memory / knowledge / observability 的接口，未来可以独立成 package，�
 
 **需要 mock 的依赖**：
 - `memory_layer.search`：隔离 memory 模块，控制返回内容和数量
-- `knowledge_base.search` 或 null provider：隔离 knowledge_base 模块
+- `knowledge_base.resolve_agent_kb_ids` / `knowledge_base.search` 或 null provider：隔离 knowledge_base 模块
 - `config`：注入测试用 token 预算上限
 
 ## 待决问题
