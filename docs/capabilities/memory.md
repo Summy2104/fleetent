@@ -34,7 +34,7 @@ maintenance proposal 或用户显式开启的低风险自动策略。
 
 **模块归属**：
 - owning package：`fleetent.intelligence.memory`
-- public API：`search(user_id, query, limit)`、`extract_and_update(user_id, conversation)`、`iter_indexable_memories(user_id)`、`update_user_memory_content()`、`mark_user_memory_stale()`、`delete_user_memory()`、`merge_user_memories()`、`MemoryItem`、`SharedMemoryItem`、`create_shared_memory()`、`update_shared_memory()`、`archive_shared_memory()`、`search_shared_memory()`、`iter_indexable_shared_memories()`
+- public API：`search(user_id, query, limit)`、`extract_and_update(user_id, conversation)`、`iter_indexable_memories(user_id)`、`update_user_memory_content()`、`mark_user_memory_stale()`、`delete_user_memory()`、`merge_user_memories()`、`MemoryItem`、`SharedMemoryItem`、`create_shared_memory()`、`update_shared_memory()`、`archive_shared_memory()`、`search_shared_memory()`、`iter_indexable_shared_memories()`、`MemoryQualityTrendQuery`、`MemoryQualityTrendBucket`、`MemoryQualityTrendSummary`、`get_memory_quality_trend_summary()`
 - owned tables：`memory_items`、`shared_memory_items`
 - config namespace：`memory.*`
 
@@ -132,6 +132,10 @@ async def create_shared_memory(...) -> SharedMemoryItem:
 
 async def search_shared_memory(scope_type: str, scope_id: str, query: str, limit: int = 10) -> list[SharedMemoryItem]:
     """检索指定 team / tenant scope 内 active 或 stale 的 Shared Memory；不接 prompt 注入。"""
+
+
+def get_memory_quality_trend_summary(query: MemoryQualityTrendQuery) -> MemoryQualityTrendSummary:
+    """只读聚合 User Memory、Shared Memory 和维护 proposal 质量趋势；不触发提取或清理。"""
 ```
 
 ## 现状
@@ -151,6 +155,7 @@ async def search_shared_memory(scope_type: str, scope_id: str, query: str, limit
 - `iter_indexable_memories(user_id)` public API 返回当前未过期 memory source records，供 vector_store 同步 reindex 使用
 - reflection maintenance apply 只通过 `fleetent.intelligence.memory` public mutation API，不直接写 `memory_items`
 - Shared Memory 数据层已完成：`shared_memory_items` 表、`SharedMemoryItem` public API、team / tenant scope、`shared:{scope_type}:{scope_id}` vector namespace、reflection proposal apply 入口和最小 admin CLI；不接 prompt 注入
+- Memory Quality Trend summary 已完成：按 day / week 只读聚合 User Memory type counts、expired context、exact duplicate candidates、Shared Memory type counts，以及 reflection maintenance proposal 的 status / action / risk counts
 - 删除旧 JSONL memory 兼容和 `load_memories()` 直接注入路径
 
 当前定位：已完成结构化语义记忆地基、基础维护动作、第一批 memory extraction evaluation 基线、与 KB
@@ -194,13 +199,12 @@ async def search_shared_memory(scope_type: str, scope_id: str, query: str, limit
 
 - 提取质量已有 mock evaluation 基线，但还缺少真实 LLM 回归样本和长期趋势统计。
 - 真实 embedding provider 边界已定义且有手动 evaluation 入口；尚未选择或部署自托管模型 endpoint。
-- memory 条数已有显式维护 API；reflection proposal lifecycle 已建立，但尚未接入 scheduler、admin UI 或长期趋势统计。
+- memory 条数已有显式维护 API；reflection proposal lifecycle 已建立，并已提供只读质量趋势 summary；尚未接入 scheduler、admin UI 或告警。
 - reindex 入口由 vector_store 提供；memory 只暴露 source iterator，不承担 job history / worker / scheduler。
 
 ## 下一批候选 specs
 
 - `memory-extraction-real-llm-regression`
-- `memory-quality-trend-summary`
 - `memory-maintenance-scheduler-or-review-ui`
 
 ## 自动化效果验证缺口
@@ -213,6 +217,9 @@ async def search_shared_memory(scope_type: str, scope_id: str, query: str, limit
   `tmp_path`，model_router 与 vector_store 均隔离，不触碰 `data/`。
 - 默认命令：`uv run pytest tests/evaluation -x -q`。该命令只运行 deterministic mock
   evaluation，真实 LLM fixture case 默认 skip。
+- Memory Quality Trend evaluation 使用 deterministic fixture 覆盖 exact duplicate candidate、expired
+  context bucket 和 Shared Memory 与 User Memory 分离；runner 写入 tmp SQLite 并调用
+  `get_memory_quality_trend_summary()`，不运行真实 LLM、不触发自动维护。
 - 手动真实 LLM evaluation：设置 `FLEETENT_EVAL_REAL_LLM=1` 并提供 provider API key 后运行
   `uv run pytest tests/evaluation/test_memory_extraction_eval.py -q`。runner 会使用真实
   `memory_extraction` 路由，但仍使用 tmp SQLite 与 mock vector_store；缺少 provider API key

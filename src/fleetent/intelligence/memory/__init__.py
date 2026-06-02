@@ -32,12 +32,21 @@ from fleetent.intelligence.memory.shared import (
     search_shared_memory,
     update_shared_memory,
 )
+from fleetent.intelligence.memory.trends import (
+    MemoryQualityTrendBucket,
+    MemoryQualityTrendQuery,
+    MemoryQualityTrendSummary,
+    get_memory_quality_trend_summary,
+)
 
 __all__ = [
     "MemoryCompactionCandidate",
     "MemoryItem",
     "MemoryMaintenancePolicy",
     "MemoryMaintenanceSummary",
+    "MemoryQualityTrendBucket",
+    "MemoryQualityTrendQuery",
+    "MemoryQualityTrendSummary",
     "MemoryType",
     "SharedMemoryItem",
     "SharedMemoryScopeType",
@@ -48,6 +57,7 @@ __all__ = [
     "create_shared_memory",
     "delete_user_memory",
     "extract_and_update",
+    "get_memory_quality_trend_summary",
     "iter_indexable_shared_memories",
     "iter_indexable_memories",
     "list_shared_memory",
