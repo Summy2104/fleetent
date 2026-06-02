@@ -26,8 +26,8 @@
 
 - [x] 2.1 Write failing tests（`tests/integration`，monkeypatch DB 到 `tmp_path`）: Alembic upgrade 后 `agent_kbs` 表存在，含 (`tenant_id`,`kb_id`,`agent_id`) 复合唯一 + `created_at`/`created_by`；named params 写入读出
 - [x] 2.2 新增 Alembic migration（标明 owner module）+ `agent_kbs_store.py`：`bind(tenant_id, kb_id, agent_id, created_by)` / `unbind(...)` / `list_agents_for_kb(tenant_id, kb_id)` / `list_kbs_for_agent(tenant_id, agent_id)` / `is_kb_bound(tenant_id, kb_id)`
-- [ ] 2.3 Write failing tests: 重复绑定幂等不报错；`unbind` 删除后 `is_kb_bound` 转 false；`list_kbs_for_agent` 过滤已归档 KB
-- [ ] 2.4 实现上述行为
+- [x] 2.3 Write failing tests: 重复绑定幂等不报错；`unbind` 删除后 `is_kb_bound` 转 false；`list_kbs_for_agent` 过滤已归档 KB
+- [x] 2.4 实现上述行为
 
 ## 3. kb_admin_api — KB 列表 / 创建 / 编辑 / 归档 + 绑定保护
 
@@ -42,12 +42,12 @@
 
 - [x] 4.1 Write failing tests: admin 粘贴/上传 text·md·html → 调引擎 `ingest_text`（断言 tenant_id/kb_id/source 透传）→ 回显分块数/入库结果（场景 103）；viewer 导入 403（场景 108）
 - [x] 4.2 实现粘贴/上传导入端点（编排 `ingest_text`/`parse_*`，引擎 mock，写审计 `doc_import`）
-- [ ] 4.3 Write failing tests: 配 local directory + 触发 `sync_local_directory` → 返回 scanned/ingested/skipped/failed summary；全量重同步要求二次确认
+- [x] 4.3 Write failing tests: 配 local directory + 触发 `sync_local_directory` → 返回 scanned/ingested/skipped/failed summary；全量重同步要求二次确认
 - [x] 4.4 实现 local directory 同步端点（编排 `sync_local_directory`，写审计 `doc_sync`）
 
 ## 5. kb_admin_api — 文档列表 / 分块预览 / 单文档删除级联
 
-- [ ] 5.1 Write failing tests: `GET /admin/kb/{kb_id}/documents` 列 filename/source/分块数/创建时间（viewer 可读）；分块预览含 content + section context
+- [x] 5.1 Write failing tests: `GET /admin/kb/{kb_id}/documents` 列 filename/source/分块数/创建时间（viewer 可读）；分块预览含 content + section context
 - [x] 5.2 实现文档列表 + 分块预览（读引擎文档/chunk 数据，只聚合展示）
 - [x] 5.3 Write failing tests: `DELETE /admin/kb/{kb_id}/documents/{document_id}` 调引擎 `delete(document_id)` 级联清理、后续不召回、写审计 `doc_delete`、高危二次确认（场景 107）；viewer 删除 403
 - [x] 5.4 实现单文档删除（编排 `delete`，二次确认 + 审计）
@@ -73,13 +73,13 @@
 
 ## 9. kb_admin_api — 按 KB 观测聚合视图
 
-- [ ] 9.1 Write failing tests: `GET /admin/kb/{kb_id}/observation` 返回按 kb 聚合的召回命中/趋势/零召回文档/引用会话（observability 数据源打桩）；只读不改索引
+- [x] 9.1 Write failing tests: `GET /admin/kb/{kb_id}/observation` 返回按 kb 聚合的召回命中/趋势/零召回文档/引用会话（observability 数据源打桩）；只读不改索引
 - [x] 9.2 实现按 kb 聚合视图（消费 observability 数据源，仅聚合与下钻入口；缺失字段登记 follow-up）
 
 ## 10. server 接线 + 管理控制台 + 收尾
 
-- [ ] 10.1 Write failing tests: `server.py` mount `/admin/kb` router；TestClient 走通登录会话 → KB 列表/检索测试
-- [ ] 10.2 改 `server.py` mount kb router；`admin.html` 追加「知识库」标签（vanilla JS 调 `/admin/kb/*`）
-- [ ] 10.3 全量 `uv run pytest -x -q` 绿
-- [ ] 10.4 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过
-- [ ] 10.5 手动冒烟：建 KB → 粘贴导入 + 配目录同步 → 文档列表/分块预览 → 检索测试台 hybrid top-k → 绑定 Agent → 绑定时归档受阻 → 解绑后归档 → 删文档级联 → 评估入口看指标 → viewer 全程只读 + 写 403 + 审计检索
+- [x] 10.1 Write failing tests: `server.py` mount `/admin/kb` router；TestClient 走通登录会话 → KB 列表/检索测试
+- [x] 10.2 改 `server.py` mount kb router；`admin.html` 追加「知识库」标签（vanilla JS 调 `/admin/kb/*`）
+- [x] 10.3 全量 `uv run pytest -x -q` 绿
+- [x] 10.4 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过
+- [x] 10.5 手动冒烟：建 KB → 粘贴导入 + 配目录同步 → 文档列表/分块预览 → 检索测试台 hybrid top-k → 绑定 Agent → 绑定时归档受阻 → 解绑后归档 → 删文档级联 → 评估入口看指标 → viewer 全程只读 + 写 403 + 审计检索

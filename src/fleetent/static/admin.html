@@ -78,6 +78,7 @@
     <div class="tabs">
       <button data-tab="users" class="active" onclick="switchTab('users')">Users</button>
       <button data-tab="im" onclick="switchTab('im')">IM Users</button>
+      <button data-tab="kb" onclick="switchTab('kb')">Knowledge Base</button>
       <button data-tab="audit" onclick="switchTab('audit')">Audit</button>
     </div>
 
@@ -102,6 +103,30 @@
       <table>
         <thead><tr><th>Platform</th><th>Platform user</th><th>Internal user</th><th>State</th><th>Actions</th></tr></thead>
         <tbody id="im-body"></tbody>
+      </table>
+    </section>
+
+    <section id="tab-kb" class="hidden">
+      <div class="card" id="kb-create-card">
+        <div class="row">
+          <input id="nkb-id" placeholder="kb_id">
+          <input id="nkb-desc" placeholder="description">
+          <button onclick="createKb()">Create KB</button>
+        </div>
+        <div id="kb-err" class="err"></div>
+      </div>
+      <div class="card">
+        <div class="row">
+          <input id="kb-q" placeholder="retrieval query" style="flex:1;">
+          <input id="kb-q-ids" placeholder="kb_ids (comma-separated)">
+          <select id="kb-q-mode"><option value="hybrid">hybrid</option><option value="vector">vector</option><option value="keyword">keyword</option></select>
+          <button onclick="kbSearch()">Test retrieval</button>
+        </div>
+        <pre id="kb-search-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+      </div>
+      <table>
+        <thead><tr><th>KB</th><th>Description</th><th>Docs</th><th>Bound agents</th><th>Actions</th></tr></thead>
+        <tbody id="kb-body"></tbody>
       </table>
     </section>
 
@@ -157,7 +182,7 @@ async function doLogout() { try { await api("POST", "/logout"); } catch (e) {} T
 async function enterApp() {
   const me = await api("GET", "/me");
   $("whoami").textContent = (me.email || me.id) + " · " + me.role;
-  if (me.role === "viewer") $("create-card").classList.add("hidden");
+  if (me.role === "viewer") { $("create-card").classList.add("hidden"); $("kb-create-card").classList.add("hidden"); }
   show("app-view");
   switchTab("users");
 }
@@ -170,9 +195,11 @@ function switchTab(tab) {
   for (const b of document.querySelectorAll(".tabs button")) b.classList.toggle("active", b.dataset.tab === tab);
   $("tab-users").classList.toggle("hidden", tab !== "users");
   $("tab-im").classList.toggle("hidden", tab !== "im");
+  $("tab-kb").classList.toggle("hidden", tab !== "kb");
   $("tab-audit").classList.toggle("hidden", tab !== "audit");
   if (tab === "users") loadUsers();
   if (tab === "im") loadIm();
+  if (tab === "kb") loadKb();
   if (tab === "audit") loadAudit();
 }
 
@@ -242,6 +269,48 @@ async function loadIm() {
 
 async function imBlock(id) { const reason = prompt("Reason?"); if (reason === null) return; try { await api("POST", `/im-users/${id}/block`, { reason }); loadIm(); } catch (e) { alert(e.message); } }
 async function imRestore(id) { try { await api("POST", `/im-users/${id}/restore`, { reason: "" }); loadIm(); } catch (e) { alert(e.message); } }
+
+async function loadKb() {
+  const kbs = await api("GET", "/kb");
+  $("kb-body").innerHTML = kbs.map(k => `
+    <tr>
+      <td>${esc(k.kb_id)}</td>
+      <td class="muted">${esc(k.description || "")}</td>
+      <td>${esc(k.doc_count != null ? k.doc_count : "—")}</td>
+      <td class="muted">${esc((k.bound_agents || []).join(", ") || "—")}</td>
+      <td class="actions">
+        <button class="small danger" onclick="archiveKb('${esc(k.kb_id)}')">Archive</button>
+      </td>
+    </tr>`).join("") || `<tr><td colspan="5" class="muted">No knowledge bases.</td></tr>`;
+}
+
+async function createKb() {
+  $("kb-err").textContent = "";
+  try {
+    await api("POST", "/kb", { kb_id: $("nkb-id").value, description: $("nkb-desc").value });
+    $("nkb-id").value = $("nkb-desc").value = "";
+    loadKb();
+  } catch (e) { $("kb-err").textContent = e.message; }
+}
+
+async function archiveKb(id) {
+  if (!confirm(`Archive KB ${id}?`)) return;
+  try {
+    await fetch("/admin/kb/" + encodeURIComponent(id), {
+      method: "DELETE",
+      headers: { "Authorization": "Session " + TOKEN, "X-Confirm": "true" },
+    }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || ("HTTP " + r.status)); });
+    loadKb();
+  } catch (e) { alert(typeof e.message === "string" ? e.message : JSON.stringify(e.message)); }
+}
+
+async function kbSearch() {
+  const ids = $("kb-q-ids").value.split(",").map(s => s.trim()).filter(Boolean);
+  try {
+    const r = await api("POST", "/kb/search", { query: $("kb-q").value, kb_ids: ids, mode: $("kb-q-mode").value });
+    $("kb-search-out").textContent = JSON.stringify(r.results, null, 2);
+  } catch (e) { $("kb-search-out").textContent = e.message; }
+}
 
 async function loadAudit() {
   const action = $("audit-action").value.trim();

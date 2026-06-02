@@ -98,6 +98,13 @@ def test_chat_over_quota_returns_429(tmp_path, monkeypatch, isolated_schedule_db
     assert events == [user.id]  # over-quota event emitted
 
 
+def test_kb_router_mounted():
+    from fleetent.server import app
+
+    paths = {getattr(r, "path", None) for r in app.routes}
+    assert "/admin/kb" in paths  # knowledge-base management router is mounted
+
+
 def test_require_auth_non_bearer_scheme(client):
     resp = client.post(
         "/chat",

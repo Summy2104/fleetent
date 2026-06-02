@@ -44,6 +44,12 @@ def test_ui_served(client):
     assert "fleetent" in r.text and "Admin" in r.text
 
 
+def test_ui_has_kb_tab(client):
+    r = client.get("/admin/ui")
+    assert 'data-tab="kb"' in r.text  # knowledge-base console tab present
+    assert "/kb/search" in r.text
+
+
 def test_login_success_and_me(client):
     u = user_store.create_web_user("log@x.com", "Logger", password_hash=auth.hash_password("pw"))
     user_store.set_role(u.id, "admin")
