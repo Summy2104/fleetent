@@ -7,6 +7,10 @@ from fleetent.user_store import (
     _conn,
 )
 
+# Internal system operations (e.g. in-session compression) run under this sentinel
+# user id and are never blocked by — nor counted against — user/global quotas.
+SYSTEM_USER_ID = "__system__"
+
 
 def set_quota(scope: str, token_limit: int | None = None, call_limit: int | None = None) -> None:
     """Set limits for a scope (``global`` or ``user:{id}``). None means unlimited."""
@@ -24,6 +28,8 @@ def set_quota(scope: str, token_limit: int | None = None, call_limit: int | None
 
 def record_usage(user_id: str, tokens: int) -> None:
     """Add consumption to the user's and the global counters."""
+    if user_id == SYSTEM_USER_ID:
+        return  # internal calls are exempt — never counted
     _init_db()
     for scope in (f"user:{user_id}", "global"):
         with _conn() as conn:
@@ -39,6 +45,8 @@ def record_usage(user_id: str, tokens: int) -> None:
 
 def check_quota(user_id: str, tokens: int = 0) -> bool:
     """Return False if adding `tokens`/one call would exceed any applicable limit."""
+    if user_id == SYSTEM_USER_ID:
+        return True  # internal calls are exempt — never blocked
     _init_db()
     for scope in (f"user:{user_id}", "global"):
         limits = _get_quota(scope)

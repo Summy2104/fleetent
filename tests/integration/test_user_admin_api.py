@@ -146,6 +146,64 @@ def test_admin_block_user_and_audit(client):
     assert any(row["target_id"] == uid for row in audit_rows)
 
 
+def test_high_risk_delete_without_2fa_blocked_then_proceeds(client):
+    token, admin_id = _session_for("admin")
+    secret = auth.enable_2fa(admin_id)
+    uid = client.post(
+        "/admin/users", headers=_hdr(token), json={"email": "d@x.com", "name": "D"}
+    ).json()["id"]
+
+    # No 2FA code → rejected, target user untouched (no business change).
+    r = client.delete(f"/admin/users/{uid}", headers=_hdr(token))
+    assert r.status_code == 403
+    assert user_store.get_by_id(uid) is not None
+
+    # Valid code → proceeds and is audited.
+    r2 = client.delete(
+        f"/admin/users/{uid}", headers={**_hdr(token), "X-2FA-Code": auth.totp(secret)}
+    )
+    assert r2.status_code == 204
+    assert user_store.get_by_id(uid) is None
+    audit_rows = client.get("/admin/audit?action=delete_user", headers=_hdr(token)).json()
+    assert any(row["target_id"] == uid for row in audit_rows)
+
+
+def test_high_risk_block_wrong_2fa_code_blocked(client):
+    token, admin_id = _session_for("admin")
+    auth.enable_2fa(admin_id)
+    uid = client.post(
+        "/admin/users", headers=_hdr(token), json={"email": "e@x.com", "name": "E"}
+    ).json()["id"]
+    r = client.post(
+        f"/admin/users/{uid}/block",
+        headers={**_hdr(token), "X-2FA-Code": "000000"},
+        json={"reason": "x"},
+    )
+    assert r.status_code == 403
+    assert user_store.get_by_id(uid).status == "active"  # not blocked
+
+
+def test_high_risk_set_role_requires_2fa(client):
+    token, admin_id = _session_for("admin")
+    secret = auth.enable_2fa(admin_id)
+    uid = client.post(
+        "/admin/users", headers=_hdr(token), json={"email": "f@x.com", "name": "F"}
+    ).json()["id"]
+    assert (
+        client.patch(
+            f"/admin/users/{uid}/role", headers=_hdr(token), json={"role": "admin"}
+        ).status_code
+        == 403
+    )
+    ok = client.patch(
+        f"/admin/users/{uid}/role",
+        headers={**_hdr(token), "X-2FA-Code": auth.totp(secret)},
+        json={"role": "admin"},
+    )
+    assert ok.status_code == 200
+    assert user_store.get_by_id(uid).role == "admin"
+
+
 def test_im_user_block_restore(client):
     token, _ = _session_for("admin")
     u = im_user_store.get_or_create("slack", "U1")

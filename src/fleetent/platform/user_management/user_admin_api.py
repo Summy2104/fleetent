@@ -53,6 +53,18 @@ def _require_admin(authorization: str | None) -> user_store.User:
     return user
 
 
+def _enforce_2fa(user: user_store.User, code: str | None) -> None:
+    """Gate a high-risk action: if the actor has 2FA enabled, a valid TOTP is required.
+
+    Raises 403 before any business change when the code is missing or wrong, so
+    delete/block/role/key-revoke do not take effect without a passing second factor.
+    """
+    if not user.totp_secret:
+        return  # no second factor configured for this actor
+    if not code or not auth.verify_user_2fa(user.id, code):
+        raise HTTPException(status_code=403, detail="2FA verification required")
+
+
 class LoginBody(BaseModel):
     email: str
     password: str
@@ -169,8 +181,13 @@ def get_user(user_id: str, authorization: str | None = Header(None)) -> dict[str
 
 
 @router.delete("/users/{user_id}", status_code=204)
-def delete_user(user_id: str, authorization: str | None = Header(None)) -> None:
+def delete_user(
+    user_id: str,
+    authorization: str | None = Header(None),
+    x_2fa_code: str | None = Header(None, alias="X-2FA-Code"),
+) -> None:
     admin = _require_admin(authorization)
+    _enforce_2fa(admin, x_2fa_code)
     try:
         user_store.delete_user(user_id)
     except PermissionError as exc:
@@ -180,9 +197,13 @@ def delete_user(user_id: str, authorization: str | None = Header(None)) -> None:
 
 @router.patch("/users/{user_id}/role")
 def set_role(
-    user_id: str, body: RoleBody, authorization: str | None = Header(None)
+    user_id: str,
+    body: RoleBody,
+    authorization: str | None = Header(None),
+    x_2fa_code: str | None = Header(None, alias="X-2FA-Code"),
 ) -> dict[str, Any]:
     admin = _require_admin(authorization)
+    _enforce_2fa(admin, x_2fa_code)
     try:
         user_store.set_role(user_id, body.role)
     except PermissionError as exc:
@@ -195,9 +216,13 @@ def set_role(
 
 @router.post("/users/{user_id}/block")
 def block_user(
-    user_id: str, body: ReasonBody, authorization: str | None = Header(None)
+    user_id: str,
+    body: ReasonBody,
+    authorization: str | None = Header(None),
+    x_2fa_code: str | None = Header(None, alias="X-2FA-Code"),
 ) -> dict[str, str]:
     admin = _require_admin(authorization)
+    _enforce_2fa(admin, x_2fa_code)
     try:
         blocklist.block_user(user_id, reason=body.reason, actor=admin.id)
     except PermissionError as exc:
@@ -231,8 +256,13 @@ def issue_key(
 
 
 @router.delete("/keys/{key_id}", status_code=204)
-def revoke_key(key_id: int, authorization: str | None = Header(None)) -> None:
+def revoke_key(
+    key_id: int,
+    authorization: str | None = Header(None),
+    x_2fa_code: str | None = Header(None, alias="X-2FA-Code"),
+) -> None:
     admin = _require_admin(authorization)
+    _enforce_2fa(admin, x_2fa_code)
     api_key_store.revoke_key(key_id)
     audit_log.write_audit(admin.id, "revoke_key", target_type="key", target_id=str(key_id))
 

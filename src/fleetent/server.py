@@ -184,6 +184,11 @@ class ChatRequest(BaseModel):
     message: str
 
 
+def _emit_over_quota_event(user_id: str) -> None:
+    """Emit an over-quota event so operators can see who hit their limit."""
+    logger.warning("over_quota user_id=%s", user_id)
+
+
 async def _authenticate(authorization: str = Header()) -> tuple[user_store.User, dict[str, Any]]:
     """Resolve a Bearer API key to (User, key_metadata). Raises 401 if invalid/blocked."""
     if not authorization.startswith("Bearer "):
@@ -259,6 +264,7 @@ async def chat(
 
     # Usage quota: reject when the user's or global limit is already exhausted.
     if not quota.check_quota(user_id):
+        _emit_over_quota_event(user_id)
         raise HTTPException(status_code=429, detail="usage quota exceeded")
 
     # Record key usage (source IP / UA / call count). Legacy keys have no row id.

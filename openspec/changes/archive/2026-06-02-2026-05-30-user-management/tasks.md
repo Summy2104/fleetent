@@ -15,8 +15,8 @@
 
 ## 0. 前置
 
-- [ ] 0.1 确认密码哈希与 TOTP 选型（倾向标准库 `hashlib.scrypt` + 自实现 TOTP；如引入 `argon2-cffi`/`pyotp` 需在 PR 说明）
-- [ ] 0.2 确认与 `agent-admin-api` 的 `is_admin` 取代关系：统一改 `role`，提供兼容映射
+- [x] 0.1 确认密码哈希与 TOTP 选型（倾向标准库 `hashlib.scrypt` + 自实现 TOTP；如引入 `argon2-cffi`/`pyotp` 需在 PR 说明）
+- [x] 0.2 确认与 `agent-admin-api` 的 `is_admin` 取代关系：统一改 `role`，提供兼容映射
 
 ## 1. user_store — users 多列 + 迁移
 
@@ -87,15 +87,15 @@
 
 - [x] 9.1 Write failing tests: `quotas` 表；`check_quota(user_id, tokens)` 在未超限放行、超限返回拒绝；global 与 user 作用域
 - [x] 9.2 新建 `quota.py` + 表（`set_quota`/`record_usage`/`check_quota`）
-- [ ] 9.3 Write failing tests: `/chat` 超限返回 429；系统内部调用豁免
-- [ ] 9.4 接入 `/chat` 入口检查
+- [x] 9.3 Write failing tests: `/chat` 超限返回 429；系统内部调用豁免
+- [x] 9.4 接入 `/chat` 入口检查
 
 ## 10. platform-audit-log
 
 - [x] 10.1 Write failing tests: `write_audit(actor, action, target_type, target_id, detail, batch_id)` 落库；`search_audit(filters)` 按 actor/action/target/时间过滤
 - [x] 10.2 新建 `audit_log.py` + 表
-- [ ] 10.3 Write failing tests: 高危动作未过 2FA 时拒绝执行且不落业务变更（守卫层）
-- [ ] 10.4 接入高危动作二次确认守卫
+- [x] 10.3 Write failing tests: 高危动作未过 2FA 时拒绝执行且不落业务变更（守卫层）
+- [x] 10.4 接入高危动作二次确认守卫
 
 ## 11. user_admin_api — REST
 
@@ -103,12 +103,12 @@
 - [x] 11.2 实现 `user_admin_api` 的 `/admin/users` CRUD + 角色 + 拉黑/解封端点
 - [x] 11.3 Write failing tests: `/admin/users/{id}/keys` 列/签/撤；`/admin/im-users` 加黑/恢复；`/admin/audit` 检索
 - [x] 11.4 实现 key / im-user / audit 端点
-- [~] 11.5 改 `server.py`：mount router、`/chat` 改用 `authenticate`(User,key_meta) + scope 校验(403) + 配额(429) + key 用量记录 + 启动 seed 内置 admin。**代码已写、py_compile 通过；运行时需 3.12（import agent_loop 的 PEP 695）**。注：token 精确配额需 agent_loop 暴露 usage 事件，当前按调用计数 + 预检，留 follow-up
+- [x] 11.5 改 `server.py`：mount router、`/chat` 改用 `authenticate`(User,key_meta) + scope 校验(403) + 配额(429) + key 用量记录 + 启动 seed 内置 admin。运行时已在 3.12 全量绿验证。注：token 精确配额需 agent_loop 暴露 usage 事件，当前按调用计数 + 预检，留 follow-up
 
 ## 12. CLI + 收尾
 
 - [x] 12.1 Write failing tests: `seed-builtin-admin` CLI（首启建 + 再跑 no-op）；`block-user` deprecated no-op（test_admin，沙箱验证）
 - [x] 12.2 改 `admin.py`（新增 `seed-builtin-admin`、deprecate `block-user`）；server 启动钩子在 lifespan 调 `seed_builtin_admin`（随 11.5，运行时需 3.12）
-- [ ] 12.3 全量 `uv run pytest -x -q` 绿（**需 3.12**）
-- [ ] 12.4 `ruff format && ruff check && mypy src` 通过（**需 3.12**）
-- [ ] 12.5 手动冒烟：首启拿初始密码→登录强制改密→建账/发邀请→签多 key 设 scope→拉黑级联→IM 默认放行 + 加黑→配额 429→审计检索
+- [x] 12.3 全量 `uv run pytest -x -q` 绿（**需 3.12**）
+- [x] 12.4 `ruff format && ruff check && mypy src` 通过（**需 3.12**）
+- [x] 12.5 手动冒烟：首启拿初始密码→登录强制改密→建账/发邀请→签多 key 设 scope→拉黑级联→IM 默认放行 + 加黑→配额 429→审计检索

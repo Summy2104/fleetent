@@ -73,6 +73,31 @@ def test_chat_valid_token_streams(tmp_path, monkeypatch, isolated_schedule_db):
     assert received_user_ids == [user.id]  # user_id flows from auth to run_stream
 
 
+def test_chat_over_quota_returns_429(tmp_path, monkeypatch, isolated_schedule_db):
+    import fleetent.governance.quota as quota
+    import fleetent.server as srv
+    import fleetent.user_store as us2
+
+    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setattr(quota, "DB_PATH", tmp_path / "users.db")
+
+    events: list[str] = []
+    monkeypatch.setattr(srv, "_emit_over_quota_event", lambda uid: events.append(uid))
+
+    user = us2.create_user("QuotaUser")
+    quota.set_quota(f"user:{user.id}", call_limit=0)  # already exhausted
+
+    with TestClient(srv.app) as c:
+        resp = c.post(
+            "/chat",
+            json={"message": "hi"},
+            headers={"Authorization": f"Bearer {user.api_key}"},
+        )
+    assert resp.status_code == 429
+    assert "quota" in resp.json()["detail"].lower()
+    assert events == [user.id]  # over-quota event emitted
+
+
 def test_require_auth_non_bearer_scheme(client):
     resp = client.post(
         "/chat",
