@@ -11,6 +11,7 @@
 >
 > **认证模型**：以 `role` 取代 `agent-admin-api` 的布尔 `is_admin`（兼容映射 `is_admin == role in {admin, built_in_admin}`）。
 > **git**：沙箱 `.git/index.lock` 残留无权清除，改动需宿主机 commit。
+> 已核查（外部 verify）：后端+Web UI+CLI 实现完成，134 相关测试绿；剩余仅 /chat 配额(9.3)与 2FA 高危守卫(10.3/10.4)的测试/接线 + 收尾门(12.3-12.5)。
 
 ## 0. 前置
 

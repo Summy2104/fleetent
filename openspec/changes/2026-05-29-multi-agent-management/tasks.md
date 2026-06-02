@@ -1,3 +1,7 @@
+> **实施进度（外部 verify，2026-06-02）**
+> 0/55 完成 —— **本 change 完全未实现**。代码库已演进为另一套架构（`agent_admin_store` 侧表 + `role` 列 + `require_admin` 角色守卫），与本 change 的版本/快照设计（`agent_versions` 表、`active_version_id`、`is_admin` 列、`AgentSnapshot`、`agent_runtime`、`invoke_agent`、memory namespace、session 版本锁）不符。无任何匹配代码或测试。
+> 建议：要么按现架构重写 proposal，要么作废本 change。checkbox 全部保持 `[ ]`。
+
 ## 1. Schema 与基础数据访问
 
 - [ ] 1.1 Write failing tests: `agent_versions` 表在 `_init_db()` 后存在；`agents` 表有 `active_version_id` / `deleted_at` 列；`users` 表有 `is_admin` 列；`channel_agents` 表有 `bound_version_id` 列；旧 schema 启动时自动 ALTER 不丢数据

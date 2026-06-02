@@ -1,5 +1,5 @@
 > **实施进度（opsx:apply，部分完成）**
-> 已完成并通过 TDD 的能力：1（im_connector_store）、2（im_connector_config）、3（im_channel_allowlist）、4（im_connector_manager）、5.3/5.4（normalizer channel 白名单门 + `NormalizedMessage.workspace_id`）。新增测试 33 个全绿（`tests/test_im_connector_store.py`、`test_im_connector_config.py`、`test_im_channel_allowlist.py`、`test_im_connector_manager.py`、`test_normalizer_allowlist.py`）。
+> 已核查（外部 verify）：store 四模块(1-4)+normalizer 门(5.3/5.4)完成；剩余：5.1/5.2 adapter 上报+配置接入、6.x server lifespan/路由、7.x im_admin_api、8.x CLI、9.x 收尾。
 >
 > **沙箱限制**：本环境只有 Python 3.10，而仓库要求 3.12（`tool_registry.py` 用 PEP 695 `def tool[F: ...]` 语法、多处 `datetime.UTC`）。新模块不 import `agent_loop/tools/server`，可在 3.10 下真实跑红→绿；但凡 import 这些的测试（5.1/5.2 adapter、6.x server、7.x admin_api 等）无法在此跑，需在 3.12 环境验证。`datetime.UTC` 已用进程级 `.pth` 别名 shim 兼容（与 `datetime.timezone.utc` 同对象，非改动产品码）。
 >
