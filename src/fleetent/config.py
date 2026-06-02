@@ -85,6 +85,11 @@ class Settings(BaseSettings):
     # AR10 per-call guardrail: strict back-to-back identical calls before tripping.
     # Aligned with agent_loop_repeat_threshold so ops reason about one repeat count.
     guardrail_repeat_threshold: int = 3
+    # AR3 D7: max number of tools dispatched concurrently within one LLM round.
+    # 8 fits typical single-round tool_calls counts while keeping a round from
+    # exhausting downstream (HTTP / sandbox / MCP) resources; >cap splits into
+    # serial batches. <=1 degrades to fully-sequential execution (status quo).
+    agent_tool_parallel_max: int = 8
     # Optional escape hatch: top-level argument keys stripped before computing the
     # signal-A fingerprint (e.g. a volatile timestamp/attempt counter). Empty by
     # default; signal B already covers volatile-argument blind spots.
