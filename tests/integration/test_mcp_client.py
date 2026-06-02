@@ -1,7 +1,7 @@
 import pytest
 
-import fleetent.mcp_client as mcp_client
-from fleetent.mcp_client import McpServerConfig, _make_tool_name
+import fleetent.integrations.mcp.client as mcp_client
+from fleetent.integrations.mcp.client import McpServerConfig, _make_tool_name
 
 
 @pytest.fixture(autouse=True)
@@ -99,7 +99,7 @@ async def test_register_server_registers_tools_from_response(monkeypatch):
     import respx
 
     import fleetent.tool_registry as tr
-    from fleetent.mcp_client import McpServerConfig, _register_server
+    from fleetent.integrations.mcp.client import McpServerConfig, _register_server
 
     server = McpServerConfig(id="mysvr", url="http://mcp.test", auth_type="none")
 
@@ -128,7 +128,7 @@ async def test_register_server_with_api_key_auth(monkeypatch):
     import httpx
     import respx
 
-    from fleetent.mcp_client import McpServerConfig, _register_server
+    from fleetent.integrations.mcp.client import McpServerConfig, _register_server
 
     monkeypatch.setenv("MY_API_KEY", "secret-token")
     server = McpServerConfig(
@@ -154,8 +154,8 @@ async def test_call_tool_sends_jsonrpc_and_returns_result(monkeypatch):
     import httpx
     import respx
 
-    import fleetent.mcp_client as mcp
-    from fleetent.mcp_client import McpServerConfig
+    import fleetent.integrations.mcp.client as mcp
+    from fleetent.integrations.mcp.client import McpServerConfig
 
     server = McpServerConfig(id="callee", url="http://callee.test", auth_type="none")
     monkeypatch.setitem(mcp._server_registry, "callee", server)
@@ -174,7 +174,7 @@ async def test_call_tool_sends_jsonrpc_and_returns_result(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_call_tool_unknown_server_raises():
-    import fleetent.mcp_client as mcp
+    import fleetent.integrations.mcp.client as mcp
 
     with pytest.raises(KeyError, match="Unknown MCP server"):
         await mcp.call_tool("no_such_server", "tool", {})

@@ -72,7 +72,7 @@ def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch, isolat
 
 async def test_mcp_servers_loaded_from_dedicated_file(tmp_path, monkeypatch, isolated_schedule_db):
     """Lifespan calls register_all with servers from config/mcp.servers.yaml."""
-    import fleetent.mcp_client as mcp_mod
+    import fleetent.integrations.mcp as mcp_mod
     import fleetent.server as srv
 
     config_dir = tmp_path / "config"
@@ -109,7 +109,7 @@ async def test_missing_mcp_servers_file_skips_registration(
     tmp_path, monkeypatch, isolated_schedule_db
 ):
     """Lifespan skips MCP loading if config/mcp.servers.yaml is missing."""
-    import fleetent.mcp_client as mcp_mod
+    import fleetent.integrations.mcp as mcp_mod
     import fleetent.server as srv
 
     mock_register = AsyncMock(return_value=None)
@@ -128,7 +128,7 @@ async def test_missing_mcp_servers_file_skips_registration(
 
 async def test_mcp_disabled_skips_dedicated_file(tmp_path, monkeypatch, isolated_schedule_db):
     """Lifespan does not read config/mcp.servers.yaml when mcp.enabled is false."""
-    import fleetent.mcp_client as mcp_mod
+    import fleetent.integrations.mcp as mcp_mod
     import fleetent.server as srv
 
     config_dir = tmp_path / "config"

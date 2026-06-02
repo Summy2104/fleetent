@@ -21,6 +21,7 @@
 | `intelligence/` | long-term context、reflection、knowledge-base、vector-store | 已形成主要边界 |
 | `observability/` | structured logging、traces、usage / performance、diagnostics | 已形成主要边界 |
 | `governance/` | permission gate、quota、audit log、blocklist、agent policy | 已有 implementation spec |
+| `integrations/` | MCP client、sandbox client、外部能力接入 | 已有 implementation spec |
 | `im_gateway/` | IM 消息归一化与 Slack / Telegram adapter | 已有目录，但 channels 相关 store 仍在顶层 |
 
 主要平铺热点：
@@ -32,7 +33,6 @@
 | `agent_loop.py` | 1000+ | `runtime.agent_loop` | P1 |
 | `user_store.py` / `api_key_store.py` / `auth.py` / `agent_store.py` | 100-300 | `platform.user_center` / `platform.agent_admin` | P2 |
 | `im_user_store.py` / `im_connector_*` / `im_channel_allowlist.py` | 50-160 | `channels` | P2 |
-| `mcp_client.py` | 200+ | `integrations.mcp` | P3 |
 | `db.py` / `config.py` | 90-270 | `infrastructure` | P3 |
 
 ## 目标 Package Map
@@ -188,10 +188,12 @@ src/fleetent/runtime/
 
 ### 7. `integrations-and-infrastructure-package-migration`
 
+状态：`mcp_client.py` 和 `sandbox_client.py` 已有 implementation spec
+`2026-06-02-integrations-package-migration`，负责迁入 `fleetent.integrations.mcp` 和
+`fleetent.integrations.sandbox`，并保留 legacy 顶层 import shim。
+
 后置迁移：
 
-- `mcp_client.py` -> `integrations/mcp/`
-- `sandbox_client.py` -> `integrations/sandbox/`
 - `config.py` -> `infrastructure/config.py`
 - `db.py` -> `infrastructure/db.py`
 

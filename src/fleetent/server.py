@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from fleetent import api_key_store, mcp_client, user_admin_api, user_store
+from fleetent import api_key_store, user_admin_api, user_store
 from fleetent.agent_loop import run_stream
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, WebhooksSettings, configure_logging, load_mcp_server_settings
@@ -25,7 +25,8 @@ from fleetent.governance.permission_gate import (
     cleanup_stale_approvals,
     list_approvals,
 )
-from fleetent.mcp_client import McpServerConfig
+from fleetent.integrations import mcp as mcp_client
+from fleetent.integrations.mcp import McpServerConfig
 from fleetent.model_router import ROUTES
 from fleetent.observability.startup_diagnostics import (
     diagnose_database_writable,

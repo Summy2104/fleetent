@@ -21,11 +21,13 @@
 - **WHEN** 调用方导入 `fleetent.mcp_client`
 - **THEN** 导入成功
 - **AND** 旧路径暴露迁移前 MCP public API
+- **AND** 旧路径与 `fleetent.integrations.mcp.client` 共享同一 MCP registry 状态
 
 #### Scenario: Legacy sandbox import remains compatible
 - **WHEN** 调用方导入 `fleetent.sandbox_client`
 - **THEN** 导入成功
 - **AND** 旧路径暴露迁移前 sandbox public API
+- **AND** 旧路径暴露的 class object 与 `fleetent.integrations.sandbox.client` 相同
 
 #### Scenario: Integrations shims do not contain business logic
 - **WHEN** 查看 legacy 顶层 `mcp_client.py` 或 `sandbox_client.py`
