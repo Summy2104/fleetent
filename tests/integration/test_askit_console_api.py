@@ -12,8 +12,8 @@ import fleetent.agent_admin_store as agent_state
 import fleetent.agent_apply_api as apply_api
 import fleetent.askit_console_api as console
 import fleetent.askit_runner as runner
-import fleetent.audit_log as audit
 import fleetent.auth as auth
+import fleetent.governance.audit_log as audit
 import fleetent.user_store as user_store
 
 
