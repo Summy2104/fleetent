@@ -6,7 +6,7 @@
 
 企业文档知识的导入、索引与检索，让 agent 能够基于企业内部文档回答问题。
 
-**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML / PDF / DOCX / PPTX / XLSX 解析，local directory、Google Drive folder 与 Confluence Cloud 手动同步、Google Sheets / Google Slides export 后接入 parser registry、connector list/check/status/sync 操作入口、sync planner、deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、entity extraction schema + explicit run、独立于 search 的 `graph_search` depth 0/1 graph evidence 检索、按 tenant + knowledge base 隔离召回相关文档片段，agent 到一个或多个 KB 的绑定与有效 KB 范围解析，向 vector_store reindex 暴露当前可索引 chunks，以及手动运行的 deterministic retrieval evaluation / combined memory+KB embedding evaluation。
+**当前负责**：手动 text / markdown 内容导入，plain text / Markdown / lightweight HTML / PDF / DOCX / PPTX / XLSX 解析，local directory、Google Drive folder 与 Confluence Cloud 手动同步、Google Sheets / Google Slides export 后接入 parser registry、connector list/check/status/sync 操作入口、sync planner、deterministic chunking、向量索引构建、SQLite FTS5/BM25 关键词索引、vector / keyword / hybrid 检索模式、entity extraction schema + explicit run、独立于 search 的 `graph_search` depth 0/1 graph evidence 检索、规则型 `plan_knowledge_search` / `execute_knowledge_search_plan` 检索策略 API、按 tenant + knowledge base 隔离召回相关文档片段，agent 到一个或多个 KB 的绑定与有效 KB 范围解析，向 vector_store reindex 暴露当前可索引 chunks，以及手动运行的 deterministic retrieval evaluation / combined memory+KB embedding evaluation。
 
 **后续负责**：第三方数据源接入与文档获取、更丰富的文档解析、实体与关系提取、图谱存储。
 
@@ -18,7 +18,7 @@
 
 **模块归属**：
 - owning package：`intelligence.knowledge_base`
-- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`parse_pdf(filename, content)`、`parse_docx(filename, content)`、`parse_pptx(filename, content)`、`parse_xlsx(filename, content)`、`parse_document(filename, content, mime_type)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`delete(document_id)`、`archive(document_id)`、`iter_indexable_knowledge_chunks(tenant_id, kb_id)`、`AgentKnowledgeBaseBinding`、`bind_agent_to_kb(tenant_id, agent_id, kb_id)`、`unbind_agent_from_kb(tenant_id, agent_id, kb_id)`、`list_agent_kb_bindings(tenant_id, agent_id)`、`resolve_agent_kb_ids(tenant_id, agent_id)`、`ConnectorSummary`、`ConnectorCheckResult`、`ConnectorSyncResult`、`ConnectorStatus`、`list_configured_connectors()`、`check_connector(connector_id)`、`run_connector_sync(connector_id, dry_run)`、`get_connector_status(connector_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`GoogleDriveConnectorConfig`、`ConfluenceConnectorConfig`、`SyncAction`、`SyncPlan`、`SyncPlanItem`、`SyncPlanSummary`、`SyncExecutionSummary`、`plan_local_directory_sync(config, tenant_id, kb_id)`、`execute_sync_plan(plan)`、`sync_local_directory(config, tenant_id, kb_id)`、`plan_google_drive_sync(config, client)`、`sync_google_drive(config, client)`、`plan_confluence_sync(config, client)`、`sync_confluence(config, client)`
+- public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`parse_pdf(filename, content)`、`parse_docx(filename, content)`、`parse_pptx(filename, content)`、`parse_xlsx(filename, content)`、`parse_document(filename, content, mime_type)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`KnowledgeSearchOptions`、`KnowledgeSearchPlan`、`KnowledgeSearchStep`、`plan_knowledge_search(query, options)`、`execute_knowledge_search_plan(plan)`、`delete(document_id)`、`archive(document_id)`、`iter_indexable_knowledge_chunks(tenant_id, kb_id)`、`AgentKnowledgeBaseBinding`、`bind_agent_to_kb(tenant_id, agent_id, kb_id)`、`unbind_agent_from_kb(tenant_id, agent_id, kb_id)`、`list_agent_kb_bindings(tenant_id, agent_id)`、`resolve_agent_kb_ids(tenant_id, agent_id)`、`ConnectorSummary`、`ConnectorCheckResult`、`ConnectorSyncResult`、`ConnectorStatus`、`list_configured_connectors()`、`check_connector(connector_id)`、`run_connector_sync(connector_id, dry_run)`、`get_connector_status(connector_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`GoogleDriveConnectorConfig`、`ConfluenceConnectorConfig`、`SyncAction`、`SyncPlan`、`SyncPlanItem`、`SyncPlanSummary`、`SyncExecutionSummary`、`plan_local_directory_sync(config, tenant_id, kb_id)`、`execute_sync_plan(plan)`、`sync_local_directory(config, tenant_id, kb_id)`、`plan_google_drive_sync(config, client)`、`sync_google_drive(config, client)`、`plan_confluence_sync(config, client)`、`sync_confluence(config, client)`
 - owned tables：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`、`knowledge_chunks_fts`、`knowledge_source_states`、`knowledge_base_agent_bindings`、`knowledge_connector_status`
 - config namespace：`knowledge_base.*`
 
@@ -407,11 +407,11 @@ def get_connector_status(connector_id: str) -> ConnectorStatus:
 - `keyword`：仅使用 SQLite FTS5 / BM25，适合产品编号、错误码、专有名词等精确词召回。
 - `hybrid`：同时取 vector 与 keyword candidates，用 RRF 融合去重后返回。
 
-hybrid search 当前不调用 rerank provider，不包含 query planner、graph search，也不依赖 OpenSearch / Elasticsearch / LanceDB。
+`search()` 保持显式底层模式，不改 `search()` 为 auto，也不要求调用方使用 planner。`plan_knowledge_search()` 是独立的规则型 API：普通 query 默认选择 hybrid；entity / relation-like query 先 graph search、不足时 hybrid fill；`rerank=True` 只标记 hybrid step。planner 不接 LLM planner、不做 query rewrite，不改变 vector / keyword / hybrid / graph / rerank 底层契约。
 
 ## 现状
 
-**已完成 core + parser + hybrid + local connector + sync planner + Google Drive / Confluence connector + agent KB binding + connector operations 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、基础 Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入；`knowledge-base-parsers-basic` 增加了无 AI 框架依赖的 plain text / Markdown / lightweight HTML parser，并提供 parsed ingest adapter；`knowledge-base-hybrid-search` 增加了 knowledge-base-owned SQLite FTS5 keyword index、keyword mode、hybrid mode 和 RRF 融合；`knowledge-base-connectors-local` 增加了 DataSource / DocumentRef 边界、显式 root allowlist 的 local directory source、`.txt` / `.md` / `.html` / `.htm` 格式映射、source path / mtime / content hash 状态记录，以及手动 `sync_local_directory`；`knowledge-base-sync-planner` 增加了 plan / execute 分离、`ingest_new` / `reingest_changed` / `skip_unchanged` / `delete_missing` 动作模型；`knowledge-base-connectors-google-drive` 增加指定 folder scope、OAuth `credential_ref`、fake-client default path、Google Docs HTML export、text / Markdown / HTML parser dispatch、`archive_missing` 和 opt-in smoke scaffold；`knowledge-base-connectors-confluence` 增加 Cloud API token `credential_ref`、space / page / page+children scope、storage HTML parser dispatch、bounded 429 retry、`archive_missing` 和 opt-in smoke scaffold；`knowledge-base-agent-kb-binding` 增加 agent 到多个 KB 的显式绑定、默认 KB 回退和空范围诊断；`knowledge-base-connector-operations` 增加 `fleetent-admin kb connectors list/check/status/sync`、credential_ref 检查、dry-run、最近一次 status 和失败摘要脱敏。
+**已完成 core + parser + hybrid + local connector + sync planner + Google Drive / Confluence connector + agent KB binding + connector operations 闭环**：`knowledge-base-core` 实现了 `intelligence.knowledge_base` runtime package、基础 Alembic 表、手动 text/markdown ingest、deterministic chunking、vector-only search、delete，以及 long-term-ctx built-in provider 接入；`knowledge-base-parsers-basic` 增加了无 AI 框架依赖的 plain text / Markdown / lightweight HTML parser，并提供 parsed ingest adapter；`knowledge-base-hybrid-search` 增加了 knowledge-base-owned SQLite FTS5 keyword index、keyword mode、hybrid mode 和 RRF 融合；`knowledge-base-connectors-local` 增加了 DataSource / DocumentRef 边界、显式 root allowlist 的 local directory source、`.txt` / `.md` / `.html` / `.htm` 格式映射、source path / mtime / content hash 状态记录，以及手动 `sync_local_directory`；`knowledge-base-sync-planner` 增加了 plan / execute 分离、`ingest_new` / `reingest_changed` / `skip_unchanged` / `delete_missing` 动作模型；`knowledge-base-connectors-google-drive` 增加指定 folder scope、OAuth `credential_ref`、fake-client default path、Google Docs HTML export、text / Markdown / HTML parser dispatch、`archive_missing` 和 opt-in smoke scaffold；`knowledge-base-connectors-confluence` 增加 Cloud API token `credential_ref`、space / page / page+children scope、storage HTML parser dispatch、bounded 429 retry、`archive_missing` 和 opt-in smoke scaffold；`knowledge-base-agent-kb-binding` 增加 agent 到多个 KB 的显式绑定、默认 KB 回退和空范围诊断；`knowledge-base-connector-operations` 增加 `fleetent-admin kb connectors list/check/status/sync`、credential_ref 检查、dry-run、最近一次 status 和失败摘要脱敏；`knowledge-base-query-planner` 增加规则型 `plan_knowledge_search` / `execute_knowledge_search_plan`，在 hybrid、graph fill 和 hybrid rerank 之间给出可解释 reason。
 
 团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移设计资产和小块算法**，而非从零重写或整体搬运。
 
@@ -419,10 +419,10 @@ hybrid search 当前不调用 rerank provider，不包含 query planner、graph 
 
 当前未实现内容：
 - 无后台 job、admin UI、REST upload API；vector rebuild 目前通过 vector_store 同步 public API 触发
-- 无 rerank / query planner
+- 无 LLM planner / query rewrite / `search(mode="auto")`
 - 已有 entity extraction schema、deterministic extractor、`kb_extraction_runs`、`kb_entities`、mentions / relations evidence 和 explicit run。
 - 已有 `graph_search` 第一版：独立于 search，支持 depth 0/1、direct entity mention、relation evidence、related entity mention 和 graph evidence；不接 query planner / rerank，不改变 `search()` / hybrid ranking。
-- 无 production ranking dashboard、reranker evaluation 或 query planner evaluation
+- 无 production ranking dashboard
 - Google Drive 不做 service account / domain-wide delegation，不做最终提问用户到 Drive document ACL 的实时映射；OAuth token 通过 connector 的 `credential_ref` 引用，MVP 可指向本地 token 文件，生产部署需保护文件权限和备份策略，后续可迁移到 credential store / secret manager。
 - Google Drive missing / 不可见默认归档 KB document 并移除 chunks / vector entries，不物理删除 `knowledge_documents` 行。
 - Google Docs 通过 export HTML 后走 HTML parser；Google Sheets / Google Slides 分别导出为 `.xlsx` / `.pptx` 后通过 parser registry 解析。
@@ -556,7 +556,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 ## 测试边界
 
 **需要单元测试的行为**：
-- public API 可导入：`KnowledgeDocument`、`KnowledgeChunk`、`ingest_text()`、`search()`、`delete()`、`iter_indexable_knowledge_chunks()`、`AgentKnowledgeBaseBinding`、`bind_agent_to_kb()`、`unbind_agent_from_kb()`、`list_agent_kb_bindings()`、`resolve_agent_kb_ids()`、`DocumentRef`、`DataSource`、sync planner dataclasses、`plan_local_directory_sync()`、`execute_sync_plan()`、`sync_local_directory()`
+- public API 可导入：`KnowledgeDocument`、`KnowledgeChunk`、`ingest_text()`、`search()`、`KnowledgeSearchOptions`、`KnowledgeSearchPlan`、`KnowledgeSearchStep`、`plan_knowledge_search()`、`execute_knowledge_search_plan()`、`delete()`、`iter_indexable_knowledge_chunks()`、`AgentKnowledgeBaseBinding`、`bind_agent_to_kb()`、`unbind_agent_from_kb()`、`list_agent_kb_bindings()`、`resolve_agent_kb_ids()`、`DocumentRef`、`DataSource`、sync planner dataclasses、`plan_local_directory_sync()`、`execute_sync_plan()`、`sync_local_directory()`
 - 配置默认值：`knowledge_base.enabled=false`，默认 tenant/kb 与 chunk 参数稳定
 
 **需要集成测试的行为**：
@@ -594,7 +594,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - [ ] 文档更新机制：重新导入同名文档时覆盖旧 chunk 和图数据，还是版本化保留？（负责人：待认领）
 - [ ] 默认作用域粒度：per-tenant 还是 per-agent？（负责人：待认领）
 - [ ] 实体类型预定义：实体类型（person / org / concept 等）由 LLM 自由生成，还是预定义枚举？自由生成灵活但类型不一致，预定义可控但覆盖不全。（负责人：待认领）
-- [ ] graph_search 与 search 的调用决策：由 long_term_ctx 根据 query 类型选择，还是总是并行调用两者再合并？（负责人：待认领）
+- [x] graph_search 与 search 的调用决策：已提供独立规则型 planner API；默认不改变 `search()`，由调用方显式使用 `plan_knowledge_search()` / `execute_knowledge_search_plan()`。
 - [ ] 图提取时机：与分块同批次触发，还是分块后单独排队？大文档图提取耗时较长，影响何时可检索。（负责人：待认领）
 - [x] PDF / Office 基础解析库选型：已采用 `pypdf`、`python-docx`、`python-pptx`、`openpyxl`，不引入 `unstructured`、OCR engine、VLM 或外部解析服务。
 - [x] Confluence 连接器认证方式：已定 MVP 只支持 Confluence Cloud API token + `credential_ref`；Server / Data Center 后置。

@@ -63,6 +63,13 @@ from fleetent.intelligence.knowledge_base.parsers import (
     parse_text,
     parse_xlsx,
 )
+from fleetent.intelligence.knowledge_base.planner import (
+    KnowledgeSearchOptions,
+    KnowledgeSearchPlan,
+    KnowledgeSearchStep,
+    execute_knowledge_search_plan,
+    plan_knowledge_search,
+)
 from fleetent.intelligence.knowledge_base.runtime import (
     archive,
     delete,
@@ -104,6 +111,9 @@ __all__ = [
     "KnowledgeDocument",
     "KnowledgeEntity",
     "KnowledgeExtractionRun",
+    "KnowledgeSearchOptions",
+    "KnowledgeSearchPlan",
+    "KnowledgeSearchStep",
     "RelationRef",
     "ParsedDocument",
     "ParsedSection",
@@ -117,6 +127,7 @@ __all__ = [
     "check_connector",
     "delete",
     "execute_sync_plan",
+    "execute_knowledge_search_plan",
     "get_connector_config",
     "get_connector_status",
     "graph_search",
@@ -133,6 +144,7 @@ __all__ = [
     "parse_pptx",
     "parse_text",
     "parse_xlsx",
+    "plan_knowledge_search",
     "plan_confluence_sync",
     "plan_google_drive_sync",
     "plan_local_directory_sync",

@@ -46,3 +46,15 @@ def test_capability_docs_describe_graph_search_scope():
         assert "graph evidence" in content
         assert "独立于 search" in content
         assert "不接 query planner / rerank" in content
+
+
+def test_capability_docs_describe_query_planner_scope():
+    kb_doc = Path("docs/capabilities/knowledge-base.md").read_text(encoding="utf-8")
+    roadmap = Path("docs/capabilities/owner-capability-roadmap.md").read_text(encoding="utf-8")
+
+    for content in [kb_doc, roadmap]:
+        assert "plan_knowledge_search" in content
+        assert "execute_knowledge_search_plan" in content
+        assert "规则型" in content
+        assert "不改 `search()`" in content
+        assert "不接 LLM planner" in content

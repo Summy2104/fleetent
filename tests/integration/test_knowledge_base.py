@@ -689,6 +689,13 @@ async def test_hybrid_rerank_provider_failure_returns_original_hybrid_order(
 
     monkeypatch.setattr(runtime, "_settings", lambda: Settings(anthropic_api_key="test-key"))
     monkeypatch.setattr(runtime.vector_store, "search", vector_search)
+    baseline = await runtime.search(
+        "ZX-888",
+        tenant_id="tenant-a",
+        kb_ids=["global"],
+        limit=2,
+        mode="hybrid",
+    )
     monkeypatch.setattr(
         runtime.rerank_runtime,
         "create_rerank_provider",
@@ -704,10 +711,7 @@ async def test_hybrid_rerank_provider_failure_returns_original_hybrid_order(
         rerank=True,
     )
 
-    assert [chunk.id for chunk in results] == [
-        f"{first_doc.id}:chunk:0",
-        f"{second_doc.id}:chunk:0",
-    ]
+    assert [chunk.id for chunk in results] == [chunk.id for chunk in baseline]
 
 
 async def test_delete_removes_document_chunks_and_vector_entries(monkeypatch, tmp_path):

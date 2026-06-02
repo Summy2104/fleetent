@@ -332,8 +332,9 @@ blocker 的问题才会阻塞 Go；docs gap、enhancement 和 out-of-scope 分�
    export parser registry 接入；OCR、扫描 PDF、image / VLM 解析仍需单独评估依赖、成本和数据主权影响。
 4. `rerank-kb-search-integration`：把已有 rerank provider 接入 KB search，对 hybrid / graph candidates 做重排；
    默认 deterministic，真实 rerank provider 显式 opt-in。
-5. `knowledge-base-query-planner`：在 vector / keyword / hybrid / graph / rerank 之间做查询策略选择；该 spec
-   最容易引入 LLM 不稳定性，因此排在 entity extraction、graph search 和 rerank 接入之后。
+5. `knowledge-base-query-planner`：已完成规则型 `plan_knowledge_search` /
+   `execute_knowledge_search_plan` 独立 API，在 hybrid、graph first + hybrid fill、hybrid rerank 之间做可解释策略选择；
+   不改 `search()`，不接 LLM planner，也不做 query rewrite。
 
 建议依赖顺序：
 

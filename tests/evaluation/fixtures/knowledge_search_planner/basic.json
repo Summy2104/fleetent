@@ -1,0 +1,28 @@
+{
+  "queries": [
+    {
+      "query": "How do I restart the cache service?",
+      "limit": 3,
+      "rerank": false,
+      "expected_steps": ["hybrid_search"],
+      "expected_rerank": [false],
+      "expected_reason": "default_hybrid"
+    },
+    {
+      "query": "Which service depends on Billing API?",
+      "limit": 5,
+      "rerank": false,
+      "expected_steps": ["graph_search", "hybrid_fill"],
+      "expected_rerank": [false, false],
+      "expected_reason": "relation_like_query"
+    },
+    {
+      "query": "Which service depends on Billing API?",
+      "limit": 5,
+      "rerank": true,
+      "expected_steps": ["graph_search", "hybrid_fill"],
+      "expected_rerank": [false, true],
+      "expected_reason": "relation_like_query"
+    }
+  ]
+}
