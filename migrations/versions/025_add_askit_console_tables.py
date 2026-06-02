@@ -14,8 +14,8 @@ persisted here. Sensitive values in params/logs are masked before persisting.
 import sqlalchemy as sa
 from alembic import op
 
-revision = "017"
-down_revision = "016"
+revision = "025"
+down_revision = "024"
 branch_labels = None
 depends_on = None
 

@@ -15,8 +15,8 @@ this table (it stays in env / secret injection).
 import sqlalchemy as sa
 from alembic import op
 
-revision = "013"
-down_revision = "012"
+revision = "021"
+down_revision = "020"
 branch_labels = None
 depends_on = None
 

@@ -14,8 +14,8 @@ masking). No cloud APM / SaaS time-series.
 import sqlalchemy as sa
 from alembic import op
 
-revision = "016"
-down_revision = "015"
+revision = "024"
+down_revision = "023"
 branch_labels = None
 depends_on = None
 

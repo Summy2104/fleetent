@@ -10,8 +10,8 @@ Owner module: platform / model-provider-management
 import sqlalchemy as sa
 from alembic import op
 
-revision = "011"
-down_revision = "010"
+revision = "019"
+down_revision = "018"
 branch_labels = None
 depends_on = None
 

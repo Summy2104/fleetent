@@ -14,8 +14,8 @@ can list, govern, and isolate playground sessions without touching transcript st
 import sqlalchemy as sa
 from alembic import op
 
-revision = "014"
-down_revision = "013"
+revision = "022"
+down_revision = "021"
 branch_labels = None
 depends_on = None
 

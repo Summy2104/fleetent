@@ -13,8 +13,8 @@ archive column belong to the knowledge-base engine domain (migrations 006-009).
 import sqlalchemy as sa
 from alembic import op
 
-revision = "012"
-down_revision = "011"
+revision = "020"
+down_revision = "019"
 branch_labels = None
 depends_on = None
 

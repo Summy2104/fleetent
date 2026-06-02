@@ -15,8 +15,8 @@ that lands, status/deleted_at can be reconciled. Mirrors skill_admin_state.
 import sqlalchemy as sa
 from alembic import op
 
-revision = "015"
-down_revision = "014"
+revision = "023"
+down_revision = "022"
 branch_labels = None
 depends_on = None
 
