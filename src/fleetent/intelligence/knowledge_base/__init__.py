@@ -21,6 +21,16 @@ from fleetent.intelligence.knowledge_base.connectors.google_drive import (
     plan_google_drive_sync,
     sync_google_drive,
 )
+from fleetent.intelligence.knowledge_base.extraction import (
+    ExtractedEntity,
+    ExtractedRelation,
+    ExtractionResult,
+    run_entity_extraction,
+)
+from fleetent.intelligence.knowledge_base.extraction_store import (
+    KnowledgeEntity,
+    KnowledgeExtractionRun,
+)
 from fleetent.intelligence.knowledge_base.models import KnowledgeChunk, KnowledgeDocument
 from fleetent.intelligence.knowledge_base.operations import (
     ConnectorCheckResult,
@@ -77,8 +87,13 @@ __all__ = [
     "GoogleDriveConnectorConfig",
     "GoogleDriveSyncPlan",
     "GoogleDriveSyncSummary",
+    "ExtractedEntity",
+    "ExtractedRelation",
+    "ExtractionResult",
     "KnowledgeChunk",
     "KnowledgeDocument",
+    "KnowledgeEntity",
+    "KnowledgeExtractionRun",
     "ParsedDocument",
     "ParsedSection",
     "SyncAction",
@@ -111,6 +126,7 @@ __all__ = [
     "plan_local_directory_sync",
     "resolve_agent_kb_ids",
     "run_connector_sync",
+    "run_entity_extraction",
     "search",
     "sync_confluence",
     "sync_google_drive",

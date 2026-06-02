@@ -371,6 +371,51 @@ def test_kb_connectors_cli_output_is_sanitized(monkeypatch):
     assert "secret-value" not in out
 
 
+def test_kb_extract_entities_outputs_sanitized_summary(monkeypatch):
+    from fleetent.intelligence.knowledge_base.extraction_store import KnowledgeExtractionRun
+    from fleetent.platform.admin_cli import kb_connectors
+
+    async def run_entity_extraction(
+        tenant_id: str,
+        kb_id: str,
+        document_id: str | None = None,
+    ):
+        assert tenant_id == "default"
+        assert kb_id == "engineering"
+        assert document_id == "doc-1"
+        return KnowledgeExtractionRun(
+            id="run-secret-value",
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            document_id=document_id,
+            extractor="deterministic",
+            status="succeeded",
+            documents_scanned=1,
+            chunks_scanned=2,
+            entities_upserted=3,
+            mentions_written=3,
+            relations_written=1,
+            failed_count=0,
+        )
+
+    monkeypatch.setattr(kb_connectors, "run_entity_extraction", run_entity_extraction)
+
+    out, _, code = run_admin(
+        "kb",
+        "extract-entities",
+        "--kb-id",
+        "engineering",
+        "--document-id",
+        "doc-1",
+    )
+
+    assert code == 0
+    assert "status=succeeded" in out
+    assert "documents_scanned=1" in out
+    assert "relations_written=1" in out
+    assert "secret-value" not in out
+
+
 def test_diagnostics_export_cli_outputs_package_path(monkeypatch, tmp_path):
     from fleetent.observability import diagnostics
 
