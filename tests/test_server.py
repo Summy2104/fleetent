@@ -262,3 +262,67 @@ def test_chat_passes_sandbox_mode_to_run_stream(tmp_path, monkeypatch):
         )
     assert resp.status_code == 200
     assert captured.get("sandbox_mode") == se.Mode.SELECTIVE
+
+
+def test_chat_passes_agent_allowed_skills_to_run_stream(tmp_path, monkeypatch):
+    """An agent's allowed_skills flow into run_stream for catalog narrowing."""
+    import fleetent.agent_store as ag
+    import fleetent.server as srv
+    import fleetent.user_store as us2
+
+    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
+
+    captured: dict = {}
+
+    async def fake_stream(msg: str, user_id: str, **kwargs):  # type: ignore[misc]
+        captured["allowed_skills"] = kwargs.get("allowed_skills")
+        yield {"type": "done", "content": "ok"}
+
+    monkeypatch.setattr(srv, "run_stream", fake_stream)
+
+    user = us2.create_user("SkillScopeTester")
+    agent = ag.create_agent("skill-bot", "Sys.", ["shell"], allowed_skills=["weather"])
+    ag.assign_channel("slack", "C-SKILL", agent.id)
+
+    with TestClient(srv.app) as c:
+        resp = c.post(
+            "/chat",
+            json={"message": "hi"},
+            headers={
+                "Authorization": f"Bearer {user.api_key}",
+                "x-platform": "slack",
+                "x-channel-id": "C-SKILL",
+            },
+        )
+    assert resp.status_code == 200
+    assert captured.get("allowed_skills") == ["weather"]
+
+
+def test_chat_no_agent_passes_no_allowed_skills(tmp_path, monkeypatch):
+    """With no bound agent, run_stream receives no allowed_skills (no narrowing)."""
+    import fleetent.agent_store as ag
+    import fleetent.server as srv
+    import fleetent.user_store as us2
+
+    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
+
+    captured: dict = {}
+
+    async def fake_stream(msg: str, user_id: str, **kwargs):  # type: ignore[misc]
+        captured["has_allowed_skills"] = "allowed_skills" in kwargs
+        yield {"type": "done", "content": "ok"}
+
+    monkeypatch.setattr(srv, "run_stream", fake_stream)
+
+    user = us2.create_user("NoAgentSkillTester")
+
+    with TestClient(srv.app) as c:
+        resp = c.post(
+            "/chat",
+            json={"message": "hi"},
+            headers={"Authorization": f"Bearer {user.api_key}"},
+        )
+    assert resp.status_code == 200
+    assert captured.get("has_allowed_skills") is False

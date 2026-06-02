@@ -940,6 +940,7 @@ async def run(
     sandbox_mode: Mode | None = None,
     agent_features: dict[str, Any] | None = None,
     session_id: str | None = None,
+    allowed_skills: list[str] | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -953,6 +954,12 @@ async def run(
     max_turns / max_consecutive_failures override the deployment defaults.
     force_model forces this run's LLM calls onto a specific model via a
     request-level routing override (MR1); None keeps task_type routing unchanged.
+    allowed_skills is a per-agent skill-catalog narrowing (agent-skill-scoping);
+    run() receives a pre-assembled messages list (the <available_skills> catalog is
+    built by the message-building entry points), so it does not re-render the
+    catalog itself — the param is accepted for API symmetry with run_stream and for
+    a future run()-builds-catalog path, and does not re-filter here (avoiding double
+    narrowing). Callers narrow at the point they build the catalog.
     """
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -1218,6 +1225,7 @@ async def run_stream(
     sandbox_mode: Mode | None = None,
     agent_features: dict[str, Any] | None = None,
     session_id: str | None = None,
+    allowed_skills: list[str] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -1232,7 +1240,9 @@ async def run_stream(
     performed on the streaming path, so approval_rejected does not apply here.
     """
     memory_ctx = load_memories(user_id=user_id)
-    skills_catalog = available_skills_prompt()
+    # agent-skill-scoping: narrow the catalog to the agent's allowed_skills (empty /
+    # None = no narrowing, all enabled skills visible).
+    skills_catalog = available_skills_prompt(allowed_skills=allowed_skills)
     disabled_trace = collect_disabled_trace() or None
 
     # SB3 D5: execution-time context channel (session/agent/features) for opt-in tools.

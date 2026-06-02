@@ -956,3 +956,43 @@ def test_collect_disabled_trace_empty_when_nothing_disabled(tmp_path):
     _write_skill(tmp_path, "on", "---\nname: on\ndescription: keep.\n---\nbody")
     sr.scan(str(tmp_path / "skills"))
     assert sr.collect_disabled_trace(disabled_skills=[]) == []
+
+
+# --- agent-skill-scoping: allowed_skills 清单收窄 ---
+
+
+def _two_enabled_skills(tmp_path):
+    _write_skill(tmp_path, "weather", "---\nname: weather\ndescription: weather skill.\n---\nbody")
+    _write_skill(tmp_path, "billing", "---\nname: billing\ndescription: billing skill.\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+
+
+def test_available_skills_prompt_none_allowed_skills_shows_all(tmp_path):
+    _two_enabled_skills(tmp_path)
+    out = sr.available_skills_prompt(allowed_skills=None)
+    assert "<name>weather</name>" in out
+    assert "<name>billing</name>" in out
+
+
+def test_available_skills_prompt_empty_allowed_skills_shows_all(tmp_path):
+    _two_enabled_skills(tmp_path)
+    out = sr.available_skills_prompt(allowed_skills=[])
+    assert "<name>weather</name>" in out
+    assert "<name>billing</name>" in out
+
+
+def test_available_skills_prompt_nonempty_narrows_to_listed(tmp_path):
+    _two_enabled_skills(tmp_path)
+    out = sr.available_skills_prompt(allowed_skills=["weather"])
+    assert "<name>weather</name>" in out
+    assert "<name>billing</name>" not in out
+
+
+def test_available_skills_prompt_disabled_wins_over_allowed_skills(tmp_path):
+    # weather is allowed but force-disabled via config — must not appear.
+    _two_enabled_skills(tmp_path)
+    out = sr.available_skills_prompt(
+        disabled_skills=["weather"], allowed_skills=["weather", "billing"]
+    )
+    assert "<name>weather</name>" not in out
+    assert "<name>billing</name>" in out

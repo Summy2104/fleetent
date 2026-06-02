@@ -138,7 +138,9 @@ async def route(msg: NormalizedMessage) -> None:
         # Build the system message ordered stable→variable for prefix caching:
         # base system + the <available_skills> catalog (stable) first, per-user
         # memory last. The model loads any skill it needs on demand via read_skill.
-        catalog = available_skills_prompt()
+        # agent-skill-scoping: narrow the catalog to the bound agent's allowed_skills
+        # (empty/None → no narrowing, full catalog as before).
+        catalog = available_skills_prompt(allowed_skills=agent.allowed_skills if agent else None)
         disabled_trace = collect_disabled_trace() or None
         memory_ctx = load_memories(user_id=msg.user_id)
         parts = [base_system, catalog, memory_ctx]

@@ -316,7 +316,10 @@ _SKILLS_INSTRUCTION = (
 )
 
 
-def available_skills_prompt(disabled_skills: list[str] | None = None) -> str:
+def available_skills_prompt(
+    disabled_skills: list[str] | None = None,
+    allowed_skills: list[str] | None = None,
+) -> str:
     """Render the enabled skills as an openclaw-style skills section for the prompt.
 
     Returns the mandatory scan instruction followed by an <available_skills>
@@ -328,12 +331,21 @@ def available_skills_prompt(disabled_skills: list[str] | None = None) -> str:
     or `enabled_by_default: false` — so its name/description never reach the prompt.
     Returns "" when nothing is enabled, so the caller can drop the section entirely
     (keeping the cache prefix maximal).
+
+    `allowed_skills` is a per-agent catalog-visibility narrowing (agent-skill-scoping):
+    empty / None means no narrowing (every enabled skill stays visible, preserving the
+    pre-change default where skills are visible to all agents — the OPPOSITE default
+    from `plugins`). A non-empty list keeps only skills whose name is listed, AND-ed
+    with the disable predicate so a disabled skill never appears even when listed
+    (disable wins). This narrows catalog visibility only; it is NOT an authorization
+    boundary — `read_skill`'s by-name `load` and tool access control are unaffected.
     """
     disabled = _resolve_disabled_skills(disabled_skills)
+    allowed = set(allowed_skills) if allowed_skills else None
     entries = [
         (name, entry)
         for name, entry in _index.items()
-        if _disabled_reason(name, entry, disabled) is None
+        if _disabled_reason(name, entry, disabled) is None and (allowed is None or name in allowed)
     ]
     if not entries:
         return ""
