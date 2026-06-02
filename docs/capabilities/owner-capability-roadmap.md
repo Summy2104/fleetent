@@ -366,7 +366,9 @@ skill 演进，属于原 capability 里需要提高优先级的能力：
 2. `skill-reflection-proposals`：基于 trace / tool usage / repeated tasks 发现可沉淀为 skill 的机会，生成
    `SkillProposal` 并持久化到 `skill_proposals`；类型包括 `create_skill`、`update_skill`、`deprecate_skill`，
    初始状态为 `pending`，owner-reviewed 后才可 apply；不自动改 skill。
-3. `reflection-trend-summary`：对 reflection findings 做长期趋势统计，用于判断 memory / KB / skill 改进是否有效。
+3. `reflection-trend-summary`：已完成 `get_reflection_trend_summary` 只读趋势聚合；基于 reflection
+   reports、KB reflection reports、User Memory maintenance proposals 和 `SkillProposal` lifecycle，按 UTC
+   day / week bucket 统计 findings 与 proposal outcome；不自动写 Memory / KB / Skill。
 
 建议依赖顺序：
 
@@ -393,9 +395,12 @@ flowchart TD
 1. `shared-memory`：已完成 User Memory 之外的共享记忆实体、`shared_memory_items` 表、team / tenant scope、
    `shared:{scope_type}:{scope_id}` vector namespace、写入 / 更新 / 删除 lifecycle、reflection proposal apply 和最小 admin CLI；
    不接 prompt 注入，默认不让管理员代批用户个人记忆，也不把企业共识直接混入 User Memory。
-2. `long-term-context-agent-tenant-policy`：在 User Memory、Shared Memory 和 Knowledge Base 之间定义
-   agent / tenant 级 provider 策略、budget 策略和冲突偏好。
-3. `memory-quality-trend-summary`：跟踪 memory extraction、retention、proposal apply 后的质量趋势，判断记忆维护是否有效。
+2. `long-term-context-agent-tenant-policy`：已创建 OpenSpec design change；后续实现以 agent ownership
+   为边界，agent 数据模型需要暴露 `tenant_id` 和可选 `team_id`，policy 只配置是否启用 tenant / team
+   级 Shared Memory、budget 策略和冲突偏好；默认保持当前行为，不引入跨团队或跨公司的共享记忆。
+3. `memory-quality-trend-summary`：已完成 `get_memory_quality_trend_summary` 只读质量趋势；覆盖 User
+   Memory counts / expired / duplicate candidates、Shared Memory 独立计数，以及 memory maintenance
+   proposal outcome；不触发 extraction、不自动维护 memory。
 
 建议依赖顺序：
 
@@ -411,16 +416,14 @@ flowchart TD
     SHARED --> MEM_TREND
 ```
 
-#### 第二阶段增强设计评估（2026-06-02）
+#### 第二阶段增强结果（2026-06-02）
 
-1. `reflection-trend-summary`：已具备设计条件并创建 OpenSpec design change。依据是 reflection reports、
-   KB reflection reports、User Memory maintenance proposals 和 `SkillProposal` lifecycle 均已落库且脱敏；
-   第一版设计为只读趋势聚合，不自动写 Memory / KB / Skill。
-2. `long-term-context-agent-tenant-policy`：已具备设计条件并创建 OpenSpec design change。依据是 long-term-ctx
-   已有 deterministic budget policy、KB agent binding 已稳定、Shared Memory 数据层已完成；第一版设计默认保持当前行为，
-   Shared Memory 仅在显式 policy 启用时进入 prompt 注入。
-3. `memory-quality-trend-summary`：已具备设计条件并创建 OpenSpec design change。依据是 `memory_items`、
-   `shared_memory_items`、retention / compaction dry-run 和 memory proposal lifecycle 均可只读聚合；第一版设计不触发
+1. `reflection-trend-summary`：已实现并 archive，提交为 `e529d60`。实现为只读趋势聚合，不自动写
+   Memory / KB / Skill。
+2. `long-term-context-agent-tenant-policy`：已完成 ownership-based 设计修订，但暂不实现和 archive。后续
+   implementation 需要先联动 agent 配置 / 表结构暴露 `tenant_id` 和可选 `team_id`，policy 不再表达任意
+   `scopes` 列表。
+3. `memory-quality-trend-summary`：已实现并 archive，提交为 `70b9773`。实现为只读质量趋势，不触发
    extraction、不自动维护 memory。
 
 ### Capability 完整度 / v1.1+
