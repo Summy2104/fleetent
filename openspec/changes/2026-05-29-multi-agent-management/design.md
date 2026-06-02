@@ -8,7 +8,8 @@
 - `memory_layer._mem_path(user_id)` 写到 `data/users/{user_id}/memories.jsonl`，全 agent 共享。
 - `model_router.ROUTES` 是模块级常量，没有 per-call override 入口。
 - `mcp_client._server_registry` 是全局的，所有 server 都注册到 `tool_registry`，agent 隔离只能靠 `allowed_tools` 白名单（glob）。
-- `user_store.users` 表无 admin 标志位。
+- `user_store.users` 表已有 `role` 列（viewer / admin / built_in_admin），认证走 `auth.has_role` + Session token——无需新增 `is_admin` 标志位。
+- 管理面已演进：`agent_admin_store`（status/provenance/drift/archived_at 侧表）+ `agent_console_api`（`/admin/agents` 生命周期：list/enable/disable/archive/restore/clone/observability）+ `agent_apply_api`（`/admin/agents/apply`、`apply:batch`）。本 change 在其上**只新增版本与绑定端点**，归档/禁用复用 `agent_admin_store.archive`。
 
 设计原则：**不破坏现有接口契约**——`agent_loop.run()` 的位置参数（system_prompt / allowed_tools）继续可用，新功能通过追加一个 `AgentSnapshot | None` 可选参数承载。
 
@@ -28,17 +29,19 @@
 - 不做 agent 配置的"GitOps"——agent 定义只在 SQLite，YAML 导入留到后续。
 - 不做"灰度发布 / A-B"——版本切换是一次性原子操作。
 - admin HTTP API 不提供 UI，纯 REST + JSON。
-- 不引入 RBAC 三态权限模型，只一个二态 `is_admin` 标志位足够当前需求。
+- 不引入 `is_admin` 标志位——复用现有 `role` 体系（viewer/admin/built_in_admin）+ Session 认证。
+- 不新增 agent CRUD/lifecycle HTTP 端点——复用现有 `agent_apply_api` + `agent_console_api`，本 change 只加版本与绑定端点。
 
 ## Decisions
 
-### 1. Schema：双表 + 软删除 + per-version 完整快照
+### 1. Schema：双表 + per-version 完整快照（Alembic 迁移 026）
+
+schema 变更走 **Alembic 迁移**（基于最新 revision 025），不在 store `_init_db` 里 ALTER。归档/禁用复用 `agent_admin_store`，**不引入 `agents.deleted_at`**。
 
 ```sql
 -- 扩展原有 agents 表（不删字段，保兼容）
 ALTER TABLE agents ADD COLUMN active_version_id INTEGER REFERENCES agent_versions(id);
-ALTER TABLE agents ADD COLUMN deleted_at TEXT;
--- system_prompt / allowed_tools 列保留但 NULL（active version 提供真实值）
+-- system_prompt / allowed_tools 列保留但可 NULL（active version 提供真实值）
 
 CREATE TABLE agent_versions (
     id                  INTEGER PRIMARY KEY,
@@ -47,16 +50,16 @@ CREATE TABLE agent_versions (
     system_prompt       TEXT NOT NULL,
     allowed_tools       TEXT NOT NULL,              -- JSON array
     skills_dir          TEXT,                       -- NULL → 用全局 default
-    mcp_server_ids      TEXT NOT NULL DEFAULT '[]', -- JSON array
+    mcp_server_ids      TEXT,                       -- JSON array; NULL → 无 MCP 限制（全部可见）
     model_overrides     TEXT NOT NULL DEFAULT '{}', -- JSON: {"default": {...}, "memory_extraction": {...}}
     memory_namespace    TEXT NOT NULL DEFAULT 'default',
     created_at          TEXT NOT NULL,
-    created_by_user_id  TEXT,                       -- 谁创建的版本（HTTP API 时为 admin user）
+    created_by_user_id  TEXT,                       -- 谁创建的版本（HTTP API 时为 Session user）
     UNIQUE(agent_id, version)
 );
 
-ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE channel_agents ADD COLUMN bound_version_id INTEGER REFERENCES agent_versions(id);
+-- users 表不变：认证复用现有 role 列
 ```
 
 **为什么不在 agents 行内 JSON 直接存历史**：版本越多查询越慢，外键约束/审计/UI 列表都更难写；SQLite 多表 join 廉价，分表是最朴素的选择。
@@ -108,16 +111,17 @@ session 结束后元数据保留，但若 admin 显式 `truncate-session` 或新
 
 ### 5. Per-agent MCP servers：白名单 + tool schema 过滤
 
-MCP 仍全局注册（启动期连接昂贵，重复连接不必要）。在 `agent_loop.run()` 取 snapshot 后构造 effective allowlist：
+MCP 仍全局注册（启动期连接昂贵，重复连接不必要）。`agent_runtime.filter_tool_schemas(schemas, allowed_tools, mcp_server_ids)` 做双重过滤：
 
 ```python
-effective_allowed = list(snapshot.allowed_tools)
-for server_id in snapshot.mcp_server_ids:
-    effective_allowed.append(f"{server_id}__*")
-# 若 snapshot.mcp_server_ids = []，不追加 MCP 工具
+# 1) allowed_tools fnmatch 过滤（保持现有语义）
+# 2) MCP 白名单前缀过滤：
+#    mcp_server_ids is None  → 不做 MCP 过滤（全部 MCP 工具可见，向后兼容）
+#    mcp_server_ids == []     → 排除所有含 "__" 的 MCP 工具
+#    mcp_server_ids == [...]  → 只保留 {sid}__ 前缀在列表中的 MCP 工具
 ```
 
-复用现有 `check_tool_access`（fnmatch）做最终过滤。意味着 agent 必须显式声明它能用哪些 MCP server——不在白名单里的 server 工具一律不可见。这一刻意收紧默认值是为多租户做铺垫。
+`None` 表示"无 MCP 限制"，是 backfill 存量 agent 的默认值（保持原行为）；新建 agent 可显式给空列表收紧到零 MCP，为多租户做铺垫。
 
 ### 6. Per-agent model overrides：route_overrides 参数
 
@@ -165,43 +169,35 @@ async def invoke_agent(agent_name: str, message: str) -> str:
 
 与 `sub_agent` 共用 `is_sub_agent` 标志，schema 里同样不暴露 `sub_agent` 和 `invoke_agent` 给子 agent，自然形成深度 1 上限。
 
-### 9. HTTP Admin API：单独 router，强制 admin 校验
+### 9. HTTP Admin API：新增版本 + 绑定端点（复用现有 /admin/agents 表面）
+
+agent 创建/更新/生命周期已由 `agent_apply_api`（`POST /admin/agents/apply`、`apply:batch`）+ `agent_console_api`（list/enable/disable/archive/restore/clone/observability）覆盖。本 change **只新增**：
 
 ```
-POST   /admin/agents                                    # 创建（同时建 version 1 并激活）
-GET    /admin/agents                                    # 列出（含已删除可选 filter）
-GET    /admin/agents/{name}                             # 当前 active 详情
-PATCH  /admin/agents/{name}                             # 创建新版本（不激活）
-GET    /admin/agents/{name}/versions                    # 版本列表
-POST   /admin/agents/{name}/versions/{version}/activate # 激活（含回滚）
-DELETE /admin/agents/{name}                             # 软删除
+GET    /admin/agents/{name}/versions                    # 版本列表（viewer+ 可读）
+POST   /admin/agents/{name}/versions/{version}/activate # 激活（含回滚，admin）
 
-POST   /admin/agents/{name}/bindings/users              # body {user_id}
-DELETE /admin/agents/{name}/bindings/users/{user_id}
+POST   /admin/agents/{name}/bindings/users              # body {user_id}（admin）
+DELETE /admin/agents/{name}/bindings/users/{user_id}    # admin
 
-POST   /admin/agents/{name}/bindings/channels           # body {platform, channel_id}
-DELETE /admin/agents/{name}/bindings/channels/{platform}/{channel_id}
+POST   /admin/agents/{name}/bindings/channels           # body {platform, channel_id}（admin，写 bound_version_id）
+DELETE /admin/agents/{name}/bindings/channels/{platform}/{channel_id}  # admin
 ```
 
-依赖 `_require_admin` 守卫（在 `_require_auth` 基础上检查 `is_admin`）。所有写入操作 transactional：创建 agent 时原子写 agents + agent_versions 两行。
+认证复用现有 Session 方案（`Authorization: Session <token>`）+ role guard，与 `askit_console_api` / `agent_console_api` 同模式：`_current_user` 解析 + `_is_admin` 判定。读端 viewer+，写端 admin。
 
 ### 10. CLI 对等命令
 
 ```
-fleetent-admin create-agent --name --system-prompt --allowed-tools [--skills-dir] [--mcp-servers] [--memory-namespace]
-fleetent-admin update-agent --name --system-prompt [...]              # 创建新版本
-fleetent-admin list-agents [--include-deleted]
+fleetent-admin update-agent --name --system-prompt [...]              # 创建新版本并默认激活
 fleetent-admin show-agent --name [--version N]
 fleetent-admin list-agent-versions --name
 fleetent-admin activate-agent-version --name --version N
-fleetent-admin delete-agent --name
 fleetent-admin assign-user --user-id --agent-name
 fleetent-admin unassign-user --user-id --agent-name
-fleetent-admin promote-admin --user-id
-fleetent-admin revoke-admin --user-id
 ```
 
-复用 `agent_store` 新 API，CLI 只负责 argparse 和 stdout 格式化。
+复用 `agent_store` 新 API，CLI 只负责 argparse 和 stdout 格式化。`create-agent` / `list-agents` 已存在；提权用现有 role 命令（`set-role`），无需 promote-admin/revoke-admin。
 
 ### 11. invoke_agent vs sub_agent 的边界
 
@@ -221,15 +217,14 @@ fleetent-admin revoke-admin --user-id
 ## Risks / Trade-offs
 
 1. **memories 文件迁移**：用户实际 prod 数据可能在生产 SQLite。提供 migration 脚本（幂等）+ CI 检测；如果不跑迁移，旧 agent 会读不到历史记忆但不会崩。
-2. **MCP 默认收紧可能误伤现有 agent**：现存 agent 创建时没有 `mcp_server_ids`，迁移脚本要把它们的初始 version 设成"全部 server"（保持原行为），新建 agent 才默认空。
+2. **MCP 默认收紧可能误伤现有 agent**：backfill 把存量 agent 的 v1 `mcp_server_ids` 设为 `NULL`（= 无 MCP 限制，保持原行为）；新建 agent 才可显式收紧到空列表。
 3. **session 元数据格式变化**：session JSON 结构改 → 兼容老格式：load 时若 `messages` 在顶层视为旧格式，自动包装。
 4. **active_version_id 切换的并发**：用 SQLite 单语句 `UPDATE agents SET active_version_id=? WHERE id=?` 原子完成；同一时刻读端不会看到中间状态。
 5. **HTTP API 表面积扩大**：所有写操作要求 admin。第一版不做审计日志（已有 eval_logger 覆盖请求层），但 `agent_versions.created_by_user_id` 记录谁创建了版本足够事后追溯。
 
 ## Migration Plan
 
-1. 加列：`ALTER TABLE agents ADD COLUMN active_version_id`、`deleted_at`；`users.is_admin`；`channel_agents.bound_version_id`。
-2. 建表：`agent_versions`。
-3. 一次性脚本：每个现存 agent 创建 version 1（mirror 现有 system_prompt / allowed_tools，mcp_server_ids = 所有当前注册的 server id，memory_namespace = 'default'）；写 `active_version_id`。
-4. `scripts/migrate_memories_to_namespace.py` 把每个 user 的 `memories.jsonl` 移到 `memories/default.jsonl`。
-5. 至少一个用户提权 `promote-admin` 后才能用新 HTTP API（CLI 不要求 admin，老人沿用 ssh + CLI）。
+1. Alembic 迁移 026：加列 `agents.active_version_id`、`channel_agents.bound_version_id`；建表 `agent_versions`。**users 表不变**。
+2. 同一迁移的 data migration 段：每个现存 agent 创建 version 1（mirror 现有 system_prompt / allowed_tools，`mcp_server_ids = NULL`，memory_namespace = 'default'）；写 `active_version_id`。幂等。
+3. `scripts/migrate_memories_to_namespace.py` 把每个 user 的 `memories.jsonl` 移到 `memories/default.jsonl`（幂等）。
+4. 用户提权用现有 `set-role <id> admin` 后才能用新 HTTP 写端点（读端 viewer+；CLI 沿用 ssh + admin CLI）。

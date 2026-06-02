@@ -56,20 +56,9 @@ When a session is created the system SHALL persist the `agent_version_id` select
 - **WHEN** version 3 is active and a brand-new session begins
 - **THEN** the session is bound to version 3 and persists `version_id=<v3 id>` in its metadata
 
-### Requirement: Soft delete preserves history
-`DELETE` operations on an agent SHALL set `agents.deleted_at` rather than removing rows. Lookups SHALL ignore soft-deleted agents by default.
-
-#### Scenario: Lookup excludes deleted agents
-- **WHEN** an agent has `deleted_at` set to a non-null timestamp
-- **THEN** `agent_store.get_by_name(name)` returns `None`
-
-#### Scenario: Listing with include_deleted flag
-- **WHEN** `agent_store.list_agents(include_deleted=True)` is called
-- **THEN** soft-deleted agents are included in the result with their `deleted_at` populated
-
 ### Requirement: Backfill version 1 for pre-existing agents
-On schema upgrade, every existing agent row that lacks an `active_version_id` SHALL be backfilled with a synthetic version 1 mirroring its current `system_prompt` and `allowed_tools`. To preserve prior behavior, the backfilled version SHALL set `mcp_server_ids` to the list of all currently registered MCP server ids (so existing agents do not lose access to MCP tools), `skills_dir = NULL`, `model_overrides = {}`, and `memory_namespace = "default"`.
+On schema upgrade, every existing agent row that lacks an `active_version_id` SHALL be backfilled with a synthetic version 1 mirroring its current `system_prompt` and `allowed_tools`. To preserve prior behavior the backfilled version SHALL set `mcp_server_ids = NULL` (interpreted at runtime as "no MCP restriction" so existing agents keep access to all MCP tools), `skills_dir = NULL`, `model_overrides = {}`, and `memory_namespace = "default"`.
 
-#### Scenario: Idempotent backfill on startup
-- **WHEN** the server starts against a database where `agents` rows exist with `active_version_id IS NULL`
-- **THEN** for each such row, a new `agent_versions(version=1)` row is inserted carrying the pre-change fields, `mcp_server_ids` lists every registered MCP server id at backfill time, and `active_version_id` is set; a subsequent restart performs no further mutations
+#### Scenario: Idempotent backfill on migration
+- **WHEN** the Alembic upgrade runs against a database where `agents` rows exist with `active_version_id IS NULL`
+- **THEN** for each such row a new `agent_versions(version=1)` row is inserted carrying the pre-change fields with `mcp_server_ids = NULL`, and `active_version_id` is set; re-running the data migration performs no further mutations

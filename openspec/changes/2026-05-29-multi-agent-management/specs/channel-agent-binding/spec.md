@@ -35,7 +35,9 @@ During message routing, the channel-level agent binding SHALL be checked before 
 - **WHEN** a message arrives in an unbound channel but the user is bound to an agent
 - **THEN** the user's agent is used
 
-### Requirement: channel_agents schema
+## ADDED Requirements
+
+### Requirement: channel_agents carries bound_version_id audit column
 The `channel_agents` table SHALL have columns: `id`, `platform` (TEXT), `channel_id` (TEXT), `agent_id` (INTEGER → agents.id), `bound_version_id` (INTEGER → agent_versions.id, nullable for legacy rows), `created_at`, with UNIQUE constraint on `(platform, channel_id)`.
 
 #### Scenario: Legacy row missing bound_version_id
