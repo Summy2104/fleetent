@@ -77,3 +77,38 @@ def test_route_config_fallbacks_immutable():
     cfg = RouteConfig(base_url="https://api.test.com", model="m", api_key_env="K", max_tokens=512)
     with pytest.raises((AttributeError, TypeError)):
         cfg.fallbacks = ("x",)  # type: ignore[misc]
+
+
+# --- per-call overrides (agent-resource-isolation) ---
+
+
+def test_async_overrides_layer_on_matching_task_type(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    _, cfg = get_async_client_and_config("default", overrides={"default": {"model": "gpt-4o-mini"}})
+    assert cfg.model == "gpt-4o-mini"
+    # other fields untouched
+    assert cfg.base_url == ROUTES["default"].base_url
+    assert cfg.max_tokens == ROUTES["default"].max_tokens
+    # global ROUTES is not mutated
+    assert ROUTES["default"].model == "claude-sonnet-4-5"
+
+
+def test_async_overrides_ignored_for_other_task_type(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    _, cfg = get_async_client_and_config(
+        "memory_extraction", overrides={"default": {"model": "gpt-4o-mini"}}
+    )
+    assert cfg == ROUTES["memory_extraction"]
+
+
+def test_sync_overrides_layer_on_matching_task_type(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    _, cfg = get_client_and_config("default", overrides={"default": {"max_tokens": 99}})
+    assert cfg.max_tokens == 99
+    assert cfg.model == ROUTES["default"].model
+
+
+def test_overrides_none_is_noop(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    _, cfg = get_async_client_and_config("default", overrides=None)
+    assert cfg == ROUTES["default"]

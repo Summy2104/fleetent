@@ -35,9 +35,9 @@
 
 ## 6. Per-agent 模型路由 overrides
 
-- [ ] 6.1 前置确认：`RouteConfig` 已 `frozen=True`（model_router.py），无需改造
-- [ ] 6.2 Write failing tests: `get_async_client_and_config("default", overrides={"default":{"model":"x"}})` 返回 `model="x"` 其它字段同 ROUTES；overrides 不含该 task_type 时不影响；`get_client_and_config` 同步版本同行为
-- [ ] 6.3 修改 `model_router.py`：两函数加 `overrides: dict | None = None`，用 `dataclasses.replace` 合并
+- [x] 6.1 前置确认：`RouteConfig` 已 `frozen=True`（model_router.py），无需改造
+- [x] 6.2 Write failing tests: `get_async_client_and_config("default", overrides={"default":{"model":"x"}})` 返回 `model="x"` 其它字段同 ROUTES；overrides 不含该 task_type 时不影响；`get_client_and_config` 同步版本同行为
+- [x] 6.3 修改 `model_router.py`：两函数加 `overrides: dict | None = None`，用 `dataclasses.replace` 合并
 
 ## 7. Per-agent memory namespace
 

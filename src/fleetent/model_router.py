@@ -5,7 +5,8 @@ maintains no state, and knows nothing about agents, tools, or memory.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import Any
 
 from openai import AsyncOpenAI, OpenAI
 
@@ -17,6 +18,18 @@ class RouteConfig:
     api_key_env: str
     max_tokens: int
     fallbacks: tuple[str, ...] = ()
+
+
+def _resolve_route(task_type: str, overrides: dict[str, dict[str, Any]] | None) -> RouteConfig:
+    """Pick the route for ``task_type`` and layer per-call overrides on top.
+
+    Overrides let a single agent run with its own model config without mutating
+    the global ``ROUTES`` table; only the requested task type's entry is applied.
+    """
+    route = ROUTES.get(task_type, ROUTES["default"])
+    if overrides and task_type in overrides:
+        route = replace(route, **overrides[task_type])
+    return route
 
 
 ROUTES: dict[str, RouteConfig] = {
@@ -38,9 +51,12 @@ ROUTES: dict[str, RouteConfig] = {
 }
 
 
-def get_client_and_config(task_type: str = "default") -> tuple[OpenAI, RouteConfig]:
+def get_client_and_config(
+    task_type: str = "default",
+    overrides: dict[str, dict[str, Any]] | None = None,
+) -> tuple[OpenAI, RouteConfig]:
     """Return (OpenAI client, route config) for the given task type."""
-    route = ROUTES.get(task_type, ROUTES["default"])
+    route = _resolve_route(task_type, overrides)
     api_key = os.environ.get(route.api_key_env)
     if not api_key:
         raise RuntimeError(f"Missing env var {route.api_key_env} for route '{task_type}'")
@@ -48,8 +64,11 @@ def get_client_and_config(task_type: str = "default") -> tuple[OpenAI, RouteConf
     return client, route
 
 
-def get_async_client_and_config(task_type: str = "default") -> tuple[AsyncOpenAI, RouteConfig]:
+def get_async_client_and_config(
+    task_type: str = "default",
+    overrides: dict[str, dict[str, Any]] | None = None,
+) -> tuple[AsyncOpenAI, RouteConfig]:
     """Return an async OpenAI client and route config for the given task type."""
-    cfg = ROUTES.get(task_type, ROUTES["default"])
+    cfg = _resolve_route(task_type, overrides)
     api_key = os.environ.get(cfg.api_key_env, "")
     return AsyncOpenAI(base_url=cfg.base_url, api_key=api_key), cfg
