@@ -45,10 +45,10 @@
 - [x] 4.2 实现 `/admin/providers/routes` 编排端点（增删 / 调序某 task_type 的 provider 列表，经配置写入边界，写审计；运行语义以 model-router 为准，不重算）
 - [x] 4.3 Write failing tests: 未为某 task_type 配 provider 时 UI 明示运行时回落 `default`、不报错（场景 117）
 - [x] 4.4 实现未知 task_type 回落明示（只呈现回落规则，不重算路由）
-- [ ] 4.5 Write failing tests: fallback 链预演返回 `[primary, ...fallbacks]` 顺序 + 模拟逐级回退；不发真实模型调用
-- [ ] 4.6 实现 `/admin/providers/routes/{task_type}/preview`（只读演示）
-- [ ] 4.7 Write failing tests: mock model-router 健康探针缓存，展示某 provider 暂不可用 / fallback 跳过 / 恢复时间
-- [ ] 4.8 实现健康探针状态视图（消费 model-router 缓存，状态不在本面重算）
+- [x] 4.5 Write failing tests: fallback 链预演返回 `[primary, ...fallbacks]` 顺序 + 模拟逐级回退；不发真实模型调用
+- [x] 4.6 实现 `/admin/providers/routes/{task_type}/preview`（只读演示）
+- [x] 4.7 Write failing tests: mock model-router 健康探针缓存，展示某 provider 暂不可用 / fallback 跳过 / 恢复时间
+- [x] 4.8 实现健康探针状态视图（消费 model-router 缓存，状态不在本面重算）
 
 ## 5. 模型单价表（未配显示「未配置」）
 
@@ -65,6 +65,6 @@
 ## 7. server 接线 + 收尾
 
 - [x] 7.1 改 `server.py`：mount `provider_admin_api.router`
-- [ ] 7.2 全量 `uv run pytest -x -q` 绿
-- [ ] 7.3 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过
-- [ ] 7.4 手动冒烟：新增 provider(key 脱敏)→ 连通性测试(可达/延迟/模型标识, 不计用量)→ 挂到 task_type 路由调 fallback 顺序写审计 → 未知 task_type 回落明示 → fallback 链预演 → 健康探针状态可见 → 维护单价(未配显示「未配置」)→ 按 provider·model 观测 → 删除 provider 写审计 → viewer 全程只读 403
+- [x] 7.2 全量 `uv run pytest -x -q` 绿
+- [x] 7.3 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过
+- [x] 7.4 手动冒烟：新增 provider(key 脱敏)→ 连通性测试(可达/延迟/模型标识, 不计用量)→ 挂到 task_type 路由调 fallback 顺序写审计 → 未知 task_type 回落明示 → fallback 链预演 → 健康探针状态可见 → 维护单价(未配显示「未配置」)→ 按 provider·model 观测 → 删除 provider 写审计 → viewer 全程只读 403

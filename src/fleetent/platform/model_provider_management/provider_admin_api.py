@@ -44,8 +44,21 @@ def router_connectivity_test(provider: dict[str, Any]) -> dict[str, Any]:
 
 
 def router_health_probe() -> dict[str, Any]:
-    """Health-probe cache (which providers are temporarily down). Placeholder."""
+    """Health-probe cache (which providers are temporarily down). Placeholder.
+
+    Maps ``provider_id -> {"available": bool, "recovers_at": str | None}``.
+    A provider absent from the cache is treated as available. The cache is owned
+    by model-router; this face only reads it, never recomputes health here.
+    """
     return {}
+
+
+def _health_of(cache: dict[str, Any], provider_id: str) -> tuple[bool, str | None]:
+    """Read a provider's availability from the probe cache (absent = available)."""
+    entry = cache.get(provider_id)
+    if entry is None:
+        return True, None
+    return bool(entry.get("available", True)), entry.get("recovers_at")
 
 
 def provider_observability(provider_id: str) -> dict[str, Any]:
@@ -170,14 +183,50 @@ def preview_route(task_type: str, authorization: str | None = Header(None)) -> d
     chain = provider_admin_store.get_route_providers(task_type)
     if not chain:
         # model-router falls back to "default" at runtime when a task_type is unconfigured.
-        return {"task_type": task_type, "chain": [], "falls_back_to": _DEFAULT_TASK_TYPE}
-    return {"task_type": task_type, "chain": chain, "falls_back_to": None}
+        return {
+            "task_type": task_type,
+            "chain": [],
+            "falls_back_to": _DEFAULT_TASK_TYPE,
+            "simulation": [],
+            "selected": None,
+        }
+    # Walk the chain against the health cache (read-only): the first available
+    # provider is selected, earlier down providers are skipped. No real model call.
+    cache = router_health_probe()
+    simulation: list[dict[str, Any]] = []
+    selected: str | None = None
+    for provider_id in chain:
+        available, recovers_at = _health_of(cache, provider_id)
+        if available and selected is None:
+            action, selected = "selected", provider_id
+        else:
+            action = "skip"
+        simulation.append(
+            {
+                "provider": provider_id,
+                "status": "up" if available else "down",
+                "action": action,
+                "recovers_at": recovers_at,
+            }
+        )
+    return {
+        "task_type": task_type,
+        "chain": chain,
+        "falls_back_to": None,
+        "simulation": simulation,
+        "selected": selected,
+    }
 
 
 @router.get("/health")
 def health(authorization: str | None = Header(None)) -> dict[str, Any]:
     _current_user(authorization)
-    return router_health_probe()
+    cache = router_health_probe()
+    providers = []
+    for p in provider_admin_store.list_providers():
+        available, recovers_at = _health_of(cache, p["id"])
+        providers.append({"id": p["id"], "available": available, "recovers_at": recovers_at})
+    return {"providers": providers}
 
 
 # --- provider list / CRUD -----------------------------------------------------

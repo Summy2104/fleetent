@@ -165,6 +165,95 @@ def test_configured_task_type_preview_chain(client):
     assert r.json()["falls_back_to"] is None
 
 
+# --- fallback chain progressive simulation (4.5/4.6) -------------------------
+
+
+def test_preview_simulation_skips_down_provider(client, monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "router_health_probe",
+        lambda: {"a": {"available": False, "recovers_at": "2026-06-02T10:00:00Z"}},
+    )
+    token, _ = _session_for("admin")
+    _add(client, token, pid="a")
+    _add(client, token, pid="b")
+    client.put(
+        "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
+    )
+    r = client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
+    body = r.json()
+    assert body["chain"] == ["a", "b"]
+    sim = body["simulation"]
+    assert [s["provider"] for s in sim] == ["a", "b"]
+    assert sim[0]["status"] == "down"
+    assert sim[0]["action"] == "skip"
+    assert sim[0]["recovers_at"] == "2026-06-02T10:00:00Z"
+    assert sim[1]["status"] == "up"
+    assert sim[1]["action"] == "selected"
+    assert body["selected"] == "b"
+
+
+def test_preview_simulation_all_down_selects_none(client, monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "router_health_probe",
+        lambda: {
+            "a": {"available": False, "recovers_at": None},
+            "b": {"available": False, "recovers_at": None},
+        },
+    )
+    token, _ = _session_for("admin")
+    _add(client, token, pid="a")
+    _add(client, token, pid="b")
+    client.put(
+        "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
+    )
+    r = client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
+    body = r.json()
+    assert body["selected"] is None
+    assert all(s["action"] == "skip" for s in body["simulation"])
+
+
+def test_preview_simulation_empty_cache_selects_primary(client):
+    token, _ = _session_for("admin")
+    _add(client, token, pid="a")
+    _add(client, token, pid="b")
+    client.put(
+        "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
+    )
+    r = client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
+    body = r.json()
+    assert body["selected"] == "a"
+    assert body["simulation"][0]["action"] == "selected"
+
+
+# --- health probe state view (4.7/4.8) --------------------------------------
+
+
+def test_health_view_shows_down_provider_and_recovery(client, monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "router_health_probe",
+        lambda: {"a": {"available": False, "recovers_at": "2026-06-02T10:00:00Z"}},
+    )
+    token, _ = _session_for("admin")
+    _add(client, token, pid="a")
+    _add(client, token, pid="b")
+    r = client.get("/admin/providers/health", headers=_hdr(token))
+    body = r.json()
+    providers = {p["id"]: p for p in body["providers"]}
+    assert providers["a"]["available"] is False
+    assert providers["a"]["recovers_at"] == "2026-06-02T10:00:00Z"
+    assert providers["b"]["available"] is True  # not in cache → available
+    assert providers["b"]["recovers_at"] is None
+
+
+def test_health_view_viewer_can_read(client):
+    token, _ = _session_for("viewer")
+    r = client.get("/admin/providers/health", headers=_hdr(token))
+    assert r.status_code == 200
+
+
 # --- pricing: unset shows 未配置, not 0 (场景 118) ---------------------------
 
 
