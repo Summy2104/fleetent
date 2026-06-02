@@ -112,6 +112,100 @@ async def test_run_returns_empty_string_when_content_is_none(mock_client):
     assert result == ""
 
 
+async def test_run_records_agent_run_started_trace(mock_client, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+
+    await al.run(
+        [{"role": "user", "content": "hi"}],
+        user_id="user-1",
+        agent_name="support-bot",
+    )
+
+    started = next(event for event in events if event.event_type == "agent_run_started")
+    assert started.user_id == "user-1"
+    assert started.agent_id == "support-bot"
+    assert started.payload == {
+        "user_id": "user-1",
+        "agent_name": "support-bot",
+        "entrypoint": "run",
+    }
+
+
+async def test_run_records_agent_run_failed_trace(mock_client, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(side_effect=RuntimeError("boom"))
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+
+    with pytest.raises(RuntimeError):
+        await al.run([{"role": "user", "content": "hi"}], user_id="user-1")
+
+    failed = next(event for event in events if event.event_type == "agent_run_failed")
+    assert failed.user_id == "user-1"
+    assert failed.payload["entrypoint"] == "run"
+    assert failed.payload["error_type"] == "RuntimeError"
+    assert failed.payload["error_message"] == "boom"
+    assert isinstance(failed.payload["elapsed_s"], float)
+
+
+async def test_run_records_llm_call_started_and_completed(mock_client, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+    monkeypatch.setattr(
+        al,
+        "get_schemas",
+        lambda: [
+            {"type": "function", "function": {"name": "get_time"}},
+            {"type": "function", "function": {"name": "calculate"}},
+        ],
+    )
+
+    await al.run([{"role": "user", "content": "hi"}])
+
+    started = next(event for event in events if event.event_type == "llm_call_started")
+    completed = next(event for event in events if event.event_type == "llm_call_completed")
+    assert started.payload == {
+        "model": "test-model",
+        "task_type": "default",
+        "streaming": False,
+        "message_count": 1,
+        "tool_schema_count": 2,
+    }
+    assert completed.payload["model"] == "test-model"
+    assert completed.payload["finish_reason"] == "stop"
+    assert completed.payload["tokens"] == {
+        "prompt": mock_client.chat.completions.create.return_value.usage.prompt_tokens,
+        "completion": mock_client.chat.completions.create.return_value.usage.completion_tokens,
+        "total": mock_client.chat.completions.create.return_value.usage.total_tokens,
+    }
+    assert isinstance(completed.payload["elapsed_s"], float)
+
+
+async def test_run_records_llm_call_failed(mock_client, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(side_effect=RuntimeError("provider down"))
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+
+    with pytest.raises(RuntimeError):
+        await al.run([{"role": "user", "content": "hi"}])
+
+    failed = next(event for event in events if event.event_type == "llm_call_failed")
+    assert failed.payload["model"] == "test-model"
+    assert failed.payload["error_type"] == "RuntimeError"
+    assert failed.payload["error_message"] == "provider down"
+    assert isinstance(failed.payload["elapsed_s"], float)
+
+
 async def test_run_dispatches_tool_then_gets_final_reply(mock_client):
     dispatched: list[str] = []
 
@@ -129,6 +223,160 @@ async def test_run_dispatches_tool_then_gets_final_reply(mock_client):
     assert result == "it is noon"
     assert dispatched == ["get_time"]
     assert mock_client.chat.completions.create.call_count == 2
+
+
+async def test_run_records_tool_call_started_and_completed(mock_client, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_tool_resp("get_time", '{"timezone":"UTC"}'), _text_resp("done")]
+    )
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+    monkeypatch.setattr(al, "get_risk_level", lambda name: "none")
+    monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: "tool result")
+
+    await al.run([{"role": "user", "content": "what time?"}])
+
+    started = next(event for event in events if event.event_type == "tool_call_started")
+    completed = next(event for event in events if event.event_type == "tool_call_completed")
+    assert started.payload["tool_name"] == "get_time"
+    assert started.payload["tool_call_id"] == "tc-1"
+    assert started.payload["risk_level"] == "none"
+    assert started.payload["argument_summary"]["keys"] == ["timezone"]
+    assert completed.payload["tool_name"] == "get_time"
+    assert completed.payload["tool_call_id"] == "tc-1"
+    assert completed.payload["result_summary"]["length"] == len("tool result")
+    assert isinstance(completed.payload["elapsed_s"], float)
+
+
+async def test_run_records_tool_call_failed(mock_client, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(side_effect=[_tool_resp("get_time")])
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+    monkeypatch.setattr(al, "get_risk_level", lambda name: "none")
+
+    def fail_dispatch(name: str, args: str, **kw) -> str:
+        raise ValueError("bad tool")
+
+    monkeypatch.setattr(al, "dispatch", fail_dispatch)
+
+    with pytest.raises(ValueError):
+        await al.run([{"role": "user", "content": "what time?"}])
+
+    failed = next(event for event in events if event.event_type == "tool_call_failed")
+    assert failed.payload["tool_name"] == "get_time"
+    assert failed.payload["tool_call_id"] == "tc-1"
+    assert failed.payload["error_type"] == "ValueError"
+    assert failed.payload["error_message"] == "bad tool"
+    assert isinstance(failed.payload["elapsed_s"], float)
+
+
+async def test_run_records_permission_requested_and_resolved(mock_client, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_tool_resp("write_file", '{"path":"x"}'), _text_resp("done")]
+    )
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+    monkeypatch.setattr(al, "get_risk_level", lambda name: "medium")
+    monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: "written")
+    monkeypatch.setattr(
+        al._default_gate,
+        "request_approval",
+        AsyncMock(return_value="approved"),
+    )
+
+    async def reply_func(message: str) -> None:
+        return None
+
+    await al.run([{"role": "user", "content": "write"}], user_id="user-1", reply_func=reply_func)
+
+    requested = next(event for event in events if event.event_type == "permission_requested")
+    resolved = next(event for event in events if event.event_type == "permission_resolved")
+    assert requested.payload["tool_name"] == "write_file"
+    assert requested.payload["risk_level"] == "medium"
+    assert requested.payload["requester_user_id"] == "user-1"
+    assert requested.payload["approval_id"]
+    assert resolved.payload["approval_id"] == requested.payload["approval_id"]
+    assert resolved.payload["decision"] == "approved"
+    assert isinstance(resolved.payload["elapsed_s"], float)
+
+
+async def test_run_records_context_compression_completed(mock_client, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+
+    def compress(messages):
+        return [messages[0], messages[-1]]
+
+    monkeypatch.setattr(al, "maybe_compress", compress)
+
+    await al.run(
+        [
+            {"role": "system", "content": "sys"},
+            {"role": "assistant", "content": "old"},
+            {"role": "user", "content": "hi"},
+        ]
+    )
+
+    compressed = next(
+        event for event in events if event.event_type == "context_compression_completed"
+    )
+    assert compressed.payload["reason"] == "runtime_message_compression"
+    assert compressed.payload["before_message_count"] == 3
+    assert compressed.payload["after_message_count"] == 2
+    assert isinstance(compressed.payload["elapsed_s"], float)
+
+
+async def test_run_records_final_reply_emitted(mock_client, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("final answer"))
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+
+    await al.run([{"role": "user", "content": "hi"}])
+
+    final = next(event for event in events if event.event_type == "final_reply_emitted")
+    assert final.payload["reply_length"] == len("final answer")
+    assert isinstance(final.payload["elapsed_s"], float)
+
+
+async def test_run_runtime_events_share_run_id(mock_client, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_tool_resp("get_time"), _text_resp("done")]
+    )
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+    monkeypatch.setattr(al, "get_risk_level", lambda name: "none")
+    monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: "tool result")
+
+    await al.run([{"role": "user", "content": "what time?"}])
+
+    runtime_events = [
+        event
+        for event in events
+        if event.event_type
+        in {
+            "agent_run_started",
+            "llm_call_started",
+            "llm_call_completed",
+            "tool_call_started",
+            "tool_call_completed",
+            "final_reply_emitted",
+            "agent_run_completed",
+        }
+    ]
+    assert len({event.run_id for event in runtime_events}) == 1
 
 
 async def test_run_is_sub_agent_filters_sub_agent_from_schemas(mock_client):
@@ -330,6 +578,25 @@ async def test_run_stream_done_on_empty_response(mock_client):
     assert done[0]["content"] == ""
 
 
+async def test_run_stream_records_agent_run_started_trace(mock_client, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok"))
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+
+    [_ async for _ in al.run_stream("hi", user_id="user-1", agent_name="support-bot")]
+
+    started = next(event for event in events if event.event_type == "agent_run_started")
+    assert started.user_id == "user-1"
+    assert started.agent_id == "support-bot"
+    assert started.payload == {
+        "user_id": "user-1",
+        "agent_name": "support-bot",
+        "entrypoint": "run_stream",
+    }
+
+
 async def test_run_stream_tool_call_yields_tool_events(mock_client):
     async def tool_stream():
         c = MagicMock()
@@ -364,6 +631,84 @@ async def test_run_stream_tool_call_yields_tool_events(mock_client):
 
     tool_event = next(e for e in events if e["type"] == "tool_call")
     assert tool_event["name"] == "get_time"
+
+
+async def test_run_stream_records_tool_call_started_and_completed(mock_client, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    async def tool_stream():
+        c = MagicMock()
+        c.choices = [MagicMock()]
+        c.choices[0].delta.content = None
+        tc_delta = MagicMock()
+        tc_delta.index = 0
+        tc_delta.id = "tc-1"
+        tc_delta.function.name = "get_time"
+        tc_delta.function.arguments = '{"timezone":"UTC"}'
+        c.choices[0].delta.tool_calls = [tc_delta]
+        c.choices[0].finish_reason = "tool_calls"
+        yield c
+
+    async def text_stream():
+        c = MagicMock()
+        c.choices = [MagicMock()]
+        c.choices[0].delta.content = "12:00"
+        c.choices[0].delta.tool_calls = None
+        c.choices[0].finish_reason = "stop"
+        yield c
+
+    mock_client.chat.completions.create = AsyncMock(side_effect=[tool_stream(), text_stream()])
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+    monkeypatch.setattr(al, "get_risk_level", lambda name: "none")
+    monkeypatch.setattr(al, "dispatch", lambda name, args: "tool result")
+
+    [_ async for _ in al.run_stream("what time?")]
+
+    started = next(event for event in events if event.event_type == "tool_call_started")
+    completed = next(event for event in events if event.event_type == "tool_call_completed")
+    assert started.payload["tool_name"] == "get_time"
+    assert started.payload["tool_call_id"] == "tc-1"
+    assert started.payload["argument_summary"]["keys"] == ["timezone"]
+    assert completed.payload["result_summary"]["length"] == len("tool result")
+
+
+async def test_run_stream_records_final_reply_emitted(mock_client, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("hel", "lo"))
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+
+    [_ async for _ in al.run_stream("say hello")]
+
+    final = next(event for event in events if event.event_type == "final_reply_emitted")
+    assert final.payload["reply_length"] == len("hello")
+    assert isinstance(final.payload["elapsed_s"], float)
+
+
+async def test_run_stream_runtime_events_share_run_id(mock_client, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok"))
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+
+    [_ async for _ in al.run_stream("say hello")]
+
+    runtime_events = [
+        event
+        for event in events
+        if event.event_type
+        in {
+            "agent_run_started",
+            "llm_call_started",
+            "llm_call_completed",
+            "final_reply_emitted",
+            "agent_run_completed",
+        }
+    ]
+    assert len({event.run_id for event in runtime_events}) == 1
 
 
 async def test_run_stream_injects_long_term_context_before_model_call(mock_client, monkeypatch):
@@ -678,6 +1023,26 @@ async def test_run_falls_back_on_429(mock_client_fb):
     assert calls[1].kwargs["model"] == "fallback-model"
 
 
+async def test_run_records_model_fallback_triggered(mock_client_fb, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client_fb.chat.completions.create = AsyncMock(
+        side_effect=[_mk_http_error(429, RateLimitError), _text_resp("fallback reply")]
+    )
+    events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", events.append)
+
+    await al.run([{"role": "user", "content": "hi"}])
+
+    fallback = next(event for event in events if event.event_type == "model_fallback_triggered")
+    assert fallback.payload == {
+        "from_model": "primary-model",
+        "to_model": "fallback-model",
+        "reason": "RateLimitError: rate limit",
+        "attempt_index": 1,
+    }
+
+
 async def test_run_falls_back_on_503(mock_client_fb):
     mock_client_fb.chat.completions.create = AsyncMock(
         side_effect=[_mk_http_error(503), _text_resp("ok")]
@@ -722,6 +1087,25 @@ async def test_run_stream_exhausted_yields_error(mock_client_fb):
     )
     events = [e async for e in al.run_stream("hi")]
     assert any(e["type"] == "error" for e in events)
+
+
+async def test_run_stream_records_agent_run_failed_trace(mock_client_fb, monkeypatch):
+    from fleetent.observability import TraceEvent
+
+    mock_client_fb.chat.completions.create = AsyncMock(
+        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+    )
+    trace_events: list[TraceEvent] = []
+    monkeypatch.setattr(al, "record_trace_event", trace_events.append)
+
+    [_ async for _ in al.run_stream("hi", user_id="user-1")]
+
+    failed = next(event for event in trace_events if event.event_type == "agent_run_failed")
+    assert failed.user_id == "user-1"
+    assert failed.payload["entrypoint"] == "run_stream"
+    assert failed.payload["error_type"] == "RateLimitError"
+    assert "rate limit" in failed.payload["error_message"]
+    assert isinstance(failed.payload["elapsed_s"], float)
 
 
 # ── agent trace fields: user_id, agent_name, streaming usage ─────────────────

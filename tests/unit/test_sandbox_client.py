@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fleetent.sandbox_client import SandboxClient
+from fleetent.integrations.sandbox import SandboxClient
 
 
 def _mock_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> MagicMock:

@@ -14,7 +14,7 @@ long-term-ctx 仍可基于 memory 正常工作。
 **不负责**：存储任何数据、记忆提取（→ memory）、文档索引（→ knowledge_base）、in-session 上下文压缩（→ context_mgr）、trace 持久化（→ observability）。
 
 **调用关系**：
-- 依赖：memory_layer（search）、knowledge_base optional provider（search）、config（token 预算上限）
+- 依赖：memory_layer（search）、knowledge_base optional provider（resolve_agent_kb_ids / search）、config（token 预算上限和来源分配策略）
 - 被依赖：agent_loop（每次对话开始前调用）
 
 **模块归属**：
@@ -30,17 +30,19 @@ flowchart TD
     A[agent_loop 调用 build_context] --> B[并行检索]
     B --> C[memory_layer.search]
     B --> D{knowledge provider\n已启用?}
-    D -->|是| E[knowledge_base.search\n向量检索]
+    D -->|是| S[knowledge_base.resolve_agent_kb_ids\n解析 agent KB 范围]
+    S --> E[knowledge_base.search\n只检索解析出的 KB]
     D -->|否| F[空 knowledge 结果]
     C --> G[合并结果]
     E --> G
     F --> G
-    G --> H[按相关度排序，memory 条目优先]
-    H --> I{超出 token 预算？}
-    I -->|是| J[截断低优先级条目]
-    I -->|否| K[格式化为注入文本]
-    J --> K
+    G --> H[按 query intent 和配置决定 memory / knowledge 优先级]
+    H --> I[应用 source top-k、source budget 和 total budget]
+    I --> J{候选是否可注入？}
+    J -->|否| M[记录排除原因]
+    J -->|是| K[格式化为注入文本]
     K --> L[返回 BuiltContext\ntext + sources]
+    M --> L
 ```
 
 ## 接口定义
@@ -52,12 +54,31 @@ class ContextSource:
     source_id: str
     score: float
     metadata: dict[str, str]
+    token_estimate: int = 0
+
+
+@dataclass
+class BudgetDecision:
+    source_type: str
+    source_id: str
+    token_estimate: int
+    reason: str  # included | below_relevance_threshold | source_top_k_exceeded | source_budget_exceeded | total_budget_exceeded | zero_available_tokens
+    included: bool
+
+
+@dataclass
+class BudgetMetadata:
+    effective_budget: int
+    memory_used_tokens: int
+    knowledge_used_tokens: int
+    decisions: list[BudgetDecision]
 
 
 @dataclass
 class BuiltContext:
     text: str
     sources: list[ContextSource]
+    budget_metadata: BudgetMetadata
 
 
 async def build_context(
@@ -84,11 +105,15 @@ async def build_context(
 - `BuiltContext`、`ContextSource`、`build_context(user_id, query, agent_id, available_tokens)` public API
 - memory-layer semantic search 接入
 - knowledge-base provider 接入；KB 未启用、未配置或无结果时不阻塞 memory 注入
+- knowledge-base provider 通过 `resolve_agent_kb_ids()` 获取 agent 有效 KB 范围；没有显式绑定时只回退默认 KB，空范围时不调用 search
 - token budget 基础截断
+- 可解释 budget policy：effective budget、memory / KB source budget、source top-k、query intent / explicit conflict preference
 - agent-runtime 在 `run()` / `run_stream()` / `run_sync()` 构造 prompt 前调用 long-term-ctx
-- `BuiltContext.sources` 供 observability source attribution 记录
+- `BuiltContext.sources` 供 observability source attribution 记录；`BudgetMetadata.decisions` 记录 included / excluded 的来源、token estimate 和原因
+- deterministic evaluation fixture / runner 覆盖 memory-only、KB-only、mixed injection 和低预算 omission
+- real-provider smoke 仅在 `FLEETENT_EVAL_REAL_LONG_TERM_CONTEXT=1` 且凭据完整时手动运行；默认 skip
 
-当前定位：已恢复长期上下文注入链路，但上下文选择策略仍处于基础阶段。
+当前定位：已恢复长期上下文注入链路，并有基础 evaluation 回归；budget policy 已具备 deterministic contract，后续重点是 agent / tenant 级策略和真实 token estimator。
 
 ## 规划中（v1.0）
 
@@ -96,38 +121,45 @@ async def build_context(
   - knowledge_base 未启用、未配置或返回空结果时不影响 memory 注入
   - graph_search 暂不接入，等 knowledge-base graph search spec 再定义
 
-- [x] **优先级合并**：memory 条目优先于 knowledge 条目
-  - 同等相关度时，用户个人记忆排在通用文档前
+- [x] **优先级合并**：默认根据 query intent 在 memory / knowledge 间选择优先级
+  - 个人偏好 / 历史类 query 优先 memory
+  - 事实 / 参考类 query 优先 knowledge
+  - `long_term_ctx.conflict_preference` 可显式指定 `auto` / `memory` / `knowledge`
 
 - [x] **token 预算控制**：注入文本总量不超过 config 配置的上限
-  - 超出时从低优先级截断，保证高相关内容优先注入
+  - 支持 `memory_max_tokens`、`knowledge_max_tokens`、`memory_top_k`、`knowledge_top_k`
+  - 排除来源记录 `below_relevance_threshold`、`source_top_k_exceeded`、`source_budget_exceeded` 或 `total_budget_exceeded`
 
 - [x] **格式化输出**：将两类结果分区段格式化
   - memory 区段：用户相关事实
   - knowledge 区段：相关文档片段
   - 任意一侧无结果时省略对应区段，不输出空占位
 
+- [x] **evaluation 基线**：`tests/evaluation/test_long_term_context_eval.py` 使用 fake provider 验证注入行为
+  - 默认不调用真实 LLM、embedding、KB connector 或 SaaS
+  - fixture 使用 expected / forbidden text 和 source assertions 回归质量变化
+
 ## 当前缺口
 
-- KB provider 已接入当前 knowledge-base search；尚未支持 agent 到多个 KB 的绑定策略。
-- token budget 仍偏粗：缺少真实 token estimator、分段截断和更细的优先级策略。
-- memory / knowledge 的比例分配还未验证。
+- KB provider 已接入 agent 到多个 KB 的绑定策略；尚未支持 agent / tenant 级 memory 与 KB budget 策略。
+- token 估算仍使用 deterministic 近似值，尚未接入真实 tokenizer。
+- memory / knowledge 的默认比例已可配置，但尚未做 agent / tenant 级策略。
 - 格式模板未产品化，缺少不同 agent / tenant 的可配置策略。
 - graph_search 未接入。
 
 ## 下一批候选 specs
 
-- `long-term-context-evaluation`
-- `long-term-context-budget-policy`
 - `long-term-context-template-config`
+- `long-term-context-agent-tenant-policy`
 - `knowledge-provider-contract`
+- `long-term-context-real-tokenizer`
 
-## 自动化效果验证缺口
+## 自动化效果验证
 
-- 构造 query + memory fixture，评估注入内容是否提升回答质量。
-- 验证过多 memory 时预算截断是否保留高价值信息。
-- 验证无 KB、空 memory、低预算等降级路径。
-- 后续 KB 接入后，评估 memory 与 knowledge 混合注入的收益和干扰。
+- 已有 deterministic fixture 验证 memory-only、KB-only、memory + KB 混合注入和低预算 omission。
+- 默认 evaluation 使用 fake provider，不依赖真实外部服务，不触碰 `data/`。
+- 真实 provider smoke 保持手动 opt-in；缺凭据或未设置 `FLEETENT_EVAL_REAL_LONG_TERM_CONTEXT=1` 时 skip。
+- 尚未做 LLM-graded answer-quality evaluation；如需要，必须单独 spec 并显式 opt-in。
 
 ## 服务化 / 目录边界判断
 
@@ -144,7 +176,7 @@ memory / knowledge / observability 的接口，未来可以独立成 package，�
 **场景 2：token 预算截断**
 - Given：memory 和 knowledge_base 检索结果合计超出 token 预算上限
 - When：build_context 合并结果
-- Then：BuiltContext.text 不超过预算上限，memory 条目优先保留，knowledge 条目被截断
+- Then：BuiltContext.text 不超过预算上限，按 query intent / config 选择优先来源，未注入来源在 BudgetMetadata 中记录排除原因
 
 **场景 3：单侧无结果**
 - Given：knowledge_base 无与当前 query 相关的内容
@@ -159,7 +191,7 @@ memory / knowledge / observability 的接口，未来可以独立成 package，�
 **场景 5：可用 token 预算为零**
 - Given：agent_loop 当前 context 已接近上限，传入 `available_tokens=0`
 - When：build_context 调用
-- Then：不发起任何检索，直接返回空 text 和空 sources；agent_loop 正常继续，不因注入失败报错
+- Then：不发起任何检索，直接返回空 text 和空 sources，并记录 `zero_available_tokens`；agent_loop 正常继续，不因注入失败报错
 
 ## 测试边界
 
@@ -171,9 +203,15 @@ memory / knowledge / observability 的接口，未来可以独立成 package，�
 - 格式化输出：memory 区段和 knowledge 区段分区正确，无结果或 disabled provider 的区段不出现在输出中
 - 来源摘要：返回 sources 仅包含被实际注入的结果，供 agent-runtime 交给 observability 记录
 
+**需要 evaluation 测试的行为**：
+- fixture schema：缺少必需字段或 source assertion 格式非法时失败
+- deterministic runner：fake memory / knowledge provider 输入能产生 expected text 和 expected sources
+- forbidden assertions：不应注入的 text/source 不出现在 BuiltContext 中
+- smoke guard：真实 provider smoke 默认 skip，只有显式环境变量和凭据完整时运行
+
 **需要 mock 的依赖**：
 - `memory_layer.search`：隔离 memory 模块，控制返回内容和数量
-- `knowledge_base.search` 或 null provider：隔离 knowledge_base 模块
+- `knowledge_base.resolve_agent_kb_ids` / `knowledge_base.search` 或 null provider：隔离 knowledge_base 模块
 - `config`：注入测试用 token 预算上限
 
 ## 待决问题

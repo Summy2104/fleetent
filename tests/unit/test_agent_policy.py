@@ -1,4 +1,4 @@
-from fleetent.agent_policy import check_tool_access
+from fleetent.governance.agent_policy import check_tool_access
 
 
 def test_exact_match():

@@ -7,6 +7,7 @@
 让 fleetent 的运行状态、agent 执行轨迹、成本与质量信号可查、可分析、可排障。面向工程师、运维人员、管理员和后续 reflection 系统，不面向最终用户。
 
 **负责**：结构化程序日志、agent run traces、来源归因摘要、用量 / 性能统计查询、启动诊断与脱敏基线。
+还包括 Pilot 运维使用的本地脱敏 diagnostics export，以及手动 diagnostics retention dry-run / apply。
 
 **不负责**：业务逻辑正确性（→ agent-runtime / 各业务模块）、资源监控与告警通知 UI（→ platform）、基础设施采集器（→ deployment / platform）、外部 APM / OTel 集成（后续独立评估）。
 
@@ -19,6 +20,7 @@
 - public API：
   - logs：`get_logger(component)`
   - traces：`record_trace_event(event)`、`query_trace_events(query)`、`record_injected_context(run_id, sources)`
+  - summaries：`get_usage_summary(query)`、`get_performance_summary(query)`
 - owned tables：`traces`；后续 `audit_events` / `usage_rollups` 如落库也由 observability owns
 - config namespace：`observability.*`
 
@@ -188,9 +190,16 @@ def get_logger(component: str) -> Logger:
 - 删除旧 JSONL trace API 和 `fleetent.eval_logger` shim，不保留向后兼容
 - agent run completion trace：`agent_run_completed`
 - usage summary：按 user / agent / tenant / session / time / model 聚合
+- performance summary：按 user / agent / tenant / session / time 聚合 run、LLM、fallback、tool 和
+  permission 等运行性能指标
 - source attribution：`InjectedContextTrace`、`record_injected_context()`、`injected_context` event
+- knowledge-base scope diagnostics：agent 没有显式 KB 绑定且默认 KB 为空时记录 `knowledge_base.agent_kb_scope_empty`
+- admin query CLI：`fleetent-admin observability traces|usage|performance` 提供 run trace、用量和性能排障入口
+- diagnostics export / retention：`export_diagnostics()` 生成本地脱敏诊断包，包含 logs、traces、usage / performance
+  summary、connector 配置摘要和 latest status；`plan_diagnostics_retention()` /
+  `apply_diagnostics_retention()` 只处理 logs、traces 和 diagnostics export 包，默认 disabled，不清理业务数据或备份
 - observability contract tests：覆盖 agent run 的 `injected_context` / `agent_run_completed` 事件链路、
-  source attribution payload safety、trace query 和 usage aggregation contract
+  source attribution payload safety、trace query、usage aggregation 和 performance aggregation contract
 
 当前定位：具备基础日志、trace、usage 和来源归因能力，但还不是完整的 request trace / APM 系统。
 
@@ -222,16 +231,17 @@ def get_logger(component: str) -> Logger:
 
 - [x] **统一 TraceEvent API**：`record_trace_event()` / `query_trace_events()` / `TraceQuery`
   - reflection 和 platform 不直接读表或文件
-  - 支持按 run / user / agent / tenant / event_type / time range 查询
+  - 支持按 run / user / agent / session / tenant / event_type / time range 查询
   - `log` 命名只留给 structured logging，不再用于 agent trace
 
 - [ ] **轻量 span 关联**：记录 `run_id`、`span_id`、`parent_span_id`
   - 不引入 OpenTelemetry SDK
   - sub_agent 继承父 `run_id` 并生成子 span
 
-- [ ] **运行事件覆盖**：记录用户输入、LLM 调用、工具调用、fallback、审批、上下文压缩、最终回复
+- [x] **运行事件覆盖**（`observability-runtime-event-coverage`）：记录 run lifecycle、LLM 调用、工具调用、fallback、审批、上下文压缩、最终回复
   - 大 payload 可截断并写入截断标记
   - 工具参数 / 返回值写入前脱敏
+  - 只定义 runtime event 覆盖，不在本阶段实现 performance rollup API
 
 ### P0-C：source attribution summary
 
@@ -250,31 +260,34 @@ def get_logger(component: str) -> Logger:
 ### P1：metrics / usage
 
 - [x] **用量查询**：从 `traces` 聚合 per-user、per-agent、per-session、global token 用量
-- [ ] **性能统计**：从 `traces` 聚合 LLM 耗时、工具耗时、错误率、fallback 次数
+- [x] **性能统计**（`observability-performance-summary`）：从 trace events 聚合 LLM 耗时、工具耗时、错误率、fallback 次数和审批等待耗时
+  - 先提供 Python public API，不新增 rollup 表
+  - 通过 `query_trace_events()` 读取数据，session 过滤在 API 读取后按 trace event 执行
+  - 后续 platform / dashboard 可通过该 API 或后续 HTTP endpoint 读取
+- [x] **Admin 查询入口**（`observability-admin-query-api`）：`fleetent-admin observability traces|usage|performance`
+  - trace 查询只输出事件元数据和 payload key summary，不输出 payload 原值
+  - usage / performance 查询复用 observability public API，不直接访问 SQLite 表
 - [ ] **预算查询接口**：供 agent-runtime 查询当前 run / session / 用户 / agent 用量
 
 ## 当前缺口
 
-- trace event 覆盖不完整：LLM call、tool call、permission、fallback、context compression、sub-agent span 等还未系统记录。
-- request_id / span 语义仍需强化：当前已能共享 run_id，但完整 trace tree 尚未完成。
-- usage summary 有 token / elapsed 基础聚合，但还缺错误率、fallback、工具耗时等质量指标。
-- logs / traces retention、导出、备份和告警策略未定义。
-- 没有平台 UI 或 admin 查询体验。
+- runtime event coverage 已覆盖 run lifecycle、LLM call、tool call、permission、fallback、context compression 和 final reply；但 request_id / span 语义仍需强化，完整 trace tree 尚未完成。
+- logs / traces / diagnostics export 已有手动 retention dry-run / apply；默认不设置保留天数，不自动清理。
+- 备份保留策略仍由部署方管理；observability retention 不删除 SQLite backups。
+- usage / performance summary 已有 Python public API 和 admin CLI；还没有 platform UI 或 HTTP 查询端点。
+- 尚未接入 OpenTelemetry / Prometheus，也没有独立 metrics store 或 rollup 表。
 
 ## 下一批候选 specs
 
-- `observability-runtime-event-coverage`
 - `observability-request-trace-tree`
-- `observability-retention-policy`
-- `observability-performance-summary`
 - `platform-trace-view`
 
 ## 自动化效果验证缺口
 
-- 构造完整 agent run fixture，验证事件流覆盖用户输入、模型、工具、上下文、完成事件。
 - 扩展完整 agent run fixture，验证事件流覆盖用户输入、模型、工具、上下文、完成事件。
 - 验证脱敏 / 截断规则对大 payload 和敏感字段稳定生效。
 - 验证 usage / performance 聚合在缺失字段、旧 trace、异常 run 下的容错。
+- 验证知识库范围诊断事件不包含用户 query、文档正文或 credential 内容。
 memory / reflection / long-term-ctx / knowledge-base 的效果评估应依赖已完成的 trace contract 证据。
 
 ## 服务化 / 目录边界判断

@@ -1,5 +1,5 @@
-import fnmatch
+"""Compatibility shim for governance agent policy."""
 
+from fleetent.governance.agent_policy import check_tool_access
 
-def check_tool_access(tool_name: str, allowed_tools: list[str]) -> bool:
-    return any(fnmatch.fnmatch(tool_name, pattern) for pattern in allowed_tools)
+__all__ = ["check_tool_access"]

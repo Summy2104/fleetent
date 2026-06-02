@@ -14,12 +14,11 @@ from pydantic import BaseModel
 
 from fleetent import (
     api_key_store,
-    audit_log,
     auth,
-    blocklist,
     im_user_store,
     user_store,
 )
+from fleetent.governance import audit_log, blocklist
 
 router = APIRouter(prefix="/admin")
 

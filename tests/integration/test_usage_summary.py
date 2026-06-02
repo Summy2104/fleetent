@@ -117,6 +117,7 @@ def test_usage_summary_maps_query_filters_to_trace_query(monkeypatch):
     trace_query = captured["query"]
     assert trace_query.user_id == "user-1"
     assert trace_query.agent_id == "agent-1"
+    assert trace_query.session_id == "session-1"
     assert trace_query.tenant_id == "tenant-1"
     assert trace_query.event_type == "agent_run_completed"
     assert trace_query.start_ts == start_ts

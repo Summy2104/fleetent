@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-import fleetent.permission_gate as permission_gate
-from fleetent.permission_gate import PermissionGate
+import fleetent.governance.permission_gate as permission_gate
+from fleetent.governance.permission_gate import PermissionGate
 
 
 @pytest.fixture

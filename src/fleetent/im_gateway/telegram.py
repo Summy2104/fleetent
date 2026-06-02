@@ -22,7 +22,7 @@ def create_app() -> object:
 
     from fleetent.config import Settings
 
-    bot_token = Settings().telegram_bot_token  # type: ignore[call-arg]
+    bot_token = Settings(anthropic_api_key="").telegram_bot_token
     builder = Application.builder().token(bot_token).concurrent_updates(True)
     application = builder.build()
 

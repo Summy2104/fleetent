@@ -2,7 +2,7 @@
 
 import datetime
 
-from fleetent.sandbox_client import SandboxClient
+from fleetent.integrations.sandbox import SandboxClient
 from fleetent.tool_registry import tool
 
 

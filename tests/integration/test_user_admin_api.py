@@ -3,9 +3,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import fleetent.api_key_store as aks
-import fleetent.audit_log as audit
 import fleetent.auth as auth
-import fleetent.blocklist as blocklist
+import fleetent.governance.audit_log as audit
+import fleetent.governance.blocklist as blocklist
 import fleetent.im_user_store as im_user_store
 import fleetent.user_admin_api as api
 import fleetent.user_store as user_store

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
 
 from fleetent.observability.traces import TraceQuery, query_trace_events
 
@@ -51,6 +52,7 @@ def get_usage_summary(query: UsageQuery) -> UsageSummary:
         TraceQuery(
             user_id=query.user_id,
             agent_id=query.agent_id,
+            session_id=query.session_id,
             tenant_id=query.tenant_id,
             event_type="agent_run_completed",
             start_ts=query.start_ts,
@@ -74,7 +76,7 @@ def get_usage_summary(query: UsageQuery) -> UsageSummary:
         prompt = _to_int(tokens.get("prompt")) if isinstance(tokens, dict) else 0
         completion = _to_int(tokens.get("completion")) if isinstance(tokens, dict) else 0
         total = _to_int(tokens.get("total", prompt + completion)) if isinstance(tokens, dict) else 0
-        elapsed_s = _to_float(event.payload.get("elapsed_s"))
+        elapsed_s = _to_elapsed(event.payload.get("elapsed_s"))
 
         run_count += 1
         prompt_tokens += prompt
@@ -155,3 +157,8 @@ def _to_float(value: object) -> float:
         return float(str(value))
     except ValueError:
         return 0
+
+
+def _to_elapsed(value: object) -> float:
+    elapsed = _to_float(value)
+    return elapsed if isfinite(elapsed) and elapsed >= 0 else 0

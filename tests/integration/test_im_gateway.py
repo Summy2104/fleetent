@@ -85,7 +85,7 @@ async def test_approve_command_resolves_gate_and_does_not_call_agent(
     )
 
     mock_resolve = AsyncMock()
-    with patch("fleetent.permission_gate._default_gate") as mock_gate:
+    with patch("fleetent.governance.permission_gate._default_gate") as mock_gate:
         mock_gate.resolve = mock_resolve
         await route(msg)
 
@@ -119,7 +119,7 @@ async def test_reject_command_resolves_gate(mock_session_mgr, mock_agent_loop, m
     )
 
     mock_resolve = AsyncMock()
-    with patch("fleetent.permission_gate._default_gate") as mock_gate:
+    with patch("fleetent.governance.permission_gate._default_gate") as mock_gate:
         mock_gate.resolve = mock_resolve
         await route(msg)
 

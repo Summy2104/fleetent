@@ -5,15 +5,15 @@ Provide tenant-scoped enterprise document ingestion, parsing, indexing, retrieva
 and retrieval evaluation for agent long-term context.
 ## Requirements
 ### Requirement: KnowledgeBridge migration plan
-系统 SHALL 在实现 fleetent knowledge-base 运行时代码前，产出 `knowledge-bridge` 到 fleetent 的迁移计划。
+系统 SHALL 保留 `knowledge-bridge` 到 fleetent 的历史迁移计划，作为后续知识库增强的参考资料。
 
 #### Scenario: Migration plan document exists
 - **WHEN** 本 change 完成
-- **THEN** 仓库包含 `docs/knowledge-bridge-migration-plan.md`
+- **THEN** 仓库包含 `docs/archive/knowledge-bridge-migration-plan.md`
 
 #### Scenario: Migration plan links from capability doc
 - **WHEN** 读者查看 `docs/capabilities/knowledge-base.md`
-- **THEN** 文档链接到 migration plan，并说明 knowledge-base 将按拆分 specs 渐进实现
+- **THEN** 文档链接到 archived migration plan，并说明 knowledge-base 将按拆分 specs 渐进实现
 
 ### Requirement: Migration asset classification
 迁移计划 SHALL 将 `knowledge-bridge` 资产分为可直接迁移、可参考但需重写、暂缓迁移和不迁移。
@@ -376,3 +376,668 @@ runtime.
 #### Scenario: Real embedding evaluation is manually runnable
 - **WHEN** 设置 `FLEETENT_EVAL_REAL_EMBEDDING=1` 且 provider 配置完整
 - **THEN** runner 可以使用真实 HTTP embedding provider 运行 fixture
+
+### Requirement: Knowledge-base sync planner public API
+系统 SHALL 提供 knowledge-base sync planner public API，用于在执行 source sync 前生成确定性的同步计划。
+
+#### Scenario: Sync planner API is importable
+- **WHEN** 调用方从 `fleetent.intelligence.knowledge_base` 导入 `SyncAction`、`SyncPlan`、`SyncPlanItem`、sync summary dataclasses、`plan_local_directory_sync` 和 `execute_sync_plan`
+- **THEN** 导入成功
+
+#### Scenario: Empty source plan
+- **WHEN** local source 目录没有支持或不支持的文件，且没有历史 source state
+- **THEN** planner 返回空 plan items
+- **AND** summary 中 scanned、planned、unsupported 均为 0
+
+### Requirement: Sync plan separates planning from execution
+sync planner SHALL 在写入 KB documents、chunks、vector index 或 source state 前产出计划。
+
+#### Scenario: Planning does not mutate knowledge base
+- **WHEN** 调用 `plan_local_directory_sync()`
+- **THEN** 系统可以列举、读取和 hash source documents
+- **AND** 不调用 `ingest_parsed()`、`delete()` 或 vector_store mutation
+- **AND** 不写入 `knowledge_source_states`
+
+#### Scenario: Execution applies a plan
+- **WHEN** 调用 `execute_sync_plan()`
+- **THEN** 系统只按 plan items 执行 ingest、reingest、delete 或 skip
+
+### Requirement: Local sync action planning
+系统 SHALL 为 local directory source documents 生成 new、changed、unchanged 和 unsupported actions。
+
+#### Scenario: New file is planned for ingest
+- **WHEN** local source 包含支持格式文件，且 `knowledge_source_states` 中没有该 source path
+- **THEN** planner 为该文件生成 `ingest_new` plan item
+
+#### Scenario: Changed file is planned for reingest
+- **WHEN** local source 文件的 mtime 或 content hash 与 source state 不一致
+- **THEN** planner 为该文件生成 `reingest_changed` plan item
+
+#### Scenario: Unchanged file is planned for skip
+- **WHEN** local source 文件的 path、mtime 和 content hash 均与 source state 一致
+- **THEN** planner 为该文件生成 `skip_unchanged` plan item
+
+#### Scenario: Unsupported files are counted
+- **WHEN** local source 包含不支持后缀
+- **THEN** planner summary 记录 unsupported 数量
+- **AND** unsupported 文件不会生成 ingest 或 reingest item
+
+### Requirement: Missing-source delete planning
+系统 SHALL 检测之前同步过但当前 source listing 中缺失的 local source path，并计划删除对应 KB document。
+
+#### Scenario: Missing source file is planned for delete
+- **WHEN** `knowledge_source_states` 中存在某 source path
+- **AND** 当前 local source listing 不再包含该 path
+- **THEN** planner 生成 `delete_missing` plan item
+
+#### Scenario: Delete plan item includes target document
+- **WHEN** planner 生成 `delete_missing` item
+- **THEN** item 包含 source_id、tenant_id、kb_id、source_path 和 document_id
+
+### Requirement: Sync plan execution
+系统 SHALL 幂等执行 sync plan items，并在单个 item 失败时继续处理其他 items。
+
+#### Scenario: Execute ingest new
+- **WHEN** executor 处理 `ingest_new` item
+- **THEN** 系统解析 source content，调用 `ingest_parsed()`
+- **AND** ingest 成功后写入 `knowledge_source_states`
+
+#### Scenario: Execute reingest changed
+- **WHEN** executor 处理 `reingest_changed` item
+- **THEN** 系统删除旧 document
+- **AND** 解析并 ingest 新 document
+- **AND** 成功后更新 `knowledge_source_states`
+
+#### Scenario: Execute delete missing
+- **WHEN** executor 处理 `delete_missing` item
+- **THEN** 系统调用 `delete(document_id)`
+- **AND** 删除对应 `knowledge_source_states` 记录
+
+#### Scenario: Execute skip unchanged
+- **WHEN** executor 处理 `skip_unchanged` item
+- **THEN** 系统不调用 parser、`ingest_parsed()` 或 `delete()`
+- **AND** summary 记录 unchanged / skipped
+
+#### Scenario: Per item failure isolation
+- **WHEN** 某个 plan item 执行失败
+- **THEN** executor 记录 failed count
+- **AND** 继续执行后续 plan items
+
+### Requirement: Local sync delegates to planner
+`sync_local_directory()` SHALL 通过 sync planner 和 executor 完成同步，而不是直接边扫描边写入 KB。
+
+#### Scenario: Local sync summary matches plan execution
+- **WHEN** 调用 `sync_local_directory()`
+- **THEN** 返回 summary 反映 planner 和 executor 的 scanned、ingested、skipped、failed、unsupported、unchanged 和 deleted 计数
+
+#### Scenario: Repeated sync remains idempotent
+- **WHEN** 对同一 local source 连续调用两次 `sync_local_directory()`
+- **THEN** 第二次 sync 对未变化文件返回 unchanged / skipped
+- **AND** 不重复创建 KB documents 或 chunks
+
+#### Scenario: Removed local file is deleted from KB
+- **WHEN** 某文件已同步到 KB
+- **AND** 该文件随后从 local source 删除
+- **AND** 再次调用 `sync_local_directory()`
+- **THEN** 对应 KB document 被删除
+- **AND** search 不再返回该 document 的 chunks
+
+### Requirement: Sync planner excludes advanced connector runtime
+sync planner SHALL NOT introduce scheduler、background worker、remote connector、sync run persistence 或 connector-specific credential lifecycle。
+
+#### Scenario: No scheduler or worker dependency
+- **WHEN** sync planner change 完成
+- **THEN** 系统不要求新增 scheduler、queue、worker 或动态 job runtime
+
+#### Scenario: No remote connector behavior
+- **WHEN** sync planner change 完成
+- **THEN** 系统不包含 Confluence、Google Drive 或其他 remote connector 实现
+
+### Requirement: Knowledge-base indexable iterator
+knowledge-base SHALL 提供 public API，用于枚举指定 tenant/kb 当前应写入 vector_store 的 chunk source records。
+
+#### Scenario: Knowledge-base indexable API is importable
+- **WHEN** 调用方从 `fleetent.intelligence.knowledge_base` 导入 `iter_indexable_knowledge_chunks`
+- **THEN** 导入成功
+
+#### Scenario: Knowledge-base indexable items are tenant and kb scoped
+- **WHEN** 多个 tenant 或 kb 都有 chunks
+- **AND** 调用 `iter_indexable_knowledge_chunks(tenant_id, kb_id)`
+- **THEN** 返回结果只包含该 tenant/kb 的 chunks
+
+#### Scenario: Knowledge-base indexable item namespace
+- **WHEN** `iter_indexable_knowledge_chunks()` 返回 item
+- **THEN** item.namespace 等于 `knowledge_namespace(tenant_id, kb_id)`
+- **AND** item.id 等于 chunk id
+- **AND** item.content 等于 chunk content
+
+### Requirement: Knowledge-base indexable iterator is a public boundary
+vector_store reindex SHALL consume knowledge-base indexable records through knowledge-base public API, not direct SQL.
+
+#### Scenario: Reindex does not query knowledge tables directly
+- **WHEN** knowledge-base reindex 执行
+- **THEN** reindex code 调用 `knowledge_base.iter_indexable_knowledge_chunks()`
+- **AND** 不直接访问 `knowledge_documents`、`knowledge_chunks` 或 `knowledge_chunks_fts` 表
+
+### Requirement: Knowledge-base combined embedding evaluation
+系统 SHALL 在 combined embedding evaluation 中覆盖 knowledge-base retrieval，验证 KB search 经由
+vector-store embedding / reindex 路径后的召回行为。
+
+#### Scenario: Knowledge-base retrieval fixture is explicit
+- **WHEN** evaluation runner 加载 combined embedding fixture
+- **THEN** fixture 包含 KB documents、KB queries、expected KB snippets 和 forbidden KB snippets
+
+#### Scenario: Knowledge-base index is rebuilt through public reindex
+- **WHEN** deterministic combined embedding evaluation 运行
+- **THEN** runner 调用 `vector_store.reindex(ReindexRequest(owner="knowledge_base", tenant_id=..., kb_id=...))`
+
+#### Scenario: Expected KB snippets are retrieved
+- **WHEN** KB query 运行完成
+- **THEN** runner 验证 expected KB snippets 出现在 `knowledge_base.search()` top-k 结果中
+
+#### Scenario: Forbidden KB snippets are rejected
+- **WHEN** KB query 运行完成
+- **THEN** runner 验证 forbidden KB snippets 不出现在 `knowledge_base.search()` top-k 结果中
+
+### Requirement: Google Drive connector configuration
+knowledge-base SHALL provide Google Drive connector configuration scoped to a target tenant and knowledge base.
+
+#### Scenario: Google Drive connector config is importable
+- **WHEN** 调用方从 knowledge-base public API 导入 Google Drive connector config
+- **THEN** 导入成功
+
+#### Scenario: Connector is scoped to tenant kb and folder
+- **WHEN** 配置 Google Drive connector
+- **THEN** config 包含 connector_id、tenant_id、kb_id、folder_id 和 OAuth credential_ref
+- **AND** connector 只同步到指定 tenant_id + kb_id
+
+#### Scenario: Connector uses OAuth user authorization
+- **WHEN** connector 访问 Google Drive
+- **THEN** 使用绑定到 connector 的 OAuth 用户授权
+- **AND** 不要求 service account 或 domain-wide delegation
+
+#### Scenario: OAuth credential belongs to connector
+- **WHEN** 用户查询已同步 KB
+- **THEN** 系统不使用该聊天用户的 Google Drive token 做实时过滤
+- **AND** 已同步内容的访问控制由 KB scope 和后续 agent-KB binding 决定
+
+#### Scenario: File based credential ref is supported
+- **WHEN** Google Drive connector config 使用 file-based credential_ref
+- **THEN** 系统可以从该引用加载 OAuth token
+- **AND** 不要求新增 credential 表
+
+### Requirement: Google Drive folder listing
+Google Drive connector SHALL list documents from a configured folder scope instead of scanning the entire Drive.
+
+#### Scenario: Folder scoped listing
+- **WHEN** connector 运行 sync plan
+- **THEN** 它只列举配置的 folder_id 范围内文档
+
+#### Scenario: Unsupported MIME types are skipped
+- **WHEN** folder 中包含 unsupported MIME type
+- **THEN** planner 或 executor 跳过该文件
+- **AND** summary 记录 unsupported 数量
+
+#### Scenario: Auth failure is recorded
+- **WHEN** OAuth token refresh 失败或 Drive API 返回授权失败
+- **THEN** connector 标记为 `auth_failed`
+- **AND** 不写入 KB documents、chunks 或 vector index
+
+### Requirement: Google Drive content parsing
+Google Drive connector SHALL map supported Drive content into existing knowledge-base parsers.
+
+#### Scenario: Google Docs export uses HTML parser
+- **WHEN** connector 同步 Google Docs
+- **THEN** 它通过 Drive export API 导出 HTML
+- **AND** 调用现有 HTML parser 生成 parsed document
+
+#### Scenario: Plain text uses text parser
+- **WHEN** connector 同步 plain text 文件
+- **THEN** 它调用现有 text parser
+
+#### Scenario: Markdown uses markdown parser
+- **WHEN** connector 同步 Markdown 文件
+- **THEN** 它调用现有 Markdown parser
+
+#### Scenario: HTML file uses HTML parser
+- **WHEN** connector 同步 HTML 文件
+- **THEN** 它调用现有 HTML parser
+
+#### Scenario: Google Sheets and Slides are unsupported in MVP
+- **WHEN** connector 遇到 Google Sheets 或 Google Slides
+- **THEN** 系统跳过该文件
+- **AND** summary 记录 unsupported 数量
+
+### Requirement: Google Drive sync planning
+knowledge-base SHALL plan Google Drive sync actions before mutating KB documents, chunks, vector index, or source state.
+
+#### Scenario: New Drive file is planned for ingest
+- **WHEN** Drive folder 包含 supported file
+- **AND** source state 中没有该 remote file
+- **THEN** planner 生成 `ingest_new` item
+
+#### Scenario: Changed Drive file is planned for reingest
+- **WHEN** remote file modified time、revision 或 content hash 与 source state 不一致
+- **THEN** planner 生成 `reingest_changed` item
+
+#### Scenario: Unchanged Drive file is skipped
+- **WHEN** remote file metadata 与 source state 一致
+- **THEN** planner 生成 `skip_unchanged` item
+
+#### Scenario: Missing Drive file is archived
+- **WHEN** source state 中存在 remote file
+- **AND** 当前 folder listing 不再包含该 file 或授权账号不再可见
+- **THEN** planner 生成 `archive_missing` item
+- **AND** 不生成 physical delete item
+
+### Requirement: Google Drive sync execution
+knowledge-base SHALL execute Google Drive sync plans through existing parser and KB public APIs.
+
+#### Scenario: Execute ingest new
+- **WHEN** executor 处理 Google Drive `ingest_new` item
+- **THEN** 系统读取或 export 文件内容
+- **AND** 调用 parser
+- **AND** 调用 `ingest_parsed()` 写入指定 tenant_id + kb_id
+- **AND** 成功后更新 source state
+
+#### Scenario: Execute reingest changed
+- **WHEN** executor 处理 Google Drive `reingest_changed` item
+- **THEN** 系统更新对应 KB document / chunks
+- **AND** 成功后更新 source state
+
+#### Scenario: Execute archive missing
+- **WHEN** executor 处理 `archive_missing` item
+- **THEN** 系统标记对应 source / document 为 archived 或 missing
+- **AND** 不调用 physical `delete(document_id)`
+- **AND** 默认 search 不返回 archived document 的 chunks
+
+#### Scenario: Per item failure isolation
+- **WHEN** 某个 Google Drive plan item 执行失败
+- **THEN** executor 记录 failed count
+- **AND** 继续执行后续 item
+
+### Requirement: Google Drive manual sync public API
+knowledge-base SHALL expose manual Google Drive sync APIs that delegate to planner and executor.
+
+#### Scenario: Google Drive sync API is importable
+- **WHEN** 调用方从 knowledge-base public API 导入 `plan_google_drive_sync` 和 `sync_google_drive`
+- **THEN** 导入成功
+
+#### Scenario: Manual sync delegates to planner
+- **WHEN** 调用 `sync_google_drive()`
+- **THEN** 系统先生成 sync plan
+- **AND** 再执行 plan
+- **AND** 不边扫描边直接写 KB
+
+#### Scenario: Manual sync returns summary
+- **WHEN** Google Drive sync 完成
+- **THEN** summary 包含 scanned、planned、ingested、changed、unchanged、unsupported、archived、failed 和 auth_failed 计数或状态
+
+### Requirement: Google Drive connector tests avoid real API by default
+Google Drive connector tests SHALL use fake clients by default and SHALL NOT connect to real Google APIs unless explicitly enabled.
+
+#### Scenario: Default tests use fake Drive client
+- **WHEN** 默认测试运行
+- **THEN** 测试使用 fake Drive client / fixtures
+- **AND** 不访问真实 Google API
+
+#### Scenario: Real smoke requires explicit opt-in
+- **WHEN** 未设置 `FLEETENT_GOOGLE_DRIVE_SMOKE=1`
+- **THEN** Google Drive real smoke test 被 skip
+
+#### Scenario: Real smoke skips without credentials
+- **WHEN** 设置 `FLEETENT_GOOGLE_DRIVE_SMOKE=1` 但缺少 OAuth credential_ref 或 folder id
+- **THEN** real smoke test 被 skip
+
+### Requirement: Confluence connector configuration
+knowledge-base SHALL provide Confluence connector configuration scoped to a target tenant and knowledge base.
+
+#### Scenario: Confluence connector config is importable
+- **WHEN** 调用方从 knowledge-base public API 导入 Confluence connector config
+- **THEN** 导入成功
+
+#### Scenario: Connector is scoped to tenant kb and Confluence scope
+- **WHEN** 配置 Confluence connector
+- **THEN** config 包含 connector_id、tenant_id、kb_id、base_url、username 和 API token credential_ref
+- **AND** config 包含 space scope、page scope 或 page include_children scope
+- **AND** connector 只同步到指定 tenant_id + kb_id
+
+#### Scenario: Connector uses Confluence Cloud API token
+- **WHEN** connector 访问 Confluence
+- **THEN** 使用绑定到 connector 的 Confluence Cloud username + API token credential
+- **AND** 不要求 Server / Data Center、Basic Auth 或 PAT 分支
+
+#### Scenario: Confluence credential belongs to connector
+- **WHEN** 用户查询已同步 KB
+- **THEN** 系统不使用该聊天用户的 Confluence credential 做实时过滤
+- **AND** 已同步内容的访问控制由 KB scope 和后续 agent-KB binding 决定
+
+### Requirement: Confluence scope listing
+Confluence connector SHALL list pages from configured scopes instead of scanning the entire site.
+
+#### Scenario: Space scope lists pages
+- **WHEN** connector 配置 space_key
+- **THEN** planner 只列举该 space 中 pages
+
+#### Scenario: Page scope lists one page
+- **WHEN** connector 配置 page_id 且 include_children=false
+- **THEN** planner 只列举该 page
+
+#### Scenario: Page children scope lists descendants
+- **WHEN** connector 配置 page_id 且 include_children=true
+- **THEN** planner 列举该 page 及 descendant pages
+
+#### Scenario: Auth failure is recorded
+- **WHEN** API token 无效、权限不足或 Confluence API 返回授权失败
+- **THEN** connector 标记为 `auth_failed`
+- **AND** 不写入 KB documents、chunks 或 vector index
+
+### Requirement: Confluence page parsing
+Confluence connector SHALL fetch page storage HTML and map it into existing knowledge-base parsers.
+
+#### Scenario: Page fetch expands required fields
+- **WHEN** connector 拉取 Confluence page
+- **THEN** 请求包含 storage HTML、version、space 和 ancestors 信息
+
+#### Scenario: Storage HTML uses HTML parser
+- **WHEN** connector 同步 Confluence page
+- **THEN** 它调用现有 HTML parser 生成 parsed document
+
+#### Scenario: Page metadata is preserved
+- **WHEN** connector 同步 Confluence page
+- **THEN** parsed metadata 包含 page id、title、space key、ancestors 或 path text
+
+### Requirement: Confluence sync planning
+knowledge-base SHALL plan Confluence sync actions before mutating KB documents, chunks, vector index, or source state.
+
+#### Scenario: New page is planned for ingest
+- **WHEN** Confluence scope 包含 page
+- **AND** source state 中没有该 page
+- **THEN** planner 生成 `ingest_new` item
+
+#### Scenario: Changed page is planned for reingest
+- **WHEN** page version 或 modified time 与 source state 不一致
+- **THEN** planner 生成 `reingest_changed` item
+
+#### Scenario: Unchanged page is skipped
+- **WHEN** page metadata 与 source state 一致
+- **THEN** planner 生成 `skip_unchanged` item
+
+#### Scenario: Missing page is archived
+- **WHEN** source state 中存在 page
+- **AND** 当前 scope listing 不再包含该 page 或 credential 不再可见
+- **THEN** planner 生成 `archive_missing` item
+- **AND** 不生成 physical delete item
+
+### Requirement: Confluence sync execution
+knowledge-base SHALL execute Confluence sync plans through existing parser and KB public APIs.
+
+#### Scenario: Execute ingest new
+- **WHEN** executor 处理 Confluence `ingest_new` item
+- **THEN** 系统读取 page storage HTML
+- **AND** 调用 HTML parser
+- **AND** 调用 `ingest_parsed()` 写入指定 tenant_id + kb_id
+- **AND** 成功后更新 source state
+
+#### Scenario: Execute reingest changed
+- **WHEN** executor 处理 Confluence `reingest_changed` item
+- **THEN** 系统更新对应 KB document / chunks
+- **AND** 成功后更新 source state
+
+#### Scenario: Execute archive missing
+- **WHEN** executor 处理 `archive_missing` item
+- **THEN** 系统标记对应 source / document 为 archived 或 missing
+- **AND** 不调用 physical `delete(document_id)`
+- **AND** 默认 search 不返回 archived document 的 chunks
+
+#### Scenario: Per item failure isolation
+- **WHEN** 某个 Confluence plan item 执行失败
+- **THEN** executor 记录 failed count
+- **AND** 继续执行后续 item
+
+### Requirement: Confluence rate limit and retry
+Confluence connector SHALL tolerate basic rate limiting without failing the entire sync.
+
+#### Scenario: Retry after rate limit
+- **WHEN** Confluence API 返回 429 和 Retry-After
+- **THEN** connector 等待 Retry-After 后重试该请求
+
+#### Scenario: Retry exhaustion records failure
+- **WHEN** 请求超过重试上限
+- **THEN** 当前 item 记录 failed
+- **AND** 后续 item 继续执行
+
+### Requirement: Confluence manual sync public API
+knowledge-base SHALL expose manual Confluence sync APIs that delegate to planner and executor.
+
+#### Scenario: Confluence sync API is importable
+- **WHEN** 调用方从 knowledge-base public API 导入 `plan_confluence_sync` 和 `sync_confluence`
+- **THEN** 导入成功
+
+#### Scenario: Manual sync delegates to planner
+- **WHEN** 调用 `sync_confluence()`
+- **THEN** 系统先生成 sync plan
+- **AND** 再执行 plan
+- **AND** 不边扫描边直接写 KB
+
+#### Scenario: Manual sync returns summary
+- **WHEN** Confluence sync 完成
+- **THEN** summary 包含 scanned、planned、ingested、changed、unchanged、archived、failed 和 auth_failed 计数或状态
+
+### Requirement: Confluence connector tests avoid real API by default
+Confluence connector tests SHALL use fake clients by default and SHALL NOT connect to real Confluence unless explicitly enabled.
+
+#### Scenario: Default tests use fake Confluence client
+- **WHEN** 默认测试运行
+- **THEN** 测试使用 fake Confluence client / fixtures
+- **AND** 不访问真实 Confluence
+
+#### Scenario: Real smoke requires explicit opt-in
+- **WHEN** 未设置 `FLEETENT_CONFLUENCE_SMOKE=1`
+- **THEN** Confluence real smoke test 被 skip
+
+#### Scenario: Real smoke skips without credentials
+- **WHEN** 设置 `FLEETENT_CONFLUENCE_SMOKE=1` 但缺少 base URL、username、credential_ref 或 scope
+- **THEN** real smoke test 被 skip
+
+### Requirement: Agent knowledge-base binding public API
+系统 SHALL 提供 agent 到 knowledge base 的绑定 public API，用于声明某个 tenant 下的 agent 可以检索哪些 KB。
+
+#### Scenario: Binding API is importable
+- **WHEN** 调用方从 `fleetent.intelligence.knowledge_base` 导入 `AgentKnowledgeBaseBinding`、
+  `bind_agent_to_kb`、`unbind_agent_from_kb`、`list_agent_kb_bindings` 和 `resolve_agent_kb_ids`
+- **THEN** 导入成功
+
+#### Scenario: Binding table exists
+- **WHEN** 数据库 migration 运行到最新版本
+- **THEN** 数据库包含 knowledge-base-owned `knowledge_base_agent_bindings` 表
+- **AND** 表对 `tenant_id + agent_id + kb_id` 施加唯一约束
+
+### Requirement: Agent KB binding behavior
+系统 SHALL 支持按 tenant 和 agent 管理显式 KB 绑定，且绑定行为保持幂等和隔离。
+
+#### Scenario: Bind is idempotent
+- **WHEN** 对同一 `tenant_id`、`agent_id` 和 `kb_id` 重复调用 `bind_agent_to_kb()`
+- **THEN** 系统只保留一条绑定
+- **AND** 调用不会因重复绑定失败
+
+#### Scenario: Unbind is idempotent
+- **WHEN** 对不存在的绑定调用 `unbind_agent_from_kb()`
+- **THEN** 系统不报错
+
+#### Scenario: Binding is tenant isolated
+- **WHEN** 不同 tenant 中存在同名 agent 的 KB 绑定
+- **THEN** 查询其中一个 tenant 的绑定不会返回另一个 tenant 的 KB
+
+#### Scenario: Binding is agent isolated
+- **WHEN** 同一 tenant 中不同 agent 绑定到不同 KB
+- **THEN** 查询其中一个 agent 的绑定不会返回另一个 agent 的 KB
+
+#### Scenario: Empty binding identifiers are rejected
+- **WHEN** `tenant_id`、`agent_id` 或 `kb_id` 为空
+- **THEN** 系统 fail fast
+
+#### Scenario: Binding may reference future KB
+- **WHEN** 调用 `bind_agent_to_kb()` 绑定当前尚不存在或尚无内容的 `kb_id`
+- **THEN** 系统允许保存绑定
+
+### Requirement: Agent KB scope resolution
+系统 SHALL 提供 `resolve_agent_kb_ids(tenant_id, agent_id)` 作为 agent 有效 KB 范围的唯一解析入口。
+
+#### Scenario: Explicit bindings override default KB
+- **WHEN** agent 存在一个或多个显式 KB 绑定
+- **THEN** `resolve_agent_kb_ids()` 返回显式绑定的 KB 列表
+- **AND** 不额外返回默认 KB
+
+#### Scenario: Missing binding falls back to default KB
+- **WHEN** agent 没有显式 KB 绑定
+- **AND** `Settings.knowledge_base.default_kb_id` 已配置
+- **THEN** `resolve_agent_kb_ids()` 返回只包含默认 KB 的列表
+
+#### Scenario: Missing default KB returns empty scope
+- **WHEN** agent 没有显式 KB 绑定
+- **AND** 默认 KB 未配置、为空或不可用
+- **THEN** `resolve_agent_kb_ids()` 返回空列表
+- **AND** 系统记录可诊断事件
+- **AND** 系统不抛出阻断 agent 对话的业务错误
+
+#### Scenario: Search with future or empty KB returns no chunks
+- **WHEN** 调用 `knowledge_base.search()` 并传入不存在或暂无内容的 `kb_id`
+- **THEN** 系统返回空结果
+- **AND** 不把该情况视为绑定错误
+
+### Requirement: Connector configuration registry
+系统 SHALL 从非 secret 应用配置中加载 knowledge-base connector 定义，并以 `connector_id` 提供稳定查找入口。
+
+#### Scenario: Google Drive connectors load from settings
+- **WHEN** `settings.yaml` 包含 `knowledge_base.google_drive.connectors`
+- **THEN** 系统可以把每条配置解析为 Google Drive connector config
+
+#### Scenario: Confluence connectors load from settings
+- **WHEN** `settings.yaml` 包含 `knowledge_base.confluence.connectors`
+- **THEN** 系统可以把每条配置解析为 Confluence connector config
+
+#### Scenario: Connector ids are globally unique
+- **WHEN** 两个 connector 使用相同 `connector_id`
+- **THEN** registry fail fast
+
+#### Scenario: Disabled connectors are listed but not synced
+- **WHEN** connector 配置 `enabled=false`
+- **THEN** list 操作仍显示该 connector
+- **AND** sync 操作返回 disabled 状态且不访问 remote API
+
+### Requirement: Connector operations public API
+系统 SHALL 提供 knowledge-base connector operations public API，用于列出、检查、同步和查看最近一次状态。
+
+#### Scenario: Connector operations API is importable
+- **WHEN** 调用方从 `fleetent.intelligence.knowledge_base` 导入 connector operations dataclasses 和 functions
+- **THEN** 导入成功
+
+#### Scenario: List connectors returns safe summaries
+- **WHEN** 调用 connector list operation
+- **THEN** 返回 connector_id、type、enabled、tenant_id、kb_id 和 scope 摘要
+- **AND** 不返回真实 credential payload
+
+#### Scenario: Unknown connector fails clearly
+- **WHEN** 对不存在的 `connector_id` 调用 check、sync 或 status operation
+- **THEN** 系统返回明确的 not-found 错误
+
+### Requirement: Connector credential and scope check
+系统 SHALL 支持对 connector 的 `credential_ref` 和 remote scope 执行显式检查。
+
+#### Scenario: Missing credential is reported
+- **WHEN** `credential_ref` 指向不存在的文件或未设置的环境变量
+- **THEN** check operation 返回 `credential_missing`
+
+#### Scenario: Invalid credential is reported
+- **WHEN** `credential_ref` 可读取但格式非法
+- **THEN** check operation 返回 `credential_invalid`
+
+#### Scenario: Auth failure is reported
+- **WHEN** connector client 认证失败
+- **THEN** check operation 返回 `auth_failed`
+
+#### Scenario: Scope unreachable is reported
+- **WHEN** connector client 无法访问配置的 folder、space 或 page scope
+- **THEN** check operation 返回 `scope_unreachable`
+
+#### Scenario: Check result is sanitized
+- **WHEN** check operation 返回失败详情
+- **THEN** 结果不包含 token、secret、credential payload 或完整文档正文
+
+### Requirement: Connector sync dry-run
+系统 SHALL 支持 connector sync dry-run，用于生成同步计划而不修改 KB 数据。
+
+#### Scenario: Dry-run does not mutate knowledge data
+- **WHEN** 调用 connector sync dry-run
+- **THEN** 系统生成 plan summary
+- **AND** 不写入 `knowledge_documents`
+- **AND** 不写入 `knowledge_source_states`
+- **AND** 不写入 vector_store
+
+#### Scenario: Dry-run records dry-run status
+- **WHEN** connector sync dry-run 完成
+- **THEN** 系统更新该 connector 的最近一次状态为 dry-run 结果
+- **AND** 状态不会被标记为真实 sync 成功
+
+### Requirement: Connector sync operation
+系统 SHALL 支持通过 connector operations 执行手动同步，并保存最近一次同步摘要。
+
+#### Scenario: Sync runs matching connector executor
+- **WHEN** 调用 connector sync operation
+- **THEN** 系统根据 connector type 调用对应 Google Drive 或 Confluence sync executor
+
+#### Scenario: Sync status summary is persisted
+- **WHEN** connector sync 完成
+- **THEN** 系统保存 scanned、planned、ingested、changed、unchanged、unsupported、archived、failed 和 auth_failed 计数
+
+#### Scenario: Sync failure still records status
+- **WHEN** connector sync 失败
+- **THEN** 系统保存失败状态和脱敏错误摘要
+- **AND** 后续 status 查询可返回该失败状态
+
+### Requirement: Connector status persistence
+系统 SHALL 保存每个 connector 最近一次运行状态，不保存完整运行历史。
+
+#### Scenario: Status table exists
+- **WHEN** 数据库 migration 运行到最新版本
+- **THEN** 数据库包含 knowledge-base-owned `knowledge_connector_status` 表
+
+#### Scenario: Only latest status is kept
+- **WHEN** 同一 connector 多次写入 status
+- **THEN** status 查询只返回最近一次结果
+
+#### Scenario: Never-run status is stable
+- **WHEN** connector 存在但从未执行 check、dry-run 或 sync
+- **THEN** status operation 返回 `never_run`
+
+#### Scenario: Status payload is sanitized
+- **WHEN** status 包含 summary 或 error
+- **THEN** 持久化内容不包含 token、secret、credential payload 或完整文档正文
+
+### Requirement: Admin CLI connector operations
+系统 SHALL 在 `fleetent-admin` 中提供 knowledge-base connector operations 命令。
+
+#### Scenario: List connectors from CLI
+- **WHEN** operator 运行 `fleetent-admin kb connectors list`
+- **THEN** CLI 输出配置的 connector 摘要
+
+#### Scenario: Check connector from CLI
+- **WHEN** operator 运行 `fleetent-admin kb connectors check <connector_id>`
+- **THEN** CLI 输出该 connector 的检查状态
+
+#### Scenario: Show connector status from CLI
+- **WHEN** operator 运行 `fleetent-admin kb connectors status <connector_id>`
+- **THEN** CLI 输出该 connector 最近一次状态或 `never_run`
+
+#### Scenario: Dry-run sync from CLI
+- **WHEN** operator 运行 `fleetent-admin kb connectors sync <connector_id> --dry-run`
+- **THEN** CLI 执行 dry-run 并输出 plan summary
+
+#### Scenario: Run sync from CLI
+- **WHEN** operator 运行 `fleetent-admin kb connectors sync <connector_id>`
+- **THEN** CLI 执行真实 sync 并输出 sync summary
+
+#### Scenario: CLI output is sanitized
+- **WHEN** CLI 输出 connector check、sync 或 status 结果
+- **THEN** 输出不包含 token、secret、credential payload 或完整文档正文

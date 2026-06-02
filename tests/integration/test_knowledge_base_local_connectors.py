@@ -235,12 +235,12 @@ async def test_sync_local_directory_skips_unchanged_files_and_reingests_changed_
     assert (first.ingested, first.skipped, first.unchanged) == (1, 0, 0)
     assert (second.ingested, second.skipped, second.unchanged) == (0, 1, 1)
     assert (third.ingested, third.skipped, third.unchanged) == (1, 0, 0)
-    assert [row["filename"] for row in documents] == ["runbook.md", "runbook.md"]
+    assert [row["filename"] for row in documents] == ["runbook.md"]
     assert states == [
         {
             "source_path": str(document_path.resolve()),
             "content_hash": hashlib.sha256(b"# Runbook\nSecond version").hexdigest(),
-            "document_id": documents[-1]["id"],
+            "document_id": documents[0]["id"],
         }
     ]
 

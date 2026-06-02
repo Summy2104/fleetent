@@ -229,3 +229,155 @@ agent-runtime SHALL 不再直接调用 memory_layer 加载最近 memory 并注�
 #### Scenario: Real LLM evaluation is not a PR gate
 - **WHEN** Bitbucket PR/main pipeline 运行
 - **THEN** pipeline 不默认运行真实 LLM evaluation
+
+### Requirement: Memory indexable iterator
+memory-layer SHALL 提供 public API，用于枚举指定用户当前应写入 vector_store 的 memory source records。
+
+#### Scenario: Memory indexable API is importable
+- **WHEN** 调用方从 `fleetent.memory_layer` 导入 `iter_indexable_memories`
+- **THEN** 导入成功
+
+#### Scenario: Memory indexable items are user scoped
+- **WHEN** 用户 A 和用户 B 都有 memory items
+- **AND** 调用 `iter_indexable_memories(user_a)`
+- **THEN** 返回结果只包含用户 A 的 memory items
+
+#### Scenario: Memory indexable items exclude expired context
+- **WHEN** 用户存在已过期 context memory
+- **THEN** `iter_indexable_memories()` 不返回该 expired memory
+
+#### Scenario: Memory indexable item namespace
+- **WHEN** `iter_indexable_memories()` 返回 item
+- **THEN** item.namespace 等于 `memory_namespace(user_id)`
+- **AND** item.id 等于 memory item id
+- **AND** item.content 等于 memory item content
+
+### Requirement: Memory indexable iterator is a public boundary
+vector_store reindex SHALL consume memory indexable records through memory-layer public API, not direct SQL.
+
+#### Scenario: Reindex does not query memory table directly
+- **WHEN** memory reindex 执行
+- **THEN** reindex code 调用 `memory_layer.iter_indexable_memories()`
+- **AND** 不直接访问 `memory_items` 表
+
+### Requirement: Memory semantic retrieval embedding evaluation
+系统 SHALL 提供 memory semantic retrieval embedding evaluation fixture，用于验证 memory search 经由
+vector-store embedding / reindex 路径后的召回行为。
+
+#### Scenario: Memory retrieval fixture is explicit
+- **WHEN** evaluation runner 加载 combined embedding fixture
+- **THEN** fixture 包含 memory records、memory queries、expected memory snippets 和 forbidden memory snippets
+
+#### Scenario: Memory index is rebuilt through public reindex
+- **WHEN** deterministic combined embedding evaluation 运行
+- **THEN** runner 调用 `vector_store.reindex(ReindexRequest(owner="memory", user_id=...))`
+
+#### Scenario: Expected memory snippets are retrieved
+- **WHEN** memory query 运行完成
+- **THEN** runner 验证 expected memory snippets 出现在 `memory_layer.search()` top-k 结果中
+
+#### Scenario: Forbidden memory snippets are rejected
+- **WHEN** memory query 运行完成
+- **THEN** runner 验证 forbidden memory snippets 不出现在 `memory_layer.search()` top-k 结果中
+
+### Requirement: Memory retention maintenance public API
+memory-layer SHALL provide a per-user public API for dry-run and apply memory retention maintenance.
+
+#### Scenario: Maintenance API is importable
+- **WHEN** 调用方从 `fleetent.memory_layer` 导入 maintenance policy、summary、candidate dataclasses 和 `run_memory_maintenance`
+- **THEN** 导入成功
+
+#### Scenario: Invalid maintenance request fails fast
+- **WHEN** caller passes empty user_id or negative per-type limits
+- **THEN** maintenance API raises a validation error
+
+#### Scenario: Maintenance is user scoped
+- **WHEN** caller runs maintenance for user A
+- **THEN** maintenance does not delete user B memory rows
+- **AND** vector deletion namespace is `mem:{user_a}`
+
+### Requirement: Memory retention dry-run
+memory-layer SHALL support dry-run retention maintenance that reports eligible rows without mutation.
+
+#### Scenario: Dry-run reports expired context rows
+- **WHEN** user has context memory with `expires_at` before now
+- **AND** maintenance runs with dry_run enabled
+- **THEN** summary reports the expired memory id
+- **AND** SQLite row remains
+- **AND** vector_store.delete is not called
+
+#### Scenario: Dry-run reports over-limit rows
+- **WHEN** user has more memories of a type than policy allows
+- **AND** maintenance runs with dry_run enabled
+- **THEN** summary reports older over-limit memory ids
+- **AND** SQLite rows remain
+- **AND** vector_store.delete is not called
+
+### Requirement: Memory retention apply
+memory-layer SHALL delete eligible per-user memory rows and matching vectors when retention maintenance is applied.
+
+#### Scenario: Apply deletes expired context rows
+- **WHEN** user has context memory with `expires_at` before now
+- **AND** maintenance runs with dry_run disabled
+- **THEN** expired context row is deleted from `memory_items`
+- **AND** vector_store.delete is called for that memory id
+
+#### Scenario: Apply deletes older over-limit rows
+- **WHEN** user has more memories of a type than policy allows
+- **AND** maintenance runs with dry_run disabled
+- **THEN** newest memories within the limit are retained
+- **AND** older over-limit rows are deleted
+
+### Requirement: Memory duplicate compaction
+memory-layer SHALL provide deterministic duplicate compaction candidates within the same user and memory type.
+
+#### Scenario: Duplicate candidate is reported
+- **WHEN** user has multiple memories of the same type with identical normalized content
+- **THEN** maintenance summary includes a compaction candidate with one canonical id and duplicate ids
+
+#### Scenario: Newest duplicate is canonical
+- **WHEN** duplicate memories have different updated_at values
+- **THEN** canonical id is the newest row, using id as stable tie-breaker
+
+#### Scenario: Apply duplicate compaction removes duplicates
+- **WHEN** maintenance runs with dry_run disabled and duplicate compaction enabled
+- **THEN** duplicate ids are deleted
+- **AND** canonical id remains
+
+### Requirement: Memory domain terminology
+Memory SHALL be treated as a capability domain, while the current memory-layer implementation SHALL be identified as User Memory.
+
+#### Scenario: Current memory-layer is User Memory
+- **WHEN** 文档或 spec 描述当前 `memory_layer`
+- **THEN** 它被描述为 per-user semantic memory / User Memory
+- **AND** 不暗示 Memory 能力域只能包含单用户记忆
+
+#### Scenario: Shared Memory is a future sibling capability
+- **WHEN** 文档描述 team、tenant、project 或 agent scoped memory
+- **THEN** 它被描述为未来 Shared Memory sibling capability
+- **AND** 不要求当前 `memory_items` 表支持 shared scope
+
+### Requirement: User Memory remains user scoped
+User Memory SHALL remain scoped by `user_id` in this change.
+
+#### Scenario: User Memory table is not generalized
+- **WHEN** memory-reflection-maintenance 完成
+- **THEN** `memory_items` 仍以 `user_id` 表示 User Memory owner
+- **AND** 系统不新增 `scope_type` 或 `scope_id` 来模拟 Shared Memory
+
+#### Scenario: User Memory namespace remains user scoped
+- **WHEN** User Memory 写入 vector_store
+- **THEN** namespace 仍为 `mem:{user_id}`
+
+### Requirement: User Memory controlled mutation boundary
+memory-layer SHALL expose public mutation behavior that allows reflection to apply approved User Memory maintenance without direct SQL access.
+
+#### Scenario: Reflection can apply approved changes through public API
+- **WHEN** reflection 应用 approved User Memory maintenance proposal
+- **THEN** 它可以通过 memory-layer public API 执行对应 mutation
+- **AND** memory-layer 继续校验 target memory 属于当前 user_id
+
+#### Scenario: Cross-user mutation is rejected
+- **WHEN** mutation target 不属于当前 user_id
+- **THEN** memory-layer 拒绝该 mutation
+- **AND** 不修改任何 User Memory

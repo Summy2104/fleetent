@@ -22,10 +22,8 @@ from fleetent import (
     chat_admin_api,
     connector_admin_api,
     kb_admin_api,
-    mcp_client,
     monitor_admin_api,
     provider_admin_api,
-    quota,
     skill_admin_api,
     stats_admin_api,
     user_admin_api,
@@ -35,7 +33,14 @@ from fleetent.agent_loop import run_stream
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, WebhooksSettings, configure_logging, load_mcp_server_settings
 from fleetent.cron_scheduler import CronScheduler
-from fleetent.mcp_client import McpServerConfig
+from fleetent.governance import quota
+from fleetent.governance.permission_gate import (
+    _default_gate,
+    cleanup_stale_approvals,
+    list_approvals,
+)
+from fleetent.integrations import mcp as mcp_client
+from fleetent.integrations.mcp import McpServerConfig
 from fleetent.model_router import ROUTES
 from fleetent.observability.startup_diagnostics import (
     diagnose_database_writable,
@@ -43,7 +48,6 @@ from fleetent.observability.startup_diagnostics import (
     log_config_failed,
     log_config_loaded,
 )
-from fleetent.permission_gate import _default_gate, cleanup_stale_approvals, list_approvals
 from fleetent.skill_registry import scan as scan_skills
 
 logger = logging.getLogger(__name__)

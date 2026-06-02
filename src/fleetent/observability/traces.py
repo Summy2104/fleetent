@@ -40,6 +40,7 @@ class TraceQuery:
     run_id: str | None = None
     user_id: str | None = None
     agent_id: str | None = None
+    session_id: str | None = None
     tenant_id: str | None = None
     event_type: str | None = None
     start_ts: datetime | None = None
@@ -121,7 +122,7 @@ def query_trace_events(query: TraceQuery) -> Iterator[TraceEvent]:
     """Query agent run trace events."""
     clauses: list[str] = []
     params: dict[str, object] = {"limit": query.limit}
-    for field in ("run_id", "user_id", "agent_id", "tenant_id", "event_type"):
+    for field in ("run_id", "user_id", "agent_id", "session_id", "tenant_id", "event_type"):
         value = getattr(query, field)
         if value is not None:
             clauses.append(f"{field} = :{field}")
@@ -150,7 +151,7 @@ def query_trace_events(query: TraceQuery) -> Iterator[TraceEvent]:
 
 
 def _database_url() -> str:
-    return os.environ.get("DATABASE_URL", "sqlite:///data/users.db")
+    return os.environ.get("DATABASE_URL", "sqlite:///data/fleetent.db")
 
 
 def _prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:

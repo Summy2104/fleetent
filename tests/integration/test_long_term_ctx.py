@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.intelligence.knowledge_base import KnowledgeChunk
@@ -144,8 +144,10 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
         source_url=None,
     )
     knowledge_search = AsyncMock(return_value=[chunk])
+    resolve_agent_kb_ids = Mock(return_value=["global"])
     monkeypatch.setattr(long_term_ctx.memory_layer, "search", AsyncMock(return_value=[]))
     monkeypatch.setattr(long_term_ctx, "Settings", lambda anthropic_api_key="": settings)
+    monkeypatch.setattr(long_term_ctx.knowledge_base, "resolve_agent_kb_ids", resolve_agent_kb_ids)
     monkeypatch.setattr(long_term_ctx.knowledge_base, "search", knowledge_search)
     long_term_ctx.set_knowledge_provider(None)
 
@@ -156,6 +158,7 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
         available_tokens=300,
     )
 
+    resolve_agent_kb_ids.assert_called_once_with("tenant-a", "agent-1")
     knowledge_search.assert_awaited_once_with(
         "markdown",
         tenant_id="tenant-a",
@@ -170,6 +173,7 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
             source_id="chunk-1",
             score=0.82,
             metadata={"filename": "guide.md", "document_id": "doc-1", "kb_id": "global"},
+            token_estimate=len("- Fleetent can ingest markdown knowledge."),
         )
     ]
 

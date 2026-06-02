@@ -24,6 +24,8 @@ class VectorBackend(Protocol):
 
     async def delete(self, id: str, namespace: str) -> None: ...
 
+    async def clear_namespace(self, namespace: str) -> None: ...
+
 
 @dataclass(frozen=True)
 class SQLiteVectorBackend:
@@ -102,6 +104,20 @@ class SQLiteVectorBackend:
             )
             await db.commit()
 
+    async def clear_namespace(self, namespace: str) -> None:
+        database_path = _sqlite_path(self.database_url)
+        database_path.parent.mkdir(parents=True, exist_ok=True)
+        async with aiosqlite.connect(database_path) as db:
+            await _init_sqlite_schema(db)
+            await db.execute(
+                """
+                DELETE FROM vector_items
+                WHERE namespace = :namespace
+                """,
+                {"namespace": namespace},
+            )
+            await db.commit()
+
 
 class InMemoryVectorBackend:
     def __init__(self) -> None:
@@ -124,6 +140,9 @@ class InMemoryVectorBackend:
 
     async def delete(self, id: str, namespace: str) -> None:
         self._vectors.get(namespace, {}).pop(id, None)
+
+    async def clear_namespace(self, namespace: str) -> None:
+        self._vectors.pop(namespace, None)
 
 
 def _similarity(left: list[float], right: list[float]) -> float:

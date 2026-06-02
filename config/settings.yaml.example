@@ -1,6 +1,6 @@
 # Non-secret application settings. Environment variables and .env override this file.
 
-database_url: sqlite:///data/users.db
+database_url: sqlite:///data/fleetent.db
 log_format: console
 
 observability:
@@ -9,6 +9,14 @@ observability:
     file_level: debug
     directory: data/logs
     json_file: true
+
+diagnostics:
+  export_dir: data/diagnostics
+  retention:
+    enabled: false
+    logs_days:
+    traces_days:
+    diagnostic_exports_days:
 
 mcp:
   enabled: true
@@ -46,6 +54,31 @@ knowledge_base:
   default_kb_id: global
   chunk_size: 1000
   chunk_overlap: 200
+  google_drive:
+    connectors:
+      - connector_id: eng-drive
+        enabled: false
+        tenant_id: default
+        kb_id: engineering
+        folder_id: "google-drive-folder-id"
+        recursive: true
+        credential_ref: "file:///etc/fleetent/secrets/google-drive-eng-token.json"
+  confluence:
+    connectors:
+      - connector_id: eng-confluence
+        enabled: false
+        tenant_id: default
+        kb_id: engineering
+        base_url: "https://example.atlassian.net/wiki"
+        username: "bot@example.com"
+        space_key: "ENG"
+        include_children: true
+        credential_ref: "env:FLEETENT_CONFLUENCE_API_TOKEN"
 
 long_term_ctx:
   max_tokens: 2048
+  memory_max_tokens: 1024
+  knowledge_max_tokens: 1024
+  memory_top_k: 10
+  knowledge_top_k: 10
+  conflict_preference: auto

@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import structlog
 import yaml
@@ -48,6 +48,18 @@ class ObservabilitySettings(BaseModel):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
 
+class DiagnosticsRetentionSettings(BaseModel):
+    enabled: bool = False
+    logs_days: int | None = None
+    traces_days: int | None = None
+    diagnostic_exports_days: int | None = None
+
+
+class DiagnosticsSettings(BaseModel):
+    export_dir: str = "data/diagnostics"
+    retention: DiagnosticsRetentionSettings = Field(default_factory=DiagnosticsRetentionSettings)
+
+
 class VectorStoreSettings(BaseModel):
     backend: str = "memory"
     database_url: str | None = None
@@ -72,6 +84,11 @@ class RerankSettings(BaseModel):
 
 class LongTermContextSettings(BaseModel):
     max_tokens: int = 2_048
+    memory_max_tokens: int = 1_024
+    knowledge_max_tokens: int = 1_024
+    memory_top_k: int = 10
+    knowledge_top_k: int = 10
+    conflict_preference: Literal["auto", "memory", "knowledge"] = "auto"
 
 
 class KnowledgeBaseSettings(BaseModel):
@@ -80,6 +97,44 @@ class KnowledgeBaseSettings(BaseModel):
     default_kb_id: str = "global"
     chunk_size: int = 1_000
     chunk_overlap: int = 200
+    google_drive: "GoogleDriveConnectorsSettings" = Field(
+        default_factory=lambda: GoogleDriveConnectorsSettings()
+    )
+    confluence: "ConfluenceConnectorsSettings" = Field(
+        default_factory=lambda: ConfluenceConnectorsSettings()
+    )
+
+
+class GoogleDriveConnectorSettings(BaseModel):
+    connector_id: str
+    tenant_id: str
+    kb_id: str
+    folder_id: str
+    credential_ref: str
+    enabled: bool = True
+    recursive: bool = True
+
+
+class GoogleDriveConnectorsSettings(BaseModel):
+    connectors: list[GoogleDriveConnectorSettings] = Field(default_factory=list)
+
+
+class ConfluenceConnectorSettings(BaseModel):
+    connector_id: str
+    tenant_id: str
+    kb_id: str
+    base_url: str
+    username: str
+    credential_ref: str
+    enabled: bool = True
+    scope_type: Literal["space", "page"] | None = None
+    space_key: str | None = None
+    page_id: str | None = None
+    include_children: bool = False
+
+
+class ConfluenceConnectorsSettings(BaseModel):
+    connectors: list[ConfluenceConnectorSettings] = Field(default_factory=list)
 
 
 class McpServerSettings(BaseModel):
@@ -128,8 +183,9 @@ class Settings(BaseSettings):
     context_keep_recent: int = 10
     log_format: str = "console"
     default_agent_name: str | None = None
-    database_url: str = "sqlite:///data/users.db"
+    database_url: str = "sqlite:///data/fleetent.db"
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    diagnostics: DiagnosticsSettings = Field(default_factory=DiagnosticsSettings)
     vector_store: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     rerank: RerankSettings = Field(default_factory=RerankSettings)

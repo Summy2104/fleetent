@@ -181,6 +181,14 @@ def test_record_injected_context_skips_empty_sources(monkeypatch):
     assert calls == []
 
 
+def test_trace_database_url_fallback_uses_default_fleetent_database(monkeypatch):
+    from fleetent.observability import traces
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    assert traces._database_url() == "sqlite:///data/fleetent.db"
+
+
 def test_query_trace_events_can_filter_injected_context_events(trace_db):
     record_trace_event(
         TraceEvent(
@@ -254,6 +262,7 @@ def test_query_trace_events_filters_by_run_user_agent_tenant_event_time_and_limi
             event_type="agent_run_completed",
             payload={"idx": 1},
             ts=base_ts,
+            session_id="session-1",
             user_id="user-1",
             agent_id="agent-1",
             tenant_id="tenant-1",
@@ -264,6 +273,7 @@ def test_query_trace_events_filters_by_run_user_agent_tenant_event_time_and_limi
             event_type="agent_run_completed",
             payload={"idx": 2},
             ts=base_ts + timedelta(minutes=1),
+            session_id="session-2",
             user_id="user-1",
             agent_id="agent-1",
             tenant_id="tenant-1",
@@ -274,6 +284,7 @@ def test_query_trace_events_filters_by_run_user_agent_tenant_event_time_and_limi
             event_type="tool_call_completed",
             payload={"idx": 3},
             ts=base_ts + timedelta(minutes=2),
+            session_id="session-2",
             user_id="user-2",
             agent_id="agent-2",
             tenant_id="tenant-2",
@@ -286,6 +297,10 @@ def test_query_trace_events_filters_by_run_user_agent_tenant_event_time_and_limi
     assert [event.id for event in query_trace_events(TraceQuery(user_id="user-1"))] == [
         "event-1",
         "event-2",
+    ]
+    assert [event.id for event in query_trace_events(TraceQuery(session_id="session-2"))] == [
+        "event-2",
+        "event-3",
     ]
     assert [
         event.id

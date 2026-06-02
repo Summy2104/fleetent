@@ -6,6 +6,8 @@ import pytest
 import fleetent.agent_store as agent_store
 import fleetent.im_user_store as im_user_store
 from fleetent import admin, user_store
+from fleetent.platform.admin_cli import agents as admin_cli_agents
+from fleetent.platform.admin_cli.main import main as admin_cli_main
 
 
 @pytest.fixture(autouse=True)
@@ -30,6 +32,15 @@ def run_admin(*args: str) -> tuple[str, str, int]:
         except SystemExit as e:
             exit_code = int(e.code or 0)
     return stdout.getvalue(), stderr.getvalue(), exit_code
+
+
+def test_admin_platform_entrypoint_is_importable():
+    assert callable(admin_cli_main)
+
+
+def test_legacy_admin_entrypoint_reexports_platform_entrypoint():
+    assert admin.main is admin_cli_main
+    assert not hasattr(admin, "_SETTINGS_YAML")
 
 
 def test_create_user_prints_id_and_key():
@@ -174,7 +185,7 @@ def test_unassign_channel():
 def test_set_default_agent(tmp_path, monkeypatch):
     settings_yaml = tmp_path / "settings.yaml"
     settings_yaml.write_text("")
-    monkeypatch.setattr(admin, "_SETTINGS_YAML", settings_yaml)
+    monkeypatch.setattr(admin_cli_agents, "_SETTINGS_YAML", settings_yaml)
     agent_store.create_agent("basic", "Basic.", [])
     out, _, code = run_admin("set-default-agent", "--agent-name", "basic")
     assert code == 0
@@ -184,7 +195,7 @@ def test_set_default_agent(tmp_path, monkeypatch):
 def test_set_default_agent_clear(tmp_path, monkeypatch):
     settings_yaml = tmp_path / "settings.yaml"
     settings_yaml.write_text("default_agent_name: basic\n")
-    monkeypatch.setattr(admin, "_SETTINGS_YAML", settings_yaml)
+    monkeypatch.setattr(admin_cli_agents, "_SETTINGS_YAML", settings_yaml)
     out, _, code = run_admin("set-default-agent", "--clear")
     assert code == 0
     content = settings_yaml.read_text()
@@ -252,3 +263,408 @@ def test_remove_schedule_success(tmp_sched_db):
 def test_remove_schedule_not_found_exits_nonzero(tmp_sched_db):
     _, _, code = run_admin("remove-schedule", "--task-id", "no-such-id")
     assert code != 0
+
+
+def test_kb_connectors_list_outputs_configured_connectors(monkeypatch):
+    from fleetent.intelligence.knowledge_base import operations
+
+    monkeypatch.setattr(
+        operations,
+        "list_configured_connectors",
+        lambda: [
+            operations.ConnectorSummary(
+                connector_id="eng-drive",
+                connector_type="google_drive",
+                enabled=True,
+                tenant_id="default",
+                kb_id="engineering",
+                scope="folder:folder-1",
+                credential_ref_summary="file:google.json",
+            )
+        ],
+    )
+
+    out, _, code = run_admin("kb", "connectors", "list")
+
+    assert code == 0
+    assert "eng-drive" in out
+    assert "google_drive" in out
+
+
+def test_kb_connectors_check_outputs_status(monkeypatch):
+    from fleetent.intelligence.knowledge_base import operations
+
+    async def check_connector(connector_id: str):
+        return operations.ConnectorCheckResult(
+            connector_id=connector_id,
+            status="ok",
+            message="connector is reachable",
+        )
+
+    monkeypatch.setattr(operations, "check_connector", check_connector)
+
+    out, _, code = run_admin("kb", "connectors", "check", "eng-drive")
+
+    assert code == 0
+    assert "ok" in out
+    assert "eng-drive" in out
+
+
+def test_kb_connectors_status_outputs_never_run(monkeypatch):
+    from fleetent.intelligence.knowledge_base import operations
+
+    monkeypatch.setattr(
+        operations,
+        "get_connector_status",
+        lambda connector_id: operations.ConnectorStatus(
+            connector_id=connector_id,
+            connector_type="google_drive",
+            tenant_id="default",
+            kb_id="engineering",
+            last_status="never_run",
+            last_started_at=None,
+            last_finished_at=None,
+            last_summary={},
+            last_error=None,
+        ),
+    )
+
+    out, _, code = run_admin("kb", "connectors", "status", "eng-drive")
+
+    assert code == 0
+    assert "never_run" in out
+
+
+def test_kb_connectors_sync_dry_run_outputs_summary(monkeypatch):
+    from fleetent.intelligence.knowledge_base import operations
+
+    async def run_connector_sync(connector_id: str, *, dry_run: bool = False):
+        assert dry_run is True
+        return operations.ConnectorSyncResult(
+            connector_id=connector_id,
+            status="dry_run_ok",
+            summary={"planned": 1},
+            error=None,
+        )
+
+    monkeypatch.setattr(operations, "run_connector_sync", run_connector_sync)
+
+    out, _, code = run_admin("kb", "connectors", "sync", "eng-drive", "--dry-run")
+
+    assert code == 0
+    assert "dry_run_ok" in out
+    assert "planned=1" in out
+
+
+def test_kb_connectors_cli_output_is_sanitized(monkeypatch):
+    from fleetent.intelligence.knowledge_base import operations
+
+    async def run_connector_sync(connector_id: str, *, dry_run: bool = False):
+        return operations.ConnectorSyncResult(
+            connector_id=connector_id,
+            status="sync_failed",
+            summary={"failed": 1},
+            error="token secret-value failed",
+        )
+
+    monkeypatch.setattr(operations, "run_connector_sync", run_connector_sync)
+
+    out, _, code = run_admin("kb", "connectors", "sync", "eng-drive")
+
+    assert code == 0
+    assert "sync_failed" in out
+    assert "secret-value" not in out
+
+
+def test_diagnostics_export_cli_outputs_package_path(monkeypatch, tmp_path):
+    from fleetent.observability import diagnostics
+
+    package_path = tmp_path / "diagnostics.zip"
+
+    def export_diagnostics(request):
+        return diagnostics.DiagnosticsExportPackage(path=package_path)
+
+    monkeypatch.setattr(diagnostics, "export_diagnostics", export_diagnostics)
+
+    out, _, code = run_admin("diagnostics", "export", "--output-dir", str(tmp_path))
+
+    assert code == 0
+    assert str(package_path) in out
+
+
+def test_diagnostics_retention_dry_run_cli_outputs_candidates(monkeypatch):
+    from fleetent.observability import diagnostics
+
+    monkeypatch.setattr(
+        diagnostics,
+        "plan_diagnostics_retention",
+        lambda: diagnostics.DiagnosticsRetentionPlan(
+            log_files=[diagnostics.Path("data/logs/old.log")],
+            trace_count=3,
+            diagnostic_exports=[diagnostics.Path("data/diagnostics/old.zip")],
+        ),
+    )
+
+    out, _, code = run_admin("diagnostics", "retention", "dry-run")
+
+    assert code == 0
+    assert "logs=1" in out
+    assert "traces=3" in out
+    assert "exports=1" in out
+
+
+def test_diagnostics_retention_apply_disabled_cli_exits_nonzero(monkeypatch):
+    from fleetent.observability import diagnostics
+
+    monkeypatch.setattr(
+        diagnostics,
+        "apply_diagnostics_retention",
+        lambda: diagnostics.DiagnosticsRetentionResult(
+            applied=False,
+            deleted_logs=0,
+            deleted_traces=0,
+            deleted_exports=0,
+            failures=[],
+            message="diagnostics retention disabled",
+        ),
+    )
+
+    _, err, code = run_admin("diagnostics", "retention", "apply")
+
+    assert code != 0
+    assert "disabled" in err
+
+
+def test_diagnostics_cli_output_is_sanitized(monkeypatch, tmp_path):
+    from fleetent.observability import diagnostics
+
+    def export_diagnostics(request):
+        return diagnostics.DiagnosticsExportPackage(path=tmp_path / "token-secret-value.zip")
+
+    monkeypatch.setattr(diagnostics, "export_diagnostics", export_diagnostics)
+
+    out, _, code = run_admin("diagnostics", "export")
+
+    assert code == 0
+    assert "secret-value" not in out
+
+
+def test_observability_traces_cli_queries_public_api_and_hides_payload_values(monkeypatch):
+    from datetime import datetime
+
+    from fleetent import observability
+
+    captured = {}
+
+    def query_trace_events(query):
+        captured["query"] = query
+        return iter(
+            [
+                observability.TraceEvent(
+                    id="evt-1",
+                    ts=datetime.fromisoformat("2026-06-02T01:02:03+00:00"),
+                    run_id="run-1",
+                    event_type="agent_run_completed",
+                    user_id="user-1",
+                    agent_id="agent-1",
+                    session_id="session-1",
+                    payload={
+                        "model_used": "claude",
+                        "token": "secret-value",
+                        "reply": "sensitive reply",
+                    },
+                )
+            ]
+        )
+
+    monkeypatch.setattr(observability, "query_trace_events", query_trace_events)
+
+    out, _, code = run_admin(
+        "observability",
+        "traces",
+        "--run-id",
+        "run-1",
+        "--event-type",
+        "agent_run_completed",
+        "--user-id",
+        "user-1",
+        "--agent-id",
+        "agent-1",
+        "--session-id",
+        "session-1",
+        "--tenant-id",
+        "default",
+        "--from",
+        "2026-06-02T00:00:00+00:00",
+        "--to",
+        "2026-06-02T23:59:59+00:00",
+        "--limit",
+        "20",
+    )
+
+    query = captured["query"]
+    assert code == 0
+    assert query.run_id == "run-1"
+    assert query.event_type == "agent_run_completed"
+    assert query.user_id == "user-1"
+    assert query.agent_id == "agent-1"
+    assert query.session_id == "session-1"
+    assert query.tenant_id == "default"
+    assert query.start_ts == datetime.fromisoformat("2026-06-02T00:00:00+00:00")
+    assert query.end_ts == datetime.fromisoformat("2026-06-02T23:59:59+00:00")
+    assert query.limit == 20
+    assert "agent_run_completed" in out
+    assert "model_used,reply,token" in out
+    assert "secret-value" not in out
+    assert "sensitive reply" not in out
+
+
+def test_observability_usage_cli_queries_public_api_and_outputs_summary(monkeypatch):
+    from datetime import datetime
+
+    from fleetent import observability
+
+    captured = {}
+
+    def get_usage_summary(query):
+        captured["query"] = query
+        return observability.UsageSummary(
+            run_count=2,
+            prompt_tokens=10,
+            completion_tokens=15,
+            total_tokens=25,
+            total_elapsed_s=3.0,
+            avg_elapsed_s=1.5,
+            by_model=[
+                observability.ModelUsage(
+                    model="claude",
+                    run_count=2,
+                    prompt_tokens=10,
+                    completion_tokens=15,
+                    total_tokens=25,
+                    total_elapsed_s=3.0,
+                    avg_elapsed_s=1.5,
+                )
+            ],
+        )
+
+    monkeypatch.setattr(observability, "get_usage_summary", get_usage_summary)
+
+    out, _, code = run_admin(
+        "observability",
+        "usage",
+        "--user-id",
+        "user-1",
+        "--agent-id",
+        "agent-1",
+        "--session-id",
+        "session-1",
+        "--tenant-id",
+        "default",
+        "--from",
+        "2026-06-02T00:00:00+00:00",
+        "--to",
+        "2026-06-02T23:59:59+00:00",
+        "--limit",
+        "50",
+    )
+
+    query = captured["query"]
+    assert code == 0
+    assert query.user_id == "user-1"
+    assert query.agent_id == "agent-1"
+    assert query.session_id == "session-1"
+    assert query.tenant_id == "default"
+    assert query.start_ts == datetime.fromisoformat("2026-06-02T00:00:00+00:00")
+    assert query.end_ts == datetime.fromisoformat("2026-06-02T23:59:59+00:00")
+    assert query.limit == 50
+    assert "run_count=2" in out
+    assert "total_tokens=25" in out
+    assert "model=claude" in out
+
+
+def test_observability_performance_cli_queries_public_api_and_outputs_summary(monkeypatch):
+    from fleetent import observability
+
+    captured = {}
+
+    def get_performance_summary(query):
+        captured["query"] = query
+        return observability.PerformanceSummary(
+            run_count=4,
+            completed_count=3,
+            failed_count=1,
+            failure_rate=0.25,
+            avg_elapsed_s=2.0,
+            p50_elapsed_s=1.5,
+            p95_elapsed_s=4.0,
+            llm_call_count=5,
+            llm_error_count=1,
+            avg_llm_elapsed_s=0.8,
+            p95_llm_elapsed_s=1.4,
+            fallback_count=1,
+            fallback_rate=0.25,
+            tool_call_count=3,
+            tool_error_count=1,
+            avg_tool_elapsed_s=0.6,
+            p95_tool_elapsed_s=1.1,
+            permission_requested_count=2,
+            permission_approved_count=1,
+            permission_rejected_count=0,
+            permission_timeout_count=1,
+            avg_permission_wait_s=5.0,
+            by_model=[
+                observability.ModelPerformance(
+                    model="claude",
+                    call_count=5,
+                    error_count=1,
+                    avg_elapsed_s=0.8,
+                )
+            ],
+            by_tool=[
+                observability.ToolPerformance(
+                    tool_name="search",
+                    call_count=3,
+                    error_count=1,
+                    avg_elapsed_s=0.6,
+                )
+            ],
+            permission=observability.PermissionSummary(
+                requested_count=2,
+                approved_count=1,
+                rejected_count=0,
+                timeout_count=1,
+                avg_wait_s=5.0,
+            ),
+        )
+
+    monkeypatch.setattr(observability, "get_performance_summary", get_performance_summary)
+
+    out, _, code = run_admin(
+        "observability",
+        "performance",
+        "--agent-id",
+        "agent-1",
+        "--limit",
+        "100",
+    )
+
+    query = captured["query"]
+    assert code == 0
+    assert query.agent_id == "agent-1"
+    assert query.limit == 100
+    assert "run_count=4" in out
+    assert "failure_rate=0.250" in out
+    assert "llm_calls=5" in out
+    assert "tool_calls=3" in out
+    assert "fallbacks=1" in out
+    assert "permission_requested=2" in out
+    assert "model=claude" in out
+    assert "tool=search" in out
+
+
+def test_observability_cli_invalid_time_exits_nonzero():
+    _, err, code = run_admin("observability", "usage", "--from", "not-a-time")
+
+    assert code != 0
+    assert "invalid timestamp" in err

@@ -1,6 +1,6 @@
 import pytest
 
-import fleetent.audit_log as audit
+import fleetent.governance.audit_log as audit
 import fleetent.im_user_store as im_user_store
 import fleetent.user_store as user_store
 

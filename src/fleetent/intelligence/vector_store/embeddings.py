@@ -64,7 +64,7 @@ class HttpEmbeddingProvider:
             return [0.0] * self.dimensions
 
         headers = _authorization_header(self.api_key_env)
-        payload = {"model": self.model, "input": [text]}
+        payload = {"model": self.model, "input": [text], "dimensions": self.dimensions}
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 response = await client.post(self.endpoint, json=payload, headers=headers)

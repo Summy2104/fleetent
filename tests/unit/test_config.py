@@ -15,7 +15,7 @@ def test_settings_defaults():
     assert s.microsandbox_url == "http://host.docker.internal:7777"
     assert s.permission_gate_medium_timeout_seconds == 300
     assert s.permission_gate_high_timeout_seconds == 3600
-    assert s.database_url == "sqlite:///data/users.db"
+    assert s.database_url == "sqlite:///data/fleetent.db"
 
 
 def test_settings_loads_non_secret_values_from_settings_yaml(tmp_path, monkeypatch):
@@ -81,6 +81,20 @@ def test_settings_example_excludes_mcp_server_definitions():
     assert "mcp-github" not in example
 
 
+def test_settings_example_uses_default_fleetent_database_url():
+    example = (Path(__file__).parents[2] / "config" / "settings.yaml.example").read_text()
+
+    assert "database_url: sqlite:///data/fleetent.db" in example
+    assert "database_url: sqlite:///data/users.db" not in example
+
+
+def test_alembic_ini_uses_default_fleetent_database_url():
+    alembic_ini = (Path(__file__).parents[2] / "alembic.ini").read_text()
+
+    assert "sqlalchemy.url = sqlite:///data/fleetent.db" in alembic_ini
+    assert "sqlalchemy.url = sqlite:///data/users.db" not in alembic_ini
+
+
 def test_mcp_servers_example_documents_server_list_format():
     example = (Path(__file__).parents[2] / "config" / "mcp.servers.yaml.example").read_text()
 
@@ -119,7 +133,7 @@ def test_settings_missing_yaml_file_uses_typed_defaults(tmp_path, monkeypatch):
 
     s = Settings(anthropic_api_key="test-key")
 
-    assert s.database_url == "sqlite:///data/users.db"
+    assert s.database_url == "sqlite:///data/fleetent.db"
     assert s.log_format == "console"
 
 
@@ -185,6 +199,39 @@ def test_knowledge_base_defaults():
     assert s.knowledge_base.chunk_size > 0
     assert s.knowledge_base.chunk_overlap >= 0
     assert s.knowledge_base.chunk_overlap < s.knowledge_base.chunk_size
+
+
+def test_diagnostics_defaults_are_conservative():
+    s = Settings(anthropic_api_key="test-key")
+
+    assert s.diagnostics.export_dir == "data/diagnostics"
+    assert s.diagnostics.retention.enabled is False
+    assert s.diagnostics.retention.logs_days is None
+    assert s.diagnostics.retention.traces_days is None
+    assert s.diagnostics.retention.diagnostic_exports_days is None
+
+
+def test_diagnostics_retention_days_are_opt_in():
+    s = Settings(
+        anthropic_api_key="test-key",
+        diagnostics={"retention": {"enabled": True, "logs_days": 7}},
+    )
+
+    assert s.diagnostics.retention.enabled is True
+    assert s.diagnostics.retention.logs_days == 7
+    assert s.diagnostics.retention.traces_days is None
+    assert s.diagnostics.retention.diagnostic_exports_days is None
+
+
+def test_settings_example_includes_diagnostics_without_default_deletion():
+    example = (Path(__file__).parents[2] / "config" / "settings.yaml.example").read_text()
+
+    assert "diagnostics:" in example
+    assert "export_dir: data/diagnostics" in example
+    assert "enabled: false" in example
+    assert "logs_days:" in example
+    assert "traces_days:" in example
+    assert "diagnostic_exports_days:" in example
 
 
 def test_vector_store_accepts_sqlite_backend_with_optional_database_url():

@@ -33,10 +33,13 @@ def test_upgrade_creates_tables(tmp_path):
     assert "traces" in tables
     assert "memory_items" in tables
     assert "reflection_reports" in tables
+    assert "memory_maintenance_proposals" in tables
     assert "knowledge_bases" in tables
     assert "knowledge_documents" in tables
     assert "knowledge_chunks" in tables
     assert "knowledge_chunks_fts" in tables
+    assert "knowledge_base_agent_bindings" in tables
+    assert "knowledge_connector_status" in tables
 
 
 def test_upgrade_creates_trace_indexes(tmp_path):
@@ -177,6 +180,24 @@ def test_column_structure(tmp_path):
         "findings_json",
         "created_at",
     }
+    maintenance_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(memory_maintenance_proposals)")
+    }
+    assert maintenance_cols >= {
+        "id",
+        "user_id",
+        "action",
+        "target_memory_ids_json",
+        "proposed_content",
+        "metadata_patch_json",
+        "risk",
+        "reason",
+        "evidence_ids_json",
+        "status",
+        "created_at",
+        "updated_at",
+        "expires_at",
+    }
 
     kb_cols = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_bases)")}
     assert kb_cols >= {"tenant_id", "kb_id", "created_at"}
@@ -188,6 +209,7 @@ def test_column_structure(tmp_path):
         "filename",
         "source",
         "source_url",
+        "archived_at",
         "created_at",
     }
     chunk_cols = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_chunks)")}

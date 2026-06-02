@@ -99,3 +99,148 @@ tables、config namespace 变化和 cross-module dependencies。
 - **WHEN** 本 change 完成
 - **THEN** 仓库不包含运行时代码或数据库 schema 变更
 
+### Requirement: Admin CLI package split
+系统 SHALL 将 admin CLI 实现迁入 `platform.admin_cli` package，同时保持现有 `fleetent-admin` 入口兼容。
+
+#### Scenario: New admin CLI package entrypoint exists
+- **WHEN** 调用方导入 `fleetent.platform.admin_cli.main.main`
+- **THEN** 导入成功
+
+#### Scenario: Legacy admin entrypoint remains compatible
+- **WHEN** 调用方导入 `fleetent.admin.main`
+- **THEN** 导入成功
+- **AND** 行为等价于新的 `fleetent.platform.admin_cli.main.main`
+
+#### Scenario: Console script remains unchanged
+- **WHEN** 查看 `pyproject.toml`
+- **THEN** `fleetent-admin` 仍指向 `fleetent.admin:main`
+
+#### Scenario: Admin shim does not contain business logic
+- **WHEN** 查看 `src/fleetent/admin.py`
+- **THEN** 文件只 re-export admin CLI entrypoint
+- **AND** 不包含命令业务处理逻辑
+
+### Requirement: Admin CLI command domains
+admin CLI SHALL 按命令域拆分实现文件，降低单文件冲突。
+
+#### Scenario: User and IM commands are split
+- **WHEN** 查看 `platform.admin_cli`
+- **THEN** user commands 和 IM commands 分别位于独立模块
+
+#### Scenario: Pilot operations commands are split
+- **WHEN** 查看 `platform.admin_cli`
+- **THEN** KB connector、diagnostics 和 observability commands 分别位于独立模块
+
+#### Scenario: Existing admin CLI behavior is preserved
+- **WHEN** 运行现有 admin CLI integration tests
+- **THEN** 用户、IM、agent/channel、schedule、KB connector、diagnostics 和 observability 命令行为保持不变
+
+#### Scenario: Command modules expose a small registration contract
+- **WHEN** 查看 `platform.admin_cli` 的命令域模块
+- **THEN** 每个模块通过 `register(subparsers)` 注册自身命令
+- **AND** 通过 `handle(args)` 处理自身命令并返回是否已处理
+
+### Requirement: Governance package migration
+系统 SHALL 将治理域实现迁入 `fleetent.governance` package，并保持 legacy 顶层 import 路径兼容。
+
+#### Scenario: Governance package exists
+- **WHEN** 调用方导入 `fleetent.governance`
+- **THEN** 导入成功
+
+#### Scenario: Governance canonical modules exist
+- **WHEN** 调用方导入 `fleetent.governance.permission_gate`、`fleetent.governance.quota`、`fleetent.governance.audit_log`、`fleetent.governance.blocklist` 或 `fleetent.governance.agent_policy`
+- **THEN** 导入成功
+
+#### Scenario: Legacy governance imports remain compatible
+- **WHEN** 调用方导入 `fleetent.permission_gate`、`fleetent.quota`、`fleetent.audit_log`、`fleetent.blocklist` 或 `fleetent.agent_policy`
+- **THEN** 导入成功
+- **AND** 旧路径暴露迁移前的 public API
+
+#### Scenario: Governance shims do not contain business logic
+- **WHEN** 查看 legacy 顶层 governance 文件
+- **THEN** 文件只 re-export `fleetent.governance.*` 的 public names
+- **AND** 不访问数据库
+- **AND** 不读取配置
+- **AND** 不承载业务逻辑
+
+#### Scenario: Governance owns existing governance data responsibilities
+- **WHEN** quota、audit log 或 blocklist 访问既有持久化数据
+- **THEN** 该访问由 `fleetent.governance` package 内的实现负责
+- **AND** 本 change 不新增数据库 schema
+
+#### Scenario: Platform and channels use governance public API
+- **WHEN** platform 或 channels 模块需要 audit log、blocklist、quota 或 permission gate 能力
+- **THEN** 它们通过 `fleetent.governance` canonical public API 调用
+- **AND** legacy 顶层 shim 不承载可被 monkeypatch 的治理状态
+
+#### Scenario: Runtime uses governance through public API
+- **WHEN** agent runtime 需要权限审批或工具访问策略
+- **THEN** 它通过 `fleetent.governance` public API 调用治理能力
+- **AND** governance package 不反向 import runtime entrypoint
+
+### Requirement: Source module organization roadmap
+系统 SHALL 维护 `src/fleetent` 的模块组织路线图，用于指导 legacy 平铺模块向模块化单体 package 迁移。
+
+#### Scenario: Roadmap document exists
+- **WHEN** 读者查看架构文档
+- **THEN** 仓库包含 `docs/architecture/source-module-organization-roadmap.md`
+
+#### Scenario: Roadmap defines target package map
+- **WHEN** 读者查看 source module organization roadmap
+- **THEN** 文档定义 `runtime`、`platform`、`governance`、`channels`、`intelligence`、`integrations`、
+  `observability` 和 `infrastructure` 的目标职责
+
+#### Scenario: Roadmap defines migration order
+- **WHEN** maintainer 准备拆分 legacy 平铺模块
+- **THEN** roadmap 给出推荐迁移顺序、首批实现型 specs 和不应提前迁移的范围
+
+#### Scenario: Roadmap defines shim policy
+- **WHEN** legacy 模块被迁移到 package
+- **THEN** roadmap 要求旧 import 路径只保留 re-export shim
+- **AND** shim 不承载业务逻辑
+
+#### Scenario: Runtime behavior is unchanged
+- **WHEN** source module organization roadmap change 完成
+- **THEN** 仓库不包含运行时代码、数据库 schema 或配置行为变更
+
+### Requirement: Integrations package migration
+系统 SHALL 将外部能力接入实现迁入 `fleetent.integrations` package，并保持 legacy 顶层 import 路径兼容。
+
+#### Scenario: Integrations package exists
+- **WHEN** 调用方导入 `fleetent.integrations`
+- **THEN** 导入成功
+
+#### Scenario: MCP canonical package exists
+- **WHEN** 调用方导入 `fleetent.integrations.mcp` 或 `fleetent.integrations.mcp.client`
+- **THEN** 导入成功
+- **AND** canonical path 暴露 MCP client public API
+
+#### Scenario: Sandbox canonical package exists
+- **WHEN** 调用方导入 `fleetent.integrations.sandbox` 或 `fleetent.integrations.sandbox.client`
+- **THEN** 导入成功
+- **AND** canonical path 暴露 sandbox client public API
+
+#### Scenario: Legacy MCP import remains compatible
+- **WHEN** 调用方导入 `fleetent.mcp_client`
+- **THEN** 导入成功
+- **AND** 旧路径暴露迁移前 MCP public API
+- **AND** 旧路径与 `fleetent.integrations.mcp.client` 共享同一 MCP registry 状态
+
+#### Scenario: Legacy sandbox import remains compatible
+- **WHEN** 调用方导入 `fleetent.sandbox_client`
+- **THEN** 导入成功
+- **AND** 旧路径暴露迁移前 sandbox public API
+- **AND** 旧路径暴露的 class object 与 `fleetent.integrations.sandbox.client` 相同
+
+#### Scenario: Integrations shims do not contain business logic
+- **WHEN** 查看 legacy 顶层 `mcp_client.py` 或 `sandbox_client.py`
+- **THEN** 文件只 re-export `fleetent.integrations.*` 的 public names
+- **AND** 不创建 MCP session
+- **AND** 不创建 Docker subprocess
+- **AND** 不承载业务逻辑或 module-level runtime state
+
+#### Scenario: Runtime and server use integrations through public API
+- **WHEN** server 注册 MCP servers 或 tools 创建 sandbox client
+- **THEN** 它们通过 `fleetent.integrations` public API 调用外部能力接入
+- **AND** integrations package 不反向 import agent runtime entrypoint
+

@@ -1,0 +1,44 @@
+{
+  "name": "combined memory and knowledge embedding retrieval",
+  "user_id": "user-1",
+  "tenant_id": "default",
+  "kb_id": "global",
+  "memories": [
+    {
+      "id": "mem-1",
+      "type": "preferences",
+      "content": "User prefers Python for backend services."
+    },
+    {
+      "id": "mem-2",
+      "type": "context",
+      "content": "User is planning a payroll migration."
+    }
+  ],
+  "documents": [
+    {
+      "filename": "support.md",
+      "content": "Payroll incidents are escalated to HR operations."
+    },
+    {
+      "filename": "database.md",
+      "content": "Database failover incidents go to platform engineering."
+    }
+  ],
+  "queries": [
+    {
+      "owner": "memory",
+      "text": "backend Python preference",
+      "top_k": 1,
+      "expected": ["Python for backend"],
+      "forbidden": ["payroll migration"]
+    },
+    {
+      "owner": "knowledge_base",
+      "text": "payroll incidents HR operations",
+      "top_k": 1,
+      "expected": ["Payroll incidents"],
+      "forbidden": ["Database failover"]
+    }
+  ]
+}

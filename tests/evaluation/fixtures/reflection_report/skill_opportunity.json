@@ -1,0 +1,44 @@
+{
+  "name": "skill opportunity finding",
+  "scope": "user-1",
+  "trace_events": [
+    {
+      "id": "trace-1",
+      "run_id": "run-1",
+      "event_type": "agent_run_completed",
+      "payload": {
+        "task_pattern": "summarize weekly Jira progress"
+      },
+      "user_id": "user-1",
+      "agent_id": "agent-1"
+    },
+    {
+      "id": "trace-2",
+      "run_id": "run-2",
+      "event_type": "agent_run_completed",
+      "payload": {
+        "task_pattern": "summarize weekly Jira progress"
+      },
+      "user_id": "user-1",
+      "agent_id": "agent-1"
+    }
+  ],
+  "memory_signals": [],
+  "expected_findings": [
+    {
+      "type": "skill_opportunity",
+      "summary_contains": "summarize weekly Jira progress",
+      "evidence_ids": ["trace-1", "trace-2"],
+      "metadata": {
+        "pattern": "summarize weekly Jira progress",
+        "count": "2"
+      }
+    }
+  ],
+  "forbidden_findings": [
+    {
+      "type": "memory_conflict"
+    }
+  ],
+  "forbidden_persisted_text": []
+}

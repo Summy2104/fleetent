@@ -104,6 +104,41 @@ class LocalSourceStateStore:
             state is not None and state.mtime_ns == mtime_ns and state.content_hash == content_hash
         )
 
+    def list_for_source(self, source_id: str, tenant_id: str, kb_id: str) -> list[LocalSourceState]:
+        rows = self._database.execute(
+            """
+            SELECT source_id, tenant_id, kb_id, source_path, mtime_ns, content_hash, document_id
+            FROM knowledge_source_states
+            WHERE source_id = :source_id
+              AND tenant_id = :tenant_id
+              AND kb_id = :kb_id
+            ORDER BY source_path ASC
+            """,
+            {
+                "source_id": source_id,
+                "tenant_id": tenant_id,
+                "kb_id": kb_id,
+            },
+        ).fetchall()
+        return [_row_to_state(row) for row in rows]
+
+    def delete(self, source_id: str, tenant_id: str, kb_id: str, source_path: str) -> None:
+        self._database.execute(
+            """
+            DELETE FROM knowledge_source_states
+            WHERE source_id = :source_id
+              AND tenant_id = :tenant_id
+              AND kb_id = :kb_id
+              AND source_path = :source_path
+            """,
+            {
+                "source_id": source_id,
+                "tenant_id": tenant_id,
+                "kb_id": kb_id,
+                "source_path": source_path,
+            },
+        )
+
 
 def _row_to_state(row: Row) -> LocalSourceState:
     return LocalSourceState(

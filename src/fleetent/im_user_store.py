@@ -65,7 +65,7 @@ def block_im_user(
     batch_id: str | None = None,
 ) -> None:
     """Block a single IM identity (admin workbench). Audited."""
-    from fleetent import audit_log
+    from fleetent.governance import audit_log
 
     _init_db()
     with _conn() as conn:
@@ -87,7 +87,7 @@ def restore_im_user(
     batch_id: str | None = None,
 ) -> None:
     """Restore a single IM identity (admin workbench). Audited."""
-    from fleetent import audit_log
+    from fleetent.governance import audit_log
 
     _init_db()
     with _conn() as conn:

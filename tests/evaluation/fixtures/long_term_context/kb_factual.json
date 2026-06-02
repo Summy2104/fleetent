@@ -1,0 +1,32 @@
+{
+  "name": "kb factual injection",
+  "user_id": "user-1",
+  "agent_id": "agent-1",
+  "query": "Who handles payroll incidents?",
+  "available_tokens": 300,
+  "memories": [],
+  "knowledge": [
+    {
+      "id": "kb-1",
+      "content": "Payroll incidents are escalated to HR operations.",
+      "score": 0.9,
+      "metadata": {
+        "title": "Support handbook"
+      }
+    }
+  ],
+  "expected_text": ["Payroll incidents are escalated to HR operations."],
+  "forbidden_text": ["User prefers concise answers."],
+  "expected_sources": [
+    {
+      "source_type": "knowledge",
+      "source_id": "kb-1"
+    }
+  ],
+  "forbidden_sources": [
+    {
+      "source_type": "memory",
+      "source_id": "mem-1"
+    }
+  ]
+}

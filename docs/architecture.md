@@ -81,7 +81,7 @@ src/fleetent/
   context_mgr.py     ← in-session token 压缩
   memory_layer.py    ← 结构化语义记忆：提取动作 → SQLite memory_items → vector_store 索引
   intelligence/
-    knowledge_base/  ← 企业文档知识库：解析、导入、local sync、vector / keyword / hybrid search
+    knowledge_base/  ← 企业文档知识库：解析、导入、local / Google Drive / Confluence sync、vector / keyword / hybrid search
     vector_store/    ← 向量索引基础设施：in-memory / SQLite backend，embedding / rerank provider
     long_term_ctx.py ← 长期上下文调度：memory / knowledge_base provider 已接入
     reflection.py    ← 反思报告：读取 traces / memory，只生成建议，不自动写回
@@ -179,6 +179,7 @@ flowchart TD
 
 | 文档 | 覆盖范围 | 优先级 | 依赖的模块 | 负责人 | 状态 |
 |------|---------|:------:|-----------|-----|------|
+| [intelligence-roadmap.md](capabilities/intelligence-roadmap.md) | 常乐负责模块总控板、MVP 缺口、实施批次 | P0 | observability · memory · long-term-ctx · reflection · vector-store · knowledge-base · deployment | 常乐 | 基础完成 |
 | [agent-runtime.md](capabilities/agent-runtime.md) | 核心循环、工具调度、上下文压缩、运行治理 | P0 | model-router · tools · session · skill · governance · observability | 张洋 | 部分完成 |
 | [model-router.md](capabilities/model-router.md) | task_type 路由、provider 配置、fallback 链 | P0 | deployment | 张洋 | 部分完成 |
 | [tools.md](capabilities/tools.md) | @tool 装饰器、schema 构建、dispatch、内置工具集 | P0 | governance · connectors | 张洋 | 部分完成 |
@@ -190,12 +191,12 @@ flowchart TD
 | [platform.md](capabilities/platform.md) | 用户管理、API 认证、admin CLI | P1 | user-center | 张亮 | 部分完成 |
 | [governance.md](capabilities/governance.md) | 权限审批、工具白名单、agent 定义与分配 | P0 | session | 张亮 | 部分完成 |
 | [scheduling.md](capabilities/scheduling.md) | Cron 定时任务、Webhook 事件触发 | P1 | agent-runtime · session · im-gateway | 张亮 | 部分完成 |
-| [connectors.md](capabilities/connectors.md) | 数据源连接器（Confluence / Google Drive 等） | P2 | user-center | 张亮 | 未开始 |
+| [connectors.md](capabilities/connectors.md) | 用户级外部工具授权连接器；区别于 knowledge-base 数据源 connector | P2 | user-center | 张亮 | 未开始 |
 | [user-center.md](capabilities/user-center.md) | 用户中心、多租户管理 | P1 | - | 张亮 | 部分完成 |
 | [memory.md](capabilities/memory.md) | 跨 session 语义记忆、提取动作、检索与评估基线 | P1 | model-router · vector-store · observability | 常乐 | 基础完成 |
 | [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入，memory / knowledge-base provider 已接入 | P1 | memory · knowledge-base | 常乐 | 基础完成 |
-| [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、local directory 导入、混合检索 | P1 | vector-store | 常乐 | 基础完成 |
+| [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、local / Google Drive / Confluence 同步、混合检索 | P1 | vector-store | 常乐 | 基础完成 |
 | [vector-store.md](capabilities/vector-store.md) | 向量索引、SQLite backend、embedding / rerank provider | P1 | deployment | 常乐 | 基础完成 |
 | [reflection.md](capabilities/reflection.md) | 记忆 / Skill / 知识库反思与自进化 | P2 | memory · skill · knowledge-base | 常乐 | 基础完成 |
 | [observability.md](capabilities/observability.md) | 评估日志、数据统计、链路追踪 | P0 | - | 常乐 | 基础完成 |
-| [deployment.md](capabilities/deployment.md) | on-premises 打包、配置管理 | P0 | - | 常乐 | 部分完成 |
+| [deployment.md](capabilities/deployment.md) | on-premises 打包、配置管理、SQLite upgrade / backup | P0 | - | 常乐 | 基础完成 |

@@ -23,7 +23,7 @@ def get_settings() -> Any:
     """Return the app Settings. Wrapped so tests can monkeypatch the .env source."""
     from fleetent.config import Settings
 
-    return Settings()  # type: ignore[call-arg]
+    return Settings(anthropic_api_key="")
 
 
 def resolve(platform: str) -> dict[str, str]:

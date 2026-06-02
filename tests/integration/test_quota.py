@@ -1,6 +1,6 @@
 import pytest
 
-import fleetent.quota as quota
+import fleetent.governance.quota as quota
 import fleetent.user_store as user_store
 
 

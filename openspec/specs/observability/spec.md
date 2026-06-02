@@ -380,3 +380,392 @@ injected_context events SHALL 通过现有 trace query API 查询，不引入单
 - **WHEN** 同一个 run 同时存在 `injected_context` 和 `agent_run_completed`
 - **THEN** 测试断言 usage summary 只按 `agent_run_completed` 统计 run_count 和 token totals
 
+### Requirement: Agent runtime lifecycle trace events
+agent-runtime SHALL record lifecycle events for each run using the existing trace API.
+
+#### Scenario: Non-streaming run start is recorded
+- **WHEN** `agent_loop.run()` starts processing a user message
+- **THEN** it records `event_type="agent_run_started"`
+- **AND** the event includes run_id、user_id、agent_name when available、entrypoint=`run`
+
+#### Scenario: Streaming run start is recorded
+- **WHEN** `agent_loop.run_stream()` starts processing a user message
+- **THEN** it records `event_type="agent_run_started"`
+- **AND** the event includes run_id、user_id、agent_name when available、entrypoint=`run_stream`
+
+#### Scenario: Run failure is recorded
+- **WHEN** an agent run fails before emitting a completed event
+- **THEN** it records `event_type="agent_run_failed"`
+- **AND** the event includes error_type、error_message、elapsed_s and entrypoint
+
+### Requirement: LLM call trace events
+agent-runtime SHALL record each LLM call attempt and outcome.
+
+#### Scenario: LLM call start is recorded
+- **WHEN** agent-runtime sends a request to a model provider
+- **THEN** it records `event_type="llm_call_started"`
+- **AND** the event includes model、task_type、streaming flag、message_count and tool_schema_count
+
+#### Scenario: LLM call completion is recorded
+- **WHEN** the model provider returns successfully
+- **THEN** it records `event_type="llm_call_completed"`
+- **AND** the event includes model、finish_reason when available、elapsed_s and token usage when available
+
+#### Scenario: LLM call failure is recorded
+- **WHEN** a model provider call raises an error
+- **THEN** it records `event_type="llm_call_failed"`
+- **AND** the event includes model、error_type、error_message and elapsed_s
+
+### Requirement: Model fallback trace events
+agent-runtime SHALL record each fallback model switch.
+
+#### Scenario: Fallback switch is recorded
+- **WHEN** the primary model call fails with a fallback-eligible error and agent-runtime tries a fallback model
+- **THEN** it records `event_type="model_fallback_triggered"`
+- **AND** the event includes from_model、to_model、reason and attempt_index
+
+#### Scenario: Exhausted fallback remains visible
+- **WHEN** all fallback attempts fail
+- **THEN** the trace contains the failed LLM call events for each attempted model
+- **AND** the run records `agent_run_failed`
+
+### Requirement: Tool call trace events
+agent-runtime SHALL record tool call start, completion, and failure events.
+
+#### Scenario: Tool call start is recorded
+- **WHEN** the model requests a tool call
+- **THEN** agent-runtime records `event_type="tool_call_started"`
+- **AND** the event includes tool_name、tool_call_id、risk_level and sanitized argument summary
+
+#### Scenario: Tool call completion is recorded
+- **WHEN** a tool call returns successfully
+- **THEN** agent-runtime records `event_type="tool_call_completed"`
+- **AND** the event includes tool_name、tool_call_id、elapsed_s and sanitized result summary
+
+#### Scenario: Tool call failure is recorded
+- **WHEN** dispatching or awaiting a tool call fails
+- **THEN** agent-runtime records `event_type="tool_call_failed"`
+- **AND** the event includes tool_name、tool_call_id、error_type、error_message and elapsed_s
+
+#### Scenario: Sub-agent tool call is covered
+- **WHEN** agent-runtime intercepts the `sub_agent` tool
+- **THEN** it records the same tool call started/completed/failed event types as ordinary tools
+
+### Requirement: Permission trace events
+agent-runtime SHALL record human approval request and resolution events for medium/high risk tools.
+
+#### Scenario: Permission request is recorded
+- **WHEN** a medium or high risk tool requires approval
+- **THEN** agent-runtime records `event_type="permission_requested"`
+- **AND** the event includes approval_id、tool_name、risk_level and requester_user_id
+
+#### Scenario: Permission resolution is recorded
+- **WHEN** the approval request resolves as approved、rejected or timeout
+- **THEN** agent-runtime records `event_type="permission_resolved"`
+- **AND** the event includes approval_id、tool_name、risk_level、decision and elapsed_s
+
+### Requirement: Context compression trace events
+agent-runtime SHALL record context compression outcomes when runtime message compression is triggered.
+
+#### Scenario: Compression is recorded
+- **WHEN** runtime context compression changes the message list before an LLM call
+- **THEN** agent-runtime records `event_type="context_compression_completed"`
+- **AND** the event includes reason、before_message_count、after_message_count and elapsed_s
+
+#### Scenario: No-op compression is not recorded
+- **WHEN** context compression is checked but does not change the message list
+- **THEN** agent-runtime does not record a context compression event
+
+### Requirement: Final reply trace event
+agent-runtime SHALL record when a final reply is emitted to the caller.
+
+#### Scenario: Non-streaming final reply is recorded
+- **WHEN** `agent_loop.run()` returns a final reply
+- **THEN** it records `event_type="final_reply_emitted"`
+- **AND** the event includes reply_length and elapsed_s
+
+#### Scenario: Streaming final reply is recorded
+- **WHEN** `agent_loop.run_stream()` emits the final `done` event
+- **THEN** it records `event_type="final_reply_emitted"`
+- **AND** the event includes reply_length and elapsed_s
+
+### Requirement: Runtime event payload safety
+Runtime trace events SHALL store bounded summaries, not raw full runtime content.
+
+#### Scenario: Prompt and transcript are not persisted
+- **WHEN** runtime events are recorded
+- **THEN** payloads do not include raw full prompt, full message transcript, or full final reply
+
+#### Scenario: Tool args and results are bounded
+- **WHEN** tool call events include arguments or results
+- **THEN** the payload contains sanitized summaries with truncation markers when needed
+
+### Requirement: Runtime events are correlated by run id
+All trace events emitted by a single agent runtime invocation SHALL share the same run_id.
+
+#### Scenario: Non-streaming runtime events share run id
+- **WHEN** `agent_loop.run()` records lifecycle, LLM, tool, permission, injected_context, final_reply, and completed events
+- **THEN** all events from that invocation share one run_id
+
+#### Scenario: Streaming runtime events share run id
+- **WHEN** `agent_loop.run_stream()` records lifecycle, LLM, tool, injected_context, final_reply, and completed events
+- **THEN** all events from that invocation share one run_id
+
+### Requirement: Performance summary public API
+系统 SHALL 提供 performance summary public API，用于从 runtime trace events 聚合性能和失败指标。
+
+#### Scenario: Performance API is importable
+- **WHEN** 调用方从 `fleetent.observability` 导入 `PerformanceQuery`、`PerformanceSummary` 和 `get_performance_summary`
+- **THEN** 导入成功
+
+#### Scenario: Empty performance summary
+- **WHEN** 查询范围内没有 trace events
+- **THEN** summary 的计数、耗时、错误率和分组列表均为 0 或空列表
+
+### Requirement: Performance summary reads through trace API
+performance summary SHALL 通过 `query_trace_events()` 读取 traces，而不是直接访问 SQLite `traces` 表。
+
+#### Scenario: Performance summary uses trace query API
+- **WHEN** `get_performance_summary()` 执行查询
+- **THEN** 它调用 `query_trace_events()`，并传入 TraceQuery 支持的 query filters
+- **AND** 它不直接访问 SQLite `traces` 表
+
+### Requirement: Performance query filters
+系统 SHALL 支持按 user、agent、tenant、session、时间范围和 limit 过滤 performance summary。
+
+#### Scenario: Filter by user
+- **WHEN** 调用 `get_performance_summary(PerformanceQuery(user_id="user-1"))`
+- **THEN** summary 只统计 user-1 的 trace events
+
+#### Scenario: Filter by session
+- **WHEN** 查询包含 session_id
+- **THEN** summary 在读取 trace API 后按 `TraceEvent.session_id` 过滤
+- **AND** summary 只统计该 session 的 trace events
+
+#### Scenario: Filter by agent and time range
+- **WHEN** 查询包含 agent_id、start_ts 和 end_ts
+- **THEN** summary 只统计该 agent 在时间范围内的 trace events
+
+### Requirement: Run-level performance metrics
+系统 SHALL 从 terminal agent run lifecycle events 聚合 run-level performance metrics。
+
+#### Scenario: Run counts and failure rate
+- **WHEN** traces 中包含 `agent_run_completed` 和 `agent_run_failed`
+- **THEN** summary 返回 run_count、completed_count、failed_count 和 failure_rate
+- **AND** run_count 等于 completed_count + failed_count
+
+#### Scenario: Run latency percentiles
+- **WHEN** completed 或 failed run events 包含合法 elapsed_s
+- **THEN** summary 返回 avg_elapsed_s、p50_elapsed_s 和 p95_elapsed_s
+
+### Requirement: LLM and fallback metrics
+系统 SHALL 从 LLM runtime events 聚合 LLM 调用、错误、耗时和 fallback 指标。
+
+#### Scenario: LLM call metrics
+- **WHEN** traces 中包含 `llm_call_completed` 和 `llm_call_failed`
+- **THEN** summary 返回 llm_call_count、llm_error_count、avg_llm_elapsed_s 和 p95_llm_elapsed_s
+
+#### Scenario: Fallback metrics
+- **WHEN** traces 中包含 `model_fallback_triggered`
+- **THEN** summary 返回 fallback_count 和 fallback_rate
+
+#### Scenario: Group by model
+- **WHEN** LLM events 包含多个 model
+- **THEN** summary.by_model 按 model 返回 call_count、error_count 和 avg_elapsed_s
+
+### Requirement: Tool performance metrics
+系统 SHALL 从 tool runtime events 聚合工具调用、错误和耗时指标。
+
+#### Scenario: Tool call metrics
+- **WHEN** traces 中包含 `tool_call_completed` 和 `tool_call_failed`
+- **THEN** summary 返回 tool_call_count、tool_error_count、avg_tool_elapsed_s 和 p95_tool_elapsed_s
+
+#### Scenario: Group by tool
+- **WHEN** tool events 包含多个 tool_name
+- **THEN** summary.by_tool 按 tool_name 返回 call_count、error_count 和 avg_elapsed_s
+- **AND** by_tool 按 call_count 降序、tool_name 升序稳定排序
+
+### Requirement: Permission wait metrics
+系统 SHALL 从 permission runtime events 聚合人工审批数量和等待耗时。
+
+#### Scenario: Permission decisions are counted
+- **WHEN** traces 中包含 `permission_requested` 和 `permission_resolved` events
+- **THEN** summary 返回 permission_requested_count、permission_approved_count、permission_rejected_count 和 permission_timeout_count
+
+#### Scenario: Permission wait time is averaged
+- **WHEN** permission resolved events 包含合法 elapsed_s
+- **THEN** summary 返回 avg_permission_wait_s
+
+### Requirement: Performance payload tolerance
+系统 SHALL 容忍旧 trace、不完整 trace 或非法 payload 字段。
+
+#### Scenario: Missing elapsed is excluded from latency samples
+- **WHEN** runtime event payload 缺失 elapsed_s
+- **THEN** event count aggregation still counts the event
+- **AND** latency aggregation excludes that event from average and percentile samples
+- **AND** summary does not raise
+
+#### Scenario: Invalid numeric fields are excluded from latency samples
+- **WHEN** runtime event payload 中的 elapsed_s 不是合法数字
+- **THEN** event count aggregation still counts the event
+- **AND** latency aggregation excludes that event from average and percentile samples
+- **AND** summary does not raise
+
+#### Scenario: Missing grouping keys use unknown
+- **WHEN** LLM event 缺失 model 或 tool event 缺失 tool_name
+- **THEN** 对应分组归入 `unknown`
+
+### Requirement: Knowledge-base scope diagnostics
+系统 SHALL 对 agent KB 范围解析失败或降级记录可诊断事件，帮助 Pilot 环境排查配置问题。
+
+#### Scenario: Default KB missing is diagnostic
+- **WHEN** agent 没有显式 KB 绑定
+- **AND** 默认 KB 未配置、为空或不可用
+- **THEN** 系统记录一条知识库范围诊断事件
+- **AND** 事件包含 `tenant_id`、`agent_id` 和原因
+
+#### Scenario: Scope diagnostics avoid sensitive content
+- **WHEN** 系统记录知识库范围诊断事件
+- **THEN** 事件不包含完整用户 query、文档正文、connector credential、token 或 secret
+
+### Requirement: Diagnostics export
+系统 SHALL 提供手动 diagnostics export，用于生成本地脱敏诊断包。
+
+#### Scenario: Export creates package with manifest
+- **WHEN** operator 运行 diagnostics export
+- **THEN** 系统创建本地诊断包
+- **AND** 包含 `manifest.json`
+
+#### Scenario: Export includes diagnostic data
+- **WHEN** operator 运行 diagnostics export
+- **THEN** 诊断包可包含指定时间范围内的 structured logs、trace events 或 trace 摘要、usage summary、
+  performance summary、connector status、environment summary 和 config summary
+
+#### Scenario: Export excludes business data
+- **WHEN** operator 运行 diagnostics export
+- **THEN** 诊断包不包含 memory 内容、KB 文档正文、KB chunks、SQLite 主库、SQLite backups 或 connector credential 文件内容
+
+#### Scenario: Export excludes full user content
+- **WHEN** trace 或 log 中包含用户消息、prompt、reply 或工具 payload
+- **THEN** 诊断包不包含完整原文
+- **AND** 大文本被截断并带有截断标记
+
+#### Scenario: Export performs second-pass redaction
+- **WHEN** 诊断包写入 logs、traces、config summary 或 error summary
+- **THEN** 系统再次脱敏 token、API key、password、secret、authorization、邮箱和手机号
+
+### Requirement: Diagnostics retention planning
+系统 SHALL 支持诊断数据 retention dry-run，用于展示将删除的候选但不修改数据。
+
+#### Scenario: Dry-run identifies old logs
+- **WHEN** 配置了 `diagnostics.retention.logs_days`
+- **THEN** retention dry-run 返回超过天数的 log 文件候选
+
+#### Scenario: Dry-run identifies old traces
+- **WHEN** 配置了 `diagnostics.retention.traces_days`
+- **THEN** retention dry-run 返回超过天数的 trace 记录数量
+
+#### Scenario: Dry-run identifies old diagnostic exports
+- **WHEN** 配置了 `diagnostics.retention.diagnostic_exports_days`
+- **THEN** retention dry-run 返回超过天数的 diagnostics export 包候选
+
+#### Scenario: Dry-run does not mutate
+- **WHEN** operator 运行 retention dry-run
+- **THEN** 系统不删除文件
+- **AND** 不删除 trace 记录
+
+### Requirement: Diagnostics retention apply
+系统 SHALL 支持显式手动 retention apply，且只清理诊断数据。
+
+#### Scenario: Apply disabled by default
+- **WHEN** `diagnostics.retention.enabled=false`
+- **AND** operator 运行 retention apply
+- **THEN** 系统 fail fast
+- **AND** 不删除任何文件或 trace 记录
+
+#### Scenario: Apply deletes only configured old logs
+- **WHEN** `diagnostics.retention.enabled=true`
+- **AND** 配置了 `logs_days`
+- **THEN** retention apply 只删除超过天数的 log 文件
+
+#### Scenario: Apply deletes only configured old traces
+- **WHEN** `diagnostics.retention.enabled=true`
+- **AND** 配置了 `traces_days`
+- **THEN** retention apply 只删除超过天数的 observability trace 记录
+
+#### Scenario: Apply deletes only configured old exports
+- **WHEN** `diagnostics.retention.enabled=true`
+- **AND** 配置了 `diagnostic_exports_days`
+- **THEN** retention apply 只删除超过天数的 diagnostics export 包
+
+#### Scenario: Apply never deletes business data
+- **WHEN** operator 运行 retention apply
+- **THEN** 系统不删除 memory、KB documents、KB chunks、vector index、users、agents、schedules、connector source state、
+  SQLite 主库或 SQLite backups
+
+#### Scenario: Apply tolerates per-file deletion failure
+- **WHEN** 删除某个诊断文件失败
+- **THEN** 系统记录该失败
+- **AND** 继续处理其他候选
+
+### Requirement: Diagnostics admin CLI
+系统 SHALL 在 `fleetent-admin` 中提供 diagnostics export 和 retention 手动操作命令。
+
+#### Scenario: Export from CLI
+- **WHEN** operator 运行 `fleetent-admin diagnostics export`
+- **THEN** CLI 调用 diagnostics export 并输出诊断包路径
+
+#### Scenario: Retention dry-run from CLI
+- **WHEN** operator 运行 `fleetent-admin diagnostics retention dry-run`
+- **THEN** CLI 输出将删除的诊断数据候选摘要
+- **AND** 不删除任何数据
+
+#### Scenario: Retention apply from CLI
+- **WHEN** operator 运行 `fleetent-admin diagnostics retention apply`
+- **THEN** CLI 执行手动 retention apply 或在 retention disabled 时返回非 0
+
+#### Scenario: Diagnostics CLI output is sanitized
+- **WHEN** CLI 输出 export、dry-run 或 apply 结果
+- **THEN** 输出不包含 token、secret、credential payload 或完整文档正文
+
+### Requirement: Observability admin trace query CLI
+系统 SHALL 在 `fleetent-admin` 中提供 observability trace 查询命令，使 operator 无需手写 SQL 即可查询 agent run trace events。
+
+#### Scenario: Query traces by filters
+- **WHEN** operator 运行 `fleetent-admin observability traces --run-id run-1 --event-type agent_run_completed --limit 20`
+- **THEN** CLI 调用 observability public API `query_trace_events(TraceQuery(...))`
+- **AND** 查询条件包含 run_id、event_type 和 limit
+
+#### Scenario: Query traces by session
+- **WHEN** operator 运行 `fleetent-admin observability traces --session-id session-1`
+- **THEN** CLI 调用 observability public API `query_trace_events(TraceQuery(session_id="session-1"))`
+
+#### Scenario: Trace output is bounded
+- **WHEN** trace event payload 包含 prompt、reply、tool payload、token、secret 或 credential 字段
+- **THEN** CLI 输出不包含 payload 原值
+- **AND** CLI 只展示事件元数据和 bounded payload key summary
+
+### Requirement: Observability admin usage query CLI
+系统 SHALL 在 `fleetent-admin` 中提供 usage summary 查询命令，使 operator 能查看 run count、token usage 和 model 分组。
+
+#### Scenario: Query usage summary by filters
+- **WHEN** operator 运行 `fleetent-admin observability usage --user-id user-1 --from 2026-06-02T00:00:00 --to 2026-06-02T23:59:59`
+- **THEN** CLI 调用 observability public API `get_usage_summary(UsageQuery(...))`
+- **AND** 输出包含 run count、prompt tokens、completion tokens、total tokens 和 by-model summary
+
+### Requirement: Observability admin performance query CLI
+系统 SHALL 在 `fleetent-admin` 中提供 performance summary 查询命令，使 operator 能查看失败率、延迟、LLM / tool / permission 指标。
+
+#### Scenario: Query performance summary by filters
+- **WHEN** operator 运行 `fleetent-admin observability performance --agent-id agent-1 --limit 100`
+- **THEN** CLI 调用 observability public API `get_performance_summary(PerformanceQuery(...))`
+- **AND** 输出包含 run count、failure rate、latency percentile、LLM、tool、fallback 和 permission summary
+
+### Requirement: Observability admin query rejects invalid time
+系统 SHALL 对 observability admin query 的非法时间过滤给出明确错误并以非零状态退出。
+
+#### Scenario: Invalid from timestamp
+- **WHEN** operator 运行 `fleetent-admin observability usage --from not-a-time`
+- **THEN** CLI 输出 invalid timestamp 错误
+- **AND** 进程以非零状态退出
+
