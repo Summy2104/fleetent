@@ -66,9 +66,9 @@
 
 ## 10. invoke_agent 工具
 
-- [ ] 10.1 Write failing tests: `invoke_agent(agent_name, message)` 对存在 agent 返回 reply 字符串；对不存在返回 `agent {name!r} not found`；被调 agent 视图中 `invoke_agent`/`sub_agent` 不可见
-- [ ] 10.2 在 `tools.py` 添加 `invoke_agent`（risk medium）：内部 `agent_runtime.load_active` + `agent_loop.run(..., is_sub_agent=True, snapshot=...)`
-- [ ] 10.3 修改 `agent_loop` 工具排除：`is_sub_agent=True` 时排除 `sub_agent` 和 `invoke_agent`
+- [x] 10.1 Write failing tests: `invoke_agent(agent_name, message)` 对存在 agent 返回 reply 字符串；对不存在返回 `agent {name!r} not found`；被调 agent 视图中 `invoke_agent`/`sub_agent` 不可见
+- [x] 10.2 在 `tools.py` 添加 `invoke_agent`（risk medium）：内部 `agent_runtime.load_active` + `agent_loop.run(..., is_sub_agent=True, snapshot=...)`
+- [x] 10.3 修改 `agent_loop` 工具排除：`is_sub_agent=True` 时排除 `sub_agent` 和 `invoke_agent`
 
 ## 11. agent_admin_api — 版本与绑定 REST
 

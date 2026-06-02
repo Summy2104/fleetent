@@ -32,6 +32,10 @@ from fleetent.tool_registry import dispatch, get_risk_level, get_schemas
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
 
 _SUB_AGENT_TOOL = "sub_agent"
+_INVOKE_AGENT_TOOL = "invoke_agent"
+# Tools a child agent must not see: it can neither spawn sub-agents nor delegate
+# to another named agent (depth is capped at 1).
+_SUB_AGENT_EXCLUDED_TOOLS = frozenset({_SUB_AGENT_TOOL, _INVOKE_AGENT_TOOL})
 _LONG_TERM_CONTEXT_HEADER = "[Long-term context]"
 
 
@@ -750,9 +754,9 @@ async def run(
         _append_system_context(messages, system_prompt, built_context.text)
         _record_injected_context(run_id, built_context.sources)
 
-        # Determine effective tool schemas (exclude sub_agent for child agents)
+        # Determine effective tool schemas (child agents cannot delegate further)
         schemas = (
-            [s for s in get_schemas() if s["function"]["name"] != _SUB_AGENT_TOOL]
+            [s for s in get_schemas() if s["function"]["name"] not in _SUB_AGENT_EXCLUDED_TOOLS]
             if is_sub_agent
             else get_schemas()
         )

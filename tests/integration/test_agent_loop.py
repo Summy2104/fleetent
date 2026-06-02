@@ -403,6 +403,30 @@ async def test_run_is_sub_agent_filters_sub_agent_from_schemas(mock_client):
     assert "get_time" in names
 
 
+async def test_run_is_sub_agent_filters_invoke_agent_from_schemas(mock_client):
+    schemas_used: list[list] = []
+
+    async def capture(**kwargs):
+        schemas_used.append(kwargs.get("tools", []))
+        return _text_resp("ok")
+
+    mock_client.chat.completions.create = capture
+
+    with patch.object(
+        al,
+        "get_schemas",
+        return_value=[
+            {"function": {"name": "invoke_agent"}},
+            {"function": {"name": "get_time"}},
+        ],
+    ):
+        await al.run([{"role": "user", "content": "go"}], is_sub_agent=True)
+
+    names = [s["function"]["name"] for s in schemas_used[0]]
+    assert "invoke_agent" not in names
+    assert "get_time" in names
+
+
 async def test_run_not_sub_agent_includes_sub_agent_in_schemas(mock_client):
     schemas_used: list[list] = []
 
