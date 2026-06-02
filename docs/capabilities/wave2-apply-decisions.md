@@ -935,3 +935,18 @@ SB9（sandbox 轨末环）：`run_code` 执行结果写入 trace。
 **需 zy 核实**：无阻塞项。`_resource_key` 当前仅串行化 `run_code`（与 design D5「同容器有状态工具」一致）；若后续认定别的内置/插件工具也共享 session 容器状态，需在 `_resource_key` 补名单。
 
 **验证**：pytest **1375 → 1398 passed**（+3 config[默认 8 / env 覆盖 / <=1]、+20 agent_loop[N=1 等价、N>1 并行 + 原序、完成序≠原序、tool_call_id 配对、sanitize 合法、批共享 token、取消全回填、审批串行、拒批排除、失败隔离、逐结果计数、分批、cap=1 顺序、沙箱串行、自由并行、流式原序、N↔N、sub_agent 单槽、深度守卫]）。ruff（改动文件 agent_loop.py / config.py / test_agent_loop.py / test_config.py）format+check 全绿（agent_loop.py 残留 1 个 N814 为基线既有、非本次引入）。mypy `src`：**78 → 79**，+1 为 `_resolve_parallel_max` 内 `Settings()` 的 call-arg（与本文件既有 3 处 `Settings()` call-arg 同一既有错误模式，非新增模式）。不 commit / 不建 PR。
+
+---
+
+## [follow-up] im-image-attachment-extraction
+
+**背景**：vision-as-tool（已归档）在 `im_gateway/normalizer.py` 加了含图消息首次自动抽取（`_image_attachments` 挑 `(bytes, str-mime 且 image/ 开头)` 项 → 存盘 + 调一次 `analyze_image`），但 `slack.py` / `telegram.py` 两个 handler 都硬编码 `attachments=[]`，IM 端这条路径无真实数据源。本 follow-up 补上两个适配器的入站图片下载，接通该路径。OpenSpec change `im-image-attachment-extraction`（新 capability `im-image-attachment`，全 ADDED）。
+
+**实现要点**：
+- **Slack**（`im_gateway/slack.py`）：`handle_message` 读 `event.get("files")`，对 `mimetype` 以 `image/` 开头的 file 用 `httpx.AsyncClient` GET `url_private`（`Authorization: Bearer {bot_token}`，bot_token 来自 `create_app` 闭包）取 `response.content`，组装 `attachments=[(bytes, mimetype), ...]`（替换硬编码 `[]`）。非图 file 忽略。逐附件 try/except `httpx.HTTPError` → `logger.warning` 跳过、降级空 attachments、不崩。`event` 类型从 `dict[str, str | None]` 放宽为 `dict[str, Any]`（files 是 list）。
+- **Telegram**（`im_gateway/telegram.py`）：MessageHandler filter `filters.TEXT & ~filters.COMMAND` → `(filters.TEXT | filters.PHOTO) & ~filters.COMMAND`（原来收不到 photo）；`handle_message` 取 `update.message.photo` 最大一张（末项）→ `await context.bot.get_file(file_id)` → `await file.download_as_bytearray()` → `attachments=[(bytes(ba), "image/jpeg")]`（telegram photo 统一 jpeg）；text 改 `caption or text or ""`（图片消息文字在 caption）。下载异常 catch（`except Exception` + `# noqa: BLE001`，best-effort）→ `logger.warning` 降级空 attachments、不崩。纯文本消息行为不变。
+- **未改 normalizer**：`_image_attachments` / `_build_user_content` / `_select_route` 抽取与路由逻辑零改动；适配器只负责把 `(bytes, image/*)` 喂进 attachments，沿用既有判据。也未碰 connector config/registry/allowlist、session 派生、reply_func、im_user_store。
+
+**跨域风险（务必协调）**：`slack.py` / `telegram.py` 属 **im-gateway 域**，张亮的 `im-gateway-management`（connector registry / allowlist / config，**不做图片**）也在此域、同改这两文件。本 change 只动：(1) 两 handler 内 `attachments` 组装、(2) telegram 的 MessageHandler filter（加 PHOTO）、(3) telegram text 取值（加 caption fallback）、(4) slack `event` 形参类型放宽。**不碰 connector 逻辑**。merge 时按关注点分块协调：张亮改的是 connector 注册/鉴权/allowlist 接线，本 change 改的是消息体内附件提取——理论上不重叠，但同文件需手动确认无行级冲突（尤其 `create_app` 顶部 import 与 handler 签名区）。
+
+**验证**：pytest **1391 → 1400 passed**（+9：slack 4[含图下载+鉴权头、非图忽略、无 files 空、下载失败降级]、telegram 5[photo 下载+选最大、caption 取文、纯文本不变、下载失败降级、filter 含 PHOTO]）。改动文件（slack.py / telegram.py / 新建 tests/test_im_attachment.py）ruff format+check 全绿。mypy `src`：**79 → 79** 不变；本 change 文件仅有 slack.py / telegram.py 的 `Settings()` call-arg 既有错误模式（与全仓多处 `Settings()` call-arg 同一既有模式，非新增模式）。外部全 mock（slack httpx 用 respx、telegram `get_file`/`download_as_bytearray` 用 unittest.mock），无真实请求。不 commit / 不建 PR。
