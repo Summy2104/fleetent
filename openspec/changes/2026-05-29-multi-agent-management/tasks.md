@@ -80,10 +80,10 @@
 
 ## 12. CLI 新命令
 
-- [ ] 12.1 Write failing tests: `update-agent` 创建新版本并默认激活；`list-agent-versions` 输出 id/version/is_active/created_at；`activate-agent-version --version N` 切换；不存在 version 非零退出
-- [ ] 12.2 在 admin CLI 添加 `update-agent` / `list-agent-versions` / `activate-agent-version` / `show-agent`
-- [ ] 12.3 Write failing tests: `assign-user` / `unassign-user` 操作 user_agents 表
-- [ ] 12.4 在 admin CLI 添加 `assign-user` / `unassign-user`
+- [x] 12.1 Write failing tests: `update-agent` 创建新版本并默认激活；`list-agent-versions` 输出 id/version/is_active/created_at；`activate-agent-version --version N` 切换；不存在 version 非零退出
+- [x] 12.2 在 admin CLI 添加 `update-agent` / `list-agent-versions` / `activate-agent-version` / `show-agent`
+- [x] 12.3 Write failing tests: `assign-user` / `unassign-user` 操作 user_agents 表
+- [x] 12.4 在 admin CLI 添加 `assign-user` / `unassign-user`
 
 ## 13. 验证
 

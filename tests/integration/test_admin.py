@@ -181,6 +181,94 @@ def test_unassign_channel():
     assert agent_store.get_agent_for_channel("telegram", "G7") is None
 
 
+# --- update-agent / version commands ---
+
+
+def test_update_agent_creates_and_activates_new_version():
+    agent_store.create_agent("verbot", "v1 prompt.", ["calculate"])
+    out, _, code = run_admin(
+        "update-agent", "--agent-name", "verbot", "--system-prompt", "v2 prompt."
+    )
+    assert code == 0
+    versions = agent_store.list_versions("verbot")
+    assert [v.version for v in versions] == [2, 1]
+    active = next(v for v in versions if v.is_active)
+    assert active.version == 2
+    assert active.system_prompt == "v2 prompt."
+
+
+def test_update_agent_no_activate_keeps_old_active():
+    agent_store.create_agent("verbot2", "v1 prompt.", ["calculate"])
+    out, _, code = run_admin(
+        "update-agent",
+        "--agent-name",
+        "verbot2",
+        "--system-prompt",
+        "v2 prompt.",
+        "--no-activate",
+    )
+    assert code == 0
+    active = next(v for v in agent_store.list_versions("verbot2") if v.is_active)
+    assert active.version == 1
+
+
+def test_list_agent_versions_outputs_fields():
+    agent_store.create_agent("listbot", "v1.", [])
+    agent_store.create_version("listbot", system_prompt="v2.")
+    out, _, code = run_admin("list-agent-versions", "--agent-name", "listbot")
+    assert code == 0
+    assert "2" in out and "1" in out
+    # active marker for current active version
+    assert "active" in out.lower()
+
+
+def test_activate_agent_version_switches():
+    agent_store.create_agent("actbot", "v1.", [])
+    agent_store.create_version("actbot", system_prompt="v2.")
+    out, _, code = run_admin("activate-agent-version", "--agent-name", "actbot", "--version", "1")
+    assert code == 0
+    active = next(v for v in agent_store.list_versions("actbot") if v.is_active)
+    assert active.version == 1
+
+
+def test_activate_agent_version_unknown_exits_nonzero():
+    agent_store.create_agent("actbot2", "v1.", [])
+    _, err, code = run_admin("activate-agent-version", "--agent-name", "actbot2", "--version", "99")
+    assert code != 0
+
+
+def test_show_agent_outputs_active_version():
+    agent_store.create_agent("showbot", "show prompt.", ["calculate"])
+    out, _, code = run_admin("show-agent", "--agent-name", "showbot")
+    assert code == 0
+    assert "showbot" in out
+    assert "show prompt." in out
+
+
+# --- assign-user / unassign-user commands ---
+
+
+def test_assign_user():
+    ag = agent_store.create_agent("userbot", "Bot.", [])
+    out, _, code = run_admin("assign-user", "--user-id", "u-7", "--agent-name", "userbot")
+    assert code == 0
+    bound = agent_store.get_agent_for_user("u-7")
+    assert bound is not None and bound.id == ag.id
+
+
+def test_assign_user_agent_not_found_exits_nonzero():
+    _, err, code = run_admin("assign-user", "--user-id", "u-7", "--agent-name", "ghost")
+    assert code != 0
+
+
+def test_unassign_user():
+    ag = agent_store.create_agent("userbot2", "Bot.", [])
+    agent_store.assign_user("u-8", ag.id)
+    out, _, code = run_admin("unassign-user", "--user-id", "u-8", "--agent-name", "userbot2")
+    assert code == 0
+    assert agent_store.get_agent_for_user("u-8") is None
+
+
 # --- set-default-agent command ---
 
 
