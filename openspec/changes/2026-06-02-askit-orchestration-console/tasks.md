@@ -89,6 +89,6 @@
 ## 10. 收尾
 
 - [x] 10.1 改 `server.py`：mount `/admin/askit` router + apply API router、lifespan 启动工作区串行队列
-- [ ] 10.2 全量 `uv run pytest -x -q` 绿（注意：import server 链路需 Python 3.12，参照 user-management change 的版本约定）
-- [ ] 10.3 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过
+- [x] 10.2 全量 `uv run pytest -x -q` 绿（注意：import server 链路需 Python 3.12，参照 user-management change 的版本约定）
+- [x] 10.3 `uv run ruff format src tests && uv run ruff check src tests && uv run mypy src` 通过
 - [ ] 10.4 手动冒烟：八系列分组展示 → 触发 build 看实时日志 → check 不绿阻止 deploy → dry-run 预演 → deploy --target fleetent 落受管对象 → 临管不被覆盖 → UI 改受管产生 drift → promote 开 PR → discard 后还原 → 临管 decompile 转正 → immutable 字段还原 → env doctor 脱敏 → viewer 只读 403 → 同工作区写操作排队
