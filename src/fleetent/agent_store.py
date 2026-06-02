@@ -319,6 +319,23 @@ def get_by_name_version(name: str, version: int) -> AgentVersion | None:
     return _row_to_version(row, agent["active_version_id"])
 
 
+def get_version_by_id(version_id: int) -> AgentVersion | None:
+    db = _db()
+    row = db.execute(
+        "SELECT av.*, a.active_version_id AS agent_active "
+        "FROM agent_versions av JOIN agents a ON a.id = av.agent_id WHERE av.id = :vid",
+        {"vid": version_id},
+    ).fetchone()
+    if row is None:
+        return None
+    return _row_to_version(row, row["agent_active"])
+
+
+def get_agent_name_by_id(agent_id: int) -> str | None:
+    row = _db().execute("SELECT name FROM agents WHERE id = :aid", {"aid": agent_id}).fetchone()
+    return None if row is None else str(row["name"])
+
+
 def assign_user(user_id: str, agent_id: int) -> None:
     _db().execute(
         "INSERT OR IGNORE INTO user_agents (user_id, agent_id) VALUES (:user_id, :agent_id)",

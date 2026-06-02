@@ -7,11 +7,83 @@ both the per-agent ``allowed_tools`` allowlist and the MCP server whitelist.
 It never imports the agent loop (one-way dependency: agent_loop -> agent_runtime).
 """
 
+from dataclasses import dataclass
 from typing import Any
 
+from fleetent import agent_store
+from fleetent.agent_store import AgentVersion
 from fleetent.governance.agent_policy import check_tool_access
 
 ToolSchema = dict[str, Any]
+
+
+@dataclass(frozen=True)
+class AgentSnapshot:
+    """Immutable, fully-resolved agent configuration the agent loop consumes."""
+
+    agent_id: int
+    name: str
+    version: int
+    version_id: int
+    system_prompt: str
+    allowed_tools: list[str]
+    skills_dir: str | None
+    mcp_server_ids: list[str] | None
+    model_overrides: dict[str, Any]
+    memory_namespace: str
+
+
+def _snapshot(name: str, version: AgentVersion) -> AgentSnapshot:
+    return AgentSnapshot(
+        agent_id=version.agent_id,
+        name=name,
+        version=version.version,
+        version_id=version.id,
+        system_prompt=version.system_prompt,
+        allowed_tools=version.allowed_tools,
+        skills_dir=version.skills_dir,
+        mcp_server_ids=version.mcp_server_ids,
+        model_overrides=version.model_overrides,
+        memory_namespace=version.memory_namespace,
+    )
+
+
+def load_active(name: str) -> AgentSnapshot | None:
+    """Resolve the agent's active version into a snapshot, or ``None`` if absent."""
+    active = next((v for v in agent_store.list_versions(name) if v.is_active), None)
+    return None if active is None else _snapshot(name, active)
+
+
+def load_version_by_name(name: str, version: int) -> AgentSnapshot | None:
+    ver = agent_store.get_by_name_version(name, version)
+    return None if ver is None else _snapshot(name, ver)
+
+
+def load_version(version_id: int) -> AgentSnapshot | None:
+    ver = agent_store.get_version_by_id(version_id)
+    if ver is None:
+        return None
+    name = agent_store.get_agent_name_by_id(ver.agent_id)
+    return None if name is None else _snapshot(name, ver)
+
+
+def resolve_agent_for_request(
+    platform: str | None,
+    channel_id: str | None,
+    user_id: str | None,
+) -> AgentSnapshot | None:
+    """Resolve the agent for a request, strict precedence: channel > user > default."""
+    if platform and channel_id:
+        channel_agent = agent_store.get_agent_for_channel(platform, channel_id)
+        if channel_agent is not None:
+            return load_active(channel_agent.name)
+    if user_id:
+        user_agent = agent_store.get_agent_for_user(user_id)
+        if user_agent is not None:
+            return load_active(user_agent.name)
+    default_agent = agent_store.get_default_agent()
+    return None if default_agent is None else load_active(default_agent.name)
+
 
 # MCP tools are registered as "{server_id}__{tool_name}"; the double underscore
 # is the separator (single underscores are part of names).

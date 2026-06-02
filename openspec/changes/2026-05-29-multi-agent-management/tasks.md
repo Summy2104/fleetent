@@ -18,10 +18,10 @@
 
 ## 3. agent_runtime — AgentSnapshot 与解析器
 
-- [ ] 3.1 Write failing tests: `AgentSnapshot` 是 frozen dataclass（字段含 agent_id/name/version/system_prompt/allowed_tools/skills_dir/mcp_server_ids/model_overrides/memory_namespace）；`load_active(name)` 解包返回 snapshot；不存在返回 `None`；`load_version_by_name(name, v)` 取指定版本
-- [ ] 3.2 新建 `agent_runtime.py`：定义 `AgentSnapshot`；实现 `load_active` / `load_version` / `load_version_by_name`
-- [ ] 3.3 Write failing tests: `resolve_agent_for_request(platform, channel_id, user_id)` 严格按 channel > user > default_agent_name 顺序返回 snapshot；都未命中返回 None
-- [ ] 3.4 实现 `resolve_agent_for_request`（内部复用 agent_store 的 channel/user/default 解析）
+- [x] 3.1 Write failing tests: `AgentSnapshot` 是 frozen dataclass（字段含 agent_id/name/version/system_prompt/allowed_tools/skills_dir/mcp_server_ids/model_overrides/memory_namespace）；`load_active(name)` 解包返回 snapshot；不存在返回 `None`；`load_version_by_name(name, v)` 取指定版本
+- [x] 3.2 新建 `agent_runtime.py`：定义 `AgentSnapshot`；实现 `load_active` / `load_version` / `load_version_by_name`
+- [x] 3.3 Write failing tests: `resolve_agent_for_request(platform, channel_id, user_id)` 严格按 channel > user > default_agent_name 顺序返回 snapshot；都未命中返回 None
+- [x] 3.4 实现 `resolve_agent_for_request`（内部复用 agent_store 的 channel/user/default 解析）
 
 ## 4. Per-agent skills 隔离
 
