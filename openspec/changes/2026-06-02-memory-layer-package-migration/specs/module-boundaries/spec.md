@@ -26,8 +26,17 @@
 
 #### Scenario: Memory package owns memory items data access
 - **WHEN** memory 功能访问既有 `memory_items` table
-- **THEN** 该访问由 `fleetent.intelligence.memory` package 内的 store 实现负责
+- **THEN** 该访问由 `fleetent.intelligence.memory.store` 实现负责
 - **AND** 本 change 不新增或修改数据库 schema
+
+#### Scenario: Memory canonical submodules separate responsibilities
+- **WHEN** 查看 `fleetent.intelligence.memory` package
+- **THEN** 数据模型位于 `models.py`
+- **AND** SQLite store 位于 `store.py`
+- **AND** LLM extraction 位于 `extraction.py`
+- **AND** semantic search 位于 `search.py`
+- **AND** public operations 位于 `operations.py`
+- **AND** retention / compaction maintenance 位于 `maintenance.py`
 
 #### Scenario: Intelligence modules use memory through public API
 - **WHEN** long-term context、reflection 或 vector reindex 需要读取 User Memory

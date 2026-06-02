@@ -174,7 +174,7 @@ class _KnowledgeResult:
 async def test_long_term_context_searches_resolved_agent_kbs(monkeypatch):
     from fleetent.intelligence import long_term_ctx
 
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", _empty_memory_search)
+    monkeypatch.setattr(long_term_ctx.memory, "search", _empty_memory_search)
     monkeypatch.setattr(
         long_term_ctx.Settings,
         "__call__",
@@ -223,7 +223,7 @@ async def test_long_term_context_searches_resolved_agent_kbs(monkeypatch):
 async def test_long_term_context_skips_search_when_agent_kb_scope_is_empty(monkeypatch):
     from fleetent.intelligence import long_term_ctx
 
-    monkeypatch.setattr(long_term_ctx.memory_layer, "search", _empty_memory_search)
+    monkeypatch.setattr(long_term_ctx.memory, "search", _empty_memory_search)
     monkeypatch.setattr(
         long_term_ctx,
         "Settings",

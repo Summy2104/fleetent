@@ -13,7 +13,7 @@ async def test_memory_candidate_generates_pending_proposal_without_modifying_mem
     tmp_path,
     monkeypatch,
 ):
-    from fleetent import memory_layer, observability
+    from fleetent import observability
     from fleetent.intelligence import reflection
 
     db_path = tmp_path / "reflection_maintenance.db"
@@ -37,7 +37,7 @@ async def test_memory_candidate_generates_pending_proposal_without_modifying_mem
         ),
     ]
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(memory_layer, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
 
     report = await reflection.run_reflection("user-1")
     proposals = reflection.generate_memory_maintenance_proposals("user-1", report.findings)
@@ -119,7 +119,7 @@ async def test_memory_conflict_generates_owner_review_proposal_without_memory_wr
             )
         ],
     )
-    monkeypatch.setattr(memory_layer, "search", AsyncMock(return_value=memories))
+    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=memories))
 
     report = await reflection.run_reflection("user-1")
     proposals = reflection.generate_memory_maintenance_proposals("user-1", report.findings)
@@ -134,7 +134,7 @@ async def test_memory_conflict_generates_owner_review_proposal_without_memory_wr
 
 
 async def test_team_or_project_fact_suggests_shared_memory_or_kb(tmp_path, monkeypatch):
-    from fleetent import memory_layer, observability
+    from fleetent import observability
     from fleetent.intelligence import reflection
 
     db_path = tmp_path / "reflection_maintenance.db"
@@ -157,7 +157,7 @@ async def test_team_or_project_fact_suggests_shared_memory_or_kb(tmp_path, monke
         ),
     ]
     monkeypatch.setattr(observability, "query_trace_events", lambda query: events)
-    monkeypatch.setattr(memory_layer, "search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
 
     report = await reflection.run_reflection("user-1")
     proposals = reflection.generate_memory_maintenance_proposals("user-1", report.findings)

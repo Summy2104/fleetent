@@ -13,6 +13,7 @@ import pytest
 
 from fleetent import memory_layer
 from fleetent.intelligence import vector_store
+from fleetent.intelligence.memory import extraction
 from tests.integration.test_migrations import apply_migrations
 
 REQUIRED_FIXTURE_FIELDS = (
@@ -117,7 +118,7 @@ async def run_mock_fixture(
     async def delete(id: str, namespace: str) -> None:
         vector_deletes.append((id, namespace))
 
-    monkeypatch.setattr(memory_layer, "get_async_client_and_config", get_mock_client)
+    monkeypatch.setattr(extraction, "get_async_client_and_config", get_mock_client)
     monkeypatch.setattr(vector_store, "upsert", upsert)
     monkeypatch.setattr(vector_store, "delete", delete)
 
@@ -149,7 +150,7 @@ async def run_real_llm_fixture(
     route_names: list[str] = []
     vector_upserts: list[tuple[str, str, str]] = []
     vector_deletes: list[tuple[str, str]] = []
-    original_get_client = memory_layer.get_async_client_and_config
+    original_get_client = extraction.get_async_client_and_config
 
     def get_recorded_client(route_name: str) -> tuple[Any, Any]:
         route_names.append(route_name)
@@ -161,7 +162,7 @@ async def run_real_llm_fixture(
     async def delete(id: str, namespace: str) -> None:
         vector_deletes.append((id, namespace))
 
-    monkeypatch.setattr(memory_layer, "get_async_client_and_config", get_recorded_client)
+    monkeypatch.setattr(extraction, "get_async_client_and_config", get_recorded_client)
     monkeypatch.setattr(vector_store, "upsert", upsert)
     monkeypatch.setattr(vector_store, "delete", delete)
 

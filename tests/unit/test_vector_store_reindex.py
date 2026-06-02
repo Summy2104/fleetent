@@ -52,12 +52,13 @@ def test_reindex_request_validation_fails_fast(request_kwargs, message):
 
 
 def test_reindex_memory_dry_run_scans_without_vector_writes(monkeypatch):
+    from fleetent.intelligence import memory
     from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
 
     reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
     writes: list[tuple[str, object]] = []
     monkeypatch.setattr(
-        reindex_module.memory_layer,
+        memory,
         "iter_indexable_memories",
         lambda user_id: [
             IndexableItem(id="mem-1", content="one", namespace=f"mem:{user_id}"),
@@ -130,12 +131,13 @@ def test_reindex_knowledge_base_dry_run_scans_without_vector_writes(monkeypatch)
 
 
 def test_reindex_memory_rebuild_clears_namespace_before_upserts(monkeypatch):
+    from fleetent.intelligence import memory
     from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
 
     reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        reindex_module.memory_layer,
+        memory,
         "iter_indexable_memories",
         lambda user_id: [
             IndexableItem(id="mem-1", content="one", namespace=f"mem:{user_id}"),
@@ -167,12 +169,13 @@ def test_reindex_memory_rebuild_clears_namespace_before_upserts(monkeypatch):
 
 
 def test_reindex_memory_rebuild_upserts_each_item_with_content_and_namespace(monkeypatch):
+    from fleetent.intelligence import memory
     from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
 
     reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
     upserts: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
-        reindex_module.memory_layer,
+        memory,
         "iter_indexable_memories",
         lambda user_id: [
             IndexableItem(id="mem-1", content="one", namespace=f"mem:{user_id}"),
@@ -195,12 +198,13 @@ def test_reindex_memory_rebuild_upserts_each_item_with_content_and_namespace(mon
 
 
 def test_reindex_memory_rebuild_continues_after_item_failure(monkeypatch):
+    from fleetent.intelligence import memory
     from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
 
     reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
     upserts: list[str] = []
     monkeypatch.setattr(
-        reindex_module.memory_layer,
+        memory,
         "iter_indexable_memories",
         lambda user_id: [
             IndexableItem(id="mem-1", content="one", namespace=f"mem:{user_id}"),
