@@ -153,6 +153,13 @@ def _resolve_guardrail_threshold(guardrail_repeat_threshold: int | None) -> int:
     return Settings().guardrail_repeat_threshold
 
 
+def _resolve_default_tool_timeout() -> float:
+    """Global default per-tool timeout from Settings (T2), resolved once per run."""
+    from fleetent.config import Settings
+
+    return Settings().tool_default_timeout_seconds
+
+
 def _load_flap_state(session_id: str | None) -> AntiFlapState | None:
     """Load per-session anti-flap state (AR17); None disables gating (CLI / no session).
 
@@ -297,6 +304,7 @@ async def _safe_dispatch(
     cancel_token: CancelToken | None = None,
     tool_context: ToolContext | None = None,
     user_id: str | None = None,
+    default_timeout: float | None = None,
 ) -> tuple[str, bool]:
     """Dispatch a tool, normalizing a crash into (error_text, failed=True).
 
@@ -310,7 +318,7 @@ async def _safe_dispatch(
     # its own deadline AND links the run-level token via `parent`, so the tool
     # observes both its timeout and a session-wide cancel. asyncio.wait_for is the
     # hard "stop waiting" guarantee even for tools that never poll the token.
-    timeout = get_effective_timeout(name)
+    timeout = get_effective_timeout(name, default_timeout)
     child = CancelToken(deadline=time.monotonic() + timeout, parent=cancel_token)
     try:
         result = dispatch(
@@ -675,6 +683,7 @@ async def run(
     stop_reason = StopReason.normal
     hygiene_repairs: dict[str, int] = {}
     guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold)
+    default_tool_timeout = _resolve_default_tool_timeout()
     flap_state = _load_flap_state(session_id)
     layered_checker, layered_store, layered_keys = _setup_layered_budget(
         session_id, user_id, agent_name
@@ -814,6 +823,7 @@ async def run(
                             token,
                             tool_context,
                             user_id=user_id,
+                            default_timeout=default_tool_timeout,
                         )
                         state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
                 else:
@@ -824,6 +834,7 @@ async def run(
                         token,
                         tool_context,
                         user_id=user_id,
+                        default_timeout=default_tool_timeout,
                     )
                     state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             # T4: cap the result written to messages (self-truncating tools like
@@ -1005,6 +1016,7 @@ async def run_stream(
     stop_reason = StopReason.normal
     hygiene_repairs: dict[str, int] = {}
     guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold)
+    default_tool_timeout = _resolve_default_tool_timeout()
     flap_state = _load_flap_state(session_id)
     layered_checker, layered_store, layered_keys = _setup_layered_budget(
         session_id, user_id, agent_name
@@ -1141,7 +1153,13 @@ async def run_stream(
                 )
                 continue
             result, failed = await _safe_dispatch(
-                name, args, False, token, tool_context, user_id=user_id
+                name,
+                args,
+                False,
+                token,
+                tool_context,
+                user_id=user_id,
+                default_timeout=default_tool_timeout,
             )
             state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             yield {"type": "tool_result", "name": name, "content": result}

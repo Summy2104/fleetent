@@ -416,3 +416,14 @@ zy 复核全部 13 个 change 后，对 cost 维度做出整体决策：**cost �
 - ① 占位符 `[REDACTED]`：**认可，保持**。
 - ② 加 entry 级「曾脱敏」布尔标记：**改——已实现**。`eval_logger` 新增 `_has_redacted_tool_calls`，`log_run`/`log` 在检测到敏感名 tool_call 参数时写 `secrets_redacted: true`（仅 True 才写、不落值），审计可知"曾出现敏感参数"。+3 测试。
 - ③ 仅脱敏顶层键、不递归：**认可，保持**。
+
+### AR20 sub-agent-lifecycle
+- ① 顺序提前到 #2：**认可，保持**。
+- ② 正常路径不单独持久化 `pending`（省一次落盘）：**认可，保持**。
+- ③ 并发测试阈值 0.09→0.13（并发性由启动时间差<0.02s 权威保证）：**认可，保持**。
+- ④ mypy +1（`Settings()` 既有模式）：**认可，保持**。
+
+### T2 tool-timeout
+- ① 全局默认超时承载：**改——已加配置开关**。新增 `Settings.tool_default_timeout_seconds=30.0`；`agent_loop` 每次运行经 `_resolve_default_tool_timeout()` 读一次、下传给 `_safe_dispatch` → `get_effective_timeout(name, default)`；单工具 `@tool(timeout=)` 仍可覆盖。+3 测试。
+- ② 超时归到已有 `tool_timeout` 类别（扩展 `_categorize` 认 `TimeoutError`）：**认可，保持**。
+- ③ 唯一改既有测试（注入 token 由"run token 本身"变"连着自身超时+run 取消的新 token"）：**认可，保持**。

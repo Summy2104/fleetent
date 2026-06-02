@@ -108,9 +108,10 @@ def get_timeout(name: str) -> float | None:
     return _timeouts.get(name)
 
 
-def get_effective_timeout(name: str) -> float:
-    """Effective timeout: the per-tool override if declared, else the global default."""
-    return _timeouts.get(name, DEFAULT_TOOL_TIMEOUT)
+def get_effective_timeout(name: str, default: float | None = None) -> float:
+    """Effective timeout: the per-tool override if declared, else the supplied global
+    default (or the module constant when no default is passed)."""
+    return _timeouts.get(name, DEFAULT_TOOL_TIMEOUT if default is None else default)
 
 
 def is_self_truncating(name: str) -> bool:

@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     # this guard is orthogonal to the main task budget. 300s balances "fits a real
     # sub-task" against "surfaces a hang fast".
     sub_agent_timeout_seconds: int = 300
+    # Global default per-tool timeout (T2). Per-tool @tool(timeout=) overrides it.
+    tool_default_timeout_seconds: float = 30.0
     # Two-dimensional iteration budget (AR2). max_turns reuses agent_max_turns
     # above (the step dimension is folded into the budget). -1 = unlimited; the
     # token dimension defaults to unlimited so existing deployments keep
