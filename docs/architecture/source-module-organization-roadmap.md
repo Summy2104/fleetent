@@ -1,0 +1,233 @@
+# Source Module Organization Roadmap
+
+## 目标
+
+`src/fleetent` 当前是模块化单体的过渡状态：部分能力已经进入 package，仍有大量 legacy 平铺模块保留在
+`src/fleetent/*.py`。本路线图用于指导后续迁移，避免为了“整理目录”一次性大搬家。
+
+目标不是让目录马上完美，而是让后续并行开发更少冲突：
+
+- 新功能有明确 owning package。
+- 已迁移模块通过 public API 暴露能力。
+- legacy import 路径迁移时保留薄 shim。
+- 每次迁移都有 OpenSpec、测试和边界声明。
+
+## 当前状态
+
+已模块化目录：
+
+| 目录 | 当前职责 | 判断 |
+| --- | --- | --- |
+| `intelligence/` | long-term context、reflection、knowledge-base、vector-store | 已形成主要边界 |
+| `observability/` | structured logging、traces、usage / performance、diagnostics | 已形成主要边界 |
+| `im_gateway/` | IM 消息归一化与 Slack / Telegram adapter | 已有目录，但 channels 相关 store 仍在顶层 |
+
+主要平铺热点：
+
+| 文件 | 行数级别 | 建议归属 | 迁移优先级 |
+| --- | ---: | --- | --- |
+| `admin.py` | 500+ | `platform.admin_cli` | P0 |
+| `memory_layer.py` | 600+ | `intelligence.memory` | P1 |
+| `agent_loop.py` | 1000+ | `runtime.agent_loop` | P1 |
+| `user_store.py` / `api_key_store.py` / `auth.py` / `agent_store.py` | 100-300 | `platform.user_center` / `platform.agent_admin` | P2 |
+| `im_user_store.py` / `im_connector_*` / `im_channel_allowlist.py` | 50-160 | `channels` | P2 |
+| `mcp_client.py` | 200+ | `integrations.mcp` | P3 |
+| `db.py` / `config.py` | 90-270 | `infrastructure` | P3 |
+
+## 目标 Package Map
+
+| Package | 负责 | 典型模块 |
+| --- | --- | --- |
+| `runtime` | agent 执行循环、上下文压缩、sub-agent 执行、运行时错误治理 | `agent_loop`、`context_mgr`、`sub_agent` |
+| `platform` | 管理面、用户 / agent / API key / admin CLI、HTTP admin API | `admin_cli`、`user_center`、`agent_store` |
+| `governance` | 工具权限、审批、quota、blocklist、audit | `permission_gate`、`quota`、`audit_log`、`blocklist` |
+| `channels` | IM / webhook / schedule 等入口适配和渠道身份绑定 | `im_gateway`、`im_user_store`、`webhook_router`、`cron_scheduler` |
+| `intelligence` | memory、long-term context、reflection、knowledge-base、vector-store | 已有目录 |
+| `integrations` | MCP、sandbox、外部系统 connector runtime | `mcp_client`、`sandbox_client` |
+| `observability` | logs、traces、summaries、diagnostics | 已有目录 |
+| `infrastructure` | config、database runtime、migration helpers、deployment primitives | `config`、`db` |
+
+依赖方向：
+
+```text
+entrypoints / platform / channels
+  -> runtime
+  -> governance / intelligence / integrations / observability
+  -> infrastructure
+```
+
+低层 package 不反向 import 高层入口。跨 package 调用必须走 public API。
+
+## 推荐迁移顺序
+
+### 1. `admin-cli-module-split`
+
+优先级最高。`admin.py` 已经承载用户、IM、schedule、agent、KB connectors、diagnostics 和 observability
+多类命令，是当前最容易产生并行冲突的文件。
+
+建议目标：
+
+```text
+src/fleetent/platform/admin_cli/
+  __init__.py
+  main.py
+  users.py
+  im.py
+  schedules.py
+  agents.py
+  kb_connectors.py
+  diagnostics.py
+  observability.py
+```
+
+保留：
+
+- `fleetent-admin` console script 行为不变。
+- `fleetent.admin.main` 作为 shim 或入口 re-export。
+
+不做：
+
+- 不改命令语义。
+- 不新增 HTTP API。
+- 不引入权限模型。
+
+### 2. `memory-layer-package-migration`
+
+将 `memory_layer.py` 迁入 `intelligence/memory/`，拆分 models、store、extraction、maintenance。
+
+建议目标：
+
+```text
+src/fleetent/intelligence/memory/
+  __init__.py
+  models.py
+  store.py
+  extraction.py
+  maintenance.py
+```
+
+保留：
+
+- `fleetent.memory_layer` 作为 re-export shim。
+- `MemoryItem`、`create`、`search`、`run_memory_maintenance` 等 public API 不变。
+
+### 3. `runtime-package-migration`
+
+将 agent runtime 相关代码迁入 `runtime/`。这一步影响面最大，必须单独做。
+
+建议目标：
+
+```text
+src/fleetent/runtime/
+  __init__.py
+  agent_loop.py
+  context.py
+  sub_agent.py
+  model_routing.py
+```
+
+注意：
+
+- `agent_loop.py` import `tools.py` 有副作用注册工具，迁移时必须保留启动顺序。
+- `context_mgr._keep_tail()` 使用 identity check，不得顺手重构行为。
+- 旧 `fleetent.agent_loop` 必须保留 shim，避免 server / tests / CLI 同步大改。
+
+### 4. `platform-user-center-package-migration`
+
+迁移 user / API key / agent store / auth 相关模块。
+
+候选：
+
+- `user_store.py`
+- `api_key_store.py`
+- `auth.py`
+- `agent_store.py`
+- `user_admin_api.py`
+- `invite_store.py`
+
+这部分和 platform / user-center v1.0 owner 强相关，执行前需要确认 owner 和业务边界。
+
+### 5. `channels-package-migration`
+
+迁移 IM / webhook / schedule 入口。
+
+候选：
+
+- `im_gateway/` 归入或重命名为 `channels/im_gateway/`
+- `im_user_store.py`
+- `im_connector_config.py`
+- `im_connector_manager.py`
+- `im_connector_store.py`
+- `im_channel_allowlist.py`
+- `webhook_router.py`
+- `cron_scheduler.py`
+- `schedule_store.py`
+
+这一步应等 user identity / channel binding 边界稳定后再做。
+
+### 6. `integrations-and-infrastructure-package-migration`
+
+后置迁移：
+
+- `mcp_client.py` -> `integrations/mcp/`
+- `sandbox_client.py` -> `integrations/sandbox/`
+- `config.py` -> `infrastructure/config.py`
+- `db.py` -> `infrastructure/db.py`
+
+`config.py` 和 `db.py` 被全仓广泛 import，迁移风险高，应最后处理。
+
+## Shim 策略
+
+迁移 legacy 平铺模块时：
+
+- 新业务逻辑必须放在目标 package。
+- 旧路径只保留 re-export public API。
+- shim 文件不允许访问数据库、不允许读配置、不允许承载业务逻辑。
+- shim 应有测试证明旧 import 路径仍可用。
+- 当全仓 import 已迁移后，可在后续 breaking cleanup spec 中删除 shim。
+
+示例：
+
+```python
+# src/fleetent/memory_layer.py
+from fleetent.intelligence.memory import MemoryItem, create, search
+
+__all__ = ["MemoryItem", "create", "search"]
+```
+
+## 每次迁移的验收要求
+
+每个实现型迁移 spec 必须：
+
+- 声明 owning package。
+- 列出 public API surface。
+- 列出 owned tables 和 config namespace，若无变化明确写无。
+- 列出 cross-module dependencies。
+- 写清 migration / shim plan。
+- 先写失败测试证明旧 import 和新 import 都可用。
+- 迁移后运行：
+  - `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py`
+  - 相关分层测试
+  - `uv run ruff check src tests`
+  - `uv run mypy src`
+  - `uv run pytest -x -q`
+  - `openspec validate <change-id> --strict`
+  - `git diff --check`
+
+## 不建议现在做的事
+
+- 不一次性把所有顶层 `.py` 移到 package。
+- 不在同一个 spec 中同时迁移 runtime、platform 和 infrastructure。
+- 不在迁移时顺手改业务行为。
+- 不在没有 owner 对齐前迁移 user-center / platform 大块代码。
+- 不提前移动 `config.py` / `db.py`。
+
+## 下一步建议
+
+先做 `admin-cli-module-split`。
+
+理由：
+
+- 当前 `admin.py` 是最新 Pilot MVP 之后增长最快的文件。
+- 拆分它不会改变数据库 schema 或核心 runtime。
+- 它能立刻降低后续 observability、KB operations、diagnostics、platform 管理命令并行开发冲突。
