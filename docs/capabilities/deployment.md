@@ -71,6 +71,10 @@
   - `usage` 查询 run count、token usage 和 by-model summary
   - `performance` 查询失败率、延迟、LLM / tool / fallback / permission 指标
 
+- ✅ **Pilot install checklist**：[pilot-install-checklist.md](../deployment/pilot-install-checklist.md)
+  - 覆盖前置条件、配置与 secret 边界、升级 / 备份、启动、健康检查、KB connector、observability、
+    diagnostics、回滚、验收和问题上报包
+
 当前定位：已有本地开发和基础 Docker 部署地基，但还不是面向客户交付的一键 on-prem 安装包。
 
 ## 升级与恢复

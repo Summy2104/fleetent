@@ -55,7 +55,7 @@ spec 零散推进后失去全貌。
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告、deterministic report evaluation、User Memory maintenance proposal lifecycle | review UI / scheduler / trend summary | 自动 skill proposal、KB reflection reports |
 | Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API、combined embedding evaluation | rerank evaluation；rerank 接入 KB search | 后台 reindex job runtime、sqlite-vec、Qdrant、OpenSearch adapter |
 | Knowledge base | 基础完成 | local ingest、parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator、combined embedding evaluation、Google Drive / Confluence connector baseline、agent 到多 KB 绑定、connector operations CLI / latest status | 真实 SaaS smoke 与生产凭据管理 | graph retrieval、document-level ACL、scheduler / full sync history、attachments / Office / PDF |
-| Deployment / config | 基础完成 | `settings.yaml`、MCP dedicated server file、legacy config fail-fast、本地 SQLite upgrade / backup 脚本 | config docs 对 intelligence runtime prerequisites 的收敛 | config center、Admin UI、hot reload |
+| Deployment / config | 基础完成 | `settings.yaml`、MCP dedicated server file、legacy config fail-fast、本地 SQLite upgrade / backup 脚本、Pilot install checklist | config docs 对 intelligence runtime prerequisites 的收敛 | config center、Admin UI、hot reload |
 
 ## 依赖顺序
 
@@ -299,7 +299,7 @@ public API、测试基线和 OpenSpec 批次已经完成。它不等同于可以
 1. `observability-admin-query-api`：提供最小 run trace / usage / performance 查询入口，避免排障必须手写 SQL。（已完成 admin CLI）
 2. `knowledge-base-agent-kb-binding`：定义 agent / tenant 到一个或多个 KB 的绑定策略和默认可见范围。（已完成）
 3. `knowledge-base-connector-operations`：补 connector sync 手动触发、状态查询、失败摘要和真实 SaaS smoke 操作说明。（已完成基础 CLI / latest status）
-4. `deployment-pilot-install-checklist`：沉淀 pilot 部署、升级、备份、恢复、健康检查和回滚清单。
+4. `deployment-pilot-install-checklist`：沉淀 pilot 部署、升级、备份、恢复、健康检查和回滚清单。（已完成）
 5. `data-retention-and-diagnostics-policy`：定义 logs / traces / connector state 的 retention、导出、脱敏和备份边界。（已完成）
 
 ### Pilot 后增强 / Knowledge Quality Track
