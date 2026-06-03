@@ -253,6 +253,23 @@ def unblock_user(user_id: str, authorization: str | None = Header(None)) -> dict
     return {"status": "active"}
 
 
+@router.post("/users/{user_id}/password")
+def reset_user_password(
+    user_id: str,
+    body: ChangePasswordBody,
+    authorization: str | None = Header(None),
+    x_2fa_code: str | None = Header(None, alias="X-2FA-Code"),
+) -> dict[str, str]:
+    """Admin-set a new password for another user, forcing a reset on their next login."""
+    admin = _require_admin(authorization)
+    _enforce_2fa(admin, x_2fa_code)
+    if user_store.get_by_id(user_id) is None:
+        raise HTTPException(status_code=404, detail="not found")
+    user_store.set_password(user_id, auth.hash_password(body.new_password), must_reset=True)
+    audit_log.write_audit(admin.id, "reset_password", target_type="user", target_id=user_id)
+    return {"status": "password_reset"}
+
+
 @router.get("/users/{user_id}/keys")
 def list_keys(user_id: str, authorization: str | None = Header(None)) -> list[dict[str, Any]]:
     _current_user(authorization)
@@ -305,6 +322,23 @@ def restore_im_user(
     admin = _require_admin(authorization)
     im_user_store.restore_im_user(im_user_id, reason=body.reason, actor=admin.id)
     return {"allowed": True}
+
+
+class BindImBody(BaseModel):
+    user_id: str
+
+
+@router.post("/im-users/{im_user_id}/bind")
+def bind_im_user(
+    im_user_id: int, body: BindImBody, authorization: str | None = Header(None)
+) -> dict[str, str]:
+    """Rebind an IM identity to an existing internal user (many-to-one)."""
+    admin = _require_admin(authorization)
+    try:
+        im_user_store.rebind_im_identity(im_user_id, body.user_id, actor=admin.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "bound"}
 
 
 @router.get("/audit")

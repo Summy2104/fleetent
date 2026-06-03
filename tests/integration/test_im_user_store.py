@@ -35,6 +35,37 @@ def test_different_platforms_different_users(db):
     assert slack_user.id != tg_user.id
 
 
+def test_rebind_im_identity_to_existing_user(db):
+    import fleetent.user_store as user_store
+
+    # slack:U1 starts bound to its own auto-created user; telegram:T1 to another.
+    slack_user = im_user_store.get_or_create("slack", "U1")
+    target = im_user_store.get_or_create("telegram", "T1")
+    im_id = im_user_store.list_im_identities(slack_user.id)[0]["id"]
+
+    im_user_store.rebind_im_identity(im_id, target.id)
+
+    # slack:U1 now belongs to target → many-to-one (target has both identities).
+    assert im_user_store.list_im_identities(slack_user.id) == []
+    platforms = {i["platform"] for i in im_user_store.list_im_identities(target.id)}
+    assert platforms == {"slack", "telegram"}
+    # orphan kept (decision): old auto-user still exists
+    assert user_store.get_by_id(slack_user.id) is not None
+
+
+def test_rebind_unknown_target_raises(db):
+    u = im_user_store.get_or_create("slack", "U2")
+    im_id = im_user_store.list_im_identities(u.id)[0]["id"]
+    with pytest.raises(ValueError):
+        im_user_store.rebind_im_identity(im_id, "ghost-user-id")
+
+
+def test_rebind_unknown_identity_raises(db):
+    target = im_user_store.get_or_create("slack", "U3")
+    with pytest.raises(ValueError):
+        im_user_store.rebind_im_identity(999999, target.id)
+
+
 def test_unique_constraint(db):
     im_user_store.get_or_create("slack", "U123")
     im_user_store.get_or_create("slack", "U123")  # should not raise

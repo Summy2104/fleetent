@@ -7,15 +7,25 @@ from fleetent.platform.im_gateway_management import im_connector_store
 
 # Credential keys per platform, and how they map to .env (config.Settings) fields.
 PLATFORM_CONFIG_KEYS: dict[str, list[str]] = {
-    "slack": ["bot_token", "app_token"],
     "telegram": ["bot_token"],
-    "whatsapp": [],
+    "slack": ["bot_token", "signing_secret", "app_token"],
+    "whatsapp": [
+        "phone_number_id",
+        "access_token",
+        "verify_token",
+        "business_account_id",
+    ],
 }
 
 _ENV_MAP: dict[tuple[str, str], str] = {
     ("slack", "bot_token"): "slack_bot_token",
+    ("slack", "signing_secret"): "slack_signing_secret",
     ("slack", "app_token"): "slack_app_token",
     ("telegram", "bot_token"): "telegram_bot_token",
+    ("whatsapp", "phone_number_id"): "whatsapp_phone_number_id",
+    ("whatsapp", "access_token"): "whatsapp_access_token",
+    ("whatsapp", "verify_token"): "whatsapp_verify_token",
+    ("whatsapp", "business_account_id"): "whatsapp_business_account_id",
 }
 
 

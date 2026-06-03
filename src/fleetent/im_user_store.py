@@ -111,6 +111,32 @@ def batch_block_im(im_user_ids: list[int], reason: str, actor: str | None = None
     return batch_id
 
 
+def rebind_im_identity(im_user_id: int, target_user_id: str, actor: str | None = None) -> None:
+    """Point an IM identity at an existing internal user (many-to-one binding). Audited.
+
+    The previously-bound user is left untouched (it may become an orphan with no IM identities).
+    """
+    from fleetent.governance import audit_log
+
+    _init_db()
+    if get_by_id(target_user_id) is None:
+        raise ValueError(f"target user not found: {target_user_id}")
+    with _conn() as conn:
+        cur = conn.execute(
+            "UPDATE im_users SET user_id = :uid WHERE id = :id",
+            {"uid": target_user_id, "id": im_user_id},
+        )
+        if cur.rowcount == 0:
+            raise ValueError(f"im identity not found: {im_user_id}")
+    audit_log.write_audit(
+        actor,
+        "rebind_im_user",
+        target_type="im_user",
+        target_id=str(im_user_id),
+        detail={"user_id": target_user_id},
+    )
+
+
 def list_im_identities(user_id: str) -> list[dict[str, Any]]:
     """All IM identities (across platforms) belonging to one internal User."""
     _init_db()

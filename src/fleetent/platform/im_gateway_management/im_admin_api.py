@@ -6,7 +6,7 @@ so the seams let this router and its tests stay synchronous). Never imports the 
 loop. Auth: admin-only (connector config carries credentials).
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
@@ -67,6 +67,11 @@ class ConnectorPatch(BaseModel):
     allowlist_enforced: bool | None = None
 
 
+class CreateConnectorBody(BaseModel):
+    platform: Literal["telegram", "slack", "whatsapp"]
+    config: dict[str, str]
+
+
 class AllowlistBody(BaseModel):
     platform: str
     scope_type: str  # "channel" | "workspace"
@@ -87,6 +92,20 @@ def _masked_view(row: dict[str, Any]) -> dict[str, Any]:
 def list_connectors(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
     _require_admin(authorization)
     return [_masked_view(row) for row in im_connector_store.list_connectors()]
+
+
+@router.post("/connectors", status_code=201)
+def create_connector(
+    body: CreateConnectorBody, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    """Create (or update) a connector for a platform from the admin console.
+
+    Idempotent: the underlying upsert keys on the UNIQUE platform column, so posting an
+    existing platform updates its config rather than inserting a duplicate.
+    """
+    _require_admin(authorization)
+    im_connector_config.set_config(body.platform, body.config)
+    return _masked_view(im_connector_store.get_connector(body.platform))  # type: ignore[arg-type]
 
 
 @router.get("/connectors/{platform}")

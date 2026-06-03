@@ -4,6 +4,8 @@ Auth follows the console pattern (Session header + role). The connector manager 
 reached through injectable start/stop seams so tests need no asyncio / real adapters.
 """
 
+from pathlib import Path
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -93,6 +95,94 @@ def test_enable_disable_drive_manager(client):
     assert client.post("/admin/im/connectors/slack/enable", headers=_hdr(token)).status_code == 200
     assert store.get_connector("slack")["enabled"] == 1
     assert api._started == ["slack"]  # type: ignore[attr-defined]
+
+
+def test_create_connector_new_platform(client):
+    token = _session_for("admin")
+    r = client.post(
+        "/admin/im/connectors",
+        headers=_hdr(token),
+        json={
+            "platform": "whatsapp",
+            "config": {
+                "phone_number_id": "123",
+                "access_token": "EAAG1234567890wxyz",
+                "verify_token": "vt",
+                "business_account_id": "ba1",
+            },
+        },
+    )
+    assert r.status_code == 201
+    assert r.json()["platform"] == "whatsapp"
+    # masked on read
+    assert r.json()["config"]["access_token"].endswith("wxyz")
+    assert cfg.resolve("whatsapp")["access_token"] == "EAAG1234567890wxyz"
+
+
+def test_create_connector_existing_platform_updates_no_duplicate(client):
+    token = _session_for("admin")
+    r = client.post(
+        "/admin/im/connectors",
+        headers=_hdr(token),
+        json={"platform": "slack", "config": {"bot_token": "xoxb-updated"}},
+    )
+    assert r.status_code == 201
+    assert cfg.resolve("slack")["bot_token"] == "xoxb-updated"
+    assert len([c for c in store.list_connectors() if c["platform"] == "slack"]) == 1
+
+
+def test_create_connector_viewer_forbidden(client):
+    token = _session_for("viewer")
+    r = client.post(
+        "/admin/im/connectors",
+        headers=_hdr(token),
+        json={"platform": "telegram", "config": {"bot_token": "t"}},
+    )
+    assert r.status_code == 403
+    assert store.get_connector("telegram") is None
+
+
+def test_create_connector_unknown_platform_rejected(client):
+    token = _session_for("admin")
+    r = client.post(
+        "/admin/im/connectors",
+        headers=_hdr(token),
+        json={"platform": "discord", "config": {"bot_token": "t"}},
+    )
+    assert r.status_code == 422
+    assert store.get_connector("discord") is None
+
+
+_ADMIN_HTML = (Path(__file__).parents[2] / "src" / "fleetent" / "static" / "admin.html").read_text(
+    encoding="utf-8"
+)
+
+
+def test_ui_has_connectors_tab_and_add_modal():
+    html = _ADMIN_HTML
+    assert 'data-tab="connectors"' in html
+    assert 'id="conn-modal"' in html
+    assert "openConnModal(" in html
+    assert "createConn(" in html
+    # platform dropdown with the three platforms
+    assert 'id="conn-platform"' in html
+    for p in ("telegram", "slack", "whatsapp"):
+        assert f'value="{p}"' in html
+
+
+def test_ui_connector_field_schema_matches_backend():
+    html = _ADMIN_HTML
+    # The per-platform credential field map must list exactly the backend keys.
+    for platform, keys in cfg.PLATFORM_CONFIG_KEYS.items():
+        for key in keys:
+            assert key in html, f"missing field {key} for {platform} in admin.html"
+
+
+def test_ui_has_enable_disable_and_admin_gate():
+    html = _ADMIN_HTML
+    assert "connEnable(" in html and "connDisable(" in html
+    # management controls hidden from viewers
+    assert "conn-create-bar" in html
 
 
 def test_allowlist_crud(client):

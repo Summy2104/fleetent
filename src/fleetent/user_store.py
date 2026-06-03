@@ -204,15 +204,21 @@ def create_web_user(
     must_reset: bool = False,
     role: str = "viewer",
 ) -> User:
-    """Create a web user (admin-initiated). Rejects duplicate or registration-blocked emails."""
+    """Create a web user (admin-initiated). Rejects duplicate or registration-blocked emails.
+
+    An empty/whitespace email is treated as "no email" (stored as NULL) and is exempt from the
+    duplicate check, so several email-less users (e.g. IM-only) can coexist.
+    """
     _init_db()
     from fleetent.governance import blocklist
 
-    if blocklist.is_registration_blocked(email):
-        raise PermissionError(f"email blocked from registration: {email}")
-    if get_by_email(email) is not None:
-        raise ValueError(f"email already exists: {email}")
-    user = create_user(name=name, email=email)
+    normalized = email.strip() or None
+    if normalized is not None:
+        if blocklist.is_registration_blocked(normalized):
+            raise PermissionError(f"email blocked from registration: {normalized}")
+        if get_by_email(normalized) is not None:
+            raise ValueError(f"email already exists: {normalized}")
+    user = create_user(name=name, email=normalized)
     if role != "viewer":
         set_role(user.id, role)
     if password_hash is not None:

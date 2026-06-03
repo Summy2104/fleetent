@@ -84,6 +84,71 @@ def test_builtin_admin_login_by_username(client):
     assert r.json()["must_reset"] is True  # default admin must change password first
 
 
+def test_admin_resets_user_password(client):
+    u = user_store.create_web_user("x@x.com", "X", password_hash=auth.hash_password("old"))
+    token, _ = _session_for("admin")
+    r = client.post(
+        f"/admin/users/{u.id}/password",
+        json={"new_password": "brandnew"},
+        headers=_hdr(token),
+    )
+    assert r.status_code == 200
+    refreshed = user_store.get_by_id(u.id)
+    assert auth.verify_password("brandnew", refreshed.password_hash)
+    assert refreshed.must_reset == 1  # target forced to reset on next login
+
+
+def test_viewer_cannot_reset_password(client):
+    u = user_store.create_web_user("y@x.com", "Y")
+    token, _ = _session_for("viewer")
+    r = client.post(
+        f"/admin/users/{u.id}/password", json={"new_password": "z"}, headers=_hdr(token)
+    )
+    assert r.status_code == 403
+
+
+def test_reset_password_unknown_user_404(client):
+    token, _ = _session_for("admin")
+    r = client.post("/admin/users/ghost/password", json={"new_password": "z"}, headers=_hdr(token))
+    assert r.status_code == 404
+
+
+def test_ui_auth_uses_semantic_forms(client):
+    # login / reset / create wrapped in <form> with proper autocomplete so the browser's
+    # password manager behaves like a normal site (fewer stray save prompts).
+    html = client.get("/admin/ui").text
+    assert html.count("<form") >= 3
+    assert 'autocomplete="current-password"' in html
+    assert 'autocomplete="new-password"' in html
+
+
+def test_ui_create_user_uses_modal(client):
+    html = client.get("/admin/ui").text
+    assert "openCreateModal" in html  # "Create user" opens a popup dialog
+    assert 'id="create-modal"' in html  # modal container present
+    assert "closeCreateModal" in html  # dialog can be dismissed
+    assert 'id="nu-password"' in html  # initial password so the new user can log in
+
+
+def test_ui_user_table_columns(client):
+    html = client.get("/admin/ui").text
+    assert 'id="user-filter"' in html  # client-side filter box over the list
+    assert 'id="role-filter"' in html  # filter by role
+    assert 'id="status-filter"' in html  # filter by status
+    assert "/password" in html  # per-row admin password-reset action wired
+    assert "<th>#</th>" in html  # leading row-index column
+    assert "<th>Email</th>" in html  # email is its own column
+    assert "<th>Nickname</th>" in html  # name column renamed and split out
+
+
+def test_ui_row_actions_use_dropdown_menu(client):
+    html = client.get("/admin/ui").text
+    assert "toggleMenu" in html  # the "…" button toggles an overflow menu
+    assert "menu-items" in html  # dropdown container for row actions
+    assert "Reset password" in html  # menu entries include reset password
+    assert "closeMenus" in html  # click-outside closes open menus
+
+
 def test_login_bad_password_401(client):
     user_store.create_web_user("a@x.com", "A", password_hash=auth.hash_password("right"))
     assert (
@@ -147,6 +212,32 @@ def test_admin_create_and_list_user(client):
     assert r.status_code == 201
     listed = client.get("/admin/users", headers=_hdr(token)).json()
     assert any(u["email"] == "a@x.com" for u in listed)
+
+
+def test_created_user_logs_in_with_initial_password_and_must_reset(client):
+    token, _ = _session_for("admin")
+    client.post(
+        "/admin/users",
+        headers=_hdr(token),
+        json={"email": "n@x.com", "name": "New", "password": "initpw", "must_reset": True},
+    )
+    r = client.post("/admin/login", json={"email": "n@x.com", "password": "initpw"})
+    assert r.status_code == 200
+    assert r.json()["must_reset"] is True  # forced to change on first login
+
+
+def test_create_users_with_empty_email_allowed(client):
+    # Empty email means "no email"; it must not collide with another empty-email user.
+    token, _ = _session_for("admin")
+    r1 = client.post(
+        "/admin/users", headers=_hdr(token), json={"email": "", "name": "A", "password": "pw"}
+    )
+    assert r1.status_code == 201
+    assert r1.json()["email"] is None
+    r2 = client.post(
+        "/admin/users", headers=_hdr(token), json={"email": "  ", "name": "B", "password": "pw"}
+    )
+    assert r2.status_code == 201  # not a false "email already exists"
 
 
 def test_admin_issue_and_revoke_key(client):
@@ -231,6 +322,41 @@ def test_high_risk_set_role_requires_2fa(client):
     )
     assert ok.status_code == 200
     assert user_store.get_by_id(uid).role == "admin"
+
+
+def test_admin_rebind_im_identity_to_user(client):
+    token, _ = _session_for("admin")
+    target = client.post(
+        "/admin/users", headers=_hdr(token), json={"email": "t@x.com", "name": "Target"}
+    ).json()["id"]
+    u = im_user_store.get_or_create("slack", "U_BIND")
+    im_id = im_user_store.list_im_identities(u.id)[0]["id"]
+
+    r = client.post(f"/admin/im-users/{im_id}/bind", headers=_hdr(token), json={"user_id": target})
+    assert r.status_code == 200
+    rows = client.get("/admin/im-users", headers=_hdr(token)).json()
+    row = next(x for x in rows if x["id"] == im_id)
+    assert row["user_id"] == target  # rebound to the chosen user
+
+
+def test_rebind_unknown_user_404(client):
+    token, _ = _session_for("admin")
+    u = im_user_store.get_or_create("slack", "U_BIND2")
+    im_id = im_user_store.list_im_identities(u.id)[0]["id"]
+    r = client.post(f"/admin/im-users/{im_id}/bind", headers=_hdr(token), json={"user_id": "ghost"})
+    assert r.status_code == 404
+
+
+def test_viewer_cannot_rebind_im(client):
+    token, _ = _session_for("viewer")
+    r = client.post("/admin/im-users/1/bind", headers=_hdr(token), json={"user_id": "x"})
+    assert r.status_code == 403
+
+
+def test_ui_im_users_has_bind_action(client):
+    html = client.get("/admin/ui").text
+    assert "openBindModal" in html  # IM row "Bind" opens a user-picker dialog
+    assert 'id="bind-modal"' in html
 
 
 def test_im_user_block_restore(client):

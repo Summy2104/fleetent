@@ -61,6 +61,26 @@ def test_seed_from_env_populates_and_enables(db, monkeypatch):
     assert telegram["enabled"] == 0
 
 
+def test_platform_config_keys_schema():
+    keys = icc.PLATFORM_CONFIG_KEYS
+    assert keys["telegram"] == ["bot_token"]
+    assert keys["slack"] == ["bot_token", "signing_secret", "app_token"]
+    assert keys["whatsapp"] == [
+        "phone_number_id",
+        "access_token",
+        "verify_token",
+        "business_account_id",
+    ]
+
+
+def test_resolve_masked_masks_whatsapp_access_token(db, monkeypatch):
+    _env(monkeypatch)
+    icc.set_config("whatsapp", {"access_token": "EAAG1234567890wxyz"})
+    masked = icc.resolve_masked("whatsapp")["access_token"]
+    assert masked.endswith("wxyz")
+    assert "1234567890" not in masked
+
+
 def test_seed_is_idempotent_unless_force(db, monkeypatch):
     _env(monkeypatch, slack_bot_token="xoxb-e", slack_app_token="xapp-e")
     icc.seed_from_env()

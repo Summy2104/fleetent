@@ -34,6 +34,26 @@ def test_seed_builtin_admin(db):
     assert auth.seed_builtin_admin() is None
 
 
+def test_seed_reasserts_must_reset_while_default_password(db):
+    # Insecure default admin/admin must stay gated: if must_reset got cleared but the
+    # password is still the bootstrap default, a later seed re-forces the reset.
+    user, _ = auth.seed_builtin_admin()
+    user_store.set_password(
+        user.id, auth.hash_password(auth.BUILTIN_ADMIN_PASSWORD), must_reset=False
+    )
+    assert user_store.get_by_id(user.id).must_reset == 0
+    assert auth.seed_builtin_admin() is None  # still a no-op return
+    assert user_store.get_by_id(user.id).must_reset == 1  # gate re-asserted
+
+
+def test_seed_leaves_must_reset_when_password_changed(db):
+    # If the admin set a real password, do not nag for another reset.
+    user, _ = auth.seed_builtin_admin()
+    user_store.set_password(user.id, auth.hash_password("a-real-password"), must_reset=False)
+    assert auth.seed_builtin_admin() is None
+    assert user_store.get_by_id(user.id).must_reset == 0
+
+
 def test_builtin_admin_cannot_be_demoted(db):
     user, _ = auth.seed_builtin_admin()
     with pytest.raises(PermissionError):

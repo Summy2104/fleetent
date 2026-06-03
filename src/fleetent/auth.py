@@ -56,7 +56,14 @@ def seed_builtin_admin() -> tuple[user_store.User, str] | None:
 
     Returns None (no-op) if a built-in admin already exists.
     """
-    if user_store.get_builtin_admin() is not None:
+    existing = user_store.get_builtin_admin()
+    if existing is not None:
+        # Insecure default admin/admin must stay gated: if the reset flag was cleared but the
+        # password is still the bootstrap default, re-assert the forced reset on next startup.
+        if not existing.must_reset and verify_password(
+            BUILTIN_ADMIN_PASSWORD, existing.password_hash
+        ):
+            user_store.set_must_reset(existing.id, True)
         return None
     temp_password = BUILTIN_ADMIN_PASSWORD
     user = user_store.create_user(name=BUILTIN_ADMIN_NAME, email=None)
