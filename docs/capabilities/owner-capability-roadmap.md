@@ -12,6 +12,18 @@
 
 **下一步不应继续堆 foundation spec。** 更合理的工作方式是先验收，再根据验收报告把问题归为 Pilot blocker、docs gap、enhancement 或 out-of-scope。
 
+Pilot 验收前先生成自动化证据包：
+
+```bash
+uv run python scripts/generate_pilot_verification_report.py
+```
+
+默认输出 `pilot-capability-verification.md` 和 `pilot-capability-verification.json`，覆盖七个 owner
+capability、默认测试命令、真实 smoke skip/pass/fail 和问题分类。真实 smoke 仍必须显式 opt-in，例如
+`FLEETENT_REAL_LLM_SMOKE=1`、`FLEETENT_GOOGLE_DRIVE_SMOKE=1`；缺少 flag 或 credential ref 时报告为
+skipped。报告中的问题分类固定使用 `Pilot blocker`、Docs gap、Enhancement、Out-of-scope，并给出
+Go / `Conditional Go` / No-Go 建议，供人工验收复核。
+
 ## 2. 范围
 
 纳入本 roadmap 管理的能力域：

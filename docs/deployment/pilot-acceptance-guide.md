@@ -8,6 +8,18 @@
 本指南不替代自动化测试，不要求默认连接真实 LLM、embedding、Google Drive 或 Confluence。真实外部依赖 smoke
 必须显式 opt-in；凭据或环境变量未配置时记录为 `skipped: credentials not configured`，不视为默认失败。
 
+进入人工验收前，先生成自动化验证报告作为辅助证据：
+
+```bash
+uv run python scripts/generate_pilot_verification_report.py
+```
+
+默认报告产物为 `pilot-capability-verification.md` 和 `pilot-capability-verification.json`。Markdown 给人工
+review；JSON 给 CI 或后续 dashboard ingestion。报告会列出七个 owner capability 的测试证据、默认命令结果、
+真实 smoke 的 pass/fail/skipped 状态、`Pilot blocker` / Docs gap / Enhancement / Out-of-scope 分类，以及
+Go / `Conditional Go` / No-Go 建议。真实 smoke 必须显式设置 opt-in flag，例如 `FLEETENT_REAL_LLM_SMOKE=1`
+和 `FLEETENT_GOOGLE_DRIVE_SMOKE=1`，并提供对应 credential ref；缺少任一项时应清晰 skipped。
+
 ## 1. 验收目标与判定标准
 
 验收目标：

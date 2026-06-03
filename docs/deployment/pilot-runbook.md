@@ -11,6 +11,18 @@ Pilot 默认部署入口是 Docker Compose；源码环境下的 `uv run uvicorn 
 - [pilot-install-checklist.md](pilot-install-checklist.md)：安装、升级、备份和回滚清单。
 - [pilot-acceptance-guide.md](pilot-acceptance-guide.md)：验收标准、外部 smoke 状态和报告模板。
 
+自动化证据入口：
+
+```bash
+uv run python scripts/generate_pilot_verification_report.py
+```
+
+该命令输出 `pilot-capability-verification.md` 和 `pilot-capability-verification.json`。人工验收时先查看
+Markdown，再把 JSON 作为可追踪附件保存。真实 smoke 默认关闭；只有显式设置 `FLEETENT_REAL_LLM_SMOKE=1`、
+`FLEETENT_GOOGLE_DRIVE_SMOKE=1` 等 opt-in flag，并配置对应 credential ref 后才运行真实外部依赖。报告
+会把问题归入 `Pilot blocker`、Docs gap、Enhancement 或 Out-of-scope，并给出 Go / `Conditional Go` /
+No-Go 建议；最终判定仍由 operator 和 owner 复核。
+
 执行原则：
 
 - 先证明核心本地链路，再检查真实外部依赖。
