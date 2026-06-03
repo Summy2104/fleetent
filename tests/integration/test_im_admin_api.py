@@ -174,9 +174,12 @@ _ADMIN_HTML = (Path(__file__).parents[2] / "src" / "fleetent" / "static" / "admi
 )
 
 
-def test_ui_has_connectors_tab_and_add_modal():
+def test_ui_has_connectors_in_im_tab_and_add_modal():
     html = _ADMIN_HTML
-    assert 'data-tab="connectors"' in html
+    # connectors are managed inside the unified IM tab — no standalone connectors tab
+    assert 'data-tab="connectors"' not in html
+    im_section = html.split('id="tab-im"', 1)[1].split("</section>", 1)[0]
+    assert "conn-body" in im_section
     assert 'id="conn-modal"' in html
     assert "openConnModal(" in html
     assert "createConn(" in html

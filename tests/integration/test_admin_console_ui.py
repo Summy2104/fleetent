@@ -24,7 +24,7 @@ def test_grouped_nav_present():
 
 def test_existing_tabs_still_reachable():
     html = ADMIN_HTML
-    for tab in ("users", "im", "connectors", "kb", "audit"):
+    for tab in ("users", "im", "kb", "audit"):
         assert f'data-tab="{tab}"' in html
 
 
@@ -488,7 +488,6 @@ def test_sidebar_all_modules_reachable():
         "skills",
         "kb",
         "providers",
-        "connectors",
         "oauth",
         "stats",
         "monitoring",
@@ -636,3 +635,36 @@ def test_im_connector_create_scoped_to_caller_owner():
     ]
     # create must not let the form spoof an arbitrary owner; backend defaults to caller
     assert "owner_id" not in create
+
+
+# --- merge IM connectors UI into the IM users tab -----------------------------
+
+
+def test_separate_connectors_tab_removed():
+    html = ADMIN_HTML
+    # the standalone connectors tab + its section no longer exist
+    assert 'data-tab="connectors"' not in html
+    assert 'id="tab-connectors"' not in html
+
+
+def test_connector_block_lives_inside_im_tab():
+    html = ADMIN_HTML
+    im_section = html.split('id="tab-im"', 1)[1].split("</section>", 1)[0]
+    # connector list + create bar + heading now render within the IM tab
+    assert "conn-body" in im_section
+    assert "conn-create-bar" in im_section
+    assert "IM Connectors" in im_section
+    # the IM users block stays too
+    assert "im-body" in im_section
+
+
+def test_im_loader_refreshes_both_lists():
+    html = ADMIN_HTML
+    loader = html.split("LOADERS.im =", 1)[1].split("\n", 1)[0]
+    assert "loadIm()" in loader
+    assert "loadConn()" in loader
+    # the standalone connectors loader registration is gone
+    assert "LOADERS.connectors" not in html
+    # and connectors is no longer a routable tab group entry
+    tab_group = html.split("const TAB_GROUP", 1)[1].split("}", 1)[0]
+    assert "connectors" not in tab_group
