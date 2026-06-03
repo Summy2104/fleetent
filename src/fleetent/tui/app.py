@@ -2,21 +2,23 @@
 
 ``AppController`` holds the testable interaction logic — a submitted line becomes a
 backend action (chat → ``send``; slash command → abort/approve/session/quit/help),
-and gateway events drive rendering. ``run`` wires it to a prompt_toolkit
-``PromptSession`` (async input) running concurrently with the backend's receive
-loop under ``patch_stdout`` so streamed output and the input line coexist. ``main``
-parses ``--url``/``--token`` and starts the loop.
+and gateway events render to the terminal. Rendering goes through an injectable
+``emit`` sink (default: prompt_toolkit ``print_formatted_text``), which is
+patch_stdout-safe; ``run`` wires it to a ``PromptSession`` running concurrently
+with the backend's receive loop under ``patch_stdout`` so streamed output and the
+input line coexist. ``main`` parses ``--url``/``--token`` and starts the loop.
 """
 
 import argparse
 import asyncio
 import logging
 import os
+from collections.abc import Callable
 from typing import Any, Protocol
 
-from prompt_toolkit import PromptSession
+from prompt_toolkit import PromptSession, print_formatted_text
+from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.patch_stdout import patch_stdout
-from rich.console import Console
 
 from fleetent.tui import protocol as p
 from fleetent.tui import render
@@ -27,6 +29,13 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_URL = "ws://127.0.0.1:8765/ws"
 _HELP = "commands: /new /session /abort [run_id] /approve <id> <approved|rejected> /quit /help"
+
+# A sink that prints rendered FormattedText; ``end`` lets streaming text stay inline.
+EmitFn = Callable[[FormattedText, str], None]
+
+
+def _default_emit(text: FormattedText, end: str) -> None:
+    print_formatted_text(text, end=end)
 
 
 class Backend(Protocol):
@@ -42,11 +51,16 @@ class Backend(Protocol):
 class AppController:
     """Interaction logic: input line → backend action; gateway event → render."""
 
-    def __init__(self, backend: Backend, console: Console, session_id: str | None = None) -> None:
+    def __init__(
+        self, backend: Backend, emit: EmitFn | None = None, session_id: str | None = None
+    ) -> None:
         self.backend = backend
-        self.console = console
+        self._emit = emit or _default_emit
         self.session_id = session_id
         self.current_run_id: str | None = None
+
+    def _status(self, message: str) -> None:
+        self._emit(render.format_status(message), "\n")
 
     async def handle_line(self, text: str) -> bool:
         """Process one submitted line; return ``False`` to quit the loop."""
@@ -60,39 +74,41 @@ class AppController:
         if cmd.name == "quit":
             return False
         if cmd.name == "help":
-            render.render_status(self.console, _HELP)
+            self._status(_HELP)
             return True
         if cmd.name == "new":
             result = await self.backend.session_new()
             self.session_id = result.get("session_id")
-            render.render_status(self.console, f"new session: {self.session_id}")
+            self._status(f"new session: {self.session_id}")
             return True
         if cmd.name == "session":
             result = await self.backend.session_list()
-            render.render_status(self.console, f"sessions: {result.get('sessions', [])}")
+            self._status(f"sessions: {result.get('sessions', [])}")
             return True
         if cmd.name == "abort":
             run_id = cmd.args[0] if cmd.args else self.current_run_id
             if run_id:
                 await self.backend.abort(run_id)
             else:
-                render.render_status(self.console, "no active run to abort")
+                self._status("no active run to abort")
             return True
         if cmd.name == "approve":
             if len(cmd.args) >= 2:
                 await self.backend.approve(cmd.args[0], cmd.args[1])
             else:
-                render.render_status(self.console, "usage: /approve <id> <approved|rejected>")
+                self._status("usage: /approve <id> <approved|rejected>")
             return True
 
         # Known commands are handled above; anything else is unknown.
         if cmd.name not in KNOWN_COMMANDS:
-            render.render_status(self.console, f"unknown command: /{cmd.name}")
+            self._status(f"unknown command: /{cmd.name}")
         return True
 
     def on_event(self, event: dict[str, Any]) -> None:
         """Render a gateway event; clear the active run on a terminal event."""
-        render.render_event(self.console, event)
+        rendered = render.format_event(event)
+        if rendered is not None:
+            self._emit(rendered, "")  # newlines are baked into the rendered text
         if event.get("type") in (p.EVENT_DONE, p.EVENT_ERROR):
             self.current_run_id = None
 
@@ -116,13 +132,12 @@ class AppController:
 
 
 async def _run(url: str, token: str) -> None:
-    console = Console()
-    controller = AppController(backend=None, console=console)  # type: ignore[arg-type]
+    controller = AppController(backend=None)  # type: ignore[arg-type]
     backend = GatewayBackend(url, token, on_event=controller.on_event)
     controller.backend = backend
-    render.render_status(console, f"connecting to {url} …")
+    controller._status(f"connecting to {url} …")
     await backend.connect()
-    render.render_status(console, "connected. type a message, or /help.")
+    controller._status("connected. type a message, or /help.")
     try:
         await controller.run()
     finally:
