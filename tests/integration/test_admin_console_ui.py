@@ -24,7 +24,7 @@ def test_grouped_nav_present():
 
 def test_existing_tabs_still_reachable():
     html = ADMIN_HTML
-    for tab in ("users", "im", "kb", "audit"):
+    for tab in ("users", "kb", "audit"):
         assert f'data-tab="{tab}"' in html
 
 
@@ -483,7 +483,6 @@ def test_sidebar_all_modules_reachable():
     sidebar = html.split('class="sidebar"', 1)[1].split("</nav>", 1)[0]
     for tab in (
         "users",
-        "im",
         "agents",
         "skills",
         "kb",
@@ -510,7 +509,7 @@ def test_page_header_primitive_present():
 def test_page_header_applied_to_each_module():
     html = ADMIN_HTML
     # every module section carries a page header (one per top-level module tab)
-    assert html.count('class="page-header"') >= 11
+    assert html.count('class="page-header"') >= 10
 
 
 # --- Redesign: toast + confirm dialog -----------------------------------------
@@ -608,14 +607,90 @@ def test_secret_fields_masked_no_prefill():
     assert '$("oc-client-secret").value = "";' in html
 
 
-# --- user-scoped IM connectors: owner column + owner-scoped create -----------
+# --- unified User-centric axis: single Users tab -----------------------------
 
 
-def test_im_connector_owner_shown_in_grouped_view():
+def _render_users_body(html):
+    return html.split("function renderUsers()", 1)[1].split("function closeMenus", 1)[0]
+
+
+def test_no_standalone_im_tab():
     html = ADMIN_HTML
-    body = html.split("async function loadIm()", 1)[1].split("async function imBlock", 1)[0]
-    # each platform group surfaces the connector's owner (admin sees all owners)
-    assert "owner_id" in body
+    assert 'data-tab="im"' not in html
+    assert 'id="tab-im"' not in html
+    assert 'id="im-groups"' not in html
+    assert "LOADERS.im" not in html
+    assert "async function loadIm" not in html
+    tab_group = html.split("const TAB_GROUP", 1)[1].split("}", 1)[0]
+    assert "im:" not in tab_group
+    group_default = html.split("const GROUP_DEFAULT_TAB", 1)[1].split("}", 1)[0]
+    assert '"im"' not in group_default and "'im'" not in group_default
+
+
+def test_access_group_only_users_tab():
+    html = ADMIN_HTML
+    access = html.split('data-group="access"', 1)[1].split("</div>", 1)[0]
+    assert 'data-tab="users"' in access
+    assert 'data-tab="im"' not in access
+
+
+def test_separate_connectors_tab_removed():
+    html = ADMIN_HTML
+    # neither the legacy connectors tab nor the IM tab exist as standalone tabs
+    assert 'data-tab="connectors"' not in html
+    assert 'id="tab-connectors"' not in html
+    assert 'data-tab="im"' not in html
+    assert 'id="tab-im"' not in html
+
+
+# --- Task 2: foldable IM identities per User ----------------------------------
+
+
+def test_loaders_users_fetches_three_endpoints():
+    html = ADMIN_HTML
+    loader = html.split("async function loadUsers()", 1)[1].split("function renderUsers", 1)[0]
+    assert '"/users"' in loader
+    assert '"/im-users"' in loader
+    assert '"/im/connectors"' in loader
+    assert "IM_BY_USER" in loader
+    assert "CONN_BY_OWNER" in loader
+
+
+def test_render_users_joins_im_identities_by_user():
+    body = _render_users_body(ADMIN_HTML)
+    # IM identities joined by user_id and folded under their User
+    assert "IM_BY_USER[" in body
+    # expander control + per-identity actions live in the per-user child region
+    assert "toggleUserRow(" in body
+    assert "openBindModal(" in body
+    assert "imBlock(" in body
+    assert "imRestore(" in body
+    assert "platform_user_id" in body
+
+
+# --- Task 3: connectors grouped under owning User -----------------------------
+
+
+def test_render_users_groups_connectors_by_owner():
+    body = _render_users_body(ADMIN_HTML)
+    assert "CONN_BY_OWNER[" in body
+    assert "connEnable(" in body
+    assert "connDisable(" in body
+
+
+def test_conn_create_bar_in_users_tab():
+    html = ADMIN_HTML
+    users_section = html.split('id="tab-users"', 1)[1].split("</section>", 1)[0]
+    assert "conn-create-bar" in users_section
+    assert "openConnModal(" in users_section
+
+
+def test_connector_modal_retained():
+    html = ADMIN_HTML
+    assert 'id="conn-modal"' in html
+    assert "function openConnModal" in html
+    assert "function createConn" in html
+    assert "const CONN_FIELDS" in html
 
 
 def test_im_connector_create_scoped_to_caller_owner():
@@ -627,33 +702,30 @@ def test_im_connector_create_scoped_to_caller_owner():
     assert "owner_id" not in create
 
 
-# --- merge IM connectors UI into the IM users tab -----------------------------
+# --- Task 4: source filter + badge --------------------------------------------
 
 
-def test_separate_connectors_tab_removed():
+def test_source_filter_control_in_users_tab():
     html = ADMIN_HTML
-    # the standalone connectors tab + its section no longer exist
-    assert 'data-tab="connectors"' not in html
-    assert 'id="tab-connectors"' not in html
+    users_section = html.split('id="tab-users"', 1)[1].split("</section>", 1)[0]
+    assert 'id="source-filter"' in users_section
 
 
-def test_im_users_and_connectors_unified_in_im_tab():
-    html = ADMIN_HTML
-    im_section = html.split('id="tab-im"', 1)[1].split("</section>", 1)[0]
-    # one grouped container replaces the two separate stacked tables
-    assert 'id="im-groups"' in im_section
-    # the add-connection control is retained inside the IM tab
-    assert "conn-create-bar" in im_section
-    # legacy separate tbodies are gone — users + connector render per platform group
-    assert "conn-body" not in im_section
-    assert "im-body" not in im_section
+def test_source_classification_and_badge():
+    body = _render_users_body(ADMIN_HTML)
+    # IM-origin detection (bound identities OR {platform}:{id} name pattern) + badge
+    assert "imOrigin" in body
+    assert "source-filter" in body
 
 
-def test_im_loader_renders_unified_view():
-    html = ADMIN_HTML
-    loader = html.split("LOADERS.im =", 1)[1].split("\n", 1)[0]
-    assert "loadIm()" in loader
-    # single unified renderer; no standalone connectors loader/tab
-    assert "LOADERS.connectors" not in html
-    tab_group = html.split("const TAB_GROUP", 1)[1].split("}", 1)[0]
-    assert "connectors" not in tab_group
+# --- Task 5: distinct block semantics -----------------------------------------
+
+
+def test_distinct_block_semantics_labels():
+    body = _render_users_body(ADMIN_HTML)
+    # whole-User disable vs single-identity block rendered with distinct labels
+    assert "Disable user" in body
+    assert "Block identity" in body
+    # user-level wires /users/.../block|unblock; identity-level wires /im-users/.../block
+    assert "block(" in body
+    assert "imBlock(" in body

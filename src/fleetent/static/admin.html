@@ -157,7 +157,6 @@
       <div class="nav-group">
         <button class="nav-group-label active" data-group="access" onclick="switchGroup('access')">Access</button>
         <button class="nav-item active" data-tab="users" onclick="switchTab('users')">Users</button>
-        <button class="nav-item" data-tab="im" onclick="switchTab('im')">IM Users</button>
       </div>
       <div class="nav-group">
         <button class="nav-group-label" data-group="agents" onclick="switchGroup('agents')">Agents &amp; Skills</button>
@@ -200,21 +199,18 @@
           <option value="blocked">blocked</option>
           <option value="disabled">disabled</option>
         </select>
+        <select id="source-filter" onchange="renderUsers()">
+          <option value="">all sources</option>
+          <option value="im">IM-origin</option>
+          <option value="human">human / API</option>
+        </select>
+        <span id="conn-create-bar"><button onclick="openConnModal()">Add connection</button></span>
         <span id="create-bar"><button onclick="openCreateModal()">Create user</button></span>
       </div>
       <div class="table-scroll"><table>
-        <thead><tr><th>#</th><th>Email</th><th>Nickname</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th></th><th>#</th><th>Email</th><th>Nickname</th><th>Role</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody id="users-body"></tbody>
       </table></div>
-    </section>
-
-    <section id="tab-im" class="hidden">
-      <div class="page-header"><h2 class="ph-title">IM</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.im?.()">Refresh</button></div></div>
-      <div class="row" style="margin-bottom:12px;">
-        <span class="muted" style="flex:1;">IM platforms — each connector with its users (credentials stored server-side, shown masked)</span>
-        <span id="conn-create-bar"><button onclick="openConnModal()">Add connection</button></span>
-      </div>
-      <div id="im-groups"></div>
     </section>
 
     <section id="tab-kb" class="hidden">
@@ -810,7 +806,7 @@ function show(view) {
 }
 
 const TAB_GROUP = {
-  users: "access", im: "access",
+  users: "access",
   agents: "agents", skills: "agents", kb: "agents",
   providers: "models", oauth: "models",
   stats: "ops", monitoring: "ops", sessions: "ops",
@@ -834,32 +830,115 @@ function switchTab(tab) {
 }
 
 LOADERS.users = () => loadUsers();
-LOADERS.im = () => loadIm();
 LOADERS.kb = () => loadKb();
 LOADERS.audit = () => loadAudit();
 
 let ALL_USERS = [];
+// IM identities + connectors are folded under their owning User (presentation
+// re-axis off existing joins: im_users.user_id = user.id, connectors.owner_id = user.id).
+let IM_BY_USER = {};
+let CONN_BY_OWNER = {};
 
 async function loadUsers() {
-  $("users-body").innerHTML = loadingRow(6);
-  try { ALL_USERS = await api("GET", "/users"); renderUsers(); }
-  catch (e) { $("users-body").innerHTML = emptyRow(6, e.message); }
+  $("users-body").innerHTML = loadingRow(8);
+  try {
+    const [users, imUsers, conns] = await Promise.all([
+      api("GET", "/users"),
+      api("GET", "/im-users"),
+      api("GET", "/im/connectors"),
+    ]);
+    ALL_USERS = users;
+    IM_BY_USER = {};
+    for (const iu of imUsers) (IM_BY_USER[iu.user_id] ||= []).push(iu);
+    CONN_BY_OWNER = {};
+    for (const c of conns) (CONN_BY_OWNER[c.owner_id] ||= []).push(c);
+    renderUsers();
+  } catch (e) { $("users-body").innerHTML = emptyRow(8, e.message); }
+}
+
+// IM-origin: a User with bound IM identities OR an auto-created backing User
+// whose name matches the {platform}:{platform_user_id} pattern.
+const IM_NAME_RE = /^(slack|telegram|whatsapp):/;
+function isImOrigin(u) {
+  return (IM_BY_USER[u.id]?.length || 0) > 0 || IM_NAME_RE.test(u.name || "");
 }
 
 function renderUsers() {
   const q = ($("user-filter").value || "").trim().toLowerCase();
   const role = $("role-filter").value;
   const status = $("status-filter").value;
+  const source = $("source-filter").value;
   const users = ALL_USERS.filter(u =>
     (!q || (u.email || "").toLowerCase().includes(q) || (u.name || "").toLowerCase().includes(q))
     && (!role || u.role === role)
-    && (!status || u.status === status));
-  $("users-body").innerHTML = users.map((u, i) => `
+    && (!status || u.status === status)
+    && (!source || (source === "im" ? isImOrigin(u) : !isImOrigin(u))));
+  $("users-body").innerHTML = users.map((u, i) => {
+    const ids = IM_BY_USER[u.id] || [];
+    const conns = CONN_BY_OWNER[u.id] || [];
+    const imOrigin = isImOrigin(u);
+    const hasChild = ids.length > 0 || conns.length > 0;
+    // Expander gated on bound IM identities (per spec); owned connectors render in
+    // the same child region when present.
+    const expander = ids.length
+      ? `<button class="small ghost" title="Show IM identities" onclick="toggleUserRow('${u.id}')">▸</button>`
+      : "";
+    const idRows = ids.map(r => `
+      <tr>
+        <td>${esc(r.platform)}</td>
+        <td>${esc(r.platform_user_id)}</td>
+        <td><span class="pill ${r.allowed ? "active" : "blocked"}">${r.allowed ? "allowed" : "blocked"}</span></td>
+        <td class="actions">
+          <button class="small ghost" onclick="openBindModal(${r.id})">Bind</button>
+          ${r.allowed
+            ? `<button class="small danger" onclick="imBlock(${r.id})">Block identity</button>`
+            : `<button class="small ghost" onclick="imRestore(${r.id})">Restore</button>`}
+        </td>
+      </tr>`).join("");
+    const idBlock = ids.length
+      ? `<div class="card" style="margin-bottom:var(--sp-2);">
+          <h4 style="margin:0 0 8px;">IM identities</h4>
+          <div class="table-scroll"><table>
+            <thead><tr><th>Platform</th><th>Platform user</th><th>State</th><th>Actions</th></tr></thead>
+            <tbody>${idRows}</tbody>
+          </table></div>
+        </div>`
+      : "";
+    const connRows = conns.map(c => {
+      const creds = Object.entries(c.config || {}).map(([k, v]) => `${esc(k)}=${esc(v)}`).join(", ");
+      return `
+      <tr>
+        <td style="text-transform:capitalize;">${esc(c.platform)}</td>
+        <td><span class="pill">${esc(c.status || "")}</span></td>
+        <td><span class="pill ${c.enabled ? "active" : "blocked"}">${c.enabled ? "on" : "off"}</span></td>
+        <td class="muted">${creds || "—"}</td>
+        <td class="actions">
+          ${c.enabled
+            ? `<button class="small danger" onclick="connDisable('${esc(c.platform)}')">Disable</button>`
+            : `<button class="small ghost" onclick="connEnable('${esc(c.platform)}')">Enable</button>`}
+        </td>
+      </tr>`;
+    }).join("");
+    const connBlock = conns.length
+      ? `<div class="card">
+          <h4 style="margin:0 0 8px;">Connectors owned</h4>
+          <div class="table-scroll"><table>
+            <thead><tr><th>Platform</th><th>Status</th><th>Enabled</th><th>Credentials</th><th>Actions</th></tr></thead>
+            <tbody>${connRows}</tbody>
+          </table></div>
+        </div>`
+      : "";
+    const childRow = hasChild
+      ? `<tr id="child-${u.id}" class="hidden"><td></td><td colspan="7">${idBlock}${connBlock}</td></tr>`
+      : "";
+    return `
     <tr>
+      <td>${expander}</td>
       <td class="muted">${i + 1}</td>
       <td>${esc(u.email || "—")}</td>
       <td>${esc(u.name || "—")}</td>
       <td><span class="pill ${u.role}">${esc(u.role)}</span></td>
+      <td><span class="pill ${imOrigin ? "blocked" : "active"}">${imOrigin ? "IM" : "human/API"}</span></td>
       <td><span class="pill ${u.status}">${esc(u.status)}</span></td>
       <td class="actions">
         <div class="menu">
@@ -871,13 +950,19 @@ function renderUsers() {
             <button onclick="resetPassword('${u.id}')">Reset password</button>
             <button onclick="viewKeys('${u.id}')">Keys</button>
             ${u.status === "blocked"
-              ? `<button onclick="unblock('${u.id}')">Unblock</button>`
-              : `<button class="danger" onclick="block('${u.id}')">Block</button>`}
+              ? `<button onclick="unblock('${u.id}')">Enable user</button>`
+              : `<button class="danger" onclick="block('${u.id}')">Disable user</button>`}
             <button class="danger" onclick="del('${u.id}')">Delete</button>
           </div>
         </div>
       </td>
-    </tr>`).join("") || emptyRow(6, "No users.");
+    </tr>${childRow}`;
+  }).join("") || emptyRow(8, "No users.");
+}
+
+function toggleUserRow(id) {
+  const child = $("child-" + id);
+  if (child) child.classList.toggle("hidden");
 }
 
 function closeMenus(except) {
@@ -936,59 +1021,8 @@ async function viewKeys(id) {
   }
 }
 
-// Unified per-platform view: one block per platform shows its connector
-// (status / masked credentials / enable-disable) and the IM users on it.
-async function loadIm() {
-  const [conns, users] = await Promise.all([
-    api("GET", "/im/connectors"),
-    api("GET", "/im-users"),
-  ]);
-  const connByPlat = {};
-  for (const c of conns) connByPlat[c.platform] = c;
-  const usersByPlat = {};
-  for (const u of users) (usersByPlat[u.platform] ||= []).push(u);
-  const platforms = [...new Set([...conns.map(c => c.platform), ...users.map(u => u.platform)])].sort();
-  if (!platforms.length) { $("im-groups").innerHTML = `<div class="muted">No IM platforms.</div>`; return; }
-  $("im-groups").innerHTML = platforms.map(p => {
-    const c = connByPlat[p];
-    const creds = c ? Object.entries(c.config || {}).map(([k, v]) => `${esc(k)}=${esc(v)}`).join(", ") : "";
-    const connBar = c
-      ? `<span class="pill">${esc(c.status || "")}</span>
-         <span class="pill ${c.enabled ? "active" : "blocked"}">${c.enabled ? "on" : "off"}</span>
-         <span class="muted">owner ${esc((c.owner_id || "").slice(0, 8))}</span>
-         <span class="muted" style="flex:1;">${creds || "—"}</span>
-         ${c.enabled
-            ? `<button class="small danger" onclick="connDisable('${esc(p)}')">Disable</button>`
-            : `<button class="small ghost" onclick="connEnable('${esc(p)}')">Enable</button>`}`
-      : `<span class="muted" style="flex:1;">No connector configured</span>`;
-    const rows = (usersByPlat[p] || []).map(r => `
-      <tr>
-        <td>${esc(r.platform_user_id)}</td>
-        <td class="muted">${esc((r.user_id || "").slice(0, 8))}</td>
-        <td><span class="pill ${r.allowed ? "active" : "blocked"}">${r.allowed ? "allowed" : "blocked"}</span></td>
-        <td class="actions">
-          <button class="small ghost" onclick="openBindModal(${r.id})">Bind</button>
-          ${r.allowed
-            ? `<button class="small danger" onclick="imBlock(${r.id})">Block</button>`
-            : `<button class="small ghost" onclick="imRestore(${r.id})">Restore</button>`}
-        </td>
-      </tr>`).join("") || `<tr><td colspan="4" class="muted">No users on this platform.</td></tr>`;
-    return `
-      <div class="card" style="margin-bottom:var(--sp-4);">
-        <div class="row" style="align-items:center; gap:8px; margin-bottom:10px;">
-          <h3 style="margin:0; text-transform:capitalize;">${esc(p)}</h3>
-          ${connBar}
-        </div>
-        <div class="table-scroll"><table>
-          <thead><tr><th>Platform user</th><th>Internal user</th><th>State</th><th>Actions</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table></div>
-      </div>`;
-  }).join("");
-}
-
-async function imBlock(id) { const reason = prompt("Reason?"); if (reason === null) return; try { await api("POST", `/im-users/${id}/block`, { reason }); loadIm(); } catch (e) { toast(e.message, "error"); } }
-async function imRestore(id) { try { await api("POST", `/im-users/${id}/restore`, { reason: "" }); loadIm(); } catch (e) { toast(e.message, "error"); } }
+async function imBlock(id) { const reason = prompt("Reason?"); if (reason === null) return; try { await api("POST", `/im-users/${id}/block`, { reason }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
+async function imRestore(id) { try { await api("POST", `/im-users/${id}/restore`, { reason: "" }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
 
 let BIND_IM_ID = null;
 async function openBindModal(imId) {
@@ -1006,7 +1040,7 @@ async function doBindIm() {
   try {
     await api("POST", `/im-users/${BIND_IM_ID}/bind`, { user_id: $("bind-user-select").value });
     closeBindModal();
-    loadIm();
+    loadUsers();
   } catch (e) { $("bind-err").textContent = e.message; }
 }
 
@@ -1017,8 +1051,8 @@ const CONN_FIELDS = {
   whatsapp: ["phone_number_id", "access_token", "verify_token", "business_account_id"],
 };
 
-// Connector mutations refresh the unified per-platform view.
-async function loadConn() { return loadIm(); }
+// Connector mutations refresh the unified User-centric view.
+async function loadConn() { return loadUsers(); }
 
 function renderConnFields() {
   const platform = $("conn-platform").value;
