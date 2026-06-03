@@ -122,7 +122,8 @@ Pilot 环境中，Google Drive / Confluence connector 的真实 credential 不�
 uv run fleetent-admin kb connectors list
 uv run fleetent-admin kb connectors check eng-drive
 uv run fleetent-admin kb connectors sync eng-drive --dry-run
-uv run fleetent-admin kb connectors sync eng-drive
+FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
+  uv run fleetent-admin kb connectors sync eng-drive --yes --pilot-fixture
 uv run fleetent-admin kb connectors status eng-drive
 ```
 

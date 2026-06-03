@@ -8,10 +8,10 @@
 docs/
   README.md                    # 本文件：导航 + 写作规范
   strategy.md                  # 战略背景：为什么做、卖什么、与竞品的差异
-  architecture.md              # 总体架构、模块关系、数据流、关键决策
+  architecture.md              # 架构总览，当前权威入口：模块关系、数据流、关键决策
   glossary.md                  # 术语表
   architecture/
-    source-module-organization-roadmap.md
+    source-module-organization-roadmap.md # 架构演进路线图和专题文档
   capabilities/
     _template.md               # 能力域文档模板
     *.md                       # 能力定义、状态和验收标准
@@ -32,7 +32,7 @@ docs/
 
 | 类型 | 放置位置 | 内容边界 |
 | --- | --- | --- |
-| 架构文档 | `docs/architecture*.md`, `docs/architecture/` | 系统定位、模块边界、数据流、关键架构决策。 |
+| 架构文档 | `docs/architecture.md`, `docs/architecture/` | `architecture.md` 是架构总览和当前权威入口；`architecture/` 放架构演进路线图和专题文档。 |
 | 能力文档 | `docs/capabilities/` | 做什么、当前状态、规划项、验收标准和模块归属。 |
 | 能力 roadmap | `docs/capabilities/roadmaps/` | 多个相关 capability 的完成度、缺口、优先级和 Pilot 风险。 |
 | 部署文档 | `docs/deployment/` | 安装、升级、备份、运行、验收和 secret 处理。 |

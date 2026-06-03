@@ -110,7 +110,7 @@ observability traces, usage, diagnostics, session persistence
 | `SLACK_APP_TOKEN` | Slack Socket Mode 需要与 `SLACK_BOT_TOKEN` 一起配置。 |
 | `TELEGRAM_BOT_TOKEN` | 启用 Telegram adapter。 |
 | `MICROSANDBOX_URL` | Sandbox 服务地址。 |
-| `MINI_AGENT_SKILLS_DIR` | 覆盖默认 skills 目录。 |
+| `FLEETENT_SKILLS_DIR` | 覆盖默认 skills 目录。 |
 
 模型路由通过 `settings.yaml` 和 `model_router.py` 配置，使用 OpenAI-compatible endpoint。不要提交真实 API key、IM token、OAuth 凭据或本地 `.env` 文件。
 
@@ -164,7 +164,7 @@ def search_database(query: str, limit: int = 10) -> str:
     ...
 ```
 
-MCP-compatible 工具服务可以写入 `config/mcp.yaml`：
+MCP-compatible 工具服务可以写入 `config/mcp.servers.yaml`：
 
 ```yaml
 servers:

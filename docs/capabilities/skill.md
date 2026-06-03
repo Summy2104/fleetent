@@ -49,7 +49,7 @@ flowchart TD
 - ⚡ **Skill 扫描**：扫描 `skills/` 目录下一级子目录中的 `SKILL.md` 文件，建立索引
   - 仅扫描一级目录，不支持深层嵌套
   - 同名 Skill 冲突时静默覆盖，无警告
-  - 环境变量名称遗留旧值（`MINI_AGENT_SKILLS_DIR`，应为 `FLEETENT_SKILLS_DIR`）
+  - 支持通过 `FLEETENT_SKILLS_DIR` 覆盖默认 skills 目录；旧 `MINI_AGENT_SKILLS_DIR` 不再生效
 
 - ⚡ **元数据解析**：从 `SKILL.md` 文件头部解析 `name` 和 `description`
   - 使用简单行扫描，而非完整 YAML 解析器，遇到复杂格式会出错
@@ -93,8 +93,6 @@ flowchart TD
 - [ ] **深层嵌套目录支持**：递归扫描 `skills/` 下任意层级的 `SKILL.md` 文件
 
 - [ ] **同名冲突警告**：扫描时发现同名 Skill，明确报警并选定一个，不静默覆盖
-
-- [ ] **环境变量名修复**：将 `MINI_AGENT_SKILLS_DIR` 更正为 `FLEETENT_SKILLS_DIR`
 
 ## 验收标准
 
