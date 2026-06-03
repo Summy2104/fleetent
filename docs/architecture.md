@@ -19,7 +19,7 @@ graph TD
     A["接入层\nserver.py · im_gateway · webhook_router"]
     B["编排层\nagent_loop · sub_agent"]
     C["能力层\nmodel_router · tool_registry · intelligence.long_term_ctx\nintelligence.memory · intelligence.vector_store · intelligence.reflection\nskill_registry · context_mgr · integrations.mcp\nintegrations.sandbox · governance.permission_gate · cron_scheduler"]
-    D["横切基础能力\nobservability · config · database runtime\nuser_store · agent_store · im_user_store\nsession_mgr · schedule_store · governance.agent_policy · platform.admin_cli"]
+    D["横切基础能力\nobservability · config · database runtime\nuser_store · agent_store · im_user_store\nsession · schedule_store · governance.agent_policy · platform.admin_cli"]
 
     A --> B --> C --> D
 ```
@@ -110,7 +110,7 @@ src/fleetent/
   user_store.py      ← SQLite 用户/API key 管理
   agent_store.py     ← SQLite：agent 定义 + 用户绑定 + channel 绑定
   im_user_store.py   ← (platform, platform_user_id) → 内部 User；allowlist
-  session_mgr.py     ← JSON session 持久化；per-session asyncio.Lock
+  session/           ← manager(←session_mgr)：JSON session 持久化、per-session asyncio.Lock；index(←session_index)：会话元数据索引（已包化；旧 session_mgr.py / session_index.py 为 re-export shim）
   schedule_store.py  ← SQLite：定时任务定义与状态持久化
   observability/     ← trace、log、usage、diagnostics
   config.py          ← pydantic-settings；加载 .env + config/settings.yaml；读取 config/mcp.servers.yaml

@@ -1215,7 +1215,7 @@ def test_summary_failure_is_logged(monkeypatch):
 
 async def test_cumulative_summary_round_trips_and_stays_incremental(monkeypatch, tmp_path):
     import fleetent.context_mgr as cm
-    import fleetent.session_mgr as sm
+    import fleetent.session.manager as sm
 
     monkeypatch.setattr(sm, "SESSIONS_DIR", tmp_path)
     monkeypatch.setattr(sm, "maybe_run_maintenance", lambda *a, **k: [])

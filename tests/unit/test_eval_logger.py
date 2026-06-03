@@ -504,7 +504,7 @@ def test_serialize_name_only_does_not_scan_value():
 
 async def test_session_persistence_keeps_plaintext_tool_call_args(tmp_path, monkeypatch):
     # Redaction lives only in the trace serialization path; session writes raw.
-    import fleetent.session_mgr as sm
+    import fleetent.session.manager as sm
 
     monkeypatch.setattr(sm, "SESSIONS_DIR", tmp_path / "sessions")
     msg = _assistant_tool_call_msg('{"api_key": "sk-secret"}')

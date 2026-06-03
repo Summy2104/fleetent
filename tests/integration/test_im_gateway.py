@@ -7,7 +7,7 @@ from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
 @pytest.fixture
 def mock_session_mgr(monkeypatch):
-    import fleetent.session_mgr as sm
+    import fleetent.session.manager as sm
 
     monkeypatch.setattr(sm, "load", AsyncMock(return_value=[]))
     monkeypatch.setattr(sm, "load_meta", AsyncMock(return_value={}))

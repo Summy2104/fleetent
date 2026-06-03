@@ -13,7 +13,7 @@ from alembic.config import Config
 
 import fleetent.governance.permission_gate as permission_gate
 import fleetent.im_user_store as im_user_store
-import fleetent.session_mgr as session_mgr
+import fleetent.session.manager as session_mgr
 import fleetent.user_store as user_store
 
 

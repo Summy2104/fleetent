@@ -4,8 +4,8 @@ import os
 import pytest
 import structlog
 
-import fleetent.session_index as session_index
-import fleetent.session_mgr as session_mgr
+import fleetent.session.index as session_index
+import fleetent.session.manager as session_mgr
 from fleetent.config import Settings
 
 

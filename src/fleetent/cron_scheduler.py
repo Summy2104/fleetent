@@ -38,7 +38,7 @@ async def _fire(task: dict[str, Any]) -> None:
     """
     import uuid
 
-    from fleetent import session_mgr
+    from fleetent.session import manager as session_mgr
 
     sid_spec = task.get("session_id")
     if sid_spec is None:
