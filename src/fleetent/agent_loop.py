@@ -28,6 +28,7 @@ from fleetent.error_classifier import classify
 from fleetent.eval_logger import log_run
 from fleetent.governance.agent_policy import check_tool_access
 from fleetent.governance.permission_gate import _default_gate
+from fleetent.integrations.sandbox import Mode, is_code_execution_enabled
 from fleetent.intelligence.long_term_ctx import ContextSource, build_context
 from fleetent.intelligence.memory import extract_and_update
 from fleetent.loop_detector import LoopDetectionChecker, arg_fingerprint, result_digest
@@ -41,7 +42,6 @@ from fleetent.observability import (
     record_trace_event,
 )
 from fleetent.provider_health import ProviderHealthCache, get_health_cache
-from fleetent.sandbox_enablement import Mode, is_code_execution_enabled
 from fleetent.skill_registry import available_skills_prompt, collect_disabled_trace
 from fleetent.skill_registry import match as match_skill  # noqa: F401  # patch target + API parity
 from fleetent.skill_registry import scan as scan_skills
@@ -1310,9 +1310,9 @@ def run_sync(
     async def _run() -> str:
         # SB3: resolve the effective mode (one-time Docker probe, cached) inside the
         # CLI's own event loop so run_code's schema visibility is gated for the CLI too.
-        from fleetent import sandbox_enablement
+        from fleetent.integrations.sandbox import get_effective_mode
 
-        sandbox_mode = await sandbox_enablement.get_effective_mode()
+        sandbox_mode = await get_effective_mode()
         return await run(
             messages,
             user_id=user_id,

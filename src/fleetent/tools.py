@@ -8,12 +8,15 @@ import uuid
 from pathlib import Path
 
 from fleetent import eval_logger, image_gen_client, vision_client
-from fleetent import sandbox_output_truncation as sot
 from fleetent.cancellation import CancelToken
 from fleetent.error_classifier import CLASSIFICATION_TABLE, ErrorCategory, ErrorClassification
-from fleetent.sandbox_client import ExecResult, SandboxClient
-from fleetent.sandbox_manager import SandboxManager
-from fleetent.sandbox_secrets import build_sandbox_env
+from fleetent.integrations.sandbox import (
+    ExecResult,
+    SandboxClient,
+    SandboxManager,
+    build_sandbox_env,
+)
+from fleetent.integrations.sandbox import output_truncation as sot
 from fleetent.tool_registry import ToolContext, tool
 
 logger = logging.getLogger(__name__)

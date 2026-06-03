@@ -355,8 +355,8 @@ def test_lifespan_starts_and_stops_cron_scheduler(tmp_path, monkeypatch):
 
 def test_chat_passes_sandbox_mode_to_run_stream(tmp_path, monkeypatch):
     """The effective sandbox mode resolved at startup flows into run_stream."""
-    import fleetent.sandbox_client as sc
-    import fleetent.sandbox_enablement as se
+    import fleetent.integrations.sandbox.client as sc
+    import fleetent.integrations.sandbox.enablement as se
     import fleetent.server as srv
     import fleetent.user_store as us2
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleetent.sandbox_enablement import (
+from fleetent.integrations.sandbox.enablement import (
     Mode,
     is_code_execution_enabled,
     resolve_effective_mode,
@@ -50,14 +50,14 @@ def test_resolve_effective_mode_docker_available_passthrough():
 
 
 def test_load_sandbox_mode_defaults_to_all_when_file_absent(tmp_path, monkeypatch):
-    import fleetent.sandbox_enablement as se
+    import fleetent.integrations.sandbox.enablement as se
 
     monkeypatch.setattr(se, "SETTINGS_PATH", tmp_path / "missing.yaml")
     assert se.load_sandbox_mode() is Mode.ALL
 
 
 def test_load_sandbox_mode_defaults_to_all_when_section_absent(tmp_path, monkeypatch):
-    import fleetent.sandbox_enablement as se
+    import fleetent.integrations.sandbox.enablement as se
 
     p = tmp_path / "settings.yaml"
     p.write_text("log_format: json\n")
@@ -66,7 +66,7 @@ def test_load_sandbox_mode_defaults_to_all_when_section_absent(tmp_path, monkeyp
 
 
 def test_load_sandbox_mode_reads_configured_value(tmp_path, monkeypatch):
-    import fleetent.sandbox_enablement as se
+    import fleetent.integrations.sandbox.enablement as se
 
     p = tmp_path / "settings.yaml"
     p.write_text("sandbox:\n  mode: selective\n")
@@ -75,7 +75,7 @@ def test_load_sandbox_mode_reads_configured_value(tmp_path, monkeypatch):
 
 
 def test_load_sandbox_mode_off(tmp_path, monkeypatch):
-    import fleetent.sandbox_enablement as se
+    import fleetent.integrations.sandbox.enablement as se
 
     p = tmp_path / "settings.yaml"
     p.write_text("sandbox:\n  mode: off\n")
@@ -84,7 +84,7 @@ def test_load_sandbox_mode_off(tmp_path, monkeypatch):
 
 
 def test_load_sandbox_mode_invalid_falls_back_to_all(tmp_path, monkeypatch):
-    import fleetent.sandbox_enablement as se
+    import fleetent.integrations.sandbox.enablement as se
 
     p = tmp_path / "settings.yaml"
     p.write_text("sandbox:\n  mode: bogus\n")
@@ -98,8 +98,8 @@ def test_load_sandbox_mode_invalid_falls_back_to_all(tmp_path, monkeypatch):
 async def test_get_effective_mode_caches_docker_probe(tmp_path, monkeypatch):
     from unittest.mock import AsyncMock
 
-    import fleetent.sandbox_client as sc
-    import fleetent.sandbox_enablement as se
+    import fleetent.integrations.sandbox.client as sc
+    import fleetent.integrations.sandbox.enablement as se
 
     monkeypatch.setattr(se, "_effective_mode_cache", None)
     monkeypatch.setattr(se, "SETTINGS_PATH", tmp_path / "missing.yaml")  # default all
@@ -116,8 +116,8 @@ async def test_get_effective_mode_caches_docker_probe(tmp_path, monkeypatch):
 async def test_get_effective_mode_degrades_when_docker_unavailable(tmp_path, monkeypatch):
     from unittest.mock import AsyncMock
 
-    import fleetent.sandbox_client as sc
-    import fleetent.sandbox_enablement as se
+    import fleetent.integrations.sandbox.client as sc
+    import fleetent.integrations.sandbox.enablement as se
 
     monkeypatch.setattr(se, "_effective_mode_cache", None)
     monkeypatch.setattr(se, "SETTINGS_PATH", tmp_path / "missing.yaml")
