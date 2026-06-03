@@ -15,10 +15,10 @@
 ## Capabilities
 
 ### New Capabilities
-- `runtime-package-architecture`: 张洋负责能力域的**包组织不变量**——每个能力域是一个 package、公共 API 收口于 `__init__.py`、跨包只用公共 API、命名去冗余前缀、迁移期 shim 不承载逻辑。这些是可验证的架构约束,后续逐包迁移 change 据此实现并被审查。
+- `package-architecture`: 本蓝图**交付的治理契约**——目标 package 结构被确立为权威定义、迁移约定(公共 API 收口 / 跨包只用公共 API / 去前缀 / shim 不承载逻辑)成为对后续逐包迁移 change 强制生效的规范、且迁移为行为不变的纯结构搬迁。注意这是「定义 + 约定」(本 change 一落地即满足),**不**断言代码此刻已重组;代码层重组由逐包迁移 change 逐步达成。
 
 ### Modified Capabilities
-<!-- 无:本 change 不改任何运行时能力的需求/场景;纯结构蓝图 + 文档,行为不变。 -->
+<!-- 无:纯结构蓝图 + 文档,行为/契约不变。 -->
 
 ## Impact
 

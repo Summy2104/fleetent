@@ -45,9 +45,9 @@ src/fleetent/
                 loop_detector.py budget.py layered_budget.py cancellation.py
                 message_hygiene.py error_classifier.py tool_guardrails.py
   model/        router.py(←model_router) provider_health.py
-                vision_client.py image_gen_client.py multimodal.py
-  tools/        registry.py(←tool_registry) builtins.py(←tools)
+  tools/        registry.py(←tool_registry) builtin_tools.py(←tools)
                 result_truncation.py plugin_loader.py
+                vision_client.py image_gen_client.py multimodal.py
   skills/       registry.py(←skill_registry) audit.py(←skill_audit)
   session/      manager.py(←session_mgr) index.py(←session_index)
   integrations/
@@ -74,7 +74,7 @@ src/fleetent/
 
 | 风险 | 缓解 |
 |------|------|
-| `tools.py` 靠 import 副作用注册内置工具 | 迁到 `tools/builtins.py` 后确保仍被顶层 import,否则 `get_schemas()` 为空(CLAUDE.md gotcha) |
+| `tools.py` 靠 import 副作用注册内置工具 | 迁到 `tools/builtin_tools.py` 后确保仍被顶层 import,否则 `get_schemas()` 为空(CLAUDE.md gotcha) |
 | 循环 import(runtime↔sub_agent 既有 lazy import) | 迁移保留既有 lazy import 边界,不在本系列重构依赖方向 |
 | import 大面积改动易漏 | shim 兜底 + 每步全量 pytest/mypy + 关键符号自检 |
 | main 高速 trunk,大 PR 难合 | 每包小 PR、由小到大、趁 CI 窗口快合 |
@@ -82,5 +82,11 @@ src/fleetent/
 
 ## Open Questions
 
-- `vision_client` / `image_gen_client` / `multimodal` 归 `model/`(模型客户端,本蓝图选此)还是 `tools/`(它们服务于 analyze_image/image_gen 工具)?**默认 `model/`**,逐包迁移 model 时如有异议再调。
 - `connectors.py` 是否一并进 `integrations/connectors/`?属张亮 channels/connectors 邻域,**本系列不含**,留张亮决定。
+
+## 已决(review 2026-06-03)
+
+- `vision_client` / `image_gen_client` / `multimodal` 归 **`tools/`**(它们服务于 analyze_image / image_gen 工具),不放 model/。
+- `tools.py` → **`tools/builtin_tools.py`**(避免与 Python `builtins` 概念混淆)。
+- 本蓝图的 capability spec(`package-architecture`)措辞为「**目标结构已确立 + 迁移约定强制生效 + 迁移行为不变**」这类**本 change 一落地即满足**的治理契约,而非「代码已重组」的终态断言(OpenSpec 要求每个 change 至少一条 delta,故不能零 spec;用此措辞避免断言尚未实现的结构)。代码层「每域已成包」的事实由逐包迁移 change 逐步达成、各自验证。
+- `runtime/` 内 13 个模块先平铺,不预先拆 `runtime/governance/` 子包;将来嫌挤再拆。
