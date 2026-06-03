@@ -28,7 +28,7 @@ from fleetent.context_mgr import (
 from fleetent.error_classifier import classify
 from fleetent.eval_logger import log_run
 from fleetent.loop_detector import LoopDetectionChecker, arg_fingerprint, result_digest
-from fleetent.memory_layer import extract_and_save, load_memories
+from fleetent.intelligence.memory import extract_and_update
 from fleetent.message_hygiene import HygieneReport, MessageContractError, sanitize
 from fleetent.model_router import RouteConfig, RouteOverride, get_async_client_and_config
 from fleetent.multimodal import build_message_with_images, has_image_block
@@ -885,23 +885,18 @@ def _accumulate_repairs(total: dict[str, int], report: HygieneReport) -> None:
 def _assemble_prompt(
     base_system: str,
     skills_catalog: str,
-    memory_ctx: str,
     user_msg: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Order messages stable→variable so the auto prefix cache can hit (D2).
 
     The cacheable prefix is the first system message: the base system prompt plus
-    the <available_skills> catalog (already including its scan instruction), which
-    is stable across requests — it changes only when the deployment's skill set
-    does. Per-request variable content (memory injection) is carried in a separate
-    second system message after it, so changing memory never rewrites the base
-    prefix. Either variable section is omitted when empty so the prefix stays
-    maximal.
+    the <available_skills> catalog (already including its scan instruction), stable
+    across requests. Per-request long-term context (memory + knowledge) is appended
+    by run()/run_stream() via build_context after this, so the base prefix stays
+    stable (memory unified onto intelligence/long_term_ctx; class C).
     """
     base = f"{base_system}\n\n{skills_catalog}" if skills_catalog else base_system
     messages: list[dict[str, Any]] = [{"role": "system", "content": base}]
-    if memory_ctx:
-        messages.append({"role": "system", "content": memory_ctx})
     messages.append(user_msg)
     return messages
 
@@ -1277,7 +1272,12 @@ async def run(
         )
     except Exception as exc:  # noqa: BLE001 — completion trace is auxiliary
         logger.debug("agent_run_completed_trace_skipped", error=str(exc))
-    extract_and_save(user_input, messages, user_id=user_id)
+    # Memory extraction unified onto intelligence/memory (class C). Best-effort and
+    # awaited (same blocking profile as the prior inline extract_and_save).
+    try:
+        await extract_and_update(user_id, messages)
+    except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
+        logger.debug("memory_extraction_skipped", error=str(exc))
     return reply
 
 
@@ -1300,12 +1300,11 @@ def run_sync(
     from fleetent.plugin_loader import load_plugins
 
     load_plugins()
-    memory_ctx = load_memories(user_id=user_id)
     skills_catalog = available_skills_prompt()
     disabled_trace = collect_disabled_trace() or None
 
     messages = _assemble_prompt(
-        system_prompt, skills_catalog, memory_ctx, {"role": "user", "content": user_input}
+        system_prompt, skills_catalog, {"role": "user", "content": user_input}
     )
 
     async def _run() -> str:
@@ -1357,7 +1356,6 @@ async def run_stream(
     Termination covers max_turns / consecutive_failures; approval gating is not
     performed on the streaming path, so approval_rejected does not apply here.
     """
-    memory_ctx = load_memories(user_id=user_id)
     # agent-skill-scoping: narrow the catalog to the agent's allowed_skills (empty /
     # None = no narrowing, all enabled skills visible).
     skills_catalog = available_skills_prompt(allowed_skills=allowed_skills)
@@ -1372,7 +1370,7 @@ async def run_stream(
         user_msg = build_message_with_images(user_input, images)
     else:
         user_msg = {"role": "user", "content": user_input}
-    messages: list[Any] = _assemble_prompt(system_prompt, skills_catalog, memory_ctx, user_msg)
+    messages: list[Any] = _assemble_prompt(system_prompt, skills_catalog, user_msg)
 
     # Route to vision when images are present; raises before any LLM call if
     # images are present but no vision route is configured (D6, option A).
@@ -1700,4 +1698,9 @@ async def run_stream(
         )
     except Exception as exc:  # noqa: BLE001 — completion trace is auxiliary
         logger.debug("agent_run_completed_trace_skipped", error=str(exc))
-    extract_and_save(user_input, messages, user_id=user_id)
+    # Memory extraction unified onto intelligence/memory (class C). Best-effort and
+    # awaited (same blocking profile as the prior inline extract_and_save).
+    try:
+        await extract_and_update(user_id, messages)
+    except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
+        logger.debug("memory_extraction_skipped", error=str(exc))

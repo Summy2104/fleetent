@@ -807,7 +807,6 @@ def test_cli_run_sync_does_not_start_maintenance_task(monkeypatch):
 
     monkeypatch.setattr(al, "scan_skills", lambda *a, **kw: None)
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "")
-    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
     monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **kw: None)
     monkeypatch.setattr(al, "run", fake_run)
     assert session_mgr._maintenance_task is None

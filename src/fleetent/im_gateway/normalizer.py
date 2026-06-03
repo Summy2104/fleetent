@@ -121,7 +121,6 @@ async def route(msg: NormalizedMessage) -> None:
         return
 
     from fleetent import agent_loop, sandbox_enablement, session_mgr
-    from fleetent.memory_layer import load_memories
     from fleetent.skill_registry import available_skills_prompt, collect_disabled_trace
 
     async with session_mgr.session_lock(msg.session_id):
@@ -136,14 +135,14 @@ async def route(msg: NormalizedMessage) -> None:
         sandbox_mode = await sandbox_enablement.get_effective_mode()
 
         # Build the system message ordered stable→variable for prefix caching:
-        # base system + the <available_skills> catalog (stable) first, per-user
-        # memory last. The model loads any skill it needs on demand via read_skill.
+        # base system + the <available_skills> catalog (stable). Per-user long-term
+        # context (memory + knowledge) is injected by agent_loop.run via build_context
+        # (class C: memory unified onto intelligence/long_term_ctx).
         # agent-skill-scoping: narrow the catalog to the bound agent's allowed_skills
         # (empty/None → no narrowing, full catalog as before).
         catalog = available_skills_prompt(allowed_skills=agent.allowed_skills if agent else None)
         disabled_trace = collect_disabled_trace() or None
-        memory_ctx = load_memories(user_id=msg.user_id)
-        parts = [base_system, catalog, memory_ctx]
+        parts = [base_system, catalog]
         system_content = "\n\n".join(p for p in parts if p)
 
         # Replace existing system message or insert at position 0

@@ -99,9 +99,8 @@ def mock_client(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
-    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     # Avoid instantiating Settings() (needs an API key) in the default-limits path.
     monkeypatch.setattr(
@@ -677,9 +676,8 @@ def mock_client_fb(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
-    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
         al,
@@ -965,7 +963,6 @@ def test_run_sync_collects_disabled_skills_trace(monkeypatch):
 
     monkeypatch.setattr(al, "scan_skills", lambda *a, **kw: None)
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "")
-    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
     monkeypatch.setattr(al, "run", fake_run)
     trace = [{"name": "off", "reason": "frontmatter_disabled"}]
     monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **kw: trace)
@@ -979,7 +976,6 @@ async def test_run_stream_logs_disabled_skills_trace(mock_client, monkeypatch):
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
     monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **kw: trace)
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "")
-    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
     mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok"))
     _ = [e async for e in al.run_stream("hi")]
     assert captured.get("disabled_skills_trace") == trace
@@ -1060,7 +1056,7 @@ async def test_run_routes_to_vision_when_image_present(monkeypatch):
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
     monkeypatch.setattr(
         al,
         "resolve_limits",
@@ -1151,8 +1147,7 @@ async def test_run_stream_routes_to_vision_with_images(monkeypatch):
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
+    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
         al,
@@ -1426,9 +1421,8 @@ def _wire_loop(monkeypatch, client, cfg):
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
-    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
         al,
@@ -1521,8 +1515,9 @@ def _capture_stream_wire(monkeypatch, *, memory: str, catalog: str) -> dict:
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_save", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "load_memories", lambda **kw: memory)
+    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    # memory param retained for call-site compat; memory injection now goes through
+    # build_context (class C), which is best-effort and no-ops without a configured DB.
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: catalog)
     monkeypatch.setattr(
         al,
@@ -1555,15 +1550,14 @@ async def test_run_stream_base_system_prefix_stable_across_variable_content(monk
     assert second["content"] == first["content"]
 
 
-async def test_run_stream_catalog_in_prefix_memory_after_base(monkeypatch):
-    # The skills catalog rides in the stable prefix (messages[0]); the variable
-    # memory is delivered after it, never inside messages[0].
-    cap = _capture_stream_wire(monkeypatch, memory="REMEMBER-X", catalog="CATALOG-BODY")
+async def test_run_stream_catalog_in_prefix(monkeypatch):
+    # The skills catalog rides in the stable prefix (messages[0]). Per-request
+    # long-term context (memory + knowledge) is injected by build_context (class C),
+    # not by prompt assembly, so prompt assembly's messages[0] is exactly base+catalog.
+    cap = _capture_stream_wire(monkeypatch, memory="", catalog="CATALOG-BODY")
     _ = [e async for e in al.run_stream("deploy please")]
     msgs = cap["messages"]
     assert "CATALOG-BODY" in msgs[0]["content"]
-    assert "REMEMBER-X" not in msgs[0]["content"]
-    assert any("REMEMBER-X" in str(m.get("content") or "") for m in msgs[1:])
 
 
 async def test_run_stream_no_variable_content_is_single_base_system(monkeypatch):
@@ -1587,20 +1581,17 @@ def test_run_sync_base_system_prefix_stable_across_variable_content(monkeypatch)
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "CATALOG-X")
     monkeypatch.setattr(al, "run", fake_run)
 
-    monkeypatch.setattr(al, "load_memories", lambda **kw: "mem-A")
     al.run_sync("deploy please")
-
-    monkeypatch.setattr(al, "load_memories", lambda **kw: "mem-B-bigger-different")
     al.run_sync("deploy please")
 
     run1, run2 = captured["runs"]
+    # Base system prefix = base + skills catalog, stable across requests. Per-request
+    # long-term context (memory + knowledge) is injected by run() via build_context
+    # (class C), not by run_sync's prompt assembly, so the cacheable prefix here is
+    # exactly base+catalog and identical across runs.
     assert run1[0]["role"] == "system"
     assert run1[0]["content"] == f"{_BASE}\n\nCATALOG-X"
     assert run2[0]["content"] == run1[0]["content"]
-    # Memory still present, after the base+catalog prefix.
-    full1 = "".join(str(m.get("content") or "") for m in run1)
-    assert "mem-A" in full1
-    assert "mem-A" not in run1[0]["content"]
 
 
 # ── prompt-cache-optimization: cache metrics into trace ──────────────────────
@@ -2296,7 +2287,6 @@ def test_run_sync_loads_plugins(monkeypatch):
 
     monkeypatch.setattr(al, "scan_skills", lambda *a, **kw: None)
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "")
-    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
     monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **kw: None)
     monkeypatch.setattr(al, "run", fake_run)
     monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.OFF))
@@ -2319,7 +2309,6 @@ def test_run_sync_passes_effective_sandbox_mode(monkeypatch):
 
     monkeypatch.setattr(al, "scan_skills", lambda *a, **kw: None)
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "")
-    monkeypatch.setattr(al, "load_memories", lambda **kw: "")
     monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **kw: None)
     monkeypatch.setattr(al, "run", fake_run)
     monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.OFF))
