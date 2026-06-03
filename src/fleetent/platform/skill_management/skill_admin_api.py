@@ -20,9 +20,10 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import auth, skill_registry, user_store
+from fleetent import auth, user_store
 from fleetent.governance import audit_log
 from fleetent.platform.skill_management import skill_admin_store
+from fleetent.skills import registry as skill_registry
 
 router = APIRouter(prefix="/admin/skills")
 

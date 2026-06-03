@@ -58,7 +58,7 @@ from fleetent.platform.skill_management import skill_admin_api
 from fleetent.platform.user_management import api_key_store, user_admin_api
 from fleetent.plugin_loader import expand_plugin_patterns, load_plugins
 from fleetent.session import manager as session_mgr
-from fleetent.skill_registry import scan as scan_skills
+from fleetent.skills import scan as scan_skills
 
 logger = logging.getLogger(__name__)
 

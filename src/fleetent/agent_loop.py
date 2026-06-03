@@ -42,9 +42,9 @@ from fleetent.observability import (
     record_trace_event,
 )
 from fleetent.provider_health import ProviderHealthCache, get_health_cache
-from fleetent.skill_registry import available_skills_prompt, collect_disabled_trace
-from fleetent.skill_registry import match as match_skill  # noqa: F401  # patch target + API parity
-from fleetent.skill_registry import scan as scan_skills
+from fleetent.skills import available_skills_prompt, collect_disabled_trace
+from fleetent.skills import match as match_skill  # noqa: F401  # patch target + API parity
+from fleetent.skills import scan as scan_skills
 from fleetent.sub_agent import SubAgentExecutor
 from fleetent.termination import (
     ApprovalRejectedChecker,

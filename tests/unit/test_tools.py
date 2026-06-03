@@ -321,7 +321,7 @@ async def test_run_code_trace_failure_does_not_block_result(monkeypatch, caplog)
 
 
 def test_read_skill_returns_full_content(tmp_path, monkeypatch):
-    from fleetent import skill_registry as sr
+    from fleetent.skills import registry as sr
 
     monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "_nb")
     d = tmp_path / "skills" / "deploy"
@@ -336,7 +336,7 @@ def test_read_skill_returns_full_content(tmp_path, monkeypatch):
 
 
 def test_read_skill_unknown_name_returns_error(tmp_path, monkeypatch):
-    from fleetent import skill_registry as sr
+    from fleetent.skills import registry as sr
 
     monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "_nb")
     sr.scan(str(tmp_path / "skills"))
@@ -346,7 +346,7 @@ def test_read_skill_unknown_name_returns_error(tmp_path, monkeypatch):
 
 
 def test_read_skill_refuses_audit_blocked(tmp_path, monkeypatch):
-    from fleetent import skill_registry as sr
+    from fleetent.skills import registry as sr
 
     monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "_nb")
     d = tmp_path / "skills" / "evil"

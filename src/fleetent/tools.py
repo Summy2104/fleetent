@@ -132,7 +132,7 @@ def read_skill(name: str) -> str:
     if no skill with that name is registered, or a refusal if the skill failed the
     static injection audit (its content never reaches the model this way).
     """
-    from fleetent import skill_registry
+    from fleetent.skills import registry as skill_registry
 
     entry = skill_registry._index.get(name)
     if entry is None:

@@ -1718,7 +1718,7 @@ async def test_run_stream_injected_skill_survives_concurrent_reload(
     request's private system prompt; an atomic index swap mid-flight (D2/D4)
     cannot rewrite that already-built prompt.
     """
-    import fleetent.skill_registry as sr
+    import fleetent.skills.registry as sr
 
     skill_dir = tmp_path / "skills" / "deploy"
     skill_dir.mkdir(parents=True)

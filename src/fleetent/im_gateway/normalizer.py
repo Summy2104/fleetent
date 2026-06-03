@@ -129,7 +129,7 @@ async def route(msg: NormalizedMessage) -> None:
     from fleetent import agent_loop
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
     from fleetent.session import manager as session_mgr
-    from fleetent.skill_registry import available_skills_prompt, collect_disabled_trace
+    from fleetent.skills import available_skills_prompt, collect_disabled_trace
 
     # Namespace the session by owner so the same platform/channel under two owners
     # never shares conversation state.

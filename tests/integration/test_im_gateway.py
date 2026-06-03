@@ -27,7 +27,7 @@ def mock_agent_loop(monkeypatch):
 def mock_memory_skill(monkeypatch):
     import fleetent.im_gateway.normalizer as norm
     import fleetent.im_user_store as ius
-    import fleetent.skill_registry as sr
+    import fleetent.skills.registry as sr
 
     monkeypatch.setattr(sr, "match", lambda text: None)
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
