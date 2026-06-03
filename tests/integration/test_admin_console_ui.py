@@ -446,3 +446,179 @@ def test_askit_endpoints_present():
         "/askit/tasks/${",
     ):
         assert frag in html, frag
+
+
+# --- Redesign: design tokens --------------------------------------------------
+
+
+def test_design_tokens_present():
+    html = ADMIN_HTML
+    style = html.split("<style>", 1)[1].split("</style>", 1)[0]
+    # token families: surfaces, spacing, radius, elevation, text/border
+    for tok in (
+        "--surface",
+        "--bg-0",
+        "--border",
+        "--text",
+        "--text-muted",
+        "--sp-1",
+        "--sp-4",
+        "--r-1",
+        "--shadow-1",
+    ):
+        assert tok in style, tok
+
+
+def test_components_reference_tokens_not_hardcoded():
+    html = ADMIN_HTML
+    style = html.split("<style>", 1)[1].split("</style>", 1)[0]
+    # spacing/surface usage goes through tokens
+    assert "var(--surface)" in style
+    assert "var(--sp-" in style
+
+
+# --- Redesign: sidebar shell --------------------------------------------------
+
+
+def test_sidebar_present_and_grouped():
+    html = ADMIN_HTML
+    assert 'class="sidebar"' in html
+    # grouped section headings inside sidebar
+    for group in ("access", "agents", "models", "ops", "audit"):
+        assert f'data-group="{group}"' in html
+    # contract preserved
+    assert "switchGroup(" in html
+    assert "switchTab(" in html
+
+
+def test_sidebar_all_modules_reachable():
+    html = ADMIN_HTML
+    sidebar = html.split('class="sidebar"', 1)[1].split("</nav>", 1)[0]
+    for tab in (
+        "users",
+        "im",
+        "agents",
+        "skills",
+        "kb",
+        "providers",
+        "connectors",
+        "oauth",
+        "stats",
+        "monitoring",
+        "sessions",
+        "askit",
+        "audit",
+    ):
+        assert f'data-tab="{tab}"' in sidebar, tab
+
+
+# --- Redesign: page header ----------------------------------------------------
+
+
+def test_page_header_primitive_present():
+    html = ADMIN_HTML
+    assert 'class="page-header"' in html
+    assert "ph-title" in html
+    assert "ph-actions" in html
+
+
+def test_page_header_applied_to_each_module():
+    html = ADMIN_HTML
+    # every module section carries a page header
+    assert html.count('class="page-header"') >= 13
+
+
+# --- Redesign: toast + confirm dialog -----------------------------------------
+
+
+def test_toast_and_confirm_helpers_present():
+    html = ADMIN_HTML
+    assert 'id="toast-host"' in html
+    assert "function toast" in html
+    assert "function confirmDialog" in html
+
+
+def test_no_native_blocking_dialogs():
+    html = ADMIN_HTML
+    # native alert()/confirm() replaced by in-app toast()/confirmDialog()
+    assert "alert(" not in html
+    assert "confirm(" not in html
+
+
+# --- Redesign: table scroll + empty/loading -----------------------------------
+
+
+def test_tables_wrapped_in_scroll_container():
+    html = ADMIN_HTML
+    # every data table lives inside a horizontal scroll container
+    assert html.count('class="table-scroll"') >= html.count("<table>")
+    assert html.count("<table>") >= 13
+
+
+def test_empty_and_loading_state_helpers_present():
+    html = ADMIN_HTML
+    assert "function loadingRow" in html
+    assert "function emptyRow" in html
+    # styling hooks
+    style = html.split("<style>", 1)[1].split("</style>", 1)[0]
+    assert ".empty" in style
+    assert ".loading" in style
+
+
+# --- Redesign: responsive + a11y ----------------------------------------------
+
+
+def test_responsive_sidebar_controls():
+    html = ADMIN_HTML
+    assert 'class="hamburger' in html
+    assert "nav-open" in html
+    style = html.split("<style>", 1)[1].split("</style>", 1)[0]
+    assert "@media (max-width:860px)" in style
+
+
+def test_a11y_markers_present():
+    html = ADMIN_HTML
+    style = html.split("<style>", 1)[1].split("</style>", 1)[0]
+    assert ":focus-visible" in style
+    assert 'aria-label="Admin navigation"' in html
+    # dialogs are labelled and keyboard-dismissable across all modals
+    assert 'role="dialog"' in html
+    assert "function escCloseModals" in html
+
+
+# --- Redesign: role gating + secrets preserved under new shell -----------------
+
+
+def test_viewer_hidden_write_containers_intact():
+    html = ADMIN_HTML
+    for cid in (
+        "create-bar",
+        "kb-create-card",
+        "conn-create-bar",
+        "sk-create-bar",
+        "pv-create-bar",
+        "ag-create-bar",
+        "st-report-bar",
+        "mon-create-bar",
+        "mon-maint-bar",
+        "sess-create-bar",
+        "sess-bulk-bar",
+        "oc-create-bar",
+        "ak-run-bar",
+    ):
+        assert f'id="{cid}"' in html, cid
+    # the enterApp viewer-gate still references every container
+    gate = html.split("if (IS_VIEWER) {", 1)[1].split("}", 1)[0]
+    for cid in ("sk-create-bar", "pv-create-bar", "oc-create-bar", "sess-bulk-bar"):
+        assert cid in gate, cid
+
+
+def test_secret_fields_masked_no_prefill():
+    html = ADMIN_HTML
+    for fid in ("pv-api-key", "oc-client-secret"):
+        snippet = html.split(f'id="{fid}"', 1)[1][:140]
+        assert 'type="password"' in snippet, fid
+        assert "autocomplete" in snippet, fid
+    # edit paths explicitly blank the secret before showing the form
+    assert '$("pv-api-key").value = "";' in html
+    assert '$("oc-client-secret").value = "";' in html
