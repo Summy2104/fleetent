@@ -245,10 +245,20 @@
         <label class="muted"><input type="checkbox" id="ag-archived" onchange="loadAgents()"> show archived</label>
         <span id="ag-create-bar">
           <button class="small" onclick="agCreate()">New agent</button>
-          <button class="ghost small" onclick="agShowTemplates()">Templates</button>
+          <button class="ghost small" onclick="tmplToggle()">Templates</button>
         </span>
       </div>
-      <pre id="ag-templates-out" class="muted" style="white-space:pre-wrap; margin:0 0 8px;"></pre>
+      <div id="ag-templates-panel" class="hidden" style="margin:0 0 12px;">
+        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <strong class="muted">Agent templates</strong>
+          <span id="tmpl-create-bar"></span>
+        </div>
+        <div class="table-scroll"><table>
+          <thead><tr><th>ID</th><th>Display name</th><th>allowed_tools</th><th>Actions</th></tr></thead>
+          <tbody id="tmpl-body"></tbody>
+        </table></div>
+        <div id="tmpl-list-err" class="err"></div>
+      </div>
       <div class="table-scroll"><table>
         <thead><tr><th>Name</th><th>Status</th><th>Provenance</th><th>Drift</th><th>Actions</th></tr></thead>
         <tbody id="ag-body"></tbody>
@@ -592,6 +602,23 @@
         <div class="row" style="justify-content:flex-end;">
           <button type="button" class="ghost" onclick="agCloseClone()">Cancel</button>
           <button type="submit">Clone</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="tmpl-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3 id="tmpl-modal-title">New template</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="tmplSave(); return false;">
+        <input id="tmpl-id" placeholder="template id (unique, e.g. triage)" autocomplete="off">
+        <input id="tmpl-display-name" placeholder="display name" autocomplete="off">
+        <input id="tmpl-allowed-tools" placeholder="allowed_tools (comma-separated, e.g. read_*, github__*)" autocomplete="off">
+        <textarea id="tmpl-system-prompt" placeholder="system prompt" rows="8" style="font-family:monospace;"></textarea>
+        <div id="tmpl-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="tmplCloseModal()">Cancel</button>
+          <button type="submit">Save</button>
         </div>
       </form>
     </div>
@@ -1331,9 +1358,77 @@ function renderAgents() {
   }).join("") || `<tr><td colspan="5" class="muted">No agents.</td></tr>`;
 }
 
-async function agShowTemplates() {
-  try { const r = await api("GET", "/agent-templates"); $("ag-templates-out").textContent = JSON.stringify(r, null, 2); }
-  catch (e) { $("ag-templates-out").textContent = e.message; }
+let TEMPLATES = [];
+function tmplToggle() {
+  const panel = $("ag-templates-panel");
+  panel.classList.toggle("hidden");
+  if (!panel.classList.contains("hidden")) tmplLoad();
+}
+async function tmplLoad() {
+  $("tmpl-list-err").textContent = "";
+  $("tmpl-create-bar").innerHTML = IS_VIEWER ? "" : `<button class="small" onclick="tmplCreate()">New template</button>`;
+  try { TEMPLATES = await api("GET", "/agent-templates"); tmplRender(); }
+  catch (e) { $("tmpl-list-err").textContent = e.message; }
+}
+function tmplRender() {
+  $("tmpl-body").innerHTML = TEMPLATES.map(t => `
+      <tr>
+        <td>${esc(t.id)}</td>
+        <td>${esc(t.display_name || "")}</td>
+        <td class="muted">${esc((t.allowed_tools || []).join(", "))}</td>
+        <td>${IS_VIEWER ? "" : `
+          <button class="small" onclick="tmplEdit('${esc(t.id)}')">Edit</button>
+          <button class="small danger" onclick="tmplDelete('${esc(t.id)}')">Delete</button>`}
+        </td>
+      </tr>`).join("") || `<tr><td colspan="4" class="muted">No templates.</td></tr>`;
+}
+function tmplCreate() {
+  $("tmpl-modal-title").textContent = "New template";
+  $("tmpl-err").textContent = "";
+  $("tmpl-id").value = "";
+  $("tmpl-id").disabled = false;
+  $("tmpl-display-name").value = "";
+  $("tmpl-allowed-tools").value = "";
+  $("tmpl-system-prompt").value = "";
+  $("tmpl-modal").dataset.mode = "create";
+  $("tmpl-modal").classList.remove("hidden");
+}
+function tmplEdit(id) {
+  const t = TEMPLATES.find(x => x.id === id);
+  if (!t) return;
+  $("tmpl-modal-title").textContent = "Edit template: " + id;
+  $("tmpl-err").textContent = "";
+  $("tmpl-id").value = id;
+  $("tmpl-id").disabled = true;
+  $("tmpl-display-name").value = t.display_name || "";
+  $("tmpl-allowed-tools").value = (t.allowed_tools || []).join(", ");
+  $("tmpl-system-prompt").value = t.system_prompt || "";
+  $("tmpl-modal").dataset.mode = "edit";
+  $("tmpl-modal").dataset.id = id;
+  $("tmpl-modal").classList.remove("hidden");
+}
+function tmplCloseModal() { $("tmpl-modal").classList.add("hidden"); }
+async function tmplSave() {
+  $("tmpl-err").textContent = "";
+  const tools = $("tmpl-allowed-tools").value.split(",").map(s => s.trim()).filter(Boolean);
+  const displayName = $("tmpl-display-name").value.trim();
+  const sp = $("tmpl-system-prompt").value;
+  try {
+    if ($("tmpl-modal").dataset.mode === "edit") {
+      const id = $("tmpl-modal").dataset.id;
+      await api("PATCH", `/agent-templates/${encodeURIComponent(id)}`, { display_name: displayName, allowed_tools: tools, system_prompt: sp });
+    } else {
+      const id = $("tmpl-id").value.trim();
+      if (!id) { $("tmpl-err").textContent = "id required"; return; }
+      await api("POST", "/agent-templates", { id, display_name: displayName, allowed_tools: tools, system_prompt: sp });
+    }
+    tmplCloseModal(); tmplLoad();
+  } catch (e) { $("tmpl-err").textContent = e.message; }
+}
+async function tmplDelete(id) {
+  if (!await confirmDialog(`Delete template ${id}?`)) return;
+  try { await api("DELETE", `/agent-templates/${encodeURIComponent(id)}`); tmplLoad(); }
+  catch (e) { toast(e.message, "error"); }
 }
 async function agObservability(name) {
   try { const r = await api("GET", `/agents/${encodeURIComponent(name)}/observability`); showInfo("Details", JSON.stringify(r, null, 2)); }

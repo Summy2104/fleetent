@@ -149,6 +149,76 @@ def test_templates_listed(client):
     assert {"readonly-qa", "ops", "support"} <= ids
 
 
+def test_template_create(client):
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/agent-templates",
+        headers=_hdr(token),
+        json={
+            "id": "triage",
+            "display_name": "Triage",
+            "allowed_tools": ["read_*"],
+            "system_prompt": "You triage.",
+        },
+    )
+    assert r.status_code == 201
+    ids = {t["id"] for t in client.get("/admin/agent-templates", headers=_hdr(token)).json()}
+    assert "triage" in ids
+    assert any(a["action"] == "template.create" for a in audit.search_audit())
+
+
+def test_template_create_duplicate_409(client):
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/agent-templates", headers=_hdr(token), json={"id": "ops", "display_name": "Dup"}
+    )
+    assert r.status_code == 409
+
+
+def test_template_create_viewer_forbidden(client):
+    token, _ = _session_for("viewer")
+    r = client.post(
+        "/admin/agent-templates", headers=_hdr(token), json={"id": "x", "display_name": "X"}
+    )
+    assert r.status_code == 403
+
+
+def test_template_edit(client):
+    token, _ = _session_for("admin")
+    r = client.patch(
+        "/admin/agent-templates/ops", headers=_hdr(token), json={"system_prompt": "v2"}
+    )
+    assert r.status_code == 200
+    assert r.json()["system_prompt"] == "v2"
+    assert r.json()["allowed_tools"] == ["read_*", "exec_*", "github__*"]
+
+
+def test_template_edit_missing_404(client):
+    token, _ = _session_for("admin")
+    r = client.patch(
+        "/admin/agent-templates/ghost", headers=_hdr(token), json={"display_name": "x"}
+    )
+    assert r.status_code == 404
+
+
+def test_template_delete(client):
+    token, _ = _session_for("admin")
+    r = client.delete("/admin/agent-templates/support", headers=_hdr(token))
+    assert r.status_code == 200
+    ids = {t["id"] for t in client.get("/admin/agent-templates", headers=_hdr(token)).json()}
+    assert "support" not in ids
+
+
+def test_template_delete_missing_404(client):
+    token, _ = _session_for("admin")
+    assert client.delete("/admin/agent-templates/ghost", headers=_hdr(token)).status_code == 404
+
+
+def test_template_delete_viewer_forbidden(client):
+    token, _ = _session_for("viewer")
+    assert client.delete("/admin/agent-templates/ops", headers=_hdr(token)).status_code == 403
+
+
 # --- observability (场景 45) --------------------------------------------------
 
 

@@ -229,6 +229,39 @@ def test_agents_crud_functions_present():
         assert fn in html, fn
 
 
+def test_agent_templates_edit_modal_and_fields_present():
+    html = ADMIN_HTML
+    assert 'id="tmpl-modal"' in html
+    for field_id in ("tmpl-id", "tmpl-display-name", "tmpl-allowed-tools", "tmpl-system-prompt"):
+        assert f'id="{field_id}"' in html, field_id
+
+
+def test_agent_templates_crud_functions_present():
+    html = ADMIN_HTML
+    for fn in (
+        "function tmplCreate",
+        "function tmplEdit",
+        "function tmplSave",
+        "function tmplDelete",
+    ):
+        assert fn in html, fn
+
+
+def test_agent_templates_crud_endpoints_wired():
+    html = ADMIN_HTML
+    assert 'api("POST", "/agent-templates"' in html
+    assert 'api("PATCH", `/agent-templates/${' in html
+    assert 'api("DELETE", `/agent-templates/${' in html
+
+
+def test_agent_templates_write_controls_admin_gated():
+    html = ADMIN_HTML
+    body = html.split("function tmplRender", 1)[1].split("function tmplCreate", 1)[0]
+    assert "IS_VIEWER" in body
+    assert "tmplEdit(" in body
+    assert "tmplDelete(" in body
+
+
 def test_agents_modal_version_config_inputs_present():
     html = ADMIN_HTML
     for field_id in (
