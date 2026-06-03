@@ -122,14 +122,9 @@ def test_webhook_no_secret_accepts_without_signature(tmp_path, monkeypatch, isol
     assert resp.status_code == 202
 
 
-def test_legacy_webhooks_yaml_fails_fast(tmp_path, monkeypatch, isolated_schedule_db):
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    (config_dir / "webhooks.yaml").write_text("sources: []\n")
-    monkeypatch.chdir(tmp_path)
-
-    with pytest.raises(RuntimeError, match="runtime API / store"), TestClient(srv.app):
-        pass
+# NOTE: main fail-fast-rejected a legacy config/webhooks.yaml (yaml→runtime-API
+# design). The merge kept zhangyang's yaml source loading, so that fail-fast test was
+# removed. The gating tests below (disabled / max-body) enforce the security model.
 
 
 def test_webhooks_disabled_rejects_before_dispatch(monkeypatch):

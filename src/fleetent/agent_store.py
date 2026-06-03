@@ -1,15 +1,27 @@
-"""Agent definitions, immutable version snapshots, and user/channel bindings.
+"""Agent definitions, immutable version snapshots, user/channel bindings, and
+per-agent capability switches.
 
-Schema lifecycle is owned by Alembic (see migrations 001, 030, and 033). This
-store reads and writes through the shared DB runtime boundary using named
-parameters; it never creates schema. The runtime-facing fields (system_prompt,
-allowed_tools, skills_dir, mcp_server_ids, model_overrides, memory_namespace)
-live in ``agent_versions``; ``agents.active_version_id`` points at the active
-snapshot. Ownership (tenant_id/team_id) lives on ``agents``.
+Schema lifecycle is owned by Alembic (single source of truth): the agents table
+is created on the trunk, gains tenant_id/team_id (030), active_version_id (033),
+and the capability columns features/plugins/allowed_skills (035-037). This store
+reads and writes through the shared DB runtime boundary using named parameters;
+it never creates schema.
+
+Two concerns live side by side, reconciled during the next<-main integration:
+
+* **Versioning** (main): the runtime-facing fields (system_prompt, allowed_tools,
+  skills_dir, mcp_server_ids, model_overrides, memory_namespace) live in
+  ``agent_versions``; ``agents.active_version_id`` points at the active snapshot.
+  This drives the admin console and the snapshot-based ``agent_runtime``.
+* **Capabilities** (next): features/plugins/allowed_skills are per-agent (NOT
+  per-version) switches stored as JSON TEXT columns on ``agents``. The flat
+  ``Agent`` dataclass exposes them so the parameter-style agent_loop pipeline can
+  read them directly. ``get_by_name`` returns runtime fields from the active
+  version and caps from the agent row.
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -17,6 +29,12 @@ from fleetent.config import Settings
 from fleetent.db import SQLiteConnection, SQLiteDatabase, create_database
 
 _UNSET: Any = object()
+
+# Agent-row columns beyond the version-derived runtime fields. Caps are not
+# versioned, so they are read straight off the agents row.
+_AGENT_ROW_COLUMNS = (
+    "id, name, active_version_id, features, plugins, allowed_skills, tenant_id, team_id"
+)
 
 
 @dataclass
@@ -26,6 +44,21 @@ class Agent:
     system_prompt: str
     allowed_tools: list[str]
     active_version_id: int | None = None
+    # Extensible per-agent capability switches (SB3). Currently carries
+    # `code_execution: bool | None`; SB5 reuses the same JSON column for
+    # `sandbox_env`. Stored as a JSON TEXT column on the agents row.
+    features: dict[str, Any] = field(default_factory=dict)
+    # AR7 plugin allowlist: names of enabled plugins this agent may use. Expanded
+    # to `{name}__*` namespace patterns and merged into the effective
+    # `allowed_tools` so the agent_loop schema filter exposes only authorised
+    # plugin tools.
+    plugins: list[str] = field(default_factory=list)
+    # agent-skill-scoping: per-agent skill catalog narrowing. Names of skills this
+    # agent may SEE in the <available_skills> catalog. EMPTY = no narrowing (every
+    # enabled skill stays visible) — the OPPOSITE default from `plugins`, because
+    # skills are visible to all agents by default whereas plugin tools are not.
+    # This is catalog visibility, NOT an authorization boundary.
+    allowed_skills: list[str] = field(default_factory=list)
     tenant_id: str = "default"
     team_id: str | None = None
 
@@ -53,10 +86,26 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _parse_caps(row: dict[str, Any]) -> dict[str, Any]:
+    """Decode the per-agent capability columns, guarding legacy NULL rows."""
+    return {
+        # `or "{}"` guards a legacy row whose features value is NULL.
+        "features": json.loads(row["features"] or "{}"),
+        # `or "[]"` guards a legacy row predating the plugins column (NULL).
+        "plugins": json.loads(row["plugins"] or "[]"),
+        # `or "[]"` guards a legacy row predating allowed_skills (NULL); [] means
+        # no narrowing (backward compatible).
+        "allowed_skills": json.loads(row["allowed_skills"] or "[]"),
+    }
+
+
 def create_agent(
     name: str,
     system_prompt: str,
     allowed_tools: list[str],
+    features: dict[str, Any] | None = None,
+    plugins: list[str] | None = None,
+    allowed_skills: list[str] | None = None,
     *,
     skills_dir: str | None = None,
     mcp_server_ids: list[str] | None = None,
@@ -65,7 +114,14 @@ def create_agent(
     tenant_id: str = "default",
     team_id: str | None = None,
 ) -> Agent:
-    """Create an agent plus its version-1 snapshot in a single transaction."""
+    """Create an agent plus its version-1 snapshot in a single transaction.
+
+    Capabilities (features/plugins/allowed_skills) are stored on the agents row;
+    runtime fields are snapshotted into agent_versions v1.
+    """
+    features = features or {}
+    plugins = plugins or []
+    allowed_skills = allowed_skills or []
     db = _db()
     now = _now()
     with db.transaction() as conn:
@@ -73,12 +129,17 @@ def create_agent(
             raise ValueError(f"agent {name!r} already exists")
         agent_id = conn.execute(
             "INSERT INTO agents "
-            "(name, system_prompt, allowed_tools, created_at, tenant_id, team_id) "
-            "VALUES (:name, :system_prompt, :allowed_tools, :created_at, :tenant_id, :team_id)",
+            "(name, system_prompt, allowed_tools, features, plugins, allowed_skills, "
+            " created_at, tenant_id, team_id) "
+            "VALUES (:name, :system_prompt, :allowed_tools, :features, :plugins, "
+            " :allowed_skills, :created_at, :tenant_id, :team_id)",
             {
                 "name": name,
                 "system_prompt": system_prompt,
                 "allowed_tools": json.dumps(allowed_tools),
+                "features": json.dumps(features),
+                "plugins": json.dumps(plugins),
+                "allowed_skills": json.dumps(allowed_skills),
                 "created_at": now,
                 "tenant_id": tenant_id,
                 "team_id": team_id,
@@ -106,6 +167,9 @@ def create_agent(
         system_prompt=system_prompt,
         allowed_tools=allowed_tools,
         active_version_id=version_id,
+        features=features,
+        plugins=plugins,
+        allowed_skills=allowed_skills,
         tenant_id=tenant_id,
         team_id=team_id,
     )
@@ -165,13 +229,13 @@ def _row_to_version(row: dict[str, Any], active_version_id: int | None) -> Agent
 
 def _get_agent_row(db: SQLiteDatabase, name: str) -> dict[str, Any] | None:
     return db.execute(
-        "SELECT id, name, active_version_id, tenant_id, team_id FROM agents WHERE name = :name",
+        f"SELECT {_AGENT_ROW_COLUMNS} FROM agents WHERE name = :name",
         {"name": name},
     ).fetchone()
 
 
 def get_by_name(name: str) -> Agent | None:
-    """Return the agent with runtime fields unpacked from its active version."""
+    """Return the agent: runtime fields from its active version, caps from the row."""
     db = _db()
     agent = _get_agent_row(db, name)
     if agent is None:
@@ -190,6 +254,7 @@ def get_by_name(name: str) -> Agent | None:
         active_version_id=int(agent["active_version_id"]),
         tenant_id=str(agent["tenant_id"]) if agent["tenant_id"] is not None else "default",
         team_id=str(agent["team_id"]) if agent["team_id"] is not None else None,
+        **_parse_caps(agent),
     )
 
 

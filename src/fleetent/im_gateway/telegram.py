@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import structlog
 
@@ -9,6 +10,29 @@ from fleetent.platform.im_gateway_management import im_connector_config, im_conn
 logger = structlog.get_logger(__name__)
 
 HEARTBEAT_INTERVAL_SECONDS = 30.0
+
+# Telegram photos carry no explicit MIME; the platform serves them as JPEG.
+_TELEGRAM_PHOTO_MIME = "image/jpeg"
+
+
+async def _download_photo_attachments(message: Any, context: Any) -> list[tuple[bytes, str]]:
+    """Download the largest PhotoSize of a Telegram message, if any.
+
+    Best-effort: a download failure is logged and degrades to no attachments
+    rather than aborting the message. The last PhotoSize is the highest
+    resolution.
+    """
+    photos = getattr(message, "photo", None)
+    if not photos:
+        return []
+    largest = photos[-1]
+    try:
+        tg_file = await context.bot.get_file(largest.file_id)
+        data = await tg_file.download_as_bytearray()
+    except Exception as exc:  # noqa: BLE001 — best-effort download, must not abort handler
+        logger.warning("telegram_photo_download_failed", error=str(exc))
+        return []
+    return [(bytes(data), _TELEGRAM_PHOTO_MIME)]
 
 
 def _derive_session_id(chat_type: str, user_id: int, reply_to_id: int | None) -> str:
@@ -26,7 +50,8 @@ def create_app(owner_id: str, config: dict[str, str]) -> object:
     except ImportError:
         raise RuntimeError("python-telegram-bot not installed") from None
 
-    builder = Application.builder().token(config.get("bot_token", "")).concurrent_updates(True)
+    bot_token = config.get("bot_token", "")
+    builder = Application.builder().token(bot_token).concurrent_updates(True)
     application = builder.build()
 
     async def handle_message(update: object, context: object) -> None:
@@ -54,13 +79,17 @@ def create_app(owner_id: str, config: dict[str, str]) -> object:
         async def reply_func(text: str) -> None:
             await update.message.reply_text(text)  # type: ignore[union-attr]
 
+        attachments = await _download_photo_attachments(update.message, context)
+        # Image messages carry their text in `caption`, not `text`.
+        text = update.message.caption or update.message.text or ""
+
         msg = NormalizedMessage(
             platform="telegram",
             owner_id=owner_id,
             session_id=session_id,
             user_id=user.id,
-            text=update.message.text or "",
-            attachments=[],
+            text=text,
+            attachments=attachments,
             reply_func=reply_func,
             channel_id=str(update.message.chat.id),
         )
@@ -68,7 +97,9 @@ def create_app(owner_id: str, config: dict[str, str]) -> object:
 
     from telegram.ext import MessageHandler, filters
 
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(
+        MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_message)
+    )
     return application
 
 

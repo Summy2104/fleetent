@@ -12,12 +12,25 @@ import fleetent.user_store as user_store
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
     db_path = tmp_path / "users.db"
+    managed_db = tmp_path / "managed.db"
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    # schedule_store (report scheduling) runs on the unified runtime; point it at a
+    # migrated managed DB so scheduled_tasks exists.
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{managed_db}")
     for mod in (user_store, audit):
         monkeypatch.setattr(mod, "DB_PATH", db_path)
     user_store._init_db()
     audit._init_db()
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{managed_db}")
+    command.upgrade(cfg, "head")
     monkeypatch.setattr(api, "fetch_traces", lambda **kw: [])
     monkeypatch.setattr(api, "fetch_approvals", lambda agent_id=None: [])
     monkeypatch.setattr(api, "agent_allowed_tools", lambda aid: [])

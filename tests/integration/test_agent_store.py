@@ -4,6 +4,7 @@ Schema is created by Alembic migrations against a tmp_path database, isolated vi
 the DATABASE_URL env var (named params, no legacy _init_db / DB_PATH path).
 """
 
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -282,3 +283,181 @@ def test_get_default_agent_returns_none_when_not_configured(db, monkeypatch):
 def test_get_default_agent_returns_none_when_agent_missing(db, monkeypatch):
     monkeypatch.setattr(agent_store, "_get_default_agent_name", lambda: "nonexistent")
     assert agent_store.get_default_agent() is None
+
+
+def test_agent_features_default_empty(db):
+    agent = agent_store.create_agent("a1", "p", ["shell"])
+    assert agent.features == {}
+    found = agent_store.get_by_name("a1")
+    assert found is not None
+    assert found.features == {}
+
+
+def test_agent_features_roundtrip(db):
+    agent_store.create_agent("a2", "p", ["shell"], features={"code_execution": True})
+    found = agent_store.get_by_name("a2")
+    assert found is not None
+    assert found.features == {"code_execution": True}
+
+
+def test_agent_features_null_row_falls_back_to_empty():
+    # A legacy row whose features value is NULL (defensive `or "{}"` guard in
+    # _parse_caps). Caps are decoded off the agents row independent of versioning;
+    # exercise the cap-parsing fallback directly with a dict row.
+    caps = agent_store._parse_caps({"features": None, "plugins": None, "allowed_skills": None})
+    assert caps["features"] == {}
+
+
+def test_agent_plugins_default_empty(db):
+    agent = agent_store.create_agent("p1", "p", ["shell"])
+    assert agent.plugins == []
+    found = agent_store.get_by_name("p1")
+    assert found is not None
+    assert found.plugins == []
+
+
+def test_agent_plugins_roundtrip(db):
+    agent_store.create_agent("p2", "p", ["shell"], plugins=["crm_tools", "billing"])
+    found = agent_store.get_by_name("p2")
+    assert found is not None
+    assert found.plugins == ["crm_tools", "billing"]
+
+
+def test_agent_plugins_null_row_falls_back_to_empty():
+    # A legacy row whose plugins value is NULL (defensive `or "[]"` guard in
+    # _parse_caps). The column is NOT NULL with a '[]' backfill, so a real NULL
+    # cannot be written; exercise the cap-parsing fallback directly with a dict row.
+    caps = agent_store._parse_caps({"features": None, "plugins": None, "allowed_skills": None})
+    assert caps["plugins"] == []
+
+
+def test_agent_allowed_skills_default_empty(db):
+    agent = agent_store.create_agent("s1", "p", ["shell"])
+    assert agent.allowed_skills == []
+    found = agent_store.get_by_name("s1")
+    assert found is not None
+    assert found.allowed_skills == []
+
+
+def test_agent_allowed_skills_roundtrip(db):
+    agent_store.create_agent("s2", "p", ["shell"], allowed_skills=["weather", "billing"])
+    found = agent_store.get_by_name("s2")
+    assert found is not None
+    assert found.allowed_skills == ["weather", "billing"]
+
+
+def test_agent_allowed_skills_null_row_falls_back_to_empty():
+    # Legacy row predating the allowed_skills column (NULL); the `or "[]"` guard in
+    # _parse_caps maps it to []. Empty means no narrowing — backward compatible.
+    caps = agent_store._parse_caps({"features": None, "plugins": None, "allowed_skills": None})
+    assert caps["allowed_skills"] == []
+
+
+def test_init_db_create_table_includes_allowed_skills_column(db):
+    import sqlite3
+
+    cols = {row[1] for row in sqlite3.connect(db).execute("PRAGMA table_info(agents)").fetchall()}
+    assert "allowed_skills" in cols
+
+
+def test_init_db_create_table_includes_plugins_column(db):
+    import sqlite3
+
+    cols = {row[1] for row in sqlite3.connect(db).execute("PRAGMA table_info(agents)").fetchall()}
+    assert "plugins" in cols
+
+
+def test_init_db_create_table_includes_features_column(db):
+    """New / test DBs go through CREATE TABLE which already carries `features`.
+
+    Per the zy override the runtime ALTER/PRAGMA migration is replaced by alembic
+    002; `_init_db` therefore creates the column directly so fresh and test
+    databases never lack it (`row[features]` cannot go out of bounds).
+    """
+    import sqlite3
+
+    cols = {row[1] for row in sqlite3.connect(db).execute("PRAGMA table_info(agents)").fetchall()}
+    assert "features" in cols
+
+
+def _load_migration_002():
+    import importlib.util
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations"
+        / "versions"
+        # Rebased 002 -> 035 during the next<-main integration (after main's head 034).
+        / "035_add_agent_features.py"
+    )
+    spec = importlib.util.spec_from_file_location("migration_002", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_alembic_002_upgrade_adds_features_to_legacy_table(tmp_path):
+    """Alembic 002 adds `features` to a pre-existing (legacy) agents table.
+
+    Drives the migration's upgrade()/downgrade() against a real SQLite legacy
+    table (no features column) via alembic Operations bound to a MigrationContext,
+    exercising the same op.add_column / op.drop_column the production upgrade runs.
+    """
+    import sqlite3
+
+    import sqlalchemy as sa
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    migration = _load_migration_002()
+    # Rebased during the next<-main integration: 002 -> 035, chained after main's head 034.
+    assert migration.revision == "035"
+    assert migration.down_revision == "034"
+
+    dbp = tmp_path / "legacy.db"
+    raw = sqlite3.connect(dbp)
+    raw.execute(
+        """CREATE TABLE agents (
+            id INTEGER PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            system_prompt TEXT NOT NULL,
+            allowed_tools TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    raw.commit()
+    raw.close()
+
+    engine = sa.create_engine(f"sqlite:///{dbp}")
+
+    def _columns() -> set[str]:
+        return {r[1] for r in sqlite3.connect(dbp).execute("PRAGMA table_info(agents)").fetchall()}
+
+    assert "features" not in _columns()
+
+    with engine.begin() as conn:
+        ctx = MigrationContext.configure(conn)
+        ops = Operations(ctx)
+        with _patched_op(migration, ops):
+            migration.upgrade()
+    assert "features" in _columns()
+
+    with engine.begin() as conn:
+        ctx = MigrationContext.configure(conn)
+        ops = Operations(ctx)
+        with _patched_op(migration, ops):
+            migration.downgrade()
+    assert "features" not in _columns()
+
+
+@contextlib.contextmanager
+def _patched_op(migration, ops):
+    """Bind the migration module's `op` proxy to a concrete Operations instance."""
+    saved = migration.op
+    migration.op = ops
+    try:
+        yield ops
+    finally:
+        migration.op = saved

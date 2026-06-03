@@ -42,7 +42,7 @@ async def test_session_namespaced_by_owner(monkeypatch):
 
     import contextlib
 
-    from fleetent import agent_loop, agent_runtime, session_mgr
+    from fleetent import agent_loop, session_mgr
 
     seen: list[str] = []
 
@@ -55,7 +55,7 @@ async def test_session_namespaced_by_owner(monkeypatch):
     monkeypatch.setattr(session_mgr, "load", lambda _sid: _async([]))
     monkeypatch.setattr(session_mgr, "load_meta", lambda _sid: _async({}))
     monkeypatch.setattr(session_mgr, "save", lambda *a, **k: _async(None))
-    monkeypatch.setattr(agent_runtime, "resolve_agent_for_request", lambda *a, **k: None)
+    monkeypatch.setattr(normalizer, "get_agent_for_context", lambda *a, **k: None)
     monkeypatch.setattr(agent_loop, "run", lambda **k: _async("ok"))
 
     await normalizer.route(_msg("ownerA", []))

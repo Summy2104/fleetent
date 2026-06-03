@@ -82,10 +82,13 @@ flowchart TD
   - 命中可疑模式：写入审计日志 + 启动时控制台警告
   - 命中严重模式：拒绝加载该 Skill
 
-- [ ] **禁用机制**：管理员可显式关闭特定 Skill，使其不参与匹配和注入
-  - 全局禁用：对所有 agent 生效
-  - agent 级禁用：只对指定 agent 生效
-  - 禁用状态记录在 observability trace event 中，便于排查「为什么这个 Skill 没有生效」
+- ✅ **禁用机制**：某 Skill「是否进入 `available_skills_prompt` 清单」由单一资格谓词（`_disabled_reason`）裁决，覆盖三类来源 + 安全审计，任一命中即排除（不向模型展示）；`load()` 按名显式加载不受任何禁用约束（人工排查的安全出口）
+  - **`enabled`（作者级，frontmatter `enabled: false`）**：Skill 作者主动硬关停自身。优先级最高（仅次于安全审计），**优先于 `enabled_by_default`**——即便 `enabled_by_default: true`，只要 `enabled: false` 仍被禁用。缺省 `true`
+  - **`disabled_skills`（运维级，部署配置 `Settings.disabled_skills`）**：运维按名强制关停，对所有 agent 生效
+  - **`enabled_by_default`（默认态，frontmatter）**：作者声明该 Skill 默认不自动进清单（缺省 `true`）。优先级最低
+  - **`audit_blocked`（安全审计，SK5）**：命中 severe 注入模式，优先级最高
+  - **来源优先级（裁决顺序，也是 trace 记录的来源标识）**：`audit_blocked` > `frontmatter_disabled`（`enabled:false`）> `config_disabled`（`disabled_skills`）> `default_disabled`（`enabled_by_default:false`）。任一命中即排除，trace 记首个（最高优先）命中来源
+  - **可观测**：某 Skill 被排除出清单时，其 name 与来源标识写入该次运行日志的 `disabled_skills_trace` 字段（仅非空才写、向后兼容），便于排查「为什么这个 Skill 没生效/不在清单」；无禁用的运行不写该字段
 
 - [ ] **深层嵌套目录支持**：递归扫描 `skills/` 下任意层级的 `SKILL.md` 文件
 

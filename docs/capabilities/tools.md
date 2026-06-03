@@ -8,10 +8,10 @@
 
 **负责**：`@tool` 装饰器注册与 schema 导出、工具 dispatch（参数反序列化 → 访问控制 → 凭证注入 → 调用 → 结果序列化）、内置工具集（`tools.py` import 副作用注册）、`risk_level` 映射（供 governance 判断是否触发审批）。
 
-**不负责**：工具访问白名单检查（→ `fleetent.governance.agent_policy`）、OAuth 凭证存储与刷新（→ connectors）、工具执行的超时传播（→ agent_loop）、沙箱隔离（→ sandbox）。
+**不负责**：工具访问白名单检查（→ governance / agent_policy）、OAuth 凭证存储与刷新（→ connectors）、工具执行的超时传播（→ agent_loop）、沙箱隔离（→ sandbox）。
 
 **调用关系**：
-- 依赖：connectors（`@tool(connector=...)` 的凭证注入）、`fleetent.governance.agent_policy`（allowed_tools 白名单检查）
+- 依赖：connectors（`@tool(connector=...)` 的凭证注入）、agent_policy（allowed_tools 白名单检查）
 - 被依赖：agent_loop（schema 获取、工具 dispatch）
 - 副作用：`tools.py` 被 import 时向 `tool_registry` 注册所有内置工具
 
@@ -20,7 +20,7 @@
 ```mermaid
 flowchart TD
     A["agent_loop\nLLM 返回 tool_call"] --> B["tool_registry.dispatch(tool_name, args, user_id)"]
-    B --> C["fleetent.governance.agent_policy.check\ntool_name 在 allowed_tools?"]
+    B --> C["agent_policy.check\ntool_name 在 allowed_tools?"]
     C -->|否| D["返回拒绝原因\n给 LLM"]
     C -->|是| E{"声明了 connector?"}
     E -->|是| F["connectors.get_credential(user_id, connector)"]
@@ -66,13 +66,12 @@ async def dispatch(tool_name: str, args: dict, user_id: str, agent_id: str) -> s
 
 - ✅ **`@tool` 装饰器**：注册工具、构建 JSON Schema、支持 description / risk_level 声明
 - ✅ **schema 导出**：`get_schemas()` 返回所有注册工具的 JSON Schema，import 副作用注册
-- ✅ **dispatch**：参数反序列化 → `fleetent.governance.agent_policy` 检查 → 调用 → 结果序列化
-- ✅ **risk_level 映射**：`low` / `medium` / `high`，`fleetent.governance.permission_gate` 据此决定是否触发审批
-- ⚡ **connector 声明**：`@tool(connector=...)` 声明已有，凭证注入逻辑待 connectors 模块实现后接通
+- ✅ **dispatch**：参数反序列化 → agent_policy 检查 → 调用 → 结果序列化
+- ✅ **risk_level 映射**：`low` / `medium` / `high`，`permission_gate` 据此决定是否触发审批
+- ✅ **connector 声明**：`@tool(connector=..., scopes=[...])` 记录到 `_connectors`（与 `_risk_levels` 平行），不进 LLM schema；`get_connector(name)` 查询
+- ✅ **connector 注入接通**：`dispatch` 调 `connectors.get_credential(user_id, connector, scopes)`——`Credential` 注入隐藏 keyword-only `client` 参数；`NeedsConsent` 短路返回 consent URL 提示串，不执行工具。`connectors`（工具 OAuth 凭证）与 `im_connector_*`（IM 平台连接适配器）无关，勿混用。默认 provider 永远返回 `NeedsConsent`（真实 OAuth 存储/刷新由后续 connector-oauth-store change 经可注入 provider 缝提供）
 
 ## 规划中（v1.0）
-
-- [ ] **connector 注入接通**：`dispatch` 中完整实现 `connectors.get_credential` 调用 + client 注入，目前凭证注入路径尚未打通
 - [ ] **工具超时保护**：每次 `dispatch` 设置 per-tool 超时（可在 `@tool` 声明，默认 30s），超时后返回 `tool_timeout` 错误给 LLM
 - [ ] **参数消毒**：dispatch 前校验 args 符合工具 JSON Schema，非法参数返回错误给 LLM 而非直接调用
 - [ ] **工具结果截断**：输出超过阈值（如 10k tokens）时截断 + 写 breadcrumb，避免工具结果撑爆 context
@@ -107,7 +106,7 @@ async def dispatch(tool_name: str, args: dict, user_id: str, agent_id: str) -> s
 **场景 6：risk_level medium 触发审批**
 - Given：工具 `delete_file` 声明 `risk_level="medium"`
 - When：agent_loop dispatch 该工具
-- Then：`fleetent.governance.permission_gate` 触发会话内自我确认，用户确认后才执行；未确认则中止
+- Then：permission_gate 触发会话内自我确认，用户确认后才执行；未确认则中止
 
 ## 测试边界
 
@@ -115,13 +114,13 @@ async def dispatch(tool_name: str, args: dict, user_id: str, agent_id: str) -> s
 - `@tool` 注册：装饰后工具出现在 `get_schemas()` 返回列表中，schema 字段正确
 - 隐藏参数过滤：keyword-only 参数不出现在 JSON Schema 的 `properties` 中
 - dispatch 工具不存在：返回错误字符串，不抛 `KeyError`
-- dispatch 访问控制拒绝：`fleetent.governance.agent_policy` 返回拒绝时，工具函数不被调用
-- risk_level 传递：`@tool(risk_level="high")` 的工具，dispatch 时 `fleetent.governance.permission_gate` 收到正确 risk_level
+- dispatch 访问控制拒绝：agent_policy 返回拒绝时，工具函数不被调用
+- risk_level 传递：`@tool(risk_level="high")` 的工具，dispatch 时 permission_gate 收到正确 risk_level
 
 **需要 mock 的依赖**：
-- `fleetent.governance.agent_policy.check`：控制返回 allowed / denied
+- `agent_policy.check`：控制返回 allowed / denied
 - `connectors.get_credential`：控制返回 Credential / NeedsConsent（connector 注入路径测试）
-- `fleetent.governance.permission_gate`：使用短超时（`PermissionGate(medium_timeout=0.1)`）
+- `permission_gate`：使用短超时（`PermissionGate(medium_timeout=0.1)`）
 
 ## 待决问题
 

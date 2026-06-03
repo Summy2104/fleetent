@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import structlog
 
@@ -9,6 +10,36 @@ from fleetent.platform.im_gateway_management import im_connector_config, im_conn
 logger = structlog.get_logger(__name__)
 
 HEARTBEAT_INTERVAL_SECONDS = 30.0
+
+_IMAGE_MIME_PREFIX = "image/"
+
+
+async def _download_image_attachments(
+    files: list[dict[str, Any]], bot_token: str
+) -> list[tuple[bytes, str]]:
+    """Download `image/*` Slack files via their authenticated `url_private`.
+
+    Best-effort: a file that fails to download is logged and skipped rather than
+    aborting the whole message. Non-image files are ignored.
+    """
+    import httpx
+
+    attachments: list[tuple[bytes, str]] = []
+    headers = {"Authorization": f"Bearer {bot_token}"}
+    async with httpx.AsyncClient() as client:
+        for f in files:
+            mime = f.get("mimetype") or ""
+            url = f.get("url_private")
+            if not mime.startswith(_IMAGE_MIME_PREFIX) or not url:
+                continue
+            try:
+                resp = await client.get(url, headers=headers)
+                resp.raise_for_status()
+            except httpx.HTTPError as exc:
+                logger.warning("slack_image_download_failed", url=url, error=str(exc))
+                continue
+            attachments.append((resp.content, mime))
+    return attachments
 
 
 def _derive_session_id(user_id: str, channel_type: str, thread_ts: str | None) -> str:
@@ -27,10 +58,11 @@ def create_app(owner_id: str, config: dict[str, str]) -> object:
     except ImportError:
         raise RuntimeError("slack-bolt not installed") from None
 
-    app = AsyncApp(token=config.get("bot_token", ""))
+    bot_token = config.get("bot_token", "")
+    app = AsyncApp(token=bot_token)
 
     @app.event("message")
-    async def handle_message(event: dict[str, str | None], say: object) -> None:
+    async def handle_message(event: dict[str, Any], say: object) -> None:
         from fleetent.im_gateway.normalizer import NormalizedMessage, route
         from fleetent.im_user_store import get_or_create
 
@@ -50,13 +82,16 @@ def create_app(owner_id: str, config: dict[str, str]) -> object:
         async def reply_func(text: str) -> None:
             await say(text=text, thread_ts=reply_thread)  # type: ignore[operator]
 
+        files = event.get("files") or []
+        attachments = await _download_image_attachments(list(files), bot_token)
+
         msg = NormalizedMessage(
             platform="slack",
             owner_id=owner_id,
             session_id=session_id,
             user_id=user.id,
             text=event.get("text") or "",
-            attachments=[],
+            attachments=attachments,
             reply_func=reply_func,
             channel_id=event.get("channel") or "",
         )

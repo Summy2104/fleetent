@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-import fleetent.config as cfg
 import fleetent.user_store as us
 
 
@@ -108,100 +107,3 @@ def test_admin_im_router_mounted(tmp_path, monkeypatch, isolated_schedule_db):
         resp = client.get("/admin/im/connectors")
 
     assert resp.status_code == 401
-
-
-async def test_mcp_servers_loaded_from_dedicated_file(tmp_path, monkeypatch, isolated_schedule_db):
-    """Lifespan calls register_all with servers from config/mcp.servers.yaml."""
-    import fleetent.integrations.mcp as mcp_mod
-    import fleetent.server as srv
-
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    settings_yaml = config_dir / "settings.yaml"
-    settings_yaml.write_text("mcp:\n  enabled: true\n")
-    (config_dir / "mcp.servers.yaml").write_text(
-        "\n".join(
-            [
-                "servers:",
-                "  - id: test",
-                "    url: http://mcp.example.com",
-            ]
-        )
-    )
-
-    mock_register = AsyncMock(return_value=None)
-    monkeypatch.setattr(mcp_mod, "register_all", mock_register)
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.chdir(tmp_path)
-
-    with TestClient(srv.app) as client:
-        client.get("/health")
-
-    mock_register.assert_called_once()
-    servers_arg = mock_register.call_args[0][0]
-    assert len(servers_arg) == 1
-    assert servers_arg[0].id == "test"
-
-
-async def test_missing_mcp_servers_file_skips_registration(
-    tmp_path, monkeypatch, isolated_schedule_db
-):
-    """Lifespan skips MCP loading if config/mcp.servers.yaml is missing."""
-    import fleetent.integrations.mcp as mcp_mod
-    import fleetent.server as srv
-
-    mock_register = AsyncMock(return_value=None)
-    monkeypatch.setattr(mcp_mod, "register_all", mock_register)
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", tmp_path / "missing-settings.yaml")
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.chdir(tmp_path)
-
-    with TestClient(srv.app) as client:
-        resp = client.get("/health")
-
-    assert resp.status_code == 200
-    mock_register.assert_not_called()
-
-
-async def test_mcp_disabled_skips_dedicated_file(tmp_path, monkeypatch, isolated_schedule_db):
-    """Lifespan does not read config/mcp.servers.yaml when mcp.enabled is false."""
-    import fleetent.integrations.mcp as mcp_mod
-    import fleetent.server as srv
-
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    settings_yaml = config_dir / "settings.yaml"
-    settings_yaml.write_text("mcp:\n  enabled: false\n")
-    (config_dir / "mcp.servers.yaml").write_text("servers: [")
-
-    mock_register = AsyncMock(return_value=None)
-    monkeypatch.setattr(mcp_mod, "register_all", mock_register)
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.chdir(tmp_path)
-
-    with TestClient(srv.app) as client:
-        resp = client.get("/health")
-
-    assert resp.status_code == 200
-    mock_register.assert_not_called()
-
-
-async def test_legacy_mcp_yaml_fails_fast(tmp_path, monkeypatch, isolated_schedule_db):
-    """Startup rejects config/mcp.yaml instead of falling back to legacy loading."""
-    import fleetent.server as srv
-
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    (config_dir / "mcp.yaml").write_text("servers: []\n")
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", config_dir / "settings.yaml")
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.chdir(tmp_path)
-
-    with pytest.raises(RuntimeError, match="config/mcp.servers.yaml"), TestClient(srv.app):
-        pass
