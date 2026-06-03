@@ -24,9 +24,10 @@ def app_and_user(tmp_path, monkeypatch):
 
 def test_ws_ready_on_valid_key(app_and_user):
     app, user = app_and_user
-    with TestClient(app) as client, client.websocket_connect(
-        "/ws", headers={"Authorization": f"Bearer {user.api_key}"}
-    ) as ws:
+    with (
+        TestClient(app) as client,
+        client.websocket_connect("/ws", headers={"Authorization": f"Bearer {user.api_key}"}) as ws,
+    ):
         frame = json.loads(ws.receive_text())
     assert frame["method"] == "event"
     assert frame["params"]["type"] == "gateway.ready"
@@ -54,9 +55,10 @@ def test_ws_missing_key_rejected(app_and_user):
 
 def test_ws_bad_json_frame_returns_parse_error_without_closing(app_and_user):
     app, user = app_and_user
-    with TestClient(app) as client, client.websocket_connect(
-        "/ws", headers={"Authorization": f"Bearer {user.api_key}"}
-    ) as ws:
+    with (
+        TestClient(app) as client,
+        client.websocket_connect("/ws", headers={"Authorization": f"Bearer {user.api_key}"}) as ws,
+    ):
         json.loads(ws.receive_text())  # gateway.ready
         ws.send_text("this is not json{")
         err = json.loads(ws.receive_text())

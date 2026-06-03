@@ -6,7 +6,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
-from fleetent.config import Settings
+import yaml
+
+from fleetent.config import MCP_SERVERS_YAML_PATH, SETTINGS_YAML_PATH, Settings
 
 ValidationProfile = Literal["dev", "pilot", "production"]
 ValidationStatus = Literal["pass", "warning", "skipped", "error"]
@@ -72,13 +74,17 @@ def validate_config(
     data_dir: Path | None = None,
     config_dir: Path | None = None,
     secrets_dir: Path | None = None,
+    config_paths: list[Path] | None = None,
+    scan_resolved_settings: bool = False,
 ) -> ValidationReport:
     """Validate local runtime prerequisites without creating production data."""
     resolved = settings or Settings(anthropic_api_key="")
     items: list[ValidationItem] = []
     items.extend(_runtime_items(resolved, data_dir, config_dir, secrets_dir))
     items.extend(_profile_items(profile, resolved))
-    items.extend(_secret_scan_items(resolved))
+    items.extend(_config_secret_scan_items(config_paths))
+    if scan_resolved_settings:
+        items.extend(_secret_scan_items(resolved))
     return ValidationReport(profile=profile, items=items)
 
 
@@ -168,6 +174,27 @@ def _secret_scan_items(settings: Settings) -> list[ValidationItem]:
     for key, value in _flatten(payload):
         if isinstance(value, str) and _looks_inline_secret(value):
             items.append(ValidationItem(f"settings.{key}", "error", "inline secret-like value"))
+    return items
+
+
+def _config_secret_scan_items(config_paths: list[Path] | None) -> list[ValidationItem]:
+    paths = (
+        config_paths if config_paths is not None else [SETTINGS_YAML_PATH, MCP_SERVERS_YAML_PATH]
+    )
+    items: list[ValidationItem] = []
+    for path in paths:
+        if not path.exists():
+            continue
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for key, value in _flatten(raw):
+            if isinstance(value, str) and _looks_inline_secret(value):
+                items.append(
+                    ValidationItem(
+                        f"config.{path}.{key}",
+                        "error",
+                        "inline secret-like value",
+                    )
+                )
     return items
 
 

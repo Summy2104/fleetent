@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 from tests.integration.test_admin import run_admin
 
@@ -54,3 +55,98 @@ def test_kb_sync_execute_requires_yes():
 
     assert code != 0
     assert "requires --yes" in err
+
+
+def test_kb_connector_execute_sync_requires_cli_safeguards(monkeypatch):
+    from fleetent.intelligence.knowledge_base import operations
+
+    called = False
+
+    async def run_connector_sync(connector_id, *, dry_run):
+        nonlocal called
+        called = True
+        return SimpleNamespace(
+            connector_id=connector_id,
+            status="sync_succeeded",
+            summary={},
+            error=None,
+        )
+
+    monkeypatch.setattr(
+        operations,
+        "get_connector_config",
+        lambda connector_id: SimpleNamespace(connector_type="google_drive"),
+    )
+    monkeypatch.setattr(operations, "run_connector_sync", run_connector_sync)
+
+    out, err, code = run_admin("kb", "connectors", "sync", "gdrive")
+
+    assert code != 0
+    assert out == ""
+    assert "requires --yes" in err
+    assert called is False
+
+
+def test_kb_connector_execute_sync_runs_with_all_safeguards(monkeypatch):
+    from fleetent.intelligence.knowledge_base import operations
+
+    calls: list[tuple[str, bool]] = []
+
+    async def run_connector_sync(connector_id, *, dry_run):
+        calls.append((connector_id, dry_run))
+        return SimpleNamespace(
+            connector_id=connector_id,
+            status="sync_succeeded",
+            summary={"documents": 1},
+            error=None,
+        )
+
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC", "1")
+    monkeypatch.setattr(
+        operations,
+        "get_connector_config",
+        lambda connector_id: SimpleNamespace(connector_type="google_drive"),
+    )
+    monkeypatch.setattr(operations, "run_connector_sync", run_connector_sync)
+
+    out, err, code = run_admin(
+        "kb",
+        "connectors",
+        "sync",
+        "gdrive",
+        "--yes",
+        "--pilot-fixture",
+    )
+
+    assert code == 0
+    assert err == ""
+    assert calls == [("gdrive", False)]
+    assert "status=sync_succeeded" in out
+
+
+def test_maintenance_apply_records_trace_evidence(monkeypatch):
+    from fleetent.platform import maintenance
+
+    events = []
+    monkeypatch.setattr(maintenance, "record_trace_event", events.append, raising=False)
+
+    summary = maintenance.compact_memory(dry_run=False, actor="operator")
+
+    assert summary.audit_ref is not None
+    assert summary.audit_ref.startswith("trace:")
+    assert len(events) == 1
+    assert events[0].event_type == "maintenance_operation"
+    assert events[0].payload["command"] == "memory compact"
+    assert events[0].payload["actor"] == "operator"
+
+
+def test_maintenance_dry_run_does_not_record_trace_evidence(monkeypatch):
+    from fleetent.platform import maintenance
+
+    events = []
+    monkeypatch.setattr(maintenance, "record_trace_event", events.append, raising=False)
+
+    summary = maintenance.compact_memory(dry_run=True, actor="operator")
+
+    assert summary.audit_ref is None
+    assert events == []

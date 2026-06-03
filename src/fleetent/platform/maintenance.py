@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
+
+from fleetent.observability.traces import TraceEvent, record_trace_event
 
 
 @dataclass(frozen=True)
@@ -37,36 +40,62 @@ ConfirmationRequired = ConfirmationRequiredError
 
 
 def compact_memory(*, dry_run: bool, actor: str) -> MaintenanceSummary:
+    command = "memory compact"
     return MaintenanceSummary(
-        command="memory compact",
+        command=command,
         dry_run=dry_run,
         affected_counts={"memories_compacted": 0},
-        audit_ref=None if dry_run else f"audit:memory:compact:{actor}",
+        audit_ref=None if dry_run else _record_maintenance_trace(command, actor),
     )
 
 
 def run_kb_sync(*, connector_id: str, dry_run: bool, actor: str) -> MaintenanceSummary:
+    command = "kb sync"
     return MaintenanceSummary(
-        command="kb sync",
+        command=command,
         dry_run=dry_run,
         affected_counts={"connectors": 1 if connector_id else 0},
-        audit_ref=None if dry_run else f"audit:kb:sync:{actor}:{connector_id}",
+        audit_ref=None
+        if dry_run
+        else _record_maintenance_trace(command, actor, {"connector_id": connector_id}),
     )
 
 
 def reindex_vector(*, namespace: str, dry_run: bool, actor: str) -> MaintenanceSummary:
+    command = "vector reindex"
     return MaintenanceSummary(
-        command="vector reindex",
+        command=command,
         dry_run=dry_run,
         affected_counts={"namespaces": 1 if namespace else 0},
-        audit_ref=None if dry_run else f"audit:vector:reindex:{actor}:{namespace}",
+        audit_ref=None
+        if dry_run
+        else _record_maintenance_trace(command, actor, {"namespace": namespace}),
     )
 
 
 def run_reflection(*, scope: str, dry_run: bool, actor: str) -> MaintenanceSummary:
+    command = "reflection run"
     return MaintenanceSummary(
-        command="reflection run",
+        command=command,
         dry_run=dry_run,
         affected_counts={"scopes": 1 if scope else 0},
-        audit_ref=None if dry_run else f"audit:reflection:run:{actor}:{scope}",
+        audit_ref=None if dry_run else _record_maintenance_trace(command, actor, {"scope": scope}),
     )
+
+
+def _record_maintenance_trace(
+    command: str,
+    actor: str,
+    extra_payload: dict[str, object] | None = None,
+) -> str:
+    trace_id = str(uuid.uuid4())
+    payload = {"actor": actor, "command": command, **(extra_payload or {})}
+    record_trace_event(
+        TraceEvent(
+            id=trace_id,
+            run_id=f"maintenance:{trace_id}",
+            event_type="maintenance_operation",
+            payload=payload,
+        )
+    )
+    return f"trace:{trace_id}"

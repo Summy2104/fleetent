@@ -30,8 +30,8 @@ uv run fleetent-admin validate-config --profile pilot --format json
 uv run python scripts/generate_pilot_verification_report.py
 ```
 
-- `validate-config` 先检查 DB URL、data/config/secrets 目录、生产依赖、connector credential ref 和 inline
-  secret-like 配置；Pilot 环境缺少真实 smoke credential ref 时记录为 skipped，不单独判失败。
+- `validate-config` 先检查 DB URL、data/config/secrets 目录、生产依赖、connector credential ref 和配置文件中的
+  inline secret-like 值；通过环境变量或受控 secret 文件注入的真实 token 不作为 inline config secret 失败。
 - diagnostics package 不包含 SQLite 主库、备份、secret 文件、完整 prompt/reply 或 KB document body；只保存
   脱敏 summary、manifest、connector status 和 skip reason。
 - KB connector real smoke 默认只允许 check + dry-run；execute sync 必须额外 opt-in，且只允许 Pilot fixture 目录或空间。
@@ -563,7 +563,8 @@ uv run fleetent-admin kb connectors status <google_drive_connector_id>
 如需真实 sync：
 
 ```bash
-FLEETENT_GOOGLE_DRIVE_SMOKE=1 uv run fleetent-admin kb connectors sync <google_drive_connector_id>
+FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
+  uv run fleetent-admin kb connectors sync <google_drive_connector_id> --yes --pilot-fixture
 ```
 
 应该看到什么：
@@ -578,7 +579,7 @@ FLEETENT_GOOGLE_DRIVE_SMOKE=1 uv run fleetent-admin kb connectors sync <google_d
 
 - check 结果明确。
 - dry-run 安全。
-- opt-in 后真实 sync 可执行，或因凭据未配置被明确记录为 skipped。
+- execute opt-in、`--yes` 和 `--pilot-fixture` 齐全后真实 sync 可执行，或因凭据未配置被明确记录为 skipped。
 - 输出不包含 OAuth token 或 credential payload。
 
 失败判断：
@@ -620,7 +621,8 @@ uv run fleetent-admin kb connectors status <confluence_connector_id>
 如需真实 sync：
 
 ```bash
-FLEETENT_CONFLUENCE_SMOKE=1 uv run fleetent-admin kb connectors sync <confluence_connector_id>
+FLEETENT_CONFLUENCE_EXECUTE_SYNC=1 \
+  uv run fleetent-admin kb connectors sync <confluence_connector_id> --yes --pilot-fixture
 ```
 
 应该看到什么：

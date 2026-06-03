@@ -1,6 +1,41 @@
 import json
 
 
+def test_env_provided_secret_values_are_not_inline_config_errors(monkeypatch):
+    from fleetent.config import Settings
+    from fleetent.platform.config_validation import validate_config
+
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-1234567890abcdef")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456789012345678901234")
+    settings = Settings(anthropic_api_key="sk-ant-1234567890abcdef")
+
+    report = validate_config(profile="pilot", settings=settings, config_paths=[])
+
+    assert report.final_status != "error"
+    assert not [item for item in report.items if item.key.startswith("settings.slack")]
+    assert "xoxb-1234567890abcdef" not in report.to_json()
+
+
+def test_secret_like_values_in_config_files_are_errors(tmp_path):
+    from fleetent.config import Settings
+    from fleetent.platform.config_validation import validate_config
+
+    settings_file = tmp_path / "settings.yaml"
+    settings_file.write_text("image_gen_url: sk-ant-1234567890abcdef\n", encoding="utf-8")
+
+    report = validate_config(
+        profile="pilot",
+        settings=Settings(anthropic_api_key=""),
+        config_paths=[settings_file],
+    )
+
+    secret_items = [
+        item for item in report.items if item.key == f"config.{settings_file}.image_gen_url"
+    ]
+    assert secret_items
+    assert secret_items[0].status == "error"
+
+
 def test_validation_report_serializes_stable_status_summary():
     from fleetent.platform.config_validation import ValidationItem, ValidationReport
 
@@ -38,7 +73,7 @@ def test_inline_secret_like_config_values_are_errors():
 
     settings = Settings(anthropic_api_key="", image_gen_url="sk-ant-1234567890abcdef")
 
-    report = validate_config(profile="pilot", settings=settings)
+    report = validate_config(profile="pilot", settings=settings, scan_resolved_settings=True)
 
     secret_items = [item for item in report.items if item.key == "settings.image_gen_url"]
     assert secret_items
