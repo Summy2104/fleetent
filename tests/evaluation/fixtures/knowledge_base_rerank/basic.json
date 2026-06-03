@@ -1,0 +1,21 @@
+{
+  "documents": [
+    {
+      "id": "forbidden",
+      "content": "ZX900 generic cache restart note for routine service recovery."
+    },
+    {
+      "id": "expected",
+      "content": "ZX900 precise cache reset remediation restores the edge gateway."
+    }
+  ],
+  "vector_order": ["forbidden", "expected"],
+  "queries": [
+    {
+      "text": "ZX900 precise cache reset",
+      "top_k": 2,
+      "expected_top_document": "expected",
+      "forbidden_top_document": "forbidden"
+    }
+  ]
+}

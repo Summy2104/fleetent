@@ -18,6 +18,10 @@ dependencies = [
     "pyyaml>=6.0.3",
     "apscheduler>=3.10",
     "aiosqlite>=0.22.1",
+    "pypdf>=6.12.2",
+    "python-docx>=1.2.0",
+    "python-pptx>=1.0.2",
+    "openpyxl>=3.1.5",
 ]
 
 [project.scripts]
@@ -41,6 +45,7 @@ dev = [
     "respx>=0.21.0",
     "types-pyyaml>=6.0.12.20260518",
     "pytest-cov>=7.1.0",
+    "types-openpyxl>=3.1.5.20260518",
 ]
 
 [tool.ruff]

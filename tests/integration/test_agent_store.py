@@ -1,18 +1,33 @@
+"""Tests for agent_store on the unified db runtime.
+
+Schema is created by Alembic migrations against a tmp_path database, isolated via
+the DATABASE_URL env var (named params, no legacy _init_db / DB_PATH path).
+"""
+
 import contextlib
+from pathlib import Path
 
 import pytest
+from alembic import command
+from alembic.config import Config
 
 import fleetent.agent_store as agent_store
 
 
+def apply_migrations(db_path: Path) -> None:
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.upgrade(cfg, "head")
+
+
 @pytest.fixture
 def db(tmp_path, monkeypatch):
-    monkeypatch.setattr(agent_store, "DB_PATH", tmp_path / "users.db")
-    import fleetent.user_store as user_store
-
-    monkeypatch.setattr(user_store, "DB_PATH", tmp_path / "users.db")
-    agent_store._init_db()
-    return tmp_path / "users.db"
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    return db_path
 
 
 def test_create_and_get_agent(db):
@@ -44,6 +59,64 @@ def test_assign_and_get_agent_for_user(db):
 
 def test_get_agent_for_user_unassigned(db):
     assert agent_store.get_agent_for_user("user-99") is None
+
+
+# --- agent ownership (tenant_id / team_id) ---
+
+
+def test_create_agent_defaults_tenant_and_team(db):
+    agent = agent_store.create_agent("owned", "prompt", [])
+    assert agent.tenant_id == "default"
+    assert agent.team_id is None
+    found = agent_store.get_by_name("owned")
+    assert found is not None
+    assert found.tenant_id == "default"
+    assert found.team_id is None
+
+
+def test_create_agent_with_explicit_ownership(db):
+    agent = agent_store.create_agent(
+        "acme-support", "prompt", [], tenant_id="acme", team_id="support"
+    )
+    assert agent.tenant_id == "acme"
+    assert agent.team_id == "support"
+    found = agent_store.get_by_name("acme-support")
+    assert found is not None
+    assert found.tenant_id == "acme"
+    assert found.team_id == "support"
+
+
+def test_existing_agent_backfills_default_tenant(db):
+    # A row inserted without ownership columns (legacy shape) resolves to the
+    # migration's tenant_id default and a null team_id.
+    from fleetent.config import Settings
+    from fleetent.db import create_database
+
+    database = create_database(Settings(anthropic_api_key="").database_url)
+    database.execute(
+        "INSERT INTO agents (name, system_prompt, allowed_tools, created_at)"
+        " VALUES (:name, :system_prompt, :allowed_tools, :created_at)",
+        {
+            "name": "legacy",
+            "system_prompt": "p",
+            "allowed_tools": "[]",
+            "created_at": "2026-01-01T00:00:00+00:00",
+        },
+    )
+    found = agent_store.get_by_name("legacy")
+    assert found is not None
+    assert found.tenant_id == "default"
+    assert found.team_id is None
+
+
+def test_ownership_survives_user_and_channel_lookup(db):
+    agent = agent_store.create_agent("routed", "prompt", [], tenant_id="acme", team_id="support")
+    agent_store.assign_user("user-1", agent.id)
+    agent_store.assign_channel("slack", "C123", agent.id)
+    by_user = agent_store.get_agent_for_user("user-1")
+    by_channel = agent_store.get_agent_for_channel("slack", "C123")
+    assert by_user is not None and by_user.tenant_id == "acme" and by_user.team_id == "support"
+    assert by_channel is not None and by_channel.tenant_id == "acme"
 
 
 # --- channel_agents tests ---
@@ -120,16 +193,23 @@ def test_agent_features_roundtrip(db):
     assert found.features == {"code_execution": True}
 
 
-def test_agent_features_null_row_falls_back_to_empty(db):
-    import fleetent.user_store as user_store
-
-    # Simulate a row written before the features column carried a value (NULL).
-    agent_store.create_agent("a3", "p", ["shell"])
-    with user_store._conn() as conn:
-        conn.execute("UPDATE agents SET features = NULL WHERE name = ?", ("a3",))
-    found = agent_store.get_by_name("a3")
-    assert found is not None
-    assert found.features == {}
+def test_agent_features_null_row_falls_back_to_empty():
+    # A legacy row whose features value is NULL (defensive `or "{}"` guard in
+    # _row_to_agent). Exercise the row-mapping fallback directly with a dict row
+    # (the unified runtime returns dict rows).
+    row = {
+        "id": 1,
+        "name": "legacy",
+        "system_prompt": "prompt",
+        "allowed_tools": "[]",
+        "features": None,
+        "plugins": None,
+        "allowed_skills": None,
+        "tenant_id": None,
+        "team_id": None,
+    }
+    agent = agent_store._row_to_agent(row)
+    assert agent.features == {}
 
 
 def test_agent_plugins_default_empty(db):
@@ -147,11 +227,21 @@ def test_agent_plugins_roundtrip(db):
     assert found.plugins == ["crm_tools", "billing"]
 
 
-def test_agent_plugins_null_row_falls_back_to_empty(db):
+def test_agent_plugins_null_row_falls_back_to_empty():
     # A legacy row whose plugins value is NULL (defensive `or "[]"` guard in
     # _row_to_agent). The column is NOT NULL with a '[]' backfill, so a real NULL
-    # cannot be written; exercise the row-mapping fallback directly.
-    row = (1, "legacy", "prompt", "[]", None, None, None)
+    # cannot be written; exercise the row-mapping fallback directly with a dict row.
+    row = {
+        "id": 1,
+        "name": "legacy",
+        "system_prompt": "prompt",
+        "allowed_tools": "[]",
+        "features": None,
+        "plugins": None,
+        "allowed_skills": None,
+        "tenant_id": None,
+        "team_id": None,
+    }
     agent = agent_store._row_to_agent(row)
     assert agent.plugins == []
 
@@ -171,10 +261,20 @@ def test_agent_allowed_skills_roundtrip(db):
     assert found.allowed_skills == ["weather", "billing"]
 
 
-def test_agent_allowed_skills_null_row_falls_back_to_empty(db):
+def test_agent_allowed_skills_null_row_falls_back_to_empty():
     # Legacy row predating the allowed_skills column (NULL); the `or "[]"` guard in
     # _row_to_agent maps it to []. Empty means no narrowing — backward compatible.
-    row = (1, "legacy", "prompt", "[]", None, None, None)
+    row = {
+        "id": 1,
+        "name": "legacy",
+        "system_prompt": "prompt",
+        "allowed_tools": "[]",
+        "features": None,
+        "plugins": None,
+        "allowed_skills": None,
+        "tenant_id": None,
+        "team_id": None,
+    }
     agent = agent_store._row_to_agent(row)
     assert agent.allowed_skills == []
 
@@ -214,8 +314,8 @@ def _load_migration_002():
         Path(__file__).resolve().parents[2]
         / "migrations"
         / "versions"
-        # Rebased 002 -> 026 during the architecture merge (after main's head 025).
-        / "026_add_agent_features.py"
+        # Rebased 002 -> 032 during the next<-main integration (after main's head 031).
+        / "032_add_agent_features.py"
     )
     spec = importlib.util.spec_from_file_location("migration_002", path)
     assert spec is not None and spec.loader is not None
@@ -238,9 +338,9 @@ def test_alembic_002_upgrade_adds_features_to_legacy_table(tmp_path):
     from alembic.operations import Operations
 
     migration = _load_migration_002()
-    # Rebased during the architecture merge: 002 -> 026, chained after main's head 025.
-    assert migration.revision == "026"
-    assert migration.down_revision == "025"
+    # Rebased during the next<-main integration: 002 -> 032, chained after main's head 031.
+    assert migration.revision == "032"
+    assert migration.down_revision == "031"
 
     dbp = tmp_path / "legacy.db"
     raw = sqlite3.connect(dbp)

@@ -1,8 +1,25 @@
+from pathlib import Path
+
 import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi.testclient import TestClient
 
 import fleetent.user_store as us
 from fleetent.server import app
+
+
+def _apply_migrations(db_path) -> None:
+    """Provision the unified-runtime schema (agents etc.) for a tmp_path db.
+
+    agent_store moved off raw DB_PATH onto the unified db runtime, so server tests
+    that touch agents must apply alembic migrations rather than monkeypatch
+    agent_store.DB_PATH (which no longer exists). user_store still uses DB_PATH.
+    """
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.upgrade(cfg, "head")
 
 
 @pytest.fixture()
@@ -45,6 +62,8 @@ def test_chat_valid_token_streams(tmp_path, monkeypatch):
     import fleetent.user_store as us2
 
     monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    _apply_migrations(tmp_path / "users.db")
 
     received_user_ids: list[str] = []
 
@@ -82,6 +101,8 @@ def test_chat_stream_exception_yields_error_event(tmp_path, monkeypatch):
     import fleetent.user_store as us2
 
     monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    _apply_migrations(tmp_path / "users.db")
 
     async def error_stream(msg: str, user_id: str, **kwargs):  # type: ignore[misc]
         raise RuntimeError("boom")
@@ -102,12 +123,23 @@ def test_chat_stream_exception_yields_error_event(tmp_path, monkeypatch):
 
 def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch):
     """/chat with x-platform + x-channel-id uses the channel-bound agent."""
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    import fleetent.agent_store as ag
     import fleetent.server as srv
     import fleetent.user_store as us2
-    import fleetent.agent_store as ag
 
-    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
+    db = tmp_path / "users.db"
+    monkeypatch.setattr(us2, "DB_PATH", db)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db}")
+    command.upgrade(cfg, "head")
 
     captured: dict = {}
 
@@ -152,7 +184,8 @@ def test_chat_merges_agent_plugins_into_allowed_tools(tmp_path, monkeypatch):
     import fleetent.user_store as us2
 
     monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    _apply_migrations(tmp_path / "users.db")
 
     captured: dict = {}
 
@@ -203,15 +236,16 @@ def test_lifespan_loads_plugins(tmp_path, monkeypatch):
     monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", tmp_path / "webhooks.yaml")
     monkeypatch.setattr(srv, "_MCP_YAML_PATH", tmp_path / "mcp.yaml")
 
-    with patch("fleetent.server.load_plugins") as mock_load:
-        with TestClient(srv.app):
-            pass
+    with patch("fleetent.server.load_plugins") as mock_load, TestClient(srv.app):
+        pass
     mock_load.assert_called_once()
 
 
 def test_lifespan_starts_and_stops_cron_scheduler(tmp_path, monkeypatch):
     from unittest.mock import AsyncMock, patch
+
     from starlette.testclient import TestClient
+
     import fleetent.server as srv
 
     monkeypatch.setattr(srv, "_WEBHOOK_YAML_PATH", tmp_path / "webhooks.yaml")
@@ -239,6 +273,8 @@ def test_chat_passes_sandbox_mode_to_run_stream(tmp_path, monkeypatch):
     import fleetent.user_store as us2
 
     monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    _apply_migrations(tmp_path / "users.db")
     # server imports load_sandbox_mode by name; patch the name in server's namespace.
     monkeypatch.setattr(srv, "load_sandbox_mode", lambda: se.Mode.SELECTIVE)
     from unittest.mock import AsyncMock
@@ -271,7 +307,8 @@ def test_chat_passes_agent_allowed_skills_to_run_stream(tmp_path, monkeypatch):
     import fleetent.user_store as us2
 
     monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    _apply_migrations(tmp_path / "users.db")
 
     captured: dict = {}
 
@@ -301,12 +338,12 @@ def test_chat_passes_agent_allowed_skills_to_run_stream(tmp_path, monkeypatch):
 
 def test_chat_no_agent_passes_no_allowed_skills(tmp_path, monkeypatch):
     """With no bound agent, run_stream receives no allowed_skills (no narrowing)."""
-    import fleetent.agent_store as ag
     import fleetent.server as srv
     import fleetent.user_store as us2
 
     monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    _apply_migrations(tmp_path / "users.db")
 
     captured: dict = {}
 

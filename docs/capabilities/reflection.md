@@ -7,14 +7,14 @@
 系统自我改进机制，定期分析 agent 执行历史，先生成结构化改进建议，再通过受控 proposal lifecycle 进入维护流程。
 reflection 默认不直接修改 User Memory、skills 或 knowledge-base。
 
-**负责**：通过 observability trace API 读取 agent 执行历史，发现规律并生成结构化 reflection report；为 User Memory 生成 owner-approved maintenance proposals。
+**负责**：通过 observability trace API 读取 agent 执行历史，发现规律并生成结构化 reflection report；为 User Memory 生成 owner-approved maintenance proposals；通过 `run_kb_reflection_report()` 生成 Knowledge Base 质量只读报告。
 
 **不负责**：实时处理（异步定期触发，不在请求链路上）、skill 的运行时注入（→ agent-runtime）、修改知识库文档内容（只上报，不写回）、Shared Memory 实现、管理员默认替用户确认 User Memory 修改。
 
 **三个作用目标**：
 - **memory reflection**：per-user，生成 memory_candidate / memory_conflict 建议，并可转成 owner-scoped maintenance proposal
 - **skill reflection**：per-agent，第一阶段只生成 skill_opportunity 建议
-- **knowledge base reflection**：per-tenant，后续阶段观察知识库使用质量，上报缺口与问题，不自动写回
+- **knowledge base reflection**：per-tenant，观察知识库使用质量，上报缺口与问题；只读报告，不自动写 KB、不触发 sync
 
 **调用关系**：
 - 依赖：observability（`query_trace_events(query)` 读取情节记忆事件）、`fleetent.intelligence.memory`（只读信号 + 已批准 proposal 的 public mutation API）、config
@@ -22,8 +22,8 @@ reflection 默认不直接修改 User Memory、skills 或 knowledge-base。
 
 **模块归属**：
 - owning package：`intelligence.reflection`
-- public API：`run_reflection(scope)`、`generate_memory_maintenance_proposals(user_id, findings)`、proposal create / approve / reject / apply API；后续扩展 `run_skill_reflection(agent_id)`、`run_kb_reflection(scope)`
-- owned tables：`reflection_reports`、`memory_maintenance_proposals`；后续 `skill_proposals`、`kb_reflection_reports`
+- public API：`run_reflection(scope)`、`generate_memory_maintenance_proposals(user_id, findings)`、proposal create / approve / reject / apply API、`KnowledgeBaseReflectionReport`、`KnowledgeBaseReflectionFinding`、`run_kb_reflection_report(scope)`、`SkillProposal`、`generate_skill_proposals()`、`approve_skill_proposal()`、`reject_skill_proposal()`、`apply_skill_proposal()`；后续扩展 `run_skill_reflection(agent_id)`
+- owned tables：`reflection_reports`、`memory_maintenance_proposals`、`kb_reflection_reports`、`skill_proposals`
 - config namespace：`reflection.*`
 
 ## 关键流程
@@ -74,6 +74,29 @@ memory_maintenance_proposals (
   updated_at   DATETIME,
   expires_at   DATETIME
 )
+
+kb_reflection_reports (
+  id           TEXT PRIMARY KEY,
+  scope        TEXT,              -- tenant / kb scope
+  time_window_start DATETIME,
+  time_window_end   DATETIME,
+  findings_json TEXT,             -- finding summary、evidence ids、metadata，不保存完整 transcript / document body
+  signal_summary_json TEXT,
+  created_at   DATETIME
+)
+
+skill_proposals (
+  id           TEXT PRIMARY KEY,
+  type         TEXT,              -- create_skill | update_skill | deprecate_skill
+  target_skill TEXT,
+  reason       TEXT,
+  evidence_refs_json TEXT,
+  suggested_draft TEXT,
+  suggested_diff TEXT,
+  status       TEXT,              -- pending | approved | rejected | applied
+  created_at   DATETIME,
+  updated_at   DATETIME
+)
 ```
 
 ## 接口定义
@@ -100,11 +123,58 @@ async def run_reflection(scope: str) -> ReflectionReport:
     """读取 traces 和 memory 只读信号，生成结构化建议报告；不自动应用建议。"""
 
 
+@dataclass
+class KnowledgeBaseReflectionFinding:
+    type: Literal[
+        "missing_knowledge",
+        "stale_document",
+        "low_retrieval_quality",
+        "connector_sync_issue",
+        "entity_graph_gap",
+        "insufficient_signal",
+    ]
+    severity: Literal["low", "medium", "high"]
+    affected_resource: str
+    evidence_refs: list[str]
+    recommendation: str
+    metadata: dict[str, str]
+
+
+async def run_kb_reflection_report(scope: str) -> KnowledgeBaseReflectionReport:
+    """读取 observability 与 knowledge-base public API，生成只读报告；不自动写 KB，不触发 sync。"""
+
+
+@dataclass
+class SkillProposal:
+    type: Literal["create_skill", "update_skill", "deprecate_skill"]
+    target_skill: str
+    status: Literal["pending", "approved", "rejected", "applied"]
+    evidence_refs: list[str]
+
+
+def generate_skill_proposals(...) -> list[SkillProposal]:
+    """从 skill_opportunity 和 tool/skill usage 信号生成 pending 提案；不自动改 skill。"""
+
+
 def generate_memory_maintenance_proposals(
     user_id: str,
     findings: list[ReflectionFinding],
 ) -> list[MemoryMaintenanceProposal]:
     """将 memory finding 转成 pending User Memory maintenance proposals，不修改 memory。"""
+
+
+@dataclass
+class ReflectionTrendBucket:
+    start_ts: datetime
+    end_ts: datetime
+    finding_counts: dict[str, int]
+    proposal_status_counts: dict[str, int]
+    applied_count: int
+    rejected_count: int
+
+
+def get_reflection_trend_summary(query: ReflectionTrendQuery) -> ReflectionTrendSummary:
+    """按 UTC day/week 汇总 reflection-owned reports 和 proposal lifecycle；不读取 raw transcript。"""
 ```
 
 ## 现状
@@ -115,17 +185,28 @@ def generate_memory_maintenance_proposals(
 - `ReflectionReport`、`ReflectionFinding`、`run_reflection(scope)` public API
 - `reflection_reports` SQLite 表
 - `memory_maintenance_proposals` SQLite 表和 proposal lifecycle API
+- `kb_reflection_reports` SQLite 表和 `run_kb_reflection_report()` public API
+- `skill_proposals` SQLite 表和 `SkillProposal` lifecycle API；支持 `create_skill`、`update_skill`、`deprecate_skill`
+- `ReflectionTrendQuery` / `ReflectionTrendBucket` / `ReflectionTrendSummary` 和
+  `get_reflection_trend_summary()` on-demand API
 - 只通过 observability public API 读取 traces
 - 只读 `fleetent.intelligence.memory` 信号；proposal apply 只通过 memory public API
 - 支持三类 finding：`memory_candidate`、`memory_conflict`、`skill_opportunity`
 - 支持 `pending` / `approved` / `rejected` / `applied` / `expired` proposal 状态
 - 支持 owner approval、low-risk explicit auto policy、high-risk delete approval gate
+- 支持从 `reflection_reports`、`kb_reflection_reports`、`memory_maintenance_proposals`、
+  `skill_proposals` 读取聚合趋势；只输出 finding type、proposal status/risk/type/action 计数和
+  applied/rejected ratio，不暴露 summary、recommendation、evidence payload 或 transcript
+- `skill_proposals` 当前没有 agent / tenant scope；trend summary 只在 `scope="global"` 或
+  `scope="*"` 时聚合 Skill proposal，避免把全局 proposal 误计入某个租户或用户
 - 支持 `suggest_shared_memory_or_kb`，用于团队共识 / 项目惯例 / 客户背景等不属于 User Memory 的内容
 - 保存 report 时不保存完整 trace transcript
 - deterministic evaluation fixture / runner 覆盖 expected / forbidden findings 和 persisted transcript redaction
+- KB reflection 支持 `missing_knowledge`、`stale_document`、`low_retrieval_quality`、`connector_sync_issue`、`entity_graph_gap` findings；报告只读，不自动写 KB、不触发 sync，也不创建 KB mutation proposal
+- Skill reflection proposals 默认生成 `pending` 提案，不自动改 skill；只有 approved proposal 才能通过 skill public boundary apply
 - real-route smoke 仅在 `FLEETENT_EVAL_REAL_REFLECTION=1` 且显式本地 fixture/config 完整时手动运行；默认 skip
 
-当前定位：已具备“生成建议报告”和 User Memory 维护 proposal lifecycle；UI / scheduler / skill proposal / KB reflection apply 尚未完成。
+当前定位：已具备“生成建议报告”、User Memory 维护 proposal lifecycle、KB 质量只读报告和 Skill proposal lifecycle；UI / scheduler 尚未完成。
 
 ## 规划中（v1.0）
 
@@ -145,17 +226,18 @@ def generate_memory_maintenance_proposals(
   - high-risk `delete` 不能 low-risk auto apply
   - `suggest_shared_memory_or_kb` 不写 User Memory
 
-- [ ] **skill reflection proposals（后续）**：分析 per-agent traces，生成、改进或删除 skill
-  - `create`：发现高频重复的 prompt pattern，提炼为新 skill
-  - `update`：识别现有 skill 的低效用法，生成改进版本
-  - `delete`：skill 长期未被触发、与其他 skill 高度重复、或持续产生负面效果时，提议删除
+- [x] **skill reflection proposals**：分析 per-agent traces，生成、改进或删除 skill
+  - `create_skill`：发现高频重复的 prompt pattern，提炼为新 skill
+  - `update_skill`：识别现有 skill 的低效用法，生成改进版本
+  - `deprecate_skill`：skill 长期未被触发、与其他 skill 高度重复、或持续产生负面效果时，提议删除
+  - 所有 proposal 初始为 `pending`；不自动改 skill，apply 只能通过 skill public boundary
   - skill 可以是单文件，也可以是含脚本、模板的多级目录；`snapshot` 字段统一存储整个目录的文件快照（JSON），审批时展示完整新状态，应用时直接覆盖写入
 
-- [ ] **knowledge base reflection（后续）**：观察知识库使用质量，只上报不写回
+- [x] **knowledge base reflection**：观察知识库使用质量，只上报不写回
   - 知识空白检测：用户频繁提问但召回质量差 → 上报"该类内容可能缺失"
   - 陈旧内容检测：某些 chunk 长期未被召回，或与近期对话明显矛盾 → 标记待管理员审查
   - 高频共现提示：多个文档频繁被一起召回 → 建议管理员补充整合文档
-  - 所有 knowledge base reflection 结果均以建议形式输出，执行由人决定
+  - 所有 knowledge base reflection 结果均以只读报告输出，执行由人决定
 
 - [ ] **生效机制（后续）**：按作用目标和环境区分
   - memory reflection：owner-approved proposal lifecycle；低风险自动维护必须由用户显式开启
@@ -204,6 +286,7 @@ def generate_memory_maintenance_proposals(
 - skill 只读：生成 skill_opportunity 不创建、更新或删除 skills/ 文件
 - report 持久化：reflection_reports 表存在，payload 不保存完整 transcript
 - knowledge-base 非依赖：KB 未启用或不可用时 run_reflection 正常返回
+- trend summary：按 UTC day/week 聚合 finding type 与 proposal lifecycle 计数，并保留未知 finding type
 
 **需要 mock 的依赖**：
 - `observability.query_trace_events`：注入可控的历史 trace events
@@ -220,7 +303,7 @@ def generate_memory_maintenance_proposals(
 ## 当前缺口
 
 - finding 规则仍然很初级，主要依赖 deterministic payload 字段和简单模式。
-- report 到 User Memory maintenance proposal 的闭环已建立；管理员 / 用户 review UI、scheduler、长期趋势统计还没有完成。
+- report 到 User Memory maintenance proposal 的闭环已建立；管理员 / 用户 review UI、scheduler 还没有完成。
 - 已有 deterministic report evaluation；尚未量化长期 precision / recall 趋势。
 - 不会默认自动维护 memory，不会生成 skill proposal，不接 knowledge-base。
 
@@ -229,13 +312,13 @@ def generate_memory_maintenance_proposals(
 - `reflection-report-consumption`
 - `skill-reflection-proposals`
 - `knowledge-base-reflection-reports`
-- `reflection-trend-summary`
 
 ## 自动化效果验证
 
 - 已有 trace / memory fixture，标注 expected findings 和 forbidden findings。
 - 已有负样本，避免单次普通任务被误判为 proposal。
 - 已有 transcript redaction fixture，验证 persisted report 不泄露完整对话。
+- 已有 trend summary fixture，验证趋势方向、proposal backlog 和 forbidden transcript redaction。
 - 后续接入真实 LLM summary 前，需要扩展 golden dataset 和显式 opt-in smoke。
 
 ## 服务化 / 目录边界判断

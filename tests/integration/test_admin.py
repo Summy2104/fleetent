@@ -1,7 +1,10 @@
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from alembic import command
+from alembic.config import Config
 
 import fleetent.agent_store as agent_store
 import fleetent.im_user_store as im_user_store
@@ -10,12 +13,21 @@ from fleetent.platform.admin_cli import agents as admin_cli_agents
 from fleetent.platform.admin_cli.main import main as admin_cli_main
 
 
+def _apply_migrations(db_path: Path) -> None:
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.upgrade(cfg, "head")
+
+
 @pytest.fixture(autouse=True)
 def tmp_db(tmp_path, monkeypatch):
     db = tmp_path / "users.db"
     monkeypatch.setattr(user_store, "DB_PATH", db)
     monkeypatch.setattr(im_user_store, "DB_PATH", db)
-    monkeypatch.setattr(agent_store, "DB_PATH", db)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
+    _apply_migrations(db)
 
 
 def run_admin(*args: str) -> tuple[str, str, int]:
@@ -368,6 +380,51 @@ def test_kb_connectors_cli_output_is_sanitized(monkeypatch):
 
     assert code == 0
     assert "sync_failed" in out
+    assert "secret-value" not in out
+
+
+def test_kb_extract_entities_outputs_sanitized_summary(monkeypatch):
+    from fleetent.intelligence.knowledge_base.extraction_store import KnowledgeExtractionRun
+    from fleetent.platform.admin_cli import kb_connectors
+
+    async def run_entity_extraction(
+        tenant_id: str,
+        kb_id: str,
+        document_id: str | None = None,
+    ):
+        assert tenant_id == "default"
+        assert kb_id == "engineering"
+        assert document_id == "doc-1"
+        return KnowledgeExtractionRun(
+            id="run-secret-value",
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            document_id=document_id,
+            extractor="deterministic",
+            status="succeeded",
+            documents_scanned=1,
+            chunks_scanned=2,
+            entities_upserted=3,
+            mentions_written=3,
+            relations_written=1,
+            failed_count=0,
+        )
+
+    monkeypatch.setattr(kb_connectors, "run_entity_extraction", run_entity_extraction)
+
+    out, _, code = run_admin(
+        "kb",
+        "extract-entities",
+        "--kb-id",
+        "engineering",
+        "--document-id",
+        "doc-1",
+    )
+
+    assert code == 0
+    assert "status=succeeded" in out
+    assert "documents_scanned=1" in out
+    assert "relations_written=1" in out
     assert "secret-value" not in out
 
 

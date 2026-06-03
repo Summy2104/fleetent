@@ -1,20 +1,20 @@
 """add agent features column
 
 Per the zy override (SB3): existing production databases gain the agents.features
-column via this alembic migration rather than a runtime PRAGMA+ALTER in
-agent_store._init_db. Fresh / test databases get the column inline from
-_init_db's CREATE TABLE. NEEDS 张亮 review (agent_store / agents-table neighbour).
+column via this alembic migration. Re-chained onto main's trunk (head 031) during
+the next<-main architecture integration; alembic is the single source of schema
+truth (no inline _init_db).
 
-Revision ID: 002
-Revises: 001
-Create Date: 2026-06-01
+Revision ID: 032
+Revises: 031
+Create Date: 2026-06-03
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "026"
-down_revision = "025"
+revision = "032"
+down_revision = "031"
 branch_labels = None
 depends_on = None
 

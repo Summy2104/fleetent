@@ -106,7 +106,8 @@ def reindex(request: ReindexRequest) -> ReindexSummary:
 - namespace helper：`memory_namespace(user_id)`、`knowledge_namespace(tenant_id, kb_id)`
 - embedding provider abstraction：deterministic provider 用于测试和本地开发，HTTP provider 兼容
   OpenAI-style `/v1/embeddings`
-- rerank provider abstraction：disabled / deterministic / HTTP provider 已定义，供后续 retrieval 流程使用
+- rerank provider abstraction：disabled / deterministic / HTTP provider 已定义；KB hybrid search 已可显式
+  `rerank=True` 调用 provider 重排候选
 - in-memory vector backend，支持 namespace 隔离、upsert 覆盖、delete、score 排序
 - 普通 SQLite persistent backend，使用 `vector_items` 表持久化 namespace-scoped vectors，检索时在 Python 内做 cosine similarity
 - `vector_store.*` / `embedding.*` / `rerank.*` 基础配置命名空间
@@ -115,7 +116,7 @@ def reindex(request: ReindexRequest) -> ReindexSummary:
 - combined memory+KB embedding evaluation 使用 deterministic embedding 默认验证 memory 和 KB 都能通过 reindex 后检索；真实 HTTP embedding smoke 显式 opt-in
 
 当前定位：可支持 `fleetent.intelligence.memory`、long-term-ctx 和测试场景；SQLite backend 解决重启后索引丢失问题，但不是大规模 ANN 检索后端。
-rerank provider 目前只提供边界，尚未接入 knowledge-base search。
+rerank provider 已接入 knowledge-base hybrid search 的显式 rerank 路径；默认仍为 disabled，不会静默调用真实外部服务。
 
 ## 规划中（v1.0）
 
@@ -143,14 +144,15 @@ rerank provider 目前只提供边界，尚未接入 knowledge-base search。
 - sqlite-vec / Qdrant 未实现：当前持久化后端是普通 SQLite + Python cosine，不提供 ANN 性能。
 - 真实 embedding 可通过 HTTP provider 接入，但当前默认仍是 deterministic，需部署自托管
   embedding endpoint 后显式配置。
-- rerank 尚未接入 knowledge-base search；当前只定义 provider abstraction。
+- rerank 已接入 knowledge-base hybrid search 的显式路径，并有 deterministic evaluation；真实 rerank
+  provider 仍需显式 opt-in smoke 和效果评估。
 - reindex 当前是同步 public API，尚未提供后台 job runtime、操作历史或管理界面。
 - 已有 combined memory+KB embedding evaluation 入口；尚缺长期趋势统计、rerank 质量评估和生产规模 ANN 后端评估。
 
 ## 下一批候选 specs
 
 - `vector-store-sqlite-vec-backend`
-- `rerank-kb-search-integration`
+- `rerank-real-provider-evaluation`
 - `vector-store-reindex-job-runtime`
 
 ## 自动化效果验证缺口

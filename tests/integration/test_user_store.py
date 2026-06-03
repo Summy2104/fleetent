@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pytest
 
-import fleetent.agent_store as agent_store
 import fleetent.api_key_store as api_key_store
 import fleetent.im_channel_allowlist as im_channel_allowlist
 import fleetent.im_connector_store as im_connector_store
@@ -13,7 +12,6 @@ from fleetent.governance import audit_log, blocklist, permission_gate, quota
 
 DEFAULT_USER_STORE_DB_PATH = user_store.DB_PATH
 DEFAULT_LEGACY_RE_EXPORT_DB_PATHS = {
-    "agent_store": agent_store.DB_PATH,
     "api_key_store": api_key_store.DB_PATH,
     "audit_log": audit_log.DB_PATH,
     "blocklist": blocklist.DB_PATH,

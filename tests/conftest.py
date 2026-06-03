@@ -1,11 +1,22 @@
-"""Shared test fixtures (merged: zhangyang health cache + main schedule-db isolation)."""
+"""Shared test fixtures (merged: zhangyang health cache + main migration-based schema)."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+from alembic import command
+from alembic.config import Config
 
 import fleetent.provider_health as provider_health
 from fleetent import db
+
+
+def _apply_migrations(db_path: Path) -> None:
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.upgrade(cfg, "head")
 
 
 @pytest.fixture(autouse=True)
@@ -36,25 +47,21 @@ def _reset_provider_health_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _reset_long_term_ctx_knowledge_provider():  # type: ignore[no-untyped-def]
+    # long_term_ctx holds the knowledge provider in a module global; tests that
+    # set it must not leak it into later tests (ordering-dependent failures).
+    yield
+    from fleetent.intelligence import long_term_ctx
+
+    long_term_ctx.set_knowledge_provider(None)
+
+
 @pytest.fixture
 def isolated_schedule_db(tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
-    database_url = f"sqlite:///{tmp_path / 'sched.db'}"
+    db_path = tmp_path / "sched.db"
+    database_url = f"sqlite:///{db_path}"
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", database_url)
-    database = db.create_database(database_url)
-    database.execute("""
-        CREATE TABLE scheduled_tasks (
-            id         TEXT PRIMARY KEY,
-            name       TEXT NOT NULL,
-            cron_expr  TEXT NOT NULL,
-            timezone   TEXT NOT NULL DEFAULT 'UTC',
-            user_id    TEXT NOT NULL,
-            agent_name TEXT,
-            message    TEXT NOT NULL,
-            enabled    INTEGER NOT NULL DEFAULT 1,
-            source     TEXT NOT NULL DEFAULT 'dynamic',
-            created_at TEXT NOT NULL,
-            session_id TEXT
-        )
-    """)
-    return database
+    _apply_migrations(db_path)
+    return db.create_database(database_url)

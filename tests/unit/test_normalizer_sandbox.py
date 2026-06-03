@@ -11,8 +11,20 @@ from fleetent.im_gateway import normalizer
 
 
 def _setup_db(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    db_path = tmp_path / "users.db"
     for mod in (user_store, ics, acl):
-        monkeypatch.setattr(mod, "DB_PATH", tmp_path / "users.db")
+        monkeypatch.setattr(mod, "DB_PATH", db_path)
+    # normalizer routing queries agent_store, which runs on the unified db runtime.
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.upgrade(cfg, "head")
     ics._init_db()
     acl._init_db()
 

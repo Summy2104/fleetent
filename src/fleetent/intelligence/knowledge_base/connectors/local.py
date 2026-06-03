@@ -7,6 +7,10 @@ _FORMAT_BY_SUFFIX = {
     ".md": "markdown",
     ".html": "html",
     ".htm": "html",
+    ".pdf": "pdf",
+    ".docx": "docx",
+    ".pptx": "pptx",
+    ".xlsx": "xlsx",
 }
 
 

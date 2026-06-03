@@ -14,11 +14,14 @@ RUN uv sync --no-dev --frozen
 # Copy source
 COPY src/ ./src/
 COPY migrations/ ./migrations/
+COPY scripts/ ./scripts/
+COPY config/*.yaml.example ./config/
+COPY .env.example ./
 COPY alembic.ini ./
 
 # Create data and config dirs
-RUN mkdir -p data config
+RUN mkdir -p data config secrets && chmod +x scripts/docker_entrypoint.sh
 
 EXPOSE 8765
 
-CMD ["uv", "run", "uvicorn", "fleetent.server:app", "--host", "0.0.0.0", "--port", "8765"]
+ENTRYPOINT ["./scripts/docker_entrypoint.sh"]

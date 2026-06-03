@@ -11,9 +11,15 @@ from fleetent.intelligence import vector_store
 from fleetent.intelligence.knowledge_base.models import KnowledgeChunk, KnowledgeDocument
 from fleetent.intelligence.knowledge_base.parsers import ParsedDocument
 from fleetent.intelligence.knowledge_base.store import KnowledgeStore
+from fleetent.intelligence.vector_store import rerank as rerank_runtime
+from fleetent.observability.structured_logging import get_logger
 
 SearchMode = Literal["vector", "keyword", "hybrid"]
 _SEARCH_MODES: set[str] = {"vector", "keyword", "hybrid"}
+RERANK_CANDIDATE_MULTIPLIER = 5
+RERANK_CANDIDATE_MIN = 20
+RERANK_CANDIDATE_MAX = 100
+_logger = get_logger("knowledge_base")
 
 
 async def ingest_text(
@@ -80,6 +86,9 @@ async def ingest_parsed(
             "section_path": section.metadata.get("path", section.title),
             "section_title": section.title,
         }
+        for key, value in section.metadata.items():
+            if key != "path":
+                section_metadata[key] = value
         for chunk_content in _chunk_text(
             normalized_text, settings.chunk_size, settings.chunk_overlap
         ):
@@ -163,11 +172,14 @@ async def search(
     kb_ids: list[str] | None = None,
     limit: int = 10,
     mode: SearchMode = "vector",
+    rerank: bool = False,
 ) -> list[KnowledgeChunk]:
     """Search knowledge chunks using vector, keyword, or hybrid retrieval."""
 
     if mode not in _SEARCH_MODES:
         raise ValueError(f"unsupported knowledge search mode: {mode}")
+    if rerank and mode != "hybrid":
+        raise ValueError("rerank only supports hybrid knowledge search mode")
     if limit <= 0:
         return []
 
@@ -178,7 +190,14 @@ async def search(
     if mode == "keyword":
         return store.search_keyword(query, resolved_tenant_id, resolved_kb_ids, limit)
     if mode == "hybrid":
-        return await _search_hybrid(query, resolved_tenant_id, resolved_kb_ids, limit, store)
+        return await _search_hybrid(
+            query,
+            resolved_tenant_id,
+            resolved_kb_ids,
+            limit,
+            store,
+            rerank=rerank,
+        )
 
     return await _search_vector(query, resolved_tenant_id, resolved_kb_ids, limit, store)
 
@@ -216,9 +235,12 @@ async def _search_hybrid(
     kb_ids: list[str],
     limit: int,
     store: KnowledgeStore,
+    *,
+    rerank: bool = False,
 ) -> list[KnowledgeChunk]:
-    vector_chunks = await _search_vector(query, tenant_id, kb_ids, limit, store)
-    keyword_chunks = store.search_keyword(query, tenant_id, kb_ids, limit)
+    candidate_limit = _rerank_candidate_limit(limit) if rerank else limit
+    vector_chunks = await _search_vector(query, tenant_id, kb_ids, candidate_limit, store)
+    keyword_chunks = store.search_keyword(query, tenant_id, kb_ids, candidate_limit)
     chunk_by_id = {chunk.id: chunk for chunk in vector_chunks}
     chunk_by_id.update({chunk.id: chunk for chunk in keyword_chunks})
 
@@ -233,7 +255,79 @@ async def _search_hybrid(
         for chunk_id, score in rrf_scores.items()
         if chunk_id in chunk_by_id
     ]
-    return sorted(fused, key=lambda chunk: (-chunk.score, chunk.position, chunk.id))[:limit]
+    candidates = sorted(fused, key=lambda chunk: (-chunk.score, chunk.position, chunk.id))
+    if not rerank:
+        return candidates[:limit]
+    return await _rerank_hybrid_candidates(
+        query,
+        candidates[:candidate_limit],
+        tenant_id=tenant_id,
+        kb_ids=kb_ids,
+        limit=limit,
+    )
+
+
+def _rerank_candidate_limit(limit: int) -> int:
+    return min(
+        max(limit * RERANK_CANDIDATE_MULTIPLIER, RERANK_CANDIDATE_MIN),
+        RERANK_CANDIDATE_MAX,
+    )
+
+
+async def _rerank_hybrid_candidates(
+    query: str,
+    candidates: list[KnowledgeChunk],
+    *,
+    tenant_id: str,
+    kb_ids: list[str],
+    limit: int,
+) -> list[KnowledgeChunk]:
+    provider = rerank_runtime.create_rerank_provider(_settings().rerank)
+    try:
+        results = await provider.rerank(
+            query,
+            [candidate.content for candidate in candidates],
+            top_n=limit,
+        )
+    except Exception as exc:
+        reason = str(exc) or exc.__class__.__name__
+        _logger.warn(
+            "kb_rerank_failed",
+            tenant_id=tenant_id,
+            kb_ids=kb_ids,
+            limit=limit,
+            candidate_count=len(candidates),
+            reason=reason,
+        )
+        return candidates[:limit]
+
+    return _apply_rerank_results(candidates, results, limit)
+
+
+def _apply_rerank_results(
+    candidates: list[KnowledgeChunk],
+    results: list[rerank_runtime.RerankResult],
+    limit: int,
+) -> list[KnowledgeChunk]:
+    selected: list[KnowledgeChunk] = []
+    selected_indexes: set[int] = set()
+    for result in results:
+        if result.index < 0 or result.index >= len(candidates):
+            continue
+        if result.index in selected_indexes:
+            continue
+        selected_indexes.add(result.index)
+        selected.append(replace(candidates[result.index], score=result.score))
+        if len(selected) >= limit:
+            return selected
+
+    for index, candidate in enumerate(candidates):
+        if index not in selected_indexes:
+            selected.append(candidate)
+        if len(selected) >= limit:
+            break
+
+    return selected
 
 
 async def delete(document_id: str) -> None:

@@ -1,8 +1,21 @@
 import re
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from io import BytesIO
+from pathlib import Path
+from typing import cast
+
+from docx import Document
+from openpyxl import load_workbook
+from pptx import Presentation
+from pypdf import PdfReader
 
 _MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 @dataclass(frozen=True)
@@ -23,6 +36,10 @@ class ParsedDocument:
     format: str
     sections: list[ParsedSection]
     metadata: dict[str, str]
+
+
+_TextParser = Callable[[str, str], ParsedDocument]
+_BinaryParser = Callable[[str, bytes], ParsedDocument]
 
 
 def parse_text(filename: str, content: str) -> ParsedDocument:
@@ -125,12 +142,268 @@ def parse_html(filename: str, content: str) -> ParsedDocument:
     )
 
 
+def parse_pdf(filename: str, content: bytes) -> ParsedDocument:
+    """Parse a text-based PDF into page sections."""
+
+    reader = PdfReader(BytesIO(content))
+    if reader.is_encrypted:
+        raise ValueError("encrypted PDF is unsupported")
+
+    sections: list[ParsedSection] = []
+    warnings: list[str] = []
+    for index, page in enumerate(reader.pages, start=1):
+        text = _normalize_text(page.extract_text() or "")
+        if not text:
+            warnings.append("empty_page_skipped")
+            continue
+        sections.append(
+            ParsedSection(
+                title=f"Page {index}",
+                text=text,
+                level=0,
+                metadata={"path": f"Page {index}", "page_number": str(index)},
+            )
+        )
+
+    if not sections:
+        raise ValueError("PDF contains no extractable text")
+
+    metadata = {"filename": filename, "format": "pdf", "parser": "pypdf"}
+    if warnings:
+        metadata["warnings"] = ",".join(sorted(set(warnings)))
+    return ParsedDocument(
+        filename=filename,
+        format="pdf",
+        sections=sections,
+        metadata=metadata,
+    )
+
+
+def parse_docx(filename: str, content: bytes) -> ParsedDocument:
+    """Parse DOCX paragraphs and tables into searchable sections."""
+
+    document = Document(BytesIO(content))
+    sections: list[ParsedSection] = []
+    current_title = "body"
+    current_level = 0
+    current_lines: list[str] = []
+    heading_stack: list[tuple[int, str]] = []
+
+    def flush_section() -> None:
+        normalized_text = _normalize_text("\n".join(current_lines))
+        if not normalized_text:
+            return
+        sections.append(
+            ParsedSection(
+                title=current_title,
+                text=normalized_text,
+                level=current_level,
+                metadata={"path": _format_heading_path(heading_stack) if heading_stack else "body"},
+            )
+        )
+
+    for paragraph in document.paragraphs:
+        text = _normalize_inline_text(paragraph.text)
+        if not text:
+            continue
+        heading_level = _docx_heading_level(paragraph.style.name if paragraph.style else "")
+        if heading_level is not None:
+            flush_section()
+            current_lines = []
+            current_title = text
+            current_level = heading_level
+            heading_stack = [
+                (level, title) for level, title in heading_stack if level < heading_level
+            ]
+            heading_stack.append((heading_level, text))
+            continue
+        current_lines.append(text)
+
+    for table in document.tables:
+        for row in table.rows:
+            cells = [_normalize_inline_text(cell.text) for cell in row.cells]
+            row_text = " | ".join(cell for cell in cells if cell)
+            if row_text:
+                current_lines.append(row_text)
+
+    flush_section()
+    if not sections:
+        raise ValueError("DOCX contains no extractable text")
+    return ParsedDocument(
+        filename=filename,
+        format="docx",
+        sections=sections,
+        metadata={"filename": filename, "format": "docx", "parser": "python-docx"},
+    )
+
+
+def parse_pptx(filename: str, content: bytes) -> ParsedDocument:
+    """Parse PPTX slide text into searchable sections."""
+
+    presentation = Presentation(BytesIO(content))
+    sections: list[ParsedSection] = []
+    for index, slide in enumerate(presentation.slides, start=1):
+        texts: list[str] = []
+        title = ""
+        if slide.shapes.title is not None and slide.shapes.title.has_text_frame:
+            title = _normalize_inline_text(slide.shapes.title.text)
+        for shape in slide.shapes:
+            if not shape.has_text_frame:
+                continue
+            text = _normalize_text(shape.text)
+            if text:
+                texts.append(text)
+        section_text = _normalize_text("\n".join(texts))
+        if not section_text:
+            continue
+        section_title = title or f"Slide {index}"
+        sections.append(
+            ParsedSection(
+                title=section_title,
+                text=section_text,
+                level=0,
+                metadata={"path": section_title, "slide_number": str(index)},
+            )
+        )
+
+    if not sections:
+        raise ValueError("PPTX contains no extractable text")
+    return ParsedDocument(
+        filename=filename,
+        format="pptx",
+        sections=sections,
+        metadata={"filename": filename, "format": "pptx", "parser": "python-pptx"},
+    )
+
+
+def parse_xlsx(filename: str, content: bytes) -> ParsedDocument:
+    """Parse XLSX sheet cell text into searchable sections."""
+
+    workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
+    sections: list[ParsedSection] = []
+    for sheet in workbook.worksheets:
+        rows: list[str] = []
+        first_row: int | None = None
+        last_row: int | None = None
+        for row_index, row in enumerate(sheet.iter_rows(values_only=True), start=1):
+            cells = [_normalize_inline_text(str(cell)) for cell in row if cell is not None]
+            row_text = " | ".join(cell for cell in cells if cell)
+            if not row_text:
+                continue
+            if first_row is None:
+                first_row = row_index
+            last_row = row_index
+            rows.append(row_text)
+        section_text = _normalize_text("\n".join(rows))
+        if not section_text:
+            continue
+        metadata = {"path": sheet.title, "sheet_name": sheet.title}
+        if first_row is not None and last_row is not None:
+            metadata["row_range"] = f"{first_row}-{last_row}"
+        sections.append(
+            ParsedSection(
+                title=sheet.title,
+                text=section_text,
+                level=0,
+                metadata=metadata,
+            )
+        )
+
+    workbook.close()
+    if not sections:
+        raise ValueError("XLSX contains no extractable text")
+    return ParsedDocument(
+        filename=filename,
+        format="xlsx",
+        sections=sections,
+        metadata={"filename": filename, "format": "xlsx", "parser": "openpyxl"},
+    )
+
+
+def parse_document(
+    filename: str,
+    content: bytes | str,
+    mime_type: str | None = None,
+) -> ParsedDocument:
+    """Dispatch supported source content to the correct knowledge-base parser."""
+
+    parser_name = _parser_name_for(filename, mime_type)
+    parser = getattr(sys.modules[__name__], parser_name)
+    if parser_name in {"parse_text", "parse_markdown", "parse_html"}:
+        text_parser = cast(_TextParser, parser)
+        return text_parser(filename, _content_as_text(content))
+    binary_parser = cast(_BinaryParser, parser)
+    return binary_parser(filename, _content_as_bytes(content))
+
+
 def _normalize_text(content: str) -> str:
     return "\n".join(line.strip() for line in content.splitlines() if line.strip())
 
 
+def _parser_name_for(
+    filename: str,
+    mime_type: str | None,
+) -> str:
+    suffix = Path(filename).suffix.lower()
+    parser_name = _PARSER_BY_SUFFIX.get(suffix)
+    if parser_name is not None:
+        return parser_name
+    normalized_mime = (mime_type or "").lower()
+    parser_name = _PARSER_BY_MIME.get(normalized_mime)
+    if parser_name is not None:
+        return parser_name
+    raise ValueError(
+        f"unsupported media type for knowledge-base parser: {suffix or normalized_mime}"
+    )
+
+
+def _content_as_text(content: bytes | str) -> str:
+    if isinstance(content, str):
+        return content
+    return content.decode("utf-8")
+
+
+def _content_as_bytes(content: bytes | str) -> bytes:
+    if isinstance(content, bytes):
+        return content
+    return content.encode("utf-8")
+
+
+def _docx_heading_level(style_name: str) -> int | None:
+    if not style_name.startswith("Heading "):
+        return None
+    try:
+        return int(style_name.removeprefix("Heading "))
+    except ValueError:
+        return None
+
+
 def _format_heading_path(heading_stack: list[tuple[int, str]]) -> str:
     return " > ".join(title for _, title in heading_stack)
+
+
+_PARSER_BY_SUFFIX = {
+    ".txt": "parse_text",
+    ".md": "parse_markdown",
+    ".markdown": "parse_markdown",
+    ".html": "parse_html",
+    ".htm": "parse_html",
+    ".pdf": "parse_pdf",
+    ".docx": "parse_docx",
+    ".pptx": "parse_pptx",
+    ".xlsx": "parse_xlsx",
+}
+_PARSER_BY_MIME = {
+    "text/plain": "parse_text",
+    "text/markdown": "parse_markdown",
+    "text/x-markdown": "parse_markdown",
+    "text/html": "parse_html",
+    "application/xhtml+xml": "parse_html",
+    "application/pdf": "parse_pdf",
+    _DOCX_MIME: "parse_docx",
+    _PPTX_MIME: "parse_pptx",
+    _XLSX_MIME: "parse_xlsx",
+}
 
 
 class _KnowledgeHTMLParser(HTMLParser):

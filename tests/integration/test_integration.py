@@ -4,25 +4,42 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from alembic import command
+from alembic.config import Config
 
-import fleetent.agent_store as agent_store
 import fleetent.governance.permission_gate as permission_gate
 import fleetent.im_user_store as im_user_store
 import fleetent.session_mgr as session_mgr
 import fleetent.user_store as user_store
 
 
+def _apply_migrations(db_path: Path) -> None:
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.upgrade(cfg, "head")
+
+
 @pytest.fixture
 def isolated_db(tmp_path, monkeypatch):
-    """Redirect all data paths to tmp_path."""
+    """Redirect all data paths to tmp_path.
+
+    Legacy stores share ``users.db`` via DB_PATH; the managed agent_store uses a
+    separate Alembic-managed database so its schema does not collide with the
+    legacy permission_gate ``approvals`` table.
+    """
     db = tmp_path / "users.db"
+    managed_db = tmp_path / "managed.db"
     monkeypatch.setattr(user_store, "DB_PATH", db)
     monkeypatch.setattr(im_user_store, "DB_PATH", db)
-    monkeypatch.setattr(agent_store, "DB_PATH", db)
     monkeypatch.setattr(permission_gate, "DB_PATH", db)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{managed_db}")
+    _apply_migrations(managed_db)
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
     return tmp_path
 

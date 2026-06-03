@@ -5,10 +5,29 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from fleetent.config import Settings
-from fleetent.intelligence import knowledge_base, memory
+from fleetent.intelligence import knowledge_base, long_term_ctx_policy, memory
+from fleetent.intelligence.long_term_ctx_policy import (
+    AgentContextIdentity as AgentContextIdentity,
+)
+from fleetent.intelligence.long_term_ctx_policy import (
+    ContextPolicy as ContextPolicy,
+)
+from fleetent.intelligence.long_term_ctx_policy import (
+    ContextPolicySourceBudget as ContextPolicySourceBudget,
+)
+from fleetent.intelligence.long_term_ctx_policy import (
+    resolve_context_policy as resolve_context_policy,
+)
 
 _MEMORY_LIMIT = 10
 _KNOWLEDGE_LIMIT = 10
+
+_POLICY_SECTION_HEADERS = {
+    "user_memory": "[Long-term memory]",
+    "knowledge_base": "[Knowledge]",
+    "tenant_shared_memory": "[Shared memory: tenant]",
+    "team_shared_memory": "[Shared memory: team]",
+}
 
 ConflictPreference = Literal["auto", "memory", "knowledge"]
 
@@ -149,6 +168,182 @@ async def build_context(
             decisions=selection.decisions,
         ),
     )
+
+
+async def build_context_with_policy(
+    *,
+    identity: AgentContextIdentity,
+    user_id: str,
+    query: str,
+    available_tokens: int,
+) -> BuiltContext:
+    """Build long-term context honoring the agent's resolved context policy.
+
+    Resolves the tenant/agent policy, queries only enabled sources (deriving the
+    Shared Memory scope from agent ownership), and records budget decisions for
+    disabled or skipped sources.
+    """
+    if available_tokens <= 0:
+        return BuiltContext(
+            text="",
+            sources=[],
+            budget_metadata=BudgetMetadata(
+                effective_budget=0,
+                decisions=[
+                    BudgetDecision(
+                        source_type="budget",
+                        source_id="available_tokens",
+                        token_estimate=0,
+                        reason="zero_available_tokens",
+                        included=False,
+                    )
+                ],
+            ),
+        )
+
+    policy = long_term_ctx_policy.resolve_context_policy(identity)
+    total_budget = min(available_tokens, Settings(anthropic_api_key="").long_term_ctx.max_tokens)
+
+    decisions: list[BudgetDecision] = []
+    included: list[_ContextCandidate] = []
+    used_by_source: dict[str, int] = {}
+
+    for source in sorted(policy.sources, key=lambda s: s.priority):
+        if not source.enabled:
+            decisions.append(_policy_decision(source.source, "disabled_by_policy"))
+            continue
+        candidates, skip_reason = await _policy_source_candidates(
+            source.source, identity, user_id, query, source.top_k
+        )
+        if skip_reason is not None:
+            decisions.append(_policy_decision(source.source, skip_reason))
+            continue
+        candidates.sort(key=lambda candidate: (-candidate.source.score, candidate.source.source_id))
+        included_count = 0
+        for candidate in candidates:
+            reason = ""
+            if included_count >= source.top_k:
+                reason = "source_top_k_exceeded"
+            elif (
+                used_by_source.get(source.source, 0) + candidate.token_estimate > source.max_tokens
+            ):
+                reason = "source_budget_exceeded"
+            elif len(_render_policy_context([*included, candidate])) > total_budget:
+                reason = "total_budget_exceeded"
+            if reason:
+                decisions.append(_decision(candidate, included=False, reason=reason))
+                continue
+            included.append(candidate)
+            included_count += 1
+            used_by_source[source.source] = (
+                used_by_source.get(source.source, 0) + candidate.token_estimate
+            )
+            decisions.append(_decision(candidate, included=True, reason="included"))
+
+    return BuiltContext(
+        text=_render_policy_context(included),
+        sources=[candidate.source for candidate in included],
+        budget_metadata=BudgetMetadata(effective_budget=total_budget, decisions=decisions),
+    )
+
+
+def _policy_decision(source: str, reason: str) -> BudgetDecision:
+    return BudgetDecision(
+        source_type=source,
+        source_id="policy",
+        token_estimate=0,
+        reason=reason,
+        included=False,
+    )
+
+
+async def _policy_source_candidates(
+    source: str,
+    identity: AgentContextIdentity,
+    user_id: str,
+    query: str,
+    top_k: int,
+) -> tuple[list[_ContextCandidate], str | None]:
+    if source == "user_memory":
+        memories = await memory.search(user_id, query, limit=top_k)
+        return _ranked_candidates(
+            source, [(item.id, item.content, {"type": item.type}) for item in memories]
+        ), None
+    if source == "knowledge_base":
+        results = await _search_knowledge(user_id, query, identity.agent_id, top_k)
+        return [_policy_knowledge_candidate(item) for item in results], None
+    if source == "tenant_shared_memory":
+        tenant_items = await memory.search_shared_memory("tenant", identity.tenant_id, query, top_k)
+        return _ranked_candidates(source, [_shared_row(item) for item in tenant_items]), None
+    if source == "team_shared_memory":
+        if not identity.team_id:
+            return [], "team_id_missing"
+        team_items = await memory.search_shared_memory("team", identity.team_id, query, top_k)
+        return _ranked_candidates(source, [_shared_row(item) for item in team_items]), None
+    return [], None
+
+
+def _shared_row(item: memory.SharedMemoryItem) -> tuple[str, str, dict[str, str]]:
+    return item.id, item.content, _shared_metadata(item)
+
+
+def _shared_metadata(item: memory.SharedMemoryItem) -> dict[str, str]:
+    return {"type": item.type, "scope_type": item.scope_type, "scope_id": item.scope_id}
+
+
+def _ranked_candidates(
+    source: str, rows: list[tuple[str, str, dict[str, str]]]
+) -> list[_ContextCandidate]:
+    # Preserve provider relevance order via descending rank scores.
+    total = len(rows)
+    candidates: list[_ContextCandidate] = []
+    for index, (source_id, content, metadata) in enumerate(rows):
+        line = f"- {content}"
+        candidates.append(
+            _ContextCandidate(
+                source=ContextSource(
+                    source_type=source,
+                    source_id=source_id,
+                    score=float(total - index),
+                    metadata=metadata,
+                    token_estimate=len(line),
+                ),
+                line=line,
+                token_estimate=len(line),
+            )
+        )
+    return candidates
+
+
+def _policy_knowledge_candidate(item: object) -> _ContextCandidate:
+    content = _item_content(item)
+    line = f"- {content}"
+    source = _knowledge_source(item)
+    return _ContextCandidate(
+        source=ContextSource(
+            source_type="knowledge_base",
+            source_id=source.source_id,
+            score=source.score,
+            metadata=source.metadata,
+            token_estimate=len(line),
+        ),
+        line=line,
+        token_estimate=len(line),
+    )
+
+
+def _render_policy_context(candidates: list[_ContextCandidate]) -> str:
+    lines: list[str] = []
+    active_section = ""
+    for candidate in candidates:
+        source_type = candidate.source.source_type
+        if source_type != active_section:
+            if lines:
+                lines.append("")
+            lines.append(_POLICY_SECTION_HEADERS.get(source_type, f"[{source_type}]"))
+            active_section = source_type
+        lines.append(candidate.line)
+    return "\n".join(lines)
 
 
 def _resolve_policy(available_tokens: int) -> BudgetPolicy:

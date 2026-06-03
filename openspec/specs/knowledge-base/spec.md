@@ -190,11 +190,13 @@ structured parsed sections。
 - **THEN** chunk metadata 保留 section title 或 heading path
 
 ### Requirement: Parser dependency boundary
-基础 parser SHALL 不引入 LlamaIndex、LangChain、docling、PDF/Office parser 或 VLM 依赖。
+基础 parser SHALL 不引入 LlamaIndex、LangChain、docling、VLM 或外部解析服务依赖。高级 parser 可以引入
+本地 PDF / Office 解析依赖，但不得引入 AI framework、OCR engine、VLM 或外部解析服务。
 
 #### Scenario: No AI framework parser dependency
-- **WHEN** basic parser change 完成
-- **THEN** runtime dependency 不包含 LlamaIndex、LangChain 或 docling
+- **WHEN** parser changes 完成
+- **THEN** runtime dependency 不包含 LlamaIndex、LangChain、docling 或 unstructured
+- **AND** 不包含 OCR engine 或 VLM dependency
 
 ### Requirement: Knowledge-base search modes
 系统 SHALL 支持 vector、keyword 和 hybrid 三种 knowledge-base search mode。
@@ -260,12 +262,27 @@ structured parsed sections。
 - **WHEN** vector 或 keyword 单侧无结果
 - **THEN** hybrid search 仍返回另一侧结果
 
-### Requirement: Hybrid search excludes advanced retrieval
-hybrid search SHALL NOT implement reranker, query planner, graph search or external search backend.
-
-#### Scenario: No rerank dependency
-- **WHEN** hybrid search 执行
+#### Scenario: Hybrid search does not rerank by default
+- **WHEN** 调用 `search(..., mode="hybrid")` 且未传入 `rerank=True`
 - **THEN** 系统不调用 rerank provider
+- **AND** 返回当前 hybrid fused ranking
+
+### Requirement: Hybrid search excludes advanced retrieval
+knowledge-base search SHALL NOT implement rerank provider, query planner, graph search or external search
+backend as part of default vector、keyword 或 hybrid search。
+
+#### Scenario: Hybrid search does not rerank by default
+- **WHEN** 调用 `search(..., mode="hybrid")` 且未传入 `rerank=True`
+- **THEN** 系统不调用 rerank provider
+- **AND** 返回当前 hybrid fused ranking
+
+#### Scenario: Graph search remains separate
+- **WHEN** 调用 `search(...)`
+- **THEN** 系统不执行 graph search relation expansion
+
+#### Scenario: Query planner remains separate
+- **WHEN** 调用 `search(...)`
+- **THEN** 系统不执行 planner-driven multi-step retrieval
 
 ### Requirement: Knowledge-base connector boundary
 系统 SHALL 提供 DataSource / DocumentRef 边界，供不同文档来源接入 knowledge-base ingest。
@@ -584,29 +601,30 @@ Google Drive connector SHALL list documents from a configured folder scope inste
 - **AND** 不写入 KB documents、chunks 或 vector index
 
 ### Requirement: Google Drive content parsing
-Google Drive connector SHALL map supported Drive content into existing knowledge-base parsers.
+Google Drive connector SHALL map supported Drive content into knowledge-base parser registry.
 
 #### Scenario: Google Docs export uses HTML parser
 - **WHEN** connector 同步 Google Docs
 - **THEN** 它通过 Drive export API 导出 HTML
-- **AND** 调用现有 HTML parser 生成 parsed document
+- **AND** 调用 HTML parser 生成 parsed document
 
 #### Scenario: Plain text uses text parser
 - **WHEN** connector 同步 plain text 文件
-- **THEN** 它调用现有 text parser
+- **THEN** 它调用 text parser
 
 #### Scenario: Markdown uses markdown parser
 - **WHEN** connector 同步 Markdown 文件
-- **THEN** 它调用现有 Markdown parser
+- **THEN** 它调用 Markdown parser
 
 #### Scenario: HTML file uses HTML parser
 - **WHEN** connector 同步 HTML 文件
-- **THEN** 它调用现有 HTML parser
+- **THEN** 它调用 HTML parser
 
-#### Scenario: Google Sheets and Slides are unsupported in MVP
+#### Scenario: Google Sheets and Slides are exported to supported Office formats
 - **WHEN** connector 遇到 Google Sheets 或 Google Slides
-- **THEN** 系统跳过该文件
-- **AND** summary 记录 unsupported 数量
+- **THEN** Google Sheets 导出为 `.xlsx`
+- **AND** Google Slides 导出为 `.pptx`
+- **AND** 导出内容通过 parser registry 解析
 
 ### Requirement: Google Drive sync planning
 knowledge-base SHALL plan Google Drive sync actions before mutating KB documents, chunks, vector index, or source state.
@@ -1041,3 +1059,616 @@ Confluence connector tests SHALL use fake clients by default and SHALL NOT conne
 #### Scenario: CLI output is sanitized
 - **WHEN** CLI 输出 connector check、sync 或 status 结果
 - **THEN** 输出不包含 token、secret、credential payload 或完整文档正文
+
+### Requirement: Advanced parser public API
+knowledge-base SHALL provide local parsers for text-based PDF, DOCX, PPTX and XLSX documents without using AI frameworks or external parsing services.
+
+#### Scenario: Advanced parser API is importable
+- **WHEN** 调用方导入 `parse_pdf`、`parse_docx`、`parse_pptx`、`parse_xlsx` 和 `parse_document`
+- **THEN** 导入成功
+
+#### Scenario: Advanced parser dependencies are local only
+- **WHEN** 查看 runtime dependencies
+- **THEN** 可以使用 `pypdf`、`python-docx`、`python-pptx` 和 `openpyxl`
+- **AND** 不包含 LlamaIndex、LangChain、docling、unstructured、OCR engine 或 VLM dependency
+
+### Requirement: Parser registry dispatch
+knowledge-base SHALL provide a parser registry that maps supported file extensions and MIME types to the correct parser.
+
+#### Scenario: Registry dispatches basic formats
+- **WHEN** 调用 `parse_document` 解析 `.txt`、`.md`、`.html` 或 `.htm`
+- **THEN** registry 分别调用 text、Markdown 或 HTML parser
+
+#### Scenario: Registry dispatches advanced formats
+- **WHEN** 调用 `parse_document` 解析 `.pdf`、`.docx`、`.pptx` 或 `.xlsx`
+- **THEN** registry 分别调用 PDF、DOCX、PPTX 或 XLSX parser
+
+#### Scenario: Registry dispatches by MIME type
+- **WHEN** filename 缺少可识别 extension
+- **AND** MIME type 是 supported type
+- **THEN** registry 使用 MIME type 选择 parser
+
+#### Scenario: Unsupported media type fails fast
+- **WHEN** registry 收到 unsupported extension 和 MIME type
+- **THEN** registry fail fast
+- **AND** 错误信息不包含文件正文
+
+### Requirement: Text-based PDF parser
+knowledge-base SHALL parse text-based PDF files into sections with page metadata.
+
+#### Scenario: PDF pages become sections
+- **WHEN** parser 解析包含可抽取文本的 PDF
+- **THEN** 每个有文本的 page 生成一个 section
+- **AND** section metadata 包含 `page_number`
+
+#### Scenario: Empty PDF extraction fails safely
+- **WHEN** parser 解析扫描版或没有可抽取文本的 PDF
+- **THEN** parser fail fast 或返回统一 empty-content failure
+- **AND** 错误信息不包含文件正文
+
+#### Scenario: Encrypted PDF fails safely
+- **WHEN** parser 解析加密 PDF
+- **THEN** parser fail fast
+- **AND** 错误摘要说明 encrypted / unsupported
+- **AND** 不输出文件正文
+
+### Requirement: DOCX parser
+knowledge-base SHALL parse DOCX paragraph and table text into searchable parsed sections.
+
+#### Scenario: DOCX paragraphs are searchable
+- **WHEN** parser 解析包含 paragraph 的 DOCX
+- **THEN** paragraph 文本进入 parsed sections
+
+#### Scenario: DOCX tables are searchable text
+- **WHEN** parser 解析包含 table 的 DOCX
+- **THEN** table cell 文本进入 parsed sections
+- **AND** 不要求保留结构化 table schema
+
+#### Scenario: DOCX headings preserve path
+- **WHEN** DOCX 包含 heading paragraphs
+- **THEN** sections metadata 保留 heading path
+
+### Requirement: PPTX parser
+knowledge-base SHALL parse PowerPoint slide text into sections with slide metadata.
+
+#### Scenario: PPTX slides become sections
+- **WHEN** parser 解析 PPTX
+- **THEN** 每个包含文本的 slide 生成 section
+- **AND** section metadata 包含 `slide_number`
+
+#### Scenario: PPTX title is used when available
+- **WHEN** slide 包含标题文本
+- **THEN** section title 使用 slide title
+- **AND** 没有标题时使用 `Slide N`
+
+### Requirement: XLSX parser
+knowledge-base SHALL parse Excel workbook cell text into searchable sections with sheet metadata.
+
+#### Scenario: XLSX sheets become sections
+- **WHEN** parser 解析 XLSX
+- **THEN** 每个 non-empty sheet 生成 section
+- **AND** section metadata 包含 `sheet_name`
+
+#### Scenario: XLSX cells become searchable text
+- **WHEN** sheet 包含非空 cells
+- **THEN** cell values 以可检索文本形式进入 section
+- **AND** 不要求保留结构化 table schema 或公式计算结果
+
+### Requirement: Advanced local source parsing
+local directory source SHALL include PDF, DOCX, PPTX and XLSX files in sync planning and parse them through the parser registry.
+
+#### Scenario: Local source supports advanced extensions
+- **WHEN** local directory 包含 `.pdf`、`.docx`、`.pptx` 或 `.xlsx`
+- **THEN** planner 将这些文件识别为 supported files
+
+#### Scenario: Local sync parses advanced files
+- **WHEN** executor 处理 advanced file ingest item
+- **THEN** 它通过 parser registry 解析文件
+- **AND** 调用 `ingest_parsed()` 写入 KB
+
+#### Scenario: Advanced section metadata reaches chunks
+- **WHEN** advanced parsed section 生成 chunk
+- **THEN** chunk metadata 保留 page、slide 或 sheet 等 section metadata
+
+### Requirement: Google Drive advanced content parsing
+Google Drive connector SHALL map Google Sheets, Google Slides and uploaded Office/PDF files into the parser registry.
+
+#### Scenario: Google Sheets export uses XLSX parser
+- **WHEN** connector 同步 Google Sheets
+- **THEN** 它通过 Drive export API 导出 `.xlsx`
+- **AND** 调用 xlsx parser 生成 parsed document
+
+#### Scenario: Google Slides export uses PPTX parser
+- **WHEN** connector 同步 Google Slides
+- **THEN** 它通过 Drive export API 导出 `.pptx`
+- **AND** 调用 pptx parser 生成 parsed document
+
+#### Scenario: Uploaded PDF and Office files use registry
+- **WHEN** connector 同步 uploaded `.pdf`、`.docx`、`.pptx` 或 `.xlsx`
+- **THEN** 它 download 原始 bytes
+- **AND** 通过 parser registry 解析
+
+#### Scenario: Per-file export failure is isolated
+- **WHEN** Google Drive export 或 download 某个文件失败
+- **THEN** executor 记录 failed count 和脱敏错误摘要
+- **AND** 继续处理后续 item
+- **AND** 不记录文件正文或 credential
+
+### Requirement: Advanced parser exclusions
+knowledge-base advanced parsers SHALL keep OCR, VLM, scanned PDF, encrypted file parsing and structured table QA out of scope.
+
+#### Scenario: OCR and VLM remain unsupported
+- **WHEN** parser 遇到只能通过 OCR 或 VLM 理解的内容
+- **THEN** parser 不调用 OCR、VLM 或外部解析服务
+- **AND** 返回 unsupported / empty extraction failure
+
+#### Scenario: Structured table QA remains out of scope
+- **WHEN** parser 解析 DOCX 或 XLSX table
+- **THEN** parser 只输出可检索文本
+- **AND** 不输出 table QA 专用结构化模型
+
+### Requirement: Knowledge-base entity extraction schema
+knowledge-base SHALL store entity extraction runs, canonical entities, entity mentions and relations in SQLite tables owned by the knowledge-base capability.
+
+#### Scenario: Extraction tables exist after migration
+- **WHEN** Alembic upgrade 到 head
+- **THEN** 数据库包含 `kb_extraction_runs`
+- **AND** 包含 `kb_entities`
+- **AND** 包含 `kb_entity_mentions`
+- **AND** 包含 `kb_relations`
+
+#### Scenario: Entity dedupe key is scoped
+- **WHEN** schema 创建 `kb_entities`
+- **THEN** `(tenant_id, kb_id, entity_type, normalized_name)` 是唯一键
+- **AND** 同名实体不会跨 KB 合并
+
+### Requirement: Entity and relation type boundaries
+knowledge-base SHALL use a fixed first-version set of entity and relation types for extraction output.
+
+#### Scenario: Supported entity types
+- **WHEN** extractor 输出 entity
+- **THEN** entity_type 必须是 `person`、`team`、`organization`、`customer`、`project`、`system`、`document`、`concept` 或 `term`
+
+#### Scenario: Supported relation types
+- **WHEN** extractor 输出 relation
+- **THEN** relation_type 必须是 `mentions`、`belongs_to`、`owns`、`depends_on`、`related_to`、`defines` 或 `conflicts_with`
+
+#### Scenario: Unsupported extraction type fails fast
+- **WHEN** extractor 输出未知 entity_type 或 relation_type
+- **THEN** extraction validation fail fast
+- **AND** 不写入 invalid row
+
+### Requirement: Entity normalization and scoped upsert
+knowledge-base SHALL normalize entity names and upsert canonical entities within a tenant + KB + type scope.
+
+#### Scenario: Same normalized entity merges in one KB
+- **WHEN** extraction 在同一 tenant + KB 中看到同类型 `Customer A` 和 `customer a`
+- **THEN** 系统只保留一个 canonical entity
+
+#### Scenario: Same normalized entity does not merge across KBs
+- **WHEN** extraction 在不同 KB 中看到同类型同名 entity
+- **THEN** 系统创建不同 canonical entities
+
+### Requirement: Explicit entity extraction runs
+knowledge-base SHALL run entity extraction only through an explicit extraction run, not as a default side effect of ingest or sync.
+
+#### Scenario: Document extraction run
+- **WHEN** 调用方显式对一个 document 运行 extraction
+- **THEN** 系统只扫描该 document 的 chunks
+- **AND** 写入 extraction run summary、entities、mentions 和 relations
+
+#### Scenario: Knowledge-base extraction run
+- **WHEN** 调用方显式对一个 KB 运行 extraction
+- **THEN** 系统逐 document 扫描该 KB 的 chunks
+- **AND** 单 document 失败不阻止后续 document
+- **AND** run summary 记录 failed count
+
+#### Scenario: Ingest does not auto-extract
+- **WHEN** KB ingest 或 connector sync 写入 document / chunks
+- **THEN** 系统不默认运行 entity extraction
+
+### Requirement: Document-level replacement semantics
+knowledge-base entity extraction SHALL replace active mentions and relations for a document only after that document extraction succeeds.
+
+#### Scenario: Successful rerun replaces document evidence
+- **WHEN** 对同一个 document 重新运行 extraction 且成功
+- **THEN** 系统替换该 document 旧 mentions 和 relations
+- **AND** 保留历史 `kb_extraction_runs` summary
+
+#### Scenario: Failed rerun keeps previous evidence
+- **WHEN** 对同一个 document 重新运行 extraction 失败
+- **THEN** 系统不删除该 document 旧 active mentions 或 relations
+- **AND** run summary 记录失败摘要
+
+#### Scenario: Orphan entity cleanup is deferred
+- **WHEN** document replacement 后某 entity 暂时没有 mentions
+- **THEN** 本 change 不要求立即删除 entity
+- **AND** orphan cleanup 留给后续 maintenance
+
+### Requirement: Deterministic extractor
+knowledge-base SHALL provide a deterministic extractor for tests and default local execution.
+
+#### Scenario: Deterministic extractor produces entities
+- **WHEN** deterministic extractor 处理固定 fixture
+- **THEN** 它输出符合 schema 的 customer、project、system、team、concept 或 term entities
+
+#### Scenario: Deterministic extractor produces relations
+- **WHEN** deterministic extractor 处理固定 relation fixture
+- **THEN** 它输出符合 schema 的 `depends_on`、`defines` 或 `conflicts_with` relations
+- **AND** 每条 relation 包含 source chunk evidence
+
+### Requirement: Extraction evidence
+knowledge-base SHALL keep source evidence for entity mentions and relations.
+
+#### Scenario: Entity mention keeps evidence
+- **WHEN** extraction 写入 entity mention
+- **THEN** mention 包含 document_id、chunk_id、text、confidence 和 extraction_run_id
+
+#### Scenario: Relation keeps evidence
+- **WHEN** extraction 写入 relation
+- **THEN** relation 包含 source_entity_id、target_entity_id、evidence_document_id、evidence_chunk_id、evidence_text、confidence 和 extraction_run_id
+
+#### Scenario: Evidence is summarized
+- **WHEN** extraction 保存 evidence_text
+- **THEN** evidence_text 不包含完整文档正文
+
+### Requirement: Entity extraction public API and CLI
+knowledge-base SHALL expose explicit entity extraction through public API and admin CLI.
+
+#### Scenario: Public API is importable
+- **WHEN** 调用方从 `fleetent.intelligence.knowledge_base` 导入 entity extraction models 和 `run_entity_extraction`
+- **THEN** 导入成功
+
+#### Scenario: Admin CLI triggers extraction
+- **WHEN** operator 运行 `fleetent-admin kb extract-entities --kb-id <kb_id>`
+- **THEN** CLI 调用 KB-level explicit extraction run
+- **AND** 输出脱敏 run summary
+
+#### Scenario: Admin CLI supports document scope
+- **WHEN** operator 运行 `fleetent-admin kb extract-entities --kb-id <kb_id> --document-id <document_id>`
+- **THEN** CLI 调用 document-level explicit extraction run
+- **AND** 输出脱敏 run summary
+
+### Requirement: Optional LLM extractor smoke
+knowledge-base MAY provide a real LLM extractor smoke path, but it SHALL be explicitly opt-in and skipped by default.
+
+#### Scenario: Real LLM extraction smoke is skipped by default
+- **WHEN** 未设置 `FLEETENT_KB_ENTITY_EXTRACTION_REAL_LLM=1`
+- **THEN** real LLM extraction smoke 被 skip
+
+#### Scenario: Real LLM extraction requires provider config
+- **WHEN** 设置 opt-in 但 provider config 或 credential 缺失
+- **THEN** real LLM extraction smoke 被 skip
+- **AND** 不影响默认测试
+
+### Requirement: Entity extraction exclusions
+knowledge-base entity extraction SHALL NOT implement graph search, automatic sync integration, scheduler, entity merge review or document ACL.
+
+#### Scenario: Graph search remains out of scope
+- **WHEN** entity extraction change 完成
+- **THEN** `search()` 和 hybrid ranking 不因 entities / relations 改变
+- **AND** 不新增 graph traversal search
+
+#### Scenario: Scheduler remains out of scope
+- **WHEN** entity extraction change 完成
+- **THEN** extraction 不自动进入 scheduler 或 worker
+- **AND** 只通过 explicit run 触发
+
+### Requirement: Knowledge-base graph search public API
+knowledge-base SHALL provide an independent graph search API that returns chunks with graph evidence without changing existing `search()` behavior.
+
+#### Scenario: Graph search API is importable
+- **WHEN** 调用方从 `fleetent.intelligence.knowledge_base` 导入 `graph_search`、`GraphSearchResult`、`GraphSearchChunk`、`EntityRef` 和 `RelationRef`
+- **THEN** 导入成功
+
+#### Scenario: Graph search is independent from search
+- **WHEN** 调用 `graph_search(...)`
+- **THEN** 系统不改变 `search(..., mode=\"vector\")`、`search(..., mode=\"keyword\")` 或 `search(..., mode=\"hybrid\")` 的行为
+
+#### Scenario: Graph search returns wrapper results
+- **WHEN** graph search 返回 chunks
+- **THEN** 每个结果包含 `KnowledgeChunk`
+- **AND** 包含 graph_score、reason、matched_entities、relations 和 evidence_chunk_ids
+
+### Requirement: Deterministic graph entity matching
+graph search SHALL match query text to entities using deterministic normalized string matching.
+
+#### Scenario: Entity name match
+- **WHEN** normalized query contains an entity normalized_name
+- **THEN** graph search treats that entity as matched
+
+#### Scenario: Entity alias match
+- **WHEN** entity metadata contains aliases
+- **AND** normalized query contains one alias
+- **THEN** graph search treats that entity as matched
+
+#### Scenario: No semantic entity search
+- **WHEN** graph search matches entities
+- **THEN** it does not call LLM, embedding search, rerank provider or vector store for entity linking
+
+### Requirement: Graph search depth
+graph search SHALL support depth 0 and depth 1 only.
+
+#### Scenario: Depth zero returns direct entity mentions
+- **WHEN** graph search runs with `depth=0`
+- **THEN** it returns chunks containing direct mentions of matched entities
+- **AND** result reason is `direct_entity_match`
+
+#### Scenario: Depth one expands relations
+- **WHEN** graph search runs with `depth=1`
+- **THEN** it returns direct entity mention chunks
+- **AND** relation evidence chunks
+- **AND** related entity mention chunks allowed by relation direction
+
+#### Scenario: Depth greater than one fails fast
+- **WHEN** graph search runs with `depth > 1`
+- **THEN** it fails fast
+
+### Requirement: Direction-aware relation expansion
+graph search SHALL expand relations according to relation type direction.
+
+#### Scenario: Bidirectional relations expand both ways
+- **WHEN** matched entity participates in `related_to` or `conflicts_with`
+- **THEN** graph search can expand to the other entity from either side
+
+#### Scenario: Directional relations expand source to target
+- **WHEN** matched entity is the source of `depends_on`、`belongs_to`、`owns` or `defines`
+- **THEN** graph search can expand to the target entity
+
+#### Scenario: Directional relations do not reverse expand
+- **WHEN** matched entity is the target of `depends_on`、`belongs_to`、`owns` or `defines`
+- **THEN** graph search does not expand back to the source entity
+
+#### Scenario: Mentions relation does not expand
+- **WHEN** matched entity participates in `mentions`
+- **THEN** graph search does not use that relation for related entity expansion
+
+### Requirement: Graph search scoring and dedupe
+graph search SHALL rank deterministic graph candidates by reason score and stable chunk ordering.
+
+#### Scenario: Graph reason scores
+- **WHEN** graph search scores candidates
+- **THEN** direct entity match has score `1.0`
+- **AND** relation evidence has score `0.8`
+- **AND** related entity mention has score `0.6`
+
+#### Scenario: Duplicate chunk merges evidence
+- **WHEN** the same chunk is reached through multiple graph paths
+- **THEN** graph search returns it once
+- **AND** keeps the highest graph_score
+- **AND** merges matched_entities、relations and evidence_chunk_ids
+
+#### Scenario: Stable graph ordering
+- **WHEN** graph search returns multiple chunks
+- **THEN** results are ordered by graph_score DESC、chunk position ASC、chunk id ASC
+
+#### Scenario: Limit is applied after merge
+- **WHEN** graph search has more candidates than limit
+- **THEN** final returned chunks do not exceed limit
+
+### Requirement: Graph search scope isolation
+graph search SHALL respect tenant and KB scope and exclude archived documents.
+
+#### Scenario: Tenant and KB scoped reads
+- **WHEN** graph search runs for tenant A and kb X
+- **THEN** it only reads entities、mentions、relations and chunks from tenant A and kb X
+
+#### Scenario: Multiple KBs are allowed
+- **WHEN** graph search runs with multiple kb_ids
+- **THEN** it can combine graph candidates from those KBs within the same tenant
+
+#### Scenario: Archived documents are excluded
+- **WHEN** graph evidence points to archived document chunks
+- **THEN** graph search does not return those chunks
+
+### Requirement: Graph search evaluation
+knowledge-base SHALL include deterministic evaluation fixtures for graph search behavior.
+
+#### Scenario: Direct entity evaluation
+- **WHEN** evaluation query mentions a customer entity
+- **THEN** expected customer chunks appear in graph search results
+- **AND** forbidden other-customer chunks do not appear
+
+#### Scenario: One-hop relation evaluation
+- **WHEN** evaluation query matches an entity with a one-hop relation
+- **THEN** direct mention、relation evidence and related entity mention chunks appear as expected
+
+#### Scenario: Relation direction evaluation
+- **WHEN** evaluation query matches the target of a directional relation
+- **THEN** graph search does not return source chunks through reverse expansion
+- **AND** bidirectional relations still expand both ways
+
+### Requirement: Graph search exclusions
+graph search SHALL NOT implement query planner, rerank integration, semantic entity search, LLM query understanding, document ACL or multi-hop graph traversal.
+
+#### Scenario: Planner remains out of scope
+- **WHEN** graph search change 完成
+- **THEN** 系统不自动决定何时调用 graph search
+- **AND** query planner 留给后续 spec
+
+#### Scenario: Rerank remains out of scope
+- **WHEN** graph search 返回 candidates
+- **THEN** 它不调用 rerank provider
+
+#### Scenario: Document ACL remains out of scope
+- **WHEN** graph search 读取 graph evidence
+- **THEN** 它只按 tenant + KB scope 过滤
+- **AND** 不实现 document-level ACL
+
+### Requirement: Hybrid rerank opt-in
+系统 SHALL 支持显式开启的 hybrid rerank，用 configured rerank provider 对 hybrid candidates 重排。
+
+#### Scenario: Hybrid rerank is opt-in
+- **WHEN** 调用 `search(query, mode="hybrid", rerank=True, limit=10)`
+- **THEN** 系统先生成 hybrid candidates
+- **AND** 调用 configured rerank provider 对 candidates 重排
+- **AND** 返回数量不超过 10
+
+#### Scenario: Existing search behavior remains default
+- **WHEN** 调用 `search(query, mode="hybrid")`
+- **THEN** 系统返回原 hybrid fused ranking
+- **AND** 不调用 rerank provider
+
+#### Scenario: Rerank only supports hybrid mode
+- **WHEN** 调用 `search(query, mode="vector", rerank=True)` 或 `search(query, mode="keyword", rerank=True)`
+- **THEN** 系统 fail fast
+- **AND** 不调用 rerank provider
+
+#### Scenario: Non-positive limit short-circuits
+- **WHEN** 调用 `search(query, mode="hybrid", rerank=True, limit=0)`
+- **THEN** 系统返回空列表
+- **AND** 不调用 rerank provider
+
+### Requirement: Hybrid rerank candidate pool
+系统 SHALL 在 hybrid rerank 开启时扩大候选池，再返回 requested limit 内的结果。
+
+#### Scenario: Candidate pool uses stable code constants
+- **WHEN** `limit` 为 K 且 `rerank=True`
+- **THEN** candidate pool size 等于 `min(max(K * 5, 20), 100)`
+- **AND** 这些数值由 knowledge-base runtime 常量定义，不新增配置项
+
+#### Scenario: Candidate pool feeds rerank provider
+- **WHEN** hybrid rerank 执行
+- **THEN** vector 和 keyword retrieval 使用 candidate pool size 生成 candidates
+- **AND** rerank provider 接收按原 hybrid ranking 排序的 candidate content
+- **AND** rerank provider 的 `top_n` 为 requested limit
+
+### Requirement: Hybrid rerank result mapping
+系统 SHALL 将 rerank provider 返回的 index + score 映射回 `KnowledgeChunk`，并保持结果稳定可解释。
+
+#### Scenario: Provider order wins for valid indexes
+- **WHEN** rerank provider 返回合法 indexes
+- **THEN** 这些 chunks 按 provider 输出顺序排在前面
+- **AND** 对应 `KnowledgeChunk.score` 使用 provider rerank score
+
+#### Scenario: Illegal or duplicate provider indexes are ignored
+- **WHEN** rerank provider 返回越界 index、负数 index 或重复 index
+- **THEN** 系统忽略非法或重复项
+- **AND** 继续处理其他有效结果
+
+#### Scenario: Missing candidates are appended in hybrid order
+- **WHEN** rerank provider 返回的有效结果少于 requested limit
+- **THEN** 未被 provider 返回的 candidates 按原 hybrid order 追加
+- **AND** 追加 chunks 保留原 hybrid score
+
+### Requirement: Hybrid rerank failure fallback
+系统 SHALL 在 rerank provider 不可用或失败时返回原 hybrid ranking，而不是让 search 失败。
+
+#### Scenario: Disabled rerank provider falls back
+- **WHEN** `rerank=True` 但 configured rerank provider disabled
+- **THEN** 系统返回原 hybrid ranking
+- **AND** 记录 structured warning
+
+#### Scenario: Rerank provider error falls back
+- **WHEN** rerank provider timeout、抛出 provider error 或返回无法使用的结果
+- **THEN** 系统返回原 hybrid ranking
+- **AND** 记录 structured warning
+
+#### Scenario: Runtime event is emitted when available
+- **WHEN** rerank fallback 发生且当前 runtime event boundary 可用
+- **THEN** 系统 SHOULD 记录 `kb_rerank_failed` event
+- **AND** 事件包含 tenant_id、kb_ids、limit、candidate_count 和 failure reason
+
+### Requirement: Reranked knowledge-base retrieval evaluation
+系统 SHALL 提供 deterministic evaluation coverage，用于验证 rerank 能改善 KB retrieval 排序。
+
+#### Scenario: Deterministic rerank promotes expected chunk
+- **WHEN** evaluation fixture 启用 deterministic rerank
+- **THEN** expected chunk 出现在 top results 中
+- **AND** 排名高于 rerank 前的干扰候选
+
+#### Scenario: Forbidden chunks are not promoted
+- **WHEN** evaluation fixture 包含 forbidden chunks
+- **THEN** reranked results 的 top result 不包含 forbidden chunk
+
+#### Scenario: Real rerank evaluation is opt-in
+- **WHEN** 未显式开启 real rerank evaluation 环境变量
+- **THEN** 不调用真实 rerank provider
+
+### Requirement: Knowledge search planner public API
+系统 SHALL 提供独立的规则型 knowledge search planner，用于解释并执行 KB retrieval 策略。
+
+#### Scenario: Planner API is importable
+- **WHEN** 调用方从 `fleetent.intelligence.knowledge_base` 导入 `KnowledgeSearchOptions`、`KnowledgeSearchPlan`、`KnowledgeSearchStep`、`plan_knowledge_search` 和 `execute_knowledge_search_plan`
+- **THEN** 导入成功
+
+#### Scenario: Planner does not change existing search API
+- **WHEN** 调用 `search(..., mode="vector")`、`search(..., mode="keyword")` 或 `search(..., mode="hybrid")`
+- **THEN** 行为保持对应底层检索语义
+- **AND** 系统不要求使用 planner
+
+#### Scenario: Planner does not use LLM
+- **WHEN** `plan_knowledge_search()` 执行
+- **THEN** 系统不调用 LLM、model router 或 query rewrite provider
+
+### Requirement: Rule-based knowledge search planning
+planner SHALL 使用 deterministic rules 生成带 reason 的 retrieval steps。
+
+#### Scenario: Default query uses hybrid
+- **WHEN** query 没有实体或关系迹象
+- **THEN** plan 包含 `hybrid_search` step
+- **AND** reason 包含 `default_hybrid`
+
+#### Scenario: Entity or relation query uses graph first
+- **WHEN** query 包含实体或关系迹象
+- **THEN** plan 包含 `graph_search` step
+- **AND** reason 包含 `entity_like_query` 或 `relation_like_query`
+
+#### Scenario: Graph plan includes hybrid fill
+- **WHEN** plan 包含 `graph_search`
+- **THEN** plan 也包含 `hybrid_fill`
+- **AND** `hybrid_fill` 用于 graph 结果不足 requested limit 时补齐
+
+#### Scenario: Rerank option affects hybrid only
+- **WHEN** `KnowledgeSearchOptions.rerank=True`
+- **THEN** plan 中 hybrid 相关 step 标记 rerank
+- **AND** graph step 不标记 rerank
+
+### Requirement: Knowledge search plan execution
+系统 SHALL 能执行 planner 输出的 steps，并返回去重后的检索结果。
+
+#### Scenario: Execute default hybrid plan
+- **WHEN** 执行只包含 `hybrid_search` 的 plan
+- **THEN** 系统调用 hybrid search
+- **AND** 透传 query、tenant_id、kb_ids 和 limit
+
+#### Scenario: Execute graph with hybrid fill
+- **WHEN** 执行包含 `graph_search` 和 `hybrid_fill` 的 plan
+- **THEN** 系统先执行 graph search
+- **AND** graph 结果不足 limit 时执行 hybrid search 补齐
+
+#### Scenario: Execution deduplicates chunks
+- **WHEN** graph 和 hybrid 返回同一 chunk
+- **THEN** 最终结果只包含一次该 chunk
+- **AND** 保留 graph evidence 或 source reason
+
+#### Scenario: Execution respects limit
+- **WHEN** plan execution 返回结果
+- **THEN** 数量不超过 plan limit
+
+### Requirement: Planner observability
+planner SHALL 输出可排查的 selected steps 和 reason 信号。
+
+#### Scenario: Planner records decision reason
+- **WHEN** `plan_knowledge_search()` 生成 plan
+- **THEN** plan 中每个 step 包含 reason
+
+#### Scenario: Executor records retrieval summary
+- **WHEN** `execute_knowledge_search_plan()` 完成
+- **THEN** 系统记录 selected steps、graph result count、hybrid fill count 和 rerank requested 状态的 structured event 或 log
+
+### Requirement: Planner evaluation
+系统 SHALL 提供 deterministic evaluation，验证 planner 对普通查询、关系查询和 rerank 查询的策略选择。
+
+#### Scenario: Ordinary query fixture chooses hybrid
+- **WHEN** evaluation 运行普通事实查询 fixture
+- **THEN** planner 选择 hybrid search
+
+#### Scenario: Relation query fixture chooses graph plus fill
+- **WHEN** evaluation 运行关系型查询 fixture
+- **THEN** planner 选择 graph search 和 hybrid fill
+
+#### Scenario: Rerank fixture only reranks hybrid
+- **WHEN** evaluation 运行 `rerank=True` fixture
+- **THEN** hybrid step 使用 rerank
+- **AND** graph step 不使用 rerank
