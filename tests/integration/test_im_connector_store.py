@@ -35,44 +35,47 @@ def test_table_has_expected_columns(db):
     } <= cols
 
 
+_OWNER = "owner1"
+
+
 def test_platform_is_unique(db):
-    ics.upsert_connector("slack")
-    ics.upsert_connector("slack")  # upsert, not a second row
+    ics.upsert_connector(_OWNER, "slack")
+    ics.upsert_connector(_OWNER, "slack")  # upsert, not a second row
     rows = ics.list_connectors()
     assert [r["platform"] for r in rows].count("slack") == 1
 
 
 def test_report_status_updates_status(db):
-    ics.upsert_connector("slack")
-    ics.report_status("slack", "connected")
-    assert ics.get_connector("slack")["status"] == "connected"
+    ics.upsert_connector(_OWNER, "slack")
+    ics.report_status(_OWNER, "slack", "connected")
+    assert ics.get_connector(_OWNER, "slack")["status"] == "connected"
 
 
 def test_report_status_with_error_sets_last_error(db):
-    ics.report_status("telegram", "error", error="network timeout")
-    row = ics.get_connector("telegram")
+    ics.report_status(_OWNER, "telegram", "error", error="network timeout")
+    row = ics.get_connector(_OWNER, "telegram")
     assert row["status"] == "error"
     assert row["last_error"] == "network timeout"
 
 
 def test_heartbeat_sets_timestamp_without_changing_status(db):
-    ics.report_status("slack", "connected")
-    ics.heartbeat("slack")
-    row = ics.get_connector("slack")
+    ics.report_status(_OWNER, "slack", "connected")
+    ics.heartbeat(_OWNER, "slack")
+    row = ics.get_connector(_OWNER, "slack")
     assert row["last_heartbeat_at"] is not None
     assert row["status"] == "connected"
 
 
 def test_set_enabled_and_allowlist_enforced(db):
-    ics.upsert_connector("slack")
-    ics.set_enabled("slack", True)
-    ics.set_allowlist_enforced("slack", True)
-    row = ics.get_connector("slack")
+    ics.upsert_connector(_OWNER, "slack")
+    ics.set_enabled(_OWNER, "slack", True)
+    ics.set_allowlist_enforced(_OWNER, "slack", True)
+    row = ics.get_connector(_OWNER, "slack")
     assert row["enabled"] == 1
     assert row["allowlist_enforced"] == 1
-    ics.set_enabled("slack", False)
-    assert ics.get_connector("slack")["enabled"] == 0
+    ics.set_enabled(_OWNER, "slack", False)
+    assert ics.get_connector(_OWNER, "slack")["enabled"] == 0
 
 
 def test_get_connector_missing_returns_none(db):
-    assert ics.get_connector("nope") is None
+    assert ics.get_connector(_OWNER, "nope") is None

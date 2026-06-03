@@ -57,25 +57,28 @@ def handle(args: argparse.Namespace) -> bool:
 
 
 def _handle_connector(args: argparse.Namespace) -> None:
+    from fleetent import user_store
     from fleetent.platform.im_gateway_management import im_connector_config, im_connector_store
+
+    owner = user_store.admin_owner_id()
 
     if args.im_connector_cmd == "list":
         connectors = im_connector_store.list_connectors()
         if not connectors:
             print("No connectors configured.")
             return
-        print(f"{'PLATFORM':<12}  {'ENABLED':<7}  {'STATUS':<14}  CONFIG")
+        print(f"{'OWNER':<14}  {'PLATFORM':<12}  {'ENABLED':<7}  {'STATUS':<14}  CONFIG")
         for row in connectors:
-            masked = im_connector_config.resolve_masked(row["platform"])
+            masked = im_connector_config.resolve_masked(row["owner_id"], row["platform"])
             config_str = ", ".join(f"{k}={v}" for k, v in masked.items()) or "(none)"
             print(
-                f"{row['platform']:<12}  {str(bool(row['enabled'])):<7}  "
+                f"{row['owner_id']:<14}  {row['platform']:<12}  {str(bool(row['enabled'])):<7}  "
                 f"{row['status']:<14}  {config_str}"
             )
         return
 
     if args.im_connector_cmd in ("enable", "disable"):
-        im_connector_store.set_enabled(args.platform, args.im_connector_cmd == "enable")
+        im_connector_store.set_enabled(owner, args.platform, args.im_connector_cmd == "enable")
         print(f"{args.platform} {args.im_connector_cmd}d")
         return
 
@@ -87,17 +90,22 @@ def _handle_connector(args: argparse.Namespace) -> None:
                 raise SystemExit(2)
             key, value = pair.split("=", 1)
             config[key] = value
-        im_connector_config.set_config(args.platform, config)
+        im_connector_config.set_config(owner, args.platform, config)
         print(f"{args.platform} config updated ({len(config)} key(s))")
         return
 
 
 def _handle_channel(args: argparse.Namespace) -> None:
+    from fleetent import user_store
     from fleetent.platform.im_gateway_management import im_channel_allowlist
+
+    owner = user_store.admin_owner_id()
 
     if args.im_channel_cmd == "allow":
         try:
-            im_channel_allowlist.add_entry(args.platform, args.scope_type, args.scope_id, args.note)
+            im_channel_allowlist.add_entry(
+                owner, args.platform, args.scope_type, args.scope_id, args.note
+            )
         except ValueError as exc:
             print(str(exc), file=sys.stderr)
             raise SystemExit(2) from exc
@@ -110,7 +118,7 @@ def _handle_channel(args: argparse.Namespace) -> None:
         return
 
     if args.im_channel_cmd == "list":
-        entries = im_channel_allowlist.list_entries(args.platform)
+        entries = im_channel_allowlist.list_entries(None, args.platform)
         if not entries:
             print("No allowlist entries.")
             return

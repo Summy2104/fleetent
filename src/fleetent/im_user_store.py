@@ -12,12 +12,14 @@ from fleetent.user_store import (
 )
 
 
-def get_or_create(platform: str, platform_user_id: str) -> User:
+def get_or_create(owner_id: str, platform: str, platform_user_id: str) -> User:
     _init_db()
     with _conn() as conn:
         row = conn.execute(
-            "SELECT user_id FROM im_users WHERE platform = ? AND platform_user_id = ?",
-            (platform, platform_user_id),
+            """SELECT user_id FROM im_users
+               WHERE owner_id = :owner_id AND platform = :platform
+                 AND platform_user_id = :puid""",
+            {"owner_id": owner_id, "platform": platform, "puid": platform_user_id},
         ).fetchone()
     if row:
         user = get_by_id(row[0])
@@ -29,9 +31,16 @@ def get_or_create(platform: str, platform_user_id: str) -> User:
         # v1.0: new IM users are allowed by default; channel admission is handled by the
         # channel allowlist (see im-channel-allowlist), not per-user approval.
         conn.execute(
-            "INSERT OR IGNORE INTO im_users"
-            " (platform, platform_user_id, user_id, allowed, created_at) VALUES (?, ?, ?, 1, ?)",
-            (platform, platform_user_id, user.id, now),
+            """INSERT OR IGNORE INTO im_users
+                   (owner_id, platform, platform_user_id, user_id, allowed, created_at)
+               VALUES (:owner_id, :platform, :puid, :uid, 1, :now)""",
+            {
+                "owner_id": owner_id,
+                "platform": platform,
+                "puid": platform_user_id,
+                "uid": user.id,
+                "now": now,
+            },
         )
     return user
 
@@ -157,17 +166,18 @@ def list_all() -> list[dict[str, Any]]:
     _init_db()
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT id, platform, platform_user_id, user_id, allowed, created_at"
+            "SELECT id, owner_id, platform, platform_user_id, user_id, allowed, created_at"
             " FROM im_users ORDER BY created_at"
         ).fetchall()
     return [
         {
             "id": r[0],
-            "platform": r[1],
-            "platform_user_id": r[2],
-            "user_id": r[3],
-            "allowed": bool(r[4]),
-            "created_at": r[5],
+            "owner_id": r[1],
+            "platform": r[2],
+            "platform_user_id": r[3],
+            "user_id": r[4],
+            "allowed": bool(r[5]),
+            "created_at": r[6],
         }
         for r in rows
     ]
@@ -186,22 +196,64 @@ def list_pending() -> list[dict[str, Any]]:
 
 
 def _init_db() -> None:
+    from fleetent import user_store
+
+    # Resolve the backfill owner before opening our own connection: admin_owner_id()
+    # opens a separate connection on the same SQLite file, which would deadlock if a
+    # write transaction were already held here.
+    admin_owner = user_store.admin_owner_id()
     with _conn() as conn:
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS im_users (
-                id               INTEGER PRIMARY KEY,
-                platform         TEXT NOT NULL,
-                platform_user_id TEXT NOT NULL,
-                user_id          TEXT NOT NULL,
-                allowed          BOOLEAN NOT NULL DEFAULT 0,
-                created_at       TEXT NOT NULL,
-                UNIQUE(platform, platform_user_id)
-            )"""
-        )
-        # Migrate: add allowed column to existing tables
+        # Migrate: add allowed column to pre-allowlist tables before any owner rebuild.
         try:
             conn.execute("ALTER TABLE im_users ADD COLUMN allowed BOOLEAN NOT NULL DEFAULT 0")
             # Existing users were already active before allowlist — grant access
             conn.execute("UPDATE im_users SET allowed = 1 WHERE allowed = 0")
         except Exception:
-            pass  # Column already exists
+            pass  # Column already exists or table absent
+        _rebuild_legacy_if_needed(conn, admin_owner)
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS im_users (
+                id               INTEGER PRIMARY KEY,
+                owner_id         TEXT NOT NULL,
+                platform         TEXT NOT NULL,
+                platform_user_id TEXT NOT NULL,
+                user_id          TEXT NOT NULL,
+                allowed          BOOLEAN NOT NULL DEFAULT 0,
+                created_at       TEXT NOT NULL,
+                UNIQUE(owner_id, platform, platform_user_id)
+            )"""
+        )
+
+
+def _rebuild_legacy_if_needed(conn: Any, owner: str) -> None:
+    """Rebuild a pre-multi-tenant `im_users` (no owner_id) in place, backfilling owner_id
+    with the built-in admin owner. Idempotent."""
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='im_users'"
+    ).fetchone()
+    if not exists:
+        return
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(im_users)")}
+    if "owner_id" in cols:
+        return
+    conn.execute("ALTER TABLE im_users RENAME TO im_users_legacy")
+    conn.execute(
+        """CREATE TABLE im_users (
+            id               INTEGER PRIMARY KEY,
+            owner_id         TEXT NOT NULL,
+            platform         TEXT NOT NULL,
+            platform_user_id TEXT NOT NULL,
+            user_id          TEXT NOT NULL,
+            allowed          BOOLEAN NOT NULL DEFAULT 0,
+            created_at       TEXT NOT NULL,
+            UNIQUE(owner_id, platform, platform_user_id)
+        )"""
+    )
+    conn.execute(
+        """INSERT INTO im_users
+               (id, owner_id, platform, platform_user_id, user_id, allowed, created_at)
+           SELECT id, :owner, platform, platform_user_id, user_id, allowed, created_at
+           FROM im_users_legacy""",
+        {"owner": owner},
+    )
+    conn.execute("DROP TABLE im_users_legacy")

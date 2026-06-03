@@ -25,6 +25,7 @@ class NormalizedMessage:
     text: str
     attachments: list[Any]
     reply_func: Callable[[str], Coroutine[Any, Any, None]]
+    owner_id: str = field(default="")
     channel_id: str = field(default="")
     workspace_id: str = field(default="")
 
@@ -66,7 +67,9 @@ async def route(msg: NormalizedMessage) -> None:
     # connector has allowlist_enforced off, this always passes (backward compatible).
     from fleetent.platform.im_gateway_management import im_channel_allowlist
 
-    if not im_channel_allowlist.is_allowed(msg.platform, msg.channel_id, msg.workspace_id or None):
+    if not im_channel_allowlist.is_allowed(
+        msg.owner_id, msg.platform, msg.channel_id, msg.workspace_id or None
+    ):
         await msg.reply_func(_REJECTION_MSG)
         return
 
@@ -79,9 +82,13 @@ async def route(msg: NormalizedMessage) -> None:
     from fleetent.skill_registry import load as load_skill
     from fleetent.skill_registry import match as match_skill
 
-    async with session_mgr.session_lock(msg.session_id):
-        history = await session_mgr.load(msg.session_id)
-        meta = await session_mgr.load_meta(msg.session_id)
+    # Namespace the session by owner so the same platform/channel under two owners never
+    # shares conversation state.
+    session_id = f"{msg.owner_id}:{msg.session_id}" if msg.owner_id else msg.session_id
+
+    async with session_mgr.session_lock(session_id):
+        history = await session_mgr.load(session_id)
+        meta = await session_mgr.load_meta(session_id)
 
         # Version lock: an existing session stays pinned to the version recorded in
         # its meta even if a newer version is later activated. A fresh session
@@ -122,6 +129,6 @@ async def route(msg: NormalizedMessage) -> None:
 
         # agent_loop.run() already appended the assistant message to history in-place.
         # Do NOT append again here — that caused duplicate messages in every session.
-        await session_mgr.save(msg.session_id, history, meta=meta)
+        await session_mgr.save(session_id, history, meta=meta)
 
     await msg.reply_func(response)

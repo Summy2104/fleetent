@@ -169,6 +169,17 @@ def get_builtin_admin() -> User | None:
     return User(*row) if row else None
 
 
+# Sentinel owner for rows backfilled before a built-in admin exists; reassigned to the
+# real admin owner on next seed.
+SYSTEM_OWNER_ID = "__system__"
+
+
+def admin_owner_id() -> str:
+    """Owner id used to attribute pre-multi-tenant IM rows: the built-in admin, else sentinel."""
+    admin = get_builtin_admin()
+    return admin.id if admin else SYSTEM_OWNER_ID
+
+
 def set_role(user_id: str, role: str) -> None:
     current = get_by_id(user_id)
     if current is not None and current.role == "built_in_admin" and role != "built_in_admin":
@@ -268,10 +279,10 @@ def _update_field(user_id: str, column: str, value: object) -> None:
         conn.execute(f"UPDATE users SET {column} = ? WHERE id = ?", (value, user_id))
 
 
-def get_or_create_im_user(platform: str, platform_user_id: str) -> "User":
+def get_or_create_im_user(owner_id: str, platform: str, platform_user_id: str) -> "User":
     from fleetent.im_user_store import get_or_create
 
-    return get_or_create(platform, platform_user_id)
+    return get_or_create(owner_id, platform, platform_user_id)
 
 
 def _conn() -> sqlite3.Connection:

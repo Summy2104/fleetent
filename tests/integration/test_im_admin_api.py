@@ -27,13 +27,17 @@ def client(tmp_path, monkeypatch):
     user_store._init_db()
     store._init_db()
     allowlist._init_db()
-    store.upsert_connector("slack", config='{"bot_token": "xoxb-secret123", "app_token": "x"}')
-    store.set_enabled("slack", True)
-    started: list[str] = []
-    stopped: list[str] = []
-    monkeypatch.setattr(api, "start_connector", lambda p: started.append(p))
-    monkeypatch.setattr(api, "stop_connector", lambda p: stopped.append(p))
+    owner = user_store.admin_owner_id()
+    store.upsert_connector(
+        owner, "slack", config='{"bot_token": "xoxb-secret123", "app_token": "x"}'
+    )
+    store.set_enabled(owner, "slack", True)
+    started: list = []
+    stopped: list = []
+    monkeypatch.setattr(api, "start_connector", lambda o, p: started.append((o, p)))
+    monkeypatch.setattr(api, "stop_connector", lambda o, p: stopped.append((o, p)))
     api._started, api._stopped = started, stopped  # type: ignore[attr-defined]
+    api._owner = owner  # type: ignore[attr-defined]
     app = FastAPI()
     app.include_router(api.router)
     return TestClient(app, raise_server_exceptions=True)
@@ -66,6 +70,17 @@ def test_list_connectors_masked(client):
     # token masked: only last 4 chars retained
     assert slack["config"]["bot_token"].endswith("t123")
     assert "xoxb-secret" not in slack["config"]["bot_token"]
+    # each row carries its owner_id
+    assert slack["owner_id"] == api._owner  # type: ignore[attr-defined]
+
+
+def test_list_connectors_admin_sees_all_owners(client):
+    # a second owner's connector must also be visible to the admin
+    store.upsert_connector("ownerZ", "telegram", config='{"bot_token": "tg"}')
+    token = _session_for("admin")
+    r = client.get("/admin/im/connectors", headers=_hdr(token))
+    owners = {c["owner_id"] for c in r.json()}
+    assert "ownerZ" in owners and api._owner in owners  # type: ignore[attr-defined]
 
 
 def test_get_connector_detail(client):
@@ -83,18 +98,19 @@ def test_patch_connector_config_and_enforce(client):
         json={"config": {"bot_token": "new-tok"}, "allowlist_enforced": True},
     )
     assert r.status_code == 200
-    assert cfg.resolve("slack")["bot_token"] == "new-tok"
-    assert store.get_connector("slack")["allowlist_enforced"] == 1
+    assert cfg.resolve(api._owner, "slack")["bot_token"] == "new-tok"  # type: ignore[attr-defined]
+    assert store.get_connector(api._owner, "slack")["allowlist_enforced"] == 1  # type: ignore[attr-defined]
 
 
 def test_enable_disable_drive_manager(client):
+    owner = api._owner  # type: ignore[attr-defined]
     token = _session_for("admin")
     assert client.post("/admin/im/connectors/slack/disable", headers=_hdr(token)).status_code == 200
-    assert store.get_connector("slack")["enabled"] == 0
-    assert api._stopped == ["slack"]  # type: ignore[attr-defined]
+    assert store.get_connector(owner, "slack")["enabled"] == 0
+    assert api._stopped == [(owner, "slack")]  # type: ignore[attr-defined]
     assert client.post("/admin/im/connectors/slack/enable", headers=_hdr(token)).status_code == 200
-    assert store.get_connector("slack")["enabled"] == 1
-    assert api._started == ["slack"]  # type: ignore[attr-defined]
+    assert store.get_connector(owner, "slack")["enabled"] == 1
+    assert api._started == [(owner, "slack")]  # type: ignore[attr-defined]
 
 
 def test_create_connector_new_platform(client):
@@ -116,7 +132,7 @@ def test_create_connector_new_platform(client):
     assert r.json()["platform"] == "whatsapp"
     # masked on read
     assert r.json()["config"]["access_token"].endswith("wxyz")
-    assert cfg.resolve("whatsapp")["access_token"] == "EAAG1234567890wxyz"
+    assert cfg.resolve(api._owner, "whatsapp")["access_token"] == "EAAG1234567890wxyz"  # type: ignore[attr-defined]
 
 
 def test_create_connector_existing_platform_updates_no_duplicate(client):
@@ -127,7 +143,7 @@ def test_create_connector_existing_platform_updates_no_duplicate(client):
         json={"platform": "slack", "config": {"bot_token": "xoxb-updated"}},
     )
     assert r.status_code == 201
-    assert cfg.resolve("slack")["bot_token"] == "xoxb-updated"
+    assert cfg.resolve(api._owner, "slack")["bot_token"] == "xoxb-updated"  # type: ignore[attr-defined]
     assert len([c for c in store.list_connectors() if c["platform"] == "slack"]) == 1
 
 
@@ -139,7 +155,7 @@ def test_create_connector_viewer_forbidden(client):
         json={"platform": "telegram", "config": {"bot_token": "t"}},
     )
     assert r.status_code == 403
-    assert store.get_connector("telegram") is None
+    assert store.get_connector(api._owner, "telegram") is None  # type: ignore[attr-defined]
 
 
 def test_create_connector_unknown_platform_rejected(client):
@@ -150,7 +166,7 @@ def test_create_connector_unknown_platform_rejected(client):
         json={"platform": "discord", "config": {"bot_token": "t"}},
     )
     assert r.status_code == 422
-    assert store.get_connector("discord") is None
+    assert store.get_connector(api._owner, "discord") is None  # type: ignore[attr-defined]
 
 
 _ADMIN_HTML = (Path(__file__).parents[2] / "src" / "fleetent" / "static" / "admin.html").read_text(

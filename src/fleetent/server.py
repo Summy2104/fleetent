@@ -138,11 +138,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # with usable config start. Wire the admin-API seams to this running manager so
     # enable/disable endpoints can drive lifecycle without importing the loop.
     loop = asyncio.get_running_loop()
-    im_admin_api.start_connector = lambda platform: asyncio.run_coroutine_threadsafe(
-        _connector_manager.start(platform), loop
+    im_admin_api.start_connector = lambda owner_id, platform: asyncio.run_coroutine_threadsafe(
+        _connector_manager.start(owner_id, platform), loop
     ).result()
-    im_admin_api.stop_connector = lambda platform: asyncio.run_coroutine_threadsafe(
-        _connector_manager.stop(platform), loop
+    im_admin_api.stop_connector = lambda owner_id, platform: asyncio.run_coroutine_threadsafe(
+        _connector_manager.stop(owner_id, platform), loop
     ).result()
     await _connector_manager.start_all_enabled()
 
@@ -157,8 +157,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    for platform in list(_connector_manager.running()):
-        await _connector_manager.stop(platform)
+    for owner_id, platform in list(_connector_manager.running()):
+        await _connector_manager.stop(owner_id, platform)
     await cron.shutdown()
     await mcp_client.close()
 

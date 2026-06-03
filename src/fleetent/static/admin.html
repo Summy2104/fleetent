@@ -224,7 +224,7 @@
         <span id="conn-create-bar"><button onclick="openConnModal()">Add connection</button></span>
       </div>
       <div class="table-scroll"><table>
-        <thead><tr><th>Platform</th><th>Status</th><th>Enabled</th><th>Credentials</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Owner</th><th>Platform</th><th>Status</th><th>Enabled</th><th>Credentials</th><th>Actions</th></tr></thead>
         <tbody id="conn-body"></tbody>
       </table></div>
     </section>
@@ -1002,6 +1002,7 @@ async function loadConn() {
     const creds = Object.entries(r.config || {}).map(([k, v]) => `${esc(k)}=${esc(v)}`).join(", ");
     return `
       <tr>
+        <td class="muted">${esc(r.owner_id || "")}</td>
         <td>${esc(r.platform)}</td>
         <td><span class="pill">${esc(r.status || "")}</span></td>
         <td><span class="pill ${r.enabled ? "active" : "blocked"}">${r.enabled ? "on" : "off"}</span></td>
@@ -1012,7 +1013,7 @@ async function loadConn() {
             : `<button class="small ghost" onclick="connEnable('${esc(r.platform)}')">Enable</button>`}
         </td>
       </tr>`;
-  }).join("") || `<tr><td colspan="5" class="muted">No connectors.</td></tr>`;
+  }).join("") || `<tr><td colspan="6" class="muted">No connectors.</td></tr>`;
 }
 
 function renderConnFields() {

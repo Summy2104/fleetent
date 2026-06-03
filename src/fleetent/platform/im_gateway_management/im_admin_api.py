@@ -27,14 +27,19 @@ _ADMIN_ROLES = {"admin", "built_in_admin"}
 # --- injectable seams (connector manager lives in the async app lifespan) -----
 
 
-def start_connector(platform: str) -> None:
-    """Ask the running connector manager to start a platform (wired in server lifespan)."""
+def start_connector(owner_id: str, platform: str) -> None:
+    """Ask the running connector manager to start an owner's platform (wired in lifespan)."""
     return None
 
 
-def stop_connector(platform: str) -> None:
-    """Ask the running connector manager to stop a platform (wired in server lifespan)."""
+def stop_connector(owner_id: str, platform: str) -> None:
+    """Ask the running connector manager to stop an owner's platform (wired in lifespan)."""
     return None
+
+
+def _default_owner() -> str:
+    """Owner scope for write/read-by-platform endpoints: the built-in admin owner."""
+    return user_store.admin_owner_id()
 
 
 # --- auth helpers -------------------------------------------------------------
@@ -70,6 +75,7 @@ class ConnectorPatch(BaseModel):
 class CreateConnectorBody(BaseModel):
     platform: Literal["telegram", "slack", "whatsapp"]
     config: dict[str, str]
+    owner_id: str | None = None
 
 
 class AllowlistBody(BaseModel):
@@ -77,6 +83,7 @@ class AllowlistBody(BaseModel):
     scope_type: str  # "channel" | "workspace"
     scope_id: str
     note: str | None = None
+    owner_id: str | None = None
 
 
 # --- connectors ---------------------------------------------------------------
@@ -84,12 +91,13 @@ class AllowlistBody(BaseModel):
 
 def _masked_view(row: dict[str, Any]) -> dict[str, Any]:
     view = dict(row)
-    view["config"] = im_connector_config.resolve_masked(row["platform"])
+    view["config"] = im_connector_config.resolve_masked(row["owner_id"], row["platform"])
     return view
 
 
 @router.get("/connectors")
 def list_connectors(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
+    """Admin scope: returns every owner's connectors, each annotated with its owner_id."""
     _require_admin(authorization)
     return [_masked_view(row) for row in im_connector_store.list_connectors()]
 
@@ -98,20 +106,24 @@ def list_connectors(authorization: str | None = Header(None)) -> list[dict[str, 
 def create_connector(
     body: CreateConnectorBody, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
-    """Create (or update) a connector for a platform from the admin console.
+    """Create (or update) a connector from the admin console.
 
-    Idempotent: the underlying upsert keys on the UNIQUE platform column, so posting an
-    existing platform updates its config rather than inserting a duplicate.
+    Idempotent: the underlying upsert keys on UNIQUE(owner_id, platform), so posting an
+    existing (owner, platform) updates its config rather than inserting a duplicate.
     """
     _require_admin(authorization)
-    im_connector_config.set_config(body.platform, body.config)
-    return _masked_view(im_connector_store.get_connector(body.platform))  # type: ignore[arg-type]
+    owner = body.owner_id or _default_owner()
+    im_connector_config.set_config(owner, body.platform, body.config)
+    return _masked_view(im_connector_store.get_connector(owner, body.platform))  # type: ignore[arg-type]
 
 
 @router.get("/connectors/{platform}")
-def get_connector(platform: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+def get_connector(
+    platform: str, owner_id: str | None = None, authorization: str | None = Header(None)
+) -> dict[str, Any]:
     _require_admin(authorization)
-    row = im_connector_store.get_connector(platform)
+    owner = owner_id or _default_owner()
+    row = im_connector_store.get_connector(owner, platform)
     if row is None:
         raise HTTPException(status_code=404, detail="connector not found")
     return _masked_view(row)
@@ -119,32 +131,42 @@ def get_connector(platform: str, authorization: str | None = Header(None)) -> di
 
 @router.patch("/connectors/{platform}")
 def patch_connector(
-    platform: str, body: ConnectorPatch, authorization: str | None = Header(None)
+    platform: str,
+    body: ConnectorPatch,
+    owner_id: str | None = None,
+    authorization: str | None = Header(None),
 ) -> dict[str, Any]:
     _require_admin(authorization)
-    if im_connector_store.get_connector(platform) is None:
+    owner = owner_id or _default_owner()
+    if im_connector_store.get_connector(owner, platform) is None:
         raise HTTPException(status_code=404, detail="connector not found")
     if body.config is not None:
-        im_connector_config.set_config(platform, body.config)
+        im_connector_config.set_config(owner, platform, body.config)
     if body.allowlist_enforced is not None:
-        im_connector_store.set_allowlist_enforced(platform, body.allowlist_enforced)
-    return _masked_view(im_connector_store.get_connector(platform))  # type: ignore[arg-type]
+        im_connector_store.set_allowlist_enforced(owner, platform, body.allowlist_enforced)
+    return _masked_view(im_connector_store.get_connector(owner, platform))  # type: ignore[arg-type]
 
 
 @router.post("/connectors/{platform}/enable")
-def enable_connector(platform: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+def enable_connector(
+    platform: str, owner_id: str | None = None, authorization: str | None = Header(None)
+) -> dict[str, Any]:
     _require_admin(authorization)
-    im_connector_store.set_enabled(platform, True)
-    start_connector(platform)
-    return {"platform": platform, "enabled": True}
+    owner = owner_id or _default_owner()
+    im_connector_store.set_enabled(owner, platform, True)
+    start_connector(owner, platform)
+    return {"owner_id": owner, "platform": platform, "enabled": True}
 
 
 @router.post("/connectors/{platform}/disable")
-def disable_connector(platform: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+def disable_connector(
+    platform: str, owner_id: str | None = None, authorization: str | None = Header(None)
+) -> dict[str, Any]:
     _require_admin(authorization)
-    im_connector_store.set_enabled(platform, False)
-    stop_connector(platform)
-    return {"platform": platform, "enabled": False}
+    owner = owner_id or _default_owner()
+    im_connector_store.set_enabled(owner, platform, False)
+    stop_connector(owner, platform)
+    return {"owner_id": owner, "platform": platform, "enabled": False}
 
 
 # --- channel allowlist --------------------------------------------------------
@@ -152,20 +174,26 @@ def disable_connector(platform: str, authorization: str | None = Header(None)) -
 
 @router.get("/allowlist")
 def list_allowlist(
-    platform: str | None = None, authorization: str | None = Header(None)
+    platform: str | None = None,
+    owner_id: str | None = None,
+    authorization: str | None = Header(None),
 ) -> list[dict[str, Any]]:
+    """Admin scope: owner_id omitted lists across all owners; platform optionally filters."""
     _require_admin(authorization)
-    return im_channel_allowlist.list_entries(platform)
+    return im_channel_allowlist.list_entries(owner_id, platform)
 
 
 @router.post("/allowlist", status_code=201)
 def add_allowlist(body: AllowlistBody, authorization: str | None = Header(None)) -> dict[str, Any]:
     _require_admin(authorization)
+    owner = body.owner_id or _default_owner()
     try:
-        im_channel_allowlist.add_entry(body.platform, body.scope_type, body.scope_id, body.note)
+        im_channel_allowlist.add_entry(
+            owner, body.platform, body.scope_type, body.scope_id, body.note
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"platform": body.platform, "scope_id": body.scope_id, "added": True}
+    return {"owner_id": owner, "platform": body.platform, "scope_id": body.scope_id, "added": True}
 
 
 @router.delete("/allowlist/{entry_id}")

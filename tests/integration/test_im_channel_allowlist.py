@@ -33,50 +33,53 @@ def test_table_columns(db):
     } <= _columns(db)
 
 
+_OWNER = "owner1"
+
+
 def test_add_entry_and_list(db):
-    acl.add_entry("slack", "channel", "C_ops", note="ops room")
-    rows = acl.list_entries("slack")
+    acl.add_entry(_OWNER, "slack", "channel", "C_ops", note="ops room")
+    rows = acl.list_entries(_OWNER, "slack")
     assert len(rows) == 1
     assert rows[0]["scope_id"] == "C_ops"
     assert rows[0]["allowed"] == 1
 
 
 def test_add_is_upsert(db):
-    acl.add_entry("slack", "channel", "C_ops")
-    acl.add_entry("slack", "channel", "C_ops", note="again")
-    assert len(acl.list_entries("slack")) == 1
+    acl.add_entry(_OWNER, "slack", "channel", "C_ops")
+    acl.add_entry(_OWNER, "slack", "channel", "C_ops", note="again")
+    assert len(acl.list_entries(_OWNER, "slack")) == 1
 
 
 def test_remove_entry(db):
-    acl.add_entry("slack", "channel", "C_ops")
-    entry_id = acl.list_entries("slack")[0]["id"]
+    acl.add_entry(_OWNER, "slack", "channel", "C_ops")
+    entry_id = acl.list_entries(_OWNER, "slack")[0]["id"]
     acl.remove_entry(entry_id)
-    assert acl.list_entries("slack") == []
+    assert acl.list_entries(_OWNER, "slack") == []
 
 
 def test_enforcement_disabled_allows_all(db):
-    ics.upsert_connector("slack", allowlist_enforced=False)
-    assert acl.is_allowed("slack", "any_channel") is True
+    ics.upsert_connector(_OWNER, "slack", allowlist_enforced=False)
+    assert acl.is_allowed(_OWNER, "slack", "any_channel") is True
 
 
 def test_enforcement_disabled_when_no_connector_row(db):
     # No connector row at all -> default allow (backward compatible)
-    assert acl.is_allowed("slack", "any_channel") is True
+    assert acl.is_allowed(_OWNER, "slack", "any_channel") is True
 
 
 def test_enforced_channel_listed_allowed(db):
-    ics.upsert_connector("slack", allowlist_enforced=True)
-    acl.add_entry("slack", "channel", "C_ops")
-    assert acl.is_allowed("slack", "C_ops") is True
+    ics.upsert_connector(_OWNER, "slack", allowlist_enforced=True)
+    acl.add_entry(_OWNER, "slack", "channel", "C_ops")
+    assert acl.is_allowed(_OWNER, "slack", "C_ops") is True
 
 
 def test_enforced_channel_not_listed_denied(db):
-    ics.upsert_connector("slack", allowlist_enforced=True)
-    assert acl.is_allowed("slack", "C_random") is False
+    ics.upsert_connector(_OWNER, "slack", allowlist_enforced=True)
+    assert acl.is_allowed(_OWNER, "slack", "C_random") is False
 
 
 def test_workspace_entry_covers_its_channels(db):
-    ics.upsert_connector("slack", allowlist_enforced=True)
-    acl.add_entry("slack", "workspace", "T_team")
-    assert acl.is_allowed("slack", "C_any", workspace_id="T_team") is True
-    assert acl.is_allowed("slack", "C_any", workspace_id="T_other") is False
+    ics.upsert_connector(_OWNER, "slack", allowlist_enforced=True)
+    acl.add_entry(_OWNER, "slack", "workspace", "T_team")
+    assert acl.is_allowed(_OWNER, "slack", "C_any", workspace_id="T_team") is True
+    assert acl.is_allowed(_OWNER, "slack", "C_any", workspace_id="T_other") is False

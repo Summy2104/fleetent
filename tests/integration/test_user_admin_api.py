@@ -186,7 +186,7 @@ def test_must_reset_gate_then_change_password(client):
 
 def test_im_users_list(client):
     token, _ = _session_for("admin")
-    im_user_store.get_or_create("slack", "U_LIST")
+    im_user_store.get_or_create("owner1", "slack", "U_LIST")
     rows = client.get("/admin/im-users", headers=_hdr(token)).json()
     assert any(r["platform_user_id"] == "U_LIST" for r in rows)
 
@@ -329,7 +329,7 @@ def test_admin_rebind_im_identity_to_user(client):
     target = client.post(
         "/admin/users", headers=_hdr(token), json={"email": "t@x.com", "name": "Target"}
     ).json()["id"]
-    u = im_user_store.get_or_create("slack", "U_BIND")
+    u = im_user_store.get_or_create("owner1", "slack", "U_BIND")
     im_id = im_user_store.list_im_identities(u.id)[0]["id"]
 
     r = client.post(f"/admin/im-users/{im_id}/bind", headers=_hdr(token), json={"user_id": target})
@@ -341,7 +341,7 @@ def test_admin_rebind_im_identity_to_user(client):
 
 def test_rebind_unknown_user_404(client):
     token, _ = _session_for("admin")
-    u = im_user_store.get_or_create("slack", "U_BIND2")
+    u = im_user_store.get_or_create("owner1", "slack", "U_BIND2")
     im_id = im_user_store.list_im_identities(u.id)[0]["id"]
     r = client.post(f"/admin/im-users/{im_id}/bind", headers=_hdr(token), json={"user_id": "ghost"})
     assert r.status_code == 404
@@ -361,7 +361,7 @@ def test_ui_im_users_has_bind_action(client):
 
 def test_im_user_block_restore(client):
     token, _ = _session_for("admin")
-    u = im_user_store.get_or_create("slack", "U1")
+    u = im_user_store.get_or_create("owner1", "slack", "U1")
     im_id = im_user_store.list_im_identities(u.id)[0]["id"]
     assert (
         client.post(

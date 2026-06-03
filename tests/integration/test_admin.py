@@ -95,15 +95,15 @@ def test_list_pending_no_users():
 
 def test_new_users_not_pending_by_default():
     # v1.0 default-allow: newly created IM users are not pending.
-    im_user_store.get_or_create("slack", "U_PEND1")
-    im_user_store.get_or_create("telegram", "12345")
+    im_user_store.get_or_create(user_store.admin_owner_id(), "slack", "U_PEND1")
+    im_user_store.get_or_create(user_store.admin_owner_id(), "telegram", "12345")
     out, _, code = run_admin("list-pending")
     assert code == 0
     assert "No pending" in out
 
 
 def test_list_pending_shows_blocked_users():
-    u = im_user_store.get_or_create("slack", "U_BLK")
+    u = im_user_store.get_or_create(user_store.admin_owner_id(), "slack", "U_BLK")
     im_id = im_user_store.list_im_identities(u.id)[0]["id"]
     im_user_store.block_user(im_id)  # allowed=0 -> appears in legacy pending list
     out, _, code = run_admin("list-pending")
@@ -112,7 +112,7 @@ def test_list_pending_shows_blocked_users():
 
 
 def test_approve_user():
-    u = im_user_store.get_or_create("slack", "U_APPROVE")
+    u = im_user_store.get_or_create(user_store.admin_owner_id(), "slack", "U_APPROVE")
     im_id = im_user_store.list_im_identities(u.id)[0]["id"]
     im_user_store.block_user(im_id)
     out, _, code = run_admin("approve-user", "--im-user-id", str(im_id))
@@ -127,7 +127,7 @@ def test_approve_user_not_found_exits_nonzero():
 
 
 def test_block_user_is_deprecated_noop():
-    u = im_user_store.get_or_create("slack", "U_BLOCK")
+    u = im_user_store.get_or_create(user_store.admin_owner_id(), "slack", "U_BLOCK")
     im_id = im_user_store.list_im_identities(u.id)[0]["id"]
     _, err, code = run_admin("block-user", "--im-user-id", str(im_id))
     assert code == 0
@@ -760,8 +760,11 @@ def test_observability_cli_invalid_time_exits_nonzero():
 
 def _seed_slack_connector():
     import fleetent.platform.im_gateway_management.im_connector_store as store
+    import fleetent.user_store as user_store
 
-    store.upsert_connector("slack", config='{"bot_token": "xoxb-secret123"}', enabled=True)
+    store.upsert_connector(
+        user_store.admin_owner_id(), "slack", config='{"bot_token": "xoxb-secret123"}', enabled=True
+    )
 
 
 def test_im_connector_list_shows_masked_config():
@@ -777,31 +780,35 @@ def test_im_connector_list_shows_masked_config():
 
 def test_im_connector_enable_disable_toggles_flag():
     import fleetent.platform.im_gateway_management.im_connector_store as store
+    import fleetent.user_store as user_store
 
+    owner = user_store.admin_owner_id()
     _seed_slack_connector()
 
     _, _, code = run_admin("im-connector", "disable", "--platform", "slack")
     assert code == 0
-    assert store.get_connector("slack")["enabled"] == 0
+    assert store.get_connector(owner, "slack")["enabled"] == 0
 
     _, _, code = run_admin("im-connector", "enable", "--platform", "slack")
     assert code == 0
-    assert store.get_connector("slack")["enabled"] == 1
+    assert store.get_connector(owner, "slack")["enabled"] == 1
 
 
 def test_im_connector_set_config_writes_config():
     import fleetent.platform.im_gateway_management.im_connector_config as cfg
+    import fleetent.user_store as user_store
 
     out, _, code = run_admin(
         "im-connector", "set-config", "--platform", "slack", "--set", "bot_token=new-tok"
     )
 
     assert code == 0
-    assert cfg.resolve("slack")["bot_token"] == "new-tok"
+    assert cfg.resolve(user_store.admin_owner_id(), "slack")["bot_token"] == "new-tok"
 
 
 def test_seed_connectors_imports_env_tokens(monkeypatch):
     import fleetent.platform.im_gateway_management.im_connector_store as store
+    import fleetent.user_store as user_store
 
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-env")
     monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-env")
@@ -810,13 +817,16 @@ def test_seed_connectors_imports_env_tokens(monkeypatch):
 
     assert code == 0
     assert "slack" in out
-    assert store.get_connector("slack")["enabled"] == 1
+    assert store.get_connector(user_store.admin_owner_id(), "slack")["enabled"] == 1
 
 
 def test_im_channel_allow_list_disallow():
     import fleetent.platform.im_gateway_management.im_connector_store as store
+    import fleetent.user_store as user_store
 
-    store.upsert_connector("slack", config='{"bot_token": "x"}', enabled=True)
+    store.upsert_connector(
+        user_store.admin_owner_id(), "slack", config='{"bot_token": "x"}', enabled=True
+    )
 
     _, _, code = run_admin(
         "im-channel", "allow", "--platform", "slack", "--scope-type", "channel", "--scope-id", "C1"
@@ -829,7 +839,7 @@ def test_im_channel_allow_list_disallow():
 
     import fleetent.platform.im_gateway_management.im_channel_allowlist as allowlist
 
-    entry_id = allowlist.list_entries("slack")[0]["id"]
+    entry_id = allowlist.list_entries(None, "slack")[0]["id"]
     _, _, code = run_admin("im-channel", "disallow", "--id", str(entry_id))
     assert code == 0
-    assert allowlist.list_entries("slack") == []
+    assert allowlist.list_entries(None, "slack") == []

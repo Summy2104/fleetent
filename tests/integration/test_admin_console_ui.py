@@ -607,3 +607,32 @@ def test_secret_fields_masked_no_prefill():
     # edit paths explicitly blank the secret before showing the form
     assert '$("pv-api-key").value = "";' in html
     assert '$("oc-client-secret").value = "";' in html
+
+
+# --- user-scoped IM connectors: owner column + owner-scoped create -----------
+
+
+def test_im_connectors_table_has_owner_column():
+    html = ADMIN_HTML
+    # the connectors table header row precedes the conn-body tbody
+    head = html.split("conn-body", 1)[0]
+    thead = head.rsplit("<thead>", 1)[1]
+    assert ">Owner<" in thead
+
+
+def test_im_connectors_render_owner_cell():
+    html = ADMIN_HTML
+    body = html.split("async function loadConn()", 1)[1].split("function renderConnFields", 1)[0]
+    # each row exposes the owner the connector belongs to (admin sees all owners)
+    assert "r.owner_id" in body
+    # colspan for the empty state must cover the new column count (6)
+    assert 'colspan="6"' in body
+
+
+def test_im_connector_create_scoped_to_caller_owner():
+    html = ADMIN_HTML
+    create = html.split("async function createConn()", 1)[1].split("async function connEnable", 1)[
+        0
+    ]
+    # create must not let the form spoof an arbitrary owner; backend defaults to caller
+    assert "owner_id" not in create

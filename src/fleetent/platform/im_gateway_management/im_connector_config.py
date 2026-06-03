@@ -36,38 +36,54 @@ def get_settings() -> Any:
     return Settings(anthropic_api_key="")
 
 
-def resolve(platform: str) -> dict[str, str]:
-    """Resolve a connector's credentials: DB config if present, else .env fallback."""
-    row = im_connector_store.get_connector(platform)
+def resolve(owner_id: str, platform: str) -> dict[str, str]:
+    """Resolve an owner's connector credentials: DB config if present, else admin-only env."""
+    row = im_connector_store.get_connector(owner_id, platform)
     if row and row["config"]:
         return cast(dict[str, str], json.loads(row["config"]))
-    return _env_fallback(platform)
+    if _is_admin_owner(owner_id):
+        return _env_fallback(platform)
+    return {}
 
 
-def resolve_masked(platform: str) -> dict[str, str]:
+def resolve_masked(owner_id: str, platform: str) -> dict[str, str]:
     """Like resolve() but with credential values masked to the last 4 characters."""
-    return {k: _mask(v) for k, v in resolve(platform).items()}
+    return {k: _mask(v) for k, v in resolve(owner_id, platform).items()}
 
 
-def set_config(platform: str, config: dict[str, str]) -> None:
+def set_config(owner_id: str, platform: str, config: dict[str, str]) -> None:
     """Persist connector config to the DB (marks the connector for reload on next start)."""
-    im_connector_store.upsert_connector(platform, config=json.dumps(config))
+    im_connector_store.upsert_connector(owner_id, platform, config=json.dumps(config))
 
 
 def seed_from_env(force: bool = False) -> list[str]:
-    """Populate connector configs from .env once. Returns platforms that got credentials."""
+    """Populate the admin owner's connector configs from .env once.
+
+    Returns platforms that got credentials. Only the built-in admin owner inherits .env.
+    """
+    from fleetent import user_store
+
+    owner_id = user_store.admin_owner_id()
     seeded: list[str] = []
     for platform in PLATFORM_CONFIG_KEYS:
-        existing = im_connector_store.get_connector(platform)
+        existing = im_connector_store.get_connector(owner_id, platform)
         if existing and existing["config"] and not force:
             continue
         cfg = _env_fallback(platform)
         if cfg:
-            im_connector_store.upsert_connector(platform, config=json.dumps(cfg), enabled=True)
+            im_connector_store.upsert_connector(
+                owner_id, platform, config=json.dumps(cfg), enabled=True
+            )
             seeded.append(platform)
         else:
-            im_connector_store.upsert_connector(platform, status="unconfigured")
+            im_connector_store.upsert_connector(owner_id, platform, status="unconfigured")
     return seeded
+
+
+def _is_admin_owner(owner_id: str) -> bool:
+    from fleetent import user_store
+
+    return owner_id == user_store.admin_owner_id()
 
 
 def _env_fallback(platform: str) -> dict[str, str]:
