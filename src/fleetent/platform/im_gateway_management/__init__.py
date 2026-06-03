@@ -28,6 +28,7 @@ from fleetent.platform.im_gateway_management.connector_config import (
 from fleetent.platform.im_gateway_management.connector_manager import ConnectorManager
 from fleetent.platform.im_gateway_management.connector_store import (
     get_connector,
+    heartbeat,
     list_connectors,
     report_status,
     set_allowlist_enforced,
@@ -36,8 +37,11 @@ from fleetent.platform.im_gateway_management.connector_store import (
 )
 from fleetent.platform.im_gateway_management.identity import (
     DB_PATH,
+    approve_user,
     block_im_user,
     check_allowed_by_user_id,
+    disable_im_accounts,
+    get_im_user,
     get_or_create,
     list_all,
     list_im_identities,
@@ -50,10 +54,14 @@ __all__ = [
     "DB_PATH",
     "ConnectorManager",
     "add_entry",
+    "approve_user",
     "block_im_user",
     "check_allowed_by_user_id",
+    "disable_im_accounts",
     "get_connector",
+    "get_im_user",
     "get_or_create",
+    "heartbeat",
     "is_allowed",
     "list_all",
     "list_connectors",

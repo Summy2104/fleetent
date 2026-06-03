@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from fleetent import auth, user_store
 from fleetent.governance import audit_log, blocklist
-from fleetent.platform.im_gateway_management import identity as im_user_store
+from fleetent.platform import im_gateway_management as im
 from fleetent.platform.user_management import api_key_store
 
 router = APIRouter(prefix="/admin")
@@ -304,7 +304,7 @@ def revoke_key(
 @router.get("/im-users")
 def list_im_users(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
     _current_user(authorization)
-    return im_user_store.list_all()
+    return im.list_all()
 
 
 @router.post("/im-users/{im_user_id}/block")
@@ -312,7 +312,7 @@ def block_im_user(
     im_user_id: int, body: ReasonBody, authorization: str | None = Header(None)
 ) -> dict[str, bool]:
     admin = _require_admin(authorization)
-    im_user_store.block_im_user(im_user_id, reason=body.reason, actor=admin.id)
+    im.block_im_user(im_user_id, reason=body.reason, actor=admin.id)
     return {"allowed": False}
 
 
@@ -321,7 +321,7 @@ def restore_im_user(
     im_user_id: int, body: ReasonBody, authorization: str | None = Header(None)
 ) -> dict[str, bool]:
     admin = _require_admin(authorization)
-    im_user_store.restore_im_user(im_user_id, reason=body.reason, actor=admin.id)
+    im.restore_im_user(im_user_id, reason=body.reason, actor=admin.id)
     return {"allowed": True}
 
 
@@ -336,7 +336,7 @@ def bind_im_user(
     """Rebind an IM identity to an existing internal user (many-to-one)."""
     admin = _require_admin(authorization)
     try:
-        im_user_store.rebind_im_identity(im_user_id, body.user_id, actor=admin.id)
+        im.rebind_im_identity(im_user_id, body.user_id, actor=admin.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"status": "bound"}

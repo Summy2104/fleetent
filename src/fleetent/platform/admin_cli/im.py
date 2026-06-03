@@ -22,9 +22,9 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
 def handle(args: argparse.Namespace) -> bool:
     """Handle IM user commands."""
     if args.cmd == "list-pending":
-        from fleetent.platform.im_gateway_management import identity as ius
+        from fleetent.platform import im_gateway_management as im
 
-        pending = ius.list_pending()
+        pending = im.list_pending()
         if not pending:
             print("No pending users.")
             return True
@@ -38,18 +38,12 @@ def handle(args: argparse.Namespace) -> bool:
         return True
 
     if args.cmd == "approve-user":
-        from fleetent.platform.im_gateway_management import identity as ius
-        from fleetent.user_store import _conn as conn_fn
+        from fleetent.platform import im_gateway_management as im
 
-        ius._init_db()
-        with conn_fn() as conn:
-            row = conn.execute(
-                "SELECT id FROM im_users WHERE id = ?", (args.im_user_id,)
-            ).fetchone()
-        if not row:
+        if im.get_im_user(args.im_user_id) is None:
             print(f"Error: IM user {args.im_user_id} not found.", file=sys.stderr)
             sys.exit(1)
-        ius.approve_user(args.im_user_id)
+        im.approve_user(args.im_user_id)
         print(f"IM user {args.im_user_id} approved.")
         return True
 

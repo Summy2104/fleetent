@@ -22,6 +22,27 @@ _LEGACY_SHIMS = {
     "fleetent.platform.im_gateway_management.im_admin_api",
 }
 
+# Canonical internal submodules. Peer modules MUST reach the IM module through its
+# package public API (`fleetent.platform.im_gateway_management`), never these files.
+_PKG = "fleetent.platform.im_gateway_management"
+_CANONICAL_SUBMODULES = {
+    f"{_PKG}.identity",
+    f"{_PKG}.connector_store",
+    f"{_PKG}.connector_config",
+    f"{_PKG}.connector_manager",
+    f"{_PKG}.channel_allowlist",
+    f"{_PKG}.admin_api",
+}
+
+# server.py is the FastAPI composition root: it registers every module's router and owns
+# the connector lifecycle injection seam (`admin_api.start_connector`). Host wiring, not a
+# peer caller, so it is allowed to bind the submodules directly.
+_COMPOSITION_ROOT = {_SRC / "server.py"}
+
+# Legacy re-export-only shims live outside the package; they exist precisely to forward to
+# the canonical submodule, so they are exempt from the public-API rule.
+_SHIM_FILES = {_SRC / "im_user_store.py"}
+
 
 def _imported_modules(tree: ast.AST) -> set[str]:
     found: set[str] = set()
@@ -46,3 +67,23 @@ def test_no_first_party_src_imports_legacy_im_shims():
         if hits:
             offenders.append(f"{path.relative_to(_SRC)}: {sorted(hits)}")
     assert not offenders, "legacy IM shim imports outside the IM module:\n" + "\n".join(offenders)
+
+
+def test_peer_modules_use_im_public_api_not_internal_submodules():
+    offenders: list[str] = []
+    for path in _SRC.rglob("*.py"):
+        if (
+            _IM_PKG in path.parents
+            or path == _IM_PKG
+            or path in _COMPOSITION_ROOT
+            or path in _SHIM_FILES
+        ):
+            continue
+        tree = ast.parse(path.read_text(), filename=str(path))
+        hits = _imported_modules(tree) & _CANONICAL_SUBMODULES
+        if hits:
+            offenders.append(f"{path.relative_to(_SRC)}: {sorted(hits)}")
+    assert not offenders, (
+        "peer modules must call the IM package public API, not internal submodules:\n"
+        + "\n".join(offenders)
+    )

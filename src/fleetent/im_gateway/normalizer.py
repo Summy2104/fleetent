@@ -9,7 +9,7 @@ import structlog
 
 from fleetent import agent_store
 from fleetent.agent_store import Agent
-from fleetent.platform.im_gateway_management import identity as im_user_store
+from fleetent.platform import im_gateway_management as im
 
 logger = structlog.get_logger(__name__)
 
@@ -66,16 +66,12 @@ async def route(msg: NormalizedMessage) -> None:
 
     # Channel allowlist gate — checked before any user-level check. When the platform's
     # connector has allowlist_enforced off, this always passes (backward compatible).
-    from fleetent.platform.im_gateway_management import channel_allowlist
-
-    if not channel_allowlist.is_allowed(
-        msg.owner_id, msg.platform, msg.channel_id, msg.workspace_id or None
-    ):
+    if not im.is_allowed(msg.owner_id, msg.platform, msg.channel_id, msg.workspace_id or None):
         await msg.reply_func(_REJECTION_MSG)
         return
 
     # Allowlist check — IM users must be approved before interacting
-    if not im_user_store.check_allowed_by_user_id(msg.user_id):
+    if not im.check_allowed_by_user_id(msg.user_id):
         await msg.reply_func(_REJECTION_MSG)
         return
 

@@ -73,6 +73,35 @@ def block_user(im_user_id: int) -> None:
         conn.execute("UPDATE im_users SET allowed = 0 WHERE id = ?", (im_user_id,))
 
 
+def get_im_user(im_user_id: int) -> dict[str, Any] | None:
+    """Fetch one IM identity by its im_users.id, or None if it does not exist."""
+    _init_db()
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT id, owner_id, platform, platform_user_id, user_id, allowed, created_at"
+            " FROM im_users WHERE id = ?",
+            (im_user_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row[0],
+        "owner_id": row[1],
+        "platform": row[2],
+        "platform_user_id": row[3],
+        "user_id": row[4],
+        "allowed": bool(row[5]),
+        "created_at": row[6],
+    }
+
+
+def disable_im_accounts(user_id: str) -> None:
+    """Disallow every IM identity bound to an internal user (used by governance block)."""
+    _init_db()
+    with _conn() as conn:
+        conn.execute("UPDATE im_users SET allowed = 0 WHERE user_id = ?", (user_id,))
+
+
 def block_im_user(
     im_user_id: int,
     reason: str | None = None,

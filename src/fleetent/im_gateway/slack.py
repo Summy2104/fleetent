@@ -4,7 +4,7 @@ import asyncio
 
 import structlog
 
-from fleetent.platform.im_gateway_management import connector_config, connector_store
+from fleetent.platform import im_gateway_management as im
 
 logger = structlog.get_logger(__name__)
 
@@ -32,10 +32,9 @@ def create_app(owner_id: str, config: dict[str, str]) -> object:
     @app.event("message")
     async def handle_message(event: dict[str, str | None], say: object) -> None:
         from fleetent.im_gateway.normalizer import NormalizedMessage, route
-        from fleetent.platform.im_gateway_management.identity import get_or_create
 
         slack_user_id = event.get("user") or "unknown"
-        user = get_or_create(owner_id, "slack", slack_user_id)
+        user = im.get_or_create(owner_id, "slack", slack_user_id)
         thread_ts = event.get("thread_ts")
         channel_type = event.get("channel_type") or "channel"
 
@@ -76,23 +75,23 @@ async def _run_socket_mode(app: object, app_token: str) -> None:
 async def _heartbeat_loop(owner_id: str) -> None:
     while True:
         await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
-        connector_store.heartbeat(owner_id, "slack")
+        im.heartbeat(owner_id, "slack")
 
 
 async def run(owner_id: str, config: dict[str, str] | None = None) -> None:
     """Run the Slack adapter, reporting status to the registry until cancelled."""
     if config is None:
-        config = connector_config.resolve(owner_id, "slack")
+        config = im.resolve(owner_id, "slack")
     app = create_app(owner_id, config)
     heartbeat = asyncio.create_task(_heartbeat_loop(owner_id))
     try:
-        connector_store.report_status(owner_id, "slack", "connected")
+        im.report_status(owner_id, "slack", "connected")
         await _run_socket_mode(app, config.get("app_token", ""))
     except asyncio.CancelledError:
-        connector_store.report_status(owner_id, "slack", "stopped")
+        im.report_status(owner_id, "slack", "stopped")
         raise
     except Exception as exc:
-        connector_store.report_status(owner_id, "slack", "error", error=str(exc))
+        im.report_status(owner_id, "slack", "error", error=str(exc))
         raise
     finally:
         heartbeat.cancel()

@@ -4,7 +4,6 @@ import fleetent.platform.im_gateway_management.channel_allowlist as acl
 import fleetent.platform.im_gateway_management.connector_store as ics
 import fleetent.user_store as user_store
 from fleetent.im_gateway import normalizer
-from fleetent.platform.im_gateway_management import identity as im_user_store
 
 
 @pytest.fixture
@@ -44,7 +43,7 @@ async def test_disallowed_channel_rejected_before_user_check(db, monkeypatch):
         called["user_check"] = True
         return True
 
-    monkeypatch.setattr(im_user_store, "check_allowed_by_user_id", spy)
+    monkeypatch.setattr(normalizer.im, "check_allowed_by_user_id", spy)
     replies = []
     await normalizer.route(_msg(replies))
     assert called["user_check"] is False  # returned before user-level check
@@ -60,7 +59,7 @@ async def test_allowed_channel_proceeds_to_user_check(db, monkeypatch):
         called["user_check"] = True
         return False  # stop here so we don't enter the agent loop
 
-    monkeypatch.setattr(im_user_store, "check_allowed_by_user_id", spy)
+    monkeypatch.setattr(normalizer.im, "check_allowed_by_user_id", spy)
     replies = []
     await normalizer.route(_msg(replies))
     assert called["user_check"] is True  # passed the channel gate
@@ -74,7 +73,7 @@ async def test_not_enforced_passes_channel_gate(db, monkeypatch):
         called["user_check"] = True
         return False
 
-    monkeypatch.setattr(im_user_store, "check_allowed_by_user_id", spy)
+    monkeypatch.setattr(normalizer.im, "check_allowed_by_user_id", spy)
     replies = []
     await normalizer.route(_msg(replies, channel_id="C_whatever"))
     assert called["user_check"] is True
@@ -89,7 +88,7 @@ async def test_workspace_allow_covers_channel(db, monkeypatch):
         called["user_check"] = True
         return False
 
-    monkeypatch.setattr(im_user_store, "check_allowed_by_user_id", spy)
+    monkeypatch.setattr(normalizer.im, "check_allowed_by_user_id", spy)
     replies = []
     await normalizer.route(_msg(replies, channel_id="C_any", workspace_id="T_team"))
     assert called["user_check"] is True
