@@ -391,6 +391,40 @@ def test_agents_crud_row_actions_admin_gated():
     assert "agDelete(" in body
 
 
+def test_agents_row_actions_in_overflow_menu():
+    html = ADMIN_HTML
+    body = html.split("function renderAgents()", 1)[1].split("function agShowTemplates", 1)[0]
+    # actions collapsed into a … overflow menu (reuses shared .menu / toggleMenu pattern)
+    assert 'class="menu"' in body
+    assert "toggleMenu(" in body
+    assert "menu-items" in body
+    # all existing actions still reachable from the menu
+    for fn in (
+        "agObservability(",
+        "agVersions(",
+        "agEdit(",
+        "agOpenBind(",
+        "agOpenClone(",
+        "agArchive(",
+        "agDelete(",
+    ):
+        assert fn in body, fn
+    # admin-only items still gated
+    assert "IS_VIEWER" in body
+
+
+def test_agents_deploy_action_present():
+    html = ADMIN_HTML
+    body = html.split("function renderAgents()", 1)[1].split("function agShowTemplates", 1)[0]
+    # Deploy menu item
+    assert "agDeploy(" in body
+    # deploy dialog + handler posting the channel-binding endpoint
+    assert 'id="ag-deploy-modal"' in html
+    assert "function agDeploy" in html
+    deploy = html.split("function agDeploy", 1)[1].split("LOADERS.agents", 1)[0]
+    assert "/bindings/channels/" in deploy
+
+
 # --- 5. Statistics module -----------------------------------------------------
 
 

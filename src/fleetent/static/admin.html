@@ -663,6 +663,21 @@
     </div>
   </div>
 
+  <div id="ag-deploy-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3 id="ag-deploy-title">Deploy agent</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="agDoDeploy(); return false;">
+        <input id="ag-deploy-platform" placeholder="platform (e.g. slack, telegram)" autocomplete="off">
+        <input id="ag-deploy-channel" placeholder="channel_id" autocomplete="off">
+        <div id="ag-deploy-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="agCloseDeploy()">Cancel</button>
+          <button type="submit">Deploy</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div id="mon-rule-modal" class="modal hidden">
     <div class="modal-box" role="dialog" aria-modal="true">
       <h3>New alert rule</h3>
@@ -1369,19 +1384,25 @@ function renderAgents() {
         <td class="muted">${esc(a.provenance || "")}</td>
         <td>${a.drift ? `<span class="pill blocked">drift</span>` : "—"}</td>
         <td class="actions">
-          <button class="small ghost" onclick="agObservability('${esc(name)}')">Stats</button>
-          <button class="small ghost" onclick="agVersions('${esc(name)}')">Versions</button>
-          ${IS_VIEWER ? "" : `
-          <button class="small ghost" onclick="agEdit('${esc(name)}')">Edit</button>
-          <button class="small ghost" onclick="agOpenBind('${esc(name)}')">Bindings</button>
-          <button class="small ghost" onclick="agOpenClone('${esc(name)}')">Clone</button>
-          ${a.status === "enabled"
-            ? `<button class="small danger" onclick="agDisable('${esc(name)}')">Disable</button>`
-            : `<button class="small ghost" onclick="agEnable('${esc(name)}')">Enable</button>`}
-          ${archived
-            ? `<button class="small ghost" onclick="agRestore('${esc(name)}')">Restore</button>`
-            : `<button class="small danger" onclick="agArchive('${esc(name)}')">Archive</button>`}
-          <button class="small danger" onclick="agDelete('${esc(name)}')">Delete</button>`}
+          <div class="menu">
+            <button class="small ghost" title="More actions" onclick="toggleMenu(this)">…</button>
+            <div class="menu-items hidden">
+              <button onclick="agObservability('${esc(name)}')">Stats</button>
+              <button onclick="agVersions('${esc(name)}')">Versions</button>
+              ${IS_VIEWER ? "" : `
+              <button onclick="agEdit('${esc(name)}')">Edit</button>
+              <button onclick="agOpenBind('${esc(name)}')">Bindings</button>
+              <button onclick="agDeploy('${esc(name)}')">Deploy</button>
+              <button onclick="agOpenClone('${esc(name)}')">Clone</button>
+              ${a.status === "enabled"
+                ? `<button class="danger" onclick="agDisable('${esc(name)}')">Disable</button>`
+                : `<button onclick="agEnable('${esc(name)}')">Enable</button>`}
+              ${archived
+                ? `<button onclick="agRestore('${esc(name)}')">Restore</button>`
+                : `<button class="danger" onclick="agArchive('${esc(name)}')">Archive</button>`}
+              <button class="danger" onclick="agDelete('${esc(name)}')">Delete</button>`}
+            </div>
+          </div>
         </td>
       </tr>`;
   }).join("") || `<tr><td colspan="5" class="muted">No agents.</td></tr>`;
@@ -1607,6 +1628,26 @@ async function agUnbindChannel() {
   const pf = $("ag-bind-platform").value.trim(), ch = $("ag-bind-channel").value.trim(); if (!pf || !ch) return;
   try { await api("DELETE", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); $("ag-bind-err").textContent = "channel unbound"; }
   catch (e) { $("ag-bind-err").textContent = e.message; }
+}
+
+let AG_DEPLOY_NAME = null;
+function agDeploy(name) {
+  AG_DEPLOY_NAME = name;
+  $("ag-deploy-title").textContent = "Deploy agent: " + name;
+  $("ag-deploy-err").textContent = "";
+  $("ag-deploy-platform").value = "";
+  $("ag-deploy-channel").value = "";
+  $("ag-deploy-modal").classList.remove("hidden");
+}
+function agCloseDeploy() { $("ag-deploy-modal").classList.add("hidden"); }
+async function agDoDeploy() {
+  const pf = $("ag-deploy-platform").value.trim(), ch = $("ag-deploy-channel").value.trim();
+  if (!pf || !ch) { $("ag-deploy-err").textContent = "platform and channel_id required"; return; }
+  try {
+    await api("POST", `/agents/${encodeURIComponent(AG_DEPLOY_NAME)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`);
+    agCloseDeploy();
+    toast(`Deployed ${AG_DEPLOY_NAME} to ${pf}:${ch}`, "ok");
+  } catch (e) { $("ag-deploy-err").textContent = e.message; }
 }
 
 LOADERS.agents = () => loadAgents();
