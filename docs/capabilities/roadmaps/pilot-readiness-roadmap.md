@@ -65,6 +65,19 @@ uv run python scripts/generate_pilot_verification_report.py
 - 按 [pilot-install-checklist.md](../../deployment/pilot-install-checklist.md) 完成一次准生产安装、升级、备份、恢复和诊断包导出演练。
 - 按 [pilot-acceptance-guide.md](../../deployment/pilot-acceptance-guide.md) 完成 Go / Conditional Go / No-Go 判定。
 
+## 合理内测平衡点
+
+以下 OpenSpec changes 用于把当前 Pilot 能力推进到“可控内测 / Pilot 交付”标准，同时避免一开始引入完整
+dashboard、scheduler / worker 或复杂权限系统：
+
+| Change | 目的 |
+| --- | --- |
+| `production-config-validation` | 启动 / 验收前校验配置、credential_ref、目录权限、明文 secret 和 profile 规则。 |
+| `diagnostics-redaction-export-hardening` | 强化诊断包 manifest、redaction 和 forbidden artifact 边界。 |
+| `pilot-verification-gate` | 固化内测前验证门禁、报告格式和 Go / Conditional Go / No-Go 规则。 |
+| `kb-connector-smoke-status` | 固化 KB connector check / dry-run / execute sync / latest status 证据和真实 smoke opt-in 规则。 |
+| `manual-maintenance-entrypoints` | 在不做 scheduler / UI 的前提下提供 dry-run first、可审计的手动维护入口。 |
+
 ## Pilot 问题分类
 
 | 分类 | 含义 | 处理 |
