@@ -272,6 +272,25 @@ def test_agent_templates_edit_modal_and_fields_present():
         assert f'id="{field_id}"' in html, field_id
 
 
+def test_resource_id_inputs_are_readonly():
+    html = ADMIN_HTML
+    import re
+
+    for input_id in ("tmpl-id", "nkb-id", "pv-id", "oc-id"):
+        m = re.search(rf'<input[^>]*id="{input_id}"[^>]*>', html)
+        assert m, input_id
+        assert "readonly" in m.group(0), input_id
+
+
+def test_genid_helper_and_create_uses_it():
+    html = ADMIN_HTML
+    assert "function genId" in html
+    # template/provider/connector create forms fill the id with a generated value
+    assert "genId()" in html
+    # not fewer than the create forms that open with a generated id
+    assert html.count("genId()") >= 3
+
+
 def test_agent_templates_crud_functions_present():
     html = ADMIN_HTML
     for fn in (

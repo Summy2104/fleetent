@@ -220,7 +220,7 @@
       <div class="page-header"><h2 class="ph-title">Knowledge Base</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.kb?.()">Refresh</button></div></div>
       <div class="card" id="kb-create-card">
         <div class="row">
-          <input id="nkb-id" placeholder="kb_id">
+          <input id="nkb-id" placeholder="auto-generated" readonly>
           <input id="nkb-desc" placeholder="description">
           <button onclick="createKb()">Create KB</button>
         </div>
@@ -568,7 +568,7 @@
     <div class="modal-box" role="dialog" aria-modal="true">
       <h3 id="pv-modal-title">Add provider</h3>
       <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="pvSave(); return false;">
-        <input id="pv-id" placeholder="provider id (e.g. openai-main)" autocomplete="off">
+        <input id="pv-id" placeholder="auto-generated" autocomplete="off" readonly>
         <input id="pv-base-url" placeholder="base_url (OpenAI-compatible)" autocomplete="off">
         <input id="pv-model" placeholder="model" autocomplete="off">
         <input id="pv-api-key" type="password" placeholder="api_key (leave blank to keep current)" autocomplete="off">
@@ -623,7 +623,7 @@
     <div class="modal-box" role="dialog" aria-modal="true">
       <h3 id="tmpl-modal-title">New template</h3>
       <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="tmplSave(); return false;">
-        <input id="tmpl-id" placeholder="template id (unique, e.g. triage)" autocomplete="off">
+        <input id="tmpl-id" placeholder="auto-generated" autocomplete="off" readonly>
         <input id="tmpl-display-name" placeholder="display name" autocomplete="off">
         <input id="tmpl-allowed-tools" placeholder="allowed_tools (comma-separated, e.g. read_*, github__*)" autocomplete="off">
         <textarea id="tmpl-system-prompt" placeholder="system prompt" rows="8" style="font-family:monospace;"></textarea>
@@ -690,7 +690,7 @@
     <div class="modal-box" role="dialog" aria-modal="true">
       <h3 id="oc-modal-title">Add OAuth connector</h3>
       <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="ocSave(); return false;">
-        <input id="oc-id" placeholder="connector id" autocomplete="off">
+        <input id="oc-id" placeholder="auto-generated" autocomplete="off" readonly>
         <input id="oc-name" placeholder="display name" autocomplete="off">
         <input id="oc-auth-url" placeholder="authorization_url" autocomplete="off">
         <input id="oc-token-url" placeholder="token_url" autocomplete="off">
@@ -868,6 +868,16 @@ function restoreTab() {
 
 function show(view) {
   for (const v of ["login-view", "reset-view", "app-view"]) $(v).classList.toggle("hidden", v !== view);
+}
+
+// Resource ids are system-generated, not user-authored: a random short hex id.
+function genId() {
+  if (window.crypto && crypto.getRandomValues) {
+    const a = new Uint8Array(4);
+    crypto.getRandomValues(a);
+    return [...a].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  return Math.random().toString(16).slice(2, 10);
 }
 
 const TAB_GROUP = {
@@ -1408,8 +1418,7 @@ function tmplRender() {
 function tmplCreate() {
   $("tmpl-modal-title").textContent = "New template";
   $("tmpl-err").textContent = "";
-  $("tmpl-id").value = "";
-  $("tmpl-id").disabled = false;
+  $("tmpl-id").value = genId();
   $("tmpl-display-name").value = "";
   $("tmpl-allowed-tools").value = "";
   $("tmpl-system-prompt").value = "";
@@ -1636,7 +1645,7 @@ function pvOpenCreate() {
   $("pv-modal-title").textContent = "Add provider";
   $("pv-err").textContent = "";
   for (const id of ["pv-id", "pv-base-url", "pv-model", "pv-api-key", "pv-max-tokens", "pv-temperature"]) $(id).value = "";
-  $("pv-id").disabled = false;
+  $("pv-id").value = genId();
   $("pv-modal").classList.remove("hidden");
 }
 async function pvOpenEdit(id) {
@@ -2020,7 +2029,7 @@ function ocOpenCreate() {
   $("oc-modal-title").textContent = "Add OAuth connector";
   $("oc-err").textContent = "";
   for (const id of ["oc-id", "oc-name", "oc-auth-url", "oc-token-url", "oc-client-id", "oc-client-secret", "oc-scopes"]) $(id).value = "";
-  $("oc-id").disabled = false; $("oc-enabled").checked = true;
+  $("oc-id").value = genId(); $("oc-enabled").checked = true;
   $("oc-modal").classList.remove("hidden");
 }
 async function ocOpenEdit(id) {
@@ -2125,6 +2134,7 @@ async function mcpReconnect(id) {
 LOADERS.oauth = () => { ocConnectors(); ocGrants(); mcpServers(); };
 
 async function loadKb() {
+  if (!$("nkb-id").value) $("nkb-id").value = genId();
   const kbs = await api("GET", "/kb");
   $("kb-body").innerHTML = kbs.map(k => `
     <tr>
@@ -2142,7 +2152,8 @@ async function createKb() {
   $("kb-err").textContent = "";
   try {
     await api("POST", "/kb", { kb_id: $("nkb-id").value, description: $("nkb-desc").value });
-    $("nkb-id").value = $("nkb-desc").value = "";
+    $("nkb-desc").value = "";
+    $("nkb-id").value = genId();
     loadKb();
   } catch (e) { $("kb-err").textContent = e.message; }
 }
