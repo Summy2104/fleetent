@@ -36,3 +36,6 @@ config/mcp.yaml
 
 .coverage
 
+# Claude Code runtime locks
+.claude/*.lock
+
