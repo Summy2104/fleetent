@@ -191,7 +191,7 @@ async def apply_shared_memory_proposal(proposal_id: str, *, actor_id: str) -> Sh
         source="reflection_proposal",
         source_ref=proposal.id,
     )
-    await reflection.apply_memory_maintenance_proposal(proposal.id, actor_user_id=actor_id)
+    reflection.mark_shared_memory_proposal_applied(proposal.id)
     return item
 
 

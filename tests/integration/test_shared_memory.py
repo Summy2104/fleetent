@@ -64,6 +64,52 @@ async def test_approved_shared_memory_proposal_apply_creates_item(monkeypatch, t
     assert row == ("applied",)
 
 
+async def test_shared_memory_proposal_apply_allows_non_owner_admin_actor(monkeypatch, tmp_path):
+    db_path = _patch_db(monkeypatch, tmp_path)
+    from fleetent.intelligence import memory, reflection
+    from fleetent.intelligence.memory import shared
+
+    upserts: list[tuple[str, str, str]] = []
+
+    async def upsert(id: str, text: str, namespace: str) -> None:
+        upserts.append((id, text, namespace))
+
+    monkeypatch.setattr(shared.vector_store, "upsert", upsert)
+
+    proposal = reflection.create_memory_maintenance_proposal(
+        user_id="memory-owner",
+        action="suggest_shared_memory_or_kb",
+        target_memory_ids=[],
+        proposed_content="Tenant support uses the enterprise escalation playbook.",
+        risk="medium",
+        reason="Shared tenant procedure is not user memory.",
+        evidence_ids=["trace-1", "trace-2"],
+        metadata_patch={
+            "target": "shared_memory",
+            "scope_type": "tenant",
+            "scope_id": "acme",
+            "type": "procedure",
+        },
+    )
+    reflection.approve_memory_maintenance_proposal(proposal.id, actor_user_id="memory-owner")
+
+    item = await memory.apply_shared_memory_proposal(proposal.id, actor_id="tenant-admin")
+
+    assert item.created_by == "tenant-admin"
+    assert upserts == [(item.id, item.content, "shared:tenant:acme")]
+    with sqlite3.connect(db_path) as conn:
+        proposal_row = conn.execute(
+            "SELECT status FROM memory_maintenance_proposals WHERE id = ?",
+            (proposal.id,),
+        ).fetchone()
+        shared_rows = conn.execute(
+            "SELECT id, source_ref FROM shared_memory_items WHERE source_ref = ?",
+            (proposal.id,),
+        ).fetchall()
+    assert proposal_row == ("applied",)
+    assert shared_rows == [(item.id, proposal.id)]
+
+
 @pytest.mark.parametrize(
     "metadata_patch",
     [

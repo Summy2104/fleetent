@@ -452,6 +452,11 @@ reflection SHALL provide an on-demand trend summary over existing reflection rep
 - **WHEN** memory maintenance and skill proposals exist
 - **THEN** the summary returns per-bucket counts by proposal status, risk, and type/action
 
+#### Scenario: Skill proposal trends are global-only
+- **WHEN** a trend summary runs with scope other than `global` or `*`
+- **THEN** skill proposal counts are not included
+- **AND** `global` or `*` scope can aggregate skill proposal counts
+
 #### Scenario: Trend summary is non-mutating
 - **WHEN** trend summary runs
 - **THEN** it does not create proposals

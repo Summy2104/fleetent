@@ -21,8 +21,28 @@ _RELATION_MARKERS = (
     " uses ",
     " upstream",
     " downstream",
+    "依赖",
+    "属于",
+    "拥有",
+    "定义",
+    "冲突",
+    "关联",
+    "连接",
+    "上游",
+    "下游",
 )
-_ENTITY_HINTS = ("service", "system", "api", "database", "warehouse")
+_ENTITY_HINTS = (
+    "service",
+    "system",
+    "api",
+    "database",
+    "warehouse",
+    "服务",
+    "系统",
+    "客户",
+    "项目",
+    "数据库",
+)
 _logger = get_logger("knowledge_base")
 
 

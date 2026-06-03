@@ -130,5 +130,16 @@ def test_reflection_trend_summary_fixture_covers_direction_and_redaction(monkeyp
     assert memory_candidate_counts == payload["expected"]["memory_candidate_counts"]
     assert missing_knowledge_counts[-1] > missing_knowledge_counts[0]
     assert memory_candidate_counts[-1] < memory_candidate_counts[0]
-    assert summary.buckets[-1].proposal_status_counts["pending"] == 2
+    assert "pending" not in summary.buckets[-1].proposal_status_counts
     assert payload["forbidden_transcript"] not in repr(summary)
+
+    global_skill_summary = reflection.get_reflection_trend_summary(
+        reflection.ReflectionTrendQuery(
+            scope="global",
+            start_ts=datetime.fromisoformat(payload["query"]["start_ts"]),
+            end_ts=datetime.fromisoformat(payload["query"]["end_ts"]),
+            bucket="week",
+            domains=("skill",),
+        )
+    )
+    assert global_skill_summary.buckets[-1].proposal_status_counts["pending"] == 2

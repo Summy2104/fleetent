@@ -108,7 +108,7 @@ def test_reflection_trend_summary_buckets_report_findings(monkeypatch, tmp_path)
     assert forbidden_transcript not in repr(summary)
 
 
-def test_reflection_trend_summary_buckets_proposal_lifecycle(monkeypatch, tmp_path):
+def test_reflection_trend_summary_buckets_scoped_memory_proposal_lifecycle(monkeypatch, tmp_path):
     from fleetent.intelligence.reflection import (
         ReflectionTrendQuery,
         get_reflection_trend_summary,
@@ -207,13 +207,31 @@ def test_reflection_trend_summary_buckets_proposal_lifecycle(monkeypatch, tmp_pa
 
     assert bucket.proposal_status_counts == {
         "applied": 1,
-        "pending": 1,
         "rejected": 1,
     }
-    assert bucket.proposal_risk_counts == {"high": 1, "low": 1, "medium": 1}
+    assert bucket.proposal_risk_counts == {"high": 1, "medium": 1}
     assert bucket.proposal_action_counts == {"delete": 1, "rewrite": 1}
-    assert bucket.proposal_type_counts == {"update_skill": 1}
+    assert bucket.proposal_type_counts == {}
     assert bucket.applied_count == 1
     assert bucket.rejected_count == 1
-    assert bucket.applied_ratio == 1 / 3
-    assert bucket.rejected_ratio == 1 / 3
+    assert bucket.applied_ratio == 1 / 2
+    assert bucket.rejected_ratio == 1 / 2
+
+    [global_bucket] = get_reflection_trend_summary(
+        ReflectionTrendQuery(
+            scope="global",
+            start_ts=datetime(2026, 1, 1, tzinfo=UTC),
+            end_ts=datetime(2026, 1, 2, tzinfo=UTC),
+            bucket="day",
+            domains=("skill",),
+        )
+    ).buckets
+
+    assert global_bucket.proposal_status_counts == {"pending": 1}
+    assert global_bucket.proposal_risk_counts == {"low": 1}
+    assert global_bucket.proposal_action_counts == {}
+    assert global_bucket.proposal_type_counts == {"update_skill": 1}
+    assert global_bucket.applied_count == 0
+    assert global_bucket.rejected_count == 0
+    assert global_bucket.applied_ratio == 0
+    assert global_bucket.rejected_ratio == 0

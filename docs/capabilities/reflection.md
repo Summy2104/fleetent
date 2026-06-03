@@ -197,6 +197,8 @@ def get_reflection_trend_summary(query: ReflectionTrendQuery) -> ReflectionTrend
 - 支持从 `reflection_reports`、`kb_reflection_reports`、`memory_maintenance_proposals`、
   `skill_proposals` 读取聚合趋势；只输出 finding type、proposal status/risk/type/action 计数和
   applied/rejected ratio，不暴露 summary、recommendation、evidence payload 或 transcript
+- `skill_proposals` 当前没有 agent / tenant scope；trend summary 只在 `scope="global"` 或
+  `scope="*"` 时聚合 Skill proposal，避免把全局 proposal 误计入某个租户或用户
 - 支持 `suggest_shared_memory_or_kb`，用于团队共识 / 项目惯例 / 客户背景等不属于 User Memory 的内容
 - 保存 report 时不保存完整 trace transcript
 - deterministic evaluation fixture / runner 覆盖 expected / forbidden findings 和 persisted transcript redaction

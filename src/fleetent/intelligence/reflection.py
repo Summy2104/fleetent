@@ -585,6 +585,20 @@ def expire_memory_maintenance_proposal(proposal_id: str) -> MemoryMaintenancePro
     return updated
 
 
+def mark_shared_memory_proposal_applied(proposal_id: str) -> MemoryMaintenanceProposal:
+    """Mark an approved Shared Memory suggestion applied without User Memory owner mutation."""
+    proposal = get_memory_maintenance_proposal(proposal_id)
+    _require_status(proposal, {"approved"})
+    if proposal.action != "suggest_shared_memory_or_kb":
+        raise ValueError("proposal is not a shared memory suggestion")
+    if proposal.metadata_patch.get("target") != "shared_memory":
+        raise ValueError("proposal target is not shared_memory")
+    updated = _with_status(proposal, "applied")
+    _update_maintenance_proposal(updated)
+    _record_maintenance_event("shared_memory_proposal_applied", updated)
+    return updated
+
+
 async def apply_memory_maintenance_proposal(
     proposal_id: str,
     *,
@@ -774,6 +788,8 @@ def _aggregate_skill_proposals(
     bucket_ranges: list[tuple[datetime, datetime]],
     query: ReflectionTrendQuery,
 ) -> None:
+    if query.scope not in {"global", "*"}:
+        return
     database = _database()
     if not database.path.exists() or not _has_table(database, "skill_proposals"):
         return

@@ -47,6 +47,20 @@ def test_entity_or_relation_query_uses_graph_first_with_hybrid_fill():
     assert plan.reason == "relation_like_query"
 
 
+def test_chinese_relation_query_uses_graph_first_with_hybrid_fill():
+    from fleetent.intelligence.knowledge_base import KnowledgeSearchOptions, plan_knowledge_search
+
+    plan = plan_knowledge_search(
+        "Acme 的 SSO 依赖哪个系统？",
+        KnowledgeSearchOptions(tenant_id="tenant-a", kb_ids=["runbook"], limit=5),
+    )
+
+    assert [(step.kind, step.reason) for step in plan.steps] == [
+        ("graph_search", "relation_like_query"),
+        ("hybrid_fill", "relation_like_query"),
+    ]
+
+
 def test_rerank_option_marks_hybrid_steps_only():
     from fleetent.intelligence.knowledge_base import KnowledgeSearchOptions, plan_knowledge_search
 
