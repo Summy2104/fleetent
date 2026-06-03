@@ -5,28 +5,58 @@ import pytest
 
 def test_knowledge_base_public_api_is_importable():
     from fleetent.intelligence.knowledge_base import (
+        EntityRef,
+        ExtractedEntity,
+        ExtractedRelation,
+        ExtractionResult,
+        GraphSearchChunk,
+        GraphSearchResult,
         KnowledgeChunk,
         KnowledgeDocument,
+        KnowledgeEntity,
+        KnowledgeExtractionRun,
         ParsedDocument,
         ParsedSection,
         delete,
+        graph_search,
         ingest_parsed,
         ingest_text,
+        parse_document,
+        parse_docx,
         parse_html,
         parse_markdown,
+        parse_pdf,
+        parse_pptx,
         parse_text,
+        parse_xlsx,
+        run_entity_extraction,
         search,
     )
 
+    assert ExtractedEntity is not None
+    assert ExtractedRelation is not None
+    assert ExtractionResult is not None
+    assert EntityRef is not None
+    assert GraphSearchChunk is not None
+    assert GraphSearchResult is not None
+    assert KnowledgeEntity is not None
+    assert KnowledgeExtractionRun is not None
     assert KnowledgeDocument is not None
     assert KnowledgeChunk is not None
     assert ParsedDocument is not None
     assert ParsedSection is not None
     assert callable(ingest_text)
     assert callable(ingest_parsed)
+    assert callable(parse_document)
     assert callable(parse_text)
     assert callable(parse_markdown)
     assert callable(parse_html)
+    assert callable(parse_pdf)
+    assert callable(parse_docx)
+    assert callable(parse_pptx)
+    assert callable(parse_xlsx)
+    assert callable(graph_search)
+    assert callable(run_entity_extraction)
     assert callable(search)
     assert callable(delete)
 

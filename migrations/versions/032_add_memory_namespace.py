@@ -1,7 +1,7 @@
 """add namespace column to memory_items
 
-Revision ID: 026
-Revises: 025
+Revision ID: 032
+Revises: 031
 Create Date: 2026-06-02
 
 Owner module: multi-agent-management
@@ -10,8 +10,8 @@ Owner module: multi-agent-management
 import sqlalchemy as sa
 from alembic import op
 
-revision = "026"
-down_revision = "025"
+revision = "032"
+down_revision = "031"
 branch_labels = None
 depends_on = None
 

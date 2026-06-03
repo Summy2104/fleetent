@@ -1,10 +1,11 @@
 """Agent definitions, immutable version snapshots, and user/channel bindings.
 
-Schema lifecycle is owned by Alembic (see migrations 001 and 027). This store
-reads and writes through the shared DB runtime boundary using named parameters;
-it never creates schema. The runtime-facing fields (system_prompt, allowed_tools,
-skills_dir, mcp_server_ids, model_overrides, memory_namespace) live in
-``agent_versions``; ``agents.active_version_id`` points at the active snapshot.
+Schema lifecycle is owned by Alembic (see migrations 001, 030, and 033). This
+store reads and writes through the shared DB runtime boundary using named
+parameters; it never creates schema. The runtime-facing fields (system_prompt,
+allowed_tools, skills_dir, mcp_server_ids, model_overrides, memory_namespace)
+live in ``agent_versions``; ``agents.active_version_id`` points at the active
+snapshot. Ownership (tenant_id/team_id) lives on ``agents``.
 """
 
 import json
@@ -25,6 +26,8 @@ class Agent:
     system_prompt: str
     allowed_tools: list[str]
     active_version_id: int | None = None
+    tenant_id: str = "default"
+    team_id: str | None = None
 
 
 @dataclass
@@ -59,6 +62,8 @@ def create_agent(
     mcp_server_ids: list[str] | None = None,
     model_overrides: dict[str, Any] | None = None,
     memory_namespace: str = "default",
+    tenant_id: str = "default",
+    team_id: str | None = None,
 ) -> Agent:
     """Create an agent plus its version-1 snapshot in a single transaction."""
     db = _db()
@@ -67,13 +72,16 @@ def create_agent(
         if conn.execute("SELECT 1 FROM agents WHERE name = :name", {"name": name}).fetchone():
             raise ValueError(f"agent {name!r} already exists")
         agent_id = conn.execute(
-            "INSERT INTO agents (name, system_prompt, allowed_tools, created_at) "
-            "VALUES (:name, :system_prompt, :allowed_tools, :created_at)",
+            "INSERT INTO agents "
+            "(name, system_prompt, allowed_tools, created_at, tenant_id, team_id) "
+            "VALUES (:name, :system_prompt, :allowed_tools, :created_at, :tenant_id, :team_id)",
             {
                 "name": name,
                 "system_prompt": system_prompt,
                 "allowed_tools": json.dumps(allowed_tools),
                 "created_at": now,
+                "tenant_id": tenant_id,
+                "team_id": team_id,
             },
         ).lastrowid
         version_id = _insert_version(
@@ -98,6 +106,8 @@ def create_agent(
         system_prompt=system_prompt,
         allowed_tools=allowed_tools,
         active_version_id=version_id,
+        tenant_id=tenant_id,
+        team_id=team_id,
     )
 
 
@@ -155,7 +165,7 @@ def _row_to_version(row: dict[str, Any], active_version_id: int | None) -> Agent
 
 def _get_agent_row(db: SQLiteDatabase, name: str) -> dict[str, Any] | None:
     return db.execute(
-        "SELECT id, name, active_version_id FROM agents WHERE name = :name",
+        "SELECT id, name, active_version_id, tenant_id, team_id FROM agents WHERE name = :name",
         {"name": name},
     ).fetchone()
 
@@ -178,6 +188,8 @@ def get_by_name(name: str) -> Agent | None:
         system_prompt=str(version["system_prompt"]),
         allowed_tools=json.loads(version["allowed_tools"]),
         active_version_id=int(agent["active_version_id"]),
+        tenant_id=str(agent["tenant_id"]) if agent["tenant_id"] is not None else "default",
+        team_id=str(agent["team_id"]) if agent["team_id"] is not None else None,
     )
 
 

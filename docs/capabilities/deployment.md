@@ -22,11 +22,16 @@
   - 密钥不进 YAML、不进 DB、不进 git，仅通过 env var 注入；YAML 中只保存 `api_key_env` 这类环境变量名引用
   - 旧 `config/mcp.yaml`、`config/cron.yaml`、`config/webhooks.yaml` 存在时启动 fail fast，避免静默使用过期配置
 
-- ✅ **Dockerfile**：单容器部署
-  - 当前已有 Dockerfile 和 docker-compose.yml，关键配置：
+- ✅ **Docker Compose**：Pilot 默认部署入口
+  - Pilot 默认从 `docker compose run --rm fleetent uv run fleetent-admin init-config` 开始，
+    显式执行 `scripts/upgrade.py` 后再 `docker compose up -d`。
+  - `uv run uvicorn fleetent.server:app` 只作为开发模式保留，不作为 Pilot 默认部署入口。
+  - 当前 Dockerfile 和 docker-compose.yml 关键配置：
     - `extra_hosts: host.docker.internal:host-gateway`（Linux 宿主机访问，`fleetent.integrations.sandbox` 通过此地址调用宿主机工具进程）
-    - `volumes: ./data:/app/data, ./config:/app/config`（持久化用户数据和配置）
-    - `env_file: .env.production`（密钥通过 env_file 注入，不写入镜像）
+    - `volumes: ./data:/app/data, ./config:/app/config, ./secrets:/app/secrets:ro`
+      （持久化用户数据和配置，secret 文件只读挂载）
+    - `env_file: .env`（本地 `.env` 由 init-config 从 `.env.example` 生成，不写入镜像）
+    - `ports: 8765:8765`
 
 - ✅ **alembic DB migration**：schema 版本管理
   - 升级脚本在 SQLite 备份成功后执行 `alembic upgrade head`，不需要手动改表
@@ -85,18 +90,18 @@
 
 ## 升级与恢复
 
-本地 SQLite-first 部署升级入口：
+Docker Compose first 的 SQLite-first 部署升级入口：
 
 ```bash
-uv run python scripts/upgrade.py
+docker compose run --rm fleetent uv run python scripts/upgrade.py
 ```
 
 常用选项：
 
 ```bash
-uv run python scripts/upgrade.py --dry-run
-uv run python scripts/upgrade.py --backup-only
-uv run python scripts/upgrade.py --database-url sqlite:///data/fleetent.db --backup-dir data/backups
+docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run
+docker compose run --rm fleetent uv run python scripts/upgrade.py --backup-only
+docker compose run --rm fleetent uv run python scripts/upgrade.py --database-url sqlite:///data/fleetent.db --backup-dir data/backups
 ```
 
 如果 migration 失败，脚本不会自动 rollback。手动恢复步骤：
@@ -108,7 +113,7 @@ uv run python scripts/upgrade.py --database-url sqlite:///data/fleetent.db --bac
 ## Connector 运维
 
 Pilot 环境中，Google Drive / Confluence connector 的真实 credential 不写入 `settings.yaml`；配置文件只保存
-`credential_ref`，例如 `file:///etc/fleetent/secrets/google-drive-token.json` 或
+`credential_ref`，例如 `file:///app/secrets/google-drive-token.json` 或
 `env:FLEETENT_CONFLUENCE_API_TOKEN`。对应文件权限、环境变量注入和备份策略由部署方保护。
 
 常用操作：
@@ -188,7 +193,7 @@ uv run fleetent-admin observability performance --agent-id agent-1 --limit 100
 
 ## 当前缺口
 
-- 缺少完整安装包：初始化、配置校验、迁移、启动、健康检查未形成一键流程。
+- Docker Compose 已作为 Pilot 默认入口；完整 release 安装包和镜像发布流水线仍未覆盖。
 - 升级脚本已覆盖本地 SQLite backup / migration；完整发布包和自动 rollback 不在当前范围内。
 - 日志 / trace / diagnostics export 已有手动 retention；SQLite backups 自动保留策略仍由部署方管理。
 - License key 机制未设计。
@@ -217,7 +222,7 @@ config validation 目录，服务拆分要等运行模块边界稳定后再做�
 **场景 1：首次部署**
 - Given：一台干净的 Linux 服务器，安装了 Docker
 - When：按照安装文档执行部署命令
-- Then：服务在 5 分钟内启动，GET /health 返回 200
+- Then：服务在 5 分钟内启动，`curl -fsS http://127.0.0.1:8765/health` 返回 200
 
 **场景 2：版本升级**
 - Given：运行中的 v1.0 实例，有存量用户数据

@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from typing import TYPE_CHECKING
 
 from fleetent.platform.admin_cli.common import sanitize_cli_value, summary_line
+
+if TYPE_CHECKING:
+    from fleetent.intelligence.knowledge_base.extraction_store import KnowledgeExtractionRun
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -22,6 +26,10 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     p_connector_sync = kb_connectors_sub.add_parser("sync", help="Run connector sync")
     p_connector_sync.add_argument("connector_id")
     p_connector_sync.add_argument("--dry-run", action="store_true")
+    p_extract = kb_sub.add_parser("extract-entities", help="Run explicit KB entity extraction")
+    p_extract.add_argument("--tenant-id", default="default")
+    p_extract.add_argument("--kb-id", required=True)
+    p_extract.add_argument("--document-id")
 
 
 def handle(args: argparse.Namespace) -> bool:
@@ -30,7 +38,22 @@ def handle(args: argparse.Namespace) -> bool:
         return False
     if args.kb_cmd == "connectors":
         _handle_connectors(args)
+        return True
+    if args.kb_cmd == "extract-entities":
+        _handle_extract_entities(args)
     return True
+
+
+async def run_entity_extraction(
+    tenant_id: str,
+    kb_id: str,
+    document_id: str | None = None,
+) -> KnowledgeExtractionRun:
+    """Delegate entity extraction to the knowledge-base public API."""
+
+    from fleetent.intelligence.knowledge_base import run_entity_extraction as run
+
+    return await run(tenant_id, kb_id, document_id=document_id)
 
 
 def _handle_connectors(args: argparse.Namespace) -> None:
@@ -76,3 +99,26 @@ def _handle_connectors(args: argparse.Namespace) -> None:
             print(summary_line(sync_result.summary))
         if sync_result.error:
             print(f"error={sanitize_cli_value(sync_result.error)}")
+
+
+def _handle_extract_entities(args: argparse.Namespace) -> None:
+    summary = asyncio.run(
+        run_entity_extraction(
+            args.tenant_id,
+            args.kb_id,
+            document_id=args.document_id,
+        )
+    )
+    print(f"status={sanitize_cli_value(summary.status)}")
+    print(f"tenant_id={sanitize_cli_value(summary.tenant_id)}")
+    print(f"kb_id={sanitize_cli_value(summary.kb_id)}")
+    if summary.document_id:
+        print(f"document_id={sanitize_cli_value(summary.document_id)}")
+    print(f"documents_scanned={summary.documents_scanned}")
+    print(f"chunks_scanned={summary.chunks_scanned}")
+    print(f"entities_upserted={summary.entities_upserted}")
+    print(f"mentions_written={summary.mentions_written}")
+    print(f"relations_written={summary.relations_written}")
+    print(f"failed_count={summary.failed_count}")
+    if summary.error_summary:
+        print(f"error={sanitize_cli_value(summary.error_summary)}")

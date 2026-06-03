@@ -578,6 +578,142 @@ async def test_hybrid_search_degrades_when_one_side_is_empty(monkeypatch, tmp_pa
     assert [chunk.id for chunk in vector_results] == [f"{vector_doc.id}:chunk:0"]
 
 
+async def test_hybrid_rerank_uses_public_provider_results_to_reorder(monkeypatch, tmp_path):
+    _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=120, chunk_overlap=0)
+
+    from fleetent.config import RerankSettings, Settings
+    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.intelligence.vector_store import RerankResult, SearchResult
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    distractor_doc = await runtime.ingest_text(
+        filename="distractor.md",
+        content="ZX-777 generic restart notes for routine incidents.",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+    expected_doc = await runtime.ingest_text(
+        filename="answer.md",
+        content="ZX-777 exact remediation requires clearing the edge cache.",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+    calls: list[tuple[list[str], int | None]] = []
+
+    class FakeReranker:
+        async def rerank(
+            self, query: str, documents: list[str], top_n: int | None = None
+        ) -> list[RerankResult]:
+            calls.append((documents, top_n))
+            return [RerankResult(index=1, score=0.98), RerankResult(index=0, score=0.10)]
+
+    async def vector_search(query: str, namespace: str, limit: int):
+        assert limit == runtime._rerank_candidate_limit(2)
+        return [
+            SearchResult(id=f"{distractor_doc.id}:chunk:0", score=0.95),
+            SearchResult(id=f"{expected_doc.id}:chunk:0", score=0.70),
+        ]
+
+    settings = Settings(anthropic_api_key="test-key", rerank=RerankSettings(backend="disabled"))
+    monkeypatch.setattr(runtime, "_settings", lambda: settings)
+    monkeypatch.setattr(runtime.vector_store, "search", vector_search)
+    monkeypatch.setattr(
+        runtime.rerank_runtime,
+        "create_rerank_provider",
+        lambda rerank_settings: FakeReranker(),
+    )
+
+    results = await runtime.search(
+        "ZX-777",
+        tenant_id="tenant-a",
+        kb_ids=["global"],
+        limit=2,
+        mode="hybrid",
+        rerank=True,
+    )
+
+    assert [chunk.id for chunk in results] == [
+        f"{expected_doc.id}:chunk:0",
+        f"{distractor_doc.id}:chunk:0",
+    ]
+    assert results[0].score == 0.98
+    assert calls == [
+        (
+            [
+                "ZX-777 generic restart notes for routine incidents.",
+                "ZX-777 exact remediation requires clearing the edge cache.",
+            ],
+            2,
+        )
+    ]
+
+
+async def test_hybrid_rerank_provider_failure_returns_original_hybrid_order(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_runtime_database(monkeypatch, tmp_path)
+    _patch_runtime_settings(monkeypatch, chunk_size=120, chunk_overlap=0)
+
+    from fleetent.config import Settings
+    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.intelligence.vector_store import SearchResult
+    from fleetent.intelligence.vector_store.rerank import RerankProviderError
+
+    monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
+    first_doc = await runtime.ingest_text(
+        filename="first.md",
+        content="ZX-888 primary recovery instructions.",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+    second_doc = await runtime.ingest_text(
+        filename="second.md",
+        content="ZX-888 secondary recovery instructions.",
+        tenant_id="tenant-a",
+        kb_id="global",
+    )
+
+    class FailingReranker:
+        async def rerank(
+            self, query: str, documents: list[str], top_n: int | None = None
+        ) -> list[object]:
+            raise RerankProviderError("provider unavailable")
+
+    async def vector_search(query: str, namespace: str, limit: int):
+        return [
+            SearchResult(id=f"{first_doc.id}:chunk:0", score=0.95),
+            SearchResult(id=f"{second_doc.id}:chunk:0", score=0.70),
+        ]
+
+    monkeypatch.setattr(runtime, "_settings", lambda: Settings(anthropic_api_key="test-key"))
+    monkeypatch.setattr(runtime.vector_store, "search", vector_search)
+    baseline = await runtime.search(
+        "ZX-888",
+        tenant_id="tenant-a",
+        kb_ids=["global"],
+        limit=2,
+        mode="hybrid",
+    )
+    monkeypatch.setattr(
+        runtime.rerank_runtime,
+        "create_rerank_provider",
+        lambda rerank_settings: FailingReranker(),
+    )
+
+    results = await runtime.search(
+        "ZX-888",
+        tenant_id="tenant-a",
+        kb_ids=["global"],
+        limit=2,
+        mode="hybrid",
+        rerank=True,
+    )
+
+    assert [chunk.id for chunk in results] == [chunk.id for chunk in baseline]
+
+
 async def test_delete_removes_document_chunks_and_vector_entries(monkeypatch, tmp_path):
     database = _patch_runtime_database(monkeypatch, tmp_path)
     _patch_runtime_settings(monkeypatch, chunk_size=5, chunk_overlap=1)

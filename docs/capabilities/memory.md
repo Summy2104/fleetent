@@ -6,9 +6,9 @@
 
 User Memory 的提取、存储与检索，让 agent 在多次对话中积累单个用户授权范围内的长期事实。
 
-**负责**：从对话中提取用户相关事实，按类型结构化存储，支持向量相似度检索，并向 vector_store reindex 暴露当前可索引记忆。当前 `fleetent.intelligence.memory` 实现的是 User Memory，不是团队 / 租户 / 项目级 Shared Memory。
+**负责**：从对话中提取用户相关事实，按类型结构化存储，支持向量相似度检索，并向 vector_store reindex 暴露当前可索引记忆。当前 `fleetent.intelligence.memory` 已实现 User Memory，并提供 Shared Memory 数据层；Shared Memory 保存已确认的团队 / 租户级上下文、偏好和流程。
 
-**不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、Shared Memory、未经 owner 确认的 reflection 写回。
+**不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、未经 owner 确认的 reflection 写回。Shared Memory 的 prompt 注入由 long_term_ctx 按 agent 归属（tenant / team）的 context policy 协调，memory 只提供 `search_shared_memory` 检索 API。
 
 ### 记忆系统全局架构
 
@@ -21,7 +21,12 @@ fleetent 的记忆系统借鉴认知科学的四类记忆划分，每类由不�
 | **程序记忆** | agent 完成特定任务的技能与方法 | `skills/` 目录 | `skill_registry` |
 | **工作记忆** | 当前 session 的对话上下文（session 结束即释放） | 内存 | `context_mgr` |
 
-本模块（`fleetent.intelligence.memory`）只负责**User Memory 中的语义记忆**，即按 `identity` / `preferences` / `context` 三类结构化存储的用户事实。其 owner 是 `user_id`，vector namespace 是 `mem:{user_id}`。其余三类由各自模块独立管理，`reflection` 跨模块读取情节记忆（traces）与 User Memory 来生成维护建议；真正改写、合并、标记 stale 或删除 User Memory 必须通过 owner-approved maintenance proposal 或用户显式开启的低风险自动策略。
+本模块（`fleetent.intelligence.memory`）负责两类语义记忆：User Memory 按 `identity` / `preferences` / `context`
+三类结构化存储用户事实，owner 是 `user_id`，vector namespace 是 `mem:{user_id}`；Shared Memory 按 `team` /
+`tenant` scope 保存 `context` / `preference` / `procedure`，表为 `shared_memory_items`，vector namespace 是
+`shared:{scope_type}:{scope_id}`。其余三类由各自模块独立管理，`reflection` 跨模块读取情节记忆（traces）与
+User Memory 来生成维护建议；真正改写、合并、标记 stale 或删除 User Memory 必须通过 owner-approved
+maintenance proposal 或用户显式开启的低风险自动策略。
 
 **调用关系**：
 - 依赖：model_router（`memory_extraction` task，默认轻量模型，可通过 config 覆盖）、vector_store（向量索引）、config
@@ -29,8 +34,8 @@ fleetent 的记忆系统借鉴认知科学的四类记忆划分，每类由不�
 
 **模块归属**：
 - owning package：`fleetent.intelligence.memory`
-- public API：`search(user_id, query, limit)`、`extract_and_update(user_id, conversation)`、`iter_indexable_memories(user_id)`、`update_user_memory_content()`、`mark_user_memory_stale()`、`delete_user_memory()`、`merge_user_memories()`、`MemoryItem`
-- owned tables：`memory_items`
+- public API：`search(user_id, query, limit)`、`extract_and_update(user_id, conversation)`、`iter_indexable_memories(user_id)`、`update_user_memory_content()`、`mark_user_memory_stale()`、`delete_user_memory()`、`merge_user_memories()`、`MemoryItem`、`SharedMemoryItem`、`create_shared_memory()`、`update_shared_memory()`、`archive_shared_memory()`、`search_shared_memory()`、`iter_indexable_shared_memories()`、`MemoryQualityTrendQuery`、`MemoryQualityTrendBucket`、`MemoryQualityTrendSummary`、`get_memory_quality_trend_summary()`
+- owned tables：`memory_items`、`shared_memory_items`
 - config namespace：`memory.*`
 
 ## 关键流程
@@ -68,9 +73,24 @@ memory_items (
   updated_at  DATETIME,
   expires_at  DATETIME           -- 仅 context 类有值；identity / preferences 为 NULL
 )
+
+shared_memory_items (
+  id          TEXT PRIMARY KEY,
+  scope_type  TEXT,              -- "team" | "tenant"
+  scope_id    TEXT,
+  type        TEXT,              -- "context" | "preference" | "procedure"
+  content     TEXT,
+  status      TEXT,              -- "active" | "stale" | "archived"
+  source      TEXT,              -- "manual" | "reflection_proposal"
+  source_ref  TEXT,
+  created_by  TEXT,
+  created_at  DATETIME,
+  updated_at  DATETIME
+)
 ```
 
 向量 embedding 存储在 vector_store，以 `memory_item.id` 为 key，不写入此表。
+Shared Memory 使用 `shared:{scope_type}:{scope_id}` namespace；active / stale 可检索，archived 从向量索引移除。
 
 ## 接口定义
 
@@ -104,6 +124,18 @@ async def update_user_memory_content(user_id: str, memory_id: str, content: str)
 
 async def mark_user_memory_stale(user_id: str, memory_id: str) -> None:
     """通过 User Memory public API 将单条 memory 标记为 stale，并从 vector_store 移除。"""
+
+
+async def create_shared_memory(...) -> SharedMemoryItem:
+    """创建 Shared Memory 并写入 shared:{scope_type}:{scope_id} 向量 namespace。"""
+
+
+async def search_shared_memory(scope_type: str, scope_id: str, query: str, limit: int = 10) -> list[SharedMemoryItem]:
+    """检索指定 team / tenant scope 内 active 或 stale 的 Shared Memory；由 long_term_ctx 按 context policy 注入。"""
+
+
+def get_memory_quality_trend_summary(query: MemoryQualityTrendQuery) -> MemoryQualityTrendSummary:
+    """只读聚合 User Memory、Shared Memory 和维护 proposal 质量趋势；不触发提取或清理。"""
 ```
 
 ## 现状
@@ -122,6 +154,8 @@ async def mark_user_memory_stale(user_id: str, memory_id: str) -> None:
 - `search()` 通过 vector_store 查相关 memory ids，回查 SQLite 并过滤过期 context
 - `iter_indexable_memories(user_id)` public API 返回当前未过期 memory source records，供 vector_store 同步 reindex 使用
 - reflection maintenance apply 只通过 `fleetent.intelligence.memory` public mutation API，不直接写 `memory_items`
+- Shared Memory 数据层已完成：`shared_memory_items` 表、`SharedMemoryItem` public API、team / tenant scope、`shared:{scope_type}:{scope_id}` vector namespace、reflection proposal apply 入口和最小 admin CLI；prompt 注入由 long_term_ctx 按 agent 归属的 context policy 协调（tenant 默认 + agent 覆盖，默认关闭）
+- Memory Quality Trend summary 已完成：按 day / week 只读聚合 User Memory type counts、expired context、exact duplicate candidates、Shared Memory type counts，以及 reflection maintenance proposal 的 status / action / risk counts
 - 删除旧 JSONL memory 兼容和 `load_memories()` 直接注入路径
 
 当前定位：已完成结构化语义记忆地基、基础维护动作、第一批 memory extraction evaluation 基线、与 KB
@@ -165,13 +199,12 @@ async def mark_user_memory_stale(user_id: str, memory_id: str) -> None:
 
 - 提取质量已有 mock evaluation 基线，但还缺少真实 LLM 回归样本和长期趋势统计。
 - 真实 embedding provider 边界已定义且有手动 evaluation 入口；尚未选择或部署自托管模型 endpoint。
-- memory 条数已有显式维护 API；reflection proposal lifecycle 已建立，但尚未接入 scheduler、admin UI 或长期趋势统计。
+- memory 条数已有显式维护 API；reflection proposal lifecycle 已建立，并已提供只读质量趋势 summary；尚未接入 scheduler、admin UI 或告警。
 - reindex 入口由 vector_store 提供；memory 只暴露 source iterator，不承担 job history / worker / scheduler。
 
 ## 下一批候选 specs
 
 - `memory-extraction-real-llm-regression`
-- `memory-quality-trend-summary`
 - `memory-maintenance-scheduler-or-review-ui`
 
 ## 自动化效果验证缺口
@@ -184,6 +217,9 @@ async def mark_user_memory_stale(user_id: str, memory_id: str) -> None:
   `tmp_path`，model_router 与 vector_store 均隔离，不触碰 `data/`。
 - 默认命令：`uv run pytest tests/evaluation -x -q`。该命令只运行 deterministic mock
   evaluation，真实 LLM fixture case 默认 skip。
+- Memory Quality Trend evaluation 使用 deterministic fixture 覆盖 exact duplicate candidate、expired
+  context bucket 和 Shared Memory 与 User Memory 分离；runner 写入 tmp SQLite 并调用
+  `get_memory_quality_trend_summary()`，不运行真实 LLM、不触发自动维护。
 - 手动真实 LLM evaluation：设置 `FLEETENT_EVAL_REAL_LLM=1` 并提供 provider API key 后运行
   `uv run pytest tests/evaluation/test_memory_extraction_eval.py -q`。runner 会使用真实
   `memory_extraction` 路由，但仍使用 tmp SQLite 与 mock vector_store；缺少 provider API key

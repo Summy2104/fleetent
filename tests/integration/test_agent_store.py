@@ -1,3 +1,9 @@
+"""Tests for agent_store on the unified db runtime.
+
+Schema is created by Alembic migrations against a tmp_path database, isolated via
+the DATABASE_URL env var (named params, no legacy _init_db / DB_PATH path).
+"""
+
 from pathlib import Path
 
 import pytest
@@ -9,7 +15,7 @@ import fleetent.agent_store as agent_store
 
 def apply_migrations(db_path: Path) -> None:
     cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
     cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
     command.upgrade(cfg, "head")
 
@@ -141,7 +147,78 @@ def test_get_by_name_reflects_active_version(db):
     assert found.allowed_tools == ["web_search"]
 
 
-# --- channel_agents ---
+# --- agent ownership (tenant_id / team_id) ---
+
+
+def test_create_agent_defaults_tenant_and_team(db):
+    agent = agent_store.create_agent("owned", "prompt", [])
+    assert agent.tenant_id == "default"
+    assert agent.team_id is None
+    found = agent_store.get_by_name("owned")
+    assert found is not None
+    assert found.tenant_id == "default"
+    assert found.team_id is None
+
+
+def test_create_agent_with_explicit_ownership(db):
+    agent = agent_store.create_agent(
+        "acme-support", "prompt", [], tenant_id="acme", team_id="support"
+    )
+    assert agent.tenant_id == "acme"
+    assert agent.team_id == "support"
+    found = agent_store.get_by_name("acme-support")
+    assert found is not None
+    assert found.tenant_id == "acme"
+    assert found.team_id == "support"
+
+
+def test_existing_agent_backfills_default_tenant(db):
+    # A row inserted without ownership columns (legacy shape) resolves to the
+    # migration's tenant_id default and a null team_id. The agent must still carry
+    # a v1 version snapshot, exactly as migration 033's backfill produces.
+    from fleetent.config import Settings
+    from fleetent.db import create_database
+
+    database = create_database(Settings(anthropic_api_key="").database_url)
+    with database.transaction() as conn:
+        agent_id = conn.execute(
+            "INSERT INTO agents (name, system_prompt, allowed_tools, created_at)"
+            " VALUES (:name, :system_prompt, :allowed_tools, :created_at)",
+            {
+                "name": "legacy",
+                "system_prompt": "p",
+                "allowed_tools": "[]",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+        ).lastrowid
+        version_id = conn.execute(
+            "INSERT INTO agent_versions "
+            "(agent_id, version, system_prompt, allowed_tools, model_overrides, "
+            " memory_namespace, created_at) "
+            "VALUES (:aid, 1, 'p', '[]', '{}', 'default', :now)",
+            {"aid": agent_id, "now": "2026-01-01T00:00:00+00:00"},
+        ).lastrowid
+        conn.execute(
+            "UPDATE agents SET active_version_id = :vid WHERE id = :aid",
+            {"vid": version_id, "aid": agent_id},
+        )
+    found = agent_store.get_by_name("legacy")
+    assert found is not None
+    assert found.tenant_id == "default"
+    assert found.team_id is None
+
+
+def test_ownership_survives_user_and_channel_lookup(db):
+    agent = agent_store.create_agent("routed", "prompt", [], tenant_id="acme", team_id="support")
+    agent_store.assign_user("user-1", agent.id)
+    agent_store.assign_channel("slack", "C123", agent.id)
+    by_user = agent_store.get_agent_for_user("user-1")
+    by_channel = agent_store.get_agent_for_channel("slack", "C123")
+    assert by_user is not None and by_user.tenant_id == "acme" and by_user.team_id == "support"
+    assert by_channel is not None and by_channel.tenant_id == "acme"
+
+
+# --- channel_agents tests ---
 
 
 def test_assign_and_get_agent_for_channel(db):

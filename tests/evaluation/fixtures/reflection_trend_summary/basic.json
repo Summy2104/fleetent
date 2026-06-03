@@ -1,0 +1,153 @@
+{
+  "scope": "owner-1",
+  "forbidden_transcript": "customer said the private launch code is ALPHA-SECRET",
+  "query": {
+    "start_ts": "2026-01-01T00:00:00+00:00",
+    "end_ts": "2026-01-15T00:00:00+00:00"
+  },
+  "expected": {
+    "missing_knowledge_counts": [1, 3],
+    "memory_candidate_counts": [3, 1]
+  },
+  "reflection_reports": [
+    {
+      "id": "reflection-week-1",
+      "time_window_start": "2026-01-01T00:00:00+00:00",
+      "time_window_end": "2026-01-01T01:00:00+00:00",
+      "created_at": "2026-01-01T01:00:00+00:00",
+      "findings": [
+        {
+          "type": "memory_candidate",
+          "summary": "Repeated user fact may belong in memory",
+          "evidence_ids": ["trace-1"],
+          "metadata": {}
+        },
+        {
+          "type": "memory_candidate",
+          "summary": "Repeated user preference may belong in memory",
+          "evidence_ids": ["trace-2"],
+          "metadata": {}
+        },
+        {
+          "type": "memory_candidate",
+          "summary": "Repeated team context may belong in memory",
+          "evidence_ids": ["trace-3"],
+          "metadata": {}
+        }
+      ]
+    },
+    {
+      "id": "reflection-week-2",
+      "time_window_start": "2026-01-08T00:00:00+00:00",
+      "time_window_end": "2026-01-08T01:00:00+00:00",
+      "created_at": "2026-01-08T01:00:00+00:00",
+      "findings": [
+        {
+          "type": "memory_candidate",
+          "summary": "One remaining memory candidate",
+          "evidence_ids": ["trace-4"],
+          "metadata": {}
+        }
+      ]
+    }
+  ],
+  "kb_reflection_reports": [
+    {
+      "id": "kb-week-1",
+      "time_window_start": "2026-01-02T00:00:00+00:00",
+      "time_window_end": "2026-01-02T01:00:00+00:00",
+      "created_at": "2026-01-02T01:00:00+00:00",
+      "signal_summary": {
+        "query_count": 2
+      },
+      "findings": [
+        {
+          "type": "missing_knowledge",
+          "severity": "high",
+          "affected_resource": "query:deployment",
+          "evidence_refs": ["trace-5"],
+          "recommendation": "Add deployment runbook article",
+          "metadata": {}
+        }
+      ]
+    },
+    {
+      "id": "kb-week-2",
+      "time_window_start": "2026-01-09T00:00:00+00:00",
+      "time_window_end": "2026-01-09T01:00:00+00:00",
+      "created_at": "2026-01-09T01:00:00+00:00",
+      "signal_summary": {
+        "query_count": 4
+      },
+      "findings": [
+        {
+          "type": "missing_knowledge",
+          "severity": "high",
+          "affected_resource": "query:billing",
+          "evidence_refs": ["trace-6"],
+          "recommendation": "Add billing FAQ article",
+          "metadata": {}
+        },
+        {
+          "type": "missing_knowledge",
+          "severity": "high",
+          "affected_resource": "query:security",
+          "evidence_refs": ["trace-7"],
+          "recommendation": "Add security review article",
+          "metadata": {}
+        },
+        {
+          "type": "missing_knowledge",
+          "severity": "medium",
+          "affected_resource": "query:integrations",
+          "evidence_refs": ["trace-8"],
+          "recommendation": "Add integrations setup article",
+          "metadata": {}
+        }
+      ]
+    }
+  ],
+  "memory_maintenance_proposals": [
+    {
+      "id": "memory-proposal-applied",
+      "action": "rewrite",
+      "target_memory_ids": ["mem-1"],
+      "proposed_content": "User prefers backend Python work",
+      "metadata_patch": {},
+      "risk": "medium",
+      "reason": "Consolidate repeated memory candidate findings",
+      "evidence_ids": ["trace-1", "trace-2", "trace-3"],
+      "status": "applied",
+      "created_at": "2026-01-04T00:00:00+00:00",
+      "updated_at": "2026-01-04T00:05:00+00:00"
+    }
+  ],
+  "skill_proposals": [
+    {
+      "id": "skill-proposal-pending-1",
+      "type": "create_skill",
+      "target_skill": "deployment-runbook",
+      "reason": "Repeated deployment guidance requests",
+      "evidence_refs": ["trace-9"],
+      "risk_level": "low",
+      "suggested_draft": null,
+      "suggested_diff": null,
+      "status": "pending",
+      "created_at": "2026-01-09T02:00:00+00:00",
+      "updated_at": "2026-01-09T02:05:00+00:00"
+    },
+    {
+      "id": "skill-proposal-pending-2",
+      "type": "update_skill",
+      "target_skill": "billing-triage",
+      "reason": "Repeated billing escalation misses",
+      "evidence_refs": ["trace-10"],
+      "risk_level": "medium",
+      "suggested_draft": null,
+      "suggested_diff": "--- diff",
+      "status": "pending",
+      "created_at": "2026-01-10T02:00:00+00:00",
+      "updated_at": "2026-01-10T02:05:00+00:00"
+    }
+  ]
+}

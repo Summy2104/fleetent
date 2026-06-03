@@ -1,0 +1,44 @@
+{
+  "documents": [
+    {
+      "id": "acme",
+      "content": "Customer: Acme\nProject: Atlas"
+    },
+    {
+      "id": "beta",
+      "content": "Customer: Beta\nProject: Beacon"
+    },
+    {
+      "id": "billing",
+      "content": "System: Billing API"
+    },
+    {
+      "id": "warehouse",
+      "content": "System: Data Warehouse"
+    },
+    {
+      "id": "dependency",
+      "content": "Depends on: Billing API -> Data Warehouse"
+    }
+  ],
+  "queries": [
+    {
+      "query": "Acme deployment",
+      "depth": 0,
+      "expected_documents": ["acme"],
+      "forbidden_documents": ["beta"]
+    },
+    {
+      "query": "Billing API dependency",
+      "depth": 1,
+      "expected_documents": ["billing", "warehouse", "dependency"],
+      "forbidden_documents": []
+    },
+    {
+      "query": "Data Warehouse",
+      "depth": 1,
+      "expected_documents": ["warehouse"],
+      "forbidden_documents": ["billing"]
+    }
+  ]
+}

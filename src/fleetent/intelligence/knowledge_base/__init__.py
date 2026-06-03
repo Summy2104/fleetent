@@ -21,6 +21,23 @@ from fleetent.intelligence.knowledge_base.connectors.google_drive import (
     plan_google_drive_sync,
     sync_google_drive,
 )
+from fleetent.intelligence.knowledge_base.extraction import (
+    ExtractedEntity,
+    ExtractedRelation,
+    ExtractionResult,
+    run_entity_extraction,
+)
+from fleetent.intelligence.knowledge_base.extraction_store import (
+    KnowledgeEntity,
+    KnowledgeExtractionRun,
+)
+from fleetent.intelligence.knowledge_base.graph_search import (
+    EntityRef,
+    GraphSearchChunk,
+    GraphSearchResult,
+    RelationRef,
+    graph_search,
+)
 from fleetent.intelligence.knowledge_base.models import KnowledgeChunk, KnowledgeDocument
 from fleetent.intelligence.knowledge_base.operations import (
     ConnectorCheckResult,
@@ -37,9 +54,21 @@ from fleetent.intelligence.knowledge_base.operations import (
 from fleetent.intelligence.knowledge_base.parsers import (
     ParsedDocument,
     ParsedSection,
+    parse_document,
+    parse_docx,
     parse_html,
     parse_markdown,
+    parse_pdf,
+    parse_pptx,
     parse_text,
+    parse_xlsx,
+)
+from fleetent.intelligence.knowledge_base.planner import (
+    KnowledgeSearchOptions,
+    KnowledgeSearchPlan,
+    KnowledgeSearchStep,
+    execute_knowledge_search_plan,
+    plan_knowledge_search,
 )
 from fleetent.intelligence.knowledge_base.runtime import (
     archive,
@@ -72,8 +101,20 @@ __all__ = [
     "GoogleDriveConnectorConfig",
     "GoogleDriveSyncPlan",
     "GoogleDriveSyncSummary",
+    "ExtractedEntity",
+    "ExtractedRelation",
+    "ExtractionResult",
+    "EntityRef",
+    "GraphSearchChunk",
+    "GraphSearchResult",
     "KnowledgeChunk",
     "KnowledgeDocument",
+    "KnowledgeEntity",
+    "KnowledgeExtractionRun",
+    "KnowledgeSearchOptions",
+    "KnowledgeSearchPlan",
+    "KnowledgeSearchStep",
+    "RelationRef",
     "ParsedDocument",
     "ParsedSection",
     "SyncAction",
@@ -86,8 +127,10 @@ __all__ = [
     "check_connector",
     "delete",
     "execute_sync_plan",
+    "execute_knowledge_search_plan",
     "get_connector_config",
     "get_connector_status",
+    "graph_search",
     "ingest_parsed",
     "ingest_text",
     "iter_indexable_knowledge_chunks",
@@ -95,12 +138,19 @@ __all__ = [
     "list_configured_connectors",
     "parse_html",
     "parse_markdown",
+    "parse_document",
+    "parse_docx",
+    "parse_pdf",
+    "parse_pptx",
     "parse_text",
+    "parse_xlsx",
+    "plan_knowledge_search",
     "plan_confluence_sync",
     "plan_google_drive_sync",
     "plan_local_directory_sync",
     "resolve_agent_kb_ids",
     "run_connector_sync",
+    "run_entity_extraction",
     "search",
     "sync_confluence",
     "sync_google_drive",

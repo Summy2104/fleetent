@@ -7,6 +7,10 @@ from datetime import datetime
 from typing import Literal
 
 MemoryType = Literal["identity", "preferences", "context"]
+SharedMemoryScopeType = Literal["team", "tenant"]
+SharedMemoryType = Literal["context", "preference", "procedure"]
+SharedMemoryStatus = Literal["active", "stale", "archived"]
+SharedMemorySource = Literal["manual", "reflection_proposal"]
 
 
 @dataclass(frozen=True)
@@ -21,6 +25,23 @@ class MemoryItem:
     updated_at: datetime
     expires_at: datetime | None
     namespace: str = "default"
+
+
+@dataclass(frozen=True)
+class SharedMemoryItem:
+    """A confirmed shared semantic memory item scoped to a team or tenant."""
+
+    id: str
+    scope_type: SharedMemoryScopeType
+    scope_id: str
+    type: SharedMemoryType
+    content: str
+    status: SharedMemoryStatus
+    source: SharedMemorySource
+    source_ref: str | None
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
 
 
 @dataclass(frozen=True)

@@ -59,16 +59,24 @@ def test_local_directory_source_maps_supported_file_extensions(tmp_path):
     (root / "guide.md").write_text("# Guide", encoding="utf-8")
     (root / "page.html").write_text("<h1>Page</h1>", encoding="utf-8")
     (root / "legacy.htm").write_text("<h1>Legacy</h1>", encoding="utf-8")
-    (root / "ignored.pdf").write_bytes(b"%PDF")
+    (root / "report.pdf").write_bytes(b"%PDF")
+    (root / "guide.docx").write_bytes(b"docx")
+    (root / "deck.pptx").write_bytes(b"pptx")
+    (root / "book.xlsx").write_bytes(b"xlsx")
+    (root / "ignored.bin").write_bytes(b"binary")
 
     source = LocalDirectoryDataSource(root_path=root, allowed_roots=[root])
     refs = source.list_documents()
 
     assert {ref.filename: ref.format for ref in refs} == {
         "guide.md": "markdown",
+        "guide.docx": "docx",
         "legacy.htm": "html",
+        "book.xlsx": "xlsx",
+        "deck.pptx": "pptx",
         "notes.txt": "text",
         "page.html": "html",
+        "report.pdf": "pdf",
     }
 
 

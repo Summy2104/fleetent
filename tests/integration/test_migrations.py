@@ -43,6 +43,13 @@ def test_upgrade_creates_tables(tmp_path):
     assert "knowledge_chunks_fts" in tables
     assert "knowledge_base_agent_bindings" in tables
     assert "knowledge_connector_status" in tables
+    assert "kb_extraction_runs" in tables
+    assert "kb_entities" in tables
+    assert "kb_entity_mentions" in tables
+    assert "kb_relations" in tables
+    assert "kb_reflection_reports" in tables
+    assert "skill_proposals" in tables
+    assert "shared_memory_items" in tables
 
 
 def test_upgrade_creates_trace_indexes(tmp_path):
@@ -201,6 +208,20 @@ def test_column_structure(tmp_path):
         "updated_at",
         "expires_at",
     }
+    shared_memory_cols = {row[1] for row in conn.execute("PRAGMA table_info(shared_memory_items)")}
+    assert shared_memory_cols >= {
+        "id",
+        "scope_type",
+        "scope_id",
+        "type",
+        "content",
+        "status",
+        "source",
+        "source_ref",
+        "created_by",
+        "created_at",
+        "updated_at",
+    }
 
     kb_cols = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_bases)")}
     assert kb_cols >= {"tenant_id", "kb_id", "created_at"}
@@ -223,6 +244,96 @@ def test_column_structure(tmp_path):
         "kb_id",
         "position",
         "content",
+        "created_at",
+    }
+    extraction_run_cols = {row[1] for row in conn.execute("PRAGMA table_info(kb_extraction_runs)")}
+    assert extraction_run_cols >= {
+        "id",
+        "tenant_id",
+        "kb_id",
+        "document_id",
+        "extractor",
+        "status",
+        "started_at",
+        "finished_at",
+        "documents_scanned",
+        "chunks_scanned",
+        "entities_upserted",
+        "mentions_written",
+        "relations_written",
+        "failed_count",
+        "error_summary",
+        "metadata_json",
+    }
+    kb_reflection_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(kb_reflection_reports)")
+    }
+    assert kb_reflection_cols >= {
+        "id",
+        "scope",
+        "time_window_start",
+        "time_window_end",
+        "findings_json",
+        "signal_summary_json",
+        "created_at",
+    }
+    skill_proposal_cols = {row[1] for row in conn.execute("PRAGMA table_info(skill_proposals)")}
+    assert skill_proposal_cols >= {
+        "id",
+        "type",
+        "target_skill",
+        "reason",
+        "evidence_refs_json",
+        "risk_level",
+        "suggested_draft",
+        "suggested_diff",
+        "status",
+        "reviewer_user_id",
+        "reviewed_at",
+        "rejection_reason",
+        "actor_user_id",
+        "applied_at",
+        "created_at",
+        "updated_at",
+    }
+    entity_cols = {row[1] for row in conn.execute("PRAGMA table_info(kb_entities)")}
+    assert entity_cols >= {
+        "id",
+        "tenant_id",
+        "kb_id",
+        "entity_type",
+        "name",
+        "normalized_name",
+        "metadata_json",
+        "created_at",
+        "updated_at",
+    }
+    mention_cols = {row[1] for row in conn.execute("PRAGMA table_info(kb_entity_mentions)")}
+    assert mention_cols >= {
+        "id",
+        "entity_id",
+        "tenant_id",
+        "kb_id",
+        "document_id",
+        "chunk_id",
+        "text",
+        "confidence",
+        "extraction_run_id",
+        "created_at",
+    }
+    relation_cols = {row[1] for row in conn.execute("PRAGMA table_info(kb_relations)")}
+    assert relation_cols >= {
+        "id",
+        "tenant_id",
+        "kb_id",
+        "relation_type",
+        "source_entity_id",
+        "target_entity_id",
+        "evidence_document_id",
+        "evidence_chunk_id",
+        "evidence_text",
+        "confidence",
+        "extraction_run_id",
         "created_at",
     }
     conn.close()
@@ -302,7 +413,7 @@ def test_agent_versions_table_and_columns(tmp_path):
 
 def test_agent_v1_backfill_for_existing_rows(tmp_path):
     db = tmp_path / "test.db"
-    _upgrade_to(db, "026")
+    _upgrade_to(db, "032")
     conn = sqlite3.connect(db)
     conn.execute(
         """
@@ -314,7 +425,7 @@ def test_agent_v1_backfill_for_existing_rows(tmp_path):
     agent_id = conn.execute("SELECT id FROM agents WHERE name='legacy'").fetchone()[0]
     conn.close()
 
-    _upgrade_to(db, "027")
+    _upgrade_to(db, "033")
 
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row
@@ -343,6 +454,28 @@ def test_downgrade_removes_agent_versions(tmp_path):
     conn.close()
     assert "agent_versions" not in tables
     assert "agents" not in tables
+
+
+def test_knowledge_entity_unique_key_is_scoped(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    indexes = conn.execute("PRAGMA index_list(kb_entities)").fetchall()
+    unique_indexes = [row[1] for row in indexes if row[2]]
+    indexed_columns = {
+        index_name: [
+            column[2] for column in conn.execute(f"PRAGMA index_info({index_name})").fetchall()
+        ]
+        for index_name in unique_indexes
+    }
+    conn.close()
+
+    assert [
+        "tenant_id",
+        "kb_id",
+        "entity_type",
+        "normalized_name",
+    ] in indexed_columns.values()
 
 
 def test_migrated_schedule_store_does_not_create_schema():

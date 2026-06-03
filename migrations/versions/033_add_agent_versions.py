@@ -1,7 +1,7 @@
 """add agent versions, channel_agents, and version-binding columns
 
-Revision ID: 027
-Revises: 026
+Revision ID: 033
+Revises: 032
 Create Date: 2026-06-02
 
 Owner module: multi-agent-management
@@ -10,8 +10,8 @@ Owner module: multi-agent-management
 import sqlalchemy as sa
 from alembic import op
 
-revision = "027"
-down_revision = "026"
+revision = "033"
+down_revision = "032"
 branch_labels = None
 depends_on = None
 
@@ -34,18 +34,9 @@ def upgrade() -> None:
     )
     op.create_index("idx_agent_versions_agent", "agent_versions", ["agent_id"])
 
-    # channel_agents was previously created only by the legacy agent_store._init_db();
-    # adopt it into Alembic so schema lifecycle is migration-owned.
-    op.create_table(
-        "channel_agents",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("platform", sa.Text(), nullable=False),
-        sa.Column("channel_id", sa.Text(), nullable=False),
-        sa.Column("agent_id", sa.Integer(), nullable=False),
-        sa.Column("bound_version_id", sa.Integer(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.UniqueConstraint("platform", "channel_id"),
-    )
+    # channel_agents already exists (migration 030). Add the version-binding column
+    # so channel routing can pin a session to a specific agent version.
+    op.add_column("channel_agents", sa.Column("bound_version_id", sa.Integer(), nullable=True))
 
     op.add_column("agents", sa.Column("active_version_id", sa.Integer(), nullable=True))
 
@@ -86,6 +77,7 @@ def _backfill_v1_versions() -> None:
 def downgrade() -> None:
     with op.batch_alter_table("agents") as batch_op:
         batch_op.drop_column("active_version_id")
-    op.drop_table("channel_agents")
+    with op.batch_alter_table("channel_agents") as batch_op:
+        batch_op.drop_column("bound_version_id")
     op.drop_index("idx_agent_versions_agent", table_name="agent_versions")
     op.drop_table("agent_versions")

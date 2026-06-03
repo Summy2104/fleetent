@@ -1,0 +1,29 @@
+{
+  "scope_type": "team",
+  "scope_id": "eng",
+  "items": [
+    {
+      "type": "context",
+      "content": "The platform team owns billing webhook incidents.",
+      "expected_query": "billing webhooks"
+    },
+    {
+      "type": "preference",
+      "content": "Release summaries should be concise and customer-facing.",
+      "expected_query": "release summaries"
+    },
+    {
+      "type": "procedure",
+      "content": "Production deploys require the release checklist.",
+      "expected_query": "production deploy"
+    }
+  ],
+  "archived": {
+    "type": "context",
+    "content": "Archived shared memory must not be retrieved."
+  },
+  "proposal": {
+    "content": "Team uses GitHub Flow for releases.",
+    "type": "procedure"
+  }
+}

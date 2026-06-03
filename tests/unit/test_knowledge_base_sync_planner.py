@@ -165,7 +165,7 @@ async def test_unsupported_files_are_counted_but_not_planned_for_ingest(monkeypa
     _patch_knowledge_runtime(monkeypatch, tmp_path)
     root = tmp_path / "docs"
     root.mkdir()
-    (root / "archive.pdf").write_bytes(b"%PDF")
+    (root / "archive.bin").write_bytes(b"binary")
 
     from fleetent.intelligence.knowledge_base import plan_local_directory_sync
     from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
@@ -184,6 +184,36 @@ async def test_unsupported_files_are_counted_but_not_planned_for_ingest(monkeypa
     assert plan.summary.scanned == 1
     assert plan.summary.unsupported == 1
     assert plan.summary.planned == 0
+
+
+async def test_advanced_files_are_planned_for_ingest(monkeypatch, tmp_path):
+    _patch_knowledge_runtime(monkeypatch, tmp_path)
+    root = tmp_path / "docs"
+    root.mkdir()
+    for filename in ["report.pdf", "guide.docx", "deck.pptx", "book.xlsx"]:
+        (root / filename).write_bytes(b"advanced")
+
+    from fleetent.intelligence.knowledge_base import SyncAction, plan_local_directory_sync
+    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+
+    plan = await plan_local_directory_sync(
+        LocalDirectorySourceConfig(
+            source_id="local-docs",
+            root_path=root,
+            allowed_roots=[root],
+        ),
+        tenant_id="tenant-a",
+        kb_id="support",
+    )
+
+    assert [(item.filename, item.document_format, item.action) for item in plan.items] == [
+        ("book.xlsx", "xlsx", SyncAction.INGEST_NEW),
+        ("deck.pptx", "pptx", SyncAction.INGEST_NEW),
+        ("guide.docx", "docx", SyncAction.INGEST_NEW),
+        ("report.pdf", "pdf", SyncAction.INGEST_NEW),
+    ]
+    assert plan.summary.scanned == 4
+    assert plan.summary.unsupported == 0
 
 
 async def test_missing_source_state_is_planned_for_delete(monkeypatch, tmp_path):

@@ -7,9 +7,11 @@ from fleetent.platform.admin_cli import (
     diagnostics,
     im,
     im_connectors,
+    init_config,
     kb_connectors,
     observability,
     schedules,
+    shared_memory,
     users,
 )
 
@@ -20,8 +22,10 @@ _COMMAND_MODULES = (
     agents,
     schedules,
     kb_connectors,
+    init_config,
     diagnostics,
     observability,
+    shared_memory,
 )
 
 
