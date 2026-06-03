@@ -39,7 +39,7 @@ from fleetent.observability.startup_diagnostics import (
 )
 from fleetent.platform.agent_management_console import agent_admin_api, agent_console_api
 from fleetent.platform.agent_statistics import stats_admin_api
-from fleetent.platform.askit_console import agent_apply_api, askit_console_api
+from fleetent.platform.askit_console import agent_apply_api
 from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import connector_admin_api
 from fleetent.platform.im_gateway_management import im_admin_api, im_connector_manager
@@ -176,7 +176,6 @@ app.include_router(agent_admin_api.router)
 app.include_router(stats_admin_api.router)
 app.include_router(monitor_admin_api.router)
 app.include_router(agent_apply_api.router)
-app.include_router(askit_console_api.router)
 
 
 class ChatRequest(BaseModel):

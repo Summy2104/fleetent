@@ -415,37 +415,24 @@ def test_oauth_write_controls_admin_gated():
     assert "oc-create-bar" in html
 
 
-# --- 9. AskIt module ----------------------------------------------------------
+# --- 9. AskIt module removed --------------------------------------------------
 
 
-def test_askit_tab_and_list_wiring():
+def test_askit_module_removed():
     html = ADMIN_HTML
-    assert 'id="tab-askit"' in html
-    assert "ak-tasks-body" in html
-    assert "/askit/series" in html
-    assert "LOADERS.askit" in html
-
-
-def test_askit_functions_present():
-    html = ADMIN_HTML
-    for fn in (
+    for frag in (
+        'id="tab-askit"',
+        'data-tab="askit"',
+        "LOADERS.askit",
+        "/askit/series",
+        "/askit/run",
+        "/askit/tasks",
         "function akSeries",
         "function akTasks",
         "function akRun",
         "function akTaskDetail",
     ):
-        assert fn in html, fn
-
-
-def test_askit_endpoints_present():
-    html = ADMIN_HTML
-    for frag in (
-        '"/askit/series"',
-        '"/askit/run"',
-        '"/askit/tasks"',
-        "/askit/tasks/${",
-    ):
-        assert frag in html, frag
+        assert frag not in html, frag
 
 
 # --- Redesign: design tokens --------------------------------------------------
@@ -506,7 +493,6 @@ def test_sidebar_all_modules_reachable():
         "stats",
         "monitoring",
         "sessions",
-        "askit",
         "audit",
     ):
         assert f'data-tab="{tab}"' in sidebar, tab
@@ -525,7 +511,7 @@ def test_page_header_primitive_present():
 def test_page_header_applied_to_each_module():
     html = ADMIN_HTML
     # every module section carries a page header
-    assert html.count('class="page-header"') >= 13
+    assert html.count('class="page-header"') >= 12
 
 
 # --- Redesign: toast + confirm dialog -----------------------------------------
@@ -604,7 +590,6 @@ def test_viewer_hidden_write_containers_intact():
         "sess-create-bar",
         "sess-bulk-bar",
         "oc-create-bar",
-        "ak-run-bar",
     ):
         assert f'id="{cid}"' in html, cid
     # the enterApp viewer-gate still references every container

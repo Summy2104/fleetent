@@ -176,7 +176,6 @@
         <button class="nav-item" data-tab="stats" onclick="switchTab('stats')">Statistics</button>
         <button class="nav-item" data-tab="monitoring" onclick="switchTab('monitoring')">Monitoring</button>
         <button class="nav-item" data-tab="sessions" onclick="switchTab('sessions')">Sessions</button>
-        <button class="nav-item" data-tab="askit" onclick="switchTab('askit')">AskIt</button>
       </div>
       <div class="nav-group">
         <button class="nav-group-label" data-group="audit" onclick="switchGroup('audit')">Audit</button>
@@ -464,26 +463,6 @@
         <tbody id="mcp-body"></tbody>
       </table></div>
       <pre id="mcp-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
-    </section>
-
-    <section id="tab-askit" class="hidden">
-      <div class="page-header"><h2 class="ph-title">AskIt</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.askit?.()">Refresh</button></div></div>
-      <div class="card">
-        <div class="row">
-          <select id="ak-series" onchange="akRenderCommands()"></select>
-          <select id="ak-command"></select>
-          <input id="ak-params" placeholder='params JSON (optional, e.g. {"x":1})' style="flex:1;">
-          <label class="muted"><input type="checkbox" id="ak-confirm"> confirm high-risk</label>
-          <span id="ak-run-bar"><button onclick="akRun()">Run</button></span>
-        </div>
-        <div class="muted" style="font-size:12px; margin-top:6px;">Live log streaming degraded to task-detail polling (see design D5).</div>
-      </div>
-      <h3 style="margin-top:16px;">Recent tasks</h3>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Task</th><th>Series</th><th>Command</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody id="ak-tasks-body"></tbody>
-      </table></div>
-      <pre id="ak-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
     </section>
 
     <section id="tab-audit" class="hidden">
@@ -830,7 +809,7 @@ async function enterApp() {
   IS_VIEWER = me.role === "viewer";
   $("whoami").textContent = (me.email || me.id) + " · " + me.role;
   if (IS_VIEWER) {
-    for (const id of ["create-bar", "kb-create-card", "conn-create-bar", "sk-create-bar", "pv-create-bar", "ag-create-bar", "st-report-bar", "mon-create-bar", "mon-maint-bar", "sess-create-bar", "sess-bulk-bar", "oc-create-bar", "ak-run-bar"]) {
+    for (const id of ["create-bar", "kb-create-card", "conn-create-bar", "sk-create-bar", "pv-create-bar", "ag-create-bar", "st-report-bar", "mon-create-bar", "mon-maint-bar", "sess-create-bar", "sess-bulk-bar", "oc-create-bar"]) {
       const el = $(id); if (el) el.classList.add("hidden");
     }
   }
@@ -846,7 +825,7 @@ const TAB_GROUP = {
   users: "access", im: "access",
   agents: "agents", skills: "agents", kb: "agents",
   providers: "models", connectors: "models", oauth: "models",
-  stats: "ops", monitoring: "ops", sessions: "ops", askit: "ops",
+  stats: "ops", monitoring: "ops", sessions: "ops",
   audit: "audit",
 };
 const GROUP_DEFAULT_TAB = { access: "users", agents: "agents", models: "providers", ops: "stats", audit: "audit" };
@@ -1860,51 +1839,6 @@ async function mcpReconnect(id) {
 }
 
 LOADERS.oauth = () => { ocConnectors(); ocGrants(); mcpServers(); };
-
-// --- AskIt ------------------------------------------------------------------
-
-let AK_SERIES = [];
-
-async function akSeries() {
-  AK_SERIES = await api("GET", "/askit/series");
-  $("ak-series").innerHTML = AK_SERIES.map(s =>
-    `<option value="${esc(s.series)}">${esc(s.series)}${s.high_risk ? " (high-risk)" : ""}</option>`).join("");
-  akRenderCommands();
-}
-function akRenderCommands() {
-  const s = AK_SERIES.find(x => x.series === $("ak-series").value);
-  $("ak-command").innerHTML = ((s && s.commands) || []).map(c =>
-    `<option value="${esc(c.command)}">${esc(c.command)}${c.readonly ? "" : " *"}</option>`).join("");
-}
-async function akTasks() {
-  const rows = await api("GET", "/askit/tasks");
-  $("ak-tasks-body").innerHTML = rows.map(t => {
-    const tid = t.task_id || t.id;
-    return `
-      <tr>
-        <td><code>${esc(tid)}</code></td>
-        <td>${esc(t.series || "")}</td>
-        <td class="muted">${esc(t.command || "")}</td>
-        <td><span class="pill ${t.status === "success" ? "active" : (t.status === "failed" ? "blocked" : "")}">${esc(t.status || "")}</span></td>
-        <td class="actions"><button class="small ghost" onclick="akTaskDetail('${esc(tid)}')">Detail</button></td>
-      </tr>`;
-  }).join("") || `<tr><td colspan="5" class="muted">No tasks.</td></tr>`;
-}
-async function akRun() {
-  let params = null;
-  const raw = $("ak-params").value.trim();
-  if (raw) { try { params = JSON.parse(raw); } catch (e) { $("ak-out").textContent = "invalid params JSON"; return; } }
-  const body = { series: $("ak-series").value, command: $("ak-command").value, params };
-  const headers = $("ak-confirm").checked ? { "X-Confirm": "true" } : undefined;
-  try { const r = await api("POST", "/askit/run", body, headers); $("ak-out").textContent = JSON.stringify(r, null, 2); akTasks(); }
-  catch (e) { $("ak-out").textContent = e.message; }
-}
-async function akTaskDetail(id) {
-  try { const r = await api("GET", `/askit/tasks/${encodeURIComponent(id)}`); $("ak-out").textContent = JSON.stringify(r, null, 2); }
-  catch (e) { $("ak-out").textContent = e.message; }
-}
-
-LOADERS.askit = () => { akSeries(); akTasks(); };
 
 async function loadKb() {
   const kbs = await api("GET", "/kb");
