@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install test t test-unit test-integration test-e2e test-evaluation lint fmt check typecheck serve admin
+.PHONY: help install test t test-unit test-unit-ci test-integration test-e2e test-evaluation lint fmt check typecheck serve admin
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -17,6 +17,10 @@ t: ## Run tests (fail-fast, quiet)
 
 test-unit: ## Run unit tests
 	uv run pytest tests/unit
+
+test-unit-ci: ## Run CI unit tests with 75% coverage gate
+	uv run coverage run --source=src/fleetent -m pytest tests/unit
+	uv run coverage report --fail-under=75
 
 test-integration: ## Run integration tests
 	uv run pytest tests/integration
