@@ -467,6 +467,30 @@ def test_downgrade_removes_template_id_column(tmp_path):
     assert "template_id" not in av_cols
 
 
+def test_agent_mcp_servers_table_created(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_mcp_servers)")}
+    conn.close()
+    assert "agent_mcp_servers" in tables
+    assert cols >= {"agent_id", "server_id", "created_at", "created_by"}
+
+
+def test_downgrade_removes_agent_mcp_servers_table(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    cfg = Config()
+    cfg.set_main_option("script_location", _MIGRATIONS_DIR)
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db}")
+    command.downgrade(cfg, "035")
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.close()
+    assert "agent_mcp_servers" not in tables
+
+
 def test_downgrade_removes_agent_versions(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)

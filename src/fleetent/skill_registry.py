@@ -15,9 +15,17 @@ _STOP_WORDS = {"the", "a", "an", "when", "use", "for", "to", "and", "or", "is", 
 class SkillIndex:
     """An isolated skill index rooted at a single skills directory."""
 
-    def __init__(self, skills_dir: str | None = None, *, scan: bool = True) -> None:
+    def __init__(
+        self,
+        skills_dir: str | None = None,
+        *,
+        scan: bool = True,
+        allowed: set[str] | None = None,
+    ) -> None:
         # {name: (description, skill_md_path)}
         self._index: dict[str, tuple[str, str]] = {}
+        # When set, only these skill names survive scanning (per-agent allowlist).
+        self._allowed = allowed
         if scan:
             self.scan(skills_dir)
 
@@ -32,6 +40,8 @@ class SkillIndex:
         for skill_md in base.glob("*/SKILL.md"):
             frontmatter = _parse_frontmatter(skill_md.read_text(encoding="utf-8"))
             name = frontmatter.get("name") or skill_md.parent.name
+            if self._allowed is not None and name not in self._allowed:
+                continue
             description = frontmatter.get("description", "")
             self._index[name] = (description, str(skill_md))
 

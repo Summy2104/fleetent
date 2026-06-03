@@ -434,6 +434,48 @@ def test_agents_deploy_action_present():
     assert "/bindings/channels/" in deploy
 
 
+def test_bindings_modal_has_skill_mcp_channel_sections():
+    html = ADMIN_HTML
+    modal = html.split('id="ag-bind-modal"', 1)[1].split("</div>\n  </div>", 1)[0]
+    # dedicated containers the loader renders into
+    assert 'id="ag-bind-skills"' in modal
+    assert 'id="ag-bind-mcp"' in modal
+    assert 'id="ag-bind-channels"' in modal
+
+
+def test_bindings_modal_loads_from_aggregate_endpoints():
+    html = ADMIN_HTML
+    fn = html.split("function agOpenBind", 1)[1].split("function agCloseBind", 1)[0]
+    # opening the modal pulls the aggregate bindings + skills lists
+    assert "/bindings`" in fn or "/bindings'" in fn
+    assert "/skills`" in fn or "/skills'" in fn
+
+
+def test_bindings_skill_toggle_wired_to_put():
+    html = ADMIN_HTML
+    fn = html.split("function agSetSkill", 1)[1].split("\nasync function", 1)[0]
+    assert '"PUT"' in fn or "'PUT'" in fn
+    assert "/skills/" in fn
+    assert "enabled" in fn
+
+
+def test_bindings_mcp_toggle_wired_to_post_delete():
+    html = ADMIN_HTML
+    bindfn = html.split("function agBindMcp", 1)[1].split("\nasync function", 1)[0]
+    assert '"POST"' in bindfn or "'POST'" in bindfn
+    assert "/bindings/mcp/" in bindfn
+    unbindfn = html.split("function agUnbindMcp", 1)[1].split("\nasync function", 1)[0]
+    assert '"DELETE"' in unbindfn or "'DELETE'" in unbindfn
+    assert "/bindings/mcp/" in unbindfn
+
+
+def test_bindings_write_controls_viewer_gated():
+    html = ADMIN_HTML
+    # the skill + mcp render helpers gate their toggles behind IS_VIEWER
+    render = html.split("function agRenderBindings", 1)[1].split("function agCloseBind", 1)[0]
+    assert "IS_VIEWER" in render
+
+
 # --- 5. Statistics module -----------------------------------------------------
 
 

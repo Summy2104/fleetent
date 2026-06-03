@@ -91,6 +91,9 @@ def mock_client(monkeypatch) -> AsyncMock:
     monkeypatch.setattr(al, "record_trace_event", lambda event: None)
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: f"{name}_result")
     monkeypatch.setattr(al, "match_skill", lambda _: None)
+    # No per-agent bindings by default: skills fall back to all, MCP union is empty.
+    monkeypatch.setattr(al.agent_store, "list_mcp_servers_for_agent", lambda aid: [])
+    monkeypatch.setattr(al.skill_admin_store, "has_any_binding", lambda name: False)
     monkeypatch.setattr(
         al, "build_context", AsyncMock(return_value=BuiltContext(text="", sources=[]))
     )
@@ -1292,8 +1295,9 @@ async def test_run_without_snapshot_uses_default_namespace_and_no_overrides(
 
 async def test_run_stream_with_snapshot_uses_skills_dir(mock_client, monkeypatch):
     class FakeIndex:
-        def __init__(self, skills_dir=None, *, scan=True):
+        def __init__(self, skills_dir=None, *, scan=True, allowed=None):
             self.skills_dir = skills_dir
+            self.allowed = allowed
 
         def match(self, user_input):
             return "deploy"

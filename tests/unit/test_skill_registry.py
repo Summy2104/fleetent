@@ -110,3 +110,22 @@ def test_skillindex_isolated_from_each_other(tmp_path):
     assert idx_a.match("help me provisioning a cluster") == "alpha"
     assert idx_b.match("help me provisioning a cluster") is None
     assert idx_b.match("archiving old backups") == "beta"
+
+
+def test_skillindex_allowed_filters_index(tmp_path):
+    base = tmp_path / "all"
+    _write_skill(base, "alpha", "Use when provisioning compute clusters.")
+    _write_skill(base, "beta", "Use when archiving cold storage backups.")
+    idx = sr.SkillIndex(str(base), allowed={"alpha"})
+    names = {s["name"] for s in idx.list_skills()}
+    assert names == {"alpha"}
+    assert idx.match("help me provisioning a cluster") == "alpha"
+    assert idx.match("archiving old backups") is None
+
+
+def test_skillindex_allowed_none_keeps_all(tmp_path):
+    base = tmp_path / "all"
+    _write_skill(base, "alpha", "Use when provisioning compute clusters.")
+    _write_skill(base, "beta", "Use when archiving cold storage backups.")
+    idx = sr.SkillIndex(str(base), allowed=None)
+    assert {s["name"] for s in idx.list_skills()} == {"alpha", "beta"}

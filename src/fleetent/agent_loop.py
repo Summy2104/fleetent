@@ -11,6 +11,7 @@ from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
 from openai.types.chat import ChatCompletionChunk
 
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
+from fleetent import agent_store
 from fleetent.agent_runtime import AgentSnapshot, filter_tool_schemas
 from fleetent.context_mgr import maybe_compress
 from fleetent.governance.permission_gate import _default_gate
@@ -22,6 +23,7 @@ from fleetent.observability import (
     record_injected_context,
     record_trace_event,
 )
+from fleetent.platform.skill_management import skill_admin_store
 from fleetent.skill_registry import SkillIndex
 from fleetent.skill_registry import load as load_skill
 from fleetent.skill_registry import match as match_skill
@@ -731,7 +733,7 @@ async def run(
     loop falls back to the global behaviour (and the legacy ``allowed_tools``).
     """
     eff_allowed = snapshot.allowed_tools if snapshot is not None else allowed_tools
-    mcp_server_ids = snapshot.mcp_server_ids if snapshot is not None else None
+    mcp_server_ids = _resolve_mcp_ids(snapshot)
     overrides = snapshot.model_overrides if snapshot is not None else None
     memory_namespace = snapshot.memory_namespace if snapshot is not None else "default"
     if snapshot is not None:
@@ -951,10 +953,39 @@ async def run(
         raise
 
 
+def _resolve_skill_allowlist(snapshot: AgentSnapshot | None) -> set[str] | None:
+    """Effective skill allowlist for an agent.
+
+    When the agent has any ``agent_skills`` rows, only the enabled subset is
+    allowed; otherwise (no rows) ``None`` falls back to every skill on disk.
+    """
+    if snapshot is None:
+        return None
+    if skill_admin_store.has_any_binding(snapshot.name):
+        return skill_admin_store.enabled_skill_names(snapshot.name)
+    return None
+
+
+def _resolve_mcp_ids(snapshot: AgentSnapshot | None) -> list[str] | None:
+    """Effective MCP whitelist: union of the snapshot list and agent bindings.
+
+    Additive — bound servers are added to the snapshot whitelist. ``None`` (no
+    restriction) is preserved only when there are no bindings either.
+    """
+    if snapshot is None:
+        return None
+    bound = agent_store.list_mcp_servers_for_agent(snapshot.agent_id)
+    base = snapshot.mcp_server_ids
+    if base is None and not bound:
+        return None
+    return sorted(set(base or []) | set(bound))
+
+
 def _match_skill_for(user_input: str, snapshot: AgentSnapshot | None) -> str | None:
     """Return the matched skill body, scoped to the snapshot's skills dir if set."""
     if snapshot is not None and snapshot.skills_dir:
-        index = SkillIndex(snapshot.skills_dir)
+        allowed = _resolve_skill_allowlist(snapshot)
+        index = SkillIndex(snapshot.skills_dir, allowed=allowed)
         name = index.match(user_input)
         return index.load(name) if name else None
     name = match_skill(user_input)
@@ -1002,7 +1033,7 @@ async def run_stream(
     MCP whitelist, model overrides, memory namespace) is applied.
     """
     eff_allowed = snapshot.allowed_tools if snapshot is not None else allowed_tools
-    mcp_server_ids = snapshot.mcp_server_ids if snapshot is not None else None
+    mcp_server_ids = _resolve_mcp_ids(snapshot)
     overrides = snapshot.model_overrides if snapshot is not None else None
     memory_namespace = snapshot.memory_namespace if snapshot is not None else "default"
     if snapshot is not None:

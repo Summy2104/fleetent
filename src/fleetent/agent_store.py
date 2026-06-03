@@ -461,6 +461,71 @@ def get_agent_for_channel(platform: str, channel_id: str) -> Agent | None:
     return get_by_name(str(row["name"]))
 
 
+def list_users_for_agent(agent_id: int) -> list[str]:
+    rows = (
+        _db()
+        .execute(
+            "SELECT user_id FROM user_agents WHERE agent_id = :agent_id ORDER BY user_id",
+            {"agent_id": agent_id},
+        )
+        .fetchall()
+    )
+    return [str(row["user_id"]) for row in rows]
+
+
+def list_channels_for_agent(agent_id: int) -> list[dict[str, Any]]:
+    rows = (
+        _db()
+        .execute(
+            "SELECT platform, channel_id, bound_version_id FROM channel_agents "
+            "WHERE agent_id = :agent_id ORDER BY platform, channel_id",
+            {"agent_id": agent_id},
+        )
+        .fetchall()
+    )
+    return [
+        {
+            "platform": str(row["platform"]),
+            "channel_id": str(row["channel_id"]),
+            "bound_version_id": row["bound_version_id"],
+        }
+        for row in rows
+    ]
+
+
+def bind_mcp_server(agent_id: int, server_id: str, created_by: str | None = None) -> None:
+    _db().execute(
+        "INSERT OR IGNORE INTO agent_mcp_servers "
+        "(agent_id, server_id, created_at, created_by) "
+        "VALUES (:agent_id, :server_id, :created_at, :created_by)",
+        {
+            "agent_id": agent_id,
+            "server_id": server_id,
+            "created_at": _now(),
+            "created_by": created_by,
+        },
+    )
+
+
+def unbind_mcp_server(agent_id: int, server_id: str) -> None:
+    _db().execute(
+        "DELETE FROM agent_mcp_servers WHERE agent_id = :agent_id AND server_id = :server_id",
+        {"agent_id": agent_id, "server_id": server_id},
+    )
+
+
+def list_mcp_servers_for_agent(agent_id: int) -> list[str]:
+    rows = (
+        _db()
+        .execute(
+            "SELECT server_id FROM agent_mcp_servers WHERE agent_id = :agent_id ORDER BY server_id",
+            {"agent_id": agent_id},
+        )
+        .fetchall()
+    )
+    return [str(row["server_id"]) for row in rows]
+
+
 def get_channel_bound_version_id(platform: str, channel_id: str) -> int | None:
     row = (
         _db()

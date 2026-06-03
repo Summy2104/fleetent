@@ -78,6 +78,32 @@ def list_skills_for_agent(agent_id: str) -> list[dict[str, Any]]:
     )
 
 
+def has_any_binding(agent_id: str) -> bool:
+    """Whether the agent has at least one agent_skills row (enabled or not)."""
+    row = (
+        _database()
+        .execute(
+            "SELECT 1 FROM agent_skills WHERE agent_id = :agent_id LIMIT 1",
+            {"agent_id": agent_id},
+        )
+        .fetchone()
+    )
+    return row is not None
+
+
+def enabled_skill_names(agent_id: str) -> set[str]:
+    """Skill names explicitly enabled (enabled=1) for the agent."""
+    rows = (
+        _database()
+        .execute(
+            "SELECT skill_name FROM agent_skills WHERE agent_id = :agent_id AND enabled = 1",
+            {"agent_id": agent_id},
+        )
+        .fetchall()
+    )
+    return {str(r["skill_name"]) for r in rows}
+
+
 def agents_enabling(skill_name: str) -> list[str]:
     """Return agent ids that explicitly enable the skill — drives delete protection."""
     rows = (

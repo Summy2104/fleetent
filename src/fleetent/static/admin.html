@@ -652,10 +652,23 @@
   </div>
 
   <div id="ag-bind-modal" class="modal hidden">
-    <div class="modal-box" role="dialog" aria-modal="true">
+    <div class="modal-box wide" role="dialog" aria-modal="true">
       <h3 id="ag-bind-title">Bindings</h3>
+
+      <h4 style="margin:10px 0 4px;">Users</h4>
       <div class="row"><input id="ag-bind-user" placeholder="user_id"><button onclick="agBindUser()">Bind user</button><button class="ghost danger" onclick="agUnbindUser()">Unbind user</button></div>
-      <div class="row" style="margin-top:8px;"><input id="ag-bind-platform" placeholder="platform"><input id="ag-bind-channel" placeholder="channel_id"><button onclick="agBindChannel()">Bind channel</button><button class="ghost danger" onclick="agUnbindChannel()">Unbind</button></div>
+      <div id="ag-bind-users" class="muted" style="margin-top:6px;"></div>
+
+      <h4 style="margin:14px 0 4px;">Channels</h4>
+      <div class="row"><input id="ag-bind-platform" placeholder="platform"><input id="ag-bind-channel" placeholder="channel_id"><button onclick="agBindChannel()">Bind channel</button><button class="ghost danger" onclick="agUnbindChannel()">Unbind</button></div>
+      <div id="ag-bind-channels" style="margin-top:6px;"></div>
+
+      <h4 style="margin:14px 0 4px;">Skills</h4>
+      <div id="ag-bind-skills" style="margin-top:6px;"></div>
+
+      <h4 style="margin:14px 0 4px;">MCP servers</h4>
+      <div id="ag-bind-mcp" style="margin-top:6px;"></div>
+
       <div id="ag-bind-err" class="err"></div>
       <div class="row" style="justify-content:flex-end; margin-top:8px;">
         <button type="button" class="ghost" onclick="agCloseBind()">Close</button>
@@ -1609,33 +1622,93 @@ async function agActivateVersion(name, version) {
   catch (e) { $("ag-versions-err").textContent = e.message; }
 }
 
-function agOpenBind(name) {
+let AG_BIND_DATA = { bindings: null, skills: [], mcpServers: [] };
+
+async function agOpenBind(name) {
   AG_BIND_NAME = name;
   $("ag-bind-title").textContent = "Bindings: " + name;
   $("ag-bind-err").textContent = "";
   for (const id of ["ag-bind-user", "ag-bind-platform", "ag-bind-channel"]) $(id).value = "";
+  for (const id of ["ag-bind-users", "ag-bind-channels", "ag-bind-skills", "ag-bind-mcp"]) $(id).innerHTML = "";
   $("ag-bind-modal").classList.remove("hidden");
+  const enc = encodeURIComponent(name);
+  try {
+    const [bindings, skills, mcpServers] = await Promise.all([
+      api("GET", `/agents/${enc}/bindings`),
+      api("GET", `/agents/${enc}/skills`),
+      api("GET", "/mcp/servers").catch(() => []),
+    ]);
+    AG_BIND_DATA = { bindings, skills, mcpServers };
+    agRenderBindings();
+  } catch (e) { $("ag-bind-err").textContent = e.message; }
 }
+
+async function agReloadBindings() {
+  const enc = encodeURIComponent(AG_BIND_NAME);
+  try {
+    const [bindings, skills] = await Promise.all([
+      api("GET", `/agents/${enc}/bindings`),
+      api("GET", `/agents/${enc}/skills`),
+    ]);
+    AG_BIND_DATA.bindings = bindings;
+    AG_BIND_DATA.skills = skills;
+    agRenderBindings();
+  } catch (e) { $("ag-bind-err").textContent = e.message; }
+}
+
+function agRenderBindings() {
+  const b = AG_BIND_DATA.bindings || { users: [], channels: [], mcp_servers: [] };
+  $("ag-bind-users").textContent = (b.users || []).length ? ("Bound: " + b.users.join(", ")) : "No users bound.";
+  $("ag-bind-channels").innerHTML = (b.channels || []).length
+    ? b.channels.map(c => `<div class="row">${esc(c.platform)} / ${esc(c.channel_id)}${IS_VIEWER ? "" : ` <button class="small ghost danger" onclick="agUnbindChannelRow('${esc(c.platform)}','${esc(c.channel_id)}')">Unbind</button>`}</div>`).join("")
+    : `<div class="muted">No channels bound.</div>`;
+  $("ag-bind-skills").innerHTML = (AG_BIND_DATA.skills || []).map(s =>
+    `<label class="row"><input type="checkbox" ${s.enabled ? "checked" : ""} ${IS_VIEWER ? "disabled" : ""} onchange="agSetSkill('${esc(s.skill_name)}', this.checked)"> ${esc(s.skill_name)}</label>`
+  ).join("") || `<div class="muted">No skills available.</div>`;
+  const bound = new Set(b.mcp_servers || []);
+  const known = (AG_BIND_DATA.mcpServers || []).map(m => m.id || m);
+  const allIds = Array.from(new Set([...known, ...(b.mcp_servers || [])]));
+  $("ag-bind-mcp").innerHTML = allIds.map(id =>
+    `<label class="row"><input type="checkbox" ${bound.has(id) ? "checked" : ""} ${IS_VIEWER ? "disabled" : ""} onchange="this.checked ? agBindMcp('${esc(id)}') : agUnbindMcp('${esc(id)}')"> ${esc(id)}</label>`
+  ).join("") || `<div class="muted">No MCP servers configured.</div>`;
+}
+
 function agCloseBind() { $("ag-bind-modal").classList.add("hidden"); }
 async function agBindUser() {
   const uid = $("ag-bind-user").value.trim(); if (!uid) return;
-  try { await api("POST", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/users/${encodeURIComponent(uid)}`); $("ag-bind-err").textContent = "user bound"; }
+  try { await api("POST", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/users/${encodeURIComponent(uid)}`); $("ag-bind-err").textContent = "user bound"; agReloadBindings(); }
   catch (e) { $("ag-bind-err").textContent = e.message; }
 }
 async function agUnbindUser() {
   const uid = $("ag-bind-user").value.trim(); if (!uid) return;
-  try { await api("DELETE", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/users/${encodeURIComponent(uid)}`); $("ag-bind-err").textContent = "user unbound"; }
+  try { await api("DELETE", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/users/${encodeURIComponent(uid)}`); $("ag-bind-err").textContent = "user unbound"; agReloadBindings(); }
   catch (e) { $("ag-bind-err").textContent = e.message; }
 }
 async function agBindChannel() {
   const pf = $("ag-bind-platform").value.trim(), ch = $("ag-bind-channel").value.trim(); if (!pf || !ch) return;
-  try { await api("POST", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); $("ag-bind-err").textContent = "channel bound"; }
+  try { await api("POST", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); $("ag-bind-err").textContent = "channel bound"; agReloadBindings(); }
   catch (e) { $("ag-bind-err").textContent = e.message; }
 }
 async function agUnbindChannel() {
   const pf = $("ag-bind-platform").value.trim(), ch = $("ag-bind-channel").value.trim(); if (!pf || !ch) return;
-  try { await api("DELETE", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); $("ag-bind-err").textContent = "channel unbound"; }
+  try { await api("DELETE", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); $("ag-bind-err").textContent = "channel unbound"; agReloadBindings(); }
   catch (e) { $("ag-bind-err").textContent = e.message; }
+}
+async function agUnbindChannelRow(pf, ch) {
+  try { await api("DELETE", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); agReloadBindings(); }
+  catch (e) { $("ag-bind-err").textContent = e.message; }
+}
+async function agSetSkill(skill, enabled) {
+  try { await api("PUT", `/agents/${encodeURIComponent(AG_BIND_NAME)}/skills/${encodeURIComponent(skill)}`, { enabled }); $("ag-bind-err").textContent = "skill " + (enabled ? "enabled" : "disabled"); }
+  catch (e) { $("ag-bind-err").textContent = e.message; agReloadBindings(); }
+}
+async function agBindMcp(server) {
+  try { await api("POST", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/mcp/${encodeURIComponent(server)}`); agReloadBindings(); }
+  catch (e) { $("ag-bind-err").textContent = e.message; agReloadBindings(); }
+}
+async function agUnbindMcp(server) {
+  try { await api("DELETE", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/mcp/${encodeURIComponent(server)}`); agReloadBindings(); }
+  catch (e) { $("ag-bind-err").textContent = e.message; agReloadBindings(); }
 }
 
 let AG_DEPLOY_NAME = null;
