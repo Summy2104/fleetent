@@ -282,6 +282,20 @@ def test_resource_id_inputs_are_readonly():
         assert "readonly" in m.group(0), input_id
 
 
+def test_textarea_themed_and_template_editor_roomy():
+    html = ADMIN_HTML
+    import re
+
+    style = html.split("<style", 1)[1].split("</style>", 1)[0]
+    # global form-control rule now covers textarea too
+    assert re.search(r"input,\s*select,\s*textarea", style)
+    # template modal is wide and the prompt editor is tall
+    box = html.split('id="tmpl-modal"', 1)[1].split("</div>", 1)[0]
+    assert "modal-box wide" in box
+    m = re.search(r'id="tmpl-system-prompt"[^>]*rows="(\d+)"', html)
+    assert m and int(m.group(1)) >= 12
+
+
 def test_genid_helper_and_create_uses_it():
     html = ADMIN_HTML
     assert "function genId" in html

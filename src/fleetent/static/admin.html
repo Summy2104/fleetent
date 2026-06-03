@@ -31,7 +31,8 @@
   button.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); }
   button.danger { background:var(--danger); }
   button.small { padding:3px 8px; font-size:12px; }
-  input, select { background:#0c0e12; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:6px 8px; font-size:13px; }
+  input, select, textarea { background:#0c0e12; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:6px 8px; font-size:13px; }
+  textarea { width:100%; box-sizing:border-box; resize:vertical; }
   /* shell: sidebar + content */
   .layout { display:flex; align-items:stretch; min-height:calc(100vh - 49px); }
   .sidebar { flex:0 0 220px; width:220px; background:var(--bg-2); border-right:1px solid var(--border);
@@ -620,13 +621,13 @@
   </div>
 
   <div id="tmpl-modal" class="modal hidden">
-    <div class="modal-box" role="dialog" aria-modal="true">
+    <div class="modal-box wide" role="dialog" aria-modal="true">
       <h3 id="tmpl-modal-title">New template</h3>
       <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="tmplSave(); return false;">
         <input id="tmpl-id" placeholder="auto-generated" autocomplete="off" readonly>
         <input id="tmpl-display-name" placeholder="display name" autocomplete="off">
         <input id="tmpl-allowed-tools" placeholder="allowed_tools (comma-separated, e.g. read_*, github__*)" autocomplete="off">
-        <textarea id="tmpl-system-prompt" placeholder="system prompt" rows="8" style="font-family:monospace;"></textarea>
+        <textarea id="tmpl-system-prompt" placeholder="system prompt" rows="16" style="font-family:monospace;"></textarea>
         <div id="tmpl-err" class="err"></div>
         <div class="row" style="justify-content:flex-end;">
           <button type="button" class="ghost" onclick="tmplCloseModal()">Cancel</button>
