@@ -56,9 +56,9 @@
 
 ## 6. Verification
 
-- [ ] 6.1 Run `uv run ruff format src tests`
-- [ ] 6.2 Run `uv run ruff check src tests`
-- [ ] 6.3 Run `uv run mypy src`
-- [ ] 6.4 Run `uv run pytest -x -q`
-- [ ] 6.5 Run `openspec validate 2026-06-02-long-term-context-agent-tenant-policy --strict`
-- [ ] 6.6 Run `git diff --check`
+- [x] 6.1 Run `uv run ruff format src tests`
+- [x] 6.2 Run `uv run ruff check src tests`
+- [x] 6.3 Run `uv run mypy src`
+- [x] 6.4 Run `uv run pytest -x -q`
+- [x] 6.5 Run `openspec validate 2026-06-02-long-term-context-agent-tenant-policy --strict`
+- [x] 6.6 Run `git diff --check`
