@@ -509,8 +509,8 @@ def test_page_header_primitive_present():
 
 def test_page_header_applied_to_each_module():
     html = ADMIN_HTML
-    # every module section carries a page header
-    assert html.count('class="page-header"') >= 12
+    # every module section carries a page header (one per top-level module tab)
+    assert html.count('class="page-header"') >= 11
 
 
 # --- Redesign: toast + confirm dialog -----------------------------------------
@@ -611,21 +611,11 @@ def test_secret_fields_masked_no_prefill():
 # --- user-scoped IM connectors: owner column + owner-scoped create -----------
 
 
-def test_im_connectors_table_has_owner_column():
+def test_im_connector_owner_shown_in_grouped_view():
     html = ADMIN_HTML
-    # the connectors table header row precedes the conn-body tbody
-    head = html.split("conn-body", 1)[0]
-    thead = head.rsplit("<thead>", 1)[1]
-    assert ">Owner<" in thead
-
-
-def test_im_connectors_render_owner_cell():
-    html = ADMIN_HTML
-    body = html.split("async function loadConn()", 1)[1].split("function renderConnFields", 1)[0]
-    # each row exposes the owner the connector belongs to (admin sees all owners)
-    assert "r.owner_id" in body
-    # colspan for the empty state must cover the new column count (6)
-    assert 'colspan="6"' in body
+    body = html.split("async function loadIm()", 1)[1].split("async function imBlock", 1)[0]
+    # each platform group surfaces the connector's owner (admin sees all owners)
+    assert "owner_id" in body
 
 
 def test_im_connector_create_scoped_to_caller_owner():
@@ -647,24 +637,23 @@ def test_separate_connectors_tab_removed():
     assert 'id="tab-connectors"' not in html
 
 
-def test_connector_block_lives_inside_im_tab():
+def test_im_users_and_connectors_unified_in_im_tab():
     html = ADMIN_HTML
     im_section = html.split('id="tab-im"', 1)[1].split("</section>", 1)[0]
-    # connector list + create bar + heading now render within the IM tab
-    assert "conn-body" in im_section
+    # one grouped container replaces the two separate stacked tables
+    assert 'id="im-groups"' in im_section
+    # the add-connection control is retained inside the IM tab
     assert "conn-create-bar" in im_section
-    assert "IM Connectors" in im_section
-    # the IM users block stays too
-    assert "im-body" in im_section
+    # legacy separate tbodies are gone — users + connector render per platform group
+    assert "conn-body" not in im_section
+    assert "im-body" not in im_section
 
 
-def test_im_loader_refreshes_both_lists():
+def test_im_loader_renders_unified_view():
     html = ADMIN_HTML
     loader = html.split("LOADERS.im =", 1)[1].split("\n", 1)[0]
     assert "loadIm()" in loader
-    assert "loadConn()" in loader
-    # the standalone connectors loader registration is gone
+    # single unified renderer; no standalone connectors loader/tab
     assert "LOADERS.connectors" not in html
-    # and connectors is no longer a routable tab group entry
     tab_group = html.split("const TAB_GROUP", 1)[1].split("}", 1)[0]
     assert "connectors" not in tab_group

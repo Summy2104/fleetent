@@ -168,7 +168,7 @@
       <div class="nav-group">
         <button class="nav-group-label" data-group="models" onclick="switchGroup('models')">Models &amp; Connectors</button>
         <button class="nav-item" data-tab="providers" onclick="switchTab('providers')">Providers</button>
-        <button class="nav-item" data-tab="oauth" onclick="switchTab('oauth')">OAuth &amp; MCP</button>
+        <button class="nav-item" data-tab="oauth" onclick="switchTab('oauth')">Connectors</button>
       </div>
       <div class="nav-group">
         <button class="nav-group-label" data-group="ops" onclick="switchGroup('ops')">Ops</button>
@@ -209,21 +209,12 @@
     </section>
 
     <section id="tab-im" class="hidden">
-      <div class="page-header"><h2 class="ph-title">IM Users</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.im?.()">Refresh</button></div></div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Platform</th><th>Platform user</th><th>Internal user</th><th>State</th><th>Actions</th></tr></thead>
-        <tbody id="im-body"></tbody>
-      </table></div>
-
-      <div class="page-header" style="margin-top:var(--sp-4);"><h2 class="ph-title">IM Connectors</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="loadConn()">Refresh</button></div></div>
+      <div class="page-header"><h2 class="ph-title">IM</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.im?.()">Refresh</button></div></div>
       <div class="row" style="margin-bottom:12px;">
-        <span class="muted" style="flex:1;">IM platform connections (credentials stored server-side, shown masked)</span>
+        <span class="muted" style="flex:1;">IM platforms — each connector with its users (credentials stored server-side, shown masked)</span>
         <span id="conn-create-bar"><button onclick="openConnModal()">Add connection</button></span>
       </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Owner</th><th>Platform</th><th>Status</th><th>Enabled</th><th>Credentials</th><th>Actions</th></tr></thead>
-        <tbody id="conn-body"></tbody>
-      </table></div>
+      <div id="im-groups"></div>
     </section>
 
     <section id="tab-kb" class="hidden">
@@ -843,7 +834,7 @@ function switchTab(tab) {
 }
 
 LOADERS.users = () => loadUsers();
-LOADERS.im = () => { loadIm(); loadConn(); };
+LOADERS.im = () => loadIm();
 LOADERS.kb = () => loadKb();
 LOADERS.audit = () => loadAudit();
 
@@ -945,21 +936,55 @@ async function viewKeys(id) {
   }
 }
 
+// Unified per-platform view: one block per platform shows its connector
+// (status / masked credentials / enable-disable) and the IM users on it.
 async function loadIm() {
-  const rows = await api("GET", "/im-users");
-  $("im-body").innerHTML = rows.map(r => `
-    <tr>
-      <td>${esc(r.platform)}</td>
-      <td>${esc(r.platform_user_id)}</td>
-      <td class="muted">${esc((r.user_id||"").slice(0,8))}</td>
-      <td><span class="pill ${r.allowed ? "active" : "blocked"}">${r.allowed ? "allowed" : "blocked"}</span></td>
-      <td class="actions">
-        <button class="small ghost" onclick="openBindModal(${r.id})">Bind</button>
-        ${r.allowed
-          ? `<button class="small danger" onclick="imBlock(${r.id})">Block</button>`
-          : `<button class="small ghost" onclick="imRestore(${r.id})">Restore</button>`}
-      </td>
-    </tr>`).join("") || `<tr><td colspan="5" class="muted">No IM users.</td></tr>`;
+  const [conns, users] = await Promise.all([
+    api("GET", "/im/connectors"),
+    api("GET", "/im-users"),
+  ]);
+  const connByPlat = {};
+  for (const c of conns) connByPlat[c.platform] = c;
+  const usersByPlat = {};
+  for (const u of users) (usersByPlat[u.platform] ||= []).push(u);
+  const platforms = [...new Set([...conns.map(c => c.platform), ...users.map(u => u.platform)])].sort();
+  if (!platforms.length) { $("im-groups").innerHTML = `<div class="muted">No IM platforms.</div>`; return; }
+  $("im-groups").innerHTML = platforms.map(p => {
+    const c = connByPlat[p];
+    const creds = c ? Object.entries(c.config || {}).map(([k, v]) => `${esc(k)}=${esc(v)}`).join(", ") : "";
+    const connBar = c
+      ? `<span class="pill">${esc(c.status || "")}</span>
+         <span class="pill ${c.enabled ? "active" : "blocked"}">${c.enabled ? "on" : "off"}</span>
+         <span class="muted">owner ${esc((c.owner_id || "").slice(0, 8))}</span>
+         <span class="muted" style="flex:1;">${creds || "—"}</span>
+         ${c.enabled
+            ? `<button class="small danger" onclick="connDisable('${esc(p)}')">Disable</button>`
+            : `<button class="small ghost" onclick="connEnable('${esc(p)}')">Enable</button>`}`
+      : `<span class="muted" style="flex:1;">No connector configured</span>`;
+    const rows = (usersByPlat[p] || []).map(r => `
+      <tr>
+        <td>${esc(r.platform_user_id)}</td>
+        <td class="muted">${esc((r.user_id || "").slice(0, 8))}</td>
+        <td><span class="pill ${r.allowed ? "active" : "blocked"}">${r.allowed ? "allowed" : "blocked"}</span></td>
+        <td class="actions">
+          <button class="small ghost" onclick="openBindModal(${r.id})">Bind</button>
+          ${r.allowed
+            ? `<button class="small danger" onclick="imBlock(${r.id})">Block</button>`
+            : `<button class="small ghost" onclick="imRestore(${r.id})">Restore</button>`}
+        </td>
+      </tr>`).join("") || `<tr><td colspan="4" class="muted">No users on this platform.</td></tr>`;
+    return `
+      <div class="card" style="margin-bottom:var(--sp-4);">
+        <div class="row" style="align-items:center; gap:8px; margin-bottom:10px;">
+          <h3 style="margin:0; text-transform:capitalize;">${esc(p)}</h3>
+          ${connBar}
+        </div>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Platform user</th><th>Internal user</th><th>State</th><th>Actions</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+      </div>`;
+  }).join("");
 }
 
 async function imBlock(id) { const reason = prompt("Reason?"); if (reason === null) return; try { await api("POST", `/im-users/${id}/block`, { reason }); loadIm(); } catch (e) { toast(e.message, "error"); } }
@@ -992,25 +1017,8 @@ const CONN_FIELDS = {
   whatsapp: ["phone_number_id", "access_token", "verify_token", "business_account_id"],
 };
 
-async function loadConn() {
-  const rows = await api("GET", "/im/connectors");
-  $("conn-body").innerHTML = rows.map(r => {
-    const creds = Object.entries(r.config || {}).map(([k, v]) => `${esc(k)}=${esc(v)}`).join(", ");
-    return `
-      <tr>
-        <td class="muted">${esc(r.owner_id || "")}</td>
-        <td>${esc(r.platform)}</td>
-        <td><span class="pill">${esc(r.status || "")}</span></td>
-        <td><span class="pill ${r.enabled ? "active" : "blocked"}">${r.enabled ? "on" : "off"}</span></td>
-        <td class="muted">${creds || "—"}</td>
-        <td class="actions">
-          ${r.enabled
-            ? `<button class="small danger" onclick="connDisable('${esc(r.platform)}')">Disable</button>`
-            : `<button class="small ghost" onclick="connEnable('${esc(r.platform)}')">Enable</button>`}
-        </td>
-      </tr>`;
-  }).join("") || `<tr><td colspan="6" class="muted">No connectors.</td></tr>`;
-}
+// Connector mutations refresh the unified per-platform view.
+async function loadConn() { return loadIm(); }
 
 function renderConnFields() {
   const platform = $("conn-platform").value;
