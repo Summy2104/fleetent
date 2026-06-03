@@ -39,8 +39,9 @@ def agent_runtime(monkeypatch):
     )
     monkeypatch.setattr(agent_loop, "get_async_client_and_config", lambda _: (client, cfg))
     monkeypatch.setattr(agent_loop, "get_schemas", lambda: [])
-    monkeypatch.setattr(agent_loop, "maybe_compress", lambda messages: messages)
+    monkeypatch.setattr(agent_loop, "maybe_compress", lambda messages, **kwargs: messages)
     monkeypatch.setattr(agent_loop, "match_skill", lambda _: None)
+    monkeypatch.setattr(agent_loop, "extract_and_update", AsyncMock())
     return client
 
 

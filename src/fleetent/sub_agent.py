@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
+
+from fleetent import agent_loop, sub_agent_lifecycle
+from fleetent.cancellation import CancelToken
+from fleetent.sub_agent_lifecycle import SubAgentLifecycle, SubAgentState
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +24,10 @@ class SubAgentResult:
     parent_session_id: str
 
 
+def _now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
 class SubAgentExecutor:
     async def run(
         self,
@@ -25,9 +35,22 @@ class SubAgentExecutor:
         parent_user_id: str,
         parent_agent_id: int | None,
         parent_session_id: str,
+        *,
+        timeout_seconds: int | None = None,
+        cancel_token: CancelToken | None = None,
     ) -> list[SubAgentResult]:
+        sub_agent_lifecycle.init_db()
+        effective_timeout = sub_agent_lifecycle.resolve_timeout(timeout_seconds)
+        batch_token = cancel_token if cancel_token is not None else CancelToken()
         coros = [
-            self._run_one(task, parent_user_id, parent_agent_id, parent_session_id)
+            self._run_one(
+                task,
+                parent_user_id,
+                parent_agent_id,
+                parent_session_id,
+                effective_timeout,
+                batch_token,
+            )
             for task in tasks
         ]
         return list(await asyncio.gather(*coros))
@@ -38,23 +61,70 @@ class SubAgentExecutor:
         parent_user_id: str,
         parent_agent_id: int | None,
         parent_session_id: str,
+        timeout_seconds: int,
+        batch_token: CancelToken,
     ) -> SubAgentResult:
-        # Avoid module import cycle: agent_loop imports SubAgentExecutor for tool dispatch.
-        from fleetent import agent_loop
-
         name = task["name"]
         prompt = task["prompt"]
+        lc = SubAgentLifecycle(
+            run_id=uuid.uuid4().hex,
+            parent_session_id=parent_session_id,
+            name=name,
+            timeout_seconds=timeout_seconds,
+            created_at=_now_iso(),
+        )
+
+        # External cancel may already have fired before this task starts: persist
+        # pending → cancelled without ever entering running (started_at stays None).
+        # On the normal path `pending` is transient (microseconds, no await before
+        # running), so the first persisted row is `running` — one fewer fsync on
+        # the hot path while keeping every observable terminal state intact.
+        if batch_token.is_cancelled():
+            sub_agent_lifecycle.upsert(lc)
+            self._transition(lc, SubAgentState.cancelled)
+            return SubAgentResult(
+                name=name, result=None, error=None, parent_session_id=parent_session_id
+            )
+
+        # Per-task token: own deadline OR parent/external cancel (D3 parent link).
+        child = CancelToken(deadline=time.monotonic() + timeout_seconds, parent=batch_token)
+        lc.started_at = _now_iso()
+        self._transition(lc, SubAgentState.running)
+
         try:
             result = await agent_loop.run(
                 messages=[{"role": "user", "content": prompt}],
                 user_id=parent_user_id,
                 is_sub_agent=True,
-            )
-            return SubAgentResult(
-                name=name, result=result, error=None, parent_session_id=parent_session_id
+                cancel_token=child,
             )
         except Exception as exc:
             logger.warning("sub_agent_task_failed task=%s error=%s", name, exc)
+            self._transition(lc, SubAgentState.failed, error=str(exc))
             return SubAgentResult(
                 name=name, result=None, error=str(exc), parent_session_id=parent_session_id
             )
+
+        if child.is_cancelled():
+            # Distinguish own-deadline (timed_out) from external/parent cancel.
+            passed = child.deadline is not None and time.monotonic() >= child.deadline
+            self._transition(lc, SubAgentState.timed_out if passed else SubAgentState.cancelled)
+            return SubAgentResult(
+                name=name, result=result, error=None, parent_session_id=parent_session_id
+            )
+
+        self._transition(lc, SubAgentState.succeeded)
+        return SubAgentResult(
+            name=name, result=result, error=None, parent_session_id=parent_session_id
+        )
+
+    def _transition(
+        self, lc: SubAgentLifecycle, dst: SubAgentState, *, error: str | None = None
+    ) -> None:
+        sub_agent_lifecycle.validate_transition(lc.state, dst)
+        lc.state = dst
+        if error is not None:
+            lc.error = error
+        if dst is not SubAgentState.running:
+            lc.ended_at = _now_iso()
+        sub_agent_lifecycle.upsert(lc)

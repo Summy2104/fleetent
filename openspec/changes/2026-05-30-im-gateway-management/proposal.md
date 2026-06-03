@@ -38,7 +38,7 @@ IM 接入层目前**只能开机静态启动、无法运行时管理**：
 - **代码**：
   - 新增：`im_connector_store.py`（`im_connectors` 表读写 + 状态上报）、`im_connector_manager.py`（adapter 生命周期 supervisor：start / stop / reload）、`im_channel_allowlist.py`（白名单表 + 校验）、`im_admin_api.py`（FastAPI `/admin/im/*` 路由）
   - 修改：`im_gateway/slack.py`、`im_gateway/telegram.py`（接入 supervisor + 状态上报 + 从 DB 取 config）、`im_gateway/normalizer.py`（route 前置 channel 白名单校验）、`server.py`（lifespan 改为经 manager 启动 enabled 连接器、mount admin router）、`admin.py`（新增 im-connector / im-channel CLI 命令）、`config.py`（令牌字段保留作为 fallback）
-- **依赖**：无新增依赖（slack-bolt、python-telegram-bot、FastAPI、aiosqlite 均已在）。
+- **依赖**：无新增依赖（slack-bolt、python-telegram-bot、FastAPI、stdlib sqlite3 均已在）。
 - **数据**：`data/users.db` 新增 `im_connectors`、`im_channel_allowlist` 两张表；`seed-connectors` 一次性把 `.env` 中的 slack / telegram 令牌写入 `im_connectors.config` 并按是否有令牌置 `enabled`。令牌明文存于本机 SQLite（与 `.env` 同等信任边界，遵守数据不出内网），API / UI 一律脱敏。
 - **认证依赖**：`/admin/im/*` 复用 `agent-admin-api` change 引入的 `users.is_admin` 守卫；若该 change 尚未合入，本 change 在实施时需先确保 admin 守卫存在（见 tasks 0.x 前置检查）。
 - **破坏性**：

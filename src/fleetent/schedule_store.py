@@ -16,6 +16,7 @@ def create(
     agent_name: str | None,
     message: str,
     source: str = "dynamic",
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     task_id = str(uuid.uuid4())
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -24,11 +25,11 @@ def create(
             """
             INSERT INTO scheduled_tasks (
                 id, name, cron_expr, timezone, user_id, agent_name,
-                message, enabled, source, created_at
+                message, enabled, source, created_at, session_id
             )
             VALUES (
                 :id, :name, :cron_expr, :timezone, :user_id, :agent_name,
-                :message, 1, :source, :created_at
+                :message, 1, :source, :created_at, :session_id
             )
             """,
             {
@@ -41,6 +42,7 @@ def create(
                 "message": message,
                 "source": source,
                 "created_at": now,
+                "session_id": session_id,
             },
         )
     return {
@@ -54,6 +56,7 @@ def create(
         "enabled": 1,
         "source": source,
         "created_at": now,
+        "session_id": session_id,
     }
 
 

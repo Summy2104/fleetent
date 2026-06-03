@@ -1,0 +1,77 @@
+# compression-layered-retention Specification
+
+## Purpose
+TBD - created by archiving change compression-layered-retention. Update Purpose after archive.
+## Requirements
+### Requirement: 压缩切分为头部 / 中段 / 尾部三层
+
+上下文压缩 SHALL 把待压缩消息显式切分为三层：头部（系统提示消息 + 用户初始意图消息；**不含压缩自产的摘要消息**）、中段（头部与尾部之间的早期对话）、尾部（最近若干消息）。压缩后的消息序列 MUST 按「头部完整消息、摘要消息、尾部完整消息」的顺序组装，且对 LLM 合法。
+
+#### Scenario: 压缩后按三层顺序组装
+- **WHEN** 触发压缩且会话存在可摘要的中段
+- **THEN** 返回的序列顺序为「头部完整消息 → 一条摘要消息 → 尾部完整消息」，头部与尾部消息保持原始顺序
+
+#### Scenario: 仅中段进入摘要
+- **WHEN** 触发压缩
+- **THEN** 仅中段消息被传入 LLM 摘要，头部与尾部消息不被传入摘要
+
+#### Scenario: 压缩自产的摘要消息不被提升进头部
+- **WHEN** 待压缩序列中存在上一次压缩产出的摘要消息（`role==system` 且 content 以 `[Earlier conversation summary]` 前缀标注）
+- **THEN** 头部识别将其排除在受保护头部完整保留区之外（不与系统提示一并提升进头部），由摘要槽位处理
+
+### Requirement: 完整保留用户初始意图
+
+压缩 SHALL 将用户最初的需求意图消息（会话开头处、位于任何 assistant / tool 消息之前的引导性用户消息）纳入头部完整保留。该初始意图消息 MUST NOT 进入 LLM 摘要，也 MUST NOT 被截断或改写。当严格回落到 `Tretained` 目标线会迫使摘要或截断初始意图时，压缩 MUST 让位于初始意图完整保留（实际 token 允许略高于目标线），序列仍对 LLM 合法。
+
+#### Scenario: 初始意图消息压缩后原样保留
+- **WHEN** 会话开头存在用户初始意图消息且触发压缩
+- **THEN** 压缩后的序列中该初始意图消息原样、完整存在，未被摘要或截断
+
+#### Scenario: 目标线让位于初始意图完整保留
+- **WHEN** 严格回落到 `Tretained` 目标线会迫使摘要或截断用户初始意图消息
+- **THEN** 完整保留初始意图，压缩后估算 token 允许略高于目标线，序列对 LLM 合法
+
+#### Scenario: 开头无用户意图消息时安全退化
+- **WHEN** 会话开头不是用户消息（或不存在用户消息）
+- **THEN** 头部仅保留系统提示消息，压缩仍正常完成且序列合法，不报错
+
+### Requirement: 尾部保留沿用工具对完整性
+
+尾部 SHALL 沿用既有的最近消息保留与工具调用对（tool_call / tool_result）完整性约束。压缩 MUST NOT 在某个 tool_call 与其对应结果之间截断尾部，且 MUST 以对象标识（identity）而非值相等判断尾部边界。
+
+#### Scenario: 尾部不切断工具调用对
+- **WHEN** 尾部边界落在某个 tool_call 与其结果之间
+- **THEN** 保留完整的工具调用对，尾部允许相应扩展，序列对 LLM 合法
+
+### Requirement: 初始意图保留条数受上界约束
+
+为防止异常长的开场把头部撑大到挤占 `Tretained`，纳入头部完整保留的初始意图消息条数 MUST 受一个上界约束（**默认 2**，覆盖「引子 + 真正需求」的分句开场）。该上界 SHALL 经配置动态可调（pydantic `Settings` 字段 `compression_initial_intent_max`，可由 `.env` / `config/settings.yaml` 覆盖），亦 MAY 经 config dict 注入，MUST NOT 引入全局可变状态。超过上界的开头用户消息不计入初始意图头部，按中段处理。
+
+#### Scenario: 上界经配置动态调整
+- **WHEN** 通过配置覆盖 `compression_initial_intent_max`
+- **THEN** 纳入头部完整保留的开头连续用户消息条数按覆盖后的上界生效
+
+#### Scenario: 初始意图条数受上界限制
+- **WHEN** 会话开头存在超过上界条数的连续用户消息
+- **THEN** 仅上界以内的开头用户消息纳入头部完整保留，其余进入中段按常规摘要
+
+### Requirement: 头部完整层计入目标线投影
+
+压缩选取尾部规模时 SHALL 把头部完整层（系统提示 + 初始意图）的估算 token 计入固定投影，使压缩后估算 token 回落到 `Tretained` 目标线附近或以下。当头部较大时，尾部 MAY 相应收缩，但 MUST 保留至少一条尾部消息并维持工具对完整性。
+
+#### Scenario: 头部增大时尾部收缩仍回落目标线
+- **WHEN** 头部（含初始意图）较大致固定投影上升
+- **THEN** 尾部相应收缩，压缩后估算 token 回落到 `Tretained` 附近或以下，且尾部至少保留一条消息
+
+### Requirement: 短会话退化不产生空摘要
+
+当头部与尾部已覆盖全部对话消息、中段为空时，压缩 MUST NOT 生成空摘要消息。若头部与尾部存在指向同一对象的重叠消息，压缩 MUST 以对象标识去重，保留单份并维持原始顺序。
+
+#### Scenario: 中段为空时不插入摘要消息
+- **WHEN** 会话过短致中段为空
+- **THEN** 返回的序列不含摘要消息，仅为去重后的头部与尾部消息，顺序合法
+
+#### Scenario: 头尾重叠按标识去重
+- **WHEN** 同一条消息既属于头部又落入尾部
+- **THEN** 该消息在结果中只出现一次（按对象标识判定），序列顺序保持原始相对次序
+
