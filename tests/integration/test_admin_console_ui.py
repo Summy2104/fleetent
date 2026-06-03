@@ -229,6 +229,23 @@ def test_agents_crud_functions_present():
         assert fn in html, fn
 
 
+def test_agent_templates_have_own_tab():
+    html = ADMIN_HTML
+    sidebar = html.split('class="sidebar"', 1)[1].split("</nav>", 1)[0]
+    assert 'data-tab="templates"' in sidebar
+    assert 'id="tab-templates"' in html
+    assert "LOADERS.templates" in html
+    # template tab grouped under the Agents group
+    assert 'templates: "agents"' in html or 'templates:"agents"' in html
+
+
+def test_agents_tab_no_longer_hosts_templates():
+    html = ADMIN_HTML
+    # the inline toggle and its panel are gone from the Agents tab
+    assert "tmplToggle" not in html
+    assert 'id="ag-templates-panel"' not in html
+
+
 def test_agent_templates_edit_modal_and_fields_present():
     html = ADMIN_HTML
     assert 'id="tmpl-modal"' in html
@@ -583,6 +600,7 @@ def test_sidebar_all_modules_reachable():
     for tab in (
         "users",
         "agents",
+        "templates",
         "skills",
         "kb",
         "providers",

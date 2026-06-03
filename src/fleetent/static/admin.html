@@ -161,6 +161,7 @@
       <div class="nav-group">
         <button class="nav-group-label" data-group="agents" onclick="switchGroup('agents')">Agents &amp; Skills</button>
         <button class="nav-item" data-tab="agents" onclick="switchTab('agents')">Agents</button>
+        <button class="nav-item" data-tab="templates" onclick="switchTab('templates')">Templates</button>
         <button class="nav-item" data-tab="skills" onclick="switchTab('skills')">Skills</button>
         <button class="nav-item" data-tab="kb" onclick="switchTab('kb')">Knowledge Base</button>
       </div>
@@ -245,24 +246,24 @@
         <label class="muted"><input type="checkbox" id="ag-archived" onchange="loadAgents()"> show archived</label>
         <span id="ag-create-bar">
           <button class="small" onclick="agCreate()">New agent</button>
-          <button class="ghost small" onclick="tmplToggle()">Templates</button>
         </span>
-      </div>
-      <div id="ag-templates-panel" class="hidden" style="margin:0 0 12px;">
-        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <strong class="muted">Agent templates</strong>
-          <span id="tmpl-create-bar"></span>
-        </div>
-        <div class="table-scroll"><table>
-          <thead><tr><th>ID</th><th>Display name</th><th>allowed_tools</th><th>Actions</th></tr></thead>
-          <tbody id="tmpl-body"></tbody>
-        </table></div>
-        <div id="tmpl-list-err" class="err"></div>
       </div>
       <div class="table-scroll"><table>
         <thead><tr><th>Name</th><th>Status</th><th>Provenance</th><th>Drift</th><th>Actions</th></tr></thead>
         <tbody id="ag-body"></tbody>
       </table></div>
+    </section>
+
+    <section id="tab-templates" class="hidden">
+      <div class="page-header"><h2 class="ph-title">Templates</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.templates?.()">Refresh</button></div></div>
+      <div class="row" style="margin-bottom:12px;">
+        <span id="tmpl-create-bar"></span>
+      </div>
+      <div class="table-scroll"><table>
+        <thead><tr><th>ID</th><th>Display name</th><th>allowed_tools</th><th>Actions</th></tr></thead>
+        <tbody id="tmpl-body"></tbody>
+      </table></div>
+      <div id="tmpl-list-err" class="err"></div>
     </section>
 
     <section id="tab-skills" class="hidden">
@@ -855,7 +856,7 @@ function show(view) {
 
 const TAB_GROUP = {
   users: "access",
-  agents: "agents", skills: "agents", kb: "agents",
+  agents: "agents", templates: "agents", skills: "agents", kb: "agents",
   providers: "models", oauth: "models",
   stats: "ops", monitoring: "ops", sessions: "ops",
   audit: "audit",
@@ -1359,11 +1360,7 @@ function renderAgents() {
 }
 
 let TEMPLATES = [];
-function tmplToggle() {
-  const panel = $("ag-templates-panel");
-  panel.classList.toggle("hidden");
-  if (!panel.classList.contains("hidden")) tmplLoad();
-}
+LOADERS.templates = () => tmplLoad();
 async function tmplLoad() {
   $("tmpl-list-err").textContent = "";
   $("tmpl-create-bar").innerHTML = IS_VIEWER ? "" : `<button class="small" onclick="tmplCreate()">New template</button>`;
