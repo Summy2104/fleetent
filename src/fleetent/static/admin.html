@@ -858,7 +858,12 @@ async function enterApp() {
     }
   }
   show("app-view");
-  switchTab("users");
+  restoreTab();
+}
+
+function restoreTab() {
+  const tab = location.hash.replace(/^#/, "");
+  switchTab(TAB_GROUP[tab] ? tab : "users");
 }
 
 function show(view) {
@@ -881,6 +886,7 @@ function switchGroup(group) {
 
 function switchTab(tab) {
   const group = TAB_GROUP[tab];
+  location.hash = tab;
   for (const b of document.querySelectorAll(".nav-group-label")) b.classList.toggle("active", b.dataset.group === group);
   for (const b of document.querySelectorAll(".nav-item")) b.classList.toggle("active", b.dataset.tab === tab);
   for (const sec of document.querySelectorAll("section[id^='tab-']")) sec.classList.toggle("hidden", sec.id !== "tab-" + tab);

@@ -28,6 +28,23 @@ def test_existing_tabs_still_reachable():
         assert f'data-tab="{tab}"' in html
 
 
+def test_active_tab_persisted_in_hash():
+    html = ADMIN_HTML
+    # switchTab writes the active tab into the URL hash
+    assert "location.hash" in html
+    # app entry no longer hardcodes the users tab; it restores from hash
+    assert 'switchTab("users")' not in html
+    assert "restoreTab" in html
+
+
+def test_active_tab_restore_falls_back_to_users():
+    html = ADMIN_HTML
+    body = html.split("function restoreTab", 1)[1].split("}", 1)[0]
+    # restore validates against TAB_GROUP and defaults to users
+    assert "TAB_GROUP" in body
+    assert '"users"' in body
+
+
 # --- 2. Skills module ---------------------------------------------------------
 
 
