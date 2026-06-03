@@ -384,6 +384,13 @@ def _upgrade_to(db_path: Path, revision: str) -> None:
     command.upgrade(cfg, revision)
 
 
+def _downgrade_to(db_path: Path, revision: str) -> None:
+    cfg = Config()
+    cfg.set_main_option("script_location", "migrations")
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.downgrade(cfg, revision)
+
+
 def test_agent_versions_table_and_columns(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)
@@ -476,6 +483,73 @@ def test_knowledge_entity_unique_key_is_scoped(tmp_path):
         "entity_type",
         "normalized_name",
     ] in indexed_columns.values()
+
+
+def test_connectors_has_agent_id_column(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(connectors)")}
+    conn.close()
+    assert "agent_id" in cols
+
+
+def test_agent_mcp_servers_table_and_columns(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_mcp_servers)")}
+    conn.close()
+    assert "agent_mcp_servers" in tables
+    assert cols >= {
+        "id",
+        "agent_id",
+        "server_id",
+        "transport",
+        "url",
+        "auth_type",
+        "api_key_env",
+        "command",
+        "args",
+        "env",
+        "created_at",
+    }
+
+
+def test_connectors_agent_id_nullable_for_existing_rows(tmp_path):
+    db = tmp_path / "test.db"
+    _upgrade_to(db, "033")
+    conn = sqlite3.connect(db)
+    now = "2026-01-01T00:00:00+00:00"
+    conn.execute(
+        """
+        INSERT INTO connectors (id, display_name, protocol, enabled, created_at, updated_at)
+        VALUES ('github', 'GitHub', 'oauth2', 1, ?, ?)
+        """,
+        (now, now),
+    )
+    conn.commit()
+    conn.close()
+
+    _upgrade_to(db, "034")
+
+    conn = sqlite3.connect(db)
+    agent_id = conn.execute("SELECT agent_id FROM connectors WHERE id='github'").fetchone()[0]
+    conn.close()
+    assert agent_id is None
+
+
+def test_downgrade_removes_agent_scoped_connector_schema(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    _downgrade_to(db, "033")
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    connector_cols = {row[1] for row in conn.execute("PRAGMA table_info(connectors)")}
+    conn.close()
+    assert "agent_mcp_servers" not in tables
+    assert "agent_id" not in connector_cols
 
 
 def test_migrated_schedule_store_does_not_create_schema():

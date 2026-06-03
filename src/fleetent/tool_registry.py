@@ -59,6 +59,7 @@ def get_schemas() -> list[ToolSchema]:
 
 
 _SUB_AGENT_TOOL = "sub_agent"
+_MCP_SEP = "__"
 
 
 def dispatch(
@@ -66,8 +67,18 @@ def dispatch(
     arguments_json: str | dict[str, Any],
     allowed_tools: list[str] | None = None,
     is_sub_agent: bool = False,
+    mcp_server_ids: list[str] | None = None,
+    mcp_scope: int | None = None,
 ) -> str | Coroutine[Any, Any, str]:
-    """Execute a registered tool by name with JSON-encoded arguments."""
+    """Execute a registered tool by name with JSON-encoded arguments.
+
+    For MCP tools (``server_id__tool``) ``mcp_server_ids`` is the agent's resolved
+    server whitelist and ``mcp_scope`` its credential scope (agent_id). A tool whose
+    ``server_id`` is outside that whitelist is rejected before any session is touched,
+    so a global session can never satisfy an out-of-scope call. When ``mcp_scope`` is
+    set, the call is routed through the scope-keyed MCP session/credential rather than
+    the globally-registered closure.
+    """
     if is_sub_agent and name == _SUB_AGENT_TOOL:
         raise PermissionError("sub_agent tool is not available inside a sub-agent")
     if allowed_tools is not None:
@@ -75,12 +86,26 @@ def dispatch(
 
         if not check_tool_access(name, allowed_tools):
             raise PermissionError(f"Tool '{name}' not permitted by agent policy")
-    if name not in _registry:
-        return f"unknown tool: {name}"
-    fn, _ = _registry[name]
+
+    is_mcp = _MCP_SEP in name
+    if is_mcp and mcp_server_ids is not None:
+        server_id = name.split(_MCP_SEP, 1)[0]
+        if server_id not in mcp_server_ids:
+            raise PermissionError(f"MCP server '{server_id}' not in agent scope")
+
     kwargs: dict[str, Any] = (
         arguments_json if isinstance(arguments_json, dict) else json.loads(arguments_json)
     )
+
+    if is_mcp and mcp_scope is not None:
+        from fleetent.integrations.mcp import client as mcp_client
+
+        server_id, tool_name = name.split(_MCP_SEP, 1)
+        return mcp_client.call_tool(server_id, tool_name, kwargs, scope=mcp_scope)
+
+    if name not in _registry:
+        return f"unknown tool: {name}"
+    fn, _ = _registry[name]
     return cast(str | Coroutine[Any, Any, str], fn(**kwargs))
 
 

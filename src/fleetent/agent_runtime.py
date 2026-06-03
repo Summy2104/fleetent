@@ -94,6 +94,20 @@ def _is_mcp_tool(name: str) -> bool:
     return _MCP_SEP in name
 
 
+def connector_scope(snapshot: AgentSnapshot) -> int:
+    """The agent_id used to resolve OAuth connectors for this snapshot."""
+    return snapshot.agent_id
+
+
+def resolve_mcp_servers(
+    snapshot: AgentSnapshot, defaults: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Effective MCP server set: agent-owned definitions overlaid on global defaults."""
+    from fleetent.platform.connector_management import agent_mcp_server_store
+
+    return agent_mcp_server_store.resolve_mcp_servers(snapshot.agent_id, defaults)
+
+
 def filter_tool_schemas(
     schemas: list[ToolSchema],
     allowed_tools: list[str] | None,

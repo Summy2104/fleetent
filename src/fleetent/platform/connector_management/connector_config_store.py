@@ -27,6 +27,7 @@ def add_connector(
     oauth_config: dict[str, Any] | None = None,
     protocol: str = "oauth2",
     enabled: bool = True,
+    agent_id: int | None = None,
 ) -> None:
     config = dict(oauth_config or {})
     config.pop("client_secret", None)  # never persist the secret
@@ -35,11 +36,13 @@ def add_connector(
         conn.execute(
             """
             INSERT INTO connectors
-                (id, display_name, protocol, oauth_config, enabled, created_at, updated_at)
-            VALUES (:id, :display_name, :protocol, :oauth_config, :enabled,
+                (agent_id, id, display_name, protocol, oauth_config, enabled,
+                 created_at, updated_at)
+            VALUES (:agent_id, :id, :display_name, :protocol, :oauth_config, :enabled,
                     :created_at, :updated_at)
             """,
             {
+                "agent_id": agent_id,
                 "id": connector_id,
                 "display_name": display_name,
                 "protocol": protocol,
@@ -54,7 +57,10 @@ def add_connector(
 _EDITABLE = {"display_name", "oauth_config", "enabled"}
 
 
-def edit_connector(connector_id: str, **fields: Any) -> None:
+_COLS = "agent_id, id, display_name, protocol, oauth_config, enabled, created_at, updated_at"
+
+
+def edit_connector(connector_id: str, agent_id: int | None = None, **fields: Any) -> None:
     updates = {k: v for k, v in fields.items() if k in _EDITABLE and v is not None}
     if "oauth_config" in updates:
         cfg = dict(updates["oauth_config"])
@@ -66,19 +72,31 @@ def edit_connector(connector_id: str, **fields: Any) -> None:
         return
     updates["updated_at"] = _now()
     assignments = ", ".join(f"{k} = :{k}" for k in updates)
+    scope = "agent_id = :agent_id" if agent_id is not None else "agent_id IS NULL"
     with _database().transaction() as conn:
         conn.execute(
-            f"UPDATE connectors SET {assignments} WHERE id = :id",
-            {**updates, "id": connector_id},
+            f"UPDATE connectors SET {assignments} WHERE id = :id AND {scope}",
+            {**updates, "id": connector_id, "agent_id": agent_id},
         )
 
 
-def get_connector(connector_id: str) -> dict[str, Any] | None:
+def get_connector(connector_id: str, agent_id: int | None = None) -> dict[str, Any] | None:
+    # Resolution: an agent-owned row wins; otherwise fall back to the global default.
+    if agent_id is not None:
+        row = (
+            _database()
+            .execute(
+                f"SELECT {_COLS} FROM connectors WHERE id = :id AND agent_id = :agent_id",
+                {"id": connector_id, "agent_id": agent_id},
+            )
+            .fetchone()
+        )
+        if row:
+            return _decode(row)
     row = (
         _database()
         .execute(
-            "SELECT id, display_name, protocol, oauth_config, enabled, created_at, updated_at "
-            "FROM connectors WHERE id = :id",
+            f"SELECT {_COLS} FROM connectors WHERE id = :id AND agent_id IS NULL",
             {"id": connector_id},
         )
         .fetchone()
@@ -86,16 +104,24 @@ def get_connector(connector_id: str) -> dict[str, Any] | None:
     return _decode(row) if row else None
 
 
-def list_connectors() -> list[dict[str, Any]]:
-    rows = (
-        _database()
-        .execute(
-            "SELECT id, display_name, protocol, oauth_config, enabled, created_at, updated_at "
-            "FROM connectors ORDER BY id"
-        )
-        .fetchall()
-    )
-    return [_decode(r) for r in rows]
+def list_connectors(agent_id: int | None = None) -> list[dict[str, Any]]:
+    db = _database()
+    globals_ = {
+        r["id"]: _decode(r)
+        for r in db.execute(
+            f"SELECT {_COLS} FROM connectors WHERE agent_id IS NULL ORDER BY id"
+        ).fetchall()
+    }
+    if agent_id is None:
+        return list(globals_.values())
+    # Overlay agent-owned rows on top of the global defaults.
+    for r in db.execute(
+        f"SELECT {_COLS} FROM connectors WHERE agent_id = :agent_id ORDER BY id",
+        {"agent_id": agent_id},
+    ).fetchall():
+        decoded = _decode(r)
+        globals_[decoded["id"]] = decoded
+    return sorted(globals_.values(), key=lambda c: c["id"])
 
 
 def _decode(row: dict[str, Any]) -> dict[str, Any]:

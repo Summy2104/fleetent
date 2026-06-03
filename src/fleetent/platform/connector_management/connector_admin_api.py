@@ -19,7 +19,10 @@ from pydantic import BaseModel
 
 from fleetent import auth, user_store
 from fleetent.governance import audit_log
-from fleetent.platform.connector_management import connector_config_store
+from fleetent.platform.connector_management import (
+    agent_mcp_server_store,
+    connector_config_store,
+)
 
 router = APIRouter(prefix="/admin")
 
@@ -31,11 +34,12 @@ _SENSITIVE = ("secret", "token", "refresh", "api_key", "password")
 # --- injectable seams (connectors / mcp follow-ups) ---------------------------
 
 
-def connectors_list_grants() -> list[dict[str, Any]]:
+def connectors_list_grants(agent_id: int | None = None) -> list[dict[str, Any]]:
     """(user, connector) authorization matrix. Owned by connectors (placeholder).
 
     Each item: ``{user_id, connector_id, status, scopes}`` where status is one of
-    not_authorized / authorized / needs_reauth / credential_error.
+    not_authorized / authorized / needs_reauth / credential_error. When ``agent_id``
+    is given the matrix is scoped to that owning agent's connectors.
     """
     return []
 
@@ -159,9 +163,11 @@ class ConnectorEditBody(BaseModel):
 
 
 @router.get("/connectors/grants")
-def authorization_matrix(authorization: str | None = Header(None)) -> dict[str, Any]:
+def authorization_matrix(
+    authorization: str | None = Header(None), agent_id: int | None = None
+) -> dict[str, Any]:
     _current_user(authorization)
-    grants = _mask(connectors_list_grants())
+    grants = _mask(connectors_list_grants(agent_id))
     # admin cannot complete a user's first consent — surface the hint, expose no route.
     return {
         "grants": grants,
@@ -177,9 +183,11 @@ def offboarding_result(user_id: str, authorization: str | None = Header(None)) -
 
 
 @router.get("/connectors")
-def list_connectors(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
+def list_connectors(
+    authorization: str | None = Header(None), agent_id: int | None = None
+) -> list[dict[str, Any]]:
     _current_user(authorization)
-    return [_mask(c) for c in connector_config_store.list_connectors()]
+    return [_mask(c) for c in connector_config_store.list_connectors(agent_id)]
 
 
 @router.post("/connectors")
@@ -244,9 +252,24 @@ def mcp_doctor_view(authorization: str | None = Header(None)) -> dict[str, Any]:
 
 
 @router.get("/mcp/servers")
-def list_mcp_servers(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
+def list_mcp_servers(
+    authorization: str | None = Header(None), agent_id: int | None = None
+) -> list[dict[str, Any]]:
     _current_user(authorization)
-    return [_mask(s) for s in mcp_list_servers()]
+    # Global-default servers (agent_id=None) overlaid with any agent-owned definitions.
+    servers: list[dict[str, Any]] = [{**s, "agent_id": None} for s in mcp_list_servers()]
+    if agent_id is not None:
+        for row in agent_mcp_server_store.list_mcp_servers(agent_id):
+            servers.append(
+                {
+                    "id": row["server_id"],
+                    "transport": row["transport"],
+                    "status": "configured",
+                    "tool_count": 0,
+                    "agent_id": row["agent_id"],
+                }
+            )
+    return [_mask(s) for s in servers]
 
 
 @router.get("/mcp/servers/{server_id}/tools")

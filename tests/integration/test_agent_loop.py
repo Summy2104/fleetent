@@ -686,7 +686,7 @@ async def test_run_stream_records_tool_call_started_and_completed(mock_client, m
     events: list[TraceEvent] = []
     monkeypatch.setattr(al, "record_trace_event", events.append)
     monkeypatch.setattr(al, "get_risk_level", lambda name: "none")
-    monkeypatch.setattr(al, "dispatch", lambda name, args: "tool result")
+    monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: "tool result")
 
     [_ async for _ in al.run_stream("what time?")]
 

@@ -126,3 +126,42 @@ def test_resolve_falls_back_to_default_when_no_channel_or_user(db, monkeypatch):
 def test_resolve_returns_none_when_nothing_matches(db, monkeypatch):
     monkeypatch.setattr(agent_store, "_get_default_agent_name", lambda: None)
     assert agent_runtime.resolve_agent_for_request("slack", "C-none", "u-none") is None
+
+
+# --- effective MCP server set + connector scope ---
+
+
+def test_resolve_mcp_servers_overlays_agent_owned_on_defaults(db):
+    from fleetent.platform.connector_management import agent_mcp_server_store
+
+    a = agent_store.create_agent("a", "P", ["shell"])
+    agent_mcp_server_store.add_mcp_server(a.id, "github", transport="http", url="https://agent-gh")
+    snap = agent_runtime.load_active("a")
+    assert snap is not None
+    defaults = [
+        {"id": "github", "transport": "http", "url": "https://default-gh"},
+        {"id": "slack", "transport": "http", "url": "https://default-slack"},
+    ]
+    resolved = {s["id"]: s for s in agent_runtime.resolve_mcp_servers(snap, defaults)}
+    assert set(resolved) == {"github", "slack"}
+    assert resolved["github"]["url"] == "https://agent-gh"
+    assert resolved["slack"]["url"] == "https://default-slack"
+
+
+def test_connector_scope_is_agent_id(db):
+    a = agent_store.create_agent("a", "P", ["shell"])
+    snap = agent_runtime.load_active("a")
+    assert snap is not None
+    assert agent_runtime.connector_scope(snap) == a.id
+
+
+def test_filter_tool_schemas_visibility_unchanged(db):
+    schemas = [
+        {"function": {"name": "github__x"}},
+        {"function": {"name": "jira__y"}},
+        {"function": {"name": "shell"}},
+    ]
+    out = {
+        s["function"]["name"] for s in agent_runtime.filter_tool_schemas(schemas, None, ["github"])
+    }
+    assert out == {"github__x", "shell"}

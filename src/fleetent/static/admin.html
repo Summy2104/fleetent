@@ -436,10 +436,11 @@
       <div class="page-header"><h2 class="ph-title">OAuth Connectors &amp; MCP</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.oauth?.()">Refresh</button></div></div>
       <div class="row" style="margin-bottom:12px;">
         <span class="muted" style="flex:1;">OAuth 2.x connectors (secrets stored server-side, shown masked)</span>
+        <input id="oc-agent-filter" placeholder="agent_id filter" onchange="ocConnectors()">
         <span id="oc-create-bar"><button onclick="ocOpenCreate()">Add connector</button></span>
       </div>
       <div class="table-scroll"><table>
-        <thead><tr><th>ID</th><th>Name</th><th>Protocol</th><th>Enabled</th><th>Actions</th></tr></thead>
+        <thead><tr><th>ID</th><th>Owner</th><th>Name</th><th>Protocol</th><th>Enabled</th><th>Actions</th></tr></thead>
         <tbody id="oc-body"></tbody>
       </table></div>
       <div class="row" style="margin:12px 0 4px;">
@@ -455,11 +456,12 @@
       <pre id="oc-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
       <div class="row" style="margin:16px 0 4px;">
         <h3 style="flex:1; margin:0;">MCP servers</h3>
+        <input id="mcp-agent-filter" placeholder="agent_id filter" onchange="mcpServers()">
         <button class="ghost small" onclick="mcpDoctor()">Doctor</button>
         <button class="ghost small" onclick="mcpServers()">Refresh servers</button>
       </div>
       <div class="table-scroll"><table>
-        <thead><tr><th>Server</th><th>Status</th><th>Tools</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Server</th><th>Owner</th><th>Status</th><th>Tools</th><th>Actions</th></tr></thead>
         <tbody id="mcp-body"></tbody>
       </table></div>
       <pre id="mcp-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
@@ -1719,10 +1721,12 @@ LOADERS.sessions = () => loadSessions();
 let OC_EDIT_ID = null;
 
 async function ocConnectors() {
-  const rows = await api("GET", "/connectors");
+  const f = $("oc-agent-filter").value.trim();
+  const rows = await api("GET", f ? `/connectors?agent_id=${encodeURIComponent(f)}` : "/connectors");
   $("oc-body").innerHTML = rows.map(c => `
       <tr>
         <td>${esc(c.id)}</td>
+        <td class="muted">${c.agent_id == null ? "global" : esc(String(c.agent_id))}</td>
         <td>${esc(c.display_name || "")}</td>
         <td class="muted">${esc(c.protocol || "")}</td>
         <td><span class="pill ${c.enabled ? "active" : "blocked"}">${c.enabled ? "on" : "off"}</span></td>
@@ -1730,7 +1734,7 @@ async function ocConnectors() {
           <button class="small ghost" onclick="ocLifecycle('${esc(c.id)}')">Lifecycle</button>
           ${IS_VIEWER ? "" : `<button class="small ghost" onclick="ocOpenEdit('${esc(c.id)}')">Edit</button>`}
         </td>
-      </tr>`).join("") || `<tr><td colspan="5" class="muted">No connectors.</td></tr>`;
+      </tr>`).join("") || `<tr><td colspan="6" class="muted">No connectors.</td></tr>`;
 }
 function ocOpenCreate() {
   OC_EDIT_ID = null;
@@ -1820,15 +1824,17 @@ async function mcpDoctor() {
 }
 async function mcpServers() {
   try {
-    const rows = await api("GET", "/mcp/servers");
+    const f = $("mcp-agent-filter").value.trim();
+    const rows = await api("GET", f ? `/mcp/servers?agent_id=${encodeURIComponent(f)}` : "/mcp/servers");
     $("mcp-body").innerHTML = rows.map(s => `
       <tr>
         <td>${esc(s.id || s.server_id || s.name)}</td>
+        <td class="muted">${s.agent_id == null ? "global" : esc(String(s.agent_id))}</td>
         <td><span class="pill ${s.connected || s.status === "up" ? "active" : "blocked"}">${esc(s.status || (s.connected ? "up" : "down"))}</span></td>
         <td class="actions"><button class="small ghost" onclick="mcpTools('${esc(s.id || s.server_id || s.name)}')">Tools</button></td>
         <td class="actions">${IS_VIEWER ? "" : `<button class="small ghost" onclick="mcpReconnect('${esc(s.id || s.server_id || s.name)}')">Reconnect</button>`}</td>
-      </tr>`).join("") || `<tr><td colspan="4" class="muted">No MCP servers.</td></tr>`;
-  } catch (e) { $("mcp-body").innerHTML = `<tr><td colspan="4" class="err">${esc(e.message)}</td></tr>`; }
+      </tr>`).join("") || `<tr><td colspan="5" class="muted">No MCP servers.</td></tr>`;
+  } catch (e) { $("mcp-body").innerHTML = `<tr><td colspan="5" class="err">${esc(e.message)}</td></tr>`; }
 }
 async function mcpTools(id) {
   try { const r = await api("GET", `/mcp/servers/${encodeURIComponent(id)}/tools`); $("mcp-out").textContent = JSON.stringify(r, null, 2); }

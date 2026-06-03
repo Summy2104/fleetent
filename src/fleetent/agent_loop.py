@@ -732,6 +732,7 @@ async def run(
     """
     eff_allowed = snapshot.allowed_tools if snapshot is not None else allowed_tools
     mcp_server_ids = snapshot.mcp_server_ids if snapshot is not None else None
+    mcp_scope = snapshot.agent_id if snapshot is not None else None
     overrides = snapshot.model_overrides if snapshot is not None else None
     memory_namespace = snapshot.memory_namespace if snapshot is not None else "default"
     if snapshot is not None:
@@ -874,6 +875,8 @@ async def run(
                                     tool_name,
                                     tc.function.arguments,
                                     is_sub_agent=is_sub_agent,
+                                    mcp_server_ids=mcp_server_ids,
+                                    mcp_scope=mcp_scope,
                                 )
                                 tool_result = (
                                     dispatch_result
@@ -882,7 +885,11 @@ async def run(
                                 )
                         else:
                             dispatch_result = dispatch(
-                                tool_name, tc.function.arguments, is_sub_agent=is_sub_agent
+                                tool_name,
+                                tc.function.arguments,
+                                is_sub_agent=is_sub_agent,
+                                mcp_server_ids=mcp_server_ids,
+                                mcp_scope=mcp_scope,
                             )
                             tool_result = (
                                 dispatch_result
@@ -1003,6 +1010,7 @@ async def run_stream(
     """
     eff_allowed = snapshot.allowed_tools if snapshot is not None else allowed_tools
     mcp_server_ids = snapshot.mcp_server_ids if snapshot is not None else None
+    mcp_scope = snapshot.agent_id if snapshot is not None else None
     overrides = snapshot.model_overrides if snapshot is not None else None
     memory_namespace = snapshot.memory_namespace if snapshot is not None else "default"
     if snapshot is not None:
@@ -1140,7 +1148,10 @@ async def run_stream(
             )
             yield {"type": "tool_call", "name": name, "args": args}
             try:
-                result = dispatch(name, args)
+                dispatched = dispatch(
+                    name, args, mcp_server_ids=mcp_server_ids, mcp_scope=mcp_scope
+                )
+                result = dispatched if isinstance(dispatched, str) else await dispatched
             except Exception as exc:
                 _record_tool_call_failed(
                     run_id=run_id,
