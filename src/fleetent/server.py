@@ -42,7 +42,7 @@ from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.askit_console import agent_apply_api
 from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import connector_admin_api
-from fleetent.platform.im_gateway_management import im_admin_api, im_connector_manager
+from fleetent.platform.im_gateway_management import admin_api, connector_manager
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.resource_monitoring import collectors, monitor_admin_api
@@ -79,7 +79,7 @@ def _admin_login_url(router_prefix: str) -> str:
     return f"http://{display_host}:{port}{router_prefix}/ui"
 
 
-_connector_manager = im_connector_manager.ConnectorManager(
+_connector_manager = connector_manager.ConnectorManager(
     factories={
         "slack": slack_adapter.run,
         "telegram": telegram_adapter.run,
@@ -138,10 +138,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # with usable config start. Wire the admin-API seams to this running manager so
     # enable/disable endpoints can drive lifecycle without importing the loop.
     loop = asyncio.get_running_loop()
-    im_admin_api.start_connector = lambda owner_id, platform: asyncio.run_coroutine_threadsafe(
+    admin_api.start_connector = lambda owner_id, platform: asyncio.run_coroutine_threadsafe(
         _connector_manager.start(owner_id, platform), loop
     ).result()
-    im_admin_api.stop_connector = lambda owner_id, platform: asyncio.run_coroutine_threadsafe(
+    admin_api.stop_connector = lambda owner_id, platform: asyncio.run_coroutine_threadsafe(
         _connector_manager.stop(owner_id, platform), loop
     ).result()
     await _connector_manager.start_all_enabled()
@@ -169,7 +169,7 @@ app.include_router(skill_admin_api.router)
 app.include_router(provider_admin_api.router)
 app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
-app.include_router(im_admin_api.router)
+app.include_router(admin_api.router)
 app.include_router(chat_admin_api.router)
 app.include_router(agent_console_api.router)
 app.include_router(agent_admin_api.router)

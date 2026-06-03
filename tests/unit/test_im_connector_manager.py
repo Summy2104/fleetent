@@ -5,9 +5,9 @@ import asyncio
 import pytest
 
 from fleetent import user_store
-from fleetent.platform.im_gateway_management import im_connector_config
-from fleetent.platform.im_gateway_management import im_connector_manager as mgr
-from fleetent.platform.im_gateway_management import im_connector_store as store
+from fleetent.platform.im_gateway_management import connector_config as im_connector_config
+from fleetent.platform.im_gateway_management import connector_manager as mgr
+from fleetent.platform.im_gateway_management import connector_store as store
 
 
 @pytest.fixture

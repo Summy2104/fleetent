@@ -280,7 +280,7 @@ def _update_field(user_id: str, column: str, value: object) -> None:
 
 
 def get_or_create_im_user(owner_id: str, platform: str, platform_user_id: str) -> "User":
-    from fleetent.im_user_store import get_or_create
+    from fleetent.platform.im_gateway_management.identity import get_or_create
 
     return get_or_create(owner_id, platform, platform_user_id)
 

@@ -11,10 +11,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import fleetent.auth as auth
-import fleetent.platform.im_gateway_management.im_admin_api as api
-import fleetent.platform.im_gateway_management.im_channel_allowlist as allowlist
-import fleetent.platform.im_gateway_management.im_connector_config as cfg
-import fleetent.platform.im_gateway_management.im_connector_store as store
+import fleetent.platform.im_gateway_management.admin_api as api
+import fleetent.platform.im_gateway_management.channel_allowlist as allowlist
+import fleetent.platform.im_gateway_management.connector_config as cfg
+import fleetent.platform.im_gateway_management.connector_store as store
 import fleetent.user_store as user_store
 
 

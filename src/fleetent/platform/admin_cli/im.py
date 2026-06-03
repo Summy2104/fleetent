@@ -22,7 +22,7 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
 def handle(args: argparse.Namespace) -> bool:
     """Handle IM user commands."""
     if args.cmd == "list-pending":
-        import fleetent.im_user_store as ius
+        from fleetent.platform.im_gateway_management import identity as ius
 
         pending = ius.list_pending()
         if not pending:
@@ -38,7 +38,7 @@ def handle(args: argparse.Namespace) -> bool:
         return True
 
     if args.cmd == "approve-user":
-        import fleetent.im_user_store as ius
+        from fleetent.platform.im_gateway_management import identity as ius
         from fleetent.user_store import _conn as conn_fn
 
         ius._init_db()

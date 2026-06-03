@@ -45,8 +45,8 @@ def mock_agent_loop(monkeypatch):
 @pytest.fixture
 def mock_memory_skill(monkeypatch):
     import fleetent.agent_runtime as ar
-    import fleetent.im_user_store as ius
     import fleetent.skill_registry as sr
+    from fleetent.platform.im_gateway_management import identity as ius
 
     monkeypatch.setattr(sr, "match", lambda text: None)
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
@@ -302,7 +302,7 @@ async def test_route_blocked_user_gets_rejection_not_agent(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
     """User with allowed=False receives rejection message; agent_loop is NOT called."""
-    import fleetent.im_user_store as ius
+    from fleetent.platform.im_gateway_management import identity as ius
 
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: False)
 
@@ -333,7 +333,7 @@ async def test_route_channel_agent_takes_priority(
 ):
     """Channel-level agent is used when bound, regardless of user binding."""
     import fleetent.agent_runtime as ar
-    import fleetent.im_user_store as ius
+    from fleetent.platform.im_gateway_management import identity as ius
 
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
 

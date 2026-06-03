@@ -45,9 +45,9 @@ def handle(args: argparse.Namespace) -> bool:
         _handle_connector(args)
         return True
     if args.cmd == "seed-connectors":
-        from fleetent.platform.im_gateway_management import im_connector_config
+        from fleetent.platform.im_gateway_management import connector_config
 
-        seeded = im_connector_config.seed_from_env()
+        seeded = connector_config.seed_from_env()
         print("Seeded: " + (", ".join(seeded) if seeded else "(none)"))
         return True
     if args.cmd == "im-channel":
@@ -58,18 +58,18 @@ def handle(args: argparse.Namespace) -> bool:
 
 def _handle_connector(args: argparse.Namespace) -> None:
     from fleetent import user_store
-    from fleetent.platform.im_gateway_management import im_connector_config, im_connector_store
+    from fleetent.platform.im_gateway_management import connector_config, connector_store
 
     owner = user_store.admin_owner_id()
 
     if args.im_connector_cmd == "list":
-        connectors = im_connector_store.list_connectors()
+        connectors = connector_store.list_connectors()
         if not connectors:
             print("No connectors configured.")
             return
         print(f"{'OWNER':<14}  {'PLATFORM':<12}  {'ENABLED':<7}  {'STATUS':<14}  CONFIG")
         for row in connectors:
-            masked = im_connector_config.resolve_masked(row["owner_id"], row["platform"])
+            masked = connector_config.resolve_masked(row["owner_id"], row["platform"])
             config_str = ", ".join(f"{k}={v}" for k, v in masked.items()) or "(none)"
             print(
                 f"{row['owner_id']:<14}  {row['platform']:<12}  {str(bool(row['enabled'])):<7}  "
@@ -78,7 +78,7 @@ def _handle_connector(args: argparse.Namespace) -> None:
         return
 
     if args.im_connector_cmd in ("enable", "disable"):
-        im_connector_store.set_enabled(owner, args.platform, args.im_connector_cmd == "enable")
+        connector_store.set_enabled(owner, args.platform, args.im_connector_cmd == "enable")
         print(f"{args.platform} {args.im_connector_cmd}d")
         return
 
@@ -90,20 +90,20 @@ def _handle_connector(args: argparse.Namespace) -> None:
                 raise SystemExit(2)
             key, value = pair.split("=", 1)
             config[key] = value
-        im_connector_config.set_config(owner, args.platform, config)
+        connector_config.set_config(owner, args.platform, config)
         print(f"{args.platform} config updated ({len(config)} key(s))")
         return
 
 
 def _handle_channel(args: argparse.Namespace) -> None:
     from fleetent import user_store
-    from fleetent.platform.im_gateway_management import im_channel_allowlist
+    from fleetent.platform.im_gateway_management import channel_allowlist
 
     owner = user_store.admin_owner_id()
 
     if args.im_channel_cmd == "allow":
         try:
-            im_channel_allowlist.add_entry(
+            channel_allowlist.add_entry(
                 owner, args.platform, args.scope_type, args.scope_id, args.note
             )
         except ValueError as exc:
@@ -113,12 +113,12 @@ def _handle_channel(args: argparse.Namespace) -> None:
         return
 
     if args.im_channel_cmd == "disallow":
-        im_channel_allowlist.remove_entry(args.id)
+        channel_allowlist.remove_entry(args.id)
         print(f"removed allowlist entry {args.id}")
         return
 
     if args.im_channel_cmd == "list":
-        entries = im_channel_allowlist.list_entries(None, args.platform)
+        entries = channel_allowlist.list_entries(None, args.platform)
         if not entries:
             print("No allowlist entries.")
             return

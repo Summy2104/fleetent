@@ -4,7 +4,7 @@ import asyncio
 
 import structlog
 
-from fleetent.platform.im_gateway_management import im_connector_config, im_connector_store
+from fleetent.platform.im_gateway_management import connector_config, connector_store
 
 logger = structlog.get_logger(__name__)
 
@@ -33,7 +33,7 @@ def create_app(owner_id: str, config: dict[str, str]) -> object:
         from telegram import Update
 
         from fleetent.im_gateway.normalizer import NormalizedMessage, route  # noqa: PLC0415
-        from fleetent.im_user_store import get_or_create  # noqa: PLC0415
+        from fleetent.platform.im_gateway_management.identity import get_or_create  # noqa: PLC0415
 
         assert isinstance(update, Update)
         if not update.message or not update.effective_user:
@@ -84,23 +84,23 @@ async def _run_polling(app: object) -> None:
 async def _heartbeat_loop(owner_id: str) -> None:
     while True:
         await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
-        im_connector_store.heartbeat(owner_id, "telegram")
+        connector_store.heartbeat(owner_id, "telegram")
 
 
 async def run(owner_id: str, config: dict[str, str] | None = None) -> None:
     """Run the Telegram adapter, reporting status to the registry until cancelled."""
     if config is None:
-        config = im_connector_config.resolve(owner_id, "telegram")
+        config = connector_config.resolve(owner_id, "telegram")
     app = create_app(owner_id, config)
     heartbeat = asyncio.create_task(_heartbeat_loop(owner_id))
     try:
-        im_connector_store.report_status(owner_id, "telegram", "connected")
+        connector_store.report_status(owner_id, "telegram", "connected")
         await _run_polling(app)
     except asyncio.CancelledError:
-        im_connector_store.report_status(owner_id, "telegram", "stopped")
+        connector_store.report_status(owner_id, "telegram", "stopped")
         raise
     except Exception as exc:
-        im_connector_store.report_status(owner_id, "telegram", "error", error=str(exc))
+        connector_store.report_status(owner_id, "telegram", "error", error=str(exc))
         raise
     finally:
         heartbeat.cancel()

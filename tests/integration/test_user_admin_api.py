@@ -5,10 +5,10 @@ from fastapi.testclient import TestClient
 import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
 import fleetent.governance.blocklist as blocklist
-import fleetent.im_user_store as im_user_store
 import fleetent.platform.user_management.api_key_store as aks
 import fleetent.platform.user_management.user_admin_api as api
 import fleetent.user_store as user_store
+from fleetent.platform.im_gateway_management import identity as im_user_store
 
 
 @pytest.fixture

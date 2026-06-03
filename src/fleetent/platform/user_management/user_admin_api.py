@@ -12,8 +12,9 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from fleetent import auth, im_user_store, user_store
+from fleetent import auth, user_store
 from fleetent.governance import audit_log, blocklist
+from fleetent.platform.im_gateway_management import identity as im_user_store
 from fleetent.platform.user_management import api_key_store
 
 router = APIRouter(prefix="/admin")

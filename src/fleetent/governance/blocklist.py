@@ -3,8 +3,9 @@
 import datetime
 import secrets
 
-from fleetent import im_user_store, user_store
+from fleetent import user_store
 from fleetent.governance import audit_log
+from fleetent.platform.im_gateway_management import identity as im_user_store
 from fleetent.platform.user_management import api_key_store
 from fleetent.user_store import (
     DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching

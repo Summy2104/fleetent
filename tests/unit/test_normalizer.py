@@ -26,18 +26,18 @@ async def test_route_threads_owner_to_allowlist(monkeypatch):
         captured["owner_id"] = owner_id
         return False  # stop before agent loop
 
-    from fleetent.platform.im_gateway_management import im_channel_allowlist
+    from fleetent.platform.im_gateway_management import channel_allowlist
 
-    monkeypatch.setattr(im_channel_allowlist, "is_allowed", fake_is_allowed)
+    monkeypatch.setattr(channel_allowlist, "is_allowed", fake_is_allowed)
     replies = []
     await normalizer.route(_msg("ownerX", replies))
     assert captured["owner_id"] == "ownerX"
 
 
 async def test_session_namespaced_by_owner(monkeypatch):
-    from fleetent.platform.im_gateway_management import im_channel_allowlist
+    from fleetent.platform.im_gateway_management import channel_allowlist
 
-    monkeypatch.setattr(im_channel_allowlist, "is_allowed", lambda *a, **k: True)
+    monkeypatch.setattr(channel_allowlist, "is_allowed", lambda *a, **k: True)
     monkeypatch.setattr(normalizer.im_user_store, "check_allowed_by_user_id", lambda _u: True)
 
     import contextlib
