@@ -95,10 +95,9 @@ git 把 main 对 `mcp_client.py→integrations/mcp/client.py`、`sandbox_client.
 
 > 这些**不是意外破坏**，而是合并取舍/延后接线的直接体现。保留为失败状态是刻意的——它们正是后续工作的"规格信号"，请逐条决定如何处置。
 
-### 类 A：D5 智能层/可观测未接进 agent_loop（6）—— 后续接线任务
-- `test_observability_agent_contracts`（4 errors）：断言 agent_loop 调用 `observability.record_injected_context`。
-- `test_long_term_context_runtime`（2）：断言 agent_loop 调用 `long_term_ctx.build_context`。
-- **处置建议**：实现 D5 后续项——把 main 的 `build_context` + observability trace 埋点接进张洋 agent_loop。届时自动转绿。
+### 类 A：D5 智能层/可观测未接进 agent_loop（6）—— ✅ 已解决（2026-06-03）
+- 已把 main 的 `build_context`（KB+记忆注入）+ observability trace（injected_context / agent_run_completed）接进张洋 `run()` 与 `run_stream()`，调用点 best-effort（无 DB/禁用 KB 不破坏运行，159 个无 DB 单测保持绿）。契约测试 fixture 适配：`maybe_compress` mock 收 `**kwargs`、补 `extract_and_save` mock（张洋 run 有记忆提取）。
+- 全量回归：**13 failed / 2070 passed / 0 errors**（A 类 6 项清零，无新破坏）。
 
 ### 类 B：D6 取 main 调度器、丢张洋 S3 会话绑定（6）—— 后续 feature 重嫁接
 - `test_scheduled_task_session_binding`（6）：断言 schedule_store.DB_PATH / load_cron_yaml / session_id 列（张洋 S3）。
