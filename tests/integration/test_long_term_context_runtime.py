@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import fleetent.agent_loop as agent_loop
+import fleetent.runtime.loop as agent_loop
 from fleetent.intelligence.long_term_ctx import BuiltContext, ContextSource
 from fleetent.model import RouteConfig
 

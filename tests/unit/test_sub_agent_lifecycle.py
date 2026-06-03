@@ -6,7 +6,7 @@ import pytest
 
 
 def test_state_enum_members():
-    from fleetent.sub_agent_lifecycle import SubAgentState
+    from fleetent.runtime.sub_agent_lifecycle import SubAgentState
 
     assert {s.value for s in SubAgentState} == {
         "pending",
@@ -19,7 +19,7 @@ def test_state_enum_members():
 
 
 def test_lifecycle_dataclass_defaults():
-    from fleetent.sub_agent_lifecycle import SubAgentLifecycle, SubAgentState
+    from fleetent.runtime.sub_agent_lifecycle import SubAgentLifecycle, SubAgentState
 
     lc = SubAgentLifecycle(
         run_id="r1",
@@ -49,7 +49,7 @@ def test_lifecycle_dataclass_defaults():
     ],
 )
 def test_legal_transitions(src, dst):
-    from fleetent.sub_agent_lifecycle import SubAgentState, validate_transition
+    from fleetent.runtime.sub_agent_lifecycle import SubAgentState, validate_transition
 
     validate_transition(SubAgentState(src), SubAgentState(dst))  # no raise
 
@@ -65,7 +65,7 @@ def test_legal_transitions(src, dst):
     ],
 )
 def test_illegal_transitions_raise(src, dst):
-    from fleetent.sub_agent_lifecycle import SubAgentState, validate_transition
+    from fleetent.runtime.sub_agent_lifecycle import SubAgentState, validate_transition
 
     with pytest.raises(ValueError):
         validate_transition(SubAgentState(src), SubAgentState(dst))
@@ -75,7 +75,7 @@ def test_illegal_transitions_raise(src, dst):
 
 
 def _lc(run_id, parent, name="t", state=None):
-    from fleetent.sub_agent_lifecycle import SubAgentLifecycle, SubAgentState
+    from fleetent.runtime.sub_agent_lifecycle import SubAgentLifecycle, SubAgentState
 
     return SubAgentLifecycle(
         run_id=run_id,
@@ -88,7 +88,7 @@ def _lc(run_id, parent, name="t", state=None):
 
 
 def test_init_db_idempotent(tmp_path, monkeypatch):
-    import fleetent.sub_agent_lifecycle as sal
+    import fleetent.runtime.sub_agent_lifecycle as sal
 
     monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
     sal.init_db()
@@ -99,7 +99,7 @@ def test_init_db_idempotent(tmp_path, monkeypatch):
 
 
 def test_upsert_then_read_back(tmp_path, monkeypatch):
-    import fleetent.sub_agent_lifecycle as sal
+    import fleetent.runtime.sub_agent_lifecycle as sal
 
     monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
     sal.init_db()
@@ -111,7 +111,7 @@ def test_upsert_then_read_back(tmp_path, monkeypatch):
 
 
 def test_query_reflects_terminal_state_and_ended_at(tmp_path, monkeypatch):
-    import fleetent.sub_agent_lifecycle as sal
+    import fleetent.runtime.sub_agent_lifecycle as sal
 
     monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
     sal.init_db()
@@ -127,7 +127,7 @@ def test_query_reflects_terminal_state_and_ended_at(tmp_path, monkeypatch):
 
 
 def test_query_by_parent_filters(tmp_path, monkeypatch):
-    import fleetent.sub_agent_lifecycle as sal
+    import fleetent.runtime.sub_agent_lifecycle as sal
 
     monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
     sal.init_db()
@@ -142,19 +142,19 @@ def test_query_by_parent_filters(tmp_path, monkeypatch):
 
 
 def test_default_timeout_constant_is_300():
-    from fleetent.sub_agent_lifecycle import SUB_AGENT_TIMEOUT_SECONDS
+    from fleetent.runtime.sub_agent_lifecycle import SUB_AGENT_TIMEOUT_SECONDS
 
     assert SUB_AGENT_TIMEOUT_SECONDS == 300
 
 
 def test_resolve_timeout_precedence_call_over_config():
-    from fleetent.sub_agent_lifecycle import resolve_timeout
+    from fleetent.runtime.sub_agent_lifecycle import resolve_timeout
 
     assert resolve_timeout(5, config=120) == 5
 
 
 def test_resolve_timeout_config_over_default():
-    from fleetent.sub_agent_lifecycle import resolve_timeout
+    from fleetent.runtime.sub_agent_lifecycle import resolve_timeout
 
     assert resolve_timeout(None, config=120) == 120
 

@@ -846,7 +846,7 @@ async def test_loop_continues_after_a_maintenance_failure(monkeypatch):
 
 
 def test_cli_run_sync_does_not_start_maintenance_task(monkeypatch):
-    import fleetent.agent_loop as al
+    import fleetent.runtime.loop as al
 
     async def fake_run(messages, **kw):
         return "done"

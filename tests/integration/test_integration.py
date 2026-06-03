@@ -54,7 +54,7 @@ async def test_full_slack_message_pipeline(isolated_db):
         reply_calls.append(text)
 
     # Mock agent_loop.run to return deterministic response and mutate messages in-place
-    with patch("fleetent.agent_loop.run", new_callable=AsyncMock) as mock_run:
+    with patch("fleetent.runtime.loop.run", new_callable=AsyncMock) as mock_run:
 
         async def fake_run(messages, **kwargs):
             messages.append({"role": "assistant", "content": "Hello from agent"})
@@ -150,7 +150,7 @@ async def test_session_history_accumulates_across_messages(isolated_db):
     async def fake_reply(text: str) -> None:
         reply_calls.append(text)
 
-    with patch("fleetent.agent_loop.run", new_callable=AsyncMock) as mock_run:
+    with patch("fleetent.runtime.loop.run", new_callable=AsyncMock) as mock_run:
 
         async def fake_run(messages, **kwargs):
             messages.append({"role": "assistant", "content": "response"})

@@ -126,8 +126,8 @@ async def route(msg: NormalizedMessage) -> None:
         await msg.reply_func(_REJECTION_MSG)
         return
 
-    from fleetent import agent_loop
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
+    from fleetent.runtime import loop as agent_loop
     from fleetent.session import manager as session_mgr
     from fleetent.skills import available_skills_prompt, collect_disabled_trace
 

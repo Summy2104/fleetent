@@ -2,9 +2,9 @@
 
 import asyncio
 
-import fleetent.agent_loop as al
+import fleetent.runtime.loop as al
 import fleetent.tools.registry as tr
-from fleetent.cancellation import CancelToken
+from fleetent.runtime.cancellation import CancelToken
 
 
 def _register(monkeypatch, name, fn, timeout=None):
@@ -144,7 +144,7 @@ async def test_timeout_is_plain_await_stop_no_sandbox(monkeypatch):
     _register(monkeypatch, "_generic_slow", _slow, timeout=0.01)
     result, failed = await al._safe_dispatch("_generic_slow", {}, is_sub_agent=False)
     assert failed is True
-    from fleetent.error_classifier import ErrorCategory, classify
+    from fleetent.runtime.error_classifier import ErrorCategory, classify
 
     assert classify(TimeoutError()).category is ErrorCategory.tool_timeout
 
@@ -165,7 +165,7 @@ def test_get_effective_timeout_honors_passed_default(monkeypatch):
 
 
 def test_resolve_default_tool_timeout_reads_settings(monkeypatch):
-    import fleetent.agent_loop as al
+    import fleetent.runtime.loop as al
 
     monkeypatch.setenv("TOOL_DEFAULT_TIMEOUT_SECONDS", "55")
     assert al._resolve_default_tool_timeout() == 55.0  # ops-configurable via env/settings

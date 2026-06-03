@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from openai import APIStatusError, RateLimitError
 
-import fleetent.agent_loop as al
+import fleetent.runtime.loop as al
 from fleetent.model.router import RouteConfig
-from fleetent.termination import LoopState, StopReason
+from fleetent.runtime.termination import LoopState, StopReason
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -238,7 +238,7 @@ def test_build_controller_empty_history_yields_only_active_reasons():
     # every state flag tripped only active reasons can fire (priority unchanged).
     # AR2: the step dimension is now carried by the budget checker, so the step
     # limit surfaces as budget_exceeded rather than max_turns.
-    from fleetent.budget import BudgetConfig, BudgetUsage
+    from fleetent.runtime.budget import BudgetConfig, BudgetUsage
 
     config = BudgetConfig(max_turns=1, max_tokens=-1)
     usage = BudgetUsage(turns=99)
@@ -298,7 +298,7 @@ async def test_run_stream_logs_stop_reason_budget_exceeded_on_turns(mock_client)
 
 
 async def test_run_cancelled_stops_before_llm_call(mock_client):
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("hi"))
     token = CancelToken()
@@ -310,7 +310,7 @@ async def test_run_cancelled_stops_before_llm_call(mock_client):
 
 
 async def test_run_cancelled_logs_stop_reason_cancelled(mock_client):
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     captured: dict = {}
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("hi"))
@@ -330,7 +330,7 @@ async def test_run_default_no_token_behaves_normally(mock_client):
 
 
 async def test_run_threads_token_to_dispatch(mock_client):
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     seen: dict = {}
 
@@ -356,7 +356,7 @@ async def test_run_threads_token_to_dispatch(mock_client):
 
 
 async def test_run_stream_cancelled_stops_before_llm_and_finishes_clean(mock_client):
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     mock_client.chat.completions.create = AsyncMock(
         side_effect=lambda *a, **k: _looping_tool_stream()
@@ -370,7 +370,7 @@ async def test_run_stream_cancelled_stops_before_llm_and_finishes_clean(mock_cli
 
 
 async def test_run_stream_cancelled_logs_stop_reason(mock_client):
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     captured: dict = {}
     mock_client.chat.completions.create = AsyncMock(
@@ -534,7 +534,7 @@ async def test_run_stream_stops_on_consecutive_failures(mock_client):
 
 async def test_run_sub_agent_tool_intercepted_and_executed(mock_client):
     """sub_agent tool call is intercepted by agent_loop, not passed to dispatch."""
-    from fleetent.sub_agent import SubAgentResult
+    from fleetent.runtime.sub_agent import SubAgentResult
 
     tasks_json = '[{"name": "t1", "prompt": "do it"}]'
     mock_client.chat.completions.create = AsyncMock(
@@ -567,7 +567,7 @@ async def test_run_sub_agent_result_formatted_in_tool_message(mock_client):
     """Sub-agent results are formatted as [name] result lines in the tool message."""
     import json as _json
 
-    from fleetent.sub_agent import SubAgentResult
+    from fleetent.runtime.sub_agent import SubAgentResult
 
     tasks = [{"name": "fetch", "prompt": "get data"}]
     args_json = _json.dumps({"tasks": _json.dumps(tasks)})
@@ -1099,7 +1099,7 @@ async def test_run_raises_when_image_but_no_vision_route(mock_client, monkeypatc
 
 async def test_image_message_passes_sanitize(mock_client):
     # AR6 coordination: list-type content must survive sanitize() without error.
-    from fleetent.message_hygiene import sanitize
+    from fleetent.runtime.message_hygiene import sanitize
 
     messages = [{"role": "user", "content": [{"type": "text", "text": "hi"}, _IMG_BLOCK]}]
     clean, report = sanitize(messages)
@@ -2391,7 +2391,7 @@ async def test_run_stream_truncates_messages_but_sse_keeps_original(mock_client,
 
 
 async def test_run_guardrail_short_circuits_then_stops(mock_client, monkeypatch):
-    from fleetent.termination import StopReason
+    from fleetent.runtime.termination import StopReason
 
     captured: dict = {}
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
@@ -2445,8 +2445,8 @@ async def test_run_guardrail_injects_placeholder_tool_result(mock_client, monkey
 
 
 async def test_run_loads_and_saves_flap_state(mock_client, monkeypatch, tmp_path):
-    import fleetent.context_mgr as cm
-    from fleetent.context_mgr import AntiFlapState
+    import fleetent.runtime.context as cm
+    from fleetent.runtime.context import AntiFlapState
 
     monkeypatch.setattr(cm, "DB_PATH", tmp_path / "users.db")
     cm.save_anti_flap_state("sess-flap", AntiFlapState(turns_since_last_compress=7))
@@ -2468,7 +2468,7 @@ async def test_run_loads_and_saves_flap_state(mock_client, monkeypatch, tmp_path
 
 
 async def test_run_without_session_id_does_not_touch_flap_db(mock_client, monkeypatch, tmp_path):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(cm, "DB_PATH", tmp_path / "users.db")
     called = {"apply": 0}
@@ -2485,8 +2485,8 @@ async def test_run_without_session_id_does_not_touch_flap_db(mock_client, monkey
 
 
 async def test_run_layered_budget_trips_and_logs_scope(mock_client, monkeypatch, tmp_path):
-    import fleetent.layered_budget as lbud
-    from fleetent.termination import StopReason
+    import fleetent.runtime.layered_budget as lbud
+    from fleetent.runtime.termination import StopReason
 
     monkeypatch.setattr(lbud, "DB_PATH", tmp_path / "users.db")
     # Tiny user-token cap → second checkpoint trips via the layered checker.
@@ -2679,7 +2679,7 @@ async def test_run_n2_sequence_passes_sanitize(mock_client):
 
 
 async def test_run_parallel_batch_shares_run_level_token(mock_client):
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     seen_parents: list = []
     mock_client.chat.completions.create = AsyncMock(
@@ -2700,7 +2700,7 @@ async def test_run_parallel_batch_shares_run_level_token(mock_client):
 async def test_run_cancel_during_batch_still_backfills_every_tool_call(mock_client):
     # Token cancelled mid-batch: each tool_call must still get exactly one tool
     # message (result or normalized failure), so no half tool-pair leaks.
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     captured: dict = {}
     mock_client.chat.completions.create = AsyncMock(
@@ -3006,7 +3006,7 @@ async def test_run_stream_n_tool_calls_match_n_tool_results(mock_client):
 async def test_run_sub_agent_as_one_batch_slot_alongside_other_tool(mock_client):
     import json as _json
 
-    from fleetent.sub_agent import SubAgentResult
+    from fleetent.runtime.sub_agent import SubAgentResult
 
     tasks = [{"name": "t1", "prompt": "do"}]
     sub_args = _json.dumps({"tasks": _json.dumps(tasks)})

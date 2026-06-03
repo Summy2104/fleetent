@@ -74,10 +74,11 @@ src/fleetent/
 
 迁移顺序（blast radius 由小到大，各为独立 change/PR，详见 `openspec/changes/runtime-package-blueprint`）：
 `integrations/sandbox` → `session` → `skills` → `model` → `tools` → `runtime`(殿后)。
+**蓝图 7 包全部落地**（`runtime` / `model` / `tools` / `skills` / `session` + `integrations/{mcp,sandbox}`）；旧扁平路径仅留 re-export shim，后续单提「统一删 shim」收尾 change。
 
 ### 当前模块地图
 
-> 反映**迁移过程中的实时状态**(以上「目标 package map」为终态)。张洋负责的执行/工具模块多数仍平铺,按上述顺序逐包迁移中。
+> 反映**迁移过程中的实时状态**(以上「目标 package map」为终态)。张洋负责的执行/工具能力域已全部包化；旧扁平路径仅留 re-export shim。
 
 ```
 src/fleetent/
@@ -86,12 +87,10 @@ src/fleetent/
     normalizer.py    ← NormalizedMessage 统一路由 pipeline
     slack.py         ← slack-bolt Socket Mode 适配器
     telegram.py      ← python-telegram-bot polling 适配器
-  agent_loop.py      ← while tool-use 核心循环；run() + run_stream()
-  sub_agent.py       ← asyncio.gather 并行子 agent；最大深度 1
+  runtime/           ← loop(←agent_loop)：while tool-use 核心循环 run() / run_stream()；context(←context_mgr)：in-session token 压缩；snapshot(←agent_runtime)：agent 快照 load_active；sub_agent：asyncio.gather 并行子 agent（最大深度 1）；运行治理 termination / loop_detector / budget / layered_budget / cancellation / message_hygiene / error_classifier / tool_guardrails / sub_agent_lifecycle（已包化；旧 agent_loop.py / context_mgr.py / agent_runtime.py 等 13 个为 re-export shim）
   model/             ← router(←model_router)：task_type → provider 配置 + fallback 链；provider_health：熔断缓存（已包化；旧 model_router.py / provider_health.py 为 re-export shim）
   tools/             ← registry(←tool_registry)：@tool 注册、schema 构建、dispatch、访问控制；builtin_tools(←tools)：内置工具（import fleetent.tools 即注册，副作用经包 __init__ 保留）；result_truncation、plugin_loader、vision_client、image_gen_client、multimodal（已包化；旧 tool_registry.py 等 6 个为 re-export shim，tools.py 与包同名已删除）
   skills/            ← registry(←skill_registry)：扫描 skills/、关键词匹配、注入 system prompt；audit(←skill_audit)：静态注入审计（已包化；旧 skill_registry.py / skill_audit.py 为 re-export shim）
-  context_mgr.py     ← in-session token 压缩
   intelligence/
     memory/         ← 结构化 User Memory + Shared Memory：提取、维护、SQLite source of truth、vector_store 索引
     knowledge_base/ ← 企业文档知识库：解析、导入、local / Google Drive / Confluence sync、hybrid / graph / rerank / planner

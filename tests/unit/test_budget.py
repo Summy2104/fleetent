@@ -6,15 +6,15 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from fleetent import budget as bud
-from fleetent.budget import (
+from fleetent.runtime import budget as bud
+from fleetent.runtime.budget import (
     NO_LIMIT,
     BudgetChecker,
     BudgetConfig,
     BudgetUsage,
     grace_max_tokens,
 )
-from fleetent.termination import LoopState, StopReason
+from fleetent.runtime.termination import LoopState, StopReason
 
 # ── BudgetConfig / BudgetUsage shape ───────────────────────────────────────────
 

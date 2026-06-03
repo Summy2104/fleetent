@@ -22,7 +22,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from fleetent.error_classifier import ErrorClassification
+    from fleetent.runtime.error_classifier import ErrorClassification
 
 logger = logging.getLogger(__name__)
 
@@ -298,7 +298,7 @@ def _disconnect_classification() -> ErrorClassification:
     We deliberately do NOT call ``error_classifier.classify()`` — it only recognizes
     ``APIStatusError`` and would return ``unknown`` for a disconnect exception.
     """
-    from fleetent.error_classifier import CLASSIFICATION_TABLE, ErrorCategory
+    from fleetent.runtime.error_classifier import CLASSIFICATION_TABLE, ErrorCategory
 
     return CLASSIFICATION_TABLE[ErrorCategory.mcp_disconnect]
 

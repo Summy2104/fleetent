@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from fleetent.sub_agent import SubAgentExecutor
+from fleetent.runtime.sub_agent import SubAgentExecutor
 
 
 async def test_two_tasks_run_and_return_results():
@@ -13,7 +13,7 @@ async def test_two_tasks_run_and_return_results():
     async def fake_run(messages, **kwargs):
         return messages[0]["content"] + "_result"
 
-    with patch("fleetent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         results = await executor.run(
             tasks=[
                 {"name": "task_a", "prompt": "do_a"},
@@ -39,7 +39,7 @@ async def test_partial_failure_returns_error_for_failed_task():
             raise RuntimeError("child failed")
         return "ok"
 
-    with patch("fleetent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         results = await executor.run(
             tasks=[
                 {"name": "good", "prompt": "do_good"},
@@ -73,7 +73,7 @@ async def test_child_cannot_spawn_sub_agent():
                 await tr.dispatch("sub_agent", {"tasks": []}, is_sub_agent=True)
         return "ok"
 
-    with patch("fleetent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         results = await executor.run(
             tasks=[{"name": "t1", "prompt": "test"}],
             parent_user_id="user-1",
@@ -90,7 +90,7 @@ async def test_results_contain_parent_session_id():
     async def fake_run(messages, **kwargs):
         return "done"
 
-    with patch("fleetent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         results = await executor.run(
             tasks=[{"name": "t1", "prompt": "go"}],
             parent_user_id="user-1",
@@ -103,7 +103,7 @@ async def test_results_contain_parent_session_id():
 
 async def test_tasks_run_concurrently_not_sequentially(tmp_path, monkeypatch):
     """asyncio.gather should overlap task execution, not serialize it."""
-    import fleetent.sub_agent_lifecycle as sal
+    import fleetent.runtime.sub_agent_lifecycle as sal
 
     monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
     start_times: list[float] = []
@@ -113,7 +113,7 @@ async def test_tasks_run_concurrently_not_sequentially(tmp_path, monkeypatch):
         await asyncio.sleep(0.05)
         return "done"
 
-    with patch("fleetent.agent_loop.run", side_effect=timed_run):
+    with patch("fleetent.runtime.loop.run", side_effect=timed_run):
         executor = SubAgentExecutor()
         t0 = time.monotonic()
         await executor.run(
@@ -146,7 +146,7 @@ def _iso_set(*vals):
 
 
 async def test_lifecycle_records_succeeded_with_timestamps(tmp_path, monkeypatch):
-    import fleetent.sub_agent_lifecycle as sal
+    import fleetent.runtime.sub_agent_lifecycle as sal
 
     monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
     executor = SubAgentExecutor()
@@ -154,7 +154,7 @@ async def test_lifecycle_records_succeeded_with_timestamps(tmp_path, monkeypatch
     async def fake_run(messages, **kwargs):
         return "ok"
 
-    with patch("fleetent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
             parent_user_id="u",
@@ -168,8 +168,8 @@ async def test_lifecycle_records_succeeded_with_timestamps(tmp_path, monkeypatch
 
 
 async def test_cancel_token_passed_with_parent_link(tmp_path, monkeypatch):
-    import fleetent.sub_agent_lifecycle as sal
-    from fleetent.cancellation import CancelToken
+    import fleetent.runtime.sub_agent_lifecycle as sal
+    from fleetent.runtime.cancellation import CancelToken
 
     monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
     executor = SubAgentExecutor()
@@ -180,7 +180,7 @@ async def test_cancel_token_passed_with_parent_link(tmp_path, monkeypatch):
         return "ok"
 
     batch = CancelToken()
-    with patch("fleetent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
             parent_user_id="u",
@@ -197,7 +197,7 @@ async def test_cancel_token_passed_with_parent_link(tmp_path, monkeypatch):
 async def test_one_task_times_out_others_succeed(tmp_path, monkeypatch):
     import time as _time
 
-    import fleetent.sub_agent_lifecycle as sal
+    import fleetent.runtime.sub_agent_lifecycle as sal
 
     monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
     executor = SubAgentExecutor()
@@ -210,7 +210,7 @@ async def test_one_task_times_out_others_succeed(tmp_path, monkeypatch):
             return "partial"
         return "done"
 
-    with patch("fleetent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         results = await executor.run(
             tasks=[{"name": "slow", "prompt": "slow"}, {"name": "fast", "prompt": "fast"}],
             parent_user_id="u",
@@ -226,7 +226,7 @@ async def test_one_task_times_out_others_succeed(tmp_path, monkeypatch):
 
 
 async def test_parent_cancel_marks_cancelled(tmp_path, monkeypatch):
-    import fleetent.sub_agent_lifecycle as sal
+    import fleetent.runtime.sub_agent_lifecycle as sal
 
     monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
     executor = SubAgentExecutor()
@@ -236,7 +236,7 @@ async def test_parent_cancel_marks_cancelled(tmp_path, monkeypatch):
         kwargs["cancel_token"].parent.cancel()
         return "partial"
 
-    with patch("fleetent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
             parent_user_id="u",
@@ -248,8 +248,8 @@ async def test_parent_cancel_marks_cancelled(tmp_path, monkeypatch):
 
 
 async def test_pending_cancelled_when_batch_precancelled(tmp_path, monkeypatch):
-    import fleetent.sub_agent_lifecycle as sal
-    from fleetent.cancellation import CancelToken
+    import fleetent.runtime.sub_agent_lifecycle as sal
+    from fleetent.runtime.cancellation import CancelToken
 
     monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
     executor = SubAgentExecutor()
@@ -261,7 +261,7 @@ async def test_pending_cancelled_when_batch_precancelled(tmp_path, monkeypatch):
 
     batch = CancelToken()
     batch.cancel()  # already cancelled before the batch starts
-    with patch("fleetent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
             parent_user_id="u",
@@ -276,7 +276,7 @@ async def test_pending_cancelled_when_batch_precancelled(tmp_path, monkeypatch):
 
 
 async def test_failure_marks_failed_with_error(tmp_path, monkeypatch):
-    import fleetent.sub_agent_lifecycle as sal
+    import fleetent.runtime.sub_agent_lifecycle as sal
 
     monkeypatch.setattr(sal, "DB_PATH", tmp_path / "users.db")
     executor = SubAgentExecutor()
@@ -284,7 +284,7 @@ async def test_failure_marks_failed_with_error(tmp_path, monkeypatch):
     async def fake_run(messages, **kwargs):
         raise RuntimeError("boom")
 
-    with patch("fleetent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
             parent_user_id="u",

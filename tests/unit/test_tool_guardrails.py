@@ -1,8 +1,8 @@
 """Tests for the per-call tool guardrail: strict consecutive-repeat (AR10)."""
 
-from fleetent.loop_detector import arg_fingerprint
-from fleetent.termination import GuardrailChecker, LoopState, StopReason
-from fleetent.tool_guardrails import GuardrailAction, evaluate_guardrail
+from fleetent.runtime.loop_detector import arg_fingerprint
+from fleetent.runtime.termination import GuardrailChecker, LoopState, StopReason
+from fleetent.runtime.tool_guardrails import GuardrailAction, evaluate_guardrail
 
 
 def _fp(args: str) -> str:

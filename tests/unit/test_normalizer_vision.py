@@ -74,7 +74,7 @@ async def test_image_message_extracted_and_stripped(tmp_path, monkeypatch):
         captured_messages["messages"] = list(messages)
         return "done"
 
-    import fleetent.agent_loop as agent_loop
+    import fleetent.runtime.loop as agent_loop
 
     monkeypatch.setattr(agent_loop, "run", fake_run)
 
@@ -111,7 +111,7 @@ async def test_no_image_message_unchanged(tmp_path, monkeypatch):
         captured_messages["messages"] = list(messages)
         return "done"
 
-    import fleetent.agent_loop as agent_loop
+    import fleetent.runtime.loop as agent_loop
 
     monkeypatch.setattr(agent_loop, "run", fake_run)
 
@@ -142,7 +142,7 @@ async def test_reference_still_readable_for_followup_analyze(tmp_path, monkeypat
         captured_messages["messages"] = list(messages)
         return "done"
 
-    import fleetent.agent_loop as agent_loop
+    import fleetent.runtime.loop as agent_loop
 
     monkeypatch.setattr(agent_loop, "run", fake_run)
 

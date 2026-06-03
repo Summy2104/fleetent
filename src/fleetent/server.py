@@ -17,7 +17,6 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from fleetent import user_store
-from fleetent.agent_loop import run_stream
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, WebhooksSettings, configure_logging
 from fleetent.cron_scheduler import CronScheduler
@@ -56,6 +55,7 @@ from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.resource_monitoring import collectors, monitor_admin_api
 from fleetent.platform.skill_management import skill_admin_api
 from fleetent.platform.user_management import api_key_store, user_admin_api
+from fleetent.runtime import run_stream
 from fleetent.session import manager as session_mgr
 from fleetent.skills import scan as scan_skills
 from fleetent.tools.plugin_loader import expand_plugin_patterns, load_plugins

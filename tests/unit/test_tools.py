@@ -144,8 +144,8 @@ async def test_run_code_normal_path_does_not_destroy_with_live_token(monkeypatch
     from unittest.mock import AsyncMock
 
     import fleetent.tools.builtin_tools as tl
-    from fleetent.cancellation import CancelToken
     from fleetent.integrations.sandbox.client import ExecResult
+    from fleetent.runtime.cancellation import CancelToken
 
     client = _mock_lifecycle_client("cid-ok")
     client.exec = AsyncMock(return_value=ExecResult(stdout="42\n", stderr="", exit_code=0))
@@ -162,7 +162,7 @@ async def test_run_code_aborts_and_destroys_on_cancel(monkeypatch):
     import asyncio
 
     import fleetent.tools.builtin_tools as tl
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     async def never_returns(ws_id, command):
         await asyncio.Event().wait()
@@ -188,8 +188,8 @@ async def test_run_code_cancel_forgets_registry_then_reacquires(monkeypatch):
     from unittest.mock import AsyncMock
 
     import fleetent.tools.builtin_tools as tl
-    from fleetent.cancellation import CancelToken
     from fleetent.integrations.sandbox.client import ExecResult
+    from fleetent.runtime.cancellation import CancelToken
 
     async def never_returns(ws_id, command):
         await asyncio.Event().wait()
@@ -219,7 +219,7 @@ async def test_run_code_cancel_path_finally_does_not_double_raise(monkeypatch):
     import asyncio
 
     import fleetent.tools.builtin_tools as tl
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     async def never_returns(ws_id, command):
         await asyncio.Event().wait()
@@ -271,7 +271,7 @@ async def test_run_code_does_not_log_trace_on_cancel(monkeypatch):
     from unittest.mock import MagicMock
 
     import fleetent.tools.builtin_tools as tl
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     async def never_returns(ws_id, command):
         await asyncio.Event().wait()
@@ -542,7 +542,7 @@ def test_run_code_self_truncates_exempt_from_t4():
 
 def test_sandbox_timeout_classification_reads_ar5_table():
     import fleetent.tools.builtin_tools as tl
-    from fleetent.error_classifier import CLASSIFICATION_TABLE, ErrorCategory
+    from fleetent.runtime.error_classifier import CLASSIFICATION_TABLE, ErrorCategory
 
     c = tl._sandbox_timeout_classification()
     assert c == CLASSIFICATION_TABLE[ErrorCategory.sandbox_timeout]
@@ -588,7 +588,7 @@ async def test_run_code_external_cancel_kills_but_not_timeout(monkeypatch):
     import asyncio
 
     import fleetent.tools.builtin_tools as tl
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     async def never_returns(ws_id, command):
         await asyncio.Event().wait()

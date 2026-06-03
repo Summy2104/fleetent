@@ -17,7 +17,7 @@ def mock_session_mgr(monkeypatch):
 
 @pytest.fixture
 def mock_agent_loop(monkeypatch):
-    import fleetent.agent_loop as al
+    import fleetent.runtime.loop as al
 
     monkeypatch.setattr(al, "run", AsyncMock(return_value="agent response"))
     return al

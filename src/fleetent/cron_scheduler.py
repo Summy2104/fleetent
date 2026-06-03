@@ -21,7 +21,7 @@ LEGACY_CRON_CONFIG_PATH = Path("config/cron.yaml")
 async def _agent_run(
     messages: list[dict[str, Any]], user_id: str, agent_name: str | None = None
 ) -> str:
-    from fleetent import agent_loop
+    from fleetent.runtime import loop as agent_loop
 
     return await agent_loop.run(messages, user_id=user_id, agent_name=agent_name)
 

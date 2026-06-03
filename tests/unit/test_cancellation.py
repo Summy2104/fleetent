@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import time
 
-from fleetent.cancellation import CancellationChecker, CancelToken
-from fleetent.termination import StopReason
+from fleetent.runtime.cancellation import CancellationChecker, CancelToken
+from fleetent.runtime.termination import StopReason
 
 
 def test_default_token_never_cancelled():
@@ -50,7 +50,7 @@ def test_checker_returns_cancelled_when_token_cancelled():
     token = CancelToken()
     token.cancel()
     checker = CancellationChecker(token)
-    from fleetent.termination import LoopState
+    from fleetent.runtime.termination import LoopState
 
     assert checker.check(LoopState()) is StopReason.cancelled
 
@@ -58,7 +58,7 @@ def test_checker_returns_cancelled_when_token_cancelled():
 def test_checker_returns_none_when_token_live():
     token = CancelToken()
     checker = CancellationChecker(token)
-    from fleetent.termination import LoopState
+    from fleetent.runtime.termination import LoopState
 
     assert checker.check(LoopState()) is None
 

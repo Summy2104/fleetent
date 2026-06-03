@@ -12,9 +12,8 @@ import logging
 import uuid
 from typing import Any, Literal, cast
 
-from fleetent.agent_loop import run_stream
-from fleetent.cancellation import CancelToken
 from fleetent.governance import permission_gate
+from fleetent.runtime import CancelToken, run_stream
 from fleetent.session import manager as session_mgr
 from fleetent.tui import protocol as p
 from fleetent.tui.transport import Transport

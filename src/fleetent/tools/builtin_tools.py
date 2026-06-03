@@ -8,8 +8,6 @@ import uuid
 from pathlib import Path
 
 from fleetent import eval_logger
-from fleetent.cancellation import CancelToken
-from fleetent.error_classifier import CLASSIFICATION_TABLE, ErrorCategory, ErrorClassification
 from fleetent.integrations.sandbox import (
     ExecResult,
     SandboxClient,
@@ -17,6 +15,12 @@ from fleetent.integrations.sandbox import (
     build_sandbox_env,
 )
 from fleetent.integrations.sandbox import output_truncation as sot
+from fleetent.runtime.cancellation import CancelToken
+from fleetent.runtime.error_classifier import (
+    CLASSIFICATION_TABLE,
+    ErrorCategory,
+    ErrorClassification,
+)
 from fleetent.tools import image_gen_client, vision_client
 from fleetent.tools.registry import ToolContext, tool
 
@@ -360,10 +364,11 @@ def sub_agent(tasks: str) -> str:
 @tool(risk_level="medium")
 async def invoke_agent(agent_name: str, message: str) -> str:
     """Delegate a message to another named agent and return its reply."""
-    # Lazy import: agent_loop imports tools at module load (circular otherwise).
-    from fleetent import agent_loop, agent_runtime
+    # Lazy import: the loop imports tools at module load (circular otherwise).
+    from fleetent.runtime import load_active
+    from fleetent.runtime import loop as agent_loop
 
-    snapshot = agent_runtime.load_active(agent_name)
+    snapshot = load_active(agent_name)
     if snapshot is None:
         return f"agent {agent_name!r} not found"
     messages = [

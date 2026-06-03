@@ -179,7 +179,7 @@ def test_unavailable_servers_lists_modes(monkeypatch):
 
 
 def test_agent_bound_to_server(monkeypatch):
-    import fleetent.agent_loop as al
+    import fleetent.runtime.loop as al
 
     monkeypatch.setattr(mc, "_server_registry", {})
     monkeypatch.setitem(tr._registry, "srv__tool", (lambda: "x", {}))
@@ -189,7 +189,7 @@ def test_agent_bound_to_server(monkeypatch):
 
 
 def test_degrade_silent_log_levels(monkeypatch):
-    import fleetent.agent_loop as al
+    import fleetent.runtime.loop as al
 
     deg = McpServerConfig(id="deg", degrade_mode="degrade")
     deg._health = HealthState.unavailable

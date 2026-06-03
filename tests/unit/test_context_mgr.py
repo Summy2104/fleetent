@@ -1,6 +1,6 @@
 import pytest
 
-from fleetent.context_mgr import (
+from fleetent.runtime.context import (
     _keep_tail,
     compress_for_context_overflow,
     estimate_tokens,
@@ -30,7 +30,7 @@ def test_no_compress_below_threshold():
 
 def test_compress_triggers_above_threshold(monkeypatch):
     # Patch _summarize so we don't call the real LLM in tests
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(
         cm, "_summarize", lambda msgs, prev_summary=None, config=None: "Summary: user asked things."
@@ -60,7 +60,7 @@ def test_compress_triggers_above_threshold(monkeypatch):
 
 
 def test_no_compress_when_at_or_below_tmax(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "Summary.")
     msgs = [
@@ -74,7 +74,7 @@ def test_no_compress_when_at_or_below_tmax(monkeypatch):
 
 
 def test_compress_triggers_when_above_tmax(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "Summary.")
     big_msgs = [
@@ -90,7 +90,7 @@ def test_compress_triggers_when_above_tmax(monkeypatch):
 
 
 def test_compress_falls_back_to_tretained_target(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "S")
     # Many large messages; keep_recent alone (10) would stay well over tretained.
@@ -108,7 +108,7 @@ def test_compress_falls_back_to_tretained_target(monkeypatch):
 
 
 def test_compress_keeps_tool_pair_whole_even_above_target(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "S")
     caller = {"role": "assistant", "content": "c" * 4000}
@@ -131,7 +131,7 @@ def test_compress_keeps_tool_pair_whole_even_above_target(monkeypatch):
 
 
 def test_compress_spacing_below_tmax_after_compress(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "S")
     big_msgs = [
@@ -154,7 +154,7 @@ def test_illegal_config_tretained_ge_tmax_raises():
 
 
 def test_manual_force_compress_below_tmax(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "S")
     # Small conversation, nowhere near tmax; force must still compress.
@@ -170,7 +170,7 @@ def test_manual_force_compress_below_tmax(monkeypatch):
 
 
 def test_context_overflow_entrypoint_compresses(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "S")
     msgs = [
@@ -197,7 +197,7 @@ def test_keep_tail_identity_not_equality():
 
 
 def test_role_with_object_attribute():
-    from fleetent.context_mgr import _role
+    from fleetent.runtime.context import _role
 
     class FakeMsg:
         role = "assistant"
@@ -206,7 +206,7 @@ def test_role_with_object_attribute():
 
 
 def test_content_with_object_attribute():
-    from fleetent.context_mgr import _content
+    from fleetent.runtime.context import _content
 
     class FakeMsg:
         content = "hello"
@@ -215,7 +215,7 @@ def test_content_with_object_attribute():
 
 
 def test_content_with_none_attribute_returns_empty():
-    from fleetent.context_mgr import _content
+    from fleetent.runtime.context import _content
 
     class FakeMsg:
         content = None
@@ -226,7 +226,7 @@ def test_content_with_none_attribute_returns_empty():
 def test_summarize_calls_llm_and_returns_content(monkeypatch):
     from unittest.mock import MagicMock
 
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     mock_client = MagicMock()
     mock_cfg = MagicMock()
@@ -241,7 +241,7 @@ def test_summarize_calls_llm_and_returns_content(monkeypatch):
 
 
 def test_summarize_exception_returns_none(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     def raise_exc(_task):
         raise RuntimeError("no key")
@@ -254,7 +254,7 @@ def test_summarize_exception_returns_none(monkeypatch):
 
 
 def test_keep_tail_tool_at_index_zero_stops_extending():
-    from fleetent.context_mgr import _keep_tail
+    from fleetent.runtime.context import _keep_tail
 
     tool_msg = {"role": "tool", "content": "result"}
     msgs = [tool_msg]  # tool at index 0 — idx==0, must break
@@ -284,7 +284,7 @@ def test_estimate_tokens_text_unchanged():
 
 def test_default_config_returns_dual_threshold_keys(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    from fleetent.context_mgr import _default_config
+    from fleetent.runtime.context import _default_config
 
     cfg = _default_config()
     assert cfg["tmax_ratio"] == 0.8
@@ -298,7 +298,7 @@ def test_compress_preserves_base_system_cacheable_prefix(monkeypatch):
     # prompt-cache coordination: base system (messages[0], the cacheable prefix)
     # must survive compression byte-for-byte; only the conversation tail is
     # summarized. The variable memory/skill system message is also kept at head.
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "Summary.")
     base = "You are a helpful assistant with access to tools. Use them when needed."
@@ -324,7 +324,7 @@ def test_compress_preserves_base_system_cacheable_prefix(monkeypatch):
 
 
 def test_pre_cleanup_replaces_image_block_with_placeholder():
-    from fleetent.context_mgr import _pre_cleanup
+    from fleetent.runtime.context import _pre_cleanup
 
     big_b64 = "A" * 100_000
     msgs = [
@@ -347,7 +347,7 @@ def test_pre_cleanup_replaces_image_block_with_placeholder():
 
 
 def test_pre_cleanup_image_placeholder_uses_dimensions_when_available():
-    from fleetent.context_mgr import _pre_cleanup
+    from fleetent.runtime.context import _pre_cleanup
 
     msgs = [
         {
@@ -368,7 +368,7 @@ def test_pre_cleanup_image_placeholder_uses_dimensions_when_available():
 
 
 def test_pre_cleanup_image_placeholder_fallback_when_size_missing():
-    from fleetent.context_mgr import _pre_cleanup
+    from fleetent.runtime.context import _pre_cleanup
 
     msgs = [
         {
@@ -383,7 +383,7 @@ def test_pre_cleanup_image_placeholder_fallback_when_size_missing():
 
 
 def test_pre_cleanup_does_not_mutate_input():
-    from fleetent.context_mgr import _pre_cleanup
+    from fleetent.runtime.context import _pre_cleanup
 
     block = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
     msgs = [{"role": "user", "content": [block]}]
@@ -394,7 +394,7 @@ def test_pre_cleanup_does_not_mutate_input():
 
 
 def test_pre_cleanup_image_replacement_is_valid_text_block():
-    from fleetent.context_mgr import _content, _pre_cleanup
+    from fleetent.runtime.context import _content, _pre_cleanup
 
     msgs = [
         {
@@ -412,7 +412,7 @@ def test_pre_cleanup_image_replacement_is_valid_text_block():
 
 
 def test_pre_cleanup_leaves_plain_text_messages_unchanged():
-    from fleetent.context_mgr import _pre_cleanup
+    from fleetent.runtime.context import _pre_cleanup
 
     msgs = [{"role": "user", "content": "just text"}]
     cleaned = _pre_cleanup(msgs)
@@ -437,7 +437,7 @@ def _tool_result(call_id: str, content: str) -> dict:
 
 
 def test_dedup_removes_earlier_identical_tool_pair():
-    from fleetent.context_mgr import _pre_cleanup
+    from fleetent.runtime.context import _pre_cleanup
 
     msgs = [
         _assistant_tc("a1", "read_file", '{"path": "/x"}'),
@@ -463,7 +463,7 @@ def test_dedup_removes_earlier_identical_tool_pair():
 
 
 def test_dedup_keeps_when_results_differ():
-    from fleetent.context_mgr import _pre_cleanup
+    from fleetent.runtime.context import _pre_cleanup
 
     msgs = [
         _assistant_tc("a1", "read_file", '{"path": "/x"}'),
@@ -482,7 +482,7 @@ def test_dedup_keeps_when_results_differ():
 
 
 def test_dedup_keeps_when_args_differ():
-    from fleetent.context_mgr import _pre_cleanup
+    from fleetent.runtime.context import _pre_cleanup
 
     msgs = [
         _assistant_tc("a1", "read_file", '{"path": "/x"}'),
@@ -501,7 +501,7 @@ def test_dedup_keeps_when_args_differ():
 
 
 def test_dedup_args_normalized_ignores_key_order_and_whitespace():
-    from fleetent.context_mgr import _pre_cleanup
+    from fleetent.runtime.context import _pre_cleanup
 
     msgs = [
         _assistant_tc("a1", "search", '{"q": "foo", "limit": 10}'),
@@ -521,7 +521,7 @@ def test_dedup_args_normalized_ignores_key_order_and_whitespace():
 
 
 def test_dedup_multi_block_assistant_kept_when_only_some_equivalent():
-    from fleetent.context_mgr import _pre_cleanup
+    from fleetent.runtime.context import _pre_cleanup
 
     multi = {
         "role": "assistant",
@@ -556,7 +556,7 @@ def test_dedup_multi_block_assistant_kept_when_only_some_equivalent():
 
 
 def test_dedup_multi_block_assistant_removed_when_all_equivalent():
-    from fleetent.context_mgr import _pre_cleanup
+    from fleetent.runtime.context import _pre_cleanup
 
     multi = {
         "role": "assistant",
@@ -607,7 +607,7 @@ def test_dedup_multi_block_assistant_removed_when_all_equivalent():
 
 
 def test_dedup_produces_no_orphan_tool_results():
-    from fleetent.context_mgr import _pre_cleanup
+    from fleetent.runtime.context import _pre_cleanup
 
     msgs = [
         _assistant_tc("a1", "ping", "{}"),
@@ -631,7 +631,7 @@ def test_dedup_produces_no_orphan_tool_results():
 
 
 def test_pre_cleanup_never_calls_llm(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     calls = {"n": 0}
 
@@ -655,7 +655,7 @@ def test_pre_cleanup_never_calls_llm(monkeypatch):
 
 
 def test_compress_runs_pre_cleanup_before_summarize(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     captured: dict[str, list] = {}
 
@@ -702,7 +702,7 @@ def test_compress_runs_pre_cleanup_before_summarize(monkeypatch):
 
 
 def test_initial_intent_takes_leading_user_run():
-    from fleetent.context_mgr import _initial_intent
+    from fleetent.runtime.context import _initial_intent
 
     conv = [
         {"role": "user", "content": "hi"},
@@ -715,7 +715,7 @@ def test_initial_intent_takes_leading_user_run():
 
 
 def test_initial_intent_stops_at_first_non_user():
-    from fleetent.context_mgr import _initial_intent
+    from fleetent.runtime.context import _initial_intent
 
     conv = [
         {"role": "user", "content": "do X"},
@@ -727,7 +727,7 @@ def test_initial_intent_stops_at_first_non_user():
 
 
 def test_initial_intent_respects_upper_bound():
-    from fleetent.context_mgr import _initial_intent
+    from fleetent.runtime.context import _initial_intent
 
     conv = [{"role": "user", "content": f"u{i}"} for i in range(5)]
     intent = _initial_intent(conv, 2)
@@ -735,7 +735,7 @@ def test_initial_intent_respects_upper_bound():
 
 
 def test_initial_intent_empty_when_leading_is_non_user():
-    from fleetent.context_mgr import _initial_intent
+    from fleetent.runtime.context import _initial_intent
 
     conv = [
         {"role": "assistant", "content": "hello"},
@@ -745,14 +745,14 @@ def test_initial_intent_empty_when_leading_is_non_user():
 
 
 def test_initial_intent_empty_when_no_user():
-    from fleetent.context_mgr import _initial_intent
+    from fleetent.runtime.context import _initial_intent
 
     conv = [{"role": "assistant", "content": "hello"}]
     assert _initial_intent(conv, 2) == []
 
 
 def test_initial_intent_returns_same_objects():
-    from fleetent.context_mgr import _initial_intent
+    from fleetent.runtime.context import _initial_intent
 
     m0 = {"role": "user", "content": "a"}
     m1 = {"role": "user", "content": "b"}
@@ -765,7 +765,7 @@ def test_initial_intent_returns_same_objects():
 
 
 def test_select_head_excludes_self_produced_summary():
-    from fleetent.context_mgr import _SUMMARY_PREFIX, _select_head
+    from fleetent.runtime.context import _SUMMARY_PREFIX, _select_head
 
     real_sys = {"role": "system", "content": "You are helpful."}
     prior_summary = {"role": "system", "content": f"{_SUMMARY_PREFIX}\nold stuff"}
@@ -778,7 +778,7 @@ def test_select_head_excludes_self_produced_summary():
 
 
 def test_select_head_orders_system_then_intent():
-    from fleetent.context_mgr import _select_head
+    from fleetent.runtime.context import _select_head
 
     real_sys = {"role": "system", "content": "sys"}
     intent = {"role": "user", "content": "do the thing"}
@@ -790,7 +790,7 @@ def test_select_head_orders_system_then_intent():
 
 def test_default_config_carries_initial_intent_max(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    from fleetent.context_mgr import _default_config
+    from fleetent.runtime.context import _default_config
 
     cfg = _default_config()
     assert cfg["initial_intent_max"] == 2
@@ -800,7 +800,7 @@ def test_default_config_carries_initial_intent_max(monkeypatch):
 
 
 def test_compress_preserves_initial_intent_and_excludes_it_from_summary(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     captured: dict[str, list] = {}
 
@@ -832,7 +832,7 @@ def test_compress_preserves_initial_intent_and_excludes_it_from_summary(monkeypa
 
 
 def test_compress_three_layer_order(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(
         cm, "_summarize", lambda msgs, prev_summary=None, config=None: "MID-SUMMARY"
@@ -864,7 +864,7 @@ def test_compress_three_layer_order(monkeypatch):
 
 
 def test_compress_prior_summary_not_promoted_to_head(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(
         cm, "_summarize", lambda msgs, prev_summary=None, config=None: "NEW-SUMMARY"
@@ -902,7 +902,7 @@ def test_compress_prior_summary_not_promoted_to_head(monkeypatch):
 
 
 def test_large_head_shrinks_tail_but_keeps_floor(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "S")
     # A big initial-intent message inflates the head; the tail must shrink in
@@ -936,7 +936,7 @@ def test_large_head_shrinks_tail_but_keeps_floor(monkeypatch):
 
 
 def test_short_conversation_no_empty_summary(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     summarize_calls = {"n": 0}
 
@@ -964,7 +964,7 @@ def test_short_conversation_no_empty_summary(monkeypatch):
 
 
 def test_head_tail_overlap_deduped_by_identity(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs, prev_summary=None, config=None: "S")
     intent = {"role": "user", "content": "the only ask"}
@@ -993,7 +993,7 @@ def test_head_tail_overlap_deduped_by_identity(monkeypatch):
 
 
 def test_summary_message_has_reference_annotation(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(
         cm, "_summarize", lambda msgs, prev_summary=None, config=None: "MID-SUMMARY"
@@ -1030,7 +1030,7 @@ def test_summary_message_has_reference_annotation(monkeypatch):
 
 
 def test_summary_prefix_constant_carries_reference_wording():
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     assert "历史对话摘要" in cm._SUMMARY_PREFIX
     assert "仅供参考" in cm._SUMMARY_PREFIX
@@ -1040,7 +1040,7 @@ def test_summary_prefix_constant_carries_reference_wording():
 
 
 def test_incremental_summary_extracts_prev_summary_and_merges(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     captured: dict[str, object] = {}
 
@@ -1080,7 +1080,7 @@ def test_incremental_summary_extracts_prev_summary_and_merges(monkeypatch):
 
 
 def test_first_compression_has_no_prev_summary(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     captured: dict[str, object] = {}
 
@@ -1112,7 +1112,7 @@ def test_first_compression_has_no_prev_summary(monkeypatch):
 def test_summarize_merges_prev_summary_into_prompt(monkeypatch):
     from unittest.mock import MagicMock
 
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     mock_client = MagicMock()
     mock_cfg = MagicMock()
@@ -1135,7 +1135,7 @@ def test_summarize_merges_prev_summary_into_prompt(monkeypatch):
 
 
 def test_summary_failure_does_not_raise_and_returns_valid_sequence(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     def _boom(messages, prev_summary=None, config=None):
         return None  # signal LLM failure
@@ -1168,7 +1168,7 @@ def test_summary_failure_does_not_raise_and_returns_valid_sequence(monkeypatch):
 
 
 def test_summary_real_exception_degrades(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     # _summarize itself swallows the LLM exception and returns None (logged).
     def raise_exc(_task):
@@ -1182,7 +1182,7 @@ def test_summary_real_exception_degrades(monkeypatch):
 def test_summary_empty_response_degrades(monkeypatch):
     from unittest.mock import MagicMock
 
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     mock_client = MagicMock()
     mock_cfg = MagicMock()
@@ -1197,7 +1197,7 @@ def test_summary_empty_response_degrades(monkeypatch):
 
 
 def test_summary_failure_is_logged(monkeypatch):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     events: list[str] = []
     monkeypatch.setattr(cm.logger, "warning", lambda event, **kw: events.append(event))
@@ -1214,7 +1214,7 @@ def test_summary_failure_is_logged(monkeypatch):
 
 
 async def test_cumulative_summary_round_trips_and_stays_incremental(monkeypatch, tmp_path):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
     import fleetent.session.manager as sm
 
     monkeypatch.setattr(sm, "SESSIONS_DIR", tmp_path)
@@ -1267,7 +1267,7 @@ async def test_cumulative_summary_round_trips_and_stays_incremental(monkeypatch,
 def test_cumulative_summary_reconsolidates_when_over_bound(monkeypatch):
     from unittest.mock import MagicMock
 
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     mock_client = MagicMock()
     mock_cfg = MagicMock()
@@ -1299,7 +1299,7 @@ def test_cumulative_summary_reconsolidates_when_over_bound(monkeypatch):
 
 import json as _json  # noqa: E402
 
-import fleetent.context_mgr as _cm  # noqa: E402
+import fleetent.runtime.context as _cm  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -1411,7 +1411,7 @@ def test_trace_failure_does_not_break_compression(tmp_path, monkeypatch):
 # ── AR17: anti-flap ──────────────────────────────────────────────────────────
 
 
-from fleetent.context_mgr import (  # noqa: E402
+from fleetent.runtime.context import (  # noqa: E402
     AntiFlapState,
     apply_anti_flap,
     load_anti_flap_state,

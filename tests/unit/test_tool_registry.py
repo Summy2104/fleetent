@@ -148,7 +148,7 @@ def test_schema_type_mapping():
 
 
 def test_dispatch_injects_token_into_opt_in_tool():
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     received: dict[str, object] = {}
 
@@ -165,7 +165,7 @@ def test_dispatch_injects_token_into_opt_in_tool():
 
 
 def test_dispatch_does_not_inject_token_into_non_opt_in_tool():
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     @tool_registry.tool
     def plain_tool(x: str) -> str:
