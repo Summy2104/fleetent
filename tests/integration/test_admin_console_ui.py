@@ -413,6 +413,15 @@ def test_agents_row_actions_in_overflow_menu():
     assert "IS_VIEWER" in body
 
 
+def test_overflow_menu_escapes_scroll_clipping():
+    html = ADMIN_HTML
+    fn = html.split("function toggleMenu(", 1)[1].split("\n}", 1)[0]
+    # dropdown must be positioned via fixed coords so the .table-scroll
+    # (overflow-x:auto) container does not clip it
+    assert "getBoundingClientRect" in fn
+    assert '"fixed"' in fn or "'fixed'" in fn
+
+
 def test_agents_deploy_action_present():
     html = ADMIN_HTML
     body = html.split("function renderAgents()", 1)[1].split("function agShowTemplates", 1)[0]
