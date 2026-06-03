@@ -49,8 +49,8 @@
 | 能力 | 当前状态 | 已有基础 | Pilot 后缺口 | 非 MVP 增强 |
 | --- | --- | --- | --- | --- |
 | Observability foundation | 基础完成 | structured logs、SQLite traces、usage summary、performance summary、source attribution、runtime event coverage、admin query CLI、diagnostics export / manual retention、contract tests | platform UI / HTTP 查询入口 | OTel / Prometheus、dashboard UI、告警 |
-| Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation、retention / compaction API、owner-approved reflection maintenance apply API、Shared Memory `shared_memory_items`、team / tenant scope、`shared:{scope_type}:{scope_id}` namespace | scheduler / review UI 与趋势统计；Shared Memory 不接 prompt 注入 | 长期质量趋势 |
-| Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture、deterministic budget policy；Shared Memory 数据层存在但不接 prompt 注入 | agent / tenant 级 budget 策略；Shared Memory provider policy | 真实 tokenizer、个性化 budget、agent-specific policy |
+| Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation、retention / compaction API、owner-approved reflection maintenance apply API、Shared Memory `shared_memory_items`、team / tenant scope、`shared:{scope_type}:{scope_id}` namespace | scheduler / review UI 与趋势统计；Shared Memory prompt 注入由 long-term-ctx context policy 协调 | 长期质量趋势 |
+| Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture、deterministic budget policy；agent / tenant context policy（tenant 默认 + agent 覆盖）按 agent 归属注入 Shared Memory（tenant / team），默认关闭、无跨 tenant/team 访问 | policy 编辑 UI 与 admin API | 真实 tokenizer、个性化 budget、LLM-driven selection |
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告、deterministic report evaluation、User Memory maintenance proposal lifecycle | review UI / scheduler / trend summary | 自动 skill proposal、KB reflection reports |
 | Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API、combined embedding evaluation | rerank evaluation；rerank 接入 KB search | 后台 reindex job runtime、sqlite-vec、Qdrant、OpenSearch adapter |
 | Knowledge base | 基础完成 | local ingest、parser registry、PDF / DOCX / PPTX / XLSX parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator、combined embedding evaluation、Google Drive / Confluence connector baseline、Google Sheets / Slides export parsing、entity extraction schema + explicit run、`kb_extraction_runs`、`kb_entities`、独立于 search 的 `graph_search` depth 0/1 graph evidence、agent 到多 KB 绑定、connector operations CLI / latest status | 真实 SaaS smoke 与生产凭据管理；query planner / rerank 尚未接入 graph candidates | document-level ACL、scheduler / full sync history、attachments / OCR / VLM |
@@ -223,7 +223,7 @@ hybrid retrieval 和 reindex；真实 SaaS smoke 仍需显式环境变量和凭�
 
 后续仍需要人工确认后再推进的方向：
 
-1. Shared Memory prompt policy：数据层已完成，但 long-term-ctx 第三类 provider、scope ownership 默认策略和 budget 仍需单独定义。
+1. Shared Memory prompt policy：long-term-ctx 已按 agent 归属（tenant / team）解析 context policy 并注入 Shared Memory（默认关闭、无跨 tenant/team 访问）；仍需的是 policy 编辑 UI / admin API 和生产默认值的人工确认。
 2. agent / tenant 到多 KB 绑定策略：会改变用户查询可见范围和 KB 访问控制。
 3. document-level ACL：会把 Google Drive / Confluence 权限映射到检索过滤，复杂度和安全风险都高。
 4. 真实 SaaS connector 生产凭据管理：涉及 secret manager、token 轮换、授权失败恢复和审计。

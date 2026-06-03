@@ -48,11 +48,11 @@
 
 ## 5. Evaluation and docs
 
-- [ ] 5.1 Write failing tests: deterministic evaluation covers tenant default, agent override, Shared Memory disabled-by-default, and no cross-team/tenant access
-- [ ] 5.2 Verify red: run `uv run pytest tests/evaluation -x -q`
-- [ ] 5.3 Implement evaluation fixture/runner
-- [ ] 5.4 Verify green: run `uv run pytest tests/evaluation -x -q`
-- [ ] 5.5 Update `docs/capabilities/long-term-ctx.md`, `docs/capabilities/memory.md`, and owner roadmap
+- [x] 5.1 Write failing tests: deterministic evaluation covers tenant default, agent override, Shared Memory disabled-by-default, and no cross-team/tenant access
+- [x] 5.2 Verify red: run `uv run pytest tests/evaluation -x -q`
+- [x] 5.3 Implement evaluation fixture/runner
+- [x] 5.4 Verify green: run `uv run pytest tests/evaluation -x -q`
+- [x] 5.5 Update `docs/capabilities/long-term-ctx.md`, `docs/capabilities/memory.md`, and owner roadmap
 
 ## 6. Verification
 

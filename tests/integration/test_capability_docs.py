@@ -97,8 +97,12 @@ def test_capability_docs_describe_shared_memory_scope():
 
     for content in [memory_doc, long_term_doc, roadmap]:
         assert "Shared Memory" in content
-        assert "shared_memory_items" in content
-        assert "shared:{scope_type}:{scope_id}" in content
         assert "team" in content
         assert "tenant" in content
-        assert "不接 prompt 注入" in content
+        # Shared Memory prompt injection is governed by the long-term-ctx context policy.
+        assert "context policy" in content
+
+    # The raw vector namespace remains documented in the data-layer docs.
+    for content in [memory_doc, roadmap]:
+        assert "shared_memory_items" in content
+        assert "shared:{scope_type}:{scope_id}" in content

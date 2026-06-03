@@ -8,7 +8,7 @@ User Memory 的提取、存储与检索，让 agent 在多次对话中积累单�
 
 **负责**：从对话中提取用户相关事实，按类型结构化存储，支持向量相似度检索，并向 vector_store reindex 暴露当前可索引记忆。当前 `fleetent.intelligence.memory` 已实现 User Memory，并提供 Shared Memory 数据层；Shared Memory 保存已确认的团队 / 租户级上下文、偏好和流程。
 
-**不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、未经 owner 确认的 reflection 写回；Shared Memory 当前不接 prompt 注入。
+**不负责**：企业文档知识（→ knowledge_base）、注入 system prompt 的协调与 token 预算（→ long_term_ctx）、未经 owner 确认的 reflection 写回。Shared Memory 的 prompt 注入由 long_term_ctx 按 agent 归属（tenant / team）的 context policy 协调，memory 只提供 `search_shared_memory` 检索 API。
 
 ### 记忆系统全局架构
 
@@ -131,7 +131,7 @@ async def create_shared_memory(...) -> SharedMemoryItem:
 
 
 async def search_shared_memory(scope_type: str, scope_id: str, query: str, limit: int = 10) -> list[SharedMemoryItem]:
-    """检索指定 team / tenant scope 内 active 或 stale 的 Shared Memory；不接 prompt 注入。"""
+    """检索指定 team / tenant scope 内 active 或 stale 的 Shared Memory；由 long_term_ctx 按 context policy 注入。"""
 
 
 def get_memory_quality_trend_summary(query: MemoryQualityTrendQuery) -> MemoryQualityTrendSummary:
@@ -154,7 +154,7 @@ def get_memory_quality_trend_summary(query: MemoryQualityTrendQuery) -> MemoryQu
 - `search()` 通过 vector_store 查相关 memory ids，回查 SQLite 并过滤过期 context
 - `iter_indexable_memories(user_id)` public API 返回当前未过期 memory source records，供 vector_store 同步 reindex 使用
 - reflection maintenance apply 只通过 `fleetent.intelligence.memory` public mutation API，不直接写 `memory_items`
-- Shared Memory 数据层已完成：`shared_memory_items` 表、`SharedMemoryItem` public API、team / tenant scope、`shared:{scope_type}:{scope_id}` vector namespace、reflection proposal apply 入口和最小 admin CLI；不接 prompt 注入
+- Shared Memory 数据层已完成：`shared_memory_items` 表、`SharedMemoryItem` public API、team / tenant scope、`shared:{scope_type}:{scope_id}` vector namespace、reflection proposal apply 入口和最小 admin CLI；prompt 注入由 long_term_ctx 按 agent 归属的 context policy 协调（tenant 默认 + agent 覆盖，默认关闭）
 - Memory Quality Trend summary 已完成：按 day / week 只读聚合 User Memory type counts、expired context、exact duplicate candidates、Shared Memory type counts，以及 reflection maintenance proposal 的 status / action / risk counts
 - 删除旧 JSONL memory 兼容和 `load_memories()` 直接注入路径
 
