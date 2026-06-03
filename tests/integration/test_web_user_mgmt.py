@@ -1,8 +1,8 @@
 import pytest
 
-import fleetent.api_key_store as aks
 import fleetent.auth as auth
-import fleetent.invite_store as invite_store
+import fleetent.platform.user_management.api_key_store as aks
+import fleetent.platform.user_management.invite_store as invite_store
 import fleetent.user_store as user_store
 
 

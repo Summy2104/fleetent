@@ -60,7 +60,9 @@ async def test_build_context_calls_memory_search_with_user_query_and_limit(monke
         available_tokens=200,
     )
 
-    memory_search.assert_awaited_once_with("user-1", "python debugging", limit=10)
+    memory_search.assert_awaited_once_with(
+        "user-1", "python debugging", limit=10, namespace="default"
+    )
 
 
 async def test_memory_results_are_formatted_with_memory_source_summary(monkeypatch):

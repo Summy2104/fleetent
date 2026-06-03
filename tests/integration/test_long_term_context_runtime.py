@@ -37,10 +37,11 @@ async def test_agent_runtime_calls_long_term_context_builder_with_existing_signa
     )
     build_context = AsyncMock(return_value=BuiltContext(text="", sources=[]))
 
-    monkeypatch.setattr(agent_loop, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(agent_loop, "get_async_client_and_config", lambda *a, **k: (client, cfg))
     monkeypatch.setattr(agent_loop, "get_schemas", lambda: [])
-    monkeypatch.setattr(agent_loop, "maybe_compress", lambda messages: messages)
+    monkeypatch.setattr(agent_loop, "maybe_compress", lambda messages, **kwargs: messages)
     monkeypatch.setattr(agent_loop, "match_skill", lambda _: None)
+    monkeypatch.setattr(agent_loop, "extract_and_update", AsyncMock())
     monkeypatch.setattr(agent_loop, "build_context", build_context)
     monkeypatch.setattr(agent_loop, "record_trace_event", lambda event: None)
     monkeypatch.setattr(agent_loop, "record_injected_context", lambda run_id, sources: None)
@@ -51,6 +52,9 @@ async def test_agent_runtime_calls_long_term_context_builder_with_existing_signa
         agent_name="agent-1",
     )
 
+    # The parameter-style agent_loop passes the four positional args; memory_namespace
+    # is left to build_context's own "default" (per-agent namespacing is not threaded
+    # through the param-style run path chosen during the next<-main integration).
     build_context.assert_awaited_once_with(
         "user-1",
         "what should I use?",

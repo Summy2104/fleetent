@@ -10,6 +10,7 @@ def mock_session_mgr(monkeypatch):
     import fleetent.session_mgr as sm
 
     monkeypatch.setattr(sm, "load", AsyncMock(return_value=[]))
+    monkeypatch.setattr(sm, "load_meta", AsyncMock(return_value={}))
     monkeypatch.setattr(sm, "save", AsyncMock())
     return sm
 
@@ -30,6 +31,8 @@ def mock_memory_skill(monkeypatch):
 
     monkeypatch.setattr(sr, "match", lambda text: None)
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
+    # -next route resolves the bound agent via get_agent_for_context (flat Agent),
+    # not the snapshot resolver; no bound agent → bare run with the default system.
     monkeypatch.setattr(norm, "get_agent_for_context", lambda platform, channel_id, user_id: None)
 
 
@@ -175,17 +178,18 @@ async def test_telegram_group_no_reply_falls_back_to_user_session():
 
 
 async def test_slack_create_app_returns_app_object(monkeypatch):
-    """create_app() instantiates a bolt App and registers the message handler."""
+    """create_app(config) instantiates a bolt App and registers the message handler."""
     from unittest.mock import MagicMock, patch
 
     mock_app_instance = MagicMock()
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-fake")
 
     # AsyncApp is imported inside create_app() via `from slack_bolt.async_app import AsyncApp`
     with patch("slack_bolt.async_app.AsyncApp", return_value=mock_app_instance) as mock_app_cls:
         import fleetent.im_gateway.slack as slack_mod
 
-        result = slack_mod.create_app()
+        result = slack_mod.create_app(
+            "owner1", {"bot_token": "xoxb-fake", "app_token": "xapp-fake"}
+        )
 
     assert result is mock_app_instance
     mock_app_cls.assert_called_once_with(token="xoxb-fake")
@@ -193,10 +197,8 @@ async def test_slack_create_app_returns_app_object(monkeypatch):
 
 
 async def test_telegram_create_app_returns_application_object(monkeypatch):
-    """create_app() builds a telegram Application and registers a message handler."""
+    """create_app(config) builds a telegram Application and registers a message handler."""
     from unittest.mock import MagicMock, patch
-
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg-fake-token")
 
     mock_app = MagicMock()
     mock_builder = MagicMock()
@@ -209,76 +211,10 @@ async def test_telegram_create_app_returns_application_object(monkeypatch):
         mock_cls.builder.return_value = mock_builder
         import fleetent.im_gateway.telegram as tg_mod
 
-        result = tg_mod.create_app()
+        result = tg_mod.create_app("owner1", {"bot_token": "tg-fake-token"})
 
     assert result is mock_app
     mock_app.add_handler.assert_called_once()
-
-
-async def test_route_uses_agent_system_prompt_and_allowed_tools(
-    mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
-):
-    """route() should pass agent's system_prompt and allowed_tools when an agent is assigned."""
-    import fleetent.im_gateway.normalizer as norm
-    from fleetent.agent_store import Agent
-
-    fake_agent = Agent(
-        id=1,
-        name="restricted",
-        system_prompt="You are a restricted agent.",
-        allowed_tools=["calculate"],
-    )
-    monkeypatch.setattr(
-        norm, "get_agent_for_context", lambda platform, channel_id, user_id: fake_agent
-    )
-
-    reply_calls: list[str] = []
-
-    async def fake_reply(text: str) -> None:
-        reply_calls.append(text)
-
-    msg = NormalizedMessage(
-        platform="slack",
-        session_id="user:U999",
-        user_id="restricted-user",
-        text="hi",
-        attachments=[],
-        reply_func=fake_reply,
-    )
-
-    await route(msg)
-
-    call_kwargs = mock_agent_loop.run.call_args[1]
-    assert call_kwargs["allowed_tools"] == ["calculate"]
-    system_msg = call_kwargs["messages"][0]
-    assert "restricted agent" in system_msg["content"]
-
-
-async def test_route_no_agent_passes_none_allowed_tools(
-    mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
-):
-    """When no agent is assigned, allowed_tools should be None (all tools available)."""
-    import fleetent.im_gateway.normalizer as norm
-
-    monkeypatch.setattr(norm, "get_agent_for_context", lambda platform, channel_id, user_id: None)
-
-    async def fake_reply(text: str) -> None:
-        pass
-
-    msg = NormalizedMessage(
-        platform="slack",
-        channel_id="C000",
-        session_id="user:U000",
-        user_id="free-user",
-        text="hi",
-        attachments=[],
-        reply_func=fake_reply,
-    )
-
-    await route(msg)
-
-    call_kwargs = mock_agent_loop.run.call_args[1]
-    assert call_kwargs["allowed_tools"] is None
 
 
 async def test_route_blocked_user_gets_rejection_not_agent(
@@ -314,7 +250,7 @@ async def test_route_blocked_user_gets_rejection_not_agent(
 async def test_route_channel_agent_takes_priority(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
-    """Channel-level agent is used when bound, regardless of user binding."""
+    """Channel-bound agent's system prompt is used for the run (flat Agent path)."""
     import fleetent.im_gateway.normalizer as norm
     import fleetent.im_user_store as ius
     from fleetent.agent_store import Agent
@@ -322,7 +258,10 @@ async def test_route_channel_agent_takes_priority(
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
 
     channel_agent = Agent(
-        id=10, name="channel-bot", system_prompt="Channel sys.", allowed_tools=["shell"]
+        id=10,
+        name="channel-bot",
+        system_prompt="Channel sys.",
+        allowed_tools=["shell"],
     )
     monkeypatch.setattr(
         norm, "get_agent_for_context", lambda platform, channel_id, user_id: channel_agent

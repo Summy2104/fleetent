@@ -55,7 +55,7 @@ def authenticate(plaintext: str) -> tuple[User, dict[str, Any]] | None:
     legacy users.api_key column for keys not yet migrated. Returns None if the key is
     invalid/revoked/expired or the owning user is blocked.
     """
-    from fleetent import api_key_store
+    from fleetent.platform.user_management import api_key_store
 
     _init_db()
     meta = api_key_store.resolve(plaintext)
@@ -92,7 +92,7 @@ def migrate_api_keys() -> list[str]:
 
     Returns the list of user ids whose keys were migrated this run.
     """
-    from fleetent import api_key_store
+    from fleetent.platform.user_management import api_key_store
 
     _init_db()
     api_key_store._init_db()
@@ -169,6 +169,17 @@ def get_builtin_admin() -> User | None:
     return User(*row) if row else None
 
 
+# Sentinel owner for rows backfilled before a built-in admin exists; reassigned to the
+# real admin owner on next seed.
+SYSTEM_OWNER_ID = "__system__"
+
+
+def admin_owner_id() -> str:
+    """Owner id used to attribute pre-multi-tenant IM rows: the built-in admin, else sentinel."""
+    admin = get_builtin_admin()
+    return admin.id if admin else SYSTEM_OWNER_ID
+
+
 def set_role(user_id: str, role: str) -> None:
     current = get_by_id(user_id)
     if current is not None and current.role == "built_in_admin" and role != "built_in_admin":
@@ -204,15 +215,21 @@ def create_web_user(
     must_reset: bool = False,
     role: str = "viewer",
 ) -> User:
-    """Create a web user (admin-initiated). Rejects duplicate or registration-blocked emails."""
+    """Create a web user (admin-initiated). Rejects duplicate or registration-blocked emails.
+
+    An empty/whitespace email is treated as "no email" (stored as NULL) and is exempt from the
+    duplicate check, so several email-less users (e.g. IM-only) can coexist.
+    """
     _init_db()
     from fleetent.governance import blocklist
 
-    if blocklist.is_registration_blocked(email):
-        raise PermissionError(f"email blocked from registration: {email}")
-    if get_by_email(email) is not None:
-        raise ValueError(f"email already exists: {email}")
-    user = create_user(name=name, email=email)
+    normalized = email.strip() or None
+    if normalized is not None:
+        if blocklist.is_registration_blocked(normalized):
+            raise PermissionError(f"email blocked from registration: {normalized}")
+        if get_by_email(normalized) is not None:
+            raise ValueError(f"email already exists: {normalized}")
+    user = create_user(name=name, email=normalized)
     if role != "viewer":
         set_role(user.id, role)
     if password_hash is not None:
@@ -262,10 +279,10 @@ def _update_field(user_id: str, column: str, value: object) -> None:
         conn.execute(f"UPDATE users SET {column} = ? WHERE id = ?", (value, user_id))
 
 
-def get_or_create_im_user(platform: str, platform_user_id: str) -> "User":
+def get_or_create_im_user(owner_id: str, platform: str, platform_user_id: str) -> "User":
     from fleetent.im_user_store import get_or_create
 
-    return get_or_create(platform, platform_user_id)
+    return get_or_create(owner_id, platform, platform_user_id)
 
 
 def _conn() -> sqlite3.Connection:

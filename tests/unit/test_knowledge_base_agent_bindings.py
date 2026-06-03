@@ -254,5 +254,7 @@ async def test_long_term_context_skips_search_when_agent_kb_scope_is_empty(monke
     assert context.sources == []
 
 
-async def _empty_memory_search(user_id: str, query: str, limit: int) -> list[object]:
+async def _empty_memory_search(
+    user_id: str, query: str, limit: int, namespace: str = "default"
+) -> list[object]:
     return []

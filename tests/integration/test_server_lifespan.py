@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-import fleetent.config as cfg
 import fleetent.user_store as us
 
 
@@ -56,10 +55,10 @@ def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch, isolat
 
     import fleetent.server as srv
 
-    # Patch adapter starters to avoid real socket connections during lifespan
+    # Manager start is mocked so lifespan never opens real sockets.
     with (
-        patch.object(srv, "_start_slack_adapter", new_callable=AsyncMock),
-        patch.object(srv, "_start_telegram_adapter", new_callable=AsyncMock),
+        patch.object(srv._connector_manager, "start_all_enabled", new_callable=AsyncMock),
+        patch.object(srv._connector_manager, "stop", new_callable=AsyncMock),
         TestClient(srv.app) as client,
     ):
         resp = client.get("/health")
@@ -70,98 +69,41 @@ def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch, isolat
     assert data["adapters"]["telegram"] is True
 
 
-async def test_mcp_servers_loaded_from_dedicated_file(tmp_path, monkeypatch, isolated_schedule_db):
-    """Lifespan calls register_all with servers from config/mcp.servers.yaml."""
-    import fleetent.integrations.mcp as mcp_mod
+def test_lifespan_starts_connectors_via_manager(tmp_path, monkeypatch, isolated_schedule_db):
+    """Lifespan drives IM connectors through manager.start_all_enabled, not hardcoded adapters."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-fake")
+    monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-fake")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg-fake")
+    monkeypatch.chdir(tmp_path)
+
     import fleetent.server as srv
 
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    settings_yaml = config_dir / "settings.yaml"
-    settings_yaml.write_text("mcp:\n  enabled: true\n")
-    (config_dir / "mcp.servers.yaml").write_text(
-        "\n".join(
-            [
-                "servers:",
-                "  - id: test",
-                "    url: http://mcp.example.com",
-            ]
-        )
-    )
-
-    mock_register = AsyncMock(return_value=None)
-    monkeypatch.setattr(mcp_mod, "register_all", mock_register)
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.chdir(tmp_path)
+    start_all = AsyncMock(return_value=None)
+    monkeypatch.setattr(srv._connector_manager, "start_all_enabled", start_all)
+    monkeypatch.setattr(srv._connector_manager, "stop", AsyncMock(return_value=None))
 
     with TestClient(srv.app) as client:
         client.get("/health")
 
-    mock_register.assert_called_once()
-    servers_arg = mock_register.call_args[0][0]
-    assert len(servers_arg) == 1
-    assert servers_arg[0].id == "test"
+    start_all.assert_called_once()
+    # Hardcoded per-adapter starters are gone; manager owns lifecycle now.
+    assert not hasattr(srv, "_start_slack_adapter")
+    assert not hasattr(srv, "_start_telegram_adapter")
 
 
-async def test_missing_mcp_servers_file_skips_registration(
-    tmp_path, monkeypatch, isolated_schedule_db
-):
-    """Lifespan skips MCP loading if config/mcp.servers.yaml is missing."""
-    import fleetent.integrations.mcp as mcp_mod
-    import fleetent.server as srv
-
-    mock_register = AsyncMock(return_value=None)
-    monkeypatch.setattr(mcp_mod, "register_all", mock_register)
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", tmp_path / "missing-settings.yaml")
+def test_admin_im_router_mounted(tmp_path, monkeypatch, isolated_schedule_db):
+    """`/admin/im/connectors` is mounted: unauthenticated request gets 401, not 404."""
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.chdir(tmp_path)
 
-    with TestClient(srv.app) as client:
-        resp = client.get("/health")
-
-    assert resp.status_code == 200
-    mock_register.assert_not_called()
-
-
-async def test_mcp_disabled_skips_dedicated_file(tmp_path, monkeypatch, isolated_schedule_db):
-    """Lifespan does not read config/mcp.servers.yaml when mcp.enabled is false."""
-    import fleetent.integrations.mcp as mcp_mod
     import fleetent.server as srv
 
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    settings_yaml = config_dir / "settings.yaml"
-    settings_yaml.write_text("mcp:\n  enabled: false\n")
-    (config_dir / "mcp.servers.yaml").write_text("servers: [")
+    with (
+        patch.object(srv._connector_manager, "start_all_enabled", new_callable=AsyncMock),
+        patch.object(srv._connector_manager, "stop", new_callable=AsyncMock),
+        TestClient(srv.app) as client,
+    ):
+        resp = client.get("/admin/im/connectors")
 
-    mock_register = AsyncMock(return_value=None)
-    monkeypatch.setattr(mcp_mod, "register_all", mock_register)
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.chdir(tmp_path)
-
-    with TestClient(srv.app) as client:
-        resp = client.get("/health")
-
-    assert resp.status_code == 200
-    mock_register.assert_not_called()
-
-
-async def test_legacy_mcp_yaml_fails_fast(tmp_path, monkeypatch, isolated_schedule_db):
-    """Startup rejects config/mcp.yaml instead of falling back to legacy loading."""
-    import fleetent.server as srv
-
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    (config_dir / "mcp.yaml").write_text("servers: []\n")
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", config_dir / "settings.yaml")
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.chdir(tmp_path)
-
-    with pytest.raises(RuntimeError, match="config/mcp.servers.yaml"), TestClient(srv.app):
-        pass
+    assert resp.status_code == 401

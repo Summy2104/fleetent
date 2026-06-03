@@ -7,8 +7,8 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-from fleetent import agent_admin_store as store
-from fleetent import agent_templates
+from fleetent.platform.agent_management_console import agent_admin_store as store
+from fleetent.platform.agent_management_console import agent_templates
 
 
 def apply_migrations(db_path: Path) -> None:
@@ -69,6 +69,19 @@ def test_drift_only_for_managed(store_db):
     assert store.get_state("managed-agent")["drift"] == 1
     store.clear_drift("managed-agent")
     assert store.get_state("managed-agent")["drift"] == 0
+
+
+def test_provenance_flip_preserves_status_and_drift(store_db):
+    # provenance lives in the side table keyed by name; flipping it must not disturb the
+    # agent's lifecycle status or drift flag (identity/version/bindings live elsewhere).
+    store.set_provenance("svc", "managed")
+    store.disable("svc")
+    store.mark_drift("svc")
+    store.set_provenance("svc", "adhoc")  # flip back
+    s = store.get_state("svc")
+    assert s["provenance"] == "adhoc"
+    assert s["status"] == "disabled"  # unchanged
+    assert s["drift"] == 1  # unchanged
 
 
 def test_list_excludes_archived(store_db):

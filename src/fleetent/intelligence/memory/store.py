@@ -26,7 +26,7 @@ def get_user_memory(user_id: str, memory_id: str) -> MemoryItem | None:
         database()
         .execute(
             """
-            SELECT id, user_id, type, content, created_at, updated_at, expires_at
+            SELECT id, user_id, type, content, created_at, updated_at, expires_at, namespace
             FROM memory_items
             WHERE user_id = :user_id AND id = :id
             """,
@@ -43,10 +43,10 @@ def insert_memory(item: MemoryItem) -> None:
     database().execute(
         """
         INSERT INTO memory_items (
-            id, user_id, type, content, created_at, updated_at, expires_at
+            id, user_id, type, content, created_at, updated_at, expires_at, namespace
         )
         VALUES (
-            :id, :user_id, :type, :content, :created_at, :updated_at, :expires_at
+            :id, :user_id, :type, :content, :created_at, :updated_at, :expires_at, :namespace
         )
         """,
         {
@@ -57,6 +57,7 @@ def insert_memory(item: MemoryItem) -> None:
             "created_at": format_datetime(item.created_at),
             "updated_at": format_datetime(item.updated_at),
             "expires_at": format_datetime(item.expires_at),
+            "namespace": item.namespace,
         },
     )
 
@@ -93,22 +94,25 @@ def delete_memory(user_id: str, target_id: str) -> None:
     )
 
 
-def memory_snapshot(user_id: str) -> dict[MemoryType, list[MemoryItem]]:
+def memory_snapshot(user_id: str, namespace: str = "default") -> dict[MemoryType, list[MemoryItem]]:
     return {
-        memory_type: memory_snapshot_by_type(user_id, memory_type, limit)
+        memory_type: memory_snapshot_by_type(user_id, memory_type, limit, namespace)
         for memory_type, limit in SNAPSHOT_LIMITS.items()
     }
 
 
-def memory_snapshot_by_type(user_id: str, memory_type: MemoryType, limit: int) -> list[MemoryItem]:
+def memory_snapshot_by_type(
+    user_id: str, memory_type: MemoryType, limit: int, namespace: str = "default"
+) -> list[MemoryItem]:
     now = datetime.now(UTC).replace(microsecond=0)
     rows = (
         database()
         .execute(
             """
-            SELECT id, user_id, type, content, created_at, updated_at, expires_at
+            SELECT id, user_id, type, content, created_at, updated_at, expires_at, namespace
             FROM memory_items
             WHERE user_id = :user_id
+              AND namespace = :namespace
               AND type = :type
               AND (:type != 'context' OR expires_at IS NULL OR expires_at >= :now)
             ORDER BY updated_at DESC
@@ -116,6 +120,7 @@ def memory_snapshot_by_type(user_id: str, memory_type: MemoryType, limit: int) -
             """,
             {
                 "user_id": user_id,
+                "namespace": namespace,
                 "type": memory_type,
                 "now": format_datetime(now),
                 "limit": limit,
@@ -126,19 +131,22 @@ def memory_snapshot_by_type(user_id: str, memory_type: MemoryType, limit: int) -
     return [row_to_memory_item(row) for row in rows]
 
 
-def memory_items_by_ids(user_id: str, ids: list[str]) -> dict[str, MemoryItem]:
+def memory_items_by_ids(
+    user_id: str, ids: list[str], namespace: str = "default"
+) -> dict[str, MemoryItem]:
     if not ids:
         return {}
     placeholders = ", ".join(f":id_{index}" for index in range(len(ids)))
     params = {f"id_{index}": id for index, id in enumerate(ids)}
     params["user_id"] = user_id
+    params["namespace"] = namespace
     rows = (
         database()
         .execute(
             f"""
-            SELECT id, user_id, type, content, created_at, updated_at, expires_at
+            SELECT id, user_id, type, content, created_at, updated_at, expires_at, namespace
             FROM memory_items
-            WHERE user_id = :user_id AND id IN ({placeholders})
+            WHERE user_id = :user_id AND namespace = :namespace AND id IN ({placeholders})
             """,
             params,
         )
@@ -284,6 +292,7 @@ def row_to_memory_item(row: dict[str, Any]) -> MemoryItem:
         created_at=parse_datetime(row["created_at"]),
         updated_at=parse_datetime(row["updated_at"]),
         expires_at=parse_optional_datetime(row["expires_at"]),
+        namespace=str(row["namespace"]) if row.get("namespace") is not None else "default",
     )
 
 

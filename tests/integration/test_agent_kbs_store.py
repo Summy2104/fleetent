@@ -7,7 +7,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-from fleetent import agent_kbs_store as store
+from fleetent.platform.knowledge_base_management import agent_kbs_store as store
 
 
 def apply_migrations(db_path: Path) -> None:

@@ -12,10 +12,10 @@ from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import fleetent.agent_kbs_store as kbs_store
 import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
-import fleetent.kb_admin_api as api
+import fleetent.platform.knowledge_base_management.agent_kbs_store as kbs_store
+import fleetent.platform.knowledge_base_management.kb_admin_api as api
 import fleetent.user_store as user_store
 
 
@@ -216,3 +216,101 @@ def test_eval_entry_read_only_for_viewer(client, monkeypatch):
     r = client.post("/admin/kb/evaluations", headers=_hdr(token), json={"kb_id": "sales"})
     assert r.status_code == 200
     assert r.json()["metrics"]["hit"] == 1
+
+
+# --- reverse lookup excludes archived KBs (任务 2.3/2.4) ----------------------
+
+
+def test_kbs_for_agent_filters_archived(client, monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "kb_engine_list",
+        lambda tenant_id: [{"kb_id": "live"}, {"kb_id": "old", "archived": True}],
+    )
+    kbs_store.bind("default", "live", "agent-a")
+    kbs_store.bind("default", "old", "agent-a")
+    token, _ = _session_for("admin")
+    rev = client.get("/admin/kb/by-agent/agent-a", headers=_hdr(token)).json()
+    assert rev["kb_ids"] == ["live"]  # archived "old" filtered out
+
+
+# --- local directory sync summary (任务 4.3) ---------------------------------
+
+
+def test_sync_directory_returns_summary(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        api,
+        "kb_sync_directory",
+        lambda t, k, path: (
+            seen.update(t=t, k=k, path=path)
+            or {"scanned": 10, "ingested": 7, "skipped": 2, "failed": 1}
+        ),
+    )
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/kb/sales/sync",
+        headers=_hdr(token, confirm=True),
+        json={"path": "/data/docs"},
+    )
+    assert r.status_code == 200
+    assert r.json() == {"scanned": 10, "ingested": 7, "skipped": 2, "failed": 1}
+    assert seen == {"t": "default", "k": "sales", "path": "/data/docs"}
+
+
+def test_sync_directory_requires_confirm(client):
+    token, _ = _session_for("admin")
+    r = client.post("/admin/kb/sales/sync", headers=_hdr(token), json={"path": "/data/docs"})
+    assert r.status_code == 428  # full resync is high-risk
+
+
+# --- document list + chunk preview (任务 5.1) --------------------------------
+
+
+def test_list_documents_and_chunk_preview(client, monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "kb_list_documents",
+        lambda t, k: [
+            {
+                "document_id": "d1",
+                "filename": "a.md",
+                "source": "paste",
+                "chunks": 3,
+                "created_at": "t0",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        api,
+        "kb_chunk_preview",
+        lambda t, k, doc: [{"chunk_id": "c1", "content": "hello", "section": "intro"}],
+    )
+    token, _ = _session_for("viewer")  # viewer may read
+    docs = client.get("/admin/kb/sales/documents", headers=_hdr(token)).json()
+    assert docs[0]["filename"] == "a.md" and docs[0]["chunks"] == 3
+    chunks = client.get("/admin/kb/sales/documents/d1/chunks", headers=_hdr(token)).json()
+    assert chunks[0]["content"] == "hello" and chunks[0]["section"] == "intro"
+
+
+# --- per-KB observation (任务 9.1) -------------------------------------------
+
+
+def test_observation_read_only_aggregation(client, monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "kb_observation",
+        lambda t, k: {
+            "kb_id": k,
+            "recall_hits": 42,
+            "zero_recall_docs": ["d9"],
+            "sessions": ["s1", "s2"],
+        },
+    )
+    token, _ = _session_for("viewer")  # read-only, viewer allowed
+    r = client.get("/admin/kb/sales/observation", headers=_hdr(token))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["recall_hits"] == 42
+    assert body["zero_recall_docs"] == ["d9"]
+    assert body["sessions"] == ["s1", "s2"]

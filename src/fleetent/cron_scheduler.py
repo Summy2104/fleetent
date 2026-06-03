@@ -27,9 +27,34 @@ async def _agent_run(
 
 
 async def _fire(task: dict[str, Any]) -> None:
-    """Construct messages and dispatch agent run for a cron task."""
-    messages = [{"role": "user", "content": task["message"]}]
+    """Construct messages and dispatch an agent run for a cron task (S3).
+
+    session_id binding (re-grafted from zhangyang's S3 onto main's scheduler):
+    - None  → each fire derives a fresh, unique session `cron/{id}/{uuid}` and runs
+      independently (no carried-over context).
+    - set   → the task accumulates context in that fixed session: prior transcript is
+      loaded, the new user message appended, and the full conversation persisted back
+      so the next fire continues it.
+    """
+    import uuid
+
+    from fleetent import session_mgr
+
+    sid_spec = task.get("session_id")
+    if sid_spec is None:
+        sid = f"cron/{task['id']}/{uuid.uuid4().hex}"
+        messages: list[dict[str, Any]] = [{"role": "user", "content": task["message"]}]
+    else:
+        sid = sid_spec
+        messages = list(await session_mgr.load(sid))
+        messages.append({"role": "user", "content": task["message"]})
+
     await _agent_run(messages, user_id=task["user_id"], agent_name=task.get("agent_name"))
+    # agent_loop.run mutates `messages` in place into the full conversation; persist it
+    # so a fixed-session task continues from here next fire.
+    await session_mgr.save(
+        sid, messages, user_id=task["user_id"], agent_name=task.get("agent_name")
+    )
 
 
 class CronScheduler:
@@ -65,6 +90,16 @@ class CronScheduler:
 
     def add_job(self, task: dict[str, Any]) -> None:
         self._register(task)
+
+    def add_interval_job(self, func: Any, seconds: int, job_id: str) -> None:
+        """Register a fixed-interval background job (e.g. monitoring collection)."""
+        self._scheduler.add_job(
+            func,
+            trigger="interval",
+            seconds=seconds,
+            id=job_id,
+            replace_existing=True,
+        )
 
     def remove_job(self, task_id: str) -> None:
         with suppress(Exception):

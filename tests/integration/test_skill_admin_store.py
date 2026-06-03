@@ -11,7 +11,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-from fleetent import skill_admin_store
+from fleetent.platform.skill_management import skill_admin_store
 
 
 def apply_migrations(db_path: Path) -> None:
