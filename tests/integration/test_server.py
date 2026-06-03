@@ -363,6 +363,7 @@ def test_create_persists_version_config_via_wired_seam(tmp_path, monkeypatch, is
         headers={"Authorization": f"Session {token}"},
         json={
             "name": "cfg",
+            "template_id": "ops",
             "system_prompt": "hi",
             "allowed_tools": ["shell"],
             "skills_dir": "/s",

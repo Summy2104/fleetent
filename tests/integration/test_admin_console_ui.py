@@ -240,6 +240,22 @@ def test_agents_crud_modal_and_fields_present():
     assert "agCreate(" in bar
 
 
+def test_agent_create_modal_wide_and_requires_template():
+    html = ADMIN_HTML
+    # ag-modal uses the wide modal box
+    modal = html.split('id="ag-modal"', 1)[1].split("</div>", 1)[0]
+    assert "modal-box wide" in modal
+    # a template <select> is present and prefills on change
+    assert 'id="ag-template"' in html
+    assert "agTemplatePrefill(" in html
+    # agCreate populates the template select; agSave sends template_id and blocks
+    # creating without a chosen template
+    agcreate = html.split("function agCreate", 1)[1].split("function agEdit", 1)[0]
+    assert "ag-template" in agcreate
+    agsave = html.split("function agSave", 1)[1].split("function agDelete", 1)[0]
+    assert "template_id" in agsave
+
+
 def test_agents_crud_functions_present():
     html = ADMIN_HTML
     for fn in ("function agCreate", "function agEdit", "function agSave", "function agDelete"):

@@ -32,6 +32,7 @@ class Agent:
     mcp_server_ids: list[str] | None = None
     model_overrides: dict[str, Any] = field(default_factory=dict)
     memory_namespace: str = "default"
+    template_id: str | None = None
 
 
 @dataclass
@@ -47,6 +48,7 @@ class AgentVersion:
     memory_namespace: str
     created_at: str
     is_active: bool = False
+    template_id: str | None = None
 
 
 def _db() -> SQLiteDatabase:
@@ -68,6 +70,7 @@ def create_agent(
     memory_namespace: str = "default",
     tenant_id: str = "default",
     team_id: str | None = None,
+    template_id: str | None = None,
 ) -> Agent:
     """Create an agent plus its version-1 snapshot in a single transaction."""
     db = _db()
@@ -99,6 +102,7 @@ def create_agent(
             model_overrides=model_overrides or {},
             memory_namespace=memory_namespace,
             now=now,
+            template_id=template_id,
         )
         conn.execute(
             "UPDATE agents SET active_version_id = :vid WHERE id = :aid",
@@ -116,6 +120,7 @@ def create_agent(
         mcp_server_ids=mcp_server_ids,
         model_overrides=model_overrides or {},
         memory_namespace=memory_namespace,
+        template_id=template_id,
     )
 
 
@@ -132,13 +137,15 @@ def _insert_version(
     memory_namespace: str,
     now: str,
     created_by_user_id: str | None = None,
+    template_id: str | None = None,
 ) -> int:
     version_id = conn.execute(
         "INSERT INTO agent_versions "
         "(agent_id, version, system_prompt, allowed_tools, skills_dir, mcp_server_ids, "
-        " model_overrides, memory_namespace, created_by_user_id, created_at) "
+        " model_overrides, memory_namespace, created_by_user_id, created_at, template_id) "
         "VALUES (:agent_id, :version, :system_prompt, :allowed_tools, :skills_dir, "
-        " :mcp_server_ids, :model_overrides, :memory_namespace, :created_by, :created_at)",
+        " :mcp_server_ids, :model_overrides, :memory_namespace, :created_by, :created_at, "
+        " :template_id)",
         {
             "agent_id": agent_id,
             "version": version,
@@ -150,6 +157,7 @@ def _insert_version(
             "memory_namespace": memory_namespace,
             "created_by": created_by_user_id,
             "created_at": now,
+            "template_id": template_id,
         },
     ).lastrowid
     return int(version_id or 0)
@@ -168,6 +176,7 @@ def _row_to_version(row: dict[str, Any], active_version_id: int | None) -> Agent
         memory_namespace=str(row["memory_namespace"]),
         created_at=str(row["created_at"]),
         is_active=int(row["id"]) == active_version_id,
+        template_id=row["template_id"],
     )
 
 
@@ -206,6 +215,7 @@ def get_by_name(name: str) -> Agent | None:
         if version["model_overrides"]
         else {},
         memory_namespace=str(version["memory_namespace"]),
+        template_id=version["template_id"],
     )
 
 
@@ -302,6 +312,7 @@ def _merge_version_fields(
         "memory_namespace": (
             str(base["memory_namespace"]) if memory_namespace is _UNSET else memory_namespace
         ),
+        "template_id": base["template_id"],
     }
 
 

@@ -249,9 +249,10 @@ def _wire_real_store(monkeypatch):
             "mcp_server_ids": a.mcp_server_ids,
             "model_overrides": a.model_overrides,
             "memory_namespace": a.memory_namespace,
+            "template_id": a.template_id,
         }
 
-    def _create(name, sp, at, sd=None, mids=None, mo=None, mn="default"):
+    def _create(name, sp, at, sd=None, mids=None, mo=None, mn="default", template_id=None):
         agent_store.create_agent(
             name,
             sp,
@@ -260,6 +261,7 @@ def _wire_real_store(monkeypatch):
             mcp_server_ids=mids,
             model_overrides=mo,
             memory_namespace=mn,
+            template_id=template_id,
         )
 
     def _update(name, system_prompt, allowed_tools, sd=None, mids=None, mo=None, mn=None):
@@ -295,7 +297,12 @@ def test_create_agent_persists_and_lists(client, monkeypatch):
     r = client.post(
         "/admin/agents",
         headers=_hdr(token),
-        json={"name": "newbot", "system_prompt": "hi", "allowed_tools": ["shell"]},
+        json={
+            "name": "newbot",
+            "system_prompt": "hi",
+            "allowed_tools": ["shell"],
+            "template_id": "ops",
+        },
     )
     assert r.status_code == 201
     found = agent_store.get_by_name("newbot")
@@ -305,12 +312,53 @@ def test_create_agent_persists_and_lists(client, monkeypatch):
     assert "newbot" in {a["agent_name"] for a in store.list_states()}
 
 
+def test_create_requires_template_id_422(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/agents",
+        headers=_hdr(token),
+        json={"name": "notmpl", "system_prompt": "x", "allowed_tools": []},
+    )
+    assert r.status_code == 422
+    assert agent_store.get_by_name("notmpl") is None
+
+
+def test_create_unknown_template_id_404(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/agents",
+        headers=_hdr(token),
+        json={"name": "ghosttmpl", "system_prompt": "x", "template_id": "nope"},
+    )
+    assert r.status_code == 404
+    assert agent_store.get_by_name("ghosttmpl") is None
+
+
+def test_create_persists_template_id_and_echoes(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/agents",
+        headers=_hdr(token),
+        json={"name": "linked", "system_prompt": "hi", "template_id": "support"},
+    )
+    assert r.status_code == 201
+    assert r.json()["template_id"] == "support"
+    assert agent_store.get_by_name("linked").template_id == "support"
+    g = client.get("/admin/agents/linked", headers=_hdr(token))
+    assert g.json()["template_id"] == "support"
+
+
 def test_create_duplicate_name_409(client, monkeypatch):
     _wire_real_store(monkeypatch)
     agent_store.create_agent("dup", "p", [])
     token, _ = _session_for("admin")
     r = client.post(
-        "/admin/agents", headers=_hdr(token), json={"name": "dup", "system_prompt": "x"}
+        "/admin/agents",
+        headers=_hdr(token),
+        json={"name": "dup", "system_prompt": "x", "template_id": "ops"},
     )
     assert r.status_code == 409
 
@@ -319,7 +367,9 @@ def test_create_viewer_forbidden(client, monkeypatch):
     _wire_real_store(monkeypatch)
     token, _ = _session_for("viewer")
     r = client.post(
-        "/admin/agents", headers=_hdr(token), json={"name": "nope", "system_prompt": "x"}
+        "/admin/agents",
+        headers=_hdr(token),
+        json={"name": "nope", "system_prompt": "x", "template_id": "ops"},
     )
     assert r.status_code == 403
     assert agent_store.get_by_name("nope") is None
@@ -422,6 +472,7 @@ def test_create_persists_version_config_fields(client, monkeypatch):
             "mcp_server_ids": ["github"],
             "model_overrides": {"model": "x"},
             "memory_namespace": "team",
+            "template_id": "ops",
         },
     )
     assert r.status_code == 201

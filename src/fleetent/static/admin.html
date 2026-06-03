@@ -587,11 +587,15 @@
   </div>
 
   <div id="ag-modal" class="modal hidden">
-    <div class="modal-box" role="dialog" aria-modal="true">
+    <div class="modal-box wide" role="dialog" aria-modal="true">
       <h3 id="ag-modal-title">New agent</h3>
       <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="agSave(); return false;">
         <input id="ag-name" placeholder="agent name (unique)" autocomplete="off">
-        <textarea id="ag-system-prompt" placeholder="system prompt" rows="8" style="font-family:monospace;"></textarea>
+        <label id="ag-template-row" style="display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted);">
+          template (required)
+          <select id="ag-template" onchange="agTemplatePrefill()"></select>
+        </label>
+        <textarea id="ag-system-prompt" placeholder="system prompt" rows="14" style="font-family:monospace;"></textarea>
         <input id="ag-allowed-tools" placeholder="allowed_tools (comma-separated, e.g. shell, github__*)" autocomplete="off">
         <input id="ag-skills-dir" placeholder="skills_dir (optional, e.g. agents/ops/skills)" autocomplete="off">
         <input id="ag-mcp-server-ids" placeholder="mcp_server_ids (comma-separated, e.g. github, jira) — empty = no restriction" autocomplete="off">
@@ -1476,7 +1480,22 @@ async function agArchive(name) {
 }
 async function agRestore(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/restore`); loadAgents(); } catch (e) { toast(e.message, "error"); } }
 
-function agCreate() {
+let AG_TEMPLATES = [];
+async function agLoadTemplateOptions() {
+  const sel = $("ag-template");
+  try { AG_TEMPLATES = await api("GET", "/agent-templates"); }
+  catch (e) { AG_TEMPLATES = []; }
+  sel.innerHTML = '<option value="">— select a template —</option>'
+    + AG_TEMPLATES.map(t => `<option value="${esc(t.id)}">${esc(t.display_name || t.id)}</option>`).join("");
+  sel.value = "";
+}
+function agTemplatePrefill() {
+  const t = AG_TEMPLATES.find(x => x.id === $("ag-template").value);
+  if (!t) return;
+  $("ag-system-prompt").value = t.system_prompt || "";
+  $("ag-allowed-tools").value = (t.allowed_tools || []).join(", ");
+}
+async function agCreate() {
   $("ag-modal-title").textContent = "New agent";
   $("ag-err").textContent = "";
   $("ag-name").value = "";
@@ -1487,6 +1506,8 @@ function agCreate() {
   $("ag-mcp-server-ids").value = "";
   $("ag-model-overrides").value = "";
   $("ag-memory-namespace").value = "";
+  $("ag-template-row").style.display = "";
+  await agLoadTemplateOptions();
   $("ag-modal").dataset.mode = "create";
   $("ag-modal").classList.remove("hidden");
 }
@@ -1503,6 +1524,7 @@ async function agEdit(name) {
     $("ag-mcp-server-ids").value = (a.mcp_server_ids || []).join(", ");
     $("ag-model-overrides").value = (a.model_overrides && Object.keys(a.model_overrides).length) ? JSON.stringify(a.model_overrides, null, 2) : "";
     $("ag-memory-namespace").value = a.memory_namespace || "";
+    $("ag-template-row").style.display = "none";
     $("ag-modal").dataset.mode = "edit";
     $("ag-modal").dataset.name = name;
     $("ag-modal").classList.remove("hidden");
@@ -1533,7 +1555,9 @@ async function agSave() {
     } else {
       const name = $("ag-name").value.trim();
       if (!name) { $("ag-err").textContent = "name required"; return; }
-      await api("POST", "/agents", { name, system_prompt: sp, allowed_tools: tools, ...extra });
+      const templateId = $("ag-template").value;
+      if (!templateId) { $("ag-err").textContent = "template required"; return; }
+      await api("POST", "/agents", { name, template_id: templateId, system_prompt: sp, allowed_tools: tools, ...extra });
     }
     agCloseModal(); loadAgents();
   } catch (e) { $("ag-err").textContent = e.message; }

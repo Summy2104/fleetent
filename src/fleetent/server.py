@@ -190,6 +190,7 @@ def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:
         "mcp_server_ids": agent.mcp_server_ids,
         "model_overrides": agent.model_overrides,
         "memory_namespace": agent.memory_namespace,
+        "template_id": agent.template_id,
     }
 
 
@@ -210,6 +211,7 @@ def wire_agent_store_seams() -> None:
         mcp_server_ids: list[str] | None = None,
         model_overrides: dict[str, Any] | None = None,
         memory_namespace: str = "default",
+        template_id: str | None = None,
     ) -> None:
         agent_store.create_agent(
             name,
@@ -219,6 +221,7 @@ def wire_agent_store_seams() -> None:
             mcp_server_ids=mcp_server_ids,
             model_overrides=model_overrides,
             memory_namespace=memory_namespace,
+            template_id=template_id,
         )
 
     def _console_update(

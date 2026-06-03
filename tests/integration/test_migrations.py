@@ -445,6 +445,28 @@ def test_agent_v1_backfill_for_existing_rows(tmp_path):
     assert n_versions == 1
 
 
+def test_agent_versions_has_template_id_column(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    av_cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_versions)")}
+    conn.close()
+    assert "template_id" in av_cols
+
+
+def test_downgrade_removes_template_id_column(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    cfg = Config()
+    cfg.set_main_option("script_location", _MIGRATIONS_DIR)
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db}")
+    command.downgrade(cfg, "034")
+    conn = sqlite3.connect(db)
+    av_cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_versions)")}
+    conn.close()
+    assert "template_id" not in av_cols
+
+
 def test_downgrade_removes_agent_versions(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)

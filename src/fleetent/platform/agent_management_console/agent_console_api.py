@@ -52,6 +52,7 @@ def create_agent_def(
     mcp_server_ids: list[str] | None = None,
     model_overrides: dict[str, Any] | None = None,
     memory_namespace: str = "default",
+    template_id: str | None = None,
 ) -> None:
     """Create a new agent definition (no bindings). Bridges agent_store.create_agent."""
     return None
@@ -134,6 +135,7 @@ class CloneBody(BaseModel):
 
 class CreateBody(BaseModel):
     name: str
+    template_id: str
     system_prompt: str = ""
     allowed_tools: list[str] = []
     skills_dir: str | None = None
@@ -254,6 +256,7 @@ def _def_response(name: str) -> dict[str, Any]:
         out["mcp_server_ids"] = agent.get("mcp_server_ids")
         out["model_overrides"] = agent.get("model_overrides", {})
         out["memory_namespace"] = agent.get("memory_namespace", "default")
+        out["template_id"] = agent.get("template_id")
     return out
 
 
@@ -262,6 +265,8 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
     user = _require_admin(authorization)
     if get_agent_def(body.name) is not None:
         raise HTTPException(status_code=409, detail="agent already exists")
+    if agent_template_store.get_template(body.template_id) is None:
+        raise HTTPException(status_code=404, detail="template not found")
     create_agent_def(
         body.name,
         body.system_prompt,
@@ -270,6 +275,7 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
         body.mcp_server_ids,
         body.model_overrides,
         body.memory_namespace,
+        body.template_id,
     )
     agent_admin_store.set_provenance(body.name, "adhoc")
     agent_admin_store.enable(body.name)
