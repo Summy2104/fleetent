@@ -366,4 +366,11 @@ async def invoke_agent(agent_name: str, message: str) -> str:
         {"role": "system", "content": snapshot.system_prompt},
         {"role": "user", "content": message},
     ]
-    return await agent_loop.run(messages, is_sub_agent=True, snapshot=snapshot)
+    # Parameter-style run (next<-main integration chose params over snapshot): the
+    # system prompt rides in `messages`; pass the snapshot's allowlist + name through.
+    return await agent_loop.run(
+        messages,
+        is_sub_agent=True,
+        allowed_tools=snapshot.allowed_tools,
+        agent_name=agent_name,
+    )
