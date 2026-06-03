@@ -4,13 +4,10 @@ import hashlib
 import hmac
 import json
 
-# ── removed YAML source loading ───────────────────────────────────────────────
-
-
-def test_yaml_source_loader_is_removed():
-    from fleetent import webhook_router as wr
-
-    assert not hasattr(wr, "load_sources")
+# NOTE: main dropped webhook_router.load_sources (yaml→runtime-API design); the merge
+# kept zhangyang's yaml source model (load_sources retained), so this "is removed"
+# regression test was removed. Webhook security (enabled flag + body-size limit) is
+# now enforced at the /webhook endpoint — see tests/integration/test_webhook_server.py.
 
 
 # ── extract_message ───────────────────────────────────────────────────────────

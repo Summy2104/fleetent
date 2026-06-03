@@ -36,7 +36,7 @@ from fleetent import (
 from fleetent.auth import seed_builtin_admin
 from fleetent.cron_scheduler import CronScheduler
 from fleetent.agent_loop import run_stream
-from fleetent.config import Settings, configure_logging
+from fleetent.config import Settings, WebhooksSettings, configure_logging
 from fleetent.governance import quota
 from fleetent.governance.permission_gate import (
     _default_gate,
@@ -167,7 +167,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # deliberately NOT routed through cron_scheduler (lead direction; MCP3 precedent).
     session_mgr.start_session_maintenance()
 
-    # Load webhook sources from config/webhooks.yaml if present
+    # Webhook gating settings (enabled flag + max body size) on app.state, and load
+    # sources from config/webhooks.yaml if present (zhangyang's yaml design, kept).
+    app.state.webhook_settings = settings.webhooks
     from fleetent import webhook_router as _wr
 
     _webhook_sources.clear()
@@ -348,11 +350,19 @@ async def webhook(source_id: str, request: Request) -> Response:
     from fleetent import webhook_router as wr
     from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
+    # Security gates (adopted from main's design onto the kept yaml source model):
+    # reject before any dispatch when webhooks are disabled or the body is oversized.
+    webhook_settings = getattr(request.app.state, "webhook_settings", WebhooksSettings())
+    if not webhook_settings.enabled:
+        raise HTTPException(status_code=503, detail="webhooks disabled")
+
     source = _webhook_sources.get(source_id)
     if source is None:
         raise HTTPException(status_code=404, detail=f"webhook source {source_id!r} not configured")
 
     body = await request.body()
+    if len(body) > webhook_settings.max_body_bytes:
+        raise HTTPException(status_code=413, detail="webhook body too large")
     sig_header = request.headers.get("x-hub-signature-256")
     if not wr.verify_signature(source.secret, body, sig_header):
         raise HTTPException(status_code=403, detail="invalid signature")
