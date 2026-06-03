@@ -42,8 +42,8 @@ typecheck: ## Type-check with mypy
 
 check: lint typecheck ## Run lint + typecheck
 
-serve: ## Start HTTP server with auto-reload (port 8000)
-	uv run uvicorn mini_agent.server:app --reload
+serve: ## Start HTTP server with auto-reload (port 8765)
+	uv run uvicorn fleetent.server:app --reload --port 8765
 
 admin: ## Show admin CLI help
-	uv run mini-agent-admin --help
+	uv run fleetent-admin --help
