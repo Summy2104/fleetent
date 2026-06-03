@@ -1,33 +1,24 @@
 from io import StringIO
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from alembic import command
-from alembic.config import Config
 
 import fleetent.agent_store as agent_store
 import fleetent.im_user_store as im_user_store
 from fleetent import user_store
 from fleetent.platform.admin_cli import agents as admin_cli_agents
 from fleetent.platform.admin_cli.main import main as admin_cli_main
-
-
-def _apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration.test_migrations import apply_migrations
 
 
 @pytest.fixture(autouse=True)
 def tmp_db(tmp_path, monkeypatch):
     db = tmp_path / "users.db"
+    apply_migrations(db)  # agent_store reads DATABASE_URL via the db boundary
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
     monkeypatch.setattr(user_store, "DB_PATH", db)
     monkeypatch.setattr(im_user_store, "DB_PATH", db)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
-    _apply_migrations(db)
 
 
 def run_admin(*args: str) -> tuple[str, str, int]:
@@ -105,15 +96,15 @@ def test_list_pending_no_users():
 
 def test_new_users_not_pending_by_default():
     # v1.0 default-allow: newly created IM users are not pending.
-    im_user_store.get_or_create("slack", "U_PEND1")
-    im_user_store.get_or_create("telegram", "12345")
+    im_user_store.get_or_create(user_store.admin_owner_id(), "slack", "U_PEND1")
+    im_user_store.get_or_create(user_store.admin_owner_id(), "telegram", "12345")
     out, _, code = run_admin("list-pending")
     assert code == 0
     assert "No pending" in out
 
 
 def test_list_pending_shows_blocked_users():
-    u = im_user_store.get_or_create("slack", "U_BLK")
+    u = im_user_store.get_or_create(user_store.admin_owner_id(), "slack", "U_BLK")
     im_id = im_user_store.list_im_identities(u.id)[0]["id"]
     im_user_store.block_user(im_id)  # allowed=0 -> appears in legacy pending list
     out, _, code = run_admin("list-pending")
@@ -122,7 +113,7 @@ def test_list_pending_shows_blocked_users():
 
 
 def test_approve_user():
-    u = im_user_store.get_or_create("slack", "U_APPROVE")
+    u = im_user_store.get_or_create(user_store.admin_owner_id(), "slack", "U_APPROVE")
     im_id = im_user_store.list_im_identities(u.id)[0]["id"]
     im_user_store.block_user(im_id)
     out, _, code = run_admin("approve-user", "--im-user-id", str(im_id))
@@ -137,7 +128,7 @@ def test_approve_user_not_found_exits_nonzero():
 
 
 def test_block_user_is_deprecated_noop():
-    u = im_user_store.get_or_create("slack", "U_BLOCK")
+    u = im_user_store.get_or_create(user_store.admin_owner_id(), "slack", "U_BLOCK")
     im_id = im_user_store.list_im_identities(u.id)[0]["id"]
     _, err, code = run_admin("block-user", "--im-user-id", str(im_id))
     assert code == 0
@@ -184,6 +175,94 @@ def test_unassign_channel():
     out, _, code = run_admin("unassign-channel", "--platform", "telegram", "--channel-id", "G7")
     assert code == 0
     assert agent_store.get_agent_for_channel("telegram", "G7") is None
+
+
+# --- update-agent / version commands ---
+
+
+def test_update_agent_creates_and_activates_new_version():
+    agent_store.create_agent("verbot", "v1 prompt.", ["calculate"])
+    out, _, code = run_admin(
+        "update-agent", "--agent-name", "verbot", "--system-prompt", "v2 prompt."
+    )
+    assert code == 0
+    versions = agent_store.list_versions("verbot")
+    assert [v.version for v in versions] == [2, 1]
+    active = next(v for v in versions if v.is_active)
+    assert active.version == 2
+    assert active.system_prompt == "v2 prompt."
+
+
+def test_update_agent_no_activate_keeps_old_active():
+    agent_store.create_agent("verbot2", "v1 prompt.", ["calculate"])
+    out, _, code = run_admin(
+        "update-agent",
+        "--agent-name",
+        "verbot2",
+        "--system-prompt",
+        "v2 prompt.",
+        "--no-activate",
+    )
+    assert code == 0
+    active = next(v for v in agent_store.list_versions("verbot2") if v.is_active)
+    assert active.version == 1
+
+
+def test_list_agent_versions_outputs_fields():
+    agent_store.create_agent("listbot", "v1.", [])
+    agent_store.create_version("listbot", system_prompt="v2.")
+    out, _, code = run_admin("list-agent-versions", "--agent-name", "listbot")
+    assert code == 0
+    assert "2" in out and "1" in out
+    # active marker for current active version
+    assert "active" in out.lower()
+
+
+def test_activate_agent_version_switches():
+    agent_store.create_agent("actbot", "v1.", [])
+    agent_store.create_version("actbot", system_prompt="v2.")
+    out, _, code = run_admin("activate-agent-version", "--agent-name", "actbot", "--version", "1")
+    assert code == 0
+    active = next(v for v in agent_store.list_versions("actbot") if v.is_active)
+    assert active.version == 1
+
+
+def test_activate_agent_version_unknown_exits_nonzero():
+    agent_store.create_agent("actbot2", "v1.", [])
+    _, err, code = run_admin("activate-agent-version", "--agent-name", "actbot2", "--version", "99")
+    assert code != 0
+
+
+def test_show_agent_outputs_active_version():
+    agent_store.create_agent("showbot", "show prompt.", ["calculate"])
+    out, _, code = run_admin("show-agent", "--agent-name", "showbot")
+    assert code == 0
+    assert "showbot" in out
+    assert "show prompt." in out
+
+
+# --- assign-user / unassign-user commands ---
+
+
+def test_assign_user():
+    ag = agent_store.create_agent("userbot", "Bot.", [])
+    out, _, code = run_admin("assign-user", "--user-id", "u-7", "--agent-name", "userbot")
+    assert code == 0
+    bound = agent_store.get_agent_for_user("u-7")
+    assert bound is not None and bound.id == ag.id
+
+
+def test_assign_user_agent_not_found_exits_nonzero():
+    _, err, code = run_admin("assign-user", "--user-id", "u-7", "--agent-name", "ghost")
+    assert code != 0
+
+
+def test_unassign_user():
+    ag = agent_store.create_agent("userbot2", "Bot.", [])
+    agent_store.assign_user("u-8", ag.id)
+    out, _, code = run_admin("unassign-user", "--user-id", "u-8", "--agent-name", "userbot2")
+    assert code == 0
+    assert agent_store.get_agent_for_user("u-8") is None
 
 
 # --- set-default-agent command ---
@@ -720,3 +799,93 @@ def test_observability_cli_invalid_time_exits_nonzero():
 
     assert code != 0
     assert "invalid timestamp" in err
+
+
+# --- im-connector / im-channel CLI (IM gateway management) --------------------
+
+
+def _seed_slack_connector():
+    import fleetent.platform.im_gateway_management.im_connector_store as store
+    import fleetent.user_store as user_store
+
+    store.upsert_connector(
+        user_store.admin_owner_id(), "slack", config='{"bot_token": "xoxb-secret123"}', enabled=True
+    )
+
+
+def test_im_connector_list_shows_masked_config():
+    _seed_slack_connector()
+
+    out, _, code = run_admin("im-connector", "list")
+
+    assert code == 0
+    assert "slack" in out
+    assert "t123" in out  # last 4 retained
+    assert "xoxb-secret" not in out  # raw token never printed
+
+
+def test_im_connector_enable_disable_toggles_flag():
+    import fleetent.platform.im_gateway_management.im_connector_store as store
+    import fleetent.user_store as user_store
+
+    owner = user_store.admin_owner_id()
+    _seed_slack_connector()
+
+    _, _, code = run_admin("im-connector", "disable", "--platform", "slack")
+    assert code == 0
+    assert store.get_connector(owner, "slack")["enabled"] == 0
+
+    _, _, code = run_admin("im-connector", "enable", "--platform", "slack")
+    assert code == 0
+    assert store.get_connector(owner, "slack")["enabled"] == 1
+
+
+def test_im_connector_set_config_writes_config():
+    import fleetent.platform.im_gateway_management.im_connector_config as cfg
+    import fleetent.user_store as user_store
+
+    out, _, code = run_admin(
+        "im-connector", "set-config", "--platform", "slack", "--set", "bot_token=new-tok"
+    )
+
+    assert code == 0
+    assert cfg.resolve(user_store.admin_owner_id(), "slack")["bot_token"] == "new-tok"
+
+
+def test_seed_connectors_imports_env_tokens(monkeypatch):
+    import fleetent.platform.im_gateway_management.im_connector_store as store
+    import fleetent.user_store as user_store
+
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-env")
+    monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-env")
+
+    out, _, code = run_admin("seed-connectors")
+
+    assert code == 0
+    assert "slack" in out
+    assert store.get_connector(user_store.admin_owner_id(), "slack")["enabled"] == 1
+
+
+def test_im_channel_allow_list_disallow():
+    import fleetent.platform.im_gateway_management.im_connector_store as store
+    import fleetent.user_store as user_store
+
+    store.upsert_connector(
+        user_store.admin_owner_id(), "slack", config='{"bot_token": "x"}', enabled=True
+    )
+
+    _, _, code = run_admin(
+        "im-channel", "allow", "--platform", "slack", "--scope-type", "channel", "--scope-id", "C1"
+    )
+    assert code == 0
+
+    out, _, code = run_admin("im-channel", "list", "--platform", "slack")
+    assert code == 0
+    assert "C1" in out
+
+    import fleetent.platform.im_gateway_management.im_channel_allowlist as allowlist
+
+    entry_id = allowlist.list_entries(None, "slack")[0]["id"]
+    _, _, code = run_admin("im-channel", "disallow", "--id", str(entry_id))
+    assert code == 0
+    assert allowlist.list_entries(None, "slack") == []

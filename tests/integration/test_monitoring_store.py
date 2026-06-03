@@ -7,8 +7,8 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-from fleetent import alerting
-from fleetent import monitoring_store as store
+from fleetent.platform.resource_monitoring import alerting
+from fleetent.platform.resource_monitoring import monitoring_store as store
 
 
 def apply_migrations(db_path: Path) -> None:

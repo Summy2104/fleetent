@@ -4,12 +4,12 @@ the bound agent's allowed_skills (empty/None → no narrowing)."""
 from unittest.mock import AsyncMock
 
 import fleetent.agent_store as agent_store
-import fleetent.im_channel_allowlist as acl
-import fleetent.im_connector_store as ics
 import fleetent.im_user_store as im_user_store
 import fleetent.skill_registry as sr
 import fleetent.user_store as user_store
 from fleetent.im_gateway import normalizer
+from fleetent.platform.im_gateway_management import im_channel_allowlist as acl
+from fleetent.platform.im_gateway_management import im_connector_store as ics
 
 
 def _setup_db(tmp_path, monkeypatch):

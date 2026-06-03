@@ -299,9 +299,9 @@ def test_plugin_name_colliding_with_builtin_skipped(plugins_root: Path) -> None:
 def test_plugin_name_colliding_with_mcp_server_skipped(
     plugins_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from fleetent import mcp_client
+    from fleetent.integrations.mcp import client as mcp_client
 
-    monkeypatch.setattr(mcp_client, "_server_registry", {"crm_mcp": object()})
+    monkeypatch.setattr(mcp_client, "_server_registry", {(None, "crm_mcp"): object()})
     _write_plugin(
         plugins_root,
         "p_crm_mcp",

@@ -15,7 +15,6 @@ from openai.types.chat import ChatCompletionChunk
 
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent import model_router
-from fleetent.governance.agent_policy import check_tool_access
 from fleetent.budget import BudgetChecker, BudgetConfig, BudgetUsage, grace_max_tokens
 from fleetent.cancellation import CancellationChecker, CancelToken
 from fleetent.context_mgr import (
@@ -27,21 +26,22 @@ from fleetent.context_mgr import (
 )
 from fleetent.error_classifier import classify
 from fleetent.eval_logger import log_run
-from fleetent.loop_detector import LoopDetectionChecker, arg_fingerprint, result_digest
+from fleetent.governance.agent_policy import check_tool_access
+from fleetent.governance.permission_gate import _default_gate
+from fleetent.intelligence.long_term_ctx import ContextSource, build_context
 from fleetent.intelligence.memory import extract_and_update
+from fleetent.loop_detector import LoopDetectionChecker, arg_fingerprint, result_digest
 from fleetent.message_hygiene import HygieneReport, MessageContractError, sanitize
 from fleetent.model_router import RouteConfig, RouteOverride, get_async_client_and_config
 from fleetent.multimodal import build_message_with_images, has_image_block
-from fleetent.governance.permission_gate import _default_gate
-from fleetent.provider_health import ProviderHealthCache, get_health_cache
-from fleetent.sandbox_enablement import Mode, is_code_execution_enabled
-from fleetent.intelligence.long_term_ctx import ContextSource, build_context
 from fleetent.observability import (
     InjectedContextTrace,
     TraceEvent,
     record_injected_context,
     record_trace_event,
 )
+from fleetent.provider_health import ProviderHealthCache, get_health_cache
+from fleetent.sandbox_enablement import Mode, is_code_execution_enabled
 from fleetent.skill_registry import available_skills_prompt, collect_disabled_trace
 from fleetent.skill_registry import match as match_skill  # noqa: F401  # patch target + API parity
 from fleetent.skill_registry import scan as scan_skills
@@ -199,7 +199,7 @@ def _strict_blocked_servers(allowed_tools: list[str] | None) -> list[str]:
     """Handle MCP degradation for this agent (MCP4): return strict-mode unavailable
     servers the agent is bound to (→ stop); log degrade(warning)/silent(debug) for
     bound non-strict unavailable servers. No MCP servers → empty, zero overhead."""
-    from fleetent import mcp_client
+    from fleetent.integrations.mcp import client as mcp_client
 
     strict_blocked: list[str] = []
     for server_id, mode in mcp_client.unavailable_servers():
@@ -1655,7 +1655,7 @@ async def run_stream(
 
     yield {"type": "done", "content": reply}
 
-    from openai.types import CompletionUsage as _CU
+    from openai.types import CompletionUsage as _CU  # noqa: N814 — terse local alias
 
     stream_usage: _CU | None = (
         _CU(

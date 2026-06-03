@@ -5,8 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>fleetent · Admin</title>
 <style>
-  :root { --bg:#0f1115; --panel:#181b22; --line:#262b35; --fg:#e6e8eb; --muted:#9aa3b2;
-          --accent:#4f8cff; --danger:#e5534b; --ok:#3fb950; --warn:#d29922; }
+  :root {
+    /* color scale */
+    --bg-0:#0b0d11; --bg-1:#0f1115; --bg-2:#13161c;
+    --surface:#181b22; --surface-2:#1d212a; --border:#262b35; --border-strong:#323845;
+    --text:#e6e8eb; --text-muted:#9aa3b2; --text-faint:#6b7280;
+    --accent:#4f8cff; --accent-weak:rgba(79,140,255,.14);
+    --danger:#e5534b; --ok:#3fb950; --warn:#d29922;
+    /* spacing */
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
+    /* radius */
+    --r-1:6px; --r-2:8px; --r-3:12px; --r-pill:999px;
+    /* elevation */
+    --shadow-1:0 1px 2px rgba(0,0,0,.3); --shadow-2:0 10px 40px rgba(0,0,0,.5);
+    /* legacy aliases (kept so existing rules need no rewrite) */
+    --bg:var(--bg-1); --panel:var(--surface); --line:var(--border); --fg:var(--text); --muted:var(--text-muted);
+  }
   * { box-sizing:border-box; }
   body { margin:0; font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
   header { display:flex; align-items:center; gap:16px; padding:12px 20px; border-bottom:1px solid var(--line); background:var(--panel); }
@@ -18,37 +32,101 @@
   button.danger { background:var(--danger); }
   button.small { padding:3px 8px; font-size:12px; }
   input, select { background:#0c0e12; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:6px 8px; font-size:13px; }
-  .wrap { max-width:1100px; margin:0 auto; padding:20px; }
-  .tabs { display:flex; gap:4px; margin-bottom:16px; }
-  .tabs button { background:transparent; color:var(--muted); border-bottom:2px solid transparent; border-radius:0; padding:8px 14px; }
-  .tabs button.active { color:var(--fg); border-bottom-color:var(--accent); }
-  table { width:100%; border-collapse:collapse; background:var(--panel); border-radius:8px; overflow:hidden; }
-  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); font-size:13px; vertical-align:middle; }
+  /* shell: sidebar + content */
+  .layout { display:flex; align-items:stretch; min-height:calc(100vh - 49px); }
+  .sidebar { flex:0 0 220px; width:220px; background:var(--bg-2); border-right:1px solid var(--border);
+    padding:var(--sp-3) var(--sp-2); overflow-y:auto; }
+  .nav-group { margin-bottom:var(--sp-4); }
+  .nav-group-label { display:block; width:100%; text-align:left; background:transparent; color:var(--text-faint);
+    font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; padding:var(--sp-1) var(--sp-3);
+    border:0; cursor:pointer; }
+  .nav-group-label.active { color:var(--text-muted); }
+  .nav-item { display:block; width:100%; text-align:left; background:transparent; color:var(--text-muted);
+    border:0; border-radius:var(--r-1); padding:var(--sp-2) var(--sp-3); margin-top:2px; font-size:13px; cursor:pointer; }
+  .nav-item:hover { background:var(--surface); color:var(--text); }
+  .nav-item.active { background:var(--accent-weak); color:var(--text); box-shadow:inset 2px 0 0 var(--accent); }
+  .content { flex:1 1 auto; min-width:0; padding:var(--sp-5); max-width:1280px; }
+  .hamburger { display:none; font-size:16px; line-height:1; }
+  .nav-backdrop { display:none; }
+  @media (max-width:860px) {
+    .hamburger { display:inline-block; }
+    .sidebar { position:fixed; top:49px; left:0; bottom:0; z-index:40; transform:translateX(-100%);
+      transition:transform .18s ease; }
+    body.nav-open .sidebar { transform:translateX(0); }
+    body.nav-open .nav-backdrop { display:block; position:fixed; inset:49px 0 0 0; z-index:30; background:rgba(0,0,0,.5); }
+    .content { padding:var(--sp-4); }
+  }
+  .table-scroll { width:100%; overflow-x:auto; border:1px solid var(--border); border-radius:var(--r-2); }
+  table { width:100%; border-collapse:collapse; background:var(--surface); }
+  th, td { text-align:left; padding:var(--sp-2) var(--sp-3); border-bottom:1px solid var(--border); font-size:13px; vertical-align:middle; white-space:nowrap; }
+  tbody tr:last-child td { border-bottom:0; }
+  tbody tr:hover td { background:var(--surface-2); }
+  thead th { position:sticky; top:0; background:var(--bg-2); z-index:1; }
   th { color:var(--muted); font-weight:500; }
+  td.empty, td.loading { text-align:center; color:var(--text-muted); padding:var(--sp-5); white-space:normal; }
+  td.loading::after { content:""; display:inline-block; width:14px; height:14px; margin-left:8px;
+    border:2px solid var(--border-strong); border-top-color:var(--accent); border-radius:50%;
+    vertical-align:middle; animation:spin .7s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
   .pill { padding:1px 8px; border-radius:10px; font-size:11px; border:1px solid var(--line); }
   .pill.active { color:var(--ok); } .pill.blocked,.pill.disabled { color:var(--danger); }
   .pill.admin,.pill.built_in_admin { color:var(--accent); } .pill.viewer { color:var(--muted); }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-2); padding:var(--sp-4); margin-bottom:var(--sp-4); box-shadow:var(--shadow-1); }
+  .page-header { display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap; margin-bottom:var(--sp-4);
+    padding-bottom:var(--sp-3); border-bottom:1px solid var(--border); }
+  .page-header .ph-title { font-size:18px; font-weight:600; margin:0; }
+  .page-header .ph-filter { flex:1 1 auto; display:flex; gap:var(--sp-2); align-items:center; flex-wrap:wrap; }
+  .page-header .ph-actions { display:flex; gap:var(--sp-2); align-items:center; flex-wrap:wrap; margin-left:auto; }
   .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-  .login { max-width:360px; margin:80px auto; }
-  .login h2 { margin-top:0; }
+  .login { width:360px; max-width:calc(100% - 32px); margin:0 auto; min-height:100vh; display:flex; flex-direction:column; justify-content:center; }
+  .login.hidden { display:none; }
+  .login h2 { margin:0 0 4px; text-align:center; }
+  .login .muted { text-align:center; margin:0 0 12px; }
   .err { color:var(--danger); min-height:18px; }
   .hidden { display:none; }
   .actions { display:flex; gap:6px; flex-wrap:wrap; }
+  .menu { position:relative; display:inline-block; }
+  .menu-items { position:absolute; right:0; top:calc(100% + 4px); z-index:20; min-width:150px;
+    background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:4px;
+    display:flex; flex-direction:column; box-shadow:0 6px 20px rgba(0,0,0,.4); }
+  .menu-items.hidden { display:none; }
+  .menu-items button { text-align:left; border:none; background:none; color:inherit;
+    padding:7px 10px; border-radius:4px; cursor:pointer; font-size:13px; }
+  .menu-items button:hover { background:var(--line); }
+  .menu-items button.danger { color:var(--danger); }
   code { background:#0c0e12; padding:2px 6px; border-radius:4px; font-size:12px; word-break:break-all; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50;
+    display:flex; align-items:center; justify-content:center; }
+  .modal.hidden { display:none; }
+  .modal-box { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:20px; width:360px; max-width:calc(100% - 32px); box-shadow:0 10px 40px rgba(0,0,0,.5); }
+  .modal-box h3 { margin:0 0 14px; }
+  .modal-box.wide { width:560px; }
+  .modal-box pre { background:var(--bg-0); border:1px solid var(--border); border-radius:var(--r-1);
+    padding:var(--sp-3); max-height:60vh; overflow:auto; font-size:12px; white-space:pre-wrap; word-break:break-word; }
+  #toast-host { position:fixed; right:var(--sp-5); bottom:var(--sp-5); z-index:80;
+    display:flex; flex-direction:column; gap:var(--sp-2); max-width:360px; }
+  .toast { background:var(--surface-2); border:1px solid var(--border-strong); border-left:3px solid var(--accent);
+    color:var(--text); border-radius:var(--r-1); padding:var(--sp-3) var(--sp-4); box-shadow:var(--shadow-2);
+    font-size:13px; animation:toast-in .15s ease; }
+  .toast.error { border-left-color:var(--danger); }
+  .toast.ok { border-left-color:var(--ok); }
+  @keyframes toast-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 </style>
 </head>
 <body>
 
 <div id="login-view" class="login">
   <div class="card">
-    <h2>fleetent Admin</h2>
-    <div class="row" style="flex-direction:column; align-items:stretch; gap:10px;">
-      <input id="login-email" placeholder="email" autocomplete="username">
-      <input id="login-password" type="password" placeholder="password" autocomplete="current-password">
-      <button onclick="doLogin()">Sign in</button>
+    <h2>Fleetent</h2>
+    <p class="muted">Sign in to the fleetent Admin console</p>
+    <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="doLogin(); return false;">
+      <input id="login-email" placeholder="Username" autocomplete="username">
+      <input id="login-password" type="password" placeholder="Password" autocomplete="current-password">
+      <button type="submit">Log in</button>
       <div id="login-err" class="err"></div>
-    </div>
+    </form>
   </div>
 </div>
 
@@ -56,78 +134,653 @@
   <div class="card">
     <h2>Set a new password</h2>
     <p class="muted">Your account requires a password reset before continuing.</p>
-    <div class="row" style="flex-direction:column; align-items:stretch; gap:10px;">
-      <input id="reset-password" type="password" placeholder="new password">
-      <button onclick="doChangePassword()">Update password</button>
+    <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="doChangePassword(); return false;">
+      <input type="text" autocomplete="username" aria-hidden="true" tabindex="-1" style="display:none;">
+      <input id="reset-password" type="password" placeholder="new password" autocomplete="new-password">
+      <button type="submit">Update password</button>
       <div id="reset-err" class="err"></div>
-    </div>
+    </form>
   </div>
 </div>
 
 <div id="app-view" class="hidden">
   <header>
+    <button class="hamburger ghost small" aria-label="Toggle navigation"
+            onclick="document.body.classList.toggle('nav-open')">☰</button>
     <h1>fleetent · Admin</h1>
     <span id="whoami" class="muted"></span>
     <span class="spacer"></span>
     <button class="ghost small" onclick="doLogout()">Sign out</button>
   </header>
-  <div class="wrap">
-    <div class="tabs">
-      <button data-tab="users" class="active" onclick="switchTab('users')">Users</button>
-      <button data-tab="im" onclick="switchTab('im')">IM Users</button>
-      <button data-tab="audit" onclick="switchTab('audit')">Audit</button>
-    </div>
+  <div class="layout">
+    <nav class="sidebar" aria-label="Admin navigation">
+      <div class="nav-group">
+        <button class="nav-group-label active" data-group="access" onclick="switchGroup('access')">Access</button>
+        <button class="nav-item active" data-tab="users" onclick="switchTab('users')">Users</button>
+        <button class="nav-item" data-tab="im" onclick="switchTab('im')">IM Users</button>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-label" data-group="agents" onclick="switchGroup('agents')">Agents &amp; Skills</button>
+        <button class="nav-item" data-tab="agents" onclick="switchTab('agents')">Agents</button>
+        <button class="nav-item" data-tab="skills" onclick="switchTab('skills')">Skills</button>
+        <button class="nav-item" data-tab="kb" onclick="switchTab('kb')">Knowledge Base</button>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-label" data-group="models" onclick="switchGroup('models')">Models &amp; Connectors</button>
+        <button class="nav-item" data-tab="providers" onclick="switchTab('providers')">Providers</button>
+        <button class="nav-item" data-tab="connectors" onclick="switchTab('connectors')">IM Connectors</button>
+        <button class="nav-item" data-tab="oauth" onclick="switchTab('oauth')">OAuth &amp; MCP</button>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-label" data-group="ops" onclick="switchGroup('ops')">Ops</button>
+        <button class="nav-item" data-tab="stats" onclick="switchTab('stats')">Statistics</button>
+        <button class="nav-item" data-tab="monitoring" onclick="switchTab('monitoring')">Monitoring</button>
+        <button class="nav-item" data-tab="sessions" onclick="switchTab('sessions')">Sessions</button>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-label" data-group="audit" onclick="switchGroup('audit')">Audit</button>
+        <button class="nav-item" data-tab="audit" onclick="switchTab('audit')">Audit</button>
+      </div>
+    </nav>
+    <div class="nav-backdrop" onclick="document.body.classList.remove('nav-open')"></div>
+    <main class="content">
 
     <section id="tab-users">
-      <div class="card" id="create-card">
-        <div class="row">
-          <input id="nu-email" placeholder="email">
-          <input id="nu-name" placeholder="name">
-          <input id="nu-password" type="password" placeholder="initial password (optional)">
-          <select id="nu-role"><option value="viewer">viewer</option><option value="admin">admin</option></select>
-          <button onclick="createUser()">Create user</button>
-        </div>
-        <div id="users-err" class="err"></div>
+      <div class="page-header"><h2 class="ph-title">Users</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.users?.()">Refresh</button></div></div>
+      <div class="row" style="margin-bottom:12px;">
+        <input id="user-filter" placeholder="filter by email or nickname" oninput="renderUsers()" style="flex:1;">
+        <select id="role-filter" onchange="renderUsers()">
+          <option value="">all roles</option>
+          <option value="viewer">viewer</option>
+          <option value="admin">admin</option>
+          <option value="built_in_admin">built_in_admin</option>
+        </select>
+        <select id="status-filter" onchange="renderUsers()">
+          <option value="">all status</option>
+          <option value="active">active</option>
+          <option value="blocked">blocked</option>
+          <option value="disabled">disabled</option>
+        </select>
+        <span id="create-bar"><button onclick="openCreateModal()">Create user</button></span>
       </div>
-      <table>
-        <thead><tr><th>Email / Name</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+      <div class="table-scroll"><table>
+        <thead><tr><th>#</th><th>Email</th><th>Nickname</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody id="users-body"></tbody>
-      </table>
+      </table></div>
     </section>
 
     <section id="tab-im" class="hidden">
-      <table>
+      <div class="page-header"><h2 class="ph-title">IM Users</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.im?.()">Refresh</button></div></div>
+      <div class="table-scroll"><table>
         <thead><tr><th>Platform</th><th>Platform user</th><th>Internal user</th><th>State</th><th>Actions</th></tr></thead>
         <tbody id="im-body"></tbody>
-      </table>
+      </table></div>
+    </section>
+
+    <section id="tab-connectors" class="hidden">
+      <div class="page-header"><h2 class="ph-title">IM Connectors</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.connectors?.()">Refresh</button></div></div>
+      <div class="row" style="margin-bottom:12px;">
+        <span class="muted" style="flex:1;">IM platform connections (credentials stored server-side, shown masked)</span>
+        <span id="conn-create-bar"><button onclick="openConnModal()">Add connection</button></span>
+      </div>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Owner</th><th>Platform</th><th>Status</th><th>Enabled</th><th>Credentials</th><th>Actions</th></tr></thead>
+        <tbody id="conn-body"></tbody>
+      </table></div>
+    </section>
+
+    <section id="tab-kb" class="hidden">
+      <div class="page-header"><h2 class="ph-title">Knowledge Base</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.kb?.()">Refresh</button></div></div>
+      <div class="card" id="kb-create-card">
+        <div class="row">
+          <input id="nkb-id" placeholder="kb_id">
+          <input id="nkb-desc" placeholder="description">
+          <button onclick="createKb()">Create KB</button>
+        </div>
+        <div id="kb-err" class="err"></div>
+      </div>
+      <div class="card">
+        <div class="row">
+          <input id="kb-q" placeholder="retrieval query" style="flex:1;">
+          <input id="kb-q-ids" placeholder="kb_ids (comma-separated)">
+          <select id="kb-q-mode"><option value="hybrid">hybrid</option><option value="vector">vector</option><option value="keyword">keyword</option></select>
+          <button onclick="kbSearch()">Test retrieval</button>
+        </div>
+        <pre id="kb-search-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+      </div>
+      <div class="table-scroll"><table>
+        <thead><tr><th>KB</th><th>Description</th><th>Docs</th><th>Bound agents</th><th>Actions</th></tr></thead>
+        <tbody id="kb-body"></tbody>
+      </table></div>
+    </section>
+
+    <section id="tab-agents" class="hidden">
+      <div class="page-header"><h2 class="ph-title">Agents</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.agents?.()">Refresh</button></div></div>
+      <div class="row" style="margin-bottom:12px;">
+        <input id="ag-filter" placeholder="filter by name" oninput="renderAgents()" style="flex:1;">
+        <label class="muted"><input type="checkbox" id="ag-archived" onchange="loadAgents()"> show archived</label>
+        <span id="ag-create-bar">
+          <button class="ghost small" onclick="agShowTemplates()">Templates</button>
+        </span>
+      </div>
+      <pre id="ag-templates-out" class="muted" style="white-space:pre-wrap; margin:0 0 8px;"></pre>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Name</th><th>Status</th><th>Provenance</th><th>Drift</th><th>Actions</th></tr></thead>
+        <tbody id="ag-body"></tbody>
+      </table></div>
+    </section>
+
+    <section id="tab-skills" class="hidden">
+      <div class="page-header"><h2 class="ph-title">Skills</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.skills?.()">Refresh</button></div></div>
+      <div class="row" style="margin-bottom:12px;">
+        <input id="sk-filter" placeholder="filter by name/description" oninput="loadSkills()" style="flex:1;">
+        <label class="muted"><input type="checkbox" id="sk-archived" onchange="loadSkills()"> show archived</label>
+        <span id="sk-create-bar">
+          <button class="ghost small" onclick="skReload()">Reload</button>
+          <button onclick="skOpenCreate()">Create skill</button>
+        </span>
+      </div>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Name</th><th>Description</th><th>Status</th><th>Audit</th><th>Source</th><th>Agents</th><th>Actions</th></tr></thead>
+        <tbody id="sk-body"></tbody>
+      </table></div>
+      <h3 style="margin-top:24px;">Reflection proposals</h3>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Proposal</th><th>Skill</th><th>Summary</th><th>Actions</th></tr></thead>
+        <tbody id="sk-prop-body"></tbody>
+      </table></div>
+      <pre id="sk-prop-diff" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+    </section>
+
+    <section id="tab-providers" class="hidden">
+      <div class="page-header"><h2 class="ph-title">Model Providers</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.providers?.()">Refresh</button></div></div>
+      <div class="row" style="margin-bottom:12px;">
+        <span class="muted" style="flex:1;">Model providers (api_key stored server-side, shown masked)</span>
+        <span id="pv-create-bar">
+          <button class="ghost small" onclick="pvHealth()">Health</button>
+          <button onclick="pvOpenCreate()">Add provider</button>
+        </span>
+      </div>
+      <pre id="pv-health-out" class="muted" style="white-space:pre-wrap; margin:0 0 8px;"></pre>
+      <div class="table-scroll"><table>
+        <thead><tr><th>ID</th><th>Base URL</th><th>Model</th><th>API key</th><th>Pricing (in/out per 1k)</th><th>Actions</th></tr></thead>
+        <tbody id="pv-body"></tbody>
+      </table></div>
+      <h3 style="margin-top:24px;">Task-type routes</h3>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Task type</th><th>Provider chain</th><th>Actions</th></tr></thead>
+        <tbody id="pv-routes-body"></tbody>
+      </table></div>
+      <div class="card row" style="margin-top:8px;">
+        <input id="pv-route-tt" placeholder="task_type (e.g. default)">
+        <input id="pv-route-ids" placeholder="provider ids (comma-separated, priority order)" style="flex:1;">
+        <button onclick="pvSetRoute()">Set route</button>
+        <button class="ghost" onclick="pvPreviewRoute()">Preview</button>
+      </div>
+      <pre id="pv-route-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+    </section>
+
+    <section id="tab-stats" class="hidden">
+      <div class="page-header"><h2 class="ph-title">Statistics</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.stats?.()">Refresh</button></div></div>
+      <div class="card">
+        <div class="row">
+          <input id="st-agent" placeholder="agent_id">
+          <select id="st-window"><option value="7d">7d</option><option value="30d">30d</option><option value="24h">24h</option></select>
+          <button onclick="stOverview()">Overview</button>
+          <button class="ghost" onclick="stTools()">Tools</button>
+          <input id="st-compare" placeholder="compare agent_ids (comma)" style="flex:1;">
+          <button class="ghost" onclick="stCompare()">Compare</button>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <select id="st-sort"><option value="total_tokens">total_tokens</option><option value="calls">calls</option><option value="cost">cost</option></select>
+          <button onclick="stPerUser()">Per-user ranking</button>
+          <select id="st-export-view"><option value="per-user">per-user</option><option value="tools">tools</option><option value="usage">usage</option></select>
+          <button class="ghost" onclick="stExport()">Export CSV</button>
+          <span id="st-report-bar">
+            <select id="st-report-period"><option value="weekly">weekly</option><option value="monthly">monthly</option></select>
+            <input id="st-report-to" placeholder="recipient">
+            <button class="ghost" onclick="stReport()">Schedule report</button>
+          </span>
+        </div>
+        <pre id="st-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+      </div>
+      <div class="table-scroll"><table>
+        <thead><tr><th>User</th><th>Calls</th><th>Tokens</th><th>Cost</th></tr></thead>
+        <tbody id="st-body"></tbody>
+      </table></div>
+      <div class="card" style="margin-top:12px;">
+        <div class="row">
+          <input id="st-user" placeholder="user_id">
+          <button onclick="stUserRequests()">User requests</button>
+          <input id="st-request" placeholder="request_id">
+          <button class="ghost" onclick="stRequest()">Request trace</button>
+          <input id="st-session" placeholder="session_id">
+          <input id="st-trace-user" placeholder="user_id (for trace)">
+          <button class="ghost" onclick="stTrace()">Session trace</button>
+        </div>
+        <pre id="st-trace-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+      </div>
+    </section>
+
+    <section id="tab-monitoring" class="hidden">
+      <div class="page-header"><h2 class="ph-title">Monitoring &amp; Alerts</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.monitoring?.()">Refresh</button></div></div>
+      <div class="card">
+        <div class="row">
+          <input id="mon-metric" placeholder="metric (e.g. cpu)">
+          <input id="mon-target" placeholder="target (e.g. host-1)">
+          <input id="mon-since" placeholder="since (ISO, optional)">
+          <button onclick="monMetrics()">Query metrics</button>
+        </div>
+        <pre id="mon-metrics-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+      </div>
+      <div class="row" style="margin:12px 0;">
+        <h3 style="flex:1; margin:0;">Alert rules</h3>
+        <span id="mon-create-bar"><button onclick="monOpenRule()">New rule</button></span>
+      </div>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Metric</th><th>Cond</th><th>Severity</th><th>Target</th><th>Enabled</th><th>Actions</th></tr></thead>
+        <tbody id="mon-rules-body"></tbody>
+      </table></div>
+      <h3 style="margin-top:24px;">Alerts</h3>
+      <div class="card row">
+        <select id="mon-alert-status"><option value="">all</option><option value="firing">firing</option><option value="ack">ack</option><option value="silenced">silenced</option></select>
+        <button onclick="monAlerts()">Refresh alerts</button>
+        <span id="mon-maint-bar">
+          <input id="mon-maint-target" placeholder="maint target (optional)">
+          <input id="mon-maint-start" placeholder="start_ts (ISO)">
+          <input id="mon-maint-end" placeholder="end_ts (ISO)">
+          <button class="ghost" onclick="monMaintenance()">Add maintenance</button>
+        </span>
+      </div>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Severity</th><th>Metric</th><th>Target</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="mon-alerts-body"></tbody>
+      </table></div>
+    </section>
+
+    <section id="tab-sessions" class="hidden">
+      <div class="page-header"><h2 class="ph-title">Sessions</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.sessions?.()">Refresh</button></div></div>
+      <div class="row" style="margin-bottom:12px;">
+        <select id="sess-status"><option value="">all status</option><option value="active">active</option><option value="ended">ended</option></select>
+        <input id="sess-user" placeholder="user_id">
+        <input id="sess-agent" placeholder="agent_name">
+        <button onclick="loadSessions()">Search</button>
+        <span style="flex:1;"></span>
+        <span id="sess-create-bar">
+          <input id="sess-pg-agent" placeholder="agent for playground">
+          <button onclick="sessStart()">Start playground</button>
+        </span>
+      </div>
+      <div class="table-scroll"><table>
+        <thead><tr><th><input type="checkbox" id="sess-all" onchange="sessToggleAll(this.checked)"></th><th>Session</th><th>Origin</th><th>Agent</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="sess-body"></tbody>
+      </table></div>
+      <div id="sess-bulk-bar" class="row" style="margin-top:8px;">
+        <button class="ghost danger" onclick="sessBulk('end')">Bulk end</button>
+        <button class="ghost danger" onclick="sessBulk('clear')">Bulk clear</button>
+      </div>
+      <div id="sess-playground" class="card hidden" style="margin-top:12px;">
+        <div class="muted">Playground: <span id="sess-pg-id"></span></div>
+        <div class="row" style="margin-top:8px;">
+          <input id="sess-pg-msg" placeholder="message" style="flex:1;">
+          <button onclick="sessMessage()">Send</button>
+          <button class="ghost" onclick="sessPin()">Pin</button>
+          <button class="ghost" onclick="sessExport()">Export</button>
+        </div>
+        <pre id="sess-pg-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+        <div class="muted" style="font-size:12px;">Streaming degraded to single-shot message (see design D5).</div>
+      </div>
+    </section>
+
+    <section id="tab-oauth" class="hidden">
+      <div class="page-header"><h2 class="ph-title">OAuth Connectors &amp; MCP</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.oauth?.()">Refresh</button></div></div>
+      <div class="row" style="margin-bottom:12px;">
+        <span class="muted" style="flex:1;">OAuth 2.x connectors (secrets stored server-side, shown masked)</span>
+        <input id="oc-agent-filter" placeholder="agent_id filter" onchange="ocConnectors()">
+        <span id="oc-create-bar"><button onclick="ocOpenCreate()">Add connector</button></span>
+      </div>
+      <div class="table-scroll"><table>
+        <thead><tr><th>ID</th><th>Owner</th><th>Name</th><th>Protocol</th><th>Enabled</th><th>Actions</th></tr></thead>
+        <tbody id="oc-body"></tbody>
+      </table></div>
+      <div class="row" style="margin:12px 0 4px;">
+        <h3 style="flex:1; margin:0;">Authorization grants</h3>
+        <button class="ghost small" onclick="ocGrants()">Refresh grants</button>
+        <input id="oc-offboard-user" placeholder="user_id">
+        <button class="ghost small" onclick="ocOffboarding()">Offboarding</button>
+      </div>
+      <div class="table-scroll"><table>
+        <thead><tr><th>User</th><th>Connector</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="oc-grants-body"></tbody>
+      </table></div>
+      <pre id="oc-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+      <div class="row" style="margin:16px 0 4px;">
+        <h3 style="flex:1; margin:0;">MCP servers</h3>
+        <input id="mcp-agent-filter" placeholder="agent_id filter" onchange="mcpServers()">
+        <button class="ghost small" onclick="mcpDoctor()">Doctor</button>
+        <button class="ghost small" onclick="mcpServers()">Refresh servers</button>
+      </div>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Server</th><th>Owner</th><th>Status</th><th>Tools</th><th>Actions</th></tr></thead>
+        <tbody id="mcp-body"></tbody>
+      </table></div>
+      <pre id="mcp-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
     </section>
 
     <section id="tab-audit" class="hidden">
+      <div class="page-header"><h2 class="ph-title">Audit Log</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.audit?.()">Refresh</button></div></div>
       <div class="card row">
         <input id="audit-action" placeholder="filter by action (e.g. block_user)">
         <button onclick="loadAudit()">Search</button>
       </div>
-      <table>
+      <div class="table-scroll"><table>
         <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
         <tbody id="audit-body"></tbody>
-      </table>
+      </table></div>
     </section>
+    </main>
+  </div>
+
+  <div id="create-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3>Create user</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="createUser(); return false;">
+        <input id="nu-email" placeholder="email" autocomplete="email">
+        <input id="nu-name" placeholder="nickname" autocomplete="off">
+        <input id="nu-password" type="password" placeholder="initial password" autocomplete="new-password">
+        <select id="nu-role"><option value="viewer">viewer</option><option value="admin">admin</option></select>
+        <div id="users-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="closeCreateModal()">Cancel</button>
+          <button type="submit">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="bind-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3>Bind IM identity to user</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="doBindIm(); return false;">
+        <select id="bind-user-select"></select>
+        <div id="bind-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="closeBindModal()">Cancel</button>
+          <button type="submit">Bind</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="conn-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3>Add connection</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="createConn(); return false;">
+        <label class="muted">Platform</label>
+        <select id="conn-platform" onchange="renderConnFields()">
+          <option value="telegram">telegram</option>
+          <option value="slack">slack</option>
+          <option value="whatsapp">whatsapp</option>
+        </select>
+        <div id="conn-fields" style="display:flex; flex-direction:column; gap:10px;"></div>
+        <div id="conn-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="closeConnModal()">Cancel</button>
+          <button type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="sk-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3 id="sk-modal-title">Create skill</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="skSave(); return false;">
+        <input id="sk-name" placeholder="skill name (matches frontmatter)" autocomplete="off">
+        <select id="sk-source"><option value="adhoc">adhoc</option><option value="managed">managed</option></select>
+        <textarea id="sk-content" placeholder="skill markdown (with frontmatter name/description)" rows="12" style="font-family:monospace;"></textarea>
+        <div id="sk-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="skCloseModal()">Cancel</button>
+          <button type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="sk-agents-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3>Bind skill to agents</h3>
+      <div id="sk-agents-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+      <div id="sk-agents-err" class="err"></div>
+      <div class="row" style="justify-content:flex-end;">
+        <button type="button" class="ghost" onclick="skCloseAgents()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pv-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3 id="pv-modal-title">Add provider</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="pvSave(); return false;">
+        <input id="pv-id" placeholder="provider id (e.g. openai-main)" autocomplete="off">
+        <input id="pv-base-url" placeholder="base_url (OpenAI-compatible)" autocomplete="off">
+        <input id="pv-model" placeholder="model" autocomplete="off">
+        <input id="pv-api-key" type="password" placeholder="api_key (leave blank to keep current)" autocomplete="off">
+        <div class="row">
+          <input id="pv-max-tokens" placeholder="max_tokens (optional)" autocomplete="off">
+          <input id="pv-temperature" placeholder="temperature (optional)" autocomplete="off">
+        </div>
+        <div id="pv-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="pvCloseModal()">Cancel</button>
+          <button type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="ag-clone-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3 id="ag-clone-title">Clone agent</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="agDoClone(); return false;">
+        <input id="ag-clone-name" placeholder="new agent name" autocomplete="off">
+        <div id="ag-clone-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="agCloseClone()">Cancel</button>
+          <button type="submit">Clone</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="ag-versions-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3 id="ag-versions-title">Versions</h3>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Version</th><th>Active</th><th>Created</th><th></th></tr></thead>
+        <tbody id="ag-versions-body"></tbody>
+      </table></div>
+      <div id="ag-versions-err" class="err"></div>
+      <div class="row" style="justify-content:flex-end;">
+        <button type="button" class="ghost" onclick="agCloseVersions()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="ag-bind-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3 id="ag-bind-title">Bindings</h3>
+      <div class="row"><input id="ag-bind-user" placeholder="user_id"><button onclick="agBindUser()">Bind user</button><button class="ghost danger" onclick="agUnbindUser()">Unbind user</button></div>
+      <div class="row" style="margin-top:8px;"><input id="ag-bind-platform" placeholder="platform"><input id="ag-bind-channel" placeholder="channel_id"><button onclick="agBindChannel()">Bind channel</button><button class="ghost danger" onclick="agUnbindChannel()">Unbind</button></div>
+      <div id="ag-bind-err" class="err"></div>
+      <div class="row" style="justify-content:flex-end; margin-top:8px;">
+        <button type="button" class="ghost" onclick="agCloseBind()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="mon-rule-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3>New alert rule</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="monCreateRule(); return false;">
+        <input id="mon-rule-metric" placeholder="metric" autocomplete="off">
+        <div class="row">
+          <select id="mon-rule-comp"><option value=">">&gt;</option><option value=">=">&gt;=</option><option value="<">&lt;</option><option value="<=">&lt;=</option></select>
+          <input id="mon-rule-threshold" placeholder="threshold" autocomplete="off">
+        </div>
+        <input id="mon-rule-target" placeholder="target (optional)" autocomplete="off">
+        <div class="row">
+          <input id="mon-rule-for" placeholder="for_seconds (0)" autocomplete="off">
+          <select id="mon-rule-severity"><option value="warning">warning</option><option value="critical">critical</option></select>
+        </div>
+        <input id="mon-rule-channels" placeholder="channels (comma, optional)" autocomplete="off">
+        <div id="mon-rule-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="monCloseRule()">Cancel</button>
+          <button type="submit">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="oc-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3 id="oc-modal-title">Add OAuth connector</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="ocSave(); return false;">
+        <input id="oc-id" placeholder="connector id" autocomplete="off">
+        <input id="oc-name" placeholder="display name" autocomplete="off">
+        <input id="oc-auth-url" placeholder="authorization_url" autocomplete="off">
+        <input id="oc-token-url" placeholder="token_url" autocomplete="off">
+        <input id="oc-client-id" placeholder="client_id" autocomplete="off">
+        <input id="oc-client-secret" type="password" placeholder="client_secret (leave blank to keep current)" autocomplete="off">
+        <input id="oc-scopes" placeholder="scopes (space/comma separated)" autocomplete="off">
+        <label class="muted"><input type="checkbox" id="oc-enabled" checked> enabled</label>
+        <div id="oc-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="ocCloseModal()">Cancel</button>
+          <button type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="pv-pricing-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3 id="pv-pricing-title">Set pricing</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="pvSavePricing(); return false;">
+        <input id="pv-price-in" placeholder="input_price_per_1k" autocomplete="off">
+        <input id="pv-price-out" placeholder="output_price_per_1k" autocomplete="off">
+        <div id="pv-pricing-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="pvClosePricing()">Cancel</button>
+          <button type="submit">Save</button>
+        </div>
+      </form>
+    </div>
   </div>
 </div>
 
+<div id="toast-host" aria-live="polite"></div>
+
 <script>
-let TOKEN = null;
+const TOKEN_KEY = "fleetent_session_token";
+let TOKEN = localStorage.getItem(TOKEN_KEY);
+function setToken(t) {
+  TOKEN = t;
+  if (t) localStorage.setItem(TOKEN_KEY, t);
+  else localStorage.removeItem(TOKEN_KEY);
+}
 const $ = (id) => document.getElementById(id);
 const esc = (s) => (s == null ? "" : String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-async function api(method, path, body) {
+// --- in-app feedback primitives (replace native alert/confirm) ---
+function toast(msg, kind) {
+  const host = $("toast-host");
+  if (!host) return;
+  const el = document.createElement("div");
+  el.className = "toast" + (kind ? " " + kind : "");
+  el.textContent = String(msg);
+  host.appendChild(el);
+  setTimeout(() => { el.style.opacity = "0"; setTimeout(() => el.remove(), 200); }, 4000);
+}
+
+// Close any open static (id-bearing) modal on Escape; dynamic overlays self-handle.
+function escCloseModals(e) {
+  if (e.key !== "Escape") return;
+  for (const m of document.querySelectorAll(".modal:not(.hidden)")) {
+    if (m.id) m.classList.add("hidden");
+  }
+}
+document.addEventListener("keydown", escCloseModals);
+
+function _overlay(buildBox) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal";
+  const box = document.createElement("div");
+  box.className = "modal-box";
+  box.setAttribute("role", "dialog");
+  box.setAttribute("aria-modal", "true");
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  const close = () => { document.removeEventListener("keydown", onKey); overlay.remove(); };
+  const onKey = (e) => { if (e.key === "Escape") buildBox.onEsc(close); };
+  document.addEventListener("keydown", onKey);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) buildBox.onEsc(close); });
+  buildBox.render(box, close);
+  return close;
+}
+
+function confirmDialog(msg, opts) {
+  opts = opts || {};
+  return new Promise((resolve) => {
+    _overlay({
+      onEsc: (close) => { close(); resolve(false); },
+      render: (box, close) => {
+        box.innerHTML =
+          '<h3>' + esc(opts.title || "Please confirm") + '</h3>' +
+          '<p class="muted" style="white-space:pre-wrap;">' + esc(msg) + '</p>' +
+          '<div class="actions" style="justify-content:flex-end; margin-top:14px;">' +
+          '<button class="ghost" data-x>Cancel</button>' +
+          '<button class="' + (opts.danger === false ? "" : "danger") + '" data-ok>' + esc(opts.ok || "Confirm") + '</button></div>';
+        box.querySelector("[data-x]").onclick = () => { close(); resolve(false); };
+        box.querySelector("[data-ok]").onclick = () => { close(); resolve(true); };
+        box.querySelector("[data-ok]").focus();
+      },
+    });
+  });
+}
+
+function loadingRow(cols) { return `<tr><td class="loading" colspan="${cols}">Loading…</td></tr>`; }
+function emptyRow(cols, msg) { return `<tr><td class="empty" colspan="${cols}">${esc(msg || "No records")}</td></tr>`; }
+
+function showInfo(title, text) {
+  _overlay({
+    onEsc: (close) => close(),
+    render: (box, close) => {
+      box.classList.add("wide");
+      box.innerHTML =
+        '<h3>' + esc(title) + '</h3><pre></pre>' +
+        '<div class="actions" style="justify-content:flex-end; margin-top:14px;"><button data-x>Close</button></div>';
+      box.querySelector("pre").textContent = String(text);
+      box.querySelector("[data-x]").onclick = close;
+      box.querySelector("[data-x]").focus();
+    },
+  });
+}
+
+async function api(method, path, body, extraHeaders) {
   const headers = {};
   if (TOKEN) headers["Authorization"] = "Session " + TOKEN;
   if (body) headers["Content-Type"] = "application/json";
+  if (extraHeaders) Object.assign(headers, extraHeaders);
   const res = await fetch("/admin" + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+  if (!res.ok) {
+    if (res.status === 401) { setToken(null); show("login-view"); }
+    throw new Error(data.detail || ("HTTP " + res.status));
+  }
   return data;
 }
 
@@ -135,7 +788,7 @@ async function doLogin() {
   $("login-err").textContent = "";
   try {
     const r = await api("POST", "/login", { email: $("login-email").value, password: $("login-password").value });
-    TOKEN = r.token;
+    setToken(r.token);
     if (r.must_reset) { show("reset-view"); return; }
     enterApp();
   } catch (e) { $("login-err").textContent = e.message; }
@@ -149,12 +802,19 @@ async function doChangePassword() {
   } catch (e) { $("reset-err").textContent = e.message; }
 }
 
-async function doLogout() { try { await api("POST", "/logout"); } catch (e) {} TOKEN = null; show("login-view"); }
+async function doLogout() { try { await api("POST", "/logout"); } catch (e) {} setToken(null); show("login-view"); }
+
+let IS_VIEWER = false;
 
 async function enterApp() {
   const me = await api("GET", "/me");
+  IS_VIEWER = me.role === "viewer";
   $("whoami").textContent = (me.email || me.id) + " · " + me.role;
-  if (me.role === "viewer") $("create-card").classList.add("hidden");
+  if (IS_VIEWER) {
+    for (const id of ["create-bar", "kb-create-card", "conn-create-bar", "sk-create-bar", "pv-create-bar", "ag-create-bar", "st-report-bar", "mon-create-bar", "mon-maint-bar", "sess-create-bar", "sess-bulk-bar", "oc-create-bar"]) {
+      const el = $(id); if (el) el.classList.add("hidden");
+    }
+  }
   show("app-view");
   switchTab("users");
 }
@@ -163,57 +823,127 @@ function show(view) {
   for (const v of ["login-view", "reset-view", "app-view"]) $(v).classList.toggle("hidden", v !== view);
 }
 
-function switchTab(tab) {
-  for (const b of document.querySelectorAll(".tabs button")) b.classList.toggle("active", b.dataset.tab === tab);
-  $("tab-users").classList.toggle("hidden", tab !== "users");
-  $("tab-im").classList.toggle("hidden", tab !== "im");
-  $("tab-audit").classList.toggle("hidden", tab !== "audit");
-  if (tab === "users") loadUsers();
-  if (tab === "im") loadIm();
-  if (tab === "audit") loadAudit();
+const TAB_GROUP = {
+  users: "access", im: "access",
+  agents: "agents", skills: "agents", kb: "agents",
+  providers: "models", connectors: "models", oauth: "models",
+  stats: "ops", monitoring: "ops", sessions: "ops",
+  audit: "audit",
+};
+const GROUP_DEFAULT_TAB = { access: "users", agents: "agents", models: "providers", ops: "stats", audit: "audit" };
+const LOADERS = {};  // each module registers its loader; switchTab calls it if present
+
+function switchGroup(group) {
+  switchTab(GROUP_DEFAULT_TAB[group]);
 }
 
+function switchTab(tab) {
+  const group = TAB_GROUP[tab];
+  for (const b of document.querySelectorAll(".nav-group-label")) b.classList.toggle("active", b.dataset.group === group);
+  for (const b of document.querySelectorAll(".nav-item")) b.classList.toggle("active", b.dataset.tab === tab);
+  for (const sec of document.querySelectorAll("section[id^='tab-']")) sec.classList.toggle("hidden", sec.id !== "tab-" + tab);
+  const loader = LOADERS[tab];
+  if (loader) loader();
+  if (window.innerWidth <= 860) document.body.classList.remove("nav-open");
+}
+
+LOADERS.users = () => loadUsers();
+LOADERS.im = () => loadIm();
+LOADERS.connectors = () => loadConn();
+LOADERS.kb = () => loadKb();
+LOADERS.audit = () => loadAudit();
+
+let ALL_USERS = [];
+
 async function loadUsers() {
-  const users = await api("GET", "/users");
-  $("users-body").innerHTML = users.map(u => `
+  $("users-body").innerHTML = loadingRow(6);
+  try { ALL_USERS = await api("GET", "/users"); renderUsers(); }
+  catch (e) { $("users-body").innerHTML = emptyRow(6, e.message); }
+}
+
+function renderUsers() {
+  const q = ($("user-filter").value || "").trim().toLowerCase();
+  const role = $("role-filter").value;
+  const status = $("status-filter").value;
+  const users = ALL_USERS.filter(u =>
+    (!q || (u.email || "").toLowerCase().includes(q) || (u.name || "").toLowerCase().includes(q))
+    && (!role || u.role === role)
+    && (!status || u.status === status));
+  $("users-body").innerHTML = users.map((u, i) => `
     <tr>
-      <td>${esc(u.email || "—")}<br><span class="muted">${esc(u.name)}</span></td>
+      <td class="muted">${i + 1}</td>
+      <td>${esc(u.email || "—")}</td>
+      <td>${esc(u.name || "—")}</td>
       <td><span class="pill ${u.role}">${esc(u.role)}</span></td>
       <td><span class="pill ${u.status}">${esc(u.status)}</span></td>
       <td class="actions">
-        <select class="small" onchange="setRole('${u.id}', this.value)">
-          ${["viewer","admin"].map(r => `<option ${u.role===r?"selected":""} value="${r}">${r}</option>`).join("")}
-        </select>
-        ${u.status === "blocked"
-          ? `<button class="small ghost" onclick="unblock('${u.id}')">Unblock</button>`
-          : `<button class="small danger" onclick="block('${u.id}')">Block</button>`}
-        <button class="small ghost" onclick="viewKeys('${u.id}')">Keys</button>
-        <button class="small danger" onclick="del('${u.id}')">Delete</button>
+        <div class="menu">
+          <button class="small ghost" title="More actions" onclick="toggleMenu(this)">…</button>
+          <div class="menu-items hidden">
+            ${u.role === "admin"
+              ? `<button onclick="setRole('${u.id}','viewer')">Make viewer</button>`
+              : `<button onclick="setRole('${u.id}','admin')">Make admin</button>`}
+            <button onclick="resetPassword('${u.id}')">Reset password</button>
+            <button onclick="viewKeys('${u.id}')">Keys</button>
+            ${u.status === "blocked"
+              ? `<button onclick="unblock('${u.id}')">Unblock</button>`
+              : `<button class="danger" onclick="block('${u.id}')">Block</button>`}
+            <button class="danger" onclick="del('${u.id}')">Delete</button>
+          </div>
+        </div>
       </td>
-    </tr>`).join("") || `<tr><td colspan="4" class="muted">No users.</td></tr>`;
+    </tr>`).join("") || emptyRow(6, "No users.");
 }
+
+function closeMenus(except) {
+  for (const m of document.querySelectorAll(".menu-items")) {
+    if (m !== except) m.classList.add("hidden");
+  }
+}
+function toggleMenu(btn) {
+  const items = btn.nextElementSibling;
+  const willOpen = items.classList.contains("hidden");
+  closeMenus(willOpen ? items : null);
+  items.classList.toggle("hidden", !willOpen);
+}
+document.addEventListener("click", (e) => { if (!e.target.closest(".menu")) closeMenus(); });
+
+function openCreateModal() {
+  $("users-err").textContent = "";
+  $("nu-email").value = $("nu-name").value = $("nu-password").value = "";
+  $("nu-role").value = "viewer";
+  $("create-modal").classList.remove("hidden");
+  $("nu-email").focus();
+}
+function closeCreateModal() { $("create-modal").classList.add("hidden"); }
 
 async function createUser() {
   $("users-err").textContent = "";
   try {
     await api("POST", "/users", {
-      email: $("nu-email").value, name: $("nu-name").value,
-      password: $("nu-password").value || null, role: $("nu-role").value,
+      email: $("nu-email").value, name: $("nu-name").value, role: $("nu-role").value,
+      password: $("nu-password").value, must_reset: true,
     });
-    $("nu-email").value = $("nu-name").value = $("nu-password").value = "";
+    closeCreateModal();
     loadUsers();
   } catch (e) { $("users-err").textContent = e.message; }
 }
 
-async function setRole(id, role) { try { await api("PATCH", `/users/${id}/role`, { role }); loadUsers(); } catch (e) { alert(e.message); } }
-async function block(id) { const reason = prompt("Reason for blocking?"); if (reason === null) return; try { await api("POST", `/users/${id}/block`, { reason }); loadUsers(); } catch (e) { alert(e.message); } }
-async function unblock(id) { try { await api("POST", `/users/${id}/unblock`); loadUsers(); } catch (e) { alert(e.message); } }
-async function del(id) { if (!confirm("Delete this user?")) return; try { await api("DELETE", `/users/${id}`); loadUsers(); } catch (e) { alert(e.message); } }
+async function setRole(id, role) { try { await api("PATCH", `/users/${id}/role`, { role }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
+async function block(id) { const reason = prompt("Reason for blocking?"); if (reason === null) return; try { await api("POST", `/users/${id}/block`, { reason }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
+async function unblock(id) { try { await api("POST", `/users/${id}/unblock`); loadUsers(); } catch (e) { toast(e.message, "error"); } }
+async function del(id) { if (!await confirmDialog("Delete this user?")) return; try { await api("DELETE", `/users/${id}`); loadUsers(); } catch (e) { toast(e.message, "error"); } }
+async function resetPassword(id) {
+  const pw = prompt("New password for this user (they will be forced to reset on next login):");
+  if (!pw) return;
+  try { await api("POST", `/users/${id}/password`, { new_password: pw }); toast("Password reset; user must change it on next login."); }
+  catch (e) { toast(e.message, "error"); }
+}
 
 async function viewKeys(id) {
   const keys = await api("GET", `/users/${id}/keys`);
   const lines = keys.map(k => `${k.prefix}…  scope=${JSON.stringify(k.scope)}  calls=${k.call_count}  ${k.revoked_at ? "[revoked]" : ""}  (id ${k.id})`).join("\n") || "(none)";
-  if (confirm(`Keys for user:\n\n${lines}\n\nIssue a new key?`)) {
+  if (await confirmDialog(`Keys for user:\n\n${lines}\n\nIssue a new key?`)) {
     const scope = prompt("Scope (comma-separated agent names, * for all)", "*");
     if (scope === null) return;
     const r = await api("POST", `/users/${id}/keys`, { scope: scope.split(",").map(s => s.trim()).filter(Boolean) });
@@ -230,6 +960,7 @@ async function loadIm() {
       <td class="muted">${esc((r.user_id||"").slice(0,8))}</td>
       <td><span class="pill ${r.allowed ? "active" : "blocked"}">${r.allowed ? "allowed" : "blocked"}</span></td>
       <td class="actions">
+        <button class="small ghost" onclick="openBindModal(${r.id})">Bind</button>
         ${r.allowed
           ? `<button class="small danger" onclick="imBlock(${r.id})">Block</button>`
           : `<button class="small ghost" onclick="imRestore(${r.id})">Restore</button>`}
@@ -237,12 +968,933 @@ async function loadIm() {
     </tr>`).join("") || `<tr><td colspan="5" class="muted">No IM users.</td></tr>`;
 }
 
-async function imBlock(id) { const reason = prompt("Reason?"); if (reason === null) return; try { await api("POST", `/im-users/${id}/block`, { reason }); loadIm(); } catch (e) { alert(e.message); } }
-async function imRestore(id) { try { await api("POST", `/im-users/${id}/restore`, { reason: "" }); loadIm(); } catch (e) { alert(e.message); } }
+async function imBlock(id) { const reason = prompt("Reason?"); if (reason === null) return; try { await api("POST", `/im-users/${id}/block`, { reason }); loadIm(); } catch (e) { toast(e.message, "error"); } }
+async function imRestore(id) { try { await api("POST", `/im-users/${id}/restore`, { reason: "" }); loadIm(); } catch (e) { toast(e.message, "error"); } }
+
+let BIND_IM_ID = null;
+async function openBindModal(imId) {
+  BIND_IM_ID = imId;
+  $("bind-err").textContent = "";
+  const users = await api("GET", "/users");
+  $("bind-user-select").innerHTML = users
+    .map(u => `<option value="${u.id}">${esc(u.email || u.name || u.id)} · ${esc(u.role)}</option>`)
+    .join("");
+  $("bind-modal").classList.remove("hidden");
+}
+function closeBindModal() { $("bind-modal").classList.add("hidden"); BIND_IM_ID = null; }
+async function doBindIm() {
+  $("bind-err").textContent = "";
+  try {
+    await api("POST", `/im-users/${BIND_IM_ID}/bind`, { user_id: $("bind-user-select").value });
+    closeBindModal();
+    loadIm();
+  } catch (e) { $("bind-err").textContent = e.message; }
+}
+
+// Per-platform credential fields — must match im_connector_config.PLATFORM_CONFIG_KEYS.
+const CONN_FIELDS = {
+  telegram: ["bot_token"],
+  slack: ["bot_token", "signing_secret", "app_token"],
+  whatsapp: ["phone_number_id", "access_token", "verify_token", "business_account_id"],
+};
+
+async function loadConn() {
+  const rows = await api("GET", "/im/connectors");
+  $("conn-body").innerHTML = rows.map(r => {
+    const creds = Object.entries(r.config || {}).map(([k, v]) => `${esc(k)}=${esc(v)}`).join(", ");
+    return `
+      <tr>
+        <td class="muted">${esc(r.owner_id || "")}</td>
+        <td>${esc(r.platform)}</td>
+        <td><span class="pill">${esc(r.status || "")}</span></td>
+        <td><span class="pill ${r.enabled ? "active" : "blocked"}">${r.enabled ? "on" : "off"}</span></td>
+        <td class="muted">${creds || "—"}</td>
+        <td class="actions">
+          ${r.enabled
+            ? `<button class="small danger" onclick="connDisable('${esc(r.platform)}')">Disable</button>`
+            : `<button class="small ghost" onclick="connEnable('${esc(r.platform)}')">Enable</button>`}
+        </td>
+      </tr>`;
+  }).join("") || `<tr><td colspan="6" class="muted">No connectors.</td></tr>`;
+}
+
+function renderConnFields() {
+  const platform = $("conn-platform").value;
+  $("conn-fields").innerHTML = (CONN_FIELDS[platform] || []).map(k =>
+    `<input data-key="${k}" placeholder="${k}" type="password" autocomplete="off">`).join("");
+}
+
+function openConnModal() {
+  $("conn-err").textContent = "";
+  $("conn-platform").value = "telegram";
+  renderConnFields();
+  $("conn-modal").classList.remove("hidden");
+}
+function closeConnModal() { $("conn-modal").classList.add("hidden"); }
+
+async function createConn() {
+  $("conn-err").textContent = "";
+  const platform = $("conn-platform").value;
+  const config = {};
+  for (const inp of $("conn-fields").querySelectorAll("input[data-key]")) {
+    if (inp.value) config[inp.dataset.key] = inp.value;
+  }
+  try {
+    await api("POST", "/im/connectors", { platform, config });
+    closeConnModal();
+    loadConn();
+  } catch (e) { $("conn-err").textContent = e.message; }
+}
+
+async function connEnable(platform) { try { await api("POST", `/im/connectors/${platform}/enable`); loadConn(); } catch (e) { toast(e.message, "error"); } }
+async function connDisable(platform) { try { await api("POST", `/im/connectors/${platform}/disable`); loadConn(); } catch (e) { toast(e.message, "error"); } }
+
+// --- Skills -----------------------------------------------------------------
+
+let SK_EDIT_NAME = null;
+
+async function loadSkills() {
+  const q = $("sk-filter").value.trim();
+  const arch = $("sk-archived").checked;
+  const qs = [];
+  if (q) qs.push("q=" + encodeURIComponent(q));
+  if (arch) qs.push("include_archived=true");
+  const rows = await api("GET", "/skills" + (qs.length ? "?" + qs.join("&") : ""));
+  $("sk-body").innerHTML = rows.map(r => {
+    const drift = r.drift ? ` <span class="pill blocked">drift</span>` : "";
+    const archived = r.status === "archived";
+    return `
+      <tr>
+        <td>${esc(r.name)}</td>
+        <td class="muted">${esc(r.description || "")}</td>
+        <td><span class="pill ${r.status === "active" ? "active" : "blocked"}">${esc(r.status)}</span>${drift}</td>
+        <td><span class="pill">${esc(r.audit_verdict || "—")}</span></td>
+        <td class="muted">${esc(r.source || "")}</td>
+        <td class="muted">${esc((r.enabling_agents || []).join(", ") || "—")}</td>
+        <td class="actions sk-actions">
+          <button class="small ghost" onclick="skObservability('${esc(r.name)}')">Stats</button>
+          ${IS_VIEWER ? "" : `
+          <button class="small ghost" onclick="skBindAgents('${esc(r.name)}')">Agents</button>
+          <button class="small ghost" onclick="skOpenEdit('${esc(r.name)}')">Edit</button>
+          ${r.global_enabled
+            ? `<button class="small danger" onclick="skDisable('${esc(r.name)}')">Disable</button>`
+            : `<button class="small ghost" onclick="skEnable('${esc(r.name)}')">Enable</button>`}
+          ${r.audit_verdict === "rejected" || r.status === "quarantined"
+            ? `<button class="small danger" onclick="skForcePublish('${esc(r.name)}')">Force publish</button>` : ""}
+          ${r.drift
+            ? `<button class="small ghost" onclick="skPromote('${esc(r.name)}')">Promote</button>
+               <button class="small ghost" onclick="skDiscard('${esc(r.name)}')">Discard</button>` : ""}
+          ${archived
+            ? `<button class="small ghost" onclick="skRestore('${esc(r.name)}')">Restore</button>`
+            : `<button class="small danger" onclick="skDelete('${esc(r.name)}')">Delete</button>`}`}
+        </td>
+      </tr>`;
+  }).join("") || `<tr><td colspan="7" class="muted">No skills.</td></tr>`;
+  skProposals();
+}
+
+function skOpenCreate() {
+  SK_EDIT_NAME = null;
+  $("sk-modal-title").textContent = "Create skill";
+  $("sk-err").textContent = "";
+  $("sk-name").value = ""; $("sk-name").disabled = false;
+  $("sk-content").value = ""; $("sk-source").value = "adhoc";
+  $("sk-modal").classList.remove("hidden");
+}
+function skOpenEdit(name) {
+  SK_EDIT_NAME = name;
+  $("sk-modal-title").textContent = "Edit skill: " + name;
+  $("sk-err").textContent = "";
+  $("sk-name").value = name; $("sk-name").disabled = true;
+  $("sk-content").value = ""; $("sk-content").placeholder = "paste full skill markdown to replace";
+  $("sk-modal").classList.remove("hidden");
+}
+function skCloseModal() { $("sk-modal").classList.add("hidden"); }
+
+async function skSave() {
+  if (SK_EDIT_NAME) return skEdit(SK_EDIT_NAME, $("sk-content").value);
+  return skCreate($("sk-name").value, $("sk-content").value, $("sk-source").value);
+}
+async function skCreate(name, content, source) {
+  $("sk-err").textContent = "";
+  try { await api("POST", "/skills", { name, content, source }); skCloseModal(); loadSkills(); }
+  catch (e) { $("sk-err").textContent = e.message; }
+}
+async function skEdit(name, content) {
+  $("sk-err").textContent = "";
+  try { await api("PUT", `/skills/${encodeURIComponent(name)}`, { content }); skCloseModal(); loadSkills(); }
+  catch (e) { $("sk-err").textContent = e.message; }
+}
+async function skEnable(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/enable`); loadSkills(); } catch (e) { toast(e.message, "error"); } }
+async function skDisable(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/disable`); loadSkills(); } catch (e) { toast(e.message, "error"); } }
+async function skReload() { try { await api("POST", "/skills/reload"); loadSkills(); } catch (e) { toast(e.message, "error"); } }
+async function skDelete(name) {
+  if (!await confirmDialog(`Archive (soft-delete) skill ${name}?`)) return;
+  try { await api("DELETE", `/skills/${encodeURIComponent(name)}`); loadSkills(); } catch (e) { toast(e.message, "error"); }
+}
+async function skRestore(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/restore`); loadSkills(); } catch (e) { toast(e.message, "error"); } }
+async function skForcePublish(name) {
+  if (!await confirmDialog(`Force-publish ${name} despite audit verdict?`)) return;
+  try { await api("POST", `/skills/${encodeURIComponent(name)}/force-publish`, null, { "X-Confirm": "true" }); loadSkills(); } catch (e) { toast(e.message, "error"); }
+}
+async function skObservability(name) {
+  try { const r = await api("GET", `/skills/${encodeURIComponent(name)}/observability`); showInfo("Details", JSON.stringify(r, null, 2)); } catch (e) { toast(e.message, "error"); }
+}
+async function skPromote(name) {
+  if (!await confirmDialog(`Promote managed skill ${name} (keep local drift)?`)) return;
+  try { await api("POST", `/skills/${encodeURIComponent(name)}/provenance/promote`, null, { "X-Confirm": "true" }); loadSkills(); } catch (e) { toast(e.message, "error"); }
+}
+async function skDiscard(name) {
+  if (!await confirmDialog(`Discard local drift of ${name} (revert to managed)?`)) return;
+  try { await api("POST", `/skills/${encodeURIComponent(name)}/provenance/discard`); loadSkills(); } catch (e) { toast(e.message, "error"); }
+}
+
+async function skBindAgents(name) {
+  $("sk-agents-err").textContent = "";
+  try {
+    const rows = await api("GET", `/skills/${encodeURIComponent(name)}/agents`);
+    $("sk-agents-list").innerHTML = rows.map(a => {
+      const aid = a.agent_id || a.id || a.name;
+      return `<label class="row" style="gap:8px;">
+        <input type="checkbox" ${a.enabled ? "checked" : ""} onchange="skSetAgent('${esc(name)}','${esc(aid)}', this.checked)">
+        ${esc(aid)}</label>`;
+    }).join("") || `<div class="muted">No agents.</div>`;
+    $("sk-agents-modal").classList.remove("hidden");
+  } catch (e) { $("sk-agents-err").textContent = e.message; }
+}
+function skCloseAgents() { $("sk-agents-modal").classList.add("hidden"); }
+async function skSetAgent(name, agentId, enabled) {
+  try { await api("PUT", `/skills/${encodeURIComponent(name)}/agents/${encodeURIComponent(agentId)}`, { enabled }); }
+  catch (e) { $("sk-agents-err").textContent = e.message; }
+}
+
+async function skProposals() {
+  let rows = [];
+  try { rows = await api("GET", "/skills/proposals"); } catch (e) { return; }
+  $("sk-prop-body").innerHTML = rows.map(p => {
+    const pid = p.proposal_id || p.id;
+    return `
+      <tr>
+        <td class="muted">${esc(pid)}</td>
+        <td>${esc(p.skill_name || p.name || "—")}</td>
+        <td class="muted">${esc(p.summary || "")}</td>
+        <td class="actions">
+          <button class="small ghost" onclick="skProposalDiff('${esc(pid)}')">Diff</button>
+          <button class="small" onclick="skApprove('${esc(pid)}')">Approve</button>
+          <button class="small danger" onclick="skReject('${esc(pid)}')">Reject</button>
+        </td>
+      </tr>`;
+  }).join("") || `<tr><td colspan="4" class="muted">No proposals.</td></tr>`;
+}
+async function skProposalDiff(id) {
+  try { const r = await api("GET", `/skills/proposals/${encodeURIComponent(id)}/diff`); $("sk-prop-diff").textContent = r.diff || JSON.stringify(r, null, 2); }
+  catch (e) { $("sk-prop-diff").textContent = e.message; }
+}
+async function skApprove(id) {
+  if (!await confirmDialog("Approve this proposal?")) return;
+  try { await api("POST", `/skills/proposals/${encodeURIComponent(id)}/approve`, null, { "X-Confirm": "true" }); skProposals(); } catch (e) { toast(e.message, "error"); }
+}
+async function skReject(id) { try { await api("POST", `/skills/proposals/${encodeURIComponent(id)}/reject`); skProposals(); } catch (e) { toast(e.message, "error"); } }
+
+LOADERS.skills = () => loadSkills();
+
+// --- Agents -----------------------------------------------------------------
+
+let ALL_AGENTS = [];
+let AG_BIND_NAME = null;
+
+async function loadAgents() {
+  ALL_AGENTS = await api("GET", "/agents" + ($("ag-archived").checked ? "?include_archived=true" : ""));
+  renderAgents();
+}
+function renderAgents() {
+  const q = $("ag-filter").value.trim().toLowerCase();
+  const rows = ALL_AGENTS.filter(a => !q || (a.agent_name || "").toLowerCase().includes(q));
+  $("ag-body").innerHTML = rows.map(a => {
+    const name = a.agent_name;
+    const archived = a.status === "archived";
+    return `
+      <tr>
+        <td>${esc(name)}</td>
+        <td><span class="pill ${a.status === "enabled" ? "active" : "blocked"}">${esc(a.status)}</span></td>
+        <td class="muted">${esc(a.provenance || "")}</td>
+        <td>${a.drift ? `<span class="pill blocked">drift</span>` : "—"}</td>
+        <td class="actions">
+          <button class="small ghost" onclick="agObservability('${esc(name)}')">Stats</button>
+          <button class="small ghost" onclick="agVersions('${esc(name)}')">Versions</button>
+          ${IS_VIEWER ? "" : `
+          <button class="small ghost" onclick="agOpenBind('${esc(name)}')">Bindings</button>
+          <button class="small ghost" onclick="agOpenClone('${esc(name)}')">Clone</button>
+          ${a.status === "enabled"
+            ? `<button class="small danger" onclick="agDisable('${esc(name)}')">Disable</button>`
+            : `<button class="small ghost" onclick="agEnable('${esc(name)}')">Enable</button>`}
+          ${archived
+            ? `<button class="small ghost" onclick="agRestore('${esc(name)}')">Restore</button>`
+            : `<button class="small danger" onclick="agArchive('${esc(name)}')">Archive</button>`}`}
+        </td>
+      </tr>`;
+  }).join("") || `<tr><td colspan="5" class="muted">No agents.</td></tr>`;
+}
+
+async function agShowTemplates() {
+  try { const r = await api("GET", "/agent-templates"); $("ag-templates-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("ag-templates-out").textContent = e.message; }
+}
+async function agObservability(name) {
+  try { const r = await api("GET", `/agents/${encodeURIComponent(name)}/observability`); showInfo("Details", JSON.stringify(r, null, 2)); }
+  catch (e) { toast(e.message, "error"); }
+}
+async function agEnable(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/enable`); loadAgents(); } catch (e) { toast(e.message, "error"); } }
+async function agDisable(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/disable`); loadAgents(); } catch (e) { toast(e.message, "error"); } }
+async function agArchive(name) {
+  if (!await confirmDialog(`Archive agent ${name}? (must be unbound)`)) return;
+  try { await api("POST", `/agents/${encodeURIComponent(name)}/archive`, null, { "X-Confirm": "true" }); loadAgents(); }
+  catch (e) { toast(e.message, "error"); }
+}
+async function agRestore(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/restore`); loadAgents(); } catch (e) { toast(e.message, "error"); } }
+
+function agOpenClone(name) {
+  $("ag-clone-title").textContent = "Clone agent: " + name;
+  $("ag-clone-err").textContent = "";
+  $("ag-clone-name").value = "";
+  $("ag-clone-modal").dataset.src = name;
+  $("ag-clone-modal").classList.remove("hidden");
+}
+function agCloseClone() { $("ag-clone-modal").classList.add("hidden"); }
+async function agDoClone() { return agClone($("ag-clone-modal").dataset.src, $("ag-clone-name").value); }
+async function agClone(name, newName) {
+  $("ag-clone-err").textContent = "";
+  try { await api("POST", `/agents/${encodeURIComponent(name)}/clone`, { new_name: newName }); agCloseClone(); loadAgents(); }
+  catch (e) { $("ag-clone-err").textContent = e.message; }
+}
+
+async function agVersions(name) {
+  $("ag-versions-title").textContent = "Versions: " + name;
+  $("ag-versions-err").textContent = "";
+  $("ag-versions-modal").dataset.name = name;
+  try {
+    const rows = await api("GET", `/agents/${encodeURIComponent(name)}/versions`);
+    $("ag-versions-body").innerHTML = rows.map(v => `
+      <tr>
+        <td>${esc(v.version)}</td>
+        <td>${v.is_active ? `<span class="pill active">active</span>` : "—"}</td>
+        <td class="muted">${esc(v.created_at || "")}</td>
+        <td class="actions">${(v.is_active || IS_VIEWER) ? "" : `<button class="small ghost" onclick="agActivateVersion('${esc(name)}', ${v.version})">Activate</button>`}</td>
+      </tr>`).join("") || `<tr><td colspan="4" class="muted">No versions.</td></tr>`;
+    $("ag-versions-modal").classList.remove("hidden");
+  } catch (e) { $("ag-versions-err").textContent = e.message; $("ag-versions-modal").classList.remove("hidden"); }
+}
+function agCloseVersions() { $("ag-versions-modal").classList.add("hidden"); }
+async function agActivateVersion(name, version) {
+  try { await api("POST", `/agents/${encodeURIComponent(name)}/versions/${version}/activate`); agVersions(name); loadAgents(); }
+  catch (e) { $("ag-versions-err").textContent = e.message; }
+}
+
+function agOpenBind(name) {
+  AG_BIND_NAME = name;
+  $("ag-bind-title").textContent = "Bindings: " + name;
+  $("ag-bind-err").textContent = "";
+  for (const id of ["ag-bind-user", "ag-bind-platform", "ag-bind-channel"]) $(id).value = "";
+  $("ag-bind-modal").classList.remove("hidden");
+}
+function agCloseBind() { $("ag-bind-modal").classList.add("hidden"); }
+async function agBindUser() {
+  const uid = $("ag-bind-user").value.trim(); if (!uid) return;
+  try { await api("POST", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/users/${encodeURIComponent(uid)}`); $("ag-bind-err").textContent = "user bound"; }
+  catch (e) { $("ag-bind-err").textContent = e.message; }
+}
+async function agUnbindUser() {
+  const uid = $("ag-bind-user").value.trim(); if (!uid) return;
+  try { await api("DELETE", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/users/${encodeURIComponent(uid)}`); $("ag-bind-err").textContent = "user unbound"; }
+  catch (e) { $("ag-bind-err").textContent = e.message; }
+}
+async function agBindChannel() {
+  const pf = $("ag-bind-platform").value.trim(), ch = $("ag-bind-channel").value.trim(); if (!pf || !ch) return;
+  try { await api("POST", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); $("ag-bind-err").textContent = "channel bound"; }
+  catch (e) { $("ag-bind-err").textContent = e.message; }
+}
+async function agUnbindChannel() {
+  const pf = $("ag-bind-platform").value.trim(), ch = $("ag-bind-channel").value.trim(); if (!pf || !ch) return;
+  try { await api("DELETE", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); $("ag-bind-err").textContent = "channel unbound"; }
+  catch (e) { $("ag-bind-err").textContent = e.message; }
+}
+
+LOADERS.agents = () => loadAgents();
+
+// --- Model Providers --------------------------------------------------------
+
+let PV_EDIT_ID = null;
+let PV_PRICING_ID = null;
+
+async function loadProviders() {
+  $("pv-body").innerHTML = loadingRow(6);
+  let rows;
+  try { rows = await api("GET", "/providers"); }
+  catch (e) { $("pv-body").innerHTML = emptyRow(6, e.message); return; }
+  $("pv-body").innerHTML = rows.map(p => `
+      <tr>
+        <td>${esc(p.id)}</td>
+        <td class="muted">${esc(p.base_url || "")}</td>
+        <td>${esc(p.model || "")}</td>
+        <td class="muted">${p.api_key_set ? esc(p.api_key || "****") : "—"}</td>
+        <td class="muted">${esc(p.input_price_per_1k != null ? p.input_price_per_1k : "—")} / ${esc(p.output_price_per_1k != null ? p.output_price_per_1k : "—")}</td>
+        <td class="actions">
+          <button class="small ghost" onclick="pvObservability('${esc(p.id)}')">Stats</button>
+          ${IS_VIEWER ? "" : `
+          <button class="small ghost" onclick="pvTest('${esc(p.id)}')">Test</button>
+          <button class="small ghost" onclick="pvOpenPricing('${esc(p.id)}')">Pricing</button>
+          <button class="small ghost" onclick="pvOpenEdit('${esc(p.id)}')">Edit</button>
+          <button class="small danger" onclick="pvDelete('${esc(p.id)}')">Delete</button>`}
+        </td>
+      </tr>`).join("") || emptyRow(6, "No providers.");
+  pvRoutes();
+}
+
+function pvOpenCreate() {
+  PV_EDIT_ID = null;
+  $("pv-modal-title").textContent = "Add provider";
+  $("pv-err").textContent = "";
+  for (const id of ["pv-id", "pv-base-url", "pv-model", "pv-api-key", "pv-max-tokens", "pv-temperature"]) $(id).value = "";
+  $("pv-id").disabled = false;
+  $("pv-modal").classList.remove("hidden");
+}
+async function pvOpenEdit(id) {
+  PV_EDIT_ID = id;
+  $("pv-modal-title").textContent = "Edit provider: " + id;
+  $("pv-err").textContent = "";
+  const rows = await api("GET", "/providers");
+  const p = rows.find(r => r.id === id) || {};
+  $("pv-id").value = id; $("pv-id").disabled = true;
+  $("pv-base-url").value = p.base_url || "";
+  $("pv-model").value = p.model || "";
+  $("pv-api-key").value = "";  // never prefill secret
+  $("pv-max-tokens").value = p.max_tokens != null ? p.max_tokens : "";
+  $("pv-temperature").value = p.temperature != null ? p.temperature : "";
+  $("pv-modal").classList.remove("hidden");
+}
+function pvCloseModal() { $("pv-modal").classList.add("hidden"); }
+
+function pvFormBody() {
+  const body = {
+    base_url: $("pv-base-url").value,
+    model: $("pv-model").value,
+  };
+  if ($("pv-api-key").value) body.api_key = $("pv-api-key").value;
+  if ($("pv-max-tokens").value) body.max_tokens = parseInt($("pv-max-tokens").value, 10);
+  if ($("pv-temperature").value) body.temperature = parseFloat($("pv-temperature").value);
+  return body;
+}
+async function pvSave() {
+  if (PV_EDIT_ID) return pvEdit(PV_EDIT_ID, pvFormBody());
+  return pvCreate($("pv-id").value, pvFormBody());
+}
+async function pvCreate(id, body) {
+  $("pv-err").textContent = "";
+  try { await api("POST", "/providers", { id, ...body }); pvCloseModal(); loadProviders(); }
+  catch (e) { $("pv-err").textContent = e.message; }
+}
+async function pvEdit(id, body) {
+  $("pv-err").textContent = "";
+  try { await api("PUT", `/providers/${encodeURIComponent(id)}`, body); pvCloseModal(); loadProviders(); }
+  catch (e) { $("pv-err").textContent = e.message; }
+}
+async function pvDelete(id) {
+  if (!await confirmDialog(`Delete provider ${id}?`)) return;
+  try { await api("DELETE", `/providers/${encodeURIComponent(id)}`); loadProviders(); } catch (e) { toast(e.message, "error"); }
+}
+async function pvTest(id) {
+  try { const r = await api("POST", `/providers/${encodeURIComponent(id)}/connectivity-test`); showInfo("Details", JSON.stringify(r, null, 2)); }
+  catch (e) { toast(e.message, "error"); }
+}
+async function pvObservability(id) {
+  try { const r = await api("GET", `/providers/${encodeURIComponent(id)}/observability`); showInfo("Details", JSON.stringify(r, null, 2)); }
+  catch (e) { toast(e.message, "error"); }
+}
+function pvOpenPricing(id) {
+  PV_PRICING_ID = id;
+  $("pv-pricing-title").textContent = "Set pricing: " + id;
+  $("pv-pricing-err").textContent = "";
+  $("pv-price-in").value = ""; $("pv-price-out").value = "";
+  $("pv-pricing-modal").classList.remove("hidden");
+}
+function pvClosePricing() { $("pv-pricing-modal").classList.add("hidden"); }
+async function pvSavePricing() { return pvPricing(PV_PRICING_ID); }
+async function pvPricing(id) {
+  $("pv-pricing-err").textContent = "";
+  const body = {};
+  if ($("pv-price-in").value) body.input_price_per_1k = parseFloat($("pv-price-in").value);
+  if ($("pv-price-out").value) body.output_price_per_1k = parseFloat($("pv-price-out").value);
+  try { await api("PUT", `/providers/${encodeURIComponent(id)}/pricing`, body); pvClosePricing(); loadProviders(); }
+  catch (e) { $("pv-pricing-err").textContent = e.message; }
+}
+
+async function pvRoutes() {
+  let routes = {};
+  try { routes = await api("GET", "/providers/routes"); } catch (e) { return; }
+  $("pv-routes-body").innerHTML = Object.entries(routes).map(([tt, chain]) => `
+      <tr>
+        <td>${esc(tt)}</td>
+        <td class="muted">${esc((chain || []).join(" → ") || "—")}</td>
+        <td class="actions">
+          <button class="small ghost" onclick="pvPreviewRoute('${esc(tt)}')">Preview</button>
+        </td>
+      </tr>`).join("") || `<tr><td colspan="3" class="muted">No routes configured.</td></tr>`;
+}
+async function pvSetRoute() {
+  const tt = $("pv-route-tt").value.trim();
+  const ids = $("pv-route-ids").value.split(",").map(s => s.trim()).filter(Boolean);
+  if (!tt) { $("pv-route-out").textContent = "task_type required"; return; }
+  try { await api("PUT", `/providers/routes/${encodeURIComponent(tt)}`, { provider_ids: ids }); pvRoutes(); $("pv-route-out").textContent = "saved"; }
+  catch (e) { $("pv-route-out").textContent = e.message; }
+}
+async function pvPreviewRoute(tt) {
+  tt = tt || $("pv-route-tt").value.trim();
+  if (!tt) { $("pv-route-out").textContent = "task_type required"; return; }
+  try { const r = await api("GET", `/providers/routes/${encodeURIComponent(tt)}/preview`); $("pv-route-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("pv-route-out").textContent = e.message; }
+}
+async function pvHealth() {
+  try { const r = await api("GET", "/providers/health"); $("pv-health-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("pv-health-out").textContent = e.message; }
+}
+
+LOADERS.providers = () => loadProviders();
+
+// --- Statistics -------------------------------------------------------------
+
+async function stPerUser() {
+  const agent = $("st-agent").value.trim();
+  const sort = $("st-sort").value;
+  const qs = [`sort_by=${encodeURIComponent(sort)}`];
+  if (agent) qs.push(`agent_id=${encodeURIComponent(agent)}`);
+  try {
+    const rows = await api("GET", "/stats/per-user?" + qs.join("&"));
+    $("st-body").innerHTML = rows.map(r => `
+      <tr>
+        <td>${esc(r.user_id)}</td>
+        <td>${esc(r.calls != null ? r.calls : "—")}</td>
+        <td>${esc(r.total_tokens != null ? r.total_tokens : "—")}</td>
+        <td>${esc(r.cost != null ? r.cost : "—")}</td>
+      </tr>`).join("") || `<tr><td colspan="4" class="muted">No data.</td></tr>`;
+  } catch (e) { $("st-body").innerHTML = `<tr><td colspan="4" class="err">${esc(e.message)}</td></tr>`; }
+}
+async function stOverview() {
+  const agent = $("st-agent").value.trim(); if (!agent) { $("st-out").textContent = "agent_id required"; return; }
+  try { const r = await api("GET", `/stats/agents/${encodeURIComponent(agent)}/overview?window=${encodeURIComponent($("st-window").value)}`); $("st-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("st-out").textContent = e.message; }
+}
+async function stTools() {
+  const agent = $("st-agent").value.trim(); if (!agent) { $("st-out").textContent = "agent_id required"; return; }
+  try { const r = await api("GET", `/stats/agents/${encodeURIComponent(agent)}/tools`); $("st-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("st-out").textContent = e.message; }
+}
+async function stCompare() {
+  const ids = $("st-compare").value.split(",").map(s => s.trim()).filter(Boolean).join(",");
+  if (!ids) { $("st-out").textContent = "agent ids required"; return; }
+  try { const r = await api("GET", `/stats/compare?agents=${encodeURIComponent(ids)}`); $("st-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("st-out").textContent = e.message; }
+}
+async function stUserRequests() {
+  const uid = $("st-user").value.trim(); if (!uid) { $("st-trace-out").textContent = "user_id required"; return; }
+  try { const r = await api("GET", `/stats/users/${encodeURIComponent(uid)}/requests`); $("st-trace-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("st-trace-out").textContent = e.message; }
+}
+async function stRequest() {
+  const rid = $("st-request").value.trim(); if (!rid) { $("st-trace-out").textContent = "request_id required"; return; }
+  try { const r = await api("GET", `/stats/requests/${encodeURIComponent(rid)}`); $("st-trace-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("st-trace-out").textContent = e.message; }
+}
+async function stTrace() {
+  const sid = $("st-session").value.trim(), uid = $("st-trace-user").value.trim();
+  if (!sid || !uid) { $("st-trace-out").textContent = "session_id and user_id required"; return; }
+  try { const r = await api("GET", `/stats/sessions/${encodeURIComponent(sid)}/trace?user_id=${encodeURIComponent(uid)}`); $("st-trace-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("st-trace-out").textContent = e.message; }
+}
+async function stExport() {
+  const view = $("st-export-view").value;
+  const agent = $("st-agent").value.trim();
+  const qs = [`view=${encodeURIComponent(view)}`];
+  if (agent) qs.push(`agent_id=${encodeURIComponent(agent)}`);
+  try {
+    const res = await fetch("/admin/stats/export?" + qs.join("&"), { method: "POST", headers: { "Authorization": "Session " + TOKEN } });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = `stats-${view}.csv`; a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) { $("st-out").textContent = e.message; }
+}
+async function stReport() {
+  const agent = $("st-agent").value.trim(); if (!agent) { $("st-out").textContent = "agent_id required"; return; }
+  const body = { period: $("st-report-period").value, agent_id: agent, recipient: $("st-report-to").value };
+  try { const r = await api("POST", "/stats/reports", body); $("st-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("st-out").textContent = e.message; }
+}
+
+LOADERS.stats = () => stPerUser();
+
+// --- Monitoring + Alerts ----------------------------------------------------
+
+async function monMetrics() {
+  const metric = $("mon-metric").value.trim(), target = $("mon-target").value.trim();
+  if (!metric || !target) { $("mon-metrics-out").textContent = "metric and target required"; return; }
+  const qs = [`metric=${encodeURIComponent(metric)}`, `target=${encodeURIComponent(target)}`];
+  if ($("mon-since").value.trim()) qs.push(`since=${encodeURIComponent($("mon-since").value.trim())}`);
+  try { const r = await api("GET", "/monitoring/metrics?" + qs.join("&")); $("mon-metrics-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("mon-metrics-out").textContent = e.message; }
+}
+
+async function monRules() {
+  try {
+    const rows = await api("GET", "/alerts/rules");
+    $("mon-rules-body").innerHTML = rows.map(r => `
+      <tr>
+        <td>${esc(r.metric)}</td>
+        <td class="muted">${esc(r.comparator)} ${esc(r.threshold)}</td>
+        <td><span class="pill ${r.severity === "critical" ? "blocked" : ""}">${esc(r.severity)}</span></td>
+        <td class="muted">${esc(r.target || "—")}</td>
+        <td><span class="pill ${r.enabled ? "active" : "blocked"}">${r.enabled ? "on" : "off"}</span></td>
+        <td class="actions">${IS_VIEWER ? "" : `
+          ${r.enabled ? `<button class="small ghost" onclick="monDisableRule('${esc(r.id)}')">Disable</button>` : ""}
+          <button class="small danger" onclick="monDeleteRule('${esc(r.id)}')">Delete</button>`}
+        </td>
+      </tr>`).join("") || `<tr><td colspan="6" class="muted">No rules.</td></tr>`;
+  } catch (e) { $("mon-rules-body").innerHTML = `<tr><td colspan="6" class="err">${esc(e.message)}</td></tr>`; }
+}
+function monOpenRule() {
+  $("mon-rule-err").textContent = "";
+  for (const id of ["mon-rule-metric", "mon-rule-threshold", "mon-rule-target", "mon-rule-for", "mon-rule-channels"]) $(id).value = "";
+  $("mon-rule-modal").classList.remove("hidden");
+}
+function monCloseRule() { $("mon-rule-modal").classList.add("hidden"); }
+async function monCreateRule() {
+  $("mon-rule-err").textContent = "";
+  const body = {
+    metric: $("mon-rule-metric").value.trim(),
+    comparator: $("mon-rule-comp").value,
+    threshold: parseFloat($("mon-rule-threshold").value),
+    severity: $("mon-rule-severity").value,
+    for_seconds: parseInt($("mon-rule-for").value || "0", 10),
+  };
+  if ($("mon-rule-target").value.trim()) body.target = $("mon-rule-target").value.trim();
+  const ch = $("mon-rule-channels").value.split(",").map(s => s.trim()).filter(Boolean);
+  if (ch.length) body.channels = ch;
+  try { await api("POST", "/alerts/rules", body); monCloseRule(); monRules(); }
+  catch (e) { $("mon-rule-err").textContent = e.message; }
+}
+async function monDisableRule(id) {
+  try { await api("POST", `/alerts/rules/${encodeURIComponent(id)}/disable`); monRules(); } catch (e) { toast(e.message, "error"); }
+}
+async function monDeleteRule(id) {
+  if (!await confirmDialog("Delete this alert rule?")) return;
+  try { await api("DELETE", `/alerts/rules/${encodeURIComponent(id)}`); monRules(); } catch (e) { toast(e.message, "error"); }
+}
+
+async function monAlerts() {
+  const status = $("mon-alert-status").value;
+  try {
+    const rows = await api("GET", "/alerts" + (status ? `?status=${encodeURIComponent(status)}` : ""));
+    $("mon-alerts-body").innerHTML = rows.map(a => `
+      <tr>
+        <td><span class="pill ${a.severity === "critical" ? "blocked" : ""}">${esc(a.severity)}</span></td>
+        <td>${esc(a.metric || "")}</td>
+        <td class="muted">${esc(a.target || "—")}</td>
+        <td>${esc(a.status || "")}</td>
+        <td class="actions">${IS_VIEWER ? "" : `
+          <button class="small ghost" onclick="monAck('${esc(a.id)}')">Ack</button>
+          <button class="small ghost" onclick="monSilence('${esc(a.id)}')">Silence</button>`}
+        </td>
+      </tr>`).join("") || `<tr><td colspan="5" class="muted">No alerts.</td></tr>`;
+  } catch (e) { $("mon-alerts-body").innerHTML = `<tr><td colspan="5" class="err">${esc(e.message)}</td></tr>`; }
+}
+async function monAck(id) {
+  const assignee = prompt("Assignee (optional)") || null;
+  try { await api("POST", `/alerts/${encodeURIComponent(id)}/ack`, { assignee }); monAlerts(); } catch (e) { toast(e.message, "error"); }
+}
+async function monSilence(id) {
+  if (!await confirmDialog("Silence this alert?")) return;
+  try { await api("POST", `/alerts/${encodeURIComponent(id)}/silence`); monAlerts(); } catch (e) { toast(e.message, "error"); }
+}
+async function monMaintenance() {
+  const body = { start_ts: $("mon-maint-start").value.trim(), end_ts: $("mon-maint-end").value.trim() };
+  if ($("mon-maint-target").value.trim()) body.target = $("mon-maint-target").value.trim();
+  if (!body.start_ts || !body.end_ts) { toast("start_ts and end_ts required"); return; }
+  try { await api("POST", "/alerts/maintenance", body); toast("maintenance window added"); } catch (e) { toast(e.message, "error"); }
+}
+
+LOADERS.monitoring = () => { monRules(); monAlerts(); };
+
+// --- Sessions + Chat playground ---------------------------------------------
+
+let SESS_PG_ID = null;
+
+async function loadSessions() {
+  const qs = [];
+  if ($("sess-status").value) qs.push(`status=${encodeURIComponent($("sess-status").value)}`);
+  if ($("sess-user").value.trim()) qs.push(`user_id=${encodeURIComponent($("sess-user").value.trim())}`);
+  if ($("sess-agent").value.trim()) qs.push(`agent_name=${encodeURIComponent($("sess-agent").value.trim())}`);
+  const rows = await api("GET", "/sessions" + (qs.length ? "?" + qs.join("&") : ""));
+  $("sess-body").innerHTML = rows.map(s => {
+    const sid = s.session_id;
+    return `
+      <tr>
+        <td><input type="checkbox" class="sess-pick" value="${esc(sid)}"></td>
+        <td><code>${esc(sid)}</code></td>
+        <td class="muted">${esc(s.origin || "")}</td>
+        <td>${esc(s.agent_name || "—")}</td>
+        <td><span class="pill ${s.status === "ended" ? "blocked" : "active"}">${esc(s.status || "active")}</span></td>
+        <td class="actions">${IS_VIEWER ? "" : `
+          <button class="small ghost" onclick="sessTakeover('${esc(sid)}')">Takeover</button>
+          <button class="small ghost" onclick="sessRelease('${esc(sid)}')">Release</button>
+          <button class="small ghost" onclick="sessInject('${esc(sid)}')">Inject</button>
+          <button class="small ghost" onclick="sessReset('${esc(sid)}')">Reset</button>
+          <button class="small danger" onclick="sessClear('${esc(sid)}')">Clear</button>
+          <button class="small danger" onclick="sessForceEnd('${esc(sid)}')">Force end</button>`}
+        </td>
+      </tr>`;
+  }).join("") || `<tr><td colspan="6" class="muted">No sessions.</td></tr>`;
+}
+function sessToggleAll(checked) { for (const c of document.querySelectorAll(".sess-pick")) c.checked = checked; }
+function sessPicked() { return [...document.querySelectorAll(".sess-pick:checked")].map(c => c.value); }
+
+async function sessTakeover(id) { try { await api("POST", `/sessions/${encodeURIComponent(id)}/takeover`); loadSessions(); } catch (e) { toast(e.message, "error"); } }
+async function sessRelease(id) { try { await api("POST", `/sessions/${encodeURIComponent(id)}/release`); loadSessions(); } catch (e) { toast(e.message, "error"); } }
+async function sessInject(id) {
+  const content = prompt("Inject message content:"); if (!content) return;
+  try { await api("POST", `/sessions/${encodeURIComponent(id)}/inject`, { content, role: "human_agent" }); } catch (e) { toast(e.message, "error"); }
+}
+async function sessForceEnd(id) {
+  if (!await confirmDialog(`Force-end session ${id}? This cannot be undone.`)) return;
+  try { await api("POST", `/sessions/${encodeURIComponent(id)}/force-end`, null, { "X-Confirm": "true" }); loadSessions(); } catch (e) { toast(e.message, "error"); }
+}
+async function sessClear(id) {
+  if (!await confirmDialog(`Clear transcript of ${id}? This cannot be undone.`)) return;
+  try { await api("POST", `/sessions/${encodeURIComponent(id)}/clear`, null, { "X-Confirm": "true" }); loadSessions(); } catch (e) { toast(e.message, "error"); }
+}
+async function sessReset(id) {
+  const keep = prompt("Keep how many recent turns?", "2"); if (keep == null) return;
+  try { await api("POST", `/sessions/${encodeURIComponent(id)}/reset`, { keep_turns: parseInt(keep, 10) }, { "X-Confirm": "true" }); loadSessions(); } catch (e) { toast(e.message, "error"); }
+}
+async function sessBulk(action) {
+  const ids = sessPicked(); if (!ids.length) { toast("select sessions first"); return; }
+  if (!await confirmDialog(`Bulk ${action} ${ids.length} session(s)? This cannot be undone.`)) return;
+  try { await api("POST", "/sessions/bulk", { session_ids: ids, action }, { "X-Confirm": "true" }); loadSessions(); } catch (e) { toast(e.message, "error"); }
+}
+
+async function sessStart() {
+  const agent = $("sess-pg-agent").value.trim(); if (!agent) { toast("agent required"); return; }
+  try {
+    const r = await api("POST", "/chat/start", { agent_name: agent });
+    SESS_PG_ID = r.session_id;
+    $("sess-pg-id").textContent = SESS_PG_ID;
+    $("sess-pg-out").textContent = "";
+    $("sess-playground").classList.remove("hidden");
+  } catch (e) { toast(e.message, "error"); }
+}
+async function sessMessage() {
+  if (!SESS_PG_ID) return;
+  try { const r = await api("POST", `/chat/${encodeURIComponent(SESS_PG_ID)}/message`, { message: $("sess-pg-msg").value }); $("sess-pg-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("sess-pg-out").textContent = e.message; }
+}
+async function sessPin() {
+  if (!SESS_PG_ID) return;
+  const note = prompt("Pin note (optional):") || null;
+  try { await api("POST", `/chat/${encodeURIComponent(SESS_PG_ID)}/pin`, { note }); $("sess-pg-out").textContent = "pinned"; }
+  catch (e) { $("sess-pg-out").textContent = e.message; }
+}
+async function sessExport() {
+  if (!SESS_PG_ID) return;
+  try {
+    const res = await fetch(`/admin/chat/${encodeURIComponent(SESS_PG_ID)}/export?fmt=markdown`, { headers: { "Authorization": "Session " + TOKEN } });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = `${SESS_PG_ID}.md`; a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) { $("sess-pg-out").textContent = e.message; }
+}
+
+LOADERS.sessions = () => loadSessions();
+
+// --- OAuth Connectors + MCP -------------------------------------------------
+
+let OC_EDIT_ID = null;
+
+async function ocConnectors() {
+  const f = $("oc-agent-filter").value.trim();
+  const rows = await api("GET", f ? `/connectors?agent_id=${encodeURIComponent(f)}` : "/connectors");
+  $("oc-body").innerHTML = rows.map(c => `
+      <tr>
+        <td>${esc(c.id)}</td>
+        <td class="muted">${c.agent_id == null ? "global" : esc(String(c.agent_id))}</td>
+        <td>${esc(c.display_name || "")}</td>
+        <td class="muted">${esc(c.protocol || "")}</td>
+        <td><span class="pill ${c.enabled ? "active" : "blocked"}">${c.enabled ? "on" : "off"}</span></td>
+        <td class="actions">
+          <button class="small ghost" onclick="ocLifecycle('${esc(c.id)}')">Lifecycle</button>
+          ${IS_VIEWER ? "" : `<button class="small ghost" onclick="ocOpenEdit('${esc(c.id)}')">Edit</button>`}
+        </td>
+      </tr>`).join("") || `<tr><td colspan="6" class="muted">No connectors.</td></tr>`;
+}
+function ocOpenCreate() {
+  OC_EDIT_ID = null;
+  $("oc-modal-title").textContent = "Add OAuth connector";
+  $("oc-err").textContent = "";
+  for (const id of ["oc-id", "oc-name", "oc-auth-url", "oc-token-url", "oc-client-id", "oc-client-secret", "oc-scopes"]) $(id).value = "";
+  $("oc-id").disabled = false; $("oc-enabled").checked = true;
+  $("oc-modal").classList.remove("hidden");
+}
+async function ocOpenEdit(id) {
+  OC_EDIT_ID = id;
+  $("oc-modal-title").textContent = "Edit connector: " + id;
+  $("oc-err").textContent = "";
+  const rows = await api("GET", "/connectors");
+  const c = rows.find(r => r.id === id) || {};
+  const cfg = c.oauth_config || {};
+  $("oc-id").value = id; $("oc-id").disabled = true;
+  $("oc-name").value = c.display_name || "";
+  $("oc-auth-url").value = cfg.authorization_url || "";
+  $("oc-token-url").value = cfg.token_url || "";
+  $("oc-client-id").value = cfg.client_id || "";
+  $("oc-client-secret").value = "";  // never prefill secret
+  $("oc-scopes").value = (cfg.scopes || []).join ? (cfg.scopes || []).join(" ") : (cfg.scopes || "");
+  $("oc-enabled").checked = c.enabled !== false;
+  $("oc-modal").classList.remove("hidden");
+}
+function ocCloseModal() { $("oc-modal").classList.add("hidden"); }
+function ocOauthConfig() {
+  const cfg = {
+    authorization_url: $("oc-auth-url").value.trim(),
+    token_url: $("oc-token-url").value.trim(),
+    client_id: $("oc-client-id").value.trim(),
+  };
+  if ($("oc-client-secret").value) cfg.client_secret = $("oc-client-secret").value;
+  const scopes = $("oc-scopes").value.split(/[\s,]+/).filter(Boolean);
+  if (scopes.length) cfg.scopes = scopes;
+  return cfg;
+}
+async function ocSave() {
+  if (OC_EDIT_ID) return ocEdit(OC_EDIT_ID);
+  return ocCreate($("oc-id").value.trim());
+}
+async function ocCreate(id) {
+  $("oc-err").textContent = "";
+  const body = { id, display_name: $("oc-name").value.trim(), protocol: "oauth2", oauth_config: ocOauthConfig(), enabled: $("oc-enabled").checked };
+  try { await api("POST", "/connectors", body); ocCloseModal(); ocConnectors(); }
+  catch (e) { $("oc-err").textContent = e.message; }
+}
+async function ocEdit(id) {
+  $("oc-err").textContent = "";
+  const body = { display_name: $("oc-name").value.trim(), oauth_config: ocOauthConfig(), enabled: $("oc-enabled").checked };
+  try { await api("PUT", `/connectors/${encodeURIComponent(id)}`, body); ocCloseModal(); ocConnectors(); }
+  catch (e) { $("oc-err").textContent = e.message; }
+}
+async function ocLifecycle(id) {
+  try { const r = await api("GET", `/connectors/${encodeURIComponent(id)}/lifecycle`); $("oc-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("oc-out").textContent = e.message; }
+}
+async function ocGrants() {
+  try {
+    const r = await api("GET", "/connectors/grants");
+    const grants = r.grants || r || [];
+    $("oc-grants-body").innerHTML = grants.map(g => `
+      <tr>
+        <td>${esc(g.user_id)}</td>
+        <td>${esc(g.connector_id)}</td>
+        <td class="muted">${esc(g.status || "granted")}</td>
+        <td class="actions">${IS_VIEWER ? "" : `<button class="small danger" onclick="ocRevoke('${esc(g.user_id)}','${esc(g.connector_id)}')">Revoke</button>`}</td>
+      </tr>`).join("") || `<tr><td colspan="4" class="muted">No grants.</td></tr>`;
+    $("oc-out").textContent = r.consent_hint || "";
+  } catch (e) { $("oc-grants-body").innerHTML = `<tr><td colspan="4" class="err">${esc(e.message)}</td></tr>`; }
+}
+async function ocRevoke(userId, connectorId) {
+  if (!await confirmDialog(`Revoke ${connectorId} grant for ${userId}?`)) return;
+  try { await api("POST", `/connectors/grants/${encodeURIComponent(userId)}/${encodeURIComponent(connectorId)}/revoke`, null, { "X-Confirm": "true" }); ocGrants(); }
+  catch (e) { toast(e.message, "error"); }
+}
+async function ocOffboarding() {
+  const uid = $("oc-offboard-user").value.trim(); if (!uid) { $("oc-out").textContent = "user_id required"; return; }
+  try { const r = await api("GET", `/connectors/offboarding/${encodeURIComponent(uid)}`); $("oc-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("oc-out").textContent = e.message; }
+}
+
+async function mcpDoctor() {
+  try { const r = await api("GET", "/mcp/doctor"); $("mcp-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("mcp-out").textContent = e.message; }
+}
+async function mcpServers() {
+  try {
+    const f = $("mcp-agent-filter").value.trim();
+    const rows = await api("GET", f ? `/mcp/servers?agent_id=${encodeURIComponent(f)}` : "/mcp/servers");
+    $("mcp-body").innerHTML = rows.map(s => `
+      <tr>
+        <td>${esc(s.id || s.server_id || s.name)}</td>
+        <td class="muted">${s.agent_id == null ? "global" : esc(String(s.agent_id))}</td>
+        <td><span class="pill ${s.connected || s.status === "up" ? "active" : "blocked"}">${esc(s.status || (s.connected ? "up" : "down"))}</span></td>
+        <td class="actions"><button class="small ghost" onclick="mcpTools('${esc(s.id || s.server_id || s.name)}')">Tools</button></td>
+        <td class="actions">${IS_VIEWER ? "" : `<button class="small ghost" onclick="mcpReconnect('${esc(s.id || s.server_id || s.name)}')">Reconnect</button>`}</td>
+      </tr>`).join("") || `<tr><td colspan="5" class="muted">No MCP servers.</td></tr>`;
+  } catch (e) { $("mcp-body").innerHTML = `<tr><td colspan="5" class="err">${esc(e.message)}</td></tr>`; }
+}
+async function mcpTools(id) {
+  try { const r = await api("GET", `/mcp/servers/${encodeURIComponent(id)}/tools`); $("mcp-out").textContent = JSON.stringify(r, null, 2); }
+  catch (e) { $("mcp-out").textContent = e.message; }
+}
+async function mcpReconnect(id) {
+  try { const r = await api("POST", `/mcp/servers/${encodeURIComponent(id)}/reconnect`); $("mcp-out").textContent = JSON.stringify(r, null, 2); mcpServers(); }
+  catch (e) { $("mcp-out").textContent = e.message; }
+}
+
+LOADERS.oauth = () => { ocConnectors(); ocGrants(); mcpServers(); };
+
+async function loadKb() {
+  const kbs = await api("GET", "/kb");
+  $("kb-body").innerHTML = kbs.map(k => `
+    <tr>
+      <td>${esc(k.kb_id)}</td>
+      <td class="muted">${esc(k.description || "")}</td>
+      <td>${esc(k.doc_count != null ? k.doc_count : "—")}</td>
+      <td class="muted">${esc((k.bound_agents || []).join(", ") || "—")}</td>
+      <td class="actions">
+        <button class="small danger" onclick="archiveKb('${esc(k.kb_id)}')">Archive</button>
+      </td>
+    </tr>`).join("") || `<tr><td colspan="5" class="muted">No knowledge bases.</td></tr>`;
+}
+
+async function createKb() {
+  $("kb-err").textContent = "";
+  try {
+    await api("POST", "/kb", { kb_id: $("nkb-id").value, description: $("nkb-desc").value });
+    $("nkb-id").value = $("nkb-desc").value = "";
+    loadKb();
+  } catch (e) { $("kb-err").textContent = e.message; }
+}
+
+async function archiveKb(id) {
+  if (!await confirmDialog(`Archive KB ${id}?`)) return;
+  try {
+    await fetch("/admin/kb/" + encodeURIComponent(id), {
+      method: "DELETE",
+      headers: { "Authorization": "Session " + TOKEN, "X-Confirm": "true" },
+    }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || ("HTTP " + r.status)); });
+    loadKb();
+  } catch (e) { toast(typeof e.message === "string" ? e.message : JSON.stringify(e.message)); }
+}
+
+async function kbSearch() {
+  const ids = $("kb-q-ids").value.split(",").map(s => s.trim()).filter(Boolean);
+  try {
+    const r = await api("POST", "/kb/search", { query: $("kb-q").value, kb_ids: ids, mode: $("kb-q-mode").value });
+    $("kb-search-out").textContent = JSON.stringify(r.results, null, 2);
+  } catch (e) { $("kb-search-out").textContent = e.message; }
+}
 
 async function loadAudit() {
   const action = $("audit-action").value.trim();
-  const rows = await api("GET", "/audit" + (action ? `?action=${encodeURIComponent(action)}` : ""));
+  $("audit-body").innerHTML = loadingRow(5);
+  let rows;
+  try { rows = await api("GET", "/audit" + (action ? `?action=${encodeURIComponent(action)}` : "")); }
+  catch (e) { $("audit-body").innerHTML = emptyRow(5, e.message); return; }
   $("audit-body").innerHTML = rows.map(r => `
     <tr>
       <td class="muted">${esc(r.created_at)}</td>
@@ -250,10 +1902,16 @@ async function loadAudit() {
       <td>${esc(r.action)}</td>
       <td>${esc(r.target_type || "")} ${esc((r.target_id||"").slice(0,12))}</td>
       <td><code>${esc(JSON.stringify(r.detail))}</code></td>
-    </tr>`).join("") || `<tr><td colspan="5" class="muted">No audit entries.</td></tr>`;
+    </tr>`).join("") || emptyRow(5, "No audit entries.");
 }
 
-show("login-view");
+async function boot() {
+  if (!TOKEN) { show("login-view"); return; }
+  // Restore a persisted session on reload; fall back to login if the token is stale/expired.
+  try { await enterApp(); }
+  catch (e) { setToken(null); show("login-view"); }
+}
+boot();
 </script>
 </body>
 </html>

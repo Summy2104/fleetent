@@ -388,6 +388,46 @@ def list_skills() -> list[dict[str, str]]:
     return [{"name": name, "description": entry.description} for name, entry in _index.items()]
 
 
+class SkillIndex:
+    """An isolated skill index rooted at a single skills directory (per-agent).
+
+    next<-main integration: main's agent runtime builds a SkillIndex from an agent
+    version's own ``skills_dir`` so each agent gets an independent catalog without
+    touching the module-level ``_index``. Wraps zhangyang's ``_build_index`` so the
+    same frontmatter parsing / audit / conflict rules apply; match/load mirror the
+    module-level behaviour over this instance's own entries.
+    """
+
+    def __init__(self, skills_dir: str | None = None, *, scan: bool = True) -> None:
+        self._entries: dict[str, SkillEntry] = {}
+        if scan:
+            self.scan(skills_dir)
+
+    def scan(self, skills_dir: str | None = None) -> None:
+        self._entries = _build_index(skills_dir)
+
+    def match(self, user_input: str) -> str | None:
+        lowered = user_input.lower()
+        for name, entry in self._entries.items():
+            # Skip author-disabled / audit-blocked skills (they are not auto-injected).
+            if not entry.enabled or not entry.enabled_by_default or entry.audit_blocked:
+                continue
+            keywords = {
+                w.strip(".,!?").lower()
+                for w in entry.description.split()
+                if len(w) > 4 and w.lower() not in _STOP_WORDS
+            }
+            if any(kw in lowered for kw in keywords):
+                return name
+        return None
+
+    def load(self, name: str) -> str:
+        return Path(self._entries[name].path).read_text(encoding="utf-8")
+
+    def list_skills(self) -> list[dict[str, str]]:
+        return [{"name": n, "description": e.description} for n, e in self._entries.items()]
+
+
 def _parse_frontmatter(content: str) -> dict[str, Any] | None:
     """Parse YAML frontmatter between leading/trailing --- delimiters.
 

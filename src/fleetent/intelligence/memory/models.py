@@ -24,6 +24,7 @@ class MemoryItem:
     created_at: datetime
     updated_at: datetime
     expires_at: datetime | None
+    namespace: str = "default"
 
 
 @dataclass(frozen=True)

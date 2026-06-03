@@ -1,8 +1,8 @@
 """Tests for MCP graceful degradation (MCP4): availability, schema filtering, modes."""
 
-import fleetent.mcp_client as mc
+import fleetent.integrations.mcp.client as mc
 import fleetent.tool_registry as tr
-from fleetent.mcp_client import HealthState, McpServerConfig
+from fleetent.integrations.mcp.client import HealthState, McpServerConfig
 
 # ── is_server_available (D1) ─────────────────────────────────────────────────
 
@@ -101,8 +101,8 @@ def test_schema_visibility_drops_unavailable_mcp_tools(monkeypatch):
     healthy = McpServerConfig(id="srvok")
     bad = McpServerConfig(id="srvbad")
     bad._health = HealthState.unavailable
-    monkeypatch.setitem(mc._server_registry, "srvok", healthy)
-    monkeypatch.setitem(mc._server_registry, "srvbad", bad)
+    monkeypatch.setitem(mc._server_registry, (None, "srvok"), healthy)
+    monkeypatch.setitem(mc._server_registry, (None, "srvbad"), bad)
     assert mc._schema_visibility("srvok__tool") is True
     assert mc._schema_visibility("srvbad__tool") is False
     assert mc._schema_visibility("plain_builtin_tool") is True  # non-MCP kept
@@ -112,7 +112,7 @@ def test_schema_visibility_drops_unavailable_mcp_tools(monkeypatch):
 def test_recovery_reexposes_tool(monkeypatch):
     s = McpServerConfig(id="recsrv")
     s._health = HealthState.degraded
-    monkeypatch.setitem(mc._server_registry, "recsrv", s)
+    monkeypatch.setitem(mc._server_registry, (None, "recsrv"), s)
     assert mc._schema_visibility("recsrv__t") is False
     mc.reset_health(s)  # connection restored
     assert mc._schema_visibility("recsrv__t") is True  # no re-registration needed
@@ -128,7 +128,9 @@ def test_unavailable_strict_server_ids(monkeypatch):
     degrade_bad = McpServerConfig(id="db", degrade_mode="degrade")
     degrade_bad._health = HealthState.unavailable
     monkeypatch.setattr(
-        mc, "_server_registry", {"sb": strict_bad, "sok": strict_ok, "db": degrade_bad}
+        mc,
+        "_server_registry",
+        {(None, "sb"): strict_bad, (None, "sok"): strict_ok, (None, "db"): degrade_bad},
     )
     monkeypatch.setattr(mc, "_failed_strict_servers", set())
     ids = mc.unavailable_strict_server_ids()
@@ -143,15 +145,15 @@ async def test_register_all_strict_startup_failure_tracked(monkeypatch):
     monkeypatch.setattr(mc, "_server_registry", {})
     monkeypatch.setattr(mc, "_failed_strict_servers", set())
 
-    async def fake_register(server):
+    async def fake_register(server, scope=None):
         if server.id == "failstrict":
             raise RuntimeError("connect failed")
-        mc._server_registry[server.id] = server
+        mc._server_registry[(scope, server.id)] = server
 
     monkeypatch.setattr(mc, "_register_server", fake_register)
     await mc.register_all([strict, healthy])
     # Platform start not blocked; healthy server registered; strict failure tracked.
-    assert "okserver" in mc._server_registry
+    assert (None, "okserver") in mc._server_registry
     assert "failstrict" in mc.unavailable_strict_server_ids()
 
 
@@ -166,7 +168,11 @@ def test_unavailable_servers_lists_modes(monkeypatch):
     sil._health = HealthState.unavailable
     st = McpServerConfig(id="st", degrade_mode="strict")
     st._health = HealthState.unavailable
-    monkeypatch.setattr(mc, "_server_registry", {"ok": ok, "deg": deg, "sil": sil, "st": st})
+    monkeypatch.setattr(
+        mc,
+        "_server_registry",
+        {(None, "ok"): ok, (None, "deg"): deg, (None, "sil"): sil, (None, "st"): st},
+    )
     monkeypatch.setattr(mc, "_failed_strict_servers", {"failst"})
     got = dict(mc.unavailable_servers())
     assert got == {"deg": "degrade", "sil": "silent", "st": "strict", "failst": "strict"}
@@ -189,7 +195,7 @@ def test_degrade_silent_log_levels(monkeypatch):
     deg._health = HealthState.unavailable
     sil = McpServerConfig(id="sil", degrade_mode="silent")
     sil._health = HealthState.unavailable
-    monkeypatch.setattr(mc, "_server_registry", {"deg": deg, "sil": sil})
+    monkeypatch.setattr(mc, "_server_registry", {(None, "deg"): deg, (None, "sil"): sil})
     monkeypatch.setattr(mc, "_failed_strict_servers", set())
 
     from unittest.mock import MagicMock

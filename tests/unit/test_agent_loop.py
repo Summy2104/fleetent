@@ -3059,13 +3059,13 @@ async def test_run_sub_agent_excluded_for_child_agent_depth_guard(mock_client):
 
 
 async def test_run_stops_on_bound_strict_unavailable(mock_client, monkeypatch):
-    import fleetent.mcp_client as mc
+    import fleetent.integrations.mcp.client as mc
     import fleetent.tool_registry as tr
-    from fleetent.mcp_client import HealthState, McpServerConfig
+    from fleetent.integrations.mcp.client import HealthState, McpServerConfig
 
     st = McpServerConfig(id="st", degrade_mode="strict")
     st._health = HealthState.unavailable
-    monkeypatch.setattr(mc, "_server_registry", {"st": st})
+    monkeypatch.setattr(mc, "_server_registry", {(None, "st"): st})
     monkeypatch.setattr(mc, "_failed_strict_servers", set())
     monkeypatch.setitem(tr._registry, "st__query", (lambda: "x", {}))
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("should-not-run"))
@@ -3076,13 +3076,13 @@ async def test_run_stops_on_bound_strict_unavailable(mock_client, monkeypatch):
 
 
 async def test_run_continues_when_strict_not_bound(mock_client, monkeypatch):
-    import fleetent.mcp_client as mc
+    import fleetent.integrations.mcp.client as mc
     import fleetent.tool_registry as tr
-    from fleetent.mcp_client import HealthState, McpServerConfig
+    from fleetent.integrations.mcp.client import HealthState, McpServerConfig
 
     st = McpServerConfig(id="st", degrade_mode="strict")
     st._health = HealthState.unavailable
-    monkeypatch.setattr(mc, "_server_registry", {"st": st})
+    monkeypatch.setattr(mc, "_server_registry", {(None, "st"): st})
     monkeypatch.setattr(mc, "_failed_strict_servers", set())
     monkeypatch.setitem(tr._registry, "st__query", (lambda: "x", {}))
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ran"))

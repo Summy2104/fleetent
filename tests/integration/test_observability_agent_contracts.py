@@ -37,7 +37,7 @@ def agent_runtime(monkeypatch):
         max_tokens=512,
         fallbacks=(),
     )
-    monkeypatch.setattr(agent_loop, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(agent_loop, "get_async_client_and_config", lambda *a, **k: (client, cfg))
     monkeypatch.setattr(agent_loop, "get_schemas", lambda: [])
     monkeypatch.setattr(agent_loop, "maybe_compress", lambda messages, **kwargs: messages)
     monkeypatch.setattr(agent_loop, "match_skill", lambda _: None)

@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from fleetent import agent_loop, sub_agent_lifecycle
+from fleetent import sub_agent_lifecycle
 from fleetent.cancellation import CancelToken
 from fleetent.sub_agent_lifecycle import SubAgentLifecycle, SubAgentState
 
@@ -90,6 +90,11 @@ class SubAgentExecutor:
         child = CancelToken(deadline=time.monotonic() + timeout_seconds, parent=batch_token)
         lc.started_at = _now_iso()
         self._transition(lc, SubAgentState.running)
+
+        # Lazy import breaks the agent_loop <-> sub_agent cycle: agent_loop imports
+        # SubAgentExecutor at module level, so sub_agent must not import agent_loop at
+        # top level (import-order-dependent crash otherwise).
+        from fleetent import agent_loop
 
         try:
             result = await agent_loop.run(

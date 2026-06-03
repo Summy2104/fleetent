@@ -1,7 +1,7 @@
 import pytest
 
-import fleetent.api_key_store as aks
 import fleetent.auth as auth
+import fleetent.platform.user_management.api_key_store as aks
 import fleetent.user_store as user_store
 
 
@@ -25,10 +25,33 @@ def test_seed_builtin_admin(db):
     assert result is not None
     user, temp_password = result
     assert user.role == "built_in_admin"
+    # fixed default credentials admin/admin; first login forces a password change
+    assert user.name == auth.BUILTIN_ADMIN_NAME == "admin"
+    assert temp_password == auth.BUILTIN_ADMIN_PASSWORD == "admin"
     assert user.must_reset == 1
     assert auth.verify_password(temp_password, user_store.get_by_id(user.id).password_hash)
     # second seed is a no-op
     assert auth.seed_builtin_admin() is None
+
+
+def test_seed_reasserts_must_reset_while_default_password(db):
+    # Insecure default admin/admin must stay gated: if must_reset got cleared but the
+    # password is still the bootstrap default, a later seed re-forces the reset.
+    user, _ = auth.seed_builtin_admin()
+    user_store.set_password(
+        user.id, auth.hash_password(auth.BUILTIN_ADMIN_PASSWORD), must_reset=False
+    )
+    assert user_store.get_by_id(user.id).must_reset == 0
+    assert auth.seed_builtin_admin() is None  # still a no-op return
+    assert user_store.get_by_id(user.id).must_reset == 1  # gate re-asserted
+
+
+def test_seed_leaves_must_reset_when_password_changed(db):
+    # If the admin set a real password, do not nag for another reset.
+    user, _ = auth.seed_builtin_admin()
+    user_store.set_password(user.id, auth.hash_password("a-real-password"), must_reset=False)
+    assert auth.seed_builtin_admin() is None
+    assert user_store.get_by_id(user.id).must_reset == 0
 
 
 def test_builtin_admin_cannot_be_demoted(db):

@@ -3,77 +3,53 @@
 Defines agent configurations (system prompt, tool allowlist) stored in SQLite, supports user-to-agent assignment, and controls which tools an agent can access via glob patterns.
 ## Requirements
 ### Requirement: Agent definition storage
-The system SHALL store agent definitions (name, system_prompt, allowed_tools, plugins, allowed_skills) in the `agents` SQLite table. The `plugins` field is a list of plugin names (default empty) declaring which plugins the agent is authorized to use; it is persisted as a JSON array text, mirroring `allowed_tools`. The `allowed_skills` field is a list of skill names (default empty) that narrows which skills appear in the agent's `<available_skills>` catalog; it is persisted as a JSON array text, mirroring `allowed_tools`. An empty `allowed_skills` means no narrowing (all enabled skills remain visible, preserving existing behavior) — the opposite default semantics from `plugins`, because skills are visible to every agent by default whereas plugin tools are not.
+The system SHALL store agent definitions in the `agents` SQLite table with columns: `id`, `name` (UNIQUE), `system_prompt` (nullable; superseded by `agent_versions`), `allowed_tools` (nullable; superseded by `agent_versions`), `active_version_id` (→ `agent_versions.id`), `created_at`. Per-version mutable fields (system_prompt, allowed_tools, skills_dir, mcp_server_ids, model_overrides, memory_namespace) SHALL live in `agent_versions`. Archival/disable is handled by the existing `agent_admin_store` console state, not by a column on `agents`.
 
-#### Scenario: Create agent
-- **WHEN** admin CLI calls `create-agent --name "assistant" --system-prompt "..." --allowed-tools '["shell","github__*"]'`
-- **THEN** a row is inserted into `agents` with the given fields, and `plugins` and `allowed_skills` default to empty lists
+#### Scenario: Create agent persists agents + agent_versions in one transaction
+- **WHEN** admin calls `create-agent --name "assistant" --system-prompt "..." --allowed-tools '["shell"]'`
+- **THEN** one row is inserted into `agents` AND one row into `agent_versions` (version=1) inside a single transaction; `agents.active_version_id` references the new version row
 
-#### Scenario: Create agent with plugins
-- **WHEN** an agent is created with `plugins=["crm_tools"]`
-- **THEN** the row stores `plugins` as `["crm_tools"]` and `get_by_name` reads it back unchanged
-
-#### Scenario: Create agent with allowed_skills
-- **WHEN** an agent is created with `allowed_skills=["weather"]`
-- **THEN** the row stores `allowed_skills` as `["weather"]` and `get_by_name` reads it back unchanged
-
-#### Scenario: Query agent by name
-- **WHEN** an incoming message is associated with an agent named "assistant"
-- **THEN** `agent_store.get_by_name("assistant")` returns the full agent definition including its `plugins` and `allowed_skills` lists
-
-#### Scenario: Legacy row without plugins
-- **WHEN** an existing `agents` row predates the `plugins` column
-- **THEN** reading that agent yields `plugins == []` (backward compatible, no behavior change)
-
-#### Scenario: Legacy row without allowed_skills
-- **WHEN** an existing `agents` row predates the `allowed_skills` column
-- **THEN** reading that agent yields `allowed_skills == []` (backward compatible: empty means no narrowing, all enabled skills visible)
+#### Scenario: Query agent by name returns active version content
+- **WHEN** an incoming message is associated with agent name `"assistant"` and `active_version_id` points to version 3
+- **THEN** `agent_store.get_by_name("assistant")` returns a structure whose `system_prompt` and `allowed_tools` come from version 3's `agent_versions` row
 
 ### Requirement: User-to-agent assignment
 The system SHALL support assigning one or more agents to a user via the `user_agents` table.
 
-#### Scenario: User assigned to agent
-- **WHEN** admin assigns user `user_id=X` to agent `agent_id=1`
-- **THEN** a row exists in `user_agents(user_id=X, agent_id=1)`
+#### Scenario: User assigned via CLI
+- **WHEN** admin runs `fleetent-admin assign-user --user-id <id> --agent-name <name>`
+- **THEN** a row exists in `user_agents(user_id, agent_id)`
 
-#### Scenario: Look up user's agent
-- **WHEN** a message arrives from `user_id=X`
-- **THEN** the system retrieves the agent assigned to that user to apply its `system_prompt` and `allowed_tools`
+#### Scenario: User unassigned via CLI
+- **WHEN** admin runs `fleetent-admin unassign-user --user-id <id> --agent-name <name>`
+- **THEN** the matching row in `user_agents` is removed
+
+#### Scenario: Look up user's agent resolves to active snapshot
+- **WHEN** a message arrives from `user_id=X` who is bound to agent `agent_id=1`
+- **THEN** the system retrieves the active `AgentSnapshot` for `agent_id=1` and applies its system_prompt, allowed_tools, skills_dir, mcp_server_ids, model_overrides, memory_namespace
 
 ### Requirement: allowed_tools wildcard support
-The `allowed_tools` field SHALL support glob-style wildcards for MCP server tools and plugin tools. An agent's authorized plugins SHALL be expanded into namespace wildcard patterns `{plugin_name}__*` and merged into the effective `allowed_tools` used for the access control check, so that a plugin tool is exposed to the agent only when its plugin is listed in the agent's `plugins`.
+The `allowed_tools` field SHALL support glob-style wildcards for MCP server tools, as before. MCP tool visibility is further constrained by the snapshot's `mcp_server_ids` allowlist; the tool must pass BOTH checks to appear in the schema.
 
-#### Scenario: Wildcard matches all tools from a server
-- **WHEN** `allowed_tools = ["github__*"]`
-- **THEN** any tool with prefix `github__` passes the access control check
+#### Scenario: Wildcard matches all tools from an allowed MCP server
+- **WHEN** `allowed_tools = ["github__*"]` AND `mcp_server_ids = ["github"]`
+- **THEN** any tool with prefix `github__` passes
 
-#### Scenario: Exact match
-- **WHEN** `allowed_tools = ["shell", "github__create_issue"]`
-- **THEN** only `shell` and `github__create_issue` pass; `github__list_prs` is rejected
-
-#### Scenario: Authorized plugin expands to namespace wildcard
-- **WHEN** an agent's `plugins` contains `crm_tools`
-- **THEN** `crm_tools__*` is merged into the effective `allowed_tools`, so `crm_tools__lookup` passes the access control check and is exposed to the LLM
-
-#### Scenario: Unauthorized plugin tool is not exposed
-- **WHEN** an agent's `plugins` does not contain `crm_tools`
-- **THEN** no `crm_tools__*` pattern is present, so `crm_tools__lookup` fails the access control check and does not appear in the tool schemas exposed to the LLM
+#### Scenario: Wildcard allowed but server not whitelisted
+- **WHEN** `allowed_tools = ["github__*"]` AND `mcp_server_ids = []`
+- **THEN** no `github__*` tool is offered to the LLM
 
 ### Requirement: Schema
-The `agents` table SHALL store: `id`, `name` (UNIQUE), `system_prompt`, `allowed_tools` (JSON array text), `plugins` (JSON array text, default `[]`), `allowed_skills` (JSON array text, default `[]`), `created_at`.
+The `agents` table SHALL store: `id`, `name` (UNIQUE), `system_prompt` (nullable), `allowed_tools` (nullable JSON array text), `active_version_id` (nullable, references `agent_versions(id)`), `created_at`.
 The `user_agents` table SHALL store: `user_id` (→ users.id), `agent_id` (→ agents.id), with PRIMARY KEY on `(user_id, agent_id)`.
 
 #### Scenario: Duplicate agent name rejected
 - **WHEN** admin tries to create an agent with a name that already exists
 - **THEN** the database UNIQUE constraint prevents it and an error is returned
 
-#### Scenario: Plugins column defaults for existing rows
-- **WHEN** the `plugins` column is added to a table that already contains agent rows
-- **THEN** existing rows take the `[]` default and remain readable without error
-
-#### Scenario: allowed_skills column defaults for existing rows
-- **WHEN** the `allowed_skills` column is added (alembic 004) to a table that already contains agent rows
-- **THEN** existing rows take the `[]` default and remain readable without error
+#### Scenario: active_version_id references a version row
+- **WHEN** an agent has been created
+- **THEN** `agents.active_version_id` is non-null and references a row in `agent_versions` whose `agent_id` matches
 
 ### Requirement: Route configuration schema
 `RouteConfig` defines the LLM routing parameters for a task type. It SHALL contain: `base_url`, `model`, `api_key_env`, `max_tokens`, and an optional `fallbacks` ordered sequence of model names to try when the primary model is unavailable.
@@ -85,4 +61,40 @@ The `user_agents` table SHALL store: `user_id` (→ users.id), `agent_id` (→ a
 #### Scenario: RouteConfig without fallbacks remains valid
 - **WHEN** `RouteConfig` is instantiated without the `fallbacks` parameter
 - **THEN** `config.fallbacks` is an empty tuple and the config is fully valid
+
+### Requirement: Agent console state storage
+
+The agent operational state SHALL store `status` (`enabled` / `disabled` / `archived`, default `enabled`), `provenance` (`managed` / `adhoc`, default `adhoc`), and `drift` (integer boolean, default `0`). `status=archived` SHALL be consistent with the soft-delete marker (archive sets both; restore clears the soft-delete marker and sets `status=enabled`). These columns SHALL be provided via an Alembic migration that backfills existing rows (`status=enabled`, or `status=archived` where already soft-deleted; `provenance=adhoc`, `drift=0`). SQL SHALL use named parameters and go through the store boundary; no ORM.
+
+> Implementation note: this state lives in a side table `agent_admin_state` (migration 015, modeled on `skill_admin_state`) keyed by agent name rather than ALTERing the `agents` table; this is the "console state" the agent-definition storage requirement defers archival/disable to.
+
+#### Scenario: New columns added with defaults via migration
+- **WHEN** the Alembic migration runs against an existing database
+- **THEN** `agent_admin_state` gains `status` / `provenance` / `drift` columns; existing rows get `status=enabled` (or `archived` if already soft-deleted), `provenance=adhoc`, `drift=0`
+
+#### Scenario: Archive keeps status and deleted_at consistent
+- **WHEN** an agent is archived
+- **THEN** `status` is `archived` AND `deleted_at` is set in the same transaction
+
+#### Scenario: Restore clears soft delete
+- **WHEN** an archived agent is restored within retention
+- **THEN** `status` becomes `enabled` AND `deleted_at` is cleared
+
+### Requirement: Routing honors agent status
+
+Routing resolution SHALL reject new sessions for agents whose `status` is `disabled` or `archived`. A `disabled` agent SHALL yield a "该 Agent 已停用" rejection (reversible). An `archived` agent SHALL be treated as not routable (equivalent to not existing in the routable list).
+
+> New constraint layered on the existing "soft-deleted agents not returned" behavior.
+
+#### Scenario: Disabled agent not routable
+- **WHEN** a message routes to an agent with `status=disabled`
+- **THEN** the request is rejected with "该 Agent 已停用" and does not enter agent_loop
+
+#### Scenario: Enabled agent routable
+- **WHEN** a message routes to an agent with `status=enabled`
+- **THEN** the request proceeds to agent_loop normally
+
+#### Scenario: Archived agent absent from routable list
+- **WHEN** the routable agent list is resolved
+- **THEN** agents with `status=archived` are excluded
 

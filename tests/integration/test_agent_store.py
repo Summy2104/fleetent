@@ -39,13 +39,42 @@ def test_create_and_get_agent(db):
     assert found.allowed_tools == ["shell", "github__*"]
 
 
+def test_create_agent_sets_active_version_v1(db):
+    agent = agent_store.create_agent("assistant", "You are helpful.", ["shell"])
+    assert agent.active_version_id is not None
+    versions = agent_store.list_versions("assistant")
+    assert len(versions) == 1
+    assert versions[0].version == 1
+    assert versions[0].is_active is True
+    assert versions[0].mcp_server_ids is None
+    assert versions[0].model_overrides == {}
+    assert versions[0].memory_namespace == "default"
+
+
+def test_create_agent_with_isolation_fields(db):
+    agent_store.create_agent(
+        "analyst",
+        "You analyze.",
+        ["shell"],
+        skills_dir="agents/analyst/skills",
+        mcp_server_ids=["github"],
+        model_overrides={"default": {"model": "x"}},
+        memory_namespace="analyst",
+    )
+    [v1] = agent_store.list_versions("analyst")
+    assert v1.skills_dir == "agents/analyst/skills"
+    assert v1.mcp_server_ids == ["github"]
+    assert v1.model_overrides == {"default": {"model": "x"}}
+    assert v1.memory_namespace == "analyst"
+
+
 def test_get_by_name_missing(db):
     assert agent_store.get_by_name("nonexistent") is None
 
 
 def test_duplicate_name_raises(db):
     agent_store.create_agent("assistant", "p1", ["shell"])
-    with pytest.raises(Exception, match="UNIQUE constraint"):
+    with pytest.raises(ValueError, match="already exists"):
         agent_store.create_agent("assistant", "p2", ["shell"])
 
 
@@ -59,6 +88,64 @@ def test_assign_and_get_agent_for_user(db):
 
 def test_get_agent_for_user_unassigned(db):
     assert agent_store.get_agent_for_user("user-99") is None
+
+
+# --- versioning ---
+
+
+def test_create_version_copies_active_and_overrides_partial(db):
+    agent_store.create_agent("assistant", "v1 prompt", ["shell"], memory_namespace="ns1")
+    v2 = agent_store.create_version("assistant", system_prompt="v2 prompt")
+    assert v2.version == 2
+    assert v2.system_prompt == "v2 prompt"
+    # unspecified fields copied from active (v1)
+    assert v2.allowed_tools == ["shell"]
+    assert v2.memory_namespace == "ns1"
+    # default activates the new version
+    assert agent_store.get_by_name("assistant").system_prompt == "v2 prompt"
+
+
+def test_create_version_without_activation_keeps_old_active(db):
+    agent_store.create_agent("assistant", "v1 prompt", ["shell"])
+    agent_store.create_version("assistant", system_prompt="v2 prompt", activate=False)
+    assert agent_store.get_by_name("assistant").system_prompt == "v1 prompt"
+    versions = agent_store.list_versions("assistant")
+    assert [v.version for v in versions] == [2, 1]
+    active = [v for v in versions if v.is_active]
+    assert len(active) == 1 and active[0].version == 1
+
+
+def test_activate_version_switches_active(db):
+    agent_store.create_agent("assistant", "v1 prompt", ["shell"])
+    agent_store.create_version("assistant", system_prompt="v2 prompt")  # active = 2
+    agent_store.activate_version("assistant", 1)
+    assert agent_store.get_by_name("assistant").system_prompt == "v1 prompt"
+
+
+def test_list_versions_desc_with_is_active(db):
+    agent_store.create_agent("assistant", "v1", ["shell"])
+    agent_store.create_version("assistant", system_prompt="v2")
+    agent_store.create_version("assistant", system_prompt="v3")
+    versions = agent_store.list_versions("assistant")
+    assert [v.version for v in versions] == [3, 2, 1]
+    assert versions[0].is_active is True
+    assert all(v.is_active is False for v in versions[1:])
+
+
+def test_get_by_name_version_returns_specific(db):
+    agent_store.create_agent("assistant", "v1 prompt", ["shell"])
+    agent_store.create_version("assistant", system_prompt="v2 prompt")
+    v1 = agent_store.get_by_name_version("assistant", 1)
+    assert v1 is not None and v1.system_prompt == "v1 prompt"
+    assert agent_store.get_by_name_version("assistant", 99) is None
+
+
+def test_get_by_name_reflects_active_version(db):
+    agent_store.create_agent("assistant", "v1 prompt", ["shell", "github__*"])
+    agent_store.create_version("assistant", system_prompt="v2 prompt", allowed_tools=["web_search"])
+    found = agent_store.get_by_name("assistant")
+    assert found.system_prompt == "v2 prompt"
+    assert found.allowed_tools == ["web_search"]
 
 
 # --- agent ownership (tenant_id / team_id) ---
@@ -88,21 +175,34 @@ def test_create_agent_with_explicit_ownership(db):
 
 def test_existing_agent_backfills_default_tenant(db):
     # A row inserted without ownership columns (legacy shape) resolves to the
-    # migration's tenant_id default and a null team_id.
+    # migration's tenant_id default and a null team_id. The agent must still carry
+    # a v1 version snapshot, exactly as migration 033's backfill produces.
     from fleetent.config import Settings
     from fleetent.db import create_database
 
     database = create_database(Settings(anthropic_api_key="").database_url)
-    database.execute(
-        "INSERT INTO agents (name, system_prompt, allowed_tools, created_at)"
-        " VALUES (:name, :system_prompt, :allowed_tools, :created_at)",
-        {
-            "name": "legacy",
-            "system_prompt": "p",
-            "allowed_tools": "[]",
-            "created_at": "2026-01-01T00:00:00+00:00",
-        },
-    )
+    with database.transaction() as conn:
+        agent_id = conn.execute(
+            "INSERT INTO agents (name, system_prompt, allowed_tools, created_at)"
+            " VALUES (:name, :system_prompt, :allowed_tools, :created_at)",
+            {
+                "name": "legacy",
+                "system_prompt": "p",
+                "allowed_tools": "[]",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+        ).lastrowid
+        version_id = conn.execute(
+            "INSERT INTO agent_versions "
+            "(agent_id, version, system_prompt, allowed_tools, model_overrides, "
+            " memory_namespace, created_at) "
+            "VALUES (:aid, 1, 'p', '[]', '{}', 'default', :now)",
+            {"aid": agent_id, "now": "2026-01-01T00:00:00+00:00"},
+        ).lastrowid
+        conn.execute(
+            "UPDATE agents SET active_version_id = :vid WHERE id = :aid",
+            {"vid": version_id, "aid": agent_id},
+        )
     found = agent_store.get_by_name("legacy")
     assert found is not None
     assert found.tenant_id == "default"
@@ -128,6 +228,13 @@ def test_assign_and_get_agent_for_channel(db):
     found = agent_store.get_agent_for_channel("slack", "C123")
     assert found is not None
     assert found.id == agent.id
+
+
+def test_assign_channel_records_bound_version(db):
+    agent = agent_store.create_agent("ch-agent", "Channel prompt.", [])
+    agent_store.assign_channel("slack", "C123", agent.id)
+    bound = agent_store.get_channel_bound_version_id("slack", "C123")
+    assert bound == agent.active_version_id
 
 
 def test_get_agent_for_channel_unbound(db):
@@ -157,7 +264,7 @@ def test_platform_isolation(db):
     assert agent_store.get_agent_for_channel("telegram", "C5") is None
 
 
-# --- default agent tests ---
+# --- default agent ---
 
 
 def test_get_default_agent_returns_agent_when_configured(db, monkeypatch):
@@ -195,21 +302,10 @@ def test_agent_features_roundtrip(db):
 
 def test_agent_features_null_row_falls_back_to_empty():
     # A legacy row whose features value is NULL (defensive `or "{}"` guard in
-    # _row_to_agent). Exercise the row-mapping fallback directly with a dict row
-    # (the unified runtime returns dict rows).
-    row = {
-        "id": 1,
-        "name": "legacy",
-        "system_prompt": "prompt",
-        "allowed_tools": "[]",
-        "features": None,
-        "plugins": None,
-        "allowed_skills": None,
-        "tenant_id": None,
-        "team_id": None,
-    }
-    agent = agent_store._row_to_agent(row)
-    assert agent.features == {}
+    # _parse_caps). Caps are decoded off the agents row independent of versioning;
+    # exercise the cap-parsing fallback directly with a dict row.
+    caps = agent_store._parse_caps({"features": None, "plugins": None, "allowed_skills": None})
+    assert caps["features"] == {}
 
 
 def test_agent_plugins_default_empty(db):
@@ -229,21 +325,10 @@ def test_agent_plugins_roundtrip(db):
 
 def test_agent_plugins_null_row_falls_back_to_empty():
     # A legacy row whose plugins value is NULL (defensive `or "[]"` guard in
-    # _row_to_agent). The column is NOT NULL with a '[]' backfill, so a real NULL
-    # cannot be written; exercise the row-mapping fallback directly with a dict row.
-    row = {
-        "id": 1,
-        "name": "legacy",
-        "system_prompt": "prompt",
-        "allowed_tools": "[]",
-        "features": None,
-        "plugins": None,
-        "allowed_skills": None,
-        "tenant_id": None,
-        "team_id": None,
-    }
-    agent = agent_store._row_to_agent(row)
-    assert agent.plugins == []
+    # _parse_caps). The column is NOT NULL with a '[]' backfill, so a real NULL
+    # cannot be written; exercise the cap-parsing fallback directly with a dict row.
+    caps = agent_store._parse_caps({"features": None, "plugins": None, "allowed_skills": None})
+    assert caps["plugins"] == []
 
 
 def test_agent_allowed_skills_default_empty(db):
@@ -263,20 +348,9 @@ def test_agent_allowed_skills_roundtrip(db):
 
 def test_agent_allowed_skills_null_row_falls_back_to_empty():
     # Legacy row predating the allowed_skills column (NULL); the `or "[]"` guard in
-    # _row_to_agent maps it to []. Empty means no narrowing — backward compatible.
-    row = {
-        "id": 1,
-        "name": "legacy",
-        "system_prompt": "prompt",
-        "allowed_tools": "[]",
-        "features": None,
-        "plugins": None,
-        "allowed_skills": None,
-        "tenant_id": None,
-        "team_id": None,
-    }
-    agent = agent_store._row_to_agent(row)
-    assert agent.allowed_skills == []
+    # _parse_caps maps it to []. Empty means no narrowing — backward compatible.
+    caps = agent_store._parse_caps({"features": None, "plugins": None, "allowed_skills": None})
+    assert caps["allowed_skills"] == []
 
 
 def test_init_db_create_table_includes_allowed_skills_column(db):
@@ -314,8 +388,8 @@ def _load_migration_002():
         Path(__file__).resolve().parents[2]
         / "migrations"
         / "versions"
-        # Rebased 002 -> 032 during the next<-main integration (after main's head 031).
-        / "032_add_agent_features.py"
+        # Rebased 002 -> 035 during the next<-main integration (after main's head 034).
+        / "035_add_agent_features.py"
     )
     spec = importlib.util.spec_from_file_location("migration_002", path)
     assert spec is not None and spec.loader is not None
@@ -338,9 +412,9 @@ def test_alembic_002_upgrade_adds_features_to_legacy_table(tmp_path):
     from alembic.operations import Operations
 
     migration = _load_migration_002()
-    # Rebased during the next<-main integration: 002 -> 032, chained after main's head 031.
-    assert migration.revision == "032"
-    assert migration.down_revision == "031"
+    # Rebased during the next<-main integration: 002 -> 035, chained after main's head 034.
+    assert migration.revision == "035"
+    assert migration.down_revision == "034"
 
     dbp = tmp_path / "legacy.db"
     raw = sqlite3.connect(dbp)

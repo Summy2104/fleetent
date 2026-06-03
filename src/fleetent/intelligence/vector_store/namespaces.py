@@ -3,10 +3,13 @@ def _require_non_empty(value: str, name: str) -> None:
         raise ValueError(f"{name} must not be empty")
 
 
-def memory_namespace(user_id: str) -> str:
-    """Return mem:{user_id}."""
+def memory_namespace(user_id: str, namespace: str = "default") -> str:
+    """Return mem:{user_id} for the default namespace, mem:{user_id}:{namespace} otherwise."""
     _require_non_empty(user_id, "user_id")
-    return f"mem:{user_id}"
+    _require_non_empty(namespace, "namespace")
+    if namespace == "default":
+        return f"mem:{user_id}"
+    return f"mem:{user_id}:{namespace}"
 
 
 def shared_namespace(scope_type: str, scope_id: str) -> str:

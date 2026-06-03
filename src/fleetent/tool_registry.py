@@ -6,7 +6,7 @@ The agent loop calls get_schemas() for the API payload and dispatch() to execute
 
 import inspect
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any, overload
 
@@ -143,6 +143,7 @@ def get_schemas() -> list[ToolSchema]:
 
 
 _SUB_AGENT_TOOL = "sub_agent"
+_MCP_SEP = "__"
 
 # Runtime out-of-band parameter (AR19 D3): a tool opts into receiving the cancel
 # token by declaring a parameter with this name. `dispatch` injects the token
@@ -182,18 +183,22 @@ def dispatch(
     cancel_token: Any = None,
     tool_context: ToolContext | None = None,
     user_id: str | None = None,
-) -> str:
+    mcp_server_ids: list[str] | None = None,
+    mcp_scope: int | None = None,
+) -> str | Coroutine[Any, Any, str]:
     """Execute a registered tool by name with JSON-encoded arguments.
 
     `cancel_token` and `tool_context` are injected out-of-band (not LLM-provided
-    arguments) only for tools that opt in by declaring the matching parameter; for
-    all other tools the call is byte-identical to one made without them.
+    arguments) only for tools that opt in by declaring the matching parameter.
 
-    For a tool declaring a `connector` (D3), the per-user credential is resolved
-    via `connectors.get_credential(user_id, connector, scopes)`: a `Credential`
-    injects its `client` as a hidden keyword-only argument; a `NeedsConsent`
-    short-circuits and returns a consent prompt without executing the tool. The
-    injected `client` never enters `kwargs`, the return value, or any trace.
+    For a tool declaring a `connector` (D3), the per-user credential is resolved via
+    `connectors.get_credential(user_id, connector, scopes)`: a `Credential` injects its
+    `client` as a hidden keyword-only argument; a `NeedsConsent` short-circuits to a
+    consent prompt. The injected `client` never enters kwargs, the return, or a trace.
+
+    For MCP tools (``server_id__tool``) ``mcp_server_ids`` is the agent's resolved server
+    whitelist (out-of-scope ids rejected before any session is touched) and ``mcp_scope``
+    routes the call through the scope-keyed MCP session rather than the global closure.
     """
     if is_sub_agent and name == _SUB_AGENT_TOOL:
         raise PermissionError("sub_agent tool is not available inside a sub-agent")
@@ -202,12 +207,27 @@ def dispatch(
 
         if not check_tool_access(name, allowed_tools):
             raise PermissionError(f"Tool '{name}' not permitted by agent policy")
-    if name not in _registry:
-        return f"unknown tool: {name}"
-    fn, _ = _registry[name]
+
+    is_mcp = _MCP_SEP in name
+    if is_mcp and mcp_server_ids is not None:
+        server_id = name.split(_MCP_SEP, 1)[0]
+        if server_id not in mcp_server_ids:
+            raise PermissionError(f"MCP server '{server_id}' not in agent scope")
+
     kwargs: dict[str, Any] = (
         arguments_json if isinstance(arguments_json, dict) else json.loads(arguments_json)
     )
+    # Agent-scoped MCP: route through the scope-keyed session, not the global closure.
+    if is_mcp and mcp_scope is not None:
+        from fleetent.integrations.mcp import client as mcp_client
+
+        server_id, tool_name = name.split(_MCP_SEP, 1)
+        return mcp_client.call_tool(server_id, tool_name, kwargs, scope=mcp_scope)
+
+    if name not in _registry:
+        return f"unknown tool: {name}"
+    fn, _ = _registry[name]
+
     if cancel_token is not None and _accepts_cancel_token(fn):
         kwargs[_CANCEL_TOKEN_PARAM] = cancel_token
     if tool_context is not None and _accepts_tool_context(fn):
@@ -215,8 +235,7 @@ def dispatch(
 
     connector_meta = get_connector(name)
     if connector_meta is None:
-        result = fn(**kwargs)
-        return result  # type: ignore[no-any-return]
+        return fn(**kwargs)
 
     from fleetent import connectors
 
@@ -229,8 +248,7 @@ def dispatch(
         )
     # Inject the client out-of-band (keyword-only, excluded from the schema); it
     # is never written back into kwargs, so it cannot reach the return value or trace.
-    result = fn(**kwargs, client=cred.client)
-    return result  # type: ignore[no-any-return]
+    return fn(**kwargs, client=cred.client)
 
 
 def _build_schema(fn: Callable[..., Any]) -> ToolSchema:

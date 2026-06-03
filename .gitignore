@@ -36,3 +36,6 @@ config/mcp.yaml
 .DS_Store
 
 .coverage
+
+# Claude Code runtime locks
+.claude/*.lock

@@ -88,6 +88,47 @@ def test_dispatch_without_allowed_tools_skips_check():
     assert "unknown tool" in result
 
 
+def test_dispatch_rejects_mcp_server_out_of_scope():
+    with pytest.raises(PermissionError, match="not in agent scope"):
+        tool_registry.dispatch("github__create", "{}", mcp_server_ids=["jira"], mcp_scope=5)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_routes_in_scope_mcp_tool_with_agent_scope(monkeypatch):
+    import fleetent.integrations.mcp.client as mcp_client
+
+    captured: dict[str, object] = {}
+
+    async def fake_call_tool(server_id, tool_name, args, scope=None):  # type: ignore[no-untyped-def]
+        captured["server_id"] = server_id
+        captured["tool_name"] = tool_name
+        captured["args"] = args
+        captured["scope"] = scope
+        return "ok"
+
+    monkeypatch.setattr(mcp_client, "call_tool", fake_call_tool)
+
+    result = tool_registry.dispatch(
+        "github__create", '{"x": 1}', mcp_server_ids=["github"], mcp_scope=5
+    )
+    out = await result  # type: ignore[misc]
+    assert out == "ok"
+    assert captured["server_id"] == "github"
+    assert captured["tool_name"] == "create"
+    assert captured["args"] == {"x": 1}
+    assert captured["scope"] == 5
+
+
+def test_dispatch_non_mcp_tool_ignores_mcp_scope():
+    @tool_registry.tool
+    def _scoped_builtin() -> str:
+        """Builtin unaffected by mcp scope."""
+        return "ok"
+
+    result = tool_registry.dispatch("_scoped_builtin", "{}", mcp_server_ids=["jira"], mcp_scope=5)
+    assert result == "ok"
+
+
 def test_schema_type_mapping():
     @tool_registry.tool
     def typed_fn(s: str, n: int, f: float, b: bool) -> str:

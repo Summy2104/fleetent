@@ -1,8 +1,8 @@
 import pytest
 
-import fleetent.im_channel_allowlist as acl
-import fleetent.im_connector_store as ics
 import fleetent.im_user_store as im_user_store
+import fleetent.platform.im_gateway_management.im_channel_allowlist as acl
+import fleetent.platform.im_gateway_management.im_connector_store as ics
 import fleetent.user_store as user_store
 from fleetent.im_gateway import normalizer
 
@@ -16,12 +16,16 @@ def db(tmp_path, monkeypatch):
     return tmp_path / "users.db"
 
 
+_OWNER = "owner1"
+
+
 def _msg(replies, *, channel_id="C_ops", workspace_id=""):
     async def reply_func(text):
         replies.append(text)
 
     return normalizer.NormalizedMessage(
         platform="slack",
+        owner_id=_OWNER,
         session_id="thread:1",
         user_id="u1",
         text="hi",
@@ -33,7 +37,7 @@ def _msg(replies, *, channel_id="C_ops", workspace_id=""):
 
 
 async def test_disallowed_channel_rejected_before_user_check(db, monkeypatch):
-    ics.upsert_connector("slack", allowlist_enforced=True)  # no allowlist entries
+    ics.upsert_connector(_OWNER, "slack", allowlist_enforced=True)  # no allowlist entries
     called = {"user_check": False}
 
     def spy(_uid):
@@ -48,8 +52,8 @@ async def test_disallowed_channel_rejected_before_user_check(db, monkeypatch):
 
 
 async def test_allowed_channel_proceeds_to_user_check(db, monkeypatch):
-    ics.upsert_connector("slack", allowlist_enforced=True)
-    acl.add_entry("slack", "channel", "C_ops")
+    ics.upsert_connector(_OWNER, "slack", allowlist_enforced=True)
+    acl.add_entry(_OWNER, "slack", "channel", "C_ops")
     called = {"user_check": False}
 
     def spy(_uid):
@@ -63,7 +67,7 @@ async def test_allowed_channel_proceeds_to_user_check(db, monkeypatch):
 
 
 async def test_not_enforced_passes_channel_gate(db, monkeypatch):
-    ics.upsert_connector("slack", allowlist_enforced=False)
+    ics.upsert_connector(_OWNER, "slack", allowlist_enforced=False)
     called = {"user_check": False}
 
     def spy(_uid):
@@ -77,8 +81,8 @@ async def test_not_enforced_passes_channel_gate(db, monkeypatch):
 
 
 async def test_workspace_allow_covers_channel(db, monkeypatch):
-    ics.upsert_connector("slack", allowlist_enforced=True)
-    acl.add_entry("slack", "workspace", "T_team")
+    ics.upsert_connector(_OWNER, "slack", allowlist_enforced=True)
+    acl.add_entry(_OWNER, "slack", "workspace", "T_team")
     called = {"user_check": False}
 
     def spy(_uid):

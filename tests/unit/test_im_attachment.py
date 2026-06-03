@@ -21,7 +21,9 @@ def _capture_slack_handler(monkeypatch):
     with patch("slack_bolt.async_app.AsyncApp", return_value=FakeApp()):
         import fleetent.im_gateway.slack as slack_mod
 
-        slack_mod.create_app()
+        slack_mod.create_app(
+            "owner1", {"bot_token": "xoxb-test-token", "app_token": "xapp-test-token"}
+        )
     return captured["handler"]
 
 
@@ -33,7 +35,7 @@ async def _run_slack(handler, event, monkeypatch):
 
     fake_user = MagicMock()
     fake_user.id = "internal-1"
-    monkeypatch.setattr(ius, "get_or_create", lambda platform, uid: fake_user)
+    monkeypatch.setattr(ius, "get_or_create", lambda owner_id, platform, uid: fake_user)
     captured_msg = AsyncMock()
     monkeypatch.setattr(norm, "route", captured_msg)
 
@@ -133,7 +135,7 @@ def _capture_telegram_handler(monkeypatch):
         mock_cls.builder.return_value = mock_builder
         import fleetent.im_gateway.telegram as tg_mod
 
-        tg_mod.create_app()
+        tg_mod.create_app("owner1", {"bot_token": "tg-test-token"})
 
     handler_obj = mock_app.add_handler.call_args[0][0]
     return handler_obj
@@ -145,7 +147,7 @@ async def _run_telegram(handler_obj, update, context, monkeypatch):
 
     fake_user = MagicMock()
     fake_user.id = "internal-tg-1"
-    monkeypatch.setattr(ius, "get_or_create", lambda platform, uid: fake_user)
+    monkeypatch.setattr(ius, "get_or_create", lambda owner_id, platform, uid: fake_user)
     captured = AsyncMock()
     monkeypatch.setattr(norm, "route", captured)
 

@@ -5,7 +5,7 @@ maintains no state, and knows nothing about agents, tools, or memory.
 """
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -216,16 +216,32 @@ def _load_routes() -> dict[str, RouteConfig]:
     return base
 
 
-def get_client_and_config(
-    task_type: str = "default", override: RouteOverride | None = None
-) -> tuple[OpenAI, RouteConfig]:
-    """Return (OpenAI client, route config) for the given task type.
+def _resolve_cfg(
+    task_type: str,
+    override: RouteOverride | None,
+    overrides: dict[str, dict[str, Any]] | None,
+) -> RouteConfig:
+    """Resolve the route config for ``task_type`` applying both override conventions.
 
-    An optional `override` is field-merged onto the task_type route result
-    before the client is built (see `_apply_override`).
+    Two per-call override APIs are supported after the next<-main integration:
+    main's ``overrides`` (a ``{task_type: {field: value}}`` dict, applied via
+    dataclasses.replace) and zhangyang's ``override`` (a ``RouteOverride`` field-merge).
+    Both default to None (no-op); the dict override is applied first, then RouteOverride.
     """
     routes = _load_routes()
-    cfg = _apply_override(routes.get(task_type, routes["default"]), override)
+    cfg = routes.get(task_type, routes["default"])
+    if overrides and task_type in overrides:
+        cfg = replace(cfg, **overrides[task_type])
+    return _apply_override(cfg, override)
+
+
+def get_client_and_config(
+    task_type: str = "default",
+    override: RouteOverride | None = None,
+    overrides: dict[str, dict[str, Any]] | None = None,
+) -> tuple[OpenAI, RouteConfig]:
+    """Return (OpenAI client, route config) for the given task type."""
+    cfg = _resolve_cfg(task_type, override, overrides)
     api_key = os.environ.get(cfg.api_key_env)
     if not api_key:
         raise RuntimeError(f"Missing env var {cfg.api_key_env} for route '{task_type}'")
@@ -234,14 +250,11 @@ def get_client_and_config(
 
 
 def get_async_client_and_config(
-    task_type: str = "default", override: RouteOverride | None = None
+    task_type: str = "default",
+    override: RouteOverride | None = None,
+    overrides: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[AsyncOpenAI, RouteConfig]:
-    """Return an async OpenAI client and route config for the given task type.
-
-    An optional `override` is field-merged onto the task_type route result
-    before the client is built (see `_apply_override`).
-    """
-    routes = _load_routes()
-    cfg = _apply_override(routes.get(task_type, routes["default"]), override)
+    """Return an async OpenAI client and route config for the given task type."""
+    cfg = _resolve_cfg(task_type, override, overrides)
     api_key = os.environ.get(cfg.api_key_env, "")
     return AsyncOpenAI(base_url=cfg.base_url, api_key=api_key), cfg

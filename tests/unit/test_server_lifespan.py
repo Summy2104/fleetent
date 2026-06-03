@@ -52,10 +52,10 @@ def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch):
 
     import fleetent.server as srv
 
-    # Patch adapter starters to avoid real socket connections during lifespan
+    # IM connectors are driven by the manager now; patch it to avoid real connections.
     with (
-        patch.object(srv, "_start_slack_adapter", new_callable=AsyncMock),
-        patch.object(srv, "_start_telegram_adapter", new_callable=AsyncMock),
+        patch.object(srv._connector_manager, "start_all_enabled", new_callable=AsyncMock),
+        patch.object(srv._connector_manager, "stop", new_callable=AsyncMock),
         TestClient(srv.app) as client,
     ):
         resp = client.get("/health")
@@ -68,7 +68,7 @@ def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch):
 
 async def test_mcp_yaml_loaded_if_exists(tmp_path, monkeypatch):
     """Lifespan calls register_all with servers from config/mcp.yaml."""
-    import fleetent.mcp_client as mcp_mod
+    import fleetent.integrations.mcp as mcp_mod
     import fleetent.server as srv
 
     mcp_yaml = tmp_path / "mcp.yaml"
@@ -79,7 +79,11 @@ async def test_mcp_yaml_loaded_if_exists(tmp_path, monkeypatch):
     monkeypatch.setattr(srv, "_MCP_YAML_PATH", mcp_yaml)
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
 
-    with TestClient(srv.app) as client:
+    with (
+        patch.object(srv._connector_manager, "start_all_enabled", new_callable=AsyncMock),
+        patch.object(srv._connector_manager, "stop", new_callable=AsyncMock),
+        TestClient(srv.app) as client,
+    ):
         client.get("/health")
 
     mock_register.assert_called_once()
@@ -90,7 +94,7 @@ async def test_mcp_yaml_loaded_if_exists(tmp_path, monkeypatch):
 
 async def test_mcp_yaml_missing_skipped_gracefully(tmp_path, monkeypatch):
     """Lifespan skips MCP loading if config/mcp.yaml doesn't exist."""
-    import fleetent.mcp_client as mcp_mod
+    import fleetent.integrations.mcp as mcp_mod
     import fleetent.server as srv
 
     mock_register = AsyncMock(return_value=None)
@@ -98,7 +102,11 @@ async def test_mcp_yaml_missing_skipped_gracefully(tmp_path, monkeypatch):
     monkeypatch.setattr(srv, "_MCP_YAML_PATH", Path("/nonexistent/mcp.yaml"))
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
 
-    with TestClient(srv.app) as client:
+    with (
+        patch.object(srv._connector_manager, "start_all_enabled", new_callable=AsyncMock),
+        patch.object(srv._connector_manager, "stop", new_callable=AsyncMock),
+        TestClient(srv.app) as client,
+    ):
         resp = client.get("/health")
 
     assert resp.status_code == 200

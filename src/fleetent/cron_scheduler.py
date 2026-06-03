@@ -91,6 +91,16 @@ class CronScheduler:
     def add_job(self, task: dict[str, Any]) -> None:
         self._register(task)
 
+    def add_interval_job(self, func: Any, seconds: int, job_id: str) -> None:
+        """Register a fixed-interval background job (e.g. monitoring collection)."""
+        self._scheduler.add_job(
+            func,
+            trigger="interval",
+            seconds=seconds,
+            id=job_id,
+            replace_existing=True,
+        )
+
     def remove_job(self, task_id: str) -> None:
         with suppress(Exception):
             self._scheduler.remove_job(task_id)

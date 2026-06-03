@@ -27,6 +27,10 @@ class NormalizedMessage:
     reply_func: Callable[[str], Coroutine[Any, Any, None]]
     channel_id: str = field(default="")
     workspace_id: str = field(default="")
+    # Owning tenant of the IM connector that produced this message (multi-tenant IM
+    # gateway). Empty = single-tenant/legacy. Namespaces the allowlist scope and the
+    # session id so the same platform/channel under two owners never collides.
+    owner_id: str = field(default="")
 
 
 def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> Agent | None:
@@ -109,9 +113,11 @@ async def route(msg: NormalizedMessage) -> None:
 
     # Channel allowlist gate — checked before any user-level check. When the platform's
     # connector has allowlist_enforced off, this always passes (backward compatible).
-    from fleetent import im_channel_allowlist
+    from fleetent.platform.im_gateway_management import im_channel_allowlist
 
-    if not im_channel_allowlist.is_allowed(msg.platform, msg.channel_id, msg.workspace_id or None):
+    if not im_channel_allowlist.is_allowed(
+        msg.owner_id, msg.platform, msg.channel_id, msg.workspace_id or None
+    ):
         await msg.reply_func(_REJECTION_MSG)
         return
 
@@ -123,8 +129,12 @@ async def route(msg: NormalizedMessage) -> None:
     from fleetent import agent_loop, sandbox_enablement, session_mgr
     from fleetent.skill_registry import available_skills_prompt, collect_disabled_trace
 
-    async with session_mgr.session_lock(msg.session_id):
-        history = await session_mgr.load(msg.session_id)
+    # Namespace the session by owner so the same platform/channel under two owners
+    # never shares conversation state.
+    session_id = f"{msg.owner_id}:{msg.session_id}" if msg.owner_id else msg.session_id
+
+    async with session_mgr.session_lock(session_id):
+        history = await session_mgr.load(session_id)
 
         # Resolve agent config: channel → user → default → bare run
         agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
@@ -161,11 +171,11 @@ async def route(msg: NormalizedMessage) -> None:
             disabled_skills_trace=disabled_trace,
             sandbox_mode=sandbox_mode,
             agent_features=agent_features,
-            session_id=msg.session_id,
+            session_id=session_id,
         )
 
         # agent_loop.run() already appended the assistant message to history in-place.
         # Do NOT append again here — that caused duplicate messages in every session.
-        await session_mgr.save(msg.session_id, history)
+        await session_mgr.save(session_id, history)
 
     await msg.reply_func(response)

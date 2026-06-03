@@ -124,9 +124,11 @@ def _reserved_namespaces() -> set[str]:
     tools are keyed `{server_id}__{tool}`, so the server id is the prefix before
     the first `__`; builtin tools are keyed by bare function name (no `__`).
     """
-    from fleetent import mcp_client
+    from fleetent.integrations.mcp import client as mcp_client
 
-    reserved: set[str] = set(mcp_client._server_registry.keys())
+    # The registry is now keyed by (scope, server_id) after the MCP scope re-key;
+    # the reserved namespace is the server id (second element), regardless of scope.
+    reserved: set[str] = {server_id for _scope, server_id in mcp_client._server_registry}
     for key in tool_registry._registry:
         reserved.add(key.split("__", 1)[0] if "__" in key else key)
     return reserved

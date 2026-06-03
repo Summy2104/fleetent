@@ -154,7 +154,7 @@ async def test_lifecycle_records_succeeded_with_timestamps(tmp_path, monkeypatch
     async def fake_run(messages, **kwargs):
         return "ok"
 
-    with patch("fleetent.sub_agent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.agent_loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
             parent_user_id="u",
@@ -180,7 +180,7 @@ async def test_cancel_token_passed_with_parent_link(tmp_path, monkeypatch):
         return "ok"
 
     batch = CancelToken()
-    with patch("fleetent.sub_agent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.agent_loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
             parent_user_id="u",
@@ -210,7 +210,7 @@ async def test_one_task_times_out_others_succeed(tmp_path, monkeypatch):
             return "partial"
         return "done"
 
-    with patch("fleetent.sub_agent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.agent_loop.run", side_effect=fake_run):
         results = await executor.run(
             tasks=[{"name": "slow", "prompt": "slow"}, {"name": "fast", "prompt": "fast"}],
             parent_user_id="u",
@@ -236,7 +236,7 @@ async def test_parent_cancel_marks_cancelled(tmp_path, monkeypatch):
         kwargs["cancel_token"].parent.cancel()
         return "partial"
 
-    with patch("fleetent.sub_agent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.agent_loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
             parent_user_id="u",
@@ -261,7 +261,7 @@ async def test_pending_cancelled_when_batch_precancelled(tmp_path, monkeypatch):
 
     batch = CancelToken()
     batch.cancel()  # already cancelled before the batch starts
-    with patch("fleetent.sub_agent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.agent_loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
             parent_user_id="u",
@@ -284,7 +284,7 @@ async def test_failure_marks_failed_with_error(tmp_path, monkeypatch):
     async def fake_run(messages, **kwargs):
         raise RuntimeError("boom")
 
-    with patch("fleetent.sub_agent.agent_loop.run", side_effect=fake_run):
+    with patch("fleetent.agent_loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
             parent_user_id="u",
