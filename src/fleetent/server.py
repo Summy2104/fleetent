@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
@@ -423,6 +423,51 @@ async def chat(
             yield f"data: {json.dumps(error, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+@app.websocket("/ws")
+async def ws_gateway(websocket: WebSocket) -> None:
+    """Bidirectional JSON-RPC 2.0 gateway for the terminal TUI (tui-gateway).
+
+    Authenticates the Bearer ``ma-`` key on the handshake, then runs a single
+    dispatch over a newline-delimited JSON-RPC protocol. SSE ``/chat`` is unaffected.
+    """
+    from fleetent.tui import dispatch as tui_dispatch
+    from fleetent.tui import protocol as tui_proto
+    from fleetent.tui.transport import WSTransport
+
+    auth = websocket.headers.get("authorization", "")
+    result = (
+        user_store.authenticate(auth.removeprefix("Bearer ").strip())
+        if auth.startswith("Bearer ")
+        else None
+    )
+    if result is None:
+        await websocket.close(code=1008)  # policy violation: auth required
+        return
+    user, _key_meta = result
+
+    await websocket.accept()
+    transport = WSTransport(websocket)
+    conn = tui_dispatch.Connection(user_id=user.id, transport=transport)
+    await transport.write(tui_proto.make_event(tui_proto.EVENT_GATEWAY_READY, {}))
+    try:
+        while True:
+            line = await websocket.receive_text()
+            try:
+                request = tui_proto.decode_frame(line)
+            except tui_proto.ParseError as exc:
+                await transport.write(tui_proto.make_error(None, tui_proto.PARSE_ERROR, str(exc)))
+                continue
+            response = await tui_dispatch.dispatch(conn, request)
+            if response is not None:
+                await transport.write(response)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        # Peer gone / connection closed: cancel in-flight runs and release the socket.
+        conn.cancel_all()
+        await transport.close()
 
 
 @app.post("/webhook/{source_id}")

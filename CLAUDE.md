@@ -96,6 +96,15 @@ src/fleetent/
     normalizer.py    ← NormalizedMessage dataclass；统一路由 pipeline
     slack.py         ← slack-bolt Socket Mode 适配器
     telegram.py      ← python-telegram-bot polling 适配器
+  tui/               ← 交互式终端 TUI(agent 服务的又一客户端，前后端分离+协议)
+    protocol.py      ← newline-delimited JSON-RPC 2.0 编解码 + 方法/事件常量
+    transport.py     ← Transport 抽象 + WSTransport(peer-gone 分类)
+    dispatch.py      ← 单 dispatch：send/abort/approve/session.*；run_stream→event
+    backend.py       ← 客户端 GatewayBackend(websockets 连接、收发协程、重连钩子)
+    render.py        ← rich 渲染(流式文本/工具面板/审批提示/状态行)，Console 可注入
+    commands.py      ← 斜杠命令解析 + prompt_toolkit Completer
+    app.py           ← AppController + prompt_toolkit 主循环；fleetent-tui 入口
+  server.py 另新增 @app.websocket("/ws") 挂接 tui dispatch(SSE /chat 不变)
 ```
 
 ### Forbidden Patterns
@@ -191,6 +200,7 @@ uv run mypy src                  # 类型检查
 uv run fleetent "hello"        # CLI
 uv run fleetent-admin create-user --name "Alice"  # 用户管理
 uvicorn fleetent.server:app --reload --port 8765  # HTTP 服务（默认端口 8765）
+uv run fleetent-tui --token ma-<key>              # 交互式终端 TUI（连 /ws，默认本地 server）
 ```
 
 ---
