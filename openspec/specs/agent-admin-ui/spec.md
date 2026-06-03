@@ -73,16 +73,16 @@ The Agents tab SHALL let an admin hard-delete an agent from a per-row "Delete" a
 
 ### Requirement: Agent template editing
 
-The admin console SHALL provide a dedicated **Templates** tab (under the Agents group) that lets an admin create, edit, and delete agent templates through a template modal capturing `id`, `display_name`, `allowed_tools`, and `system_prompt`. A "New template" control SHALL appear in the Templates tab and per-template "Edit"/"Delete" actions SHALL appear in the templates list; all template write controls SHALL be hidden from viewers. The Agents tab SHALL no longer contain template controls.
+The admin console SHALL keep a single **Agents** sidebar item and surface **Agents** and **Templates** as two sub-tabs inside the Agents page header. Selecting the Templates sub-tab SHALL let an admin create, edit, and delete agent templates through a template modal capturing `id`, `display_name`, `allowed_tools`, and `system_prompt`. A "New template" control SHALL appear in the Templates sub-tab and per-template "Edit"/"Delete" actions SHALL appear in the templates list; all template write controls SHALL be hidden from viewers. There SHALL be no separate Templates sidebar nav item.
 
-#### Scenario: Templates tab is a sibling of Agents
+#### Scenario: Templates is an Agents-page sub-tab
 
-- **WHEN** the admin console renders the sidebar navigation
-- **THEN** a `Templates` nav item (its own `#tab-templates` section) appears under the Agents group, separate from the Agents tab, and the Agents tab no longer shows a "Templates" toggle
+- **WHEN** the admin opens the Agents tab
+- **THEN** the page header shows `Agents` and `Templates` sub-tabs, there is no separate Templates sidebar nav item, and selecting the Templates sub-tab shows the templates list
 
 #### Scenario: Admin creates a template
 
-- **WHEN** an admin opens the Templates tab, opens the template modal, fills id/display_name/allowed_tools/system_prompt, and saves
+- **WHEN** an admin opens the Templates sub-tab, opens the template modal, fills id/display_name/allowed_tools/system_prompt, and saves
 - **THEN** the console calls `POST /admin/agent-templates` and the new template appears in the list
 
 #### Scenario: Admin edits a template
@@ -97,5 +97,5 @@ The admin console SHALL provide a dedicated **Templates** tab (under the Agents 
 
 #### Scenario: Viewer cannot edit templates
 
-- **WHEN** a viewer opens the Templates tab
+- **WHEN** a viewer opens the Templates sub-tab
 - **THEN** the "New template" control and per-template Edit/Delete actions are hidden
