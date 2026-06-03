@@ -2194,7 +2194,7 @@ def _tool_names_sent(client) -> set[str]:
 
 
 async def test_run_off_mode_excludes_run_code(mock_client, monkeypatch):
-    from fleetent.sandbox_enablement import Mode
+    from fleetent.integrations.sandbox.enablement import Mode
 
     monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
@@ -2203,7 +2203,7 @@ async def test_run_off_mode_excludes_run_code(mock_client, monkeypatch):
 
 
 async def test_run_selective_excludes_run_code_when_not_opted_in(mock_client, monkeypatch):
-    from fleetent.sandbox_enablement import Mode
+    from fleetent.integrations.sandbox.enablement import Mode
 
     monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
@@ -2214,7 +2214,7 @@ async def test_run_selective_excludes_run_code_when_not_opted_in(mock_client, mo
 
 
 async def test_run_selective_includes_run_code_when_opted_in(mock_client, monkeypatch):
-    from fleetent.sandbox_enablement import Mode
+    from fleetent.integrations.sandbox.enablement import Mode
 
     monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
@@ -2227,7 +2227,7 @@ async def test_run_selective_includes_run_code_when_opted_in(mock_client, monkey
 
 
 async def test_run_all_includes_run_code_when_unset(mock_client, monkeypatch):
-    from fleetent.sandbox_enablement import Mode
+    from fleetent.integrations.sandbox.enablement import Mode
 
     monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
@@ -2236,7 +2236,7 @@ async def test_run_all_includes_run_code_when_unset(mock_client, monkeypatch):
 
 
 async def test_run_all_excludes_run_code_when_explicit_false(mock_client, monkeypatch):
-    from fleetent.sandbox_enablement import Mode
+    from fleetent.integrations.sandbox.enablement import Mode
 
     monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
@@ -2257,7 +2257,7 @@ async def test_run_no_sandbox_mode_does_not_filter_run_code(mock_client, monkeyp
 
 
 async def test_run_stream_off_mode_excludes_run_code(mock_client, monkeypatch):
-    from fleetent.sandbox_enablement import Mode
+    from fleetent.integrations.sandbox.enablement import Mode
 
     monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
     mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("done"))
@@ -2267,7 +2267,7 @@ async def test_run_stream_off_mode_excludes_run_code(mock_client, monkeypatch):
 
 
 async def test_run_stream_all_includes_run_code(mock_client, monkeypatch):
-    from fleetent.sandbox_enablement import Mode
+    from fleetent.integrations.sandbox.enablement import Mode
 
     monkeypatch.setattr(al, "get_schemas", lambda: [_schema("run_code"), _schema("calculate")])
     mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("done"))
@@ -2279,8 +2279,8 @@ async def test_run_stream_all_includes_run_code(mock_client, monkeypatch):
 def test_run_sync_loads_plugins(monkeypatch):
     from unittest.mock import AsyncMock, MagicMock
 
+    import fleetent.integrations.sandbox.enablement as se
     import fleetent.plugin_loader as pl
-    import fleetent.sandbox_enablement as se
 
     async def fake_run(messages, **kw):
         return "done"
@@ -2299,7 +2299,7 @@ def test_run_sync_loads_plugins(monkeypatch):
 def test_run_sync_passes_effective_sandbox_mode(monkeypatch):
     from unittest.mock import AsyncMock
 
-    import fleetent.sandbox_enablement as se
+    import fleetent.integrations.sandbox.enablement as se
 
     captured: dict = {}
 

@@ -56,8 +56,8 @@ def test_read_file_missing_file():
 
 def _make_manager(mock_client, scope=None):
     """Build a SandboxManager with injected resources/clock around a mock client."""
-    from fleetent.sandbox_config import SandboxResources
-    from fleetent.sandbox_manager import SandboxManager, Scope
+    from fleetent.integrations.sandbox.config import SandboxResources
+    from fleetent.integrations.sandbox.manager import SandboxManager, Scope
 
     return SandboxManager(
         client=mock_client,
@@ -88,7 +88,7 @@ async def test_run_code_returns_stdout(monkeypatch):
     from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
 
     client = _mock_lifecycle_client("cid-123")
     client.exec = AsyncMock(return_value=ExecResult(stdout="42\n", stderr="", exit_code=0))
@@ -105,7 +105,7 @@ async def test_run_code_includes_stderr(monkeypatch):
     from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
 
     client = _mock_lifecycle_client("cid-456")
     client.exec = AsyncMock(
@@ -145,7 +145,7 @@ async def test_run_code_normal_path_does_not_destroy_with_live_token(monkeypatch
 
     import fleetent.tools as tl
     from fleetent.cancellation import CancelToken
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
 
     client = _mock_lifecycle_client("cid-ok")
     client.exec = AsyncMock(return_value=ExecResult(stdout="42\n", stderr="", exit_code=0))
@@ -189,7 +189,7 @@ async def test_run_code_cancel_forgets_registry_then_reacquires(monkeypatch):
 
     import fleetent.tools as tl
     from fleetent.cancellation import CancelToken
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
 
     async def never_returns(ws_id, command):
         await asyncio.Event().wait()
@@ -243,7 +243,7 @@ async def test_run_code_logs_sandbox_exec_metadata(monkeypatch):
     from unittest.mock import AsyncMock, MagicMock
 
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
 
     client = _mock_lifecycle_client("cid-trace")
     client.exec = AsyncMock(return_value=ExecResult(stdout="héllo\n", stderr="warn", exit_code=2))
@@ -299,7 +299,7 @@ async def test_run_code_trace_failure_does_not_block_result(monkeypatch, caplog)
     from unittest.mock import AsyncMock, MagicMock
 
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
 
     client = _mock_lifecycle_client("cid-trace-fail")
     client.exec = AsyncMock(return_value=ExecResult(stdout="42\n", stderr="", exit_code=0))
@@ -369,7 +369,7 @@ async def test_run_code_uses_session_id_from_tool_context(monkeypatch):
     from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
     from fleetent.tool_registry import ToolContext
 
     client = _mock_lifecycle_client("cid-ctx")
@@ -389,7 +389,7 @@ async def test_run_code_degrades_safely_without_tool_context(monkeypatch):
     from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
 
     client = _mock_lifecycle_client("cid-default")
     client.exec = AsyncMock(return_value=ExecResult(stdout="hi\n", stderr="", exit_code=0))
@@ -407,7 +407,7 @@ async def test_run_code_injects_agent_sandbox_env(monkeypatch):
     from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
     from fleetent.tool_registry import ToolContext
 
     client = _mock_lifecycle_client("cid-env")
@@ -429,7 +429,7 @@ async def test_run_code_sandbox_env_filters_sensitive(monkeypatch):
     from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
     from fleetent.tool_registry import ToolContext
 
     client = _mock_lifecycle_client("cid-env2")
@@ -452,7 +452,7 @@ async def test_run_code_no_sandbox_env_passes_empty(monkeypatch):
     from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
     from fleetent.tool_registry import ToolContext
 
     client = _mock_lifecycle_client("cid-env3")
@@ -472,9 +472,9 @@ async def test_run_code_no_sandbox_env_passes_empty(monkeypatch):
 async def test_run_code_truncates_stdout(monkeypatch):
     from unittest.mock import AsyncMock
 
-    import fleetent.sandbox_output_truncation as sot
+    import fleetent.integrations.sandbox.output_truncation as sot
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
 
     monkeypatch.setattr(sot, "MAX_STDOUT_BYTES", 500)
     big = "Z" * 100_000
@@ -491,9 +491,9 @@ async def test_run_code_truncates_stdout(monkeypatch):
 async def test_run_code_truncates_stderr_independently(monkeypatch):
     from unittest.mock import AsyncMock
 
-    import fleetent.sandbox_output_truncation as sot
+    import fleetent.integrations.sandbox.output_truncation as sot
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
 
     monkeypatch.setattr(sot, "MAX_STDERR_BYTES", 300)
     client = _mock_lifecycle_client("cid-err")
@@ -512,9 +512,9 @@ async def test_run_code_trace_records_original_bytes(monkeypatch):
     from unittest.mock import AsyncMock
 
     import fleetent.eval_logger as el
-    import fleetent.sandbox_output_truncation as sot
+    import fleetent.integrations.sandbox.output_truncation as sot
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
 
     monkeypatch.setattr(sot, "MAX_STDOUT_BYTES", 500)
     captured: dict = {}
@@ -550,8 +550,8 @@ def test_sandbox_timeout_classification_reads_ar5_table():
 
 
 def _timeout_manager(client, exec_timeout):
-    from fleetent.sandbox_config import SandboxResources
-    from fleetent.sandbox_manager import SandboxManager, Scope
+    from fleetent.integrations.sandbox.config import SandboxResources
+    from fleetent.integrations.sandbox.manager import SandboxManager, Scope
 
     return SandboxManager(
         client=client,
@@ -576,7 +576,7 @@ async def test_run_code_sandbox_timeout_kills_and_classifies(monkeypatch):
     client = _mock_lifecycle_client("cid-timeout")
     client.exec = never_returns
     monkeypatch.setattr(tl, "_MANAGER", _timeout_manager(client, exec_timeout=0))
-    monkeypatch.setattr("fleetent.sandbox_client._KILL_GRACE_SECONDS", 0.001)
+    monkeypatch.setattr("fleetent.integrations.sandbox.client._KILL_GRACE_SECONDS", 0.001)
 
     result = await asyncio.wait_for(tl.run_code(code="while True: pass"), timeout=2.0)
     assert "超时" in result  # sandbox-timeout text, not the generic cancel text
@@ -596,7 +596,7 @@ async def test_run_code_external_cancel_kills_but_not_timeout(monkeypatch):
     client = _mock_lifecycle_client("cid-cancel2")
     client.exec = never_returns
     monkeypatch.setattr(tl, "_MANAGER", _timeout_manager(client, exec_timeout=30))
-    monkeypatch.setattr("fleetent.sandbox_client._KILL_GRACE_SECONDS", 0.001)
+    monkeypatch.setattr("fleetent.integrations.sandbox.client._KILL_GRACE_SECONDS", 0.001)
 
     token = CancelToken()
     token.cancel()  # external cancel before the (30s) sandbox deadline
@@ -613,7 +613,7 @@ async def test_run_code_within_timeout_returns_normally(monkeypatch):
     from unittest.mock import AsyncMock
 
     import fleetent.tools as tl
-    from fleetent.sandbox_client import ExecResult
+    from fleetent.integrations.sandbox.client import ExecResult
 
     client = _mock_lifecycle_client("cid-ok")
     client.exec = AsyncMock(return_value=ExecResult(stdout="42\n", stderr="", exit_code=0))

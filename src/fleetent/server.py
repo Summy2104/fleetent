@@ -31,6 +31,13 @@ from fleetent.im_gateway import slack as slack_adapter
 from fleetent.im_gateway import telegram as telegram_adapter
 from fleetent.integrations import mcp as mcp_client
 from fleetent.integrations.mcp import McpServerConfig
+from fleetent.integrations.sandbox import (
+    Mode,
+    SandboxClient,
+    cleanup_orphans,
+    load_sandbox_mode,
+    resolve_effective_mode,
+)
 from fleetent.model_router import ROUTES
 from fleetent.observability.startup_diagnostics import (
     diagnose_database_writable,
@@ -50,9 +57,6 @@ from fleetent.platform.resource_monitoring import collectors, monitor_admin_api
 from fleetent.platform.skill_management import skill_admin_api
 from fleetent.platform.user_management import api_key_store, user_admin_api
 from fleetent.plugin_loader import expand_plugin_patterns, load_plugins
-from fleetent.sandbox_cleanup import cleanup_orphans
-from fleetent.sandbox_client import SandboxClient
-from fleetent.sandbox_enablement import Mode, load_sandbox_mode, resolve_effective_mode
 from fleetent.skill_registry import scan as scan_skills
 
 logger = logging.getLogger(__name__)

@@ -116,8 +116,8 @@ async def test_mcp_yaml_missing_skipped_gracefully(tmp_path, monkeypatch):
 def test_health_exposes_sandbox_mode_when_docker_available(tmp_path, monkeypatch):
     """When Docker is available, /health reports the configured effective mode."""
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    import fleetent.sandbox_client as sc
-    import fleetent.sandbox_enablement as se
+    import fleetent.integrations.sandbox.client as sc
+    import fleetent.integrations.sandbox.enablement as se
     import fleetent.server as srv
 
     monkeypatch.setattr(srv, "load_sandbox_mode", lambda: se.Mode.ALL)
@@ -134,8 +134,8 @@ def test_health_exposes_sandbox_mode_when_docker_available(tmp_path, monkeypatch
 def test_health_degrades_sandbox_mode_when_docker_unavailable(tmp_path, monkeypatch):
     """Docker unavailable degrades the effective mode to off, surfaced in /health."""
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    import fleetent.sandbox_client as sc
-    import fleetent.sandbox_enablement as se
+    import fleetent.integrations.sandbox.client as sc
+    import fleetent.integrations.sandbox.enablement as se
     import fleetent.server as srv
 
     monkeypatch.setattr(srv, "load_sandbox_mode", lambda: se.Mode.ALL)
@@ -154,7 +154,7 @@ def test_health_degrades_sandbox_mode_when_docker_unavailable(tmp_path, monkeypa
 def test_lifespan_does_not_crash_when_docker_unavailable(tmp_path, monkeypatch):
     """Platform boots normally even when the Docker probe fails (graceful degrade)."""
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    import fleetent.sandbox_client as sc
+    import fleetent.integrations.sandbox.client as sc
     import fleetent.server as srv
 
     monkeypatch.setattr(sc.SandboxClient, "docker_available", AsyncMock(return_value=False))
@@ -170,7 +170,7 @@ def test_lifespan_does_not_crash_when_docker_unavailable(tmp_path, monkeypatch):
 def test_lifespan_runs_cleanup_once_when_docker_available(tmp_path, monkeypatch):
     """Docker available -> orphan cleanup is invoked exactly once at startup."""
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    import fleetent.sandbox_client as sc
+    import fleetent.integrations.sandbox.client as sc
     import fleetent.server as srv
 
     monkeypatch.setattr(sc.SandboxClient, "docker_available", AsyncMock(return_value=True))
@@ -187,7 +187,7 @@ def test_lifespan_skips_cleanup_when_docker_unavailable(tmp_path, monkeypatch):
     """Docker unavailable -> cleanup is skipped (reuses the SB3 probe result, no
     second probe drives the decision)."""
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    import fleetent.sandbox_client as sc
+    import fleetent.integrations.sandbox.client as sc
     import fleetent.server as srv
 
     probe = AsyncMock(return_value=False)
@@ -207,7 +207,7 @@ def test_lifespan_skips_cleanup_when_docker_unavailable(tmp_path, monkeypatch):
 def test_lifespan_cleanup_failure_does_not_block_startup(tmp_path, monkeypatch):
     """A cleanup error is logged but the platform still boots (D4 best-effort)."""
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    import fleetent.sandbox_client as sc
+    import fleetent.integrations.sandbox.client as sc
     import fleetent.server as srv
 
     monkeypatch.setattr(sc.SandboxClient, "docker_available", AsyncMock(return_value=True))

@@ -101,7 +101,7 @@ src/fleetent/
     reflection.py   ← 反思报告与 proposal：读取 traces / memory / KB 信号，只读趋势，不自动写回
   integrations/
     mcp/            ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
-  sandbox_*.py       ← Docker CLI 封装：隔离 Python 执行（仍平铺，迁移目标 integrations/sandbox/）
+    sandbox/        ← Docker CLI 封装：隔离 Python 执行（已包化；旧 sandbox_*.py 为 re-export shim）
   governance/
     permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
     agent_policy.py    ← fnmatch 工具访问检查

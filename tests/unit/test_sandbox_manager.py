@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-from fleetent.sandbox_config import NetworkPolicy, SandboxResources
-from fleetent.sandbox_manager import SandboxManager, Scope
+from fleetent.integrations.sandbox.config import NetworkPolicy, SandboxResources
+from fleetent.integrations.sandbox.manager import SandboxManager, Scope
 
 
 def _mock_client() -> MagicMock:

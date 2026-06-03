@@ -475,7 +475,7 @@ def test_serialize_does_not_mutate_original_tool_call_msg():
 def test_serialize_reuses_sandbox_secrets_rule(monkeypatch):
     import json as _json
 
-    import fleetent.sandbox_secrets as ss
+    import fleetent.integrations.sandbox.secrets as ss
     from fleetent.eval_logger import REDACTED_PLACEHOLDER, _serialize
 
     # A name not normally sensitive becomes sensitive once the shared rule is
