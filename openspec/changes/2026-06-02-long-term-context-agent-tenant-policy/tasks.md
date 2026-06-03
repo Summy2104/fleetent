@@ -11,14 +11,14 @@
 - [x] 2.2 Verify red: run `uv run pytest tests/integration -x -q`
 - [x] 2.3 Implement agent ownership migration / store boundary or wire to existing agent management public API
 - [x] 2.4 Verify green: run `uv run pytest tests/integration -x -q`
-- [ ] 2.5 Write failing tests: Alembic creates `long_term_context_policies` with tenant default + agent override fields for source enablement and budgets
-- [ ] 2.6 Verify red: run `uv run pytest tests/unit -x -q`
-- [ ] 2.7 Implement policy migration/store boundary with named parameters
-- [ ] 2.8 Verify green: run `uv run pytest tests/unit -x -q`
-- [ ] 2.9 Write failing tests: empty tenant_id, invalid budget/top_k, and arbitrary Shared Memory scope grants fail fast
-- [ ] 2.10 Verify red: run `uv run pytest tests/unit -x -q`
-- [ ] 2.11 Implement validation
-- [ ] 2.12 Verify green: run `uv run pytest tests/unit -x -q`
+- [x] 2.5 Write failing tests: Alembic creates `long_term_context_policies` with tenant default + agent override fields for source enablement and budgets
+- [x] 2.6 Verify red: run `uv run pytest tests/unit -x -q`
+- [x] 2.7 Implement policy migration/store boundary with named parameters
+- [x] 2.8 Verify green: run `uv run pytest tests/unit -x -q`
+- [x] 2.9 Write failing tests: empty tenant_id, invalid budget/top_k, and arbitrary Shared Memory scope grants fail fast
+- [x] 2.10 Verify red: run `uv run pytest tests/unit -x -q`
+- [x] 2.11 Implement validation
+- [x] 2.12 Verify green: run `uv run pytest tests/unit -x -q`
 
 ## 3. Policy resolution
 
