@@ -2,8 +2,8 @@
 
 ## 1. OpenSpec proposal
 
-- [ ] 1.1 Create proposal, design, tasks, and long-term-ctx spec delta
-- [ ] 1.2 Run `openspec validate 2026-06-02-long-term-context-agent-tenant-policy --strict`
+- [x] 1.1 Create proposal, design, tasks, and long-term-ctx spec delta
+- [x] 1.2 Run `openspec validate 2026-06-02-long-term-context-agent-tenant-policy --strict`
 
 ## 2. Policy model and persistence
 
@@ -33,18 +33,18 @@
 
 ## 4. Policy-aware context building
 
-- [ ] 4.1 Write failing tests: enabled tenant Shared Memory calls `search_shared_memory("tenant", agent.tenant_id, ...)` and records shared source attribution
-- [ ] 4.2 Verify red: run `uv run pytest tests/unit -x -q`
-- [ ] 4.3 Implement tenant Shared Memory provider integration
-- [ ] 4.4 Verify green: run `uv run pytest tests/unit -x -q`
-- [ ] 4.5 Write failing tests: enabled team Shared Memory calls `search_shared_memory("team", agent.team_id, ...)`; empty team_id skips with budget decision
-- [ ] 4.6 Verify red: run `uv run pytest tests/unit -x -q`
-- [ ] 4.7 Implement team Shared Memory provider integration and skip reason
-- [ ] 4.8 Verify green: run `uv run pytest tests/unit -x -q`
-- [ ] 4.9 Write failing tests: disabled source is not queried and budget decisions explain exclusion
-- [ ] 4.10 Verify red: run `uv run pytest tests/unit -x -q`
-- [ ] 4.11 Implement source enablement and budget decision metadata
-- [ ] 4.12 Verify green: run `uv run pytest tests/unit -x -q`
+- [x] 4.1 Write failing tests: enabled tenant Shared Memory calls `search_shared_memory("tenant", agent.tenant_id, ...)` and records shared source attribution
+- [x] 4.2 Verify red: run `uv run pytest tests/unit -x -q`
+- [x] 4.3 Implement tenant Shared Memory provider integration
+- [x] 4.4 Verify green: run `uv run pytest tests/unit -x -q`
+- [x] 4.5 Write failing tests: enabled team Shared Memory calls `search_shared_memory("team", agent.team_id, ...)`; empty team_id skips with budget decision
+- [x] 4.6 Verify red: run `uv run pytest tests/unit -x -q`
+- [x] 4.7 Implement team Shared Memory provider integration and skip reason
+- [x] 4.8 Verify green: run `uv run pytest tests/unit -x -q`
+- [x] 4.9 Write failing tests: disabled source is not queried and budget decisions explain exclusion
+- [x] 4.10 Verify red: run `uv run pytest tests/unit -x -q`
+- [x] 4.11 Implement source enablement and budget decision metadata
+- [x] 4.12 Verify green: run `uv run pytest tests/unit -x -q`
 
 ## 5. Evaluation and docs
 
