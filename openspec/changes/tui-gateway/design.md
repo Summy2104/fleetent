@@ -68,7 +68,9 @@ fleetent 是 on-prem Lean Agent 平台,IM(Slack/Telegram)为主战场,另有单�
 
 ### D5 — 审批流:`approval_required` 事件 + `approve` 方法
 
-agent 触发 medium/high 风险工具时,`permission_gate.request_approval` 阻塞等待;网关在该 run 的事件流中推 `approval_required{approval_id, tool, risk, args}`。客户端渲染审批提示,用户 `/approve` → 发 `approve{approval_id, decision}` → 网关转 `permission_gate.resolve(approval_id, decision)` 放行。**复用现有 `permission_gate` 与 `/approvals`,不改其行为**;WS 只是又一个 resolve 入口。
+用户 `/approve` → 发 `approve{approval_id, decision}` → 网关转 `permission_gate.resolve(approval_id, decision, approver_user_id)` 放行/拒绝。**复用现有 `permission_gate` 与 `/approvals`,不改其行为**;WS 只是又一个 resolve 入口。
+
+> **v1 范围修正(实施时发现)**:理想流程里 agent 触发 medium/high 工具时网关在事件流中推 `approval_required`、客户端渲染提示。但当前 `run_stream` 设 `include_approval=False`——**流式路径不做审批门控**(只有非流式 `run()` 门控),因此流式 run 不会产生 `approval_required`,网关也无从推送。本 change 不改 `run_stream` 契约(非目标),故 **v1 只实现 `approve`(解决)这一半**:它对任何来源的 approval 都能 resolve,与 `/approvals` 等价。让流式路径门控并发出 `approval_required` 是独立变更 **`streaming-approval-gating`**(给 `run_stream` 加可选 `include_approval` + yield approval 事件,同时影响 SSE `/chat`),落地后客户端审批渲染再启用。
 
 ### D6 — 认证:WS 握手校验 Bearer `ma-` key
 

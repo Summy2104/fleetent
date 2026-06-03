@@ -297,6 +297,16 @@ def _read(session_id: str) -> tuple[list[dict[str, object]], dict[str, object]]:
     return list(raw.get("messages", [])), dict(raw.get("meta", {}))
 
 
+def list_session_ids(prefix: str = "") -> list[str]:
+    """Return persisted session ids, optionally filtered to those under ``prefix``.
+
+    Additive read helper (tui-gateway): lets the TUI gateway enumerate a user's
+    sessions without changing any existing session contract. Ids are derived the
+    same way as the maintenance scanners (recurses subdirs, skips ``.json.tmp``).
+    """
+    return sorted(sid for sid, _size, _mtime in _scan_sessions() if sid.startswith(prefix))
+
+
 async def load(session_id: str) -> list[dict[str, object]]:
     messages, _ = _read(session_id)
     return messages

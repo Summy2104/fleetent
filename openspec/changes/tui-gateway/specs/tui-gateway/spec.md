@@ -56,21 +56,23 @@
 - **WHEN** 客户端 abort 一个不存在或已结束的 run_id
 - **THEN** 系统返回 `{ok:false}` 或 `{aborted:false}` 且不崩连接
 
-### Requirement: 审批流经 WebSocket 暴露
+### Requirement: 审批解决经 WebSocket 暴露
 
-当 agent 触发 medium/high 风险工具进入审批等待时,系统 SHALL 在该 run 的事件流中推送 `approval_required` 通知(含 `approval_id`、工具名、风险级别、参数)。系统 SHALL 支持 `approve` 请求 `{approval_id, decision}`,将决定转交既有 `permission_gate` 解析。复用既有审批机制,不改变其行为。
+系统 SHALL 支持 `approve` 请求 `{approval_id, decision}`,将决定(`approved`/`rejected`)转交既有 `permission_gate` 解析,复用既有审批机制、不改变其行为。这是又一个审批解决入口,与既有 `POST /approvals/{id}/resolve` 等价。
 
-#### Scenario: 推送待审批
-- **WHEN** agent 调用一个需审批的工具
-- **THEN** 系统推送 `params.type: "approval_required"`、含 `approval_id` 的 `event` 通知
+> **v1 范围说明**:`run_stream`(流式路径)当前不做审批门控(`include_approval=False`),因此流式过程中**不会**产生 `approval_required`,系统在 v1 **不**主动推送该事件。让流式路径门控并发出 `approval_required` 是一个独立的 agent-runtime 变更(`streaming-approval-gating`),落地后客户端的审批渲染再启用。本能力先保证“解决”可用。
 
 #### Scenario: 批准放行
 - **WHEN** 客户端发送 `approve{approval_id, decision:"approved"}`
-- **THEN** 系统调用 permission_gate 解析为通过,被审批工具得以继续
+- **THEN** 系统调用 permission_gate 解析为通过,返回 `{ok:true}`(该 approval 存在时)
 
 #### Scenario: 拒绝
 - **WHEN** 客户端发送 `approve{approval_id, decision:"rejected"}`
 - **THEN** 系统将该审批解析为拒绝
+
+#### Scenario: 非法 decision
+- **WHEN** 客户端发送的 `decision` 不是 `approved`/`rejected`
+- **THEN** 系统回送 JSON-RPC 错误 `code: -32602`(invalid params)
 
 ### Requirement: 会话方法
 
@@ -108,9 +110,10 @@
 - **WHEN** 用户在运行中输入 `/abort`(或按 Ctrl-C)
 - **THEN** 客户端向服务端发送 `abort` 请求中断当前 run
 
-#### Scenario: 就地审批
-- **WHEN** 客户端收到 `approval_required` 事件且用户用 `/approve` 作出决定
+#### Scenario: 审批决定
+- **WHEN** 用户用 `/approve <approval_id> <approved|rejected>` 作出决定
 - **THEN** 客户端发送 `approve` 请求并将决定回传服务端
+- **NOTE** v1 不会收到 `approval_required` 推送(流式路径不门控,见上文范围说明);客户端的 `approval_required` 渲染待 `streaming-approval-gating` 落地后启用
 
 #### Scenario: 工具调用展示
 - **WHEN** 客户端收到 `tool_call`/`tool_result` 事件

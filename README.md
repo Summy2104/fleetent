@@ -38,6 +38,14 @@ curl -s http://localhost:8765/chat \
   -d '{"message": "What is 7 * 8?"}' | grep "^data:"
 ```
 
+**Interactive terminal TUI (`fleetent-tui`):**
+
+```bash
+# Connects to the server's WebSocket gateway (/ws) for a streaming, multi-turn
+# terminal chat with slash commands (/new /session /abort /approve /quit /help).
+uv run fleetent-tui --url ws://127.0.0.1:8765/ws --token ma-abc123...
+```
+
 ## Architecture
 
 ```
