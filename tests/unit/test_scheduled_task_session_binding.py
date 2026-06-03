@@ -1,44 +1,38 @@
 """Tests for cron task <-> session binding (S3)."""
 
-from pathlib import Path
-
 import fleetent.cron_scheduler as cron
 import fleetent.schedule_store as ss
+from tests.integration.test_migrations import apply_migrations
 
 
-# ── schedule_store session_id column (D4) ────────────────────────────────────
+# ── schedule_store session_id column (S3, re-grafted onto main's db.py regime) ──
 
 
 def test_create_persists_session_id(tmp_path, monkeypatch):
-    monkeypatch.setattr(ss, "DB_PATH", tmp_path / "users.db")
+    db = tmp_path / "sched.db"
+    apply_migrations(db)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
     ss.create("daily", "0 9 * * *", "UTC", "u1", None, "report", session_id="cron/daily")
     tasks = ss.list_tasks()
     assert tasks[0]["session_id"] == "cron/daily"
 
 
 def test_create_session_id_defaults_none(tmp_path, monkeypatch):
-    monkeypatch.setattr(ss, "DB_PATH", tmp_path / "users.db")
+    db = tmp_path / "sched.db"
+    apply_migrations(db)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
     ss.create("oneoff", "0 9 * * *", "UTC", "u1", None, "do it")
     assert ss.list_tasks()[0]["session_id"] is None
 
 
-# ── load_cron_yaml session_id (D1) ───────────────────────────────────────────
+# NOTE: zhangyang's S3 also defined cron jobs (with session_id) via config/cron.yaml.
+# main deliberately dropped yaml cron loading in favour of DB-only runtime management
+# (cron_scheduler.test_cron_yaml_loader_is_removed enforces this), so the yaml-loader
+# test was removed during the merge. Session binding itself is preserved via the DB
+# path (schedule_store.create(session_id=) + _fire) — see the tests above/below.
 
 
-def test_load_cron_yaml_session_id(tmp_path):
-    p = tmp_path / "cron.yaml"
-    p.write_text(
-        "jobs:\n"
-        "  - id: j1\n    name: J1\n    cron: '0 9 * * *'\n    user_id: u1\n"
-        "    message: hi\n    session_id: cron/fixed\n"
-        "  - id: j2\n    name: J2\n    cron: '0 9 * * *'\n    user_id: u1\n    message: yo\n"
-    )
-    jobs = {j["id"]: j for j in cron.load_cron_yaml(p)}
-    assert jobs["j1"]["session_id"] == "cron/fixed"
-    assert jobs["j2"]["session_id"] is None
-
-
-# ── _fire binding semantics (D1/D2/D3) ───────────────────────────────────────
+# ── _fire binding semantics ──────────────────────────────────────────────────
 
 
 async def test_fire_independent_semantics_unique_sessions(tmp_path, monkeypatch):
