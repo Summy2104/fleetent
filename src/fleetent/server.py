@@ -186,6 +186,10 @@ def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:
         "id": agent.id,
         "system_prompt": agent.system_prompt,
         "allowed_tools": agent.allowed_tools,
+        "skills_dir": agent.skills_dir,
+        "mcp_server_ids": agent.mcp_server_ids,
+        "model_overrides": agent.model_overrides,
+        "memory_namespace": agent.memory_namespace,
     }
 
 
@@ -198,17 +202,47 @@ def wire_agent_store_seams() -> None:
     def _get_def(name: str) -> dict[str, Any] | None:
         return _agent_def_dict(agent_store.get_by_name(name))
 
-    def _console_create(name: str, system_prompt: str, allowed_tools: list[str]) -> None:
-        agent_store.create_agent(name, system_prompt, allowed_tools)
+    def _console_create(
+        name: str,
+        system_prompt: str,
+        allowed_tools: list[str],
+        skills_dir: str | None = None,
+        mcp_server_ids: list[str] | None = None,
+        model_overrides: dict[str, Any] | None = None,
+        memory_namespace: str = "default",
+    ) -> None:
+        agent_store.create_agent(
+            name,
+            system_prompt,
+            allowed_tools,
+            skills_dir=skills_dir,
+            mcp_server_ids=mcp_server_ids,
+            model_overrides=model_overrides,
+            memory_namespace=memory_namespace,
+        )
 
     def _console_update(
-        name: str, system_prompt: str | None, allowed_tools: list[str] | None
+        name: str,
+        system_prompt: str | None,
+        allowed_tools: list[str] | None,
+        skills_dir: str | None = None,
+        mcp_server_ids: list[str] | None = None,
+        model_overrides: dict[str, Any] | None = None,
+        memory_namespace: str | None = None,
     ) -> None:
         kwargs: dict[str, Any] = {}
         if system_prompt is not None:
             kwargs["system_prompt"] = system_prompt
         if allowed_tools is not None:
             kwargs["allowed_tools"] = allowed_tools
+        if skills_dir is not None:
+            kwargs["skills_dir"] = skills_dir
+        if mcp_server_ids is not None:
+            kwargs["mcp_server_ids"] = mcp_server_ids
+        if model_overrides is not None:
+            kwargs["model_overrides"] = model_overrides
+        if memory_namespace is not None:
+            kwargs["memory_namespace"] = memory_namespace
         agent_store.create_version(name, **kwargs)
 
     def _console_delete(name: str) -> bool:

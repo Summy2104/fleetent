@@ -9,7 +9,7 @@ snapshot. Ownership (tenant_id/team_id) lives on ``agents``.
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,6 +28,10 @@ class Agent:
     active_version_id: int | None = None
     tenant_id: str = "default"
     team_id: str | None = None
+    skills_dir: str | None = None
+    mcp_server_ids: list[str] | None = None
+    model_overrides: dict[str, Any] = field(default_factory=dict)
+    memory_namespace: str = "default"
 
 
 @dataclass
@@ -108,6 +112,10 @@ def create_agent(
         active_version_id=version_id,
         tenant_id=tenant_id,
         team_id=team_id,
+        skills_dir=skills_dir,
+        mcp_server_ids=mcp_server_ids,
+        model_overrides=model_overrides or {},
+        memory_namespace=memory_namespace,
     )
 
 
@@ -190,6 +198,14 @@ def get_by_name(name: str) -> Agent | None:
         active_version_id=int(agent["active_version_id"]),
         tenant_id=str(agent["tenant_id"]) if agent["tenant_id"] is not None else "default",
         team_id=str(agent["team_id"]) if agent["team_id"] is not None else None,
+        skills_dir=version["skills_dir"],
+        mcp_server_ids=(
+            None if version["mcp_server_ids"] is None else json.loads(version["mcp_server_ids"])
+        ),
+        model_overrides=json.loads(version["model_overrides"])
+        if version["model_overrides"]
+        else {},
+        memory_namespace=str(version["memory_namespace"]),
     )
 
 

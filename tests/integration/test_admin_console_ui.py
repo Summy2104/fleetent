@@ -229,6 +229,37 @@ def test_agents_crud_functions_present():
         assert fn in html, fn
 
 
+def test_agents_modal_version_config_inputs_present():
+    html = ADMIN_HTML
+    for field_id in (
+        "ag-skills-dir",
+        "ag-mcp-server-ids",
+        "ag-model-overrides",
+        "ag-memory-namespace",
+    ):
+        assert f'id="{field_id}"' in html, field_id
+
+
+def test_agents_save_and_edit_reference_version_config_fields():
+    html = ADMIN_HTML
+    save = html.split("function agSave", 1)[1].split("function agDelete", 1)[0]
+    for field_id in (
+        "ag-skills-dir",
+        "ag-mcp-server-ids",
+        "ag-model-overrides",
+        "ag-memory-namespace",
+    ):
+        assert field_id in save, f"agSave missing {field_id}"
+    edit = html.split("function agEdit", 1)[1].split("function agCloseModal", 1)[0]
+    for field_id in (
+        "ag-skills-dir",
+        "ag-mcp-server-ids",
+        "ag-model-overrides",
+        "ag-memory-namespace",
+    ):
+        assert field_id in edit, f"agEdit missing {field_id}"
+
+
 def test_agents_crud_endpoints_wired():
     html = ADMIN_HTML
     # create = POST /agents, delete = DELETE with confirm header, edit = PATCH

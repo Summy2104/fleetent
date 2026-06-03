@@ -36,19 +36,39 @@ _ADMIN_ROLES = {"admin", "built_in_admin"}
 
 
 def get_agent_def(name: str) -> dict[str, Any] | None:
-    """Resolve an agent's active definition (id/system_prompt/allowed_tools)."""
+    """Resolve an agent's active definition.
+
+    Returns id/system_prompt/allowed_tools plus the per-version config fields
+    skills_dir/mcp_server_ids/model_overrides/memory_namespace.
+    """
     return None
 
 
-def create_agent_def(name: str, system_prompt: str, allowed_tools: list[str]) -> None:
+def create_agent_def(
+    name: str,
+    system_prompt: str,
+    allowed_tools: list[str],
+    skills_dir: str | None = None,
+    mcp_server_ids: list[str] | None = None,
+    model_overrides: dict[str, Any] | None = None,
+    memory_namespace: str = "default",
+) -> None:
     """Create a new agent definition (no bindings). Bridges agent_store.create_agent."""
     return None
 
 
-def update_agent_def(name: str, system_prompt: str | None, allowed_tools: list[str] | None) -> None:
+def update_agent_def(
+    name: str,
+    system_prompt: str | None,
+    allowed_tools: list[str] | None,
+    skills_dir: str | None = None,
+    mcp_server_ids: list[str] | None = None,
+    model_overrides: dict[str, Any] | None = None,
+    memory_namespace: str | None = None,
+) -> None:
     """Edit an agent by snapshotting a new active version. Bridges create_version.
 
-    ``None`` fields are left unchanged.
+    ``None`` fields are left unchanged (inherited from the prior active version).
     """
     return None
 
@@ -116,11 +136,19 @@ class CreateBody(BaseModel):
     name: str
     system_prompt: str = ""
     allowed_tools: list[str] = []
+    skills_dir: str | None = None
+    mcp_server_ids: list[str] | None = None
+    model_overrides: dict[str, Any] = {}
+    memory_namespace: str = "default"
 
 
 class UpdateBody(BaseModel):
     system_prompt: str | None = None
     allowed_tools: list[str] | None = None
+    skills_dir: str | None = None
+    mcp_server_ids: list[str] | None = None
+    model_overrides: dict[str, Any] | None = None
+    memory_namespace: str | None = None
 
 
 # --- templates (literal path before /{name}) ----------------------------------
@@ -165,6 +193,10 @@ def _def_response(name: str) -> dict[str, Any]:
     if agent is not None:
         out["system_prompt"] = agent["system_prompt"]
         out["allowed_tools"] = agent["allowed_tools"]
+        out["skills_dir"] = agent.get("skills_dir")
+        out["mcp_server_ids"] = agent.get("mcp_server_ids")
+        out["model_overrides"] = agent.get("model_overrides", {})
+        out["memory_namespace"] = agent.get("memory_namespace", "default")
     return out
 
 
@@ -173,7 +205,15 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
     user = _require_admin(authorization)
     if get_agent_def(body.name) is not None:
         raise HTTPException(status_code=409, detail="agent already exists")
-    create_agent_def(body.name, body.system_prompt, body.allowed_tools)
+    create_agent_def(
+        body.name,
+        body.system_prompt,
+        body.allowed_tools,
+        body.skills_dir,
+        body.mcp_server_ids,
+        body.model_overrides,
+        body.memory_namespace,
+    )
     agent_admin_store.set_provenance(body.name, "adhoc")
     agent_admin_store.enable(body.name)
     audit_log.write_audit(user.id, "agent.create", "agent", body.name)
@@ -196,7 +236,15 @@ def update_agent(
     user = _require_admin(authorization)
     if get_agent_def(name) is None:
         raise HTTPException(status_code=404, detail="agent not found")
-    update_agent_def(name, body.system_prompt, body.allowed_tools)
+    update_agent_def(
+        name,
+        body.system_prompt,
+        body.allowed_tools,
+        body.skills_dir,
+        body.mcp_server_ids,
+        body.model_overrides,
+        body.memory_namespace,
+    )
     agent_admin_store.mark_drift(name)  # no-op unless provenance is managed
     audit_log.write_audit(user.id, "agent.update", "agent", name)
     return _def_response(name)
@@ -277,7 +325,15 @@ def clone_agent(
         raise HTTPException(status_code=404, detail="source agent not found")
     if get_agent_def(body.new_name) is not None:
         raise HTTPException(status_code=409, detail="target name already exists")
-    create_agent_def(body.new_name, src["system_prompt"], src["allowed_tools"])
+    create_agent_def(
+        body.new_name,
+        src["system_prompt"],
+        src["allowed_tools"],
+        src.get("skills_dir"),
+        src.get("mcp_server_ids"),
+        src.get("model_overrides", {}),
+        src.get("memory_namespace", "default"),
+    )
     # clone is a fresh adhoc agent with no bindings and default enabled status
     agent_admin_store.set_provenance(body.new_name, "adhoc")
     agent_admin_store.enable(body.new_name)

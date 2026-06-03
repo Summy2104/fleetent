@@ -119,7 +119,9 @@ def test_clone_copies_def_no_bindings(client, monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        api, "create_agent_def", lambda n, sp, at: created.update(name=n, sp=sp, at=at)
+        api,
+        "create_agent_def",
+        lambda n, sp, at, *a, **k: created.update(name=n, sp=sp, at=at),
     )
     token, _ = _session_for("admin")
     r = client.post("/admin/agents/ops/clone", headers=_hdr(token), json={"new_name": "ops2"})
@@ -169,14 +171,41 @@ def _wire_real_store(monkeypatch):
         a = agent_store.get_by_name(name)
         if a is None:
             return None
-        return {"id": a.id, "system_prompt": a.system_prompt, "allowed_tools": a.allowed_tools}
+        return {
+            "id": a.id,
+            "system_prompt": a.system_prompt,
+            "allowed_tools": a.allowed_tools,
+            "skills_dir": a.skills_dir,
+            "mcp_server_ids": a.mcp_server_ids,
+            "model_overrides": a.model_overrides,
+            "memory_namespace": a.memory_namespace,
+        }
 
-    def _update(name, system_prompt, allowed_tools):
+    def _create(name, sp, at, sd=None, mids=None, mo=None, mn="default"):
+        agent_store.create_agent(
+            name,
+            sp,
+            at,
+            skills_dir=sd,
+            mcp_server_ids=mids,
+            model_overrides=mo,
+            memory_namespace=mn,
+        )
+
+    def _update(name, system_prompt, allowed_tools, sd=None, mids=None, mo=None, mn=None):
         kwargs = {}
         if system_prompt is not None:
             kwargs["system_prompt"] = system_prompt
         if allowed_tools is not None:
             kwargs["allowed_tools"] = allowed_tools
+        if sd is not None:
+            kwargs["skills_dir"] = sd
+        if mids is not None:
+            kwargs["mcp_server_ids"] = mids
+        if mo is not None:
+            kwargs["model_overrides"] = mo
+        if mn is not None:
+            kwargs["memory_namespace"] = mn
         agent_store.create_version(name, **kwargs)
 
     def _refs(name):
@@ -184,9 +213,7 @@ def _wire_real_store(monkeypatch):
         return store.references(a.id) if a else {"users": [], "channels": []}
 
     monkeypatch.setattr(api, "get_agent_def", _def)
-    monkeypatch.setattr(
-        api, "create_agent_def", lambda n, sp, at: agent_store.create_agent(n, sp, at)
-    )
+    monkeypatch.setattr(api, "create_agent_def", _create)
     monkeypatch.setattr(api, "update_agent_def", _update)
     monkeypatch.setattr(api, "delete_agent_def", lambda n: agent_store.delete_agent(n))
     monkeypatch.setattr(api, "references_for", _refs)
@@ -306,3 +333,83 @@ def test_delete_viewer_forbidden(client, monkeypatch):
     token, _ = _session_for("viewer")
     r = client.delete("/admin/agents/ops", headers=_hdr(token, confirm=True))
     assert r.status_code == 403
+
+
+# --- version-config fields (skills_dir / mcp_server_ids / model_overrides / memory_namespace) ---
+
+
+def test_create_persists_version_config_fields(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/agents",
+        headers=_hdr(token),
+        json={
+            "name": "cfgbot",
+            "system_prompt": "hi",
+            "allowed_tools": ["shell"],
+            "skills_dir": "/s",
+            "mcp_server_ids": ["github"],
+            "model_overrides": {"model": "x"},
+            "memory_namespace": "team",
+        },
+    )
+    assert r.status_code == 201
+    a = agent_store.get_by_name("cfgbot")
+    assert a.skills_dir == "/s"
+    assert a.mcp_server_ids == ["github"]
+    assert a.model_overrides == {"model": "x"}
+    assert a.memory_namespace == "team"
+
+
+def test_get_returns_version_config_fields(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    agent_store.create_agent(
+        "cfgbot",
+        "p",
+        ["shell"],
+        skills_dir="/s",
+        mcp_server_ids=["github"],
+        model_overrides={"model": "x"},
+        memory_namespace="team",
+    )
+    token, _ = _session_for("viewer")
+    r = client.get("/admin/agents/cfgbot", headers=_hdr(token))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["skills_dir"] == "/s"
+    assert body["mcp_server_ids"] == ["github"]
+    assert body["model_overrides"] == {"model": "x"}
+    assert body["memory_namespace"] == "team"
+
+
+def test_patch_overrides_only_provided_field(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    agent_store.create_agent("cfgbot", "v1", ["shell"], skills_dir="/s")
+    token, _ = _session_for("admin")
+    r = client.patch("/admin/agents/cfgbot", headers=_hdr(token), json={"memory_namespace": "team"})
+    assert r.status_code == 200
+    a = agent_store.get_by_name("cfgbot")
+    assert a.memory_namespace == "team"
+    assert a.skills_dir == "/s"  # inherited from prior version
+
+
+def test_clone_copies_version_config_fields(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    agent_store.create_agent(
+        "src",
+        "p",
+        ["shell"],
+        skills_dir="/s",
+        mcp_server_ids=["github"],
+        model_overrides={"model": "x"},
+        memory_namespace="team",
+    )
+    token, _ = _session_for("admin")
+    r = client.post("/admin/agents/src/clone", headers=_hdr(token), json={"new_name": "dst"})
+    assert r.status_code == 200
+    a = agent_store.get_by_name("dst")
+    assert a.skills_dir == "/s"
+    assert a.mcp_server_ids == ["github"]
+    assert a.model_overrides == {"model": "x"}
+    assert a.memory_namespace == "team"

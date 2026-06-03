@@ -352,3 +352,44 @@ def test_apply_persists_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_
     assert r.status_code == 200
     found = agent_store.get_by_name("fresh")
     assert found is not None and found.system_prompt == "Fresh."
+
+
+def test_create_persists_version_config_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_db):
+    _agent_admin_env(tmp_path, monkeypatch)
+    token = _admin_session()
+    client = TestClient(app)
+    r = client.post(
+        "/admin/agents",
+        headers={"Authorization": f"Session {token}"},
+        json={
+            "name": "cfg",
+            "system_prompt": "hi",
+            "allowed_tools": ["shell"],
+            "skills_dir": "/s",
+            "mcp_server_ids": ["github"],
+            "model_overrides": {"model": "x"},
+            "memory_namespace": "team",
+        },
+    )
+    assert r.status_code == 201
+    a = agent_store.get_by_name("cfg")
+    assert a.skills_dir == "/s"
+    assert a.mcp_server_ids == ["github"]
+    assert a.model_overrides == {"model": "x"}
+    assert a.memory_namespace == "team"
+
+
+def test_update_overrides_only_provided_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_db):
+    _agent_admin_env(tmp_path, monkeypatch)
+    agent_store.create_agent("cfg", "v1", ["shell"], skills_dir="/s")
+    token = _admin_session()
+    client = TestClient(app)
+    r = client.patch(
+        "/admin/agents/cfg",
+        headers={"Authorization": f"Session {token}"},
+        json={"memory_namespace": "team"},
+    )
+    assert r.status_code == 200
+    a = agent_store.get_by_name("cfg")
+    assert a.memory_namespace == "team"
+    assert a.skills_dir == "/s"  # inherited

@@ -67,6 +67,27 @@ def test_create_agent_with_isolation_fields(db):
     assert v1.memory_namespace == "analyst"
 
 
+def test_agent_carries_active_version_config_fields(db):
+    created = agent_store.create_agent(
+        "analyst",
+        "You analyze.",
+        ["shell"],
+        skills_dir="agents/analyst/skills",
+        mcp_server_ids=["github"],
+        model_overrides={"default": {"model": "x"}},
+        memory_namespace="analyst",
+    )
+    assert created.skills_dir == "agents/analyst/skills"
+    assert created.mcp_server_ids == ["github"]
+    assert created.model_overrides == {"default": {"model": "x"}}
+    assert created.memory_namespace == "analyst"
+    found = agent_store.get_by_name("analyst")
+    assert found.skills_dir == "agents/analyst/skills"
+    assert found.mcp_server_ids == ["github"]
+    assert found.model_overrides == {"default": {"model": "x"}}
+    assert found.memory_namespace == "analyst"
+
+
 def test_get_by_name_missing(db):
     assert agent_store.get_by_name("nonexistent") is None
 
