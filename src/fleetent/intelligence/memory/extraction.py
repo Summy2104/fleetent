@@ -10,7 +10,7 @@ from typing import Any, cast
 from fleetent.intelligence import vector_store
 from fleetent.intelligence.memory import store
 from fleetent.intelligence.memory.models import MemoryItem, MemoryType
-from fleetent.model_router import get_async_client_and_config
+from fleetent.model import get_async_client_and_config
 
 EXTRACT_SYSTEM = (
     "Extract user semantic memories from the conversation. Return a JSON array of actions. "

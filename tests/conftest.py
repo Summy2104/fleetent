@@ -8,7 +8,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-import fleetent.provider_health as provider_health
+import fleetent.model.provider_health as provider_health
 from fleetent import db
 
 

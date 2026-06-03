@@ -14,7 +14,6 @@ from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
 from openai.types.chat import ChatCompletionChunk
 
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
-from fleetent import model_router
 from fleetent.budget import BudgetChecker, BudgetConfig, BudgetUsage, grace_max_tokens
 from fleetent.cancellation import CancellationChecker, CancelToken
 from fleetent.context_mgr import (
@@ -33,7 +32,9 @@ from fleetent.intelligence.long_term_ctx import ContextSource, build_context
 from fleetent.intelligence.memory import extract_and_update
 from fleetent.loop_detector import LoopDetectionChecker, arg_fingerprint, result_digest
 from fleetent.message_hygiene import HygieneReport, MessageContractError, sanitize
-from fleetent.model_router import RouteConfig, RouteOverride, get_async_client_and_config
+from fleetent.model import router as model_router
+from fleetent.model.provider_health import ProviderHealthCache, get_health_cache
+from fleetent.model.router import RouteConfig, RouteOverride, get_async_client_and_config
 from fleetent.multimodal import build_message_with_images, has_image_block
 from fleetent.observability import (
     InjectedContextTrace,
@@ -41,7 +42,6 @@ from fleetent.observability import (
     record_injected_context,
     record_trace_event,
 )
-from fleetent.provider_health import ProviderHealthCache, get_health_cache
 from fleetent.skills import available_skills_prompt, collect_disabled_trace
 from fleetent.skills import match as match_skill  # noqa: F401  # patch target + API parity
 from fleetent.skills import scan as scan_skills

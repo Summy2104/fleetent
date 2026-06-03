@@ -38,7 +38,7 @@ from fleetent.integrations.sandbox import (
     load_sandbox_mode,
     resolve_effective_mode,
 )
-from fleetent.model_router import ROUTES
+from fleetent.model import ROUTES
 from fleetent.observability.startup_diagnostics import (
     diagnose_database_writable,
     diagnose_provider_keys,

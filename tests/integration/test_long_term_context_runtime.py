@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import fleetent.agent_loop as agent_loop
 from fleetent.intelligence.long_term_ctx import BuiltContext, ContextSource
-from fleetent.model_router import RouteConfig
+from fleetent.model import RouteConfig
 
 
 def _text_response(text: str = "ok") -> MagicMock:

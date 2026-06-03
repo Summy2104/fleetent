@@ -5,8 +5,8 @@ import pytest
 import yaml
 from openai import AsyncOpenAI, OpenAI
 
-from fleetent import model_router
-from fleetent.model_router import (
+from fleetent.model import router as model_router
+from fleetent.model.router import (
     DEFAULT_ROUTES,
     ROUTES,
     RouteConfig,
@@ -195,7 +195,7 @@ def test_get_async_client_and_config_with_override_model(monkeypatch):
 
 def test_get_async_client_and_config_override_base_url_used_in_client(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    with patch("fleetent.model_router.AsyncOpenAI") as mk:
+    with patch("fleetent.model.router.AsyncOpenAI") as mk:
         get_async_client_and_config(
             "default", override=RouteOverride(model="haiku", base_url="https://other/v1/")
         )
@@ -211,7 +211,7 @@ def test_get_client_and_config_with_override_model(monkeypatch):
 
 def test_get_client_and_config_override_base_url_used_in_client(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    with patch("fleetent.model_router.OpenAI") as mk:
+    with patch("fleetent.model.router.OpenAI") as mk:
         get_client_and_config(
             "default", override=RouteOverride(model="haiku", base_url="https://other/v1/")
         )
@@ -587,7 +587,7 @@ def test_get_client_and_config_uses_file_route(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(model_router, "ROUTES_PATH", p)
     monkeypatch.setenv("VLLM_KEY", "secret-from-env")
-    with patch("fleetent.model_router.OpenAI") as mk:
+    with patch("fleetent.model.router.OpenAI") as mk:
         client, cfg = get_client_and_config("default")
     assert cfg.model == "local-llama"
     assert mk.call_args.kwargs["api_key"] == "secret-from-env"

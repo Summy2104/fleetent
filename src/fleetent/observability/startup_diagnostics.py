@@ -6,7 +6,7 @@ import os
 from collections.abc import Iterable
 
 from fleetent.db import create_database
-from fleetent.model_router import RouteConfig
+from fleetent.model import RouteConfig
 from fleetent.observability import get_logger
 
 

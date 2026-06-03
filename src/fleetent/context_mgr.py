@@ -10,7 +10,7 @@ from typing import Any
 import structlog
 
 from fleetent import eval_logger
-from fleetent.model_router import get_client_and_config
+from fleetent.model import get_client_and_config
 from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatch
 
 _DEFAULT_FLAP_WINDOW = 3

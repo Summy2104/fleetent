@@ -9,7 +9,7 @@ import pytest
 from openai import APIStatusError, RateLimitError
 
 import fleetent.agent_loop as al
-from fleetent.model_router import RouteConfig
+from fleetent.model.router import RouteConfig
 from fleetent.termination import LoopState, StopReason
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -1086,7 +1086,7 @@ async def test_run_uses_default_route_for_text(mock_client, monkeypatch):
 
 
 async def test_run_raises_when_image_but_no_vision_route(mock_client, monkeypatch):
-    from fleetent import model_router
+    from fleetent.model import router as model_router
 
     routes_no_vision = {k: v for k, v in model_router.ROUTES.items() if k != "vision"}
     monkeypatch.setattr(model_router, "ROUTES", routes_no_vision)
@@ -1160,7 +1160,7 @@ async def test_run_stream_routes_to_vision_with_images(monkeypatch):
 
 
 async def test_run_stream_raises_when_image_but_no_vision_route(mock_client, monkeypatch):
-    from fleetent import model_router
+    from fleetent.model import router as model_router
 
     routes_no_vision = {k: v for k, v in model_router.ROUTES.items() if k != "vision"}
     monkeypatch.setattr(model_router, "ROUTES", routes_no_vision)
@@ -1203,7 +1203,7 @@ async def test_run_force_model_none_passes_no_override(mock_client, monkeypatch)
 
 
 async def test_run_force_model_passes_override(mock_client, monkeypatch):
-    from fleetent.model_router import RouteOverride
+    from fleetent.model.router import RouteOverride
 
     calls: list[dict] = []
     client = _route_spy(monkeypatch, calls)
@@ -1251,7 +1251,7 @@ async def test_run_stream_force_model_none_passes_no_override(mock_client, monke
 
 
 async def test_run_stream_force_model_passes_override(mock_client, monkeypatch):
-    from fleetent.model_router import RouteOverride
+    from fleetent.model.router import RouteOverride
 
     calls: list[dict] = []
     client = _route_spy(monkeypatch, calls)
@@ -1294,7 +1294,7 @@ class _FakeClock:
 
 
 def _install_health_cache(monkeypatch, *, failure_threshold=1, cooldown_seconds=60, clock=None):
-    import fleetent.provider_health as ph
+    import fleetent.model.provider_health as ph
 
     clock = clock or _FakeClock()
     cache = ph.ProviderHealthCache(

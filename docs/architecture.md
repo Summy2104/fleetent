@@ -18,7 +18,7 @@
 graph TD
     A["接入层\nserver.py · im_gateway · webhook_router"]
     B["编排层\nagent_loop · sub_agent"]
-    C["能力层\nmodel_router · tool_registry · intelligence.long_term_ctx\nintelligence.memory · intelligence.vector_store · intelligence.reflection\nskills · context_mgr · integrations.mcp\nintegrations.sandbox · governance.permission_gate · cron_scheduler"]
+    C["能力层\nmodel · tool_registry · intelligence.long_term_ctx\nintelligence.memory · intelligence.vector_store · intelligence.reflection\nskills · context_mgr · integrations.mcp\nintegrations.sandbox · governance.permission_gate · cron_scheduler"]
     D["横切基础能力\nobservability · config · database runtime\nuser_store · agent_store · im_user_store\nsession · schedule_store · governance.agent_policy · platform.admin_cli"]
 
     A --> B --> C --> D
@@ -88,7 +88,7 @@ src/fleetent/
     telegram.py      ← python-telegram-bot polling 适配器
   agent_loop.py      ← while tool-use 核心循环；run() + run_stream()
   sub_agent.py       ← asyncio.gather 并行子 agent；最大深度 1
-  model_router.py    ← task_type → provider 配置 + fallback 链
+  model/             ← router(←model_router)：task_type → provider 配置 + fallback 链；provider_health：熔断缓存（已包化；旧 model_router.py / provider_health.py 为 re-export shim）
   tool_registry.py   ← @tool 注册、schema 构建、dispatch、访问控制
   tools.py           ← 内置工具（import 即注册，副作用）
   skills/            ← registry(←skill_registry)：扫描 skills/、关键词匹配、注入 system prompt；audit(←skill_audit)：静态注入审计（已包化；旧 skill_registry.py / skill_audit.py 为 re-export shim）
