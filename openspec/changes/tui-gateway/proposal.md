@@ -26,4 +26,4 @@ fleetent 目前只有一次性 CLI(`fleetent "<prompt>"`)和单向 SSE `/chat`,�
 - **依赖**:新增 `prompt_toolkit`、`rich`(纯 Python,自托管,无云服务);WebSocket 由现有 FastAPI/starlette 提供,无新增。
 - **配置/入口**:`pyproject.toml` 新增 `fleetent-tui` script;新增可选 TUI 相关配置项(server URL/token 缺省、超时)。
 - **不受影响**:现有 SSE `/chat`、`/health`、`/approvals`、`/webhook`、IM 网关、CLI 全部保持原样。
-- **分支**:基于并合回 `feature/zhangyang`,不碰 `main`。
+- **分支**:基于并合回 `main`(集成已完成,main 现为权威主干)。
