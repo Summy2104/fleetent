@@ -11,13 +11,28 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
 
 _CONFLICT_PREFERENCES = {"auto", "memory", "knowledge"}
 _TENANT_DEFAULT_AGENT = ""
+
+ContextSource = Literal[
+    "user_memory",
+    "tenant_shared_memory",
+    "team_shared_memory",
+    "knowledge_base",
+]
+
+# Lower priority value wins first when budgets are applied during context building.
+_SOURCE_PRIORITY: dict[ContextSource, int] = {
+    "user_memory": 0,
+    "knowledge_base": 1,
+    "tenant_shared_memory": 2,
+    "team_shared_memory": 3,
+}
 
 _COLUMNS = (
     "tenant_id",
@@ -70,6 +85,116 @@ class ContextPolicyRecord:
     knowledge_base_max_tokens: int
     knowledge_base_top_k: int
     conflict_preference: str
+
+
+@dataclass(frozen=True)
+class AgentContextIdentity:
+    """Agent ownership used to resolve context policy and Shared Memory scope."""
+
+    agent_id: str
+    tenant_id: str
+    team_id: str | None
+
+
+@dataclass(frozen=True)
+class ContextPolicySourceBudget:
+    """Resolved enablement and budget for one context source."""
+
+    source: ContextSource
+    enabled: bool
+    max_tokens: int
+    top_k: int
+    priority: int
+
+
+@dataclass(frozen=True)
+class ContextPolicy:
+    """Resolved policy for an agent: per-source enablement and budgets."""
+
+    tenant_id: str
+    agent_id: str
+    agent_team_id: str | None
+    conflict_preference: str
+    sources: list[ContextPolicySourceBudget]
+
+
+def resolve_context_policy(agent: AgentContextIdentity) -> ContextPolicy:
+    """Resolve the effective policy for an agent.
+
+    Agent override wins over the tenant default; with no stored row the default
+    preserves current behavior (User Memory + Knowledge Base on, Shared Memory off).
+    """
+    record = get_policy(agent.tenant_id, agent.agent_id)
+    if record is None:
+        record = get_policy(agent.tenant_id, None)
+    if record is None:
+        return _default_policy(agent)
+    return _record_to_policy(agent, record)
+
+
+def _default_policy(agent: AgentContextIdentity) -> ContextPolicy:
+    settings = Settings(anthropic_api_key="").long_term_ctx
+    sources = [
+        _budget("user_memory", True, settings.memory_max_tokens, settings.memory_top_k),
+        _budget("knowledge_base", True, settings.knowledge_max_tokens, settings.knowledge_top_k),
+        _budget("tenant_shared_memory", False, settings.memory_max_tokens, settings.memory_top_k),
+        _budget("team_shared_memory", False, settings.memory_max_tokens, settings.memory_top_k),
+    ]
+    return ContextPolicy(
+        tenant_id=agent.tenant_id,
+        agent_id=agent.agent_id,
+        agent_team_id=agent.team_id,
+        conflict_preference=settings.conflict_preference,
+        sources=sources,
+    )
+
+
+def _record_to_policy(agent: AgentContextIdentity, record: ContextPolicyRecord) -> ContextPolicy:
+    sources = [
+        _budget(
+            "user_memory",
+            record.user_memory_enabled,
+            record.user_memory_max_tokens,
+            record.user_memory_top_k,
+        ),
+        _budget(
+            "knowledge_base",
+            record.knowledge_base_enabled,
+            record.knowledge_base_max_tokens,
+            record.knowledge_base_top_k,
+        ),
+        _budget(
+            "tenant_shared_memory",
+            record.tenant_shared_memory_enabled,
+            record.tenant_shared_memory_max_tokens,
+            record.tenant_shared_memory_top_k,
+        ),
+        _budget(
+            "team_shared_memory",
+            record.team_shared_memory_enabled,
+            record.team_shared_memory_max_tokens,
+            record.team_shared_memory_top_k,
+        ),
+    ]
+    return ContextPolicy(
+        tenant_id=agent.tenant_id,
+        agent_id=agent.agent_id,
+        agent_team_id=agent.team_id,
+        conflict_preference=record.conflict_preference,
+        sources=sources,
+    )
+
+
+def _budget(
+    source: ContextSource, enabled: bool, max_tokens: int, top_k: int
+) -> ContextPolicySourceBudget:
+    return ContextPolicySourceBudget(
+        source=source,
+        enabled=enabled,
+        max_tokens=max_tokens,
+        top_k=top_k,
+        priority=_SOURCE_PRIORITY[source],
+    )
 
 
 def upsert_policy(record: ContextPolicyRecord) -> ContextPolicyRecord:

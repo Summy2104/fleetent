@@ -22,14 +22,14 @@
 
 ## 3. Policy resolution
 
-- [ ] 3.1 Write failing tests: no policy preserves current User Memory + KB behavior and leaves Shared Memory disabled
-- [ ] 3.2 Verify red: run `uv run pytest tests/unit -x -q`
-- [ ] 3.3 Implement default policy resolution
-- [ ] 3.4 Verify green: run `uv run pytest tests/unit -x -q`
-- [ ] 3.5 Write failing tests: agent policy overrides tenant policy for the same tenant and agent
-- [ ] 3.6 Verify red: run `uv run pytest tests/unit -x -q`
-- [ ] 3.7 Implement override resolution
-- [ ] 3.8 Verify green: run `uv run pytest tests/unit -x -q`
+- [x] 3.1 Write failing tests: no policy preserves current User Memory + KB behavior and leaves Shared Memory disabled
+- [x] 3.2 Verify red: run `uv run pytest tests/unit -x -q`
+- [x] 3.3 Implement default policy resolution
+- [x] 3.4 Verify green: run `uv run pytest tests/unit -x -q`
+- [x] 3.5 Write failing tests: agent policy overrides tenant policy for the same tenant and agent
+- [x] 3.6 Verify red: run `uv run pytest tests/unit -x -q`
+- [x] 3.7 Implement override resolution
+- [x] 3.8 Verify green: run `uv run pytest tests/unit -x -q`
 
 ## 4. Policy-aware context building
 
