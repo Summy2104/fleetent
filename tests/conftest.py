@@ -53,7 +53,8 @@ def isolated_schedule_db(tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
             message    TEXT NOT NULL,
             enabled    INTEGER NOT NULL DEFAULT 1,
             source     TEXT NOT NULL DEFAULT 'dynamic',
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            session_id TEXT
         )
     """)
     return database
