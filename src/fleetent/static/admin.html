@@ -204,7 +204,6 @@
           <option value="im">IM-origin</option>
           <option value="human">human / API</option>
         </select>
-        <span id="conn-create-bar"><button onclick="openConnModal()">Add connection</button></span>
         <span id="create-bar"><button onclick="openCreateModal()">Create user</button></span>
       </div>
       <div class="table-scroll"><table>
@@ -793,7 +792,7 @@ async function enterApp() {
   IS_VIEWER = me.role === "viewer";
   $("whoami").textContent = (me.email || me.id) + " · " + me.role;
   if (IS_VIEWER) {
-    for (const id of ["create-bar", "kb-create-card", "conn-create-bar", "sk-create-bar", "pv-create-bar", "ag-create-bar", "st-report-bar", "mon-create-bar", "mon-maint-bar", "sess-create-bar", "sess-bulk-bar", "oc-create-bar"]) {
+    for (const id of ["create-bar", "kb-create-card", "sk-create-bar", "pv-create-bar", "ag-create-bar", "st-report-bar", "mon-create-bar", "mon-maint-bar", "sess-create-bar", "sess-bulk-bar", "oc-create-bar"]) {
       const el = $(id); if (el) el.classList.add("hidden");
     }
   }
@@ -949,6 +948,7 @@ function renderUsers() {
               : `<button onclick="setRole('${u.id}','admin')">Make admin</button>`}
             <button onclick="resetPassword('${u.id}')">Reset password</button>
             <button onclick="viewKeys('${u.id}')">Keys</button>
+            ${IS_VIEWER ? "" : `<button onclick="openConnModal('${u.id}')">Add connection</button>`}
             ${u.status === "blocked"
               ? `<button onclick="unblock('${u.id}')">Enable user</button>`
               : `<button class="danger" onclick="block('${u.id}')">Disable user</button>`}
@@ -1060,13 +1060,17 @@ function renderConnFields() {
     `<input data-key="${k}" placeholder="${k}" type="password" autocomplete="off">`).join("");
 }
 
-function openConnModal() {
+// Owner of the connector being created — set from the per-User-row action so the
+// new connector attaches to that User (admin-gated). Null falls back to the caller.
+let CONN_OWNER = null;
+function openConnModal(ownerId) {
+  CONN_OWNER = ownerId || null;
   $("conn-err").textContent = "";
   $("conn-platform").value = "telegram";
   renderConnFields();
   $("conn-modal").classList.remove("hidden");
 }
-function closeConnModal() { $("conn-modal").classList.add("hidden"); }
+function closeConnModal() { $("conn-modal").classList.add("hidden"); CONN_OWNER = null; }
 
 async function createConn() {
   $("conn-err").textContent = "";
@@ -1075,8 +1079,10 @@ async function createConn() {
   for (const inp of $("conn-fields").querySelectorAll("input[data-key]")) {
     if (inp.value) config[inp.dataset.key] = inp.value;
   }
+  const body = { platform, config };
+  if (CONN_OWNER) body.owner_id = CONN_OWNER;
   try {
-    await api("POST", "/im/connectors", { platform, config });
+    await api("POST", "/im/connectors", body);
     closeConnModal();
     loadConn();
   } catch (e) { $("conn-err").textContent = e.message; }

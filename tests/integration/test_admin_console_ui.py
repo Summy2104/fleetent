@@ -578,7 +578,6 @@ def test_viewer_hidden_write_containers_intact():
     for cid in (
         "create-bar",
         "kb-create-card",
-        "conn-create-bar",
         "sk-create-bar",
         "pv-create-bar",
         "ag-create-bar",
@@ -678,11 +677,14 @@ def test_render_users_groups_connectors_by_owner():
     assert "connDisable(" in body
 
 
-def test_conn_create_bar_in_users_tab():
+def test_add_connection_per_user_row():
     html = ADMIN_HTML
-    users_section = html.split('id="tab-users"', 1)[1].split("</section>", 1)[0]
-    assert "conn-create-bar" in users_section
-    assert "openConnModal(" in users_section
+    # no top-level "Add connection" bar — the action lives on each User row
+    assert "conn-create-bar" not in html
+    body = _render_users_body(html)
+    # per-row add targets that User as the connector owner, admin-gated
+    assert "openConnModal('" in body
+    assert "IS_VIEWER" in body
 
 
 def test_connector_modal_retained():
@@ -693,13 +695,15 @@ def test_connector_modal_retained():
     assert "const CONN_FIELDS" in html
 
 
-def test_im_connector_create_scoped_to_caller_owner():
+def test_im_connector_create_targets_selected_owner():
     html = ADMIN_HTML
     create = html.split("async function createConn()", 1)[1].split("async function connEnable", 1)[
         0
     ]
-    # create must not let the form spoof an arbitrary owner; backend defaults to caller
-    assert "owner_id" not in create
+    # owner flows from the per-row target (CONN_OWNER set by openConnModal), not a
+    # free-text form field; creation stays admin-gated server-side.
+    assert "owner_id" in create
+    assert "CONN_OWNER" in create
 
 
 # --- Task 4: source filter + badge --------------------------------------------

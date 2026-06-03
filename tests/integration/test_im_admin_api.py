@@ -179,8 +179,8 @@ def test_ui_has_connectors_in_users_tab_and_add_modal():
     # connectors are managed inside the unified Users tab — no standalone IM/connectors tab
     assert 'data-tab="connectors"' not in html
     assert 'id="tab-im"' not in html
-    users_section = html.split('id="tab-users"', 1)[1].split("</section>", 1)[0]
-    assert "conn-create-bar" in users_section
+    # "Add connection" is a per-User-row action, not a top-level bar
+    assert "conn-create-bar" not in html
     assert 'id="conn-modal"' in html
     assert "openConnModal(" in html
     assert "createConn(" in html
@@ -201,8 +201,10 @@ def test_ui_connector_field_schema_matches_backend():
 def test_ui_has_enable_disable_and_admin_gate():
     html = _ADMIN_HTML
     assert "connEnable(" in html and "connDisable(" in html
-    # management controls hidden from viewers
-    assert "conn-create-bar" in html
+    # per-row connector controls (incl. Add connection) are admin-gated
+    body = html.split("function renderUsers()", 1)[1].split("function closeMenus", 1)[0]
+    assert "IS_VIEWER" in body
+    assert "openConnModal('" in body
 
 
 def test_allowlist_crud(client):
