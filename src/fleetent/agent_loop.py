@@ -7,7 +7,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import structlog
 from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
@@ -35,7 +35,15 @@ from fleetent.multimodal import build_message_with_images, has_image_block
 from fleetent.governance.permission_gate import _default_gate
 from fleetent.provider_health import ProviderHealthCache, get_health_cache
 from fleetent.sandbox_enablement import Mode, is_code_execution_enabled
+from fleetent.intelligence.long_term_ctx import ContextSource, build_context
+from fleetent.observability import (
+    InjectedContextTrace,
+    TraceEvent,
+    record_injected_context,
+    record_trace_event,
+)
 from fleetent.skill_registry import available_skills_prompt, collect_disabled_trace
+from fleetent.skill_registry import match as match_skill  # noqa: F401  # patch target + API parity
 from fleetent.skill_registry import scan as scan_skills
 from fleetent.sub_agent import SubAgentExecutor
 from fleetent.termination import (
@@ -920,6 +928,90 @@ def _extract_cache_tokens(usage: Any) -> dict[str, int] | None:
     return found or None
 
 
+# Long-term context (knowledge base + memory) injection + observability trace
+# wiring, grafted from main's agent_loop during the architecture merge (follow-up
+# class A). build_context / trace recording are best-effort at the call sites in
+# run()/run_stream() so a missing DB or disabled KB never breaks a run.
+_LONG_TERM_CONTEXT_HEADER = "[Long-term context]"
+
+
+def _first_user_content(messages: list[Any]) -> str:
+    for message in messages:
+        if isinstance(message, dict) and message.get("role") == "user":
+            content = message.get("content", "")
+            return content if isinstance(content, str) else str(content)
+    return ""
+
+
+def _append_system_context(messages: list[Any], system_prompt: str, context_text: str) -> None:
+    if not context_text:
+        return
+    addition = f"{_LONG_TERM_CONTEXT_HEADER}\n{context_text}"
+    for message in messages:
+        if isinstance(message, dict) and message.get("role") == "system":
+            message["content"] = f"{message.get('content', '')}\n\n{addition}"
+            return
+    messages.insert(0, {"role": "system", "content": f"{system_prompt}\n\n{addition}"})
+
+
+def _record_injected_context(run_id: str, sources: list[ContextSource]) -> None:
+    if not sources:
+        return
+    record_injected_context(
+        run_id,
+        [
+            InjectedContextTrace(
+                source_id=source.source_id,
+                source_type=cast(Literal["memory", "knowledge"], source.source_type),
+                score=source.score,
+                token_estimate=int(getattr(source, "token_estimate", 0)),
+                metadata=source.metadata,
+            )
+            for source in sources
+        ],
+    )
+
+
+def _record_agent_run_completed(
+    *,
+    run_id: str,
+    user_input: str,
+    reply: str,
+    messages: list[Any],
+    elapsed_s: float,
+    usage: Any | None,
+    model_used: str,
+    user_id: str,
+    agent_name: str | None,
+) -> None:
+    payload: dict[str, Any] = {
+        "input": user_input,
+        "reply": reply,
+        "elapsed_s": round(elapsed_s, 3),
+        "tokens": (
+            {
+                "prompt": usage.prompt_tokens,
+                "completion": usage.completion_tokens,
+                "total": usage.total_tokens,
+            }
+            if usage
+            else None
+        ),
+        "model_used": model_used,
+    }
+    if agent_name is not None:
+        payload["agent_name"] = agent_name
+    record_trace_event(
+        TraceEvent(
+            run_id=run_id,
+            event_type="agent_run_completed",
+            payload=payload,
+            user_id=user_id,
+            agent_id=agent_name,
+        )
+    )
+
+
 async def run(
     messages: list[dict[str, Any]],
     user_id: str = "default",
@@ -994,6 +1086,17 @@ async def run(
     )
 
     start = time.monotonic()
+    run_id = str(uuid.uuid4())
+    user_input = _first_user_content(messages)
+    # Class-A wiring: inject long-term context (KB + memory) and record the
+    # injected-context trace. Best-effort — a missing DB / disabled KB must not
+    # break the run (mirrors the sandbox/eval_logger best-effort pattern).
+    try:
+        built_context = await build_context(user_id, user_input, agent_name or "", cfg.max_tokens)
+        _append_system_context(messages, system_prompt, built_context.text)
+        _record_injected_context(run_id, built_context.sources)
+    except Exception as exc:  # noqa: BLE001 — long-term context is auxiliary
+        logger.debug("long_term_context_skipped", error=str(exc))
     # MCP4: a strict-mode MCP server the agent is bound to is unavailable → stop up
     # front with a clear error (rather than run without its tools). Also logs
     # degrade/silent degradations for bound servers. No MCP servers → no-op.
@@ -1159,6 +1262,21 @@ async def run(
         budget_dimension=budget_dimension,
         budget_scope=budget_scope,
     )
+    # Class-A wiring: completion trace event (model + token usage). Best-effort.
+    try:
+        _record_agent_run_completed(
+            run_id=run_id,
+            user_input=user_input,
+            reply=reply,
+            messages=messages,
+            elapsed_s=time.monotonic() - start,
+            usage=usage,
+            model_used=model_used,
+            user_id=user_id,
+            agent_name=agent_name,
+        )
+    except Exception as exc:  # noqa: BLE001 — completion trace is auxiliary
+        logger.debug("agent_run_completed_trace_skipped", error=str(exc))
     extract_and_save(user_input, messages, user_id=user_id)
     return reply
 
@@ -1267,6 +1385,15 @@ async def run_stream(
         client, cfg = get_async_client_and_config(route, override=RouteOverride(model=force_model))
 
     start = time.monotonic()
+    run_id = str(uuid.uuid4())
+    # Class-A wiring (streaming): inject long-term context + record injected-context
+    # trace. Best-effort — missing DB / disabled KB must not break the stream.
+    try:
+        built_context = await build_context(user_id, user_input, agent_name or "", cfg.max_tokens)
+        _append_system_context(messages, system_prompt, built_context.text)
+        _record_injected_context(run_id, built_context.sources)
+    except Exception as exc:  # noqa: BLE001 — long-term context is auxiliary
+        logger.debug("long_term_context_skipped", error=str(exc))
     reply = ""
     # MCP4: stop up front when a bound strict MCP server is unavailable (see run()).
     strict_blocked = _strict_blocked_servers(allowed_tools)
@@ -1558,4 +1685,19 @@ async def run_stream(
         budget_dimension=budget_dimension,
         budget_scope=budget_scope,
     )
+    # Class-A wiring (streaming): completion trace event. Best-effort.
+    try:
+        _record_agent_run_completed(
+            run_id=run_id,
+            user_input=user_input,
+            reply=reply,
+            messages=messages,
+            elapsed_s=time.monotonic() - start,
+            usage=stream_usage,
+            model_used=model_used,
+            user_id=user_id,
+            agent_name=agent_name,
+        )
+    except Exception as exc:  # noqa: BLE001 — completion trace is auxiliary
+        logger.debug("agent_run_completed_trace_skipped", error=str(exc))
     extract_and_save(user_input, messages, user_id=user_id)
