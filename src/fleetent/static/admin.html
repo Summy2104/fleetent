@@ -72,6 +72,9 @@
   .pill.active { color:var(--ok); } .pill.blocked,.pill.disabled { color:var(--danger); }
   .pill.admin,.pill.built_in_admin { color:var(--accent); } .pill.viewer { color:var(--muted); }
   .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-2); padding:var(--sp-4); margin-bottom:var(--sp-4); box-shadow:var(--shadow-1); }
+  .subtabs { display:inline-flex; gap:2px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-pill); padding:2px; }
+  .subtab { border:none; background:transparent; color:var(--muted); padding:4px 14px; border-radius:var(--r-pill); font-size:13px; cursor:pointer; }
+  .subtab.active { background:var(--accent); color:#fff; }
   .page-header { display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap; margin-bottom:var(--sp-4);
     padding-bottom:var(--sp-3); border-bottom:1px solid var(--border); }
   .page-header .ph-title { font-size:18px; font-weight:600; margin:0; }
@@ -161,7 +164,6 @@
       <div class="nav-group">
         <button class="nav-group-label" data-group="agents" onclick="switchGroup('agents')">Agents &amp; Skills</button>
         <button class="nav-item" data-tab="agents" onclick="switchTab('agents')">Agents</button>
-        <button class="nav-item" data-tab="templates" onclick="switchTab('templates')">Templates</button>
         <button class="nav-item" data-tab="skills" onclick="switchTab('skills')">Skills</button>
         <button class="nav-item" data-tab="kb" onclick="switchTab('kb')">Knowledge Base</button>
       </div>
@@ -240,30 +242,39 @@
     </section>
 
     <section id="tab-agents" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Agents</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.agents?.()">Refresh</button></div></div>
-      <div class="row" style="margin-bottom:12px;">
-        <input id="ag-filter" placeholder="filter by name" oninput="renderAgents()" style="flex:1;">
-        <label class="muted"><input type="checkbox" id="ag-archived" onchange="loadAgents()"> show archived</label>
-        <span id="ag-create-bar">
-          <button class="small" onclick="agCreate()">New agent</button>
-        </span>
+      <div class="page-header">
+        <h2 class="ph-title">Agents</h2>
+        <div class="ph-filter">
+          <div class="subtabs">
+            <button id="ag-subtab-agents" class="subtab active" onclick="agSubTab('agents')">Agents</button>
+            <button id="ag-subtab-templates" class="subtab" onclick="agSubTab('templates')">Templates</button>
+          </div>
+        </div>
+        <div class="ph-actions"><button class="ghost small" onclick="agSubRefresh()">Refresh</button></div>
       </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Name</th><th>Status</th><th>Provenance</th><th>Drift</th><th>Actions</th></tr></thead>
-        <tbody id="ag-body"></tbody>
-      </table></div>
-    </section>
-
-    <section id="tab-templates" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Templates</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.templates?.()">Refresh</button></div></div>
-      <div class="row" style="margin-bottom:12px;">
-        <span id="tmpl-create-bar"></span>
+      <div id="ag-pane">
+        <div class="row" style="margin-bottom:12px;">
+          <input id="ag-filter" placeholder="filter by name" oninput="renderAgents()" style="flex:1;">
+          <label class="muted"><input type="checkbox" id="ag-archived" onchange="loadAgents()"> show archived</label>
+          <span id="ag-create-bar">
+            <button class="small" onclick="agCreate()">New agent</button>
+          </span>
+        </div>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Name</th><th>Status</th><th>Provenance</th><th>Drift</th><th>Actions</th></tr></thead>
+          <tbody id="ag-body"></tbody>
+        </table></div>
       </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>ID</th><th>Display name</th><th>allowed_tools</th><th>Actions</th></tr></thead>
-        <tbody id="tmpl-body"></tbody>
-      </table></div>
-      <div id="tmpl-list-err" class="err"></div>
+      <div id="tmpl-pane" class="hidden">
+        <div class="row" style="margin-bottom:12px;">
+          <span id="tmpl-create-bar"></span>
+        </div>
+        <div class="table-scroll"><table>
+          <thead><tr><th>ID</th><th>Display name</th><th>allowed_tools</th><th>Actions</th></tr></thead>
+          <tbody id="tmpl-body"></tbody>
+        </table></div>
+        <div id="tmpl-list-err" class="err"></div>
+      </div>
     </section>
 
     <section id="tab-skills" class="hidden">
@@ -856,7 +867,7 @@ function show(view) {
 
 const TAB_GROUP = {
   users: "access",
-  agents: "agents", templates: "agents", skills: "agents", kb: "agents",
+  agents: "agents", skills: "agents", kb: "agents",
   providers: "models", oauth: "models",
   stats: "ops", monitoring: "ops", sessions: "ops",
   audit: "audit",
@@ -1360,7 +1371,16 @@ function renderAgents() {
 }
 
 let TEMPLATES = [];
-LOADERS.templates = () => tmplLoad();
+let AG_SUBTAB = "agents";
+function agSubTab(name) {
+  AG_SUBTAB = name;
+  $("ag-subtab-agents").classList.toggle("active", name === "agents");
+  $("ag-subtab-templates").classList.toggle("active", name === "templates");
+  $("ag-pane").classList.toggle("hidden", name !== "agents");
+  $("tmpl-pane").classList.toggle("hidden", name !== "templates");
+  if (name === "templates") tmplLoad();
+}
+function agSubRefresh() { AG_SUBTAB === "templates" ? tmplLoad() : loadAgents(); }
 async function tmplLoad() {
   $("tmpl-list-err").textContent = "";
   $("tmpl-create-bar").innerHTML = IS_VIEWER ? "" : `<button class="small" onclick="tmplCreate()">New template</button>`;
