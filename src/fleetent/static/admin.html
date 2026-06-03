@@ -597,10 +597,6 @@
         </label>
         <textarea id="ag-system-prompt" placeholder="system prompt" rows="14" style="font-family:monospace;"></textarea>
         <input id="ag-allowed-tools" placeholder="allowed_tools (comma-separated, e.g. shell, github__*)" autocomplete="off">
-        <input id="ag-skills-dir" placeholder="skills_dir (optional, e.g. agents/ops/skills)" autocomplete="off">
-        <input id="ag-mcp-server-ids" placeholder="mcp_server_ids (comma-separated, e.g. github, jira) — empty = no restriction" autocomplete="off">
-        <textarea id="ag-model-overrides" placeholder='model_overrides JSON (optional, e.g. {"model":"claude-haiku-4-5"})' rows="3" style="font-family:monospace;"></textarea>
-        <input id="ag-memory-namespace" placeholder="memory_namespace (default: default)" autocomplete="off">
         <div id="ag-err" class="err"></div>
         <div class="row" style="justify-content:flex-end;">
           <button type="button" class="ghost" onclick="agCloseModal()">Cancel</button>
@@ -1502,10 +1498,6 @@ async function agCreate() {
   $("ag-name").disabled = false;
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
-  $("ag-skills-dir").value = "";
-  $("ag-mcp-server-ids").value = "";
-  $("ag-model-overrides").value = "";
-  $("ag-memory-namespace").value = "";
   $("ag-template-row").style.display = "";
   await agLoadTemplateOptions();
   $("ag-modal").dataset.mode = "create";
@@ -1520,10 +1512,6 @@ async function agEdit(name) {
     $("ag-name").disabled = true;
     $("ag-system-prompt").value = a.system_prompt || "";
     $("ag-allowed-tools").value = (a.allowed_tools || []).join(", ");
-    $("ag-skills-dir").value = a.skills_dir || "";
-    $("ag-mcp-server-ids").value = (a.mcp_server_ids || []).join(", ");
-    $("ag-model-overrides").value = (a.model_overrides && Object.keys(a.model_overrides).length) ? JSON.stringify(a.model_overrides, null, 2) : "";
-    $("ag-memory-namespace").value = a.memory_namespace || "";
     $("ag-template-row").style.display = "none";
     $("ag-modal").dataset.mode = "edit";
     $("ag-modal").dataset.name = name;
@@ -1535,29 +1523,16 @@ async function agSave() {
   $("ag-err").textContent = "";
   const tools = $("ag-allowed-tools").value.split(",").map(s => s.trim()).filter(Boolean);
   const sp = $("ag-system-prompt").value;
-  // version-config fields: include only when set so omitted fields inherit (PATCH) or default (create)
-  const extra = {};
-  const skillsDir = $("ag-skills-dir").value.trim();
-  if (skillsDir) extra.skills_dir = skillsDir;
-  const mcpIds = $("ag-mcp-server-ids").value.split(",").map(s => s.trim()).filter(Boolean);
-  if (mcpIds.length) extra.mcp_server_ids = mcpIds;
-  const moRaw = $("ag-model-overrides").value.trim();
-  if (moRaw) {
-    try { extra.model_overrides = JSON.parse(moRaw); }
-    catch (e) { $("ag-err").textContent = "model_overrides must be valid JSON"; return; }
-  }
-  const memNs = $("ag-memory-namespace").value.trim();
-  if (memNs) extra.memory_namespace = memNs;
   try {
     if ($("ag-modal").dataset.mode === "edit") {
       const name = $("ag-modal").dataset.name;
-      await api("PATCH", `/agents/${encodeURIComponent(name)}`, { system_prompt: sp, allowed_tools: tools, ...extra });
+      await api("PATCH", `/agents/${encodeURIComponent(name)}`, { system_prompt: sp, allowed_tools: tools });
     } else {
       const name = $("ag-name").value.trim();
       if (!name) { $("ag-err").textContent = "name required"; return; }
       const templateId = $("ag-template").value;
       if (!templateId) { $("ag-err").textContent = "template required"; return; }
-      await api("POST", "/agents", { name, template_id: templateId, system_prompt: sp, allowed_tools: tools, ...extra });
+      await api("POST", "/agents", { name, template_id: templateId, system_prompt: sp, allowed_tools: tools });
     }
     agCloseModal(); loadAgents();
   } catch (e) { $("ag-err").textContent = e.message; }

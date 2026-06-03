@@ -347,35 +347,31 @@ def test_agent_templates_write_controls_admin_gated():
     assert "tmplDelete(" in body
 
 
-def test_agents_modal_version_config_inputs_present():
+_NON_TEMPLATE_FIELDS = (
+    "ag-skills-dir",
+    "ag-mcp-server-ids",
+    "ag-model-overrides",
+    "ag-memory-namespace",
+)
+
+
+def test_agents_modal_only_template_backed_fields():
     html = ADMIN_HTML
-    for field_id in (
-        "ag-skills-dir",
-        "ag-mcp-server-ids",
-        "ag-model-overrides",
-        "ag-memory-namespace",
-    ):
-        assert f'id="{field_id}"' in html, field_id
+    # template-backed editable fields remain
+    assert 'id="ag-system-prompt"' in html
+    assert 'id="ag-allowed-tools"' in html
+    # non-template free-form fields are gone
+    for field_id in _NON_TEMPLATE_FIELDS:
+        assert f'id="{field_id}"' not in html, field_id
 
 
-def test_agents_save_and_edit_reference_version_config_fields():
+def test_agents_save_and_edit_drop_non_template_fields():
     html = ADMIN_HTML
     save = html.split("function agSave", 1)[1].split("function agDelete", 1)[0]
-    for field_id in (
-        "ag-skills-dir",
-        "ag-mcp-server-ids",
-        "ag-model-overrides",
-        "ag-memory-namespace",
-    ):
-        assert field_id in save, f"agSave missing {field_id}"
     edit = html.split("function agEdit", 1)[1].split("function agCloseModal", 1)[0]
-    for field_id in (
-        "ag-skills-dir",
-        "ag-mcp-server-ids",
-        "ag-model-overrides",
-        "ag-memory-namespace",
-    ):
-        assert field_id in edit, f"agEdit missing {field_id}"
+    for field_id in _NON_TEMPLATE_FIELDS:
+        assert field_id not in save, f"agSave still references {field_id}"
+        assert field_id not in edit, f"agEdit still references {field_id}"
 
 
 def test_agents_crud_endpoints_wired():
