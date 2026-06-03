@@ -21,7 +21,16 @@
 | 5 | 测试归位 + conftest 合并 | ⏳ |
 | 6 | docs / openspec 并集 + CLAUDE.md 统一 | ✅(CLAUDE/docs 已处理；openspec 取并集自动完成) |
 
-**最终测试**：`uv run pytest` → **2064 passed / 15 failed / 4 errors / 16 skipped**（合并前各分支分别测各自代码；本数为合并后统一套件）。collection 干净无错误，`fleetent.server` 等核心模块 import 正常，alembic 单一 head（028）。15 failed + 4 errors **全部映射到已记录决策的预期后果或待审设计分歧**（见下方分类），无意外破坏。
+**最终测试**：合并初始 2064 passed / 15 failed / 4 errors → **逐条解决后 2079 passed / 1 failed / 16 skipped**。collection 干净，核心 import 正常，alembic 单一 head（029）。
+
+**唯一剩余失败** = `test_trace_events::test_legacy_eval_logger_..._not_public`，即 C2（trace 统一）—— 张洋已决定**单独立项**，eval_logger 暂与 observability 共存，故该断言预期失败。
+
+**逐条处置结果（与张洋逐条过完）**：
+- **类 A**（D5 智能层未接入，6）→ ✅ 已接线（build_context + observability trace 进 run/run_stream）。
+- **类 B**（D6 S3 会话绑定，6）→ ✅ 在 main db.py 调度器上重做（按需 session_id 绑定，迁移 029）；yaml cron 加载按 main 规范弃用。
+- **类 C1**（记忆双系统）→ ✅ 统一到 intelligence/memory，删 memory_layer.py。
+- **类 C2**（trace 双系统）→ ⏸️ 单独立项（天级重构，100+ 测试触点）。eval_logger 暂共存。
+- **类 D**（webhook 设计）→ ✅ 留 yaml 源模型 + 加 main 的安全门控（enabled/body-size）。
 
 ---
 
@@ -118,15 +127,16 @@ git 把 main 对 `mcp_client.py→integrations/mcp/client.py`、`sandbox_client.
 
 ## 后续工作清单（FOLLOW-UP，按优先级）
 
-1. **[高] 智能层接线**：`agent_loop` 调用 `intelligence/long_term_ctx.build_context()` 注入 KB+记忆；接 `observability` trace 埋点。（解类 A）
-2. **[高] trace/memory 统一**：评估弃用扁平 `eval_logger.py` / `memory_layer.py`，全面改用 `observability/traces` + `intelligence/memory`。（解 D3 共存 + 类 C）
-3. **[中] S3 会话绑定重嫁接**：在 main db.py 调度器上重做定时任务 session 绑定。（解类 B）
-4. **[中] Webhook 设计定夺**：main 运行时 API vs 张洋 yaml。（解类 D）
-5. **[中] DB schema 收编**：张洋裸 `CREATE TABLE`（budget_usage/sub_agent_runs/session_anti_flap 等）纳入 alembic 声明。
-6. **[低] mcp/sandbox 是否归 `integrations/` 包**：当前扁平（D4）。若要严格 main 规范，机械迁移 + 改 import。
-7. **[低] 测试精确归类**：迁入 `tests/unit/` 的 34 个文件按 unit/integration 精确归位。
-8. **[低] `reload-skills` CLI 子命令**：main admin_cli 未含，`skill_registry.reload()` 仍在。
-9. **[低] CLAUDE.md / capability docs 与混合架构对齐**（扁平 mcp/sandbox + main 包结构并存的现状描述）。
+> 类 A/B/C1/D 已在「逐条过」中解决（见上）。以下为剩余项。
+
+1. **[高·已立项] C2 trace 统一**：弃用 `eval_logger.py` 改用 `observability/traces`（含为 compression/sandbox 新增事件类型）。天级重构，~100+ 测试触点（test_eval_logger 42 测 + agent_loop 55 处 log_run 断言 + context_mgr 8 + tools 13）。**唯一剩余失败测试**等它落地。
+2. **[中] 记忆提取的触发**：C1 把 inline 提取改为 `intelligence.memory.extract_and_update`（每次 run 后 best-effort 调用，对齐原 inline 行为）。若想完全对齐 main（提取移出热路径、交反思层），再调整。
+3. **[中] DB schema 收编**：张洋裸 `CREATE TABLE`（budget_usage/sub_agent_runs/session_anti_flap 等）纳入 alembic 声明。
+4. **[低] mcp/sandbox 是否归 `integrations/` 包**：当前扁平（D4）。若要严格 main 规范，机械迁移 + 改 import。
+5. **[低] 测试精确归类**：迁入 `tests/unit/` 的 34 个文件按 unit/integration 精确归位。
+6. **[低] `reload-skills` CLI 子命令**：main admin_cli 未含，`skill_registry.reload()` 仍在。
+7. **[低] CLAUDE.md / capability docs 与混合架构对齐**（扁平 mcp/sandbox + main 包结构并存的现状描述）。
+8. **[低] webhook 运行时 API**：当前 yaml 源模型 + 安全门控（类 D）；main 设想的运行时来源管理 API 可后续补。
 
 ---
 
