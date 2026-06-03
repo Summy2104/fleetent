@@ -44,6 +44,39 @@
 | 仅设计 | 文档和 spec 已有方向，但没有可依赖实现 |
 | 未开始 | 尚未进入设计或实现 |
 
+## 完成度总览
+
+一句话结论：**常乐负责模块的 MVP Foundation 和 Pilot MVP 工程前置已经完成；当前还没完成的是准生产人工验收、真实外部依赖 smoke、管理入口和更高级的生产化能力。**
+
+| 分类 | 状态 | 包含内容 | 下一步 |
+| --- | --- | --- | --- |
+| MVP Foundation | 已完成 | Observability、Memory、Long-term Context、Reflection、Vector Store、Knowledge Base、Deployment / Config 的核心 API、store、默认测试和 OpenSpec 批次 | 进入维护和缺陷修复，不再按 foundation 补大块能力 |
+| Pilot MVP 工程前置 | 基础完成 | admin query CLI、agent KB binding、connector operations、Pilot install checklist、diagnostics / retention、Docker Compose Pilot 入口 | 按 Pilot runbook 做准生产部署和人工验收 |
+| Pilot 后增强首批 | 已完成 | advanced file parsers、entity extraction、graph search、KB hybrid rerank、query planner、KB reflection reports、SkillProposal lifecycle、reflection trend、Shared Memory、long-term context agent / tenant policy、memory quality trend | 只保留真实环境验证和产品化入口，不再作为未完成 spec 跟踪 |
+| 真实外部依赖验证 | 未完成 | 真实 LLM、真实 embedding provider、真实 rerank provider、真实 Google Drive / Confluence credential smoke | 在测试环境显式 opt-in，按验收报告记录 `passed` / `skipped` / `failed` |
+| 管理和运维入口 | 未完成 | platform UI / HTTP 查询、policy admin API、review UI、scheduler / worker、full sync history、后台 reindex job runtime、告警 | 根据 Pilot 验收反馈决定优先级 |
+| 高复杂增强 | 暂缓 | document-level ACL、OCR / VLM / 扫描 PDF、sqlite-vec / Qdrant / OpenSearch adapter、真实 tokenizer、LLM-driven selection、自动知识库修复、自动 skill 发布 | 等客户场景或规模压力明确后再开 spec |
+
+### 已完成的主要 spec 组
+
+| 组 | 已完成 spec |
+| --- | --- |
+| Observability | `observability-runtime-event-coverage`、`observability-performance-summary`、`observability-admin-query-api`、`data-retention-and-diagnostics-policy` |
+| Memory | `memory-sqlite-semantic-store`、`memory-update-merge-actions`、`memory-extraction-evaluation`、`memory-retention-and-compaction`、`memory-reflection-maintenance`、`shared-memory`、`memory-quality-trend-summary` |
+| Long-term Context | `long-term-context-foundation`、`long-term-context-evaluation`、`long-term-context-budget-policy`、`long-term-context-agent-tenant-policy` |
+| Reflection | `reflection-foundation`、`reflection-report-evaluation`、`reflection-knowledge-base-reports`、`skill-reflection-proposals`、`reflection-trend-summary` |
+| Vector Store | `vector-store-foundation`、`vector-store-sqlite-backend`、`embedding-rerank-provider-abstraction`、`vector-store-reindex-jobs`、`memory-and-kb-real-embedding-evaluation`、`rerank-kb-search-integration` |
+| Knowledge Base | `knowledge-base-core`、`knowledge-base-parsers-basic`、`knowledge-base-hybrid-search`、`knowledge-base-connectors-local`、`knowledge-base-sync-planner`、`knowledge-base-connectors-google-drive`、`knowledge-base-connectors-confluence`、`knowledge-base-agent-kb-binding`、`knowledge-base-connector-operations`、`knowledge-base-file-parsers-advanced`、`knowledge-base-entity-relation-extraction`、`knowledge-base-graph-search`、`knowledge-base-query-planner` |
+| Deployment / Config | `configuration-foundation`、`mcp-server-config-split`、`deployment-upgrade-and-backup`、`deployment-pilot-install-checklist`、`deployment-docker-compose-foundation`、`pilot-acceptance-guide` |
+
+### 仍未完成但不阻塞当前 Pilot Go / No-Go 的事项
+
+- 真实 provider / SaaS smoke：必须在准生产环境显式配置后验证，不能用默认 CI 代替。
+- UI / HTTP 管理入口：当前以 admin CLI、文档和 public API 为主。
+- scheduler / worker / full sync history：当前 connector sync、retention、reindex 都以手动或同步 API 为主。
+- 生产默认策略：Shared Memory、long-term context policy、reflection proposal review 的默认启用范围仍需结合 Pilot 反馈确认。
+- 高复杂检索能力：document-level ACL、OCR / VLM、ANN 后端和 OpenSearch adapter 暂缓。
+
 ## 当前能力地图
 
 | 能力 | 当前状态 | 已有基础 | Pilot 后缺口 | 非 MVP 增强 |

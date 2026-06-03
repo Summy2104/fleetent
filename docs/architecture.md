@@ -80,11 +80,11 @@ src/fleetent/
   skill_registry.py  ← 扫描 skills/，关键词匹配，注入 system prompt
   context_mgr.py     ← in-session token 压缩
   intelligence/
-    memory/         ← 结构化语义记忆：提取动作 → SQLite memory_items → vector_store 索引
-    knowledge_base/ ← 企业文档知识库：解析、导入、local / Google Drive / Confluence sync、vector / keyword / hybrid search
-    vector_store/   ← 向量索引基础设施：in-memory / SQLite backend，embedding / rerank provider
-    long_term_ctx.py ← 长期上下文调度：memory / knowledge_base provider 已接入
-    reflection.py   ← 反思报告：读取 traces / memory，只生成建议，不自动写回
+    memory/         ← 结构化 User Memory + Shared Memory：提取、维护、SQLite source of truth、vector_store 索引
+    knowledge_base/ ← 企业文档知识库：解析、导入、local / Google Drive / Confluence sync、hybrid / graph / rerank / planner
+    vector_store/   ← 向量索引基础设施：in-memory / SQLite backend，embedding / rerank provider，reindex
+    long_term_ctx.py ← 长期上下文调度：memory / knowledge_base / Shared Memory provider 与 context policy
+    reflection.py   ← 反思报告与 proposal：读取 traces / memory / KB 信号，只读趋势，不自动写回
   integrations/
     mcp/            ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
     sandbox/        ← Docker CLI 封装：隔离 Python 执行
@@ -182,7 +182,7 @@ flowchart TD
 
 | 文档 | 覆盖范围 | 优先级 | 依赖的模块 | 负责人 | 状态 |
 |------|---------|:------:|-----------|-----|------|
-| [owner-capability-roadmap.md](capabilities/owner-capability-roadmap.md) | 常乐负责模块总控板、MVP 缺口、实施批次 | P0 | observability · memory · long-term-ctx · reflection · vector-store · knowledge-base · deployment | 常乐 | 基础完成 |
+| [owner-capability-roadmap.md](capabilities/owner-capability-roadmap.md) | 常乐负责模块总控板、完成度总览、MVP / Pilot 缺口、实施批次 | P0 | observability · memory · long-term-ctx · reflection · vector-store · knowledge-base · deployment | 常乐 | 已实现 |
 | [agent-runtime.md](capabilities/agent-runtime.md) | 核心循环、工具调度、上下文压缩、运行治理 | P0 | model-router · tools · session · skill · governance · observability | 张洋 | 部分完成 |
 | [model-router.md](capabilities/model-router.md) | task_type 路由、provider 配置、fallback 链 | P0 | deployment | 张洋 | 部分完成 |
 | [tools.md](capabilities/tools.md) | @tool 装饰器、schema 构建、dispatch、内置工具集 | P0 | governance · connectors | 张洋 | 部分完成 |
@@ -196,10 +196,10 @@ flowchart TD
 | [scheduling.md](capabilities/scheduling.md) | Cron 定时任务、Webhook 事件触发 | P1 | agent-runtime · session · im-gateway | 张亮 | 部分完成 |
 | [connectors.md](capabilities/connectors.md) | 用户级外部工具授权连接器；区别于 knowledge-base 数据源 connector | P2 | user-center | 张亮 | 未开始 |
 | [user-center.md](capabilities/user-center.md) | 用户中心、多租户管理 | P1 | - | 张亮 | 部分完成 |
-| [memory.md](capabilities/memory.md) | 跨 session 语义记忆、提取动作、检索与评估基线 | P1 | model-router · vector-store · observability | 常乐 | 基础完成 |
-| [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入，memory / knowledge-base provider 已接入 | P1 | memory · knowledge-base | 常乐 | 基础完成 |
-| [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、local / Google Drive / Confluence 同步、混合检索 | P1 | vector-store | 常乐 | 基础完成 |
-| [vector-store.md](capabilities/vector-store.md) | 向量索引、SQLite backend、embedding / rerank provider | P1 | deployment | 常乐 | 基础完成 |
-| [reflection.md](capabilities/reflection.md) | 记忆 / Skill / 知识库反思与自进化 | P2 | memory · skill · knowledge-base | 常乐 | 基础完成 |
+| [memory.md](capabilities/memory.md) | User Memory、Shared Memory、维护 proposal、质量趋势 | P1 | model-router · vector-store · observability · reflection | 常乐 | 基础完成 |
+| [long-term-ctx.md](capabilities/long-term-ctx.md) | 长期上下文调度与注入，memory / knowledge-base / Shared Memory provider 和 context policy | P1 | memory · knowledge-base | 常乐 | 基础完成 |
+| [knowledge-base.md](capabilities/knowledge-base.md) | 企业文档知识库、local / Google Drive / Confluence 同步、hybrid / graph / rerank / planner | P1 | vector-store | 常乐 | 基础完成 |
+| [vector-store.md](capabilities/vector-store.md) | 向量索引、SQLite backend、embedding / rerank provider、同步 reindex | P1 | deployment | 常乐 | 基础完成 |
+| [reflection.md](capabilities/reflection.md) | User Memory / Skill / 知识库反思、proposal lifecycle、趋势聚合 | P2 | memory · skill · knowledge-base · observability | 常乐 | 基础完成 |
 | [observability.md](capabilities/observability.md) | 评估日志、数据统计、链路追踪 | P0 | - | 常乐 | 基础完成 |
 | [deployment.md](capabilities/deployment.md) | on-premises 打包、配置管理、SQLite upgrade / backup | P0 | - | 常乐 | 基础完成 |
