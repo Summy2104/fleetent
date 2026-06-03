@@ -45,6 +45,19 @@ def create_agent_def(name: str, system_prompt: str, allowed_tools: list[str]) ->
     return None
 
 
+def update_agent_def(name: str, system_prompt: str | None, allowed_tools: list[str] | None) -> None:
+    """Edit an agent by snapshotting a new active version. Bridges create_version.
+
+    ``None`` fields are left unchanged.
+    """
+    return None
+
+
+def delete_agent_def(name: str) -> bool:
+    """Hard-delete an agent definition. Bridges agent_store.delete_agent."""
+    return False
+
+
 def references_for(agent_name: str) -> dict[str, Any]:
     """Who references an agent (users/channels) — drives archive protection."""
     agent = get_agent_def(agent_name)
@@ -99,6 +112,17 @@ class CloneBody(BaseModel):
     new_name: str
 
 
+class CreateBody(BaseModel):
+    name: str
+    system_prompt: str = ""
+    allowed_tools: list[str] = []
+
+
+class UpdateBody(BaseModel):
+    system_prompt: str | None = None
+    allowed_tools: list[str] | None = None
+
+
 # --- templates (literal path before /{name}) ----------------------------------
 
 
@@ -125,6 +149,76 @@ def observability(
 ) -> dict[str, Any]:
     _current_user(authorization)
     return agent_observability_agg(name, window)
+
+
+# --- CRUD: create / read-full / update / delete -------------------------------
+
+
+def _def_response(name: str) -> dict[str, Any]:
+    agent = get_agent_def(name)
+    state = agent_admin_store.get_state(name)
+    out: dict[str, Any] = {
+        "agent": name,
+        "provenance": state["provenance"],
+        "status": state["status"],
+    }
+    if agent is not None:
+        out["system_prompt"] = agent["system_prompt"]
+        out["allowed_tools"] = agent["allowed_tools"]
+    return out
+
+
+@router.post("/agents", status_code=201)
+def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    if get_agent_def(body.name) is not None:
+        raise HTTPException(status_code=409, detail="agent already exists")
+    create_agent_def(body.name, body.system_prompt, body.allowed_tools)
+    agent_admin_store.set_provenance(body.name, "adhoc")
+    agent_admin_store.enable(body.name)
+    audit_log.write_audit(user.id, "agent.create", "agent", body.name)
+    return _def_response(body.name)
+
+
+@router.get("/agents/{name}")
+def get_agent(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    _current_user(authorization)
+    agent = get_agent_def(name)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    return _def_response(name)
+
+
+@router.patch("/agents/{name}")
+def update_agent(
+    name: str, body: UpdateBody, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    if get_agent_def(name) is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    update_agent_def(name, body.system_prompt, body.allowed_tools)
+    agent_admin_store.mark_drift(name)  # no-op unless provenance is managed
+    audit_log.write_audit(user.id, "agent.update", "agent", name)
+    return _def_response(name)
+
+
+@router.delete("/agents/{name}")
+def delete_agent(
+    name: str,
+    authorization: str | None = Header(None),
+    x_confirm: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    if get_agent_def(name) is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    refs = references_for(name)
+    if refs["users"] or refs["channels"]:
+        raise HTTPException(status_code=409, detail={"error": "agent still bound", **refs})
+    _require_confirm(x_confirm)
+    delete_agent_def(name)
+    agent_admin_store.delete_state(name)
+    audit_log.write_audit(user.id, "agent.delete", "agent", name)
+    return {"agent": name, "deleted": True}
 
 
 # --- lifecycle ----------------------------------------------------------------

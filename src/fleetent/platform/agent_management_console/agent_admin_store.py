@@ -122,6 +122,12 @@ def is_referenced(agent_id: int) -> bool:
     return bool(refs["users"] or refs["channels"])
 
 
+def delete_state(agent_name: str) -> None:
+    """Remove the side-table row for a hard-deleted agent; missing is a no-op."""
+    with _database().transaction() as conn:
+        conn.execute("DELETE FROM agent_admin_state WHERE agent_name = :name", {"name": agent_name})
+
+
 _FIELDS = {"status", "provenance", "drift", "archived_at"}
 _DEFAULTS = {"status": "enabled", "provenance": "adhoc", "drift": 0, "archived_at": None}
 

@@ -211,6 +211,41 @@ def test_agents_write_controls_admin_gated():
     assert "ag-create-bar" in html
 
 
+def test_agents_crud_modal_and_fields_present():
+    html = ADMIN_HTML
+    # create/edit modal with the three editable fields
+    assert 'id="ag-modal"' in html
+    assert 'id="ag-name"' in html
+    assert 'id="ag-system-prompt"' in html
+    assert 'id="ag-allowed-tools"' in html
+    # "New agent" control lives in the (admin-gated) create bar
+    bar = html.split('id="ag-create-bar"', 1)[1].split("</span>", 1)[0]
+    assert "agCreate(" in bar
+
+
+def test_agents_crud_functions_present():
+    html = ADMIN_HTML
+    for fn in ("function agCreate", "function agEdit", "function agSave", "function agDelete"):
+        assert fn in html, fn
+
+
+def test_agents_crud_endpoints_wired():
+    html = ADMIN_HTML
+    # create = POST /agents, delete = DELETE with confirm header, edit = PATCH
+    assert 'api("POST", "/agents"' in html
+    assert 'api("PATCH", `/agents/${' in html
+    assert 'api("DELETE", `/agents/${' in html
+    assert '"X-Confirm": "true"' in html
+
+
+def test_agents_crud_row_actions_admin_gated():
+    html = ADMIN_HTML
+    body = html.split("function renderAgents()", 1)[1].split("function agShowTemplates", 1)[0]
+    assert "IS_VIEWER" in body
+    assert "agEdit(" in body
+    assert "agDelete(" in body
+
+
 # --- 5. Statistics module -----------------------------------------------------
 
 

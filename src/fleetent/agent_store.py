@@ -289,6 +289,27 @@ def _merge_version_fields(
     }
 
 
+def delete_agent(name: str) -> bool:
+    """Hard-delete an agent and all its versions in one transaction.
+
+    Returns True when an agent was removed, False when no such agent exists.
+    Deletes ``agent_versions`` before ``agents`` to respect the FK ordering.
+    """
+    db = _db()
+    with db.transaction() as conn:
+        agent = conn.execute("SELECT id FROM agents WHERE name = :name", {"name": name}).fetchone()
+        if agent is None:
+            return False
+        agent_id = int(agent["id"])
+        # Detach the active-version FK before removing version rows.
+        conn.execute(
+            "UPDATE agents SET active_version_id = NULL WHERE id = :aid", {"aid": agent_id}
+        )
+        conn.execute("DELETE FROM agent_versions WHERE agent_id = :aid", {"aid": agent_id})
+        conn.execute("DELETE FROM agents WHERE id = :aid", {"aid": agent_id})
+    return True
+
+
 def activate_version(name: str, version: int) -> None:
     db = _db()
     with db.transaction() as conn:

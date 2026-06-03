@@ -1,6 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
 
+import fleetent.agent_store as agent_store
+import fleetent.auth as auth
+import fleetent.governance.audit_log as audit
 import fleetent.user_store as us
 from fleetent.server import app
 from tests.integration.test_migrations import apply_migrations
@@ -301,3 +304,51 @@ def test_lifespan_registers_monitoring_collection_job(tmp_path, monkeypatch, iso
         for c in instance.add_interval_job.call_args_list
     }
     assert "monitoring_collect" in job_ids
+
+
+# --- agent_store seam wiring (clone/apply persist in production) --------------
+
+
+def _agent_admin_env(tmp_path, monkeypatch):
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setattr(us, "DB_PATH", db_path)
+    monkeypatch.setattr(audit, "DB_PATH", db_path)
+    return db_path
+
+
+def _admin_session() -> str:
+    u = us.create_user("admin-user")
+    us.set_role(u.id, "admin")
+    return auth.create_session(u.id)
+
+
+def test_clone_persists_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_db):
+    _agent_admin_env(tmp_path, monkeypatch)
+    agent_store.create_agent("ops", "Ops prompt", ["read_*"])
+    token = _admin_session()
+    client = TestClient(app)
+    r = client.post(
+        "/admin/agents/ops/clone",
+        headers={"Authorization": f"Session {token}"},
+        json={"new_name": "ops-copy"},
+    )
+    assert r.status_code == 200
+    copy = agent_store.get_by_name("ops-copy")
+    assert copy is not None and copy.system_prompt == "Ops prompt"
+
+
+def test_apply_persists_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_db):
+    _agent_admin_env(tmp_path, monkeypatch)
+    token = _admin_session()
+    client = TestClient(app)
+    r = client.post(
+        "/admin/agents/apply",
+        headers={"Authorization": f"Session {token}"},
+        json={"name": "fresh", "system_prompt": "Fresh.", "allowed_tools": ["shell"]},
+    )
+    assert r.status_code == 200
+    found = agent_store.get_by_name("fresh")
+    assert found is not None and found.system_prompt == "Fresh."

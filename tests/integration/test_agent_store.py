@@ -263,6 +263,31 @@ def test_platform_isolation(db):
     assert agent_store.get_agent_for_channel("telegram", "C5") is None
 
 
+# --- hard delete ---
+
+
+def test_delete_agent_removes_agent_and_versions(db):
+    from fleetent.config import Settings
+    from fleetent.db import create_database
+
+    agent = agent_store.create_agent("doomed", "v1", ["shell"])
+    agent_store.create_version("doomed", system_prompt="v2")
+    agent_store.create_version("doomed", system_prompt="v3")
+
+    assert agent_store.delete_agent("doomed") is True
+    assert agent_store.get_by_name("doomed") is None
+
+    database = create_database(Settings(anthropic_api_key="").database_url)
+    rows = database.execute(
+        "SELECT COUNT(*) AS c FROM agent_versions WHERE agent_id = :aid", {"aid": agent.id}
+    ).fetchone()
+    assert rows is not None and int(rows["c"]) == 0
+
+
+def test_delete_agent_unknown_returns_false(db):
+    assert agent_store.delete_agent("ghost") is False
+
+
 # --- default agent ---
 
 

@@ -113,6 +113,18 @@ def test_references_and_protection(store_db):
     assert store.is_referenced(999) is False
 
 
+def test_delete_state_removes_row(store_db):
+    store.set_provenance("gone", "adhoc")
+    store.enable("gone")
+    assert any(s["agent_name"] == "gone" for s in store.list_states())
+    store.delete_state("gone")
+    assert all(s["agent_name"] != "gone" for s in store.list_states())
+
+
+def test_delete_state_missing_is_noop(store_db):
+    store.delete_state("never-existed")  # must not raise
+
+
 def test_templates_readonly():
     templates = {t["id"] for t in agent_templates.list_templates()}
     assert {"readonly-qa", "ops", "support"} <= templates

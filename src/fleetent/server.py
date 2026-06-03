@@ -15,7 +15,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from fleetent import user_store
+from fleetent import agent_store, user_store
 from fleetent.agent_loop import run_stream
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, WebhooksSettings, configure_logging, load_mcp_server_settings
@@ -176,6 +176,61 @@ app.include_router(agent_admin_api.router)
 app.include_router(stats_admin_api.router)
 app.include_router(monitor_admin_api.router)
 app.include_router(agent_apply_api.router)
+
+
+def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:
+    """Serialize an Agent to the dict shape the console/apply seams promise."""
+    if agent is None:
+        return None
+    return {
+        "id": agent.id,
+        "system_prompt": agent.system_prompt,
+        "allowed_tools": agent.allowed_tools,
+    }
+
+
+def wire_agent_store_seams() -> None:
+    """Bridge the console + apply agent seams to agent_store (production wiring).
+
+    Without this, clone/create/update/delete and apply act as inert stubs.
+    """
+
+    def _get_def(name: str) -> dict[str, Any] | None:
+        return _agent_def_dict(agent_store.get_by_name(name))
+
+    def _console_create(name: str, system_prompt: str, allowed_tools: list[str]) -> None:
+        agent_store.create_agent(name, system_prompt, allowed_tools)
+
+    def _console_update(
+        name: str, system_prompt: str | None, allowed_tools: list[str] | None
+    ) -> None:
+        kwargs: dict[str, Any] = {}
+        if system_prompt is not None:
+            kwargs["system_prompt"] = system_prompt
+        if allowed_tools is not None:
+            kwargs["allowed_tools"] = allowed_tools
+        agent_store.create_version(name, **kwargs)
+
+    def _console_delete(name: str) -> bool:
+        return agent_store.delete_agent(name)
+
+    def _apply_create(name: str, system_prompt: str, allowed_tools: list[str]) -> int:
+        return agent_store.create_agent(name, system_prompt, allowed_tools).id
+
+    def _apply_update(name: str, system_prompt: str, allowed_tools: list[str]) -> None:
+        agent_store.create_version(name, system_prompt=system_prompt, allowed_tools=allowed_tools)
+
+    agent_console_api.get_agent_def = _get_def
+    agent_console_api.create_agent_def = _console_create
+    agent_console_api.update_agent_def = _console_update
+    agent_console_api.delete_agent_def = _console_delete
+
+    agent_apply_api.get_agent_def = _get_def
+    agent_apply_api.create_agent_def = _apply_create
+    agent_apply_api.update_agent_def = _apply_update
+
+
+wire_agent_store_seams()
 
 
 class ChatRequest(BaseModel):
