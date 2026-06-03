@@ -37,6 +37,45 @@ class CommandResult:
 
 
 @dataclass(frozen=True)
+class GateCommandResult(CommandResult):
+    """Pilot gate command result with required/optional status and duration."""
+
+    required: bool = True
+    duration_seconds: float = 0.0
+
+    def to_json(self) -> dict[str, object]:
+        payload = super().to_json()
+        payload["required"] = self.required
+        payload["duration_seconds"] = self.duration_seconds
+        return payload
+
+
+@dataclass(frozen=True)
+class ConfigValidationEvidence:
+    status: str
+    error_count: int
+    skipped_count: int
+    artifact: Path | None = None
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "artifact": str(self.artifact) if self.artifact else None,
+            "error_count": self.error_count,
+            "skipped_count": self.skipped_count,
+            "status": self.status,
+        }
+
+
+@dataclass(frozen=True)
+class DiagnosticsEvidence:
+    manifest_path: Path
+    artifact_count: int
+
+    def to_json(self) -> dict[str, object]:
+        return {"artifact_count": self.artifact_count, "manifest_path": str(self.manifest_path)}
+
+
+@dataclass(frozen=True)
 class CapabilityEvidence:
     """Evidence for one owner capability domain."""
 
@@ -152,6 +191,9 @@ class PilotVerificationReport:
     real_smoke: list[RealSmokeEvidence]
     issues: list[VerificationIssue]
     recommendation: Recommendation
+    config_validation: ConfigValidationEvidence | None = None
+    diagnostics: DiagnosticsEvidence | None = None
+    connector_status: list[dict[str, object]] = field(default_factory=list)
 
     @classmethod
     def for_current_run(
@@ -162,6 +204,9 @@ class PilotVerificationReport:
         real_smoke: list[RealSmokeEvidence],
         issues: list[VerificationIssue],
         artifact_dir: Path,
+        config_validation: ConfigValidationEvidence | None = None,
+        diagnostics: DiagnosticsEvidence | None = None,
+        connector_status: list[dict[str, object]] | None = None,
     ) -> PilotVerificationReport:
         """Build a report using current process and git metadata."""
         artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -177,6 +222,9 @@ class PilotVerificationReport:
             real_smoke=real_smoke,
             issues=issues,
             recommendation=recommend(command_results, capability_evidence, real_smoke, issues),
+            config_validation=config_validation,
+            diagnostics=diagnostics,
+            connector_status=connector_status or [],
         )
 
     def to_json(self) -> dict[str, object]:
@@ -187,6 +235,11 @@ class PilotVerificationReport:
             "real_smoke": [item.to_json() for item in self.real_smoke],
             "issues": [item.to_json() for item in self.issues],
             "recommendation": self.recommendation,
+            "config_validation": (
+                self.config_validation.to_json() if self.config_validation else None
+            ),
+            "diagnostics": self.diagnostics.to_json() if self.diagnostics else None,
+            "connector_status": list(self.connector_status),
         }
 
 
@@ -319,6 +372,25 @@ def render_markdown_report(report: PilotVerificationReport) -> str:
             lines.append(f"- {smoke.name}: **{smoke.status}**{reason}")
     else:
         lines.append("- No real smoke results were imported.")
+    lines.extend(["", "## Config Validation", ""])
+    if report.config_validation:
+        lines.append(f"- Status: **{report.config_validation.status}**")
+        lines.append(f"- Errors: {report.config_validation.error_count}")
+        lines.append(f"- Skipped: {report.config_validation.skipped_count}")
+    else:
+        lines.append("- No config validation evidence imported.")
+    lines.extend(["", "## Diagnostics Evidence", ""])
+    if report.diagnostics:
+        lines.append(f"- Manifest: `{report.diagnostics.manifest_path}`")
+        lines.append(f"- Artifacts: {report.diagnostics.artifact_count}")
+    else:
+        lines.append("- No diagnostics manifest imported.")
+    lines.extend(["", "## Connector Status", ""])
+    if report.connector_status:
+        for status in report.connector_status:
+            lines.append(f"- `{status.get('connector_id')}`: {status.get('last_status')}")
+    else:
+        lines.append("- No connector status imported.")
     lines.extend(["", "## Issues", ""])
     if report.issues:
         for issue in report.issues:

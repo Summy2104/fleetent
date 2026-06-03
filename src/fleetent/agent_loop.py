@@ -1310,9 +1310,9 @@ def run_sync(
     async def _run() -> str:
         # SB3: resolve the effective mode (one-time Docker probe, cached) inside the
         # CLI's own event loop so run_code's schema visibility is gated for the CLI too.
-        from fleetent.integrations.sandbox import get_effective_mode
+        from fleetent.integrations.sandbox import enablement as sandbox_enablement
 
-        sandbox_mode = await get_effective_mode()
+        sandbox_mode = await sandbox_enablement.get_effective_mode()
         return await run(
             messages,
             user_id=user_id,

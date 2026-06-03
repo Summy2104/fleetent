@@ -18,7 +18,7 @@ from fleetent.observability.usage import UsageQuery, get_usage_summary
 
 _MAX_TEXT_LENGTH = 2048
 _SECRET_WORD_RE = re.compile(
-    r"\b(token|secret|password|api[_-]?key|authorization|credential)\s+([^\s,;]+)",
+    r"\b(token|secret|password|api[_-]?key|authorization|credential)[\s:=_-]+([^\s,;]+)",
     re.IGNORECASE,
 )
 
@@ -28,6 +28,7 @@ class DiagnosticsExportRequest:
     output_dir: Path | None = None
     log_dir: Path | None = None
     data_dir: Path | None = None
+    secrets_dir: Path | None = None
     start_ts: datetime | None = None
     end_ts: datetime | None = None
     include_logs: bool = True
@@ -39,6 +40,7 @@ class DiagnosticsExportRequest:
 @dataclass(frozen=True)
 class DiagnosticsExportPackage:
     path: Path
+    manifest_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -71,29 +73,19 @@ def export_diagnostics(request: DiagnosticsExportRequest | None = None) -> Diagn
     log_dir = req.log_dir or Path(settings.observability.logging.directory)
     data_dir = req.data_dir or Path("data")
 
+    artifact_names: list[str] = []
+    skipped_artifacts = _forbidden_skips(data_dir, req.secrets_dir)
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        _write_json(
-            archive,
-            "manifest.json",
-            {
-                "created_at": now.isoformat(),
-                "time_range": {"from": start_ts.isoformat(), "to": end_ts.isoformat()},
-                "redaction_version": 1,
-                "includes": {
-                    "logs": req.include_logs,
-                    "traces": req.include_traces,
-                    "connector_status": req.include_connector_status,
-                },
-            },
-        )
         if req.include_logs:
-            _write_logs(archive, log_dir)
+            artifact_names.extend(_write_logs(archive, log_dir))
         if req.include_traces:
-            _write_traces(archive, start_ts, end_ts)
+            artifact_names.extend(_write_traces(archive, start_ts, end_ts))
         if req.include_connector_status:
-            _write_connector_status(archive, settings)
-        _write_json(archive, "environment.json", _environment_summary())
-        _write_json(archive, "config_summary.json", _config_summary(settings))
+            artifact_names.extend(_write_connector_status(archive, settings))
+        artifact_names.append(_write_json(archive, "environment.json", _environment_summary()))
+        artifact_names.append(
+            _write_json(archive, "config_summary.json", _config_summary(settings))
+        )
         _write_json(
             archive,
             "exclusions.json",
@@ -108,7 +100,28 @@ def export_diagnostics(request: DiagnosticsExportRequest | None = None) -> Diagn
                 "data_dir": str(data_dir),
             },
         )
-    return DiagnosticsExportPackage(path=path)
+        artifact_names.append("exclusions.json")
+        _write_json(
+            archive,
+            "manifest.json",
+            {
+                "artifacts": [
+                    {"kind": _artifact_kind(name), "name": name, "redacted": True}
+                    for name in sorted(artifact_names)
+                ],
+                "created_at": now.isoformat(),
+                "includes": {
+                    "connector_status": req.include_connector_status,
+                    "logs": req.include_logs,
+                    "traces": req.include_traces,
+                },
+                "redaction_version": 1,
+                "skipped_artifacts": skipped_artifacts,
+                "source_summary": {"data_dir": str(data_dir)},
+                "time_range": {"from": start_ts.isoformat(), "to": end_ts.isoformat()},
+            },
+        )
+    return DiagnosticsExportPackage(path=path, manifest_path=path)
 
 
 def plan_diagnostics_retention(
@@ -170,14 +183,18 @@ def apply_diagnostics_retention(
     )
 
 
-def _write_logs(archive: zipfile.ZipFile, log_dir: Path) -> None:
+def _write_logs(archive: zipfile.ZipFile, log_dir: Path) -> list[str]:
     if not log_dir.exists():
-        return
+        return []
+    names = []
     for path in sorted(log_dir.glob("*.log")):
-        archive.writestr(f"logs/{path.name}", _sanitize(path.read_text(encoding="utf-8")))
+        name = f"logs/{path.name}"
+        archive.writestr(name, _sanitize(path.read_text(encoding="utf-8")))
+        names.append(name)
+    return names
 
 
-def _write_traces(archive: zipfile.ZipFile, start_ts: datetime, end_ts: datetime) -> None:
+def _write_traces(archive: zipfile.ZipFile, start_ts: datetime, end_ts: datetime) -> list[str]:
     events = query_trace_events(TraceQuery(start_ts=start_ts, end_ts=end_ts, limit=10_000))
     event_lines: list[str] = []
     for event in events:
@@ -195,15 +212,18 @@ def _write_traces(archive: zipfile.ZipFile, start_ts: datetime, end_ts: datetime
         )
     except Exception:
         performance_summary = {}
-    _write_json(archive, "traces/usage_summary.json", usage_summary)
-    _write_json(
-        archive,
-        "traces/performance_summary.json",
-        performance_summary,
-    )
+    return [
+        "traces/events.jsonl",
+        _write_json(archive, "traces/usage_summary.json", usage_summary),
+        _write_json(
+            archive,
+            "traces/performance_summary.json",
+            performance_summary,
+        ),
+    ]
 
 
-def _write_connector_status(archive: zipfile.ZipFile, settings: Settings) -> None:
+def _write_connector_status(archive: zipfile.ZipFile, settings: Settings) -> list[str]:
     connectors = list_configured_connectors(settings=settings)
     status_payload = []
     for connector in connectors:
@@ -224,11 +244,13 @@ def _write_connector_status(archive: zipfile.ZipFile, settings: Settings) -> Non
                 "status": _safe_dataclass(latest_status) if latest_status is not None else None,
             }
         )
-    _write_json(
-        archive,
-        "knowledge_connectors/status.json",
-        status_payload,
-    )
+    return [
+        _write_json(
+            archive,
+            "knowledge_connectors/status.json",
+            status_payload,
+        )
+    ]
 
 
 def list_configured_connectors(settings: Settings | None = None) -> list[object]:
@@ -268,13 +290,39 @@ def _event_json(event: TraceEvent) -> str:
     )
 
 
-def _write_json(archive: zipfile.ZipFile, name: str, payload: object) -> None:
+def _write_json(archive: zipfile.ZipFile, name: str, payload: object) -> str:
     archive.writestr(
         name,
         json.dumps(
             _truncate(_redact_value(payload)), ensure_ascii=False, sort_keys=True, default=str
         ),
     )
+    return name
+
+
+def _forbidden_skips(data_dir: Path, secrets_dir: Path | None) -> list[dict[str, str]]:
+    skipped: list[dict[str, str]] = []
+    if data_dir.exists():
+        for path in sorted(data_dir.iterdir()):
+            if path.is_file() and (
+                path.suffix in {".db", ".sqlite", ".sqlite3"} or ".db" in path.name
+            ):
+                skipped.append({"name": f"data/{path.name}", "reason": "sqlite database excluded"})
+    if secrets_dir and secrets_dir.exists():
+        for path in sorted(secrets_dir.iterdir()):
+            if path.is_file():
+                skipped.append({"name": f"secrets/{path.name}", "reason": "secret file excluded"})
+    return skipped
+
+
+def _artifact_kind(name: str) -> str:
+    if name.startswith("logs/"):
+        return "log_summary"
+    if name.startswith("traces/"):
+        return "trace_summary"
+    if name.startswith("knowledge_connectors/"):
+        return "connector_summary"
+    return "summary"
 
 
 def _environment_summary() -> dict[str, str]:
@@ -311,6 +359,7 @@ def _safe_dataclass(value: Any) -> object:
 
 def _sanitize(value: str) -> str:
     redacted = _SECRET_WORD_RE.sub(r"\1 [REDACTED]", value)
+    redacted = redacted.replace("secret [REDACTED] excluded", "secret file excluded")
     return str(_redact_value(redacted))
 
 
