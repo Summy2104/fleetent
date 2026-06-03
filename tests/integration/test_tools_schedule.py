@@ -10,7 +10,7 @@ def test_schedule_task_returns_success_with_task_id():
     fake_task = {"id": "uuid-123", "name": "daily"}
 
     with patch.object(ss, "create", return_value=fake_task) as mock_create:
-        from fleetent.tool_registry import dispatch
+        from fleetent.tools.registry import dispatch
 
         payload = (
             '{"name":"daily","cron_expr":"0 9 * * *","message":"run",'
@@ -30,7 +30,7 @@ def test_cancel_task_returns_success_when_found():
     import fleetent.tools  # noqa: F401
 
     with patch.object(ss, "delete", return_value=True):
-        from fleetent.tool_registry import dispatch
+        from fleetent.tools.registry import dispatch
 
         result = dispatch("cancel_task", '{"task_id":"uuid-123"}')
 
@@ -43,7 +43,7 @@ def test_cancel_task_returns_error_when_not_found():
     import fleetent.tools  # noqa: F401
 
     with patch.object(ss, "delete", return_value=False):
-        from fleetent.tool_registry import dispatch
+        from fleetent.tools.registry import dispatch
 
         result = dispatch("cancel_task", '{"task_id":"no-such-id"}')
 

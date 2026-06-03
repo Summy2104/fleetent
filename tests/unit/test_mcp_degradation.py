@@ -1,7 +1,7 @@
 """Tests for MCP graceful degradation (MCP4): availability, schema filtering, modes."""
 
 import fleetent.integrations.mcp.client as mc
-import fleetent.tool_registry as tr
+import fleetent.tools.registry as tr
 from fleetent.integrations.mcp.client import HealthState, McpServerConfig
 
 # ── is_server_available (D1) ─────────────────────────────────────────────────

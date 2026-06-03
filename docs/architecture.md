@@ -38,8 +38,8 @@ fleetent 采用模块化单体：单进程、单仓库、统一部署，但代�
 ```
 src/fleetent/
   runtime/          ← loop(←agent_loop)、context(←context_mgr)、sub_agent、snapshot(←agent_runtime)、运行治理(termination/loop_detector/budget/cancellation/message_hygiene/error_classifier/tool_guardrails)
-  model/            ← router(←model_router)、provider_health、vision_client、image_gen_client、multimodal
-  tools/            ← registry(←tool_registry)、builtin_tools(←tools)、result_truncation、plugin_loader
+  model/            ← router(←model_router)、provider_health
+  tools/            ← registry(←tool_registry)、builtin_tools(←tools)、result_truncation、plugin_loader、vision_client、image_gen_client、multimodal
   skills/           ← registry(←skill_registry)、audit(←skill_audit)
   session/          ← manager(←session_mgr)、index(←session_index)
   governance/       ← agent_policy、permission_gate、agent 能力边界
@@ -89,8 +89,7 @@ src/fleetent/
   agent_loop.py      ← while tool-use 核心循环；run() + run_stream()
   sub_agent.py       ← asyncio.gather 并行子 agent；最大深度 1
   model/             ← router(←model_router)：task_type → provider 配置 + fallback 链；provider_health：熔断缓存（已包化；旧 model_router.py / provider_health.py 为 re-export shim）
-  tool_registry.py   ← @tool 注册、schema 构建、dispatch、访问控制
-  tools.py           ← 内置工具（import 即注册，副作用）
+  tools/             ← registry(←tool_registry)：@tool 注册、schema 构建、dispatch、访问控制；builtin_tools(←tools)：内置工具（import fleetent.tools 即注册，副作用经包 __init__ 保留）；result_truncation、plugin_loader、vision_client、image_gen_client、multimodal（已包化；旧 tool_registry.py 等 6 个为 re-export shim，tools.py 与包同名已删除）
   skills/            ← registry(←skill_registry)：扫描 skills/、关键词匹配、注入 system prompt；audit(←skill_audit)：静态注入审计（已包化；旧 skill_registry.py / skill_audit.py 为 re-export shim）
   context_mgr.py     ← in-session token 压缩
   intelligence/

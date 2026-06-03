@@ -59,7 +59,7 @@ async def test_partial_failure_returns_error_for_failed_task():
 
 async def test_child_cannot_spawn_sub_agent():
     """When is_sub_agent=True, sub_agent tool must not be in registry."""
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     # Simulate what agent_loop does when is_sub_agent=True
     # The sub_agent tool should not be dispatched

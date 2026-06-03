@@ -711,9 +711,9 @@ class _SpyManager:
 
 
 def _install_spy_manager(monkeypatch, manager):
-    import fleetent.tools as tools
+    import fleetent.tools.builtin_tools as builtin_tools
 
-    monkeypatch.setattr(tools, "_get_manager", lambda: manager)
+    monkeypatch.setattr(builtin_tools, "_get_manager", lambda: manager)
     return manager
 
 

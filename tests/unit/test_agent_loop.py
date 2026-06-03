@@ -2280,7 +2280,7 @@ def test_run_sync_loads_plugins(monkeypatch):
     from unittest.mock import AsyncMock, MagicMock
 
     import fleetent.integrations.sandbox.enablement as se
-    import fleetent.plugin_loader as pl
+    import fleetent.tools.plugin_loader as pl
 
     async def fake_run(messages, **kw):
         return "done"
@@ -2335,7 +2335,7 @@ async def test_safe_dispatch_forwards_user_id():
 
 
 async def test_run_truncates_large_tool_result(mock_client, monkeypatch):
-    import fleetent.tool_result_truncation as trt
+    import fleetent.tools.result_truncation as trt
 
     seen: list = []
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: seen.append(list(msgs)) or msgs)
@@ -2354,7 +2354,7 @@ async def test_run_truncates_large_tool_result(mock_client, monkeypatch):
 
 
 async def test_run_self_truncating_tool_exempt(mock_client, monkeypatch):
-    import fleetent.tool_result_truncation as trt
+    import fleetent.tools.result_truncation as trt
 
     seen: list = []
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: seen.append(list(msgs)) or msgs)
@@ -2371,7 +2371,7 @@ async def test_run_self_truncating_tool_exempt(mock_client, monkeypatch):
 
 
 async def test_run_stream_truncates_messages_but_sse_keeps_original(mock_client, monkeypatch):
-    import fleetent.tool_result_truncation as trt
+    import fleetent.tools.result_truncation as trt
 
     seen: list = []
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: seen.append(list(msgs)) or msgs)
@@ -3060,7 +3060,7 @@ async def test_run_sub_agent_excluded_for_child_agent_depth_guard(mock_client):
 
 async def test_run_stops_on_bound_strict_unavailable(mock_client, monkeypatch):
     import fleetent.integrations.mcp.client as mc
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
     from fleetent.integrations.mcp.client import HealthState, McpServerConfig
 
     st = McpServerConfig(id="st", degrade_mode="strict")
@@ -3077,7 +3077,7 @@ async def test_run_stops_on_bound_strict_unavailable(mock_client, monkeypatch):
 
 async def test_run_continues_when_strict_not_bound(mock_client, monkeypatch):
     import fleetent.integrations.mcp.client as mc
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
     from fleetent.integrations.mcp.client import HealthState, McpServerConfig
 
     st = McpServerConfig(id="st", degrade_mode="strict")

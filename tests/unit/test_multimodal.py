@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 
-from fleetent.multimodal import (
+from fleetent.tools.multimodal import (
     build_image_block,
     build_message_with_images,
     has_image_block,

@@ -1,0 +1,79 @@
+"""Client for a self-hosted, OpenAI-compatible vision (VLM) endpoint.
+
+Mirrors image_gen_client: an OpenAI-compatible base_url pointed at any
+self-hostable VLM behind a compat layer. No cloud-hosted proprietary service —
+data stays in-net. Sends a single focused vision chat (instruction text + the
+image inlined as a base64 data URL) and returns the model's text answer; the
+calling tool reads images from disk by reference, so base64 never enters the
+main context or trace.
+"""
+
+import base64
+from typing import Any
+
+from openai import AsyncOpenAI
+
+from fleetent.config import Settings
+
+# VLMs answer in seconds; generous but bounded so a hung endpoint fails locally.
+_DEFAULT_TIMEOUT_SECONDS: float = 120.0
+
+# Inlining as a data URL keeps the image inside the request body (in-net),
+# matching multimodal.build_image_block.
+_DATA_URL_MIME = "image/png"
+
+
+class VisionError(Exception):
+    """Raised when image analysis cannot produce text (unconfigured endpoint,
+    endpoint error/timeout, or an unusable response)."""
+
+
+def _build_client(settings: Settings) -> AsyncOpenAI:
+    """Build an AsyncOpenAI bound to the configured vision endpoint.
+
+    Self-hosted endpoints often ignore the key; a non-empty placeholder keeps
+    the SDK from rejecting the request before it reaches the backend.
+    """
+    return AsyncOpenAI(base_url=settings.vision_url, api_key="vision")
+
+
+async def analyze(
+    image_bytes: bytes,
+    instruction: str,
+    *,
+    settings: Settings | None = None,
+) -> str:
+    """Run one focused vision call over the image and return the text answer.
+
+    Sends a standard OpenAI-compatible vision message (an instruction text block
+    plus an `image_url` block carrying the image as a base64 data URL) and
+    returns the assistant text. Any failure is raised as VisionError for the
+    caller to normalize into a tool-result error string.
+    """
+    settings = settings or Settings()
+    if not settings.vision_url:
+        raise VisionError("vision endpoint not configured (vision_url is empty)")
+
+    client = _build_client(settings)
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    content: list[Any] = [
+        {"type": "text", "text": instruction},
+        {"type": "image_url", "image_url": {"url": f"data:{_DATA_URL_MIME};base64,{b64}"}},
+    ]
+    messages: list[Any] = [{"role": "user", "content": content}]
+    try:
+        response = await client.chat.completions.create(
+            model=settings.vision_model,
+            messages=messages,
+            timeout=_DEFAULT_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:  # endpoint error / timeout — normalized for caller
+        raise VisionError(f"vision endpoint call failed: {exc}") from exc
+
+    choices = getattr(response, "choices", None)
+    if not choices:
+        raise VisionError("vision endpoint returned no choices")
+    text = getattr(choices[0].message, "content", None)
+    if not text:
+        raise VisionError("vision endpoint returned empty content")
+    return str(text)

@@ -139,7 +139,7 @@ async def test_two_agents_same_github_route_to_separate_credentials(scoped_db, m
 
 
 async def test_dispatch_guard_blocks_out_of_scope_mcp_server(scoped_db, monkeypatch):
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     # Agent A's resolved scope only includes "github"; "internal" is out of scope.
     with pytest.raises(PermissionError):

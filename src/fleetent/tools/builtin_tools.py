@@ -7,7 +7,7 @@ import time
 import uuid
 from pathlib import Path
 
-from fleetent import eval_logger, image_gen_client, vision_client
+from fleetent import eval_logger
 from fleetent.cancellation import CancelToken
 from fleetent.error_classifier import CLASSIFICATION_TABLE, ErrorCategory, ErrorClassification
 from fleetent.integrations.sandbox import (
@@ -17,7 +17,8 @@ from fleetent.integrations.sandbox import (
     build_sandbox_env,
 )
 from fleetent.integrations.sandbox import output_truncation as sot
-from fleetent.tool_registry import ToolContext, tool
+from fleetent.tools import image_gen_client, vision_client
+from fleetent.tools.registry import ToolContext, tool
 
 logger = logging.getLogger(__name__)
 

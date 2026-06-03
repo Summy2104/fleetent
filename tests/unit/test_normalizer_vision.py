@@ -9,12 +9,12 @@ run() carries no image_url block and the loop routes to the text model.
 from unittest.mock import AsyncMock
 
 import fleetent.im_user_store as im_user_store
-import fleetent.tools as tl
+import fleetent.tools.builtin_tools as tl
 import fleetent.user_store as user_store
 from fleetent.im_gateway import normalizer
-from fleetent.multimodal import has_image_block
 from fleetent.platform.im_gateway_management import im_channel_allowlist as acl
 from fleetent.platform.im_gateway_management import im_connector_store as ics
+from fleetent.tools.multimodal import has_image_block
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"payload" * 4
 

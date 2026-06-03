@@ -207,7 +207,7 @@ def _schema_visibility(tool_name: str) -> bool:
 
 def install_schema_filter() -> None:
     """Wire the MCP visibility predicate into tool_registry (MCP4 D4)."""
-    from fleetent import tool_registry
+    from fleetent.tools import registry as tool_registry
 
     tool_registry.set_schema_visibility_filter(_schema_visibility)
 
@@ -902,7 +902,7 @@ async def _register_http_server(server: McpServerConfig, scope: int | None = Non
 def _register_tool_stdio(
     server: McpServerConfig, tool_name: str, tool_def: Any, scope: int | None = None
 ) -> None:
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     input_schema = (
         tool_def.inputSchema
@@ -930,7 +930,7 @@ def _register_tool_stdio(
 def _register_tool_http(
     server: McpServerConfig, tool_name: str, tool_def: dict[str, Any], scope: int | None = None
 ) -> None:
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     input_schema = tool_def.get("inputSchema", {"type": "object", "properties": {}})
 

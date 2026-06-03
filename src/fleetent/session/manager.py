@@ -399,7 +399,7 @@ async def _release_sandboxes(session_ids: list[str]) -> None:
     """
     if not session_ids:
         return
-    from fleetent.tools import _get_manager
+    from fleetent.tools.builtin_tools import _get_manager
 
     manager = _get_manager()
     # Per-id isolation: one stuck container must not block reclaiming the others.

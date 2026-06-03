@@ -3,7 +3,7 @@
 import asyncio
 
 import fleetent.agent_loop as al
-import fleetent.tool_registry as tr
+import fleetent.tools.registry as tr
 from fleetent.cancellation import CancelToken
 
 

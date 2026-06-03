@@ -71,8 +71,8 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 src/fleetent/
   agent_loop.py      ← while tool-use 核心循环；run() + run_stream()
   model_router.py    ← task_type → provider 配置（OpenAI-compatible + fallback 链）
-  tool_registry.py   ← @tool 装饰器、schema 构建、dispatch；访问控制
-  tools.py           ← 内置工具（import 即注册，副作用）
+  tools/registry.py        ← @tool 装饰器、schema 构建、dispatch；访问控制
+  tools/builtin_tools.py   ← 内置工具（import fleetent.tools 即注册，副作用经包 __init__ 保留）
   skill_registry.py  ← 扫描 skills/，关键词匹配，注入 system prompt
   context_mgr.py     ← in-session token 压缩，keep_tail identity check
   memory_layer.py    ← 跨 session 事实：Haiku 提取 → JSONL → 注入
@@ -216,7 +216,7 @@ FLEETENT_SKILLS_DIR  # 覆盖 skills/ 目录（默认 ./skills）
 
 ## Gotchas
 
-- `tools.py` 注册工具是 import 副作用——`agent_loop.py` 顶部必须 import，否则 `get_schemas()` 返回空
+- `tools/builtin_tools.py` 注册工具是 import 副作用——`tools/__init__.py` 顶部 `from fleetent.tools import builtin_tools` 承载此副作用，`agent_loop.py` 顶部 `import fleetent.tools` 触发注册，否则 `get_schemas()` 返回空
 - `skill_registry.scan()` 在服务启动时运行（FastAPI lifespan），不是每次请求；CLI `run()` 每次调用
 - `context_mgr._keep_tail()` 用 identity check（`m is tail[0]`），不用 `==`——内容相同的 dict 相等但非同一对象
 - Bearer token 格式：`Authorization: Bearer ma-<64hex>`——`ma-` 前缀区分服务 key 与模型 API key

@@ -35,7 +35,6 @@ from fleetent.message_hygiene import HygieneReport, MessageContractError, saniti
 from fleetent.model import router as model_router
 from fleetent.model.provider_health import ProviderHealthCache, get_health_cache
 from fleetent.model.router import RouteConfig, RouteOverride, get_async_client_and_config
-from fleetent.multimodal import build_message_with_images, has_image_block
 from fleetent.observability import (
     InjectedContextTrace,
     TraceEvent,
@@ -56,7 +55,8 @@ from fleetent.termination import (
     resolve_limits,
 )
 from fleetent.tool_guardrails import GuardrailAction, evaluate_guardrail
-from fleetent.tool_registry import (
+from fleetent.tools.multimodal import build_message_with_images, has_image_block
+from fleetent.tools.registry import (
     ToolContext,
     dispatch,
     get_effective_timeout,
@@ -64,7 +64,7 @@ from fleetent.tool_registry import (
     get_schemas,
     is_self_truncating,
 )
-from fleetent.tool_result_truncation import truncate_tool_result
+from fleetent.tools.result_truncation import truncate_tool_result
 
 logger = structlog.get_logger(__name__)
 
@@ -187,7 +187,7 @@ def _agent_bound_to_server(server_id: str, allowed_tools: list[str] | None) -> b
     agent (allowed_tools=None) — a documented limitation."""
     if allowed_tools is None:
         return True
-    from fleetent.tool_registry import _registry
+    from fleetent.tools.registry import _registry
 
     prefix = f"{server_id}__"
     return any(
@@ -1297,7 +1297,7 @@ def run_sync(
     # freshly added plugin is picked up). The CLI passes no allowed_tools, so
     # plugin tools are exposed un-gated here — consistent with how the CLI exposes
     # all builtin tools (no per-agent authorization on the CLI path).
-    from fleetent.plugin_loader import load_plugins
+    from fleetent.tools.plugin_loader import load_plugins
 
     load_plugins()
     skills_catalog = available_skills_prompt()

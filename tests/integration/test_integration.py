@@ -125,7 +125,7 @@ async def test_permission_gate_approved_tool_executes(isolated_db):
 
 async def test_tool_not_in_allowed_tools_raises_before_approval(isolated_db):
     """Tool not in agent's allowed_tools → PermissionError, no approval row created."""
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     with pytest.raises(PermissionError, match="not permitted"):
         tr.dispatch("shell", {}, allowed_tools=["github__*"])

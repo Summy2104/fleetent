@@ -56,9 +56,9 @@ from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.resource_monitoring import collectors, monitor_admin_api
 from fleetent.platform.skill_management import skill_admin_api
 from fleetent.platform.user_management import api_key_store, user_admin_api
-from fleetent.plugin_loader import expand_plugin_patterns, load_plugins
 from fleetent.session import manager as session_mgr
 from fleetent.skills import scan as scan_skills
+from fleetent.tools.plugin_loader import expand_plugin_patterns, load_plugins
 
 logger = logging.getLogger(__name__)
 

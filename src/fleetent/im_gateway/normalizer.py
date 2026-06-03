@@ -72,7 +72,7 @@ async def _build_user_content(msg: NormalizedMessage) -> str:
     base64 never enters the main context, so the loop routes to the text model.
     Look-back is left to the model via analyze_image on the same references.
     """
-    from fleetent import tools, vision_client
+    from fleetent.tools import builtin_tools, vision_client
 
     images = _image_attachments(msg.attachments)
     if not images:
@@ -81,7 +81,7 @@ async def _build_user_content(msg: NormalizedMessage) -> str:
     instruction = msg.text or "Describe this image."
     sections = [msg.text] if msg.text else []
     for data, mime in images:
-        ref = tools._save_upload(data, mime)
+        ref = builtin_tools._save_upload(data, mime)
         try:
             analysis = await vision_client.analyze(data, instruction)
         except vision_client.VisionError as exc:
