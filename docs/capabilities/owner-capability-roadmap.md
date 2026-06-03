@@ -49,11 +49,11 @@
 | 能力 | 当前状态 | 已有基础 | Pilot 后缺口 | 非 MVP 增强 |
 | --- | --- | --- | --- | --- |
 | Observability foundation | 基础完成 | structured logs、SQLite traces、usage summary、performance summary、source attribution、runtime event coverage、admin query CLI、diagnostics export / manual retention、contract tests | platform UI / HTTP 查询入口 | OTel / Prometheus、dashboard UI、告警 |
-| Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation、retention / compaction API、owner-approved reflection maintenance apply API、Shared Memory `shared_memory_items`、team / tenant scope、`shared:{scope_type}:{scope_id}` namespace | scheduler / review UI 与趋势统计；Shared Memory prompt 注入由 long-term-ctx context policy 协调 | 长期质量趋势 |
+| Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation、retention / compaction API、owner-approved reflection maintenance apply API、Shared Memory `shared_memory_items`、team / tenant scope、`shared:{scope_type}:{scope_id}` namespace、只读 memory quality trend summary | scheduler / review UI / 告警；Shared Memory 生产默认策略和编辑入口 | 真实 LLM 长期质量评估 |
 | Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture、deterministic budget policy；agent / tenant context policy（tenant 默认 + agent 覆盖）按 agent 归属注入 Shared Memory（tenant / team），默认关闭、无跨 tenant/team 访问 | policy 编辑 UI 与 admin API | 真实 tokenizer、个性化 budget、LLM-driven selection |
-| Reflection | 基础完成 | 读取 trace / memory 生成建议报告、deterministic report evaluation、User Memory maintenance proposal lifecycle | review UI / scheduler / trend summary | 自动 skill proposal、KB reflection reports |
-| Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API、combined embedding evaluation | rerank evaluation；rerank 接入 KB search | 后台 reindex job runtime、sqlite-vec、Qdrant、OpenSearch adapter |
-| Knowledge base | 基础完成 | local ingest、parser registry、PDF / DOCX / PPTX / XLSX parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator、combined embedding evaluation、Google Drive / Confluence connector baseline、Google Sheets / Slides export parsing、entity extraction schema + explicit run、`kb_extraction_runs`、`kb_entities`、独立于 search 的 `graph_search` depth 0/1 graph evidence、agent 到多 KB 绑定、connector operations CLI / latest status | 真实 SaaS smoke 与生产凭据管理；query planner / rerank 尚未接入 graph candidates | document-level ACL、scheduler / full sync history、attachments / OCR / VLM |
+| Reflection | 基础完成 | 读取 trace / memory 生成建议报告、deterministic report evaluation、User Memory maintenance proposal lifecycle、KB reflection reports、SkillProposal lifecycle、只读 reflection trend summary | review UI / scheduler / scope-aware SkillProposal 归属 | 自动知识库修复、自动 skill 发布 |
+| Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API、combined embedding evaluation、KB hybrid rerank 接入与 deterministic rerank evaluation | 真实 rerank provider smoke 与质量评估；后台 reindex job runtime | sqlite-vec、Qdrant、OpenSearch adapter |
+| Knowledge base | 基础完成 | local ingest、parser registry、PDF / DOCX / PPTX / XLSX parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator、combined embedding evaluation、Google Drive / Confluence connector baseline、Google Sheets / Slides export parsing、entity extraction schema + explicit run、`kb_extraction_runs`、`kb_entities`、独立于 search 的 `graph_search` depth 0/1 graph evidence、hybrid rerank、规则型 query planner、agent 到多 KB 绑定、connector operations CLI / latest status | 真实 SaaS smoke 与生产凭据管理；graph / rerank 已通过 planner 串联但尚未成为 `search(mode="auto")` 默认路径 | document-level ACL、scheduler / full sync history、attachments / OCR / VLM |
 | Deployment / config | 基础完成 | `settings.yaml`、MCP dedicated server file、legacy config fail-fast、本地 SQLite upgrade / backup 脚本、Pilot install checklist | config docs 对 intelligence runtime prerequisites 的收敛 | config center、Admin UI、hot reload |
 
 ## 依赖顺序
@@ -248,13 +248,13 @@ hybrid retrieval 和 reindex；真实 SaaS smoke 仍需显式环境变量和凭�
 - `memory-retention-and-compaction` 和 `long-term-context-evaluation`
 - connector contract / fake connector 设计可以和 evaluation specs 并行；真实 SaaS smoke 仍保持显式 opt-in
 
-后续仍不建议提前做：
+后续仍不建议提前做 / 已完成后仍需保持的边界：
 
-- Shared Memory 早于 User Memory ownership / proposal lifecycle 稳定。
+- Shared Memory 已在 User Memory ownership / proposal lifecycle 稳定后完成；后续不得绕过 owner boundary。
 - document-level ACL 早于 agent / KB 绑定策略。
 - connector scheduler / worker 早于手动 sync observability 与失败恢复。
 - reflection 自动化写回早于 owner-approved proposal review 入口。
-- `rerank-kb-search-integration` 早于 rerank evaluation。
+- 真实 rerank provider 质量评估早于明确 opt-in smoke 和失败降级策略。
 
 ## MVP 标准分层
 
@@ -328,7 +328,7 @@ blocker 的问题才会阻塞 Go；docs gap、enhancement 和 out-of-scope 分�
    `kb_entities`、mentions / relations evidence、explicit run 和 deterministic extractor；graph search 仍未实现，
    不默认调用真实 LLM。
 2. `knowledge-base-graph-search`：已完成独立于 search 的 `graph_search`，支持 depth 0/1、direct entity
-   mention、relation evidence、related entity mention、graph evidence 和 deterministic evaluation；不接 query planner / rerank。
+   mention、relation evidence、related entity mention、graph evidence 和 deterministic evaluation；该 spec 本身不接 query planner / rerank。
 3. `knowledge-base-file-parsers-advanced`：已完成 PDF / DOCX / PPTX / XLSX、Google Sheets / Google Slides
    export parser registry 接入；OCR、扫描 PDF、image / VLM 解析仍需单独评估依赖、成本和数据主权影响。
 4. `rerank-kb-search-integration`：把已有 rerank provider 接入 KB search，对 hybrid / graph candidates 做重排；
@@ -394,10 +394,10 @@ flowchart TD
 
 1. `shared-memory`：已完成 User Memory 之外的共享记忆实体、`shared_memory_items` 表、team / tenant scope、
    `shared:{scope_type}:{scope_id}` vector namespace、写入 / 更新 / 删除 lifecycle、reflection proposal apply 和最小 admin CLI；
-   不接 prompt 注入，默认不让管理员代批用户个人记忆，也不把企业共识直接混入 User Memory。
-2. `long-term-context-agent-tenant-policy`：已创建 OpenSpec design change；后续实现以 agent ownership
-   为边界，agent 数据模型需要暴露 `tenant_id` 和可选 `team_id`，policy 只配置是否启用 tenant / team
-   级 Shared Memory、budget 策略和冲突偏好；默认保持当前行为，不引入跨团队或跨公司的共享记忆。
+   shared-memory 本身不负责 prompt 注入，注入已由 long-term-ctx context policy 按 agent 归属处理；默认不让管理员代批用户个人记忆，也不把企业共识直接混入 User Memory。
+2. `long-term-context-agent-tenant-policy`：已完成并 archive；实现以 agent ownership 为边界，agent
+   数据模型暴露 `tenant_id` 和可选 `team_id`，policy 只配置是否启用 tenant / team 级 Shared Memory、
+   budget 策略和冲突偏好；默认保持当前行为，不引入跨团队或跨公司的共享记忆。
 3. `memory-quality-trend-summary`：已完成 `get_memory_quality_trend_summary` 只读质量趋势；覆盖 User
    Memory counts / expired / duplicate candidates、Shared Memory 独立计数，以及 memory maintenance
    proposal outcome；不触发 extraction、不自动维护 memory。
@@ -420,9 +420,9 @@ flowchart TD
 
 1. `reflection-trend-summary`：已实现并 archive，提交为 `e529d60`。实现为只读趋势聚合，不自动写
    Memory / KB / Skill。
-2. `long-term-context-agent-tenant-policy`：已完成 ownership-based 设计修订，但暂不实现和 archive。后续
-   implementation 需要先联动 agent 配置 / 表结构暴露 `tenant_id` 和可选 `team_id`，policy 不再表达任意
-   `scopes` 列表。
+2. `long-term-context-agent-tenant-policy`：已实现并 archive，提交为 `dd8fbb5`。实现为 ownership-based
+   context policy：tenant 默认 + agent 覆盖，Shared Memory scope 只从 agent `tenant_id` / `team_id`
+   派生，默认关闭，不表达任意 `scopes` 列表。
 3. `memory-quality-trend-summary`：已实现并 archive，提交为 `70b9773`。实现为只读质量趋势，不触发
    extraction、不自动维护 memory。
 

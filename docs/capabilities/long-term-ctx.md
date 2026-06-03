@@ -151,17 +151,20 @@ async def build_context(
 
 ## 当前缺口
 
-- KB provider 已接入 agent 到多个 KB 的绑定策略；尚未支持 agent / tenant 级 memory 与 KB budget 策略。
-- Shared Memory 已提供 team / tenant 数据层，但尚未作为第三类 provider 接入 long-term-ctx；当前不接 prompt 注入。
+- KB provider 已接入 agent 到多个 KB 的绑定策略；agent / tenant context policy 已支持 tenant 默认 +
+  agent 覆盖、User Memory / Shared Memory / Knowledge Base 开关与预算。
+- Shared Memory 已作为第三类 provider 接入 `build_context_with_policy()`；scope 只从 agent 归属
+  `tenant_id` / `team_id` 派生，默认关闭，不支持 policy 任意指定跨 tenant / team scope。
 - token 估算仍使用 deterministic 近似值，尚未接入真实 tokenizer。
-- memory / knowledge 的默认比例已可配置，但尚未做 agent / tenant 级策略。
-- 格式模板未产品化，缺少不同 agent / tenant 的可配置策略。
-- graph_search 未接入。
+- policy 编辑入口仍是代码 / store 层能力，尚未提供 admin API、UI 或热更新。
+- 格式模板未产品化，缺少按 agent / tenant 配置的 prompt 模板。
+- graph_search 不直接接入 `build_context()`；需要调用方通过 knowledge-base planner / search 先形成 KB
+  候选后再进入长期上下文。
 
 ## 下一批候选 specs
 
 - `long-term-context-template-config`
-- `long-term-context-agent-tenant-policy`
+- `long-term-context-policy-admin-api`
 - `knowledge-provider-contract`
 - `long-term-context-real-tokenizer`
 

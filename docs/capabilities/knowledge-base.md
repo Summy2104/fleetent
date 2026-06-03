@@ -417,13 +417,13 @@ def get_connector_status(connector_id: str) -> ConnectorStatus:
 
 团队已有独立的 [knowledge-bridge](../../../knowledge-bridge) 项目，覆盖了大部分核心功能，但技术栈与 fleetent 约束不兼容，不能直接作为依赖引入。实施策略：**有选择地迁移设计资产和小块算法**，而非从零重写或整体搬运。
 
-历史迁移评估见 [knowledge-bridge 迁移计划](../archive/knowledge-bridge-migration-plan.md)。knowledge-base 将按拆分 specs 渐进实现：已先完成 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环，并完成 `knowledge-base-parsers-basic` 的基础解析器、`knowledge-base-hybrid-search` 的 SQLite FTS5 / BM25 与 RRF 融合、`knowledge-base-connectors-local` 的 local directory 手动同步、sync planner、Google Drive connector、Confluence connector；后续再推进 graph search 和 retrieval audit。
+历史迁移评估见 [knowledge-bridge 迁移计划](../archive/knowledge-bridge-migration-plan.md)。knowledge-base 按拆分 specs 渐进实现：已完成 `knowledge-base-core` 的手动导入、分块、向量索引和基础 search 闭环，并完成 `knowledge-base-parsers-basic` 的基础解析器、`knowledge-base-hybrid-search` 的 SQLite FTS5 / BM25 与 RRF 融合、`knowledge-base-connectors-local` 的 local directory 手动同步、sync planner、Google Drive connector、Confluence connector、advanced parsers、entity extraction、graph search、hybrid rerank 和规则型 query planner。后续重点转向真实 SaaS smoke、生产凭据管理、scheduler / full sync history、ACL 和更重的解析能力。
 
 当前未实现内容：
 - 无后台 job、admin UI、REST upload API；vector rebuild 目前通过 vector_store 同步 public API 触发
 - 无 LLM planner / query rewrite / `search(mode="auto")`
 - 已有 entity extraction schema、deterministic extractor、`kb_extraction_runs`、`kb_entities`、mentions / relations evidence 和 explicit run。
-- 已有 `graph_search` 第一版：独立于 search，支持 depth 0/1、direct entity mention、relation evidence、related entity mention 和 graph evidence；不接 query planner / rerank，不改变 `search()` / hybrid ranking。
+- 已有 `graph_search` 第一版：独立于 search，支持 depth 0/1、direct entity mention、relation evidence、related entity mention 和 graph evidence；该 API 本身不接 query planner / rerank，不改变 `search()` / hybrid ranking。
 - 无 production ranking dashboard
 - Google Drive 不做 service account / domain-wide delegation，不做最终提问用户到 Drive document ACL 的实时映射；OAuth token 通过 connector 的 `credential_ref` 引用，MVP 可指向本地 token 文件，生产部署需保护文件权限和备份策略，后续可迁移到 credential store / secret manager。
 - Google Drive missing / 不可见默认归档 KB document 并移除 chunks / vector entries，不物理删除 `knowledge_documents` 行。
@@ -454,14 +454,18 @@ def get_connector_status(connector_id: str) -> ConnectorStatus:
 - parser 已支持 text / Markdown / lightweight HTML / PDF / DOCX / PPTX / XLSX；local directory 和 Google Drive uploaded Office/PDF 通过 parser registry 解析，Google Sheets / Google Slides 通过 export 后解析。
 - OCR、VLM、扫描 PDF、图片语义理解和结构化 table QA 不支持。
 - local directory、Google Drive 与 Confluence 已支持 plan + execute 手动 sync，并可通过 admin CLI 列出、检查、dry-run、同步和查看最近一次 status；尚未实现后台 job。
-- 检索已支持 SQLite FTS5/BM25 keyword mode 与 RRF hybrid mode；尚未实现 rerank、query planner 或 graph。
+- 检索已支持 SQLite FTS5/BM25 keyword mode、RRF hybrid mode、显式 hybrid rerank、
+  独立 `graph_search()` 和规则型 `plan_knowledge_search()` / `execute_knowledge_search_plan()`；不提供
+  `search(mode="auto")`，不接 LLM planner / query rewrite。
 - 外部 SaaS 数据源已有 fake-client 默认路径和手动 opt-in smoke scaffold；真实 Google Drive / Confluence API client 不进入默认测试路径。
 - long-term-ctx 已通过 `resolve_agent_kb_ids()` 使用 agent KB binding；尚未实现 document-level ACL。
 - 后台 vector index rebuild job runtime 尚未实现；当前只提供同步 vector_store reindex public API。
 
 ## 下一批候选 specs
 
-- 后续 connector 增强 specs：Drive / Confluence 真实 client wiring、ACL 映射、scheduler / full sync history、附件解析、OCR / VLM / 扫描 PDF 评估
+- 后续 connector / retrieval 增强 specs：真实 Google Drive / Confluence smoke 和生产凭据管理、
+  document-level ACL 映射、scheduler / full sync history、附件解析、OCR / VLM / 扫描 PDF 评估、
+  graph / rerank 在 agent 默认检索链路中的产品化策略
 
 ## 自动化效果验证
 

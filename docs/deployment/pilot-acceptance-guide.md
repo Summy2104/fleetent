@@ -385,9 +385,11 @@ reindex 检查：
 
 Rerank smoke：
 
-- 当前 rerank provider boundary 已定义，但尚未接入 KB search。
+- 当前 rerank provider boundary 已定义，并已接入 KB hybrid search 的显式 `rerank=True` 路径；默认
+  `rerank.backend=disabled`，不会静默调用真实外部服务。
 - 如果 `rerank.backend=disabled`，记录 `skipped: rerank disabled by config`。
-- 如果显式配置 deterministic 或 HTTP rerank provider，只验证 provider smoke 和错误处理，不把 rerank 接入缺失判为 Pilot blocker。
+- 如果显式配置 deterministic 或 HTTP rerank provider，验证 provider smoke、错误处理和 KB hybrid rerank
+  能返回稳定结果；真实 rerank provider 失败通常记为 Conditional Go，除非影响默认本地链路。
 
 ## 12. 真实外部依赖记录规则
 
@@ -483,7 +485,7 @@ pilot_acceptance_report:
 | --- | --- | --- |
 | Pilot blocker | 阻止小范围真实用户试用的问题，例如服务无法启动、DB migration 不可用、diagnostics 不脱敏、memory / KB local 基础链路不可用、secret 泄漏。 | 必须修复并复测后才能 Go。 |
 | Docs gap | 功能可用，但操作说明、错误解释、记录模板或排障路径不清晰。 | 可 Conditional Go，但必须补文档 owner 和完成时间。 |
-| Enhancement | Pilot 可用性不被阻塞的增强，例如 UI、scheduler、credential store、长期趋势统计、rerank 接入 KB search。 | 不阻塞第一次 Pilot 验收；进入后续 spec 评估。 |
+| Enhancement | Pilot 可用性不被阻塞的增强，例如 UI、scheduler、credential store、真实 rerank 质量评估、graph / rerank 默认检索策略产品化。 | 不阻塞第一次 Pilot 验收；进入后续 spec 评估。 |
 | Out-of-scope | 非本 owner 范围或本 change 明确不处理的事项，例如客户网络策略、企业 IdP、生产 secret manager 选型。 | 记录依赖 owner，不作为本次验收失败原因。 |
 
 增强 specs 可以与 Pilot 验收并行推进，但 Pilot 后增强不默认阻塞第一次 Pilot 验收。验收反馈应先按上述分类进入
