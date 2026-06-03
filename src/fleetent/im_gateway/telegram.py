@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+
 import structlog
 
+from fleetent.platform.im_gateway_management import im_connector_config, im_connector_store
+
 logger = structlog.get_logger(__name__)
+
+HEARTBEAT_INTERVAL_SECONDS = 30.0
 
 
 def _derive_session_id(chat_type: str, user_id: int, reply_to_id: int | None) -> str:
@@ -13,17 +19,14 @@ def _derive_session_id(chat_type: str, user_id: int, reply_to_id: int | None) ->
     return f"user:{user_id}"
 
 
-def create_app() -> object:
+def create_app(owner_id: str, config: dict[str, str]) -> object:
     """Create and return a configured python-telegram-bot Application."""
     try:
         from telegram.ext import Application
     except ImportError:
         raise RuntimeError("python-telegram-bot not installed") from None
 
-    from fleetent.config import Settings
-
-    bot_token = Settings(anthropic_api_key="").telegram_bot_token
-    builder = Application.builder().token(bot_token).concurrent_updates(True)
+    builder = Application.builder().token(config.get("bot_token", "")).concurrent_updates(True)
     application = builder.build()
 
     async def handle_message(update: object, context: object) -> None:
@@ -37,7 +40,7 @@ def create_app() -> object:
             return
 
         tg_user_id = update.effective_user.id
-        user = get_or_create("telegram", str(tg_user_id))
+        user = get_or_create(owner_id, "telegram", str(tg_user_id))
 
         reply_to = update.message.reply_to_message
         chat_type = update.message.chat.type
@@ -53,11 +56,13 @@ def create_app() -> object:
 
         msg = NormalizedMessage(
             platform="telegram",
+            owner_id=owner_id,
             session_id=session_id,
             user_id=user.id,
             text=update.message.text or "",
             attachments=[],
             reply_func=reply_func,
+            channel_id=str(update.message.chat.id),
         )
         await route(msg)
 
@@ -65,3 +70,37 @@ def create_app() -> object:
 
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     return application
+
+
+async def _run_polling(app: object) -> None:
+    """Start polling and serve until cancelled (network seam)."""
+    await app.initialize()  # type: ignore[attr-defined]
+    await app.start()  # type: ignore[attr-defined]
+    await app.updater.start_polling()  # type: ignore[attr-defined]
+    # Polling runs in its own task; block here until the manager cancels us.
+    await asyncio.Event().wait()
+
+
+async def _heartbeat_loop(owner_id: str) -> None:
+    while True:
+        await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+        im_connector_store.heartbeat(owner_id, "telegram")
+
+
+async def run(owner_id: str, config: dict[str, str] | None = None) -> None:
+    """Run the Telegram adapter, reporting status to the registry until cancelled."""
+    if config is None:
+        config = im_connector_config.resolve(owner_id, "telegram")
+    app = create_app(owner_id, config)
+    heartbeat = asyncio.create_task(_heartbeat_loop(owner_id))
+    try:
+        im_connector_store.report_status(owner_id, "telegram", "connected")
+        await _run_polling(app)
+    except asyncio.CancelledError:
+        im_connector_store.report_status(owner_id, "telegram", "stopped")
+        raise
+    except Exception as exc:
+        im_connector_store.report_status(owner_id, "telegram", "error", error=str(exc))
+        raise
+    finally:
+        heartbeat.cancel()

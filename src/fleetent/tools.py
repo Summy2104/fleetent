@@ -105,3 +105,19 @@ def sub_agent(tasks: str) -> str:
     """Run multiple sub-tasks in parallel. tasks is a JSON array with 'name' and 'prompt' fields."""
     # Execution is intercepted by agent_loop before reaching here.
     return "sub_agent must be called through the agent loop"
+
+
+@tool(risk_level="medium")
+async def invoke_agent(agent_name: str, message: str) -> str:
+    """Delegate a message to another named agent and return its reply."""
+    # Lazy import: agent_loop imports tools at module load (circular otherwise).
+    from fleetent import agent_loop, agent_runtime
+
+    snapshot = agent_runtime.load_active(agent_name)
+    if snapshot is None:
+        return f"agent {agent_name!r} not found"
+    messages = [
+        {"role": "system", "content": snapshot.system_prompt},
+        {"role": "user", "content": message},
+    ]
+    return await agent_loop.run(messages, is_sub_agent=True, snapshot=snapshot)

@@ -7,8 +7,8 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-from fleetent import session_admin_store as store
 from fleetent import session_mgr
+from fleetent.platform.chat_management import session_admin_store as store
 
 
 def apply_migrations(db_path: Path) -> None:

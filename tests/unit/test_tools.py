@@ -113,3 +113,60 @@ async def test_run_code_destroys_workspace_on_error(monkeypatch):
         await tl.run_code(code="print('hi')")
 
     mock_client.destroy_workspace.assert_called_once_with("cid-789")
+
+
+# ── invoke_agent ───────────────────────────────────────────────────────────────
+
+
+def test_invoke_agent_registered_medium_risk():
+    assert "invoke_agent" in tool_registry._registry
+    assert tool_registry.get_risk_level("invoke_agent") == "medium"
+
+
+@pytest.mark.asyncio
+async def test_invoke_agent_returns_reply_for_existing_agent(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    import fleetent.agent_loop as al
+    import fleetent.agent_runtime as ar
+    import fleetent.tools as tl
+    from fleetent.agent_runtime import AgentSnapshot
+
+    snapshot = AgentSnapshot(
+        agent_id=1,
+        name="helper",
+        version=1,
+        version_id=1,
+        system_prompt="You help.",
+        allowed_tools=["calculate"],
+        skills_dir=None,
+        mcp_server_ids=None,
+        model_overrides={},
+        memory_namespace="default",
+    )
+    monkeypatch.setattr(ar, "load_active", lambda name: snapshot)
+    captured: dict = {}
+
+    async def fake_run(messages, **kwargs):
+        captured["messages"] = messages
+        captured["kwargs"] = kwargs
+        return "sub reply"
+
+    monkeypatch.setattr(al, "run", AsyncMock(side_effect=fake_run))
+
+    result = await tl.invoke_agent(agent_name="helper", message="2+2?")
+
+    assert result == "sub reply"
+    assert captured["kwargs"]["is_sub_agent"] is True
+    assert captured["kwargs"]["snapshot"] is snapshot
+
+
+@pytest.mark.asyncio
+async def test_invoke_agent_unknown_agent_returns_not_found(monkeypatch):
+    import fleetent.agent_runtime as ar
+    import fleetent.tools as tl
+
+    monkeypatch.setattr(ar, "load_active", lambda name: None)
+
+    result = await tl.invoke_agent(agent_name="ghost", message="hi")
+    assert result == "agent 'ghost' not found"

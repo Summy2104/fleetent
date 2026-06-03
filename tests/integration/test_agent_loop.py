@@ -85,7 +85,7 @@ def mock_client(monkeypatch) -> AsyncMock:
 
     cfg.fallbacks = ()
 
-    monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(al, "get_async_client_and_config", lambda *a, **k: (client, cfg))
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
     monkeypatch.setattr(al, "record_trace_event", lambda event: None)
@@ -403,6 +403,30 @@ async def test_run_is_sub_agent_filters_sub_agent_from_schemas(mock_client):
     assert "get_time" in names
 
 
+async def test_run_is_sub_agent_filters_invoke_agent_from_schemas(mock_client):
+    schemas_used: list[list] = []
+
+    async def capture(**kwargs):
+        schemas_used.append(kwargs.get("tools", []))
+        return _text_resp("ok")
+
+    mock_client.chat.completions.create = capture
+
+    with patch.object(
+        al,
+        "get_schemas",
+        return_value=[
+            {"function": {"name": "invoke_agent"}},
+            {"function": {"name": "get_time"}},
+        ],
+    ):
+        await al.run([{"role": "user", "content": "go"}], is_sub_agent=True)
+
+    names = [s["function"]["name"] for s in schemas_used[0]]
+    assert "invoke_agent" not in names
+    assert "get_time" in names
+
+
 async def test_run_not_sub_agent_includes_sub_agent_in_schemas(mock_client):
     schemas_used: list[list] = []
 
@@ -449,6 +473,7 @@ async def test_run_injects_long_term_context_before_model_call(mock_client, monk
         "what should I use?",
         "agent-1",
         512,
+        memory_namespace="default",
     )
     messages = mock_client.chat.completions.create.await_args.kwargs["messages"]
     assert messages[0]["content"] == "base system\n\n[Long-term context]\nRemember user preference"
@@ -661,7 +686,7 @@ async def test_run_stream_records_tool_call_started_and_completed(mock_client, m
     events: list[TraceEvent] = []
     monkeypatch.setattr(al, "record_trace_event", events.append)
     monkeypatch.setattr(al, "get_risk_level", lambda name: "none")
-    monkeypatch.setattr(al, "dispatch", lambda name, args: "tool result")
+    monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: "tool result")
 
     [_ async for _ in al.run_stream("what time?")]
 
@@ -722,7 +747,9 @@ async def test_run_stream_injects_long_term_context_before_model_call(mock_clien
 
     [_ async for _ in al.run_stream("how deploy?", user_id="user-1", agent_name="agent-1")]
 
-    build_context.assert_awaited_once_with("user-1", "how deploy?", "agent-1", 512)
+    build_context.assert_awaited_once_with(
+        "user-1", "how deploy?", "agent-1", 512, memory_namespace="default"
+    )
     messages = mock_client.chat.completions.create.await_args.kwargs["messages"]
     assert "Use private deployment docs" in messages[0]["content"]
 
@@ -850,7 +877,7 @@ def test_run_sync_calls_long_term_context(mock_client, monkeypatch):
     result = al.run_sync("hello", user_id="user-1")
 
     assert result == "ok"
-    build_context.assert_awaited_once_with("user-1", "hello", "", 512)
+    build_context.assert_awaited_once_with("user-1", "hello", "", 512, memory_namespace="default")
     messages = mock_client.chat.completions.create.await_args.kwargs["messages"]
     assert "CLI memory" in messages[0]["content"]
 
@@ -997,7 +1024,7 @@ def mock_client_fb(monkeypatch) -> AsyncMock:
         fallbacks=("fallback-model",),
     )
     monkeypatch.setenv("TEST_KEY", "k")
-    monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(al, "get_async_client_and_config", lambda *a, **k: (client, cfg))
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs: msgs)
     monkeypatch.setattr(al, "record_trace_event", lambda event: None)
@@ -1167,3 +1194,142 @@ async def test_agent_run_does_not_create_jsonl_trace_file(mock_client, monkeypat
     await al.run([{"role": "user", "content": "hi"}])
 
     assert not (tmp_path / "data" / "traces.jsonl").exists()
+
+
+# ── snapshot application (task 9) ─────────────────────────────────────────────
+
+
+def _fn_schema(name: str) -> dict:
+    return {"type": "function", "function": {"name": name, "description": "", "parameters": {}}}
+
+
+def _snapshot(**overrides):
+    from fleetent.agent_runtime import AgentSnapshot
+
+    base = dict(
+        agent_id=1,
+        name="bot",
+        version=1,
+        version_id=1,
+        system_prompt="You are bot.",
+        allowed_tools=None,
+        skills_dir=None,
+        mcp_server_ids=None,
+        model_overrides={},
+        memory_namespace="default",
+    )
+    base.update(overrides)
+    return AgentSnapshot(**base)
+
+
+async def test_run_with_snapshot_filters_tools_by_allowed_and_mcp(mock_client, monkeypatch):
+    monkeypatch.setattr(
+        al,
+        "get_schemas",
+        lambda: [_fn_schema("shell"), _fn_schema("github__x"), _fn_schema("gitlab__y")],
+    )
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    snap = _snapshot(allowed_tools=["shell", "github__*"], mcp_server_ids=["github"])
+
+    await al.run([{"role": "user", "content": "hi"}], snapshot=snap)
+
+    tools = mock_client.chat.completions.create.await_args.kwargs["tools"]
+    names = {t["function"]["name"] for t in tools}
+    assert names == {"shell", "github__x"}
+
+
+async def test_run_with_snapshot_passes_model_overrides(mock_client, monkeypatch):
+    captured: dict = {}
+
+    def capture(task_type, overrides=None):
+        captured["task_type"] = task_type
+        captured["overrides"] = overrides
+        return mock_client, _route_cfg()
+
+    monkeypatch.setattr(al, "get_async_client_and_config", capture)
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    snap = _snapshot(model_overrides={"default": {"model": "x"}})
+
+    await al.run([{"role": "user", "content": "hi"}], snapshot=snap)
+
+    assert captured["overrides"] == {"default": {"model": "x"}}
+
+
+async def test_run_with_snapshot_passes_memory_namespace(mock_client, monkeypatch):
+    from fleetent.intelligence.long_term_ctx import BuiltContext
+
+    build_context = AsyncMock(return_value=BuiltContext(text="", sources=[]))
+    monkeypatch.setattr(al, "build_context", build_context)
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    snap = _snapshot(memory_namespace="analyst")
+
+    await al.run([{"role": "user", "content": "hi"}], snapshot=snap)
+
+    assert build_context.await_args.kwargs.get("memory_namespace") == "analyst"
+
+
+async def test_run_without_snapshot_uses_default_namespace_and_no_overrides(
+    mock_client, monkeypatch
+):
+    from fleetent.intelligence.long_term_ctx import BuiltContext
+
+    captured: dict = {}
+
+    def capture(task_type, overrides=None):
+        captured["overrides"] = overrides
+        return mock_client, _route_cfg()
+
+    monkeypatch.setattr(al, "get_async_client_and_config", capture)
+    build_context = AsyncMock(return_value=BuiltContext(text="", sources=[]))
+    monkeypatch.setattr(al, "build_context", build_context)
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+
+    await al.run([{"role": "user", "content": "hi"}])
+
+    assert captured["overrides"] is None
+    assert build_context.await_args.kwargs.get("memory_namespace") == "default"
+
+
+async def test_run_stream_with_snapshot_uses_skills_dir(mock_client, monkeypatch):
+    class FakeIndex:
+        def __init__(self, skills_dir=None, *, scan=True):
+            self.skills_dir = skills_dir
+
+        def match(self, user_input):
+            return "deploy"
+
+        def load(self, name):
+            return "SKILL-FROM-DIR"
+
+    monkeypatch.setattr(al, "SkillIndex", FakeIndex)
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok"))
+    snap = _snapshot(skills_dir="agents/bot/skills")
+
+    [_ async for _ in al.run_stream("how deploy?", snapshot=snap)]
+
+    messages = mock_client.chat.completions.create.await_args.kwargs["messages"]
+    assert "SKILL-FROM-DIR" in messages[0]["content"]
+
+
+async def test_run_stream_with_snapshot_filters_tools(mock_client, monkeypatch):
+    monkeypatch.setattr(
+        al,
+        "get_schemas",
+        lambda: [_fn_schema("shell"), _fn_schema("github__x"), _fn_schema("gitlab__y")],
+    )
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok"))
+    snap = _snapshot(allowed_tools=["shell", "github__*"], mcp_server_ids=["github"])
+
+    [_ async for _ in al.run_stream("hi", snapshot=snap)]
+
+    tools = mock_client.chat.completions.create.await_args.kwargs["tools"]
+    names = {t["function"]["name"] for t in tools}
+    assert names == {"shell", "github__x"}
+
+
+def _route_cfg():
+    cfg = MagicMock()
+    cfg.model = "test-model"
+    cfg.max_tokens = 512
+    cfg.fallbacks = ()
+    return cfg

@@ -16,6 +16,8 @@ from typing import Any, cast
 from fleetent import user_store
 
 BUILTIN_ADMIN_NAME = "admin"
+# Fixed default credentials for on-prem first run. INSECURE — change after deploy.
+BUILTIN_ADMIN_PASSWORD = "admin"
 
 # Login sessions: token -> {"user_id": str, "last_active": float}
 _SESSIONS: dict[str, dict[str, Any]] = {}
@@ -54,11 +56,19 @@ def seed_builtin_admin() -> tuple[user_store.User, str] | None:
 
     Returns None (no-op) if a built-in admin already exists.
     """
-    if user_store.get_builtin_admin() is not None:
+    existing = user_store.get_builtin_admin()
+    if existing is not None:
+        # Insecure default admin/admin must stay gated: if the reset flag was cleared but the
+        # password is still the bootstrap default, re-assert the forced reset on next startup.
+        if not existing.must_reset and verify_password(
+            BUILTIN_ADMIN_PASSWORD, existing.password_hash
+        ):
+            user_store.set_must_reset(existing.id, True)
         return None
-    temp_password = secrets.token_urlsafe(12)
+    temp_password = BUILTIN_ADMIN_PASSWORD
     user = user_store.create_user(name=BUILTIN_ADMIN_NAME, email=None)
     user_store.set_role(user.id, "built_in_admin")
+    # admin/admin is an insecure bootstrap credential: force a password change on first login.
     user_store.set_password(user.id, hash_password(temp_password), must_reset=True)
     refreshed = user_store.get_by_id(user.id)
     assert refreshed is not None

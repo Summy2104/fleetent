@@ -2,7 +2,7 @@ import datetime
 
 import pytest
 
-import fleetent.api_key_store as aks
+import fleetent.platform.user_management.api_key_store as aks
 import fleetent.user_store as user_store
 
 

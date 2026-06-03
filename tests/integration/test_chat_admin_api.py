@@ -13,9 +13,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import fleetent.auth as auth
-import fleetent.chat_admin_api as api
 import fleetent.governance.audit_log as audit
-import fleetent.session_admin_store as store
+import fleetent.platform.chat_management.chat_admin_api as api
+import fleetent.platform.chat_management.session_admin_store as store
 import fleetent.user_store as user_store
 
 
@@ -93,6 +93,35 @@ def test_playground_message_passes_overrides(client, monkeypatch):  # 场景 98
     assert r.status_code == 200
     assert seen["overrides"] == {"model": "gpt-5.5", "temperature": 0.1}
     assert seen["agent"] == "ops"
+
+
+def test_overrides_are_request_scoped(client, monkeypatch):  # 场景 98 (覆盖仅作用本请求)
+    seen = []
+    monkeypatch.setattr(
+        api,
+        "run_playground",
+        lambda agent, sid, msg, overrides, bypass: (
+            seen.append((sid, overrides)) or {"reply": "", "events": []}
+        ),
+    )
+    token, _ = _session_for("admin")
+    a = client.post("/admin/chat/start", headers=_hdr(token), json={"agent_name": "ops"}).json()[
+        "session_id"
+    ]
+    b = client.post("/admin/chat/start", headers=_hdr(token), json={"agent_name": "ops"}).json()[
+        "session_id"
+    ]
+    client.post(
+        f"/admin/chat/{a}/message",
+        headers=_hdr(token),
+        json={"message": "hi", "overrides": {"model": "x"}},
+    )
+    client.post(f"/admin/chat/{b}/message", headers=_hdr(token), json={"message": "hi"})
+    by_sid = dict(seen)
+    assert by_sid[a] == {"model": "x"}
+    assert by_sid[b] is None  # other session unaffected by A's override
+    # agent definition metadata is untouched by request-level overrides
+    assert store.get_meta(a)["agent_name"] == "ops"
 
 
 def test_playground_message_rejects_non_playground(client, monkeypatch):
@@ -173,6 +202,33 @@ def test_bulk_dispose(client):
     assert store.get_meta("a")["status"] == "ended"
 
 
+def test_session_detail_replays_meta_and_transcript(client, monkeypatch):  # 场景 100 (回放)
+    monkeypatch.setattr(api, "load_transcript", lambda sid: [{"role": "user", "content": "q"}])
+    store.upsert_meta("web-9", origin="web", agent_name="ops")
+    token, _ = _session_for("admin")
+    r = client.get("/admin/sessions/web-9", headers=_hdr(token))
+    assert r.status_code == 200
+    assert r.json()["meta"]["agent_name"] == "ops"
+    assert r.json()["transcript"][0]["content"] == "q"
+
+
+def test_reset_requires_confirm_and_delegates(client, monkeypatch):  # 场景 101 (重置)
+    reset_calls = []
+    monkeypatch.setattr(api, "reset_session", lambda sid, keep: reset_calls.append((sid, keep)))
+    token, _ = _session_for("admin")
+    assert (
+        client.post(
+            "/admin/sessions/s1/reset", headers=_hdr(token), json={"keep_turns": 2}
+        ).status_code
+        == 428
+    )
+    r = client.post(
+        "/admin/sessions/s1/reset", headers=_hdr(token, confirm=True), json={"keep_turns": 2}
+    )
+    assert r.status_code == 200
+    assert reset_calls == [("s1", 2)]
+
+
 def test_viewer_read_only(client):  # 场景 102
     token, _ = _session_for("viewer")
     assert client.get("/admin/sessions", headers=_hdr(token)).status_code == 200
@@ -190,3 +246,63 @@ def test_export_audited(client):
     r = client.get("/admin/chat/s1/export", headers=_hdr(token))
     assert r.status_code == 200
     assert any(a["action"] == "session_export" for a in audit.search_audit())
+
+
+def test_export_markdown_format(client, monkeypatch):  # 场景 101 (Markdown 导出)
+    monkeypatch.setattr(api, "load_transcript", lambda sid: [{"role": "user", "content": "hi"}])
+    token, _ = _session_for("admin")
+    r = client.get("/admin/chat/s1/export?fmt=markdown", headers=_hdr(token))
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/markdown")
+    assert "# Session s1" in r.text
+    assert any(a["action"] == "session_export" for a in audit.search_audit())
+
+
+def test_purge_expired_playground_removes_unpinned(client, monkeypatch):  # 场景 101 (保留期)
+    import datetime as dt
+
+    cleared = []
+    monkeypatch.setattr(api, "clear_session", lambda sid: cleared.append(sid))
+    store.upsert_meta("pg-old", origin="playground")
+    store.upsert_meta("pg-keep", origin="playground")
+    store.set_pinned("pg-keep", True)
+    future = dt.datetime.now(dt.UTC) + dt.timedelta(days=10)
+    out = api.purge_expired_playground(now=future, retention_days=7)
+    assert "pg-old" in out["purged"]
+    assert "pg-keep" not in out["purged"]
+    assert cleared == ["pg-old"]
+    # meta removed -> get_meta falls back to default (updated_at None)
+    assert store.get_meta("pg-old")["updated_at"] is None
+
+
+def test_list_sessions_enriched_with_stats(client, monkeypatch):  # 场景 100 (列表富化)
+    store.upsert_meta("web-1", origin="web", agent_name="ops", user_id="u1")
+    monkeypatch.setattr(
+        api,
+        "session_stats",
+        lambda sid: {"total_tokens": 42, "rounds": 3, "pending_approvals": 1},
+    )
+    token, _ = _session_for("admin")
+    rows = client.get("/admin/sessions", headers=_hdr(token)).json()
+    row = next(r for r in rows if r["session_id"] == "web-1")
+    assert row["total_tokens"] == 42
+    assert row["rounds"] == 3
+    assert row["pending_approvals"] == 1
+
+
+def test_playground_stream_sse(client, monkeypatch):  # 场景 98 (SSE 流式)
+    events = [{"type": "token", "data": "he"}, {"type": "token", "data": "llo"}, {"type": "done"}]
+    monkeypatch.setattr(
+        api,
+        "run_playground_stream",
+        lambda agent, sid, msg, overrides, bypass: iter(events),
+    )
+    token, _ = _session_for("admin")
+    sid = client.post("/admin/chat/start", headers=_hdr(token), json={"agent_name": "ops"}).json()[
+        "session_id"
+    ]
+    r = client.post(f"/admin/chat/{sid}/stream", headers=_hdr(token), json={"message": "hi"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/event-stream")
+    assert "data:" in r.text
+    assert "llo" in r.text

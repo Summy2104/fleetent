@@ -4,17 +4,20 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 
+# Absolute so tests that chdir (e.g. test_server) still find the scripts.
+_MIGRATIONS_DIR = str(Path(__file__).resolve().parents[2] / "migrations")
+
 
 def apply_migrations(db_path: Path) -> None:
     cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
+    cfg.set_main_option("script_location", _MIGRATIONS_DIR)
     cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
     command.upgrade(cfg, "head")
 
 
 def downgrade_migrations(db_path: Path) -> None:
     cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
+    cfg.set_main_option("script_location", _MIGRATIONS_DIR)
     cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
     command.downgrade(cfg, "base")
 
@@ -336,6 +339,130 @@ def test_column_structure(tmp_path):
     conn.close()
 
 
+def test_memory_items_has_namespace_column(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(memory_items)")}
+    conn.close()
+    assert "namespace" in cols
+
+
+def test_memory_namespace_server_default_backfills_existing_rows(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    now = "2026-01-01T00:00:00+00:00"
+    # Insert without specifying namespace: server default must apply.
+    conn.execute(
+        """
+        INSERT INTO memory_items (id, user_id, type, content, created_at, updated_at)
+        VALUES ('m1', 'u1', 'identity', 'fact', ?, ?)
+        """,
+        (now, now),
+    )
+    conn.commit()
+    namespace = conn.execute("SELECT namespace FROM memory_items WHERE id = 'm1'").fetchone()[0]
+    conn.close()
+    assert namespace == "default"
+
+
+def test_downgrade_removes_namespace_column(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    downgrade_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.close()
+    assert "memory_items" not in tables
+
+
+def _upgrade_to(db_path: Path, revision: str) -> None:
+    cfg = Config()
+    cfg.set_main_option("script_location", "migrations")
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.upgrade(cfg, revision)
+
+
+def _downgrade_to(db_path: Path, revision: str) -> None:
+    cfg = Config()
+    cfg.set_main_option("script_location", "migrations")
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.downgrade(cfg, revision)
+
+
+def test_agent_versions_table_and_columns(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    av_cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_versions)")}
+    agent_cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)")}
+    chan_cols = {row[1] for row in conn.execute("PRAGMA table_info(channel_agents)")}
+    conn.close()
+    assert "agent_versions" in tables
+    assert "channel_agents" in tables
+    assert av_cols >= {
+        "id",
+        "agent_id",
+        "version",
+        "system_prompt",
+        "allowed_tools",
+        "skills_dir",
+        "mcp_server_ids",
+        "model_overrides",
+        "memory_namespace",
+        "created_at",
+    }
+    assert "active_version_id" in agent_cols
+    assert "bound_version_id" in chan_cols
+
+
+def test_agent_v1_backfill_for_existing_rows(tmp_path):
+    db = tmp_path / "test.db"
+    _upgrade_to(db, "032")
+    conn = sqlite3.connect(db)
+    conn.execute(
+        """
+        INSERT INTO agents (name, system_prompt, allowed_tools, created_at)
+        VALUES ('legacy', 'You are legacy.', '["shell"]', '2026-01-01T00:00:00+00:00')
+        """
+    )
+    conn.commit()
+    agent_id = conn.execute("SELECT id FROM agents WHERE name='legacy'").fetchone()[0]
+    conn.close()
+
+    _upgrade_to(db, "033")
+
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    agent = conn.execute("SELECT * FROM agents WHERE id=?", (agent_id,)).fetchone()
+    version = conn.execute("SELECT * FROM agent_versions WHERE agent_id=?", (agent_id,)).fetchone()
+    n_versions = conn.execute(
+        "SELECT COUNT(*) FROM agent_versions WHERE agent_id=?", (agent_id,)
+    ).fetchone()[0]
+    conn.close()
+
+    assert agent["active_version_id"] == version["id"]
+    assert version["version"] == 1
+    assert version["system_prompt"] == "You are legacy."
+    assert version["allowed_tools"] == '["shell"]'
+    assert version["mcp_server_ids"] is None
+    assert version["memory_namespace"] == "default"
+    assert n_versions == 1
+
+
+def test_downgrade_removes_agent_versions(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    downgrade_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.close()
+    assert "agent_versions" not in tables
+    assert "agents" not in tables
+
+
 def test_knowledge_entity_unique_key_is_scoped(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)
@@ -356,6 +483,73 @@ def test_knowledge_entity_unique_key_is_scoped(tmp_path):
         "entity_type",
         "normalized_name",
     ] in indexed_columns.values()
+
+
+def test_connectors_has_agent_id_column(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(connectors)")}
+    conn.close()
+    assert "agent_id" in cols
+
+
+def test_agent_mcp_servers_table_and_columns(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_mcp_servers)")}
+    conn.close()
+    assert "agent_mcp_servers" in tables
+    assert cols >= {
+        "id",
+        "agent_id",
+        "server_id",
+        "transport",
+        "url",
+        "auth_type",
+        "api_key_env",
+        "command",
+        "args",
+        "env",
+        "created_at",
+    }
+
+
+def test_connectors_agent_id_nullable_for_existing_rows(tmp_path):
+    db = tmp_path / "test.db"
+    _upgrade_to(db, "033")
+    conn = sqlite3.connect(db)
+    now = "2026-01-01T00:00:00+00:00"
+    conn.execute(
+        """
+        INSERT INTO connectors (id, display_name, protocol, enabled, created_at, updated_at)
+        VALUES ('github', 'GitHub', 'oauth2', 1, ?, ?)
+        """,
+        (now, now),
+    )
+    conn.commit()
+    conn.close()
+
+    _upgrade_to(db, "034")
+
+    conn = sqlite3.connect(db)
+    agent_id = conn.execute("SELECT agent_id FROM connectors WHERE id='github'").fetchone()[0]
+    conn.close()
+    assert agent_id is None
+
+
+def test_downgrade_removes_agent_scoped_connector_schema(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    _downgrade_to(db, "033")
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    connector_cols = {row[1] for row in conn.execute("PRAGMA table_info(connectors)")}
+    conn.close()
+    assert "agent_mcp_servers" not in tables
+    assert "agent_id" not in connector_cols
 
 
 def test_migrated_schedule_store_does_not_create_schema():

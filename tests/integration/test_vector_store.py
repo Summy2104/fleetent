@@ -40,6 +40,20 @@ def test_namespace_helpers_return_fixed_formats():
     assert shared_namespace("tenant", "acme") == "shared:tenant:acme"
 
 
+def test_memory_namespace_default_is_backwards_compatible():
+    from fleetent.intelligence.vector_store import memory_namespace
+
+    assert memory_namespace("u1", "default") == "mem:u1"
+    assert memory_namespace("u1") == "mem:u1"
+
+
+def test_memory_namespace_non_default_appends_namespace():
+    from fleetent.intelligence.vector_store import memory_namespace
+
+    assert memory_namespace("u1", "analyst") == "mem:u1:analyst"
+    assert memory_namespace("u1", "cs") == "mem:u1:cs"
+
+
 @pytest.mark.parametrize(
     ("user_id",),
     [

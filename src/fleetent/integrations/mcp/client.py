@@ -18,8 +18,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_server_registry: dict[str, McpServerConfig] = {}
-_active_sessions: dict[str, Any] = {}  # server_id -> mcp.ClientSession (stdio only)
+# Scope = owning agent_id; None = global default (config/mcp.servers.yaml layer).
+# Maps are keyed by (scope, server_id) so the same server_id can carry distinct
+# credentials/sessions per agent without one scope satisfying another's calls.
+_server_registry: dict[tuple[int | None, str], McpServerConfig] = {}
+_active_sessions: dict[tuple[int | None, str], Any] = {}  # stdio sessions only
 _exit_stack: AsyncExitStack | None = None
 
 
@@ -60,27 +63,33 @@ async def close() -> None:
     _active_sessions.clear()
 
 
-async def register_all(servers: list[McpServerConfig]) -> None:
+async def register_all(servers: list[McpServerConfig], scope: int | None = None) -> None:
     from fleetent.observability.startup_diagnostics import log_mcp_server_unreachable
 
     for server in servers:
         try:
-            await _register_server(server)
+            await _register_server(server, scope)
         except Exception as exc:
             log_mcp_server_unreachable(server.id, str(exc))
             logger.warning("mcp_server_unavailable server_id=%s error=%s", server.id, exc)
 
 
-async def _register_server(server: McpServerConfig) -> None:
+async def _register_server(server: McpServerConfig, scope: int | None = None) -> None:
     if server.transport == "stdio":
-        await _register_stdio_server(server)
+        await _register_stdio_server(server, scope)
     else:
-        await _register_http_server(server)
+        await _register_http_server(server, scope)
 
 
-async def _register_stdio_server(server: McpServerConfig) -> None:
+async def _register_stdio_server(server: McpServerConfig, scope: int | None = None) -> None:
     from mcp import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    key = (scope, server.id)
+    # Lazy reuse: a live session for this (scope, server) is kept across re-registers.
+    if key in _active_sessions:
+        _server_registry[key] = server
+        return
 
     merged_env = {**os.environ, **server.env} if server.env else None
     params = StdioServerParameters(
@@ -94,21 +103,21 @@ async def _register_stdio_server(server: McpServerConfig) -> None:
     session: Any = await stack.enter_async_context(ClientSession(read, write))
     await session.initialize()
 
-    _active_sessions[server.id] = session
-    _server_registry[server.id] = server
+    _active_sessions[key] = session
+    _server_registry[key] = server
 
     tools_result = await session.list_tools()
     tools = tools_result.tools
     for tool_def in tools:
         tool_name = _make_tool_name(server.id, tool_def.name)
-        _register_tool_stdio(server, tool_name, tool_def)
+        _register_tool_stdio(server, tool_name, tool_def, scope)
 
     logger.info(
         "mcp_server_registered server_id=%s transport=stdio tool_count=%d", server.id, len(tools)
     )
 
 
-async def _register_http_server(server: McpServerConfig) -> None:
+async def _register_http_server(server: McpServerConfig, scope: int | None = None) -> None:
     import httpx
 
     headers: dict[str, str] = {}
@@ -128,15 +137,17 @@ async def _register_http_server(server: McpServerConfig) -> None:
     tools = data.get("result", {}).get("tools", [])
     for tool_def in tools:
         tool_name = _make_tool_name(server.id, tool_def["name"])
-        _register_tool_http(server, tool_name, tool_def)
+        _register_tool_http(server, tool_name, tool_def, scope)
 
-    _server_registry[server.id] = server
+    _server_registry[(scope, server.id)] = server
     logger.info(
         "mcp_server_registered server_id=%s transport=http tool_count=%d", server.id, len(tools)
     )
 
 
-def _register_tool_stdio(server: McpServerConfig, tool_name: str, tool_def: Any) -> None:
+def _register_tool_stdio(
+    server: McpServerConfig, tool_name: str, tool_def: Any, scope: int | None = None
+) -> None:
     import fleetent.tool_registry as tr
 
     input_schema = (
@@ -146,7 +157,7 @@ def _register_tool_stdio(server: McpServerConfig, tool_name: str, tool_def: Any)
     )
 
     async def call(**kwargs: object) -> str:
-        return await _call_stdio_tool(server.id, tool_def.name, dict(kwargs))
+        return await _call_stdio_tool(server.id, tool_def.name, dict(kwargs), scope)
 
     schema: tr.ToolSchema = {
         "type": "function",
@@ -159,13 +170,15 @@ def _register_tool_stdio(server: McpServerConfig, tool_name: str, tool_def: Any)
     tr._registry[tool_name] = (call, schema)
 
 
-def _register_tool_http(server: McpServerConfig, tool_name: str, tool_def: dict[str, Any]) -> None:
+def _register_tool_http(
+    server: McpServerConfig, tool_name: str, tool_def: dict[str, Any], scope: int | None = None
+) -> None:
     import fleetent.tool_registry as tr
 
     input_schema = tool_def.get("inputSchema", {"type": "object", "properties": {}})
 
     async def call(**kwargs: object) -> str:
-        return await _call_http_tool(server.id, tool_def["name"], dict(kwargs))
+        return await _call_http_tool(server.id, tool_def["name"], dict(kwargs), scope)
 
     schema: tr.ToolSchema = {
         "type": "function",
@@ -178,8 +191,10 @@ def _register_tool_http(server: McpServerConfig, tool_name: str, tool_def: dict[
     tr._registry[tool_name] = (call, schema)
 
 
-async def _call_stdio_tool(server_id: str, tool_name: str, args: dict[str, Any]) -> str:
-    session = _active_sessions.get(server_id)
+async def _call_stdio_tool(
+    server_id: str, tool_name: str, args: dict[str, Any], scope: int | None = None
+) -> str:
+    session = _active_sessions.get((scope, server_id))
     if session is None:
         raise KeyError(f"No active stdio session for MCP server: {server_id}")
     result = await session.call_tool(tool_name, args)
@@ -188,8 +203,10 @@ async def _call_stdio_tool(server_id: str, tool_name: str, args: dict[str, Any])
     return ""
 
 
-async def _call_http_tool(server_id: str, tool_name: str, args: dict[str, Any]) -> str:
-    server = _server_registry.get(server_id)
+async def _call_http_tool(
+    server_id: str, tool_name: str, args: dict[str, Any], scope: int | None = None
+) -> str:
+    server = _server_registry.get((scope, server_id))
     if server is None:
         raise KeyError(f"Unknown MCP server: {server_id}")
 
@@ -222,11 +239,13 @@ async def _call_http_tool(server_id: str, tool_name: str, args: dict[str, Any]) 
     return str(result) if result is not None else ""
 
 
-# Keep call_tool as a public API for backward compatibility
-async def call_tool(server_id: str, tool_name: str, args: dict[str, Any]) -> str:
-    server = _server_registry.get(server_id)
+# Public API; scope=None resolves the global-default layer.
+async def call_tool(
+    server_id: str, tool_name: str, args: dict[str, Any], scope: int | None = None
+) -> str:
+    server = _server_registry.get((scope, server_id))
     if server is None:
         raise KeyError(f"Unknown MCP server: {server_id}")
     if server.transport == "stdio":
-        return await _call_stdio_tool(server_id, tool_name, args)
-    return await _call_http_tool(server_id, tool_name, args)
+        return await _call_stdio_tool(server_id, tool_name, args, scope)
+    return await _call_http_tool(server_id, tool_name, args, scope)

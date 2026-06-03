@@ -1,10 +1,10 @@
 import pytest
 
-import fleetent.api_key_store as aks
 import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
 import fleetent.governance.blocklist as blocklist
 import fleetent.im_user_store as im_user_store
+import fleetent.platform.user_management.api_key_store as aks
 import fleetent.user_store as user_store
 
 
@@ -22,7 +22,9 @@ def db(tmp_path, monkeypatch):
 def test_block_user_cascade(db):
     u = user_store.create_web_user("a@x.com", "Alice")
     plaintext, _ = aks.issue_key(u.id)
-    im_user_store.get_or_create("slack", "U1")  # creates User; bind not needed
+    im_user_store.get_or_create(
+        user_store.admin_owner_id(), "slack", "U1"
+    )  # creates User; bind not needed
     # bind the IM identity to the blocked user for the cascade test
     import sqlite3
 
