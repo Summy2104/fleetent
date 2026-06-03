@@ -1,6 +1,6 @@
 """Tests for sandbox stdout/stderr truncation (SB6)."""
 
-import fleetent.sandbox_output_truncation as sot
+import fleetent.integrations.sandbox.output_truncation as sot
 
 
 def _nbytes(s: str) -> int:

@@ -7,8 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from fleetent import sandbox_config
-from fleetent.sandbox_config import NetworkPolicy, SandboxResources, load_sandbox_resources
+from fleetent.integrations.sandbox import config as sandbox_config
+from fleetent.integrations.sandbox.config import (
+    NetworkPolicy,
+    SandboxResources,
+    load_sandbox_resources,
+)
 
 
 def test_network_policy_members() -> None:
@@ -202,7 +206,7 @@ def test_exec_timeout_within_range_unchanged(
 def test_load_lifecycle_defaults_when_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from fleetent.sandbox_config import load_sandbox_lifecycle
+    from fleetent.integrations.sandbox.config import load_sandbox_lifecycle
 
     monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", tmp_path / "absent.yaml")
     lc = load_sandbox_lifecycle()
@@ -211,7 +215,7 @@ def test_load_lifecycle_defaults_when_absent(
 
 
 def test_load_lifecycle_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleetent.sandbox_config import load_sandbox_lifecycle
+    from fleetent.integrations.sandbox.config import load_sandbox_lifecycle
 
     path = _write_settings(
         tmp_path,
@@ -230,7 +234,7 @@ def test_load_lifecycle_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 def test_load_lifecycle_invalid_scope_falls_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from fleetent.sandbox_config import load_sandbox_lifecycle
+    from fleetent.integrations.sandbox.config import load_sandbox_lifecycle
 
     path = _write_settings(
         tmp_path,
@@ -252,7 +256,7 @@ def test_load_lifecycle_invalid_scope_falls_back(
 def test_build_resources_by_scope_session_hardened(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from fleetent.sandbox_config import build_resources_by_scope
+    from fleetent.integrations.sandbox.config import build_resources_by_scope
 
     monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", tmp_path / "absent.yaml")
     by_scope = build_resources_by_scope()
@@ -264,7 +268,7 @@ def test_build_resources_by_scope_agent_downgraded_by_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """With no agent_scope override, agent tier still drops read_only to writable."""
-    from fleetent.sandbox_config import build_resources_by_scope
+    from fleetent.integrations.sandbox.config import build_resources_by_scope
 
     monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", tmp_path / "absent.yaml")
     by_scope = build_resources_by_scope()
@@ -274,7 +278,7 @@ def test_build_resources_by_scope_agent_downgraded_by_default(
 def test_build_resources_by_scope_agent_scope_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from fleetent.sandbox_config import build_resources_by_scope
+    from fleetent.integrations.sandbox.config import build_resources_by_scope
 
     path = _write_settings(
         tmp_path,

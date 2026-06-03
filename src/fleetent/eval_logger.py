@@ -9,7 +9,7 @@ from typing import Any
 
 from openai.types import CompletionUsage
 
-from fleetent import sandbox_secrets
+from fleetent.integrations.sandbox import secrets as sandbox_secrets
 
 # Single trace path constant for all three writers (log_run / log /
 # log_sandbox_exec). One injectable module-level path means tests monkeypatch

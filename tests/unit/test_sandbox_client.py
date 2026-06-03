@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fleetent.sandbox_client import SandboxClient
-from fleetent.sandbox_config import NetworkPolicy, SandboxResources
+from fleetent.integrations.sandbox.client import SandboxClient
+from fleetent.integrations.sandbox.config import NetworkPolicy, SandboxResources
 
 
 def _mock_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> MagicMock:
@@ -350,7 +350,7 @@ async def test_list_containers_returns_empty_when_cli_missing(client):
 
 
 async def test_kill_workspace_sigterm_then_sigkill(client, monkeypatch):
-    import fleetent.sandbox_client as sc
+    import fleetent.integrations.sandbox.client as sc
 
     monkeypatch.setattr(sc, "_KILL_GRACE_SECONDS", 0.001)
     calls: list[tuple] = []
@@ -371,7 +371,7 @@ async def test_kill_workspace_sigterm_then_sigkill(client, monkeypatch):
 
 
 async def test_kill_workspace_nonzero_does_not_raise(client, monkeypatch):
-    import fleetent.sandbox_client as sc
+    import fleetent.integrations.sandbox.client as sc
 
     monkeypatch.setattr(sc, "_KILL_GRACE_SECONDS", 0.001)
     # SIGKILL on an already-stopped container returns nonzero — must not raise.

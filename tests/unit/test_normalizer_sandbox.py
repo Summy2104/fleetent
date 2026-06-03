@@ -50,7 +50,7 @@ async def test_route_passes_sandbox_context_to_run(tmp_path, monkeypatch):
     monkeypatch.setattr(im_user_store, "check_allowed_by_user_id", lambda _uid: True)
 
     import fleetent.agent_loop as agent_loop
-    import fleetent.sandbox_enablement as se
+    import fleetent.integrations.sandbox.enablement as se
 
     monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.SELECTIVE))
 

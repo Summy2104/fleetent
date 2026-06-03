@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from unittest.mock import AsyncMock
 
-from fleetent.sandbox_cleanup import cleanup_orphans
+from fleetent.integrations.sandbox.cleanup import cleanup_orphans
 
 
 def _client(names: list[str]) -> AsyncMock:
@@ -56,7 +56,7 @@ async def test_cleanup_orphans_skips_names_without_prefix():
 async def test_cleanup_orphans_logs_count_and_names(caplog):
     """D4 audit: the count and the destroyed container names are logged."""
     client = _client(["sandbox-session-1", "sandbox-agent-bot"])
-    with caplog.at_level(logging.INFO, logger="fleetent.sandbox_cleanup"):
+    with caplog.at_level(logging.INFO, logger="fleetent.integrations.sandbox.cleanup"):
         await cleanup_orphans(client)
     text = caplog.text
     assert "2" in text

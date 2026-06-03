@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleetent.sandbox_secrets import build_sandbox_env, is_sensitive_name
+from fleetent.integrations.sandbox.secrets import build_sandbox_env, is_sensitive_name
 
 
 @pytest.mark.parametrize(

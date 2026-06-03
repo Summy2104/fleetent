@@ -37,15 +37,21 @@ fleetent 采用模块化单体：单进程、单仓库、统一部署，但代�
 
 ```
 src/fleetent/
-  runtime/          ← agent_loop、context_mgr、sub_agent
+  runtime/          ← loop(←agent_loop)、context(←context_mgr)、sub_agent、snapshot(←agent_runtime)、运行治理(termination/loop_detector/budget/cancellation/message_hygiene/error_classifier/tool_guardrails)
+  model/            ← router(←model_router)、provider_health、vision_client、image_gen_client、multimodal
+  tools/            ← registry(←tool_registry)、builtin_tools(←tools)、result_truncation、plugin_loader
+  skills/           ← registry(←skill_registry)、audit(←skill_audit)
+  session/          ← manager(←session_mgr)、index(←session_index)
   governance/       ← agent_policy、permission_gate、agent 能力边界
   platform/         ← user / agent / API key / admin / auth control plane
   channels/         ← im_gateway、webhook_router、cron_scheduler、schedule_store
   intelligence/     ← memory、knowledge_base、long_term_ctx、vector_store、reflection
-  integrations/     ← mcp、sandbox、connectors
+  integrations/     ← mcp、sandbox(←sandbox_*,工具执行后端,与 mcp/connectors 同类)、connectors
   observability/    ← trace、log、usage、diagnostics
   infrastructure/   ← config、db runtime、底层 adapter
 ```
+
+> 张洋负责的执行引擎 + 工具系统按 7 个 capability 边界细分为 `runtime` / `model` / `tools` / `skills` / `session` 五个独立顶层包 + `integrations/{mcp,sandbox}`;`sandbox` 归 integrations 因其是「工具依赖的可插拔外部执行后端」(Docker daemon 适配器),与 `mcp`(MCP server)、`connectors`(OAuth)同类。
 
 能力边界说明：
 
@@ -58,12 +64,20 @@ src/fleetent/
 迁移规则：
 
 - 新代码进入 owning package；旧平铺模块在被大幅触碰时迁移。
-- 跨模块调用只能使用 public API，不 import 另一模块的 internal implementation。
+- **每个能力域是一个 package（目录 + `__init__.py`），公共 API 收口于 `__init__.py`**。
+- 跨包调用只能使用目标包的 public API（其 `__init__.py` 导出），不 import 另一包的 internal module。
+- **迁入 package 时去冗余前缀命名**（对齐 `mcp_client.py` → `mcp/client.py`；`sandbox_client.py` → `sandbox/client.py`、`tool_registry.py` → `tools/registry.py`）；用 `git mv` 保留 blame。
 - 每张持久化表有且只有一个 owner module；其他模块通过 owner public API 访问。
 - 每个模块拥有稳定配置命名空间，例如 `memory.*`、`knowledge_base.*`、`observability.*`。
-- 平铺模块迁移期间可以保留 re-export shim，但 shim 不承载业务逻辑。
+- 平铺模块迁移期间可保留旧扁平路径的 re-export shim，但 **shim 只 re-export、不承载业务逻辑**；**所有包迁完且调用方改到新路径后，统一删除全部 shim**。
+- 迁移为纯结构搬迁：**不改运行时行为、公共契约、数据库 schema**；每步全量测试绿、可回退。
+
+迁移顺序（blast radius 由小到大，各为独立 change/PR，详见 `openspec/changes/runtime-package-blueprint`）：
+`integrations/sandbox` → `session` → `skills` → `model` → `tools` → `runtime`(殿后)。
 
 ### 当前模块地图
+
+> 反映**迁移过程中的实时状态**(以上「目标 package map」为终态)。张洋负责的执行/工具模块多数仍平铺,按上述顺序逐包迁移中。
 
 ```
 src/fleetent/
@@ -87,7 +101,7 @@ src/fleetent/
     reflection.py   ← 反思报告与 proposal：读取 traces / memory / KB 信号，只读趋势，不自动写回
   integrations/
     mcp/            ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
-    sandbox/        ← Docker CLI 封装：隔离 Python 执行
+    sandbox/        ← Docker CLI 封装：隔离 Python 执行（已包化；旧 sandbox_*.py 为 re-export shim）
   governance/
     permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
     agent_policy.py    ← fnmatch 工具访问检查
