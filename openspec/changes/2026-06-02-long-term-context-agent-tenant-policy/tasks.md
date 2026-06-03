@@ -7,10 +7,10 @@
 
 ## 2. Policy model and persistence
 
-- [ ] 2.1 Write failing tests: agent boundary exposes `tenant_id` and optional `team_id`; existing agents backfill `tenant_id="default"`
-- [ ] 2.2 Verify red: run `uv run pytest tests/integration -x -q`
-- [ ] 2.3 Implement agent ownership migration / store boundary or wire to existing agent management public API
-- [ ] 2.4 Verify green: run `uv run pytest tests/integration -x -q`
+- [x] 2.1 Write failing tests: agent boundary exposes `tenant_id` and optional `team_id`; existing agents backfill `tenant_id="default"`
+- [x] 2.2 Verify red: run `uv run pytest tests/integration -x -q`
+- [x] 2.3 Implement agent ownership migration / store boundary or wire to existing agent management public API
+- [x] 2.4 Verify green: run `uv run pytest tests/integration -x -q`
 - [ ] 2.5 Write failing tests: Alembic creates `long_term_context_policies` with tenant default + agent override fields for source enablement and budgets
 - [ ] 2.6 Verify red: run `uv run pytest tests/unit -x -q`
 - [ ] 2.7 Implement policy migration/store boundary with named parameters

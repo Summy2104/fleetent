@@ -1,7 +1,10 @@
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from alembic import command
+from alembic.config import Config
 
 import fleetent.agent_store as agent_store
 import fleetent.im_user_store as im_user_store
@@ -10,12 +13,21 @@ from fleetent.platform.admin_cli import agents as admin_cli_agents
 from fleetent.platform.admin_cli.main import main as admin_cli_main
 
 
+def _apply_migrations(db_path: Path) -> None:
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.upgrade(cfg, "head")
+
+
 @pytest.fixture(autouse=True)
 def tmp_db(tmp_path, monkeypatch):
     db = tmp_path / "users.db"
     monkeypatch.setattr(user_store, "DB_PATH", db)
     monkeypatch.setattr(im_user_store, "DB_PATH", db)
-    monkeypatch.setattr(agent_store, "DB_PATH", db)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
+    _apply_migrations(db)
 
 
 def run_admin(*args: str) -> tuple[str, str, int]:

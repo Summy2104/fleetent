@@ -107,12 +107,23 @@ def test_chat_stream_exception_yields_error_event(tmp_path, monkeypatch, isolate
 
 def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch, isolated_schedule_db):
     """/chat with x-platform + x-channel-id uses the channel-bound agent."""
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
     import fleetent.agent_store as ag
     import fleetent.server as srv
     import fleetent.user_store as us2
 
-    monkeypatch.setattr(us2, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setattr(ag, "DB_PATH", tmp_path / "users.db")
+    db = tmp_path / "users.db"
+    monkeypatch.setattr(us2, "DB_PATH", db)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
+    cfg = Config()
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db}")
+    command.upgrade(cfg, "head")
 
     captured: dict = {}
 

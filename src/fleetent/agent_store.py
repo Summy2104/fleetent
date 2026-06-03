@@ -1,13 +1,14 @@
+"""Agent definitions, user/channel bindings, and ownership on the unified db runtime."""
+
 import datetime
 import json
 from dataclasses import dataclass
+from typing import Any
 
-from fleetent.user_store import (
-    DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching
-)
-from fleetent.user_store import (
-    _conn,
-)
+from fleetent.config import Settings
+from fleetent.db import SQLiteDatabase, create_database
+
+_AGENT_COLUMNS = "id, name, system_prompt, allowed_tools, tenant_id, team_id"
 
 
 @dataclass
@@ -16,96 +17,133 @@ class Agent:
     name: str
     system_prompt: str
     allowed_tools: list[str]
+    tenant_id: str = "default"
+    team_id: str | None = None
 
 
-def create_agent(name: str, system_prompt: str, allowed_tools: list[str]) -> Agent:
-    _init_db()
-    now = datetime.datetime.now(datetime.UTC).isoformat()
-    with _conn() as conn:
-        cursor = conn.execute(
-            "INSERT INTO agents (name, system_prompt, allowed_tools, created_at)"
-            " VALUES (?, ?, ?, ?)",
-            (name, system_prompt, json.dumps(allowed_tools), now),
-        )
-        agent_id = cursor.lastrowid
+def _database() -> SQLiteDatabase:
+    return create_database(Settings(anthropic_api_key="").database_url)
+
+
+def _now() -> str:
+    return datetime.datetime.now(datetime.UTC).isoformat()
+
+
+def _row_to_agent(row: dict[str, Any]) -> Agent:
+    return Agent(
+        id=int(row["id"]),
+        name=str(row["name"]),
+        system_prompt=str(row["system_prompt"]),
+        allowed_tools=json.loads(row["allowed_tools"]),
+        tenant_id=str(row["tenant_id"]) if row["tenant_id"] is not None else "default",
+        team_id=str(row["team_id"]) if row["team_id"] is not None else None,
+    )
+
+
+def create_agent(
+    name: str,
+    system_prompt: str,
+    allowed_tools: list[str],
+    *,
+    tenant_id: str = "default",
+    team_id: str | None = None,
+) -> Agent:
+    result = _database().execute(
+        "INSERT INTO agents (name, system_prompt, allowed_tools, created_at, tenant_id, team_id)"
+        " VALUES (:name, :system_prompt, :allowed_tools, :created_at, :tenant_id, :team_id)",
+        {
+            "name": name,
+            "system_prompt": system_prompt,
+            "allowed_tools": json.dumps(allowed_tools),
+            "created_at": _now(),
+            "tenant_id": tenant_id,
+            "team_id": team_id,
+        },
+    )
+    agent_id = result.lastrowid
     assert agent_id is not None
-    return Agent(id=agent_id, name=name, system_prompt=system_prompt, allowed_tools=allowed_tools)
+    return Agent(
+        id=agent_id,
+        name=name,
+        system_prompt=system_prompt,
+        allowed_tools=allowed_tools,
+        tenant_id=tenant_id,
+        team_id=team_id,
+    )
 
 
 def get_by_name(name: str) -> Agent | None:
-    _init_db()
-    with _conn() as conn:
-        row = conn.execute(
-            "SELECT id, name, system_prompt, allowed_tools FROM agents WHERE name = ?", (name,)
-        ).fetchone()
-    if not row:
-        return None
-    return Agent(id=row[0], name=row[1], system_prompt=row[2], allowed_tools=json.loads(row[3]))
+    row = (
+        _database()
+        .execute(
+            f"SELECT {_AGENT_COLUMNS} FROM agents WHERE name = :name",
+            {"name": name},
+        )
+        .fetchone()
+    )
+    return _row_to_agent(row) if row else None
 
 
 def assign_user(user_id: str, agent_id: int) -> None:
-    _init_db()
-    with _conn() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO user_agents (user_id, agent_id) VALUES (?, ?)",
-            (user_id, agent_id),
-        )
+    _database().execute(
+        "INSERT OR IGNORE INTO user_agents (user_id, agent_id) VALUES (:user_id, :agent_id)",
+        {"user_id": user_id, "agent_id": agent_id},
+    )
 
 
 def get_agent_for_user(user_id: str) -> Agent | None:
-    _init_db()
-    with _conn() as conn:
-        row = conn.execute(
-            """SELECT a.id, a.name, a.system_prompt, a.allowed_tools
+    row = (
+        _database()
+        .execute(
+            """SELECT a.id, a.name, a.system_prompt, a.allowed_tools, a.tenant_id, a.team_id
                FROM agents a
                JOIN user_agents ua ON ua.agent_id = a.id
-               WHERE ua.user_id = ?
+               WHERE ua.user_id = :user_id
                LIMIT 1""",
-            (user_id,),
-        ).fetchone()
-    if not row:
-        return None
-    return Agent(id=row[0], name=row[1], system_prompt=row[2], allowed_tools=json.loads(row[3]))
+            {"user_id": user_id},
+        )
+        .fetchone()
+    )
+    return _row_to_agent(row) if row else None
 
 
 def assign_channel(platform: str, channel_id: str, agent_id: int) -> None:
-    _init_db()
-    with _conn() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO channel_agents (platform, channel_id, agent_id, created_at)"
-            " VALUES (?, ?, ?, ?)",
-            (platform, channel_id, agent_id, datetime.datetime.now(datetime.UTC).isoformat()),
-        )
+    _database().execute(
+        "INSERT OR REPLACE INTO channel_agents (platform, channel_id, agent_id, created_at)"
+        " VALUES (:platform, :channel_id, :agent_id, :created_at)",
+        {
+            "platform": platform,
+            "channel_id": channel_id,
+            "agent_id": agent_id,
+            "created_at": _now(),
+        },
+    )
 
 
 def unassign_channel(platform: str, channel_id: str) -> None:
-    _init_db()
-    with _conn() as conn:
-        conn.execute(
-            "DELETE FROM channel_agents WHERE platform = ? AND channel_id = ?",
-            (platform, channel_id),
-        )
+    _database().execute(
+        "DELETE FROM channel_agents WHERE platform = :platform AND channel_id = :channel_id",
+        {"platform": platform, "channel_id": channel_id},
+    )
 
 
 def get_agent_for_channel(platform: str, channel_id: str) -> Agent | None:
-    _init_db()
-    with _conn() as conn:
-        row = conn.execute(
-            """SELECT a.id, a.name, a.system_prompt, a.allowed_tools
+    row = (
+        _database()
+        .execute(
+            """SELECT a.id, a.name, a.system_prompt, a.allowed_tools, a.tenant_id, a.team_id
                FROM agents a
                JOIN channel_agents ca ON ca.agent_id = a.id
-               WHERE ca.platform = ? AND ca.channel_id = ?
+               WHERE ca.platform = :platform AND ca.channel_id = :channel_id
                LIMIT 1""",
-            (platform, channel_id),
-        ).fetchone()
-    if not row:
-        return None
-    return Agent(id=row[0], name=row[1], system_prompt=row[2], allowed_tools=json.loads(row[3]))
+            {"platform": platform, "channel_id": channel_id},
+        )
+        .fetchone()
+    )
+    return _row_to_agent(row) if row else None
 
 
 def _get_default_agent_name() -> str | None:
-    from fleetent.config import Settings
-
     return Settings(anthropic_api_key="").default_agent_name
 
 
@@ -114,33 +152,3 @@ def get_default_agent() -> Agent | None:
     if not name:
         return None
     return get_by_name(name)
-
-
-def _init_db() -> None:
-    with _conn() as conn:
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS agents (
-                id            INTEGER PRIMARY KEY,
-                name          TEXT UNIQUE NOT NULL,
-                system_prompt TEXT NOT NULL,
-                allowed_tools TEXT NOT NULL,
-                created_at    TEXT NOT NULL
-            )"""
-        )
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS user_agents (
-                user_id   TEXT NOT NULL,
-                agent_id  INTEGER NOT NULL,
-                PRIMARY KEY (user_id, agent_id)
-            )"""
-        )
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS channel_agents (
-                id         INTEGER PRIMARY KEY,
-                platform   TEXT NOT NULL,
-                channel_id TEXT NOT NULL,
-                agent_id   INTEGER NOT NULL,
-                created_at TEXT NOT NULL,
-                UNIQUE(platform, channel_id)
-            )"""
-        )
