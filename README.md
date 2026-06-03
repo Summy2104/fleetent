@@ -1,21 +1,21 @@
 # fleetent
 
-fleetent is a lean, self-hosted agent platform for enterprise IM and internal tools. It is built with Python and FastAPI, avoids heavyweight AI frameworks, and keeps data inside the deployment boundary.
+fleetent 是一个面向企业内网部署的轻量 Agent 平台。项目基于 Python 和 FastAPI 构建，不依赖 LangChain / LlamaIndex / LangGraph 等 AI 框架，核心目标是在客户自己的部署边界内运行 Agent、工具、记忆、知识库和治理能力。
 
-Core capabilities include:
+核心能力：
 
-- multi-user HTTP, Slack and Telegram entry points;
-- OpenAI-compatible model routing with provider fallback;
-- tool calling, MCP tool servers and sub-agents;
-- user memory, shared memory, long-term context and knowledge base retrieval;
-- human approval gates for risky tool calls;
-- observability traces, usage summaries, diagnostics and pilot verification reports;
-- SQLite-first local runtime with Alembic-managed schema lifecycle.
+- 多用户 HTTP、Slack、Telegram 和终端 TUI 入口；
+- OpenAI-compatible 模型路由、fallback 和 provider 配置；
+- 工具调用、MCP 工具服务、子 Agent 和沙箱执行；
+- User Memory、Shared Memory、长期上下文和知识库检索；
+- medium / high 风险工具调用的人类审批门控；
+- trace、usage、performance、diagnostics 和 Pilot 验证报告；
+- SQLite-first 本地运行时，schema 生命周期由 Alembic 管理。
 
-## Quick Start
+## 快速开始
 
 ```bash
-# Prerequisites: Python 3.12+, uv and an LLM provider API key.
+# 前置条件：Python 3.12+、uv，以及一个 LLM provider API key。
 git clone <repo-url>
 cd fleetent
 uv sync
@@ -23,19 +23,19 @@ cp config/settings.yaml.example config/settings.yaml
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Run a single CLI request:
+运行一次 CLI 请求：
 
 ```bash
 uv run fleetent "What time is it, and what is 123 * 456?"
 ```
 
-Start the HTTP server:
+启动 HTTP 服务：
 
 ```bash
 uv run uvicorn fleetent.server:app --reload --port 8765
 ```
 
-Create a user and call `/chat`:
+创建用户并调用 `/chat`：
 
 ```bash
 uv run fleetent-admin create-user --name "Alice"
@@ -47,13 +47,13 @@ curl -s http://localhost:8765/chat \
   -d '{"message": "What is 7 * 8?"}' | grep "^data:"
 ```
 
-Run the interactive terminal UI:
+运行交互式终端 TUI：
 
 ```bash
 uv run fleetent-tui --url ws://127.0.0.1:8765/ws --token ma-<64hex>
 ```
 
-## Architecture
+## 架构
 
 ```text
 HTTP / IM / TUI
@@ -77,48 +77,48 @@ agent_loop.run() / run_stream()
 observability traces, usage, diagnostics, session persistence
 ```
 
-The codebase is moving from legacy flat modules toward a modular monolith. New code should prefer package boundaries under `src/fleetent/`:
+代码库正在从 legacy 平铺模块逐步迁移到模块化单体。新增代码优先放在 `src/fleetent/` 下对应 package，并通过 public API 跨模块调用。
 
-| Package | Role |
+| Package | 职责 |
 | --- | --- |
-| `runtime` / flat runtime modules | Agent loop, termination, cancellation, budgets and session runtime behavior. |
-| `governance` | Approval gates, quotas, audit log, blocklist and agent policy. |
-| `platform` | Admin APIs, user management, agent management, connector management and console surfaces. |
-| `im_gateway` | Slack and Telegram normalization and routing. |
-| `integrations` | MCP, sandbox and external integration boundaries. |
-| `intelligence` | Memory, shared memory, long-term context, reflection, vector store and knowledge base. |
-| `observability` | Trace storage, usage/performance summaries, diagnostics and verification reports. |
-| `tui` | Interactive terminal client and WebSocket dispatch protocol. |
+| `runtime` / flat runtime modules | Agent loop、终止、取消、预算、session runtime 等运行时行为。 |
+| `governance` | 审批门、配额、审计、blocklist 和 agent policy。 |
+| `platform` | Admin API、用户管理、Agent 管理、connector 管理和控制台入口。 |
+| `im_gateway` | Slack / Telegram 消息归一化与路由。 |
+| `integrations` | MCP、sandbox 和外部集成边界。 |
+| `intelligence` | Memory、Shared Memory、long-term context、reflection、vector store 和 knowledge base。 |
+| `observability` | Trace、usage / performance summary、diagnostics 和 verification report。 |
+| `tui` | 交互式终端客户端和 WebSocket dispatch 协议。 |
 
-Cross-package calls should use public APIs. Avoid importing internal implementation details from migrated packages.
+已迁移 package 的 internal 实现不应被其他 package 直接 import；跨模块调用应走 public API、CLI、HTTP 或明确的管理入口。
 
-## Configuration
+## 配置
 
-Settings are loaded from environment variables and `config/settings.yaml`.
+配置从环境变量和 `config/settings.yaml` 读取。
 
-Required for normal LLM-backed operation:
+常规 LLM 路径需要：
 
-| Variable | Description |
+| 变量 | 说明 |
 | --- | --- |
-| `ANTHROPIC_API_KEY` | Default Anthropic-compatible route credential. |
+| `ANTHROPIC_API_KEY` | 默认 Anthropic-compatible route 凭据。 |
 
-Common optional variables:
+常见可选变量：
 
-| Variable | Description |
+| 变量 | 说明 |
 | --- | --- |
-| `SLACK_BOT_TOKEN` | Enables Slack adapter. |
-| `SLACK_APP_TOKEN` | Required alongside `SLACK_BOT_TOKEN` for Slack Socket Mode. |
-| `TELEGRAM_BOT_TOKEN` | Enables Telegram adapter. |
-| `MICROSANDBOX_URL` | Sandbox service URL. |
-| `MINI_AGENT_SKILLS_DIR` | Override skill directory. |
+| `SLACK_BOT_TOKEN` | 启用 Slack adapter。 |
+| `SLACK_APP_TOKEN` | Slack Socket Mode 需要与 `SLACK_BOT_TOKEN` 一起配置。 |
+| `TELEGRAM_BOT_TOKEN` | 启用 Telegram adapter。 |
+| `MICROSANDBOX_URL` | Sandbox 服务地址。 |
+| `MINI_AGENT_SKILLS_DIR` | 覆盖默认 skills 目录。 |
 
-Model routes are configured in `settings.yaml` and `model_router.py` using OpenAI-compatible endpoints. Do not commit real API keys, IM tokens, OAuth credentials or local `.env` files.
+模型路由通过 `settings.yaml` 和 `model_router.py` 配置，使用 OpenAI-compatible endpoint。不要提交真实 API key、IM token、OAuth 凭据或本地 `.env` 文件。
 
 ## HTTP API
 
-### Authentication
+### 认证
 
-`/chat` requires a Bearer token issued by the admin CLI:
+`/chat` 需要 admin CLI 签发的 Bearer token：
 
 ```text
 Authorization: Bearer ma-<64hex>
@@ -126,7 +126,7 @@ Authorization: Bearer ma-<64hex>
 
 ### POST /chat
 
-Streams Server-Sent Events:
+返回 Server-Sent Events：
 
 ```bash
 curl -s http://localhost:8765/chat \
@@ -135,7 +135,7 @@ curl -s http://localhost:8765/chat \
   -d '{"message": "What is the current time?"}'
 ```
 
-Example event types:
+事件示例：
 
 ```text
 data: {"type": "text_delta", "content": "The current"}
@@ -150,9 +150,9 @@ data: {"type": "done", "content": "The current time is ..."}
 {"status": "ok", "adapters": {"slack": false, "telegram": false}}
 ```
 
-## Tools and MCP
+## 工具与 MCP
 
-Built-in tools are registered with `@tool`:
+内置工具通过 `@tool` 注册：
 
 ```python
 from fleetent.tool_registry import tool
@@ -164,7 +164,7 @@ def search_database(query: str, limit: int = 10) -> str:
     ...
 ```
 
-MCP-compatible tool servers can be configured in `config/mcp.yaml`:
+MCP-compatible 工具服务可以写入 `config/mcp.yaml`：
 
 ```yaml
 servers:
@@ -174,11 +174,11 @@ servers:
     api_key_env: INTERNAL_TOOLS_API_KEY
 ```
 
-MCP tools are registered as `{server_id}__{tool_name}` to avoid name collisions.
+MCP 工具会注册为 `{server_id}__{tool_name}`，避免与内置工具重名。
 
 ## Skills
 
-Skills live under `skills/<skill-name>/SKILL.md`. The registry scans them at startup and the agent can read matching skill instructions on demand.
+Skill 文件放在 `skills/<skill-name>/SKILL.md`。服务启动时会扫描 skill，Agent 可按需读取匹配的 skill 指令。
 
 ```text
 skills/
@@ -186,15 +186,15 @@ skills/
     SKILL.md
 ```
 
-## Development
+## 开发
 
-Install dependencies:
+安装依赖：
 
 ```bash
 uv sync
 ```
 
-Run tests:
+运行测试：
 
 ```bash
 uv run pytest
@@ -205,7 +205,7 @@ uv run pytest tests/e2e
 uv run pytest tests/evaluation
 ```
 
-Run quality checks:
+运行质量检查：
 
 ```bash
 uv run ruff format src tests
@@ -214,23 +214,25 @@ uv run mypy src
 PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py
 ```
 
-Generate pilot verification evidence when the verification suite is available:
+生成 Pilot 验证报告：
 
 ```bash
 uv run python scripts/generate_pilot_verification_report.py
 ```
 
-## Documentation
+## 文档
 
-Primary docs:
+主要文档：
 
-| Doc | Purpose |
+| 文档 | 说明 |
 | --- | --- |
-| `docs/architecture.md` | Architecture overview and capability index. |
-| `docs/capabilities/` | Capability-level design and status documents. |
-| `docs/deployment/` | Pilot install, runbook, acceptance and secrets guidance. |
-| `openspec/` | Spec-driven proposals, tasks and archived changes. |
+| `docs/architecture.md` | 架构总览和 capability 索引。 |
+| `docs/capabilities/` | 能力域设计、状态和验收文档。 |
+| `docs/capabilities/roadmaps/` | Pilot readiness 和能力簇 roadmap。 |
+| `docs/deployment/` | Pilot 安装、运行、验收和 secret 处理。 |
+| `docs/records/` | 集成记录、执行日志和 review / apply 决策记录。 |
+| `openspec/` | Spec-driven proposals、tasks 和归档 changes。 |
 
 ## License
 
-Apache 2.0. See the project license metadata for details.
+Apache 2.0。详见项目 license metadata。

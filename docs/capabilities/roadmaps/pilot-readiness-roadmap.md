@@ -1,0 +1,80 @@
+# Pilot readiness roadmap
+
+这份文档是 fleetent Pilot Go / Conditional Go / No-Go 的横向总览。它只做全项目薄看板和验收入口索引；各能力簇的详细状态放在同目录下的专项 roadmap。
+
+## 当前结论
+
+**Pilot MVP 工程前置已基础完成。** 当前已有 admin query CLI、agent KB binding、connector operations、diagnostics / retention、Docker Compose Pilot 入口、Pilot install checklist、Pilot acceptance guide 和自动化验证报告入口。
+
+**当前还不能直接宣称 Pilot Go。** 仍需在准生产环境完成真实 LLM / embedding / rerank / Google Drive / Confluence smoke，并按 [Pilot acceptance guide](../../deployment/pilot-acceptance-guide.md) 输出 Go / Conditional Go / No-Go 判定。
+
+Pilot 验收前先生成自动化证据包：
+
+```bash
+uv run python scripts/generate_pilot_verification_report.py
+```
+
+默认输出 `pilot-capability-verification.md` 和 `pilot-capability-verification.json`，覆盖默认测试命令、能力域证据、真实 smoke skip/pass/fail 和问题分类。真实 smoke 必须显式 opt-in，例如 `FLEETENT_REAL_LLM_SMOKE=1`、`FLEETENT_GOOGLE_DRIVE_SMOKE=1`；缺少 flag 或 credential ref 时报告为 skipped。报告中的问题分类固定使用 `Pilot blocker`、Docs gap、Enhancement、Out-of-scope，并给出 Go / `Conditional Go` / No-Go 建议，供人工验收复核。
+
+## Roadmap 索引
+
+| Roadmap | 覆盖能力 | 用途 |
+| --- | --- | --- |
+| [intelligence-roadmap.md](intelligence-roadmap.md) | Memory、Long-term Context、Reflection、Vector Store、Knowledge Base | 智能层能力深度状态、质量增强批次、真实 provider / SaaS 验证缺口 |
+| [observability-deployment-roadmap.md](observability-deployment-roadmap.md) | Observability、Diagnostics、Deployment / Config | 可观测证据、诊断包、安装升级备份、Pilot 验收运行基础 |
+| [../../records/roadmaps/v1.0-roadmap.md](../../records/roadmaps/v1.0-roadmap.md) | Agent runtime、model-router、tools、MCP、sandbox、skill、session | v1.0 执行引擎开发排期记录 |
+
+## 全项目 readiness 看板
+
+| 能力簇 | 当前状态 | 详情 | Pilot 风险 |
+| --- | --- | --- | --- |
+| Agent runtime / tooling | 部分完成 | [v1.0-roadmap.md](../../records/roadmaps/v1.0-roadmap.md)、[agent-runtime.md](../agent-runtime.md)、[tools.md](../tools.md)、[mcp.md](../mcp.md)、[sandbox.md](../sandbox.md)、[skill.md](../skill.md)、[session.md](../session.md) | Medium：核心执行链路已可用，但运行治理和工具/沙箱增强仍需分批收敛 |
+| Intelligence | 基础完成 | [intelligence-roadmap.md](intelligence-roadmap.md) | Medium：默认测试和 deterministic evaluation 已有，真实 LLM / embedding / rerank / SaaS smoke 仍需准生产验证 |
+| Observability / Deployment | 基础完成 | [observability-deployment-roadmap.md](observability-deployment-roadmap.md) | High：Go/No-Go 依赖诊断包、备份恢复、真实环境 smoke 和人工验收报告 |
+| Platform / Governance | 部分完成 | [platform.md](../platform.md)、[governance.md](../governance.md)、[user-center.md](../user-center.md)、[connectors.md](../connectors.md) | Medium：admin CLI 和 public API 可用，review UI / policy UI / connector credential 管理仍是增强项 |
+| Channels / Automation | 部分完成 | [im-gateway.md](../im-gateway.md)、[scheduling.md](../scheduling.md) | Medium：Slack / Telegram / Webhook / scheduler 可用性需要结合真实部署和客户接入路径复核 |
+
+## 状态定义
+
+| 状态 | 含义 |
+| --- | --- |
+| 已实现 | 关键用户路径已经完成，默认测试覆盖，短期只需维护 |
+| 基础完成 | public API / store / 配置边界已建立，但效果验证、运维或生产化仍有缺口 |
+| 部分完成 | 已有可用能力，但关键链路或边界仍明显缺失 |
+| 仅设计 | 文档和 spec 已有方向，但没有可依赖实现 |
+| 未开始 | 尚未进入设计或实现 |
+
+## Pilot MVP 工程前置
+
+| spec | 完成状态 |
+| --- | --- |
+| `observability-admin-query-api` | 已完成 admin CLI，可查询 run trace / usage / performance，避免排障必须手写 SQL |
+| `knowledge-base-agent-kb-binding` | 已完成 agent / tenant 到一个或多个 KB 的绑定策略和默认可见范围 |
+| `knowledge-base-connector-operations` | 已完成 connector list / check / status / sync、dry-run、失败摘要和真实 SaaS smoke 操作说明 |
+| `deployment-pilot-install-checklist` | 已完成安装、升级、备份、恢复、健康检查和回滚清单 |
+| `data-retention-and-diagnostics-policy` | 已完成 logs / traces / connector state 的 retention、导出、脱敏和备份边界 |
+| `deployment-docker-compose-foundation` | 已完成 Docker Compose Pilot 默认入口、配置初始化和 flat `secrets/` 目录说明 |
+| `pilot-acceptance-guide` | 已完成人工验收指南和报告模板 |
+
+## Pilot MVP 仍需真实环境验证
+
+- 使用真实 LLM / embedding provider 跑 smoke。
+- 使用真实 rerank provider 跑显式 opt-in smoke 和质量检查。
+- 使用真实 Google Drive / Confluence credential_ref 跑 connector check / sync smoke。
+- 按 [pilot-install-checklist.md](../../deployment/pilot-install-checklist.md) 完成一次准生产安装、升级、备份、恢复和诊断包导出演练。
+- 按 [pilot-acceptance-guide.md](../../deployment/pilot-acceptance-guide.md) 完成 Go / Conditional Go / No-Go 判定。
+
+## Pilot 问题分类
+
+| 分类 | 含义 | 处理 |
+| --- | --- | --- |
+| Pilot blocker | 阻止小范围真实用户试用，例如服务无法启动、DB migration 不可用、diagnostics 不脱敏、memory / KB local 基础链路不可用、secret 泄漏 | 必须修复并复测后才能 Go |
+| Docs gap | 功能可用，但操作说明、错误解释、记录模板或排障路径不清晰 | 可 Conditional Go，但要补 owner 和完成时间 |
+| Enhancement | Pilot 可用性不被阻塞的增强，例如 UI、scheduler、credential store、真实 rerank 质量评估、graph / rerank 默认检索策略产品化 | 不阻塞第一次 Pilot 验收，进入后续 spec 评估 |
+| Out-of-scope | 非当前能力簇范围或本 change 明确不处理的事项，例如客户网络策略、企业 IdP、生产 secret manager 选型 | 记录依赖 owner，不作为本次验收失败原因 |
+
+## 维护规则
+
+- 每个专项 roadmap 只维护相关能力簇的深度状态和后续批次。
+- 本文件只维护横向 readiness、验收入口和跨能力风险。
+- Pilot 验收报告中的问题必须先分类，再决定进入 docs gap、后续 OpenSpec 或 out-of-scope 跟进。

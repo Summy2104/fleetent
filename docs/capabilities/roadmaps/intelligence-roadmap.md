@@ -1,135 +1,52 @@
-# owner-capability-roadmap
+# Intelligence roadmap
 
-> 这份文档是常乐负责能力域的总控板，用来判断当前完成度、Pilot Go / No-Go 边界，以及后续 OpenSpec 的优先级。
+这份文档跟踪 fleetent 的 intelligence 能力簇：Memory、Long-term Context、Reflection、Vector Store 和 Knowledge Base。它用于判断这些能力的当前完成度、Pilot 验证缺口和后续 OpenSpec 优先级。
 
-## 1. 当前结论
+## 当前结论
 
-**MVP Foundation 已完成。** 常乐负责的 Observability、Memory、Long-term Context、Reflection、Vector Store、Knowledge Base、Deployment / Config 已具备核心 API、store、配置边界、默认测试和 OpenSpec 批次。
+**MVP Foundation 已完成。** Memory、Long-term Context、Reflection、Vector Store 和 Knowledge Base 已具备核心 API、store、配置边界、默认测试和 OpenSpec 批次。
 
-**Pilot MVP 工程前置已基础完成。** 已有 admin query CLI、agent KB binding、connector operations、diagnostics / retention、Docker Compose Pilot 入口、Pilot install checklist 和 Pilot acceptance guide。
+**Pilot 后增强首批已大体完成。** advanced parsers、entity extraction、graph_search、KB hybrid rerank、query planner、KB reflection reports、SkillProposal、reflection trend、Shared Memory、context policy、memory quality trend 已落地。
 
-**当前还不能直接宣称 Pilot 已 Go。** 需要在准生产环境完成真实 LLM / embedding / rerank / Google Drive / Confluence smoke，并按 [Pilot acceptance guide](../deployment/pilot-acceptance-guide.md) 输出 Go / Conditional Go / No-Go 判定。
+**当前主要缺口在真实环境验证和生产化入口。** 真实 LLM / embedding / rerank provider、Google Drive / Confluence smoke、review UI、scheduler、policy admin API、credential 管理和 full sync history 仍需结合 Pilot 反馈推进。
 
-**下一步不应继续堆 foundation spec。** 更合理的工作方式是先验收，再根据验收报告把问题归为 Pilot blocker、docs gap、enhancement 或 out-of-scope。
-
-Pilot 验收前先生成自动化证据包：
-
-```bash
-uv run python scripts/generate_pilot_verification_report.py
-```
-
-默认输出 `pilot-capability-verification.md` 和 `pilot-capability-verification.json`，覆盖七个 owner
-capability、默认测试命令、真实 smoke skip/pass/fail 和问题分类。真实 smoke 仍必须显式 opt-in，例如
-`FLEETENT_REAL_LLM_SMOKE=1`、`FLEETENT_GOOGLE_DRIVE_SMOKE=1`；缺少 flag 或 credential ref 时报告为
-skipped。报告中的问题分类固定使用 `Pilot blocker`、Docs gap、Enhancement、Out-of-scope，并给出
-Go / `Conditional Go` / No-Go 建议，供人工验收复核。
-
-## 2. 范围
-
-纳入本 roadmap 管理的能力域：
+## 范围
 
 | 能力域 | 文档 | 负责范围 |
 | --- | --- | --- |
-| Observability | [observability.md](observability.md) | logs、agent traces、source attribution、usage / performance summary |
-| Memory | [memory.md](memory.md) | User Memory、Shared Memory、extraction、merge/update/delete、retention / compaction、quality trend |
-| Long-term Context | [long-term-ctx.md](long-term-ctx.md) | memory / KB / Shared Memory context selection、token budget、prompt injection、context policy |
-| Reflection | [reflection.md](reflection.md) | trace / memory / KB 反思、User Memory maintenance proposal、SkillProposal、trend summary |
-| Vector Store | [vector-store.md](vector-store.md) | vector backend、embedding / rerank provider、reindex |
-| Knowledge Base | [knowledge-base.md](knowledge-base.md) | document ingest、local / Google Drive / Confluence sync、hybrid / graph / rerank / planner |
-| Deployment / Config | [deployment.md](deployment.md) | on-prem config、Docker Compose Pilot 入口、backup / upgrade、module runtime prerequisites |
+| Memory | [../memory.md](../memory.md) | User Memory、Shared Memory、extraction、merge/update/delete、retention / compaction、quality trend |
+| Long-term Context | [../long-term-ctx.md](../long-term-ctx.md) | memory / KB / Shared Memory context selection、token budget、prompt injection、context policy |
+| Reflection | [../reflection.md](../reflection.md) | trace / memory / KB 反思、User Memory maintenance proposal、SkillProposal、trend summary |
+| Vector Store | [../vector-store.md](../vector-store.md) | vector backend、embedding / rerank provider、reindex |
+| Knowledge Base | [../knowledge-base.md](../knowledge-base.md) | document ingest、local / Google Drive / Confluence sync、hybrid / graph / rerank / planner |
 
-不纳入本 roadmap 直接管理，但会作为依赖引用：
+依赖但不直接管理：
 
-- agent-runtime：产生 runtime events，是 observability 的主要数据源。
+- agent-runtime：产生 runtime events，是 observability 和 reflection 的主要数据源。
 - platform / governance：后续展示 trace、审批、用户和 agent 绑定。
-- connectors：用户级外部工具授权与凭证层；KB 数据源 connector 归 knowledge-base 能力域管理。
+- connectors：用户级外部工具授权与凭证层；KB 数据源 connector 归 Knowledge Base 能力域管理。
 
-## 3. 状态定义
+## 完成度看板
 
-| 状态 | 含义 |
-| --- | --- |
-| 已实现 | 关键用户路径已经完成，默认测试覆盖，短期只需维护 |
-| 基础完成 | public API / store / 配置边界已建立，但效果验证、运维或生产化仍有缺口 |
-| 部分完成 | 已有可用能力，但关键链路或边界仍明显缺失 |
-| 仅设计 | 文档和 spec 已有方向，但没有可依赖实现 |
-| 未开始 | 尚未进入设计或实现 |
-
-## 4. 完成度看板
-
-| 层级 | 状态 | 已完成 | 未完成但不阻塞当前 Pilot Go / No-Go | 暂缓 / 非 MVP |
+| 层级 | 状态 | 已完成 | 当前缺口 | 暂缓 / 非 MVP |
 | --- | --- | --- | --- | --- |
 | MVP Foundation | 已实现 | 核心 API、store、配置边界、默认测试、evaluation baseline、OpenSpec 批次 | 无 foundation 级大缺口 | 无 |
-| Pilot MVP 工程前置 | 基础完成 | admin query CLI、agent KB binding、connector operations、diagnostics / retention、Docker Compose Pilot、install checklist、acceptance guide | 准生产人工验收、真实外部依赖 smoke | platform UI / HTTP 查询入口 |
+| Pilot MVP 工程前置 | 基础完成 | agent KB binding、connector operations、默认可见范围、local ingest、deterministic evaluation | 准生产人工验收、真实外部依赖 smoke | platform UI / HTTP 查询入口 |
 | Pilot 后增强首批 | 已实现 | advanced parsers、entity extraction、graph_search、KB hybrid rerank、query planner、KB reflection reports、SkillProposal、reflection trend、Shared Memory、context policy、memory quality trend | 真实 provider 质量评估、生产默认策略确认 | 自动知识库修复、自动 skill 发布 |
 | 管理和运维入口 | 部分完成 | admin CLI 和 public API 可用 | policy admin API、review UI、scheduler / worker、full sync history、后台 reindex job runtime、告警 | dashboard / workflow UI |
 | 高复杂增强 | 暂缓 | 已完成进入条件评估 | 无 | document-level ACL、OCR / VLM / 扫描 PDF、sqlite-vec / Qdrant / OpenSearch adapter、真实 tokenizer、LLM-driven selection |
 
-## 5. 当前能力地图
+## 当前能力地图
 
 | 能力 | 当前状态 | 已有基础 | 当前缺口 | 后续增强 |
 | --- | --- | --- | --- | --- |
-| Observability foundation | 基础完成 | structured logs、SQLite traces、usage summary、performance summary、source attribution、runtime event coverage、admin query CLI、diagnostics export / manual retention、contract tests | platform UI / HTTP 查询入口 | OTel / Prometheus、dashboard UI、告警 |
 | Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation、retention / compaction API、owner-approved reflection maintenance apply API、Shared Memory `shared_memory_items`、team / tenant scope、`shared:{scope_type}:{scope_id}` namespace、只读 memory quality trend summary | scheduler / review UI / 告警；Shared Memory 生产默认策略和编辑入口 | 真实 LLM 长期质量评估 |
 | Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture、deterministic budget policy；agent / tenant context policy（tenant 默认 + agent 覆盖）按 agent 归属注入 Shared Memory（tenant / team），默认关闭、无跨 tenant/team 访问 | policy 编辑 UI 与 admin API | 真实 tokenizer、个性化 budget、LLM-driven selection |
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告、deterministic report evaluation、User Memory maintenance proposal lifecycle、KB reflection reports、SkillProposal lifecycle、只读 reflection trend summary | review UI / scheduler / scope-aware SkillProposal 归属 | 自动知识库修复、自动 skill 发布 |
 | Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API、combined embedding evaluation、KB hybrid rerank 接入与 deterministic rerank evaluation | 真实 rerank provider smoke 与质量评估；后台 reindex job runtime | sqlite-vec、Qdrant、OpenSearch adapter |
 | Knowledge base | 基础完成 | local ingest、parser registry、PDF / DOCX / PPTX / XLSX parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator、combined embedding evaluation、Google Drive / Confluence connector baseline、Google Sheets / Slides export parsing、entity extraction schema + explicit run、`kb_extraction_runs`、`kb_entities`、独立于 search 的 `graph_search` depth 0/1 graph evidence、hybrid rerank、规则型 query planner、agent 到多 KB 绑定、connector operations CLI / latest status | 真实 SaaS smoke 与生产凭据管理；graph / rerank 已通过 planner 串联但尚未成为 `search(mode="auto")` 默认路径 | document-level ACL、scheduler / full sync history、attachments / OCR / VLM |
-| Deployment / config | 基础完成 | `settings.yaml`、MCP dedicated server file、legacy config fail-fast、本地 SQLite upgrade / backup 脚本、Pilot install checklist、Docker Compose Pilot 入口 | 准生产部署演练和 config docs 对 intelligence runtime prerequisites 的收敛 | config center、Admin UI、hot reload |
 
-## 6. Pilot MVP 判定
-
-Pilot MVP 的人工验收入口是 [Pilot acceptance guide](../deployment/pilot-acceptance-guide.md)。它用于真实测试环境验收，不替代默认自动化测试。默认测试不连接真实 LLM、embedding、Google Drive 或 Confluence；真实外部 smoke 必须显式 opt-in，未配置时记录为 skipped。
-
-### Pilot MVP 已完成工程前置
-
-| spec | 完成状态 |
-| --- | --- |
-| `observability-admin-query-api` | 已完成 admin CLI，可查询 run trace / usage / performance，避免排障必须手写 SQL |
-| `knowledge-base-agent-kb-binding` | 已完成 agent / tenant 到一个或多个 KB 的绑定策略和默认可见范围 |
-| `knowledge-base-connector-operations` | 已完成 connector list / check / status / sync、dry-run、失败摘要和真实 SaaS smoke 操作说明 |
-| `deployment-pilot-install-checklist` | 已完成安装、升级、备份、恢复、健康检查和回滚清单 |
-| `data-retention-and-diagnostics-policy` | 已完成 logs / traces / connector state 的 retention、导出、脱敏和备份边界 |
-| `deployment-docker-compose-foundation` | 已完成 Docker Compose Pilot 默认入口、配置初始化和 flat `secrets/` 目录说明 |
-| `pilot-acceptance-guide` | 已完成人工验收指南和报告模板 |
-
-### Pilot MVP 仍需真实环境验证
-
-- 使用真实 LLM / embedding provider 跑 smoke。
-- 使用真实 rerank provider 跑显式 opt-in smoke 和质量检查。
-- 使用真实 Google Drive / Confluence credential_ref 跑 connector check / sync smoke。
-- 按 [pilot-install-checklist.md](../deployment/pilot-install-checklist.md) 完成一次准生产安装、升级、备份、恢复和诊断包导出演练。
-- 按 [pilot-acceptance-guide.md](../deployment/pilot-acceptance-guide.md) 完成 Go / Conditional Go / No-Go 判定。
-
-### Pilot 问题分类
-
-| 分类 | 含义 | 处理 |
-| --- | --- | --- |
-| Pilot blocker | 阻止小范围真实用户试用，例如服务无法启动、DB migration 不可用、diagnostics 不脱敏、memory / KB local 基础链路不可用、secret 泄漏 | 必须修复并复测后才能 Go |
-| Docs gap | 功能可用，但操作说明、错误解释、记录模板或排障路径不清晰 | 可 Conditional Go，但要补 owner 和完成时间 |
-| Enhancement | Pilot 可用性不被阻塞的增强，例如 UI、scheduler、credential store、真实 rerank 质量评估、graph / rerank 默认检索策略产品化 | 不阻塞第一次 Pilot 验收，进入后续 spec 评估 |
-| Out-of-scope | 非本 owner 范围或本 change 明确不处理的事项，例如客户网络策略、企业 IdP、生产 secret manager 选型 | 记录依赖 owner，不作为本次验收失败原因 |
-
-## 7. 已完成基础批次
-
-### M1：可观测、可排查
-
-目标：每次 agent 运行的关键行为都有可查询证据，工程师能定位问题。
-
-完成标准：
-
-- LLM call、tool call、fallback、permission、context compression、final reply 都有 trace event。
-- 可以按 run / user / agent / session 查询关键耗时、token、错误、fallback 和工具调用摘要。
-
-已完成 spec：
-
-- `observability-runtime-event-coverage`：补齐 runtime event source，不做聚合 API。
-- `observability-performance-summary`：基于 runtime events 提供 Python 聚合查询 API，不做 UI / rollup。
-
-剩余缺口：
-
-- platform UI / HTTP 查询入口、OTel / Prometheus 和告警不属于 M1，进入后续运维入口。
-
-### M2：可同步、可重建
+## M2：可同步、可重建
 
 目标：KB 与 vector store 从“能导入”升级为“能维护和运维”。
 
@@ -149,7 +66,7 @@ Pilot MVP 的人工验收入口是 [Pilot acceptance guide](../deployment/pilot-
 
 - 后台 reindex job runtime、full sync history 和 scheduler / worker 不属于 M2，进入后续管理和运维入口。
 
-### M3：可评估
+## M3：可评估
 
 目标：核心 intelligence 能力的效果不只靠人工感觉判断。
 
@@ -170,7 +87,7 @@ Pilot MVP 的人工验收入口是 [Pilot acceptance guide](../deployment/pilot-
 
 - 真实 LLM / embedding / rerank provider 的质量评估需要准生产环境显式 opt-in，不进入默认 CI。
 
-### M4：可维护、可演进
+## M4：可维护、可演进
 
 目标：长期运行后不会因为记忆、知识库和反思数据增长而失控。
 
@@ -190,7 +107,7 @@ Pilot MVP 的人工验收入口是 [Pilot acceptance guide](../deployment/pilot-
 
 - review UI、scheduler、告警和生产默认策略需要结合 Pilot 反馈继续做。
 
-### M4b：企业知识源接入
+## M4b：企业知识源接入
 
 目标：把 KB 从 local directory baseline 扩展到客户真实企业知识源，同时不绕过 sync planner 和数据边界。
 
@@ -209,11 +126,7 @@ Pilot MVP 的人工验收入口是 [Pilot acceptance guide](../deployment/pilot-
 
 - 真实 SaaS smoke、生产凭据管理、scheduler / full sync history 和 document-level ACL 仍需后续决策。
 
-## 8. Pilot 后增强批次
-
-Pilot 后增强可以与 Pilot 验收并行推进，但不默认阻塞第一次 Pilot 验收。只有验收报告中被分类为 Pilot blocker 的问题才会阻塞 Go；docs gap、enhancement 和 out-of-scope 分别进入文档补齐、后续 spec 或外部 owner 跟进。
-
-### P1：知识库质量增强
+## P1：知识库质量增强
 
 目标：把 KB 从“能同步和混合检索”提升到“能解析更多企业文件、识别实体关系、支持图证据、显式 rerank 和可解释 search plan”。
 
@@ -257,7 +170,7 @@ flowchart TD
     KB_BIND --> PLANNER
 ```
 
-### P2：反思与演进增强
+## P2：反思与演进增强
 
 目标：把 reflection 从“报告 / User Memory maintenance”扩展到 KB 质量报告、SkillProposal 生命周期和只读趋势聚合。
 
@@ -296,7 +209,7 @@ flowchart TD
     SKILL_PROP --> REF_TREND
 ```
 
-### P3：共享记忆与上下文策略增强
+## P3：共享记忆与上下文策略增强
 
 目标：把 memory / long-term context 从个人记忆扩展到团队协作语境，同时保持 User Memory owner boundary 和 agent ownership 边界。
 
@@ -331,11 +244,10 @@ flowchart TD
     SHARED --> MEM_TREND
 ```
 
-## 9. 后续 Backlog
+## 后续 Backlog
 
 ### 真实环境验证
 
-- `real-llm-smoke`：真实 LLM route smoke。
 - `real-embedding-smoke`：真实 embedding provider smoke 和 retrieval quality check。
 - `real-rerank-smoke`：真实 rerank provider smoke 和 KB hybrid rerank quality check。
 - `google-drive-real-smoke`：真实 Google Drive credential_ref、connector check / sync smoke。
@@ -343,12 +255,10 @@ flowchart TD
 
 ### 管理和运维入口
 
-- `observability-http-or-platform-query`：platform UI / HTTP 查询入口。
 - `long-term-context-policy-admin-api`：context policy 管理入口。
 - `memory-reflection-review-ui`：User Memory / Shared Memory / SkillProposal review 入口。
 - `connector-scheduler-and-sync-history`：scheduler / worker / full sync history。
 - `vector-store-reindex-job-runtime`：后台 reindex job runtime 和操作历史。
-- `diagnostics-alerting`：诊断包之外的告警和 dashboard。
 
 ### 暂缓 / v1.1+
 
@@ -359,7 +269,7 @@ flowchart TD
 - `reflection-auto-kb-fix`：自动知识库修复。
 - `skill-auto-publish`：自动 skill 发布。
 
-## 10. 暂缓项进入条件
+## 暂缓项进入条件
 
 | 暂缓项 | 进入条件 |
 | --- | --- |
@@ -369,10 +279,9 @@ flowchart TD
 | `long-term-context-real-tokenizer` | deterministic token 估算在 Pilot 中造成可复现上下文截断或超预算问题 |
 | 自动知识库修复 / 自动 skill 发布 | review UI、审批流程、审计和回滚路径稳定后，再讨论是否允许自动 apply |
 
-## 11. 维护规则
+## 维护规则
 
 - 新增 intelligence 相关 spec 前，必须在本 roadmap 中标明所属批次和解锁关系。
 - capability 文档状态变化时，同步更新本 roadmap 的“完成度看板”和“当前能力地图”。
 - 每完成一个批次，重新评估下一批是否仍然是最高优先级。
 - 不把探索性想法直接推进为实现 spec；先确认它解决哪个 MVP 缺口。
-- Pilot 验收报告中的问题必须先分类，再决定是否进入 OpenSpec。

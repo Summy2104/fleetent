@@ -5,9 +5,9 @@ TBD - created by archiving change pilot-capability-verification-suite. Update Pu
 ## Requirements
 ### Requirement: Owner capability contract tests
 
-The project SHALL provide automated contract tests for the owner capability domains listed in
-`docs/capabilities/owner-capability-roadmap.md`: Observability, Memory, Long-term Context, Reflection,
-Vector Store, Knowledge Base and Deployment / Config. These tests SHALL exercise public APIs, CLI/HTTP
+The project SHALL provide automated contract tests for the Pilot capability domains listed in
+`docs/capabilities/roadmaps/pilot-readiness-roadmap.md`: Observability, Memory, Long-term Context,
+Reflection, Vector Store, Knowledge Base and Deployment / Config. These tests SHALL exercise public APIs, CLI/HTTP
 boundaries or documented admin entry points with isolated local dependencies. They SHALL NOT touch `data/`
 or require real LLM, embedding, rerank, Google Drive or Confluence services by default.
 
@@ -74,4 +74,3 @@ real smoke pass/fail/skipped status, issue classification and a final Go / Condi
 - **WHEN** a human reviews the Markdown report
 - **THEN** they can see which owner capability domains passed, failed or were skipped
 - **AND** they can find the evidence needed to reproduce or inspect each result
-

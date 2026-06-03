@@ -2,7 +2,7 @@
 
 > 全自主 apply 期间，遇到的冲突 / Open Question 及其自解决策记录，供 zy 最后核实。
 > 每个 change 一节：遇到什么、怎么解的、影响。
-> 执行顺序见 `v1.0-roadmap.md` 波次 3；硬约束 AR18(cost-budget-control) → MR2(cost-aware-routing)。
+> 执行顺序见 `docs/records/roadmaps/v1.0-roadmap.md` 波次 3；硬约束 AR18(cost-budget-control) → MR2(cost-aware-routing)。
 > **顺序修订（见下方「执行顺序自解决策」）**：AR20 提前到第 2 位，因其提供 T2/SB7 依赖的 `CancelToken.parent` 原语。
 
 ## 执行顺序自解决策（2026-06-01）

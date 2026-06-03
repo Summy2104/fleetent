@@ -1,6 +1,6 @@
 # 集成执行日志：`main` × `feature/zhangyang`
 
-> 配套文档：`docs/integration-plan-main-zhangyang.md`（方案）
+> 配套文档：`docs/records/integration/plan-main-zhangyang.md`（方案）
 > 执行方式：自主执行，决策与问题记录于此，全部完成后由张洋逐个审核
 > 回退锚点：`feature/zhangyang` 起点 `b7395b4`（方案文档提交后为 `5376d39`）
 > main 基线：`7182767`
