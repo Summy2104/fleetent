@@ -1,68 +1,67 @@
-"""TUI rich rendering of gateway events (tui-gateway 7.1). Output captured via StringIO."""
+"""TUI rendering of gateway events to FormattedText (tui-gateway 7.1)."""
 
-from io import StringIO
-
-from rich.console import Console
+from prompt_toolkit.formatted_text import FormattedText
 
 from fleetent.tui import protocol as p
 from fleetent.tui import render
 
 
-def _console() -> tuple[Console, StringIO]:
-    buf = StringIO()
-    return Console(file=buf, force_terminal=False, width=100, no_color=True), buf
+def _plain(ft: FormattedText | None) -> str:
+    """Concatenate the text of a FormattedText (drop styles) for assertions."""
+    assert ft is not None
+    return "".join(text for _style, text in ft)
 
 
-def test_text_delta_writes_content():
-    c, buf = _console()
-    render.render_event(c, p.make_event(p.EVENT_TEXT_DELTA, {"content": "hello world"})["params"])
-    assert "hello world" in buf.getvalue()
+def test_text_delta_renders_content_plain():
+    out = _plain(
+        render.format_event(p.make_event(p.EVENT_TEXT_DELTA, {"content": "hello world"})["params"])
+    )
+    assert out == "hello world"  # no newline, no styling wrapper text
 
 
 def test_tool_call_shows_name_and_args():
-    c, buf = _console()
-    render.render_event(
-        c, {"type": "tool_call", "payload": {"name": "calculate", "args": {"x": 1}}}
+    out = _plain(
+        render.format_event(
+            {"type": "tool_call", "payload": {"name": "calculate", "args": {"x": 1}}}
+        )
     )
-    out = buf.getvalue()
-    assert "calculate" in out
+    assert "calculate" in out and "x" in out
 
 
 def test_tool_result_truncates_long_content():
-    c, buf = _console()
     long = "A" * (render.RESULT_TRUNCATE_LIMIT + 200)
-    render.render_event(c, {"type": "tool_result", "payload": {"name": "shell", "content": long}})
-    out = buf.getvalue()
+    out = _plain(
+        render.format_event({"type": "tool_result", "payload": {"name": "shell", "content": long}})
+    )
     assert "shell" in out
-    assert "…" in out  # truncation marker present
-    assert "A" * (render.RESULT_TRUNCATE_LIMIT + 200) not in out  # full content not shown
+    assert "…" in out
+    assert long not in out  # full content not shown
 
 
-def test_error_event_is_displayed():
-    c, buf = _console()
-    render.render_event(c, {"type": "error", "payload": {"content": "boom failure"}})
-    assert "boom failure" in buf.getvalue()
+def test_error_event_is_rendered():
+    out = _plain(render.format_event({"type": "error", "payload": {"content": "boom failure"}}))
+    assert "boom failure" in out
 
 
 def test_approval_required_shows_prompt():
-    c, buf = _console()
-    render.render_event(
-        c,
-        {
-            "type": "approval_required",
-            "payload": {"approval_id": "a1", "tool": "shell", "risk": "high"},
-        },
+    out = _plain(
+        render.format_event(
+            {
+                "type": "approval_required",
+                "payload": {"approval_id": "a1", "tool": "shell", "risk": "high"},
+            }
+        )
     )
-    out = buf.getvalue()
-    assert "a1" in out and "shell" in out
+    assert "a1" in out and "shell" in out and "/approve a1" in out
 
 
-def test_render_status_writes_message():
-    c, buf = _console()
-    render.render_status(c, "connecting…")
-    assert "connecting" in buf.getvalue()
+def test_format_status_carries_message():
+    assert "connecting" in _plain(render.format_status("connecting…"))
 
 
-def test_done_event_does_not_raise():
-    c, _buf = _console()
-    render.render_event(c, {"type": "done", "payload": {"content": "ok"}})
+def test_done_event_renders_newline_only():
+    assert _plain(render.format_event({"type": "done", "payload": {"content": "ok"}})) == "\n"
+
+
+def test_unknown_event_returns_none():
+    assert render.format_event({"type": "mystery", "payload": {}}) is None
