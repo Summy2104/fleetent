@@ -722,6 +722,36 @@ def test_source_classification_and_badge():
     assert "source-filter" in body
 
 
+# --- User list pagination -----------------------------------------------------
+
+
+def test_user_list_pagination_controls_present():
+    html = ADMIN_HTML
+    users_section = html.split('id="tab-users"', 1)[1].split("</section>", 1)[0]
+    assert 'id="users-pager"' in users_section
+
+
+def test_render_users_paginates_filtered_list():
+    body = _render_users_body(ADMIN_HTML)
+    # current page slice of the filtered list
+    assert "USERS_PAGE" in body
+    assert "USERS_PAGE_SIZE" in body
+    assert ".slice(" in body
+    # pager nav wiring
+    assert "usersGoto(" in body
+
+
+def test_filter_change_resets_to_first_page():
+    html = ADMIN_HTML
+    # changing any filter jumps back to page 1
+    assert "function usersFilterChanged" in html
+    reset = html.split("function usersFilterChanged", 1)[1].split("}", 1)[0]
+    assert "USERS_PAGE = 1" in reset
+    # filter inputs route through the reset wrapper, not renderUsers directly
+    users_section = html.split('id="tab-users"', 1)[1].split("</section>", 1)[0]
+    assert "usersFilterChanged()" in users_section
+
+
 # --- Task 5: distinct block semantics -----------------------------------------
 
 

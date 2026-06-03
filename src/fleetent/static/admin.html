@@ -186,20 +186,20 @@
     <section id="tab-users">
       <div class="page-header"><h2 class="ph-title">Users</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.users?.()">Refresh</button></div></div>
       <div class="row" style="margin-bottom:12px;">
-        <input id="user-filter" placeholder="filter by email or nickname" oninput="renderUsers()" style="flex:1;">
-        <select id="role-filter" onchange="renderUsers()">
+        <input id="user-filter" placeholder="filter by email or nickname" oninput="usersFilterChanged()" style="flex:1;">
+        <select id="role-filter" onchange="usersFilterChanged()">
           <option value="">all roles</option>
           <option value="viewer">viewer</option>
           <option value="admin">admin</option>
           <option value="built_in_admin">built_in_admin</option>
         </select>
-        <select id="status-filter" onchange="renderUsers()">
+        <select id="status-filter" onchange="usersFilterChanged()">
           <option value="">all status</option>
           <option value="active">active</option>
           <option value="blocked">blocked</option>
           <option value="disabled">disabled</option>
         </select>
-        <select id="source-filter" onchange="renderUsers()">
+        <select id="source-filter" onchange="usersFilterChanged()">
           <option value="">all sources</option>
           <option value="im">IM-origin</option>
           <option value="human">human / API</option>
@@ -210,6 +210,7 @@
         <thead><tr><th></th><th>#</th><th>Email</th><th>Nickname</th><th>Role</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody id="users-body"></tbody>
       </table></div>
+      <div id="users-pager" class="row" style="margin-top:12px; align-items:center; gap:8px;"></div>
     </section>
 
     <section id="tab-kb" class="hidden">
@@ -837,6 +838,8 @@ let ALL_USERS = [];
 // re-axis off existing joins: im_users.user_id = user.id, connectors.owner_id = user.id).
 let IM_BY_USER = {};
 let CONN_BY_OWNER = {};
+const USERS_PAGE_SIZE = 20;
+let USERS_PAGE = 1;
 
 async function loadUsers() {
   $("users-body").innerHTML = loadingRow(8);
@@ -872,7 +875,12 @@ function renderUsers() {
     && (!role || u.role === role)
     && (!status || u.status === status)
     && (!source || (source === "im" ? isImOrigin(u) : !isImOrigin(u))));
-  $("users-body").innerHTML = users.map((u, i) => {
+  const total = users.length;
+  const pages = Math.max(1, Math.ceil(total / USERS_PAGE_SIZE));
+  if (USERS_PAGE > pages) USERS_PAGE = pages;
+  const offset = (USERS_PAGE - 1) * USERS_PAGE_SIZE;
+  const pageUsers = users.slice(offset, offset + USERS_PAGE_SIZE);
+  $("users-body").innerHTML = pageUsers.map((u, i) => {
     const ids = IM_BY_USER[u.id] || [];
     const conns = CONN_BY_OWNER[u.id] || [];
     const imOrigin = isImOrigin(u);
@@ -933,7 +941,7 @@ function renderUsers() {
     return `
     <tr>
       <td>${expander}</td>
-      <td class="muted">${i + 1}</td>
+      <td class="muted">${offset + i + 1}</td>
       <td>${esc(u.email || "—")}</td>
       <td>${esc(u.name || "—")}</td>
       <td><span class="pill ${u.role}">${esc(u.role)}</span></td>
@@ -958,6 +966,28 @@ function renderUsers() {
       </td>
     </tr>${childRow}`;
   }).join("") || emptyRow(8, "No users.");
+  renderUsersPager(total, pages);
+}
+
+function renderUsersPager(total, pages) {
+  const start = total ? (USERS_PAGE - 1) * USERS_PAGE_SIZE + 1 : 0;
+  const end = Math.min(USERS_PAGE * USERS_PAGE_SIZE, total);
+  $("users-pager").innerHTML = `
+    <span class="muted">${start}–${end} of ${total}</span>
+    <span class="spacer" style="flex:1;"></span>
+    <button class="small ghost" ${USERS_PAGE <= 1 ? "disabled" : ""} onclick="usersGoto(${USERS_PAGE - 1})">Prev</button>
+    <span class="muted">Page ${USERS_PAGE} / ${pages}</span>
+    <button class="small ghost" ${USERS_PAGE >= pages ? "disabled" : ""} onclick="usersGoto(${USERS_PAGE + 1})">Next</button>`;
+}
+
+function usersGoto(page) {
+  USERS_PAGE = Math.max(1, page);
+  renderUsers();
+}
+
+function usersFilterChanged() {
+  USERS_PAGE = 1;
+  renderUsers();
 }
 
 function toggleUserRow(id) {
