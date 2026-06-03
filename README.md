@@ -228,7 +228,7 @@ uv run python scripts/generate_pilot_verification_report.py
 | --- | --- |
 | `docs/architecture.md` | 架构总览和 capability 索引。 |
 | `docs/capabilities/` | 能力域设计、状态和验收文档。 |
-| `docs/capabilities/roadmaps/` | Pilot readiness 和能力簇 roadmap。 |
+| `docs/capabilities/roadmaps/` | Pilot readiness、Runtime / Tooling、Intelligence、Observability / Deployment、Platform / Channel roadmap。 |
 | `docs/deployment/` | Pilot 安装、运行、验收和 secret 处理。 |
 | `docs/records/` | 集成记录、执行日志和 review / apply 决策记录。 |
 | `openspec/` | Spec-driven proposals、tasks 和归档 changes。 |

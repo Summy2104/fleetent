@@ -24,6 +24,7 @@ docs/
   records/
     integration/               # 一次性集成方案与执行日志
     decision-logs/             # apply/review 过程中的决策记录
+    roadmaps/                  # 历史开发排期和执行计划记录
   archive/                     # 过期设计、旧 internals deep dive、历史调研
 ```
 
@@ -37,6 +38,17 @@ docs/
 | 部署文档 | `docs/deployment/` | 安装、升级、备份、运行、验收和 secret 处理。 |
 | 项目记录 | `docs/records/` | 集成方案、执行日志、review/apply 决策记录。 |
 | 归档资料 | `docs/archive/` | 不再作为当前事实来源的旧设计、历史调研和 deep dive。 |
+
+## Roadmap 索引
+
+| Roadmap | 用途 |
+| --- | --- |
+| `docs/capabilities/roadmaps/pilot-readiness-roadmap.md` | 全项目 Pilot readiness 总览、验收入口和 Go / Conditional Go / No-Go 风险。 |
+| `docs/capabilities/roadmaps/runtime-tooling-roadmap.md` | Agent Runtime、Model Router、Tools、MCP、Sandbox、Skill、Session 能力簇。 |
+| `docs/capabilities/roadmaps/intelligence-roadmap.md` | Memory、Long-term Context、Reflection、Vector Store、Knowledge Base 能力簇。 |
+| `docs/capabilities/roadmaps/observability-deployment-roadmap.md` | Observability、Diagnostics、Deployment / Config 能力簇。 |
+| `docs/capabilities/roadmaps/platform-channel-roadmap.md` | Platform、Governance、User Center、Connectors、IM Gateway、Scheduling / Webhook 能力簇。 |
+| `docs/records/roadmaps/v1.0-roadmap.md` | 历史 v1.0 执行引擎开发排期记录。 |
 
 ## 写作规范
 

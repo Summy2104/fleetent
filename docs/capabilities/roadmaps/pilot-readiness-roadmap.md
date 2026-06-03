@@ -20,19 +20,20 @@ uv run python scripts/generate_pilot_verification_report.py
 
 | Roadmap | 覆盖能力 | 用途 |
 | --- | --- | --- |
+| [runtime-tooling-roadmap.md](runtime-tooling-roadmap.md) | Agent Runtime、Model Router、Tools、MCP、Sandbox、Skill、Session | 执行引擎与工具链路状态、端到端稳定性风险、v1.0 执行计划入口 |
 | [intelligence-roadmap.md](intelligence-roadmap.md) | Memory、Long-term Context、Reflection、Vector Store、Knowledge Base | 智能层能力深度状态、质量增强批次、真实 provider / SaaS 验证缺口 |
 | [observability-deployment-roadmap.md](observability-deployment-roadmap.md) | Observability、Diagnostics、Deployment / Config | 可观测证据、诊断包、安装升级备份、Pilot 验收运行基础 |
+| [platform-channel-roadmap.md](platform-channel-roadmap.md) | Platform、Governance、User Center、Connectors、IM Gateway、Scheduling / Webhook | 控制面、治理、接入和自动化状态，真实接入和权限边界风险 |
 | [../../records/roadmaps/v1.0-roadmap.md](../../records/roadmaps/v1.0-roadmap.md) | Agent runtime、model-router、tools、MCP、sandbox、skill、session | v1.0 执行引擎开发排期记录 |
 
 ## 全项目 readiness 看板
 
 | 能力簇 | 当前状态 | 详情 | Pilot 风险 |
 | --- | --- | --- | --- |
-| Agent runtime / tooling | 部分完成 | [v1.0-roadmap.md](../../records/roadmaps/v1.0-roadmap.md)、[agent-runtime.md](../agent-runtime.md)、[tools.md](../tools.md)、[mcp.md](../mcp.md)、[sandbox.md](../sandbox.md)、[skill.md](../skill.md)、[session.md](../session.md) | Medium：核心执行链路已可用，但运行治理和工具/沙箱增强仍需分批收敛 |
+| Agent runtime / tooling | 部分完成 | [runtime-tooling-roadmap.md](runtime-tooling-roadmap.md) | Medium：核心执行链路已可用，但运行治理和工具/沙箱增强仍需分批收敛 |
 | Intelligence | 基础完成 | [intelligence-roadmap.md](intelligence-roadmap.md) | Medium：默认测试和 deterministic evaluation 已有，真实 LLM / embedding / rerank / SaaS smoke 仍需准生产验证 |
 | Observability / Deployment | 基础完成 | [observability-deployment-roadmap.md](observability-deployment-roadmap.md) | High：Go/No-Go 依赖诊断包、备份恢复、真实环境 smoke 和人工验收报告 |
-| Platform / Governance | 部分完成 | [platform.md](../platform.md)、[governance.md](../governance.md)、[user-center.md](../user-center.md)、[connectors.md](../connectors.md) | Medium：admin CLI 和 public API 可用，review UI / policy UI / connector credential 管理仍是增强项 |
-| Channels / Automation | 部分完成 | [im-gateway.md](../im-gateway.md)、[scheduling.md](../scheduling.md) | Medium：Slack / Telegram / Webhook / scheduler 可用性需要结合真实部署和客户接入路径复核 |
+| Platform / Governance / Channels | 部分完成 | [platform-channel-roadmap.md](platform-channel-roadmap.md) | Medium：Slack / Telegram / Webhook / scheduler / connector 可用性和权限边界需要结合真实部署复核 |
 
 ## 状态定义
 
