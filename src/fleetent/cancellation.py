@@ -1,8 +1,0 @@
-"""Re-export shim: moved to fleetent.runtime.cancellation
-(restructure-runtime-package). No logic here — remove once all imports migrate.
-
-Note: monkeypatch module attributes on fleetent.runtime.cancellation, not on this shim —
-``import *`` copies names, so patching the shim has no effect.
-"""
-
-from fleetent.runtime.cancellation import *  # noqa: F401,F403

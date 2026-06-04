@@ -1,9 +1,7 @@
 import pytest
 
-from fleetent import (
-    tool_registry,
-    tools,  # noqa: F401 — registers tools as side effect
-)
+from fleetent import tools  # noqa: F401 — registers tools as side effect
+from fleetent.tools import registry as tool_registry
 
 
 def test_get_current_time_registered():
