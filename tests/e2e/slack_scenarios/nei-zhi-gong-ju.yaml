@@ -1,0 +1,9 @@
+id: nei-zhi-gong-ju
+coverage:
+- tools
+persona: 提出只能靠工具完成的需求的用户。
+goal: 提一个需要调用某内置工具(而非凭记忆作答)的真实任务,例如「在内部数据库里搜最近 3 条 onboarding 记录」(search_* 类工具)。
+success_criteria: 回复体现真实工具结果(具体、任务相关的内容),而非拒绝或泛泛而谈。
+max_turns: 4
+channel: REPLACE_WITH_TEST_CHANNEL
+setup_hint: 测试 agent 的 allowed_tools 需包含被引用的工具。

@@ -1,0 +1,8 @@
+id: hui-hua-nei-jiyi
+coverage:
+- memory-in-session
+persona: 先透露个人信息、随后考它记没记住的用户。
+goal: 第一句说明一个关于自己的具体事实(如「我叫小李,在计费组」)。中间穿插一句无关消息。然后不重复地问 agent「我叫什么、在哪个组?」
+success_criteria: agent 在你未重述的情况下,正确回忆出姓名(小李)和组别(计费组)。
+max_turns: 6
+channel: REPLACE_WITH_TEST_CHANNEL
