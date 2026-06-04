@@ -4,7 +4,7 @@ import dataclasses
 
 import pytest
 
-import fleetent.skill_audit as sa
+import fleetent.skills.audit as sa
 
 
 def test_clean_content_returns_no_hits():

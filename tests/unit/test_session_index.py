@@ -1,6 +1,6 @@
 import pytest
 
-import fleetent.session_index as session_index
+import fleetent.session.index as session_index
 
 
 @pytest.fixture(autouse=True)

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from fleetent.budget import BudgetChecker, BudgetConfig, BudgetUsage
 from fleetent.config import Settings
-from fleetent.termination import (
+from fleetent.runtime.budget import BudgetChecker, BudgetConfig, BudgetUsage
+from fleetent.runtime.termination import (
     ApprovalRejectedChecker,
     ConsecutiveFailuresChecker,
     LoopState,

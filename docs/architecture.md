@@ -18,8 +18,8 @@
 graph TD
     A["接入层\nserver.py · im_gateway · webhook_router"]
     B["编排层\nagent_loop · sub_agent"]
-    C["能力层\nmodel_router · tool_registry · intelligence.long_term_ctx\nintelligence.memory · intelligence.vector_store · intelligence.reflection\nskill_registry · context_mgr · integrations.mcp\nintegrations.sandbox · governance.permission_gate · cron_scheduler"]
-    D["横切基础能力\nobservability · config · database runtime\nuser_store · agent_store · im_user_store\nsession_mgr · schedule_store · governance.agent_policy · platform.admin_cli"]
+    C["能力层\nmodel · tool_registry · intelligence.long_term_ctx\nintelligence.memory · intelligence.vector_store · intelligence.reflection\nskills · context_mgr · integrations.mcp\nintegrations.sandbox · governance.permission_gate · cron_scheduler"]
+    D["横切基础能力\nobservability · config · database runtime\nuser_store · agent_store · im_user_store\nsession · schedule_store · governance.agent_policy · platform.admin_cli"]
 
     A --> B --> C --> D
 ```
@@ -38,8 +38,8 @@ fleetent 采用模块化单体：单进程、单仓库、统一部署，但代�
 ```
 src/fleetent/
   runtime/          ← loop(←agent_loop)、context(←context_mgr)、sub_agent、snapshot(←agent_runtime)、运行治理(termination/loop_detector/budget/cancellation/message_hygiene/error_classifier/tool_guardrails)
-  model/            ← router(←model_router)、provider_health、vision_client、image_gen_client、multimodal
-  tools/            ← registry(←tool_registry)、builtin_tools(←tools)、result_truncation、plugin_loader
+  model/            ← router(←model_router)、provider_health
+  tools/            ← registry(←tool_registry)、builtin_tools(←tools)、result_truncation、plugin_loader、vision_client、image_gen_client、multimodal
   skills/           ← registry(←skill_registry)、audit(←skill_audit)
   session/          ← manager(←session_mgr)、index(←session_index)
   governance/       ← agent_policy、permission_gate、agent 能力边界
@@ -74,10 +74,11 @@ src/fleetent/
 
 迁移顺序（blast radius 由小到大，各为独立 change/PR，详见 `openspec/changes/runtime-package-blueprint`）：
 `integrations/sandbox` → `session` → `skills` → `model` → `tools` → `runtime`(殿后)。
+**蓝图 7 包全部落地**（`runtime` / `model` / `tools` / `skills` / `session` + `integrations/{mcp,sandbox}`）；旧扁平路径仅留 re-export shim，后续单提「统一删 shim」收尾 change。
 
 ### 当前模块地图
 
-> 反映**迁移过程中的实时状态**(以上「目标 package map」为终态)。张洋负责的执行/工具模块多数仍平铺,按上述顺序逐包迁移中。
+> 反映**迁移过程中的实时状态**(以上「目标 package map」为终态)。张洋负责的执行/工具能力域已全部包化；旧扁平路径仅留 re-export shim。
 
 ```
 src/fleetent/
@@ -86,13 +87,10 @@ src/fleetent/
     normalizer.py    ← NormalizedMessage 统一路由 pipeline
     slack.py         ← slack-bolt Socket Mode 适配器
     telegram.py      ← python-telegram-bot polling 适配器
-  agent_loop.py      ← while tool-use 核心循环；run() + run_stream()
-  sub_agent.py       ← asyncio.gather 并行子 agent；最大深度 1
-  model_router.py    ← task_type → provider 配置 + fallback 链
-  tool_registry.py   ← @tool 注册、schema 构建、dispatch、访问控制
-  tools.py           ← 内置工具（import 即注册，副作用）
-  skill_registry.py  ← 扫描 skills/，关键词匹配，注入 system prompt
-  context_mgr.py     ← in-session token 压缩
+  runtime/           ← loop(←agent_loop)：while tool-use 核心循环 run() / run_stream()；context(←context_mgr)：in-session token 压缩；snapshot(←agent_runtime)：agent 快照 load_active；sub_agent：asyncio.gather 并行子 agent（最大深度 1）；运行治理 termination / loop_detector / budget / layered_budget / cancellation / message_hygiene / error_classifier / tool_guardrails / sub_agent_lifecycle（已包化；旧 agent_loop.py / context_mgr.py / agent_runtime.py 等 13 个为 re-export shim）
+  model/             ← router(←model_router)：task_type → provider 配置 + fallback 链；provider_health：熔断缓存（已包化；旧 model_router.py / provider_health.py 为 re-export shim）
+  tools/             ← registry(←tool_registry)：@tool 注册、schema 构建、dispatch、访问控制；builtin_tools(←tools)：内置工具（import fleetent.tools 即注册，副作用经包 __init__ 保留）；result_truncation、plugin_loader、vision_client、image_gen_client、multimodal（已包化；旧 tool_registry.py 等 6 个为 re-export shim，tools.py 与包同名已删除）
+  skills/            ← registry(←skill_registry)：扫描 skills/、关键词匹配、注入 system prompt；audit(←skill_audit)：静态注入审计（已包化；旧 skill_registry.py / skill_audit.py 为 re-export shim）
   intelligence/
     memory/         ← 结构化 User Memory + Shared Memory：提取、维护、SQLite source of truth、vector_store 索引
     knowledge_base/ ← 企业文档知识库：解析、导入、local / Google Drive / Confluence sync、hybrid / graph / rerank / planner
@@ -110,7 +108,7 @@ src/fleetent/
   user_store.py      ← SQLite 用户/API key 管理
   agent_store.py     ← SQLite：agent 定义 + 用户绑定 + channel 绑定
   im_user_store.py   ← (platform, platform_user_id) → 内部 User；allowlist
-  session_mgr.py     ← JSON session 持久化；per-session asyncio.Lock
+  session/           ← manager(←session_mgr)：JSON session 持久化、per-session asyncio.Lock；index(←session_index)：会话元数据索引（已包化；旧 session_mgr.py / session_index.py 为 re-export shim）
   schedule_store.py  ← SQLite：定时任务定义与状态持久化
   observability/     ← trace、log、usage、diagnostics
   config.py          ← pydantic-settings；加载 .env + config/settings.yaml；读取 config/mcp.servers.yaml

@@ -1,6 +1,6 @@
 import pytest
 
-from fleetent import tool_registry
+from fleetent.tools import registry as tool_registry
 
 
 @pytest.fixture(autouse=True)
@@ -148,7 +148,7 @@ def test_schema_type_mapping():
 
 
 def test_dispatch_injects_token_into_opt_in_tool():
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     received: dict[str, object] = {}
 
@@ -165,7 +165,7 @@ def test_dispatch_injects_token_into_opt_in_tool():
 
 
 def test_dispatch_does_not_inject_token_into_non_opt_in_tool():
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     @tool_registry.tool
     def plain_tool(x: str) -> str:
@@ -220,7 +220,7 @@ def test_schema_unaffected_for_tool_without_token():
 
 
 def test_dispatch_injects_tool_context_into_opt_in_tool():
-    from fleetent.tool_registry import ToolContext
+    from fleetent.tools.registry import ToolContext
 
     received: dict[str, object] = {}
 
@@ -237,7 +237,7 @@ def test_dispatch_injects_tool_context_into_opt_in_tool():
 
 
 def test_dispatch_does_not_inject_context_into_non_opt_in_tool():
-    from fleetent.tool_registry import ToolContext
+    from fleetent.tools.registry import ToolContext
 
     @tool_registry.tool
     def plain_ctx_tool(x: str) -> str:

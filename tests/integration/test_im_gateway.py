@@ -7,7 +7,7 @@ from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
 @pytest.fixture
 def mock_session_mgr(monkeypatch):
-    import fleetent.session_mgr as sm
+    import fleetent.session.manager as sm
 
     monkeypatch.setattr(sm, "load", AsyncMock(return_value=[]))
     monkeypatch.setattr(sm, "load_meta", AsyncMock(return_value={}))
@@ -17,7 +17,7 @@ def mock_session_mgr(monkeypatch):
 
 @pytest.fixture
 def mock_agent_loop(monkeypatch):
-    import fleetent.agent_loop as al
+    import fleetent.runtime.loop as al
 
     monkeypatch.setattr(al, "run", AsyncMock(return_value="agent response"))
     return al
@@ -27,7 +27,7 @@ def mock_agent_loop(monkeypatch):
 def mock_memory_skill(monkeypatch):
     import fleetent.im_gateway.normalizer as norm
     import fleetent.im_user_store as ius
-    import fleetent.skill_registry as sr
+    import fleetent.skills.registry as sr
 
     monkeypatch.setattr(sr, "match", lambda text: None)
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)

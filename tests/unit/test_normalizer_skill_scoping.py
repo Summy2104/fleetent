@@ -3,13 +3,24 @@ the bound agent's allowed_skills (empty/None → no narrowing)."""
 
 from unittest.mock import AsyncMock
 
-import fleetent.agent_store as agent_store
+import yaml
+
+import fleetent.agent_config as agent_config
 import fleetent.im_user_store as im_user_store
-import fleetent.skill_registry as sr
+import fleetent.skills as sr
 import fleetent.user_store as user_store
 from fleetent.im_gateway import normalizer
 from fleetent.platform.im_gateway_management import im_channel_allowlist as acl
 from fleetent.platform.im_gateway_management import im_connector_store as ics
+
+
+def _write_agent(root, name, **fields):
+    doc = {"name": name, "version": 1}
+    doc.update(fields)
+    d = root / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    agent_config.scan(root)
 
 
 def _setup_db(tmp_path, monkeypatch):
@@ -50,8 +61,8 @@ def _msg(replies):
 
 async def _common_patches(monkeypatch, captured):
     monkeypatch.setattr(im_user_store, "check_allowed_by_user_id", lambda _uid: True)
-    import fleetent.agent_loop as agent_loop
     import fleetent.integrations.sandbox.enablement as se
+    import fleetent.runtime.loop as agent_loop
 
     monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.OFF))
 
@@ -72,8 +83,14 @@ async def test_route_narrows_catalog_to_agent_allowed_skills(tmp_path, monkeypat
     captured: dict = {}
     await _common_patches(monkeypatch, captured)
 
-    agent = agent_store.create_agent("ss-bot", "Sys.", ["shell"], allowed_skills=["weather"])
-    agent_store.assign_channel("slack", "C-SS", agent.id)
+    _write_agent(
+        tmp_path / "agents",
+        "ss-bot",
+        system_prompt="Sys.",
+        allowed_tools=["shell"],
+        allowed_skills=["weather"],
+        bindings={"channels": ["slack:C-SS"]},
+    )
 
     replies: list[str] = []
     await normalizer.route(_msg(replies))
@@ -85,6 +102,7 @@ async def test_route_no_agent_does_not_narrow(tmp_path, monkeypatch):
     _setup_db(tmp_path, monkeypatch)
     captured: dict = {}
     await _common_patches(monkeypatch, captured)
+    agent_config.scan(tmp_path / "empty-agents")  # no agents → no narrowing
 
     replies: list[str] = []
     await normalizer.route(_msg(replies))

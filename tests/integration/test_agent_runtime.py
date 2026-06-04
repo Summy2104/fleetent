@@ -1,14 +1,21 @@
-"""Integration tests for agent_runtime snapshot loading and request resolution."""
+"""Integration tests for agent_runtime snapshot loading and request resolution.
+
+Runtime resolution (``load_active``, ``resolve_agent_for_request``, ``connector_scope``,
+``resolve_mcp_servers``) is file-sourced (file-driven-agent-config). Version-specific
+loaders (``load_version``/``load_version_by_name``) stay DB-backed (authoring side).
+"""
 
 import dataclasses
 from pathlib import Path
 
 import pytest
+import yaml
 from alembic import command
 from alembic.config import Config
 
-import fleetent.agent_runtime as agent_runtime
+import fleetent.agent_config as agent_config
 import fleetent.agent_store as agent_store
+import fleetent.runtime.snapshot as agent_runtime
 
 
 def apply_migrations(db_path: Path) -> None:
@@ -27,28 +34,47 @@ def db(tmp_path, monkeypatch):
     return db_path
 
 
-def test_snapshot_is_frozen(db):
-    agent_store.create_agent("a", "P", ["shell"])
+@pytest.fixture
+def agents(tmp_path):
+    """A file agents dir wired as the current index; returns a writer that rescans."""
+    root = tmp_path / "agents"
+    root.mkdir()
+
+    def write(name: str, **fields) -> None:
+        doc = {"name": name, "version": 1}
+        doc.update(fields)
+        agent_dir = root / name
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        (agent_dir / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+        agent_config.scan(root)
+
+    return write
+
+
+def test_snapshot_is_frozen(agents):
+    agents("a", system_prompt="P", allowed_tools=["shell"])
     snap = agent_runtime.load_active("a")
     assert snap is not None
     with pytest.raises(dataclasses.FrozenInstanceError):
         snap.system_prompt = "mutated"  # type: ignore[misc]
 
 
-def test_load_active_unpacks_version_fields(db):
-    agent_store.create_agent(
+def test_load_active_unpacks_file_fields(agents):
+    agents(
         "analyst",
-        "You analyze.",
-        ["shell", "github__*"],
+        version=3,
+        system_prompt="You analyze.",
+        allowed_tools=["shell", "github__*"],
         skills_dir="agents/analyst/skills",
-        mcp_server_ids=["github"],
+        mcp_servers=[{"id": "github", "url": "https://gh"}],
         model_overrides={"default": {"model": "x"}},
         memory_namespace="analyst",
     )
     snap = agent_runtime.load_active("analyst")
     assert snap is not None
     assert snap.name == "analyst"
-    assert snap.version == 1
+    assert snap.agent_id == "analyst"  # identity is the name (string)
+    assert snap.version == 3
     assert snap.system_prompt == "You analyze."
     assert snap.allowed_tools == ["shell", "github__*"]
     assert snap.skills_dir == "agents/analyst/skills"
@@ -57,17 +83,20 @@ def test_load_active_unpacks_version_fields(db):
     assert snap.memory_namespace == "analyst"
 
 
-def test_load_active_missing_returns_none(db):
+def test_load_active_missing_returns_none(agents):
+    agents("a", system_prompt="P", allowed_tools=["shell"])
     assert agent_runtime.load_active("nonexistent") is None
 
 
-def test_load_active_reflects_active_version(db):
-    agent_store.create_agent("a", "v1 prompt", ["shell"])
-    agent_store.create_version("a", system_prompt="v2 prompt")
+def test_load_active_reflects_file_version(agents):
+    agents("a", version=2, system_prompt="v2 prompt", allowed_tools=["shell"])
     snap = agent_runtime.load_active("a")
     assert snap is not None
     assert snap.system_prompt == "v2 prompt"
     assert snap.version == 2
+
+
+# --- version-specific loaders stay DB-backed (authoring side) ---
 
 
 def test_load_version_by_name_returns_specific(db):
@@ -90,52 +119,44 @@ def test_load_version_by_id(db):
     assert agent_runtime.load_version(999999) is None
 
 
-# --- resolve_agent_for_request: channel > user > default ---
+# --- resolve_agent_for_request: channel > user > default (file index) ---
 
 
-def test_resolve_prefers_channel_over_user_and_default(db, monkeypatch):
-    chan = agent_store.create_agent("chan-bot", "channel", ["shell"])
-    user_agent = agent_store.create_agent("user-bot", "user", ["shell"])
-    agent_store.create_agent("default-bot", "default", ["shell"])
-    agent_store.assign_channel("slack", "C1", chan.id)
-    agent_store.assign_user("u1", user_agent.id)
-    monkeypatch.setattr(agent_store, "_get_default_agent_name", lambda: "default-bot")
-
+def test_resolve_prefers_channel_over_user_and_default(agents):
+    agents("chan-bot", system_prompt="channel", bindings={"channels": ["slack:C1"]})
+    agents("user-bot", system_prompt="user", bindings={"users": ["u1"]})
+    agents("default-bot", system_prompt="default", bindings={"default": True})
     snap = agent_runtime.resolve_agent_for_request("slack", "C1", "u1")
     assert snap is not None and snap.name == "chan-bot"
 
 
-def test_resolve_falls_back_to_user_when_no_channel(db, monkeypatch):
-    user_agent = agent_store.create_agent("user-bot", "user", ["shell"])
-    agent_store.create_agent("default-bot", "default", ["shell"])
-    agent_store.assign_user("u1", user_agent.id)
-    monkeypatch.setattr(agent_store, "_get_default_agent_name", lambda: "default-bot")
-
+def test_resolve_falls_back_to_user_when_no_channel(agents):
+    agents("user-bot", system_prompt="user", bindings={"users": ["u1"]})
+    agents("default-bot", system_prompt="default", bindings={"default": True})
     snap = agent_runtime.resolve_agent_for_request("slack", "C-none", "u1")
     assert snap is not None and snap.name == "user-bot"
 
 
-def test_resolve_falls_back_to_default_when_no_channel_or_user(db, monkeypatch):
-    agent_store.create_agent("default-bot", "default", ["shell"])
-    monkeypatch.setattr(agent_store, "_get_default_agent_name", lambda: "default-bot")
-
+def test_resolve_falls_back_to_default_when_no_channel_or_user(agents):
+    agents("default-bot", system_prompt="default", bindings={"default": True})
     snap = agent_runtime.resolve_agent_for_request("slack", "C-none", "u-none")
     assert snap is not None and snap.name == "default-bot"
 
 
-def test_resolve_returns_none_when_nothing_matches(db, monkeypatch):
-    monkeypatch.setattr(agent_store, "_get_default_agent_name", lambda: None)
+def test_resolve_returns_none_when_nothing_matches(agents):
+    agents("lonely", system_prompt="P")  # no bindings, no default
     assert agent_runtime.resolve_agent_for_request("slack", "C-none", "u-none") is None
 
 
-# --- effective MCP server set + connector scope ---
+# --- effective MCP server set + connector scope (file inline, zero DB) ---
 
 
-def test_resolve_mcp_servers_overlays_agent_owned_on_defaults(db):
-    from fleetent.platform.connector_management import agent_mcp_server_store
-
-    a = agent_store.create_agent("a", "P", ["shell"])
-    agent_mcp_server_store.add_mcp_server(a.id, "github", transport="http", url="https://agent-gh")
+def test_resolve_mcp_servers_overlays_inline_on_defaults(agents):
+    agents(
+        "a",
+        system_prompt="P",
+        mcp_servers=[{"id": "github", "transport": "http", "url": "https://agent-gh"}],
+    )
     snap = agent_runtime.load_active("a")
     assert snap is not None
     defaults = [
@@ -148,14 +169,14 @@ def test_resolve_mcp_servers_overlays_agent_owned_on_defaults(db):
     assert resolved["slack"]["url"] == "https://default-slack"
 
 
-def test_connector_scope_is_agent_id(db):
-    a = agent_store.create_agent("a", "P", ["shell"])
+def test_connector_scope_is_agent_name(agents):
+    agents("a", system_prompt="P")
     snap = agent_runtime.load_active("a")
     assert snap is not None
-    assert agent_runtime.connector_scope(snap) == a.id
+    assert agent_runtime.connector_scope(snap) == "a"
 
 
-def test_filter_tool_schemas_visibility_unchanged(db):
+def test_filter_tool_schemas_visibility_unchanged(agents):
     schemas = [
         {"function": {"name": "github__x"}},
         {"function": {"name": "jira__y"}},

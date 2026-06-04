@@ -1,4 +1,9 @@
-## ADDED Requirements
+# permission-gate Specification
+
+## Purpose
+人在回路（human-in-the-loop）的工具审批门。被标注 `risk_level` 的工具在执行前暂停，先经访问控制（`allowed_tools` 白名单）校验，再按风险等级触发审批：medium 向请求者本人发确认、high 向预配置审批人发审批。审批通过 `asyncio.Event` 阻塞 agent 执行，等待 IM 回调放行/拒绝或超时自动拒绝；全过程的请求与结果落 `approvals` 表，留可审计的轨迹并跨重启存活。
+
+## Requirements
 
 ### Requirement: Access control at dispatch
 The system SHALL check `agent.allowed_tools` before executing any tool, as the first gate in `tool_registry.dispatch()`.

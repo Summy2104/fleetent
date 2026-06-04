@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from openai import APIStatusError, RateLimitError
 
-import fleetent.agent_loop as al
-from fleetent.model_router import RouteConfig
-from fleetent.termination import LoopState, StopReason
+import fleetent.runtime.loop as al
+from fleetent.model.router import RouteConfig
+from fleetent.runtime.termination import LoopState, StopReason
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -238,7 +238,7 @@ def test_build_controller_empty_history_yields_only_active_reasons():
     # every state flag tripped only active reasons can fire (priority unchanged).
     # AR2: the step dimension is now carried by the budget checker, so the step
     # limit surfaces as budget_exceeded rather than max_turns.
-    from fleetent.budget import BudgetConfig, BudgetUsage
+    from fleetent.runtime.budget import BudgetConfig, BudgetUsage
 
     config = BudgetConfig(max_turns=1, max_tokens=-1)
     usage = BudgetUsage(turns=99)
@@ -298,7 +298,7 @@ async def test_run_stream_logs_stop_reason_budget_exceeded_on_turns(mock_client)
 
 
 async def test_run_cancelled_stops_before_llm_call(mock_client):
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("hi"))
     token = CancelToken()
@@ -310,7 +310,7 @@ async def test_run_cancelled_stops_before_llm_call(mock_client):
 
 
 async def test_run_cancelled_logs_stop_reason_cancelled(mock_client):
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     captured: dict = {}
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("hi"))
@@ -330,7 +330,7 @@ async def test_run_default_no_token_behaves_normally(mock_client):
 
 
 async def test_run_threads_token_to_dispatch(mock_client):
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     seen: dict = {}
 
@@ -356,7 +356,7 @@ async def test_run_threads_token_to_dispatch(mock_client):
 
 
 async def test_run_stream_cancelled_stops_before_llm_and_finishes_clean(mock_client):
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     mock_client.chat.completions.create = AsyncMock(
         side_effect=lambda *a, **k: _looping_tool_stream()
@@ -370,7 +370,7 @@ async def test_run_stream_cancelled_stops_before_llm_and_finishes_clean(mock_cli
 
 
 async def test_run_stream_cancelled_logs_stop_reason(mock_client):
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     captured: dict = {}
     mock_client.chat.completions.create = AsyncMock(
@@ -534,7 +534,7 @@ async def test_run_stream_stops_on_consecutive_failures(mock_client):
 
 async def test_run_sub_agent_tool_intercepted_and_executed(mock_client):
     """sub_agent tool call is intercepted by agent_loop, not passed to dispatch."""
-    from fleetent.sub_agent import SubAgentResult
+    from fleetent.runtime.sub_agent import SubAgentResult
 
     tasks_json = '[{"name": "t1", "prompt": "do it"}]'
     mock_client.chat.completions.create = AsyncMock(
@@ -567,7 +567,7 @@ async def test_run_sub_agent_result_formatted_in_tool_message(mock_client):
     """Sub-agent results are formatted as [name] result lines in the tool message."""
     import json as _json
 
-    from fleetent.sub_agent import SubAgentResult
+    from fleetent.runtime.sub_agent import SubAgentResult
 
     tasks = [{"name": "fetch", "prompt": "get data"}]
     args_json = _json.dumps({"tasks": _json.dumps(tasks)})
@@ -1086,7 +1086,7 @@ async def test_run_uses_default_route_for_text(mock_client, monkeypatch):
 
 
 async def test_run_raises_when_image_but_no_vision_route(mock_client, monkeypatch):
-    from fleetent import model_router
+    from fleetent.model import router as model_router
 
     routes_no_vision = {k: v for k, v in model_router.ROUTES.items() if k != "vision"}
     monkeypatch.setattr(model_router, "ROUTES", routes_no_vision)
@@ -1099,7 +1099,7 @@ async def test_run_raises_when_image_but_no_vision_route(mock_client, monkeypatc
 
 async def test_image_message_passes_sanitize(mock_client):
     # AR6 coordination: list-type content must survive sanitize() without error.
-    from fleetent.message_hygiene import sanitize
+    from fleetent.runtime.message_hygiene import sanitize
 
     messages = [{"role": "user", "content": [{"type": "text", "text": "hi"}, _IMG_BLOCK]}]
     clean, report = sanitize(messages)
@@ -1160,7 +1160,7 @@ async def test_run_stream_routes_to_vision_with_images(monkeypatch):
 
 
 async def test_run_stream_raises_when_image_but_no_vision_route(mock_client, monkeypatch):
-    from fleetent import model_router
+    from fleetent.model import router as model_router
 
     routes_no_vision = {k: v for k, v in model_router.ROUTES.items() if k != "vision"}
     monkeypatch.setattr(model_router, "ROUTES", routes_no_vision)
@@ -1203,7 +1203,7 @@ async def test_run_force_model_none_passes_no_override(mock_client, monkeypatch)
 
 
 async def test_run_force_model_passes_override(mock_client, monkeypatch):
-    from fleetent.model_router import RouteOverride
+    from fleetent.model.router import RouteOverride
 
     calls: list[dict] = []
     client = _route_spy(monkeypatch, calls)
@@ -1251,7 +1251,7 @@ async def test_run_stream_force_model_none_passes_no_override(mock_client, monke
 
 
 async def test_run_stream_force_model_passes_override(mock_client, monkeypatch):
-    from fleetent.model_router import RouteOverride
+    from fleetent.model.router import RouteOverride
 
     calls: list[dict] = []
     client = _route_spy(monkeypatch, calls)
@@ -1294,7 +1294,7 @@ class _FakeClock:
 
 
 def _install_health_cache(monkeypatch, *, failure_threshold=1, cooldown_seconds=60, clock=None):
-    import fleetent.provider_health as ph
+    import fleetent.model.provider_health as ph
 
     clock = clock or _FakeClock()
     cache = ph.ProviderHealthCache(
@@ -1718,7 +1718,7 @@ async def test_run_stream_injected_skill_survives_concurrent_reload(
     request's private system prompt; an atomic index swap mid-flight (D2/D4)
     cannot rewrite that already-built prompt.
     """
-    import fleetent.skill_registry as sr
+    import fleetent.skills.registry as sr
 
     skill_dir = tmp_path / "skills" / "deploy"
     skill_dir.mkdir(parents=True)
@@ -2280,7 +2280,7 @@ def test_run_sync_loads_plugins(monkeypatch):
     from unittest.mock import AsyncMock, MagicMock
 
     import fleetent.integrations.sandbox.enablement as se
-    import fleetent.plugin_loader as pl
+    import fleetent.tools.plugin_loader as pl
 
     async def fake_run(messages, **kw):
         return "done"
@@ -2299,6 +2299,7 @@ def test_run_sync_loads_plugins(monkeypatch):
 def test_run_sync_passes_effective_sandbox_mode(monkeypatch):
     from unittest.mock import AsyncMock
 
+    import fleetent.integrations.sandbox as sb
     import fleetent.integrations.sandbox.enablement as se
 
     captured: dict = {}
@@ -2311,7 +2312,9 @@ def test_run_sync_passes_effective_sandbox_mode(monkeypatch):
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "")
     monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **kw: None)
     monkeypatch.setattr(al, "run", fake_run)
-    monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.OFF))
+    # run_sync does a lazy `from fleetent.integrations.sandbox import get_effective_mode`,
+    # which binds to the package re-export — patch there, not on the enablement submodule.
+    monkeypatch.setattr(sb, "get_effective_mode", AsyncMock(return_value=se.Mode.OFF))
     al.run_sync("hi")
     assert captured.get("sandbox_mode") is se.Mode.OFF
 
@@ -2335,7 +2338,7 @@ async def test_safe_dispatch_forwards_user_id():
 
 
 async def test_run_truncates_large_tool_result(mock_client, monkeypatch):
-    import fleetent.tool_result_truncation as trt
+    import fleetent.tools.result_truncation as trt
 
     seen: list = []
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: seen.append(list(msgs)) or msgs)
@@ -2354,7 +2357,7 @@ async def test_run_truncates_large_tool_result(mock_client, monkeypatch):
 
 
 async def test_run_self_truncating_tool_exempt(mock_client, monkeypatch):
-    import fleetent.tool_result_truncation as trt
+    import fleetent.tools.result_truncation as trt
 
     seen: list = []
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: seen.append(list(msgs)) or msgs)
@@ -2371,7 +2374,7 @@ async def test_run_self_truncating_tool_exempt(mock_client, monkeypatch):
 
 
 async def test_run_stream_truncates_messages_but_sse_keeps_original(mock_client, monkeypatch):
-    import fleetent.tool_result_truncation as trt
+    import fleetent.tools.result_truncation as trt
 
     seen: list = []
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: seen.append(list(msgs)) or msgs)
@@ -2391,7 +2394,7 @@ async def test_run_stream_truncates_messages_but_sse_keeps_original(mock_client,
 
 
 async def test_run_guardrail_short_circuits_then_stops(mock_client, monkeypatch):
-    from fleetent.termination import StopReason
+    from fleetent.runtime.termination import StopReason
 
     captured: dict = {}
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
@@ -2445,8 +2448,8 @@ async def test_run_guardrail_injects_placeholder_tool_result(mock_client, monkey
 
 
 async def test_run_loads_and_saves_flap_state(mock_client, monkeypatch, tmp_path):
-    import fleetent.context_mgr as cm
-    from fleetent.context_mgr import AntiFlapState
+    import fleetent.runtime.context as cm
+    from fleetent.runtime.context import AntiFlapState
 
     monkeypatch.setattr(cm, "DB_PATH", tmp_path / "users.db")
     cm.save_anti_flap_state("sess-flap", AntiFlapState(turns_since_last_compress=7))
@@ -2468,7 +2471,7 @@ async def test_run_loads_and_saves_flap_state(mock_client, monkeypatch, tmp_path
 
 
 async def test_run_without_session_id_does_not_touch_flap_db(mock_client, monkeypatch, tmp_path):
-    import fleetent.context_mgr as cm
+    import fleetent.runtime.context as cm
 
     monkeypatch.setattr(cm, "DB_PATH", tmp_path / "users.db")
     called = {"apply": 0}
@@ -2485,8 +2488,8 @@ async def test_run_without_session_id_does_not_touch_flap_db(mock_client, monkey
 
 
 async def test_run_layered_budget_trips_and_logs_scope(mock_client, monkeypatch, tmp_path):
-    import fleetent.layered_budget as lbud
-    from fleetent.termination import StopReason
+    import fleetent.runtime.layered_budget as lbud
+    from fleetent.runtime.termination import StopReason
 
     monkeypatch.setattr(lbud, "DB_PATH", tmp_path / "users.db")
     # Tiny user-token cap → second checkpoint trips via the layered checker.
@@ -2679,7 +2682,7 @@ async def test_run_n2_sequence_passes_sanitize(mock_client):
 
 
 async def test_run_parallel_batch_shares_run_level_token(mock_client):
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     seen_parents: list = []
     mock_client.chat.completions.create = AsyncMock(
@@ -2700,7 +2703,7 @@ async def test_run_parallel_batch_shares_run_level_token(mock_client):
 async def test_run_cancel_during_batch_still_backfills_every_tool_call(mock_client):
     # Token cancelled mid-batch: each tool_call must still get exactly one tool
     # message (result or normalized failure), so no half tool-pair leaks.
-    from fleetent.cancellation import CancelToken
+    from fleetent.runtime.cancellation import CancelToken
 
     captured: dict = {}
     mock_client.chat.completions.create = AsyncMock(
@@ -3006,7 +3009,7 @@ async def test_run_stream_n_tool_calls_match_n_tool_results(mock_client):
 async def test_run_sub_agent_as_one_batch_slot_alongside_other_tool(mock_client):
     import json as _json
 
-    from fleetent.sub_agent import SubAgentResult
+    from fleetent.runtime.sub_agent import SubAgentResult
 
     tasks = [{"name": "t1", "prompt": "do"}]
     sub_args = _json.dumps({"tasks": _json.dumps(tasks)})
@@ -3060,7 +3063,7 @@ async def test_run_sub_agent_excluded_for_child_agent_depth_guard(mock_client):
 
 async def test_run_stops_on_bound_strict_unavailable(mock_client, monkeypatch):
     import fleetent.integrations.mcp.client as mc
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
     from fleetent.integrations.mcp.client import HealthState, McpServerConfig
 
     st = McpServerConfig(id="st", degrade_mode="strict")
@@ -3077,7 +3080,7 @@ async def test_run_stops_on_bound_strict_unavailable(mock_client, monkeypatch):
 
 async def test_run_continues_when_strict_not_bound(mock_client, monkeypatch):
     import fleetent.integrations.mcp.client as mc
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
     from fleetent.integrations.mcp.client import HealthState, McpServerConfig
 
     st = McpServerConfig(id="st", degrade_mode="strict")

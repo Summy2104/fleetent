@@ -11,13 +11,13 @@ from fleetent.config import Settings
 
 
 def test_generated_dir_constant_exists():
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     assert isinstance(tl.GENERATED_DIR, Path)
 
 
 def test_generated_dir_monkeypatchable(monkeypatch, tmp_path):
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
     assert tmp_path / "gen" == tl.GENERATED_DIR
@@ -37,7 +37,7 @@ def _mock_async_openai(image_obj):
 
 
 def test_generate_decodes_b64_json(monkeypatch):
-    import fleetent.image_gen_client as igc
+    import fleetent.tools.image_gen_client as igc
 
     b64 = base64.b64encode(PNG_BYTES).decode("ascii")
     client = _mock_async_openai(SimpleNamespace(b64_json=b64, url=None))
@@ -54,7 +54,7 @@ def test_generate_decodes_b64_json(monkeypatch):
 
 
 def test_generate_requires_configured_url():
-    import fleetent.image_gen_client as igc
+    import fleetent.tools.image_gen_client as igc
 
     settings = Settings(anthropic_api_key="k", image_gen_url="")
     with pytest.raises(igc.ImageGenError):
@@ -62,7 +62,7 @@ def test_generate_requires_configured_url():
 
 
 def test_generate_endpoint_error_raises_imagegenerror(monkeypatch):
-    import fleetent.image_gen_client as igc
+    import fleetent.tools.image_gen_client as igc
 
     client = MagicMock()
     client.images.generate = AsyncMock(side_effect=RuntimeError("boom"))
@@ -74,7 +74,7 @@ def test_generate_endpoint_error_raises_imagegenerror(monkeypatch):
 
 
 def test_generate_empty_data_raises(monkeypatch):
-    import fleetent.image_gen_client as igc
+    import fleetent.tools.image_gen_client as igc
 
     client = MagicMock()
     client.images.generate = AsyncMock(return_value=SimpleNamespace(data=[]))
@@ -86,7 +86,7 @@ def test_generate_empty_data_raises(monkeypatch):
 
 
 def test_generate_fetches_url_when_no_b64(monkeypatch):
-    import fleetent.image_gen_client as igc
+    import fleetent.tools.image_gen_client as igc
 
     client = _mock_async_openai(
         SimpleNamespace(b64_json=None, url="http://localhost:9000/img/abc.png")
@@ -108,7 +108,7 @@ def test_generate_fetches_url_when_no_b64(monkeypatch):
 
 
 def test_save_image_writes_to_generated_dir(monkeypatch, tmp_path):
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
     ref = tl._save_image(PNG_BYTES)
@@ -121,7 +121,7 @@ def test_save_image_writes_to_generated_dir(monkeypatch, tmp_path):
 
 
 def test_save_image_uses_uuid_png_name(monkeypatch, tmp_path):
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
     tl._save_image(PNG_BYTES)
@@ -134,7 +134,7 @@ def test_save_image_uses_uuid_png_name(monkeypatch, tmp_path):
 
 
 def test_save_image_reference_has_no_base64(monkeypatch, tmp_path):
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
     b64 = base64.b64encode(PNG_BYTES).decode("ascii")
@@ -146,23 +146,23 @@ def test_save_image_reference_has_no_base64(monkeypatch, tmp_path):
 
 
 def test_generate_image_registered_low_risk():
-    import fleetent.tools as tl  # noqa: F401 — registers tools
-    from fleetent import tool_registry
+    import fleetent.tools.builtin_tools as tl  # noqa: F401 — registers tools
+    from fleetent.tools import registry as tool_registry
 
     assert "generate_image" in tool_registry._registry
     assert tool_registry.get_risk_level("generate_image") == "low"
 
 
 def test_generate_image_in_schemas():
-    import fleetent.tools as tl  # noqa: F401
-    from fleetent import tool_registry
+    import fleetent.tools.builtin_tools as tl  # noqa: F401
+    from fleetent.tools import registry as tool_registry
 
     names = [s["function"]["name"] for s in tool_registry.get_schemas()]
     assert "generate_image" in names
 
 
 def test_generate_image_success_returns_reference(monkeypatch, tmp_path):
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
 
@@ -180,7 +180,7 @@ def test_generate_image_success_returns_reference(monkeypatch, tmp_path):
 
 
 def test_generate_image_result_has_no_base64(monkeypatch, tmp_path):
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
 
@@ -195,8 +195,8 @@ def test_generate_image_result_has_no_base64(monkeypatch, tmp_path):
 
 
 def test_generate_image_failure_normalized_not_raised(monkeypatch, tmp_path):
-    import fleetent.tools as tl
-    from fleetent.image_gen_client import ImageGenError
+    import fleetent.tools.builtin_tools as tl
+    from fleetent.tools.image_gen_client import ImageGenError
 
     monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
 
@@ -220,7 +220,7 @@ def test_tool_result_message_in_trace_has_no_base64(monkeypatch, tmp_path):
     leak base64 — the result is a short reference, so this is a regression guard."""
     import json
 
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent import eval_logger
 
     monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")

@@ -1,7 +1,7 @@
 """Tests for tool-result truncation at the message write-back boundary (T4)."""
 
-import fleetent.tool_registry as tr
-import fleetent.tool_result_truncation as trt
+import fleetent.tools.registry as tr
+import fleetent.tools.result_truncation as trt
 
 
 def _nbytes(s: str) -> int:
