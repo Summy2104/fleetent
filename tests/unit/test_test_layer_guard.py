@@ -70,3 +70,123 @@ def test_guard_allows_pure_unit_fixtures(tmp_path):
     )
 
     assert scan_unit_tests(unit_root) == []
+
+
+def test_guard_reports_real_database_unit_dependencies(tmp_path):
+    from scripts.check_test_layers import scan_unit_tests
+
+    unit_root = tmp_path / "tests" / "unit"
+    _write(
+        unit_root / "test_bad_db_patterns.py",
+        "\n".join(
+            [
+                "import sqlite3",
+                "from fleetent import user_store",
+                "from fleetent.infrastructure.database import create_database",
+                "",
+                "def test_store_uses_tmp_sqlite(tmp_path, monkeypatch):",
+                "    monkeypatch.setattr(user_store, 'DB_PATH', tmp_path / 'users.db')",
+                "    user_store._init_db()",
+                "    with sqlite3.connect(tmp_path / 'users.db') as conn:",
+                "        assert conn.execute('select 1').fetchone()[0] == 1",
+                "",
+                "def test_runtime_sqlite_url(monkeypatch):",
+                "    monkeypatch.setenv('DATABASE_URL', 'sqlite:///tmp/fleetent.db')",
+                "    create_database('sqlite:///tmp/fleetent.db')",
+            ]
+        ),
+    )
+
+    violations = scan_unit_tests(unit_root)
+
+    diagnostics = {(violation.line, violation.rule) for violation in violations}
+    assert diagnostics == {
+        (1, "sqlite-import"),
+        (6, "production-db-path-mutation"),
+        (7, "store-init-db-call"),
+        (8, "sqlite-connect-call"),
+        (12, "sqlite-database-url"),
+        (13, "sqlite-create-database-call"),
+    }
+    assert all(violation.reason for violation in violations)
+
+
+def test_guard_allows_read_only_db_symbol_compatibility_assertions(tmp_path):
+    from scripts.check_test_layers import scan_unit_tests
+
+    unit_root = tmp_path / "tests" / "unit"
+    _write(
+        unit_root / "test_compat.py",
+        "\n".join(
+            [
+                "def test_db_path_constant_is_reexported():",
+                "    from fleetent.platform import im_gateway_management as im",
+                "    assert hasattr(im, 'DB_PATH')",
+                "",
+                "def test_db_path_monkeypatchability_is_compat_only(tmp_path, monkeypatch):",
+                "    from fleetent.platform.im_gateway_management import identity",
+                "    monkeypatch.setattr(identity, 'DB_PATH', tmp_path / 'users.db')",
+                "    assert identity.DB_PATH == tmp_path / 'users.db'",
+                "",
+                "def test_legacy_shim_reexports_same_object():",
+                "    from fleetent.platform.im_gateway_management import connector_store",
+                "    from fleetent.platform.im_gateway_management import im_connector_store",
+                "    assert im_connector_store.get_connector is connector_store.get_connector",
+            ]
+        ),
+    )
+
+    assert scan_unit_tests(unit_root) == []
+
+
+def test_guard_does_not_allowlist_real_database_dependencies(tmp_path):
+    from scripts.check_test_layers import scan_unit_tests
+
+    unit_root = tmp_path / "tests" / "unit"
+    _write(
+        unit_root / "test_allowlisted_db.py",
+        "\n".join(
+            [
+                "import sqlite3",
+                "",
+                "def test_db(tmp_path):",
+                "    sqlite3.connect(tmp_path / 'x.db')",
+            ]
+        ),
+    )
+
+    violations = scan_unit_tests(
+        unit_root,
+        allowlist={"test_allowlisted_db.py": "documented non-DB false positive"},
+    )
+
+    assert {(violation.line, violation.rule) for violation in violations} == {
+        (1, "sqlite-import"),
+        (4, "sqlite-connect-call"),
+    }
+
+
+def test_guard_reports_db_path_with_unqualified_persistence_helpers(tmp_path):
+    from scripts.check_test_layers import scan_unit_tests
+
+    unit_root = tmp_path / "tests" / "unit"
+    _write(
+        unit_root / "test_bad_unqualified_store.py",
+        "\n".join(
+            [
+                "from fleetent.runtime.context import load_anti_flap_state, save_anti_flap_state",
+                "import fleetent.runtime.context as cm",
+                "",
+                "def test_roundtrip(tmp_path, monkeypatch):",
+                "    monkeypatch.setattr(cm, 'DB_PATH', tmp_path / 'users.db')",
+                "    save_anti_flap_state('s1', object())",
+                "    assert load_anti_flap_state('s1') is not None",
+            ]
+        ),
+    )
+
+    violations = scan_unit_tests(unit_root)
+
+    assert {(violation.line, violation.rule) for violation in violations} == {
+        (5, "production-db-path-mutation")
+    }
