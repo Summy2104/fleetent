@@ -391,9 +391,10 @@ def test_routes_path_is_injectable_path():
     assert isinstance(model_router.ROUTES_PATH, Path)
 
 
-def test_routes_path_default_points_at_config():
+def test_routes_path_default_points_at_config(monkeypatch):
     from fleetent import paths
 
+    monkeypatch.delenv("FLEETENT_HOME", raising=False)
     assert paths.config_dir() / "routes.yaml" == model_router.ROUTES_PATH
 
 
