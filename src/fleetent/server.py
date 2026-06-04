@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket,
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from fleetent import agent_config, agent_store, user_store
+from fleetent import agent_config, agent_store, paths, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, WebhooksSettings, configure_logging
 from fleetent.cron_scheduler import CronScheduler
@@ -62,8 +62,8 @@ from fleetent.tools.plugin_loader import expand_plugin_patterns, load_plugins
 
 logger = logging.getLogger(__name__)
 
-_MCP_YAML_PATH: Path = Path("config/mcp.yaml")
-_WEBHOOK_YAML_PATH: Path = Path("config/webhooks.yaml")
+_MCP_YAML_PATH: Path = paths.config_dir() / "mcp.yaml"
+_WEBHOOK_YAML_PATH: Path = paths.config_dir() / "webhooks.yaml"
 _webhook_sources: dict[str, Any] = {}
 
 

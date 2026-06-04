@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 import yaml
 
-_SETTINGS_YAML = Path("config/settings.yaml")
+from fleetent import paths
+
+_SETTINGS_YAML = paths.settings_yaml_path()
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

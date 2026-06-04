@@ -5,13 +5,14 @@ import json
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from pathlib import Path
 
 import structlog
 
+from fleetent import paths
+
 logger = structlog.get_logger(__name__)
 
-SESSIONS_DIR = Path("data/sessions")
+SESSIONS_DIR = paths.sessions_dir()
 
 _SECONDS_PER_DAY = 86_400
 _BYTES_PER_MB = 1024 * 1024

@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import logging
 from contextlib import suppress
-from pathlib import Path
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 
 import fleetent.schedule_store as _store
+from fleetent import paths
 from fleetent.config import SchedulingSettings
 from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatching
 
 logger = logging.getLogger(__name__)
 
-LEGACY_CRON_CONFIG_PATH = Path("config/cron.yaml")
+LEGACY_CRON_CONFIG_PATH = paths.config_dir() / "cron.yaml"
 
 
 async def _agent_run(

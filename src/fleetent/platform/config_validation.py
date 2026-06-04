@@ -8,6 +8,7 @@ from typing import Literal
 
 import yaml
 
+from fleetent import paths
 from fleetent.config import MCP_SERVERS_YAML_PATH, SETTINGS_YAML_PATH, Settings
 
 ValidationProfile = Literal["dev", "pilot", "production"]
@@ -107,8 +108,8 @@ def _runtime_items(
 ) -> list[ValidationItem]:
     items = [ValidationItem("database.url", "pass", _database_reason(settings.database_url))]
     for key, path in {
-        "paths.data_dir": data_dir or Path("data"),
-        "paths.config_dir": config_dir or Path("config"),
+        "paths.data_dir": data_dir or paths.data_dir(),
+        "paths.config_dir": config_dir or paths.config_dir(),
         "paths.secrets_dir": secrets_dir or Path("secrets"),
     }.items():
         if path.exists():

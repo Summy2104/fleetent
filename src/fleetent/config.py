@@ -12,8 +12,10 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
-SETTINGS_YAML_PATH = Path("config/settings.yaml")
-MCP_SERVERS_YAML_PATH = Path("config/mcp.servers.yaml")
+from fleetent import paths
+
+SETTINGS_YAML_PATH = paths.settings_yaml_path()
+MCP_SERVERS_YAML_PATH = paths.config_dir() / "mcp.servers.yaml"
 YAML_SECRET_FIELDS = frozenset(
     {
         "anthropic_api_key",
@@ -40,7 +42,7 @@ class SecretRejectingYamlSettingsSource(YamlConfigSettingsSource):
 class LoggingSettings(BaseModel):
     console_level: str = "info"
     file_level: str = "debug"
-    directory: str = "data/logs"
+    directory: str = Field(default_factory=lambda: str(paths.data_dir() / "logs"))
     json_file: bool = True
 
 
@@ -56,7 +58,7 @@ class DiagnosticsRetentionSettings(BaseModel):
 
 
 class DiagnosticsSettings(BaseModel):
-    export_dir: str = "data/diagnostics"
+    export_dir: str = Field(default_factory=lambda: str(paths.data_dir() / "diagnostics"))
     retention: DiagnosticsRetentionSettings = Field(default_factory=DiagnosticsRetentionSettings)
 
 
@@ -183,7 +185,9 @@ class Settings(BaseSettings):
     context_keep_recent: int = 10
     log_format: str = "console"
     default_agent_name: str | None = None
-    database_url: str = "sqlite:///data/fleetent.db"
+    database_url: str = Field(
+        default_factory=lambda: f"sqlite:///{paths.data_dir() / 'fleetent.db'}"
+    )
     # ── runtime tuning fields merged from feature/zhangyang (flat, per D1) ──
     # Compression dual-threshold (AR12) + layered retention (AR13) + anti-flap (AR17).
     context_tmax_ratio: float = 0.8
