@@ -1,11 +1,11 @@
 ## 0. 前置确认
 
-- [ ] 0.1 确认前置 change `configurable-data-home` 已合入 main（`FLEETENT_HOME` 路径解析可用）；否则本 change 不进入实施
+- [x] 0.1 确认前置 change `configurable-data-home` 已合入 main（`FLEETENT_HOME` 路径解析可用）；否则本 change 不进入实施
 
 ## 1. 脚手架与参数解析（含 --help）
 
-- [ ] 1.1 Write failing tests：`tests/integration/test_install_script.py` —— 断言 `scripts/install.sh` 存在且可执行；`--help` 退出码 0 且输出含全部受支持 flag（`--skip-db`/`--skip-config`/`--dir`/`--help`）且不产生副作用；未知 flag 以非零退出码退出并打印用法。用临时 HOME/CWD 隔离，绝不触碰真实 `data/`/`~`
-- [ ] 1.2 Implement：创建 `scripts/install.sh`（`#!/bin/bash` + `chmod +x`）——顶部 env 净化（unset `PYTHONPATH`/`PYTHONHOME`、`set -e`）、颜色/日志 helper、arg 解析与 `usage()`、`main()` 骨架（函数留空 stub），使 1.1 转绿
+- [x] 1.1 Write failing tests：`tests/integration/test_install_script.py` —— 断言 `scripts/install.sh` 存在且可执行；`--help` 退出码 0 且输出含全部受支持 flag（`--skip-db`/`--skip-config`/`--dir`/`--help`）且不产生副作用；未知 flag 以非零退出码退出并打印用法。用临时 HOME/CWD 隔离，绝不触碰真实 `data/`/`~`
+- [x] 1.2 Implement：创建 `scripts/install.sh`（`#!/bin/bash` + `chmod +x`）——顶部 env 净化（unset `PYTHONPATH`/`PYTHONHOME`、`set -e`）、颜色/日志 helper、arg 解析与 `usage()`、`main()` 骨架（函数留空 stub），使 1.1 转绿
 
 ## 2. uv 探测与全局命令安装
 
