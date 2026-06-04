@@ -1120,3 +1120,34 @@ def test_distinct_block_semantics_labels():
     # user-level wires /users/.../block|unblock; identity-level wires /im-users/.../block
     assert "block(" in body
     assert "imBlock(" in body
+
+
+# --- legacy module search (unify-legacy-console-modules) -----------------------
+
+
+def _section(html, tab):
+    start = html.index(f'<section id="tab-{tab}"')
+    nxt = html.find('<section id="tab-', start + 10)
+    return html[start: nxt if nxt > 0 else start + 8000]
+
+
+def test_legacy_modules_have_search_in_page_header():
+    html = ADMIN_HTML
+    # each legacy list module fills its .ph-filter slot with a search input
+    for tab, fid in [("kb", "kb-filter"), ("sessions", "sess-filter"),
+                     ("monitoring", "mon-filter"), ("stats", "st-filter")]:
+        sec = _section(html, tab)
+        filt = sec.split('class="ph-filter"', 1)[1].split("</div>", 1)[0]
+        assert f'id="{fid}"' in filt, f"{tab}: search input missing from .ph-filter"
+
+
+def test_legacy_module_search_filters_rows():
+    html = ADMIN_HTML
+    # render/filter functions reference their search value, so typing narrows rows
+    for fid, fn in [("kb-filter", "function renderKb"),
+                    ("sess-filter", "function renderSessions"),
+                    ("mon-filter", "function renderMonAlerts"),
+                    ("st-filter", "function renderStatsRows")]:
+        assert fn in html, f"missing render fn {fn}"
+        body = html.split(fn, 1)[1][:1400]
+        assert fid in body, f"{fn} does not consult #{fid}"

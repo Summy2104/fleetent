@@ -566,7 +566,7 @@
     </section>
 
     <section id="tab-kb" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Knowledge Base</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.kb?.()">Refresh</button></div></div>
+      <div class="page-header"><h2 class="ph-title">Knowledge Base</h2><div class="ph-filter"><input id="kb-filter" class="sk-search" placeholder="🔍  Search by id or description" oninput="renderKb()"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.kb?.()">Refresh</button></div></div>
       <div class="card" id="kb-create-card">
         <div class="row">
           <input id="nkb-id" placeholder="auto-generated" readonly>
@@ -747,7 +747,7 @@
     </section>
 
     <section id="tab-stats" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Statistics</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.stats?.()">Refresh</button></div></div>
+      <div class="page-header"><h2 class="ph-title">Statistics</h2><div class="ph-filter"><input id="st-filter" class="sk-search" placeholder="🔍  Filter rows by user" oninput="renderStatsRows()"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.stats?.()">Refresh</button></div></div>
       <div class="card">
         <div class="row">
           <input id="st-agent" placeholder="agent_id">
@@ -789,7 +789,7 @@
     </section>
 
     <section id="tab-monitoring" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Monitoring &amp; Alerts</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.monitoring?.()">Refresh</button></div></div>
+      <div class="page-header"><h2 class="ph-title">Monitoring &amp; Alerts</h2><div class="ph-filter"><input id="mon-filter" class="sk-search" placeholder="🔍  Search rules & alerts by metric / target" oninput="renderMonRules(); renderMonAlerts()"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.monitoring?.()">Refresh</button></div></div>
       <div class="card">
         <div class="row">
           <input id="mon-metric" placeholder="metric (e.g. cpu)">
@@ -825,7 +825,7 @@
     </section>
 
     <section id="tab-sessions" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Sessions</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.sessions?.()">Refresh</button></div></div>
+      <div class="page-header"><h2 class="ph-title">Sessions</h2><div class="ph-filter"><input id="sess-filter" class="sk-search" placeholder="🔍  Filter loaded rows by id / agent / origin" oninput="renderSessions()"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.sessions?.()">Refresh</button></div></div>
       <div class="row" style="margin-bottom:12px;">
         <select id="sess-status"><option value="">all status</option><option value="active">active</option><option value="ended">ended</option></select>
         <input id="sess-user" placeholder="user_id">
@@ -3283,16 +3283,20 @@ async function stPerUser() {
   const sort = $("st-sort").value;
   const qs = [`sort_by=${encodeURIComponent(sort)}`];
   if (agent) qs.push(`agent_id=${encodeURIComponent(agent)}`);
-  try {
-    const rows = await api("GET", "/stats/per-user?" + qs.join("&"));
-    $("st-body").innerHTML = rows.map(r => `
+  try { ST_ROWS = await api("GET", "/stats/per-user?" + qs.join("&")); renderStatsRows(); }
+  catch (e) { $("st-body").innerHTML = `<tr><td colspan="4" class="err">${esc(e.message)}</td></tr>`; }
+}
+let ST_ROWS = [];
+function renderStatsRows() {
+  const q = ($("st-filter")?.value || "").trim().toLowerCase();
+  const rows = ST_ROWS.filter(r => !q || (r.user_id || "").toLowerCase().includes(q));
+  $("st-body").innerHTML = rows.map(r => `
       <tr>
         <td>${esc(r.user_id)}</td>
         <td>${esc(r.calls != null ? r.calls : "—")}</td>
         <td>${esc(r.total_tokens != null ? r.total_tokens : "—")}</td>
         <td>${esc(r.cost != null ? r.cost : "—")}</td>
       </tr>`).join("") || `<tr><td colspan="4" class="muted">No data.</td></tr>`;
-  } catch (e) { $("st-body").innerHTML = `<tr><td colspan="4" class="err">${esc(e.message)}</td></tr>`; }
 }
 async function stOverview() {
   const agent = $("st-agent").value.trim(); if (!agent) { $("st-out").textContent = "agent_id required"; return; }
@@ -3360,10 +3364,18 @@ async function monMetrics() {
   catch (e) { $("mon-metrics-out").textContent = e.message; }
 }
 
+let MON_RULES = [];
+function _monMatch(q, ...vals) {
+  return !q || vals.some(v => (v || "").toString().toLowerCase().includes(q));
+}
 async function monRules() {
-  try {
-    const rows = await api("GET", "/alerts/rules");
-    $("mon-rules-body").innerHTML = rows.map(r => `
+  try { MON_RULES = await api("GET", "/alerts/rules"); renderMonRules(); }
+  catch (e) { $("mon-rules-body").innerHTML = `<tr><td colspan="6" class="err">${esc(e.message)}</td></tr>`; }
+}
+function renderMonRules() {
+  const q = ($("mon-filter")?.value || "").trim().toLowerCase();
+  const rows = MON_RULES.filter(r => _monMatch(q, r.metric, r.target, r.severity));
+  $("mon-rules-body").innerHTML = rows.map(r => `
       <tr>
         <td>${esc(r.metric)}</td>
         <td class="muted">${esc(r.comparator)} ${esc(r.threshold)}</td>
@@ -3375,7 +3387,6 @@ async function monRules() {
           <button class="small danger" onclick="monDeleteRule('${esc(r.id)}')">Delete</button>`}
         </td>
       </tr>`).join("") || `<tr><td colspan="6" class="muted">No rules.</td></tr>`;
-  } catch (e) { $("mon-rules-body").innerHTML = `<tr><td colspan="6" class="err">${esc(e.message)}</td></tr>`; }
 }
 function monOpenRule() {
   $("mon-rule-err").textContent = "";
@@ -3406,11 +3417,16 @@ async function monDeleteRule(id) {
   try { await api("DELETE", `/alerts/rules/${encodeURIComponent(id)}`); monRules(); } catch (e) { toast(e.message, "error"); }
 }
 
+let MON_ALERTS = [];
 async function monAlerts() {
   const status = $("mon-alert-status").value;
-  try {
-    const rows = await api("GET", "/alerts" + (status ? `?status=${encodeURIComponent(status)}` : ""));
-    $("mon-alerts-body").innerHTML = rows.map(a => `
+  try { MON_ALERTS = await api("GET", "/alerts" + (status ? `?status=${encodeURIComponent(status)}` : "")); renderMonAlerts(); }
+  catch (e) { $("mon-alerts-body").innerHTML = `<tr><td colspan="5" class="err">${esc(e.message)}</td></tr>`; }
+}
+function renderMonAlerts() {
+  const q = ($("mon-filter")?.value || "").trim().toLowerCase();
+  const rows = MON_ALERTS.filter(a => _monMatch(q, a.metric, a.target, a.severity));
+  $("mon-alerts-body").innerHTML = rows.map(a => `
       <tr>
         <td><span class="pill ${a.severity === "critical" ? "blocked" : ""}">${esc(a.severity)}</span></td>
         <td>${esc(a.metric || "")}</td>
@@ -3421,7 +3437,6 @@ async function monAlerts() {
           <button class="small ghost" onclick="monSilence('${esc(a.id)}')">Silence</button>`}
         </td>
       </tr>`).join("") || `<tr><td colspan="5" class="muted">No alerts.</td></tr>`;
-  } catch (e) { $("mon-alerts-body").innerHTML = `<tr><td colspan="5" class="err">${esc(e.message)}</td></tr>`; }
 }
 async function monAck(id) {
   const assignee = prompt("Assignee (optional)") || null;
@@ -3449,7 +3464,16 @@ async function loadSessions() {
   if ($("sess-status").value) qs.push(`status=${encodeURIComponent($("sess-status").value)}`);
   if ($("sess-user").value.trim()) qs.push(`user_id=${encodeURIComponent($("sess-user").value.trim())}`);
   if ($("sess-agent").value.trim()) qs.push(`agent_name=${encodeURIComponent($("sess-agent").value.trim())}`);
-  const rows = await api("GET", "/sessions" + (qs.length ? "?" + qs.join("&") : ""));
+  SESS_ALL = await api("GET", "/sessions" + (qs.length ? "?" + qs.join("&") : ""));
+  renderSessions();
+}
+let SESS_ALL = [];
+function renderSessions() {
+  const q = ($("sess-filter")?.value || "").trim().toLowerCase();
+  const rows = SESS_ALL.filter(s => !q
+    || (s.session_id || "").toLowerCase().includes(q)
+    || (s.agent_name || "").toLowerCase().includes(q)
+    || (s.origin || "").toLowerCase().includes(q));
   $("sess-body").innerHTML = rows.map(s => {
     const sid = s.session_id;
     return `
@@ -4265,10 +4289,18 @@ async function testOAuthConfigInModal() {
 
 LOADERS.oauth = () => { loadAllConnectors(); };
 
+let KB_ALL = [];
 async function loadKb() {
   if (!$("nkb-id").value) $("nkb-id").value = genId();
-  const kbs = await api("GET", "/kb");
-  $("kb-body").innerHTML = kbs.map(k => `
+  KB_ALL = await api("GET", "/kb");
+  renderKb();
+}
+function renderKb() {
+  const q = ($("kb-filter")?.value || "").trim().toLowerCase();
+  const rows = KB_ALL.filter(k => !q
+    || (k.kb_id || "").toLowerCase().includes(q)
+    || (k.description || "").toLowerCase().includes(q));
+  $("kb-body").innerHTML = rows.map(k => `
     <tr>
       <td>${esc(k.kb_id)}</td>
       <td class="muted">${esc(k.description || "")}</td>
