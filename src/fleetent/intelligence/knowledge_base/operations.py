@@ -18,15 +18,15 @@ from fleetent.intelligence.knowledge_base.connectors.confluence import (
     ConfluenceAuthError,
     ConfluenceClient,
     ConfluenceConnectorConfig,
-    FakeConfluenceClient,
+    HttpConfluenceClient,
     plan_confluence_sync,
     sync_confluence,
 )
 from fleetent.intelligence.knowledge_base.connectors.google_drive import (
-    FakeGoogleDriveClient,
     GoogleDriveAuthError,
     GoogleDriveClient,
     GoogleDriveConnectorConfig,
+    HttpGoogleDriveClient,
     plan_google_drive_sync,
     sync_google_drive,
 )
@@ -136,11 +136,19 @@ async def check_connector(
     try:
         if definition.connector_type == "google_drive":
             google_config = _google_config(definition)
-            google_client = google_drive_client or FakeGoogleDriveClient()
+            google_client = google_drive_client or _create_google_drive_client(google_config)
             google_client.list_files(google_config.folder_id, recursive=google_config.recursive)
         else:
             confluence_config = _confluence_config(definition)
-            confluence_client_value = confluence_client or FakeConfluenceClient()
+            confluence_client_value = confluence_client or _create_confluence_client(
+                confluence_config.base_url,
+                _resolve_env_value(
+                    confluence_config.username,
+                    confluence_config.username_env,
+                    field_name="username",
+                ),
+                confluence_config.api_token_env,
+            )
             await plan_confluence_sync(
                 confluence_config,
                 client=confluence_client_value,
@@ -313,7 +321,7 @@ async def _run_enabled_connector_sync(
 ) -> ConnectorSyncResult:
     if definition.connector_type == "google_drive":
         google_config = _google_config(definition)
-        google_client = google_drive_client or FakeGoogleDriveClient()
+        google_client = google_drive_client or _create_google_drive_client(google_config)
         if dry_run:
             google_plan = await plan_google_drive_sync(google_config, client=google_client)
             return ConnectorSyncResult(
@@ -325,7 +333,15 @@ async def _run_enabled_connector_sync(
         )
 
     confluence_config = _confluence_config(definition)
-    confluence_client_value = confluence_client or FakeConfluenceClient()
+    confluence_client_value = confluence_client or _create_confluence_client(
+        confluence_config.base_url,
+        _resolve_env_value(
+            confluence_config.username,
+            confluence_config.username_env,
+            field_name="username",
+        ),
+        confluence_config.api_token_env,
+    )
     if dry_run:
         confluence_plan = await plan_confluence_sync(
             confluence_config,
@@ -343,6 +359,29 @@ async def _run_enabled_connector_sync(
         definition.connector_id,
         "sync_succeeded",
         _summary_dict(confluence_summary),
+    )
+
+
+def _create_google_drive_client(config: GoogleDriveConnectorConfig) -> GoogleDriveClient:
+    return HttpGoogleDriveClient(
+        credential_ref=config.credential_ref,
+        access_token_env=config.access_token_env,
+        refresh_token_env=config.refresh_token_env,
+        client_id_env=config.client_id_env,
+        client_secret_env=config.client_secret_env,
+        token_uri_env=config.token_uri_env,
+    )
+
+
+def _create_confluence_client(
+    base_url: str,
+    username: str,
+    api_token_env: str,
+) -> ConfluenceClient:
+    return HttpConfluenceClient(
+        base_url=base_url,
+        username=username,
+        credential_ref=f"env:{api_token_env}" if api_token_env else "",
     )
 
 
@@ -371,6 +410,11 @@ def _google_definition(item: GoogleDriveConnectorSettings) -> ConnectorDefinitio
             folder_id=item.folder_id,
             credential_ref=item.credential_ref,
             recursive=item.recursive,
+            access_token_env=item.access_token_env,
+            refresh_token_env=item.refresh_token_env,
+            client_id_env=item.client_id_env,
+            client_secret_env=item.client_secret_env,
+            token_uri_env=item.token_uri_env,
         ),
     )
 
@@ -386,13 +430,29 @@ def _confluence_definition(item: ConfluenceConnectorSettings) -> ConnectorDefini
             kb_id=item.kb_id,
             base_url=item.base_url,
             username=item.username,
-            credential_ref=item.credential_ref,
+            credential_ref=_resolve_confluence_credential_ref(item),
             scope_type=item.scope_type or ("page" if item.page_id else "space"),
+            username_env=item.username_env,
+            api_token_env=_resolve_confluence_api_token_env(item),
             space_key=item.space_key,
             page_id=item.page_id,
             include_children=item.include_children,
         ),
     )
+
+
+def _resolve_confluence_credential_ref(item: ConfluenceConnectorSettings) -> str:
+    if item.api_token_env:
+        return f"env:{item.api_token_env}"
+    return item.credential_ref
+
+
+def _resolve_confluence_api_token_env(item: ConfluenceConnectorSettings) -> str:
+    if item.api_token_env:
+        return item.api_token_env
+    if item.credential_ref.startswith("env:"):
+        return item.credential_ref.removeprefix("env:")
+    return ""
 
 
 def _summary_for_definition(definition: ConnectorDefinition) -> ConnectorSummary:
@@ -413,13 +473,16 @@ def _summary_for_definition(definition: ConnectorDefinition) -> ConnectorSummary
         tenant_id=definition.config.tenant_id,
         kb_id=definition.config.kb_id,
         scope=scope,
-        credential_ref_summary=_credential_ref_summary(definition.config.credential_ref),
+        credential_ref_summary=_connector_credential_summary(definition),
     )
 
 
 def _check_credential(definition: ConnectorDefinition) -> tuple[str, str] | None:
     try:
-        payload = _read_credential_ref(definition.config.credential_ref)
+        if definition.connector_type == "google_drive":
+            payload = _read_google_drive_credential(_google_config(definition))
+        else:
+            payload = _read_credential_ref(definition.config.credential_ref)
     except FileNotFoundError:
         return ("credential_missing", "credential reference is missing")
     except KeyError:
@@ -436,14 +499,87 @@ def _check_credential(definition: ConnectorDefinition) -> tuple[str, str] | None
     return None
 
 
+def _connector_credential_summary(definition: ConnectorDefinition) -> str:
+    if definition.connector_type == "google_drive":
+        config = _google_config(definition)
+        if config.access_token_env:
+            return "env:FLEETENT_GOOGLE_DRIVE_*"
+    return _credential_ref_summary(definition.config.credential_ref)
+
+
+def _read_google_drive_credential(config: GoogleDriveConnectorConfig) -> str:
+    if config.credential_ref:
+        return _read_credential_ref(config.credential_ref)
+    mapping = {
+        "access_token": os.getenv(config.access_token_env, "") if config.access_token_env else "",
+        "refresh_token": os.getenv(config.refresh_token_env, "")
+        if config.refresh_token_env
+        else "",
+        "client_id": os.getenv(config.client_id_env, "") if config.client_id_env else "",
+        "client_secret": os.getenv(config.client_secret_env, "")
+        if config.client_secret_env
+        else "",
+        "token_uri": os.getenv(config.token_uri_env, "") if config.token_uri_env else "",
+    }
+    if not any(mapping.values()):
+        raise KeyError("google drive env credentials")
+    return json.dumps(
+        {key: value for key, value in mapping.items() if value},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
 def _read_credential_ref(credential_ref: str) -> str:
     if credential_ref.startswith("env:"):
         env_name = credential_ref.removeprefix("env:")
+        if env_name in os.environ:
+            return os.environ[env_name]
+        if _has_google_drive_flat_env(env_name):
+            return _google_drive_flat_env_payload(env_name)
         if env_name not in os.environ:
             raise KeyError(env_name)
-        return os.environ[env_name]
     path = Path(credential_ref.removeprefix("file://")).expanduser()
     return path.read_text(encoding="utf-8")
+
+
+def _resolve_env_value(value: str, env_name: str, *, field_name: str) -> str:
+    if value:
+        return value
+    if not env_name:
+        return ""
+    resolved = os.getenv(env_name)
+    if resolved:
+        return resolved
+    raise ValueError(f"{field_name} env var is missing: {env_name}")
+
+
+def _has_google_drive_flat_env(prefix: str) -> bool:
+    return any(
+        os.getenv(f"{prefix}_{suffix}")
+        for suffix in (
+            "ACCESS_TOKEN",
+            "REFRESH_TOKEN",
+            "CLIENT_ID",
+            "CLIENT_SECRET",
+            "TOKEN_URI",
+        )
+    )
+
+
+def _google_drive_flat_env_payload(prefix: str) -> str:
+    mapping = {
+        "access_token": os.getenv(f"{prefix}_ACCESS_TOKEN", ""),
+        "refresh_token": os.getenv(f"{prefix}_REFRESH_TOKEN", ""),
+        "client_id": os.getenv(f"{prefix}_CLIENT_ID", ""),
+        "client_secret": os.getenv(f"{prefix}_CLIENT_SECRET", ""),
+        "token_uri": os.getenv(f"{prefix}_TOKEN_URI", "https://oauth2.googleapis.com/token"),
+    }
+    return json.dumps(
+        {key: value for key, value in mapping.items() if value},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
 
 
 def _credential_ref_summary(credential_ref: str) -> str:

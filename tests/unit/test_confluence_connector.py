@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import httpx
 import pytest
+import respx
 
 
 def test_confluence_connector_config_public_api_is_importable():
@@ -58,6 +60,95 @@ def test_confluence_credential_ref_resolver_supports_env_and_file(tmp_path, monk
 
     assert resolver.resolve("env:CONFLUENCE_TOKEN").payload == "env-token"
     assert resolver.resolve(str(token_path)).payload == "file-token"
+
+
+@respx.mock
+def test_http_confluence_client_lists_space_pages_with_pagination(monkeypatch):
+    from fleetent.intelligence.knowledge_base.connectors.confluence import HttpConfluenceClient
+
+    monkeypatch.setenv("CONFLUENCE_TOKEN", "conf-token")
+    first = respx.get("https://example.atlassian.net/wiki/rest/api/content").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "results": [_confluence_page_json("1", "Runbook")],
+                    "_links": {"next": "/rest/api/content?start=1"},
+                },
+            ),
+            httpx.Response(200, json={"results": [_confluence_page_json("2", "Deploy")]}),
+        ]
+    )
+
+    pages = HttpConfluenceClient(
+        base_url="https://example.atlassian.net/wiki",
+        username="bot@example.com",
+        credential_ref="env:CONFLUENCE_TOKEN",
+    ).list_space_pages("ENG")
+
+    assert [[page.id for page in group] for group in pages] == [["1"], ["2"]]
+    request = first.calls[0].request
+    assert request.url.params["spaceKey"] == "ENG"
+    assert (
+        request.url.params["expand"] == "body.storage,version,space,ancestors,history.lastUpdated"
+    )
+    assert request.headers["Authorization"].startswith("Basic ")
+
+
+@respx.mock
+def test_http_confluence_client_gets_page_and_children(monkeypatch):
+    from fleetent.intelligence.knowledge_base.connectors.confluence import HttpConfluenceClient
+
+    monkeypatch.setenv("CONFLUENCE_TOKEN", "conf-token")
+    page_route = respx.get("https://example.atlassian.net/wiki/rest/api/content/root").mock(
+        return_value=httpx.Response(200, json=_confluence_page_json("root", "Root"))
+    )
+    child_route = respx.get(
+        "https://example.atlassian.net/wiki/rest/api/content/root/child/page"
+    ).mock(
+        return_value=httpx.Response(200, json={"results": [_confluence_page_json("c1", "Child")]})
+    )
+    client = HttpConfluenceClient(
+        base_url="https://example.atlassian.net/wiki",
+        username="bot@example.com",
+        credential_ref="env:CONFLUENCE_TOKEN",
+    )
+
+    page = client.get_page("root")
+    children = client.list_child_pages("root")
+
+    assert page.id == "root"
+    assert page.title == "Root"
+    assert [child.id for child in children] == ["c1"]
+    assert page_route.calls.last.request.url.params["expand"]
+    assert child_route.calls.last.request.url.params["expand"]
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("status_code", "expected_error"),
+    [
+        (401, "ConfluenceAuthError"),
+        (403, "ConfluenceAuthError"),
+        (429, "ConfluenceRateLimitError"),
+    ],
+)
+def test_http_confluence_client_maps_http_errors(monkeypatch, status_code, expected_error):
+    from fleetent.intelligence.knowledge_base.connectors import confluence
+    from fleetent.intelligence.knowledge_base.connectors.confluence import HttpConfluenceClient
+
+    monkeypatch.setenv("CONFLUENCE_TOKEN", "conf-token")
+    respx.get("https://example.atlassian.net/wiki/rest/api/content").mock(
+        return_value=httpx.Response(status_code, headers={"Retry-After": "2"})
+    )
+    client = HttpConfluenceClient(
+        base_url="https://example.atlassian.net/wiki",
+        username="bot@example.com",
+        credential_ref="env:CONFLUENCE_TOKEN",
+    )
+
+    with pytest.raises(getattr(confluence, expected_error)):
+        client.list_space_pages("ENG")
 
 
 async def test_confluence_auth_failure_marks_summary_auth_failed():
@@ -313,6 +404,18 @@ def _page(page_id: str, title: str):
         modified_time="2026-06-02T00:00:00+00:00",
         ancestors=["Engineering"],
     )
+
+
+def _confluence_page_json(page_id: str, title: str):
+    return {
+        "id": page_id,
+        "title": title,
+        "space": {"key": "ENG"},
+        "body": {"storage": {"value": f"<h1>{title}</h1><p>Body</p>"}},
+        "version": {"number": 2, "when": "2026-06-02T00:00:00.000Z"},
+        "history": {"lastUpdated": {"when": "2026-06-02T00:00:00.000Z"}},
+        "ancestors": [{"title": "Engineering"}],
+    }
 
 
 async def _noop_sleep(seconds: float) -> None:

@@ -68,20 +68,24 @@ TBD - created by archiving change configuration-foundation. Update Purpose after
 
 #### Scenario: Google Drive connector config shape
 - **WHEN** `settings.yaml` 配置 Google Drive connector
-- **THEN** 配置包含 connector_id、enabled、tenant_id、kb_id、folder_id、recursive 和 credential_ref
+- **THEN** 配置包含 connector_id、enabled、tenant_id、kb_id、folder_id 和 recursive
+- **AND** OAuth credential 字段通过 `access_token_env`、`refresh_token_env`、`client_id_env` 和
+  `client_secret_env` 引用环境变量
+- **AND** Google token URI 使用代码默认值
 
 #### Scenario: Confluence connector config shape
 - **WHEN** `settings.yaml` 配置 Confluence connector
-- **THEN** 配置包含 connector_id、enabled、tenant_id、kb_id、base_url、username、scope 字段和 credential_ref
+- **THEN** 配置包含 connector_id、enabled、tenant_id、kb_id、base_url、scope 字段、`username_env` 和
+  `api_token_env`
 
-#### Scenario: Config stores credential reference only
+#### Scenario: Config stores credential env references only
 - **WHEN** `settings.yaml` 配置任意 knowledge-base connector
-- **THEN** 配置只包含 `credential_ref`
+- **THEN** 配置只包含 env var name references
 - **AND** 不包含 OAuth refresh token、client secret、Confluence API token 或其他真实 credential payload
 
-#### Scenario: Credential ref supports file and env
-- **WHEN** connector 配置 `credential_ref`
-- **THEN** 系统支持 `file://...`、本地文件路径和 `env:VAR_NAME` 引用形式
+#### Scenario: Legacy credential ref remains compatible
+- **WHEN** connector 仍配置 legacy `credential_ref`
+- **THEN** 系统保持兼容，不要求 operator 立即迁移已有本地配置
 
 ### Requirement: Diagnostics configuration
 系统 SHALL 提供 diagnostics 配置 namespace，用于控制诊断导出目录和手动 retention 策略。
@@ -154,12 +158,18 @@ TBD - created by archiving change configuration-foundation. Update Purpose after
 - **AND** 示例文件名不包含 scope
 - **AND** scope 由 connector config 或未来数据库配置表达
 
-### Requirement: Credential references use container secrets path in examples
-配置样例 SHALL 使用 Docker Compose mount 后的 `/app/secrets` 路径展示 file credential reference。
+### Requirement: Credential references use flat environment examples
+配置样例 SHALL 使用平铺环境变量引用展示 connector credential，不要求 operator 把 OAuth JSON 放入单个环境变量或文件路径。
 
-#### Scenario: Google Drive credential ref uses app secrets path
+#### Scenario: Google Drive config uses explicit env fields
 - **WHEN** operator 查看 `config/settings.yaml.example`
-- **THEN** Google Drive 示例 `credential_ref` 使用 `file:///app/secrets/google-drive-token.json`
+- **THEN** Google Drive 示例显式使用 `access_token_env`、`refresh_token_env`、`client_id_env` 和
+  `client_secret_env`
+
+#### Scenario: Confluence username uses env reference
+- **WHEN** operator 查看 `config/settings.yaml.example`
+- **THEN** Confluence 示例使用 `username_env`
+- **AND** token 使用 `api_token_env`
 
 #### Scenario: Credential ref does not encode scope in filename
 - **WHEN** operator 查看配置样例和 secrets 文档

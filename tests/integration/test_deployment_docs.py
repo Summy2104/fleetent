@@ -10,6 +10,10 @@ def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
     assert "FLEETENT_AUTO_UPGRADE=false" in content
     assert "ANTHROPIC_API_KEY=" in content
     assert "OPENAI_API_KEY=" in content
+    assert "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN=" in content
+    assert "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET=" in content
+    assert "FLEETENT_CONFLUENCE_USERNAME=" in content
+    assert "FLEETENT_CONFLUENCE_TOKEN=" in content
     assert "sk-" not in content
     assert "ma-" not in content
     assert "xoxb-" not in content
@@ -24,10 +28,10 @@ def test_secrets_documentation_describes_flat_untracked_directory():
         "secrets/",
         "平铺",
         "不进 git",
-        "google-drive-token.json",
         "confluence-api-token",
-        "credential_ref",
-        "file:///app/secrets/google-drive-token.json",
+        "api_token_env",
+        "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN",
+        "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET",
     ]
     for phrase in required_phrases:
         assert phrase in content
@@ -36,7 +40,12 @@ def test_secrets_documentation_describes_flat_untracked_directory():
 def test_settings_example_uses_flat_container_secret_reference():
     content = Path("config/settings.yaml.example").read_text(encoding="utf-8")
 
-    assert 'credential_ref: "file:///app/secrets/google-drive-token.json"' in content
+    assert "access_token_env: FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN" in content
+    assert "client_secret_env: FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET" in content
+    assert 'username_env: "FLEETENT_CONFLUENCE_USERNAME"' in content
+    assert 'scope_type: "space"' in content
+    assert "page_id:" in content
+    assert "api_token_env: FLEETENT_CONFLUENCE_TOKEN" in content
     assert "/etc/fleetent/secrets" not in content
     assert "google-drive-eng-token.json" not in content
 
