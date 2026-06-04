@@ -222,7 +222,14 @@ init_db() {
     fi
     rm -f "$tmp_ini"
 }
-precheck_docker()        { :; }
+# Sandbox (run_code) needs a host Docker. Absence is a warning, never fatal —
+# many dev setups don't use the sandbox.
+precheck_docker() {
+    if command -v docker >/dev/null 2>&1; then
+        return 0
+    fi
+    log_warn "Docker not found — the sandbox (run_code) tool will be unavailable. Install Docker to enable it."
+}
 print_success()          { :; }
 
 main() {

@@ -29,8 +29,8 @@
 
 ## 6. Docker 非阻断预检
 
-- [ ] 6.1 Write failing tests：临时 PATH 无 `docker` 时 script 打印沙箱告警但以退出码 0 完成；有 `docker`（注入假 docker）时不发沙箱告警
-- [ ] 6.2 Implement：`precheck_docker()` —— `command -v docker` 失败时告警继续（`|| true`，避免被 `set -e` 误杀），使测试转绿
+- [x] 6.1 Write failing tests：临时 PATH 无 `docker` 时 script 打印沙箱告警但以退出码 0 完成；有 `docker`（注入假 docker）时不发沙箱告警
+- [x] 6.2 Implement：`precheck_docker()` —— `command -v docker` 失败时告警继续（`|| true`，避免被 `set -e` 误杀），使测试转绿
 
 ## 7. 端到端编排与收尾
 

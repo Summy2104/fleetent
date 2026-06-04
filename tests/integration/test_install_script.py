@@ -292,3 +292,28 @@ def test_init_db_rerun_is_idempotent(tmp_path: Path) -> None:
     r2 = _run_env(["--skip-config"], env, home)
 
     assert r1.returncode == 0 and r2.returncode == 0
+
+
+def test_missing_docker_warns_but_succeeds(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")  # no docker on minimal PATH
+
+    result = _run_env(["--skip-db", "--skip-config"], env, home)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Docker not found" in (result.stdout + result.stderr)
+
+
+def test_present_docker_no_warning(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    fake_bin = tmp_path / "bin"
+    env = _fake_uv_env(home, fake_bin, tmp_path / "uv.log")
+    docker = fake_bin / "docker"
+    docker.write_text("#!/bin/bash\n:")
+    docker.chmod(0o755)
+
+    result = _run_env(["--skip-db", "--skip-config"], env, home)
+
+    assert "Docker not found" not in (result.stdout + result.stderr)
