@@ -9,8 +9,6 @@ import os
 import subprocess
 from pathlib import Path
 
-import pytest
-
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "install.sh"
 SUPPORTED_FLAGS = ("--skip-db", "--skip-config", "--dir", "--help")
 
