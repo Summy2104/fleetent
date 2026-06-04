@@ -1,10 +1,10 @@
 ## 1. Materialize agent home on create/update
 
-- [ ] 1.1 Write failing tests: platform create/update writes `FLEETENT_HOME/<agent-id>/agent.yaml`
+- [x] 1.1 Write failing tests: platform create/update writes `FLEETENT_HOME/<agent-id>/agent.yaml`
   from the authored definition (prompt/tools/skills/mcp/connectors + `access`); seeds a
   `.env` scaffold (env-var names only, no plaintext); update rewrites agent.yaml but
   preserves operator `.env` values.
-- [ ] 1.2 Implement home materialization in agent create/update (reuse the agent home
+- [x] 1.2 Implement home materialization in agent create/update (reuse the agent home
   schema + per-agent access from per-agent-im-access). Make 1.1 green.
 
 ## 2. Start/stop controller (spawn, no monitoring)

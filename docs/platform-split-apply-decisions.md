@@ -110,4 +110,17 @@
 
 ### Change 4: platform-agent-lifecycle
 
-（待开始）
+**D4.1 — materialize 以 `AgentFile`（home schema）为输入，写 `agent.yaml` + `.env` scaffold。**
+- `agent_store.Agent` 只存核心定义（prompt/tools/skills/mcp/features/plugins），没有 `connectors`/`access` 字段。故由平台用 store 数据 + connectors/access 组装出 `AgentFile` 再传给 materialize。当前平台尚无 per-agent access/connector 的 authoring 存储，故 materialize 接受可选 connectors/access，缺省给 default-closed access（`AgentAccess()`）、无 connectors——与 [[project-platform-split-apply-run]] 的 per-agent-im-access default-closed 一致，且向前兼容后续 authoring。
+
+**D4.2 — home 目录 = `FLEETENT_HOME/<name>/`，与 agent-runtime-cli 的 `resolve_home` 对齐。**
+
+**D4.3 — `.env` scaffold 只写「被引用的 env 变量名」，值留空；update 保留 operator 已填的值。**
+- 收集 connectors.slack 的 `bot_token_env`/`app_token_env`、mcp 的 `api_key_env` 等名字；写 `.env` 时解析已有文件、保留其值、只补缺失的名字（绝不写明文密钥）。
+
+**D4.4 — start/stop 控制器：spawn `fleetent agent run <name>` 子进程 + 内存 PID 跟踪，不监控/不重启/不探活。**
+- 进程自己退出后状态显示 not-running，不自动拉起（用户选定的轻量模型）。PID 跟踪仅在平台进程生命周期内有效。
+
+**D4.5 — admin 端点 `POST /admin/agents/<name>/start` `/stop` + 浅状态，放新建的 lifecycle 路由，由 control-plane server 挂载。**
+
+模块落位：`src/fleetent/platform/agent_lifecycle/{materialize.py,controller.py,lifecycle_admin_api.py}`。
