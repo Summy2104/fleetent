@@ -31,6 +31,18 @@ def client(tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "DB_PATH", db_path)
     user_store._init_db()
     audit._init_db()
+
+    # Keep endpoint tests hermetic: the live-runtime sync/probe seams must not touch
+    # the network. Tests that exercise them monkeypatch these explicitly.
+    async def _noop_sync(server_id: str, agent_id: int | None) -> None:
+        return None
+
+    async def _fake_probe(server_id: str) -> dict:
+        return {"connected": True, "tool_count": 0, "tools": []}
+
+    monkeypatch.setattr(api, "mcp_sync_server", _noop_sync)
+    monkeypatch.setattr(api, "mcp_probe", _fake_probe)
+
     app = FastAPI()
     app.include_router(api.router)
     return TestClient(app, raise_server_exceptions=True)
@@ -204,17 +216,30 @@ def test_mcp_server_states_visible(client, monkeypatch):
     assert "degraded" in states and "permanently_unavailable" in states
 
 
-def test_mcp_tool_namespace_visible(client, monkeypatch):  # 场景 113
-    monkeypatch.setattr(
-        api,
-        "mcp_list_tools",
-        lambda sid: [
-            {"name": f"{sid}__read_file", "description": "read", "params": {"path": "str"}},
-        ],
-    )
+def test_mcp_tools_lists_live_server_tools(client, monkeypatch):  # 场景 113
     token, _ = _session_for("admin")
+    _add_global_mcp(client, token, "fs")
+
+    async def fake_probe(server_id):
+        assert server_id == "fs"
+        return {
+            "connected": True,
+            "tool_count": 1,
+            "tools": [{"name": "read_file", "description": "read"}],
+        }
+
+    monkeypatch.setattr(api, "mcp_probe", fake_probe)
     r = client.get("/admin/mcp/servers/fs/tools", headers=_hdr(token))
-    assert r.json()[0]["name"] == "fs__read_file"
+    body = r.json()
+    assert body["connected"] is True
+    assert body["tools"][0]["name"] == "read_file"
+
+
+def test_mcp_tools_404_when_absent(client):
+    token, _ = _session_for("admin")
+    r = client.get("/admin/mcp/servers/ghost/tools", headers=_hdr(token))
+    assert r.json()["connected"] is False
+    assert r.json()["tools"] == []
 
 
 def test_mcp_reconnect_admin_only(client, monkeypatch):
@@ -262,6 +287,97 @@ def test_mcp_server_list_exposes_owner_and_agent_filter(client, monkeypatch):
     assert internal["agent_id"] == 5
 
 
+def test_global_mcp_server_added_via_api_is_listed(client):
+    # A server created through the dialog is global (agent_id=None); it must show
+    # in the default list, not only when an agent is selected.
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/mcp/servers",
+        headers=_hdr(token),
+        json={"id": "middle", "transport": "http", "url": "https://example.com/mcp"},
+    )
+    assert r.status_code == 200
+
+    listed = client.get("/admin/mcp/servers", headers=_hdr(token)).json()
+    middle = next(s for s in listed if s["id"] == "middle")
+    assert middle["agent_id"] is None
+    assert middle["transport"] == "http"
+
+
+def _add_global_mcp(client, token, sid="middle"):
+    return client.post(
+        "/admin/mcp/servers",
+        headers=_hdr(token),
+        json={"id": sid, "transport": "http", "url": "https://example.com/mcp"},
+    )
+
+
+def test_edit_mcp_server(client):
+    token, _ = _session_for("admin")
+    _add_global_mcp(client, token)
+    r = client.put(
+        "/admin/mcp/servers/middle",
+        headers=_hdr(token),
+        json={"url": "https://changed.example.com/mcp", "transport": "websocket"},
+    )
+    assert r.status_code == 200
+    listed = client.get("/admin/mcp/servers", headers=_hdr(token)).json()
+    middle = next(s for s in listed if s["id"] == "middle")
+    assert middle["url"] == "https://changed.example.com/mcp"
+    assert middle["transport"] == "websocket"
+
+
+def test_disable_mcp_server(client):
+    token, _ = _session_for("admin")
+    _add_global_mcp(client, token)
+    r = client.put("/admin/mcp/servers/middle", headers=_hdr(token), json={"enabled": False})
+    assert r.status_code == 200
+    listed = client.get("/admin/mcp/servers", headers=_hdr(token)).json()
+    middle = next(s for s in listed if s["id"] == "middle")
+    assert middle["enabled"] is False
+
+
+def test_delete_mcp_server(client):
+    token, _ = _session_for("admin")
+    _add_global_mcp(client, token)
+    r = client.delete("/admin/mcp/servers/middle", headers=_hdr(token))
+    assert r.status_code == 200
+    listed = client.get("/admin/mcp/servers", headers=_hdr(token)).json()
+    assert all(s["id"] != "middle" for s in listed)
+
+
+def test_mcp_mutations_viewer_forbidden(client):
+    admin, _ = _session_for("admin")
+    _add_global_mcp(client, admin)
+    viewer, _ = _session_for("viewer")
+    assert client.put("/admin/mcp/servers/middle", headers=_hdr(viewer), json={}).status_code == 403
+    assert client.delete("/admin/mcp/servers/middle", headers=_hdr(viewer)).status_code == 403
+
+
+def test_delete_connector(client):
+    token, _ = _session_for("admin")
+    client.post(
+        "/admin/connectors", headers=_hdr(token), json={"id": "gh", "display_name": "GitHub"}
+    )
+    r = client.delete("/admin/connectors/gh", headers=_hdr(token))
+    assert r.status_code == 200
+    assert client.get("/admin/connectors", headers=_hdr(token)).json() == []
+
+
+def test_delete_connector_viewer_forbidden(client):
+    admin, _ = _session_for("admin")
+    client.post(
+        "/admin/connectors", headers=_hdr(admin), json={"id": "gh", "display_name": "GitHub"}
+    )
+    viewer, _ = _session_for("viewer")
+    assert client.delete("/admin/connectors/gh", headers=_hdr(viewer)).status_code == 403
+
+
+def test_delete_connector_404_when_absent(client):
+    token, _ = _session_for("admin")
+    assert client.delete("/admin/connectors/ghost", headers=_hdr(token)).status_code == 404
+
+
 def test_authorization_matrix_scoped_to_agent(client, monkeypatch):
     captured: dict[str, object] = {}
 
@@ -288,3 +404,65 @@ def test_mcp_doctor_masks_auth(client, monkeypatch):
     r = client.get("/admin/mcp/doctor", headers=_hdr(token))
     assert r.json()["checks"][0]["api_key"] == "****"
     assert r.json()["checks"][0]["level"] == "green"
+
+
+def test_test_endpoint_returns_probe_result(client, monkeypatch):
+    token, _ = _session_for("admin")
+    _add_global_mcp(client, token, "probed")
+
+    async def fake_probe(server_id):
+        assert server_id == "probed"
+        return {"connected": True, "tool_count": 3, "tools": ["a", "b", "c"]}
+
+    monkeypatch.setattr(api, "mcp_probe", fake_probe)
+    r = client.post("/admin/mcp/servers/probed/test", headers=_hdr(token))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["success"] is True
+    assert body["connected"] is True
+    assert body["tools_count"] == 3
+    assert body["tools"] == ["a", "b", "c"]
+
+
+def test_test_endpoint_reports_failure(client, monkeypatch):
+    token, _ = _session_for("admin")
+    _add_global_mcp(client, token, "downsrv")
+
+    async def fake_probe(server_id):
+        return {"connected": False, "error": "connection refused"}
+
+    monkeypatch.setattr(api, "mcp_probe", fake_probe)
+    r = client.post("/admin/mcp/servers/downsrv/test", headers=_hdr(token))
+    body = r.json()
+    assert body["success"] is False
+    assert body["connected"] is False
+    assert "refused" in body["error"]
+
+
+def test_test_endpoint_404_when_absent(client):
+    token, _ = _session_for("admin")
+    r = client.post("/admin/mcp/servers/ghost/test", headers=_hdr(token))
+    assert r.json()["connected"] is False
+
+
+def test_create_triggers_runtime_sync(client, monkeypatch):
+    calls = []
+
+    async def spy_sync(server_id, agent_id):
+        calls.append((server_id, agent_id))
+
+    monkeypatch.setattr(api, "mcp_sync_server", spy_sync)
+    token, _ = _session_for("admin")
+    _add_global_mcp(client, token, "synced")
+    assert ("synced", None) in calls
+
+
+def test_create_duplicate_mcp_server_409(client):
+    token, _ = _session_for("admin")
+    assert _add_global_mcp(client, token, "dup").status_code == 200
+    r = client.post(
+        "/admin/mcp/servers",
+        headers=_hdr(token),
+        json={"id": "dup", "transport": "http", "url": "https://other"},
+    )
+    assert r.status_code == 409

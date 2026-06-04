@@ -136,3 +136,18 @@ def test_agent_scoped_secret_never_stored(store_db):
     )
     c = store.get_connector("gh", agent_id=9)
     assert "client_secret" not in c["oauth_config"]
+
+
+def test_delete_connector_removes_row(store_db):
+    store.add_connector("gh", "GitHub")
+    store.delete_connector("gh")
+    assert store.get_connector("gh") is None
+
+
+def test_delete_connector_is_scoped(store_db):
+    store.add_connector("gh", "global")
+    store.add_connector("gh", "agent5", agent_id=5)
+    store.delete_connector("gh")  # global scope only
+    assert store.get_connector("gh") is None
+    # the agent-owned row must survive a global delete
+    assert store.get_connector("gh", agent_id=5)["display_name"] == "agent5"

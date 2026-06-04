@@ -79,3 +79,66 @@ def test_resolve_adds_agent_only_server(store_db):
     resolved = {s["id"]: s for s in store.resolve_mcp_servers(5, defaults)}
     assert set(resolved) == {"github", "internal"}
     assert resolved["internal"]["command"] == "python"
+
+
+def test_enabled_defaults_true(store_db):
+    store.add_mcp_server(5, "github")
+    assert store.get_mcp_server(5, "github")["enabled"] is True
+
+
+def test_edit_updates_fields(store_db):
+    store.add_mcp_server(5, "github", url="https://a", transport="http")
+    store.edit_mcp_server(5, "github", url="https://b", transport="websocket")
+    s = store.get_mcp_server(5, "github")
+    assert s["url"] == "https://b"
+    assert s["transport"] == "websocket"
+
+
+def test_edit_can_disable(store_db):
+    store.add_mcp_server(5, "github")
+    store.edit_mcp_server(5, "github", enabled=False)
+    assert store.get_mcp_server(5, "github")["enabled"] is False
+
+
+def test_delete_removes_row(store_db):
+    store.add_mcp_server(5, "github")
+    store.delete_mcp_server(5, "github")
+    assert store.get_mcp_server(5, "github") is None
+
+
+def test_delete_is_scoped(store_db):
+    store.add_mcp_server(5, "github")
+    store.add_mcp_server(7, "github")
+    store.delete_mcp_server(5, "github")
+    assert store.get_mcp_server(5, "github") is None
+    assert store.get_mcp_server(7, "github") is not None
+
+
+def test_resolve_skips_disabled(store_db):
+    defaults = [{"id": "github", "transport": "http", "url": "https://default-gh"}]
+    store.add_mcp_server(5, "internal", transport="stdio", command="python", enabled=False)
+    resolved = {s["id"]: s for s in store.resolve_mcp_servers(5, defaults)}
+    assert set(resolved) == {"github"}
+
+
+def test_headers_round_trip(store_db):
+    store.add_mcp_server(5, "h1", transport="http", url="https://a", headers={"X-API-Key": "k"})
+    s = store.get_mcp_server(5, "h1")
+    assert s["headers"] == {"X-API-Key": "k"}
+
+
+def test_headers_default_empty(store_db):
+    store.add_mcp_server(5, "h2")
+    assert store.get_mcp_server(5, "h2")["headers"] == {}
+
+
+def test_edit_headers(store_db):
+    store.add_mcp_server(5, "h3", headers={"A": "1"})
+    store.edit_mcp_server(5, "h3", headers={"B": "2"})
+    assert store.get_mcp_server(5, "h3")["headers"] == {"B": "2"}
+
+
+def test_resolve_includes_headers(store_db):
+    store.add_mcp_server(5, "h4", transport="http", url="https://a", headers={"X-API-Key": "k"})
+    resolved = {s["id"]: s for s in store.resolve_mcp_servers(5, [])}
+    assert resolved["h4"]["headers"] == {"X-API-Key": "k"}

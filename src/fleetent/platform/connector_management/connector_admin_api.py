@@ -83,6 +83,26 @@ def mcp_doctor() -> dict[str, Any]:
     return {"checks": []}
 
 
+async def mcp_sync_server(server_id: str, agent_id: int | None) -> None:
+    """Re-sync a global server's live runtime registration after a config change.
+
+    Only the global layer (``agent_id is None``) is wired into the runtime; agent-scoped
+    rows are skipped. An injectable seam so endpoint tests stay hermetic (no real network).
+    """
+    if agent_id is not None:
+        return
+    from fleetent.platform.connector_management import mcp_runtime
+
+    await mcp_runtime.sync_server(server_id)
+
+
+async def mcp_probe(server_id: str) -> dict[str, Any]:
+    """Real connectivity test for a stored global server (initialize + tools/list)."""
+    from fleetent.platform.connector_management import mcp_runtime
+
+    return await mcp_runtime.probe_global_server(server_id)
+
+
 # --- masking ------------------------------------------------------------------
 
 
@@ -220,10 +240,52 @@ def edit_connector(
     return _mask_dict(connector_config_store.get_connector(connector_id))
 
 
+@router.delete("/connectors/{connector_id}")
+def delete_connector(connector_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    if connector_config_store.get_connector(connector_id) is None:
+        raise HTTPException(status_code=404, detail="connector not found")
+    connector_config_store.delete_connector(connector_id)
+    audit_log.write_audit(user.id, "connector.delete", "connector", connector_id)
+    return {"success": True, "connector_id": connector_id}
+
+
 @router.get("/connectors/{connector_id}/lifecycle")
 def lifecycle(connector_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
     _current_user(authorization)
     return connector_lifecycle_stats(connector_id)
+
+
+@router.post("/connectors/{connector_id}/test")
+def test_oauth_connector(
+    connector_id: str, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    """Test OAuth connector by checking token validity and lifecycle."""
+    _current_user(authorization)
+    try:
+        # Get connector config to check if it exists
+        connector = connector_config_store.get_connector(connector_id)
+        if not connector:
+            return {"success": False, "connector_id": connector_id, "error": "Connector not found"}
+
+        # Get lifecycle stats to check token validity
+        stats = connector_lifecycle_stats(connector_id)
+
+        # Check if there are any active tokens
+        has_active_tokens = stats.get("active_grants", 0) > 0
+        token_valid = has_active_tokens and stats.get("last_refresh_success", False)
+
+        return {
+            "success": True,
+            "connector_id": connector_id,
+            "enabled": connector.get("enabled", False),
+            "token_valid": token_valid,
+            "active_grants": stats.get("active_grants", 0),
+            "last_refresh": stats.get("last_refresh_at"),
+            "display_name": connector.get("display_name", connector_id),
+        }
+    except Exception as e:
+        return {"success": False, "connector_id": connector_id, "error": str(e)}
 
 
 @router.post("/connectors/grants/{user_id}/{connector_id}/revoke")
@@ -256,28 +318,52 @@ def list_mcp_servers(
     authorization: str | None = Header(None), agent_id: int | None = None
 ) -> list[dict[str, Any]]:
     _current_user(authorization)
-    # Global-default servers (agent_id=None) overlaid with any agent-owned definitions.
+    # Runtime connection states are owned by the mcp domain (placeholder until wired).
     servers: list[dict[str, Any]] = [{**s, "agent_id": None} for s in mcp_list_servers()]
+    seen = {s["id"] for s in servers}
+
+    def _from_row(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": row["server_id"],
+            "transport": row["transport"],
+            "url": row["url"],
+            "command": row["command"],
+            "args": row["args"],
+            "enabled": row["enabled"],
+            "status": "configured" if row["enabled"] else "disabled",
+            "tool_count": 0,
+            "agent_id": row["agent_id"],
+        }
+
+    # Persisted definitions: global defaults always, plus the agent's own when scoped.
+    for row in agent_mcp_server_store.list_mcp_servers(None):
+        if row["server_id"] not in seen:
+            servers.append(_from_row(row))
+            seen.add(row["server_id"])
     if agent_id is not None:
         for row in agent_mcp_server_store.list_mcp_servers(agent_id):
-            servers.append(
-                {
-                    "id": row["server_id"],
-                    "transport": row["transport"],
-                    "status": "configured",
-                    "tool_count": 0,
-                    "agent_id": row["agent_id"],
-                }
-            )
+            servers.append(_from_row(row))
     return [_mask(s) for s in servers]
 
 
 @router.get("/mcp/servers/{server_id}/tools")
-def list_mcp_tools(
+async def list_mcp_tools(
     server_id: str, authorization: str | None = Header(None)
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
+    """Live tool catalog for a stored MCP server (connects + tools/list).
+
+    Returns ``{connected, tools: [{name, description}], error?}`` so the detail view
+    can show what the server actually exposes, not a stored guess.
+    """
     _current_user(authorization)
-    return mcp_list_tools(server_id)
+    if agent_mcp_server_store.get_mcp_server(None, server_id) is None:
+        return {"connected": False, "error": "Server configuration not found", "tools": []}
+    result = await mcp_probe(server_id)
+    return {
+        "connected": bool(result.get("connected")),
+        "tools": result.get("tools", []),
+        "error": result.get("error"),
+    }
 
 
 @router.post("/mcp/servers/{server_id}/reconnect")
@@ -286,3 +372,96 @@ def reconnect_mcp(server_id: str, authorization: str | None = Header(None)) -> d
     result = mcp_reconnect(server_id)
     audit_log.write_audit(user.id, "mcp.reconnect", "mcp_server", server_id)
     return result
+
+
+@router.put("/mcp/servers/{server_id}")
+async def edit_mcp_server(
+    server_id: str,
+    body: dict[str, Any],
+    authorization: str | None = Header(None),
+    agent_id: int | None = None,
+) -> dict[str, Any]:
+    """Edit a stored MCP server definition. `enabled: false` deactivates it."""
+    user = _require_admin(authorization)
+    if agent_mcp_server_store.get_mcp_server(agent_id, server_id) is None:
+        raise HTTPException(status_code=404, detail="mcp server not found")
+    agent_mcp_server_store.edit_mcp_server(agent_id, server_id, **body)
+    audit_log.write_audit(user.id, "mcp.edit", "mcp_server", server_id)
+    await mcp_sync_server(server_id, agent_id)
+    return {"success": True, "server_id": server_id}
+
+
+@router.delete("/mcp/servers/{server_id}")
+async def delete_mcp_server(
+    server_id: str,
+    authorization: str | None = Header(None),
+    agent_id: int | None = None,
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    if agent_mcp_server_store.get_mcp_server(agent_id, server_id) is None:
+        raise HTTPException(status_code=404, detail="mcp server not found")
+    agent_mcp_server_store.delete_mcp_server(agent_id, server_id)
+    audit_log.write_audit(user.id, "mcp.delete", "mcp_server", server_id)
+    await mcp_sync_server(server_id, agent_id)
+    return {"success": True, "server_id": server_id}
+
+
+@router.post("/mcp/servers")
+async def create_mcp_server(
+    server: dict[str, Any], authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    """Create a new MCP server configuration."""
+    user = _require_admin(authorization)
+
+    server_id = server.get("id") or server.get("server_id")
+    if not isinstance(server_id, str) or not server_id:
+        raise HTTPException(status_code=422, detail="server id is required")
+    agent_id = server.get("agent_id")
+    if agent_mcp_server_store.get_mcp_server(agent_id, server_id) is not None:
+        raise HTTPException(status_code=409, detail="mcp server id already exists")
+    transport = server.get("transport", "stdio")
+
+    agent_mcp_server_store.add_mcp_server(
+        agent_id=agent_id,
+        server_id=server_id,
+        transport=transport,
+        url=server.get("url", ""),
+        auth_type=server.get("auth_type", "none"),
+        api_key_env=server.get("api_key_env", ""),
+        command=server.get("command", ""),
+        args=server.get("args"),
+        env=server.get("env"),
+        headers=server.get("headers"),
+    )
+
+    audit_log.write_audit(user.id, "mcp.create", "mcp_server", server_id)
+    await mcp_sync_server(server_id, agent_id)
+    return {"success": True, "server_id": server_id}
+
+
+@router.post("/mcp/servers/{server_id}/test")
+async def test_mcp_server(
+    server_id: str, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    """Connect to the stored MCP server (initialize + tools/list) and report status.
+
+    A real handshake, not a config check: returns connected + the live tool count, or
+    connected=False with the failure reason.
+    """
+    _current_user(authorization)
+    row = agent_mcp_server_store.get_mcp_server(None, server_id)
+    if row is None:
+        return {
+            "success": False,
+            "server_id": server_id,
+            "connected": False,
+            "error": "Server configuration not found",
+        }
+    result = await mcp_probe(server_id)
+    return {
+        "success": bool(result.get("connected")),
+        "server_id": server_id,
+        "transport": row["transport"],
+        "tools_count": result.get("tool_count", 0),
+        **result,
+    }

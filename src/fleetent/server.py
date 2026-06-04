@@ -162,6 +162,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as exc:
             logger.warning("mcp_yaml_load_failed path=%s error=%s", _MCP_YAML_PATH, exc)
 
+    # Register enabled global MCP servers defined through the admin console (the DB
+    # counterpart to mcp.yaml), so their tools become available to agents.
+    try:
+        from fleetent.platform.connector_management import mcp_runtime
+
+        await mcp_runtime.register_global_store_servers()
+    except Exception as exc:
+        logger.warning("mcp_store_register_failed error=%s", exc)
+
     # MCP3: start the connection-health monitor (bare asyncio task, not cron_scheduler).
     mcp_client.start_health_monitor()
 
