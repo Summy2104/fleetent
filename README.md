@@ -14,6 +14,24 @@ fleetent 是一个面向企业内网部署的轻量 Agent 平台。项目基于 
 
 ## 快速开始
 
+### 一键安装（开发者 / 单机）
+
+Linux / macOS / WSL2：脚本会 bootstrap uv + Python 3.12，用 `uv tool install` 把
+`fleetent`/`fleetent-admin`/`fleetent-tui` 装成全局命令，并把 config/data 固定在
+`FLEETENT_HOME`（默认 `~/.fleetent`，与工作目录解耦）。
+
+```bash
+git clone <repo-url> && cd fleetent
+scripts/install.sh                 # 或 --dir PATH / --skip-db / --skip-config
+# 新开 shell 后（确保 ~/.local/bin 在 PATH）：
+fleetent "hello"
+```
+
+> 这是面向开发者 / 单机快速体验的路径。**on-prem 生产部署请用 Docker**
+> （`Dockerfile` + `docker-compose.yml`），环境可复现、数据不出内网。
+
+### 手动安装（在仓库内运行）
+
 ```bash
 # 前置条件：Python 3.12+、uv，以及一个 LLM provider API key。
 git clone <repo-url>
