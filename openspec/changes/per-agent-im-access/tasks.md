@@ -1,9 +1,9 @@
 ## 1. Agent-home access config
 
-- [ ] 1.1 Write failing unit tests: `agent.yaml` `access` block parses
+- [x] 1.1 Write failing unit tests: `agent.yaml` `access` block parses
   (`allow_channels`/`allow_users`/`require_approval`); absent block → safe default
   (no implicit allow, approval required); inline secret rules still rejected.
-- [ ] 1.2 Add the `access` model to the agent home schema in `agent_config`. Make 1.1 green.
+- [x] 1.2 Add the `access` model to the agent home schema in `agent_config`. Make 1.1 green.
 
 ## 2. Agent-local approval store
 
