@@ -9,6 +9,7 @@ admin console remain the authoring source of truth; these files are generated ar
 """
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,14 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from fleetent import paths
-from fleetent.config import McpServerSettings
+from fleetent.config import (
+    EmbeddingSettings,
+    KnowledgeBaseSettings,
+    LongTermContextSettings,
+    McpServerSettings,
+    RerankSettings,
+    VectorStoreSettings,
+)
 from fleetent.platform.config_validation import _flatten, _looks_inline_secret
 
 # Agents root directory. Module-level constant (injectable via monkeypatch per the
@@ -25,6 +33,7 @@ from fleetent.platform.config_validation import _flatten, _looks_inline_secret
 AGENTS_DIR = paths.config_dir() / "agents"
 
 AGENT_FILE_NAME = "agent.yaml"
+_ENV_VAR_NAME_RE = re.compile(r"^(env:)?[A-Z_][A-Z0-9_]*$")
 
 
 class AgentBindings(BaseModel):
@@ -71,6 +80,11 @@ class AgentFile(BaseModel):
     plugins: list[str] = Field(default_factory=list)
     features: dict[str, Any] = Field(default_factory=dict)
     mcp_servers: list[McpServerSettings] = Field(default_factory=list)
+    vector_store: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    rerank: RerankSettings = Field(default_factory=RerankSettings)
+    knowledge_base: KnowledgeBaseSettings = Field(default_factory=KnowledgeBaseSettings)
+    long_term_ctx: LongTermContextSettings = Field(default_factory=LongTermContextSettings)
     connectors: AgentConnectors = Field(default_factory=AgentConnectors)
     bindings: AgentBindings = Field(default_factory=AgentBindings)
 
@@ -132,14 +146,29 @@ def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
     """Reject inline plaintext secrets in MCP/connector defs; secrets go via env refs."""
     payload = {
         "mcp_servers": [server.model_dump() for server in agent.mcp_servers],
+        "vector_store": agent.vector_store.model_dump(),
+        "embedding": agent.embedding.model_dump(),
+        "rerank": agent.rerank.model_dump(),
+        "knowledge_base": agent.knowledge_base.model_dump(),
+        "long_term_ctx": agent.long_term_ctx.model_dump(),
         "connectors": agent.connectors.model_dump(),
     }
     for key, value in _flatten(payload):
-        if isinstance(value, str) and _looks_inline_secret(value):
+        if isinstance(value, str) and _looks_inline_secret(value) and not _is_env_reference(
+            key, value
+        ):
             raise ValueError(
                 f"inline secret-like value in agent '{agent.name}' at '{key}' ({path}); "
                 "reference secrets by environment-variable name instead"
             )
+
+
+def _is_env_reference(key: str, value: str) -> bool:
+    if key.endswith("_env"):
+        return _ENV_VAR_NAME_RE.fullmatch(value) is not None
+    if key.endswith("credential_ref"):
+        return _ENV_VAR_NAME_RE.fullmatch(value) is not None or value.startswith("file://")
+    return False
 
 
 def load_agent_home_file(path: Path) -> AgentFile:

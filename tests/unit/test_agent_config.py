@@ -70,6 +70,82 @@ def test_agent_file_defaults() -> None:
     assert af.bindings.users == []
 
 
+def test_agent_file_accepts_typed_intelligence_config() -> None:
+    doc = _valid_doc()
+    doc.update(
+        {
+            "vector_store": {"backend": "sqlite", "database_url": "sqlite:///data/vector.db"},
+            "embedding": {
+                "backend": "http",
+                "dimensions": 1024,
+                "endpoint_env": "FLEETENT_EVAL_EMBEDDING_ENDPOINT",
+                "model_env": "FLEETENT_EVAL_EMBEDDING_MODEL",
+                "api_key_env": "FLEETENT_EVAL_EMBEDDING_API_KEY",
+            },
+            "rerank": {
+                "backend": "http",
+                "endpoint_env": "FLEETENT_EVAL_RERANK_ENDPOINT",
+                "model_env": "FLEETENT_EVAL_RERANK_MODEL",
+                "api_key_env": "FLEETENT_EVAL_RERANK_API_KEY",
+            },
+            "knowledge_base": {
+                "enabled": True,
+                "default_tenant_id": "pilot-tenant",
+                "default_kb_id": "pilot-kb",
+                "google_drive": {
+                    "connectors": [
+                        {
+                            "connector_id": "pilot-drive",
+                            "tenant_id": "pilot-tenant",
+                            "kb_id": "pilot-kb",
+                            "folder_id": "folder-123",
+                            "access_token_env": "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN",
+                            "refresh_token_env": "FLEETENT_GOOGLE_DRIVE_REFRESH_TOKEN",
+                            "client_id_env": "FLEETENT_GOOGLE_DRIVE_CLIENT_ID",
+                            "client_secret_env": "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET",
+                        }
+                    ]
+                },
+                "confluence": {
+                    "connectors": [
+                        {
+                            "connector_id": "pilot-confluence",
+                            "tenant_id": "pilot-tenant",
+                            "kb_id": "pilot-kb",
+                            "base_url": "https://example.atlassian.net/wiki",
+                            "username_env": "FLEETENT_CONFLUENCE_USERNAME",
+                            "scope_type": "page",
+                            "page_id": 123,
+                            "api_token_env": "FLEETENT_CONFLUENCE_TOKEN",
+                        }
+                    ]
+                },
+            },
+            "long_term_ctx": {
+                "max_tokens": 2048,
+                "memory_max_tokens": 1024,
+                "knowledge_max_tokens": 1024,
+                "conflict_preference": "auto",
+            },
+        }
+    )
+
+    af = agent_config.AgentFile.model_validate(doc)
+
+    assert af.vector_store.backend == "sqlite"
+    assert af.embedding.dimensions == 1024
+    assert af.embedding.api_key_env == "FLEETENT_EVAL_EMBEDDING_API_KEY"
+    assert af.rerank.model_env == "FLEETENT_EVAL_RERANK_MODEL"
+    assert af.knowledge_base.default_tenant_id == "pilot-tenant"
+    assert af.knowledge_base.google_drive.connectors[0].client_secret_env == (
+        "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET"
+    )
+    assert af.knowledge_base.confluence.connectors[0].api_token_env == (
+        "FLEETENT_CONFLUENCE_TOKEN"
+    )
+    assert af.long_term_ctx.conflict_preference == "auto"
+
+
 @pytest.mark.parametrize("missing", ["name", "version"])
 def test_agent_file_missing_required_rejected(missing: str) -> None:
     doc = _valid_doc()
@@ -320,3 +396,7 @@ def test_repo_agent_yaml_example_loads_as_home_file() -> None:
     agent = agent_config.load_agent_home_file(example)
     assert agent.name  # non-empty
     assert agent.version >= 1
+    assert agent.vector_store.backend == "sqlite"
+    assert agent.embedding.api_key_env == "FLEETENT_EVAL_EMBEDDING_API_KEY"
+    assert agent.rerank.api_key_env == "FLEETENT_EVAL_RERANK_API_KEY"
+    assert agent.knowledge_base.enabled is True
