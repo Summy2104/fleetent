@@ -18,28 +18,28 @@
 
 ## 4. Frontend — Agents card grid + toolbar
 
-- [ ] 4.1 Replace the `#tab-agents` table with a card grid (`connector-grid`/`#ag-grid`), a toolbar (search + status filter tabs) and a result count, mirroring Skills
-- [ ] 4.2 Rewrite `loadAgents()`/`renderAgents()` to fetch once and render `agentCardHtml()` cards with status/provenance pills + quick actions; preserve `data-tab="agents"` and admin/viewer gating
+- [x] 4.1 Replace the `#tab-agents` table with a card grid (`connector-grid`/`#ag-grid`), a toolbar (search + status filter tabs) and a result count, mirroring Skills
+- [x] 4.2 Rewrite `loadAgents()`/`renderAgents()` to fetch once and render `agentCardHtml()` cards with status/provenance pills + quick actions; preserve `data-tab="agents"` and admin/viewer gating
 
 ## 5. Frontend — agent detail drawer (CRUD + versions)
 
-- [ ] 5.1 Add `#ag-drawer` (reuse `.conn-drawer` classes) opened on card click: metadata (system prompt, allowed tools, model overrides, status, provenance), lifecycle actions (enable/disable/archive/restore/delete/clone), and a Versions section with activate
-- [ ] 5.2 Wire **edit**: action in the drawer reads `GET /admin/agents/{name}` to prefill the edit modal and saves via `PATCH /admin/agents/{name}`; create modal keeps the required-template flow
+- [x] 5.1 Add `#ag-drawer` (reuse `.conn-drawer` classes) opened on card click: metadata (system prompt, allowed tools, model overrides, status, provenance), lifecycle actions (enable/disable/archive/restore/delete/clone), and a Versions section with activate
+- [x] 5.2 Wire **edit**: action in the drawer reads `GET /admin/agents/{name}` to prefill the edit modal and saves via `PATCH /admin/agents/{name}`; create modal keeps the required-template flow
 
 ## 6. Frontend — binding management sections in the drawer
 
-- [ ] 6.1 Skills section: bound list + toggle via `GET /admin/agents/{name}/skills` + `PUT /admin/agents/{name}/skills/{skill}`
-- [ ] 6.2 Connectors section: MCP servers (options `GET /admin/mcp/servers`, state `GET /admin/agents/{name}/bindings`, `POST`/`DELETE .../bindings/mcp/{id}`) and OAuth connectors (options `GET /admin/connectors`, state + toggle via the new OAuth binding endpoints)
-- [ ] 6.3 Knowledge bases section: bound-KB list + bind/unbind via `/admin/agents/{name}/kbs`
-- [ ] 6.4 IM section: user bindings and channel bindings list + bind/unbind via the existing user/channel endpoints
-- [ ] 6.5 Remove the old `#ag-bind-modal` / `#ag-modal` bindings flow and all dead `agOpenBind`/`ag-bind-*` references
+- [x] 6.1 Skills section: bound list + toggle via `GET /admin/agents/{name}/skills` + `PUT /admin/agents/{name}/skills/{skill}`
+- [x] 6.2 Connectors section: MCP servers (options `GET /admin/mcp/servers`, state `GET /admin/agents/{name}/bindings`, `POST`/`DELETE .../bindings/mcp/{id}`) and OAuth connectors (options `GET /admin/connectors`, state + toggle via the new OAuth binding endpoints)
+- [x] 6.3 Knowledge bases section: bound-KB list + bind/unbind via `/admin/agents/{name}/kbs`
+- [x] 6.4 IM section: user bindings and channel bindings list + bind/unbind via the existing user/channel endpoints
+- [x] 6.5 Remove the old `#ag-bind-modal` / `#ag-modal` bindings flow and all dead `agOpenBind`/`ag-bind-*` references
 
 ## 7. Tests + cleanup
 
-- [ ] 7.1 Update `tests/integration/test_admin_console_ui.py` agent assertions to the new card/drawer markup + binding sections (drop table/old-modal assertions); keep nav/tab hooks
-- [ ] 7.2 `uv run pytest -x -q` (full suite) green; `uv run ruff check src tests` and `uv run mypy src` show no new issues from this change
+- [x] 7.1 Update `tests/integration/test_admin_console_ui.py` agent assertions to the new card/drawer markup + binding sections (drop table/old-modal assertions); keep nav/tab hooks
+- [x] 7.2 `uv run pytest -x -q` (full suite) green; `uv run ruff check src tests` and `uv run mypy src` show no new issues from this change
 
 ## 8. Verify
 
-- [ ] 8.1 Browser-verify: agent card grid + search/filter; drawer CRUD + edit; each binding section (skills, MCP + OAuth connectors, KB, IM) manages its bound list; viewer gating
+- [x] 8.1 Browser-verify: agent card grid + search/filter; drawer CRUD + edit; each binding section (skills, MCP + OAuth connectors, KB, IM) manages its bound list; viewer gating
 - [ ] 8.2 Archive the change on the feature branch (`/opsx:archive`) after all checkboxes are `[x]`

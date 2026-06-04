@@ -175,10 +175,30 @@ def test_providers_write_controls_admin_gated():
 def test_agents_tab_and_list_wiring():
     html = ADMIN_HTML
     assert 'id="tab-agents"' in html
-    assert "ag-body" in html
-    assert 'api("GET", "/agents"' in html
+    # card grid + toolbar replaced the legacy table
+    assert 'id="ag-grid"' in html
+    assert 'id="ag-tabs"' in html
+    assert 'id="ag-filter"' in html
+    assert "function agentCardHtml" in html
+    assert 'api("GET", "/agents?include_archived=true")' in html
     assert "LOADERS.agents" in html
     assert "/agent-templates" in html
+
+
+def test_agents_detail_drawer_and_binding_sections():
+    html = ADMIN_HTML
+    # detail drawer replaces the bind/deploy modals
+    assert 'id="ag-drawer"' in html
+    assert "function agDrawer" in html
+    assert 'id="ag-bind-modal"' not in html
+    assert 'id="ag-deploy-modal"' not in html
+    # every binding section is wired in the drawer
+    assert "function agSetSkill" in html
+    assert "function agToggleMcp" in html
+    assert "function agToggleOauth" in html
+    assert "function agAddKb" in html and "function agUnbindKb" in html
+    for frag in ("/skills/", "/bindings/mcp/", "/bindings/oauth/", "/kbs"):
+        assert frag in html, frag
 
 
 def test_agents_lifecycle_functions_present():
@@ -386,26 +406,20 @@ def test_agents_crud_row_actions_admin_gated():
     assert "agDelete(" in body
 
 
-def test_agents_row_actions_in_overflow_menu():
+def test_agents_drawer_lifecycle_actions_present_and_gated():
     html = ADMIN_HTML
-    body = html.split("function renderAgents()", 1)[1].split("function agShowTemplates", 1)[0]
-    # actions collapsed into a … overflow menu (reuses shared .menu / toggleMenu pattern)
-    assert 'class="menu"' in body
-    assert "toggleMenu(" in body
-    assert "menu-items" in body
-    # all existing actions still reachable from the menu
+    body = html.split("function agRenderDrawer", 1)[1].split("async function agSetSkill", 1)[0]
+    # lifecycle actions live in the drawer, admin-gated behind IS_VIEWER
+    assert "IS_VIEWER" in body
     for fn in (
-        "agObservability(",
-        "agVersions(",
         "agEdit(",
-        "agOpenBind(",
         "agOpenClone(",
         "agArchive(",
+        "agRestore(",
         "agDelete(",
+        "agActivateVersion(",
     ):
         assert fn in body, fn
-    # admin-only items still gated
-    assert "IS_VIEWER" in body
 
 
 def test_overflow_menu_escapes_scroll_clipping():
@@ -417,33 +431,23 @@ def test_overflow_menu_escapes_scroll_clipping():
     assert '"fixed"' in fn or "'fixed'" in fn
 
 
-def test_agents_deploy_action_present():
+def test_agents_im_binding_in_drawer():
     html = ADMIN_HTML
-    body = html.split("function renderAgents()", 1)[1].split("function agShowTemplates", 1)[0]
-    # Deploy menu item
-    assert "agDeploy(" in body
-    # deploy dialog + handler posting the channel-binding endpoint
-    assert 'id="ag-deploy-modal"' in html
-    assert "function agDeploy" in html
-    deploy = html.split("function agDeploy", 1)[1].split("LOADERS.agents", 1)[0]
-    assert "/bindings/channels/" in deploy
+    # IM channel binding moved into the drawer (deploy modal removed)
+    assert 'id="ag-deploy-modal"' not in html
+    assert "function agBindChannel" in html
+    chfn = html.split("async function agBindChannel", 1)[1].split("async function", 1)[0]
+    assert "/bindings/channels/" in chfn
 
 
-def test_bindings_modal_has_skill_mcp_channel_sections():
+def test_drawer_loads_from_aggregate_endpoints():
     html = ADMIN_HTML
-    modal = html.split('id="ag-bind-modal"', 1)[1].split("</div>\n  </div>", 1)[0]
-    # dedicated containers the loader renders into
-    assert 'id="ag-bind-skills"' in modal
-    assert 'id="ag-bind-mcp"' in modal
-    assert 'id="ag-bind-channels"' in modal
-
-
-def test_bindings_modal_loads_from_aggregate_endpoints():
-    html = ADMIN_HTML
-    fn = html.split("function agOpenBind", 1)[1].split("function agCloseBind", 1)[0]
-    # opening the modal pulls the aggregate bindings + skills lists
-    assert "/bindings`" in fn or "/bindings'" in fn
-    assert "/skills`" in fn or "/skills'" in fn
+    fn = html.split("async function agDrawer", 1)[1].split("function agDrawerSection", 1)[0]
+    # opening the drawer pulls every per-agent binding list in one fan-out
+    for frag in ("/bindings`", "/skills`", "/kbs`", "/bindings/oauth`", "/versions`"):
+        assert frag in fn, frag
+    # plus the available-option catalogs
+    assert '"/mcp/servers"' in fn and '"/connectors"' in fn and '"/kb"' in fn
 
 
 def test_bindings_skill_toggle_wired_to_put():
@@ -454,20 +458,18 @@ def test_bindings_skill_toggle_wired_to_put():
     assert "enabled" in fn
 
 
-def test_bindings_mcp_toggle_wired_to_post_delete():
+def test_bindings_mcp_and_oauth_toggle_wired_to_post_delete():
     html = ADMIN_HTML
-    bindfn = html.split("function agBindMcp", 1)[1].split("\nasync function", 1)[0]
-    assert '"POST"' in bindfn or "'POST'" in bindfn
-    assert "/bindings/mcp/" in bindfn
-    unbindfn = html.split("function agUnbindMcp", 1)[1].split("\nasync function", 1)[0]
-    assert '"DELETE"' in unbindfn or "'DELETE'" in unbindfn
-    assert "/bindings/mcp/" in unbindfn
+    mcp = html.split("async function agToggleMcp", 1)[1].split("\nasync function", 1)[0]
+    assert "POST" in mcp and "DELETE" in mcp and "/bindings/mcp/" in mcp
+    oauth = html.split("async function agToggleOauth", 1)[1].split("\nasync function", 1)[0]
+    assert "POST" in oauth and "DELETE" in oauth and "/bindings/oauth/" in oauth
 
 
 def test_bindings_write_controls_viewer_gated():
     html = ADMIN_HTML
-    # the skill + mcp render helpers gate their toggles behind IS_VIEWER
-    render = html.split("function agRenderBindings", 1)[1].split("function agCloseBind", 1)[0]
+    # the drawer render helper gates every binding control behind IS_VIEWER
+    render = html.split("function agRenderDrawer", 1)[1].split("async function agSetSkill", 1)[0]
     assert "IS_VIEWER" in render
 
 
@@ -825,7 +827,7 @@ def test_tables_wrapped_in_scroll_container():
     html = ADMIN_HTML
     # every data table lives inside a horizontal scroll container
     assert html.count('class="table-scroll"') >= html.count("<table>")
-    assert html.count("<table>") >= 13
+    assert html.count("<table>") >= 12
 
 
 def test_empty_and_loading_state_helpers_present():
