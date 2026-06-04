@@ -7,9 +7,9 @@
 
 ## 2. Agent-local approval store
 
-- [ ] 2.1 Write failing unit tests: local approval store under agent home `data/` —
+- [x] 2.1 Write failing unit tests: local approval store under agent home `data/` —
   add/approve/list/contains; survives reload; isolated per agent (tmp home).
-- [ ] 2.2 Implement the agent-local approval store (json under home `data/`, injectable
+- [x] 2.2 Implement the agent-local approval store (json under home `data/`, injectable
   path). Make 2.1 green.
 
 ## 2b. Local IM user identity (no platform user_store)
