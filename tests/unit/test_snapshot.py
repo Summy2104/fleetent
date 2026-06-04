@@ -56,9 +56,7 @@ def _index(**overrides: Any) -> AgentConfigIndex:
 
 
 def test_snapshot_from_file_maps_fields_and_mcp() -> None:
-    agent = _agent_file(
-        mcp_servers=[McpServerSettings(id="github"), McpServerSettings(id="slack")]
-    )
+    agent = _agent_file(mcp_servers=[McpServerSettings(id="github"), McpServerSettings(id="slack")])
     snap = snapshot._snapshot_from_file(agent)
     assert snap.agent_id == "support"
     assert snap.name == "support"
@@ -78,9 +76,7 @@ def test_snapshot_from_file_no_mcp_servers_yields_none() -> None:
 
 def test_load_active_returns_snapshot(monkeypatch: Any) -> None:
     agent = _agent_file()
-    monkeypatch.setattr(
-        agent_config, "current", lambda: _index(agents={"support": agent})
-    )
+    monkeypatch.setattr(agent_config, "current", lambda: _index(agents={"support": agent}))
     snap = snapshot.load_active("support")
     assert snap is not None
     assert snap.name == "support"
@@ -114,16 +110,12 @@ def test_load_active_db_returns_active_version(monkeypatch: Any) -> None:
 
 
 def test_load_active_db_none_when_no_active(monkeypatch: Any) -> None:
-    monkeypatch.setattr(
-        agent_store, "list_versions", lambda name: [_version(is_active=False)]
-    )
+    monkeypatch.setattr(agent_store, "list_versions", lambda name: [_version(is_active=False)])
     assert snapshot.load_active_db("support") is None
 
 
 def test_load_version_by_name_found(monkeypatch: Any) -> None:
-    monkeypatch.setattr(
-        agent_store, "get_by_name_version", lambda name, v: _version(version=v)
-    )
+    monkeypatch.setattr(agent_store, "get_by_name_version", lambda name, v: _version(version=v))
     snap = snapshot.load_version_by_name("support", 5)
     assert snap is not None and snap.version == 5
 
@@ -198,9 +190,7 @@ def test_resolve_mcp_servers_overlays_agent_on_defaults(monkeypatch: Any) -> Non
         name="support",
         mcp_servers=[McpServerSettings(id="github", url="http://agent")],
     )
-    monkeypatch.setattr(
-        agent_config, "current", lambda: _index(agents={"support": agent})
-    )
+    monkeypatch.setattr(agent_config, "current", lambda: _index(agents={"support": agent}))
     defaults = [{"id": "github", "url": "http://default"}, {"id": "jira"}]
     snap = snapshot._snapshot_from_file(agent)
     merged = snapshot.resolve_mcp_servers(snap, defaults)

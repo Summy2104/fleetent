@@ -38,7 +38,7 @@
 - [x] 3.2 Verify green: 运行 `uv run pytest tests/integration -x -q`，确认迁移后的 integration 层通过
   - 2026-06-05: `1400 passed in 111.91s`.
 - [x] 3.3 Verify green: 运行 `uv run pytest -x -q`，确认完整测试仍通过
-  - 2026-06-05: `3107 passed, 14 skipped in 136.34s`.
+  - 2026-06-05: `3107 passed, 14 skipped in 134.29s`.
 
 ## 4. 文档和 CI 辅助
 
@@ -53,14 +53,13 @@
 ## 5. 收尾
 
 - [x] 5.1 运行 `uv run ruff format src tests scripts`
-- [ ] 5.2 运行 `uv run ruff check src tests scripts`
-  - 2026-06-04: failed on pre-existing unrelated lint issues in
-    `src/fleetent/platform/model_provider_management/provider_admin_store.py` and
-    `src/fleetent/platform/model_provider_management/provider_connectivity.py`.
-- [ ] 5.3 运行 `uv run mypy src`
-  - 2026-06-04: failed on existing production typing issues across 18 files.
+  - 2026-06-05: `11 files reformatted, 461 files left unchanged`.
+- [x] 5.2 运行 `uv run ruff check src tests scripts`
+  - 2026-06-05: `All checks passed!`
+- [x] 5.3 运行 `uv run mypy src`
+  - 2026-06-05: `Success: no issues found in 194 source files`.
 - [x] 5.4 运行 `uv run pytest -x -q`
-  - 2026-06-05: `3107 passed, 14 skipped in 136.34s`.
+  - 2026-06-05: `3107 passed, 14 skipped in 134.29s`.
 - [x] 5.5 运行 `uv run python scripts/check_test_layers.py`
 - [x] 5.6 运行 `openspec validate clarify-test-layer-boundaries --strict`
 - [x] 5.7 运行 `git diff --check`

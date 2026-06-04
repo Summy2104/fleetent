@@ -154,8 +154,10 @@ def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
         "knowledge_base": agent.knowledge_base.model_dump(),
     }
     for key, value in _flatten(payload):
-        if isinstance(value, str) and _looks_inline_secret(value) and not _is_env_reference(
-            key, value
+        if (
+            isinstance(value, str)
+            and _looks_inline_secret(value)
+            and not _is_env_reference(key, value)
         ):
             raise ValueError(
                 f"inline secret-like value in agent '{agent.name}' at '{key}' ({path}); "

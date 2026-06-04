@@ -480,7 +480,7 @@ async def _authenticate(authorization: str = Header()) -> tuple[user_store.User,
 
 @app.get("/health")
 async def health(request: Request) -> dict:  # type: ignore[type-arg]
-    settings = Settings()
+    settings = Settings()  # type: ignore[call-arg]
     # SB3: surface the effective sandbox mode resolved at startup; default to off
     # when the state is somehow unset (e.g. lifespan not run) so we never crash.
     mode: Mode = getattr(request.app.state, "sandbox_mode", Mode.OFF)
@@ -526,7 +526,7 @@ async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # t
 async def chat(
     req: ChatRequest,
     request: Request,
-    auth_result: tuple[user_store.User, dict] = Depends(_authenticate),
+    auth_result: tuple[user_store.User, dict[str, Any]] = Depends(_authenticate),
     x_platform: str | None = Header(default=None),
     x_channel_id: str | None = Header(default=None),
 ) -> StreamingResponse:

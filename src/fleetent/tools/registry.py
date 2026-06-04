@@ -8,9 +8,11 @@ import inspect
 import json
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, overload
+from typing import Any, cast, overload
 
 ToolSchema = dict[str, Any]
+ToolReturn = str | Coroutine[Any, Any, str]
+ToolFn = Callable[..., ToolReturn]
 
 
 @dataclass
@@ -45,7 +47,7 @@ _connectors: dict[str, tuple[str, list[str]]] = {}
 
 
 @overload
-def tool[F: Callable[..., str]](fn: F) -> F: ...
+def tool[F: ToolFn](fn: F) -> F: ...
 
 
 @overload
@@ -56,11 +58,11 @@ def tool(
     scopes: list[str] | None = None,
     timeout: float | None = None,
     self_truncates: bool = False,
-) -> Callable[[Callable[..., str]], Callable[..., str]]: ...
+) -> Callable[[ToolFn], ToolFn]: ...
 
 
 def tool(
-    fn: Callable[..., str] | None = None,
+    fn: ToolFn | None = None,
     *,
     risk_level: str = "none",
     connector: str | None = None,
@@ -77,7 +79,7 @@ def tool(
     is stored parallel to risk_level and never enters the LLM-facing schema.
     """
 
-    def _register(target: Callable[..., str]) -> Callable[..., str]:
+    def _register(target: ToolFn) -> ToolFn:
         _registry[target.__name__] = (target, _build_schema(target))
         _risk_levels[target.__name__] = risk_level
         if connector is not None:
@@ -235,7 +237,7 @@ def dispatch(
 
     connector_meta = get_connector(name)
     if connector_meta is None:
-        return fn(**kwargs)
+        return cast(ToolReturn, fn(**kwargs))
 
     from fleetent import connectors
 
@@ -248,7 +250,7 @@ def dispatch(
         )
     # Inject the client out-of-band (keyword-only, excluded from the schema); it
     # is never written back into kwargs, so it cannot reach the return value or trace.
-    return fn(**kwargs, client=cred.client)
+    return cast(ToolReturn, fn(**kwargs, client=cred.client))
 
 
 def _build_schema(fn: Callable[..., Any]) -> ToolSchema:

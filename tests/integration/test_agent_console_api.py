@@ -253,8 +253,16 @@ def _wire_real_store(monkeypatch):
         }
 
     def _create(
-        name, sp, at, sd=None, mids=None, mo=None, mn="default", template_id=None,
-        plugins=None, features=None,
+        name,
+        sp,
+        at,
+        sd=None,
+        mids=None,
+        mo=None,
+        mn="default",
+        template_id=None,
+        plugins=None,
+        features=None,
     ):
         agent_store.create_agent(
             name,
