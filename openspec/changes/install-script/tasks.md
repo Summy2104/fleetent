@@ -19,8 +19,8 @@
 
 ## 4. 配置模板拷贝（幂等）
 
-- [ ] 4.1 Write failing tests：fresh 时从 `.env.example`→`$FLEETENT_HOME/.env`、`config/*.yaml.example`→`$FLEETENT_HOME/config/*.yaml`；已存在时不覆盖（写哨兵内容后重跑，断言保留）；`--skip-config` 时不拷贝
-- [ ] 4.2 Implement：`copy_config_templates()` —— 「存在即跳过」语义（`[ -f x ] || cp`），受 `--skip-config` 短路，使测试转绿
+- [x] 4.1 Write failing tests：fresh 时从 `.env.example`→`$FLEETENT_HOME/.env`、`config/*.yaml.example`→`$FLEETENT_HOME/config/*.yaml`；已存在时不覆盖（写哨兵内容后重跑，断言保留）；`--skip-config` 时不拷贝
+- [x] 4.2 Implement：`copy_config_templates()` —— 「存在即跳过」语义（`[ -f x ] || cp`），受 `--skip-config` 短路，使测试转绿
 
 ## 5. Alembic 数据库初始化（幂等）
 

@@ -173,7 +173,29 @@ setup_home_env() {
         *) log_warn "~/.local/bin is not on your PATH — add it (e.g. 'uv tool update-shell') to run the fleetent command." ;;
     esac
 }
-copy_config_templates()  { :; }
+# Seed config from templates under FLEETENT_HOME. Never clobber existing files.
+copy_config_templates() {
+    if [ "$SKIP_CONFIG" = true ]; then
+        log_info "Skipping config templates (--skip-config)"
+        return 0
+    fi
+    mkdir -p "$FLEETENT_HOME/config"
+
+    if [ -f "$REPO_ROOT/.env.example" ] && [ ! -f "$FLEETENT_HOME/.env" ]; then
+        cp "$REPO_ROOT/.env.example" "$FLEETENT_HOME/.env"
+        log_success "Created $FLEETENT_HOME/.env"
+    fi
+
+    local example target
+    for example in "$REPO_ROOT"/config/*.yaml.example; do
+        [ -e "$example" ] || continue
+        target="$FLEETENT_HOME/config/$(basename "${example%.example}")"
+        if [ ! -f "$target" ]; then
+            cp "$example" "$target"
+            log_success "Created $target"
+        fi
+    done
+}
 init_db()                { :; }
 precheck_docker()        { :; }
 print_success()          { :; }

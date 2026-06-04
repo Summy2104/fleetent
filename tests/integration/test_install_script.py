@@ -211,3 +211,40 @@ def test_path_hint_when_local_bin_absent(tmp_path: Path) -> None:
     result = _run_env(["--skip-db", "--skip-config"], env, home)
 
     assert ".local/bin" in (result.stdout + result.stderr)
+
+
+def test_config_templates_copied_on_fresh_install(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
+
+    result = _run_env(["--skip-db"], env, home)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    fh = home / ".fleetent"
+    assert (fh / ".env").is_file()
+    assert (fh / "config" / "settings.yaml").is_file()
+    assert (fh / "config" / "mcp.servers.yaml").is_file()
+
+
+def test_existing_config_not_overwritten(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    fh = home / ".fleetent"
+    (fh / "config").mkdir(parents=True)
+    (fh / ".env").write_text("SENTINEL=keepme\n")
+    env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
+
+    _run_env(["--skip-db"], env, home)
+
+    assert (fh / ".env").read_text() == "SENTINEL=keepme\n"
+
+
+def test_skip_config_copies_nothing(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
+
+    _run_env(["--skip-db", "--skip-config"], env, home)
+
+    assert not (home / ".fleetent" / ".env").exists()
