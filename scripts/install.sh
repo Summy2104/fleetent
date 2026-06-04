@@ -196,7 +196,32 @@ copy_config_templates() {
         fi
     done
 }
-init_db()                { :; }
+# Initialize the SQLite DB under FLEETENT_HOME via Alembic (idempotent). Schema
+# lifecycle stays with Alembic — we only point it at the resolved DB path by
+# rewriting a transient copy of the repo's alembic.ini (no env.py changes).
+init_db() {
+    if [ "$SKIP_DB" = true ]; then
+        log_info "Skipping database init (--skip-db)"
+        return 0
+    fi
+    mkdir -p "$FLEETENT_HOME/data"
+    log_info "Initializing database (alembic upgrade head)..."
+
+    local tmp_ini
+    tmp_ini="$(mktemp)"
+    sed -e "s|^script_location = .*|script_location = $REPO_ROOT/migrations|" \
+        -e "s|^sqlalchemy.url = .*|sqlalchemy.url = sqlite:///$FLEETENT_HOME/data/fleetent.db|" \
+        "$REPO_ROOT/alembic.ini" > "$tmp_ini"
+
+    if uv run --project "$REPO_ROOT" alembic -c "$tmp_ini" upgrade head; then
+        log_success "Database ready at $FLEETENT_HOME/data/fleetent.db"
+    else
+        rm -f "$tmp_ini"
+        log_error "Alembic migration failed."
+        exit 1
+    fi
+    rm -f "$tmp_ini"
+}
 precheck_docker()        { :; }
 print_success()          { :; }
 

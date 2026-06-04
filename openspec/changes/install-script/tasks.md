@@ -24,8 +24,8 @@
 
 ## 5. Alembic 数据库初始化（幂等）
 
-- [ ] 5.1 Write failing tests：默认运行针对 `$FLEETENT_HOME/data` 调用 `alembic upgrade head` 并生成数据库；重复运行不报错、不破坏已有数据；`--skip-db` 时不运行 Alembic
-- [ ] 5.2 Implement：`init_db()` —— 针对 `FLEETENT_HOME/data` 运行 `alembic upgrade head`（复用 `alembic.ini`/`migrations/`，不自建建表逻辑），受 `--skip-db` 短路，使测试转绿
+- [x] 5.1 Write failing tests：默认运行针对 `$FLEETENT_HOME/data` 调用 `alembic upgrade head` 并生成数据库；重复运行不报错、不破坏已有数据；`--skip-db` 时不运行 Alembic
+- [x] 5.2 Implement：`init_db()` —— 针对 `FLEETENT_HOME/data` 运行 `alembic upgrade head`（复用 `alembic.ini`/`migrations/`，不自建建表逻辑），受 `--skip-db` 短路，使测试转绿
 
 ## 6. Docker 非阻断预检
 

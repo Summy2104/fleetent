@@ -72,6 +72,12 @@ def test_unknown_flag_fails_fast(tmp_path: Path) -> None:
 
 _FAKE_UV = """#!/bin/bash
 echo "uv $*" >> "$UV_LOG"
+# Dump the contents of any -c <file> arg (alembic config) so tests can inspect it.
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-c" ] && [ -f "$a" ]; then cat "$a" >> "$UV_LOG"; fi
+  prev="$a"
+done
 case "$1" in
   --version) echo "uv 0.5.0 (fake)" ;;
   python)
@@ -248,3 +254,41 @@ def test_skip_config_copies_nothing(tmp_path: Path) -> None:
     _run_env(["--skip-db", "--skip-config"], env, home)
 
     assert not (home / ".fleetent" / ".env").exists()
+
+
+def test_init_db_runs_alembic_against_fleetent_home(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    uv_log = tmp_path / "uv.log"
+    env = _fake_uv_env(home, tmp_path / "bin", uv_log)
+
+    result = _run_env(["--skip-config"], env, home)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    log = uv_log.read_text()
+    assert "alembic" in log and "upgrade head" in log
+    # The transient alembic config targets the FLEETENT_HOME database.
+    assert f"sqlite:///{home / '.fleetent' / 'data' / 'fleetent.db'}" in log
+    assert (home / ".fleetent" / "data").is_dir()
+
+
+def test_skip_db_does_not_run_alembic(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    uv_log = tmp_path / "uv.log"
+    env = _fake_uv_env(home, tmp_path / "bin", uv_log)
+
+    _run_env(["--skip-db", "--skip-config"], env, home)
+
+    assert "upgrade head" not in uv_log.read_text()
+
+
+def test_init_db_rerun_is_idempotent(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
+
+    r1 = _run_env(["--skip-config"], env, home)
+    r2 = _run_env(["--skip-config"], env, home)
+
+    assert r1.returncode == 0 and r2.returncode == 0
