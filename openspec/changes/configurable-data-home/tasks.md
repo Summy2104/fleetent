@@ -25,8 +25,8 @@
 
 ## 6. DATABASE_URL 旁路收编
 
-- [ ] 6.1 Write failing tests：`observability/traces.py` 等不再出现硬编码 `sqlite:///data/...`；`DATABASE_URL` 设置时优先生效、未设时默认从 `data_dir()` 派生（锁定优先级与默认值语义不变）
-- [ ] 6.2 Implement：将直接 `os.environ["DATABASE_URL"]` + 硬编码默认的读取点收编为经中心解析使测试转绿
+- [x] 6.1 Write failing tests：`observability/traces.py` 等不再出现硬编码 `sqlite:///data/...`；`DATABASE_URL` 设置时优先生效、未设时默认从 `data_dir()` 派生（锁定优先级与默认值语义不变）
+- [x] 6.2 Implement：将直接 `os.environ["DATABASE_URL"]` + 硬编码默认的读取点收编为经中心解析使测试转绿
 
 ## 7. 收尾
 
