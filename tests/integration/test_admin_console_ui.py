@@ -976,6 +976,21 @@ def test_add_connection_per_user_row():
     assert "IS_VIEWER" in body
 
 
+def test_edit_user_profile_modal_and_wiring():
+    html = ADMIN_HTML
+    # edit modal with name + email fields
+    assert 'id="edit-user-modal"' in html
+    assert 'id="eu-name"' in html and 'id="eu-email"' in html
+    # functions present and wired to PATCH /users/{id}
+    for fn in ("function openEditUser", "function closeEditUser", "function saveUser"):
+        assert fn in html, fn
+    save = html.split("async function saveUser", 1)[1].split("async function setRole", 1)[0]
+    assert 'api("PATCH", `/users/${id}`' in save
+    # admin-gated Edit action on each user row
+    body = _render_users_body(html)
+    assert "openEditUser('" in body and "IS_VIEWER" in body
+
+
 def test_connector_modal_retained():
     html = ADMIN_HTML
     assert 'id="conn-modal"' in html

@@ -922,6 +922,21 @@
     </div>
   </div>
 
+  <div id="edit-user-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3>Edit user</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="saveUser(); return false;">
+        <input id="eu-name" placeholder="nickname" autocomplete="off">
+        <input id="eu-email" placeholder="email" autocomplete="email">
+        <div id="edit-user-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="closeEditUser()">Cancel</button>
+          <button type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div id="bind-modal" class="modal hidden">
     <div class="modal-box" role="dialog" aria-modal="true">
       <h3>Bind IM identity to user</h3>
@@ -1601,6 +1616,7 @@ function renderUsers() {
         <div class="menu">
           <button class="small ghost" title="More actions" onclick="toggleMenu(this)">…</button>
           <div class="menu-items hidden">
+            ${IS_VIEWER ? "" : `<button onclick="openEditUser('${u.id}')">Edit</button>`}
             ${u.role === "admin"
               ? `<button onclick="setRole('${u.id}','viewer')">Make viewer</button>`
               : `<button onclick="setRole('${u.id}','admin')">Make admin</button>`}
@@ -1687,6 +1703,25 @@ async function createUser() {
   } catch (e) { $("users-err").textContent = e.message; }
 }
 
+function openEditUser(id) {
+  const u = (ALL_USERS || []).find(x => x.id === id);
+  if (!u) return;
+  $("edit-user-modal").dataset.id = id;
+  $("eu-name").value = u.name || "";
+  $("eu-email").value = u.email || "";
+  $("edit-user-err").textContent = "";
+  $("edit-user-modal").classList.remove("hidden");
+}
+function closeEditUser() { $("edit-user-modal").classList.add("hidden"); }
+async function saveUser() {
+  const id = $("edit-user-modal").dataset.id;
+  $("edit-user-err").textContent = "";
+  try {
+    await api("PATCH", `/users/${id}`, { name: $("eu-name").value, email: $("eu-email").value });
+    closeEditUser();
+    loadUsers();
+  } catch (e) { $("edit-user-err").textContent = e.message; }
+}
 async function setRole(id, role) { try { await api("PATCH", `/users/${id}/role`, { role }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
 async function block(id) { const reason = prompt("Reason for blocking?"); if (reason === null) return; try { await api("POST", `/users/${id}/block`, { reason }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
 async function unblock(id) { try { await api("POST", `/users/${id}/unblock`); loadUsers(); } catch (e) { toast(e.message, "error"); } }
