@@ -1,0 +1,46 @@
+# Self-contained agent definition for a deployed single agent.
+#
+# Layout: this file lives at the agent home root as `agent.yaml`
+#   (FLEETENT_HOME/agent.yaml — flat, no config/ subdirectory).
+# The deployed agent runtime reads ONLY this file + .env; data is local under
+# FLEETENT_HOME/data/. Secrets are NEVER inlined — reference them by env-var name.
+# (This template ends in `.example`; install.sh copies it to agent.yaml.)
+
+name: default                      # required; the agent's name
+version: 1                         # required
+
+# ── runtime definition ──
+system_prompt: |
+  You are a helpful assistant.
+model_overrides:
+  default: { provider: anthropic, model: claude-opus-4-8 }
+skills_dir: skills                 # null = global default skills dir
+allowed_skills: []                 # empty = no narrowing (all enabled skills visible)
+
+# ── tools / capabilities ──
+allowed_tools: ["search_*", "read_skill"]
+plugins: []
+features:
+  code_execution: false            # set true to expose the run_code sandbox tool
+
+# ── MCP servers (inline; secrets via env reference only) ──
+mcp_servers: []
+# Example:
+# mcp_servers:
+#   - id: acme
+#     transport: http
+#     url: https://acme.internal/mcp
+#     auth_type: bearer
+#     api_key_env: ACME_MCP_TOKEN   # env-var NAME, never the token value
+
+# ── connectors (per-agent IM ingress; tokens via env reference only) ──
+# connectors:
+#   slack:
+#     bot_token_env: SLACK_BOT_TOKEN   # env-var NAME (xoxb- token lives in .env)
+#     app_token_env: SLACK_APP_TOKEN   # env-var NAME (xapp- Socket Mode token)
+#     channels: []                     # optional filter; empty = respond everywhere
+
+# ── bindings (channel/user filters; the deployed single agent is always default) ──
+bindings:
+  channels: []
+  users: []
