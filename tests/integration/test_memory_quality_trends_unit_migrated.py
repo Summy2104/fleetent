@@ -113,8 +113,12 @@ def test_daily_buckets_count_user_memories_and_expiry(monkeypatch, tmp_path) -> 
     _insert_memory("x1", "u2", "identity", "carol", _ts(1))
 
     query = memory.MemoryQualityTrendQuery(
-        user_id="u1", scope_type=None, scope_id=None,
-        start_ts=_ts(1), end_ts=_ts(4), bucket="day",
+        user_id="u1",
+        scope_type=None,
+        scope_id=None,
+        start_ts=_ts(1),
+        end_ts=_ts(4),
+        bucket="day",
     )
     summary = memory.get_memory_quality_trend_summary(query)
 
@@ -135,8 +139,12 @@ def test_duplicate_candidate_counts(monkeypatch, tmp_path) -> None:
     _insert_memory("d3", "u1", "identity", "SAME FACT", _ts(2))
 
     query = memory.MemoryQualityTrendQuery(
-        user_id="u1", scope_type=None, scope_id=None,
-        start_ts=_ts(1), end_ts=_ts(4), bucket="day",
+        user_id="u1",
+        scope_type=None,
+        scope_id=None,
+        start_ts=_ts(1),
+        end_ts=_ts(4),
+        bucket="day",
     )
     summary = memory.get_memory_quality_trend_summary(query)
 
@@ -151,8 +159,12 @@ def test_shared_memory_and_weekly_bucketing(monkeypatch, tmp_path) -> None:
     _insert_shared(database, "s3", "context", _ts(2), scope_id="other")
 
     query = memory.MemoryQualityTrendQuery(
-        user_id=None, scope_type="team", scope_id="eng",
-        start_ts=_ts(1), end_ts=_ts(8), bucket="week",
+        user_id=None,
+        scope_type="team",
+        scope_id="eng",
+        start_ts=_ts(1),
+        end_ts=_ts(8),
+        bucket="week",
     )
     summary = memory.get_memory_quality_trend_summary(query)
 
@@ -178,13 +190,15 @@ def test_maintenance_proposals_counted(monkeypatch, tmp_path) -> None:
     ]
     from fleetent.intelligence import reflection
 
-    monkeypatch.setattr(
-        reflection, "list_memory_maintenance_proposals", lambda user_id: proposals
-    )
+    monkeypatch.setattr(reflection, "list_memory_maintenance_proposals", lambda user_id: proposals)
 
     query = memory.MemoryQualityTrendQuery(
-        user_id="u1", scope_type=None, scope_id=None,
-        start_ts=_ts(1), end_ts=_ts(4), bucket="day",
+        user_id="u1",
+        scope_type=None,
+        scope_id=None,
+        start_ts=_ts(1),
+        end_ts=_ts(4),
+        bucket="day",
     )
     summary = memory.get_memory_quality_trend_summary(query)
 
@@ -197,8 +211,12 @@ def test_maintenance_proposals_counted(monkeypatch, tmp_path) -> None:
 def test_proposals_skipped_without_user(monkeypatch, tmp_path) -> None:
     _patch_trend_db(monkeypatch, tmp_path)
     query = memory.MemoryQualityTrendQuery(
-        user_id=None, scope_type=None, scope_id=None,
-        start_ts=_ts(1), end_ts=_ts(4), bucket="day",
+        user_id=None,
+        scope_type=None,
+        scope_id=None,
+        start_ts=_ts(1),
+        end_ts=_ts(4),
+        bucket="day",
     )
     summary = memory.get_memory_quality_trend_summary(query)
     assert all(b.proposal_status_counts == {} for b in summary.buckets)

@@ -169,7 +169,11 @@ data/
 
 - 测试按成本和依赖范围分层：
   - `tests/unit/`：单模块行为，mock LLM、数据库、HTTP、sandbox 等外部依赖，作为新增单元测试默认位置
+    - unit 不得使用 FastAPI `TestClient` / app lifespan，不得运行 Alembic migration，不得导入
+      `tests.integration.*` helper，也不得验证真实 SQLite schema lifecycle / DB runtime orchestration
+    - `tmp_path` 可用于纯解析、配置路径、序列化和可注入文件边界
   - `tests/integration/`：多模块协作、SQLite/Alembic/FastAPI、observability trace / usage / logging 等需要真实本地组件的测试
+    - FastAPI `TestClient`、Alembic migration、migrated SQLite tables、store/runtime wiring 都属于 integration
   - `tests/e2e/`：启动服务或走 CLI/HTTP/IM 完整链路的端到端测试；默认不进入 PR 门禁，真实服务 smoke 需显式开启
   - `tests/evaluation/`：memory、reflection、long-term context、knowledge-base 等效果评估；不得接入真实 LLM / embedding 服务作为默认测试
 - 历史平铺测试已迁移到分层目录；不得继续向 `tests/` 根目录新增 `test_*.py`
@@ -177,6 +181,7 @@ data/
 - 每个测试函数只测一个行为，不在同一函数里断言多个不相关的事情
 - `permission_gate` 测试必须传短超时：`PermissionGate(medium_timeout=0.1)`
 - TDD 红绿循环优先运行最近相关分层命令，例如 `uv run pytest tests/unit -x -q` 或 `uv run pytest tests/integration -x -q`；收尾必须运行 `uv run pytest -x -q`
+- 涉及测试归位、测试层规则或新增 unit 测试时，收尾同时运行 `uv run python scripts/check_test_layers.py`
 
 ---
 
@@ -202,6 +207,7 @@ uv run pytest tests/unit         # 单元测试
 uv run pytest tests/integration  # 集成测试
 uv run pytest tests/e2e          # 端到端测试
 uv run pytest tests/evaluation   # 效果评估测试
+uv run python scripts/check_test_layers.py  # 检查 unit/integration 测试层边界
 uv run ruff check src tests      # lint
 uv run mypy src                  # 类型检查
 uv run fleetent "hello"        # CLI

@@ -9,7 +9,9 @@ from fleetent.runtime import snapshot
 def _write_home_agent(home, **overrides) -> None:
     doc = {"name": "deployed", "version": 1, "system_prompt": "You are deployed."}
     doc.update(overrides)
-    (home / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    config_dir = home / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
 
 
 def test_scan_publishes_single_home_agent(tmp_path, monkeypatch) -> None:

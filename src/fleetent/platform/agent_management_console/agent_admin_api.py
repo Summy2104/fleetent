@@ -112,8 +112,7 @@ def _build_agent_yaml(agent: agent_store.Agent) -> str:
 
     bindings: dict[str, Any] = {}
     channels = [
-        f"{c['platform']}:{c['channel_id']}"
-        for c in agent_store.list_channels_for_agent(agent.id)
+        f"{c['platform']}:{c['channel_id']}" for c in agent_store.list_channels_for_agent(agent.id)
     ]
     users = agent_store.list_users_for_agent(agent.id)
     if channels:

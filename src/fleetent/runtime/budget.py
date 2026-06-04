@@ -82,7 +82,7 @@ def _grace_defaults() -> tuple[float, int]:
     keeps this module import-light, mirroring termination._default_config."""
     from fleetent.config import Settings
 
-    s = Settings()
+    s = Settings()  # type: ignore[call-arg]
     return s.agent_grace_call_token_ratio, s.agent_grace_call_min_tokens
 
 
