@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from fleetent import paths
 from fleetent.config import DiagnosticsSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.observability.performance import PerformanceQuery, get_performance_summary
@@ -21,6 +22,10 @@ _SECRET_WORD_RE = re.compile(
     r"\b(token|secret|password|api[_-]?key|authorization|credential)[\s:=_-]+([^\s,;]+)",
     re.IGNORECASE,
 )
+
+
+def _default_data_dir() -> Path:
+    return paths.data_dir()
 
 
 @dataclass(frozen=True)
@@ -71,7 +76,7 @@ def export_diagnostics(request: DiagnosticsExportRequest | None = None) -> Diagn
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / f"diagnostics-{now.strftime('%Y%m%d-%H%M%S')}.zip"
     log_dir = req.log_dir or Path(settings.observability.logging.directory)
-    data_dir = req.data_dir or Path("data")
+    data_dir = req.data_dir or _default_data_dir()
 
     artifact_names: list[str] = []
     skipped_artifacts = _forbidden_skips(data_dir, req.secrets_dir)
@@ -135,7 +140,7 @@ def plan_diagnostics_retention(
     diagnostics = settings or _settings().diagnostics
     current = now or datetime.now(UTC)
     logs = _old_files(
-        log_dir or Path("data/logs"),
+        log_dir or _default_data_dir() / "logs",
         diagnostics.retention.logs_days,
         current,
         suffixes=(".log",),

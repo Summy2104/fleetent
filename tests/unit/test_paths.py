@@ -25,9 +25,7 @@ def _make_repo(root: Path) -> Path:
     return root
 
 
-def test_explicit_fleetent_home_wins(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_explicit_fleetent_home_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     home = tmp_path / "explicit"
     monkeypatch.setenv("FLEETENT_HOME", str(home))
     monkeypatch.chdir(tmp_path)  # cwd irrelevant when env is set
@@ -81,9 +79,7 @@ def test_explicit_home_overrides_repo_local(
     assert paths.base_dir() == override
 
 
-def test_derived_paths_under_data_dir(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_derived_paths_under_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     home = tmp_path / "h"
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 

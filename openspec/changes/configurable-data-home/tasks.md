@@ -30,6 +30,6 @@
 
 ## 7. 收尾
 
-- [ ] 7.1 全仓库 grep 确认无残留绕过 `paths.py` 的硬编码 `Path("data/...")`/`Path("config/...")`（diagnostics 展示用字符串等非路径解析点除外，需在 PR 说明）
-- [ ] 7.2 全量 `ANTHROPIC_API_KEY=sk-test-dummy uv run pytest -x -q` 通过；`uv run ruff format && uv run ruff check src tests`；`uv run mypy src` 不新增错误
-- [ ] 7.3 更新 CLAUDE.md 数据目录/Gotchas 段：记录 `FLEETENT_HOME` 与解析优先级，标注路径常量已收口到 `paths.py`
+- [x] 7.1 全仓库 grep 确认无残留绕过 `paths.py` 的硬编码 `Path("data/...")`/`Path("config/...")`（diagnostics 展示用字符串等非路径解析点除外，需在 PR 说明）
+- [x] 7.2 全量 `ANTHROPIC_API_KEY=sk-test-dummy uv run pytest -x -q` 通过；`uv run ruff format && uv run ruff check src tests`；`uv run mypy src` 不新增错误
+- [x] 7.3 更新 CLAUDE.md 数据目录/Gotchas 段：记录 `FLEETENT_HOME` 与解析优先级，标注路径常量已收口到 `paths.py`
