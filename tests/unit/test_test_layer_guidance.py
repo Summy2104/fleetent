@@ -22,3 +22,10 @@ def test_project_guidance_documents_test_layer_guard_and_unit_boundaries():
         assert "只读 legacy shim / public API / path constant" in text
     assert "scripts/check_test_layers.py" in makefile
     assert "DB-backed unit tests" in makefile
+
+
+def test_unit_ci_coverage_gate_keeps_required_scope_and_threshold():
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+
+    assert "uv run coverage run --source=src/fleetent -m pytest tests/unit" in makefile
+    assert "uv run coverage report --fail-under=75" in makefile
