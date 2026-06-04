@@ -15,8 +15,8 @@
 
 ## 4. 数据库与会话路径迁移
 
-- [ ] 4.1 Write failing tests：断言 `user_store.DB_PATH`、`session/index.DB_PATH`、`session/manager.SESSIONS_DIR` 从 `paths.py` 派生；文件名维持现状（`fleetent.db`/`users.db`/`sessions`，不改名）；既有 session/user_store 测试的 monkeypatch 隔离仍通过
-- [ ] 4.2 Implement：迁移 `user_store.py`、`session/index.py`、`session/manager.py` 使测试转绿
+- [x] 4.1 Write failing tests：断言 `user_store.DB_PATH`、`session/index.DB_PATH`、`session/manager.SESSIONS_DIR` 从 `paths.py` 派生；文件名维持现状（`fleetent.db`/`users.db`/`sessions`，不改名）；既有 session/user_store 测试的 monkeypatch 隔离仍通过
+- [x] 4.2 Implement：迁移 `user_store.py`、`session/index.py`、`session/manager.py` 使测试转绿
 
 ## 5. 其余配置型路径与 agent/cron/model 迁移
 
