@@ -140,9 +140,9 @@ data/
   users/{user_id}/memories.jsonl  # per-user 记忆（当前实现，v1.0 前迁移到 users.db）
 ```
 
-测试用 `tmp_path + monkeypatch` 隔离，绝不触碰 `data/`。
+测试用 `tmp_path + monkeypatch` 隔离，绝不触碰 `data/`。但 `tmp_path` 不决定测试层级：只要创建真实 DB file、验证 schema、执行 CRUD 或 store/runtime 协作，就属于 integration。
 
-**路径解析**：`config/` 与 `data/` 的实际位置由 `src/fleetent/paths.py` 统一解析（所有路径常量从 `config_dir()`/`data_dir()` 派生，禁止各模块自读家目录环境变量）。优先级：① `FLEETENT_HOME` 环境变量显式设置 → `$FLEETENT_HOME/{config,data}`；② 否则检测到仓库标记（CWD 含 `pyproject.toml` 的 `name="fleetent"` 或 `./config`）→ 仓库本地 `./config`+`./data`（**开发态零改动**）；③ 否则回退 `~/.fleetent/{config,data}`（全局安装态）。测试整体重定向可用 `monkeypatch.setenv("FLEETENT_HOME", tmp_path)`；单模块仍可 `monkeypatch.setattr(module, "DB_PATH", ...)`。
+**路径解析**：`config/` 与 `data/` 的实际位置由 `src/fleetent/paths.py` 统一解析（所有路径常量从 `config_dir()`/`data_dir()` 派生，禁止各模块自读家目录环境变量）。优先级：① `FLEETENT_HOME` 环境变量显式设置 → `$FLEETENT_HOME/{config,data}`；② 否则检测到仓库标记（CWD 含 `pyproject.toml` 的 `name="fleetent"` 或 `./config`）→ 仓库本地 `./config`+`./data`（**开发态零改动**）；③ 否则回退 `~/.fleetent/{config,data}`（全局安装态）。测试整体重定向可用 `monkeypatch.setenv("FLEETENT_HOME", tmp_path)`；只读 legacy shim / public API / path constant 兼容断言可直接检查常量或 monkeypatchability，但不得创建真实 DB。
 
 **Agent 配置加载**：部署的单体 agent 读 home 根的 `agent.yaml`（`paths.agent_file() = base_dir()/agent.yaml`，扁平、无 `config/`）。`agent_config.build_index()`：当 `agents_dir`/`FLEETENT_AGENTS_DIR` 均未指定且 home 根存在 `agent.yaml` 时，加载它为**唯一且强制 default** 的 agent（跳过目录名校验）；否则回退扫描 `config/agents/<name>/`（多 agent，平台/dev 用）。
 
@@ -153,7 +153,7 @@ data/
 ### 隔离模式
 
 - `conftest.py` 的 autouse `_isolate_fleetent_home` 把 `FLEETENT_HOME` 钉在临时目录——防止任何测试经 `~/.fleetent` 家目录回退泄漏到真实用户家目录（chdir 出仓库 + 未设 FLEETENT_HOME 时会触发）。测路径解析优先级的测试用自身 `monkeypatch` 覆盖它
-- 数据库测试优先使用统一 DB fixture 或 `tmp_path` 隔离；legacy store 迁移前可 `monkeypatch.setattr(module, "DB_PATH", tmp_path / "x.db")`
+- 数据库测试必须放在 `tests/integration/`，并使用统一 DB fixture 或 `tmp_path` 隔离；unit 只允许 mock 数据库或只读兼容断言
 - `monkeypatch.setattr(memory_layer, "_mem_path", ...)` — 记忆文件隔离
 - `patch("fleetent.memory_layer.get_client_and_config", ...)` — LLM 调用隔离
 - 所有 async 测试自动收集：`asyncio_mode = auto`（pytest.ini），无需 `@pytest.mark.asyncio`
@@ -161,7 +161,7 @@ data/
 ### Mock 策略
 
 - **LLM 调用必须 mock**：patch `get_client_and_config`，单元测试不允许真实 API 调用
-- **数据库必须隔离**：使用 `tmp_path` / 统一 DB fixture；legacy store 迁移前 monkeypatch `DB_PATH` 到 `tmp_path`
+- **数据库必须隔离**：真实 DB file、schema、CRUD 或 store/runtime 协作测试放在 integration，并使用 `tmp_path` / 统一 DB fixture
 - **文件路径必须隔离**：sessions、memories 路径同上
 - **外部 HTTP**（MCP、sandbox）：用 `respx` 或 `unittest.mock` mock，不发真实请求
 
@@ -171,7 +171,10 @@ data/
   - `tests/unit/`：单模块行为，mock LLM、数据库、HTTP、sandbox 等外部依赖，作为新增单元测试默认位置
     - unit 不得使用 FastAPI `TestClient` / app lifespan，不得运行 Alembic migration，不得导入
       `tests.integration.*` helper，也不得验证真实 SQLite schema lifecycle / DB runtime orchestration
-    - `tmp_path` 可用于纯解析、配置路径、序列化和可注入文件边界
+    - unit 不得导入 `sqlite3`、monkeypatch `DB_PATH` 后创建真实 DB file、调用生产 `_init_db()`，也不得用
+      `DATABASE_URL=sqlite:///...` 或 `create_database("sqlite:///...")` 验证 store/runtime 持久化
+    - `tmp_path` 只可用于纯解析、配置路径、序列化和可注入文件边界；一旦用于真实 DB file、schema、CRUD 或 store/runtime 协作，测试必须放在 integration
+    - 只读 legacy shim / public API / path constant 兼容断言可留在 unit
   - `tests/integration/`：多模块协作、SQLite/Alembic/FastAPI、observability trace / usage / logging 等需要真实本地组件的测试
     - FastAPI `TestClient`、Alembic migration、migrated SQLite tables、store/runtime wiring 都属于 integration
   - `tests/e2e/`：启动服务或走 CLI/HTTP/IM 完整链路的端到端测试；默认不进入 PR 门禁，真实服务 smoke 需显式开启
