@@ -1,9 +1,9 @@
 ## 1. Agent-runtime boot/app (factored from server.py)
 
-- [ ] 1.1 Write failing tests: an agent-runtime boot routine scans a single agent home,
+- [x] 1.1 Write failing tests: an agent-runtime boot routine scans a single agent home,
   starts that agent's IM connectors (mock adapters), starts session/MCP as needed, and
   exposes the agent loop — with no `/admin/*` and no dependency on the platform app.
-- [ ] 1.2 Factor the agent+IM boot out of `server.py` into an agent-scoped runtime
+- [x] 1.2 Factor the agent+IM boot out of `server.py` into an agent-scoped runtime
   (shared libs reused). Make 1.1 green; keep `uvicorn fleetent.server:app` still working.
 
 ## 2. `fleetent agent run` CLI

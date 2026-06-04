@@ -72,7 +72,19 @@
 
 ### Change 2: agent-runtime-cli
 
-（待开始）
+**D2.1 — 新建 `src/fleetent/runtime/agent_app.py` 承载 standalone agent runtime，不改 `server.py` 的 app/lifespan（任务 1.2 要求 `uvicorn fleetent.server:app` 继续可用）。**
+- runtime 复用既有共享件（`agent_config`、`SlackSupervisor`、`session.manager`、`mcp_client`、sandbox enablement、`run_stream`），但自带一个**精简 boot + 小 ASGI app**，不挂任何 `/admin/*`、不 import `server.py`。
+
+**D2.2 — boot 发布「单 agent 索引」。**
+- `agent run <agent-id>` 解析 home = `FLEETENT_HOME/<agent-id>/`（`--home PATH` 可覆盖），`load_agent_file` 加载该 home 的 `agent.yaml`，发布一个 forced-default 单 agent 索引（新增 `agent_config.scan_home(agent_dir)`，复用既有 `_single_agent_index`）。这样路由只解析到这一个 agent，符合「自包含单 agent 进程」。
+
+**D2.3 — IM 绑定：当前只起 slack（schema 里 `AgentConnectors` 仅有 `slack`）。**
+- proposal 写「Slack/Telegram」，但 `agent.yaml` 的 `AgentConnectors` 模型目前只有 `slack` 字段，没有 per-agent telegram。故 runtime 通过 `SlackSupervisor.start(agent_name)` 起该 agent 的 slack 连接；per-agent telegram 不在 home schema 内，**暂不纳入**（owner-level telegram 仍由平台侧管理，且平台 IM 将在 change 3 移除）。记录此偏离。
+
+**D2.4 — boot 的基础设施（sandbox 探测 / MCP 注册 / session 维护）走可注入开关 + 可 mock 的 seam，单测默认 `with_infra=False` + 注入 mock supervisor，避免触碰 docker/网络。**
+
+**D2.5 — `--port` 才挂 HTTP。**
+- `build_app(agent)` 构造只含 `/chat`(SSE，应用 home agent 的 system_prompt/allowed_tools/allowed_skills via `run_stream`)、`/ws`(复用 `tui.dispatch`)、`/health` 的小 app；无 `--port` 时根本不构造/不监听。auth 直接用 `user_store.authenticate`，不经由 `server.py` 的 `_authenticate`（避免平台依赖）。
 
 ### Change 3: platform-control-plane
 
