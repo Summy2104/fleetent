@@ -2677,6 +2677,7 @@ function agRenderPreview(name, a, yamlText) {
   const archived = a.status === "archived";
   const statusCls = a.status === "enabled" ? "active" : archived ? "" : "blocked";
   const lifecycle = IS_VIEWER ? "" : `
+    <button class="small" onclick="agDeploy('${esc(name)}')">🚀 Deploy</button>
     <button class="small" onclick="agEdit('${esc(name)}')">Edit</button>
     <button class="small ghost" onclick="agOpenClone('${esc(name)}')">Clone</button>
     ${a.status === "enabled"
@@ -2706,6 +2707,13 @@ function agRenderPreview(name, a, yamlText) {
 function agCopyYaml() {
   navigator.clipboard?.writeText(AG_YAML_CACHE);
   toast("Copied agent.yaml", "ok");
+}
+async function agDeploy(name) {
+  if (!await confirmDialog(`Deploy ${name}? Writes (overwrites) its agent.yaml into the runtime agents dir.`)) return;
+  try {
+    const r = await api("POST", `/agents/${encodeURIComponent(name)}/deploy`);
+    toast("Deployed → " + r.path, "ok");
+  } catch (e) { toast(e.message, "error"); }
 }
 function agDownloadYaml(name) {
   const blob = new Blob([AG_YAML_CACHE], { type: "text/yaml" });

@@ -464,6 +464,13 @@ def test_agent_export_yaml_wired():
     assert "agExportYaml(" in html  # button in the drawer
 
 
+def test_agent_deploy_wired():
+    html = ADMIN_HTML
+    assert "function agDeploy" in html
+    assert "/deploy" in html
+    assert "agDeploy(" in html  # button in the preview
+
+
 def test_agent_drawer_preview_is_readonly_yaml():
     html = ADMIN_HTML
     # clicking a card opens a read-only agent.yaml preview, not the editable sections

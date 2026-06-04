@@ -381,3 +381,46 @@ def test_export_agent_yaml_unknown_404(client):
     token, _ = _session_for("admin")
     r = client.get("/admin/agents/ghost/agent-yaml", headers=_hdr(token))
     assert r.status_code == 404
+
+
+# --- deploy agent.yaml to the runtime agents dir ------------------------------
+
+
+def test_deploy_writes_agent_yaml(client, tmp_path, monkeypatch):
+    import yaml as _yaml
+
+    agents_dir = tmp_path / "agents"
+    monkeypatch.setenv("FLEETENT_AGENTS_DIR", str(agents_dir))
+    agent_store.create_agent(
+        "dep-bot", "You are dep-bot.", ["read_file"], plugins=["p1"],
+        model_overrides={"default": {"provider": "anthropic", "model": "claude-opus-4-8"}},
+    )
+    token, _ = _session_for("admin")
+    r = client.post("/admin/agents/dep-bot/deploy", headers=_hdr(token))
+    assert r.status_code == 200, r.text
+    dest = agents_dir / "dep-bot" / "agent.yaml"
+    assert dest.exists()
+    assert r.json()["path"] == str(dest)
+    doc = _yaml.safe_load(dest.read_text())
+    assert doc["name"] == "dep-bot"
+    assert doc["allowed_tools"] == ["read_file"]
+    assert doc["plugins"] == ["p1"]
+
+    # redeploy overwrites in place after an edit
+    agent_store.create_version("dep-bot", system_prompt="changed")
+    r2 = client.post("/admin/agents/dep-bot/deploy", headers=_hdr(token))
+    assert r2.status_code == 200
+    assert "changed" in dest.read_text()
+
+
+def test_deploy_viewer_forbidden(client):
+    agent_store.create_agent("dep2", "x", [])
+    token, _ = _session_for("viewer")
+    r = client.post("/admin/agents/dep2/deploy", headers=_hdr(token))
+    assert r.status_code == 403
+
+
+def test_deploy_unknown_agent_404(client):
+    token, _ = _session_for("admin")
+    r = client.post("/admin/agents/ghost/deploy", headers=_hdr(token))
+    assert r.status_code == 404
