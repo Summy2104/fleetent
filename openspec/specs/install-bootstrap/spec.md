@@ -77,22 +77,20 @@ install script SHALL 将运行状态目录固定为 `FLEETENT_HOME`（默认 `~/
 - **THEN** script 使用 PATH 作为 `FLEETENT_HOME`，而非默认 `~/.fleetent`
 
 ### Requirement: Configuration templates
-install script SHALL 在 `FLEETENT_HOME` 根目录（扁平布局，无 `config/` 子目录）从模板创建运行所需文件，且不覆盖 operator 已有内容：seed 根目录 `agent.yaml`（自包含单体 agent 配置）与 `.env`。全局配置文件（settings/mcp/mcp.servers）不再 seed —— 各加载器在其缺失时回退默认值。
+install script SHALL seed `.env` at `FLEETENT_HOME/.env` and the self-contained single-agent config at `FLEETENT_HOME/config/agent.yaml` from repository templates, preserving existing operator files. Global settings/mcp templates remain unseeded.
 
-#### Scenario: Agent config and env seeded at home root on fresh install
-- **WHEN** `FLEETENT_HOME` 下不存在 `agent.yaml` 或 `.env`
-- **THEN** script 从 `config/agent.yaml.example` 创建 `$FLEETENT_HOME/agent.yaml`
-- **AND** 从 `.env.example` 创建 `$FLEETENT_HOME/.env`
-- **AND** 不创建 `$FLEETENT_HOME/config/` 子目录、不拷贝全局 `config/*.yaml`
+#### Scenario: Fresh install seeds config-dir agent yaml
+- **WHEN** `FLEETENT_HOME/config/agent.yaml` or `.env` is absent
+- **THEN** script creates `$FLEETENT_HOME/.env` from `.env.example`
+- **AND** creates `$FLEETENT_HOME/config/agent.yaml` from `config/agent.yaml.example`
 
-#### Scenario: Existing agent.yaml or .env is preserved
-- **WHEN** `$FLEETENT_HOME/agent.yaml` 或 `.env` 已存在
-- **THEN** script 不覆盖已有文件
-- **AND** 保留 operator 现有内容
+#### Scenario: Existing config-dir agent yaml or env is preserved
+- **WHEN** `$FLEETENT_HOME/config/agent.yaml` or `.env` already exists
+- **THEN** script leaves existing files unchanged
 
-#### Scenario: Skip config flag
-- **WHEN** operator 运行 install script with `--skip-config`
-- **THEN** script 不拷贝任何模板（既不 seed agent.yaml 也不 seed .env）
+#### Scenario: Skip config skips seeding
+- **WHEN** operator passes `--skip-config`
+- **THEN** script does not seed `config/agent.yaml` or `.env`
 
 ### Requirement: Database initialization
 install script SHALL 通过 Alembic 在 `FLEETENT_HOME/data` 下初始化 SQLite 数据库，使 schema lifecycle 统一归 Alembic 管理。

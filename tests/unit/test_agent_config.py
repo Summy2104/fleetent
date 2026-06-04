@@ -348,25 +348,27 @@ def test_long_system_prompt_not_flagged_as_secret(tmp_path) -> None:
     assert index.get("support") is not None
 
 
-# ── single-file agent home (single-agent-config-file change) ──────────────────
+# ── single-file agent config (single-agent-config-file change) ────────────────
 
 
-def _write_home_agent(home, name: str, **overrides) -> None:
-    """Write a home-root agent.yaml (no <name>/ subdir)."""
+def _write_config_agent(home, name: str, **overrides) -> None:
+    """Write a config-dir agent.yaml (no <name>/ subdir)."""
     doc = {"name": name, "version": 1}
     doc.update(overrides)
-    (home / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    config_dir = home / "config"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
 
 
-def test_load_agent_home_file_skips_dir_name_check(tmp_path) -> None:
-    # Home-root agent.yaml: `name` need not match any directory name.
-    _write_home_agent(tmp_path, "whatever-name")
-    agent = agent_config.load_agent_home_file(tmp_path / "agent.yaml")
+def test_load_single_agent_file_skips_dir_name_check(tmp_path) -> None:
+    # Config-dir single-agent file: `name` need not match any directory name.
+    _write_config_agent(tmp_path, "whatever-name")
+    agent = agent_config.load_agent_home_file(tmp_path / "config" / "agent.yaml")
     assert agent.name == "whatever-name"
 
 
-def test_load_agent_home_file_still_rejects_inline_secret(tmp_path) -> None:
-    _write_home_agent(
+def test_load_single_agent_file_still_rejects_inline_secret(tmp_path) -> None:
+    _write_config_agent(
         tmp_path,
         "support",
         mcp_servers=[
@@ -380,18 +382,18 @@ def test_load_agent_home_file_still_rejects_inline_secret(tmp_path) -> None:
         ],
     )
     with pytest.raises(ValueError):
-        agent_config.load_agent_home_file(tmp_path / "agent.yaml")
+        agent_config.load_agent_home_file(tmp_path / "config" / "agent.yaml")
 
 
-def test_build_index_prefers_home_file_as_sole_default(tmp_path, monkeypatch) -> None:
+def test_build_index_prefers_config_agent_file_as_sole_default(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()
     # A multi-scan agents dir also exists; it must be ignored when home file is present.
     agents_dir = home / "config" / "agents"
     agents_dir.mkdir(parents=True)
     _write_agent(agents_dir, "other")
-    # Home-root agent.yaml, bindings.default false -> still forced default.
-    _write_home_agent(home, "deployed", bindings={"default": False, "channels": ["slack:C9"]})
+    # Config-dir agent.yaml, bindings.default false -> still forced default.
+    _write_config_agent(home, "deployed", bindings={"default": False, "channels": ["slack:C9"]})
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
     index = agent_config.build_index()
@@ -402,14 +404,16 @@ def test_build_index_prefers_home_file_as_sole_default(tmp_path, monkeypatch) ->
     assert index.get("other") is None
 
 
-def test_build_index_falls_back_to_multiscan_without_home_file(tmp_path, monkeypatch) -> None:
+def test_build_index_falls_back_to_multiscan_without_config_agent_file(
+    tmp_path, monkeypatch
+) -> None:
     home = tmp_path / "home"
     home.mkdir()
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
     _write_agent(agents_dir, "a", bindings={"default": True})
     _write_agent(agents_dir, "b")
-    monkeypatch.setenv("FLEETENT_HOME", str(home))  # no home-root agent.yaml
+    monkeypatch.setenv("FLEETENT_HOME", str(home))  # no config/agent.yaml
     monkeypatch.setenv("FLEETENT_AGENTS_DIR", str(agents_dir))  # explicit multi-scan dir
 
     index = agent_config.build_index()
@@ -418,8 +422,8 @@ def test_build_index_falls_back_to_multiscan_without_home_file(tmp_path, monkeyp
     assert index.default == "a"  # multiscan: default decided by bindings.default
 
 
-def test_repo_agent_yaml_example_loads_as_home_file() -> None:
-    """The shipped single-agent root template parses with the home-file loader."""
+def test_repo_agent_yaml_example_loads_as_single_agent_file() -> None:
+    """The shipped single-agent template parses with the single-file loader."""
     from pathlib import Path
 
     repo = Path(__file__).resolve().parents[2]

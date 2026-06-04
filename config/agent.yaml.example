@@ -1,10 +1,10 @@
 # Self-contained agent definition for a deployed single agent.
 #
-# Layout: this file lives at the agent home root as `agent.yaml`
-#   (FLEETENT_HOME/agent.yaml — flat, no config/ subdirectory).
+# Layout: this file lives at `config/agent.yaml`
+#   (FLEETENT_HOME/config/agent.yaml for deployed installs).
 # The deployed agent runtime reads ONLY this file + .env; data is local under
 # FLEETENT_HOME/data/. Secrets are NEVER inlined — reference them by env-var name.
-# (This template ends in `.example`; install.sh copies it to agent.yaml.)
+# (This template ends in `.example`; install.sh copies it to config/agent.yaml.)
 #
 # Single-agent mode: this agent is the sole, forced-default agent, so there is no
 # routing table and `bindings.default` does not apply. `bindings.channels/users`
