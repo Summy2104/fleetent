@@ -17,6 +17,12 @@ under `tests/integration/`.
 - **THEN** the test belongs under `tests/integration/`
 - **AND** it SHALL NOT live under `tests/unit/`
 
+#### Scenario: Read-only compatibility assertions remain unit-eligible
+- **WHEN** a test only asserts legacy re-export shims, public API import surface, or path constant
+  values without creating, migrating, querying, or mutating a real database
+- **THEN** the test MAY remain under `tests/unit/`
+- **AND** the guard SHALL NOT fail it solely because it references a DB-related symbol name
+
 #### Scenario: Store schema initialization is integration-only
 - **WHEN** a test calls production `_init_db()` or validates table / column shape for a store
 - **THEN** the test belongs under `tests/integration/`
@@ -48,7 +54,8 @@ The test-layer guard SHALL no longer allow legacy SQLite / DB-backed tests to re
 #### Scenario: Guard has no DB legacy allowlist
 - **WHEN** the guard uses an allowlist for temporary false positives
 - **THEN** the allowlist SHALL NOT allow real SQLite / DB-backed unit tests
-- **AND** any allowlist entry SHALL document a non-DB reason
+- **AND** any allowlist entry SHALL document a non-DB reason, such as a read-only compatibility
+  assertion that does not create or query a database
 
 #### Scenario: Existing DB-backed tests still run as integration tests
 - **WHEN** DB-backed tests are migrated out of `tests/unit/`

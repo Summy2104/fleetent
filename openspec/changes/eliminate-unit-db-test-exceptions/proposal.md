@@ -1,8 +1,9 @@
 ## Why
 
-`clarify-test-layer-boundaries` 先定义了 unit / integration 的可执行边界，并允许短期 legacy
-SQLite store 例外。这个例外适合第一轮收敛，但如果长期存在，`tests/unit/` 仍然不能被团队和 AI agent
-理解为“单模块、mock 外部依赖、快速反馈”的目录。
+`clarify-test-layer-boundaries` 先定义了 unit / integration 的可执行边界，并把 HTTP client、
+Alembic / migration、runtime orchestration 等高置信 integration 测试迁出 `tests/unit/`。但它没有
+覆盖 legacy SQLite store / DB runtime 模式：这些文件仍可通过 `DB_PATH` monkeypatch、
+`_init_db()`、`DATABASE_URL=sqlite:///...` 或真实 store CRUD 留在 unit 层。
 
 当前残留风险主要来自 legacy store 测试：它们通过 `DB_PATH` monkeypatch、`_init_db()`、`sqlite3`
 查询、`DATABASE_URL=sqlite:///...` 或 `create_database(sqlite://...)` 验证真实持久化行为。这些测试
@@ -24,7 +25,9 @@ integration。
   - 纯 store persistence 文件整文件迁到 `tests/integration/`。
   - 混合文件有限拆分：纯逻辑测试留 unit，DB-backed tests 移 integration。
   - 已有同名 integration 文件时合并或重命名，避免重复测试语义和 pytest module name 冲突。
-- 删除上一轮 guard 中的 legacy DB allowlist；保留的 allowlist 只能用于非 DB 误报，并必须说明原因。
+- 收敛 guard 规则到行为边界：禁止真实 DB 行为，不禁止只读 legacy shim / public API / path constant
+  兼容断言。
+- 如 guard 保留 allowlist，只能用于非 DB 误报，并必须说明原因；不得用 allowlist 放行真实 DB 行为。
 - 更新项目指南，明确 `tmp_path` 不等于 unit：只要用于真实 DB 文件 / migrated schema / store CRUD，
   就属于 integration。
 
@@ -33,6 +36,7 @@ integration。
 - 不修改生产 store API 或 DB runtime。
 - 不引入 fake repository / in-memory repository 抽象。
 - 不要求把 DB tests 改写成 mock-heavy unit tests。
+- 不禁止 unit 层验证 legacy re-export shim、public API import surface、路径常量字符串等只读兼容契约。
 - 不迁移 e2e / evaluation。
 - 不新增真实外部服务调用。
 - 不改变 CI 默认是否运行 e2e / evaluation 的策略。
