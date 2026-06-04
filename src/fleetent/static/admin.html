@@ -2320,7 +2320,16 @@ async function tmplLoad() {
   $("tmpl-list-err").textContent = "";
   $("tmpl-create-bar").innerHTML = IS_VIEWER ? "" : `<button class="small" onclick="tmplCreate()">New template</button>`;
   try { TEMPLATES = await api("GET", "/agent-templates"); tmplRender(); }
-  catch (e) { $("tmpl-list-err").textContent = e.message; }
+  catch (e) {
+    // "Failed to fetch" = the request never reached the server (e.g. it restarted
+    // mid-request). Don't dead-end on a blip — show a clear message + a retry.
+    const network = /failed to fetch|networkerror|load failed/i.test(e.message || "");
+    const msg = network ? "Couldn't reach the server — it may be restarting." : e.message;
+    $("tmpl-body").innerHTML = `<tr><td colspan="4">
+      <div class="muted" style="padding:8px 0;">${esc(msg)}
+        <button class="small ghost" style="margin-left:8px;" onclick="tmplLoad()">Retry</button>
+      </div></td></tr>`;
+  }
 }
 function tmplRender() {
   $("tmpl-body").innerHTML = TEMPLATES.map(t => `
