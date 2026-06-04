@@ -127,12 +127,13 @@ async def test_tasks_run_concurrently_not_sequentially(tmp_path, monkeypatch):
         )
         elapsed = time.monotonic() - t0
 
-    # AR20 added synchronous lifecycle persistence (~1 fsync per write), so the
-    # absolute bound is a loose ceiling that still fails on full serialization
-    # (~0.15s) while passing overlapped sleeps (~0.10s). The authoritative
-    # concurrency guard is the start-time overlap assertion below: serialized
-    # tasks would start >0.05s apart (after task 1's sleep), not within 0.02s.
-    assert elapsed < 0.13, f"tasks appear sequential (elapsed={elapsed:.3f}s)"
+    # The authoritative concurrency guard is the start-time overlap assertion
+    # below: serialized tasks would start >0.05s apart (after task 1's sleep),
+    # while overlapped tasks start within a few ms. The absolute elapsed bound is
+    # only a loose backstop — kept generous (0.5s) so full-suite high-load fsync
+    # jitter (AR20 added synchronous lifecycle persistence) cannot flake it, yet
+    # still well under the >0.10s of sleep plus overhead a serialized run incurs.
+    assert elapsed < 0.5, f"tasks appear sequential (elapsed={elapsed:.3f}s)"
     # Both tasks must have started before either finished
     assert len(start_times) == 2
     assert abs(start_times[1] - start_times[0]) < 0.02

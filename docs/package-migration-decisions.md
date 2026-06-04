@@ -78,8 +78,13 @@
 
 ### 留给审核人的待办清单
 
-1. **统一删 shim 收尾 change**（蓝图 D5 既定计划）：全库调用方已切新路径后，删除全部旧路径 shim
-2. **预存测试隔离缺陷**：`tests/integration/test_cron_scheduler.py` 的 `test_fire_calls_agent_loop_run` / `test_fire_message_in_user_content` 未 patch SESSIONS_DIR，泄漏 `data/sessions/cron/t1`、`t2`——建议单独 fix PR
-3. **预存基线失败**：`tests/unit/test_agent_loop.py::test_run_sync_passes_effective_sandbox_mode`（sandbox-mode 相关，迁移前即失败）——待排查修复
-4. **计时 flake**：`test_tasks_run_concurrently_not_sequentially` 上限 0.13s 在全量高负载下偶发超时——建议放宽
-5. openspec CLI 本环境不可用，各包 `openspec validate` 均以手工核验 spec scenario 替代——如需可补装后回放校验
+1. **统一删 shim 收尾 change**（蓝图 D5 既定计划）：全库调用方已切新路径后，删除全部旧路径 shim ——【已确认 src+tests 零残留引用，待张洋定时机】
+2. **预存测试隔离缺陷**：`tests/integration/test_cron_scheduler.py` 的 `test_fire_calls_agent_loop_run` / `test_fire_message_in_user_content` 未 patch SESSIONS_DIR，泄漏 `data/sessions/cron/t1`、`t2`——建议单独 fix PR ——【本 PR 修复：两用例 monkeypatch `fleetent.session.manager.SESSIONS_DIR` 到 tmp_path，已回放确认 data/ 无泄漏】
+3. **预存基线失败**：`tests/unit/test_agent_loop.py::test_run_sync_passes_effective_sandbox_mode`（sandbox-mode 相关，迁移前即失败）——待排查修复 ——【排查中，另有任务在跑，本 PR 不触碰】
+4. **计时 flake**：`test_tasks_run_concurrently_not_sequentially` 上限 0.13s 在全量高负载下偶发超时——建议放宽 ——【本 PR 修复：保留 start-time overlap（<0.02s）作为权威并发判据，仅把宽松的耗时上限放宽到 0.5s，已回放 10/10 通过】
+5. openspec CLI 本环境不可用，各包 `openspec validate` 均以手工核验 spec scenario 替代——如需可补装后回放校验 ——【本环境 openspec CLI 已可用，本 PR 补齐 permission-gate / sub-agent 两 spec 的 Purpose 段后 `openspec validate --all --strict` 142 passed / 0 failed】
+
+## 审核记录（2026-06-04）
+
+张洋已过审决策日志：现场决策 ①（skills 放弃 audit 包级导出）②（normalizer 私有引用显性化，列为架构债待与 connectors 归属一并讨论）维持原判；③（vision/image_gen/multimodal 归 tools/）经确认采纳。
+待办 G（spec Purpose）/ D（cron 隔离）/ F（计时 flake）由本 PR 处理；E（预存失败）排查中；C（删 shim）已确认 src+tests 零残留引用，待张洋定时机。
