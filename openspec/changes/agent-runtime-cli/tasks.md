@@ -15,9 +15,9 @@
 
 ## 3. One-shot CLI applies the deployed agent
 
-- [ ] 3.1 Write failing test: `run_sync` applies the resolved home/default agent's
+- [x] 3.1 Write failing test: `run_sync` applies the resolved home/default agent's
   `system_prompt`/`allowed_tools`/`allowed_skills` (not the generic default).
-- [ ] 3.2 Rewire `run_sync` to resolve + apply the home agent. Make 3.1 green.
+- [x] 3.2 Rewire `run_sync` to resolve + apply the home agent. Make 3.1 green.
 
 ## 4. Closeout
 
