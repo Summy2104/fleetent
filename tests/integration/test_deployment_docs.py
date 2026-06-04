@@ -14,6 +14,10 @@ def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
     assert "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET=" in content
     assert "FLEETENT_CONFLUENCE_USERNAME=" in content
     assert "FLEETENT_CONFLUENCE_TOKEN=" in content
+    assert "FLEETENT_EVAL_EMBEDDING_ENDPOINT=" in content
+    assert "FLEETENT_EVAL_EMBEDDING_API_KEY=" in content
+    assert "FLEETENT_EVAL_RERANK_ENDPOINT=" in content
+    assert "FLEETENT_EVAL_RERANK_API_KEY=" in content
     assert "sk-" not in content
     assert "ma-" not in content
     assert "xoxb-" not in content
@@ -46,6 +50,13 @@ def test_settings_example_uses_flat_container_secret_reference():
     assert 'scope_type: "space"' in content
     assert "page_id:" in content
     assert "api_token_env: FLEETENT_CONFLUENCE_TOKEN" in content
+    assert "endpoint_env: FLEETENT_EVAL_EMBEDDING_ENDPOINT" in content
+    assert "model_env: FLEETENT_EVAL_EMBEDDING_MODEL" in content
+    assert "dimensions_env: FLEETENT_EVAL_EMBEDDING_DIMENSIONS" in content
+    assert "api_key_env: FLEETENT_EVAL_EMBEDDING_API_KEY" in content
+    assert "endpoint_env: FLEETENT_EVAL_RERANK_ENDPOINT" in content
+    assert "model_env: FLEETENT_EVAL_RERANK_MODEL" in content
+    assert "api_key_env: FLEETENT_EVAL_RERANK_API_KEY" in content
     assert "/etc/fleetent/secrets" not in content
     assert "google-drive-eng-token.json" not in content
 

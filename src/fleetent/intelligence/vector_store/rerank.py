@@ -101,8 +101,8 @@ def create_rerank_provider(settings: RerankSettings) -> RerankProvider:
         return DeterministicRerankProvider()
     if settings.backend == "http":
         return HttpRerankProvider(
-            endpoint=settings.endpoint,
-            model=settings.model,
+            endpoint=_resolve_env_value(settings.endpoint, settings.endpoint_env),
+            model=_resolve_env_value(settings.model, settings.model_env),
             api_key_env=settings.api_key_env,
             timeout_seconds=settings.timeout_seconds,
         )
@@ -119,6 +119,12 @@ def _authorization_header(api_key_env: str) -> dict[str, str]:
     if not api_key:
         return {}
     return {"Authorization": f"Bearer {api_key}"}
+
+
+def _resolve_env_value(value: str, env_name: str) -> str:
+    if env_name:
+        return os.environ.get(env_name, value)
+    return value
 
 
 def _error_detail(response: httpx.Response) -> str:
@@ -173,7 +179,7 @@ def _extract_results(body: object, document_count: int) -> list[RerankResult]:
         if index < 0 or index >= document_count:
             raise RerankProviderError(f"HTTP rerank provider result index {index} out of range")
 
-        score = item.get("score")
+        score = item.get("score", item.get("relevance_score"))
         if not isinstance(score, int | float):
             raise RerankProviderError("HTTP rerank provider result score is invalid")
 

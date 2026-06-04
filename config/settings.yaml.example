@@ -36,16 +36,21 @@ vector_store:
 embedding:
   backend: deterministic
   dimensions: 64
+  dimensions_env: FLEETENT_EVAL_EMBEDDING_DIMENSIONS
   endpoint: ""
+  endpoint_env: FLEETENT_EVAL_EMBEDDING_ENDPOINT
   model: ""
-  api_key_env: ""
+  model_env: FLEETENT_EVAL_EMBEDDING_MODEL
+  api_key_env: FLEETENT_EVAL_EMBEDDING_API_KEY
   timeout_seconds: 10.0
 
 rerank:
   backend: disabled
   endpoint: ""
+  endpoint_env: FLEETENT_EVAL_RERANK_ENDPOINT
   model: ""
-  api_key_env: ""
+  model_env: FLEETENT_EVAL_RERANK_MODEL
+  api_key_env: FLEETENT_EVAL_RERANK_API_KEY
   timeout_seconds: 10.0
 
 knowledge_base:

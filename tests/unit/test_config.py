@@ -53,6 +53,33 @@ def test_settings_loads_non_secret_values_from_settings_yaml(tmp_path, monkeypat
     assert s.knowledge_base.enabled is True
 
 
+def test_vector_provider_settings_accept_env_references():
+    s = Settings(
+        anthropic_api_key="test-key",
+        embedding={
+            "backend": "http",
+            "endpoint_env": "FLEETENT_EVAL_EMBEDDING_ENDPOINT",
+            "model_env": "FLEETENT_EVAL_EMBEDDING_MODEL",
+            "dimensions_env": "FLEETENT_EVAL_EMBEDDING_DIMENSIONS",
+            "api_key_env": "FLEETENT_EVAL_EMBEDDING_API_KEY",
+        },
+        rerank={
+            "backend": "http",
+            "endpoint_env": "FLEETENT_EVAL_RERANK_ENDPOINT",
+            "model_env": "FLEETENT_EVAL_RERANK_MODEL",
+            "api_key_env": "FLEETENT_EVAL_RERANK_API_KEY",
+        },
+    )
+
+    assert s.embedding.endpoint_env == "FLEETENT_EVAL_EMBEDDING_ENDPOINT"
+    assert s.embedding.model_env == "FLEETENT_EVAL_EMBEDDING_MODEL"
+    assert s.embedding.dimensions_env == "FLEETENT_EVAL_EMBEDDING_DIMENSIONS"
+    assert s.embedding.api_key_env == "FLEETENT_EVAL_EMBEDDING_API_KEY"
+    assert s.rerank.endpoint_env == "FLEETENT_EVAL_RERANK_ENDPOINT"
+    assert s.rerank.model_env == "FLEETENT_EVAL_RERANK_MODEL"
+    assert s.rerank.api_key_env == "FLEETENT_EVAL_RERANK_API_KEY"
+
+
 def test_settings_mcp_namespace_is_global_policy_only():
     s = Settings(anthropic_api_key="test-key")
 
