@@ -358,37 +358,6 @@ def test_scan_conflict_keeps_path_sorted_first(tmp_path):
     assert sr._index["dup"].path.endswith("/alpha/SKILL.md")
 
 
-<<<<<<< HEAD
-def test_skillindex_isolated_from_each_other(tmp_path):
-    a = tmp_path / "a"
-    b = tmp_path / "b"
-    _write_skill(a, "alpha", "Use when provisioning compute clusters.")
-    _write_skill(b, "beta", "Use when archiving cold storage backups.")
-    idx_a = sr.SkillIndex(str(a))
-    idx_b = sr.SkillIndex(str(b))
-    assert idx_a.match("help me provisioning a cluster") == "alpha"
-    assert idx_b.match("help me provisioning a cluster") is None
-    assert idx_b.match("archiving old backups") == "beta"
-
-
-def test_skillindex_allowed_filters_index(tmp_path):
-    base = tmp_path / "all"
-    _write_skill(base, "alpha", "Use when provisioning compute clusters.")
-    _write_skill(base, "beta", "Use when archiving cold storage backups.")
-    idx = sr.SkillIndex(str(base), allowed={"alpha"})
-    names = {s["name"] for s in idx.list_skills()}
-    assert names == {"alpha"}
-    assert idx.match("help me provisioning a cluster") == "alpha"
-    assert idx.match("archiving old backups") is None
-
-
-def test_skillindex_allowed_none_keeps_all(tmp_path):
-    base = tmp_path / "all"
-    _write_skill(base, "alpha", "Use when provisioning compute clusters.")
-    _write_skill(base, "beta", "Use when archiving cold storage backups.")
-    idx = sr.SkillIndex(str(base), allowed=None)
-    assert {s["name"] for s in idx.list_skills()} == {"alpha", "beta"}
-=======
 def test_scan_conflict_winner_independent_of_arrival_order(tmp_path, monkeypatch):
     _write_named_skill(tmp_path, "alpha", "dup")
     _write_named_skill(tmp_path, "beta", "dup")
@@ -1027,4 +996,3 @@ def test_available_skills_prompt_disabled_wins_over_allowed_skills(tmp_path):
     )
     assert "<name>weather</name>" not in out
     assert "<name>billing</name>" in out
->>>>>>> origin/main

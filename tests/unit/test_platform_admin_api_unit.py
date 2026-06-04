@@ -336,19 +336,19 @@ def test_user_admin_route_handlers_cover_management(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         user_admin_api.api_key_store, "revoke_key", lambda key_id: keys.append({"revoked": key_id})
     )
-    monkeypatch.setattr(user_admin_api.im_user_store, "list_all", lambda: im_rows)
+    monkeypatch.setattr(user_admin_api.im, "list_all", lambda: im_rows)
     monkeypatch.setattr(
-        user_admin_api.im_user_store,
+        user_admin_api.im,
         "block_im_user",
         lambda im_user_id, reason, actor: audits.append(("block_im", im_user_id)),
     )
     monkeypatch.setattr(
-        user_admin_api.im_user_store,
+        user_admin_api.im,
         "restore_im_user",
         lambda im_user_id, reason, actor: audits.append(("restore_im", im_user_id)),
     )
     monkeypatch.setattr(
-        user_admin_api.im_user_store,
+        user_admin_api.im,
         "rebind_im_identity",
         lambda im_user_id, user_id, actor: audits.append(("bind_im", im_user_id, user_id)),
     )

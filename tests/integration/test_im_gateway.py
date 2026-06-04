@@ -25,12 +25,8 @@ def mock_agent_loop(monkeypatch):
 
 @pytest.fixture
 def mock_memory_skill(monkeypatch):
-<<<<<<< HEAD
-    import fleetent.agent_runtime as ar
-=======
     import fleetent.im_gateway.normalizer as norm
     import fleetent.im_user_store as ius
->>>>>>> origin/main
     import fleetent.skill_registry as sr
     from fleetent.platform import im_gateway_management as ius
 
@@ -255,16 +251,10 @@ async def test_route_blocked_user_gets_rejection_not_agent(
 async def test_route_channel_agent_takes_priority(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
-<<<<<<< HEAD
-    """Channel-level agent is used when bound, regardless of user binding."""
-    import fleetent.agent_runtime as ar
-    from fleetent.platform import im_gateway_management as ius
-=======
     """Channel-bound agent's system prompt is used for the run (flat Agent path)."""
     import fleetent.im_gateway.normalizer as norm
     import fleetent.im_user_store as ius
     from fleetent.agent_store import Agent
->>>>>>> origin/main
 
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
 
