@@ -30,11 +30,25 @@ runtime SHALL NOT write approvals to a platform database.
 - **THEN** the approval is written to the agent's local store and survives a restart,
   with no platform-DB write
 
+### Requirement: IM user identity resolved locally
+
+The agent runtime SHALL resolve the IM user identity for a message without reading the
+platform `user_store`: the (platform, platform_user_id) is mapped to the agent-runtime
+identity using the platform-native id directly or an agent-local mapping store. No
+platform-DB `get_or_create`/user lookup occurs on the runtime path.
+
+#### Scenario: Identity resolved without platform user DB
+
+- **WHEN** a Slack message arrives at the agent runtime and the platform `user_store` is
+  rigged to raise on access
+- **THEN** the message is still attributed to a stable per-agent identity and routing
+  proceeds, proving identity resolution is local
+
 ### Requirement: Runtime access gate is local and zero-DB
 
-`normalizer.route` SHALL evaluate the channel and user gates against the agent's local
-access config and local approval store, and SHALL NOT read `im_channel_allowlist` or the
-owner-keyed user store on the runtime path.
+The agent runtime SHALL evaluate the channel and user gates against the agent's local
+access config and local approval store via the `im` module, and SHALL NOT read the
+owner-keyed channel allowlist or user store on the runtime path.
 
 #### Scenario: Allowed user proceeds
 

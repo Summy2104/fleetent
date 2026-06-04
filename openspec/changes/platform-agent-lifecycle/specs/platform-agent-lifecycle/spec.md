@@ -10,7 +10,7 @@ agent's home directory, so the agent is runnable by `fleetent agent run`.
 #### Scenario: Create writes the home
 
 - **WHEN** an admin creates agent `support` on the platform
-- **THEN** `<agents_root>/support/agent.yaml` is written from the authored definition and
+- **THEN** `FLEETENT_HOME/support/agent.yaml` is written from the authored definition and
   a `.env` scaffold is present, with secrets referenced only by env-var name
 
 #### Scenario: Update re-materializes

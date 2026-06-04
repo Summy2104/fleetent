@@ -2,14 +2,16 @@
 
 ### Requirement: Standalone agent runtime via `fleetent agent run`
 
-The `fleetent` command SHALL provide `agent run <home|name> [--port N]` that boots a
-single agent as a self-contained foreground process: it resolves and loads the agent
-home (`agent.yaml` + `.env` + local access), runs the agent loop, and starts that agent's
-IM connectors. The process SHALL run without any platform service.
+The `fleetent` command SHALL provide `agent run <agent-id> [--port N]` that boots a
+single agent as a self-contained foreground process: it resolves the agent home at
+`FLEETENT_HOME/<agent-id>/` (`agent.yaml` + `.env` + `data/` + local access), loads it,
+runs the agent loop, and starts that agent's IM connectors. The process SHALL run
+without any platform service.
 
 #### Scenario: Boot one agent from its home
 
-- **WHEN** `fleetent agent run support` is invoked and the `support` home exists
+- **WHEN** `fleetent agent run support` is invoked and `FLEETENT_HOME/support/agent.yaml`
+  exists
 - **THEN** the process loads that home's agent and starts its IM connectors, with no
   platform server required
 

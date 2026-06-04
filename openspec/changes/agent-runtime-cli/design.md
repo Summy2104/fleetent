@@ -28,10 +28,13 @@ Extract the agent/IM half of `server.py` into an agent-scoped runtime
 the single agent home, starts the per-agent Slack supervisor + Telegram (bound), starts
 session/MCP/sandbox as needed, and (if `--port`) mounts `/chat` + `/ws`. No `/admin/*`.
 
-### D2: `fleetent agent run` CLI
-`fleetent` gains an `agent run <home|name> [--port N]` subcommand: resolve the agent home
-(explicit path, or name under an agents root, or `FLEETENT_HOME`), set the home, and run
-the agent runtime in the foreground. IM always; HTTP/ws only with `--port`.
+### D2: `fleetent agent run` CLI + home layout
+`fleetent` gains an `agent run <agent-id> [--port N]` subcommand. The multi-agent home
+layout is **`FLEETENT_HOME/<agent-id>/`** (each agent its own subdir: `agent.yaml` +
+`.env` + `data/`); `agent run <agent-id>` resolves and loads that home, then runs the
+agent runtime in the foreground. IM always; HTTP/ws only with `--port`. (An explicit
+`--home PATH` may override; the lone single-deploy `config/agent.yaml` mode stays for the
+install.sh single-agent case.)
 
 ### D3: `fleetent "<prompt>"` applies the home agent
 `run_sync` resolves the home/default agent via `agent_config` and applies its
@@ -63,5 +66,7 @@ agent process.
 
 ## Open Questions
 
-- Agent-home resolution precedence for `<name>` (agents root vs `FLEETENT_HOME`) — settle
-  at apply time, consistent with `paths`/single-file mode.
+- Transition overlap: before `platform-control-plane` lands, both the platform monolith
+  and `fleetent agent run` could start the same agent's Slack connection (two Socket Mode
+  sessions on one app). Not guarded here by decision (operators won't run both for the
+  same agent); land `platform-control-plane` promptly after to remove the platform's IM.

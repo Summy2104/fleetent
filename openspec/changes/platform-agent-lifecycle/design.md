@@ -21,7 +21,7 @@ start/stop the agent process — lightweight, no monitoring (user-chosen).
 ## Decisions
 
 ### D1: Materialize the home on create/update
-On agent create/update, the platform writes `<agents_root>/<name>/agent.yaml` (from the
+On agent create/update, the platform writes `FLEETENT_HOME/<agent-id>/agent.yaml` (from the
 authored definition: prompt/tools/skills/mcp/connectors + the per-agent `access` block)
 and seeds a `.env` scaffold (env-var names only; operator fills secrets). This is the
 DB→file export contract.

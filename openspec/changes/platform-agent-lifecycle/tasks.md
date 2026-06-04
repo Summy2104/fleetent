@@ -1,6 +1,6 @@
 ## 1. Materialize agent home on create/update
 
-- [ ] 1.1 Write failing tests: platform create/update writes `<agents_root>/<name>/agent.yaml`
+- [ ] 1.1 Write failing tests: platform create/update writes `FLEETENT_HOME/<agent-id>/agent.yaml`
   from the authored definition (prompt/tools/skills/mcp/connectors + `access`); seeds a
   `.env` scaffold (env-var names only, no plaintext); update rewrites agent.yaml but
   preserves operator `.env` values.
