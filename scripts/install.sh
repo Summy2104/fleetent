@@ -230,7 +230,16 @@ precheck_docker() {
     fi
     log_warn "Docker not found — the sandbox (run_code) tool will be unavailable. Install Docker to enable it."
 }
-print_success()          { :; }
+print_success() {
+    log_success "fleetent installed."
+    echo
+    echo "Next steps:"
+    echo "  - Ensure ~/.local/bin is on your PATH (e.g. 'uv tool update-shell'),"
+    echo "    then open a new shell and run:  fleetent \"hello\""
+    echo "  - State / config live in:  $FLEETENT_HOME"
+    echo "  - Edit secrets in:  $FLEETENT_HOME/.env"
+    echo "  - For on-prem PRODUCTION deployment, use the Docker path (docker-compose.yml)."
+}
 
 main() {
     detect_os

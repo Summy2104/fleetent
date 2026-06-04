@@ -34,6 +34,6 @@
 
 ## 7. 端到端编排与收尾
 
-- [ ] 7.1 Write failing tests：`main()` 全流程在隔离环境跑通（mock 网络相关步骤）——顺序执行各步、`--dir` flag 生效；`print_success` 输出含「如何把 `~/.local/bin` 加入 PATH」提示
-- [ ] 7.2 Implement：`main()` 串联 `detect_os → ensure_uv → check_python → install_tool → setup_home_env → copy_config_templates → init_db → precheck_docker → print_success`，`--dir` 短路逻辑接好，使测试转绿
+- [x] 7.1 Write failing tests：`main()` 全流程在隔离环境跑通（mock 网络相关步骤）——顺序执行各步、`--dir` flag 生效；`print_success` 输出含「如何把 `~/.local/bin` 加入 PATH」提示
+- [x] 7.2 Implement：`main()` 串联 `detect_os → ensure_uv → check_python → install_tool → setup_home_env → copy_config_templates → init_db → precheck_docker → print_success`，`--dir` 短路逻辑接好，使测试转绿
 - [ ] 7.3 收尾：脚本头部注释标注「面向开发者/单机；生产用 Docker」；README 增补一键安装说明（含 Linux/macOS/WSL2 范围）；全量 `ANTHROPIC_API_KEY=sk-test-dummy uv run pytest -x -q` 通过；`uv run ruff format && uv run ruff check` 仅校验本 change 新增测试文件；运行 `shellcheck scripts/install.sh`（若可用）无致命告警

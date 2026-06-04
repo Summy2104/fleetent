@@ -317,3 +317,17 @@ def test_present_docker_no_warning(tmp_path: Path) -> None:
     result = _run_env(["--skip-db", "--skip-config"], env, home)
 
     assert "Docker not found" not in (result.stdout + result.stderr)
+
+
+def test_full_run_prints_success_with_path_hint(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
+
+    result = _run_env([], env, home)  # full flow, no skips
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    out = result.stdout + result.stderr
+    assert "Next steps" in out
+    assert ".local/bin" in out
+    assert "fleetent" in out
