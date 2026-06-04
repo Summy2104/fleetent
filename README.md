@@ -18,14 +18,14 @@ fleetent 是一个面向企业内网部署的轻量 Agent 平台。项目基于 
 
 Linux / macOS / WSL2：脚本会 bootstrap uv + Python 3.12，用 `uv tool install` 把
 `fleetent`/`fleetent-admin`/`fleetent-tui` 装成全局命令，并在 `FLEETENT_HOME`
-（默认 `~/.fleetent`，与工作目录解耦）下铺设**扁平布局**：`agent.yaml` + `.env` + `data/`。
-部署的 agent 只读自己的 `agent.yaml`（从 `config/agent.yaml.example` 生成）。
+（默认 `~/.fleetent`，与工作目录解耦）下铺设：`config/agent.yaml` + `.env` + `data/`。
+部署的 agent 只读自己的 `config/agent.yaml`（从 `config/agent.yaml.example` 生成）。
 
 ```bash
 git clone <repo-url> && cd fleetent
 scripts/install.sh                 # 或 --dir PATH / --skip-db / --skip-config
 # 编辑 agent 配置与密钥：
-$EDITOR ~/.fleetent/agent.yaml ~/.fleetent/.env
+$EDITOR ~/.fleetent/config/agent.yaml ~/.fleetent/.env
 # 新开 shell 后（确保 ~/.local/bin 在 PATH）：
 fleetent "hello"
 ```
@@ -40,7 +40,7 @@ fleetent "hello"
 git clone <repo-url>
 cd fleetent
 uv sync
-cp config/settings.yaml.example config/settings.yaml
+cp config/agent.yaml.example config/agent.yaml
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
@@ -115,7 +115,8 @@ observability traces, usage, diagnostics, session persistence
 
 ## 配置
 
-配置从环境变量和 `config/settings.yaml` 读取。
+部署 agent 配置从环境变量和 `config/agent.yaml` 读取。真实 secret 不写入 YAML；配置文件只保存
+`api_key_env`、`*_env` 这类环境变量名引用。
 
 常规 LLM 路径需要：
 
@@ -133,7 +134,7 @@ observability traces, usage, diagnostics, session persistence
 | `MICROSANDBOX_URL` | Sandbox 服务地址。 |
 | `FLEETENT_SKILLS_DIR` | 覆盖默认 skills 目录。 |
 
-模型路由通过 `settings.yaml` 和 `model_router.py` 配置，使用 OpenAI-compatible endpoint。不要提交真实 API key、IM token、OAuth 凭据或本地 `.env` 文件。
+模型路由通过 agent config 和 `model_router.py` 配置，使用 OpenAI-compatible endpoint。不要提交真实 API key、IM token、OAuth 凭据或本地 `.env` 文件。
 
 ## HTTP API
 
@@ -186,10 +187,10 @@ def search_database(query: str, limit: int = 10) -> str:
     ...
 ```
 
-MCP-compatible 工具服务可以写入 `config/mcp.servers.yaml`：
+MCP-compatible 工具服务可以写入 `config/agent.yaml` 的 `mcp_servers`：
 
 ```yaml
-servers:
+mcp_servers:
   - id: internal_tools
     url: http://localhost:3000
     auth_type: api_key
