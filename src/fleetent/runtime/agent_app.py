@@ -120,6 +120,35 @@ async def boot(
     return AgentRuntime(agent=agent, supervisor=supervisor, app=app, port=port)
 
 
+async def _wait_forever() -> None:
+    """Block until cancelled (IM-only foreground runtime has no HTTP server to await)."""
+    import asyncio
+
+    await asyncio.Event().wait()
+
+
+async def serve(agent_id: str, *, port: int | None = None, home: str | Path | None = None) -> None:
+    """Boot the agent and run it in the foreground until cancelled.
+
+    With ``port`` the agent app is served over HTTP (``/chat`` + ``/ws``); without it the
+    process runs IM-only with no HTTP listener.
+    """
+    rt = await boot(agent_id, home=home, port=port)
+    try:
+        if port is not None:
+            import uvicorn
+
+            assert rt.app is not None  # boot() builds the app whenever a port is given
+            server = uvicorn.Server(
+                uvicorn.Config(rt.app, host="0.0.0.0", port=port, log_level="info")
+            )
+            await server.serve()
+        else:
+            await _wait_forever()
+    finally:
+        await rt.stop()
+
+
 def build_app(agent_name: str) -> FastAPI:
     """Build the agent-scoped ASGI app: ``/chat`` (SSE), ``/ws`` (TUI), ``/health``.
 

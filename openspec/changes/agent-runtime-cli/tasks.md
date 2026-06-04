@@ -8,9 +8,9 @@
 
 ## 2. `fleetent agent run` CLI
 
-- [ ] 2.1 Write failing tests: `fleetent agent run <home>` resolves the home and boots the
+- [x] 2.1 Write failing tests: `fleetent agent run <home>` resolves the home and boots the
   runtime (mock boot); `--port` mounts HTTP/ws, absent `--port` opens no HTTP listener.
-- [ ] 2.2 Implement the `agent run` subcommand (home resolution + foreground boot +
+- [x] 2.2 Implement the `agent run` subcommand (home resolution + foreground boot +
   optional `--port`). Make 2.1 green.
 
 ## 3. One-shot CLI applies the deployed agent
