@@ -464,10 +464,23 @@ def test_agent_export_yaml_wired():
     assert "agExportYaml(" in html  # button in the drawer
 
 
+def test_agent_drawer_preview_is_readonly_yaml():
+    html = ADMIN_HTML
+    # clicking a card opens a read-only agent.yaml preview, not the editable sections
+    fn = html.split("async function agDrawer", 1)[1].split("function agRenderPreview", 1)[0]
+    assert "/agent-yaml" in fn
+    assert "function agRenderPreview" in html
+    preview = html.split("function agRenderPreview", 1)[1].split("function agCopyYaml", 1)[0]
+    assert 'id="ag-yaml-pre"' in preview
+    assert "agDrawerManage(" in preview  # "Manage bindings" switches to the editable view
+    # copy + download the previewed yaml
+    assert "function agCopyYaml" in html and "function agDownloadYaml" in html
+
+
 def test_drawer_loads_from_aggregate_endpoints():
     html = ADMIN_HTML
-    fn = html.split("async function agDrawer", 1)[1].split("function agDrawerSection", 1)[0]
-    # opening the drawer pulls every per-agent binding list in one fan-out
+    fn = html.split("async function agDrawerManage", 1)[1].split("function agDrawerSection", 1)[0]
+    # the manage view pulls every per-agent binding list in one fan-out
     for frag in ("/bindings`", "/skills`", "/kbs`", "/bindings/oauth`", "/versions`"):
         assert frag in fn, frag
     # plus the available-option catalogs

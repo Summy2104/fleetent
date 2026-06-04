@@ -2647,7 +2647,76 @@ async function agActivateVersion(name, version) {
 
 let AG_DRAWER = null;
 
+// Clicking an agent opens a read-only preview: the full agent.yaml. Editing /
+// binding management lives behind the "Manage bindings" button (agDrawerManage).
+let AG_YAML_CACHE = "";
 async function agDrawer(name) {
+  AG_DRAWER = name;
+  $("ag-drawer-title").textContent = name;
+  $("ag-drawer").classList.remove("hidden");
+  $("ag-drawer-body").innerHTML = `<div class="muted">Loading…</div>`;
+  const enc = encodeURIComponent(name);
+  try {
+    const [a, exp] = await Promise.all([
+      api("GET", `/agents/${enc}`),
+      api("GET", `/agents/${enc}/agent-yaml`),
+    ]);
+    agRenderPreview(name, a, exp.yaml);
+  } catch (e) {
+    const network = /failed to fetch|networkerror|load failed/i.test(e.message || "");
+    const msg = network ? "Couldn't reach the server — it may be restarting." : e.message;
+    $("ag-drawer-body").innerHTML =
+      `<div class="muted" style="padding:4px 0;">${esc(msg)}
+        <button class="small ghost" style="margin-left:8px;" onclick="agDrawer('${esc(name)}')">Retry</button>
+      </div>`;
+  }
+}
+
+function agRenderPreview(name, a, yamlText) {
+  AG_YAML_CACHE = yamlText || "";
+  const archived = a.status === "archived";
+  const statusCls = a.status === "enabled" ? "active" : archived ? "" : "blocked";
+  const lifecycle = IS_VIEWER ? "" : `
+    <button class="small" onclick="agEdit('${esc(name)}')">Edit</button>
+    <button class="small ghost" onclick="agOpenClone('${esc(name)}')">Clone</button>
+    ${a.status === "enabled"
+      ? `<button class="small ghost" onclick="agDisable('${esc(name)}')">Disable</button>`
+      : `<button class="small ghost" onclick="agEnable('${esc(name)}')">Enable</button>`}
+    ${archived
+      ? `<button class="small ghost" onclick="agRestore('${esc(name)}')">Restore</button>`
+      : `<button class="small ghost danger" onclick="agArchive('${esc(name)}')">Archive</button>`}
+    <button class="small ghost danger" onclick="agDelete('${esc(name)}')">Delete</button>
+    <button class="small ghost" onclick="agDrawerManage('${esc(name)}')">Manage bindings</button>`;
+  $("ag-drawer-body").innerHTML = `
+    <div class="sk-pills" style="margin-bottom:10px;">
+      <span class="pill ${statusCls}">${esc(a.status || "")}</span>
+      ${a.provenance ? `<span class="pill">${esc(a.provenance)}</span>` : ""}
+      ${a.drift ? `<span class="pill blocked">drift</span>` : ""}
+    </div>
+    <div class="row" style="flex-wrap:wrap; gap:6px; margin-bottom:10px;">
+      <button class="small ghost" onclick="agCopyYaml()">Copy</button>
+      <button class="small ghost" onclick="agDownloadYaml('${esc(name)}')">Download</button>
+      ${lifecycle}
+    </div>
+    <h4 style="margin:8px 0 6px;">agent.yaml <span class="muted" style="font-weight:normal;">(read-only preview)</span></h4>
+    <pre id="ag-yaml-pre" style="white-space:pre; overflow:auto; max-height:68vh; font-size:12px;"></pre>`;
+  document.getElementById("ag-yaml-pre").textContent = AG_YAML_CACHE;
+}
+
+function agCopyYaml() {
+  navigator.clipboard?.writeText(AG_YAML_CACHE);
+  toast("Copied agent.yaml", "ok");
+}
+function agDownloadYaml(name) {
+  const blob = new Blob([AG_YAML_CACHE], { type: "text/yaml" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name + "-agent.yaml";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function agDrawerManage(name) {
   AG_DRAWER = name;
   $("ag-drawer-title").textContent = name;
   $("ag-drawer").classList.remove("hidden");
@@ -2672,13 +2741,11 @@ async function agDrawer(name) {
       ]);
     agRenderDrawer(name, { a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions, allUsers });
   } catch (e) {
-    // The agent record itself failed to load (e.g. the server restarted mid-request,
-    // surfacing as "Failed to fetch"). Offer a retry instead of dead-ending.
     const network = /failed to fetch|networkerror|load failed/i.test(e.message || "");
     const msg = network ? "Couldn't reach the server — it may be restarting." : e.message;
     $("ag-drawer-body").innerHTML =
       `<div class="muted" style="padding:4px 0;">${esc(msg)}
-        <button class="small ghost" style="margin-left:8px;" onclick="agDrawer('${esc(name)}')">Retry</button>
+        <button class="small ghost" style="margin-left:8px;" onclick="agDrawerManage('${esc(name)}')">Retry</button>
       </div>`;
   }
 }
@@ -2775,7 +2842,8 @@ function agRenderDrawer(name, d) {
     `<div class="row">v${esc(v.version)} ${v.is_active ? `<span class="pill active">active</span>` : ""}<span class="muted" style="flex:1;">${esc(v.created_at || "")}</span>${(v.is_active || IS_VIEWER) ? "" : `<button class="small ghost" onclick="agActivateVersion('${esc(name)}', ${v.version})">Activate</button>`}</div>`
   ).join("") || `<div class="muted">No versions.</div>`;
 
-  const exportRow = `<div class="row" style="margin-bottom:10px;">
+  const exportRow = `<div class="row" style="margin-bottom:10px; gap:6px;">
+    <button class="small ghost" onclick="agDrawer('${esc(name)}')">← Preview</button>
     <button class="small ghost" onclick="agExportYaml('${esc(name)}')">⤓ Export agent.yaml</button></div>`;
   $("ag-drawer-body").innerHTML =
     meta
@@ -2819,31 +2887,31 @@ async function agExportYaml(name) {
 }
 async function agSetSkill(skill, enabled) {
   try { await api("PUT", `/agents/${encodeURIComponent(AG_DRAWER)}/skills/${encodeURIComponent(skill)}`, { enabled }); }
-  catch (e) { toast(e.message, "error"); agDrawer(AG_DRAWER); }
+  catch (e) { toast(e.message, "error"); agDrawerManage(AG_DRAWER); }
 }
 async function agToggleMcp(server, on) {
   const m = on ? "POST" : "DELETE";
   try { await api(m, `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/mcp/${encodeURIComponent(server)}`); }
-  catch (e) { toast(e.message, "error"); agDrawer(AG_DRAWER); }
+  catch (e) { toast(e.message, "error"); agDrawerManage(AG_DRAWER); }
 }
 async function agToggleOauth(connector, on) {
   const m = on ? "POST" : "DELETE";
   try { await api(m, `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/oauth/${encodeURIComponent(connector)}`); }
-  catch (e) { toast(e.message, "error"); agDrawer(AG_DRAWER); }
+  catch (e) { toast(e.message, "error"); agDrawerManage(AG_DRAWER); }
 }
 async function agAddKb() {
   const id = $("ag-kb-select").value; if (!id) return;
-  try { await api("POST", `/agents/${encodeURIComponent(AG_DRAWER)}/kbs`, { kb_id: id }); agDrawer(AG_DRAWER); }
+  try { await api("POST", `/agents/${encodeURIComponent(AG_DRAWER)}/kbs`, { kb_id: id }); agDrawerManage(AG_DRAWER); }
   catch (e) { toast(e.message, "error"); }
 }
 async function agUnbindKb(id) {
-  try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/kbs/${encodeURIComponent(id)}`); agDrawer(AG_DRAWER); }
+  try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/kbs/${encodeURIComponent(id)}`); agDrawerManage(AG_DRAWER); }
   catch (e) { toast(e.message, "error"); }
 }
 async function agToggleUser(uid, on) {
   const m = on ? "POST" : "DELETE";
   try { await api(m, `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/users/${encodeURIComponent(uid)}`); }
-  catch (e) { toast(e.message, "error"); agDrawer(AG_DRAWER); }
+  catch (e) { toast(e.message, "error"); agDrawerManage(AG_DRAWER); }
 }
 function agFilterUsers() {
   const q = ($("ag-user-filter").value || "").trim().toLowerCase();
@@ -2853,11 +2921,11 @@ function agFilterUsers() {
 }
 async function agBindChannel() {
   const pf = $("ag-ch-platform").value.trim(), ch = $("ag-ch-id").value.trim(); if (!pf || !ch) return;
-  try { await api("POST", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); agDrawer(AG_DRAWER); }
+  try { await api("POST", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); agDrawerManage(AG_DRAWER); }
   catch (e) { toast(e.message, "error"); }
 }
 async function agUnbindChannel(pf, ch) {
-  try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); agDrawer(AG_DRAWER); }
+  try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); agDrawerManage(AG_DRAWER); }
   catch (e) { toast(e.message, "error"); }
 }
 
