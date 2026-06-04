@@ -1,0 +1,42 @@
+# Self-contained agent definition (file-driven-agent-config).
+#
+# Layout: config/agents/<name>/agent.yaml   (directory name MUST equal `name`)
+# Override the agents root with FLEETENT_AGENTS_DIR (default: config/agents).
+# This is a runtime artifact generated from the authoring DB; `version` corresponds
+# to the DB version. Secrets are NEVER inlined — reference them by env-var name.
+# (This template ends in `.example` so the scanner ignores it.)
+
+name: example                      # required; must match the directory name
+version: 1                         # required; corresponds to the authoring DB version
+tenant_id: default
+team_id: null
+
+# ── runtime definition ──
+system_prompt: |
+  You are the example agent.
+model_overrides:
+  default: { provider: anthropic, model: claude-opus-4-8 }
+memory_namespace: example
+skills_dir: skills                 # null = global default skills dir
+allowed_skills: []                 # empty = no narrowing (all enabled skills visible)
+
+# ── tools / capabilities ──
+allowed_tools: ["search_*", "read_skill", "acme__*"]
+plugins: ["acme"]
+features:
+  code_execution: true
+  sandbox_env: { TZ: UTC }
+
+# ── MCP servers (inline; secrets via env reference only) ──
+mcp_servers:
+  - id: acme
+    transport: http
+    url: https://acme.internal/mcp
+    auth_type: bearer
+    api_key_env: ACME_MCP_TOKEN    # env-var NAME, never the token value
+
+# ── bindings (routing + authorization; aggregated into the global routing table) ──
+bindings:
+  default: false                   # at most one agent across all files may be true
+  channels: ["slack:C0123", "telegram:-100999"]
+  users: ["u_alice", "u_bob"]

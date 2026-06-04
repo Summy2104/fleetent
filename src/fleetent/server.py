@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket,
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from fleetent import user_store
+from fleetent import agent_config, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, WebhooksSettings, configure_logging
 from fleetent.cron_scheduler import CronScheduler
@@ -100,6 +100,9 @@ _connector_manager = im_connector_manager.ConnectorManager(
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     scan_skills()
+    # file-driven-agent-config: scan agent.yaml files once at startup (same lifecycle
+    # as scan_skills); the in-memory index drives zero-DB runtime agent resolution.
+    agent_config.scan()
     # AR7: load enabled plugins once at startup (same lifecycle as scan_skills /
     # mcp register_all). A missing plugins/ dir or a bad plugin never aborts boot.
     load_plugins()

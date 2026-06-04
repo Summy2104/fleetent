@@ -1,8 +1,11 @@
 """Runtime resolution of agent configuration into an executable snapshot.
 
-This module turns stored agent/version rows into the immutable ``AgentSnapshot``
-the agent loop consumes, and provides the pure tool-schema filter that enforces
-both the per-agent ``allowed_tools`` allowlist and the MCP server whitelist.
+Runtime resolution is file-sourced: the active snapshot and request routing come
+from the self-contained ``agent.yaml`` index (``agent_config``) with zero database
+access (file-driven-agent-config). Version-specific loaders
+(``load_version``/``load_version_by_name``) stay DB-backed for the authoring/console
+side. This module provides the pure tool-schema filter that enforces both the
+per-agent ``allowed_tools`` allowlist and the MCP server whitelist.
 
 It never imports the agent loop (one-way dependency: agent_loop -> agent_runtime).
 """
@@ -10,7 +13,8 @@ It never imports the agent loop (one-way dependency: agent_loop -> agent_runtime
 from dataclasses import dataclass
 from typing import Any
 
-from fleetent import agent_store
+from fleetent import agent_config, agent_store
+from fleetent.agent_config import AgentFile
 from fleetent.agent_store import AgentVersion
 from fleetent.governance.agent_policy import check_tool_access
 
@@ -21,7 +25,9 @@ ToolSchema = dict[str, Any]
 class AgentSnapshot:
     """Immutable, fully-resolved agent configuration the agent loop consumes."""
 
-    agent_id: int
+    # Identity is the agent name (string). Authoring DB rows still carry an int id,
+    # rendered as its string form on the DB-backed version loaders.
+    agent_id: str
     name: str
     version: int
     version_id: int
@@ -33,9 +39,25 @@ class AgentSnapshot:
     memory_namespace: str
 
 
+def _snapshot_from_file(agent: AgentFile) -> AgentSnapshot:
+    server_ids = [server.id for server in agent.mcp_servers]
+    return AgentSnapshot(
+        agent_id=agent.name,
+        name=agent.name,
+        version=agent.version,
+        version_id=agent.version,
+        system_prompt=agent.system_prompt,
+        allowed_tools=agent.allowed_tools,
+        skills_dir=agent.skills_dir,
+        mcp_server_ids=server_ids or None,
+        model_overrides=agent.model_overrides,
+        memory_namespace=agent.memory_namespace,
+    )
+
+
 def _snapshot(name: str, version: AgentVersion) -> AgentSnapshot:
     return AgentSnapshot(
-        agent_id=version.agent_id,
+        agent_id=str(version.agent_id),
         name=name,
         version=version.version,
         version_id=version.id,
@@ -49,7 +71,13 @@ def _snapshot(name: str, version: AgentVersion) -> AgentSnapshot:
 
 
 def load_active(name: str) -> AgentSnapshot | None:
-    """Resolve the agent's active version into a snapshot, or ``None`` if absent."""
+    """Resolve the agent's file-sourced snapshot, or ``None`` if absent. Zero DB."""
+    agent = agent_config.current().get(name)
+    return None if agent is None else _snapshot_from_file(agent)
+
+
+def load_active_db(name: str) -> AgentSnapshot | None:
+    """DB-backed active snapshot for the authoring/console side (NOT the runtime path)."""
     active = next((v for v in agent_store.list_versions(name) if v.is_active), None)
     return None if active is None else _snapshot(name, active)
 
@@ -72,17 +100,16 @@ def resolve_agent_for_request(
     channel_id: str | None,
     user_id: str | None,
 ) -> AgentSnapshot | None:
-    """Resolve the agent for a request, strict precedence: channel > user > default."""
+    """Resolve the agent for a request from the file index: channel > user > default."""
+    index = agent_config.current()
+    name: str | None = None
     if platform and channel_id:
-        channel_agent = agent_store.get_agent_for_channel(platform, channel_id)
-        if channel_agent is not None:
-            return load_active(channel_agent.name)
-    if user_id:
-        user_agent = agent_store.get_agent_for_user(user_id)
-        if user_agent is not None:
-            return load_active(user_agent.name)
-    default_agent = agent_store.get_default_agent()
-    return None if default_agent is None else load_active(default_agent.name)
+        name = index.agent_for_channel(platform, channel_id)
+    if name is None and user_id:
+        name = index.agent_for_user(user_id)
+    if name is None:
+        name = index.default_agent()
+    return None if name is None else load_active(name)
 
 
 # MCP tools are registered as "{server_id}__{tool_name}"; the double underscore
@@ -94,18 +121,21 @@ def _is_mcp_tool(name: str) -> bool:
     return _MCP_SEP in name
 
 
-def connector_scope(snapshot: AgentSnapshot) -> int:
-    """The agent_id used to resolve OAuth connectors for this snapshot."""
+def connector_scope(snapshot: AgentSnapshot) -> str:
+    """The agent name used to resolve OAuth connectors for this snapshot."""
     return snapshot.agent_id
 
 
 def resolve_mcp_servers(
     snapshot: AgentSnapshot, defaults: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Effective MCP server set: agent-owned definitions overlaid on global defaults."""
-    from fleetent.platform.connector_management import agent_mcp_server_store
-
-    return agent_mcp_server_store.resolve_mcp_servers(snapshot.agent_id, defaults)
+    """Effective MCP set: the agent's inline file definitions overlaid on defaults. Zero DB."""
+    merged: dict[str, dict[str, Any]] = {d["id"]: dict(d) for d in defaults}
+    agent = agent_config.current().get(snapshot.name)
+    if agent is not None:
+        for server in agent.mcp_servers:
+            merged[server.id] = server.model_dump()
+    return sorted(merged.values(), key=lambda s: s["id"])
 
 
 def filter_tool_schemas(

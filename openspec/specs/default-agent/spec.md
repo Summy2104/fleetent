@@ -4,37 +4,49 @@
 TBD - created by archiving change im-user-access-control. Update Purpose after archive.
 ## Requirements
 ### Requirement: Global default agent configuration
-The system SHALL support configuring a default agent by name via `Settings.default_agent_name`. When a message has no channel or user binding, the default agent (if configured) is used.
 
-#### Scenario: Default agent configured, no channel or user binding
-- **WHEN** `Settings.default_agent_name = "basic"` and neither the channel nor the user has an agent binding
-- **THEN** `agent_store.get_default_agent()` returns the agent named "basic" and it is applied to the request
+The system SHALL determine the default agent from the file-based agent index: the
+single agent whose file sets `bindings.default: true`. When a message has no channel or
+user binding, that default agent (if present) is used. Resolving the default SHALL NOT
+read the database.
 
-#### Scenario: Default agent not configured
-- **WHEN** `Settings.default_agent_name` is `None` (or empty)
-- **THEN** `agent_store.get_default_agent()` returns `None` and the request proceeds with no agent (bare run)
+#### Scenario: Default agent declared in a file, no channel or user binding
 
-#### Scenario: Default agent name refers to non-existent agent
-- **WHEN** `Settings.default_agent_name = "nonexistent"` and no agent with that name exists
-- **THEN** `agent_store.get_default_agent()` returns `None` and the request proceeds as bare run
+- **WHEN** exactly one agent file sets `bindings.default: true` and neither the channel
+  nor the user has a binding
+- **THEN** that agent is applied to the request, resolved from its file with no DB read
+
+#### Scenario: No default agent declared
+
+- **WHEN** no agent file sets `bindings.default: true`
+- **THEN** default resolution returns nothing and the request proceeds with no agent
+  (bare run)
 
 ### Requirement: Agent lookup priority order
-The system SHALL resolve the agent for each incoming message in the following priority order: channel binding > user binding > default agent > bare run.
+
+The system SHALL resolve the agent for each incoming message in the following priority
+order, served entirely from the file-based agent index: channel binding > user binding
+> default agent > bare run.
 
 #### Scenario: All levels present — channel wins
-- **WHEN** the channel has a binding, the user has a binding, and a default agent is configured
+
+- **WHEN** the channel is bound by an agent file, the user is bound by an agent file,
+  and a default agent file exists
 - **THEN** the channel's agent is used
 
 #### Scenario: No channel binding — user wins
-- **WHEN** the channel has no binding but the user has a binding
+
+- **WHEN** no agent file binds the channel but an agent file binds the user
 - **THEN** the user's agent is used
 
 #### Scenario: No channel or user binding — default wins
-- **WHEN** neither channel nor user is bound
-- **THEN** the default agent (if configured) is used
+
+- **WHEN** neither the channel nor the user is bound by any agent file
+- **THEN** the default agent (if declared) is used
 
 #### Scenario: No bindings and no default — bare run
-- **WHEN** no channel binding, no user binding, and no default agent configured
+
+- **WHEN** no agent file binds the channel or user and none declares a default
 - **THEN** the request runs without a custom system_prompt or allowed_tools
 
 ### Requirement: Admin can set default agent via CLI
