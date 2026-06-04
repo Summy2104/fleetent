@@ -15,7 +15,7 @@ RUN uv sync --no-dev --frozen
 COPY src/ ./src/
 COPY migrations/ ./migrations/
 COPY scripts/ ./scripts/
-COPY config/*.yaml.example ./config/
+COPY config/agent.yaml.example ./config/
 COPY .env.example ./
 COPY alembic.ini ./
 

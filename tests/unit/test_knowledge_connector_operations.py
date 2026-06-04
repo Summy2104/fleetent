@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 import pytest
 
@@ -532,12 +531,6 @@ async def test_sync_uses_real_confluence_client_factory_by_default(monkeypatch):
     ]
 
 
-def test_connector_settings_example_contains_only_env_secret_references():
-    example = Path("config/settings.yaml.example").read_text()
-
-    assert "connectors:" in example
-    assert "access_token_env:" in example
-    assert "api_token_env:" in example
-    assert "refresh_token:" not in example
-    assert "client_secret:" not in example
-    assert "api_token:" not in example
+# Removed test_connector_settings_example_contains_only_env_secret_references:
+# config/settings.yaml.example was dropped (drop-global-config-files); KB connector
+# secret-reference validation moves with the deferred intelligence -> agent.yaml work.
