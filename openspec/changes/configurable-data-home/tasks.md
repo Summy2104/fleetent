@@ -10,8 +10,8 @@
 
 ## 3. config.py 与 server.py 迁移
 
-- [ ] 3.1 Write failing tests：断言 `config.py` 的 `SETTINGS_YAML_PATH`/`MCP_SERVERS_YAML_PATH`/`logging.directory`/`diagnostics.export_dir`/`database_url` 默认值、`server.py` 的 `_MCP_YAML_PATH`/`_WEBHOOK_YAML_PATH` 从 `paths.py` 派生；仓库内默认行为不变（回归保护）
-- [ ] 3.2 Implement：迁移 `config.py`、`server.py` 路径来源使测试转绿
+- [x] 3.1 Write failing tests：断言 `config.py` 的 `SETTINGS_YAML_PATH`/`MCP_SERVERS_YAML_PATH`/`logging.directory`/`diagnostics.export_dir`/`database_url` 默认值、`server.py` 的 `_MCP_YAML_PATH`/`_WEBHOOK_YAML_PATH` 从 `paths.py` 派生；仓库内默认行为不变（回归保护）
+- [x] 3.2 Implement：迁移 `config.py`、`server.py` 路径来源使测试转绿
 
 ## 4. 数据库与会话路径迁移
 
