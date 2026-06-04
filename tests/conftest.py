@@ -32,6 +32,20 @@ def _default_required_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_fleetent_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Pin FLEETENT_HOME to a temp dir for every test.
+
+    Without this, the `~/.fleetent` home fallback (configurable-data-home) makes
+    any test that resolves config/data/logs outside a repo checkout — e.g. after
+    chdir to tmp with no FLEETENT_HOME — write into the real user home. Tests that
+    exercise resolution precedence override this via their own monkeypatch.
+    """
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path_factory.mktemp("fleetent_home")))
+
+
+@pytest.fixture(autouse=True)
 def _reset_provider_health_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     """Give every test a fresh provider health cache.
 

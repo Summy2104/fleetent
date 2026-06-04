@@ -10,7 +10,8 @@ from fleetent.model import router
 from fleetent.platform.admin_cli import agents as admin_agents
 
 
-def test_runtime_config_paths_derive_from_resolver() -> None:
+def test_runtime_config_paths_derive_from_resolver(monkeypatch) -> None:
+    monkeypatch.delenv("FLEETENT_HOME", raising=False)
     assert paths.config_dir() / "agents" == agent_config.AGENTS_DIR
     assert paths.config_dir() / "cron.yaml" == cron_scheduler.LEGACY_CRON_CONFIG_PATH
     assert paths.config_dir() / "routes.yaml" == router.ROUTES_PATH
