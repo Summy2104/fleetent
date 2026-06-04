@@ -26,8 +26,8 @@ from fleetent.governance.permission_gate import (
     cleanup_stale_approvals,
     list_approvals,
 )
-from fleetent.im_gateway import slack as slack_adapter
 from fleetent.im_gateway import telegram as telegram_adapter
+from fleetent.im_gateway.slack_supervisor import SlackSupervisor
 from fleetent.integrations import mcp as mcp_client
 from fleetent.integrations.mcp import McpServerConfig
 from fleetent.integrations.sandbox import (
@@ -89,12 +89,17 @@ def _admin_login_url(router_prefix: str) -> str:
     return f"http://{display_host}:{port}{router_prefix}/ui"
 
 
+# Owner-level connector manager. Slack is intentionally absent: it is per-agent,
+# supervised by `_slack_supervisor` from the agent index (per-agent-slack-connector).
 _connector_manager = im_connector_manager.ConnectorManager(
     factories={
-        "slack": slack_adapter.run,
         "telegram": telegram_adapter.run,
     }
 )
+
+# Per-agent Slack supervisor: one Socket Mode connection per agent declaring
+# `connectors.slack`, sourced from the agent index.
+_slack_supervisor = SlackSupervisor()
 
 
 @asynccontextmanager
@@ -194,6 +199,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _connector_manager.stop(owner_id, platform), loop
     ).result()
     await _connector_manager.start_all_enabled()
+    # per-agent-slack-connector: one Socket Mode connection per agent declaring
+    # connectors.slack, sourced from the agent index scanned above.
+    await _slack_supervisor.start_from_index()
 
     # Best-effort scheduler start: a missing/locked scheduled_tasks table (e.g. an
     # unmigrated DB) must not prevent the HTTP API from serving, consistent with the
@@ -216,6 +224,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     for owner_id, platform in list(_connector_manager.running()):
         await _connector_manager.stop(owner_id, platform)
+    await _slack_supervisor.stop_all()
     try:
         await cron.shutdown()
     except Exception as exc:

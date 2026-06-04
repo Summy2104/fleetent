@@ -34,6 +34,24 @@ class AgentBindings(BaseModel):
     users: list[str] = Field(default_factory=list)
 
 
+class SlackConnector(BaseModel):
+    """Per-agent Slack connection. Tokens are env-var names, never inline secrets."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bot_token_env: str
+    app_token_env: str
+    # Optional channel filter: when non-empty, the agent responds only in these channels
+    # among those its Slack app receives events from. Empty = respond everywhere.
+    channels: list[str] = Field(default_factory=list)
+
+
+class AgentConnectors(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slack: SlackConnector | None = None
+
+
 class AgentFile(BaseModel):
     """Schema for a self-contained ``agent.yaml``."""
 
@@ -52,6 +70,7 @@ class AgentFile(BaseModel):
     plugins: list[str] = Field(default_factory=list)
     features: dict[str, Any] = Field(default_factory=dict)
     mcp_servers: list[McpServerSettings] = Field(default_factory=list)
+    connectors: AgentConnectors = Field(default_factory=AgentConnectors)
     bindings: AgentBindings = Field(default_factory=AgentBindings)
 
 
@@ -75,6 +94,10 @@ class AgentConfigIndex:
 
     def default_agent(self) -> str | None:
         return self.default
+
+    def slack_agents(self) -> list[str]:
+        """Names of agents that declare a Slack connector."""
+        return [name for name, a in self.agents.items() if a.connectors.slack is not None]
 
 
 # Current published index. Empty until scan() runs (mirrors skill_registry._index).
@@ -106,7 +129,10 @@ def load_agent_file(agent_dir: Path) -> AgentFile:
 
 def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
     """Reject inline plaintext secrets in MCP/connector defs; secrets go via env refs."""
-    payload = {"mcp_servers": [server.model_dump() for server in agent.mcp_servers]}
+    payload = {
+        "mcp_servers": [server.model_dump() for server in agent.mcp_servers],
+        "connectors": agent.connectors.model_dump(),
+    }
     for key, value in _flatten(payload):
         if isinstance(value, str) and _looks_inline_secret(value):
             raise ValueError(

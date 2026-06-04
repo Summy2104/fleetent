@@ -188,7 +188,7 @@ async def test_slack_create_app_returns_app_object(monkeypatch):
         import fleetent.im_gateway.slack as slack_mod
 
         result = slack_mod.create_app(
-            "owner1", {"bot_token": "xoxb-fake", "app_token": "xapp-fake"}
+            "support", "owner1", {"bot_token": "xoxb-fake", "app_token": "xapp-fake"}
         )
 
     assert result is mock_app_instance
