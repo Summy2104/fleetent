@@ -65,3 +65,13 @@ class LocalApprovalStore:
 
     def list_pending(self) -> list[str]:
         return self._read()["pending"]
+
+
+def resolve_identity(platform: str, platform_user_id: str) -> str:
+    """Resolve a stable per-agent identity for an incoming IM message — no platform DB.
+
+    The agent runtime uses the platform-native IM user id directly as the identity, so
+    it never reads the platform ``user_store``. Author-facing ``allow_users`` entries in
+    the agent home are matched against this same native id.
+    """
+    return platform_user_id

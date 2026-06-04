@@ -14,11 +14,11 @@
 
 ## 2b. Local IM user identity (no platform user_store)
 
-- [ ] 2b.1 Write failing tests: the agent runtime resolves a stable per-agent identity
+- [x] 2b.1 Write failing tests: the agent runtime resolves a stable per-agent identity
   for an incoming IM message with the platform `user_store` rigged to raise (no
   `get_or_create`/user-DB read); identity is the platform-native id or an agent-local
   mapping.
-- [ ] 2b.2 Make IM adapters / route resolve identity locally (drop the platform
+- [x] 2b.2 Make IM adapters / route resolve identity locally (drop the platform
   `user_store.get_or_create` from the agent runtime path). Make 2b.1 green.
 
 ## 3. Local, zero-DB route gate
