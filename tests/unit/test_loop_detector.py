@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from fleetent.loop_detector import (
+from fleetent.runtime.loop_detector import (
     LoopDetectionChecker,
     arg_fingerprint,
     result_digest,
 )
-from fleetent.termination import LoopState, StopReason
+from fleetent.runtime.termination import LoopState, StopReason
 
 # ── arg_fingerprint ─────────────────────────────────────────────────────────
 

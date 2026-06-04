@@ -6,7 +6,7 @@ import copy
 
 import pytest
 
-from fleetent.message_hygiene import (
+from fleetent.runtime.message_hygiene import (
     HygieneReport,
     MessageContractError,
     RepairKind,

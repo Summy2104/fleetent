@@ -1,6 +1,6 @@
 """Unit tests for agent_runtime pure helpers (no DB required)."""
 
-from fleetent.agent_runtime import filter_tool_schemas
+from fleetent.runtime.snapshot import filter_tool_schemas
 
 
 def _schema(name: str) -> dict:

@@ -1,9 +1,7 @@
 import pytest
 
-from fleetent import (
-    tool_registry,
-    tools,  # noqa: F401 — registers tools as side effect
-)
+from fleetent import tools  # noqa: F401 — registers tools as side effect
+from fleetent.tools import registry as tool_registry
 
 
 def test_get_current_time_registered():
@@ -87,7 +85,7 @@ def _mock_lifecycle_client(create_id="cid-1"):
 async def test_run_code_returns_stdout(monkeypatch):
     from unittest.mock import AsyncMock
 
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
 
     client = _mock_lifecycle_client("cid-123")
@@ -104,7 +102,7 @@ async def test_run_code_returns_stdout(monkeypatch):
 async def test_run_code_includes_stderr(monkeypatch):
     from unittest.mock import AsyncMock
 
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
 
     client = _mock_lifecycle_client("cid-456")
@@ -124,7 +122,7 @@ async def test_run_code_does_not_destroy_on_exec_error(monkeypatch):
     """An exec error propagates but the workspace is left for reuse (no destroy)."""
     from unittest.mock import AsyncMock
 
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     client = _mock_lifecycle_client("cid-789")
     client.exec = AsyncMock(side_effect=RuntimeError("docker died"))
@@ -143,9 +141,9 @@ async def test_run_code_normal_path_does_not_destroy_with_live_token(monkeypatch
     """A live (never-cancelled) token reuses the workspace without destroying it."""
     from unittest.mock import AsyncMock
 
-    import fleetent.tools as tl
-    from fleetent.cancellation import CancelToken
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
+    from fleetent.runtime.cancellation import CancelToken
 
     client = _mock_lifecycle_client("cid-ok")
     client.exec = AsyncMock(return_value=ExecResult(stdout="42\n", stderr="", exit_code=0))
@@ -161,8 +159,8 @@ async def test_run_code_aborts_and_destroys_on_cancel(monkeypatch):
     though normal completion no longer destroys."""
     import asyncio
 
-    import fleetent.tools as tl
-    from fleetent.cancellation import CancelToken
+    import fleetent.tools.builtin_tools as tl
+    from fleetent.runtime.cancellation import CancelToken
 
     async def never_returns(ws_id, command):
         await asyncio.Event().wait()
@@ -187,9 +185,9 @@ async def test_run_code_cancel_forgets_registry_then_reacquires(monkeypatch):
     import asyncio
     from unittest.mock import AsyncMock
 
-    import fleetent.tools as tl
-    from fleetent.cancellation import CancelToken
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
+    from fleetent.runtime.cancellation import CancelToken
 
     async def never_returns(ws_id, command):
         await asyncio.Event().wait()
@@ -199,7 +197,7 @@ async def test_run_code_cancel_forgets_registry_then_reacquires(monkeypatch):
     mgr = _make_manager(client)
     monkeypatch.setattr(tl, "_MANAGER", mgr)
 
-    from fleetent.tool_registry import ToolContext
+    from fleetent.tools.registry import ToolContext
 
     ctx = ToolContext(agent_name="a", features={}, session_id="sess-9")
     token = CancelToken()
@@ -218,8 +216,8 @@ async def test_run_code_cancel_path_finally_does_not_double_raise(monkeypatch):
     """A destroy hiccup on the cancel path must not surface as an unhandled error."""
     import asyncio
 
-    import fleetent.tools as tl
-    from fleetent.cancellation import CancelToken
+    import fleetent.tools.builtin_tools as tl
+    from fleetent.runtime.cancellation import CancelToken
 
     async def never_returns(ws_id, command):
         await asyncio.Event().wait()
@@ -242,7 +240,7 @@ async def test_run_code_cancel_path_finally_does_not_double_raise(monkeypatch):
 async def test_run_code_logs_sandbox_exec_metadata(monkeypatch):
     from unittest.mock import AsyncMock, MagicMock
 
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
 
     client = _mock_lifecycle_client("cid-trace")
@@ -270,8 +268,8 @@ async def test_run_code_does_not_log_trace_on_cancel(monkeypatch):
     import asyncio
     from unittest.mock import MagicMock
 
-    import fleetent.tools as tl
-    from fleetent.cancellation import CancelToken
+    import fleetent.tools.builtin_tools as tl
+    from fleetent.runtime.cancellation import CancelToken
 
     async def never_returns(ws_id, command):
         await asyncio.Event().wait()
@@ -298,7 +296,7 @@ async def test_run_code_trace_failure_does_not_block_result(monkeypatch, caplog)
     import logging
     from unittest.mock import AsyncMock, MagicMock
 
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
 
     client = _mock_lifecycle_client("cid-trace-fail")
@@ -321,7 +319,7 @@ async def test_run_code_trace_failure_does_not_block_result(monkeypatch, caplog)
 
 
 def test_read_skill_returns_full_content(tmp_path, monkeypatch):
-    from fleetent import skill_registry as sr
+    from fleetent.skills import registry as sr
 
     monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "_nb")
     d = tmp_path / "skills" / "deploy"
@@ -336,7 +334,7 @@ def test_read_skill_returns_full_content(tmp_path, monkeypatch):
 
 
 def test_read_skill_unknown_name_returns_error(tmp_path, monkeypatch):
-    from fleetent import skill_registry as sr
+    from fleetent.skills import registry as sr
 
     monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "_nb")
     sr.scan(str(tmp_path / "skills"))
@@ -346,7 +344,7 @@ def test_read_skill_unknown_name_returns_error(tmp_path, monkeypatch):
 
 
 def test_read_skill_refuses_audit_blocked(tmp_path, monkeypatch):
-    from fleetent import skill_registry as sr
+    from fleetent.skills import registry as sr
 
     monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "_nb")
     d = tmp_path / "skills" / "evil"
@@ -368,9 +366,9 @@ async def test_run_code_uses_session_id_from_tool_context(monkeypatch):
     """run_code keys its session-scope workspace on the context's session_id (SB3 D5)."""
     from unittest.mock import AsyncMock
 
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
-    from fleetent.tool_registry import ToolContext
+    from fleetent.tools.registry import ToolContext
 
     client = _mock_lifecycle_client("cid-ctx")
     client.exec = AsyncMock(return_value=ExecResult(stdout="ok\n", stderr="", exit_code=0))
@@ -388,7 +386,7 @@ async def test_run_code_degrades_safely_without_tool_context(monkeypatch):
     """run_code without context falls back to the default key, not raising."""
     from unittest.mock import AsyncMock
 
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
 
     client = _mock_lifecycle_client("cid-default")
@@ -406,9 +404,9 @@ async def test_run_code_injects_agent_sandbox_env(monkeypatch):
     """run_code reads agent `features.sandbox_env` and injects it (SB5 D4)."""
     from unittest.mock import AsyncMock
 
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
-    from fleetent.tool_registry import ToolContext
+    from fleetent.tools.registry import ToolContext
 
     client = _mock_lifecycle_client("cid-env")
     client.exec = AsyncMock(return_value=ExecResult(stdout="ok\n", stderr="", exit_code=0))
@@ -428,9 +426,9 @@ async def test_run_code_sandbox_env_filters_sensitive(monkeypatch):
     container — build_sandbox_env's unified filter applies (SB5 D2)."""
     from unittest.mock import AsyncMock
 
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
-    from fleetent.tool_registry import ToolContext
+    from fleetent.tools.registry import ToolContext
 
     client = _mock_lifecycle_client("cid-env2")
     client.exec = AsyncMock(return_value=ExecResult(stdout="ok\n", stderr="", exit_code=0))
@@ -451,9 +449,9 @@ async def test_run_code_no_sandbox_env_passes_empty(monkeypatch):
     """Without a declared sandbox_env, run_code injects an empty env (clean)."""
     from unittest.mock import AsyncMock
 
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
-    from fleetent.tool_registry import ToolContext
+    from fleetent.tools.registry import ToolContext
 
     client = _mock_lifecycle_client("cid-env3")
     client.exec = AsyncMock(return_value=ExecResult(stdout="ok\n", stderr="", exit_code=0))
@@ -473,7 +471,7 @@ async def test_run_code_truncates_stdout(monkeypatch):
     from unittest.mock import AsyncMock
 
     import fleetent.integrations.sandbox.output_truncation as sot
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
 
     monkeypatch.setattr(sot, "MAX_STDOUT_BYTES", 500)
@@ -492,7 +490,7 @@ async def test_run_code_truncates_stderr_independently(monkeypatch):
     from unittest.mock import AsyncMock
 
     import fleetent.integrations.sandbox.output_truncation as sot
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
 
     monkeypatch.setattr(sot, "MAX_STDERR_BYTES", 300)
@@ -513,7 +511,7 @@ async def test_run_code_trace_records_original_bytes(monkeypatch):
 
     import fleetent.eval_logger as el
     import fleetent.integrations.sandbox.output_truncation as sot
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
 
     monkeypatch.setattr(sot, "MAX_STDOUT_BYTES", 500)
@@ -531,8 +529,8 @@ async def test_run_code_trace_records_original_bytes(monkeypatch):
 
 def test_run_code_self_truncates_exempt_from_t4():
     # SB6 owns run_code truncation; T4 must skip it (declared self_truncates).
-    import fleetent.tool_registry as tr
     import fleetent.tools  # noqa: F401
+    import fleetent.tools.registry as tr
 
     assert tr.is_self_truncating("run_code") is True
 
@@ -541,8 +539,8 @@ def test_run_code_self_truncates_exempt_from_t4():
 
 
 def test_sandbox_timeout_classification_reads_ar5_table():
-    import fleetent.tools as tl
-    from fleetent.error_classifier import CLASSIFICATION_TABLE, ErrorCategory
+    import fleetent.tools.builtin_tools as tl
+    from fleetent.runtime.error_classifier import CLASSIFICATION_TABLE, ErrorCategory
 
     c = tl._sandbox_timeout_classification()
     assert c == CLASSIFICATION_TABLE[ErrorCategory.sandbox_timeout]
@@ -568,7 +566,7 @@ def _timeout_manager(client, exec_timeout):
 async def test_run_code_sandbox_timeout_kills_and_classifies(monkeypatch):
     import asyncio
 
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     async def never_returns(ws_id, command):
         await asyncio.Event().wait()
@@ -587,8 +585,8 @@ async def test_run_code_sandbox_timeout_kills_and_classifies(monkeypatch):
 async def test_run_code_external_cancel_kills_but_not_timeout(monkeypatch):
     import asyncio
 
-    import fleetent.tools as tl
-    from fleetent.cancellation import CancelToken
+    import fleetent.tools.builtin_tools as tl
+    from fleetent.runtime.cancellation import CancelToken
 
     async def never_returns(ws_id, command):
         await asyncio.Event().wait()
@@ -612,7 +610,7 @@ async def test_run_code_external_cancel_kills_but_not_timeout(monkeypatch):
 async def test_run_code_within_timeout_returns_normally(monkeypatch):
     from unittest.mock import AsyncMock
 
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent.integrations.sandbox.client import ExecResult
 
     client = _mock_lifecycle_client("cid-ok")

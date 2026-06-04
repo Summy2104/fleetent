@@ -4,8 +4,8 @@ import os
 import pytest
 import structlog
 
-import fleetent.session_index as session_index
-import fleetent.session_mgr as session_mgr
+import fleetent.session.index as session_index
+import fleetent.session.manager as session_mgr
 from fleetent.config import Settings
 
 
@@ -711,9 +711,9 @@ class _SpyManager:
 
 
 def _install_spy_manager(monkeypatch, manager):
-    import fleetent.tools as tools
+    import fleetent.tools.builtin_tools as builtin_tools
 
-    monkeypatch.setattr(tools, "_get_manager", lambda: manager)
+    monkeypatch.setattr(builtin_tools, "_get_manager", lambda: manager)
     return manager
 
 
@@ -846,7 +846,7 @@ async def test_loop_continues_after_a_maintenance_failure(monkeypatch):
 
 
 def test_cli_run_sync_does_not_start_maintenance_task(monkeypatch):
-    import fleetent.agent_loop as al
+    import fleetent.runtime.loop as al
 
     async def fake_run(messages, **kw):
         return "done"

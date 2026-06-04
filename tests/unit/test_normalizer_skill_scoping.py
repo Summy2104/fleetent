@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import fleetent.agent_store as agent_store
 import fleetent.im_user_store as im_user_store
-import fleetent.skill_registry as sr
+import fleetent.skills as sr
 import fleetent.user_store as user_store
 from fleetent.im_gateway import normalizer
 from fleetent.platform.im_gateway_management import im_channel_allowlist as acl
@@ -50,8 +50,8 @@ def _msg(replies):
 
 async def _common_patches(monkeypatch, captured):
     monkeypatch.setattr(im_user_store, "check_allowed_by_user_id", lambda _uid: True)
-    import fleetent.agent_loop as agent_loop
     import fleetent.integrations.sandbox.enablement as se
+    import fleetent.runtime.loop as agent_loop
 
     monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.OFF))
 

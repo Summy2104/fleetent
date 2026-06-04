@@ -2,7 +2,7 @@
 
 import sys
 
-from fleetent.agent_loop import run_sync as run
+from fleetent.runtime import run_sync as run
 
 
 def main() -> None:

@@ -9,12 +9,12 @@ run() carries no image_url block and the loop routes to the text model.
 from unittest.mock import AsyncMock
 
 import fleetent.im_user_store as im_user_store
-import fleetent.tools as tl
+import fleetent.tools.builtin_tools as tl
 import fleetent.user_store as user_store
 from fleetent.im_gateway import normalizer
-from fleetent.multimodal import has_image_block
 from fleetent.platform.im_gateway_management import im_channel_allowlist as acl
 from fleetent.platform.im_gateway_management import im_connector_store as ics
+from fleetent.tools.multimodal import has_image_block
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"payload" * 4
 
@@ -74,7 +74,7 @@ async def test_image_message_extracted_and_stripped(tmp_path, monkeypatch):
         captured_messages["messages"] = list(messages)
         return "done"
 
-    import fleetent.agent_loop as agent_loop
+    import fleetent.runtime.loop as agent_loop
 
     monkeypatch.setattr(agent_loop, "run", fake_run)
 
@@ -111,7 +111,7 @@ async def test_no_image_message_unchanged(tmp_path, monkeypatch):
         captured_messages["messages"] = list(messages)
         return "done"
 
-    import fleetent.agent_loop as agent_loop
+    import fleetent.runtime.loop as agent_loop
 
     monkeypatch.setattr(agent_loop, "run", fake_run)
 
@@ -142,7 +142,7 @@ async def test_reference_still_readable_for_followup_analyze(tmp_path, monkeypat
         captured_messages["messages"] = list(messages)
         return "done"
 
-    import fleetent.agent_loop as agent_loop
+    import fleetent.runtime.loop as agent_loop
 
     monkeypatch.setattr(agent_loop, "run", fake_run)
 

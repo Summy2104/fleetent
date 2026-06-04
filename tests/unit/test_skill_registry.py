@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import structlog
 
-import fleetent.skill_registry as sr
+import fleetent.skills.registry as sr
 
 
 def _write_skill(tmp_path, name, body):
@@ -448,9 +448,12 @@ def test_scan_missing_builtin_dir_does_not_error(tmp_path, monkeypatch):
 
 def test_shipped_builtin_dir_exists():
     # Regression: the package ships at least one builtin SKILL.md so a fresh
-    # deployment is non-empty. Use the real package path, not the per-test
-    # monkeypatched attribute.
-    real_builtin = Path(sr.__file__).parent / "builtin_skills"
+    # deployment is non-empty. Compute the real package path independently (not
+    # the per-test monkeypatched attribute). This also guards the
+    # restructure-skills-package relative-path fix: registry now lives in skills/,
+    # so builtin_skills/ is one level up at src/fleetent/builtin_skills/ — which is
+    # exactly what BUILTIN_SKILLS_DIR must resolve to.
+    real_builtin = Path(sr.__file__).parent.parent / "builtin_skills"
     assert real_builtin.is_dir()
     assert list(real_builtin.rglob("SKILL.md"))
 

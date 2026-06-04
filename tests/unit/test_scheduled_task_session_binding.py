@@ -35,7 +35,7 @@ def test_create_session_id_defaults_none(tmp_path, monkeypatch):
 
 
 async def test_fire_independent_semantics_unique_sessions(tmp_path, monkeypatch):
-    import fleetent.session_mgr as sm
+    import fleetent.session.manager as sm
 
     monkeypatch.setattr(sm, "SESSIONS_DIR", tmp_path / "sessions")
     sids: list[str] = []
@@ -56,7 +56,7 @@ async def test_fire_independent_semantics_unique_sessions(tmp_path, monkeypatch)
 
 
 async def test_fire_fixed_semantics_accumulates(tmp_path, monkeypatch):
-    import fleetent.session_mgr as sm
+    import fleetent.session.manager as sm
 
     monkeypatch.setattr(sm, "SESSIONS_DIR", tmp_path / "sessions")
     captured_msgs: list = []
@@ -90,7 +90,7 @@ async def test_fire_fixed_semantics_accumulates(tmp_path, monkeypatch):
 
 
 async def test_fire_saves_with_user_and_agent(tmp_path, monkeypatch):
-    import fleetent.session_mgr as sm
+    import fleetent.session.manager as sm
 
     monkeypatch.setattr(sm, "SESSIONS_DIR", tmp_path / "sessions")
     captured: dict = {}

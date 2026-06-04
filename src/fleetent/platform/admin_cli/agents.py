@@ -172,7 +172,7 @@ def _activate_agent_version(args: argparse.Namespace) -> None:
 
 
 def _show_agent(args: argparse.Namespace) -> None:
-    from fleetent.agent_runtime import load_active
+    from fleetent.runtime import load_active
 
     snapshot = load_active(args.agent_name)
     if snapshot is None:

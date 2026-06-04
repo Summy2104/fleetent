@@ -16,8 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket,
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from fleetent import session_mgr, user_store
-from fleetent.agent_loop import run_stream
+from fleetent import user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, WebhooksSettings, configure_logging
 from fleetent.cron_scheduler import CronScheduler
@@ -38,7 +37,7 @@ from fleetent.integrations.sandbox import (
     load_sandbox_mode,
     resolve_effective_mode,
 )
-from fleetent.model_router import ROUTES
+from fleetent.model import ROUTES
 from fleetent.observability.startup_diagnostics import (
     diagnose_database_writable,
     diagnose_provider_keys,
@@ -56,8 +55,10 @@ from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.resource_monitoring import collectors, monitor_admin_api
 from fleetent.platform.skill_management import skill_admin_api
 from fleetent.platform.user_management import api_key_store, user_admin_api
-from fleetent.plugin_loader import expand_plugin_patterns, load_plugins
-from fleetent.skill_registry import scan as scan_skills
+from fleetent.runtime import run_stream
+from fleetent.session import manager as session_mgr
+from fleetent.skills import scan as scan_skills
+from fleetent.tools.plugin_loader import expand_plugin_patterns, load_plugins
 
 logger = logging.getLogger(__name__)
 

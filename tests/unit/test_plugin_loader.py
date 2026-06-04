@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from fleetent import plugin_loader, tool_registry
+from fleetent.tools import plugin_loader
+from fleetent.tools import registry as tool_registry
 
 
 @pytest.fixture(autouse=True)
@@ -95,7 +96,7 @@ def test_only_subdirs_with_manifest_recognised(plugins_root: Path) -> None:
         plugins_root,
         "p_alpha",
         init_py="""
-        from fleetent.tool_registry import tool
+        from fleetent.tools.registry import tool
 
         @tool
         def ping() -> str:
@@ -144,7 +145,7 @@ def test_enabled_plugin_tool_is_namespaced(plugins_root: Path) -> None:
         plugins_root,
         "p_crm",
         init_py="""
-        from fleetent.tool_registry import tool
+        from fleetent.tools.registry import tool
 
         @tool(risk_level="medium")
         def lookup(account: str) -> str:
@@ -171,7 +172,7 @@ def test_indirect_import_does_not_namespace_foreign_tools(
     (helper_root / "foreign_side_effect.py").write_text(
         textwrap.dedent(
             """
-            from fleetent.tool_registry import tool
+            from fleetent.tools.registry import tool
 
             @tool
             def foreign_tool(x: str) -> str:
@@ -190,7 +191,7 @@ def test_indirect_import_does_not_namespace_foreign_tools(
         init_py="""
         import foreign_side_effect  # noqa: F401 — registers foreign_tool as a side effect
 
-        from fleetent.tool_registry import tool
+        from fleetent.tools.registry import tool
 
         @tool
         def own(x: str) -> str:
@@ -215,7 +216,7 @@ def _good_plugin(root: Path, name: str) -> None:
         root,
         name,
         init_py=f"""
-        from fleetent.tool_registry import tool
+        from fleetent.tools.registry import tool
 
         @tool
         def act(x: str) -> str:
@@ -281,7 +282,7 @@ def test_plugin_name_colliding_with_builtin_skipped(plugins_root: Path) -> None:
         "p_crmx",
         manifest="name: crmx\nenabled: true\n",
         init_py="""
-        from fleetent.tool_registry import tool
+        from fleetent.tools.registry import tool
 
         @tool
         def lookup(x: str) -> str:
@@ -307,7 +308,7 @@ def test_plugin_name_colliding_with_mcp_server_skipped(
         "p_crm_mcp",
         manifest="name: crm_mcp\nenabled: true\n",
         init_py="""
-        from fleetent.tool_registry import tool
+        from fleetent.tools.registry import tool
 
         @tool
         def lookup(x: str) -> str:
@@ -326,7 +327,7 @@ def test_two_plugins_same_name_second_skipped(plugins_root: Path) -> None:
         "p_first",
         manifest="name: dup\nenabled: true\n",
         init_py="""
-        from fleetent.tool_registry import tool
+        from fleetent.tools.registry import tool
 
         @tool
         def alpha(x: str) -> str:
@@ -339,7 +340,7 @@ def test_two_plugins_same_name_second_skipped(plugins_root: Path) -> None:
         "p_second",
         manifest="name: dup\nenabled: true\n",
         init_py="""
-        from fleetent.tool_registry import tool
+        from fleetent.tools.registry import tool
 
         @tool
         def beta(x: str) -> str:
@@ -369,7 +370,7 @@ def test_plugin_tool_visible_only_when_namespace_allowed(plugins_root: Path) -> 
         plugins_root,
         "p_crm2",
         init_py="""
-        from fleetent.tool_registry import tool
+        from fleetent.tools.registry import tool
 
         @tool
         def lookup(x: str) -> str:

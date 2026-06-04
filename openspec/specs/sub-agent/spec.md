@@ -1,4 +1,9 @@
-## ADDED Requirements
+# sub-agent Specification
+
+## Purpose
+并行子 agent 执行能力。父 agent 通过 `sub_agent` 工具派发多个任务，经 `asyncio.gather` 并发执行，单个任务失败不影响其余结果一并回收。每个子 agent 以纯净上下文启动（仅含父给定 prompt，不继承父对话历史），并在父的 `user_id` 与 agent 策略下运行；子 agent 不得再派生子 agent（最大深度 1）。子 agent 的 eval trace 记录 `parent_session_id` 以建立父子链路。
+
+## Requirements
 
 ### Requirement: Parallel sub-agent execution
 The system SHALL allow a parent agent to dispatch multiple sub-agents that run concurrently via `asyncio.gather`.
