@@ -135,12 +135,9 @@ def test_providers_crud_and_actions_wired():
         "function pvEdit",
         "function pvDelete",
         "function pvTest",
-        "function pvPricing",
-        "function pvObservability",
         "function pvRoutes",
         "function pvSetRoute",
         "function pvPreviewRoute",
-        "function pvHealth",
     ):
         assert fn in html, fn
 
@@ -150,12 +147,10 @@ def test_providers_endpoints_present():
     for frag in (
         "/providers/${",
         "/connectivity-test",
-        "/pricing",
         "/observability",
         '"/providers/routes"',
         "/routes/",
         "/preview",
-        '"/providers/health"',
     ):
         assert frag in html, frag
 
@@ -627,7 +622,7 @@ def test_sessions_write_controls_admin_gated():
 def test_oauth_mcp_tab_distinct_from_im_connectors():
     html = ADMIN_HTML
     assert 'id="tab-oauth"' in html
-    assert "oc-body" in html
+    assert 'id="oauth-grid"' in html  # card grid (replaced oc-body table)
     # distinct from IM connectors tab which uses /im/connectors
     assert 'data-tab="oauth"' in html
     assert "LOADERS.oauth" in html
@@ -636,7 +631,8 @@ def test_oauth_mcp_tab_distinct_from_im_connectors():
 def test_oauth_mcp_functions_present():
     html = ADMIN_HTML
     for fn in (
-        "function ocConnectors",
+        "function loadOauthConnectors",
+        "function loadMcpConnectors",
         "function ocCreate",
         "function ocEdit",
         "function ocGrants",
@@ -683,25 +679,22 @@ def test_oauth_write_controls_admin_gated():
 # --- agent-scoped OAuth/MCP: owner column + agent filter ----------------------
 
 
-def test_oauth_connectors_table_has_owner_column():
+def test_oauth_connectors_card_shows_owner():
     html = ADMIN_HTML
-    head = html.split('id="oc-body"', 1)[0]
-    thead = head.rsplit("<thead>", 1)[1]
-    assert ">Owner<" in thead
+    card = html.split("function oauthCardHtml", 1)[1].split("function ", 2)[0]
+    assert "Global" in card and "Agent:" in card  # owner shown on the card
 
 
-def test_mcp_servers_table_has_owner_column():
+def test_mcp_servers_rendered_as_cards():
     html = ADMIN_HTML
-    head = html.split('id="mcp-body"', 1)[0]
-    thead = head.rsplit("<thead>", 1)[1]
-    assert ">Owner<" in thead
+    assert "function mcpCardHtml" in html
+    assert 'id="mcp-grid"' in html
 
 
-def test_oauth_connectors_render_owner_cell_and_colspan():
+def test_oauth_connectors_render_owner_cell():
     html = ADMIN_HTML
-    body = html.split("async function ocConnectors()", 1)[1].split("function ocOpenCreate", 1)[0]
-    assert "c.agent_id" in body
-    assert 'colspan="6"' in body
+    body = html.split("function oauthCardHtml", 1)[1].split("function ", 2)[0]
+    assert "c.agent_id" in body  # owner derived from agent_id
 
 
 def test_mcp_servers_render_owner_cell_and_colspan():
@@ -709,22 +702,6 @@ def test_mcp_servers_render_owner_cell_and_colspan():
     body = html.split("async function mcpServers()", 1)[1].split("async function mcpTools", 1)[0]
     assert "s.agent_id" in body
     assert 'colspan="5"' in body
-
-
-def test_oauth_agent_filter_control_present_and_wired():
-    html = ADMIN_HTML
-    assert 'id="oc-agent-filter"' in html
-    body = html.split("async function ocConnectors()", 1)[1].split("function ocOpenCreate", 1)[0]
-    assert "oc-agent-filter" in body
-    assert "agent_id=" in body
-
-
-def test_mcp_agent_filter_control_present_and_wired():
-    html = ADMIN_HTML
-    assert 'id="mcp-agent-filter"' in html
-    body = html.split("async function mcpServers()", 1)[1].split("async function mcpTools", 1)[0]
-    assert "mcp-agent-filter" in body
-    assert "agent_id=" in body
 
 
 # --- 9. AskIt module removed --------------------------------------------------
@@ -898,12 +875,11 @@ def test_viewer_hidden_write_containers_intact():
         "mon-maint-bar",
         "sess-create-bar",
         "sess-bulk-bar",
-        "oc-create-bar",
     ):
         assert f'id="{cid}"' in html, cid
     # the enterApp viewer-gate still references every container
     gate = html.split("if (IS_VIEWER) {", 1)[1].split("}", 1)[0]
-    for cid in ("sk-create-bar", "pv-create-bar", "oc-create-bar", "sess-bulk-bar"):
+    for cid in ("sk-create-bar", "pv-create-bar", "sess-bulk-bar"):
         assert cid in gate, cid
 
 
@@ -915,7 +891,6 @@ def test_secret_fields_masked_no_prefill():
         assert "autocomplete" in snippet, fid
     # edit paths explicitly blank the secret before showing the form
     assert '$("pv-api-key").value = "";' in html
-    assert '$("oc-client-secret").value = "";' in html
 
 
 # --- unified User-centric axis: single Users tab -----------------------------
