@@ -1,0 +1,9 @@
+id: duo-bu-zu-he-ren-wu
+coverage:
+- tools-multi
+persona: 一次性提出需要多步、连用多个工具的复合任务的用户。
+goal: 提一个需要先检索、再基于检索结果做进一步处理的复合任务(如「查出最近一条工单,并据其内容起草一段回复」)。
+success_criteria: 回复显示 agent 串联完成了多步(检索→加工),最终结果连贯且基于中间结果,而非只做了一步。
+max_turns: 5
+channel: REPLACE_WITH_TEST_CHANNEL
+setup_hint: 测试 agent 需具备完成该复合任务所需的多个工具。

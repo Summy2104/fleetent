@@ -1,0 +1,8 @@
+id: chang-wen-ben-zhai-yao
+coverage:
+- long-text
+persona: 粘贴大段长文本要求处理的用户。
+goal: 粘贴一段很长的中文文本(几百字以上),要求 agent 给出结构化摘要或抽取关键点。
+success_criteria: agent 正确消化长文本,给出忠实、抓住要点的结构化摘要,不截断遗漏主旨、不答非所问。
+max_turns: 3
+channel: REPLACE_WITH_TEST_CHANNEL

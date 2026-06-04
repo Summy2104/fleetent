@@ -144,12 +144,15 @@ data/
 
 **路径解析**：`config/` 与 `data/` 的实际位置由 `src/fleetent/paths.py` 统一解析（所有路径常量从 `config_dir()`/`data_dir()` 派生，禁止各模块自读家目录环境变量）。优先级：① `FLEETENT_HOME` 环境变量显式设置 → `$FLEETENT_HOME/{config,data}`；② 否则检测到仓库标记（CWD 含 `pyproject.toml` 的 `name="fleetent"` 或 `./config`）→ 仓库本地 `./config`+`./data`（**开发态零改动**）；③ 否则回退 `~/.fleetent/{config,data}`（全局安装态）。测试整体重定向可用 `monkeypatch.setenv("FLEETENT_HOME", tmp_path)`；单模块仍可 `monkeypatch.setattr(module, "DB_PATH", ...)`。
 
+**Agent 配置加载**：部署的单体 agent 读 home 根的 `agent.yaml`（`paths.agent_file() = base_dir()/agent.yaml`，扁平、无 `config/`）。`agent_config.build_index()`：当 `agents_dir`/`FLEETENT_AGENTS_DIR` 均未指定且 home 根存在 `agent.yaml` 时，加载它为**唯一且强制 default** 的 agent（跳过目录名校验）；否则回退扫描 `config/agents/<name>/`（多 agent，平台/dev 用）。
+
 ---
 
 ## 测试规范
 
 ### 隔离模式
 
+- `conftest.py` 的 autouse `_isolate_fleetent_home` 把 `FLEETENT_HOME` 钉在临时目录——防止任何测试经 `~/.fleetent` 家目录回退泄漏到真实用户家目录（chdir 出仓库 + 未设 FLEETENT_HOME 时会触发）。测路径解析优先级的测试用自身 `monkeypatch` 覆盖它
 - 数据库测试优先使用统一 DB fixture 或 `tmp_path` 隔离；legacy store 迁移前可 `monkeypatch.setattr(module, "DB_PATH", tmp_path / "x.db")`
 - `monkeypatch.setattr(memory_layer, "_mem_path", ...)` — 记忆文件隔离
 - `patch("fleetent.memory_layer.get_client_and_config", ...)` — LLM 调用隔离

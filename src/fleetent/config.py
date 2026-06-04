@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 import structlog
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -70,8 +70,11 @@ class VectorStoreSettings(BaseModel):
 class EmbeddingSettings(BaseModel):
     backend: str = "deterministic"
     dimensions: int = 64
+    dimensions_env: str = ""
     endpoint: str = ""
+    endpoint_env: str = ""
     model: str = ""
+    model_env: str = ""
     api_key_env: str = ""
     timeout_seconds: float = 10.0
 
@@ -79,7 +82,9 @@ class EmbeddingSettings(BaseModel):
 class RerankSettings(BaseModel):
     backend: str = "disabled"
     endpoint: str = ""
+    endpoint_env: str = ""
     model: str = ""
+    model_env: str = ""
     api_key_env: str = ""
     timeout_seconds: float = 10.0
 
@@ -112,7 +117,12 @@ class GoogleDriveConnectorSettings(BaseModel):
     tenant_id: str
     kb_id: str
     folder_id: str
-    credential_ref: str
+    credential_ref: str = ""
+    access_token_env: str = ""
+    refresh_token_env: str = ""
+    client_id_env: str = ""
+    client_secret_env: str = ""
+    token_uri_env: str = ""
     enabled: bool = True
     recursive: bool = True
 
@@ -126,13 +136,22 @@ class ConfluenceConnectorSettings(BaseModel):
     tenant_id: str
     kb_id: str
     base_url: str
-    username: str
-    credential_ref: str
+    username: str = ""
+    username_env: str = ""
+    credential_ref: str = ""
+    api_token_env: str = ""
     enabled: bool = True
     scope_type: Literal["space", "page"] | None = None
     space_key: str | None = None
     page_id: str | None = None
     include_children: bool = False
+
+    @field_validator("page_id", mode="before")
+    @classmethod
+    def _normalize_page_id(cls, value: object) -> object:
+        if isinstance(value, int):
+            return str(value)
+        return value
 
 
 class ConfluenceConnectorsSettings(BaseModel):

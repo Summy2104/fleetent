@@ -1,0 +1,9 @@
+id: mcp-gong-ju
+coverage:
+- mcp
+persona: 需求只能由 MCP 服务工具满足的用户。
+goal: 提一个由测试 agent 内联 MCP server 提供的任务(如对接 mock MCP 的某能力,或「列出仓库 X 的未关闭 issue」),用真实任务措辞。
+success_criteria: 回复包含只能来自该 MCP 工具的具体数据(服务特定结果),不是泛泛或拒绝。
+max_turns: 4
+channel: REPLACE_WITH_TEST_CHANNEL
+setup_hint: 测试 agent 需声明可达的 mcp_servers 并放行其工具(allowed_tools 含 "<server>__*");mock MCP 即可。

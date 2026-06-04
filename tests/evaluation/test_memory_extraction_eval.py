@@ -1,9 +1,13 @@
+import importlib.util
+import os
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from fleetent.intelligence.memory import extraction
+from fleetent.model import router as model_router
 from tests.evaluation.memory_extraction_eval import (
     REQUIRED_FIXTURE_FIELDS,
     FixtureValidationError,
@@ -170,6 +174,7 @@ async def test_real_llm_evaluation_skips_by_default(tmp_path, monkeypatch) -> No
 
 async def test_real_llm_evaluation_skips_without_provider_api_key(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLEETENT_EVAL_REAL_LLM", "1")
+    monkeypatch.setattr(model_router, "ROUTES_PATH", tmp_path / "routes.yaml")
     for env_name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"):
         monkeypatch.delenv(env_name, raising=False)
 
@@ -177,12 +182,126 @@ async def test_real_llm_evaluation_skips_without_provider_api_key(tmp_path, monk
         await run_real_llm_fixture(load_fixtures()[0], tmp_path, monkeypatch)
 
 
+async def test_real_llm_evaluation_treats_default_test_key_as_missing(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLEETENT_EVAL_REAL_LLM", "1")
+    monkeypatch.setattr(model_router, "ROUTES_PATH", tmp_path / "routes.yaml")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    def should_skip_before_route_lookup(route_name: str):
+        raise AssertionError(f"real LLM evaluation should skip before {route_name} route lookup")
+
+    monkeypatch.setattr(extraction, "get_async_client_and_config", should_skip_before_route_lookup)
+
+    with pytest.raises(pytest.skip.Exception) as exc_info:
+        await run_real_llm_fixture(load_fixtures()[0], tmp_path, monkeypatch)
+
+    assert "real provider credential" in str(exc_info.value)
+
+
+async def test_real_llm_evaluation_skips_when_credentials_do_not_match_memory_route(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLEETENT_EVAL_REAL_LLM", "1")
+    monkeypatch.setattr(model_router, "ROUTES_PATH", tmp_path / "routes.yaml")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "real-openai-key")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    def should_skip_before_route_lookup(route_name: str):
+        raise AssertionError(f"real LLM evaluation should skip before {route_name} route lookup")
+
+    monkeypatch.setattr(extraction, "get_async_client_and_config", should_skip_before_route_lookup)
+
+    with pytest.raises(pytest.skip.Exception) as exc_info:
+        await run_real_llm_fixture(load_fixtures()[0], tmp_path, monkeypatch)
+
+    assert "real provider credential" in str(exc_info.value)
+
+
+async def test_real_llm_evaluation_accepts_configured_memory_route_api_key_env(
+    tmp_path, monkeypatch
+) -> None:
+    fixture = load_fixtures()[0]
+    monkeypatch.setenv("FLEETENT_EVAL_REAL_LLM", "1")
+    monkeypatch.setattr(model_router, "ROUTES_PATH", tmp_path / "routes.yaml")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setenv("MEMORY_ROUTE_API_KEY", "real-memory-route-key")
+    monkeypatch.setitem(
+        model_router.ROUTES,
+        "memory_extraction",
+        model_router.RouteConfig(
+            base_url="https://memory-route.test/v1/",
+            model="memory-route-test",
+            api_key_env="MEMORY_ROUTE_API_KEY",
+            max_tokens=256,
+        ),
+    )
+    route_names: list[str] = []
+    create = AsyncMock(
+        return_value=SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content='[{"action": "ignore", "reason": "test"}]')
+                )
+            ]
+        )
+    )
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    cfg = SimpleNamespace(model="real-route-test", max_tokens=256)
+
+    def get_client(route_name: str):
+        route_names.append(route_name)
+        return client, cfg
+
+    monkeypatch.setattr(extraction, "get_async_client_and_config", get_client)
+
+    try:
+        result = await run_real_llm_fixture(fixture, tmp_path, monkeypatch)
+    except pytest.skip.Exception as exc:
+        pytest.fail(f"configured memory route credential should not skip: {exc}")
+
+    assert result.llm_route_names == ["memory_extraction"]
+    assert route_names == ["memory_extraction"]
+
+
+def test_default_required_env_preserves_real_llm_operator_credentials(monkeypatch) -> None:
+    spec = importlib.util.spec_from_file_location(
+        "_fleetent_root_conftest", Path(__file__).resolve().parents[1] / "conftest.py"
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    root_conftest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(root_conftest)
+    monkeypatch.setenv("FLEETENT_EVAL_REAL_LLM", "1")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "real-provider-key")
+    recorded_setenv: list[tuple[str, str]] = []
+
+    class RecordingMonkeyPatch:
+        def setenv(self, key: str, value: str) -> None:
+            recorded_setenv.append((key, value))
+            os.environ[key] = value
+
+    root_conftest._default_required_env.__wrapped__(RecordingMonkeyPatch())
+
+    assert os.environ["ANTHROPIC_API_KEY"] == "real-provider-key"
+    assert ("ANTHROPIC_API_KEY", "test-key") not in recorded_setenv
+
+
 async def test_real_llm_evaluation_uses_memory_extraction_route_when_enabled(
     tmp_path, monkeypatch
 ) -> None:
     fixture = load_fixtures()[0]
     monkeypatch.setenv("FLEETENT_EVAL_REAL_LLM", "1")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(model_router, "ROUTES_PATH", tmp_path / "routes.yaml")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "real-provider-key")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     route_names: list[str] = []
     create = AsyncMock(
         return_value=SimpleNamespace(

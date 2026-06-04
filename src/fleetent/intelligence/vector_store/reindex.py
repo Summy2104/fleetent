@@ -1,10 +1,14 @@
 import asyncio
 import inspect
+import time
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
 
 from fleetent.intelligence import knowledge_base
 from fleetent.intelligence.vector_store import namespaces, runtime
+
+_BACKOFF_SECONDS = (1.0, 2.0, 4.0)
+_PACING_SECONDS = 0.2
 
 
 @dataclass(frozen=True)
@@ -111,12 +115,11 @@ def _rebuild(request: ReindexRequest, namespace: str, items: list[IndexableItem]
     reindexed = 0
     failed = 0
     for item in items:
-        try:
-            _run_sync(runtime.upsert(item.id, item.content, item.namespace))
-        except Exception:
+        if _upsert_with_retry(item):
+            reindexed += 1
+        else:
             failed += 1
-            continue
-        reindexed += 1
+        _sleep(_PACING_SECONDS)
     return ReindexSummary(
         owner=request.owner,
         namespace=namespace,
@@ -126,6 +129,23 @@ def _rebuild(request: ReindexRequest, namespace: str, items: list[IndexableItem]
         skipped=0,
         failed=failed,
     )
+
+
+def _upsert_with_retry(item: IndexableItem) -> bool:
+    for attempt in range(len(_BACKOFF_SECONDS) + 1):
+        try:
+            _run_sync(runtime.upsert(item.id, item.content, item.namespace))
+            return True
+        except Exception:
+            if attempt == len(_BACKOFF_SECONDS):
+                return False
+            _sleep(_BACKOFF_SECONDS[attempt])
+    return False
+
+
+def _sleep(seconds: float) -> None:
+    if seconds > 0:
+        time.sleep(seconds)
 
 
 def _run_sync(result: object) -> None:

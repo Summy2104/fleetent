@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -23,6 +24,15 @@ EXTRACT_SYSTEM = (
 )
 VALID_TYPES = {"identity", "preferences", "context"}
 CONTEXT_TTL = timedelta(days=30)
+JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+IDENTITY_ROLE_SUFFIXES = (
+    "architect",
+    "developer",
+    "engineer",
+    "manager",
+    "operator",
+    "researcher",
+)
 
 
 async def extract_and_update(
@@ -40,12 +50,8 @@ async def extract_and_update(
         ],
         max_tokens=cfg.max_tokens,
     )
-    raw = strip_markdown_fence(response.choices[0].message.content or "[]")
-    try:
-        actions = json.loads(raw)
-    except json.JSONDecodeError:
-        return
-    if not isinstance(actions, list):
+    actions = parse_action_array(response.choices[0].message.content or "[]")
+    if actions is None:
         return
 
     now = datetime.now(UTC).replace(microsecond=0)
@@ -69,6 +75,7 @@ async def extract_and_update(
         if not isinstance(content, str) or not content.strip() or raw_type not in VALID_TYPES:
             continue
         memory_type = cast(MemoryType, raw_type)
+        normalized_content = normalize_action_content(memory_type, content)
         if action_name == "update":
             target_id = action.get("target_id")
             target = snapshot_by_id.get(target_id) if isinstance(target_id, str) else None
@@ -78,7 +85,7 @@ async def extract_and_update(
                 id=target.id,
                 user_id=user_id,
                 type=target.type,
-                content=content.strip(),
+                content=normalized_content,
                 created_at=target.created_at,
                 updated_at=now,
                 expires_at=expires_at(memory_type, now),
@@ -93,7 +100,7 @@ async def extract_and_update(
             id=str(uuid.uuid4()),
             user_id=user_id,
             type=memory_type,
-            content=content.strip(),
+            content=normalized_content,
             created_at=now,
             updated_at=now,
             expires_at=expires_at(memory_type, now),
@@ -109,6 +116,92 @@ def strip_markdown_fence(text: str) -> str:
         text = text.split("\n", 1)[-1]
         text = text.rsplit("```", 1)[0]
     return text.strip()
+
+
+def parse_action_array(text: str) -> list[Any] | None:
+    """Return the first valid JSON array from a raw or provider-wrapped response."""
+    decoder = json.JSONDecoder()
+    for candidate in _json_candidates(text):
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, list):
+            return parsed
+
+    for index, char in enumerate(text):
+        if char != "[":
+            continue
+        try:
+            parsed, _end = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, list):
+            return parsed
+    return None
+
+
+def _json_candidates(text: str) -> list[str]:
+    stripped = text.strip()
+    candidates = [stripped, strip_markdown_fence(stripped)]
+    candidates.extend(match.group(1).strip() for match in JSON_FENCE_RE.finditer(text))
+    return candidates
+
+
+def normalize_action_content(memory_type: MemoryType, content: str) -> str:
+    """Normalize common real-provider wording to user-scoped memory content."""
+    text = " ".join(content.strip().split())
+    lowered = text.casefold()
+    if lowered.startswith("the user's "):
+        return f"User's {text[11:]}"
+    if lowered.startswith("user's "):
+        return f"User's {text[7:]}"
+    if lowered.startswith("the user "):
+        return f"User {text[9:]}"
+    if lowered.startswith("user "):
+        return f"User {text[5:]}"
+
+    if memory_type == "identity":
+        return _normalize_identity_content(text, lowered)
+    if memory_type == "preferences":
+        return _normalize_preferences_content(text, lowered)
+    return _normalize_context_content(text, lowered)
+
+
+def _normalize_identity_content(text: str, lowered: str) -> str:
+    for prefix in ("i am ", "i'm "):
+        if lowered.startswith(prefix):
+            return f"User is {text[len(prefix) :]}"
+    if lowered.startswith("my name is "):
+        return f"User's name is {text[11:]}"
+    if lowered.startswith(("a ", "an ", "the ")):
+        return f"User is {text}"
+    if lowered.endswith(IDENTITY_ROLE_SUFFIXES):
+        return f"User is a {lowered}"
+    return text
+
+
+def _normalize_preferences_content(text: str, lowered: str) -> str:
+    for prefix in ("prefers ", "i prefer "):
+        if lowered.startswith(prefix):
+            return f"User prefers {text[len(prefix) :]}"
+    if lowered.startswith("my preference is "):
+        return f"User prefers {text[17:]}"
+    return text
+
+
+def _normalize_context_content(text: str, lowered: str) -> str:
+    for prefix, replacement in (
+        ("currently ", "User is currently "),
+        ("i am currently ", "User is currently "),
+        ("i'm currently ", "User is currently "),
+        ("working on ", "User is working on "),
+        ("i am working on ", "User is working on "),
+        ("i'm working on ", "User is working on "),
+    ):
+        if lowered.startswith(prefix):
+            return f"{replacement}{text[len(prefix) :]}"
+    return text
 
 
 def expires_at(memory_type: MemoryType, now: datetime) -> datetime | None:

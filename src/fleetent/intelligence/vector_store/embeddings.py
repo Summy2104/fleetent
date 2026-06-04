@@ -101,9 +101,9 @@ def create_embedding_provider(settings: EmbeddingSettings) -> EmbeddingProvider:
         return DeterministicEmbeddingProvider(dimensions=settings.dimensions)
     if settings.backend == "http":
         return HttpEmbeddingProvider(
-            endpoint=settings.endpoint,
-            model=settings.model,
-            dimensions=settings.dimensions,
+            endpoint=_resolve_env_value(settings.endpoint, settings.endpoint_env),
+            model=_resolve_env_value(settings.model, settings.model_env),
+            dimensions=_resolve_dimensions(settings.dimensions, settings.dimensions_env),
             api_key_env=settings.api_key_env,
             timeout_seconds=settings.timeout_seconds,
         )
@@ -124,6 +124,24 @@ def _authorization_header(api_key_env: str) -> dict[str, str]:
     if not api_key:
         return {}
     return {"Authorization": f"Bearer {api_key}"}
+
+
+def _resolve_env_value(value: str, env_name: str) -> str:
+    if env_name:
+        return os.environ.get(env_name, value)
+    return value
+
+
+def _resolve_dimensions(value: int, env_name: str) -> int:
+    if not env_name:
+        return value
+    raw_value = os.environ.get(env_name)
+    if raw_value is None or raw_value == "":
+        return value
+    try:
+        return int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"embedding dimensions env var {env_name} must be an integer") from exc
 
 
 def _extract_embedding(body: object) -> list[float]:

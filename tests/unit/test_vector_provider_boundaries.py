@@ -42,6 +42,31 @@ async def test_http_embedding_sends_dimensions_payload_and_authorization(monkeyp
     }
 
 
+async def test_http_embedding_resolves_endpoint_model_and_dimensions_from_env(monkeypatch):
+    from fleetent.intelligence.vector_store.embeddings import create_embedding_provider
+
+    monkeypatch.setenv("EMBEDDING_ENDPOINT", "http://embedding.test/v1/embeddings")
+    monkeypatch.setenv("EMBEDDING_MODEL", "bge-m3")
+    monkeypatch.setenv("EMBEDDING_DIMENSIONS", "3")
+    provider = create_embedding_provider(
+        EmbeddingSettings(
+            backend="http",
+            endpoint_env="EMBEDDING_ENDPOINT",
+            model_env="EMBEDDING_MODEL",
+            dimensions_env="EMBEDDING_DIMENSIONS",
+        )
+    )
+
+    with respx.mock:
+        respx.post("http://embedding.test/v1/embeddings").mock(
+            return_value=httpx.Response(200, json={"data": [{"embedding": [0.1, 0.2, 0.3]}]})
+        )
+
+        vector = await provider.embed("hello world")
+
+    assert vector == [0.1, 0.2, 0.3]
+
+
 @pytest.mark.parametrize(
     ("response", "message"),
     [
@@ -130,6 +155,29 @@ async def test_http_rerank_sends_payload_and_authorization(monkeypatch):
     }
 
 
+async def test_http_rerank_resolves_endpoint_and_model_from_env(monkeypatch):
+    from fleetent.intelligence.vector_store.rerank import create_rerank_provider
+
+    monkeypatch.setenv("RERANK_ENDPOINT", "http://rerank.test/rerank")
+    monkeypatch.setenv("RERANK_MODEL", "bge-reranker")
+    provider = create_rerank_provider(
+        RerankSettings(
+            backend="http",
+            endpoint_env="RERANK_ENDPOINT",
+            model_env="RERANK_MODEL",
+        )
+    )
+
+    with respx.mock:
+        respx.post("http://rerank.test/rerank").mock(
+            return_value=httpx.Response(200, json={"results": [{"index": 0, "score": 0.9}]})
+        )
+
+        results = await provider.rerank("query", ["doc-a"])
+
+    assert [(result.index, result.score) for result in results] == [(0, 0.9)]
+
+
 async def test_http_rerank_preserves_provider_rank_and_score_order():
     from fleetent.intelligence.vector_store.rerank import create_rerank_provider
 
@@ -152,6 +200,35 @@ async def test_http_rerank_preserves_provider_rank_and_score_order():
         results = await provider.rerank("query", ["doc-a", "doc-b", "doc-c"])
 
     assert [(result.index, result.score) for result in results] == [(2, 0.7), (0, 0.6)]
+
+
+async def test_http_rerank_accepts_relevance_score_field():
+    from fleetent.intelligence.vector_store.rerank import create_rerank_provider
+
+    provider = create_rerank_provider(
+        RerankSettings(
+            backend="http",
+            endpoint="http://rerank.test/rerank",
+            model="jina-reranker",
+        )
+    )
+
+    with respx.mock:
+        respx.post("http://rerank.test/rerank").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"index": 1, "relevance_score": 0.92},
+                        {"index": 0, "relevance_score": 0.71},
+                    ]
+                },
+            )
+        )
+
+        results = await provider.rerank("query", ["doc-a", "doc-b"])
+
+    assert [(result.index, result.score) for result in results] == [(1, 0.92), (0, 0.71)]
 
 
 @pytest.mark.parametrize(

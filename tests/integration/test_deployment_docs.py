@@ -10,6 +10,14 @@ def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
     assert "FLEETENT_AUTO_UPGRADE=false" in content
     assert "ANTHROPIC_API_KEY=" in content
     assert "OPENAI_API_KEY=" in content
+    assert "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN=" in content
+    assert "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET=" in content
+    assert "FLEETENT_CONFLUENCE_USERNAME=" in content
+    assert "FLEETENT_CONFLUENCE_TOKEN=" in content
+    assert "FLEETENT_EVAL_EMBEDDING_ENDPOINT=" in content
+    assert "FLEETENT_EVAL_EMBEDDING_API_KEY=" in content
+    assert "FLEETENT_EVAL_RERANK_ENDPOINT=" in content
+    assert "FLEETENT_EVAL_RERANK_API_KEY=" in content
     assert "sk-" not in content
     assert "ma-" not in content
     assert "xoxb-" not in content
@@ -24,21 +32,22 @@ def test_secrets_documentation_describes_flat_untracked_directory():
         "secrets/",
         "平铺",
         "不进 git",
-        "google-drive-token.json",
         "confluence-api-token",
-        "credential_ref",
-        "file:///app/secrets/google-drive-token.json",
+        "api_token_env",
+        "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN",
+        "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET",
     ]
     for phrase in required_phrases:
         assert phrase in content
 
 
-def test_settings_example_uses_flat_container_secret_reference():
-    content = Path("config/settings.yaml.example").read_text(encoding="utf-8")
-
-    assert 'credential_ref: "file:///app/secrets/google-drive-token.json"' in content
-    assert "/etc/fleetent/secrets" not in content
-    assert "google-drive-eng-token.json" not in content
+def test_global_config_example_templates_removed():
+    # The deployed agent is self-contained (agent.yaml + .env); the global config
+    # files are optional (loaders default when absent) and no longer shipped.
+    assert not Path("config/settings.yaml.example").exists()
+    assert not Path("config/mcp.yaml.example").exists()
+    assert not Path("config/mcp.servers.yaml.example").exists()
+    assert Path("config/agent.yaml.example").exists()
 
 
 def test_dockerfile_includes_deployment_runtime_assets_and_port():
@@ -46,7 +55,7 @@ def test_dockerfile_includes_deployment_runtime_assets_and_port():
 
     required_phrases = [
         "COPY scripts/ ./scripts/",
-        "COPY config/*.yaml.example ./config/",
+        "COPY config/agent.yaml.example ./config/",
         "COPY .env.example ./",
         'ENTRYPOINT ["./scripts/docker_entrypoint.sh"]',
         "EXPOSE 8765",
@@ -198,6 +207,35 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
         "uv run fleetent-admin kb connectors check <confluence_connector_id>",
         "FLEETENT_EVAL_REAL_EMBEDDING=1",
         "skipped: credentials not configured",
+    ]
+    for phrase in required_phrases:
+        assert phrase in content
+
+
+def test_intelligence_roadmap_manual_uses_current_shared_memory_cli():
+    content = Path("docs/deployment/intelligence-roadmap-test-manual.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "fleetent-admin shared-memory" not in content
+    assert "fleetent-admin memory shared" in content
+
+
+def test_intelligence_roadmap_manual_documents_real_llm_credentials_safely():
+    content = Path("docs/deployment/intelligence-roadmap-test-manual.md").read_text(
+        encoding="utf-8"
+    )
+
+    required_phrases = [
+        "FLEETENT_EVAL_REAL_LLM",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "不要写入本手册、验收记录、测试 fixture、commit、issue、日志或 trace",
+        "不要记录值",
+        "缺少真实 provider key",
+        "测试应跳过",
+        "需要配置真实 credential 的原因",
     ]
     for phrase in required_phrases:
         assert phrase in content
