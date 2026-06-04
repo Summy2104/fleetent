@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 from fleetent import paths
+from fleetent.agent_config import AgentAccess
 
 # Default agent-local approval store path (single-agent home). Injectable: the standalone
 # agent runtime points this at its own home `data/`; tests pass an explicit path.
@@ -75,3 +76,15 @@ def resolve_identity(platform: str, platform_user_id: str) -> str:
     the agent home are matched against this same native id.
     """
     return platform_user_id
+
+
+def channel_allowed(access: AgentAccess, channel_id: str) -> bool:
+    """Channel gate: empty ``allow_channels`` allows all the agent's bound channels."""
+    if not access.allow_channels:
+        return True
+    return channel_id in access.allow_channels
+
+
+def user_allowed(access: AgentAccess, store: LocalApprovalStore, identity: str) -> bool:
+    """User gate: allowed if statically listed or locally approved."""
+    return identity in access.allow_users or store.is_approved(identity)

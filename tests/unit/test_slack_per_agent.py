@@ -6,20 +6,11 @@ import fleetent.im_gateway.slack as slack
 
 
 def _build_handler(monkeypatch, agent_name, owner_id, config):
-    captured = {}
-
-    def fake_get_or_create(owner, platform, puid):
-        captured["owner_id"] = owner
-        m = MagicMock()
-        m.id = "internal-1"
-        return m
-
     routed = {}
 
     async def fake_route(msg):
         routed["msg"] = msg
 
-    monkeypatch.setattr("fleetent.im_user_store.get_or_create", fake_get_or_create)
     monkeypatch.setattr("fleetent.im_gateway.normalizer.route", fake_route)
 
     holder = {}

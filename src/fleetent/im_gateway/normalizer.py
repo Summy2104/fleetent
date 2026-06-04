@@ -8,8 +8,8 @@ from typing import Any
 import structlog
 
 from fleetent import agent_config
-from fleetent.agent_config import AgentFile
-from fleetent.platform import im_gateway_management as im
+from fleetent.agent_config import AgentAccess, AgentFile
+from fleetent.im_gateway import access
 
 logger = structlog.get_logger(__name__)
 
@@ -120,14 +120,27 @@ async def route(msg: NormalizedMessage) -> None:
             await msg.reply_func(f"⚠️ approval {approval_id} not found or already expired")
         return
 
-    # Channel allowlist gate — checked before any user-level check. When the platform's
-    # connector has allowlist_enforced off, this always passes (backward compatible).
-    if not im.is_allowed(msg.owner_id, msg.platform, msg.channel_id, msg.workspace_id or None):
+    # Resolve agent config first — the access gate is per-agent. When the receiving
+    # connection already identifies the agent (per-agent-slack-connector stamps
+    # msg.agent_name), use it directly and skip channel→agent lookup; otherwise fall
+    # back to channel → user → default. Zero DB: the index is file-sourced.
+    if msg.agent_name:
+        agent = agent_config.current().get(msg.agent_name)
+    else:
+        agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
+
+    # Local, zero-platform-DB access gate against the agent's own access config + an
+    # agent-local approval store. No agent resolved (bare run) → default-closed.
+    access_cfg = agent.access if agent else AgentAccess()
+    store = access.LocalApprovalStore(access.APPROVALS_PATH)
+    if not access.channel_allowed(access_cfg, msg.channel_id):
         await msg.reply_func(_REJECTION_MSG)
         return
-
-    # Allowlist check — IM users must be approved before interacting
-    if not im.check_allowed_by_user_id(msg.user_id):
+    if not access.user_allowed(access_cfg, store, msg.user_id):
+        # Record the pending user so the platform/admin can approve them later; either
+        # way the message never reaches the loop, decided entirely from local state.
+        if access_cfg.require_approval:
+            store.add_pending(msg.user_id)
         await msg.reply_func(_REJECTION_MSG)
         return
 
@@ -143,13 +156,6 @@ async def route(msg: NormalizedMessage) -> None:
     async with session_mgr.session_lock(session_id):
         history = await session_mgr.load(session_id)
 
-        # Resolve agent config. When the receiving connection already identifies the
-        # agent (per-agent-slack-connector stamps msg.agent_name), use it directly and
-        # skip channel→agent lookup; otherwise fall back to channel → user → default.
-        if msg.agent_name:
-            agent = agent_config.current().get(msg.agent_name)
-        else:
-            agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
         base_system = agent.system_prompt if agent else _SYSTEM
         allowed_tools = agent.allowed_tools if agent else None
         agent_features = agent.features if agent else None

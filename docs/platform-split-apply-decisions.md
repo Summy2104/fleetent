@@ -51,7 +51,17 @@
 
 **D1.5 — route() 先解析 agent，再做本地 gate。**
 - 现状 gate（channel/user）在 agent 解析之前；新设计 gate 是 per-agent 的，必须先有 agent。
-- 决策：把 agent 解析上移到 gate 之前（解析本身零 DB，文件索引）。agent 解析为 None（bare run，无任何 agent 配置）时，用 module 级 default-closed access 兜底（安全默认）。
+- 决策：把 agent 解析上移到 gate 之前（解析本身零 DB，文件索引）。agent 解析为 None（bare run，无任何 agent 配置）时，用 `AgentAccess()` default-closed 兜底（安全默认）。
+
+**D1.6 — bare-run（无 agent 解析）也走 default-closed，是有意的破坏性变更。**
+- 冲突：迁移时发现两个旧测试（`test_normalizer_sandbox::test_route_passes_sandbox_context_to_run`、`test_normalizer_skill_scoping::test_route_no_agent_does_not_narrow`）断言「无 agent 的 bare-run 能进 loop」——这正是 spec 明确要废除的「allowlist-off = allow-all」遗留行为。
+- 判断：spec scenario 只测「agent 存在但无 access 块 → default-closed」，未直接测「完全无 agent」。但把 default-closed 延伸到「无 agent」是最安全、与「默认关闭」精神一致的选择；且 standalone agent runtime（change 2 目标）永远有 agent，bare-run 只出现在平台过渡路径，而该路径在 change 3 被整体移除。
+- 决策：`agent is None → AgentAccess() → 阻断`（记 pending）。据此迁移两个旧测试：sandbox 测试改为绑定一个放行 u1、无 features 的 agent 来验证 sandbox 上下文透传；skill_scoping 的 no-agent 测试改为断言「无 agent → 被 default-closed 阻断、不进 loop」。
+
+**D1.7 — 移除测旧平台 allowlist gate 的过时测试。**
+- `tests/integration/test_normalizer_allowlist.py`（4 个）整体测的是 route() 调 owner-keyed `im_channel_allowlist`/user-store 的旧运行路径——该路径已从 route() 移除。
+- `tests/unit/test_normalizer::test_route_threads_owner_to_allowlist` 测「owner 透传给 im.is_allowed」，同样过时。
+- 决策：删除这些过时用例；其替代覆盖由新增的 `tests/integration/test_normalizer_local_access.py`（per-agent 本地 gate）承担。平台侧 `channel_allowlist` 模块本身保留（平台 authoring 仍用），仅运行路径不再调用。
 
 ### Change 2: agent-runtime-cli
 

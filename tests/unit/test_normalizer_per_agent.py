@@ -4,18 +4,17 @@ from unittest.mock import AsyncMock
 
 import yaml
 
-import fleetent.im_user_store as im_user_store
 import fleetent.runtime.loop as agent_loop
 import fleetent.session.manager as session_mgr
 import fleetent.skills as sr
 from fleetent import agent_config
-from fleetent.im_gateway import normalizer
+from fleetent.im_gateway import access, normalizer
 from fleetent.integrations.sandbox import enablement as se
-from fleetent.platform.im_gateway_management import im_channel_allowlist as acl
 
 
 def _write(root, name, **fields):
-    doc = {"name": name, "version": 1}
+    # Default access allows the test user U1 so the local per-agent gate passes.
+    doc = {"name": name, "version": 1, "access": {"allow_users": ["U1"]}}
     doc.update(fields)
     d = root / name
     d.mkdir(parents=True, exist_ok=True)
@@ -24,8 +23,7 @@ def _write(root, name, **fields):
 
 def _patches(monkeypatch, tmp_path, captured):
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
-    monkeypatch.setattr(im_user_store, "check_allowed_by_user_id", lambda _uid: True)
-    monkeypatch.setattr(acl, "is_allowed", lambda *a, **k: True)
+    monkeypatch.setattr(access, "APPROVALS_PATH", tmp_path / "data" / "im_approvals.json")
     monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.OFF))
     monkeypatch.setattr(sr, "available_skills_prompt", lambda **k: "")
 

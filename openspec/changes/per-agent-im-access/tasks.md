@@ -23,17 +23,17 @@
 
 ## 3. Local, zero-DB route gate
 
-- [ ] 3.1 Write failing tests: `normalizer.route` allows a user in `allow_users` /
+- [x] 3.1 Write failing tests: `normalizer.route` allows a user in `allow_users` /
   approved-locally; blocks a disallowed user when `require_approval`; channel filter via
   `allow_channels`; with the platform allowlist/user-store rigged to raise, routing still
   decides (zero-DB proof).
-- [ ] 3.2 Rewire `route` channel/user gates to the local access config + approval store;
+- [x] 3.2 Rewire `route` channel/user gates to the local access config + approval store;
   remove the owner-keyed `im_channel_allowlist`/user-store reads from the runtime path.
   Make 3.1 green.
 
 ## 4. Migrate + closeout
 
-- [ ] 4.1 Migrate existing allowlist/route tests to the per-agent local model.
+- [x] 4.1 Migrate existing allowlist/route tests to the per-agent local model.
 - [ ] 4.2 `uv run ruff format src tests && uv run ruff check src tests` and
   `uv run mypy src` (no new errors over baseline).
 - [ ] 4.3 Full suite `uv run pytest -x -q` green.
