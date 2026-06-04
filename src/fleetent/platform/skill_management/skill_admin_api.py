@@ -15,9 +15,12 @@ Auth mirrors user_admin_api: ``Authorization: Session <token>``; reads allow
 viewer+admin, writes require admin, high-risk writes require ``X-Confirm: true``.
 """
 
+import shutil
+import tempfile
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from fleetent import auth, skill_registry, user_store
@@ -36,6 +39,19 @@ _ADMIN_ROLES = {"admin", "built_in_admin"}
 def engine_list_skills() -> list[dict[str, str]]:
     """List the engine's current skill index. Defaults to skill_registry."""
     return skill_registry.list_skills()
+
+
+def engine_skill_content(name: str) -> str | None:
+    """Return a skill's raw SKILL.md content. Defaults to skill_registry."""
+    try:
+        return skill_registry.load(name)
+    except Exception:  # noqa: BLE001 — unknown/unreadable skill -> no content
+        return None
+
+
+def engine_skills_dir() -> str:
+    """The writable user skills directory (where imports are materialized)."""
+    return skill_registry._resolve_skills_dir(None)
 
 
 def engine_audit(content: str) -> dict[str, Any]:
@@ -66,24 +82,60 @@ def engine_observability(skill_name: str) -> dict[str, Any]:
     return {"skill_name": skill_name, "hits": 0, "sessions": [], "stale": True}
 
 
+def _proposal_dict(p: Any) -> dict[str, Any]:
+    """Serialize a reflection SkillProposal to a JSON-able review-inbox row."""
+    return {
+        "id": p.id,
+        "type": p.type,
+        "target_skill": p.target_skill,
+        "reason": p.reason,
+        "evidence_refs": list(p.evidence_refs),
+        "risk_level": p.risk_level,
+        "status": p.status,
+        "has_draft": bool(p.suggested_draft),
+        "has_diff": bool(p.suggested_diff),
+        "created_at": p.created_at.isoformat(),
+        "updated_at": p.updated_at.isoformat(),
+    }
+
+
 def reflection_list_proposals() -> list[dict[str, Any]]:
-    """Pending Skill proposals from reflection. Placeholder (reflection follow-up)."""
-    return []
+    """Pending Skill proposals from reflection (newest first)."""
+    from fleetent.intelligence import reflection
+
+    return [_proposal_dict(p) for p in reflection.list_skill_proposals("pending")]
 
 
 def reflection_proposal_diff(proposal_id: str) -> dict[str, Any]:
-    """Diff of a proposal vs current content, from reflection snapshot. Placeholder."""
-    return {"proposal_id": proposal_id, "diff": ""}
+    """Full proposal payload incl. suggested diff/draft, for the review viewer."""
+    from fleetent.intelligence import reflection
+
+    try:
+        p = reflection.get_skill_proposal(proposal_id)
+    except ValueError:
+        return {"proposal_id": proposal_id, "diff": "", "draft": ""}
+    return {
+        **_proposal_dict(p),
+        "proposal_id": p.id,
+        "diff": p.suggested_diff or "",
+        "draft": p.suggested_draft or "",
+    }
 
 
-def reflection_apply_proposal(proposal_id: str) -> None:
-    """Apply (approve) a proposal so the change takes effect. Placeholder."""
-    return None
+def reflection_apply_proposal(proposal_id: str, reviewer_user_id: str) -> None:
+    """Approve a proposal (status -> approved)."""
+    from fleetent.intelligence import reflection
+
+    reflection.approve_skill_proposal(proposal_id, reviewer_user_id=reviewer_user_id)
 
 
-def reflection_close_proposal(proposal_id: str) -> None:
-    """Close (reject) a proposal without changing the skill. Placeholder."""
-    return None
+def reflection_close_proposal(
+    proposal_id: str, reviewer_user_id: str, reason: str = "rejected via admin console"
+) -> None:
+    """Reject a proposal without changing the skill."""
+    from fleetent.intelligence import reflection
+
+    reflection.reject_skill_proposal(proposal_id, reviewer_user_id=reviewer_user_id, reason=reason)
 
 
 def askit_override(skill_name: str, action: str) -> dict[str, Any]:
@@ -209,6 +261,16 @@ def list_skills(
     return rows
 
 
+@router.get("/{name}/content")
+def skill_content(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    """Raw SKILL.md content for preview / edit prefill."""
+    _current_user(authorization)
+    content = engine_skill_content(name)
+    if content is None:
+        raise HTTPException(status_code=404, detail="skill content not found")
+    return {"name": name, "content": content}
+
+
 # --- upload / create / edit ---------------------------------------------------
 
 
@@ -224,6 +286,97 @@ def create_skill(body: SkillBody, authorization: str | None = Header(None)) -> d
     result = _publish(body.name, body.content, body.source, verdict)
     audit_log.write_audit(user.id, "skill.create", "skill", body.name, detail=result)
     return result
+
+
+def _safe_skill_name(name: str) -> bool:
+    return bool(name) and ".." not in name and all(c.isalnum() or c in "._-" for c in name)
+
+
+def _import_skill_dir(src_dir: Path, source: str) -> dict[str, Any]:
+    """Materialize one skill directory into the skills dir, then publish it.
+
+    Copies the whole directory (SKILL.md plus any supporting files/scripts) so the
+    engine's next scan loads it. Raises ValueError for a bad/unsafe skill (caller
+    reports it as skipped). The destination skill name comes from the frontmatter.
+    """
+    skill_file = src_dir / "SKILL.md"
+    content = skill_file.read_text(encoding="utf-8")
+    fm = skill_registry._parse_frontmatter(content) or {}
+    name = str(fm.get("name") or "").strip()
+    if not name or not fm.get("description"):
+        raise ValueError("invalid frontmatter (name/description required)")
+    if not _safe_skill_name(name):
+        raise ValueError(f"unsafe skill name: {name!r}")
+    dest = Path(engine_skills_dir()) / name
+    shutil.copytree(src_dir, dest, dirs_exist_ok=True)
+    skill_admin_store.set_provenance(name, source)
+    verdict = engine_audit(content)
+    return _publish(name, content, source, verdict)
+
+
+def _run_import(root: Path, recursive: bool, source: str) -> dict[str, Any]:
+    """Import one (or, when recursive, every) skill dir under ``root``. Raises HTTP 422
+    when nothing importable is found; per-skill failures are collected, not raised."""
+    if recursive:
+        dirs = sorted(d for d in root.iterdir() if d.is_dir() and (d / "SKILL.md").exists())
+        if not dirs:
+            raise HTTPException(
+                status_code=422, detail="no skill directories (with SKILL.md) found"
+            )
+    else:
+        if not (root / "SKILL.md").exists():
+            raise HTTPException(
+                status_code=422, detail="no SKILL.md here; use batch for a parent directory"
+            )
+        dirs = [root]
+
+    imported: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    failed: list[dict[str, str]] = []
+    for d in dirs:
+        try:
+            res = _import_skill_dir(d, source)
+            imported.append(
+                {"name": res["name"], "verdict": res["verdict"], "published": res["published"]}
+            )
+        except ValueError as exc:
+            skipped.append({"dir": d.name, "reason": str(exc)})
+        except Exception as exc:  # noqa: BLE001 — surface copy/IO failure per-skill, keep going
+            failed.append({"dir": d.name, "error": str(exc)})
+    return {"imported": imported, "skipped": skipped, "failed": failed}
+
+
+@router.post("/import/upload")
+async def import_skills_upload(
+    files: list[UploadFile] = File(...),
+    source: str = Form("adhoc"),
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    """Import skill(s) from a folder uploaded by the browser (multipart).
+
+    The browser sends each file with its folder-relative path as the filename
+    (``<input webkitdirectory>``). The tree is reconstructed in a temp dir and then
+    imported. Single-skill vs batch is auto-detected: a SKILL.md at the folder root
+    means one skill; otherwise every immediate subdir with a SKILL.md is imported.
+    """
+    user = _require_admin(authorization)
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        tops: set[str] = set()
+        for f in files:
+            rel = (f.filename or "").replace("\\", "/").lstrip("/")
+            if not rel or ".." in rel.split("/"):
+                continue
+            tops.add(rel.split("/", 1)[0])
+            dest = root / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(await f.read())
+        # webkitdirectory nests everything under the chosen folder; descend into it.
+        base = root / next(iter(tops)) if len(tops) == 1 else root
+        recursive = not (base / "SKILL.md").exists()
+        summary = _run_import(base, recursive, source)
+    audit_log.write_audit(user.id, "skill.import", "skill", "upload", detail=summary)
+    return summary
 
 
 @router.put("/{name}")
@@ -407,14 +560,23 @@ def approve_proposal(
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
     _require_confirm(x_confirm)
-    reflection_apply_proposal(proposal_id)
+    reflection_apply_proposal(proposal_id, user.id)
     audit_log.write_audit(user.id, "skill.proposal_approve", "skill_proposal", proposal_id)
     return {"proposal_id": proposal_id, "status": "approved"}
 
 
+class RejectBody(BaseModel):
+    reason: str = "rejected via admin console"
+
+
 @router.post("/proposals/{proposal_id}/reject")
-def reject_proposal(proposal_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+def reject_proposal(
+    proposal_id: str,
+    authorization: str | None = Header(None),
+    body: RejectBody | None = None,
+) -> dict[str, Any]:
     user = _require_admin(authorization)
-    reflection_close_proposal(proposal_id)
+    reason = body.reason if body else "rejected via admin console"
+    reflection_close_proposal(proposal_id, user.id, reason)
     audit_log.write_audit(user.id, "skill.proposal_reject", "skill_proposal", proposal_id)
     return {"proposal_id": proposal_id, "status": "rejected"}

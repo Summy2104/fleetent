@@ -104,12 +104,12 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         skill_admin_api,
         "reflection_apply_proposal",
-        lambda proposal_id: proposals.append(f"apply:{proposal_id}"),
+        lambda proposal_id, reviewer_user_id: proposals.append(f"apply:{proposal_id}"),
     )
     monkeypatch.setattr(
         skill_admin_api,
         "reflection_close_proposal",
-        lambda proposal_id: proposals.append(f"close:{proposal_id}"),
+        lambda proposal_id, reviewer_user_id, reason: proposals.append(f"close:{proposal_id}"),
     )
     monkeypatch.setattr(
         skill_admin_api,

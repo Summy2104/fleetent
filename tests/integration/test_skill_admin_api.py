@@ -242,18 +242,22 @@ def test_force_publish_requires_confirm(client):
 
 def test_approve_proposal_applies_via_reflection(client, monkeypatch):
     applied = []
-    monkeypatch.setattr(api, "reflection_apply_proposal", lambda pid: applied.append(pid))
-    token, _ = _session_for("admin")
+    monkeypatch.setattr(
+        api, "reflection_apply_proposal", lambda pid, reviewer: applied.append((pid, reviewer))
+    )
+    token, uid = _session_for("admin")
     r = client.post("/admin/skills/proposals/p1/approve", headers=_hdr(token, confirm=True))
     assert r.status_code == 200
-    assert applied == ["p1"]
+    assert applied == [("p1", uid)]
     assert any(a["action"] == "skill.proposal_approve" for a in audit.search_audit())
 
 
 def test_reject_proposal_closes_without_change(client, monkeypatch):
     closed, applied = [], []
-    monkeypatch.setattr(api, "reflection_close_proposal", lambda pid: closed.append(pid))
-    monkeypatch.setattr(api, "reflection_apply_proposal", lambda pid: applied.append(pid))
+    monkeypatch.setattr(
+        api, "reflection_close_proposal", lambda pid, reviewer, reason: closed.append(pid)
+    )
+    monkeypatch.setattr(api, "reflection_apply_proposal", lambda pid, reviewer: applied.append(pid))
     token, _ = _session_for("admin")
     r = client.post("/admin/skills/proposals/p2/reject", headers=_hdr(token))
     assert r.status_code == 200
@@ -265,3 +269,111 @@ def test_list_proposals_uses_reflection(client, monkeypatch):
     token, _ = _session_for("viewer")
     r = client.get("/admin/skills/proposals", headers=_hdr(token))
     assert r.json()[0]["id"] == "p1"
+
+
+def _insert_proposal(db_path, pid="pr1", status="pending"):
+    import sqlite3
+    now = "2026-06-04T00:00:00+00:00"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """INSERT INTO skill_proposals
+           (id, type, target_skill, reason, evidence_refs_json, risk_level,
+            suggested_draft, suggested_diff, status, created_at, updated_at)
+           VALUES (?, 'creation', 'demo', 'because logs', '["t1"]', 'low',
+                   '---\nname: demo\n---\nbody', '@@ -1 +1 @@', ?, ?, ?)""",
+        (pid, status, now, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_list_proposals_real_reflection(client, tmp_path):
+    _insert_proposal(tmp_path / "users.db")
+    token, _ = _session_for("admin")
+    rows = client.get("/admin/skills/proposals", headers=_hdr(token)).json()
+    assert any(p["id"] == "pr1" and p["target_skill"] == "demo" for p in rows)
+    assert rows[0]["risk_level"] == "low"
+    assert rows[0]["has_diff"] is True
+
+
+def test_proposal_diff_real_reflection(client, tmp_path):
+    _insert_proposal(tmp_path / "users.db", pid="pr2")
+    token, _ = _session_for("admin")
+    r = client.get("/admin/skills/proposals/pr2/diff", headers=_hdr(token)).json()
+    assert "@@" in r["diff"]
+    assert r["target_skill"] == "demo"
+
+
+def test_approve_proposal_real_reflection_updates_status(client, tmp_path):
+    _insert_proposal(tmp_path / "users.db", pid="pr3")
+    token, _ = _session_for("admin")
+    r = client.post("/admin/skills/proposals/pr3/approve", headers=_hdr(token, confirm=True))
+    assert r.status_code == 200
+    # no longer pending
+    rows = client.get("/admin/skills/proposals", headers=_hdr(token)).json()
+    assert all(p["id"] != "pr3" for p in rows)
+
+
+def test_skill_content_endpoint(client, monkeypatch):
+    monkeypatch.setattr(
+        api, "engine_skill_content", lambda n: "---\nname: x\n---\nbody" if n == "x" else None
+    )
+    token, _ = _session_for("viewer")
+    r = client.get("/admin/skills/x/content", headers=_hdr(token))
+    assert r.status_code == 200
+    assert "body" in r.json()["content"]
+    assert client.get("/admin/skills/ghost/content", headers=_hdr(token)).status_code == 404
+
+
+def test_import_upload_single_folder(client, tmp_path, monkeypatch):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    monkeypatch.setattr(api, "engine_skills_dir", lambda: str(skills_dir))
+    token, _ = _session_for("admin")
+    # browser webkitdirectory: filenames are folder-relative (single skill folder "alpha")
+    files = [
+        ("files", ("alpha/SKILL.md", b"---\nname: alpha\ndescription: d\n---\nbody")),
+        ("files", ("alpha/run.sh", b"echo hi")),
+    ]
+    r = client.post("/admin/skills/import/upload", headers=_hdr(token), files=files)
+    assert r.status_code == 200
+    assert [i["name"] for i in r.json()["imported"]] == ["alpha"]
+    assert (skills_dir / "alpha" / "SKILL.md").exists()
+    assert (skills_dir / "alpha" / "run.sh").exists()
+
+
+def test_import_upload_batch_folder(client, tmp_path, monkeypatch):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    monkeypatch.setattr(api, "engine_skills_dir", lambda: str(skills_dir))
+    token, _ = _session_for("admin")
+    # bundle/ has no top SKILL.md -> auto-detected as batch
+    files = [
+        ("files", ("bundle/one/SKILL.md", b"---\nname: one\ndescription: d\n---\nb")),
+        ("files", ("bundle/two/SKILL.md", b"---\nname: two\ndescription: d\n---\nb")),
+        ("files", ("bundle/readme.txt", b"not a skill")),
+    ]
+    r = client.post("/admin/skills/import/upload", headers=_hdr(token), files=files)
+    assert {i["name"] for i in r.json()["imported"]} == {"one", "two"}
+
+
+def test_import_upload_viewer_forbidden(client):
+    token, _ = _session_for("viewer")
+    files = [("files", ("a/SKILL.md", b"---\nname: a\ndescription: d\n---\nb"))]
+    r = client.post("/admin/skills/import/upload", headers=_hdr(token), files=files)
+    assert r.status_code == 403
+
+
+def test_import_upload_bad_frontmatter_skipped(client, tmp_path, monkeypatch):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    monkeypatch.setattr(api, "engine_skills_dir", lambda: str(skills_dir))
+    token, _ = _session_for("admin")
+    files = [
+        ("files", ("bundle/good/SKILL.md", b"---\nname: good\ndescription: d\n---\nb")),
+        ("files", ("bundle/bad/SKILL.md", b"no frontmatter here")),
+    ]
+    r = client.post("/admin/skills/import/upload", headers=_hdr(token), files=files)
+    body = r.json()
+    assert [i["name"] for i in body["imported"]] == ["good"]
+    assert body["skipped"][0]["dir"] == "bad"

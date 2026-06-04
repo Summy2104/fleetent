@@ -414,6 +414,19 @@ def get_skill_proposal(proposal_id: str) -> SkillProposal:
     return proposal
 
 
+def list_skill_proposals(status: str | None = "pending") -> list[SkillProposal]:
+    """List Skill proposals, newest first; ``status=None`` returns every status."""
+    database = _database()
+    if not database.path.exists() or not _has_table(database, "skill_proposals"):
+        return []
+    where = "WHERE status = :status" if status else ""
+    rows = database.execute(
+        f"SELECT * FROM skill_proposals {where} ORDER BY updated_at DESC",
+        {"status": status} if status else {},
+    ).fetchall()
+    return [_skill_proposal_from_row(row) for row in rows]
+
+
 def approve_skill_proposal(proposal_id: str, *, reviewer_user_id: str) -> SkillProposal:
     """Approve a pending Skill proposal."""
     proposal = get_skill_proposal(proposal_id)
