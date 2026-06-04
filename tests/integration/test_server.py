@@ -98,6 +98,9 @@ def _agent_admin_env(tmp_path, monkeypatch):
     apply_migrations(db_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    # platform-agent-lifecycle: create/update now materializes the agent home; isolate
+    # FLEETENT_HOME to tmp so the seam never writes to the real data dir.
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     monkeypatch.setattr(us, "DB_PATH", db_path)
     monkeypatch.setattr(audit, "DB_PATH", db_path)
     return db_path
@@ -162,6 +165,8 @@ def test_create_persists_version_config_via_wired_seam(tmp_path, monkeypatch, is
     assert a.mcp_server_ids == ["github"]
     assert a.model_overrides == {"model": "x"}
     assert a.memory_namespace == "team"
+    # platform-agent-lifecycle: create materialized the runnable home
+    assert (tmp_path / "cfg" / "agent.yaml").exists()
 
 
 def test_update_overrides_only_provided_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_db):

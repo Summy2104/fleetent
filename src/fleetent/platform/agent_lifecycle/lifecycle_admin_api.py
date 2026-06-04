@@ -13,7 +13,6 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException
 
 from fleetent import agent_store, auth, user_store
-from fleetent.agent_config import AgentFile
 from fleetent.platform.agent_lifecycle import controller, materialize
 
 router = APIRouter(prefix="/admin/agents", tags=["agent-lifecycle"])
@@ -40,27 +39,10 @@ def _require_admin(authorization: str | None) -> user_store.User:
     return user
 
 
-def _agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
-    """Build the home schema from the authored core definition.
-
-    connectors/access are not yet stored per-agent on the platform; they materialize as
-    their safe defaults (no connectors; default-closed access) until authoring lands.
-    """
-    return AgentFile(
-        name=agent.name,
-        version=1,
-        system_prompt=agent.system_prompt,
-        allowed_tools=agent.allowed_tools,
-        allowed_skills=agent.allowed_skills,
-        plugins=agent.plugins,
-        features=agent.features,
-    )
-
-
 def _materialize_if_needed(agent: agent_store.Agent) -> None:
     home = materialize.home_dir(agent.name)
     if not (home / "agent.yaml").exists():
-        materialize.write_home(_agent_file_from_store(agent))
+        materialize.write_home(materialize.agent_file_from_store(agent))
 
 
 @router.post("/{name}/start")

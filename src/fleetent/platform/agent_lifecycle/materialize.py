@@ -12,8 +12,25 @@ from pathlib import Path
 
 import yaml
 
-from fleetent import paths
+from fleetent import agent_store, paths
 from fleetent.agent_config import AGENT_FILE_NAME, AgentFile
+
+
+def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
+    """Build the home schema from the authored core definition.
+
+    connectors/access are not yet stored per-agent on the platform; they materialize as
+    their safe defaults (no connectors; default-closed access) until authoring lands.
+    """
+    return AgentFile(
+        name=agent.name,
+        version=1,
+        system_prompt=agent.system_prompt,
+        allowed_tools=agent.allowed_tools,
+        allowed_skills=agent.allowed_skills,
+        plugins=agent.plugins,
+        features=agent.features,
+    )
 
 
 def home_dir(name: str) -> Path:
@@ -65,6 +82,18 @@ def _seed_env(home: Path, names: list[str]) -> None:
         if key not in names:
             lines.append(f"{key}={val}")
     env_path.write_text("\n".join(lines) + "\n" if lines else "", encoding="utf-8")
+
+
+def materialize_from_store(name: str) -> Path | None:
+    """Materialize the home for a stored agent by name (the DB→file export on write).
+
+    Returns the home dir, or None if no such agent exists. Best-effort callers may ignore
+    a None (e.g. a delete racing a materialize).
+    """
+    agent = agent_store.get_by_name(name)
+    if agent is None:
+        return None
+    return write_home(agent_file_from_store(agent))
 
 
 def write_home(agent: AgentFile) -> Path:

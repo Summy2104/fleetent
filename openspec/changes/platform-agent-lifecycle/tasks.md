@@ -24,6 +24,6 @@
 
 ## 4. Closeout
 
-- [ ] 4.1 `uv run ruff format src tests && uv run ruff check src tests` and
+- [x] 4.1 `uv run ruff format src tests && uv run ruff check src tests` and
   `uv run mypy src` (no new errors over baseline).
 - [ ] 4.2 Full suite `uv run pytest -x -q` green.
