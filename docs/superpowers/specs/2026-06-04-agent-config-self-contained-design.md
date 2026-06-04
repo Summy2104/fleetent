@@ -26,13 +26,13 @@ agent.yaml 自包含 agent 核心能力：`system_prompt` / `model_overrides` / 
 
 **本次不做（后续单独 change）**：KB、memory、vector_store、embedding、rerank、long_term_ctx —— 先跑各自默认值（等于关闭/默认）。agent.yaml「手写源 vs DB 生成」关系也暂不纠结（运行时只管读）。
 
-## 三个 change（顺序 1 → 2 → 3）
+## 三个 change（实际执行顺序 1 → 3 → 2，见 I3）
 
-| # | change | 内容 |
-|---|---|---|
-| 1 | `single-agent-config-file` | `paths.agent_file()` + `agent_config` 单文件 home 加载（唯一且强制 default），优先于多扫描；消费者零改动 |
-| 2 | `drop-global-config-files` | 删 `settings.yaml`/`mcp.yaml`/`mcp.servers.yaml`（含 `.example`）；`Settings` 收缩为本地 infra（db/logging，paths 默认 + .env）；deferred intelligence 跑默认 |
-| 3 | `installer-seed-agent-yaml` | `install.sh` seed `$FLEETENT_HOME/agent.yaml`（根，不建 config/），修最初的 bug |
+| # | change | 内容 | 状态 |
+|---|---|---|---|
+| 1 | `single-agent-config-file` | `paths.agent_file()` + `agent_config` 单文件 home 加载（唯一且强制 default），优先于多扫描；消费者零改动 | ✅ merged (PR #107) |
+| 3 | `installer-seed-agent-yaml` | `install.sh` seed `$FLEETENT_HOME/agent.yaml`（扁平 home，无 config/）+ `config/agent.yaml.example`，修最初的 bug | ✅ merged (PR #108) |
+| 2 | `drop-global-config-files` | 删 3 个全局 `.example` + init-config 不再 seed + Dockerfile 显式 COPY；**加载器保留（容忍缺失→默认）**，`Settings` 收缩 + 加载器移除 **deferred** | 实施中 |
 
 ## 决策日志（Decisions）
 
@@ -51,5 +51,19 @@ agent.yaml 自包含 agent 核心能力：`system_prompt` / `model_overrides` / 
 ## 待审核要点（供张洋最终 review）
 
 - 单文件「强制 default」语义是否符合预期（D2）。
-- change 2 删 `settings.yaml` 后，deferred 的 KB/memory/vector 等跑默认值（关闭）是否可接受到「后续再做」之前。
 - install.sh 扁平布局（无 config/）是否最终形态。
+- **本次未删加载器、未收缩 `Settings`**（见 I2）：`settings.yaml` 仍被 `Settings` + sandbox config/enablement 的加载器读取（缺失即默认）。这是有意 deferred，等以下「后续工作」一起做——确认这个边界可接受。
+
+## 后续工作（deferred，本 3-change 之外）
+
+1. **intelligence → agent.yaml**：vector_store/embedding/rerank/knowledge_base/long_term_ctx 从 `Settings` 迁入 agent.yaml；改 intelligence 子系统从 agent 配置取。
+2. **sandbox 配置 → agent.yaml**：`sandbox:` 段（mode/scope/resources）从 settings.yaml 迁入 agent.yaml 的 `features`。
+3. **移除加载器 + 收缩 `Settings`**：1+2 完成后，settings.yaml/mcp 全局加载器可彻底删除，`Settings` 收缩为纯本地 infra（db/logging）。
+4. **Docker 单 agent 运行时布局**：容器内 `/app/agent.yaml` 的放置/挂载（本 3-change 只对齐了 install.sh 路径，未重做 Docker 运行时布局）。
+
+## 最终审核汇总（3-change 完成后）
+
+- **change 1**（PR #107，merged）：agent 运行时从 `FLEETENT_HOME/agent.yaml` 加载单体自包含 agent（强制 default，跳目录名校验），不存在则回退多扫描；消费者零改动。
+- **change 3**（PR #108，merged）：`install.sh` 改为扁平 home seed `agent.yaml`+`.env`，新增 `config/agent.yaml.example`；**修复最初的 bug**（部署的 agent.yaml 现在被 seed 且被运行时读取）。
+- **change 2**（本，PR 待建）：删 3 个全局 `.example` + init-config 不再 seed + Dockerfile 显式 COPY；加载器保留（容忍缺失），深度移除 deferred。
+- 全程：每个 change 独立 worktree+分支、TDD 红绿、archive+sync spec、CI 绿后 admin 合并、清理 worktree；只推 origin(Bitbucket)。

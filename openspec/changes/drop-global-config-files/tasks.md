@@ -20,4 +20,4 @@
 ## 5. 收尾
 
 - [ ] 5.1 全量 `ANTHROPIC_API_KEY=sk-test-dummy uv run pytest -x -q` 通过；`uv run ruff format && uv run ruff check`；`uv run mypy src` 不新增；`bash -n` 无关
-- [ ] 5.2 更新设计文档决策日志（本 change 完成 + 明确「删加载器+收缩 Settings」deferred 的范围与触发条件：随 sandbox/intelligence→agent.yaml 迁移）；写 3-change 最终审核汇总段
+- [x] 5.2 更新设计文档决策日志（本 change 完成 + 明确「删加载器+收缩 Settings」deferred 的范围与触发条件：随 sandbox/intelligence→agent.yaml 迁移）；写 3-change 最终审核汇总段
