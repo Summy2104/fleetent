@@ -4,11 +4,13 @@ import argparse
 
 from fleetent.platform.admin_cli import (
     agents,
+    config_validation,
     diagnostics,
     im,
     im_connectors,
     init_config,
     kb_connectors,
+    maintenance,
     observability,
     schedules,
     shared_memory,
@@ -23,9 +25,11 @@ _COMMAND_MODULES = (
     schedules,
     kb_connectors,
     init_config,
+    config_validation,
     diagnostics,
     observability,
     shared_memory,
+    maintenance,
 )
 
 

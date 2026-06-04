@@ -4,7 +4,14 @@
 TBD - created by archiving change 2026-06-02-connector-management. Update Purpose after archive.
 ## Requirements
 ### Requirement: MCP server list and connection status
-The admin face SHALL list all configured MCP servers (stdio / HTTP transport) with a connection status aligned to the `mcp` domain: connected, startup-degraded (masked at startup), probe-failing-reconnecting (exponential backoff), and marked-permanently-unavailable. Each entry SHALL show registered tool count, the `server__{tool}` namespace list, and the last handshake/probe time. Connection state is delegated to the `mcp` domain and SHALL NOT be recomputed here.
+The admin face SHALL list all configured MCP servers (stdio / HTTP transport) with a
+connection status aligned to the `mcp` domain: connected, startup-degraded (masked at
+startup), probe-failing-reconnecting (exponential backoff), and marked-permanently-
+unavailable. Each entry SHALL show its owning agent (or "global default" for entries
+sourced from `config/mcp.servers.yaml`), registered tool count, the `server__{tool}`
+namespace list, and the last handshake/probe time. The list SHALL support filtering by
+owning agent. Connection state is delegated to the `mcp` domain and SHALL NOT be
+recomputed here.
 
 #### Scenario: Startup-degraded server visible (场景 112)
 - **WHEN** an admin opens the MCP server list while an HTTP MCP server was degraded after a failed startup handshake
@@ -13,6 +20,10 @@ The admin face SHALL list all configured MCP servers (stdio / HTTP transport) wi
 #### Scenario: Connection states distinguished
 - **WHEN** servers are respectively connected, reconnecting under backoff, and marked permanently unavailable
 - **THEN** the list shows each distinct status as reported by the `mcp` domain
+
+#### Scenario: Owning agent shown and filterable
+- **WHEN** an admin filters the MCP server list by agent `billing`
+- **THEN** only `billing`-owned servers and applicable global defaults are listed, each labeled with its owning agent or "global default"
 
 ### Requirement: Registered tool namespace visibility
 The admin face SHALL let an admin expand an MCP server to view its registered tools (name, description, input-schema summary). Tool names SHALL be shown under the `{server_id}__{tool_name}` (double-underscore) namespace so an admin can reference `server__*` tools when configuring an Agent's `allowed_tools`. Access control of the allowlist itself belongs to the `governance` domain; this face only makes tools visible.

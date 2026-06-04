@@ -86,6 +86,20 @@ class ConnectorStatus:
     last_error: str | None
 
 
+@dataclass(frozen=True)
+class SmokeStepStatus:
+    status: Literal["passed", "failed", "skipped"]
+    skipped_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class RealConnectorSmokeStatus:
+    connector_id: str
+    check: SmokeStepStatus
+    dry_run: SmokeStepStatus
+    execute_sync: SmokeStepStatus
+
+
 def list_configured_connectors(settings: Settings | None = None) -> list[ConnectorSummary]:
     """List configured knowledge-base connectors without exposing credential payloads."""
     return [
@@ -259,6 +273,35 @@ def record_connector_status(
             "updated_at": finished.isoformat(),
         },
     )
+
+
+def real_connector_smoke_gate(
+    *,
+    connector_id: str,
+    smoke_enabled: bool,
+    credential_ref: str | None,
+    execute_sync: bool,
+    execute_enabled: bool,
+    pilot_fixture: bool,
+) -> RealConnectorSmokeStatus:
+    """Return explicit opt-in gate status for real connector smoke operations."""
+    if not smoke_enabled:
+        skipped = SmokeStepStatus("skipped", "real smoke opt-in flag is absent")
+        return RealConnectorSmokeStatus(connector_id, skipped, skipped, skipped)
+    if not credential_ref:
+        skipped = SmokeStepStatus("skipped", "credential_ref is absent")
+        return RealConnectorSmokeStatus(connector_id, skipped, skipped, skipped)
+    check = SmokeStepStatus("passed")
+    dry_run = SmokeStepStatus("passed")
+    if not execute_sync:
+        execute = SmokeStepStatus("skipped", "execute sync was not requested")
+    elif not execute_enabled:
+        execute = SmokeStepStatus("skipped", "execute opt-in flag is absent")
+    elif not pilot_fixture:
+        execute = SmokeStepStatus("skipped", "source is not marked as a Pilot fixture")
+    else:
+        execute = SmokeStepStatus("passed")
+    return RealConnectorSmokeStatus(connector_id, check, dry_run, execute)
 
 
 async def _run_enabled_connector_sync(

@@ -15,25 +15,6 @@ def mock_session_mgr(monkeypatch):
     return sm
 
 
-def _make_snapshot(**overrides):
-    from fleetent.agent_runtime import AgentSnapshot
-
-    defaults = dict(
-        agent_id=1,
-        name="agent",
-        version=1,
-        version_id=1,
-        system_prompt="System.",
-        allowed_tools=["calculate"],
-        skills_dir=None,
-        mcp_server_ids=None,
-        model_overrides={},
-        memory_namespace="default",
-    )
-    defaults.update(overrides)
-    return AgentSnapshot(**defaults)
-
-
 @pytest.fixture
 def mock_agent_loop(monkeypatch):
     import fleetent.agent_loop as al
@@ -44,13 +25,20 @@ def mock_agent_loop(monkeypatch):
 
 @pytest.fixture
 def mock_memory_skill(monkeypatch):
+<<<<<<< HEAD
     import fleetent.agent_runtime as ar
+=======
+    import fleetent.im_gateway.normalizer as norm
+    import fleetent.im_user_store as ius
+>>>>>>> origin/main
     import fleetent.skill_registry as sr
     from fleetent.platform import im_gateway_management as ius
 
     monkeypatch.setattr(sr, "match", lambda text: None)
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
-    monkeypatch.setattr(ar, "resolve_agent_for_request", lambda platform, channel_id, user_id: None)
+    # -next route resolves the bound agent via get_agent_for_context (flat Agent),
+    # not the snapshot resolver; no bound agent → bare run with the default system.
+    monkeypatch.setattr(norm, "get_agent_for_context", lambda platform, channel_id, user_id: None)
 
 
 async def test_route_loads_history_calls_agent_saves_replies(
@@ -234,70 +222,6 @@ async def test_telegram_create_app_returns_application_object(monkeypatch):
     mock_app.add_handler.assert_called_once()
 
 
-async def test_route_uses_agent_snapshot_when_assigned(
-    mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
-):
-    """route() should pass the resolved snapshot and use its system_prompt."""
-    import fleetent.agent_runtime as ar
-
-    snapshot = _make_snapshot(
-        name="restricted",
-        system_prompt="You are a restricted agent.",
-        allowed_tools=["calculate"],
-    )
-    monkeypatch.setattr(
-        ar, "resolve_agent_for_request", lambda platform, channel_id, user_id: snapshot
-    )
-
-    reply_calls: list[str] = []
-
-    async def fake_reply(text: str) -> None:
-        reply_calls.append(text)
-
-    msg = NormalizedMessage(
-        platform="slack",
-        session_id="user:U999",
-        user_id="restricted-user",
-        text="hi",
-        attachments=[],
-        reply_func=fake_reply,
-    )
-
-    await route(msg)
-
-    call_kwargs = mock_agent_loop.run.call_args[1]
-    assert call_kwargs["snapshot"] is snapshot
-    system_msg = call_kwargs["messages"][0]
-    assert "restricted agent" in system_msg["content"]
-
-
-async def test_route_no_agent_passes_none_snapshot(
-    mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
-):
-    """When no agent resolves, snapshot should be None (bare run)."""
-    import fleetent.agent_runtime as ar
-
-    monkeypatch.setattr(ar, "resolve_agent_for_request", lambda platform, channel_id, user_id: None)
-
-    async def fake_reply(text: str) -> None:
-        pass
-
-    msg = NormalizedMessage(
-        platform="slack",
-        channel_id="C000",
-        session_id="user:U000",
-        user_id="free-user",
-        text="hi",
-        attachments=[],
-        reply_func=fake_reply,
-    )
-
-    await route(msg)
-
-    call_kwargs = mock_agent_loop.run.call_args[1]
-    assert call_kwargs["snapshot"] is None
-
-
 async def test_route_blocked_user_gets_rejection_not_agent(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
@@ -331,17 +255,27 @@ async def test_route_blocked_user_gets_rejection_not_agent(
 async def test_route_channel_agent_takes_priority(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
+<<<<<<< HEAD
     """Channel-level agent is used when bound, regardless of user binding."""
     import fleetent.agent_runtime as ar
     from fleetent.platform import im_gateway_management as ius
+=======
+    """Channel-bound agent's system prompt is used for the run (flat Agent path)."""
+    import fleetent.im_gateway.normalizer as norm
+    import fleetent.im_user_store as ius
+    from fleetent.agent_store import Agent
+>>>>>>> origin/main
 
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: True)
 
-    channel_snapshot = _make_snapshot(
-        agent_id=10, name="channel-bot", system_prompt="Channel sys.", allowed_tools=["shell"]
+    channel_agent = Agent(
+        id=10,
+        name="channel-bot",
+        system_prompt="Channel sys.",
+        allowed_tools=["shell"],
     )
     monkeypatch.setattr(
-        ar, "resolve_agent_for_request", lambda platform, channel_id, user_id: channel_snapshot
+        norm, "get_agent_for_context", lambda platform, channel_id, user_id: channel_agent
     )
 
     reply_calls: list[str] = []
@@ -362,5 +296,5 @@ async def test_route_channel_agent_takes_priority(
     await route(msg)
 
     call_kwargs = mock_agent_loop.run.call_args[1]
-    assert call_kwargs["snapshot"] is channel_snapshot
+    assert call_kwargs["allowed_tools"] == ["shell"]
     assert "Channel sys." in call_kwargs["messages"][0]["content"]

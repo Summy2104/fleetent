@@ -680,6 +680,53 @@ def test_oauth_write_controls_admin_gated():
     assert "oc-create-bar" in html
 
 
+# --- agent-scoped OAuth/MCP: owner column + agent filter ----------------------
+
+
+def test_oauth_connectors_table_has_owner_column():
+    html = ADMIN_HTML
+    head = html.split('id="oc-body"', 1)[0]
+    thead = head.rsplit("<thead>", 1)[1]
+    assert ">Owner<" in thead
+
+
+def test_mcp_servers_table_has_owner_column():
+    html = ADMIN_HTML
+    head = html.split('id="mcp-body"', 1)[0]
+    thead = head.rsplit("<thead>", 1)[1]
+    assert ">Owner<" in thead
+
+
+def test_oauth_connectors_render_owner_cell_and_colspan():
+    html = ADMIN_HTML
+    body = html.split("async function ocConnectors()", 1)[1].split("function ocOpenCreate", 1)[0]
+    assert "c.agent_id" in body
+    assert 'colspan="6"' in body
+
+
+def test_mcp_servers_render_owner_cell_and_colspan():
+    html = ADMIN_HTML
+    body = html.split("async function mcpServers()", 1)[1].split("async function mcpTools", 1)[0]
+    assert "s.agent_id" in body
+    assert 'colspan="5"' in body
+
+
+def test_oauth_agent_filter_control_present_and_wired():
+    html = ADMIN_HTML
+    assert 'id="oc-agent-filter"' in html
+    body = html.split("async function ocConnectors()", 1)[1].split("function ocOpenCreate", 1)[0]
+    assert "oc-agent-filter" in body
+    assert "agent_id=" in body
+
+
+def test_mcp_agent_filter_control_present_and_wired():
+    html = ADMIN_HTML
+    assert 'id="mcp-agent-filter"' in html
+    body = html.split("async function mcpServers()", 1)[1].split("async function mcpTools", 1)[0]
+    assert "mcp-agent-filter" in body
+    assert "agent_id=" in body
+
+
 # --- 9. AskIt module removed --------------------------------------------------
 
 

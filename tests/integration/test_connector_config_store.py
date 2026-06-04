@@ -77,3 +77,62 @@ def test_list(store_db):
     store.add_connector("a", "A")
     store.add_connector("b", "B")
     assert {c["id"] for c in store.list_connectors()} == {"a", "b"}
+
+
+def test_same_id_allowed_across_agents(store_db):
+    store.add_connector("github", "GH global")
+    store.add_connector("github", "GH agent 5", agent_id=5)
+    store.add_connector("github", "GH agent 7", agent_id=7)
+    assert store.get_connector("github")["display_name"] == "GH global"
+    assert store.get_connector("github", agent_id=5)["display_name"] == "GH agent 5"
+    assert store.get_connector("github", agent_id=7)["display_name"] == "GH agent 7"
+
+
+def test_agent_owned_overrides_global_default(store_db):
+    store.add_connector("github", "GH global", oauth_config={"client_id": "global"})
+    store.add_connector("github", "GH agent 5", oauth_config={"client_id": "scoped"}, agent_id=5)
+    resolved = store.get_connector("github", agent_id=5)
+    assert resolved["oauth_config"]["client_id"] == "scoped"
+
+
+def test_get_falls_back_to_global_when_no_agent_row(store_db):
+    store.add_connector("github", "GH global")
+    resolved = store.get_connector("github", agent_id=5)
+    assert resolved["display_name"] == "GH global"
+
+
+def test_null_scope_returns_only_global_defaults(store_db):
+    store.add_connector("github", "GH global")
+    store.add_connector("github", "GH agent 5", agent_id=5)
+    listed = store.list_connectors()
+    assert {(c["id"], c.get("agent_id")) for c in listed} == {("github", None)}
+
+
+def test_list_scoped_overlays_agent_on_global(store_db):
+    store.add_connector("github", "GH global")
+    store.add_connector("slack", "Slack global")
+    store.add_connector("github", "GH agent 5", agent_id=5)
+    listed = {c["id"]: c for c in store.list_connectors(agent_id=5)}
+    assert set(listed) == {"github", "slack"}
+    assert listed["github"]["display_name"] == "GH agent 5"
+    assert listed["slack"]["display_name"] == "Slack global"
+
+
+def test_duplicate_within_same_agent_scope_rejected(store_db):
+    store.add_connector("github", "GH agent 5", agent_id=5)
+    with pytest.raises(sqlite3.IntegrityError):
+        store.add_connector("github", "GH agent 5 dup", agent_id=5)
+
+
+def test_duplicate_global_rejected(store_db):
+    store.add_connector("github", "GH global")
+    with pytest.raises(sqlite3.IntegrityError):
+        store.add_connector("github", "GH global dup")
+
+
+def test_agent_scoped_secret_never_stored(store_db):
+    store.add_connector(
+        "gh", "GitHub", oauth_config={"client_id": "cid", "client_secret": "shhh"}, agent_id=9
+    )
+    c = store.get_connector("gh", agent_id=9)
+    assert "client_secret" not in c["oauth_config"]

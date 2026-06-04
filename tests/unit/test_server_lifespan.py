@@ -1,0 +1,219 @@
+"""Tests for server lifespan wiring: MCP startup, adapter env detection, health."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+import pytest
+import yaml
+from fastapi.testclient import TestClient
+
+import fleetent.user_store as us
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    return TestClient(app_module().app)
+
+
+def app_module():
+    import fleetent.server as srv
+
+    return srv
+
+
+def test_health_includes_adapter_status(tmp_path, monkeypatch):
+    """Health endpoint returns adapter presence flags; both False when no tokens."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.chdir(tmp_path)  # no .env here — prevents Settings from loading tokens
+
+    import fleetent.server as srv
+
+    with TestClient(srv.app) as client:
+        resp = client.get("/health")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert data["adapters"]["slack"] is False
+    assert data["adapters"]["telegram"] is False
+
+
+def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch):
+    """Health endpoint shows True for adapters whose env tokens are present."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-fake")
+    monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-fake")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg-fake")
+
+    import fleetent.server as srv
+
+    # IM connectors are driven by the manager now; patch it to avoid real connections.
+    with (
+        patch.object(srv._connector_manager, "start_all_enabled", new_callable=AsyncMock),
+        patch.object(srv._connector_manager, "stop", new_callable=AsyncMock),
+        TestClient(srv.app) as client,
+    ):
+        resp = client.get("/health")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["adapters"]["slack"] is True
+    assert data["adapters"]["telegram"] is True
+
+
+async def test_mcp_yaml_loaded_if_exists(tmp_path, monkeypatch):
+    """Lifespan calls register_all with servers from config/mcp.yaml."""
+    import fleetent.integrations.mcp as mcp_mod
+    import fleetent.server as srv
+
+    mcp_yaml = tmp_path / "mcp.yaml"
+    mcp_yaml.write_text(yaml.dump({"servers": [{"id": "test", "url": "http://mcp.example.com"}]}))
+
+    mock_register = AsyncMock(return_value=None)
+    monkeypatch.setattr(mcp_mod, "register_all", mock_register)
+    monkeypatch.setattr(srv, "_MCP_YAML_PATH", mcp_yaml)
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+
+    with (
+        patch.object(srv._connector_manager, "start_all_enabled", new_callable=AsyncMock),
+        patch.object(srv._connector_manager, "stop", new_callable=AsyncMock),
+        TestClient(srv.app) as client,
+    ):
+        client.get("/health")
+
+    mock_register.assert_called_once()
+    servers_arg = mock_register.call_args[0][0]
+    assert len(servers_arg) == 1
+    assert servers_arg[0].id == "test"
+
+
+async def test_mcp_yaml_missing_skipped_gracefully(tmp_path, monkeypatch):
+    """Lifespan skips MCP loading if config/mcp.yaml doesn't exist."""
+    import fleetent.integrations.mcp as mcp_mod
+    import fleetent.server as srv
+
+    mock_register = AsyncMock(return_value=None)
+    monkeypatch.setattr(mcp_mod, "register_all", mock_register)
+    monkeypatch.setattr(srv, "_MCP_YAML_PATH", Path("/nonexistent/mcp.yaml"))
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+
+    with (
+        patch.object(srv._connector_manager, "start_all_enabled", new_callable=AsyncMock),
+        patch.object(srv._connector_manager, "stop", new_callable=AsyncMock),
+        TestClient(srv.app) as client,
+    ):
+        resp = client.get("/health")
+
+    assert resp.status_code == 200
+    mock_register.assert_not_called()
+
+
+def test_health_exposes_sandbox_mode_when_docker_available(tmp_path, monkeypatch):
+    """When Docker is available, /health reports the configured effective mode."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    import fleetent.integrations.sandbox.client as sc
+    import fleetent.integrations.sandbox.enablement as se
+    import fleetent.server as srv
+
+    monkeypatch.setattr(srv, "load_sandbox_mode", lambda: se.Mode.ALL)
+    monkeypatch.setattr(sc.SandboxClient, "docker_available", AsyncMock(return_value=True))
+
+    with TestClient(srv.app) as client:
+        resp = client.get("/health")
+
+    data = resp.json()
+    assert data["sandbox"]["mode"] == "all"
+    assert data["sandbox"].get("docker_available") is True
+
+
+def test_health_degrades_sandbox_mode_when_docker_unavailable(tmp_path, monkeypatch):
+    """Docker unavailable degrades the effective mode to off, surfaced in /health."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    import fleetent.integrations.sandbox.client as sc
+    import fleetent.integrations.sandbox.enablement as se
+    import fleetent.server as srv
+
+    monkeypatch.setattr(srv, "load_sandbox_mode", lambda: se.Mode.ALL)
+    monkeypatch.setattr(sc.SandboxClient, "docker_available", AsyncMock(return_value=False))
+
+    with TestClient(srv.app) as client:
+        resp = client.get("/health")
+
+    data = resp.json()
+    assert data["sandbox"]["mode"] == "off"
+    assert data["sandbox"].get("docker_available") is False
+    # Degradation reason surfaced for ops.
+    assert "docker unavailable" in data["sandbox"].get("note", "").lower()
+
+
+def test_lifespan_does_not_crash_when_docker_unavailable(tmp_path, monkeypatch):
+    """Platform boots normally even when the Docker probe fails (graceful degrade)."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    import fleetent.integrations.sandbox.client as sc
+    import fleetent.server as srv
+
+    monkeypatch.setattr(sc.SandboxClient, "docker_available", AsyncMock(return_value=False))
+
+    with TestClient(srv.app) as client:
+        resp = client.get("/health")
+    assert resp.status_code == 200
+
+
+# ── SB8 orphan cleanup wiring ─────────────────────────────────────────────────
+
+
+def test_lifespan_runs_cleanup_once_when_docker_available(tmp_path, monkeypatch):
+    """Docker available -> orphan cleanup is invoked exactly once at startup."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    import fleetent.integrations.sandbox.client as sc
+    import fleetent.server as srv
+
+    monkeypatch.setattr(sc.SandboxClient, "docker_available", AsyncMock(return_value=True))
+    cleanup = AsyncMock(return_value=2)
+    monkeypatch.setattr(srv, "cleanup_orphans", cleanup)
+
+    with TestClient(srv.app) as client:
+        client.get("/health")
+
+    cleanup.assert_awaited_once()
+
+
+def test_lifespan_skips_cleanup_when_docker_unavailable(tmp_path, monkeypatch):
+    """Docker unavailable -> cleanup is skipped (reuses the SB3 probe result, no
+    second probe drives the decision)."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    import fleetent.integrations.sandbox.client as sc
+    import fleetent.server as srv
+
+    probe = AsyncMock(return_value=False)
+    monkeypatch.setattr(sc.SandboxClient, "docker_available", probe)
+    cleanup = AsyncMock(return_value=0)
+    monkeypatch.setattr(srv, "cleanup_orphans", cleanup)
+
+    with TestClient(srv.app) as client:
+        resp = client.get("/health")
+
+    assert resp.status_code == 200
+    cleanup.assert_not_awaited()
+    # SB3 probe is the single source of the availability decision (one probe).
+    probe.assert_awaited_once()
+
+
+def test_lifespan_cleanup_failure_does_not_block_startup(tmp_path, monkeypatch):
+    """A cleanup error is logged but the platform still boots (D4 best-effort)."""
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    import fleetent.integrations.sandbox.client as sc
+    import fleetent.server as srv
+
+    monkeypatch.setattr(sc.SandboxClient, "docker_available", AsyncMock(return_value=True))
+    monkeypatch.setattr(srv, "cleanup_orphans", AsyncMock(side_effect=RuntimeError("docker boom")))
+
+    with TestClient(srv.app) as client:
+        resp = client.get("/health")
+
+    assert resp.status_code == 200

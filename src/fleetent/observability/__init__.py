@@ -18,6 +18,21 @@ from fleetent.observability.performance import (
     ToolPerformance,
     get_performance_summary,
 )
+from fleetent.observability.pilot_verification import (
+    CapabilityEvidence,
+    CommandResult,
+    PilotSmokeScenario,
+    PilotVerificationReport,
+    RealSmokeEvidence,
+    RunMetadata,
+    VerificationIssue,
+    classify_issue,
+    real_smoke_gate,
+    recommend,
+    render_json_report,
+    render_markdown_report,
+    write_pilot_smoke_artifact,
+)
 from fleetent.observability.structured_logging import Logger, get_logger
 from fleetent.observability.traces import (
     InjectedContextTrace,
@@ -31,6 +46,8 @@ from fleetent.observability.usage import ModelUsage, UsageQuery, UsageSummary, g
 
 __all__ = [
     "Logger",
+    "CapabilityEvidence",
+    "CommandResult",
     "DiagnosticsExportPackage",
     "DiagnosticsExportRequest",
     "DiagnosticsRetentionPlan",
@@ -41,12 +58,18 @@ __all__ = [
     "PerformanceQuery",
     "PerformanceSummary",
     "PermissionSummary",
+    "PilotSmokeScenario",
+    "PilotVerificationReport",
+    "RealSmokeEvidence",
+    "RunMetadata",
     "TraceEvent",
     "TraceQuery",
     "ToolPerformance",
     "UsageQuery",
     "UsageSummary",
+    "VerificationIssue",
     "apply_diagnostics_retention",
+    "classify_issue",
     "export_diagnostics",
     "get_performance_summary",
     "get_logger",
@@ -54,6 +77,11 @@ __all__ = [
     "performance",
     "plan_diagnostics_retention",
     "query_trace_events",
+    "real_smoke_gate",
+    "recommend",
     "record_injected_context",
     "record_trace_event",
+    "render_json_report",
+    "render_markdown_report",
+    "write_pilot_smoke_artifact",
 ]

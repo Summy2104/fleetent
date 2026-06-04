@@ -26,9 +26,12 @@ class NormalizedMessage:
     text: str
     attachments: list[Any]
     reply_func: Callable[[str], Coroutine[Any, Any, None]]
-    owner_id: str = field(default="")
     channel_id: str = field(default="")
     workspace_id: str = field(default="")
+    # Owning tenant of the IM connector that produced this message (multi-tenant IM
+    # gateway). Empty = single-tenant/legacy. Namespaces the allowlist scope and the
+    # session id so the same platform/channel under two owners never collides.
+    owner_id: str = field(default="")
 
 
 def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> Agent | None:
@@ -41,6 +44,51 @@ def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> Agent
     if agent:
         return agent
     return agent_store.get_default_agent()
+
+
+_IMAGE_MIME_PREFIX = "image/"
+
+
+def _image_attachments(attachments: list[Any]) -> list[tuple[bytes, str]]:
+    """Pick out `(bytes, mime)` image attachments; ignore non-image entries."""
+    images: list[tuple[bytes, str]] = []
+    for att in attachments:
+        if (
+            isinstance(att, tuple)
+            and len(att) == 2
+            and isinstance(att[0], (bytes, bytearray))
+            and isinstance(att[1], str)
+            and att[1].startswith(_IMAGE_MIME_PREFIX)
+        ):
+            images.append((bytes(att[0]), att[1]))
+    return images
+
+
+async def _build_user_content(msg: NormalizedMessage) -> str:
+    """Build the user message content, extracting images first (D3).
+
+    With no image attachments this is just the user text. With images, each is
+    saved to uploads, analyzed once (user text as instruction), and the message
+    becomes the user text plus the structured analysis and on-disk references —
+    base64 never enters the main context, so the loop routes to the text model.
+    Look-back is left to the model via analyze_image on the same references.
+    """
+    from fleetent import tools, vision_client
+
+    images = _image_attachments(msg.attachments)
+    if not images:
+        return msg.text
+
+    instruction = msg.text or "Describe this image."
+    sections = [msg.text] if msg.text else []
+    for data, mime in images:
+        ref = tools._save_upload(data, mime)
+        try:
+            analysis = await vision_client.analyze(data, instruction)
+        except vision_client.VisionError as exc:
+            analysis = f"(image analysis failed: {exc})"
+        sections.append(f"[图片 {ref}]\n{analysis}")
+    return "\n\n".join(sections)
 
 
 async def route(msg: NormalizedMessage) -> None:
@@ -75,39 +123,35 @@ async def route(msg: NormalizedMessage) -> None:
         await msg.reply_func(_REJECTION_MSG)
         return
 
-    from fleetent import agent_loop, agent_runtime, session_mgr
-    from fleetent.skill_registry import load as load_skill
-    from fleetent.skill_registry import match as match_skill
+    from fleetent import agent_loop, session_mgr
+    from fleetent.integrations.sandbox import enablement as sandbox_enablement
+    from fleetent.skill_registry import available_skills_prompt, collect_disabled_trace
 
-    # Namespace the session by owner so the same platform/channel under two owners never
-    # shares conversation state.
+    # Namespace the session by owner so the same platform/channel under two owners
+    # never shares conversation state.
     session_id = f"{msg.owner_id}:{msg.session_id}" if msg.owner_id else msg.session_id
 
     async with session_mgr.session_lock(session_id):
         history = await session_mgr.load(session_id)
-        meta = await session_mgr.load_meta(session_id)
 
-        # Version lock: an existing session stays pinned to the version recorded in
-        # its meta even if a newer version is later activated. A fresh session
-        # resolves the currently active version (channel > user > default).
-        snapshot = None
-        locked_version_id = meta.get("agent_version_id")
-        if isinstance(locked_version_id, int):
-            snapshot = agent_runtime.load_version(locked_version_id)
-        if snapshot is None:
-            snapshot = agent_runtime.resolve_agent_for_request(
-                msg.platform, msg.channel_id, msg.user_id
-            )
-            if snapshot is not None:
-                meta = {"agent_id": snapshot.agent_id, "agent_version_id": snapshot.version_id}
+        # Resolve agent config: channel → user → default → bare run
+        agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
+        base_system = agent.system_prompt if agent else _SYSTEM
+        allowed_tools = agent.allowed_tools if agent else None
+        agent_features = agent.features if agent else None
+        # SB3: gate run_code on the IM path too; mode is resolved once per process.
+        sandbox_mode = await sandbox_enablement.get_effective_mode()
 
-        base_system = snapshot.system_prompt if snapshot is not None else _SYSTEM
-
-        # Build fresh system message with the matching skill.
-        system_content = base_system
-        matched = match_skill(msg.text)
-        if matched:
-            system_content = f"{system_content}\n\n{load_skill(matched)}"
+        # Build the system message ordered stable→variable for prefix caching:
+        # base system + the <available_skills> catalog (stable). Per-user long-term
+        # context (memory + knowledge) is injected by agent_loop.run via build_context
+        # (class C: memory unified onto intelligence/long_term_ctx).
+        # agent-skill-scoping: narrow the catalog to the bound agent's allowed_skills
+        # (empty/None → no narrowing, full catalog as before).
+        catalog = available_skills_prompt(allowed_skills=agent.allowed_skills if agent else None)
+        disabled_trace = collect_disabled_trace() or None
+        parts = [base_system, catalog]
+        system_content = "\n\n".join(p for p in parts if p)
 
         # Replace existing system message or insert at position 0
         if history and isinstance(history[0], dict) and history[0].get("role") == "system":
@@ -115,17 +159,21 @@ async def route(msg: NormalizedMessage) -> None:
         else:
             history.insert(0, {"role": "system", "content": system_content})
 
-        history.append({"role": "user", "content": msg.text})
+        history.append({"role": "user", "content": await _build_user_content(msg)})
 
         response = await agent_loop.run(
             messages=history,
             user_id=msg.user_id,
             reply_func=msg.reply_func,
-            snapshot=snapshot,
+            allowed_tools=allowed_tools,
+            disabled_skills_trace=disabled_trace,
+            sandbox_mode=sandbox_mode,
+            agent_features=agent_features,
+            session_id=session_id,
         )
 
         # agent_loop.run() already appended the assistant message to history in-place.
         # Do NOT append again here — that caused duplicate messages in every session.
-        await session_mgr.save(session_id, history, meta=meta)
+        await session_mgr.save(session_id, history)
 
     await msg.reply_func(response)

@@ -109,7 +109,7 @@ def test_authorization_matrix_four_states(client, monkeypatch):
     monkeypatch.setattr(
         api,
         "connectors_list_grants",
-        lambda: [
+        lambda agent_id=None: [
             {"user_id": "u1", "connector_id": "gh", "status": "authorized", "scopes": ["repo"]},
             {"user_id": "u2", "connector_id": "gh", "status": "not_authorized"},
             {"user_id": "u3", "connector_id": "gh", "status": "needs_reauth"},
@@ -136,7 +136,7 @@ def test_matrix_masks_tokens(client, monkeypatch):
     monkeypatch.setattr(
         api,
         "connectors_list_grants",
-        lambda: [
+        lambda agent_id=None: [
             {
                 "user_id": "u1",
                 "connector_id": "gh",
@@ -225,6 +225,57 @@ def test_mcp_reconnect_admin_only(client, monkeypatch):
     assert any(a["action"] == "mcp.reconnect" for a in audit.search_audit())
     viewer, _ = _session_for("viewer")
     assert client.post("/admin/mcp/servers/gh/reconnect", headers=_hdr(viewer)).status_code == 403
+
+
+def test_connector_list_exposes_owner_and_filters_by_agent(client):
+    from fleetent.platform.connector_management import connector_config_store as store
+
+    token, _ = _session_for("admin")
+    client.post(
+        "/admin/connectors", headers=_hdr(token), json={"id": "gh", "display_name": "GH global"}
+    )
+    store.add_connector("gh", "GH agent 5", agent_id=5)
+
+    r = client.get("/admin/connectors", headers=_hdr(token))
+    assert {(c["id"], c["agent_id"]) for c in r.json()} == {("gh", None)}
+
+    r2 = client.get("/admin/connectors?agent_id=5", headers=_hdr(token))
+    assert {c["display_name"] for c in r2.json()} == {"GH agent 5"}
+
+
+def test_mcp_server_list_exposes_owner_and_agent_filter(client, monkeypatch):
+    from fleetent.platform.connector_management import agent_mcp_server_store
+
+    monkeypatch.setattr(
+        api,
+        "mcp_list_servers",
+        lambda: [{"id": "fs", "transport": "stdio", "status": "connected", "tool_count": 1}],
+    )
+    agent_mcp_server_store.add_mcp_server(5, "internal", transport="stdio", command="python")
+    token, _ = _session_for("admin")
+
+    r = client.get("/admin/mcp/servers", headers=_hdr(token))
+    assert ("fs", None) in {(s["id"], s["agent_id"]) for s in r.json()}
+
+    r2 = client.get("/admin/mcp/servers?agent_id=5", headers=_hdr(token))
+    internal = next(s for s in r2.json() if s["id"] == "internal")
+    assert internal["agent_id"] == 5
+
+
+def test_authorization_matrix_scoped_to_agent(client, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_grants(agent_id=None):  # type: ignore[no-untyped-def]
+        captured["agent_id"] = agent_id
+        return [
+            {"user_id": "u1", "connector_id": "gh", "status": "authorized", "agent_id": agent_id}
+        ]
+
+    monkeypatch.setattr(api, "connectors_list_grants", fake_grants)
+    token, _ = _session_for("admin")
+    r = client.get("/admin/connectors/grants?agent_id=7", headers=_hdr(token))
+    assert captured["agent_id"] == 7
+    assert r.json()["grants"][0]["agent_id"] == 7
 
 
 def test_mcp_doctor_masks_auth(client, monkeypatch):

@@ -1,0 +1,19 @@
+# MCP server connections — copy to config/mcp.yaml and fill in values
+# This file is gitignored; never commit credentials
+servers:
+  - id: github
+    url: https://mcp.github.example.com
+    auth_type: api_key          # none | api_key | oauth2
+    api_key_env: GITHUB_MCP_KEY # env var holding the key
+
+  # OAuth2 (client_credentials). token_url MUST point at a customer-internal,
+  # self-hosted authorization server (e.g. on-prem Keycloak / internal gateway).
+  # Never a cloud identity service — data sovereignty: nothing leaves the intranet.
+  # The client secret is referenced via an env var, never written here in plaintext.
+  - id: internal-gateway
+    url: https://mcp.internal.example.lan
+    auth_type: oauth2
+    token_url: https://auth.internal.example.lan/realms/mcp/protocol/openid-connect/token
+    client_id: fleetent-mcp
+    client_secret_env: INTERNAL_GATEWAY_OAUTH_SECRET # env var holding the client secret
+    scope: mcp.read mcp.write                          # optional, space-separated

@@ -3,50 +3,37 @@ image: python:3.12
 definitions:
   caches:
     uv: ~/.cache/uv
+  steps:
+    - step: &unit-coverage
+        name: unit tests + coverage
+        caches:
+          - uv
+        script:
+          - pip install uv
+          - export ANTHROPIC_API_KEY=test-key
+          - uv sync --frozen --group dev
+          - uv run alembic upgrade head
+          - make test-unit-ci
+    - step: &integration-tests
+        name: integration tests
+        caches:
+          - uv
+        script:
+          - pip install uv
+          - export ANTHROPIC_API_KEY=test-key
+          - uv sync --frozen --group dev
+          - uv run alembic upgrade head
+          - make test-integration
 
 pipelines:
   pull-requests:
     '**':
-      - step:
-          name: unit tests
-          caches:
-            - uv
-          script:
-            - pip install uv
-            - export ANTHROPIC_API_KEY=test-key
-            - uv sync --frozen --group dev
-            - uv run alembic upgrade head
-            - uv run pytest tests/unit
-      - step:
-          name: integration tests
-          caches:
-            - uv
-          script:
-            - pip install uv
-            - export ANTHROPIC_API_KEY=test-key
-            - uv sync --frozen --group dev
-            - uv run alembic upgrade head
-            - uv run pytest tests/integration
+      - step: *unit-coverage
 
   branches:
     main:
-      - step:
-          name: unit tests
-          caches:
-            - uv
-          script:
-            - pip install uv
-            - export ANTHROPIC_API_KEY=test-key
-            - uv sync --frozen --group dev
-            - uv run alembic upgrade head
-            - uv run pytest tests/unit
-      - step:
-          name: integration tests
-          caches:
-            - uv
-          script:
-            - pip install uv
-            - export ANTHROPIC_API_KEY=test-key
-            - uv sync --frozen --group dev
-            - uv run alembic upgrade head
-            - uv run pytest tests/integration
+      - step: *unit-coverage
+
+  custom:
+    integration-tests:
+      - step: *integration-tests

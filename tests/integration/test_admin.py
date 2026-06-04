@@ -455,7 +455,7 @@ def test_kb_connectors_cli_output_is_sanitized(monkeypatch):
 
     monkeypatch.setattr(operations, "run_connector_sync", run_connector_sync)
 
-    out, _, code = run_admin("kb", "connectors", "sync", "eng-drive")
+    out, _, code = run_admin("kb", "connectors", "sync", "eng-drive", "--dry-run")
 
     assert code == 0
     assert "sync_failed" in out
