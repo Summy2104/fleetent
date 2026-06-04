@@ -373,20 +373,26 @@ def test_agent_templates_write_controls_admin_gated():
     assert "tmplDelete(" in body
 
 
+# Free-form fields the modal never exposes (covered by template / bindings instead).
 _NON_TEMPLATE_FIELDS = (
     "ag-skills-dir",
     "ag-mcp-server-ids",
-    "ag-model-overrides",
     "ag-memory-namespace",
 )
 
 
-def test_agents_modal_only_template_backed_fields():
+def test_agents_modal_core_and_create_config_fields():
     html = ADMIN_HTML
-    # template-backed editable fields remain
+    # identity fields remain
     assert 'id="ag-system-prompt"' in html
     assert 'id="ag-allowed-tools"' in html
-    # non-template free-form fields are gone
+    # new-agent config: structured model overrides + capabilities YAML paste
+    assert 'id="ag-model-overrides"' in html
+    assert "function agRenderModelOverrides" in html
+    assert "function agCollectModelOverrides" in html
+    assert 'id="ag-capabilities"' in html
+    assert "capabilities_yaml" in html
+    # still no free-form skills-dir/mcp/memory inputs
     for field_id in _NON_TEMPLATE_FIELDS:
         assert f'id="{field_id}"' not in html, field_id
 
