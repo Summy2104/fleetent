@@ -94,6 +94,18 @@ def test_agents_enabling_returns_only_enabled(store_db):
     assert enabling == ["agent-a"]
 
 
+def test_has_any_binding(store_db):
+    assert skill_admin_store.has_any_binding("agent-a") is False
+    skill_admin_store.set_binding("agent-a", "summarizer", enabled=False, updated_by="admin")
+    assert skill_admin_store.has_any_binding("agent-a") is True
+
+
+def test_enabled_skill_names(store_db):
+    skill_admin_store.set_binding("agent-a", "summarizer", enabled=True, updated_by="admin")
+    skill_admin_store.set_binding("agent-a", "translator", enabled=False, updated_by="admin")
+    assert skill_admin_store.enabled_skill_names("agent-a") == {"summarizer"}
+
+
 # --- 3. provenance + drift ---
 
 

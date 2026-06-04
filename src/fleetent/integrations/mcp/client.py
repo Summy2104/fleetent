@@ -135,6 +135,9 @@ class McpServerConfig:
     url: str = ""
     auth_type: str = "none"  # "none" | "api_key" | "oauth2"
     api_key_env: str = ""
+    # Extra HTTP headers sent verbatim on every request (e.g. a server-specific
+    # X-API-Key that does not fit the Authorization: Bearer model).
+    headers: dict[str, str] = field(default_factory=dict)
     # OAuth2 fields (auth_type == "oauth2"); token_url points at a customer-internal,
     # self-hosted authorization server — never a cloud identity service.
     token_url: str = ""
@@ -413,7 +416,7 @@ async def _probe_once(server: McpServerConfig) -> None:
     import httpx
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
             await _post_jsonrpc(client, server, "tools/list", {})
     except Exception as exc:  # noqa: BLE001 — probe maps disconnects; other errors logged
         if _is_disconnect_error(exc):
@@ -533,7 +536,7 @@ async def _close_http_sessions() -> None:
 
     import httpx
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
         for server in active:
             try:
                 bearer = await _bearer_for(server)
@@ -614,6 +617,8 @@ def _base_headers(server: McpServerConfig, *, bearer: str | None = None) -> dict
     sync function.
     """
     headers: dict[str, str] = {"Accept": "application/json, text/event-stream"}
+    if server.headers:
+        headers.update(server.headers)
     if bearer:
         headers["Authorization"] = f"Bearer {bearer}"
     elif server.auth_type == "api_key" and server.api_key_env:
@@ -685,7 +690,7 @@ async def _fetch_client_credentials_token(server: McpServerConfig) -> OAuthToken
     if server.scope:
         data["scope"] = server.scope
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
         resp = await client.post(server.token_url, data=data)
 
     if _is_auth_error_response(resp):
@@ -884,7 +889,7 @@ async def _post_notification(client: Any, server: McpServerConfig, method: str) 
 async def _register_http_server(server: McpServerConfig, scope: int | None = None) -> None:
     import httpx
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
         await _open_session(client, server)
         list_obj = await _post_jsonrpc(client, server, "tools/list", {})
 
@@ -897,6 +902,67 @@ async def _register_http_server(server: McpServerConfig, scope: int | None = Non
     logger.info(
         "mcp_server_registered server_id=%s transport=http tool_count=%d", server.id, len(tools)
     )
+
+
+async def probe_server(server: McpServerConfig) -> dict[str, Any]:
+    """One-shot connectivity check for the admin "Test" action.
+
+    Connects, runs the initialize handshake, and lists tools — then discards the
+    connection. Never mutates the shared registry/sessions, so it is safe to run
+    against an unregistered or candidate config. Returns connected/tool_count/tools,
+    or connected=False with the error string on any failure.
+    """
+    try:
+        if server.transport == "stdio":
+            tools = await _probe_stdio_tools(server)
+        else:
+            tools = await _probe_http_tools(server)
+    except Exception as exc:  # noqa: BLE001 — surface any failure as a clean result
+        return {"connected": False, "error": str(exc)}
+    return {"connected": True, "tool_count": len(tools), "tools": tools}
+
+
+async def _probe_http_tools(server: McpServerConfig) -> list[dict[str, str]]:
+    import httpx
+
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        await _open_session(client, server)
+        list_obj = await _post_jsonrpc(client, server, "tools/list", {})
+    return [
+        {"name": t["name"], "description": t.get("description", "")}
+        for t in list_obj.get("result", {}).get("tools", [])
+    ]
+
+
+async def _probe_stdio_tools(server: McpServerConfig) -> list[dict[str, str]]:
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    merged_env = {**os.environ, **server.env} if server.env else None
+    params = StdioServerParameters(command=server.command, args=server.args, env=merged_env)
+    async with AsyncExitStack() as stack:
+        read, write = await stack.enter_async_context(stdio_client(params))
+        session: Any = await stack.enter_async_context(ClientSession(read, write))
+        await session.initialize()
+        result = await session.list_tools()
+        return [{"name": t.name, "description": t.description or ""} for t in result.tools]
+
+
+def unregister_server(server_id: str, scope: int | None = None) -> None:
+    """Remove a server's tools and registry/session entries (e.g. on delete/disable).
+
+    The inverse of registration: drops every ``{server_id}__`` tool from the shared
+    tool registry and forgets the server so its tools stop being exposed. Best-effort
+    on the session handle; an HTTP DELETE handshake is not attempted here.
+    """
+    import fleetent.tools.registry as tr
+
+    prefix = f"{server_id}__"
+    if scope is None:
+        for name in [n for n in tr._registry if n.startswith(prefix)]:
+            del tr._registry[name]
+    _server_registry.pop((scope, server_id), None)
+    _active_sessions.pop((scope, server_id), None)
 
 
 def _register_tool_stdio(
@@ -967,7 +1033,7 @@ async def _call_stdio_tool(
             return _handle_disconnect(server)
         raise
     if result.content:
-        return result.content[0].text
+        return str(result.content[0].text)
     return ""
 
 
@@ -993,7 +1059,7 @@ async def _call_http_tool(
     import httpx
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             obj = await _post_jsonrpc(
                 client, server, "tools/call", {"name": tool_name, "arguments": args}
             )
@@ -1006,7 +1072,7 @@ async def _call_http_tool(
     if isinstance(result, dict):
         contents = result.get("content", [])
         if contents and isinstance(contents[0], dict):
-            return contents[0].get("text", str(result))
+            return str(contents[0].get("text", str(result)))
     return str(result) if result is not None else ""
 
 

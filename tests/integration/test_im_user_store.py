@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-import fleetent.im_user_store as im_user_store
+from fleetent.platform.im_gateway_management import identity as im_user_store
 
 
 @pytest.fixture

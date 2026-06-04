@@ -79,3 +79,48 @@ The console SHALL provide visible focus styling, aria labelling on navigation an
 #### Scenario: Modal dismissable by keyboard
 - **WHEN** a modal or dialog is open and the operator presses Escape
 - **THEN** the modal closes
+
+
+### Requirement: Active tab persists across reload
+
+The admin console SHALL reflect the active tab in the URL (`location.hash`) whenever the tab changes, and SHALL restore that tab on load. When the URL carries no tab or an unknown tab, the console SHALL fall back to the default `users` tab.
+
+#### Scenario: Reload stays on the current tab
+
+- **WHEN** the user is on the Agents tab and reloads the page
+- **THEN** the console reads the tab from `location.hash` and restores the Agents tab instead of jumping to Users
+
+#### Scenario: Missing or unknown tab falls back to default
+
+- **WHEN** the page loads with no hash or a hash that is not a known tab
+- **THEN** the console shows the default `users` tab
+
+
+### Requirement: System-generated resource ids
+
+Admin create forms that require a unique resource `id` SHALL generate that id automatically and present it read-only; the user SHALL NOT type or edit the id. This applies to the create forms for agent templates, knowledge bases, model providers, and OAuth connectors. Edit forms SHALL continue to show the existing id read-only. The generated id SHALL be sent through the existing create endpoints unchanged.
+
+#### Scenario: Create form auto-fills a read-only id
+
+- **WHEN** the operator opens a create form for a template, knowledge base, provider, or connector
+- **THEN** the id field is pre-filled with a generated value and is read-only, so the operator cannot type or change it
+
+#### Scenario: Generated id is submitted on create
+
+- **WHEN** the operator saves a newly created resource
+- **THEN** the console submits the generated id through the existing create endpoint
+
+
+### Requirement: Themed, comfortably sized text editors
+
+Multi-line text editors (`textarea`) in the admin console SHALL share the same dark theme styling as text inputs (background, border, color, full width) instead of relying on the browser default. The template editor modal SHALL provide a comfortably sized system-prompt editor so an operator can author a prompt without a cramped field.
+
+#### Scenario: Textarea matches the dark theme
+
+- **WHEN** a modal containing a `textarea` is shown
+- **THEN** the textarea uses the console's themed background and border, not the browser default white field
+
+#### Scenario: System-prompt editor is roomy
+
+- **WHEN** the operator opens the template editor modal
+- **THEN** the system-prompt editor is tall enough to comfortably write a multi-line prompt

@@ -2,7 +2,8 @@
 
 import pytest
 
-from fleetent import im_user_store, user_store
+from fleetent import user_store
+from fleetent.platform.im_gateway_management import identity as im_user_store
 
 
 @pytest.fixture

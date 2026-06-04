@@ -1,6 +1,6 @@
 import pytest
 
-import fleetent.platform.im_gateway_management.im_connector_store as ics
+import fleetent.platform.im_gateway_management.connector_store as ics
 import fleetent.user_store as user_store
 
 

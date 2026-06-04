@@ -59,6 +59,10 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM"]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependency markers are call-in-default by design (suppress B008).
+extend-immutable-calls = ["fastapi.File", "fastapi.Form"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

@@ -11,10 +11,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import fleetent.auth as auth
-import fleetent.platform.im_gateway_management.im_admin_api as api
-import fleetent.platform.im_gateway_management.im_channel_allowlist as allowlist
-import fleetent.platform.im_gateway_management.im_connector_config as cfg
-import fleetent.platform.im_gateway_management.im_connector_store as store
+import fleetent.platform.im_gateway_management.admin_api as api
+import fleetent.platform.im_gateway_management.channel_allowlist as allowlist
+import fleetent.platform.im_gateway_management.connector_config as cfg
+import fleetent.platform.im_gateway_management.connector_store as store
 import fleetent.user_store as user_store
 
 
@@ -174,9 +174,13 @@ _ADMIN_HTML = (Path(__file__).parents[2] / "src" / "fleetent" / "static" / "admi
 )
 
 
-def test_ui_has_connectors_tab_and_add_modal():
+def test_ui_has_connectors_in_users_tab_and_add_modal():
     html = _ADMIN_HTML
-    assert 'data-tab="connectors"' in html
+    # connectors are managed inside the unified Users tab — no standalone IM/connectors tab
+    assert 'data-tab="connectors"' not in html
+    assert 'id="tab-im"' not in html
+    # "Add connection" is a per-User-row action, not a top-level bar
+    assert "conn-create-bar" not in html
     assert 'id="conn-modal"' in html
     assert "openConnModal(" in html
     assert "createConn(" in html
@@ -197,8 +201,10 @@ def test_ui_connector_field_schema_matches_backend():
 def test_ui_has_enable_disable_and_admin_gate():
     html = _ADMIN_HTML
     assert "connEnable(" in html and "connDisable(" in html
-    # management controls hidden from viewers
-    assert "conn-create-bar" in html
+    # per-row connector controls (incl. Add connection) are admin-gated
+    body = html.split("function renderUsers()", 1)[1].split("function closeMenus", 1)[0]
+    assert "IS_VIEWER" in body
+    assert "openConnModal('" in body
 
 
 def test_allowlist_crud(client):

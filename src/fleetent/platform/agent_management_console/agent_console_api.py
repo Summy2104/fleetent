@@ -23,7 +23,7 @@ from fleetent.governance import audit_log
 from fleetent.platform.agent_management_console import (
     agent_admin_store,
     agent_observability,
-    agent_templates,
+    agent_template_store,
 )
 
 router = APIRouter(prefix="/admin")
@@ -36,13 +36,47 @@ _ADMIN_ROLES = {"admin", "built_in_admin"}
 
 
 def get_agent_def(name: str) -> dict[str, Any] | None:
-    """Resolve an agent's active definition (id/system_prompt/allowed_tools)."""
+    """Resolve an agent's active definition.
+
+    Returns id/system_prompt/allowed_tools plus the per-version config fields
+    skills_dir/mcp_server_ids/model_overrides/memory_namespace.
+    """
     return None
 
 
-def create_agent_def(name: str, system_prompt: str, allowed_tools: list[str]) -> None:
+def create_agent_def(
+    name: str,
+    system_prompt: str,
+    allowed_tools: list[str],
+    skills_dir: str | None = None,
+    mcp_server_ids: list[str] | None = None,
+    model_overrides: dict[str, Any] | None = None,
+    memory_namespace: str = "default",
+    template_id: str | None = None,
+) -> None:
     """Create a new agent definition (no bindings). Bridges agent_store.create_agent."""
     return None
+
+
+def update_agent_def(
+    name: str,
+    system_prompt: str | None,
+    allowed_tools: list[str] | None,
+    skills_dir: str | None = None,
+    mcp_server_ids: list[str] | None = None,
+    model_overrides: dict[str, Any] | None = None,
+    memory_namespace: str | None = None,
+) -> None:
+    """Edit an agent by snapshotting a new active version. Bridges create_version.
+
+    ``None`` fields are left unchanged (inherited from the prior active version).
+    """
+    return None
+
+
+def delete_agent_def(name: str) -> bool:
+    """Hard-delete an agent definition. Bridges agent_store.delete_agent."""
+    return False
 
 
 def references_for(agent_name: str) -> dict[str, Any]:
@@ -99,13 +133,90 @@ class CloneBody(BaseModel):
     new_name: str
 
 
+class CreateBody(BaseModel):
+    name: str
+    template_id: str
+    system_prompt: str = ""
+    allowed_tools: list[str] = []
+    skills_dir: str | None = None
+    mcp_server_ids: list[str] | None = None
+    model_overrides: dict[str, Any] = {}
+    memory_namespace: str = "default"
+
+
+class UpdateBody(BaseModel):
+    system_prompt: str | None = None
+    allowed_tools: list[str] | None = None
+    skills_dir: str | None = None
+    mcp_server_ids: list[str] | None = None
+    model_overrides: dict[str, Any] | None = None
+    memory_namespace: str | None = None
+
+
 # --- templates (literal path before /{name}) ----------------------------------
+
+
+class TemplateCreateBody(BaseModel):
+    id: str
+    display_name: str
+    allowed_tools: list[str] = []
+    system_prompt: str = ""
+
+
+class TemplateUpdateBody(BaseModel):
+    display_name: str | None = None
+    allowed_tools: list[str] | None = None
+    system_prompt: str | None = None
 
 
 @router.get("/agent-templates")
 def list_templates(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
     _current_user(authorization)
-    return agent_templates.list_templates()
+    return agent_template_store.list_templates()
+
+
+@router.post("/agent-templates", status_code=201)
+def create_template(
+    body: TemplateCreateBody, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    if not body.id.strip():
+        raise HTTPException(status_code=422, detail="id required")
+    if agent_template_store.get_template(body.id) is not None:
+        raise HTTPException(status_code=409, detail="template already exists")
+    template = agent_template_store.create_template(
+        body.id, body.display_name, body.allowed_tools, body.system_prompt
+    )
+    audit_log.write_audit(user.id, "template.create", "agent_template", body.id)
+    return template
+
+
+@router.patch("/agent-templates/{template_id}")
+def update_template(
+    template_id: str, body: TemplateUpdateBody, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    kwargs: dict[str, Any] = {}
+    if body.display_name is not None:
+        kwargs["display_name"] = body.display_name
+    if body.allowed_tools is not None:
+        kwargs["allowed_tools"] = body.allowed_tools
+    if body.system_prompt is not None:
+        kwargs["system_prompt"] = body.system_prompt
+    template = agent_template_store.update_template(template_id, **kwargs)
+    if template is None:
+        raise HTTPException(status_code=404, detail="template not found")
+    audit_log.write_audit(user.id, "template.update", "agent_template", template_id)
+    return template
+
+
+@router.delete("/agent-templates/{template_id}")
+def delete_template(template_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    if not agent_template_store.delete_template(template_id):
+        raise HTTPException(status_code=404, detail="template not found")
+    audit_log.write_audit(user.id, "template.delete", "agent_template", template_id)
+    return {"id": template_id, "deleted": True}
 
 
 # --- list ---------------------------------------------------------------------
@@ -125,6 +236,100 @@ def observability(
 ) -> dict[str, Any]:
     _current_user(authorization)
     return agent_observability_agg(name, window)
+
+
+# --- CRUD: create / read-full / update / delete -------------------------------
+
+
+def _def_response(name: str) -> dict[str, Any]:
+    agent = get_agent_def(name)
+    state = agent_admin_store.get_state(name)
+    out: dict[str, Any] = {
+        "agent": name,
+        "provenance": state["provenance"],
+        "status": state["status"],
+    }
+    if agent is not None:
+        out["system_prompt"] = agent["system_prompt"]
+        out["allowed_tools"] = agent["allowed_tools"]
+        out["skills_dir"] = agent.get("skills_dir")
+        out["mcp_server_ids"] = agent.get("mcp_server_ids")
+        out["model_overrides"] = agent.get("model_overrides", {})
+        out["memory_namespace"] = agent.get("memory_namespace", "default")
+        out["template_id"] = agent.get("template_id")
+    return out
+
+
+@router.post("/agents", status_code=201)
+def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    if get_agent_def(body.name) is not None:
+        raise HTTPException(status_code=409, detail="agent already exists")
+    if agent_template_store.get_template(body.template_id) is None:
+        raise HTTPException(status_code=404, detail="template not found")
+    create_agent_def(
+        body.name,
+        body.system_prompt,
+        body.allowed_tools,
+        body.skills_dir,
+        body.mcp_server_ids,
+        body.model_overrides,
+        body.memory_namespace,
+        body.template_id,
+    )
+    agent_admin_store.set_provenance(body.name, "adhoc")
+    agent_admin_store.enable(body.name)
+    audit_log.write_audit(user.id, "agent.create", "agent", body.name)
+    return _def_response(body.name)
+
+
+@router.get("/agents/{name}")
+def get_agent(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    _current_user(authorization)
+    agent = get_agent_def(name)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    return _def_response(name)
+
+
+@router.patch("/agents/{name}")
+def update_agent(
+    name: str, body: UpdateBody, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    if get_agent_def(name) is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    update_agent_def(
+        name,
+        body.system_prompt,
+        body.allowed_tools,
+        body.skills_dir,
+        body.mcp_server_ids,
+        body.model_overrides,
+        body.memory_namespace,
+    )
+    agent_admin_store.mark_drift(name)  # no-op unless provenance is managed
+    audit_log.write_audit(user.id, "agent.update", "agent", name)
+    return _def_response(name)
+
+
+@router.delete("/agents/{name}")
+def delete_agent(
+    name: str,
+    authorization: str | None = Header(None),
+    x_confirm: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    if get_agent_def(name) is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    refs = references_for(name)
+    if refs["users"] or refs["channels"]:
+        raise HTTPException(status_code=409, detail={"error": "agent still bound", **refs})
+    _require_confirm(x_confirm)
+    delete_agent_def(name)
+    agent_admin_store.delete_state(name)
+    audit_log.write_audit(user.id, "agent.delete", "agent", name)
+    return {"agent": name, "deleted": True}
 
 
 # --- lifecycle ----------------------------------------------------------------
@@ -183,7 +388,15 @@ def clone_agent(
         raise HTTPException(status_code=404, detail="source agent not found")
     if get_agent_def(body.new_name) is not None:
         raise HTTPException(status_code=409, detail="target name already exists")
-    create_agent_def(body.new_name, src["system_prompt"], src["allowed_tools"])
+    create_agent_def(
+        body.new_name,
+        src["system_prompt"],
+        src["allowed_tools"],
+        src.get("skills_dir"),
+        src.get("mcp_server_ids"),
+        src.get("model_overrides", {}),
+        src.get("memory_namespace", "default"),
+    )
     # clone is a fresh adhoc agent with no bindings and default enabled status
     agent_admin_store.set_provenance(body.new_name, "adhoc")
     agent_admin_store.enable(body.new_name)

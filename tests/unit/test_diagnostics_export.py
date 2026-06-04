@@ -205,3 +205,97 @@ def test_export_diagnostics_excludes_business_data_and_database_files(tmp_path):
 
     assert all(not name.endswith("fleetent.db") for name in names)
     assert "memory KB document body" not in combined
+
+
+def test_export_records_status_unavailable_when_status_lookup_raises(monkeypatch, tmp_path):
+    from fleetent.intelligence.knowledge_base.operations import ConnectorSummary
+    from fleetent.observability import diagnostics
+    from fleetent.observability.diagnostics import DiagnosticsExportRequest, export_diagnostics
+
+    monkeypatch.setattr(
+        diagnostics,
+        "list_configured_connectors",
+        lambda settings=None: [
+            ConnectorSummary(
+                connector_id="eng-drive",
+                connector_type="google_drive",
+                enabled=True,
+                tenant_id="default",
+                kb_id="engineering",
+                scope="folder:folder-1",
+                credential_ref_summary="file:google.json",
+            )
+        ],
+    )
+
+    def boom(connector_id, settings=None):
+        raise RuntimeError("status backend down")
+
+    monkeypatch.setattr(diagnostics, "get_connector_status", boom)
+
+    package = export_diagnostics(
+        DiagnosticsExportRequest(
+            output_dir=tmp_path,
+            include_logs=False,
+            include_traces=False,
+            settings=Settings(anthropic_api_key="test-key"),
+        )
+    )
+
+    with zipfile.ZipFile(package.path) as archive:
+        status = archive.read("knowledge_connectors/status.json").decode()
+
+    assert "status_unavailable" in status
+    assert "status backend down" in status
+
+
+def test_get_connector_status_delegates_to_operations(monkeypatch):
+    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.observability import diagnostics
+
+    monkeypatch.setattr(
+        operations, "get_connector_status", lambda connector_id, settings=None: {"id": connector_id}
+    )
+
+    assert diagnostics.get_connector_status("eng-drive") == {"id": "eng-drive"}
+
+
+def test_list_configured_connectors_delegates_to_operations(monkeypatch):
+    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.observability import diagnostics
+
+    monkeypatch.setattr(
+        operations, "list_configured_connectors", lambda settings=None: ["c1", "c2"]
+    )
+
+    assert diagnostics.list_configured_connectors() == ["c1", "c2"]
+
+
+def test_export_skips_secret_files_in_manifest(tmp_path):
+    from fleetent.observability.diagnostics import DiagnosticsExportRequest, export_diagnostics
+
+    secrets_dir = tmp_path / "secrets"
+    secrets_dir.mkdir()
+    (secrets_dir / "google.json").write_text("token")
+
+    package = export_diagnostics(
+        DiagnosticsExportRequest(
+            output_dir=tmp_path / "exports",
+            secrets_dir=secrets_dir,
+            include_logs=False,
+            include_traces=False,
+        )
+    )
+
+    with zipfile.ZipFile(package.path) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+
+    skipped = {entry["name"] for entry in manifest["skipped_artifacts"]}
+    assert "secrets/google.json" in skipped
+
+
+def test_diagnostics_database_factory_builds_sqlite_database():
+    from fleetent.db import SQLiteDatabase
+    from fleetent.observability import diagnostics
+
+    assert isinstance(diagnostics._database(), SQLiteDatabase)

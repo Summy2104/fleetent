@@ -31,20 +31,26 @@
   button.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); }
   button.danger { background:var(--danger); }
   button.small { padding:3px 8px; font-size:12px; }
-  input, select { background:#0c0e12; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:6px 8px; font-size:13px; }
+  input, select, textarea { background:#0c0e12; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:6px 8px; font-size:13px; }
+  textarea { width:100%; box-sizing:border-box; resize:vertical; }
   /* shell: sidebar + content */
   .layout { display:flex; align-items:stretch; min-height:calc(100vh - 49px); }
-  .sidebar { flex:0 0 220px; width:220px; background:var(--bg-2); border-right:1px solid var(--border);
-    padding:var(--sp-3) var(--sp-2); overflow-y:auto; }
-  .nav-group { margin-bottom:var(--sp-4); }
+  .sidebar { flex:0 0 232px; width:232px; background:var(--bg-2); border-right:1px solid var(--border);
+    padding:14px 10px; overflow-y:auto; }
+  .nav-group { margin-bottom:16px; }
   .nav-group-label { display:block; width:100%; text-align:left; background:transparent; color:var(--text-faint);
-    font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; padding:var(--sp-1) var(--sp-3);
+    font-size:10.5px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; padding:4px 10px 6px;
     border:0; cursor:pointer; }
   .nav-group-label.active { color:var(--text-muted); }
-  .nav-item { display:block; width:100%; text-align:left; background:transparent; color:var(--text-muted);
-    border:0; border-radius:var(--r-1); padding:var(--sp-2) var(--sp-3); margin-top:2px; font-size:13px; cursor:pointer; }
+  .nav-item { display:flex; align-items:center; gap:10px; width:100%; text-align:left; background:transparent;
+    color:var(--text-muted); border:0; border-radius:8px; padding:7px 10px; margin-top:1px; font-size:13.5px;
+    cursor:pointer; position:relative; transition:background .12s ease, color .12s ease; }
   .nav-item:hover { background:var(--surface); color:var(--text); }
-  .nav-item.active { background:var(--accent-weak); color:var(--text); box-shadow:inset 2px 0 0 var(--accent); }
+  .nav-item.active { background:var(--accent-weak); color:var(--text); font-weight:600; }
+  .nav-item.active::before { content:""; position:absolute; left:-10px; top:6px; bottom:6px; width:3px;
+    border-radius:0 3px 3px 0; background:var(--accent); }
+  .nav-ico { width:18px; flex-shrink:0; text-align:center; font-size:14px; opacity:.8; }
+  .nav-item:hover .nav-ico, .nav-item.active .nav-ico { opacity:1; }
   .content { flex:1 1 auto; min-width:0; padding:var(--sp-5); max-width:1280px; }
   .hamburger { display:none; font-size:16px; line-height:1; }
   .nav-backdrop { display:none; }
@@ -72,6 +78,9 @@
   .pill.active { color:var(--ok); } .pill.blocked,.pill.disabled { color:var(--danger); }
   .pill.admin,.pill.built_in_admin { color:var(--accent); } .pill.viewer { color:var(--muted); }
   .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-2); padding:var(--sp-4); margin-bottom:var(--sp-4); box-shadow:var(--shadow-1); }
+  .subtabs { display:inline-flex; gap:2px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-pill); padding:2px; }
+  .subtab { border:none; background:transparent; color:var(--muted); padding:4px 14px; border-radius:var(--r-pill); font-size:13px; cursor:pointer; }
+  .subtab.active { background:var(--accent); color:#fff; }
   .page-header { display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap; margin-bottom:var(--sp-4);
     padding-bottom:var(--sp-3); border-bottom:1px solid var(--border); }
   .page-header .ph-title { font-size:18px; font-weight:600; margin:0; }
@@ -99,8 +108,12 @@
     display:flex; align-items:center; justify-content:center; }
   .modal.hidden { display:none; }
   .modal-box { background:var(--panel); border:1px solid var(--line); border-radius:10px;
-    padding:20px; width:360px; max-width:calc(100% - 32px); box-shadow:0 10px 40px rgba(0,0,0,.5); }
+    padding:20px; width:360px; max-width:calc(100% - 32px); box-shadow:0 10px 40px rgba(0,0,0,.5);
+    max-height:calc(100vh - 48px); overflow-y:auto; }
   .modal-box h3 { margin:0 0 14px; }
+  .modal-box input:not([type=checkbox]):not([type=radio]),
+  .modal-box select,
+  .modal-box textarea { width:100%; box-sizing:border-box; }
   .modal-box.wide { width:560px; }
   .modal-box pre { background:var(--bg-0); border:1px solid var(--border); border-radius:var(--r-1);
     padding:var(--sp-3); max-height:60vh; overflow:auto; font-size:12px; white-space:pre-wrap; word-break:break-word; }
@@ -111,8 +124,347 @@
     font-size:13px; animation:toast-in .15s ease; }
   .toast.error { border-left-color:var(--danger); }
   .toast.ok { border-left-color:var(--ok); }
+  .toast.info { border-left-color:var(--accent); }
   @keyframes toast-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
   :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  
+  /* Provider Modal Styles */
+  .provider-modal { width: 640px; max-width: calc(100% - 32px); }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .modal-header h3 { margin: 0; font-size: 20px; font-weight: 600; }
+  .modal-close { background: transparent; border: none; color: var(--text-muted); font-size: 24px; width: 32px; height: 32px; border-radius: var(--r-1); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .modal-close:hover { background: var(--surface-2); color: var(--text); }
+  
+  .provider-form { display: flex; flex-direction: column; gap: 24px; }
+  .form-section { display: flex; flex-direction: column; gap: 16px; }
+  .form-section-title { font-size: 14px; font-weight: 600; color: var(--text); margin: 0 0 8px; }
+  
+  .provider-types { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+  .provider-type-card { position: relative; display: block; padding: 16px; background: var(--surface); border: 2px solid var(--border); border-radius: var(--r-2); cursor: pointer; transition: all 0.15s ease; }
+  .provider-type-card:hover { border-color: var(--border-strong); background: var(--surface-2); }
+  .provider-type-card.active { border-color: var(--accent); background: var(--accent-weak); }
+  .provider-type-card input[type="radio"] { position: absolute; opacity: 0; pointer-events: none; }
+  .provider-type-content { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+  .provider-icon { font-size: 24px; }
+  .provider-name { font-size: 13px; font-weight: 500; color: var(--text); }
+  
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-label { font-size: 13px; font-weight: 500; color: var(--text); }
+  .form-input { background: var(--bg-0); border: 1px solid var(--border); color: var(--text); border-radius: var(--r-1); padding: 8px 12px; font-size: 14px; transition: border-color 0.15s ease; }
+  .form-input:focus { border-color: var(--accent); background: var(--bg-1); }
+  .form-input:disabled { opacity: 0.5; cursor: not-allowed; }
+  .form-hint { font-size: 12px; color: var(--text-muted); }
+  
+  .form-row { display: flex; gap: 12px; }
+  .form-row .form-group { flex: 1; }
+  
+  .password-input-wrapper { position: relative; display: flex; }
+  .password-input-wrapper input { padding-right: 40px; flex: 1; }
+  .password-toggle { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 38px; background: transparent; border: none; color: var(--text-muted); cursor: pointer; border-radius: 0 var(--r-1) var(--r-1) 0; display: flex; align-items: center; justify-content: center; }
+  .password-toggle:hover { background: var(--surface-2); }
+  
+  .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
+  button.primary { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: var(--r-1); font-size: 14px; font-weight: 500; cursor: pointer; }
+  button.primary:hover { background: #6b9fff; }
+  
+  details.form-section summary { list-style: none; }
+  details.form-section summary::-webkit-details-marker { display: none; }
+  details.form-section summary::before { content: "▶"; display: inline-block; margin-right: 8px; transition: transform 0.15s ease; }
+  details.form-section[open] summary::before { transform: rotate(90deg); }
+
+  /* Connector styles */
+  .connector-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  
+  .conn-tab {
+    padding: 8px 16px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+  }
+  
+  .conn-tab:hover {
+    color: var(--text);
+  }
+  
+  .conn-tab.active {
+    color: var(--text);
+    border-bottom-color: var(--primary);
+  }
+  
+  .connector-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  
+  .connector-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  
+  .connector-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    transform: translateY(-2px);
+  }
+  
+  .connector-card.disabled {
+    opacity: 0.6;
+  }
+  .card-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .test-result {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    background: var(--surface-2, var(--surface));
+    font-size: 13px;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .result-ok { color: var(--ok); font-weight: 600; }
+  .result-err { color: var(--danger); font-weight: 600; }
+  .tool-list { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+  .tool-item { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; border-top: 1px solid var(--border); }
+  .tool-item code { color: var(--accent); font-size: 12px; white-space: nowrap; }
+  .tool-desc { color: var(--muted); font-size: 12px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { display: inline-block; animation: spin 1s linear infinite; }
+
+  /* --- Skills module --- */
+  .sk-toolbar { display:flex; gap:10px; margin-bottom:10px; }
+  .sk-search { flex:1; }
+  .sk-filter-tabs { display:flex; gap:6px; flex-wrap:wrap; }
+  .sk-filter-tab { padding:5px 12px; border:1px solid var(--border); border-radius:999px;
+    background:var(--surface); color:var(--muted); cursor:pointer; font-size:13px; }
+  .sk-filter-tab:hover { border-color:var(--border-strong, var(--accent)); }
+  .sk-filter-tab.active { background:var(--accent-weak, var(--accent)); border-color:var(--accent);
+    color:var(--accent, #fff); font-weight:600; }
+  .sk-filter-tab .cnt { opacity:.7; margin-left:5px; font-size:11px; }
+  .badge-count { font-size:12px; color:var(--muted); font-weight:400; }
+  .sk-pills { display:flex; gap:5px; flex-wrap:wrap; margin:6px 0 2px; }
+  .conn-drawer { position:fixed; top:0; right:0; width:520px; max-width:92vw; height:100vh;
+    background:var(--panel); border-left:1px solid var(--line); box-shadow:-8px 0 30px rgba(0,0,0,.4);
+    z-index:45; display:flex; flex-direction:column; }
+  .conn-drawer.hidden { display:none; }
+  .conn-drawer-head { display:flex; justify-content:space-between; align-items:center;
+    padding:16px 20px; border-bottom:1px solid var(--border); }
+  .conn-drawer-head h3 { margin:0; font-size:17px; word-break:break-all; }
+  .conn-drawer-body { padding:16px 20px; overflow-y:auto; flex:1; }
+  .sk-meta-row { display:flex; gap:8px; margin:4px 0; font-size:13px; }
+  .sk-meta-row .k { color:var(--muted); min-width:96px; }
+  .sk-edit-top { display:flex; gap:12px; margin-bottom:10px; }
+  .sk-edit-split { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .sk-edit-pane { display:flex; flex-direction:column; min-width:0; }
+  .sk-edit-pane textarea { min-height:340px; font-family:monospace; font-size:12px; width:100%; box-sizing:border-box; }
+  .field-label { font-size:12px; color:var(--muted); display:block; margin-bottom:4px; }
+  .sk-fm-summary { font-size:12px; margin-bottom:6px; min-height:18px; }
+  .sk-fm-summary .ok { color:var(--ok); }
+  .sk-fm-summary .err { color:var(--danger); }
+  .sk-preview { background:var(--bg-0, var(--surface)); border:1px solid var(--border); border-radius:var(--r-1);
+    padding:10px; height:316px; overflow:auto; white-space:pre-wrap; font-size:12px; margin:0; }
+  .sk-prop-list { display:flex; flex-direction:column; gap:10px; }
+  .sk-prop-card { border:1px solid var(--border); border-radius:var(--r-2); padding:12px 14px; background:var(--surface); }
+  .sk-prop-card .hd { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .sk-prop-card .reason { color:var(--muted); font-size:13px; margin:6px 0; }
+  .sk-diff { background:var(--bg-0, #0c0c0c); border:1px solid var(--border); border-radius:var(--r-1);
+    padding:10px; overflow:auto; max-height:280px; white-space:pre; font-size:12px; margin:8px 0 0; }
+  .sk-diff .add { color:var(--ok); } .sk-diff .del { color:var(--danger); } .sk-diff .hunk { color:var(--accent); }
+  .risk-low { color:var(--ok); } .risk-medium { color:#d8a200; } .risk-high { color:var(--danger); }
+  .sk-import-section { border:1px solid var(--border); border-radius:var(--r-2); padding:12px 14px; background:var(--surface); }
+  /* --- Chat module --- */
+  .chat-wrap { display:flex; flex-direction:column; height:calc(100vh - 170px); min-height:420px;
+    border:1px solid var(--border); border-radius:var(--r-2); overflow:hidden; background:var(--surface); }
+  .chat-toolbar { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); }
+  .chat-toolbar select { min-width:200px; }
+  .chat-log { flex:1; overflow-y:auto; padding:18px; display:flex; flex-direction:column; gap:14px; }
+  .chat-empty { margin:auto; text-align:center; }
+  .chat-msg { display:flex; gap:10px; max-width:82%; }
+  .chat-msg.user { align-self:flex-end; flex-direction:row-reverse; }
+  .chat-msg.assistant { align-self:flex-start; }
+  .chat-avatar { width:28px; height:28px; border-radius:50%; flex-shrink:0; display:flex;
+    align-items:center; justify-content:center; font-size:14px; background:var(--panel); border:1px solid var(--border); }
+  .chat-bubble { padding:10px 14px; border-radius:14px; white-space:pre-wrap; word-break:break-word;
+    font-size:14px; line-height:1.55; }
+  .chat-msg.user .chat-bubble { background:var(--accent); color:#fff; border-bottom-right-radius:4px; }
+  .chat-msg.assistant .chat-bubble { background:var(--panel); border:1px solid var(--border); border-bottom-left-radius:4px; }
+  .chat-tools { margin-top:6px; display:flex; flex-direction:column; gap:3px; }
+  .chat-tool { font-size:11px; color:var(--muted); font-family:monospace; }
+  .chat-composer { display:flex; gap:8px; padding:12px 14px; border-top:1px solid var(--border); align-items:flex-end; }
+  .chat-composer textarea { flex:1; resize:none; max-height:160px; font-family:inherit; font-size:14px; box-sizing:border-box; }
+  /* --- Users layout polish --- */
+  .users-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:4px; }
+  .users-toolbar .sk-search { flex:1; min-width:240px; }
+  #tab-users thead th { font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); font-weight:600; }
+  #tab-users tbody tr:hover > td { background:var(--surface); }
+
+  .connector-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12px;
+    font-size: 20px;
+  }
+  
+  .connector-icon.mcp {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+  }
+  
+  .connector-icon.oauth {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+  }
+  
+  .connector-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  
+  .connector-desc {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 12px;
+    height: 32px;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  
+  .connector-status {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+  
+  .connector-status.active {
+    background: #10b981;
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+  }
+  
+  .connector-status.inactive {
+    background: #ef4444;
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+  }
+  
+  .connector-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    gap: 8px;
+  }
+  
+  .connector-tools {
+    color: var(--muted);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  
+  .connector-footer button {
+    flex-shrink: 0;
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+  
+  #connector-details {
+    position: fixed;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 400px;
+    background: var(--bg);
+    border-left: 1px solid var(--border);
+    z-index: 100;
+    overflow-y: auto;
+    box-shadow: -4px 0 12px rgba(0,0,0,0.1);
+  }
+  
+  .details-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  
+  #conn-details-content {
+    padding: 20px;
+  }
+
+  .conn-modal-type-selector {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .conn-type-card {
+    padding: 16px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+  }
+
+  .conn-type-card:hover {
+    border-color: var(--primary);
+    background: var(--hover);
+  }
+
+  .conn-type-card.selected {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.1);
+  }
+
+  .conn-type-icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+  }
+
+  .conn-type-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .conn-type-desc {
+    font-size: 12px;
+    color: var(--muted);
+  }
 </style>
 </head>
 <body>
@@ -156,30 +508,25 @@
     <nav class="sidebar" aria-label="Admin navigation">
       <div class="nav-group">
         <button class="nav-group-label active" data-group="access" onclick="switchGroup('access')">Access</button>
-        <button class="nav-item active" data-tab="users" onclick="switchTab('users')">Users</button>
-        <button class="nav-item" data-tab="im" onclick="switchTab('im')">IM Users</button>
+        <button class="nav-item active" data-tab="users" onclick="switchTab('users')"><span class="nav-ico">👤</span>Users</button>
       </div>
       <div class="nav-group">
         <button class="nav-group-label" data-group="agents" onclick="switchGroup('agents')">Agents &amp; Skills</button>
-        <button class="nav-item" data-tab="agents" onclick="switchTab('agents')">Agents</button>
-        <button class="nav-item" data-tab="skills" onclick="switchTab('skills')">Skills</button>
-        <button class="nav-item" data-tab="kb" onclick="switchTab('kb')">Knowledge Base</button>
+        <button class="nav-item" data-tab="agents" onclick="switchTab('agents')"><span class="nav-ico">🤖</span>Agents</button>
+        <button class="nav-item" data-tab="skills" onclick="switchTab('skills')"><span class="nav-ico">🧩</span>Skills</button>
+        <button class="nav-item" data-tab="kb" onclick="switchTab('kb')"><span class="nav-ico">📚</span>Knowledge Base</button>
+        <button class="nav-item" data-tab="chat" onclick="switchTab('chat')"><span class="nav-ico">💬</span>Chat</button>
       </div>
       <div class="nav-group">
         <button class="nav-group-label" data-group="models" onclick="switchGroup('models')">Models &amp; Connectors</button>
-        <button class="nav-item" data-tab="providers" onclick="switchTab('providers')">Providers</button>
-        <button class="nav-item" data-tab="connectors" onclick="switchTab('connectors')">IM Connectors</button>
-        <button class="nav-item" data-tab="oauth" onclick="switchTab('oauth')">OAuth &amp; MCP</button>
+        <button class="nav-item" data-tab="providers" onclick="switchTab('providers')"><span class="nav-ico">🧠</span>Providers</button>
+        <button class="nav-item" data-tab="oauth" onclick="switchTab('oauth')"><span class="nav-ico">🔌</span>Connectors</button>
       </div>
       <div class="nav-group">
         <button class="nav-group-label" data-group="ops" onclick="switchGroup('ops')">Ops</button>
-        <button class="nav-item" data-tab="stats" onclick="switchTab('stats')">Statistics</button>
-        <button class="nav-item" data-tab="monitoring" onclick="switchTab('monitoring')">Monitoring</button>
-        <button class="nav-item" data-tab="sessions" onclick="switchTab('sessions')">Sessions</button>
-      </div>
-      <div class="nav-group">
-        <button class="nav-group-label" data-group="audit" onclick="switchGroup('audit')">Audit</button>
-        <button class="nav-item" data-tab="audit" onclick="switchTab('audit')">Audit</button>
+        <button class="nav-item" data-tab="stats" onclick="switchTab('stats')"><span class="nav-ico">📊</span>Statistics</button>
+        <button class="nav-item" data-tab="monitoring" onclick="switchTab('monitoring')"><span class="nav-ico">🩺</span>Monitoring</button>
+        <button class="nav-item" data-tab="sessions" onclick="switchTab('sessions')"><span class="nav-ico">🗂️</span>Sessions</button>
       </div>
     </nav>
     <div class="nav-backdrop" onclick="document.body.classList.remove('nav-open')"></div>
@@ -187,53 +534,40 @@
 
     <section id="tab-users">
       <div class="page-header"><h2 class="ph-title">Users</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.users?.()">Refresh</button></div></div>
-      <div class="row" style="margin-bottom:12px;">
-        <input id="user-filter" placeholder="filter by email or nickname" oninput="renderUsers()" style="flex:1;">
-        <select id="role-filter" onchange="renderUsers()">
-          <option value="">all roles</option>
+      <div class="users-toolbar">
+        <input id="user-filter" class="sk-search" placeholder="🔍  Search by email or nickname" oninput="usersFilterChanged()">
+        <select id="role-filter" onchange="usersFilterChanged()">
+          <option value="">All roles</option>
           <option value="viewer">viewer</option>
           <option value="admin">admin</option>
           <option value="built_in_admin">built_in_admin</option>
         </select>
-        <select id="status-filter" onchange="renderUsers()">
-          <option value="">all status</option>
+        <select id="status-filter" onchange="usersFilterChanged()">
+          <option value="">All status</option>
           <option value="active">active</option>
           <option value="blocked">blocked</option>
           <option value="disabled">disabled</option>
         </select>
-        <span id="create-bar"><button onclick="openCreateModal()">Create user</button></span>
+        <select id="source-filter" onchange="usersFilterChanged()">
+          <option value="">All sources</option>
+          <option value="im">IM-origin</option>
+          <option value="human">human / API</option>
+        </select>
+        <span id="create-bar"><button onclick="openCreateModal()">+ New user</button></span>
       </div>
+      <div id="users-count" class="muted" style="margin:2px 2px 12px;"></div>
       <div class="table-scroll"><table>
-        <thead><tr><th>#</th><th>Email</th><th>Nickname</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th></th><th>#</th><th>Email</th><th>Nickname</th><th>Role</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody id="users-body"></tbody>
       </table></div>
-    </section>
-
-    <section id="tab-im" class="hidden">
-      <div class="page-header"><h2 class="ph-title">IM Users</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.im?.()">Refresh</button></div></div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Platform</th><th>Platform user</th><th>Internal user</th><th>State</th><th>Actions</th></tr></thead>
-        <tbody id="im-body"></tbody>
-      </table></div>
-    </section>
-
-    <section id="tab-connectors" class="hidden">
-      <div class="page-header"><h2 class="ph-title">IM Connectors</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.connectors?.()">Refresh</button></div></div>
-      <div class="row" style="margin-bottom:12px;">
-        <span class="muted" style="flex:1;">IM platform connections (credentials stored server-side, shown masked)</span>
-        <span id="conn-create-bar"><button onclick="openConnModal()">Add connection</button></span>
-      </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Owner</th><th>Platform</th><th>Status</th><th>Enabled</th><th>Credentials</th><th>Actions</th></tr></thead>
-        <tbody id="conn-body"></tbody>
-      </table></div>
+      <div id="users-pager" class="row" style="margin-top:14px; align-items:center; gap:8px;"></div>
     </section>
 
     <section id="tab-kb" class="hidden">
       <div class="page-header"><h2 class="ph-title">Knowledge Base</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.kb?.()">Refresh</button></div></div>
       <div class="card" id="kb-create-card">
         <div class="row">
-          <input id="nkb-id" placeholder="kb_id">
+          <input id="nkb-id" placeholder="auto-generated" readonly>
           <input id="nkb-desc" placeholder="description">
           <button onclick="createKb()">Create KB</button>
         </div>
@@ -255,69 +589,155 @@
     </section>
 
     <section id="tab-agents" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Agents</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.agents?.()">Refresh</button></div></div>
-      <div class="row" style="margin-bottom:12px;">
-        <input id="ag-filter" placeholder="filter by name" oninput="renderAgents()" style="flex:1;">
-        <label class="muted"><input type="checkbox" id="ag-archived" onchange="loadAgents()"> show archived</label>
-        <span id="ag-create-bar">
-          <button class="ghost small" onclick="agShowTemplates()">Templates</button>
-        </span>
+      <div class="page-header">
+        <h2 class="ph-title">Agents</h2>
+        <div class="ph-filter">
+          <div class="subtabs">
+            <button id="ag-subtab-agents" class="subtab active" onclick="agSubTab('agents')">Agents</button>
+            <button id="ag-subtab-templates" class="subtab" onclick="agSubTab('templates')">Templates</button>
+          </div>
+        </div>
+        <div class="ph-actions"><button class="ghost small" onclick="agSubRefresh()">Refresh</button></div>
       </div>
-      <pre id="ag-templates-out" class="muted" style="white-space:pre-wrap; margin:0 0 8px;"></pre>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Name</th><th>Status</th><th>Provenance</th><th>Drift</th><th>Actions</th></tr></thead>
-        <tbody id="ag-body"></tbody>
-      </table></div>
+      <div id="ag-pane">
+        <div class="sk-toolbar">
+          <input id="ag-filter" class="sk-search" placeholder="🔍  Search agents by name" oninput="renderAgents()">
+          <span id="ag-create-bar"><button onclick="agCreate()">+ New agent</button></span>
+        </div>
+        <div id="ag-tabs" class="sk-filter-tabs"></div>
+        <div id="ag-count" class="muted" style="margin:2px 2px 12px;"></div>
+        <div id="ag-grid" class="connector-grid"></div>
+      </div>
+      <div id="tmpl-pane" class="hidden">
+        <div class="row" style="margin-bottom:12px;">
+          <span id="tmpl-create-bar"></span>
+        </div>
+        <div class="table-scroll"><table>
+          <thead><tr><th>ID</th><th>Display name</th><th>allowed_tools</th><th>Actions</th></tr></thead>
+          <tbody id="tmpl-body"></tbody>
+        </table></div>
+        <div id="tmpl-list-err" class="err"></div>
+      </div>
+
+      <!-- Agent detail drawer -->
+      <div id="ag-drawer" class="conn-drawer hidden">
+        <div class="conn-drawer-head">
+          <h3 id="ag-drawer-title">Agent</h3>
+          <button class="modal-close" onclick="agCloseDrawer()">×</button>
+        </div>
+        <div id="ag-drawer-body" class="conn-drawer-body"></div>
+      </div>
     </section>
 
     <section id="tab-skills" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Skills</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.skills?.()">Refresh</button></div></div>
-      <div class="row" style="margin-bottom:12px;">
-        <input id="sk-filter" placeholder="filter by name/description" oninput="loadSkills()" style="flex:1;">
-        <label class="muted"><input type="checkbox" id="sk-archived" onchange="loadSkills()"> show archived</label>
-        <span id="sk-create-bar">
-          <button class="ghost small" onclick="skReload()">Reload</button>
-          <button onclick="skOpenCreate()">Create skill</button>
-        </span>
+      <div class="page-header">
+        <h2 class="ph-title">Skills</h2>
+        <div class="ph-actions">
+          <button class="ghost small" onclick="skReload()">Reload index</button>
+          <button class="ghost" onclick="skOpenImport()">Import</button>
+          <button id="sk-create-bar" onclick="skOpenCreate()">+ New skill</button>
+        </div>
       </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Name</th><th>Description</th><th>Status</th><th>Audit</th><th>Source</th><th>Agents</th><th>Actions</th></tr></thead>
-        <tbody id="sk-body"></tbody>
-      </table></div>
-      <h3 style="margin-top:24px;">Reflection proposals</h3>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Proposal</th><th>Skill</th><th>Summary</th><th>Actions</th></tr></thead>
-        <tbody id="sk-prop-body"></tbody>
-      </table></div>
-      <pre id="sk-prop-diff" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+
+      <div class="sk-toolbar">
+        <input id="sk-search" class="sk-search" placeholder="🔍  Search skills by name or description" oninput="skRender()">
+        <select id="sk-source-filter" onchange="skRender()">
+          <option value="">All sources</option>
+          <option value="adhoc">adhoc</option>
+          <option value="managed">managed</option>
+        </select>
+      </div>
+      <div id="sk-tabs" class="sk-filter-tabs"></div>
+      <div id="sk-count" class="muted" style="margin:4px 2px 10px;"></div>
+
+      <div id="sk-grid" class="connector-grid"></div>
+
+      <div class="sk-proposals">
+        <div class="page-header" style="margin-top:8px;">
+          <h3 class="ph-title" style="font-size:16px;">Reflection proposals <span id="sk-prop-count" class="badge-count"></span></h3>
+        </div>
+        <div id="sk-prop-list" class="sk-prop-list"></div>
+      </div>
+
+      <!-- Skill detail drawer -->
+      <div id="sk-drawer" class="conn-drawer hidden">
+        <div class="conn-drawer-head">
+          <h3 id="sk-drawer-title">Skill</h3>
+          <button class="modal-close" onclick="skCloseDrawer()">×</button>
+        </div>
+        <div id="sk-drawer-body" class="conn-drawer-body"></div>
+      </div>
+    </section>
+
+    <section id="tab-chat" class="hidden">
+      <div class="page-header">
+        <h2 class="ph-title">Chat</h2>
+        <div class="ph-actions">
+          <button class="ghost small" id="chat-pin" onclick="chatPin()" disabled>Pin</button>
+          <button class="ghost small" id="chat-export" onclick="chatExport()" disabled>Export</button>
+          <button onclick="chatNew()">New chat</button>
+        </div>
+      </div>
+      <div class="chat-wrap">
+        <div class="chat-toolbar">
+          <label class="field-label" style="margin:0;">Agent</label>
+          <select id="chat-agent"></select>
+          <span id="chat-sid" class="muted" style="font-size:12px;"></span>
+        </div>
+        <div id="chat-log" class="chat-log">
+          <div class="chat-empty muted">Pick an agent and send a message to start.</div>
+        </div>
+        <div class="chat-composer">
+          <textarea id="chat-input" rows="1" placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
+            oninput="chatAutogrow(this)" onkeydown="chatKey(event)"></textarea>
+          <button id="chat-send" class="primary" onclick="chatSend()">Send</button>
+        </div>
+      </div>
     </section>
 
     <section id="tab-providers" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Model Providers</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.providers?.()">Refresh</button></div></div>
-      <div class="row" style="margin-bottom:12px;">
-        <span class="muted" style="flex:1;">Model providers (api_key stored server-side, shown masked)</span>
-        <span id="pv-create-bar">
-          <button class="ghost small" onclick="pvHealth()">Health</button>
-          <button onclick="pvOpenCreate()">Add provider</button>
-        </span>
+      <div class="page-header">
+        <h2 class="ph-title">Model Providers</h2>
+        <div class="ph-filter">
+          <div class="subtabs">
+            <button class="subtab active" id="pv-tab-providers" onclick="pvSwitchSubtab('providers')">Providers</button>
+            <button class="subtab" id="pv-tab-routing" onclick="pvSwitchSubtab('routing')">Routing</button>
+          </div>
+        </div>
+        <div class="ph-actions"><button class="ghost small" onclick="LOADERS.providers?.()">Refresh</button></div>
       </div>
-      <pre id="pv-health-out" class="muted" style="white-space:pre-wrap; margin:0 0 8px;"></pre>
-      <div class="table-scroll"><table>
-        <thead><tr><th>ID</th><th>Base URL</th><th>Model</th><th>API key</th><th>Pricing (in/out per 1k)</th><th>Actions</th></tr></thead>
-        <tbody id="pv-body"></tbody>
-      </table></div>
-      <h3 style="margin-top:24px;">Task-type routes</h3>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Task type</th><th>Provider chain</th><th>Actions</th></tr></thead>
-        <tbody id="pv-routes-body"></tbody>
-      </table></div>
-      <div class="card row" style="margin-top:8px;">
-        <input id="pv-route-tt" placeholder="task_type (e.g. default)">
-        <input id="pv-route-ids" placeholder="provider ids (comma-separated, priority order)" style="flex:1;">
-        <button onclick="pvSetRoute()">Set route</button>
-        <button class="ghost" onclick="pvPreviewRoute()">Preview</button>
+      
+      <!-- Providers subtab -->
+      <div id="pv-subtab-providers">
+        <div class="row" style="margin-bottom:12px;">
+          <span class="muted" style="flex:1;">Model providers (api_key stored server-side, shown masked)</span>
+          <span id="pv-create-bar">
+            <button onclick="pvOpenCreate()">Add Provider</button>
+          </span>
+        </div>
+        <div class="table-scroll"><table>
+          <thead><tr><th>ID</th><th>Description</th><th>Model</th><th>Base URL</th><th>API key</th><th>Actions</th></tr></thead>
+          <tbody id="pv-body"></tbody>
+        </table></div>
       </div>
-      <pre id="pv-route-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+      
+      <!-- Routing subtab -->
+      <div id="pv-subtab-routing" class="hidden">
+        <div class="row" style="margin-bottom:12px;">
+          <span class="muted" style="flex:1;">Configure task-type routing and fallback chains</span>
+        </div>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Task type</th><th>Provider chain (priority order)</th><th>Actions</th></tr></thead>
+          <tbody id="pv-routes-body"></tbody>
+        </table></div>
+        <div class="card row" style="margin-top:12px;">
+          <input id="pv-route-tt" placeholder="task_type (e.g. default)">
+          <input id="pv-route-ids" placeholder="provider ids (comma-separated, priority order)" style="flex:1;">
+          <button onclick="pvSetRoute()">Set route</button>
+          <button class="ghost" onclick="pvPreviewRoute()">Preview</button>
+        </div>
+        <pre id="pv-route-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+      </div>
     </section>
 
     <section id="tab-stats" class="hidden">
@@ -433,51 +853,55 @@
     </section>
 
     <section id="tab-oauth" class="hidden">
-      <div class="page-header"><h2 class="ph-title">OAuth Connectors &amp; MCP</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.oauth?.()">Refresh</button></div></div>
-      <div class="row" style="margin-bottom:12px;">
-        <span class="muted" style="flex:1;">OAuth 2.x connectors (secrets stored server-side, shown masked)</span>
-        <input id="oc-agent-filter" placeholder="agent_id filter" onchange="ocConnectors()">
-        <span id="oc-create-bar"><button onclick="ocOpenCreate()">Add connector</button></span>
+      <div class="page-header">
+        <h2 class="ph-title">Connectors</h2>
+        <div class="ph-filter"></div>
+        <div class="ph-actions">
+          <button class="primary small" onclick="ocOpenCreate()">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            Add Connector
+          </button>
+        </div>
       </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>ID</th><th>Owner</th><th>Name</th><th>Protocol</th><th>Enabled</th><th>Actions</th></tr></thead>
-        <tbody id="oc-body"></tbody>
-      </table></div>
-      <div class="row" style="margin:12px 0 4px;">
-        <h3 style="flex:1; margin:0;">Authorization grants</h3>
-        <button class="ghost small" onclick="ocGrants()">Refresh grants</button>
-        <input id="oc-offboard-user" placeholder="user_id">
-        <button class="ghost small" onclick="ocOffboarding()">Offboarding</button>
+
+      <!-- Connectors Grid View -->
+      <div class="connector-tabs">
+        <button id="conn-tab-all" class="conn-tab active" onclick="switchConnectorTab('all')">All Connectors</button>
+        <button id="conn-tab-mcp" class="conn-tab" onclick="switchConnectorTab('mcp')">MCP Servers</button>
+        <button id="conn-tab-oauth" class="conn-tab" onclick="switchConnectorTab('oauth')">OAuth</button>
       </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>User</th><th>Connector</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody id="oc-grants-body"></tbody>
-      </table></div>
-      <pre id="oc-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
-      <div class="row" style="margin:16px 0 4px;">
-        <h3 style="flex:1; margin:0;">MCP servers</h3>
-        <input id="mcp-agent-filter" placeholder="agent_id filter" onchange="mcpServers()">
-        <button class="ghost small" onclick="mcpDoctor()">Doctor</button>
-        <button class="ghost small" onclick="mcpServers()">Refresh servers</button>
+
+      <div id="conn-content-all" class="conn-content">
+        <div class="connector-grid" id="connector-grid">
+          <!-- Dynamically populated connector cards -->
+        </div>
       </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Server</th><th>Owner</th><th>Status</th><th>Tools</th><th>Actions</th></tr></thead>
-        <tbody id="mcp-body"></tbody>
-      </table></div>
-      <pre id="mcp-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+
+      <div id="conn-content-mcp" class="conn-content hidden">
+        <div class="connector-grid" id="mcp-grid">
+          <!-- MCP server cards -->
+        </div>
+      </div>
+
+      <div id="conn-content-oauth" class="conn-content hidden">
+        <div class="connector-grid" id="oauth-grid">
+          <!-- OAuth connector cards -->
+        </div>
+      </div>
+
+      <!-- Details Panel -->
+      <div id="connector-details" class="hidden">
+        <div class="details-header">
+          <h3 id="conn-details-title">Connector Details</h3>
+          <button class="ghost small" onclick="closeConnectorDetails()">×</button>
+        </div>
+        <div id="conn-details-content"></div>
+      </div>
     </section>
 
-    <section id="tab-audit" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Audit Log</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.audit?.()">Refresh</button></div></div>
-      <div class="card row">
-        <input id="audit-action" placeholder="filter by action (e.g. block_user)">
-        <button onclick="loadAudit()">Search</button>
-      </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
-        <tbody id="audit-body"></tbody>
-      </table></div>
-    </section>
     </main>
   </div>
 
@@ -533,18 +957,64 @@
   </div>
 
   <div id="sk-modal" class="modal hidden">
-    <div class="modal-box" role="dialog" aria-modal="true">
+    <div class="modal-box" role="dialog" aria-modal="true" style="width:920px; max-width:calc(100% - 32px);">
       <h3 id="sk-modal-title">Create skill</h3>
-      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="skSave(); return false;">
-        <input id="sk-name" placeholder="skill name (matches frontmatter)" autocomplete="off">
-        <select id="sk-source"><option value="adhoc">adhoc</option><option value="managed">managed</option></select>
-        <textarea id="sk-content" placeholder="skill markdown (with frontmatter name/description)" rows="12" style="font-family:monospace;"></textarea>
+      <form onsubmit="skSave(); return false;">
+        <div class="sk-edit-top">
+          <label style="flex:1;">
+            <span class="field-label">Skill name <span class="muted">(must match frontmatter <code>name</code>)</span></span>
+            <input id="sk-name" placeholder="my-skill" autocomplete="off">
+          </label>
+          <label>
+            <span class="field-label">Source</span>
+            <select id="sk-source"><option value="adhoc">adhoc</option><option value="managed">managed</option></select>
+          </label>
+        </div>
+        <div class="sk-edit-split">
+          <div class="sk-edit-pane">
+            <span class="field-label">SKILL.md</span>
+            <textarea id="sk-content" placeholder="---&#10;name: my-skill&#10;description: what it does and when to use it&#10;tags: [research, web]&#10;---&#10;&#10;# Instructions&#10;..." oninput="skPreview()"></textarea>
+          </div>
+          <div class="sk-edit-pane">
+            <span class="field-label">Preview</span>
+            <div id="sk-fm-summary" class="sk-fm-summary"></div>
+            <pre id="sk-preview" class="sk-preview"></pre>
+          </div>
+        </div>
         <div id="sk-err" class="err"></div>
-        <div class="row" style="justify-content:flex-end;">
+        <div class="row" style="justify-content:flex-end; margin-top:6px;">
           <button type="button" class="ghost" onclick="skCloseModal()">Cancel</button>
-          <button type="submit">Save</button>
+          <button type="submit" class="primary">Save</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="sk-import-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true" style="width:560px; max-width:calc(100% - 32px);">
+      <h3>Import skills</h3>
+      <label class="field-label">Source provenance</label>
+      <select id="sk-import-source" style="margin-bottom:14px;">
+        <option value="adhoc">adhoc</option><option value="managed">managed</option>
+      </select>
+
+      <div class="sk-import-section">
+        <strong>📁 Upload a skill folder</strong>
+        <p class="muted" style="font-size:13px; margin:4px 0 8px;">
+          Pick a skill folder (with <code>SKILL.md</code>) or a folder containing several
+          skills. The whole folder uploads — single vs batch is detected automatically.
+        </p>
+        <div class="row" style="gap:8px;">
+          <input type="file" id="sk-import-files" webkitdirectory directory multiple>
+          <button type="button" id="sk-upload-btn" class="primary" onclick="skDoUpload()">Upload &amp; import</button>
+        </div>
+      </div>
+
+      <div id="sk-import-err" class="err"></div>
+      <div id="sk-import-result" class="test-result hidden"></div>
+      <div class="row" style="justify-content:flex-end; margin-top:10px;">
+        <button type="button" class="ghost" onclick="skCloseImport()">Close</button>
+      </div>
     </div>
   </div>
 
@@ -560,20 +1030,138 @@
   </div>
 
   <div id="pv-modal" class="modal hidden">
-    <div class="modal-box" role="dialog" aria-modal="true">
-      <h3 id="pv-modal-title">Add provider</h3>
-      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="pvSave(); return false;">
-        <input id="pv-id" placeholder="provider id (e.g. openai-main)" autocomplete="off">
-        <input id="pv-base-url" placeholder="base_url (OpenAI-compatible)" autocomplete="off">
-        <input id="pv-model" placeholder="model" autocomplete="off">
-        <input id="pv-api-key" type="password" placeholder="api_key (leave blank to keep current)" autocomplete="off">
-        <div class="row">
-          <input id="pv-max-tokens" placeholder="max_tokens (optional)" autocomplete="off">
-          <input id="pv-temperature" placeholder="temperature (optional)" autocomplete="off">
+    <div class="modal-box provider-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h3 id="pv-modal-title">Add Provider</h3>
+        <button type="button" class="modal-close" onclick="pvCloseModal()" aria-label="Close">×</button>
+      </div>
+      <form class="provider-form" onsubmit="pvSave(); return false;">
+        <!-- Provider Type Selection -->
+        <div class="form-section">
+          <div class="provider-types">
+            <label class="provider-type-card active" data-type="openai">
+              <input type="radio" name="provider-type" value="openai" checked onchange="pvUpdateProviderType('openai')">
+              <div class="provider-type-content">
+                <span class="provider-icon">🤖</span>
+                <span class="provider-name">OpenAI</span>
+              </div>
+            </label>
+            <label class="provider-type-card" data-type="anthropic">
+              <input type="radio" name="provider-type" value="anthropic" onchange="pvUpdateProviderType('anthropic')">
+              <div class="provider-type-content">
+                <span class="provider-icon">🧠</span>
+                <span class="provider-name">Anthropic</span>
+              </div>
+            </label>
+            <label class="provider-type-card" data-type="azure">
+              <input type="radio" name="provider-type" value="azure" onchange="pvUpdateProviderType('azure')">
+              <div class="provider-type-content">
+                <span class="provider-icon">☁️</span>
+                <span class="provider-name">Azure</span>
+              </div>
+            </label>
+            <label class="provider-type-card" data-type="custom">
+              <input type="radio" name="provider-type" value="custom" onchange="pvUpdateProviderType('custom')">
+              <div class="provider-type-content">
+                <span class="provider-icon">⚙️</span>
+                <span class="provider-name">Custom</span>
+              </div>
+            </label>
+          </div>
         </div>
+
+        <!-- Basic Configuration -->
+        <div class="form-section">
+          <h4 class="form-section-title">Configuration</h4>
+          <div class="form-group">
+            <label class="form-label" for="pv-id">Provider ID</label>
+            <input id="pv-id" type="text" class="form-input" placeholder="Auto-generated" autocomplete="off" readonly required>
+            <span class="form-hint">Unique identifier (auto-generated)</span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="pv-description">Description</label>
+            <input id="pv-description" type="text" class="form-input" placeholder="e.g., Production GPT-4 endpoint" autocomplete="off">
+            <span class="form-hint">Brief description of this provider</span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="pv-base-url">Base URL</label>
+            <input id="pv-base-url" type="url" class="form-input" placeholder="https://api.openai.com/v1" autocomplete="off" required>
+            <span class="form-hint">OpenAI-compatible API endpoint</span>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group" style="flex: 1;">
+              <label class="form-label" for="pv-model">Model</label>
+              <select id="pv-model" class="form-input" required>
+                <option value="">Select a model...</option>
+                <optgroup label="GPT-4">
+                  <option value="gpt-4o">GPT-4o</option>
+                  <option value="gpt-4o-mini">GPT-4o Mini</option>
+                  <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                  <option value="gpt-4">GPT-4</option>
+                </optgroup>
+                <optgroup label="GPT-3.5">
+                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                </optgroup>
+                <option value="custom">Custom model...</option>
+              </select>
+              <input id="pv-model-custom" type="text" class="form-input hidden" placeholder="Enter custom model name" style="margin-top: 8px;">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="pv-api-key">API Key</label>
+            <div class="password-input-wrapper">
+              <input id="pv-api-key" type="password" class="form-input" placeholder="sk-..." autocomplete="off">
+              <button type="button" class="password-toggle" onclick="pvTogglePassword()" aria-label="Toggle password visibility">👁</button>
+            </div>
+            <span class="form-hint">Leave blank to keep existing key when editing</span>
+          </div>
+        </div>
+
+        <!-- Advanced Settings -->
+        <details class="form-section">
+          <summary class="form-section-title" style="cursor: pointer;">Advanced Settings</summary>
+          <div class="form-row" style="margin-top: 12px;">
+            <div class="form-group">
+              <label class="form-label" for="pv-max-tokens">Max Tokens</label>
+              <input id="pv-max-tokens" type="number" class="form-input" placeholder="4096" min="1" max="128000" autocomplete="off">
+              <span class="form-hint">Maximum response length</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="pv-temperature">Temperature</label>
+              <input id="pv-temperature" type="number" class="form-input" placeholder="0.7" min="0" max="2" step="0.1" autocomplete="off">
+              <span class="form-hint">Response randomness (0-2)</span>
+            </div>
+          </div>
+        </details>
+
         <div id="pv-err" class="err"></div>
-        <div class="row" style="justify-content:flex-end;">
+        
+        <div class="modal-footer">
           <button type="button" class="ghost" onclick="pvCloseModal()">Cancel</button>
+          <button type="submit" class="primary">Save Provider</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="ag-modal" class="modal hidden">
+    <div class="modal-box wide" role="dialog" aria-modal="true">
+      <h3 id="ag-modal-title">New agent</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="agSave(); return false;">
+        <input id="ag-name" placeholder="agent name (unique)" autocomplete="off">
+        <label id="ag-template-row" style="display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted);">
+          template (required)
+          <select id="ag-template" onchange="agTemplatePrefill()"></select>
+        </label>
+        <textarea id="ag-system-prompt" placeholder="system prompt" rows="14" style="font-family:monospace;"></textarea>
+        <input id="ag-allowed-tools" placeholder="allowed_tools (comma-separated, e.g. shell, github__*)" autocomplete="off">
+        <div id="ag-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="agCloseModal()">Cancel</button>
           <button type="submit">Save</button>
         </div>
       </form>
@@ -594,6 +1182,23 @@
     </div>
   </div>
 
+  <div id="tmpl-modal" class="modal hidden">
+    <div class="modal-box wide" role="dialog" aria-modal="true">
+      <h3 id="tmpl-modal-title">New template</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="tmplSave(); return false;">
+        <input id="tmpl-id" placeholder="auto-generated" autocomplete="off" readonly>
+        <input id="tmpl-display-name" placeholder="display name" autocomplete="off">
+        <input id="tmpl-allowed-tools" placeholder="allowed_tools (comma-separated, e.g. read_*, github__*)" autocomplete="off">
+        <textarea id="tmpl-system-prompt" placeholder="system prompt" rows="16" style="font-family:monospace;"></textarea>
+        <div id="tmpl-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="tmplCloseModal()">Cancel</button>
+          <button type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div id="ag-versions-modal" class="modal hidden">
     <div class="modal-box" role="dialog" aria-modal="true">
       <h3 id="ag-versions-title">Versions</h3>
@@ -608,14 +1213,12 @@
     </div>
   </div>
 
-  <div id="ag-bind-modal" class="modal hidden">
-    <div class="modal-box" role="dialog" aria-modal="true">
-      <h3 id="ag-bind-title">Bindings</h3>
-      <div class="row"><input id="ag-bind-user" placeholder="user_id"><button onclick="agBindUser()">Bind user</button><button class="ghost danger" onclick="agUnbindUser()">Unbind user</button></div>
-      <div class="row" style="margin-top:8px;"><input id="ag-bind-platform" placeholder="platform"><input id="ag-bind-channel" placeholder="channel_id"><button onclick="agBindChannel()">Bind channel</button><button class="ghost danger" onclick="agUnbindChannel()">Unbind</button></div>
-      <div id="ag-bind-err" class="err"></div>
-      <div class="row" style="justify-content:flex-end; margin-top:8px;">
-        <button type="button" class="ghost" onclick="agCloseBind()">Close</button>
+  <div id="test-dialog" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true" style="max-width: 500px;">
+      <h3 id="test-dialog-title">Test Results</h3>
+      <div id="test-dialog-content" style="padding: 16px 0;"></div>
+      <div class="row" style="justify-content:flex-end; margin-top: 16px;">
+        <button type="button" class="primary" onclick="closeTestDialog()">Close</button>
       </div>
     </div>
   </div>
@@ -645,40 +1248,28 @@
   </div>
 
   <div id="oc-modal" class="modal hidden">
-    <div class="modal-box" role="dialog" aria-modal="true">
-      <h3 id="oc-modal-title">Add OAuth connector</h3>
-      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="ocSave(); return false;">
-        <input id="oc-id" placeholder="connector id" autocomplete="off">
-        <input id="oc-name" placeholder="display name" autocomplete="off">
-        <input id="oc-auth-url" placeholder="authorization_url" autocomplete="off">
-        <input id="oc-token-url" placeholder="token_url" autocomplete="off">
-        <input id="oc-client-id" placeholder="client_id" autocomplete="off">
-        <input id="oc-client-secret" type="password" placeholder="client_secret (leave blank to keep current)" autocomplete="off">
-        <input id="oc-scopes" placeholder="scopes (space/comma separated)" autocomplete="off">
-        <label class="muted"><input type="checkbox" id="oc-enabled" checked> enabled</label>
-        <div id="oc-err" class="err"></div>
-        <div class="row" style="justify-content:flex-end;">
-          <button type="button" class="ghost" onclick="ocCloseModal()">Cancel</button>
-          <button type="submit">Save</button>
+    <div class="modal-box" role="dialog" aria-modal="true" style="width: 720px; max-width: calc(100% - 32px);">
+      <h3 id="oc-modal-title">Add Connector</h3>
+      
+      <!-- Connector Type Selection -->
+      <div id="conn-type-selector" class="conn-modal-type-selector">
+        <div class="conn-type-card" onclick="selectConnectorType('mcp')">
+          <div class="conn-type-icon">🔌</div>
+          <div class="conn-type-title">MCP Server</div>
+          <div class="conn-type-desc">Model Context Protocol server for tools</div>
         </div>
-      </form>
+        <div class="conn-type-card" onclick="selectConnectorType('oauth')">
+          <div class="conn-type-icon">🔐</div>
+          <div class="conn-type-title">OAuth 2.0</div>
+          <div class="conn-type-desc">Connect to OAuth-protected APIs</div>
+        </div>
+      </div>
+
+      <!-- Dynamic Form Container -->
+      <div id="connector-form-container"></div>
     </div>
   </div>
 
-  <div id="pv-pricing-modal" class="modal hidden">
-    <div class="modal-box" role="dialog" aria-modal="true">
-      <h3 id="pv-pricing-title">Set pricing</h3>
-      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="pvSavePricing(); return false;">
-        <input id="pv-price-in" placeholder="input_price_per_1k" autocomplete="off">
-        <input id="pv-price-out" placeholder="output_price_per_1k" autocomplete="off">
-        <div id="pv-pricing-err" class="err"></div>
-        <div class="row" style="justify-content:flex-end;">
-          <button type="button" class="ghost" onclick="pvClosePricing()">Cancel</button>
-          <button type="submit">Save</button>
-        </div>
-      </form>
-    </div>
-  </div>
 </div>
 
 <div id="toast-host" aria-live="polite"></div>
@@ -703,6 +1294,31 @@ function toast(msg, kind) {
   el.textContent = String(msg);
   host.appendChild(el);
   setTimeout(() => { el.style.opacity = "0"; setTimeout(() => el.remove(), 200); }, 4000);
+}
+
+function showTestDialog(title, content, status) {
+  const dialog = $('test-dialog');
+  const dialogTitle = $('test-dialog-title');
+  const dialogContent = $('test-dialog-content');
+  
+  dialogTitle.textContent = title;
+  
+  if (status === 'loading') {
+    dialogContent.innerHTML = `
+      <div style="text-align: center; color: var(--muted);">
+        <div style="display: inline-block; animation: spin 1s linear infinite;">⏳</div>
+        <div style="margin-top: 8px;">${content}</div>
+      </div>
+    `;
+  } else {
+    dialogContent.innerHTML = content;
+  }
+  
+  dialog.classList.remove('hidden');
+}
+
+function closeTestDialog() {
+  $('test-dialog').classList.add('hidden');
 }
 
 // Close any open static (id-bearing) modal on Escape; dynamic overlays self-handle.
@@ -811,26 +1427,40 @@ async function enterApp() {
   IS_VIEWER = me.role === "viewer";
   $("whoami").textContent = (me.email || me.id) + " · " + me.role;
   if (IS_VIEWER) {
-    for (const id of ["create-bar", "kb-create-card", "conn-create-bar", "sk-create-bar", "pv-create-bar", "ag-create-bar", "st-report-bar", "mon-create-bar", "mon-maint-bar", "sess-create-bar", "sess-bulk-bar", "oc-create-bar"]) {
+    for (const id of ["create-bar", "kb-create-card", "sk-create-bar", "pv-create-bar", "ag-create-bar", "st-report-bar", "mon-create-bar", "mon-maint-bar", "sess-create-bar", "sess-bulk-bar", "oc-create-bar"]) {
       const el = $(id); if (el) el.classList.add("hidden");
     }
   }
   show("app-view");
-  switchTab("users");
+  restoreTab();
+}
+
+function restoreTab() {
+  const tab = location.hash.replace(/^#/, "");
+  switchTab(TAB_GROUP[tab] ? tab : "users");
 }
 
 function show(view) {
   for (const v of ["login-view", "reset-view", "app-view"]) $(v).classList.toggle("hidden", v !== view);
 }
 
+// Resource ids are system-generated, not user-authored: a random short hex id.
+function genId() {
+  if (window.crypto && crypto.getRandomValues) {
+    const a = new Uint8Array(4);
+    crypto.getRandomValues(a);
+    return [...a].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  return Math.random().toString(16).slice(2, 10);
+}
+
 const TAB_GROUP = {
-  users: "access", im: "access",
-  agents: "agents", skills: "agents", kb: "agents",
-  providers: "models", connectors: "models", oauth: "models",
+  users: "access",
+  agents: "agents", skills: "agents", kb: "agents", chat: "agents",
+  providers: "models", oauth: "models",
   stats: "ops", monitoring: "ops", sessions: "ops",
-  audit: "audit",
 };
-const GROUP_DEFAULT_TAB = { access: "users", agents: "agents", models: "providers", ops: "stats", audit: "audit" };
+const GROUP_DEFAULT_TAB = { access: "users", agents: "agents", models: "providers", ops: "stats" };
 const LOADERS = {};  // each module registers its loader; switchTab calls it if present
 
 function switchGroup(group) {
@@ -839,6 +1469,7 @@ function switchGroup(group) {
 
 function switchTab(tab) {
   const group = TAB_GROUP[tab];
+  location.hash = tab;
   for (const b of document.querySelectorAll(".nav-group-label")) b.classList.toggle("active", b.dataset.group === group);
   for (const b of document.querySelectorAll(".nav-item")) b.classList.toggle("active", b.dataset.tab === tab);
   for (const sec of document.querySelectorAll("section[id^='tab-']")) sec.classList.toggle("hidden", sec.id !== "tab-" + tab);
@@ -848,33 +1479,123 @@ function switchTab(tab) {
 }
 
 LOADERS.users = () => loadUsers();
-LOADERS.im = () => loadIm();
-LOADERS.connectors = () => loadConn();
 LOADERS.kb = () => loadKb();
-LOADERS.audit = () => loadAudit();
 
 let ALL_USERS = [];
+// IM identities + connectors are folded under their owning User (presentation
+// re-axis off existing joins: im_users.user_id = user.id, connectors.owner_id = user.id).
+let IM_BY_USER = {};
+let CONN_BY_OWNER = {};
+const USERS_PAGE_SIZE = 20;
+let USERS_PAGE = 1;
 
 async function loadUsers() {
-  $("users-body").innerHTML = loadingRow(6);
-  try { ALL_USERS = await api("GET", "/users"); renderUsers(); }
-  catch (e) { $("users-body").innerHTML = emptyRow(6, e.message); }
+  $("users-body").innerHTML = loadingRow(8);
+  try {
+    const [users, imUsers, conns] = await Promise.all([
+      api("GET", "/users"),
+      api("GET", "/im-users"),
+      api("GET", "/im/connectors"),
+    ]);
+    ALL_USERS = users;
+    IM_BY_USER = {};
+    for (const iu of imUsers) (IM_BY_USER[iu.user_id] ||= []).push(iu);
+    CONN_BY_OWNER = {};
+    for (const c of conns) (CONN_BY_OWNER[c.owner_id] ||= []).push(c);
+    renderUsers();
+  } catch (e) { $("users-body").innerHTML = emptyRow(8, e.message); }
+}
+
+// IM-origin: a User with bound IM identities OR an auto-created backing User
+// whose name matches the {platform}:{platform_user_id} pattern.
+const IM_NAME_RE = /^(slack|telegram|whatsapp):/;
+function isImOrigin(u) {
+  return (IM_BY_USER[u.id]?.length || 0) > 0 || IM_NAME_RE.test(u.name || "");
 }
 
 function renderUsers() {
   const q = ($("user-filter").value || "").trim().toLowerCase();
   const role = $("role-filter").value;
   const status = $("status-filter").value;
+  const source = $("source-filter").value;
   const users = ALL_USERS.filter(u =>
     (!q || (u.email || "").toLowerCase().includes(q) || (u.name || "").toLowerCase().includes(q))
     && (!role || u.role === role)
-    && (!status || u.status === status));
-  $("users-body").innerHTML = users.map((u, i) => `
+    && (!status || u.status === status)
+    && (!source || (source === "im" ? isImOrigin(u) : !isImOrigin(u))));
+  const total = users.length;
+  const countEl = $("users-count");
+  if (countEl) countEl.textContent = `${total} of ${ALL_USERS.length} user${ALL_USERS.length === 1 ? "" : "s"}`;
+  const pages = Math.max(1, Math.ceil(total / USERS_PAGE_SIZE));
+  if (USERS_PAGE > pages) USERS_PAGE = pages;
+  const offset = (USERS_PAGE - 1) * USERS_PAGE_SIZE;
+  const pageUsers = users.slice(offset, offset + USERS_PAGE_SIZE);
+  $("users-body").innerHTML = pageUsers.map((u, i) => {
+    const ids = IM_BY_USER[u.id] || [];
+    const conns = CONN_BY_OWNER[u.id] || [];
+    const imOrigin = isImOrigin(u);
+    const hasChild = ids.length > 0 || conns.length > 0;
+    // Expander gated on bound IM identities (per spec); owned connectors render in
+    // the same child region when present.
+    const expander = ids.length
+      ? `<button class="small ghost" title="Show IM identities" onclick="toggleUserRow('${u.id}')">▸</button>`
+      : "";
+    const idRows = ids.map(r => `
+      <tr>
+        <td>${esc(r.platform)}</td>
+        <td>${esc(r.platform_user_id)}</td>
+        <td><span class="pill ${r.allowed ? "active" : "blocked"}">${r.allowed ? "allowed" : "blocked"}</span></td>
+        <td class="actions">
+          <button class="small ghost" onclick="openBindModal(${r.id})">Bind</button>
+          ${r.allowed
+            ? `<button class="small danger" onclick="imBlock(${r.id})">Block identity</button>`
+            : `<button class="small ghost" onclick="imRestore(${r.id})">Restore</button>`}
+        </td>
+      </tr>`).join("");
+    const idBlock = ids.length
+      ? `<div class="card" style="margin-bottom:var(--sp-2);">
+          <h4 style="margin:0 0 8px;">IM identities</h4>
+          <div class="table-scroll"><table>
+            <thead><tr><th>Platform</th><th>Platform user</th><th>State</th><th>Actions</th></tr></thead>
+            <tbody>${idRows}</tbody>
+          </table></div>
+        </div>`
+      : "";
+    const connRows = conns.map(c => {
+      const creds = Object.entries(c.config || {}).map(([k, v]) => `${esc(k)}=${esc(v)}`).join(", ");
+      return `
+      <tr>
+        <td style="text-transform:capitalize;">${esc(c.platform)}</td>
+        <td><span class="pill">${esc(c.status || "")}</span></td>
+        <td><span class="pill ${c.enabled ? "active" : "blocked"}">${c.enabled ? "on" : "off"}</span></td>
+        <td class="muted">${creds || "—"}</td>
+        <td class="actions">
+          ${c.enabled
+            ? `<button class="small danger" onclick="connDisable('${esc(c.platform)}')">Disable</button>`
+            : `<button class="small ghost" onclick="connEnable('${esc(c.platform)}')">Enable</button>`}
+        </td>
+      </tr>`;
+    }).join("");
+    const connBlock = conns.length
+      ? `<div class="card">
+          <h4 style="margin:0 0 8px;">Connectors owned</h4>
+          <div class="table-scroll"><table>
+            <thead><tr><th>Platform</th><th>Status</th><th>Enabled</th><th>Credentials</th><th>Actions</th></tr></thead>
+            <tbody>${connRows}</tbody>
+          </table></div>
+        </div>`
+      : "";
+    const childRow = hasChild
+      ? `<tr id="child-${u.id}" class="hidden"><td></td><td colspan="7">${idBlock}${connBlock}</td></tr>`
+      : "";
+    return `
     <tr>
-      <td class="muted">${i + 1}</td>
+      <td>${expander}</td>
+      <td class="muted">${offset + i + 1}</td>
       <td>${esc(u.email || "—")}</td>
       <td>${esc(u.name || "—")}</td>
       <td><span class="pill ${u.role}">${esc(u.role)}</span></td>
+      <td><span class="pill ${imOrigin ? "blocked" : "active"}">${imOrigin ? "IM" : "human/API"}</span></td>
       <td><span class="pill ${u.status}">${esc(u.status)}</span></td>
       <td class="actions">
         <div class="menu">
@@ -885,14 +1606,43 @@ function renderUsers() {
               : `<button onclick="setRole('${u.id}','admin')">Make admin</button>`}
             <button onclick="resetPassword('${u.id}')">Reset password</button>
             <button onclick="viewKeys('${u.id}')">Keys</button>
+            ${IS_VIEWER ? "" : `<button onclick="openConnModal('${u.id}')">Add connection</button>`}
             ${u.status === "blocked"
-              ? `<button onclick="unblock('${u.id}')">Unblock</button>`
-              : `<button class="danger" onclick="block('${u.id}')">Block</button>`}
+              ? `<button onclick="unblock('${u.id}')">Enable user</button>`
+              : `<button class="danger" onclick="block('${u.id}')">Disable user</button>`}
             <button class="danger" onclick="del('${u.id}')">Delete</button>
           </div>
         </div>
       </td>
-    </tr>`).join("") || emptyRow(6, "No users.");
+    </tr>${childRow}`;
+  }).join("") || emptyRow(8, "No users.");
+  renderUsersPager(total, pages);
+}
+
+function renderUsersPager(total, pages) {
+  const start = total ? (USERS_PAGE - 1) * USERS_PAGE_SIZE + 1 : 0;
+  const end = Math.min(USERS_PAGE * USERS_PAGE_SIZE, total);
+  $("users-pager").innerHTML = `
+    <span class="muted">${start}–${end} of ${total}</span>
+    <span class="spacer" style="flex:1;"></span>
+    <button class="small ghost" ${USERS_PAGE <= 1 ? "disabled" : ""} onclick="usersGoto(${USERS_PAGE - 1})">Prev</button>
+    <span class="muted">Page ${USERS_PAGE} / ${pages}</span>
+    <button class="small ghost" ${USERS_PAGE >= pages ? "disabled" : ""} onclick="usersGoto(${USERS_PAGE + 1})">Next</button>`;
+}
+
+function usersGoto(page) {
+  USERS_PAGE = Math.max(1, page);
+  renderUsers();
+}
+
+function usersFilterChanged() {
+  USERS_PAGE = 1;
+  renderUsers();
+}
+
+function toggleUserRow(id) {
+  const child = $("child-" + id);
+  if (child) child.classList.toggle("hidden");
 }
 
 function closeMenus(except) {
@@ -904,9 +1654,17 @@ function toggleMenu(btn) {
   const items = btn.nextElementSibling;
   const willOpen = items.classList.contains("hidden");
   closeMenus(willOpen ? items : null);
-  items.classList.toggle("hidden", !willOpen);
+  if (!willOpen) { items.classList.add("hidden"); return; }
+  // Position as fixed so the .table-scroll (overflow:auto) container can't clip it.
+  items.classList.remove("hidden");
+  const r = btn.getBoundingClientRect();
+  items.style.position = "fixed";
+  items.style.right = "auto";
+  items.style.top = (r.bottom + 4) + "px";
+  items.style.left = Math.max(8, r.right - items.offsetWidth) + "px";
 }
 document.addEventListener("click", (e) => { if (!e.target.closest(".menu")) closeMenus(); });
+window.addEventListener("scroll", () => closeMenus(), true);
 
 function openCreateModal() {
   $("users-err").textContent = "";
@@ -951,25 +1709,8 @@ async function viewKeys(id) {
   }
 }
 
-async function loadIm() {
-  const rows = await api("GET", "/im-users");
-  $("im-body").innerHTML = rows.map(r => `
-    <tr>
-      <td>${esc(r.platform)}</td>
-      <td>${esc(r.platform_user_id)}</td>
-      <td class="muted">${esc((r.user_id||"").slice(0,8))}</td>
-      <td><span class="pill ${r.allowed ? "active" : "blocked"}">${r.allowed ? "allowed" : "blocked"}</span></td>
-      <td class="actions">
-        <button class="small ghost" onclick="openBindModal(${r.id})">Bind</button>
-        ${r.allowed
-          ? `<button class="small danger" onclick="imBlock(${r.id})">Block</button>`
-          : `<button class="small ghost" onclick="imRestore(${r.id})">Restore</button>`}
-      </td>
-    </tr>`).join("") || `<tr><td colspan="5" class="muted">No IM users.</td></tr>`;
-}
-
-async function imBlock(id) { const reason = prompt("Reason?"); if (reason === null) return; try { await api("POST", `/im-users/${id}/block`, { reason }); loadIm(); } catch (e) { toast(e.message, "error"); } }
-async function imRestore(id) { try { await api("POST", `/im-users/${id}/restore`, { reason: "" }); loadIm(); } catch (e) { toast(e.message, "error"); } }
+async function imBlock(id) { const reason = prompt("Reason?"); if (reason === null) return; try { await api("POST", `/im-users/${id}/block`, { reason }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
+async function imRestore(id) { try { await api("POST", `/im-users/${id}/restore`, { reason: "" }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
 
 let BIND_IM_ID = null;
 async function openBindModal(imId) {
@@ -987,7 +1728,7 @@ async function doBindIm() {
   try {
     await api("POST", `/im-users/${BIND_IM_ID}/bind`, { user_id: $("bind-user-select").value });
     closeBindModal();
-    loadIm();
+    loadUsers();
   } catch (e) { $("bind-err").textContent = e.message; }
 }
 
@@ -998,25 +1739,8 @@ const CONN_FIELDS = {
   whatsapp: ["phone_number_id", "access_token", "verify_token", "business_account_id"],
 };
 
-async function loadConn() {
-  const rows = await api("GET", "/im/connectors");
-  $("conn-body").innerHTML = rows.map(r => {
-    const creds = Object.entries(r.config || {}).map(([k, v]) => `${esc(k)}=${esc(v)}`).join(", ");
-    return `
-      <tr>
-        <td class="muted">${esc(r.owner_id || "")}</td>
-        <td>${esc(r.platform)}</td>
-        <td><span class="pill">${esc(r.status || "")}</span></td>
-        <td><span class="pill ${r.enabled ? "active" : "blocked"}">${r.enabled ? "on" : "off"}</span></td>
-        <td class="muted">${creds || "—"}</td>
-        <td class="actions">
-          ${r.enabled
-            ? `<button class="small danger" onclick="connDisable('${esc(r.platform)}')">Disable</button>`
-            : `<button class="small ghost" onclick="connEnable('${esc(r.platform)}')">Enable</button>`}
-        </td>
-      </tr>`;
-  }).join("") || `<tr><td colspan="6" class="muted">No connectors.</td></tr>`;
-}
+// Connector mutations refresh the unified User-centric view.
+async function loadConn() { return loadUsers(); }
 
 function renderConnFields() {
   const platform = $("conn-platform").value;
@@ -1024,13 +1748,17 @@ function renderConnFields() {
     `<input data-key="${k}" placeholder="${k}" type="password" autocomplete="off">`).join("");
 }
 
-function openConnModal() {
+// Owner of the connector being created — set from the per-User-row action so the
+// new connector attaches to that User (admin-gated). Null falls back to the caller.
+let CONN_OWNER = null;
+function openConnModal(ownerId) {
+  CONN_OWNER = ownerId || null;
   $("conn-err").textContent = "";
   $("conn-platform").value = "telegram";
   renderConnFields();
   $("conn-modal").classList.remove("hidden");
 }
-function closeConnModal() { $("conn-modal").classList.add("hidden"); }
+function closeConnModal() { $("conn-modal").classList.add("hidden"); CONN_OWNER = null; }
 
 async function createConn() {
   $("conn-err").textContent = "";
@@ -1039,8 +1767,10 @@ async function createConn() {
   for (const inp of $("conn-fields").querySelectorAll("input[data-key]")) {
     if (inp.value) config[inp.dataset.key] = inp.value;
   }
+  const body = { platform, config };
+  if (CONN_OWNER) body.owner_id = CONN_OWNER;
   try {
-    await api("POST", "/im/connectors", { platform, config });
+    await api("POST", "/im/connectors", body);
     closeConnModal();
     loadConn();
   } catch (e) { $("conn-err").textContent = e.message; }
@@ -1052,64 +1782,181 @@ async function connDisable(platform) { try { await api("POST", `/im/connectors/$
 // --- Skills -----------------------------------------------------------------
 
 let SK_EDIT_NAME = null;
+let SK_ALL = [];
+let SK_TAB = 'all';
+
+const SK_TABS = [
+  { key: 'all',         label: 'All',         test: () => true },
+  { key: 'active',      label: 'Active',      test: r => r.status === 'active' && r.global_enabled },
+  { key: 'disabled',    label: 'Disabled',    test: r => r.status === 'active' && !r.global_enabled },
+  { key: 'quarantined', label: 'Quarantined', test: r => r.status === 'quarantined' },
+  { key: 'drifted',     label: 'Drifted',     test: r => !!r.drift },
+  { key: 'archived',    label: 'Archived',    test: r => r.status === 'archived' },
+];
 
 async function loadSkills() {
-  const q = $("sk-filter").value.trim();
-  const arch = $("sk-archived").checked;
-  const qs = [];
-  if (q) qs.push("q=" + encodeURIComponent(q));
-  if (arch) qs.push("include_archived=true");
-  const rows = await api("GET", "/skills" + (qs.length ? "?" + qs.join("&") : ""));
-  $("sk-body").innerHTML = rows.map(r => {
-    const drift = r.drift ? ` <span class="pill blocked">drift</span>` : "";
-    const archived = r.status === "archived";
-    return `
-      <tr>
-        <td>${esc(r.name)}</td>
-        <td class="muted">${esc(r.description || "")}</td>
-        <td><span class="pill ${r.status === "active" ? "active" : "blocked"}">${esc(r.status)}</span>${drift}</td>
-        <td><span class="pill">${esc(r.audit_verdict || "—")}</span></td>
-        <td class="muted">${esc(r.source || "")}</td>
-        <td class="muted">${esc((r.enabling_agents || []).join(", ") || "—")}</td>
-        <td class="actions sk-actions">
-          <button class="small ghost" onclick="skObservability('${esc(r.name)}')">Stats</button>
-          ${IS_VIEWER ? "" : `
-          <button class="small ghost" onclick="skBindAgents('${esc(r.name)}')">Agents</button>
-          <button class="small ghost" onclick="skOpenEdit('${esc(r.name)}')">Edit</button>
-          ${r.global_enabled
-            ? `<button class="small danger" onclick="skDisable('${esc(r.name)}')">Disable</button>`
-            : `<button class="small ghost" onclick="skEnable('${esc(r.name)}')">Enable</button>`}
-          ${r.audit_verdict === "rejected" || r.status === "quarantined"
-            ? `<button class="small danger" onclick="skForcePublish('${esc(r.name)}')">Force publish</button>` : ""}
-          ${r.drift
-            ? `<button class="small ghost" onclick="skPromote('${esc(r.name)}')">Promote</button>
-               <button class="small ghost" onclick="skDiscard('${esc(r.name)}')">Discard</button>` : ""}
-          ${archived
-            ? `<button class="small ghost" onclick="skRestore('${esc(r.name)}')">Restore</button>`
-            : `<button class="small danger" onclick="skDelete('${esc(r.name)}')">Delete</button>`}`}
-        </td>
-      </tr>`;
-  }).join("") || `<tr><td colspan="7" class="muted">No skills.</td></tr>`;
+  try {
+    SK_ALL = await api("GET", "/skills?include_archived=true");
+  } catch (e) { toast(e.message, "error"); SK_ALL = []; }
+  skRenderTabs();
+  skRender();
   skProposals();
 }
 
+function skRenderTabs() {
+  $("sk-tabs").innerHTML = SK_TABS.map(t => {
+    const n = SK_ALL.filter(t.test).length;
+    return `<div class="sk-filter-tab ${SK_TAB === t.key ? 'active' : ''}" onclick="skSetTab('${t.key}')">${t.label}<span class="cnt">${n}</span></div>`;
+  }).join("");
+}
+function skSetTab(key) { SK_TAB = key; skRenderTabs(); skRender(); }
+
+function skMatch(r) {
+  const tab = SK_TABS.find(t => t.key === SK_TAB) || SK_TABS[0];
+  if (!tab.test(r)) return false;
+  const src = $("sk-source-filter").value;
+  if (src && r.source !== src) return false;
+  const q = $("sk-search").value.trim().toLowerCase();
+  if (q && !r.name.toLowerCase().includes(q) && !(r.description || "").toLowerCase().includes(q)) return false;
+  return true;
+}
+
+function skPills(r) {
+  const out = [];
+  const st = r.status === 'active' ? (r.global_enabled ? 'active' : 'blocked') : 'blocked';
+  out.push(`<span class="pill ${st}">${esc(r.status === 'active' && !r.global_enabled ? 'disabled' : r.status)}</span>`);
+  if (r.audit_verdict && r.audit_verdict !== 'pass') out.push(`<span class="pill blocked">audit: ${esc(r.audit_verdict)}</span>`);
+  if (r.drift) out.push(`<span class="pill blocked">drift</span>`);
+  out.push(`<span class="pill">${esc(r.source || 'adhoc')}</span>`);
+  return out.join(" ");
+}
+
+function skCard(r) {
+  const enabled = r.status === 'active' && r.global_enabled;
+  const nAgents = (r.enabling_agents || []).length;
+  return `
+    <div class="connector-card ${enabled ? '' : 'disabled'}" onclick="skDrawer('${esc(r.name)}')">
+      <div class="connector-status ${enabled ? 'active' : 'inactive'}"></div>
+      <div class="connector-icon" style="background:var(--accent-weak,#2a2a3a);">🧩</div>
+      <div class="connector-title">${esc(r.name)}</div>
+      <div class="connector-desc">${esc(r.description || 'No description')}</div>
+      <div class="sk-pills">${skPills(r)}</div>
+      <div class="connector-footer">
+        <span class="connector-tools">${nAgents} agent${nAgents === 1 ? '' : 's'}</span>
+        ${IS_VIEWER ? '' : `<div class="card-actions">
+          <button class="small ghost" onclick="event.stopPropagation(); skOpenEdit('${esc(r.name)}')">Edit</button>
+          ${enabled
+            ? `<button class="small ghost" onclick="event.stopPropagation(); skDisable('${esc(r.name)}')">Disable</button>`
+            : (r.status === 'active' ? `<button class="small ghost" onclick="event.stopPropagation(); skEnable('${esc(r.name)}')">Enable</button>` : '')}
+        </div>`}
+      </div>
+    </div>`;
+}
+
+function skRender() {
+  const shown = SK_ALL.filter(skMatch);
+  $("sk-grid").innerHTML = shown.map(skCard).join("")
+    || `<div class="muted" style="padding:24px; text-align:center;">No skills match.</div>`;
+  $("sk-count").textContent = `${shown.length} of ${SK_ALL.length} skill${SK_ALL.length === 1 ? '' : 's'}`;
+}
+
+// --- detail drawer ---
+async function skDrawer(name) {
+  const r = SK_ALL.find(x => x.name === name);
+  if (!r) return;
+  $("sk-drawer-title").textContent = name;
+  $("sk-drawer").classList.remove("hidden");
+  $("sk-drawer-body").innerHTML = '<div class="muted"><span class="spin">⏳</span> Loading…</div>';
+  let content = "", agents = [];
+  try { content = (await api("GET", `/skills/${encodeURIComponent(name)}/content`)).content; } catch (e) { content = "(content unavailable: " + e.message + ")"; }
+  try { agents = await api("GET", `/skills/${encodeURIComponent(name)}/agents`); } catch (e) { agents = []; }
+
+  const meta = (k, v) => `<div class="sk-meta-row"><span class="k">${k}</span><span>${v}</span></div>`;
+  const agentRows = agents.map(a => {
+    const aid = a.agent_id || a.id || a.name;
+    return `<label class="row" style="gap:8px;"><input type="checkbox" ${a.enabled ? "checked" : ""}
+      ${IS_VIEWER ? 'disabled' : ''} onchange="skSetAgent('${esc(name)}','${esc(aid)}', this.checked)"> ${esc(String(aid))}</label>`;
+  }).join("") || `<div class="muted">No agents available.</div>`;
+
+  const acts = IS_VIEWER ? '' : `
+    <div class="row" style="flex-wrap:wrap; gap:6px; margin-top:6px;">
+      <button class="small ghost" onclick="skOpenEdit('${esc(name)}')">Edit</button>
+      ${r.global_enabled
+        ? `<button class="small ghost" onclick="skDisable('${esc(name)}')">Disable</button>`
+        : `<button class="small ghost" onclick="skEnable('${esc(name)}')">Enable</button>`}
+      ${(r.audit_verdict === 'rejected' || r.status === 'quarantined')
+        ? `<button class="small danger" onclick="skForcePublish('${esc(name)}')">Force publish</button>` : ''}
+      ${r.drift ? `<button class="small ghost" onclick="skPromote('${esc(name)}')">Promote</button>
+                   <button class="small ghost" onclick="skDiscard('${esc(name)}')">Discard</button>` : ''}
+      ${r.status === 'archived'
+        ? `<button class="small ghost" onclick="skRestore('${esc(name)}')">Restore</button>`
+        : `<button class="small danger" onclick="skDelete('${esc(name)}')">Delete</button>`}
+    </div>`;
+
+  $("sk-drawer-body").innerHTML = `
+    <div class="sk-pills">${skPills(r)}</div>
+    <p class="muted" style="margin:8px 0;">${esc(r.description || 'No description')}</p>
+    ${meta('Source', esc(r.source || 'adhoc'))}
+    ${meta('Audit', esc(r.audit_verdict || '—'))}
+    ${meta('Global', r.global_enabled ? 'enabled' : 'disabled')}
+    ${acts}
+    <h4 style="margin:16px 0 6px;">Agent bindings</h4>
+    <div style="display:flex; flex-direction:column; gap:6px;">${agentRows}</div>
+    <h4 style="margin:16px 0 6px;">SKILL.md</h4>
+    <pre class="sk-preview" style="height:auto; max-height:340px;">${esc(content)}</pre>`;
+}
+function skCloseDrawer() { $("sk-drawer").classList.add("hidden"); }
+
+// --- editor ---
 function skOpenCreate() {
   SK_EDIT_NAME = null;
   $("sk-modal-title").textContent = "Create skill";
   $("sk-err").textContent = "";
   $("sk-name").value = ""; $("sk-name").disabled = false;
   $("sk-content").value = ""; $("sk-source").value = "adhoc";
+  skPreview();
   $("sk-modal").classList.remove("hidden");
 }
-function skOpenEdit(name) {
+async function skOpenEdit(name) {
   SK_EDIT_NAME = name;
   $("sk-modal-title").textContent = "Edit skill: " + name;
   $("sk-err").textContent = "";
   $("sk-name").value = name; $("sk-name").disabled = true;
-  $("sk-content").value = ""; $("sk-content").placeholder = "paste full skill markdown to replace";
+  $("sk-content").value = "Loading…";
   $("sk-modal").classList.remove("hidden");
+  try {
+    const r = await api("GET", `/skills/${encodeURIComponent(name)}/content`);
+    $("sk-content").value = r.content || "";
+  } catch (e) { $("sk-content").value = ""; $("sk-err").textContent = "could not load content: " + e.message; }
+  skPreview();
 }
 function skCloseModal() { $("sk-modal").classList.add("hidden"); }
+
+function skParseFrontmatter(text) {
+  const m = text.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (!m) return null;
+  const fm = {};
+  m[1].split("\n").forEach(line => {
+    const i = line.indexOf(":");
+    if (i > 0) fm[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  });
+  return fm;
+}
+function skPreview() {
+  const text = $("sk-content").value;
+  const fm = skParseFrontmatter(text);
+  const sum = $("sk-fm-summary");
+  if (!fm) {
+    sum.innerHTML = `<span class="err">⚠ No frontmatter block (--- … ---) found</span>`;
+  } else if (!fm.name || !fm.description) {
+    const missing = [!fm.name && "name", !fm.description && "description"].filter(Boolean).join(", ");
+    sum.innerHTML = `<span class="err">⚠ Missing required frontmatter: ${esc(missing)}</span>`;
+  } else {
+    const extra = ["tags", "version", "platforms"].filter(k => fm[k]).map(k => `${k}=${esc(fm[k])}`).join("  ");
+    sum.innerHTML = `<span class="ok">✓ ${esc(fm.name)}</span> — ${esc(fm.description)}${extra ? `<br><span class="muted">${extra}</span>` : ""}`;
+  }
+  $("sk-preview").textContent = text;
+}
 
 async function skSave() {
   if (SK_EDIT_NAME) return skEdit(SK_EDIT_NAME, $("sk-content").value);
@@ -1125,133 +1972,456 @@ async function skEdit(name, content) {
   try { await api("PUT", `/skills/${encodeURIComponent(name)}`, { content }); skCloseModal(); loadSkills(); }
   catch (e) { $("sk-err").textContent = e.message; }
 }
-async function skEnable(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/enable`); loadSkills(); } catch (e) { toast(e.message, "error"); } }
-async function skDisable(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/disable`); loadSkills(); } catch (e) { toast(e.message, "error"); } }
-async function skReload() { try { await api("POST", "/skills/reload"); loadSkills(); } catch (e) { toast(e.message, "error"); } }
+
+function skAfterMutate() { const open = !$("sk-drawer").classList.contains("hidden"); const n = $("sk-drawer-title").textContent; loadSkills().then(() => { if (open) skDrawer(n); }); }
+async function skEnable(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/enable`); skAfterMutate(); } catch (e) { toast(e.message, "error"); } }
+async function skDisable(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/disable`); skAfterMutate(); } catch (e) { toast(e.message, "error"); } }
+async function skReload() { try { await api("POST", "/skills/reload"); loadSkills(); toast("Skill index reloaded", "success"); } catch (e) { toast(e.message, "error"); } }
 async function skDelete(name) {
-  if (!await confirmDialog(`Archive (soft-delete) skill ${name}?`)) return;
-  try { await api("DELETE", `/skills/${encodeURIComponent(name)}`); loadSkills(); } catch (e) { toast(e.message, "error"); }
+  if (!await confirmDialog(`Archive (soft-delete) skill "${name}"?`)) return;
+  try { await api("DELETE", `/skills/${encodeURIComponent(name)}`); skCloseDrawer(); loadSkills(); } catch (e) { toast(e.message, "error"); }
 }
-async function skRestore(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/restore`); loadSkills(); } catch (e) { toast(e.message, "error"); } }
+async function skRestore(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/restore`); skAfterMutate(); } catch (e) { toast(e.message, "error"); } }
 async function skForcePublish(name) {
-  if (!await confirmDialog(`Force-publish ${name} despite audit verdict?`)) return;
-  try { await api("POST", `/skills/${encodeURIComponent(name)}/force-publish`, null, { "X-Confirm": "true" }); loadSkills(); } catch (e) { toast(e.message, "error"); }
-}
-async function skObservability(name) {
-  try { const r = await api("GET", `/skills/${encodeURIComponent(name)}/observability`); showInfo("Details", JSON.stringify(r, null, 2)); } catch (e) { toast(e.message, "error"); }
+  if (!await confirmDialog(`Force-publish "${name}" despite audit verdict?`)) return;
+  try { await api("POST", `/skills/${encodeURIComponent(name)}/force-publish`, null, { "X-Confirm": "true" }); skAfterMutate(); } catch (e) { toast(e.message, "error"); }
 }
 async function skPromote(name) {
-  if (!await confirmDialog(`Promote managed skill ${name} (keep local drift)?`)) return;
-  try { await api("POST", `/skills/${encodeURIComponent(name)}/provenance/promote`, null, { "X-Confirm": "true" }); loadSkills(); } catch (e) { toast(e.message, "error"); }
+  if (!await confirmDialog(`Promote managed skill "${name}" (keep local drift)?`)) return;
+  try { await api("POST", `/skills/${encodeURIComponent(name)}/provenance/promote`, null, { "X-Confirm": "true" }); skAfterMutate(); } catch (e) { toast(e.message, "error"); }
 }
 async function skDiscard(name) {
-  if (!await confirmDialog(`Discard local drift of ${name} (revert to managed)?`)) return;
-  try { await api("POST", `/skills/${encodeURIComponent(name)}/provenance/discard`); loadSkills(); } catch (e) { toast(e.message, "error"); }
+  if (!await confirmDialog(`Discard local drift of "${name}" (revert to managed)?`)) return;
+  try { await api("POST", `/skills/${encodeURIComponent(name)}/provenance/discard`); skAfterMutate(); } catch (e) { toast(e.message, "error"); }
 }
-
-async function skBindAgents(name) {
-  $("sk-agents-err").textContent = "";
-  try {
-    const rows = await api("GET", `/skills/${encodeURIComponent(name)}/agents`);
-    $("sk-agents-list").innerHTML = rows.map(a => {
-      const aid = a.agent_id || a.id || a.name;
-      return `<label class="row" style="gap:8px;">
-        <input type="checkbox" ${a.enabled ? "checked" : ""} onchange="skSetAgent('${esc(name)}','${esc(aid)}', this.checked)">
-        ${esc(aid)}</label>`;
-    }).join("") || `<div class="muted">No agents.</div>`;
-    $("sk-agents-modal").classList.remove("hidden");
-  } catch (e) { $("sk-agents-err").textContent = e.message; }
-}
-function skCloseAgents() { $("sk-agents-modal").classList.add("hidden"); }
 async function skSetAgent(name, agentId, enabled) {
   try { await api("PUT", `/skills/${encodeURIComponent(name)}/agents/${encodeURIComponent(agentId)}`, { enabled }); }
-  catch (e) { $("sk-agents-err").textContent = e.message; }
+  catch (e) { toast(e.message, "error"); }
 }
 
+// --- proposals review ---
+function skDiffHtml(diff) {
+  if (!diff) return '<div class="muted">No diff.</div>';
+  const html = esc(diff).split("\n").map(l => {
+    if (l.startsWith("@@")) return `<span class="hunk">${l}</span>`;
+    if (l.startsWith("+")) return `<span class="add">${l}</span>`;
+    if (l.startsWith("-")) return `<span class="del">${l}</span>`;
+    return l;
+  }).join("\n");
+  return `<pre class="sk-diff">${html}</pre>`;
+}
 async function skProposals() {
   let rows = [];
-  try { rows = await api("GET", "/skills/proposals"); } catch (e) { return; }
-  $("sk-prop-body").innerHTML = rows.map(p => {
-    const pid = p.proposal_id || p.id;
+  try { rows = await api("GET", "/skills/proposals"); } catch (e) { rows = []; }
+  $("sk-prop-count").textContent = rows.length ? `(${rows.length} pending)` : "(none pending)";
+  $("sk-prop-list").innerHTML = rows.map(p => {
+    const pid = p.id || p.proposal_id;
+    const risk = (p.risk_level || "").toLowerCase();
+    const ev = (p.evidence_refs || []).length;
     return `
-      <tr>
-        <td class="muted">${esc(pid)}</td>
-        <td>${esc(p.skill_name || p.name || "—")}</td>
-        <td class="muted">${esc(p.summary || "")}</td>
-        <td class="actions">
-          <button class="small ghost" onclick="skProposalDiff('${esc(pid)}')">Diff</button>
-          <button class="small" onclick="skApprove('${esc(pid)}')">Approve</button>
-          <button class="small danger" onclick="skReject('${esc(pid)}')">Reject</button>
-        </td>
-      </tr>`;
-  }).join("") || `<tr><td colspan="4" class="muted">No proposals.</td></tr>`;
+      <div class="sk-prop-card" id="prop-${esc(pid)}">
+        <div class="hd">
+          <strong>${esc(p.target_skill || p.skill_name || "—")}</strong>
+          <span class="pill">${esc(p.type || "proposal")}</span>
+          ${risk ? `<span class="pill risk-${esc(risk)}">risk: ${esc(risk)}</span>` : ""}
+          ${ev ? `<span class="muted" style="font-size:12px;">${ev} evidence</span>` : ""}
+        </div>
+        <div class="reason">${esc(p.reason || "")}</div>
+        <div class="row" style="gap:6px;">
+          ${p.has_diff ? `<button class="small ghost" onclick="skProposalDiff('${esc(pid)}')">View diff</button>` : ""}
+          ${IS_VIEWER ? "" : `<button class="small" onclick="skApprove('${esc(pid)}')">Approve</button>
+          <button class="small danger" onclick="skReject('${esc(pid)}')">Reject</button>`}
+        </div>
+        <div class="prop-diff"></div>
+      </div>`;
+  }).join("") || `<div class="muted">No pending proposals.</div>`;
 }
 async function skProposalDiff(id) {
-  try { const r = await api("GET", `/skills/proposals/${encodeURIComponent(id)}/diff`); $("sk-prop-diff").textContent = r.diff || JSON.stringify(r, null, 2); }
-  catch (e) { $("sk-prop-diff").textContent = e.message; }
+  const host = document.querySelector(`#prop-${CSS.escape(id)} .prop-diff`);
+  try { const r = await api("GET", `/skills/proposals/${encodeURIComponent(id)}/diff`); if (host) host.innerHTML = skDiffHtml(r.diff); }
+  catch (e) { if (host) host.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
 }
 async function skApprove(id) {
   if (!await confirmDialog("Approve this proposal?")) return;
-  try { await api("POST", `/skills/proposals/${encodeURIComponent(id)}/approve`, null, { "X-Confirm": "true" }); skProposals(); } catch (e) { toast(e.message, "error"); }
+  try { await api("POST", `/skills/proposals/${encodeURIComponent(id)}/approve`, null, { "X-Confirm": "true" }); skProposals(); toast("Proposal approved", "success"); } catch (e) { toast(e.message, "error"); }
 }
-async function skReject(id) { try { await api("POST", `/skills/proposals/${encodeURIComponent(id)}/reject`); skProposals(); } catch (e) { toast(e.message, "error"); } }
+async function skReject(id) {
+  if (!await confirmDialog("Reject this proposal?")) return;
+  try { await api("POST", `/skills/proposals/${encodeURIComponent(id)}/reject`); skProposals(); } catch (e) { toast(e.message, "error"); }
+}
+
+function skOpenImport() {
+  $("sk-import-source").value = "adhoc";
+  if ($("sk-import-files")) $("sk-import-files").value = "";
+  $("sk-import-err").textContent = "";
+  const res = $("sk-import-result"); res.classList.add("hidden"); res.innerHTML = "";
+  $("sk-import-modal").classList.remove("hidden");
+}
+function skCloseImport() { $("sk-import-modal").classList.add("hidden"); }
+
+function skImportShowResult(r) {
+  const res = $("sk-import-result");
+  const ok = (r.imported || []).map(i =>
+    `<div class="result-ok">✓ ${esc(i.name)}${i.verdict && i.verdict !== "pass" ? ` <span class="muted">(${esc(i.verdict)})</span>` : ""}</div>`).join("");
+  const skip = (r.skipped || []).map(s => `<div class="muted">↷ ${esc(s.dir)} — ${esc(s.reason)}</div>`).join("");
+  const fail = (r.failed || []).map(f => `<div class="result-err">✗ ${esc(f.dir)} — ${esc(f.error)}</div>`).join("");
+  const n = (r.imported || []).length;
+  res.classList.remove("hidden");
+  res.innerHTML = `<div><strong>${n} imported</strong>, ${(r.skipped || []).length} skipped, ${(r.failed || []).length} failed</div>${ok}${skip}${fail}`;
+  loadSkills();
+  if (n) toast(`Imported ${n} skill(s)`, "success");
+}
+
+async function skDoUpload() {
+  const input = $("sk-import-files");
+  const files = input && input.files ? [...input.files] : [];
+  $("sk-import-err").textContent = "";
+  if (!files.length) { $("sk-import-err").textContent = "pick a folder first"; return; }
+  const fd = new FormData();
+  fd.append("source", $("sk-import-source").value);
+  for (const f of files) fd.append("files", f, f.webkitRelativePath || f.name);
+  const btn = $("sk-upload-btn");
+  const res = $("sk-import-result");
+  btn.disabled = true; btn.textContent = "⏳ Uploading…";
+  res.classList.remove("hidden");
+  res.innerHTML = `<div class="muted"><span class="spin">⏳</span> Uploading ${files.length} file(s)…</div>`;
+  try {
+    const resp = await fetch("/admin/skills/import/upload", {
+      method: "POST", headers: { "Authorization": "Session " + TOKEN }, body: fd,
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
+    skImportShowResult(data);
+  } catch (e) {
+    res.classList.add("hidden");
+    $("sk-import-err").textContent = e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = "Upload & import";
+  }
+}
 
 LOADERS.skills = () => loadSkills();
+
+// --- Chat (admin playground) -------------------------------------------------
+let CHAT_SID = null;
+let CHAT_BUSY = false;
+
+async function loadChat() {
+  let agents = [];
+  try { agents = await api("GET", "/agents?include_archived=true"); } catch (e) { agents = []; }
+  const opts = agents
+    .filter(a => (a.status || "enabled") !== "archived")
+    .map(a => {
+      const n = a.agent_name || a.name;
+      const tag = a.status && a.status !== "enabled" ? ` (${esc(a.status)})` : "";
+      return `<option value="${esc(n)}">${esc(n)}${tag}</option>`;
+    }).join("");
+  $("chat-agent").innerHTML = opts || '<option value="">(no agents — create one first)</option>';
+}
+
+function chatAutogrow(t) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 160) + "px"; }
+function chatKey(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); chatSend(); } }
+
+function chatNew() {
+  CHAT_SID = null;
+  $("chat-log").innerHTML = '<div class="chat-empty muted">Pick an agent and send a message to start.</div>';
+  $("chat-sid").textContent = "";
+  $("chat-pin").disabled = true;
+  $("chat-export").disabled = true;
+  $("chat-input").focus();
+}
+
+function chatBubble(role, text) {
+  const log = $("chat-log");
+  const empty = log.querySelector(".chat-empty");
+  if (empty) empty.remove();
+  const wrap = document.createElement("div");
+  wrap.className = "chat-msg " + role;
+  wrap.innerHTML = `<div class="chat-avatar">${role === "user" ? "🧑" : "🤖"}</div><div class="chat-bubble"></div>`;
+  wrap.querySelector(".chat-bubble").textContent = text;
+  log.appendChild(wrap);
+  log.scrollTop = log.scrollHeight;
+  return wrap;
+}
+
+function chatToolNotes(events) {
+  const tools = (events || []).filter(e => ["tool_call", "tool_result", "error"].includes(e.type));
+  if (!tools.length) return "";
+  return `<div class="chat-tools">` + tools.map(e => {
+    if (e.type === "error") return `<div class="chat-tool" style="color:var(--danger)">⚠ ${esc(e.content || "")}</div>`;
+    if (e.type === "tool_call") return `<div class="chat-tool">🔧 ${esc(e.name || "tool")}(${esc(JSON.stringify(e.args || {}))})</div>`;
+    return `<div class="chat-tool">↳ ${esc(e.name || "")}: ${esc(String(e.content ?? "").slice(0, 200))}</div>`;
+  }).join("") + `</div>`;
+}
+
+async function chatSend() {
+  if (CHAT_BUSY) return;
+  const msg = $("chat-input").value.trim();
+  const agent = $("chat-agent").value;
+  if (!msg) return;
+  if (!agent) { toast("Pick an agent first", "error"); return; }
+  CHAT_BUSY = true;
+  $("chat-send").disabled = true;
+  $("chat-input").value = "";
+  chatAutogrow($("chat-input"));
+  chatBubble("user", msg);
+  const pending = chatBubble("assistant", "…");
+  pending.querySelector(".chat-bubble").classList.add("muted");
+  try {
+    if (!CHAT_SID) {
+      const s = await api("POST", "/chat/start", { agent_name: agent });
+      CHAT_SID = s.session_id;
+      $("chat-sid").textContent = CHAT_SID;
+      $("chat-pin").disabled = false;
+      $("chat-export").disabled = false;
+    }
+    const r = await api("POST", `/chat/${encodeURIComponent(CHAT_SID)}/message`, { message: msg });
+    const bubble = pending.querySelector(".chat-bubble");
+    bubble.classList.remove("muted");
+    bubble.textContent = r.reply || "(no reply)";
+    const notes = chatToolNotes(r.events);
+    if (notes) pending.insertAdjacentHTML("beforeend", notes);
+  } catch (e) {
+    const bubble = pending.querySelector(".chat-bubble");
+    bubble.classList.remove("muted");
+    bubble.innerHTML = `<span style="color:var(--danger)">${esc(e.message)}</span>`;
+  } finally {
+    CHAT_BUSY = false;
+    $("chat-send").disabled = false;
+    $("chat-log").scrollTop = $("chat-log").scrollHeight;
+  }
+}
+
+async function chatPin() {
+  if (!CHAT_SID) return;
+  try { await api("POST", `/chat/${encodeURIComponent(CHAT_SID)}/pin`, {}); toast("Pinned", "success"); }
+  catch (e) { toast(e.message, "error"); }
+}
+
+async function chatExport() {
+  if (!CHAT_SID) return;
+  try {
+    const res = await fetch(`/admin/chat/${encodeURIComponent(CHAT_SID)}/export?fmt=markdown`,
+      { headers: { "Authorization": "Session " + TOKEN } });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = CHAT_SID + ".md";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) { toast(e.message, "error"); }
+}
+
+LOADERS.chat = () => loadChat();
 
 // --- Agents -----------------------------------------------------------------
 
 let ALL_AGENTS = [];
-let AG_BIND_NAME = null;
+
+let AG_STATUS = "all";
+const AG_STATUS_TABS = [
+  ["all", "All"], ["enabled", "Enabled"], ["disabled", "Disabled"], ["archived", "Archived"],
+];
 
 async function loadAgents() {
-  ALL_AGENTS = await api("GET", "/agents" + ($("ag-archived").checked ? "?include_archived=true" : ""));
+  $("ag-create-bar").innerHTML = IS_VIEWER ? "" : `<button onclick="agCreate()">+ New agent</button>`;
+  ALL_AGENTS = await api("GET", "/agents?include_archived=true");
   renderAgents();
 }
+function agStatusFilter(s) { AG_STATUS = s; renderAgents(); }
 function renderAgents() {
   const q = $("ag-filter").value.trim().toLowerCase();
-  const rows = ALL_AGENTS.filter(a => !q || (a.agent_name || "").toLowerCase().includes(q));
-  $("ag-body").innerHTML = rows.map(a => {
-    const name = a.agent_name;
-    const archived = a.status === "archived";
-    return `
-      <tr>
-        <td>${esc(name)}</td>
-        <td><span class="pill ${a.status === "enabled" ? "active" : "blocked"}">${esc(a.status)}</span></td>
-        <td class="muted">${esc(a.provenance || "")}</td>
-        <td>${a.drift ? `<span class="pill blocked">drift</span>` : "—"}</td>
-        <td class="actions">
-          <button class="small ghost" onclick="agObservability('${esc(name)}')">Stats</button>
-          <button class="small ghost" onclick="agVersions('${esc(name)}')">Versions</button>
-          ${IS_VIEWER ? "" : `
-          <button class="small ghost" onclick="agOpenBind('${esc(name)}')">Bindings</button>
-          <button class="small ghost" onclick="agOpenClone('${esc(name)}')">Clone</button>
-          ${a.status === "enabled"
-            ? `<button class="small danger" onclick="agDisable('${esc(name)}')">Disable</button>`
-            : `<button class="small ghost" onclick="agEnable('${esc(name)}')">Enable</button>`}
-          ${archived
-            ? `<button class="small ghost" onclick="agRestore('${esc(name)}')">Restore</button>`
-            : `<button class="small danger" onclick="agArchive('${esc(name)}')">Archive</button>`}`}
-        </td>
-      </tr>`;
-  }).join("") || `<tr><td colspan="5" class="muted">No agents.</td></tr>`;
+  const counts = { all: ALL_AGENTS.length };
+  for (const a of ALL_AGENTS) counts[a.status] = (counts[a.status] || 0) + 1;
+  $("ag-tabs").innerHTML = AG_STATUS_TABS.map(([k, label]) =>
+    `<button class="sk-filter-tab ${AG_STATUS === k ? "active" : ""}" onclick="agStatusFilter('${k}')">${label} <span class="muted">${counts[k] || 0}</span></button>`
+  ).join("");
+  const rows = ALL_AGENTS.filter(a =>
+    (AG_STATUS === "all" || a.status === AG_STATUS) &&
+    (!q || (a.agent_name || "").toLowerCase().includes(q))
+  );
+  $("ag-count").textContent = `${rows.length} agent${rows.length === 1 ? "" : "s"}`;
+  $("ag-grid").innerHTML = rows.map(agentCardHtml).join("")
+    || `<div class="muted" style="padding:24px;">No agents.</div>`;
 }
+function agentCardHtml(a) {
+  const name = a.agent_name;
+  const enabled = a.status === "enabled";
+  const statusCls = enabled ? "active" : a.status === "archived" ? "" : "blocked";
+  return `
+    <div class="connector-card ${enabled ? '' : 'disabled'}" onclick="agDrawer('${esc(name)}')">
+      <div class="connector-status ${enabled ? 'active' : 'inactive'}"></div>
+      <div class="connector-icon" style="background:var(--accent-weak,#2a2a3a);">🤖</div>
+      <div class="connector-title">${esc(name)}</div>
+      <div class="connector-desc">${esc((a.system_prompt || "").slice(0, 90) || "No system prompt")}</div>
+      <div class="sk-pills">
+        <span class="pill ${statusCls}">${esc(a.status)}</span>
+        ${a.provenance ? `<span class="pill">${esc(a.provenance)}</span>` : ""}
+        ${a.drift ? `<span class="pill blocked">drift</span>` : ""}
+      </div>
+    </div>`;
+}
+function agDrawerOpen() { return !$("ag-drawer").classList.contains("hidden"); }
+function agCloseDrawer() { $("ag-drawer").classList.add("hidden"); }
+function agAfterChange(name) { loadAgents(); if (name && agDrawerOpen()) agDrawer(name); }
 
-async function agShowTemplates() {
-  try { const r = await api("GET", "/agent-templates"); $("ag-templates-out").textContent = JSON.stringify(r, null, 2); }
-  catch (e) { $("ag-templates-out").textContent = e.message; }
+let TEMPLATES = [];
+let AG_SUBTAB = "agents";
+function agSubTab(name) {
+  AG_SUBTAB = name;
+  $("ag-subtab-agents").classList.toggle("active", name === "agents");
+  $("ag-subtab-templates").classList.toggle("active", name === "templates");
+  $("ag-pane").classList.toggle("hidden", name !== "agents");
+  $("tmpl-pane").classList.toggle("hidden", name !== "templates");
+  if (name === "templates") tmplLoad();
+}
+function agSubRefresh() { AG_SUBTAB === "templates" ? tmplLoad() : loadAgents(); }
+async function tmplLoad() {
+  $("tmpl-list-err").textContent = "";
+  $("tmpl-create-bar").innerHTML = IS_VIEWER ? "" : `<button class="small" onclick="tmplCreate()">New template</button>`;
+  try { TEMPLATES = await api("GET", "/agent-templates"); tmplRender(); }
+  catch (e) { $("tmpl-list-err").textContent = e.message; }
+}
+function tmplRender() {
+  $("tmpl-body").innerHTML = TEMPLATES.map(t => `
+      <tr>
+        <td>${esc(t.id)}</td>
+        <td>${esc(t.display_name || "")}</td>
+        <td class="muted">${esc((t.allowed_tools || []).join(", "))}</td>
+        <td>${IS_VIEWER ? "" : `
+          <button class="small" onclick="tmplEdit('${esc(t.id)}')">Edit</button>
+          <button class="small danger" onclick="tmplDelete('${esc(t.id)}')">Delete</button>`}
+        </td>
+      </tr>`).join("") || `<tr><td colspan="4" class="muted">No templates.</td></tr>`;
+}
+function tmplCreate() {
+  $("tmpl-modal-title").textContent = "New template";
+  $("tmpl-err").textContent = "";
+  $("tmpl-id").value = genId();
+  $("tmpl-display-name").value = "";
+  $("tmpl-allowed-tools").value = "";
+  $("tmpl-system-prompt").value = "";
+  $("tmpl-modal").dataset.mode = "create";
+  $("tmpl-modal").classList.remove("hidden");
+}
+function tmplEdit(id) {
+  const t = TEMPLATES.find(x => x.id === id);
+  if (!t) return;
+  $("tmpl-modal-title").textContent = "Edit template: " + id;
+  $("tmpl-err").textContent = "";
+  $("tmpl-id").value = id;
+  $("tmpl-id").disabled = true;
+  $("tmpl-display-name").value = t.display_name || "";
+  $("tmpl-allowed-tools").value = (t.allowed_tools || []).join(", ");
+  $("tmpl-system-prompt").value = t.system_prompt || "";
+  $("tmpl-modal").dataset.mode = "edit";
+  $("tmpl-modal").dataset.id = id;
+  $("tmpl-modal").classList.remove("hidden");
+}
+function tmplCloseModal() { $("tmpl-modal").classList.add("hidden"); }
+async function tmplSave() {
+  $("tmpl-err").textContent = "";
+  const tools = $("tmpl-allowed-tools").value.split(",").map(s => s.trim()).filter(Boolean);
+  const displayName = $("tmpl-display-name").value.trim();
+  const sp = $("tmpl-system-prompt").value;
+  try {
+    if ($("tmpl-modal").dataset.mode === "edit") {
+      const id = $("tmpl-modal").dataset.id;
+      await api("PATCH", `/agent-templates/${encodeURIComponent(id)}`, { display_name: displayName, allowed_tools: tools, system_prompt: sp });
+    } else {
+      const id = $("tmpl-id").value.trim();
+      if (!id) { $("tmpl-err").textContent = "id required"; return; }
+      await api("POST", "/agent-templates", { id, display_name: displayName, allowed_tools: tools, system_prompt: sp });
+    }
+    tmplCloseModal(); tmplLoad();
+  } catch (e) { $("tmpl-err").textContent = e.message; }
+}
+async function tmplDelete(id) {
+  if (!await confirmDialog(`Delete template ${id}?`)) return;
+  try { await api("DELETE", `/agent-templates/${encodeURIComponent(id)}`); tmplLoad(); }
+  catch (e) { toast(e.message, "error"); }
 }
 async function agObservability(name) {
   try { const r = await api("GET", `/agents/${encodeURIComponent(name)}/observability`); showInfo("Details", JSON.stringify(r, null, 2)); }
   catch (e) { toast(e.message, "error"); }
 }
-async function agEnable(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/enable`); loadAgents(); } catch (e) { toast(e.message, "error"); } }
-async function agDisable(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/disable`); loadAgents(); } catch (e) { toast(e.message, "error"); } }
+async function agEnable(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/enable`); agAfterChange(name); } catch (e) { toast(e.message, "error"); } }
+async function agDisable(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/disable`); agAfterChange(name); } catch (e) { toast(e.message, "error"); } }
 async function agArchive(name) {
   if (!await confirmDialog(`Archive agent ${name}? (must be unbound)`)) return;
-  try { await api("POST", `/agents/${encodeURIComponent(name)}/archive`, null, { "X-Confirm": "true" }); loadAgents(); }
+  try { await api("POST", `/agents/${encodeURIComponent(name)}/archive`, null, { "X-Confirm": "true" }); agAfterChange(name); }
   catch (e) { toast(e.message, "error"); }
 }
-async function agRestore(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/restore`); loadAgents(); } catch (e) { toast(e.message, "error"); } }
+async function agRestore(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/restore`); agAfterChange(name); } catch (e) { toast(e.message, "error"); } }
+
+let AG_TEMPLATES = [];
+async function agLoadTemplateOptions() {
+  const sel = $("ag-template");
+  try { AG_TEMPLATES = await api("GET", "/agent-templates"); }
+  catch (e) { AG_TEMPLATES = []; }
+  sel.innerHTML = '<option value="">— select a template —</option>'
+    + AG_TEMPLATES.map(t => `<option value="${esc(t.id)}">${esc(t.display_name || t.id)}</option>`).join("");
+  sel.value = "";
+}
+function agTemplatePrefill() {
+  const t = AG_TEMPLATES.find(x => x.id === $("ag-template").value);
+  if (!t) return;
+  $("ag-system-prompt").value = t.system_prompt || "";
+  $("ag-allowed-tools").value = (t.allowed_tools || []).join(", ");
+}
+async function agCreate() {
+  $("ag-modal-title").textContent = "New agent";
+  $("ag-err").textContent = "";
+  $("ag-name").value = "";
+  $("ag-name").disabled = false;
+  $("ag-system-prompt").value = "";
+  $("ag-allowed-tools").value = "";
+  $("ag-template-row").style.display = "";
+  await agLoadTemplateOptions();
+  $("ag-modal").dataset.mode = "create";
+  $("ag-modal").classList.remove("hidden");
+}
+async function agEdit(name) {
+  $("ag-err").textContent = "";
+  try {
+    const a = await api("GET", `/agents/${encodeURIComponent(name)}`);
+    $("ag-modal-title").textContent = "Edit agent: " + name;
+    $("ag-name").value = name;
+    $("ag-name").disabled = true;
+    $("ag-system-prompt").value = a.system_prompt || "";
+    $("ag-allowed-tools").value = (a.allowed_tools || []).join(", ");
+    $("ag-template-row").style.display = "none";
+    $("ag-modal").dataset.mode = "edit";
+    $("ag-modal").dataset.name = name;
+    $("ag-modal").classList.remove("hidden");
+  } catch (e) { toast(e.message, "error"); }
+}
+function agCloseModal() { $("ag-modal").classList.add("hidden"); }
+async function agSave() {
+  $("ag-err").textContent = "";
+  const tools = $("ag-allowed-tools").value.split(",").map(s => s.trim()).filter(Boolean);
+  const sp = $("ag-system-prompt").value;
+  try {
+    if ($("ag-modal").dataset.mode === "edit") {
+      const name = $("ag-modal").dataset.name;
+      await api("PATCH", `/agents/${encodeURIComponent(name)}`, { system_prompt: sp, allowed_tools: tools });
+    } else {
+      const name = $("ag-name").value.trim();
+      if (!name) { $("ag-err").textContent = "name required"; return; }
+      const templateId = $("ag-template").value;
+      if (!templateId) { $("ag-err").textContent = "template required"; return; }
+      await api("POST", "/agents", { name, template_id: templateId, system_prompt: sp, allowed_tools: tools });
+    }
+    const editedName = $("ag-modal").dataset.mode === "edit" ? $("ag-modal").dataset.name : null;
+    agCloseModal(); agAfterChange(editedName);
+  } catch (e) { $("ag-err").textContent = e.message; }
+}
+async function agDelete(name) {
+  if (!await confirmDialog(`Delete agent ${name}? This is permanent and cannot be undone.`)) return;
+  try { await api("DELETE", `/agents/${encodeURIComponent(name)}`, null, { "X-Confirm": "true" }); agCloseDrawer(); loadAgents(); }
+  catch (e) { toast(e.message, "error"); }
+}
 
 function agOpenClone(name) {
   $("ag-clone-title").textContent = "Clone agent: " + name;
@@ -1286,37 +2456,166 @@ async function agVersions(name) {
 }
 function agCloseVersions() { $("ag-versions-modal").classList.add("hidden"); }
 async function agActivateVersion(name, version) {
-  try { await api("POST", `/agents/${encodeURIComponent(name)}/versions/${version}/activate`); agVersions(name); loadAgents(); }
-  catch (e) { $("ag-versions-err").textContent = e.message; }
+  try { await api("POST", `/agents/${encodeURIComponent(name)}/versions/${version}/activate`); agAfterChange(name); }
+  catch (e) { toast(e.message, "error"); }
 }
 
-function agOpenBind(name) {
-  AG_BIND_NAME = name;
-  $("ag-bind-title").textContent = "Bindings: " + name;
-  $("ag-bind-err").textContent = "";
-  for (const id of ["ag-bind-user", "ag-bind-platform", "ag-bind-channel"]) $(id).value = "";
-  $("ag-bind-modal").classList.remove("hidden");
+let AG_DRAWER = null;
+
+async function agDrawer(name) {
+  AG_DRAWER = name;
+  $("ag-drawer-title").textContent = name;
+  $("ag-drawer").classList.remove("hidden");
+  $("ag-drawer-body").innerHTML = `<div class="muted">Loading…</div>`;
+  const enc = encodeURIComponent(name);
+  try {
+    const [a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions] = await Promise.all([
+      api("GET", `/agents/${enc}`),
+      api("GET", `/agents/${enc}/bindings`),
+      api("GET", `/agents/${enc}/skills`),
+      api("GET", `/agents/${enc}/kbs`),
+      api("GET", `/agents/${enc}/bindings/oauth`),
+      api("GET", "/mcp/servers").catch(() => []),
+      api("GET", "/connectors").catch(() => []),
+      api("GET", "/kb").catch(() => []),
+      api("GET", `/agents/${enc}/versions`).catch(() => []),
+    ]);
+    agRenderDrawer(name, { a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions });
+  } catch (e) { $("ag-drawer-body").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
 }
-function agCloseBind() { $("ag-bind-modal").classList.add("hidden"); }
+
+function agDrawerSection(title, inner) {
+  return `<h4 style="margin:16px 0 6px;">${title}</h4><div style="display:flex; flex-direction:column; gap:6px;">${inner}</div>`;
+}
+
+function agRenderDrawer(name, d) {
+  const a = d.a || {};
+  const archived = a.status === "archived";
+  const statusCls = a.status === "enabled" ? "active" : archived ? "" : "blocked";
+  const tools = (a.allowed_tools || []);
+  const meta = `
+    <div class="sk-pills" style="margin-bottom:10px;">
+      <span class="pill ${statusCls}">${esc(a.status || "")}</span>
+      ${a.provenance ? `<span class="pill">${esc(a.provenance)}</span>` : ""}
+      ${a.drift ? `<span class="pill blocked">drift</span>` : ""}
+    </div>
+    <div class="sk-meta-row"><span class="muted">Allowed tools</span></div>
+    <div class="sk-pills">${tools.length ? tools.map(t => `<span class="pill">${esc(t)}</span>`).join("") : `<span class="muted">none</span>`}</div>
+    <div class="sk-meta-row" style="margin-top:10px;"><span class="muted">System prompt</span></div>
+    <pre class="muted" style="white-space:pre-wrap; max-height:160px; overflow:auto; margin:4px 0 0;">${esc(a.system_prompt || "—")}</pre>`;
+
+  const actions = IS_VIEWER ? "" : `
+    <div class="row" style="flex-wrap:wrap; gap:6px;">
+      <button class="small" onclick="agEdit('${esc(name)}')">Edit</button>
+      <button class="small ghost" onclick="agOpenClone('${esc(name)}')">Clone</button>
+      ${a.status === "enabled"
+        ? `<button class="small ghost" onclick="agDisable('${esc(name)}')">Disable</button>`
+        : `<button class="small ghost" onclick="agEnable('${esc(name)}')">Enable</button>`}
+      ${archived
+        ? `<button class="small ghost" onclick="agRestore('${esc(name)}')">Restore</button>`
+        : `<button class="small ghost danger" onclick="agArchive('${esc(name)}')">Archive</button>`}
+      <button class="small ghost danger" onclick="agDelete('${esc(name)}')">Delete</button>
+    </div>`;
+
+  // Skills — toggle list
+  const skills = (d.skills || []).map(s =>
+    `<label class="row"><input type="checkbox" ${s.enabled ? "checked" : ""} ${IS_VIEWER ? "disabled" : ""} onchange="agSetSkill('${esc(s.skill_name)}', this.checked)"> ${esc(s.skill_name)}</label>`
+  ).join("") || `<div class="muted">No skills available.</div>`;
+
+  // Connectors — MCP toggles + OAuth toggles
+  const mcpBound = new Set(d.bindings.mcp_servers || []);
+  const mcpIds = Array.from(new Set([...(d.mcpServers || []).map(m => m.id || m), ...(d.bindings.mcp_servers || [])]));
+  const mcp = mcpIds.map(id =>
+    `<label class="row"><input type="checkbox" ${mcpBound.has(id) ? "checked" : ""} ${IS_VIEWER ? "disabled" : ""} onchange="agToggleMcp('${esc(id)}', this.checked)"> ${esc(id)}</label>`
+  ).join("") || `<div class="muted">No MCP servers configured.</div>`;
+  const oauthBound = new Set(d.oauth.connector_ids || []);
+  const oauth = (d.connectors || []).map(c =>
+    `<label class="row"><input type="checkbox" ${oauthBound.has(c.id) ? "checked" : ""} ${IS_VIEWER ? "disabled" : ""} onchange="agToggleOauth('${esc(c.id)}', this.checked)"> ${esc(c.display_name || c.id)}</label>`
+  ).join("") || `<div class="muted">No OAuth connectors configured.</div>`;
+  const connectors = `<div class="sk-meta-row"><span class="muted">MCP servers</span></div>${mcp}
+    <div class="sk-meta-row" style="margin-top:10px;"><span class="muted">OAuth connectors</span></div>${oauth}`;
+
+  // Knowledge bases — bound list + add select
+  const boundKb = d.kbs.kb_ids || [];
+  const kbList = boundKb.length
+    ? boundKb.map(id => `<div class="row">${esc(id)}${IS_VIEWER ? "" : ` <button class="small ghost danger" onclick="agUnbindKb('${esc(id)}')">Remove</button>`}</div>`).join("")
+    : `<div class="muted">No knowledge bases bound.</div>`;
+  const kbOpts = (d.allKbs || []).filter(k => !boundKb.includes(k.kb_id))
+    .map(k => `<option value="${esc(k.kb_id)}">${esc(k.kb_id)}${k.description ? " — " + esc(k.description) : ""}</option>`).join("");
+  const kbAdd = IS_VIEWER || !kbOpts ? "" :
+    `<div class="row" style="margin-top:8px;"><select id="ag-kb-select"><option value="">— select a KB —</option>${kbOpts}</select><button class="small" onclick="agAddKb()">Bind</button></div>`;
+
+  // IM — users + channels
+  const users = (d.bindings.users || []);
+  const userList = users.length
+    ? users.map(u => `<div class="row">${esc(u)}${IS_VIEWER ? "" : ` <button class="small ghost danger" onclick="agUnbindUser('${esc(u)}')">Unbind</button>`}</div>`).join("")
+    : `<div class="muted">No users bound.</div>`;
+  const userAdd = IS_VIEWER ? "" :
+    `<div class="row" style="margin-top:8px;"><input id="ag-user-input" placeholder="user_id"><button class="small" onclick="agBindUser()">Bind user</button></div>`;
+  const chans = (d.bindings.channels || []);
+  const chList = chans.length
+    ? chans.map(c => `<div class="row">${esc(c.platform)} / ${esc(c.channel_id)}${IS_VIEWER ? "" : ` <button class="small ghost danger" onclick="agUnbindChannel('${esc(c.platform)}','${esc(c.channel_id)}')">Unbind</button>`}</div>`).join("")
+    : `<div class="muted">No channels bound.</div>`;
+  const chAdd = IS_VIEWER ? "" :
+    `<div class="row" style="margin-top:8px;"><input id="ag-ch-platform" placeholder="platform" style="max-width:120px;"><input id="ag-ch-id" placeholder="channel_id"><button class="small" onclick="agBindChannel()">Bind</button></div>`;
+  const im = `<div class="sk-meta-row"><span class="muted">Users</span></div>${userList}${userAdd}
+    <div class="sk-meta-row" style="margin-top:10px;"><span class="muted">Channels</span></div>${chList}${chAdd}`;
+
+  // Versions
+  const versions = (d.versions || []).map(v =>
+    `<div class="row">v${esc(v.version)} ${v.is_active ? `<span class="pill active">active</span>` : ""}<span class="muted" style="flex:1;">${esc(v.created_at || "")}</span>${(v.is_active || IS_VIEWER) ? "" : `<button class="small ghost" onclick="agActivateVersion('${esc(name)}', ${v.version})">Activate</button>`}</div>`
+  ).join("") || `<div class="muted">No versions.</div>`;
+
+  $("ag-drawer-body").innerHTML =
+    meta
+    + (actions ? agDrawerSection("Actions", actions) : "")
+    + agDrawerSection("Skills", skills)
+    + agDrawerSection("Connectors", connectors)
+    + agDrawerSection("Knowledge bases", kbList + kbAdd)
+    + agDrawerSection("IM", im)
+    + agDrawerSection("Versions", versions);
+}
+
+async function agSetSkill(skill, enabled) {
+  try { await api("PUT", `/agents/${encodeURIComponent(AG_DRAWER)}/skills/${encodeURIComponent(skill)}`, { enabled }); }
+  catch (e) { toast(e.message, "error"); agDrawer(AG_DRAWER); }
+}
+async function agToggleMcp(server, on) {
+  const m = on ? "POST" : "DELETE";
+  try { await api(m, `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/mcp/${encodeURIComponent(server)}`); }
+  catch (e) { toast(e.message, "error"); agDrawer(AG_DRAWER); }
+}
+async function agToggleOauth(connector, on) {
+  const m = on ? "POST" : "DELETE";
+  try { await api(m, `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/oauth/${encodeURIComponent(connector)}`); }
+  catch (e) { toast(e.message, "error"); agDrawer(AG_DRAWER); }
+}
+async function agAddKb() {
+  const id = $("ag-kb-select").value; if (!id) return;
+  try { await api("POST", `/agents/${encodeURIComponent(AG_DRAWER)}/kbs`, { kb_id: id }); agDrawer(AG_DRAWER); }
+  catch (e) { toast(e.message, "error"); }
+}
+async function agUnbindKb(id) {
+  try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/kbs/${encodeURIComponent(id)}`); agDrawer(AG_DRAWER); }
+  catch (e) { toast(e.message, "error"); }
+}
 async function agBindUser() {
-  const uid = $("ag-bind-user").value.trim(); if (!uid) return;
-  try { await api("POST", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/users/${encodeURIComponent(uid)}`); $("ag-bind-err").textContent = "user bound"; }
-  catch (e) { $("ag-bind-err").textContent = e.message; }
+  const uid = $("ag-user-input").value.trim(); if (!uid) return;
+  try { await api("POST", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/users/${encodeURIComponent(uid)}`); agDrawer(AG_DRAWER); }
+  catch (e) { toast(e.message, "error"); }
 }
-async function agUnbindUser() {
-  const uid = $("ag-bind-user").value.trim(); if (!uid) return;
-  try { await api("DELETE", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/users/${encodeURIComponent(uid)}`); $("ag-bind-err").textContent = "user unbound"; }
-  catch (e) { $("ag-bind-err").textContent = e.message; }
+async function agUnbindUser(uid) {
+  try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/users/${encodeURIComponent(uid)}`); agDrawer(AG_DRAWER); }
+  catch (e) { toast(e.message, "error"); }
 }
 async function agBindChannel() {
-  const pf = $("ag-bind-platform").value.trim(), ch = $("ag-bind-channel").value.trim(); if (!pf || !ch) return;
-  try { await api("POST", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); $("ag-bind-err").textContent = "channel bound"; }
-  catch (e) { $("ag-bind-err").textContent = e.message; }
+  const pf = $("ag-ch-platform").value.trim(), ch = $("ag-ch-id").value.trim(); if (!pf || !ch) return;
+  try { await api("POST", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); agDrawer(AG_DRAWER); }
+  catch (e) { toast(e.message, "error"); }
 }
-async function agUnbindChannel() {
-  const pf = $("ag-bind-platform").value.trim(), ch = $("ag-bind-channel").value.trim(); if (!pf || !ch) return;
-  try { await api("DELETE", `/agents/${encodeURIComponent(AG_BIND_NAME)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); $("ag-bind-err").textContent = "channel unbound"; }
-  catch (e) { $("ag-bind-err").textContent = e.message; }
+async function agUnbindChannel(pf, ch) {
+  try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); agDrawer(AG_DRAWER); }
+  catch (e) { toast(e.message, "error"); }
 }
 
 LOADERS.agents = () => loadAgents();
@@ -1324,7 +2623,6 @@ LOADERS.agents = () => loadAgents();
 // --- Model Providers --------------------------------------------------------
 
 let PV_EDIT_ID = null;
-let PV_PRICING_ID = null;
 
 async function loadProviders() {
   $("pv-body").innerHTML = loadingRow(6);
@@ -1334,15 +2632,13 @@ async function loadProviders() {
   $("pv-body").innerHTML = rows.map(p => `
       <tr>
         <td>${esc(p.id)}</td>
-        <td class="muted">${esc(p.base_url || "")}</td>
+        <td>${esc(p.description || "—")}</td>
         <td>${esc(p.model || "")}</td>
+        <td class="muted" style="font-size: 12px;">${esc(p.base_url || "")}</td>
         <td class="muted">${p.api_key_set ? esc(p.api_key || "****") : "—"}</td>
-        <td class="muted">${esc(p.input_price_per_1k != null ? p.input_price_per_1k : "—")} / ${esc(p.output_price_per_1k != null ? p.output_price_per_1k : "—")}</td>
         <td class="actions">
-          <button class="small ghost" onclick="pvObservability('${esc(p.id)}')">Stats</button>
           ${IS_VIEWER ? "" : `
           <button class="small ghost" onclick="pvTest('${esc(p.id)}')">Test</button>
-          <button class="small ghost" onclick="pvOpenPricing('${esc(p.id)}')">Pricing</button>
           <button class="small ghost" onclick="pvOpenEdit('${esc(p.id)}')">Edit</button>
           <button class="small danger" onclick="pvDelete('${esc(p.id)}')">Delete</button>`}
         </td>
@@ -1352,33 +2648,165 @@ async function loadProviders() {
 
 function pvOpenCreate() {
   PV_EDIT_ID = null;
-  $("pv-modal-title").textContent = "Add provider";
+  $("pv-modal-title").textContent = "Add Provider";
   $("pv-err").textContent = "";
-  for (const id of ["pv-id", "pv-base-url", "pv-model", "pv-api-key", "pv-max-tokens", "pv-temperature"]) $(id).value = "";
-  $("pv-id").disabled = false;
+  // Reset form
+  for (const id of ["pv-id", "pv-description", "pv-base-url", "pv-api-key", "pv-max-tokens", "pv-temperature"]) {
+    if ($(id)) $(id).value = "";
+  }
+  $("pv-id").value = genId();
+  $("pv-model").value = "";
+  $("pv-model-custom").value = "";
+  $("pv-model-custom").classList.add("hidden");
+  // Reset provider type to OpenAI
+  document.querySelector('input[name="provider-type"][value="openai"]').checked = true;
+  pvUpdateProviderType('openai');
   $("pv-modal").classList.remove("hidden");
 }
+
 async function pvOpenEdit(id) {
   PV_EDIT_ID = id;
-  $("pv-modal-title").textContent = "Edit provider: " + id;
+  $("pv-modal-title").textContent = "Edit Provider";
   $("pv-err").textContent = "";
   const rows = await api("GET", "/providers");
   const p = rows.find(r => r.id === id) || {};
-  $("pv-id").value = id; $("pv-id").disabled = true;
+  $("pv-id").value = id;
+  $("pv-description").value = p.description || "";
   $("pv-base-url").value = p.base_url || "";
-  $("pv-model").value = p.model || "";
+  
+  // Handle model selection
+  const standardModels = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"];
+  if (standardModels.includes(p.model)) {
+    $("pv-model").value = p.model;
+    $("pv-model-custom").classList.add("hidden");
+  } else {
+    $("pv-model").value = "custom";
+    $("pv-model-custom").value = p.model || "";
+    $("pv-model-custom").classList.remove("hidden");
+  }
+  
   $("pv-api-key").value = "";  // never prefill secret
   $("pv-max-tokens").value = p.max_tokens != null ? p.max_tokens : "";
   $("pv-temperature").value = p.temperature != null ? p.temperature : "";
+  
+  // Detect provider type from URL
+  if (p.base_url?.includes('openai.com')) {
+    pvUpdateProviderType('openai');
+  } else if (p.base_url?.includes('anthropic.com')) {
+    pvUpdateProviderType('anthropic');
+  } else if (p.base_url?.includes('azure.com')) {
+    pvUpdateProviderType('azure');
+  } else {
+    pvUpdateProviderType('custom');
+  }
+  
   $("pv-modal").classList.remove("hidden");
 }
-function pvCloseModal() { $("pv-modal").classList.add("hidden"); }
+
+function pvCloseModal() {
+  $("pv-modal").classList.add("hidden");
+}
+
+function pvUpdateProviderType(type) {
+  // Update active state
+  document.querySelectorAll('.provider-type-card').forEach(card => {
+    card.classList.toggle('active', card.dataset.type === type);
+  });
+  
+  // Update URL placeholder based on type
+  const urlInput = $("pv-base-url");
+  switch(type) {
+    case 'openai':
+      urlInput.placeholder = "https://api.openai.com/v1";
+      pvUpdateModelOptions(['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo']);
+      break;
+    case 'anthropic':
+      urlInput.placeholder = "https://api.anthropic.com/v1";
+      pvUpdateModelOptions(['claude-4-5-sonnet', 'claude-4-5-haiku', 'claude-4-5-opus']);
+      break;
+    case 'azure':
+      urlInput.placeholder = "https://YOUR_RESOURCE.openai.azure.com";
+      pvUpdateModelOptions(['gpt-4', 'gpt-35-turbo']);
+      break;
+    case 'custom':
+      urlInput.placeholder = "https://your-api-endpoint.com/v1";
+      pvUpdateModelOptions([]);
+      break;
+  }
+}
+
+function pvUpdateModelOptions(models) {
+  const select = $("pv-model");
+  const currentValue = select.value;
+  
+  // Clear existing options except first and custom
+  while (select.options.length > 2) {
+    select.remove(1);
+  }
+  
+  // Add model options
+  if (models.length > 0) {
+    models.forEach(model => {
+      const option = document.createElement('option');
+      option.value = model;
+      option.textContent = model;
+      select.insertBefore(option, select.lastElementChild);
+    });
+  }
+  
+  // Restore value if it exists
+  if (currentValue && Array.from(select.options).some(opt => opt.value === currentValue)) {
+    select.value = currentValue;
+  }
+}
+
+function pvTogglePassword() {
+  const input = $("pv-api-key");
+  const button = input.nextElementSibling;
+  if (input.type === "password") {
+    input.type = "text";
+    button.textContent = "🙈";
+  } else {
+    input.type = "password";
+    button.textContent = "👁";
+  }
+}
+
+// Handle model selection change
+document.addEventListener('DOMContentLoaded', () => {
+  const modelSelect = document.getElementById('pv-model');
+  if (modelSelect) {
+    modelSelect.addEventListener('change', (e) => {
+      const customInput = $("pv-model-custom");
+      if (e.target.value === 'custom') {
+        customInput.classList.remove('hidden');
+        customInput.required = true;
+      } else {
+        customInput.classList.add('hidden');
+        customInput.required = false;
+      }
+    });
+  }
+});
 
 function pvFormBody() {
   const body = {
     base_url: $("pv-base-url").value,
-    model: $("pv-model").value,
   };
+  
+  // Add description if present
+  if ($("pv-description").value) {
+    body.description = $("pv-description").value;
+  }
+  
+  // Get model value
+  const modelSelect = $("pv-model");
+  if (modelSelect.value === 'custom') {
+    body.model = $("pv-model-custom").value;
+  } else {
+    body.model = modelSelect.value;
+  }
+  
   if ($("pv-api-key").value) body.api_key = $("pv-api-key").value;
   if ($("pv-max-tokens").value) body.max_tokens = parseInt($("pv-max-tokens").value, 10);
   if ($("pv-temperature").value) body.temperature = parseFloat($("pv-temperature").value);
@@ -1403,31 +2831,55 @@ async function pvDelete(id) {
   try { await api("DELETE", `/providers/${encodeURIComponent(id)}`); loadProviders(); } catch (e) { toast(e.message, "error"); }
 }
 async function pvTest(id) {
-  try { const r = await api("POST", `/providers/${encodeURIComponent(id)}/connectivity-test`); showInfo("Details", JSON.stringify(r, null, 2)); }
-  catch (e) { toast(e.message, "error"); }
+  // Find the test button and show loading state
+  const button = event.target;
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.innerHTML = '<span style="display: inline-block; animation: spin 1s linear infinite;">⏳</span> Testing...';
+  
+  // Show testing dialog
+  showTestDialog('Provider Test', 'Testing connectivity...', 'loading');
+  
+  try { 
+    const r = await api("POST", `/providers/${encodeURIComponent(id)}/connectivity-test`); 
+    
+    // Show result dialog
+    if (r.reachable) {
+      const details = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div><strong>Status:</strong> <span style="color: #4CAF50;">✅ Reachable</span></div>
+          <div><strong>Provider ID:</strong> ${esc(id)}</div>
+          <div><strong>Latency:</strong> ${r.latency_ms || '?'}ms</div>
+          ${r.model ? `<div><strong>Model:</strong> ${esc(r.model)}</div>` : ''}
+          ${r.base_url ? `<div><strong>Base URL:</strong> ${esc(r.base_url)}</div>` : ''}
+          ${r.details ? `<div><strong>Details:</strong> ${esc(r.details)}</div>` : ''}
+        </div>
+      `;
+      showTestDialog('Provider Test', details, 'success');
+      toast(`✅ Provider is reachable! (${r.latency_ms || '?'}ms)`, "success");
+    } else {
+      const details = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div><strong>Status:</strong> <span style="color: #f44336;">❌ Unreachable</span></div>
+          <div><strong>Provider ID:</strong> ${esc(id)}</div>
+          <div><strong>Error:</strong> ${esc(r.error || 'Connection failed')}</div>
+          ${r.details ? `<div><strong>Details:</strong> ${esc(r.details)}</div>` : ''}
+        </div>
+      `;
+      showTestDialog('Provider Test', details, 'error');
+      toast(`❌ Provider unreachable`, "error");
+    }
+  }
+  catch (e) { 
+    showTestDialog('Provider Test', `<div style="color: #f44336;">❌ ${esc(e.message)}</div>`, 'error');
+    toast(e.message, "error"); 
+  }
+  finally {
+    // Restore button state
+    button.disabled = false;
+    button.textContent = originalText;
+  }
 }
-async function pvObservability(id) {
-  try { const r = await api("GET", `/providers/${encodeURIComponent(id)}/observability`); showInfo("Details", JSON.stringify(r, null, 2)); }
-  catch (e) { toast(e.message, "error"); }
-}
-function pvOpenPricing(id) {
-  PV_PRICING_ID = id;
-  $("pv-pricing-title").textContent = "Set pricing: " + id;
-  $("pv-pricing-err").textContent = "";
-  $("pv-price-in").value = ""; $("pv-price-out").value = "";
-  $("pv-pricing-modal").classList.remove("hidden");
-}
-function pvClosePricing() { $("pv-pricing-modal").classList.add("hidden"); }
-async function pvSavePricing() { return pvPricing(PV_PRICING_ID); }
-async function pvPricing(id) {
-  $("pv-pricing-err").textContent = "";
-  const body = {};
-  if ($("pv-price-in").value) body.input_price_per_1k = parseFloat($("pv-price-in").value);
-  if ($("pv-price-out").value) body.output_price_per_1k = parseFloat($("pv-price-out").value);
-  try { await api("PUT", `/providers/${encodeURIComponent(id)}/pricing`, body); pvClosePricing(); loadProviders(); }
-  catch (e) { $("pv-pricing-err").textContent = e.message; }
-}
-
 async function pvRoutes() {
   let routes = {};
   try { routes = await api("GET", "/providers/routes"); } catch (e) { return; }
@@ -1453,12 +2905,28 @@ async function pvPreviewRoute(tt) {
   try { const r = await api("GET", `/providers/routes/${encodeURIComponent(tt)}/preview`); $("pv-route-out").textContent = JSON.stringify(r, null, 2); }
   catch (e) { $("pv-route-out").textContent = e.message; }
 }
-async function pvHealth() {
-  try { const r = await api("GET", "/providers/health"); $("pv-health-out").textContent = JSON.stringify(r, null, 2); }
-  catch (e) { $("pv-health-out").textContent = e.message; }
+function pvSwitchSubtab(tab) {
+  // Update tab buttons
+  $("pv-tab-providers").classList.toggle("active", tab === "providers");
+  $("pv-tab-routing").classList.toggle("active", tab === "routing");
+  
+  // Show/hide content
+  $("pv-subtab-providers").classList.toggle("hidden", tab !== "providers");
+  $("pv-subtab-routing").classList.toggle("hidden", tab !== "routing");
+  
+  // Load routing data when switching to routing tab
+  if (tab === "routing") {
+    pvRoutes();
+  }
 }
 
-LOADERS.providers = () => loadProviders();
+LOADERS.providers = () => {
+  loadProviders();
+  // Load routing data if routing tab is active
+  if (!$("pv-subtab-routing").classList.contains("hidden")) {
+    pvRoutes();
+  }
+};
 
 // --- Statistics -------------------------------------------------------------
 
@@ -1716,49 +3184,477 @@ async function sessExport() {
 
 LOADERS.sessions = () => loadSessions();
 
-// --- OAuth Connectors + MCP -------------------------------------------------
+// --- Connectors (OAuth + MCP) -----------------------------------------------
 
 let OC_EDIT_ID = null;
+let CURRENT_CONNECTOR_TYPE = null;
 
-async function ocConnectors() {
-  const f = $("oc-agent-filter").value.trim();
-  const rows = await api("GET", f ? `/connectors?agent_id=${encodeURIComponent(f)}` : "/connectors");
-  $("oc-body").innerHTML = rows.map(c => `
-      <tr>
-        <td>${esc(c.id)}</td>
-        <td class="muted">${c.agent_id == null ? "global" : esc(String(c.agent_id))}</td>
-        <td>${esc(c.display_name || "")}</td>
-        <td class="muted">${esc(c.protocol || "")}</td>
-        <td><span class="pill ${c.enabled ? "active" : "blocked"}">${c.enabled ? "on" : "off"}</span></td>
-        <td class="actions">
-          <button class="small ghost" onclick="ocLifecycle('${esc(c.id)}')">Lifecycle</button>
-          ${IS_VIEWER ? "" : `<button class="small ghost" onclick="ocOpenEdit('${esc(c.id)}')">Edit</button>`}
-        </td>
-      </tr>`).join("") || `<tr><td colspan="6" class="muted">No connectors.</td></tr>`;
+function switchConnectorTab(tab) {
+  CONN_TAB = tab;
+  // Update tab buttons
+  document.querySelectorAll('.conn-tab').forEach(t => t.classList.remove('active'));
+  $(`conn-tab-${tab}`).classList.add('active');
+  
+  // Show/hide content
+  document.querySelectorAll('.conn-content').forEach(c => c.classList.add('hidden'));
+  $(`conn-content-${tab}`).classList.remove('hidden');
+  
+  // Load data
+  if (tab === 'all') loadAllConnectors();
+  else if (tab === 'mcp') loadMcpConnectors();
+  else if (tab === 'oauth') loadOauthConnectors();
 }
+
+function mcpCardHtml(s) {
+  const sid = esc(s.id || s.server_id);
+  const enabled = s.enabled === undefined ? true : !!s.enabled;
+  const actions = IS_VIEWER ? '' : `
+        <button class="small ghost" onclick="event.stopPropagation(); mcpOpenEdit('${sid}')">Edit</button>
+        <button class="small ghost" onclick="event.stopPropagation(); mcpToggle('${sid}', ${enabled ? 'false' : 'true'})">${enabled ? 'Disable' : 'Enable'}</button>
+        <button class="small danger" onclick="event.stopPropagation(); mcpDelete('${sid}')">Delete</button>`;
+  return `
+      <div class="connector-card ${enabled ? '' : 'disabled'}" onclick="showConnectorDetails('mcp', '${sid}')">
+        <div class="connector-status ${enabled ? 'active' : 'inactive'}"></div>
+        <div class="connector-icon mcp">🔌</div>
+        <div class="connector-title">${esc(s.name || s.id || s.server_id)}</div>
+        <div class="connector-desc">MCP Server${enabled ? '' : ' · disabled'}</div>
+        <div class="connector-footer">
+          <span class="connector-tools">${esc(s.transport || '')}</span>
+          <div class="card-actions">
+            <button class="small ghost" onclick="event.stopPropagation(); testMcpServer('${sid}')">Test</button>${actions}
+          </div>
+        </div>
+      </div>`;
+}
+
+function oauthCardHtml(c) {
+  const cid = esc(c.id);
+  const enabled = c.enabled === undefined ? true : !!c.enabled;
+  const actions = IS_VIEWER ? '' : `
+        <button class="small ghost" onclick="event.stopPropagation(); ocOpenEdit('${cid}')">Edit</button>
+        <button class="small ghost" onclick="event.stopPropagation(); ocToggle('${cid}', ${enabled ? 'false' : 'true'})">${enabled ? 'Disable' : 'Enable'}</button>
+        <button class="small danger" onclick="event.stopPropagation(); ocDelete('${cid}')">Delete</button>`;
+  return `
+      <div class="connector-card ${enabled ? '' : 'disabled'}" onclick="showConnectorDetails('oauth', '${cid}')">
+        <div class="connector-status ${enabled ? 'active' : 'inactive'}"></div>
+        <div class="connector-icon oauth">🔐</div>
+        <div class="connector-title">${esc(c.display_name || c.id)}</div>
+        <div class="connector-desc">OAuth 2.0 Connector${enabled ? '' : ' · disabled'}</div>
+        <div class="connector-footer">
+          <span class="connector-tools">${c.agent_id ? `Agent: ${c.agent_id}` : 'Global'}</span>
+          <div class="card-actions">
+            <button class="small ghost" onclick="event.stopPropagation(); testOAuthConnector('${cid}')">Test</button>${actions}
+          </div>
+        </div>
+      </div>`;
+}
+
+async function loadAllConnectors() {
+  const [oauth, mcp] = await Promise.all([
+    api("GET", "/connectors").catch(() => []),
+    api("GET", "/mcp/servers").catch(() => [])
+  ]);
+  const allCards = [...oauth.map(oauthCardHtml), ...mcp.map(mcpCardHtml)];
+  $('connector-grid').innerHTML = allCards.join('') || '<div class="muted">No connectors configured.</div>';
+}
+
+async function loadMcpConnectors() {
+  const servers = await api("GET", "/mcp/servers").catch(() => []);
+  $('mcp-grid').innerHTML = servers.map(mcpCardHtml).join('')
+    || '<div class="muted">No MCP servers configured.</div>';
+}
+
+async function loadOauthConnectors() {
+  const connectors = await api("GET", "/connectors").catch(() => []);
+  $('oauth-grid').innerHTML = connectors.map(oauthCardHtml).join('')
+    || '<div class="muted">No OAuth connectors configured.</div>';
+}
+
+let CONN_TAB = 'all';
+function reloadConnectorCards() {
+  if (CONN_TAB === 'mcp') return loadMcpConnectors();
+  if (CONN_TAB === 'oauth') return loadOauthConnectors();
+  return loadAllConnectors();
+}
+
+async function showConnectorDetails(type, id) {
+  $('conn-details-title').textContent = `${type === 'mcp' ? 'MCP Server' : 'OAuth Connector'}: ${id}`;
+  $('conn-details-content').innerHTML = '<div class="muted">Loading...</div>';
+  $('connector-details').classList.remove('hidden');
+  
+  try {
+    if (type === 'mcp') {
+      $('conn-details-content').innerHTML =
+        '<div class="muted"><span class="spin">⏳</span> Connecting and listing tools…</div>';
+      const r = await api("GET", `/mcp/servers/${encodeURIComponent(id)}/tools`);
+      const header = r.connected
+        ? `<div class="result-ok">✅ Connected · ${r.tools.length} tool${r.tools.length === 1 ? '' : 's'}</div>`
+        : `<div class="result-err">❌ ${esc(r.error || 'Not connected')}</div>`;
+      $('conn-details-content').innerHTML = `
+        <h4>Tools</h4>
+        ${header}
+        ${mcpToolListHtml(r.tools)}
+        ${IS_VIEWER ? '' : `
+          <div style="margin-top:12px; display:flex; gap:8px;">
+            <button class="ghost" onclick="mcpOpenEdit('${esc(id)}')">Edit</button>
+            <button class="ghost" onclick="showConnectorDetails('mcp', '${esc(id)}')">Refresh</button>
+          </div>
+        `}
+      `;
+    } else {
+      const lifecycle = await api("GET", `/connectors/${encodeURIComponent(id)}/lifecycle`);
+      $('conn-details-content').innerHTML = `
+        <h4>Lifecycle</h4>
+        <pre style="white-space: pre-wrap;">${JSON.stringify(lifecycle, null, 2)}</pre>
+        ${IS_VIEWER ? '' : `
+          <button class="ghost" onclick="ocOpenEdit('${esc(id)}')">Edit</button>
+        `}
+      `;
+    }
+  } catch (e) {
+    $('conn-details-content').innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  }
+}
+
+function closeConnectorDetails() {
+  $('connector-details').classList.add('hidden');
+}
+
+function selectConnectorType(type) {
+  // Update selection UI from the clicked card, then build the form.
+  document.querySelectorAll('.conn-type-card').forEach(card => card.classList.remove('selected'));
+  if (typeof event !== 'undefined' && event && event.currentTarget) {
+    event.currentTarget.classList.add('selected');
+  }
+  selectConnectorTypeDirect(type);
+}
+
+function buildConnectorForm(type) {
+  if (type === 'mcp') {
+    const mcpId = genId();
+    $('oc-modal-title').textContent = 'Add MCP Server';
+    $('connector-form-container').innerHTML = `
+      <form style="display:flex; flex-direction:column; gap:12px;" onsubmit="saveMcpConnector(); return false;">
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Server ID</span>
+          <input id="mcp-id" value="${mcpId}" readonly style="background: var(--hover); width: 100%;">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Display Name</span>
+          <input id="mcp-name" placeholder="My MCP Server" autocomplete="off" style="width: 100%;">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Description</span>
+          <input id="mcp-desc" placeholder="Optional description" autocomplete="off" style="width: 100%;">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Transport</span>
+          <select id="mcp-transport" onchange="updateMcpFields()" style="width: 100%;">
+            <option value="stdio">Standard I/O (Local Process)</option>
+            <option value="http">HTTP</option>
+            <option value="websocket">WebSocket</option>
+          </select>
+        </label>
+        <div id="mcp-stdio-fields">
+          <label>
+            <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Command</span>
+            <input id="mcp-command" placeholder="npx @modelcontextprotocol/server-everything" autocomplete="off" style="width: 100%;">
+          </label>
+          <label>
+            <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Arguments (optional)</span>
+            <input id="mcp-args" placeholder="--verbose --config /path/to/config" autocomplete="off" style="width: 100%;">
+          </label>
+          <label>
+            <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Environment Variables (optional)</span>
+            <textarea id="mcp-env" placeholder="KEY1=value1&#10;KEY2=value2" style="width: 100%; min-height:60px; font-family:monospace; font-size:12px;"></textarea>
+          </label>
+        </div>
+        <div id="mcp-http-fields" class="hidden">
+          <label>
+            <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">URL</span>
+            <input id="mcp-url" placeholder="http://localhost:3000/mcp" autocomplete="off" style="width: 100%;">
+          </label>
+          <label>
+            <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Headers (optional)</span>
+            <textarea id="mcp-headers" placeholder="Authorization: Bearer token&#10;X-Custom-Header: value" style="width: 100%; min-height:60px; font-family:monospace; font-size:12px;"></textarea>
+          </label>
+        </div>
+        <div id="mcp-ws-fields" class="hidden">
+          <label>
+            <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">WebSocket URL</span>
+            <input id="mcp-ws-url" placeholder="ws://localhost:3000/mcp" autocomplete="off" style="width: 100%;">
+          </label>
+          <label>
+            <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Subprotocols (optional)</span>
+            <input id="mcp-subprotocols" placeholder="mcp-v1, custom-protocol" autocomplete="off" style="width: 100%;">
+          </label>
+        </div>
+        <label style="display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="mcp-enabled" checked>
+          <span>Enable immediately</span>
+        </label>
+        <div id="mcp-err" class="err"></div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px;">
+          <button type="button" class="ghost" onclick="ocCloseModal()">Cancel</button>
+          <button type="button" id="mcp-test-btn" onclick="testMcpConfigInModal()">Test Connection</button>
+          <button type="submit" class="primary">Add MCP Server</button>
+        </div>
+        <div id="mcp-test-result" class="test-result hidden"></div>
+      </form>
+    `;
+  } else {
+    $('oc-modal-title').textContent = 'Add OAuth Connector';
+    const connId = genId();
+    $('connector-form-container').innerHTML = `
+      <form style="display:flex; flex-direction:column; gap:12px;" onsubmit="ocSave(); return false;">
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Connector ID</span>
+          <input id="oc-id" value="${connId}" readonly style="background: var(--hover);">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Display Name</span>
+          <input id="oc-name" placeholder="GitHub API" autocomplete="off">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Authorization URL</span>
+          <input id="oc-auth-url" placeholder="https://github.com/login/oauth/authorize" autocomplete="off">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Token URL</span>
+          <input id="oc-token-url" placeholder="https://github.com/login/oauth/access_token" autocomplete="off">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Client ID</span>
+          <input id="oc-client-id" placeholder="your-client-id" autocomplete="off">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Client Secret</span>
+          <input id="oc-client-secret" type="password" placeholder="your-client-secret" autocomplete="off">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Scopes</span>
+          <input id="oc-scopes" placeholder="repo user (space separated)" autocomplete="off">
+        </label>
+        <label style="display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="oc-enabled" checked>
+          <span>Enable immediately</span>
+        </label>
+        <div id="oc-err" class="err"></div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px;">
+          <button type="button" class="ghost" onclick="ocCloseModal()">Cancel</button>
+          <button type="button" onclick="testOAuthConfigInModal()">Test Connection</button>
+          <button type="submit" class="primary">Add OAuth Connector</button>
+        </div>
+      </form>
+    `;
+  }
+}
+
+function updateMcpFields() {
+  const transport = $('mcp-transport').value;
+  
+  // Hide all transport-specific fields first
+  $('mcp-stdio-fields').classList.add('hidden');
+  $('mcp-http-fields').classList.add('hidden');
+  if ($('mcp-ws-fields')) $('mcp-ws-fields').classList.add('hidden');
+  
+  // Show relevant fields
+  if (transport === 'stdio') {
+    $('mcp-stdio-fields').classList.remove('hidden');
+  } else if (transport === 'http') {
+    $('mcp-http-fields').classList.remove('hidden');
+  } else if (transport === 'websocket') {
+    if ($('mcp-ws-fields')) $('mcp-ws-fields').classList.remove('hidden');
+  }
+}
+
+function buildMcpConfigFromForm() {
+  const transport = $('mcp-transport').value;
+  const config = {
+    id: $('mcp-id').value.trim(),
+    name: $('mcp-name').value.trim(),
+    description: $('mcp-desc').value.trim(),
+    transport,
+    enabled: $('mcp-enabled').checked
+  };
+
+  if (transport === 'stdio') {
+    config.command = $('mcp-command').value.trim();
+    const args = $('mcp-args').value.trim();
+    if (args) config.args = args.split(/\s+/);
+    const envText = $('mcp-env').value.trim();
+    if (envText) {
+      const env = {};
+      envText.split('\n').forEach(line => {
+        const [key, ...valueParts] = line.split('=');
+        if (key) env[key.trim()] = valueParts.join('=').trim();
+      });
+      if (Object.keys(env).length) config.env = env;
+    }
+  } else if (transport === 'http') {
+    config.url = $('mcp-url').value.trim();
+    const headersText = $('mcp-headers').value.trim();
+    if (headersText) {
+      const headers = {};
+      headersText.split('\n').forEach(line => {
+        const [key, ...valueParts] = line.split(':');
+        if (key) headers[key.trim()] = valueParts.join(':').trim();
+      });
+      if (Object.keys(headers).length) config.headers = headers;
+    }
+  } else if (transport === 'websocket') {
+    config.url = $('mcp-ws-url').value.trim();
+    const subprotocols = $('mcp-subprotocols').value.trim();
+    if (subprotocols) {
+      config.subprotocols = subprotocols.split(',').map(s => s.trim()).filter(Boolean);
+    }
+  }
+  return config;
+}
+
+async function saveMcpConnector() {
+  $('mcp-err').textContent = '';
+  const config = buildMcpConfigFromForm();
+  try {
+    if (MCP_EDIT_ID) {
+      // server_id is immutable; the rest of the config is editable.
+      const { id, name, description, ...patch } = config;
+      await api("PUT", `/mcp/servers/${encodeURIComponent(MCP_EDIT_ID)}`, patch);
+    } else {
+      await api("POST", "/mcp/servers", config);
+    }
+    ocCloseModal();
+    reloadConnectorCards();
+  } catch (e) {
+    $('mcp-err').textContent = e.message;
+  }
+}
+
+let MCP_EDIT_ID = null;
+
+async function mcpOpenEdit(id) {
+  MCP_EDIT_ID = id;
+  const servers = await api("GET", "/mcp/servers").catch(() => []);
+  const s = servers.find(x => (x.id || x.server_id) === id) || {};
+  selectConnectorTypeDirect('mcp');
+  $('oc-modal-title').textContent = `Edit MCP Server: ${id}`;
+  $('mcp-id').value = id;
+  $('mcp-transport').value = s.transport || 'http';
+  updateMcpFields();
+  if (s.url) $('mcp-url') && ($('mcp-url').value = s.url);
+  if (s.command) $('mcp-command') && ($('mcp-command').value = s.command);
+  if (s.args && $('mcp-args')) $('mcp-args').value = (s.args || []).join(' ');
+  if ($('mcp-enabled')) $('mcp-enabled').checked = s.enabled !== false;
+  const submit = document.querySelector('#connector-form-container button[type="submit"]');
+  if (submit) submit.textContent = 'Save Changes';
+  $('oc-modal').classList.remove('hidden');
+}
+
+// Build the MCP form without relying on a click event (for edit prefill).
+function selectConnectorTypeDirect(type) {
+  CURRENT_CONNECTOR_TYPE = type;
+  document.querySelectorAll('.conn-type-card').forEach(card => card.classList.remove('selected'));
+  $('conn-type-selector').classList.add('hidden');
+  buildConnectorForm(type);
+}
+
+async function mcpToggle(id, enable) {
+  try {
+    await api("PUT", `/mcp/servers/${encodeURIComponent(id)}`, { enabled: enable });
+    reloadConnectorCards();
+  } catch (e) { toast(e.message, "error"); }
+}
+
+async function mcpDelete(id) {
+  if (!await confirmDialog(`Delete MCP server "${id}"? This cannot be undone.`)) return;
+  try {
+    await api("DELETE", `/mcp/servers/${encodeURIComponent(id)}`);
+    reloadConnectorCards();
+  } catch (e) { toast(e.message, "error"); }
+}
+
+async function ocToggle(id, enable) {
+  try {
+    await api("PUT", `/connectors/${encodeURIComponent(id)}`, { enabled: enable });
+    reloadConnectorCards();
+  } catch (e) { toast(e.message, "error"); }
+}
+
+async function ocDelete(id) {
+  if (!await confirmDialog(`Delete OAuth connector "${id}"? This cannot be undone.`)) return;
+  try {
+    await api("DELETE", `/connectors/${encodeURIComponent(id)}`);
+    reloadConnectorCards();
+  } catch (e) { toast(e.message, "error"); }
+}
+
 function ocOpenCreate() {
   OC_EDIT_ID = null;
-  $("oc-modal-title").textContent = "Add OAuth connector";
-  $("oc-err").textContent = "";
-  for (const id of ["oc-id", "oc-name", "oc-auth-url", "oc-token-url", "oc-client-id", "oc-client-secret", "oc-scopes"]) $(id).value = "";
-  $("oc-id").disabled = false; $("oc-enabled").checked = true;
+  MCP_EDIT_ID = null;
+  CURRENT_CONNECTOR_TYPE = null;
+  $("oc-modal-title").textContent = "Add Connector";
+  
+  // Reset UI
+  document.querySelectorAll('.conn-type-card').forEach(card => card.classList.remove('selected'));
+  
+  // Show type selector, clear form container
+  $('conn-type-selector').classList.remove('hidden');
+  $('connector-form-container').innerHTML = '';
+  
   $("oc-modal").classList.remove("hidden");
 }
 async function ocOpenEdit(id) {
   OC_EDIT_ID = id;
-  $("oc-modal-title").textContent = "Edit connector: " + id;
-  $("oc-err").textContent = "";
+  $("oc-modal-title").textContent = "Edit OAuth Connector";
+  
   const rows = await api("GET", "/connectors");
   const c = rows.find(r => r.id === id) || {};
   const cfg = c.oauth_config || {};
-  $("oc-id").value = id; $("oc-id").disabled = true;
-  $("oc-name").value = c.display_name || "";
-  $("oc-auth-url").value = cfg.authorization_url || "";
-  $("oc-token-url").value = cfg.token_url || "";
-  $("oc-client-id").value = cfg.client_id || "";
-  $("oc-client-secret").value = "";  // never prefill secret
-  $("oc-scopes").value = (cfg.scopes || []).join ? (cfg.scopes || []).join(" ") : (cfg.scopes || "");
-  $("oc-enabled").checked = c.enabled !== false;
+  
+  // Hide type selector, show OAuth form
+  $('conn-type-selector').classList.add('hidden');
+  $('connector-form-container').innerHTML = `
+    <form style="display:flex; flex-direction:column; gap:12px;" onsubmit="ocSave(); return false;">
+      <label>
+        <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Connector ID</span>
+        <input id="oc-id" value="${id}" readonly style="background: var(--hover);">
+      </label>
+      <label>
+        <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Display Name</span>
+        <input id="oc-name" value="${esc(c.display_name || '')}" placeholder="GitHub API" autocomplete="off">
+      </label>
+      <label>
+        <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Authorization URL</span>
+        <input id="oc-auth-url" value="${esc(cfg.authorization_url || '')}" placeholder="https://github.com/login/oauth/authorize" autocomplete="off">
+      </label>
+      <label>
+        <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Token URL</span>
+        <input id="oc-token-url" value="${esc(cfg.token_url || '')}" placeholder="https://github.com/login/oauth/access_token" autocomplete="off">
+      </label>
+      <label>
+        <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Client ID</span>
+        <input id="oc-client-id" value="${esc(cfg.client_id || '')}" placeholder="your-client-id" autocomplete="off">
+      </label>
+      <label>
+        <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Client Secret</span>
+        <input id="oc-client-secret" type="password" placeholder="Leave blank to keep current" autocomplete="off">
+      </label>
+      <label>
+        <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Scopes</span>
+        <input id="oc-scopes" value="${esc((cfg.scopes || []).join ? (cfg.scopes || []).join(' ') : (cfg.scopes || ''))}" placeholder="repo user (space separated)" autocomplete="off">
+      </label>
+      <label style="display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" id="oc-enabled" ${c.enabled !== false ? 'checked' : ''}>
+        <span>Enabled</span>
+      </label>
+      <div id="oc-err" class="err"></div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px;">
+        <button type="button" class="ghost" onclick="ocCloseModal()">Cancel</button>
+        <button type="submit" class="primary">Save Changes</button>
+      </div>
+    </form>
+  `;
+  
   $("oc-modal").classList.remove("hidden");
 }
 function ocCloseModal() { $("oc-modal").classList.add("hidden"); }
@@ -1780,13 +3676,13 @@ async function ocSave() {
 async function ocCreate(id) {
   $("oc-err").textContent = "";
   const body = { id, display_name: $("oc-name").value.trim(), protocol: "oauth2", oauth_config: ocOauthConfig(), enabled: $("oc-enabled").checked };
-  try { await api("POST", "/connectors", body); ocCloseModal(); ocConnectors(); }
+  try { await api("POST", "/connectors", body); ocCloseModal(); reloadConnectorCards(); }
   catch (e) { $("oc-err").textContent = e.message; }
 }
 async function ocEdit(id) {
   $("oc-err").textContent = "";
   const body = { display_name: $("oc-name").value.trim(), oauth_config: ocOauthConfig(), enabled: $("oc-enabled").checked };
-  try { await api("PUT", `/connectors/${encodeURIComponent(id)}`, body); ocCloseModal(); ocConnectors(); }
+  try { await api("PUT", `/connectors/${encodeURIComponent(id)}`, body); ocCloseModal(); reloadConnectorCards(); }
   catch (e) { $("oc-err").textContent = e.message; }
 }
 async function ocLifecycle(id) {
@@ -1845,9 +3741,184 @@ async function mcpReconnect(id) {
   catch (e) { $("mcp-out").textContent = e.message; }
 }
 
-LOADERS.oauth = () => { ocConnectors(); ocGrants(); mcpServers(); };
+async function testMcpServer(id) {
+  try {
+    // Show testing dialog
+    showTestDialog('MCP Server Test', 'Testing connection...', 'loading');
+    
+    const r = await api("POST", `/mcp/servers/${encodeURIComponent(id)}/test`);
+    
+    if (r.success) {
+      const details = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div><strong>Status:</strong> <span style="color: #4CAF50;">✅ Connected</span></div>
+          <div><strong>Transport:</strong> ${esc(r.transport || 'Unknown')}</div>
+          <div><strong>Tools Available:</strong> ${r.tools_count || 0}</div>
+          ${r.message ? `<div><strong>Details:</strong> ${esc(r.message)}</div>` : ''}
+        </div>
+      `;
+      showTestDialog('MCP Server Test', details, 'success');
+      toast(`✅ MCP server is connected`, "success");
+    } else {
+      const details = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div><strong>Status:</strong> <span style="color: #f44336;">❌ Failed</span></div>
+          <div><strong>Error:</strong> ${esc(r.error || 'Unknown error')}</div>
+          ${r.server_id ? `<div><strong>Server ID:</strong> ${esc(r.server_id)}</div>` : ''}
+        </div>
+      `;
+      showTestDialog('MCP Server Test', details, 'error');
+      toast(`❌ MCP server test failed`, "error");
+    }
+  } catch (e) {
+    showTestDialog('MCP Server Test', `<div style="color: #f44336;">❌ ${esc(e.message)}</div>`, 'error');
+    toast(`❌ MCP server test failed`, "error");
+  }
+}
+
+async function testOAuthConnector(id) {
+  try {
+    // Show testing dialog
+    showTestDialog('OAuth Connector Test', 'Testing authentication...', 'loading');
+    
+    const r = await api("POST", `/connectors/${encodeURIComponent(id)}/test`);
+    
+    if (r.success) {
+      const details = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div><strong>Status:</strong> <span style="color: #4CAF50;">✅ Working</span></div>
+          <div><strong>Connector:</strong> ${esc(r.display_name || id)}</div>
+          <div><strong>Enabled:</strong> ${r.enabled ? 'Yes' : 'No'}</div>
+          <div><strong>Token Valid:</strong> ${r.token_valid ? '✅ Yes' : '❌ No'}</div>
+          ${r.active_grants ? `<div><strong>Active Grants:</strong> ${r.active_grants}</div>` : ''}
+          ${r.last_refresh ? `<div><strong>Last Refresh:</strong> ${new Date(r.last_refresh).toLocaleString()}</div>` : ''}
+        </div>
+      `;
+      showTestDialog('OAuth Connector Test', details, 'success');
+      toast(`✅ OAuth connector is working`, "success");
+    } else {
+      const details = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div><strong>Status:</strong> <span style="color: #f44336;">❌ Failed</span></div>
+          <div><strong>Error:</strong> ${esc(r.error || 'Unknown error')}</div>
+          ${r.connector_id ? `<div><strong>Connector ID:</strong> ${esc(r.connector_id)}</div>` : ''}
+        </div>
+      `;
+      showTestDialog('OAuth Connector Test', details, 'error');
+      toast(`❌ OAuth test failed`, "error");
+    }
+  } catch (e) {
+    showTestDialog('OAuth Connector Test', `<div style="color: #f44336;">❌ ${esc(e.message)}</div>`, 'error');
+    toast(`❌ OAuth test failed`, "error");
+  }
+}
+
+function mcpToolListHtml(tools) {
+  if (!tools || !tools.length) return '<div class="muted" style="margin-top:6px;">No tools exposed.</div>';
+  return `<div class="tool-list">` + tools.map(t => `
+    <div class="tool-item">
+      <code>${esc(t.name)}</code>
+      ${t.description ? `<span class="tool-desc">${esc(t.description)}</span>` : ''}
+    </div>`).join('') + `</div>`;
+}
+
+function mcpResultHtml(r) {
+  if (r && r.connected) {
+    const n = r.tools_count != null ? r.tools_count : (r.tools ? r.tools.length : 0);
+    return `<div class="result-ok">✅ Connected · ${n} tool${n === 1 ? '' : 's'}</div>`
+      + mcpToolListHtml(r.tools);
+  }
+  return `<div class="result-err">❌ ${esc((r && r.error) || 'Connection failed')}</div>`;
+}
+
+async function testMcpConfigInModal() {
+  const config = buildMcpConfigFromForm();
+  const needsUrl = config.transport === 'http' || config.transport === 'websocket';
+  if (needsUrl && !config.url) { toast("❌ URL is required", "error"); return; }
+  if (config.transport === 'stdio' && !config.command) {
+    toast("❌ Command is required for stdio transport", "error"); return;
+  }
+
+  const btn = $('mcp-test-btn');
+  const panel = $('mcp-test-result');
+  const origLabel = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Testing…'; }
+  if (panel) {
+    panel.classList.remove('hidden');
+    panel.innerHTML = '<div class="muted"><span class="spin">⏳</span> Connecting…</div>';
+  }
+
+  // Persist the current form first (server_id is immutable on edit), then run the real
+  // handshake against the saved server — editing tests the actual server, no duplicate.
+  try {
+    let testId;
+    if (MCP_EDIT_ID) {
+      const { id, name, description, ...patch } = config;
+      await api("PUT", `/mcp/servers/${encodeURIComponent(MCP_EDIT_ID)}`, patch);
+      testId = MCP_EDIT_ID;
+    } else {
+      await api("POST", "/mcp/servers", config);
+      testId = config.id;
+      reloadConnectorCards();
+    }
+    const r = await api("POST", `/mcp/servers/${encodeURIComponent(testId)}/test`);
+    if (panel) panel.innerHTML = mcpResultHtml(r);
+  } catch (e) {
+    if (panel) panel.innerHTML = `<div class="result-err">❌ ${esc(e.message)}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origLabel || 'Test Connection'; }
+  }
+}
+
+async function testOAuthConfigInModal() {
+  // Build config from form
+  const config = {
+    id: $('oc-id').value.trim() || 'test-oauth-temp',
+    display_name: $('oc-name').value.trim(),
+    enabled: true,
+    oauth_config: {
+      auth_url: $('oc-auth-url').value.trim(),
+      token_url: $('oc-token-url').value.trim(),
+      client_id: $('oc-client-id').value.trim(),
+      client_secret: $('oc-client-secret').value.trim(),
+      scopes: $('oc-scopes').value.trim().split(/\s+/).filter(Boolean)
+    }
+  };
+  
+  // Validate required fields
+  if (!config.oauth_config.auth_url || !config.oauth_config.token_url) {
+    toast("❌ Authorization URL and Token URL are required", "error");
+    return;
+  }
+  
+  if (!config.oauth_config.client_id || !config.oauth_config.client_secret) {
+    toast("❌ Client ID and Client Secret are required", "error");
+    return;
+  }
+  
+  try {
+    toast("Testing OAuth configuration...", "info");
+    
+    // First save the config temporarily
+    await api("POST", "/connectors", config);
+    
+    // Then test it
+    const r = await api("POST", `/connectors/${encodeURIComponent(config.id)}/test`);
+    
+    if (r.success) {
+      toast(`✅ OAuth configuration valid! Connector is ${r.enabled ? 'enabled' : 'disabled'}.`, "success");
+    } else {
+      toast(`❌ OAuth test failed: ${r.error || 'Unknown error'}`, "error");
+    }
+  } catch (e) {
+    toast(`❌ OAuth test failed: ${e.message}`, "error");
+  }
+}
+
+LOADERS.oauth = () => { loadAllConnectors(); };
 
 async function loadKb() {
+  if (!$("nkb-id").value) $("nkb-id").value = genId();
   const kbs = await api("GET", "/kb");
   $("kb-body").innerHTML = kbs.map(k => `
     <tr>
@@ -1865,7 +3936,8 @@ async function createKb() {
   $("kb-err").textContent = "";
   try {
     await api("POST", "/kb", { kb_id: $("nkb-id").value, description: $("nkb-desc").value });
-    $("nkb-id").value = $("nkb-desc").value = "";
+    $("nkb-desc").value = "";
+    $("nkb-id").value = genId();
     loadKb();
   } catch (e) { $("kb-err").textContent = e.message; }
 }
@@ -1887,22 +3959,6 @@ async function kbSearch() {
     const r = await api("POST", "/kb/search", { query: $("kb-q").value, kb_ids: ids, mode: $("kb-q-mode").value });
     $("kb-search-out").textContent = JSON.stringify(r.results, null, 2);
   } catch (e) { $("kb-search-out").textContent = e.message; }
-}
-
-async function loadAudit() {
-  const action = $("audit-action").value.trim();
-  $("audit-body").innerHTML = loadingRow(5);
-  let rows;
-  try { rows = await api("GET", "/audit" + (action ? `?action=${encodeURIComponent(action)}` : "")); }
-  catch (e) { $("audit-body").innerHTML = emptyRow(5, e.message); return; }
-  $("audit-body").innerHTML = rows.map(r => `
-    <tr>
-      <td class="muted">${esc(r.created_at)}</td>
-      <td>${esc(r.actor_user_id || "—")}</td>
-      <td>${esc(r.action)}</td>
-      <td>${esc(r.target_type || "")} ${esc((r.target_id||"").slice(0,12))}</td>
-      <td><code>${esc(JSON.stringify(r.detail))}</code></td>
-    </tr>`).join("") || emptyRow(5, "No audit entries.");
 }
 
 async function boot() {

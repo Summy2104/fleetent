@@ -19,6 +19,9 @@ from pydantic import BaseModel
 from fleetent import auth, user_store
 from fleetent.governance import audit_log
 from fleetent.platform.model_provider_management import provider_admin_store
+from fleetent.platform.model_provider_management.provider_connectivity import (
+    test_provider_connectivity_sync,
+)
 
 router = APIRouter(prefix="/admin/providers")
 
@@ -31,17 +34,13 @@ _DEFAULT_TASK_TYPE = "default"
 
 
 def router_connectivity_test(provider: dict[str, Any]) -> dict[str, Any]:
-    """Probe a provider endpoint. Owned by model-router (follow-up placeholder).
+    """Probe a provider endpoint.
 
     Returns ``{"reachable", "latency_ms", "model"}``. Tests monkeypatch this.
     The probe must not record observability usage/cost.
     """
-    return {
-        "reachable": False,
-        "latency_ms": None,
-        "model": provider.get("model"),
-        "error": "connectivity probe not wired (model-router follow-up)",
-    }
+    # Use the actual connectivity test implementation
+    return test_provider_connectivity_sync(provider)
 
 
 def router_health_probe() -> dict[str, Any]:
@@ -124,6 +123,7 @@ def _cost_label(price: float | None) -> str | float:
 
 class ProviderBody(BaseModel):
     id: str
+    description: str | None = None
     base_url: str
     model: str
     api_key: str | None = None
@@ -133,6 +133,7 @@ class ProviderBody(BaseModel):
 
 
 class ProviderEditBody(BaseModel):
+    description: str | None = None
     base_url: str | None = None
     model: str | None = None
     api_key: str | None = None
@@ -246,6 +247,7 @@ def add_provider(body: ProviderBody, authorization: str | None = Header(None)) -
         raise HTTPException(status_code=409, detail="provider id already exists")
     provider_admin_store.add_provider(
         body.id,
+        description=body.description,
         base_url=body.base_url,
         model=body.model,
         api_key=body.api_key,

@@ -243,3 +243,64 @@ async def test_call_tool_unknown_scope_raises(monkeypatch):
 
     with pytest.raises(KeyError, match="Unknown MCP server"):
         await mcp_client.call_tool("github", "t", {}, scope=5)
+
+
+@pytest.mark.asyncio
+async def test_probe_server_http_success(monkeypatch):
+    """probe_server connects, lists tools, returns connected + count without registering."""
+    import fleetent.tools.registry as tr
+
+    async def fake_open(client, server):
+        return None
+
+    async def fake_post(client, server, method, params, **kw):
+        return {"result": {"tools": [{"name": "a"}, {"name": "b"}]}}
+
+    monkeypatch.setattr(mcp_client, "_open_session", fake_open)
+    monkeypatch.setattr(mcp_client, "_post_jsonrpc", fake_post)
+
+    server = McpServerConfig(id="probe1", url="http://localhost:9999", auth_type="none")
+    result = await mcp_client.probe_server(server)
+    assert result["connected"] is True
+    assert result["tool_count"] == 2
+    assert {t["name"] for t in result["tools"]} == {"a", "b"}
+    # probe must not pollute the global registry
+    assert (None, "probe1") not in mcp_client._server_registry
+    assert "probe1__a" not in tr._registry
+
+
+@pytest.mark.asyncio
+async def test_probe_server_http_failure(monkeypatch):
+    import httpx
+
+    async def fake_open(client, server):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(mcp_client, "_open_session", fake_open)
+    server = McpServerConfig(id="probe2", url="http://localhost:1", auth_type="none")
+    result = await mcp_client.probe_server(server)
+    assert result["connected"] is False
+    assert "refused" in result["error"]
+
+
+def test_unregister_server_removes_tools():
+    import fleetent.tools.registry as tr
+
+    server = McpServerConfig(id="gone", url="http://x", auth_type="none")
+    mcp_client._register_tool_http(server, "gone__t1", {"name": "t1"})
+    mcp_client._register_tool_http(server, "gone__t2", {"name": "t2"})
+    mcp_client._server_registry[(None, "gone")] = server
+    assert "gone__t1" in tr._registry
+
+    mcp_client.unregister_server("gone")
+
+    assert "gone__t1" not in tr._registry
+    assert "gone__t2" not in tr._registry
+    assert (None, "gone") not in mcp_client._server_registry
+
+
+def test_base_headers_includes_custom_headers():
+    server = McpServerConfig(id="h", url="http://x", auth_type="none", headers={"X-API-Key": "k"})
+    headers = mcp_client._base_headers(server)
+    assert headers["X-API-Key"] == "k"
+    assert headers["Accept"]  # baseline preserved

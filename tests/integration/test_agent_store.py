@@ -68,6 +68,51 @@ def test_create_agent_with_isolation_fields(db):
     assert v1.memory_namespace == "analyst"
 
 
+def test_agent_carries_active_version_config_fields(db):
+    created = agent_store.create_agent(
+        "analyst",
+        "You analyze.",
+        ["shell"],
+        skills_dir="agents/analyst/skills",
+        mcp_server_ids=["github"],
+        model_overrides={"default": {"model": "x"}},
+        memory_namespace="analyst",
+    )
+    assert created.skills_dir == "agents/analyst/skills"
+    assert created.mcp_server_ids == ["github"]
+    assert created.model_overrides == {"default": {"model": "x"}}
+    assert created.memory_namespace == "analyst"
+    found = agent_store.get_by_name("analyst")
+    assert found.skills_dir == "agents/analyst/skills"
+    assert found.mcp_server_ids == ["github"]
+    assert found.model_overrides == {"default": {"model": "x"}}
+    assert found.memory_namespace == "analyst"
+
+
+def test_create_agent_persists_template_id(db):
+    created = agent_store.create_agent(
+        "support", "You help.", ["shell"], template_id="support-tmpl"
+    )
+    assert created.template_id == "support-tmpl"
+    [v1] = agent_store.list_versions("support")
+    assert v1.template_id == "support-tmpl"
+    assert agent_store.get_by_name("support").template_id == "support-tmpl"
+
+
+def test_create_agent_without_template_id_is_none(db):
+    created = agent_store.create_agent("plain", "You help.", ["shell"])
+    assert created.template_id is None
+    assert agent_store.get_by_name("plain").template_id is None
+    [v1] = agent_store.list_versions("plain")
+    assert v1.template_id is None
+
+
+def test_new_version_inherits_template_id(db):
+    agent_store.create_agent("support", "v1", ["shell"], template_id="support-tmpl")
+    v2 = agent_store.create_version("support", system_prompt="v2")
+    assert v2.template_id == "support-tmpl"
+
+
 def test_get_by_name_missing(db):
     assert agent_store.get_by_name("nonexistent") is None
 
@@ -264,6 +309,31 @@ def test_platform_isolation(db):
     assert agent_store.get_agent_for_channel("telegram", "C5") is None
 
 
+# --- hard delete ---
+
+
+def test_delete_agent_removes_agent_and_versions(db):
+    from fleetent.config import Settings
+    from fleetent.db import create_database
+
+    agent = agent_store.create_agent("doomed", "v1", ["shell"])
+    agent_store.create_version("doomed", system_prompt="v2")
+    agent_store.create_version("doomed", system_prompt="v3")
+
+    assert agent_store.delete_agent("doomed") is True
+    assert agent_store.get_by_name("doomed") is None
+
+    database = create_database(Settings(anthropic_api_key="").database_url)
+    rows = database.execute(
+        "SELECT COUNT(*) AS c FROM agent_versions WHERE agent_id = :aid", {"aid": agent.id}
+    ).fetchone()
+    assert rows is not None and int(rows["c"]) == 0
+
+
+def test_delete_agent_unknown_returns_false(db):
+    assert agent_store.delete_agent("ghost") is False
+
+
 # --- default agent ---
 
 
@@ -388,8 +458,8 @@ def _load_migration_002():
         Path(__file__).resolve().parents[2]
         / "migrations"
         / "versions"
-        # Rebased 002 -> 035 during the next<-main integration (after main's head 034).
-        / "035_add_agent_features.py"
+        # Rebased 002 -> 036 when the duplicate-revision branches were linearized.
+        / "036_add_agent_features.py"
     )
     spec = importlib.util.spec_from_file_location("migration_002", path)
     assert spec is not None and spec.loader is not None
@@ -412,9 +482,9 @@ def test_alembic_002_upgrade_adds_features_to_legacy_table(tmp_path):
     from alembic.operations import Operations
 
     migration = _load_migration_002()
-    # Rebased during the next<-main integration: 002 -> 035, chained after main's head 034.
-    assert migration.revision == "035"
-    assert migration.down_revision == "034"
+    # Linearized chain: 002 -> 036, chained after 035 (agent_versions.template_id).
+    assert migration.revision == "036"
+    assert migration.down_revision == "035"
 
     dbp = tmp_path / "legacy.db"
     raw = sqlite3.connect(dbp)

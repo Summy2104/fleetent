@@ -221,7 +221,7 @@ async def test_route_blocked_user_gets_rejection_not_agent(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
     """User with allowed=False receives rejection message; agent_loop is NOT called."""
-    import fleetent.im_user_store as ius
+    from fleetent.platform import im_gateway_management as ius
 
     monkeypatch.setattr(ius, "check_allowed_by_user_id", lambda user_id: False)
 

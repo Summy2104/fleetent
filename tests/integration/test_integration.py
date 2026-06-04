@@ -12,9 +12,9 @@ from alembic import command
 from alembic.config import Config
 
 import fleetent.governance.permission_gate as permission_gate
-import fleetent.im_user_store as im_user_store
 import fleetent.session.manager as session_mgr
 import fleetent.user_store as user_store
+from fleetent.platform.im_gateway_management import identity as im_user_store
 
 
 def _apply_migrations(db_path: Path) -> None:

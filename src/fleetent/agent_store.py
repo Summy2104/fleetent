@@ -3,7 +3,7 @@ per-agent capability switches.
 
 Schema lifecycle is owned by Alembic (single source of truth): the agents table
 is created on the trunk, gains tenant_id/team_id (030), active_version_id (033),
-and the capability columns features/plugins/allowed_skills (035-037). This store
+and the capability columns features/plugins/allowed_skills (036-038). This store
 reads and writes through the shared DB runtime boundary using named parameters;
 it never creates schema.
 
@@ -61,6 +61,11 @@ class Agent:
     allowed_skills: list[str] = field(default_factory=list)
     tenant_id: str = "default"
     team_id: str | None = None
+    skills_dir: str | None = None
+    mcp_server_ids: list[str] | None = None
+    model_overrides: dict[str, Any] = field(default_factory=dict)
+    memory_namespace: str = "default"
+    template_id: str | None = None
 
 
 @dataclass
@@ -76,6 +81,7 @@ class AgentVersion:
     memory_namespace: str
     created_at: str
     is_active: bool = False
+    template_id: str | None = None
 
 
 def _db() -> SQLiteDatabase:
@@ -113,6 +119,7 @@ def create_agent(
     memory_namespace: str = "default",
     tenant_id: str = "default",
     team_id: str | None = None,
+    template_id: str | None = None,
 ) -> Agent:
     """Create an agent plus its version-1 snapshot in a single transaction.
 
@@ -156,6 +163,7 @@ def create_agent(
             model_overrides=model_overrides or {},
             memory_namespace=memory_namespace,
             now=now,
+            template_id=template_id,
         )
         conn.execute(
             "UPDATE agents SET active_version_id = :vid WHERE id = :aid",
@@ -172,6 +180,11 @@ def create_agent(
         allowed_skills=allowed_skills,
         tenant_id=tenant_id,
         team_id=team_id,
+        skills_dir=skills_dir,
+        mcp_server_ids=mcp_server_ids,
+        model_overrides=model_overrides or {},
+        memory_namespace=memory_namespace,
+        template_id=template_id,
     )
 
 
@@ -188,13 +201,15 @@ def _insert_version(
     memory_namespace: str,
     now: str,
     created_by_user_id: str | None = None,
+    template_id: str | None = None,
 ) -> int:
     version_id = conn.execute(
         "INSERT INTO agent_versions "
         "(agent_id, version, system_prompt, allowed_tools, skills_dir, mcp_server_ids, "
-        " model_overrides, memory_namespace, created_by_user_id, created_at) "
+        " model_overrides, memory_namespace, created_by_user_id, created_at, template_id) "
         "VALUES (:agent_id, :version, :system_prompt, :allowed_tools, :skills_dir, "
-        " :mcp_server_ids, :model_overrides, :memory_namespace, :created_by, :created_at)",
+        " :mcp_server_ids, :model_overrides, :memory_namespace, :created_by, :created_at, "
+        " :template_id)",
         {
             "agent_id": agent_id,
             "version": version,
@@ -206,6 +221,7 @@ def _insert_version(
             "memory_namespace": memory_namespace,
             "created_by": created_by_user_id,
             "created_at": now,
+            "template_id": template_id,
         },
     ).lastrowid
     return int(version_id or 0)
@@ -224,6 +240,7 @@ def _row_to_version(row: dict[str, Any], active_version_id: int | None) -> Agent
         memory_namespace=str(row["memory_namespace"]),
         created_at=str(row["created_at"]),
         is_active=int(row["id"]) == active_version_id,
+        template_id=row["template_id"],
     )
 
 
@@ -254,6 +271,15 @@ def get_by_name(name: str) -> Agent | None:
         active_version_id=int(agent["active_version_id"]),
         tenant_id=str(agent["tenant_id"]) if agent["tenant_id"] is not None else "default",
         team_id=str(agent["team_id"]) if agent["team_id"] is not None else None,
+        skills_dir=version["skills_dir"],
+        mcp_server_ids=(
+            None if version["mcp_server_ids"] is None else json.loads(version["mcp_server_ids"])
+        ),
+        model_overrides=json.loads(version["model_overrides"])
+        if version["model_overrides"]
+        else {},
+        memory_namespace=str(version["memory_namespace"]),
+        template_id=version["template_id"],
         **_parse_caps(agent),
     )
 
@@ -351,7 +377,29 @@ def _merge_version_fields(
         "memory_namespace": (
             str(base["memory_namespace"]) if memory_namespace is _UNSET else memory_namespace
         ),
+        "template_id": base["template_id"],
     }
+
+
+def delete_agent(name: str) -> bool:
+    """Hard-delete an agent and all its versions in one transaction.
+
+    Returns True when an agent was removed, False when no such agent exists.
+    Deletes ``agent_versions`` before ``agents`` to respect the FK ordering.
+    """
+    db = _db()
+    with db.transaction() as conn:
+        agent = conn.execute("SELECT id FROM agents WHERE name = :name", {"name": name}).fetchone()
+        if agent is None:
+            return False
+        agent_id = int(agent["id"])
+        # Detach the active-version FK before removing version rows.
+        conn.execute(
+            "UPDATE agents SET active_version_id = NULL WHERE id = :aid", {"aid": agent_id}
+        )
+        conn.execute("DELETE FROM agent_versions WHERE agent_id = :aid", {"aid": agent_id})
+        conn.execute("DELETE FROM agents WHERE id = :aid", {"aid": agent_id})
+    return True
 
 
 def activate_version(name: str, version: int) -> None:
@@ -476,6 +524,73 @@ def get_agent_for_channel(platform: str, channel_id: str) -> Agent | None:
     if row is None:
         return None
     return get_by_name(str(row["name"]))
+
+
+def list_users_for_agent(agent_id: int) -> list[str]:
+    rows = (
+        _db()
+        .execute(
+            "SELECT user_id FROM user_agents WHERE agent_id = :agent_id ORDER BY user_id",
+            {"agent_id": agent_id},
+        )
+        .fetchall()
+    )
+    return [str(row["user_id"]) for row in rows]
+
+
+def list_channels_for_agent(agent_id: int) -> list[dict[str, Any]]:
+    rows = (
+        _db()
+        .execute(
+            "SELECT platform, channel_id, bound_version_id FROM channel_agents "
+            "WHERE agent_id = :agent_id ORDER BY platform, channel_id",
+            {"agent_id": agent_id},
+        )
+        .fetchall()
+    )
+    return [
+        {
+            "platform": str(row["platform"]),
+            "channel_id": str(row["channel_id"]),
+            "bound_version_id": row["bound_version_id"],
+        }
+        for row in rows
+    ]
+
+
+def bind_mcp_server(agent_id: int, server_id: str, created_by: str | None = None) -> None:
+    _db().execute(
+        "INSERT OR IGNORE INTO agent_mcp_server_bindings "
+        "(agent_id, server_id, created_at, created_by) "
+        "VALUES (:agent_id, :server_id, :created_at, :created_by)",
+        {
+            "agent_id": agent_id,
+            "server_id": server_id,
+            "created_at": _now(),
+            "created_by": created_by,
+        },
+    )
+
+
+def unbind_mcp_server(agent_id: int, server_id: str) -> None:
+    _db().execute(
+        "DELETE FROM agent_mcp_server_bindings "
+        "WHERE agent_id = :agent_id AND server_id = :server_id",
+        {"agent_id": agent_id, "server_id": server_id},
+    )
+
+
+def list_mcp_servers_for_agent(agent_id: int) -> list[str]:
+    rows = (
+        _db()
+        .execute(
+            "SELECT server_id FROM agent_mcp_server_bindings "
+            "WHERE agent_id = :agent_id ORDER BY server_id",
+            {"agent_id": agent_id},
+        )
+        .fetchall()
+    )
+    return [str(row["server_id"]) for row in rows]
 
 
 def get_channel_bound_version_id(platform: str, channel_id: str) -> int | None:

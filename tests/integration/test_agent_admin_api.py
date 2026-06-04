@@ -146,3 +146,159 @@ def test_bind_unknown_agent_404(client):
     token, _ = _session_for("admin")
     resp = client.post("/admin/agents/ghost/bindings/users/u-1", headers=_hdr(token))
     assert resp.status_code == 404
+
+
+# --- bindings read ------------------------------------------------------------
+
+
+def test_get_bindings_shape(client):
+    agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    agent_store.assign_user("u-1", agent.id)
+    agent_store.assign_channel("slack", "C-1", agent.id)
+    agent_store.bind_mcp_server(agent.id, "github")
+    token, _ = _session_for("viewer")
+
+    resp = client.get("/admin/agents/ops/bindings", headers=_hdr(token))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["users"] == ["u-1"]
+    assert body["mcp_servers"] == ["github"]
+    assert len(body["channels"]) == 1
+    chan = body["channels"][0]
+    assert chan["platform"] == "slack" and chan["channel_id"] == "C-1"
+
+
+def test_get_bindings_unknown_agent_404(client):
+    token, _ = _session_for("viewer")
+    resp = client.get("/admin/agents/ghost/bindings", headers=_hdr(token))
+    assert resp.status_code == 404
+
+
+# --- agent-side skill bindings ------------------------------------------------
+
+
+def test_put_and_get_agent_skill(client):
+    agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    token, _ = _session_for("admin")
+
+    resp = client.put(
+        "/admin/agents/ops/skills/crm-ops", headers=_hdr(token), json={"enabled": True}
+    )
+    assert resp.status_code == 200
+
+    resp = client.get("/admin/agents/ops/skills", headers=_hdr(token))
+    assert resp.status_code == 200
+    by_name = {s["skill_name"]: s["enabled"] for s in resp.json()}
+    assert by_name.get("crm-ops") is True
+
+
+def test_put_agent_skill_viewer_forbidden(client):
+    agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    token, _ = _session_for("viewer")
+    resp = client.put(
+        "/admin/agents/ops/skills/crm-ops", headers=_hdr(token), json={"enabled": True}
+    )
+    assert resp.status_code == 403
+
+
+# --- agent MCP bindings -------------------------------------------------------
+
+
+def test_bind_known_mcp_server(client, monkeypatch):
+    agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    monkeypatch.setattr(api, "_known_mcp_server_ids", lambda: {"github", "jira"})
+    token, _ = _session_for("admin")
+
+    resp = client.post("/admin/agents/ops/bindings/mcp/github", headers=_hdr(token))
+    assert resp.status_code == 200
+    assert agent_store.list_mcp_servers_for_agent(agent.id) == ["github"]
+
+    resp = client.delete("/admin/agents/ops/bindings/mcp/github", headers=_hdr(token))
+    assert resp.status_code == 200
+    assert agent_store.list_mcp_servers_for_agent(agent.id) == []
+
+
+def test_bind_unknown_mcp_server_404(client, monkeypatch):
+    agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    monkeypatch.setattr(api, "_known_mcp_server_ids", lambda: {"github"})
+    token, _ = _session_for("admin")
+
+    resp = client.post("/admin/agents/ops/bindings/mcp/nope", headers=_hdr(token))
+    assert resp.status_code == 404
+    assert agent_store.list_mcp_servers_for_agent(agent.id) == []
+
+
+def test_bind_mcp_viewer_forbidden(client):
+    agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    token, _ = _session_for("viewer")
+    resp = client.post("/admin/agents/ops/bindings/mcp/github", headers=_hdr(token))
+    assert resp.status_code == 403
+
+
+# --- agent knowledge-base bindings -------------------------------------------
+
+
+def _kb_ids(client, token):
+    return client.get("/admin/agents/ops/kbs", headers=_hdr(token)).json()["kb_ids"]
+
+
+def test_kb_bind_list_unbind(client):
+    agent_store.create_agent("ops", "Ops.", ["shell"])
+    token, _ = _session_for("admin")
+    assert _kb_ids(client, token) == []
+    r = client.post("/admin/agents/ops/kbs", headers=_hdr(token), json={"kb_id": "kb1"})
+    assert r.status_code == 200
+    client.post("/admin/agents/ops/kbs", headers=_hdr(token), json={"kb_id": "kb1"})  # idempotent
+    assert _kb_ids(client, token) == ["kb1"]
+    assert client.delete("/admin/agents/ops/kbs/kb1", headers=_hdr(token)).status_code == 200
+    assert _kb_ids(client, token) == []
+
+
+def test_kb_bind_viewer_forbidden(client):
+    agent_store.create_agent("ops", "Ops.", ["shell"])
+    token, _ = _session_for("viewer")
+    r = client.post("/admin/agents/ops/kbs", headers=_hdr(token), json={"kb_id": "kb1"})
+    assert r.status_code == 403
+
+
+def test_kb_bind_unknown_agent_404(client):
+    token, _ = _session_for("admin")
+    r = client.post("/admin/agents/ghost/kbs", headers=_hdr(token), json={"kb_id": "kb1"})
+    assert r.status_code == 404
+
+
+# --- agent OAuth connector bindings ------------------------------------------
+
+
+def _oauth_ids(client, token):
+    r = client.get("/admin/agents/ops/bindings/oauth", headers=_hdr(token))
+    return r.json()["connector_ids"]
+
+
+def test_oauth_bind_list_unbind(client):
+    from fleetent.platform.connector_management import connector_config_store
+
+    agent_store.create_agent("ops", "Ops.", ["shell"])
+    connector_config_store.add_connector("github", "GitHub")
+    token, _ = _session_for("admin")
+    assert _oauth_ids(client, token) == []
+    r = client.post("/admin/agents/ops/bindings/oauth/github", headers=_hdr(token))
+    assert r.status_code == 200
+    assert _oauth_ids(client, token) == ["github"]
+    d = client.delete("/admin/agents/ops/bindings/oauth/github", headers=_hdr(token))
+    assert d.status_code == 200
+    assert _oauth_ids(client, token) == []
+
+
+def test_oauth_bind_unknown_connector_404(client):
+    agent_store.create_agent("ops", "Ops.", ["shell"])
+    token, _ = _session_for("admin")
+    r = client.post("/admin/agents/ops/bindings/oauth/nope", headers=_hdr(token))
+    assert r.status_code == 404
+
+
+def test_oauth_bind_viewer_forbidden(client):
+    agent_store.create_agent("ops", "Ops.", ["shell"])
+    token, _ = _session_for("viewer")
+    r = client.post("/admin/agents/ops/bindings/oauth/github", headers=_hdr(token))
+    assert r.status_code == 403

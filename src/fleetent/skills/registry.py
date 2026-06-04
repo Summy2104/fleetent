@@ -399,13 +399,26 @@ class SkillIndex:
     module-level behaviour over this instance's own entries.
     """
 
-    def __init__(self, skills_dir: str | None = None, *, scan: bool = True) -> None:
+    def __init__(
+        self,
+        skills_dir: str | None = None,
+        *,
+        scan: bool = True,
+        allowed: set[str] | None = None,
+    ) -> None:
         self._entries: dict[str, SkillEntry] = {}
+        # When set, only these skill names survive scanning (per-agent allowlist).
+        self._allowed = allowed
         if scan:
             self.scan(skills_dir)
 
     def scan(self, skills_dir: str | None = None) -> None:
-        self._entries = _build_index(skills_dir)
+        entries = _build_index(skills_dir)
+        # Apply allowed filtering if set
+        if self._allowed is not None:
+            self._entries = {k: v for k, v in entries.items() if k in self._allowed}
+        else:
+            self._entries = entries
 
     def match(self, user_input: str) -> str | None:
         lowered = user_input.lower()

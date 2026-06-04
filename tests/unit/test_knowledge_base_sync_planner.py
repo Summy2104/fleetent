@@ -260,6 +260,343 @@ async def test_missing_source_state_is_planned_for_delete(monkeypatch, tmp_path)
     assert plan.summary.deleted == 1
 
 
+async def test_execute_sync_plan_skips_unchanged_items(monkeypatch, tmp_path):
+    _patch_knowledge_runtime(monkeypatch, tmp_path)
+    root = tmp_path / "docs"
+    root.mkdir()
+
+    from fleetent.intelligence.knowledge_base import SyncAction, execute_sync_plan
+    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+
+    plan = _build_plan(
+        root,
+        [_plan_item(SyncAction.SKIP_UNCHANGED, root, "a.md")],
+        unsupported=2,
+    )
+    config = LocalDirectorySourceConfig(
+        source_id="local-docs", root_path=root, allowed_roots=[root]
+    )
+    plan = _with_config(plan, config)
+
+    summary = await execute_sync_plan(plan)
+
+    assert summary.unchanged == 1
+    assert summary.skipped == 3  # unsupported (2) + the one skipped item
+    assert summary.ingested == 0
+    assert summary.failed == 0
+
+
+async def test_execute_sync_plan_ingests_new_file_and_records_state(monkeypatch, tmp_path):
+    database = _patch_knowledge_runtime(monkeypatch, tmp_path)
+    root = tmp_path / "docs"
+    root.mkdir()
+    document_path = root / "runbook.md"
+    document_path.write_text("# Runbook\nStart service", encoding="utf-8")
+
+    ingested = _fake_ingest(monkeypatch, document_id="doc-new")
+
+    from fleetent.intelligence.knowledge_base import SyncAction, execute_sync_plan
+    from fleetent.intelligence.knowledge_base.connectors import (
+        LocalDirectorySourceConfig,
+        LocalSourceStateStore,
+    )
+
+    item = _plan_item(
+        SyncAction.INGEST_NEW,
+        root,
+        "runbook.md",
+        document_format="markdown",
+        mtime_ns=document_path.stat().st_mtime_ns,
+        content_hash="abc123",
+    )
+    config = LocalDirectorySourceConfig(
+        source_id="local-docs", root_path=root, allowed_roots=[root]
+    )
+    plan = _with_config(_build_plan(root, [item]), config)
+
+    summary = await execute_sync_plan(plan)
+
+    assert summary.ingested == 1
+    assert summary.failed == 0
+    assert len(ingested) == 1
+    states = LocalSourceStateStore(database).list_for_source(
+        source_id="local-docs", tenant_id="tenant-a", kb_id="support"
+    )
+    assert [state.document_id for state in states] == ["doc-new"]
+
+
+async def test_execute_sync_plan_reingest_deletes_then_ingests(monkeypatch, tmp_path):
+    _patch_knowledge_runtime(monkeypatch, tmp_path)
+    root = tmp_path / "docs"
+    root.mkdir()
+    document_path = root / "runbook.md"
+    document_path.write_text("# Runbook\nUpdated", encoding="utf-8")
+
+    deleted = _fake_delete(monkeypatch)
+    _fake_ingest(monkeypatch, document_id="doc-reingest")
+
+    from fleetent.intelligence.knowledge_base import SyncAction, execute_sync_plan
+    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+
+    item = _plan_item(
+        SyncAction.REINGEST_CHANGED,
+        root,
+        "runbook.md",
+        document_format="markdown",
+        mtime_ns=document_path.stat().st_mtime_ns,
+        content_hash="def456",
+        document_id="doc-old",
+    )
+    config = LocalDirectorySourceConfig(
+        source_id="local-docs", root_path=root, allowed_roots=[root]
+    )
+    plan = _with_config(_build_plan(root, [item]), config)
+
+    summary = await execute_sync_plan(plan)
+
+    assert summary.ingested == 1
+    assert deleted == ["doc-old"]
+
+
+async def test_execute_sync_plan_deletes_missing_document(monkeypatch, tmp_path):
+    database = _patch_knowledge_runtime(monkeypatch, tmp_path)
+    root = tmp_path / "docs"
+    root.mkdir()
+    missing_path = str((root / "gone.md").resolve())
+
+    deleted = _fake_delete(monkeypatch)
+
+    from fleetent.intelligence.knowledge_base import SyncAction, execute_sync_plan
+    from fleetent.intelligence.knowledge_base.connectors import (
+        LocalDirectorySourceConfig,
+        LocalSourceState,
+        LocalSourceStateStore,
+    )
+
+    LocalSourceStateStore(database).upsert(
+        LocalSourceState(
+            source_id="local-docs",
+            tenant_id="tenant-a",
+            kb_id="support",
+            source_path=missing_path,
+            mtime_ns=1,
+            content_hash="old",
+            document_id="doc-gone",
+        )
+    )
+    item = _plan_item(
+        SyncAction.DELETE_MISSING,
+        root,
+        "gone.md",
+        source_path=missing_path,
+        document_id="doc-gone",
+    )
+    config = LocalDirectorySourceConfig(
+        source_id="local-docs", root_path=root, allowed_roots=[root]
+    )
+    plan = _with_config(_build_plan(root, [item]), config)
+
+    summary = await execute_sync_plan(plan)
+
+    assert summary.deleted == 1
+    assert deleted == ["doc-gone"]
+    remaining = LocalSourceStateStore(database).list_for_source(
+        source_id="local-docs", tenant_id="tenant-a", kb_id="support"
+    )
+    assert remaining == []
+
+
+async def test_execute_sync_plan_delete_without_document_id_counts_failed(monkeypatch, tmp_path):
+    _patch_knowledge_runtime(monkeypatch, tmp_path)
+    root = tmp_path / "docs"
+    root.mkdir()
+    _fake_delete(monkeypatch)
+
+    from fleetent.intelligence.knowledge_base import SyncAction, execute_sync_plan
+    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+
+    item = _plan_item(SyncAction.DELETE_MISSING, root, "gone.md", document_id=None)
+    config = LocalDirectorySourceConfig(
+        source_id="local-docs", root_path=root, allowed_roots=[root]
+    )
+    plan = _with_config(_build_plan(root, [item]), config)
+
+    summary = await execute_sync_plan(plan)
+
+    assert summary.failed == 1
+    assert summary.deleted == 0
+
+
+async def test_execute_sync_plan_unsupported_action_counts_failed(monkeypatch, tmp_path):
+    _patch_knowledge_runtime(monkeypatch, tmp_path)
+    root = tmp_path / "docs"
+    root.mkdir()
+
+    from fleetent.intelligence.knowledge_base import SyncAction, execute_sync_plan
+    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+
+    item = _plan_item(SyncAction.AUTH_FAILED, root, "a.md")
+    config = LocalDirectorySourceConfig(
+        source_id="local-docs", root_path=root, allowed_roots=[root]
+    )
+    plan = _with_config(_build_plan(root, [item]), config)
+
+    summary = await execute_sync_plan(plan)
+
+    assert summary.failed == 1
+    assert summary.ingested == 0
+
+
+async def test_execute_sync_plan_unsupported_format_counts_failed(monkeypatch, tmp_path):
+    _patch_knowledge_runtime(monkeypatch, tmp_path)
+    root = tmp_path / "docs"
+    root.mkdir()
+    (root / "data.bin").write_bytes(b"binary")
+    _fake_ingest(monkeypatch, document_id="doc-x")
+
+    from fleetent.intelligence.knowledge_base import SyncAction, execute_sync_plan
+    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+
+    item = _plan_item(
+        SyncAction.INGEST_NEW,
+        root,
+        "data.bin",
+        document_format="binary",
+        mtime_ns=1,
+        content_hash="hash",
+    )
+    config = LocalDirectorySourceConfig(
+        source_id="local-docs", root_path=root, allowed_roots=[root]
+    )
+    plan = _with_config(_build_plan(root, [item]), config)
+
+    summary = await execute_sync_plan(plan)
+
+    assert summary.failed == 1
+
+
+async def test_plan_local_directory_sync_rejects_ref_without_path(monkeypatch, tmp_path):
+    _patch_knowledge_runtime(monkeypatch, tmp_path)
+    root = tmp_path / "docs"
+    root.mkdir()
+
+    from fleetent.intelligence.knowledge_base import plan_local_directory_sync, sync_planner
+    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+    from fleetent.intelligence.knowledge_base.connectors.base import DocumentRef
+
+    class _PathlessSource:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def list_documents(self):
+            return [DocumentRef(id="x", filename="x.md", format="markdown", path=None)]
+
+        def count_unsupported_documents(self):
+            return 0
+
+        def fetch(self, ref):
+            return b"data"
+
+    monkeypatch.setattr(sync_planner, "LocalDirectoryDataSource", _PathlessSource)
+
+    config = LocalDirectorySourceConfig(
+        source_id="local-docs", root_path=root, allowed_roots=[root]
+    )
+
+    try:
+        await plan_local_directory_sync(config, tenant_id="tenant-a", kb_id="support")
+    except ValueError as exc:
+        assert "must include path" in str(exc)
+    else:
+        raise AssertionError("pathless ref was accepted")
+
+
+def _build_plan(root, items, unsupported=0):
+    from fleetent.intelligence.knowledge_base import SyncPlan, SyncPlanSummary
+    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+
+    config = LocalDirectorySourceConfig(
+        source_id="local-docs", root_path=root, allowed_roots=[root]
+    )
+    return SyncPlan(
+        source_config=config,
+        tenant_id="tenant-a",
+        kb_id="support",
+        items=items,
+        summary=SyncPlanSummary(
+            scanned=len(items) + unsupported,
+            planned=len(items),
+            unsupported=unsupported,
+        ),
+    )
+
+
+def _with_config(plan, config):
+    from dataclasses import replace
+
+    return replace(plan, source_config=config)
+
+
+def _plan_item(
+    action,
+    root,
+    filename,
+    *,
+    document_format="markdown",
+    source_path=None,
+    mtime_ns=None,
+    content_hash=None,
+    document_id=None,
+):
+    from fleetent.intelligence.knowledge_base import SyncPlanItem
+
+    return SyncPlanItem(
+        action=action,
+        source_id="local-docs",
+        tenant_id="tenant-a",
+        kb_id="support",
+        source_path=source_path if source_path is not None else str((root / filename).resolve()),
+        filename=filename,
+        document_format=document_format,
+        mtime_ns=mtime_ns,
+        content_hash=content_hash,
+        document_id=document_id,
+    )
+
+
+def _fake_ingest(monkeypatch, *, document_id):
+    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.intelligence.knowledge_base.models import KnowledgeDocument
+
+    calls = []
+
+    async def _ingest_parsed(parsed, *, tenant_id, kb_id, source, source_url):
+        calls.append(parsed)
+        return KnowledgeDocument(
+            id=document_id,
+            tenant_id=tenant_id,
+            kb_id=kb_id,
+            filename=parsed.filename,
+            source=source,
+            source_url=source_url,
+        )
+
+    monkeypatch.setattr(runtime, "ingest_parsed", _ingest_parsed)
+    return calls
+
+
+def _fake_delete(monkeypatch):
+    from fleetent.intelligence.knowledge_base import runtime
+
+    deleted = []
+
+    async def _delete(document_id):
+        deleted.append(document_id)
+
+    monkeypatch.setattr(runtime, "delete", _delete)
+    return deleted
+
+
 def _patch_knowledge_runtime(monkeypatch, tmp_path):
     from fleetent.intelligence.knowledge_base import runtime
 

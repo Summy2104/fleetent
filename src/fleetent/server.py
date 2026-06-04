@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket,
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from fleetent import agent_config, paths, user_store
+from fleetent import agent_config, agent_store, paths, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, WebhooksSettings, configure_logging
 from fleetent.cron_scheduler import CronScheduler
@@ -49,7 +49,7 @@ from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.askit_console import agent_apply_api
 from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.connector_management import connector_admin_api
-from fleetent.platform.im_gateway_management import im_admin_api, im_connector_manager
+from fleetent.platform.im_gateway_management import admin_api, connector_manager
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.resource_monitoring import collectors, monitor_admin_api
@@ -91,7 +91,7 @@ def _admin_login_url(router_prefix: str) -> str:
 
 # Owner-level connector manager. Slack is intentionally absent: it is per-agent,
 # supervised by `_slack_supervisor` from the agent index (per-agent-slack-connector).
-_connector_manager = im_connector_manager.ConnectorManager(
+_connector_manager = connector_manager.ConnectorManager(
     factories={
         "telegram": telegram_adapter.run,
     }
@@ -171,6 +171,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as exc:
             logger.warning("mcp_yaml_load_failed path=%s error=%s", _MCP_YAML_PATH, exc)
 
+    # Register enabled global MCP servers defined through the admin console (the DB
+    # counterpart to mcp.yaml), so their tools become available to agents.
+    try:
+        from fleetent.platform.connector_management import mcp_runtime
+
+        await mcp_runtime.register_global_store_servers()
+    except Exception as exc:
+        logger.warning("mcp_store_register_failed error=%s", exc)
+
     # MCP3: start the connection-health monitor (bare asyncio task, not cron_scheduler).
     mcp_client.start_health_monitor()
 
@@ -192,16 +201,68 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # with usable config start. Wire the admin-API seams to this running manager so
     # enable/disable endpoints can drive lifecycle without importing the loop.
     loop = asyncio.get_running_loop()
-    im_admin_api.start_connector = lambda owner_id, platform: asyncio.run_coroutine_threadsafe(
+    admin_api.start_connector = lambda owner_id, platform: asyncio.run_coroutine_threadsafe(
         _connector_manager.start(owner_id, platform), loop
     ).result()
-    im_admin_api.stop_connector = lambda owner_id, platform: asyncio.run_coroutine_threadsafe(
+    admin_api.stop_connector = lambda owner_id, platform: asyncio.run_coroutine_threadsafe(
         _connector_manager.stop(owner_id, platform), loop
     ).result()
     await _connector_manager.start_all_enabled()
     # per-agent-slack-connector: one Socket Mode connection per agent declaring
     # connectors.slack, sourced from the agent index scanned above.
     await _slack_supervisor.start_from_index()
+
+    # Wire the admin "Chat" playground to the real agent loop (mirrors /chat): the
+    # selected agent is resolved by name from its file-driven config, and the turn
+    # runs through run_stream against the playground session. Without this the
+    # playground seams are inert placeholders.
+    def _pg_run(
+        agent_name: str,
+        session_id: str,
+        message: str,
+        overrides: dict[str, Any] | None,
+        bypass_medium: bool,
+    ) -> dict[str, Any]:
+        af = agent_config.current().get(agent_name) if agent_name else None
+        kwargs: dict[str, Any] = {"user_id": "playground", "session_id": session_id}
+        if af is not None:
+            kwargs["system_prompt"] = af.system_prompt
+            kwargs["allowed_tools"] = af.allowed_tools + expand_plugin_patterns(af.plugins)
+            kwargs["agent_name"] = af.name
+            kwargs["agent_features"] = af.features
+            kwargs["allowed_skills"] = af.allowed_skills
+        events: list[dict[str, Any]] = []
+
+        async def _collect() -> str:
+            reply = ""
+            try:
+                async for ev in run_stream(message, **kwargs):
+                    etype = ev.get("type")
+                    if etype == "done":
+                        reply = ev.get("content", "")
+                    elif etype in ("tool_call", "tool_result", "error"):
+                        events.append(ev)
+            except Exception as exc:  # noqa: BLE001 — surface as a turn error, never a 500
+                events.append({"type": "error", "content": str(exc)})
+            return reply
+
+        reply = asyncio.run_coroutine_threadsafe(_collect(), loop).result()
+        return {"reply": reply, "events": events}
+
+    def _pg_transcript(session_id: str) -> list[dict[str, Any]]:
+        return asyncio.run_coroutine_threadsafe(session_mgr.load(session_id), loop).result()
+
+    chat_admin_api.run_playground = _pg_run
+    chat_admin_api.load_transcript = _pg_transcript
+    chat_admin_api.clear_session = lambda session_id: asyncio.run_coroutine_threadsafe(
+        session_mgr.clear(session_id), loop
+    ).result()
+    chat_admin_api.inject = lambda session_id, role, content: asyncio.run_coroutine_threadsafe(
+        session_mgr.inject_message(session_id, role, content), loop
+    ).result()
+    chat_admin_api.reset_session = lambda session_id, keep_turns: asyncio.run_coroutine_threadsafe(
+        session_mgr.reset(session_id, keep_turns), loop
+    ).result()
 
     # Best-effort scheduler start: a missing/locked scheduled_tasks table (e.g. an
     # unmigrated DB) must not prevent the HTTP API from serving, consistent with the
@@ -239,13 +300,105 @@ app.include_router(skill_admin_api.router)
 app.include_router(provider_admin_api.router)
 app.include_router(kb_admin_api.router)
 app.include_router(connector_admin_api.router)
-app.include_router(im_admin_api.router)
+app.include_router(admin_api.router)
 app.include_router(chat_admin_api.router)
 app.include_router(agent_console_api.router)
 app.include_router(agent_admin_api.router)
 app.include_router(stats_admin_api.router)
 app.include_router(monitor_admin_api.router)
 app.include_router(agent_apply_api.router)
+
+
+def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:
+    """Serialize an Agent to the dict shape the console/apply seams promise."""
+    if agent is None:
+        return None
+    return {
+        "id": agent.id,
+        "system_prompt": agent.system_prompt,
+        "allowed_tools": agent.allowed_tools,
+        "skills_dir": agent.skills_dir,
+        "mcp_server_ids": agent.mcp_server_ids,
+        "model_overrides": agent.model_overrides,
+        "memory_namespace": agent.memory_namespace,
+        "template_id": agent.template_id,
+    }
+
+
+def wire_agent_store_seams() -> None:
+    """Bridge the console + apply agent seams to agent_store (production wiring).
+
+    Without this, clone/create/update/delete and apply act as inert stubs.
+    """
+
+    def _get_def(name: str) -> dict[str, Any] | None:
+        return _agent_def_dict(agent_store.get_by_name(name))
+
+    def _console_create(
+        name: str,
+        system_prompt: str,
+        allowed_tools: list[str],
+        skills_dir: str | None = None,
+        mcp_server_ids: list[str] | None = None,
+        model_overrides: dict[str, Any] | None = None,
+        memory_namespace: str = "default",
+        template_id: str | None = None,
+    ) -> None:
+        agent_store.create_agent(
+            name,
+            system_prompt,
+            allowed_tools,
+            skills_dir=skills_dir,
+            mcp_server_ids=mcp_server_ids,
+            model_overrides=model_overrides,
+            memory_namespace=memory_namespace,
+            template_id=template_id,
+        )
+
+    def _console_update(
+        name: str,
+        system_prompt: str | None,
+        allowed_tools: list[str] | None,
+        skills_dir: str | None = None,
+        mcp_server_ids: list[str] | None = None,
+        model_overrides: dict[str, Any] | None = None,
+        memory_namespace: str | None = None,
+    ) -> None:
+        kwargs: dict[str, Any] = {}
+        if system_prompt is not None:
+            kwargs["system_prompt"] = system_prompt
+        if allowed_tools is not None:
+            kwargs["allowed_tools"] = allowed_tools
+        if skills_dir is not None:
+            kwargs["skills_dir"] = skills_dir
+        if mcp_server_ids is not None:
+            kwargs["mcp_server_ids"] = mcp_server_ids
+        if model_overrides is not None:
+            kwargs["model_overrides"] = model_overrides
+        if memory_namespace is not None:
+            kwargs["memory_namespace"] = memory_namespace
+        agent_store.create_version(name, **kwargs)
+
+    def _console_delete(name: str) -> bool:
+        return agent_store.delete_agent(name)
+
+    def _apply_create(name: str, system_prompt: str, allowed_tools: list[str]) -> int:
+        return agent_store.create_agent(name, system_prompt, allowed_tools).id
+
+    def _apply_update(name: str, system_prompt: str, allowed_tools: list[str]) -> None:
+        agent_store.create_version(name, system_prompt=system_prompt, allowed_tools=allowed_tools)
+
+    agent_console_api.get_agent_def = _get_def
+    agent_console_api.create_agent_def = _console_create
+    agent_console_api.update_agent_def = _console_update
+    agent_console_api.delete_agent_def = _console_delete
+
+    agent_apply_api.get_agent_def = _get_def
+    agent_apply_api.create_agent_def = _apply_create
+    agent_apply_api.update_agent_def = _apply_update
+
+
+wire_agent_store_seams()
 
 
 class ChatRequest(BaseModel):

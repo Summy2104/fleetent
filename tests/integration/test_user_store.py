@@ -1,12 +1,12 @@
 import pytest
 
-import fleetent.im_user_store as im_user_store
-import fleetent.platform.im_gateway_management.im_channel_allowlist as im_channel_allowlist
-import fleetent.platform.im_gateway_management.im_connector_store as im_connector_store
+import fleetent.platform.im_gateway_management.channel_allowlist as im_channel_allowlist
+import fleetent.platform.im_gateway_management.connector_store as im_connector_store
 import fleetent.platform.user_management.api_key_store as api_key_store
 import fleetent.platform.user_management.invite_store as invite_store
 from fleetent import paths, user_store
 from fleetent.governance import audit_log, blocklist, permission_gate, quota
+from fleetent.platform.im_gateway_management import identity as im_user_store
 
 DEFAULT_USER_STORE_DB_PATH = user_store.DB_PATH
 DEFAULT_LEGACY_RE_EXPORT_DB_PATHS = {

@@ -1,0 +1,66 @@
+- generic [ref=e11]:
+  - banner [ref=e12]:
+    - heading "fleetent · Admin" [level=1] [ref=e13]
+    - generic [ref=e14]: 876b7c46-9bf1-49ba-8730-8615c16732b7 · built_in_admin
+    - button "Sign out" [ref=e15] [cursor=pointer]
+  - generic [ref=e16]:
+    - navigation "Admin navigation" [ref=e17]:
+      - generic [ref=e18]:
+        - button "Access" [ref=e19] [cursor=pointer]
+        - button "Users" [ref=e20] [cursor=pointer]
+      - generic [ref=e21]:
+        - button "Agents & Skills" [ref=e22] [cursor=pointer]
+        - button "Agents" [ref=e23] [cursor=pointer]
+        - button "Skills" [ref=e24] [cursor=pointer]
+        - button "Knowledge Base" [ref=e25] [cursor=pointer]
+      - generic [ref=e26]:
+        - button "Models & Connectors" [ref=e27] [cursor=pointer]
+        - button "Providers" [ref=e28] [cursor=pointer]
+        - button "Connectors" [ref=e29] [cursor=pointer]
+      - generic [ref=e30]:
+        - button "Ops" [ref=e31] [cursor=pointer]
+        - button "Statistics" [ref=e32] [cursor=pointer]
+        - button "Monitoring" [ref=e33] [cursor=pointer]
+        - button "Sessions" [ref=e34] [cursor=pointer]
+      - generic [ref=e35]:
+        - button "Audit" [ref=e36] [cursor=pointer]
+        - button "Audit" [ref=e37] [cursor=pointer]
+    - main [ref=e38]:
+      - generic [ref=e39]:
+        - generic [ref=e40]:
+          - heading "Connectors" [level=2] [ref=e41]
+          - button "Add Connector" [ref=e43] [cursor=pointer]:
+            - img [ref=e44]
+            - text: Add Connector
+        - generic [ref=e45]:
+          - button "All Connectors" [active] [ref=e46] [cursor=pointer]
+          - button "MCP Servers" [ref=e47] [cursor=pointer]
+          - button "OAuth" [ref=e48] [cursor=pointer]
+        - generic [ref=e50]:
+          - generic [ref=e58] [cursor=pointer]:
+            - generic [ref=e60]: 🔐
+            - generic [ref=e61]: GitHub
+            - generic [ref=e62]: OAuth 2.0 Connector
+            - generic [ref=e63]:
+              - generic [ref=e64]: Global
+              - button "Test" [ref=e65]
+          - generic [ref=e66] [cursor=pointer]:
+            - generic [ref=e68]: 🔌
+            - generic [ref=e69]: d7a0d72e
+            - generic [ref=e70]: MCP Server
+            - generic [ref=e71]:
+              - generic [ref=e72]: No tools
+              - button "Test" [ref=e73]
+          - generic [ref=e74] [cursor=pointer]:
+            - generic [ref=e76]: 🔌
+            - generic [ref=e77]: middle
+            - generic [ref=e78]: MCP Server
+            - generic [ref=e79]:
+              - generic [ref=e80]: No tools
+              - button "Test" [ref=e81]
+        - generic [ref=e52]:
+          - generic [ref=e53]:
+            - 'heading "MCP Server: d7a0d72e" [level=3] [ref=e54]'
+            - button "×" [ref=e55] [cursor=pointer]
+          - generic [ref=e57]: invalid or expired session
+  - text: ▶

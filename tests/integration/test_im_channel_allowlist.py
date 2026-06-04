@@ -1,7 +1,7 @@
 import pytest
 
-import fleetent.platform.im_gateway_management.im_channel_allowlist as acl
-import fleetent.platform.im_gateway_management.im_connector_store as ics
+import fleetent.platform.im_gateway_management.channel_allowlist as acl
+import fleetent.platform.im_gateway_management.connector_store as ics
 import fleetent.user_store as user_store
 
 

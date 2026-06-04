@@ -4,10 +4,10 @@ from unittest.mock import patch
 import pytest
 
 import fleetent.agent_store as agent_store
-import fleetent.im_user_store as im_user_store
 from fleetent import user_store
 from fleetent.platform.admin_cli import agents as admin_cli_agents
 from fleetent.platform.admin_cli.main import main as admin_cli_main
+from fleetent.platform.im_gateway_management import identity as im_user_store
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -805,7 +805,7 @@ def test_observability_cli_invalid_time_exits_nonzero():
 
 
 def _seed_slack_connector():
-    import fleetent.platform.im_gateway_management.im_connector_store as store
+    import fleetent.platform.im_gateway_management.connector_store as store
     import fleetent.user_store as user_store
 
     store.upsert_connector(
@@ -825,7 +825,7 @@ def test_im_connector_list_shows_masked_config():
 
 
 def test_im_connector_enable_disable_toggles_flag():
-    import fleetent.platform.im_gateway_management.im_connector_store as store
+    import fleetent.platform.im_gateway_management.connector_store as store
     import fleetent.user_store as user_store
 
     owner = user_store.admin_owner_id()
@@ -841,7 +841,7 @@ def test_im_connector_enable_disable_toggles_flag():
 
 
 def test_im_connector_set_config_writes_config():
-    import fleetent.platform.im_gateway_management.im_connector_config as cfg
+    import fleetent.platform.im_gateway_management.connector_config as cfg
     import fleetent.user_store as user_store
 
     out, _, code = run_admin(
@@ -853,7 +853,7 @@ def test_im_connector_set_config_writes_config():
 
 
 def test_seed_connectors_imports_env_tokens(monkeypatch):
-    import fleetent.platform.im_gateway_management.im_connector_store as store
+    import fleetent.platform.im_gateway_management.connector_store as store
     import fleetent.user_store as user_store
 
     # Slack is per-agent now; seed covers owner-level platforms (Telegram).
@@ -867,7 +867,7 @@ def test_seed_connectors_imports_env_tokens(monkeypatch):
 
 
 def test_im_channel_allow_list_disallow():
-    import fleetent.platform.im_gateway_management.im_connector_store as store
+    import fleetent.platform.im_gateway_management.connector_store as store
     import fleetent.user_store as user_store
 
     store.upsert_connector(
@@ -883,7 +883,7 @@ def test_im_channel_allow_list_disallow():
     assert code == 0
     assert "C1" in out
 
-    import fleetent.platform.im_gateway_management.im_channel_allowlist as allowlist
+    import fleetent.platform.im_gateway_management.channel_allowlist as allowlist
 
     entry_id = allowlist.list_entries(None, "slack")[0]["id"]
     _, _, code = run_admin("im-channel", "disallow", "--id", str(entry_id))

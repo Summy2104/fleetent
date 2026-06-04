@@ -22,7 +22,7 @@ async def test_slack_handler_stamps_owner_and_agent(monkeypatch):
         routed["owner_id"] = msg.owner_id
         routed["agent_name"] = msg.agent_name
 
-    monkeypatch.setattr("fleetent.im_user_store.get_or_create", fake_get_or_create)
+    monkeypatch.setattr("fleetent.platform.im_gateway_management.get_or_create", fake_get_or_create)
     monkeypatch.setattr("fleetent.im_gateway.normalizer.route", fake_route)
 
     handler_holder = {}
@@ -51,11 +51,11 @@ async def test_slack_handler_stamps_owner_and_agent(monkeypatch):
 async def test_telegram_run_reports_status_with_owner(monkeypatch):
     statuses: list = []
     monkeypatch.setattr(
-        telegram.im_connector_store,
+        telegram.im,
         "report_status",
         lambda o, p, s, error=None: statuses.append((o, p, s)),
     )
-    monkeypatch.setattr(telegram.im_connector_store, "heartbeat", lambda o, p: None)
+    monkeypatch.setattr(telegram.im, "heartbeat", lambda o, p: None)
     monkeypatch.setattr(telegram, "create_app", lambda owner_id, config: object())
 
     async def boom(app):

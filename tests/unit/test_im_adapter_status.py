@@ -16,11 +16,11 @@ _OWNER = "owner1"
 
 def _stub_store(monkeypatch, mod, statuses, heartbeats):
     monkeypatch.setattr(
-        mod.im_connector_store,
+        mod.im,
         "report_status",
         lambda o, p, s, error=None: statuses.append((p, s, error)),
     )
-    monkeypatch.setattr(mod.im_connector_store, "heartbeat", lambda o, p: heartbeats.append(p))
+    monkeypatch.setattr(mod.im, "heartbeat", lambda o, p: heartbeats.append(p))
 
 
 async def test_telegram_run_reports_connected_then_error(monkeypatch):

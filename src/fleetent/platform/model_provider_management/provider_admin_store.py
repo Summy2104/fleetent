@@ -26,7 +26,7 @@ def _now() -> str:
 
 
 _PROVIDER_COLS = (
-    "id, base_url, model, api_key, max_tokens, temperature, extra_params, "
+    "id, description, base_url, model, api_key, max_tokens, temperature, extra_params, "
     "input_price_per_1k, output_price_per_1k, created_at, updated_at"
 )
 
@@ -35,6 +35,7 @@ def add_provider(
     provider_id: str,
     base_url: str,
     model: str,
+    description: str | None = None,
     api_key: str | None = None,
     max_tokens: int | None = None,
     temperature: float | None = None,
@@ -45,13 +46,14 @@ def add_provider(
         conn.execute(
             """
             INSERT INTO model_providers
-                (id, base_url, model, api_key, max_tokens, temperature, extra_params,
+                (id, description, base_url, model, api_key, max_tokens, temperature, extra_params,
                  created_at, updated_at)
-            VALUES (:id, :base_url, :model, :api_key, :max_tokens, :temperature,
+            VALUES (:id, :description, :base_url, :model, :api_key, :max_tokens, :temperature,
                     :extra_params, :created_at, :updated_at)
             """,
             {
                 "id": provider_id,
+                "description": description,
                 "base_url": base_url,
                 "model": model,
                 "api_key": api_key,
@@ -64,7 +66,7 @@ def add_provider(
         )
 
 
-_EDITABLE = {"base_url", "model", "max_tokens", "temperature", "extra_params", "api_key"}
+_EDITABLE = {"description", "base_url", "model", "max_tokens", "temperature", "extra_params", "api_key"}
 
 
 def edit_provider(provider_id: str, **fields: Any) -> None:

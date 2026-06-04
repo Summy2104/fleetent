@@ -3,8 +3,9 @@
 import datetime
 import secrets
 
-from fleetent import im_user_store, user_store
+from fleetent import user_store
 from fleetent.governance import audit_log
+from fleetent.platform import im_gateway_management as im
 from fleetent.platform.user_management import api_key_store
 from fleetent.user_store import (
     DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching
@@ -65,9 +66,7 @@ def is_registration_blocked(email: str) -> bool:
 
 
 def _disable_im_accounts(user_id: str) -> None:
-    im_user_store._init_db()
-    with _conn() as conn:
-        conn.execute("UPDATE im_users SET allowed = 0 WHERE user_id = ?", (user_id,))
+    im.disable_im_accounts(user_id)
 
 
 def _ban_registration(email: str, reason: str, batch_id: str | None) -> None:

@@ -452,6 +452,54 @@ def test_agent_v1_backfill_for_existing_rows(tmp_path):
     assert n_versions == 1
 
 
+def test_agent_versions_has_template_id_column(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    av_cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_versions)")}
+    conn.close()
+    assert "template_id" in av_cols
+
+
+def test_downgrade_removes_template_id_column(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    cfg = Config()
+    cfg.set_main_option("script_location", _MIGRATIONS_DIR)
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db}")
+    command.downgrade(cfg, "034")
+    conn = sqlite3.connect(db)
+    av_cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_versions)")}
+    conn.close()
+    assert "template_id" not in av_cols
+
+
+def test_agent_mcp_server_bindings_table_created(tmp_path):
+    # The binding table (agent->global server join) is distinct from the
+    # full-definition agent_mcp_servers table; both must exist at head.
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_mcp_server_bindings)")}
+    conn.close()
+    assert "agent_mcp_server_bindings" in tables
+    assert cols >= {"agent_id", "server_id", "created_at", "created_by"}
+
+
+def test_downgrade_removes_agent_mcp_server_bindings_table(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    cfg = Config()
+    cfg.set_main_option("script_location", _MIGRATIONS_DIR)
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db}")
+    command.downgrade(cfg, "040")
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.close()
+    assert "agent_mcp_server_bindings" not in tables
+
+
 def test_downgrade_removes_agent_versions(tmp_path):
     db = tmp_path / "test.db"
     apply_migrations(db)
@@ -532,7 +580,7 @@ def test_connectors_agent_id_nullable_for_existing_rows(tmp_path):
     conn.commit()
     conn.close()
 
-    _upgrade_to(db, "034")
+    _upgrade_to(db, "040")
 
     conn = sqlite3.connect(db)
     agent_id = conn.execute("SELECT agent_id FROM connectors WHERE id='github'").fetchone()[0]
@@ -570,3 +618,14 @@ def test_knowledge_base_store_uses_database_boundary_and_named_parameters():
     assert "CREATE TABLE" not in store_source
     assert "?" not in store_source
     assert ":tenant_id" in store_source
+
+
+def test_agent_oauth_bindings_table_and_columns(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_oauth_bindings)")}
+    conn.close()
+    assert "agent_oauth_bindings" in tables
+    assert cols >= {"agent_id", "connector_id", "created_at", "created_by"}

@@ -18,14 +18,31 @@ ADMIN_HTML = (Path(__file__).parents[2] / "src" / "fleetent" / "static" / "admin
 def test_grouped_nav_present():
     html = ADMIN_HTML
     assert "switchGroup(" in html
-    for group in ("access", "agents", "models", "ops", "audit"):
+    for group in ("access", "agents", "models", "ops"):
         assert f'data-group="{group}"' in html
 
 
 def test_existing_tabs_still_reachable():
     html = ADMIN_HTML
-    for tab in ("users", "im", "connectors", "kb", "audit"):
+    for tab in ("users", "kb", "chat"):
         assert f'data-tab="{tab}"' in html
+
+
+def test_active_tab_persisted_in_hash():
+    html = ADMIN_HTML
+    # switchTab writes the active tab into the URL hash
+    assert "location.hash" in html
+    # app entry no longer hardcodes the users tab; it restores from hash
+    assert 'switchTab("users")' not in html
+    assert "restoreTab" in html
+
+
+def test_active_tab_restore_falls_back_to_users():
+    html = ADMIN_HTML
+    body = html.split("function restoreTab", 1)[1].split("}", 1)[0]
+    # restore validates against TAB_GROUP and defaults to users
+    assert "TAB_GROUP" in body
+    assert '"users"' in body
 
 
 # --- 2. Skills module ---------------------------------------------------------
@@ -34,9 +51,9 @@ def test_existing_tabs_still_reachable():
 def test_skills_tab_and_list_wiring():
     html = ADMIN_HTML
     assert 'id="tab-skills"' in html
-    assert "sk-body" in html
+    assert 'id="sk-grid"' in html  # card grid (replaced the old sk-body table)
     # list endpoint wired
-    assert 'api("GET", "/skills"' in html
+    assert 'api("GET", "/skills' in html
     assert "LOADERS.skills" in html
 
 
@@ -68,11 +85,11 @@ def test_skills_action_functions_present():
         "function skReload",
         "function skDelete",
         "function skRestore",
-        "function skBindAgents",
         "function skForcePublish",
-        "function skObservability",
         "function skPromote",
         "function skDiscard",
+        "function skDrawer",
+        "function skDoUpload",
     ):
         assert fn in html, fn
 
@@ -118,12 +135,9 @@ def test_providers_crud_and_actions_wired():
         "function pvEdit",
         "function pvDelete",
         "function pvTest",
-        "function pvPricing",
-        "function pvObservability",
         "function pvRoutes",
         "function pvSetRoute",
         "function pvPreviewRoute",
-        "function pvHealth",
     ):
         assert fn in html, fn
 
@@ -133,12 +147,10 @@ def test_providers_endpoints_present():
     for frag in (
         "/providers/${",
         "/connectivity-test",
-        "/pricing",
         "/observability",
         '"/providers/routes"',
         "/routes/",
         "/preview",
-        '"/providers/health"',
     ):
         assert frag in html, frag
 
@@ -163,10 +175,30 @@ def test_providers_write_controls_admin_gated():
 def test_agents_tab_and_list_wiring():
     html = ADMIN_HTML
     assert 'id="tab-agents"' in html
-    assert "ag-body" in html
-    assert 'api("GET", "/agents"' in html
+    # card grid + toolbar replaced the legacy table
+    assert 'id="ag-grid"' in html
+    assert 'id="ag-tabs"' in html
+    assert 'id="ag-filter"' in html
+    assert "function agentCardHtml" in html
+    assert 'api("GET", "/agents?include_archived=true")' in html
     assert "LOADERS.agents" in html
     assert "/agent-templates" in html
+
+
+def test_agents_detail_drawer_and_binding_sections():
+    html = ADMIN_HTML
+    # detail drawer replaces the bind/deploy modals
+    assert 'id="ag-drawer"' in html
+    assert "function agDrawer" in html
+    assert 'id="ag-bind-modal"' not in html
+    assert 'id="ag-deploy-modal"' not in html
+    # every binding section is wired in the drawer
+    assert "function agSetSkill" in html
+    assert "function agToggleMcp" in html
+    assert "function agToggleOauth" in html
+    assert "function agAddKb" in html and "function agUnbindKb" in html
+    for frag in ("/skills/", "/bindings/mcp/", "/bindings/oauth/", "/kbs"):
+        assert frag in html, frag
 
 
 def test_agents_lifecycle_functions_present():
@@ -209,6 +241,236 @@ def test_agents_endpoints_present():
 def test_agents_write_controls_admin_gated():
     html = ADMIN_HTML
     assert "ag-create-bar" in html
+
+
+def test_agents_crud_modal_and_fields_present():
+    html = ADMIN_HTML
+    # create/edit modal with the three editable fields
+    assert 'id="ag-modal"' in html
+    assert 'id="ag-name"' in html
+    assert 'id="ag-system-prompt"' in html
+    assert 'id="ag-allowed-tools"' in html
+    # "New agent" control lives in the (admin-gated) create bar
+    bar = html.split('id="ag-create-bar"', 1)[1].split("</span>", 1)[0]
+    assert "agCreate(" in bar
+
+
+def test_agent_create_modal_wide_and_requires_template():
+    html = ADMIN_HTML
+    # ag-modal uses the wide modal box
+    modal = html.split('id="ag-modal"', 1)[1].split("</div>", 1)[0]
+    assert "modal-box wide" in modal
+    # a template <select> is present and prefills on change
+    assert 'id="ag-template"' in html
+    assert "agTemplatePrefill(" in html
+    # agCreate populates the template select; agSave sends template_id and blocks
+    # creating without a chosen template
+    agcreate = html.split("function agCreate", 1)[1].split("function agEdit", 1)[0]
+    assert "ag-template" in agcreate
+    agsave = html.split("function agSave", 1)[1].split("function agDelete", 1)[0]
+    assert "template_id" in agsave
+
+
+def test_agents_crud_functions_present():
+    html = ADMIN_HTML
+    for fn in ("function agCreate", "function agEdit", "function agSave", "function agDelete"):
+        assert fn in html, fn
+
+
+def test_agents_templates_are_inpage_subtabs():
+    html = ADMIN_HTML
+    sidebar = html.split('class="sidebar"', 1)[1].split("</nav>", 1)[0]
+    # single Agents sidebar item, no separate Templates sidebar tab / section
+    assert 'data-tab="templates"' not in sidebar
+    assert 'id="tab-templates"' not in html
+    # sub-tab switcher + panes live inside the Agents page
+    assert "agSubTab(" in html
+    assert 'id="ag-pane"' in html
+    assert 'id="tmpl-pane"' in html
+
+
+def test_agents_tab_no_longer_hosts_templates_toggle():
+    html = ADMIN_HTML
+    # the old inline toggle panel is gone
+    assert "tmplToggle" not in html
+    assert 'id="ag-templates-panel"' not in html
+
+
+def test_agent_templates_edit_modal_and_fields_present():
+    html = ADMIN_HTML
+    assert 'id="tmpl-modal"' in html
+    for field_id in ("tmpl-id", "tmpl-display-name", "tmpl-allowed-tools", "tmpl-system-prompt"):
+        assert f'id="{field_id}"' in html, field_id
+
+
+def test_resource_id_inputs_are_readonly():
+    html = ADMIN_HTML
+    import re
+
+    for input_id in ("tmpl-id", "nkb-id", "pv-id", "oc-id"):
+        m = re.search(rf'<input[^>]*id="{input_id}"[^>]*>', html)
+        assert m, input_id
+        assert "readonly" in m.group(0), input_id
+
+
+def test_textarea_themed_and_template_editor_roomy():
+    html = ADMIN_HTML
+    import re
+
+    style = html.split("<style", 1)[1].split("</style>", 1)[0]
+    # global form-control rule now covers textarea too
+    assert re.search(r"input,\s*select,\s*textarea", style)
+    # template modal is wide and the prompt editor is tall
+    box = html.split('id="tmpl-modal"', 1)[1].split("</div>", 1)[0]
+    assert "modal-box wide" in box
+    m = re.search(r'id="tmpl-system-prompt"[^>]*rows="(\d+)"', html)
+    assert m and int(m.group(1)) >= 12
+
+
+def test_genid_helper_and_create_uses_it():
+    html = ADMIN_HTML
+    assert "function genId" in html
+    # template/provider/connector create forms fill the id with a generated value
+    assert "genId()" in html
+    # not fewer than the create forms that open with a generated id
+    assert html.count("genId()") >= 3
+
+
+def test_agent_templates_crud_functions_present():
+    html = ADMIN_HTML
+    for fn in (
+        "function tmplCreate",
+        "function tmplEdit",
+        "function tmplSave",
+        "function tmplDelete",
+    ):
+        assert fn in html, fn
+
+
+def test_agent_templates_crud_endpoints_wired():
+    html = ADMIN_HTML
+    assert 'api("POST", "/agent-templates"' in html
+    assert 'api("PATCH", `/agent-templates/${' in html
+    assert 'api("DELETE", `/agent-templates/${' in html
+
+
+def test_agent_templates_write_controls_admin_gated():
+    html = ADMIN_HTML
+    body = html.split("function tmplRender", 1)[1].split("function tmplCreate", 1)[0]
+    assert "IS_VIEWER" in body
+    assert "tmplEdit(" in body
+    assert "tmplDelete(" in body
+
+
+_NON_TEMPLATE_FIELDS = (
+    "ag-skills-dir",
+    "ag-mcp-server-ids",
+    "ag-model-overrides",
+    "ag-memory-namespace",
+)
+
+
+def test_agents_modal_only_template_backed_fields():
+    html = ADMIN_HTML
+    # template-backed editable fields remain
+    assert 'id="ag-system-prompt"' in html
+    assert 'id="ag-allowed-tools"' in html
+    # non-template free-form fields are gone
+    for field_id in _NON_TEMPLATE_FIELDS:
+        assert f'id="{field_id}"' not in html, field_id
+
+
+def test_agents_save_and_edit_drop_non_template_fields():
+    html = ADMIN_HTML
+    save = html.split("function agSave", 1)[1].split("function agDelete", 1)[0]
+    edit = html.split("function agEdit", 1)[1].split("function agCloseModal", 1)[0]
+    for field_id in _NON_TEMPLATE_FIELDS:
+        assert field_id not in save, f"agSave still references {field_id}"
+        assert field_id not in edit, f"agEdit still references {field_id}"
+
+
+def test_agents_crud_endpoints_wired():
+    html = ADMIN_HTML
+    # create = POST /agents, delete = DELETE with confirm header, edit = PATCH
+    assert 'api("POST", "/agents"' in html
+    assert 'api("PATCH", `/agents/${' in html
+    assert 'api("DELETE", `/agents/${' in html
+    assert '"X-Confirm": "true"' in html
+
+
+def test_agents_crud_row_actions_admin_gated():
+    html = ADMIN_HTML
+    body = html.split("function renderAgents()", 1)[1].split("function agShowTemplates", 1)[0]
+    assert "IS_VIEWER" in body
+    assert "agEdit(" in body
+    assert "agDelete(" in body
+
+
+def test_agents_drawer_lifecycle_actions_present_and_gated():
+    html = ADMIN_HTML
+    body = html.split("function agRenderDrawer", 1)[1].split("async function agSetSkill", 1)[0]
+    # lifecycle actions live in the drawer, admin-gated behind IS_VIEWER
+    assert "IS_VIEWER" in body
+    for fn in (
+        "agEdit(",
+        "agOpenClone(",
+        "agArchive(",
+        "agRestore(",
+        "agDelete(",
+        "agActivateVersion(",
+    ):
+        assert fn in body, fn
+
+
+def test_overflow_menu_escapes_scroll_clipping():
+    html = ADMIN_HTML
+    fn = html.split("function toggleMenu(", 1)[1].split("\n}", 1)[0]
+    # dropdown must be positioned via fixed coords so the .table-scroll
+    # (overflow-x:auto) container does not clip it
+    assert "getBoundingClientRect" in fn
+    assert '"fixed"' in fn or "'fixed'" in fn
+
+
+def test_agents_im_binding_in_drawer():
+    html = ADMIN_HTML
+    # IM channel binding moved into the drawer (deploy modal removed)
+    assert 'id="ag-deploy-modal"' not in html
+    assert "function agBindChannel" in html
+    chfn = html.split("async function agBindChannel", 1)[1].split("async function", 1)[0]
+    assert "/bindings/channels/" in chfn
+
+
+def test_drawer_loads_from_aggregate_endpoints():
+    html = ADMIN_HTML
+    fn = html.split("async function agDrawer", 1)[1].split("function agDrawerSection", 1)[0]
+    # opening the drawer pulls every per-agent binding list in one fan-out
+    for frag in ("/bindings`", "/skills`", "/kbs`", "/bindings/oauth`", "/versions`"):
+        assert frag in fn, frag
+    # plus the available-option catalogs
+    assert '"/mcp/servers"' in fn and '"/connectors"' in fn and '"/kb"' in fn
+
+
+def test_bindings_skill_toggle_wired_to_put():
+    html = ADMIN_HTML
+    fn = html.split("function agSetSkill", 1)[1].split("\nasync function", 1)[0]
+    assert '"PUT"' in fn or "'PUT'" in fn
+    assert "/skills/" in fn
+    assert "enabled" in fn
+
+
+def test_bindings_mcp_and_oauth_toggle_wired_to_post_delete():
+    html = ADMIN_HTML
+    mcp = html.split("async function agToggleMcp", 1)[1].split("\nasync function", 1)[0]
+    assert "POST" in mcp and "DELETE" in mcp and "/bindings/mcp/" in mcp
+    oauth = html.split("async function agToggleOauth", 1)[1].split("\nasync function", 1)[0]
+    assert "POST" in oauth and "DELETE" in oauth and "/bindings/oauth/" in oauth
+
+
+def test_bindings_write_controls_viewer_gated():
+    html = ADMIN_HTML
+    # the drawer render helper gates every binding control behind IS_VIEWER
+    render = html.split("function agRenderDrawer", 1)[1].split("async function agSetSkill", 1)[0]
+    assert "IS_VIEWER" in render
 
 
 # --- 5. Statistics module -----------------------------------------------------
@@ -362,7 +624,7 @@ def test_sessions_write_controls_admin_gated():
 def test_oauth_mcp_tab_distinct_from_im_connectors():
     html = ADMIN_HTML
     assert 'id="tab-oauth"' in html
-    assert "oc-body" in html
+    assert 'id="oauth-grid"' in html  # card grid (replaced oc-body table)
     # distinct from IM connectors tab which uses /im/connectors
     assert 'data-tab="oauth"' in html
     assert "LOADERS.oauth" in html
@@ -371,7 +633,8 @@ def test_oauth_mcp_tab_distinct_from_im_connectors():
 def test_oauth_mcp_functions_present():
     html = ADMIN_HTML
     for fn in (
-        "function ocConnectors",
+        "function loadOauthConnectors",
+        "function loadMcpConnectors",
         "function ocCreate",
         "function ocEdit",
         "function ocGrants",
@@ -418,25 +681,22 @@ def test_oauth_write_controls_admin_gated():
 # --- agent-scoped OAuth/MCP: owner column + agent filter ----------------------
 
 
-def test_oauth_connectors_table_has_owner_column():
+def test_oauth_connectors_card_shows_owner():
     html = ADMIN_HTML
-    head = html.split('id="oc-body"', 1)[0]
-    thead = head.rsplit("<thead>", 1)[1]
-    assert ">Owner<" in thead
+    card = html.split("function oauthCardHtml", 1)[1].split("function ", 2)[0]
+    assert "Global" in card and "Agent:" in card  # owner shown on the card
 
 
-def test_mcp_servers_table_has_owner_column():
+def test_mcp_servers_rendered_as_cards():
     html = ADMIN_HTML
-    head = html.split('id="mcp-body"', 1)[0]
-    thead = head.rsplit("<thead>", 1)[1]
-    assert ">Owner<" in thead
+    assert "function mcpCardHtml" in html
+    assert 'id="mcp-grid"' in html
 
 
-def test_oauth_connectors_render_owner_cell_and_colspan():
+def test_oauth_connectors_render_owner_cell():
     html = ADMIN_HTML
-    body = html.split("async function ocConnectors()", 1)[1].split("function ocOpenCreate", 1)[0]
-    assert "c.agent_id" in body
-    assert 'colspan="6"' in body
+    body = html.split("function oauthCardHtml", 1)[1].split("function ", 2)[0]
+    assert "c.agent_id" in body  # owner derived from agent_id
 
 
 def test_mcp_servers_render_owner_cell_and_colspan():
@@ -444,22 +704,6 @@ def test_mcp_servers_render_owner_cell_and_colspan():
     body = html.split("async function mcpServers()", 1)[1].split("async function mcpTools", 1)[0]
     assert "s.agent_id" in body
     assert 'colspan="5"' in body
-
-
-def test_oauth_agent_filter_control_present_and_wired():
-    html = ADMIN_HTML
-    assert 'id="oc-agent-filter"' in html
-    body = html.split("async function ocConnectors()", 1)[1].split("function ocOpenCreate", 1)[0]
-    assert "oc-agent-filter" in body
-    assert "agent_id=" in body
-
-
-def test_mcp_agent_filter_control_present_and_wired():
-    html = ADMIN_HTML
-    assert 'id="mcp-agent-filter"' in html
-    body = html.split("async function mcpServers()", 1)[1].split("async function mcpTools", 1)[0]
-    assert "mcp-agent-filter" in body
-    assert "agent_id=" in body
 
 
 # --- 9. AskIt module removed --------------------------------------------------
@@ -518,7 +762,7 @@ def test_sidebar_present_and_grouped():
     html = ADMIN_HTML
     assert 'class="sidebar"' in html
     # grouped section headings inside sidebar
-    for group in ("access", "agents", "models", "ops", "audit"):
+    for group in ("access", "agents", "models", "ops"):
         assert f'data-group="{group}"' in html
     # contract preserved
     assert "switchGroup(" in html
@@ -530,17 +774,15 @@ def test_sidebar_all_modules_reachable():
     sidebar = html.split('class="sidebar"', 1)[1].split("</nav>", 1)[0]
     for tab in (
         "users",
-        "im",
         "agents",
         "skills",
         "kb",
+        "chat",
         "providers",
-        "connectors",
         "oauth",
         "stats",
         "monitoring",
         "sessions",
-        "audit",
     ):
         assert f'data-tab="{tab}"' in sidebar, tab
 
@@ -557,8 +799,8 @@ def test_page_header_primitive_present():
 
 def test_page_header_applied_to_each_module():
     html = ADMIN_HTML
-    # every module section carries a page header
-    assert html.count('class="page-header"') >= 12
+    # every module section carries a page header (one per top-level module tab)
+    assert html.count('class="page-header"') >= 10
 
 
 # --- Redesign: toast + confirm dialog -----------------------------------------
@@ -585,7 +827,7 @@ def test_tables_wrapped_in_scroll_container():
     html = ADMIN_HTML
     # every data table lives inside a horizontal scroll container
     assert html.count('class="table-scroll"') >= html.count("<table>")
-    assert html.count("<table>") >= 13
+    assert html.count("<table>") >= 12
 
 
 def test_empty_and_loading_state_helpers_present():
@@ -627,7 +869,6 @@ def test_viewer_hidden_write_containers_intact():
     for cid in (
         "create-bar",
         "kb-create-card",
-        "conn-create-bar",
         "sk-create-bar",
         "pv-create-bar",
         "ag-create-bar",
@@ -636,12 +877,11 @@ def test_viewer_hidden_write_containers_intact():
         "mon-maint-bar",
         "sess-create-bar",
         "sess-bulk-bar",
-        "oc-create-bar",
     ):
         assert f'id="{cid}"' in html, cid
     # the enterApp viewer-gate still references every container
     gate = html.split("if (IS_VIEWER) {", 1)[1].split("}", 1)[0]
-    for cid in ("sk-create-bar", "pv-create-bar", "oc-create-bar", "sess-bulk-bar"):
+    for cid in ("sk-create-bar", "pv-create-bar", "sess-bulk-bar"):
         assert cid in gate, cid
 
 
@@ -653,33 +893,162 @@ def test_secret_fields_masked_no_prefill():
         assert "autocomplete" in snippet, fid
     # edit paths explicitly blank the secret before showing the form
     assert '$("pv-api-key").value = "";' in html
-    assert '$("oc-client-secret").value = "";' in html
 
 
-# --- user-scoped IM connectors: owner column + owner-scoped create -----------
+# --- unified User-centric axis: single Users tab -----------------------------
 
 
-def test_im_connectors_table_has_owner_column():
+def _render_users_body(html):
+    return html.split("function renderUsers()", 1)[1].split("function closeMenus", 1)[0]
+
+
+def test_no_standalone_im_tab():
     html = ADMIN_HTML
-    # the connectors table header row precedes the conn-body tbody
-    head = html.split("conn-body", 1)[0]
-    thead = head.rsplit("<thead>", 1)[1]
-    assert ">Owner<" in thead
+    assert 'data-tab="im"' not in html
+    assert 'id="tab-im"' not in html
+    assert 'id="im-groups"' not in html
+    assert "LOADERS.im" not in html
+    assert "async function loadIm" not in html
+    tab_group = html.split("const TAB_GROUP", 1)[1].split("}", 1)[0]
+    assert "im:" not in tab_group
+    group_default = html.split("const GROUP_DEFAULT_TAB", 1)[1].split("}", 1)[0]
+    assert '"im"' not in group_default and "'im'" not in group_default
 
 
-def test_im_connectors_render_owner_cell():
+def test_access_group_only_users_tab():
     html = ADMIN_HTML
-    body = html.split("async function loadConn()", 1)[1].split("function renderConnFields", 1)[0]
-    # each row exposes the owner the connector belongs to (admin sees all owners)
-    assert "r.owner_id" in body
-    # colspan for the empty state must cover the new column count (6)
-    assert 'colspan="6"' in body
+    access = html.split('data-group="access"', 1)[1].split("</div>", 1)[0]
+    assert 'data-tab="users"' in access
+    assert 'data-tab="im"' not in access
 
 
-def test_im_connector_create_scoped_to_caller_owner():
+def test_separate_connectors_tab_removed():
+    html = ADMIN_HTML
+    # neither the legacy connectors tab nor the IM tab exist as standalone tabs
+    assert 'data-tab="connectors"' not in html
+    assert 'id="tab-connectors"' not in html
+    assert 'data-tab="im"' not in html
+    assert 'id="tab-im"' not in html
+
+
+# --- Task 2: foldable IM identities per User ----------------------------------
+
+
+def test_loaders_users_fetches_three_endpoints():
+    html = ADMIN_HTML
+    loader = html.split("async function loadUsers()", 1)[1].split("function renderUsers", 1)[0]
+    assert '"/users"' in loader
+    assert '"/im-users"' in loader
+    assert '"/im/connectors"' in loader
+    assert "IM_BY_USER" in loader
+    assert "CONN_BY_OWNER" in loader
+
+
+def test_render_users_joins_im_identities_by_user():
+    body = _render_users_body(ADMIN_HTML)
+    # IM identities joined by user_id and folded under their User
+    assert "IM_BY_USER[" in body
+    # expander control + per-identity actions live in the per-user child region
+    assert "toggleUserRow(" in body
+    assert "openBindModal(" in body
+    assert "imBlock(" in body
+    assert "imRestore(" in body
+    assert "platform_user_id" in body
+
+
+# --- Task 3: connectors grouped under owning User -----------------------------
+
+
+def test_render_users_groups_connectors_by_owner():
+    body = _render_users_body(ADMIN_HTML)
+    assert "CONN_BY_OWNER[" in body
+    assert "connEnable(" in body
+    assert "connDisable(" in body
+
+
+def test_add_connection_per_user_row():
+    html = ADMIN_HTML
+    # no top-level "Add connection" bar — the action lives on each User row
+    assert "conn-create-bar" not in html
+    body = _render_users_body(html)
+    # per-row add targets that User as the connector owner, admin-gated
+    assert "openConnModal('" in body
+    assert "IS_VIEWER" in body
+
+
+def test_connector_modal_retained():
+    html = ADMIN_HTML
+    assert 'id="conn-modal"' in html
+    assert "function openConnModal" in html
+    assert "function createConn" in html
+    assert "const CONN_FIELDS" in html
+
+
+def test_im_connector_create_targets_selected_owner():
     html = ADMIN_HTML
     create = html.split("async function createConn()", 1)[1].split("async function connEnable", 1)[
         0
     ]
-    # create must not let the form spoof an arbitrary owner; backend defaults to caller
-    assert "owner_id" not in create
+    # owner flows from the per-row target (CONN_OWNER set by openConnModal), not a
+    # free-text form field; creation stays admin-gated server-side.
+    assert "owner_id" in create
+    assert "CONN_OWNER" in create
+
+
+# --- Task 4: source filter + badge --------------------------------------------
+
+
+def test_source_filter_control_in_users_tab():
+    html = ADMIN_HTML
+    users_section = html.split('id="tab-users"', 1)[1].split("</section>", 1)[0]
+    assert 'id="source-filter"' in users_section
+
+
+def test_source_classification_and_badge():
+    body = _render_users_body(ADMIN_HTML)
+    # IM-origin detection (bound identities OR {platform}:{id} name pattern) + badge
+    assert "imOrigin" in body
+    assert "source-filter" in body
+
+
+# --- User list pagination -----------------------------------------------------
+
+
+def test_user_list_pagination_controls_present():
+    html = ADMIN_HTML
+    users_section = html.split('id="tab-users"', 1)[1].split("</section>", 1)[0]
+    assert 'id="users-pager"' in users_section
+
+
+def test_render_users_paginates_filtered_list():
+    body = _render_users_body(ADMIN_HTML)
+    # current page slice of the filtered list
+    assert "USERS_PAGE" in body
+    assert "USERS_PAGE_SIZE" in body
+    assert ".slice(" in body
+    # pager nav wiring
+    assert "usersGoto(" in body
+
+
+def test_filter_change_resets_to_first_page():
+    html = ADMIN_HTML
+    # changing any filter jumps back to page 1
+    assert "function usersFilterChanged" in html
+    reset = html.split("function usersFilterChanged", 1)[1].split("}", 1)[0]
+    assert "USERS_PAGE = 1" in reset
+    # filter inputs route through the reset wrapper, not renderUsers directly
+    users_section = html.split('id="tab-users"', 1)[1].split("</section>", 1)[0]
+    assert "usersFilterChanged()" in users_section
+
+
+# --- Task 5: distinct block semantics -----------------------------------------
+
+
+def test_distinct_block_semantics_labels():
+    body = _render_users_body(ADMIN_HTML)
+    # whole-User disable vs single-identity block rendered with distinct labels
+    assert "Disable user" in body
+    assert "Block identity" in body
+    # user-level wires /users/.../block|unblock; identity-level wires /im-users/.../block
+    assert "block(" in body
+    assert "imBlock(" in body

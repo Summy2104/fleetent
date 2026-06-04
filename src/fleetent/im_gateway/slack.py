@@ -67,14 +67,14 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
     @app.event("message")
     async def handle_message(event: dict[str, Any], say: object) -> None:
         from fleetent.im_gateway.normalizer import NormalizedMessage, route
-        from fleetent.im_user_store import get_or_create
+        from fleetent.platform import im_gateway_management as im
 
         channel = event.get("channel") or ""
         if channels and channel not in channels:
             return  # channel outside this agent's response filter
 
         slack_user_id = event.get("user") or "unknown"
-        user = get_or_create(owner_id, "slack", slack_user_id)
+        user = im.get_or_create(owner_id, "slack", slack_user_id)
         thread_ts = event.get("thread_ts")
         channel_type = event.get("channel_type") or "channel"
 

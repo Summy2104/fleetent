@@ -80,6 +80,15 @@ def edit_connector(connector_id: str, agent_id: int | None = None, **fields: Any
         )
 
 
+def delete_connector(connector_id: str, agent_id: int | None = None) -> None:
+    scope = "agent_id = :agent_id" if agent_id is not None else "agent_id IS NULL"
+    with _database().transaction() as conn:
+        conn.execute(
+            f"DELETE FROM connectors WHERE id = :id AND {scope}",
+            {"id": connector_id, "agent_id": agent_id},
+        )
+
+
 def get_connector(connector_id: str, agent_id: int | None = None) -> dict[str, Any] | None:
     # Resolution: an agent-owned row wins; otherwise fall back to the global default.
     if agent_id is not None:

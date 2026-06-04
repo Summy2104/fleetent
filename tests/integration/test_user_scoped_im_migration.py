@@ -10,8 +10,10 @@ import sqlite3
 
 import pytest
 
-from fleetent import im_user_store, user_store
-from fleetent.platform.im_gateway_management import im_channel_allowlist, im_connector_store
+from fleetent import user_store
+from fleetent.platform.im_gateway_management import channel_allowlist as im_channel_allowlist
+from fleetent.platform.im_gateway_management import connector_store as im_connector_store
+from fleetent.platform.im_gateway_management import identity as im_user_store
 
 
 @pytest.fixture
