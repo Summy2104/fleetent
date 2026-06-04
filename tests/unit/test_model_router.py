@@ -392,7 +392,9 @@ def test_routes_path_is_injectable_path():
 
 
 def test_routes_path_default_points_at_config():
-    assert Path("config/routes.yaml") == model_router.ROUTES_PATH
+    from fleetent import paths
+
+    assert paths.config_dir() / "routes.yaml" == model_router.ROUTES_PATH
 
 
 # --- _load_routes: load from YAML ---

@@ -7,7 +7,7 @@ import time
 import uuid
 from pathlib import Path
 
-from fleetent import eval_logger
+from fleetent import eval_logger, paths
 from fleetent.integrations.sandbox import (
     ExecResult,
     SandboxClient,
@@ -62,12 +62,12 @@ def _get_manager() -> SandboxManager:
 # Generated images are written here, then a short reference is returned to the
 # loop (never inline base64). Injectable module-level constant (no global mutable
 # state): tests monkeypatch this to an isolated tmp path.
-GENERATED_DIR: Path = Path("data/generated")
+GENERATED_DIR: Path = paths.data_dir() / "generated"
 
 # Inbound images are written here, then a short reference (path) travels in the
 # main context; analyze_image reads bytes back by reference. Injectable like
 # GENERATED_DIR (no global mutable state) so tests isolate it to a tmp path.
-UPLOADS_DIR: Path = Path("data/uploads")
+UPLOADS_DIR: Path = paths.data_dir() / "uploads"
 
 # Map common image mimes to file extensions for stored uploads.
 _MIME_EXT = {

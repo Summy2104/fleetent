@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from fleetent import paths
 from fleetent.db import create_database
 from fleetent.observability.structured_logging import _redact_value
 
@@ -151,7 +152,8 @@ def query_trace_events(query: TraceQuery) -> Iterator[TraceEvent]:
 
 
 def _database_url() -> str:
-    return os.environ.get("DATABASE_URL", "sqlite:///data/fleetent.db")
+    default = f"sqlite:///{paths.data_dir() / 'fleetent.db'}"
+    return os.environ.get("DATABASE_URL", default)
 
 
 def _prepare_payload(payload: dict[str, Any]) -> dict[str, Any]:

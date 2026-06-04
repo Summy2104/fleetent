@@ -1,5 +1,6 @@
 import asyncio
 import os
+from pathlib import Path
 
 import pytest
 import structlog
@@ -310,14 +311,14 @@ async def test_cleanup_unlink_failure_does_not_abort_batch(sessions_dir, monkeyp
     _set_mtime(sessions_dir / "bad.json", now - ttl - 10)
     _set_mtime(sessions_dir / "good.json", now - ttl - 10)
 
-    real_unlink = session_mgr.Path.unlink
+    real_unlink = Path.unlink
 
     def flaky_unlink(self, *args, **kwargs):
         if self.name == "bad.json":
             raise OSError("boom")
         return real_unlink(self, *args, **kwargs)
 
-    monkeypatch.setattr(session_mgr.Path, "unlink", flaky_unlink)
+    monkeypatch.setattr(Path, "unlink", flaky_unlink)
 
     removed = session_mgr.cleanup_expired(ttl_seconds=ttl, _now=now)
 
@@ -594,14 +595,14 @@ async def test_enforce_capacity_unlink_failure_does_not_abort_batch(sessions_dir
         await session_mgr.save(sid, [{"role": "user", "content": "x"}])
         _set_mtime(sessions_dir / f"{sid}.json", mtime)
 
-    real_unlink = session_mgr.Path.unlink
+    real_unlink = Path.unlink
 
     def flaky_unlink(self, *args, **kwargs):
         if self.name == "bad.json":
             raise OSError("boom")
         return real_unlink(self, *args, **kwargs)
 
-    monkeypatch.setattr(session_mgr.Path, "unlink", flaky_unlink)
+    monkeypatch.setattr(Path, "unlink", flaky_unlink)
 
     # Limit allows two files -> exactly one eviction is attempted (the oldest, bad).
     # bad's unlink fails but the batch must not abort or over-evict healthy sessions;

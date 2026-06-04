@@ -4,17 +4,17 @@ import base64
 import json
 import re
 import time
-from pathlib import Path
 from typing import Any
 
 from openai.types import CompletionUsage
 
+from fleetent import paths
 from fleetent.integrations.sandbox import secrets as sandbox_secrets
 
 # Single trace path constant for all three writers (log_run / log /
 # log_sandbox_exec). One injectable module-level path means tests monkeypatch
 # exactly one attribute to isolate every write (no leaked second alias).
-TRACE_PATH = Path("data/traces.jsonl")
+TRACE_PATH = paths.data_dir() / "traces.jsonl"
 
 # Placeholder written in place of a sensitive-named tool_call argument value.
 REDACTED_PLACEHOLDER = "[REDACTED]"
