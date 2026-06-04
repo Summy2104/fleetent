@@ -51,7 +51,7 @@ def test_dockerfile_includes_deployment_runtime_assets_and_port():
 
     required_phrases = [
         "COPY scripts/ ./scripts/",
-        "COPY config/*.yaml.example ./config/",
+        "COPY config/agent.yaml.example ./config/",
         "COPY .env.example ./",
         'ENTRYPOINT ["./scripts/docker_entrypoint.sh"]',
         "EXPOSE 8765",
