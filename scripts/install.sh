@@ -149,7 +149,30 @@ install_tool() {
     log_success "Installed: $ENTRYPOINTS"
 }
 
-setup_home_env()         { :; }
+# Fix the state directory (FLEETENT_HOME) and persist it to the user's shell rc
+# so the global command resolves config/data there regardless of CWD.
+setup_home_env() {
+    export FLEETENT_HOME="$FLEETENT_HOME_DIR"
+    mkdir -p "$FLEETENT_HOME"
+    log_info "FLEETENT_HOME = $FLEETENT_HOME"
+
+    local rc
+    case "$(basename "${SHELL:-/bin/bash}")" in
+        zsh)  rc="$HOME/.zshrc" ;;
+        bash) rc="$HOME/.bashrc" ;;
+        *)    rc="$HOME/.profile" ;;
+    esac
+    # Idempotent: only append if no FLEETENT_HOME export is already present.
+    if [ ! -f "$rc" ] || ! grep -qF "export FLEETENT_HOME=" "$rc"; then
+        echo "export FLEETENT_HOME=\"$FLEETENT_HOME\"" >> "$rc"
+        log_success "Persisted FLEETENT_HOME to $rc"
+    fi
+
+    case ":$PATH:" in
+        *":$HOME/.local/bin:"*) : ;;
+        *) log_warn "~/.local/bin is not on your PATH — add it (e.g. 'uv tool update-shell') to run the fleetent command." ;;
+    esac
+}
 copy_config_templates()  { :; }
 init_db()                { :; }
 precheck_docker()        { :; }

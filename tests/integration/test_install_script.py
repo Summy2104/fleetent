@@ -101,6 +101,7 @@ def _fake_uv_env(home: Path, fake_bin: Path, uv_log: Path, **flags: str) -> dict
         "PATH": f"{fake_bin}:/usr/bin:/bin:/usr/sbin:/sbin",
         "UV_LOG": str(uv_log),
         "FAKE_BIN": str(fake_bin),
+        "SHELL": "/bin/bash",  # deterministic rc target (~/.bashrc)
     }
     env.update(flags)
     return env
@@ -162,3 +163,51 @@ def test_missing_entrypoint_reports_recovery_hint(tmp_path: Path) -> None:
     assert result.returncode != 0
     combined = result.stdout + result.stderr
     assert "uv tool install" in combined
+
+
+def test_default_fleetent_home_created_and_persisted(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
+
+    result = _run_env(["--skip-db", "--skip-config"], env, home)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (home / ".fleetent").is_dir()
+    rc = (home / ".bashrc").read_text()
+    assert f'export FLEETENT_HOME="{home / ".fleetent"}"' in rc
+
+
+def test_fleetent_home_persist_is_idempotent(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
+
+    _run_env(["--skip-db", "--skip-config"], env, home)
+    _run_env(["--skip-db", "--skip-config"], env, home)
+
+    rc = (home / ".bashrc").read_text()
+    assert rc.count("export FLEETENT_HOME=") == 1
+
+
+def test_dir_flag_overrides_home(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    custom = tmp_path / "custom-home"
+    env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
+
+    result = _run_env(["--dir", str(custom), "--skip-db", "--skip-config"], env, home)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert custom.is_dir()
+    assert f'export FLEETENT_HOME="{custom}"' in (home / ".bashrc").read_text()
+
+
+def test_path_hint_when_local_bin_absent(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")  # PATH lacks ~/.local/bin
+
+    result = _run_env(["--skip-db", "--skip-config"], env, home)
+
+    assert ".local/bin" in (result.stdout + result.stderr)

@@ -14,8 +14,8 @@
 
 ## 3. FLEETENT_HOME 状态目录
 
-- [ ] 3.1 Write failing tests：默认 `FLEETENT_HOME=~/.fleetent`（隔离 HOME 验证）并写入 shell rc（幂等：重跑不重复写）；`--dir PATH` 覆盖默认；`~/.local/bin` 不在 PATH 时打印加入提示
-- [ ] 3.2 Implement：`setup_home_env()` —— 解析 `FLEETENT_HOME`（默认 `~/.fleetent`，`--dir` 覆盖）、本次进程内 export、幂等写入 shell rc、PATH 提示，使测试转绿
+- [x] 3.1 Write failing tests：默认 `FLEETENT_HOME=~/.fleetent`（隔离 HOME 验证）并写入 shell rc（幂等：重跑不重复写）；`--dir PATH` 覆盖默认；`~/.local/bin` 不在 PATH 时打印加入提示
+- [x] 3.2 Implement：`setup_home_env()` —— 解析 `FLEETENT_HOME`（默认 `~/.fleetent`，`--dir` 覆盖）、本次进程内 export、幂等写入 shell rc、PATH 提示，使测试转绿
 
 ## 4. 配置模板拷贝（幂等）
 
