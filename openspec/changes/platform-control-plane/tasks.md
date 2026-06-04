@@ -20,4 +20,4 @@
   execution/IM tests to the agent-runtime suite (or mark them agent-runtime-scoped).
 - [x] 3.2 `uv run ruff format src tests && uv run ruff check src tests` and
   `uv run mypy src` (no new errors over baseline).
-- [ ] 3.3 Full suite `uv run pytest -x -q` green.
+- [x] 3.3 Full suite `uv run pytest -x -q` green.
