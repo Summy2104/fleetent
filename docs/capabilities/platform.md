@@ -523,7 +523,7 @@ flowchart TD
 
 ### model_provider 管理（v1.0）
 
-> 设计哲学借鉴市面成熟的「模型供应商 / 模型接入后台」（Dify 的 Model Provider 设置、各网关的 provider + 路由配置、OpenRouter 式的多 provider 编排）：**provider 与 task_type 路由是后台里可配置、可测连通、可设 fallback 顺序、可维护单价表的一等公民**，让 admin 无需手改 `config/settings.yaml` 即可新增一个 OpenAI-compatible 端点并接入路由。本模块只写**管理面的可观察行为**；task_type → provider 映射、AsyncOpenAI client 实例化、fallback 链遍历与切换的**运行语义**由 [model-router](./model-router.md) 负责，成本追踪由 [observability](./observability.md) 负责，本节只提供这些能力的 UI 入口并交叉引用。
+> 设计哲学借鉴市面成熟的「模型供应商 / 模型接入后台」（Dify 的 Model Provider 设置、各网关的 provider + 路由配置、OpenRouter 式的多 provider 编排）：**provider 与 task_type 路由是后台里可配置、可测连通、可设 fallback 顺序、可维护单价表的一等公民**，让 admin 无需手改 `config/agent.yaml` 即可新增一个 OpenAI-compatible 端点并接入路由。本模块只写**管理面的可观察行为**；task_type → provider 映射、AsyncOpenAI client 实例化、fallback 链遍历与切换的**运行语义**由 [model-router](./model-router.md) 负责，成本追踪由 [observability](./observability.md) 负责，本节只提供这些能力的 UI 入口并交叉引用。
 >
 > **自托管口径**：provider 的 base_url 可指向任意 OpenAI-compatible 端点（Anthropic / OpenRouter / 本地 Ollama / vLLM 等），符合"基础设施可自托管、数据不出内网"的部署原则；本页对自托管 / 自定义模型同样适用。
 

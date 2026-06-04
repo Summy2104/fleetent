@@ -70,6 +70,114 @@ def test_agent_file_defaults() -> None:
     assert af.bindings.users == []
 
 
+def test_agent_file_accepts_typed_intelligence_config() -> None:
+    doc = _valid_doc()
+    doc.update(
+        {
+            "vector_store": {"backend": "sqlite", "database_url": "sqlite:///data/vector.db"},
+            "embedding": {
+                "backend": "http",
+                "dimensions": 1024,
+                "endpoint_env": "FLEETENT_EVAL_EMBEDDING_ENDPOINT",
+                "model_env": "FLEETENT_EVAL_EMBEDDING_MODEL",
+                "api_key_env": "FLEETENT_EVAL_EMBEDDING_API_KEY",
+            },
+            "rerank": {
+                "backend": "http",
+                "endpoint_env": "FLEETENT_EVAL_RERANK_ENDPOINT",
+                "model_env": "FLEETENT_EVAL_RERANK_MODEL",
+                "api_key_env": "FLEETENT_EVAL_RERANK_API_KEY",
+            },
+            "knowledge_base": {
+                "enabled": True,
+                "default_tenant_id": "pilot-tenant",
+                "default_kb_id": "pilot-kb",
+                "google_drive": {
+                    "connectors": [
+                        {
+                            "connector_id": "pilot-drive",
+                            "tenant_id": "pilot-tenant",
+                            "kb_id": "pilot-kb",
+                            "folder_id": "folder-123",
+                            "access_token_env": "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN",
+                            "refresh_token_env": "FLEETENT_GOOGLE_DRIVE_REFRESH_TOKEN",
+                            "client_id_env": "FLEETENT_GOOGLE_DRIVE_CLIENT_ID",
+                            "client_secret_env": "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET",
+                        }
+                    ]
+                },
+                "confluence": {
+                    "connectors": [
+                        {
+                            "connector_id": "pilot-confluence",
+                            "tenant_id": "pilot-tenant",
+                            "kb_id": "pilot-kb",
+                            "base_url": "https://example.atlassian.net/wiki",
+                            "username_env": "FLEETENT_CONFLUENCE_USERNAME",
+                            "scope_type": "page",
+                            "page_id": 123,
+                            "api_token_env": "FLEETENT_CONFLUENCE_TOKEN",
+                        }
+                    ]
+                },
+            },
+            "long_term_ctx": {
+                "max_tokens": 2048,
+                "memory_max_tokens": 1024,
+                "knowledge_max_tokens": 1024,
+                "conflict_preference": "auto",
+            },
+        }
+    )
+
+    af = agent_config.AgentFile.model_validate(doc)
+
+    assert af.vector_store.backend == "sqlite"
+    assert af.embedding.dimensions == 1024
+    assert af.embedding.api_key_env == "FLEETENT_EVAL_EMBEDDING_API_KEY"
+    assert af.rerank.model_env == "FLEETENT_EVAL_RERANK_MODEL"
+    assert af.knowledge_base.default_tenant_id == "pilot-tenant"
+    assert af.knowledge_base.google_drive.connectors[0].client_secret_env == (
+        "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET"
+    )
+    assert af.knowledge_base.confluence.connectors[0].api_token_env == (
+        "FLEETENT_CONFLUENCE_TOKEN"
+    )
+    assert af.long_term_ctx.conflict_preference == "auto"
+
+
+def test_agent_home_file_accepts_google_drive_folder_id_in_intelligence_config(tmp_path) -> None:
+    doc = {
+        "name": "pilot",
+        "version": 1,
+        "knowledge_base": {
+            "enabled": True,
+            "google_drive": {
+                "connectors": [
+                    {
+                        "connector_id": "pilot-drive",
+                        "tenant_id": "pilot-tenant",
+                        "kb_id": "pilot-kb",
+                        "folder_id": "1Cs7y_5p8BOX4hZ7CT7fbS8CPBCkjF-W3",
+                        "access_token_env": "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN",
+                        "refresh_token_env": "FLEETENT_GOOGLE_DRIVE_REFRESH_TOKEN",
+                        "client_id_env": "FLEETENT_GOOGLE_DRIVE_CLIENT_ID",
+                        "client_secret_env": "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET",
+                    }
+                ]
+            },
+        },
+    }
+    path = tmp_path / "agent.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+
+    agent = agent_config.load_agent_home_file(path)
+
+    assert agent.knowledge_base.google_drive.connectors[0].folder_id == (
+        "1Cs7y_5p8BOX4hZ7CT7fbS8CPBCkjF-W3"
+    )
+
+
 @pytest.mark.parametrize("missing", ["name", "version"])
 def test_agent_file_missing_required_rejected(missing: str) -> None:
     doc = _valid_doc()
@@ -240,25 +348,27 @@ def test_long_system_prompt_not_flagged_as_secret(tmp_path) -> None:
     assert index.get("support") is not None
 
 
-# ── single-file agent home (single-agent-config-file change) ──────────────────
+# ── single-file agent config (single-agent-config-file change) ────────────────
 
 
-def _write_home_agent(home, name: str, **overrides) -> None:
-    """Write a home-root agent.yaml (no <name>/ subdir)."""
+def _write_config_agent(home, name: str, **overrides) -> None:
+    """Write a config-dir agent.yaml (no <name>/ subdir)."""
     doc = {"name": name, "version": 1}
     doc.update(overrides)
-    (home / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    config_dir = home / "config"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
 
 
-def test_load_agent_home_file_skips_dir_name_check(tmp_path) -> None:
-    # Home-root agent.yaml: `name` need not match any directory name.
-    _write_home_agent(tmp_path, "whatever-name")
-    agent = agent_config.load_agent_home_file(tmp_path / "agent.yaml")
+def test_load_single_agent_file_skips_dir_name_check(tmp_path) -> None:
+    # Config-dir single-agent file: `name` need not match any directory name.
+    _write_config_agent(tmp_path, "whatever-name")
+    agent = agent_config.load_agent_home_file(tmp_path / "config" / "agent.yaml")
     assert agent.name == "whatever-name"
 
 
-def test_load_agent_home_file_still_rejects_inline_secret(tmp_path) -> None:
-    _write_home_agent(
+def test_load_single_agent_file_still_rejects_inline_secret(tmp_path) -> None:
+    _write_config_agent(
         tmp_path,
         "support",
         mcp_servers=[
@@ -272,18 +382,18 @@ def test_load_agent_home_file_still_rejects_inline_secret(tmp_path) -> None:
         ],
     )
     with pytest.raises(ValueError):
-        agent_config.load_agent_home_file(tmp_path / "agent.yaml")
+        agent_config.load_agent_home_file(tmp_path / "config" / "agent.yaml")
 
 
-def test_build_index_prefers_home_file_as_sole_default(tmp_path, monkeypatch) -> None:
+def test_build_index_prefers_config_agent_file_as_sole_default(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()
     # A multi-scan agents dir also exists; it must be ignored when home file is present.
     agents_dir = home / "config" / "agents"
     agents_dir.mkdir(parents=True)
     _write_agent(agents_dir, "other")
-    # Home-root agent.yaml, bindings.default false -> still forced default.
-    _write_home_agent(home, "deployed", bindings={"default": False, "channels": ["slack:C9"]})
+    # Config-dir agent.yaml, bindings.default false -> still forced default.
+    _write_config_agent(home, "deployed", bindings={"default": False, "channels": ["slack:C9"]})
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
     index = agent_config.build_index()
@@ -294,14 +404,16 @@ def test_build_index_prefers_home_file_as_sole_default(tmp_path, monkeypatch) ->
     assert index.get("other") is None
 
 
-def test_build_index_falls_back_to_multiscan_without_home_file(tmp_path, monkeypatch) -> None:
+def test_build_index_falls_back_to_multiscan_without_config_agent_file(
+    tmp_path, monkeypatch
+) -> None:
     home = tmp_path / "home"
     home.mkdir()
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
     _write_agent(agents_dir, "a", bindings={"default": True})
     _write_agent(agents_dir, "b")
-    monkeypatch.setenv("FLEETENT_HOME", str(home))  # no home-root agent.yaml
+    monkeypatch.setenv("FLEETENT_HOME", str(home))  # no config/agent.yaml
     monkeypatch.setenv("FLEETENT_AGENTS_DIR", str(agents_dir))  # explicit multi-scan dir
 
     index = agent_config.build_index()
@@ -310,8 +422,8 @@ def test_build_index_falls_back_to_multiscan_without_home_file(tmp_path, monkeyp
     assert index.default == "a"  # multiscan: default decided by bindings.default
 
 
-def test_repo_agent_yaml_example_loads_as_home_file() -> None:
-    """The shipped single-agent root template parses with the home-file loader."""
+def test_repo_agent_yaml_example_loads_as_single_agent_file() -> None:
+    """The shipped single-agent template parses with the single-file loader."""
     from pathlib import Path
 
     repo = Path(__file__).resolve().parents[2]
@@ -320,3 +432,7 @@ def test_repo_agent_yaml_example_loads_as_home_file() -> None:
     agent = agent_config.load_agent_home_file(example)
     assert agent.name  # non-empty
     assert agent.version >= 1
+    assert agent.vector_store.backend == "sqlite"
+    assert agent.embedding.api_key_env == "FLEETENT_EVAL_EMBEDDING_API_KEY"
+    assert agent.rerank.api_key_env == "FLEETENT_EVAL_RERANK_API_KEY"
+    assert agent.knowledge_base.enabled is True

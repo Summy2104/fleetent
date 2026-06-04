@@ -140,9 +140,9 @@ def test_pilot_install_checklist_documents_secret_and_reporting_boundaries():
     content = Path("docs/deployment/pilot-install-checklist.md").read_text(encoding="utf-8")
 
     required_phrases = [
-        "不要把真实 secret、token、credential payload 写入 settings、日志、trace",
+        "不要把真实 secret、token、credential payload 写入 agent config、日志、trace",
         "diagnostics package、issue 或测试 fixture",
-        "credential_ref",
+        "`*_env` 引用",
         "SQLite backup",
         "停止 fleetent 服务",
         "替换当前 DB 文件",

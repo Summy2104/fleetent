@@ -9,6 +9,7 @@ admin console remain the authoring source of truth; these files are generated ar
 """
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,14 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from fleetent import paths
-from fleetent.config import McpServerSettings
+from fleetent.config import (
+    EmbeddingSettings,
+    KnowledgeBaseSettings,
+    LongTermContextSettings,
+    McpServerSettings,
+    RerankSettings,
+    VectorStoreSettings,
+)
 from fleetent.platform.config_validation import _flatten, _looks_inline_secret
 
 # Agents root directory. Module-level constant (injectable via monkeypatch per the
@@ -25,6 +33,7 @@ from fleetent.platform.config_validation import _flatten, _looks_inline_secret
 AGENTS_DIR = paths.config_dir() / "agents"
 
 AGENT_FILE_NAME = "agent.yaml"
+_ENV_VAR_NAME_RE = re.compile(r"^(env:)?[A-Z_][A-Z0-9_]*$")
 
 
 class AgentBindings(BaseModel):
@@ -71,6 +80,11 @@ class AgentFile(BaseModel):
     plugins: list[str] = Field(default_factory=list)
     features: dict[str, Any] = Field(default_factory=dict)
     mcp_servers: list[McpServerSettings] = Field(default_factory=list)
+    vector_store: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    rerank: RerankSettings = Field(default_factory=RerankSettings)
+    knowledge_base: KnowledgeBaseSettings = Field(default_factory=KnowledgeBaseSettings)
+    long_term_ctx: LongTermContextSettings = Field(default_factory=LongTermContextSettings)
     connectors: AgentConnectors = Field(default_factory=AgentConnectors)
     bindings: AgentBindings = Field(default_factory=AgentBindings)
 
@@ -134,19 +148,46 @@ def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
         "mcp_servers": [server.model_dump() for server in agent.mcp_servers],
         "connectors": agent.connectors.model_dump(),
     }
+    intelligence_payload = {
+        "embedding": agent.embedding.model_dump(),
+        "rerank": agent.rerank.model_dump(),
+        "knowledge_base": agent.knowledge_base.model_dump(),
+    }
     for key, value in _flatten(payload):
-        if isinstance(value, str) and _looks_inline_secret(value):
+        if isinstance(value, str) and _looks_inline_secret(value) and not _is_env_reference(
+            key, value
+        ):
+            raise ValueError(
+                f"inline secret-like value in agent '{agent.name}' at '{key}' ({path}); "
+                "reference secrets by environment-variable name instead"
+            )
+    for key, value in _flatten(intelligence_payload):
+        if not _is_secret_reference_key(key) or not isinstance(value, str):
+            continue
+        if _looks_inline_secret(value) and not _is_env_reference(key, value):
             raise ValueError(
                 f"inline secret-like value in agent '{agent.name}' at '{key}' ({path}); "
                 "reference secrets by environment-variable name instead"
             )
 
 
-def load_agent_home_file(path: Path) -> AgentFile:
-    """Parse a home-root ``agent.yaml`` (deployed single agent).
+def _is_env_reference(key: str, value: str) -> bool:
+    if key.endswith("_env"):
+        return _ENV_VAR_NAME_RE.fullmatch(value) is not None
+    if key.endswith("credential_ref"):
+        return _ENV_VAR_NAME_RE.fullmatch(value) is not None or value.startswith("file://")
+    return False
 
-    Unlike :func:`load_agent_file`, this skips the directory-name check — a home-root
-    file has no ``<name>/`` parent. Inline-secret rejection still applies.
+
+def _is_secret_reference_key(key: str) -> bool:
+    return key.endswith("_env") or key.endswith("credential_ref")
+
+
+def load_agent_home_file(path: Path) -> AgentFile:
+    """Parse the single-agent ``agent.yaml``.
+
+    Unlike :func:`load_agent_file`, this skips the directory-name check — the config-dir
+    single-agent file has no ``<name>/`` parent. Inline-secret rejection still applies.
     """
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
@@ -157,7 +198,7 @@ def load_agent_home_file(path: Path) -> AgentFile:
 
 
 def _single_agent_index(agent: AgentFile) -> AgentConfigIndex:
-    """Build an index from one home-root agent: it is the sole, forced-default agent."""
+    """Build an index from one single-file agent: it is the sole, forced-default agent."""
     by_channel = {ch: agent.name for ch in agent.bindings.channels}
     by_user = {u: agent.name for u in agent.bindings.users}
     return AgentConfigIndex(
@@ -169,7 +210,7 @@ def build_index(agents_dir: str | Path | None = None) -> AgentConfigIndex:
     """Build a fresh resolution index (pure; no globals).
 
     Single-file mode: when no explicit ``agents_dir`` / ``FLEETENT_AGENTS_DIR`` is given
-    and a home-root ``agent.yaml`` exists, load it as the sole, forced-default agent.
+    and ``config/agent.yaml`` exists, load it as the sole, forced-default agent.
     Otherwise scan the agents directory (multi-agent).
     """
     if agents_dir is None and "FLEETENT_AGENTS_DIR" not in os.environ:
