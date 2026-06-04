@@ -42,4 +42,4 @@
 ## 8. Verify
 
 - [x] 8.1 Browser-verify: agent card grid + search/filter; drawer CRUD + edit; each binding section (skills, MCP + OAuth connectors, KB, IM) manages its bound list; viewer gating
-- [ ] 8.2 Archive the change on the feature branch (`/opsx:archive`) after all checkboxes are `[x]`
+- [x] 8.2 Archive the change on the feature branch (`/opsx:archive`) after all checkboxes are `[x]`
