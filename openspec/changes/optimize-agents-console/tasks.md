@@ -1,20 +1,20 @@
 ## 1. Per-agent OAuth connector binding (store + migration)
 
-- [ ] 1.1 Write failing tests: migration creates `agent_oauth_bindings`; store `bind`/`unbind`/`list_connectors_for_agent`/`list_agents_for_connector` (idempotent, per-agent scoped) — run `uv run pytest tests/integration/test_migrations.py tests/integration/test_agent_oauth_binding_store.py -x -q` → red
-- [ ] 1.2 Add Alembic migration `0NN_add_agent_oauth_bindings` (agent_id, connector_id, created_at, created_by; PK (agent_id, connector_id)); single head
-- [ ] 1.3 Implement `agent_oauth_binding_store` (named params, db runtime, no ORM) to green
-- [ ] 1.4 `uv run pytest -x -q` for the two files → green; migration upgrade/downgrade round-trip clean
+- [x] 1.1 Write failing tests: migration creates `agent_oauth_bindings`; store `bind`/`unbind`/`list_connectors_for_agent`/`list_agents_for_connector` (idempotent, per-agent scoped) — run `uv run pytest tests/integration/test_migrations.py tests/integration/test_agent_oauth_binding_store.py -x -q` → red
+- [x] 1.2 Add Alembic migration `0NN_add_agent_oauth_bindings` (agent_id, connector_id, created_at, created_by; PK (agent_id, connector_id)); single head
+- [x] 1.3 Implement `agent_oauth_binding_store` (named params, db runtime, no ORM) to green
+- [x] 1.4 `uv run pytest -x -q` for the two files → green; migration upgrade/downgrade round-trip clean
 
 ## 2. Agent-side knowledge-base binding endpoints
 
-- [ ] 2.1 Write failing tests in `tests/integration/test_agent_admin_api.py`: GET/POST/DELETE `/admin/agents/{name}/kbs` (list, idempotent bind, unbind, viewer 403, unknown agent 404) → red
-- [ ] 2.2 Implement the endpoints in `agent_admin_api.py` delegating to `agent_kbs_store` (resolve name→id, agent tenant); reuse role guards → green
+- [x] 2.1 Write failing tests in `tests/integration/test_agent_admin_api.py`: GET/POST/DELETE `/admin/agents/{name}/kbs` (list, idempotent bind, unbind, viewer 403, unknown agent 404) → red
+- [x] 2.2 Implement the endpoints in `agent_admin_api.py` delegating to `agent_kbs_store` (resolve name→id, agent tenant); reuse role guards → green
 
 ## 3. Agent-side OAuth connector binding endpoints
 
-- [ ] 3.1 Write failing tests: GET/POST/DELETE `/admin/agents/{name}/bindings/oauth/{connector_id}` (list, idempotent bind, unbind, viewer 403, unknown connector 404) → red
-- [ ] 3.2 Implement the endpoints in `agent_admin_api.py` over `agent_oauth_binding_store`, validating the connector exists via `connector_config_store` → green
-- [ ] 3.3 `uv run pytest tests/integration/test_agent_admin_api.py -x -q` → green; `uv run ruff check` + `uv run mypy` on changed backend files clean
+- [x] 3.1 Write failing tests: GET/POST/DELETE `/admin/agents/{name}/bindings/oauth/{connector_id}` (list, idempotent bind, unbind, viewer 403, unknown connector 404) → red
+- [x] 3.2 Implement the endpoints in `agent_admin_api.py` over `agent_oauth_binding_store`, validating the connector exists via `connector_config_store` → green
+- [x] 3.3 `uv run pytest tests/integration/test_agent_admin_api.py -x -q` → green; `uv run ruff check` + `uv run mypy` on changed backend files clean
 
 ## 4. Frontend — Agents card grid + toolbar
 

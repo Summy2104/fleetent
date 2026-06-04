@@ -618,3 +618,14 @@ def test_knowledge_base_store_uses_database_boundary_and_named_parameters():
     assert "CREATE TABLE" not in store_source
     assert "?" not in store_source
     assert ":tenant_id" in store_source
+
+
+def test_agent_oauth_bindings_table_and_columns(tmp_path):
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_oauth_bindings)")}
+    conn.close()
+    assert "agent_oauth_bindings" in tables
+    assert cols >= {"agent_id", "connector_id", "created_at", "created_by"}

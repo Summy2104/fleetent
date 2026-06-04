@@ -12,6 +12,11 @@ from fastapi import APIRouter, Body, Header, HTTPException
 
 from fleetent import agent_store, auth, config, user_store
 from fleetent.governance import audit_log
+from fleetent.platform.connector_management import (
+    agent_oauth_binding_store,
+    connector_config_store,
+)
+from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.skill_management import skill_admin_store
 from fleetent.skills import registry as skill_registry
 
@@ -216,3 +221,89 @@ def unbind_mcp(
         detail={"server_id": server_id},
     )
     return {"agent": name, "server_id": server_id, "bound": False}
+
+
+# --- agent knowledge-base bindings -------------------------------------------
+
+
+@router.get("/agents/{name}/kbs")
+def list_agent_kbs(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    _current_user(authorization)
+    agent = _require_agent(name)
+    kb_ids = agent_kbs_store.list_kbs_for_agent(agent.tenant_id, str(agent.id))
+    return {"agent": name, "kb_ids": kb_ids}
+
+
+@router.post("/agents/{name}/kbs")
+def bind_agent_kb(
+    name: str,
+    kb_id: str = Body(..., embed=True),
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    agent = _require_agent(name)
+    agent_kbs_store.bind(agent.tenant_id, kb_id, str(agent.id), created_by=user.id)
+    audit_log.write_audit(
+        user.id, "agent.kb.bind", target_type="agent", target_id=name, detail={"kb_id": kb_id}
+    )
+    return {"agent": name, "kb_id": kb_id, "bound": True}
+
+
+@router.delete("/agents/{name}/kbs/{kb_id}")
+def unbind_agent_kb(
+    name: str, kb_id: str, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    agent = _require_agent(name)
+    agent_kbs_store.unbind(agent.tenant_id, kb_id, str(agent.id))
+    audit_log.write_audit(
+        user.id, "agent.kb.unbind", target_type="agent", target_id=name, detail={"kb_id": kb_id}
+    )
+    return {"agent": name, "kb_id": kb_id, "bound": False}
+
+
+# --- agent OAuth connector bindings ------------------------------------------
+
+
+@router.get("/agents/{name}/bindings/oauth")
+def list_agent_oauth(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    _current_user(authorization)
+    agent = _require_agent(name)
+    connector_ids = agent_oauth_binding_store.list_connectors_for_agent(agent.id)
+    return {"agent": name, "connector_ids": connector_ids}
+
+
+@router.post("/agents/{name}/bindings/oauth/{connector_id}")
+def bind_oauth(
+    name: str, connector_id: str, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    agent = _require_agent(name)
+    if connector_config_store.get_connector(connector_id) is None:
+        raise HTTPException(status_code=404, detail=f"connector {connector_id!r} not found")
+    agent_oauth_binding_store.bind(agent.id, connector_id, created_by=user.id)
+    audit_log.write_audit(
+        user.id,
+        "agent.oauth.bind",
+        target_type="agent",
+        target_id=name,
+        detail={"connector_id": connector_id},
+    )
+    return {"agent": name, "connector_id": connector_id, "bound": True}
+
+
+@router.delete("/agents/{name}/bindings/oauth/{connector_id}")
+def unbind_oauth(
+    name: str, connector_id: str, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    agent = _require_agent(name)
+    agent_oauth_binding_store.unbind(agent.id, connector_id)
+    audit_log.write_audit(
+        user.id,
+        "agent.oauth.unbind",
+        target_type="agent",
+        target_id=name,
+        detail={"connector_id": connector_id},
+    )
+    return {"agent": name, "connector_id": connector_id, "bound": False}
