@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
+import sys
 from typing import TYPE_CHECKING
 
 from fleetent.platform.admin_cli.common import sanitize_cli_value, summary_line
@@ -26,6 +28,8 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     p_connector_sync = kb_connectors_sub.add_parser("sync", help="Run connector sync")
     p_connector_sync.add_argument("connector_id")
     p_connector_sync.add_argument("--dry-run", action="store_true")
+    p_connector_sync.add_argument("--yes", action="store_true")
+    p_connector_sync.add_argument("--pilot-fixture", action="store_true")
     p_extract = kb_sub.add_parser("extract-entities", help="Run explicit KB entity extraction")
     p_extract.add_argument("--tenant-id", default="default")
     p_extract.add_argument("--kb-id", required=True)
@@ -90,6 +94,8 @@ def _handle_connectors(args: argparse.Namespace) -> None:
         return
 
     if args.connector_cmd == "sync":
+        if not args.dry_run and not _execute_sync_allowed(operations, args):
+            sys.exit(1)
         sync_result = asyncio.run(
             operations.run_connector_sync(args.connector_id, dry_run=args.dry_run)
         )
@@ -99,6 +105,31 @@ def _handle_connectors(args: argparse.Namespace) -> None:
             print(summary_line(sync_result.summary))
         if sync_result.error:
             print(f"error={sanitize_cli_value(sync_result.error)}")
+
+
+def _execute_sync_allowed(operations, args: argparse.Namespace) -> bool:
+    if not args.yes:
+        print(
+            "connector execute sync requires --yes; run dry-run first: "
+            f"fleetent-admin kb connectors sync {args.connector_id} --dry-run",
+            file=sys.stderr,
+        )
+        return False
+    if not args.pilot_fixture:
+        print("connector execute sync requires --pilot-fixture", file=sys.stderr)
+        return False
+    definition = operations.get_connector_config(args.connector_id)
+    env_flag = _execute_sync_env_flag(str(definition.connector_type))
+    if os.getenv(env_flag) != "1":
+        print(f"connector execute sync requires {env_flag}=1", file=sys.stderr)
+        return False
+    return True
+
+
+def _execute_sync_env_flag(connector_type: str) -> str:
+    if connector_type == "confluence":
+        return "FLEETENT_CONFLUENCE_EXECUTE_SYNC"
+    return "FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC"
 
 
 def _handle_extract_entities(args: argparse.Namespace) -> None:

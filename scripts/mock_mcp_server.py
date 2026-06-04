@@ -52,11 +52,23 @@ def _handle(body: dict) -> dict:
         elif name == "add":
             result = str(args.get("a", 0) + args.get("b", 0))
         else:
-            return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"unknown tool: {name}"}}
+            return {
+                "jsonrpc": "2.0",
+                "id": rid,
+                "error": {"code": -32601, "message": f"unknown tool: {name}"},
+            }
 
-        return {"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text": result}]}}
+        return {
+            "jsonrpc": "2.0",
+            "id": rid,
+            "result": {"content": [{"type": "text", "text": result}]},
+        }
 
-    return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"unknown method: {method}"}}
+    return {
+        "jsonrpc": "2.0",
+        "id": rid,
+        "error": {"code": -32601, "message": f"unknown method: {method}"},
+    }
 
 
 class Handler(BaseHTTPRequestHandler):

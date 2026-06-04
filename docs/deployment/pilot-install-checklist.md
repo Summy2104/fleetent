@@ -114,7 +114,8 @@ uv run fleetent-admin kb connectors sync eng-drive --dry-run
 执行同步：
 
 ```bash
-uv run fleetent-admin kb connectors sync eng-drive
+FLEETENT_GOOGLE_DRIVE_EXECUTE_SYNC=1 \
+  uv run fleetent-admin kb connectors sync eng-drive --yes --pilot-fixture
 ```
 
 查看最近一次状态：

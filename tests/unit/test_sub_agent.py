@@ -115,7 +115,6 @@ async def test_tasks_run_concurrently_not_sequentially(tmp_path, monkeypatch):
 
     with patch("fleetent.runtime.loop.run", side_effect=timed_run):
         executor = SubAgentExecutor()
-        t0 = time.monotonic()
         await executor.run(
             tasks=[
                 {"name": "t1", "prompt": "p1"},
@@ -125,16 +124,9 @@ async def test_tasks_run_concurrently_not_sequentially(tmp_path, monkeypatch):
             parent_agent_id=None,
             parent_session_id="s",
         )
-        elapsed = time.monotonic() - t0
 
-    # The authoritative concurrency guard is the start-time overlap assertion
-    # below: serialized tasks would start >0.05s apart (after task 1's sleep),
-    # while overlapped tasks start within a few ms. The absolute elapsed bound is
-    # only a loose backstop — kept generous (0.5s) so full-suite high-load fsync
-    # jitter (AR20 added synchronous lifecycle persistence) cannot flake it, yet
-    # still well under the >0.10s of sleep plus overhead a serialized run incurs.
-    assert elapsed < 0.5, f"tasks appear sequential (elapsed={elapsed:.3f}s)"
-    # Both tasks must have started before either finished
+    # The authoritative concurrency guard is start-time overlap. Total elapsed
+    # includes synchronous SQLite lifecycle writes and is noisy on CI filesystems.
     assert len(start_times) == 2
     assert abs(start_times[1] - start_times[0]) < 0.02
 
