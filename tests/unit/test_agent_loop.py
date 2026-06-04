@@ -2299,6 +2299,7 @@ def test_run_sync_loads_plugins(monkeypatch):
 def test_run_sync_passes_effective_sandbox_mode(monkeypatch):
     from unittest.mock import AsyncMock
 
+    import fleetent.integrations.sandbox as sb
     import fleetent.integrations.sandbox.enablement as se
 
     captured: dict = {}
@@ -2311,7 +2312,9 @@ def test_run_sync_passes_effective_sandbox_mode(monkeypatch):
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **kw: "")
     monkeypatch.setattr(al, "collect_disabled_trace", lambda *a, **kw: None)
     monkeypatch.setattr(al, "run", fake_run)
-    monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.OFF))
+    # run_sync does a lazy `from fleetent.integrations.sandbox import get_effective_mode`,
+    # which binds to the package re-export — patch there, not on the enablement submodule.
+    monkeypatch.setattr(sb, "get_effective_mode", AsyncMock(return_value=se.Mode.OFF))
     al.run_sync("hi")
     assert captured.get("sandbox_mode") is se.Mode.OFF
 
