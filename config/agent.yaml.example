@@ -5,42 +5,82 @@
 # The deployed agent runtime reads ONLY this file + .env; data is local under
 # FLEETENT_HOME/data/. Secrets are NEVER inlined — reference them by env-var name.
 # (This template ends in `.example`; install.sh copies it to agent.yaml.)
+#
+# Single-agent mode: this agent is the sole, forced-default agent, so there is no
+# routing table and `bindings.default` does not apply. `bindings.channels/users`
+# act only as ingress filters for this one agent.
 
-name: default                      # required; the agent's name
-version: 1                         # required
+name: support-bot                  # required; the agent's name (any value in single-agent mode)
+version: 3                         # required
+tenant_id: acme-corp               # optional, default "default"
+team_id: cs-team-01                # optional, default null
 
 # ── runtime definition ──
 system_prompt: |
-  You are a helpful assistant.
+  你是 Acme 公司的客户支持助手 support-bot。
+  - 用中文回答用户的产品和账单问题
+  - 不确定的信息先用 search_docs 工具检索知识库再作答
+  - 涉及退款、账户删除等敏感操作必须走人工审批
+  - 保持礼貌、简洁，单次回复不超过 5 句话
 model_overrides:
-  default: { provider: anthropic, model: claude-opus-4-8 }
+  default:
+    provider: anthropic
+    model: claude-opus-4-8
+  fast:
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+memory_namespace: support-bot      # default ""
 skills_dir: skills                 # null = global default skills dir
-allowed_skills: []                 # empty = no narrowing (all enabled skills visible)
+allowed_skills:                    # empty = no narrowing (all enabled skills visible)
+  - jira
+  - slack-daily-jira
 
 # ── tools / capabilities ──
-allowed_tools: ["search_*", "read_skill"]
-plugins: []
+allowed_tools:                     # fnmatch patterns; MCP tools are "<server>__<tool>"
+  - "search_*"
+  - "read_skill"
+  - "read_file"
+  - "docs__*"
+  - "jira__*"
+plugins:
+  - acme-docs
+  - billing
 features:
-  code_execution: false            # set true to expose the run_code sandbox tool
+  code_execution: true             # expose the run_code sandbox tool
+  sandbox_env:
+    TZ: Asia/Shanghai
+    LANG: zh_CN.UTF-8
 
 # ── MCP servers (inline; secrets via env reference only) ──
-mcp_servers: []
-# Example:
-# mcp_servers:
-#   - id: acme
-#     transport: http
-#     url: https://acme.internal/mcp
-#     auth_type: bearer
-#     api_key_env: ACME_MCP_TOKEN   # env-var NAME, never the token value
+mcp_servers:
+  - id: docs
+    transport: http
+    url: https://docs.acme.internal/mcp
+    auth_type: bearer
+    api_key_env: ACME_DOCS_MCP_TOKEN   # env-var NAME, never the token value
+  - id: billing
+    transport: stdio
+    command: /usr/local/bin/billing-mcp
+    args:
+      - "--mode"
+      - "readonly"
+    env:
+      BILLING_DB_DSN_ENV: BILLING_DB_DSN
 
 # ── connectors (per-agent IM ingress; tokens via env reference only) ──
-# connectors:
-#   slack:
-#     bot_token_env: SLACK_BOT_TOKEN   # env-var NAME (xoxb- token lives in .env)
-#     app_token_env: SLACK_APP_TOKEN   # env-var NAME (xapp- Socket Mode token)
-#     channels: []                     # optional filter; empty = respond everywhere
+connectors:
+  slack:
+    bot_token_env: SUPPORT_SLACK_BOT   # env-var NAME (xoxb- token lives in .env)
+    app_token_env: SUPPORT_SLACK_APP   # env-var NAME (xapp- Socket Mode token)
+    channels:                          # optional filter; empty = respond everywhere
+      - C0123ABCD
+      - C0456EFGH
 
-# ── bindings (channel/user filters; the deployed single agent is always default) ──
+# ── bindings (ingress filters; the deployed single agent is always default) ──
 bindings:
-  channels: []
-  users: []
+  channels:
+    - "slack:C0123ABCD"
+    - "telegram:-1001234567890"
+  users:
+    - "u_alice"
+    - "u_bob"
