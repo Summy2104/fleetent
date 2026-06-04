@@ -10,5 +10,5 @@
 
 ## 3. 收尾
 
-- [ ] 3.1 全量 `ANTHROPIC_API_KEY=sk-test-dummy uv run pytest -x -q` 通过；`uv run ruff format && uv run ruff check`；`uv run mypy src` 不新增错误；`bash -n scripts/install.sh`
-- [ ] 3.2 更新设计文档 `docs/superpowers/specs/2026-06-04-agent-config-self-contained-design.md` 决策/问题日志（记录：加载器容忍缺失的发现、重排 1→3→2、扁平 home、Dockerfile/init_config 清理留给 drop-global-config-files）；README 一键安装段若提及 config/ 布局则同步为扁平
+- [x] 3.1 全量 `ANTHROPIC_API_KEY=sk-test-dummy uv run pytest -x -q` 通过；`uv run ruff format && uv run ruff check`；`uv run mypy src` 不新增错误；`bash -n scripts/install.sh`
+- [x] 3.2 更新设计文档 `docs/superpowers/specs/2026-06-04-agent-config-self-contained-design.md` 决策/问题日志（记录：加载器容忍缺失的发现、重排 1→3→2、扁平 home、Dockerfile/init_config 清理留给 drop-global-config-files）；README 一键安装段若提及 config/ 布局则同步为扁平
