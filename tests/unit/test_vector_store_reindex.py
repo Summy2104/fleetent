@@ -213,6 +213,8 @@ def test_reindex_memory_rebuild_continues_after_item_failure(monkeypatch):
         ],
     )
     monkeypatch.setattr(reindex_module.runtime, "clear_namespace", lambda namespace: None)
+    monkeypatch.setattr(reindex_module, "_BACKOFF_SECONDS", (0.0, 0.0, 0.0))
+    monkeypatch.setattr(reindex_module, "_sleep", lambda seconds: None)
 
     def upsert(item_id: str, content: str, namespace: str) -> None:
         upserts.append(item_id)
@@ -223,11 +225,66 @@ def test_reindex_memory_rebuild_continues_after_item_failure(monkeypatch):
 
     summary = reindex(ReindexRequest(owner="memory", user_id="alice"))
 
-    assert upserts == ["mem-1", "mem-bad", "mem-2"]
+    assert upserts == ["mem-1", "mem-bad", "mem-bad", "mem-bad", "mem-bad", "mem-2"]
     assert summary.scanned == 3
     assert summary.reindexed == 2
     assert summary.skipped == 0
     assert summary.failed == 1
+
+
+def test_reindex_retries_transient_item_failure(monkeypatch):
+    from fleetent.intelligence import memory
+    from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
+
+    reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
+    calls: list[str] = []
+    monkeypatch.setattr(
+        memory,
+        "iter_indexable_memories",
+        lambda user_id: [IndexableItem(id="mem-1", content="one", namespace=f"mem:{user_id}")],
+    )
+    monkeypatch.setattr(reindex_module.runtime, "clear_namespace", lambda namespace: None)
+    monkeypatch.setattr(reindex_module, "_BACKOFF_SECONDS", (0.0,))
+    monkeypatch.setattr(reindex_module, "_sleep", lambda seconds: None)
+
+    def upsert(item_id: str, content: str, namespace: str) -> None:
+        calls.append(item_id)
+        if len(calls) == 1:
+            raise RuntimeError("provider returned status 429")
+
+    monkeypatch.setattr(reindex_module.runtime, "upsert", upsert)
+
+    summary = reindex(ReindexRequest(owner="memory", user_id="alice"))
+
+    assert calls == ["mem-1", "mem-1"]
+    assert summary.reindexed == 1
+    assert summary.failed == 0
+
+
+def test_reindex_applies_injectable_pacing_between_items(monkeypatch):
+    from fleetent.intelligence import memory
+    from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
+
+    reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        memory,
+        "iter_indexable_memories",
+        lambda user_id: [
+            IndexableItem(id="mem-1", content="one", namespace=f"mem:{user_id}"),
+            IndexableItem(id="mem-2", content="two", namespace=f"mem:{user_id}"),
+        ],
+    )
+    monkeypatch.setattr(reindex_module.runtime, "clear_namespace", lambda namespace: None)
+    monkeypatch.setattr(reindex_module.runtime, "upsert", lambda *args: None)
+    monkeypatch.setattr(reindex_module, "_PACING_SECONDS", 0.25)
+    monkeypatch.setattr(reindex_module, "_sleep", lambda seconds: sleeps.append(seconds))
+
+    summary = reindex(ReindexRequest(owner="memory", user_id="alice"))
+
+    assert sleeps == [0.25, 0.25]
+    assert summary.reindexed == 2
+    assert summary.failed == 0
 
 
 def test_reindex_knowledge_base_rebuild_clears_namespace_before_upserts(monkeypatch):
@@ -310,6 +367,8 @@ def test_reindex_knowledge_base_rebuild_continues_after_chunk_failure(monkeypatc
         ],
     )
     monkeypatch.setattr(reindex_module.runtime, "clear_namespace", lambda namespace: None)
+    monkeypatch.setattr(reindex_module, "_BACKOFF_SECONDS", (0.0, 0.0, 0.0))
+    monkeypatch.setattr(reindex_module, "_sleep", lambda seconds: None)
 
     def upsert(item_id: str, content: str, namespace: str) -> None:
         upserts.append(item_id)
@@ -320,7 +379,14 @@ def test_reindex_knowledge_base_rebuild_continues_after_chunk_failure(monkeypatc
 
     summary = reindex(ReindexRequest(owner="knowledge_base", tenant_id="tenant-a", kb_id="global"))
 
-    assert upserts == ["chunk-1", "chunk-bad", "chunk-2"]
+    assert upserts == [
+        "chunk-1",
+        "chunk-bad",
+        "chunk-bad",
+        "chunk-bad",
+        "chunk-bad",
+        "chunk-2",
+    ]
     assert summary.scanned == 3
     assert summary.reindexed == 2
     assert summary.skipped == 0

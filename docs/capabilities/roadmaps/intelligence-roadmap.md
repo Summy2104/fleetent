@@ -8,9 +8,24 @@
 
 **Pilot 后增强首批已大体完成。** advanced parsers、entity extraction、graph_search、KB hybrid rerank、query planner、KB reflection reports、SkillProposal、reflection trend、Shared Memory、context policy、memory quality trend 已落地。
 
-**当前主要缺口在真实环境验证和生产化入口。** 真实 LLM / embedding / rerank provider、Google Drive / Confluence smoke、review UI、scheduler、policy admin API、credential 管理和 full sync history 仍需结合 Pilot 反馈推进。
+**Go 验证进行中，外部 KB 与 Vector provider smoke 已通过。** Google Drive / Confluence 已完成真实 API check、sync 和本地 KB 入库验证；Jina embedding / rerank provider 已完成真实 smoke、evaluation 和 228 chunk 全量 reindex 验证。当前 Go 判定剩余项集中在真实 LLM，以及生产化入口缺口是否被 Pilot owner 接受为非阻塞。
 
 人工验收入口：[Intelligence Roadmap 人工测试手册](../../deployment/intelligence-roadmap-test-manual.md)。
+
+## Go 验证状态
+
+截至 2026-06-04，本机准生产验证状态如下：
+
+| 验证项 | 状态 | 证据 / 说明 |
+| --- | --- | --- |
+| Google Drive real smoke | passed | 真实 API check 通过；真实 sync `scanned=5 planned=5 ingested=5`；本地 KB 写入 5 个 Google Drive 文档。 |
+| Confluence real smoke | passed | 真实 API check 通过；page scope sync `scanned=1 planned=1 ingested=1`；本地 KB 写入 1 个 Confluence 文档。 |
+| Real embedding smoke | passed | `jina-embeddings-v3`，`dimensions=1024`；memory + KB embedding evaluation `38 passed`。 |
+| Real rerank smoke | passed | 真实 HTTP rerank 返回 3 个候选，score 存在且排序发生变化；provider adapter 已兼容 `relevance_score`。 |
+| Config / secret boundary | passed | Google Drive、Confluence、embedding、rerank 均使用 env reference；真实 secret 保留在本地 `.env`，不进入 git。 |
+| Real LLM smoke | pending | 仍需验证 memory extraction、long-term context 和 reflection 真实 LLM 路径。 |
+| Real KB retrieval E2E | passed | 已用真实 Google / Confluence 入库文档验证 hybrid search、rerank、query planner 和 source attribution；全量 228 chunk 真实 reindex 经 provider retry / pacing 修复后通过，`scanned=228 reindexed=228 failed=0`。 |
+| Production operations gaps | pending owner decision | policy admin API、review UI、scheduler / worker、full sync history、后台 reindex runtime 和告警尚未完成；需判定是否作为 Go blocker。 |
 
 ## 范围
 
@@ -33,8 +48,8 @@
 | 层级 | 状态 | 已完成 | 当前缺口 | 暂缓 / 非 MVP |
 | --- | --- | --- | --- | --- |
 | MVP Foundation | 已实现 | 核心 API、store、配置边界、默认测试、evaluation baseline、OpenSpec 批次 | 无 foundation 级大缺口 | 无 |
-| Pilot MVP 工程前置 | 基础完成 | agent KB binding、connector operations、默认可见范围、local ingest、deterministic evaluation | 准生产人工验收、真实外部依赖 smoke | platform UI / HTTP 查询入口 |
-| Pilot 后增强首批 | 已实现 | advanced parsers、entity extraction、graph_search、KB hybrid rerank、query planner、KB reflection reports、SkillProposal、reflection trend、Shared Memory、context policy、memory quality trend | 真实 provider 质量评估、生产默认策略确认 | 自动知识库修复、自动 skill 发布 |
+| Pilot MVP 工程前置 | Go 验证中 | agent KB binding、connector operations、默认可见范围、local ingest、deterministic evaluation、Google Drive / Confluence 真实入库 smoke、真实 KB retrieval E2E、全量真实 embedding reindex | 准生产人工验收结论 | platform UI / HTTP 查询入口 |
+| Pilot 后增强首批 | Go 验证中 | advanced parsers、entity extraction、graph_search、KB hybrid rerank、query planner、KB reflection reports、SkillProposal、reflection trend、Shared Memory、context policy、memory quality trend、真实 embedding / rerank smoke | 真实 LLM smoke、生产默认策略确认 | 自动知识库修复、自动 skill 发布 |
 | 管理和运维入口 | 部分完成 | admin CLI 和 public API 可用 | policy admin API、review UI、scheduler / worker、full sync history、后台 reindex job runtime、告警 | dashboard / workflow UI |
 | 高复杂增强 | 暂缓 | 已完成进入条件评估 | 无 | document-level ACL、OCR / VLM / 扫描 PDF、sqlite-vec / Qdrant / OpenSearch adapter、真实 tokenizer、LLM-driven selection |
 
@@ -45,8 +60,8 @@
 | Memory semantic store | 基础完成 | SQLite `memory_items`、create/update/delete/ignore、vector index、mock evaluation、combined embedding evaluation、retention / compaction API、owner-approved reflection maintenance apply API、Shared Memory `shared_memory_items`、team / tenant scope、`shared:{scope_type}:{scope_id}` namespace、只读 memory quality trend summary | scheduler / review UI / 告警；Shared Memory 生产默认策略和编辑入口 | 真实 LLM 长期质量评估 |
 | Long-term context | 基础完成 | memory / knowledge provider 接入、context source attribution、deterministic evaluation fixture、deterministic budget policy；agent / tenant context policy（tenant 默认 + agent 覆盖）按 agent 归属注入 Shared Memory（tenant / team），默认关闭、无跨 tenant/team 访问 | policy 编辑 UI 与 admin API | 真实 tokenizer、个性化 budget、LLM-driven selection |
 | Reflection | 基础完成 | 读取 trace / memory 生成建议报告、deterministic report evaluation、User Memory maintenance proposal lifecycle、KB reflection reports、SkillProposal lifecycle、只读 reflection trend summary | review UI / scheduler / scope-aware SkillProposal 归属 | 自动知识库修复、自动 skill 发布 |
-| Vector store | 基础完成 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API、combined embedding evaluation、KB hybrid rerank 接入与 deterministic rerank evaluation | 真实 rerank provider smoke 与质量评估；后台 reindex job runtime | sqlite-vec、Qdrant、OpenSearch adapter |
-| Knowledge base | 基础完成 | local ingest、parser registry、PDF / DOCX / PPTX / XLSX parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator、combined embedding evaluation、Google Drive / Confluence connector baseline、Google Sheets / Slides export parsing、entity extraction schema + explicit run、`kb_extraction_runs`、`kb_entities`、独立于 search 的 `graph_search` depth 0/1 graph evidence、hybrid rerank、规则型 query planner、agent 到多 KB 绑定、connector operations CLI / latest status | 真实 SaaS smoke 与生产凭据管理；graph / rerank 已通过 planner 串联但尚未成为 `search(mode="auto")` 默认路径 | document-level ACL、scheduler / full sync history、attachments / OCR / VLM |
+| Vector store | Go 验证中 | public API、namespace、in-memory backend、SQLite backend、embedding / rerank provider abstraction、同步 reindex API、provider retry / pacing、combined embedding evaluation、KB hybrid rerank 接入与 deterministic rerank evaluation、Jina embedding / rerank 真实 smoke、全量真实 provider reindex | 后台 reindex job runtime | sqlite-vec、Qdrant、OpenSearch adapter |
+| Knowledge base | Go 验证中 | local ingest、parser registry、PDF / DOCX / PPTX / XLSX parser、chunking、vector + BM25 + hybrid retrieval、sync planner、evaluation fixture、reindex source iterator、combined embedding evaluation、Google Drive / Confluence connector baseline、Google Sheets / Slides export parsing、entity extraction schema + explicit run、`kb_extraction_runs`、`kb_entities`、独立于 search 的 `graph_search` depth 0/1 graph evidence、hybrid rerank、规则型 query planner、agent 到多 KB 绑定、connector operations CLI / latest status、Google Drive / Confluence 真实入库 smoke、真实 KB retrieval E2E、全量真实 embedding reindex | 生产凭据管理；graph / rerank 已通过 planner 串联但尚未成为 `search(mode="auto")` 默认路径 | document-level ACL、scheduler / full sync history、attachments / OCR / VLM |
 
 ## M2：可同步、可重建
 
@@ -87,7 +102,8 @@
 
 剩余缺口：
 
-- 真实 LLM / embedding / rerank provider 的质量评估需要准生产环境显式 opt-in，不进入默认 CI。
+- 真实 embedding / rerank provider smoke 已在准生产环境显式 opt-in 通过；真实 LLM 路径仍需验证。
+- 真实 provider 质量评估不进入默认 CI，仍需作为 Pilot 验收证据记录。
 
 ## M4：可维护、可演进
 
@@ -126,7 +142,7 @@
 
 剩余缺口：
 
-- 真实 SaaS smoke、生产凭据管理、scheduler / full sync history 和 document-level ACL 仍需后续决策。
+- 真实 SaaS smoke 已通过；生产凭据管理、scheduler / full sync history 和 document-level ACL 仍需后续决策。
 
 ## P1：知识库质量增强
 
@@ -250,10 +266,13 @@ flowchart TD
 
 ### 真实环境验证
 
-- `real-embedding-smoke`：真实 embedding provider smoke 和 retrieval quality check。
-- `real-rerank-smoke`：真实 rerank provider smoke 和 KB hybrid rerank quality check。
-- `google-drive-real-smoke`：真实 Google Drive credential_ref、connector check / sync smoke。
-- `confluence-real-smoke`：真实 Confluence credential_ref、connector check / sync smoke。
+- 已通过 `real-embedding-smoke`：Jina embedding provider smoke 和 retrieval quality check。
+- 已通过 `real-rerank-smoke`：Jina rerank provider smoke；adapter 兼容 `score` / `relevance_score`。
+- 已通过 `google-drive-real-smoke`：真实 Google Drive connector check / sync / KB 入库 smoke。
+- 已通过 `confluence-real-smoke`：真实 Confluence connector check / sync / KB 入库 smoke。
+- 已通过 `real-kb-retrieval-e2e` 代表性验证：用真实入库文档验证 hybrid search、rerank、query planner default path、relation-like graph+hybrid_fill path 和 source attribution。
+- 待执行 `real-llm-smoke`：Memory extraction、Long-term Context、Reflection 的真实 LLM 路径。
+- 已通过 `real-embedding-full-reindex`：全量 228 chunk 真实 reindex 经 provider retry / pacing 修复后通过，`scanned=228 reindexed=228 failed=0`。
 
 ### 管理和运维入口
 
