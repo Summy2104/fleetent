@@ -16,16 +16,21 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
-from fleetent import agent_config, paths
+from fleetent import agent_config, paths, user_store
 from fleetent.agent_config import AgentFile
 
 if TYPE_CHECKING:
-    from fastapi import FastAPI
-
     from fleetent.im_gateway.slack_supervisor import SlackSupervisor
 
 logger = structlog.get_logger(__name__)
+
+
+class ChatRequest(BaseModel):
+    message: str
 
 
 @dataclass
@@ -156,18 +161,10 @@ def build_app(agent_name: str) -> FastAPI:
     """
     from collections.abc import AsyncGenerator
 
-    from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
-    from fastapi.responses import StreamingResponse
-    from pydantic import BaseModel
-
-    from fleetent import user_store
     from fleetent.runtime.loop import run_stream
     from fleetent.tools.plugin_loader import expand_plugin_patterns
 
     app = FastAPI(title=f"fleetent-agent:{agent_name}")
-
-    class ChatRequest(BaseModel):
-        message: str
 
     def _authenticate(authorization: str = Header(default="")) -> user_store.User:  # noqa: B008
         token = authorization.removeprefix("Bearer ").strip()

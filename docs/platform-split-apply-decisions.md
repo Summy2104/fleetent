@@ -92,7 +92,21 @@
 
 ### Change 3: platform-control-plane
 
-（待开始）
+**D3.1 — lifespan 精简范围（严格按 D1）。**
+- 移除：sandbox 探测+orphan 清理、agent-use MCP（mcp.yaml 加载 / register_global_store_servers / start_health_monitor）、session 维护、IM（`_connector_manager.start_all_enabled` / `_slack_supervisor.start_from_index` / admin_api 的 start/stop connector seam）、webhook 源加载；shutdown 里对应的 connector/supervisor/mcp/session 收尾也一并移除。
+- 保留：scan_skills、`agent_config.scan`（authoring/console 读取用）、load_plugins（console 列举用，无害）、cleanup_stale_approvals、builtin-admin seed、全部 admin 路由、`/health`、`/approvals`(+resolve)、平台 cron（monitoring + playground retention）、**admin 控制台 Chat playground seam**（按需执行、非 boot-time loop，属 console 工具，保留）。
+
+**D3.2 — 仅移除 `/chat`、`/ws`、`/webhook/*` 三个执行路由（spec/任务只点名这三个）。`/approvals`/`/approvals/{id}/resolve`/`/health` 不在移除清单，保留。**
+
+**D3.3 — `/health` 安全：`request.app.state.sandbox_mode` 用 `getattr(..., Mode.OFF)` 兜底，故移除 sandbox 探测后 health 仍 200（sandbox 显示 off）。**
+
+**D3.4 — 测试迁移（3.1）：删除测「已移除端点」的用例，把 `/ws` 迁到 agent runtime。**
+- 删除 `test_webhook_server.py`（平台 `/webhook` 整体移除、未迁到别处；签名逻辑仍由 `test_webhook_router.py` 单测覆盖）。
+- 删除 `test_tui_ws_endpoint.py`，新建 `test_agent_runtime_ws.py`：`/ws` 行为迁到 `agent_app.build_app`，握手/ready/parse-error/auth 测试指向 agent runtime。
+- `test_server.py` 删除全部 13 个 `/chat` 执行测试（平台 `/chat` 已移除；平台特有的 quota/scope/disabled-agent 门控随之消失，agent runtime 的 `/chat` 不复刻这些），保留 control-plane + lifespan(cron/plugins/monitoring) + agent-store seam 测试。
+- `test_server_lifespan.py`(unit) 删除 mcp.yaml / sandbox 探测·健康·清理 的用例；(integration) 删除 `test_lifespan_starts_connectors_via_manager`（control-plane「不启 IM」由新 `test_platform_control_plane.py` 覆盖）。
+
+**D3.5 — 顺带修复 change 2 的真实 bug：`agent_app.py` 的 `/ws`(及 `/chat`) 因 `from __future__ import annotations` + 函数内局部 import，FastAPI `get_type_hints()` 在建路由时无法解析 `WebSocket`/`ChatRequest` → 端点请求期 `NameError`、`/ws` 连接被 1008 关闭。change 2 的测试只断言「路由存在」未实际打请求，故漏掉。修复：把 `FastAPI`/`WebSocket`/`WebSocketDisconnect`/`StreamingResponse`/`user_store` 提升到模块级、`ChatRequest` 提到模块级；并补一个真正打 `/chat` 的功能测试 + 迁移后的 `/ws` 测试作回归护栏。这是「行为测试」抓 bug 的范例。
 
 ### Change 4: platform-agent-lifecycle
 

@@ -1,7 +1,11 @@
 """Standalone agent runtime: boot one agent home, bind IM, optional HTTP — no platform."""
 
-import yaml
 
+import yaml
+from fastapi.testclient import TestClient
+
+import fleetent.runtime.loop as loop
+import fleetent.user_store as us
 from fleetent import agent_config
 from fleetent.runtime import agent_app
 
@@ -60,6 +64,47 @@ def test_build_app_serves_chat_ws_health_and_no_admin():
     assert "/health" in paths
     # No platform admin surface on the agent runtime.
     assert not any(p and p.startswith("/admin") for p in paths)
+
+
+def test_chat_streams_and_applies_agent(tmp_path, monkeypatch):
+    # Functional /chat: proves the route is wired (not just present) and applies the
+    # home agent's config to run_stream. (Regression guard: an earlier annotation bug
+    # made the routes build but fail at request time.)
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    user = us.create_user("ChatUser")
+    home = _write_home(tmp_path, allowed_tools=["shell"], allowed_skills=["weather"])
+    agent_config.scan_home(home)
+
+    captured = {}
+
+    async def fake_run_stream(message, **kwargs):
+        captured["message"] = message
+        captured.update(kwargs)
+        yield {"type": "done", "content": "streamed-reply"}
+
+    monkeypatch.setattr(loop, "run_stream", fake_run_stream)
+
+    app = agent_app.build_app("support")
+    with TestClient(app) as client:
+        resp = client.post(
+            "/chat",
+            json={"message": "hi"},
+            headers={"Authorization": f"Bearer {user.api_key}"},
+        )
+
+    assert resp.status_code == 200
+    assert "streamed-reply" in resp.text
+    assert captured["agent_name"] == "support"
+    assert captured["system_prompt"] == "I am support."
+    assert "shell" in captured["allowed_tools"]
+    assert captured["allowed_skills"] == ["weather"]
+
+
+def test_chat_requires_auth(tmp_path, monkeypatch):
+    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    app = agent_app.build_app("support")
+    with TestClient(app) as client:
+        assert client.post("/chat", json={"message": "hi"}).status_code == 401
 
 
 def test_resolve_home_uses_fleetent_home(tmp_path, monkeypatch):
