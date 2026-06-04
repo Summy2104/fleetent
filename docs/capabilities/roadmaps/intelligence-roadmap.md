@@ -8,7 +8,7 @@
 
 **Pilot 后增强首批已大体完成。** advanced parsers、entity extraction、graph_search、KB hybrid rerank、query planner、KB reflection reports、SkillProposal、reflection trend、Shared Memory、context policy、memory quality trend 已落地。
 
-**Go 验证进行中，外部 KB 与 Vector provider smoke 已通过。** Google Drive / Confluence 已完成真实 API check、sync 和本地 KB 入库验证；Jina embedding / rerank provider 已完成真实 smoke、evaluation 和 228 chunk 全量 reindex 验证。当前 Go 判定剩余项集中在真实 LLM，以及生产化入口缺口是否被 Pilot owner 接受为非阻塞。
+**Go 验证进行中，外部 KB、Vector provider 和 LLM smoke 已通过。** Google Drive / Confluence 已完成真实 API check、sync 和本地 KB 入库验证；Jina embedding / rerank provider 已完成真实 smoke、evaluation 和 228 chunk 全量 reindex 验证；Memory extraction、Long-term Context 和 Reflection 的真实 LLM / provider smoke 已通过。当前 Go 判定剩余项集中在生产化入口缺口是否被 Pilot owner 接受为非阻塞。
 
 人工验收入口：[Intelligence Roadmap 人工测试手册](../../deployment/intelligence-roadmap-test-manual.md)。
 
@@ -23,7 +23,7 @@
 | Real embedding smoke | passed | `jina-embeddings-v3`，`dimensions=1024`；memory + KB embedding evaluation `38 passed`。 |
 | Real rerank smoke | passed | 真实 HTTP rerank 返回 3 个候选，score 存在且排序发生变化；provider adapter 已兼容 `relevance_score`。 |
 | Config / secret boundary | passed | Google Drive、Confluence、embedding、rerank 均使用 env reference；真实 secret 保留在本地 `.env`，不进入 git。 |
-| Real LLM smoke | pending | 仍需验证 memory extraction、long-term context 和 reflection 真实 LLM 路径。 |
+| Real LLM smoke | passed | `FLEETENT_EVAL_REAL_LLM=1` memory extraction fixture `7 passed`；`FLEETENT_EVAL_REAL_LONG_TERM_CONTEXT=1` long-term context smoke `23 passed`；`FLEETENT_EVAL_REAL_REFLECTION=1` + explicit fixture reflection smoke `20 passed`。 |
 | Real KB retrieval E2E | passed | 已用真实 Google / Confluence 入库文档验证 hybrid search、rerank、query planner 和 source attribution；全量 228 chunk 真实 reindex 经 provider retry / pacing 修复后通过，`scanned=228 reindexed=228 failed=0`。 |
 | Production operations gaps | pending owner decision | policy admin API、review UI、scheduler / worker、full sync history、后台 reindex runtime 和告警尚未完成；需判定是否作为 Go blocker。 |
 
@@ -49,7 +49,7 @@
 | --- | --- | --- | --- | --- |
 | MVP Foundation | 已实现 | 核心 API、store、配置边界、默认测试、evaluation baseline、OpenSpec 批次 | 无 foundation 级大缺口 | 无 |
 | Pilot MVP 工程前置 | Go 验证中 | agent KB binding、connector operations、默认可见范围、local ingest、deterministic evaluation、Google Drive / Confluence 真实入库 smoke、真实 KB retrieval E2E、全量真实 embedding reindex | 准生产人工验收结论 | platform UI / HTTP 查询入口 |
-| Pilot 后增强首批 | Go 验证中 | advanced parsers、entity extraction、graph_search、KB hybrid rerank、query planner、KB reflection reports、SkillProposal、reflection trend、Shared Memory、context policy、memory quality trend、真实 embedding / rerank smoke | 真实 LLM smoke、生产默认策略确认 | 自动知识库修复、自动 skill 发布 |
+| Pilot 后增强首批 | Go 验证中 | advanced parsers、entity extraction、graph_search、KB hybrid rerank、query planner、KB reflection reports、SkillProposal、reflection trend、Shared Memory、context policy、memory quality trend、真实 embedding / rerank smoke、真实 LLM smoke | 生产默认策略确认 | 自动知识库修复、自动 skill 发布 |
 | 管理和运维入口 | 部分完成 | admin CLI 和 public API 可用 | policy admin API、review UI、scheduler / worker、full sync history、后台 reindex job runtime、告警 | dashboard / workflow UI |
 | 高复杂增强 | 暂缓 | 已完成进入条件评估 | 无 | document-level ACL、OCR / VLM / 扫描 PDF、sqlite-vec / Qdrant / OpenSearch adapter、真实 tokenizer、LLM-driven selection |
 
@@ -271,7 +271,7 @@ flowchart TD
 - 已通过 `google-drive-real-smoke`：真实 Google Drive connector check / sync / KB 入库 smoke。
 - 已通过 `confluence-real-smoke`：真实 Confluence connector check / sync / KB 入库 smoke。
 - 已通过 `real-kb-retrieval-e2e` 代表性验证：用真实入库文档验证 hybrid search、rerank、query planner default path、relation-like graph+hybrid_fill path 和 source attribution。
-- 待执行 `real-llm-smoke`：Memory extraction、Long-term Context、Reflection 的真实 LLM 路径。
+- 已通过 `real-llm-smoke`：Memory extraction 真实 LLM fixture `7 passed`；Long-term Context real provider smoke `23 passed`；Reflection explicit fixture smoke `20 passed`。
 - 已通过 `real-embedding-full-reindex`：全量 228 chunk 真实 reindex 经 provider retry / pacing 修复后通过，`scanned=228 reindexed=228 failed=0`。
 
 ### 管理和运维入口
