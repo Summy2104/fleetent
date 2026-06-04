@@ -1,14 +1,14 @@
-"""Adapter status reporting: slack/telegram report connect/error/stopped + heartbeat.
+"""Telegram adapter status reporting: connect/error/stopped + heartbeat.
 
 These run without real platform sockets: create_app and the network-start seam are
-mocked, and the connector store is stubbed so nothing touches the DB.
+mocked, and the connector store is stubbed so nothing touches the DB. (Slack no longer
+reports owner-level status — it is per-agent; see test_slack_supervisor.py.)
 """
 
 import asyncio
 
 import pytest
 
-import fleetent.im_gateway.slack as slack
 import fleetent.im_gateway.telegram as telegram
 
 _OWNER = "owner1"
@@ -21,46 +21,6 @@ def _stub_store(monkeypatch, mod, statuses, heartbeats):
         lambda o, p, s, error=None: statuses.append((p, s, error)),
     )
     monkeypatch.setattr(mod.im_connector_store, "heartbeat", lambda o, p: heartbeats.append(p))
-
-
-async def test_slack_run_reports_connected_then_error(monkeypatch):
-    statuses: list = []
-    _stub_store(monkeypatch, slack, statuses, [])
-    monkeypatch.setattr(slack, "create_app", lambda owner_id, config: object())
-
-    async def boom(app, app_token):
-        raise RuntimeError("conn fail")
-
-    monkeypatch.setattr(slack, "_run_socket_mode", boom)
-
-    with pytest.raises(RuntimeError):
-        await slack.run(_OWNER, {"bot_token": "b", "app_token": "a"})
-
-    assert ("slack", "connected", None) in statuses
-    assert ("slack", "error", "conn fail") in statuses
-
-
-async def test_slack_run_heartbeats_then_stopped_on_cancel(monkeypatch):
-    statuses: list = []
-    heartbeats: list = []
-    _stub_store(monkeypatch, slack, statuses, heartbeats)
-    monkeypatch.setattr(slack, "create_app", lambda owner_id, config: object())
-    monkeypatch.setattr(slack, "HEARTBEAT_INTERVAL_SECONDS", 0.01)
-
-    async def block(app, app_token):
-        await asyncio.Event().wait()
-
-    monkeypatch.setattr(slack, "_run_socket_mode", block)
-
-    task = asyncio.create_task(slack.run(_OWNER, {"bot_token": "b", "app_token": "a"}))
-    await asyncio.sleep(0.05)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-
-    assert ("slack", "connected", None) in statuses
-    assert ("slack", "stopped", None) in statuses
-    assert len(heartbeats) >= 1
 
 
 async def test_telegram_run_reports_connected_then_error(monkeypatch):

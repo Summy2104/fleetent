@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 import structlog
 
-from fleetent.platform.im_gateway_management import im_connector_config, im_connector_store
-
 logger = structlog.get_logger(__name__)
-
-HEARTBEAT_INTERVAL_SECONDS = 30.0
 
 _IMAGE_MIME_PREFIX = "image/"
 
@@ -51,20 +46,32 @@ def _derive_session_id(user_id: str, channel_type: str, thread_ts: str | None) -
     return f"user:{user_id}"
 
 
-def create_app(owner_id: str, config: dict[str, str]) -> object:
-    """Create and return a configured slack-bolt AsyncApp with Socket Mode."""
+def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object:
+    """Create a slack-bolt AsyncApp bound to one agent's Slack connection.
+
+    The receiving connection identifies the agent (per-agent-slack-connector): the
+    handler stamps ``agent_name`` so routing skips channel→agent lookup. ``owner_id``
+    still scopes user mapping / allowlist (per-agent isolation of those is deferred to
+    per-agent-im-access). ``config.channels``, when non-empty, filters which channels
+    the agent responds in.
+    """
     try:
         from slack_bolt.async_app import AsyncApp
     except ImportError:
         raise RuntimeError("slack-bolt not installed") from None
 
     bot_token = config.get("bot_token", "")
+    channels = config.get("channels") or []
     app = AsyncApp(token=bot_token)
 
     @app.event("message")
     async def handle_message(event: dict[str, Any], say: object) -> None:
         from fleetent.im_gateway.normalizer import NormalizedMessage, route
         from fleetent.im_user_store import get_or_create
+
+        channel = event.get("channel") or ""
+        if channels and channel not in channels:
+            return  # channel outside this agent's response filter
 
         slack_user_id = event.get("user") or "unknown"
         user = get_or_create(owner_id, "slack", slack_user_id)
@@ -88,12 +95,13 @@ def create_app(owner_id: str, config: dict[str, str]) -> object:
         msg = NormalizedMessage(
             platform="slack",
             owner_id=owner_id,
+            agent_name=agent_name,
             session_id=session_id,
             user_id=user.id,
             text=event.get("text") or "",
             attachments=attachments,
             reply_func=reply_func,
-            channel_id=event.get("channel") or "",
+            channel_id=channel,
         )
         await route(msg)
 
@@ -108,26 +116,11 @@ async def _run_socket_mode(app: object, app_token: str) -> None:
     await handler.start_async()  # type: ignore[no-untyped-call]
 
 
-async def _heartbeat_loop(owner_id: str) -> None:
-    while True:
-        await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
-        im_connector_store.heartbeat(owner_id, "slack")
+async def run(agent_name: str, owner_id: str, config: dict[str, Any]) -> None:
+    """Run one agent's Slack connection until cancelled (network seam).
 
-
-async def run(owner_id: str, config: dict[str, str] | None = None) -> None:
-    """Run the Slack adapter, reporting status to the registry until cancelled."""
-    if config is None:
-        config = im_connector_config.resolve(owner_id, "slack")
-    app = create_app(owner_id, config)
-    heartbeat = asyncio.create_task(_heartbeat_loop(owner_id))
-    try:
-        im_connector_store.report_status(owner_id, "slack", "connected")
-        await _run_socket_mode(app, config.get("app_token", ""))
-    except asyncio.CancelledError:
-        im_connector_store.report_status(owner_id, "slack", "stopped")
-        raise
-    except Exception as exc:
-        im_connector_store.report_status(owner_id, "slack", "error", error=str(exc))
-        raise
-    finally:
-        heartbeat.cancel()
+    Per-agent connection status is owned by the connector supervisor, which catches
+    errors here and records them per agent. This runner just opens the connection.
+    """
+    app = create_app(agent_name, owner_id, config)
+    await _run_socket_mode(app, config.get("app_token", ""))

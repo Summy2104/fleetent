@@ -35,6 +35,15 @@ mcp_servers:
     auth_type: bearer
     api_key_env: ACME_MCP_TOKEN    # env-var NAME, never the token value
 
+# ── connectors (per-agent IM ingress; tokens via env reference only) ──
+# Each agent brings its own Slack app: its own bot identity, scopes, and Socket Mode
+# connection. The receiving connection identifies the agent (no channel→agent lookup).
+connectors:
+  slack:
+    bot_token_env: SUPPORT_SLACK_BOT   # env-var NAME (xoxb- token lives in the env)
+    app_token_env: SUPPORT_SLACK_APP   # env-var NAME (xapp- Socket Mode token)
+    channels: ["C0123"]                # optional filter; empty/absent = respond everywhere
+
 # ── bindings (routing + authorization; aggregated into the global routing table) ──
 bindings:
   default: false                   # at most one agent across all files may be true

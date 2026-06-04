@@ -62,19 +62,25 @@ The system SHALL automatically reconnect if the IM SDK connection drops, AND SHA
 - **THEN** it periodically calls `heartbeat(platform)` so `last_heartbeat_at` stays fresh
 
 ### Requirement: Adapter startup is connector-driven and credentials come from the registry
-Adapters SHALL be started and stopped by the connector manager (not hardcoded in server lifespan), and SHALL obtain credentials via `im_connector_config.resolve(platform)` (DB-first, `.env` fallback) rather than reading `config.Settings` directly.
 
-#### Scenario: Manager starts enabled adapters on boot
-- **WHEN** the server starts and the `slack` connector is `enabled=1` with valid credentials
-- **THEN** the connector manager launches the Slack adapter using credentials from `resolve("slack")`
+Owner-level adapters (Telegram, WhatsApp) SHALL be started and stopped by the connector
+manager (not hardcoded in server lifespan) and SHALL obtain credentials via
+`im_connector_config.resolve(platform)` (DB-first, `.env` fallback). Slack SHALL NOT be
+started this way: each agent's Slack connection is started per-agent from the agent
+index (see `per-agent-slack-connector`), with credentials from that agent's
+`connectors.slack` environment references.
+
+#### Scenario: Manager starts enabled owner-level adapters on boot
+- **WHEN** the server starts and the `telegram` connector is `enabled=1` with valid credentials
+- **THEN** the connector manager launches the Telegram adapter using credentials from `resolve("telegram")`
+
+#### Scenario: Slack is not started by the owner connector manager
+- **WHEN** the server starts
+- **THEN** no Slack adapter is launched by the owner-level connector manager; Slack connections are started per-agent from the agent index
 
 #### Scenario: Disabled adapter not started
 - **WHEN** the `telegram` connector is `enabled=0` at boot
 - **THEN** the Telegram adapter is not launched
-
-#### Scenario: Credentials sourced from DB when seeded
-- **WHEN** `im_connectors.slack.config` has been seeded with a token
-- **THEN** the adapter uses the DB token, ignoring the `.env` value
 
 ### Requirement: Routing enforces the channel allowlist
 Before normalizing into the agent pipeline, `normalizer.route` SHALL consult `im_channel_allowlist.is_allowed(platform, channel_id, workspace_id)` and SHALL drop disallowed messages before user-level checks.
