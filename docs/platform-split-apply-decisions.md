@@ -63,6 +63,12 @@
 - `tests/unit/test_normalizer::test_route_threads_owner_to_allowlist` 测「owner 透传给 im.is_allowed」，同样过时。
 - 决策：删除这些过时用例；其替代覆盖由新增的 `tests/integration/test_normalizer_local_access.py`（per-agent 本地 gate）承担。平台侧 `channel_allowlist` 模块本身保留（平台 authoring 仍用），仅运行路径不再调用。
 
+**D1.8 — 全量 suite 又抓出 9 个被本 change 破坏的 IM/route 测试，一并迁移；3 个为预存基线失败，不在本 change 范围。**
+- 全量 `pytest` 后 12 个失败。回到 base 分支 `chore/agent-platform-split-openspec` 复跑判定来源：
+  - **预存基线失败（base 上也红，非本 change 引入）**：`tests/integration/test_single_agent_runtime.py` 3 个。根因是单文件 home 模式 `paths.agent_file()` 路径与测试写入位置不一致，与 per-agent-im-access 无关。**保持原状**，仅记录。
+  - **本 change 引入（base 上绿）**：9 个 —— `test_im_adapter_owner`(1)、`test_normalizer_vision`(3)、`test_im_gateway`(2)、`test_integration`(2)。均因（a）default-closed gate 阻断了无 access 的 agent / bare-run，或（b）adapter 改用原生 id（不再 `user.id`）。按 4.1 同样手法迁移。
+  - 其中 `test_im_gateway::test_route_channel_agent_takes_priority` 暴露一个真实点：旧测试 fake `get_agent_for_context` 返回的是 `agent_store.Agent`（无 `.access`），而生产路径只返回 `AgentFile`。迁移为返回带 `access` 的 `AgentFile`，与生产类型一致。
+
 ### Change 2: agent-runtime-cli
 
 （待开始）

@@ -24,6 +24,25 @@ def _apply_migrations(db_path: Path) -> None:
     command.upgrade(cfg, "head")
 
 
+def _bind_default_agent(tmp_path: Path, user_id: str) -> None:
+    """Bind a default agent allowing ``user_id`` so the per-agent local gate passes."""
+    import yaml
+
+    import fleetent.agent_config as agent_config
+
+    root = tmp_path / "agents"
+    d = root / "it-bot"
+    d.mkdir(parents=True, exist_ok=True)
+    doc = {
+        "name": "it-bot",
+        "version": 1,
+        "bindings": {"default": True},
+        "access": {"allow_users": [user_id]},
+    }
+    (d / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    agent_config.scan(root)
+
+
 @pytest.fixture
 def isolated_db(tmp_path, monkeypatch):
     """Redirect all data paths to tmp_path.
@@ -47,6 +66,8 @@ def isolated_db(tmp_path, monkeypatch):
 async def test_full_slack_message_pipeline(isolated_db):
     """Mock Slack message → full pipeline → reply sent + session saved."""
     from fleetent.im_gateway.normalizer import NormalizedMessage, route
+
+    _bind_default_agent(isolated_db, "internal-user-1")
 
     reply_calls: list[str] = []
 
@@ -144,6 +165,8 @@ async def test_tool_not_in_allowed_tools_raises_before_approval(isolated_db):
 async def test_session_history_accumulates_across_messages(isolated_db):
     """Two messages to same session → history grows correctly."""
     from fleetent.im_gateway.normalizer import NormalizedMessage, route
+
+    _bind_default_agent(isolated_db, "internal-user-2")
 
     reply_calls: list[str] = []
 
