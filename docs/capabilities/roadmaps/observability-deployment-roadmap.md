@@ -10,6 +10,8 @@
 | Deployment / Config | [../deployment.md](../deployment.md) | on-prem config、Docker Compose Pilot 入口、backup / upgrade、module runtime prerequisites |
 | Pilot verification | [pilot-readiness-roadmap.md](pilot-readiness-roadmap.md) | 自动化证据包、真实 smoke 状态、Go / Conditional Go / No-Go 建议 |
 
+人工验收入口：[Observability and Deployment Roadmap 人工测试手册](../../deployment/observability-deployment-roadmap-test-manual.md)。
+
 ## 当前能力地图
 
 | 能力 | 当前状态 | 已有基础 | 当前缺口 | 后续增强 |

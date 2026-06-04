@@ -10,6 +10,8 @@
 
 **当前主要缺口在真实环境验证和生产化入口。** 真实 LLM / embedding / rerank provider、Google Drive / Confluence smoke、review UI、scheduler、policy admin API、credential 管理和 full sync history 仍需结合 Pilot 反馈推进。
 
+人工验收入口：[Intelligence Roadmap 人工测试手册](../../deployment/intelligence-roadmap-test-manual.md)。
+
 ## 范围
 
 | 能力域 | 文档 | 负责范围 |
