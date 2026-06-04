@@ -115,8 +115,53 @@
     font-size:13px; animation:toast-in .15s ease; }
   .toast.error { border-left-color:var(--danger); }
   .toast.ok { border-left-color:var(--ok); }
+  .toast.info { border-left-color:var(--accent); }
   @keyframes toast-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
   :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  
+  /* Provider Modal Styles */
+  .provider-modal { width: 640px; max-width: calc(100% - 32px); }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .modal-header h3 { margin: 0; font-size: 20px; font-weight: 600; }
+  .modal-close { background: transparent; border: none; color: var(--text-muted); font-size: 24px; width: 32px; height: 32px; border-radius: var(--r-1); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .modal-close:hover { background: var(--surface-2); color: var(--text); }
+  
+  .provider-form { display: flex; flex-direction: column; gap: 24px; }
+  .form-section { display: flex; flex-direction: column; gap: 16px; }
+  .form-section-title { font-size: 14px; font-weight: 600; color: var(--text); margin: 0 0 8px; }
+  
+  .provider-types { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+  .provider-type-card { position: relative; display: block; padding: 16px; background: var(--surface); border: 2px solid var(--border); border-radius: var(--r-2); cursor: pointer; transition: all 0.15s ease; }
+  .provider-type-card:hover { border-color: var(--border-strong); background: var(--surface-2); }
+  .provider-type-card.active { border-color: var(--accent); background: var(--accent-weak); }
+  .provider-type-card input[type="radio"] { position: absolute; opacity: 0; pointer-events: none; }
+  .provider-type-content { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+  .provider-icon { font-size: 24px; }
+  .provider-name { font-size: 13px; font-weight: 500; color: var(--text); }
+  
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-label { font-size: 13px; font-weight: 500; color: var(--text); }
+  .form-input { background: var(--bg-0); border: 1px solid var(--border); color: var(--text); border-radius: var(--r-1); padding: 8px 12px; font-size: 14px; transition: border-color 0.15s ease; }
+  .form-input:focus { border-color: var(--accent); background: var(--bg-1); }
+  .form-input:disabled { opacity: 0.5; cursor: not-allowed; }
+  .form-hint { font-size: 12px; color: var(--text-muted); }
+  
+  .form-row { display: flex; gap: 12px; }
+  .form-row .form-group { flex: 1; }
+  
+  .password-input-wrapper { position: relative; display: flex; }
+  .password-input-wrapper input { padding-right: 40px; flex: 1; }
+  .password-toggle { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 38px; background: transparent; border: none; color: var(--text-muted); cursor: pointer; border-radius: 0 var(--r-1) var(--r-1) 0; display: flex; align-items: center; justify-content: center; }
+  .password-toggle:hover { background: var(--surface-2); }
+  
+  .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
+  button.primary { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: var(--r-1); font-size: 14px; font-weight: 500; cursor: pointer; }
+  button.primary:hover { background: #6b9fff; }
+  
+  details.form-section summary { list-style: none; }
+  details.form-section summary::-webkit-details-marker { display: none; }
+  details.form-section summary::before { content: "▶"; display: inline-block; margin-right: 8px; transition: transform 0.15s ease; }
+  details.form-section[open] summary::before { transform: rotate(90deg); }
 </style>
 </head>
 <body>
@@ -301,31 +346,48 @@
     </section>
 
     <section id="tab-providers" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Model Providers</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.providers?.()">Refresh</button></div></div>
-      <div class="row" style="margin-bottom:12px;">
-        <span class="muted" style="flex:1;">Model providers (api_key stored server-side, shown masked)</span>
-        <span id="pv-create-bar">
-          <button class="ghost small" onclick="pvHealth()">Health</button>
-          <button onclick="pvOpenCreate()">Add provider</button>
-        </span>
+      <div class="page-header">
+        <h2 class="ph-title">Model Providers</h2>
+        <div class="ph-filter">
+          <div class="subtabs">
+            <button class="subtab active" id="pv-tab-providers" onclick="pvSwitchSubtab('providers')">Providers</button>
+            <button class="subtab" id="pv-tab-routing" onclick="pvSwitchSubtab('routing')">Routing</button>
+          </div>
+        </div>
+        <div class="ph-actions"><button class="ghost small" onclick="LOADERS.providers?.()">Refresh</button></div>
       </div>
-      <pre id="pv-health-out" class="muted" style="white-space:pre-wrap; margin:0 0 8px;"></pre>
-      <div class="table-scroll"><table>
-        <thead><tr><th>ID</th><th>Base URL</th><th>Model</th><th>API key</th><th>Pricing (in/out per 1k)</th><th>Actions</th></tr></thead>
-        <tbody id="pv-body"></tbody>
-      </table></div>
-      <h3 style="margin-top:24px;">Task-type routes</h3>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Task type</th><th>Provider chain</th><th>Actions</th></tr></thead>
-        <tbody id="pv-routes-body"></tbody>
-      </table></div>
-      <div class="card row" style="margin-top:8px;">
-        <input id="pv-route-tt" placeholder="task_type (e.g. default)">
-        <input id="pv-route-ids" placeholder="provider ids (comma-separated, priority order)" style="flex:1;">
-        <button onclick="pvSetRoute()">Set route</button>
-        <button class="ghost" onclick="pvPreviewRoute()">Preview</button>
+      
+      <!-- Providers subtab -->
+      <div id="pv-subtab-providers">
+        <div class="row" style="margin-bottom:12px;">
+          <span class="muted" style="flex:1;">Model providers (api_key stored server-side, shown masked)</span>
+          <span id="pv-create-bar">
+            <button onclick="pvOpenCreate()">Add Provider</button>
+          </span>
+        </div>
+        <div class="table-scroll"><table>
+          <thead><tr><th>ID</th><th>Description</th><th>Model</th><th>Base URL</th><th>API key</th><th>Actions</th></tr></thead>
+          <tbody id="pv-body"></tbody>
+        </table></div>
       </div>
-      <pre id="pv-route-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+      
+      <!-- Routing subtab -->
+      <div id="pv-subtab-routing" class="hidden">
+        <div class="row" style="margin-bottom:12px;">
+          <span class="muted" style="flex:1;">Configure task-type routing and fallback chains</span>
+        </div>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Task type</th><th>Provider chain (priority order)</th><th>Actions</th></tr></thead>
+          <tbody id="pv-routes-body"></tbody>
+        </table></div>
+        <div class="card row" style="margin-top:12px;">
+          <input id="pv-route-tt" placeholder="task_type (e.g. default)">
+          <input id="pv-route-ids" placeholder="provider ids (comma-separated, priority order)" style="flex:1;">
+          <button onclick="pvSetRoute()">Set route</button>
+          <button class="ghost" onclick="pvPreviewRoute()">Preview</button>
+        </div>
+        <pre id="pv-route-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+      </div>
     </section>
 
     <section id="tab-stats" class="hidden">
@@ -566,21 +628,119 @@
   </div>
 
   <div id="pv-modal" class="modal hidden">
-    <div class="modal-box" role="dialog" aria-modal="true">
-      <h3 id="pv-modal-title">Add provider</h3>
-      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="pvSave(); return false;">
-        <input id="pv-id" placeholder="auto-generated" autocomplete="off" readonly>
-        <input id="pv-base-url" placeholder="base_url (OpenAI-compatible)" autocomplete="off">
-        <input id="pv-model" placeholder="model" autocomplete="off">
-        <input id="pv-api-key" type="password" placeholder="api_key (leave blank to keep current)" autocomplete="off">
-        <div class="row">
-          <input id="pv-max-tokens" placeholder="max_tokens (optional)" autocomplete="off">
-          <input id="pv-temperature" placeholder="temperature (optional)" autocomplete="off">
+    <div class="modal-box provider-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h3 id="pv-modal-title">Add Provider</h3>
+        <button type="button" class="modal-close" onclick="pvCloseModal()" aria-label="Close">×</button>
+      </div>
+      <form class="provider-form" onsubmit="pvSave(); return false;">
+        <!-- Provider Type Selection -->
+        <div class="form-section">
+          <div class="provider-types">
+            <label class="provider-type-card active" data-type="openai">
+              <input type="radio" name="provider-type" value="openai" checked onchange="pvUpdateProviderType('openai')">
+              <div class="provider-type-content">
+                <span class="provider-icon">🤖</span>
+                <span class="provider-name">OpenAI</span>
+              </div>
+            </label>
+            <label class="provider-type-card" data-type="anthropic">
+              <input type="radio" name="provider-type" value="anthropic" onchange="pvUpdateProviderType('anthropic')">
+              <div class="provider-type-content">
+                <span class="provider-icon">🧠</span>
+                <span class="provider-name">Anthropic</span>
+              </div>
+            </label>
+            <label class="provider-type-card" data-type="azure">
+              <input type="radio" name="provider-type" value="azure" onchange="pvUpdateProviderType('azure')">
+              <div class="provider-type-content">
+                <span class="provider-icon">☁️</span>
+                <span class="provider-name">Azure</span>
+              </div>
+            </label>
+            <label class="provider-type-card" data-type="custom">
+              <input type="radio" name="provider-type" value="custom" onchange="pvUpdateProviderType('custom')">
+              <div class="provider-type-content">
+                <span class="provider-icon">⚙️</span>
+                <span class="provider-name">Custom</span>
+              </div>
+            </label>
+          </div>
         </div>
+
+        <!-- Basic Configuration -->
+        <div class="form-section">
+          <h4 class="form-section-title">Configuration</h4>
+          <div class="form-group">
+            <label class="form-label" for="pv-id">Provider ID</label>
+            <input id="pv-id" type="text" class="form-input" placeholder="Auto-generated" autocomplete="off" readonly required>
+            <span class="form-hint">Unique identifier (auto-generated)</span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="pv-description">Description</label>
+            <input id="pv-description" type="text" class="form-input" placeholder="e.g., Production GPT-4 endpoint" autocomplete="off">
+            <span class="form-hint">Brief description of this provider</span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="pv-base-url">Base URL</label>
+            <input id="pv-base-url" type="url" class="form-input" placeholder="https://api.openai.com/v1" autocomplete="off" required>
+            <span class="form-hint">OpenAI-compatible API endpoint</span>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group" style="flex: 1;">
+              <label class="form-label" for="pv-model">Model</label>
+              <select id="pv-model" class="form-input" required>
+                <option value="">Select a model...</option>
+                <optgroup label="GPT-4">
+                  <option value="gpt-4o">GPT-4o</option>
+                  <option value="gpt-4o-mini">GPT-4o Mini</option>
+                  <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                  <option value="gpt-4">GPT-4</option>
+                </optgroup>
+                <optgroup label="GPT-3.5">
+                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                </optgroup>
+                <option value="custom">Custom model...</option>
+              </select>
+              <input id="pv-model-custom" type="text" class="form-input hidden" placeholder="Enter custom model name" style="margin-top: 8px;">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="pv-api-key">API Key</label>
+            <div class="password-input-wrapper">
+              <input id="pv-api-key" type="password" class="form-input" placeholder="sk-..." autocomplete="off">
+              <button type="button" class="password-toggle" onclick="pvTogglePassword()" aria-label="Toggle password visibility">👁</button>
+            </div>
+            <span class="form-hint">Leave blank to keep existing key when editing</span>
+          </div>
+        </div>
+
+        <!-- Advanced Settings -->
+        <details class="form-section">
+          <summary class="form-section-title" style="cursor: pointer;">Advanced Settings</summary>
+          <div class="form-row" style="margin-top: 12px;">
+            <div class="form-group">
+              <label class="form-label" for="pv-max-tokens">Max Tokens</label>
+              <input id="pv-max-tokens" type="number" class="form-input" placeholder="4096" min="1" max="128000" autocomplete="off">
+              <span class="form-hint">Maximum response length</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="pv-temperature">Temperature</label>
+              <input id="pv-temperature" type="number" class="form-input" placeholder="0.7" min="0" max="2" step="0.1" autocomplete="off">
+              <span class="form-hint">Response randomness (0-2)</span>
+            </div>
+          </div>
+        </details>
+
         <div id="pv-err" class="err"></div>
-        <div class="row" style="justify-content:flex-end;">
+        
+        <div class="modal-footer">
           <button type="button" class="ghost" onclick="pvCloseModal()">Cancel</button>
-          <button type="submit">Save</button>
+          <button type="submit" class="primary">Save Provider</button>
         </div>
       </form>
     </div>
@@ -736,20 +896,6 @@
     </div>
   </div>
 
-  <div id="pv-pricing-modal" class="modal hidden">
-    <div class="modal-box" role="dialog" aria-modal="true">
-      <h3 id="pv-pricing-title">Set pricing</h3>
-      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="pvSavePricing(); return false;">
-        <input id="pv-price-in" placeholder="input_price_per_1k" autocomplete="off">
-        <input id="pv-price-out" placeholder="output_price_per_1k" autocomplete="off">
-        <div id="pv-pricing-err" class="err"></div>
-        <div class="row" style="justify-content:flex-end;">
-          <button type="button" class="ghost" onclick="pvClosePricing()">Cancel</button>
-          <button type="submit">Save</button>
-        </div>
-      </form>
-    </div>
-  </div>
 </div>
 
 <div id="toast-host" aria-live="polite"></div>
@@ -1736,7 +1882,6 @@ LOADERS.agents = () => loadAgents();
 // --- Model Providers --------------------------------------------------------
 
 let PV_EDIT_ID = null;
-let PV_PRICING_ID = null;
 
 async function loadProviders() {
   $("pv-body").innerHTML = loadingRow(6);
@@ -1746,15 +1891,13 @@ async function loadProviders() {
   $("pv-body").innerHTML = rows.map(p => `
       <tr>
         <td>${esc(p.id)}</td>
-        <td class="muted">${esc(p.base_url || "")}</td>
+        <td>${esc(p.description || "—")}</td>
         <td>${esc(p.model || "")}</td>
+        <td class="muted" style="font-size: 12px;">${esc(p.base_url || "")}</td>
         <td class="muted">${p.api_key_set ? esc(p.api_key || "****") : "—"}</td>
-        <td class="muted">${esc(p.input_price_per_1k != null ? p.input_price_per_1k : "—")} / ${esc(p.output_price_per_1k != null ? p.output_price_per_1k : "—")}</td>
         <td class="actions">
-          <button class="small ghost" onclick="pvObservability('${esc(p.id)}')">Stats</button>
           ${IS_VIEWER ? "" : `
           <button class="small ghost" onclick="pvTest('${esc(p.id)}')">Test</button>
-          <button class="small ghost" onclick="pvOpenPricing('${esc(p.id)}')">Pricing</button>
           <button class="small ghost" onclick="pvOpenEdit('${esc(p.id)}')">Edit</button>
           <button class="small danger" onclick="pvDelete('${esc(p.id)}')">Delete</button>`}
         </td>
@@ -1764,33 +1907,165 @@ async function loadProviders() {
 
 function pvOpenCreate() {
   PV_EDIT_ID = null;
-  $("pv-modal-title").textContent = "Add provider";
+  $("pv-modal-title").textContent = "Add Provider";
   $("pv-err").textContent = "";
-  for (const id of ["pv-id", "pv-base-url", "pv-model", "pv-api-key", "pv-max-tokens", "pv-temperature"]) $(id).value = "";
+  // Reset form
+  for (const id of ["pv-id", "pv-description", "pv-base-url", "pv-api-key", "pv-max-tokens", "pv-temperature"]) {
+    if ($(id)) $(id).value = "";
+  }
   $("pv-id").value = genId();
+  $("pv-model").value = "";
+  $("pv-model-custom").value = "";
+  $("pv-model-custom").classList.add("hidden");
+  // Reset provider type to OpenAI
+  document.querySelector('input[name="provider-type"][value="openai"]').checked = true;
+  pvUpdateProviderType('openai');
   $("pv-modal").classList.remove("hidden");
 }
+
 async function pvOpenEdit(id) {
   PV_EDIT_ID = id;
-  $("pv-modal-title").textContent = "Edit provider: " + id;
+  $("pv-modal-title").textContent = "Edit Provider";
   $("pv-err").textContent = "";
   const rows = await api("GET", "/providers");
   const p = rows.find(r => r.id === id) || {};
-  $("pv-id").value = id; $("pv-id").disabled = true;
+  $("pv-id").value = id;
+  $("pv-description").value = p.description || "";
   $("pv-base-url").value = p.base_url || "";
-  $("pv-model").value = p.model || "";
+  
+  // Handle model selection
+  const standardModels = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"];
+  if (standardModels.includes(p.model)) {
+    $("pv-model").value = p.model;
+    $("pv-model-custom").classList.add("hidden");
+  } else {
+    $("pv-model").value = "custom";
+    $("pv-model-custom").value = p.model || "";
+    $("pv-model-custom").classList.remove("hidden");
+  }
+  
   $("pv-api-key").value = "";  // never prefill secret
   $("pv-max-tokens").value = p.max_tokens != null ? p.max_tokens : "";
   $("pv-temperature").value = p.temperature != null ? p.temperature : "";
+  
+  // Detect provider type from URL
+  if (p.base_url?.includes('openai.com')) {
+    pvUpdateProviderType('openai');
+  } else if (p.base_url?.includes('anthropic.com')) {
+    pvUpdateProviderType('anthropic');
+  } else if (p.base_url?.includes('azure.com')) {
+    pvUpdateProviderType('azure');
+  } else {
+    pvUpdateProviderType('custom');
+  }
+  
   $("pv-modal").classList.remove("hidden");
 }
-function pvCloseModal() { $("pv-modal").classList.add("hidden"); }
+
+function pvCloseModal() {
+  $("pv-modal").classList.add("hidden");
+}
+
+function pvUpdateProviderType(type) {
+  // Update active state
+  document.querySelectorAll('.provider-type-card').forEach(card => {
+    card.classList.toggle('active', card.dataset.type === type);
+  });
+  
+  // Update URL placeholder based on type
+  const urlInput = $("pv-base-url");
+  switch(type) {
+    case 'openai':
+      urlInput.placeholder = "https://api.openai.com/v1";
+      pvUpdateModelOptions(['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo']);
+      break;
+    case 'anthropic':
+      urlInput.placeholder = "https://api.anthropic.com/v1";
+      pvUpdateModelOptions(['claude-4-5-sonnet', 'claude-4-5-haiku', 'claude-4-5-opus']);
+      break;
+    case 'azure':
+      urlInput.placeholder = "https://YOUR_RESOURCE.openai.azure.com";
+      pvUpdateModelOptions(['gpt-4', 'gpt-35-turbo']);
+      break;
+    case 'custom':
+      urlInput.placeholder = "https://your-api-endpoint.com/v1";
+      pvUpdateModelOptions([]);
+      break;
+  }
+}
+
+function pvUpdateModelOptions(models) {
+  const select = $("pv-model");
+  const currentValue = select.value;
+  
+  // Clear existing options except first and custom
+  while (select.options.length > 2) {
+    select.remove(1);
+  }
+  
+  // Add model options
+  if (models.length > 0) {
+    models.forEach(model => {
+      const option = document.createElement('option');
+      option.value = model;
+      option.textContent = model;
+      select.insertBefore(option, select.lastElementChild);
+    });
+  }
+  
+  // Restore value if it exists
+  if (currentValue && Array.from(select.options).some(opt => opt.value === currentValue)) {
+    select.value = currentValue;
+  }
+}
+
+function pvTogglePassword() {
+  const input = $("pv-api-key");
+  const button = input.nextElementSibling;
+  if (input.type === "password") {
+    input.type = "text";
+    button.textContent = "🙈";
+  } else {
+    input.type = "password";
+    button.textContent = "👁";
+  }
+}
+
+// Handle model selection change
+document.addEventListener('DOMContentLoaded', () => {
+  const modelSelect = document.getElementById('pv-model');
+  if (modelSelect) {
+    modelSelect.addEventListener('change', (e) => {
+      const customInput = $("pv-model-custom");
+      if (e.target.value === 'custom') {
+        customInput.classList.remove('hidden');
+        customInput.required = true;
+      } else {
+        customInput.classList.add('hidden');
+        customInput.required = false;
+      }
+    });
+  }
+});
 
 function pvFormBody() {
   const body = {
     base_url: $("pv-base-url").value,
-    model: $("pv-model").value,
   };
+  
+  // Add description if present
+  if ($("pv-description").value) {
+    body.description = $("pv-description").value;
+  }
+  
+  // Get model value
+  const modelSelect = $("pv-model");
+  if (modelSelect.value === 'custom') {
+    body.model = $("pv-model-custom").value;
+  } else {
+    body.model = modelSelect.value;
+  }
+  
   if ($("pv-api-key").value) body.api_key = $("pv-api-key").value;
   if ($("pv-max-tokens").value) body.max_tokens = parseInt($("pv-max-tokens").value, 10);
   if ($("pv-temperature").value) body.temperature = parseFloat($("pv-temperature").value);
@@ -1815,31 +2090,41 @@ async function pvDelete(id) {
   try { await api("DELETE", `/providers/${encodeURIComponent(id)}`); loadProviders(); } catch (e) { toast(e.message, "error"); }
 }
 async function pvTest(id) {
-  try { const r = await api("POST", `/providers/${encodeURIComponent(id)}/connectivity-test`); showInfo("Details", JSON.stringify(r, null, 2)); }
-  catch (e) { toast(e.message, "error"); }
+  // Find the test button and show loading state
+  const button = event.target;
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.innerHTML = '<span style="display: inline-block; animation: spin 1s linear infinite;">⏳</span> Testing...';
+  
+  // Show testing toast
+  toast("Testing provider connectivity...", "info");
+  
+  try { 
+    const r = await api("POST", `/providers/${encodeURIComponent(id)}/connectivity-test`); 
+    
+    // Show result in toast and modal
+    if (r.reachable) {
+      toast(`✅ Provider is reachable! (${r.latency_ms || '?'}ms)`, "ok");
+    } else {
+      toast(`❌ Provider unreachable: ${r.error || 'Connection failed'}`, "error");
+    }
+    
+    // Format the detailed result
+    let statusIcon = r.reachable ? '✅' : '❌';
+    let formattedResult = `${statusIcon} Connectivity Test Result\n\n`;
+    formattedResult += JSON.stringify(r, null, 2);
+    
+    showInfo("Test Result", formattedResult);
+  }
+  catch (e) { 
+    toast(e.message, "error"); 
+  }
+  finally {
+    // Restore button state
+    button.disabled = false;
+    button.textContent = originalText;
+  }
 }
-async function pvObservability(id) {
-  try { const r = await api("GET", `/providers/${encodeURIComponent(id)}/observability`); showInfo("Details", JSON.stringify(r, null, 2)); }
-  catch (e) { toast(e.message, "error"); }
-}
-function pvOpenPricing(id) {
-  PV_PRICING_ID = id;
-  $("pv-pricing-title").textContent = "Set pricing: " + id;
-  $("pv-pricing-err").textContent = "";
-  $("pv-price-in").value = ""; $("pv-price-out").value = "";
-  $("pv-pricing-modal").classList.remove("hidden");
-}
-function pvClosePricing() { $("pv-pricing-modal").classList.add("hidden"); }
-async function pvSavePricing() { return pvPricing(PV_PRICING_ID); }
-async function pvPricing(id) {
-  $("pv-pricing-err").textContent = "";
-  const body = {};
-  if ($("pv-price-in").value) body.input_price_per_1k = parseFloat($("pv-price-in").value);
-  if ($("pv-price-out").value) body.output_price_per_1k = parseFloat($("pv-price-out").value);
-  try { await api("PUT", `/providers/${encodeURIComponent(id)}/pricing`, body); pvClosePricing(); loadProviders(); }
-  catch (e) { $("pv-pricing-err").textContent = e.message; }
-}
-
 async function pvRoutes() {
   let routes = {};
   try { routes = await api("GET", "/providers/routes"); } catch (e) { return; }
@@ -1865,12 +2150,28 @@ async function pvPreviewRoute(tt) {
   try { const r = await api("GET", `/providers/routes/${encodeURIComponent(tt)}/preview`); $("pv-route-out").textContent = JSON.stringify(r, null, 2); }
   catch (e) { $("pv-route-out").textContent = e.message; }
 }
-async function pvHealth() {
-  try { const r = await api("GET", "/providers/health"); $("pv-health-out").textContent = JSON.stringify(r, null, 2); }
-  catch (e) { $("pv-health-out").textContent = e.message; }
+function pvSwitchSubtab(tab) {
+  // Update tab buttons
+  $("pv-tab-providers").classList.toggle("active", tab === "providers");
+  $("pv-tab-routing").classList.toggle("active", tab === "routing");
+  
+  // Show/hide content
+  $("pv-subtab-providers").classList.toggle("hidden", tab !== "providers");
+  $("pv-subtab-routing").classList.toggle("hidden", tab !== "routing");
+  
+  // Load routing data when switching to routing tab
+  if (tab === "routing") {
+    pvRoutes();
+  }
 }
 
-LOADERS.providers = () => loadProviders();
+LOADERS.providers = () => {
+  loadProviders();
+  // Load routing data if routing tab is active
+  if (!$("pv-subtab-routing").classList.contains("hidden")) {
+    pvRoutes();
+  }
+};
 
 // --- Statistics -------------------------------------------------------------
 
