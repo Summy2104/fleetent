@@ -35,17 +35,22 @@
   textarea { width:100%; box-sizing:border-box; resize:vertical; }
   /* shell: sidebar + content */
   .layout { display:flex; align-items:stretch; min-height:calc(100vh - 49px); }
-  .sidebar { flex:0 0 220px; width:220px; background:var(--bg-2); border-right:1px solid var(--border);
-    padding:var(--sp-3) var(--sp-2); overflow-y:auto; }
-  .nav-group { margin-bottom:var(--sp-4); }
+  .sidebar { flex:0 0 232px; width:232px; background:var(--bg-2); border-right:1px solid var(--border);
+    padding:14px 10px; overflow-y:auto; }
+  .nav-group { margin-bottom:16px; }
   .nav-group-label { display:block; width:100%; text-align:left; background:transparent; color:var(--text-faint);
-    font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; padding:var(--sp-1) var(--sp-3);
+    font-size:10.5px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; padding:4px 10px 6px;
     border:0; cursor:pointer; }
   .nav-group-label.active { color:var(--text-muted); }
-  .nav-item { display:block; width:100%; text-align:left; background:transparent; color:var(--text-muted);
-    border:0; border-radius:var(--r-1); padding:var(--sp-2) var(--sp-3); margin-top:2px; font-size:13px; cursor:pointer; }
+  .nav-item { display:flex; align-items:center; gap:10px; width:100%; text-align:left; background:transparent;
+    color:var(--text-muted); border:0; border-radius:8px; padding:7px 10px; margin-top:1px; font-size:13.5px;
+    cursor:pointer; position:relative; transition:background .12s ease, color .12s ease; }
   .nav-item:hover { background:var(--surface); color:var(--text); }
-  .nav-item.active { background:var(--accent-weak); color:var(--text); box-shadow:inset 2px 0 0 var(--accent); }
+  .nav-item.active { background:var(--accent-weak); color:var(--text); font-weight:600; }
+  .nav-item.active::before { content:""; position:absolute; left:-10px; top:6px; bottom:6px; width:3px;
+    border-radius:0 3px 3px 0; background:var(--accent); }
+  .nav-ico { width:18px; flex-shrink:0; text-align:center; font-size:14px; opacity:.8; }
+  .nav-item:hover .nav-ico, .nav-item.active .nav-ico { opacity:1; }
   .content { flex:1 1 auto; min-width:0; padding:var(--sp-5); max-width:1280px; }
   .hamburger { display:none; font-size:16px; line-height:1; }
   .nav-backdrop { display:none; }
@@ -503,25 +508,25 @@
     <nav class="sidebar" aria-label="Admin navigation">
       <div class="nav-group">
         <button class="nav-group-label active" data-group="access" onclick="switchGroup('access')">Access</button>
-        <button class="nav-item active" data-tab="users" onclick="switchTab('users')">Users</button>
+        <button class="nav-item active" data-tab="users" onclick="switchTab('users')"><span class="nav-ico">👤</span>Users</button>
       </div>
       <div class="nav-group">
         <button class="nav-group-label" data-group="agents" onclick="switchGroup('agents')">Agents &amp; Skills</button>
-        <button class="nav-item" data-tab="agents" onclick="switchTab('agents')">Agents</button>
-        <button class="nav-item" data-tab="skills" onclick="switchTab('skills')">Skills</button>
-        <button class="nav-item" data-tab="kb" onclick="switchTab('kb')">Knowledge Base</button>
-        <button class="nav-item" data-tab="chat" onclick="switchTab('chat')">Chat</button>
+        <button class="nav-item" data-tab="agents" onclick="switchTab('agents')"><span class="nav-ico">🤖</span>Agents</button>
+        <button class="nav-item" data-tab="skills" onclick="switchTab('skills')"><span class="nav-ico">🧩</span>Skills</button>
+        <button class="nav-item" data-tab="kb" onclick="switchTab('kb')"><span class="nav-ico">📚</span>Knowledge Base</button>
+        <button class="nav-item" data-tab="chat" onclick="switchTab('chat')"><span class="nav-ico">💬</span>Chat</button>
       </div>
       <div class="nav-group">
         <button class="nav-group-label" data-group="models" onclick="switchGroup('models')">Models &amp; Connectors</button>
-        <button class="nav-item" data-tab="providers" onclick="switchTab('providers')">Providers</button>
-        <button class="nav-item" data-tab="oauth" onclick="switchTab('oauth')">Connectors</button>
+        <button class="nav-item" data-tab="providers" onclick="switchTab('providers')"><span class="nav-ico">🧠</span>Providers</button>
+        <button class="nav-item" data-tab="oauth" onclick="switchTab('oauth')"><span class="nav-ico">🔌</span>Connectors</button>
       </div>
       <div class="nav-group">
         <button class="nav-group-label" data-group="ops" onclick="switchGroup('ops')">Ops</button>
-        <button class="nav-item" data-tab="stats" onclick="switchTab('stats')">Statistics</button>
-        <button class="nav-item" data-tab="monitoring" onclick="switchTab('monitoring')">Monitoring</button>
-        <button class="nav-item" data-tab="sessions" onclick="switchTab('sessions')">Sessions</button>
+        <button class="nav-item" data-tab="stats" onclick="switchTab('stats')"><span class="nav-ico">📊</span>Statistics</button>
+        <button class="nav-item" data-tab="monitoring" onclick="switchTab('monitoring')"><span class="nav-ico">🩺</span>Monitoring</button>
+        <button class="nav-item" data-tab="sessions" onclick="switchTab('sessions')"><span class="nav-ico">🗂️</span>Sessions</button>
       </div>
     </nav>
     <div class="nav-backdrop" onclick="document.body.classList.remove('nav-open')"></div>
