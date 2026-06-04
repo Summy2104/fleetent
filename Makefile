@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install test t test-unit test-unit-ci test-integration test-e2e test-evaluation lint fmt check typecheck serve admin
+.PHONY: help install test t test-unit test-unit-ci test-integration test-e2e test-evaluation test-layers lint fmt check typecheck serve admin
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -31,11 +31,14 @@ test-e2e: ## Run end-to-end tests
 test-evaluation: ## Run evaluation tests
 	uv run pytest tests/evaluation
 
+test-layers: ## Check unit/integration test layer boundaries
+	uv run python scripts/check_test_layers.py
+
 lint: ## Check code style with ruff
-	uv run ruff check src tests
+	uv run ruff check src tests scripts
 
 fmt: ## Auto-format code with ruff
-	uv run ruff format src tests
+	uv run ruff format src tests scripts
 
 typecheck: ## Type-check with mypy
 	uv run mypy src
