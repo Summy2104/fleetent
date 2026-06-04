@@ -287,6 +287,26 @@
   .sk-diff .add { color:var(--ok); } .sk-diff .del { color:var(--danger); } .sk-diff .hunk { color:var(--accent); }
   .risk-low { color:var(--ok); } .risk-medium { color:#d8a200; } .risk-high { color:var(--danger); }
   .sk-import-section { border:1px solid var(--border); border-radius:var(--r-2); padding:12px 14px; background:var(--surface); }
+  /* --- Chat module --- */
+  .chat-wrap { display:flex; flex-direction:column; height:calc(100vh - 170px); min-height:420px;
+    border:1px solid var(--border); border-radius:var(--r-2); overflow:hidden; background:var(--surface); }
+  .chat-toolbar { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); }
+  .chat-toolbar select { min-width:200px; }
+  .chat-log { flex:1; overflow-y:auto; padding:18px; display:flex; flex-direction:column; gap:14px; }
+  .chat-empty { margin:auto; text-align:center; }
+  .chat-msg { display:flex; gap:10px; max-width:82%; }
+  .chat-msg.user { align-self:flex-end; flex-direction:row-reverse; }
+  .chat-msg.assistant { align-self:flex-start; }
+  .chat-avatar { width:28px; height:28px; border-radius:50%; flex-shrink:0; display:flex;
+    align-items:center; justify-content:center; font-size:14px; background:var(--panel); border:1px solid var(--border); }
+  .chat-bubble { padding:10px 14px; border-radius:14px; white-space:pre-wrap; word-break:break-word;
+    font-size:14px; line-height:1.55; }
+  .chat-msg.user .chat-bubble { background:var(--accent); color:#fff; border-bottom-right-radius:4px; }
+  .chat-msg.assistant .chat-bubble { background:var(--panel); border:1px solid var(--border); border-bottom-left-radius:4px; }
+  .chat-tools { margin-top:6px; display:flex; flex-direction:column; gap:3px; }
+  .chat-tool { font-size:11px; color:var(--muted); font-family:monospace; }
+  .chat-composer { display:flex; gap:8px; padding:12px 14px; border-top:1px solid var(--border); align-items:flex-end; }
+  .chat-composer textarea { flex:1; resize:none; max-height:160px; font-family:inherit; font-size:14px; box-sizing:border-box; }
 
   .connector-icon {
     width: 40px;
@@ -485,6 +505,7 @@
         <button class="nav-item" data-tab="agents" onclick="switchTab('agents')">Agents</button>
         <button class="nav-item" data-tab="skills" onclick="switchTab('skills')">Skills</button>
         <button class="nav-item" data-tab="kb" onclick="switchTab('kb')">Knowledge Base</button>
+        <button class="nav-item" data-tab="chat" onclick="switchTab('chat')">Chat</button>
       </div>
       <div class="nav-group">
         <button class="nav-group-label" data-group="models" onclick="switchGroup('models')">Models &amp; Connectors</button>
@@ -633,6 +654,32 @@
           <button class="modal-close" onclick="skCloseDrawer()">×</button>
         </div>
         <div id="sk-drawer-body" class="conn-drawer-body"></div>
+      </div>
+    </section>
+
+    <section id="tab-chat" class="hidden">
+      <div class="page-header">
+        <h2 class="ph-title">Chat</h2>
+        <div class="ph-actions">
+          <button class="ghost small" id="chat-pin" onclick="chatPin()" disabled>Pin</button>
+          <button class="ghost small" id="chat-export" onclick="chatExport()" disabled>Export</button>
+          <button onclick="chatNew()">New chat</button>
+        </div>
+      </div>
+      <div class="chat-wrap">
+        <div class="chat-toolbar">
+          <label class="field-label" style="margin:0;">Agent</label>
+          <select id="chat-agent"></select>
+          <span id="chat-sid" class="muted" style="font-size:12px;"></span>
+        </div>
+        <div id="chat-log" class="chat-log">
+          <div class="chat-empty muted">Pick an agent and send a message to start.</div>
+        </div>
+        <div class="chat-composer">
+          <textarea id="chat-input" rows="1" placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
+            oninput="chatAutogrow(this)" onkeydown="chatKey(event)"></textarea>
+          <button id="chat-send" class="primary" onclick="chatSend()">Send</button>
+        </div>
       </div>
     </section>
 
@@ -1448,7 +1495,7 @@ function genId() {
 
 const TAB_GROUP = {
   users: "access",
-  agents: "agents", skills: "agents", kb: "agents",
+  agents: "agents", skills: "agents", kb: "agents", chat: "agents",
   providers: "models", oauth: "models",
   stats: "ops", monitoring: "ops", sessions: "ops",
   audit: "audit",
@@ -2093,6 +2140,119 @@ async function skDoUpload() {
 }
 
 LOADERS.skills = () => loadSkills();
+
+// --- Chat (admin playground) -------------------------------------------------
+let CHAT_SID = null;
+let CHAT_BUSY = false;
+
+async function loadChat() {
+  let agents = [];
+  try { agents = await api("GET", "/agents?include_archived=true"); } catch (e) { agents = []; }
+  const opts = agents
+    .filter(a => (a.status || "enabled") !== "archived")
+    .map(a => {
+      const n = a.agent_name || a.name;
+      const tag = a.status && a.status !== "enabled" ? ` (${esc(a.status)})` : "";
+      return `<option value="${esc(n)}">${esc(n)}${tag}</option>`;
+    }).join("");
+  $("chat-agent").innerHTML = opts || '<option value="">(no agents — create one first)</option>';
+}
+
+function chatAutogrow(t) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 160) + "px"; }
+function chatKey(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); chatSend(); } }
+
+function chatNew() {
+  CHAT_SID = null;
+  $("chat-log").innerHTML = '<div class="chat-empty muted">Pick an agent and send a message to start.</div>';
+  $("chat-sid").textContent = "";
+  $("chat-pin").disabled = true;
+  $("chat-export").disabled = true;
+  $("chat-input").focus();
+}
+
+function chatBubble(role, text) {
+  const log = $("chat-log");
+  const empty = log.querySelector(".chat-empty");
+  if (empty) empty.remove();
+  const wrap = document.createElement("div");
+  wrap.className = "chat-msg " + role;
+  wrap.innerHTML = `<div class="chat-avatar">${role === "user" ? "🧑" : "🤖"}</div><div class="chat-bubble"></div>`;
+  wrap.querySelector(".chat-bubble").textContent = text;
+  log.appendChild(wrap);
+  log.scrollTop = log.scrollHeight;
+  return wrap;
+}
+
+function chatToolNotes(events) {
+  const tools = (events || []).filter(e => ["tool_call", "tool_result", "error"].includes(e.type));
+  if (!tools.length) return "";
+  return `<div class="chat-tools">` + tools.map(e => {
+    if (e.type === "error") return `<div class="chat-tool" style="color:var(--danger)">⚠ ${esc(e.content || "")}</div>`;
+    if (e.type === "tool_call") return `<div class="chat-tool">🔧 ${esc(e.name || "tool")}(${esc(JSON.stringify(e.args || {}))})</div>`;
+    return `<div class="chat-tool">↳ ${esc(e.name || "")}: ${esc(String(e.content ?? "").slice(0, 200))}</div>`;
+  }).join("") + `</div>`;
+}
+
+async function chatSend() {
+  if (CHAT_BUSY) return;
+  const msg = $("chat-input").value.trim();
+  const agent = $("chat-agent").value;
+  if (!msg) return;
+  if (!agent) { toast("Pick an agent first", "error"); return; }
+  CHAT_BUSY = true;
+  $("chat-send").disabled = true;
+  $("chat-input").value = "";
+  chatAutogrow($("chat-input"));
+  chatBubble("user", msg);
+  const pending = chatBubble("assistant", "…");
+  pending.querySelector(".chat-bubble").classList.add("muted");
+  try {
+    if (!CHAT_SID) {
+      const s = await api("POST", "/chat/start", { agent_name: agent });
+      CHAT_SID = s.session_id;
+      $("chat-sid").textContent = CHAT_SID;
+      $("chat-pin").disabled = false;
+      $("chat-export").disabled = false;
+    }
+    const r = await api("POST", `/chat/${encodeURIComponent(CHAT_SID)}/message`, { message: msg });
+    const bubble = pending.querySelector(".chat-bubble");
+    bubble.classList.remove("muted");
+    bubble.textContent = r.reply || "(no reply)";
+    const notes = chatToolNotes(r.events);
+    if (notes) pending.insertAdjacentHTML("beforeend", notes);
+  } catch (e) {
+    const bubble = pending.querySelector(".chat-bubble");
+    bubble.classList.remove("muted");
+    bubble.innerHTML = `<span style="color:var(--danger)">${esc(e.message)}</span>`;
+  } finally {
+    CHAT_BUSY = false;
+    $("chat-send").disabled = false;
+    $("chat-log").scrollTop = $("chat-log").scrollHeight;
+  }
+}
+
+async function chatPin() {
+  if (!CHAT_SID) return;
+  try { await api("POST", `/chat/${encodeURIComponent(CHAT_SID)}/pin`, {}); toast("Pinned", "success"); }
+  catch (e) { toast(e.message, "error"); }
+}
+
+async function chatExport() {
+  if (!CHAT_SID) return;
+  try {
+    const res = await fetch(`/admin/chat/${encodeURIComponent(CHAT_SID)}/export?fmt=markdown`,
+      { headers: { "Authorization": "Session " + TOKEN } });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = CHAT_SID + ".md";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) { toast(e.message, "error"); }
+}
+
+LOADERS.chat = () => loadChat();
 
 // --- Agents -----------------------------------------------------------------
 

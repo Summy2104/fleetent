@@ -204,6 +204,58 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     ).result()
     await _connector_manager.start_all_enabled()
 
+    # Wire the admin "Chat" playground to the real agent loop (mirrors /chat): the
+    # selected agent is resolved by name from its file-driven config, and the turn
+    # runs through run_stream against the playground session. Without this the
+    # playground seams are inert placeholders.
+    def _pg_run(
+        agent_name: str,
+        session_id: str,
+        message: str,
+        overrides: dict[str, Any] | None,
+        bypass_medium: bool,
+    ) -> dict[str, Any]:
+        af = agent_config.current().get(agent_name) if agent_name else None
+        kwargs: dict[str, Any] = {"user_id": "playground", "session_id": session_id}
+        if af is not None:
+            kwargs["system_prompt"] = af.system_prompt
+            kwargs["allowed_tools"] = af.allowed_tools + expand_plugin_patterns(af.plugins)
+            kwargs["agent_name"] = af.name
+            kwargs["agent_features"] = af.features
+            kwargs["allowed_skills"] = af.allowed_skills
+        events: list[dict[str, Any]] = []
+
+        async def _collect() -> str:
+            reply = ""
+            try:
+                async for ev in run_stream(message, **kwargs):
+                    etype = ev.get("type")
+                    if etype == "done":
+                        reply = ev.get("content", "")
+                    elif etype in ("tool_call", "tool_result", "error"):
+                        events.append(ev)
+            except Exception as exc:  # noqa: BLE001 — surface as a turn error, never a 500
+                events.append({"type": "error", "content": str(exc)})
+            return reply
+
+        reply = asyncio.run_coroutine_threadsafe(_collect(), loop).result()
+        return {"reply": reply, "events": events}
+
+    def _pg_transcript(session_id: str) -> list[dict[str, Any]]:
+        return asyncio.run_coroutine_threadsafe(session_mgr.load(session_id), loop).result()
+
+    chat_admin_api.run_playground = _pg_run
+    chat_admin_api.load_transcript = _pg_transcript
+    chat_admin_api.clear_session = lambda session_id: asyncio.run_coroutine_threadsafe(
+        session_mgr.clear(session_id), loop
+    ).result()
+    chat_admin_api.inject = lambda session_id, role, content: asyncio.run_coroutine_threadsafe(
+        session_mgr.inject_message(session_id, role, content), loop
+    ).result()
+    chat_admin_api.reset_session = lambda session_id, keep_turns: asyncio.run_coroutine_threadsafe(
+        session_mgr.reset(session_id, keep_turns), loop
+    ).result()
+
     # Best-effort scheduler start: a missing/locked scheduled_tasks table (e.g. an
     # unmigrated DB) must not prevent the HTTP API from serving, consistent with the
     # sandbox-cleanup / IM-adapter best-effort pattern above. Surfaced via warning.
