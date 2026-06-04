@@ -35,12 +35,10 @@
 ## 3. 分层测试仍可运行
 
 - [x] 3.1 Verify green: 运行 `uv run pytest tests/unit -x -q`，确认 unit 层收集和执行通过
-- [ ] 3.2 Verify green: 运行 `uv run pytest tests/integration -x -q`，确认迁移后的 integration 层通过
-  - 2026-06-04: failed at pre-existing baseline failure
-    `tests/integration/test_single_agent_runtime.py::test_scan_publishes_single_home_agent`
-    after 1182 passed.
-- [ ] 3.3 Verify green: 运行 `uv run pytest -x -q`，确认完整测试仍通过
-  - 2026-06-04: failed at the same pre-existing baseline failure after 2767 passed.
+- [x] 3.2 Verify green: 运行 `uv run pytest tests/integration -x -q`，确认迁移后的 integration 层通过
+  - 2026-06-05: `1400 passed in 111.91s`.
+- [x] 3.3 Verify green: 运行 `uv run pytest -x -q`，确认完整测试仍通过
+  - 2026-06-05: `3107 passed, 14 skipped in 136.34s`.
 
 ## 4. 文档和 CI 辅助
 
@@ -61,9 +59,8 @@
     `src/fleetent/platform/model_provider_management/provider_connectivity.py`.
 - [ ] 5.3 运行 `uv run mypy src`
   - 2026-06-04: failed on existing production typing issues across 18 files.
-- [ ] 5.4 运行 `uv run pytest -x -q`
-  - 2026-06-04: failed at pre-existing
-    `tests/integration/test_single_agent_runtime.py::test_scan_publishes_single_home_agent`.
+- [x] 5.4 运行 `uv run pytest -x -q`
+  - 2026-06-05: `3107 passed, 14 skipped in 136.34s`.
 - [x] 5.5 运行 `uv run python scripts/check_test_layers.py`
 - [x] 5.6 运行 `openspec validate clarify-test-layer-boundaries --strict`
 - [x] 5.7 运行 `git diff --check`
