@@ -267,6 +267,8 @@
     background:var(--panel); border-left:1px solid var(--line); box-shadow:-8px 0 30px rgba(0,0,0,.4);
     z-index:45; display:flex; flex-direction:column; }
   .conn-drawer.hidden { display:none; }
+  /* Agent drawer holds far more config (bindings across 6 sections) — give it room. */
+  #ag-drawer { width:760px; }
   .conn-drawer-head { display:flex; justify-content:space-between; align-items:center;
     padding:16px 20px; border-bottom:1px solid var(--border); }
   .conn-drawer-head h3 { margin:0; font-size:17px; word-break:break-all; }
@@ -564,7 +566,7 @@
     </section>
 
     <section id="tab-kb" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Knowledge Base</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.kb?.()">Refresh</button></div></div>
+      <div class="page-header"><h2 class="ph-title">Knowledge Base</h2><div class="ph-filter"><input id="kb-filter" class="sk-search" placeholder="🔍  Search by id or description" oninput="renderKb()"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.kb?.()">Refresh</button></div></div>
       <div class="card" id="kb-create-card">
         <div class="row">
           <input id="nkb-id" placeholder="auto-generated" readonly>
@@ -709,16 +711,12 @@
       
       <!-- Providers subtab -->
       <div id="pv-subtab-providers">
-        <div class="row" style="margin-bottom:12px;">
-          <span class="muted" style="flex:1;">Model providers (api_key stored server-side, shown masked)</span>
-          <span id="pv-create-bar">
-            <button onclick="pvOpenCreate()">Add Provider</button>
-          </span>
+        <div class="sk-toolbar">
+          <input id="pv-filter" class="sk-search" placeholder="🔍  Search providers by id, model, or URL" oninput="renderProviders()">
+          <span id="pv-create-bar"><button onclick="pvOpenCreate()">+ Add provider</button></span>
         </div>
-        <div class="table-scroll"><table>
-          <thead><tr><th>ID</th><th>Description</th><th>Model</th><th>Base URL</th><th>API key</th><th>Actions</th></tr></thead>
-          <tbody id="pv-body"></tbody>
-        </table></div>
+        <div id="pv-count" class="muted" style="margin:2px 2px 12px;"></div>
+        <div id="pv-grid" class="connector-grid"></div>
       </div>
       
       <!-- Routing subtab -->
@@ -738,10 +736,18 @@
         </div>
         <pre id="pv-route-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
       </div>
+
+      <div id="pv-drawer" class="conn-drawer hidden">
+        <div class="conn-drawer-head">
+          <h3 id="pv-drawer-title">Provider</h3>
+          <button class="modal-close" onclick="pvCloseDrawer()">×</button>
+        </div>
+        <div id="pv-drawer-body" class="conn-drawer-body"></div>
+      </div>
     </section>
 
     <section id="tab-stats" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Statistics</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.stats?.()">Refresh</button></div></div>
+      <div class="page-header"><h2 class="ph-title">Statistics</h2><div class="ph-filter"><input id="st-filter" class="sk-search" placeholder="🔍  Filter rows by user" oninput="renderStatsRows()"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.stats?.()">Refresh</button></div></div>
       <div class="card">
         <div class="row">
           <input id="st-agent" placeholder="agent_id">
@@ -783,7 +789,7 @@
     </section>
 
     <section id="tab-monitoring" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Monitoring &amp; Alerts</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.monitoring?.()">Refresh</button></div></div>
+      <div class="page-header"><h2 class="ph-title">Monitoring &amp; Alerts</h2><div class="ph-filter"><input id="mon-filter" class="sk-search" placeholder="🔍  Search rules & alerts by metric / target" oninput="renderMonRules(); renderMonAlerts()"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.monitoring?.()">Refresh</button></div></div>
       <div class="card">
         <div class="row">
           <input id="mon-metric" placeholder="metric (e.g. cpu)">
@@ -819,7 +825,7 @@
     </section>
 
     <section id="tab-sessions" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Sessions</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.sessions?.()">Refresh</button></div></div>
+      <div class="page-header"><h2 class="ph-title">Sessions</h2><div class="ph-filter"><input id="sess-filter" class="sk-search" placeholder="🔍  Filter loaded rows by id / agent / origin" oninput="renderSessions()"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.sessions?.()">Refresh</button></div></div>
       <div class="row" style="margin-bottom:12px;">
         <select id="sess-status"><option value="">all status</option><option value="active">active</option><option value="ended">ended</option></select>
         <input id="sess-user" placeholder="user_id">
@@ -917,6 +923,21 @@
         <div class="row" style="justify-content:flex-end;">
           <button type="button" class="ghost" onclick="closeCreateModal()">Cancel</button>
           <button type="submit">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="edit-user-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3>Edit user</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="saveUser(); return false;">
+        <input id="eu-name" placeholder="nickname" autocomplete="off">
+        <input id="eu-email" placeholder="email" autocomplete="email">
+        <div id="edit-user-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="closeEditUser()">Cancel</button>
+          <button type="submit">Save</button>
         </div>
       </form>
     </div>
@@ -1157,8 +1178,36 @@
           template (required)
           <select id="ag-template" onchange="agTemplatePrefill()"></select>
         </label>
-        <textarea id="ag-system-prompt" placeholder="system prompt" rows="14" style="font-family:monospace;"></textarea>
+        <label class="muted" style="font-size:12px;">System prompt / identity
+          <textarea id="ag-system-prompt" placeholder="Describe the agent's identity and behavior…" rows="8" style="font-family:monospace; width:100%; margin-top:4px;"></textarea>
+        </label>
         <input id="ag-allowed-tools" placeholder="allowed_tools (comma-separated, e.g. shell, github__*)" autocomplete="off">
+        <div id="ag-create-extra">
+          <h4 style="margin:14px 0 4px;">Model providers</h4>
+          <div class="muted" style="font-size:12px; margin-bottom:6px;">Optional. One entry per level — leave a model blank to skip that level.</div>
+          <div id="ag-model-overrides"></div>
+          <h4 style="margin:14px 0 4px;">Capabilities (YAML)</h4>
+          <div class="muted" style="font-size:12px;">Paste an allowed_tools / plugins / features block — recorded as-is.</div>
+          <textarea id="ag-capabilities" rows="10" autocomplete="off" spellcheck="false" style="font-family:monospace; width:100%; margin-top:4px;" placeholder="allowed_tools:&#10;  - &quot;search_*&quot;&#10;  - read_file&#10;plugins:&#10;  - acme-docs&#10;features:&#10;  code_execution: true&#10;  sandbox_env:&#10;    TZ: Asia/Shanghai"></textarea>
+        </div>
+        <div id="ag-bind-config">
+          <div class="muted" style="font-size:12px;">Configure bindings for the new agent (optional — all editable later).</div>
+          <h4 style="margin:14px 0 4px;">Skills</h4>
+          <div id="agm-skills" style="display:flex; flex-direction:column; gap:4px;"></div>
+          <h4 style="margin:14px 0 4px;">Connectors</h4>
+          <div class="sk-meta-row"><span class="muted">MCP servers</span></div>
+          <div id="agm-mcp" style="display:flex; flex-direction:column; gap:4px;"></div>
+          <div class="sk-meta-row" style="margin-top:8px;"><span class="muted">OAuth connectors</span></div>
+          <div id="agm-oauth" style="display:flex; flex-direction:column; gap:4px;"></div>
+          <h4 style="margin:14px 0 4px;">Knowledge bases</h4>
+          <div id="agm-kb" style="display:flex; flex-direction:column; gap:4px;"></div>
+          <h4 style="margin:14px 0 4px;">IM users (allowlist)</h4>
+          <input id="agm-user-filter" class="sk-search" style="margin:4px 0 6px;" placeholder="🔍  Filter users by name, email or id" oninput="agmFilterUsers()">
+          <div id="agm-users" style="display:flex; flex-direction:column; gap:4px;"></div>
+          <h4 style="margin:14px 0 4px;">Channels</h4>
+          <div id="agm-channels"></div>
+          <div class="row" style="margin-top:6px;"><input id="agm-ch-platform" placeholder="platform" style="max-width:120px;"><input id="agm-ch-id" placeholder="channel_id"><button type="button" class="small" onclick="agmAddChannel()">Add channel</button></div>
+        </div>
         <div id="ag-err" class="err"></div>
         <div class="row" style="justify-content:flex-end;">
           <button type="button" class="ghost" onclick="agCloseModal()">Cancel</button>
@@ -1390,7 +1439,19 @@ async function api(method, path, body, extraHeaders) {
   if (TOKEN) headers["Authorization"] = "Session " + TOKEN;
   if (body) headers["Content-Type"] = "application/json";
   if (extraHeaders) Object.assign(headers, extraHeaders);
-  const res = await fetch("/admin" + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const opts = { method, headers, body: body ? JSON.stringify(body) : undefined };
+  // Transparently ride over a brief server bounce (e.g. a dev --reload restart):
+  // a thrown fetch ("Failed to fetch") means the request never completed, so it is
+  // safe to re-issue for any method. Retry a few times with short backoff.
+  let res;
+  for (let attempt = 0; ; attempt++) {
+    try { res = await fetch("/admin" + path, opts); break; }
+    catch (e) {
+      const network = /failed to fetch|load failed|networkerror/i.test(e.message || "");
+      if (!network || attempt >= 3) throw e;
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -1601,6 +1662,7 @@ function renderUsers() {
         <div class="menu">
           <button class="small ghost" title="More actions" onclick="toggleMenu(this)">…</button>
           <div class="menu-items hidden">
+            ${IS_VIEWER ? "" : `<button onclick="openEditUser('${u.id}')">Edit</button>`}
             ${u.role === "admin"
               ? `<button onclick="setRole('${u.id}','viewer')">Make viewer</button>`
               : `<button onclick="setRole('${u.id}','admin')">Make admin</button>`}
@@ -1687,6 +1749,25 @@ async function createUser() {
   } catch (e) { $("users-err").textContent = e.message; }
 }
 
+function openEditUser(id) {
+  const u = (ALL_USERS || []).find(x => x.id === id);
+  if (!u) return;
+  $("edit-user-modal").dataset.id = id;
+  $("eu-name").value = u.name || "";
+  $("eu-email").value = u.email || "";
+  $("edit-user-err").textContent = "";
+  $("edit-user-modal").classList.remove("hidden");
+}
+function closeEditUser() { $("edit-user-modal").classList.add("hidden"); }
+async function saveUser() {
+  const id = $("edit-user-modal").dataset.id;
+  $("edit-user-err").textContent = "";
+  try {
+    await api("PATCH", `/users/${id}`, { name: $("eu-name").value, email: $("eu-email").value });
+    closeEditUser();
+    loadUsers();
+  } catch (e) { $("edit-user-err").textContent = e.message; }
+}
 async function setRole(id, role) { try { await api("PATCH", `/users/${id}/role`, { role }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
 async function block(id) { const reason = prompt("Reason for blocking?"); if (reason === null) return; try { await api("POST", `/users/${id}/block`, { reason }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
 async function unblock(id) { try { await api("POST", `/users/${id}/unblock`); loadUsers(); } catch (e) { toast(e.message, "error"); } }
@@ -2281,7 +2362,16 @@ async function tmplLoad() {
   $("tmpl-list-err").textContent = "";
   $("tmpl-create-bar").innerHTML = IS_VIEWER ? "" : `<button class="small" onclick="tmplCreate()">New template</button>`;
   try { TEMPLATES = await api("GET", "/agent-templates"); tmplRender(); }
-  catch (e) { $("tmpl-list-err").textContent = e.message; }
+  catch (e) {
+    // "Failed to fetch" = the request never reached the server (e.g. it restarted
+    // mid-request). Don't dead-end on a blip — show a clear message + a retry.
+    const network = /failed to fetch|networkerror|load failed/i.test(e.message || "");
+    const msg = network ? "Couldn't reach the server — it may be restarting." : e.message;
+    $("tmpl-body").innerHTML = `<tr><td colspan="4">
+      <div class="muted" style="padding:8px 0;">${esc(msg)}
+        <button class="small ghost" style="margin-left:8px;" onclick="tmplLoad()">Retry</button>
+      </div></td></tr>`;
+  }
 }
 function tmplRender() {
   $("tmpl-body").innerHTML = TEMPLATES.map(t => `
@@ -2378,10 +2468,85 @@ async function agCreate() {
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
   $("ag-template-row").style.display = "";
+  $("ag-bind-config").style.display = "";
+  $("ag-create-extra").style.display = "";
+  $("ag-allowed-tools").style.display = "none";  // capabilities YAML supplies tools in create
+  agRenderModelOverrides();
+  $("ag-capabilities").value = "";
   await agLoadTemplateOptions();
+  await agLoadCreateBindings();
   $("ag-modal").dataset.mode = "create";
   $("ag-modal").classList.remove("hidden");
 }
+
+const AGM_MODEL_PROVIDERS = ["anthropic", "openai-compatible", "openai", "azure", "custom"];
+function agRenderModelOverrides() {
+  const provs = AGM_MODEL_PROVIDERS.map(p => `<option value="${p}">${p}</option>`).join("");
+  $("ag-model-overrides").innerHTML = ["default", "fast", "reasoning"].map(lvl => `
+    <div class="row" data-mo="${lvl}" style="gap:6px; margin-bottom:6px; align-items:center;">
+      <span style="min-width:74px; color:var(--muted);">${lvl}</span>
+      <select class="agmo-provider">${provs}</select>
+      <input class="agmo-model" placeholder="model" style="flex:1;" autocomplete="off">
+      <input class="agmo-baseurl" placeholder="base_url_env (optional)" style="flex:1;" autocomplete="off">
+    </div>`).join("");
+}
+function agCollectModelOverrides() {
+  const mo = {};
+  for (const row of document.querySelectorAll("#ag-model-overrides [data-mo]")) {
+    const model = row.querySelector(".agmo-model").value.trim();
+    if (!model) continue;
+    const o = { provider: row.querySelector(".agmo-provider").value, model };
+    const baseEnv = row.querySelector(".agmo-baseurl").value.trim();
+    if (baseEnv) o.base_url_env = baseEnv;
+    mo[row.dataset.mo] = o;
+  }
+  return mo;
+}
+
+let AGM_CHANNELS = [];
+async function agLoadCreateBindings() {
+  AGM_CHANNELS = [];
+  $("agm-channels").innerHTML = "";
+  if ($("agm-user-filter")) $("agm-user-filter").value = "";
+  const [skills, mcp, connectors, kbs, users] = await Promise.all([
+    api("GET", "/skills").catch(() => []),
+    api("GET", "/mcp/servers").catch(() => []),
+    api("GET", "/connectors").catch(() => []),
+    api("GET", "/kb").catch(() => []),
+    api("GET", "/users").catch(() => []),
+  ]);
+  const box = (cls, val, label, q) =>
+    `<label class="row ${cls}" ${q != null ? `data-q="${esc(q.toLowerCase())}"` : ""}><input type="checkbox" value="${esc(val)}"> ${label}</label>`;
+  $("agm-skills").innerHTML = (skills || []).map(s => box("agm-skill", s.name, esc(s.name))).join("")
+    || `<div class="muted">No skills available.</div>`;
+  $("agm-mcp").innerHTML = (mcp || []).map(m => box("agm-mcp-item", m.id, esc(m.id))).join("")
+    || `<div class="muted">No MCP servers.</div>`;
+  $("agm-oauth").innerHTML = (connectors || []).map(c => box("agm-oauth-item", c.id, esc(c.display_name || c.id))).join("")
+    || `<div class="muted">No OAuth connectors.</div>`;
+  $("agm-kb").innerHTML = (kbs || []).map(k => box("agm-kb-item", k.kb_id, esc(k.kb_id) + (k.description ? ` <span class="muted">— ${esc(k.description)}</span>` : ""))).join("")
+    || `<div class="muted">No knowledge bases.</div>`;
+  $("agm-users").innerHTML = (users || []).map(u =>
+    box("agm-user-row", u.id, esc(u.name || u.email || u.id) + (u.name || u.email ? ` <span class="muted">(${esc(u.id)})</span>` : ""),
+      [u.id, u.name || "", u.email || ""].join(" "))).join("") || `<div class="muted">No users available.</div>`;
+}
+function agmFilterUsers() {
+  const q = ($("agm-user-filter").value || "").trim().toLowerCase();
+  for (const row of document.querySelectorAll("#agm-users .agm-user-row")) {
+    row.style.display = (!q || (row.dataset.q || "").includes(q)) ? "" : "none";
+  }
+}
+function agmRenderChannels() {
+  $("agm-channels").innerHTML = AGM_CHANNELS.map((c, i) =>
+    `<div class="row">${esc(c.platform)} / ${esc(c.channel_id)} <button type="button" class="small ghost danger" onclick="agmRemoveChannel(${i})">Remove</button></div>`).join("");
+}
+function agmAddChannel() {
+  const pf = $("agm-ch-platform").value.trim(), ch = $("agm-ch-id").value.trim();
+  if (!pf || !ch) return;
+  if (!AGM_CHANNELS.some(c => c.platform === pf && c.channel_id === ch)) AGM_CHANNELS.push({ platform: pf, channel_id: ch });
+  $("agm-ch-platform").value = ""; $("agm-ch-id").value = "";
+  agmRenderChannels();
+}
+function agmRemoveChannel(i) { AGM_CHANNELS.splice(i, 1); agmRenderChannels(); }
 async function agEdit(name) {
   $("ag-err").textContent = "";
   try {
@@ -2392,29 +2557,61 @@ async function agEdit(name) {
     $("ag-system-prompt").value = a.system_prompt || "";
     $("ag-allowed-tools").value = (a.allowed_tools || []).join(", ");
     $("ag-template-row").style.display = "none";
+    $("ag-bind-config").style.display = "none";
+    $("ag-create-extra").style.display = "none";
+    $("ag-allowed-tools").style.display = "";
     $("ag-modal").dataset.mode = "edit";
     $("ag-modal").dataset.name = name;
     $("ag-modal").classList.remove("hidden");
   } catch (e) { toast(e.message, "error"); }
 }
 function agCloseModal() { $("ag-modal").classList.add("hidden"); }
+async function agApplyCreateBindings(name) {
+  const enc = encodeURIComponent(name);
+  const checked = (cls) => [...document.querySelectorAll(`#ag-bind-config .${cls} input:checked`)].map(i => i.value);
+  const calls = [];
+  for (const s of checked("agm-skill"))
+    calls.push(api("PUT", `/agents/${enc}/skills/${encodeURIComponent(s)}`, { enabled: true }));
+  for (const id of checked("agm-mcp-item"))
+    calls.push(api("POST", `/agents/${enc}/bindings/mcp/${encodeURIComponent(id)}`));
+  for (const id of checked("agm-oauth-item"))
+    calls.push(api("POST", `/agents/${enc}/bindings/oauth/${encodeURIComponent(id)}`));
+  for (const id of checked("agm-kb-item"))
+    calls.push(api("POST", `/agents/${enc}/kbs`, { kb_id: id }));
+  for (const id of checked("agm-user-row"))
+    calls.push(api("POST", `/agents/${enc}/bindings/users/${encodeURIComponent(id)}`));
+  for (const c of AGM_CHANNELS)
+    calls.push(api("POST", `/agents/${enc}/bindings/channels/${encodeURIComponent(c.platform)}/${encodeURIComponent(c.channel_id)}`));
+  const results = await Promise.allSettled(calls);
+  const failed = results.filter(r => r.status === "rejected").length;
+  if (failed) toast(`${failed} binding(s) failed; review them in the detail panel.`, "error");
+}
 async function agSave() {
   $("ag-err").textContent = "";
   const tools = $("ag-allowed-tools").value.split(",").map(s => s.trim()).filter(Boolean);
   const sp = $("ag-system-prompt").value;
+  const isEdit = $("ag-modal").dataset.mode === "edit";
   try {
-    if ($("ag-modal").dataset.mode === "edit") {
-      const name = $("ag-modal").dataset.name;
+    let name;
+    if (isEdit) {
+      name = $("ag-modal").dataset.name;
       await api("PATCH", `/agents/${encodeURIComponent(name)}`, { system_prompt: sp, allowed_tools: tools });
     } else {
-      const name = $("ag-name").value.trim();
+      name = $("ag-name").value.trim();
       if (!name) { $("ag-err").textContent = "name required"; return; }
       const templateId = $("ag-template").value;
       if (!templateId) { $("ag-err").textContent = "template required"; return; }
-      await api("POST", "/agents", { name, template_id: templateId, system_prompt: sp, allowed_tools: tools });
+      await api("POST", "/agents", {
+        name, template_id: templateId, system_prompt: sp,
+        model_overrides: agCollectModelOverrides(),
+        capabilities_yaml: $("ag-capabilities").value,
+      });
+      await agApplyCreateBindings(name);
     }
-    const editedName = $("ag-modal").dataset.mode === "edit" ? $("ag-modal").dataset.name : null;
-    agCloseModal(); agAfterChange(editedName);
+    agCloseModal();
+    await loadAgents();
+    // Open the detail panel so the just-configured bindings are visible and editable.
+    agDrawer(name);
   } catch (e) { $("ag-err").textContent = e.message; }
 }
 async function agDelete(name) {
@@ -2462,6 +2659,9 @@ async function agActivateVersion(name, version) {
 
 let AG_DRAWER = null;
 
+// Clicking an agent opens a read-only preview: the full agent.yaml. Editing /
+// binding management lives behind the "Manage bindings" button (agDrawerManage).
+let AG_YAML_CACHE = "";
 async function agDrawer(name) {
   AG_DRAWER = name;
   $("ag-drawer-title").textContent = name;
@@ -2469,19 +2669,105 @@ async function agDrawer(name) {
   $("ag-drawer-body").innerHTML = `<div class="muted">Loading…</div>`;
   const enc = encodeURIComponent(name);
   try {
-    const [a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions] = await Promise.all([
+    const [a, exp] = await Promise.all([
       api("GET", `/agents/${enc}`),
-      api("GET", `/agents/${enc}/bindings`),
-      api("GET", `/agents/${enc}/skills`),
-      api("GET", `/agents/${enc}/kbs`),
-      api("GET", `/agents/${enc}/bindings/oauth`),
-      api("GET", "/mcp/servers").catch(() => []),
-      api("GET", "/connectors").catch(() => []),
-      api("GET", "/kb").catch(() => []),
-      api("GET", `/agents/${enc}/versions`).catch(() => []),
+      api("GET", `/agents/${enc}/agent-yaml`),
     ]);
-    agRenderDrawer(name, { a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions });
-  } catch (e) { $("ag-drawer-body").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+    agRenderPreview(name, a, exp.yaml);
+  } catch (e) {
+    const network = /failed to fetch|networkerror|load failed/i.test(e.message || "");
+    const msg = network ? "Couldn't reach the server — it may be restarting." : e.message;
+    $("ag-drawer-body").innerHTML =
+      `<div class="muted" style="padding:4px 0;">${esc(msg)}
+        <button class="small ghost" style="margin-left:8px;" onclick="agDrawer('${esc(name)}')">Retry</button>
+      </div>`;
+  }
+}
+
+function agRenderPreview(name, a, yamlText) {
+  AG_YAML_CACHE = yamlText || "";
+  const archived = a.status === "archived";
+  const statusCls = a.status === "enabled" ? "active" : archived ? "" : "blocked";
+  const lifecycle = IS_VIEWER ? "" : `
+    <button class="small" onclick="agDeploy('${esc(name)}')">🚀 Deploy</button>
+    <button class="small" onclick="agEdit('${esc(name)}')">Edit</button>
+    <button class="small ghost" onclick="agOpenClone('${esc(name)}')">Clone</button>
+    ${a.status === "enabled"
+      ? `<button class="small ghost" onclick="agDisable('${esc(name)}')">Disable</button>`
+      : `<button class="small ghost" onclick="agEnable('${esc(name)}')">Enable</button>`}
+    ${archived
+      ? `<button class="small ghost" onclick="agRestore('${esc(name)}')">Restore</button>`
+      : `<button class="small ghost danger" onclick="agArchive('${esc(name)}')">Archive</button>`}
+    <button class="small ghost danger" onclick="agDelete('${esc(name)}')">Delete</button>
+    <button class="small ghost" onclick="agDrawerManage('${esc(name)}')">Manage bindings</button>`;
+  $("ag-drawer-body").innerHTML = `
+    <div class="sk-pills" style="margin-bottom:10px;">
+      <span class="pill ${statusCls}">${esc(a.status || "")}</span>
+      ${a.provenance ? `<span class="pill">${esc(a.provenance)}</span>` : ""}
+      ${a.drift ? `<span class="pill blocked">drift</span>` : ""}
+    </div>
+    <div class="row" style="flex-wrap:wrap; gap:6px; margin-bottom:10px;">
+      <button class="small ghost" onclick="agCopyYaml()">Copy</button>
+      <button class="small ghost" onclick="agDownloadYaml('${esc(name)}')">Download</button>
+      ${lifecycle}
+    </div>
+    <h4 style="margin:8px 0 6px;">agent.yaml <span class="muted" style="font-weight:normal;">(read-only preview)</span></h4>
+    <pre id="ag-yaml-pre" style="white-space:pre; overflow:auto; max-height:68vh; font-size:12px;"></pre>`;
+  document.getElementById("ag-yaml-pre").textContent = AG_YAML_CACHE;
+}
+
+function agCopyYaml() {
+  navigator.clipboard?.writeText(AG_YAML_CACHE);
+  toast("Copied agent.yaml", "ok");
+}
+async function agDeploy(name) {
+  if (!await confirmDialog(`Deploy ${name}? Writes (overwrites) its agent.yaml into the runtime agents dir.`)) return;
+  try {
+    const r = await api("POST", `/agents/${encodeURIComponent(name)}/deploy`);
+    toast("Deployed → " + r.path, "ok");
+  } catch (e) { toast(e.message, "error"); }
+}
+function agDownloadYaml(name) {
+  const blob = new Blob([AG_YAML_CACHE], { type: "text/yaml" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name + "-agent.yaml";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function agDrawerManage(name) {
+  AG_DRAWER = name;
+  $("ag-drawer-title").textContent = name;
+  $("ag-drawer").classList.remove("hidden");
+  $("ag-drawer-body").innerHTML = `<div class="muted">Loading…</div>`;
+  const enc = encodeURIComponent(name);
+  try {
+    // Only the agent record is essential; every binding sub-list degrades to empty
+    // on failure so one erroring section (e.g. an unmigrated table) can't blank the
+    // whole drawer.
+    const [a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions, allUsers] =
+      await Promise.all([
+        api("GET", `/agents/${enc}`),
+        api("GET", `/agents/${enc}/bindings`).catch(() => ({ users: [], channels: [], mcp_servers: [] })),
+        api("GET", `/agents/${enc}/skills`).catch(() => []),
+        api("GET", `/agents/${enc}/kbs`).catch(() => ({ kb_ids: [] })),
+        api("GET", `/agents/${enc}/bindings/oauth`).catch(() => ({ connector_ids: [] })),
+        api("GET", "/mcp/servers").catch(() => []),
+        api("GET", "/connectors").catch(() => []),
+        api("GET", "/kb").catch(() => []),
+        api("GET", `/agents/${enc}/versions`).catch(() => []),
+        api("GET", "/users").catch(() => []),
+      ]);
+    agRenderDrawer(name, { a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions, allUsers });
+  } catch (e) {
+    const network = /failed to fetch|networkerror|load failed/i.test(e.message || "");
+    const msg = network ? "Couldn't reach the server — it may be restarting." : e.message;
+    $("ag-drawer-body").innerHTML =
+      `<div class="muted" style="padding:4px 0;">${esc(msg)}
+        <button class="small ghost" style="margin-left:8px;" onclick="agDrawerManage('${esc(name)}')">Retry</button>
+      </div>`;
+  }
 }
 
 function agDrawerSection(title, inner) {
@@ -2545,20 +2831,30 @@ function agRenderDrawer(name, d) {
   const kbAdd = IS_VIEWER || !kbOpts ? "" :
     `<div class="row" style="margin-top:8px;"><select id="ag-kb-select"><option value="">— select a KB —</option>${kbOpts}</select><button class="small" onclick="agAddKb()">Bind</button></div>`;
 
-  // IM — users + channels
-  const users = (d.bindings.users || []);
-  const userList = users.length
-    ? users.map(u => `<div class="row">${esc(u)}${IS_VIEWER ? "" : ` <button class="small ghost danger" onclick="agUnbindUser('${esc(u)}')">Unbind</button>`}</div>`).join("")
-    : `<div class="muted">No users bound.</div>`;
-  const userAdd = IS_VIEWER ? "" :
-    `<div class="row" style="margin-top:8px;"><input id="ag-user-input" placeholder="user_id"><button class="small" onclick="agBindUser()">Bind user</button></div>`;
+  // IM — users (filterable multi-select allowlist) + channels (bind many)
+  const boundUsers = new Set(d.bindings.users || []);
+  const userLabel = (u) => esc(u.name || u.email || u.id) + (u.name || u.email ? ` <span class="muted">(${esc(u.id)})</span>` : "");
+  const userRow = (id, q, checked, body) =>
+    `<label class="row ag-user-row" data-q="${esc(q.toLowerCase())}"><input type="checkbox" ${checked ? "checked" : ""} ${IS_VIEWER ? "disabled" : ""} onchange="agToggleUser('${esc(id)}', this.checked)"> ${body}</label>`;
+  const userRows = (d.allUsers || []).map(u =>
+    userRow(u.id, [u.id, u.name || "", u.email || ""].join(" "), boundUsers.has(u.id), userLabel(u))
+  ).join("") || `<div class="muted">No users available.</div>`;
+  // bound users not present in the available list (e.g. removed) still get a row
+  const known = new Set((d.allUsers || []).map(u => u.id));
+  const orphanRows = (d.bindings.users || []).filter(id => !known.has(id)).map(id =>
+    userRow(id, id, true, esc(id))
+  ).join("");
+  const userFilter = (d.allUsers || []).length > 6
+    ? `<input id="ag-user-filter" class="sk-search" style="margin:4px 0 6px;" placeholder="🔍  Filter users by name, email or id" oninput="agFilterUsers()">`
+    : "";
+
   const chans = (d.bindings.channels || []);
   const chList = chans.length
     ? chans.map(c => `<div class="row">${esc(c.platform)} / ${esc(c.channel_id)}${IS_VIEWER ? "" : ` <button class="small ghost danger" onclick="agUnbindChannel('${esc(c.platform)}','${esc(c.channel_id)}')">Unbind</button>`}</div>`).join("")
     : `<div class="muted">No channels bound.</div>`;
   const chAdd = IS_VIEWER ? "" :
-    `<div class="row" style="margin-top:8px;"><input id="ag-ch-platform" placeholder="platform" style="max-width:120px;"><input id="ag-ch-id" placeholder="channel_id"><button class="small" onclick="agBindChannel()">Bind</button></div>`;
-  const im = `<div class="sk-meta-row"><span class="muted">Users</span></div>${userList}${userAdd}
+    `<div class="row" style="margin-top:8px;"><input id="ag-ch-platform" placeholder="platform" style="max-width:120px;"><input id="ag-ch-id" placeholder="channel_id"><button class="small" onclick="agBindChannel()">Bind channel</button></div>`;
+  const im = `<div class="sk-meta-row"><span class="muted">Users (allowlist)</span></div>${userFilter}${userRows}${orphanRows}
     <div class="sk-meta-row" style="margin-top:10px;"><span class="muted">Channels</span></div>${chList}${chAdd}`;
 
   // Versions
@@ -2566,8 +2862,12 @@ function agRenderDrawer(name, d) {
     `<div class="row">v${esc(v.version)} ${v.is_active ? `<span class="pill active">active</span>` : ""}<span class="muted" style="flex:1;">${esc(v.created_at || "")}</span>${(v.is_active || IS_VIEWER) ? "" : `<button class="small ghost" onclick="agActivateVersion('${esc(name)}', ${v.version})">Activate</button>`}</div>`
   ).join("") || `<div class="muted">No versions.</div>`;
 
+  const exportRow = `<div class="row" style="margin-bottom:10px; gap:6px;">
+    <button class="small ghost" onclick="agDrawer('${esc(name)}')">← Preview</button>
+    <button class="small ghost" onclick="agExportYaml('${esc(name)}')">⤓ Export agent.yaml</button></div>`;
   $("ag-drawer-body").innerHTML =
     meta
+    + exportRow
     + (actions ? agDrawerSection("Actions", actions) : "")
     + agDrawerSection("Skills", skills)
     + agDrawerSection("Connectors", connectors)
@@ -2576,45 +2876,76 @@ function agRenderDrawer(name, d) {
     + agDrawerSection("Versions", versions);
 }
 
+async function agExportYaml(name) {
+  let text;
+  try { text = (await api("GET", `/agents/${encodeURIComponent(name)}/agent-yaml`)).yaml; }
+  catch (e) { toast(e.message, "error"); return; }
+  _overlay({
+    onEsc: (close) => close(),
+    render: (box, close) => {
+      box.classList.add("wide");
+      box.innerHTML = "<h3>agent.yaml — " + esc(name) + "</h3>"
+        + '<pre style="max-height:60vh; overflow:auto;"></pre>'
+        + '<div class="actions" style="justify-content:flex-end; gap:6px; margin-top:14px;">'
+        + "<button data-copy>Copy</button><button data-dl>Download</button>"
+        + '<button data-x class="ghost">Close</button></div>';
+      box.querySelector("pre").textContent = text;
+      box.querySelector("[data-copy]").onclick = () => {
+        navigator.clipboard?.writeText(text); toast("Copied agent.yaml", "ok");
+      };
+      box.querySelector("[data-dl]").onclick = () => {
+        const blob = new Blob([text], { type: "text/yaml" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = name + "-agent.yaml";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      };
+      box.querySelector("[data-x]").onclick = close;
+    },
+  });
+}
 async function agSetSkill(skill, enabled) {
   try { await api("PUT", `/agents/${encodeURIComponent(AG_DRAWER)}/skills/${encodeURIComponent(skill)}`, { enabled }); }
-  catch (e) { toast(e.message, "error"); agDrawer(AG_DRAWER); }
+  catch (e) { toast(e.message, "error"); agDrawerManage(AG_DRAWER); }
 }
 async function agToggleMcp(server, on) {
   const m = on ? "POST" : "DELETE";
   try { await api(m, `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/mcp/${encodeURIComponent(server)}`); }
-  catch (e) { toast(e.message, "error"); agDrawer(AG_DRAWER); }
+  catch (e) { toast(e.message, "error"); agDrawerManage(AG_DRAWER); }
 }
 async function agToggleOauth(connector, on) {
   const m = on ? "POST" : "DELETE";
   try { await api(m, `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/oauth/${encodeURIComponent(connector)}`); }
-  catch (e) { toast(e.message, "error"); agDrawer(AG_DRAWER); }
+  catch (e) { toast(e.message, "error"); agDrawerManage(AG_DRAWER); }
 }
 async function agAddKb() {
   const id = $("ag-kb-select").value; if (!id) return;
-  try { await api("POST", `/agents/${encodeURIComponent(AG_DRAWER)}/kbs`, { kb_id: id }); agDrawer(AG_DRAWER); }
+  try { await api("POST", `/agents/${encodeURIComponent(AG_DRAWER)}/kbs`, { kb_id: id }); agDrawerManage(AG_DRAWER); }
   catch (e) { toast(e.message, "error"); }
 }
 async function agUnbindKb(id) {
-  try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/kbs/${encodeURIComponent(id)}`); agDrawer(AG_DRAWER); }
+  try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/kbs/${encodeURIComponent(id)}`); agDrawerManage(AG_DRAWER); }
   catch (e) { toast(e.message, "error"); }
 }
-async function agBindUser() {
-  const uid = $("ag-user-input").value.trim(); if (!uid) return;
-  try { await api("POST", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/users/${encodeURIComponent(uid)}`); agDrawer(AG_DRAWER); }
-  catch (e) { toast(e.message, "error"); }
+async function agToggleUser(uid, on) {
+  const m = on ? "POST" : "DELETE";
+  try { await api(m, `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/users/${encodeURIComponent(uid)}`); }
+  catch (e) { toast(e.message, "error"); agDrawerManage(AG_DRAWER); }
 }
-async function agUnbindUser(uid) {
-  try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/users/${encodeURIComponent(uid)}`); agDrawer(AG_DRAWER); }
-  catch (e) { toast(e.message, "error"); }
+function agFilterUsers() {
+  const q = ($("ag-user-filter").value || "").trim().toLowerCase();
+  for (const row of document.querySelectorAll("#ag-drawer-body .ag-user-row")) {
+    row.style.display = (!q || (row.dataset.q || "").includes(q)) ? "" : "none";
+  }
 }
 async function agBindChannel() {
   const pf = $("ag-ch-platform").value.trim(), ch = $("ag-ch-id").value.trim(); if (!pf || !ch) return;
-  try { await api("POST", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); agDrawer(AG_DRAWER); }
+  try { await api("POST", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); agDrawerManage(AG_DRAWER); }
   catch (e) { toast(e.message, "error"); }
 }
 async function agUnbindChannel(pf, ch) {
-  try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); agDrawer(AG_DRAWER); }
+  try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/channels/${encodeURIComponent(pf)}/${encodeURIComponent(ch)}`); agDrawerManage(AG_DRAWER); }
   catch (e) { toast(e.message, "error"); }
 }
 
@@ -2624,26 +2955,78 @@ LOADERS.agents = () => loadAgents();
 
 let PV_EDIT_ID = null;
 
+let PV_ALL = [];
+
 async function loadProviders() {
-  $("pv-body").innerHTML = loadingRow(6);
-  let rows;
-  try { rows = await api("GET", "/providers"); }
-  catch (e) { $("pv-body").innerHTML = emptyRow(6, e.message); return; }
-  $("pv-body").innerHTML = rows.map(p => `
-      <tr>
-        <td>${esc(p.id)}</td>
-        <td>${esc(p.description || "—")}</td>
-        <td>${esc(p.model || "")}</td>
-        <td class="muted" style="font-size: 12px;">${esc(p.base_url || "")}</td>
-        <td class="muted">${p.api_key_set ? esc(p.api_key || "****") : "—"}</td>
-        <td class="actions">
-          ${IS_VIEWER ? "" : `
-          <button class="small ghost" onclick="pvTest('${esc(p.id)}')">Test</button>
-          <button class="small ghost" onclick="pvOpenEdit('${esc(p.id)}')">Edit</button>
-          <button class="small danger" onclick="pvDelete('${esc(p.id)}')">Delete</button>`}
-        </td>
-      </tr>`).join("") || emptyRow(6, "No providers.");
+  $("pv-create-bar").innerHTML = IS_VIEWER ? "" : `<button onclick="pvOpenCreate()">+ Add provider</button>`;
+  $("pv-grid").innerHTML = `<div class="muted" style="padding:24px;">Loading…</div>`;
+  try { PV_ALL = await api("GET", "/providers"); }
+  catch (e) { $("pv-grid").innerHTML = `<div class="err" style="padding:24px;">${esc(e.message)}</div>`; return; }
+  renderProviders();
   pvRoutes();
+}
+
+function pvIcon(p) {
+  const u = (p.base_url || "").toLowerCase();
+  if (u.includes("anthropic")) return "🧠";
+  if (u.includes("openai")) return "🤖";
+  if (u.includes("azure")) return "☁️";
+  return "⚙️";
+}
+
+function renderProviders() {
+  const q = ($("pv-filter").value || "").trim().toLowerCase();
+  const rows = PV_ALL.filter(p => !q
+    || (p.id || "").toLowerCase().includes(q)
+    || (p.model || "").toLowerCase().includes(q)
+    || (p.base_url || "").toLowerCase().includes(q));
+  $("pv-count").textContent = `${rows.length} provider${rows.length === 1 ? "" : "s"}`;
+  $("pv-grid").innerHTML = rows.map(pvCardHtml).join("")
+    || `<div class="muted" style="padding:24px;">No providers.</div>`;
+}
+
+function pvCardHtml(p) {
+  const keyed = p.api_key_set;
+  return `
+    <div class="connector-card" onclick="pvDrawer('${esc(p.id)}')">
+      <div class="connector-status ${keyed ? 'active' : 'inactive'}"></div>
+      <div class="connector-icon" style="background:var(--accent-weak,#2a2a3a);">${pvIcon(p)}</div>
+      <div class="connector-title">${esc(p.id)}</div>
+      <div class="connector-desc">${esc(p.description || p.base_url || "No description")}</div>
+      <div class="sk-pills">
+        ${p.model ? `<span class="pill">${esc(p.model)}</span>` : ""}
+        <span class="pill ${keyed ? "active" : "blocked"}">${keyed ? "key set" : "no key"}</span>
+      </div>
+    </div>`;
+}
+
+function pvCloseDrawer() { $("pv-drawer").classList.add("hidden"); }
+
+function pvDrawer(id) {
+  const p = PV_ALL.find(x => x.id === id);
+  if (!p) return;
+  $("pv-drawer-title").textContent = id;
+  const meta = (k, v) => `<div class="sk-meta-row"><span class="muted" style="min-width:96px;">${k}</span><span>${v}</span></div>`;
+  const actions = IS_VIEWER ? "" : `
+    <div class="row" style="flex-wrap:wrap; gap:6px; margin-top:6px;">
+      <button class="small" onclick="pvTest('${esc(id)}')">Test connection</button>
+      <button class="small ghost" onclick="pvOpenEdit('${esc(id)}')">Edit</button>
+      <button class="small ghost danger" onclick="pvDelete('${esc(id)}')">Delete</button>
+    </div>`;
+  $("pv-drawer-body").innerHTML = `
+    <div class="sk-pills" style="margin-bottom:10px;">
+      ${p.model ? `<span class="pill">${esc(p.model)}</span>` : ""}
+      <span class="pill ${p.api_key_set ? "active" : "blocked"}">${p.api_key_set ? "key set" : "no key"}</span>
+    </div>
+    ${meta("Description", esc(p.description || "—"))}
+    ${meta("Base URL", esc(p.base_url || "—"))}
+    ${meta("Model", esc(p.model || "—"))}
+    ${meta("API key", p.api_key_set ? esc(p.api_key || "****") : "—")}
+    ${meta("Max tokens", p.max_tokens != null ? esc(String(p.max_tokens)) : "—")}
+    ${meta("Temperature", p.temperature != null ? esc(String(p.temperature)) : "—")}
+    ${actions}
+    <pre id="pv-test-out" class="muted" style="white-space:pre-wrap; margin:12px 0 0;"></pre>`;
+  $("pv-drawer").classList.remove("hidden");
 }
 
 function pvOpenCreate() {
@@ -2823,61 +3206,38 @@ async function pvCreate(id, body) {
 }
 async function pvEdit(id, body) {
   $("pv-err").textContent = "";
-  try { await api("PUT", `/providers/${encodeURIComponent(id)}`, body); pvCloseModal(); loadProviders(); }
-  catch (e) { $("pv-err").textContent = e.message; }
+  try {
+    await api("PUT", `/providers/${encodeURIComponent(id)}`, body);
+    pvCloseModal();
+    await loadProviders();
+    if (!$("pv-drawer").classList.contains("hidden")) pvDrawer(id);
+  } catch (e) { $("pv-err").textContent = e.message; }
 }
 async function pvDelete(id) {
   if (!await confirmDialog(`Delete provider ${id}?`)) return;
-  try { await api("DELETE", `/providers/${encodeURIComponent(id)}`); loadProviders(); } catch (e) { toast(e.message, "error"); }
+  try { await api("DELETE", `/providers/${encodeURIComponent(id)}`); pvCloseDrawer(); loadProviders(); }
+  catch (e) { toast(e.message, "error"); }
 }
 async function pvTest(id) {
-  // Find the test button and show loading state
-  const button = event.target;
-  const originalText = button.textContent;
-  button.disabled = true;
-  button.innerHTML = '<span style="display: inline-block; animation: spin 1s linear infinite;">⏳</span> Testing...';
-  
-  // Show testing dialog
-  showTestDialog('Provider Test', 'Testing connectivity...', 'loading');
-  
-  try { 
-    const r = await api("POST", `/providers/${encodeURIComponent(id)}/connectivity-test`); 
-    
-    // Show result dialog
+  const out = $("pv-test-out");
+  if (out) out.textContent = "⏳ Testing connectivity…";
+  try {
+    const r = await api("POST", `/providers/${encodeURIComponent(id)}/connectivity-test`);
     if (r.reachable) {
-      const details = `
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          <div><strong>Status:</strong> <span style="color: #4CAF50;">✅ Reachable</span></div>
-          <div><strong>Provider ID:</strong> ${esc(id)}</div>
-          <div><strong>Latency:</strong> ${r.latency_ms || '?'}ms</div>
-          ${r.model ? `<div><strong>Model:</strong> ${esc(r.model)}</div>` : ''}
-          ${r.base_url ? `<div><strong>Base URL:</strong> ${esc(r.base_url)}</div>` : ''}
-          ${r.details ? `<div><strong>Details:</strong> ${esc(r.details)}</div>` : ''}
-        </div>
-      `;
-      showTestDialog('Provider Test', details, 'success');
-      toast(`✅ Provider is reachable! (${r.latency_ms || '?'}ms)`, "success");
+      const msg = `✅ Reachable (${r.latency_ms || "?"}ms)`
+        + (r.model ? `\nModel: ${r.model}` : "")
+        + (r.base_url ? `\nBase URL: ${r.base_url}` : "")
+        + (r.details ? `\n${r.details}` : "");
+      if (out) out.textContent = msg;
+      toast(`✅ Provider is reachable! (${r.latency_ms || "?"}ms)`, "success");
     } else {
-      const details = `
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          <div><strong>Status:</strong> <span style="color: #f44336;">❌ Unreachable</span></div>
-          <div><strong>Provider ID:</strong> ${esc(id)}</div>
-          <div><strong>Error:</strong> ${esc(r.error || 'Connection failed')}</div>
-          ${r.details ? `<div><strong>Details:</strong> ${esc(r.details)}</div>` : ''}
-        </div>
-      `;
-      showTestDialog('Provider Test', details, 'error');
-      toast(`❌ Provider unreachable`, "error");
+      const msg = `❌ Unreachable\n${r.error || "Connection failed"}` + (r.details ? `\n${r.details}` : "");
+      if (out) out.textContent = msg;
+      toast("❌ Provider unreachable", "error");
     }
-  }
-  catch (e) { 
-    showTestDialog('Provider Test', `<div style="color: #f44336;">❌ ${esc(e.message)}</div>`, 'error');
-    toast(e.message, "error"); 
-  }
-  finally {
-    // Restore button state
-    button.disabled = false;
-    button.textContent = originalText;
+  } catch (e) {
+    if (out) out.textContent = `❌ ${e.message}`;
+    toast(e.message, "error");
   }
 }
 async function pvRoutes() {
@@ -2935,16 +3295,20 @@ async function stPerUser() {
   const sort = $("st-sort").value;
   const qs = [`sort_by=${encodeURIComponent(sort)}`];
   if (agent) qs.push(`agent_id=${encodeURIComponent(agent)}`);
-  try {
-    const rows = await api("GET", "/stats/per-user?" + qs.join("&"));
-    $("st-body").innerHTML = rows.map(r => `
+  try { ST_ROWS = await api("GET", "/stats/per-user?" + qs.join("&")); renderStatsRows(); }
+  catch (e) { $("st-body").innerHTML = `<tr><td colspan="4" class="err">${esc(e.message)}</td></tr>`; }
+}
+let ST_ROWS = [];
+function renderStatsRows() {
+  const q = ($("st-filter")?.value || "").trim().toLowerCase();
+  const rows = ST_ROWS.filter(r => !q || (r.user_id || "").toLowerCase().includes(q));
+  $("st-body").innerHTML = rows.map(r => `
       <tr>
         <td>${esc(r.user_id)}</td>
         <td>${esc(r.calls != null ? r.calls : "—")}</td>
         <td>${esc(r.total_tokens != null ? r.total_tokens : "—")}</td>
         <td>${esc(r.cost != null ? r.cost : "—")}</td>
       </tr>`).join("") || `<tr><td colspan="4" class="muted">No data.</td></tr>`;
-  } catch (e) { $("st-body").innerHTML = `<tr><td colspan="4" class="err">${esc(e.message)}</td></tr>`; }
 }
 async function stOverview() {
   const agent = $("st-agent").value.trim(); if (!agent) { $("st-out").textContent = "agent_id required"; return; }
@@ -3012,10 +3376,18 @@ async function monMetrics() {
   catch (e) { $("mon-metrics-out").textContent = e.message; }
 }
 
+let MON_RULES = [];
+function _monMatch(q, ...vals) {
+  return !q || vals.some(v => (v || "").toString().toLowerCase().includes(q));
+}
 async function monRules() {
-  try {
-    const rows = await api("GET", "/alerts/rules");
-    $("mon-rules-body").innerHTML = rows.map(r => `
+  try { MON_RULES = await api("GET", "/alerts/rules"); renderMonRules(); }
+  catch (e) { $("mon-rules-body").innerHTML = `<tr><td colspan="6" class="err">${esc(e.message)}</td></tr>`; }
+}
+function renderMonRules() {
+  const q = ($("mon-filter")?.value || "").trim().toLowerCase();
+  const rows = MON_RULES.filter(r => _monMatch(q, r.metric, r.target, r.severity));
+  $("mon-rules-body").innerHTML = rows.map(r => `
       <tr>
         <td>${esc(r.metric)}</td>
         <td class="muted">${esc(r.comparator)} ${esc(r.threshold)}</td>
@@ -3027,7 +3399,6 @@ async function monRules() {
           <button class="small danger" onclick="monDeleteRule('${esc(r.id)}')">Delete</button>`}
         </td>
       </tr>`).join("") || `<tr><td colspan="6" class="muted">No rules.</td></tr>`;
-  } catch (e) { $("mon-rules-body").innerHTML = `<tr><td colspan="6" class="err">${esc(e.message)}</td></tr>`; }
 }
 function monOpenRule() {
   $("mon-rule-err").textContent = "";
@@ -3058,11 +3429,16 @@ async function monDeleteRule(id) {
   try { await api("DELETE", `/alerts/rules/${encodeURIComponent(id)}`); monRules(); } catch (e) { toast(e.message, "error"); }
 }
 
+let MON_ALERTS = [];
 async function monAlerts() {
   const status = $("mon-alert-status").value;
-  try {
-    const rows = await api("GET", "/alerts" + (status ? `?status=${encodeURIComponent(status)}` : ""));
-    $("mon-alerts-body").innerHTML = rows.map(a => `
+  try { MON_ALERTS = await api("GET", "/alerts" + (status ? `?status=${encodeURIComponent(status)}` : "")); renderMonAlerts(); }
+  catch (e) { $("mon-alerts-body").innerHTML = `<tr><td colspan="5" class="err">${esc(e.message)}</td></tr>`; }
+}
+function renderMonAlerts() {
+  const q = ($("mon-filter")?.value || "").trim().toLowerCase();
+  const rows = MON_ALERTS.filter(a => _monMatch(q, a.metric, a.target, a.severity));
+  $("mon-alerts-body").innerHTML = rows.map(a => `
       <tr>
         <td><span class="pill ${a.severity === "critical" ? "blocked" : ""}">${esc(a.severity)}</span></td>
         <td>${esc(a.metric || "")}</td>
@@ -3073,7 +3449,6 @@ async function monAlerts() {
           <button class="small ghost" onclick="monSilence('${esc(a.id)}')">Silence</button>`}
         </td>
       </tr>`).join("") || `<tr><td colspan="5" class="muted">No alerts.</td></tr>`;
-  } catch (e) { $("mon-alerts-body").innerHTML = `<tr><td colspan="5" class="err">${esc(e.message)}</td></tr>`; }
 }
 async function monAck(id) {
   const assignee = prompt("Assignee (optional)") || null;
@@ -3101,7 +3476,16 @@ async function loadSessions() {
   if ($("sess-status").value) qs.push(`status=${encodeURIComponent($("sess-status").value)}`);
   if ($("sess-user").value.trim()) qs.push(`user_id=${encodeURIComponent($("sess-user").value.trim())}`);
   if ($("sess-agent").value.trim()) qs.push(`agent_name=${encodeURIComponent($("sess-agent").value.trim())}`);
-  const rows = await api("GET", "/sessions" + (qs.length ? "?" + qs.join("&") : ""));
+  SESS_ALL = await api("GET", "/sessions" + (qs.length ? "?" + qs.join("&") : ""));
+  renderSessions();
+}
+let SESS_ALL = [];
+function renderSessions() {
+  const q = ($("sess-filter")?.value || "").trim().toLowerCase();
+  const rows = SESS_ALL.filter(s => !q
+    || (s.session_id || "").toLowerCase().includes(q)
+    || (s.agent_name || "").toLowerCase().includes(q)
+    || (s.origin || "").toLowerCase().includes(q));
   $("sess-body").innerHTML = rows.map(s => {
     const sid = s.session_id;
     return `
@@ -3917,10 +4301,18 @@ async function testOAuthConfigInModal() {
 
 LOADERS.oauth = () => { loadAllConnectors(); };
 
+let KB_ALL = [];
 async function loadKb() {
   if (!$("nkb-id").value) $("nkb-id").value = genId();
-  const kbs = await api("GET", "/kb");
-  $("kb-body").innerHTML = kbs.map(k => `
+  KB_ALL = await api("GET", "/kb");
+  renderKb();
+}
+function renderKb() {
+  const q = ($("kb-filter")?.value || "").trim().toLowerCase();
+  const rows = KB_ALL.filter(k => !q
+    || (k.kb_id || "").toLowerCase().includes(q)
+    || (k.description || "").toLowerCase().includes(q));
+  $("kb-body").innerHTML = rows.map(k => `
     <tr>
       <td>${esc(k.kb_id)}</td>
       <td class="muted">${esc(k.description || "")}</td>

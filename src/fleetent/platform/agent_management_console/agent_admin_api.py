@@ -8,11 +8,13 @@ lifecycle is owned by Alembic. This module never imports the agent loop.
 
 from typing import Any
 
+import yaml
 from fastapi import APIRouter, Body, Header, HTTPException
 
-from fleetent import agent_store, auth, config, user_store
+from fleetent import agent_store, auth, config, paths, user_store
 from fleetent.governance import audit_log
 from fleetent.platform.connector_management import (
+    agent_mcp_server_store,
     agent_oauth_binding_store,
     connector_config_store,
 )
@@ -60,8 +62,95 @@ def _require_agent(name: str) -> agent_store.Agent:
 
 
 def _known_mcp_server_ids() -> set[str]:
-    """Seam: the set of MCP server ids an agent may bind to (from config)."""
-    return {s.id for s in config.load_mcp_server_settings()}
+    """The set of MCP server ids an agent may bind to.
+
+    Unions the YAML config seam with DB-registered global servers (admin console),
+    matching what ``GET /admin/mcp/servers`` lists — so a server defined only in the
+    store (not config) is still bindable.
+    """
+    ids = {s.id for s in config.load_mcp_server_settings()}
+    ids |= {str(r["server_id"]) for r in agent_mcp_server_store.list_mcp_servers(None)}
+    return ids
+
+
+def _build_agent_yaml(agent: agent_store.Agent) -> str:
+    """Assemble the runtime agent.yaml from the DB-authored config + bindings.
+
+    Covers every field the admin console authors. connectors.slack is intentionally
+    omitted: per-agent Slack connectors are not authored in the DB.
+    """
+    data: dict[str, Any] = {"name": agent.name}
+    if agent.system_prompt:
+        data["system_prompt"] = agent.system_prompt
+    if agent.model_overrides:
+        data["model_overrides"] = agent.model_overrides
+    if agent.allowed_skills:
+        data["allowed_skills"] = agent.allowed_skills
+    if agent.allowed_tools:
+        data["allowed_tools"] = agent.allowed_tools
+    if agent.plugins:
+        data["plugins"] = agent.plugins
+    if agent.features:
+        data["features"] = agent.features
+    if agent.memory_namespace and agent.memory_namespace != "default":
+        data["memory_namespace"] = agent.memory_namespace
+
+    servers: list[dict[str, Any]] = []
+    for sid in agent_store.list_mcp_servers_for_agent(agent.id):
+        row = agent_mcp_server_store.get_mcp_server(
+            agent.id, sid
+        ) or agent_mcp_server_store.get_mcp_server(None, sid)
+        if row is None:
+            continue
+        entry: dict[str, Any] = {"id": sid, "transport": row["transport"]}
+        for key in ("url", "auth_type", "api_key_env", "command", "args", "env"):
+            if row.get(key):
+                entry[key] = row[key]
+        servers.append(entry)
+    if servers:
+        data["mcp_servers"] = servers
+
+    bindings: dict[str, Any] = {}
+    channels = [
+        f"{c['platform']}:{c['channel_id']}"
+        for c in agent_store.list_channels_for_agent(agent.id)
+    ]
+    users = agent_store.list_users_for_agent(agent.id)
+    if channels:
+        bindings["channels"] = channels
+    if users:
+        bindings["users"] = users
+    if bindings:
+        data["bindings"] = bindings
+
+    return yaml.dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False)
+
+
+@router.get("/agents/{name}/agent-yaml")
+def export_agent_yaml(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    _current_user(authorization)
+    agent = _require_agent(name)
+    return {"agent": name, "yaml": _build_agent_yaml(agent)}
+
+
+@router.post("/agents/{name}/deploy")
+def deploy_agent(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    """Write (overwrite) the agent.yaml at ``<FLEETENT home>/<name>/agent.yaml``.
+
+    Target: ``~/.fleetent/<name>/agent.yaml`` (honors FLEETENT_HOME). Picking it up
+    into the runtime index is owned elsewhere; this just generates the file.
+    """
+    user = _require_admin(authorization)
+    agent = _require_agent(name)
+    if "/" in name or "\\" in name or name in (".", ".."):
+        raise HTTPException(status_code=400, detail="invalid agent name")
+    dest = paths.base_dir() / name / "agent.yaml"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(_build_agent_yaml(agent), encoding="utf-8")
+    audit_log.write_audit(
+        user.id, "agent.deploy", target_type="agent", target_id=name, detail={"path": str(dest)}
+    )
+    return {"agent": name, "path": str(dest), "deployed": True}
 
 
 @router.get("/agents/{name}/versions")

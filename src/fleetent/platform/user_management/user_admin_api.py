@@ -142,6 +142,11 @@ class RoleBody(BaseModel):
     role: str
 
 
+class ProfileBody(BaseModel):
+    name: str | None = None
+    email: str | None = None
+
+
 class ReasonBody(BaseModel):
     reason: str = ""
 
@@ -210,6 +215,36 @@ def delete_user(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     audit_log.write_audit(admin.id, "delete_user", target_type="user", target_id=user_id)
+
+
+@router.patch("/users/{user_id}")
+def update_user(
+    user_id: str,
+    body: ProfileBody,
+    authorization: str | None = Header(None),
+    x_2fa_code: str | None = Header(None, alias="X-2FA-Code"),
+) -> dict[str, Any]:
+    """Edit a user's profile (name and/or email). Admin-only."""
+    admin = _require_admin(authorization)
+    _enforce_2fa(admin, x_2fa_code)
+    if user_store.get_by_id(user_id) is None:
+        raise HTTPException(status_code=404, detail="not found")
+    name = body.name.strip() if body.name is not None else None
+    if name is not None and not name:
+        raise HTTPException(status_code=422, detail="name cannot be empty")
+    email = body.email.strip() if body.email is not None else None
+    try:
+        user_store.set_profile(user_id, name=name, email=email)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    audit_log.write_audit(
+        admin.id,
+        "update_user",
+        target_type="user",
+        target_id=user_id,
+        detail={"name": name, "email": email},
+    )
+    return _user_dict(user_store.get_by_id(user_id))  # type: ignore[arg-type]
 
 
 @router.patch("/users/{user_id}/role")

@@ -218,6 +218,36 @@ def test_bind_known_mcp_server(client, monkeypatch):
     assert agent_store.list_mcp_servers_for_agent(agent.id) == []
 
 
+def test_known_mcp_ids_include_store_registered(monkeypatch):
+    # _known_mcp_server_ids unions the YAML config seam with DB-registered global
+    # servers (the same set the drawer lists), so a store-only server is bindable.
+    from fleetent.platform.connector_management import agent_mcp_server_store
+
+    monkeypatch.setattr(api.config, "load_mcp_server_settings", lambda: [])
+    monkeypatch.setattr(
+        agent_mcp_server_store,
+        "list_mcp_servers",
+        lambda agent_id: [{"server_id": "middle"}] if agent_id is None else [],
+    )
+    assert "middle" in api._known_mcp_server_ids()
+
+
+def test_bind_store_registered_mcp_server(client, monkeypatch):
+    from fleetent.platform.connector_management import agent_mcp_server_store
+
+    agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    monkeypatch.setattr(api.config, "load_mcp_server_settings", lambda: [])
+    monkeypatch.setattr(
+        agent_mcp_server_store,
+        "list_mcp_servers",
+        lambda agent_id: [{"server_id": "middle"}] if agent_id is None else [],
+    )
+    token, _ = _session_for("admin")
+    resp = client.post("/admin/agents/ops/bindings/mcp/middle", headers=_hdr(token))
+    assert resp.status_code == 200, resp.text
+    assert agent_store.list_mcp_servers_for_agent(agent.id) == ["middle"]
+
+
 def test_bind_unknown_mcp_server_404(client, monkeypatch):
     agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
     monkeypatch.setattr(api, "_known_mcp_server_ids", lambda: {"github"})
@@ -302,3 +332,95 @@ def test_oauth_bind_viewer_forbidden(client):
     token, _ = _session_for("viewer")
     r = client.post("/admin/agents/ops/bindings/oauth/github", headers=_hdr(token))
     assert r.status_code == 403
+
+
+# --- export agent.yaml --------------------------------------------------------
+
+
+def test_export_agent_yaml(client):
+    import yaml as _yaml
+
+    from fleetent.platform.connector_management import agent_mcp_server_store
+
+    agent = agent_store.create_agent(
+        "support-bot",
+        "You are support-bot.",
+        ["search_*", "read_file"],
+        plugins=["acme-docs", "billing"],
+        features={"code_execution": True, "sandbox_env": {"TZ": "Asia/Shanghai"}},
+        allowed_skills=["jira"],
+        model_overrides={"default": {"provider": "anthropic", "model": "claude-opus-4-8"}},
+        memory_namespace="support-bot",
+    )
+    agent_mcp_server_store.add_mcp_server(
+        None, "docs", transport="http", url="https://docs.acme.internal/mcp",
+        auth_type="bearer", api_key_env="ACME_DOCS_MCP_TOKEN",
+    )
+    agent_store.bind_mcp_server(agent.id, "docs")
+    agent_store.assign_user("u_alice", agent.id)
+    agent_store.assign_channel("slack", "C0123ABCD", agent.id)
+
+    token, _ = _session_for("admin")
+    r = client.get("/admin/agents/support-bot/agent-yaml", headers=_hdr(token))
+    assert r.status_code == 200, r.text
+    doc = _yaml.safe_load(r.json()["yaml"])
+    assert doc["name"] == "support-bot"
+    assert doc["system_prompt"].startswith("You are support-bot")
+    assert doc["model_overrides"]["default"]["model"] == "claude-opus-4-8"
+    assert doc["allowed_tools"] == ["search_*", "read_file"]
+    assert doc["plugins"] == ["acme-docs", "billing"]
+    assert doc["features"]["sandbox_env"]["TZ"] == "Asia/Shanghai"
+    assert doc["allowed_skills"] == ["jira"]
+    assert doc["memory_namespace"] == "support-bot"
+    assert {s["id"]: s for s in doc["mcp_servers"]}["docs"]["api_key_env"] == "ACME_DOCS_MCP_TOKEN"
+    assert "slack:C0123ABCD" in doc["bindings"]["channels"]
+    assert "u_alice" in doc["bindings"]["users"]
+
+
+def test_export_agent_yaml_unknown_404(client):
+    token, _ = _session_for("admin")
+    r = client.get("/admin/agents/ghost/agent-yaml", headers=_hdr(token))
+    assert r.status_code == 404
+
+
+# --- deploy agent.yaml to the runtime agents dir ------------------------------
+
+
+def test_deploy_writes_agent_yaml(client, tmp_path, monkeypatch):
+    import yaml as _yaml
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("FLEETENT_HOME", str(home))
+    agent_store.create_agent(
+        "dep-bot", "You are dep-bot.", ["read_file"], plugins=["p1"],
+        model_overrides={"default": {"provider": "anthropic", "model": "claude-opus-4-8"}},
+    )
+    token, _ = _session_for("admin")
+    r = client.post("/admin/agents/dep-bot/deploy", headers=_hdr(token))
+    assert r.status_code == 200, r.text
+    dest = home / "dep-bot" / "agent.yaml"
+    assert dest.exists()
+    assert r.json()["path"] == str(dest)
+    doc = _yaml.safe_load(dest.read_text())
+    assert doc["name"] == "dep-bot"
+    assert doc["allowed_tools"] == ["read_file"]
+    assert doc["plugins"] == ["p1"]
+
+    # redeploy overwrites in place after an edit
+    agent_store.create_version("dep-bot", system_prompt="changed")
+    r2 = client.post("/admin/agents/dep-bot/deploy", headers=_hdr(token))
+    assert r2.status_code == 200
+    assert "changed" in dest.read_text()
+
+
+def test_deploy_viewer_forbidden(client):
+    agent_store.create_agent("dep2", "x", [])
+    token, _ = _session_for("viewer")
+    r = client.post("/admin/agents/dep2/deploy", headers=_hdr(token))
+    assert r.status_code == 403
+
+
+def test_deploy_unknown_agent_404(client):
+    token, _ = _session_for("admin")
+    r = client.post("/admin/agents/ghost/deploy", headers=_hdr(token))
+    assert r.status_code == 404

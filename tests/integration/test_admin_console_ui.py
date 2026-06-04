@@ -123,9 +123,21 @@ def test_skills_write_controls_admin_gated():
 def test_providers_tab_and_list_wiring():
     html = ADMIN_HTML
     assert 'id="tab-providers"' in html
-    assert "pv-body" in html
+    # card grid + search toolbar replaced the legacy table
+    assert 'id="pv-grid"' in html
+    assert 'id="pv-filter"' in html
+    assert "function pvCardHtml" in html
     assert 'api("GET", "/providers"' in html
     assert "LOADERS.providers" in html
+
+
+def test_providers_detail_drawer_present():
+    html = ADMIN_HTML
+    assert 'id="pv-drawer"' in html
+    assert "function pvDrawer" in html and "function pvCloseDrawer" in html
+    # cards open the drawer; drawer hosts the Test/Edit/Delete actions
+    card = html.split("function pvCardHtml", 1)[1].split("function pvCloseDrawer", 1)[0]
+    assert "pvDrawer(" in card
 
 
 def test_providers_crud_and_actions_wired():
@@ -212,8 +224,7 @@ def test_agents_lifecycle_functions_present():
         "function agObservability",
         "function agVersions",
         "function agActivateVersion",
-        "function agBindUser",
-        "function agUnbindUser",
+        "function agToggleUser",
         "function agBindChannel",
         "function agUnbindChannel",
     ):
@@ -362,20 +373,26 @@ def test_agent_templates_write_controls_admin_gated():
     assert "tmplDelete(" in body
 
 
+# Free-form fields the modal never exposes (covered by template / bindings instead).
 _NON_TEMPLATE_FIELDS = (
     "ag-skills-dir",
     "ag-mcp-server-ids",
-    "ag-model-overrides",
     "ag-memory-namespace",
 )
 
 
-def test_agents_modal_only_template_backed_fields():
+def test_agents_modal_core_and_create_config_fields():
     html = ADMIN_HTML
-    # template-backed editable fields remain
+    # identity fields remain
     assert 'id="ag-system-prompt"' in html
     assert 'id="ag-allowed-tools"' in html
-    # non-template free-form fields are gone
+    # new-agent config: structured model overrides + capabilities YAML paste
+    assert 'id="ag-model-overrides"' in html
+    assert "function agRenderModelOverrides" in html
+    assert "function agCollectModelOverrides" in html
+    assert 'id="ag-capabilities"' in html
+    assert "capabilities_yaml" in html
+    # still no free-form skills-dir/mcp/memory inputs
     for field_id in _NON_TEMPLATE_FIELDS:
         assert f'id="{field_id}"' not in html, field_id
 
@@ -440,14 +457,50 @@ def test_agents_im_binding_in_drawer():
     assert "/bindings/channels/" in chfn
 
 
+def test_agent_export_yaml_wired():
+    html = ADMIN_HTML
+    assert "function agExportYaml" in html
+    assert "/agent-yaml" in html
+    assert "agExportYaml(" in html  # button in the drawer
+
+
+def test_agent_deploy_wired():
+    html = ADMIN_HTML
+    assert "function agDeploy" in html
+    assert "/deploy" in html
+    assert "agDeploy(" in html  # button in the preview
+
+
+def test_agent_drawer_preview_is_readonly_yaml():
+    html = ADMIN_HTML
+    # clicking a card opens a read-only agent.yaml preview, not the editable sections
+    fn = html.split("async function agDrawer", 1)[1].split("function agRenderPreview", 1)[0]
+    assert "/agent-yaml" in fn
+    assert "function agRenderPreview" in html
+    preview = html.split("function agRenderPreview", 1)[1].split("function agCopyYaml", 1)[0]
+    assert 'id="ag-yaml-pre"' in preview
+    assert "agDrawerManage(" in preview  # "Manage bindings" switches to the editable view
+    # copy + download the previewed yaml
+    assert "function agCopyYaml" in html and "function agDownloadYaml" in html
+
+
 def test_drawer_loads_from_aggregate_endpoints():
     html = ADMIN_HTML
-    fn = html.split("async function agDrawer", 1)[1].split("function agDrawerSection", 1)[0]
-    # opening the drawer pulls every per-agent binding list in one fan-out
+    fn = html.split("async function agDrawerManage", 1)[1].split("function agDrawerSection", 1)[0]
+    # the manage view pulls every per-agent binding list in one fan-out
     for frag in ("/bindings`", "/skills`", "/kbs`", "/bindings/oauth`", "/versions`"):
         assert frag in fn, frag
     # plus the available-option catalogs
     assert '"/mcp/servers"' in fn and '"/connectors"' in fn and '"/kb"' in fn
+    # each binding sub-list degrades to a default on failure so one erroring endpoint
+    # (e.g. an unmigrated table -> HTTP 500) can't blank the whole drawer
+    for frag in (
+        "/bindings`).catch(",
+        "/skills`).catch(",
+        "/kbs`).catch(",
+        "/bindings/oauth`).catch(",
+    ):
+        assert frag in fn, frag
 
 
 def test_bindings_skill_toggle_wired_to_put():
@@ -827,7 +880,7 @@ def test_tables_wrapped_in_scroll_container():
     html = ADMIN_HTML
     # every data table lives inside a horizontal scroll container
     assert html.count('class="table-scroll"') >= html.count("<table>")
-    assert html.count("<table>") >= 12
+    assert html.count("<table>") >= 11
 
 
 def test_empty_and_loading_state_helpers_present():
@@ -976,6 +1029,21 @@ def test_add_connection_per_user_row():
     assert "IS_VIEWER" in body
 
 
+def test_edit_user_profile_modal_and_wiring():
+    html = ADMIN_HTML
+    # edit modal with name + email fields
+    assert 'id="edit-user-modal"' in html
+    assert 'id="eu-name"' in html and 'id="eu-email"' in html
+    # functions present and wired to PATCH /users/{id}
+    for fn in ("function openEditUser", "function closeEditUser", "function saveUser"):
+        assert fn in html, fn
+    save = html.split("async function saveUser", 1)[1].split("async function setRole", 1)[0]
+    assert 'api("PATCH", `/users/${id}`' in save
+    # admin-gated Edit action on each user row
+    body = _render_users_body(html)
+    assert "openEditUser('" in body and "IS_VIEWER" in body
+
+
 def test_connector_modal_retained():
     html = ADMIN_HTML
     assert 'id="conn-modal"' in html
@@ -1052,3 +1120,43 @@ def test_distinct_block_semantics_labels():
     # user-level wires /users/.../block|unblock; identity-level wires /im-users/.../block
     assert "block(" in body
     assert "imBlock(" in body
+
+
+# --- legacy module search (unify-legacy-console-modules) -----------------------
+
+
+def _section(html, tab):
+    start = html.index(f'<section id="tab-{tab}"')
+    nxt = html.find('<section id="tab-', start + 10)
+    return html[start: nxt if nxt > 0 else start + 8000]
+
+
+def test_api_helper_retries_on_network_failure():
+    html = ADMIN_HTML
+    fn = html.split("async function api(", 1)[1].split("async function doLogin", 1)[0]
+    # the shared api() rides over a transient fetch failure (dev --reload bounce)
+    assert "failed to fetch" in fn.lower()
+    assert "setTimeout" in fn
+    assert "attempt" in fn
+
+
+def test_legacy_modules_have_search_in_page_header():
+    html = ADMIN_HTML
+    # each legacy list module fills its .ph-filter slot with a search input
+    for tab, fid in [("kb", "kb-filter"), ("sessions", "sess-filter"),
+                     ("monitoring", "mon-filter"), ("stats", "st-filter")]:
+        sec = _section(html, tab)
+        filt = sec.split('class="ph-filter"', 1)[1].split("</div>", 1)[0]
+        assert f'id="{fid}"' in filt, f"{tab}: search input missing from .ph-filter"
+
+
+def test_legacy_module_search_filters_rows():
+    html = ADMIN_HTML
+    # render/filter functions reference their search value, so typing narrows rows
+    for fid, fn in [("kb-filter", "function renderKb"),
+                    ("sess-filter", "function renderSessions"),
+                    ("mon-filter", "function renderMonAlerts"),
+                    ("st-filter", "function renderStatsRows")]:
+        assert fn in html, f"missing render fn {fn}"
+        body = html.split(fn, 1)[1][:1400]
+        assert fid in body, f"{fn} does not consult #{fid}"
