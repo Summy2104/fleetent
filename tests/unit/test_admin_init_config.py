@@ -22,11 +22,8 @@ def run_admin(*args: str) -> tuple[str, str, int]:
 
 
 def write_config_examples(root: Path) -> None:
+    # Global config templates are gone; only .env.example is seeded by init-config.
     (root / ".env.example").write_text("FLEETENT_AUTO_UPGRADE=false\n", encoding="utf-8")
-    config_dir = root / "config"
-    config_dir.mkdir()
-    (config_dir / "settings.yaml.example").write_text("database_url: sqlite:///data/fleetent.db\n")
-    (config_dir / "mcp.servers.yaml.example").write_text("servers: []\n")
 
 
 def test_init_config_dry_run_prints_planned_paths_without_writing(tmp_path, monkeypatch):
@@ -39,22 +36,16 @@ def test_init_config_dry_run_prints_planned_paths_without_writing(tmp_path, monk
     assert err == ""
     for path in [
         ".env",
-        "config/settings.yaml",
-        "config/mcp.servers.yaml",
         "data/",
         "data/logs/",
         "data/diagnostics/",
         "secrets/",
     ]:
         assert f"create {path}" in out
+    assert "config/settings.yaml" not in out
+    assert "config/mcp.servers.yaml" not in out
 
-    for path in [
-        ".env",
-        "config/settings.yaml",
-        "config/mcp.servers.yaml",
-        "data",
-        "secrets",
-    ]:
+    for path in [".env", "data", "secrets"]:
         assert not (tmp_path / path).exists()
 
 
@@ -69,11 +60,8 @@ def test_init_config_skips_existing_files_by_default(tmp_path, monkeypatch):
     assert code == 0
     assert err == ""
     assert "skip .env" in out
-    assert "create config/settings.yaml" in out
+    assert "config/settings.yaml" not in out
     assert existing_env.read_text(encoding="utf-8") == "OPENAI_API_KEY=local\n"
-    assert (
-        (tmp_path / "config/settings.yaml").read_text(encoding="utf-8").startswith("database_url:")
-    )
     assert (tmp_path / "data/logs").is_dir()
     assert (tmp_path / "data/diagnostics").is_dir()
     assert (tmp_path / "secrets").is_dir()

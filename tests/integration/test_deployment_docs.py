@@ -37,17 +37,13 @@ def test_secrets_documentation_describes_flat_untracked_directory():
         assert phrase in content
 
 
-def test_settings_example_uses_flat_container_secret_reference():
-    content = Path("config/settings.yaml.example").read_text(encoding="utf-8")
-
-    assert "access_token_env: FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN" in content
-    assert "client_secret_env: FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET" in content
-    assert 'username_env: "FLEETENT_CONFLUENCE_USERNAME"' in content
-    assert 'scope_type: "space"' in content
-    assert "page_id:" in content
-    assert "api_token_env: FLEETENT_CONFLUENCE_TOKEN" in content
-    assert "/etc/fleetent/secrets" not in content
-    assert "google-drive-eng-token.json" not in content
+def test_global_config_example_templates_removed():
+    # The deployed agent is self-contained (agent.yaml + .env); the global config
+    # files are optional (loaders default when absent) and no longer shipped.
+    assert not Path("config/settings.yaml.example").exists()
+    assert not Path("config/mcp.yaml.example").exists()
+    assert not Path("config/mcp.servers.yaml.example").exists()
+    assert Path("config/agent.yaml.example").exists()
 
 
 def test_dockerfile_includes_deployment_runtime_assets_and_port():
