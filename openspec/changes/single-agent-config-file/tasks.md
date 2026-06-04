@@ -20,5 +20,5 @@
 
 ## 5. 收尾
 
-- [ ] 5.1 全量 `ANTHROPIC_API_KEY=sk-test-dummy uv run pytest -x -q` 通过；`uv run ruff format && uv run ruff check src tests`；`uv run mypy src` 不新增错误
-- [ ] 5.2 写 brainstorming 设计文档 `docs/superpowers/specs/2026-06-04-agent-config-self-contained-design.md`（总体设计 + 决策/问题日志，供最终审核）；CLAUDE.md 数据目录/路径段补「agent home 根 agent.yaml」说明
+- [x] 5.1 全量 `ANTHROPIC_API_KEY=sk-test-dummy uv run pytest -x -q` 通过；`uv run ruff format && uv run ruff check src tests`；`uv run mypy src` 不新增错误
+- [x] 5.2 写 brainstorming 设计文档 `docs/superpowers/specs/2026-06-04-agent-config-self-contained-design.md`（总体设计 + 决策/问题日志，供最终审核）；CLAUDE.md 数据目录/路径段补「agent home 根 agent.yaml」说明
