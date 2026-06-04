@@ -70,8 +70,11 @@ class VectorStoreSettings(BaseModel):
 class EmbeddingSettings(BaseModel):
     backend: str = "deterministic"
     dimensions: int = 64
+    dimensions_env: str = ""
     endpoint: str = ""
+    endpoint_env: str = ""
     model: str = ""
+    model_env: str = ""
     api_key_env: str = ""
     timeout_seconds: float = 10.0
 
@@ -79,7 +82,9 @@ class EmbeddingSettings(BaseModel):
 class RerankSettings(BaseModel):
     backend: str = "disabled"
     endpoint: str = ""
+    endpoint_env: str = ""
     model: str = ""
+    model_env: str = ""
     api_key_env: str = ""
     timeout_seconds: float = 10.0
 

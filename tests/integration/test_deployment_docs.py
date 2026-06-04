@@ -14,6 +14,10 @@ def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
     assert "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET=" in content
     assert "FLEETENT_CONFLUENCE_USERNAME=" in content
     assert "FLEETENT_CONFLUENCE_TOKEN=" in content
+    assert "FLEETENT_EVAL_EMBEDDING_ENDPOINT=" in content
+    assert "FLEETENT_EVAL_EMBEDDING_API_KEY=" in content
+    assert "FLEETENT_EVAL_RERANK_ENDPOINT=" in content
+    assert "FLEETENT_EVAL_RERANK_API_KEY=" in content
     assert "sk-" not in content
     assert "ma-" not in content
     assert "xoxb-" not in content
