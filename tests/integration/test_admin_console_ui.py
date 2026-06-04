@@ -123,9 +123,21 @@ def test_skills_write_controls_admin_gated():
 def test_providers_tab_and_list_wiring():
     html = ADMIN_HTML
     assert 'id="tab-providers"' in html
-    assert "pv-body" in html
+    # card grid + search toolbar replaced the legacy table
+    assert 'id="pv-grid"' in html
+    assert 'id="pv-filter"' in html
+    assert "function pvCardHtml" in html
     assert 'api("GET", "/providers"' in html
     assert "LOADERS.providers" in html
+
+
+def test_providers_detail_drawer_present():
+    html = ADMIN_HTML
+    assert 'id="pv-drawer"' in html
+    assert "function pvDrawer" in html and "function pvCloseDrawer" in html
+    # cards open the drawer; drawer hosts the Test/Edit/Delete actions
+    card = html.split("function pvCardHtml", 1)[1].split("function pvCloseDrawer", 1)[0]
+    assert "pvDrawer(" in card
 
 
 def test_providers_crud_and_actions_wired():
@@ -827,7 +839,7 @@ def test_tables_wrapped_in_scroll_container():
     html = ADMIN_HTML
     # every data table lives inside a horizontal scroll container
     assert html.count('class="table-scroll"') >= html.count("<table>")
-    assert html.count("<table>") >= 12
+    assert html.count("<table>") >= 11
 
 
 def test_empty_and_loading_state_helpers_present():

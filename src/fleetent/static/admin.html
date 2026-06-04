@@ -709,16 +709,12 @@
       
       <!-- Providers subtab -->
       <div id="pv-subtab-providers">
-        <div class="row" style="margin-bottom:12px;">
-          <span class="muted" style="flex:1;">Model providers (api_key stored server-side, shown masked)</span>
-          <span id="pv-create-bar">
-            <button onclick="pvOpenCreate()">Add Provider</button>
-          </span>
+        <div class="sk-toolbar">
+          <input id="pv-filter" class="sk-search" placeholder="🔍  Search providers by id, model, or URL" oninput="renderProviders()">
+          <span id="pv-create-bar"><button onclick="pvOpenCreate()">+ Add provider</button></span>
         </div>
-        <div class="table-scroll"><table>
-          <thead><tr><th>ID</th><th>Description</th><th>Model</th><th>Base URL</th><th>API key</th><th>Actions</th></tr></thead>
-          <tbody id="pv-body"></tbody>
-        </table></div>
+        <div id="pv-count" class="muted" style="margin:2px 2px 12px;"></div>
+        <div id="pv-grid" class="connector-grid"></div>
       </div>
       
       <!-- Routing subtab -->
@@ -737,6 +733,14 @@
           <button class="ghost" onclick="pvPreviewRoute()">Preview</button>
         </div>
         <pre id="pv-route-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+      </div>
+
+      <div id="pv-drawer" class="conn-drawer hidden">
+        <div class="conn-drawer-head">
+          <h3 id="pv-drawer-title">Provider</h3>
+          <button class="modal-close" onclick="pvCloseDrawer()">×</button>
+        </div>
+        <div id="pv-drawer-body" class="conn-drawer-body"></div>
       </div>
     </section>
 
@@ -2659,26 +2663,78 @@ LOADERS.agents = () => loadAgents();
 
 let PV_EDIT_ID = null;
 
+let PV_ALL = [];
+
 async function loadProviders() {
-  $("pv-body").innerHTML = loadingRow(6);
-  let rows;
-  try { rows = await api("GET", "/providers"); }
-  catch (e) { $("pv-body").innerHTML = emptyRow(6, e.message); return; }
-  $("pv-body").innerHTML = rows.map(p => `
-      <tr>
-        <td>${esc(p.id)}</td>
-        <td>${esc(p.description || "—")}</td>
-        <td>${esc(p.model || "")}</td>
-        <td class="muted" style="font-size: 12px;">${esc(p.base_url || "")}</td>
-        <td class="muted">${p.api_key_set ? esc(p.api_key || "****") : "—"}</td>
-        <td class="actions">
-          ${IS_VIEWER ? "" : `
-          <button class="small ghost" onclick="pvTest('${esc(p.id)}')">Test</button>
-          <button class="small ghost" onclick="pvOpenEdit('${esc(p.id)}')">Edit</button>
-          <button class="small danger" onclick="pvDelete('${esc(p.id)}')">Delete</button>`}
-        </td>
-      </tr>`).join("") || emptyRow(6, "No providers.");
+  $("pv-create-bar").innerHTML = IS_VIEWER ? "" : `<button onclick="pvOpenCreate()">+ Add provider</button>`;
+  $("pv-grid").innerHTML = `<div class="muted" style="padding:24px;">Loading…</div>`;
+  try { PV_ALL = await api("GET", "/providers"); }
+  catch (e) { $("pv-grid").innerHTML = `<div class="err" style="padding:24px;">${esc(e.message)}</div>`; return; }
+  renderProviders();
   pvRoutes();
+}
+
+function pvIcon(p) {
+  const u = (p.base_url || "").toLowerCase();
+  if (u.includes("anthropic")) return "🧠";
+  if (u.includes("openai")) return "🤖";
+  if (u.includes("azure")) return "☁️";
+  return "⚙️";
+}
+
+function renderProviders() {
+  const q = ($("pv-filter").value || "").trim().toLowerCase();
+  const rows = PV_ALL.filter(p => !q
+    || (p.id || "").toLowerCase().includes(q)
+    || (p.model || "").toLowerCase().includes(q)
+    || (p.base_url || "").toLowerCase().includes(q));
+  $("pv-count").textContent = `${rows.length} provider${rows.length === 1 ? "" : "s"}`;
+  $("pv-grid").innerHTML = rows.map(pvCardHtml).join("")
+    || `<div class="muted" style="padding:24px;">No providers.</div>`;
+}
+
+function pvCardHtml(p) {
+  const keyed = p.api_key_set;
+  return `
+    <div class="connector-card" onclick="pvDrawer('${esc(p.id)}')">
+      <div class="connector-status ${keyed ? 'active' : 'inactive'}"></div>
+      <div class="connector-icon" style="background:var(--accent-weak,#2a2a3a);">${pvIcon(p)}</div>
+      <div class="connector-title">${esc(p.id)}</div>
+      <div class="connector-desc">${esc(p.description || p.base_url || "No description")}</div>
+      <div class="sk-pills">
+        ${p.model ? `<span class="pill">${esc(p.model)}</span>` : ""}
+        <span class="pill ${keyed ? "active" : "blocked"}">${keyed ? "key set" : "no key"}</span>
+      </div>
+    </div>`;
+}
+
+function pvCloseDrawer() { $("pv-drawer").classList.add("hidden"); }
+
+function pvDrawer(id) {
+  const p = PV_ALL.find(x => x.id === id);
+  if (!p) return;
+  $("pv-drawer-title").textContent = id;
+  const meta = (k, v) => `<div class="sk-meta-row"><span class="muted" style="min-width:96px;">${k}</span><span>${v}</span></div>`;
+  const actions = IS_VIEWER ? "" : `
+    <div class="row" style="flex-wrap:wrap; gap:6px; margin-top:6px;">
+      <button class="small" onclick="pvTest('${esc(id)}')">Test connection</button>
+      <button class="small ghost" onclick="pvOpenEdit('${esc(id)}')">Edit</button>
+      <button class="small ghost danger" onclick="pvDelete('${esc(id)}')">Delete</button>
+    </div>`;
+  $("pv-drawer-body").innerHTML = `
+    <div class="sk-pills" style="margin-bottom:10px;">
+      ${p.model ? `<span class="pill">${esc(p.model)}</span>` : ""}
+      <span class="pill ${p.api_key_set ? "active" : "blocked"}">${p.api_key_set ? "key set" : "no key"}</span>
+    </div>
+    ${meta("Description", esc(p.description || "—"))}
+    ${meta("Base URL", esc(p.base_url || "—"))}
+    ${meta("Model", esc(p.model || "—"))}
+    ${meta("API key", p.api_key_set ? esc(p.api_key || "****") : "—")}
+    ${meta("Max tokens", p.max_tokens != null ? esc(String(p.max_tokens)) : "—")}
+    ${meta("Temperature", p.temperature != null ? esc(String(p.temperature)) : "—")}
+    ${actions}
+    <pre id="pv-test-out" class="muted" style="white-space:pre-wrap; margin:12px 0 0;"></pre>`;
+  $("pv-drawer").classList.remove("hidden");
 }
 
 function pvOpenCreate() {
@@ -2858,61 +2914,38 @@ async function pvCreate(id, body) {
 }
 async function pvEdit(id, body) {
   $("pv-err").textContent = "";
-  try { await api("PUT", `/providers/${encodeURIComponent(id)}`, body); pvCloseModal(); loadProviders(); }
-  catch (e) { $("pv-err").textContent = e.message; }
+  try {
+    await api("PUT", `/providers/${encodeURIComponent(id)}`, body);
+    pvCloseModal();
+    await loadProviders();
+    if (!$("pv-drawer").classList.contains("hidden")) pvDrawer(id);
+  } catch (e) { $("pv-err").textContent = e.message; }
 }
 async function pvDelete(id) {
   if (!await confirmDialog(`Delete provider ${id}?`)) return;
-  try { await api("DELETE", `/providers/${encodeURIComponent(id)}`); loadProviders(); } catch (e) { toast(e.message, "error"); }
+  try { await api("DELETE", `/providers/${encodeURIComponent(id)}`); pvCloseDrawer(); loadProviders(); }
+  catch (e) { toast(e.message, "error"); }
 }
 async function pvTest(id) {
-  // Find the test button and show loading state
-  const button = event.target;
-  const originalText = button.textContent;
-  button.disabled = true;
-  button.innerHTML = '<span style="display: inline-block; animation: spin 1s linear infinite;">⏳</span> Testing...';
-  
-  // Show testing dialog
-  showTestDialog('Provider Test', 'Testing connectivity...', 'loading');
-  
-  try { 
-    const r = await api("POST", `/providers/${encodeURIComponent(id)}/connectivity-test`); 
-    
-    // Show result dialog
+  const out = $("pv-test-out");
+  if (out) out.textContent = "⏳ Testing connectivity…";
+  try {
+    const r = await api("POST", `/providers/${encodeURIComponent(id)}/connectivity-test`);
     if (r.reachable) {
-      const details = `
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          <div><strong>Status:</strong> <span style="color: #4CAF50;">✅ Reachable</span></div>
-          <div><strong>Provider ID:</strong> ${esc(id)}</div>
-          <div><strong>Latency:</strong> ${r.latency_ms || '?'}ms</div>
-          ${r.model ? `<div><strong>Model:</strong> ${esc(r.model)}</div>` : ''}
-          ${r.base_url ? `<div><strong>Base URL:</strong> ${esc(r.base_url)}</div>` : ''}
-          ${r.details ? `<div><strong>Details:</strong> ${esc(r.details)}</div>` : ''}
-        </div>
-      `;
-      showTestDialog('Provider Test', details, 'success');
-      toast(`✅ Provider is reachable! (${r.latency_ms || '?'}ms)`, "success");
+      const msg = `✅ Reachable (${r.latency_ms || "?"}ms)`
+        + (r.model ? `\nModel: ${r.model}` : "")
+        + (r.base_url ? `\nBase URL: ${r.base_url}` : "")
+        + (r.details ? `\n${r.details}` : "");
+      if (out) out.textContent = msg;
+      toast(`✅ Provider is reachable! (${r.latency_ms || "?"}ms)`, "success");
     } else {
-      const details = `
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          <div><strong>Status:</strong> <span style="color: #f44336;">❌ Unreachable</span></div>
-          <div><strong>Provider ID:</strong> ${esc(id)}</div>
-          <div><strong>Error:</strong> ${esc(r.error || 'Connection failed')}</div>
-          ${r.details ? `<div><strong>Details:</strong> ${esc(r.details)}</div>` : ''}
-        </div>
-      `;
-      showTestDialog('Provider Test', details, 'error');
-      toast(`❌ Provider unreachable`, "error");
+      const msg = `❌ Unreachable\n${r.error || "Connection failed"}` + (r.details ? `\n${r.details}` : "");
+      if (out) out.textContent = msg;
+      toast("❌ Provider unreachable", "error");
     }
-  }
-  catch (e) { 
-    showTestDialog('Provider Test', `<div style="color: #f44336;">❌ ${esc(e.message)}</div>`, 'error');
-    toast(e.message, "error"); 
-  }
-  finally {
-    // Restore button state
-    button.disabled = false;
-    button.textContent = originalText;
+  } catch (e) {
+    if (out) out.textContent = `❌ ${e.message}`;
+    toast(e.message, "error");
   }
 }
 async function pvRoutes() {
