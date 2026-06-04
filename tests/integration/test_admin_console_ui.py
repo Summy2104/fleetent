@@ -1131,6 +1131,15 @@ def _section(html, tab):
     return html[start: nxt if nxt > 0 else start + 8000]
 
 
+def test_api_helper_retries_on_network_failure():
+    html = ADMIN_HTML
+    fn = html.split("async function api(", 1)[1].split("async function doLogin", 1)[0]
+    # the shared api() rides over a transient fetch failure (dev --reload bounce)
+    assert "failed to fetch" in fn.lower()
+    assert "setTimeout" in fn
+    assert "attempt" in fn
+
+
 def test_legacy_modules_have_search_in_page_header():
     html = ADMIN_HTML
     # each legacy list module fills its .ph-filter slot with a search input
