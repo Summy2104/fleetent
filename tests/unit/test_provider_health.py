@@ -5,8 +5,8 @@ Time is always injected via a fake clock; these tests never sleep.
 
 from __future__ import annotations
 
-import fleetent.provider_health as ph
-from fleetent.provider_health import ProviderHealthCache, ProviderState
+import fleetent.model.provider_health as ph
+from fleetent.model.provider_health import ProviderHealthCache, ProviderState
 
 
 class FakeClock:

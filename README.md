@@ -155,7 +155,8 @@ data: {"type": "done", "content": "The current time is ..."}
 内置工具通过 `@tool` 注册：
 
 ```python
-from fleetent.tool_registry import tool
+# src/fleetent/tools/builtin_tools.py  (or any file imported at startup)
+from fleetent.tools import tool
 
 
 @tool

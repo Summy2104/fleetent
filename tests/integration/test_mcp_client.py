@@ -7,7 +7,7 @@ from fleetent.integrations.mcp.client import McpServerConfig, _make_tool_name
 @pytest.fixture(autouse=True)
 def clean_registry():
     """Isolate each test — snapshot and restore the tool + MCP registries."""
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     before = dict(tr._registry)
     srv_before = dict(mcp_client._server_registry)
@@ -55,7 +55,7 @@ async def test_register_all_skips_unreachable_server(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_register_tool_puts_in_registry():
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     server = McpServerConfig(id="testsvr", url="http://localhost:9999", auth_type="none")
     tool_def = {
@@ -76,7 +76,7 @@ async def test_register_tool_puts_in_registry():
 @pytest.mark.asyncio
 async def test_register_tool_schema_format():
     """Registered MCP tool schema should be OpenAI function-call format."""
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     server = McpServerConfig(id="linear", url="http://localhost:9998", auth_type="none")
     tool_def = {
@@ -104,7 +104,7 @@ async def test_register_server_registers_tools_from_response(monkeypatch):
     import httpx
     import respx
 
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
     from fleetent.integrations.mcp.client import McpServerConfig, _register_server
 
     server = McpServerConfig(id="mysvr", url="http://mcp.test", auth_type="none")
@@ -248,7 +248,7 @@ async def test_call_tool_unknown_scope_raises(monkeypatch):
 @pytest.mark.asyncio
 async def test_probe_server_http_success(monkeypatch):
     """probe_server connects, lists tools, returns connected + count without registering."""
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     async def fake_open(client, server):
         return None
@@ -284,7 +284,7 @@ async def test_probe_server_http_failure(monkeypatch):
 
 
 def test_unregister_server_removes_tools():
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     server = McpServerConfig(id="gone", url="http://x", auth_type="none")
     mcp_client._register_tool_http(server, "gone__t1", {"name": "t1"})

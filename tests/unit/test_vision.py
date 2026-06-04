@@ -40,7 +40,7 @@ def _mock_async_openai(text: str):
 
 
 def test_analyze_sends_image_and_instruction_returns_text(monkeypatch):
-    import fleetent.vision_client as vc
+    import fleetent.tools.vision_client as vc
 
     client = _mock_async_openai("an invoice for $42")
     monkeypatch.setattr(vc, "_build_client", lambda settings: client)
@@ -66,7 +66,7 @@ def test_analyze_sends_image_and_instruction_returns_text(monkeypatch):
 
 
 def test_analyze_requires_configured_url():
-    import fleetent.vision_client as vc
+    import fleetent.tools.vision_client as vc
 
     settings = Settings(anthropic_api_key="k", vision_url="")
     with pytest.raises(vc.VisionError):
@@ -74,7 +74,7 @@ def test_analyze_requires_configured_url():
 
 
 def test_analyze_endpoint_error_raises_visionerror(monkeypatch):
-    import fleetent.vision_client as vc
+    import fleetent.tools.vision_client as vc
 
     client = MagicMock()
     client.chat.completions.create = AsyncMock(side_effect=RuntimeError("boom"))
@@ -86,7 +86,7 @@ def test_analyze_endpoint_error_raises_visionerror(monkeypatch):
 
 
 def test_analyze_empty_choices_raises(monkeypatch):
-    import fleetent.vision_client as vc
+    import fleetent.tools.vision_client as vc
 
     client = MagicMock()
     client.chat.completions.create = AsyncMock(return_value=SimpleNamespace(choices=[]))
@@ -101,20 +101,20 @@ def test_analyze_empty_choices_raises(monkeypatch):
 
 
 def test_uploads_dir_constant_exists():
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     assert isinstance(tl.UPLOADS_DIR, Path)
 
 
 def test_uploads_dir_monkeypatchable(monkeypatch, tmp_path):
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
     assert tmp_path / "up" == tl.UPLOADS_DIR
 
 
 def test_save_upload_writes_and_reads_back(monkeypatch, tmp_path):
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
     ref = tl._save_upload(PNG_BYTES, "image/png")
@@ -130,7 +130,7 @@ def test_save_upload_writes_and_reads_back(monkeypatch, tmp_path):
 
 
 def test_save_upload_reference_is_path(monkeypatch, tmp_path):
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
     ref = tl._save_upload(PNG_BYTES, "image/jpeg")
@@ -142,8 +142,8 @@ def test_save_upload_reference_is_path(monkeypatch, tmp_path):
 
 
 def test_analyze_image_registered():
-    import fleetent.tools as tl  # noqa: F401 — registers tools
-    from fleetent import tool_registry
+    import fleetent.tools.builtin_tools as tl  # noqa: F401 — registers tools
+    from fleetent.tools import registry as tool_registry
 
     assert "analyze_image" in tool_registry._registry
     names = [s["function"]["name"] for s in tool_registry.get_schemas()]
@@ -151,7 +151,7 @@ def test_analyze_image_registered():
 
 
 def test_analyze_image_valid_ref_returns_text(monkeypatch, tmp_path):
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
     ref = tl._save_upload(PNG_BYTES, "image/png")
@@ -168,7 +168,7 @@ def test_analyze_image_valid_ref_returns_text(monkeypatch, tmp_path):
 
 
 def test_analyze_image_result_has_no_base64(monkeypatch, tmp_path):
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
     ref = tl._save_upload(PNG_BYTES, "image/png")
@@ -184,7 +184,7 @@ def test_analyze_image_result_has_no_base64(monkeypatch, tmp_path):
 
 
 def test_analyze_image_invalid_ref_returns_error_not_raised(monkeypatch, tmp_path):
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
 
     monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
     result = asyncio_run(
@@ -194,8 +194,8 @@ def test_analyze_image_invalid_ref_returns_error_not_raised(monkeypatch, tmp_pat
 
 
 def test_analyze_image_unconfigured_endpoint_returns_error(monkeypatch, tmp_path):
-    import fleetent.tools as tl
-    from fleetent.vision_client import VisionError
+    import fleetent.tools.builtin_tools as tl
+    from fleetent.tools.vision_client import VisionError
 
     monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
     ref = tl._save_upload(PNG_BYTES, "image/png")
@@ -216,7 +216,7 @@ def test_analyze_image_unconfigured_endpoint_returns_error(monkeypatch, tmp_path
 def test_analyze_image_result_in_trace_has_no_base64(monkeypatch, tmp_path):
     import json
 
-    import fleetent.tools as tl
+    import fleetent.tools.builtin_tools as tl
     from fleetent import eval_logger
 
     monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")

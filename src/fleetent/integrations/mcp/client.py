@@ -22,7 +22,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from fleetent.error_classifier import ErrorClassification
+    from fleetent.runtime.error_classifier import ErrorClassification
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +210,7 @@ def _schema_visibility(tool_name: str) -> bool:
 
 def install_schema_filter() -> None:
     """Wire the MCP visibility predicate into tool_registry (MCP4 D4)."""
-    from fleetent import tool_registry
+    from fleetent.tools import registry as tool_registry
 
     tool_registry.set_schema_visibility_filter(_schema_visibility)
 
@@ -301,7 +301,7 @@ def _disconnect_classification() -> ErrorClassification:
     We deliberately do NOT call ``error_classifier.classify()`` — it only recognizes
     ``APIStatusError`` and would return ``unknown`` for a disconnect exception.
     """
-    from fleetent.error_classifier import CLASSIFICATION_TABLE, ErrorCategory
+    from fleetent.runtime.error_classifier import CLASSIFICATION_TABLE, ErrorCategory
 
     return CLASSIFICATION_TABLE[ErrorCategory.mcp_disconnect]
 
@@ -955,7 +955,7 @@ def unregister_server(server_id: str, scope: int | None = None) -> None:
     tool registry and forgets the server so its tools stop being exposed. Best-effort
     on the session handle; an HTTP DELETE handshake is not attempted here.
     """
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     prefix = f"{server_id}__"
     if scope is None:
@@ -968,7 +968,7 @@ def unregister_server(server_id: str, scope: int | None = None) -> None:
 def _register_tool_stdio(
     server: McpServerConfig, tool_name: str, tool_def: Any, scope: int | None = None
 ) -> None:
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     input_schema = (
         tool_def.inputSchema
@@ -996,7 +996,7 @@ def _register_tool_stdio(
 def _register_tool_http(
     server: McpServerConfig, tool_name: str, tool_def: dict[str, Any], scope: int | None = None
 ) -> None:
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     input_schema = tool_def.get("inputSchema", {"type": "object", "properties": {}})
 

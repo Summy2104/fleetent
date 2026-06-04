@@ -69,12 +69,15 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 
 ```
 src/fleetent/
-  agent_loop.py      ← while tool-use 核心循环；run() + run_stream()
+  runtime/loop.py          ← while tool-use 核心循环；run() + run_stream()（←agent_loop.py，旧路径留 shim）
+  runtime/context.py       ← in-session token 压缩，keep_tail identity check（←context_mgr.py）
+  runtime/snapshot.py      ← agent 快照 load_active（←agent_runtime.py）
+  runtime/sub_agent.py     ← asyncio.gather 并行子 agent；最大深度 1
+  runtime/{termination,loop_detector,budget,layered_budget,cancellation,message_hygiene,error_classifier,tool_guardrails,sub_agent_lifecycle}.py ← 运行治理（终止/循环检测/预算/取消/消息净化/错误分类/工具护栏/子 agent 生命周期）
   model_router.py    ← task_type → provider 配置（OpenAI-compatible + fallback 链）
-  tool_registry.py   ← @tool 装饰器、schema 构建、dispatch；访问控制
-  tools.py           ← 内置工具（import 即注册，副作用）
+  tools/registry.py        ← @tool 装饰器、schema 构建、dispatch；访问控制
+  tools/builtin_tools.py   ← 内置工具（import fleetent.tools 即注册，副作用经包 __init__ 保留）
   skill_registry.py  ← 扫描 skills/，关键词匹配，注入 system prompt
-  context_mgr.py     ← in-session token 压缩，keep_tail identity check
   memory_layer.py    ← 跨 session 事实：Haiku 提取 → JSONL → 注入
   user_store.py      ← 用户/API key 持久化（当前 SQLite-first）
   eval_logger.py     ← append-only JSONL 追踪日志
@@ -88,7 +91,6 @@ src/fleetent/
   permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
   sandbox_client.py  ← Docker CLI 封装：隔离 Python 执行
   mcp_client.py      ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
-  sub_agent.py       ← asyncio.gather 并行子 agent；最大深度 1
   cron_scheduler.py  ← APScheduler 定时任务；server 启动时初始化
   schedule_store.py  ← 定时任务定义与状态持久化（当前 SQLite-first）
   webhook_router.py  ← Webhook 来源配置加载、签名验证、消息提取
@@ -216,9 +218,10 @@ FLEETENT_SKILLS_DIR  # 覆盖 skills/ 目录（默认 ./skills）
 
 ## Gotchas
 
-- `tools.py` 注册工具是 import 副作用——`agent_loop.py` 顶部必须 import，否则 `get_schemas()` 返回空
+- `tools/builtin_tools.py` 注册工具是 import 副作用——`tools/__init__.py` 顶部 `from fleetent.tools import builtin_tools` 承载此副作用，`runtime/loop.py` 顶部 `import fleetent.tools` 触发注册，否则 `get_schemas()` 返回空
 - `skill_registry.scan()` 在服务启动时运行（FastAPI lifespan），不是每次请求；CLI `run()` 每次调用
-- `context_mgr._keep_tail()` 用 identity check（`m is tail[0]`），不用 `==`——内容相同的 dict 相等但非同一对象
+- `runtime/context.py` 的 `_keep_tail()` 用 identity check（`m is tail[0]`），不用 `==`——内容相同的 dict 相等但非同一对象（旧路径 `context_mgr` 留 shim；测试 patch/私有名访问改指 `fleetent.runtime.context`）
+- runtime 旧扁平路径（`agent_loop`/`context_mgr`/`agent_runtime`/`sub_agent`/`cancellation` 等 13 个）仅留 re-export shim；测试 `patch`/`monkeypatch.setattr` 目标须打在 `fleetent.runtime.loop` 等真实子模块上——`import *` 复制引用，patch shim 不生效
 - Bearer token 格式：`Authorization: Bearer ma-<64hex>`——`ma-` 前缀区分服务 key 与模型 API key
 - `model_router.get_async_client_and_config()` 每次调用新建 client——故意的，client 无状态且廉价
 - `permission_gate` 测试需要短超时：`PermissionGate(medium_timeout=0.1)`

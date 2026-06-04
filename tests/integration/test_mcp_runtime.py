@@ -29,7 +29,7 @@ def db(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def clean_registry():
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     before, srv = dict(tr._registry), dict(mcp_client._server_registry)
     yield

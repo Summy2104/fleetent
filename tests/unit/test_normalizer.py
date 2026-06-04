@@ -38,7 +38,8 @@ async def test_session_namespaced_by_owner(monkeypatch):
 
     import contextlib
 
-    from fleetent import agent_loop, session_mgr
+    from fleetent.runtime import loop as agent_loop
+    from fleetent.session import manager as session_mgr
 
     seen: list[str] = []
 

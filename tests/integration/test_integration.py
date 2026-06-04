@@ -12,7 +12,7 @@ from alembic import command
 from alembic.config import Config
 
 import fleetent.governance.permission_gate as permission_gate
-import fleetent.session_mgr as session_mgr
+import fleetent.session.manager as session_mgr
 import fleetent.user_store as user_store
 from fleetent.platform.im_gateway_management import identity as im_user_store
 
@@ -54,7 +54,7 @@ async def test_full_slack_message_pipeline(isolated_db):
         reply_calls.append(text)
 
     # Mock agent_loop.run to return deterministic response and mutate messages in-place
-    with patch("fleetent.agent_loop.run", new_callable=AsyncMock) as mock_run:
+    with patch("fleetent.runtime.loop.run", new_callable=AsyncMock) as mock_run:
 
         async def fake_run(messages, **kwargs):
             messages.append({"role": "assistant", "content": "Hello from agent"})
@@ -125,7 +125,7 @@ async def test_permission_gate_approved_tool_executes(isolated_db):
 
 async def test_tool_not_in_allowed_tools_raises_before_approval(isolated_db):
     """Tool not in agent's allowed_tools → PermissionError, no approval row created."""
-    import fleetent.tool_registry as tr
+    import fleetent.tools.registry as tr
 
     with pytest.raises(PermissionError, match="not permitted"):
         tr.dispatch("shell", {}, allowed_tools=["github__*"])
@@ -150,7 +150,7 @@ async def test_session_history_accumulates_across_messages(isolated_db):
     async def fake_reply(text: str) -> None:
         reply_calls.append(text)
 
-    with patch("fleetent.agent_loop.run", new_callable=AsyncMock) as mock_run:
+    with patch("fleetent.runtime.loop.run", new_callable=AsyncMock) as mock_run:
 
         async def fake_run(messages, **kwargs):
             messages.append({"role": "assistant", "content": "response"})

@@ -77,7 +77,9 @@ async def test_shutdown_stops_scheduler(tmp_path, monkeypatch, isolated_schedule
 
 async def test_fire_calls_agent_loop_run(tmp_path, monkeypatch):
     import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
 
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
     run_mock = AsyncMock(return_value="reply")
     monkeypatch.setattr(cs, "_agent_run", run_mock)
 
@@ -103,7 +105,9 @@ async def test_fire_calls_agent_loop_run(tmp_path, monkeypatch):
 
 async def test_fire_message_in_user_content(tmp_path, monkeypatch):
     import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
 
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
     run_mock = AsyncMock(return_value="ok")
     monkeypatch.setattr(cs, "_agent_run", run_mock)
 

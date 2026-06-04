@@ -4,9 +4,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-import fleetent.layered_budget as lb
-from fleetent.budget import NO_LIMIT
-from fleetent.layered_budget import (
+import fleetent.runtime.layered_budget as lb
+from fleetent.runtime.budget import NO_LIMIT
+from fleetent.runtime.layered_budget import (
     BudgetScope,
     BudgetStore,
     BudgetWindow,
@@ -16,7 +16,7 @@ from fleetent.layered_budget import (
     ScopeUsage,
     period_for,
 )
-from fleetent.termination import StopReason
+from fleetent.runtime.termination import StopReason
 
 
 def _clock(dt):
@@ -59,7 +59,7 @@ def test_from_settings_only_overrides_configured(monkeypatch):
 
 
 def test_scope_usage_add_turns_tokens_match_ar2():
-    from fleetent.budget import BudgetUsage
+    from fleetent.runtime.budget import BudgetUsage
 
     layered, ar2 = ScopeUsage(), BudgetUsage()
     layered.add(100, 50)
@@ -180,8 +180,8 @@ def test_checker_skips_missing_key(tmp_path, monkeypatch):
 
 async def test_agent_loop_dormant_without_caps(monkeypatch, tmp_path):
     """Default (no caps): layered budget is dormant — no checker, no DB written."""
-    import fleetent.agent_loop as al
-    import fleetent.layered_budget as lbud
+    import fleetent.runtime.layered_budget as lbud
+    import fleetent.runtime.loop as al
 
     monkeypatch.setattr(lbud, "DB_PATH", tmp_path / "users.db")
     checker, store, keys = al._setup_layered_budget("s", "u", "a")
