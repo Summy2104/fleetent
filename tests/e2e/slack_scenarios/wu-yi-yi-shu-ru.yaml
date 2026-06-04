@@ -1,0 +1,8 @@
+id: wu-yi-yi-shu-ru
+coverage:
+- junk-input
+persona: 发送无意义或近乎空白内容的用户。
+goal: 发送一条无意义/乱码或近乎空白的消息(如「。。。」或一串随机字符),观察 agent 反应。
+success_criteria: agent 不崩溃、不胡乱编造,而是礼貌地请用户澄清意图或给出引导。
+max_turns: 3
+channel: REPLACE_WITH_TEST_CHANNEL
