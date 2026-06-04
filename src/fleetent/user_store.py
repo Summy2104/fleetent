@@ -5,10 +5,11 @@ import secrets
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-DB_PATH = Path("data/fleetent.db")
+from fleetent import paths
+
+DB_PATH = paths.data_dir() / "fleetent.db"
 
 
 @dataclass

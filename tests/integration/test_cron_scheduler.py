@@ -142,8 +142,9 @@ async def test_start_fails_fast_when_legacy_cron_yaml_exists(
 
     config_dir = tmp_path / "config"
     config_dir.mkdir()
-    (config_dir / "cron.yaml").write_text("jobs: []\n")
-    monkeypatch.chdir(tmp_path)
+    legacy = config_dir / "cron.yaml"
+    legacy.write_text("jobs: []\n")
+    monkeypatch.setattr(cs, "LEGACY_CRON_CONFIG_PATH", legacy)
 
     scheduler = cs.CronScheduler()
     with pytest.raises(RuntimeError, match="SQLite-backed runtime management"):

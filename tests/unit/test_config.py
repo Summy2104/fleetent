@@ -2,12 +2,14 @@ from pathlib import Path
 
 import pytest
 
+from fleetent import paths
 from fleetent.config import Settings, configure_logging
 
 
 @pytest.fixture(autouse=True)
 def isolate_settings_dotenv(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
 
 
 def test_settings_defaults():
@@ -15,7 +17,7 @@ def test_settings_defaults():
     assert s.microsandbox_url == "http://host.docker.internal:7777"
     assert s.permission_gate_medium_timeout_seconds == 300
     assert s.permission_gate_high_timeout_seconds == 3600
-    assert s.database_url == "sqlite:///data/fleetent.db"
+    assert s.database_url == f"sqlite:///{paths.data_dir() / 'fleetent.db'}"
 
 
 def test_settings_loads_non_secret_values_from_settings_yaml(tmp_path, monkeypatch):
@@ -133,7 +135,7 @@ def test_settings_missing_yaml_file_uses_typed_defaults(tmp_path, monkeypatch):
 
     s = Settings(anthropic_api_key="test-key")
 
-    assert s.database_url == "sqlite:///data/fleetent.db"
+    assert s.database_url == f"sqlite:///{paths.data_dir() / 'fleetent.db'}"
     assert s.log_format == "console"
 
 
@@ -164,7 +166,7 @@ def test_observability_logging_defaults():
 
     assert s.observability.logging.console_level == "info"
     assert s.observability.logging.file_level == "debug"
-    assert s.observability.logging.directory == "data/logs"
+    assert s.observability.logging.directory == str(paths.data_dir() / "logs")
 
 
 def test_vector_store_defaults():
@@ -204,7 +206,7 @@ def test_knowledge_base_defaults():
 def test_diagnostics_defaults_are_conservative():
     s = Settings(anthropic_api_key="test-key")
 
-    assert s.diagnostics.export_dir == "data/diagnostics"
+    assert s.diagnostics.export_dir == str(paths.data_dir() / "diagnostics")
     assert s.diagnostics.retention.enabled is False
     assert s.diagnostics.retention.logs_days is None
     assert s.diagnostics.retention.traces_days is None

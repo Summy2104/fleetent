@@ -142,6 +142,8 @@ data/
 
 测试用 `tmp_path + monkeypatch` 隔离，绝不触碰 `data/`。
 
+**路径解析**：`config/` 与 `data/` 的实际位置由 `src/fleetent/paths.py` 统一解析（所有路径常量从 `config_dir()`/`data_dir()` 派生，禁止各模块自读家目录环境变量）。优先级：① `FLEETENT_HOME` 环境变量显式设置 → `$FLEETENT_HOME/{config,data}`；② 否则检测到仓库标记（CWD 含 `pyproject.toml` 的 `name="fleetent"` 或 `./config`）→ 仓库本地 `./config`+`./data`（**开发态零改动**）；③ 否则回退 `~/.fleetent/{config,data}`（全局安装态）。测试整体重定向可用 `monkeypatch.setenv("FLEETENT_HOME", tmp_path)`；单模块仍可 `monkeypatch.setattr(module, "DB_PATH", ...)`。
+
 ---
 
 ## 测试规范
@@ -211,13 +213,16 @@ uv run fleetent-tui --token ma-<key>              # 交互式终端 TUI（连 /w
 
 ```
 ANTHROPIC_API_KEY      # 默认路由必需
+FLEETENT_HOME          # 覆盖 config/data 家目录（未设时：仓库内→./；仓库外→~/.fleetent）
 FLEETENT_SKILLS_DIR  # 覆盖 skills/ 目录（默认 ./skills）
+FLEETENT_AGENTS_DIR  # 覆盖 agents 目录（默认 <config_dir>/agents）
 ```
 
 ---
 
 ## Gotchas
 
+- 路径常量（`DB_PATH`/`SESSIONS_DIR`/`SETTINGS_YAML_PATH` 等）在 import 时从 `paths.py` 求值一次（`paths.data_dir()/...`）——`FLEETENT_HOME` 须在进程启动前设定。测试中要在 import 后整体重定向，需 `monkeypatch.setenv("FLEETENT_HOME", ...)` 后 `importlib.reload(module)`，或直接 `monkeypatch.setattr(module, "<CONST>", ...)`（沿用既有注入习惯）。依赖 CWD-相对路径 + `chdir` 的旧测试在迁移后失效，改用常量注入
 - `tools/builtin_tools.py` 注册工具是 import 副作用——`tools/__init__.py` 顶部 `from fleetent.tools import builtin_tools` 承载此副作用，`runtime/loop.py` 顶部 `import fleetent.tools` 触发注册，否则 `get_schemas()` 返回空
 - `skill_registry.scan()` 在服务启动时运行（FastAPI lifespan），不是每次请求；CLI `run()` 每次调用
 - `runtime/context.py` 的 `_keep_tail()` 用 identity check（`m is tail[0]`），不用 `==`——内容相同的 dict 相等但非同一对象（旧路径 `context_mgr` 留 shim；测试 patch/私有名访问改指 `fleetent.runtime.context`）

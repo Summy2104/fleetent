@@ -7,10 +7,12 @@ import re
 import sys
 import traceback
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
+
+from fleetent import paths
 
 _LEVELS = {
     "silent": 0,
@@ -27,7 +29,7 @@ _LEVELS = {
 class _LoggingConfig:
     console_level: str = "info"
     file_level: str = "debug"
-    directory: Path = Path("data/logs")
+    directory: Path = field(default_factory=lambda: paths.data_dir() / "logs")
     console_stream: TextIO = sys.stdout
 
 
@@ -88,15 +90,16 @@ def configure_structured_logging(
     *,
     console_level: str = "info",
     file_level: str = "debug",
-    directory: str | Path = "data/logs",
+    directory: str | Path | None = None,
     console_stream: TextIO | None = None,
 ) -> None:
     """Configure structured logging outputs."""
     global _config
+    resolved_dir = Path(directory) if directory is not None else paths.data_dir() / "logs"
     _config = _LoggingConfig(
         console_level=console_level,
         file_level=file_level,
-        directory=Path(directory),
+        directory=resolved_dir,
         console_stream=console_stream or sys.stdout,
     )
 

@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 import fleetent.im_user_store as im_user_store
@@ -7,7 +5,7 @@ import fleetent.platform.im_gateway_management.im_channel_allowlist as im_channe
 import fleetent.platform.im_gateway_management.im_connector_store as im_connector_store
 import fleetent.platform.user_management.api_key_store as api_key_store
 import fleetent.platform.user_management.invite_store as invite_store
-from fleetent import user_store
+from fleetent import paths, user_store
 from fleetent.governance import audit_log, blocklist, permission_gate, quota
 
 DEFAULT_USER_STORE_DB_PATH = user_store.DB_PATH
@@ -37,13 +35,13 @@ def test_create_user_returns_user():
 
 
 def test_default_db_path_uses_fleetent_database():
-    assert Path("data/fleetent.db") == DEFAULT_USER_STORE_DB_PATH
+    assert paths.data_dir() / "fleetent.db" == DEFAULT_USER_STORE_DB_PATH
 
 
 def test_legacy_re_exports_inherit_default_db_path():
     assert DEFAULT_LEGACY_RE_EXPORT_DB_PATHS
     for db_path in DEFAULT_LEGACY_RE_EXPORT_DB_PATHS.values():
-        assert db_path == Path("data/fleetent.db")
+        assert db_path == paths.data_dir() / "fleetent.db"
 
 
 def test_get_by_api_key_found():

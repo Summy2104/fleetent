@@ -7,9 +7,10 @@ written as a best-effort side effect after a successful message save.
 
 import sqlite3
 import time
-from pathlib import Path
 
-DB_PATH = Path("data/users.db")
+from fleetent import paths
+
+DB_PATH = paths.data_dir() / "users.db"
 
 
 def _conn() -> sqlite3.Connection:
