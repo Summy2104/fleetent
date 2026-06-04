@@ -2627,7 +2627,16 @@ async function agDrawer(name) {
         api("GET", "/users").catch(() => []),
       ]);
     agRenderDrawer(name, { a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions, allUsers });
-  } catch (e) { $("ag-drawer-body").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  } catch (e) {
+    // The agent record itself failed to load (e.g. the server restarted mid-request,
+    // surfacing as "Failed to fetch"). Offer a retry instead of dead-ending.
+    const network = /failed to fetch|networkerror|load failed/i.test(e.message || "");
+    const msg = network ? "Couldn't reach the server — it may be restarting." : e.message;
+    $("ag-drawer-body").innerHTML =
+      `<div class="muted" style="padding:4px 0;">${esc(msg)}
+        <button class="small ghost" style="margin-left:8px;" onclick="agDrawer('${esc(name)}')">Retry</button>
+      </div>`;
+  }
 }
 
 function agDrawerSection(title, inner) {
