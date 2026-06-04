@@ -77,3 +77,150 @@ def test_retention_apply_disabled_fails_fast(tmp_path):
 
     assert result.applied is False
     assert "disabled" in result.message
+
+
+def _patch_traces_db(monkeypatch, tmp_path, rows):
+    from pathlib import Path
+
+    from fleetent.db import create_database
+    from fleetent.observability import diagnostics
+    from tests.integration.test_migrations import apply_migrations
+
+    db_path = Path(tmp_path) / "traces.db"
+    apply_migrations(db_path)
+    database = create_database(f"sqlite:///{db_path}")
+    for ts, run_id in rows:
+        database.execute(
+            "INSERT INTO traces (id, run_id, event_type, ts, payload_json) "
+            "VALUES (:id, :run_id, :event_type, :ts, :payload_json)",
+            {
+                "id": run_id,
+                "run_id": run_id,
+                "event_type": "tool_call",
+                "ts": ts,
+                "payload_json": "{}",
+            },
+        )
+    monkeypatch.setattr(diagnostics, "_database", lambda: database)
+    return database
+
+
+def test_retention_apply_deletes_old_logs_exports_and_traces(monkeypatch, tmp_path):
+    from fleetent.observability.diagnostics import apply_diagnostics_retention
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    old_log = log_dir / "2026-04-01.log"
+    old_log.write_text("old")
+    export_dir = tmp_path / "diagnostics"
+    export_dir.mkdir()
+    old_export = export_dir / "diagnostics-20260401-000000.zip"
+    old_export.write_text("zip")
+    now = datetime(2026, 6, 2, tzinfo=UTC)
+    import os
+
+    stamp = (now - timedelta(days=40)).timestamp()
+    for path in (old_log, old_export):
+        os.utime(path, (stamp, stamp))
+
+    _patch_traces_db(
+        monkeypatch,
+        tmp_path,
+        rows=[((now - timedelta(days=40)).isoformat(), "old-trace")],
+    )
+
+    result = apply_diagnostics_retention(
+        settings=_settings(tmp_path, enabled=True, logs_days=7, traces_days=7, exports_days=7),
+        log_dir=log_dir,
+        now=now,
+    )
+
+    assert result.applied is True
+    assert result.deleted_logs == 1
+    assert result.deleted_exports == 1
+    assert result.deleted_traces == 1
+    assert result.failures == []
+    assert not old_log.exists()
+    assert not old_export.exists()
+
+
+def test_retention_plan_counts_old_traces(monkeypatch, tmp_path):
+    from fleetent.observability.diagnostics import plan_diagnostics_retention
+
+    now = datetime(2026, 6, 2, tzinfo=UTC)
+    _patch_traces_db(
+        monkeypatch,
+        tmp_path,
+        rows=[
+            ((now - timedelta(days=40)).isoformat(), "old-1"),
+            (now.isoformat(), "new-1"),
+        ],
+    )
+
+    plan = plan_diagnostics_retention(
+        settings=_settings(tmp_path, enabled=True, traces_days=7),
+        now=now,
+    )
+
+    assert plan.trace_count == 1
+
+
+def test_old_trace_count_returns_zero_on_query_error(monkeypatch, tmp_path):
+    from fleetent.observability import diagnostics
+
+    class BrokenDatabase:
+        def execute(self, *args, **kwargs):
+            raise RuntimeError("no table")
+
+    monkeypatch.setattr(diagnostics, "_database", lambda: BrokenDatabase())
+
+    assert diagnostics._old_trace_count(7, datetime(2026, 6, 2, tzinfo=UTC)) == 0
+
+
+def test_delete_old_traces_returns_zero_when_days_none():
+    from fleetent.observability import diagnostics
+
+    assert diagnostics._delete_old_traces(None, datetime(2026, 6, 2, tzinfo=UTC)) == 0
+
+
+def test_delete_old_traces_returns_zero_on_query_error(monkeypatch):
+    from fleetent.observability import diagnostics
+
+    class BrokenDatabase:
+        def execute(self, *args, **kwargs):
+            raise RuntimeError("locked")
+
+    monkeypatch.setattr(diagnostics, "_database", lambda: BrokenDatabase())
+
+    assert diagnostics._delete_old_traces(7, datetime(2026, 6, 2, tzinfo=UTC)) == 0
+
+
+def test_delete_files_reports_failures_for_missing_paths(tmp_path):
+    from fleetent.observability import diagnostics
+
+    present = tmp_path / "a.zip"
+    present.write_text("x")
+    missing = tmp_path / "gone.zip"
+
+    deleted, failures = diagnostics._delete_files([present, missing])
+
+    assert deleted == 1
+    assert len(failures) == 1
+    assert "gone.zip" in failures[0]
+
+
+def test_database_url_summary_redacts_sqlite_and_keeps_scheme():
+    from fleetent.observability import diagnostics
+
+    assert diagnostics._database_url_summary("sqlite:///data/x.db") == "sqlite:///<local-file>"
+    assert diagnostics._database_url_summary("postgresql://user:pw@host/db") == "postgresql"
+
+
+def test_write_logs_returns_empty_when_dir_missing(tmp_path):
+    import zipfile
+
+    from fleetent.observability import diagnostics
+
+    archive_path = tmp_path / "out.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        assert diagnostics._write_logs(archive, tmp_path / "absent") == []

@@ -102,3 +102,62 @@ def test_resolve_carries_per_source_budgets(monkeypatch):
     kb = _sources(resolved)["knowledge_base"]
     assert kb.max_tokens == 777
     assert kb.top_k == 3
+
+
+def _patch_policy_db(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    from fleetent.db import create_database
+    from tests.integration.test_migrations import apply_migrations
+
+    db_path = Path(tmp_path) / "policy.db"
+    apply_migrations(db_path)
+    database = create_database(f"sqlite:///{db_path}")
+    monkeypatch.setattr(policy, "_database", lambda: database)
+
+
+def test_upsert_then_get_round_trips_tenant_default(monkeypatch, tmp_path):
+    _patch_policy_db(monkeypatch, tmp_path)
+
+    policy.upsert_policy(_record("acme", None, tenant_shared_memory_enabled=True))
+
+    loaded = policy.get_policy("acme", None)
+
+    assert loaded is not None
+    assert loaded.agent_id is None
+    assert loaded.tenant_shared_memory_enabled is True
+    assert loaded.knowledge_base_max_tokens == 1024
+
+
+def test_upsert_replaces_existing_scope_on_conflict(monkeypatch, tmp_path):
+    _patch_policy_db(monkeypatch, tmp_path)
+
+    policy.upsert_policy(_record("acme", "a1", knowledge_base_max_tokens=100))
+    policy.upsert_policy(_record("acme", "a1", knowledge_base_max_tokens=999))
+
+    loaded = policy.get_policy("acme", "a1")
+
+    assert loaded is not None
+    assert loaded.agent_id == "a1"
+    assert loaded.knowledge_base_max_tokens == 999
+
+
+def test_get_policy_returns_none_when_missing(monkeypatch, tmp_path):
+    _patch_policy_db(monkeypatch, tmp_path)
+
+    assert policy.get_policy("acme", "ghost") is None
+
+
+def test_upsert_rejects_invalid_record_before_write(monkeypatch, tmp_path):
+    import pytest
+
+    _patch_policy_db(monkeypatch, tmp_path)
+
+    with pytest.raises(ValueError, match="tenant_id"):
+        policy.upsert_policy(_record("", None))
+
+
+def test_database_factory_builds_sqlite_database():
+    from fleetent.db import SQLiteDatabase
+
+    assert isinstance(policy._database(), SQLiteDatabase)
