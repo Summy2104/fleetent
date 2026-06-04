@@ -8,6 +8,7 @@ lifecycle is owned by Alembic. This module never imports the agent loop.
 
 from typing import Any
 
+import yaml
 from fastapi import APIRouter, Body, Header, HTTPException
 
 from fleetent import agent_store, auth, config, user_store
@@ -70,6 +71,66 @@ def _known_mcp_server_ids() -> set[str]:
     ids = {s.id for s in config.load_mcp_server_settings()}
     ids |= {str(r["server_id"]) for r in agent_mcp_server_store.list_mcp_servers(None)}
     return ids
+
+
+def _build_agent_yaml(agent: agent_store.Agent) -> str:
+    """Assemble the runtime agent.yaml from the DB-authored config + bindings.
+
+    Covers every field the admin console authors. connectors.slack is intentionally
+    omitted: per-agent Slack connectors are not authored in the DB.
+    """
+    data: dict[str, Any] = {"name": agent.name}
+    if agent.system_prompt:
+        data["system_prompt"] = agent.system_prompt
+    if agent.model_overrides:
+        data["model_overrides"] = agent.model_overrides
+    if agent.allowed_skills:
+        data["allowed_skills"] = agent.allowed_skills
+    if agent.allowed_tools:
+        data["allowed_tools"] = agent.allowed_tools
+    if agent.plugins:
+        data["plugins"] = agent.plugins
+    if agent.features:
+        data["features"] = agent.features
+    if agent.memory_namespace and agent.memory_namespace != "default":
+        data["memory_namespace"] = agent.memory_namespace
+
+    servers: list[dict[str, Any]] = []
+    for sid in agent_store.list_mcp_servers_for_agent(agent.id):
+        row = agent_mcp_server_store.get_mcp_server(
+            agent.id, sid
+        ) or agent_mcp_server_store.get_mcp_server(None, sid)
+        if row is None:
+            continue
+        entry: dict[str, Any] = {"id": sid, "transport": row["transport"]}
+        for key in ("url", "auth_type", "api_key_env", "command", "args", "env"):
+            if row.get(key):
+                entry[key] = row[key]
+        servers.append(entry)
+    if servers:
+        data["mcp_servers"] = servers
+
+    bindings: dict[str, Any] = {}
+    channels = [
+        f"{c['platform']}:{c['channel_id']}"
+        for c in agent_store.list_channels_for_agent(agent.id)
+    ]
+    users = agent_store.list_users_for_agent(agent.id)
+    if channels:
+        bindings["channels"] = channels
+    if users:
+        bindings["users"] = users
+    if bindings:
+        data["bindings"] = bindings
+
+    return yaml.dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False)
+
+
+@router.get("/agents/{name}/agent-yaml")
+def export_agent_yaml(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    _current_user(authorization)
+    agent = _require_agent(name)
+    return {"agent": name, "yaml": _build_agent_yaml(agent)}
 
 
 @router.get("/agents/{name}/versions")

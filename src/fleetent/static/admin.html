@@ -2775,8 +2775,11 @@ function agRenderDrawer(name, d) {
     `<div class="row">v${esc(v.version)} ${v.is_active ? `<span class="pill active">active</span>` : ""}<span class="muted" style="flex:1;">${esc(v.created_at || "")}</span>${(v.is_active || IS_VIEWER) ? "" : `<button class="small ghost" onclick="agActivateVersion('${esc(name)}', ${v.version})">Activate</button>`}</div>`
   ).join("") || `<div class="muted">No versions.</div>`;
 
+  const exportRow = `<div class="row" style="margin-bottom:10px;">
+    <button class="small ghost" onclick="agExportYaml('${esc(name)}')">⤓ Export agent.yaml</button></div>`;
   $("ag-drawer-body").innerHTML =
     meta
+    + exportRow
     + (actions ? agDrawerSection("Actions", actions) : "")
     + agDrawerSection("Skills", skills)
     + agDrawerSection("Connectors", connectors)
@@ -2785,6 +2788,35 @@ function agRenderDrawer(name, d) {
     + agDrawerSection("Versions", versions);
 }
 
+async function agExportYaml(name) {
+  let text;
+  try { text = (await api("GET", `/agents/${encodeURIComponent(name)}/agent-yaml`)).yaml; }
+  catch (e) { toast(e.message, "error"); return; }
+  _overlay({
+    onEsc: (close) => close(),
+    render: (box, close) => {
+      box.classList.add("wide");
+      box.innerHTML = "<h3>agent.yaml — " + esc(name) + "</h3>"
+        + '<pre style="max-height:60vh; overflow:auto;"></pre>'
+        + '<div class="actions" style="justify-content:flex-end; gap:6px; margin-top:14px;">'
+        + "<button data-copy>Copy</button><button data-dl>Download</button>"
+        + '<button data-x class="ghost">Close</button></div>';
+      box.querySelector("pre").textContent = text;
+      box.querySelector("[data-copy]").onclick = () => {
+        navigator.clipboard?.writeText(text); toast("Copied agent.yaml", "ok");
+      };
+      box.querySelector("[data-dl]").onclick = () => {
+        const blob = new Blob([text], { type: "text/yaml" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = name + "-agent.yaml";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      };
+      box.querySelector("[data-x]").onclick = close;
+    },
+  });
+}
 async function agSetSkill(skill, enabled) {
   try { await api("PUT", `/agents/${encodeURIComponent(AG_DRAWER)}/skills/${encodeURIComponent(skill)}`, { enabled }); }
   catch (e) { toast(e.message, "error"); agDrawer(AG_DRAWER); }

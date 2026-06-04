@@ -457,6 +457,13 @@ def test_agents_im_binding_in_drawer():
     assert "/bindings/channels/" in chfn
 
 
+def test_agent_export_yaml_wired():
+    html = ADMIN_HTML
+    assert "function agExportYaml" in html
+    assert "/agent-yaml" in html
+    assert "agExportYaml(" in html  # button in the drawer
+
+
 def test_drawer_loads_from_aggregate_endpoints():
     html = ADMIN_HTML
     fn = html.split("async function agDrawer", 1)[1].split("function agDrawerSection", 1)[0]

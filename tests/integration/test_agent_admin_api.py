@@ -332,3 +332,52 @@ def test_oauth_bind_viewer_forbidden(client):
     token, _ = _session_for("viewer")
     r = client.post("/admin/agents/ops/bindings/oauth/github", headers=_hdr(token))
     assert r.status_code == 403
+
+
+# --- export agent.yaml --------------------------------------------------------
+
+
+def test_export_agent_yaml(client):
+    import yaml as _yaml
+
+    from fleetent.platform.connector_management import agent_mcp_server_store
+
+    agent = agent_store.create_agent(
+        "support-bot",
+        "You are support-bot.",
+        ["search_*", "read_file"],
+        plugins=["acme-docs", "billing"],
+        features={"code_execution": True, "sandbox_env": {"TZ": "Asia/Shanghai"}},
+        allowed_skills=["jira"],
+        model_overrides={"default": {"provider": "anthropic", "model": "claude-opus-4-8"}},
+        memory_namespace="support-bot",
+    )
+    agent_mcp_server_store.add_mcp_server(
+        None, "docs", transport="http", url="https://docs.acme.internal/mcp",
+        auth_type="bearer", api_key_env="ACME_DOCS_MCP_TOKEN",
+    )
+    agent_store.bind_mcp_server(agent.id, "docs")
+    agent_store.assign_user("u_alice", agent.id)
+    agent_store.assign_channel("slack", "C0123ABCD", agent.id)
+
+    token, _ = _session_for("admin")
+    r = client.get("/admin/agents/support-bot/agent-yaml", headers=_hdr(token))
+    assert r.status_code == 200, r.text
+    doc = _yaml.safe_load(r.json()["yaml"])
+    assert doc["name"] == "support-bot"
+    assert doc["system_prompt"].startswith("You are support-bot")
+    assert doc["model_overrides"]["default"]["model"] == "claude-opus-4-8"
+    assert doc["allowed_tools"] == ["search_*", "read_file"]
+    assert doc["plugins"] == ["acme-docs", "billing"]
+    assert doc["features"]["sandbox_env"]["TZ"] == "Asia/Shanghai"
+    assert doc["allowed_skills"] == ["jira"]
+    assert doc["memory_namespace"] == "support-bot"
+    assert {s["id"]: s for s in doc["mcp_servers"]}["docs"]["api_key_env"] == "ACME_DOCS_MCP_TOKEN"
+    assert "slack:C0123ABCD" in doc["bindings"]["channels"]
+    assert "u_alice" in doc["bindings"]["users"]
+
+
+def test_export_agent_yaml_unknown_404(client):
+    token, _ = _session_for("admin")
+    r = client.get("/admin/agents/ghost/agent-yaml", headers=_hdr(token))
+    assert r.status_code == 404
