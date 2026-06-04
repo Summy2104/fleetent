@@ -1180,6 +1180,7 @@
         </label>
         <textarea id="ag-system-prompt" placeholder="system prompt" rows="14" style="font-family:monospace;"></textarea>
         <input id="ag-allowed-tools" placeholder="allowed_tools (comma-separated, e.g. shell, github__*)" autocomplete="off">
+        <div id="ag-create-hint" class="muted" style="font-size:12px;">After creating, the detail panel opens to configure skills, connectors, knowledge bases and IM bindings.</div>
         <div id="ag-err" class="err"></div>
         <div class="row" style="justify-content:flex-end;">
           <button type="button" class="ghost" onclick="agCloseModal()">Cancel</button>
@@ -2428,6 +2429,7 @@ async function agCreate() {
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
   $("ag-template-row").style.display = "";
+  $("ag-create-hint").style.display = "";
   await agLoadTemplateOptions();
   $("ag-modal").dataset.mode = "create";
   $("ag-modal").classList.remove("hidden");
@@ -2442,6 +2444,7 @@ async function agEdit(name) {
     $("ag-system-prompt").value = a.system_prompt || "";
     $("ag-allowed-tools").value = (a.allowed_tools || []).join(", ");
     $("ag-template-row").style.display = "none";
+    $("ag-create-hint").style.display = "none";
     $("ag-modal").dataset.mode = "edit";
     $("ag-modal").dataset.name = name;
     $("ag-modal").classList.remove("hidden");
@@ -2452,19 +2455,24 @@ async function agSave() {
   $("ag-err").textContent = "";
   const tools = $("ag-allowed-tools").value.split(",").map(s => s.trim()).filter(Boolean);
   const sp = $("ag-system-prompt").value;
+  const isEdit = $("ag-modal").dataset.mode === "edit";
   try {
-    if ($("ag-modal").dataset.mode === "edit") {
-      const name = $("ag-modal").dataset.name;
+    let name;
+    if (isEdit) {
+      name = $("ag-modal").dataset.name;
       await api("PATCH", `/agents/${encodeURIComponent(name)}`, { system_prompt: sp, allowed_tools: tools });
     } else {
-      const name = $("ag-name").value.trim();
+      name = $("ag-name").value.trim();
       if (!name) { $("ag-err").textContent = "name required"; return; }
       const templateId = $("ag-template").value;
       if (!templateId) { $("ag-err").textContent = "template required"; return; }
       await api("POST", "/agents", { name, template_id: templateId, system_prompt: sp, allowed_tools: tools });
     }
-    const editedName = $("ag-modal").dataset.mode === "edit" ? $("ag-modal").dataset.name : null;
-    agCloseModal(); agAfterChange(editedName);
+    agCloseModal();
+    await loadAgents();
+    // Open the detail drawer right after create/edit so bindings (skills, connectors,
+    // knowledge bases, IM) are configured as part of the new-agent flow.
+    agDrawer(name);
   } catch (e) { $("ag-err").textContent = e.message; }
 }
 async function agDelete(name) {
