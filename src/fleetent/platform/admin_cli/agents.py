@@ -172,9 +172,10 @@ def _activate_agent_version(args: argparse.Namespace) -> None:
 
 
 def _show_agent(args: argparse.Namespace) -> None:
-    from fleetent.runtime import load_active
+    # Authoring/console view → DB active version (not the file-based runtime path).
+    from fleetent.runtime.snapshot import load_active_db
 
-    snapshot = load_active(args.agent_name)
+    snapshot = load_active_db(args.agent_name)
     if snapshot is None:
         print(f"Error: Agent {args.agent_name!r} not found.", file=sys.stderr)
         sys.exit(1)

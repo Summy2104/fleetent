@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
@@ -8,6 +9,16 @@ from fastapi.testclient import TestClient
 import fleetent.user_store as us
 from fleetent.server import app
 from tests.integration.test_migrations import apply_migrations
+
+
+def _bind_file_agent(root, monkeypatch, name, **fields):
+    """Write a file agent and point FLEETENT_AGENTS_DIR at it (lifespan scan picks it up)."""
+    doc = {"name": name, "version": 1}
+    doc.update(fields)
+    d = root / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    monkeypatch.setenv("FLEETENT_AGENTS_DIR", str(root))
 
 
 def _migrated_db(tmp_path, monkeypatch):
@@ -161,7 +172,6 @@ def test_chat_stream_exception_yields_error_event(tmp_path, monkeypatch):
 
 def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch):
     """/chat with x-platform + x-channel-id uses the channel-bound agent."""
-    import fleetent.agent_store as ag
     import fleetent.server as srv
     import fleetent.user_store as us2
 
@@ -185,8 +195,14 @@ def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch):
     monkeypatch.setattr(srv, "run_stream", fake_stream)
 
     user = us2.create_user("ChannelTester")
-    channel_agent = ag.create_agent("channel-bot", "Channel system.", ["shell"])
-    ag.assign_channel("slack", "C-TEST", channel_agent.id)
+    _bind_file_agent(
+        tmp_path / "agents",
+        monkeypatch,
+        "channel-bot",
+        system_prompt="Channel system.",
+        allowed_tools=["shell"],
+        bindings={"channels": ["slack:C-TEST"]},
+    )
 
     with TestClient(srv.app) as c:
         resp = c.post(
@@ -206,7 +222,6 @@ def test_chat_uses_channel_agent_when_headers_provided(tmp_path, monkeypatch):
 
 def test_chat_rejects_disabled_agent(tmp_path, monkeypatch, isolated_schedule_db):
     """/chat must refuse a disabled agent and never enter the agent loop (task 8)."""
-    import fleetent.agent_store as ag
     import fleetent.server as srv
     import fleetent.user_store as us2
 
@@ -222,8 +237,14 @@ def test_chat_rejects_disabled_agent(tmp_path, monkeypatch, isolated_schedule_db
     monkeypatch.setattr(srv, "agent_routing_status", lambda name: "disabled")
 
     user = us2.create_user("DisabledChan")
-    agent = ag.create_agent("paused-bot", "x", ["shell"])
-    ag.assign_channel("slack", "C-OFF", agent.id)
+    _bind_file_agent(
+        tmp_path / "agents",
+        monkeypatch,
+        "paused-bot",
+        system_prompt="x",
+        allowed_tools=["shell"],
+        bindings={"channels": ["slack:C-OFF"]},
+    )
 
     with TestClient(srv.app) as c:
         resp = c.post(
@@ -241,7 +262,6 @@ def test_chat_rejects_disabled_agent(tmp_path, monkeypatch, isolated_schedule_db
 
 
 def test_chat_rejects_archived_agent(tmp_path, monkeypatch, isolated_schedule_db):
-    import fleetent.agent_store as ag
     import fleetent.server as srv
     import fleetent.user_store as us2
 
@@ -249,8 +269,14 @@ def test_chat_rejects_archived_agent(tmp_path, monkeypatch, isolated_schedule_db
     monkeypatch.setattr(srv, "agent_routing_status", lambda name: "archived")
 
     user = us2.create_user("ArchChan")
-    agent = ag.create_agent("gone-bot", "x", ["shell"])
-    ag.assign_channel("slack", "C-ARC", agent.id)
+    _bind_file_agent(
+        tmp_path / "agents",
+        monkeypatch,
+        "gone-bot",
+        system_prompt="x",
+        allowed_tools=["shell"],
+        bindings={"channels": ["slack:C-ARC"]},
+    )
 
     with TestClient(srv.app) as c:
         resp = c.post(
@@ -267,7 +293,6 @@ def test_chat_rejects_archived_agent(tmp_path, monkeypatch, isolated_schedule_db
 
 def test_chat_merges_agent_plugins_into_allowed_tools(tmp_path, monkeypatch):
     """An agent's plugins expand to `{name}__*` patterns merged into allowed_tools."""
-    import fleetent.agent_store as ag
     import fleetent.server as srv
     import fleetent.user_store as us2
 
@@ -291,8 +316,15 @@ def test_chat_merges_agent_plugins_into_allowed_tools(tmp_path, monkeypatch):
     monkeypatch.setattr(srv, "run_stream", fake_stream)
 
     user = us2.create_user("PluginTester")
-    agent = ag.create_agent("plugin-bot", "Sys.", ["shell"], plugins=["crm_tools", "billing"])
-    ag.assign_channel("slack", "C-PLUG", agent.id)
+    _bind_file_agent(
+        tmp_path / "agents",
+        monkeypatch,
+        "plugin-bot",
+        system_prompt="Sys.",
+        allowed_tools=["shell"],
+        plugins=["crm_tools", "billing"],
+        bindings={"channels": ["slack:C-PLUG"]},
+    )
 
     with TestClient(srv.app) as c:
         resp = c.post(
@@ -390,7 +422,6 @@ def test_chat_passes_sandbox_mode_to_run_stream(tmp_path, monkeypatch):
 
 def test_chat_passes_agent_allowed_skills_to_run_stream(tmp_path, monkeypatch):
     """An agent's allowed_skills flow into run_stream for catalog narrowing."""
-    import fleetent.agent_store as ag
     import fleetent.server as srv
     import fleetent.user_store as us2
 
@@ -407,8 +438,15 @@ def test_chat_passes_agent_allowed_skills_to_run_stream(tmp_path, monkeypatch):
     monkeypatch.setattr(srv, "run_stream", fake_stream)
 
     user = us2.create_user("SkillScopeTester")
-    agent = ag.create_agent("skill-bot", "Sys.", ["shell"], allowed_skills=["weather"])
-    ag.assign_channel("slack", "C-SKILL", agent.id)
+    _bind_file_agent(
+        tmp_path / "agents",
+        monkeypatch,
+        "skill-bot",
+        system_prompt="Sys.",
+        allowed_tools=["shell"],
+        allowed_skills=["weather"],
+        bindings={"channels": ["slack:C-SKILL"]},
+    )
 
     with TestClient(srv.app) as c:
         resp = c.post(

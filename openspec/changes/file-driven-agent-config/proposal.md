@@ -65,8 +65,14 @@ file's inline `mcp_servers`.
 
 - **Code**: new `agent_config` loader/schema module; `runtime/snapshot.py` internals
   rewired to the file index; `config/agents/` directory convention +
-  `FLEETENT_AGENTS_DIR`. `runtime/loop.py`, IM normalizer, and `filter_tool_schemas`
-  unchanged (API/shape preserved).
+  `FLEETENT_AGENTS_DIR`. The IM routing entry `normalizer.get_agent_for_context` (and
+  its `server.chat` caller) is rewired to resolve from the file index — this is the
+  primary runtime path and is required for IM/API requests to be zero-DB.
+  `get_agent_for_context` returns an `AgentFile`; both callers read only
+  `system_prompt`/`allowed_tools`/`plugins`/`name`/`features`/`allowed_skills`, which the
+  file model already provides, so the loop hand-off and `filter_tool_schemas` are
+  unchanged. The DB-backed lifecycle gate (`agent_routing_status`) and api-key scope
+  checks on the API path are separate governance concerns, left as-is.
 - **Identity ripple**: `AgentSnapshot` identity and `connector_scope` become strings
   (the agent name). The OAuth-connector and stats DB tables are still keyed by int
   `agent_id`; their schema rekey to string keys is a deferred follow-up. OAuth-connector
