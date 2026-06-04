@@ -51,9 +51,9 @@ def test_active_tab_restore_falls_back_to_users():
 def test_skills_tab_and_list_wiring():
     html = ADMIN_HTML
     assert 'id="tab-skills"' in html
-    assert "sk-body" in html
+    assert 'id="sk-grid"' in html  # card grid (replaced the old sk-body table)
     # list endpoint wired
-    assert 'api("GET", "/skills"' in html
+    assert 'api("GET", "/skills' in html
     assert "LOADERS.skills" in html
 
 
@@ -85,11 +85,11 @@ def test_skills_action_functions_present():
         "function skReload",
         "function skDelete",
         "function skRestore",
-        "function skBindAgents",
         "function skForcePublish",
-        "function skObservability",
         "function skPromote",
         "function skDiscard",
+        "function skDrawer",
+        "function skDoUpload",
     ):
         assert fn in html, fn
 

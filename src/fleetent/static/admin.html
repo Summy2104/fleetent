@@ -103,8 +103,12 @@
     display:flex; align-items:center; justify-content:center; }
   .modal.hidden { display:none; }
   .modal-box { background:var(--panel); border:1px solid var(--line); border-radius:10px;
-    padding:20px; width:360px; max-width:calc(100% - 32px); box-shadow:0 10px 40px rgba(0,0,0,.5); }
+    padding:20px; width:360px; max-width:calc(100% - 32px); box-shadow:0 10px 40px rgba(0,0,0,.5);
+    max-height:calc(100vh - 48px); overflow-y:auto; }
   .modal-box h3 { margin:0 0 14px; }
+  .modal-box input:not([type=checkbox]):not([type=radio]),
+  .modal-box select,
+  .modal-box textarea { width:100%; box-sizing:border-box; }
   .modal-box.wide { width:560px; }
   .modal-box pre { background:var(--bg-0); border:1px solid var(--border); border-radius:var(--r-1);
     padding:var(--sp-3); max-height:60vh; overflow:auto; font-size:12px; white-space:pre-wrap; word-break:break-word; }
@@ -162,6 +166,275 @@
   details.form-section summary::-webkit-details-marker { display: none; }
   details.form-section summary::before { content: "▶"; display: inline-block; margin-right: 8px; transition: transform 0.15s ease; }
   details.form-section[open] summary::before { transform: rotate(90deg); }
+
+  /* Connector styles */
+  .connector-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  
+  .conn-tab {
+    padding: 8px 16px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+  }
+  
+  .conn-tab:hover {
+    color: var(--text);
+  }
+  
+  .conn-tab.active {
+    color: var(--text);
+    border-bottom-color: var(--primary);
+  }
+  
+  .connector-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  
+  .connector-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  
+  .connector-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    transform: translateY(-2px);
+  }
+  
+  .connector-card.disabled {
+    opacity: 0.6;
+  }
+  .card-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .test-result {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-2);
+    background: var(--surface-2, var(--surface));
+    font-size: 13px;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .result-ok { color: var(--ok); font-weight: 600; }
+  .result-err { color: var(--danger); font-weight: 600; }
+  .tool-list { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+  .tool-item { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; border-top: 1px solid var(--border); }
+  .tool-item code { color: var(--accent); font-size: 12px; white-space: nowrap; }
+  .tool-desc { color: var(--muted); font-size: 12px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { display: inline-block; animation: spin 1s linear infinite; }
+
+  /* --- Skills module --- */
+  .sk-toolbar { display:flex; gap:10px; margin-bottom:10px; }
+  .sk-search { flex:1; }
+  .sk-filter-tabs { display:flex; gap:6px; flex-wrap:wrap; }
+  .sk-filter-tab { padding:5px 12px; border:1px solid var(--border); border-radius:999px;
+    background:var(--surface); color:var(--muted); cursor:pointer; font-size:13px; }
+  .sk-filter-tab:hover { border-color:var(--border-strong, var(--accent)); }
+  .sk-filter-tab.active { background:var(--accent-weak, var(--accent)); border-color:var(--accent);
+    color:var(--accent, #fff); font-weight:600; }
+  .sk-filter-tab .cnt { opacity:.7; margin-left:5px; font-size:11px; }
+  .badge-count { font-size:12px; color:var(--muted); font-weight:400; }
+  .sk-pills { display:flex; gap:5px; flex-wrap:wrap; margin:6px 0 2px; }
+  .conn-drawer { position:fixed; top:0; right:0; width:520px; max-width:92vw; height:100vh;
+    background:var(--panel); border-left:1px solid var(--line); box-shadow:-8px 0 30px rgba(0,0,0,.4);
+    z-index:45; display:flex; flex-direction:column; }
+  .conn-drawer.hidden { display:none; }
+  .conn-drawer-head { display:flex; justify-content:space-between; align-items:center;
+    padding:16px 20px; border-bottom:1px solid var(--border); }
+  .conn-drawer-head h3 { margin:0; font-size:17px; word-break:break-all; }
+  .conn-drawer-body { padding:16px 20px; overflow-y:auto; flex:1; }
+  .sk-meta-row { display:flex; gap:8px; margin:4px 0; font-size:13px; }
+  .sk-meta-row .k { color:var(--muted); min-width:96px; }
+  .sk-edit-top { display:flex; gap:12px; margin-bottom:10px; }
+  .sk-edit-split { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .sk-edit-pane { display:flex; flex-direction:column; min-width:0; }
+  .sk-edit-pane textarea { min-height:340px; font-family:monospace; font-size:12px; width:100%; box-sizing:border-box; }
+  .field-label { font-size:12px; color:var(--muted); display:block; margin-bottom:4px; }
+  .sk-fm-summary { font-size:12px; margin-bottom:6px; min-height:18px; }
+  .sk-fm-summary .ok { color:var(--ok); }
+  .sk-fm-summary .err { color:var(--danger); }
+  .sk-preview { background:var(--bg-0, var(--surface)); border:1px solid var(--border); border-radius:var(--r-1);
+    padding:10px; height:316px; overflow:auto; white-space:pre-wrap; font-size:12px; margin:0; }
+  .sk-prop-list { display:flex; flex-direction:column; gap:10px; }
+  .sk-prop-card { border:1px solid var(--border); border-radius:var(--r-2); padding:12px 14px; background:var(--surface); }
+  .sk-prop-card .hd { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .sk-prop-card .reason { color:var(--muted); font-size:13px; margin:6px 0; }
+  .sk-diff { background:var(--bg-0, #0c0c0c); border:1px solid var(--border); border-radius:var(--r-1);
+    padding:10px; overflow:auto; max-height:280px; white-space:pre; font-size:12px; margin:8px 0 0; }
+  .sk-diff .add { color:var(--ok); } .sk-diff .del { color:var(--danger); } .sk-diff .hunk { color:var(--accent); }
+  .risk-low { color:var(--ok); } .risk-medium { color:#d8a200; } .risk-high { color:var(--danger); }
+  .sk-import-section { border:1px solid var(--border); border-radius:var(--r-2); padding:12px 14px; background:var(--surface); }
+
+  .connector-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12px;
+    font-size: 20px;
+  }
+  
+  .connector-icon.mcp {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+  }
+  
+  .connector-icon.oauth {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+  }
+  
+  .connector-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  
+  .connector-desc {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 12px;
+    height: 32px;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  
+  .connector-status {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+  
+  .connector-status.active {
+    background: #10b981;
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+  }
+  
+  .connector-status.inactive {
+    background: #ef4444;
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+  }
+  
+  .connector-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    gap: 8px;
+  }
+  
+  .connector-tools {
+    color: var(--muted);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  
+  .connector-footer button {
+    flex-shrink: 0;
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+  
+  #connector-details {
+    position: fixed;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 400px;
+    background: var(--bg);
+    border-left: 1px solid var(--border);
+    z-index: 100;
+    overflow-y: auto;
+    box-shadow: -4px 0 12px rgba(0,0,0,0.1);
+  }
+  
+  .details-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  
+  #conn-details-content {
+    padding: 20px;
+  }
+
+  .conn-modal-type-selector {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .conn-type-card {
+    padding: 16px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+  }
+
+  .conn-type-card:hover {
+    border-color: var(--primary);
+    background: var(--hover);
+  }
+
+  .conn-type-card.selected {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.1);
+  }
+
+  .conn-type-icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+  }
+
+  .conn-type-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .conn-type-desc {
+    font-size: 12px;
+    color: var(--muted);
+  }
 </style>
 </head>
 <body>
@@ -324,25 +597,43 @@
     </section>
 
     <section id="tab-skills" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Skills</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.skills?.()">Refresh</button></div></div>
-      <div class="row" style="margin-bottom:12px;">
-        <input id="sk-filter" placeholder="filter by name/description" oninput="loadSkills()" style="flex:1;">
-        <label class="muted"><input type="checkbox" id="sk-archived" onchange="loadSkills()"> show archived</label>
-        <span id="sk-create-bar">
-          <button class="ghost small" onclick="skReload()">Reload</button>
-          <button onclick="skOpenCreate()">Create skill</button>
-        </span>
+      <div class="page-header">
+        <h2 class="ph-title">Skills</h2>
+        <div class="ph-actions">
+          <button class="ghost small" onclick="skReload()">Reload index</button>
+          <button class="ghost" onclick="skOpenImport()">Import</button>
+          <button id="sk-create-bar" onclick="skOpenCreate()">+ New skill</button>
+        </div>
       </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Name</th><th>Description</th><th>Status</th><th>Audit</th><th>Source</th><th>Agents</th><th>Actions</th></tr></thead>
-        <tbody id="sk-body"></tbody>
-      </table></div>
-      <h3 style="margin-top:24px;">Reflection proposals</h3>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Proposal</th><th>Skill</th><th>Summary</th><th>Actions</th></tr></thead>
-        <tbody id="sk-prop-body"></tbody>
-      </table></div>
-      <pre id="sk-prop-diff" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+
+      <div class="sk-toolbar">
+        <input id="sk-search" class="sk-search" placeholder="🔍  Search skills by name or description" oninput="skRender()">
+        <select id="sk-source-filter" onchange="skRender()">
+          <option value="">All sources</option>
+          <option value="adhoc">adhoc</option>
+          <option value="managed">managed</option>
+        </select>
+      </div>
+      <div id="sk-tabs" class="sk-filter-tabs"></div>
+      <div id="sk-count" class="muted" style="margin:4px 2px 10px;"></div>
+
+      <div id="sk-grid" class="connector-grid"></div>
+
+      <div class="sk-proposals">
+        <div class="page-header" style="margin-top:8px;">
+          <h3 class="ph-title" style="font-size:16px;">Reflection proposals <span id="sk-prop-count" class="badge-count"></span></h3>
+        </div>
+        <div id="sk-prop-list" class="sk-prop-list"></div>
+      </div>
+
+      <!-- Skill detail drawer -->
+      <div id="sk-drawer" class="conn-drawer hidden">
+        <div class="conn-drawer-head">
+          <h3 id="sk-drawer-title">Skill</h3>
+          <button class="modal-close" onclick="skCloseDrawer()">×</button>
+        </div>
+        <div id="sk-drawer-body" class="conn-drawer-body"></div>
+      </div>
     </section>
 
     <section id="tab-providers" class="hidden">
@@ -503,38 +794,53 @@
     </section>
 
     <section id="tab-oauth" class="hidden">
-      <div class="page-header"><h2 class="ph-title">OAuth Connectors &amp; MCP</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.oauth?.()">Refresh</button></div></div>
-      <div class="row" style="margin-bottom:12px;">
-        <span class="muted" style="flex:1;">OAuth 2.x connectors (secrets stored server-side, shown masked)</span>
-        <input id="oc-agent-filter" placeholder="agent_id filter" onchange="ocConnectors()">
-        <span id="oc-create-bar"><button onclick="ocOpenCreate()">Add connector</button></span>
+      <div class="page-header">
+        <h2 class="ph-title">Connectors</h2>
+        <div class="ph-filter"></div>
+        <div class="ph-actions">
+          <button class="primary small" onclick="ocOpenCreate()">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            Add Connector
+          </button>
+        </div>
       </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>ID</th><th>Owner</th><th>Name</th><th>Protocol</th><th>Enabled</th><th>Actions</th></tr></thead>
-        <tbody id="oc-body"></tbody>
-      </table></div>
-      <div class="row" style="margin:12px 0 4px;">
-        <h3 style="flex:1; margin:0;">Authorization grants</h3>
-        <button class="ghost small" onclick="ocGrants()">Refresh grants</button>
-        <input id="oc-offboard-user" placeholder="user_id">
-        <button class="ghost small" onclick="ocOffboarding()">Offboarding</button>
+
+      <!-- Connectors Grid View -->
+      <div class="connector-tabs">
+        <button id="conn-tab-all" class="conn-tab active" onclick="switchConnectorTab('all')">All Connectors</button>
+        <button id="conn-tab-mcp" class="conn-tab" onclick="switchConnectorTab('mcp')">MCP Servers</button>
+        <button id="conn-tab-oauth" class="conn-tab" onclick="switchConnectorTab('oauth')">OAuth</button>
       </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>User</th><th>Connector</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody id="oc-grants-body"></tbody>
-      </table></div>
-      <pre id="oc-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
-      <div class="row" style="margin:16px 0 4px;">
-        <h3 style="flex:1; margin:0;">MCP servers</h3>
-        <input id="mcp-agent-filter" placeholder="agent_id filter" onchange="mcpServers()">
-        <button class="ghost small" onclick="mcpDoctor()">Doctor</button>
-        <button class="ghost small" onclick="mcpServers()">Refresh servers</button>
+
+      <div id="conn-content-all" class="conn-content">
+        <div class="connector-grid" id="connector-grid">
+          <!-- Dynamically populated connector cards -->
+        </div>
       </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Server</th><th>Owner</th><th>Status</th><th>Tools</th><th>Actions</th></tr></thead>
-        <tbody id="mcp-body"></tbody>
-      </table></div>
-      <pre id="mcp-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+
+      <div id="conn-content-mcp" class="conn-content hidden">
+        <div class="connector-grid" id="mcp-grid">
+          <!-- MCP server cards -->
+        </div>
+      </div>
+
+      <div id="conn-content-oauth" class="conn-content hidden">
+        <div class="connector-grid" id="oauth-grid">
+          <!-- OAuth connector cards -->
+        </div>
+      </div>
+
+      <!-- Details Panel -->
+      <div id="connector-details" class="hidden">
+        <div class="details-header">
+          <h3 id="conn-details-title">Connector Details</h3>
+          <button class="ghost small" onclick="closeConnectorDetails()">×</button>
+        </div>
+        <div id="conn-details-content"></div>
+      </div>
     </section>
 
     <section id="tab-audit" class="hidden">
@@ -603,18 +909,64 @@
   </div>
 
   <div id="sk-modal" class="modal hidden">
-    <div class="modal-box" role="dialog" aria-modal="true">
+    <div class="modal-box" role="dialog" aria-modal="true" style="width:920px; max-width:calc(100% - 32px);">
       <h3 id="sk-modal-title">Create skill</h3>
-      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="skSave(); return false;">
-        <input id="sk-name" placeholder="skill name (matches frontmatter)" autocomplete="off">
-        <select id="sk-source"><option value="adhoc">adhoc</option><option value="managed">managed</option></select>
-        <textarea id="sk-content" placeholder="skill markdown (with frontmatter name/description)" rows="12" style="font-family:monospace;"></textarea>
+      <form onsubmit="skSave(); return false;">
+        <div class="sk-edit-top">
+          <label style="flex:1;">
+            <span class="field-label">Skill name <span class="muted">(must match frontmatter <code>name</code>)</span></span>
+            <input id="sk-name" placeholder="my-skill" autocomplete="off">
+          </label>
+          <label>
+            <span class="field-label">Source</span>
+            <select id="sk-source"><option value="adhoc">adhoc</option><option value="managed">managed</option></select>
+          </label>
+        </div>
+        <div class="sk-edit-split">
+          <div class="sk-edit-pane">
+            <span class="field-label">SKILL.md</span>
+            <textarea id="sk-content" placeholder="---&#10;name: my-skill&#10;description: what it does and when to use it&#10;tags: [research, web]&#10;---&#10;&#10;# Instructions&#10;..." oninput="skPreview()"></textarea>
+          </div>
+          <div class="sk-edit-pane">
+            <span class="field-label">Preview</span>
+            <div id="sk-fm-summary" class="sk-fm-summary"></div>
+            <pre id="sk-preview" class="sk-preview"></pre>
+          </div>
+        </div>
         <div id="sk-err" class="err"></div>
-        <div class="row" style="justify-content:flex-end;">
+        <div class="row" style="justify-content:flex-end; margin-top:6px;">
           <button type="button" class="ghost" onclick="skCloseModal()">Cancel</button>
-          <button type="submit">Save</button>
+          <button type="submit" class="primary">Save</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="sk-import-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true" style="width:560px; max-width:calc(100% - 32px);">
+      <h3>Import skills</h3>
+      <label class="field-label">Source provenance</label>
+      <select id="sk-import-source" style="margin-bottom:14px;">
+        <option value="adhoc">adhoc</option><option value="managed">managed</option>
+      </select>
+
+      <div class="sk-import-section">
+        <strong>📁 Upload a skill folder</strong>
+        <p class="muted" style="font-size:13px; margin:4px 0 8px;">
+          Pick a skill folder (with <code>SKILL.md</code>) or a folder containing several
+          skills. The whole folder uploads — single vs batch is detected automatically.
+        </p>
+        <div class="row" style="gap:8px;">
+          <input type="file" id="sk-import-files" webkitdirectory directory multiple>
+          <button type="button" id="sk-upload-btn" class="primary" onclick="skDoUpload()">Upload &amp; import</button>
+        </div>
+      </div>
+
+      <div id="sk-import-err" class="err"></div>
+      <div id="sk-import-result" class="test-result hidden"></div>
+      <div class="row" style="justify-content:flex-end; margin-top:10px;">
+        <button type="button" class="ghost" onclick="skCloseImport()">Close</button>
+      </div>
     </div>
   </div>
 
@@ -853,6 +1205,16 @@
     </div>
   </div>
 
+  <div id="test-dialog" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true" style="max-width: 500px;">
+      <h3 id="test-dialog-title">Test Results</h3>
+      <div id="test-dialog-content" style="padding: 16px 0;"></div>
+      <div class="row" style="justify-content:flex-end; margin-top: 16px;">
+        <button type="button" class="primary" onclick="closeTestDialog()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div id="mon-rule-modal" class="modal hidden">
     <div class="modal-box" role="dialog" aria-modal="true">
       <h3>New alert rule</h3>
@@ -878,23 +1240,25 @@
   </div>
 
   <div id="oc-modal" class="modal hidden">
-    <div class="modal-box" role="dialog" aria-modal="true">
-      <h3 id="oc-modal-title">Add OAuth connector</h3>
-      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="ocSave(); return false;">
-        <input id="oc-id" placeholder="auto-generated" autocomplete="off" readonly>
-        <input id="oc-name" placeholder="display name" autocomplete="off">
-        <input id="oc-auth-url" placeholder="authorization_url" autocomplete="off">
-        <input id="oc-token-url" placeholder="token_url" autocomplete="off">
-        <input id="oc-client-id" placeholder="client_id" autocomplete="off">
-        <input id="oc-client-secret" type="password" placeholder="client_secret (leave blank to keep current)" autocomplete="off">
-        <input id="oc-scopes" placeholder="scopes (space/comma separated)" autocomplete="off">
-        <label class="muted"><input type="checkbox" id="oc-enabled" checked> enabled</label>
-        <div id="oc-err" class="err"></div>
-        <div class="row" style="justify-content:flex-end;">
-          <button type="button" class="ghost" onclick="ocCloseModal()">Cancel</button>
-          <button type="submit">Save</button>
+    <div class="modal-box" role="dialog" aria-modal="true" style="width: 720px; max-width: calc(100% - 32px);">
+      <h3 id="oc-modal-title">Add Connector</h3>
+      
+      <!-- Connector Type Selection -->
+      <div id="conn-type-selector" class="conn-modal-type-selector">
+        <div class="conn-type-card" onclick="selectConnectorType('mcp')">
+          <div class="conn-type-icon">🔌</div>
+          <div class="conn-type-title">MCP Server</div>
+          <div class="conn-type-desc">Model Context Protocol server for tools</div>
         </div>
-      </form>
+        <div class="conn-type-card" onclick="selectConnectorType('oauth')">
+          <div class="conn-type-icon">🔐</div>
+          <div class="conn-type-title">OAuth 2.0</div>
+          <div class="conn-type-desc">Connect to OAuth-protected APIs</div>
+        </div>
+      </div>
+
+      <!-- Dynamic Form Container -->
+      <div id="connector-form-container"></div>
     </div>
   </div>
 
@@ -922,6 +1286,31 @@ function toast(msg, kind) {
   el.textContent = String(msg);
   host.appendChild(el);
   setTimeout(() => { el.style.opacity = "0"; setTimeout(() => el.remove(), 200); }, 4000);
+}
+
+function showTestDialog(title, content, status) {
+  const dialog = $('test-dialog');
+  const dialogTitle = $('test-dialog-title');
+  const dialogContent = $('test-dialog-content');
+  
+  dialogTitle.textContent = title;
+  
+  if (status === 'loading') {
+    dialogContent.innerHTML = `
+      <div style="text-align: center; color: var(--muted);">
+        <div style="display: inline-block; animation: spin 1s linear infinite;">⏳</div>
+        <div style="margin-top: 8px;">${content}</div>
+      </div>
+    `;
+  } else {
+    dialogContent.innerHTML = content;
+  }
+  
+  dialog.classList.remove('hidden');
+}
+
+function closeTestDialog() {
+  $('test-dialog').classList.add('hidden');
 }
 
 // Close any open static (id-bearing) modal on Escape; dynamic overlays self-handle.
@@ -1385,64 +1774,181 @@ async function connDisable(platform) { try { await api("POST", `/im/connectors/$
 // --- Skills -----------------------------------------------------------------
 
 let SK_EDIT_NAME = null;
+let SK_ALL = [];
+let SK_TAB = 'all';
+
+const SK_TABS = [
+  { key: 'all',         label: 'All',         test: () => true },
+  { key: 'active',      label: 'Active',      test: r => r.status === 'active' && r.global_enabled },
+  { key: 'disabled',    label: 'Disabled',    test: r => r.status === 'active' && !r.global_enabled },
+  { key: 'quarantined', label: 'Quarantined', test: r => r.status === 'quarantined' },
+  { key: 'drifted',     label: 'Drifted',     test: r => !!r.drift },
+  { key: 'archived',    label: 'Archived',    test: r => r.status === 'archived' },
+];
 
 async function loadSkills() {
-  const q = $("sk-filter").value.trim();
-  const arch = $("sk-archived").checked;
-  const qs = [];
-  if (q) qs.push("q=" + encodeURIComponent(q));
-  if (arch) qs.push("include_archived=true");
-  const rows = await api("GET", "/skills" + (qs.length ? "?" + qs.join("&") : ""));
-  $("sk-body").innerHTML = rows.map(r => {
-    const drift = r.drift ? ` <span class="pill blocked">drift</span>` : "";
-    const archived = r.status === "archived";
-    return `
-      <tr>
-        <td>${esc(r.name)}</td>
-        <td class="muted">${esc(r.description || "")}</td>
-        <td><span class="pill ${r.status === "active" ? "active" : "blocked"}">${esc(r.status)}</span>${drift}</td>
-        <td><span class="pill">${esc(r.audit_verdict || "—")}</span></td>
-        <td class="muted">${esc(r.source || "")}</td>
-        <td class="muted">${esc((r.enabling_agents || []).join(", ") || "—")}</td>
-        <td class="actions sk-actions">
-          <button class="small ghost" onclick="skObservability('${esc(r.name)}')">Stats</button>
-          ${IS_VIEWER ? "" : `
-          <button class="small ghost" onclick="skBindAgents('${esc(r.name)}')">Agents</button>
-          <button class="small ghost" onclick="skOpenEdit('${esc(r.name)}')">Edit</button>
-          ${r.global_enabled
-            ? `<button class="small danger" onclick="skDisable('${esc(r.name)}')">Disable</button>`
-            : `<button class="small ghost" onclick="skEnable('${esc(r.name)}')">Enable</button>`}
-          ${r.audit_verdict === "rejected" || r.status === "quarantined"
-            ? `<button class="small danger" onclick="skForcePublish('${esc(r.name)}')">Force publish</button>` : ""}
-          ${r.drift
-            ? `<button class="small ghost" onclick="skPromote('${esc(r.name)}')">Promote</button>
-               <button class="small ghost" onclick="skDiscard('${esc(r.name)}')">Discard</button>` : ""}
-          ${archived
-            ? `<button class="small ghost" onclick="skRestore('${esc(r.name)}')">Restore</button>`
-            : `<button class="small danger" onclick="skDelete('${esc(r.name)}')">Delete</button>`}`}
-        </td>
-      </tr>`;
-  }).join("") || `<tr><td colspan="7" class="muted">No skills.</td></tr>`;
+  try {
+    SK_ALL = await api("GET", "/skills?include_archived=true");
+  } catch (e) { toast(e.message, "error"); SK_ALL = []; }
+  skRenderTabs();
+  skRender();
   skProposals();
 }
 
+function skRenderTabs() {
+  $("sk-tabs").innerHTML = SK_TABS.map(t => {
+    const n = SK_ALL.filter(t.test).length;
+    return `<div class="sk-filter-tab ${SK_TAB === t.key ? 'active' : ''}" onclick="skSetTab('${t.key}')">${t.label}<span class="cnt">${n}</span></div>`;
+  }).join("");
+}
+function skSetTab(key) { SK_TAB = key; skRenderTabs(); skRender(); }
+
+function skMatch(r) {
+  const tab = SK_TABS.find(t => t.key === SK_TAB) || SK_TABS[0];
+  if (!tab.test(r)) return false;
+  const src = $("sk-source-filter").value;
+  if (src && r.source !== src) return false;
+  const q = $("sk-search").value.trim().toLowerCase();
+  if (q && !r.name.toLowerCase().includes(q) && !(r.description || "").toLowerCase().includes(q)) return false;
+  return true;
+}
+
+function skPills(r) {
+  const out = [];
+  const st = r.status === 'active' ? (r.global_enabled ? 'active' : 'blocked') : 'blocked';
+  out.push(`<span class="pill ${st}">${esc(r.status === 'active' && !r.global_enabled ? 'disabled' : r.status)}</span>`);
+  if (r.audit_verdict && r.audit_verdict !== 'pass') out.push(`<span class="pill blocked">audit: ${esc(r.audit_verdict)}</span>`);
+  if (r.drift) out.push(`<span class="pill blocked">drift</span>`);
+  out.push(`<span class="pill">${esc(r.source || 'adhoc')}</span>`);
+  return out.join(" ");
+}
+
+function skCard(r) {
+  const enabled = r.status === 'active' && r.global_enabled;
+  const nAgents = (r.enabling_agents || []).length;
+  return `
+    <div class="connector-card ${enabled ? '' : 'disabled'}" onclick="skDrawer('${esc(r.name)}')">
+      <div class="connector-status ${enabled ? 'active' : 'inactive'}"></div>
+      <div class="connector-icon" style="background:var(--accent-weak,#2a2a3a);">🧩</div>
+      <div class="connector-title">${esc(r.name)}</div>
+      <div class="connector-desc">${esc(r.description || 'No description')}</div>
+      <div class="sk-pills">${skPills(r)}</div>
+      <div class="connector-footer">
+        <span class="connector-tools">${nAgents} agent${nAgents === 1 ? '' : 's'}</span>
+        ${IS_VIEWER ? '' : `<div class="card-actions">
+          <button class="small ghost" onclick="event.stopPropagation(); skOpenEdit('${esc(r.name)}')">Edit</button>
+          ${enabled
+            ? `<button class="small ghost" onclick="event.stopPropagation(); skDisable('${esc(r.name)}')">Disable</button>`
+            : (r.status === 'active' ? `<button class="small ghost" onclick="event.stopPropagation(); skEnable('${esc(r.name)}')">Enable</button>` : '')}
+        </div>`}
+      </div>
+    </div>`;
+}
+
+function skRender() {
+  const shown = SK_ALL.filter(skMatch);
+  $("sk-grid").innerHTML = shown.map(skCard).join("")
+    || `<div class="muted" style="padding:24px; text-align:center;">No skills match.</div>`;
+  $("sk-count").textContent = `${shown.length} of ${SK_ALL.length} skill${SK_ALL.length === 1 ? '' : 's'}`;
+}
+
+// --- detail drawer ---
+async function skDrawer(name) {
+  const r = SK_ALL.find(x => x.name === name);
+  if (!r) return;
+  $("sk-drawer-title").textContent = name;
+  $("sk-drawer").classList.remove("hidden");
+  $("sk-drawer-body").innerHTML = '<div class="muted"><span class="spin">⏳</span> Loading…</div>';
+  let content = "", agents = [];
+  try { content = (await api("GET", `/skills/${encodeURIComponent(name)}/content`)).content; } catch (e) { content = "(content unavailable: " + e.message + ")"; }
+  try { agents = await api("GET", `/skills/${encodeURIComponent(name)}/agents`); } catch (e) { agents = []; }
+
+  const meta = (k, v) => `<div class="sk-meta-row"><span class="k">${k}</span><span>${v}</span></div>`;
+  const agentRows = agents.map(a => {
+    const aid = a.agent_id || a.id || a.name;
+    return `<label class="row" style="gap:8px;"><input type="checkbox" ${a.enabled ? "checked" : ""}
+      ${IS_VIEWER ? 'disabled' : ''} onchange="skSetAgent('${esc(name)}','${esc(aid)}', this.checked)"> ${esc(String(aid))}</label>`;
+  }).join("") || `<div class="muted">No agents available.</div>`;
+
+  const acts = IS_VIEWER ? '' : `
+    <div class="row" style="flex-wrap:wrap; gap:6px; margin-top:6px;">
+      <button class="small ghost" onclick="skOpenEdit('${esc(name)}')">Edit</button>
+      ${r.global_enabled
+        ? `<button class="small ghost" onclick="skDisable('${esc(name)}')">Disable</button>`
+        : `<button class="small ghost" onclick="skEnable('${esc(name)}')">Enable</button>`}
+      ${(r.audit_verdict === 'rejected' || r.status === 'quarantined')
+        ? `<button class="small danger" onclick="skForcePublish('${esc(name)}')">Force publish</button>` : ''}
+      ${r.drift ? `<button class="small ghost" onclick="skPromote('${esc(name)}')">Promote</button>
+                   <button class="small ghost" onclick="skDiscard('${esc(name)}')">Discard</button>` : ''}
+      ${r.status === 'archived'
+        ? `<button class="small ghost" onclick="skRestore('${esc(name)}')">Restore</button>`
+        : `<button class="small danger" onclick="skDelete('${esc(name)}')">Delete</button>`}
+    </div>`;
+
+  $("sk-drawer-body").innerHTML = `
+    <div class="sk-pills">${skPills(r)}</div>
+    <p class="muted" style="margin:8px 0;">${esc(r.description || 'No description')}</p>
+    ${meta('Source', esc(r.source || 'adhoc'))}
+    ${meta('Audit', esc(r.audit_verdict || '—'))}
+    ${meta('Global', r.global_enabled ? 'enabled' : 'disabled')}
+    ${acts}
+    <h4 style="margin:16px 0 6px;">Agent bindings</h4>
+    <div style="display:flex; flex-direction:column; gap:6px;">${agentRows}</div>
+    <h4 style="margin:16px 0 6px;">SKILL.md</h4>
+    <pre class="sk-preview" style="height:auto; max-height:340px;">${esc(content)}</pre>`;
+}
+function skCloseDrawer() { $("sk-drawer").classList.add("hidden"); }
+
+// --- editor ---
 function skOpenCreate() {
   SK_EDIT_NAME = null;
   $("sk-modal-title").textContent = "Create skill";
   $("sk-err").textContent = "";
   $("sk-name").value = ""; $("sk-name").disabled = false;
   $("sk-content").value = ""; $("sk-source").value = "adhoc";
+  skPreview();
   $("sk-modal").classList.remove("hidden");
 }
-function skOpenEdit(name) {
+async function skOpenEdit(name) {
   SK_EDIT_NAME = name;
   $("sk-modal-title").textContent = "Edit skill: " + name;
   $("sk-err").textContent = "";
   $("sk-name").value = name; $("sk-name").disabled = true;
-  $("sk-content").value = ""; $("sk-content").placeholder = "paste full skill markdown to replace";
+  $("sk-content").value = "Loading…";
   $("sk-modal").classList.remove("hidden");
+  try {
+    const r = await api("GET", `/skills/${encodeURIComponent(name)}/content`);
+    $("sk-content").value = r.content || "";
+  } catch (e) { $("sk-content").value = ""; $("sk-err").textContent = "could not load content: " + e.message; }
+  skPreview();
 }
 function skCloseModal() { $("sk-modal").classList.add("hidden"); }
+
+function skParseFrontmatter(text) {
+  const m = text.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (!m) return null;
+  const fm = {};
+  m[1].split("\n").forEach(line => {
+    const i = line.indexOf(":");
+    if (i > 0) fm[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  });
+  return fm;
+}
+function skPreview() {
+  const text = $("sk-content").value;
+  const fm = skParseFrontmatter(text);
+  const sum = $("sk-fm-summary");
+  if (!fm) {
+    sum.innerHTML = `<span class="err">⚠ No frontmatter block (--- … ---) found</span>`;
+  } else if (!fm.name || !fm.description) {
+    const missing = [!fm.name && "name", !fm.description && "description"].filter(Boolean).join(", ");
+    sum.innerHTML = `<span class="err">⚠ Missing required frontmatter: ${esc(missing)}</span>`;
+  } else {
+    const extra = ["tags", "version", "platforms"].filter(k => fm[k]).map(k => `${k}=${esc(fm[k])}`).join("  ");
+    sum.innerHTML = `<span class="ok">✓ ${esc(fm.name)}</span> — ${esc(fm.description)}${extra ? `<br><span class="muted">${extra}</span>` : ""}`;
+  }
+  $("sk-preview").textContent = text;
+}
 
 async function skSave() {
   if (SK_EDIT_NAME) return skEdit(SK_EDIT_NAME, $("sk-content").value);
@@ -1458,76 +1964,133 @@ async function skEdit(name, content) {
   try { await api("PUT", `/skills/${encodeURIComponent(name)}`, { content }); skCloseModal(); loadSkills(); }
   catch (e) { $("sk-err").textContent = e.message; }
 }
-async function skEnable(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/enable`); loadSkills(); } catch (e) { toast(e.message, "error"); } }
-async function skDisable(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/disable`); loadSkills(); } catch (e) { toast(e.message, "error"); } }
-async function skReload() { try { await api("POST", "/skills/reload"); loadSkills(); } catch (e) { toast(e.message, "error"); } }
+
+function skAfterMutate() { const open = !$("sk-drawer").classList.contains("hidden"); const n = $("sk-drawer-title").textContent; loadSkills().then(() => { if (open) skDrawer(n); }); }
+async function skEnable(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/enable`); skAfterMutate(); } catch (e) { toast(e.message, "error"); } }
+async function skDisable(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/disable`); skAfterMutate(); } catch (e) { toast(e.message, "error"); } }
+async function skReload() { try { await api("POST", "/skills/reload"); loadSkills(); toast("Skill index reloaded", "success"); } catch (e) { toast(e.message, "error"); } }
 async function skDelete(name) {
-  if (!await confirmDialog(`Archive (soft-delete) skill ${name}?`)) return;
-  try { await api("DELETE", `/skills/${encodeURIComponent(name)}`); loadSkills(); } catch (e) { toast(e.message, "error"); }
+  if (!await confirmDialog(`Archive (soft-delete) skill "${name}"?`)) return;
+  try { await api("DELETE", `/skills/${encodeURIComponent(name)}`); skCloseDrawer(); loadSkills(); } catch (e) { toast(e.message, "error"); }
 }
-async function skRestore(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/restore`); loadSkills(); } catch (e) { toast(e.message, "error"); } }
+async function skRestore(name) { try { await api("POST", `/skills/${encodeURIComponent(name)}/restore`); skAfterMutate(); } catch (e) { toast(e.message, "error"); } }
 async function skForcePublish(name) {
-  if (!await confirmDialog(`Force-publish ${name} despite audit verdict?`)) return;
-  try { await api("POST", `/skills/${encodeURIComponent(name)}/force-publish`, null, { "X-Confirm": "true" }); loadSkills(); } catch (e) { toast(e.message, "error"); }
-}
-async function skObservability(name) {
-  try { const r = await api("GET", `/skills/${encodeURIComponent(name)}/observability`); showInfo("Details", JSON.stringify(r, null, 2)); } catch (e) { toast(e.message, "error"); }
+  if (!await confirmDialog(`Force-publish "${name}" despite audit verdict?`)) return;
+  try { await api("POST", `/skills/${encodeURIComponent(name)}/force-publish`, null, { "X-Confirm": "true" }); skAfterMutate(); } catch (e) { toast(e.message, "error"); }
 }
 async function skPromote(name) {
-  if (!await confirmDialog(`Promote managed skill ${name} (keep local drift)?`)) return;
-  try { await api("POST", `/skills/${encodeURIComponent(name)}/provenance/promote`, null, { "X-Confirm": "true" }); loadSkills(); } catch (e) { toast(e.message, "error"); }
+  if (!await confirmDialog(`Promote managed skill "${name}" (keep local drift)?`)) return;
+  try { await api("POST", `/skills/${encodeURIComponent(name)}/provenance/promote`, null, { "X-Confirm": "true" }); skAfterMutate(); } catch (e) { toast(e.message, "error"); }
 }
 async function skDiscard(name) {
-  if (!await confirmDialog(`Discard local drift of ${name} (revert to managed)?`)) return;
-  try { await api("POST", `/skills/${encodeURIComponent(name)}/provenance/discard`); loadSkills(); } catch (e) { toast(e.message, "error"); }
+  if (!await confirmDialog(`Discard local drift of "${name}" (revert to managed)?`)) return;
+  try { await api("POST", `/skills/${encodeURIComponent(name)}/provenance/discard`); skAfterMutate(); } catch (e) { toast(e.message, "error"); }
 }
-
-async function skBindAgents(name) {
-  $("sk-agents-err").textContent = "";
-  try {
-    const rows = await api("GET", `/skills/${encodeURIComponent(name)}/agents`);
-    $("sk-agents-list").innerHTML = rows.map(a => {
-      const aid = a.agent_id || a.id || a.name;
-      return `<label class="row" style="gap:8px;">
-        <input type="checkbox" ${a.enabled ? "checked" : ""} onchange="skSetAgent('${esc(name)}','${esc(aid)}', this.checked)">
-        ${esc(aid)}</label>`;
-    }).join("") || `<div class="muted">No agents.</div>`;
-    $("sk-agents-modal").classList.remove("hidden");
-  } catch (e) { $("sk-agents-err").textContent = e.message; }
-}
-function skCloseAgents() { $("sk-agents-modal").classList.add("hidden"); }
 async function skSetAgent(name, agentId, enabled) {
   try { await api("PUT", `/skills/${encodeURIComponent(name)}/agents/${encodeURIComponent(agentId)}`, { enabled }); }
-  catch (e) { $("sk-agents-err").textContent = e.message; }
+  catch (e) { toast(e.message, "error"); }
 }
 
+// --- proposals review ---
+function skDiffHtml(diff) {
+  if (!diff) return '<div class="muted">No diff.</div>';
+  const html = esc(diff).split("\n").map(l => {
+    if (l.startsWith("@@")) return `<span class="hunk">${l}</span>`;
+    if (l.startsWith("+")) return `<span class="add">${l}</span>`;
+    if (l.startsWith("-")) return `<span class="del">${l}</span>`;
+    return l;
+  }).join("\n");
+  return `<pre class="sk-diff">${html}</pre>`;
+}
 async function skProposals() {
   let rows = [];
-  try { rows = await api("GET", "/skills/proposals"); } catch (e) { return; }
-  $("sk-prop-body").innerHTML = rows.map(p => {
-    const pid = p.proposal_id || p.id;
+  try { rows = await api("GET", "/skills/proposals"); } catch (e) { rows = []; }
+  $("sk-prop-count").textContent = rows.length ? `(${rows.length} pending)` : "(none pending)";
+  $("sk-prop-list").innerHTML = rows.map(p => {
+    const pid = p.id || p.proposal_id;
+    const risk = (p.risk_level || "").toLowerCase();
+    const ev = (p.evidence_refs || []).length;
     return `
-      <tr>
-        <td class="muted">${esc(pid)}</td>
-        <td>${esc(p.skill_name || p.name || "—")}</td>
-        <td class="muted">${esc(p.summary || "")}</td>
-        <td class="actions">
-          <button class="small ghost" onclick="skProposalDiff('${esc(pid)}')">Diff</button>
-          <button class="small" onclick="skApprove('${esc(pid)}')">Approve</button>
-          <button class="small danger" onclick="skReject('${esc(pid)}')">Reject</button>
-        </td>
-      </tr>`;
-  }).join("") || `<tr><td colspan="4" class="muted">No proposals.</td></tr>`;
+      <div class="sk-prop-card" id="prop-${esc(pid)}">
+        <div class="hd">
+          <strong>${esc(p.target_skill || p.skill_name || "—")}</strong>
+          <span class="pill">${esc(p.type || "proposal")}</span>
+          ${risk ? `<span class="pill risk-${esc(risk)}">risk: ${esc(risk)}</span>` : ""}
+          ${ev ? `<span class="muted" style="font-size:12px;">${ev} evidence</span>` : ""}
+        </div>
+        <div class="reason">${esc(p.reason || "")}</div>
+        <div class="row" style="gap:6px;">
+          ${p.has_diff ? `<button class="small ghost" onclick="skProposalDiff('${esc(pid)}')">View diff</button>` : ""}
+          ${IS_VIEWER ? "" : `<button class="small" onclick="skApprove('${esc(pid)}')">Approve</button>
+          <button class="small danger" onclick="skReject('${esc(pid)}')">Reject</button>`}
+        </div>
+        <div class="prop-diff"></div>
+      </div>`;
+  }).join("") || `<div class="muted">No pending proposals.</div>`;
 }
 async function skProposalDiff(id) {
-  try { const r = await api("GET", `/skills/proposals/${encodeURIComponent(id)}/diff`); $("sk-prop-diff").textContent = r.diff || JSON.stringify(r, null, 2); }
-  catch (e) { $("sk-prop-diff").textContent = e.message; }
+  const host = document.querySelector(`#prop-${CSS.escape(id)} .prop-diff`);
+  try { const r = await api("GET", `/skills/proposals/${encodeURIComponent(id)}/diff`); if (host) host.innerHTML = skDiffHtml(r.diff); }
+  catch (e) { if (host) host.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
 }
 async function skApprove(id) {
   if (!await confirmDialog("Approve this proposal?")) return;
-  try { await api("POST", `/skills/proposals/${encodeURIComponent(id)}/approve`, null, { "X-Confirm": "true" }); skProposals(); } catch (e) { toast(e.message, "error"); }
+  try { await api("POST", `/skills/proposals/${encodeURIComponent(id)}/approve`, null, { "X-Confirm": "true" }); skProposals(); toast("Proposal approved", "success"); } catch (e) { toast(e.message, "error"); }
 }
-async function skReject(id) { try { await api("POST", `/skills/proposals/${encodeURIComponent(id)}/reject`); skProposals(); } catch (e) { toast(e.message, "error"); } }
+async function skReject(id) {
+  if (!await confirmDialog("Reject this proposal?")) return;
+  try { await api("POST", `/skills/proposals/${encodeURIComponent(id)}/reject`); skProposals(); } catch (e) { toast(e.message, "error"); }
+}
+
+function skOpenImport() {
+  $("sk-import-source").value = "adhoc";
+  if ($("sk-import-files")) $("sk-import-files").value = "";
+  $("sk-import-err").textContent = "";
+  const res = $("sk-import-result"); res.classList.add("hidden"); res.innerHTML = "";
+  $("sk-import-modal").classList.remove("hidden");
+}
+function skCloseImport() { $("sk-import-modal").classList.add("hidden"); }
+
+function skImportShowResult(r) {
+  const res = $("sk-import-result");
+  const ok = (r.imported || []).map(i =>
+    `<div class="result-ok">✓ ${esc(i.name)}${i.verdict && i.verdict !== "pass" ? ` <span class="muted">(${esc(i.verdict)})</span>` : ""}</div>`).join("");
+  const skip = (r.skipped || []).map(s => `<div class="muted">↷ ${esc(s.dir)} — ${esc(s.reason)}</div>`).join("");
+  const fail = (r.failed || []).map(f => `<div class="result-err">✗ ${esc(f.dir)} — ${esc(f.error)}</div>`).join("");
+  const n = (r.imported || []).length;
+  res.classList.remove("hidden");
+  res.innerHTML = `<div><strong>${n} imported</strong>, ${(r.skipped || []).length} skipped, ${(r.failed || []).length} failed</div>${ok}${skip}${fail}`;
+  loadSkills();
+  if (n) toast(`Imported ${n} skill(s)`, "success");
+}
+
+async function skDoUpload() {
+  const input = $("sk-import-files");
+  const files = input && input.files ? [...input.files] : [];
+  $("sk-import-err").textContent = "";
+  if (!files.length) { $("sk-import-err").textContent = "pick a folder first"; return; }
+  const fd = new FormData();
+  fd.append("source", $("sk-import-source").value);
+  for (const f of files) fd.append("files", f, f.webkitRelativePath || f.name);
+  const btn = $("sk-upload-btn");
+  const res = $("sk-import-result");
+  btn.disabled = true; btn.textContent = "⏳ Uploading…";
+  res.classList.remove("hidden");
+  res.innerHTML = `<div class="muted"><span class="spin">⏳</span> Uploading ${files.length} file(s)…</div>`;
+  try {
+    const resp = await fetch("/admin/skills/import/upload", {
+      method: "POST", headers: { "Authorization": "Session " + TOKEN }, body: fd,
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
+    skImportShowResult(data);
+  } catch (e) {
+    res.classList.add("hidden");
+    $("sk-import-err").textContent = e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = "Upload & import";
+  }
+}
 
 LOADERS.skills = () => loadSkills();
 
@@ -2098,27 +2661,41 @@ async function pvTest(id) {
   button.disabled = true;
   button.innerHTML = '<span style="display: inline-block; animation: spin 1s linear infinite;">⏳</span> Testing...';
   
-  // Show testing toast
-  toast("Testing provider connectivity...", "info");
+  // Show testing dialog
+  showTestDialog('Provider Test', 'Testing connectivity...', 'loading');
   
   try { 
     const r = await api("POST", `/providers/${encodeURIComponent(id)}/connectivity-test`); 
     
-    // Show result in toast and modal
+    // Show result dialog
     if (r.reachable) {
-      toast(`✅ Provider is reachable! (${r.latency_ms || '?'}ms)`, "ok");
+      const details = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div><strong>Status:</strong> <span style="color: #4CAF50;">✅ Reachable</span></div>
+          <div><strong>Provider ID:</strong> ${esc(id)}</div>
+          <div><strong>Latency:</strong> ${r.latency_ms || '?'}ms</div>
+          ${r.model ? `<div><strong>Model:</strong> ${esc(r.model)}</div>` : ''}
+          ${r.base_url ? `<div><strong>Base URL:</strong> ${esc(r.base_url)}</div>` : ''}
+          ${r.details ? `<div><strong>Details:</strong> ${esc(r.details)}</div>` : ''}
+        </div>
+      `;
+      showTestDialog('Provider Test', details, 'success');
+      toast(`✅ Provider is reachable! (${r.latency_ms || '?'}ms)`, "success");
     } else {
-      toast(`❌ Provider unreachable: ${r.error || 'Connection failed'}`, "error");
+      const details = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div><strong>Status:</strong> <span style="color: #f44336;">❌ Unreachable</span></div>
+          <div><strong>Provider ID:</strong> ${esc(id)}</div>
+          <div><strong>Error:</strong> ${esc(r.error || 'Connection failed')}</div>
+          ${r.details ? `<div><strong>Details:</strong> ${esc(r.details)}</div>` : ''}
+        </div>
+      `;
+      showTestDialog('Provider Test', details, 'error');
+      toast(`❌ Provider unreachable`, "error");
     }
-    
-    // Format the detailed result
-    let statusIcon = r.reachable ? '✅' : '❌';
-    let formattedResult = `${statusIcon} Connectivity Test Result\n\n`;
-    formattedResult += JSON.stringify(r, null, 2);
-    
-    showInfo("Test Result", formattedResult);
   }
   catch (e) { 
+    showTestDialog('Provider Test', `<div style="color: #f44336;">❌ ${esc(e.message)}</div>`, 'error');
     toast(e.message, "error"); 
   }
   finally {
@@ -2431,49 +3008,477 @@ async function sessExport() {
 
 LOADERS.sessions = () => loadSessions();
 
-// --- OAuth Connectors + MCP -------------------------------------------------
+// --- Connectors (OAuth + MCP) -----------------------------------------------
 
 let OC_EDIT_ID = null;
+let CURRENT_CONNECTOR_TYPE = null;
 
-async function ocConnectors() {
-  const f = $("oc-agent-filter").value.trim();
-  const rows = await api("GET", f ? `/connectors?agent_id=${encodeURIComponent(f)}` : "/connectors");
-  $("oc-body").innerHTML = rows.map(c => `
-      <tr>
-        <td>${esc(c.id)}</td>
-        <td class="muted">${c.agent_id == null ? "global" : esc(String(c.agent_id))}</td>
-        <td>${esc(c.display_name || "")}</td>
-        <td class="muted">${esc(c.protocol || "")}</td>
-        <td><span class="pill ${c.enabled ? "active" : "blocked"}">${c.enabled ? "on" : "off"}</span></td>
-        <td class="actions">
-          <button class="small ghost" onclick="ocLifecycle('${esc(c.id)}')">Lifecycle</button>
-          ${IS_VIEWER ? "" : `<button class="small ghost" onclick="ocOpenEdit('${esc(c.id)}')">Edit</button>`}
-        </td>
-      </tr>`).join("") || `<tr><td colspan="6" class="muted">No connectors.</td></tr>`;
+function switchConnectorTab(tab) {
+  CONN_TAB = tab;
+  // Update tab buttons
+  document.querySelectorAll('.conn-tab').forEach(t => t.classList.remove('active'));
+  $(`conn-tab-${tab}`).classList.add('active');
+  
+  // Show/hide content
+  document.querySelectorAll('.conn-content').forEach(c => c.classList.add('hidden'));
+  $(`conn-content-${tab}`).classList.remove('hidden');
+  
+  // Load data
+  if (tab === 'all') loadAllConnectors();
+  else if (tab === 'mcp') loadMcpConnectors();
+  else if (tab === 'oauth') loadOauthConnectors();
 }
+
+function mcpCardHtml(s) {
+  const sid = esc(s.id || s.server_id);
+  const enabled = s.enabled === undefined ? true : !!s.enabled;
+  const actions = IS_VIEWER ? '' : `
+        <button class="small ghost" onclick="event.stopPropagation(); mcpOpenEdit('${sid}')">Edit</button>
+        <button class="small ghost" onclick="event.stopPropagation(); mcpToggle('${sid}', ${enabled ? 'false' : 'true'})">${enabled ? 'Disable' : 'Enable'}</button>
+        <button class="small danger" onclick="event.stopPropagation(); mcpDelete('${sid}')">Delete</button>`;
+  return `
+      <div class="connector-card ${enabled ? '' : 'disabled'}" onclick="showConnectorDetails('mcp', '${sid}')">
+        <div class="connector-status ${enabled ? 'active' : 'inactive'}"></div>
+        <div class="connector-icon mcp">🔌</div>
+        <div class="connector-title">${esc(s.name || s.id || s.server_id)}</div>
+        <div class="connector-desc">MCP Server${enabled ? '' : ' · disabled'}</div>
+        <div class="connector-footer">
+          <span class="connector-tools">${esc(s.transport || '')}</span>
+          <div class="card-actions">
+            <button class="small ghost" onclick="event.stopPropagation(); testMcpServer('${sid}')">Test</button>${actions}
+          </div>
+        </div>
+      </div>`;
+}
+
+function oauthCardHtml(c) {
+  const cid = esc(c.id);
+  const enabled = c.enabled === undefined ? true : !!c.enabled;
+  const actions = IS_VIEWER ? '' : `
+        <button class="small ghost" onclick="event.stopPropagation(); ocOpenEdit('${cid}')">Edit</button>
+        <button class="small ghost" onclick="event.stopPropagation(); ocToggle('${cid}', ${enabled ? 'false' : 'true'})">${enabled ? 'Disable' : 'Enable'}</button>
+        <button class="small danger" onclick="event.stopPropagation(); ocDelete('${cid}')">Delete</button>`;
+  return `
+      <div class="connector-card ${enabled ? '' : 'disabled'}" onclick="showConnectorDetails('oauth', '${cid}')">
+        <div class="connector-status ${enabled ? 'active' : 'inactive'}"></div>
+        <div class="connector-icon oauth">🔐</div>
+        <div class="connector-title">${esc(c.display_name || c.id)}</div>
+        <div class="connector-desc">OAuth 2.0 Connector${enabled ? '' : ' · disabled'}</div>
+        <div class="connector-footer">
+          <span class="connector-tools">${c.agent_id ? `Agent: ${c.agent_id}` : 'Global'}</span>
+          <div class="card-actions">
+            <button class="small ghost" onclick="event.stopPropagation(); testOAuthConnector('${cid}')">Test</button>${actions}
+          </div>
+        </div>
+      </div>`;
+}
+
+async function loadAllConnectors() {
+  const [oauth, mcp] = await Promise.all([
+    api("GET", "/connectors").catch(() => []),
+    api("GET", "/mcp/servers").catch(() => [])
+  ]);
+  const allCards = [...oauth.map(oauthCardHtml), ...mcp.map(mcpCardHtml)];
+  $('connector-grid').innerHTML = allCards.join('') || '<div class="muted">No connectors configured.</div>';
+}
+
+async function loadMcpConnectors() {
+  const servers = await api("GET", "/mcp/servers").catch(() => []);
+  $('mcp-grid').innerHTML = servers.map(mcpCardHtml).join('')
+    || '<div class="muted">No MCP servers configured.</div>';
+}
+
+async function loadOauthConnectors() {
+  const connectors = await api("GET", "/connectors").catch(() => []);
+  $('oauth-grid').innerHTML = connectors.map(oauthCardHtml).join('')
+    || '<div class="muted">No OAuth connectors configured.</div>';
+}
+
+let CONN_TAB = 'all';
+function reloadConnectorCards() {
+  if (CONN_TAB === 'mcp') return loadMcpConnectors();
+  if (CONN_TAB === 'oauth') return loadOauthConnectors();
+  return loadAllConnectors();
+}
+
+async function showConnectorDetails(type, id) {
+  $('conn-details-title').textContent = `${type === 'mcp' ? 'MCP Server' : 'OAuth Connector'}: ${id}`;
+  $('conn-details-content').innerHTML = '<div class="muted">Loading...</div>';
+  $('connector-details').classList.remove('hidden');
+  
+  try {
+    if (type === 'mcp') {
+      $('conn-details-content').innerHTML =
+        '<div class="muted"><span class="spin">⏳</span> Connecting and listing tools…</div>';
+      const r = await api("GET", `/mcp/servers/${encodeURIComponent(id)}/tools`);
+      const header = r.connected
+        ? `<div class="result-ok">✅ Connected · ${r.tools.length} tool${r.tools.length === 1 ? '' : 's'}</div>`
+        : `<div class="result-err">❌ ${esc(r.error || 'Not connected')}</div>`;
+      $('conn-details-content').innerHTML = `
+        <h4>Tools</h4>
+        ${header}
+        ${mcpToolListHtml(r.tools)}
+        ${IS_VIEWER ? '' : `
+          <div style="margin-top:12px; display:flex; gap:8px;">
+            <button class="ghost" onclick="mcpOpenEdit('${esc(id)}')">Edit</button>
+            <button class="ghost" onclick="showConnectorDetails('mcp', '${esc(id)}')">Refresh</button>
+          </div>
+        `}
+      `;
+    } else {
+      const lifecycle = await api("GET", `/connectors/${encodeURIComponent(id)}/lifecycle`);
+      $('conn-details-content').innerHTML = `
+        <h4>Lifecycle</h4>
+        <pre style="white-space: pre-wrap;">${JSON.stringify(lifecycle, null, 2)}</pre>
+        ${IS_VIEWER ? '' : `
+          <button class="ghost" onclick="ocOpenEdit('${esc(id)}')">Edit</button>
+        `}
+      `;
+    }
+  } catch (e) {
+    $('conn-details-content').innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  }
+}
+
+function closeConnectorDetails() {
+  $('connector-details').classList.add('hidden');
+}
+
+function selectConnectorType(type) {
+  // Update selection UI from the clicked card, then build the form.
+  document.querySelectorAll('.conn-type-card').forEach(card => card.classList.remove('selected'));
+  if (typeof event !== 'undefined' && event && event.currentTarget) {
+    event.currentTarget.classList.add('selected');
+  }
+  selectConnectorTypeDirect(type);
+}
+
+function buildConnectorForm(type) {
+  if (type === 'mcp') {
+    const mcpId = genId();
+    $('oc-modal-title').textContent = 'Add MCP Server';
+    $('connector-form-container').innerHTML = `
+      <form style="display:flex; flex-direction:column; gap:12px;" onsubmit="saveMcpConnector(); return false;">
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Server ID</span>
+          <input id="mcp-id" value="${mcpId}" readonly style="background: var(--hover); width: 100%;">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Display Name</span>
+          <input id="mcp-name" placeholder="My MCP Server" autocomplete="off" style="width: 100%;">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Description</span>
+          <input id="mcp-desc" placeholder="Optional description" autocomplete="off" style="width: 100%;">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Transport</span>
+          <select id="mcp-transport" onchange="updateMcpFields()" style="width: 100%;">
+            <option value="stdio">Standard I/O (Local Process)</option>
+            <option value="http">HTTP</option>
+            <option value="websocket">WebSocket</option>
+          </select>
+        </label>
+        <div id="mcp-stdio-fields">
+          <label>
+            <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Command</span>
+            <input id="mcp-command" placeholder="npx @modelcontextprotocol/server-everything" autocomplete="off" style="width: 100%;">
+          </label>
+          <label>
+            <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Arguments (optional)</span>
+            <input id="mcp-args" placeholder="--verbose --config /path/to/config" autocomplete="off" style="width: 100%;">
+          </label>
+          <label>
+            <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Environment Variables (optional)</span>
+            <textarea id="mcp-env" placeholder="KEY1=value1&#10;KEY2=value2" style="width: 100%; min-height:60px; font-family:monospace; font-size:12px;"></textarea>
+          </label>
+        </div>
+        <div id="mcp-http-fields" class="hidden">
+          <label>
+            <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">URL</span>
+            <input id="mcp-url" placeholder="http://localhost:3000/mcp" autocomplete="off" style="width: 100%;">
+          </label>
+          <label>
+            <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Headers (optional)</span>
+            <textarea id="mcp-headers" placeholder="Authorization: Bearer token&#10;X-Custom-Header: value" style="width: 100%; min-height:60px; font-family:monospace; font-size:12px;"></textarea>
+          </label>
+        </div>
+        <div id="mcp-ws-fields" class="hidden">
+          <label>
+            <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">WebSocket URL</span>
+            <input id="mcp-ws-url" placeholder="ws://localhost:3000/mcp" autocomplete="off" style="width: 100%;">
+          </label>
+          <label>
+            <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Subprotocols (optional)</span>
+            <input id="mcp-subprotocols" placeholder="mcp-v1, custom-protocol" autocomplete="off" style="width: 100%;">
+          </label>
+        </div>
+        <label style="display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="mcp-enabled" checked>
+          <span>Enable immediately</span>
+        </label>
+        <div id="mcp-err" class="err"></div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px;">
+          <button type="button" class="ghost" onclick="ocCloseModal()">Cancel</button>
+          <button type="button" id="mcp-test-btn" onclick="testMcpConfigInModal()">Test Connection</button>
+          <button type="submit" class="primary">Add MCP Server</button>
+        </div>
+        <div id="mcp-test-result" class="test-result hidden"></div>
+      </form>
+    `;
+  } else {
+    $('oc-modal-title').textContent = 'Add OAuth Connector';
+    const connId = genId();
+    $('connector-form-container').innerHTML = `
+      <form style="display:flex; flex-direction:column; gap:12px;" onsubmit="ocSave(); return false;">
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Connector ID</span>
+          <input id="oc-id" value="${connId}" readonly style="background: var(--hover);">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Display Name</span>
+          <input id="oc-name" placeholder="GitHub API" autocomplete="off">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Authorization URL</span>
+          <input id="oc-auth-url" placeholder="https://github.com/login/oauth/authorize" autocomplete="off">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Token URL</span>
+          <input id="oc-token-url" placeholder="https://github.com/login/oauth/access_token" autocomplete="off">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Client ID</span>
+          <input id="oc-client-id" placeholder="your-client-id" autocomplete="off">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Client Secret</span>
+          <input id="oc-client-secret" type="password" placeholder="your-client-secret" autocomplete="off">
+        </label>
+        <label>
+          <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Scopes</span>
+          <input id="oc-scopes" placeholder="repo user (space separated)" autocomplete="off">
+        </label>
+        <label style="display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="oc-enabled" checked>
+          <span>Enable immediately</span>
+        </label>
+        <div id="oc-err" class="err"></div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px;">
+          <button type="button" class="ghost" onclick="ocCloseModal()">Cancel</button>
+          <button type="button" onclick="testOAuthConfigInModal()">Test Connection</button>
+          <button type="submit" class="primary">Add OAuth Connector</button>
+        </div>
+      </form>
+    `;
+  }
+}
+
+function updateMcpFields() {
+  const transport = $('mcp-transport').value;
+  
+  // Hide all transport-specific fields first
+  $('mcp-stdio-fields').classList.add('hidden');
+  $('mcp-http-fields').classList.add('hidden');
+  if ($('mcp-ws-fields')) $('mcp-ws-fields').classList.add('hidden');
+  
+  // Show relevant fields
+  if (transport === 'stdio') {
+    $('mcp-stdio-fields').classList.remove('hidden');
+  } else if (transport === 'http') {
+    $('mcp-http-fields').classList.remove('hidden');
+  } else if (transport === 'websocket') {
+    if ($('mcp-ws-fields')) $('mcp-ws-fields').classList.remove('hidden');
+  }
+}
+
+function buildMcpConfigFromForm() {
+  const transport = $('mcp-transport').value;
+  const config = {
+    id: $('mcp-id').value.trim(),
+    name: $('mcp-name').value.trim(),
+    description: $('mcp-desc').value.trim(),
+    transport,
+    enabled: $('mcp-enabled').checked
+  };
+
+  if (transport === 'stdio') {
+    config.command = $('mcp-command').value.trim();
+    const args = $('mcp-args').value.trim();
+    if (args) config.args = args.split(/\s+/);
+    const envText = $('mcp-env').value.trim();
+    if (envText) {
+      const env = {};
+      envText.split('\n').forEach(line => {
+        const [key, ...valueParts] = line.split('=');
+        if (key) env[key.trim()] = valueParts.join('=').trim();
+      });
+      if (Object.keys(env).length) config.env = env;
+    }
+  } else if (transport === 'http') {
+    config.url = $('mcp-url').value.trim();
+    const headersText = $('mcp-headers').value.trim();
+    if (headersText) {
+      const headers = {};
+      headersText.split('\n').forEach(line => {
+        const [key, ...valueParts] = line.split(':');
+        if (key) headers[key.trim()] = valueParts.join(':').trim();
+      });
+      if (Object.keys(headers).length) config.headers = headers;
+    }
+  } else if (transport === 'websocket') {
+    config.url = $('mcp-ws-url').value.trim();
+    const subprotocols = $('mcp-subprotocols').value.trim();
+    if (subprotocols) {
+      config.subprotocols = subprotocols.split(',').map(s => s.trim()).filter(Boolean);
+    }
+  }
+  return config;
+}
+
+async function saveMcpConnector() {
+  $('mcp-err').textContent = '';
+  const config = buildMcpConfigFromForm();
+  try {
+    if (MCP_EDIT_ID) {
+      // server_id is immutable; the rest of the config is editable.
+      const { id, name, description, ...patch } = config;
+      await api("PUT", `/mcp/servers/${encodeURIComponent(MCP_EDIT_ID)}`, patch);
+    } else {
+      await api("POST", "/mcp/servers", config);
+    }
+    ocCloseModal();
+    reloadConnectorCards();
+  } catch (e) {
+    $('mcp-err').textContent = e.message;
+  }
+}
+
+let MCP_EDIT_ID = null;
+
+async function mcpOpenEdit(id) {
+  MCP_EDIT_ID = id;
+  const servers = await api("GET", "/mcp/servers").catch(() => []);
+  const s = servers.find(x => (x.id || x.server_id) === id) || {};
+  selectConnectorTypeDirect('mcp');
+  $('oc-modal-title').textContent = `Edit MCP Server: ${id}`;
+  $('mcp-id').value = id;
+  $('mcp-transport').value = s.transport || 'http';
+  updateMcpFields();
+  if (s.url) $('mcp-url') && ($('mcp-url').value = s.url);
+  if (s.command) $('mcp-command') && ($('mcp-command').value = s.command);
+  if (s.args && $('mcp-args')) $('mcp-args').value = (s.args || []).join(' ');
+  if ($('mcp-enabled')) $('mcp-enabled').checked = s.enabled !== false;
+  const submit = document.querySelector('#connector-form-container button[type="submit"]');
+  if (submit) submit.textContent = 'Save Changes';
+  $('oc-modal').classList.remove('hidden');
+}
+
+// Build the MCP form without relying on a click event (for edit prefill).
+function selectConnectorTypeDirect(type) {
+  CURRENT_CONNECTOR_TYPE = type;
+  document.querySelectorAll('.conn-type-card').forEach(card => card.classList.remove('selected'));
+  $('conn-type-selector').classList.add('hidden');
+  buildConnectorForm(type);
+}
+
+async function mcpToggle(id, enable) {
+  try {
+    await api("PUT", `/mcp/servers/${encodeURIComponent(id)}`, { enabled: enable });
+    reloadConnectorCards();
+  } catch (e) { toast(e.message, "error"); }
+}
+
+async function mcpDelete(id) {
+  if (!await confirmDialog(`Delete MCP server "${id}"? This cannot be undone.`)) return;
+  try {
+    await api("DELETE", `/mcp/servers/${encodeURIComponent(id)}`);
+    reloadConnectorCards();
+  } catch (e) { toast(e.message, "error"); }
+}
+
+async function ocToggle(id, enable) {
+  try {
+    await api("PUT", `/connectors/${encodeURIComponent(id)}`, { enabled: enable });
+    reloadConnectorCards();
+  } catch (e) { toast(e.message, "error"); }
+}
+
+async function ocDelete(id) {
+  if (!await confirmDialog(`Delete OAuth connector "${id}"? This cannot be undone.`)) return;
+  try {
+    await api("DELETE", `/connectors/${encodeURIComponent(id)}`);
+    reloadConnectorCards();
+  } catch (e) { toast(e.message, "error"); }
+}
+
 function ocOpenCreate() {
   OC_EDIT_ID = null;
-  $("oc-modal-title").textContent = "Add OAuth connector";
-  $("oc-err").textContent = "";
-  for (const id of ["oc-id", "oc-name", "oc-auth-url", "oc-token-url", "oc-client-id", "oc-client-secret", "oc-scopes"]) $(id).value = "";
-  $("oc-id").value = genId(); $("oc-enabled").checked = true;
+  MCP_EDIT_ID = null;
+  CURRENT_CONNECTOR_TYPE = null;
+  $("oc-modal-title").textContent = "Add Connector";
+  
+  // Reset UI
+  document.querySelectorAll('.conn-type-card').forEach(card => card.classList.remove('selected'));
+  
+  // Show type selector, clear form container
+  $('conn-type-selector').classList.remove('hidden');
+  $('connector-form-container').innerHTML = '';
+  
   $("oc-modal").classList.remove("hidden");
 }
 async function ocOpenEdit(id) {
   OC_EDIT_ID = id;
-  $("oc-modal-title").textContent = "Edit connector: " + id;
-  $("oc-err").textContent = "";
+  $("oc-modal-title").textContent = "Edit OAuth Connector";
+  
   const rows = await api("GET", "/connectors");
   const c = rows.find(r => r.id === id) || {};
   const cfg = c.oauth_config || {};
-  $("oc-id").value = id; $("oc-id").disabled = true;
-  $("oc-name").value = c.display_name || "";
-  $("oc-auth-url").value = cfg.authorization_url || "";
-  $("oc-token-url").value = cfg.token_url || "";
-  $("oc-client-id").value = cfg.client_id || "";
-  $("oc-client-secret").value = "";  // never prefill secret
-  $("oc-scopes").value = (cfg.scopes || []).join ? (cfg.scopes || []).join(" ") : (cfg.scopes || "");
-  $("oc-enabled").checked = c.enabled !== false;
+  
+  // Hide type selector, show OAuth form
+  $('conn-type-selector').classList.add('hidden');
+  $('connector-form-container').innerHTML = `
+    <form style="display:flex; flex-direction:column; gap:12px;" onsubmit="ocSave(); return false;">
+      <label>
+        <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Connector ID</span>
+        <input id="oc-id" value="${id}" readonly style="background: var(--hover);">
+      </label>
+      <label>
+        <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Display Name</span>
+        <input id="oc-name" value="${esc(c.display_name || '')}" placeholder="GitHub API" autocomplete="off">
+      </label>
+      <label>
+        <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Authorization URL</span>
+        <input id="oc-auth-url" value="${esc(cfg.authorization_url || '')}" placeholder="https://github.com/login/oauth/authorize" autocomplete="off">
+      </label>
+      <label>
+        <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Token URL</span>
+        <input id="oc-token-url" value="${esc(cfg.token_url || '')}" placeholder="https://github.com/login/oauth/access_token" autocomplete="off">
+      </label>
+      <label>
+        <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Client ID</span>
+        <input id="oc-client-id" value="${esc(cfg.client_id || '')}" placeholder="your-client-id" autocomplete="off">
+      </label>
+      <label>
+        <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Client Secret</span>
+        <input id="oc-client-secret" type="password" placeholder="Leave blank to keep current" autocomplete="off">
+      </label>
+      <label>
+        <span style="font-size:12px; color:var(--muted); display:block; margin-bottom:4px;">Scopes</span>
+        <input id="oc-scopes" value="${esc((cfg.scopes || []).join ? (cfg.scopes || []).join(' ') : (cfg.scopes || ''))}" placeholder="repo user (space separated)" autocomplete="off">
+      </label>
+      <label style="display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" id="oc-enabled" ${c.enabled !== false ? 'checked' : ''}>
+        <span>Enabled</span>
+      </label>
+      <div id="oc-err" class="err"></div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px;">
+        <button type="button" class="ghost" onclick="ocCloseModal()">Cancel</button>
+        <button type="submit" class="primary">Save Changes</button>
+      </div>
+    </form>
+  `;
+  
   $("oc-modal").classList.remove("hidden");
 }
 function ocCloseModal() { $("oc-modal").classList.add("hidden"); }
@@ -2495,13 +3500,13 @@ async function ocSave() {
 async function ocCreate(id) {
   $("oc-err").textContent = "";
   const body = { id, display_name: $("oc-name").value.trim(), protocol: "oauth2", oauth_config: ocOauthConfig(), enabled: $("oc-enabled").checked };
-  try { await api("POST", "/connectors", body); ocCloseModal(); ocConnectors(); }
+  try { await api("POST", "/connectors", body); ocCloseModal(); reloadConnectorCards(); }
   catch (e) { $("oc-err").textContent = e.message; }
 }
 async function ocEdit(id) {
   $("oc-err").textContent = "";
   const body = { display_name: $("oc-name").value.trim(), oauth_config: ocOauthConfig(), enabled: $("oc-enabled").checked };
-  try { await api("PUT", `/connectors/${encodeURIComponent(id)}`, body); ocCloseModal(); ocConnectors(); }
+  try { await api("PUT", `/connectors/${encodeURIComponent(id)}`, body); ocCloseModal(); reloadConnectorCards(); }
   catch (e) { $("oc-err").textContent = e.message; }
 }
 async function ocLifecycle(id) {
@@ -2560,7 +3565,181 @@ async function mcpReconnect(id) {
   catch (e) { $("mcp-out").textContent = e.message; }
 }
 
-LOADERS.oauth = () => { ocConnectors(); ocGrants(); mcpServers(); };
+async function testMcpServer(id) {
+  try {
+    // Show testing dialog
+    showTestDialog('MCP Server Test', 'Testing connection...', 'loading');
+    
+    const r = await api("POST", `/mcp/servers/${encodeURIComponent(id)}/test`);
+    
+    if (r.success) {
+      const details = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div><strong>Status:</strong> <span style="color: #4CAF50;">✅ Connected</span></div>
+          <div><strong>Transport:</strong> ${esc(r.transport || 'Unknown')}</div>
+          <div><strong>Tools Available:</strong> ${r.tools_count || 0}</div>
+          ${r.message ? `<div><strong>Details:</strong> ${esc(r.message)}</div>` : ''}
+        </div>
+      `;
+      showTestDialog('MCP Server Test', details, 'success');
+      toast(`✅ MCP server is connected`, "success");
+    } else {
+      const details = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div><strong>Status:</strong> <span style="color: #f44336;">❌ Failed</span></div>
+          <div><strong>Error:</strong> ${esc(r.error || 'Unknown error')}</div>
+          ${r.server_id ? `<div><strong>Server ID:</strong> ${esc(r.server_id)}</div>` : ''}
+        </div>
+      `;
+      showTestDialog('MCP Server Test', details, 'error');
+      toast(`❌ MCP server test failed`, "error");
+    }
+  } catch (e) {
+    showTestDialog('MCP Server Test', `<div style="color: #f44336;">❌ ${esc(e.message)}</div>`, 'error');
+    toast(`❌ MCP server test failed`, "error");
+  }
+}
+
+async function testOAuthConnector(id) {
+  try {
+    // Show testing dialog
+    showTestDialog('OAuth Connector Test', 'Testing authentication...', 'loading');
+    
+    const r = await api("POST", `/connectors/${encodeURIComponent(id)}/test`);
+    
+    if (r.success) {
+      const details = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div><strong>Status:</strong> <span style="color: #4CAF50;">✅ Working</span></div>
+          <div><strong>Connector:</strong> ${esc(r.display_name || id)}</div>
+          <div><strong>Enabled:</strong> ${r.enabled ? 'Yes' : 'No'}</div>
+          <div><strong>Token Valid:</strong> ${r.token_valid ? '✅ Yes' : '❌ No'}</div>
+          ${r.active_grants ? `<div><strong>Active Grants:</strong> ${r.active_grants}</div>` : ''}
+          ${r.last_refresh ? `<div><strong>Last Refresh:</strong> ${new Date(r.last_refresh).toLocaleString()}</div>` : ''}
+        </div>
+      `;
+      showTestDialog('OAuth Connector Test', details, 'success');
+      toast(`✅ OAuth connector is working`, "success");
+    } else {
+      const details = `
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div><strong>Status:</strong> <span style="color: #f44336;">❌ Failed</span></div>
+          <div><strong>Error:</strong> ${esc(r.error || 'Unknown error')}</div>
+          ${r.connector_id ? `<div><strong>Connector ID:</strong> ${esc(r.connector_id)}</div>` : ''}
+        </div>
+      `;
+      showTestDialog('OAuth Connector Test', details, 'error');
+      toast(`❌ OAuth test failed`, "error");
+    }
+  } catch (e) {
+    showTestDialog('OAuth Connector Test', `<div style="color: #f44336;">❌ ${esc(e.message)}</div>`, 'error');
+    toast(`❌ OAuth test failed`, "error");
+  }
+}
+
+function mcpToolListHtml(tools) {
+  if (!tools || !tools.length) return '<div class="muted" style="margin-top:6px;">No tools exposed.</div>';
+  return `<div class="tool-list">` + tools.map(t => `
+    <div class="tool-item">
+      <code>${esc(t.name)}</code>
+      ${t.description ? `<span class="tool-desc">${esc(t.description)}</span>` : ''}
+    </div>`).join('') + `</div>`;
+}
+
+function mcpResultHtml(r) {
+  if (r && r.connected) {
+    const n = r.tools_count != null ? r.tools_count : (r.tools ? r.tools.length : 0);
+    return `<div class="result-ok">✅ Connected · ${n} tool${n === 1 ? '' : 's'}</div>`
+      + mcpToolListHtml(r.tools);
+  }
+  return `<div class="result-err">❌ ${esc((r && r.error) || 'Connection failed')}</div>`;
+}
+
+async function testMcpConfigInModal() {
+  const config = buildMcpConfigFromForm();
+  const needsUrl = config.transport === 'http' || config.transport === 'websocket';
+  if (needsUrl && !config.url) { toast("❌ URL is required", "error"); return; }
+  if (config.transport === 'stdio' && !config.command) {
+    toast("❌ Command is required for stdio transport", "error"); return;
+  }
+
+  const btn = $('mcp-test-btn');
+  const panel = $('mcp-test-result');
+  const origLabel = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Testing…'; }
+  if (panel) {
+    panel.classList.remove('hidden');
+    panel.innerHTML = '<div class="muted"><span class="spin">⏳</span> Connecting…</div>';
+  }
+
+  // Persist the current form first (server_id is immutable on edit), then run the real
+  // handshake against the saved server — editing tests the actual server, no duplicate.
+  try {
+    let testId;
+    if (MCP_EDIT_ID) {
+      const { id, name, description, ...patch } = config;
+      await api("PUT", `/mcp/servers/${encodeURIComponent(MCP_EDIT_ID)}`, patch);
+      testId = MCP_EDIT_ID;
+    } else {
+      await api("POST", "/mcp/servers", config);
+      testId = config.id;
+      reloadConnectorCards();
+    }
+    const r = await api("POST", `/mcp/servers/${encodeURIComponent(testId)}/test`);
+    if (panel) panel.innerHTML = mcpResultHtml(r);
+  } catch (e) {
+    if (panel) panel.innerHTML = `<div class="result-err">❌ ${esc(e.message)}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origLabel || 'Test Connection'; }
+  }
+}
+
+async function testOAuthConfigInModal() {
+  // Build config from form
+  const config = {
+    id: $('oc-id').value.trim() || 'test-oauth-temp',
+    display_name: $('oc-name').value.trim(),
+    enabled: true,
+    oauth_config: {
+      auth_url: $('oc-auth-url').value.trim(),
+      token_url: $('oc-token-url').value.trim(),
+      client_id: $('oc-client-id').value.trim(),
+      client_secret: $('oc-client-secret').value.trim(),
+      scopes: $('oc-scopes').value.trim().split(/\s+/).filter(Boolean)
+    }
+  };
+  
+  // Validate required fields
+  if (!config.oauth_config.auth_url || !config.oauth_config.token_url) {
+    toast("❌ Authorization URL and Token URL are required", "error");
+    return;
+  }
+  
+  if (!config.oauth_config.client_id || !config.oauth_config.client_secret) {
+    toast("❌ Client ID and Client Secret are required", "error");
+    return;
+  }
+  
+  try {
+    toast("Testing OAuth configuration...", "info");
+    
+    // First save the config temporarily
+    await api("POST", "/connectors", config);
+    
+    // Then test it
+    const r = await api("POST", `/connectors/${encodeURIComponent(config.id)}/test`);
+    
+    if (r.success) {
+      toast(`✅ OAuth configuration valid! Connector is ${r.enabled ? 'enabled' : 'disabled'}.`, "success");
+    } else {
+      toast(`❌ OAuth test failed: ${r.error || 'Unknown error'}`, "error");
+    }
+  } catch (e) {
+    toast(`❌ OAuth test failed: ${e.message}`, "error");
+  }
+}
+
+LOADERS.oauth = () => { loadAllConnectors(); };
 
 async function loadKb() {
   if (!$("nkb-id").value) $("nkb-id").value = genId();
