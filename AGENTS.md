@@ -106,7 +106,10 @@ pytest 配置为 `asyncio_mode = auto`，async 测试无需 `@pytest.mark.asynci
 - `tests/unit/`：单模块行为，mock LLM、数据库、HTTP、sandbox 等外部依赖，作为新增单元测试默认位置。
   unit 不得使用 FastAPI `TestClient` / app lifespan，不得运行 Alembic migration，不得导入
   `tests.integration.*` helper，也不得验证真实 SQLite schema lifecycle / DB runtime orchestration。
-  `tmp_path` 可用于纯解析、配置路径、序列化和可注入文件边界。
+  unit 不得导入 `sqlite3`、monkeypatch `DB_PATH` 后创建真实 DB file、调用生产 `_init_db()`，也不得用
+  `DATABASE_URL=sqlite:///...` 或 `create_database("sqlite:///...")` 验证 store/runtime 持久化。
+  `tmp_path` 只可用于纯解析、配置路径、序列化和可注入文件边界；一旦用于真实 DB file、schema、CRUD 或 store/runtime 协作，
+  测试必须放在 integration。只读 legacy shim / public API / path constant 兼容断言可留在 unit。
 - `tests/integration/`：多模块协作、SQLite/Alembic/FastAPI、observability trace / usage / logging 等需要真实本地组件的测试。
   FastAPI `TestClient`、Alembic migration、migrated SQLite tables、store/runtime wiring 都属于 integration。
 - `tests/e2e/`：启动服务或走 CLI/HTTP/IM 完整链路的端到端测试；默认不进入 PR 门禁，真实服务 smoke 需显式开启。
@@ -117,7 +120,7 @@ TDD 红绿循环优先运行最近相关分层命令，例如 `uv run pytest tes
 `uv run pytest tests/integration -x -q`；收尾必须运行 `uv run pytest -x -q`。
 涉及测试归位、测试层规则或新增 unit 测试时，收尾同时运行 `uv run python scripts/check_test_layers.py`。
 
-测试必须隔离外部依赖：LLM 调用 patch `get_client_and_config`，数据库测试用 `tmp_path` 或统一 DB fixture 隔离（legacy store 迁移前可 monkeypatch `DB_PATH`），MCP / sandbox / 外部 HTTP 用 `respx` 或 `unittest.mock`。每个测试函数只测一个行为；`permission_gate` 测试使用短超时：`PermissionGate(medium_timeout=0.1)`。
+测试必须隔离外部依赖：LLM 调用 patch `get_client_and_config`，数据库测试放在 integration 并用 `tmp_path` 或统一 DB fixture 隔离，MCP / sandbox / 外部 HTTP 用 `respx` 或 `unittest.mock`。每个测试函数只测一个行为；`permission_gate` 测试使用短超时：`PermissionGate(medium_timeout=0.1)`。
 
 ## Gotchas
 

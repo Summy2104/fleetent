@@ -31,7 +31,7 @@ test-e2e: ## Run end-to-end tests
 test-evaluation: ## Run evaluation tests
 	uv run pytest tests/evaluation
 
-test-layers: ## Check unit/integration test layer boundaries
+test-layers: ## Check unit/integration boundaries, including DB-backed unit tests
 	uv run python scripts/check_test_layers.py
 
 lint: ## Check code style with ruff
