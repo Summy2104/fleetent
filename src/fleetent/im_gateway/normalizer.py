@@ -31,6 +31,9 @@ class NormalizedMessage:
     # gateway). Empty = single-tenant/legacy. Namespaces the allowlist scope and the
     # session id so the same platform/channel under two owners never collides.
     owner_id: str = field(default="")
+    # Pre-resolved agent name (per-agent-slack-connector): set when the receiving
+    # connection already identifies the agent (Slack). Empty = resolve via the index.
+    agent_name: str = field(default="")
 
 
 def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> AgentFile | None:
@@ -143,8 +146,13 @@ async def route(msg: NormalizedMessage) -> None:
     async with session_mgr.session_lock(session_id):
         history = await session_mgr.load(session_id)
 
-        # Resolve agent config: channel → user → default → bare run
-        agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
+        # Resolve agent config. When the receiving connection already identifies the
+        # agent (per-agent-slack-connector stamps msg.agent_name), use it directly and
+        # skip channel→agent lookup; otherwise fall back to channel → user → default.
+        if msg.agent_name:
+            agent = agent_config.current().get(msg.agent_name)
+        else:
+            agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
         base_system = agent.system_prompt if agent else _SYSTEM
         allowed_tools = agent.allowed_tools if agent else None
         agent_features = agent.features if agent else None
