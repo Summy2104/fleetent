@@ -20,8 +20,8 @@
 
 ## 5. 其余配置型路径与 agent/cron/model 迁移
 
-- [ ] 5.1 Write failing tests：断言 `agent_config.AGENTS_DIR`、`cron_scheduler.LEGACY_CRON_CONFIG_PATH`、`model/router.ROUTES_PATH`、`platform/admin_cli/*`（`init_config` 目录列表、`agents._SETTINGS_YAML`）从 `paths.py` 派生
-- [ ] 5.2 Implement：迁移上述模块使测试转绿
+- [x] 5.1 Write failing tests：断言 `agent_config.AGENTS_DIR`、`cron_scheduler.LEGACY_CRON_CONFIG_PATH`、`model/router.ROUTES_PATH`、`platform/admin_cli/*`（`init_config` 目录列表、`agents._SETTINGS_YAML`）从 `paths.py` 派生
+- [x] 5.2 Implement：迁移上述模块使测试转绿
 
 ## 6. DATABASE_URL 旁路收编
 

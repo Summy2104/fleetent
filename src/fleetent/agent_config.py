@@ -16,12 +16,13 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from fleetent import paths
 from fleetent.config import McpServerSettings
 from fleetent.platform.config_validation import _flatten, _looks_inline_secret
 
 # Agents root directory. Module-level constant (injectable via monkeypatch per the
 # project's no-global-mutable-state rule); env override mirrors FLEETENT_SKILLS_DIR.
-AGENTS_DIR = Path("config/agents")
+AGENTS_DIR = paths.config_dir() / "agents"
 
 AGENT_FILE_NAME = "agent.yaml"
 

@@ -12,6 +12,8 @@ from typing import Any
 import yaml
 from openai import AsyncOpenAI, OpenAI
 
+from fleetent import paths
+
 # Reserved create() kwargs that params MUST NOT carry: they are passed as
 # explicit keyword args, so a same-named key in params would raise a duplicate
 # keyword TypeError (D3). Stripped during merge as a defensive guard.
@@ -114,7 +116,7 @@ DEFAULT_ROUTES: dict[str, RouteConfig] = {
 # Deployment-level routes file. Injectable module-level constant (no global
 # mutable state): tests monkeypatch this to an isolated tmp path. Missing file
 # is a normal state (built-in defaults are used); no hot reload.
-ROUTES_PATH: Path = Path("config/routes.yaml")
+ROUTES_PATH: Path = paths.config_dir() / "routes.yaml"
 
 # In-memory effective table; the merge base for _load_routes(). Tests that
 # mutate routing (monkeypatch.setitem) operate on this.

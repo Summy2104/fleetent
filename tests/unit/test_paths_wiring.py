@@ -12,30 +12,26 @@ from fleetent.tools import builtin_tools
 
 
 def test_constants_derive_from_paths() -> None:
-    assert eval_logger.TRACE_PATH == paths.data_dir() / "traces.jsonl"
-    assert builtin_tools.GENERATED_DIR == paths.data_dir() / "generated"
-    assert builtin_tools.UPLOADS_DIR == paths.data_dir() / "uploads"
-    assert sandbox_config.SETTINGS_PATH == paths.settings_yaml_path()
-    assert sandbox_enablement.SETTINGS_PATH == paths.settings_yaml_path()
+    assert paths.data_dir() / "traces.jsonl" == eval_logger.TRACE_PATH
+    assert paths.data_dir() / "generated" == builtin_tools.GENERATED_DIR
+    assert paths.data_dir() / "uploads" == builtin_tools.UPLOADS_DIR
+    assert paths.settings_yaml_path() == sandbox_config.SETTINGS_PATH
+    assert paths.settings_yaml_path() == sandbox_enablement.SETTINGS_PATH
 
 
-def test_fleetent_home_redirects_on_reload(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_fleetent_home_redirects_on_reload(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     home = tmp_path / "home"
     monkeypatch.setenv("FLEETENT_HOME", str(home))
     # eval_logger has no import side effects, so reloading is safe.
     reloaded = importlib.reload(eval_logger)
     try:
-        assert reloaded.TRACE_PATH == home / "data" / "traces.jsonl"
+        assert home / "data" / "traces.jsonl" == reloaded.TRACE_PATH
     finally:
         monkeypatch.delenv("FLEETENT_HOME", raising=False)
         importlib.reload(eval_logger)
 
 
-def test_module_constant_still_patchable(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_module_constant_still_patchable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     target = tmp_path / "isolated" / "traces.jsonl"
     monkeypatch.setattr(eval_logger, "TRACE_PATH", target)
-    assert eval_logger.TRACE_PATH == target
+    assert target == eval_logger.TRACE_PATH
