@@ -1,7 +1,7 @@
 ## 1. 中心路径解析器 paths.py
 
-- [ ] 1.1 Write failing tests：`tests/unit/test_paths.py` —— 断言解析优先级：`FLEETENT_HOME` 设置时 `config_dir()`/`data_dir()` 指向 `$FLEETENT_HOME/{config,data}`；未设且检测到仓库标记时指向 `./config`/`./data`；未设且无仓库标记时回退 `~/.fleetent/{config,data}`；env 优先于仓库本地。用 `monkeypatch.setenv` + 临时 CWD/HOME 隔离
-- [ ] 1.2 Implement：创建 `src/fleetent/paths.py`，实现 `config_dir()`/`data_dir()` 与 base 优先级解析（`FLEETENT_HOME` → repo marker（`pyproject.toml` 含 `name="fleetent"` 或 `./config`）→ `~/.fleetent`），并导出派生便捷路径（settings/db/sessions 等）使测试转绿
+- [x] 1.1 Write failing tests：`tests/unit/test_paths.py` —— 断言解析优先级：`FLEETENT_HOME` 设置时 `config_dir()`/`data_dir()` 指向 `$FLEETENT_HOME/{config,data}`；未设且检测到仓库标记时指向 `./config`/`./data`；未设且无仓库标记时回退 `~/.fleetent/{config,data}`；env 优先于仓库本地。用 `monkeypatch.setenv` + 临时 CWD/HOME 隔离
+- [x] 1.2 Implement：创建 `src/fleetent/paths.py`，实现 `config_dir()`/`data_dir()` 与 base 优先级解析（`FLEETENT_HOME` → repo marker（`pyproject.toml` 含 `name="fleetent"` 或 `./config`）→ `~/.fleetent`），并导出派生便捷路径（settings/db/sessions 等）使测试转绿
 
 ## 2. 低 blast-radius 调用方迁移
 
