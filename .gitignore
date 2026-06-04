@@ -14,6 +14,8 @@ data/logs/
 data/users/
 data/sessions/
 data/
+reports/
+.tmp/
 
 # Env
 .env

@@ -37,7 +37,7 @@ uv run python scripts/generate_pilot_verification_report.py
 | --- | --- | --- | --- |
 | Agent runtime / tooling | 部分完成 | [runtime-tooling-roadmap.md](runtime-tooling-roadmap.md) | Medium：核心执行链路已可用，但运行治理和工具/沙箱增强仍需分批收敛 |
 | Intelligence | 基础完成 | [intelligence-roadmap.md](intelligence-roadmap.md) | Medium：默认测试和 deterministic evaluation 已有，真实 LLM / embedding / rerank / SaaS smoke 仍需准生产验证 |
-| Observability / Deployment | 基础完成 | [observability-deployment-roadmap.md](observability-deployment-roadmap.md) | High：Go/No-Go 依赖诊断包、备份恢复、真实环境 smoke 和人工验收报告 |
+| Observability / Deployment | Go（local-as-server validated） | [observability-deployment-roadmap.md](observability-deployment-roadmap.md) | Low：部署、备份恢复、可观测和 diagnostics 已本机验证；sandbox 容器内 Docker 不可用交由 Runtime / Sandbox 验证 |
 | Platform / Governance / Channels | 部分完成 | [platform-channel-roadmap.md](platform-channel-roadmap.md) | Medium：Slack / Telegram / Webhook / scheduler / connector 可用性和权限边界需要结合真实部署复核 |
 
 ## 状态定义
