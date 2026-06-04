@@ -17,12 +17,15 @@ fleetent 是一个面向企业内网部署的轻量 Agent 平台。项目基于 
 ### 一键安装（开发者 / 单机）
 
 Linux / macOS / WSL2：脚本会 bootstrap uv + Python 3.12，用 `uv tool install` 把
-`fleetent`/`fleetent-admin`/`fleetent-tui` 装成全局命令，并把 config/data 固定在
-`FLEETENT_HOME`（默认 `~/.fleetent`，与工作目录解耦）。
+`fleetent`/`fleetent-admin`/`fleetent-tui` 装成全局命令，并在 `FLEETENT_HOME`
+（默认 `~/.fleetent`，与工作目录解耦）下铺设**扁平布局**：`agent.yaml` + `.env` + `data/`。
+部署的 agent 只读自己的 `agent.yaml`（从 `config/agent.yaml.example` 生成）。
 
 ```bash
 git clone <repo-url> && cd fleetent
 scripts/install.sh                 # 或 --dir PATH / --skip-db / --skip-config
+# 编辑 agent 配置与密钥：
+$EDITOR ~/.fleetent/agent.yaml ~/.fleetent/.env
 # 新开 shell 后（确保 ~/.local/bin 在 PATH）：
 fleetent "hello"
 ```

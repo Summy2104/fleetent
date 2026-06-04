@@ -43,7 +43,10 @@ agent.yaml 自包含 agent 核心能力：`system_prompt` / `model_overrides` / 
 
 ## 问题日志（Issues encountered）
 
-- *(实施中如遇问题，在此追加：问题、决策、依据。)*
+- **I1（关键发现）加载器均容忍文件缺失**：`settings.yaml`（Settings yaml source，现成测试 `test_settings_missing_yaml_file_uses_typed_defaults` 证明）、`mcp.yaml`（server lifespan existence-guarded）、`mcp.servers.yaml`（`load_mcp_server_settings` 缺失返回 `[]`）、sandbox config/enablement（缺失返回默认）。⇒ 部署 agent 无这些全局文件即跑默认，本就可用。
+- **I2 settings.yaml 仍托管 sandbox + intelligence 配置**：`integrations/sandbox/{config,enablement}.py` 读 `settings.yaml` 的 `sandbox:` 段；intelligence 也在 `Settings`。⇒ **决策：推迟「删加载器 + 收缩 Settings」**，与 sandbox/intelligence→agent.yaml 迁移一起（deferred）。change 2 只删被 seed 的全局模板，不动加载器。
+- **I3 .example 与 install/Docker/init_config 的 seed 路径耦合**：删全局 `.example` 会让 install.sh / `Dockerfile(COPY config/*.yaml.example)` / `init_config` 破窗。⇒ **决策：重排 1→3→2**。change 3 先改 install seed `agent.yaml`（扁平 home）、停拷全局文件；change 2 再删孤立模板 + 修 Dockerfile/init_config。
+- **I4 部署 home 扁平无 config/**：install.sh seed `$FLEETENT_HOME/{agent.yaml,.env}` + `data/`。新增 `config/agent.yaml.example`（核心字段、无 intelligence）。
 
 ## 待审核要点（供张洋最终 review）
 
