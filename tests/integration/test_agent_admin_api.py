@@ -389,8 +389,8 @@ def test_export_agent_yaml_unknown_404(client):
 def test_deploy_writes_agent_yaml(client, tmp_path, monkeypatch):
     import yaml as _yaml
 
-    agents_dir = tmp_path / "agents"
-    monkeypatch.setenv("FLEETENT_AGENTS_DIR", str(agents_dir))
+    home = tmp_path / "home"
+    monkeypatch.setenv("FLEETENT_HOME", str(home))
     agent_store.create_agent(
         "dep-bot", "You are dep-bot.", ["read_file"], plugins=["p1"],
         model_overrides={"default": {"provider": "anthropic", "model": "claude-opus-4-8"}},
@@ -398,7 +398,7 @@ def test_deploy_writes_agent_yaml(client, tmp_path, monkeypatch):
     token, _ = _session_for("admin")
     r = client.post("/admin/agents/dep-bot/deploy", headers=_hdr(token))
     assert r.status_code == 200, r.text
-    dest = agents_dir / "dep-bot" / "agent.yaml"
+    dest = home / "dep-bot" / "agent.yaml"
     assert dest.exists()
     assert r.json()["path"] == str(dest)
     doc = _yaml.safe_load(dest.read_text())

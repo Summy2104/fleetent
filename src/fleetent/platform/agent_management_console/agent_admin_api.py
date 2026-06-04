@@ -6,13 +6,12 @@ top of the agent management console, reusing the same Session auth + role guards
 lifecycle is owned by Alembic. This module never imports the agent loop.
 """
 
-import contextlib
 from typing import Any
 
 import yaml
 from fastapi import APIRouter, Body, Header, HTTPException
 
-from fleetent import agent_config, agent_store, auth, config, user_store
+from fleetent import agent_store, auth, config, paths, user_store
 from fleetent.governance import audit_log
 from fleetent.platform.connector_management import (
     agent_mcp_server_store,
@@ -136,22 +135,18 @@ def export_agent_yaml(name: str, authorization: str | None = Header(None)) -> di
 
 @router.post("/agents/{name}/deploy")
 def deploy_agent(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
-    """Write the agent.yaml into the runtime agents dir and re-scan so it goes live.
+    """Write (overwrite) the agent.yaml at ``<FLEETENT home>/<name>/agent.yaml``.
 
-    Target: ``<agents_dir>/<name>/agent.yaml`` (agents_dir resolves under the
-    FLEETENT home, e.g. ~/.fleetent/config/agents). Overwrites any existing file.
+    Target: ``~/.fleetent/<name>/agent.yaml`` (honors FLEETENT_HOME). Picking it up
+    into the runtime index is owned elsewhere; this just generates the file.
     """
     user = _require_admin(authorization)
     agent = _require_agent(name)
     if "/" in name or "\\" in name or name in (".", ".."):
         raise HTTPException(status_code=400, detail="invalid agent name")
-    dest = agent_config._resolve_agents_dir(None) / name / "agent.yaml"
+    dest = paths.base_dir() / name / "agent.yaml"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(_build_agent_yaml(agent), encoding="utf-8")
-    # Best-effort: refresh the in-memory index so the deployed agent is live now.
-    # A sibling bad agent.yaml must not fail the deploy.
-    with contextlib.suppress(Exception):
-        agent_config.scan()
     audit_log.write_audit(
         user.id, "agent.deploy", target_type="agent", target_id=name, detail={"path": str(dest)}
     )
