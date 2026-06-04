@@ -1180,7 +1180,24 @@
         </label>
         <textarea id="ag-system-prompt" placeholder="system prompt" rows="14" style="font-family:monospace;"></textarea>
         <input id="ag-allowed-tools" placeholder="allowed_tools (comma-separated, e.g. shell, github__*)" autocomplete="off">
-        <div id="ag-create-hint" class="muted" style="font-size:12px;">After creating, the detail panel opens to configure skills, connectors, knowledge bases and IM bindings.</div>
+        <div id="ag-bind-config">
+          <div class="muted" style="font-size:12px;">Configure bindings for the new agent (optional — all editable later).</div>
+          <h4 style="margin:14px 0 4px;">Skills</h4>
+          <div id="agm-skills" style="display:flex; flex-direction:column; gap:4px;"></div>
+          <h4 style="margin:14px 0 4px;">Connectors</h4>
+          <div class="sk-meta-row"><span class="muted">MCP servers</span></div>
+          <div id="agm-mcp" style="display:flex; flex-direction:column; gap:4px;"></div>
+          <div class="sk-meta-row" style="margin-top:8px;"><span class="muted">OAuth connectors</span></div>
+          <div id="agm-oauth" style="display:flex; flex-direction:column; gap:4px;"></div>
+          <h4 style="margin:14px 0 4px;">Knowledge bases</h4>
+          <div id="agm-kb" style="display:flex; flex-direction:column; gap:4px;"></div>
+          <h4 style="margin:14px 0 4px;">IM users (allowlist)</h4>
+          <input id="agm-user-filter" class="sk-search" style="margin:4px 0 6px;" placeholder="🔍  Filter users by name, email or id" oninput="agmFilterUsers()">
+          <div id="agm-users" style="display:flex; flex-direction:column; gap:4px;"></div>
+          <h4 style="margin:14px 0 4px;">Channels</h4>
+          <div id="agm-channels"></div>
+          <div class="row" style="margin-top:6px;"><input id="agm-ch-platform" placeholder="platform" style="max-width:120px;"><input id="agm-ch-id" placeholder="channel_id"><button type="button" class="small" onclick="agmAddChannel()">Add channel</button></div>
+        </div>
         <div id="ag-err" class="err"></div>
         <div class="row" style="justify-content:flex-end;">
           <button type="button" class="ghost" onclick="agCloseModal()">Cancel</button>
@@ -2429,11 +2446,57 @@ async function agCreate() {
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
   $("ag-template-row").style.display = "";
-  $("ag-create-hint").style.display = "";
+  $("ag-bind-config").style.display = "";
   await agLoadTemplateOptions();
+  await agLoadCreateBindings();
   $("ag-modal").dataset.mode = "create";
   $("ag-modal").classList.remove("hidden");
 }
+
+let AGM_CHANNELS = [];
+async function agLoadCreateBindings() {
+  AGM_CHANNELS = [];
+  $("agm-channels").innerHTML = "";
+  if ($("agm-user-filter")) $("agm-user-filter").value = "";
+  const [skills, mcp, connectors, kbs, users] = await Promise.all([
+    api("GET", "/skills").catch(() => []),
+    api("GET", "/mcp/servers").catch(() => []),
+    api("GET", "/connectors").catch(() => []),
+    api("GET", "/kb").catch(() => []),
+    api("GET", "/users").catch(() => []),
+  ]);
+  const box = (cls, val, label, q) =>
+    `<label class="row ${cls}" ${q != null ? `data-q="${esc(q.toLowerCase())}"` : ""}><input type="checkbox" value="${esc(val)}"> ${label}</label>`;
+  $("agm-skills").innerHTML = (skills || []).map(s => box("agm-skill", s.name, esc(s.name))).join("")
+    || `<div class="muted">No skills available.</div>`;
+  $("agm-mcp").innerHTML = (mcp || []).map(m => box("agm-mcp-item", m.id, esc(m.id))).join("")
+    || `<div class="muted">No MCP servers.</div>`;
+  $("agm-oauth").innerHTML = (connectors || []).map(c => box("agm-oauth-item", c.id, esc(c.display_name || c.id))).join("")
+    || `<div class="muted">No OAuth connectors.</div>`;
+  $("agm-kb").innerHTML = (kbs || []).map(k => box("agm-kb-item", k.kb_id, esc(k.kb_id) + (k.description ? ` <span class="muted">— ${esc(k.description)}</span>` : ""))).join("")
+    || `<div class="muted">No knowledge bases.</div>`;
+  $("agm-users").innerHTML = (users || []).map(u =>
+    box("agm-user-row", u.id, esc(u.name || u.email || u.id) + (u.name || u.email ? ` <span class="muted">(${esc(u.id)})</span>` : ""),
+      [u.id, u.name || "", u.email || ""].join(" "))).join("") || `<div class="muted">No users available.</div>`;
+}
+function agmFilterUsers() {
+  const q = ($("agm-user-filter").value || "").trim().toLowerCase();
+  for (const row of document.querySelectorAll("#agm-users .agm-user-row")) {
+    row.style.display = (!q || (row.dataset.q || "").includes(q)) ? "" : "none";
+  }
+}
+function agmRenderChannels() {
+  $("agm-channels").innerHTML = AGM_CHANNELS.map((c, i) =>
+    `<div class="row">${esc(c.platform)} / ${esc(c.channel_id)} <button type="button" class="small ghost danger" onclick="agmRemoveChannel(${i})">Remove</button></div>`).join("");
+}
+function agmAddChannel() {
+  const pf = $("agm-ch-platform").value.trim(), ch = $("agm-ch-id").value.trim();
+  if (!pf || !ch) return;
+  if (!AGM_CHANNELS.some(c => c.platform === pf && c.channel_id === ch)) AGM_CHANNELS.push({ platform: pf, channel_id: ch });
+  $("agm-ch-platform").value = ""; $("agm-ch-id").value = "";
+  agmRenderChannels();
+}
+function agmRemoveChannel(i) { AGM_CHANNELS.splice(i, 1); agmRenderChannels(); }
 async function agEdit(name) {
   $("ag-err").textContent = "";
   try {
@@ -2444,13 +2507,33 @@ async function agEdit(name) {
     $("ag-system-prompt").value = a.system_prompt || "";
     $("ag-allowed-tools").value = (a.allowed_tools || []).join(", ");
     $("ag-template-row").style.display = "none";
-    $("ag-create-hint").style.display = "none";
+    $("ag-bind-config").style.display = "none";
     $("ag-modal").dataset.mode = "edit";
     $("ag-modal").dataset.name = name;
     $("ag-modal").classList.remove("hidden");
   } catch (e) { toast(e.message, "error"); }
 }
 function agCloseModal() { $("ag-modal").classList.add("hidden"); }
+async function agApplyCreateBindings(name) {
+  const enc = encodeURIComponent(name);
+  const checked = (cls) => [...document.querySelectorAll(`#ag-bind-config .${cls} input:checked`)].map(i => i.value);
+  const calls = [];
+  for (const s of checked("agm-skill"))
+    calls.push(api("PUT", `/agents/${enc}/skills/${encodeURIComponent(s)}`, { enabled: true }));
+  for (const id of checked("agm-mcp-item"))
+    calls.push(api("POST", `/agents/${enc}/bindings/mcp/${encodeURIComponent(id)}`));
+  for (const id of checked("agm-oauth-item"))
+    calls.push(api("POST", `/agents/${enc}/bindings/oauth/${encodeURIComponent(id)}`));
+  for (const id of checked("agm-kb-item"))
+    calls.push(api("POST", `/agents/${enc}/kbs`, { kb_id: id }));
+  for (const id of checked("agm-user-row"))
+    calls.push(api("POST", `/agents/${enc}/bindings/users/${encodeURIComponent(id)}`));
+  for (const c of AGM_CHANNELS)
+    calls.push(api("POST", `/agents/${enc}/bindings/channels/${encodeURIComponent(c.platform)}/${encodeURIComponent(c.channel_id)}`));
+  const results = await Promise.allSettled(calls);
+  const failed = results.filter(r => r.status === "rejected").length;
+  if (failed) toast(`${failed} binding(s) failed; review them in the detail panel.`, "error");
+}
 async function agSave() {
   $("ag-err").textContent = "";
   const tools = $("ag-allowed-tools").value.split(",").map(s => s.trim()).filter(Boolean);
@@ -2467,11 +2550,11 @@ async function agSave() {
       const templateId = $("ag-template").value;
       if (!templateId) { $("ag-err").textContent = "template required"; return; }
       await api("POST", "/agents", { name, template_id: templateId, system_prompt: sp, allowed_tools: tools });
+      await agApplyCreateBindings(name);
     }
     agCloseModal();
     await loadAgents();
-    // Open the detail drawer right after create/edit so bindings (skills, connectors,
-    // knowledge bases, IM) are configured as part of the new-agent flow.
+    // Open the detail panel so the just-configured bindings are visible and editable.
     agDrawer(name);
   } catch (e) { $("ag-err").textContent = e.message; }
 }
