@@ -217,7 +217,7 @@ def test_path_hint_when_local_bin_absent(tmp_path: Path) -> None:
     assert ".local/bin" in (result.stdout + result.stderr)
 
 
-def test_config_templates_copied_on_fresh_install(tmp_path: Path) -> None:
+def test_agent_yaml_and_env_seeded_at_home_root(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
@@ -226,32 +226,37 @@ def test_config_templates_copied_on_fresh_install(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     fh = home / ".fleetent"
+    # Flat home layout: agent.yaml + .env at root, no config/ subdir.
+    assert (fh / "agent.yaml").is_file()
     assert (fh / ".env").is_file()
-    assert (fh / "config" / "settings.yaml").is_file()
-    assert (fh / "config" / "mcp.servers.yaml").is_file()
+    assert not (fh / "config").exists()
+    # agent.yaml content came from the shipped template.
+    assert "system_prompt" in (fh / "agent.yaml").read_text()
 
 
-def test_existing_config_not_overwritten(tmp_path: Path) -> None:
+def test_existing_agent_yaml_not_overwritten(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     fh = home / ".fleetent"
-    (fh / "config").mkdir(parents=True)
-    (fh / ".env").write_text("SENTINEL=keepme\n")
+    fh.mkdir(parents=True)
+    (fh / "agent.yaml").write_text("name: keepme\nversion: 9\n")
     env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
 
     _run_env(["--skip-db"], env, home)
 
-    assert (fh / ".env").read_text() == "SENTINEL=keepme\n"
+    assert (fh / "agent.yaml").read_text() == "name: keepme\nversion: 9\n"
 
 
-def test_skip_config_copies_nothing(tmp_path: Path) -> None:
+def test_skip_config_seeds_nothing(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
 
     _run_env(["--skip-db", "--skip-config"], env, home)
 
-    assert not (home / ".fleetent" / ".env").exists()
+    fh = home / ".fleetent"
+    assert not (fh / "agent.yaml").exists()
+    assert not (fh / ".env").exists()
 
 
 def test_init_db_runs_alembic_against_fleetent_home(tmp_path: Path) -> None:

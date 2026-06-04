@@ -283,9 +283,7 @@ def test_build_index_prefers_home_file_as_sole_default(tmp_path, monkeypatch) ->
     agents_dir.mkdir(parents=True)
     _write_agent(agents_dir, "other")
     # Home-root agent.yaml, bindings.default false -> still forced default.
-    _write_home_agent(
-        home, "deployed", bindings={"default": False, "channels": ["slack:C9"]}
-    )
+    _write_home_agent(home, "deployed", bindings={"default": False, "channels": ["slack:C9"]})
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
     index = agent_config.build_index()
@@ -310,3 +308,15 @@ def test_build_index_falls_back_to_multiscan_without_home_file(tmp_path, monkeyp
 
     assert set(index.agents) == {"a", "b"}
     assert index.default == "a"  # multiscan: default decided by bindings.default
+
+
+def test_repo_agent_yaml_example_loads_as_home_file() -> None:
+    """The shipped single-agent root template parses with the home-file loader."""
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[2]
+    example = repo / "config" / "agent.yaml.example"
+    assert example.is_file(), "config/agent.yaml.example must exist (installer template)"
+    agent = agent_config.load_agent_home_file(example)
+    assert agent.name  # non-empty
+    assert agent.version >= 1
