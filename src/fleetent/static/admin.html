@@ -267,6 +267,8 @@
     background:var(--panel); border-left:1px solid var(--line); box-shadow:-8px 0 30px rgba(0,0,0,.4);
     z-index:45; display:flex; flex-direction:column; }
   .conn-drawer.hidden { display:none; }
+  /* Agent drawer holds far more config (bindings across 6 sections) — give it room. */
+  #ag-drawer { width:760px; }
   .conn-drawer-head { display:flex; justify-content:space-between; align-items:center;
     padding:16px 20px; border-bottom:1px solid var(--border); }
   .conn-drawer-head h3 { margin:0; font-size:17px; word-break:break-all; }
@@ -2520,18 +2522,20 @@ async function agDrawer(name) {
     // Only the agent record is essential; every binding sub-list degrades to empty
     // on failure so one erroring section (e.g. an unmigrated table) can't blank the
     // whole drawer.
-    const [a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions] = await Promise.all([
-      api("GET", `/agents/${enc}`),
-      api("GET", `/agents/${enc}/bindings`).catch(() => ({ users: [], channels: [], mcp_servers: [] })),
-      api("GET", `/agents/${enc}/skills`).catch(() => []),
-      api("GET", `/agents/${enc}/kbs`).catch(() => ({ kb_ids: [] })),
-      api("GET", `/agents/${enc}/bindings/oauth`).catch(() => ({ connector_ids: [] })),
-      api("GET", "/mcp/servers").catch(() => []),
-      api("GET", "/connectors").catch(() => []),
-      api("GET", "/kb").catch(() => []),
-      api("GET", `/agents/${enc}/versions`).catch(() => []),
-    ]);
-    agRenderDrawer(name, { a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions });
+    const [a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions, allUsers] =
+      await Promise.all([
+        api("GET", `/agents/${enc}`),
+        api("GET", `/agents/${enc}/bindings`).catch(() => ({ users: [], channels: [], mcp_servers: [] })),
+        api("GET", `/agents/${enc}/skills`).catch(() => []),
+        api("GET", `/agents/${enc}/kbs`).catch(() => ({ kb_ids: [] })),
+        api("GET", `/agents/${enc}/bindings/oauth`).catch(() => ({ connector_ids: [] })),
+        api("GET", "/mcp/servers").catch(() => []),
+        api("GET", "/connectors").catch(() => []),
+        api("GET", "/kb").catch(() => []),
+        api("GET", `/agents/${enc}/versions`).catch(() => []),
+        api("GET", "/users").catch(() => []),
+      ]);
+    agRenderDrawer(name, { a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions, allUsers });
   } catch (e) { $("ag-drawer-body").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
 }
 
@@ -2596,20 +2600,25 @@ function agRenderDrawer(name, d) {
   const kbAdd = IS_VIEWER || !kbOpts ? "" :
     `<div class="row" style="margin-top:8px;"><select id="ag-kb-select"><option value="">— select a KB —</option>${kbOpts}</select><button class="small" onclick="agAddKb()">Bind</button></div>`;
 
-  // IM — users + channels
-  const users = (d.bindings.users || []);
-  const userList = users.length
-    ? users.map(u => `<div class="row">${esc(u)}${IS_VIEWER ? "" : ` <button class="small ghost danger" onclick="agUnbindUser('${esc(u)}')">Unbind</button>`}</div>`).join("")
-    : `<div class="muted">No users bound.</div>`;
-  const userAdd = IS_VIEWER ? "" :
-    `<div class="row" style="margin-top:8px;"><input id="ag-user-input" placeholder="user_id"><button class="small" onclick="agBindUser()">Bind user</button></div>`;
+  // IM — users (multi-select allowlist) + channels (bind many)
+  const boundUsers = new Set(d.bindings.users || []);
+  const userLabel = (u) => esc(u.name || u.email || u.id) + (u.name || u.email ? ` <span class="muted">(${esc(u.id)})</span>` : "");
+  const userRows = (d.allUsers || []).map(u =>
+    `<label class="row"><input type="checkbox" ${boundUsers.has(u.id) ? "checked" : ""} ${IS_VIEWER ? "disabled" : ""} onchange="agToggleUser('${esc(u.id)}', this.checked)"> ${userLabel(u)}</label>`
+  ).join("") || `<div class="muted">No users available.</div>`;
+  // bound users not present in the available list (e.g. removed) still get a row
+  const known = new Set((d.allUsers || []).map(u => u.id));
+  const orphanRows = (d.bindings.users || []).filter(id => !known.has(id)).map(id =>
+    `<label class="row"><input type="checkbox" checked ${IS_VIEWER ? "disabled" : ""} onchange="agToggleUser('${esc(id)}', this.checked)"> ${esc(id)}</label>`
+  ).join("");
+
   const chans = (d.bindings.channels || []);
   const chList = chans.length
     ? chans.map(c => `<div class="row">${esc(c.platform)} / ${esc(c.channel_id)}${IS_VIEWER ? "" : ` <button class="small ghost danger" onclick="agUnbindChannel('${esc(c.platform)}','${esc(c.channel_id)}')">Unbind</button>`}</div>`).join("")
     : `<div class="muted">No channels bound.</div>`;
   const chAdd = IS_VIEWER ? "" :
-    `<div class="row" style="margin-top:8px;"><input id="ag-ch-platform" placeholder="platform" style="max-width:120px;"><input id="ag-ch-id" placeholder="channel_id"><button class="small" onclick="agBindChannel()">Bind</button></div>`;
-  const im = `<div class="sk-meta-row"><span class="muted">Users</span></div>${userList}${userAdd}
+    `<div class="row" style="margin-top:8px;"><input id="ag-ch-platform" placeholder="platform" style="max-width:120px;"><input id="ag-ch-id" placeholder="channel_id"><button class="small" onclick="agBindChannel()">Bind channel</button></div>`;
+  const im = `<div class="sk-meta-row"><span class="muted">Users (allowlist)</span></div>${userRows}${orphanRows}
     <div class="sk-meta-row" style="margin-top:10px;"><span class="muted">Channels</span></div>${chList}${chAdd}`;
 
   // Versions
@@ -2650,14 +2659,10 @@ async function agUnbindKb(id) {
   try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/kbs/${encodeURIComponent(id)}`); agDrawer(AG_DRAWER); }
   catch (e) { toast(e.message, "error"); }
 }
-async function agBindUser() {
-  const uid = $("ag-user-input").value.trim(); if (!uid) return;
-  try { await api("POST", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/users/${encodeURIComponent(uid)}`); agDrawer(AG_DRAWER); }
-  catch (e) { toast(e.message, "error"); }
-}
-async function agUnbindUser(uid) {
-  try { await api("DELETE", `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/users/${encodeURIComponent(uid)}`); agDrawer(AG_DRAWER); }
-  catch (e) { toast(e.message, "error"); }
+async function agToggleUser(uid, on) {
+  const m = on ? "POST" : "DELETE";
+  try { await api(m, `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/users/${encodeURIComponent(uid)}`); }
+  catch (e) { toast(e.message, "error"); agDrawer(AG_DRAWER); }
 }
 async function agBindChannel() {
   const pf = $("ag-ch-platform").value.trim(), ch = $("ag-ch-id").value.trim(); if (!pf || !ch) return;

@@ -13,6 +13,7 @@ from fastapi import APIRouter, Body, Header, HTTPException
 from fleetent import agent_store, auth, config, user_store
 from fleetent.governance import audit_log
 from fleetent.platform.connector_management import (
+    agent_mcp_server_store,
     agent_oauth_binding_store,
     connector_config_store,
 )
@@ -60,8 +61,15 @@ def _require_agent(name: str) -> agent_store.Agent:
 
 
 def _known_mcp_server_ids() -> set[str]:
-    """Seam: the set of MCP server ids an agent may bind to (from config)."""
-    return {s.id for s in config.load_mcp_server_settings()}
+    """The set of MCP server ids an agent may bind to.
+
+    Unions the YAML config seam with DB-registered global servers (admin console),
+    matching what ``GET /admin/mcp/servers`` lists — so a server defined only in the
+    store (not config) is still bindable.
+    """
+    ids = {s.id for s in config.load_mcp_server_settings()}
+    ids |= {str(r["server_id"]) for r in agent_mcp_server_store.list_mcp_servers(None)}
+    return ids
 
 
 @router.get("/agents/{name}/versions")

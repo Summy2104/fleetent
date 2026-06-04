@@ -224,8 +224,7 @@ def test_agents_lifecycle_functions_present():
         "function agObservability",
         "function agVersions",
         "function agActivateVersion",
-        "function agBindUser",
-        "function agUnbindUser",
+        "function agToggleUser",
         "function agBindChannel",
         "function agUnbindChannel",
     ):

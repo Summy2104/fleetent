@@ -218,6 +218,36 @@ def test_bind_known_mcp_server(client, monkeypatch):
     assert agent_store.list_mcp_servers_for_agent(agent.id) == []
 
 
+def test_known_mcp_ids_include_store_registered(monkeypatch):
+    # _known_mcp_server_ids unions the YAML config seam with DB-registered global
+    # servers (the same set the drawer lists), so a store-only server is bindable.
+    from fleetent.platform.connector_management import agent_mcp_server_store
+
+    monkeypatch.setattr(api.config, "load_mcp_server_settings", lambda: [])
+    monkeypatch.setattr(
+        agent_mcp_server_store,
+        "list_mcp_servers",
+        lambda agent_id: [{"server_id": "middle"}] if agent_id is None else [],
+    )
+    assert "middle" in api._known_mcp_server_ids()
+
+
+def test_bind_store_registered_mcp_server(client, monkeypatch):
+    from fleetent.platform.connector_management import agent_mcp_server_store
+
+    agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
+    monkeypatch.setattr(api.config, "load_mcp_server_settings", lambda: [])
+    monkeypatch.setattr(
+        agent_mcp_server_store,
+        "list_mcp_servers",
+        lambda agent_id: [{"server_id": "middle"}] if agent_id is None else [],
+    )
+    token, _ = _session_for("admin")
+    resp = client.post("/admin/agents/ops/bindings/mcp/middle", headers=_hdr(token))
+    assert resp.status_code == 200, resp.text
+    assert agent_store.list_mcp_servers_for_agent(agent.id) == ["middle"]
+
+
 def test_bind_unknown_mcp_server_404(client, monkeypatch):
     agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
     monkeypatch.setattr(api, "_known_mcp_server_ids", lambda: {"github"})
