@@ -2,6 +2,21 @@
 
 这份文档跟踪 Observability、Diagnostics、Deployment / Config 相关能力。它们是 Pilot Go / No-Go 的证据来源和运行基础，不承载 memory / KB / reflection 的详细能力规划。
 
+## 当前结论
+
+**Observability / Deployment 已达到能力簇 Go。** 2026-06-04 已在本机 `local-as-server`
+模式完成人工验证：Docker Compose 启动、health check、`validate-config`、SQLite backup / upgrade /
+restore drill、trace / usage / performance 查询、diagnostics export / redaction 和 Pilot verification
+report 均可用。
+
+**该结论不是全项目 Pilot Go。** 真实 LLM / embedding / rerank / Google Drive / Confluence smoke
+归 Runtime / Model Router 与 Intelligence roadmap 继续验证；本 roadmap 只负责记录 smoke 状态和提供可观测、
+诊断、部署与证据包基础。
+
+**已知环境 note。** 本机 Docker Compose 服务可启动，但 app 容器内没有 Docker CLI / socket，sandbox
+effective mode 为 `off`。这不是 Observability / Deployment blocker；是否允许容器内访问宿主 Docker、
+是否 fail fast 或降级，归 Runtime / Sandbox roadmap 决策。
+
 ## 范围
 
 | 能力域 | 文档 | 负责范围 |
@@ -9,6 +24,8 @@
 | Observability | [../observability.md](../observability.md) | logs、agent traces、source attribution、usage / performance summary |
 | Deployment / Config | [../deployment.md](../deployment.md) | on-prem config、Docker Compose Pilot 入口、backup / upgrade、module runtime prerequisites |
 | Pilot verification | [pilot-readiness-roadmap.md](pilot-readiness-roadmap.md) | 自动化证据包、真实 smoke 状态、Go / Conditional Go / No-Go 建议 |
+
+人工验收入口：[Observability and Deployment Roadmap 人工测试手册](../../deployment/observability-deployment-roadmap-test-manual.md)。
 
 ## 当前能力地图
 
