@@ -9,8 +9,8 @@
 
 ## 2. uv 探测与全局命令安装
 
-- [ ] 2.1 Write failing tests：注入假 `uv` 到临时 PATH 验证「已存在则复用、缺失才装」；断言安装步骤调用 `uv tool install`；缺入口时告警并打印可复现命令；`check_python` 对 `<3.12` fail fast
-- [ ] 2.2 Implement：`ensure_uv()`（探测 `PATH`→`~/.local/bin`→`~/.cargo/bin`，缺失才装）、`check_python()`（校验 `>=3.12`）、`install_tool()`（`uv tool install`，校验三入口生成）使测试转绿
+- [x] 2.1 Write failing tests：注入假 `uv` 到临时 PATH 验证「已存在则复用、缺失才装」；断言安装步骤调用 `uv tool install`；缺入口时告警并打印可复现命令；`check_python` 对 `<3.12` fail fast
+- [x] 2.2 Implement：`ensure_uv()`（探测 `PATH`→`~/.local/bin`→`~/.cargo/bin`，缺失才装）、`check_python()`（校验 `>=3.12`）、`install_tool()`（`uv tool install`，校验三入口生成）使测试转绿
 
 ## 3. FLEETENT_HOME 状态目录
 

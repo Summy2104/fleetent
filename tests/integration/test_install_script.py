@@ -63,3 +63,102 @@ def test_unknown_flag_fails_fast(tmp_path: Path) -> None:
     assert result.returncode != 0
     combined = result.stdout + result.stderr
     assert "usage" in combined.lower() or "Usage" in combined
+
+
+# ── fake-uv harness ─────────────────────────────────────────────────────────
+# A stub `uv` on PATH lets us exercise ensure_uv/check_python/install_tool
+# without touching the network. It logs every invocation and, on `tool install`,
+# can create the three entrypoints so install_tool's verification passes.
+
+_FAKE_UV = """#!/bin/bash
+echo "uv $*" >> "$UV_LOG"
+case "$1" in
+  --version) echo "uv 0.5.0 (fake)" ;;
+  python)
+    [ "${FAKE_PYTHON_OK:-1}" = "1" ] && exit 0 || exit 1
+    ;;
+  tool)
+    if [ "$2" = "install" ] && [ "${FAKE_TOOL_CREATES_ENTRYPOINTS:-1}" = "1" ]; then
+      for c in fleetent fleetent-admin fleetent-tui; do
+        printf '#!/bin/bash\\n:' > "$FAKE_BIN/$c"; chmod +x "$FAKE_BIN/$c"
+      done
+    fi
+    ;;
+esac
+exit 0
+"""
+
+
+def _fake_uv_env(home: Path, fake_bin: Path, uv_log: Path, **flags: str) -> dict[str, str]:
+    fake_bin.mkdir(parents=True, exist_ok=True)
+    uv = fake_bin / "uv"
+    uv.write_text(_FAKE_UV)
+    uv.chmod(0o755)
+    # Minimal PATH: fake uv + system essentials only. Excludes ~/.local/bin so a
+    # real installed `fleetent` can't leak into command -v checks.
+    env = {
+        "HOME": str(home),
+        "PATH": f"{fake_bin}:/usr/bin:/bin:/usr/sbin:/sbin",
+        "UV_LOG": str(uv_log),
+        "FAKE_BIN": str(fake_bin),
+    }
+    env.update(flags)
+    return env
+
+
+def _run_env(args: list[str], env: dict[str, str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", str(SCRIPT), *args],
+        env=env,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_install_tool_invokes_uv_tool_install(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    uv_log = tmp_path / "uv.log"
+    env = _fake_uv_env(home, tmp_path / "bin", uv_log)
+
+    result = _run_env(["--skip-db", "--skip-config"], env, home)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "tool install" in uv_log.read_text()
+
+
+def test_existing_uv_is_reused_not_installed(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
+
+    result = _run_env(["--skip-db", "--skip-config"], env, home)
+
+    # uv present on PATH → no self-install attempt.
+    assert "Installing uv" not in (result.stdout + result.stderr)
+
+
+def test_check_python_fails_fast_when_no_312(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log", FAKE_PYTHON_OK="0")
+
+    result = _run_env(["--skip-db", "--skip-config"], env, home)
+
+    assert result.returncode != 0
+    assert "3.12" in (result.stdout + result.stderr)
+
+
+def test_missing_entrypoint_reports_recovery_hint(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _fake_uv_env(
+        home, tmp_path / "bin", tmp_path / "uv.log", FAKE_TOOL_CREATES_ENTRYPOINTS="0"
+    )
+
+    result = _run_env(["--skip-db", "--skip-config"], env, home)
+
+    assert result.returncode != 0
+    combined = result.stdout + result.stderr
+    assert "uv tool install" in combined

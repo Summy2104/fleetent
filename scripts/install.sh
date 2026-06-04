@@ -43,9 +43,12 @@ log_warn()    { printf "${YELLOW}⚠${NC} %s\n" "$1" >&2; }
 log_error()   { printf "${RED}✗${NC} %s\n" "$1" >&2; }
 
 # ── Configuration / flags ───────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 FLEETENT_HOME_DIR="${FLEETENT_HOME:-$HOME/.fleetent}"
 SKIP_DB=false
 SKIP_CONFIG=false
+ENTRYPOINTS="fleetent fleetent-admin fleetent-tui"
 
 usage() {
     cat <<'EOF'
@@ -100,9 +103,52 @@ parse_args() {
 
 # ── Steps (filled in by later tasks) ────────────────────────────────────────
 detect_os()              { :; }
-ensure_uv()              { :; }
-check_python()           { :; }
-install_tool()           { :; }
+
+# Reuse uv from PATH or its standard install locations; only fetch if absent.
+ensure_uv() {
+    if command -v uv >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ -x "$HOME/.local/bin/uv" ]; then
+        export PATH="$HOME/.local/bin:$PATH"
+        return 0
+    fi
+    if [ -x "$HOME/.cargo/bin/uv" ]; then
+        export PATH="$HOME/.cargo/bin:$PATH"
+        return 0
+    fi
+    log_info "Installing uv (fast Python package manager)..."
+    if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
+        log_error "uv install failed. Install it manually: https://docs.astral.sh/uv/"
+        exit 1
+    fi
+    export PATH="$HOME/.local/bin:$PATH"
+}
+
+# uv provisions the interpreter; fail fast if a >=3.12 runtime can't be found.
+check_python() {
+    if ! uv python find ">=3.12" >/dev/null 2>&1; then
+        log_error "Python >=3.12 is required and uv could not provide it."
+        exit 1
+    fi
+}
+
+# Install the three console-script entrypoints globally (into ~/.local/bin),
+# editable so the dev checkout stays the source of truth.
+install_tool() {
+    log_info "Installing fleetent commands via uv tool..."
+    uv tool install --force --editable "$REPO_ROOT"
+    for cmd in $ENTRYPOINTS; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            log_error "Expected command '$cmd' not found after install."
+            log_info "Try manually: uv tool install --editable \"$REPO_ROOT\""
+            log_info "Ensure ~/.local/bin is on your PATH (uv tool update-shell)."
+            exit 1
+        fi
+    done
+    log_success "Installed: $ENTRYPOINTS"
+}
+
 setup_home_env()         { :; }
 copy_config_templates()  { :; }
 init_db()                { :; }
