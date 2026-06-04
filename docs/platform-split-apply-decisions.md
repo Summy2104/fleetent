@@ -86,6 +86,10 @@
 **D2.5 — `--port` 才挂 HTTP。**
 - `build_app(agent)` 构造只含 `/chat`(SSE，应用 home agent 的 system_prompt/allowed_tools/allowed_skills via `run_stream`)、`/ws`(复用 `tui.dispatch`)、`/health` 的小 app；无 `--port` 时根本不构造/不监听。auth 直接用 `user_store.authenticate`，不经由 `server.py` 的 `_authenticate`（避免平台依赖）。
 
+**D2.6 — 闭环：无 server/IM 测试需迁移；3 个预存基线失败保持原状。**
+- `server.py` 未改动，`uvicorn fleetent.server:app` 仍可用，全部 server/server_lifespan 测试通过——任务 4.1 无迁移工作量。
+- `test_single_agent_runtime.py` 3 个仍红，是 change 1 已确认的预存基线失败（单文件 home 模式 `paths.agent_file()=config/agent.yaml` 与测试写 `tmp_path/agent.yaml` 位置不符）。它与 agent-runtime-cli 的 home 布局（`FLEETENT_HOME/<agent-id>/`，走新增 `scan_home`）正交，本 change 不触碰该路径，故**保持原状**，仅记录；4.3 判据为「不新增失败」，已满足。
+
 ### Change 3: platform-control-plane
 
 （待开始）

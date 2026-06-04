@@ -21,7 +21,7 @@
 
 ## 4. Closeout
 
-- [ ] 4.1 Migrate/adjust affected server/IM tests for the factored runtime.
-- [ ] 4.2 `uv run ruff format src tests && uv run ruff check src tests` and
+- [x] 4.1 Migrate/adjust affected server/IM tests for the factored runtime.
+- [x] 4.2 `uv run ruff format src tests && uv run ruff check src tests` and
   `uv run mypy src` (no new errors over baseline).
-- [ ] 4.3 Full suite `uv run pytest -x -q` green.
+- [x] 4.3 Full suite `uv run pytest -x -q` green.
