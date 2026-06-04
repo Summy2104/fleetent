@@ -146,17 +146,25 @@ def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
     """Reject inline plaintext secrets in MCP/connector defs; secrets go via env refs."""
     payload = {
         "mcp_servers": [server.model_dump() for server in agent.mcp_servers],
-        "vector_store": agent.vector_store.model_dump(),
+        "connectors": agent.connectors.model_dump(),
+    }
+    intelligence_payload = {
         "embedding": agent.embedding.model_dump(),
         "rerank": agent.rerank.model_dump(),
         "knowledge_base": agent.knowledge_base.model_dump(),
-        "long_term_ctx": agent.long_term_ctx.model_dump(),
-        "connectors": agent.connectors.model_dump(),
     }
     for key, value in _flatten(payload):
         if isinstance(value, str) and _looks_inline_secret(value) and not _is_env_reference(
             key, value
         ):
+            raise ValueError(
+                f"inline secret-like value in agent '{agent.name}' at '{key}' ({path}); "
+                "reference secrets by environment-variable name instead"
+            )
+    for key, value in _flatten(intelligence_payload):
+        if not _is_secret_reference_key(key) or not isinstance(value, str):
+            continue
+        if _looks_inline_secret(value) and not _is_env_reference(key, value):
             raise ValueError(
                 f"inline secret-like value in agent '{agent.name}' at '{key}' ({path}); "
                 "reference secrets by environment-variable name instead"
@@ -169,6 +177,10 @@ def _is_env_reference(key: str, value: str) -> bool:
     if key.endswith("credential_ref"):
         return _ENV_VAR_NAME_RE.fullmatch(value) is not None or value.startswith("file://")
     return False
+
+
+def _is_secret_reference_key(key: str) -> bool:
+    return key.endswith("_env") or key.endswith("credential_ref")
 
 
 def load_agent_home_file(path: Path) -> AgentFile:

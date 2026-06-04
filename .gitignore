@@ -27,6 +27,7 @@ secrets/
 .worktrees/
 
 # Config — example files are committed, actual configs are not
+agent.yaml
 config/*.yaml
 config/mcp.yaml
 !config/*.example.yaml

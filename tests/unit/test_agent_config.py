@@ -146,6 +146,38 @@ def test_agent_file_accepts_typed_intelligence_config() -> None:
     assert af.long_term_ctx.conflict_preference == "auto"
 
 
+def test_agent_home_file_accepts_google_drive_folder_id_in_intelligence_config(tmp_path) -> None:
+    doc = {
+        "name": "pilot",
+        "version": 1,
+        "knowledge_base": {
+            "enabled": True,
+            "google_drive": {
+                "connectors": [
+                    {
+                        "connector_id": "pilot-drive",
+                        "tenant_id": "pilot-tenant",
+                        "kb_id": "pilot-kb",
+                        "folder_id": "1Cs7y_5p8BOX4hZ7CT7fbS8CPBCkjF-W3",
+                        "access_token_env": "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN",
+                        "refresh_token_env": "FLEETENT_GOOGLE_DRIVE_REFRESH_TOKEN",
+                        "client_id_env": "FLEETENT_GOOGLE_DRIVE_CLIENT_ID",
+                        "client_secret_env": "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET",
+                    }
+                ]
+            },
+        },
+    }
+    path = tmp_path / "agent.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+
+    agent = agent_config.load_agent_home_file(path)
+
+    assert agent.knowledge_base.google_drive.connectors[0].folder_id == (
+        "1Cs7y_5p8BOX4hZ7CT7fbS8CPBCkjF-W3"
+    )
+
+
 @pytest.mark.parametrize("missing", ["name", "version"])
 def test_agent_file_missing_required_rejected(missing: str) -> None:
     doc = _valid_doc()
