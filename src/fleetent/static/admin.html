@@ -2600,17 +2600,22 @@ function agRenderDrawer(name, d) {
   const kbAdd = IS_VIEWER || !kbOpts ? "" :
     `<div class="row" style="margin-top:8px;"><select id="ag-kb-select"><option value="">— select a KB —</option>${kbOpts}</select><button class="small" onclick="agAddKb()">Bind</button></div>`;
 
-  // IM — users (multi-select allowlist) + channels (bind many)
+  // IM — users (filterable multi-select allowlist) + channels (bind many)
   const boundUsers = new Set(d.bindings.users || []);
   const userLabel = (u) => esc(u.name || u.email || u.id) + (u.name || u.email ? ` <span class="muted">(${esc(u.id)})</span>` : "");
+  const userRow = (id, q, checked, body) =>
+    `<label class="row ag-user-row" data-q="${esc(q.toLowerCase())}"><input type="checkbox" ${checked ? "checked" : ""} ${IS_VIEWER ? "disabled" : ""} onchange="agToggleUser('${esc(id)}', this.checked)"> ${body}</label>`;
   const userRows = (d.allUsers || []).map(u =>
-    `<label class="row"><input type="checkbox" ${boundUsers.has(u.id) ? "checked" : ""} ${IS_VIEWER ? "disabled" : ""} onchange="agToggleUser('${esc(u.id)}', this.checked)"> ${userLabel(u)}</label>`
+    userRow(u.id, [u.id, u.name || "", u.email || ""].join(" "), boundUsers.has(u.id), userLabel(u))
   ).join("") || `<div class="muted">No users available.</div>`;
   // bound users not present in the available list (e.g. removed) still get a row
   const known = new Set((d.allUsers || []).map(u => u.id));
   const orphanRows = (d.bindings.users || []).filter(id => !known.has(id)).map(id =>
-    `<label class="row"><input type="checkbox" checked ${IS_VIEWER ? "disabled" : ""} onchange="agToggleUser('${esc(id)}', this.checked)"> ${esc(id)}</label>`
+    userRow(id, id, true, esc(id))
   ).join("");
+  const userFilter = (d.allUsers || []).length > 6
+    ? `<input id="ag-user-filter" class="sk-search" style="margin:4px 0 6px;" placeholder="🔍  Filter users by name, email or id" oninput="agFilterUsers()">`
+    : "";
 
   const chans = (d.bindings.channels || []);
   const chList = chans.length
@@ -2618,7 +2623,7 @@ function agRenderDrawer(name, d) {
     : `<div class="muted">No channels bound.</div>`;
   const chAdd = IS_VIEWER ? "" :
     `<div class="row" style="margin-top:8px;"><input id="ag-ch-platform" placeholder="platform" style="max-width:120px;"><input id="ag-ch-id" placeholder="channel_id"><button class="small" onclick="agBindChannel()">Bind channel</button></div>`;
-  const im = `<div class="sk-meta-row"><span class="muted">Users (allowlist)</span></div>${userRows}${orphanRows}
+  const im = `<div class="sk-meta-row"><span class="muted">Users (allowlist)</span></div>${userFilter}${userRows}${orphanRows}
     <div class="sk-meta-row" style="margin-top:10px;"><span class="muted">Channels</span></div>${chList}${chAdd}`;
 
   // Versions
@@ -2663,6 +2668,12 @@ async function agToggleUser(uid, on) {
   const m = on ? "POST" : "DELETE";
   try { await api(m, `/agents/${encodeURIComponent(AG_DRAWER)}/bindings/users/${encodeURIComponent(uid)}`); }
   catch (e) { toast(e.message, "error"); agDrawer(AG_DRAWER); }
+}
+function agFilterUsers() {
+  const q = ($("ag-user-filter").value || "").trim().toLowerCase();
+  for (const row of document.querySelectorAll("#ag-drawer-body .ag-user-row")) {
+    row.style.display = (!q || (row.dataset.q || "").includes(q)) ? "" : "none";
+  }
 }
 async function agBindChannel() {
   const pf = $("ag-ch-platform").value.trim(), ch = $("ag-ch-id").value.trim(); if (!pf || !ch) return;
