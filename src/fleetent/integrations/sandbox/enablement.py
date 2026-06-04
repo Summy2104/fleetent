@@ -15,12 +15,14 @@ from pathlib import Path
 
 import yaml
 
+from fleetent import paths
+
 logger = logging.getLogger(__name__)
 
 # config/settings.yaml is the home of the shared `sandbox:` section (SB3 owns the
 # skeleton; SB2 adds scope/idle_hours, SB4 adds resources). Injectable module-level
 # constant (no global mutable state) so tests monkeypatch it to an isolated path.
-SETTINGS_PATH: Path = Path("config/settings.yaml")
+SETTINGS_PATH: Path = paths.settings_yaml_path()
 
 _DEFAULT_MODE_NAME = "all"
 

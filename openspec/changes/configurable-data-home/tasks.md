@@ -5,8 +5,8 @@
 
 ## 2. 低 blast-radius 调用方迁移
 
-- [ ] 2.1 Write failing tests：扩展/新增单测断言 `eval_logger`、`tools/builtin_tools`（generated/uploads）、`integrations/sandbox/{config,enablement}` 的路径常量从 `paths.py` 派生；`monkeypatch.setenv("FLEETENT_HOME", tmp)` 时整体重定向，且既有 monkeypatch 模块常量方式仍生效
-- [ ] 2.2 Implement：将上述模块的硬编码 `data/`/`config/` 常量改为从 `paths.py` 派生使测试转绿
+- [x] 2.1 Write failing tests：扩展/新增单测断言 `eval_logger`、`tools/builtin_tools`（generated/uploads）、`integrations/sandbox/{config,enablement}` 的路径常量从 `paths.py` 派生；`monkeypatch.setenv("FLEETENT_HOME", tmp)` 时整体重定向，且既有 monkeypatch 模块常量方式仍生效
+- [x] 2.2 Implement：将上述模块的硬编码 `data/`/`config/` 常量改为从 `paths.py` 派生使测试转绿
 
 ## 3. config.py 与 server.py 迁移
 

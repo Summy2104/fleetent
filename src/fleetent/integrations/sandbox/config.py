@@ -20,11 +20,13 @@ from pathlib import Path
 
 import yaml
 
+from fleetent import paths
+
 logger = logging.getLogger(__name__)
 
 # Shared with sandbox_enablement.SETTINGS_PATH; an injectable module-level
 # constant (no global mutable state) so tests monkeypatch it to an isolated path.
-SETTINGS_PATH: Path = Path("config/settings.yaml")
+SETTINGS_PATH: Path = paths.settings_yaml_path()
 
 _EXEC_TIMEOUT_MIN = 1
 _EXEC_TIMEOUT_MAX = 600
