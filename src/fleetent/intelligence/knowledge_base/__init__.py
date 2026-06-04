@@ -21,6 +21,7 @@ from fleetent.intelligence.knowledge_base.connectors.google_drive import (
     plan_google_drive_sync,
     sync_google_drive,
 )
+from fleetent.intelligence.knowledge_base.connectors.sync import LocalDirectorySourceConfig
 from fleetent.intelligence.knowledge_base.extraction import (
     ExtractedEntity,
     ExtractedRelation,
@@ -71,12 +72,21 @@ from fleetent.intelligence.knowledge_base.planner import (
     plan_knowledge_search,
 )
 from fleetent.intelligence.knowledge_base.runtime import (
+    SearchMode,
     archive,
+    archive_knowledge_base,
+    create_knowledge_base,
     delete,
+    delete_document,
     ingest_parsed,
     ingest_text,
+    is_active_knowledge_base,
     iter_indexable_knowledge_chunks,
+    list_documents,
+    list_knowledge_bases,
+    preview_document_chunks,
     search,
+    update_knowledge_base_description,
 )
 from fleetent.intelligence.knowledge_base.sync_planner import (
     SyncAction,
@@ -114,7 +124,9 @@ __all__ = [
     "KnowledgeSearchOptions",
     "KnowledgeSearchPlan",
     "KnowledgeSearchStep",
+    "LocalDirectorySourceConfig",
     "RelationRef",
+    "SearchMode",
     "ParsedDocument",
     "ParsedSection",
     "SyncAction",
@@ -123,9 +135,12 @@ __all__ = [
     "SyncPlanItem",
     "SyncPlanSummary",
     "archive",
+    "archive_knowledge_base",
     "bind_agent_to_kb",
     "check_connector",
+    "create_knowledge_base",
     "delete",
+    "delete_document",
     "execute_sync_plan",
     "execute_knowledge_search_plan",
     "get_connector_config",
@@ -134,8 +149,11 @@ __all__ = [
     "ingest_parsed",
     "ingest_text",
     "iter_indexable_knowledge_chunks",
+    "is_active_knowledge_base",
+    "list_documents",
     "list_agent_kb_bindings",
     "list_configured_connectors",
+    "list_knowledge_bases",
     "parse_html",
     "parse_markdown",
     "parse_document",
@@ -148,6 +166,7 @@ __all__ = [
     "plan_confluence_sync",
     "plan_google_drive_sync",
     "plan_local_directory_sync",
+    "preview_document_chunks",
     "resolve_agent_kb_ids",
     "run_connector_sync",
     "run_entity_extraction",
@@ -155,4 +174,5 @@ __all__ = [
     "sync_confluence",
     "sync_google_drive",
     "unbind_agent_from_kb",
+    "update_knowledge_base_description",
 ]

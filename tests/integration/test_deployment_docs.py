@@ -203,6 +203,35 @@ def test_pilot_runbook_contains_required_commands_and_failure_handling():
         assert phrase in content
 
 
+def test_intelligence_roadmap_manual_uses_current_shared_memory_cli():
+    content = Path("docs/deployment/intelligence-roadmap-test-manual.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "fleetent-admin shared-memory" not in content
+    assert "fleetent-admin memory shared" in content
+
+
+def test_intelligence_roadmap_manual_documents_real_llm_credentials_safely():
+    content = Path("docs/deployment/intelligence-roadmap-test-manual.md").read_text(
+        encoding="utf-8"
+    )
+
+    required_phrases = [
+        "FLEETENT_EVAL_REAL_LLM",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "不要写入本手册、验收记录、测试 fixture、commit、issue、日志或 trace",
+        "不要记录值",
+        "缺少真实 provider key",
+        "测试应跳过",
+        "需要配置真实 credential 的原因",
+    ]
+    for phrase in required_phrases:
+        assert phrase in content
+
+
 def test_deployment_docs_are_docker_compose_first_and_use_port_8765():
     docs = {
         path: path.read_text(encoding="utf-8")
