@@ -15,6 +15,7 @@ Auth: reads allow viewer+admin, writes require admin; archive needs X-Confirm.
 
 from typing import Any
 
+import yaml
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
@@ -53,6 +54,8 @@ def create_agent_def(
     model_overrides: dict[str, Any] | None = None,
     memory_namespace: str = "default",
     template_id: str | None = None,
+    plugins: list[str] | None = None,
+    features: dict[str, Any] | None = None,
 ) -> None:
     """Create a new agent definition (no bindings). Bridges agent_store.create_agent."""
     return None
@@ -138,10 +141,15 @@ class CreateBody(BaseModel):
     template_id: str
     system_prompt: str = ""
     allowed_tools: list[str] = []
+    plugins: list[str] = []
+    features: dict[str, Any] = {}
     skills_dir: str | None = None
     mcp_server_ids: list[str] | None = None
     model_overrides: dict[str, Any] = {}
     memory_namespace: str = "default"
+    # Optional raw capabilities block (allowed_tools/plugins/features) pasted as YAML;
+    # parsed server-side and, when present, overrides the structured fields above.
+    capabilities_yaml: str | None = None
 
 
 class UpdateBody(BaseModel):
@@ -252,12 +260,35 @@ def _def_response(name: str) -> dict[str, Any]:
     if agent is not None:
         out["system_prompt"] = agent["system_prompt"]
         out["allowed_tools"] = agent["allowed_tools"]
+        out["plugins"] = agent.get("plugins", [])
+        out["features"] = agent.get("features", {})
         out["skills_dir"] = agent.get("skills_dir")
         out["mcp_server_ids"] = agent.get("mcp_server_ids")
         out["model_overrides"] = agent.get("model_overrides", {})
         out["memory_namespace"] = agent.get("memory_namespace", "default")
         out["template_id"] = agent.get("template_id")
     return out
+
+
+def _resolve_capabilities(body: CreateBody) -> tuple[list[str], list[str], dict[str, Any]]:
+    """Resolve allowed_tools/plugins/features, letting a pasted YAML block override them.
+
+    The YAML is recorded as-is: whatever keys it carries replace the structured fields.
+    """
+    allowed_tools, plugins, features = body.allowed_tools, body.plugins, body.features
+    if body.capabilities_yaml and body.capabilities_yaml.strip():
+        try:
+            parsed = yaml.safe_load(body.capabilities_yaml)
+        except yaml.YAMLError as exc:
+            raise HTTPException(
+                status_code=422, detail=f"invalid capabilities YAML: {exc}"
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise HTTPException(status_code=422, detail="capabilities YAML must be a mapping")
+        allowed_tools = parsed.get("allowed_tools", allowed_tools)
+        plugins = parsed.get("plugins", plugins)
+        features = parsed.get("features", features)
+    return allowed_tools, plugins, features
 
 
 @router.post("/agents", status_code=201)
@@ -267,15 +298,18 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
         raise HTTPException(status_code=409, detail="agent already exists")
     if agent_template_store.get_template(body.template_id) is None:
         raise HTTPException(status_code=404, detail="template not found")
+    allowed_tools, plugins, features = _resolve_capabilities(body)
     create_agent_def(
         body.name,
         body.system_prompt,
-        body.allowed_tools,
+        allowed_tools,
         body.skills_dir,
         body.mcp_server_ids,
         body.model_overrides,
         body.memory_namespace,
         body.template_id,
+        plugins=plugins,
+        features=features,
     )
     agent_admin_store.set_provenance(body.name, "adhoc")
     agent_admin_store.enable(body.name)

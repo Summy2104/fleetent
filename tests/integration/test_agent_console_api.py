@@ -252,11 +252,16 @@ def _wire_real_store(monkeypatch):
             "template_id": a.template_id,
         }
 
-    def _create(name, sp, at, sd=None, mids=None, mo=None, mn="default", template_id=None):
+    def _create(
+        name, sp, at, sd=None, mids=None, mo=None, mn="default", template_id=None,
+        plugins=None, features=None,
+    ):
         agent_store.create_agent(
             name,
             sp,
             at,
+            plugins=plugins,
+            features=features,
             skills_dir=sd,
             mcp_server_ids=mids,
             model_overrides=mo,
@@ -349,6 +354,59 @@ def test_create_persists_template_id_and_echoes(client, monkeypatch):
     assert agent_store.get_by_name("linked").template_id == "support"
     g = client.get("/admin/agents/linked", headers=_hdr(token))
     assert g.json()["template_id"] == "support"
+
+
+def test_create_with_model_overrides_and_capabilities_yaml(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    token, _ = _session_for("admin")
+    yaml_blob = (
+        "allowed_tools:\n  - search_*\n  - read_file\n"
+        "plugins:\n  - acme-docs\n  - billing\n"
+        "features:\n  code_execution: true\n  sandbox_env:\n    TZ: Asia/Shanghai\n"
+    )
+    r = client.post(
+        "/admin/agents",
+        headers=_hdr(token),
+        json={
+            "name": "capbot",
+            "template_id": "ops",
+            "system_prompt": "You are ops.",
+            "model_overrides": {
+                "default": {"provider": "anthropic", "model": "claude-opus-4-8"},
+                "fast": {"provider": "anthropic", "model": "claude-haiku-4-5-20251001"},
+                "reasoning": {
+                    "provider": "openai-compatible",
+                    "model": "deepseek-r1",
+                    "base_url_env": "DEEPSEEK_BASE_URL",
+                },
+            },
+            "capabilities_yaml": yaml_blob,
+        },
+    )
+    assert r.status_code == 201, r.text
+    a = agent_store.get_by_name("capbot")
+    assert a.allowed_tools == ["search_*", "read_file"]
+    assert a.plugins == ["acme-docs", "billing"]
+    assert a.features["code_execution"] is True
+    assert a.features["sandbox_env"]["TZ"] == "Asia/Shanghai"
+    assert a.model_overrides["default"]["model"] == "claude-opus-4-8"
+    assert a.model_overrides["reasoning"]["base_url_env"] == "DEEPSEEK_BASE_URL"
+
+
+def test_create_bad_capabilities_yaml_422(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/agents",
+        headers=_hdr(token),
+        json={
+            "name": "badyaml",
+            "template_id": "ops",
+            "capabilities_yaml": "allowed_tools: [unterminated",
+        },
+    )
+    assert r.status_code == 422
+    assert agent_store.get_by_name("badyaml") is None
 
 
 def test_create_duplicate_name_409(client, monkeypatch):

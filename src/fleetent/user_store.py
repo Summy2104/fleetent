@@ -188,6 +188,22 @@ def set_role(user_id: str, role: str) -> None:
     _update_field(user_id, "role", role)
 
 
+def set_profile(user_id: str, name: str | None = None, email: str | None = None) -> None:
+    """Update a user's editable profile fields (name and/or email).
+
+    Email must stay unique across users; reusing another user's email raises ValueError.
+    Passing None for a field leaves it unchanged.
+    """
+    if email is not None:
+        existing = get_by_email(email)
+        if existing is not None and existing.id != user_id:
+            raise ValueError("email already in use")
+    if name is not None:
+        _update_field(user_id, "name", name)
+    if email is not None:
+        _update_field(user_id, "email", email)
+
+
 def set_status(user_id: str, status: str) -> None:
     _update_field(user_id, "status", status)
 
