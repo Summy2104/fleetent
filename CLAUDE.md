@@ -150,6 +150,7 @@ data/
 
 ### 隔离模式
 
+- `conftest.py` 的 autouse `_isolate_fleetent_home` 把 `FLEETENT_HOME` 钉在临时目录——防止任何测试经 `~/.fleetent` 家目录回退泄漏到真实用户家目录（chdir 出仓库 + 未设 FLEETENT_HOME 时会触发）。测路径解析优先级的测试用自身 `monkeypatch` 覆盖它
 - 数据库测试优先使用统一 DB fixture 或 `tmp_path` 隔离；legacy store 迁移前可 `monkeypatch.setattr(module, "DB_PATH", tmp_path / "x.db")`
 - `monkeypatch.setattr(memory_layer, "_mem_path", ...)` — 记忆文件隔离
 - `patch("fleetent.memory_layer.get_client_and_config", ...)` — LLM 调用隔离

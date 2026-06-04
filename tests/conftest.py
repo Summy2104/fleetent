@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,23 @@ def _default_required_env(monkeypatch: pytest.MonkeyPatch) -> None:
     env, so set a dummy here. Tests that exercise missing-key behaviour can
     monkeypatch.delenv it themselves (autouse runs before the test body).
     """
+    if os.environ.get("FLEETENT_EVAL_REAL_LLM") == "1":
+        return
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_fleetent_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Pin FLEETENT_HOME to a temp dir for every test.
+
+    Without this, the `~/.fleetent` home fallback (configurable-data-home) makes
+    any test that resolves config/data/logs outside a repo checkout — e.g. after
+    chdir to tmp with no FLEETENT_HOME — write into the real user home. Tests that
+    exercise resolution precedence override this via their own monkeypatch.
+    """
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path_factory.mktemp("fleetent_home")))
 
 
 @pytest.fixture(autouse=True)

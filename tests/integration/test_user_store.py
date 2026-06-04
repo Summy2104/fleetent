@@ -34,11 +34,13 @@ def test_create_user_returns_user():
     assert len(user.id) == 36  # uuid4
 
 
-def test_default_db_path_uses_fleetent_database():
+def test_default_db_path_uses_fleetent_database(monkeypatch):
+    monkeypatch.delenv("FLEETENT_HOME", raising=False)
     assert paths.data_dir() / "fleetent.db" == DEFAULT_USER_STORE_DB_PATH
 
 
-def test_legacy_re_exports_inherit_default_db_path():
+def test_legacy_re_exports_inherit_default_db_path(monkeypatch):
+    monkeypatch.delenv("FLEETENT_HOME", raising=False)
     assert DEFAULT_LEGACY_RE_EXPORT_DB_PATHS
     for db_path in DEFAULT_LEGACY_RE_EXPORT_DB_PATHS.values():
         assert db_path == paths.data_dir() / "fleetent.db"

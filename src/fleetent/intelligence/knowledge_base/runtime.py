@@ -22,6 +22,86 @@ RERANK_CANDIDATE_MAX = 100
 _logger = get_logger("knowledge_base")
 
 
+def create_knowledge_base(tenant_id: str, kb_id: str, description: str = "") -> None:
+    """Create a tenant-scoped knowledge base record if it does not already exist."""
+
+    KnowledgeStore(_database()).ensure_knowledge_base(tenant_id, kb_id, description)
+
+
+def update_knowledge_base_description(tenant_id: str, kb_id: str, description: str) -> bool:
+    """Update the description for a tenant-scoped knowledge base."""
+
+    return KnowledgeStore(_database()).update_knowledge_base_description(
+        tenant_id, kb_id, description
+    )
+
+
+def is_active_knowledge_base(tenant_id: str, kb_id: str) -> bool:
+    """Return whether a knowledge base exists and is not archived."""
+
+    return KnowledgeStore(_database()).has_active_knowledge_base(tenant_id, kb_id)
+
+
+async def archive_knowledge_base(tenant_id: str, kb_id: str) -> bool:
+    """Archive a knowledge base and remove its active chunks from vector indexes."""
+
+    store = KnowledgeStore(_database())
+    chunks = store.iter_indexable_chunks(tenant_id, kb_id)
+    archived = store.archive_knowledge_base(tenant_id, kb_id)
+    if not archived:
+        return False
+    for chunk in chunks:
+        await vector_store.delete(
+            chunk.id,
+            vector_store.knowledge_namespace(chunk.tenant_id, chunk.kb_id),
+        )
+    return True
+
+
+def list_knowledge_bases(tenant_id: str) -> list[dict[str, object]]:
+    """List tenant knowledge bases with document and chunk aggregates."""
+
+    rows = KnowledgeStore(_database()).list_knowledge_bases(tenant_id)
+    return [
+        {
+            "tenant_id": str(row["tenant_id"]),
+            "kb_id": str(row["kb_id"]),
+            "description": str(row["description"]),
+            "doc_count": int(row["doc_count"]),
+            "chunk_count": int(row["chunk_count"]),
+            "last_import": row["last_import"],
+            "archived": row["archived_at"] is not None,
+        }
+        for row in rows
+    ]
+
+
+def list_documents(tenant_id: str, kb_id: str) -> list[dict[str, object]]:
+    """List active documents imported into one knowledge base."""
+
+    rows = KnowledgeStore(_database()).list_documents(tenant_id, kb_id)
+    return [
+        {
+            "document_id": str(row["document_id"]),
+            "filename": str(row["filename"]),
+            "source": str(row["source"]),
+            "source_url": str(row["source_url"]) if row["source_url"] is not None else None,
+            "chunks": int(row["chunks"]),
+            "created_at": row["created_at"],
+        }
+        for row in rows
+    ]
+
+
+def preview_document_chunks(
+    tenant_id: str, kb_id: str, document_id: str
+) -> list[dict[str, object]]:
+    """Return ordered chunk previews for one active document."""
+
+    chunks = KnowledgeStore(_database()).preview_document_chunks(tenant_id, kb_id, document_id)
+    return [_chunk_to_public_dict(chunk) for chunk in chunks]
+
+
 async def ingest_text(
     filename: str,
     content: str,
@@ -343,6 +423,21 @@ async def delete(document_id: str) -> None:
     store.delete_document(document_id)
 
 
+async def delete_document(tenant_id: str, kb_id: str, document_id: str) -> bool:
+    """Delete an active document only when it belongs to the given tenant and KB."""
+
+    store = KnowledgeStore(_database())
+    if not store.has_active_document(tenant_id, kb_id, document_id):
+        return False
+    chunks = store.get_scoped_document_chunks(tenant_id, kb_id, document_id)
+    for chunk in chunks:
+        await vector_store.delete(
+            chunk.id,
+            vector_store.knowledge_namespace(chunk.tenant_id, chunk.kb_id),
+        )
+    return store.delete_scoped_document(tenant_id, kb_id, document_id)
+
+
 async def archive(document_id: str) -> None:
     """Archive a knowledge document without deleting the document record."""
 
@@ -376,6 +471,22 @@ def iter_indexable_knowledge_chunks(
             namespace=namespace,
             metadata=metadata,
         )
+
+
+def _chunk_to_public_dict(chunk: KnowledgeChunk) -> dict[str, object]:
+    return {
+        "chunk_id": chunk.id,
+        "document_id": chunk.document_id,
+        "kb_id": chunk.kb_id,
+        "filename": chunk.filename,
+        "content": chunk.content,
+        "position": chunk.position,
+        "score": chunk.score,
+        "source": chunk.source,
+        "source_url": chunk.source_url,
+        "section": chunk.metadata.get("section_title") or chunk.metadata.get("section_path", ""),
+        "section_path": chunk.metadata.get("section_path", ""),
+    }
 
 
 def _chunk_text(content: str, chunk_size: int, chunk_overlap: int) -> list[str]:

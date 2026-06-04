@@ -4,11 +4,22 @@
 TBD - created by archiving change 2026-06-02-knowledge-base-management. Update Purpose after archive.
 ## Requirements
 ### Requirement: Retrieval playground
+
 The system SHALL provide a retrieval test bench `/admin/kb/search` taking a query, one or more selected kb_ids, a search mode (vector / keyword / hybrid), and a top-k. It SHALL orchestrate the engine `search` and return the recalled chunks. It SHALL NOT redefine retrieval; it orchestrates the engine. Both viewer and admin SHALL be able to run it and view results.
 
 #### Scenario: Hybrid recall verification (场景 105)
 - **WHEN** an admin enters a query in the playground, selects a KB that has imported documents, picks hybrid mode, and sets top-k=5
 - **THEN** at most 5 recalled chunks are returned, each showing score, owning document, position, and section context, in stable score order
+
+#### Scenario: Search uses real host KB index
+- **WHEN** a document has been imported through `/admin/kb/{kb_id}/documents`
+- **AND** a viewer searches for text contained in that document through `/admin/kb/search`
+- **THEN** the response includes matching chunks from the real KB engine with document id, chunk id, score, source metadata and content preview
+- **AND** the response is not an empty placeholder unless the query truly has no match
+
+#### Scenario: Empty KB selection is rejected
+- **WHEN** a caller submits an empty `kb_ids` list
+- **THEN** the request fails fast and no search is performed
 
 #### Scenario: Multiple knowledge bases selectable
 - **WHEN** the query selects multiple kb_ids in the current tenant

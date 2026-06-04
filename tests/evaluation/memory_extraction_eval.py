@@ -14,6 +14,7 @@ import pytest
 from fleetent.intelligence import memory as memory_layer
 from fleetent.intelligence import vector_store
 from fleetent.intelligence.memory import extraction
+from fleetent.model import router as model_router
 from tests.integration.test_migrations import apply_migrations
 
 REQUIRED_FIXTURE_FIELDS = (
@@ -27,7 +28,7 @@ REQUIRED_FIXTURE_FIELDS = (
 _VALID_ACTIONS = {"create", "update", "delete", "ignore"}
 _DEFAULT_USER_ID = "evaluation-user"
 _FIXTURE_DIR = Path(__file__).parent / "fixtures" / "memory_extraction"
-_REAL_LLM_API_KEY_ENVS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY")
+_NON_REAL_LLM_API_KEYS = {"", "test-key"}
 
 
 class FixtureValidationError(ValueError):
@@ -138,8 +139,8 @@ async def run_real_llm_fixture(
     """Run one fixture through the real memory extraction route when explicitly enabled."""
     if os.environ.get("FLEETENT_EVAL_REAL_LLM") != "1":
         pytest.skip("set FLEETENT_EVAL_REAL_LLM=1 to run real LLM memory evaluation")
-    if not any(os.environ.get(env_name) for env_name in _REAL_LLM_API_KEY_ENVS):
-        pytest.skip("real LLM memory evaluation requires a provider API key")
+    if not _has_real_llm_provider_credentials():
+        pytest.skip("real LLM memory evaluation requires a real provider credential")
 
     validate_fixture(fixture)
     db_path = tmp_path / "memory-extraction-real-eval.db"
@@ -174,6 +175,12 @@ async def run_real_llm_fixture(
         vector_upserts=vector_upserts,
         vector_deletes=vector_deletes,
     )
+
+
+def _has_real_llm_provider_credentials(route_name: str = "memory_extraction") -> bool:
+    routes = model_router._load_routes()
+    route = routes.get(route_name, routes["default"])
+    return os.environ.get(route.api_key_env, "").strip() not in _NON_REAL_LLM_API_KEYS
 
 
 def assert_fixture_memory_state(

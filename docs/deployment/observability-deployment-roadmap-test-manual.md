@@ -6,6 +6,29 @@
 Deployment / Config 和 Pilot verification；Memory / KB / Reflection 的业务验收见
 [intelligence-roadmap-test-manual.md](intelligence-roadmap-test-manual.md)。
 
+## 0. 当前验证记录
+
+2026-06-04 已完成一次本机 `local-as-server` 人工验证，结论为：
+
+```text
+observability_deployment_acceptance:
+  decision: Go for Observability / Deployment
+  scope: local-as-server, single-node
+  evidence:
+    automated_tests: passed
+    config_validation: passed
+    docker_compose: passed
+    health_check: passed
+    backup_upgrade_restore: passed
+    observability_queries: passed
+    diagnostics_export_redaction: passed
+    pilot_verification_report: generated
+  notes:
+    - This is not full-project Pilot Go.
+    - Real LLM / embedding / rerank / Google Drive / Confluence smoke remain owned by Runtime / Model Router and Intelligence roadmap validation.
+    - The app container does not have Docker CLI / socket access, so sandbox effective mode is off. This is not an Observability / Deployment blocker.
+```
+
 ## 1. Go 判定边界
 
 达到 `Go` 需要同时满足：
@@ -60,6 +83,8 @@ docker compose version
 - branch / commit SHA 与验收记录一致。
 - `git status --short` 不显示 `.env`、credential 文件、SQLite DB、backup 或 diagnostics package。
 - Docker Compose 可用。
+- 如果 `/health` 显示 sandbox `mode=off` 且 `docker_available=false`，记录为 Runtime / Sandbox note；
+  除非本次 Observability / Deployment 验收明确要求 sandbox 执行，否则不作为本手册的 blocker。
 
 ## 3. 自动化快验
 
@@ -126,11 +151,14 @@ uv run fleetent-admin kb connectors list
 执行：
 
 ```bash
-docker compose run --rm fleetent uv run fleetent-admin --help
-docker compose run --rm fleetent uv run fleetent-admin init-config
+docker compose run --rm --entrypoint uv fleetent run fleetent-admin --help
+docker compose run --rm --entrypoint uv fleetent run fleetent-admin init-config
 docker compose up -d
 docker compose ps
 ```
+
+`fleetent` 镜像的默认 entrypoint 会启动 Uvicorn server；容器内运行 CLI 时必须用 `--entrypoint uv`
+覆盖默认 entrypoint。
 
 如果有 HTTP health endpoint，执行：
 
@@ -188,6 +216,9 @@ test -f data/backups/<timestamp>/fleetent.db
 如需在测试环境恢复，先停止服务，再由 operator 将 backup 复制回测试 DB 路径，并记录操作：
 
 ```bash
+stamp=$(date +%Y%m%d-%H%M%S)
+mkdir -p "data/backups/manual-before-restore-${stamp}"
+cp data/fleetent.db "data/backups/manual-before-restore-${stamp}/fleetent.db"
 docker compose down
 cp data/backups/<timestamp>/fleetent.db data/fleetent.db
 docker compose up -d
@@ -198,6 +229,7 @@ docker compose up -d
 - dry-run 输出 database URL、backup 路径和 migration 计划，不创建 backup，不运行 Alembic。
 - backup-only 创建 `data/backups/<timestamp>/fleetent.db`，不运行 migration。
 - upgrade 在 backup 成功后运行 migration。
+- restore 覆盖当前 DB 前，先额外保存一份当前 DB 的 manual backup。
 - restore drill 后服务可再次启动。
 
 失败分类：
@@ -355,3 +387,7 @@ observability_deployment_acceptance:
 ```
 
 `Go` 需要没有 unresolved `Pilot blocker`，且 diagnostics / config / trace / report 均无敏感信息泄漏。
+
+如果本机验证已经达到 `Go`，但全项目报告仍因真实 LLM / embedding / rerank / Google Drive / Confluence
+显示 `skipped` 而给出 `Conditional Go`，不要降级本 roadmap 结论；把这些 skipped 项转交给对应 roadmap
+继续验证。
