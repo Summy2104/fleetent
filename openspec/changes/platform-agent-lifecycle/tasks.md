@@ -9,10 +9,10 @@
 
 ## 2. Start/stop controller (spawn, no monitoring)
 
-- [ ] 2.1 Write failing tests (mock subprocess spawn): start spawns
+- [x] 2.1 Write failing tests (mock subprocess spawn): start spawns
   `fleetent agent run <name>` and records the PID; stop terminates the tracked process;
   a process that exits is reported not-running and is NOT restarted.
-- [ ] 2.2 Implement the start/stop controller (spawn/terminate + in-memory PID tracking,
+- [x] 2.2 Implement the start/stop controller (spawn/terminate + in-memory PID tracking,
   no probe/restart). Make 2.1 green.
 
 ## 3. Admin endpoints
