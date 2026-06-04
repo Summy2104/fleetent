@@ -2517,12 +2517,15 @@ async function agDrawer(name) {
   $("ag-drawer-body").innerHTML = `<div class="muted">Loading…</div>`;
   const enc = encodeURIComponent(name);
   try {
+    // Only the agent record is essential; every binding sub-list degrades to empty
+    // on failure so one erroring section (e.g. an unmigrated table) can't blank the
+    // whole drawer.
     const [a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions] = await Promise.all([
       api("GET", `/agents/${enc}`),
-      api("GET", `/agents/${enc}/bindings`),
-      api("GET", `/agents/${enc}/skills`),
-      api("GET", `/agents/${enc}/kbs`),
-      api("GET", `/agents/${enc}/bindings/oauth`),
+      api("GET", `/agents/${enc}/bindings`).catch(() => ({ users: [], channels: [], mcp_servers: [] })),
+      api("GET", `/agents/${enc}/skills`).catch(() => []),
+      api("GET", `/agents/${enc}/kbs`).catch(() => ({ kb_ids: [] })),
+      api("GET", `/agents/${enc}/bindings/oauth`).catch(() => ({ connector_ids: [] })),
       api("GET", "/mcp/servers").catch(() => []),
       api("GET", "/connectors").catch(() => []),
       api("GET", "/kb").catch(() => []),

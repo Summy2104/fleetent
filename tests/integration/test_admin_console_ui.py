@@ -460,6 +460,15 @@ def test_drawer_loads_from_aggregate_endpoints():
         assert frag in fn, frag
     # plus the available-option catalogs
     assert '"/mcp/servers"' in fn and '"/connectors"' in fn and '"/kb"' in fn
+    # each binding sub-list degrades to a default on failure so one erroring endpoint
+    # (e.g. an unmigrated table -> HTTP 500) can't blank the whole drawer
+    for frag in (
+        "/bindings`).catch(",
+        "/skills`).catch(",
+        "/kbs`).catch(",
+        "/bindings/oauth`).catch(",
+    ):
+        assert frag in fn, frag
 
 
 def test_bindings_skill_toggle_wired_to_put():
