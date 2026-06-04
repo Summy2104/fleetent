@@ -37,6 +37,7 @@ from fleetent.observability.startup_diagnostics import (
     log_config_failed,
     log_config_loaded,
 )
+from fleetent.platform.agent_lifecycle import lifecycle_admin_api
 from fleetent.platform.agent_management_console import agent_admin_api, agent_console_api
 from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.askit_console import agent_apply_api
@@ -221,6 +222,7 @@ app.include_router(agent_admin_api.router)
 app.include_router(stats_admin_api.router)
 app.include_router(monitor_admin_api.router)
 app.include_router(agent_apply_api.router)
+app.include_router(lifecycle_admin_api.router)
 
 
 def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:

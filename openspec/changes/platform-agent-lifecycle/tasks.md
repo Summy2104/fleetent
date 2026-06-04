@@ -17,9 +17,9 @@
 
 ## 3. Admin endpoints
 
-- [ ] 3.1 Write failing integration tests: `POST /admin/agents/<name>/start` materializes
+- [x] 3.1 Write failing integration tests: `POST /admin/agents/<name>/start` materializes
   (if needed) + spawns; `/stop` terminates; status reflects tracked-running vs not.
-- [ ] 3.2 Add the start/stop/status admin endpoints wired to the controller. Make 3.1
+- [x] 3.2 Add the start/stop/status admin endpoints wired to the controller. Make 3.1
   green.
 
 ## 4. Closeout
