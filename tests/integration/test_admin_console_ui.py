@@ -18,13 +18,13 @@ ADMIN_HTML = (Path(__file__).parents[2] / "src" / "fleetent" / "static" / "admin
 def test_grouped_nav_present():
     html = ADMIN_HTML
     assert "switchGroup(" in html
-    for group in ("access", "agents", "models", "ops", "audit"):
+    for group in ("access", "agents", "models", "ops"):
         assert f'data-group="{group}"' in html
 
 
 def test_existing_tabs_still_reachable():
     html = ADMIN_HTML
-    for tab in ("users", "kb", "audit"):
+    for tab in ("users", "kb", "chat"):
         assert f'data-tab="{tab}"' in html
 
 
@@ -760,7 +760,7 @@ def test_sidebar_present_and_grouped():
     html = ADMIN_HTML
     assert 'class="sidebar"' in html
     # grouped section headings inside sidebar
-    for group in ("access", "agents", "models", "ops", "audit"):
+    for group in ("access", "agents", "models", "ops"):
         assert f'data-group="{group}"' in html
     # contract preserved
     assert "switchGroup(" in html
@@ -775,12 +775,12 @@ def test_sidebar_all_modules_reachable():
         "agents",
         "skills",
         "kb",
+        "chat",
         "providers",
         "oauth",
         "stats",
         "monitoring",
         "sessions",
-        "audit",
     ):
         assert f'data-tab="{tab}"' in sidebar, tab
 

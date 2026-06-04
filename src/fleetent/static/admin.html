@@ -307,6 +307,11 @@
   .chat-tool { font-size:11px; color:var(--muted); font-family:monospace; }
   .chat-composer { display:flex; gap:8px; padding:12px 14px; border-top:1px solid var(--border); align-items:flex-end; }
   .chat-composer textarea { flex:1; resize:none; max-height:160px; font-family:inherit; font-size:14px; box-sizing:border-box; }
+  /* --- Users layout polish --- */
+  .users-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:4px; }
+  .users-toolbar .sk-search { flex:1; min-width:240px; }
+  #tab-users thead th { font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); font-weight:600; }
+  #tab-users tbody tr:hover > td { background:var(--surface); }
 
   .connector-icon {
     width: 40px;
@@ -518,42 +523,39 @@
         <button class="nav-item" data-tab="monitoring" onclick="switchTab('monitoring')">Monitoring</button>
         <button class="nav-item" data-tab="sessions" onclick="switchTab('sessions')">Sessions</button>
       </div>
-      <div class="nav-group">
-        <button class="nav-group-label" data-group="audit" onclick="switchGroup('audit')">Audit</button>
-        <button class="nav-item" data-tab="audit" onclick="switchTab('audit')">Audit</button>
-      </div>
     </nav>
     <div class="nav-backdrop" onclick="document.body.classList.remove('nav-open')"></div>
     <main class="content">
 
     <section id="tab-users">
       <div class="page-header"><h2 class="ph-title">Users</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.users?.()">Refresh</button></div></div>
-      <div class="row" style="margin-bottom:12px;">
-        <input id="user-filter" placeholder="filter by email or nickname" oninput="usersFilterChanged()" style="flex:1;">
+      <div class="users-toolbar">
+        <input id="user-filter" class="sk-search" placeholder="🔍  Search by email or nickname" oninput="usersFilterChanged()">
         <select id="role-filter" onchange="usersFilterChanged()">
-          <option value="">all roles</option>
+          <option value="">All roles</option>
           <option value="viewer">viewer</option>
           <option value="admin">admin</option>
           <option value="built_in_admin">built_in_admin</option>
         </select>
         <select id="status-filter" onchange="usersFilterChanged()">
-          <option value="">all status</option>
+          <option value="">All status</option>
           <option value="active">active</option>
           <option value="blocked">blocked</option>
           <option value="disabled">disabled</option>
         </select>
         <select id="source-filter" onchange="usersFilterChanged()">
-          <option value="">all sources</option>
+          <option value="">All sources</option>
           <option value="im">IM-origin</option>
           <option value="human">human / API</option>
         </select>
-        <span id="create-bar"><button onclick="openCreateModal()">Create user</button></span>
+        <span id="create-bar"><button onclick="openCreateModal()">+ New user</button></span>
       </div>
+      <div id="users-count" class="muted" style="margin:2px 2px 12px;"></div>
       <div class="table-scroll"><table>
         <thead><tr><th></th><th>#</th><th>Email</th><th>Nickname</th><th>Role</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody id="users-body"></tbody>
       </table></div>
-      <div id="users-pager" class="row" style="margin-top:12px; align-items:center; gap:8px;"></div>
+      <div id="users-pager" class="row" style="margin-top:14px; align-items:center; gap:8px;"></div>
     </section>
 
     <section id="tab-kb" class="hidden">
@@ -890,17 +892,6 @@
       </div>
     </section>
 
-    <section id="tab-audit" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Audit Log</h2><div class="ph-filter"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.audit?.()">Refresh</button></div></div>
-      <div class="card row">
-        <input id="audit-action" placeholder="filter by action (e.g. block_user)">
-        <button onclick="loadAudit()">Search</button>
-      </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
-        <tbody id="audit-body"></tbody>
-      </table></div>
-    </section>
     </main>
   </div>
 
@@ -1498,9 +1489,8 @@ const TAB_GROUP = {
   agents: "agents", skills: "agents", kb: "agents", chat: "agents",
   providers: "models", oauth: "models",
   stats: "ops", monitoring: "ops", sessions: "ops",
-  audit: "audit",
 };
-const GROUP_DEFAULT_TAB = { access: "users", agents: "agents", models: "providers", ops: "stats", audit: "audit" };
+const GROUP_DEFAULT_TAB = { access: "users", agents: "agents", models: "providers", ops: "stats" };
 const LOADERS = {};  // each module registers its loader; switchTab calls it if present
 
 function switchGroup(group) {
@@ -1520,7 +1510,6 @@ function switchTab(tab) {
 
 LOADERS.users = () => loadUsers();
 LOADERS.kb = () => loadKb();
-LOADERS.audit = () => loadAudit();
 
 let ALL_USERS = [];
 // IM identities + connectors are folded under their owning User (presentation
@@ -1565,6 +1554,8 @@ function renderUsers() {
     && (!status || u.status === status)
     && (!source || (source === "im" ? isImOrigin(u) : !isImOrigin(u))));
   const total = users.length;
+  const countEl = $("users-count");
+  if (countEl) countEl.textContent = `${total} of ${ALL_USERS.length} user${ALL_USERS.length === 1 ? "" : "s"}`;
   const pages = Math.max(1, Math.ceil(total / USERS_PAGE_SIZE));
   if (USERS_PAGE > pages) USERS_PAGE = pages;
   const offset = (USERS_PAGE - 1) * USERS_PAGE_SIZE;
@@ -3943,22 +3934,6 @@ async function kbSearch() {
     const r = await api("POST", "/kb/search", { query: $("kb-q").value, kb_ids: ids, mode: $("kb-q-mode").value });
     $("kb-search-out").textContent = JSON.stringify(r.results, null, 2);
   } catch (e) { $("kb-search-out").textContent = e.message; }
-}
-
-async function loadAudit() {
-  const action = $("audit-action").value.trim();
-  $("audit-body").innerHTML = loadingRow(5);
-  let rows;
-  try { rows = await api("GET", "/audit" + (action ? `?action=${encodeURIComponent(action)}` : "")); }
-  catch (e) { $("audit-body").innerHTML = emptyRow(5, e.message); return; }
-  $("audit-body").innerHTML = rows.map(r => `
-    <tr>
-      <td class="muted">${esc(r.created_at)}</td>
-      <td>${esc(r.actor_user_id || "—")}</td>
-      <td>${esc(r.action)}</td>
-      <td>${esc(r.target_type || "")} ${esc((r.target_id||"").slice(0,12))}</td>
-      <td><code>${esc(JSON.stringify(r.detail))}</code></td>
-    </tr>`).join("") || emptyRow(5, "No audit entries.");
 }
 
 async function boot() {
