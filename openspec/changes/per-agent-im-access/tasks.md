@@ -34,6 +34,7 @@
 ## 4. Migrate + closeout
 
 - [x] 4.1 Migrate existing allowlist/route tests to the per-agent local model.
-- [ ] 4.2 `uv run ruff format src tests && uv run ruff check src tests` and
+- [x] 4.2 `uv run ruff format src tests && uv run ruff check src tests` and
   `uv run mypy src` (no new errors over baseline).
-- [ ] 4.3 Full suite `uv run pytest -x -q` green.
+- [x] 4.3 Full suite `uv run pytest -x -q` green (3115 passed; 4 pre-existing baseline
+  failures unrelated to this change, confirmed failing on the base branch).
