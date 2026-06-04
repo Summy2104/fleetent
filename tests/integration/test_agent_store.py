@@ -458,8 +458,8 @@ def _load_migration_002():
         Path(__file__).resolve().parents[2]
         / "migrations"
         / "versions"
-        # Rebased 002 -> 035 during the next<-main integration (after main's head 034).
-        / "035_add_agent_features.py"
+        # Rebased 002 -> 036 when the duplicate-revision branches were linearized.
+        / "036_add_agent_features.py"
     )
     spec = importlib.util.spec_from_file_location("migration_002", path)
     assert spec is not None and spec.loader is not None
@@ -482,9 +482,9 @@ def test_alembic_002_upgrade_adds_features_to_legacy_table(tmp_path):
     from alembic.operations import Operations
 
     migration = _load_migration_002()
-    # Rebased during the next<-main integration: 002 -> 035, chained after main's head 034.
-    assert migration.revision == "035"
-    assert migration.down_revision == "034"
+    # Linearized chain: 002 -> 036, chained after 035 (agent_versions.template_id).
+    assert migration.revision == "036"
+    assert migration.down_revision == "035"
 
     dbp = tmp_path / "legacy.db"
     raw = sqlite3.connect(dbp)

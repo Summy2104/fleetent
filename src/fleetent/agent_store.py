@@ -3,7 +3,7 @@ per-agent capability switches.
 
 Schema lifecycle is owned by Alembic (single source of truth): the agents table
 is created on the trunk, gains tenant_id/team_id (030), active_version_id (033),
-and the capability columns features/plugins/allowed_skills (035-037). This store
+and the capability columns features/plugins/allowed_skills (036-038). This store
 reads and writes through the shared DB runtime boundary using named parameters;
 it never creates schema.
 
@@ -560,7 +560,7 @@ def list_channels_for_agent(agent_id: int) -> list[dict[str, Any]]:
 
 def bind_mcp_server(agent_id: int, server_id: str, created_by: str | None = None) -> None:
     _db().execute(
-        "INSERT OR IGNORE INTO agent_mcp_servers "
+        "INSERT OR IGNORE INTO agent_mcp_server_bindings "
         "(agent_id, server_id, created_at, created_by) "
         "VALUES (:agent_id, :server_id, :created_at, :created_by)",
         {
@@ -574,7 +574,8 @@ def bind_mcp_server(agent_id: int, server_id: str, created_by: str | None = None
 
 def unbind_mcp_server(agent_id: int, server_id: str) -> None:
     _db().execute(
-        "DELETE FROM agent_mcp_servers WHERE agent_id = :agent_id AND server_id = :server_id",
+        "DELETE FROM agent_mcp_server_bindings "
+        "WHERE agent_id = :agent_id AND server_id = :server_id",
         {"agent_id": agent_id, "server_id": server_id},
     )
 
@@ -583,7 +584,8 @@ def list_mcp_servers_for_agent(agent_id: int) -> list[str]:
     rows = (
         _db()
         .execute(
-            "SELECT server_id FROM agent_mcp_servers WHERE agent_id = :agent_id ORDER BY server_id",
+            "SELECT server_id FROM agent_mcp_server_bindings "
+            "WHERE agent_id = :agent_id ORDER BY server_id",
             {"agent_id": agent_id},
         )
         .fetchall()
