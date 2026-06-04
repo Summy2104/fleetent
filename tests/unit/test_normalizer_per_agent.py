@@ -1,0 +1,84 @@
+"""route() uses the pre-resolved agent for Slack, skipping get_agent_for_context."""
+
+from unittest.mock import AsyncMock
+
+import yaml
+
+import fleetent.im_user_store as im_user_store
+import fleetent.runtime.loop as agent_loop
+import fleetent.session.manager as session_mgr
+import fleetent.skills as sr
+from fleetent import agent_config
+from fleetent.im_gateway import normalizer
+from fleetent.integrations.sandbox import enablement as se
+from fleetent.platform.im_gateway_management import im_channel_allowlist as acl
+
+
+def _write(root, name, **fields):
+    doc = {"name": name, "version": 1}
+    doc.update(fields)
+    d = root / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+
+
+def _patches(monkeypatch, tmp_path, captured):
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(im_user_store, "check_allowed_by_user_id", lambda _uid: True)
+    monkeypatch.setattr(acl, "is_allowed", lambda *a, **k: True)
+    monkeypatch.setattr(se, "get_effective_mode", AsyncMock(return_value=se.Mode.OFF))
+    monkeypatch.setattr(sr, "available_skills_prompt", lambda **k: "")
+
+    async def fake_run(messages, **kwargs):
+        captured["system"] = messages[0]["content"]
+        return "done"
+
+    monkeypatch.setattr(agent_loop, "run", fake_run)
+
+    calls = []
+    real = normalizer.get_agent_for_context
+    monkeypatch.setattr(
+        normalizer, "get_agent_for_context", lambda *a, **k: (calls.append(1), real(*a, **k))[1]
+    )
+    captured["gac_calls"] = calls
+
+
+def _msg(agent_name=""):
+    async def reply(_text):
+        pass
+
+    return normalizer.NormalizedMessage(
+        platform="slack",
+        session_id="user:U1",
+        user_id="U1",
+        text="hi",
+        attachments=[],
+        reply_func=reply,
+        channel_id="C1",
+        agent_name=agent_name,
+    )
+
+
+async def test_route_uses_preresolved_agent_for_slack(tmp_path, monkeypatch):
+    _write(tmp_path / "agents", "support", system_prompt="S")
+    agent_config.scan(tmp_path / "agents")
+    captured: dict = {}
+    _patches(monkeypatch, tmp_path, captured)
+
+    await normalizer.route(_msg(agent_name="support"))
+
+    assert captured["system"] == "S"  # support agent applied
+    assert captured["gac_calls"] == []  # get_agent_for_context NOT consulted
+
+
+async def test_route_without_preresolved_agent_uses_index(tmp_path, monkeypatch):
+    # Telegram-style: no agent_name stamped → falls back to index resolution.
+    _write(tmp_path / "agents", "chan", system_prompt="C", bindings={"channels": ["slack:C1"]})
+    agent_config.scan(tmp_path / "agents")
+    captured: dict = {}
+    _patches(monkeypatch, tmp_path, captured)
+
+    await normalizer.route(_msg(agent_name=""))
+
+    assert captured["system"] == "C"
+    assert captured["gac_calls"] == [1]  # index lookup used

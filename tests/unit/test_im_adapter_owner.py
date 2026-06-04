@@ -6,29 +6,7 @@ import fleetent.im_gateway.slack as slack
 import fleetent.im_gateway.telegram as telegram
 
 
-async def test_slack_run_reports_status_with_owner(monkeypatch):
-    statuses: list = []
-    monkeypatch.setattr(
-        slack.im,
-        "report_status",
-        lambda o, p, s, error=None: statuses.append((o, p, s)),
-    )
-    monkeypatch.setattr(slack.im, "heartbeat", lambda o, p: None)
-    monkeypatch.setattr(slack, "create_app", lambda owner_id, config: object())
-
-    async def boom(app, app_token):
-        raise RuntimeError("x")
-
-    monkeypatch.setattr(slack, "_run_socket_mode", boom)
-
-    import pytest
-
-    with pytest.raises(RuntimeError):
-        await slack.run("ownerA", {"bot_token": "b", "app_token": "a"})
-    assert ("ownerA", "slack", "connected") in statuses
-
-
-async def test_slack_handler_stamps_owner(monkeypatch):
+async def test_slack_handler_stamps_owner_and_agent(monkeypatch):
     captured = {}
 
     def fake_get_or_create(owner_id, platform, puid):
@@ -42,6 +20,7 @@ async def test_slack_handler_stamps_owner(monkeypatch):
 
     async def fake_route(msg):
         routed["owner_id"] = msg.owner_id
+        routed["agent_name"] = msg.agent_name
 
     monkeypatch.setattr("fleetent.platform.im_gateway_management.get_or_create", fake_get_or_create)
     monkeypatch.setattr("fleetent.im_gateway.normalizer.route", fake_route)
@@ -58,14 +37,15 @@ async def test_slack_handler_stamps_owner(monkeypatch):
 
     app.event = event_deco
     with patch("slack_bolt.async_app.AsyncApp", return_value=app):
-        slack.create_app("ownerA", {"bot_token": "b"})
+        slack.create_app("support", "ownerA", {"bot_token": "b"})
 
     async def say(text, thread_ts=None):
         pass
 
-    await handler_holder["fn"]({"user": "U1", "text": "hi", "ts": "1"}, say)
+    await handler_holder["fn"]({"user": "U1", "text": "hi", "ts": "1", "channel": "C1"}, say)
     assert captured["owner_id"] == "ownerA"
     assert routed["owner_id"] == "ownerA"
+    assert routed["agent_name"] == "support"
 
 
 async def test_telegram_run_reports_status_with_owner(monkeypatch):

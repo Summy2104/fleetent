@@ -22,7 +22,7 @@ def _capture_slack_handler(monkeypatch):
         import fleetent.im_gateway.slack as slack_mod
 
         slack_mod.create_app(
-            "owner1", {"bot_token": "xoxb-test-token", "app_token": "xapp-test-token"}
+            "support", "owner1", {"bot_token": "xoxb-test-token", "app_token": "xapp-test-token"}
         )
     return captured["handler"]
 

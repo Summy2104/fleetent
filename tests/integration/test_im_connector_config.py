@@ -35,8 +35,9 @@ def test_resolve_prefers_db_config(db, monkeypatch):
 
 
 def test_resolve_falls_back_to_env(db, monkeypatch):
-    _env(monkeypatch, slack_bot_token="xoxb-env", slack_app_token="xapp-env")
-    assert icc.resolve(_owner(), "slack") == {"bot_token": "xoxb-env", "app_token": "xapp-env"}
+    # Slack is per-agent now; owner-level .env fallback covers Telegram.
+    _env(monkeypatch, telegram_bot_token="tg-env")
+    assert icc.resolve(_owner(), "telegram") == {"bot_token": "tg-env"}
 
 
 def test_resolve_masked_exposes_only_last4(db, monkeypatch):
@@ -54,21 +55,19 @@ def test_set_config_writes_db(db, monkeypatch):
 
 
 def test_seed_from_env_populates_and_enables(db, monkeypatch):
-    _env(monkeypatch, slack_bot_token="xoxb-e", slack_app_token="xapp-e")  # telegram empty
+    _env(monkeypatch, telegram_bot_token="tg-e")  # slack is per-agent, not seeded
     seeded = icc.seed_from_env()
-    assert "slack" in seeded
-    slack = ics.get_connector(_owner(), "slack")
-    assert json.loads(slack["config"]) == {"bot_token": "xoxb-e", "app_token": "xapp-e"}
-    assert slack["enabled"] == 1
+    assert "telegram" in seeded
+    assert "slack" not in seeded  # owner-level Slack removed
     telegram = ics.get_connector(_owner(), "telegram")
-    assert telegram["status"] == "unconfigured"
-    assert telegram["enabled"] == 0
+    assert json.loads(telegram["config"]) == {"bot_token": "tg-e"}
+    assert telegram["enabled"] == 1
 
 
 def test_platform_config_keys_schema():
     keys = icc.PLATFORM_CONFIG_KEYS
     assert keys["telegram"] == ["bot_token"]
-    assert keys["slack"] == ["bot_token", "signing_secret", "app_token"]
+    assert "slack" not in keys  # per-agent (per-agent-slack-connector), not owner-level
     assert keys["whatsapp"] == [
         "phone_number_id",
         "access_token",
@@ -86,12 +85,14 @@ def test_resolve_masked_masks_whatsapp_access_token(db, monkeypatch):
 
 
 def test_seed_is_idempotent_unless_force(db, monkeypatch):
-    _env(monkeypatch, slack_bot_token="xoxb-e", slack_app_token="xapp-e")
+    _env(monkeypatch, telegram_bot_token="tg-e")
     icc.seed_from_env()
-    # change env, seed again without force -> slack config unchanged
-    _env(monkeypatch, slack_bot_token="xoxb-CHANGED", slack_app_token="xapp-e")
+    # change env, seed again without force -> telegram config unchanged
+    _env(monkeypatch, telegram_bot_token="tg-CHANGED")
     icc.seed_from_env()
-    assert json.loads(ics.get_connector(_owner(), "slack")["config"])["bot_token"] == "xoxb-e"
+    assert json.loads(ics.get_connector(_owner(), "telegram")["config"])["bot_token"] == "tg-e"
     # with force -> overwritten
     icc.seed_from_env(force=True)
-    assert json.loads(ics.get_connector(_owner(), "slack")["config"])["bot_token"] == "xoxb-CHANGED"
+    assert (
+        json.loads(ics.get_connector(_owner(), "telegram")["config"])["bot_token"] == "tg-CHANGED"
+    )
