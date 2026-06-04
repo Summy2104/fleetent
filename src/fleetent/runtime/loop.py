@@ -14,6 +14,7 @@ from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
 from openai.types.chat import ChatCompletionChunk
 
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
+from fleetent import agent_config
 from fleetent.eval_logger import log_run
 from fleetent.governance.agent_policy import check_tool_access
 from fleetent.governance.permission_gate import _default_gate
@@ -1293,6 +1294,9 @@ def run_sync(
     call so freshly added skills are picked up.
     """
     scan_skills()
+    # file-driven-agent-config: rescan agent.yaml files each CLI invocation so freshly
+    # added/edited agents are picked up (mirrors scan_skills).
+    agent_config.scan()
     # AR7: load enabled plugins each CLI invocation, mirroring scan_skills (so a
     # freshly added plugin is picked up). The CLI passes no allowed_tools, so
     # plugin tools are exposed un-gated here — consistent with how the CLI exposes

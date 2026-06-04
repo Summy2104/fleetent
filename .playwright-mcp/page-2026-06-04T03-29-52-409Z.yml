@@ -1,0 +1,8 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e12]:
+    - heading "Set a new password" [level=2] [ref=e13]
+    - paragraph [ref=e14]: Your account requires a password reset before continuing.
+    - generic [ref=e15]:
+      - textbox "new password" [ref=e16]
+      - button "Update password" [ref=e17] [cursor=pointer]
+  - text: ▶

@@ -1,0 +1,89 @@
+- generic [ref=e11]:
+  - banner [ref=e12]:
+    - heading "fleetent · Admin" [level=1] [ref=e13]
+    - generic [ref=e14]: 876b7c46-9bf1-49ba-8730-8615c16732b7 · built_in_admin
+    - button "Sign out" [ref=e15] [cursor=pointer]
+  - generic [ref=e16]:
+    - navigation "Admin navigation" [ref=e17]:
+      - generic [ref=e18]:
+        - button "Access" [ref=e19] [cursor=pointer]
+        - button "Users" [ref=e20] [cursor=pointer]
+      - generic [ref=e21]:
+        - button "Agents & Skills" [ref=e22] [cursor=pointer]
+        - button "Agents" [ref=e23] [cursor=pointer]
+        - button "Skills" [ref=e24] [cursor=pointer]
+        - button "Knowledge Base" [ref=e25] [cursor=pointer]
+      - generic [ref=e26]:
+        - button "Models & Connectors" [ref=e27] [cursor=pointer]
+        - button "Providers" [ref=e28] [cursor=pointer]
+        - button "Connectors" [ref=e29] [cursor=pointer]
+      - generic [ref=e30]:
+        - button "Ops" [ref=e31] [cursor=pointer]
+        - button "Statistics" [ref=e32] [cursor=pointer]
+        - button "Monitoring" [ref=e33] [cursor=pointer]
+        - button "Sessions" [ref=e34] [cursor=pointer]
+      - generic [ref=e35]:
+        - button "Audit" [ref=e36] [cursor=pointer]
+        - button "Audit" [ref=e37] [cursor=pointer]
+    - main [ref=e38]:
+      - generic [ref=e39]:
+        - generic [ref=e40]:
+          - heading "Skills" [level=2] [ref=e41]
+          - generic [ref=e42]:
+            - button "Reload index" [ref=e43] [cursor=pointer]
+            - button "Import" [ref=e44] [cursor=pointer]
+            - button "+ New skill" [ref=e45] [cursor=pointer]
+        - generic [ref=e46]:
+          - textbox "🔍 Search skills by name or description" [ref=e47]:
+            - /placeholder: 🔍  Search skills by name or description
+          - combobox [ref=e48]:
+            - option "All sources" [selected]
+            - option "adhoc"
+            - option "managed"
+        - generic [ref=e49]:
+          - generic [ref=e50] [cursor=pointer]: All2
+          - generic [ref=e51] [cursor=pointer]: Active2
+          - generic [ref=e52] [cursor=pointer]: Disabled0
+          - generic [ref=e53] [cursor=pointer]: Quarantined0
+          - generic [ref=e54] [cursor=pointer]: Drifted0
+          - generic [ref=e55] [cursor=pointer]: Archived0
+        - generic [ref=e56]: 2 of 2 skills
+        - generic [ref=e57]:
+          - generic [ref=e58] [cursor=pointer]:
+            - generic [ref=e60]: 🧩
+            - generic [ref=e61]: getting-started
+            - generic [ref=e62]: Use when the user asks how to get started, what this assistant can do, or wants an introduction to available capabilities.
+            - generic [ref=e63]:
+              - generic [ref=e64]: active
+              - generic [ref=e65]: adhoc
+            - generic [ref=e66]:
+              - generic [ref=e67]: 0 agents
+              - generic [ref=e68]:
+                - button "Edit" [ref=e69]
+                - button "Disable" [ref=e70]
+          - generic [ref=e71] [cursor=pointer]:
+            - generic [ref=e73]: 🧩
+            - generic [ref=e74]: summarize-doc
+            - generic [ref=e75]: Summarize documents, articles, or long text. Use when user asks to summarize, tldr, or condense content.
+            - generic [ref=e76]:
+              - generic [ref=e77]: active
+              - generic [ref=e78]: adhoc
+            - generic [ref=e79]:
+              - generic [ref=e80]: 0 agents
+              - generic [ref=e81]:
+                - button "Edit" [ref=e82]
+                - button "Disable" [ref=e83]
+        - generic [ref=e84]:
+          - heading "Reflection proposals (1 pending)" [level=3] [ref=e86]
+          - generic [ref=e88]:
+            - generic [ref=e89]:
+              - strong [ref=e90]: summarize-doc
+              - generic [ref=e91]: enhancement
+              - generic [ref=e92]: "risk: low"
+              - generic [ref=e93]: 2 evidence
+            - generic [ref=e94]: Users repeatedly asked for bullet summaries; add a bullet mode section.
+            - generic [ref=e95]:
+              - button "View diff" [ref=e96] [cursor=pointer]
+              - button "Approve" [ref=e97] [cursor=pointer]
+              - button "Reject" [ref=e98] [cursor=pointer]
+  - text: ▶

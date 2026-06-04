@@ -1,0 +1,99 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - heading "fleetent · Admin" [level=1] [ref=e4]
+    - generic [ref=e5]: 876b7c46-9bf1-49ba-8730-8615c16732b7 · built_in_admin
+    - button "Sign out" [ref=e6] [cursor=pointer]
+  - generic [ref=e7]:
+    - navigation "Admin navigation" [ref=e8]:
+      - generic [ref=e9]:
+        - button "Access" [ref=e10] [cursor=pointer]
+        - button "Users" [ref=e11] [cursor=pointer]
+      - generic [ref=e12]:
+        - button "Agents & Skills" [ref=e13] [cursor=pointer]
+        - button "Agents" [ref=e14] [cursor=pointer]
+        - button "Skills" [ref=e15] [cursor=pointer]
+        - button "Knowledge Base" [ref=e16] [cursor=pointer]
+      - generic [ref=e17]:
+        - button "Models & Connectors" [ref=e18] [cursor=pointer]
+        - button "Providers" [ref=e19] [cursor=pointer]
+        - button "Connectors" [ref=e20] [cursor=pointer]
+      - generic [ref=e21]:
+        - button "Ops" [ref=e22] [cursor=pointer]
+        - button "Statistics" [ref=e23] [cursor=pointer]
+        - button "Monitoring" [ref=e24] [cursor=pointer]
+        - button "Sessions" [ref=e25] [cursor=pointer]
+      - generic [ref=e26]:
+        - button "Audit" [ref=e27] [cursor=pointer]
+        - button "Audit" [ref=e28] [cursor=pointer]
+    - main [ref=e29]:
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - heading "Connectors" [level=2] [ref=e32]
+          - button "Add Connector" [ref=e34] [cursor=pointer]:
+            - img [ref=e35]
+            - text: Add Connector
+        - generic [ref=e36]:
+          - button "All Connectors" [ref=e37] [cursor=pointer]
+          - button "MCP Servers" [ref=e38] [cursor=pointer]
+          - button "OAuth" [ref=e39] [cursor=pointer]
+        - generic [ref=e56] [cursor=pointer]:
+          - generic [ref=e58]: 🔐
+          - generic [ref=e59]: GitHub
+          - generic [ref=e60]: OAuth 2.0 Connector
+          - generic [ref=e61]:
+            - generic [ref=e62]: Global
+            - generic [ref=e63]:
+              - button "Test" [ref=e64]
+              - button "Edit" [active] [ref=e65]
+              - button "Disable" [ref=e66]
+              - button "Delete" [ref=e67]
+  - text: ▶
+  - dialog [ref=e69]:
+    - heading "Edit OAuth Connector" [level=3] [ref=e70]
+    - generic [ref=e71]:
+      - generic [ref=e72] [cursor=pointer]:
+        - generic [ref=e73]: 🔌
+        - generic [ref=e74]: MCP Server
+        - generic [ref=e75]: Model Context Protocol server for tools
+      - generic [ref=e76] [cursor=pointer]:
+        - generic [ref=e77]: 🔐
+        - generic [ref=e78]: OAuth 2.0
+        - generic [ref=e79]: Connect to OAuth-protected APIs
+    - generic [ref=e81]:
+      - generic [ref=e82]:
+        - generic [ref=e83]: Connector ID
+        - textbox "Connector ID" [ref=e84]: github
+      - generic [ref=e85]:
+        - generic [ref=e86]: Display Name
+        - textbox "Display Name" [ref=e87]:
+          - /placeholder: GitHub API
+          - text: GitHub
+      - generic [ref=e88]:
+        - generic [ref=e89]: Authorization URL
+        - textbox "Authorization URL" [ref=e90]:
+          - /placeholder: https://github.com/login/oauth/authorize
+          - text: https://github.com/login/oauth/authorize
+      - generic [ref=e91]:
+        - generic [ref=e92]: Token URL
+        - textbox "Token URL" [ref=e93]:
+          - /placeholder: https://github.com/login/oauth/access_token
+          - text: "****"
+      - generic [ref=e94]:
+        - generic [ref=e95]: Client ID
+        - textbox "Client ID" [ref=e96]:
+          - /placeholder: your-client-id
+          - text: cid
+      - generic [ref=e97]:
+        - generic [ref=e98]: Client Secret
+        - textbox "Client Secret" [ref=e99]:
+          - /placeholder: Leave blank to keep current
+      - generic [ref=e100]:
+        - generic [ref=e101]: Scopes
+        - textbox "Scopes" [ref=e102]:
+          - /placeholder: repo user (space separated)
+      - generic [ref=e103]:
+        - checkbox "Enabled" [checked] [ref=e104]
+        - generic [ref=e105]: Enabled
+      - generic [ref=e107]:
+        - button "Cancel" [ref=e108] [cursor=pointer]
+        - button "Save Changes" [ref=e109] [cursor=pointer]

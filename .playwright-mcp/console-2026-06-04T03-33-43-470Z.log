@@ -1,0 +1,19 @@
+[  376858ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8765/admin/mcp/servers/8c3e0977/test:0
+[  382784ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/connectors:0
+[  382791ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/mcp/servers:0
+[  390784ms] TypeError: Cannot set properties of null (setting 'textContent')
+    at mcpReconnect (http://127.0.0.1:8765/admin/ui:3192:40)
+[  444613ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/connectors:0
+[  444614ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/mcp/servers:0
+[  445308ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/connectors:0
+[  445309ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/mcp/servers:0
+[  445495ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/connectors:0
+[  445497ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/mcp/servers:0
+[  445667ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/connectors:0
+[  445669ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/mcp/servers:0
+[  445862ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/mcp/servers:0
+[  445864ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/connectors:0
+[  466525ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/mcp/servers:0
+[  467204ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/mcp/servers:0
+[  467391ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/mcp/servers:0
+[  467573ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8765/admin/mcp/servers:0

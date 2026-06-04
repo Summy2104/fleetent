@@ -1,0 +1,89 @@
+- generic [ref=e19]:
+  - banner [ref=e20]:
+    - heading "fleetent · Admin" [level=1] [ref=e21]
+    - generic [ref=e22]: 876b7c46-9bf1-49ba-8730-8615c16732b7 · built_in_admin
+    - button "Sign out" [ref=e23] [cursor=pointer]
+  - generic [ref=e24]:
+    - navigation "Admin navigation" [ref=e25]:
+      - generic [ref=e26]:
+        - button "Access" [ref=e27] [cursor=pointer]
+        - button "Users" [ref=e28] [cursor=pointer]
+      - generic [ref=e29]:
+        - button "Agents & Skills" [ref=e30] [cursor=pointer]
+        - button "Agents" [ref=e31] [cursor=pointer]
+        - button "Skills" [ref=e32] [cursor=pointer]
+        - button "Knowledge Base" [ref=e33] [cursor=pointer]
+      - generic [ref=e34]:
+        - button "Models & Connectors" [ref=e35] [cursor=pointer]
+        - button "Providers" [ref=e36] [cursor=pointer]
+        - button "Connectors" [ref=e37] [cursor=pointer]
+      - generic [ref=e38]:
+        - button "Ops" [ref=e39] [cursor=pointer]
+        - button "Statistics" [ref=e40] [cursor=pointer]
+        - button "Monitoring" [ref=e41] [cursor=pointer]
+        - button "Sessions" [ref=e42] [cursor=pointer]
+      - generic [ref=e43]:
+        - button "Audit" [ref=e44] [cursor=pointer]
+        - button "Audit" [ref=e45] [cursor=pointer]
+    - main [ref=e46]:
+      - generic [ref=e88]:
+        - generic [ref=e89]:
+          - heading "Connectors" [level=2] [ref=e90]
+          - button "Add Connector" [ref=e92] [cursor=pointer]:
+            - img [ref=e93]
+            - text: Add Connector
+        - generic [ref=e94]:
+          - button "All Connectors" [ref=e95] [cursor=pointer]
+          - button "MCP Servers" [ref=e96] [cursor=pointer]
+          - button "OAuth" [ref=e97] [cursor=pointer]
+        - generic [ref=e100]: No connectors configured.
+  - text: ▶
+  - dialog [ref=e102]:
+    - heading "Add MCP Server" [level=3] [ref=e113]
+    - generic [ref=e104]:
+      - generic [ref=e105] [cursor=pointer]:
+        - generic [ref=e106]: 🔌
+        - generic [ref=e107]: MCP Server
+        - generic [ref=e108]: Model Context Protocol server for tools
+      - generic [ref=e109] [cursor=pointer]:
+        - generic [ref=e110]: 🔐
+        - generic [ref=e111]: OAuth 2.0
+        - generic [ref=e112]: Connect to OAuth-protected APIs
+    - generic [ref=e115]:
+      - generic [ref=e116]:
+        - generic [ref=e117]: Server ID
+        - textbox "Server ID" [ref=e118]: 8c3e0977
+      - generic [ref=e119]:
+        - generic [ref=e120]: Display Name
+        - textbox "Display Name" [ref=e121]:
+          - /placeholder: My MCP Server
+      - generic [ref=e122]:
+        - generic [ref=e123]: Description
+        - textbox "Description" [ref=e124]:
+          - /placeholder: Optional description
+      - generic [ref=e125]:
+        - generic [ref=e126]: Transport
+        - combobox "Transport" [ref=e127]:
+          - option "Standard I/O (Local Process)" [selected]
+          - option "HTTP"
+          - option "WebSocket"
+      - generic [ref=e128]:
+        - generic [ref=e129]:
+          - generic [ref=e130]: Command
+          - textbox "Command" [ref=e131]:
+            - /placeholder: npx @modelcontextprotocol/server-everything
+        - generic [ref=e132]:
+          - generic [ref=e133]: Arguments (optional)
+          - textbox "Arguments (optional)" [ref=e134]:
+            - /placeholder: "--verbose --config /path/to/config"
+        - generic [ref=e135]:
+          - generic [ref=e136]: Environment Variables (optional)
+          - textbox "Environment Variables (optional)" [ref=e137]:
+            - /placeholder: "KEY1=value1\nKEY2=value2"
+      - generic [ref=e138]:
+        - checkbox "Enable immediately" [checked] [ref=e139]
+        - generic [ref=e140]: Enable immediately
+      - generic [ref=e142]:
+        - button "Cancel" [ref=e143] [cursor=pointer]
+        - button "Test Connection" [ref=e144] [cursor=pointer]
+        - button "Add MCP Server" [ref=e145] [cursor=pointer]

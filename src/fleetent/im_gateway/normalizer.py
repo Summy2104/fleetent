@@ -7,8 +7,8 @@ from typing import Any
 
 import structlog
 
-from fleetent import agent_store
-from fleetent.agent_store import Agent
+from fleetent import agent_config
+from fleetent.agent_config import AgentFile
 from fleetent.platform import im_gateway_management as im
 
 logger = structlog.get_logger(__name__)
@@ -34,16 +34,21 @@ class NormalizedMessage:
     owner_id: str = field(default="")
 
 
-def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> Agent | None:
-    """Resolve agent: channel binding → user binding → default agent → None (bare run)."""
+def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> AgentFile | None:
+    """Resolve agent from the file index: channel → user → default → None (bare run).
+
+    Zero DB: bindings and definitions come from the scanned ``agent.yaml`` index
+    (file-driven-agent-config).
+    """
+    index = agent_config.current()
+    name: str | None = None
     if channel_id:
-        agent = agent_store.get_agent_for_channel(platform, channel_id)
-        if agent:
-            return agent
-    agent = agent_store.get_agent_for_user(user_id)
-    if agent:
-        return agent
-    return agent_store.get_default_agent()
+        name = index.agent_for_channel(platform, channel_id)
+    if name is None and user_id:
+        name = index.agent_for_user(user_id)
+    if name is None:
+        name = index.default_agent()
+    return None if name is None else index.get(name)
 
 
 _IMAGE_MIME_PREFIX = "image/"

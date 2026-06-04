@@ -1,0 +1,23 @@
+[  157158ms] TypeError: Cannot set properties of null (setting 'textContent')
+    at mcpReconnect (http://127.0.0.1:8765/admin/ui:3192:40)
+[  157811ms] TypeError: Cannot set properties of null (setting 'textContent')
+    at mcpReconnect (http://127.0.0.1:8765/admin/ui:3192:40)
+[  158008ms] TypeError: Cannot set properties of null (setting 'textContent')
+    at mcpReconnect (http://127.0.0.1:8765/admin/ui:3192:40)
+[  158193ms] TypeError: Cannot set properties of null (setting 'textContent')
+    at mcpReconnect (http://127.0.0.1:8765/admin/ui:3192:40)
+[  158375ms] TypeError: Cannot set properties of null (setting 'textContent')
+    at mcpReconnect (http://127.0.0.1:8765/admin/ui:3192:40)
+[  158557ms] TypeError: Cannot set properties of null (setting 'textContent')
+    at mcpReconnect (http://127.0.0.1:8765/admin/ui:3192:40)
+[  159362ms] TypeError: Cannot set properties of null (setting 'textContent')
+    at mcpReconnect (http://127.0.0.1:8765/admin/ui:3192:40)
+[  159541ms] TypeError: Cannot set properties of null (setting 'textContent')
+    at mcpReconnect (http://127.0.0.1:8765/admin/ui:3192:40)
+[  159730ms] TypeError: Cannot set properties of null (setting 'textContent')
+    at mcpReconnect (http://127.0.0.1:8765/admin/ui:3192:40)
+[  159907ms] TypeError: Cannot set properties of null (setting 'textContent')
+    at mcpReconnect (http://127.0.0.1:8765/admin/ui:3192:40)
+[  479502ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8765/admin/mcp/servers/d7a0d72e/tools:0
+[  653228ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8765/admin/login:0
+[  654862ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8765/admin/login:0

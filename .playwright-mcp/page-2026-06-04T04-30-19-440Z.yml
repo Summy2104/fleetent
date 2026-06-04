@@ -1,0 +1,69 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - heading "fleetent · Admin" [level=1] [ref=e4]
+      - generic [ref=e5]: 876b7c46-9bf1-49ba-8730-8615c16732b7 · built_in_admin
+      - button "Sign out" [ref=e6] [cursor=pointer]
+    - generic [ref=e7]:
+      - navigation "Admin navigation" [ref=e8]:
+        - generic [ref=e9]:
+          - button "Access" [ref=e10] [cursor=pointer]
+          - button "Users" [ref=e11] [cursor=pointer]
+        - generic [ref=e12]:
+          - button "Agents & Skills" [ref=e13] [cursor=pointer]
+          - button "Agents" [ref=e14] [cursor=pointer]
+          - button "Skills" [ref=e15] [cursor=pointer]
+          - button "Knowledge Base" [ref=e16] [cursor=pointer]
+        - generic [ref=e17]:
+          - button "Models & Connectors" [ref=e18] [cursor=pointer]
+          - button "Providers" [ref=e19] [cursor=pointer]
+          - button "Connectors" [ref=e20] [cursor=pointer]
+        - generic [ref=e21]:
+          - button "Ops" [ref=e22] [cursor=pointer]
+          - button "Statistics" [ref=e23] [cursor=pointer]
+          - button "Monitoring" [ref=e24] [cursor=pointer]
+          - button "Sessions" [ref=e25] [cursor=pointer]
+        - generic [ref=e26]:
+          - button "Audit" [ref=e27] [cursor=pointer]
+          - button "Audit" [ref=e28] [cursor=pointer]
+      - main [ref=e29]:
+        - generic [ref=e30]:
+          - generic [ref=e31]:
+            - heading "Connectors" [level=2] [ref=e32]
+            - button "Add Connector" [ref=e34] [cursor=pointer]:
+              - img [ref=e35]
+              - text: Add Connector
+          - generic [ref=e36]:
+            - button "All Connectors" [ref=e37] [cursor=pointer]
+            - button "MCP Servers" [ref=e38] [cursor=pointer]
+            - button "OAuth" [ref=e39] [cursor=pointer]
+          - generic [ref=e41]:
+            - generic [ref=e42] [cursor=pointer]:
+              - generic [ref=e44]: 🔐
+              - generic [ref=e45]: GitHub
+              - generic [ref=e46]: OAuth 2.0 Connector · disabled
+              - generic [ref=e47]:
+                - generic [ref=e48]: Global
+                - generic [ref=e49]:
+                  - button "Test" [ref=e50]
+                  - button "Edit" [ref=e51]
+                  - button "Enable" [ref=e52]
+                  - button "Delete" [ref=e53]
+            - generic [ref=e54] [cursor=pointer]:
+              - generic [ref=e56]: 🔌
+              - generic [ref=e57]: middle
+              - generic [ref=e58]: MCP Server
+              - generic [ref=e59]:
+                - generic [ref=e60]: http
+                - generic [ref=e61]:
+                  - button "Test" [ref=e62]
+                  - button "Edit" [ref=e63]
+                  - button "Disable" [ref=e64]
+                  - button "Delete" [ref=e65]
+    - text: ▶
+  - dialog [ref=e67]:
+    - heading "Please confirm" [level=3] [ref=e68]
+    - paragraph [ref=e69]: Delete OAuth connector "github"? This cannot be undone.
+    - generic [ref=e70]:
+      - button "Cancel" [ref=e71] [cursor=pointer]
+      - button "Confirm" [active] [ref=e72] [cursor=pointer]
