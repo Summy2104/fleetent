@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,8 @@ def _default_required_env(monkeypatch: pytest.MonkeyPatch) -> None:
     env, so set a dummy here. Tests that exercise missing-key behaviour can
     monkeypatch.delenv it themselves (autouse runs before the test body).
     """
+    if os.environ.get("FLEETENT_EVAL_REAL_LLM") == "1":
+        return
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
 

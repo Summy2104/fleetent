@@ -14,18 +14,91 @@ class KnowledgeStore:
     def __init__(self, database: SQLiteDatabase) -> None:
         self._database = database
 
-    def ensure_knowledge_base(self, tenant_id: str, kb_id: str) -> None:
+    def ensure_knowledge_base(self, tenant_id: str, kb_id: str, description: str = "") -> None:
         self._database.execute(
             """
-            INSERT OR IGNORE INTO knowledge_bases (tenant_id, kb_id, created_at)
-            VALUES (:tenant_id, :kb_id, :created_at)
+            INSERT OR IGNORE INTO knowledge_bases (
+                tenant_id, kb_id, description, created_at, archived_at
+            )
+            VALUES (:tenant_id, :kb_id, :description, :created_at, NULL)
             """,
             {
                 "tenant_id": tenant_id,
                 "kb_id": kb_id,
+                "description": description,
                 "created_at": _format_datetime(_now()),
             },
         )
+
+    def update_knowledge_base_description(
+        self, tenant_id: str, kb_id: str, description: str
+    ) -> bool:
+        result = self._database.execute(
+            """
+            UPDATE knowledge_bases
+            SET description = :description
+            WHERE tenant_id = :tenant_id
+              AND kb_id = :kb_id
+            """,
+            {"tenant_id": tenant_id, "kb_id": kb_id, "description": description},
+        )
+        return result.rowcount > 0
+
+    def archive_knowledge_base(self, tenant_id: str, kb_id: str) -> bool:
+        result = self._database.execute(
+            """
+            UPDATE knowledge_bases
+            SET archived_at = :archived_at
+            WHERE tenant_id = :tenant_id
+              AND kb_id = :kb_id
+              AND archived_at IS NULL
+            """,
+            {
+                "tenant_id": tenant_id,
+                "kb_id": kb_id,
+                "archived_at": _format_datetime(_now()),
+            },
+        )
+        return result.rowcount > 0
+
+    def has_active_knowledge_base(self, tenant_id: str, kb_id: str) -> bool:
+        row = self._database.execute(
+            """
+            SELECT kb_id
+            FROM knowledge_bases
+            WHERE tenant_id = :tenant_id
+              AND kb_id = :kb_id
+              AND archived_at IS NULL
+            """,
+            {"tenant_id": tenant_id, "kb_id": kb_id},
+        ).fetchone()
+        return row is not None
+
+    def list_knowledge_bases(self, tenant_id: str) -> list[Row]:
+        return self._database.execute(
+            """
+            SELECT
+                kb.tenant_id,
+                kb.kb_id,
+                kb.description,
+                kb.created_at,
+                kb.archived_at,
+                COUNT(DISTINCT document.id) AS doc_count,
+                COUNT(chunk.id) AS chunk_count,
+                MAX(document.created_at) AS last_import
+            FROM knowledge_bases AS kb
+            LEFT JOIN knowledge_documents AS document
+              ON document.tenant_id = kb.tenant_id
+             AND document.kb_id = kb.kb_id
+             AND document.archived_at IS NULL
+            LEFT JOIN knowledge_chunks AS chunk
+              ON chunk.document_id = document.id
+            WHERE kb.tenant_id = :tenant_id
+            GROUP BY kb.tenant_id, kb.kb_id, kb.description, kb.created_at, kb.archived_at
+            ORDER BY kb.kb_id ASC
+            """,
+            {"tenant_id": tenant_id},
+        ).fetchall()
 
     def insert_document(self, document: KnowledgeDocument) -> None:
         self._database.execute(
@@ -107,9 +180,13 @@ class KnowledgeStore:
                     document.source_url
                 FROM knowledge_chunks AS chunk
                 JOIN knowledge_documents AS document ON document.id = chunk.document_id
+                JOIN knowledge_bases AS kb
+                  ON kb.tenant_id = chunk.tenant_id
+                 AND kb.kb_id = chunk.kb_id
                 WHERE chunk.tenant_id = :tenant_id
                   AND chunk.id IN ({placeholders})
                   AND document.archived_at IS NULL
+                  AND kb.archived_at IS NULL
                 """,
             params,
         ).fetchall()
@@ -131,13 +208,67 @@ class KnowledgeStore:
                     document.source_url
                 FROM knowledge_chunks AS chunk
                 JOIN knowledge_documents AS document ON document.id = chunk.document_id
+                JOIN knowledge_bases AS kb
+                  ON kb.tenant_id = chunk.tenant_id
+                 AND kb.kb_id = chunk.kb_id
                 WHERE chunk.document_id = :document_id
                   AND document.archived_at IS NULL
+                  AND kb.archived_at IS NULL
                 ORDER BY chunk.position ASC
                 """,
             {"document_id": document_id},
         ).fetchall()
         return [_row_to_chunk(row, score=0.0) for row in rows]
+
+    def get_scoped_document_chunks(
+        self, tenant_id: str, kb_id: str, document_id: str
+    ) -> list[KnowledgeChunk]:
+        rows = self._database.execute(
+            """
+                SELECT
+                    chunk.id,
+                    chunk.document_id,
+                    chunk.tenant_id,
+                    chunk.kb_id,
+                    chunk.position,
+                    chunk.content,
+                    chunk.metadata_json,
+                    document.filename,
+                    document.source,
+                    document.source_url
+                FROM knowledge_chunks AS chunk
+                JOIN knowledge_documents AS document ON document.id = chunk.document_id
+                JOIN knowledge_bases AS kb
+                  ON kb.tenant_id = chunk.tenant_id
+                 AND kb.kb_id = chunk.kb_id
+                WHERE chunk.tenant_id = :tenant_id
+                  AND chunk.kb_id = :kb_id
+                  AND chunk.document_id = :document_id
+                  AND document.archived_at IS NULL
+                  AND kb.archived_at IS NULL
+                ORDER BY chunk.position ASC
+                """,
+            {"tenant_id": tenant_id, "kb_id": kb_id, "document_id": document_id},
+        ).fetchall()
+        return [_row_to_chunk(row, score=0.0) for row in rows]
+
+    def has_active_document(self, tenant_id: str, kb_id: str, document_id: str) -> bool:
+        row = self._database.execute(
+            """
+            SELECT document.id
+            FROM knowledge_documents AS document
+            JOIN knowledge_bases AS kb
+              ON kb.tenant_id = document.tenant_id
+             AND kb.kb_id = document.kb_id
+            WHERE document.tenant_id = :tenant_id
+              AND document.kb_id = :kb_id
+              AND document.id = :document_id
+              AND document.archived_at IS NULL
+              AND kb.archived_at IS NULL
+            """,
+            {"tenant_id": tenant_id, "kb_id": kb_id, "document_id": document_id},
+        ).fetchone()
+        return row is not None
 
     def iter_indexable_chunks(self, tenant_id: str, kb_id: str) -> list[KnowledgeChunk]:
         rows = self._database.execute(
@@ -155,12 +286,78 @@ class KnowledgeStore:
                     document.source_url
                 FROM knowledge_chunks AS chunk
                 JOIN knowledge_documents AS document ON document.id = chunk.document_id
+                JOIN knowledge_bases AS kb
+                  ON kb.tenant_id = chunk.tenant_id
+                 AND kb.kb_id = chunk.kb_id
                 WHERE chunk.tenant_id = :tenant_id
                   AND chunk.kb_id = :kb_id
                   AND document.archived_at IS NULL
+                  AND kb.archived_at IS NULL
                 ORDER BY chunk.document_id ASC, chunk.position ASC, chunk.id ASC
                 """,
             {"tenant_id": tenant_id, "kb_id": kb_id},
+        ).fetchall()
+        return [_row_to_chunk(row, score=0.0) for row in rows]
+
+    def list_documents(self, tenant_id: str, kb_id: str) -> list[Row]:
+        return self._database.execute(
+            """
+            SELECT
+                document.id AS document_id,
+                document.filename,
+                document.source,
+                document.source_url,
+                document.created_at,
+                COUNT(chunk.id) AS chunks
+            FROM knowledge_documents AS document
+            JOIN knowledge_bases AS kb
+              ON kb.tenant_id = document.tenant_id
+             AND kb.kb_id = document.kb_id
+            LEFT JOIN knowledge_chunks AS chunk ON chunk.document_id = document.id
+            WHERE document.tenant_id = :tenant_id
+              AND document.kb_id = :kb_id
+              AND document.archived_at IS NULL
+              AND kb.archived_at IS NULL
+            GROUP BY
+                document.id,
+                document.filename,
+                document.source,
+                document.source_url,
+                document.created_at
+            ORDER BY document.created_at DESC, document.id ASC
+            """,
+            {"tenant_id": tenant_id, "kb_id": kb_id},
+        ).fetchall()
+
+    def preview_document_chunks(
+        self, tenant_id: str, kb_id: str, document_id: str
+    ) -> list[KnowledgeChunk]:
+        rows = self._database.execute(
+            """
+                SELECT
+                    chunk.id,
+                    chunk.document_id,
+                    chunk.tenant_id,
+                    chunk.kb_id,
+                    chunk.position,
+                    chunk.content,
+                    chunk.metadata_json,
+                    document.filename,
+                    document.source,
+                    document.source_url
+                FROM knowledge_chunks AS chunk
+                JOIN knowledge_documents AS document ON document.id = chunk.document_id
+                JOIN knowledge_bases AS kb
+                  ON kb.tenant_id = chunk.tenant_id
+                 AND kb.kb_id = chunk.kb_id
+                WHERE chunk.tenant_id = :tenant_id
+                  AND chunk.kb_id = :kb_id
+                  AND chunk.document_id = :document_id
+                  AND document.archived_at IS NULL
+                  AND kb.archived_at IS NULL
+                ORDER BY chunk.position ASC
+                """,
+            {"tenant_id": tenant_id, "kb_id": kb_id, "document_id": document_id},
         ).fetchall()
         return [_row_to_chunk(row, score=0.0) for row in rows]
 
@@ -202,10 +399,14 @@ class KnowledgeStore:
             FROM knowledge_chunks_fts
             JOIN knowledge_chunks AS chunk ON chunk.id = knowledge_chunks_fts.chunk_id
             JOIN knowledge_documents AS document ON document.id = chunk.document_id
+            JOIN knowledge_bases AS kb
+              ON kb.tenant_id = chunk.tenant_id
+             AND kb.kb_id = chunk.kb_id
             WHERE knowledge_chunks_fts MATCH :query
               AND knowledge_chunks_fts.tenant_id = :tenant_id
               AND knowledge_chunks_fts.kb_id IN ({placeholders})
               AND document.archived_at IS NULL
+              AND kb.archived_at IS NULL
             ORDER BY rank ASC, chunk.position ASC, chunk.id ASC
             LIMIT :limit
             """,
@@ -269,6 +470,12 @@ class KnowledgeStore:
                 """,
                 {"document_id": document_id},
             )
+
+    def delete_scoped_document(self, tenant_id: str, kb_id: str, document_id: str) -> bool:
+        if not self.has_active_document(tenant_id, kb_id, document_id):
+            return False
+        self.delete_document(document_id)
+        return True
 
 
 def _row_to_chunk(row: Row, score: float) -> KnowledgeChunk:

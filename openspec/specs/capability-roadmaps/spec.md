@@ -5,6 +5,7 @@ Define the roadmap documents used to manage Pilot readiness, related capability 
 implementation batches, dependencies, validation gaps and Go / Conditional Go / No-Go criteria.
 ## Requirements
 ### Requirement: Pilot readiness roadmap
+
 The project SHALL maintain a thin Pilot readiness roadmap that links detailed capability-cluster
 roadmaps and identifies Pilot validation entrypoints.
 
@@ -27,6 +28,16 @@ roadmaps and identifies Pilot validation entrypoints.
 #### Scenario: Roadmap defines MVP-ready criteria
 - **WHEN** the team evaluates whether Pilot is ready
 - **THEN** roadmap docs provide explicit criteria for readiness, validation evidence and remaining gaps
+
+#### Scenario: Intelligence validation manual uses current CLI entrypoints
+- **WHEN** a maintainer opens `docs/deployment/intelligence-roadmap-test-manual.md`
+- **THEN** shared memory validation commands use the current `fleetent-admin memory shared ...` command tree
+- **AND** the manual does not instruct operators to run removed `fleetent-admin shared-memory ...` commands
+
+#### Scenario: Intelligence validation manual describes real provider opt-in
+- **WHEN** a maintainer opens `docs/deployment/intelligence-roadmap-test-manual.md`
+- **THEN** real LLM validation instructions explain the explicit opt-in env and provider credential requirements
+- **AND** the instructions do not require committing or printing secrets
 
 ### Requirement: Unit test hardening is tracked after MVP foundation
 Capability roadmaps SHALL track test hardening as post-foundation quality work rather than as a new runtime feature.
