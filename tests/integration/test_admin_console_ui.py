@@ -98,15 +98,15 @@ def test_skill_import_has_clear_folder_picker():
     html = ADMIN_HTML
     # the raw file input is hidden; a visible button triggers it so the whole
     # control is obviously clickable (fixes "clicking does nothing")
+    # visible native folder input (direct click = the only 100%-reliable picker trigger)
     assert 'id="sk-import-files"' in html
-    # native <label for> opens the picker (reliable user activation, no JS .click())
-    assert '<label for="sk-import-files"' in html
-    assert 'id="sk-import-pick"' in html  # selected-folder label
+    assert "webkitdirectory" in html
+    assert 'id="sk-import-pick"' in html
     assert "function skImportPicked" in html
-    # immediate click feedback: label flips + control shows a busy/pressed state
-    fn = html.split("function skPickFeedback", 1)[1].split("function skImportPicked", 1)[0]
-    assert "Opening folder picker" in fn
-    assert "is-busy" in fn
+    # reliable fallback when the OS folder picker is blocked: a .zip upload
+    assert 'id="sk-import-zip"' in html
+    assert "function skDoUploadZip" in html
+    assert 'accept=".zip' in html
 
 
 def test_skills_proposals_review_wired():

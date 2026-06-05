@@ -358,6 +358,26 @@ def test_import_upload_batch_folder(client, tmp_path, monkeypatch):
     assert {i["name"] for i in r.json()["imported"]} == {"one", "two"}
 
 
+def test_import_upload_zip(client, tmp_path, monkeypatch):
+    import io
+    import zipfile
+
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    monkeypatch.setattr(api, "engine_skills_dir", lambda: str(skills_dir))
+    token, _ = _session_for("admin")
+    # a .zip is the reliable fallback when the OS folder picker is blocked
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("alpha/SKILL.md", "---\nname: alpha\ndescription: d\n---\nbody")
+        zf.writestr("alpha/run.sh", "echo hi")
+    files = [("files", ("skills.zip", buf.getvalue(), "application/zip"))]
+    r = client.post("/admin/skills/import/upload", headers=_hdr(token), files=files)
+    assert r.status_code == 200, r.text
+    assert [i["name"] for i in r.json()["imported"]] == ["alpha"]
+    assert (skills_dir / "alpha" / "SKILL.md").exists()
+
+
 def test_import_upload_viewer_forbidden(client):
     token, _ = _session_for("viewer")
     files = [("files", ("a/SKILL.md", b"---\nname: a\ndescription: d\n---\nb"))]
