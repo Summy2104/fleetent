@@ -51,7 +51,7 @@ from fleetent.platform.im_gateway_management.identity import (
     list_pending,
     rebind_im_identity,
     restore_im_user,
-    update_im_identity_metadata,
+    update_im_identity,
 )
 
 __all__ = [
@@ -77,7 +77,7 @@ __all__ = [
     "list_pending",
     "rebind_im_identity",
     "remove_entry",
-    "update_im_identity_metadata",
+    "update_im_identity",
     "report_status",
     "resolve",
     "resolve_masked",

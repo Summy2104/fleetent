@@ -997,6 +997,8 @@
       <h3>Edit IM identity</h3>
       <div id="ie-head" class="bind-im-summary"></div>
       <form class="row" style="flex-direction:column; align-items:stretch; gap:10px; margin-top:10px;" onsubmit="doImEdit(); return false;">
+        <label class="field-label" for="ie-puid">User ID <span class="muted">— auto-captured, edit to override</span></label>
+        <input id="ie-puid" autocomplete="off">
         <div id="ie-fields" style="display:flex; flex-direction:column; gap:10px;"></div>
         <div id="ie-err" class="err"></div>
         <div class="row" style="justify-content:flex-end;">
@@ -1883,13 +1885,14 @@ function openImEdit(imId) {
   if (!identity) return;
   IM_EDIT_ID = imId;
   $("ie-err").textContent = "";
-  // Read-only header: the handle is auto-captured from the platform, never edited.
+  // Platform is fixed; the User ID is auto-captured but admin-overridable below.
   const icon = PLATFORM_ICON[identity.platform] || "🔗";
   $("ie-head").innerHTML = `<span class="bind-im-avatar">${icon}</span>
     <div>
-      <div class="bind-im-id">${esc(identity.platform)} · ${esc(identity.platform_user_id)}</div>
-      <div class="bind-im-owner">Platform handle — auto-captured, read-only</div>
+      <div class="bind-im-id">${esc(identity.platform)}</div>
+      <div class="bind-im-owner">Platform — fixed</div>
     </div>`;
+  $("ie-puid").value = identity.platform_user_id;
   // Editable fields differ per platform; render from the field schema.
   const fields = IM_FIELDS[identity.platform] || [];
   const meta = identity.metadata || {};
@@ -1909,13 +1912,15 @@ function openImEdit(imId) {
 function closeImEdit() { $("im-edit-modal").classList.add("hidden"); IM_EDIT_ID = null; }
 async function doImEdit() {
   $("ie-err").textContent = "";
+  const platform_user_id = $("ie-puid").value.trim();
+  if (!platform_user_id) { $("ie-err").textContent = "User ID is required"; return; }
   const metadata = {};
   for (const el of $("ie-fields").querySelectorAll("[data-key]")) {
     const v = el.value.trim();
     if (v) metadata[el.dataset.key] = v;
   }
   try {
-    await api("PATCH", `/im-users/${IM_EDIT_ID}`, { metadata });
+    await api("PATCH", `/im-users/${IM_EDIT_ID}`, { platform_user_id, metadata });
     closeImEdit();
     toast("IM identity updated", "success");
     loadUsers();

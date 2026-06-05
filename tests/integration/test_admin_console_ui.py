@@ -1034,11 +1034,11 @@ def test_im_identity_has_edit_and_delete():
     assert 'id="ie-head"' in html  # read-only handle summary
     assert "IM_FIELDS" in html  # field schema fetched from the API
     assert '"/im-users/fields"' in html
-    assert "auto-captured, read-only" in html
-    # platform_user_id is no longer an editable input.
-    assert 'id="ie-puid"' not in html
+    # User ID is auto-captured but admin-overridable.
+    assert 'id="ie-puid"' in html
+    assert "auto-captured, edit to override" in html
     assert "doImEdit(" in html
-    assert '"PATCH", `/im-users/${IM_EDIT_ID}`, { metadata }' in html
+    assert '"PATCH", `/im-users/${IM_EDIT_ID}`, { platform_user_id, metadata }' in html
     # Delete wired to the DELETE endpoint with a confirm guard.
     assert 'api("DELETE", `/im-users/${id}`)' in html
     assert "confirmDialog(" in html[html.index("async function imDelete") :]

@@ -231,40 +231,56 @@ def identity_fields(platform: str) -> list[dict[str, Any]]:
     return [dict(f) for f in PLATFORM_IDENTITY_FIELDS.get(platform, [])]
 
 
-def update_im_identity_metadata(
+def update_im_identity(
     im_user_id: int,
-    metadata: dict[str, Any],
+    platform_user_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
     actor: str | None = None,
 ) -> None:
-    """Replace an IM identity's editable metadata. Audited.
+    """Edit an IM identity. Audited.
 
-    Only keys defined for the identity's platform (see PLATFORM_IDENTITY_FIELDS) are
-    stored; unknown keys are dropped. The handle, binding and allowlist are untouched.
-    Raises ValueError if the identity does not exist.
+    The platform User ID is auto-captured but admin-overridable: pass ``platform_user_id``
+    to correct it (uniqueness-checked → ValueError "already exists" on collision). Pass
+    ``metadata`` to replace the per-platform editable fields (keys outside the platform's
+    schema are dropped). The platform, binding and allowlist are untouched. Raises
+    ValueError if the identity does not exist.
     """
     import json
+    import sqlite3
 
     from fleetent.governance import audit_log
 
     _init_db()
+    detail: dict[str, Any] = {}
     with _conn() as conn:
         row = conn.execute(
             "SELECT platform FROM im_users WHERE id = :id", {"id": im_user_id}
         ).fetchone()
         if row is None:
             raise ValueError(f"im identity not found: {im_user_id}")
-        allowed_keys = {f["key"] for f in PLATFORM_IDENTITY_FIELDS.get(row[0], [])}
-        clean = {k: v for k, v in metadata.items() if k in allowed_keys}
-        conn.execute(
-            "UPDATE im_users SET meta_json = :m WHERE id = :id",
-            {"m": json.dumps(clean), "id": im_user_id},
-        )
+        if platform_user_id is not None:
+            try:
+                conn.execute(
+                    "UPDATE im_users SET platform_user_id = :puid WHERE id = :id",
+                    {"puid": platform_user_id, "id": im_user_id},
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(f"im identity already exists: {platform_user_id}") from exc
+            detail["platform_user_id"] = platform_user_id
+        if metadata is not None:
+            allowed_keys = {f["key"] for f in PLATFORM_IDENTITY_FIELDS.get(row[0], [])}
+            clean = {k: v for k, v in metadata.items() if k in allowed_keys}
+            conn.execute(
+                "UPDATE im_users SET meta_json = :m WHERE id = :id",
+                {"m": json.dumps(clean), "id": im_user_id},
+            )
+            detail["metadata_keys"] = sorted(clean)
     audit_log.write_audit(
         actor,
         "update_im_user",
         target_type="im_user",
         target_id=str(im_user_id),
-        detail={"metadata_keys": sorted(clean)},
+        detail=detail,
     )
 
 

@@ -385,6 +385,7 @@ def im_identity_fields(authorization: str | None = Header(None)) -> dict[str, li
 
 
 class EditImBody(BaseModel):
+    platform_user_id: str | None = None
     metadata: dict[str, Any] = {}
 
 
@@ -392,12 +393,19 @@ class EditImBody(BaseModel):
 def edit_im_user(
     im_user_id: int, body: EditImBody, authorization: str | None = Header(None)
 ) -> dict[str, str]:
-    """Edit an IM identity's per-platform metadata (handle stays auto-captured)."""
+    """Edit an IM identity: per-platform metadata + optional User ID override."""
     admin = _require_admin(authorization)
     try:
-        im.update_im_identity_metadata(im_user_id, body.metadata, actor=admin.id)
+        im.update_im_identity(
+            im_user_id,
+            platform_user_id=body.platform_user_id,
+            metadata=body.metadata,
+            actor=admin.id,
+        )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # "already exists" is a uniqueness conflict; anything else is not-found.
+        status = 409 if "already exists" in str(exc) else 404
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
     return {"status": "updated"}
 
 
