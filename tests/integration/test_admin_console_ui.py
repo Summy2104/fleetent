@@ -486,6 +486,21 @@ def test_agent_drawer_preview_is_readonly_yaml():
     assert "function agCopyYaml" in html and "function agDownloadYaml" in html
 
 
+def test_agent_bindings_are_searchable_multiselect():
+    html = ADMIN_HTML
+    fn = html.split("async function agLoadCreateBindings", 1)[1].split("function agMsWidget", 1)[0]
+    # skills / connectors(mcp+oauth) / im users render as the multi-select widget
+    for call in ("agMsWidget(\"agm-skills\"", "agMsWidget(\"agm-mcp\"", "agMsWidget(\"agm-oauth\"", "agMsWidget(\"agm-users\""):
+        assert call in fn, call
+    # the widget supports name filtering + chip selection; classes preserved for save-diff
+    widget = html.split("function agMsWidget", 1)[1].split("function agMsOpen", 1)[0]
+    assert "ms-search" in widget and "agMsFilter(" in widget
+    assert "ms-chips" in widget
+    # the old standalone user filter input is gone
+    assert 'id="agm-user-filter"' not in html
+    assert "agmFilterUsers" not in html
+
+
 def test_agent_model_overrides_pick_from_providers():
     html = ADMIN_HTML
     render = html.split("function agRenderModelOverrides", 1)[1].split("function agCollectModelOverrides", 1)[0]

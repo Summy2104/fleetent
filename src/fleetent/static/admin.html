@@ -270,6 +270,25 @@
     text-overflow:ellipsis; }
   .bind-user-item .bind-user-sub { color:var(--muted); font-size:12px; }
   .bind-user-empty { padding:16px; text-align:center; color:var(--muted); font-size:13px; }
+  /* --- Multi-select dropdown (agent bindings) --- */
+  .ms { position:relative; }
+  .ms-control { min-height:36px; display:flex; flex-wrap:wrap; gap:4px; align-items:center;
+    padding:5px 8px; border:1px solid var(--border); border-radius:8px; background:var(--surface);
+    cursor:pointer; }
+  .ms-chips { display:flex; flex-wrap:wrap; gap:4px; flex:1; }
+  .ms-chip { display:inline-flex; align-items:center; gap:5px; padding:2px 6px; font-size:12px;
+    background:var(--line); border-radius:999px; }
+  .ms-chip button { border:none; background:none; color:var(--muted); cursor:pointer; font-size:13px;
+    line-height:1; padding:0; }
+  .ms-chip button:hover { color:var(--danger); }
+  .ms-panel { position:absolute; z-index:30; left:0; right:0; margin-top:4px; padding:6px;
+    background:var(--panel); border:1px solid var(--border); border-radius:8px;
+    box-shadow:0 6px 20px rgba(0,0,0,.4); }
+  .ms-panel.hidden { display:none; }
+  .ms-search { width:100%; margin-bottom:6px; }
+  .ms-opts { max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; }
+  .ms-opt { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; }
+  .ms-opt:hover { background:var(--surface); }
   /* --- Skills module --- */
   .sk-toolbar { display:flex; gap:10px; margin-bottom:10px; }
   .sk-search { flex:1; }
@@ -1260,8 +1279,7 @@
           <h4 style="margin:14px 0 4px;">Knowledge bases</h4>
           <div id="agm-kb" style="display:flex; flex-direction:column; gap:4px;"></div>
           <h4 style="margin:14px 0 4px;">IM users (allowlist)</h4>
-          <input id="agm-user-filter" class="sk-search" style="margin:4px 0 6px;" placeholder="🔍  Filter users by name, email or id" oninput="agmFilterUsers()">
-          <div id="agm-users" style="display:flex; flex-direction:column; gap:4px;"></div>
+          <div id="agm-users"></div>
           <h4 style="margin:14px 0 4px;">Channels</h4>
           <div id="agm-channels"></div>
           <div class="row" style="margin-top:6px;"><input id="agm-ch-platform" placeholder="platform" style="max-width:120px;"><input id="agm-ch-id" placeholder="channel_id"><button type="button" class="small" onclick="agmAddChannel()">Add channel</button></div>
@@ -2768,7 +2786,6 @@ let AGM_CHANNELS = [];
 async function agLoadCreateBindings(current = null) {
   AGM_CHANNELS = [];
   $("agm-channels").innerHTML = "";
-  if ($("agm-user-filter")) $("agm-user-filter").value = "";
   const [skills, mcp, connectors, kbs, users] = await Promise.all([
     api("GET", "/skills").catch(() => []),
     api("GET", "/mcp/servers").catch(() => []),
@@ -2776,19 +2793,23 @@ async function agLoadCreateBindings(current = null) {
     api("GET", "/kb").catch(() => []),
     api("GET", "/users").catch(() => []),
   ]);
-  const box = (cls, val, label, q) =>
-    `<label class="row ${cls}" ${q != null ? `data-q="${esc(q.toLowerCase())}"` : ""}><input type="checkbox" value="${esc(val)}"> ${label}</label>`;
-  $("agm-skills").innerHTML = (skills || []).map(s => box("agm-skill", s.name, esc(s.name))).join("")
-    || `<div class="muted">No skills available.</div>`;
-  $("agm-mcp").innerHTML = (mcp || []).map(m => box("agm-mcp-item", m.id, esc(m.id))).join("")
-    || `<div class="muted">No MCP servers.</div>`;
-  $("agm-oauth").innerHTML = (connectors || []).map(c => box("agm-oauth-item", c.id, esc(c.display_name || c.id))).join("")
-    || `<div class="muted">No OAuth connectors.</div>`;
+  // Skills / connectors / IM users are searchable multi-select dropdowns; KB stays a
+  // simple list. The option checkboxes keep their binding classes so the save-diff
+  // read-paths (checked("agm-…")) are unchanged.
+  agMsWidget("agm-skills", "agm-skill", (skills || []).map(s => ({ value: s.name, label: s.name })), "Select skills…");
+  agMsWidget("agm-mcp", "agm-mcp-item", (mcp || []).map(m => ({ value: m.id, label: m.id })), "Select MCP servers…");
+  agMsWidget("agm-oauth", "agm-oauth-item",
+    (connectors || []).map(c => ({ value: c.id, label: c.display_name || c.id, q: `${c.display_name || ""} ${c.id}` })),
+    "Select OAuth connectors…");
+  agMsWidget("agm-users", "agm-user-row",
+    (users || []).map(u => ({
+      value: u.id,
+      label: (u.name || u.email || u.id) + (u.name || u.email ? ` (${u.id})` : ""),
+      q: [u.id, u.name || "", u.email || ""].join(" "),
+    })), "Select IM users…");
+  const box = (cls, val, label) => `<label class="row ${cls}"><input type="checkbox" value="${esc(val)}"> ${label}</label>`;
   $("agm-kb").innerHTML = (kbs || []).map(k => box("agm-kb-item", k.kb_id, esc(k.kb_id) + (k.description ? ` <span class="muted">— ${esc(k.description)}</span>` : ""))).join("")
     || `<div class="muted">No knowledge bases.</div>`;
-  $("agm-users").innerHTML = (users || []).map(u =>
-    box("agm-user-row", u.id, esc(u.name || u.email || u.id) + (u.name || u.email ? ` <span class="muted">(${esc(u.id)})</span>` : ""),
-      [u.id, u.name || "", u.email || ""].join(" "))).join("") || `<div class="muted">No users available.</div>`;
   if (current) {
     const check = (cls, set) => {
       for (const cb of document.querySelectorAll(`#ag-bind-config .${cls} input[type=checkbox]`))
@@ -2799,15 +2820,63 @@ async function agLoadCreateBindings(current = null) {
     check("agm-oauth-item", new Set(current.oauth || []));
     check("agm-kb-item", new Set(current.kb || []));
     check("agm-user-row", new Set(current.users || []));
+    for (const id of ["agm-skills", "agm-mcp", "agm-oauth", "agm-users"]) agMsSync(id);
     AGM_CHANNELS = (current.channels || []).map(c => ({ platform: c.platform, channel_id: c.channel_id }));
     agmRenderChannels();
   }
 }
-function agmFilterUsers() {
-  const q = ($("agm-user-filter").value || "").trim().toLowerCase();
-  for (const row of document.querySelectorAll("#agm-users .agm-user-row")) {
-    row.style.display = (!q || (row.dataset.q || "").includes(q)) ? "" : "none";
+
+// Searchable multi-select: renders option checkboxes (keeping `cls` for read-paths)
+// inside a filterable dropdown, with selected items shown as removable chips.
+function agMsWidget(containerId, cls, items, placeholder) {
+  const opts = items.map(it =>
+    `<label class="ms-opt ${cls}" data-q="${esc((it.q || it.label).toLowerCase())}">
+       <input type="checkbox" value="${esc(it.value)}" onchange="agMsSync('${containerId}')"> ${esc(it.label)}
+     </label>`).join("") || `<div class="muted" style="padding:6px;">None available.</div>`;
+  $(containerId).innerHTML = `
+    <div class="ms">
+      <div class="ms-control" onclick="agMsOpen('${containerId}', event)">
+        <span class="ms-chips" id="${containerId}-chips"></span>
+      </div>
+      <div class="ms-panel hidden" id="${containerId}-panel">
+        <input class="ms-search sk-search" placeholder="🔍  Filter by name" oninput="agMsFilter('${containerId}')" onclick="event.stopPropagation()">
+        <div class="ms-opts">${opts}</div>
+      </div>
+    </div>`;
+  $(containerId).querySelector(".ms-control").dataset.placeholder = placeholder || "Select…";
+  agMsSync(containerId);
+}
+function agMsOpen(id, e) {
+  if (e) e.stopPropagation();
+  const panel = $(id + "-panel");
+  const wasHidden = panel.classList.contains("hidden");
+  for (const p of document.querySelectorAll("#ag-bind-config .ms-panel")) p.classList.add("hidden");
+  if (wasHidden) {
+    panel.classList.remove("hidden");
+    const s = panel.querySelector(".ms-search");
+    if (s) { s.value = ""; agMsFilter(id); s.focus(); }
   }
+}
+function agMsFilter(id) {
+  const q = ($(id + "-panel").querySelector(".ms-search").value || "").trim().toLowerCase();
+  for (const o of $(id + "-panel").querySelectorAll(".ms-opt"))
+    o.style.display = (!q || (o.dataset.q || "").includes(q)) ? "" : "none";
+}
+function agMsSync(id) {
+  const checked = [...$(id).querySelectorAll(".ms-opt input:checked")];
+  const chips = $(id + "-chips");
+  const placeholder = $(id).querySelector(".ms-control").dataset.placeholder || "Select…";
+  if (!checked.length) { chips.innerHTML = `<span class="muted" style="font-size:12px;">${esc(placeholder)}</span>`; return; }
+  chips.innerHTML = checked.map(cb =>
+    `<span class="ms-chip">${esc(cb.parentElement.textContent.trim())}<button type="button" data-ms="${id}" data-val="${esc(cb.value)}" onclick="agMsUncheck(this, event)">×</button></span>`
+  ).join("");
+}
+function agMsUncheck(btn, e) {
+  e.stopPropagation();
+  const id = btn.dataset.ms, val = btn.dataset.val;
+  const cb = [...$(id).querySelectorAll(".ms-opt input")].find(i => i.value === val);
+  if (cb) cb.checked = false;
+  agMsSync(id);
 }
 function agmRenderChannels() {
   $("agm-channels").innerHTML = AGM_CHANNELS.map((c, i) =>
