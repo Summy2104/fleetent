@@ -1,11 +1,11 @@
 """Platform materializes a runnable agent home (agent.yaml + .env scaffold)."""
 
-
 from fleetent.agent_config import (
     AgentAccess,
     AgentConnectors,
     AgentFile,
     SlackConnector,
+    default_models,
     load_agent_file,
 )
 from fleetent.platform.agent_lifecycle import materialize
@@ -18,6 +18,7 @@ def _agent(name="support", **fields):
         system_prompt="Help the user.",
         allowed_tools=["shell"],
         allowed_skills=["weather"],
+        models=default_models(),
         access=AgentAccess(allow_users=["u_alice"]),
         connectors=AgentConnectors(
             slack=SlackConnector(bot_token_env="SUP_BOT", app_token_env="SUP_APP")
@@ -52,6 +53,32 @@ def test_env_scaffold_has_names_only_no_plaintext(tmp_path, monkeypatch):
             assert line.split("=", 1)[1] == ""
 
 
+def test_env_scaffold_includes_model_api_key_envs(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    home = materialize.write_home(
+        _agent(
+            models={
+                "targets": [
+                    {
+                        "id": "primary",
+                        "provider": "anthropic",
+                        "protocol": "openai_chat",
+                        "base_url": "https://api.anthropic.com/v1/",
+                        "model": "claude-sonnet",
+                        "api_key_env": "FLEETENT_MODEL_PRIMARY_API_KEY",
+                    }
+                ],
+                "routes": {"default": [{"target": "primary"}]},
+            }
+        )
+    )
+
+    env_text = (home / ".env").read_text(encoding="utf-8")
+
+    assert "FLEETENT_MODEL_PRIMARY_API_KEY=" in env_text
+    assert "ANTHROPIC_API_KEY=" not in env_text
+
+
 def test_update_rewrites_yaml_preserves_env_values(tmp_path, monkeypatch):
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     home = materialize.write_home(_agent())
@@ -70,7 +97,7 @@ def test_update_rewrites_yaml_preserves_env_values(tmp_path, monkeypatch):
 
 def test_default_closed_access_when_not_authored(tmp_path, monkeypatch):
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    agent = AgentFile(name="bare", version=1)  # no access block authored
+    agent = AgentFile(name="bare", version=1, models=default_models())  # no access block authored
     home = materialize.write_home(agent)
     af = load_agent_file(home)
     assert af.access.require_approval is True

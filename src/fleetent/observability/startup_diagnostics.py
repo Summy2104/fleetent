@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable
+from typing import Protocol
 
 from fleetent.db import create_database
-from fleetent.model import RouteConfig
 from fleetent.observability import get_logger
+
+
+class ProviderKeyRoute(Protocol):
+    api_key_env: str
 
 
 def log_config_loaded() -> None:
@@ -42,7 +46,7 @@ def diagnose_database_writable(database_url: str) -> bool:
     return True
 
 
-def diagnose_provider_keys(routes: Iterable[RouteConfig]) -> None:
+def diagnose_provider_keys(routes: Iterable[ProviderKeyRoute]) -> None:
     """Warn for missing provider API keys discovered during startup."""
     seen: set[str] = set()
     for route in routes:

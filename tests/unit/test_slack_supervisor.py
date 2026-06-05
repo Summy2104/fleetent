@@ -12,6 +12,7 @@ def _write(root, name, bot_env, app_env, channels=None):
     doc = {
         "name": name,
         "version": 1,
+        "models": agent_config.default_models().model_dump(),
         "connectors": {
             "slack": {
                 "bot_token_env": bot_env,

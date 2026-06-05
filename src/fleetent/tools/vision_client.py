@@ -14,6 +14,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from fleetent.agent_config import AgentFile
+from fleetent.model import ModelConfigError, ModelPolicySnapshot
 
 # VLMs answer in seconds; generous but bounded so a hung endpoint fails locally.
 _DEFAULT_TIMEOUT_SECONDS: float = 120.0
@@ -28,13 +29,13 @@ class VisionError(Exception):
     endpoint error/timeout, or an unusable response)."""
 
 
-def _build_client(base_url: str) -> AsyncOpenAI:
+def _build_client(base_url: str, api_key: str | None = None) -> AsyncOpenAI:
     """Build an AsyncOpenAI bound to the configured vision endpoint.
 
     Self-hosted endpoints often ignore the key; a non-empty placeholder keeps
     the SDK from rejecting the request before it reaches the backend.
     """
-    return AsyncOpenAI(base_url=base_url, api_key="vision")
+    return AsyncOpenAI(base_url=base_url, api_key=api_key or "vision")
 
 
 async def analyze(
@@ -53,10 +54,16 @@ async def analyze(
     from fleetent import agent_config
 
     src = config or agent_config.active_agent_or_default()
-    if not src.vision_url:
-        raise VisionError("vision endpoint not configured (vision_url is empty)")
+    try:
+        policy = ModelPolicySnapshot.from_agent(src)
+        resolved = policy.resolve("vision")[0]
+        if resolved.protocol != "openai_chat" or not resolved.base_url or not resolved.model:
+            raise ModelConfigError("vision route must target an openai_chat model")
+        api_key = policy.require_api_key(resolved)
+    except Exception as exc:
+        raise VisionError(f"vision route not configured: {exc}") from exc
 
-    client = _build_client(src.vision_url)
+    client = _build_client(resolved.base_url, api_key)
     b64 = base64.b64encode(image_bytes).decode("ascii")
     content: list[Any] = [
         {"type": "text", "text": instruction},
@@ -65,7 +72,7 @@ async def analyze(
     messages: list[Any] = [{"role": "user", "content": content}]
     try:
         response = await client.chat.completions.create(
-            model=src.vision_model,
+            model=resolved.model,
             messages=messages,
             timeout=_DEFAULT_TIMEOUT_SECONDS,
         )

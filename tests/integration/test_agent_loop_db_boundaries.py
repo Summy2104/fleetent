@@ -58,7 +58,7 @@ def mock_client(monkeypatch) -> AsyncMock:
     cfg.max_tokens = 512
     cfg.fallbacks = ()
 
-    monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(al, "_build_async_client", lambda resolved, api_key: client)
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)

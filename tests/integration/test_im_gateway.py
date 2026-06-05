@@ -40,11 +40,16 @@ async def test_route_loads_history_calls_agent_saves_replies(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
     import fleetent.im_gateway.normalizer as norm
-    from fleetent.agent_config import AgentAccess, AgentFile
+    from fleetent.agent_config import AgentAccess, AgentFile, default_models
 
     # Bind an agent that allows this user so the per-agent local gate passes (an allowed
     # user short-circuits before the approval store is read, so no path patch is needed).
-    agent = AgentFile(name="a", version=1, access=AgentAccess(allow_users=["internal-user-1"]))
+    agent = AgentFile(
+        name="a",
+        version=1,
+        models=default_models(),
+        access=AgentAccess(allow_users=["internal-user-1"]),
+    )
     monkeypatch.setattr(norm, "get_agent_for_context", lambda *a, **k: agent)
 
     reply_calls = []
@@ -260,11 +265,12 @@ async def test_route_channel_agent_takes_priority(
 ):
     """Channel-bound agent's system prompt is used for the run (file-driven AgentFile)."""
     import fleetent.im_gateway.normalizer as norm
-    from fleetent.agent_config import AgentAccess, AgentFile
+    from fleetent.agent_config import AgentAccess, AgentFile, default_models
 
     channel_agent = AgentFile(
         name="channel-bot",
         version=1,
+        models=default_models(),
         system_prompt="Channel sys.",
         allowed_tools=["shell"],
         access=AgentAccess(allow_users=["some-user"]),

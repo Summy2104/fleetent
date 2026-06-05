@@ -270,9 +270,15 @@ def test_unassign_user():
 def _write_agent_yaml(agents_dir, name, *, default=False):
     import yaml
 
+    import fleetent.agent_config as agent_config
+
     d = agents_dir / name
     d.mkdir(parents=True, exist_ok=True)
-    data: dict = {"name": name, "version": 1}
+    data: dict = {
+        "name": name,
+        "version": 1,
+        "models": agent_config.default_models().model_dump(mode="json"),
+    }
     if default:
         data["bindings"] = {"default": True}
     (d / "agent.yaml").write_text(yaml.safe_dump(data))

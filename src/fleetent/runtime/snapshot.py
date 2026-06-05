@@ -14,9 +14,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from fleetent import agent_config, agent_store
-from fleetent.agent_config import AgentFile
+from fleetent.agent_config import AgentFile, default_models
 from fleetent.agent_store import AgentVersion
 from fleetent.governance.agent_policy import check_tool_access
+from fleetent.model import ModelPolicySnapshot
 
 ToolSchema = dict[str, Any]
 
@@ -94,7 +95,7 @@ class AgentSnapshot:
     allowed_tools: list[str]
     skills_dir: str | None
     mcp_server_ids: list[str] | None
-    model_overrides: dict[str, Any]
+    model_policy: ModelPolicySnapshot
     memory_namespace: str
     governance: GovernanceConfig = GovernanceConfig()
 
@@ -110,7 +111,7 @@ def _snapshot_from_file(agent: AgentFile) -> AgentSnapshot:
         allowed_tools=agent.allowed_tools,
         skills_dir=agent.skills_dir,
         mcp_server_ids=server_ids or None,
-        model_overrides=agent.model_overrides,
+        model_policy=ModelPolicySnapshot.from_agent(agent),
         memory_namespace=agent.memory_namespace,
         governance=_governance_from_file(agent),
     )
@@ -126,7 +127,7 @@ def _snapshot(name: str, version: AgentVersion) -> AgentSnapshot:
         allowed_tools=version.allowed_tools,
         skills_dir=version.skills_dir,
         mcp_server_ids=version.mcp_server_ids,
-        model_overrides=version.model_overrides,
+        model_policy=ModelPolicySnapshot.from_models(agent_id=name, models=default_models()),
         memory_namespace=version.memory_namespace,
     )
 

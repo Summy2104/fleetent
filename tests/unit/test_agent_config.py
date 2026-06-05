@@ -14,7 +14,7 @@ def _valid_doc() -> dict:
         "tenant_id": "acme",
         "team_id": "t1",
         "system_prompt": "You are support.",
-        "model_overrides": {"default": {"model": "claude-opus-4-8"}},
+        "models": _valid_models_doc(),
         "memory_namespace": "support",
         "skills_dir": "skills",
         "allowed_skills": ["triage"],
@@ -38,6 +38,36 @@ def _valid_doc() -> dict:
     }
 
 
+def _valid_models_doc() -> dict:
+    return {
+        "targets": [
+            {
+                "id": "primary",
+                "provider": "anthropic",
+                "protocol": "openai_chat",
+                "base_url": "https://api.anthropic.com/v1/",
+                "model": "claude-sonnet-4-5",
+                "api_key_env": "FLEETENT_MODEL_PRIMARY_API_KEY",
+                "max_tokens": 4096,
+                "params": {"temperature": 0.5},
+            },
+            {
+                "id": "embed",
+                "provider": "local",
+                "protocol": "http_embedding",
+                "endpoint": "http://embedding.local/embed",
+            },
+        ],
+        "routes": {
+            "default": [{"target": "primary"}],
+            "memory_extraction": [
+                {"target": "primary", "max_tokens": 1024, "params": {"temperature": 0}}
+            ],
+            "embedding": [{"target": "embed"}],
+        },
+    }
+
+
 def test_agent_file_parses_all_fields() -> None:
     af = agent_config.AgentFile.model_validate(_valid_doc())
     assert af.name == "support"
@@ -47,6 +77,8 @@ def test_agent_file_parses_all_fields() -> None:
     assert af.allowed_tools == ["search_*", "acme__*"]
     assert af.plugins == ["acme"]
     assert af.features == {"code_execution": True}
+    assert af.models.targets[0].id == "primary"
+    assert af.models.routes["memory_extraction"][0].max_tokens == 1024
     assert af.bindings.channels == ["slack:C0123"]
     assert af.bindings.users == ["u_alice"]
     # inline mcp_servers reuse the config McpServerSettings model
@@ -56,7 +88,9 @@ def test_agent_file_parses_all_fields() -> None:
 
 
 def test_agent_file_defaults() -> None:
-    af = agent_config.AgentFile.model_validate({"name": "bare", "version": 1})
+    af = agent_config.AgentFile.model_validate(
+        {"name": "bare", "version": 1, "models": _valid_models_doc()}
+    )
     assert af.skills_dir is None
     assert af.allowed_skills == []
     assert af.plugins == []
@@ -68,6 +102,49 @@ def test_agent_file_defaults() -> None:
     assert af.bindings.default is False
     assert af.bindings.channels == []
     assert af.bindings.users == []
+
+
+def test_agent_file_requires_models() -> None:
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate({"name": "bare", "version": 1})
+
+
+@pytest.mark.parametrize("field", ["provider", "protocol"])
+def test_model_target_requires_provider_and_protocol(field: str) -> None:
+    doc = _valid_doc()
+    del doc["models"]["targets"][0][field]
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
+
+
+def test_model_target_duplicate_id_rejected() -> None:
+    doc = _valid_doc()
+    doc["models"]["targets"].append(dict(doc["models"]["targets"][0]))
+    with pytest.raises(ValidationError, match="duplicate target id"):
+        agent_config.AgentFile.model_validate(doc)
+
+
+def test_model_route_missing_target_rejected() -> None:
+    doc = _valid_doc()
+    doc["models"]["routes"]["default"] = [{"target": "missing"}]
+    with pytest.raises(ValidationError, match="unknown model target"):
+        agent_config.AgentFile.model_validate(doc)
+
+
+def test_model_api_key_env_inline_secret_rejected(tmp_path) -> None:
+    doc = _valid_doc()
+    doc["models"]["targets"][0]["api_key_env"] = "sk-live-0123456789abcdefghijABCDEF"
+    path = tmp_path / "agent.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    with pytest.raises(ValueError, match="api_key_env"):
+        agent_config.load_agent_home_file(path)
+
+
+def test_model_overrides_old_field_rejected() -> None:
+    doc = _valid_doc()
+    doc["model_overrides"] = {"default": {"model": "legacy"}}
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
 
 
 def test_agent_file_accepts_typed_intelligence_config() -> None:
@@ -148,6 +225,7 @@ def test_agent_home_file_accepts_google_drive_folder_id_in_intelligence_config(t
     doc = {
         "name": "pilot",
         "version": 1,
+        "models": _valid_models_doc(),
         "knowledge_base": {
             "enabled": True,
             "google_drive": {
@@ -215,7 +293,7 @@ def test_load_agent_file_dir_name_mismatch_rejected(tmp_path) -> None:
 
 
 def _write_agent(root, name: str, **overrides) -> None:
-    doc = {"name": name, "version": 1}
+    doc = {"name": name, "version": 1, "models": _valid_models_doc()}
     doc.update(overrides)
     agent_dir = root / name
     agent_dir.mkdir(parents=True)
@@ -351,7 +429,7 @@ def test_long_system_prompt_not_flagged_as_secret(tmp_path) -> None:
 
 def _write_config_agent(home, name: str, **overrides) -> None:
     """Write a flat home-root agent.yaml (no config/ or <name>/ subdir)."""
-    doc = {"name": name, "version": 1}
+    doc = {"name": name, "version": 1, "models": _valid_models_doc()}
     doc.update(overrides)
     home.mkdir(parents=True, exist_ok=True)
     (home / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
@@ -429,7 +507,7 @@ def test_repo_agent_yaml_example_loads_as_single_agent_file() -> None:
     agent = agent_config.load_agent_home_file(example)
     assert agent.name  # non-empty
     assert agent.version >= 1
+    assert agent.models.routes["default"][0].target == "primary"
+    assert agent.models.targets[0].api_key_env == "FLEETENT_MODEL_PRIMARY_API_KEY"
     assert agent.vector_store.backend == "sqlite"
-    assert agent.embedding.api_key_env == "FLEETENT_EVAL_EMBEDDING_API_KEY"
-    assert agent.rerank.api_key_env == "FLEETENT_EVAL_RERANK_API_KEY"
     assert agent.knowledge_base.enabled is True

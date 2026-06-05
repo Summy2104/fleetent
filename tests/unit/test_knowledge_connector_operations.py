@@ -4,11 +4,11 @@ from dataclasses import dataclass
 
 import pytest
 
-from fleetent.agent_config import AgentFile
+from fleetent.agent_config import AgentFile, default_models
 
 
 def _settings(**knowledge_base: object) -> AgentFile:
-    return AgentFile(name="t", version=1, knowledge_base=knowledge_base)
+    return AgentFile(name="t", version=1, models=default_models(), knowledge_base=knowledge_base)
 
 
 def test_google_drive_connectors_load_from_settings():
@@ -244,6 +244,7 @@ def test_missing_required_connector_field_mentions_field_name():
         AgentFile(
             name="t",
             version=1,
+            models=default_models(),
             knowledge_base={
                 "google_drive": {
                     "connectors": [

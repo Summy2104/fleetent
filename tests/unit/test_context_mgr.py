@@ -223,6 +223,20 @@ def test_content_with_none_attribute_returns_empty():
     assert _content(FakeMsg()) == ""
 
 
+def _patch_summary_client(monkeypatch, cm, mock_client, model: str = "haiku") -> None:
+    from types import SimpleNamespace
+
+    policy = SimpleNamespace(require_api_key=lambda cfg: None)
+    cfg = SimpleNamespace(
+        protocol="openai_chat",
+        base_url="http://summary.test/v1/",
+        model=model,
+        params={},
+    )
+    monkeypatch.setattr(cm, "_summary_route", lambda: (policy, cfg))
+    monkeypatch.setattr(cm, "OpenAI", lambda **_: mock_client)
+
+
 def test_summarize_calls_llm_and_returns_content(monkeypatch):
     from unittest.mock import MagicMock
 
@@ -234,7 +248,7 @@ def test_summarize_calls_llm_and_returns_content(monkeypatch):
     mock_response = MagicMock()
     mock_response.choices[0].message.content = "Summary here"
     mock_client.chat.completions.create.return_value = mock_response
-    monkeypatch.setattr(cm, "get_client_and_config", lambda _: (mock_client, mock_cfg))
+    _patch_summary_client(monkeypatch, cm, mock_client, mock_cfg.model)
 
     result = cm._summarize([{"role": "user", "content": "hello"}])
     assert result == "Summary here"
@@ -243,10 +257,10 @@ def test_summarize_calls_llm_and_returns_content(monkeypatch):
 def test_summarize_exception_returns_none(monkeypatch):
     import fleetent.runtime.context as cm
 
-    def raise_exc(_task):
+    def raise_exc():
         raise RuntimeError("no key")
 
-    monkeypatch.setattr(cm, "get_client_and_config", raise_exc)
+    monkeypatch.setattr(cm, "_summary_route", raise_exc)
     # AR14 D3: LLM failure signals degradation via None (never raises); the caller
     # owns the static head/tail fallback.
     result = cm._summarize([{"role": "user", "content": "hello"}])
@@ -639,7 +653,7 @@ def test_pre_cleanup_never_calls_llm(monkeypatch):
         calls["n"] += 1
         raise AssertionError("pre-cleanup must not call the LLM")
 
-    monkeypatch.setattr(cm, "get_client_and_config", _spy)
+    monkeypatch.setattr(cm, "_summary_route", _spy)
     msgs = [
         {
             "role": "user",
@@ -667,8 +681,8 @@ def test_compress_runs_pre_cleanup_before_summarize(monkeypatch):
     # get_client_and_config must never be hit by the cleanup path
     monkeypatch.setattr(
         cm,
-        "get_client_and_config",
-        lambda _t: (_ for _ in ()).throw(AssertionError("cleanup called LLM")),
+        "_summary_route",
+        lambda: (_ for _ in ()).throw(AssertionError("cleanup called LLM")),
     )
 
     big_b64 = "A" * 50_000
@@ -1120,7 +1134,7 @@ def test_summarize_merges_prev_summary_into_prompt(monkeypatch):
     mock_response = MagicMock()
     mock_response.choices[0].message.content = "merged summary"
     mock_client.chat.completions.create.return_value = mock_response
-    monkeypatch.setattr(cm, "get_client_and_config", lambda _: (mock_client, mock_cfg))
+    _patch_summary_client(monkeypatch, cm, mock_client, mock_cfg.model)
 
     result = cm._summarize(
         [{"role": "user", "content": "new turn"}], prev_summary="existing summary base"
@@ -1171,10 +1185,10 @@ def test_summary_real_exception_degrades(monkeypatch):
     import fleetent.runtime.context as cm
 
     # _summarize itself swallows the LLM exception and returns None (logged).
-    def raise_exc(_task):
+    def raise_exc():
         raise RuntimeError("no key")
 
-    monkeypatch.setattr(cm, "get_client_and_config", raise_exc)
+    monkeypatch.setattr(cm, "_summary_route", raise_exc)
     out = cm._summarize([{"role": "user", "content": "hi"}])
     assert out is None
 
@@ -1190,7 +1204,7 @@ def test_summary_empty_response_degrades(monkeypatch):
     mock_response = MagicMock()
     mock_response.choices[0].message.content = ""  # empty response
     mock_client.chat.completions.create.return_value = mock_response
-    monkeypatch.setattr(cm, "get_client_and_config", lambda _: (mock_client, mock_cfg))
+    _patch_summary_client(monkeypatch, cm, mock_client, mock_cfg.model)
 
     out = cm._summarize([{"role": "user", "content": "hi"}])
     assert out is None
@@ -1202,10 +1216,10 @@ def test_summary_failure_is_logged(monkeypatch):
     events: list[str] = []
     monkeypatch.setattr(cm.logger, "warning", lambda event, **kw: events.append(event))
 
-    def raise_exc(_task):
+    def raise_exc():
         raise RuntimeError("no key")
 
-    monkeypatch.setattr(cm, "get_client_and_config", raise_exc)
+    monkeypatch.setattr(cm, "_summary_route", raise_exc)
     cm._summarize([{"role": "user", "content": "hi"}])
     assert events  # failure was logged, not silently swallowed
 
@@ -1281,7 +1295,7 @@ def test_cumulative_summary_reconsolidates_when_over_bound(monkeypatch):
         return resp
 
     mock_client.chat.completions.create.side_effect = _create
-    monkeypatch.setattr(cm, "get_client_and_config", lambda _: (mock_client, mock_cfg))
+    _patch_summary_client(monkeypatch, cm, mock_client, mock_cfg.model)
 
     huge_prev = "Z" * 100_000
     out = cm._summarize(
@@ -1420,9 +1434,9 @@ _FLAP_CFG = {**_BIG, "flap_window": 3, "min_savings_ratio": 0.10, "min_interval_
 
 
 def test_agentfile_anti_flap_defaults():
-    from fleetent.agent_config import AgentFile
+    from fleetent.agent_config import AgentFile, default_models
 
-    s = AgentFile(name="x", version=1)
+    s = AgentFile(name="x", version=1, models=default_models())
     assert s.context_flap_window == 3
     assert s.context_min_savings_ratio == 0.10
     assert s.context_min_interval_turns == 1

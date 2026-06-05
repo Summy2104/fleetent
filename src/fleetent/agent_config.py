@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from fleetent import paths
 from fleetent.config import (
@@ -82,6 +82,76 @@ class AgentAccess(BaseModel):
     require_approval: bool = True
 
 
+class ModelTarget(BaseModel):
+    """Agent-local model endpoint definition."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    provider: str
+    protocol: str
+    base_url: str | None = None
+    endpoint: str | None = None
+    model: str | None = None
+    api_key_env: str | None = None
+    max_tokens: int | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_protocol_requirements(self) -> "ModelTarget":
+        if not self.id.strip():
+            raise ValueError("model target id must not be empty")
+        if not self.provider.strip():
+            raise ValueError(f"model target '{self.id}' provider must not be empty")
+        if not self.protocol.strip():
+            raise ValueError(f"model target '{self.id}' protocol must not be empty")
+        if self.protocol == "openai_chat" and (not self.base_url or not self.model):
+            raise ValueError(f"model target '{self.id}' requires base_url and model")
+        if self.protocol == "openai_image_generation" and (not self.endpoint or not self.model):
+            raise ValueError(f"model target '{self.id}' requires endpoint and model")
+        if self.protocol in {"http_embedding", "http_rerank"} and not self.endpoint:
+            raise ValueError(f"model target '{self.id}' requires endpoint")
+        return self
+
+
+class ModelRouteEntry(BaseModel):
+    """One route entry, ordered by fallback priority."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target: str
+    max_tokens: int | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentModels(BaseModel):
+    """Agent-local model policy section."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    targets: list[ModelTarget]
+    routes: dict[str, list[ModelRouteEntry]]
+
+    @model_validator(mode="after")
+    def _validate_targets_and_routes(self) -> "AgentModels":
+        target_ids: set[str] = set()
+        for target in self.targets:
+            if target.id in target_ids:
+                raise ValueError(f"duplicate target id '{target.id}'")
+            target_ids.add(target.id)
+        for route, entries in self.routes.items():
+            if not route.strip():
+                raise ValueError("model route key must not be empty")
+            if not entries:
+                raise ValueError(f"model route '{route}' must contain at least one target")
+            for entry in entries:
+                if entry.target not in target_ids:
+                    raise ValueError(
+                        f"model route '{route}' references unknown model target '{entry.target}'"
+                    )
+        return self
+
+
 class AgentFile(BaseModel):
     """Schema for a self-contained ``agent.yaml``."""
 
@@ -92,7 +162,7 @@ class AgentFile(BaseModel):
     tenant_id: str = "default"
     team_id: str | None = None
     system_prompt: str = ""
-    model_overrides: dict[str, Any] = Field(default_factory=dict)
+    models: AgentModels
     memory_namespace: str = ""
     skills_dir: str | None = None
     allowed_skills: list[str] = Field(default_factory=list)
@@ -226,6 +296,7 @@ def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
         "connectors": agent.connectors.model_dump(),
     }
     intelligence_payload = {
+        "models": agent.models.model_dump(),
         "embedding": agent.embedding.model_dump(),
         "rerank": agent.rerank.model_dump(),
         "knowledge_base": agent.knowledge_base.model_dump(),
@@ -367,11 +438,49 @@ def active_agent() -> AgentFile | None:
     return None
 
 
+def default_models() -> AgentModels:
+    """Return a local no-auth model policy for neutral in-process defaults."""
+    return AgentModels(
+        targets=[
+            ModelTarget(
+                id="default",
+                provider="local",
+                protocol="openai_chat",
+                base_url="http://localhost:11434/v1/",
+                model="default",
+                max_tokens=4096,
+            ),
+            ModelTarget(
+                id="vision",
+                provider="local",
+                protocol="openai_chat",
+                base_url="http://localhost:11434/v1/",
+                model="default-vision",
+                max_tokens=4096,
+            ),
+            ModelTarget(
+                id="embedding",
+                provider="local",
+                protocol="http_embedding",
+                endpoint="http://localhost:11434/v1/embeddings",
+                model="default-embedding",
+                params={"dimensions": 64},
+            ),
+        ],
+        routes={
+            "default": [ModelRouteEntry(target="default")],
+            "memory_extraction": [ModelRouteEntry(target="default")],
+            "vision": [ModelRouteEntry(target="vision")],
+            "embedding": [ModelRouteEntry(target="embedding")],
+        },
+    )
+
+
 # Neutral default carrying the schema's literal defaults. It is the process-level
 # fallback source for runtime knobs (intelligence/deployment/session) when no single
 # agent is deployed (multi-agent dev/platform/empty index) — replacing the historical
 # global ``Settings`` fallback after the config consolidation.
-_DEFAULT_AGENT_FILE = AgentFile(name="", version=0)
+_DEFAULT_AGENT_FILE = AgentFile(name="", version=0, models=default_models())
 
 
 def active_agent_or_default() -> AgentFile:

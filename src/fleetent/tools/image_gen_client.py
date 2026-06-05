@@ -14,6 +14,7 @@ import httpx
 from openai import AsyncOpenAI, Omit, omit
 
 from fleetent.agent_config import AgentFile
+from fleetent.model import ModelConfigError, ModelPolicySnapshot
 
 # Long enough for diffusion backends, which may take seconds to minutes (D5).
 _DEFAULT_TIMEOUT_SECONDS: float = 120.0
@@ -24,13 +25,13 @@ class ImageGenError(Exception):
     endpoint error/timeout, or an unusable response)."""
 
 
-def _build_client(base_url: str) -> AsyncOpenAI:
+def _build_client(base_url: str, api_key: str | None = None) -> AsyncOpenAI:
     """Build an AsyncOpenAI bound to the configured images endpoint.
 
     Self-hosted endpoints often ignore the key; a non-empty placeholder keeps
     the SDK from rejecting the request before it reaches the backend.
     """
-    return AsyncOpenAI(base_url=base_url, api_key="image-gen")
+    return AsyncOpenAI(base_url=base_url, api_key=api_key or "image-gen")
 
 
 async def _fetch_url(url: str) -> bytes:
@@ -57,14 +58,24 @@ async def generate(
     from fleetent import agent_config
 
     src = config or agent_config.active_agent_or_default()
-    if not src.image_gen_url:
-        raise ImageGenError("image generation endpoint not configured (image_gen_url is empty)")
+    try:
+        policy = ModelPolicySnapshot.from_agent(src)
+        resolved = policy.resolve("image_generation")[0]
+        if resolved.protocol != "openai_image_generation":
+            raise ModelConfigError(
+                f"image_generation target '{resolved.target_id}' uses {resolved.protocol}"
+            )
+        if not resolved.endpoint or not resolved.model:
+            raise ModelConfigError("image_generation route requires endpoint and model")
+        api_key = policy.require_api_key(resolved)
+    except Exception as exc:
+        raise ImageGenError(f"image generation route not configured: {exc}") from exc
 
-    client = _build_client(src.image_gen_url)
+    client = _build_client(resolved.endpoint, api_key)
     size_arg: str | Omit = size if size is not None else omit
     try:
         response = await client.images.generate(
-            model=src.image_gen_model,
+            model=resolved.model,
             prompt=prompt,
             response_format="b64_json",
             size=size_arg,

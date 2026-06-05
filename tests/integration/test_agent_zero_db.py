@@ -25,6 +25,7 @@ def _write_agent(root) -> None:
                 "name": "support",
                 "version": 1,
                 "system_prompt": "S",
+                "models": agent_config.default_models().model_dump(mode="json"),
                 "allowed_tools": ["shell"],
                 "mcp_servers": [{"id": "acme", "transport": "http", "url": "https://acme"}],
                 "bindings": {"channels": ["slack:C1"], "users": ["u1"], "default": True},

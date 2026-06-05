@@ -35,13 +35,60 @@ system_prompt: |
   - 不确定的信息先用 search_docs 工具检索知识库再作答
   - 涉及退款、账户删除等敏感操作必须走人工审批
   - 保持礼貌、简洁，单次回复不超过 5 句话
-model_overrides:
-  default:
-    provider: anthropic
-    model: claude-opus-4-8
-  fast:
-    provider: anthropic
-    model: claude-haiku-4-5-20251001
+models:
+  targets:
+    - id: primary
+      provider: anthropic
+      protocol: openai_chat
+      base_url: https://api.anthropic.com/v1/
+      model: claude-opus-4-8
+      api_key_env: FLEETENT_MODEL_PRIMARY_API_KEY
+      max_tokens: 4096
+    - id: fast
+      provider: anthropic
+      protocol: openai_chat
+      base_url: https://api.anthropic.com/v1/
+      model: claude-haiku-4-5-20251001
+      api_key_env: FLEETENT_MODEL_FAST_API_KEY
+      max_tokens: 1024
+      params:
+        temperature: 0
+    - id: embedding
+      provider: local
+      protocol: http_embedding
+      endpoint: http://localhost:9002/v1/embeddings
+      model: bge-m3
+      api_key_env: FLEETENT_MODEL_EMBEDDING_API_KEY
+      params:
+        dimensions: 64
+    - id: rerank
+      provider: local
+      protocol: http_rerank
+      endpoint: http://localhost:9003/v1/rerank
+      model: bge-reranker
+      api_key_env: FLEETENT_MODEL_RERANK_API_KEY
+    - id: image
+      provider: local
+      protocol: openai_image_generation
+      endpoint: http://localhost:9004/v1/images/generations
+      model: flux-schnell
+  routes:
+    default:
+      - target: primary
+      - target: fast
+    memory_extraction:
+      - target: fast
+        max_tokens: 1024
+        params:
+          temperature: 0
+    vision:
+      - target: primary
+    embedding:
+      - target: embedding
+    rerank:
+      - target: rerank
+    image_generation:
+      - target: image
 memory_namespace: support-bot      # default ""
 skills_dir: skills                 # null = global default skills dir
 allowed_skills:                    # empty = no narrowing (all enabled skills visible)

@@ -186,7 +186,7 @@ def _show_agent(args: argparse.Namespace) -> None:
     print(f"allowed_tools: {snapshot.allowed_tools}")
     print(f"skills_dir: {snapshot.skills_dir}")
     print(f"mcp_server_ids: {snapshot.mcp_server_ids}")
-    print(f"model_overrides: {snapshot.model_overrides}")
+    print(f"model_policy: {snapshot.model_policy.model_dump(mode='json')}")
     print(f"memory_namespace: {snapshot.memory_namespace}")
 
 

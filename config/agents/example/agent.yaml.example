@@ -14,8 +14,18 @@ team_id: null
 # ── runtime definition ──
 system_prompt: |
   You are the example agent.
-model_overrides:
-  default: { provider: anthropic, model: claude-opus-4-8 }
+models:
+  targets:
+    - id: primary
+      provider: anthropic
+      protocol: openai_chat
+      base_url: https://api.anthropic.com/v1/
+      model: claude-opus-4-8
+      api_key_env: FLEETENT_MODEL_PRIMARY_API_KEY
+      max_tokens: 4096
+  routes:
+    default:
+      - target: primary
 memory_namespace: example
 skills_dir: skills                 # null = global default skills dir
 allowed_skills: []                 # empty = no narrowing (all enabled skills visible)

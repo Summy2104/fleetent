@@ -13,10 +13,12 @@ def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
 
     # Platform-side
     assert "FLEETENT_AUTO_UPGRADE=false" in platform
-    assert "ANTHROPIC_API_KEY=" in platform
+    assert "FLEETENT_MODEL_PRIMARY_API_KEY=" not in platform
     # Agent-side
-    assert "ANTHROPIC_API_KEY=" in agent
-    assert "OPENAI_API_KEY=" in agent
+    assert "ANTHROPIC_API_KEY=" not in agent
+    assert "OPENAI_API_KEY=" not in agent
+    assert "FLEETENT_MODEL_PRIMARY_API_KEY=" in agent
+    assert "FLEETENT_MODEL_EMBEDDING_API_KEY=" in agent
     assert "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN=" in agent
     assert "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET=" in agent
     assert "FLEETENT_CONFLUENCE_USERNAME=" in agent
@@ -292,7 +294,5 @@ def test_env_example_covers_agent_yaml_example_env_refs():
                 walk(item)
 
     walk(doc)
-    refs.add("ANTHROPIC_API_KEY")  # required default route key
-
     missing = sorted(name for name in refs if name and f"{name}=" not in env_text)
     assert not missing, f".env.example missing referenced env names: {missing}"

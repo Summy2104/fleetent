@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 
 from fleetent import agent_store, paths
-from fleetent.agent_config import AGENT_FILE_NAME, AgentFile
+from fleetent.agent_config import AGENT_FILE_NAME, AgentFile, default_models
 
 
 def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
@@ -30,6 +30,8 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
         allowed_skills=agent.allowed_skills,
         plugins=agent.plugins,
         features=agent.features,
+        models=default_models(),
+        memory_namespace=agent.memory_namespace,
     )
 
 
@@ -47,6 +49,9 @@ def _env_var_names(agent: AgentFile) -> list[str]:
     for server in agent.mcp_servers:
         if server.api_key_env:
             names.append(server.api_key_env)
+    for target in agent.models.targets:
+        if target.api_key_env:
+            names.append(target.api_key_env)
     # stable order, de-duplicated
     seen: set[str] = set()
     ordered: list[str] = []

@@ -3,8 +3,9 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import fleetent.runtime.loop as agent_loop
+from fleetent.agent_config import AgentModels, ModelRouteEntry, ModelTarget
 from fleetent.intelligence.long_term_ctx import BuiltContext, ContextSource
-from fleetent.model import RouteConfig
+from fleetent.model import ModelPolicySnapshot
 
 
 def _text_response(text: str = "ok") -> MagicMock:
@@ -28,16 +29,24 @@ async def test_agent_runtime_calls_long_term_context_builder_with_existing_signa
 ):
     client = AsyncMock()
     client.chat.completions.create = AsyncMock(return_value=_text_response())
-    cfg = RouteConfig(
-        base_url="http://example.test/v1",
-        model="test-model",
-        api_key_env="TEST_API_KEY",
-        max_tokens=321,
-        fallbacks=(),
+    policy = ModelPolicySnapshot.from_models(
+        agent_id="agent-1",
+        models=AgentModels(
+            targets=[
+                ModelTarget(
+                    id="primary",
+                    provider="test",
+                    protocol="openai_chat",
+                    base_url="http://example.test/v1",
+                    model="test-model",
+                )
+            ],
+            routes={"default": [ModelRouteEntry(target="primary", max_tokens=321)]},
+        ),
     )
     build_context = AsyncMock(return_value=BuiltContext(text="", sources=[]))
 
-    monkeypatch.setattr(agent_loop, "get_async_client_and_config", lambda *a, **k: (client, cfg))
+    monkeypatch.setattr(agent_loop, "_build_async_client", lambda *a, **k: client)
     monkeypatch.setattr(agent_loop, "get_schemas", lambda: [])
     monkeypatch.setattr(agent_loop, "maybe_compress", lambda messages, **kwargs: messages)
     monkeypatch.setattr(agent_loop, "match_skill", lambda _: None)
@@ -50,6 +59,7 @@ async def test_agent_runtime_calls_long_term_context_builder_with_existing_signa
         [{"role": "user", "content": "what should I use?"}],
         user_id="user-1",
         agent_name="agent-1",
+        model_policy=policy,
     )
 
     # The parameter-style agent_loop passes the four positional args; memory_namespace

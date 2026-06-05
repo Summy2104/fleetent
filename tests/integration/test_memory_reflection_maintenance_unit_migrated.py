@@ -543,6 +543,5 @@ def _patch_extraction(monkeypatch, content: str) -> AsyncMock:
         )
     )
     client.chat.completions.create = create
-    cfg = SimpleNamespace(model="test-memory-model", max_tokens=512)
-    monkeypatch.setattr(extraction, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(extraction, "AsyncOpenAI", lambda **kwargs: client)
     return create

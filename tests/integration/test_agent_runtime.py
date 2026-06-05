@@ -41,7 +41,11 @@ def agents(tmp_path):
     root.mkdir()
 
     def write(name: str, **fields) -> None:
-        doc = {"name": name, "version": 1}
+        doc = {
+            "name": name,
+            "version": 1,
+            "models": agent_config.default_models().model_dump(mode="json"),
+        }
         doc.update(fields)
         agent_dir = root / name
         agent_dir.mkdir(parents=True, exist_ok=True)
@@ -67,7 +71,6 @@ def test_load_active_unpacks_file_fields(agents):
         allowed_tools=["shell", "github__*"],
         skills_dir="agents/analyst/skills",
         mcp_servers=[{"id": "github", "url": "https://gh"}],
-        model_overrides={"default": {"model": "x"}},
         memory_namespace="analyst",
     )
     snap = agent_runtime.load_active("analyst")
@@ -79,7 +82,9 @@ def test_load_active_unpacks_file_fields(agents):
     assert snap.allowed_tools == ["shell", "github__*"]
     assert snap.skills_dir == "agents/analyst/skills"
     assert snap.mcp_server_ids == ["github"]
-    assert snap.model_overrides == {"default": {"model": "x"}}
+    resolved = snap.model_policy.resolve("default")
+    assert resolved[0].model == "default"
+    assert resolved[1:] == ()
     assert snap.memory_namespace == "analyst"
 
 

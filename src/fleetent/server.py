@@ -30,10 +30,8 @@ from fleetent.im_gateway.slack_supervisor import SlackSupervisor
 from fleetent.integrations.sandbox import (
     Mode,
 )
-from fleetent.model import ROUTES
 from fleetent.observability.startup_diagnostics import (
     diagnose_database_writable,
-    diagnose_provider_keys,
     log_config_failed,
     log_config_loaded,
 )
@@ -110,7 +108,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     configure_logging(settings)
     log_config_loaded()
     diagnose_database_writable(settings.database_url)
-    diagnose_provider_keys(ROUTES.values())
 
     # platform-control-plane: agent execution (loop + sandbox + IM) runs only in an
     # `fleetent agent run` process; the platform no longer probes Docker, registers

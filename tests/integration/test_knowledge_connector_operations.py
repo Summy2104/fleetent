@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from fleetent.agent_config import AgentFile
+from fleetent.agent_config import AgentFile, default_models
 from fleetent.db import create_database
 from tests.integration.test_migrations import apply_migrations
 
@@ -18,7 +18,12 @@ def _patch_operations_database(monkeypatch, tmp_path):
 
 
 def _settings(**knowledge_base: object) -> AgentFile:
-    return AgentFile(name="t", version=1, knowledge_base=knowledge_base)
+    return AgentFile(
+        name="t",
+        version=1,
+        models=default_models(),
+        knowledge_base=knowledge_base,
+    )
 
 
 def test_never_run_connector_status_is_stable(monkeypatch, tmp_path):

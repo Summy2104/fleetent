@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from fleetent.agent_config import AgentFile
+from fleetent.agent_config import AgentFile, default_models
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"fake-image-payload" * 4
 
@@ -21,9 +21,50 @@ def asyncio_run(coro):
 
 
 def test_vision_config_defaults():
-    settings = AgentFile(name="t", version=1)
-    assert settings.vision_url == ""
-    assert settings.vision_model == "default"
+    settings = AgentFile(name="t", version=1, models=default_models())
+    assert settings.models.routes["vision"][0].target == "vision"
+
+
+def _vision_agent() -> AgentFile:
+    return AgentFile.model_validate(
+        {
+            "name": "t",
+            "version": 1,
+            "models": {
+                "targets": [
+                    {
+                        "id": "vision",
+                        "provider": "local",
+                        "protocol": "openai_chat",
+                        "base_url": "http://localhost:9001/v1/",
+                        "model": "qwen-vl",
+                    }
+                ],
+                "routes": {"vision": [{"target": "vision"}]},
+            },
+        }
+    )
+
+
+def _no_vision_agent() -> AgentFile:
+    return AgentFile.model_validate(
+        {
+            "name": "t",
+            "version": 1,
+            "models": {
+                "targets": [
+                    {
+                        "id": "primary",
+                        "provider": "local",
+                        "protocol": "openai_chat",
+                        "base_url": "http://localhost:9001/v1/",
+                        "model": "text",
+                    }
+                ],
+                "routes": {"default": [{"target": "primary"}]},
+            },
+        }
+    )
 
 
 # ── vision_client ────────────────────────────────────────────────────────────
@@ -43,10 +84,9 @@ def test_analyze_sends_image_and_instruction_returns_text(monkeypatch):
     import fleetent.tools.vision_client as vc
 
     client = _mock_async_openai("an invoice for $42")
-    monkeypatch.setattr(vc, "_build_client", lambda settings: client)
+    monkeypatch.setattr(vc, "_build_client", lambda *args, **kwargs: client)
 
-    settings = AgentFile(name="t", version=1, vision_url="http://localhost:9001/v1/")
-    result = asyncio_run(vc.analyze(PNG_BYTES, "what is this?", config=settings))
+    result = asyncio_run(vc.analyze(PNG_BYTES, "what is this?", config=_vision_agent()))
 
     assert result == "an invoice for $42"
     _, kwargs = client.chat.completions.create.call_args
@@ -62,15 +102,14 @@ def test_analyze_sends_image_and_instruction_returns_text(monkeypatch):
     image_block = next(b for b in content if b["type"] == "image_url")
     b64 = base64.b64encode(PNG_BYTES).decode("ascii")
     assert b64 in image_block["image_url"]["url"]
-    assert kwargs["model"] == "default"
+    assert kwargs["model"] == "qwen-vl"
 
 
 def test_analyze_requires_configured_url():
     import fleetent.tools.vision_client as vc
 
-    settings = AgentFile(name="t", version=1, vision_url="")
     with pytest.raises(vc.VisionError):
-        asyncio_run(vc.analyze(PNG_BYTES, "x", config=settings))
+        asyncio_run(vc.analyze(PNG_BYTES, "x", config=_no_vision_agent()))
 
 
 def test_analyze_endpoint_error_raises_visionerror(monkeypatch):
@@ -78,11 +117,10 @@ def test_analyze_endpoint_error_raises_visionerror(monkeypatch):
 
     client = MagicMock()
     client.chat.completions.create = AsyncMock(side_effect=RuntimeError("boom"))
-    monkeypatch.setattr(vc, "_build_client", lambda settings: client)
+    monkeypatch.setattr(vc, "_build_client", lambda *args, **kwargs: client)
 
-    settings = AgentFile(name="t", version=1, vision_url="http://localhost:9001/v1/")
     with pytest.raises(vc.VisionError):
-        asyncio_run(vc.analyze(PNG_BYTES, "x", config=settings))
+        asyncio_run(vc.analyze(PNG_BYTES, "x", config=_vision_agent()))
 
 
 def test_analyze_empty_choices_raises(monkeypatch):
@@ -90,11 +128,10 @@ def test_analyze_empty_choices_raises(monkeypatch):
 
     client = MagicMock()
     client.chat.completions.create = AsyncMock(return_value=SimpleNamespace(choices=[]))
-    monkeypatch.setattr(vc, "_build_client", lambda settings: client)
+    monkeypatch.setattr(vc, "_build_client", lambda *args, **kwargs: client)
 
-    settings = AgentFile(name="t", version=1, vision_url="http://localhost:9001/v1/")
     with pytest.raises(vc.VisionError):
-        asyncio_run(vc.analyze(PNG_BYTES, "x", config=settings))
+        asyncio_run(vc.analyze(PNG_BYTES, "x", config=_vision_agent()))
 
 
 # ── uploads storage helper ──────────────────────────────────────────────────

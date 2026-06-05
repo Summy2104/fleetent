@@ -16,7 +16,18 @@ def _agent_file(**overrides: Any) -> AgentFile:
         "system_prompt": "be helpful",
         "allowed_tools": ["read_file"],
         "skills_dir": "skills",
-        "model_overrides": {"temperature": 0.2},
+        "models": {
+            "targets": [
+                {
+                    "id": "primary",
+                    "provider": "anthropic",
+                    "protocol": "openai_chat",
+                    "base_url": "https://api.anthropic.com/v1/",
+                    "model": "claude-sonnet",
+                }
+            ],
+            "routes": {"default": [{"target": "primary"}]},
+        },
         "memory_namespace": "support-ns",
     }
     base.update(overrides)
@@ -67,6 +78,9 @@ def test_snapshot_from_file_maps_fields_and_mcp() -> None:
     assert snap.skills_dir == "skills"
     assert snap.mcp_server_ids == ["github", "slack"]
     assert snap.memory_namespace == "support-ns"
+    assert snap.model_policy.agent_id == "support"
+    assert snap.model_policy.resolve("default")[0].target_id == "primary"
+    assert not hasattr(snap, "model_overrides")
 
 
 def test_snapshot_from_file_no_mcp_servers_yields_none() -> None:

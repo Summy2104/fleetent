@@ -7,7 +7,7 @@ from fleetent import agent_config
 
 
 def _write(root, name, **fields):
-    doc = {"name": name, "version": 1}
+    doc = {"name": name, "version": 1, "models": agent_config.default_models().model_dump()}
     doc.update(fields)
     d = root / name
     d.mkdir(parents=True, exist_ok=True)

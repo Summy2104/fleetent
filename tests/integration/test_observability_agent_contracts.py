@@ -7,8 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import fleetent.runtime.loop as agent_loop
+from fleetent.agent_config import AgentModels, ModelRouteEntry, ModelTarget
 from fleetent.intelligence.long_term_ctx import BuiltContext, ContextSource
-from fleetent.model import RouteConfig
+from fleetent.model import ModelPolicySnapshot
 from fleetent.observability import (
     TraceEvent,
     TraceQuery,
@@ -30,14 +31,22 @@ def trace_db(tmp_path, monkeypatch):
 @pytest.fixture
 def agent_runtime(monkeypatch):
     client = AsyncMock()
-    cfg = RouteConfig(
-        base_url="http://example.test/v1",
-        model="contract-model",
-        api_key_env="TEST_API_KEY",
-        max_tokens=512,
-        fallbacks=(),
+    client.model_policy = ModelPolicySnapshot.from_models(
+        agent_id="agent-contract",
+        models=AgentModels(
+            targets=[
+                ModelTarget(
+                    id="primary",
+                    provider="test",
+                    protocol="openai_chat",
+                    base_url="http://example.test/v1",
+                    model="contract-model",
+                )
+            ],
+            routes={"default": [ModelRouteEntry(target="primary", max_tokens=512)]},
+        ),
     )
-    monkeypatch.setattr(agent_loop, "get_async_client_and_config", lambda *a, **k: (client, cfg))
+    monkeypatch.setattr(agent_loop, "_build_async_client", lambda *a, **k: client)
     monkeypatch.setattr(agent_loop, "get_schemas", lambda: [])
     monkeypatch.setattr(agent_loop, "maybe_compress", lambda messages, **kwargs: messages)
     monkeypatch.setattr(agent_loop, "match_skill", lambda _: None)
@@ -152,6 +161,7 @@ async def test_non_streaming_run_persists_context_and_completion_trace_contract(
         [{"role": "user", "content": "What should I deploy?"}],
         user_id="user-contract",
         agent_name="agent-contract",
+        model_policy=agent_runtime.model_policy,
     )
 
     assert reply == "done"
@@ -189,6 +199,7 @@ async def test_streaming_run_persists_context_and_completion_trace_contract(
             "What should I deploy?",
             user_id="user-contract",
             agent_name="agent-contract",
+            model_policy=agent_runtime.model_policy,
         )
     ]
 
@@ -223,6 +234,7 @@ async def test_source_attribution_payload_excludes_raw_content_and_is_sanitized(
         [{"role": "user", "content": "Find deployment notes"}],
         user_id="user-contract",
         agent_name="agent-contract",
+        model_policy=agent_runtime.model_policy,
     )
 
     injected = next(query_trace_events(TraceQuery(event_type="injected_context")))
@@ -268,6 +280,7 @@ async def test_usage_summary_counts_only_completion_events_when_context_is_injec
         [{"role": "user", "content": "What should I deploy?"}],
         user_id="user-contract",
         agent_name="agent-contract",
+        model_policy=agent_runtime.model_policy,
     )
 
     assert len(list(query_trace_events(TraceQuery(event_type="injected_context")))) == 1
