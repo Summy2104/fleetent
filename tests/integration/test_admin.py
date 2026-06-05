@@ -5,7 +5,6 @@ import pytest
 
 import fleetent.agent_store as agent_store
 from fleetent import user_store
-from fleetent.platform.admin_cli import agents as admin_cli_agents
 from fleetent.platform.admin_cli.main import main as admin_cli_main
 from fleetent.platform.im_gateway_management import identity as im_user_store
 from tests.integration.test_migrations import apply_migrations

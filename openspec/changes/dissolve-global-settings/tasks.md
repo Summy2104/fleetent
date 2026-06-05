@@ -56,5 +56,9 @@
 
 ## 7. 收尾
 
-- [ ] 7.1 `uv run ruff format src tests && uv run ruff check src tests` + `uv run mypy src` 通过
-- [ ] 7.2 全量 `uv run pytest -x -q` 与 `uv run python scripts/check_test_layers.py` 通过
+- [x] 7.1 `uv run ruff format src tests && uv run ruff check src tests` + `uv run mypy src` 通过
+      (mypy 200 files 全清;ruff 全清 —— 含一处既有 agent_store SIM401 加 noqa:`row` 是 sqlite3.Row
+      无 .get;5 个无关 whole-tree format drift 文件按惯例不纳入本 PR)
+- [x] 7.2 全量 `uv run pytest -x -q` 与 `uv run python scripts/check_test_layers.py` 通过
+      (check_test_layers 通过;unit+integration 3081 passed;仅余 10 个 model_router 失败 = 本地
+      `config/routes.yaml` 污染,移开后 62/62 全过,与本工作无关)

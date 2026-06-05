@@ -105,7 +105,8 @@ def _parse_caps(row: dict[str, Any]) -> dict[str, Any]:
         # no narrowing (backward compatible).
         "allowed_skills": json.loads(row["allowed_skills"] or "[]"),
         # icon column added in migration 047; guard legacy rows that predate it.
-        "icon": (row["icon"] if "icon" in row else None),
+        # `row` is a sqlite3.Row (no .get), so `in` membership is the guard, not row.get.
+        "icon": (row["icon"] if "icon" in row else None),  # noqa: SIM401
     }
 
 

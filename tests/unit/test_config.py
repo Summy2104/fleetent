@@ -112,7 +112,7 @@ def test_settings_constructible_without_any_secret():
 def test_yaml_secret_fields_is_empty_safety_net():
     from fleetent.config import YAML_SECRET_FIELDS
 
-    assert YAML_SECRET_FIELDS == frozenset()
+    assert frozenset() == YAML_SECRET_FIELDS
 
 
 def test_settings_loads_non_secret_values_from_settings_yaml(tmp_path, monkeypatch):
