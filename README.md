@@ -33,6 +33,20 @@ fleetent "hello"
 > 这是面向开发者 / 单机快速体验的路径。**on-prem 生产部署请用 Docker**
 > （`Dockerfile` + `docker-compose.yml`），环境可复现、数据不出内网。
 
+### 新建一个独立 agent（无平台依赖）
+
+`fleetent agent init` 从内置模板 scaffold 出一个可独立运行的 agent home：
+
+```bash
+fleetent agent init my-bot              # 生成 ~/.fleetent/my-bot/{agent.yaml,.env}
+$EDITOR ~/.fleetent/my-bot/agent.yaml ~/.fleetent/my-bot/.env
+fleetent agent run my-bot --port 8766   # 把该 agent 当独立服务跑（loop + IM + sandbox）
+```
+
+`agent.yaml` 的 `name` 自动设为 `my-bot`（与 `agent run` 的目录名一致）；`.env` 列出模板引用的环境变量名（空值待填，绝不含真实密钥）。`--home PATH` 覆盖位置，`--force` 覆盖已有 `agent.yaml`（`.env` 始终保留）。
+
+> 平台侧（控制台/DB）创建 agent 会自动 `materialize` 出同样的 home；`agent init` 是其无平台、命令行的对应物。
+
 ### 手动安装（在仓库内运行）
 
 ```bash
