@@ -89,30 +89,6 @@ def test_agent_carries_active_version_config_fields(db):
     assert found.memory_namespace == "analyst"
 
 
-def test_create_agent_persists_template_id(db):
-    created = agent_store.create_agent(
-        "support", "You help.", ["shell"], template_id="support-tmpl"
-    )
-    assert created.template_id == "support-tmpl"
-    [v1] = agent_store.list_versions("support")
-    assert v1.template_id == "support-tmpl"
-    assert agent_store.get_by_name("support").template_id == "support-tmpl"
-
-
-def test_create_agent_without_template_id_is_none(db):
-    created = agent_store.create_agent("plain", "You help.", ["shell"])
-    assert created.template_id is None
-    assert agent_store.get_by_name("plain").template_id is None
-    [v1] = agent_store.list_versions("plain")
-    assert v1.template_id is None
-
-
-def test_new_version_inherits_template_id(db):
-    agent_store.create_agent("support", "v1", ["shell"], template_id="support-tmpl")
-    v2 = agent_store.create_version("support", system_prompt="v2")
-    assert v2.template_id == "support-tmpl"
-
-
 def test_get_by_name_missing(db):
     assert agent_store.get_by_name("nonexistent") is None
 

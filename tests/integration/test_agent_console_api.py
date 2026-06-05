@@ -139,86 +139,6 @@ def test_clone_duplicate_name_rejected(client, monkeypatch):
     assert r.status_code == 409
 
 
-# --- templates (场景 43) ------------------------------------------------------
-
-
-def test_templates_listed(client):
-    token, _ = _session_for("viewer")
-    r = client.get("/admin/agent-templates", headers=_hdr(token))
-    ids = {t["id"] for t in r.json()}
-    assert {"readonly-qa", "ops", "support"} <= ids
-
-
-def test_template_create(client):
-    token, _ = _session_for("admin")
-    r = client.post(
-        "/admin/agent-templates",
-        headers=_hdr(token),
-        json={
-            "id": "triage",
-            "display_name": "Triage",
-            "allowed_tools": ["read_*"],
-            "system_prompt": "You triage.",
-        },
-    )
-    assert r.status_code == 201
-    ids = {t["id"] for t in client.get("/admin/agent-templates", headers=_hdr(token)).json()}
-    assert "triage" in ids
-    assert any(a["action"] == "template.create" for a in audit.search_audit())
-
-
-def test_template_create_duplicate_409(client):
-    token, _ = _session_for("admin")
-    r = client.post(
-        "/admin/agent-templates", headers=_hdr(token), json={"id": "ops", "display_name": "Dup"}
-    )
-    assert r.status_code == 409
-
-
-def test_template_create_viewer_forbidden(client):
-    token, _ = _session_for("viewer")
-    r = client.post(
-        "/admin/agent-templates", headers=_hdr(token), json={"id": "x", "display_name": "X"}
-    )
-    assert r.status_code == 403
-
-
-def test_template_edit(client):
-    token, _ = _session_for("admin")
-    r = client.patch(
-        "/admin/agent-templates/ops", headers=_hdr(token), json={"system_prompt": "v2"}
-    )
-    assert r.status_code == 200
-    assert r.json()["system_prompt"] == "v2"
-    assert r.json()["allowed_tools"] == ["read_*", "exec_*", "github__*"]
-
-
-def test_template_edit_missing_404(client):
-    token, _ = _session_for("admin")
-    r = client.patch(
-        "/admin/agent-templates/ghost", headers=_hdr(token), json={"display_name": "x"}
-    )
-    assert r.status_code == 404
-
-
-def test_template_delete(client):
-    token, _ = _session_for("admin")
-    r = client.delete("/admin/agent-templates/support", headers=_hdr(token))
-    assert r.status_code == 200
-    ids = {t["id"] for t in client.get("/admin/agent-templates", headers=_hdr(token)).json()}
-    assert "support" not in ids
-
-
-def test_template_delete_missing_404(client):
-    token, _ = _session_for("admin")
-    assert client.delete("/admin/agent-templates/ghost", headers=_hdr(token)).status_code == 404
-
-
-def test_template_delete_viewer_forbidden(client):
-    token, _ = _session_for("viewer")
-    assert client.delete("/admin/agent-templates/ops", headers=_hdr(token)).status_code == 403
-
-
 # --- observability (场景 45) --------------------------------------------------
 
 
@@ -249,7 +169,6 @@ def _wire_real_store(monkeypatch):
             "mcp_server_ids": a.mcp_server_ids,
             "model_overrides": a.model_overrides,
             "memory_namespace": a.memory_namespace,
-            "template_id": a.template_id,
             "icon": a.icon,
         }
 
@@ -261,7 +180,6 @@ def _wire_real_store(monkeypatch):
         mids=None,
         mo=None,
         mn="default",
-        template_id=None,
         plugins=None,
         features=None,
         icon=None,
@@ -276,7 +194,6 @@ def _wire_real_store(monkeypatch):
             mcp_server_ids=mids,
             model_overrides=mo,
             memory_namespace=mn,
-            template_id=template_id,
             icon=icon,
         )
 
@@ -319,7 +236,6 @@ def test_create_agent_persists_and_lists(client, monkeypatch):
             "name": "newbot",
             "system_prompt": "hi",
             "allowed_tools": ["shell"],
-            "template_id": "ops",
         },
     )
     assert r.status_code == 201
@@ -328,45 +244,6 @@ def test_create_agent_persists_and_lists(client, monkeypatch):
     st = store.get_state("newbot")
     assert st["provenance"] == "adhoc" and st["status"] == "enabled"
     assert "newbot" in {a["agent_name"] for a in store.list_states()}
-
-
-def test_create_requires_template_id_422(client, monkeypatch):
-    _wire_real_store(monkeypatch)
-    token, _ = _session_for("admin")
-    r = client.post(
-        "/admin/agents",
-        headers=_hdr(token),
-        json={"name": "notmpl", "system_prompt": "x", "allowed_tools": []},
-    )
-    assert r.status_code == 422
-    assert agent_store.get_by_name("notmpl") is None
-
-
-def test_create_unknown_template_id_404(client, monkeypatch):
-    _wire_real_store(monkeypatch)
-    token, _ = _session_for("admin")
-    r = client.post(
-        "/admin/agents",
-        headers=_hdr(token),
-        json={"name": "ghosttmpl", "system_prompt": "x", "template_id": "nope"},
-    )
-    assert r.status_code == 404
-    assert agent_store.get_by_name("ghosttmpl") is None
-
-
-def test_create_persists_template_id_and_echoes(client, monkeypatch):
-    _wire_real_store(monkeypatch)
-    token, _ = _session_for("admin")
-    r = client.post(
-        "/admin/agents",
-        headers=_hdr(token),
-        json={"name": "linked", "system_prompt": "hi", "template_id": "support"},
-    )
-    assert r.status_code == 201
-    assert r.json()["template_id"] == "support"
-    assert agent_store.get_by_name("linked").template_id == "support"
-    g = client.get("/admin/agents/linked", headers=_hdr(token))
-    assert g.json()["template_id"] == "support"
 
 
 def test_create_with_model_overrides_and_capabilities_yaml(client, monkeypatch):
@@ -382,7 +259,6 @@ def test_create_with_model_overrides_and_capabilities_yaml(client, monkeypatch):
         headers=_hdr(token),
         json={
             "name": "capbot",
-            "template_id": "ops",
             "system_prompt": "You are ops.",
             "model_overrides": {
                 "default": {"provider": "anthropic", "model": "claude-opus-4-8"},
@@ -414,7 +290,6 @@ def test_create_bad_capabilities_yaml_422(client, monkeypatch):
         headers=_hdr(token),
         json={
             "name": "badyaml",
-            "template_id": "ops",
             "capabilities_yaml": "allowed_tools: [unterminated",
         },
     )
@@ -429,7 +304,7 @@ def test_create_duplicate_name_409(client, monkeypatch):
     r = client.post(
         "/admin/agents",
         headers=_hdr(token),
-        json={"name": "dup", "system_prompt": "x", "template_id": "ops"},
+        json={"name": "dup", "system_prompt": "x"},
     )
     assert r.status_code == 409
 
@@ -440,7 +315,7 @@ def test_create_viewer_forbidden(client, monkeypatch):
     r = client.post(
         "/admin/agents",
         headers=_hdr(token),
-        json={"name": "nope", "system_prompt": "x", "template_id": "ops"},
+        json={"name": "nope", "system_prompt": "x"},
     )
     assert r.status_code == 403
     assert agent_store.get_by_name("nope") is None
@@ -556,7 +431,6 @@ def test_create_persists_version_config_fields(client, monkeypatch):
             "mcp_server_ids": ["github"],
             "model_overrides": {"model": "x"},
             "memory_namespace": "team",
-            "template_id": "ops",
         },
     )
     assert r.status_code == 201
@@ -626,7 +500,7 @@ def test_create_with_icon_and_list_includes_it(client, monkeypatch):
     r = client.post(
         "/admin/agents",
         headers=_hdr(token),
-        json={"name": "iconbot", "template_id": "ops", "system_prompt": "x", "icon": "🦊"},
+        json={"name": "iconbot", "system_prompt": "x", "icon": "🦊"},
     )
     assert r.status_code == 201, r.text
     assert r.json()["icon"] == "🦊"

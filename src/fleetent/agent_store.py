@@ -65,7 +65,6 @@ class Agent:
     mcp_server_ids: list[str] | None = None
     model_overrides: dict[str, Any] = field(default_factory=dict)
     memory_namespace: str = "default"
-    template_id: str | None = None
     # Optional avatar emoji shown in the console; agent-level identity, not versioned.
     icon: str | None = None
 
@@ -83,7 +82,6 @@ class AgentVersion:
     memory_namespace: str
     created_at: str
     is_active: bool = False
-    template_id: str | None = None
 
 
 def _db() -> SQLiteDatabase:
@@ -105,7 +103,8 @@ def _parse_caps(row: dict[str, Any]) -> dict[str, Any]:
         # no narrowing (backward compatible).
         "allowed_skills": json.loads(row["allowed_skills"] or "[]"),
         # icon column added in migration 047; guard legacy rows that predate it.
-        "icon": (row["icon"] if "icon" in row else None),
+        # sqlite3.Row has no .get(), so SIM401's row.get() suggestion does not apply.
+        "icon": (row["icon"] if "icon" in row else None),  # noqa: SIM401
     }
 
 
@@ -123,7 +122,6 @@ def create_agent(
     memory_namespace: str = "default",
     tenant_id: str = "default",
     team_id: str | None = None,
-    template_id: str | None = None,
     icon: str | None = None,
 ) -> Agent:
     """Create an agent plus its version-1 snapshot in a single transaction.
@@ -169,7 +167,6 @@ def create_agent(
             model_overrides=model_overrides or {},
             memory_namespace=memory_namespace,
             now=now,
-            template_id=template_id,
         )
         conn.execute(
             "UPDATE agents SET active_version_id = :vid WHERE id = :aid",
@@ -190,7 +187,6 @@ def create_agent(
         mcp_server_ids=mcp_server_ids,
         model_overrides=model_overrides or {},
         memory_namespace=memory_namespace,
-        template_id=template_id,
         icon=icon,
     )
 
@@ -219,15 +215,13 @@ def _insert_version(
     memory_namespace: str,
     now: str,
     created_by_user_id: str | None = None,
-    template_id: str | None = None,
 ) -> int:
     version_id = conn.execute(
         "INSERT INTO agent_versions "
         "(agent_id, version, system_prompt, allowed_tools, skills_dir, mcp_server_ids, "
-        " model_overrides, memory_namespace, created_by_user_id, created_at, template_id) "
+        " model_overrides, memory_namespace, created_by_user_id, created_at) "
         "VALUES (:agent_id, :version, :system_prompt, :allowed_tools, :skills_dir, "
-        " :mcp_server_ids, :model_overrides, :memory_namespace, :created_by, :created_at, "
-        " :template_id)",
+        " :mcp_server_ids, :model_overrides, :memory_namespace, :created_by, :created_at)",
         {
             "agent_id": agent_id,
             "version": version,
@@ -239,7 +233,6 @@ def _insert_version(
             "memory_namespace": memory_namespace,
             "created_by": created_by_user_id,
             "created_at": now,
-            "template_id": template_id,
         },
     ).lastrowid
     return int(version_id or 0)
@@ -258,7 +251,6 @@ def _row_to_version(row: dict[str, Any], active_version_id: int | None) -> Agent
         memory_namespace=str(row["memory_namespace"]),
         created_at=str(row["created_at"]),
         is_active=int(row["id"]) == active_version_id,
-        template_id=row["template_id"],
     )
 
 
@@ -297,7 +289,6 @@ def get_by_name(name: str) -> Agent | None:
         if version["model_overrides"]
         else {},
         memory_namespace=str(version["memory_namespace"]),
-        template_id=version["template_id"],
         **_parse_caps(agent),
     )
 
@@ -395,7 +386,6 @@ def _merge_version_fields(
         "memory_namespace": (
             str(base["memory_namespace"]) if memory_namespace is _UNSET else memory_namespace
         ),
-        "template_id": base["template_id"],
     }
 
 

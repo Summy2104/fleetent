@@ -194,7 +194,6 @@ def test_agents_tab_and_list_wiring():
     assert "function agentCardHtml" in html
     assert 'api("GET", "/agents?include_archived=true")' in html
     assert "LOADERS.agents" in html
-    assert "/agent-templates" in html
 
 
 def test_agents_detail_drawer_and_binding_sections():
@@ -266,20 +265,15 @@ def test_agents_crud_modal_and_fields_present():
     assert "agCreate(" in bar
 
 
-def test_agent_create_modal_wide_and_requires_template():
+def test_agent_create_modal_wide_and_template_free():
     html = ADMIN_HTML
     # ag-modal uses the wide modal box
     modal = html.split('id="ag-modal"', 1)[1].split("</div>", 1)[0]
     assert "modal-box wide" in modal
-    # a template <select> is present and prefills on change
-    assert 'id="ag-template"' in html
-    assert "agTemplatePrefill(" in html
-    # agCreate populates the template select; agSave sends template_id and blocks
-    # creating without a chosen template
-    agcreate = html.split("function agCreate", 1)[1].split("function agEdit", 1)[0]
-    assert "ag-template" in agcreate
-    agsave = html.split("function agSave", 1)[1].split("function agDelete", 1)[0]
-    assert "template_id" in agsave
+    # the template module was removed: no template picker / template_id anywhere
+    assert 'id="ag-template"' not in html
+    assert "agTemplatePrefill(" not in html
+    assert "template_id" not in html
 
 
 def test_agents_crud_functions_present():
@@ -288,89 +282,47 @@ def test_agents_crud_functions_present():
         assert fn in html, fn
 
 
-def test_agents_templates_are_inpage_subtabs():
+def test_agents_have_no_template_module():
     html = ADMIN_HTML
     sidebar = html.split('class="sidebar"', 1)[1].split("</nav>", 1)[0]
-    # single Agents sidebar item, no separate Templates sidebar tab / section
     assert 'data-tab="templates"' not in sidebar
     assert 'id="tab-templates"' not in html
-    # sub-tab switcher + panes live inside the Agents page
-    assert "agSubTab(" in html
-    assert 'id="ag-pane"' in html
-    assert 'id="tmpl-pane"' in html
-
-
-def test_agents_tab_no_longer_hosts_templates_toggle():
-    html = ADMIN_HTML
-    # the old inline toggle panel is gone
-    assert "tmplToggle" not in html
-    assert 'id="ag-templates-panel"' not in html
-
-
-def test_agent_templates_edit_modal_and_fields_present():
-    html = ADMIN_HTML
-    assert 'id="tmpl-modal"' in html
-    for field_id in ("tmpl-id", "tmpl-display-name", "tmpl-allowed-tools", "tmpl-system-prompt"):
-        assert f'id="{field_id}"' in html, field_id
+    # the in-page Templates sub-tab + pane + modal + CRUD are all gone
+    for marker in (
+        "agSubTab(",
+        'id="tmpl-pane"',
+        'id="tmpl-modal"',
+        "function tmplCreate",
+        "tmplToggle",
+    ):
+        assert marker not in html, marker
 
 
 def test_resource_id_inputs_are_readonly():
     html = ADMIN_HTML
     import re
 
-    for input_id in ("tmpl-id", "nkb-id", "pv-id", "oc-id"):
+    for input_id in ("nkb-id", "pv-id", "oc-id"):
         m = re.search(rf'<input[^>]*id="{input_id}"[^>]*>', html)
         assert m, input_id
         assert "readonly" in m.group(0), input_id
 
 
-def test_textarea_themed_and_template_editor_roomy():
+def test_textarea_themed():
     html = ADMIN_HTML
     import re
 
     style = html.split("<style", 1)[1].split("</style>", 1)[0]
-    # global form-control rule now covers textarea too
+    # global form-control rule covers textarea too
     assert re.search(r"input,\s*select,\s*textarea", style)
-    # template modal is wide and the prompt editor is tall
-    box = html.split('id="tmpl-modal"', 1)[1].split("</div>", 1)[0]
-    assert "modal-box wide" in box
-    m = re.search(r'id="tmpl-system-prompt"[^>]*rows="(\d+)"', html)
-    assert m and int(m.group(1)) >= 12
 
 
 def test_genid_helper_and_create_uses_it():
     html = ADMIN_HTML
     assert "function genId" in html
-    # template/provider/connector create forms fill the id with a generated value
+    # provider/connector/kb create forms fill the id with a generated value
     assert "genId()" in html
-    # not fewer than the create forms that open with a generated id
-    assert html.count("genId()") >= 3
-
-
-def test_agent_templates_crud_functions_present():
-    html = ADMIN_HTML
-    for fn in (
-        "function tmplCreate",
-        "function tmplEdit",
-        "function tmplSave",
-        "function tmplDelete",
-    ):
-        assert fn in html, fn
-
-
-def test_agent_templates_crud_endpoints_wired():
-    html = ADMIN_HTML
-    assert 'api("POST", "/agent-templates"' in html
-    assert 'api("PATCH", `/agent-templates/${' in html
-    assert 'api("DELETE", `/agent-templates/${' in html
-
-
-def test_agent_templates_write_controls_admin_gated():
-    html = ADMIN_HTML
-    body = html.split("function tmplRender", 1)[1].split("function tmplCreate", 1)[0]
-    assert "IS_VIEWER" in body
-    assert "tmplEdit(" in body
-    assert "tmplDelete(" in body
+    assert html.count("genId()") >= 2
 
 
 # Free-form fields the modal never exposes (covered by template / bindings instead).
@@ -490,7 +442,12 @@ def test_agent_bindings_are_searchable_multiselect():
     html = ADMIN_HTML
     fn = html.split("async function agLoadCreateBindings", 1)[1].split("function agMsWidget", 1)[0]
     # skills / connectors(mcp+oauth) / im users render as the multi-select widget
-    for call in ("agMsWidget(\"agm-skills\"", "agMsWidget(\"agm-mcp\"", "agMsWidget(\"agm-oauth\"", "agMsWidget(\"agm-users\""):
+    for call in (
+        'agMsWidget("agm-skills"',
+        'agMsWidget("agm-mcp"',
+        'agMsWidget("agm-oauth"',
+        'agMsWidget("agm-users"',
+    ):
         assert call in fn, call
     # the widget supports name filtering + chip selection; classes preserved for save-diff
     widget = html.split("function agMsWidget", 1)[1].split("function agMsOpen", 1)[0]
@@ -503,7 +460,9 @@ def test_agent_bindings_are_searchable_multiselect():
 
 def test_agent_model_overrides_pick_from_providers():
     html = ADMIN_HTML
-    render = html.split("function agRenderModelOverrides", 1)[1].split("function agCollectModelOverrides", 1)[0]
+    render = html.split("function agRenderModelOverrides", 1)[1].split(
+        "function agCollectModelOverrides", 1
+    )[0]
     # Each level is a provider dropdown sourced from the configured registry —
     # no free-text model / base_url_env inputs.
     assert "AG_PROVIDERS" in render
@@ -513,7 +472,12 @@ def test_agent_model_overrides_pick_from_providers():
     assert "AG_PROVIDERS.find" in collect  # model derived from the chosen provider
     # providers are loaded when the modal opens (create + edit)
     assert 'AG_PROVIDERS = await api("GET", "/providers")' in html
-    assert 'api("GET", "/providers")' in html.split("async function agEdit", 1)[1].split("async function agApplyEditBindings", 1)[0]
+    assert (
+        'api("GET", "/providers")'
+        in html.split("async function agEdit", 1)[1].split("async function agApplyEditBindings", 1)[
+            0
+        ]
+    )
 
 
 def test_agent_edit_reuses_new_agent_modal_prefilled():
@@ -521,16 +485,17 @@ def test_agent_edit_reuses_new_agent_modal_prefilled():
     fn = html.split("async function agEdit", 1)[1].split("async function agApplyEditBindings", 1)[0]
     # Edit opens the shared ag-modal in edit mode with the create sections visible.
     assert 'dataset.mode = "edit"' in fn
-    assert 'getElementById' not in fn  # uses $() like the rest
+    assert "getElementById" not in fn  # uses $() like the rest
     for shown in ('"ag-create-extra"', '"ag-bind-config"'):
         assert shown in fn
-    assert '"ag-template-row"' in fn  # template hidden in edit
     # prefill: model overrides + capabilities YAML + bindings
     assert "agFillModelOverrides(" in fn
     assert "agToolsToYaml(" in fn
     assert "agLoadCreateBindings(current)" in fn
     # save applies a binding diff (add + remove)
-    diff = html.split("async function agApplyEditBindings", 1)[1].split("async function agSave", 1)[0]
+    diff = html.split("async function agApplyEditBindings", 1)[1].split("async function agSave", 1)[
+        0
+    ]
     assert "DELETE" in diff and "POST" in diff
     assert "capabilities_yaml" in html.split("async function agSave", 1)[1].split("\n}", 1)[0]
 
@@ -931,7 +896,7 @@ def test_tables_wrapped_in_scroll_container():
     html = ADMIN_HTML
     # every data table lives inside a horizontal scroll container
     assert html.count('class="table-scroll"') >= html.count("<table>")
-    assert html.count("<table>") >= 11
+    assert html.count("<table>") >= 10
 
 
 def test_empty_and_loading_state_helpers_present():

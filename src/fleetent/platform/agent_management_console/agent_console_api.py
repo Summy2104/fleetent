@@ -2,7 +2,7 @@
 
 Layers the operational management face on top of the agent definition/binding store:
 enable/disable, archive (soft delete) with binding protection + restore, clone,
-the read-only template library, managed/adhoc provenance + drift, and the per-agent
+managed/adhoc provenance + drift, and the per-agent
 observation view.
 
 Agent CRUD/versioning and the binding tables come from agent_store; per-agent metric
@@ -24,7 +24,6 @@ from fleetent.governance import audit_log
 from fleetent.platform.agent_management_console import (
     agent_admin_store,
     agent_observability,
-    agent_template_store,
 )
 
 router = APIRouter(prefix="/admin")
@@ -53,7 +52,6 @@ def create_agent_def(
     mcp_server_ids: list[str] | None = None,
     model_overrides: dict[str, Any] | None = None,
     memory_namespace: str = "default",
-    template_id: str | None = None,
     plugins: list[str] | None = None,
     features: dict[str, Any] | None = None,
     icon: str | None = None,
@@ -149,7 +147,6 @@ class CloneBody(BaseModel):
 
 class CreateBody(BaseModel):
     name: str
-    template_id: str
     system_prompt: str = ""
     allowed_tools: list[str] = []
     plugins: list[str] = []
@@ -175,72 +172,6 @@ class UpdateBody(BaseModel):
     # Optional capabilities YAML (parsed server-side); when present its allowed_tools
     # override the structured field, mirroring create.
     capabilities_yaml: str | None = None
-
-
-# --- templates (literal path before /{name}) ----------------------------------
-
-
-class TemplateCreateBody(BaseModel):
-    id: str
-    display_name: str
-    allowed_tools: list[str] = []
-    system_prompt: str = ""
-
-
-class TemplateUpdateBody(BaseModel):
-    display_name: str | None = None
-    allowed_tools: list[str] | None = None
-    system_prompt: str | None = None
-
-
-@router.get("/agent-templates")
-def list_templates(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
-    _current_user(authorization)
-    return agent_template_store.list_templates()
-
-
-@router.post("/agent-templates", status_code=201)
-def create_template(
-    body: TemplateCreateBody, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    if not body.id.strip():
-        raise HTTPException(status_code=422, detail="id required")
-    if agent_template_store.get_template(body.id) is not None:
-        raise HTTPException(status_code=409, detail="template already exists")
-    template = agent_template_store.create_template(
-        body.id, body.display_name, body.allowed_tools, body.system_prompt
-    )
-    audit_log.write_audit(user.id, "template.create", "agent_template", body.id)
-    return template
-
-
-@router.patch("/agent-templates/{template_id}")
-def update_template(
-    template_id: str, body: TemplateUpdateBody, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    kwargs: dict[str, Any] = {}
-    if body.display_name is not None:
-        kwargs["display_name"] = body.display_name
-    if body.allowed_tools is not None:
-        kwargs["allowed_tools"] = body.allowed_tools
-    if body.system_prompt is not None:
-        kwargs["system_prompt"] = body.system_prompt
-    template = agent_template_store.update_template(template_id, **kwargs)
-    if template is None:
-        raise HTTPException(status_code=404, detail="template not found")
-    audit_log.write_audit(user.id, "template.update", "agent_template", template_id)
-    return template
-
-
-@router.delete("/agent-templates/{template_id}")
-def delete_template(template_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    if not agent_template_store.delete_template(template_id):
-        raise HTTPException(status_code=404, detail="template not found")
-    audit_log.write_audit(user.id, "template.delete", "agent_template", template_id)
-    return {"id": template_id, "deleted": True}
 
 
 # --- list ---------------------------------------------------------------------
@@ -290,7 +221,6 @@ def _def_response(name: str) -> dict[str, Any]:
         out["mcp_server_ids"] = agent.get("mcp_server_ids")
         out["model_overrides"] = agent.get("model_overrides", {})
         out["memory_namespace"] = agent.get("memory_namespace", "default")
-        out["template_id"] = agent.get("template_id")
         out["icon"] = agent.get("icon")
     return out
 
@@ -325,8 +255,6 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
     user = _require_admin(authorization)
     if get_agent_def(body.name) is not None:
         raise HTTPException(status_code=409, detail="agent already exists")
-    if agent_template_store.get_template(body.template_id) is None:
-        raise HTTPException(status_code=404, detail="template not found")
     allowed_tools, plugins, features = _resolve_capabilities(
         body.allowed_tools, body.plugins, body.features, body.capabilities_yaml
     )
@@ -338,7 +266,6 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
         body.mcp_server_ids,
         body.model_overrides,
         body.memory_namespace,
-        body.template_id,
         plugins=plugins,
         features=features,
         icon=body.icon,

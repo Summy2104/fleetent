@@ -53,7 +53,9 @@ def test_update_identity_metadata_audited(db):
     user = im_user_store.get_or_create(_OWNER, "slack", "U1")
     im_id = im_user_store.list_im_identities(user.id)[0]["id"]
     im_user_store.update_im_identity(
-        im_id, metadata={"display_name": "Alice", "email": "a@x.com", "notes": "vip"}, actor="admin1"
+        im_id,
+        metadata={"display_name": "Alice", "email": "a@x.com", "notes": "vip"},
+        actor="admin1",
     )
     row = im_user_store.get_im_user(im_id)
     assert row is not None
