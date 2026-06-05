@@ -62,7 +62,7 @@ _DEFAULT_INITIAL_INTENT_MAX = 2
 def _default_config() -> ContextConfig:
     from fleetent.config import Settings
 
-    s = Settings()
+    s = Settings()  # type: ignore[call-arg]
     return {
         "max_tokens": s.context_max_tokens,
         "tmax_ratio": s.context_tmax_ratio,

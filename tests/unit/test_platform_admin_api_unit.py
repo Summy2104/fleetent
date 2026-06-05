@@ -1160,7 +1160,7 @@ def test_server_helpers_cover_admin_url_jobs_and_auth(
     purged: list[str] = []
     monkeypatch.delenv("DATABASE_URL", raising=False)
     server._run_playground_retention()
-    monkeypatch.setenv("DATABASE_URL", "sqlite:///tmp.db")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/fleetent")
     monkeypatch.setattr(
         server.chat_admin_api, "purge_expired_playground", lambda: purged.append("purge")
     )
@@ -1169,7 +1169,7 @@ def test_server_helpers_cover_admin_url_jobs_and_auth(
 
     monkeypatch.delenv("DATABASE_URL", raising=False)
     assert server.agent_routing_status("ops") == "enabled"
-    monkeypatch.setenv("DATABASE_URL", "sqlite:///tmp.db")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/fleetent")
     from fleetent.platform.agent_management_console import agent_admin_store
 
     monkeypatch.setattr(agent_admin_store, "get_state", lambda agent_name: {"status": "disabled"})

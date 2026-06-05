@@ -67,10 +67,10 @@ environment:
 
 检查目标：
 
-- `config/settings.yaml` 只包含非敏感策略配置。
-- `config/mcp.servers.yaml` 只包含 MCP server definition 和非敏感引用。
-- Google Drive / Confluence credential 使用 `credential_ref`，例如 `env:FLEETENT_CONNECTOR_TOKEN`
-  或 `file:///app/secrets/google-drive-token.json`。
+- `config/agent.yaml` 只包含 agent、model、MCP server、knowledge base、connector、provider 等非敏感配置。
+- Google Drive / Confluence credential 使用平铺的 `*_env` 引用，例如
+  `FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN`、`FLEETENT_CONFLUENCE_TOKEN`。
+- MCP server credential 只包含 `api_key_env` 等非敏感引用。
 - `.env`、系统环境变量或受控 secret 文件只留在测试环境本机，不进入 git、trace、日志、diagnostics package 或 issue。
 - `database_url` 指向测试环境 SQLite 文件，例如 `sqlite:///data/fleetent.db`。
 
@@ -78,8 +78,7 @@ environment:
 
 ```bash
 git status --short
-test -f config/settings.yaml
-test -f config/mcp.servers.yaml || true
+test -f config/agent.yaml
 uv run fleetent-admin kb connectors list
 ```
 

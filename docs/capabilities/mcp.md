@@ -22,7 +22,7 @@
 ```mermaid
 flowchart TD
     subgraph conn["启动时连接"]
-        CFG["config/mcp.servers.yaml\nservers"] --> T1["stdio transport\n子进程 stdin/stdout"]
+        CFG["config/agent.yaml\nmcp_servers"] --> T1["stdio transport\n子进程 stdin/stdout"]
         CFG --> T2["HTTP transport\nPOST + SSE"]
         T1 & T2 --> INIT[initialize 握手]
         INIT -->|成功| NS["工具注册\nserver__{tool} 命名空间"]
@@ -47,9 +47,10 @@ flowchart TD
 - ✅ **stdio 传输**：通过子进程 stdin/stdout 接入本机 MCP 服务（文件系统、本地脚本等）
   - 子进程标准输出只能写协议消息，混入 `print()` 调试输出会破坏协议
 
-- ✅ **服务注册与启动配置**：`config/mcp.servers.yaml` 声明服务列表，启动时自动连接并注册工具；`config/settings.yaml` 的 `mcp.enabled` 只控制全局 MCP 开关
+- ✅ **服务注册与启动配置**：`config/agent.yaml` 的 `mcp_servers` 声明服务列表，启动时自动连接并注册工具；服务凭据只保存环境变量名引用
   - 某个服务连接失败 → 该服务工具不可用，不影响其他服务和平台正常启动
-  - 旧 `config/mcp.yaml` 不再读取；文件存在时启动失败并提示迁移到 `config/mcp.servers.yaml`
+  - legacy `config/mcp.servers.yaml` 缺失时返回空列表；当前部署模板不再要求该文件
+  - 旧 `config/mcp.yaml` 不再读取；文件存在时启动失败并提示迁移
 
 - ✅ **工具命名空间隔离**：来自不同服务的工具自动加 `{server_id}__{tool_name}` 前缀
   - 双下划线是命名空间分隔符，单下划线是工具名本身的合法字符
@@ -92,7 +93,7 @@ flowchart TD
 ## 验收标准
 
 **场景 1：外部服务工具正常注册并可调用**
-- Given：`config/mcp.servers.yaml` 中声明了一个外部 MCP 服务（如 GitHub 工具服务）
+- Given：`config/agent.yaml` 的 `mcp_servers` 中声明了一个外部 MCP 服务（如 GitHub 工具服务）
 - When：平台启动完成
 - Then：该服务的工具对 agent 可见；用户请求触发后，agent 可成功调用并获得结果
 
@@ -126,8 +127,7 @@ flowchart TD
 
 **需要 mock 的依赖**：
 - MCP 服务端（stdio/HTTP）：用 mock server 模拟正常响应和故障场景
-- `config/settings.yaml` 路径：`monkeypatch` 到临时文件，只注入 `mcp.enabled` 等全局策略
-- `config/mcp.servers.yaml` 路径：在临时 `config/` 下写入 server definitions，隔离本机 operator 配置
+- `config/agent.yaml` 路径：在临时 `config/` 下写入 server definitions，隔离本机 operator 配置
 - 子进程启动（stdio）：mock `subprocess.Popen`，隔离真实子进程
 
 ## 待决问题

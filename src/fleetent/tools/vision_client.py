@@ -50,7 +50,7 @@ async def analyze(
     returns the assistant text. Any failure is raised as VisionError for the
     caller to normalize into a tool-result error string.
     """
-    settings = settings or Settings()
+    settings = settings or Settings()  # type: ignore[call-arg]
     if not settings.vision_url:
         raise VisionError("vision endpoint not configured (vision_url is empty)")
 

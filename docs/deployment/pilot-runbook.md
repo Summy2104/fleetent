@@ -121,22 +121,21 @@ git status --short
 
 - 证明配置文件只保存非敏感策略。
 - 证明真实凭据由环境变量或受控 secret 文件提供。
-- 证明 MCP servers 仍是独立配置，不混入主 settings。
+- 证明 agent 运行配置和 MCP servers 均只保存非敏感引用。
 
 操作步骤：
 
 ```bash
-test -f config/settings.yaml
-test -f config/mcp.servers.yaml || true
+test -f config/agent.yaml
 ```
 
 人工检查：
 
-- `config/settings.yaml` 里只有 `database_url`、默认 agent、diagnostics、connector、provider 等非敏感配置。
-- Google Drive / Confluence credential 使用 `credential_ref`，例如 `env:FLEETENT_CONNECTOR_TOKEN`
-  或 `file:///app/secrets/google-drive-token.json`。
-- `credential_ref` 指向的文件权限由部署方保护。
-- `config/mcp.servers.yaml` 只定义 MCP server，不保存 token payload。
+- `config/agent.yaml` 里只有 agent、model、MCP server、knowledge base、connector、provider 等非敏感配置。
+- Google Drive / Confluence credential 使用平铺的 `*_env` 引用，例如
+  `FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN`、`FLEETENT_CONFLUENCE_TOKEN`。
+- MCP server API key 也只使用 `api_key_env` 等环境变量名引用，不保存 token payload。
+- 环境变量或受控 secret 文件的权限由部署方保护。
 
 应该看到什么：
 
@@ -169,7 +168,7 @@ docker compose run --rm fleetent uv run fleetent-admin init-config
 - 镜像构建成功。
 - `fleetent --help` 能显示 agent CLI 用法。
 - `fleetent-admin --help` 能显示管理命令。
-- `.env`、`config/settings.yaml`、`config/mcp.servers.yaml`、`data/`、`data/logs/`、
+- `.env`、`config/agent.yaml`、`data/`、`data/logs/`、
   `data/diagnostics/` 和 `secrets/` 已初始化；如果文件已存在，命令会跳过。
 
 失败判断：
@@ -758,7 +757,7 @@ retest_result:
 
 服务无法启动：
 
-1. 检查 `config/settings.yaml`。
+1. 检查 `config/agent.yaml` 和 `.env`。
 2. 检查 `database_url` 和 DB 文件权限。
 3. 检查 `uv run alembic upgrade head`。
 4. 检查启动日志是否包含 import error 或配置错误。

@@ -272,7 +272,7 @@ class SandboxClient:
             stderr=asyncio.subprocess.DEVNULL,
         )
         await proc.communicate()
-        logger.info("sandbox_destroyed", container_id=workspace_id[:12])
+        logger.info("sandbox_destroyed", extra={"container_id": workspace_id[:12]})
 
     async def kill_workspace(self, workspace_id: str) -> None:
         """Forcefully terminate a container: SIGTERM, fixed grace, then SIGKILL (SB7).

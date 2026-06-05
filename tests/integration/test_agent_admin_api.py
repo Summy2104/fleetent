@@ -353,8 +353,12 @@ def test_export_agent_yaml(client):
         memory_namespace="support-bot",
     )
     agent_mcp_server_store.add_mcp_server(
-        None, "docs", transport="http", url="https://docs.acme.internal/mcp",
-        auth_type="bearer", api_key_env="ACME_DOCS_MCP_TOKEN",
+        None,
+        "docs",
+        transport="http",
+        url="https://docs.acme.internal/mcp",
+        auth_type="bearer",
+        api_key_env="ACME_DOCS_MCP_TOKEN",
     )
     agent_store.bind_mcp_server(agent.id, "docs")
     agent_store.assign_user("u_alice", agent.id)
@@ -392,7 +396,10 @@ def test_deploy_writes_agent_yaml(client, tmp_path, monkeypatch):
     home = tmp_path / "home"
     monkeypatch.setenv("FLEETENT_HOME", str(home))
     agent_store.create_agent(
-        "dep-bot", "You are dep-bot.", ["read_file"], plugins=["p1"],
+        "dep-bot",
+        "You are dep-bot.",
+        ["read_file"],
+        plugins=["p1"],
         model_overrides={"default": {"provider": "anthropic", "model": "claude-opus-4-8"}},
     )
     token, _ = _session_for("admin")

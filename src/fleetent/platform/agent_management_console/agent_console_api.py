@@ -249,7 +249,11 @@ def list_agents(
 ) -> list[dict[str, Any]]:
     _current_user(authorization)
     rows = agent_admin_store.list_states(include_archived=include_archived)
-    icons = agent_icons()
+    # Icon enrichment is cosmetic — never let it break the list if the lookup fails.
+    try:
+        icons = agent_icons()
+    except Exception:  # noqa: BLE001 — best-effort avatar lookup
+        icons = {}
     for r in rows:
         r["icon"] = icons.get(str(r.get("agent_name") or ""))
     return rows

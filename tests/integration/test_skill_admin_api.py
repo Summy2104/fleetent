@@ -273,6 +273,7 @@ def test_list_proposals_uses_reflection(client, monkeypatch):
 
 def _insert_proposal(db_path, pid="pr1", status="pending"):
     import sqlite3
+
     now = "2026-06-04T00:00:00+00:00"
     conn = sqlite3.connect(db_path)
     conn.execute(

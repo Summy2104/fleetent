@@ -122,16 +122,16 @@ uv run pytest tests/integration/test_trace_events.py \
 执行：
 
 ```bash
-test -f config/settings.yaml
-test -f config/mcp.servers.yaml || true
+test -f config/agent.yaml
 uv run fleetent-admin validate-config --profile pilot --format json
 uv run fleetent-admin kb connectors list
 ```
 
 人工复核：
 
-- `config/settings.yaml` 不包含明文 API key、OAuth token、connector token 或 password。
-- `config/mcp.servers.yaml` 只包含 MCP server definition 和非敏感引用。
+- `config/agent.yaml` 不包含明文 API key、OAuth token、connector token 或 password。
+- MCP server、Google Drive、Confluence、embedding、rerank 等 credential 只包含 `*_env`
+  引用。
 - `fleetent-admin kb connectors list` 输出不包含 token、credential payload 或文档正文。
 
 失败分类：
@@ -168,7 +168,7 @@ curl -fsS http://127.0.0.1:8765/health || true
 
 人工复核：
 
-- `.env`、`config/settings.yaml`、`config/mcp.servers.yaml`、`data/`、`data/logs/`、
+- `.env`、`config/agent.yaml`、`data/`、`data/logs/`、
   `data/diagnostics/` 和 `secrets/` 的创建或跳过行为符合预期。
 - 服务进程保持运行。
 - health check 或等效 CLI smoke 可执行。

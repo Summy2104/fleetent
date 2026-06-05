@@ -16,10 +16,10 @@
 
 ## 现状
 
-- ✅ **pydantic-settings 配置体系**：.env + config/settings.yaml 双源加载
-  - `config/settings.yaml` 是统一非敏感应用策略配置文件，环境变量和 `.env` 优先级高于 YAML
-  - MCP server definitions 独立放在 `config/mcp.servers.yaml`；`settings.yaml` 只保留 `mcp.enabled` 这类全局策略
-  - 密钥不进 YAML、不进 DB、不进 git，仅通过 env var 注入；YAML 中只保存 `api_key_env` 这类环境变量名引用
+- ✅ **单 agent 配置体系**：`.env` + `config/agent.yaml`
+  - `config/agent.yaml` 是部署 agent 的非敏感运行配置文件，保存 agent、model、MCP servers、knowledge base、connector、embedding、rerank 等配置
+  - 密钥不进 YAML、不进 DB、不进 git，仅通过 env var 注入；YAML 中只保存 `api_key_env`、`*_env` 这类环境变量名引用
+  - legacy `config/settings.yaml` / `config/mcp.servers.yaml` 加载器仍保留缺省兼容路径，但当前部署模板和 installer 不再要求它们存在
   - 旧 `config/mcp.yaml`、`config/cron.yaml`、`config/webhooks.yaml` 存在时启动 fail fast，避免静默使用过期配置
 
 - ✅ **Docker Compose**：Pilot 默认部署入口
@@ -112,9 +112,9 @@ docker compose run --rm fleetent uv run python scripts/upgrade.py --database-url
 
 ## Connector 运维
 
-Pilot 环境中，Google Drive / Confluence connector 的真实 credential 不写入 `settings.yaml`；配置文件只保存
-`credential_ref`，例如 `file:///app/secrets/google-drive-token.json` 或
-`env:FLEETENT_CONFLUENCE_API_TOKEN`。对应文件权限、环境变量注入和备份策略由部署方保护。
+Pilot 环境中，Google Drive / Confluence connector 的真实 credential 不写入 `config/agent.yaml`；
+配置文件只保存平铺的环境变量名引用，例如 `FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN` 和
+`FLEETENT_CONFLUENCE_TOKEN`。对应环境变量注入、文件权限和备份策略由部署方保护。
 
 常用操作：
 
@@ -154,7 +154,7 @@ uv run fleetent-admin diagnostics retention dry-run
 uv run fleetent-admin diagnostics retention apply
 ```
 
-默认 `diagnostics.retention.enabled=false`，因此 `apply` 会拒绝执行。只有在 `config/settings.yaml` 中显式
+默认 `diagnostics.retention.enabled=false`，因此 `apply` 会拒绝执行。只有在配置中显式
 开启并设置对应 days 字段后，才会删除超过天数的 logs、traces 或 diagnostics export 包。SQLite backups
 不在 diagnostics retention 范围内，备份保留策略由部署方单独管理。
 
