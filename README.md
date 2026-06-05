@@ -18,17 +18,20 @@ fleetent 是一个面向企业内网部署的轻量 Agent 平台。项目基于 
 
 Linux / macOS / WSL2：脚本会 bootstrap uv + Python 3.12，用 `uv tool install` 把
 `fleetent`/`fleetent-admin`/`fleetent-tui` 装成全局命令，并在 `FLEETENT_HOME`
-（默认 `~/.fleetent`，与工作目录解耦）下铺设：`config/agent.yaml` + `.env` + `data/`。
-部署的 agent 只读自己的 `config/agent.yaml`（从 `config/agent.yaml.example` 生成）。
+（默认 `~/.fleetent`，与工作目录解耦）下铺设**扁平布局**：`agent.yaml` + `.env` + `data/`（无 config/ 子目录）。
+部署的 agent 只读自己的 `agent.yaml`（从 `config/agent/agent.yaml.example` 生成）+ `.env`（从 `config/agent/.env.example`）。
 
 ```bash
 git clone <repo-url> && cd fleetent
 scripts/install.sh                 # 或 --dir PATH / --skip-db / --skip-config
 # 编辑 agent 配置与密钥：
-$EDITOR ~/.fleetent/config/agent.yaml ~/.fleetent/.env
+$EDITOR ~/.fleetent/agent.yaml ~/.fleetent/.env
 # 新开 shell 后（确保 ~/.local/bin 在 PATH）：
 fleetent "hello"
 ```
+
+> 仓库示例模板按使用方分目录：`config/agent/`（`agent.yaml.example` + 该 agent 的 `.env.example`）、`config/platform/`（平台 `.env.example`）。
+> **迁移**：旧部署若是 `FLEETENT_HOME/config/agent.yaml`，把它移到 home 根 `FLEETENT_HOME/agent.yaml`。
 
 > 这是面向开发者 / 单机快速体验的路径。**on-prem 生产部署请用 Docker**
 > （`Dockerfile` + `docker-compose.yml`），环境可复现、数据不出内网。

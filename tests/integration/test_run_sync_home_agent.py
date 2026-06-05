@@ -9,11 +9,10 @@ from fleetent.integrations.sandbox import enablement as se
 
 
 def _write_home_agent(home, **fields):
-    cfg = home / "config"
-    cfg.mkdir(parents=True, exist_ok=True)
+    home.mkdir(parents=True, exist_ok=True)
     doc = {"name": "deployed", "version": 1}
     doc.update(fields)
-    (cfg / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    (home / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
 
 
 def test_run_sync_applies_home_agent(tmp_path, monkeypatch):
