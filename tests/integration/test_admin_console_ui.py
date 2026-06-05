@@ -486,6 +486,21 @@ def test_agent_drawer_preview_is_readonly_yaml():
     assert "function agCopyYaml" in html and "function agDownloadYaml" in html
 
 
+def test_agent_model_overrides_pick_from_providers():
+    html = ADMIN_HTML
+    render = html.split("function agRenderModelOverrides", 1)[1].split("function agCollectModelOverrides", 1)[0]
+    # Each level is a provider dropdown sourced from the configured registry —
+    # no free-text model / base_url_env inputs.
+    assert "AG_PROVIDERS" in render
+    assert "agmo-model" not in render
+    assert "agmo-baseurl" not in render
+    collect = html.split("function agCollectModelOverrides", 1)[1].split("\n}", 1)[0]
+    assert "AG_PROVIDERS.find" in collect  # model derived from the chosen provider
+    # providers are loaded when the modal opens (create + edit)
+    assert 'AG_PROVIDERS = await api("GET", "/providers")' in html
+    assert 'api("GET", "/providers")' in html.split("async function agEdit", 1)[1].split("async function agApplyEditBindings", 1)[0]
+
+
 def test_agent_edit_reuses_new_agent_modal_prefilled():
     html = ADMIN_HTML
     fn = html.split("async function agEdit", 1)[1].split("async function agApplyEditBindings", 1)[0]

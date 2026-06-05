@@ -2730,6 +2730,7 @@ async function agCreate() {
   $("ag-bind-config").style.display = "";
   $("ag-create-extra").style.display = "";
   $("ag-allowed-tools").style.display = "none";  // capabilities YAML supplies tools in create
+  AG_PROVIDERS = await api("GET", "/providers").catch(() => []);
   agRenderModelOverrides();
   $("ag-capabilities").value = "";
   await agLoadTemplateOptions();
@@ -2738,26 +2739,26 @@ async function agCreate() {
   $("ag-modal").classList.remove("hidden");
 }
 
-const AGM_MODEL_PROVIDERS = ["anthropic", "openai-compatible", "openai", "azure", "custom"];
+// Per-level model picks a CONFIGURED provider (Providers module) — no free-text
+// model. AG_PROVIDERS is loaded when the modal opens.
+let AG_PROVIDERS = [];
 function agRenderModelOverrides() {
-  const provs = AGM_MODEL_PROVIDERS.map(p => `<option value="${p}">${p}</option>`).join("");
-  $("ag-model-overrides").innerHTML = ["default", "fast", "reasoning"].map(lvl => `
+  const opts = `<option value="">— none —</option>`
+    + AG_PROVIDERS.map(p => `<option value="${esc(p.id)}">${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}</option>`).join("");
+  const hint = AG_PROVIDERS.length ? "" : `<div class="muted" style="font-size:12px;">No providers configured — add one under Providers first.</div>`;
+  $("ag-model-overrides").innerHTML = hint + ["default", "fast", "reasoning"].map(lvl => `
     <div class="row" data-mo="${lvl}" style="gap:6px; margin-bottom:6px; align-items:center;">
       <span style="min-width:74px; color:var(--muted);">${lvl}</span>
-      <select class="agmo-provider">${provs}</select>
-      <input class="agmo-model" placeholder="model" style="flex:1;" autocomplete="off">
-      <input class="agmo-baseurl" placeholder="base_url_env (optional)" style="flex:1;" autocomplete="off">
+      <select class="agmo-provider" style="flex:1;">${opts}</select>
     </div>`).join("");
 }
 function agCollectModelOverrides() {
   const mo = {};
   for (const row of document.querySelectorAll("#ag-model-overrides [data-mo]")) {
-    const model = row.querySelector(".agmo-model").value.trim();
-    if (!model) continue;
-    const o = { provider: row.querySelector(".agmo-provider").value, model };
-    const baseEnv = row.querySelector(".agmo-baseurl").value.trim();
-    if (baseEnv) o.base_url_env = baseEnv;
-    mo[row.dataset.mo] = o;
+    const pid = row.querySelector(".agmo-provider").value;
+    if (!pid) continue;
+    const p = AG_PROVIDERS.find(x => x.id === pid);
+    mo[row.dataset.mo] = { provider: pid, model: p ? (p.model || "") : "" };
   }
   return mo;
 }
@@ -2823,10 +2824,9 @@ function agmRemoveChannel(i) { AGM_CHANNELS.splice(i, 1); agmRenderChannels(); }
 function agFillModelOverrides(mo) {
   for (const row of document.querySelectorAll("#ag-model-overrides [data-mo]")) {
     const o = (mo || {})[row.dataset.mo];
-    if (!o) continue;
-    row.querySelector(".agmo-provider").value = o.provider || "anthropic";
-    row.querySelector(".agmo-model").value = o.model || "";
-    row.querySelector(".agmo-baseurl").value = o.base_url_env || "";
+    // Stored `provider` is a configured-provider id; select it (blank if it no
+    // longer exists in the registry).
+    row.querySelector(".agmo-provider").value = o ? (o.provider || "") : "";
   }
 }
 // Render current allowed_tools back into the capabilities YAML the modal edits.
@@ -2843,13 +2843,15 @@ async function agEdit(name) {
   $("ag-err").textContent = "";
   const enc = encodeURIComponent(name);
   try {
-    const [a, bindings, skills, kbs, oauth] = await Promise.all([
+    const [a, bindings, skills, kbs, oauth, providers] = await Promise.all([
       api("GET", `/agents/${enc}`),
       api("GET", `/agents/${enc}/bindings`).catch(() => ({ users: [], channels: [], mcp_servers: [] })),
       api("GET", `/agents/${enc}/skills`).catch(() => []),
       api("GET", `/agents/${enc}/kbs`).catch(() => ({ kb_ids: [] })),
       api("GET", `/agents/${enc}/bindings/oauth`).catch(() => ({ connector_ids: [] })),
+      api("GET", "/providers").catch(() => []),
     ]);
+    AG_PROVIDERS = providers || [];
     const current = {
       skills: (skills || []).filter(s => s.enabled).map(s => s.skill_name),
       mcp: bindings.mcp_servers || [],
