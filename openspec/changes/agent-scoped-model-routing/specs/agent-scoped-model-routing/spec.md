@@ -112,6 +112,29 @@ the primary source of model routing.
 - **WHEN** `config/routes.yaml` exists but the Agent snapshot defines `models`
 - **THEN** runtime uses the Agent snapshot `models`
 
+### Requirement: Model policy snapshot is service-readable
+
+The system SHALL expose a validated `ModelPolicySnapshot` derived from `agent.yaml.models`.
+The snapshot SHALL be usable by agent-loop and by future split services such as memory,
+knowledge base, embedding, rerank, and image generation services. The snapshot SHALL carry
+agent identity, routes, target ids, provider, protocol, model, endpoint/base URL, params, and
+`api_key_env` names, but SHALL NOT carry plaintext API keys.
+
+#### Scenario: Memory service consumes Agent model policy
+- **WHEN** memory extraction is handled by a separate service
+- **THEN** the service resolves the Agent's `memory_extraction` route from `ModelPolicySnapshot`
+- **AND** it records usage with agent, provider, target, route, and model dimensions
+
+#### Scenario: Knowledge service consumes embedding/rerank policy
+- **WHEN** knowledge retrieval is handled by a separate service
+- **THEN** the service resolves `embedding` and `rerank` routes from the same Agent policy
+- **AND** it does not maintain an independent global provider route
+
+#### Scenario: Split services do not receive plaintext keys
+- **WHEN** a policy snapshot is passed to or materialized for a service
+- **THEN** it contains env var names such as `api_key_env`
+- **AND** it does not contain plaintext provider credentials
+
 ### Requirement: Platform materializes model config
 
 Platform deployment SHALL materialize authored model targets/routes into the Agent's

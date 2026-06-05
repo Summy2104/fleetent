@@ -11,7 +11,9 @@ DB，也不应依赖全局 `routes.yaml`。
 - embedding/rerank/knowledge 仍有部分路径读取 `Settings()`。
 - platform provider 管理是全局 CRUD/route，代码注释也承认 runtime consuming tables 是 follow-up。
 
-本 change 以 Agent-local `models` 作为唯一 runtime 模型配置契约。
+本 change 以 Agent-local `models` 作为 Agent-scoped model policy contract。它不是
+agent-loop 进程的私有配置，而是可由 agent-loop、memory service、knowledge service、
+embedding/rerank service、image service 等消费的模型策略契约。
 
 ## Goals / Non-Goals
 
@@ -23,6 +25,8 @@ DB，也不应依赖全局 `routes.yaml`。
 - route 数组顺序表达 fallback，route entry 覆盖 target 默认参数。
 - runtime 只读取当前 Agent snapshot。
 - 平台 materialize 写出完整 `agent.yaml` 和 `.env` scaffold。
+- 引入 `ModelPolicySnapshot` 作为可传输/可缓存的服务边界对象，支持后续 memory/KB
+  等模块拆成独立服务。
 - 删除旧 `model_overrides` / `routes.yaml` 主路径。
 
 **Non-Goals:**
@@ -159,6 +163,37 @@ MVP 使用 `api_key_env`，不使用 `secret_env` / `credential_env`。这不锁
 3. 已存在 `.env` 的 operator value 保留。
 4. 明文 key 不写入 `agent.yaml`。
 
+### D7 — `models` 是服务可消费的 policy contract
+
+未来 memory、knowledge base、embedding、rerank、image generation 拆成独立服务时，
+这些服务不应各自维护全局模型路由。它们应消费同一个 Agent-scoped policy：
+
+```text
+Agent DB config
+  -> agent.yaml
+  -> ModelPolicySnapshot
+  -> agent-loop / memory service / knowledge service / embedding service / rerank service / image service
+```
+
+`ModelPolicySnapshot` 是 `models.targets + models.routes` 经过校验后的解析结果。它必须：
+
+- 保留 agent identity。
+- 保留 route key、target id、provider、protocol、model、endpoint/base URL。
+- 保留 `api_key_env` 名称，但不携带明文 key。
+- 可被服务本地缓存。
+- 可作为部署产物随服务 materialize，或由 Agent runtime 调用服务时按 `agent_id + route_key`
+  指定策略。
+
+服务化后的调用原则：
+
+- 服务按 `agent_id + route_key` 选择模型策略，例如 `memory_extraction`、`embedding`、
+  `rerank`、`image_generation`。
+- 计费、审计、trace 仍以 agent/provider/target/route/model 为维度。
+- 服务不得引入自己的全局 provider route 作为生产主路径。
+
+MVP 可以先让各服务直接消费 materialized Agent policy；未来若需要模型调用网关，也应复用同一个
+`ModelPolicySnapshot`，而不是新增第二套模型配置。
+
 ## Error Handling
 
 配置加载 fail loud：
@@ -195,6 +230,8 @@ fallback，以免掩盖部署问题。
 - [一次性删除旧路径影响测试较大] → MVP 未上线，避免兼容债；通过 OpenSpec tasks 明确替换范围。
 - [embedding/rerank/image generation 纳入统一 schema 触碰 intelligence/tools] → 分阶段实现
   adapter 和 runtime wiring，但 schema 一次定准。
+- [后续拆服务可能产生多套配置] → `ModelPolicySnapshot` 明确为跨进程服务边界，避免
+  memory/KB/image 服务各自维护模型路由。
 - [`provider` 非枚举可能出现拼写漂移] → MVP 优先自定义 provider 灵活性；平台 UI 可提供模板选择。
 
 ## Open Questions
@@ -205,4 +242,5 @@ fallback，以免掩盖部署问题。
 - env 字段名使用 `api_key_env`。
 - env 默认命名为 `FLEETENT_MODEL_<TARGET_ID_UPPER>_API_KEY`。
 - image generation、embedding、rerank 纳入统一 `models`。
+- `models` 是 Agent-scoped policy contract，可被拆分服务消费。
 - 不兼容旧 `model_overrides` / `routes.yaml`。

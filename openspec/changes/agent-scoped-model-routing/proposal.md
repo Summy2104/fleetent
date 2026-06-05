@@ -22,7 +22,8 @@ MVP 尚未上线，本 change 不做旧配置兼容，直接收敛到 Agent-scop
   `FLEETENT_MODEL_<TARGET_ID_UPPER>_API_KEY`；不再使用 `ANTHROPIC_API_KEY`
   作为模板默认值。
 - LLM、vision、image generation、embedding、rerank 纳入统一 `models.routes`。
-- runtime 新增 Agent-scoped model resolver，主路径不再读取 `config/routes.yaml`。
+- runtime 新增 Agent-scoped model resolver，输出可传输/可缓存的
+  `ModelPolicySnapshot`，主路径不再读取 `config/routes.yaml`。
 - 平台 materialize 展开 Agent-local `models.targets` 到 `agent.yaml`，并为
   `api_key_env` 生成 `.env` scaffold，保留 operator 已填值。
 - 删除旧 `model_overrides` / `routes.yaml` 主路径，不保留兼容 shim。
@@ -32,7 +33,8 @@ MVP 尚未上线，本 change 不做旧配置兼容，直接收敛到 Agent-scop
 ### New Capabilities
 
 - `agent-scoped-model-routing`: Agent-local model targets/routes schema、resolver、
-  fallback、parameter override、per-Agent credential env contract。
+  fallback、parameter override、per-Agent credential env contract、service-readable
+  model policy snapshot。
 
 ### Modified Capabilities
 
@@ -47,13 +49,14 @@ MVP 尚未上线，本 change 不做旧配置兼容，直接收敛到 Agent-scop
 - **owning package**: `model` owns model route resolution and provider adapters;
   `runtime` consumes resolved model configs; `platform` materializes authored Agent config.
 - **public API surface**: new public resolver types/functions under `fleetent.model`;
-  `AgentFile`/`AgentSnapshot` expose `models`.
+  `AgentFile`/`AgentSnapshot` expose `models`; `ModelPolicySnapshot` is the service boundary
+  object for agent-loop, memory, knowledge, image, embedding, and rerank consumers.
 - **owned tables**: existing `agent_versions` model config field is replaced or reshaped for
   `models`; provider/template storage may be adjusted in `platform` but runtime must not query it.
 - **config namespace**: `agent.yaml.models`.
-- **cross-module dependencies**: `runtime` depends on `model` public resolver API;
-  `platform.agent_lifecycle` depends on `agent_config.AgentFile`; `model` must not import
-  `platform`.
+- **cross-module dependencies**: `runtime` and future memory/knowledge services depend on
+  `model` public resolver API; `platform.agent_lifecycle` depends on `agent_config.AgentFile`;
+  `model` must not import `platform`.
 - **migration / shim plan**: no runtime compatibility shim. DB/schema and examples are migrated
   directly because MVP is not live.
 
