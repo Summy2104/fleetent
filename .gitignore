@@ -25,6 +25,10 @@ secrets/
 
 # Worktrees
 .worktrees/
+.claude/worktrees/
+
+# Browser self-test artifacts (Playwright MCP)
+.playwright-mcp/
 
 # Config — example files are committed, actual configs are not
 agent.yaml
