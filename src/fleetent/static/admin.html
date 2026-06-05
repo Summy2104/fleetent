@@ -562,14 +562,14 @@
         <button class="nav-item active" data-tab="users" onclick="switchTab('users')"><span class="nav-ico">👤</span>Users</button>
       </div>
       <div class="nav-group">
-        <button class="nav-group-label" data-group="agents" onclick="switchGroup('agents')">Agents &amp; Skills</button>
+        <button class="nav-group-label" data-group="agents" onclick="switchGroup('agents')">Agents</button>
         <button class="nav-item" data-tab="agents" onclick="switchTab('agents')"><span class="nav-ico">🤖</span>Agents</button>
-        <button class="nav-item" data-tab="skills" onclick="switchTab('skills')"><span class="nav-ico">🧩</span>Skills</button>
-        <button class="nav-item" data-tab="kb" onclick="switchTab('kb')"><span class="nav-ico">📚</span>Knowledge Base</button>
         <button class="nav-item" data-tab="chat" onclick="switchTab('chat')"><span class="nav-ico">💬</span>Chat</button>
       </div>
       <div class="nav-group">
-        <button class="nav-group-label" data-group="models" onclick="switchGroup('models')">Models &amp; Connectors</button>
+        <button class="nav-group-label" data-group="resources" onclick="switchGroup('resources')">Agent resources</button>
+        <button class="nav-item" data-tab="skills" onclick="switchTab('skills')"><span class="nav-ico">🧩</span>Skills</button>
+        <button class="nav-item" data-tab="kb" onclick="switchTab('kb')"><span class="nav-ico">📚</span>Knowledge Base</button>
         <button class="nav-item" data-tab="providers" onclick="switchTab('providers')"><span class="nav-ico">🧠</span>Providers</button>
         <button class="nav-item" data-tab="oauth" onclick="switchTab('oauth')"><span class="nav-ico">🔌</span>Connectors</button>
       </div>
@@ -1612,11 +1612,12 @@ function genId() {
 
 const TAB_GROUP = {
   users: "access",
-  agents: "agents", skills: "agents", kb: "agents", chat: "agents",
-  providers: "models", oauth: "models",
+  agents: "agents", chat: "agents",
+  // optional building blocks an agent can be configured with
+  skills: "resources", kb: "resources", providers: "resources", oauth: "resources",
   stats: "ops", monitoring: "ops", sessions: "ops",
 };
-const GROUP_DEFAULT_TAB = { access: "users", agents: "agents", models: "providers", ops: "stats" };
+const GROUP_DEFAULT_TAB = { access: "users", agents: "agents", resources: "skills", ops: "stats" };
 const LOADERS = {};  // each module registers its loader; switchTab calls it if present
 
 function switchGroup(group) {

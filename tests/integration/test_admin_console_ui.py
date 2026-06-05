@@ -18,7 +18,7 @@ ADMIN_HTML = (Path(__file__).parents[2] / "src" / "fleetent" / "static" / "admin
 def test_grouped_nav_present():
     html = ADMIN_HTML
     assert "switchGroup(" in html
-    for group in ("access", "agents", "models", "ops"):
+    for group in ("access", "agents", "resources", "ops"):
         assert f'data-group="{group}"' in html
 
 
@@ -867,7 +867,7 @@ def test_sidebar_present_and_grouped():
     html = ADMIN_HTML
     assert 'class="sidebar"' in html
     # grouped section headings inside sidebar
-    for group in ("access", "agents", "models", "ops"):
+    for group in ("access", "agents", "resources", "ops"):
         assert f'data-group="{group}"' in html
     # contract preserved
     assert "switchGroup(" in html
