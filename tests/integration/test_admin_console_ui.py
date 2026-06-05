@@ -1009,15 +1009,18 @@ def test_render_users_joins_im_identities_by_user():
     assert "platform_user_id" in body
 
 
-def test_im_identity_row_has_overflow_menu_to_linked_user_config():
+def test_im_identity_row_actions_are_limited_to_identity_scope():
     body = _render_users_body(ADMIN_HTML)
-    # Identity row exposes the linked user's full config via an overflow menu,
-    # so the lifecycle is reachable without jumping to the parent row.
-    assert "toggleMenu(this)" in body
-    assert "menu-sep" in body
-    assert "Linked user" in body
-    for action in ("openEditUser(", "setRole(", "resetPassword(", "viewKeys(", "del("):
-        assert action in body
+    # An IM identity is dependent: its actions are limited to identity scope.
+    # It must NOT carry the platform user's lifecycle config (that lives on the
+    # user row), so the two menus stay distinct.
+    idrows = body[body.index("const idRows ") : body.index("const idBlock ")]
+    assert "openBindModal(" in idrows  # reassign which platform user it attaches to
+    assert "imBlock(" in idrows
+    assert "imRestore(" in idrows
+    # No user-lifecycle actions duplicated onto the identity row.
+    for forbidden in ("openEditUser(", "setRole(", "resetPassword(", "viewKeys(", "del("):
+        assert forbidden not in idrows
 
 
 def test_bind_modal_is_searchable_user_picker():

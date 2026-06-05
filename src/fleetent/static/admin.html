@@ -103,8 +103,6 @@
     padding:7px 10px; border-radius:4px; cursor:pointer; font-size:13px; }
   .menu-items button:hover { background:var(--line); }
   .menu-items button.danger { color:var(--danger); }
-  .menu-sep { padding:6px 10px 3px; margin-top:3px; border-top:1px solid var(--line);
-    color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
   code { background:#0c0e12; padding:2px 6px; border-radius:4px; font-size:12px; word-break:break-all; }
   .modal { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50;
     display:flex; align-items:center; justify-content:center; }
@@ -1663,9 +1661,10 @@ function renderUsers() {
     const expander = ids.length
       ? `<button class="small ghost" title="Show IM identities" onclick="toggleUserRow('${u.id}')">▸</button>`
       : "";
-    // The IM identity row carries identity-scoped actions (reassign / allowlist)
-    // plus an overflow menu onto the linked user's config — so the full lifecycle
-    // is reachable here without jumping back to the parent row.
+    // An IM identity is dependent — it can only attach to a platform user, never
+    // exist on its own. Its actions are limited to identity scope: reassign which
+    // platform user it attaches to, and toggle the allowlist. User-lifecycle config
+    // (role/profile/keys/delete) lives on the platform user row, not here.
     const idRows = ids.map(r => `
       <tr>
         <td>${esc(r.platform)}</td>
@@ -1673,25 +1672,9 @@ function renderUsers() {
         <td><span class="pill ${r.allowed ? "active" : "blocked"}">${r.allowed ? "allowed" : "blocked"}</span></td>
         <td class="actions">
           <button class="small ghost" onclick="openBindModal(${r.id})">Reassign user</button>
-          <div class="menu">
-            <button class="small ghost" title="More actions" onclick="toggleMenu(this)">…</button>
-            <div class="menu-items hidden">
-              ${r.allowed
-                ? `<button class="danger" onclick="imBlock(${r.id})">Block identity</button>`
-                : `<button onclick="imRestore(${r.id})">Restore identity</button>`}
-              <div class="menu-sep">Linked user</div>
-              ${IS_VIEWER ? "" : `<button onclick="openEditUser('${u.id}')">Edit user</button>`}
-              ${u.role === "admin"
-                ? `<button onclick="setRole('${u.id}','viewer')">Make viewer</button>`
-                : `<button onclick="setRole('${u.id}','admin')">Make admin</button>`}
-              <button onclick="resetPassword('${u.id}')">Reset password</button>
-              <button onclick="viewKeys('${u.id}')">Keys</button>
-              ${u.status === "blocked"
-                ? `<button onclick="unblock('${u.id}')">Enable user</button>`
-                : `<button class="danger" onclick="block('${u.id}')">Disable user</button>`}
-              <button class="danger" onclick="del('${u.id}')">Delete user</button>
-            </div>
-          </div>
+          ${r.allowed
+            ? `<button class="small danger" onclick="imBlock(${r.id})">Block identity</button>`
+            : `<button class="small ghost" onclick="imRestore(${r.id})">Restore</button>`}
         </td>
       </tr>`).join("");
     const idBlock = ids.length
