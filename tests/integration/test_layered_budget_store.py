@@ -74,9 +74,7 @@ def test_checker_triggers_on_scope_over(tmp_path, monkeypatch):
     store = BudgetStore()
     store.add(BudgetScope.user, "u1", 6000, 0, now=now)
     cfg = LayeredBudgetConfig({BudgetScope.user: ScopeBudget(max_tokens=5000)})
-    chk = LayeredBudgetChecker(
-        cfg, store, {BudgetScope.user: "u1"}, clock=_clock(now)
-    )
+    chk = LayeredBudgetChecker(cfg, store, {BudgetScope.user: "u1"}, clock=_clock(now))
     assert chk.check(None) is StopReason.budget_exceeded
     assert chk.triggered_scope == "user" and chk.triggered_dimension == "tokens"
 

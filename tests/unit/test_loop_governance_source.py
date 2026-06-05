@@ -24,7 +24,9 @@ def test_budget_config_call_param_overrides_governance() -> None:
 
 
 def test_guardrail_threshold_uses_governance() -> None:
-    assert loop._resolve_guardrail_threshold(None, GovernanceConfig(guardrail_repeat_threshold=9)) == 9
+    assert (
+        loop._resolve_guardrail_threshold(None, GovernanceConfig(guardrail_repeat_threshold=9)) == 9
+    )
 
 
 def test_parallel_max_uses_governance() -> None:
@@ -32,7 +34,10 @@ def test_parallel_max_uses_governance() -> None:
 
 
 def test_default_tool_timeout_uses_governance() -> None:
-    assert loop._resolve_default_tool_timeout(GovernanceConfig(tool_default_timeout_seconds=15.0)) == 15.0
+    assert (
+        loop._resolve_default_tool_timeout(GovernanceConfig(tool_default_timeout_seconds=15.0))
+        == 15.0
+    )
 
 
 def test_loop_config_uses_governance() -> None:

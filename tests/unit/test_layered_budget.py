@@ -30,11 +30,11 @@ def test_scope_order_narrow_to_wide():
 
 
 def test_cross_run_scopes_exclude_global():
-    assert lb.CROSS_RUN_SCOPES == (
+    assert (
         BudgetScope.session,
         BudgetScope.user,
         BudgetScope.agent,
-    )
+    ) == lb.CROSS_RUN_SCOPES
 
 
 def test_unconfigured_scope_is_unlimited():

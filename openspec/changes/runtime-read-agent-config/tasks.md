@@ -43,7 +43,7 @@
 
 ## 7. 收尾
 
-- [ ] 7.1 `uv run ruff format src tests && uv run ruff check src tests` + `uv run mypy src` 通过
-- [ ] 7.2 全量 `uv run pytest -x -q` 与 `uv run python scripts/check_test_layers.py` 通过
-- [ ] 7.3 确认 `Settings` 字段已无运行时回读(grep 验证;为阶段 3 删除铺路),并在 change 完成说明中列出
+- [x] 7.1 `uv run ruff format src tests && uv run ruff check src tests` + `uv run mypy src` 通过
+- [x] 7.2 全量 `uv run pytest -x -q` 与 `uv run python scripts/check_test_layers.py` 通过
+- [x] 7.3 确认 `Settings` 字段已无运行时回读(grep 验证;为阶段 3 删除铺路),并在 change 完成说明中列出
       此时已成死代码的 `Settings` 字段清单

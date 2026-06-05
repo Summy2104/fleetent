@@ -47,6 +47,20 @@ KB connector 子模型 被 `AgentFile` import 复用,不能随 `Settings` 字段
 删除 IM tokens 后,`YAML_SECRET_FIELDS` 仅余 `anthropic_api_key`(若保留)。`SecretRejectingYamlSettingsSource`
 继续守 `settings.yaml` 不放密钥。
 
+### D4.1: 阶段 2 遗留的 Settings-fallback 分支(阶段 3 必须一并处理)
+阶段 2 把 runtime/intelligence/deployment 切到"active_agent() 优先、Settings 回退"。删 Settings 字段前,
+这些**回退分支**必须改为读 home-derived 默认或保留中性常量,否则删字段会破坏无 agent 态:
+- loop.py `_resolve_budget_config`/`_resolve_loop_config`/`_resolve_guardrail_threshold`/
+  `_resolve_parallel_max`/`_resolve_default_tool_timeout` 的 `Settings()` 回退分支。
+- termination.py `_default_config`、budget.py `_grace_defaults`、context.py `_default_config` 的 Settings 分支。
+- layered_budget.py `LayeredBudgetConfig.from_settings`(`from_governance` 已是主路径)。
+- session/manager.py、skills/registry.py、model/provider_health.py、tools/{image_gen,vision}_client.py、
+  observability/diagnostics.py `_default_diagnostics`、intelligence/long_term_ctx `_ltc_config`、
+  knowledge_base `_kb_config`/`_rerank_config`、vector_store/runtime import 时 `_configure(Settings())`。
+- sub_agent_lifecycle.py `resolve_timeout` 的 Settings 回退(阶段 2 有意保留)。
+处理方式:这些字段删除后,回退改为各 dataclass 的字面默认(GovernanceConfig/AgentFile 已持有等价默认),
+或为进程级单例保留一个中性默认常量。`database_url` 回退**保留**(平台 DB)。
+
 ### D5: 删除顺序与防回读
 先确认(grep + 测试)无运行时 import 被删字段,再删。删字段后跑全量测试捕捉漏网回读。`agent_budget_global_*`
 的删除与阶段 2 移除 global 聚合配套。

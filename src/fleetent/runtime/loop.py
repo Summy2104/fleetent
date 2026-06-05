@@ -42,6 +42,7 @@ from fleetent.runtime.context import (
 from fleetent.runtime.error_classifier import classify
 from fleetent.runtime.loop_detector import LoopDetectionChecker, arg_fingerprint, result_digest
 from fleetent.runtime.message_hygiene import HygieneReport, MessageContractError, sanitize
+from fleetent.runtime.snapshot import GovernanceConfig
 from fleetent.runtime.sub_agent import SubAgentExecutor
 from fleetent.runtime.termination import (
     ApprovalRejectedChecker,
@@ -52,7 +53,6 @@ from fleetent.runtime.termination import (
     TerminationController,
     resolve_limits,
 )
-from fleetent.runtime.snapshot import GovernanceConfig
 from fleetent.runtime.tool_guardrails import GuardrailAction, evaluate_guardrail
 from fleetent.skills import available_skills_prompt, collect_disabled_trace
 from fleetent.skills import match as match_skill  # noqa: F401  # patch target + API parity
@@ -168,7 +168,9 @@ def _resolve_loop_config(
         return repeat_threshold, ignore_arg_keys
     if governance is not None:
         return (
-            repeat_threshold if repeat_threshold is not None else governance.agent_loop_repeat_threshold,
+            repeat_threshold
+            if repeat_threshold is not None
+            else governance.agent_loop_repeat_threshold,
             ignore_arg_keys
             if ignore_arg_keys is not None
             else list(governance.loop_detect_ignore_arg_keys),

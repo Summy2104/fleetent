@@ -172,7 +172,7 @@ def _settings() -> Settings:
     return Settings(anthropic_api_key="")
 
 
-def _kb_config() -> "KnowledgeBaseSettings":
+def _kb_config() -> KnowledgeBaseSettings:
     """knowledge_base config from the active (standalone) agent, else Settings default."""
     from fleetent import agent_config
 
