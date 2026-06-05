@@ -1,0 +1,39 @@
+jira:
+  cloud_id: "8ea8cda4-5f68-407d-a571-c90ed9eed684"
+  project_key: "AAA"
+  connector: plugin_atlassian
+fields:
+  issue_type: {epic: "10148", story: "10192", task: "10179"}
+  story_points: ["customfield_10016", "customfield_10740"]
+  start_date: "customfield_10015"
+  due_date: "duedate"
+  sprint: "customfield_10020"
+  fix_version: "13372"
+transitions:
+  story_to_done: ["5", "2", "6"]
+  epic_done_policy: "stop_at_gate"
+owners:
+  default: null
+  map:
+    # capability slug -> Jira accountId (see fleetent docs/architecture.md owner column)
+    agent-runtime: "712020:228fe4f1-c497-48df-91ce-4b6ec06cf1ba"   # Yang Zhang
+    model-router: "712020:228fe4f1-c497-48df-91ce-4b6ec06cf1ba"
+    tools: "712020:228fe4f1-c497-48df-91ce-4b6ec06cf1ba"
+    mcp: "712020:228fe4f1-c497-48df-91ce-4b6ec06cf1ba"
+    sandbox: "712020:228fe4f1-c497-48df-91ce-4b6ec06cf1ba"
+    skill: "712020:228fe4f1-c497-48df-91ce-4b6ec06cf1ba"
+    session: "712020:228fe4f1-c497-48df-91ce-4b6ec06cf1ba"
+    im-gateway: "712020:f71ac511-e5df-4d55-96ba-d9c4f8cf8486"      # liang.zhangAA
+    governance: "712020:f71ac511-e5df-4d55-96ba-d9c4f8cf8486"
+    scheduling: "712020:f71ac511-e5df-4d55-96ba-d9c4f8cf8486"
+    platform: "712020:f71ac511-e5df-4d55-96ba-d9c4f8cf8486"
+    memory: "622eec4966b6de00688617f2"                              # Randy
+    long-term-ctx: "622eec4966b6de00688617f2"
+    knowledge-base: "622eec4966b6de00688617f2"
+    vector-store: "622eec4966b6de00688617f2"
+    reflection: "622eec4966b6de00688617f2"
+    observability: "622eec4966b6de00688617f2"
+    deployment: "622eec4966b6de00688617f2"
+granularity:
+  max_stories_per_epic: 12
+  filter_non_feature: true

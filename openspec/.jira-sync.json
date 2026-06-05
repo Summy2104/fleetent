@@ -1,0 +1,705 @@
+{
+  "synced": {
+    "2026-05-24-slack-telegram-mvp": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-25-cron-scheduled-tasks": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-25-im-user-access-control": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-25-model-fallback-chain": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-25-webhook-triggers": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-builtin-skills": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-compression-dual-threshold": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-embedding-rerank-provider-abstraction": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-error-classification": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-image-generation-tool": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-knowledge-base-connectors-local": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-knowledge-base-core": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-knowledge-base-hybrid-search": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-knowledge-base-parsers-basic": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-knowledge-base-retrieval-evaluation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-long-term-context-foundation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-mcp-http-streamable": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-memory-extraction-evaluation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-memory-sqlite-semantic-store": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-memory-update-merge-actions": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-message-hygiene": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-model-parameter-config": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-model-routes-externalize": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-multimodal-input": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-observability-contract-tests": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-observability-source-attribution": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-observability-sqlite-agent-traces": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-observability-structured-logging": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-observability-usage-summary": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-prompt-cache-optimization": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-provider-health-probe-cache": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-reflection-foundation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-request-routing-override": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-session-disk-management": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-session-metadata-index": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-session-ttl-cleanup": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-skill-env-var-rename": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-skill-name-conflict-warning": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-skill-nested-scan": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-skill-read-on-demand": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-skill-yaml-frontmatter": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-termination-framework": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-vector-store-foundation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-05-31-vector-store-sqlite-backend": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-cancellation-propagation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-compression-anti-flap": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-compression-incremental-summary": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-compression-layered-retention": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-compression-pre-cleanup": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-compression-trace": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-configuration-foundation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-connector-credential-injection": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-cost-aware-routing": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-cost-budget-control": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-deployment-upgrade-and-backup": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-iteration-budget-grace-call": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-knowledge-base-connectors-confluence": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-knowledge-base-connectors-google-drive": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-knowledge-base-sync-planner": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-long-term-context-budget-policy": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-long-term-context-evaluation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-loop-detection": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-mcp-degradation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-mcp-health-reconnect": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-mcp-oauth2": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-mcp-server-config-split": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-mcp-session-management": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-memory-and-kb-real-embedding-evaluation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-memory-reflection-maintenance": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-memory-retention-and-compaction": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-observability-performance-summary": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-observability-runtime-event-coverage": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-reflection-report-evaluation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-sandbox-enablement-control": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-sandbox-exec-timeout": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-sandbox-lifecycle": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-sandbox-orphan-cleanup": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-sandbox-output-truncation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-sandbox-resource-limits": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-sandbox-secret-injection": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-sandbox-trace-logging": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-scheduled-task-session-binding": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-skill-disable-mechanism": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-skill-hot-reload": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-skill-injection-audit": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-sub-agent-lifecycle": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-tool-arg-sanitization": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-tool-call-guardrails": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-tool-result-truncation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-tool-timeout": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-vector-store-reindex-jobs": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-01-vision-as-tool": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-2026-05-29-multi-agent-management": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-2026-05-30-im-gateway-management": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-2026-05-30-user-management": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-2026-06-02-agent-management-console": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-2026-06-02-agent-statistics-panel": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-2026-06-02-askit-orchestration-console": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-2026-06-02-chat-management": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-2026-06-02-connector-management": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-2026-06-02-knowledge-base-management": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-2026-06-02-model-provider-management": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-2026-06-02-resource-monitoring-alerting": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-2026-06-02-skill-management": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-agent-skill-scoping": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-data-retention-and-diagnostics-policy": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-deployment-docker-compose-foundation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-deployment-pilot-install-checklist": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-im-image-attachment-extraction": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-internal-session-maintenance": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-knowledge-base-agent-kb-binding": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-knowledge-base-connector-operations": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-knowledge-base-entity-relation-extraction": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-knowledge-base-file-parsers-advanced": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-knowledge-base-graph-search": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-knowledge-base-query-planner": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-memory-quality-trend-summary": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-observability-admin-query-api": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-pilot-acceptance-guide": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-plugin-tools": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-reflection-knowledge-base-reports": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-reflection-trend-summary": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-rerank-kb-search-integration": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-shared-memory": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-skill-reflection-proposals": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-02-tool-parallel-dispatch": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-add-admin-console-modules": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-add-im-platform-connections": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-agent-actions-overflow-and-deploy": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-agent-requires-template": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-agent-scoped-oauth-mcp": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-agents-templates-subtabs": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-autogen-resource-ids": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-complete-agent-crud-console": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-diagnostics-redaction-export-hardening": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-editable-agent-templates": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-expand-agent-bindings": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-expose-agent-version-config-crud": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-kb-connector-smoke-status": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-long-term-context-agent-tenant-policy": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-manual-maintenance-entrypoints": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-merge-im-connectors-into-im-users": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-merge-im-connectors-ui-into-im-users": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-persist-admin-active-tab": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-pilot-capability-verification-suite": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-pilot-readiness-safeguard-fixes": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-pilot-verification-gate": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-production-config-validation": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-redesign-admin-console-ux": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-roomier-template-editor": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-split-agent-templates-tab": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-trim-agent-modal-to-template-fields": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-tui-gateway": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-unify-user-im-identity-admin-ui": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-03-user-scoped-im-connectors": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-agent-runtime-cli": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-agent-yaml-intelligence-config": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-config-dir-single-agent-yaml": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-configurable-data-home": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-drop-global-config-files": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-env-config-vector-providers": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-file-driven-agent-config": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-install-script": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-installer-seed-agent-yaml": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-intelligence-production-validation-readiness": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-optimize-agents-console": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-per-agent-im-access": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-per-agent-slack-connector": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-platform-agent-lifecycle": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-platform-control-plane": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-real-kb-connector-http-clients": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-single-agent-config-file": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-slack-e2e-test-suite": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-unify-legacy-console-modules": {
+      "epic": null,
+      "stories": {}
+    },
+    "2026-06-04-vector-reindex-provider-backoff": {
+      "epic": null,
+      "stories": {}
+    }
+  },
+  "note": "migrated 2026-06-05 from session backfill; epic/story keys not 1:1 (mid-granularity merge)"
+}
