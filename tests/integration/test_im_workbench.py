@@ -42,7 +42,8 @@ def test_batch_block_shared_id(db):
 def test_identity_fields_differ_by_platform(db):
     slack_keys = {f["key"] for f in im_user_store.identity_fields("slack")}
     tele_keys = {f["key"] for f in im_user_store.identity_fields("telegram")}
-    assert "email" in slack_keys
+    # Slack workspace + enterprise IDs are editable; the User ID is the handle.
+    assert {"email", "team_id", "enterprise_id"} <= slack_keys
     assert "username" in tele_keys
     assert slack_keys != tele_keys
     assert im_user_store.identity_fields("unknown") == []

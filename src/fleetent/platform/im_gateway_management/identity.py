@@ -24,10 +24,13 @@ from fleetent.user_store import (
 # so they never belong in this map. Add a field by appending here — the JSON
 # meta_json column needs no migration.
 PLATFORM_IDENTITY_FIELDS: dict[str, list[dict[str, Any]]] = {
+    # Slack exposes a User ID (= platform_user_id, the read-only handle), plus a
+    # Workspace ID and an Enterprise ID for org-grid workspaces.
     "slack": [
         {"key": "display_name", "label": "Display name"},
         {"key": "email", "label": "Email"},
-        {"key": "team_id", "label": "Workspace / Team ID"},
+        {"key": "team_id", "label": "Workspace ID"},
+        {"key": "enterprise_id", "label": "Enterprise ID"},
         {"key": "notes", "label": "Notes", "multiline": True},
     ],
     "telegram": [
