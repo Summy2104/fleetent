@@ -145,7 +145,7 @@ IM 凭证经 per-agent `connectors` 的 `*_env` 引用提供。
 - **THEN** secret 文件名不使用 `eng`、`product` 或类似 connector scope 作为命名要求
 
 ### Requirement: Global config files are optional
-agent 运行时 SHALL 在 `settings.yaml` / `mcp.yaml` / `mcp.servers.yaml` 缺失时回退到内置默认值，不得因其缺失而启动失败。这三个全局配置文件 SHALL NOT 作为部署/脚手架的默认产物（install.sh 部署扁平 home，`init-config` 不再 seed 它们）。
+agent 运行时 SHALL 在 `settings.yaml` / `mcp.yaml` / `mcp.servers.yaml` 缺失时回退到内置默认值，不得因其缺失而启动失败。这三个全局配置文件 SHALL NOT 作为部署/脚手架的默认产物（install.sh 部署扁平 home，`init-config` 不再 seed 它们）。仓库示例模板按使用方分目录：`config/agent/`（agent.yaml + agent 的 .env）与 `config/platform/`（平台 .env）。
 
 #### Scenario: Settings falls back to defaults without settings.yaml
 - **WHEN** `settings.yaml` 不存在
@@ -162,10 +162,11 @@ agent 运行时 SHALL 在 `settings.yaml` / `mcp.yaml` / `mcp.servers.yaml` 缺�
 - **THEN** 不创建 `config/settings.yaml` 或 `config/mcp.servers.yaml`
 - **AND** 仍创建 `.env` 与数据目录
 
-#### Scenario: Global example templates are absent from the repo
+#### Scenario: Example templates split by component under config/
 - **WHEN** 查看仓库 `config/`
-- **THEN** 不存在 `settings.yaml.example` / `mcp.yaml.example` / `mcp.servers.yaml.example`
-- **AND** 存在 `config/agent.yaml.example`（部署 agent 的模板）
+- **THEN** 不存在 `settings.yaml.example` / `mcp.yaml.example` / `mcp.servers.yaml.example`，也不存在仓库根 `.env.example`
+- **AND** 存在 `config/agent/agent.yaml.example` 与 `config/agent/.env.example`（部署 agent 模板）
+- **AND** 存在 `config/platform/.env.example`（平台模板）
 
 ### Requirement: Vector provider config uses env references
 Embedding and rerank HTTP provider configuration SHALL support environment-variable references for deploy-time provider values while keeping secrets out of tracked YAML.
@@ -186,3 +187,4 @@ Embedding and rerank HTTP provider configuration SHALL support environment-varia
 - **WHEN** operator views `.env.example`
 - **THEN** the file shows the env var names used by real embedding and rerank smoke
 - **AND** the file does not contain provider API key values
+

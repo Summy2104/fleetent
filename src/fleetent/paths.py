@@ -61,8 +61,8 @@ def data_dir() -> Path:
 
 
 def agent_file() -> Path:
-    """The deployed single agent's self-contained config."""
-    return config_dir() / "agent.yaml"
+    """The deployed single agent's self-contained config, at the flat home root."""
+    return base_dir() / "agent.yaml"
 
 
 def settings_yaml_path() -> Path:

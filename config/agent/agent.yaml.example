@@ -1,10 +1,11 @@
 # Self-contained agent definition for a deployed single agent.
 #
-# Layout: this file lives at `config/agent.yaml`
-#   (FLEETENT_HOME/config/agent.yaml for deployed installs).
+# Layout: the deployed agent home is FLAT — this file lives at the home root as
+#   FLEETENT_HOME/agent.yaml (no config/ subdirectory), alongside .env and data/.
 # The deployed agent runtime reads ONLY this file + .env; data is local under
 # FLEETENT_HOME/data/. Secrets are NEVER inlined — reference them by env-var name.
-# (This template ends in `.example`; install.sh copies it to config/agent.yaml.)
+# (This template ends in `.example`; install.sh copies it to FLEETENT_HOME/agent.yaml.
+#  The matching env template is config/agent/.env.example.)
 #
 # Single-agent mode: this agent is the sole, forced-default agent, so there is no
 # routing table and `bindings.default` does not apply. `bindings.channels/users`
@@ -162,9 +163,7 @@ bindings:
     - "u_alice"
     - "u_bob"
 
-# ── per-agent runtime governance (NOTE: schema present from phase
-#    agent-yaml-governance-schema; runtime reads these from phase
-#    runtime-read-agent-config onward — until then global Settings defaults apply).
+# ── per-agent runtime governance (resolved from this agent.yaml; config consolidation).
 #    All values below equal the current defaults; omit any you don't override. ──
 # context compression
 context_max_tokens: 200000
@@ -207,3 +206,13 @@ diagnostics:
 
 # NOTE: agent_budget_global_* and database_url are intentionally NOT accepted here.
 # The database location is derived from the agent home (<home>/data/fleetent.db).
+
+# ── access control (per-agent IM authorization; closed by default) ──
+# Default is closed: with no rules the agent grants no implicit access and requires
+# approval. allow_channels empty = allow every channel the agent is bound to.
+access:
+  allow_channels:
+    - "slack:C0123ABCD"
+  allow_users:
+    - "u_alice"
+  require_approval: true
