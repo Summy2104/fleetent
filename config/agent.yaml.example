@@ -149,3 +149,49 @@ bindings:
   users:
     - "u_alice"
     - "u_bob"
+
+# ── per-agent runtime governance (NOTE: schema present from phase
+#    agent-yaml-governance-schema; runtime reads these from phase
+#    runtime-read-agent-config onward — until then global Settings defaults apply).
+#    All values below equal the current defaults; omit any you don't override. ──
+# context compression
+context_max_tokens: 200000
+context_compress_threshold: 0.8
+context_keep_recent: 10
+# loop / budget / guardrail
+agent_max_turns: 50
+agent_max_consecutive_failures: 3
+agent_max_tokens: -1            # -1 = unlimited
+tool_default_timeout_seconds: 30.0
+sub_agent_timeout_seconds: 300
+agent_tool_parallel_max: 8
+# layered budget — session/user/agent dims only (global dimension intentionally dropped)
+agent_budget_user_tokens: -1
+agent_budget_user_window: weekly
+agent_budget_agent_window: weekly
+# permission gate
+permission_gate_medium_timeout_seconds: 300
+permission_gate_high_timeout_seconds: 3600
+# provider circuit breaker
+provider_failure_threshold: 3
+provider_cooldown_seconds: 60
+
+# ── per-agent deployment / process knobs ──
+microsandbox_url: http://host.docker.internal:7777
+log_format: console               # console | json
+session_ttl_days: 30
+disabled_skills: []
+# image / vision endpoints (self-hosted; empty = disabled)
+image_gen_url: ""
+vision_url: ""
+observability:
+  logging:
+    console_level: info
+    file_level: debug
+diagnostics:
+  export_dir: data/diagnostics
+  retention:
+    enabled: false
+
+# NOTE: agent_budget_global_* and database_url are intentionally NOT accepted here.
+# The database location is derived from the agent home (<home>/data/fleetent.db).
