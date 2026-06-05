@@ -1,25 +1,25 @@
-"""WebSocket gateway /ws: handshake, auth, parse error, SSE coexistence (tui-gateway 5.1)."""
+"""Agent-runtime WebSocket gateway /ws: handshake, auth, parse error (tui-gateway 5.1).
+
+The /ws behavior moved from the platform app to the standalone agent runtime
+(`fleetent.runtime.agent_app.build_app`). Auth (Bearer ma- key via
+user_store.authenticate) and the tui dispatch/protocol are identical.
+"""
 
 import json
-from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 import fleetent.user_store as us
+from fleetent.runtime import agent_app
 
 
 @pytest.fixture
 def app_and_user(tmp_path, monkeypatch):
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    import fleetent.server as srv
-
-    # IM connectors are driven by the manager at startup; stub it out for the test.
-    monkeypatch.setattr(srv._connector_manager, "start_all_enabled", AsyncMock())
-    monkeypatch.setattr(srv._connector_manager, "stop", AsyncMock())
     user = us.create_user("WSUser")
-    return srv.app, user
+    return agent_app.build_app("some-agent"), user
 
 
 def test_ws_ready_on_valid_key(app_and_user):
@@ -67,10 +67,3 @@ def test_ws_bad_json_frame_returns_parse_error_without_closing(app_and_user):
         ws.send_text(json.dumps({"id": 1, "method": "frobnicate", "params": {}}))
         resp = json.loads(ws.receive_text())
         assert resp["id"] == 1 and resp["error"]["code"] == -32601
-
-
-def test_sse_chat_route_unaffected(app_and_user):
-    app, _user = app_and_user
-    paths = {getattr(r, "path", None) for r in app.routes}
-    assert "/chat" in paths  # existing SSE endpoint still mounted
-    assert "/ws" in paths  # new gateway mounted

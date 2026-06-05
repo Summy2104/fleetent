@@ -295,6 +295,17 @@
   .risk-low { color:var(--ok); } .risk-medium { color:#d8a200; } .risk-high { color:var(--danger); }
   .sk-import-section { border:1px solid var(--border); border-radius:var(--r-2); padding:12px 14px; background:var(--surface); }
   /* --- Chat module --- */
+  .chat-split { display:flex; gap:12px; height:calc(100vh - 170px); min-height:420px; }
+  .chat-history { width:230px; flex-shrink:0; overflow-y:auto; border:1px solid var(--border);
+    border-radius:8px; background:var(--card); }
+  .chat-history-head { padding:10px 12px; font-size:12px; color:var(--muted);
+    border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--card); }
+  .chat-hrow { padding:9px 12px; border-bottom:1px solid var(--border); cursor:pointer;
+    display:flex; justify-content:space-between; gap:6px; align-items:center; }
+  .chat-hrow:hover { background:var(--panel); }
+  .chat-hrow.active { background:var(--accent-weak,#22304a); }
+  .chat-hrow .ht { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .chat-hrow .hx { font-size:11px; color:var(--muted); }
   .chat-wrap { display:flex; flex-direction:column; height:calc(100vh - 170px); min-height:420px;
     border:1px solid var(--border); border-radius:var(--r-2); overflow:hidden; background:var(--surface); }
   .chat-toolbar { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); }
@@ -680,19 +691,25 @@
           <button onclick="chatNew()">New chat</button>
         </div>
       </div>
-      <div class="chat-wrap">
-        <div class="chat-toolbar">
-          <label class="field-label" style="margin:0;">Agent</label>
-          <select id="chat-agent"></select>
-          <span id="chat-sid" class="muted" style="font-size:12px;"></span>
-        </div>
-        <div id="chat-log" class="chat-log">
-          <div class="chat-empty muted">Pick an agent and send a message to start.</div>
-        </div>
-        <div class="chat-composer">
-          <textarea id="chat-input" rows="1" placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
-            oninput="chatAutogrow(this)" onkeydown="chatKey(event)"></textarea>
-          <button id="chat-send" class="primary" onclick="chatSend()">Send</button>
+      <div class="chat-split">
+        <aside id="chat-history" class="chat-history">
+          <div class="chat-history-head">Your sessions</div>
+          <div id="chat-history-list"></div>
+        </aside>
+        <div class="chat-wrap" style="flex:1; min-width:0;">
+          <div class="chat-toolbar">
+            <label class="field-label" style="margin:0;">Agent</label>
+            <select id="chat-agent"></select>
+            <span id="chat-sid" class="muted" style="font-size:12px;"></span>
+          </div>
+          <div id="chat-log" class="chat-log">
+            <div class="chat-empty muted">Pick an agent and send a message to start.</div>
+          </div>
+          <div class="chat-composer">
+            <textarea id="chat-input" rows="1" placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
+              oninput="chatAutogrow(this)" onkeydown="chatKey(event)"></textarea>
+            <button id="chat-send" class="primary" onclick="chatSend()">Send</button>
+          </div>
         </div>
       </div>
     </section>
@@ -1174,6 +1191,12 @@
       <h3 id="ag-modal-title">New agent</h3>
       <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="agSave(); return false;">
         <input id="ag-name" placeholder="agent name (unique)" autocomplete="off">
+        <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
+          <span class="muted" style="font-size:12px;">Icon</span>
+          <span id="ag-icon-preview" style="font-size:22px; line-height:1;">🤖</span>
+          <span id="ag-icon-palette" style="display:flex; gap:4px; flex-wrap:wrap;"></span>
+          <input id="ag-icon" type="hidden">
+        </div>
         <label id="ag-template-row" style="display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted);">
           template (required)
           <select id="ag-template" onchange="agTemplatePrefill()"></select>
@@ -2198,6 +2221,46 @@ async function loadChat() {
       return `<option value="${esc(n)}">${esc(n)}${tag}</option>`;
     }).join("");
   $("chat-agent").innerHTML = opts || '<option value="">(no agents — create one first)</option>';
+  chatLoadHistory();
+}
+
+async function chatLoadHistory() {
+  let rows = [];
+  try { rows = await api("GET", "/chat/sessions"); } catch (e) { rows = []; }
+  $("chat-history-list").innerHTML = rows.map(s => {
+    const when = (s.updated_at || "").replace("T", " ").slice(0, 16);
+    return `<div class="chat-hrow ${s.session_id === CHAT_SID ? "active" : ""}" onclick="chatOpen('${esc(s.session_id)}','${esc(s.agent_name || "")}')">
+      <div style="overflow:hidden;"><div class="ht">${esc(s.agent_name || "—")}${s.pinned ? " 📌" : ""}</div><div class="hx">${esc(when)}</div></div>
+      <button class="small ghost danger" onclick="event.stopPropagation(); chatDelete('${esc(s.session_id)}')">×</button>
+    </div>`;
+  }).join("") || `<div class="muted" style="padding:12px; font-size:12px;">No sessions yet.</div>`;
+}
+
+async function chatOpen(sid, agent) {
+  CHAT_SID = sid;
+  $("chat-sid").textContent = sid;
+  if (agent) $("chat-agent").value = agent;
+  $("chat-pin").disabled = false;
+  $("chat-export").disabled = false;
+  $("chat-log").innerHTML = '<div class="chat-empty muted">Loading…</div>';
+  try {
+    const r = await api("GET", `/chat/${encodeURIComponent(sid)}/export?fmt=json`);
+    $("chat-log").innerHTML = "";
+    const t = r.transcript || [];
+    if (!t.length) $("chat-log").innerHTML = '<div class="chat-empty muted">(empty session)</div>';
+    for (const m of t) {
+      const role = m.role === "user" ? "user" : "assistant";
+      chatBubble(role, typeof m.content === "string" ? m.content : JSON.stringify(m.content));
+    }
+  } catch (e) { $("chat-log").innerHTML = `<div class="chat-empty err">${esc(e.message)}</div>`; }
+  chatLoadHistory();
+}
+
+async function chatDelete(sid) {
+  if (!await confirmDialog("Delete this chat session?")) return;
+  try { await api("DELETE", `/chat/${encodeURIComponent(sid)}`); } catch (e) { toast(e.message, "error"); return; }
+  if (sid === CHAT_SID) chatNew();
+  chatLoadHistory();
 }
 
 function chatAutogrow(t) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 160) + "px"; }
@@ -2210,6 +2273,7 @@ function chatNew() {
   $("chat-pin").disabled = true;
   $("chat-export").disabled = true;
   $("chat-input").focus();
+  chatLoadHistory();
 }
 
 function chatBubble(role, text) {
@@ -2255,6 +2319,7 @@ async function chatSend() {
       $("chat-sid").textContent = CHAT_SID;
       $("chat-pin").disabled = false;
       $("chat-export").disabled = false;
+      chatLoadHistory();  // surface the new session in the sidebar
     }
     const r = await api("POST", `/chat/${encodeURIComponent(CHAT_SID)}/message`, { message: msg });
     const bubble = pending.querySelector(".chat-bubble");
@@ -2333,7 +2398,7 @@ function agentCardHtml(a) {
   return `
     <div class="connector-card ${enabled ? '' : 'disabled'}" onclick="agDrawer('${esc(name)}')">
       <div class="connector-status ${enabled ? 'active' : 'inactive'}"></div>
-      <div class="connector-icon" style="background:var(--accent-weak,#2a2a3a);">🤖</div>
+      <div class="connector-icon" style="background:var(--accent-weak,#2a2a3a);">${esc(a.icon || "🤖")}</div>
       <div class="connector-title">${esc(name)}</div>
       <div class="connector-desc">${esc((a.system_prompt || "").slice(0, 90) || "No system prompt")}</div>
       <div class="sk-pills">
@@ -2460,11 +2525,23 @@ function agTemplatePrefill() {
   $("ag-system-prompt").value = t.system_prompt || "";
   $("ag-allowed-tools").value = (t.allowed_tools || []).join(", ");
 }
+const AG_ICONS = ["🤖","🦊","🐱","🐶","🧠","📚","🛠️","🔧","💬","📊","🚀","🛡️","🧩","⚙️","🌐","🔍","🤝","📈","✨","🧪"];
+function agRenderIconPalette() {
+  $("ag-icon-palette").innerHTML = AG_ICONS.map(e =>
+    `<button type="button" class="small ghost" style="padding:2px 5px; font-size:16px;" onclick="agSetIcon('${e}')">${e}</button>`
+  ).join("");
+}
+function agSetIcon(emoji) {
+  $("ag-icon").value = emoji || "";
+  $("ag-icon-preview").textContent = emoji || "🤖";
+}
 async function agCreate() {
   $("ag-modal-title").textContent = "New agent";
   $("ag-err").textContent = "";
   $("ag-name").value = "";
   $("ag-name").disabled = false;
+  agRenderIconPalette();
+  agSetIcon("");
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
   $("ag-template-row").style.display = "";
@@ -2554,6 +2631,8 @@ async function agEdit(name) {
     $("ag-modal-title").textContent = "Edit agent: " + name;
     $("ag-name").value = name;
     $("ag-name").disabled = true;
+    agRenderIconPalette();
+    agSetIcon(a.icon || "");
     $("ag-system-prompt").value = a.system_prompt || "";
     $("ag-allowed-tools").value = (a.allowed_tools || []).join(", ");
     $("ag-template-row").style.display = "none";
@@ -2592,17 +2671,18 @@ async function agSave() {
   const sp = $("ag-system-prompt").value;
   const isEdit = $("ag-modal").dataset.mode === "edit";
   try {
+    const icon = $("ag-icon").value || null;
     let name;
     if (isEdit) {
       name = $("ag-modal").dataset.name;
-      await api("PATCH", `/agents/${encodeURIComponent(name)}`, { system_prompt: sp, allowed_tools: tools });
+      await api("PATCH", `/agents/${encodeURIComponent(name)}`, { system_prompt: sp, allowed_tools: tools, icon });
     } else {
       name = $("ag-name").value.trim();
       if (!name) { $("ag-err").textContent = "name required"; return; }
       const templateId = $("ag-template").value;
       if (!templateId) { $("ag-err").textContent = "template required"; return; }
       await api("POST", "/agents", {
-        name, template_id: templateId, system_prompt: sp,
+        name, template_id: templateId, system_prompt: sp, icon,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
       });
@@ -2686,6 +2766,7 @@ async function agDrawer(name) {
 
 function agRenderPreview(name, a, yamlText) {
   AG_YAML_CACHE = yamlText || "";
+  $("ag-drawer-title").textContent = (a.icon ? a.icon + " " : "") + name;
   const archived = a.status === "archived";
   const statusCls = a.status === "enabled" ? "active" : archived ? "" : "blocked";
   const lifecycle = IS_VIEWER ? "" : `

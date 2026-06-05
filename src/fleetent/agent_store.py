@@ -33,7 +33,7 @@ _UNSET: Any = object()
 # Agent-row columns beyond the version-derived runtime fields. Caps are not
 # versioned, so they are read straight off the agents row.
 _AGENT_ROW_COLUMNS = (
-    "id, name, active_version_id, features, plugins, allowed_skills, tenant_id, team_id"
+    "id, name, active_version_id, features, plugins, allowed_skills, tenant_id, team_id, icon"
 )
 
 
@@ -66,6 +66,8 @@ class Agent:
     model_overrides: dict[str, Any] = field(default_factory=dict)
     memory_namespace: str = "default"
     template_id: str | None = None
+    # Optional avatar emoji shown in the console; agent-level identity, not versioned.
+    icon: str | None = None
 
 
 @dataclass
@@ -102,6 +104,8 @@ def _parse_caps(row: dict[str, Any]) -> dict[str, Any]:
         # `or "[]"` guards a legacy row predating allowed_skills (NULL); [] means
         # no narrowing (backward compatible).
         "allowed_skills": json.loads(row["allowed_skills"] or "[]"),
+        # icon column added in migration 047; guard legacy rows that predate it.
+        "icon": (row["icon"] if "icon" in row else None),
     }
 
 
@@ -120,6 +124,7 @@ def create_agent(
     tenant_id: str = "default",
     team_id: str | None = None,
     template_id: str | None = None,
+    icon: str | None = None,
 ) -> Agent:
     """Create an agent plus its version-1 snapshot in a single transaction.
 
@@ -137,9 +142,9 @@ def create_agent(
         agent_id = conn.execute(
             "INSERT INTO agents "
             "(name, system_prompt, allowed_tools, features, plugins, allowed_skills, "
-            " created_at, tenant_id, team_id) "
+            " created_at, tenant_id, team_id, icon) "
             "VALUES (:name, :system_prompt, :allowed_tools, :features, :plugins, "
-            " :allowed_skills, :created_at, :tenant_id, :team_id)",
+            " :allowed_skills, :created_at, :tenant_id, :team_id, :icon)",
             {
                 "name": name,
                 "system_prompt": system_prompt,
@@ -150,6 +155,7 @@ def create_agent(
                 "created_at": now,
                 "tenant_id": tenant_id,
                 "team_id": team_id,
+                "icon": icon,
             },
         ).lastrowid
         version_id = _insert_version(
@@ -185,7 +191,19 @@ def create_agent(
         model_overrides=model_overrides or {},
         memory_namespace=memory_namespace,
         template_id=template_id,
+        icon=icon,
     )
+
+
+def set_icon(name: str, icon: str | None) -> None:
+    """Set an agent's avatar emoji (agent-level identity, not a new version)."""
+    _db().execute("UPDATE agents SET icon = :icon WHERE name = :name", {"icon": icon, "name": name})
+
+
+def icons_by_name() -> dict[str, str]:
+    """Map of agent name -> icon for the rows that have one (drives the list view)."""
+    rows = _db().execute("SELECT name, icon FROM agents WHERE icon IS NOT NULL").fetchall()
+    return {str(r["name"]): str(r["icon"]) for r in rows}
 
 
 def _insert_version(

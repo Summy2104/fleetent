@@ -3,9 +3,11 @@ id into agent_loop.run so run_code's schema visibility is gated on the IM path t
 
 from unittest.mock import AsyncMock
 
-import fleetent.im_user_store as im_user_store
+import yaml
+
+import fleetent.agent_config as agent_config
 import fleetent.user_store as user_store
-from fleetent.im_gateway import normalizer
+from fleetent.im_gateway import access, normalizer
 from fleetent.platform.im_gateway_management import im_channel_allowlist as acl
 from fleetent.platform.im_gateway_management import im_connector_store as ics
 
@@ -45,9 +47,26 @@ def _msg(replies):
     )
 
 
+def _write_default_agent(root, name, **fields):
+    # A default agent allowing u1 so the per-agent gate passes; no features declared so
+    # agent_features stays {} and run_code remains gated by the resolved sandbox mode.
+    doc = {
+        "name": name,
+        "version": 1,
+        "access": {"allow_users": ["u1"]},
+        "bindings": {"default": True},
+    }
+    doc.update(fields)
+    d = root / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    agent_config.scan(root)
+
+
 async def test_route_passes_sandbox_context_to_run(tmp_path, monkeypatch):
     _setup_db(tmp_path, monkeypatch)
-    monkeypatch.setattr(im_user_store, "check_allowed_by_user_id", lambda _uid: True)
+    monkeypatch.setattr(access, "APPROVALS_PATH", tmp_path / "data" / "im_approvals.json")
+    _write_default_agent(tmp_path / "agents", "sb3-bot")
 
     import fleetent.integrations.sandbox.enablement as se
     import fleetent.runtime.loop as agent_loop

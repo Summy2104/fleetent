@@ -62,6 +62,21 @@ class AgentConnectors(BaseModel):
     slack: SlackConnector | None = None
 
 
+class AgentAccess(BaseModel):
+    """Per-agent IM access rules, read from the agent home (no platform-DB lookup).
+
+    The default is closed: with no rules an agent grants no implicit access and
+    requires approval, rather than the legacy allowlist-off = allow-all behaviour.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Empty allow_channels = allow all channels the agent is bound to.
+    allow_channels: list[str] = Field(default_factory=list)
+    allow_users: list[str] = Field(default_factory=list)
+    require_approval: bool = True
+
+
 class AgentFile(BaseModel):
     """Schema for a self-contained ``agent.yaml``."""
 
@@ -87,6 +102,7 @@ class AgentFile(BaseModel):
     long_term_ctx: LongTermContextSettings = Field(default_factory=LongTermContextSettings)
     connectors: AgentConnectors = Field(default_factory=AgentConnectors)
     bindings: AgentBindings = Field(default_factory=AgentBindings)
+    access: AgentAccess = Field(default_factory=AgentAccess)
 
 
 @dataclass(frozen=True)
@@ -257,6 +273,19 @@ def scan(agents_dir: str | Path | None = None) -> None:
     """Rebuild and publish the current index. Server runs once at startup; CLI per call."""
     global _index
     _index = build_index(agents_dir)
+
+
+def scan_home(agent_dir: str | Path) -> AgentFile:
+    """Publish a single-agent index from one agent home dir (standalone runtime).
+
+    Loads ``<agent_dir>/agent.yaml`` (dir name must match the agent name) and publishes
+    it as the sole, forced-default agent. Used by ``fleetent agent run`` so routing
+    resolves only this one self-contained agent.
+    """
+    global _index
+    agent = load_agent_file(Path(agent_dir))
+    _index = _single_agent_index(agent)
+    return agent
 
 
 def current() -> AgentConfigIndex:
