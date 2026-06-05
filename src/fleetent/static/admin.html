@@ -1479,9 +1479,28 @@ async function api(method, path, body, extraHeaders) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 401) { setToken(null); show("login-view"); }
-    throw new Error(data.detail || ("HTTP " + res.status));
+    throw new Error(apiErrorMessage(data.detail) || ("HTTP " + res.status));
   }
   return data;
+}
+
+// FastAPI `detail` can be a plain string, a structured object (e.g. the
+// "agent still bound" 409 with {error, users, channels}), or a validation
+// array. Render any shape as a readable message instead of "[object Object]".
+function apiErrorMessage(detail) {
+  if (detail == null) return "";
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(d => (d && d.msg) ? d.msg : JSON.stringify(d)).join("; ");
+  }
+  if (typeof detail === "object") {
+    const base = detail.error || detail.message || detail.detail || "";
+    const extras = Object.entries(detail)
+      .filter(([k, v]) => !["error", "message", "detail"].includes(k) && Array.isArray(v) && v.length)
+      .map(([k, v]) => `${k}: ${v.join(", ")}`);
+    return [base, ...extras].filter(Boolean).join(" — ") || JSON.stringify(detail);
+  }
+  return String(detail);
 }
 
 async function doLogin() {

@@ -1153,6 +1153,16 @@ def test_chat_session_history_present():
     assert "/chat/${encodeURIComponent(sid)}" in html
 
 
+def test_api_error_message_handles_object_detail():
+    html = ADMIN_HTML
+    # object/array FastAPI `detail` (e.g. the "agent still bound" 409) renders
+    # readably instead of "[object Object]"
+    assert "function apiErrorMessage" in html
+    assert "apiErrorMessage(data.detail)" in html
+    fn = html.split("function apiErrorMessage", 1)[1].split("async function doLogin", 1)[0]
+    assert "Array.isArray" in fn and ".error" in fn
+
+
 def test_api_helper_retries_on_network_failure():
     html = ADMIN_HTML
     fn = html.split("async function api(", 1)[1].split("async function doLogin", 1)[0]
