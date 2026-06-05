@@ -1009,6 +1009,17 @@ def test_render_users_joins_im_identities_by_user():
     assert "platform_user_id" in body
 
 
+def test_im_identity_row_has_overflow_menu_to_linked_user_config():
+    body = _render_users_body(ADMIN_HTML)
+    # Identity row exposes the linked user's full config via an overflow menu,
+    # so the lifecycle is reachable without jumping to the parent row.
+    assert "toggleMenu(this)" in body
+    assert "menu-sep" in body
+    assert "Linked user" in body
+    for action in ("openEditUser(", "setRole(", "resetPassword(", "viewKeys(", "del("):
+        assert action in body
+
+
 def test_bind_modal_is_searchable_user_picker():
     html = ADMIN_HTML
     # Redesigned bind flow: a searchable user picker, not a bare <select>.
