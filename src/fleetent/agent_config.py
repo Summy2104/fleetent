@@ -360,8 +360,20 @@ def active_agent() -> AgentFile | None:
     A standalone ``fleetent agent run`` process publishes exactly one (forced-default)
     agent, so process-level config (intelligence backends, deployment knobs) resolves
     from it. In the multi-agent dev/platform index (or an empty one) this returns None
-    and callers fall back to the global ``Settings`` defaults.
+    and callers fall back to ``active_agent_or_default``'s neutral default.
     """
     if len(_index.agents) == 1:
         return next(iter(_index.agents.values()))
     return None
+
+
+# Neutral default carrying the schema's literal defaults. It is the process-level
+# fallback source for runtime knobs (intelligence/deployment/session) when no single
+# agent is deployed (multi-agent dev/platform/empty index) — replacing the historical
+# global ``Settings`` fallback after the config consolidation.
+_DEFAULT_AGENT_FILE = AgentFile(name="", version=0)
+
+
+def active_agent_or_default() -> AgentFile:
+    """The single active agent for this process, or a neutral default with schema defaults."""
+    return active_agent() or _DEFAULT_AGENT_FILE

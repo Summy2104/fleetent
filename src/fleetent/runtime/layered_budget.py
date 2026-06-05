@@ -114,16 +114,9 @@ class LayeredBudgetConfig:
         )
 
     @classmethod
-    def from_settings(cls, settings: object | None = None) -> LayeredBudgetConfig:
-        from fleetent.config import Settings
-
-        s = settings if settings is not None else Settings()  # type: ignore[call-arg]
-        return cls._from_source(s)
-
-    @classmethod
     def from_governance(cls, governance: object) -> LayeredBudgetConfig:
-        """Build from a per-agent GovernanceConfig (duck-typed: reads the same
-        ``agent_budget_<scope>_{turns,tokens}`` attribute names as Settings)."""
+        """Build from a per-agent GovernanceConfig (duck-typed: reads the
+        ``agent_budget_<scope>_{turns,tokens}`` attribute names)."""
         return cls._from_source(governance)
 
     @classmethod

@@ -13,7 +13,7 @@ import base64
 import httpx
 from openai import AsyncOpenAI, Omit, omit
 
-from fleetent.config import Settings
+from fleetent.agent_config import AgentFile
 
 # Long enough for diffusion backends, which may take seconds to minutes (D5).
 _DEFAULT_TIMEOUT_SECONDS: float = 120.0
@@ -46,7 +46,7 @@ async def generate(
     prompt: str,
     *,
     size: str | None = None,
-    settings: Settings | None = None,
+    config: AgentFile | None = None,
 ) -> bytes:
     """Generate an image from a text prompt and return raw image bytes.
 
@@ -56,7 +56,7 @@ async def generate(
     """
     from fleetent import agent_config
 
-    src = settings or agent_config.active_agent() or Settings()  # type: ignore[call-arg]
+    src = config or agent_config.active_agent_or_default()
     if not src.image_gen_url:
         raise ImageGenError("image generation endpoint not configured (image_gen_url is empty)")
 

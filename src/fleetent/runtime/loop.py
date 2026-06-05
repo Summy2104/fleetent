@@ -128,8 +128,7 @@ def _limit_config_from_governance(
 ) -> dict[str, int] | None:
     """LimitConfig (max_turns / max_consecutive_failures) from governance, or None.
 
-    None lets resolve_limits fall back to its Settings-backed defaults (transitional;
-    Settings removal lands in dissolve-global-settings)."""
+    None lets resolve_limits fall back to its GovernanceConfig-default-backed limits."""
     if governance is None:
         return None
     return {
@@ -143,19 +142,15 @@ def _resolve_budget_config(
     max_tokens: int | None,
     governance: GovernanceConfig | None = None,
 ) -> BudgetConfig:
-    """Resolve the two-dimensional budget: call param > governance > Settings default.
+    """Resolve the two-dimensional budget: call param > governance > default.
 
-    The step dimension reuses resolve_limits (now seeded from governance); the token
-    dimension comes from governance (or Settings when governance is absent)."""
-    mt, _ = resolve_limits(max_turns, None, config=_limit_config_from_governance(governance))
+    The step dimension reuses resolve_limits (seeded from governance); the token
+    dimension comes from governance (a default GovernanceConfig when absent)."""
+    gov = governance if governance is not None else GovernanceConfig()
+    mt, _ = resolve_limits(max_turns, None, config=_limit_config_from_governance(gov))
     if max_tokens is not None:
         return BudgetConfig(max_turns=mt, max_tokens=max_tokens)
-    if governance is not None:
-        return BudgetConfig(max_turns=mt, max_tokens=governance.agent_max_tokens)
-    from fleetent.config import Settings
-
-    s = Settings()  # type: ignore[call-arg]
-    return BudgetConfig(max_turns=mt, max_tokens=s.agent_max_tokens)
+    return BudgetConfig(max_turns=mt, max_tokens=gov.agent_max_tokens)
 
 
 def _resolve_loop_config(
@@ -163,24 +158,13 @@ def _resolve_loop_config(
     ignore_arg_keys: list[str] | None,
     governance: GovernanceConfig | None = None,
 ) -> tuple[int, list[str]]:
-    """Resolve loop-detection settings: call param > governance > Settings default."""
+    """Resolve loop-detection settings: call param > governance > default."""
     if repeat_threshold is not None and ignore_arg_keys is not None:
         return repeat_threshold, ignore_arg_keys
-    if governance is not None:
-        return (
-            repeat_threshold
-            if repeat_threshold is not None
-            else governance.agent_loop_repeat_threshold,
-            ignore_arg_keys
-            if ignore_arg_keys is not None
-            else list(governance.loop_detect_ignore_arg_keys),
-        )
-    from fleetent.config import Settings
-
-    s = Settings()  # type: ignore[call-arg]
+    gov = governance if governance is not None else GovernanceConfig()
     return (
-        repeat_threshold if repeat_threshold is not None else s.agent_loop_repeat_threshold,
-        ignore_arg_keys if ignore_arg_keys is not None else list(s.loop_detect_ignore_arg_keys),
+        repeat_threshold if repeat_threshold is not None else gov.agent_loop_repeat_threshold,
+        ignore_arg_keys if ignore_arg_keys is not None else list(gov.loop_detect_ignore_arg_keys),
     )
 
 
@@ -191,29 +175,20 @@ def _resolve_guardrail_threshold(
     """Resolve the AR10 guardrail threshold: call param > governance > Settings default."""
     if guardrail_repeat_threshold is not None:
         return guardrail_repeat_threshold
-    if governance is not None:
-        return governance.guardrail_repeat_threshold
-    from fleetent.config import Settings
-
-    return Settings().guardrail_repeat_threshold  # type: ignore[call-arg]
+    gov = governance if governance is not None else GovernanceConfig()
+    return gov.guardrail_repeat_threshold
 
 
 def _resolve_parallel_max(governance: GovernanceConfig | None = None) -> int:
-    """Resolve the AR3 single-round tool concurrency cap: governance > Settings default."""
-    if governance is not None:
-        return governance.agent_tool_parallel_max
-    from fleetent.config import Settings
-
-    return Settings().agent_tool_parallel_max  # type: ignore[call-arg]
+    """Resolve the AR3 single-round tool concurrency cap: governance > default."""
+    gov = governance if governance is not None else GovernanceConfig()
+    return gov.agent_tool_parallel_max
 
 
 def _resolve_default_tool_timeout(governance: GovernanceConfig | None = None) -> float:
-    """Global default per-tool timeout: governance > Settings default (T2)."""
-    if governance is not None:
-        return governance.tool_default_timeout_seconds
-    from fleetent.config import Settings
-
-    return Settings().tool_default_timeout_seconds  # type: ignore[call-arg]
+    """Global default per-tool timeout: governance > default (T2)."""
+    gov = governance if governance is not None else GovernanceConfig()
+    return gov.tool_default_timeout_seconds
 
 
 def _agent_bound_to_server(server_id: str, allowed_tools: list[str] | None) -> bool:
@@ -312,19 +287,16 @@ def _setup_layered_budget(
     """Build the AR18 layered-budget checker/store, or (None, None, {}) when no cap
     is configured (dormant by default → zero behaviour/DB change for plain runs).
 
-    Caps + windows come from the per-agent governance when present, else Settings
-    (transitional). The global (cross-agent) scope was dropped in the consolidation."""
+    Caps + windows come from the per-agent governance (a default GovernanceConfig
+    when absent → all dims uncapped). The global (cross-agent) scope was dropped."""
     from fleetent.runtime import layered_budget as lbud
 
-    if governance is not None:
-        config = lbud.LayeredBudgetConfig.from_governance(governance)
-        windows = {
-            lbud.BudgetScope.user: lbud.BudgetWindow(governance.agent_budget_user_window),
-            lbud.BudgetScope.agent: lbud.BudgetWindow(governance.agent_budget_agent_window),
-        }
-    else:
-        config = lbud.LayeredBudgetConfig.from_settings()
-        windows = None
+    gov = governance if governance is not None else GovernanceConfig()
+    config = lbud.LayeredBudgetConfig.from_governance(gov)
+    windows = {
+        lbud.BudgetScope.user: lbud.BudgetWindow(gov.agent_budget_user_window),
+        lbud.BudgetScope.agent: lbud.BudgetWindow(gov.agent_budget_agent_window),
+    }
     if not config.has_any_cap():
         return None, None, {}
     store = lbud.BudgetStore(windows=windows)

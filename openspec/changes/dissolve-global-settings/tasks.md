@@ -1,7 +1,10 @@
 ## 1. 删除前确认无运行时回读
 
-- [ ] 1.1 grep 全库确认阶段 2 后无 runtime 模块仍读待删 `Settings` 字段(治理/部署/智能层/IM tokens/
+- [x] 1.1 grep 全库确认阶段 2 后无 runtime 模块仍读待删 `Settings` 字段(治理/部署/智能层/IM tokens/
       `default_agent_name`/`agent_budget_global_*`);产出确认清单(对照阶段 2 task 7.3)
+      → 确认:仅 D4.1 列出的 fallback 分支(`Settings()`/`s.` 无-agent 回退)+ `server.py` health
+      adapters + `agent_store._get_default_agent_name` + `set-default-agent` CLI 仍读待删字段;所有
+      `agent.`/`governance.` 读取均来自 agent.yaml dataclass(正确保留)。fallback 分支由 task 2.2 前置重指。
 
 ## 2. 删除 Settings agent-runtime 字段
 

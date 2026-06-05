@@ -60,35 +60,22 @@ _DEFAULT_INITIAL_INTENT_MAX = 2
 
 
 def _default_config(agent_name: str | None = None) -> ContextConfig:
-    """Compression config: the active agent's context_* fields when resolvable by
-    agent_name, else the historical Settings defaults (transitional fallback)."""
-    if agent_name is not None:
-        from fleetent import agent_config
+    """Compression config: the named agent's context_* fields when resolvable, else
+    a neutral default agent's schema defaults."""
+    from fleetent import agent_config
 
-        agent = agent_config.current().get(agent_name)
-        if agent is not None:
-            return {
-                "max_tokens": agent.context_max_tokens,
-                "tmax_ratio": agent.context_tmax_ratio,
-                "tretained_ratio": agent.context_tretained_ratio,
-                "keep_recent": agent.context_keep_recent,
-                "initial_intent_max": agent.compression_initial_intent_max,
-                "flap_window": agent.context_flap_window,
-                "min_savings_ratio": agent.context_min_savings_ratio,
-                "min_interval_turns": agent.context_min_interval_turns,
-            }
-    from fleetent.config import Settings
-
-    s = Settings()  # type: ignore[call-arg]
+    agent = agent_config.current().get(agent_name) if agent_name is not None else None
+    if agent is None:
+        agent = agent_config.active_agent_or_default()
     return {
-        "max_tokens": s.context_max_tokens,
-        "tmax_ratio": s.context_tmax_ratio,
-        "tretained_ratio": s.context_tretained_ratio,
-        "keep_recent": s.context_keep_recent,
-        "initial_intent_max": s.compression_initial_intent_max,
-        "flap_window": s.context_flap_window,
-        "min_savings_ratio": s.context_min_savings_ratio,
-        "min_interval_turns": s.context_min_interval_turns,
+        "max_tokens": agent.context_max_tokens,
+        "tmax_ratio": agent.context_tmax_ratio,
+        "tretained_ratio": agent.context_tretained_ratio,
+        "keep_recent": agent.context_keep_recent,
+        "initial_intent_max": agent.compression_initial_intent_max,
+        "flap_window": agent.context_flap_window,
+        "min_savings_ratio": agent.context_min_savings_ratio,
+        "min_interval_turns": agent.context_min_interval_turns,
     }
 
 

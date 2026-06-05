@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from fleetent.config import Settings
+from fleetent.agent_config import AgentFile
 
 
 def test_generated_dir_constant_exists():
@@ -43,8 +43,8 @@ def test_generate_decodes_b64_json(monkeypatch):
     client = _mock_async_openai(SimpleNamespace(b64_json=b64, url=None))
     monkeypatch.setattr(igc, "_build_client", lambda settings: client)
 
-    settings = Settings(anthropic_api_key="k", image_gen_url="http://localhost:9000/v1/")
-    result = asyncio_run(igc.generate("a red cube", settings=settings))
+    settings = AgentFile(name="t", version=1, image_gen_url="http://localhost:9000/v1/")
+    result = asyncio_run(igc.generate("a red cube", config=settings))
 
     assert result == PNG_BYTES
     # b64_json requested explicitly
@@ -56,9 +56,9 @@ def test_generate_decodes_b64_json(monkeypatch):
 def test_generate_requires_configured_url():
     import fleetent.tools.image_gen_client as igc
 
-    settings = Settings(anthropic_api_key="k", image_gen_url="")
+    settings = AgentFile(name="t", version=1, image_gen_url="")
     with pytest.raises(igc.ImageGenError):
-        asyncio_run(igc.generate("x", settings=settings))
+        asyncio_run(igc.generate("x", config=settings))
 
 
 def test_generate_endpoint_error_raises_imagegenerror(monkeypatch):
@@ -68,9 +68,9 @@ def test_generate_endpoint_error_raises_imagegenerror(monkeypatch):
     client.images.generate = AsyncMock(side_effect=RuntimeError("boom"))
     monkeypatch.setattr(igc, "_build_client", lambda settings: client)
 
-    settings = Settings(anthropic_api_key="k", image_gen_url="http://localhost:9000/v1/")
+    settings = AgentFile(name="t", version=1, image_gen_url="http://localhost:9000/v1/")
     with pytest.raises(igc.ImageGenError):
-        asyncio_run(igc.generate("x", settings=settings))
+        asyncio_run(igc.generate("x", config=settings))
 
 
 def test_generate_empty_data_raises(monkeypatch):
@@ -80,9 +80,9 @@ def test_generate_empty_data_raises(monkeypatch):
     client.images.generate = AsyncMock(return_value=SimpleNamespace(data=[]))
     monkeypatch.setattr(igc, "_build_client", lambda settings: client)
 
-    settings = Settings(anthropic_api_key="k", image_gen_url="http://localhost:9000/v1/")
+    settings = AgentFile(name="t", version=1, image_gen_url="http://localhost:9000/v1/")
     with pytest.raises(igc.ImageGenError):
-        asyncio_run(igc.generate("x", settings=settings))
+        asyncio_run(igc.generate("x", config=settings))
 
 
 def test_generate_fetches_url_when_no_b64(monkeypatch):
@@ -99,8 +99,8 @@ def test_generate_fetches_url_when_no_b64(monkeypatch):
 
     monkeypatch.setattr(igc, "_fetch_url", fake_fetch)
 
-    settings = Settings(anthropic_api_key="k", image_gen_url="http://localhost:9000/v1/")
-    result = asyncio_run(igc.generate("x", settings=settings))
+    settings = AgentFile(name="t", version=1, image_gen_url="http://localhost:9000/v1/")
+    result = asyncio_run(igc.generate("x", config=settings))
     assert result == PNG_BYTES
 
 
@@ -166,7 +166,7 @@ def test_generate_image_success_returns_reference(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
 
-    async def fake_generate(prompt, *, size=None, settings=None):
+    async def fake_generate(prompt, *, size=None, config=None):
         assert prompt == "a blue circle"
         return PNG_BYTES
 
@@ -184,7 +184,7 @@ def test_generate_image_result_has_no_base64(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
 
-    async def fake_generate(prompt, *, size=None, settings=None):
+    async def fake_generate(prompt, *, size=None, config=None):
         return PNG_BYTES
 
     monkeypatch.setattr(tl.image_gen_client, "generate", fake_generate)
@@ -200,7 +200,7 @@ def test_generate_image_failure_normalized_not_raised(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
 
-    async def fake_generate(prompt, *, size=None, settings=None):
+    async def fake_generate(prompt, *, size=None, config=None):
         raise ImageGenError("endpoint not configured")
 
     monkeypatch.setattr(tl.image_gen_client, "generate", fake_generate)
@@ -225,7 +225,7 @@ def test_tool_result_message_in_trace_has_no_base64(monkeypatch, tmp_path):
 
     monkeypatch.setattr(tl, "GENERATED_DIR", tmp_path / "gen")
 
-    async def fake_generate(prompt, *, size=None, settings=None):
+    async def fake_generate(prompt, *, size=None, config=None):
         return PNG_BYTES
 
     monkeypatch.setattr(tl.image_gen_client, "generate", fake_generate)

@@ -13,7 +13,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from fleetent.config import Settings
+from fleetent.agent_config import AgentFile
 
 # VLMs answer in seconds; generous but bounded so a hung endpoint fails locally.
 _DEFAULT_TIMEOUT_SECONDS: float = 120.0
@@ -41,7 +41,7 @@ async def analyze(
     image_bytes: bytes,
     instruction: str,
     *,
-    settings: Settings | None = None,
+    config: AgentFile | None = None,
 ) -> str:
     """Run one focused vision call over the image and return the text answer.
 
@@ -52,7 +52,7 @@ async def analyze(
     """
     from fleetent import agent_config
 
-    src = settings or agent_config.active_agent() or Settings()  # type: ignore[call-arg]
+    src = config or agent_config.active_agent_or_default()
     if not src.vision_url:
         raise VisionError("vision endpoint not configured (vision_url is empty)")
 
