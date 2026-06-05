@@ -18,7 +18,7 @@ ADMIN_HTML = (Path(__file__).parents[2] / "src" / "fleetent" / "static" / "admin
 def test_grouped_nav_present():
     html = ADMIN_HTML
     assert "switchGroup(" in html
-    for group in ("access", "agents", "models", "ops"):
+    for group in ("access", "agents", "resources", "ops"):
         assert f'data-group="{group}"' in html
 
 
@@ -92,6 +92,31 @@ def test_skills_action_functions_present():
         "function skDoUpload",
     ):
         assert fn in html, fn
+
+
+def test_skill_import_folder_or_zip_dropzone():
+    html = ADMIN_HTML
+    # single entry: a drop zone accepting a dragged folder or a .zip; click falls back
+    # to the hidden webkitdirectory folder picker. Loose individual files are rejected.
+    assert 'id="sk-drop"' in html
+    assert 'id="sk-import-folder"' in html
+    assert "webkitdirectory" in html
+    assert "$('sk-import-folder').click()" in html
+    assert 'id="sk-import-pick"' in html
+    assert "function skDrop" in html
+    assert "function skFolderPicked" in html
+    assert "function skWalkDir" in html
+    assert "webkitGetAsEntry" in html
+    # loose-file rejection path is present
+    assert "只接受文件夹或 .zip" in html
+    # the old multi-file input, zip input, and paste section are gone
+    assert 'id="sk-import-files"' not in html
+    assert 'id="sk-import-zip"' not in html
+    assert "skImportPaste" not in html
+    assert 'id="sk-paste-content"' not in html
+    up = html.split("async function skDoUpload", 1)[1].split("\n}", 1)[0]
+    assert "/skills/import/upload" in up
+    assert "SK_PICKED" in up
 
 
 def test_skills_proposals_review_wired():
@@ -314,10 +339,31 @@ def test_resource_id_inputs_are_readonly():
     html = ADMIN_HTML
     import re
 
-    for input_id in ("nkb-id", "pv-id", "oc-id"):
+    for input_id in ("pv-id", "oc-id"):
         m = re.search(rf'<input[^>]*id="{input_id}"[^>]*>', html)
         assert m, input_id
         assert "readonly" in m.group(0), input_id
+
+
+def test_kb_source_connectors_management_present():
+    html = ADMIN_HTML
+    # KB tab hosts a source-connector manager (Drive/Confluence) + add/edit modal
+    assert 'id="kbc-body"' in html
+    assert 'id="kbc-modal"' in html
+    assert 'id="kbc-kind"' in html
+    assert "function loadKbConnectors" in html
+    assert "function kbcSave" in html
+    # CRUD + check + dry-run sync wired to the API
+    assert 'api("GET", "/kb/connectors")' in html
+    assert 'api("POST", "/kb/connectors"' in html
+    assert "/check" in html and "/sync" in html
+    assert "KBC_FIELDS" in html  # per-kind field defs
+    assert "loadKbConnectors()" in html.split("async function loadKb", 1)[1].split("}", 1)[0]
+    # free-form custom metadata authored as YAML (parsed server-side), like provider params
+    assert 'id="kbc-custom"' in html
+    assert "Custom (YAML)" in html
+    save = html.split("async function kbcSave", 1)[1].split("async function kbcDelete", 1)[0]
+    assert "custom_yaml" in save
 
 
 def test_textarea_themed():
@@ -849,7 +895,7 @@ def test_sidebar_present_and_grouped():
     html = ADMIN_HTML
     assert 'class="sidebar"' in html
     # grouped section headings inside sidebar
-    for group in ("access", "agents", "models", "ops"):
+    for group in ("access", "agents", "resources", "ops"):
         assert f'data-group="{group}"' in html
     # contract preserved
     assert "switchGroup(" in html
@@ -955,7 +1001,6 @@ def test_viewer_hidden_write_containers_intact():
     html = ADMIN_HTML
     for cid in (
         "create-bar",
-        "kb-create-card",
         "sk-create-bar",
         "pv-create-bar",
         "ag-create-bar",
@@ -1262,7 +1307,6 @@ def test_legacy_modules_have_search_in_page_header():
     html = ADMIN_HTML
     # each legacy list module fills its .ph-filter slot with a search input
     for tab, fid in [
-        ("kb", "kb-filter"),
         ("sessions", "sess-filter"),
         ("monitoring", "mon-filter"),
         ("stats", "st-filter"),
@@ -1276,7 +1320,6 @@ def test_legacy_module_search_filters_rows():
     html = ADMIN_HTML
     # render/filter functions reference their search value, so typing narrows rows
     for fid, fn in [
-        ("kb-filter", "function renderKb"),
         ("sess-filter", "function renderSessions"),
         ("mon-filter", "function renderMonAlerts"),
         ("st-filter", "function renderStatsRows"),

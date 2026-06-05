@@ -47,7 +47,7 @@ def test_ui_served(client):
 def test_ui_has_kb_tab(client):
     r = client.get("/admin/ui")
     assert 'data-tab="kb"' in r.text  # knowledge-base console tab present
-    assert "/kb/search" in r.text
+    assert "/kb/connectors" in r.text  # KB tab manages source connectors
 
 
 def test_ui_persists_session_across_refresh(client):

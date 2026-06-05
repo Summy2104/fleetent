@@ -15,8 +15,10 @@ Auth mirrors user_admin_api: ``Authorization: Session <token>``; reads allow
 viewer+admin, writes require admin, high-risk writes require ``X-Confirm: true``.
 """
 
+import io
 import shutil
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -368,12 +370,28 @@ async def import_skills_upload(
             rel = (f.filename or "").replace("\\", "/").lstrip("/")
             if not rel or ".." in rel.split("/"):
                 continue
+            data = await f.read()
+            # A .zip is the reliable alternative when the OS folder picker is unavailable:
+            # extract its tree (zip-slip guarded) instead of storing the archive itself.
+            if rel.lower().endswith(".zip"):
+                with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                    for member in zf.namelist():
+                        mrel = member.replace("\\", "/").lstrip("/")
+                        if not mrel or mrel.endswith("/") or ".." in mrel.split("/"):
+                            continue
+                        tops.add(mrel.split("/", 1)[0])
+                        mdest = root / mrel
+                        mdest.parent.mkdir(parents=True, exist_ok=True)
+                        mdest.write_bytes(zf.read(member))
+                continue
             tops.add(rel.split("/", 1)[0])
             dest = root / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(await f.read())
-        # webkitdirectory nests everything under the chosen folder; descend into it.
-        base = root / next(iter(tops)) if len(tops) == 1 else root
+            dest.write_bytes(data)
+        # A single top that is a directory (chosen folder, or a zip's root dir) is
+        # descended into; a single loose file (e.g. just SKILL.md) keeps base = root.
+        only = next(iter(tops)) if len(tops) == 1 else None
+        base = root / only if only and (root / only).is_dir() else root
         recursive = not (base / "SKILL.md").exists()
         summary = _run_import(base, recursive, source)
     audit_log.write_audit(user.id, "skill.import", "skill", "upload", detail=summary)

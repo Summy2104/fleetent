@@ -332,6 +332,12 @@
   .sk-diff .add { color:var(--ok); } .sk-diff .del { color:var(--danger); } .sk-diff .hunk { color:var(--accent); }
   .risk-low { color:var(--ok); } .risk-medium { color:#d8a200; } .risk-high { color:var(--danger); }
   .sk-import-section { border:1px solid var(--border); border-radius:var(--r-2); padding:12px 14px; background:var(--surface); }
+  .sk-drop { border:1.5px dashed var(--border); border-radius:var(--r-2); padding:22px 14px; text-align:center;
+    color:var(--muted); cursor:pointer; transition:border-color .12s, background .12s; user-select:none; }
+  .sk-drop:hover { border-color:var(--accent); }
+  .sk-drop.dragover { border-color:var(--accent); background:rgba(80,140,255,.08); color:var(--text); }
+  button.is-busy { opacity:.55; transform:scale(.97); }
+  button:active { transform:scale(.97); }
   /* --- Chat module --- */
   .chat-split { display:flex; gap:12px; height:calc(100vh - 170px); min-height:420px; }
   .chat-history { width:230px; flex-shrink:0; overflow-y:auto; border:1px solid var(--border);
@@ -562,14 +568,14 @@
         <button class="nav-item active" data-tab="users" onclick="switchTab('users')"><span class="nav-ico">👤</span>Users</button>
       </div>
       <div class="nav-group">
-        <button class="nav-group-label" data-group="agents" onclick="switchGroup('agents')">Agents &amp; Skills</button>
+        <button class="nav-group-label" data-group="agents" onclick="switchGroup('agents')">Agents</button>
         <button class="nav-item" data-tab="agents" onclick="switchTab('agents')"><span class="nav-ico">🤖</span>Agents</button>
-        <button class="nav-item" data-tab="skills" onclick="switchTab('skills')"><span class="nav-ico">🧩</span>Skills</button>
-        <button class="nav-item" data-tab="kb" onclick="switchTab('kb')"><span class="nav-ico">📚</span>Knowledge Base</button>
         <button class="nav-item" data-tab="chat" onclick="switchTab('chat')"><span class="nav-ico">💬</span>Chat</button>
       </div>
       <div class="nav-group">
-        <button class="nav-group-label" data-group="models" onclick="switchGroup('models')">Models &amp; Connectors</button>
+        <button class="nav-group-label" data-group="resources" onclick="switchGroup('resources')">Agent resources</button>
+        <button class="nav-item" data-tab="skills" onclick="switchTab('skills')"><span class="nav-ico">🧩</span>Skills</button>
+        <button class="nav-item" data-tab="kb" onclick="switchTab('kb')"><span class="nav-ico">📚</span>Knowledge Base</button>
         <button class="nav-item" data-tab="providers" onclick="switchTab('providers')"><span class="nav-ico">🧠</span>Providers</button>
         <button class="nav-item" data-tab="oauth" onclick="switchTab('oauth')"><span class="nav-ico">🔌</span>Connectors</button>
       </div>
@@ -615,29 +621,49 @@
     </section>
 
     <section id="tab-kb" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Knowledge Base</h2><div class="ph-filter"><input id="kb-filter" class="sk-search" placeholder="🔍  Search by id or description" oninput="renderKb()"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.kb?.()">Refresh</button></div></div>
-      <div class="card" id="kb-create-card">
-        <div class="row">
-          <input id="nkb-id" placeholder="auto-generated" readonly>
-          <input id="nkb-desc" placeholder="description">
-          <button onclick="createKb()">Create KB</button>
-        </div>
-        <div id="kb-err" class="err"></div>
-      </div>
+      <div class="page-header"><h2 class="ph-title">Knowledge Base</h2><div class="ph-actions"><button class="ghost small" onclick="LOADERS.kb?.()">Refresh</button></div></div>
+
       <div class="card">
-        <div class="row">
-          <input id="kb-q" placeholder="retrieval query" style="flex:1;">
-          <input id="kb-q-ids" placeholder="kb_ids (comma-separated)">
-          <select id="kb-q-mode"><option value="hybrid">hybrid</option><option value="vector">vector</option><option value="keyword">keyword</option></select>
-          <button onclick="kbSearch()">Test retrieval</button>
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <h4 style="margin:0;">Source connectors <span class="muted" style="font-weight:normal; font-size:12px;">(Google Drive / Confluence)</span></h4>
+          <span id="kbc-create-bar"><button class="small" onclick="kbcOpenCreate()">+ Add connector</button></span>
         </div>
-        <pre id="kb-search-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
+        <div class="table-scroll" style="margin-top:8px;"><table>
+          <thead><tr><th>ID</th><th>Kind</th><th>Enabled</th><th>Tenant / KB</th><th>Scope</th><th>Actions</th></tr></thead>
+          <tbody id="kbc-body"></tbody>
+        </table></div>
+        <div id="kbc-list-err" class="err"></div>
       </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>KB</th><th>Description</th><th>Docs</th><th>Bound agents</th><th>Actions</th></tr></thead>
-        <tbody id="kb-body"></tbody>
-      </table></div>
     </section>
+
+    <div id="kbc-modal" class="modal hidden">
+      <div class="modal-box wide" role="dialog" aria-modal="true">
+        <h3 id="kbc-modal-title">Add source connector</h3>
+        <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="kbcSave(); return false;">
+          <label class="field-label" for="kbc-id">Connector ID</label>
+          <input id="kbc-id" autocomplete="off">
+          <label class="field-label" for="kbc-kind">Kind</label>
+          <select id="kbc-kind" onchange="kbcRenderFields()">
+            <option value="google_drive">Google Drive</option>
+            <option value="confluence">Confluence</option>
+          </select>
+          <div class="row">
+            <input id="kbc-tenant" placeholder="tenant_id" autocomplete="off">
+            <input id="kbc-kb" placeholder="kb_id" autocomplete="off">
+          </div>
+          <label class="row" style="gap:6px;"><input type="checkbox" id="kbc-enabled" checked> Enabled</label>
+          <div id="kbc-fields" style="display:flex; flex-direction:column; gap:8px;"></div>
+          <label class="field-label" for="kbc-custom">Custom (YAML)</label>
+          <textarea id="kbc-custom" rows="4" autocomplete="off" spellcheck="false" style="font-family:monospace;" placeholder="poll_interval: 3600&#10;labels:&#10;  - pilot"></textarea>
+          <div class="muted" style="font-size:12px;">Free-form key/values (YAML) attached to this connector.</div>
+          <div id="kbc-err" class="err"></div>
+          <div class="row" style="justify-content:flex-end;">
+            <button type="button" class="ghost" onclick="kbcCloseModal()">Cancel</button>
+            <button type="submit">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <section id="tab-agents" class="hidden">
       <div class="page-header">
@@ -1075,13 +1101,19 @@
       </select>
 
       <div class="sk-import-section">
-        <strong>📁 Upload a skill folder</strong>
+        <strong>📁 Upload a skill</strong>
         <p class="muted" style="font-size:13px; margin:4px 0 8px;">
-          Pick a skill folder (with <code>SKILL.md</code>) or a folder containing several
-          skills. The whole folder uploads — single vs batch is detected automatically.
+          Drop a skill <strong>folder</strong> or its <code>.zip</code> (single vs batch is
+          detected automatically). Loose individual files are not accepted.
         </p>
-        <div class="row" style="gap:8px;">
-          <input type="file" id="sk-import-files" webkitdirectory directory multiple>
+        <div id="sk-drop" tabindex="0" class="sk-drop"
+             ondragover="skDragOver(event)" ondragleave="skDragLeave(event)" ondrop="skDrop(event)"
+             onclick="$('sk-import-folder').click()">
+          <div id="sk-drop-hint">📁 拖入文件夹或 .zip，或点击选择文件夹</div>
+        </div>
+        <input type="file" id="sk-import-folder" webkitdirectory multiple onchange="skFolderPicked()" style="display:none;">
+        <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px;">
+          <span id="sk-import-pick" class="muted" style="font-size:13px;">No selection</span>
           <button type="button" id="sk-upload-btn" class="primary" onclick="skDoUpload()">Upload &amp; import</button>
         </div>
       </div>
@@ -1592,11 +1624,12 @@ function genId() {
 
 const TAB_GROUP = {
   users: "access",
-  agents: "agents", skills: "agents", kb: "agents", chat: "agents",
-  providers: "models", oauth: "models",
+  agents: "agents", chat: "agents",
+  // optional building blocks an agent can be configured with
+  skills: "resources", kb: "resources", providers: "resources", oauth: "resources",
   stats: "ops", monitoring: "ops", sessions: "ops",
 };
-const GROUP_DEFAULT_TAB = { access: "users", agents: "agents", models: "providers", ops: "stats" };
+const GROUP_DEFAULT_TAB = { access: "users", agents: "agents", resources: "skills", ops: "stats" };
 const LOADERS = {};  // each module registers its loader; switchTab calls it if present
 
 function switchGroup(group) {
@@ -2321,12 +2354,76 @@ async function skReject(id) {
   try { await api("POST", `/skills/proposals/${encodeURIComponent(id)}/reject`); skProposals(); } catch (e) { toast(e.message, "error"); }
 }
 
+// One of two accepted sources: a folder (tree of {file, path}) or a single .zip.
+// Loose individual files are rejected. Backend auto-detects single vs batch and
+// extracts the .zip, so both modes post to the same endpoint.
+let SK_PICKED = null;  // {mode:'folder'|'zip', entries:[{file, path}]}
+
 function skOpenImport() {
   $("sk-import-source").value = "adhoc";
-  if ($("sk-import-files")) $("sk-import-files").value = "";
+  if ($("sk-import-folder")) $("sk-import-folder").value = "";
+  skSetPicked(null);
   $("sk-import-err").textContent = "";
   const res = $("sk-import-result"); res.classList.add("hidden"); res.innerHTML = "";
   $("sk-import-modal").classList.remove("hidden");
+}
+function skSetPicked(p) {
+  SK_PICKED = p;
+  if (!p) {
+    $("sk-import-pick").textContent = "No selection";
+    $("sk-drop-hint").textContent = "📁 拖入文件夹或 .zip，或点击选择文件夹";
+    return;
+  }
+  if (p.mode === "zip") {
+    $("sk-import-pick").textContent = `✅ ${p.entries[0].path}`;
+    $("sk-drop-hint").textContent = `📦 ${p.entries[0].path}`;
+  } else {
+    const top = p.entries[0].path.split("/")[0];
+    $("sk-import-pick").textContent = `✅ 文件夹 ${top} — ${p.entries.length} 个文件`;
+    $("sk-drop-hint").textContent = `📁 ${top} — ${p.entries.length} 个文件`;
+  }
+}
+function skFolderPicked() {
+  const files = [...($("sk-import-folder").files || [])];
+  if (!files.length) return;
+  skSetPicked({ mode: "folder", entries: files.map(f => ({ file: f, path: f.webkitRelativePath || f.name })) });
+}
+function skDragOver(e) { e.preventDefault(); $("sk-drop").classList.add("dragover"); }
+function skDragLeave(e) { e.preventDefault(); $("sk-drop").classList.remove("dragover"); }
+function skEntryFile(entry) { return new Promise((res, rej) => entry.file(res, rej)); }
+async function skWalkDir(dirEntry, prefix, out) {
+  const reader = dirEntry.createReader();
+  const readBatch = () => new Promise((res, rej) => reader.readEntries(res, rej));
+  let batch;
+  // readEntries returns in chunks; keep calling until it yields an empty batch.
+  while ((batch = await readBatch()).length) {
+    for (const en of batch) {
+      const p = `${prefix}/${en.name}`;
+      if (en.isFile) out.push({ file: await skEntryFile(en), path: p });
+      else if (en.isDirectory) await skWalkDir(en, p, out);
+    }
+  }
+}
+async function skDrop(e) {
+  e.preventDefault();
+  $("sk-drop").classList.remove("dragover");
+  $("sk-import-err").textContent = "";
+  const items = [...(e.dataTransfer.items || [])];
+  const entries = items.map(it => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
+  if (entries.length === 1 && entries[0].isFile && /\.zip$/i.test(entries[0].name)) {
+    const file = await skEntryFile(entries[0]);
+    skSetPicked({ mode: "zip", entries: [{ file, path: file.name }] });
+    return;
+  }
+  const dirs = entries.filter(en => en.isDirectory);
+  if (dirs.length) {
+    const collected = [];
+    for (const d of dirs) await skWalkDir(d, d.name, collected);
+    if (!collected.length) { $("sk-import-err").textContent = "文件夹为空"; return; }
+    skSetPicked({ mode: "folder", entries: collected });
+    return;
+  }
+  $("sk-import-err").textContent = "只接受文件夹或 .zip，不接受单个文件";
 }
 function skCloseImport() { $("sk-import-modal").classList.add("hidden"); }
 
@@ -2344,18 +2441,20 @@ function skImportShowResult(r) {
 }
 
 async function skDoUpload() {
-  const input = $("sk-import-files");
-  const files = input && input.files ? [...input.files] : [];
   $("sk-import-err").textContent = "";
-  if (!files.length) { $("sk-import-err").textContent = "pick a folder first"; return; }
+  if (!SK_PICKED || !SK_PICKED.entries.length) {
+    $("sk-import-err").textContent = "拖入一个文件夹或 .zip";
+    return;
+  }
+  const entries = SK_PICKED.entries;
   const fd = new FormData();
   fd.append("source", $("sk-import-source").value);
-  for (const f of files) fd.append("files", f, f.webkitRelativePath || f.name);
+  for (const { file, path } of entries) fd.append("files", file, path);
   const btn = $("sk-upload-btn");
   const res = $("sk-import-result");
   btn.disabled = true; btn.textContent = "⏳ Uploading…";
   res.classList.remove("hidden");
-  res.innerHTML = `<div class="muted"><span class="spin">⏳</span> Uploading ${files.length} file(s)…</div>`;
+  res.innerHTML = `<div class="muted"><span class="spin">⏳</span> Uploading ${entries.length} file(s)…</div>`;
   try {
     const resp = await fetch("/admin/skills/import/upload", {
       method: "POST", headers: { "Authorization": "Session " + TOKEN }, body: fd,
@@ -4627,58 +4726,142 @@ async function testOAuthConfigInModal() {
 
 LOADERS.oauth = () => { loadAllConnectors(); };
 
-let KB_ALL = [];
 async function loadKb() {
-  if (!$("nkb-id").value) $("nkb-id").value = genId();
-  KB_ALL = await api("GET", "/kb");
-  renderKb();
+  // The KB tab now only manages source connectors; KB CRUD/retrieval moved out.
+  loadKbConnectors();
 }
-function renderKb() {
-  const q = ($("kb-filter")?.value || "").trim().toLowerCase();
-  const rows = KB_ALL.filter(k => !q
-    || (k.kb_id || "").toLowerCase().includes(q)
-    || (k.description || "").toLowerCase().includes(q));
-  $("kb-body").innerHTML = rows.map(k => `
+
+// --- KB source connectors (Google Drive / Confluence) ---
+// Field defs per kind mirror kb_connector_store config keys (env-ref names, not secrets).
+const KBC_FIELDS = {
+  google_drive: [
+    { key: "folder_id", label: "Folder ID" },
+    { key: "recursive", label: "Recursive", type: "checkbox" },
+    { key: "access_token_env", label: "Access token env var" },
+    { key: "refresh_token_env", label: "Refresh token env var" },
+    { key: "client_id_env", label: "Client ID env var" },
+    { key: "client_secret_env", label: "Client secret env var" },
+    { key: "token_uri_env", label: "Token URI env var" },
+  ],
+  confluence: [
+    { key: "base_url", label: "Base URL" },
+    { key: "scope_type", label: "Scope", type: "select", options: ["", "space", "page"] },
+    { key: "space_key", label: "Space key" },
+    { key: "page_id", label: "Page ID" },
+    { key: "include_children", label: "Include children", type: "checkbox" },
+    { key: "username", label: "Username (or use env)" },
+    { key: "username_env", label: "Username env var" },
+    { key: "api_token_env", label: "API token env var" },
+  ],
+};
+let KBC_ALL = [];
+let KBC_EDIT_ID = null;
+
+async function loadKbConnectors() {
+  $("kbc-list-err").textContent = "";
+  try { KBC_ALL = await api("GET", "/kb/connectors"); kbcRender(); }
+  catch (e) { $("kbc-body").innerHTML = `<tr><td colspan="6" class="muted">${esc(e.message)}</td></tr>`; }
+}
+function kbcScope(c) {
+  if (c.kind === "google_drive") return "folder:" + (c.config.folder_id || "—");
+  return (c.config.scope_type || "—") + ":" + (c.config.space_key || c.config.page_id || "—");
+}
+function kbcRender() {
+  $("kbc-body").innerHTML = KBC_ALL.map(c => `
     <tr>
-      <td>${esc(k.kb_id)}</td>
-      <td class="muted">${esc(k.description || "")}</td>
-      <td>${esc(k.doc_count != null ? k.doc_count : "—")}</td>
-      <td class="muted">${esc((k.bound_agents || []).join(", ") || "—")}</td>
+      <td>${esc(c.connector_id)}</td>
+      <td>${esc(c.kind)}</td>
+      <td><span class="pill ${c.enabled ? "active" : "blocked"}">${c.enabled ? "enabled" : "disabled"}</span></td>
+      <td class="muted">${esc(c.tenant_id)} / ${esc(c.kb_id)}</td>
+      <td class="muted">${esc(kbcScope(c))}</td>
       <td class="actions">
-        <button class="small danger" onclick="archiveKb('${esc(k.kb_id)}')">Archive</button>
+        <button class="small ghost" onclick="kbcCheck('${esc(c.connector_id)}')">Check</button>
+        <button class="small ghost" onclick="kbcSync('${esc(c.connector_id)}')">Dry-run</button>
+        ${IS_VIEWER ? "" : `<button class="small ghost" onclick="kbcOpenEdit('${esc(c.connector_id)}')">Edit</button>
+        <button class="small danger" onclick="kbcDelete('${esc(c.connector_id)}')">Delete</button>`}
       </td>
-    </tr>`).join("") || `<tr><td colspan="5" class="muted">No knowledge bases.</td></tr>`;
+    </tr>`).join("") || `<tr><td colspan="6" class="muted">No source connectors.</td></tr>`;
 }
-
-async function createKb() {
-  $("kb-err").textContent = "";
+function kbcRenderFields(current = {}) {
+  const kind = $("kbc-kind").value;
+  $("kbc-fields").innerHTML = (KBC_FIELDS[kind] || []).map(f => {
+    const v = current[f.key];
+    if (f.type === "checkbox")
+      return `<label class="row" style="gap:6px;"><input type="checkbox" data-key="${f.key}" ${v ? "checked" : ""}> ${esc(f.label)}</label>`;
+    if (f.type === "select")
+      return `<label class="field-label">${esc(f.label)}</label><select data-key="${f.key}">${f.options.map(o => `<option value="${o}" ${v === o ? "selected" : ""}>${o || "—"}</option>`).join("")}</select>`;
+    return `<label class="field-label">${esc(f.label)}</label><input data-key="${f.key}" autocomplete="off" value="${esc(v != null ? String(v) : "")}">`;
+  }).join("");
+}
+function kbcOpenCreate() {
+  KBC_EDIT_ID = null;
+  $("kbc-modal-title").textContent = "Add source connector";
+  $("kbc-err").textContent = "";
+  $("kbc-id").value = ""; $("kbc-id").disabled = false;
+  $("kbc-kind").value = "google_drive"; $("kbc-kind").disabled = false;
+  $("kbc-tenant").value = "pilot-tenant"; $("kbc-kb").value = "pilot-kb";
+  $("kbc-enabled").checked = true;
+  $("kbc-custom").value = "";
+  kbcRenderFields();
+  $("kbc-modal").classList.remove("hidden");
+}
+function kbcOpenEdit(id) {
+  const c = KBC_ALL.find(x => x.connector_id === id);
+  if (!c) return;
+  KBC_EDIT_ID = id;
+  $("kbc-modal-title").textContent = "Edit connector: " + id;
+  $("kbc-err").textContent = "";
+  $("kbc-id").value = id; $("kbc-id").disabled = true;   // id is the key, not editable
+  $("kbc-kind").value = c.kind; $("kbc-kind").disabled = true;  // kind fixed after create
+  $("kbc-tenant").value = c.tenant_id; $("kbc-kb").value = c.kb_id;
+  $("kbc-enabled").checked = c.enabled;
+  $("kbc-custom").value = c.custom_yaml || "";
+  kbcRenderFields(c.config || {});
+  $("kbc-modal").classList.remove("hidden");
+}
+function kbcCloseModal() { $("kbc-modal").classList.add("hidden"); }
+function kbcCollectConfig() {
+  const config = {};
+  for (const el of $("kbc-fields").querySelectorAll("[data-key]")) {
+    if (el.type === "checkbox") config[el.dataset.key] = el.checked;
+    else { const v = el.value.trim(); if (v) config[el.dataset.key] = v; }
+  }
+  return config;
+}
+async function kbcSave() {
+  $("kbc-err").textContent = "";
+  const config = kbcCollectConfig();
+  const tenant_id = $("kbc-tenant").value.trim(), kb_id = $("kbc-kb").value.trim();
+  const enabled = $("kbc-enabled").checked;
+  const custom_yaml = $("kbc-custom").value;  // YAML; parsed + validated server-side
   try {
-    await api("POST", "/kb", { kb_id: $("nkb-id").value, description: $("nkb-desc").value });
-    $("nkb-desc").value = "";
-    $("nkb-id").value = genId();
-    loadKb();
-  } catch (e) { $("kb-err").textContent = e.message; }
+    if (KBC_EDIT_ID) {
+      await api("PATCH", `/kb/connectors/${encodeURIComponent(KBC_EDIT_ID)}`, { tenant_id, kb_id, enabled, config, custom_yaml });
+    } else {
+      const connector_id = $("kbc-id").value.trim();
+      if (!connector_id) { $("kbc-err").textContent = "connector id required"; return; }
+      await api("POST", "/kb/connectors", { connector_id, kind: $("kbc-kind").value, tenant_id, kb_id, enabled, config, custom_yaml });
+    }
+    kbcCloseModal(); loadKbConnectors();
+  } catch (e) { $("kbc-err").textContent = apiErrorMessage(e.message || e); }
 }
-
-async function archiveKb(id) {
-  if (!await confirmDialog(`Archive KB ${id}?`)) return;
+async function kbcDelete(id) {
+  if (!await confirmDialog(`Delete connector ${id}?`)) return;
+  try { await api("DELETE", `/kb/connectors/${encodeURIComponent(id)}`); loadKbConnectors(); }
+  catch (e) { toast(e.message, "error"); }
+}
+async function kbcCheck(id) {
   try {
-    await fetch("/admin/kb/" + encodeURIComponent(id), {
-      method: "DELETE",
-      headers: { "Authorization": "Session " + TOKEN, "X-Confirm": "true" },
-    }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || ("HTTP " + r.status)); });
-    loadKb();
-  } catch (e) { toast(typeof e.message === "string" ? e.message : JSON.stringify(e.message)); }
+    const r = await api("POST", `/kb/connectors/${encodeURIComponent(id)}/check`);
+    toast(`${id}: ${r.status} — ${r.message}`, r.status === "ok" ? "success" : "error");
+  } catch (e) { toast(e.message, "error"); }
 }
-
-async function kbSearch() {
-  const ids = $("kb-q-ids").value.split(",").map(s => s.trim()).filter(Boolean);
+async function kbcSync(id) {
   try {
-    const r = await api("POST", "/kb/search", { query: $("kb-q").value, kb_ids: ids, mode: $("kb-q-mode").value });
-    $("kb-search-out").textContent = JSON.stringify(r.results, null, 2);
-  } catch (e) { $("kb-search-out").textContent = e.message; }
+    const r = await api("POST", `/kb/connectors/${encodeURIComponent(id)}/sync`, { dry_run: true });
+    showInfo(`Dry-run: ${id}`, JSON.stringify(r, null, 2));
+  } catch (e) { toast(e.message, "error"); }
 }
-
 async function boot() {
   if (!TOKEN) { show("login-view"); return; }
   // Restore a persisted session on reload; fall back to login if the token is stale/expired.

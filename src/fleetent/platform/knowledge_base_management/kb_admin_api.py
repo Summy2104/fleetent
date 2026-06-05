@@ -18,13 +18,14 @@ import asyncio
 from pathlib import Path
 from typing import Any, cast
 
+import yaml
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from fleetent import auth, user_store
 from fleetent.governance import audit_log
 from fleetent.intelligence import knowledge_base
-from fleetent.platform.knowledge_base_management import agent_kbs_store
+from fleetent.platform.knowledge_base_management import agent_kbs_store, kb_connector_store
 
 router = APIRouter(prefix="/admin/kb")
 
@@ -493,3 +494,188 @@ def observation(
 ) -> dict[str, Any]:
     _current_user(authorization)
     return kb_observation(tenant_id, kb_id)
+
+
+# --- KB source connectors (Google Drive / Confluence) -------------------------
+#
+# DB-managed ingestion connectors. The stored config + credential env-references are
+# assembled into a KnowledgeBaseSettings and fed to the existing config-driven
+# ingestion engine (operations.*), so check/status/sync are reused unchanged. Real
+# ingestion sync stays gated to the CLI; the console exposes check + dry-run + status.
+
+
+class ConnectorBody(BaseModel):
+    connector_id: str
+    kind: str  # google_drive | confluence
+    tenant_id: str = _DEFAULT_TENANT
+    kb_id: str = "global"
+    enabled: bool = True
+    config: dict[str, Any] = {}
+    custom: dict[str, Any] = {}  # free-form metadata, not schema-filtered
+    # Console sends custom as YAML (friendlier to author); parsed server-side. When
+    # present it overrides `custom`. Stored as JSON either way.
+    custom_yaml: str | None = None
+
+
+class ConnectorEditBody(BaseModel):
+    tenant_id: str | None = None
+    kb_id: str | None = None
+    enabled: bool | None = None
+    config: dict[str, Any] | None = None
+    custom: dict[str, Any] | None = None
+    custom_yaml: str | None = None
+
+
+def _parse_custom_yaml(text: str) -> dict[str, Any]:
+    """Parse the YAML the user authored into a dict (empty/blank -> {})."""
+    if not text or not text.strip():
+        return {}
+    try:
+        parsed = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise HTTPException(status_code=422, detail=f"invalid custom YAML: {exc}") from exc
+    if parsed is None:
+        return {}
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=422, detail="custom must be a YAML mapping")
+    return parsed
+
+
+def _connector_out(row: dict[str, Any]) -> dict[str, Any]:
+    """Augment a stored connector with custom_yaml for friendly display/editing."""
+    out = dict(row)
+    custom = out.get("custom") or {}
+    out["custom_yaml"] = (
+        yaml.safe_dump(custom, sort_keys=False, allow_unicode=True) if custom else ""
+    )
+    return out
+
+
+def _connector_settings() -> Any:
+    """A settings-shaped object exposing .knowledge_base built from the DB store,
+    so the config-driven ingestion engine can run against DB-managed connectors."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(knowledge_base=kb_connector_store.as_knowledge_base_settings())
+
+
+@router.get("/connectors")
+def list_kb_connectors(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
+    _current_user(authorization)
+    return [_connector_out(r) for r in kb_connector_store.list_connectors()]
+
+
+@router.post("/connectors", status_code=201)
+def add_kb_connector(
+    body: ConnectorBody, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    if body.kind not in kb_connector_store.KINDS:
+        raise HTTPException(status_code=422, detail=f"unknown kind: {body.kind}")
+    if kb_connector_store.get_connector(body.connector_id) is not None:
+        raise HTTPException(status_code=409, detail="connector id already exists")
+    custom = _parse_custom_yaml(body.custom_yaml) if body.custom_yaml is not None else body.custom
+    try:
+        kb_connector_store.add_connector(
+            body.connector_id,
+            body.kind,
+            body.tenant_id,
+            body.kb_id,
+            body.config,
+            body.enabled,
+            custom=custom,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    audit_log.write_audit(user.id, "kb_connector.add", "kb_connector", body.connector_id)
+    created = kb_connector_store.get_connector(body.connector_id)
+    assert created is not None
+    return _connector_out(created)
+
+
+@router.patch("/connectors/{connector_id}")
+def edit_kb_connector(
+    connector_id: str, body: ConnectorEditBody, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    fields = body.model_dump(exclude_unset=True)
+    if "custom_yaml" in fields:
+        fields["custom"] = _parse_custom_yaml(fields.pop("custom_yaml"))
+    try:
+        kb_connector_store.edit_connector(connector_id, **fields)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    audit_log.write_audit(user.id, "kb_connector.edit", "kb_connector", connector_id)
+    edited = kb_connector_store.get_connector(connector_id)
+    if edited is None:
+        raise HTTPException(status_code=404, detail="connector not found")
+    return _connector_out(edited)
+
+
+@router.delete("/connectors/{connector_id}", status_code=204)
+def delete_kb_connector(connector_id: str, authorization: str | None = Header(None)) -> None:
+    user = _require_admin(authorization)
+    if not kb_connector_store.delete_connector(connector_id):
+        raise HTTPException(status_code=404, detail="connector not found")
+    audit_log.write_audit(user.id, "kb_connector.delete", "kb_connector", connector_id)
+
+
+@router.post("/connectors/{connector_id}/check")
+async def check_kb_connector(
+    connector_id: str, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    _require_admin(authorization)
+    if kb_connector_store.get_connector(connector_id) is None:
+        raise HTTPException(status_code=404, detail="connector not found")
+    result = await knowledge_base.check_connector(connector_id, settings=_connector_settings())
+    return {"connector_id": result.connector_id, "status": result.status, "message": result.message}
+
+
+@router.get("/connectors/{connector_id}/status")
+def kb_connector_status(
+    connector_id: str, authorization: str | None = Header(None)
+) -> dict[str, Any]:
+    _current_user(authorization)
+    if kb_connector_store.get_connector(connector_id) is None:
+        raise HTTPException(status_code=404, detail="connector not found")
+    status = knowledge_base.get_connector_status(connector_id, settings=_connector_settings())
+    return {
+        "connector_id": status.connector_id,
+        "status": status.last_status,
+        "summary": status.last_summary,
+        "error": status.last_error,
+    }
+
+
+class ConnectorSyncBody(BaseModel):
+    dry_run: bool = True
+
+
+@router.post("/connectors/{connector_id}/sync")
+async def sync_kb_connector(
+    connector_id: str,
+    body: ConnectorSyncBody,
+    authorization: str | None = Header(None),
+    x_confirm: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    if kb_connector_store.get_connector(connector_id) is None:
+        raise HTTPException(status_code=404, detail="connector not found")
+    if not body.dry_run:
+        _require_confirm(x_confirm)  # real ingestion is high-risk
+    result = await knowledge_base.run_connector_sync(
+        connector_id, settings=_connector_settings(), dry_run=body.dry_run
+    )
+    audit_log.write_audit(
+        user.id,
+        "kb_connector.sync",
+        "kb_connector",
+        connector_id,
+        detail={"dry_run": body.dry_run, "status": result.status},
+    )
+    return {
+        "connector_id": result.connector_id,
+        "status": result.status,
+        "summary": result.summary,
+        "error": result.error,
+    }
