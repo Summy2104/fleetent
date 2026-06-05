@@ -49,7 +49,11 @@ def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
     targets: dict[str, ModelTarget] = {}
     routes: dict[str, list[ModelRouteEntry]] = {}
     for route_key, sel in model_overrides.items():
-        provider_id = (sel or {}).get("provider")
+        # Only the console's {route: {provider, model}} shape expands to a target; other
+        # legacy shapes (e.g. {"model": "fast"}) are ignored and fall back to defaults.
+        if not isinstance(sel, dict):
+            continue
+        provider_id = sel.get("provider")
         if not provider_id:
             continue
         provider = provider_admin_store.get_provider(provider_id)

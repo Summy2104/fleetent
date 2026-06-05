@@ -42,9 +42,9 @@
 
 ## 8. Quality gates
 
-- [ ] 8.1 Run `uv run pytest -x -q`
-- [ ] 8.2 Run `uv run ruff format src tests`
-- [ ] 8.3 Run `uv run ruff check src tests`
-- [ ] 8.4 Run `uv run mypy src`
-- [ ] 8.5 Run `uv run python scripts/check_test_layers.py`
-- [ ] 8.6 Run `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py`
+- [x] 8.1 Run `uv run pytest -x -q`
+- [x] 8.2 Run `uv run ruff format src tests`
+- [x] 8.3 Run `uv run ruff check src tests`
+- [x] 8.4 Run `uv run mypy src`
+- [x] 8.5 Run `uv run python scripts/check_test_layers.py`
+- [x] 8.6 Run `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py`

@@ -14,19 +14,18 @@ def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
     # Platform-side
     assert "FLEETENT_AUTO_UPGRADE=false" in platform
     assert "FLEETENT_MODEL_PRIMARY_API_KEY=" not in platform
-    # Agent-side
+    # Agent-side: the committed template is process-level only. Agent-referenced
+    # credentials (model / Slack / MCP / KB) are materialized per-agent + surfaced in
+    # the console panel, so they must NOT live in this template.
     assert "ANTHROPIC_API_KEY=" not in agent
     assert "OPENAI_API_KEY=" not in agent
-    assert "FLEETENT_MODEL_PRIMARY_API_KEY=" in agent
-    assert "FLEETENT_MODEL_EMBEDDING_API_KEY=" in agent
-    assert "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN=" in agent
-    assert "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET=" in agent
-    assert "FLEETENT_CONFLUENCE_USERNAME=" in agent
-    assert "FLEETENT_CONFLUENCE_TOKEN=" in agent
-    assert "FLEETENT_EVAL_EMBEDDING_ENDPOINT=" in agent
-    assert "FLEETENT_EVAL_EMBEDDING_API_KEY=" in agent
-    assert "FLEETENT_EVAL_RERANK_ENDPOINT=" in agent
-    assert "FLEETENT_EVAL_RERANK_API_KEY=" in agent
+    assert "FLEETENT_SECRET_KEY=" in agent  # secret-store master key is process-level
+    for materialized in (
+        "FLEETENT_MODEL_PRIMARY_API_KEY=",
+        "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN=",
+        "FLEETENT_CONFLUENCE_TOKEN=",
+    ):
+        assert materialized not in agent
     # No real secret material in either.
     for marker in ("sk-", "ma-", "xoxb-", "xapp-"):
         assert marker not in both
@@ -274,8 +273,10 @@ def test_deployment_docs_are_docker_compose_first_and_use_port_8765():
     assert "uv run uvicorn fleetent.server:app` 只作为开发模式" in combined
 
 
-def test_env_example_covers_agent_yaml_example_env_refs():
-    """Every env-var name referenced by agent.yaml.example must exist in .env.example."""
+def test_agent_yaml_example_env_refs_are_materialized_not_in_template():
+    """agent.yaml.example's per-agent `*_env` are materialized, NOT in the committed
+    process-level template — that's the split. The template carries only process-level
+    vars (e.g. FLEETENT_SECRET_KEY)."""
     import yaml
 
     doc = yaml.safe_load(Path("config/agent/agent.yaml.example").read_text(encoding="utf-8"))
@@ -294,5 +295,9 @@ def test_env_example_covers_agent_yaml_example_env_refs():
                 walk(item)
 
     walk(doc)
-    missing = sorted(name for name in refs if name and f"{name}=" not in env_text)
-    assert not missing, f".env.example missing referenced env names: {missing}"
+    # the example references at least one per-agent credential, and none of them are
+    # carried by the process-level template (they come from materialize + the panel)
+    assert refs
+    leaked = sorted(name for name in refs if name and f"{name}=" in env_text)
+    assert not leaked, f"process-level template must not carry agent secrets: {leaked}"
+    assert "FLEETENT_SECRET_KEY=" in env_text
