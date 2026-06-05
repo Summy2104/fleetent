@@ -2523,9 +2523,28 @@ async function agObservability(name) {
 async function agEnable(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/enable`); agAfterChange(name); } catch (e) { toast(e.message, "error"); } }
 async function agDisable(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/disable`); agAfterChange(name); } catch (e) { toast(e.message, "error"); } }
 async function agArchive(name) {
-  if (!await confirmDialog(`Archive agent ${name}? (must be unbound)`)) return;
-  try { await api("POST", `/agents/${encodeURIComponent(name)}/archive`, null, { "X-Confirm": "true" }); agAfterChange(name); }
-  catch (e) { toast(e.message, "error"); }
+  if (!await confirmDialog(`Archive agent ${name}?`)) return;
+  const enc = encodeURIComponent(name);
+  try {
+    await api("POST", `/agents/${enc}/archive`, null, { "X-Confirm": "true" });
+    agAfterChange(name);
+    return;
+  } catch (e) {
+    // Archive is blocked while the agent has bindings. Offer to unbind everything
+    // and archive in one step instead of dead-ending on the error.
+    const b = await api("GET", `/agents/${enc}/bindings`).catch(() => null);
+    const users = (b && b.users) || [];
+    const channels = (b && b.channels) || [];
+    if (!users.length && !channels.length) { toast(e.message, "error"); return; }
+    const parts = [];
+    if (users.length) parts.push(`${users.length} user(s)`);
+    if (channels.length) parts.push(`${channels.length} channel(s)`);
+    if (!await confirmDialog(`${name} is bound to ${parts.join(" and ")}. Unbind all and archive?`)) return;
+    for (const u of users) await api("DELETE", `/agents/${enc}/bindings/users/${encodeURIComponent(u)}`).catch(() => {});
+    for (const c of channels) await api("DELETE", `/agents/${enc}/bindings/channels/${encodeURIComponent(c.platform)}/${encodeURIComponent(c.channel_id)}`).catch(() => {});
+    try { await api("POST", `/agents/${enc}/archive`, null, { "X-Confirm": "true" }); agAfterChange(name); }
+    catch (e2) { toast(e2.message, "error"); }
+  }
 }
 async function agRestore(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/restore`); agAfterChange(name); } catch (e) { toast(e.message, "error"); } }
 
