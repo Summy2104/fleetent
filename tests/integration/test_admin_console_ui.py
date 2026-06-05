@@ -94,25 +94,29 @@ def test_skills_action_functions_present():
         assert fn in html, fn
 
 
-def test_skill_import_single_file_or_zip_picker():
+def test_skill_import_folder_or_zip_dropzone():
     html = ADMIN_HTML
-    # one merged picker: a plain multi-file input that takes the skill's files or a .zip,
-    # plus a hidden webkitdirectory input toggled by a "select a folder instead" link
-    assert 'id="sk-import-files"' in html
+    # single entry: a drop zone accepting a dragged folder or a .zip; click falls back
+    # to the hidden webkitdirectory folder picker. Loose individual files are rejected.
+    assert 'id="sk-drop"' in html
     assert 'id="sk-import-folder"' in html
     assert "webkitdirectory" in html
     assert "$('sk-import-folder').click()" in html
-    assert 'accept=".zip' in html
     assert 'id="sk-import-pick"' in html
-    assert "function skImportPicked" in html
-    assert "function skPickedFiles" in html
-    # the separate zip input and the paste section are gone (merged into the one picker)
+    assert "function skDrop" in html
+    assert "function skFolderPicked" in html
+    assert "function skWalkDir" in html
+    assert "webkitGetAsEntry" in html
+    # loose-file rejection path is present
+    assert "只接受文件夹或 .zip" in html
+    # the old multi-file input, zip input, and paste section are gone
+    assert 'id="sk-import-files"' not in html
     assert 'id="sk-import-zip"' not in html
     assert "skImportPaste" not in html
     assert 'id="sk-paste-content"' not in html
     up = html.split("async function skDoUpload", 1)[1].split("\n}", 1)[0]
     assert "/skills/import/upload" in up
-    assert "skPickedFiles()" in up
+    assert "SK_PICKED" in up
 
 
 def test_skills_proposals_review_wired():
