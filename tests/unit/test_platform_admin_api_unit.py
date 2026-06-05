@@ -647,7 +647,8 @@ def test_chat_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> Non
         chat_admin_api.playground_message(
             "web-1", chat_admin_api.MessageBody(message="hi"), "Session token"
         )
-    assert not_playground.value.status_code == 409
+    # per-user isolation: a non-playground (or non-owned) session is not found, not 409
+    assert not_playground.value.status_code == 404
     with pytest.raises(HTTPException) as missing_confirm:
         chat_admin_api.force_end("web-1", "Session token")
     assert missing_confirm.value.status_code == 428
