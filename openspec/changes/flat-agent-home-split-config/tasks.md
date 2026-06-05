@@ -26,4 +26,4 @@
 ## 6. 收尾
 
 - [x] 6.1 全量 `ANTHROPIC_API_KEY=sk-test-dummy uv run pytest -x -q` 通过；`uv run ruff format && uv run ruff check src tests`；`uv run mypy src` 不新增；`bash -n scripts/install.sh`；手动 smoke：隔离 HOME 跑 install.sh → 校验扁平 `agent.yaml` 被 `fleetent` 读到
-- [ ] 6.2 README/CLAUDE agent 部署段：部署 home 扁平（`agent.yaml` 在根）、模板新位置、旧 `config/agent.yaml` 迁移说明
+- [x] 6.2 README/CLAUDE agent 部署段：部署 home 扁平（`agent.yaml` 在根）、模板新位置、旧 `config/agent.yaml` 迁移说明
