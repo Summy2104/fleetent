@@ -59,7 +59,24 @@ _MIDDLE_OMITTED_NOTICE = "[中段对话已省略：摘要生成失败，已降�
 _DEFAULT_INITIAL_INTENT_MAX = 2
 
 
-def _default_config() -> ContextConfig:
+def _default_config(agent_name: str | None = None) -> ContextConfig:
+    """Compression config: the active agent's context_* fields when resolvable by
+    agent_name, else the historical Settings defaults (transitional fallback)."""
+    if agent_name is not None:
+        from fleetent import agent_config
+
+        agent = agent_config.current().get(agent_name)
+        if agent is not None:
+            return {
+                "max_tokens": agent.context_max_tokens,
+                "tmax_ratio": agent.context_tmax_ratio,
+                "tretained_ratio": agent.context_tretained_ratio,
+                "keep_recent": agent.context_keep_recent,
+                "initial_intent_max": agent.compression_initial_intent_max,
+                "flap_window": agent.context_flap_window,
+                "min_savings_ratio": agent.context_min_savings_ratio,
+                "min_interval_turns": agent.context_min_interval_turns,
+            }
     from fleetent.config import Settings
 
     s = Settings()  # type: ignore[call-arg]
@@ -98,8 +115,8 @@ def _estimate_message_tokens(msg: Any) -> int:
     return total
 
 
-def _resolve_config(config: ContextConfig | None) -> ContextConfig:
-    cfg = config if config is not None else _default_config()
+def _resolve_config(config: ContextConfig | None, agent_name: str | None = None) -> ContextConfig:
+    cfg = config if config is not None else _default_config(agent_name)
     tmax = cfg["tmax_ratio"]
     tretained = cfg["tretained_ratio"]
     # Spacing invariant (D2): Tretained must stay strictly below Tmax, otherwise a
@@ -128,7 +145,7 @@ def maybe_compress(
         force: Manual `/compact` semantics — compress to Tretained regardless of
             whether the Tmax trigger line is currently exceeded.
     """
-    cfg = _resolve_config(config)
+    cfg = _resolve_config(config, agent_name)
     trigger_line = int(cfg["max_tokens"] * cfg["tmax_ratio"])
     if not force and estimate_tokens(messages) <= trigger_line:
         return messages
@@ -155,7 +172,7 @@ def compress_for_context_overflow(
     The caller is responsible for the catch-error -> compress -> retry orchestration
     (Non-Goal here); this only performs the unconditional compression to Tretained.
     """
-    cfg = _resolve_config(config)
+    cfg = _resolve_config(config, agent_name)
     return _compress(
         messages,
         cfg,
@@ -606,7 +623,7 @@ def apply_anti_flap(
     minimum-interval hysteresis window. Manual (`maybe_compress(force=True)`) and
     context-overflow entrypoints deliberately do NOT call this (D4 exemption).
     """
-    cfg = _resolve_config(config)
+    cfg = _resolve_config(config, agent_name)
     flap_window = int(cfg.get("flap_window", _DEFAULT_FLAP_WINDOW))
     min_savings = float(cfg.get("min_savings_ratio", _DEFAULT_MIN_SAVINGS_RATIO))
     min_interval = int(cfg.get("min_interval_turns", _DEFAULT_MIN_INTERVAL_TURNS))

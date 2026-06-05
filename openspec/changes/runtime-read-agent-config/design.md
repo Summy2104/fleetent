@@ -78,3 +78,17 @@ standalone 一进程一 agent,启动时解析即确定。多 agent 共享进程(
 
 - 进程级旋钮在 standalone 的注入点(启动 wiring 具体落在 `fleetent agent run` boot 还是各模块 lazy
   首次解析)在 apply 时按模块既有形态择优,不阻塞 spec。
+
+## 执行期决策(apply 时落实)
+- **termination**:`resolve_limits` 已有 `config` 注入点;loop 的 `_build_controller` 经
+  `_limit_config_from_governance(governance)` 注入,故 termination 的 max_turns/max_consecutive_failures
+  已是 agent 来源(group 2 覆盖),termination 模块本身无需改。
+- **context 压缩**:`maybe_compress`/`apply_anti_flap`/`compress_for_context_overflow` 已带 `agent_name`,
+  故 `_default_config(agent_name)` 直接从 `agent_config.current().get(agent_name)` 的 context_* 字段解析,
+  无 agent 时回退 Settings。无需把压缩字段塞进 GovernanceConfig(避免 ContextConfig 与 GovernanceConfig 二选一)。
+- **sub_agent_timeout / sub-agent governance 继承**:本阶段**保留 Settings 回退**(`resolve_timeout` 的
+  call-param > config > Settings 链不变,sub_agent 不注入 config)。理由:sub-agent 是 depth-1 helper,
+  把 governance 从 parent loop 经 tool dispatch 穿到 `SubAgentExecutor` 的代价与收益不成比例。阶段 3 删
+  Settings 时,`resolve_timeout` 与 `grace`/`_grace_defaults` 的 Settings 回退一并改为读 standalone 当前
+  agent(或保留一个中性默认常量)——记为阶段 3 的收尾项。
+- **grace call 预算**(`budget._grace_defaults`):同 sub_agent,暂留 Settings 回退,阶段 3 归一。

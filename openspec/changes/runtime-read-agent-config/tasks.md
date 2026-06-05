@@ -22,9 +22,9 @@
 
 ## 4. termination / context / sub_agent 来源切换
 
-- [ ] 4.1 Write failing tests: `termination.py`、`context.py`(压缩阈值/keep_recent/各 ratio)、
+- [x] 4.1 Write failing tests: `termination.py`、`context.py`(压缩阈值/keep_recent/各 ratio)、
       `sub_agent_lifecycle.py`(sub-agent 超时)来自 agent 配置;未填 == 旧默认。运行见红
-- [ ] 4.2 切换上述模块的 `Settings()` 读取到 agent 配置。运行见绿
+- [x] 4.2 切换上述模块的 `Settings()` 读取到 agent 配置。运行见绿
 
 ## 5. 智能层来源切换(消除空转)
 
