@@ -18,9 +18,9 @@
 
 ## 4. write-only 凭据 API + required-env
 
-- [ ] 4.1 Write failing tests: `PUT secret` 不回显值、响应只含 env_name+status；`GET secrets` 不含明文；空值 `PUT` 被拒；`DELETE` 清值；`GET required-env` 按当前定义列出 `*_env`+来源标签+mode+status，新增 MCP 后即时反映，无 `*_env` 的段不误报（tests/integration，FastAPI TestClient）
-- [ ] 4.2 Implement: 凭据路由（PUT/DELETE/GET secrets、GET required-env，复用 `_env_var_names`）；写/删审计不记值
-- [ ] 4.3 Verify green: `uv run pytest tests/integration/test_agent_secret_api.py -x -q`
+- [x] 4.1 Write failing tests: `PUT secret` 不回显值、响应只含 env_name+status；`GET secrets` 不含明文；空值 `PUT` 被拒；`DELETE` 清值；`GET required-env` 按当前定义列出 `*_env`+来源标签+mode+status，新增 MCP 后即时反映，无 `*_env` 的段不误报（tests/integration，FastAPI TestClient）
+- [x] 4.2 Implement: 凭据路由（PUT/DELETE/GET secrets、GET required-env，复用 `_env_var_names`）；写/删审计不记值
+- [x] 4.3 Verify green: `uv run pytest tests/integration/test_agent_secret_api.py -x -q`
 
 ## 5. materialize resolver（按 mode 写 .env）
 

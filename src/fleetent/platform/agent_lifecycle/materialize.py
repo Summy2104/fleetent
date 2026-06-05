@@ -140,33 +140,46 @@ def home_dir(name: str) -> Path:
     return paths.base_dir() / name
 
 
+def required_env_slots(
+    agent: AgentFile,
+    knowledge_config: KnowledgeConfigSnapshot | None = None,
+) -> list[tuple[str, str]]:
+    """Every ``*_env`` the agent's home references, as ``(env_name, source_label)``.
+
+    Source labels group the slot by purpose (Connectors / MCP / Models / Knowledge) for
+    the console's required-secrets panel. Stable order, de-duplicated by env name (first
+    label wins).
+    """
+    slots: list[tuple[str, str]] = []
+    slack = agent.connectors.slack
+    if slack is not None:
+        slots.append((slack.bot_token_env, "Connectors·slack"))
+        slots.append((slack.app_token_env, "Connectors·slack"))
+    for server in agent.mcp_servers:
+        if server.api_key_env:
+            slots.append((server.api_key_env, f"MCP·{server.id}"))
+    for target in agent.models.targets:
+        if target.api_key_env:
+            slots.append((target.api_key_env, f"Models·{target.id}"))
+    if knowledge_config is not None:
+        for key, value in _flatten(knowledge_config.model_dump(mode="json")):
+            if key.endswith("_env") and isinstance(value, str) and value:
+                slots.append((value, "Knowledge"))
+    seen: set[str] = set()
+    ordered: list[tuple[str, str]] = []
+    for name, label in slots:
+        if name and name not in seen:
+            seen.add(name)
+            ordered.append((name, label))
+    return ordered
+
+
 def _env_var_names(
     agent: AgentFile,
     knowledge_config: KnowledgeConfigSnapshot | None = None,
 ) -> list[str]:
     """Collect the env-var names the agent's home references (connectors + MCP)."""
-    names: list[str] = []
-    slack = agent.connectors.slack
-    if slack is not None:
-        names.extend([slack.bot_token_env, slack.app_token_env])
-    for server in agent.mcp_servers:
-        if server.api_key_env:
-            names.append(server.api_key_env)
-    for target in agent.models.targets:
-        if target.api_key_env:
-            names.append(target.api_key_env)
-    if knowledge_config is not None:
-        for key, value in _flatten(knowledge_config.model_dump(mode="json")):
-            if key.endswith("_env") and isinstance(value, str) and value:
-                names.append(value)
-    # stable order, de-duplicated
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for n in names:
-        if n and n not in seen:
-            seen.add(n)
-            ordered.append(n)
-    return ordered
+    return [name for name, _ in required_env_slots(agent, knowledge_config)]
 
 
 def _parse_env(text: str) -> dict[str, str]:
