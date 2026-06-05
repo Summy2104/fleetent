@@ -22,6 +22,11 @@ not by provider-specific branching.
 - **THEN** the target must provide `endpoint`
 - **AND** it may provide `model` and `api_key_env`
 
+#### Scenario: OpenAI-compatible image generation target
+- **WHEN** an Agent defines a target with `protocol: openai_image_generation`
+- **THEN** the target must provide `endpoint` and `model`
+- **AND** it may provide `api_key_env`
+
 #### Scenario: Duplicate target id is invalid
 - **WHEN** `models.targets` contains duplicate `id` values
 - **THEN** Agent config loading fails loudly
@@ -54,8 +59,9 @@ id and MAY override `max_tokens` and `params`.
 
 The runtime SHALL recognize the following model route keys: `default`, `memory_extraction`,
 `vision`, `embedding`, `rerank`, `image_generation`, `audio_transcription`, and
-`audio_generation`. The image/audio routes MAY exist before their adapters are fully implemented,
-but their names SHALL be reserved.
+`audio_generation`. `image_generation` SHALL route the existing `generate_image` tool through an
+OpenAI-compatible images provider. Audio routes MAY exist before their adapters are fully
+implemented, but their names SHALL be reserved.
 
 #### Scenario: Default chat route
 - **WHEN** the agent loop needs a normal LLM call
@@ -68,6 +74,10 @@ but their names SHALL be reserved.
 #### Scenario: Embedding and rerank routes
 - **WHEN** embedding or rerank providers are needed
 - **THEN** runtime resolves `models.routes.embedding` or `models.routes.rerank`
+
+#### Scenario: Image generation route
+- **WHEN** the `generate_image` tool needs to create an image
+- **THEN** runtime resolves `models.routes.image_generation`
 
 ### Requirement: API key env contract
 
@@ -130,4 +140,3 @@ MVP runtime SHALL reject or remove old `model_overrides` configuration and SHALL
 - **WHEN** `fleetent agent init` or example config generates model credentials
 - **THEN** it uses `FLEETENT_MODEL_<TARGET_ID_UPPER>_API_KEY`
 - **AND** it does not use `ANTHROPIC_API_KEY`
-

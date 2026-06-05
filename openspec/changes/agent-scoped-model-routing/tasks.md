@@ -7,7 +7,7 @@
 ## 2. Model resolver
 
 - [ ] 2.1 Write failing tests: 新增 `tests/unit/test_model_resolver.py`，覆盖 target+route 合并、route params 覆盖 target params、fallback 顺序、missing env、认证/配置错误不 fallback、可切换错误 fallback
-- [ ] 2.2 Implement: 在 `fleetent.model` 提供 Agent-scoped resolver 与 resolved config 类型，支持 `openai_chat` / `http_embedding` / `http_rerank` 的协议分派边界，使测试转绿
+- [ ] 2.2 Implement: 在 `fleetent.model` 提供 Agent-scoped resolver 与 resolved config 类型，支持 `openai_chat` / `openai_image_generation` / `http_embedding` / `http_rerank` 的协议分派边界，使测试转绿
 - [ ] 2.3 Verify green: 运行 `uv run pytest tests/unit/test_model_resolver.py -x -q`
 
 ## 3. Runtime wiring
@@ -16,10 +16,10 @@
 - [ ] 3.2 Implement: 更新 `AgentSnapshot`、loop 调用点和 OpenAI-compatible client 创建路径，使测试转绿
 - [ ] 3.3 Verify green: 运行相关 runtime/model 单元测试 `uv run pytest tests/unit -x -q`
 
-## 4. Embedding / rerank integration
+## 4. Image / embedding / rerank integration
 
-- [ ] 4.1 Write failing tests: 覆盖 embedding/rerank 从 `models.routes.embedding` / `models.routes.rerank` 解析 provider，而不是从 `Settings()` 独立读取生产路由
-- [ ] 4.2 Implement: 将 intelligence embedding/rerank runtime 接入 Agent-scoped resolver，保留测试注入边界，使测试转绿
+- [ ] 4.1 Write failing tests: 覆盖 `generate_image` 从 `models.routes.image_generation` 解析 provider，embedding/rerank 从 `models.routes.embedding` / `models.routes.rerank` 解析 provider，而不是从 `Settings()` 独立读取生产路由
+- [ ] 4.2 Implement: 将 `tools/image_gen_client.py`、intelligence embedding/rerank runtime 接入 Agent-scoped resolver，保留测试注入边界，使测试转绿
 - [ ] 4.3 Verify green: 运行相关 unit/integration 测试
 
 ## 5. Platform materialize and templates
@@ -41,4 +41,3 @@
 - [ ] 7.3 运行 `uv run mypy src`
 - [ ] 7.4 运行 `uv run python scripts/check_test_layers.py`
 - [ ] 7.5 运行 `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py`
-
