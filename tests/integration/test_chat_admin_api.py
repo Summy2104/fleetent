@@ -349,14 +349,20 @@ def test_chat_cross_user_access_denied(client, monkeypatch):
         "session_id"
     ]
     # another operator cannot message or export someone else's playground session
-    assert client.post(
-        f"/admin/chat/{sa}/message", headers=_hdr(tb), json={"message": "hi"}
-    ).status_code == 404
+    assert (
+        client.post(
+            f"/admin/chat/{sa}/message", headers=_hdr(tb), json={"message": "hi"}
+        ).status_code
+        == 404
+    )
     assert client.get(f"/admin/chat/{sa}/export", headers=_hdr(tb)).status_code == 404
     # owner still can
-    assert client.post(
-        f"/admin/chat/{sa}/message", headers=_hdr(ta), json={"message": "hi"}
-    ).status_code == 200
+    assert (
+        client.post(
+            f"/admin/chat/{sa}/message", headers=_hdr(ta), json={"message": "hi"}
+        ).status_code
+        == 200
+    )
 
 
 def test_chat_delete_own_session(client):
