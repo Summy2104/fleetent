@@ -260,7 +260,7 @@ def duplicate_compaction_candidates(user_id: str) -> list[MemoryCompactionCandid
 
 
 def database() -> SQLiteDatabase:
-    return create_database(Settings(anthropic_api_key="").database_url)
+    return create_database(Settings().database_url)
 
 
 def format_datetime(value: datetime | None) -> str | None:

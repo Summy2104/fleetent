@@ -133,7 +133,9 @@ def resolve_context_policy(agent: AgentContextIdentity) -> ContextPolicy:
 
 
 def _default_policy(agent: AgentContextIdentity) -> ContextPolicy:
-    settings = Settings(anthropic_api_key="").long_term_ctx
+    from fleetent.intelligence.long_term_ctx import _ltc_config
+
+    settings = _ltc_config()
     sources = [
         _budget("user_memory", True, settings.memory_max_tokens, settings.memory_top_k),
         _budget("knowledge_base", True, settings.knowledge_max_tokens, settings.knowledge_top_k),
@@ -301,4 +303,4 @@ def _row_to_record(row: dict[str, Any]) -> ContextPolicyRecord:
 
 
 def _database() -> SQLiteDatabase:
-    return create_database(Settings(anthropic_api_key="").database_url)
+    return create_database(Settings().database_url)

@@ -92,7 +92,7 @@ def test_resolve_timeout_config_over_default():
     assert resolve_timeout(None, config=120) == 120
 
 
-def test_settings_has_sub_agent_timeout_default_300():
-    from fleetent.config import Settings
+def test_agentfile_has_sub_agent_timeout_default_300():
+    from fleetent.agent_config import AgentFile
 
-    assert Settings(anthropic_api_key="x").sub_agent_timeout_seconds == 300
+    assert AgentFile(name="x", version=1).sub_agent_timeout_seconds == 300

@@ -316,12 +316,9 @@ def _seed_entities(tmp_path):
 
 
 def _patch_graph_runtime(monkeypatch, database):
-    from fleetent.config import KnowledgeBaseSettings, Settings
+    from fleetent.config import KnowledgeBaseSettings
     from fleetent.intelligence.knowledge_base import runtime
 
-    settings = Settings(
-        anthropic_api_key="test-key",
-        knowledge_base=KnowledgeBaseSettings(default_tenant_id="tenant-a", default_kb_id="support"),
-    )
+    config = KnowledgeBaseSettings(default_tenant_id="tenant-a", default_kb_id="support")
     monkeypatch.setattr(runtime, "_database", lambda: database)
-    monkeypatch.setattr(runtime, "_settings", lambda: settings)
+    monkeypatch.setattr(runtime, "_kb_config", lambda: config)

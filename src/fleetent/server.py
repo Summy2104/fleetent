@@ -103,7 +103,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     load_plugins()
     cleanup_stale_approvals()
     try:
-        settings = Settings()  # type: ignore[call-arg]
+        settings = Settings()
     except Exception as exc:
         log_config_failed(exc)
         raise
@@ -143,6 +143,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         overrides: dict[str, Any] | None,
         bypass_medium: bool,
     ) -> dict[str, Any]:
+        from fleetent.runtime.snapshot import _governance_from_file
+
         af = agent_config.current().get(agent_name) if agent_name else None
         kwargs: dict[str, Any] = {"user_id": "playground", "session_id": session_id}
         if af is not None:
@@ -151,6 +153,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             kwargs["agent_name"] = af.name
             kwargs["agent_features"] = af.features
             kwargs["allowed_skills"] = af.allowed_skills
+            kwargs["governance"] = _governance_from_file(af)
         events: list[dict[str, Any]] = []
 
         async def _collect() -> str:
@@ -187,7 +190,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Best-effort scheduler start: a missing/locked scheduled_tasks table (e.g. an
     # unmigrated DB) must not prevent the HTTP API from serving, consistent with the
     # sandbox-cleanup / IM-adapter best-effort pattern above. Surfaced via warning.
-    cron = CronScheduler(settings=settings.scheduling)
+    cron = CronScheduler(settings=agent_config.active_agent_or_default().scheduling)
     try:
         await cron.start()
         cron.add_interval_job(
@@ -402,9 +405,28 @@ async def _authenticate(authorization: str = Header()) -> tuple[user_store.User,
     return result
 
 
+def _slack_adapter_configured() -> bool:
+    """Whether any indexed agent declares a per-agent Slack connector."""
+    return any(
+        agent.connectors.slack is not None for agent in agent_config.current().agents.values()
+    )
+
+
+def _telegram_adapter_configured() -> bool:
+    """Whether the admin owner has a Telegram connector configured (owner-level IM).
+
+    Defensive: a missing/unmigrated connector store must not break /health."""
+    try:
+        from fleetent import user_store
+        from fleetent.platform.im_gateway_management import connector_config
+
+        return bool(connector_config.resolve(user_store.admin_owner_id(), "telegram"))
+    except Exception:
+        return False
+
+
 @app.get("/health")
 async def health(request: Request) -> dict:  # type: ignore[type-arg]
-    settings = Settings()  # type: ignore[call-arg]
     # SB3: surface the effective sandbox mode resolved at startup; default to off
     # when the state is somehow unset (e.g. lifespan not run) so we never crash.
     mode: Mode = getattr(request.app.state, "sandbox_mode", Mode.OFF)
@@ -415,8 +437,8 @@ async def health(request: Request) -> dict:  # type: ignore[type-arg]
     return {
         "status": "ok",
         "adapters": {
-            "slack": bool(settings.slack_bot_token),
-            "telegram": bool(settings.telegram_bot_token),
+            "slack": _slack_adapter_configured(),
+            "telegram": _telegram_adapter_configured(),
         },
         "sandbox": sandbox,
     }

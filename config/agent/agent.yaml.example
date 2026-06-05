@@ -10,6 +10,18 @@
 # Single-agent mode: this agent is the sole, forced-default agent, so there is no
 # routing table and `bindings.default` does not apply. `bindings.channels/users`
 # act only as ingress filters for this one agent.
+#
+# Migrating from an older global config (config consolidation): every agent-runtime
+# knob that used to live in `config/settings.yaml` now lives HERE in agent.yaml —
+#   • intelligence: vector_store / embedding / rerank / knowledge_base / long_term_ctx / mcp
+#   • governance:   context_* / agent_budget_* / agent_max_* / permission_gate_* /
+#                   tool_default_timeout_seconds / provider_* (see "runtime governance" below)
+#   • deployment:   microsandbox_url / session_* / image_gen_* / vision_* / disabled_skills /
+#                   observability / diagnostics / scheduling / webhooks
+#   • default agent: the old `default_agent_name` is now `bindings.default: true`
+#   • IM tokens:     the old slack_/telegram_ tokens are now `connectors.*` `*_env` refs (Slack)
+#                    or owner-level env vars (Telegram); never inline
+# The platform `config/settings.yaml` keeps only `database_url` / `log_format` / `observability`.
 
 name: support-bot                  # required; the agent's name (any value in single-agent mode)
 version: 3                         # required
@@ -150,6 +162,50 @@ bindings:
   users:
     - "u_alice"
     - "u_bob"
+
+# ── per-agent runtime governance (resolved from this agent.yaml; config consolidation).
+#    All values below equal the current defaults; omit any you don't override. ──
+# context compression
+context_max_tokens: 200000
+context_compress_threshold: 0.8
+context_keep_recent: 10
+# loop / budget / guardrail
+agent_max_turns: 50
+agent_max_consecutive_failures: 3
+agent_max_tokens: -1            # -1 = unlimited
+tool_default_timeout_seconds: 30.0
+sub_agent_timeout_seconds: 300
+agent_tool_parallel_max: 8
+# layered budget — session/user/agent dims only (global dimension intentionally dropped)
+agent_budget_user_tokens: -1
+agent_budget_user_window: weekly
+agent_budget_agent_window: weekly
+# permission gate
+permission_gate_medium_timeout_seconds: 300
+permission_gate_high_timeout_seconds: 3600
+# provider circuit breaker
+provider_failure_threshold: 3
+provider_cooldown_seconds: 60
+
+# ── per-agent deployment / process knobs ──
+microsandbox_url: http://host.docker.internal:7777
+log_format: console               # console | json
+session_ttl_days: 30
+disabled_skills: []
+# image / vision endpoints (self-hosted; empty = disabled)
+image_gen_url: ""
+vision_url: ""
+observability:
+  logging:
+    console_level: info
+    file_level: debug
+diagnostics:
+  export_dir: data/diagnostics
+  retention:
+    enabled: false
+
+# NOTE: agent_budget_global_* and database_url are intentionally NOT accepted here.
+# The database location is derived from the agent home (<home>/data/fleetent.db).
 
 # ── access control (per-agent IM authorization; closed by default) ──
 # Default is closed: with no rules the agent grants no implicit access and requires
