@@ -18,7 +18,7 @@ _STATUSES = {"enabled", "disabled", "archived"}
 
 
 def _database() -> SQLiteDatabase:
-    return create_database(Settings(anthropic_api_key="").database_url)
+    return create_database(Settings().database_url)
 
 
 def _now() -> str:

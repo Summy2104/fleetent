@@ -46,14 +46,17 @@ def test_health_includes_adapter_status(tmp_path, monkeypatch, isolated_schedule
     assert data["adapters"]["telegram"] is False
 
 
-def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch, isolated_schedule_db):
-    """Health endpoint shows True for adapters whose env tokens are present."""
+def test_health_adapter_flags_true_when_connectors_present(
+    tmp_path, monkeypatch, isolated_schedule_db
+):
+    """Health reflects per-agent Slack + owner Telegram connector presence."""
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-fake")
-    monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-fake")
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg-fake")
 
     import fleetent.server as srv
+
+    # Slack is per-agent (agent.yaml connectors.slack); Telegram is owner-level.
+    monkeypatch.setattr(srv, "_slack_adapter_configured", lambda: True)
+    monkeypatch.setattr(srv, "_telegram_adapter_configured", lambda: True)
 
     # Manager start is mocked so lifespan never opens real sockets.
     with (
@@ -67,29 +70,6 @@ def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch, isolat
     data = resp.json()
     assert data["adapters"]["slack"] is True
     assert data["adapters"]["telegram"] is True
-
-
-def test_lifespan_starts_connectors_via_manager(tmp_path, monkeypatch, isolated_schedule_db):
-    """Lifespan drives IM connectors through manager.start_all_enabled, not hardcoded adapters."""
-    monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-fake")
-    monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-fake")
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg-fake")
-    monkeypatch.chdir(tmp_path)
-
-    import fleetent.server as srv
-
-    start_all = AsyncMock(return_value=None)
-    monkeypatch.setattr(srv._connector_manager, "start_all_enabled", start_all)
-    monkeypatch.setattr(srv._connector_manager, "stop", AsyncMock(return_value=None))
-
-    with TestClient(srv.app) as client:
-        client.get("/health")
-
-    start_all.assert_called_once()
-    # Hardcoded per-adapter starters are gone; manager owns lifecycle now.
-    assert not hasattr(srv, "_start_slack_adapter")
-    assert not hasattr(srv, "_start_telegram_adapter")
 
 
 def test_admin_im_router_mounted(tmp_path, monkeypatch, isolated_schedule_db):

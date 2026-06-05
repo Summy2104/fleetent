@@ -225,7 +225,7 @@ def test_existing_agent_backfills_default_tenant(db):
     from fleetent.config import Settings
     from fleetent.db import create_database
 
-    database = create_database(Settings(anthropic_api_key="").database_url)
+    database = create_database(Settings().database_url)
     with database.transaction() as conn:
         agent_id = conn.execute(
             "INSERT INTO agents (name, system_prompt, allowed_tools, created_at)"
@@ -323,7 +323,7 @@ def test_delete_agent_removes_agent_and_versions(db):
     assert agent_store.delete_agent("doomed") is True
     assert agent_store.get_by_name("doomed") is None
 
-    database = create_database(Settings(anthropic_api_key="").database_url)
+    database = create_database(Settings().database_url)
     rows = database.execute(
         "SELECT COUNT(*) AS c FROM agent_versions WHERE agent_id = :aid", {"aid": agent.id}
     ).fetchone()

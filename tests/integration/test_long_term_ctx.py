@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
-from fleetent.config import KnowledgeBaseSettings, Settings
+from fleetent.config import KnowledgeBaseSettings
 from fleetent.intelligence.knowledge_base import KnowledgeChunk
 from fleetent.intelligence.memory import MemoryItem
 
@@ -125,13 +125,10 @@ async def test_missing_knowledge_provider_does_not_block_memory_context(monkeypa
 async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enabled(monkeypatch):
     from fleetent.intelligence import long_term_ctx
 
-    settings = Settings(
-        anthropic_api_key="test-key",
-        knowledge_base=KnowledgeBaseSettings(
-            enabled=True,
-            default_tenant_id="tenant-a",
-            default_kb_id="global",
-        ),
+    kb_config = KnowledgeBaseSettings(
+        enabled=True,
+        default_tenant_id="tenant-a",
+        default_kb_id="global",
     )
     chunk = KnowledgeChunk(
         id="chunk-1",
@@ -148,7 +145,7 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
     knowledge_search = AsyncMock(return_value=[chunk])
     resolve_agent_kb_ids = Mock(return_value=["global"])
     monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
-    monkeypatch.setattr(long_term_ctx, "Settings", lambda anthropic_api_key="": settings)
+    monkeypatch.setattr(long_term_ctx, "_kb_config", lambda: kb_config)
     monkeypatch.setattr(long_term_ctx.knowledge_base, "resolve_agent_kb_ids", resolve_agent_kb_ids)
     monkeypatch.setattr(long_term_ctx.knowledge_base, "search", knowledge_search)
     long_term_ctx.set_knowledge_provider(None)
@@ -183,13 +180,10 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
 async def test_builtin_knowledge_provider_disabled_does_not_call_knowledge_base(monkeypatch):
     from fleetent.intelligence import long_term_ctx
 
-    settings = Settings(
-        anthropic_api_key="test-key",
-        knowledge_base=KnowledgeBaseSettings(enabled=False),
-    )
+    kb_config = KnowledgeBaseSettings(enabled=False)
     knowledge_search = AsyncMock(return_value=[])
     monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
-    monkeypatch.setattr(long_term_ctx, "Settings", lambda anthropic_api_key="": settings)
+    monkeypatch.setattr(long_term_ctx, "_kb_config", lambda: kb_config)
     monkeypatch.setattr(long_term_ctx.knowledge_base, "search", knowledge_search)
     long_term_ctx.set_knowledge_provider(None)
 

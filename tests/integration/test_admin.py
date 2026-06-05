@@ -5,7 +5,6 @@ import pytest
 
 import fleetent.agent_store as agent_store
 from fleetent import user_store
-from fleetent.platform.admin_cli import agents as admin_cli_agents
 from fleetent.platform.admin_cli.main import main as admin_cli_main
 from fleetent.platform.im_gateway_management import identity as im_user_store
 from tests.integration.test_migrations import apply_migrations
@@ -268,24 +267,58 @@ def test_unassign_user():
 # --- set-default-agent command ---
 
 
-def test_set_default_agent(tmp_path, monkeypatch):
-    settings_yaml = tmp_path / "settings.yaml"
-    settings_yaml.write_text("")
-    monkeypatch.setattr(admin_cli_agents, "_SETTINGS_YAML", settings_yaml)
-    agent_store.create_agent("basic", "Basic.", [])
+def _write_agent_yaml(agents_dir, name, *, default=False):
+    import yaml
+
+    d = agents_dir / name
+    d.mkdir(parents=True, exist_ok=True)
+    data: dict = {"name": name, "version": 1}
+    if default:
+        data["bindings"] = {"default": True}
+    (d / "agent.yaml").write_text(yaml.safe_dump(data))
+
+
+def _read_default(agents_dir, name):
+    import yaml
+
+    data = yaml.safe_load((agents_dir / name / "agent.yaml").read_text()) or {}
+    return bool((data.get("bindings") or {}).get("default", False))
+
+
+def test_set_default_agent_writes_agent_yaml(tmp_path, monkeypatch):
+    agents_dir = tmp_path / "agents"
+    _write_agent_yaml(agents_dir, "basic")
+    _write_agent_yaml(agents_dir, "ops", default=True)
+    monkeypatch.setenv("FLEETENT_AGENTS_DIR", str(agents_dir))
+
     out, _, code = run_admin("set-default-agent", "--agent-name", "basic")
+
     assert code == 0
-    assert "basic" in settings_yaml.read_text()
+    assert _read_default(agents_dir, "basic") is True
+    assert _read_default(agents_dir, "ops") is False  # previous default cleared
+    assert not (tmp_path / "settings.yaml").exists()
+
+
+def test_set_default_agent_unknown_agent_errors(tmp_path, monkeypatch):
+    agents_dir = tmp_path / "agents"
+    _write_agent_yaml(agents_dir, "basic")
+    monkeypatch.setenv("FLEETENT_AGENTS_DIR", str(agents_dir))
+
+    _, err, code = run_admin("set-default-agent", "--agent-name", "ghost")
+
+    assert code != 0
+    assert "ghost" in err
 
 
 def test_set_default_agent_clear(tmp_path, monkeypatch):
-    settings_yaml = tmp_path / "settings.yaml"
-    settings_yaml.write_text("default_agent_name: basic\n")
-    monkeypatch.setattr(admin_cli_agents, "_SETTINGS_YAML", settings_yaml)
+    agents_dir = tmp_path / "agents"
+    _write_agent_yaml(agents_dir, "ops", default=True)
+    monkeypatch.setenv("FLEETENT_AGENTS_DIR", str(agents_dir))
+
     out, _, code = run_admin("set-default-agent", "--clear")
+
     assert code == 0
-    content = settings_yaml.read_text()
-    assert "basic" not in content
+    assert _read_default(agents_dir, "ops") is False
 
 
 # ── schedule admin commands ───────────────────────────────────────────────────

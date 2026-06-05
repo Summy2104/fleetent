@@ -1,26 +1,25 @@
-"""FastAPI HTTP server: POST /chat (SSE), GET /health."""
+"""FastAPI control-plane server: admin/console + agent authoring + health/auth.
+
+Agent execution and IM ingress are NOT served here — they run in a standalone agent
+runtime (`fleetent agent run`); this app starts agent-free with no IM, loop, or sandbox
+(see openspec change ``platform-control-plane``)."""
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
-import yaml
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response, StreamingResponse
+from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
 
-from fleetent import agent_config, agent_store, paths, user_store
+from fleetent import agent_config, agent_store, user_store
 from fleetent.auth import seed_builtin_admin
-from fleetent.config import Settings, WebhooksSettings, configure_logging
+from fleetent.config import Settings, configure_logging
 from fleetent.cron_scheduler import CronScheduler
-from fleetent.governance import quota
 from fleetent.governance.permission_gate import (
     _default_gate,
     cleanup_stale_approvals,
@@ -28,14 +27,8 @@ from fleetent.governance.permission_gate import (
 )
 from fleetent.im_gateway import telegram as telegram_adapter
 from fleetent.im_gateway.slack_supervisor import SlackSupervisor
-from fleetent.integrations import mcp as mcp_client
-from fleetent.integrations.mcp import McpServerConfig
 from fleetent.integrations.sandbox import (
     Mode,
-    SandboxClient,
-    cleanup_orphans,
-    load_sandbox_mode,
-    resolve_effective_mode,
 )
 from fleetent.model import ROUTES
 from fleetent.observability.startup_diagnostics import (
@@ -44,6 +37,7 @@ from fleetent.observability.startup_diagnostics import (
     log_config_failed,
     log_config_loaded,
 )
+from fleetent.platform.agent_lifecycle import lifecycle_admin_api, materialize
 from fleetent.platform.agent_management_console import agent_admin_api, agent_console_api
 from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.askit_console import agent_apply_api
@@ -54,17 +48,13 @@ from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.resource_monitoring import collectors, monitor_admin_api
 from fleetent.platform.skill_management import skill_admin_api
-from fleetent.platform.user_management import api_key_store, user_admin_api
+from fleetent.platform.user_management import user_admin_api
 from fleetent.runtime import run_stream
 from fleetent.session import manager as session_mgr
 from fleetent.skills import scan as scan_skills
 from fleetent.tools.plugin_loader import expand_plugin_patterns, load_plugins
 
 logger = logging.getLogger(__name__)
-
-_MCP_YAML_PATH: Path = paths.config_dir() / "mcp.yaml"
-_WEBHOOK_YAML_PATH: Path = paths.config_dir() / "webhooks.yaml"
-_webhook_sources: dict[str, Any] = {}
 
 
 def _admin_login_url(router_prefix: str) -> str:
@@ -113,7 +103,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     load_plugins()
     cleanup_stale_approvals()
     try:
-        settings = Settings()  # type: ignore[call-arg]
+        settings = Settings()
     except Exception as exc:
         log_config_failed(exc)
         raise
@@ -122,33 +112,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     diagnose_database_writable(settings.database_url)
     diagnose_provider_keys(ROUTES.values())
 
-    # SB3: probe Docker once at startup, resolve the effective code-execution mode,
-    # and stash it on app.state for /chat and /health. Docker unavailable degrades
-    # the mode to off without blocking startup (the probe itself never raises).
-    configured_mode = load_sandbox_mode()
-    sandbox_client = SandboxClient()
-    docker_available = await sandbox_client.docker_available()
-    effective_mode = resolve_effective_mode(configured_mode, docker_available)
-    app.state.sandbox_mode = effective_mode
-    app.state.sandbox_docker_available = docker_available
-    if docker_available:
-        logger.info("sandbox_mode_effective mode=%s", effective_mode.value)
-    else:
-        logger.warning(
-            "sandbox_mode_effective mode=%s (docker unavailable; configured=%s)",
-            effective_mode.value,
-            configured_mode.value,
-        )
-
-    # SB8: reuse the single SB3 Docker probe above — when Docker is available,
-    # reclaim orphan sandbox-* containers left by a previous crash. Best-effort:
-    # a failure is logged and startup proceeds; unavailable Docker skips cleanup
-    # (the mode is already degraded by SB3). No second probe, no scheduler.
-    if docker_available:
-        try:
-            await cleanup_orphans(sandbox_client)
-        except Exception as exc:
-            logger.warning("sandbox_orphan_cleanup_failed error=%s", exc)
+    # platform-control-plane: agent execution (loop + sandbox + IM) runs only in an
+    # `fleetent agent run` process; the platform no longer probes Docker, registers
+    # agent-use MCP, maintains sessions, or starts IM connectors at boot.
 
     # Seed the built-in admin on first boot; log the one-time initial password.
     admin_seed = seed_builtin_admin()
@@ -162,55 +128,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     logger.info("admin_login_url url=%s", _admin_login_url(user_admin_api.router.prefix))
 
-    # Load MCP servers from config/mcp.yaml if present
-    if _MCP_YAML_PATH.exists():
-        try:
-            raw = yaml.safe_load(_MCP_YAML_PATH.read_text())
-            servers = [McpServerConfig(**s) for s in raw.get("servers", [])]
-            await mcp_client.register_all(servers)
-        except Exception as exc:
-            logger.warning("mcp_yaml_load_failed path=%s error=%s", _MCP_YAML_PATH, exc)
-
-    # Register enabled global MCP servers defined through the admin console (the DB
-    # counterpart to mcp.yaml), so their tools become available to agents.
-    try:
-        from fleetent.platform.connector_management import mcp_runtime
-
-        await mcp_runtime.register_global_store_servers()
-    except Exception as exc:
-        logger.warning("mcp_store_register_failed error=%s", exc)
-
-    # MCP3: start the connection-health monitor (bare asyncio task, not cron_scheduler).
-    mcp_client.start_health_monitor()
-
-    # Periodic session maintenance: trigger TTL cleanup + capacity eviction on an
-    # interval so idle (no-save) periods are still maintained. Bare asyncio task,
-    # deliberately NOT routed through cron_scheduler (lead direction; MCP3 precedent).
-    session_mgr.start_session_maintenance()
-
-    # Webhook gating settings (enabled flag + max body size) on app.state, and load
-    # sources from config/webhooks.yaml if present (zhangyang's yaml design, kept).
-    app.state.webhook_settings = settings.webhooks
-    from fleetent import webhook_router as _wr
-
-    _webhook_sources.clear()
-    if _WEBHOOK_YAML_PATH.exists():
-        _webhook_sources.update(_wr.load_sources(_WEBHOOK_YAML_PATH))
-
-    # IM connectors are driven by the registry via the manager: only enabled platforms
-    # with usable config start. Wire the admin-API seams to this running manager so
-    # enable/disable endpoints can drive lifecycle without importing the loop.
+    # The running event loop, used by the admin "Chat" playground seams below to drive
+    # on-demand turns from sync admin handlers.
     loop = asyncio.get_running_loop()
-    admin_api.start_connector = lambda owner_id, platform: asyncio.run_coroutine_threadsafe(
-        _connector_manager.start(owner_id, platform), loop
-    ).result()
-    admin_api.stop_connector = lambda owner_id, platform: asyncio.run_coroutine_threadsafe(
-        _connector_manager.stop(owner_id, platform), loop
-    ).result()
-    await _connector_manager.start_all_enabled()
-    # per-agent-slack-connector: one Socket Mode connection per agent declaring
-    # connectors.slack, sourced from the agent index scanned above.
-    await _slack_supervisor.start_from_index()
 
     # Wire the admin "Chat" playground to the real agent loop (mirrors /chat): the
     # selected agent is resolved by name from its file-driven config, and the turn
@@ -223,6 +143,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         overrides: dict[str, Any] | None,
         bypass_medium: bool,
     ) -> dict[str, Any]:
+        from fleetent.runtime.snapshot import _governance_from_file
+
         af = agent_config.current().get(agent_name) if agent_name else None
         kwargs: dict[str, Any] = {"user_id": "playground", "session_id": session_id}
         if af is not None:
@@ -231,6 +153,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             kwargs["agent_name"] = af.name
             kwargs["agent_features"] = af.features
             kwargs["allowed_skills"] = af.allowed_skills
+            kwargs["governance"] = _governance_from_file(af)
         events: list[dict[str, Any]] = []
 
         async def _collect() -> str:
@@ -267,7 +190,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Best-effort scheduler start: a missing/locked scheduled_tasks table (e.g. an
     # unmigrated DB) must not prevent the HTTP API from serving, consistent with the
     # sandbox-cleanup / IM-adapter best-effort pattern above. Surfaced via warning.
-    cron = CronScheduler(settings=settings.scheduling)
+    cron = CronScheduler(settings=agent_config.active_agent_or_default().scheduling)
     try:
         await cron.start()
         cron.add_interval_job(
@@ -283,15 +206,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    for owner_id, platform in list(_connector_manager.running()):
-        await _connector_manager.stop(owner_id, platform)
-    await _slack_supervisor.stop_all()
     try:
         await cron.shutdown()
     except Exception as exc:
         logger.warning("cron_scheduler_shutdown_failed error=%s", exc)
-    await session_mgr.stop_session_maintenance()
-    await mcp_client.close()
 
 
 app = FastAPI(title="fleetent", lifespan=lifespan)
@@ -307,6 +225,7 @@ app.include_router(agent_admin_api.router)
 app.include_router(stats_admin_api.router)
 app.include_router(monitor_admin_api.router)
 app.include_router(agent_apply_api.router)
+app.include_router(lifecycle_admin_api.router)
 
 
 def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:
@@ -363,6 +282,8 @@ def wire_agent_store_seams() -> None:
             template_id=template_id,
             icon=icon,
         )
+        # platform-agent-lifecycle: materialize the runnable home on create.
+        materialize.materialize_from_store(name)
 
     def _console_update(
         name: str,
@@ -387,15 +308,20 @@ def wire_agent_store_seams() -> None:
         if memory_namespace is not None:
             kwargs["memory_namespace"] = memory_namespace
         agent_store.create_version(name, **kwargs)
+        # platform-agent-lifecycle: re-materialize the home on update.
+        materialize.materialize_from_store(name)
 
     def _console_delete(name: str) -> bool:
         return agent_store.delete_agent(name)
 
     def _apply_create(name: str, system_prompt: str, allowed_tools: list[str]) -> int:
-        return agent_store.create_agent(name, system_prompt, allowed_tools).id
+        agent_id = agent_store.create_agent(name, system_prompt, allowed_tools).id
+        materialize.materialize_from_store(name)
+        return agent_id
 
     def _apply_update(name: str, system_prompt: str, allowed_tools: list[str]) -> None:
         agent_store.create_version(name, system_prompt=system_prompt, allowed_tools=allowed_tools)
+        materialize.materialize_from_store(name)
 
     agent_console_api.get_agent_def = _get_def
     agent_console_api.create_agent_def = _console_create
@@ -410,10 +336,6 @@ def wire_agent_store_seams() -> None:
 
 
 wire_agent_store_seams()
-
-
-class ChatRequest(BaseModel):
-    message: str
 
 
 def _emit_over_quota_event(user_id: str) -> None:
@@ -483,9 +405,28 @@ async def _authenticate(authorization: str = Header()) -> tuple[user_store.User,
     return result
 
 
+def _slack_adapter_configured() -> bool:
+    """Whether any indexed agent declares a per-agent Slack connector."""
+    return any(
+        agent.connectors.slack is not None for agent in agent_config.current().agents.values()
+    )
+
+
+def _telegram_adapter_configured() -> bool:
+    """Whether the admin owner has a Telegram connector configured (owner-level IM).
+
+    Defensive: a missing/unmigrated connector store must not break /health."""
+    try:
+        from fleetent import user_store
+        from fleetent.platform.im_gateway_management import connector_config
+
+        return bool(connector_config.resolve(user_store.admin_owner_id(), "telegram"))
+    except Exception:
+        return False
+
+
 @app.get("/health")
 async def health(request: Request) -> dict:  # type: ignore[type-arg]
-    settings = Settings()  # type: ignore[call-arg]
     # SB3: surface the effective sandbox mode resolved at startup; default to off
     # when the state is somehow unset (e.g. lifespan not run) so we never crash.
     mode: Mode = getattr(request.app.state, "sandbox_mode", Mode.OFF)
@@ -496,8 +437,8 @@ async def health(request: Request) -> dict:  # type: ignore[type-arg]
     return {
         "status": "ok",
         "adapters": {
-            "slack": bool(settings.slack_bot_token),
-            "telegram": bool(settings.telegram_bot_token),
+            "slack": _slack_adapter_configured(),
+            "telegram": _telegram_adapter_configured(),
         },
         "sandbox": sandbox,
     }
@@ -525,172 +466,3 @@ async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # t
     if not found:
         raise HTTPException(status_code=404, detail=f"approval {approval_id} not found or expired")
     return {"status": "ok", "approval_id": approval_id, "decision": req.decision}
-
-
-@app.post("/chat")
-async def chat(
-    req: ChatRequest,
-    request: Request,
-    auth_result: tuple[user_store.User, dict[str, Any]] = Depends(_authenticate),
-    x_platform: str | None = Header(default=None),
-    x_channel_id: str | None = Header(default=None),
-) -> StreamingResponse:
-    from fleetent.im_gateway.normalizer import get_agent_for_context
-
-    user, key_meta = auth_result
-    user_id = user.id
-
-    agent = get_agent_for_context(
-        platform=x_platform or "",
-        channel_id=x_channel_id or "",
-        user_id=user_id,
-    )
-    system_prompt = agent.system_prompt if agent else None
-    # AR7: an agent's plugin allowlist expands to `{name}__*` namespace patterns
-    # merged into allowed_tools, so the agent_loop schema filter exposes only the
-    # authorised plugins' namespaced tools to the LLM.
-    allowed_tools = agent.allowed_tools + expand_plugin_patterns(agent.plugins) if agent else None
-    agent_name = agent.name if agent else None
-    agent_features = agent.features if agent else None
-    # agent-skill-scoping: per-agent skill-catalog narrowing (empty = no narrowing).
-    # No bound agent → None → run_stream renders the full catalog (existing behavior).
-    allowed_skills = agent.allowed_skills if agent else None
-    # SB3: effective mode resolved at startup gates run_code's schema visibility.
-    sandbox_mode: Mode = getattr(request.app.state, "sandbox_mode", Mode.OFF)
-
-    # Lifecycle gate: disabled / archived agents are not routable (no agent loop entry).
-    if agent_name is not None:
-        status = agent_routing_status(agent_name)
-        if status == "disabled":
-            raise HTTPException(status_code=403, detail="该 Agent 已停用")
-        if status == "archived":
-            raise HTTPException(status_code=403, detail="该 Agent 已归档，无法路由")
-
-    # API-key scope: the key may be restricted to specific agents.
-    if agent_name is not None and not api_key_store.check_scope(key_meta["scope"], agent_name):
-        raise HTTPException(status_code=403, detail="scope does not allow this agent")
-
-    # Usage quota: reject when the user's or global limit is already exhausted.
-    if not quota.check_quota(user_id):
-        _emit_over_quota_event(user_id)
-        raise HTTPException(status_code=429, detail="usage quota exceeded")
-
-    # Record key usage (source IP / UA / call count). Legacy keys have no row id.
-    if key_meta.get("id") is not None:
-        api_key_store.record_usage(
-            key_meta["id"],
-            ip=request.client.host if request.client else None,
-            ua=request.headers.get("user-agent"),
-        )
-    quota.record_usage(user_id, tokens=0)  # token-precise accounting: see follow-up note
-
-    async def _stream() -> AsyncGenerator[str, None]:
-        try:
-            kwargs: dict[str, Any] = {"user_id": user_id, "sandbox_mode": sandbox_mode}
-            if system_prompt is not None:
-                kwargs["system_prompt"] = system_prompt
-            if allowed_tools is not None:
-                kwargs["allowed_tools"] = allowed_tools
-            if agent_name is not None:
-                kwargs["agent_name"] = agent_name
-            if agent_features is not None:
-                kwargs["agent_features"] = agent_features
-            if allowed_skills is not None:
-                kwargs["allowed_skills"] = allowed_skills
-            async for event in run_stream(req.message, **kwargs):
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-        except Exception as exc:
-            error = {"type": "error", "content": str(exc)}
-            yield f"data: {json.dumps(error, ensure_ascii=False)}\n\n"
-
-    return StreamingResponse(_stream(), media_type="text/event-stream")
-
-
-@app.websocket("/ws")
-async def ws_gateway(websocket: WebSocket) -> None:
-    """Bidirectional JSON-RPC 2.0 gateway for the terminal TUI (tui-gateway).
-
-    Authenticates the Bearer ``ma-`` key on the handshake, then runs a single
-    dispatch over a newline-delimited JSON-RPC protocol. SSE ``/chat`` is unaffected.
-    """
-    from fleetent.tui import dispatch as tui_dispatch
-    from fleetent.tui import protocol as tui_proto
-    from fleetent.tui.transport import WSTransport
-
-    auth = websocket.headers.get("authorization", "")
-    result = (
-        user_store.authenticate(auth.removeprefix("Bearer ").strip())
-        if auth.startswith("Bearer ")
-        else None
-    )
-    if result is None:
-        await websocket.close(code=1008)  # policy violation: auth required
-        return
-    user, _key_meta = result
-
-    await websocket.accept()
-    transport = WSTransport(websocket)
-    conn = tui_dispatch.Connection(user_id=user.id, transport=transport)
-    await transport.write(tui_proto.make_event(tui_proto.EVENT_GATEWAY_READY, {}))
-    try:
-        while True:
-            line = await websocket.receive_text()
-            try:
-                request = tui_proto.decode_frame(line)
-            except tui_proto.ParseError as exc:
-                await transport.write(tui_proto.make_error(None, tui_proto.PARSE_ERROR, str(exc)))
-                continue
-            response = await tui_dispatch.dispatch(conn, request)
-            if response is not None:
-                await transport.write(response)
-    except WebSocketDisconnect:
-        pass
-    finally:
-        # Peer gone / connection closed: cancel in-flight runs and release the socket.
-        conn.cancel_all()
-        await transport.close()
-
-
-@app.post("/webhook/{source_id}")
-async def webhook(source_id: str, request: Request) -> Response:
-    from fleetent import webhook_router as wr
-    from fleetent.im_gateway.normalizer import NormalizedMessage, route
-
-    # Security gates (adopted from main's design onto the kept yaml source model):
-    # reject before any dispatch when webhooks are disabled or the body is oversized.
-    webhook_settings = getattr(request.app.state, "webhook_settings", WebhooksSettings())
-    if not webhook_settings.enabled:
-        raise HTTPException(status_code=503, detail="webhooks disabled")
-
-    source = _webhook_sources.get(source_id)
-    if source is None:
-        raise HTTPException(status_code=404, detail=f"webhook source {source_id!r} not configured")
-
-    body = await request.body()
-    if len(body) > webhook_settings.max_body_bytes:
-        raise HTTPException(status_code=413, detail="webhook body too large")
-    sig_header = request.headers.get("x-hub-signature-256")
-    if not wr.verify_signature(source.secret, body, sig_header):
-        raise HTTPException(status_code=403, detail="invalid signature")
-
-    try:
-        payload = json.loads(body) if body else {}
-    except json.JSONDecodeError:
-        payload = {}
-
-    text = wr.extract_message(source.message_template, payload)
-
-    async def _noop_reply(_: str) -> None:
-        pass
-
-    msg = NormalizedMessage(
-        platform="webhook",
-        session_id=f"webhook-{source_id}",
-        user_id=source.user_id,
-        text=text,
-        attachments=[],
-        reply_func=_noop_reply,
-        channel_id="",
-    )
-    asyncio.create_task(route(msg))
-    return Response(status_code=202)

@@ -73,4 +73,4 @@ def delete(task_id: str) -> bool:
 
 
 def _database() -> SQLiteDatabase:
-    return create_database(Settings(anthropic_api_key="").database_url)
+    return create_database(Settings().database_url)

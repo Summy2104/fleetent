@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from fleetent.config import Settings
 from fleetent.runtime.budget import BudgetChecker, BudgetConfig, BudgetUsage
 from fleetent.runtime.termination import (
     ApprovalRejectedChecker,
@@ -134,10 +133,11 @@ def test_controller_short_circuits_after_first_hit() -> None:
 # ── config / resolve_limits ─────────────────────────────────────────────────────
 
 
-def test_settings_has_termination_fields_with_defaults() -> None:
-    # Verified via model_fields to avoid instantiating Settings (needs api key)
-    assert Settings.model_fields["agent_max_turns"].default == 50
-    assert Settings.model_fields["agent_max_consecutive_failures"].default == 3
+def test_agentfile_has_termination_fields_with_defaults() -> None:
+    from fleetent.agent_config import AgentFile
+
+    assert AgentFile.model_fields["agent_max_turns"].default == 50
+    assert AgentFile.model_fields["agent_max_consecutive_failures"].default == 3
 
 
 def test_resolve_limits_uses_config_when_no_params() -> None:

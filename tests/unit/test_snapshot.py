@@ -250,3 +250,32 @@ def test_filter_tool_schemas_mcp_whitelist_keeps_listed_server() -> None:
     result = snapshot.filter_tool_schemas(schemas, None, ["github"])
     names = [s["function"]["name"] for s in result]
     assert names == ["read_file", "github__issue"]
+
+
+# --- governance carried on the snapshot (runtime-read-agent-config) ---------
+
+
+def test_snapshot_from_file_carries_governance() -> None:
+    agent = _agent_file(agent_max_turns=30, tool_default_timeout_seconds=15.0)
+    snap = snapshot._snapshot_from_file(agent)
+    assert snap.governance.agent_max_turns == 30
+    assert snap.governance.tool_default_timeout_seconds == 15.0
+
+
+def test_snapshot_from_file_governance_defaults_match_settings() -> None:
+    snap = snapshot._snapshot_from_file(_agent_file())
+    g = snap.governance
+    assert g.agent_max_turns == 50
+    assert g.tool_default_timeout_seconds == 30.0
+    assert g.agent_max_tokens == -1
+    assert g.guardrail_repeat_threshold == 3
+    assert g.agent_tool_parallel_max == 8
+    assert g.agent_loop_repeat_threshold == 3
+    assert g.loop_detect_ignore_arg_keys == ()
+
+
+def test_db_snapshot_carries_default_governance() -> None:
+    snap = snapshot._snapshot("support", _version())
+    # DB/authoring side gets the prior Settings-equivalent defaults.
+    assert snap.governance.agent_max_turns == 50
+    assert snap.governance.tool_default_timeout_seconds == 30.0

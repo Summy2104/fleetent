@@ -249,8 +249,8 @@ def match(user_input: str, disabled_skills: list[str] | None = None) -> str | No
     A skill is excluded from matching (and not auto-injected) when it is
     disabled — either `enabled_by_default` is false, or its name is in
     `disabled_skills`. The exclusion reason is logged so operators can answer
-    "why didn't this skill fire?". `disabled_skills` defaults to the deployment
-    `Settings.disabled_skills` (param > config); `load()` is unaffected.
+    "why didn't this skill fire?". `disabled_skills` defaults to the active agent's
+    `disabled_skills` (param > config); `load()` is unaffected.
     """
     disabled = _resolve_disabled_skills(disabled_skills)
     lowered = user_input.lower()
@@ -271,12 +271,12 @@ def match(user_input: str, disabled_skills: list[str] | None = None) -> str | No
 
 
 def _resolve_disabled_skills(disabled_skills: list[str] | None) -> set[str]:
-    """Resolve the force-disable name set: explicit param > deployment Settings."""
+    """Resolve the force-disable name set: explicit param > active agent config."""
     if disabled_skills is not None:
         return set(disabled_skills)
-    from fleetent.config import Settings
+    from fleetent import agent_config
 
-    return set(Settings().disabled_skills)  # type: ignore[call-arg]
+    return set(agent_config.active_agent_or_default().disabled_skills)
 
 
 def _disabled_reason(name: str, entry: SkillEntry, disabled: set[str]) -> str | None:

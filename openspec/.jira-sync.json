@@ -1,0 +1,2195 @@
+{
+  "synced": {
+    "2026-05-24-slack-telegram-mvp": {
+      "epic": null,
+      "stories": {
+        "Agent definition storage": null,
+        "User-to-agent assignment": null,
+        "allowed_tools wildcard support": null,
+        "Schema": null,
+        "Alembic migration management": null,
+        "Migration covers all new tables": null,
+        "No raw schema creation in application code": null,
+        "Normalize Slack messages": null,
+        "Normalize Telegram messages": null,
+        "Unified message format": null,
+        "Thread-first replies": null,
+        "IM SDK reconnect": null,
+        "Map platform user to internal user": null,
+        "Platform uniqueness": null,
+        "Startup tool registration": null,
+        "Tool naming convention": null,
+        "Transparent tool dispatch": null,
+        "Module interface": null,
+        "Access control at dispatch": null,
+        "Risk-level declaration": null,
+        "Async approval wait": null,
+        "Approval timeout": null,
+        "Approval persistence": null,
+        "Per-session workspace lifecycle": null,
+        "Tool execution in sandbox": null,
+        "Cross-session isolation": null,
+        "Sandbox failure handling": null,
+        "Host connectivity": null,
+        "Load session history": null,
+        "Save session history": null,
+        "Session isolation": null,
+        "Parallel sub-agent execution": null,
+        "Fresh context per sub-agent": null,
+        "Depth limit": null,
+        "Permission inheritance": null,
+        "Trace linkage": null,
+        "Look up user by platform identity": null
+      }
+    },
+    "2026-05-25-cron-scheduled-tasks": {
+      "epic": null,
+      "stories": {
+        "Scheduled task definition and persistence": null,
+        "Static tasks loaded from config/cron.yaml": null,
+        "Dynamic tasks survive server restart": null,
+        "Cron trigger fires agent run asynchronously": null,
+        "schedule_task tool for dynamic scheduling": null,
+        "cancel_task tool for removing schedules": null,
+        "Admin CLI commands for schedule management": null
+      }
+    },
+    "2026-05-25-im-user-access-control": {
+      "epic": null,
+      "stories": {
+        "Channel-to-agent binding storage": null,
+        "Channel binding takes priority over user binding in agent lookup": null,
+        "Global default agent configuration": null,
+        "Agent lookup priority order": null,
+        "Admin can set default agent via CLI": null,
+        "New IM users require approval before access": null,
+        "Admin can list pending (unapproved) users": null,
+        "Admin can approve an IM user": null,
+        "Admin can block an IM user": null,
+        "Map platform user to internal user": null,
+        "Platform uniqueness": null,
+        "Schema": null
+      }
+    },
+    "2026-05-25-model-fallback-chain": {
+      "epic": null,
+      "stories": {
+        "Route configuration schema": null,
+        "Fallback chain configuration": null,
+        "Automatic retry on rate limit (429)": null,
+        "Automatic retry on service unavailable (503)": null,
+        "Fallback exhaustion propagates last error": null,
+        "Non-retriable errors bypass fallback": null,
+        "Actual model usage is recorded in eval trace": null
+      }
+    },
+    "2026-05-25-webhook-triggers": {
+      "epic": null,
+      "stories": {
+        "Webhook source configuration": null,
+        "Webhook endpoint accepts POST requests": null,
+        "HMAC-SHA256 signature verification": null,
+        "Payload text extraction via message template": null,
+        "Agent run dispatched as background task": null,
+        "Webhook reply is a no-op": null
+      }
+    },
+    "2026-05-31-bitbucket-ci": {
+      "epic": null,
+      "stories": {
+        "Pull requests run the full test suite": null,
+        "Main branch updates are verified": null
+      }
+    },
+    "2026-05-31-builtin-skills": {
+      "epic": null,
+      "stories": {
+        "平台内置 Skill 扫描与来源标记": null,
+        "enabled_by_default 控制默认启用态": null,
+        "配置强制禁用指定 Skill": null
+      }
+    },
+    "2026-05-31-compression-dual-threshold": {
+      "epic": null,
+      "stories": {
+        "双阈值触发压缩": null,
+        "压缩回落到 Tretained 目标线": null,
+        "两阈值保持间距": null,
+        "手动触发压缩": null,
+        "上下文过长错误触发压缩": null,
+        "阈值可配置与注入": null
+      }
+    },
+    "2026-05-31-define-module-boundaries-and-code-organization": {
+      "epic": null,
+      "stories": {
+        "Alembic migration management": null,
+        "No raw schema creation in application code": null,
+        "模块化单体 package map": null,
+        "Public API boundary": null,
+        "Module-owned data": null,
+        "Module-owned configuration namespace": null,
+        "Dependency direction": null,
+        "Gradual migration with compatibility shim": null,
+        "OpenSpec changes declare boundary impact": null
+      }
+    },
+    "2026-05-31-embedding-rerank-provider-abstraction": {
+      "epic": null,
+      "stories": {
+        "Vector store configuration": null,
+        "Embedding provider abstraction": null,
+        "Rerank provider abstraction": null,
+        "Vector store runtime uses embedding provider": null
+      }
+    },
+    "2026-05-31-error-classification": {
+      "epic": null,
+      "stories": {
+        "运行时错误归一化为固定分类": null,
+        "每个分类挂载恢复策略标志位": null,
+        "主循环只读标志位响应错误": null,
+        "错误分类码写入 trace": null,
+        "预留分类码不被主动返回": null
+      }
+    },
+    "2026-05-31-image-generation-tool": {
+      "epic": null,
+      "stories": {
+        "提供文生图工具 generate_image": null,
+        "后端为自托管 OpenAI 兼容 images 端点": null,
+        "生成图存盘并返回短引用": null,
+        "生成失败归一化为工具失败": null
+      }
+    },
+    "2026-05-31-introduce-database-runtime-boundary": {
+      "epic": null,
+      "stories": {
+        "Database runtime configuration": null,
+        "Database adapter boundary": null,
+        "Named SQL parameters": null,
+        "Transaction handling": null,
+        "Result shape": null,
+        "Reference store migration": null,
+        "Alembic migration management": null,
+        "No raw schema creation in application code": null
+      }
+    },
+    "2026-05-31-knowledge-base-connectors-local": {
+      "epic": null,
+      "stories": {
+        "Knowledge-base connector boundary": null,
+        "Local directory data source": null,
+        "Local manual sync": null,
+        "Local source state": null,
+        "Local connector excludes advanced sync": null
+      }
+    },
+    "2026-05-31-knowledge-base-core": {
+      "epic": null,
+      "stories": {
+        "Knowledge-base runtime foundation": null,
+        "Manual text ingest and chunk indexing": null,
+        "Vector-only knowledge search": null,
+        "Knowledge document deletion": null,
+        "First implementation excludes advanced retrieval": null,
+        "Optional knowledge provider": null
+      }
+    },
+    "2026-05-31-knowledge-base-hybrid-search": {
+      "epic": null,
+      "stories": {
+        "Knowledge-base search modes": null,
+        "Keyword indexing": null,
+        "Keyword retrieval behavior": null,
+        "Hybrid RRF fusion": null,
+        "Hybrid search excludes advanced retrieval": null
+      }
+    },
+    "2026-05-31-knowledge-base-parsers-basic": {
+      "epic": null,
+      "stories": {
+        "Basic parser public API": null,
+        "Text parser": null,
+        "Markdown parser": null,
+        "Lightweight HTML parser": null,
+        "Parsed ingest adapter": null,
+        "Parser dependency boundary": null
+      }
+    },
+    "2026-05-31-knowledge-base-retrieval-evaluation": {
+      "epic": null,
+      "stories": {
+        "Fast default feedback": null,
+        "Knowledge-base retrieval evaluation fixtures": null,
+        "Deterministic retrieval evaluation": null,
+        "Optional real embedding retrieval evaluation": null
+      }
+    },
+    "2026-05-31-knowledge-bridge-migration-plan": {
+      "epic": null,
+      "stories": {
+        "KnowledgeBridge migration plan": null,
+        "Migration asset classification": null,
+        "Fleetent constraint mapping": null,
+        "Knowledge-base spec split": null
+      }
+    },
+    "2026-05-31-long-term-context-foundation": {
+      "epic": null,
+      "stories": {
+        "Long-term context public API": null,
+        "Empty token budget short-circuit": null,
+        "Memory context retrieval": null,
+        "Optional knowledge provider": null,
+        "Context merge and budget control": null,
+        "Agent runtime uses long-term context": null
+      }
+    },
+    "2026-05-31-mcp-http-streamable": {
+      "epic": null,
+      "stories": {
+        "Streamable HTTP 传输接入服务注册": null,
+        "initialize 握手与会话标识管理": null,
+        "Accept 协商与 JSON/SSE 双响应解析": null,
+        "单调递增请求 id 与响应匹配": null,
+        "连接失败降级": null
+      }
+    },
+    "2026-05-31-memory-extraction-evaluation": {
+      "epic": null,
+      "stories": {
+        "Fast default feedback": null,
+        "Memory extraction evaluation fixtures": null,
+        "Deterministic memory extraction evaluation": null,
+        "Memory extraction scenario coverage": null,
+        "Optional real LLM memory extraction evaluation": null
+      }
+    },
+    "2026-05-31-memory-sqlite-semantic-store": {
+      "epic": null,
+      "stories": {
+        "Structured semantic memory model": null,
+        "Memory public API": null,
+        "No JSONL memory compatibility": null,
+        "Memory extraction actions": null,
+        "Memory type TTL rules": null,
+        "Vector index synchronization": null,
+        "Semantic memory search": null,
+        "Agent runtime no longer injects memory directly": null
+      }
+    },
+    "2026-05-31-memory-update-merge-actions": {
+      "epic": null,
+      "stories": {
+        "Memory extraction actions": null,
+        "Existing memory snapshot for extraction": null,
+        "Memory conflict handling through update actions": null
+      }
+    },
+    "2026-05-31-message-hygiene": {
+      "epic": null,
+      "stories": {
+        "发送前消息契约校验与修复": null,
+        "修复连续同角色消息": null,
+        "补全缺失的 tool_result": null,
+        "移除孤立的 tool_result": null,
+        "修复动作写入 trace": null,
+        "无法安全修复时尽早报错": null
+      }
+    },
+    "2026-05-31-migrate-existing-tests-by-layer": {
+      "epic": null,
+      "stories": {
+        "Layered test suite organization": null,
+        "Fast default feedback": null,
+        "Agent guidance matches test layers": null
+      }
+    },
+    "2026-05-31-model-parameter-config": {
+      "epic": null,
+      "stories": {
+        "task_type 级默认采样参数": null,
+        "单次调用采样参数覆盖与深合并": null
+      }
+    },
+    "2026-05-31-model-routes-externalize": {
+      "epic": null,
+      "stories": {
+        "从 YAML 文件加载路由表": null,
+        "内置默认兜底与文件缺失降级": null,
+        "文件损坏或字段非法时明确报错": null,
+        "密钥仅以环境变量名引用": null,
+        "路由文件路径可注入且不热加载": null,
+        "get_client_and_config 对外行为不变": null
+      }
+    },
+    "2026-05-31-multimodal-input": {
+      "epic": null,
+      "stories": {
+        "接受图片内容并透传 LLM": null,
+        "base64 编码图片作为消息内容": null,
+        "含图片时路由到视觉模型": null,
+        "图片内容不破坏压缩与 trace": null,
+        "音频视频不支持，非图片二进制降级占位": null
+      }
+    },
+    "2026-05-31-observability-contract-tests": {
+      "epic": null,
+      "stories": {
+        "Observability contract test coverage": null,
+        "Observability payload safety tests": null,
+        "Usage summary ignores non-completion events": null
+      }
+    },
+    "2026-05-31-observability-source-attribution": {
+      "epic": null,
+      "stories": {
+        "Injected context trace public API": null,
+        "Injected context trace event": null,
+        "Source attribution content safety": null,
+        "Empty injected context is skipped": null,
+        "Agent runtime records injected context sources": null,
+        "Injected context events are queryable": null
+      }
+    },
+    "2026-05-31-observability-sqlite-agent-traces": {
+      "epic": null,
+      "stories": {
+        "Trace event public API": null,
+        "No legacy trace logging API": null,
+        "Trace table storage": null,
+        "Record trace event": null,
+        "Query trace events": null,
+        "Trace payload safety": null,
+        "Agent runtime records completed run": null,
+        "No JSONL trace output": null,
+        "Trace and structured logging naming separation": null
+      }
+    },
+    "2026-05-31-observability-structured-logging": {
+      "epic": null,
+      "stories": {
+        "Structured logger public API": null,
+        "Logging level filtering": null,
+        "Console and file outputs": null,
+        "Log event shape": null,
+        "Redaction baseline": null,
+        "Startup diagnostics": null,
+        "Output failure isolation": null,
+        "Structured logs are not agent traces": null
+      }
+    },
+    "2026-05-31-observability-usage-summary": {
+      "epic": null,
+      "stories": {
+        "Usage summary public API": null,
+        "Usage summary source events": null,
+        "Basic usage aggregation": null,
+        "Usage query filters": null,
+        "Usage by model": null,
+        "Usage payload tolerance": null,
+        "Usage summary reads through trace API": null
+      }
+    },
+    "2026-05-31-prompt-cache-optimization": {
+      "epic": null,
+      "stories": {
+        "稳定可缓存提示前缀": null,
+        "缓存命中指标写入 trace": null,
+        "后端无关、不使用 provider 专有缓存标记": null,
+        "压缩保留可缓存头部": null
+      }
+    },
+    "2026-05-31-provider-health-probe-cache": {
+      "epic": null,
+      "stories": {
+        "provider 健康状态缓存": null,
+        "连续失败达阈值标记不可用": null,
+        "fallback 遍历跳过不可用 provider": null,
+        "冷却期满半开重试": null,
+        "成功调用立即恢复": null,
+        "失败判定范围": null
+      }
+    },
+    "2026-05-31-reflection-foundation": {
+      "epic": null,
+      "stories": {
+        "Reflection report public API": null,
+        "Trace-based analysis input": null,
+        "Memory input is read-only": null,
+        "Foundation finding types": null,
+        "Reflection report persistence": null,
+        "No automatic application": null
+      }
+    },
+    "2026-05-31-request-routing-override": {
+      "epic": null,
+      "stories": {
+        "请求级路由覆盖入口": null,
+        "字段级覆盖语义": null,
+        "覆盖模型默认清空 fallback 链": null,
+        "agent_loop 暴露 force_model 透传": null,
+        "覆盖后的实际模型写入 trace": null
+      }
+    },
+    "2026-05-31-session-disk-management": {
+      "epic": null,
+      "stories": {
+        "基于总大小与数量上限的容量判定": null,
+        "LRU 最旧优先淘汰至回落阈值": null,
+        "上限可配置、可覆盖、可按维度关闭": null,
+        "删除容错与日志记录": null,
+        "容量管理由内置维护触发驱动": null
+      }
+    },
+    "2026-05-31-session-metadata-index": {
+      "epic": null,
+      "stories": {
+        "session 元数据存储": null,
+        "活跃时元数据 upsert 更新": null,
+        "session 元数据查询": null,
+        "全系统统计查询": null,
+        "元数据故障不破坏消息持久化": null
+      }
+    },
+    "2026-05-31-session-ttl-cleanup": {
+      "epic": null,
+      "stories": {
+        "基于最后活跃时间的 TTL 过期判定": null,
+        "过期 session 一次性清理": null,
+        "TTL 时长可配置与覆盖": null,
+        "删除容错与日志记录": null,
+        "内置维护触发(无需外部调度)": null
+      }
+    },
+    "2026-05-31-skill-env-var-rename": {
+      "epic": null,
+      "stories": {
+        "通过 FLEETENT_SKILLS_DIR 覆盖 skills 目录": null
+      }
+    },
+    "2026-05-31-skill-name-conflict-warning": {
+      "epic": null,
+      "stories": {
+        "同名 Skill 冲突报警": null,
+        "确定性选定唯一胜出者": null,
+        "无冲突时行为不变": null
+      }
+    },
+    "2026-05-31-skill-nested-scan": {
+      "epic": null,
+      "stories": {
+        "递归扫描任意层级 SKILL.md": null,
+        "单层扫描行为保持兼容": null
+      }
+    },
+    "2026-05-31-skill-read-on-demand": {
+      "epic": null,
+      "stories": {
+        "可用 Skill 清单注入(L1 感知)": null,
+        "Skill 全文按需经工具加载": null,
+        "清单进稳定可缓存前缀": null
+      }
+    },
+    "2026-05-31-skill-yaml-frontmatter": {
+      "epic": null,
+      "stories": {
+        "标准 YAML frontmatter 解析": null,
+        "扩展元数据字段承载": null,
+        "解析失败明确报警并跳过": null
+      }
+    },
+    "2026-05-31-sync-intelligence-capability-status": {
+      "epic": null,
+      "stories": {
+        "Intelligence capability status documentation": null
+      }
+    },
+    "2026-05-31-termination-framework": {
+      "epic": null,
+      "stories": {
+        "统一终止检查点": null,
+        "可扩展的终止策略注册表": null,
+        "max_turns 终止": null,
+        "consecutive_failures 终止": null,
+        "approval_rejected 终止": null,
+        "终止原因码写入 trace": null
+      }
+    },
+    "2026-05-31-test-suite-organization": {
+      "epic": null,
+      "stories": {
+        "Layered test suite organization": null,
+        "Fast default feedback": null,
+        "Agent guidance matches test layers": null
+      }
+    },
+    "2026-05-31-vector-store-foundation": {
+      "epic": null,
+      "stories": {
+        "Vector store public API": null,
+        "Vector store configuration": null,
+        "Namespace helpers": null,
+        "Deterministic embedding backend": null,
+        "In-memory vector backend": null,
+        "Namespace isolation": null,
+        "Upsert overwrite": null,
+        "Delete vector": null,
+        "Search ordering": null
+      }
+    },
+    "2026-05-31-vector-store-sqlite-backend": {
+      "epic": null,
+      "stories": {
+        "Vector store configuration": null,
+        "SQLite persistent vector backend": null,
+        "SQLite backend similarity and data validation": null,
+        "Vector backend adapter boundary": null
+      }
+    },
+    "2026-06-01-cancellation-propagation": {
+      "epic": null,
+      "stories": {
+        "单向 cancel token 通路": null,
+        "两层取消保护——cooperative 与硬 deadline": null,
+        "主循环在取消时优雅停止": null,
+        "取消时真正中止工具执行并释放资源": null,
+        "取消终止写入 trace": null,
+        "cancel token 接口对外契约": null,
+        "cancelled 终止已接入主循环": null
+      }
+    },
+    "2026-06-01-compression-anti-flap": {
+      "epic": null,
+      "stories": {
+        "反抖动状态 session 级持久化、按次传入、跨 run 累计且无全局可变状态": null,
+        "连续低节省熔断关闭自动压缩并告警": null,
+        "手动与上下文过长入口豁免反抖动门控": null,
+        "最小压缩间隔滞后窗口": null,
+        "反抖动阈值可配置与注入": null
+      }
+    },
+    "2026-06-01-compression-incremental-summary": {
+      "epic": null,
+      "stories": {
+        "多次压缩增量摘要": null,
+        "摘要文本标注来源": null,
+        "摘要失败降级不崩溃": null,
+        "累积摘要随 session 持久化": null,
+        "错误触发压缩沿用增量摘要与降级": null
+      }
+    },
+    "2026-06-01-compression-layered-retention": {
+      "epic": null,
+      "stories": {
+        "压缩切分为头部 / 中段 / 尾部三层": null,
+        "完整保留用户初始意图": null,
+        "尾部保留沿用工具对完整性": null,
+        "初始意图保留条数受上界约束": null,
+        "头部完整层计入目标线投影": null,
+        "短会话退化不产生空摘要": null
+      }
+    },
+    "2026-06-01-compression-pre-cleanup": {
+      "epic": null,
+      "stories": {
+        "压缩前纯规则清理预处理": null,
+        "图片与二进制占位块兜底替换": null,
+        "重复工具调用去重": null,
+        "清理不改变触发与目标线语义": null
+      }
+    },
+    "2026-06-01-compression-trace": {
+      "epic": null,
+      "stories": {
+        "每次压缩写入一条压缩 trace": null,
+        "压缩 trace 记录规定的元数据字段": null,
+        "压缩 trace 记录 session 归因键": null,
+        "压缩 trace 只记元数据与摘要标识不落原始大对象": null,
+        "压缩 trace 写入失败不影响压缩主流程": null,
+        "压缩 trace 复用统一 trace 出口与可注入路径": null
+      }
+    },
+    "2026-06-01-configuration-foundation": {
+      "epic": null,
+      "stories": {
+        "Unified settings file": null,
+        "Secrets stay outside settings YAML": null,
+        "Legacy feature YAML files removed": null,
+        "Minimal settings surface": null,
+        "Dynamic tasks survive server restart": null,
+        "Static tasks loaded from config/cron.yaml": null,
+        "Scheduler global settings": null,
+        "Startup tool registration": null,
+        "Webhook source configuration": null,
+        "Webhook global settings": null
+      }
+    },
+    "2026-06-01-connector-credential-injection": {
+      "epic": null,
+      "stories": {
+        "connector 凭证接口": null,
+        "@tool 声明 connector 与 scopes": null,
+        "dispatch 注入已授权凭证": null,
+        "未授权时短路返回 consent": null,
+        "凭证不泄漏": null
+      }
+    },
+    "2026-06-01-cost-aware-routing": {
+      "epic": null,
+      "stories": {
+        "路由据预算剩余倾向更便宜的模型": null,
+        "消费 AR18 暴露的只读剩余快照，路由层与 agent_loop 均不重算层级": null,
+        "未传入剩余信号或预算充裕时路由与现状等价": null,
+        "紧张级别到成本动作的映射可配置": null,
+        "请求级 override 优先级高于成本感知降级": null
+      }
+    },
+    "2026-06-01-cost-budget-control": {
+      "epic": null,
+      "stories": {
+        "五层成本预算层级": null,
+        "每层上限可配置且默认不拦截": null,
+        "跨运行累计持久化": null,
+        "预算按窗口周期重置": null,
+        "跨运行层聚合检查触发 budget_exceeded": null,
+        "系统内部操作豁免计入预算": null,
+        "任一层超限触发 Grace Call 而非硬切断": null,
+        "暴露预算剩余只读快照供成本感知路由": null
+      }
+    },
+    "2026-06-01-database-default-path-rename": {
+      "epic": null,
+      "stories": {
+        "Unified settings file": null,
+        "Minimal settings surface": null,
+        "Database runtime configuration": null
+      }
+    },
+    "2026-06-01-deployment-upgrade-and-backup": {
+      "epic": null,
+      "stories": {
+        "SQLite upgrade entry point": null,
+        "Pre-migration SQLite backup": null,
+        "Upgrade dry run": null,
+        "Backup-only mode": null,
+        "Migration failure handling": null,
+        "Manual restore documentation": null,
+        "Upgrade excludes install package scope": null
+      }
+    },
+    "2026-06-01-intelligence-capability-roadmap": {
+      "epic": null,
+      "stories": {
+        "Intelligence capability roadmap": null
+      }
+    },
+    "2026-06-01-iteration-budget-grace-call": {
+      "epic": null,
+      "stories": {
+        "两维迭代预算": null,
+        "预算判定注册进终止框架": null,
+        "系统内部操作豁免计入预算": null,
+        "预算耗尽时触发 Grace Call 生成进展总结": null,
+        "Grace Call 使用按固定比例预留的独立 token 预算": null,
+        "Grace Call 自身失败降级为部分结果": null,
+        "budget_exceeded 终止已接入主循环": null,
+        "max_turns 终止": null
+      }
+    },
+    "2026-06-01-knowledge-base-connectors-confluence": {
+      "epic": null,
+      "stories": {
+        "Confluence connector configuration": null,
+        "Confluence scope listing": null,
+        "Confluence page parsing": null,
+        "Confluence sync planning": null,
+        "Confluence sync execution": null,
+        "Confluence rate limit and retry": null,
+        "Confluence manual sync public API": null,
+        "Confluence connector tests avoid real API by default": null
+      }
+    },
+    "2026-06-01-knowledge-base-connectors-google-drive": {
+      "epic": null,
+      "stories": {
+        "Google Drive connector configuration": null,
+        "Google Drive folder listing": null,
+        "Google Drive content parsing": null,
+        "Google Drive sync planning": null,
+        "Google Drive sync execution": null,
+        "Google Drive manual sync public API": null,
+        "Google Drive connector tests avoid real API by default": null
+      }
+    },
+    "2026-06-01-knowledge-base-sync-planner": {
+      "epic": null,
+      "stories": {
+        "Knowledge-base sync planner public API": null,
+        "Sync plan separates planning from execution": null,
+        "Local sync action planning": null,
+        "Missing-source delete planning": null,
+        "Sync plan execution": null,
+        "Local sync delegates to planner": null,
+        "Sync planner excludes advanced connector runtime": null
+      }
+    },
+    "2026-06-01-long-term-context-budget-policy": {
+      "epic": null,
+      "stories": {
+        "Deterministic budget policy": null,
+        "Source budget limits": null,
+        "Source-aware conflict preference": null,
+        "Budget decision metadata": null,
+        "Conservative policy scope": null
+      }
+    },
+    "2026-06-01-long-term-context-evaluation": {
+      "epic": null,
+      "stories": {
+        "Fast default feedback": null,
+        "Long-term context evaluation fixtures": null,
+        "Deterministic long-term context evaluation": null,
+        "Optional real-provider long-term context smoke": null
+      }
+    },
+    "2026-06-01-loop-detection": {
+      "epic": null,
+      "stories": {
+        "粗粒度循环检测注册进终止框架": null,
+        "同一工具无进展的反复调用识别为循环": null,
+        "两段式响应——先注入警告再强制终止": null,
+        "检测阈值可配置且终止写入 trace": null,
+        "警告注入对压缩轮的可见性": null,
+        "loop_detected 终止已接入主循环": null
+      }
+    },
+    "2026-06-01-mcp-degradation": {
+      "epic": null,
+      "stories": {
+        "统一可用性判定整合连接健康与认证不可用两正交态": null,
+        "不可用服务的工具从 AI 可见 schema 临时摘除并在恢复后重新可见": null,
+        "降级模式可配置为 degrade / strict / silent": null,
+        "启动失败降级与运行时降级对 AI 表现一致": null,
+        "降级期工具调用仍安全返回不可用结果": null
+      }
+    },
+    "2026-06-01-mcp-health-reconnect": {
+      "epic": null,
+      "stories": {
+        "断连异常归类为 mcp_disconnect 并据标志位重连": null,
+        "连接健康状态按服务隔离": null,
+        "周期性探活检测断连": null,
+        "指数退避重连与永久不可用标记": null,
+        "重连成功后自动恢复": null,
+        "降级期间工具调用返回不可用信号": null
+      }
+    },
+    "2026-06-01-mcp-oauth2": {
+      "epic": null,
+      "stories": {
+        "OAuth2 客户端认证向自托管 token 端点取 token": null,
+        "access token 过期前自动刷新且对调用透明": null,
+        "token 存储按服务隔离且可注入": null,
+        "认证失败标记服务认证不可用并提示重新授权": null
+      }
+    },
+    "2026-06-01-mcp-server-config-split": {
+      "epic": null,
+      "stories": {
+        "Minimal settings surface": null,
+        "Startup tool registration": null,
+        "Dedicated MCP server definition file": null
+      }
+    },
+    "2026-06-01-mcp-session-management": {
+      "epic": null,
+      "stories": {
+        "会话过期透明重建并重试": null,
+        "会话重建至多一次": null,
+        "认证失败不触发会话重建": null,
+        "会话生命周期按服务隔离持有": null,
+        "关停时主动释放会话": null
+      }
+    },
+    "2026-06-01-memory-and-kb-real-embedding-evaluation": {
+      "epic": null,
+      "stories": {
+        "Fast default feedback": null,
+        "Knowledge-base combined embedding evaluation": null,
+        "Memory semantic retrieval embedding evaluation": null,
+        "Combined real embedding evaluation guard": null
+      }
+    },
+    "2026-06-01-memory-reflection-maintenance": {
+      "epic": null,
+      "stories": {
+        "Memory domain terminology": null,
+        "User Memory remains user scoped": null,
+        "User Memory controlled mutation boundary": null,
+        "User Memory maintenance proposal lifecycle": null,
+        "User Memory owner approval": null,
+        "Memory maintenance action risk boundaries": null,
+        "Interaction-time confirmation metadata": null,
+        "Shared Memory and KB migration suggestions": null,
+        "Maintenance apply uses Memory public API": null
+      }
+    },
+    "2026-06-01-memory-retention-and-compaction": {
+      "epic": null,
+      "stories": {
+        "Memory retention maintenance public API": null,
+        "Memory retention dry-run": null,
+        "Memory retention apply": null,
+        "Memory duplicate compaction": null
+      }
+    },
+    "2026-06-01-observability-performance-summary": {
+      "epic": null,
+      "stories": {
+        "Performance summary public API": null,
+        "Performance summary reads through trace API": null,
+        "Performance query filters": null,
+        "Run-level performance metrics": null,
+        "LLM and fallback metrics": null,
+        "Tool performance metrics": null,
+        "Permission wait metrics": null,
+        "Performance payload tolerance": null
+      }
+    },
+    "2026-06-01-observability-runtime-event-coverage": {
+      "epic": null,
+      "stories": {
+        "Agent runtime lifecycle trace events": null,
+        "LLM call trace events": null,
+        "Model fallback trace events": null,
+        "Tool call trace events": null,
+        "Permission trace events": null,
+        "Context compression trace events": null,
+        "Final reply trace event": null,
+        "Runtime event payload safety": null,
+        "Runtime events are correlated by run id": null
+      }
+    },
+    "2026-06-01-reflection-report-evaluation": {
+      "epic": null,
+      "stories": {
+        "Fast default feedback": null,
+        "Reflection report evaluation fixtures": null,
+        "Deterministic reflection report evaluation": null,
+        "Optional real-route reflection smoke": null
+      }
+    },
+    "2026-06-01-sandbox-enablement-control": {
+      "epic": null,
+      "stories": {
+        "全局三态 mode 控制代码执行能力": null,
+        "agent 级 code_execution 开关": null,
+        "Docker 不可用时自动降级为 off": null,
+        "agent 定义承载 features 配置并兼容旧库": null,
+        "run_code 调用可获取 agent 与 session 上下文": null,
+        "沙箱客户端提供 Docker 可用性探测": null
+      }
+    },
+    "2026-06-01-sandbox-exec-timeout": {
+      "epic": null,
+      "stories": {
+        "沙箱执行受 exec_timeout 约束": null,
+        "超时后对容器执行 docker kill 序列强制终止": null,
+        "沙箱执行超时归一为 sandbox_timeout 错误": null,
+        "区分沙箱超时与外部取消": null,
+        "不越界改动工具层超时与容器去留策略": null
+      }
+    },
+    "2026-06-01-sandbox-lifecycle": {
+      "epic": null,
+      "stories": {
+        "沙箱容器按 scope 决定存活粒度": null,
+        "session scope 会话内复用、会话结束销毁": null,
+        "agent scope 以可写 rootfs 创建并经 docker commit 固化依赖": null,
+        "agent scope 闲置超时自动销毁": null,
+        "沙箱客户端支持按归属命名与依赖固化": null
+      }
+    },
+    "2026-06-01-sandbox-orphan-cleanup": {
+      "epic": null,
+      "stories": {
+        "清理 sandbox 前缀的孤儿容器": null,
+        "平台启动时自动清理且不阻断启动": null,
+        "提供不依赖调度器的按需触发入口": null,
+        "沙箱客户端支持按前缀枚举容器": null
+      }
+    },
+    "2026-06-01-sandbox-output-truncation": {
+      "epic": null,
+      "stories": {
+        "沙箱输出超阈值时返回前被截断": null,
+        "stdout 与 stderr 各自独立按各自阈值截断": null,
+        "截断采用头尾保留并标明原始大小": null,
+        "多字节字符不被截断破坏": null,
+        "字节阈值可注入且不依赖全局可变状态": null,
+        "截断只作用于返回 AI 的副本不削减 trace 与执行结果": null
+      }
+    },
+    "2026-06-01-sandbox-resource-limits": {
+      "epic": null,
+      "stories": {
+        "沙箱资源限制经配置声明": null,
+        "未配置时回退安全默认值": null,
+        "非法资源配置不被静默接受": null,
+        "exec_timeout 仅承载不在本能力强制终止": null,
+        "沙箱客户端按次传入资源配置构造创建命令": null
+      }
+    },
+    "2026-06-01-sandbox-secret-injection": {
+      "epic": null,
+      "stories": {
+        "敏感名称环境变量不传入容器": null,
+        "仅按变量名过滤，不扫描变量值": null,
+        "三层来源统一过滤后注入": null,
+        "宿主机敏感变量绝不泄漏进沙箱": null,
+        "沙箱客户端按需注入已过滤环境变量": null
+      }
+    },
+    "2026-06-01-sandbox-trace-logging": {
+      "epic": null,
+      "stories": {
+        "沙箱执行结果写入 trace": null,
+        "trace 记录带统一的类型标记": null,
+        "trace 写入路径为单一可隔离常量": null,
+        "trace 仅记录元数据不记录内容": null,
+        "trace 写入失败不阻断执行结果返回": null
+      }
+    },
+    "2026-06-01-scheduled-task-session-binding": {
+      "epic": null,
+      "stories": {
+        "定时任务 session 绑定语义可配置且显式声明": null,
+        "默认每次触发独立 session": null,
+        "scheduled_tasks 承载可选 session_id 字段": null,
+        "触发时据 session_id 接入 session 持久化": null
+      }
+    },
+    "2026-06-01-skill-disable-mechanism": {
+      "epic": null,
+      "stories": {
+        "frontmatter enabled 显式禁用单个 Skill": null,
+        "单一清单资格谓词统一裁决禁用": null,
+        "禁用来源写入运行日志": null
+      }
+    },
+    "2026-06-01-skill-hot-reload": {
+      "epic": null,
+      "stories": {
+        "运行期触发重扫无需重启": null,
+        "重扫期间原子切换，无半空索引窗口": null,
+        "重扫失败保留旧索引并告警": null,
+        "in-flight 任务继续使用旧版 Skill": null
+      }
+    },
+    "2026-06-01-skill-injection-audit": {
+      "epic": null,
+      "stories": {
+        "Skill 内容的静态注入审计": null,
+        "命中严重模式拒绝经注入面到达模型": null,
+        "命中可疑模式记录并告警": null
+      }
+    },
+    "2026-06-01-sub-agent-lifecycle": {
+      "epic": null,
+      "stories": {
+        "子 agent 生命周期状态机": null,
+        "子任务超时控制": null,
+        "区分超时与外部取消终态": null,
+        "生命周期状态可观测": null,
+        "生命周期状态持久化": null,
+        "既有并行执行行为向后兼容": null
+      }
+    },
+    "2026-06-01-tool-arg-sanitization": {
+      "epic": null,
+      "stories": {
+        "assistant tool_call 敏感名参数值在写入 trace 前被脱敏": null,
+        "脱敏复用 SB5 敏感名规则，单一事实来源": null,
+        "脱敏仅作用于 trace，session 工作上下文不脱敏": null,
+        "仅名过滤的局限被显式承认": null
+      }
+    },
+    "2026-06-01-tool-call-guardrails": {
+      "epic": null,
+      "stories": {
+        "相同工具相同参数严格连续重复触发守卫": null,
+        "守卫命中先短路后停止两阶段响应": null,
+        "守卫阈值默认值与可配置": null,
+        "未命中守卫时不改变既有 dispatch 行为": null
+      }
+    },
+    "2026-06-01-tool-result-truncation": {
+      "epic": null,
+      "stories": {
+        "超阈值工具结果写入消息前被截断": null,
+        "截断采用头尾保留并插入 breadcrumb": null,
+        "多字节字符不被截断破坏": null,
+        "字节阈值可注入且未配置时回退安全默认": null,
+        "截断只作用于消息副本不削减完整结果来源": null,
+        "自截断工具对工具结果截断豁免": null
+      }
+    },
+    "2026-06-01-tool-timeout": {
+      "epic": null,
+      "stories": {
+        "单次工具调用受配置时限超时保护": null,
+        "超时复用 AR19 cancel token 的 deadline 机制": null,
+        "工具超时归一为 tool_timeout 错误返回给 LLM": null,
+        "超时时限可配置且 per-tool 覆盖全局默认": null,
+        "工具超时与沙箱执行超时（SB7）边界清晰": null
+      }
+    },
+    "2026-06-01-vector-store-reindex-jobs": {
+      "epic": null,
+      "stories": {
+        "Knowledge-base indexable iterator": null,
+        "Knowledge-base indexable iterator is a public boundary": null,
+        "Memory indexable iterator": null,
+        "Memory indexable iterator is a public boundary": null,
+        "Vector namespace clearing": null,
+        "Indexable item shape": null,
+        "Reindex public API": null,
+        "Reindex dry run": null,
+        "Memory vector rebuild": null,
+        "Knowledge-base vector rebuild": null,
+        "Reindex excludes background job runtime": null
+      }
+    },
+    "2026-06-01-vision-as-tool": {
+      "epic": null,
+      "stories": {
+        "图像理解经 analyze_image 工具按需提供": null,
+        "入站图片存盘,主上下文仅带引用": null,
+        "含图消息首次自动抽取并回落文本路由": null
+      }
+    },
+    "2026-06-02-2026-05-29-multi-agent-management": {
+      "epic": null,
+      "stories": {
+        "Version and binding endpoints reuse role-based Session auth": null,
+        "Version management endpoints": null,
+        "Binding endpoints": null,
+        "Agent definition storage": null,
+        "User-to-agent assignment": null,
+        "allowed_tools wildcard support": null,
+        "Schema": null,
+        "invoke_agent built-in tool": null,
+        "Depth limit of 1 enforced via is_sub_agent": null,
+        "invoke_agent does not bypass parent's permission model": null,
+        "invoke_agent runs are recorded in eval trace under their own agent_name": null,
+        "Per-agent skills directory": null,
+        "Per-agent MCP server allowlist": null,
+        "Per-agent model overrides": null,
+        "Per-agent memory namespace": null,
+        "Memory namespace schema migration": null,
+        "agent_versions table schema": null,
+        "Active version pointer is single source of truth": null,
+        "Versions are immutable": null,
+        "AgentSnapshot is the runtime representation": null,
+        "Session locks to its initial snapshot": null,
+        "Backfill version 1 for pre-existing agents": null,
+        "Channel-to-agent binding storage": null,
+        "Channel binding takes priority over user binding in agent lookup": null,
+        "channel_agents carries bound_version_id audit column": null
+      }
+    },
+    "2026-06-02-2026-05-30-im-gateway-management": {
+      "epic": null,
+      "stories": {
+        "Channel allowlist storage": null,
+        "Per-platform opt-in enforcement": null,
+        "Routing enforces the channel allowlist before the agent pipeline": null,
+        "Allowlist management surface": null,
+        "Config resolution with .env fallback": null,
+        "Masked read for management surfaces": null,
+        "Update connector config": null,
+        "Seed connectors from environment": null,
+        "Connector registry storage": null,
+        "Connector status reporting": null,
+        "Runtime enable and disable": null,
+        "Unconfigured connectors are not started": null,
+        "Connector listing exposes status": null,
+        "IM SDK reconnect": null,
+        "Adapter startup is connector-driven and credentials come from the registry": null,
+        "Routing enforces the channel allowlist": null
+      }
+    },
+    "2026-06-02-2026-05-30-user-management": {
+      "epic": null,
+      "stories": {
+        "Three-tier roles": null,
+        "Built-in admin seeding": null,
+        "Forced password reset on first login": null,
+        "Built-in admin is protected": null,
+        "Email/password login with idle timeout": null,
+        "2FA for high-risk operations": null,
+        "No public self-registration": null,
+        "Multiple API keys per user": null,
+        "Agent-level scope enforcement": null,
+        "Key validity on authentication": null,
+        "Key usage tracking": null,
+        "Expiry reminder and renewal": null,
+        "New IM users require approval before access": null,
+        "New IM users are allowed by default": null,
+        "Batch block/restore and unified identity view": null,
+        "Admin can block an IM user": null,
+        "All admin write operations are audited": null,
+        "Audit log is searchable and exportable": null,
+        "High-risk operations require second confirmation": null,
+        "Per-user and global quotas": null,
+        "Over-quota requests are rejected": null,
+        "One-click cascade block": null,
+        "Unblock does not revive keys": null,
+        "Batch block": null,
+        "Expanded users schema": null,
+        "API keys move to a dedicated table": null,
+        "Key resolution enforces validity": null,
+        "Admin creates users manually": null,
+        "One-time invite links": null,
+        "CSV bulk import": null,
+        "User list and lifecycle": null
+      }
+    },
+    "2026-06-02-2026-06-02-agent-management-console": {
+      "epic": null,
+      "stories": {
+        "Role-based guard for agent lifecycle and console writes": null,
+        "Agent lifecycle, clone, template, and observability endpoints": null,
+        "Agent console state storage": null,
+        "Routing honors agent status": null,
+        "Enable / disable toggle preserves definition and bindings": null,
+        "Binding protection before archive": null,
+        "Archive requires confirmation and is reversible within retention": null,
+        "State machine transitions": null,
+        "Per-agent aggregated observability view": null,
+        "Managed / adhoc provenance badge": null,
+        "Stable identity across provenance changes": null,
+        "Drift flag on managed agents": null,
+        "Clone an agent without bindings": null,
+        "Built-in template library": null
+      }
+    },
+    "2026-06-02-2026-06-02-agent-statistics-panel": {
+      "epic": null,
+      "stories": {
+        "Per-agent core metrics panel": null,
+        "Multi-agent comparison view": null,
+        "Cost aggregation with model pricing": null,
+        "Dependent fields show placeholder until available": null,
+        "Tool and governance metrics": null,
+        "allowed_tools coverage hint": null,
+        "Model, skill and binding distribution": null,
+        "Per-user usage and frequency ranking": null,
+        "Drilldown by user / channel / model / time": null,
+        "Export and scheduled report": null,
+        "Read-only access for viewer and admin": null,
+        "Drill from user to request list": null,
+        "Single-request full event stream": null,
+        "Request correlation by request_id": null,
+        "Sub_agent subtree expansion": null,
+        "Session-level degradation when request_id is missing": null
+      }
+    },
+    "2026-06-02-2026-06-02-askit-orchestration-console": {
+      "epic": null,
+      "stories": {
+        "Series-grouped console layout": null,
+        "Asynchronous task with streaming logs and history": null,
+        "Deploy check gate": null,
+        "Dry-run preview for deploy": null,
+        "Override-flow review with diff and Promote/Discard/Skip": null,
+        "Cron declared-vs-installed diff": null,
+        "Redacted environment diagnostics": null,
+        "Migrations default to dry-run": null,
+        "Role-based access in the console": null,
+        "Per-workspace serial write queue": null,
+        "Subprocess invocation with pinned askit version": null,
+        "Idempotent agents apply API": null,
+        "Apply owns the agent definition only, never bindings": null,
+        "Apply upsert resolution and adopt": null,
+        "Skills delivery triggers hot reload": null,
+        "Apply is authenticated and audited": null,
+        "Provenance badge for agents and skills": null,
+        "UI edits to managed objects create drift that can flow back": null,
+        "Discarded drift is restored by spec on next deploy": null,
+        "Immutable fields restored on deploy": null,
+        "Ad-hoc to managed via decompile keeps identity": null,
+        "Source switch never rebuilds the object": null
+      }
+    },
+    "2026-06-02-2026-06-02-chat-management": {
+      "epic": null,
+      "stories": {
+        "Isolated playground session": null,
+        "Streaming reply with per-turn observability": null,
+        "Per-request parameter overrides": null,
+        "Controlled approval bypass (playground only)": null,
+        "Playground retention, pinning, and export": null,
+        "Session list and search": null,
+        "Per-turn replay reuses read-only browsing": null,
+        "Session takeover with human injection": null,
+        "Force-end / clear / reset": null,
+        "Batch disposal and quota linkage": null,
+        "Export with audit trail": null,
+        "Chat management permissions and audit": null,
+        "Session metadata": null,
+        "Controlled write hooks": null
+      }
+    },
+    "2026-06-02-2026-06-02-connector-management": {
+      "epic": null,
+      "stories": {
+        "MCP server list and connection status": null,
+        "Registered tool namespace visibility": null,
+        "Manual reconnect and re-handshake": null,
+        "MCP doctor diagnostic entry": null,
+        "MCP management permissions and audit": null,
+        "Connector directory and configuration": null,
+        "Per-user authorization matrix": null,
+        "Admin cannot complete first-time consent on behalf of a user": null,
+        "Admin revoke on behalf of a user": null,
+        "Offboarding linkage visibility": null,
+        "Credential lifecycle observability": null,
+        "Sensitive value masking across all views": null
+      }
+    },
+    "2026-06-02-2026-06-02-knowledge-base-management": {
+      "epic": null,
+      "stories": {
+        "Knowledge base listing": null,
+        "Create knowledge base": null,
+        "Edit knowledge base": null,
+        "Archive knowledge base with binding protection": null,
+        "Document import via multiple entry points": null,
+        "Document list and lifecycle": null,
+        "Per-KB observation aggregation": null,
+        "Knowledge base management permissions and audit": null,
+        "KB to Agent binding matrix": null,
+        "Binding relation backs scope limiting and delete protection": null,
+        "Retrieval evaluation entry": null,
+        "Retrieval playground": null
+      }
+    },
+    "2026-06-02-2026-06-02-model-provider-management": {
+      "epic": null,
+      "stories": {
+        "Per-model input/output unit price maintenance": null,
+        "Cost aggregation uses token × price": null,
+        "Unconfigured price shows \"not configured\" not 0": null,
+        "Price maintenance is role-gated": null,
+        "Provider listing with routing context": null,
+        "Create, edit, and delete a provider": null,
+        "Per-provider and per-model observability view": null,
+        "api_key never disclosed in plaintext": null,
+        "Role-gated provider management": null,
+        "Lightweight connectivity test for a single provider": null,
+        "Connectivity test is role-gated": null,
+        "Visual task_type routing order edit": null,
+        "Unknown task_type fallback is shown": null,
+        "Fallback chain preview": null,
+        "Health probe status visibility": null,
+        "Routing edits are role-gated": null
+      }
+    },
+    "2026-06-02-2026-06-02-resource-monitoring-alerting": {
+      "epic": null,
+      "stories": {
+        "Alert lifecycle state machine": null,
+        "Critical alert escalation when unacknowledged": null,
+        "Deduplication, aggregation, grouping, and inhibition": null,
+        "Maintenance window silencing": null,
+        "Alert center search, snapshot, and audit": null,
+        "Per-rule multi-channel notification": null,
+        "Webhook outbound to external systems": null,
+        "Send failure retry and failure record": null,
+        "Threshold plus duration alert rules": null,
+        "Rule enable, disable, and clone": null,
+        "Static threshold and optional rate-of-change rules": null,
+        "Rule management is admin-only": null,
+        "Four-layer resource metrics collection": null,
+        "Collector self-failure is surfaced, never silently dropped": null,
+        "Real-time dashboard and history curves": null,
+        "Collection and storage stay within the internal network": null,
+        "Monitoring dashboard is read-only for viewers": null
+      }
+    },
+    "2026-06-02-2026-06-02-skill-management": {
+      "epic": null,
+      "stories": {
+        "Skill list and search": null,
+        "Upload or create with frontmatter validation and audit gating": null,
+        "Edit skill": null,
+        "Global enable/disable": null,
+        "Archive (soft delete) with reference protection and restore": null,
+        "Security audit display and quarantine force-publish": null,
+        "Hot reload trigger": null,
+        "Per-skill observability view": null,
+        "Skill management permissions and audit": null,
+        "Skill-to-Agent matrix": null,
+        "Per-agent enable/disable": null,
+        "Reference view reused for deletion protection": null,
+        "Proposal inbox": null,
+        "Proposal diff": null,
+        "Approve proposal": null,
+        "Reject proposal": null,
+        "Managed / ad-hoc provenance badge": null,
+        "Drift marking on managed skills": null,
+        "Override reflow hooks": null,
+        "Immutable fields restored by spec": null
+      }
+    },
+    "2026-06-02-admin-cli-module-split": {
+      "epic": null,
+      "stories": {
+        "Fleetent admin command compatibility": null,
+        "Admin CLI package split": null,
+        "Admin CLI command domains": null
+      }
+    },
+    "2026-06-02-admin-entrypoint-shim-cleanup": {
+      "epic": null,
+      "stories": {
+        "Admin CLI package split": null
+      }
+    },
+    "2026-06-02-agent-skill-scoping": {
+      "epic": null,
+      "stories": {
+        "Agent definition storage": null,
+        "Schema": null,
+        "agent 可声明 allowed_skills 收窄技能清单": null,
+        "空 allowed_skills 不限制（向后兼容）": null,
+        "非空 allowed_skills 收窄清单": null,
+        "allowed_skills 收窄与技能禁用叠加": null,
+        "allowed_skills 仅作用于清单可见性，非授权边界": null,
+        "run 与 run_stream 透传 allowed_skills": null
+      }
+    },
+    "2026-06-02-capability-docs-package-path-sync": {
+      "epic": null,
+      "stories": {
+        "Capability docs use canonical package names": null,
+        "Owner roadmap uses owner scope rather than intelligence package scope": null
+      }
+    },
+    "2026-06-02-data-retention-and-diagnostics-policy": {
+      "epic": null,
+      "stories": {
+        "Diagnostics configuration": null,
+        "Diagnostics and retention deployment guidance": null,
+        "Diagnostics export": null,
+        "Diagnostics retention planning": null,
+        "Diagnostics retention apply": null,
+        "Diagnostics admin CLI": null
+      }
+    },
+    "2026-06-02-deployment-docker-compose-foundation": {
+      "epic": null,
+      "stories": {
+        "Local configuration initialization": null,
+        "Env and secrets files stay out of git": null,
+        "Credential references use container secrets path in examples": null,
+        "Docker Compose Pilot deployment entrypoint": null,
+        "Container image includes deployment tooling": null,
+        "Explicit migration is recommended for Pilot": null,
+        "Docker deployment docs cover secrets and init flow": null
+      }
+    },
+    "2026-06-02-deployment-pilot-install-checklist": {
+      "epic": null,
+      "stories": {
+        "Pilot install checklist": null
+      }
+    },
+    "2026-06-02-governance-and-integrations-shim-cleanup": {
+      "epic": null,
+      "stories": {
+        "Module interface": null,
+        "Governance package migration": null,
+        "Integrations package migration": null,
+        "Per-session workspace lifecycle": null,
+        "Tool execution in sandbox": null
+      }
+    },
+    "2026-06-02-governance-package-migration": {
+      "epic": null,
+      "stories": {
+        "Governance package migration": null
+      }
+    },
+    "2026-06-02-im-image-attachment-extraction": {
+      "epic": null,
+      "stories": {
+        "Slack 适配器下载入站图片填入 attachments": null,
+        "Telegram 适配器接收 photo 消息并下载图片填入 attachments": null,
+        "attachments 契约与 vision 抽取判据一致": null
+      }
+    },
+    "2026-06-02-integrations-package-migration": {
+      "epic": null,
+      "stories": {
+        "Integrations package migration": null
+      }
+    },
+    "2026-06-02-intelligence-unit-test-hardening": {
+      "epic": null,
+      "stories": {
+        "Intelligence unit test hardening": null,
+        "Intelligence test distribution remains layered": null,
+        "Unit test hardening is tracked after MVP foundation": null
+      }
+    },
+    "2026-06-02-internal-session-maintenance": {
+      "epic": null,
+      "stories": {
+        "进程内周期触发 session 清理": null,
+        "单次清理失败不杀常驻循环": null,
+        "触发器启停接入 server lifespan": null,
+        "CLI 一次性进程不启常驻触发器": null,
+        "触发机制不依赖外部调度器": null
+      }
+    },
+    "2026-06-02-knowledge-base-agent-kb-binding": {
+      "epic": null,
+      "stories": {
+        "Agent knowledge-base binding public API": null,
+        "Agent KB binding behavior": null,
+        "Agent KB scope resolution": null,
+        "Long-term context uses agent KB bindings": null,
+        "Knowledge-base scope diagnostics": null
+      }
+    },
+    "2026-06-02-knowledge-base-connector-operations": {
+      "epic": null,
+      "stories": {
+        "Knowledge-base connector configuration": null,
+        "Pilot connector operation guidance": null,
+        "Connector configuration registry": null,
+        "Connector operations public API": null,
+        "Connector credential and scope check": null,
+        "Connector sync dry-run": null,
+        "Connector sync operation": null,
+        "Connector status persistence": null,
+        "Admin CLI connector operations": null
+      }
+    },
+    "2026-06-02-knowledge-base-entity-relation-extraction": {
+      "epic": null,
+      "stories": {
+        "Knowledge-base entity extraction schema": null,
+        "Entity and relation type boundaries": null,
+        "Entity normalization and scoped upsert": null,
+        "Explicit entity extraction runs": null,
+        "Document-level replacement semantics": null,
+        "Deterministic extractor": null,
+        "Extraction evidence": null,
+        "Entity extraction public API and CLI": null,
+        "Optional LLM extractor smoke": null,
+        "Entity extraction exclusions": null
+      }
+    },
+    "2026-06-02-knowledge-base-file-parsers-advanced": {
+      "epic": null,
+      "stories": {
+        "Advanced parser public API": null,
+        "Parser registry dispatch": null,
+        "Text-based PDF parser": null,
+        "DOCX parser": null,
+        "PPTX parser": null,
+        "XLSX parser": null,
+        "Advanced local source parsing": null,
+        "Google Drive advanced content parsing": null,
+        "Advanced parser exclusions": null,
+        "Parser dependency boundary": null,
+        "Google Drive content parsing": null
+      }
+    },
+    "2026-06-02-knowledge-base-graph-search": {
+      "epic": null,
+      "stories": {
+        "Knowledge-base graph search public API": null,
+        "Deterministic graph entity matching": null,
+        "Graph search depth": null,
+        "Direction-aware relation expansion": null,
+        "Graph search scoring and dedupe": null,
+        "Graph search scope isolation": null,
+        "Graph search evaluation": null,
+        "Graph search exclusions": null
+      }
+    },
+    "2026-06-02-knowledge-base-query-planner": {
+      "epic": null,
+      "stories": {
+        "Knowledge search planner public API": null,
+        "Rule-based knowledge search planning": null,
+        "Knowledge search plan execution": null,
+        "Planner observability": null,
+        "Planner evaluation": null
+      }
+    },
+    "2026-06-02-memory-layer-legacy-import-cleanup": {
+      "epic": null,
+      "stories": {
+        "Intelligence unit test hardening": null,
+        "Memory indexable iterator": null,
+        "Memory indexable iterator is a public boundary": null,
+        "Memory semantic retrieval embedding evaluation": null,
+        "Memory retention maintenance public API": null,
+        "Memory layer package migration": null
+      }
+    },
+    "2026-06-02-memory-layer-package-migration": {
+      "epic": null,
+      "stories": {
+        "Memory package preserves user memory behavior": null,
+        "Memory layer package migration": null
+      }
+    },
+    "2026-06-02-memory-quality-trend-summary": {
+      "epic": null,
+      "stories": {
+        "Memory quality trend summary design": null
+      }
+    },
+    "2026-06-02-observability-admin-query-api": {
+      "epic": null,
+      "stories": {
+        "Observability admin trace query CLI": null,
+        "Observability admin usage query CLI": null,
+        "Observability admin performance query CLI": null,
+        "Observability admin query rejects invalid time": null
+      }
+    },
+    "2026-06-02-pilot-acceptance-guide": {
+      "epic": null,
+      "stories": {
+        "Pilot acceptance guide": null,
+        "Owner roadmap tracks Pilot acceptance entrypoint": null
+      }
+    },
+    "2026-06-02-plugin-tools": {
+      "epic": null,
+      "stories": {
+        "Agent definition storage": null,
+        "allowed_tools wildcard support": null,
+        "Schema": null,
+        "从插件目录扫描并加载插件": null,
+        "仅加载启用的插件": null,
+        "插件工具加命名空间前缀": null,
+        "清单错误或导入失败时跳过并告警": null,
+        "平台启动时加载插件": null,
+        "agent 须经 plugins 白名单授权方可见可用插件工具": null,
+        "插件名命名空间全局唯一": null
+      }
+    },
+    "2026-06-02-reflection-knowledge-base-reports": {
+      "epic": null,
+      "stories": {
+        "Knowledge-base reflection report public API": null,
+        "Knowledge-base reflection is read-only": null,
+        "Knowledge-base reflection inputs use public APIs": null,
+        "Knowledge-base reflection finding types": null,
+        "Knowledge-base reflection persistence": null,
+        "Knowledge-base reflection evaluation": null
+      }
+    },
+    "2026-06-02-reflection-trend-summary": {
+      "epic": null,
+      "stories": {
+        "Reflection trend summary design": null
+      }
+    },
+    "2026-06-02-rerank-kb-search-integration": {
+      "epic": null,
+      "stories": {
+        "Hybrid RRF fusion": null,
+        "Hybrid search excludes advanced retrieval": null,
+        "Hybrid rerank opt-in": null,
+        "Hybrid rerank candidate pool": null,
+        "Hybrid rerank result mapping": null,
+        "Hybrid rerank failure fallback": null,
+        "Reranked knowledge-base retrieval evaluation": null
+      }
+    },
+    "2026-06-02-shared-memory": {
+      "epic": null,
+      "stories": {
+        "Shared Memory model": null,
+        "Shared Memory public API": null,
+        "Shared Memory vector synchronization": null,
+        "Shared Memory search": null,
+        "Shared Memory reindex boundary": null,
+        "Shared Memory proposal apply": null,
+        "Shared Memory does not inject prompt directly": null
+      }
+    },
+    "2026-06-02-skill-reflection-proposals": {
+      "epic": null,
+      "stories": {
+        "Skill reflection proposal public API": null,
+        "Skill proposal types": null,
+        "Skill proposal evidence and draft": null,
+        "Skill proposal review lifecycle": null,
+        "Skill proposal apply boundary": null,
+        "Skill proposal generation avoids real LLM by default": null,
+        "Skill proposal evaluation": null
+      }
+    },
+    "2026-06-02-source-module-organization-roadmap": {
+      "epic": null,
+      "stories": {
+        "Source module organization roadmap": null
+      }
+    },
+    "2026-06-02-tool-parallel-dispatch": {
+      "epic": null,
+      "stories": {
+        "同一轮多工具并行调度": null,
+        "结果按原序回填且 tool-pair 合法": null,
+        "并行批次取消传播": null,
+        "多风险工具审批策略——审批串行、执行并行": null,
+        "单工具失败隔离与逐结果计数": null,
+        "单轮并发上限可配置": null,
+        "共享沙箱容器并发边界": null,
+        "流式并行期事件按原序": null
+      }
+    },
+    "2026-06-03-add-admin-console-modules": {
+      "epic": null,
+      "stories": {
+        "Agents management tab": null,
+        "Agent lifecycle and clone": null,
+        "Agent versions and bindings": null,
+        "AskIt tab": null,
+        "Run an AskIt task and view detail": null,
+        "Monitoring tab": null,
+        "Alert rules management": null,
+        "Alert handling": null,
+        "OAuth connectors tab": null,
+        "Connector CRUD and grant revoke": null,
+        "MCP servers view": null,
+        "Providers management tab": null,
+        "Provider CRUD and connectivity": null,
+        "Task-type routing": null,
+        "Sessions tab": null,
+        "Session control actions": null,
+        "Chat playground": null,
+        "Skills management tab": null,
+        "Skill lifecycle and binding actions": null,
+        "Skill proposal review": null,
+        "Statistics tab": null,
+        "Request drill-down and trace": null,
+        "Export and reports": null
+      }
+    },
+    "2026-06-03-add-im-platform-connections": {
+      "epic": null,
+      "stories": {
+        "IM connector management section": null,
+        "Add-connection modal with platform dropdown": null,
+        "Dynamic per-platform credential fields": null,
+        "Enable and disable a connector from the console": null,
+        "Per-platform credential field schema": null,
+        "Mask all configured credential fields": null,
+        "Create a connector for a not-yet-configured platform": null
+      }
+    },
+    "2026-06-03-agent-actions-overflow-and-deploy": {
+      "epic": null,
+      "stories": {
+        "Agent lifecycle and clone": null
+      }
+    },
+    "2026-06-03-agent-requires-template": {
+      "epic": null,
+      "stories": {
+        "Agent creation requires an existing template": null,
+        "Agents management tab": null,
+        "agent_versions records its originating template": null
+      }
+    },
+    "2026-06-03-agent-scoped-oauth-mcp": {
+      "epic": null,
+      "stories": {
+        "Per-agent MCP server allowlist": null,
+        "Connector ownership by agent": null,
+        "Connector credential resolution is scoped by agent": null,
+        "MCP server ownership by agent": null,
+        "MCP sessions and credentials isolated per agent": null,
+        "Admin surfaces expose the owning agent": null,
+        "Startup tool registration": null,
+        "Transparent tool dispatch": null,
+        "MCP server list and connection status": null,
+        "Connector directory and configuration": null,
+        "Per-user authorization matrix": null
+      }
+    },
+    "2026-06-03-agents-templates-subtabs": {
+      "epic": null,
+      "stories": {
+        "Agent template editing": null
+      }
+    },
+    "2026-06-03-autogen-resource-ids": {
+      "epic": null,
+      "stories": {
+        "System-generated resource ids": null
+      }
+    },
+    "2026-06-03-complete-agent-crud-console": {
+      "epic": null,
+      "stories": {
+        "Agent create, read-full, update, and delete endpoints": null,
+        "Console and apply seams wired to the store": null,
+        "Agent create and edit": null,
+        "Agent deletion": null,
+        "Agent hard deletion": null
+      }
+    },
+    "2026-06-03-diagnostics-redaction-export-hardening": {
+      "epic": null,
+      "stories": {
+        "Diagnostics manifest": null,
+        "Default summary-only export": null,
+        "Redacted evidence output": null
+      }
+    },
+    "2026-06-03-editable-agent-templates": {
+      "epic": null,
+      "stories": {
+        "Agent template management endpoints": null,
+        "Agent template editing": null,
+        "Agent template storage": null,
+        "Agent template store CRUD": null
+      }
+    },
+    "2026-06-03-expand-agent-bindings": {
+      "epic": null,
+      "stories": {
+        "Agent binding read endpoint": null,
+        "Agent MCP binding endpoints": null,
+        "Agent versions and bindings": null,
+        "Agent invocation resolves live resource bindings": null,
+        "Per-agent MCP server binding storage": null,
+        "MCP bindings union into runtime tool filtering": null,
+        "Agent-centric skill binding read and edit": null,
+        "Per-agent enable/disable": null
+      }
+    },
+    "2026-06-03-expose-agent-version-config-crud": {
+      "epic": null,
+      "stories": {
+        "Agent create, read-full, update, and delete endpoints": null,
+        "Agent create and edit": null
+      }
+    },
+    "2026-06-03-kb-connector-smoke-status": {
+      "epic": null,
+      "stories": {
+        "Connector latest status": null,
+        "Real connector smoke is explicit opt-in": null,
+        "Connector evidence in Pilot report": null
+      }
+    },
+    "2026-06-03-long-term-context-agent-tenant-policy": {
+      "epic": null,
+      "stories": {
+        "Agent tenant context policy design": null
+      }
+    },
+    "2026-06-03-manual-maintenance-entrypoints": {
+      "epic": null,
+      "stories": {
+        "Dry-run first maintenance commands": null,
+        "Maintenance summaries": null,
+        "Shared Memory edits use proposal lifecycle": null,
+        "Public API boundaries": null
+      }
+    },
+    "2026-06-03-merge-im-connectors-into-im-users": {
+      "epic": null,
+      "stories": {
+        "Unified IM module public API": null,
+        "IM module owns all IM tables": null,
+        "Legacy IM import paths are compatibility shims": null,
+        "Behavior-preserving consolidation": null,
+        "Module-owned data": null
+      }
+    },
+    "2026-06-03-merge-im-connectors-ui-into-im-users": {
+      "epic": null,
+      "stories": {
+        "IM connector management section": null
+      }
+    },
+    "2026-06-03-persist-admin-active-tab": {
+      "epic": null,
+      "stories": {
+        "Active tab persists across reload": null
+      }
+    },
+    "2026-06-03-pilot-capability-verification-suite": {
+      "epic": null,
+      "stories": {
+        "Owner capability contract tests": null,
+        "Pilot acceptance E2E smoke tests": null,
+        "Explicit opt-in real smoke tests": null,
+        "Human-readable verification report": null
+      }
+    },
+    "2026-06-03-pilot-readiness-safeguard-fixes": {
+      "epic": null,
+      "stories": {
+        "Real connector smoke is explicit opt-in": null,
+        "Maintenance summaries": null,
+        "Secret-safe config scanning": null
+      }
+    },
+    "2026-06-03-pilot-verification-gate": {
+      "epic": null,
+      "stories": {
+        "Pilot verification gate": null,
+        "Gate report artifacts": null
+      }
+    },
+    "2026-06-03-production-config-validation": {
+      "epic": null,
+      "stories": {
+        "Profile-aware config validation": null,
+        "Secret-safe config scanning": null,
+        "Validation report output": null
+      }
+    },
+    "2026-06-03-redesign-admin-console-ux": {
+      "epic": null,
+      "stories": {
+        "Sidebar navigation layout": null,
+        "Design token layer": null,
+        "Consistent page header per module": null,
+        "Reusable data table presentation": null,
+        "In-app feedback and confirmation": null,
+        "Empty and loading states": null,
+        "Role gating and secret handling preserved": null,
+        "Basic accessibility": null
+      }
+    },
+    "2026-06-03-restructure-model-package": {
+      "epic": null,
+      "stories": {
+        "model 域已迁入 model/": null
+      }
+    },
+    "2026-06-03-restructure-runtime-package": {
+      "epic": null,
+      "stories": {
+        "runtime 域已迁入 runtime/": null
+      }
+    },
+    "2026-06-03-restructure-sandbox-package": {
+      "epic": null,
+      "stories": {
+        "sandbox 域已迁入 integrations/sandbox": null
+      }
+    },
+    "2026-06-03-restructure-session-package": {
+      "epic": null,
+      "stories": {
+        "session 域已迁入 session/": null
+      }
+    },
+    "2026-06-03-restructure-skills-package": {
+      "epic": null,
+      "stories": {
+        "skills 域已迁入 skills/": null
+      }
+    },
+    "2026-06-03-restructure-tools-package": {
+      "epic": null,
+      "stories": {
+        "tools 域已迁入 tools/": null
+      }
+    },
+    "2026-06-03-roomier-template-editor": {
+      "epic": null,
+      "stories": {
+        "Themed, comfortably sized text editors": null
+      }
+    },
+    "2026-06-03-runtime-package-blueprint": {
+      "epic": null,
+      "stories": {
+        "目标 package 结构为权威定义": null,
+        "迁移约定为强制规范": null,
+        "迁移为行为不变的纯结构搬迁": null
+      }
+    },
+    "2026-06-03-split-agent-templates-tab": {
+      "epic": null,
+      "stories": {
+        "Agent template editing": null
+      }
+    },
+    "2026-06-03-trim-agent-modal-to-template-fields": {
+      "epic": null,
+      "stories": {
+        "Agents management tab": null
+      }
+    },
+    "2026-06-03-tui-gateway": {
+      "epic": null,
+      "stories": {
+        "WebSocket 网关端点": null,
+        "连接认证": null,
+        "send 方法触发流式 run": null,
+        "abort 方法中断运行": null,
+        "审批解决经 WebSocket 暴露": null,
+        "会话方法": null,
+        "Transport 抽象与 peer-gone 语义": null,
+        "终端 TUI 客户端": null,
+        "客户端断连处理": null
+      }
+    },
+    "2026-06-03-unify-user-im-identity-admin-ui": {
+      "epic": null,
+      "stories": {
+        "IM connector management section": null,
+        "User list and lifecycle": null
+      }
+    },
+    "2026-06-03-user-scoped-im-connectors": {
+      "epic": null,
+      "stories": {
+        "Per-owner connector registry": null,
+        "Owner-scoped credential resolution with admin-only env fallback": null,
+        "Per-owner adapter lifecycle": null,
+        "Owner-isolated inbound routing": null,
+        "Owner-scoped IM identity and allowlist": null,
+        "Admin sees and manages all owners": null,
+        "Admin UI shows owner scope": null,
+        "Backward-compatible migration to admin owner": null
+      }
+    },
+    "2026-06-04-agent-runtime-cli": {
+      "epic": null,
+      "stories": {
+        "Standalone agent runtime via `fleetent agent run`": null,
+        "HTTP is opt-in via `--port`": null,
+        "One-shot CLI applies the deployed agent": null
+      }
+    },
+    "2026-06-04-agent-yaml-intelligence-config": {
+      "epic": null,
+      "stories": {
+        "Secrets stay outside settings YAML": null,
+        "Agent file may carry intelligence configuration": null
+      }
+    },
+    "2026-06-04-clarify-test-layer-boundaries": {
+      "epic": null,
+      "stories": {
+        "Unit test layer excludes integration dependencies": null,
+        "Test layer guard prevents new unit/integration drift": null
+      }
+    },
+    "2026-06-04-config-dir-single-agent-yaml": {
+      "epic": null,
+      "stories": {
+        "Single-file agent home loading": null,
+        "Configuration templates": null
+      }
+    },
+    "2026-06-04-configurable-data-home": {
+      "epic": null,
+      "stories": {
+        "Central path resolver": null,
+        "Home resolution precedence": null,
+        "Development behavior unchanged": null,
+        "Path constant injectability": null,
+        "DATABASE_URL bypass consolidation": null
+      }
+    },
+    "2026-06-04-drop-global-config-files": {
+      "epic": null,
+      "stories": {
+        "Global config files are optional": null
+      }
+    },
+    "2026-06-04-eliminate-unit-db-test-exceptions": {
+      "epic": null,
+      "stories": {
+        "Unit test layer has no real database dependencies": null,
+        "Legacy DB unit exceptions are eliminated": null
+      }
+    },
+    "2026-06-04-env-config-vector-providers": {
+      "epic": null,
+      "stories": {
+        "Vector provider config uses env references": null
+      }
+    },
+    "2026-06-04-file-driven-agent-config": {
+      "epic": null,
+      "stories": {
+        "Agent definition storage": null,
+        "Runtime agent resolution is file-sourced": null,
+        "Channel binding takes priority over user binding in agent lookup": null,
+        "Global default agent configuration": null,
+        "Agent lookup priority order": null,
+        "Self-contained agent config file": null,
+        "Zero-database runtime resolution": null,
+        "Scan-built in-memory index": null,
+        "Inline MCP overlay without database": null,
+        "Secrets rejected in agent files": null,
+        "Binding conflicts fail fast": null
+      }
+    },
+    "2026-06-04-install-script": {
+      "epic": null,
+      "stories": {
+        "Install script entry point": null,
+        "Environment hygiene": null,
+        "uv runtime provisioning": null,
+        "Global command installation": null,
+        "Decoupled state home": null,
+        "Configuration templates": null,
+        "Database initialization": null,
+        "Optional dependency precheck": null,
+        "Non-interactive flags": null
+      }
+    },
+    "2026-06-04-installer-seed-agent-yaml": {
+      "epic": null,
+      "stories": {
+        "Configuration templates": null
+      }
+    },
+    "2026-06-04-intelligence-production-validation-readiness": {
+      "epic": null,
+      "stories": {
+        "Pilot readiness roadmap": null,
+        "Fast default feedback": null,
+        "Create knowledge base": null,
+        "Document import via multiple entry points": null,
+        "Document list and lifecycle": null,
+        "Retrieval playground": null,
+        "Memory extraction actions": null,
+        "Optional real LLM memory extraction evaluation": null
+      }
+    },
+    "2026-06-04-optimize-agents-console": {
+      "epic": null,
+      "stories": {
+        "Agent knowledge-base binding endpoints": null,
+        "Agent OAuth connector binding endpoints": null,
+        "Agents management tab": null,
+        "Agent versions and bindings": null,
+        "Per-agent OAuth connector binding store": null
+      }
+    },
+    "2026-06-04-per-agent-im-access": {
+      "epic": null,
+      "stories": {
+        "Per-agent IM access config in the agent home": null,
+        "Agent-local approval store": null,
+        "IM user identity resolved locally": null,
+        "Runtime access gate is local and zero-DB": null
+      }
+    },
+    "2026-06-04-per-agent-slack-connector": {
+      "epic": null,
+      "stories": {
+        "Agent file may declare platform connectors": null,
+        "Secrets rejected in agent files": null,
+        "Per-platform credential field schema": null,
+        "Seed connectors from environment": null,
+        "Slack is excluded from the owner-level connector lifecycle": null,
+        "Adapter startup is connector-driven and credentials come from the registry": null,
+        "agent.yaml declares a Slack connector": null,
+        "One Socket Mode connection per declaring agent": null,
+        "Reload reconciles connections against the agent index": null,
+        "Slack routing resolves the agent implicitly from the connection": null
+      }
+    },
+    "2026-06-04-platform-agent-lifecycle": {
+      "epic": null,
+      "stories": {
+        "Create/update materializes a runnable agent home": null,
+        "Start and stop agent processes without monitoring": null
+      }
+    },
+    "2026-06-04-platform-control-plane": {
+      "epic": null,
+      "stories": {
+        "Platform boots as a control plane with no agents": null,
+        "Agent execution endpoints are not on the platform": null
+      }
+    },
+    "2026-06-04-raise-unit-coverage-to-75": {
+      "epic": null,
+      "stories": {
+        "Repository unit coverage gate stays at 75 percent": null,
+        "Unit coverage is improved through layered unit tests": null
+      }
+    },
+    "2026-06-04-real-kb-connector-http-clients": {
+      "epic": null,
+      "stories": {
+        "Real connector HTTP clients": null
+      }
+    },
+    "2026-06-04-remove-package-migration-shims": {
+      "epic": null,
+      "stories": {
+        "Flat-path package migration cleanup": null,
+        "sandbox 域已迁入 integrations/sandbox": null,
+        "session 域已迁入 session/": null,
+        "skills 域已迁入 skills/": null,
+        "model 域已迁入 model/": null,
+        "tools 域已迁入 tools/": null,
+        "runtime 域已迁入 runtime/": null
+      }
+    },
+    "2026-06-04-single-agent-config-file": {
+      "epic": null,
+      "stories": {
+        "Single-file agent home loading": null
+      }
+    },
+    "2026-06-04-slack-e2e-test-suite": {
+      "epic": null,
+      "stories": {
+        "Chinese scenario catalog": null,
+        "Coverage completeness": null,
+        "LLM-as-user black-box execution": null,
+        "Honesty rules": null,
+        "Catalog validator (automated gate)": null
+      }
+    },
+    "2026-06-04-unify-legacy-console-modules": {
+      "epic": null,
+      "stories": {
+        "List modules expose a working row search": null
+      }
+    },
+    "2026-06-04-vector-reindex-provider-backoff": {
+      "epic": null,
+      "stories": {
+        "Reindex handles transient provider throttling": null
+      }
+    },
+    "2026-06-05-agent-init-cli": {
+      "epic": null,
+      "stories": {
+        "Scaffold an agent home via `fleetent agent init`": null
+      }
+    }
+  },
+  "note": "complete archived-change record (2026-06-05). story keys null because the session backfill was mid-granularity, not requirement-level; dedup matches by requirement title so nulls are fine. active changes intentionally excluded."
+}

@@ -4,11 +4,11 @@ from dataclasses import dataclass
 
 import pytest
 
-from fleetent.config import Settings
+from fleetent.agent_config import AgentFile
 
 
-def _settings(**knowledge_base: object) -> Settings:
-    return Settings(anthropic_api_key="test-key", knowledge_base=knowledge_base)
+def _settings(**knowledge_base: object) -> AgentFile:
+    return AgentFile(name="t", version=1, knowledge_base=knowledge_base)
 
 
 def test_google_drive_connectors_load_from_settings():
@@ -239,27 +239,24 @@ def test_duplicate_connector_ids_fail_fast():
         list_configured_connectors(settings=settings)
 
 
-def test_missing_required_connector_field_mentions_field_name(tmp_path, monkeypatch):
-    import fleetent.config as cfg
-
-    settings_yaml = tmp_path / "settings.yaml"
-    settings_yaml.write_text(
-        "\n".join(
-            [
-                "knowledge_base:",
-                "  google_drive:",
-                "    connectors:",
-                "      - connector_id: broken",
-                "        tenant_id: default",
-                "        kb_id: engineering",
-                "        credential_ref: file:///secure/google.json",
-            ]
-        )
-    )
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
-
+def test_missing_required_connector_field_mentions_field_name():
     with pytest.raises(Exception, match="folder_id"):
-        Settings(anthropic_api_key="test-key")
+        AgentFile(
+            name="t",
+            version=1,
+            knowledge_base={
+                "google_drive": {
+                    "connectors": [
+                        {
+                            "connector_id": "broken",
+                            "tenant_id": "default",
+                            "kb_id": "engineering",
+                            "credential_ref": "file:///secure/google.json",
+                        }
+                    ]
+                }
+            },
+        )
 
 
 async def test_disabled_connector_is_listed_but_not_synced(monkeypatch):

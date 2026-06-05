@@ -42,7 +42,12 @@ def test_agent_cli_handles_channel_version_user_and_default_flows(monkeypatch, t
         memory_namespace="ops",
     )
 
-    monkeypatch.setattr(agents, "_SETTINGS_YAML", tmp_path / "settings.yaml")
+    import yaml
+
+    agents_dir = tmp_path / "agents"
+    (agents_dir / "ops").mkdir(parents=True)
+    (agents_dir / "ops" / "agent.yaml").write_text(yaml.safe_dump({"name": "ops", "version": 1}))
+    monkeypatch.setenv("FLEETENT_AGENTS_DIR", str(agents_dir))
     monkeypatch.setitem(
         sys.modules,
         "fleetent.agent_store",
@@ -69,7 +74,8 @@ def test_agent_cli_handles_channel_version_user_and_default_flows(monkeypatch, t
     )
     assert agents.handle(_ns(cmd="unassign-channel", platform="slack", channel_id="C1"))
     assert agents.handle(_ns(cmd="set-default-agent", clear=False, agent_name="ops"))
-    assert "default_agent_name" in (tmp_path / "settings.yaml").read_text(encoding="utf-8")
+    ops_yaml = yaml.safe_load((agents_dir / "ops" / "agent.yaml").read_text())
+    assert ops_yaml["bindings"]["default"] is True
     assert agents.handle(_ns(cmd="set-default-agent", clear=True, agent_name=None))
     assert agents.handle(
         _ns(

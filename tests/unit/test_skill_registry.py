@@ -481,11 +481,10 @@ def test_scan_no_source_priority_override_logic(tmp_path, monkeypatch):
 # --- disabled_skills injection (task 4) ---
 
 
-def test_settings_has_disabled_skills_default_empty(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "dummy")
-    from fleetent.config import Settings
+def test_agentfile_has_disabled_skills_default_empty():
+    from fleetent.agent_config import AgentFile
 
-    assert Settings().disabled_skills == []
+    assert AgentFile(name="x", version=1).disabled_skills == []
 
 
 def test_match_disabled_skills_param_overrides(tmp_path):

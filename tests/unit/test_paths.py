@@ -87,9 +87,9 @@ def test_derived_paths_under_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert paths.sessions_dir() == home / "data" / "sessions"
 
 
-def test_agent_file_under_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # Deployed single agent reads its concrete config from config/agent.yaml.
+def test_agent_file_at_home_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # Deployed single agent reads its config from the flat home root (no config/).
     home = tmp_path / "h"
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
-    assert paths.agent_file() == home / "config" / "agent.yaml"
+    assert paths.agent_file() == home / "agent.yaml"

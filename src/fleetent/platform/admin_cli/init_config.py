@@ -16,7 +16,7 @@ class InitConfigPlanItem:
     path: str
 
 
-_GENERATED_FILES = ((".env.example", ".env"),)
+_GENERATED_FILES = (("config/platform/.env.example", ".env"),)
 _GENERATED_DIRS = (
     "data/",
     "data/logs/",

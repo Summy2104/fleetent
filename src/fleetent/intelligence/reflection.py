@@ -886,7 +886,7 @@ def _as_utc(value: datetime) -> datetime:
 
 
 def _database() -> SQLiteDatabase:
-    return create_database(Settings(anthropic_api_key="").database_url)
+    return create_database(Settings().database_url)
 
 
 def _has_reflection_reports_table(database: SQLiteDatabase) -> bool:
