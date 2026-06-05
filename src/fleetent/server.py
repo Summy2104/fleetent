@@ -143,6 +143,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         overrides: dict[str, Any] | None,
         bypass_medium: bool,
     ) -> dict[str, Any]:
+        from fleetent.runtime.snapshot import _governance_from_file
+
         af = agent_config.current().get(agent_name) if agent_name else None
         kwargs: dict[str, Any] = {"user_id": "playground", "session_id": session_id}
         if af is not None:
@@ -151,6 +153,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             kwargs["agent_name"] = af.name
             kwargs["agent_features"] = af.features
             kwargs["allowed_skills"] = af.allowed_skills
+            kwargs["governance"] = _governance_from_file(af)
         events: list[dict[str, Any]] = []
 
         async def _collect() -> str:

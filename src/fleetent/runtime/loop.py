@@ -52,6 +52,7 @@ from fleetent.runtime.termination import (
     TerminationController,
     resolve_limits,
 )
+from fleetent.runtime.snapshot import GovernanceConfig
 from fleetent.runtime.tool_guardrails import GuardrailAction, evaluate_guardrail
 from fleetent.skills import available_skills_prompt, collect_disabled_trace
 from fleetent.skills import match as match_skill  # noqa: F401  # patch target + API parity
@@ -122,18 +123,35 @@ _GUARDRAIL_FEEDBACK_TEXT = (
 _GRACE_CALL_TEXT = "已达到本次任务的预算上限。请用一段话总结当前进展与已得结论，不要再调用工具。"
 
 
+def _limit_config_from_governance(
+    governance: GovernanceConfig | None,
+) -> dict[str, int] | None:
+    """LimitConfig (max_turns / max_consecutive_failures) from governance, or None.
+
+    None lets resolve_limits fall back to its Settings-backed defaults (transitional;
+    Settings removal lands in dissolve-global-settings)."""
+    if governance is None:
+        return None
+    return {
+        "max_turns": governance.agent_max_turns,
+        "max_consecutive_failures": governance.agent_max_consecutive_failures,
+    }
+
+
 def _resolve_budget_config(
     max_turns: int | None,
     max_tokens: int | None,
+    governance: GovernanceConfig | None = None,
 ) -> BudgetConfig:
-    """Resolve the two-dimensional budget: call param > Settings > default (D1).
+    """Resolve the two-dimensional budget: call param > governance > Settings default.
 
-    The step dimension reuses the existing max_turns resolution (resolve_limits);
-    the token dimension comes from Settings (NO_LIMIT by default) unless overridden.
-    """
-    mt, _ = resolve_limits(max_turns, None)
+    The step dimension reuses resolve_limits (now seeded from governance); the token
+    dimension comes from governance (or Settings when governance is absent)."""
+    mt, _ = resolve_limits(max_turns, None, config=_limit_config_from_governance(governance))
     if max_tokens is not None:
         return BudgetConfig(max_turns=mt, max_tokens=max_tokens)
+    if governance is not None:
+        return BudgetConfig(max_turns=mt, max_tokens=governance.agent_max_tokens)
     from fleetent.config import Settings
 
     s = Settings()  # type: ignore[call-arg]
@@ -143,10 +161,18 @@ def _resolve_budget_config(
 def _resolve_loop_config(
     repeat_threshold: int | None,
     ignore_arg_keys: list[str] | None,
+    governance: GovernanceConfig | None = None,
 ) -> tuple[int, list[str]]:
-    """Resolve loop-detection settings: call param > Settings > default (D3)."""
+    """Resolve loop-detection settings: call param > governance > Settings default."""
     if repeat_threshold is not None and ignore_arg_keys is not None:
         return repeat_threshold, ignore_arg_keys
+    if governance is not None:
+        return (
+            repeat_threshold if repeat_threshold is not None else governance.agent_loop_repeat_threshold,
+            ignore_arg_keys
+            if ignore_arg_keys is not None
+            else list(governance.loop_detect_ignore_arg_keys),
+        )
     from fleetent.config import Settings
 
     s = Settings()  # type: ignore[call-arg]
@@ -156,24 +182,33 @@ def _resolve_loop_config(
     )
 
 
-def _resolve_guardrail_threshold(guardrail_repeat_threshold: int | None) -> int:
-    """Resolve the AR10 guardrail threshold: call param > Settings > default (D1)."""
+def _resolve_guardrail_threshold(
+    guardrail_repeat_threshold: int | None,
+    governance: GovernanceConfig | None = None,
+) -> int:
+    """Resolve the AR10 guardrail threshold: call param > governance > Settings default."""
     if guardrail_repeat_threshold is not None:
         return guardrail_repeat_threshold
+    if governance is not None:
+        return governance.guardrail_repeat_threshold
     from fleetent.config import Settings
 
     return Settings().guardrail_repeat_threshold  # type: ignore[call-arg]
 
 
-def _resolve_parallel_max() -> int:
-    """Resolve the AR3 single-round tool concurrency cap from Settings (D7)."""
+def _resolve_parallel_max(governance: GovernanceConfig | None = None) -> int:
+    """Resolve the AR3 single-round tool concurrency cap: governance > Settings default."""
+    if governance is not None:
+        return governance.agent_tool_parallel_max
     from fleetent.config import Settings
 
     return Settings().agent_tool_parallel_max  # type: ignore[call-arg]
 
 
-def _resolve_default_tool_timeout() -> float:
-    """Global default per-tool timeout from Settings (T2), resolved once per run."""
+def _resolve_default_tool_timeout(governance: GovernanceConfig | None = None) -> float:
+    """Global default per-tool timeout: governance > Settings default (T2)."""
+    if governance is not None:
+        return governance.tool_default_timeout_seconds
     from fleetent.config import Settings
 
     return Settings().tool_default_timeout_seconds  # type: ignore[call-arg]
@@ -313,6 +348,7 @@ def _build_controller(
     loop_repeat_threshold: int | None = None,
     loop_ignore_arg_keys: list[str] | None = None,
     cancel_token: CancelToken | None = None,
+    governance: GovernanceConfig | None = None,
 ) -> tuple[TerminationController, LoopDetectionChecker, BudgetChecker]:
     """Assemble the termination controller with the active checkers.
 
@@ -332,8 +368,12 @@ def _build_controller(
     short-circuits before any other reason; with a never-cancelling default token
     it can never fire, keeping the no-token path byte-identical.
     """
-    _, mcf = resolve_limits(max_turns, max_consecutive_failures)
-    threshold, ignore_keys = _resolve_loop_config(loop_repeat_threshold, loop_ignore_arg_keys)
+    _, mcf = resolve_limits(
+        max_turns, max_consecutive_failures, config=_limit_config_from_governance(governance)
+    )
+    threshold, ignore_keys = _resolve_loop_config(
+        loop_repeat_threshold, loop_ignore_arg_keys, governance
+    )
     controller = TerminationController()
     if cancel_token is not None:
         controller.register(CancellationChecker(cancel_token))
@@ -1029,6 +1069,7 @@ async def run(
     agent_features: dict[str, Any] | None = None,
     session_id: str | None = None,
     allowed_skills: list[str] | None = None,
+    governance: GovernanceConfig | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1119,7 +1160,7 @@ async def run(
 
     # None → a never-cancelling default token, keeping the no-token path identical.
     token = cancel_token if cancel_token is not None else CancelToken()
-    budget_config = _resolve_budget_config(max_turns, max_tokens)
+    budget_config = _resolve_budget_config(max_turns, max_tokens, governance)
     budget_usage = BudgetUsage()
     controller, loop_checker, budget_checker = _build_controller(
         max_turns,
@@ -1130,13 +1171,14 @@ async def run(
         loop_repeat_threshold=loop_repeat_threshold,
         loop_ignore_arg_keys=loop_ignore_arg_keys,
         cancel_token=token,
+        governance=governance,
     )
     state = LoopState()
     stop_reason = StopReason.normal
     hygiene_repairs: dict[str, int] = {}
-    guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold)
-    parallel_max = _resolve_parallel_max()
-    default_tool_timeout = _resolve_default_tool_timeout()
+    guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold, governance)
+    parallel_max = _resolve_parallel_max(governance)
+    default_tool_timeout = _resolve_default_tool_timeout(governance)
     flap_state = _load_flap_state(session_id)
     layered_checker, layered_store, layered_keys = _setup_layered_budget(
         session_id, user_id, agent_name
@@ -1315,7 +1357,9 @@ def run_sync(
     allowed_skills: list[str] | None = None
     agent_name: str | None = None
     agent_features: dict[str, Any] | None = None
+    governance: GovernanceConfig | None = None
     if agent is not None:
+        from fleetent.runtime.snapshot import _governance_from_file
         from fleetent.tools.plugin_loader import expand_plugin_patterns
 
         if agent.system_prompt:
@@ -1324,6 +1368,7 @@ def run_sync(
         allowed_skills = agent.allowed_skills
         agent_name = agent.name
         agent_features = agent.features
+        governance = _governance_from_file(agent)
 
     skills_catalog = available_skills_prompt(allowed_skills=allowed_skills)
     disabled_trace = collect_disabled_trace() or None
@@ -1348,6 +1393,7 @@ def run_sync(
             allowed_skills=allowed_skills,
             disabled_skills_trace=disabled_trace,
             sandbox_mode=sandbox_mode,
+            governance=governance,
         )
 
     return asyncio.run(_run())
@@ -1372,6 +1418,7 @@ async def run_stream(
     agent_features: dict[str, Any] | None = None,
     session_id: str | None = None,
     allowed_skills: list[str] | None = None,
+    governance: GovernanceConfig | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -1446,7 +1493,7 @@ async def run_stream(
     cache_tokens: dict[str, int] | None = None
 
     token = cancel_token if cancel_token is not None else CancelToken()
-    budget_config = _resolve_budget_config(max_turns, max_tokens)
+    budget_config = _resolve_budget_config(max_turns, max_tokens, governance)
     budget_usage = BudgetUsage()
     controller, loop_checker, budget_checker = _build_controller(
         max_turns,
@@ -1457,13 +1504,14 @@ async def run_stream(
         loop_repeat_threshold=loop_repeat_threshold,
         loop_ignore_arg_keys=loop_ignore_arg_keys,
         cancel_token=token,
+        governance=governance,
     )
     state = LoopState()
     stop_reason = StopReason.normal
     hygiene_repairs: dict[str, int] = {}
-    guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold)
-    parallel_max = _resolve_parallel_max()
-    default_tool_timeout = _resolve_default_tool_timeout()
+    guardrail_threshold = _resolve_guardrail_threshold(guardrail_repeat_threshold, governance)
+    parallel_max = _resolve_parallel_max(governance)
+    default_tool_timeout = _resolve_default_tool_timeout(governance)
     flap_state = _load_flap_state(session_id)
     layered_checker, layered_store, layered_keys = _setup_layered_budget(
         session_id, user_id, agent_name

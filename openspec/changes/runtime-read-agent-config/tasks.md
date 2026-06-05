@@ -1,16 +1,16 @@
 ## 1. AgentSnapshot 扩展携带治理配置(其余任务依赖)
 
-- [ ] 1.1 Write failing tests: 断言 `_snapshot_from_file(AgentFile)` 产出的 snapshot 携带治理字段
+- [x] 1.1 Write failing tests: 断言 `_snapshot_from_file(AgentFile)` 产出的 snapshot 携带治理字段
       (agent_max_turns、context 压缩组、分层预算 session/user/agent、permission gate、provider 熔断、
       tool/sub-agent 超时);断言 DB 侧 `_snapshot` 用旧默认填充保持兼容。运行见红
-- [ ] 1.2 扩展 `AgentSnapshot`(`runtime/snapshot.py`)字段 + `_snapshot_from_file` / `_snapshot` 填充。
+- [x] 1.2 扩展 `AgentSnapshot`(`runtime/snapshot.py`)字段 + `_snapshot_from_file` / `_snapshot` 填充。
       运行见绿
 
 ## 2. loop.py 治理来源切换
 
-- [ ] 2.1 Write failing tests: 断言 `agent_max_turns` 等来自 snapshot/agent 配置(未注入参数时),
+- [x] 2.1 Write failing tests: 断言 `agent_max_turns` 等来自 snapshot/agent 配置(未注入参数时),
       优先级 call-param > agent config > default;未填字段 == 旧 `Settings` 默认。运行见红
-- [ ] 2.2 把 `_resolve_budget_config`/`_resolve_loop_config`/`_resolve_guardrail_threshold`/
+- [x] 2.2 把 `_resolve_budget_config`/`_resolve_loop_config`/`_resolve_guardrail_threshold`/
       `_resolve_parallel_max`/`_resolve_default_tool_timeout` 的 `Settings()` 回退改为读 snapshot。运行见绿
 
 ## 3. 跨运行预算 + 砍 global

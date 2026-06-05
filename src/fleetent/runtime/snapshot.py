@@ -22,6 +22,48 @@ ToolSchema = dict[str, Any]
 
 
 @dataclass(frozen=True)
+class GovernanceConfig:
+    """Per-run governance the agent loop consumes, resolved from the agent's config.
+
+    Defaults mirror the historical global ``Settings`` defaults so a snapshot built
+    without an agent file (DB/authoring side) behaves exactly as before. File-sourced
+    snapshots fill these from the agent's ``agent.yaml`` (see ``_governance_from_file``).
+    The global budget dimension is intentionally absent (dropped in the consolidation).
+    """
+
+    # iteration / budget
+    agent_max_turns: int = 50
+    agent_max_consecutive_failures: int = 3
+    agent_max_tokens: int = -1
+    agent_grace_call_token_ratio: float = 0.05
+    agent_grace_call_min_tokens: int = 512
+    # loop detection / guardrail / concurrency
+    agent_loop_repeat_threshold: int = 3
+    guardrail_repeat_threshold: int = 3
+    agent_tool_parallel_max: int = 8
+    loop_detect_ignore_arg_keys: tuple[str, ...] = ()
+    # timeouts
+    sub_agent_timeout_seconds: int = 300
+    tool_default_timeout_seconds: float = 30.0
+
+
+def _governance_from_file(agent: AgentFile) -> GovernanceConfig:
+    return GovernanceConfig(
+        agent_max_turns=agent.agent_max_turns,
+        agent_max_consecutive_failures=agent.agent_max_consecutive_failures,
+        agent_max_tokens=agent.agent_max_tokens,
+        agent_grace_call_token_ratio=agent.agent_grace_call_token_ratio,
+        agent_grace_call_min_tokens=agent.agent_grace_call_min_tokens,
+        agent_loop_repeat_threshold=agent.agent_loop_repeat_threshold,
+        guardrail_repeat_threshold=agent.guardrail_repeat_threshold,
+        agent_tool_parallel_max=agent.agent_tool_parallel_max,
+        loop_detect_ignore_arg_keys=tuple(agent.loop_detect_ignore_arg_keys),
+        sub_agent_timeout_seconds=agent.sub_agent_timeout_seconds,
+        tool_default_timeout_seconds=agent.tool_default_timeout_seconds,
+    )
+
+
+@dataclass(frozen=True)
 class AgentSnapshot:
     """Immutable, fully-resolved agent configuration the agent loop consumes."""
 
@@ -37,6 +79,7 @@ class AgentSnapshot:
     mcp_server_ids: list[str] | None
     model_overrides: dict[str, Any]
     memory_namespace: str
+    governance: GovernanceConfig = GovernanceConfig()
 
 
 def _snapshot_from_file(agent: AgentFile) -> AgentSnapshot:
@@ -52,6 +95,7 @@ def _snapshot_from_file(agent: AgentFile) -> AgentSnapshot:
         mcp_server_ids=server_ids or None,
         model_overrides=agent.model_overrides,
         memory_namespace=agent.memory_namespace,
+        governance=_governance_from_file(agent),
     )
 
 
