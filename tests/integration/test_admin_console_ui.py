@@ -99,14 +99,14 @@ def test_skill_import_has_clear_folder_picker():
     # the raw file input is hidden; a visible button triggers it so the whole
     # control is obviously clickable (fixes "clicking does nothing")
     assert 'id="sk-import-files"' in html
-    assert "skPickFolder(this)" in html
+    # native <label for> opens the picker (reliable user activation, no JS .click())
+    assert '<label for="sk-import-files"' in html
     assert 'id="sk-import-pick"' in html  # selected-folder label
     assert "function skImportPicked" in html
-    # immediate click feedback: label flips + button shows a busy/pressed state
-    fn = html.split("function skPickFolder", 1)[1].split("function skImportPicked", 1)[0]
+    # immediate click feedback: label flips + control shows a busy/pressed state
+    fn = html.split("function skPickFeedback", 1)[1].split("function skImportPicked", 1)[0]
     assert "Opening folder picker" in fn
     assert "is-busy" in fn
-    assert '$("sk-import-files").click()' in fn  # still triggers the hidden input
 
 
 def test_skills_proposals_review_wired():
