@@ -32,9 +32,10 @@
 
 ## 4. set-default-agent CLI 作用于 agent.yaml
 
-- [ ] 4.1 Write failing tests: `set-default-agent --agent-name X` 写目标 agent.yaml `bindings.default: true`
+- [x] 4.1 Write failing tests: `set-default-agent --agent-name X` 写目标 agent.yaml `bindings.default: true`
       并清除原 default;`--clear` 移除该 flag;不写 `settings.yaml`。运行见红
-- [ ] 4.2 改 admin CLI `set-default-agent` 实现作用于 agent.yaml。运行见绿
+- [x] 4.2 改 admin CLI `set-default-agent` 实现作用于 agent.yaml(遍历 agents_dir,set/clear
+      bindings.default;未知 agent 报错);删 `_SETTINGS_YAML`。运行见绿
 
 ## 5. config_validation retarget 到 agent.yaml
 

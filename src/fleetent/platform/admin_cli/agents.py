@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+from typing import TYPE_CHECKING
 
 import yaml
 
-from fleetent import paths
-
-_SETTINGS_YAML = paths.settings_yaml_path()
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -212,17 +212,48 @@ def _unassign_user(args: argparse.Namespace) -> None:
     print(f"User {args.user_id} unassigned from agent '{args.agent_name}'.")
 
 
+def _agent_yaml_files() -> dict[str, Path]:
+    """Map agent name -> its ``agent.yaml`` path in the multi-agent layout."""
+    from fleetent import agent_config
+
+    root = agent_config._resolve_agents_dir(None)
+    if not root.is_dir():
+        return {}
+    return {
+        p.name: p / agent_config.AGENT_FILE_NAME
+        for p in sorted(root.iterdir())
+        if (p / agent_config.AGENT_FILE_NAME).is_file()
+    }
+
+
+def _set_agent_default(path: Path, want_default: bool) -> bool:
+    """Set/clear ``bindings.default`` in one agent.yaml; return whether it changed."""
+    data = yaml.safe_load(path.read_text()) or {}
+    bindings = data.get("bindings") or {}
+    if bool(bindings.get("default", False)) == want_default:
+        return False
+    if want_default:
+        bindings["default"] = True
+    else:
+        bindings.pop("default", None)
+    data["bindings"] = bindings
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    return True
+
+
 def _set_default_agent(args: argparse.Namespace) -> None:
-    data: dict[str, object] = {}
-    if _SETTINGS_YAML.exists():
-        data = yaml.safe_load(_SETTINGS_YAML.read_text()) or {}
+    # default-agent resolution is the file index's bindings.default winner (zero-DB);
+    # this command edits the agent.yaml files, never settings.yaml.
+    files = _agent_yaml_files()
 
     if args.clear:
-        data.pop("default_agent_name", None)
-        print("Default agent cleared.")
-    else:
-        data["default_agent_name"] = args.agent_name
-        print(f"Default agent set to '{args.agent_name}'.")
+        cleared = [name for name, path in files.items() if _set_agent_default(path, False)]
+        print(f"Default agent cleared from '{cleared[0]}'." if cleared else "No default agent set.")
+        return
 
-    _SETTINGS_YAML.parent.mkdir(parents=True, exist_ok=True)
-    _SETTINGS_YAML.write_text(yaml.safe_dump(data))
+    if args.agent_name not in files:
+        print(f"Error: Agent {args.agent_name!r} not found.", file=sys.stderr)
+        sys.exit(1)
+    for name, path in files.items():
+        _set_agent_default(path, name == args.agent_name)
+    print(f"Default agent set to '{args.agent_name}'.")
