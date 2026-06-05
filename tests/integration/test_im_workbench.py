@@ -39,6 +39,78 @@ def test_batch_block_shared_id(db):
     assert len(rows) == 2
 
 
+def test_identity_fields_differ_by_platform(db):
+    slack_keys = {f["key"] for f in im_user_store.identity_fields("slack")}
+    tele_keys = {f["key"] for f in im_user_store.identity_fields("telegram")}
+    # Slack workspace + enterprise IDs are editable; the User ID is the handle.
+    assert {"email", "team_id", "enterprise_id"} <= slack_keys
+    assert "username" in tele_keys
+    assert slack_keys != tele_keys
+    assert im_user_store.identity_fields("unknown") == []
+
+
+def test_update_identity_metadata_audited(db):
+    user = im_user_store.get_or_create(_OWNER, "slack", "U1")
+    im_id = im_user_store.list_im_identities(user.id)[0]["id"]
+    im_user_store.update_im_identity(
+        im_id,
+        metadata={"display_name": "Alice", "email": "a@x.com", "notes": "vip"},
+        actor="admin1",
+    )
+    row = im_user_store.get_im_user(im_id)
+    assert row is not None
+    assert row["metadata"] == {"display_name": "Alice", "email": "a@x.com", "notes": "vip"}
+    # handle untouched when only metadata is edited
+    assert row["platform"] == "slack"
+    assert row["platform_user_id"] == "U1"
+    assert len(audit.search_audit(action="update_im_user", target_id=str(im_id))) == 1
+
+
+def test_update_identity_can_override_user_id(db):
+    user = im_user_store.get_or_create(_OWNER, "slack", "U1")
+    im_id = im_user_store.list_im_identities(user.id)[0]["id"]
+    # admin corrects the auto-captured Slack User ID
+    im_user_store.update_im_identity(im_id, platform_user_id="U0555FN1REX", actor="admin1")
+    row = im_user_store.get_im_user(im_id)
+    assert row["platform_user_id"] == "U0555FN1REX"
+    assert row["platform"] == "slack"  # platform unchanged
+
+
+def test_update_identity_user_id_conflict_raises(db):
+    a = im_user_store.get_or_create(_OWNER, "slack", "A1")
+    im_user_store.get_or_create(_OWNER, "slack", "B1")
+    a_id = im_user_store.list_im_identities(a.id)[0]["id"]
+    with pytest.raises(ValueError):
+        im_user_store.update_im_identity(a_id, platform_user_id="B1")
+
+
+def test_update_metadata_drops_keys_not_in_platform_schema(db):
+    user = im_user_store.get_or_create(_OWNER, "telegram", "T1")
+    im_id = im_user_store.list_im_identities(user.id)[0]["id"]
+    # email is a Slack field, not Telegram — it must be dropped.
+    im_user_store.update_im_identity(im_id, metadata={"username": "@bob", "email": "x@x.com"})
+    assert im_user_store.get_im_user(im_id)["metadata"] == {"username": "@bob"}
+
+
+def test_update_identity_missing_raises(db):
+    with pytest.raises(ValueError):
+        im_user_store.update_im_identity(9999, metadata={"display_name": "x"})
+
+
+def test_delete_im_identity_audited(db):
+    user = im_user_store.get_or_create(_OWNER, "slack", "U1")
+    im_id = im_user_store.list_im_identities(user.id)[0]["id"]
+    im_user_store.delete_im_identity(im_id, actor="admin1")
+    assert im_user_store.get_im_user(im_id) is None
+    assert im_user_store.list_im_identities(user.id) == []
+    assert len(audit.search_audit(action="delete_im_user", target_id=str(im_id))) == 1
+
+
+def test_delete_im_identity_missing_raises(db):
+    with pytest.raises(ValueError):
+        im_user_store.delete_im_identity(9999)
+
+
 def test_list_identities_merges_platforms(db):
     # Same internal user bound to two platforms (simulate by reusing user_id).
     u = im_user_store.get_or_create(_OWNER, "slack", "M1")

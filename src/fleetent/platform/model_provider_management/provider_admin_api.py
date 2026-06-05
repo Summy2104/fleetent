@@ -124,22 +124,30 @@ def _cost_label(price: float | None) -> str | float:
 class ProviderBody(BaseModel):
     id: str
     description: str | None = None
+    provider: str | None = None
+    protocol: str | None = None
     base_url: str
     model: str
     api_key: str | None = None
+    api_key_env: str | None = None
     max_tokens: int | None = None
     temperature: float | None = None
     extra_params: dict[str, Any] | None = None
+    params: dict[str, Any] | None = None
 
 
 class ProviderEditBody(BaseModel):
     description: str | None = None
+    provider: str | None = None
+    protocol: str | None = None
     base_url: str | None = None
     model: str | None = None
     api_key: str | None = None
+    api_key_env: str | None = None
     max_tokens: int | None = None
     temperature: float | None = None
     extra_params: dict[str, Any] | None = None
+    params: dict[str, Any] | None = None
 
 
 class RouteOrderBody(BaseModel):
@@ -248,12 +256,16 @@ def add_provider(body: ProviderBody, authorization: str | None = Header(None)) -
     provider_admin_store.add_provider(
         body.id,
         description=body.description,
+        provider=body.provider,
+        protocol=body.protocol,
         base_url=body.base_url,
         model=body.model,
         api_key=body.api_key,
+        api_key_env=body.api_key_env,
         max_tokens=body.max_tokens,
         temperature=body.temperature,
         extra_params=body.extra_params,
+        params=body.params,
     )
     audit_log.write_audit(
         user.id,

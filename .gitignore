@@ -25,6 +25,10 @@ secrets/
 
 # Worktrees
 .worktrees/
+.claude/worktrees/
+
+# Browser self-test artifacts (Playwright MCP)
+.playwright-mcp/
 
 # Config — *.example / *.yaml.example templates are committed; real configs are not.
 # `.env` (above) already ignores config/agent/.env, config/platform/.env, etc.

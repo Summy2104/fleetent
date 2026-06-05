@@ -377,6 +377,48 @@ def bind_im_user(
     return {"status": "bound"}
 
 
+@router.get("/im-users/fields")
+def im_identity_fields(authorization: str | None = Header(None)) -> dict[str, list[dict[str, Any]]]:
+    """Per-platform editable metadata field definitions for IM identities."""
+    _current_user(authorization)
+    return dict(im.PLATFORM_IDENTITY_FIELDS)
+
+
+class EditImBody(BaseModel):
+    platform_user_id: str | None = None
+    metadata: dict[str, Any] = {}
+
+
+@router.patch("/im-users/{im_user_id}")
+def edit_im_user(
+    im_user_id: int, body: EditImBody, authorization: str | None = Header(None)
+) -> dict[str, str]:
+    """Edit an IM identity: per-platform metadata + optional User ID override."""
+    admin = _require_admin(authorization)
+    try:
+        im.update_im_identity(
+            im_user_id,
+            platform_user_id=body.platform_user_id,
+            metadata=body.metadata,
+            actor=admin.id,
+        )
+    except ValueError as exc:
+        # "already exists" is a uniqueness conflict; anything else is not-found.
+        status = 409 if "already exists" in str(exc) else 404
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    return {"status": "updated"}
+
+
+@router.delete("/im-users/{im_user_id}", status_code=204)
+def delete_im_user(im_user_id: int, authorization: str | None = Header(None)) -> None:
+    """Delete an IM identity. The bound platform user is left untouched."""
+    admin = _require_admin(authorization)
+    try:
+        im.delete_im_identity(im_user_id, actor=admin.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/audit")
 def search_audit(
     action: str | None = None,

@@ -34,7 +34,6 @@ def _agent() -> agent_store.Agent:
         mcp_server_ids=["global", "agent-only"],
         model_overrides={"model": "fast"},
         memory_namespace="ops",
-        template_id="tpl",
     )
 
 
@@ -244,7 +243,7 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
     assert missing_oauth.value.status_code == 404
 
 
-def test_agent_console_templates_crud_and_agent_lifecycle(monkeypatch):
+def test_agent_console_agent_lifecycle(monkeypatch):
     _patch_agent_admin_auth(monkeypatch, agent_console_api)
     defs: dict[str, dict[str, Any]] = {
         "ops": {
@@ -257,7 +256,6 @@ def test_agent_console_templates_crud_and_agent_lifecycle(monkeypatch):
             "mcp_server_ids": ["mcp"],
             "model_overrides": {"model": "fast"},
             "memory_namespace": "ops",
-            "template_id": "tpl",
         }
     }
     calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
@@ -310,63 +308,12 @@ def test_agent_console_templates_crud_and_agent_lifecycle(monkeypatch):
     monkeypatch.setattr(
         agent_console_api.agent_admin_store, "list_states", lambda include_archived=False: [state]
     )
-    templates = {"tpl": {"id": "tpl", "display_name": "Template"}}
-    monkeypatch.setattr(
-        agent_console_api.agent_template_store, "list_templates", lambda: list(templates.values())
-    )
-    monkeypatch.setattr(
-        agent_console_api.agent_template_store, "get_template", lambda id: templates.get(id)
-    )
-    monkeypatch.setattr(
-        agent_console_api.agent_template_store,
-        "create_template",
-        lambda id, display_name, allowed_tools, system_prompt: templates.setdefault(
-            id, {"id": id, "display_name": display_name}
-        ),
-    )
-    monkeypatch.setattr(
-        agent_console_api.agent_template_store,
-        "update_template",
-        lambda id, **kwargs: {**templates[id], **kwargs} if id in templates else None,
-    )
-    monkeypatch.setattr(
-        agent_console_api.agent_template_store, "delete_template", lambda id: id in templates
-    )
 
-    assert agent_console_api.list_templates(authorization="Session token") == list(
-        templates.values()
-    )
-    assert (
-        agent_console_api.create_template(
-            agent_console_api.TemplateCreateBody(id="new", display_name="New"),
-            authorization="Session token",
-        )["id"]
-        == "new"
-    )
-    with pytest.raises(HTTPException) as empty_template:
-        agent_console_api.create_template(
-            agent_console_api.TemplateCreateBody(id=" ", display_name="Blank"),
-            authorization="Session token",
-        )
-    assert empty_template.value.status_code == 422
-    assert (
-        agent_console_api.update_template(
-            "tpl",
-            agent_console_api.TemplateUpdateBody(display_name="Renamed"),
-            authorization="Session token",
-        )["display_name"]
-        == "Renamed"
-    )
-    assert agent_console_api.delete_template("tpl", authorization="Session token") == {
-        "id": "tpl",
-        "deleted": True,
-    }
     assert agent_console_api.list_agents(authorization="Session token") == [state]
     assert agent_console_api.observability("ops", authorization="Session token") == {"calls": 3}
     created = agent_console_api.create_agent(
         agent_console_api.CreateBody(
             name="new-agent",
-            template_id="new",
             capabilities_yaml=(
                 "allowed_tools:\n  - shell\nplugins:\n  - p\nfeatures:\n  flag: true\n"
             ),
@@ -414,7 +361,7 @@ def test_agent_console_templates_crud_and_agent_lifecycle(monkeypatch):
     with pytest.raises(HTTPException) as bad_yaml:
         agent_console_api.create_agent(
             agent_console_api.CreateBody(
-                name="bad", template_id="new", capabilities_yaml="- not-map"
+                name="bad", capabilities_yaml="- not-map"
             ),
             authorization="Session token",
         )

@@ -22,6 +22,24 @@ from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.skill_management import skill_admin_store
 from fleetent.skills import registry as skill_registry
 
+
+class _AgentYamlDumper(yaml.Dumper):
+    """Dump agent.yaml the way the hand-written examples read: sequence items indented
+    under their key, and multiline strings as literal block scalars."""
+
+    def increase_indent(self, flow: bool = False, indentless: bool = False) -> Any:
+        # Force indented (non-indentless) block sequences: "key:\n  - item".
+        return super().increase_indent(flow, False)
+
+
+def _represent_str(dumper: yaml.Dumper, data: str) -> Any:
+    style = "|" if "\n" in data else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+
+
+_AgentYamlDumper.add_representer(str, _represent_str)
+
+
 router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
@@ -122,7 +140,14 @@ def _build_agent_yaml(agent: agent_store.Agent) -> str:
     if bindings:
         data["bindings"] = bindings
 
-    return yaml.dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    return yaml.dump(
+        data,
+        Dumper=_AgentYamlDumper,
+        indent=2,
+        allow_unicode=True,
+        sort_keys=False,
+        default_flow_style=False,
+    )
 
 
 @router.get("/agents/{name}/agent-yaml")

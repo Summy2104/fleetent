@@ -82,6 +82,37 @@ def test_add_provider_masks_key_in_response(client):
     assert r.json()["api_key_set"] is True
 
 
+def test_add_provider_vendor_protocol_env_params_roundtrip(client):
+    token, _ = _session_for("admin")
+    r = _add(
+        client,
+        token,
+        pid="fast",
+        provider="anthropic",
+        protocol="openai_chat",
+        api_key_env="FLEETENT_MODEL_FAST_API_KEY",
+        max_tokens=2048,
+        params={"temperature": 0.3, "top_p": 0.9},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["provider"] == "anthropic"
+    assert body["protocol"] == "openai_chat"
+    assert body["api_key_env"] == "FLEETENT_MODEL_FAST_API_KEY"  # env name, not masked
+    assert body["params"] == {"temperature": 0.3, "top_p": 0.9}
+    # editing params + protocol persists
+    e = client.put(
+        "/admin/providers/fast",
+        headers=_hdr(token),
+        json={"protocol": "anthropic_messages", "params": {"temperature": 0.1}},
+    )
+    assert e.status_code == 200, e.text
+    got = client.get("/admin/providers", headers=_hdr(token)).json()
+    fast = next(p for p in got if p["id"] == "fast")
+    assert fast["protocol"] == "anthropic_messages"
+    assert fast["params"] == {"temperature": 0.1}
+
+
 def test_list_masks_key(client):
     token, _ = _session_for("admin")
     _add(client, token)

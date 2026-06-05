@@ -167,6 +167,18 @@ def test_providers_endpoints_present():
         assert frag in html, frag
 
 
+def test_providers_form_has_vendor_protocol_env_params():
+    html = ADMIN_HTML
+    # new provider fields: api_key_env, protocol, custom params (JSON)
+    for fid in ('id="pv-api-key-env"', 'id="pv-protocol"', 'id="pv-params"'):
+        assert fid in html, fid
+    form = html.split("function pvFormBody", 1)[1].split("async function pvSave", 1)[0]
+    assert "api_key_env" in form
+    assert "body.protocol" in form
+    assert "body.provider" in form  # vendor from the provider-type radio
+    assert "JSON.parse(raw)" in form  # params parsed as JSON
+
+
 def test_providers_secret_field_password_no_prefill():
     html = ADMIN_HTML
     # api_key input must be a password field with autocomplete off
@@ -194,7 +206,6 @@ def test_agents_tab_and_list_wiring():
     assert "function agentCardHtml" in html
     assert 'api("GET", "/agents?include_archived=true")' in html
     assert "LOADERS.agents" in html
-    assert "/agent-templates" in html
 
 
 def test_agents_detail_drawer_and_binding_sections():
@@ -266,20 +277,15 @@ def test_agents_crud_modal_and_fields_present():
     assert "agCreate(" in bar
 
 
-def test_agent_create_modal_wide_and_requires_template():
+def test_agent_create_modal_wide_and_template_free():
     html = ADMIN_HTML
     # ag-modal uses the wide modal box
     modal = html.split('id="ag-modal"', 1)[1].split("</div>", 1)[0]
     assert "modal-box wide" in modal
-    # a template <select> is present and prefills on change
-    assert 'id="ag-template"' in html
-    assert "agTemplatePrefill(" in html
-    # agCreate populates the template select; agSave sends template_id and blocks
-    # creating without a chosen template
-    agcreate = html.split("function agCreate", 1)[1].split("function agEdit", 1)[0]
-    assert "ag-template" in agcreate
-    agsave = html.split("function agSave", 1)[1].split("function agDelete", 1)[0]
-    assert "template_id" in agsave
+    # the template module was removed: no template picker / template_id anywhere
+    assert 'id="ag-template"' not in html
+    assert "agTemplatePrefill(" not in html
+    assert "template_id" not in html
 
 
 def test_agents_crud_functions_present():
@@ -288,89 +294,47 @@ def test_agents_crud_functions_present():
         assert fn in html, fn
 
 
-def test_agents_templates_are_inpage_subtabs():
+def test_agents_have_no_template_module():
     html = ADMIN_HTML
     sidebar = html.split('class="sidebar"', 1)[1].split("</nav>", 1)[0]
-    # single Agents sidebar item, no separate Templates sidebar tab / section
     assert 'data-tab="templates"' not in sidebar
     assert 'id="tab-templates"' not in html
-    # sub-tab switcher + panes live inside the Agents page
-    assert "agSubTab(" in html
-    assert 'id="ag-pane"' in html
-    assert 'id="tmpl-pane"' in html
-
-
-def test_agents_tab_no_longer_hosts_templates_toggle():
-    html = ADMIN_HTML
-    # the old inline toggle panel is gone
-    assert "tmplToggle" not in html
-    assert 'id="ag-templates-panel"' not in html
-
-
-def test_agent_templates_edit_modal_and_fields_present():
-    html = ADMIN_HTML
-    assert 'id="tmpl-modal"' in html
-    for field_id in ("tmpl-id", "tmpl-display-name", "tmpl-allowed-tools", "tmpl-system-prompt"):
-        assert f'id="{field_id}"' in html, field_id
+    # the in-page Templates sub-tab + pane + modal + CRUD are all gone
+    for marker in (
+        "agSubTab(",
+        'id="tmpl-pane"',
+        'id="tmpl-modal"',
+        "function tmplCreate",
+        "tmplToggle",
+    ):
+        assert marker not in html, marker
 
 
 def test_resource_id_inputs_are_readonly():
     html = ADMIN_HTML
     import re
 
-    for input_id in ("tmpl-id", "nkb-id", "pv-id", "oc-id"):
+    for input_id in ("nkb-id", "pv-id", "oc-id"):
         m = re.search(rf'<input[^>]*id="{input_id}"[^>]*>', html)
         assert m, input_id
         assert "readonly" in m.group(0), input_id
 
 
-def test_textarea_themed_and_template_editor_roomy():
+def test_textarea_themed():
     html = ADMIN_HTML
     import re
 
     style = html.split("<style", 1)[1].split("</style>", 1)[0]
-    # global form-control rule now covers textarea too
+    # global form-control rule covers textarea too
     assert re.search(r"input,\s*select,\s*textarea", style)
-    # template modal is wide and the prompt editor is tall
-    box = html.split('id="tmpl-modal"', 1)[1].split("</div>", 1)[0]
-    assert "modal-box wide" in box
-    m = re.search(r'id="tmpl-system-prompt"[^>]*rows="(\d+)"', html)
-    assert m and int(m.group(1)) >= 12
 
 
 def test_genid_helper_and_create_uses_it():
     html = ADMIN_HTML
     assert "function genId" in html
-    # template/provider/connector create forms fill the id with a generated value
+    # provider/connector/kb create forms fill the id with a generated value
     assert "genId()" in html
-    # not fewer than the create forms that open with a generated id
-    assert html.count("genId()") >= 3
-
-
-def test_agent_templates_crud_functions_present():
-    html = ADMIN_HTML
-    for fn in (
-        "function tmplCreate",
-        "function tmplEdit",
-        "function tmplSave",
-        "function tmplDelete",
-    ):
-        assert fn in html, fn
-
-
-def test_agent_templates_crud_endpoints_wired():
-    html = ADMIN_HTML
-    assert 'api("POST", "/agent-templates"' in html
-    assert 'api("PATCH", `/agent-templates/${' in html
-    assert 'api("DELETE", `/agent-templates/${' in html
-
-
-def test_agent_templates_write_controls_admin_gated():
-    html = ADMIN_HTML
-    body = html.split("function tmplRender", 1)[1].split("function tmplCreate", 1)[0]
-    assert "IS_VIEWER" in body
-    assert "tmplEdit(" in body
-    assert "tmplDelete(" in body
+    assert html.count("genId()") >= 2
 
 
 # Free-form fields the modal never exposes (covered by template / bindings instead).
@@ -479,9 +443,76 @@ def test_agent_drawer_preview_is_readonly_yaml():
     assert "function agRenderPreview" in html
     preview = html.split("function agRenderPreview", 1)[1].split("function agCopyYaml", 1)[0]
     assert 'id="ag-yaml-pre"' in preview
-    assert "agDrawerManage(" in preview  # "Manage bindings" switches to the editable view
+    # A single "Edit" opens the new-agent modal (prefilled); no separate binding button.
+    assert "agEdit(" in preview
+    assert "Manage bindings" not in preview
     # copy + download the previewed yaml
     assert "function agCopyYaml" in html and "function agDownloadYaml" in html
+
+
+def test_agent_bindings_are_searchable_multiselect():
+    html = ADMIN_HTML
+    fn = html.split("async function agLoadCreateBindings", 1)[1].split("function agMsWidget", 1)[0]
+    # skills / connectors(mcp+oauth) / im users render as the multi-select widget
+    for call in (
+        'agMsWidget("agm-skills"',
+        'agMsWidget("agm-mcp"',
+        'agMsWidget("agm-oauth"',
+        'agMsWidget("agm-users"',
+    ):
+        assert call in fn, call
+    # the widget supports name filtering + chip selection; classes preserved for save-diff
+    widget = html.split("function agMsWidget", 1)[1].split("function agMsOpen", 1)[0]
+    assert "ms-search" in widget and "agMsFilter(" in widget
+    assert "ms-chips" in widget
+    # the old standalone user filter input is gone
+    assert 'id="agm-user-filter"' not in html
+    assert "agmFilterUsers" not in html
+    # an outside click collapses an open panel so it stops covering the form
+    assert 'e.target.closest(".ms")' in html
+    assert 'for (const p of document.querySelectorAll(".ms-panel")) p.classList.add("hidden")' in html
+
+
+def test_agent_model_overrides_pick_from_providers():
+    html = ADMIN_HTML
+    render = html.split("function agRenderModelOverrides", 1)[1].split(
+        "function agCollectModelOverrides", 1
+    )[0]
+    # Each level is a provider dropdown sourced from the configured registry —
+    # no free-text model / base_url_env inputs.
+    assert "AG_PROVIDERS" in render
+    assert "agmo-model" not in render
+    assert "agmo-baseurl" not in render
+    collect = html.split("function agCollectModelOverrides", 1)[1].split("\n}", 1)[0]
+    assert "AG_PROVIDERS.find" in collect  # model derived from the chosen provider
+    # providers are loaded when the modal opens (create + edit)
+    assert 'AG_PROVIDERS = await api("GET", "/providers")' in html
+    assert (
+        'api("GET", "/providers")'
+        in html.split("async function agEdit", 1)[1].split("async function agApplyEditBindings", 1)[
+            0
+        ]
+    )
+
+
+def test_agent_edit_reuses_new_agent_modal_prefilled():
+    html = ADMIN_HTML
+    fn = html.split("async function agEdit", 1)[1].split("async function agApplyEditBindings", 1)[0]
+    # Edit opens the shared ag-modal in edit mode with the create sections visible.
+    assert 'dataset.mode = "edit"' in fn
+    assert "getElementById" not in fn  # uses $() like the rest
+    for shown in ('"ag-create-extra"', '"ag-bind-config"'):
+        assert shown in fn
+    # prefill: model overrides + capabilities YAML + bindings
+    assert "agFillModelOverrides(" in fn
+    assert "agToolsToYaml(" in fn
+    assert "agLoadCreateBindings(current)" in fn
+    # save applies a binding diff (add + remove)
+    diff = html.split("async function agApplyEditBindings", 1)[1].split("async function agSave", 1)[
+        0
+    ]
+    assert "DELETE" in diff and "POST" in diff
+    assert "capabilities_yaml" in html.split("async function agSave", 1)[1].split("\n}", 1)[0]
 
 
 def test_drawer_loads_from_aggregate_endpoints():
@@ -880,7 +911,7 @@ def test_tables_wrapped_in_scroll_container():
     html = ADMIN_HTML
     # every data table lives inside a horizontal scroll container
     assert html.count('class="table-scroll"') >= html.count("<table>")
-    assert html.count("<table>") >= 11
+    assert html.count("<table>") >= 10
 
 
 def test_empty_and_loading_state_helpers_present():
@@ -1007,6 +1038,58 @@ def test_render_users_joins_im_identities_by_user():
     assert "imBlock(" in body
     assert "imRestore(" in body
     assert "platform_user_id" in body
+
+
+def test_im_identity_row_actions_are_limited_to_identity_scope():
+    body = _render_users_body(ADMIN_HTML)
+    # An IM identity is dependent: its actions are limited to identity scope.
+    # It must NOT carry the platform user's lifecycle config (that lives on the
+    # user row), so the two menus stay distinct.
+    idrows = body[body.index("const idRows ") : body.index("const idBlock ")]
+    assert "openBindModal(" in idrows  # reassign which platform user it attaches to
+    assert "imBlock(" in idrows
+    assert "imRestore(" in idrows
+    # No user-lifecycle actions duplicated onto the identity row.
+    for forbidden in ("openEditUser(", "setRole(", "resetPassword(", "viewKeys(", "del("):
+        assert forbidden not in idrows
+    # Identity-scoped edit + delete present.
+    assert "openImEdit(" in idrows
+    assert "imDelete(" in idrows
+
+
+def test_im_identity_has_edit_and_delete():
+    html = ADMIN_HTML
+    # Edit modal edits per-platform METADATA; the handle is read-only/auto-captured.
+    assert 'id="im-edit-modal"' in html
+    assert 'id="ie-fields"' in html  # dynamic per-platform field container
+    assert 'id="ie-head"' in html  # read-only handle summary
+    assert "IM_FIELDS" in html  # field schema fetched from the API
+    assert '"/im-users/fields"' in html
+    # User ID is auto-captured but admin-overridable.
+    assert 'id="ie-puid"' in html
+    assert "auto-captured, edit to override" in html
+    assert "doImEdit(" in html
+    assert '"PATCH", `/im-users/${IM_EDIT_ID}`, { platform_user_id, metadata }' in html
+    # Delete wired to the DELETE endpoint with a confirm guard.
+    assert 'api("DELETE", `/im-users/${id}`)' in html
+    assert "confirmDialog(" in html[html.index("async function imDelete") :]
+
+
+def test_bind_modal_is_searchable_user_picker():
+    html = ADMIN_HTML
+    # Redesigned bind flow: a searchable user picker, not a bare <select>.
+    assert 'id="bind-user-select"' not in html
+    assert 'id="bind-search"' in html
+    assert 'id="bind-user-list"' in html
+    assert "bindFilterUsers(" in html
+    assert "bindRenderUsers(" in html
+    # Modal shows which identity is being reassigned + its current owner.
+    assert 'id="bind-im-summary"' in html
+    assert "Currently linked to" in html
+    # Clicking a user row links it directly (id passed to doBindIm).
+    assert "doBindIm('" in html or "doBindIm(`" in html
+    # Platform icons for friendlier context.
+    assert "PLATFORM_ICON" in html
 
 
 # --- Task 3: connectors grouped under owning User -----------------------------
@@ -1151,6 +1234,16 @@ def test_chat_session_history_present():
     assert 'api("GET", "/chat/sessions")' in html
     # delete + open hit the per-session endpoints
     assert "/chat/${encodeURIComponent(sid)}" in html
+
+
+def test_api_error_message_handles_object_detail():
+    html = ADMIN_HTML
+    # object/array FastAPI `detail` (e.g. the "agent still bound" 409) renders
+    # readably instead of "[object Object]"
+    assert "function apiErrorMessage" in html
+    assert "apiErrorMessage(data.detail)" in html
+    fn = html.split("function apiErrorMessage", 1)[1].split("async function doLogin", 1)[0]
+    assert "Array.isArray" in fn and ".error" in fn
 
 
 def test_api_helper_retries_on_network_failure():

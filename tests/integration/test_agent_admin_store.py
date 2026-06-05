@@ -1,4 +1,4 @@
-"""Tests for agent_admin_store (migration 015) + agent_templates."""
+"""Tests for agent_admin_store (migration 015)."""
 
 import sqlite3
 from pathlib import Path
@@ -8,7 +8,6 @@ from alembic import command
 from alembic.config import Config
 
 from fleetent.platform.agent_management_console import agent_admin_store as store
-from fleetent.platform.agent_management_console import agent_templates
 
 
 def apply_migrations(db_path: Path) -> None:
@@ -125,11 +124,3 @@ def test_delete_state_missing_is_noop(store_db):
     store.delete_state("never-existed")  # must not raise
 
 
-def test_templates_readonly():
-    templates = {t["id"] for t in agent_templates.list_templates()}
-    assert {"readonly-qa", "ops", "support"} <= templates
-    t = agent_templates.get_template("ops")
-    assert "allowed_tools" in t and "system_prompt" in t
-    # mutating the returned copy must not affect the source
-    t["allowed_tools"].append("x")
-    assert "x" not in agent_templates.get_template("ops")["allowed_tools"]
