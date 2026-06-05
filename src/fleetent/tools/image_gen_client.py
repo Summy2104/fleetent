@@ -24,13 +24,13 @@ class ImageGenError(Exception):
     endpoint error/timeout, or an unusable response)."""
 
 
-def _build_client(settings: Settings) -> AsyncOpenAI:
+def _build_client(base_url: str) -> AsyncOpenAI:
     """Build an AsyncOpenAI bound to the configured images endpoint.
 
     Self-hosted endpoints often ignore the key; a non-empty placeholder keeps
     the SDK from rejecting the request before it reaches the backend.
     """
-    return AsyncOpenAI(base_url=settings.image_gen_url, api_key="image-gen")
+    return AsyncOpenAI(base_url=base_url, api_key="image-gen")
 
 
 async def _fetch_url(url: str) -> bytes:
@@ -54,15 +54,17 @@ async def generate(
     a url instead, fetches the bytes from that in-network url. Any failure is
     raised as ImageGenError for the caller to normalize.
     """
-    settings = settings or Settings()  # type: ignore[call-arg]
-    if not settings.image_gen_url:
+    from fleetent import agent_config
+
+    src = settings or agent_config.active_agent() or Settings()  # type: ignore[call-arg]
+    if not src.image_gen_url:
         raise ImageGenError("image generation endpoint not configured (image_gen_url is empty)")
 
-    client = _build_client(settings)
+    client = _build_client(src.image_gen_url)
     size_arg: str | Omit = size if size is not None else omit
     try:
         response = await client.images.generate(
-            model=settings.image_gen_model,
+            model=src.image_gen_model,
             prompt=prompt,
             response_format="b64_json",
             size=size_arg,

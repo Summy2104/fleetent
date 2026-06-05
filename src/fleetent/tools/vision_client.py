@@ -28,13 +28,13 @@ class VisionError(Exception):
     endpoint error/timeout, or an unusable response)."""
 
 
-def _build_client(settings: Settings) -> AsyncOpenAI:
+def _build_client(base_url: str) -> AsyncOpenAI:
     """Build an AsyncOpenAI bound to the configured vision endpoint.
 
     Self-hosted endpoints often ignore the key; a non-empty placeholder keeps
     the SDK from rejecting the request before it reaches the backend.
     """
-    return AsyncOpenAI(base_url=settings.vision_url, api_key="vision")
+    return AsyncOpenAI(base_url=base_url, api_key="vision")
 
 
 async def analyze(
@@ -50,11 +50,13 @@ async def analyze(
     returns the assistant text. Any failure is raised as VisionError for the
     caller to normalize into a tool-result error string.
     """
-    settings = settings or Settings()  # type: ignore[call-arg]
-    if not settings.vision_url:
+    from fleetent import agent_config
+
+    src = settings or agent_config.active_agent() or Settings()  # type: ignore[call-arg]
+    if not src.vision_url:
         raise VisionError("vision endpoint not configured (vision_url is empty)")
 
-    client = _build_client(settings)
+    client = _build_client(src.vision_url)
     b64 = base64.b64encode(image_bytes).decode("ascii")
     content: list[Any] = [
         {"type": "text", "text": instruction},
@@ -63,7 +65,7 @@ async def analyze(
     messages: list[Any] = [{"role": "user", "content": content}]
     try:
         response = await client.chat.completions.create(
-            model=settings.vision_model,
+            model=src.vision_model,
             messages=messages,
             timeout=_DEFAULT_TIMEOUT_SECONDS,
         )

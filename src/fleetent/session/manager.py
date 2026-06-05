@@ -29,9 +29,10 @@ _maintenance_task: asyncio.Task[None] | None = None
 
 
 def _default_config() -> dict[str, float]:
+    from fleetent import agent_config
     from fleetent.config import Settings
 
-    s = Settings()  # type: ignore[call-arg]
+    s = agent_config.active_agent() or Settings()  # type: ignore[call-arg]
     return {
         "ttl_seconds": s.session_ttl_days * _SECONDS_PER_DAY,
         "max_total_bytes": s.session_max_total_mb * _BYTES_PER_MB,
@@ -95,9 +96,11 @@ def start_session_maintenance(*, interval: float | None = None) -> asyncio.Task[
     if _maintenance_task is not None and not _maintenance_task.done():
         return _maintenance_task
     if interval is None:
+        from fleetent import agent_config
         from fleetent.config import Settings
 
-        interval = Settings().session_cleanup_interval_seconds  # type: ignore[call-arg]
+        src = agent_config.active_agent() or Settings()  # type: ignore[call-arg]
+        interval = src.session_cleanup_interval_seconds
     _maintenance_task = asyncio.create_task(_session_maintenance_loop(interval))
     return _maintenance_task
 

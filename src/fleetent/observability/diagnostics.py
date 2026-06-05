@@ -137,7 +137,7 @@ def plan_diagnostics_retention(
     now: datetime | None = None,
 ) -> DiagnosticsRetentionPlan:
     """Plan diagnostics retention candidates without mutating data."""
-    diagnostics = settings or _settings().diagnostics
+    diagnostics = settings or _default_diagnostics()
     current = now or datetime.now(UTC)
     logs = _old_files(
         log_dir or _default_data_dir() / "logs",
@@ -165,7 +165,7 @@ def apply_diagnostics_retention(
     now: datetime | None = None,
 ) -> DiagnosticsRetentionResult:
     """Apply manual diagnostics retention to logs, traces, and export packages."""
-    diagnostics = settings or _settings().diagnostics
+    diagnostics = settings or _default_diagnostics()
     if not diagnostics.retention.enabled:
         return DiagnosticsRetentionResult(False, 0, 0, 0, [], "diagnostics retention disabled")
     plan = plan_diagnostics_retention(
@@ -441,6 +441,14 @@ def _delete_files(paths: list[Path]) -> tuple[int, list[str]]:
 
 def _settings() -> Settings:
     return Settings(anthropic_api_key="")
+
+
+def _default_diagnostics() -> DiagnosticsSettings:
+    """Diagnostics config from the active (standalone) agent, else Settings default."""
+    from fleetent import agent_config
+
+    agent = agent_config.active_agent()
+    return agent.diagnostics if agent is not None else _settings().diagnostics
 
 
 def _database() -> SQLiteDatabase:
