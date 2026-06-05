@@ -4,12 +4,15 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import yaml
 
 from fleetent import paths
 from fleetent.config import MCP_SERVERS_YAML_PATH, SETTINGS_YAML_PATH, Settings
+
+if TYPE_CHECKING:
+    from fleetent.agent_config import AgentFile
 
 ValidationProfile = Literal["dev", "pilot", "production"]
 ValidationStatus = Literal["pass", "warning", "skipped", "error"]
@@ -72,20 +75,29 @@ def validate_config(
     *,
     profile: ValidationProfile,
     settings: Settings | None = None,
+    agent: AgentFile | None = None,
     data_dir: Path | None = None,
     config_dir: Path | None = None,
     secrets_dir: Path | None = None,
     config_paths: list[Path] | None = None,
-    scan_resolved_settings: bool = False,
+    scan_resolved_agent: bool = False,
 ) -> ValidationReport:
-    """Validate local runtime prerequisites without creating production data."""
+    """Validate local runtime prerequisites without creating production data.
+
+    Platform prerequisites (DB reachability, directories) come from the slim
+    ``Settings``; agent-runtime dependencies (intelligence backends, connector refs)
+    and the resolved-config secret scan come from the per-agent ``agent.yaml``."""
     resolved = settings or Settings()
+    if agent is None:
+        from fleetent import agent_config
+
+        agent = agent_config.active_agent_or_default()
     items: list[ValidationItem] = []
     items.extend(_runtime_items(resolved, data_dir, config_dir, secrets_dir))
-    items.extend(_profile_items(profile, resolved))
+    items.extend(_profile_items(profile, agent))
     items.extend(_config_secret_scan_items(config_paths))
-    if scan_resolved_settings:
-        items.extend(_secret_scan_items(resolved))
+    if scan_resolved_agent:
+        items.extend(_secret_scan_items(agent))
     return ValidationReport(profile=profile, items=items)
 
 
@@ -122,16 +134,13 @@ def _runtime_items(
     return items
 
 
-def _profile_items(profile: ValidationProfile, settings: Settings) -> list[ValidationItem]:
+def _profile_items(profile: ValidationProfile, agent: AgentFile) -> list[ValidationItem]:
     items: list[ValidationItem] = []
     items.append(
-        _dependency_item(profile, "embedding.backend", settings.embedding.backend, "deterministic")
+        _dependency_item(profile, "embedding.backend", agent.embedding.backend, "deterministic")
     )
-    items.append(_dependency_item(profile, "rerank.backend", settings.rerank.backend, "disabled"))
-    if (
-        settings.knowledge_base.google_drive.connectors
-        or settings.knowledge_base.confluence.connectors
-    ):
+    items.append(_dependency_item(profile, "rerank.backend", agent.rerank.backend, "disabled"))
+    if agent.knowledge_base.google_drive.connectors or agent.knowledge_base.confluence.connectors:
         items.append(
             ValidationItem("connectors.credential_ref", "pass", "connector refs configured")
         )
@@ -169,21 +178,35 @@ def _dependency_item(
     return ValidationItem(key, "warning", f"dev profile uses {local_default} backend")
 
 
-def _secret_scan_items(settings: Settings) -> list[ValidationItem]:
-    payload = settings.model_dump(mode="json")
+def _secret_scan_items(agent: AgentFile) -> list[ValidationItem]:
+    payload = agent.model_dump(mode="json")
     items: list[ValidationItem] = []
     for key, value in _flatten(payload):
         if isinstance(value, str) and _looks_inline_secret(value):
-            items.append(ValidationItem(f"settings.{key}", "error", "inline secret-like value"))
+            items.append(ValidationItem(f"agent.{key}", "error", "inline secret-like value"))
     return items
 
 
+def _default_scan_paths() -> list[Path]:
+    """Config files scanned for inline secrets by default: platform settings, the MCP
+    server file, and every discoverable per-agent ``agent.yaml`` (single- + multi-agent)."""
+    from fleetent import agent_config
+
+    scan = [SETTINGS_YAML_PATH, MCP_SERVERS_YAML_PATH, paths.agent_file()]
+    root = agent_config._resolve_agents_dir(None)
+    if root.is_dir():
+        scan.extend(
+            agent_dir / agent_config.AGENT_FILE_NAME
+            for agent_dir in sorted(root.iterdir())
+            if (agent_dir / agent_config.AGENT_FILE_NAME).is_file()
+        )
+    return scan
+
+
 def _config_secret_scan_items(config_paths: list[Path] | None) -> list[ValidationItem]:
-    paths = (
-        config_paths if config_paths is not None else [SETTINGS_YAML_PATH, MCP_SERVERS_YAML_PATH]
-    )
+    scan_paths = config_paths if config_paths is not None else _default_scan_paths()
     items: list[ValidationItem] = []
-    for path in paths:
+    for path in scan_paths:
         if not path.exists():
             continue
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}

@@ -39,10 +39,11 @@
 
 ## 5. config_validation retarget 到 agent.yaml
 
-- [ ] 5.1 Write failing tests(integration): `validate-config` 校验 agent.yaml 治理/部署/智能层字段与
+- [x] 5.1 Write failing tests: `validate-config` 校验 agent.yaml 治理/部署/智能层字段与
       inline-secret;env 注入的 token 不报 inline secret;平台 DB 可达仍可校验。运行见红
-- [ ] 5.2 retarget `platform/config_validation.py`:加载 agent.yaml 校验,inline-secret 扫描复用阶段 1
-      同源逻辑;平台 prerequisite 仍读精简 `Settings`。运行见绿
+- [x] 5.2 retarget `platform/config_validation.py`:`validate_config` 加 `agent` 源(默认
+      `active_agent_or_default()`),profile/secret 扫描读 agent;`_default_scan_paths` 含 agent.yaml;
+      平台 prerequisite(DB/dirs)仍读精简 `Settings`。运行见绿(mypy 全清)
 
 ## 6. settings.yaml.example 收缩 + 文档
 

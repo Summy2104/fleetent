@@ -2,35 +2,36 @@ import json
 
 
 def test_env_provided_secret_values_are_not_inline_config_errors(monkeypatch):
-    from fleetent.config import Settings
+    from fleetent.agent_config import AgentFile
     from fleetent.platform.config_validation import validate_config
 
+    # The agent references its Slack token by env-var name; the secret value lives in
+    # the environment and never appears in agent.yaml or the validation output.
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-1234567890abcdef")
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456789012345678901234")
-    settings = Settings()
+    agent = AgentFile(
+        name="a",
+        version=1,
+        connectors={"slack": {"bot_token_env": "SLACK_BOT_TOKEN", "app_token_env": "SLACK_APP"}},
+    )
 
-    report = validate_config(profile="pilot", settings=settings, config_paths=[])
+    report = validate_config(
+        profile="pilot", agent=agent, config_paths=[], scan_resolved_agent=True
+    )
 
     assert report.final_status != "error"
-    assert not [item for item in report.items if item.key.startswith("settings.slack")]
     assert "xoxb-1234567890abcdef" not in report.to_json()
 
 
 def test_secret_like_values_in_config_files_are_errors(tmp_path):
-    from fleetent.config import Settings
     from fleetent.platform.config_validation import validate_config
 
-    settings_file = tmp_path / "settings.yaml"
-    settings_file.write_text("image_gen_url: sk-ant-1234567890abcdef\n", encoding="utf-8")
+    agent_yaml = tmp_path / "agent.yaml"
+    agent_yaml.write_text("image_gen_url: sk-ant-1234567890abcdef\n", encoding="utf-8")
 
-    report = validate_config(
-        profile="pilot",
-        settings=Settings(),
-        config_paths=[settings_file],
-    )
+    report = validate_config(profile="pilot", config_paths=[agent_yaml])
 
     secret_items = [
-        item for item in report.items if item.key == f"config.{settings_file}.image_gen_url"
+        item for item in report.items if item.key == f"config.{agent_yaml}.image_gen_url"
     ]
     assert secret_items
     assert secret_items[0].status == "error"
@@ -67,29 +68,29 @@ def test_validation_report_serializes_stable_status_summary():
     }
 
 
-def test_inline_secret_like_config_values_are_errors():
-    from fleetent.config import Settings
+def test_inline_secret_like_agent_values_are_errors():
+    from fleetent.agent_config import AgentFile
     from fleetent.platform.config_validation import validate_config
 
-    settings = Settings(image_gen_url="sk-ant-1234567890abcdef")
+    agent = AgentFile(name="a", version=1, image_gen_url="sk-ant-1234567890abcdef")
 
-    report = validate_config(profile="pilot", settings=settings, scan_resolved_settings=True)
+    report = validate_config(profile="pilot", agent=agent, scan_resolved_agent=True)
 
-    secret_items = [item for item in report.items if item.key == "settings.image_gen_url"]
+    secret_items = [item for item in report.items if item.key == "agent.image_gen_url"]
     assert secret_items
     assert secret_items[0].status == "error"
     assert "inline secret-like value" in secret_items[0].reason
 
 
 def test_profile_rules_warn_skip_or_error_for_production_dependencies():
-    from fleetent.config import Settings
+    from fleetent.agent_config import AgentFile
     from fleetent.platform.config_validation import validate_config
 
-    settings = Settings(embedding={"backend": "deterministic"})
+    agent = AgentFile(name="a", version=1, embedding={"backend": "deterministic"})
 
-    dev = validate_config(profile="dev", settings=settings)
-    pilot = validate_config(profile="pilot", settings=settings)
-    production = validate_config(profile="production", settings=settings)
+    dev = validate_config(profile="dev", agent=agent)
+    pilot = validate_config(profile="pilot", agent=agent)
+    production = validate_config(profile="production", agent=agent)
 
     assert _item(dev, "embedding.backend").status == "warning"
     assert _item(pilot, "embedding.backend").status == "skipped"
