@@ -1,0 +1,27 @@
+name: support-bot
+version: 1
+tenant_id: acme-corp
+team_id: customer-success
+
+system_prompt: |
+  You are Acme's customer support assistant.
+
+knowledge:
+  enabled: true
+  bindings:
+    - tenant_id: acme-corp
+      kb_id: support-kb
+      default: true
+      permissions:
+        search: true
+    - tenant_id: acme-corp
+      kb_id: billing-kb
+      permissions:
+        search: true
+  retrieval_policy:
+    mode: hybrid
+    top_k: 10
+    rerank: true
+    embedding_route: embedding
+    rerank_route: rerank
+

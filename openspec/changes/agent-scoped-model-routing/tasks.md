@@ -18,14 +18,14 @@
 
 ## 4. Image / embedding / rerank integration
 
-- [ ] 4.1 Write failing tests: 覆盖 `generate_image` 从 `models.routes.image_generation` 解析 provider，embedding/rerank 从 `models.routes.embedding` / `models.routes.rerank` 解析 provider；服务化消费方通过 `ModelPolicySnapshot` 按 `agent_id + route_key` 解析，而不是从 `Settings()` 或全局 provider route 独立读取生产路由
+- [ ] 4.1 Write failing tests: 覆盖 `generate_image` 从 `models.routes.image_generation` 解析 provider，embedding/rerank 从 `models.routes.embedding` / `models.routes.rerank` 解析 provider；服务化消费方通过 `ModelPolicySnapshot` 按 `agent_id + route_key` 解析，而不是从 AgentFile legacy flat fields 或全局 provider route 独立读取生产路由
 - [ ] 4.2 Implement: 将 `tools/image_gen_client.py`、intelligence embedding/rerank runtime 接入 Agent-scoped resolver / `ModelPolicySnapshot`，保留测试注入边界，使测试转绿
 - [ ] 4.3 Verify green: 运行相关 unit/integration 测试
 
 ## 5. Platform materialize and templates
 
 - [ ] 5.1 Write failing tests: 覆盖 platform DB/authored Agent materialize 生成完整 `models`，`.env` scaffold 写入 `api_key_env` 且保留已有值，模板不再输出 `ANTHROPIC_API_KEY` / `model_overrides`
-- [ ] 5.2 Implement: 更新 `platform/agent_lifecycle/materialize.py`、admin deploy/export、`fleetent agent init` scaffold、`config/agent.yaml.example`，使测试转绿
+- [ ] 5.2 Implement: 更新 `platform/agent_lifecycle/materialize.py`、admin deploy/export、`fleetent agent init` scaffold、`config/agent/agent.yaml.example` 与 local `config/agent.yaml`，使测试转绿
 - [ ] 5.3 Verify green: 运行相关 platform/runtime integration 测试
 
 ## 6. Remove old runtime config path

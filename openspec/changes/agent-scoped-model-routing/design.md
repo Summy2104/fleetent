@@ -8,7 +8,8 @@ DB，也不应依赖全局 `routes.yaml`。
 
 - `AgentFile` 已经能承载很多 Agent-local 配置，但模型仍是浅层 `model_overrides`。
 - LLM router 仍有内置 `DEFAULT_ROUTES` 与 `config/routes.yaml`。
-- embedding/rerank/knowledge 仍有部分路径读取 `Settings()`。
+- config consolidation 后 `Settings` 已瘦身；embedding/rerank/knowledge、image/vision 等
+  runtime 配置现在主要作为 AgentFile 上的 legacy flat fields 存在，仍未纳入统一 `models`。
 - platform provider 管理是全局 CRUD/route，代码注释也承认 runtime consuming tables 是 follow-up。
 
 本 change 以 Agent-local `models` 作为 Agent-scoped model policy contract。它不是
@@ -139,7 +140,7 @@ MVP 使用 `api_key_env`，不使用 `secret_env` / `credential_env`。这不锁
 `model/router.py` 可以被重构或替换，但 runtime 主路径不得再从 `config/routes.yaml`
 或 `DEFAULT_ROUTES` 推导生产配置。现有 `tools/image_gen_client.py` 和
 `tools/vision_client.py` 也应从 Agent-scoped resolver 获取 endpoint/model/api key，而不是
-继续读取 `Settings.image_gen_url` / `Settings.vision_url`。
+继续读取 `AgentFile.image_gen_url` / `AgentFile.vision_url` 等 legacy flat fields。
 
 ### D5 — platform provider catalog 只做 authoring 辅助
 
