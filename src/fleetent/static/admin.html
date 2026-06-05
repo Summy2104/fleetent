@@ -992,6 +992,27 @@
     </div>
   </div>
 
+  <div id="im-edit-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3>Edit IM identity</h3>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="doImEdit(); return false;">
+        <label class="field-label" for="ie-platform">Platform</label>
+        <select id="ie-platform">
+          <option value="slack">slack</option>
+          <option value="telegram">telegram</option>
+          <option value="whatsapp">whatsapp</option>
+        </select>
+        <label class="field-label" for="ie-puid">Platform user id</label>
+        <input id="ie-puid" placeholder="e.g. U12345" autocomplete="off">
+        <div id="ie-err" class="err"></div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" class="ghost" onclick="closeImEdit()">Cancel</button>
+          <button type="submit">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div id="conn-modal" class="modal hidden">
     <div class="modal-box" role="dialog" aria-modal="true">
       <h3>Add connection</h3>
@@ -1671,10 +1692,12 @@ function renderUsers() {
         <td>${esc(r.platform_user_id)}</td>
         <td><span class="pill ${r.allowed ? "active" : "blocked"}">${r.allowed ? "allowed" : "blocked"}</span></td>
         <td class="actions">
+          <button class="small ghost" onclick="openImEdit(${r.id})">Edit</button>
           <button class="small ghost" onclick="openBindModal(${r.id})">Reassign user</button>
           ${r.allowed
             ? `<button class="small danger" onclick="imBlock(${r.id})">Block identity</button>`
             : `<button class="small ghost" onclick="imRestore(${r.id})">Restore</button>`}
+          <button class="small danger" onclick="imDelete(${r.id})">Delete</button>
         </td>
       </tr>`).join("");
     const idBlock = ids.length
@@ -1856,6 +1879,36 @@ async function viewKeys(id) {
 
 async function imBlock(id) { const reason = prompt("Reason?"); if (reason === null) return; try { await api("POST", `/im-users/${id}/block`, { reason }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
 async function imRestore(id) { try { await api("POST", `/im-users/${id}/restore`, { reason: "" }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
+
+let IM_EDIT_ID = null;
+function openImEdit(imId) {
+  const identity = Object.values(IM_BY_USER).flat().find(r => r.id === imId);
+  if (!identity) return;
+  IM_EDIT_ID = imId;
+  $("ie-err").textContent = "";
+  $("ie-platform").value = identity.platform;
+  $("ie-puid").value = identity.platform_user_id;
+  $("im-edit-modal").classList.remove("hidden");
+  $("ie-puid").focus();
+}
+function closeImEdit() { $("im-edit-modal").classList.add("hidden"); IM_EDIT_ID = null; }
+async function doImEdit() {
+  $("ie-err").textContent = "";
+  const platform = $("ie-platform").value;
+  const platform_user_id = $("ie-puid").value.trim();
+  if (!platform_user_id) { $("ie-err").textContent = "Platform user id is required"; return; }
+  try {
+    await api("PATCH", `/im-users/${IM_EDIT_ID}`, { platform, platform_user_id });
+    closeImEdit();
+    toast("IM identity updated", "success");
+    loadUsers();
+  } catch (e) { $("ie-err").textContent = apiErrorMessage(e.message || e); }
+}
+async function imDelete(id) {
+  if (!await confirmDialog("Delete this IM identity? The linked platform user is kept.")) return;
+  try { await api("DELETE", `/im-users/${id}`); toast("IM identity deleted", "success"); loadUsers(); }
+  catch (e) { toast(e.message, "error"); }
+}
 
 const PLATFORM_ICON = { slack: "💬", telegram: "✈️", whatsapp: "🟢" };
 let BIND_IM_ID = null;

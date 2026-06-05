@@ -39,6 +39,49 @@ def test_batch_block_shared_id(db):
     assert len(rows) == 2
 
 
+def test_update_im_identity_edits_handle_audited(db):
+    user = im_user_store.get_or_create(_OWNER, "slack", "U1")
+    im_id = im_user_store.list_im_identities(user.id)[0]["id"]
+    im_user_store.update_im_identity(
+        im_id, platform="telegram", platform_user_id="999", actor="admin1"
+    )
+    row = im_user_store.get_im_user(im_id)
+    assert row is not None
+    assert row["platform"] == "telegram"
+    assert row["platform_user_id"] == "999"
+    # binding + allowlist untouched
+    assert row["user_id"] == user.id
+    assert len(audit.search_audit(action="update_im_user", target_id=str(im_id))) == 1
+
+
+def test_update_im_identity_missing_raises(db):
+    with pytest.raises(ValueError):
+        im_user_store.update_im_identity(9999, platform="slack", platform_user_id="x")
+
+
+def test_update_im_identity_conflict_raises(db):
+    a = im_user_store.get_or_create(_OWNER, "slack", "A1")
+    im_user_store.get_or_create(_OWNER, "slack", "B1")
+    a_id = im_user_store.list_im_identities(a.id)[0]["id"]
+    # Renaming A1 -> B1 collides with the existing (owner, slack, B1) identity.
+    with pytest.raises(ValueError):
+        im_user_store.update_im_identity(a_id, platform="slack", platform_user_id="B1")
+
+
+def test_delete_im_identity_audited(db):
+    user = im_user_store.get_or_create(_OWNER, "slack", "U1")
+    im_id = im_user_store.list_im_identities(user.id)[0]["id"]
+    im_user_store.delete_im_identity(im_id, actor="admin1")
+    assert im_user_store.get_im_user(im_id) is None
+    assert im_user_store.list_im_identities(user.id) == []
+    assert len(audit.search_audit(action="delete_im_user", target_id=str(im_id))) == 1
+
+
+def test_delete_im_identity_missing_raises(db):
+    with pytest.raises(ValueError):
+        im_user_store.delete_im_identity(9999)
+
+
 def test_list_identities_merges_platforms(db):
     # Same internal user bound to two platforms (simulate by reusing user_id).
     u = im_user_store.get_or_create(_OWNER, "slack", "M1")

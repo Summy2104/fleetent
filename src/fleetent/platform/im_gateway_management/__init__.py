@@ -40,6 +40,7 @@ from fleetent.platform.im_gateway_management.identity import (
     approve_user,
     block_im_user,
     check_allowed_by_user_id,
+    delete_im_identity,
     disable_im_accounts,
     get_im_user,
     get_or_create,
@@ -48,6 +49,7 @@ from fleetent.platform.im_gateway_management.identity import (
     list_pending,
     rebind_im_identity,
     restore_im_user,
+    update_im_identity,
 )
 
 __all__ = [
@@ -57,6 +59,7 @@ __all__ = [
     "approve_user",
     "block_im_user",
     "check_allowed_by_user_id",
+    "delete_im_identity",
     "disable_im_accounts",
     "get_connector",
     "get_im_user",
@@ -70,6 +73,7 @@ __all__ = [
     "list_pending",
     "rebind_im_identity",
     "remove_entry",
+    "update_im_identity",
     "report_status",
     "resolve",
     "resolve_masked",

@@ -1021,6 +1021,22 @@ def test_im_identity_row_actions_are_limited_to_identity_scope():
     # No user-lifecycle actions duplicated onto the identity row.
     for forbidden in ("openEditUser(", "setRole(", "resetPassword(", "viewKeys(", "del("):
         assert forbidden not in idrows
+    # Identity-scoped edit + delete present.
+    assert "openImEdit(" in idrows
+    assert "imDelete(" in idrows
+
+
+def test_im_identity_has_edit_and_delete():
+    html = ADMIN_HTML
+    # Edit modal for the identity handle (platform + platform_user_id).
+    assert 'id="im-edit-modal"' in html
+    assert 'id="ie-platform"' in html
+    assert 'id="ie-puid"' in html
+    assert "doImEdit(" in html
+    assert '"PATCH", `/im-users/${IM_EDIT_ID}`' in html
+    # Delete wired to the DELETE endpoint with a confirm guard.
+    assert 'api("DELETE", `/im-users/${id}`)' in html
+    assert "confirmDialog(" in html[html.index("async function imDelete") :]
 
 
 def test_bind_modal_is_searchable_user_picker():

@@ -181,6 +181,61 @@ def rebind_im_identity(im_user_id: int, target_user_id: str, actor: str | None =
     )
 
 
+def update_im_identity(
+    im_user_id: int,
+    platform: str,
+    platform_user_id: str,
+    actor: str | None = None,
+) -> None:
+    """Edit an IM identity's handle (platform + platform_user_id). Audited.
+
+    Binding (user_id) and allowlist (allowed) are left untouched. Raises ValueError
+    if the identity is missing or the new handle collides with an existing one.
+    """
+    import sqlite3
+
+    from fleetent.governance import audit_log
+
+    _init_db()
+    with _conn() as conn:
+        try:
+            cur = conn.execute(
+                "UPDATE im_users SET platform = :platform, platform_user_id = :puid WHERE id = :id",
+                {"platform": platform, "puid": platform_user_id, "id": im_user_id},
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(f"im identity already exists: {platform}:{platform_user_id}") from exc
+        if cur.rowcount == 0:
+            raise ValueError(f"im identity not found: {im_user_id}")
+    audit_log.write_audit(
+        actor,
+        "update_im_user",
+        target_type="im_user",
+        target_id=str(im_user_id),
+        detail={"platform": platform, "platform_user_id": platform_user_id},
+    )
+
+
+def delete_im_identity(im_user_id: int, actor: str | None = None) -> None:
+    """Delete an IM identity row. Audited. Raises ValueError if it does not exist.
+
+    The previously-bound platform user is left untouched.
+    """
+    from fleetent.governance import audit_log
+
+    _init_db()
+    with _conn() as conn:
+        cur = conn.execute("DELETE FROM im_users WHERE id = :id", {"id": im_user_id})
+        if cur.rowcount == 0:
+            raise ValueError(f"im identity not found: {im_user_id}")
+    audit_log.write_audit(
+        actor,
+        "delete_im_user",
+        target_type="im_user",
+        target_id=str(im_user_id),
+    )
+
+
 def list_im_identities(user_id: str) -> list[dict[str, Any]]:
     """All IM identities (across platforms) belonging to one internal User."""
     _init_db()
