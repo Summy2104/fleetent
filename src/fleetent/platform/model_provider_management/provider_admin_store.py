@@ -26,7 +26,8 @@ def _now() -> str:
 
 
 _PROVIDER_COLS = (
-    "id, description, base_url, model, api_key, max_tokens, temperature, extra_params, "
+    "id, description, provider, protocol, base_url, model, api_key, api_key_env, "
+    "max_tokens, temperature, extra_params, params, "
     "input_price_per_1k, output_price_per_1k, created_at, updated_at"
 )
 
@@ -40,26 +41,35 @@ def add_provider(
     max_tokens: int | None = None,
     temperature: float | None = None,
     extra_params: dict[str, Any] | None = None,
+    provider: str | None = None,
+    protocol: str | None = None,
+    api_key_env: str | None = None,
+    params: dict[str, Any] | None = None,
 ) -> None:
     now = _now()
     with _database().transaction() as conn:
         conn.execute(
             """
             INSERT INTO model_providers
-                (id, description, base_url, model, api_key, max_tokens, temperature, extra_params,
-                 created_at, updated_at)
-            VALUES (:id, :description, :base_url, :model, :api_key, :max_tokens, :temperature,
-                    :extra_params, :created_at, :updated_at)
+                (id, description, provider, protocol, base_url, model, api_key, api_key_env,
+                 max_tokens, temperature, extra_params, params, created_at, updated_at)
+            VALUES (:id, :description, :provider, :protocol, :base_url, :model, :api_key,
+                    :api_key_env, :max_tokens, :temperature, :extra_params, :params,
+                    :created_at, :updated_at)
             """,
             {
                 "id": provider_id,
                 "description": description,
+                "provider": provider,
+                "protocol": protocol,
                 "base_url": base_url,
                 "model": model,
                 "api_key": api_key,
+                "api_key_env": api_key_env,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "extra_params": json.dumps(extra_params) if extra_params else None,
+                "params": json.dumps(params) if params else None,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -68,13 +78,18 @@ def add_provider(
 
 _EDITABLE = {
     "description",
+    "provider",
+    "protocol",
     "base_url",
     "model",
     "max_tokens",
     "temperature",
     "extra_params",
+    "params",
     "api_key",
+    "api_key_env",
 }
+_JSON_FIELDS = {"extra_params", "params"}
 
 
 def edit_provider(provider_id: str, **fields: Any) -> None:
@@ -82,8 +97,9 @@ def edit_provider(provider_id: str, **fields: Any) -> None:
     updates = {k: v for k, v in fields.items() if k in _EDITABLE}
     if "api_key" in updates and updates["api_key"] is None:
         del updates["api_key"]  # blank = unchanged
-    if "extra_params" in updates and updates["extra_params"] is not None:
-        updates["extra_params"] = json.dumps(updates["extra_params"])
+    for jf in _JSON_FIELDS:
+        if jf in updates and updates[jf] is not None:
+            updates[jf] = json.dumps(updates[jf])
     if not updates:
         return
     updates["updated_at"] = _now()
@@ -141,8 +157,9 @@ def list_providers() -> list[dict[str, Any]]:
 
 def _decode(row: dict[str, Any]) -> dict[str, Any]:
     out = dict(row)
-    if out.get("extra_params"):
-        out["extra_params"] = json.loads(out["extra_params"])
+    for jf in _JSON_FIELDS:
+        if out.get(jf):
+            out[jf] = json.loads(out[jf])
     return out
 
 

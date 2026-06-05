@@ -1195,6 +1195,12 @@
             </div>
             <span class="form-hint">Leave blank to keep existing key when editing</span>
           </div>
+
+          <div class="form-group">
+            <label class="form-label" for="pv-api-key-env">API key env var</label>
+            <input id="pv-api-key-env" type="text" class="form-input" placeholder="e.g. FLEETENT_MODEL_FAST_API_KEY" autocomplete="off">
+            <span class="form-hint">Env var name holding the key (preferred over an inline key)</span>
+          </div>
         </div>
 
         <!-- Advanced Settings -->
@@ -1211,6 +1217,16 @@
               <input id="pv-temperature" type="number" class="form-input" placeholder="0.7" min="0" max="2" step="0.1" autocomplete="off">
               <span class="form-hint">Response randomness (0-2)</span>
             </div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label" for="pv-protocol">Protocol</label>
+            <input id="pv-protocol" type="text" class="form-input" placeholder="e.g. openai_chat" autocomplete="off">
+            <span class="form-hint">Wire protocol label</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="pv-params">Params (custom, JSON)</label>
+            <textarea id="pv-params" class="form-input" rows="4" placeholder='{"temperature": 0.3, "top_p": 0.9}' autocomplete="off" spellcheck="false" style="font-family:monospace;"></textarea>
+            <span class="form-hint">Free-form sampling params passed to the model</span>
           </div>
         </details>
 
@@ -3327,7 +3343,7 @@ function pvOpenCreate() {
   $("pv-modal-title").textContent = "Add Provider";
   $("pv-err").textContent = "";
   // Reset form
-  for (const id of ["pv-id", "pv-description", "pv-base-url", "pv-api-key", "pv-max-tokens", "pv-temperature"]) {
+  for (const id of ["pv-id", "pv-description", "pv-base-url", "pv-api-key", "pv-api-key-env", "pv-max-tokens", "pv-temperature", "pv-protocol", "pv-params"]) {
     if ($(id)) $(id).value = "";
   }
   $("pv-id").value = genId();
@@ -3362,20 +3378,23 @@ async function pvOpenEdit(id) {
   }
   
   $("pv-api-key").value = "";  // never prefill secret
+  $("pv-api-key-env").value = p.api_key_env || "";
   $("pv-max-tokens").value = p.max_tokens != null ? p.max_tokens : "";
   $("pv-temperature").value = p.temperature != null ? p.temperature : "";
-  
-  // Detect provider type from URL
-  if (p.base_url?.includes('openai.com')) {
-    pvUpdateProviderType('openai');
-  } else if (p.base_url?.includes('anthropic.com')) {
-    pvUpdateProviderType('anthropic');
-  } else if (p.base_url?.includes('azure.com')) {
-    pvUpdateProviderType('azure');
-  } else {
-    pvUpdateProviderType('custom');
+  $("pv-protocol").value = p.protocol || "";
+  $("pv-params").value = p.params ? JSON.stringify(p.params, null, 2) : "";
+
+  // Provider (vendor): use the stored value, else infer from the base URL.
+  let ptype = p.provider;
+  if (!document.querySelector(`input[name="provider-type"][value="${ptype}"]`)) {
+    ptype = p.base_url?.includes("openai.com") ? "openai"
+      : p.base_url?.includes("anthropic.com") ? "anthropic"
+      : p.base_url?.includes("azure.com") ? "azure" : "custom";
   }
-  
+  const radio = document.querySelector(`input[name="provider-type"][value="${ptype}"]`);
+  if (radio) radio.checked = true;
+  pvUpdateProviderType(ptype);
+
   $("pv-modal").classList.remove("hidden");
 }
 
@@ -3484,13 +3503,27 @@ function pvFormBody() {
   }
   
   if ($("pv-api-key").value) body.api_key = $("pv-api-key").value;
+  if ($("pv-api-key-env").value) body.api_key_env = $("pv-api-key-env").value.trim();
   if ($("pv-max-tokens").value) body.max_tokens = parseInt($("pv-max-tokens").value, 10);
   if ($("pv-temperature").value) body.temperature = parseFloat($("pv-temperature").value);
+  // Vendor comes from the provider-type radio; protocol is a free-text label.
+  const ptype = document.querySelector('input[name="provider-type"]:checked');
+  if (ptype) body.provider = ptype.value;
+  if ($("pv-protocol").value) body.protocol = $("pv-protocol").value.trim();
+  const raw = $("pv-params").value.trim();
+  if (raw) {
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { $("pv-err").textContent = "Params must be valid JSON"; return null; }
+    if (typeof parsed !== "object" || Array.isArray(parsed)) { $("pv-err").textContent = "Params must be a JSON object"; return null; }
+    body.params = parsed;
+  }
   return body;
 }
 async function pvSave() {
-  if (PV_EDIT_ID) return pvEdit(PV_EDIT_ID, pvFormBody());
-  return pvCreate($("pv-id").value, pvFormBody());
+  const body = pvFormBody();
+  if (!body) return;  // invalid params
+  if (PV_EDIT_ID) return pvEdit(PV_EDIT_ID, body);
+  return pvCreate($("pv-id").value, body);
 }
 async function pvCreate(id, body) {
   $("pv-err").textContent = "";

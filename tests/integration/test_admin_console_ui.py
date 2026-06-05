@@ -167,6 +167,18 @@ def test_providers_endpoints_present():
         assert frag in html, frag
 
 
+def test_providers_form_has_vendor_protocol_env_params():
+    html = ADMIN_HTML
+    # new provider fields: api_key_env, protocol, custom params (JSON)
+    for fid in ('id="pv-api-key-env"', 'id="pv-protocol"', 'id="pv-params"'):
+        assert fid in html, fid
+    form = html.split("function pvFormBody", 1)[1].split("async function pvSave", 1)[0]
+    assert "api_key_env" in form
+    assert "body.protocol" in form
+    assert "body.provider" in form  # vendor from the provider-type radio
+    assert "JSON.parse(raw)" in form  # params parsed as JSON
+
+
 def test_providers_secret_field_password_no_prefill():
     html = ADMIN_HTML
     # api_key input must be a password field with autocomplete off
