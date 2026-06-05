@@ -1,6 +1,6 @@
 import pytest
 
-from fleetent.config import KnowledgeBaseSettings, Settings
+from fleetent.config import KnowledgeBaseSettings
 from fleetent.db import create_database
 from tests.integration.test_migrations import apply_migrations
 
@@ -18,12 +18,9 @@ def _patch_runtime_database(monkeypatch, tmp_path):
 def _patch_runtime_settings(monkeypatch, **knowledge_base):
     from fleetent.intelligence.knowledge_base import runtime
 
-    settings = Settings(
-        anthropic_api_key="test-key",
-        knowledge_base=KnowledgeBaseSettings(**knowledge_base),
-    )
-    monkeypatch.setattr(runtime, "_settings", lambda: settings)
-    return settings
+    config = KnowledgeBaseSettings(**knowledge_base)
+    monkeypatch.setattr(runtime, "_kb_config", lambda: config)
+    return config
 
 
 async def test_ingest_text_creates_document_and_deterministic_chunks(monkeypatch, tmp_path):

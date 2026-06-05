@@ -173,11 +173,10 @@ def _settings() -> Settings:
 
 
 def _kb_config() -> KnowledgeBaseSettings:
-    """knowledge_base config from the active (standalone) agent, else Settings default."""
+    """knowledge_base config from the active agent (a neutral default when absent)."""
     from fleetent import agent_config
 
-    agent = agent_config.active_agent()
-    return agent.knowledge_base if agent is not None else _settings().knowledge_base
+    return agent_config.active_agent_or_default().knowledge_base
 
 
 def _database() -> SQLiteDatabase:

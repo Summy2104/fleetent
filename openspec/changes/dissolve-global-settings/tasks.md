@@ -8,12 +8,16 @@
 
 ## 2. 删除 Settings agent-runtime 字段
 
-- [ ] 2.1 Write failing tests: 断言 `Settings` 不再含治理字段(`agent_max_turns`/`context_*`/
+- [x] 2.1 Write failing tests: 断言 `Settings` 不再含治理字段(`agent_max_turns`/`context_*`/
       `agent_budget_*` 含 global/`session_*`/`permission_gate_*`/`tool_default_timeout_seconds`/
       `provider_failure_threshold` 等)与部署字段(`microsandbox_url`/`image_gen_*`/`vision_*`/
       `disabled_skills`)及智能层字段(`vector_store`/`embedding`/`rerank`/`long_term_ctx`/
       `knowledge_base`/`mcp`/`scheduling`/`webhooks`)。运行见红(字段尚存)
-- [ ] 2.2 从 `Settings` 删除上述字段;**保留**子模型类于 `config.py` 供 `AgentFile` 复用。运行见绿
+      → `test_settings_excludes_dissolved_agent_runtime_fields`
+- [x] 2.2 从 `Settings` 删除上述字段;**保留**子模型类于 `config.py` 供 `AgentFile` 复用。运行见绿
+      → 含前置 fallback 重指;~16 测试文件从 `Settings(...)` 迁到 `AgentFile`;intelligence/diagnostics
+      源读取改 `active_agent_or_default()`/`_kb_config`/`_ltc_config`。config_validation 仍读旧字段
+      (mypy 4 err + 4 测试失败)→ 留待 task 5 retarget。
 
 ## 3. 删除 IM tokens、default_agent_name、anthropic_api_key
 

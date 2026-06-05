@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from fleetent.config import KnowledgeBaseSettings, Settings
+from fleetent.config import KnowledgeBaseSettings
 from fleetent.db import create_database
 from tests.integration.test_migrations import apply_migrations
 
@@ -22,12 +22,9 @@ def _patch_binding_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path):
 def _patch_binding_settings(monkeypatch: pytest.MonkeyPatch, default_kb_id: str = "global"):
     from fleetent.intelligence.knowledge_base import bindings
 
-    settings = Settings(
-        anthropic_api_key="test-key",
-        knowledge_base=KnowledgeBaseSettings(default_kb_id=default_kb_id),
-    )
-    monkeypatch.setattr(bindings, "_settings", lambda: settings)
-    return settings
+    config = KnowledgeBaseSettings(default_kb_id=default_kb_id)
+    monkeypatch.setattr(bindings, "_kb_config", lambda: config)
+    return config
 
 
 def test_binding_public_api_is_importable():
@@ -176,18 +173,9 @@ async def test_long_term_context_searches_resolved_agent_kbs(monkeypatch):
 
     monkeypatch.setattr(long_term_ctx.memory, "search", _empty_memory_search)
     monkeypatch.setattr(
-        long_term_ctx.Settings,
-        "__call__",
-        lambda self: None,
-        raising=False,
-    )
-    monkeypatch.setattr(
         long_term_ctx,
-        "Settings",
-        lambda anthropic_api_key="": Settings(
-            anthropic_api_key="test-key",
-            knowledge_base=KnowledgeBaseSettings(enabled=True, default_tenant_id="tenant-a"),
-        ),
+        "_kb_config",
+        lambda: KnowledgeBaseSettings(enabled=True, default_tenant_id="tenant-a"),
     )
     monkeypatch.setattr(
         long_term_ctx.knowledge_base,
@@ -226,11 +214,8 @@ async def test_long_term_context_skips_search_when_agent_kb_scope_is_empty(monke
     monkeypatch.setattr(long_term_ctx.memory, "search", _empty_memory_search)
     monkeypatch.setattr(
         long_term_ctx,
-        "Settings",
-        lambda anthropic_api_key="": Settings(
-            anthropic_api_key="test-key",
-            knowledge_base=KnowledgeBaseSettings(enabled=True, default_tenant_id="tenant-a"),
-        ),
+        "_kb_config",
+        lambda: KnowledgeBaseSettings(enabled=True, default_tenant_id="tenant-a"),
     )
     monkeypatch.setattr(
         long_term_ctx.knowledge_base,

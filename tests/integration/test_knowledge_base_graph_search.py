@@ -1,4 +1,4 @@
-from fleetent.config import KnowledgeBaseSettings, Settings
+from fleetent.config import KnowledgeBaseSettings
 from fleetent.db import create_database
 from fleetent.intelligence.knowledge_base.parsers import ParsedDocument, ParsedSection
 from tests.integration.test_migrations import apply_migrations
@@ -83,12 +83,9 @@ def _patch_knowledge_runtime(monkeypatch, tmp_path):
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)
     database = create_database(f"sqlite:///{db_path}")
-    settings = Settings(
-        anthropic_api_key="test-key",
-        knowledge_base=KnowledgeBaseSettings(chunk_size=500, chunk_overlap=0),
-    )
+    config = KnowledgeBaseSettings(chunk_size=500, chunk_overlap=0)
     monkeypatch.setattr(runtime, "_database", lambda: database)
-    monkeypatch.setattr(runtime, "_settings", lambda: settings)
+    monkeypatch.setattr(runtime, "_kb_config", lambda: config)
     monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
     monkeypatch.setattr(runtime.vector_store, "delete", _noop_delete)
     return database

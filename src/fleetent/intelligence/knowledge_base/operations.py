@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from fleetent.agent_config import AgentFile
 from fleetent.config import (
     ConfluenceConnectorSettings,
     GoogleDriveConnectorSettings,
@@ -101,7 +102,7 @@ class RealConnectorSmokeStatus:
     execute_sync: SmokeStepStatus
 
 
-def list_configured_connectors(settings: Settings | None = None) -> list[ConnectorSummary]:
+def list_configured_connectors(settings: AgentFile | None = None) -> list[ConnectorSummary]:
     """List configured knowledge-base connectors without exposing credential payloads."""
     return [
         _summary_for_definition(item)
@@ -112,7 +113,7 @@ def list_configured_connectors(settings: Settings | None = None) -> list[Connect
 def get_connector_config(
     connector_id: str,
     *,
-    settings: Settings | None = None,
+    settings: AgentFile | None = None,
 ) -> ConnectorDefinition:
     """Return one configured connector definition."""
     for definition in _connector_definitions(settings.knowledge_base if settings else _kb_config()):
@@ -124,7 +125,7 @@ def get_connector_config(
 async def check_connector(
     connector_id: str,
     *,
-    settings: Settings | None = None,
+    settings: AgentFile | None = None,
     google_drive_client: GoogleDriveClient | None = None,
     confluence_client: ConfluenceClient | None = None,
 ) -> ConnectorCheckResult:
@@ -166,7 +167,7 @@ async def check_connector(
 async def run_connector_sync(
     connector_id: str,
     *,
-    settings: Settings | None = None,
+    settings: AgentFile | None = None,
     dry_run: bool = False,
     google_drive_client: GoogleDriveClient | None = None,
     confluence_client: ConfluenceClient | None = None,
@@ -197,7 +198,7 @@ async def run_connector_sync(
 def get_connector_status(
     connector_id: str,
     *,
-    settings: Settings | None = None,
+    settings: AgentFile | None = None,
 ) -> ConnectorStatus:
     """Read the latest known connector operation status."""
     definition = get_connector_config(connector_id, settings=settings)
@@ -672,11 +673,10 @@ def _settings() -> Settings:
 
 
 def _kb_config() -> KnowledgeBaseSettings:
-    """knowledge_base config from the active (standalone) agent, else Settings default."""
+    """knowledge_base config from the active agent (a neutral default when absent)."""
     from fleetent import agent_config
 
-    agent = agent_config.active_agent()
-    return agent.knowledge_base if agent is not None else _settings().knowledge_base
+    return agent_config.active_agent_or_default().knowledge_base
 
 
 def _database() -> SQLiteDatabase:

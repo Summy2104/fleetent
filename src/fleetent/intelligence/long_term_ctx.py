@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
-from fleetent.config import LongTermContextSettings, Settings
+from fleetent.config import KnowledgeBaseSettings, LongTermContextSettings
 from fleetent.intelligence import knowledge_base, long_term_ctx_policy, memory
 from fleetent.intelligence.long_term_ctx_policy import (
     AgentContextIdentity as AgentContextIdentity,
@@ -105,17 +105,13 @@ def set_knowledge_provider(provider: KnowledgeProvider | None) -> None:
 
 
 def _ltc_config() -> "LongTermContextSettings":
-    """long_term_ctx config from the active (standalone) agent, else Settings default.
+    """long_term_ctx config from the active agent (a neutral default when absent).
 
-    Reads ``Settings`` from this module's namespace so it stays the seam tests patch
-    when no agent is published; a standalone single-agent process resolves the agent's
-    ``long_term_ctx`` block instead."""
+    Resolves the active single-agent process's ``long_term_ctx`` block, or a neutral
+    default ``AgentFile``'s block when no single agent is published."""
     from fleetent import agent_config
 
-    agent = agent_config.active_agent()
-    if agent is not None:
-        return agent.long_term_ctx
-    return Settings(anthropic_api_key="").long_term_ctx
+    return agent_config.active_agent_or_default().long_term_ctx
 
 
 async def build_context(
@@ -544,22 +540,29 @@ async def _search_knowledge(
     if _knowledge_provider is not None:
         return await _knowledge_provider(user_id, query, agent_id, limit)
 
-    settings = Settings(anthropic_api_key="")
-    if not settings.knowledge_base.enabled:
+    kb = _kb_config()
+    if not kb.enabled:
         return []
     kb_ids = knowledge_base.resolve_agent_kb_ids(
-        settings.knowledge_base.default_tenant_id,
+        kb.default_tenant_id,
         agent_id,
     )
     if not kb_ids:
         return []
     results = await knowledge_base.search(
         query,
-        tenant_id=settings.knowledge_base.default_tenant_id,
+        tenant_id=kb.default_tenant_id,
         kb_ids=kb_ids,
         limit=limit,
     )
     return list(results)
+
+
+def _kb_config() -> "KnowledgeBaseSettings":
+    """knowledge_base config from the active agent (a neutral default when absent)."""
+    from fleetent import agent_config
+
+    return agent_config.active_agent_or_default().knowledge_base
 
 
 def _knowledge_source(item: object) -> ContextSource:

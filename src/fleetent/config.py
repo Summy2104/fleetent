@@ -190,79 +190,27 @@ class WebhooksSettings(BaseModel):
 
 
 class Settings(BaseSettings):
+    """Slim platform control-plane settings.
+
+    Agent-runtime configuration (governance / deployment / intelligence namespaces)
+    was consolidated into the per-agent ``agent.yaml`` (dissolve-global-settings); this
+    surface keeps only the platform authoring/control-plane DB and the platform process
+    logging. Secrets stay in env. Intelligence sub-model classes above remain in this
+    module purely so ``AgentFile`` can reuse them.
+    """
+
     model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", extra="ignore")
 
     anthropic_api_key: str
     slack_bot_token: str = ""
     slack_app_token: str = ""
     telegram_bot_token: str = ""
-    microsandbox_url: str = "http://host.docker.internal:7777"
-    permission_gate_medium_timeout_seconds: int = 300
-    permission_gate_high_timeout_seconds: int = 3600
-    context_max_tokens: int = 200_000
-    context_compress_threshold: float = 0.8
-    context_keep_recent: int = 10
     log_format: str = "console"
     default_agent_name: str | None = None
     database_url: str = Field(
         default_factory=lambda: f"sqlite:///{paths.data_dir() / 'fleetent.db'}"
     )
-    # ── runtime tuning fields merged from feature/zhangyang (flat, per D1) ──
-    # Compression dual-threshold (AR12) + layered retention (AR13) + anti-flap (AR17).
-    context_tmax_ratio: float = 0.8
-    context_tretained_ratio: float = 0.6
-    compression_initial_intent_max: int = 2
-    context_flap_window: int = 3
-    context_min_savings_ratio: float = 0.10
-    context_min_interval_turns: int = 1
-    # Cross-run layered budget caps (AR18). -1 = unlimited (backward-compatible).
-    agent_budget_session_turns: int = -1
-    agent_budget_session_tokens: int = -1
-    agent_budget_user_turns: int = -1
-    agent_budget_user_tokens: int = -1
-    agent_budget_agent_turns: int = -1
-    agent_budget_agent_tokens: int = -1
-    agent_budget_global_turns: int = -1
-    agent_budget_global_tokens: int = -1
-    agent_budget_user_window: str = "weekly"
-    agent_budget_agent_window: str = "weekly"
-    agent_budget_global_window: str = "monthly"
-    # Session disk management (S1/S2/S4) + internal maintenance loop.
-    session_ttl_days: int = 30
-    session_max_total_mb: int = 1024
-    session_max_count: int = 10000
-    session_cleanup_interval_seconds: float = 3600.0
-    # Agent loop / budget / loop-detection / guardrails (AR2/AR4/AR10/AR20/T2/AR3).
-    agent_max_turns: int = 50
-    agent_max_consecutive_failures: int = 3
-    sub_agent_timeout_seconds: int = 300
-    tool_default_timeout_seconds: float = 30.0
-    agent_max_tokens: int = -1
-    agent_grace_call_token_ratio: float = 0.05
-    agent_grace_call_min_tokens: int = 512
-    agent_loop_repeat_threshold: int = 3
-    guardrail_repeat_threshold: int = 3
-    agent_tool_parallel_max: int = 8
-    loop_detect_ignore_arg_keys: list[str] = []
-    # Provider health circuit breaker (MR3, model_router fallback).
-    provider_failure_threshold: int = 3
-    provider_cooldown_seconds: int = 60
-    # Skill disable list + self-hosted image/vision endpoints (data-sovereignty).
-    disabled_skills: list[str] = []
-    image_gen_url: str = ""
-    image_gen_model: str = "default"
-    vision_url: str = ""
-    vision_model: str = "default"
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
-    diagnostics: DiagnosticsSettings = Field(default_factory=DiagnosticsSettings)
-    vector_store: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
-    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
-    rerank: RerankSettings = Field(default_factory=RerankSettings)
-    long_term_ctx: LongTermContextSettings = Field(default_factory=LongTermContextSettings)
-    knowledge_base: KnowledgeBaseSettings = Field(default_factory=KnowledgeBaseSettings)
-    mcp: McpSettings = Field(default_factory=McpSettings)
-    scheduling: SchedulingSettings = Field(default_factory=SchedulingSettings)
-    webhooks: WebhooksSettings = Field(default_factory=WebhooksSettings)
 
     @classmethod
     def settings_customise_sources(

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fleetent import paths
+from fleetent.agent_config import AgentFile
 from fleetent.config import DiagnosticsSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.observability.performance import PerformanceQuery, get_performance_summary
@@ -39,7 +40,7 @@ class DiagnosticsExportRequest:
     include_logs: bool = True
     include_traces: bool = True
     include_connector_status: bool = True
-    settings: Settings | None = None
+    settings: AgentFile | None = None
 
 
 @dataclass(frozen=True)
@@ -68,7 +69,9 @@ class DiagnosticsRetentionResult:
 def export_diagnostics(request: DiagnosticsExportRequest | None = None) -> DiagnosticsExportPackage:
     """Create a local sanitized diagnostics package."""
     req = request or DiagnosticsExportRequest()
-    settings = req.settings or _settings()
+    from fleetent import agent_config
+
+    settings = req.settings or agent_config.active_agent_or_default()
     now = datetime.now(UTC).replace(microsecond=0)
     start_ts = req.start_ts or now - timedelta(days=1)
     end_ts = req.end_ts or now
@@ -228,7 +231,7 @@ def _write_traces(archive: zipfile.ZipFile, start_ts: datetime, end_ts: datetime
     ]
 
 
-def _write_connector_status(archive: zipfile.ZipFile, settings: Settings) -> list[str]:
+def _write_connector_status(archive: zipfile.ZipFile, settings: AgentFile) -> list[str]:
     connectors = list_configured_connectors(settings=settings)
     status_payload = []
     for connector in connectors:
@@ -258,7 +261,7 @@ def _write_connector_status(archive: zipfile.ZipFile, settings: Settings) -> lis
     ]
 
 
-def list_configured_connectors(settings: Settings | None = None) -> list[object]:
+def list_configured_connectors(settings: AgentFile | None = None) -> list[object]:
     from fleetent.intelligence.knowledge_base.operations import (
         list_configured_connectors as list_kb_connectors,
     )
@@ -266,7 +269,7 @@ def list_configured_connectors(settings: Settings | None = None) -> list[object]
     return list(list_kb_connectors(settings=settings))
 
 
-def get_connector_status(connector_id: str, settings: Settings | None = None) -> object:
+def get_connector_status(connector_id: str, settings: AgentFile | None = None) -> object:
     from fleetent.intelligence.knowledge_base.operations import (
         get_connector_status as get_kb_connector_status,
     )
@@ -337,9 +340,9 @@ def _environment_summary() -> dict[str, str]:
     }
 
 
-def _config_summary(settings: Settings) -> dict[str, object]:
+def _config_summary(settings: AgentFile) -> dict[str, object]:
     return {
-        "database_url": _database_url_summary(settings.database_url),
+        "database_url": _database_url_summary(_settings().database_url),
         "observability": {"log_dir": settings.observability.logging.directory},
         "diagnostics": {
             "export_dir": settings.diagnostics.export_dir,
@@ -444,11 +447,10 @@ def _settings() -> Settings:
 
 
 def _default_diagnostics() -> DiagnosticsSettings:
-    """Diagnostics config from the active (standalone) agent, else Settings default."""
+    """Diagnostics config from the active agent (a neutral default when absent)."""
     from fleetent import agent_config
 
-    agent = agent_config.active_agent()
-    return agent.diagnostics if agent is not None else _settings().diagnostics
+    return agent_config.active_agent_or_default().diagnostics
 
 
 def _database() -> SQLiteDatabase:

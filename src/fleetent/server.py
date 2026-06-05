@@ -190,7 +190,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Best-effort scheduler start: a missing/locked scheduled_tasks table (e.g. an
     # unmigrated DB) must not prevent the HTTP API from serving, consistent with the
     # sandbox-cleanup / IM-adapter best-effort pattern above. Surfaced via warning.
-    cron = CronScheduler(settings=settings.scheduling)
+    cron = CronScheduler(settings=agent_config.active_agent_or_default().scheduling)
     try:
         await cron.start()
         cron.add_interval_job(

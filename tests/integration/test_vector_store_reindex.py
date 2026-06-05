@@ -2,7 +2,6 @@ import asyncio
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
-from fleetent.config import Settings
 from fleetent.db import create_database
 from tests.integration.test_migrations import apply_migrations
 
@@ -38,10 +37,10 @@ def _insert_memory_row(
 
 
 def _configure_memory_vector_runtime(monkeypatch):
+    from fleetent.agent_config import AgentFile
     from fleetent.intelligence.vector_store import runtime
 
-    settings = Settings(anthropic_api_key="", vector_store={"backend": "memory"})
-    runtime._configure(settings)
+    runtime._configure(AgentFile(name="t", version=1, vector_store={"backend": "memory"}))
 
 
 def test_memory_rebuild_removes_stale_vectors_and_indexes_current_items(tmp_path, monkeypatch):
@@ -76,19 +75,18 @@ def test_memory_rebuild_removes_stale_vectors_and_indexes_current_items(tmp_path
 
 
 def _patch_knowledge_runtime(monkeypatch, tmp_path):
+    from fleetent.config import KnowledgeBaseSettings
     from fleetent.intelligence.knowledge_base import runtime as knowledge_runtime
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)
     database = create_database(f"sqlite:///{db_path}")
-    settings = Settings(
-        anthropic_api_key="test-key",
-        database_url=f"sqlite:///{db_path}",
-        knowledge_base={"chunk_size": 100, "chunk_overlap": 0},
-        vector_store={"backend": "memory"},
-    )
     monkeypatch.setattr(knowledge_runtime, "_database", lambda: database)
-    monkeypatch.setattr(knowledge_runtime, "_settings", lambda: settings)
+    monkeypatch.setattr(
+        knowledge_runtime,
+        "_kb_config",
+        lambda: KnowledgeBaseSettings(chunk_size=100, chunk_overlap=0),
+    )
     return knowledge_runtime
 
 
