@@ -22,8 +22,10 @@ def run_admin(*args: str) -> tuple[str, str, int]:
 
 
 def write_config_examples(root: Path) -> None:
-    # Global config templates are gone; only .env.example is seeded by init-config.
-    (root / ".env.example").write_text("FLEETENT_AUTO_UPGRADE=false\n", encoding="utf-8")
+    # init-config seeds .env from the platform template under config/platform/.
+    platform_dir = root / "config" / "platform"
+    platform_dir.mkdir(parents=True, exist_ok=True)
+    (platform_dir / ".env.example").write_text("FLEETENT_AUTO_UPGRADE=false\n", encoding="utf-8")
 
 
 def test_init_config_dry_run_prints_planned_paths_without_writing(tmp_path, monkeypatch):
