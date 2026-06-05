@@ -47,8 +47,12 @@
 
 ## 6. settings.yaml.example 收缩 + 文档
 
-- [ ] 6.1 收缩 `config/settings.yaml.example` 为平台精简集(`database_url`/`log_format`/`observability`);
+- [x] 6.1 收缩 `config/settings.yaml.example` 为平台精简集(`database_url`/`log_format`/`observability`);
       在迁移说明中列出 agent-runtime 字段 → `agent.yaml` 的迁移路径
+      → 发现:`settings.yaml.example` 已被 `drop-global-config-files` 删除且有测试强制其缺失(部署 agent
+      自包含 agent.yaml + .env)。故不重建文件;改为 ① 把 `configuration` spec 三个 scenario 从「查看
+      .example 文件」重构为「构造 Settings / 加载 settings.yaml」以对齐现实;② 在 `agent.yaml.example`
+      头部加 settings.yaml→agent.yaml 字段迁移说明。
 
 ## 7. 收尾
 

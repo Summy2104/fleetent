@@ -9,6 +9,18 @@
 # Single-agent mode: this agent is the sole, forced-default agent, so there is no
 # routing table and `bindings.default` does not apply. `bindings.channels/users`
 # act only as ingress filters for this one agent.
+#
+# Migrating from an older global config (config consolidation): every agent-runtime
+# knob that used to live in `config/settings.yaml` now lives HERE in agent.yaml —
+#   • intelligence: vector_store / embedding / rerank / knowledge_base / long_term_ctx / mcp
+#   • governance:   context_* / agent_budget_* / agent_max_* / permission_gate_* /
+#                   tool_default_timeout_seconds / provider_* (see "runtime governance" below)
+#   • deployment:   microsandbox_url / session_* / image_gen_* / vision_* / disabled_skills /
+#                   observability / diagnostics / scheduling / webhooks
+#   • default agent: the old `default_agent_name` is now `bindings.default: true`
+#   • IM tokens:     the old slack_/telegram_ tokens are now `connectors.*` `*_env` refs (Slack)
+#                    or owner-level env vars (Telegram); never inline
+# The platform `config/settings.yaml` keeps only `database_url` / `log_format` / `observability`.
 
 name: support-bot                  # required; the agent's name (any value in single-agent mode)
 version: 3                         # required

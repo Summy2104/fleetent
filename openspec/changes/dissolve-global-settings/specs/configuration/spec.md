@@ -7,21 +7,24 @@
 密钥引用。agent 运行时配置(治理、部署、智能层 namespace)MUST NOT 出现在 `config/settings.yaml`——这些
 已收口到对应 agent 的 `agent.yaml`。
 
-#### Scenario: Supported settings namespaces
-- **WHEN** 查看 `config/settings.yaml.example`
-- **THEN** 文件只包含 `database_url`、`log_format`、`observability`
-- **AND** `database_url` 示例值为 `sqlite:///data/fleetent.db`
+#### Scenario: Supported settings fields
+- **WHEN** 构造 `Settings` 并查看其字段
+- **THEN** `Settings` 只暴露 `database_url`、`log_format`、`observability`
+- **AND** `database_url` 默认推导为 home 下的 `sqlite:///<data_dir>/fleetent.db`
+- **AND** 全局 `config/settings.yaml.example` 模板不再随仓库发布(`drop-global-config-files`),
+  部署 agent 自包含于 `agent.yaml` + `.env`
 
-#### Scenario: Agent-runtime namespaces are absent from settings
-- **WHEN** 查看 `config/settings.yaml.example`
-- **THEN** 文件不包含 `vector_store`、`embedding`、`rerank`、`knowledge_base`、`long_term_ctx`、`mcp`、
-  `scheduling`、`webhooks`、`diagnostics` 或任何治理/部署旋钮
+#### Scenario: Agent-runtime namespaces are absent from Settings
+- **WHEN** 构造 `Settings`
+- **THEN** 不存在 `vector_store`、`embedding`、`rerank`、`knowledge_base`、`long_term_ctx`、`mcp`、
+  `scheduling`、`webhooks`、`diagnostics` 字段,也不存在任何治理/部署旋钮
 - **AND** 这些配置位于对应 agent 的 `agent.yaml`
 
 #### Scenario: Runtime objects stay out of settings
-- **WHEN** 查看 `config/settings.yaml.example`
-- **THEN** 文件不包含 cron jobs、webhook sources、MCP server definitions、agent definitions、
-  user bindings、memory items、knowledge documents 或 reindex jobs
+- **WHEN** 加载 `config/settings.yaml`(若存在)
+- **THEN** 只解析 `database_url`、`log_format`、`observability`;cron jobs、webhook sources、
+  MCP server definitions、agent definitions、user bindings、memory items、knowledge documents 或
+  reindex jobs 一律不在此承载
 
 ### Requirement: Secrets stay outside settings YAML
 
