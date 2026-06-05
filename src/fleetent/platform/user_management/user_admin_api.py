@@ -76,9 +76,16 @@ class ChangePasswordBody(BaseModel):
 
 
 @router.get("/ui", response_class=HTMLResponse)
-def admin_ui() -> str:
-    """Serve the self-contained admin console (vanilla JS, calls the JSON API)."""
-    return _UI_PATH.read_text(encoding="utf-8")
+def admin_ui() -> HTMLResponse:
+    """Serve the self-contained admin console (vanilla JS, calls the JSON API).
+
+    no-store: the SPA is a single HTML doc that changes on every deploy; without this
+    browsers heuristically cache it (no Last-Modified/ETag) and serve stale UI.
+    """
+    return HTMLResponse(
+        _UI_PATH.read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _resolve_login_user(identifier: str) -> user_store.User | None:
