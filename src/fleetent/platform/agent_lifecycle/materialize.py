@@ -8,6 +8,7 @@ references secrets by env-var name only (never plaintext) — so the agent is ru
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,10 @@ from fleetent.platform.config_validation import _flatten
 from fleetent.platform.connector_management import agent_mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
+from fleetent.platform.secret_management import agent_secret_store
+
+# Resolves an env-var name to its inject-mode value, or None for operator-mode slots.
+SecretResolver = Callable[[str], str | None]
 
 
 def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
@@ -193,15 +198,24 @@ def _parse_env(text: str) -> dict[str, str]:
     return values
 
 
-def _seed_env(home: Path, names: list[str]) -> None:
-    """Write/refresh ``.env`` with the referenced names, preserving operator values.
+def _seed_env(
+    home: Path,
+    names: list[str],
+    secret_resolver: SecretResolver | None = None,
+) -> None:
+    """Write/refresh ``.env`` with the referenced names, resolving by credential mode.
 
-    Existing values are kept verbatim; missing names are added with an empty value. No
-    secret value is ever written by the platform.
+    A ``secret_resolver`` (bound to an agent) supplies inject-mode values: when it returns
+    a value for a name, that value is written (``NAME=value``); when it returns None the
+    slot is operator-mode and the existing operator value is preserved (or left blank). No
+    operator value is ever overwritten by the platform.
     """
     env_path = home / ".env"
     existing = _parse_env(env_path.read_text(encoding="utf-8")) if env_path.exists() else {}
-    lines = [f"{name}={existing.get(name, '')}" for name in names]
+    lines: list[str] = []
+    for name in names:
+        injected = secret_resolver(name) if secret_resolver is not None else None
+        lines.append(f"{name}={injected if injected is not None else existing.get(name, '')}")
     # keep any operator-added vars not referenced by the definition
     for key, val in existing.items():
         if key not in names:
@@ -212,24 +226,31 @@ def _seed_env(home: Path, names: list[str]) -> None:
 def materialize_from_store(name: str) -> Path | None:
     """Materialize the home for a stored agent by name (the DB→file export on write).
 
+    inject-mode credential values are decrypted into ``.env``; operator slots stay blank.
     Returns the home dir, or None if no such agent exists. Best-effort callers may ignore
     a None (e.g. a delete racing a materialize).
     """
     agent = agent_store.get_by_name(name)
     if agent is None:
         return None
-    return write_home(agent_file_from_store(agent))
+
+    def resolver(env_name: str) -> str | None:
+        return agent_secret_store.get_decrypted(agent.id, env_name)
+
+    return write_home(agent_file_from_store(agent), secret_resolver=resolver)
 
 
 def write_home(
     agent: AgentFile,
     *,
     knowledge_config: KnowledgeConfigSnapshot | None = None,
+    secret_resolver: SecretResolver | None = None,
 ) -> Path:
     """Materialize ``agent``'s home and return its directory.
 
-    Rewrites ``agent.yaml`` from the definition and seeds/refreshes the ``.env`` scaffold.
-    Idempotent: re-running rewrites the yaml and preserves operator ``.env`` values.
+    Rewrites ``agent.yaml`` (pure ``*_env`` references, never a secret value) and seeds the
+    ``.env`` scaffold, resolving inject-mode values via ``secret_resolver``. Idempotent:
+    re-running rewrites the yaml and preserves operator ``.env`` values.
     """
     home = home_dir(agent.name)
     home.mkdir(parents=True, exist_ok=True)
@@ -239,7 +260,7 @@ def write_home(
     )
     if knowledge_config is not None:
         write_knowledge_config(knowledge_config)
-    _seed_env(home, _env_var_names(agent, knowledge_config))
+    _seed_env(home, _env_var_names(agent, knowledge_config), secret_resolver)
     return home
 
 

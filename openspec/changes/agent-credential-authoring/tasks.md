@@ -24,9 +24,9 @@
 
 ## 5. materialize resolver（按 mode 写 .env）
 
-- [ ] 5.1 Write failing tests: inject 槽写解密真值；operator 槽保留运维已填值、否则写 `NAME=`；inject 标记 set 但解密失败 fail loud；任意 mode 下 agent.yaml 不含明文（tests/integration）
-- [ ] 5.2 Implement: `_seed_env` 接入 secret resolver；materialize 记 required/ inject/operator 计数（不记值）
-- [ ] 5.3 Verify green: 跑 materialize resolver 测试
+- [x] 5.1 Write failing tests: inject 槽写解密真值；operator 槽保留运维已填值、否则写 `NAME=`；inject 标记 set 但解密失败 fail loud；任意 mode 下 agent.yaml 不含明文（tests/integration）
+- [x] 5.2 Implement: `_seed_env` 接入 secret resolver；materialize 记 required/ inject/operator 计数（不记值）
+- [x] 5.3 Verify green: 跑 materialize resolver 测试
 
 ## 6. console CredentialField 控件 + 「所需密钥」面板
 
