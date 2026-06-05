@@ -250,11 +250,12 @@ def _wire_real_store(monkeypatch):
             "model_overrides": a.model_overrides,
             "memory_namespace": a.memory_namespace,
             "template_id": a.template_id,
+            "icon": a.icon,
         }
 
     def _create(
         name, sp, at, sd=None, mids=None, mo=None, mn="default", template_id=None,
-        plugins=None, features=None,
+        plugins=None, features=None, icon=None,
     ):
         agent_store.create_agent(
             name,
@@ -267,6 +268,7 @@ def _wire_real_store(monkeypatch):
             model_overrides=mo,
             memory_namespace=mn,
             template_id=template_id,
+            icon=icon,
         )
 
     def _update(name, system_prompt, allowed_tools, sd=None, mids=None, mo=None, mn=None):
@@ -294,6 +296,8 @@ def _wire_real_store(monkeypatch):
     monkeypatch.setattr(api, "update_agent_def", _update)
     monkeypatch.setattr(api, "delete_agent_def", lambda n: agent_store.delete_agent(n))
     monkeypatch.setattr(api, "references_for", _refs)
+    monkeypatch.setattr(api, "set_agent_icon", agent_store.set_icon)
+    monkeypatch.setattr(api, "agent_icons", agent_store.icons_by_name)
 
 
 def test_create_agent_persists_and_lists(client, monkeypatch):
@@ -592,3 +596,29 @@ def test_clone_copies_version_config_fields(client, monkeypatch):
     assert a.mcp_server_ids == ["github"]
     assert a.model_overrides == {"model": "x"}
     assert a.memory_namespace == "team"
+
+
+def test_create_with_icon_and_list_includes_it(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    token, _ = _session_for("admin")
+    r = client.post(
+        "/admin/agents",
+        headers=_hdr(token),
+        json={"name": "iconbot", "template_id": "ops", "system_prompt": "x", "icon": "🦊"},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["icon"] == "🦊"
+    assert agent_store.get_by_name("iconbot").icon == "🦊"
+    # list view carries the icon for the card grid
+    rows = client.get("/admin/agents", headers=_hdr(token)).json()
+    assert {x["agent_name"]: x.get("icon") for x in rows}["iconbot"] == "🦊"
+
+
+def test_update_changes_icon(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    token, _ = _session_for("admin")
+    agent_store.create_agent("ic2", "p", [], icon="🐱")
+    r = client.patch("/admin/agents/ic2", headers=_hdr(token), json={"icon": "🐶"})
+    assert r.status_code == 200
+    assert agent_store.get_by_name("ic2").icon == "🐶"
+    assert r.json()["icon"] == "🐶"

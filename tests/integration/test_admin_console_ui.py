@@ -1131,6 +1131,17 @@ def _section(html, tab):
     return html[start: nxt if nxt > 0 else start + 8000]
 
 
+def test_agent_icon_picker_present():
+    html = ADMIN_HTML
+    assert 'id="ag-icon"' in html and 'id="ag-icon-palette"' in html
+    assert "function agSetIcon" in html and "function agRenderIconPalette" in html
+    # save sends icon; card renders the chosen icon
+    save = html.split("function agSave", 1)[1].split("function agDelete", 1)[0]
+    assert "icon" in save
+    card = html.split("function agentCardHtml", 1)[1].split("function ", 2)[0]
+    assert "a.icon" in card
+
+
 def test_chat_session_history_present():
     html = ADMIN_HTML
     # per-user session history sidebar in the chat module

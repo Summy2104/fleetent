@@ -1191,6 +1191,12 @@
       <h3 id="ag-modal-title">New agent</h3>
       <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="agSave(); return false;">
         <input id="ag-name" placeholder="agent name (unique)" autocomplete="off">
+        <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
+          <span class="muted" style="font-size:12px;">Icon</span>
+          <span id="ag-icon-preview" style="font-size:22px; line-height:1;">🤖</span>
+          <span id="ag-icon-palette" style="display:flex; gap:4px; flex-wrap:wrap;"></span>
+          <input id="ag-icon" type="hidden">
+        </div>
         <label id="ag-template-row" style="display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted);">
           template (required)
           <select id="ag-template" onchange="agTemplatePrefill()"></select>
@@ -2392,7 +2398,7 @@ function agentCardHtml(a) {
   return `
     <div class="connector-card ${enabled ? '' : 'disabled'}" onclick="agDrawer('${esc(name)}')">
       <div class="connector-status ${enabled ? 'active' : 'inactive'}"></div>
-      <div class="connector-icon" style="background:var(--accent-weak,#2a2a3a);">🤖</div>
+      <div class="connector-icon" style="background:var(--accent-weak,#2a2a3a);">${esc(a.icon || "🤖")}</div>
       <div class="connector-title">${esc(name)}</div>
       <div class="connector-desc">${esc((a.system_prompt || "").slice(0, 90) || "No system prompt")}</div>
       <div class="sk-pills">
@@ -2519,11 +2525,23 @@ function agTemplatePrefill() {
   $("ag-system-prompt").value = t.system_prompt || "";
   $("ag-allowed-tools").value = (t.allowed_tools || []).join(", ");
 }
+const AG_ICONS = ["🤖","🦊","🐱","🐶","🧠","📚","🛠️","🔧","💬","📊","🚀","🛡️","🧩","⚙️","🌐","🔍","🤝","📈","✨","🧪"];
+function agRenderIconPalette() {
+  $("ag-icon-palette").innerHTML = AG_ICONS.map(e =>
+    `<button type="button" class="small ghost" style="padding:2px 5px; font-size:16px;" onclick="agSetIcon('${e}')">${e}</button>`
+  ).join("");
+}
+function agSetIcon(emoji) {
+  $("ag-icon").value = emoji || "";
+  $("ag-icon-preview").textContent = emoji || "🤖";
+}
 async function agCreate() {
   $("ag-modal-title").textContent = "New agent";
   $("ag-err").textContent = "";
   $("ag-name").value = "";
   $("ag-name").disabled = false;
+  agRenderIconPalette();
+  agSetIcon("");
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
   $("ag-template-row").style.display = "";
@@ -2613,6 +2631,8 @@ async function agEdit(name) {
     $("ag-modal-title").textContent = "Edit agent: " + name;
     $("ag-name").value = name;
     $("ag-name").disabled = true;
+    agRenderIconPalette();
+    agSetIcon(a.icon || "");
     $("ag-system-prompt").value = a.system_prompt || "";
     $("ag-allowed-tools").value = (a.allowed_tools || []).join(", ");
     $("ag-template-row").style.display = "none";
@@ -2651,17 +2671,18 @@ async function agSave() {
   const sp = $("ag-system-prompt").value;
   const isEdit = $("ag-modal").dataset.mode === "edit";
   try {
+    const icon = $("ag-icon").value || null;
     let name;
     if (isEdit) {
       name = $("ag-modal").dataset.name;
-      await api("PATCH", `/agents/${encodeURIComponent(name)}`, { system_prompt: sp, allowed_tools: tools });
+      await api("PATCH", `/agents/${encodeURIComponent(name)}`, { system_prompt: sp, allowed_tools: tools, icon });
     } else {
       name = $("ag-name").value.trim();
       if (!name) { $("ag-err").textContent = "name required"; return; }
       const templateId = $("ag-template").value;
       if (!templateId) { $("ag-err").textContent = "template required"; return; }
       await api("POST", "/agents", {
-        name, template_id: templateId, system_prompt: sp,
+        name, template_id: templateId, system_prompt: sp, icon,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
       });
@@ -2745,6 +2766,7 @@ async function agDrawer(name) {
 
 function agRenderPreview(name, a, yamlText) {
   AG_YAML_CACHE = yamlText || "";
+  $("ag-drawer-title").textContent = (a.icon ? a.icon + " " : "") + name;
   const archived = a.status === "archived";
   const statusCls = a.status === "enabled" ? "active" : archived ? "" : "blocked";
   const lifecycle = IS_VIEWER ? "" : `
