@@ -221,6 +221,12 @@ def _wire_real_store(monkeypatch):
     monkeypatch.setattr(api, "create_agent_def", _create)
     monkeypatch.setattr(api, "update_agent_def", _update)
     monkeypatch.setattr(api, "delete_agent_def", lambda n: agent_store.delete_agent(n))
+
+    def _rename(old, new):
+        agent_store.rename_agent(old, new)
+        store.rename(old, new)
+
+    monkeypatch.setattr(api, "rename_agent_def", _rename)
     monkeypatch.setattr(api, "references_for", _refs)
     monkeypatch.setattr(api, "set_agent_icon", agent_store.set_icon)
     monkeypatch.setattr(api, "agent_icons", agent_store.icons_by_name)
@@ -345,6 +351,33 @@ def test_patch_creates_new_active_version(client, monkeypatch):
     assert r.status_code == 200
     assert agent_store.get_by_name("ops").system_prompt == "v2"
     assert len(agent_store.list_versions("ops")) == 2
+
+
+def test_patch_renames_agent(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    agent_store.create_agent("ops", "v1", ["shell"])
+    store.set_provenance("ops", "adhoc")
+    store.enable("ops")
+    token, _ = _session_for("admin")
+    r = client.patch(
+        "/admin/agents/ops", headers=_hdr(token), json={"name": "ops2", "system_prompt": "v2"}
+    )
+    assert r.status_code == 200
+    assert r.json()["agent"] == "ops2"
+    assert agent_store.get_by_name("ops") is None
+    assert agent_store.get_by_name("ops2").system_prompt == "v2"
+    # admin-state row moved with the rename
+    assert store.get_state("ops2")["status"] == "enabled"
+
+
+def test_patch_rename_conflict_409(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    agent_store.create_agent("ops", "v1", ["shell"])
+    agent_store.create_agent("taken", "v1", ["shell"])
+    token, _ = _session_for("admin")
+    r = client.patch("/admin/agents/ops", headers=_hdr(token), json={"name": "taken"})
+    assert r.status_code == 409
+    assert agent_store.get_by_name("ops") is not None
 
 
 def test_patch_capabilities_yaml_updates_tools(client, monkeypatch):

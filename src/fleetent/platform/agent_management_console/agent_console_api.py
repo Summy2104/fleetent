@@ -91,6 +91,11 @@ def delete_agent_def(name: str) -> bool:
     return False
 
 
+def rename_agent_def(old_name: str, new_name: str) -> None:
+    """Rename an agent + re-key its admin-state row. Bridges agent_store.rename_agent."""
+    return None
+
+
 def references_for(agent_name: str) -> dict[str, Any]:
     """Who references an agent (users/channels) — drives archive protection."""
     agent = get_agent_def(agent_name)
@@ -162,6 +167,7 @@ class CreateBody(BaseModel):
 
 
 class UpdateBody(BaseModel):
+    name: str | None = None  # rename the agent (optional)
     system_prompt: str | None = None
     allowed_tools: list[str] | None = None
     skills_dir: str | None = None
@@ -292,12 +298,22 @@ def update_agent(
     user = _require_admin(authorization)
     if get_agent_def(name) is None:
         raise HTTPException(status_code=404, detail="agent not found")
+    # Optional rename: the agent name is editable; bindings key on agent_id so only
+    # the name + admin-state row move. Apply it first, then edit under the new name.
+    target = name
+    if body.name is not None and body.name.strip() and body.name.strip() != name:
+        try:
+            rename_agent_def(name, body.name.strip())
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        target = body.name.strip()
+        audit_log.write_audit(user.id, "agent.rename", "agent", target, detail={"from": name})
     allowed_tools = body.allowed_tools
     if body.capabilities_yaml is not None:
         # Capabilities YAML drives allowed_tools; plugins/features are inherited unchanged.
         allowed_tools, _, _ = _resolve_capabilities([], [], {}, body.capabilities_yaml)
     update_agent_def(
-        name,
+        target,
         body.system_prompt,
         allowed_tools,
         body.skills_dir,
@@ -306,10 +322,10 @@ def update_agent(
         body.memory_namespace,
     )
     if body.icon is not None:
-        set_agent_icon(name, body.icon)
-    agent_admin_store.mark_drift(name)  # no-op unless provenance is managed
-    audit_log.write_audit(user.id, "agent.update", "agent", name)
-    return _def_response(name)
+        set_agent_icon(target, body.icon)
+    agent_admin_store.mark_drift(target)  # no-op unless provenance is managed
+    audit_log.write_audit(user.id, "agent.update", "agent", target)
+    return _def_response(target)
 
 
 @router.delete("/agents/{name}")

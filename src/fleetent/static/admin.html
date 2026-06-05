@@ -2803,7 +2803,7 @@ async function agEdit(name) {
     };
     $("ag-modal-title").textContent = "Edit agent: " + name;
     $("ag-name").value = name;
-    $("ag-name").disabled = true;
+    $("ag-name").disabled = false;  // name is editable (rename)
     agRenderIconPalette();
     agSetIcon(a.icon || "");
     $("ag-system-prompt").value = a.system_prompt || "";
@@ -2879,10 +2879,13 @@ async function agSave() {
     const icon = $("ag-icon").value || null;
     let name;
     if (isEdit) {
-      name = $("ag-modal").dataset.name;
-      // Same shape as create: capabilities YAML drives allowed_tools.
-      await api("PATCH", `/agents/${encodeURIComponent(name)}`, {
-        system_prompt: sp, icon,
+      const orig = $("ag-modal").dataset.name;
+      name = $("ag-name").value.trim();  // editable: may be a rename
+      if (!name) { $("ag-err").textContent = "name required"; return; }
+      // Same shape as create: capabilities YAML drives allowed_tools. The rename (if any)
+      // is applied server-side first, so bindings below target the new name.
+      await api("PATCH", `/agents/${encodeURIComponent(orig)}`, {
+        name, system_prompt: sp, icon,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
       });

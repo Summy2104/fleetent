@@ -389,6 +389,26 @@ def _merge_version_fields(
     }
 
 
+def rename_agent(old_name: str, new_name: str) -> None:
+    """Rename an agent (its name is the only name-keyed field; bindings use agent_id).
+
+    Raises ValueError if the source is missing or the target name is already taken.
+    """
+    new_name = new_name.strip()
+    if not new_name:
+        raise ValueError("agent name required")
+    db = _db()
+    with db.transaction() as conn:
+        if conn.execute("SELECT 1 FROM agents WHERE name = :n", {"n": old_name}).fetchone() is None:
+            raise ValueError(f"agent {old_name!r} not found")
+        if conn.execute("SELECT 1 FROM agents WHERE name = :n", {"n": new_name}).fetchone():
+            raise ValueError(f"agent {new_name!r} already exists")
+        conn.execute(
+            "UPDATE agents SET name = :new WHERE name = :old",
+            {"new": new_name, "old": old_name},
+        )
+
+
 def delete_agent(name: str) -> bool:
     """Hard-delete an agent and all its versions in one transaction.
 
