@@ -16,4 +16,4 @@
 ## 4. 收尾
 
 - [x] 4.1 全量 `ANTHROPIC_API_KEY=sk-test-dummy uv run pytest -x -q` 通过；`uv run ruff format && uv run ruff check src tests`；`uv run mypy src` 不新增；`fleetent agent init smoke-x --home <tmp>` 手动 smoke + `agent_config.load_agent_file` 验证
-- [ ] 4.2 更新 `__main__.py` 顶部 docstring 用法、CLAUDE.md/README agent 部署段补 `fleetent agent init`；设计文档 `docs/superpowers/specs/2026-06-05-fleetent-agent-init-design.md`（含与平台 materialize 的分工）
+- [x] 4.2 更新 `__main__.py` 顶部 docstring 用法、CLAUDE.md/README agent 部署段补 `fleetent agent init`；设计文档 `docs/superpowers/specs/2026-06-05-fleetent-agent-init-design.md`（含与平台 materialize 的分工）
