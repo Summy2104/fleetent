@@ -36,9 +36,9 @@
 
 ## 7. `.env.example` 拆分为进程级模板
 
-- [ ] 7.1 Write failing tests: `config/agent/.env.example` 含 `FLEETENT_SECRET_KEY`、不含 agent 级 model/Slack/MCP/KB `*_env`、所有条目为 `NAME=` 无值（tests/integration 解析断言）
-- [ ] 7.2 Implement: 拆分模板，新增 `FLEETENT_SECRET_KEY`，删除 agent 引用密钥；更新 `agent.yaml.example` 注释指向生成路径
-- [ ] 7.3 Verify green: 跑模板解析测试
+- [x] 7.1 Write failing tests: `config/agent/.env.example` 含 `FLEETENT_SECRET_KEY`、不含 agent 级 model/Slack/MCP/KB `*_env`、所有条目为 `NAME=` 无值（tests/integration 解析断言）
+- [x] 7.2 Implement: 拆分模板，新增 `FLEETENT_SECRET_KEY`，删除 agent 引用密钥；更新 `agent.yaml.example` 注释指向生成路径
+- [x] 7.3 Verify green: 跑模板解析测试
 
 ## 8. Quality gates
 
