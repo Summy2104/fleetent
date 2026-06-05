@@ -23,11 +23,11 @@ HealthConfig = dict[str, int]
 
 
 def _default_config() -> HealthConfig:
-    """Deployment-level defaults from Settings (env-configurable). Lazy import
+    """Deployment-level defaults from the active agent config. Lazy import
     mirrors context_mgr / termination to keep this module import-light."""
-    from fleetent.config import Settings
+    from fleetent import agent_config
 
-    s = Settings()  # type: ignore[call-arg]
+    s = agent_config.active_agent_or_default()
     return {
         "failure_threshold": s.provider_failure_threshold,
         "cooldown_seconds": s.provider_cooldown_seconds,

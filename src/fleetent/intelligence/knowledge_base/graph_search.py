@@ -72,7 +72,7 @@ async def graph_search(
     from fleetent.intelligence.knowledge_base import runtime
     from fleetent.intelligence.knowledge_base.store import KnowledgeStore
 
-    settings = runtime._settings().knowledge_base
+    settings = runtime._kb_config()
     resolved_tenant_id = tenant_id or settings.default_tenant_id
     resolved_kb_ids = kb_ids or [settings.default_kb_id]
     if limit <= 0:

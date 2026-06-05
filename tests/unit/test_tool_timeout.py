@@ -152,10 +152,10 @@ async def test_timeout_is_plain_await_stop_no_sandbox(monkeypatch):
 # ── T2 review: global default timeout configurable via Settings ──────────────
 
 
-def test_settings_tool_default_timeout_default_30():
-    from fleetent.config import Settings
+def test_agentfile_tool_default_timeout_default_30():
+    from fleetent.agent_config import AgentFile
 
-    assert Settings(anthropic_api_key="x").tool_default_timeout_seconds == 30.0
+    assert AgentFile(name="x", version=1).tool_default_timeout_seconds == 30.0
 
 
 def test_get_effective_timeout_honors_passed_default(monkeypatch):
@@ -164,8 +164,8 @@ def test_get_effective_timeout_honors_passed_default(monkeypatch):
     assert tr.get_effective_timeout("_eff_def") == tr.DEFAULT_TOOL_TIMEOUT  # falls back
 
 
-def test_resolve_default_tool_timeout_reads_settings(monkeypatch):
+def test_resolve_default_tool_timeout_uses_governance_default():
     import fleetent.runtime.loop as al
 
-    monkeypatch.setenv("TOOL_DEFAULT_TIMEOUT_SECONDS", "55")
-    assert al._resolve_default_tool_timeout() == 55.0  # ops-configurable via env/settings
+    # No governance → the GovernanceConfig literal default (per-agent knob otherwise).
+    assert al._resolve_default_tool_timeout() == 30.0

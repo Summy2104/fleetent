@@ -121,7 +121,7 @@ async def test_run_layered_budget_trips_and_logs_scope(mock_client, monkeypatch,
     # Tiny user-token cap -> second checkpoint trips via the layered checker.
     capped = lbud.LayeredBudgetConfig({lbud.BudgetScope.user: lbud.ScopeBudget(max_tokens=1)})
     monkeypatch.setattr(
-        lbud.LayeredBudgetConfig, "from_settings", classmethod(lambda cls, s=None: capped)
+        lbud.LayeredBudgetConfig, "from_governance", classmethod(lambda cls, g: capped)
     )
     captured: dict = {}
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))

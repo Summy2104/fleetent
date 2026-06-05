@@ -28,10 +28,16 @@ _ENV_MAP: dict[tuple[str, str], str] = {
 
 
 def get_settings() -> Any:
-    """Return the app Settings. Wrapped so tests can monkeypatch the .env source."""
-    from fleetent.config import Settings
+    """Owner-level IM connector secrets, sourced from the environment.
 
-    return Settings(anthropic_api_key="")
+    These tokens are NOT platform ``Settings`` fields (config consolidation); they
+    live only in env/.env under the ``_ENV_MAP`` env-var names. Returned as a simple
+    namespace so callers can ``getattr`` by field and tests can monkeypatch the source.
+    """
+    import os
+    from types import SimpleNamespace
+
+    return SimpleNamespace(**{attr: os.environ.get(attr.upper(), "") for attr in _ENV_MAP.values()})
 
 
 def resolve(owner_id: str, platform: str) -> dict[str, str]:

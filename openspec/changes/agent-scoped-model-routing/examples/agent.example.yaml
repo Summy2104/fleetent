@@ -1,0 +1,237 @@
+# Complete example for a deployed single Agent home.
+#
+# Layout:
+#   <agent-home>/agent.yaml
+#   <agent-home>/.env
+#   <agent-home>/data/
+#
+# Secrets are never inlined here. Every credential is referenced by env var name.
+
+name: support-bot
+version: 1
+tenant_id: acme-corp
+team_id: customer-success
+
+system_prompt: |
+  You are Acme's customer support assistant.
+  Answer in the user's language.
+  Use the knowledge base before answering product, billing, or policy questions.
+  Escalate refunds, account deletion, and contract changes to a human operator.
+  Keep answers concise and avoid making claims that are not grounded in available context.
+
+# Unified Agent-local model routing.
+#
+# targets define what can be called.
+# routes define how each runtime scenario uses those targets.
+models:
+  targets:
+    # Primary chat model. Anthropic is called through its OpenAI-compatible Chat API.
+    - id: primary
+      provider: anthropic
+      protocol: openai_chat
+      base_url: https://api.anthropic.com/v1/
+      model: claude-sonnet-4-5
+      api_key_env: FLEETENT_MODEL_PRIMARY_API_KEY
+      max_tokens: 4096
+      params:
+        temperature: 0.5
+
+    # Fast/cheap model for deterministic internal tasks.
+    - id: fast
+      provider: anthropic
+      protocol: openai_chat
+      base_url: https://api.anthropic.com/v1/
+      model: claude-haiku-4-5
+      api_key_env: FLEETENT_MODEL_FAST_API_KEY
+      max_tokens: 2048
+      params:
+        temperature: 0.2
+
+    # Custom OpenAI-compatible provider.
+    - id: backup
+      provider: acme-vllm
+      protocol: openai_chat
+      base_url: https://vllm.acme.internal/v1/
+      model: qwen3-32b
+      api_key_env: FLEETENT_MODEL_BACKUP_API_KEY
+      max_tokens: 4096
+      params:
+        temperature: 0.5
+
+    # Embedding provider used by knowledge retrieval.
+    - id: embedding
+      provider: acme-embedding
+      protocol: http_embedding
+      endpoint: https://embedding.acme.internal/embed
+      model: bge-m3
+      api_key_env: FLEETENT_MODEL_EMBEDDING_API_KEY
+      params:
+        dimensions: 1024
+        timeout_seconds: 10
+
+    # Rerank provider used after hybrid retrieval.
+    - id: rerank
+      provider: acme-rerank
+      protocol: http_rerank
+      endpoint: https://rerank.acme.internal/rerank
+      model: bge-reranker-large
+      api_key_env: FLEETENT_MODEL_RERANK_API_KEY
+      params:
+        timeout_seconds: 10
+
+    # Text-to-image provider used by the generate_image tool.
+    - id: image
+      provider: acme-image
+      protocol: openai_image_generation
+      endpoint: https://image.acme.internal/v1/images/generations
+      model: flux-schnell
+      api_key_env: FLEETENT_MODEL_IMAGE_API_KEY
+      params:
+        timeout_seconds: 120
+
+  routes:
+    # Main assistant replies. Fallback order is array order.
+    default:
+      - target: primary
+        params:
+          temperature: 0.7
+      - target: backup
+        params:
+          temperature: 0.5
+
+    # Internal extraction should be cheaper and deterministic.
+    memory_extraction:
+      - target: fast
+        max_tokens: 1024
+        params:
+          temperature: 0
+
+    # Multimodal chat input. Uses the primary chat target in this example.
+    vision:
+      - target: primary
+        max_tokens: 4096
+        params:
+          temperature: 0.2
+
+    embedding:
+      - target: embedding
+
+    rerank:
+      - target: rerank
+
+    image_generation:
+      - target: image
+
+    # Reserved route names. Add targets when these capabilities are enabled.
+    audio_transcription: []
+    audio_generation: []
+
+memory_namespace: support-bot
+skills_dir: skills
+
+allowed_skills:
+  - jira
+  - slack-daily-jira
+  - customer-support
+
+allowed_tools:
+  - search_*
+  - read_skill
+  - read_file
+  - docs__*
+  - jira__*
+  - billing__*
+
+plugins:
+  - acme-docs
+  - billing
+
+features:
+  code_execution: true
+  sandbox_env:
+    TZ: Asia/Shanghai
+    LANG: zh_CN.UTF-8
+
+# Non-secret intelligence configuration. Model calls for embedding/rerank are
+# routed through models.routes.embedding and models.routes.rerank above.
+vector_store:
+  backend: sqlite
+  database_url: sqlite:///data/vector_store.db
+
+knowledge_base:
+  enabled: true
+  default_tenant_id: acme-corp
+  default_kb_id: support-kb
+  chunk_size: 1000
+  chunk_overlap: 200
+  google_drive:
+    connectors:
+      - connector_id: support-drive
+        enabled: true
+        tenant_id: acme-corp
+        kb_id: support-kb
+        folder_id: 1abcDEF_support_docs
+        recursive: true
+        access_token_env: FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN
+        refresh_token_env: FLEETENT_GOOGLE_DRIVE_REFRESH_TOKEN
+        client_id_env: FLEETENT_GOOGLE_DRIVE_CLIENT_ID
+        client_secret_env: FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET
+  confluence:
+    connectors:
+      - connector_id: support-confluence
+        enabled: true
+        tenant_id: acme-corp
+        kb_id: support-kb
+        base_url: https://acme.atlassian.net/wiki
+        username_env: FLEETENT_CONFLUENCE_USERNAME
+        scope_type: space
+        space_key: SUPPORT
+        include_children: true
+        api_token_env: FLEETENT_CONFLUENCE_TOKEN
+
+long_term_ctx:
+  max_tokens: 2048
+  memory_max_tokens: 1024
+  knowledge_max_tokens: 1024
+  memory_top_k: 10
+  knowledge_top_k: 10
+  conflict_preference: auto
+
+mcp_servers:
+  - id: docs
+    transport: http
+    url: https://docs.acme.internal/mcp
+    auth_type: bearer
+    api_key_env: ACME_DOCS_MCP_TOKEN
+
+  - id: billing
+    transport: stdio
+    command: /usr/local/bin/billing-mcp
+    args:
+      - --mode
+      - readonly
+    env:
+      BILLING_DB_DSN_ENV: BILLING_DB_DSN
+
+connectors:
+  slack:
+    bot_token_env: SUPPORT_SLACK_BOT_TOKEN
+    app_token_env: SUPPORT_SLACK_APP_TOKEN
+    channels:
+      - C0123ABCD
+      - C0456EFGH
+
+bindings:
+  channels:
+    - slack:C0123ABCD
+    - telegram:-1001234567890
+  users:
+    - u_alice
+    - u_bob
+
+access:
+  allow_channels:
+    - slack:C0123ABCD
+  allow_users:
+    - u_alice
+  require_approval: true

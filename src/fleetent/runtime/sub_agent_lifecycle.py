@@ -19,7 +19,7 @@ from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export f
 
 logger = logging.getLogger(__name__)
 
-# Default per sub-agent wall-clock timeout; mirrors Settings.sub_agent_timeout_seconds.
+# Default per sub-agent wall-clock timeout; mirrors GovernanceConfig.sub_agent_timeout_seconds.
 SUB_AGENT_TIMEOUT_SECONDS = 300
 
 
@@ -69,14 +69,12 @@ def validate_transition(src: SubAgentState, dst: SubAgentState) -> None:
 
 
 def resolve_timeout(timeout_seconds: int | None = None, config: int | None = None) -> int:
-    """Resolve effective timeout. Precedence: call param > config (Settings) > default."""
+    """Resolve effective timeout. Precedence: call param > config > module default."""
     if timeout_seconds is not None:
         return timeout_seconds
     if config is not None:
         return config
-    from fleetent.config import Settings
-
-    return Settings().sub_agent_timeout_seconds  # type: ignore[call-arg]
+    return SUB_AGENT_TIMEOUT_SECONDS
 
 
 def _conn() -> sqlite3.Connection:

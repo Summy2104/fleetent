@@ -78,12 +78,12 @@ class BudgetChecker:
 
 
 def _grace_defaults() -> tuple[float, int]:
-    """Grace-call ratio/floor defaults from Settings (env-configurable). Lazy import
+    """Grace-call ratio/floor from GovernanceConfig's literal defaults. Lazy import
     keeps this module import-light, mirroring termination._default_config."""
-    from fleetent.config import Settings
+    from fleetent.runtime.snapshot import GovernanceConfig
 
-    s = Settings()  # type: ignore[call-arg]
-    return s.agent_grace_call_token_ratio, s.agent_grace_call_min_tokens
+    gov = GovernanceConfig()
+    return gov.agent_grace_call_token_ratio, gov.agent_grace_call_min_tokens
 
 
 def grace_max_tokens(

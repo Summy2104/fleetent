@@ -182,16 +182,16 @@ copy_config_templates() {
         log_info "Skipping config templates (--skip-config)"
         return 0
     fi
-    mkdir -p "$FLEETENT_HOME/config"
+    mkdir -p "$FLEETENT_HOME"
 
-    if [ -f "$REPO_ROOT/.env.example" ] && [ ! -f "$FLEETENT_HOME/.env" ]; then
-        cp "$REPO_ROOT/.env.example" "$FLEETENT_HOME/.env"
+    if [ -f "$REPO_ROOT/config/agent/.env.example" ] && [ ! -f "$FLEETENT_HOME/.env" ]; then
+        cp "$REPO_ROOT/config/agent/.env.example" "$FLEETENT_HOME/.env"
         log_success "Created $FLEETENT_HOME/.env"
     fi
 
-    if [ -f "$REPO_ROOT/config/agent.yaml.example" ] && [ ! -f "$FLEETENT_HOME/config/agent.yaml" ]; then
-        cp "$REPO_ROOT/config/agent.yaml.example" "$FLEETENT_HOME/config/agent.yaml"
-        log_success "Created $FLEETENT_HOME/config/agent.yaml"
+    if [ -f "$REPO_ROOT/config/agent/agent.yaml.example" ] && [ ! -f "$FLEETENT_HOME/agent.yaml" ]; then
+        cp "$REPO_ROOT/config/agent/agent.yaml.example" "$FLEETENT_HOME/agent.yaml"
+        log_success "Created $FLEETENT_HOME/agent.yaml"
     fi
 }
 # Initialize the SQLite DB under FLEETENT_HOME via Alembic (idempotent). Schema

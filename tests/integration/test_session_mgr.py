@@ -7,7 +7,8 @@ import structlog
 
 import fleetent.session.index as session_index
 import fleetent.session.manager as session_mgr
-from fleetent.config import Settings
+from fleetent import agent_config
+from fleetent.agent_config import AgentFile
 
 
 @pytest.fixture(autouse=True)
@@ -201,32 +202,12 @@ async def test_different_sessions_do_not_block_each_other(sessions_dir):
 # --- Config / _default_config ---
 
 
-def test_settings_has_session_ttl_days_default():
-    assert Settings.model_fields["session_ttl_days"].default == 30
+def test_agentfile_has_session_ttl_days_default():
+    assert AgentFile.model_fields["session_ttl_days"].default == 30
 
 
-def test_default_config_returns_ttl_seconds(monkeypatch):
-    monkeypatch.setattr(
-        session_mgr,
-        "_default_config",
-        session_mgr._default_config,
-    )
-    # Avoid instantiating real Settings (anthropic_api_key required): patch loader.
-    # _default_config() now also reads the capacity fields, so the stub must
-    # provide them too.
-    monkeypatch.setattr(
-        "fleetent.config.Settings",
-        lambda: type(
-            "S",
-            (),
-            {
-                "session_ttl_days": 30,
-                "session_max_total_mb": 1024,
-                "session_max_count": 10000,
-                "session_cleanup_interval_seconds": 3600.0,
-            },
-        )(),
-    )
+def test_default_config_returns_ttl_seconds():
+    # No agent deployed → the neutral default AgentFile supplies the schema defaults.
     cfg = session_mgr._default_config()
     assert cfg["ttl_seconds"] == 30 * 86400
 
@@ -362,32 +343,21 @@ async def test_cleanup_param_overrides_default_config(sessions_dir, monkeypatch)
     assert (sessions_dir / "old.json").exists()
 
 
-# --- Capacity config: Settings fields + _default_config ---
+# --- Capacity config: AgentFile fields + _default_config ---
 
 
-def test_settings_has_session_max_total_mb_default():
-    assert Settings.model_fields["session_max_total_mb"].default == 1024
+def test_agentfile_has_session_max_total_mb_default():
+    assert AgentFile.model_fields["session_max_total_mb"].default == 1024
 
 
-def test_settings_has_session_max_count_default():
-    assert Settings.model_fields["session_max_count"].default == 10000
+def test_agentfile_has_session_max_count_default():
+    assert AgentFile.model_fields["session_max_count"].default == 10000
 
 
 def test_default_config_returns_capacity_limits(monkeypatch):
-    # Avoid instantiating real Settings (anthropic_api_key required): patch loader.
-    monkeypatch.setattr(
-        "fleetent.config.Settings",
-        lambda: type(
-            "S",
-            (),
-            {
-                "session_ttl_days": 30,
-                "session_max_total_mb": 2,
-                "session_max_count": 5,
-                "session_cleanup_interval_seconds": 3600.0,
-            },
-        )(),
-    )
+    # _default_config reads the single active agent's deployment knobs.
+    agent = AgentFile(name="t", version=1, session_max_total_mb=2, session_max_count=5)
+    monkeypatch.setattr(agent_config, "active_agent", lambda: agent)
     cfg = session_mgr._default_config()
     assert cfg["max_total_bytes"] == 2 * 1024 * 1024
     assert cfg["max_count"] == 5

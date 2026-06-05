@@ -1419,10 +1419,10 @@ from fleetent.runtime.context import (  # noqa: E402
 _FLAP_CFG = {**_BIG, "flap_window": 3, "min_savings_ratio": 0.10, "min_interval_turns": 1}
 
 
-def test_settings_anti_flap_defaults():
-    from fleetent.config import Settings
+def test_agentfile_anti_flap_defaults():
+    from fleetent.agent_config import AgentFile
 
-    s = Settings(anthropic_api_key="x")
+    s = AgentFile(name="x", version=1)
     assert s.context_flap_window == 3
     assert s.context_min_savings_ratio == 0.10
     assert s.context_min_interval_turns == 1

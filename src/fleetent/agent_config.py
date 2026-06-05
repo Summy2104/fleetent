@@ -19,12 +19,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from fleetent import paths
 from fleetent.config import (
+    DiagnosticsSettings,
     EmbeddingSettings,
     KnowledgeBaseSettings,
     LongTermContextSettings,
     McpServerSettings,
+    McpSettings,
+    ObservabilitySettings,
     RerankSettings,
+    SchedulingSettings,
     VectorStoreSettings,
+    WebhooksSettings,
 )
 from fleetent.platform.config_validation import _flatten, _looks_inline_secret
 
@@ -62,6 +67,21 @@ class AgentConnectors(BaseModel):
     slack: SlackConnector | None = None
 
 
+class AgentAccess(BaseModel):
+    """Per-agent IM access rules, read from the agent home (no platform-DB lookup).
+
+    The default is closed: with no rules an agent grants no implicit access and
+    requires approval, rather than the legacy allowlist-off = allow-all behaviour.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Empty allow_channels = allow all channels the agent is bound to.
+    allow_channels: list[str] = Field(default_factory=list)
+    allow_users: list[str] = Field(default_factory=list)
+    require_approval: bool = True
+
+
 class AgentFile(BaseModel):
     """Schema for a self-contained ``agent.yaml``."""
 
@@ -85,8 +105,65 @@ class AgentFile(BaseModel):
     rerank: RerankSettings = Field(default_factory=RerankSettings)
     knowledge_base: KnowledgeBaseSettings = Field(default_factory=KnowledgeBaseSettings)
     long_term_ctx: LongTermContextSettings = Field(default_factory=LongTermContextSettings)
+    # ── per-agent runtime governance (defaults mirror Settings; schema-only this phase,
+    #    runtime wiring lands in runtime-read-agent-config) ──
+    # context compression
+    context_max_tokens: int = 200_000
+    context_compress_threshold: float = 0.8
+    context_keep_recent: int = 10
+    context_tmax_ratio: float = 0.8
+    context_tretained_ratio: float = 0.6
+    compression_initial_intent_max: int = 2
+    context_flap_window: int = 3
+    context_min_savings_ratio: float = 0.10
+    context_min_interval_turns: int = 1
+    # layered budget — session/user/agent dims only (global dropped: no cross-agent runtime)
+    agent_budget_session_turns: int = -1
+    agent_budget_session_tokens: int = -1
+    agent_budget_user_turns: int = -1
+    agent_budget_user_tokens: int = -1
+    agent_budget_agent_turns: int = -1
+    agent_budget_agent_tokens: int = -1
+    agent_budget_user_window: str = "weekly"
+    agent_budget_agent_window: str = "weekly"
+    # loop / budget / guardrail
+    agent_max_turns: int = 50
+    agent_max_consecutive_failures: int = 3
+    agent_max_tokens: int = -1
+    agent_grace_call_token_ratio: float = 0.05
+    agent_grace_call_min_tokens: int = 512
+    agent_loop_repeat_threshold: int = 3
+    guardrail_repeat_threshold: int = 3
+    agent_tool_parallel_max: int = 8
+    loop_detect_ignore_arg_keys: list[str] = Field(default_factory=list)
+    sub_agent_timeout_seconds: int = 300
+    tool_default_timeout_seconds: float = 30.0
+    # permission gate
+    permission_gate_medium_timeout_seconds: int = 300
+    permission_gate_high_timeout_seconds: int = 3600
+    # provider circuit breaker
+    provider_failure_threshold: int = 3
+    provider_cooldown_seconds: int = 60
+    # ── per-agent deployment / process knobs (defaults mirror Settings) ──
+    microsandbox_url: str = "http://host.docker.internal:7777"
+    log_format: str = "console"
+    session_ttl_days: int = 30
+    session_max_total_mb: int = 1024
+    session_max_count: int = 10000
+    session_cleanup_interval_seconds: float = 3600.0
+    image_gen_url: str = ""
+    image_gen_model: str = "default"
+    vision_url: str = ""
+    vision_model: str = "default"
+    disabled_skills: list[str] = Field(default_factory=list)
+    observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    diagnostics: DiagnosticsSettings = Field(default_factory=DiagnosticsSettings)
+    mcp: McpSettings = Field(default_factory=McpSettings)
+    scheduling: SchedulingSettings = Field(default_factory=SchedulingSettings)
+    webhooks: WebhooksSettings = Field(default_factory=WebhooksSettings)
     connectors: AgentConnectors = Field(default_factory=AgentConnectors)
     bindings: AgentBindings = Field(default_factory=AgentBindings)
+    access: AgentAccess = Field(default_factory=AgentAccess)
 
 
 @dataclass(frozen=True)
@@ -212,7 +289,7 @@ def build_index(agents_dir: str | Path | None = None) -> AgentConfigIndex:
     """Build a fresh resolution index (pure; no globals).
 
     Single-file mode: when no explicit ``agents_dir`` / ``FLEETENT_AGENTS_DIR`` is given
-    and ``config/agent.yaml`` exists, load it as the sole, forced-default agent.
+    and a home-root ``agent.yaml`` exists, load it as the sole, forced-default agent.
     Otherwise scan the agents directory (multi-agent).
     """
     if agents_dir is None and "FLEETENT_AGENTS_DIR" not in os.environ:
@@ -259,6 +336,44 @@ def scan(agents_dir: str | Path | None = None) -> None:
     _index = build_index(agents_dir)
 
 
+def scan_home(agent_dir: str | Path) -> AgentFile:
+    """Publish a single-agent index from one agent home dir (standalone runtime).
+
+    Loads ``<agent_dir>/agent.yaml`` (dir name must match the agent name) and publishes
+    it as the sole, forced-default agent. Used by ``fleetent agent run`` so routing
+    resolves only this one self-contained agent.
+    """
+    global _index
+    agent = load_agent_file(Path(agent_dir))
+    _index = _single_agent_index(agent)
+    return agent
+
+
 def current() -> AgentConfigIndex:
     """Return the currently published index."""
     return _index
+
+
+def active_agent() -> AgentFile | None:
+    """The single active agent for this process, or None.
+
+    A standalone ``fleetent agent run`` process publishes exactly one (forced-default)
+    agent, so process-level config (intelligence backends, deployment knobs) resolves
+    from it. In the multi-agent dev/platform index (or an empty one) this returns None
+    and callers fall back to ``active_agent_or_default``'s neutral default.
+    """
+    if len(_index.agents) == 1:
+        return next(iter(_index.agents.values()))
+    return None
+
+
+# Neutral default carrying the schema's literal defaults. It is the process-level
+# fallback source for runtime knobs (intelligence/deployment/session) when no single
+# agent is deployed (multi-agent dev/platform/empty index) — replacing the historical
+# global ``Settings`` fallback after the config consolidation.
+_DEFAULT_AGENT_FILE = AgentFile(name="", version=0)
+
+
+def active_agent_or_default() -> AgentFile:
+    """The single active agent for this process, or a neutral default with schema defaults."""
+    return active_agent() or _DEFAULT_AGENT_FILE

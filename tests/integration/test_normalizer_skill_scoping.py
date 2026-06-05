@@ -6,10 +6,9 @@ from unittest.mock import AsyncMock
 import yaml
 
 import fleetent.agent_config as agent_config
-import fleetent.im_user_store as im_user_store
 import fleetent.skills as sr
 import fleetent.user_store as user_store
-from fleetent.im_gateway import normalizer
+from fleetent.im_gateway import access, normalizer
 from fleetent.platform.im_gateway_management import im_channel_allowlist as acl
 from fleetent.platform.im_gateway_management import im_connector_store as ics
 
@@ -59,8 +58,8 @@ def _msg(replies):
     )
 
 
-async def _common_patches(monkeypatch, captured):
-    monkeypatch.setattr(im_user_store, "check_allowed_by_user_id", lambda _uid: True)
+async def _common_patches(monkeypatch, captured, tmp_path):
+    monkeypatch.setattr(access, "APPROVALS_PATH", tmp_path / "data" / "im_approvals.json")
     import fleetent.integrations.sandbox.enablement as se
     import fleetent.runtime.loop as agent_loop
 
@@ -81,7 +80,7 @@ async def _common_patches(monkeypatch, captured):
 async def test_route_narrows_catalog_to_agent_allowed_skills(tmp_path, monkeypatch):
     _setup_db(tmp_path, monkeypatch)
     captured: dict = {}
-    await _common_patches(monkeypatch, captured)
+    await _common_patches(monkeypatch, captured, tmp_path)
 
     _write_agent(
         tmp_path / "agents",
@@ -90,6 +89,7 @@ async def test_route_narrows_catalog_to_agent_allowed_skills(tmp_path, monkeypat
         allowed_tools=["shell"],
         allowed_skills=["weather"],
         bindings={"channels": ["slack:C-SS"]},
+        access={"allow_users": ["u1"]},
     )
 
     replies: list[str] = []
@@ -98,13 +98,16 @@ async def test_route_narrows_catalog_to_agent_allowed_skills(tmp_path, monkeypat
     assert captured.get("allowed_skills") == ["weather"]
 
 
-async def test_route_no_agent_does_not_narrow(tmp_path, monkeypatch):
+async def test_route_no_agent_blocked_default_closed(tmp_path, monkeypatch):
+    # per-agent-im-access: no resolved agent → default-closed, blocked before the loop
+    # (this replaces the legacy "no agent = allow-all, no narrowing" behavior).
     _setup_db(tmp_path, monkeypatch)
     captured: dict = {}
-    await _common_patches(monkeypatch, captured)
-    agent_config.scan(tmp_path / "empty-agents")  # no agents → no narrowing
+    await _common_patches(monkeypatch, captured, tmp_path)
+    agent_config.scan(tmp_path / "empty-agents")  # no agents resolved
 
     replies: list[str] = []
     await normalizer.route(_msg(replies))
 
-    assert captured.get("allowed_skills") is None
+    assert replies and replies[0] == normalizer._REJECTION_MSG
+    assert "allowed_skills" not in captured  # never reached catalog building

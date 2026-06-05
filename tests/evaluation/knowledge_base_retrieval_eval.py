@@ -225,7 +225,7 @@ async def _run_fixture(
             query_results=query_results,
         )
     finally:
-        vector_runtime._configure(Settings(anthropic_api_key=""))
+        vector_runtime._configure(Settings())
 
 
 def _require_non_empty_string(value: object, field: str) -> None:

@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from typing import Literal
 
-from fleetent.config import Settings
+from fleetent.config import KnowledgeBaseSettings, RerankSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.intelligence import vector_store
 from fleetent.intelligence.knowledge_base.models import KnowledgeChunk, KnowledgeDocument
@@ -116,7 +116,7 @@ async def ingest_text(
     if not normalized_content:
         raise ValueError("content must not be empty")
 
-    settings = _settings().knowledge_base
+    settings = _kb_config()
     chunks = [
         KnowledgeChunk(
             id="",
@@ -153,7 +153,7 @@ async def ingest_parsed(
 ) -> KnowledgeDocument:
     """Import parsed document sections into a knowledge base."""
 
-    settings = _settings().knowledge_base
+    settings = _kb_config()
     chunks: list[KnowledgeChunk] = []
     position = 0
     for section in parsed.sections:
@@ -209,7 +209,7 @@ async def _ingest_chunks(
     source: str,
     source_url: str | None,
 ) -> KnowledgeDocument:
-    settings = _settings().knowledge_base
+    settings = _kb_config()
     resolved_tenant_id = tenant_id or settings.default_tenant_id
     resolved_kb_id = kb_id or settings.default_kb_id
     document = KnowledgeDocument(
@@ -263,7 +263,7 @@ async def search(
     if limit <= 0:
         return []
 
-    settings = _settings().knowledge_base
+    settings = _kb_config()
     resolved_tenant_id = tenant_id or settings.default_tenant_id
     resolved_kb_ids = kb_ids or [settings.default_kb_id]
     store = KnowledgeStore(_database())
@@ -362,7 +362,7 @@ async def _rerank_hybrid_candidates(
     kb_ids: list[str],
     limit: int,
 ) -> list[KnowledgeChunk]:
-    provider = rerank_runtime.create_rerank_provider(_settings().rerank)
+    provider = rerank_runtime.create_rerank_provider(_rerank_config())
     try:
         results = await provider.rerank(
             query,
@@ -507,7 +507,21 @@ def _chunk_text(content: str, chunk_size: int, chunk_overlap: int) -> list[str]:
 
 
 def _settings() -> Settings:
-    return Settings(anthropic_api_key="")
+    return Settings()
+
+
+def _kb_config() -> KnowledgeBaseSettings:
+    """knowledge_base config from the active agent (a neutral default when absent)."""
+    from fleetent import agent_config
+
+    return agent_config.active_agent_or_default().knowledge_base
+
+
+def _rerank_config() -> RerankSettings:
+    """rerank config from the active agent (a neutral default when absent)."""
+    from fleetent import agent_config
+
+    return agent_config.active_agent_or_default().rerank
 
 
 def _database() -> SQLiteDatabase:

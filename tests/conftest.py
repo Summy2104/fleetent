@@ -22,11 +22,12 @@ def _apply_migrations(db_path: Path) -> None:
 
 @pytest.fixture(autouse=True)
 def _default_required_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Provide the required ANTHROPIC_API_KEY for Settings() across the suite.
+    """Provide ANTHROPIC_API_KEY for the default model route across the suite.
 
-    Settings.anthropic_api_key is required (CLAUDE.md: "默认路由必需"). Both source
-    branches assumed it lived in the run environment; the merge has no global test
-    env, so set a dummy here. Tests that exercise missing-key behaviour can
+    The platform ``Settings`` no longer carries an API key (config consolidation),
+    but ``model_router``'s default route still resolves the LLM key from this env
+    (CLAUDE.md: "默认路由必需"). Tests with no global env would otherwise fail to
+    build a client; set a dummy here. Tests exercising missing-key behaviour can
     monkeypatch.delenv it themselves (autouse runs before the test body).
     """
     if os.environ.get("FLEETENT_EVAL_REAL_LLM") == "1":
@@ -72,6 +73,19 @@ def _reset_long_term_ctx_knowledge_provider():  # type: ignore[no-untyped-def]
     from fleetent.intelligence import long_term_ctx
 
     long_term_ctx.set_knowledge_provider(None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_agent_config_index():  # type: ignore[no-untyped-def]
+    # agent_config publishes the resolved agent index as a module global that
+    # runtime config now reads via current()/active_agent(). Tests that publish an
+    # index must not leak it into later tests (process-level governance/intelligence
+    # resolution would otherwise pick up a stale single agent).
+    from fleetent import agent_config
+
+    original = agent_config._index
+    yield
+    agent_config._index = original
 
 
 @pytest.fixture

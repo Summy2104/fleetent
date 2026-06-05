@@ -2,25 +2,32 @@ from pathlib import Path
 
 
 def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
-    env_example = Path(".env.example")
+    agent_env = Path("config/agent/.env.example")
+    platform_env = Path("config/platform/.env.example")
     gitignore = Path(".gitignore").read_text(encoding="utf-8")
 
-    assert env_example.exists()
-    content = env_example.read_text(encoding="utf-8")
-    assert "FLEETENT_AUTO_UPGRADE=false" in content
-    assert "ANTHROPIC_API_KEY=" in content
-    assert "OPENAI_API_KEY=" in content
-    assert "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN=" in content
-    assert "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET=" in content
-    assert "FLEETENT_CONFLUENCE_USERNAME=" in content
-    assert "FLEETENT_CONFLUENCE_TOKEN=" in content
-    assert "FLEETENT_EVAL_EMBEDDING_ENDPOINT=" in content
-    assert "FLEETENT_EVAL_EMBEDDING_API_KEY=" in content
-    assert "FLEETENT_EVAL_RERANK_ENDPOINT=" in content
-    assert "FLEETENT_EVAL_RERANK_API_KEY=" in content
-    assert "sk-" not in content
-    assert "ma-" not in content
-    assert "xoxb-" not in content
+    assert agent_env.exists() and platform_env.exists()
+    agent = agent_env.read_text(encoding="utf-8")
+    platform = platform_env.read_text(encoding="utf-8")
+    both = agent + "\n" + platform
+
+    # Platform-side
+    assert "FLEETENT_AUTO_UPGRADE=false" in platform
+    assert "ANTHROPIC_API_KEY=" in platform
+    # Agent-side
+    assert "ANTHROPIC_API_KEY=" in agent
+    assert "OPENAI_API_KEY=" in agent
+    assert "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN=" in agent
+    assert "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET=" in agent
+    assert "FLEETENT_CONFLUENCE_USERNAME=" in agent
+    assert "FLEETENT_CONFLUENCE_TOKEN=" in agent
+    assert "FLEETENT_EVAL_EMBEDDING_ENDPOINT=" in agent
+    assert "FLEETENT_EVAL_EMBEDDING_API_KEY=" in agent
+    assert "FLEETENT_EVAL_RERANK_ENDPOINT=" in agent
+    assert "FLEETENT_EVAL_RERANK_API_KEY=" in agent
+    # No real secret material in either.
+    for marker in ("sk-", "ma-", "xoxb-", "xapp-"):
+        assert marker not in both
     assert "\n.env\n" in f"\n{gitignore}\n"
     assert "\nsecrets/\n" in f"\n{gitignore}\n"
 
@@ -44,10 +51,15 @@ def test_secrets_documentation_describes_flat_untracked_directory():
 def test_global_config_example_templates_removed():
     # The deployed agent is self-contained (agent.yaml + .env); the global config
     # files are optional (loaders default when absent) and no longer shipped.
+    # Templates are split by component under config/agent/ and config/platform/.
     assert not Path("config/settings.yaml.example").exists()
     assert not Path("config/mcp.yaml.example").exists()
     assert not Path("config/mcp.servers.yaml.example").exists()
-    assert Path("config/agent.yaml.example").exists()
+    assert not Path("config/agent.yaml.example").exists()
+    assert not Path(".env.example").exists()
+    assert Path("config/agent/agent.yaml.example").exists()
+    assert Path("config/agent/.env.example").exists()
+    assert Path("config/platform/.env.example").exists()
 
 
 def test_dockerfile_includes_deployment_runtime_assets_and_port():
@@ -55,8 +67,7 @@ def test_dockerfile_includes_deployment_runtime_assets_and_port():
 
     required_phrases = [
         "COPY scripts/ ./scripts/",
-        "COPY config/agent.yaml.example ./config/",
-        "COPY .env.example ./",
+        "COPY config/ ./config/",
         'ENTRYPOINT ["./scripts/docker_entrypoint.sh"]',
         "EXPOSE 8765",
     ]
@@ -259,3 +270,29 @@ def test_deployment_docs_are_docker_compose_first_and_use_port_8765():
     combined = "\n".join(docs.values())
     assert "Pilot 默认" in combined
     assert "uv run uvicorn fleetent.server:app` 只作为开发模式" in combined
+
+
+def test_env_example_covers_agent_yaml_example_env_refs():
+    """Every env-var name referenced by agent.yaml.example must exist in .env.example."""
+    import yaml
+
+    doc = yaml.safe_load(Path("config/agent/agent.yaml.example").read_text(encoding="utf-8"))
+    env_text = Path("config/agent/.env.example").read_text(encoding="utf-8")
+
+    refs: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if isinstance(value, str) and key.endswith("_env"):
+                    refs.add(value)
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(doc)
+    refs.add("ANTHROPIC_API_KEY")  # required default route key
+
+    missing = sorted(name for name in refs if name and f"{name}=" not in env_text)
+    assert not missing, f".env.example missing referenced env names: {missing}"

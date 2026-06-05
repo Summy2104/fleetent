@@ -2790,7 +2790,7 @@ async def test_run_parallel_max_one_runs_sequentially(mock_client):
         return f"{name}_r"
 
     with (
-        patch.object(al, "_resolve_parallel_max", lambda: 1),
+        patch.object(al, "_resolve_parallel_max", lambda governance=None: 1),
         patch.object(al, "dispatch", disp),
     ):
         await al.run([{"role": "user", "content": "x"}])
@@ -2824,7 +2824,7 @@ async def test_run_parallel_max_splits_into_batches_backfill_original_order(mock
         return f"{name}_r"
 
     with (
-        patch.object(al, "_resolve_parallel_max", lambda: 2),
+        patch.object(al, "_resolve_parallel_max", lambda governance=None: 2),
         patch.object(al, "dispatch", disp),
         patch.object(al, "log_run", lambda *a, **kw: captured.update({"messages": a[2]})),
     ):

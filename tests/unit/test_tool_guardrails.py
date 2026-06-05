@@ -12,10 +12,10 @@ def _fp(args: str) -> str:
 # ── threshold default + resolution (group 2) ─────────────────────────────────
 
 
-def test_settings_guardrail_threshold_default_3():
-    from fleetent.config import Settings
+def test_agentfile_guardrail_threshold_default_3():
+    from fleetent.agent_config import AgentFile
 
-    assert Settings(anthropic_api_key="x").guardrail_repeat_threshold == 3
+    assert AgentFile(name="x", version=1).guardrail_repeat_threshold == 3
 
 
 # ── strict consecutive counting + trigger (group 3) ──────────────────────────

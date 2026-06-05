@@ -1,4 +1,4 @@
-from fleetent.config import Settings
+from fleetent.agent_config import AgentFile
 from fleetent.intelligence.vector_store.backend import (
     SearchResult,
     VectorBackend,
@@ -13,19 +13,31 @@ _embedding: EmbeddingProvider
 _backend: VectorBackend
 
 
-def _configure(settings: Settings) -> None:
+def _platform_database_url() -> str:
+    """The home-derived platform DB url; the vector backend's fallback DB path."""
+    from fleetent.config import Settings
+
+    return Settings().database_url
+
+
+def _configure(agent: AgentFile) -> None:
     global _embedding, _backend
 
-    _embedding = create_embedding_provider(settings.embedding)
-    _backend = _create_vector_backend(settings)
+    _embedding = create_embedding_provider(agent.embedding)
+    database_url = agent.vector_store.database_url or _platform_database_url()
+    _backend = create_vector_backend(agent.vector_store, database_url=database_url)
 
 
-def _create_vector_backend(settings: Settings) -> VectorBackend:
-    database_url = settings.vector_store.database_url or settings.database_url
-    return create_vector_backend(settings.vector_store, database_url=database_url)
+def configure_from_active_agent() -> None:
+    """Configure the embedding/vector singletons from the active agent's
+    embedding/vector_store blocks (a neutral default when no single agent is
+    published); the DB path falls back to the home-derived platform DB url."""
+    from fleetent import agent_config
+
+    _configure(agent_config.active_agent_or_default())
 
 
-_configure(Settings(anthropic_api_key=""))
+configure_from_active_agent()
 
 
 async def upsert(id: str, text: str, namespace: str) -> None:

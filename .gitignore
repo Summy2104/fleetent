@@ -30,11 +30,13 @@ secrets/
 # Browser self-test artifacts (Playwright MCP)
 .playwright-mcp/
 
-# Config — example files are committed, actual configs are not
+# Config — *.example / *.yaml.example templates are committed; real configs are not.
+# `.env` (above) already ignores config/agent/.env, config/platform/.env, etc.
 agent.yaml
 config/*.yaml
-config/mcp.yaml
-!config/*.example.yaml
+config/agent/*.yaml
+config/platform/*.yaml
+config/agents/*/agent.yaml
 
 # IDE
 .vscode/

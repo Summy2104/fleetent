@@ -16,7 +16,13 @@ from fleetent.intelligence.vector_store.rerank import (
     RerankResult,
     create_rerank_provider,
 )
-from fleetent.intelligence.vector_store.runtime import clear_namespace, delete, search, upsert
+from fleetent.intelligence.vector_store.runtime import (
+    clear_namespace,
+    configure_from_active_agent,
+    delete,
+    search,
+    upsert,
+)
 
 __all__ = [
     "IndexableItem",
@@ -27,6 +33,7 @@ __all__ = [
     "RerankResult",
     "SearchResult",
     "clear_namespace",
+    "configure_from_active_agent",
     "create_rerank_provider",
     "delete",
     "knowledge_namespace",

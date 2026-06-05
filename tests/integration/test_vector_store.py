@@ -128,13 +128,15 @@ async def test_upsert_uses_configured_http_embedding_provider():
     import httpx
     import respx
 
-    from fleetent.config import EmbeddingSettings, Settings
+    from fleetent.agent_config import AgentFile
+    from fleetent.config import EmbeddingSettings
     from fleetent.intelligence.vector_store import runtime
     from fleetent.intelligence.vector_store.backend import InMemoryVectorBackend
 
     runtime._configure(
-        Settings(
-            anthropic_api_key="",
+        AgentFile(
+            name="t",
+            version=1,
             embedding=EmbeddingSettings(
                 backend="http",
                 dimensions=2,
@@ -156,19 +158,21 @@ async def test_upsert_uses_configured_http_embedding_provider():
         assert isinstance(runtime._backend, InMemoryVectorBackend)
         assert runtime._backend._vectors["mem:http-upsert"]["id-http"] == [1.0, 0.0]
     finally:
-        runtime._configure(Settings(anthropic_api_key=""))
+        runtime._configure(AgentFile(name="t", version=1))
 
 
 async def test_search_uses_configured_http_embedding_provider():
     import httpx
     import respx
 
-    from fleetent.config import EmbeddingSettings, Settings
+    from fleetent.agent_config import AgentFile
+    from fleetent.config import EmbeddingSettings
     from fleetent.intelligence.vector_store import runtime
 
     runtime._configure(
-        Settings(
-            anthropic_api_key="",
+        AgentFile(
+            name="t",
+            version=1,
             embedding=EmbeddingSettings(
                 backend="http",
                 dimensions=2,
@@ -190,7 +194,7 @@ async def test_search_uses_configured_http_embedding_provider():
         assert route.call_count == 2
         assert [result.id for result in results] == ["id-http"]
     finally:
-        runtime._configure(Settings(anthropic_api_key=""))
+        runtime._configure(AgentFile(name="t", version=1))
 
 
 async def test_search_limit_is_respected():
@@ -435,15 +439,15 @@ async def test_sqlite_backend_upsert_rejects_empty_vector(tmp_path):
 async def test_runtime_public_api_uses_sqlite_backend_with_global_database_url(
     tmp_path, monkeypatch
 ):
-    from fleetent.config import Settings
+    from fleetent.agent_config import AgentFile
     from fleetent.intelligence.vector_store import runtime
+    from fleetent.intelligence.vector_store.backend import create_vector_backend
 
-    settings = Settings(
-        anthropic_api_key="",
-        database_url=_sqlite_database_url(tmp_path / "vectors.db"),
-        vector_store={"backend": "sqlite"},
+    agent = AgentFile(name="t", version=1, vector_store={"backend": "sqlite"})
+    database_url = _sqlite_database_url(tmp_path / "vectors.db")
+    monkeypatch.setattr(
+        runtime, "_backend", create_vector_backend(agent.vector_store, database_url=database_url)
     )
-    monkeypatch.setattr(runtime, "_backend", runtime._create_vector_backend(settings))
 
     await runtime.upsert("id-1", "python debugging", namespace="mem:user-1")
     assert [result.id for result in await runtime.search("python", namespace="mem:user-1")] == [

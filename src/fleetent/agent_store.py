@@ -85,7 +85,7 @@ class AgentVersion:
 
 
 def _db() -> SQLiteDatabase:
-    return create_database(Settings(anthropic_api_key="").database_url)
+    return create_database(Settings().database_url)
 
 
 def _now() -> str:
@@ -103,7 +103,7 @@ def _parse_caps(row: dict[str, Any]) -> dict[str, Any]:
         # no narrowing (backward compatible).
         "allowed_skills": json.loads(row["allowed_skills"] or "[]"),
         # icon column added in migration 047; guard legacy rows that predate it.
-        # sqlite3.Row has no .get(), so SIM401's row.get() suggestion does not apply.
+        # `row` is a sqlite3.Row (no .get), so `in` membership is the guard, not row.get.
         "icon": (row["icon"] if "icon" in row else None),  # noqa: SIM401
     }
 
@@ -637,7 +637,11 @@ def get_channel_bound_version_id(platform: str, channel_id: str) -> int | None:
 
 
 def _get_default_agent_name() -> str | None:
-    return Settings(anthropic_api_key="").default_agent_name
+    # The default agent is the file index's `bindings.default` winner (zero-DB),
+    # not a global Settings field (dissolved in config consolidation).
+    from fleetent import agent_config
+
+    return agent_config.current().default
 
 
 def get_default_agent() -> Agent | None:

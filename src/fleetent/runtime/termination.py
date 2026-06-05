@@ -21,14 +21,14 @@ ToolCallRecord = tuple[str, str, str, bool]
 
 
 def _default_config() -> LimitConfig:
-    """Deployment-level defaults from Settings (env-configurable). Lazy import
-    mirrors context_mgr._default_config to keep this module import-light."""
-    from fleetent.config import Settings
+    """Iteration-limit defaults from GovernanceConfig's literal defaults. Lazy import
+    keeps this module import-light and avoids a cycle with the snapshot module."""
+    from fleetent.runtime.snapshot import GovernanceConfig
 
-    s = Settings()  # type: ignore[call-arg]
+    gov = GovernanceConfig()
     return {
-        "max_turns": s.agent_max_turns,
-        "max_consecutive_failures": s.agent_max_consecutive_failures,
+        "max_turns": gov.agent_max_turns,
+        "max_consecutive_failures": gov.agent_max_consecutive_failures,
     }
 
 

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from fleetent.config import Settings
+from fleetent.agent_config import AgentFile
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"fake-image-payload" * 4
 
@@ -21,7 +21,7 @@ def asyncio_run(coro):
 
 
 def test_vision_config_defaults():
-    settings = Settings(anthropic_api_key="k")
+    settings = AgentFile(name="t", version=1)
     assert settings.vision_url == ""
     assert settings.vision_model == "default"
 
@@ -45,8 +45,8 @@ def test_analyze_sends_image_and_instruction_returns_text(monkeypatch):
     client = _mock_async_openai("an invoice for $42")
     monkeypatch.setattr(vc, "_build_client", lambda settings: client)
 
-    settings = Settings(anthropic_api_key="k", vision_url="http://localhost:9001/v1/")
-    result = asyncio_run(vc.analyze(PNG_BYTES, "what is this?", settings=settings))
+    settings = AgentFile(name="t", version=1, vision_url="http://localhost:9001/v1/")
+    result = asyncio_run(vc.analyze(PNG_BYTES, "what is this?", config=settings))
 
     assert result == "an invoice for $42"
     _, kwargs = client.chat.completions.create.call_args
@@ -68,9 +68,9 @@ def test_analyze_sends_image_and_instruction_returns_text(monkeypatch):
 def test_analyze_requires_configured_url():
     import fleetent.tools.vision_client as vc
 
-    settings = Settings(anthropic_api_key="k", vision_url="")
+    settings = AgentFile(name="t", version=1, vision_url="")
     with pytest.raises(vc.VisionError):
-        asyncio_run(vc.analyze(PNG_BYTES, "x", settings=settings))
+        asyncio_run(vc.analyze(PNG_BYTES, "x", config=settings))
 
 
 def test_analyze_endpoint_error_raises_visionerror(monkeypatch):
@@ -80,9 +80,9 @@ def test_analyze_endpoint_error_raises_visionerror(monkeypatch):
     client.chat.completions.create = AsyncMock(side_effect=RuntimeError("boom"))
     monkeypatch.setattr(vc, "_build_client", lambda settings: client)
 
-    settings = Settings(anthropic_api_key="k", vision_url="http://localhost:9001/v1/")
+    settings = AgentFile(name="t", version=1, vision_url="http://localhost:9001/v1/")
     with pytest.raises(vc.VisionError):
-        asyncio_run(vc.analyze(PNG_BYTES, "x", settings=settings))
+        asyncio_run(vc.analyze(PNG_BYTES, "x", config=settings))
 
 
 def test_analyze_empty_choices_raises(monkeypatch):
@@ -92,9 +92,9 @@ def test_analyze_empty_choices_raises(monkeypatch):
     client.chat.completions.create = AsyncMock(return_value=SimpleNamespace(choices=[]))
     monkeypatch.setattr(vc, "_build_client", lambda settings: client)
 
-    settings = Settings(anthropic_api_key="k", vision_url="http://localhost:9001/v1/")
+    settings = AgentFile(name="t", version=1, vision_url="http://localhost:9001/v1/")
     with pytest.raises(vc.VisionError):
-        asyncio_run(vc.analyze(PNG_BYTES, "x", settings=settings))
+        asyncio_run(vc.analyze(PNG_BYTES, "x", config=settings))
 
 
 # ── uploads storage helper ──────────────────────────────────────────────────
@@ -156,7 +156,7 @@ def test_analyze_image_valid_ref_returns_text(monkeypatch, tmp_path):
     monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
     ref = tl._save_upload(PNG_BYTES, "image/png")
 
-    async def fake_analyze(image_bytes, instruction, *, settings=None):
+    async def fake_analyze(image_bytes, instruction, *, config=None):
         assert image_bytes == PNG_BYTES
         assert instruction == "read the total"
         return "total is $42"
@@ -173,7 +173,7 @@ def test_analyze_image_result_has_no_base64(monkeypatch, tmp_path):
     monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
     ref = tl._save_upload(PNG_BYTES, "image/png")
 
-    async def fake_analyze(image_bytes, instruction, *, settings=None):
+    async def fake_analyze(image_bytes, instruction, *, config=None):
         return "described"
 
     monkeypatch.setattr(tl.vision_client, "analyze", fake_analyze)
@@ -200,7 +200,7 @@ def test_analyze_image_unconfigured_endpoint_returns_error(monkeypatch, tmp_path
     monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
     ref = tl._save_upload(PNG_BYTES, "image/png")
 
-    async def fake_analyze(image_bytes, instruction, *, settings=None):
+    async def fake_analyze(image_bytes, instruction, *, config=None):
         raise VisionError("vision endpoint not configured (vision_url is empty)")
 
     monkeypatch.setattr(tl.vision_client, "analyze", fake_analyze)
@@ -222,7 +222,7 @@ def test_analyze_image_result_in_trace_has_no_base64(monkeypatch, tmp_path):
     monkeypatch.setattr(tl, "UPLOADS_DIR", tmp_path / "up")
     ref = tl._save_upload(PNG_BYTES, "image/png")
 
-    async def fake_analyze(image_bytes, instruction, *, settings=None):
+    async def fake_analyze(image_bytes, instruction, *, config=None):
         return "structured description"
 
     monkeypatch.setattr(tl.vision_client, "analyze", fake_analyze)

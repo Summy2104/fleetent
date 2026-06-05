@@ -212,7 +212,7 @@ async def _run_fixture(
             query_results=query_results,
         )
     finally:
-        vector_runtime._configure(Settings(anthropic_api_key=""))
+        vector_runtime._configure(Settings())
 
 
 def assert_query_expectations(result: CombinedEmbeddingEvaluationResult) -> None:
