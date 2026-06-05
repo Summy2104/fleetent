@@ -46,14 +46,17 @@ def test_health_includes_adapter_status(tmp_path, monkeypatch, isolated_schedule
     assert data["adapters"]["telegram"] is False
 
 
-def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch, isolated_schedule_db):
-    """Health endpoint shows True for adapters whose env tokens are present."""
+def test_health_adapter_flags_true_when_connectors_present(
+    tmp_path, monkeypatch, isolated_schedule_db
+):
+    """Health reflects per-agent Slack + owner Telegram connector presence."""
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-fake")
-    monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-fake")
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg-fake")
 
     import fleetent.server as srv
+
+    # Slack is per-agent (agent.yaml connectors.slack); Telegram is owner-level.
+    monkeypatch.setattr(srv, "_slack_adapter_configured", lambda: True)
+    monkeypatch.setattr(srv, "_telegram_adapter_configured", lambda: True)
 
     # Manager start is mocked so lifespan never opens real sockets.
     with (

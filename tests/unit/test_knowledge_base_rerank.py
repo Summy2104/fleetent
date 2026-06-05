@@ -117,7 +117,7 @@ async def test_rerank_provider_failure_falls_back_to_hybrid_order(monkeypatch):
         "create_rerank_provider",
         lambda settings: FailingProvider(),
     )
-    monkeypatch.setattr(runtime, "_settings", lambda: Settings(anthropic_api_key="test-key"))
+    monkeypatch.setattr(runtime, "_settings", lambda: Settings())
     monkeypatch.setattr(runtime, "_logger", FakeLogger())
 
     reranked = await runtime._rerank_hybrid_candidates(

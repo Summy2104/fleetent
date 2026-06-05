@@ -443,7 +443,7 @@ def _delete_files(paths: list[Path]) -> tuple[int, list[str]]:
 
 
 def _settings() -> Settings:
-    return Settings(anthropic_api_key="")
+    return Settings()
 
 
 def _default_diagnostics() -> DiagnosticsSettings:

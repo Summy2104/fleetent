@@ -23,7 +23,7 @@ def test_settings_default_paths_follow_fleetent_home(
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     monkeypatch.setattr("fleetent.config.SETTINGS_YAML_PATH", tmp_path / "missing.yaml")
 
-    s = Settings(anthropic_api_key="test-key")
+    s = Settings()
 
     assert s.database_url == f"sqlite:///{tmp_path / 'data' / 'fleetent.db'}"
     assert s.observability.logging.directory == str(tmp_path / "data" / "logs")

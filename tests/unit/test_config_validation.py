@@ -7,7 +7,7 @@ def test_env_provided_secret_values_are_not_inline_config_errors(monkeypatch):
 
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-1234567890abcdef")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456789012345678901234")
-    settings = Settings(anthropic_api_key="sk-ant-1234567890abcdef")
+    settings = Settings()
 
     report = validate_config(profile="pilot", settings=settings, config_paths=[])
 
@@ -25,7 +25,7 @@ def test_secret_like_values_in_config_files_are_errors(tmp_path):
 
     report = validate_config(
         profile="pilot",
-        settings=Settings(anthropic_api_key=""),
+        settings=Settings(),
         config_paths=[settings_file],
     )
 
@@ -71,7 +71,7 @@ def test_inline_secret_like_config_values_are_errors():
     from fleetent.config import Settings
     from fleetent.platform.config_validation import validate_config
 
-    settings = Settings(anthropic_api_key="", image_gen_url="sk-ant-1234567890abcdef")
+    settings = Settings(image_gen_url="sk-ant-1234567890abcdef")
 
     report = validate_config(profile="pilot", settings=settings, scan_resolved_settings=True)
 
@@ -85,7 +85,7 @@ def test_profile_rules_warn_skip_or_error_for_production_dependencies():
     from fleetent.config import Settings
     from fleetent.platform.config_validation import validate_config
 
-    settings = Settings(anthropic_api_key="", embedding={"backend": "deterministic"})
+    settings = Settings(embedding={"backend": "deterministic"})
 
     dev = validate_config(profile="dev", settings=settings)
     pilot = validate_config(profile="pilot", settings=settings)

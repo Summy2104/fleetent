@@ -87,7 +87,7 @@ class AgentVersion:
 
 
 def _db() -> SQLiteDatabase:
-    return create_database(Settings(anthropic_api_key="").database_url)
+    return create_database(Settings().database_url)
 
 
 def _now() -> str:
@@ -627,7 +627,11 @@ def get_channel_bound_version_id(platform: str, channel_id: str) -> int | None:
 
 
 def _get_default_agent_name() -> str | None:
-    return Settings(anthropic_api_key="").default_agent_name
+    # The default agent is the file index's `bindings.default` winner (zero-DB),
+    # not a global Settings field (dissolved in config consolidation).
+    from fleetent import agent_config
+
+    return agent_config.current().default
 
 
 def get_default_agent() -> Agent | None:

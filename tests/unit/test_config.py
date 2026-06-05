@@ -14,7 +14,7 @@ def isolate_settings_dotenv(tmp_path, monkeypatch):
 
 
 def test_settings_defaults():
-    s = Settings(anthropic_api_key="test-key")
+    s = Settings()
     assert s.database_url == f"sqlite:///{paths.data_dir() / 'fleetent.db'}"
     assert s.log_format == "console"
 
@@ -91,6 +91,30 @@ def test_settings_excludes_dissolved_agent_runtime_fields():
     assert fields.isdisjoint(dissolved), sorted(fields & dissolved)
 
 
+def test_settings_excludes_im_tokens_and_default_agent_and_api_key():
+    fields = set(Settings.model_fields)
+    removed = {
+        "slack_bot_token",
+        "slack_app_token",
+        "telegram_bot_token",
+        "default_agent_name",
+        "anthropic_api_key",
+    }
+    assert fields.isdisjoint(removed), sorted(fields & removed)
+
+
+def test_settings_constructible_without_any_secret():
+    # Platform Settings carries no secret/API key; it builds with no arguments.
+    s = Settings()
+    assert s.log_format == "console"
+
+
+def test_yaml_secret_fields_is_empty_safety_net():
+    from fleetent.config import YAML_SECRET_FIELDS
+
+    assert YAML_SECRET_FIELDS == frozenset()
+
+
 def test_settings_loads_non_secret_values_from_settings_yaml(tmp_path, monkeypatch):
     import fleetent.config as cfg
 
@@ -108,7 +132,7 @@ def test_settings_loads_non_secret_values_from_settings_yaml(tmp_path, monkeypat
     )
     monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
 
-    s = Settings(anthropic_api_key="test-key")
+    s = Settings()
 
     assert s.database_url == "sqlite:///tmp/fleetent.db"
     assert s.log_format == "json"
@@ -178,13 +202,15 @@ def test_settings_missing_yaml_file_uses_typed_defaults(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", tmp_path / "missing.yaml")
 
-    s = Settings(anthropic_api_key="test-key")
+    s = Settings()
 
     assert s.database_url == f"sqlite:///{paths.data_dir() / 'fleetent.db'}"
     assert s.log_format == "console"
 
 
-def test_settings_yaml_does_not_load_secret_values(tmp_path, monkeypatch):
+def test_settings_yaml_ignores_unknown_secret_like_keys(tmp_path, monkeypatch):
+    # The slim platform Settings has no secret fields, so stray secret-like keys in
+    # settings.yaml are simply ignored (extra="ignore"); non-secret values still load.
     import fleetent.config as cfg
 
     settings_yaml = tmp_path / "settings.yaml"
@@ -198,16 +224,17 @@ def test_settings_yaml_does_not_load_secret_values(tmp_path, monkeypatch):
         )
     )
     monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-env")
     monkeypatch.chdir(tmp_path)
 
-    with pytest.raises(ValueError, match="anthropic_api_key.*slack_bot_token.*env/.env"):
-        Settings()
+    s = Settings()
+
+    assert s.database_url == "sqlite:///tmp/fleetent.db"
+    assert not hasattr(s, "anthropic_api_key")
+    assert not hasattr(s, "slack_bot_token")
 
 
 def test_observability_logging_defaults():
-    s = Settings(anthropic_api_key="test-key")
+    s = Settings()
 
     assert s.observability.logging.console_level == "info"
     assert s.observability.logging.file_level == "debug"
@@ -291,7 +318,7 @@ def test_sqlite_vector_backend_uses_global_database_url_when_not_configured(tmp_
     # vector_store config now lives on the agent; the DB url falls back to the
     # platform Settings.database_url when the agent's vector_store has none.
     database_url = f"sqlite:///{tmp_path / 'app.db'}"
-    platform = Settings(anthropic_api_key="test-key", database_url=database_url)
+    platform = Settings(database_url=database_url)
     agent = AgentFile(name="t", version=1, vector_store={"backend": "sqlite"})
 
     backend = create_vector_backend(
@@ -316,31 +343,18 @@ def test_sqlite_vector_backend_rejects_non_sqlite_database_url():
 
 def test_settings_env_override(monkeypatch):
     monkeypatch.setenv("LOG_FORMAT", "json")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     s = Settings()
     assert s.log_format == "json"
 
 
-def test_settings_missing_required_key(monkeypatch, tmp_path):
+def test_settings_needs_no_required_key(monkeypatch, tmp_path):
+    # The platform Settings carries no required secret; it builds with no env/.env.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.chdir(tmp_path)  # no .env here — prevents pydantic-settings from loading it
-    with pytest.raises(Exception):  # noqa: B017
-        Settings()
+    monkeypatch.chdir(tmp_path)
+    s = Settings()
+    assert s.database_url
 
 
-def test_configure_logging_does_not_raise(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+def test_configure_logging_does_not_raise():
     s = Settings()
     configure_logging(s)  # should not raise
-
-
-def test_default_agent_name_defaults_to_none():
-    s = Settings(anthropic_api_key="test-key")
-    assert s.default_agent_name is None
-
-
-def test_default_agent_name_from_env(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv("DEFAULT_AGENT_NAME", "basic")
-    s = Settings()
-    assert s.default_agent_name == "basic"

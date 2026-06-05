@@ -17,7 +17,7 @@ def _platform_database_url() -> str:
     """The home-derived platform DB url; the vector backend's fallback DB path."""
     from fleetent.config import Settings
 
-    return Settings(anthropic_api_key="").database_url
+    return Settings().database_url
 
 
 def _configure(agent: AgentFile) -> None:

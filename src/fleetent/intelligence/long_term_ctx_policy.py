@@ -303,4 +303,4 @@ def _row_to_record(row: dict[str, Any]) -> ContextPolicyRecord:
 
 
 def _database() -> SQLiteDatabase:
-    return create_database(Settings(anthropic_api_key="").database_url)
+    return create_database(Settings().database_url)

@@ -103,7 +103,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     load_plugins()
     cleanup_stale_approvals()
     try:
-        settings = Settings()  # type: ignore[call-arg]
+        settings = Settings()
     except Exception as exc:
         log_config_failed(exc)
         raise
@@ -405,9 +405,28 @@ async def _authenticate(authorization: str = Header()) -> tuple[user_store.User,
     return result
 
 
+def _slack_adapter_configured() -> bool:
+    """Whether any indexed agent declares a per-agent Slack connector."""
+    return any(
+        agent.connectors.slack is not None for agent in agent_config.current().agents.values()
+    )
+
+
+def _telegram_adapter_configured() -> bool:
+    """Whether the admin owner has a Telegram connector configured (owner-level IM).
+
+    Defensive: a missing/unmigrated connector store must not break /health."""
+    try:
+        from fleetent import user_store
+        from fleetent.platform.im_gateway_management import connector_config
+
+        return bool(connector_config.resolve(user_store.admin_owner_id(), "telegram"))
+    except Exception:
+        return False
+
+
 @app.get("/health")
 async def health(request: Request) -> dict:  # type: ignore[type-arg]
-    settings = Settings()  # type: ignore[call-arg]
     # SB3: surface the effective sandbox mode resolved at startup; default to off
     # when the state is somehow unset (e.g. lifespan not run) so we never crash.
     mode: Mode = getattr(request.app.state, "sandbox_mode", Mode.OFF)
@@ -418,8 +437,8 @@ async def health(request: Request) -> dict:  # type: ignore[type-arg]
     return {
         "status": "ok",
         "adapters": {
-            "slack": bool(settings.slack_bot_token),
-            "telegram": bool(settings.telegram_bot_token),
+            "slack": _slack_adapter_configured(),
+            "telegram": _telegram_adapter_configured(),
         },
         "sandbox": sandbox,
     }

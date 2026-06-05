@@ -41,17 +41,15 @@ def test_health_includes_adapter_status(tmp_path, monkeypatch):
     assert data["adapters"]["telegram"] is False
 
 
-def test_health_adapter_flags_true_when_tokens_set(tmp_path, monkeypatch):
-    """Health endpoint shows True for adapters whose env tokens are present."""
+def test_health_adapter_flags_true_when_connectors_present(tmp_path, monkeypatch):
+    """Health reflects per-agent Slack + owner Telegram connector presence."""
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
-    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-fake")
-    monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-fake")
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg-fake")
 
     import fleetent.server as srv
 
-    # _connector_manager still exists on the module; patching its starters is harmless
-    # (the control-plane lifespan never starts connectors anyway).
+    monkeypatch.setattr(srv, "_slack_adapter_configured", lambda: True)
+    monkeypatch.setattr(srv, "_telegram_adapter_configured", lambda: True)
+
     with (
         patch.object(srv._connector_manager, "start_all_enabled", new_callable=AsyncMock),
         patch.object(srv._connector_manager, "stop", new_callable=AsyncMock),

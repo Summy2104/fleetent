@@ -507,7 +507,7 @@ def _chunk_text(content: str, chunk_size: int, chunk_overlap: int) -> list[str]:
 
 
 def _settings() -> Settings:
-    return Settings(anthropic_api_key="")
+    return Settings()
 
 
 def _kb_config() -> KnowledgeBaseSettings:

@@ -21,11 +21,14 @@
 
 ## 3. 删除 IM tokens、default_agent_name、anthropic_api_key
 
-- [ ] 3.1 Write failing tests: 断言 `Settings` 无 `slack_bot_token`/`slack_app_token`/
+- [x] 3.1 Write failing tests: 断言 `Settings` 无 `slack_bot_token`/`slack_app_token`/
       `telegram_bot_token`/`default_agent_name`/`anthropic_api_key`;`YAML_SECRET_FIELDS` 清空;
       平台 stores 可 `Settings()` 无需传 key。运行见红
-- [ ] 3.2 删除这些字段;`YAML_SECRET_FIELDS` 置空(`SecretRejecting` 源作空集安全网保留);
+- [x] 3.2 删除这些字段;`YAML_SECRET_FIELDS` 置空(`SecretRejecting` 源作空集安全网保留);
       平台 stores 的 `Settings(anthropic_api_key="")` 改为 `Settings()`。运行见绿
+      → `_get_default_agent_name` 读 `agent_config.current().default`;server `/health` adapters 改
+      per-agent connectors(slack)+ owner connector(telegram);owner IM tokens 经 `connector_config`
+      从 env 读取(脱离 Settings)。config_validation 仍 task 5。
 
 ## 4. set-default-agent CLI 作用于 agent.yaml
 

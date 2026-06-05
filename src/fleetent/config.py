@@ -16,14 +16,11 @@ from fleetent import paths
 
 SETTINGS_YAML_PATH = paths.settings_yaml_path()
 MCP_SERVERS_YAML_PATH = paths.config_dir() / "mcp.servers.yaml"
-YAML_SECRET_FIELDS = frozenset(
-    {
-        "anthropic_api_key",
-        "slack_bot_token",
-        "slack_app_token",
-        "telegram_bot_token",
-    }
-)
+# Empty after the config consolidation: the platform Settings carries no secret
+# fields. Kept as a defensive safety net so the YAML source still refuses any known
+# secret field, should one ever be reintroduced. Inline-secret scanning of agent.yaml
+# now lives in platform/config_validation.py.
+YAML_SECRET_FIELDS: frozenset[str] = frozenset()
 
 
 class SecretRejectingYamlSettingsSource(YamlConfigSettingsSource):
@@ -201,12 +198,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", extra="ignore")
 
-    anthropic_api_key: str
-    slack_bot_token: str = ""
-    slack_app_token: str = ""
-    telegram_bot_token: str = ""
     log_format: str = "console"
-    default_agent_name: str | None = None
     database_url: str = Field(
         default_factory=lambda: f"sqlite:///{paths.data_dir() / 'fleetent.db'}"
     )

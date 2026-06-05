@@ -79,7 +79,7 @@ def validate_config(
     scan_resolved_settings: bool = False,
 ) -> ValidationReport:
     """Validate local runtime prerequisites without creating production data."""
-    resolved = settings or Settings(anthropic_api_key="")
+    resolved = settings or Settings()
     items: list[ValidationItem] = []
     items.extend(_runtime_items(resolved, data_dir, config_dir, secrets_dir))
     items.extend(_profile_items(profile, resolved))

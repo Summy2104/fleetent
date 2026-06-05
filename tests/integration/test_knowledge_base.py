@@ -612,7 +612,7 @@ async def test_hybrid_rerank_uses_public_provider_results_to_reorder(monkeypatch
             SearchResult(id=f"{expected_doc.id}:chunk:0", score=0.70),
         ]
 
-    settings = Settings(anthropic_api_key="test-key", rerank=RerankSettings(backend="disabled"))
+    settings = Settings(rerank=RerankSettings(backend="disabled"))
     monkeypatch.setattr(runtime, "_settings", lambda: settings)
     monkeypatch.setattr(runtime.vector_store, "search", vector_search)
     monkeypatch.setattr(
@@ -684,7 +684,7 @@ async def test_hybrid_rerank_provider_failure_returns_original_hybrid_order(
             SearchResult(id=f"{second_doc.id}:chunk:0", score=0.70),
         ]
 
-    monkeypatch.setattr(runtime, "_settings", lambda: Settings(anthropic_api_key="test-key"))
+    monkeypatch.setattr(runtime, "_settings", lambda: Settings())
     monkeypatch.setattr(runtime.vector_store, "search", vector_search)
     baseline = await runtime.search(
         "ZX-888",
