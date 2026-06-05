@@ -37,6 +37,7 @@ from fleetent.platform.im_gateway_management.connector_store import (
 )
 from fleetent.platform.im_gateway_management.identity import (
     DB_PATH,
+    PLATFORM_IDENTITY_FIELDS,
     approve_user,
     block_im_user,
     check_allowed_by_user_id,
@@ -44,16 +45,18 @@ from fleetent.platform.im_gateway_management.identity import (
     disable_im_accounts,
     get_im_user,
     get_or_create,
+    identity_fields,
     list_all,
     list_im_identities,
     list_pending,
     rebind_im_identity,
     restore_im_user,
-    update_im_identity,
+    update_im_identity_metadata,
 )
 
 __all__ = [
     "DB_PATH",
+    "PLATFORM_IDENTITY_FIELDS",
     "ConnectorManager",
     "add_entry",
     "approve_user",
@@ -64,6 +67,7 @@ __all__ = [
     "get_connector",
     "get_im_user",
     "get_or_create",
+    "identity_fields",
     "heartbeat",
     "is_allowed",
     "list_all",
@@ -73,7 +77,7 @@ __all__ = [
     "list_pending",
     "rebind_im_identity",
     "remove_entry",
-    "update_im_identity",
+    "update_im_identity_metadata",
     "report_status",
     "resolve",
     "resolve_masked",

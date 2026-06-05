@@ -191,19 +191,31 @@ def test_im_users_list(client):
     assert any(r["platform_user_id"] == "U_LIST" for r in rows)
 
 
-def test_im_identity_edit_updates_handle(client):
+def test_im_fields_endpoint_lists_per_platform(client):
+    token, _ = _session_for("viewer")  # read-only callers may load the field schema
+    r = client.get("/admin/im-users/fields", headers=_hdr(token))
+    assert r.status_code == 200
+    body = r.json()
+    assert "slack" in body and "telegram" in body and "whatsapp" in body
+    slack_keys = {f["key"] for f in body["slack"]}
+    assert "email" in slack_keys
+    assert "username" not in slack_keys  # telegram-only
+
+
+def test_im_identity_edit_metadata(client):
     token, _ = _session_for("admin")
     user = im_user_store.get_or_create("owner1", "slack", "U_EDIT")
     im_id = im_user_store.list_im_identities(user.id)[0]["id"]
     r = client.patch(
         f"/admin/im-users/{im_id}",
         headers=_hdr(token),
-        json={"platform": "telegram", "platform_user_id": "42"},
+        json={"metadata": {"display_name": "Alice", "email": "a@x.com"}},
     )
     assert r.status_code == 200
     row = im_user_store.get_im_user(im_id)
-    assert row["platform"] == "telegram"
-    assert row["platform_user_id"] == "42"
+    assert row["metadata"] == {"display_name": "Alice", "email": "a@x.com"}
+    # the platform handle is never touched by an edit
+    assert row["platform_user_id"] == "U_EDIT"
 
 
 def test_im_identity_edit_missing_404(client):
@@ -211,22 +223,9 @@ def test_im_identity_edit_missing_404(client):
     r = client.patch(
         "/admin/im-users/999999",
         headers=_hdr(token),
-        json={"platform": "slack", "platform_user_id": "x"},
+        json={"metadata": {"display_name": "x"}},
     )
     assert r.status_code == 404
-
-
-def test_im_identity_edit_conflict_409(client):
-    token, _ = _session_for("admin")
-    a = im_user_store.get_or_create("owner1", "slack", "A1")
-    im_user_store.get_or_create("owner1", "slack", "B1")
-    a_id = im_user_store.list_im_identities(a.id)[0]["id"]
-    r = client.patch(
-        f"/admin/im-users/{a_id}",
-        headers=_hdr(token),
-        json={"platform": "slack", "platform_user_id": "B1"},
-    )
-    assert r.status_code == 409
 
 
 def test_im_identity_delete(client):
@@ -252,7 +251,7 @@ def test_im_identity_edit_and_delete_require_admin(client):
         client.patch(
             f"/admin/im-users/{im_id}",
             headers=_hdr(token),
-            json={"platform": "slack", "platform_user_id": "z"},
+            json={"metadata": {"display_name": "z"}},
         ).status_code
         == 403
     )
