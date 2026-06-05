@@ -122,7 +122,7 @@ class LayeredBudgetConfig:
     def from_settings(cls, settings: object | None = None) -> LayeredBudgetConfig:
         from fleetent.config import Settings
 
-        s = settings if settings is not None else Settings()
+        s = settings if settings is not None else Settings()  # type: ignore[call-arg]
         per: dict[BudgetScope, ScopeBudget] = {}
         for scope in CROSS_RUN_SCOPES:
             name = scope.value

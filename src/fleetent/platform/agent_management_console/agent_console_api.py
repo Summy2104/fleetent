@@ -56,9 +56,20 @@ def create_agent_def(
     template_id: str | None = None,
     plugins: list[str] | None = None,
     features: dict[str, Any] | None = None,
+    icon: str | None = None,
 ) -> None:
     """Create a new agent definition (no bindings). Bridges agent_store.create_agent."""
     return None
+
+
+def set_agent_icon(name: str, icon: str | None) -> None:
+    """Set an agent's avatar emoji (agent-level). Bridges agent_store.set_icon."""
+    return None
+
+
+def agent_icons() -> dict[str, str]:
+    """Map of agent name -> icon. Bridges agent_store.icons_by_name (for the list view)."""
+    return {}
 
 
 def update_agent_def(
@@ -147,6 +158,7 @@ class CreateBody(BaseModel):
     mcp_server_ids: list[str] | None = None
     model_overrides: dict[str, Any] = {}
     memory_namespace: str = "default"
+    icon: str | None = None
     # Optional raw capabilities block (allowed_tools/plugins/features) pasted as YAML;
     # parsed server-side and, when present, overrides the structured fields above.
     capabilities_yaml: str | None = None
@@ -159,6 +171,7 @@ class UpdateBody(BaseModel):
     mcp_server_ids: list[str] | None = None
     model_overrides: dict[str, Any] | None = None
     memory_namespace: str | None = None
+    icon: str | None = None
 
 
 # --- templates (literal path before /{name}) ----------------------------------
@@ -235,7 +248,15 @@ def list_agents(
     include_archived: bool = False, authorization: str | None = Header(None)
 ) -> list[dict[str, Any]]:
     _current_user(authorization)
-    return agent_admin_store.list_states(include_archived=include_archived)
+    rows = agent_admin_store.list_states(include_archived=include_archived)
+    # Icon enrichment is cosmetic — never let it break the list if the lookup fails.
+    try:
+        icons = agent_icons()
+    except Exception:  # noqa: BLE001 — best-effort avatar lookup
+        icons = {}
+    for r in rows:
+        r["icon"] = icons.get(str(r.get("agent_name") or ""))
+    return rows
 
 
 @router.get("/agents/{name}/observability")
@@ -267,6 +288,7 @@ def _def_response(name: str) -> dict[str, Any]:
         out["model_overrides"] = agent.get("model_overrides", {})
         out["memory_namespace"] = agent.get("memory_namespace", "default")
         out["template_id"] = agent.get("template_id")
+        out["icon"] = agent.get("icon")
     return out
 
 
@@ -310,6 +332,7 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
         body.template_id,
         plugins=plugins,
         features=features,
+        icon=body.icon,
     )
     agent_admin_store.set_provenance(body.name, "adhoc")
     agent_admin_store.enable(body.name)
@@ -342,6 +365,8 @@ def update_agent(
         body.model_overrides,
         body.memory_namespace,
     )
+    if body.icon is not None:
+        set_agent_icon(name, body.icon)
     agent_admin_store.mark_drift(name)  # no-op unless provenance is managed
     audit_log.write_audit(user.id, "agent.update", "agent", name)
     return _def_response(name)

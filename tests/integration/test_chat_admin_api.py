@@ -128,8 +128,9 @@ def test_playground_message_rejects_non_playground(client, monkeypatch):
     monkeypatch.setattr(api, "run_playground", lambda *a: {"reply": "", "events": []})
     store.upsert_meta("real-1", origin="web")
     token, _ = _session_for("admin")
+    # a non-playground (or non-owned) session is not reachable via the chat endpoint
     r = client.post("/admin/chat/real-1/message", headers=_hdr(token), json={"message": "hi"})
-    assert r.status_code == 409
+    assert r.status_code == 404
 
 
 def test_playground_bypass_audited(client, monkeypatch):  # 场景 99
@@ -243,7 +244,10 @@ def test_viewer_read_only(client):  # 场景 102
 
 def test_export_audited(client):
     token, _ = _session_for("admin")
-    r = client.get("/admin/chat/s1/export", headers=_hdr(token))
+    sid = client.post("/admin/chat/start", headers=_hdr(token), json={"agent_name": "ops"}).json()[
+        "session_id"
+    ]
+    r = client.get(f"/admin/chat/{sid}/export", headers=_hdr(token))
     assert r.status_code == 200
     assert any(a["action"] == "session_export" for a in audit.search_audit())
 
@@ -251,10 +255,13 @@ def test_export_audited(client):
 def test_export_markdown_format(client, monkeypatch):  # 场景 101 (Markdown 导出)
     monkeypatch.setattr(api, "load_transcript", lambda sid: [{"role": "user", "content": "hi"}])
     token, _ = _session_for("admin")
-    r = client.get("/admin/chat/s1/export?fmt=markdown", headers=_hdr(token))
+    sid = client.post("/admin/chat/start", headers=_hdr(token), json={"agent_name": "ops"}).json()[
+        "session_id"
+    ]
+    r = client.get(f"/admin/chat/{sid}/export?fmt=markdown", headers=_hdr(token))
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/markdown")
-    assert "# Session s1" in r.text
+    assert f"# Session {sid}" in r.text
     assert any(a["action"] == "session_export" for a in audit.search_audit())
 
 
@@ -306,3 +313,61 @@ def test_playground_stream_sse(client, monkeypatch):  # 场景 98 (SSE 流式)
     assert r.headers["content-type"].startswith("text/event-stream")
     assert "data:" in r.text
     assert "llo" in r.text
+
+
+# --- per-user chat session history (chat-session-history) ---------------------
+
+
+def test_chat_start_records_owner(client):
+    token, uid = _session_for("admin")
+    sid = client.post("/admin/chat/start", headers=_hdr(token), json={"agent_name": "ops"}).json()[
+        "session_id"
+    ]
+    assert store.get_meta(sid)["user_id"] == uid
+
+
+def test_chat_sessions_listed_per_user(client):
+    ta, ua = _session_for("admin")
+    tb, ub = _session_for("admin")
+    sa = client.post("/admin/chat/start", headers=_hdr(ta), json={"agent_name": "ops"}).json()[
+        "session_id"
+    ]
+    sb = client.post("/admin/chat/start", headers=_hdr(tb), json={"agent_name": "qa"}).json()[
+        "session_id"
+    ]
+    mine_a = {s["session_id"] for s in client.get("/admin/chat/sessions", headers=_hdr(ta)).json()}
+    mine_b = {s["session_id"] for s in client.get("/admin/chat/sessions", headers=_hdr(tb)).json()}
+    assert sa in mine_a and sb not in mine_a
+    assert sb in mine_b and sa not in mine_b
+
+
+def test_chat_cross_user_access_denied(client, monkeypatch):
+    monkeypatch.setattr(api, "run_playground", lambda *a: {"reply": "", "events": []})
+    ta, _ = _session_for("admin")
+    tb, _ = _session_for("admin")
+    sa = client.post("/admin/chat/start", headers=_hdr(ta), json={"agent_name": "ops"}).json()[
+        "session_id"
+    ]
+    # another operator cannot message or export someone else's playground session
+    assert client.post(
+        f"/admin/chat/{sa}/message", headers=_hdr(tb), json={"message": "hi"}
+    ).status_code == 404
+    assert client.get(f"/admin/chat/{sa}/export", headers=_hdr(tb)).status_code == 404
+    # owner still can
+    assert client.post(
+        f"/admin/chat/{sa}/message", headers=_hdr(ta), json={"message": "hi"}
+    ).status_code == 200
+
+
+def test_chat_delete_own_session(client):
+    ta, _ = _session_for("admin")
+    tb, _ = _session_for("admin")
+    sa = client.post("/admin/chat/start", headers=_hdr(ta), json={"agent_name": "ops"}).json()[
+        "session_id"
+    ]
+    # non-owner cannot delete
+    assert client.delete(f"/admin/chat/{sa}", headers=_hdr(tb)).status_code == 404
+    # owner deletes -> gone from their list
+    assert client.delete(f"/admin/chat/{sa}", headers=_hdr(ta)).status_code in (200, 204)
+    mine = {s["session_id"] for s in client.get("/admin/chat/sessions", headers=_hdr(ta)).json()}
+    assert sa not in mine

@@ -621,7 +621,11 @@ def _google_drive_files_from_json(raw_files: list[object]) -> list[GoogleDriveFi
         name = raw_file.get("name")
         mime_type = raw_file.get("mimeType")
         modified_time = raw_file.get("modifiedTime")
-        if not all(isinstance(value, str) and value for value in (file_id, name, mime_type)):
+        if not isinstance(file_id, str) or not file_id:
+            raise RuntimeError("Google Drive file metadata is malformed")
+        if not isinstance(name, str) or not name:
+            raise RuntimeError("Google Drive file metadata is malformed")
+        if not isinstance(mime_type, str) or not mime_type:
             raise RuntimeError("Google Drive file metadata is malformed")
         if not isinstance(modified_time, str) or not modified_time:
             raise RuntimeError("Google Drive file metadata is malformed")

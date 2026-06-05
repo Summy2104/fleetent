@@ -401,9 +401,7 @@ def test_update_user_edits_name_and_email(client):
 def test_update_user_partial_name_only(client):
     token, _ = _session_for("admin")
     target = user_store.create_user("keep-mail", email="keep@x.io")
-    r = client.patch(
-        f"/admin/users/{target.id}", json={"name": "renamed"}, headers=_hdr(token)
-    )
+    r = client.patch(f"/admin/users/{target.id}", json={"name": "renamed"}, headers=_hdr(token))
     assert r.status_code == 200
     refreshed = user_store.get_by_id(target.id)
     assert refreshed.name == "renamed" and refreshed.email == "keep@x.io"
@@ -418,9 +416,7 @@ def test_update_user_unknown_404(client):
 def test_update_user_viewer_forbidden(client):
     token, _ = _session_for("viewer")
     target = user_store.create_user("victim")
-    r = client.patch(
-        f"/admin/users/{target.id}", json={"name": "x"}, headers=_hdr(token)
-    )
+    r = client.patch(f"/admin/users/{target.id}", json={"name": "x"}, headers=_hdr(token))
     assert r.status_code == 403
 
 
@@ -428,7 +424,5 @@ def test_update_user_email_conflict_409(client):
     token, _ = _session_for("admin")
     user_store.create_user("a", email="taken@x.io")
     target = user_store.create_user("b", email="b@x.io")
-    r = client.patch(
-        f"/admin/users/{target.id}", json={"email": "taken@x.io"}, headers=_hdr(token)
-    )
+    r = client.patch(f"/admin/users/{target.id}", json={"email": "taken@x.io"}, headers=_hdr(token))
     assert r.status_code == 409

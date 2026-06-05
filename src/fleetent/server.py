@@ -240,6 +240,7 @@ def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:
         "model_overrides": agent.model_overrides,
         "memory_namespace": agent.memory_namespace,
         "template_id": agent.template_id,
+        "icon": agent.icon,
     }
 
 
@@ -263,6 +264,7 @@ def wire_agent_store_seams() -> None:
         template_id: str | None = None,
         plugins: list[str] | None = None,
         features: dict[str, Any] | None = None,
+        icon: str | None = None,
     ) -> None:
         agent_store.create_agent(
             name,
@@ -275,6 +277,7 @@ def wire_agent_store_seams() -> None:
             model_overrides=model_overrides,
             memory_namespace=memory_namespace,
             template_id=template_id,
+            icon=icon,
         )
         # platform-agent-lifecycle: materialize the runnable home on create.
         materialize.materialize_from_store(name)
@@ -321,6 +324,8 @@ def wire_agent_store_seams() -> None:
     agent_console_api.create_agent_def = _console_create
     agent_console_api.update_agent_def = _console_update
     agent_console_api.delete_agent_def = _console_delete
+    agent_console_api.set_agent_icon = agent_store.set_icon
+    agent_console_api.agent_icons = agent_store.icons_by_name
 
     agent_apply_api.get_agent_def = _get_def
     agent_apply_api.create_agent_def = _apply_create
@@ -399,7 +404,7 @@ async def _authenticate(authorization: str = Header()) -> tuple[user_store.User,
 
 @app.get("/health")
 async def health(request: Request) -> dict:  # type: ignore[type-arg]
-    settings = Settings()
+    settings = Settings()  # type: ignore[call-arg]
     # SB3: surface the effective sandbox mode resolved at startup; default to off
     # when the state is somehow unset (e.g. lifespan not run) so we never crash.
     mode: Mode = getattr(request.app.state, "sandbox_mode", Mode.OFF)

@@ -647,7 +647,8 @@ def test_chat_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> Non
         chat_admin_api.playground_message(
             "web-1", chat_admin_api.MessageBody(message="hi"), "Session token"
         )
-    assert not_playground.value.status_code == 409
+    # per-user isolation: a non-playground (or non-owned) session is not found, not 409
+    assert not_playground.value.status_code == 404
     with pytest.raises(HTTPException) as missing_confirm:
         chat_admin_api.force_end("web-1", "Session token")
     assert missing_confirm.value.status_code == 428
@@ -1159,7 +1160,7 @@ def test_server_helpers_cover_admin_url_jobs_and_auth(
     purged: list[str] = []
     monkeypatch.delenv("DATABASE_URL", raising=False)
     server._run_playground_retention()
-    monkeypatch.setenv("DATABASE_URL", "sqlite:///tmp.db")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/fleetent")
     monkeypatch.setattr(
         server.chat_admin_api, "purge_expired_playground", lambda: purged.append("purge")
     )
@@ -1168,7 +1169,7 @@ def test_server_helpers_cover_admin_url_jobs_and_auth(
 
     monkeypatch.delenv("DATABASE_URL", raising=False)
     assert server.agent_routing_status("ops") == "enabled"
-    monkeypatch.setenv("DATABASE_URL", "sqlite:///tmp.db")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/fleetent")
     from fleetent.platform.agent_management_console import agent_admin_store
 
     monkeypatch.setattr(agent_admin_store, "get_state", lambda agent_name: {"status": "disabled"})

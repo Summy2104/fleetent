@@ -276,7 +276,7 @@ def _resolve_disabled_skills(disabled_skills: list[str] | None) -> set[str]:
         return set(disabled_skills)
     from fleetent.config import Settings
 
-    return set(Settings().disabled_skills)
+    return set(Settings().disabled_skills)  # type: ignore[call-arg]
 
 
 def _disabled_reason(name: str, entry: SkillEntry, disabled: set[str]) -> str | None:

@@ -136,7 +136,7 @@ def _resolve_budget_config(
         return BudgetConfig(max_turns=mt, max_tokens=max_tokens)
     from fleetent.config import Settings
 
-    s = Settings()
+    s = Settings()  # type: ignore[call-arg]
     return BudgetConfig(max_turns=mt, max_tokens=s.agent_max_tokens)
 
 
@@ -149,7 +149,7 @@ def _resolve_loop_config(
         return repeat_threshold, ignore_arg_keys
     from fleetent.config import Settings
 
-    s = Settings()
+    s = Settings()  # type: ignore[call-arg]
     return (
         repeat_threshold if repeat_threshold is not None else s.agent_loop_repeat_threshold,
         ignore_arg_keys if ignore_arg_keys is not None else list(s.loop_detect_ignore_arg_keys),
@@ -162,21 +162,21 @@ def _resolve_guardrail_threshold(guardrail_repeat_threshold: int | None) -> int:
         return guardrail_repeat_threshold
     from fleetent.config import Settings
 
-    return Settings().guardrail_repeat_threshold
+    return Settings().guardrail_repeat_threshold  # type: ignore[call-arg]
 
 
 def _resolve_parallel_max() -> int:
     """Resolve the AR3 single-round tool concurrency cap from Settings (D7)."""
     from fleetent.config import Settings
 
-    return Settings().agent_tool_parallel_max
+    return Settings().agent_tool_parallel_max  # type: ignore[call-arg]
 
 
 def _resolve_default_tool_timeout() -> float:
     """Global default per-tool timeout from Settings (T2), resolved once per run."""
     from fleetent.config import Settings
 
-    return Settings().tool_default_timeout_seconds
+    return Settings().tool_default_timeout_seconds  # type: ignore[call-arg]
 
 
 def _agent_bound_to_server(server_id: str, allowed_tools: list[str] | None) -> bool:
@@ -393,8 +393,8 @@ async def _safe_dispatch(
             user_id=user_id,
         )
         if inspect.iscoroutine(result):
-            result = await asyncio.wait_for(result, timeout=timeout)
-        return result, False
+            return await asyncio.wait_for(result, timeout=timeout), False
+        return cast(str, result), False
     except TimeoutError:  # asyncio.wait_for timeout → tool_timeout (AR5 reserved code)
         child.cancel()
         return f"tool execution timed out after {timeout}s", True
@@ -710,8 +710,8 @@ async def _call_with_fallback(
         try:
             resp = await client.chat.completions.create(
                 model=model,
-                messages=messages,  # type: ignore[arg-type]
-                tools=schemas,  # type: ignore[arg-type]
+                messages=messages,
+                tools=schemas,
                 max_tokens=cfg.max_tokens,
                 **cfg.params,
             )
@@ -797,8 +797,8 @@ async def _stream_with_fallback(
         try:
             stream = await client.chat.completions.create(
                 model=model,
-                messages=messages,  # type: ignore[arg-type]
-                tools=schemas,  # type: ignore[arg-type]
+                messages=messages,
+                tools=schemas,
                 max_tokens=cfg.max_tokens,
                 stream=True,
                 stream_options={"include_usage": True},

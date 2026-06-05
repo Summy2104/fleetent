@@ -76,7 +76,7 @@ def resolve_timeout(timeout_seconds: int | None = None, config: int | None = Non
         return config
     from fleetent.config import Settings
 
-    return Settings().sub_agent_timeout_seconds
+    return Settings().sub_agent_timeout_seconds  # type: ignore[call-arg]
 
 
 def _conn() -> sqlite3.Connection:

@@ -66,7 +66,15 @@ def add_provider(
         )
 
 
-_EDITABLE = {"description", "base_url", "model", "max_tokens", "temperature", "extra_params", "api_key"}
+_EDITABLE = {
+    "description",
+    "base_url",
+    "model",
+    "max_tokens",
+    "temperature",
+    "extra_params",
+    "api_key",
+}
 
 
 def edit_provider(provider_id: str, **fields: Any) -> None:

@@ -6,7 +6,7 @@ import argparse
 import asyncio
 import os
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fleetent.platform.admin_cli.common import sanitize_cli_value, summary_line
 
@@ -107,7 +107,7 @@ def _handle_connectors(args: argparse.Namespace) -> None:
             print(f"error={sanitize_cli_value(sync_result.error)}")
 
 
-def _execute_sync_allowed(operations, args: argparse.Namespace) -> bool:
+def _execute_sync_allowed(operations: Any, args: argparse.Namespace) -> bool:
     if not args.yes:
         print(
             "connector execute sync requires --yes; run dry-run first: "

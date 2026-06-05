@@ -168,12 +168,45 @@ class BulkBody(BaseModel):
 # --- playground ---------------------------------------------------------------
 
 
+def _require_own_playground(session_id: str, user: user_store.User) -> dict[str, Any]:
+    """Resolve a playground session that belongs to this operator, else 404.
+
+    Playground chat history is per-operator: only the user who started a session
+    may message/export/delete it.
+    """
+    meta = session_admin_store.get_meta(session_id)
+    if meta.get("origin") != "playground" or meta.get("user_id") != user.id:
+        raise HTTPException(status_code=404, detail="playground session not found")
+    return meta
+
+
 @router.post("/chat/start")
 def playground_start(body: StartBody, authorization: str | None = Header(None)) -> dict[str, Any]:
-    _require_admin(authorization)
+    user = _require_admin(authorization)
     session_id = f"pg-{uuid.uuid4().hex[:12]}"
-    session_admin_store.upsert_meta(session_id, origin="playground", agent_name=body.agent_name)
+    session_admin_store.upsert_meta(
+        session_id, origin="playground", agent_name=body.agent_name, user_id=user.id
+    )
     return {"session_id": session_id, "origin": "playground", "agent_name": body.agent_name}
+
+
+@router.get("/chat/sessions")
+def list_playground_sessions(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
+    """The current operator's playground sessions (most recent first), isolated per user."""
+    user = _require_admin(authorization)
+    rows = session_admin_store.list_meta(user_id=user.id, include_playground=True)
+    return [r for r in rows if r.get("origin") == "playground"]
+
+
+@router.delete("/chat/{session_id}", status_code=204)
+def delete_playground_session(
+    session_id: str, authorization: str | None = Header(None)
+) -> None:
+    user = _require_admin(authorization)
+    _require_own_playground(session_id, user)
+    clear_session(session_id)
+    session_admin_store.delete_meta(session_id)
+    audit_log.write_audit(user.id, "playground_delete", "session", session_id)
 
 
 @router.post("/chat/{session_id}/message")
@@ -181,9 +214,7 @@ def playground_message(
     session_id: str, body: MessageBody, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
-    meta = session_admin_store.get_meta(session_id)
-    if meta["origin"] != "playground":
-        raise HTTPException(status_code=409, detail="not a playground session")
+    meta = _require_own_playground(session_id, user)
     bypass = body.auto_approve_medium  # only honored for playground sessions
     if bypass:
         audit_log.write_audit(user.id, "playground_bypass_medium", "session", session_id)
@@ -196,9 +227,7 @@ def playground_stream(
     session_id: str, body: MessageBody, authorization: str | None = Header(None)
 ) -> StreamingResponse:
     user = _require_admin(authorization)
-    meta = session_admin_store.get_meta(session_id)
-    if meta["origin"] != "playground":
-        raise HTTPException(status_code=409, detail="not a playground session")
+    meta = _require_own_playground(session_id, user)
     bypass = body.auto_approve_medium
     if bypass:
         audit_log.write_audit(user.id, "playground_bypass_medium", "session", session_id)
@@ -217,6 +246,7 @@ def playground_pin(
     session_id: str, body: PinBody, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
+    _require_own_playground(session_id, user)
     session_admin_store.set_pinned(session_id, True, note=body.note)
     audit_log.write_audit(user.id, "playground_pin", "session", session_id)
     return {"session_id": session_id, "pinned": True}
@@ -227,6 +257,7 @@ def playground_export(
     session_id: str, fmt: str = "json", authorization: str | None = Header(None)
 ) -> Any:
     user = _require_admin(authorization)
+    _require_own_playground(session_id, user)
     transcript = load_transcript(session_id)
     audit_log.write_audit(user.id, "session_export", "session", session_id, detail={"fmt": fmt})
     if fmt == "markdown":

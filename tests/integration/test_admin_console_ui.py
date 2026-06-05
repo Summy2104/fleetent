@@ -1128,7 +1128,29 @@ def test_distinct_block_semantics_labels():
 def _section(html, tab):
     start = html.index(f'<section id="tab-{tab}"')
     nxt = html.find('<section id="tab-', start + 10)
-    return html[start: nxt if nxt > 0 else start + 8000]
+    return html[start : nxt if nxt > 0 else start + 8000]
+
+
+def test_agent_icon_picker_present():
+    html = ADMIN_HTML
+    assert 'id="ag-icon"' in html and 'id="ag-icon-palette"' in html
+    assert "function agSetIcon" in html and "function agRenderIconPalette" in html
+    # save sends icon; card renders the chosen icon
+    save = html.split("function agSave", 1)[1].split("function agDelete", 1)[0]
+    assert "icon" in save
+    card = html.split("function agentCardHtml", 1)[1].split("function ", 2)[0]
+    assert "a.icon" in card
+
+
+def test_chat_session_history_present():
+    html = ADMIN_HTML
+    # per-user session history sidebar in the chat module
+    assert 'id="chat-history-list"' in html
+    assert "function chatLoadHistory" in html
+    assert "function chatOpen" in html and "function chatDelete" in html
+    assert 'api("GET", "/chat/sessions")' in html
+    # delete + open hit the per-session endpoints
+    assert "/chat/${encodeURIComponent(sid)}" in html
 
 
 def test_api_helper_retries_on_network_failure():
@@ -1143,8 +1165,12 @@ def test_api_helper_retries_on_network_failure():
 def test_legacy_modules_have_search_in_page_header():
     html = ADMIN_HTML
     # each legacy list module fills its .ph-filter slot with a search input
-    for tab, fid in [("kb", "kb-filter"), ("sessions", "sess-filter"),
-                     ("monitoring", "mon-filter"), ("stats", "st-filter")]:
+    for tab, fid in [
+        ("kb", "kb-filter"),
+        ("sessions", "sess-filter"),
+        ("monitoring", "mon-filter"),
+        ("stats", "st-filter"),
+    ]:
         sec = _section(html, tab)
         filt = sec.split('class="ph-filter"', 1)[1].split("</div>", 1)[0]
         assert f'id="{fid}"' in filt, f"{tab}: search input missing from .ph-filter"
@@ -1153,10 +1179,12 @@ def test_legacy_modules_have_search_in_page_header():
 def test_legacy_module_search_filters_rows():
     html = ADMIN_HTML
     # render/filter functions reference their search value, so typing narrows rows
-    for fid, fn in [("kb-filter", "function renderKb"),
-                    ("sess-filter", "function renderSessions"),
-                    ("mon-filter", "function renderMonAlerts"),
-                    ("st-filter", "function renderStatsRows")]:
+    for fid, fn in [
+        ("kb-filter", "function renderKb"),
+        ("sess-filter", "function renderSessions"),
+        ("mon-filter", "function renderMonAlerts"),
+        ("st-filter", "function renderStatsRows"),
+    ]:
         assert fn in html, f"missing render fn {fn}"
         body = html.split(fn, 1)[1][:1400]
         assert fid in body, f"{fn} does not consult #{fid}"

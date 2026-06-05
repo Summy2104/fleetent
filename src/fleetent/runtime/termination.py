@@ -25,7 +25,7 @@ def _default_config() -> LimitConfig:
     mirrors context_mgr._default_config to keep this module import-light."""
     from fleetent.config import Settings
 
-    s = Settings()
+    s = Settings()  # type: ignore[call-arg]
     return {
         "max_turns": s.agent_max_turns,
         "max_consecutive_failures": s.agent_max_consecutive_failures,

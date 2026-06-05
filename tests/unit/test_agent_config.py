@@ -140,9 +140,7 @@ def test_agent_file_accepts_typed_intelligence_config() -> None:
     assert af.knowledge_base.google_drive.connectors[0].client_secret_env == (
         "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET"
     )
-    assert af.knowledge_base.confluence.connectors[0].api_token_env == (
-        "FLEETENT_CONFLUENCE_TOKEN"
-    )
+    assert af.knowledge_base.confluence.connectors[0].api_token_env == ("FLEETENT_CONFLUENCE_TOKEN")
     assert af.long_term_ctx.conflict_preference == "auto"
 
 

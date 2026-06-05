@@ -54,7 +54,7 @@ async def generate(
     a url instead, fetches the bytes from that in-network url. Any failure is
     raised as ImageGenError for the caller to normalize.
     """
-    settings = settings or Settings()
+    settings = settings or Settings()  # type: ignore[call-arg]
     if not settings.image_gen_url:
         raise ImageGenError("image generation endpoint not configured (image_gen_url is empty)")
 
