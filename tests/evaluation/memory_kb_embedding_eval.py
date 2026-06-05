@@ -168,16 +168,16 @@ async def _run_fixture(
 
     apply_migrations(db_path)
     database_url = f"sqlite:///{db_path}"
+    kb_settings = KnowledgeBaseSettings(
+        enabled=True,
+        chunk_size=120,
+        chunk_overlap=0,
+    )
     agent = _agent_for_embedding(
         embedding,
         vector_store=VectorStoreSettings(
             backend="sqlite",
             database_url=f"sqlite:///{vector_db_path}",
-        ),
-        knowledge_base=KnowledgeBaseSettings(
-            enabled=True,
-            chunk_size=120,
-            chunk_overlap=0,
         ),
     )
     settings = Settings(database_url=database_url)
@@ -186,6 +186,7 @@ async def _run_fixture(
     monkeypatch.setattr(agent_config, "active_agent_or_default", lambda: agent)
     monkeypatch.setattr(kb_runtime, "_settings", lambda: settings)
     monkeypatch.setattr(kb_runtime, "_database", lambda: database)
+    monkeypatch.setattr(kb_runtime, "_kb_config", lambda: kb_settings)
     vector_runtime._configure(agent)
 
     try:
@@ -228,7 +229,6 @@ def _agent_for_embedding(
     embedding: EmbeddingSettings,
     *,
     vector_store: VectorStoreSettings,
-    knowledge_base: KnowledgeBaseSettings,
 ) -> AgentFile:
     if embedding.backend == "deterministic":
         return AgentFile(
@@ -236,7 +236,6 @@ def _agent_for_embedding(
             version=0,
             models=default_models(),
             vector_store=vector_store,
-            knowledge_base=knowledge_base,
         )
     if embedding.backend == "http":
         return AgentFile(
@@ -257,7 +256,6 @@ def _agent_for_embedding(
                 routes={"embedding": [ModelRouteEntry(target="embedding")]},
             ),
             vector_store=vector_store,
-            knowledge_base=knowledge_base,
         )
     raise FixtureValidationError(f"unsupported embedding backend: {embedding.backend}")
 

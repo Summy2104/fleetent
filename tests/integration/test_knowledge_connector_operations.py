@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from fleetent.agent_config import AgentFile, default_models
 from fleetent.db import create_database
+from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -17,13 +17,24 @@ def _patch_operations_database(monkeypatch, tmp_path):
     return database
 
 
-def _settings(**knowledge_base: object) -> AgentFile:
-    return AgentFile(
-        name="t",
-        version=1,
-        models=default_models(),
-        knowledge_base=knowledge_base,
-    )
+def _settings(**knowledge_base: object) -> KnowledgeConfigSnapshot:
+    knowledge_bases: list[dict[str, object]] = []
+    for source_type, block in knowledge_base.items():
+        connectors = block.get("connectors", [])  # type: ignore[union-attr]
+        for item in connectors:  # type: ignore[union-attr]
+            source = dict(item)
+            source["id"] = source.pop("connector_id")
+            source["type"] = source_type
+            tenant_id = str(source.pop("tenant_id"))
+            kb_id = str(source.pop("kb_id"))
+            knowledge_bases.append(
+                {
+                    "id": kb_id,
+                    "tenant_id": tenant_id,
+                    "sources": [source],
+                }
+            )
+    return KnowledgeConfigSnapshot.model_validate({"knowledge_bases": knowledge_bases})
 
 
 def test_never_run_connector_status_is_stable(monkeypatch, tmp_path):

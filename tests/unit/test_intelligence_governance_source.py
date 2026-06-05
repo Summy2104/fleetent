@@ -1,6 +1,6 @@
 """Intelligence config resolves from the active agent (runtime-read-agent-config).
 
-Standalone single-agent processes read long_term_ctx / KB config from the active agent;
+Standalone single-agent processes read long_term_ctx config from the active agent;
 multi-agent / no-agent indexes fall back to a neutral default agent's schema defaults.
 """
 
@@ -39,21 +39,7 @@ def test_ltc_config_falls_back_to_default_without_agent() -> None:
     assert cfg.max_tokens == 2048  # LongTermContextSettings default
 
 
-def test_kb_config_from_active_agent() -> None:
-    from fleetent.config import KnowledgeBaseSettings
-    from fleetent.intelligence.knowledge_base import runtime as kb_runtime
-
-    agent = AgentFile(
-        name="a",
-        version=1,
-        models=default_models(),
-        knowledge_base=KnowledgeBaseSettings(default_kb_id="team-kb"),
-    )
-    _publish_single(agent)
-    assert kb_runtime._kb_config().default_kb_id == "team-kb"
-
-
-def test_kb_config_falls_back_without_agent() -> None:
+def test_kb_runtime_config_is_neutral_without_agent_source_construction() -> None:
     from fleetent.intelligence.knowledge_base import runtime as kb_runtime
 
     _publish_empty()

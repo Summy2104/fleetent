@@ -4,11 +4,27 @@ from dataclasses import dataclass
 
 import pytest
 
-from fleetent.agent_config import AgentFile, default_models
+from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
 
 
-def _settings(**knowledge_base: object) -> AgentFile:
-    return AgentFile(name="t", version=1, models=default_models(), knowledge_base=knowledge_base)
+def _settings(**knowledge_base: object) -> KnowledgeConfigSnapshot:
+    knowledge_bases: list[dict[str, object]] = []
+    for source_type, block in knowledge_base.items():
+        connectors = block.get("connectors", [])  # type: ignore[union-attr]
+        for item in connectors:  # type: ignore[union-attr]
+            source = dict(item)
+            source["id"] = source.pop("connector_id")
+            source["type"] = source_type
+            tenant_id = str(source.pop("tenant_id"))
+            kb_id = str(source.pop("kb_id"))
+            knowledge_bases.append(
+                {
+                    "id": kb_id,
+                    "tenant_id": tenant_id,
+                    "sources": [source],
+                }
+            )
+    return KnowledgeConfigSnapshot.model_validate({"knowledge_bases": knowledge_bases})
 
 
 def test_google_drive_connectors_load_from_settings():
@@ -73,6 +89,33 @@ def test_google_drive_connectors_load_explicit_env_fields_from_settings():
     assert definition.config.access_token_env == "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN"
     assert definition.config.client_secret_env == "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET"
     assert definition.config.token_uri_env == ""
+
+
+def test_connectors_load_from_default_knowledge_yaml(tmp_path, monkeypatch):
+    from fleetent.intelligence.knowledge_base import list_configured_connectors
+
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "knowledge.yaml").write_text(
+        """
+knowledge_bases:
+  - id: engineering
+    tenant_id: default
+    sources:
+      - id: eng-drive
+        type: google_drive
+        folder_id: folder-1
+        credential_ref: file:///secure/google.json
+""",
+        encoding="utf-8",
+    )
+
+    connectors = list_configured_connectors()
+
+    assert [(item.connector_id, item.tenant_id, item.kb_id) for item in connectors] == [
+        ("eng-drive", "default", "engineering")
+    ]
 
 
 def test_confluence_connectors_load_from_settings():
@@ -206,57 +249,53 @@ async def test_confluence_connector_username_can_load_from_env(monkeypatch):
 
 
 def test_duplicate_connector_ids_fail_fast():
-    from fleetent.intelligence.knowledge_base import list_configured_connectors
-
-    settings = _settings(
-        google_drive={
-            "connectors": [
-                {
-                    "connector_id": "same",
-                    "tenant_id": "default",
-                    "kb_id": "kb-a",
-                    "folder_id": "folder-1",
-                    "credential_ref": "file:///secure/google.json",
-                }
-            ]
-        },
-        confluence={
-            "connectors": [
-                {
-                    "connector_id": "same",
-                    "tenant_id": "default",
-                    "kb_id": "kb-b",
-                    "base_url": "https://example.atlassian.net/wiki",
-                    "username": "bot@example.com",
-                    "space_key": "ENG",
-                    "credential_ref": "env:FLEETENT_CONFLUENCE_TOKEN",
-                }
-            ]
-        },
-    )
-
-    with pytest.raises(ValueError, match="duplicate connector_id: same"):
-        list_configured_connectors(settings=settings)
+    with pytest.raises(ValueError, match="duplicate source id: same"):
+        _settings(
+            google_drive={
+                "connectors": [
+                    {
+                        "connector_id": "same",
+                        "tenant_id": "default",
+                        "kb_id": "kb-a",
+                        "folder_id": "folder-1",
+                        "credential_ref": "file:///secure/google.json",
+                    }
+                ]
+            },
+            confluence={
+                "connectors": [
+                    {
+                        "connector_id": "same",
+                        "tenant_id": "default",
+                        "kb_id": "kb-b",
+                        "base_url": "https://example.atlassian.net/wiki",
+                        "username": "bot@example.com",
+                        "space_key": "ENG",
+                        "credential_ref": "env:FLEETENT_CONFLUENCE_TOKEN",
+                    }
+                ]
+            },
+        )
 
 
 def test_missing_required_connector_field_mentions_field_name():
     with pytest.raises(Exception, match="folder_id"):
-        AgentFile(
-            name="t",
-            version=1,
-            models=default_models(),
-            knowledge_base={
-                "google_drive": {
-                    "connectors": [
-                        {
-                            "connector_id": "broken",
-                            "tenant_id": "default",
-                            "kb_id": "engineering",
-                            "credential_ref": "file:///secure/google.json",
-                        }
-                    ]
-                }
-            },
+        KnowledgeConfigSnapshot.model_validate(
+            {
+                "knowledge_bases": [
+                    {
+                        "id": "engineering",
+                        "tenant_id": "default",
+                        "sources": [
+                            {
+                                "id": "broken",
+                                "type": "google_drive",
+                                "credential_ref": "file:///secure/google.json",
+                            }
+                        ],
+                    }
+                ]
+            }
         )
 
 

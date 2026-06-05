@@ -14,6 +14,8 @@ import yaml
 
 from fleetent import agent_store, paths
 from fleetent.agent_config import AGENT_FILE_NAME, AgentFile, default_models
+from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
+from fleetent.platform.config_validation import _flatten
 
 
 def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
@@ -40,7 +42,10 @@ def home_dir(name: str) -> Path:
     return paths.base_dir() / name
 
 
-def _env_var_names(agent: AgentFile) -> list[str]:
+def _env_var_names(
+    agent: AgentFile,
+    knowledge_config: KnowledgeConfigSnapshot | None = None,
+) -> list[str]:
     """Collect the env-var names the agent's home references (connectors + MCP)."""
     names: list[str] = []
     slack = agent.connectors.slack
@@ -52,6 +57,10 @@ def _env_var_names(agent: AgentFile) -> list[str]:
     for target in agent.models.targets:
         if target.api_key_env:
             names.append(target.api_key_env)
+    if knowledge_config is not None:
+        for key, value in _flatten(knowledge_config.model_dump(mode="json")):
+            if key.endswith("_env") and isinstance(value, str) and value:
+                names.append(value)
     # stable order, de-duplicated
     seen: set[str] = set()
     ordered: list[str] = []
@@ -101,7 +110,11 @@ def materialize_from_store(name: str) -> Path | None:
     return write_home(agent_file_from_store(agent))
 
 
-def write_home(agent: AgentFile) -> Path:
+def write_home(
+    agent: AgentFile,
+    *,
+    knowledge_config: KnowledgeConfigSnapshot | None = None,
+) -> Path:
     """Materialize ``agent``'s home and return its directory.
 
     Rewrites ``agent.yaml`` from the definition and seeds/refreshes the ``.env`` scaffold.
@@ -113,5 +126,32 @@ def write_home(agent: AgentFile) -> Path:
     (home / AGENT_FILE_NAME).write_text(
         yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
-    _seed_env(home, _env_var_names(agent))
+    if knowledge_config is not None:
+        write_knowledge_config(knowledge_config)
+    _seed_env(home, _env_var_names(agent, knowledge_config))
     return home
+
+
+def write_knowledge_config(
+    knowledge_config: KnowledgeConfigSnapshot,
+    *,
+    service_home: Path | None = None,
+) -> Path:
+    """Materialize KB construction config to platform or standalone service home."""
+    config_dir = (service_home / "config") if service_home is not None else paths.config_dir()
+    config_dir.mkdir(parents=True, exist_ok=True)
+    path = config_dir / "knowledge.yaml"
+    path.write_text(
+        yaml.safe_dump(_knowledge_payload(knowledge_config), sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _knowledge_payload(knowledge_config: KnowledgeConfigSnapshot) -> dict[str, object]:
+    payload = knowledge_config.model_dump(mode="json", exclude_defaults=False)
+    for kb in payload["knowledge_bases"]:
+        for source in kb["sources"]:
+            source.pop("tenant_id", None)
+            source.pop("kb_id", None)
+    return payload

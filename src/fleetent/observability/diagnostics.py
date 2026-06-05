@@ -232,14 +232,14 @@ def _write_traces(archive: zipfile.ZipFile, start_ts: datetime, end_ts: datetime
 
 
 def _write_connector_status(archive: zipfile.ZipFile, settings: AgentFile) -> list[str]:
-    connectors = list_configured_connectors(settings=settings)
+    connectors = list_configured_connectors()
     status_payload = []
     for connector in connectors:
         connector_id = getattr(connector, "connector_id", None)
         latest_status = None
         if connector_id:
             try:
-                latest_status = get_connector_status(str(connector_id), settings=settings)
+                latest_status = get_connector_status(str(connector_id))
             except Exception as exc:
                 latest_status = {
                     "connector_id": str(connector_id),
@@ -266,7 +266,7 @@ def list_configured_connectors(settings: AgentFile | None = None) -> list[object
         list_configured_connectors as list_kb_connectors,
     )
 
-    return list(list_kb_connectors(settings=settings))
+    return list(list_kb_connectors())
 
 
 def get_connector_status(connector_id: str, settings: AgentFile | None = None) -> object:
@@ -274,7 +274,7 @@ def get_connector_status(connector_id: str, settings: AgentFile | None = None) -
         get_connector_status as get_kb_connector_status,
     )
 
-    return get_kb_connector_status(connector_id, settings=settings)
+    return get_kb_connector_status(connector_id)
 
 
 def _event_json(event: TraceEvent) -> str:
@@ -351,7 +351,7 @@ def _config_summary(settings: AgentFile) -> dict[str, object]:
             "traces_days": settings.diagnostics.retention.traces_days,
             "diagnostic_exports_days": settings.diagnostics.retention.diagnostic_exports_days,
         },
-        "knowledge_base": {"enabled": settings.knowledge_base.enabled},
+        "knowledge": {"enabled": settings.knowledge.enabled},
     }
 
 

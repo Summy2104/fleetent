@@ -165,37 +165,22 @@ def test_agent_file_accepts_typed_intelligence_config() -> None:
                 "model_env": "FLEETENT_EVAL_RERANK_MODEL",
                 "api_key_env": "FLEETENT_EVAL_RERANK_API_KEY",
             },
-            "knowledge_base": {
+            "knowledge": {
                 "enabled": True,
-                "default_tenant_id": "pilot-tenant",
-                "default_kb_id": "pilot-kb",
-                "google_drive": {
-                    "connectors": [
-                        {
-                            "connector_id": "pilot-drive",
-                            "tenant_id": "pilot-tenant",
-                            "kb_id": "pilot-kb",
-                            "folder_id": "folder-123",
-                            "access_token_env": "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN",
-                            "refresh_token_env": "FLEETENT_GOOGLE_DRIVE_REFRESH_TOKEN",
-                            "client_id_env": "FLEETENT_GOOGLE_DRIVE_CLIENT_ID",
-                            "client_secret_env": "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET",
-                        }
-                    ]
-                },
-                "confluence": {
-                    "connectors": [
-                        {
-                            "connector_id": "pilot-confluence",
-                            "tenant_id": "pilot-tenant",
-                            "kb_id": "pilot-kb",
-                            "base_url": "https://example.atlassian.net/wiki",
-                            "username_env": "FLEETENT_CONFLUENCE_USERNAME",
-                            "scope_type": "page",
-                            "page_id": 123,
-                            "api_token_env": "FLEETENT_CONFLUENCE_TOKEN",
-                        }
-                    ]
+                "bindings": [
+                    {
+                        "tenant_id": "pilot-tenant",
+                        "kb_id": "pilot-kb",
+                        "default": True,
+                        "permissions": {"search": True},
+                    }
+                ],
+                "retrieval_policy": {
+                    "mode": "hybrid",
+                    "top_k": 12,
+                    "rerank": True,
+                    "embedding_route": "embedding",
+                    "rerank_route": "rerank",
                 },
             },
             "long_term_ctx": {
@@ -213,15 +198,17 @@ def test_agent_file_accepts_typed_intelligence_config() -> None:
     assert af.embedding.dimensions == 1024
     assert af.embedding.api_key_env == "FLEETENT_EVAL_EMBEDDING_API_KEY"
     assert af.rerank.model_env == "FLEETENT_EVAL_RERANK_MODEL"
-    assert af.knowledge_base.default_tenant_id == "pilot-tenant"
-    assert af.knowledge_base.google_drive.connectors[0].client_secret_env == (
-        "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET"
-    )
-    assert af.knowledge_base.confluence.connectors[0].api_token_env == ("FLEETENT_CONFLUENCE_TOKEN")
+    assert af.knowledge.bindings[0].tenant_id == "pilot-tenant"
+    assert af.knowledge.bindings[0].kb_id == "pilot-kb"
+    assert af.knowledge.bindings[0].default is True
+    assert af.knowledge.retrieval_policy.mode == "hybrid"
+    assert af.knowledge.retrieval_policy.top_k == 12
+    assert af.knowledge.retrieval_policy.embedding_route == "embedding"
+    assert af.knowledge.retrieval_policy.rerank_route == "rerank"
     assert af.long_term_ctx.conflict_preference == "auto"
 
 
-def test_agent_home_file_accepts_google_drive_folder_id_in_intelligence_config(tmp_path) -> None:
+def test_agent_file_rejects_old_knowledge_base_connector_config() -> None:
     doc = {
         "name": "pilot",
         "version": 1,
@@ -244,14 +231,79 @@ def test_agent_home_file_accepts_google_drive_folder_id_in_intelligence_config(t
             },
         },
     }
+
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
+
+
+def test_agent_knowledge_enabled_requires_binding() -> None:
+    with pytest.raises(ValidationError, match="bindings"):
+        agent_config.AgentFile.model_validate(
+            {
+                "name": "pilot",
+                "version": 1,
+                "models": _valid_models_doc(),
+                "knowledge": {"enabled": True},
+            }
+        )
+
+
+def test_agent_knowledge_rejects_duplicate_defaults() -> None:
+    with pytest.raises(ValidationError, match="default"):
+        agent_config.AgentFile.model_validate(
+            {
+                "name": "pilot",
+                "version": 1,
+                "models": _valid_models_doc(),
+                "knowledge": {
+                    "enabled": True,
+                    "bindings": [
+                        {"tenant_id": "tenant-a", "kb_id": "support", "default": True},
+                        {"tenant_id": "tenant-a", "kb_id": "billing", "default": True},
+                    ],
+                },
+            }
+        )
+
+
+@pytest.mark.parametrize("missing", ["tenant_id", "kb_id"])
+def test_agent_knowledge_binding_requires_tenant_and_kb(missing: str) -> None:
+    binding = {"tenant_id": "tenant-a", "kb_id": "support"}
+    del binding[missing]
+    with pytest.raises(ValidationError, match=missing):
+        agent_config.AgentFile.model_validate(
+            {
+                "name": "pilot",
+                "version": 1,
+                "models": _valid_models_doc(),
+                "knowledge": {"enabled": True, "bindings": [binding]},
+            }
+        )
+
+
+def test_load_agent_home_file_rejects_old_knowledge_base_connector_config(tmp_path) -> None:
+    doc = {
+        "name": "pilot",
+        "version": 1,
+        "models": _valid_models_doc(),
+        "knowledge_base": {
+            "google_drive": {
+                "connectors": [
+                    {
+                        "connector_id": "pilot-drive",
+                        "tenant_id": "pilot-tenant",
+                        "kb_id": "pilot-kb",
+                        "folder_id": "1Cs7y_5p8BOX4hZ7CT7fbS8CPBCkjF-W3",
+                    }
+                ]
+            },
+        },
+    }
     path = tmp_path / "agent.yaml"
     path.write_text(yaml.safe_dump(doc), encoding="utf-8")
 
-    agent = agent_config.load_agent_home_file(path)
-
-    assert agent.knowledge_base.google_drive.connectors[0].folder_id == (
-        "1Cs7y_5p8BOX4hZ7CT7fbS8CPBCkjF-W3"
-    )
+    with pytest.raises(ValidationError):
+        agent_config.load_agent_home_file(path)
 
 
 @pytest.mark.parametrize("missing", ["name", "version"])
@@ -504,10 +556,15 @@ def test_repo_agent_yaml_example_loads_as_single_agent_file() -> None:
     repo = Path(__file__).resolve().parents[2]
     example = repo / "config" / "agent" / "agent.yaml.example"
     assert example.is_file(), "config/agent/agent.yaml.example must exist (installer template)"
+    raw = yaml.safe_load(example.read_text(encoding="utf-8"))
+    assert "knowledge_base" not in raw
     agent = agent_config.load_agent_home_file(example)
     assert agent.name  # non-empty
     assert agent.version >= 1
     assert agent.models.routes["default"][0].target == "primary"
     assert agent.models.targets[0].api_key_env == "FLEETENT_MODEL_PRIMARY_API_KEY"
     assert agent.vector_store.backend == "sqlite"
-    assert agent.knowledge_base.enabled is True
+    assert agent.embedding.api_key_env == "FLEETENT_EVAL_EMBEDDING_API_KEY"
+    assert agent.rerank.api_key_env == "FLEETENT_EVAL_RERANK_API_KEY"
+    assert agent.knowledge.enabled is True
+    assert agent.knowledge.bindings[0].kb_id == "pilot-kb"

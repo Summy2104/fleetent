@@ -89,10 +89,11 @@ def _patch_runtime(monkeypatch, tmp_path):
         version=1,
         models=default_models(),
         rerank=RerankSettings(backend="deterministic"),
-        knowledge_base=KnowledgeBaseSettings(chunk_size=500, chunk_overlap=0),
     )
+    kb_settings = KnowledgeBaseSettings(chunk_size=500, chunk_overlap=0)
     monkeypatch.setattr(runtime, "_database", lambda: database)
     monkeypatch.setattr(agent_config, "active_agent_or_default", lambda: agent)
+    monkeypatch.setattr(runtime, "_kb_config", lambda: kb_settings)
     monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
     monkeypatch.setattr(runtime.vector_store, "delete", _noop_delete)
     return database
