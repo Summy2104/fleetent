@@ -1,8 +1,8 @@
 ## 1. 导出层补齐（model/mcp/bindings/knowledge/tenant/team/skills_dir）
 
-- [ ] 1.1 Write failing tests: `agent_file_from_store` 回填 `tenant_id`/`team_id`/`skills_dir`；有 model_overrides 时展开真实 `models.targets/routes`（target `api_key_env` 复用 provider 级、无 localhost 占位）、无覆盖时回退 `default_models()`；`mcp_server_ids`→`mcp_servers`、`channel_agents`/`user_agents`→`bindings`、`agent_kbs`→`knowledge.bindings`（tests/integration，DB fixture 隔离）
-- [ ] 1.2 Implement: 扩展 `agent_file_from_store` 与 provider 展开逻辑；接入 mcp/bindings/knowledge 查询
-- [ ] 1.3 Verify green: `uv run pytest tests/integration/test_agent_materialize.py -x -q`（或对应文件）
+- [x] 1.1 Write failing tests: `agent_file_from_store` 回填 `tenant_id`/`team_id`/`skills_dir`；有 model_overrides 时展开真实 `models.targets/routes`（target `api_key_env` 复用 provider 级、无 localhost 占位）、无覆盖时回退 `default_models()`；`mcp_server_ids`→`mcp_servers`、`channel_agents`/`user_agents`→`bindings`、`agent_kbs`→`knowledge.bindings`（tests/integration，DB fixture 隔离）
+- [x] 1.2 Implement: 扩展 `agent_file_from_store` 与 provider 展开逻辑；接入 mcp/bindings/knowledge 查询；`_build_agent_yaml` 改为单一委托（console 预览 == 部署 home）
+- [x] 1.3 Verify green: `uv run pytest tests/integration/test_agent_export_from_store.py -x -q`（含 agent_admin/lifecycle 回归）
 
 ## 2. 加密 secret store
 

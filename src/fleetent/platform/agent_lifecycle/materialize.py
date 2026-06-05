@@ -9,31 +9,129 @@ references secrets by env-var name only (never plaintext) — so the agent is ru
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 from fleetent import agent_store, paths
-from fleetent.agent_config import AGENT_FILE_NAME, AgentFile, default_models
+from fleetent.agent_config import (
+    AGENT_FILE_NAME,
+    AgentBindings,
+    AgentFile,
+    AgentKnowledge,
+    AgentKnowledgeBinding,
+    AgentModels,
+    ModelRouteEntry,
+    ModelTarget,
+    default_models,
+)
+from fleetent.config import McpServerSettings
 from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
 from fleetent.platform.config_validation import _flatten
+from fleetent.platform.connector_management import agent_mcp_server_store
+from fleetent.platform.knowledge_base_management import agent_kbs_store
+from fleetent.platform.model_provider_management import provider_admin_store
+
+
+def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
+    """Expand per-route provider selections into real targets/routes.
+
+    Each route key maps to a chosen provider id; the provider config supplies base_url,
+    model, protocol and ``api_key_env`` (reused at the provider level, not re-authored
+    per agent). Routes referencing the same provider share one target. Falls back to the
+    neutral local default policy when no providers are selected.
+    """
+    targets: dict[str, ModelTarget] = {}
+    routes: dict[str, list[ModelRouteEntry]] = {}
+    for route_key, sel in model_overrides.items():
+        provider_id = (sel or {}).get("provider")
+        if not provider_id:
+            continue
+        provider = provider_admin_store.get_provider(provider_id)
+        if provider is None:
+            continue
+        if provider_id not in targets:
+            targets[provider_id] = ModelTarget(
+                id=provider_id,
+                provider=str(provider.get("provider") or provider_id),
+                protocol=str(provider.get("protocol") or "openai_chat"),
+                base_url=provider.get("base_url"),
+                model=provider.get("model"),
+                api_key_env=provider.get("api_key_env"),
+                max_tokens=provider.get("max_tokens"),
+                params=provider.get("params") or {},
+            )
+        routes[route_key] = [ModelRouteEntry(target=provider_id)]
+    if not targets:
+        return default_models()
+    return AgentModels(targets=list(targets.values()), routes=routes)
+
+
+def _mcp_servers_from_store(agent_id: int) -> list[McpServerSettings]:
+    """Assemble bound MCP server definitions (agent-scoped first, then global)."""
+    servers: list[McpServerSettings] = []
+    for sid in agent_store.list_mcp_servers_for_agent(agent_id):
+        row = agent_mcp_server_store.get_mcp_server(
+            agent_id, sid
+        ) or agent_mcp_server_store.get_mcp_server(None, sid)
+        if row is None:
+            continue
+        servers.append(
+            McpServerSettings(
+                id=sid,
+                transport=str(row.get("transport") or "http"),
+                url=str(row.get("url") or ""),
+                auth_type=str(row.get("auth_type") or "none"),
+                api_key_env=str(row.get("api_key_env") or ""),
+                command=str(row.get("command") or ""),
+                args=list(row.get("args") or []),
+                env=dict(row.get("env") or {}),
+            )
+        )
+    return servers
+
+
+def _bindings_from_store(agent_id: int) -> AgentBindings:
+    channels = [
+        f"{c['platform']}:{c['channel_id']}" for c in agent_store.list_channels_for_agent(agent_id)
+    ]
+    return AgentBindings(channels=channels, users=agent_store.list_users_for_agent(agent_id))
+
+
+def _knowledge_from_store(tenant_id: str, agent_id: int) -> AgentKnowledge:
+    kb_ids = agent_kbs_store.list_kbs_for_agent(tenant_id, str(agent_id))
+    if not kb_ids:
+        return AgentKnowledge()
+    return AgentKnowledge(
+        enabled=True,
+        bindings=[AgentKnowledgeBinding(tenant_id=tenant_id, kb_id=kb_id) for kb_id in kb_ids],
+    )
 
 
 def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
-    """Build the home schema from the authored core definition.
+    """Build the full home schema from the authored definition + bindings.
 
-    connectors/access are not yet stored per-agent on the platform; they materialize as
-    their safe defaults (no connectors; default-closed access) until authoring lands.
+    Materializes every field the platform authors: identity (tenant/team), model policy
+    (expanded from provider selections), MCP servers, IM bindings and knowledge bindings.
+    connectors/access are not yet stored per-agent; they materialize as their safe defaults
+    (no connectors; default-closed access) until authoring lands.
     """
     return AgentFile(
         name=agent.name,
         version=1,
+        tenant_id=agent.tenant_id,
+        team_id=agent.team_id,
         system_prompt=agent.system_prompt,
         allowed_tools=agent.allowed_tools,
         allowed_skills=agent.allowed_skills,
         plugins=agent.plugins,
         features=agent.features,
-        models=default_models(),
+        skills_dir=agent.skills_dir,
+        models=_models_from_overrides(agent.model_overrides),
         memory_namespace=agent.memory_namespace,
+        mcp_servers=_mcp_servers_from_store(agent.id),
+        bindings=_bindings_from_store(agent.id),
+        knowledge=_knowledge_from_store(agent.tenant_id, agent.id),
     )
 
 
