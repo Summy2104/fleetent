@@ -169,23 +169,32 @@ class _KnowledgeResult:
 
 
 async def test_long_term_context_searches_resolved_agent_kbs(monkeypatch):
+    from fleetent import agent_config
+    from fleetent.agent_config import AgentConfigIndex, AgentFile
     from fleetent.intelligence import long_term_ctx
 
+    agent = AgentFile(
+        name="agent-1",
+        version=1,
+        knowledge={
+            "enabled": True,
+            "bindings": [
+                {"tenant_id": "tenant-a", "kb_id": "engineering"},
+                {"tenant_id": "tenant-a", "kb_id": "support"},
+            ],
+            "retrieval_policy": {"mode": "hybrid"},
+        },
+    )
+    monkeypatch.setattr(
+        agent_config,
+        "_index",
+        AgentConfigIndex(agents={"agent-1": agent}, by_channel={}, by_user={}, default="agent-1"),
+    )
     monkeypatch.setattr(long_term_ctx.memory, "search", _empty_memory_search)
-    monkeypatch.setattr(
-        long_term_ctx,
-        "_kb_config",
-        lambda: KnowledgeBaseSettings(enabled=True, default_tenant_id="tenant-a"),
-    )
-    monkeypatch.setattr(
-        long_term_ctx.knowledge_base,
-        "resolve_agent_kb_ids",
-        lambda tenant_id, agent_id: ["engineering", "support"],
-    )
     calls = []
 
-    async def search(query: str, tenant_id: str, kb_ids: list[str], limit: int):
-        calls.append((query, tenant_id, kb_ids, limit))
+    async def search(query: str, tenant_id: str, kb_ids: list[str], limit: int, mode: str):
+        calls.append((query, tenant_id, kb_ids, limit, mode))
         return [
             _KnowledgeResult(
                 id="chunk-1",
@@ -204,26 +213,26 @@ async def test_long_term_context_searches_resolved_agent_kbs(monkeypatch):
         available_tokens=500,
     )
 
-    assert calls == [("what is the install process?", "tenant-a", ["engineering", "support"], 10)]
+    assert calls == [
+        ("what is the install process?", "tenant-a", ["engineering", "support"], 10, "hybrid")
+    ]
     assert "Install runbook" in context.text
 
 
 async def test_long_term_context_skips_search_when_agent_kb_scope_is_empty(monkeypatch):
+    from fleetent import agent_config
+    from fleetent.agent_config import AgentConfigIndex, AgentFile
     from fleetent.intelligence import long_term_ctx
 
+    agent = AgentFile(name="agent-1", version=1, knowledge={"enabled": False})
+    monkeypatch.setattr(
+        agent_config,
+        "_index",
+        AgentConfigIndex(agents={"agent-1": agent}, by_channel={}, by_user={}, default="agent-1"),
+    )
     monkeypatch.setattr(long_term_ctx.memory, "search", _empty_memory_search)
-    monkeypatch.setattr(
-        long_term_ctx,
-        "_kb_config",
-        lambda: KnowledgeBaseSettings(enabled=True, default_tenant_id="tenant-a"),
-    )
-    monkeypatch.setattr(
-        long_term_ctx.knowledge_base,
-        "resolve_agent_kb_ids",
-        lambda tenant_id, agent_id: [],
-    )
 
-    async def fail_search(query: str, tenant_id: str, kb_ids: list[str], limit: int):
+    async def fail_search(query: str, tenant_id: str, kb_ids: list[str], limit: int, mode: str):
         raise AssertionError("knowledge search should not be called")
 
     monkeypatch.setattr(long_term_ctx.knowledge_base, "search", fail_search)

@@ -1,6 +1,5 @@
 """Standalone agent runtime: boot one agent home, bind IM, optional HTTP — no platform."""
 
-
 import yaml
 from fastapi.testclient import TestClient
 

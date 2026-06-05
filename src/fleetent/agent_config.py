@@ -12,16 +12,15 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from fleetent import paths
 from fleetent.config import (
     DiagnosticsSettings,
     EmbeddingSettings,
-    KnowledgeBaseSettings,
     LongTermContextSettings,
     McpServerSettings,
     McpSettings,
@@ -82,6 +81,48 @@ class AgentAccess(BaseModel):
     require_approval: bool = True
 
 
+class AgentKnowledgePermissions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    search: bool = True
+
+
+class AgentKnowledgeBinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_id: str
+    kb_id: str
+    default: bool = False
+    permissions: AgentKnowledgePermissions = Field(default_factory=AgentKnowledgePermissions)
+
+
+class AgentRetrievalPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["vector", "keyword", "hybrid"] = "hybrid"
+    top_k: int = 10
+    rerank: bool = False
+    embedding_route: str = ""
+    rerank_route: str = ""
+
+
+class AgentKnowledge(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    bindings: list[AgentKnowledgeBinding] = Field(default_factory=list)
+    retrieval_policy: AgentRetrievalPolicy = Field(default_factory=AgentRetrievalPolicy)
+
+    @model_validator(mode="after")
+    def _validate_bindings(self) -> "AgentKnowledge":
+        if self.enabled and not self.bindings:
+            raise ValueError("knowledge.bindings must contain at least one binding when enabled")
+        defaults = [binding for binding in self.bindings if binding.default]
+        if len(defaults) > 1:
+            raise ValueError("knowledge.bindings may mark at most one default binding")
+        return self
+
+
 class AgentFile(BaseModel):
     """Schema for a self-contained ``agent.yaml``."""
 
@@ -103,7 +144,7 @@ class AgentFile(BaseModel):
     vector_store: VectorStoreSettings = Field(default_factory=VectorStoreSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     rerank: RerankSettings = Field(default_factory=RerankSettings)
-    knowledge_base: KnowledgeBaseSettings = Field(default_factory=KnowledgeBaseSettings)
+    knowledge: AgentKnowledge = Field(default_factory=AgentKnowledge)
     long_term_ctx: LongTermContextSettings = Field(default_factory=LongTermContextSettings)
     # ── per-agent runtime governance (defaults mirror Settings; schema-only this phase,
     #    runtime wiring lands in runtime-read-agent-config) ──
@@ -228,7 +269,7 @@ def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
     intelligence_payload = {
         "embedding": agent.embedding.model_dump(),
         "rerank": agent.rerank.model_dump(),
-        "knowledge_base": agent.knowledge_base.model_dump(),
+        "knowledge": agent.knowledge.model_dump(),
     }
     for key, value in _flatten(payload):
         if (

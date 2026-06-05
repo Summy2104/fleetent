@@ -24,4 +24,3 @@ def test_slack_removed_from_owner_connector_manager():
 def test_slack_removed_from_owner_connector_config_schema():
     assert "slack" not in im_connector_config.PLATFORM_CONFIG_KEYS
     assert "telegram" in im_connector_config.PLATFORM_CONFIG_KEYS
-

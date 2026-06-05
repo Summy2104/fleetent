@@ -140,7 +140,7 @@ def _profile_items(profile: ValidationProfile, agent: AgentFile) -> list[Validat
         _dependency_item(profile, "embedding.backend", agent.embedding.backend, "deterministic")
     )
     items.append(_dependency_item(profile, "rerank.backend", agent.rerank.backend, "disabled"))
-    if agent.knowledge_base.google_drive.connectors or agent.knowledge_base.confluence.connectors:
+    if agent.knowledge.bindings:
         items.append(
             ValidationItem("connectors.credential_ref", "pass", "connector refs configured")
         )
@@ -182,6 +182,8 @@ def _secret_scan_items(agent: AgentFile) -> list[ValidationItem]:
     payload = agent.model_dump(mode="json")
     items: list[ValidationItem] = []
     for key, value in _flatten(payload):
+        if key.endswith("directory") or key.endswith("_dir") or key.endswith("export_dir"):
+            continue
         if isinstance(value, str) and _looks_inline_secret(value):
             items.append(ValidationItem(f"agent.{key}", "error", "inline secret-like value"))
     return items

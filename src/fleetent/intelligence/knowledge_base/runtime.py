@@ -511,10 +511,8 @@ def _settings() -> Settings:
 
 
 def _kb_config() -> KnowledgeBaseSettings:
-    """knowledge_base config from the active agent (a neutral default when absent)."""
-    from fleetent import agent_config
-
-    return agent_config.active_agent_or_default().knowledge_base
+    """Neutral KB runtime defaults; source construction lives in knowledge.yaml."""
+    return KnowledgeBaseSettings()
 
 
 def _rerank_config() -> RerankSettings:

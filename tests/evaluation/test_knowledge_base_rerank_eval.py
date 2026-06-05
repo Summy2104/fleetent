@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from fleetent import agent_config
+from fleetent.agent_config import AgentConfigIndex, AgentFile
 from fleetent.config import KnowledgeBaseSettings, RerankSettings, Settings
 from fleetent.db import create_database
 from tests.integration.test_migrations import apply_migrations
@@ -85,11 +87,16 @@ def _patch_runtime(monkeypatch, tmp_path):
     settings = Settings(
         anthropic_api_key="test-key",
         database_url=f"sqlite:///{db_path}",
-        rerank=RerankSettings(backend="deterministic"),
         knowledge_base=KnowledgeBaseSettings(chunk_size=500, chunk_overlap=0),
     )
+    agent = AgentFile(name="eval", version=1, rerank=RerankSettings(backend="deterministic"))
     monkeypatch.setattr(runtime, "_database", lambda: database)
     monkeypatch.setattr(runtime, "_settings", lambda: settings)
+    monkeypatch.setattr(
+        agent_config,
+        "_index",
+        AgentConfigIndex(agents={"eval": agent}, by_channel={}, by_user={}, default="eval"),
+    )
     monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
     monkeypatch.setattr(runtime.vector_store, "delete", _noop_delete)
     return database

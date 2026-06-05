@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from fleetent.agent_config import AgentFile
 from fleetent.config import EmbeddingSettings, KnowledgeBaseSettings, Settings, VectorStoreSettings
 from fleetent.db import create_database
 from fleetent.intelligence.vector_store import ReindexSummary
@@ -159,25 +160,23 @@ async def _run_fixture(
     from fleetent.intelligence.vector_store import runtime as vector_runtime
 
     apply_migrations(db_path)
-    settings = Settings(
-        anthropic_api_key="test-key",
-        database_url=f"sqlite:///{db_path}",
+    settings = Settings(database_url=f"sqlite:///{db_path}")
+    agent = AgentFile(
+        name="eval",
+        version=1,
         vector_store=VectorStoreSettings(
             backend="sqlite",
             database_url=f"sqlite:///{vector_db_path}",
         ),
         embedding=embedding,
-        knowledge_base=KnowledgeBaseSettings(
-            enabled=True,
-            chunk_size=120,
-            chunk_overlap=0,
-        ),
     )
+    kb_settings = KnowledgeBaseSettings(chunk_size=120, chunk_overlap=0)
     database = create_database(settings.database_url)
     monkeypatch.setenv("DATABASE_URL", settings.database_url)
     monkeypatch.setattr(kb_runtime, "_settings", lambda: settings)
     monkeypatch.setattr(kb_runtime, "_database", lambda: database)
-    vector_runtime._configure(settings)
+    monkeypatch.setattr(kb_runtime, "_kb_config", lambda: kb_settings)
+    vector_runtime._configure(agent)
 
     try:
         _insert_memories(db_path, str(fixture["user_id"]), fixture["memories"])
@@ -212,7 +211,7 @@ async def _run_fixture(
             query_results=query_results,
         )
     finally:
-        vector_runtime._configure(Settings())
+        vector_runtime._configure(AgentFile(name="default", version=1))
 
 
 def assert_query_expectations(result: CombinedEmbeddingEvaluationResult) -> None:

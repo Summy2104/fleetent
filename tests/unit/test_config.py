@@ -264,15 +264,14 @@ def test_rerank_defaults():
     assert s.rerank.timeout_seconds == 10.0
 
 
-def test_knowledge_base_defaults():
+def test_agent_knowledge_defaults():
     s = AgentFile(name="t", version=1)
 
-    assert s.knowledge_base.enabled is False
-    assert s.knowledge_base.default_tenant_id == "default"
-    assert s.knowledge_base.default_kb_id == "global"
-    assert s.knowledge_base.chunk_size > 0
-    assert s.knowledge_base.chunk_overlap >= 0
-    assert s.knowledge_base.chunk_overlap < s.knowledge_base.chunk_size
+    assert s.knowledge.enabled is False
+    assert s.knowledge.bindings == []
+    assert s.knowledge.retrieval_policy.mode == "hybrid"
+    assert s.knowledge.retrieval_policy.top_k == 10
+    assert s.knowledge.retrieval_policy.embedding_route == ""
 
 
 def test_diagnostics_defaults_are_conservative():

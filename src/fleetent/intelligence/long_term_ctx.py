@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
-from fleetent.config import KnowledgeBaseSettings, LongTermContextSettings
+from fleetent.config import LongTermContextSettings
 from fleetent.intelligence import knowledge_base, long_term_ctx_policy, memory
 from fleetent.intelligence.long_term_ctx_policy import (
     AgentContextIdentity as AgentContextIdentity,
@@ -540,29 +540,25 @@ async def _search_knowledge(
     if _knowledge_provider is not None:
         return await _knowledge_provider(user_id, query, agent_id, limit)
 
-    kb = _kb_config()
-    if not kb.enabled:
-        return []
-    kb_ids = knowledge_base.resolve_agent_kb_ids(
-        kb.default_tenant_id,
-        agent_id,
-    )
-    if not kb_ids:
-        return []
-    results = await knowledge_base.search(
-        query,
-        tenant_id=kb.default_tenant_id,
-        kb_ids=kb_ids,
-        limit=limit,
-    )
-    return list(results)
-
-
-def _kb_config() -> "KnowledgeBaseSettings":
-    """knowledge_base config from the active agent (a neutral default when absent)."""
     from fleetent import agent_config
 
-    return agent_config.active_agent_or_default().knowledge_base
+    agent = agent_config.active_agent_or_default()
+    kb = agent.knowledge
+    if not kb.enabled:
+        return []
+    bindings = [binding for binding in kb.bindings if binding.permissions.search]
+    kb_ids = [binding.kb_id for binding in bindings]
+    if not kb_ids:
+        return []
+    tenant_id = bindings[0].tenant_id
+    results = await knowledge_base.search(
+        query,
+        tenant_id=tenant_id,
+        kb_ids=kb_ids,
+        limit=limit,
+        mode=kb.retrieval_policy.mode,
+    )
+    return list(results)
 
 
 def _knowledge_source(item: object) -> ContextSource:
