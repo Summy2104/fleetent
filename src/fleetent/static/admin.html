@@ -295,6 +295,17 @@
   .risk-low { color:var(--ok); } .risk-medium { color:#d8a200; } .risk-high { color:var(--danger); }
   .sk-import-section { border:1px solid var(--border); border-radius:var(--r-2); padding:12px 14px; background:var(--surface); }
   /* --- Chat module --- */
+  .chat-split { display:flex; gap:12px; height:calc(100vh - 170px); min-height:420px; }
+  .chat-history { width:230px; flex-shrink:0; overflow-y:auto; border:1px solid var(--border);
+    border-radius:8px; background:var(--card); }
+  .chat-history-head { padding:10px 12px; font-size:12px; color:var(--muted);
+    border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--card); }
+  .chat-hrow { padding:9px 12px; border-bottom:1px solid var(--border); cursor:pointer;
+    display:flex; justify-content:space-between; gap:6px; align-items:center; }
+  .chat-hrow:hover { background:var(--panel); }
+  .chat-hrow.active { background:var(--accent-weak,#22304a); }
+  .chat-hrow .ht { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .chat-hrow .hx { font-size:11px; color:var(--muted); }
   .chat-wrap { display:flex; flex-direction:column; height:calc(100vh - 170px); min-height:420px;
     border:1px solid var(--border); border-radius:var(--r-2); overflow:hidden; background:var(--surface); }
   .chat-toolbar { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); }
@@ -680,19 +691,25 @@
           <button onclick="chatNew()">New chat</button>
         </div>
       </div>
-      <div class="chat-wrap">
-        <div class="chat-toolbar">
-          <label class="field-label" style="margin:0;">Agent</label>
-          <select id="chat-agent"></select>
-          <span id="chat-sid" class="muted" style="font-size:12px;"></span>
-        </div>
-        <div id="chat-log" class="chat-log">
-          <div class="chat-empty muted">Pick an agent and send a message to start.</div>
-        </div>
-        <div class="chat-composer">
-          <textarea id="chat-input" rows="1" placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
-            oninput="chatAutogrow(this)" onkeydown="chatKey(event)"></textarea>
-          <button id="chat-send" class="primary" onclick="chatSend()">Send</button>
+      <div class="chat-split">
+        <aside id="chat-history" class="chat-history">
+          <div class="chat-history-head">Your sessions</div>
+          <div id="chat-history-list"></div>
+        </aside>
+        <div class="chat-wrap" style="flex:1; min-width:0;">
+          <div class="chat-toolbar">
+            <label class="field-label" style="margin:0;">Agent</label>
+            <select id="chat-agent"></select>
+            <span id="chat-sid" class="muted" style="font-size:12px;"></span>
+          </div>
+          <div id="chat-log" class="chat-log">
+            <div class="chat-empty muted">Pick an agent and send a message to start.</div>
+          </div>
+          <div class="chat-composer">
+            <textarea id="chat-input" rows="1" placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
+              oninput="chatAutogrow(this)" onkeydown="chatKey(event)"></textarea>
+            <button id="chat-send" class="primary" onclick="chatSend()">Send</button>
+          </div>
         </div>
       </div>
     </section>
@@ -2198,6 +2215,46 @@ async function loadChat() {
       return `<option value="${esc(n)}">${esc(n)}${tag}</option>`;
     }).join("");
   $("chat-agent").innerHTML = opts || '<option value="">(no agents — create one first)</option>';
+  chatLoadHistory();
+}
+
+async function chatLoadHistory() {
+  let rows = [];
+  try { rows = await api("GET", "/chat/sessions"); } catch (e) { rows = []; }
+  $("chat-history-list").innerHTML = rows.map(s => {
+    const when = (s.updated_at || "").replace("T", " ").slice(0, 16);
+    return `<div class="chat-hrow ${s.session_id === CHAT_SID ? "active" : ""}" onclick="chatOpen('${esc(s.session_id)}','${esc(s.agent_name || "")}')">
+      <div style="overflow:hidden;"><div class="ht">${esc(s.agent_name || "—")}${s.pinned ? " 📌" : ""}</div><div class="hx">${esc(when)}</div></div>
+      <button class="small ghost danger" onclick="event.stopPropagation(); chatDelete('${esc(s.session_id)}')">×</button>
+    </div>`;
+  }).join("") || `<div class="muted" style="padding:12px; font-size:12px;">No sessions yet.</div>`;
+}
+
+async function chatOpen(sid, agent) {
+  CHAT_SID = sid;
+  $("chat-sid").textContent = sid;
+  if (agent) $("chat-agent").value = agent;
+  $("chat-pin").disabled = false;
+  $("chat-export").disabled = false;
+  $("chat-log").innerHTML = '<div class="chat-empty muted">Loading…</div>';
+  try {
+    const r = await api("GET", `/chat/${encodeURIComponent(sid)}/export?fmt=json`);
+    $("chat-log").innerHTML = "";
+    const t = r.transcript || [];
+    if (!t.length) $("chat-log").innerHTML = '<div class="chat-empty muted">(empty session)</div>';
+    for (const m of t) {
+      const role = m.role === "user" ? "user" : "assistant";
+      chatBubble(role, typeof m.content === "string" ? m.content : JSON.stringify(m.content));
+    }
+  } catch (e) { $("chat-log").innerHTML = `<div class="chat-empty err">${esc(e.message)}</div>`; }
+  chatLoadHistory();
+}
+
+async function chatDelete(sid) {
+  if (!await confirmDialog("Delete this chat session?")) return;
+  try { await api("DELETE", `/chat/${encodeURIComponent(sid)}`); } catch (e) { toast(e.message, "error"); return; }
+  if (sid === CHAT_SID) chatNew();
+  chatLoadHistory();
 }
 
 function chatAutogrow(t) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 160) + "px"; }
@@ -2210,6 +2267,7 @@ function chatNew() {
   $("chat-pin").disabled = true;
   $("chat-export").disabled = true;
   $("chat-input").focus();
+  chatLoadHistory();
 }
 
 function chatBubble(role, text) {
@@ -2255,6 +2313,7 @@ async function chatSend() {
       $("chat-sid").textContent = CHAT_SID;
       $("chat-pin").disabled = false;
       $("chat-export").disabled = false;
+      chatLoadHistory();  // surface the new session in the sidebar
     }
     const r = await api("POST", `/chat/${encodeURIComponent(CHAT_SID)}/message`, { message: msg });
     const bubble = pending.querySelector(".chat-bubble");

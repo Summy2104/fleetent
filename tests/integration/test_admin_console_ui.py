@@ -1131,6 +1131,17 @@ def _section(html, tab):
     return html[start: nxt if nxt > 0 else start + 8000]
 
 
+def test_chat_session_history_present():
+    html = ADMIN_HTML
+    # per-user session history sidebar in the chat module
+    assert 'id="chat-history-list"' in html
+    assert "function chatLoadHistory" in html
+    assert "function chatOpen" in html and "function chatDelete" in html
+    assert 'api("GET", "/chat/sessions")' in html
+    # delete + open hit the per-session endpoints
+    assert "/chat/${encodeURIComponent(sid)}" in html
+
+
 def test_api_helper_retries_on_network_failure():
     html = ADMIN_HTML
     fn = html.split("async function api(", 1)[1].split("async function doLogin", 1)[0]
