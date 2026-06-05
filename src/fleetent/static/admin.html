@@ -2872,8 +2872,9 @@ async function agSave() {
     }
     agCloseModal();
     await loadAgents();
-    // Open the detail panel so the just-configured bindings are visible and editable.
-    agDrawer(name);
+    // Return to the management view so config edits and bindings stay in one place.
+    if (isEdit) agDrawerManage(name);
+    else agDrawer(name);
   } catch (e) { $("ag-err").textContent = e.message; }
 }
 async function agDelete(name) {
@@ -2921,8 +2922,8 @@ async function agActivateVersion(name, version) {
 
 let AG_DRAWER = null;
 
-// Clicking an agent opens a read-only preview: the full agent.yaml. Editing /
-// binding management lives behind the "Manage bindings" button (agDrawerManage).
+// Clicking an agent opens a read-only preview: the full agent.yaml. A single
+// "Edit" opens the management view (agDrawerManage): config editor + live bindings.
 let AG_YAML_CACHE = "";
 async function agDrawer(name) {
   AG_DRAWER = name;
@@ -2951,9 +2952,11 @@ function agRenderPreview(name, a, yamlText) {
   $("ag-drawer-title").textContent = (a.icon ? a.icon + " " : "") + name;
   const archived = a.status === "archived";
   const statusCls = a.status === "enabled" ? "active" : archived ? "" : "blocked";
+  // Single "Edit" opens the management view (config editor + live bindings); the
+  // former separate binding-management button is folded into it.
   const lifecycle = IS_VIEWER ? "" : `
     <button class="small" onclick="agDeploy('${esc(name)}')">🚀 Deploy</button>
-    <button class="small" onclick="agEdit('${esc(name)}')">Edit</button>
+    <button class="small" onclick="agDrawerManage('${esc(name)}')">Edit</button>
     <button class="small ghost" onclick="agOpenClone('${esc(name)}')">Clone</button>
     ${a.status === "enabled"
       ? `<button class="small ghost" onclick="agDisable('${esc(name)}')">Disable</button>`
@@ -2961,8 +2964,7 @@ function agRenderPreview(name, a, yamlText) {
     ${archived
       ? `<button class="small ghost" onclick="agRestore('${esc(name)}')">Restore</button>`
       : `<button class="small ghost danger" onclick="agArchive('${esc(name)}')">Archive</button>`}
-    <button class="small ghost danger" onclick="agDelete('${esc(name)}')">Delete</button>
-    <button class="small ghost" onclick="agDrawerManage('${esc(name)}')">Manage bindings</button>`;
+    <button class="small ghost danger" onclick="agDelete('${esc(name)}')">Delete</button>`;
   $("ag-drawer-body").innerHTML = `
     <div class="sk-pills" style="margin-bottom:10px;">
       <span class="pill ${statusCls}">${esc(a.status || "")}</span>
@@ -3055,7 +3057,7 @@ function agRenderDrawer(name, d) {
 
   const actions = IS_VIEWER ? "" : `
     <div class="row" style="flex-wrap:wrap; gap:6px;">
-      <button class="small" onclick="agEdit('${esc(name)}')">Edit</button>
+      <button class="small" onclick="agEdit('${esc(name)}')">Edit config</button>
       <button class="small ghost" onclick="agOpenClone('${esc(name)}')">Clone</button>
       ${a.status === "enabled"
         ? `<button class="small ghost" onclick="agDisable('${esc(name)}')">Disable</button>`

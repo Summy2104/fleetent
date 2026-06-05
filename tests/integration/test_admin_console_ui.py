@@ -479,7 +479,9 @@ def test_agent_drawer_preview_is_readonly_yaml():
     assert "function agRenderPreview" in html
     preview = html.split("function agRenderPreview", 1)[1].split("function agCopyYaml", 1)[0]
     assert 'id="ag-yaml-pre"' in preview
-    assert "agDrawerManage(" in preview  # "Manage bindings" switches to the editable view
+    # A single "Edit" opens the management view; the separate "Manage bindings" is gone.
+    assert "agDrawerManage(" in preview
+    assert "Manage bindings" not in preview
     # copy + download the previewed yaml
     assert "function agCopyYaml" in html and "function agDownloadYaml" in html
 
