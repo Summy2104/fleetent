@@ -1120,6 +1120,19 @@
         </div>
       </div>
 
+      <div class="sk-import-section" style="margin-top:12px;">
+        <strong>📝 Or paste a skill — no file dialog needed</strong>
+        <p class="muted" style="font-size:13px; margin:4px 0 8px;">
+          Works in any browser/webview. Paste your <code>SKILL.md</code> (must have
+          <code>name</code>/<code>description</code> frontmatter).
+        </p>
+        <input id="sk-paste-name" placeholder="skill name (e.g. my-skill)" autocomplete="off" style="margin-bottom:6px; width:100%; box-sizing:border-box;">
+        <textarea id="sk-paste-content" rows="8" spellcheck="false" style="font-family:monospace; width:100%; box-sizing:border-box;" placeholder="---&#10;name: my-skill&#10;description: what it does&#10;---&#10;# My Skill&#10;…"></textarea>
+        <div class="row" style="margin-top:6px;">
+          <button type="button" class="primary" onclick="skImportPaste()">Import pasted skill</button>
+        </div>
+      </div>
+
       <div id="sk-import-err" class="err"></div>
       <div id="sk-import-result" class="test-result hidden"></div>
       <div class="row" style="justify-content:flex-end; margin-top:10px;">
@@ -2360,6 +2373,8 @@ function skOpenImport() {
   $("sk-import-source").value = "adhoc";
   if ($("sk-import-files")) $("sk-import-files").value = "";
   if ($("sk-import-zip")) $("sk-import-zip").value = "";
+  if ($("sk-paste-name")) $("sk-paste-name").value = "";
+  if ($("sk-paste-content")) $("sk-paste-content").value = "";
   skImportPicked();
   $("sk-import-err").textContent = "";
   const res = $("sk-import-result"); res.classList.add("hidden"); res.innerHTML = "";
@@ -2395,6 +2410,20 @@ async function skDoUploadZip() {
   const files = $("sk-import-zip").files ? [...$("sk-import-zip").files] : [];
   if (!files.length) { $("sk-import-err").textContent = "pick a .zip first"; return; }
   return skUploadSkillFiles(files, null, null);
+}
+// Dialog-free path: paste SKILL.md text. Works in any browser/webview.
+async function skImportPaste() {
+  $("sk-import-err").textContent = "";
+  const name = $("sk-paste-name").value.trim();
+  const content = $("sk-paste-content").value;
+  if (!name) { $("sk-import-err").textContent = "skill name required"; return; }
+  if (!content.trim()) { $("sk-import-err").textContent = "paste SKILL.md content"; return; }
+  try {
+    await api("POST", "/skills", { name, content, source: $("sk-import-source").value });
+    skCloseImport();
+    loadSkills();
+    toast(`Imported ${name}`, "success");
+  } catch (e) { $("sk-import-err").textContent = apiErrorMessage(e.message || e); }
 }
 async function skUploadSkillFiles(files, btn, btnLabel) {
   $("sk-import-err").textContent = "";

@@ -107,6 +107,11 @@ def test_skill_import_has_clear_folder_picker():
     assert 'id="sk-import-zip"' in html
     assert "function skDoUploadZip" in html
     assert 'accept=".zip' in html
+    # dialog-free fallback: paste SKILL.md text (works in any webview)
+    assert 'id="sk-paste-content"' in html
+    assert "function skImportPaste" in html
+    paste = html.split("async function skImportPaste", 1)[1].split("\n}", 1)[0]
+    assert 'api("POST", "/skills"' in paste
 
 
 def test_skills_proposals_review_wired():
