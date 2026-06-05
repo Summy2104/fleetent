@@ -74,6 +74,19 @@ def _reset_long_term_ctx_knowledge_provider():  # type: ignore[no-untyped-def]
     long_term_ctx.set_knowledge_provider(None)
 
 
+@pytest.fixture(autouse=True)
+def _reset_agent_config_index():  # type: ignore[no-untyped-def]
+    # agent_config publishes the resolved agent index as a module global that
+    # runtime config now reads via current()/active_agent(). Tests that publish an
+    # index must not leak it into later tests (process-level governance/intelligence
+    # resolution would otherwise pick up a stale single agent).
+    from fleetent import agent_config
+
+    original = agent_config._index
+    yield
+    agent_config._index = original
+
+
 @pytest.fixture
 def isolated_schedule_db(tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
     db_path = tmp_path / "sched.db"

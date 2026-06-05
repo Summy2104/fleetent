@@ -352,3 +352,16 @@ def scan_home(agent_dir: str | Path) -> AgentFile:
 def current() -> AgentConfigIndex:
     """Return the currently published index."""
     return _index
+
+
+def active_agent() -> AgentFile | None:
+    """The single active agent for this process, or None.
+
+    A standalone ``fleetent agent run`` process publishes exactly one (forced-default)
+    agent, so process-level config (intelligence backends, deployment knobs) resolves
+    from it. In the multi-agent dev/platform index (or an empty one) this returns None
+    and callers fall back to the global ``Settings`` defaults.
+    """
+    if len(_index.agents) == 1:
+        return next(iter(_index.agents.values()))
+    return None

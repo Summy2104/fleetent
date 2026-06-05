@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
-from fleetent.config import Settings
+from fleetent.config import LongTermContextSettings, Settings
 from fleetent.intelligence import knowledge_base, long_term_ctx_policy, memory
 from fleetent.intelligence.long_term_ctx_policy import (
     AgentContextIdentity as AgentContextIdentity,
@@ -102,6 +102,20 @@ def set_knowledge_provider(provider: KnowledgeProvider | None) -> None:
 
     global _knowledge_provider
     _knowledge_provider = provider
+
+
+def _ltc_config() -> "LongTermContextSettings":
+    """long_term_ctx config from the active (standalone) agent, else Settings default.
+
+    Reads ``Settings`` from this module's namespace so it stays the seam tests patch
+    when no agent is published; a standalone single-agent process resolves the agent's
+    ``long_term_ctx`` block instead."""
+    from fleetent import agent_config
+
+    agent = agent_config.active_agent()
+    if agent is not None:
+        return agent.long_term_ctx
+    return Settings(anthropic_api_key="").long_term_ctx
 
 
 async def build_context(
@@ -203,7 +217,7 @@ async def build_context_with_policy(
         )
 
     policy = long_term_ctx_policy.resolve_context_policy(identity)
-    total_budget = min(available_tokens, Settings(anthropic_api_key="").long_term_ctx.max_tokens)
+    total_budget = min(available_tokens, _ltc_config().max_tokens)
 
     decisions: list[BudgetDecision] = []
     included: list[_ContextCandidate] = []
@@ -348,7 +362,7 @@ def _render_policy_context(candidates: list[_ContextCandidate]) -> str:
 
 
 def _resolve_policy(available_tokens: int) -> BudgetPolicy:
-    settings = Settings(anthropic_api_key="").long_term_ctx
+    settings = _ltc_config()
     return BudgetPolicy(
         max_tokens=min(available_tokens, settings.max_tokens),
         memory_max_tokens=settings.memory_max_tokens,
