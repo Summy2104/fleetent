@@ -5,7 +5,7 @@ import contextlib
 import pytest
 
 import fleetent.im_gateway.access as access
-from fleetent.agent_config import AgentAccess, AgentFile
+from fleetent.agent_config import AgentAccess, AgentFile, default_models
 from fleetent.im_gateway import normalizer
 from fleetent.runtime import loop as agent_loop
 from fleetent.session import manager as session_mgr
@@ -46,7 +46,7 @@ def approvals(tmp_path, monkeypatch):
 
 
 def _agent(access_cfg):
-    return AgentFile(name="a", version=1, access=access_cfg)
+    return AgentFile(name="a", version=1, models=default_models(), access=access_cfg)
 
 
 def _set_agent(monkeypatch, agent):

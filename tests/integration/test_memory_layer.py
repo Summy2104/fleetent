@@ -3,11 +3,23 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
+from fleetent.agent_config import AgentFile, default_models
 from fleetent.intelligence import memory as memory_layer
 from fleetent.intelligence import vector_store
 from fleetent.intelligence.memory import extraction, store
 from fleetent.intelligence.memory.models import MemoryItem
+from fleetent.intelligence.vector_store import runtime as vector_runtime
 from tests.integration.test_migrations import apply_migrations
+
+
+@pytest.fixture(autouse=True)
+def _reset_vector_runtime():
+    agent = AgentFile(name="", version=0, models=default_models())
+    vector_runtime._configure(agent)
+    yield
+    vector_runtime._configure(agent)
 
 
 def test_memory_layer_public_api_exports_semantic_store_contract():
@@ -33,8 +45,7 @@ def _patch_extraction(monkeypatch, content: str) -> AsyncMock:
         )
     )
     client.chat.completions.create = create
-    cfg = SimpleNamespace(model="test-memory-model", max_tokens=512)
-    monkeypatch.setattr(extraction, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(extraction, "AsyncOpenAI", lambda **kwargs: client)
     return create
 
 

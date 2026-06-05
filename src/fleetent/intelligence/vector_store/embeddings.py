@@ -7,6 +7,7 @@ from typing import Protocol
 import httpx
 
 from fleetent.config import EmbeddingSettings
+from fleetent.model import ModelConfigError, ModelPolicySnapshot
 
 
 class EmbeddingProvider(Protocol):
@@ -115,6 +116,40 @@ def create_embedding_provider(settings: EmbeddingSettings) -> EmbeddingProvider:
 
 def create_embedding_backend(settings: EmbeddingSettings) -> EmbeddingProvider:
     return create_embedding_provider(settings)
+
+
+def create_embedding_provider_from_policy(policy: ModelPolicySnapshot) -> EmbeddingProvider:
+    resolved = policy.resolve("embedding")[0]
+    if resolved.protocol != "http_embedding":
+        raise ModelConfigError(
+            f"embedding target '{resolved.target_id}' uses unsupported protocol "
+            f"{resolved.protocol!r}"
+        )
+    if not resolved.endpoint:
+        raise ModelConfigError(f"embedding target '{resolved.target_id}' missing endpoint")
+    dimensions = _int_param(resolved.params, "dimensions", 64)
+    timeout = _float_param(resolved.params, "timeout_seconds", 10.0)
+    return HttpEmbeddingProvider(
+        endpoint=resolved.endpoint,
+        model=resolved.model or "",
+        dimensions=dimensions,
+        api_key_env=resolved.api_key_env or "",
+        timeout_seconds=timeout,
+    )
+
+
+def _int_param(params: dict[str, object], key: str, default: int) -> int:
+    value = params.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ModelConfigError(f"embedding param '{key}' must be an integer")
+    return value
+
+
+def _float_param(params: dict[str, object], key: str, default: float) -> float:
+    value = params.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ModelConfigError(f"embedding param '{key}' must be numeric")
+    return float(value)
 
 
 def _authorization_header(api_key_env: str) -> dict[str, str]:

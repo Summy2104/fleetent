@@ -356,7 +356,13 @@ def test_agentfile_has_session_max_count_default():
 
 def test_default_config_returns_capacity_limits(monkeypatch):
     # _default_config reads the single active agent's deployment knobs.
-    agent = AgentFile(name="t", version=1, session_max_total_mb=2, session_max_count=5)
+    agent = AgentFile(
+        name="t",
+        version=1,
+        models=agent_config.default_models(),
+        session_max_total_mb=2,
+        session_max_count=5,
+    )
     monkeypatch.setattr(agent_config, "active_agent", lambda: agent)
     cfg = session_mgr._default_config()
     assert cfg["max_total_bytes"] == 2 * 1024 * 1024

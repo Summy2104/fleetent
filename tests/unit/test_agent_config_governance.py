@@ -13,7 +13,7 @@ from fleetent import agent_config
 
 
 def _write(root, name, **fields):
-    doc = {"name": name, "version": 1}
+    doc = _agent_doc(name=name)
     doc.update(fields)
     d = root / name
     d.mkdir(parents=True, exist_ok=True)
@@ -21,20 +21,24 @@ def _write(root, name, **fields):
     return d
 
 
+def _agent_doc(name: str = "a", **fields):
+    doc = {"name": name, "version": 1, "models": agent_config.default_models().model_dump()}
+    doc.update(fields)
+    return doc
+
+
 # ── governance fields ──────────────────────────────────────────────────────
 
 
 def test_governance_fields_parse() -> None:
     af = agent_config.AgentFile.model_validate(
-        {
-            "name": "a",
-            "version": 1,
-            "agent_max_turns": 30,
-            "context_compress_threshold": 0.7,
-            "agent_budget_user_tokens": 5000,
-            "permission_gate_medium_timeout_seconds": 60,
-            "provider_failure_threshold": 5,
-        }
+        _agent_doc(
+            agent_max_turns=30,
+            context_compress_threshold=0.7,
+            agent_budget_user_tokens=5000,
+            permission_gate_medium_timeout_seconds=60,
+            provider_failure_threshold=5,
+        )
     )
     assert af.agent_max_turns == 30
     assert af.context_compress_threshold == 0.7
@@ -44,7 +48,7 @@ def test_governance_fields_parse() -> None:
 
 
 def test_governance_defaults_match_settings() -> None:
-    af = agent_config.AgentFile.model_validate({"name": "bare", "version": 1})
+    af = agent_config.AgentFile.model_validate(_agent_doc(name="bare"))
     # Defaults must equal current Settings defaults (config.py).
     assert af.agent_max_turns == 50
     assert af.agent_max_consecutive_failures == 3
@@ -69,8 +73,8 @@ def test_governance_defaults_match_settings() -> None:
 
 
 def test_two_agents_carry_independent_governance() -> None:
-    a = agent_config.AgentFile.model_validate({"name": "a", "version": 1, "agent_max_turns": 30})
-    b = agent_config.AgentFile.model_validate({"name": "b", "version": 1, "agent_max_turns": 80})
+    a = agent_config.AgentFile.model_validate(_agent_doc(name="a", agent_max_turns=30))
+    b = agent_config.AgentFile.model_validate(_agent_doc(name="b", agent_max_turns=80))
     assert a.agent_max_turns == 30
     assert b.agent_max_turns == 80
 
@@ -80,37 +84,27 @@ def test_two_agents_carry_independent_governance() -> None:
 
 def test_deployment_scalar_fields_parse() -> None:
     af = agent_config.AgentFile.model_validate(
-        {
-            "name": "a",
-            "version": 1,
-            "microsandbox_url": "http://sandbox:7777",
-            "session_ttl_days": 7,
-            "image_gen_url": "http://img:8000",
-            "vision_model": "qwen-vl",
-            "disabled_skills": ["x"],
-            "log_format": "json",
-        }
+        _agent_doc(
+            microsandbox_url="http://sandbox:7777",
+            session_ttl_days=7,
+            disabled_skills=["x"],
+            log_format="json",
+        )
     )
     assert af.microsandbox_url == "http://sandbox:7777"
     assert af.session_ttl_days == 7
-    assert af.image_gen_url == "http://img:8000"
-    assert af.vision_model == "qwen-vl"
     assert af.disabled_skills == ["x"]
     assert af.log_format == "json"
 
 
 def test_deployment_defaults_match_settings() -> None:
-    af = agent_config.AgentFile.model_validate({"name": "bare", "version": 1})
+    af = agent_config.AgentFile.model_validate(_agent_doc(name="bare"))
     assert af.microsandbox_url == "http://host.docker.internal:7777"
     assert af.log_format == "console"
     assert af.session_ttl_days == 30
     assert af.session_max_total_mb == 1024
     assert af.session_max_count == 10000
     assert af.session_cleanup_interval_seconds == 3600.0
-    assert af.image_gen_url == ""
-    assert af.image_gen_model == "default"
-    assert af.vision_url == ""
-    assert af.vision_model == "default"
     assert af.disabled_skills == []
 
 
@@ -118,11 +112,9 @@ def test_nested_observability_reuses_submodel() -> None:
     from fleetent.config import ObservabilitySettings
 
     af = agent_config.AgentFile.model_validate(
-        {
-            "name": "a",
-            "version": 1,
-            "observability": {"logging": {"console_level": "debug"}},
-        }
+        _agent_doc(
+            observability={"logging": {"console_level": "debug"}},
+        )
     )
     assert isinstance(af.observability, ObservabilitySettings)
     assert af.observability.logging.console_level == "debug"
@@ -137,14 +129,12 @@ def test_nested_blocks_reuse_submodels() -> None:
     )
 
     af = agent_config.AgentFile.model_validate(
-        {
-            "name": "a",
-            "version": 1,
-            "diagnostics": {"export_dir": "/tmp/diag"},
-            "mcp": {"enabled": False},
-            "scheduling": {"default_timezone": "Asia/Shanghai"},
-            "webhooks": {"max_body_bytes": 2048},
-        }
+        _agent_doc(
+            diagnostics={"export_dir": "/tmp/diag"},
+            mcp={"enabled": False},
+            scheduling={"default_timezone": "Asia/Shanghai"},
+            webhooks={"max_body_bytes": 2048},
+        )
     )
     assert isinstance(af.diagnostics, DiagnosticsSettings)
     assert isinstance(af.mcp, McpSettings)
@@ -169,7 +159,7 @@ def test_nested_blocks_reuse_submodels() -> None:
     ],
 )
 def test_excluded_fields_rejected(field: str) -> None:
-    doc = {"name": "a", "version": 1, field: "x" if "window" in field else 1}
+    doc = _agent_doc(**{field: "x" if "window" in field else 1})
     if field == "database_url":
         doc[field] = "sqlite:///x.db"
     with pytest.raises(ValidationError):

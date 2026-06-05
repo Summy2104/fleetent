@@ -14,7 +14,11 @@ from fleetent.platform.im_gateway_management import im_connector_store as ics
 
 
 def _write_agent(root, name, **fields):
-    doc = {"name": name, "version": 1}
+    doc = {
+        "name": name,
+        "version": 1,
+        "models": agent_config.default_models().model_dump(mode="json"),
+    }
     doc.update(fields)
     d = root / name
     d.mkdir(parents=True, exist_ok=True)

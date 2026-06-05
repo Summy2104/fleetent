@@ -5,12 +5,13 @@ import json
 import sqlite3
 import time
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast
 
 import structlog
+from openai import OpenAI
 
 from fleetent import eval_logger
-from fleetent.model import get_client_and_config
+from fleetent.model import ModelConfigError, ModelPolicySnapshot, ResolvedModelConfig
 from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatch
 
 _DEFAULT_FLAP_WINDOW = 3
@@ -180,11 +181,20 @@ def _resolve_summary_model() -> str | None:
     """Resolve the summary route's model name for the trace (AR16 D4), defensively:
     observability must never break compression, so a resolution failure → None."""
     try:
-        _, scfg = get_client_and_config("memory_extraction")
-        return str(scfg.model)
+        return str(_summary_route()[1].model)
     except Exception as exc:  # observability only — never propagate
         logger.warning("compression_summary_model_resolve_failed", error=str(exc))
         return None
+
+
+def _summary_route() -> tuple[ModelPolicySnapshot, ResolvedModelConfig]:
+    from fleetent import agent_config
+
+    policy = ModelPolicySnapshot.from_agent(agent_config.active_agent_or_default())
+    cfg = policy.resolve("memory_extraction")[0]
+    if cfg.protocol != "openai_chat" or not cfg.base_url or not cfg.model:
+        raise ModelConfigError("memory_extraction route must target an openai_chat model")
+    return policy, cfg
 
 
 def _log_compression_safe(**kwargs: Any) -> None:
@@ -394,23 +404,26 @@ def _summarize(
     """
     max_tokens = (config or {}).get("summary_max_tokens", _DEFAULT_SUMMARY_MAX_TOKENS)
     try:
-        client, cfg = get_client_and_config("memory_extraction")
+        policy, cfg = _summary_route()
+        client = OpenAI(base_url=cfg.base_url, api_key=policy.require_api_key(cfg) or "fleetent")
         text = "\n".join(
             f"{_role(m)}: {_content(m)}"
             for m in messages
             if _role(m) in ("user", "assistant") and _content(m)
         )
         prompt = _build_summary_prompt(text, prev_summary)
-        response = client.chat.completions.create(
+        create_completion = cast(Any, client.chat.completions.create)
+        response = create_completion(
             model=cfg.model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
+            **cfg.params,
         )
         summary = response.choices[0].message.content
         if not summary:
             logger.warning("compression_summary_empty_response")
             return None
-        return summary
+        return cast(str, summary)
     except Exception as exc:
         logger.warning("compression_summary_failed", error=str(exc))
         return None

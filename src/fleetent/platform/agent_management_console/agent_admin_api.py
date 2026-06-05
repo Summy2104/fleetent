@@ -13,6 +13,7 @@ from fastapi import APIRouter, Body, Header, HTTPException
 
 from fleetent import agent_store, auth, config, paths, user_store
 from fleetent.governance import audit_log
+from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
 from fleetent.platform.connector_management import (
     agent_mcp_server_store,
     agent_oauth_binding_store,
@@ -97,21 +98,9 @@ def _build_agent_yaml(agent: agent_store.Agent) -> str:
     Covers every field the admin console authors. connectors.slack is intentionally
     omitted: per-agent Slack connectors are not authored in the DB.
     """
-    data: dict[str, Any] = {"name": agent.name}
-    if agent.system_prompt:
-        data["system_prompt"] = agent.system_prompt
-    if agent.model_overrides:
-        data["model_overrides"] = agent.model_overrides
-    if agent.allowed_skills:
-        data["allowed_skills"] = agent.allowed_skills
-    if agent.allowed_tools:
-        data["allowed_tools"] = agent.allowed_tools
-    if agent.plugins:
-        data["plugins"] = agent.plugins
-    if agent.features:
-        data["features"] = agent.features
-    if agent.memory_namespace and agent.memory_namespace != "default":
-        data["memory_namespace"] = agent.memory_namespace
+    data: dict[str, Any] = agent_file_from_store(agent).model_dump(
+        mode="json", exclude_defaults=False
+    )
 
     servers: list[dict[str, Any]] = []
     for sid in agent_store.list_mcp_servers_for_agent(agent.id):

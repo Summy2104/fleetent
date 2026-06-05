@@ -5,12 +5,17 @@ from unittest.mock import AsyncMock
 import yaml
 
 import fleetent.runtime.loop as loop
+from fleetent import agent_config
 from fleetent.integrations.sandbox import enablement as se
 
 
 def _write_home_agent(home, **fields):
     home.mkdir(parents=True, exist_ok=True)
-    doc = {"name": "deployed", "version": 1}
+    doc = {
+        "name": "deployed",
+        "version": 1,
+        "models": agent_config.default_models().model_dump(mode="json"),
+    }
     doc.update(fields)
     (home / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
 

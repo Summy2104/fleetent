@@ -5,11 +5,11 @@ from the active agent; multi-agent / no-agent falls back to Settings defaults.
 """
 
 from fleetent import agent_config
-from fleetent.agent_config import AgentConfigIndex, AgentFile
+from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
 
 
 def _publish_single(**fields) -> None:
-    agent = AgentFile(name="a", version=1, **fields)
+    agent = AgentFile(name="a", version=1, models=default_models(), **fields)
     agent_config._index = AgentConfigIndex(
         agents={"a": agent}, by_channel={}, by_user={}, default="a"
     )

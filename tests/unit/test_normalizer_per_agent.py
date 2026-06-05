@@ -14,7 +14,12 @@ from fleetent.integrations.sandbox import enablement as se
 
 def _write(root, name, **fields):
     # Default access allows the test user U1 so the local per-agent gate passes.
-    doc = {"name": name, "version": 1, "access": {"allow_users": ["U1"]}}
+    doc = {
+        "name": name,
+        "version": 1,
+        "models": agent_config.default_models().model_dump(),
+        "access": {"allow_users": ["U1"]},
+    }
     doc.update(fields)
     d = root / name
     d.mkdir(parents=True, exist_ok=True)

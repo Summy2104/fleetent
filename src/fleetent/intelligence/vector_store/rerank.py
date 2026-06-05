@@ -6,6 +6,7 @@ from typing import Protocol
 import httpx
 
 from fleetent.config import RerankSettings
+from fleetent.model import ModelConfigError, ModelPolicySnapshot
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,30 @@ def create_rerank_provider(settings: RerankSettings) -> RerankProvider:
         f"Unsupported rerank.backend {settings.backend!r}. "
         "Supported rerank backends: disabled, deterministic, http"
     )
+
+
+def create_rerank_provider_from_policy(policy: ModelPolicySnapshot) -> RerankProvider:
+    resolved = policy.resolve("rerank")[0]
+    if resolved.protocol != "http_rerank":
+        raise ModelConfigError(
+            f"rerank target '{resolved.target_id}' uses unsupported protocol {resolved.protocol!r}"
+        )
+    if not resolved.endpoint:
+        raise ModelConfigError(f"rerank target '{resolved.target_id}' missing endpoint")
+    timeout = _float_param(resolved.params, "timeout_seconds", 10.0)
+    return HttpRerankProvider(
+        endpoint=resolved.endpoint,
+        model=resolved.model or "",
+        api_key_env=resolved.api_key_env or "",
+        timeout_seconds=timeout,
+    )
+
+
+def _float_param(params: dict[str, object], key: str, default: float) -> float:
+    value = params.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ModelConfigError(f"rerank param '{key}' must be numeric")
+    return float(value)
 
 
 def _authorization_header(api_key_env: str) -> dict[str, str]:

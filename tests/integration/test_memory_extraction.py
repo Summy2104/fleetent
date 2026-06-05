@@ -63,8 +63,7 @@ def _patch_extraction(monkeypatch, content: str) -> None:
         )
     )
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-    cfg = SimpleNamespace(model="test-memory-extraction", max_tokens=512)
-    monkeypatch.setattr(extraction, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(extraction, "AsyncOpenAI", lambda **kwargs: client)
 
 
 def _memory_rows(db_path):

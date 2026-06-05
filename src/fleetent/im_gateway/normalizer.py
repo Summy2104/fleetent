@@ -156,12 +156,14 @@ async def route(msg: NormalizedMessage) -> None:
     async with session_mgr.session_lock(session_id):
         history = await session_mgr.load(session_id)
 
+        from fleetent.model import ModelPolicySnapshot
         from fleetent.runtime.snapshot import _governance_from_file
 
         base_system = agent.system_prompt if agent else _SYSTEM
         allowed_tools = agent.allowed_tools if agent else None
         agent_features = agent.features if agent else None
         governance = _governance_from_file(agent) if agent else None
+        model_policy = ModelPolicySnapshot.from_agent(agent) if agent else None
         # SB3: gate run_code on the IM path too; mode is resolved once per process.
         sandbox_mode = await sandbox_enablement.get_effective_mode()
 
@@ -194,6 +196,7 @@ async def route(msg: NormalizedMessage) -> None:
             agent_features=agent_features,
             session_id=session_id,
             governance=governance,
+            model_policy=model_policy,
         )
 
         # agent_loop.run() already appended the assistant message to history in-place.

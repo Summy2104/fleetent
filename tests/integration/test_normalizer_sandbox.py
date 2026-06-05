@@ -53,6 +53,7 @@ def _write_default_agent(root, name, **fields):
     doc = {
         "name": name,
         "version": 1,
+        "models": agent_config.default_models().model_dump(mode="json"),
         "access": {"allow_users": ["u1"]},
         "bindings": {"default": True},
     }

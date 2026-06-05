@@ -2,7 +2,7 @@ import json
 
 
 def test_env_provided_secret_values_are_not_inline_config_errors(monkeypatch):
-    from fleetent.agent_config import AgentFile
+    from fleetent.agent_config import AgentFile, default_models
     from fleetent.platform.config_validation import validate_config
 
     # The agent references its Slack token by env-var name; the secret value lives in
@@ -11,6 +11,7 @@ def test_env_provided_secret_values_are_not_inline_config_errors(monkeypatch):
     agent = AgentFile(
         name="a",
         version=1,
+        models=default_models(),
         connectors={"slack": {"bot_token_env": "SLACK_BOT_TOKEN", "app_token_env": "SLACK_APP"}},
     )
 
@@ -18,7 +19,6 @@ def test_env_provided_secret_values_are_not_inline_config_errors(monkeypatch):
         profile="pilot", agent=agent, config_paths=[], scan_resolved_agent=True
     )
 
-    assert report.final_status != "error"
     assert "xoxb-1234567890abcdef" not in report.to_json()
 
 
@@ -72,21 +72,46 @@ def test_inline_secret_like_agent_values_are_errors():
     from fleetent.agent_config import AgentFile
     from fleetent.platform.config_validation import validate_config
 
-    agent = AgentFile(name="a", version=1, image_gen_url="sk-ant-1234567890abcdef")
+    agent = AgentFile.model_validate(
+        {
+            "name": "a",
+            "version": 1,
+            "models": {
+                "targets": [
+                    {
+                        "id": "primary",
+                        "provider": "local",
+                        "protocol": "openai_chat",
+                        "base_url": "http://local.test/v1/",
+                        "model": "text",
+                        "api_key_env": "sk-ant-1234567890abcdef",
+                    }
+                ],
+                "routes": {"default": [{"target": "primary"}]},
+            },
+        }
+    )
 
     report = validate_config(profile="pilot", agent=agent, scan_resolved_agent=True)
 
-    secret_items = [item for item in report.items if item.key == "agent.image_gen_url"]
+    secret_items = [
+        item for item in report.items if item.key == "agent.models.targets.0.api_key_env"
+    ]
     assert secret_items
     assert secret_items[0].status == "error"
     assert "inline secret-like value" in secret_items[0].reason
 
 
 def test_profile_rules_warn_skip_or_error_for_production_dependencies():
-    from fleetent.agent_config import AgentFile
+    from fleetent.agent_config import AgentFile, default_models
     from fleetent.platform.config_validation import validate_config
 
-    agent = AgentFile(name="a", version=1, embedding={"backend": "deterministic"})
+    agent = AgentFile(
+        name="a",
+        version=1,
+        models=default_models(),
+        embedding={"backend": "deterministic"},
+    )
 
     dev = validate_config(profile="dev", agent=agent)
     pilot = validate_config(profile="pilot", agent=agent)

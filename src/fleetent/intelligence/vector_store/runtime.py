@@ -5,9 +5,11 @@ from fleetent.intelligence.vector_store.backend import (
     create_vector_backend,
 )
 from fleetent.intelligence.vector_store.embeddings import (
+    DeterministicEmbeddingProvider,
     EmbeddingProvider,
-    create_embedding_provider,
+    create_embedding_provider_from_policy,
 )
+from fleetent.model import ModelPolicySnapshot
 
 _embedding: EmbeddingProvider
 _backend: VectorBackend
@@ -23,7 +25,10 @@ def _platform_database_url() -> str:
 def _configure(agent: AgentFile) -> None:
     global _embedding, _backend
 
-    _embedding = create_embedding_provider(agent.embedding)
+    if not agent.name:
+        _embedding = DeterministicEmbeddingProvider()
+    else:
+        _embedding = create_embedding_provider_from_policy(ModelPolicySnapshot.from_agent(agent))
     database_url = agent.vector_store.database_url or _platform_database_url()
     _backend = create_vector_backend(agent.vector_store, database_url=database_url)
 

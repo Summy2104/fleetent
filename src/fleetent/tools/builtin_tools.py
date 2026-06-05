@@ -382,4 +382,5 @@ async def invoke_agent(agent_name: str, message: str) -> str:
         is_sub_agent=True,
         allowed_tools=snapshot.allowed_tools,
         agent_name=agent_name,
+        model_policy=snapshot.model_policy,
     )

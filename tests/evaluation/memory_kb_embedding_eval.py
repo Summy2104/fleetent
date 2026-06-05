@@ -10,6 +10,13 @@ from typing import Any
 
 import pytest
 
+from fleetent.agent_config import (
+    AgentFile,
+    AgentModels,
+    ModelRouteEntry,
+    ModelTarget,
+    default_models,
+)
 from fleetent.config import EmbeddingSettings, KnowledgeBaseSettings, Settings, VectorStoreSettings
 from fleetent.db import create_database
 from fleetent.intelligence.vector_store import ReindexSummary
@@ -154,30 +161,33 @@ async def _run_fixture(
     vector_db_path: Path,
     embedding: EmbeddingSettings,
 ) -> CombinedEmbeddingEvaluationResult:
+    from fleetent import agent_config
     from fleetent.intelligence import knowledge_base, vector_store
     from fleetent.intelligence.knowledge_base import runtime as kb_runtime
     from fleetent.intelligence.vector_store import runtime as vector_runtime
 
     apply_migrations(db_path)
-    settings = Settings(
-        anthropic_api_key="test-key",
-        database_url=f"sqlite:///{db_path}",
+    database_url = f"sqlite:///{db_path}"
+    kb_settings = KnowledgeBaseSettings(
+        enabled=True,
+        chunk_size=120,
+        chunk_overlap=0,
+    )
+    agent = _agent_for_embedding(
+        embedding,
         vector_store=VectorStoreSettings(
             backend="sqlite",
             database_url=f"sqlite:///{vector_db_path}",
         ),
-        embedding=embedding,
-        knowledge_base=KnowledgeBaseSettings(
-            enabled=True,
-            chunk_size=120,
-            chunk_overlap=0,
-        ),
     )
-    database = create_database(settings.database_url)
-    monkeypatch.setenv("DATABASE_URL", settings.database_url)
+    settings = Settings(database_url=database_url)
+    database = create_database(database_url)
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    monkeypatch.setattr(agent_config, "active_agent_or_default", lambda: agent)
     monkeypatch.setattr(kb_runtime, "_settings", lambda: settings)
     monkeypatch.setattr(kb_runtime, "_database", lambda: database)
-    vector_runtime._configure(settings)
+    monkeypatch.setattr(kb_runtime, "_kb_config", lambda: kb_settings)
+    vector_runtime._configure(agent)
 
     try:
         _insert_memories(db_path, str(fixture["user_id"]), fixture["memories"])
@@ -212,7 +222,42 @@ async def _run_fixture(
             query_results=query_results,
         )
     finally:
-        vector_runtime._configure(Settings())
+        vector_runtime._configure(AgentFile(name="", version=0, models=default_models()))
+
+
+def _agent_for_embedding(
+    embedding: EmbeddingSettings,
+    *,
+    vector_store: VectorStoreSettings,
+) -> AgentFile:
+    if embedding.backend == "deterministic":
+        return AgentFile(
+            name="",
+            version=0,
+            models=default_models(),
+            vector_store=vector_store,
+        )
+    if embedding.backend == "http":
+        return AgentFile(
+            name="memory-kb-real-embedding-eval",
+            version=1,
+            models=AgentModels(
+                targets=[
+                    ModelTarget(
+                        id="embedding",
+                        provider="evaluation",
+                        protocol="http_embedding",
+                        endpoint=embedding.endpoint,
+                        model=embedding.model,
+                        api_key_env=embedding.api_key_env,
+                        params={"dimensions": embedding.dimensions},
+                    )
+                ],
+                routes={"embedding": [ModelRouteEntry(target="embedding")]},
+            ),
+            vector_store=vector_store,
+        )
+    raise FixtureValidationError(f"unsupported embedding backend: {embedding.backend}")
 
 
 def assert_query_expectations(result: CombinedEmbeddingEvaluationResult) -> None:

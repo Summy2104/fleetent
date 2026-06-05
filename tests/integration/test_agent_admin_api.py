@@ -349,7 +349,6 @@ def test_export_agent_yaml(client):
         plugins=["acme-docs", "billing"],
         features={"code_execution": True, "sandbox_env": {"TZ": "Asia/Shanghai"}},
         allowed_skills=["jira"],
-        model_overrides={"default": {"provider": "anthropic", "model": "claude-opus-4-8"}},
         memory_namespace="support-bot",
     )
     agent_mcp_server_store.add_mcp_server(
@@ -370,7 +369,8 @@ def test_export_agent_yaml(client):
     doc = _yaml.safe_load(r.json()["yaml"])
     assert doc["name"] == "support-bot"
     assert doc["system_prompt"].startswith("You are support-bot")
-    assert doc["model_overrides"]["default"]["model"] == "claude-opus-4-8"
+    assert "model_overrides" not in doc
+    assert doc["models"]["routes"]["default"][0]["target"] == "default"
     assert doc["allowed_tools"] == ["search_*", "read_file"]
     assert doc["plugins"] == ["acme-docs", "billing"]
     assert doc["features"]["sandbox_env"]["TZ"] == "Asia/Shanghai"
@@ -415,7 +415,6 @@ def test_deploy_writes_agent_yaml(client, tmp_path, monkeypatch):
         "You are dep-bot.",
         ["read_file"],
         plugins=["p1"],
-        model_overrides={"default": {"provider": "anthropic", "model": "claude-opus-4-8"}},
     )
     token, _ = _session_for("admin")
     r = client.post("/admin/agents/dep-bot/deploy", headers=_hdr(token))
@@ -425,6 +424,8 @@ def test_deploy_writes_agent_yaml(client, tmp_path, monkeypatch):
     assert r.json()["path"] == str(dest)
     doc = _yaml.safe_load(dest.read_text())
     assert doc["name"] == "dep-bot"
+    assert "models" in doc
+    assert "model_overrides" not in doc
     assert doc["allowed_tools"] == ["read_file"]
     assert doc["plugins"] == ["p1"]
 

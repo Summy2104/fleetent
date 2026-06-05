@@ -22,13 +22,18 @@ def _msg(owner_id, replies, *, session_id="s1", channel_id="C1"):
 async def test_session_namespaced_by_owner(monkeypatch, tmp_path):
     import contextlib
 
-    from fleetent.agent_config import AgentAccess, AgentFile
+    from fleetent.agent_config import AgentAccess, AgentFile, default_models
     from fleetent.im_gateway import access
     from fleetent.runtime import loop as agent_loop
     from fleetent.session import manager as session_mgr
 
     # A resolved agent that allows the test user, so the local gate passes.
-    agent = AgentFile(name="a", version=1, access=AgentAccess(allow_users=["u1"]))
+    agent = AgentFile(
+        name="a",
+        version=1,
+        models=default_models(),
+        access=AgentAccess(allow_users=["u1"]),
+    )
     monkeypatch.setattr(normalizer, "get_agent_for_context", lambda *a, **k: agent)
     monkeypatch.setattr(access, "APPROVALS_PATH", tmp_path / "data" / "im_approvals.json")
 

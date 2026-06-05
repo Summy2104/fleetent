@@ -11,10 +11,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from fleetent.agent_config import AgentModels, ModelRouteEntry, ModelTarget
 from fleetent.intelligence import memory as memory_layer
 from fleetent.intelligence import vector_store
 from fleetent.intelligence.memory import extraction
-from fleetent.model import router as model_router
+from fleetent.model import ModelPolicySnapshot
 from tests.integration.test_migrations import apply_migrations
 
 REQUIRED_FIXTURE_FIELDS = (
@@ -29,6 +30,7 @@ _VALID_ACTIONS = {"create", "update", "delete", "ignore"}
 _DEFAULT_USER_ID = "evaluation-user"
 _FIXTURE_DIR = Path(__file__).parent / "fixtures" / "memory_extraction"
 _NON_REAL_LLM_API_KEYS = {"", "test-key"}
+_REAL_LLM_API_KEY_ENV = "FLEETENT_EVAL_MEMORY_LLM_API_KEY"
 
 
 class FixtureValidationError(ValueError):
@@ -90,7 +92,6 @@ async def run_mock_fixture(
     db_path = tmp_path / "memory-extraction-eval.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
     _insert_initial_memories(db_path, fixture["initial_memories"])
     route_names: list[str] = []
@@ -104,11 +105,10 @@ async def run_mock_fixture(
         )
     )
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-    cfg = SimpleNamespace(model="mock-memory-extraction", max_tokens=512)
 
-    def get_mock_client(route_name: str) -> tuple[Any, Any]:
-        route_names.append(route_name)
-        return client, cfg
+    def openai_client(**kwargs: Any) -> Any:
+        route_names.append("memory_extraction")
+        return client
 
     vector_upserts: list[tuple[str, str, str]] = []
     vector_deletes: list[tuple[str, str]] = []
@@ -119,11 +119,15 @@ async def run_mock_fixture(
     async def delete(id: str, namespace: str) -> None:
         vector_deletes.append((id, namespace))
 
-    monkeypatch.setattr(extraction, "get_async_client_and_config", get_mock_client)
+    monkeypatch.setattr(extraction, "AsyncOpenAI", openai_client)
     monkeypatch.setattr(vector_store, "upsert", upsert)
     monkeypatch.setattr(vector_store, "delete", delete)
 
-    await memory_layer.extract_and_update(_DEFAULT_USER_ID, list(fixture["conversation"]))
+    await memory_layer.extract_and_update(
+        _DEFAULT_USER_ID,
+        list(fixture["conversation"]),
+        model_policy=_memory_policy(api_key_env=None, model="mock-memory-extraction"),
+    )
     return MockEvaluationResult(
         db_path=db_path,
         rows=memory_rows(db_path),
@@ -151,11 +155,6 @@ async def run_real_llm_fixture(
     route_names: list[str] = []
     vector_upserts: list[tuple[str, str, str]] = []
     vector_deletes: list[tuple[str, str]] = []
-    original_get_client = extraction.get_async_client_and_config
-
-    def get_recorded_client(route_name: str) -> tuple[Any, Any]:
-        route_names.append(route_name)
-        return original_get_client(route_name)
 
     async def upsert(id: str, text: str, namespace: str) -> None:
         vector_upserts.append((id, text, namespace))
@@ -163,11 +162,15 @@ async def run_real_llm_fixture(
     async def delete(id: str, namespace: str) -> None:
         vector_deletes.append((id, namespace))
 
-    monkeypatch.setattr(extraction, "get_async_client_and_config", get_recorded_client)
     monkeypatch.setattr(vector_store, "upsert", upsert)
     monkeypatch.setattr(vector_store, "delete", delete)
 
-    await memory_layer.extract_and_update(_DEFAULT_USER_ID, list(fixture["conversation"]))
+    route_names.append("memory_extraction")
+    await memory_layer.extract_and_update(
+        _DEFAULT_USER_ID,
+        list(fixture["conversation"]),
+        model_policy=_memory_policy(api_key_env=_REAL_LLM_API_KEY_ENV),
+    )
     return MockEvaluationResult(
         db_path=db_path,
         rows=memory_rows(db_path),
@@ -177,10 +180,31 @@ async def run_real_llm_fixture(
     )
 
 
-def _has_real_llm_provider_credentials(route_name: str = "memory_extraction") -> bool:
-    routes = model_router._load_routes()
-    route = routes.get(route_name, routes["default"])
-    return os.environ.get(route.api_key_env, "").strip() not in _NON_REAL_LLM_API_KEYS
+def _has_real_llm_provider_credentials() -> bool:
+    return os.environ.get(_REAL_LLM_API_KEY_ENV, "").strip() not in _NON_REAL_LLM_API_KEYS
+
+
+def _memory_policy(*, api_key_env: str | None, model: str = "memory-eval") -> ModelPolicySnapshot:
+    return ModelPolicySnapshot.from_models(
+        agent_id="memory-eval",
+        models=AgentModels(
+            targets=[
+                ModelTarget(
+                    id="memory",
+                    provider="eval",
+                    protocol="openai_chat",
+                    base_url="https://memory-eval.test/v1/",
+                    model=model,
+                    api_key_env=api_key_env,
+                )
+            ],
+            routes={
+                "memory_extraction": [
+                    ModelRouteEntry(target="memory", max_tokens=512),
+                ]
+            },
+        ),
+    )
 
 
 def assert_fixture_memory_state(

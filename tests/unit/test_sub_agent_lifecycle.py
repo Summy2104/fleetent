@@ -93,6 +93,6 @@ def test_resolve_timeout_config_over_default():
 
 
 def test_agentfile_has_sub_agent_timeout_default_300():
-    from fleetent.agent_config import AgentFile
+    from fleetent.agent_config import AgentFile, default_models
 
-    assert AgentFile(name="x", version=1).sub_agent_timeout_seconds == 300
+    assert AgentFile(name="x", version=1, models=default_models()).sub_agent_timeout_seconds == 300

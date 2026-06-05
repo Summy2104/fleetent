@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from fleetent import paths
-from fleetent.agent_config import AgentFile
+from fleetent.agent_config import AgentFile, default_models
 from fleetent.config import Settings, configure_logging
 
 
@@ -143,6 +143,7 @@ def test_vector_provider_settings_accept_env_references():
     s = AgentFile(
         name="t",
         version=1,
+        models=default_models(),
         embedding={
             "backend": "http",
             "endpoint_env": "FLEETENT_EVAL_EMBEDDING_ENDPOINT",
@@ -168,7 +169,7 @@ def test_vector_provider_settings_accept_env_references():
 
 
 def test_agent_mcp_namespace_is_policy_only():
-    s = AgentFile(name="t", version=1)
+    s = AgentFile(name="t", version=1, models=default_models())
 
     assert s.mcp.enabled is True
     assert not hasattr(s.mcp, "servers")
@@ -179,6 +180,7 @@ def test_agent_rejects_mcp_policy_server_definitions():
         AgentFile(
             name="t",
             version=1,
+            models=default_models(),
             mcp={
                 "servers": [
                     {
@@ -242,7 +244,7 @@ def test_observability_logging_defaults():
 
 
 def test_vector_store_defaults():
-    s = AgentFile(name="t", version=1)
+    s = AgentFile(name="t", version=1, models=default_models())
 
     assert s.vector_store.backend == "memory"
     assert s.vector_store.database_url is None
@@ -255,7 +257,7 @@ def test_vector_store_defaults():
 
 
 def test_rerank_defaults():
-    s = AgentFile(name="t", version=1)
+    s = AgentFile(name="t", version=1, models=default_models())
 
     assert s.rerank.backend == "disabled"
     assert s.rerank.endpoint == ""
@@ -264,19 +266,18 @@ def test_rerank_defaults():
     assert s.rerank.timeout_seconds == 10.0
 
 
-def test_knowledge_base_defaults():
-    s = AgentFile(name="t", version=1)
+def test_agent_knowledge_defaults():
+    s = AgentFile(name="t", version=1, models=default_models())
 
-    assert s.knowledge_base.enabled is False
-    assert s.knowledge_base.default_tenant_id == "default"
-    assert s.knowledge_base.default_kb_id == "global"
-    assert s.knowledge_base.chunk_size > 0
-    assert s.knowledge_base.chunk_overlap >= 0
-    assert s.knowledge_base.chunk_overlap < s.knowledge_base.chunk_size
+    assert s.knowledge.enabled is False
+    assert s.knowledge.bindings == []
+    assert s.knowledge.retrieval_policy.mode == "hybrid"
+    assert s.knowledge.retrieval_policy.top_k == 10
+    assert s.knowledge.retrieval_policy.embedding_route == ""
 
 
 def test_diagnostics_defaults_are_conservative():
-    s = AgentFile(name="t", version=1)
+    s = AgentFile(name="t", version=1, models=default_models())
 
     assert s.diagnostics.export_dir == str(paths.data_dir() / "diagnostics")
     assert s.diagnostics.retention.enabled is False
@@ -289,6 +290,7 @@ def test_diagnostics_retention_days_are_opt_in():
     s = AgentFile(
         name="t",
         version=1,
+        models=default_models(),
         diagnostics={"retention": {"enabled": True, "logs_days": 7}},
     )
 
@@ -302,6 +304,7 @@ def test_vector_store_accepts_sqlite_backend_with_optional_database_url():
     s = AgentFile(
         name="t",
         version=1,
+        models=default_models(),
         vector_store={"backend": "sqlite", "database_url": "sqlite:///tmp/vector.db"},
     )
 
@@ -319,7 +322,9 @@ def test_sqlite_vector_backend_uses_global_database_url_when_not_configured(tmp_
     # platform Settings.database_url when the agent's vector_store has none.
     database_url = f"sqlite:///{tmp_path / 'app.db'}"
     platform = Settings(database_url=database_url)
-    agent = AgentFile(name="t", version=1, vector_store={"backend": "sqlite"})
+    agent = AgentFile(
+        name="t", version=1, models=default_models(), vector_store={"backend": "sqlite"}
+    )
 
     backend = create_vector_backend(
         agent.vector_store,

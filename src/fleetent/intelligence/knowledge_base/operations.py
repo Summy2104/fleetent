@@ -8,14 +8,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from fleetent.agent_config import AgentFile
-from fleetent.config import (
-    ConfluenceConnectorSettings,
-    GoogleDriveConnectorSettings,
-    KnowledgeBaseSettings,
-    Settings,
-)
+from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
+from fleetent.intelligence.knowledge_base.config import (
+    KnowledgeConfigSnapshot,
+    KnowledgeSourceConfig,
+    load_knowledge_config,
+)
 from fleetent.intelligence.knowledge_base.connectors.confluence import (
     ConfluenceAuthError,
     ConfluenceClient,
@@ -102,21 +101,20 @@ class RealConnectorSmokeStatus:
     execute_sync: SmokeStepStatus
 
 
-def list_configured_connectors(settings: AgentFile | None = None) -> list[ConnectorSummary]:
+def list_configured_connectors(
+    settings: KnowledgeConfigSnapshot | None = None,
+) -> list[ConnectorSummary]:
     """List configured knowledge-base connectors without exposing credential payloads."""
-    return [
-        _summary_for_definition(item)
-        for item in _connector_definitions(settings.knowledge_base if settings else _kb_config())
-    ]
+    return [_summary_for_definition(item) for item in _connector_definitions(_kb_config(settings))]
 
 
 def get_connector_config(
     connector_id: str,
     *,
-    settings: AgentFile | None = None,
+    settings: KnowledgeConfigSnapshot | None = None,
 ) -> ConnectorDefinition:
     """Return one configured connector definition."""
-    for definition in _connector_definitions(settings.knowledge_base if settings else _kb_config()):
+    for definition in _connector_definitions(_kb_config(settings)):
         if definition.connector_id == connector_id:
             return definition
     raise ValueError(f"unknown connector_id: {connector_id}")
@@ -125,7 +123,7 @@ def get_connector_config(
 async def check_connector(
     connector_id: str,
     *,
-    settings: AgentFile | None = None,
+    settings: KnowledgeConfigSnapshot | None = None,
     google_drive_client: GoogleDriveClient | None = None,
     confluence_client: ConfluenceClient | None = None,
 ) -> ConnectorCheckResult:
@@ -167,7 +165,7 @@ async def check_connector(
 async def run_connector_sync(
     connector_id: str,
     *,
-    settings: AgentFile | None = None,
+    settings: KnowledgeConfigSnapshot | None = None,
     dry_run: bool = False,
     google_drive_client: GoogleDriveClient | None = None,
     confluence_client: ConfluenceClient | None = None,
@@ -198,7 +196,7 @@ async def run_connector_sync(
 def get_connector_status(
     connector_id: str,
     *,
-    settings: AgentFile | None = None,
+    settings: KnowledgeConfigSnapshot | None = None,
 ) -> ConnectorStatus:
     """Read the latest known connector operation status."""
     definition = get_connector_config(connector_id, settings=settings)
@@ -388,10 +386,9 @@ def _create_confluence_client(
     )
 
 
-def _connector_definitions(kb: KnowledgeBaseSettings) -> list[ConnectorDefinition]:
+def _connector_definitions(config: KnowledgeConfigSnapshot) -> list[ConnectorDefinition]:
     definitions = [
-        *[_google_definition(item) for item in kb.google_drive.connectors],
-        *[_confluence_definition(item) for item in kb.confluence.connectors],
+        _source_definition(source) for kb in config.knowledge_bases for source in kb.sources
     ]
     seen: set[str] = set()
     for definition in definitions:
@@ -401,13 +398,19 @@ def _connector_definitions(kb: KnowledgeBaseSettings) -> list[ConnectorDefinitio
     return definitions
 
 
-def _google_definition(item: GoogleDriveConnectorSettings) -> ConnectorDefinition:
+def _source_definition(source: KnowledgeSourceConfig) -> ConnectorDefinition:
+    if source.type == "google_drive":
+        return _google_definition(source)
+    return _confluence_definition(source)
+
+
+def _google_definition(item: KnowledgeSourceConfig) -> ConnectorDefinition:
     return ConnectorDefinition(
-        connector_id=item.connector_id,
+        connector_id=item.id,
         connector_type="google_drive",
         enabled=item.enabled,
         config=GoogleDriveConnectorConfig(
-            connector_id=item.connector_id,
+            connector_id=item.id,
             tenant_id=item.tenant_id,
             kb_id=item.kb_id,
             folder_id=item.folder_id,
@@ -422,13 +425,13 @@ def _google_definition(item: GoogleDriveConnectorSettings) -> ConnectorDefinitio
     )
 
 
-def _confluence_definition(item: ConfluenceConnectorSettings) -> ConnectorDefinition:
+def _confluence_definition(item: KnowledgeSourceConfig) -> ConnectorDefinition:
     return ConnectorDefinition(
-        connector_id=item.connector_id,
+        connector_id=item.id,
         connector_type="confluence",
         enabled=item.enabled,
         config=ConfluenceConnectorConfig(
-            connector_id=item.connector_id,
+            connector_id=item.id,
             tenant_id=item.tenant_id,
             kb_id=item.kb_id,
             base_url=item.base_url,
@@ -444,13 +447,13 @@ def _confluence_definition(item: ConfluenceConnectorSettings) -> ConnectorDefini
     )
 
 
-def _resolve_confluence_credential_ref(item: ConfluenceConnectorSettings) -> str:
+def _resolve_confluence_credential_ref(item: KnowledgeSourceConfig) -> str:
     if item.api_token_env:
         return f"env:{item.api_token_env}"
     return item.credential_ref
 
 
-def _resolve_confluence_api_token_env(item: ConfluenceConnectorSettings) -> str:
+def _resolve_confluence_api_token_env(item: KnowledgeSourceConfig) -> str:
     if item.api_token_env:
         return item.api_token_env
     if item.credential_ref.startswith("env:"):
@@ -672,11 +675,14 @@ def _settings() -> Settings:
     return Settings()
 
 
-def _kb_config() -> KnowledgeBaseSettings:
-    """knowledge_base config from the active agent (a neutral default when absent)."""
-    from fleetent import agent_config
-
-    return agent_config.active_agent_or_default().knowledge_base
+def _kb_config(settings: KnowledgeConfigSnapshot | None = None) -> KnowledgeConfigSnapshot:
+    """Knowledge service config from explicit snapshot or default knowledge.yaml."""
+    if settings is not None:
+        return settings
+    try:
+        return load_knowledge_config()
+    except FileNotFoundError:
+        return KnowledgeConfigSnapshot()
 
 
 def _database() -> SQLiteDatabase:

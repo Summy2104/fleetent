@@ -153,9 +153,11 @@ async def test_timeout_is_plain_await_stop_no_sandbox(monkeypatch):
 
 
 def test_agentfile_tool_default_timeout_default_30():
-    from fleetent.agent_config import AgentFile
+    from fleetent.agent_config import AgentFile, default_models
 
-    assert AgentFile(name="x", version=1).tool_default_timeout_seconds == 30.0
+    assert (
+        AgentFile(name="x", version=1, models=default_models()).tool_default_timeout_seconds == 30.0
+    )
 
 
 def test_get_effective_timeout_honors_passed_default(monkeypatch):

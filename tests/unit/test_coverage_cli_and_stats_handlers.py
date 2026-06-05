@@ -38,7 +38,7 @@ def test_agent_cli_handles_channel_version_user_and_default_flows(monkeypatch, t
         allowed_tools=["search"],
         skills_dir="skills",
         mcp_server_ids=["mcp"],
-        model_overrides={"model": "fast"},
+        model_policy=SimpleNamespace(model_dump=lambda mode="json": {"routes": {"default": []}}),
         memory_namespace="ops",
     )
 

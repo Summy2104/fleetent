@@ -1,6 +1,5 @@
 """Standalone agent runtime: boot one agent home, bind IM, optional HTTP — no platform."""
 
-
 import yaml
 from fastapi.testclient import TestClient
 
@@ -24,7 +23,12 @@ class _FakeSupervisor:
 def _write_home(tmp_path, name="support", **fields):
     home = tmp_path / name
     home.mkdir(parents=True, exist_ok=True)
-    doc = {"name": name, "version": 1, "system_prompt": "I am support."}
+    doc = {
+        "name": name,
+        "version": 1,
+        "system_prompt": "I am support.",
+        "models": agent_config.default_models().model_dump(mode="json"),
+    }
     doc.update(fields)
     (home / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
     return home
