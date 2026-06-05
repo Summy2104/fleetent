@@ -251,6 +251,25 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .spin { display: inline-block; animation: spin 1s linear infinite; }
 
+  /* --- Bind IM identity picker --- */
+  .bind-im-summary { display:flex; align-items:center; gap:12px; padding:12px 14px;
+    border:1px solid var(--border); border-radius:10px; background:var(--surface); }
+  .bind-im-summary .bind-im-avatar { font-size:22px; line-height:1; flex:none; }
+  .bind-im-summary .bind-im-id { font-weight:600; }
+  .bind-im-summary .bind-im-owner { color:var(--muted); font-size:12px; margin-top:2px; }
+  .bind-user-list { max-height:300px; overflow-y:auto; border:1px solid var(--border);
+    border-radius:10px; }
+  .bind-user-list:empty { display:none; }
+  .bind-user-item { display:flex; align-items:center; gap:10px; padding:10px 12px;
+    border-bottom:1px solid var(--border); cursor:pointer; }
+  .bind-user-item:last-child { border-bottom:none; }
+  .bind-user-item:hover { background:var(--surface); }
+  .bind-user-item.is-current { opacity:.55; cursor:default; }
+  .bind-user-item .bind-user-main { flex:1; min-width:0; }
+  .bind-user-item .bind-user-name { font-weight:600; white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; }
+  .bind-user-item .bind-user-sub { color:var(--muted); font-size:12px; }
+  .bind-user-empty { padding:16px; text-align:center; color:var(--muted); font-size:13px; }
   /* --- Skills module --- */
   .sk-toolbar { display:flex; gap:10px; margin-bottom:10px; }
   .sk-search { flex:1; }
@@ -962,15 +981,14 @@
 
   <div id="bind-modal" class="modal hidden">
     <div class="modal-box" role="dialog" aria-modal="true">
-      <h3>Bind IM identity to user</h3>
-      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="doBindIm(); return false;">
-        <select id="bind-user-select"></select>
-        <div id="bind-err" class="err"></div>
-        <div class="row" style="justify-content:flex-end;">
-          <button type="button" class="ghost" onclick="closeBindModal()">Cancel</button>
-          <button type="submit">Bind</button>
-        </div>
-      </form>
+      <h3>Link IM identity to a user</h3>
+      <div id="bind-im-summary" class="bind-im-summary"></div>
+      <input id="bind-search" class="sk-search" style="margin:10px 0 6px;" placeholder="🔍  Search users by email, name or id" oninput="bindFilterUsers()">
+      <div id="bind-user-list" class="bind-user-list"></div>
+      <div id="bind-err" class="err"></div>
+      <div class="row" style="justify-content:flex-end; margin-top:8px;">
+        <button type="button" class="ghost" onclick="closeBindModal()">Cancel</button>
+      </div>
     </div>
   </div>
 
@@ -1649,7 +1667,7 @@ function renderUsers() {
         <td>${esc(r.platform_user_id)}</td>
         <td><span class="pill ${r.allowed ? "active" : "blocked"}">${r.allowed ? "allowed" : "blocked"}</span></td>
         <td class="actions">
-          <button class="small ghost" onclick="openBindModal(${r.id})">Bind</button>
+          <button class="small ghost" onclick="openBindModal(${r.id})">Reassign user</button>
           ${r.allowed
             ? `<button class="small danger" onclick="imBlock(${r.id})">Block identity</button>`
             : `<button class="small ghost" onclick="imRestore(${r.id})">Restore</button>`}
@@ -1835,24 +1853,71 @@ async function viewKeys(id) {
 async function imBlock(id) { const reason = prompt("Reason?"); if (reason === null) return; try { await api("POST", `/im-users/${id}/block`, { reason }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
 async function imRestore(id) { try { await api("POST", `/im-users/${id}/restore`, { reason: "" }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
 
+const PLATFORM_ICON = { slack: "💬", telegram: "✈️", whatsapp: "🟢" };
 let BIND_IM_ID = null;
+let BIND_IM_OWNER = null;
+
 async function openBindModal(imId) {
   BIND_IM_ID = imId;
   $("bind-err").textContent = "";
-  const users = await api("GET", "/users");
-  $("bind-user-select").innerHTML = users
-    .map(u => `<option value="${u.id}">${esc(u.email || u.name || u.id)} · ${esc(u.role)}</option>`)
-    .join("");
+  $("bind-search").value = "";
+  // Locate the identity in the already-loaded grouping to render a context summary.
+  const identity = Object.values(IM_BY_USER).flat().find(r => r.id === imId);
+  BIND_IM_OWNER = identity ? identity.user_id : null;
+  const icon = PLATFORM_ICON[identity?.platform] || "🔗";
+  const owner = ALL_USERS.find(u => u.id === BIND_IM_OWNER);
+  const ownerLabel = owner ? esc(owner.email || owner.name || owner.id) : "—";
+  $("bind-im-summary").innerHTML = identity
+    ? `<span class="bind-im-avatar">${icon}</span>
+       <div>
+         <div class="bind-im-id">${esc(identity.platform)} · ${esc(identity.platform_user_id)}</div>
+         <div class="bind-im-owner">Currently linked to ${ownerLabel}</div>
+       </div>`
+    : "";
+  bindRenderUsers();
   $("bind-modal").classList.remove("hidden");
+  $("bind-search").focus();
 }
-function closeBindModal() { $("bind-modal").classList.add("hidden"); BIND_IM_ID = null; }
-async function doBindIm() {
+
+function bindRenderUsers() {
+  const q = ($("bind-search").value || "").trim().toLowerCase();
+  const matches = ALL_USERS.filter(u => {
+    if (!q) return true;
+    return [u.email, u.name, u.id, u.role].some(v => (v || "").toLowerCase().includes(q));
+  });
+  if (!matches.length) {
+    $("bind-user-list").innerHTML = `<div class="bind-user-empty">No matching users</div>`;
+    return;
+  }
+  $("bind-user-list").innerHTML = matches.map(u => {
+    const current = u.id === BIND_IM_OWNER;
+    const onclick = current ? "" : `onclick="doBindIm('${u.id}')"`;
+    return `<div class="bind-user-item ${current ? "is-current" : ""}" ${onclick}>
+      <div class="bind-user-main">
+        <div class="bind-user-name">${esc(u.email || u.name || u.id)}</div>
+        <div class="bind-user-sub">${esc(u.role)}${u.email && u.name ? " · " + esc(u.name) : ""}</div>
+      </div>
+      ${current ? `<span class="pill active">current</span>` : `<span class="muted">Link →</span>`}
+    </div>`;
+  }).join("");
+}
+
+function bindFilterUsers() { bindRenderUsers(); }
+
+function closeBindModal() {
+  $("bind-modal").classList.add("hidden");
+  BIND_IM_ID = null;
+  BIND_IM_OWNER = null;
+}
+
+async function doBindIm(userId) {
   $("bind-err").textContent = "";
   try {
-    await api("POST", `/im-users/${BIND_IM_ID}/bind`, { user_id: $("bind-user-select").value });
+    await api("POST", `/im-users/${BIND_IM_ID}/bind`, { user_id: userId });
     closeBindModal();
+    toast("IM identity reassigned", "success");
     loadUsers();
-  } catch (e) { $("bind-err").textContent = e.message; }
+  } catch (e) { $("bind-err").textContent = apiErrorMessage(e.message || e); }
 }
 
 // Per-platform credential fields — must match im_connector_config.PLATFORM_CONFIG_KEYS.

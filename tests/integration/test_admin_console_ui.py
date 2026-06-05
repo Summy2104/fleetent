@@ -1009,6 +1009,23 @@ def test_render_users_joins_im_identities_by_user():
     assert "platform_user_id" in body
 
 
+def test_bind_modal_is_searchable_user_picker():
+    html = ADMIN_HTML
+    # Redesigned bind flow: a searchable user picker, not a bare <select>.
+    assert 'id="bind-user-select"' not in html
+    assert 'id="bind-search"' in html
+    assert 'id="bind-user-list"' in html
+    assert "bindFilterUsers(" in html
+    assert "bindRenderUsers(" in html
+    # Modal shows which identity is being reassigned + its current owner.
+    assert 'id="bind-im-summary"' in html
+    assert "Currently linked to" in html
+    # Clicking a user row links it directly (id passed to doBindIm).
+    assert "doBindIm('" in html or "doBindIm(`" in html
+    # Platform icons for friendlier context.
+    assert "PLATFORM_ICON" in html
+
+
 # --- Task 3: connectors grouped under owning User -----------------------------
 
 
