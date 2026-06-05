@@ -168,17 +168,29 @@ def test_real_sync_requires_confirm(client, monkeypatch):
     assert r.status_code == 200 and r.json()["status"] == "synced"
 
 
-def test_custom_metadata_roundtrip_and_not_in_ingestion_model(client):
+def test_custom_yaml_roundtrip_and_not_in_ingestion_model(client):
     token = _session_for("admin")
-    body = {**_GDRIVE, "custom": {"poll_interval": 3600, "labels": ["pilot"]}}
+    # author custom as YAML; stored as JSON, returned with a custom_yaml for display
+    body = {**_GDRIVE, "custom_yaml": "poll_interval: 3600\nlabels:\n  - pilot\n"}
     r = client.post("/admin/kb/connectors", headers=_hdr(token), json=body)
     assert r.status_code == 201, r.text
     assert r.json()["custom"] == {"poll_interval": 3600, "labels": ["pilot"]}
-    # edit custom
+    assert "poll_interval: 3600" in r.json()["custom_yaml"]
+    # edit via YAML
     e = client.patch(
-        "/admin/kb/connectors/pilot-drive", headers=_hdr(token), json={"custom": {"k": "v"}}
+        "/admin/kb/connectors/pilot-drive", headers=_hdr(token), json={"custom_yaml": "k: v\n"}
     )
     assert e.status_code == 200 and e.json()["custom"] == {"k": "v"}
+    # invalid YAML -> 422
+    bad = client.patch(
+        "/admin/kb/connectors/pilot-drive", headers=_hdr(token), json={"custom_yaml": "[unbalanced"}
+    )
+    assert bad.status_code == 422
+    # non-mapping YAML -> 422
+    notmap = client.patch(
+        "/admin/kb/connectors/pilot-drive", headers=_hdr(token), json={"custom_yaml": "- a\n- b"}
+    )
+    assert notmap.status_code == 422
     # custom is metadata: it must NOT leak into the ingestion connector model
     kb = store.as_knowledge_base_settings()
     conn = kb.google_drive.connectors[0]

@@ -18,6 +18,7 @@ import asyncio
 from pathlib import Path
 from typing import Any, cast
 
+import yaml
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
@@ -511,6 +512,9 @@ class ConnectorBody(BaseModel):
     enabled: bool = True
     config: dict[str, Any] = {}
     custom: dict[str, Any] = {}  # free-form metadata, not schema-filtered
+    # Console sends custom as YAML (friendlier to author); parsed server-side. When
+    # present it overrides `custom`. Stored as JSON either way.
+    custom_yaml: str | None = None
 
 
 class ConnectorEditBody(BaseModel):
@@ -519,6 +523,32 @@ class ConnectorEditBody(BaseModel):
     enabled: bool | None = None
     config: dict[str, Any] | None = None
     custom: dict[str, Any] | None = None
+    custom_yaml: str | None = None
+
+
+def _parse_custom_yaml(text: str) -> dict[str, Any]:
+    """Parse the YAML the user authored into a dict (empty/blank -> {})."""
+    if not text or not text.strip():
+        return {}
+    try:
+        parsed = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise HTTPException(status_code=422, detail=f"invalid custom YAML: {exc}") from exc
+    if parsed is None:
+        return {}
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=422, detail="custom must be a YAML mapping")
+    return parsed
+
+
+def _connector_out(row: dict[str, Any]) -> dict[str, Any]:
+    """Augment a stored connector with custom_yaml for friendly display/editing."""
+    out = dict(row)
+    custom = out.get("custom") or {}
+    out["custom_yaml"] = (
+        yaml.safe_dump(custom, sort_keys=False, allow_unicode=True) if custom else ""
+    )
+    return out
 
 
 def _connector_settings() -> Any:
@@ -532,7 +562,7 @@ def _connector_settings() -> Any:
 @router.get("/connectors")
 def list_kb_connectors(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
     _current_user(authorization)
-    return kb_connector_store.list_connectors()
+    return [_connector_out(r) for r in kb_connector_store.list_connectors()]
 
 
 @router.post("/connectors", status_code=201)
@@ -544,6 +574,7 @@ def add_kb_connector(
         raise HTTPException(status_code=422, detail=f"unknown kind: {body.kind}")
     if kb_connector_store.get_connector(body.connector_id) is not None:
         raise HTTPException(status_code=409, detail="connector id already exists")
+    custom = _parse_custom_yaml(body.custom_yaml) if body.custom_yaml is not None else body.custom
     try:
         kb_connector_store.add_connector(
             body.connector_id,
@@ -552,14 +583,14 @@ def add_kb_connector(
             body.kb_id,
             body.config,
             body.enabled,
-            custom=body.custom,
+            custom=custom,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     audit_log.write_audit(user.id, "kb_connector.add", "kb_connector", body.connector_id)
     created = kb_connector_store.get_connector(body.connector_id)
     assert created is not None
-    return created
+    return _connector_out(created)
 
 
 @router.patch("/connectors/{connector_id}")
@@ -567,15 +598,18 @@ def edit_kb_connector(
     connector_id: str, body: ConnectorEditBody, authorization: str | None = Header(None)
 ) -> dict[str, Any]:
     user = _require_admin(authorization)
+    fields = body.model_dump(exclude_unset=True)
+    if "custom_yaml" in fields:
+        fields["custom"] = _parse_custom_yaml(fields.pop("custom_yaml"))
     try:
-        kb_connector_store.edit_connector(connector_id, **body.model_dump(exclude_unset=True))
+        kb_connector_store.edit_connector(connector_id, **fields)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     audit_log.write_audit(user.id, "kb_connector.edit", "kb_connector", connector_id)
     edited = kb_connector_store.get_connector(connector_id)
     if edited is None:
         raise HTTPException(status_code=404, detail="connector not found")
-    return edited
+    return _connector_out(edited)
 
 
 @router.delete("/connectors/{connector_id}", status_code=204)
