@@ -228,7 +228,7 @@ def build_index(agents_dir: str | Path | None = None) -> AgentConfigIndex:
     """Build a fresh resolution index (pure; no globals).
 
     Single-file mode: when no explicit ``agents_dir`` / ``FLEETENT_AGENTS_DIR`` is given
-    and ``config/agent.yaml`` exists, load it as the sole, forced-default agent.
+    and a home-root ``agent.yaml`` exists, load it as the sole, forced-default agent.
     Otherwise scan the agents directory (multi-agent).
     """
     if agents_dir is None and "FLEETENT_AGENTS_DIR" not in os.environ:

@@ -217,7 +217,7 @@ def test_path_hint_when_local_bin_absent(tmp_path: Path) -> None:
     assert ".local/bin" in (result.stdout + result.stderr)
 
 
-def test_agent_yaml_and_env_seeded_under_config_dir(tmp_path: Path) -> None:
+def test_agent_yaml_and_env_seeded_at_flat_home_root(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
@@ -226,23 +226,24 @@ def test_agent_yaml_and_env_seeded_under_config_dir(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     fh = home / ".fleetent"
-    assert (fh / "config" / "agent.yaml").is_file()
+    # Flat home: agent.yaml + .env at the root, no config/ subdir.
+    assert (fh / "agent.yaml").is_file()
     assert (fh / ".env").is_file()
-    # agent.yaml content came from the shipped template.
-    assert "system_prompt" in (fh / "config" / "agent.yaml").read_text()
+    assert not (fh / "config").exists()
+    assert "system_prompt" in (fh / "agent.yaml").read_text()
 
 
 def test_existing_agent_yaml_not_overwritten(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     fh = home / ".fleetent"
-    (fh / "config").mkdir(parents=True)
-    (fh / "config" / "agent.yaml").write_text("name: keepme\nversion: 9\n")
+    fh.mkdir(parents=True)
+    (fh / "agent.yaml").write_text("name: keepme\nversion: 9\n")
     env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
 
     _run_env(["--skip-db"], env, home)
 
-    assert (fh / "config" / "agent.yaml").read_text() == "name: keepme\nversion: 9\n"
+    assert (fh / "agent.yaml").read_text() == "name: keepme\nversion: 9\n"
 
 
 def test_skip_config_seeds_nothing(tmp_path: Path) -> None:

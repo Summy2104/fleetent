@@ -350,18 +350,17 @@ def test_long_system_prompt_not_flagged_as_secret(tmp_path) -> None:
 
 
 def _write_config_agent(home, name: str, **overrides) -> None:
-    """Write a config-dir agent.yaml (no <name>/ subdir)."""
+    """Write a flat home-root agent.yaml (no config/ or <name>/ subdir)."""
     doc = {"name": name, "version": 1}
     doc.update(overrides)
-    config_dir = home / "config"
-    config_dir.mkdir(exist_ok=True)
-    (config_dir / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
 
 
 def test_load_single_agent_file_skips_dir_name_check(tmp_path) -> None:
     # Config-dir single-agent file: `name` need not match any directory name.
     _write_config_agent(tmp_path, "whatever-name")
-    agent = agent_config.load_agent_home_file(tmp_path / "config" / "agent.yaml")
+    agent = agent_config.load_agent_home_file(tmp_path / "agent.yaml")
     assert agent.name == "whatever-name"
 
 
@@ -380,7 +379,7 @@ def test_load_single_agent_file_still_rejects_inline_secret(tmp_path) -> None:
         ],
     )
     with pytest.raises(ValueError):
-        agent_config.load_agent_home_file(tmp_path / "config" / "agent.yaml")
+        agent_config.load_agent_home_file(tmp_path / "agent.yaml")
 
 
 def test_build_index_prefers_config_agent_file_as_sole_default(tmp_path, monkeypatch) -> None:
@@ -425,8 +424,8 @@ def test_repo_agent_yaml_example_loads_as_single_agent_file() -> None:
     from pathlib import Path
 
     repo = Path(__file__).resolve().parents[2]
-    example = repo / "config" / "agent.yaml.example"
-    assert example.is_file(), "config/agent.yaml.example must exist (installer template)"
+    example = repo / "config" / "agent" / "agent.yaml.example"
+    assert example.is_file(), "config/agent/agent.yaml.example must exist (installer template)"
     agent = agent_config.load_agent_home_file(example)
     assert agent.name  # non-empty
     assert agent.version >= 1
