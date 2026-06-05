@@ -11,6 +11,7 @@ from typing import Any, Literal
 from fleetent.config import (
     ConfluenceConnectorSettings,
     GoogleDriveConnectorSettings,
+    KnowledgeBaseSettings,
     Settings,
 )
 from fleetent.db import SQLiteDatabase, create_database
@@ -103,7 +104,8 @@ class RealConnectorSmokeStatus:
 def list_configured_connectors(settings: Settings | None = None) -> list[ConnectorSummary]:
     """List configured knowledge-base connectors without exposing credential payloads."""
     return [
-        _summary_for_definition(item) for item in _connector_definitions(settings or _settings())
+        _summary_for_definition(item)
+        for item in _connector_definitions(settings.knowledge_base if settings else _kb_config())
     ]
 
 
@@ -113,7 +115,7 @@ def get_connector_config(
     settings: Settings | None = None,
 ) -> ConnectorDefinition:
     """Return one configured connector definition."""
-    for definition in _connector_definitions(settings or _settings()):
+    for definition in _connector_definitions(settings.knowledge_base if settings else _kb_config()):
         if definition.connector_id == connector_id:
             return definition
     raise ValueError(f"unknown connector_id: {connector_id}")
@@ -385,10 +387,10 @@ def _create_confluence_client(
     )
 
 
-def _connector_definitions(settings: Settings) -> list[ConnectorDefinition]:
+def _connector_definitions(kb: KnowledgeBaseSettings) -> list[ConnectorDefinition]:
     definitions = [
-        *[_google_definition(item) for item in settings.knowledge_base.google_drive.connectors],
-        *[_confluence_definition(item) for item in settings.knowledge_base.confluence.connectors],
+        *[_google_definition(item) for item in kb.google_drive.connectors],
+        *[_confluence_definition(item) for item in kb.confluence.connectors],
     ]
     seen: set[str] = set()
     for definition in definitions:
@@ -667,6 +669,14 @@ def _now() -> datetime:
 
 def _settings() -> Settings:
     return Settings(anthropic_api_key="")
+
+
+def _kb_config() -> KnowledgeBaseSettings:
+    """knowledge_base config from the active (standalone) agent, else Settings default."""
+    from fleetent import agent_config
+
+    agent = agent_config.active_agent()
+    return agent.knowledge_base if agent is not None else _settings().knowledge_base
 
 
 def _database() -> SQLiteDatabase:

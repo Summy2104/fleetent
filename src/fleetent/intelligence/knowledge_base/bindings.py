@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from fleetent.config import Settings
+from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.observability import TraceEvent, record_trace_event
 
@@ -98,7 +98,7 @@ def resolve_agent_kb_ids(tenant_id: str, agent_id: str) -> list[str]:
     if bindings:
         return [binding.kb_id for binding in bindings]
 
-    default_kb_id = _settings().knowledge_base.default_kb_id.strip()
+    default_kb_id = _kb_config().default_kb_id.strip()
     if default_kb_id:
         return [default_kb_id]
 
@@ -170,6 +170,14 @@ def _now() -> datetime:
 
 def _settings() -> Settings:
     return Settings(anthropic_api_key="")
+
+
+def _kb_config() -> "KnowledgeBaseSettings":
+    """knowledge_base config from the active (standalone) agent, else Settings default."""
+    from fleetent import agent_config
+
+    agent = agent_config.active_agent()
+    return agent.knowledge_base if agent is not None else _settings().knowledge_base
 
 
 def _database() -> SQLiteDatabase:

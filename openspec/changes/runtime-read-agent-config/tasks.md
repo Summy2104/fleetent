@@ -28,16 +28,16 @@
 
 ## 5. 智能层来源切换(消除空转)
 
-- [ ] 5.1 Write failing tests: vector_store/embedding/rerank/knowledge_base/long_term_ctx 运行时从当前
+- [x] 5.1 Write failing tests: vector_store/embedding/rerank/knowledge_base/long_term_ctx 运行时从当前
       agent 配置构造,而非全局 `Settings`(rig `Settings()` 抛错验证不再回读)。运行见红
-- [ ] 5.2 切换 `intelligence/**`(vector_store/embeddings/rerank/runtime、knowledge_base/*、
+- [x] 5.2 切换 `intelligence/**`(vector_store/embeddings/rerank/runtime、knowledge_base/*、
       long_term_ctx*、memory/store、reflection)读取来源。运行见绿
 
 ## 6. 进程级部署旋钮启动时解析
 
-- [ ] 6.1 Write failing tests: standalone agent 进程下 session 清理间隔/disabled_skills/microsandbox_url/
+- [x] 6.1 Write failing tests: standalone agent 进程下 session 清理间隔/disabled_skills/microsandbox_url/
       image·vision endpoint/diagnostics/日志来自当前 agent 配置;多 agent 态回退默认。运行见红
-- [ ] 6.2 切换 `session/manager.py`、`skills/registry.py`、`tools/{image_gen_client,vision_client}.py`、
+- [x] 6.2 切换 `session/manager.py`、`skills/registry.py`、`tools/{image_gen_client,vision_client}.py`、
       `observability/diagnostics.py`、`model/provider_health.py` 的来源(启动注入或 lazy 解析当前 agent)。
       运行见绿
 

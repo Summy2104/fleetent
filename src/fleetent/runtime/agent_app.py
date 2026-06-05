@@ -107,6 +107,11 @@ async def boot(
 
     home_dir = resolve_home(agent_id, home)
     agent = agent_config.scan_home(home_dir)
+    # Re-point the vector/embedding singletons at this agent's intelligence config
+    # (import-time config used global Settings; standalone runs AS this single agent).
+    from fleetent.intelligence import vector_store
+
+    vector_store.configure_from_active_agent()
     scan_skills()
     load_plugins()
 

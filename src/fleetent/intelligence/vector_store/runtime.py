@@ -25,6 +25,21 @@ def _create_vector_backend(settings: Settings) -> VectorBackend:
     return create_vector_backend(settings.vector_store, database_url=database_url)
 
 
+def configure_from_active_agent() -> None:
+    """Reconfigure the embedding/vector singletons from the standalone process's active
+    agent (its embedding/vector_store blocks); the DB path still falls back to the
+    home-derived Settings.database_url. No-op when no single agent is published."""
+    from fleetent import agent_config
+
+    agent = agent_config.active_agent()
+    if agent is None:
+        return
+    global _embedding, _backend
+    _embedding = create_embedding_provider(agent.embedding)
+    database_url = agent.vector_store.database_url or Settings(anthropic_api_key="").database_url
+    _backend = create_vector_backend(agent.vector_store, database_url=database_url)
+
+
 _configure(Settings(anthropic_api_key=""))
 
 
