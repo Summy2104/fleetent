@@ -20,12 +20,19 @@ TBD - created by archiving change configuration-foundation. Update Purpose after
 - **THEN** 环境变量值优先
 
 ### Requirement: Secrets stay outside settings YAML
-敏感值 SHALL 继续通过环境变量或 `.env` 注入，而不是写入 `config/settings.yaml` 或
-`agent.yaml`。
+
+敏感值 SHALL 继续通过环境变量或 `.env` 注入,而不是写入 `config/settings.yaml` 或 `agent.yaml`。IM
+tokens(`slack_bot_token`、`slack_app_token`、`telegram_bot_token`)MUST NOT 作为 `Settings` 字段存在——
+IM 凭证经 per-agent `connectors` 的 `*_env` 引用提供。
 
 #### Scenario: Secret references use env names
 - **WHEN** 某 provider 需要 API key
-- **THEN** 配置文件只保存 `api_key_env` 或等价 env var 名称，不保存 secret value
+- **THEN** 配置文件只保存 `api_key_env` 或等价 env var 名称,不保存 secret value
+
+#### Scenario: IM tokens are not Settings fields
+- **WHEN** 构造 `Settings`
+- **THEN** 不存在 `slack_bot_token` / `slack_app_token` / `telegram_bot_token` 字段
+- **AND** IM 凭证经 agent.yaml `connectors.*` 的 `*_env` 引用提供
 
 #### Scenario: Settings example is not required for deployed agent
 - **WHEN** 查看部署模板
@@ -48,70 +55,30 @@ TBD - created by archiving change configuration-foundation. Update Purpose after
 - **THEN** 启动 fail fast，并提示 webhook source management 后续通过 runtime API / store 管理
 
 ### Requirement: Minimal settings surface
-第一版统一配置 SHALL 只包含当前明确需要的顶层 namespace。
 
-#### Scenario: Supported settings namespaces
-- **WHEN** 查看 `config/settings.yaml.example`
-- **THEN** 文件只包含 database_url、log_format、observability、mcp、scheduling、webhooks、
-  vector_store、embedding、rerank、knowledge_base 和 long_term_ctx
-- **AND** database_url 示例值为 `sqlite:///data/fleetent.db`
+全局 `Settings` SHALL 收缩为**平台控制面所需的精简集**:`database_url`(平台 authoring/control-plane DB,
+与 per-agent home 推导出的运行时 DB 分离)、平台进程日志(`log_format`、`observability`)及必要的平台
+密钥引用。agent 运行时配置(治理、部署、智能层 namespace)MUST NOT 出现在 `config/settings.yaml`——这些
+已收口到对应 agent 的 `agent.yaml`。
+
+#### Scenario: Supported settings fields
+- **WHEN** 构造 `Settings` 并查看其字段
+- **THEN** `Settings` 只暴露 `database_url`、`log_format`、`observability`
+- **AND** `database_url` 默认推导为 home 下的 `sqlite:///<data_dir>/fleetent.db`
+- **AND** 全局 `config/settings.yaml.example` 模板不再随仓库发布(`drop-global-config-files`),
+  部署 agent 自包含于 `agent.yaml` + `.env`
+
+#### Scenario: Agent-runtime namespaces are absent from Settings
+- **WHEN** 构造 `Settings`
+- **THEN** 不存在 `vector_store`、`embedding`、`rerank`、`knowledge_base`、`long_term_ctx`、`mcp`、
+  `scheduling`、`webhooks`、`diagnostics` 字段,也不存在任何治理/部署旋钮
+- **AND** 这些配置位于对应 agent 的 `agent.yaml`
 
 #### Scenario: Runtime objects stay out of settings
-- **WHEN** 查看 `config/settings.yaml.example`
-- **THEN** 文件不包含 cron jobs、webhook sources、MCP server definitions、agent definitions、
-  user bindings、memory items、knowledge documents 或 reindex jobs
-
-#### Scenario: MCP settings are global policy only
-- **WHEN** 查看 `config/settings.yaml.example`
-- **THEN** `mcp` namespace 只包含全局策略字段，不包含 `servers`
-
-### Requirement: Knowledge-base connector configuration
-系统 SHALL 支持在统一应用配置中声明 knowledge-base connector definitions，且只保存非 secret 字段和 credential references。
-
-#### Scenario: Google Drive connector config shape
-- **WHEN** `settings.yaml` 配置 Google Drive connector
-- **THEN** 配置包含 connector_id、enabled、tenant_id、kb_id、folder_id 和 recursive
-- **AND** OAuth credential 字段通过 `access_token_env`、`refresh_token_env`、`client_id_env` 和
-  `client_secret_env` 引用环境变量
-- **AND** Google token URI 使用代码默认值
-
-#### Scenario: Confluence connector config shape
-- **WHEN** `settings.yaml` 配置 Confluence connector
-- **THEN** 配置包含 connector_id、enabled、tenant_id、kb_id、base_url、scope 字段、`username_env` 和
-  `api_token_env`
-
-#### Scenario: Config stores credential env references only
-- **WHEN** `settings.yaml` 配置任意 knowledge-base connector
-- **THEN** 配置只包含 env var name references
-- **AND** 不包含 OAuth refresh token、client secret、Confluence API token 或其他真实 credential payload
-
-#### Scenario: Legacy credential ref remains compatible
-- **WHEN** connector 仍配置 legacy `credential_ref`
-- **THEN** 系统保持兼容，不要求 operator 立即迁移已有本地配置
-
-### Requirement: Diagnostics configuration
-系统 SHALL 提供 diagnostics 配置 namespace，用于控制诊断导出目录和手动 retention 策略。
-
-#### Scenario: Diagnostics defaults are conservative
-- **WHEN** 未显式配置 diagnostics
-- **THEN** `diagnostics.export_dir` 默认为 `data/diagnostics`
-- **AND** `diagnostics.retention.enabled` 默认为 false
-- **AND** logs、traces 和 diagnostic exports 的 retention days 默认为空
-
-#### Scenario: Retention days are opt-in
-- **WHEN** `diagnostics.retention.enabled=true`
-- **AND** 某个 retention days 字段为空
-- **THEN** 系统不清理该数据类型
-
-#### Scenario: Settings example includes diagnostics without default deletion
-- **WHEN** 查看 `config/settings.yaml.example`
-- **THEN** 文件包含 diagnostics 配置示例
-- **AND** retention 默认 disabled
-- **AND** retention days 字段为空或未设置
-
-#### Scenario: Diagnostics config contains no secrets
-- **WHEN** 查看 diagnostics 配置
-- **THEN** 配置不包含 token、API key、password、secret 或 credential payload
+- **WHEN** 加载 `config/settings.yaml`(若存在)
+- **THEN** 只解析 `database_url`、`log_format`、`observability`;cron jobs、webhook sources、
+  MCP server definitions、agent definitions、user bindings、memory items、knowledge documents 或
+  reindex jobs 一律不在此承载
 
 ### Requirement: Local configuration initialization
 系统 SHALL 提供 `fleetent-admin init-config` 作为本地部署配置初始化入口。
