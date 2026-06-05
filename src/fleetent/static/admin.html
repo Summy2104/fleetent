@@ -1103,8 +1103,8 @@
           skills. The whole folder uploads — single vs batch is detected automatically.
         </p>
         <div class="row" style="gap:8px; align-items:center;">
-          <input type="file" id="sk-import-files" webkitdirectory directory multiple style="position:absolute; width:1px; height:1px; opacity:0; overflow:hidden;" onchange="skImportPicked()">
-          <label for="sk-import-files" id="sk-choose-btn" class="ghost" style="display:inline-block; cursor:pointer;" onclick="skPickFeedback()">📁 Choose folder</label>
+          <input type="file" id="sk-import-files" webkitdirectory directory multiple style="position:absolute; width:1px; height:1px; opacity:0; overflow:hidden;" onclick="skPickFeedback()" onchange="skImportPicked()">
+          <label for="sk-import-files" id="sk-choose-btn" class="ghost" style="display:inline-block; cursor:pointer;">📁 Choose folder</label>
           <span id="sk-import-pick" class="muted" style="font-size:13px;">No folder chosen</span>
           <button type="button" id="sk-upload-btn" class="primary" onclick="skDoUpload()">Upload &amp; import</button>
         </div>
@@ -2357,16 +2357,18 @@ function skOpenImport() {
 // The <label for> opens the picker natively (reliable user activation); this only
 // adds visible feedback. Immediate label change so the click is unmistakable.
 function skPickFeedback() {
-  $("sk-import-pick").textContent = "⏳ Opening folder picker…";
-  const lbl = $("sk-choose-btn");
-  lbl.classList.add("is-busy");
-  // The window regains focus when the dialog closes (picked or cancelled) — reflect
-  // the real state then.
-  const onBack = () => {
-    window.removeEventListener("focus", onBack);
-    setTimeout(() => { lbl.classList.remove("is-busy"); skImportPicked(); }, 150);
-  };
-  window.addEventListener("focus", onBack);
+  // Pure visual feedback. Wrapped so a failure here can NEVER block the native
+  // picker the input/label opens.
+  try {
+    $("sk-import-pick").textContent = "⏳ Opening folder picker…";
+    const lbl = $("sk-choose-btn");
+    lbl.classList.add("is-busy");
+    const onBack = () => {
+      window.removeEventListener("focus", onBack);
+      setTimeout(() => { lbl.classList.remove("is-busy"); skImportPicked(); }, 150);
+    };
+    window.addEventListener("focus", onBack);
+  } catch (e) { /* feedback is best-effort */ }
 }
 function skImportPicked() {
   const n = ($("sk-import-files").files || []).length;
