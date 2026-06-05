@@ -75,7 +75,7 @@ def test_checker_triggers_on_scope_over(tmp_path, monkeypatch):
     store.add(BudgetScope.user, "u1", 6000, 0, now=now)
     cfg = LayeredBudgetConfig({BudgetScope.user: ScopeBudget(max_tokens=5000)})
     chk = LayeredBudgetChecker(
-        cfg, store, {BudgetScope.user: "u1", BudgetScope.global_: lb.GLOBAL_KEY}, clock=_clock(now)
+        cfg, store, {BudgetScope.user: "u1"}, clock=_clock(now)
     )
     assert chk.check(None) is StopReason.budget_exceeded
     assert chk.triggered_scope == "user" and chk.triggered_dimension == "tokens"
@@ -86,15 +86,15 @@ def test_checker_narrowest_scope_wins(tmp_path, monkeypatch):
     now = datetime(2026, 6, 1, tzinfo=UTC)
     store = BudgetStore()
     store.add(BudgetScope.user, "u1", 6000, 0, now=now)
-    store.add(BudgetScope.global_, lb.GLOBAL_KEY, 6000, 0, now=now)
+    store.add(BudgetScope.agent, "a1", 6000, 0, now=now)
     cfg = LayeredBudgetConfig(
         {
             BudgetScope.user: ScopeBudget(max_tokens=5000),
-            BudgetScope.global_: ScopeBudget(max_tokens=5000),
+            BudgetScope.agent: ScopeBudget(max_tokens=5000),
         }
     )
     chk = LayeredBudgetChecker(
-        cfg, store, {BudgetScope.user: "u1", BudgetScope.global_: lb.GLOBAL_KEY}, clock=_clock(now)
+        cfg, store, {BudgetScope.user: "u1", BudgetScope.agent: "a1"}, clock=_clock(now)
     )
     assert chk.check(None) is StopReason.budget_exceeded
     assert chk.triggered_scope == "user"  # narrower reported

@@ -15,9 +15,9 @@
 
 ## 3. 跨运行预算 + 砍 global
 
-- [ ] 3.1 Write failing tests: 断言聚合检查只覆盖 session/user/agent 三层、无 global 桶;窗口默认与来源
+- [x] 3.1 Write failing tests: 断言聚合检查只覆盖 session/user/agent 三层、无 global 桶;窗口默认与来源
       来自 agent 配置;key 缺失跳过该层。运行见红
-- [ ] 3.2 改 `layered_budget.py` 读 agent 配置、移除 `agent_budget_global_*` 读取与 global 聚合;
+- [x] 3.2 改 `layered_budget.py` 读 agent 配置、移除 `agent_budget_global_*` 读取与 global 聚合;
       `budget.py` token 维度来源切换。运行见绿
 
 ## 4. termination / context / sub_agent 来源切换

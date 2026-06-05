@@ -15,8 +15,9 @@ from fleetent.runtime.layered_budget import (
 # ── enum + order (group 2) ───────────────────────────────────────────────────
 
 
-def test_scope_enum_five_values():
-    assert {s.value for s in BudgetScope} == {"task", "session", "user", "agent", "global"}
+def test_scope_enum_four_values_no_global():
+    # global dropped: distributed per-agent processes have no cross-agent aggregation.
+    assert {s.value for s in BudgetScope} == {"task", "session", "user", "agent"}
 
 
 def test_scope_order_narrow_to_wide():
@@ -25,8 +26,15 @@ def test_scope_order_narrow_to_wide():
         BudgetScope.session,
         BudgetScope.user,
         BudgetScope.agent,
-        BudgetScope.global_,
     ) == lb.SCOPE_ORDER
+
+
+def test_cross_run_scopes_exclude_global():
+    assert lb.CROSS_RUN_SCOPES == (
+        BudgetScope.session,
+        BudgetScope.user,
+        BudgetScope.agent,
+    )
 
 
 def test_unconfigured_scope_is_unlimited():
@@ -35,11 +43,11 @@ def test_unconfigured_scope_is_unlimited():
     assert (sb.max_turns, sb.max_tokens) == (NO_LIMIT, NO_LIMIT)
 
 
-def test_from_settings_only_overrides_configured(monkeypatch):
-    from fleetent.config import Settings
+def test_from_governance_only_overrides_configured():
+    from fleetent.runtime.snapshot import GovernanceConfig
 
-    s = Settings(anthropic_api_key="x", agent_budget_user_tokens=5000)
-    cfg = LayeredBudgetConfig.from_settings(s)
+    g = GovernanceConfig(agent_budget_user_tokens=5000)
+    cfg = LayeredBudgetConfig.from_governance(g)
     assert cfg.for_scope(BudgetScope.user).max_tokens == 5000
     assert cfg.for_scope(BudgetScope.user).max_turns == NO_LIMIT  # not configured → unlimited
 

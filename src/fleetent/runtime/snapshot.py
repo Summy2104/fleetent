@@ -37,6 +37,15 @@ class GovernanceConfig:
     agent_max_tokens: int = -1
     agent_grace_call_token_ratio: float = 0.05
     agent_grace_call_min_tokens: int = 512
+    # cross-run layered budget — session/user/agent dims only (global dropped)
+    agent_budget_session_turns: int = -1
+    agent_budget_session_tokens: int = -1
+    agent_budget_user_turns: int = -1
+    agent_budget_user_tokens: int = -1
+    agent_budget_agent_turns: int = -1
+    agent_budget_agent_tokens: int = -1
+    agent_budget_user_window: str = "weekly"
+    agent_budget_agent_window: str = "weekly"
     # loop detection / guardrail / concurrency
     agent_loop_repeat_threshold: int = 3
     guardrail_repeat_threshold: int = 3
@@ -54,6 +63,14 @@ def _governance_from_file(agent: AgentFile) -> GovernanceConfig:
         agent_max_tokens=agent.agent_max_tokens,
         agent_grace_call_token_ratio=agent.agent_grace_call_token_ratio,
         agent_grace_call_min_tokens=agent.agent_grace_call_min_tokens,
+        agent_budget_session_turns=agent.agent_budget_session_turns,
+        agent_budget_session_tokens=agent.agent_budget_session_tokens,
+        agent_budget_user_turns=agent.agent_budget_user_turns,
+        agent_budget_user_tokens=agent.agent_budget_user_tokens,
+        agent_budget_agent_turns=agent.agent_budget_agent_turns,
+        agent_budget_agent_tokens=agent.agent_budget_agent_tokens,
+        agent_budget_user_window=agent.agent_budget_user_window,
+        agent_budget_agent_window=agent.agent_budget_agent_window,
         agent_loop_repeat_threshold=agent.agent_loop_repeat_threshold,
         guardrail_repeat_threshold=agent.guardrail_repeat_threshold,
         agent_tool_parallel_max=agent.agent_tool_parallel_max,

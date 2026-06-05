@@ -302,21 +302,34 @@ def _gated_compress(
 
 
 def _setup_layered_budget(
-    session_id: str | None, user_id: str | None, agent_name: str | None
+    session_id: str | None,
+    user_id: str | None,
+    agent_name: str | None,
+    governance: GovernanceConfig | None = None,
 ) -> tuple[Any, Any, dict[Any, str | None]]:
     """Build the AR18 layered-budget checker/store, or (None, None, {}) when no cap
-    is configured (dormant by default → zero behaviour/DB change for plain runs)."""
+    is configured (dormant by default → zero behaviour/DB change for plain runs).
+
+    Caps + windows come from the per-agent governance when present, else Settings
+    (transitional). The global (cross-agent) scope was dropped in the consolidation."""
     from fleetent.runtime import layered_budget as lbud
 
-    config = lbud.LayeredBudgetConfig.from_settings()
+    if governance is not None:
+        config = lbud.LayeredBudgetConfig.from_governance(governance)
+        windows = {
+            lbud.BudgetScope.user: lbud.BudgetWindow(governance.agent_budget_user_window),
+            lbud.BudgetScope.agent: lbud.BudgetWindow(governance.agent_budget_agent_window),
+        }
+    else:
+        config = lbud.LayeredBudgetConfig.from_settings()
+        windows = None
     if not config.has_any_cap():
         return None, None, {}
-    store = lbud.BudgetStore()
+    store = lbud.BudgetStore(windows=windows)
     keys: dict[Any, str | None] = {
         lbud.BudgetScope.session: session_id,
         lbud.BudgetScope.user: user_id,
         lbud.BudgetScope.agent: agent_name,
-        lbud.BudgetScope.global_: lbud.GLOBAL_KEY,
     }
     checker = lbud.LayeredBudgetChecker(config, store, keys, clock=lbud.utc_now)
     return checker, store, keys
@@ -1181,7 +1194,7 @@ async def run(
     default_tool_timeout = _resolve_default_tool_timeout(governance)
     flap_state = _load_flap_state(session_id)
     layered_checker, layered_store, layered_keys = _setup_layered_budget(
-        session_id, user_id, agent_name
+        session_id, user_id, agent_name, governance
     )
     if layered_checker is not None:
         controller.register(layered_checker)
@@ -1514,7 +1527,7 @@ async def run_stream(
     default_tool_timeout = _resolve_default_tool_timeout(governance)
     flap_state = _load_flap_state(session_id)
     layered_checker, layered_store, layered_keys = _setup_layered_budget(
-        session_id, user_id, agent_name
+        session_id, user_id, agent_name, governance
     )
     if layered_checker is not None:
         controller.register(layered_checker)

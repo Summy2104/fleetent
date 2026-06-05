@@ -25,26 +25,22 @@ class BudgetScope(StrEnum):
     session = "session"
     user = "user"
     agent = "agent"
-    global_ = "global"
 
 
 # Narrow → wide. task is per-run (AR2); the rest are cross-run (persisted here).
+# The global (cross-agent) scope was dropped: distributed per-agent processes have
+# no shared runtime to aggregate a cross-agent total.
 SCOPE_ORDER: tuple[BudgetScope, ...] = (
     BudgetScope.task,
     BudgetScope.session,
     BudgetScope.user,
     BudgetScope.agent,
-    BudgetScope.global_,
 )
 CROSS_RUN_SCOPES: tuple[BudgetScope, ...] = (
     BudgetScope.session,
     BudgetScope.user,
     BudgetScope.agent,
-    BudgetScope.global_,
 )
-
-# Sentinel key for the single global bucket (no natural id).
-GLOBAL_KEY = "__global__"
 
 
 class BudgetWindow(StrEnum):
@@ -58,7 +54,6 @@ _DEFAULT_WINDOW: dict[BudgetScope, BudgetWindow] = {
     BudgetScope.session: BudgetWindow.lifetime,
     BudgetScope.user: BudgetWindow.weekly,
     BudgetScope.agent: BudgetWindow.weekly,
-    BudgetScope.global_: BudgetWindow.monthly,
 }
 
 
@@ -123,12 +118,22 @@ class LayeredBudgetConfig:
         from fleetent.config import Settings
 
         s = settings if settings is not None else Settings()  # type: ignore[call-arg]
+        return cls._from_source(s)
+
+    @classmethod
+    def from_governance(cls, governance: object) -> LayeredBudgetConfig:
+        """Build from a per-agent GovernanceConfig (duck-typed: reads the same
+        ``agent_budget_<scope>_{turns,tokens}`` attribute names as Settings)."""
+        return cls._from_source(governance)
+
+    @classmethod
+    def _from_source(cls, src: object) -> LayeredBudgetConfig:
         per: dict[BudgetScope, ScopeBudget] = {}
         for scope in CROSS_RUN_SCOPES:
             name = scope.value
             per[scope] = ScopeBudget(
-                max_turns=getattr(s, f"agent_budget_{name}_turns", NO_LIMIT),
-                max_tokens=getattr(s, f"agent_budget_{name}_tokens", NO_LIMIT),
+                max_turns=getattr(src, f"agent_budget_{name}_turns", NO_LIMIT),
+                max_tokens=getattr(src, f"agent_budget_{name}_tokens", NO_LIMIT),
             )
         return cls(per_scope=per)
 
