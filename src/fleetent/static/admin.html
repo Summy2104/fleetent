@@ -332,6 +332,8 @@
   .sk-diff .add { color:var(--ok); } .sk-diff .del { color:var(--danger); } .sk-diff .hunk { color:var(--accent); }
   .risk-low { color:var(--ok); } .risk-medium { color:#d8a200; } .risk-high { color:var(--danger); }
   .sk-import-section { border:1px solid var(--border); border-radius:var(--r-2); padding:12px 14px; background:var(--surface); }
+  button.is-busy { opacity:.55; transform:scale(.97); }
+  button:active { transform:scale(.97); }
   /* --- Chat module --- */
   .chat-split { display:flex; gap:12px; height:calc(100vh - 170px); min-height:420px; }
   .chat-history { width:230px; flex-shrink:0; overflow-y:auto; border:1px solid var(--border);
@@ -1102,7 +1104,7 @@
         </p>
         <div class="row" style="gap:8px; align-items:center;">
           <input type="file" id="sk-import-files" webkitdirectory directory multiple style="display:none" onchange="skImportPicked()">
-          <button type="button" class="ghost" onclick="$('sk-import-files').click()">📁 Choose folder</button>
+          <button type="button" id="sk-choose-btn" class="ghost" onclick="skPickFolder(this)">📁 Choose folder</button>
           <span id="sk-import-pick" class="muted" style="font-size:13px;">No folder chosen</span>
           <button type="button" id="sk-upload-btn" class="primary" onclick="skDoUpload()">Upload &amp; import</button>
         </div>
@@ -2352,9 +2354,23 @@ function skOpenImport() {
   const res = $("sk-import-result"); res.classList.add("hidden"); res.innerHTML = "";
   $("sk-import-modal").classList.remove("hidden");
 }
+function skPickFolder(btn) {
+  // Immediate feedback so the click is unmistakable even before the OS dialog paints.
+  $("sk-import-pick").textContent = "⏳ Opening folder picker…";
+  btn.classList.add("is-busy");
+  btn.disabled = true;
+  // The window regains focus when the dialog closes (whether a folder was picked or
+  // cancelled) — reflect the real state then.
+  const onBack = () => {
+    window.removeEventListener("focus", onBack);
+    setTimeout(() => { btn.classList.remove("is-busy"); btn.disabled = false; skImportPicked(); }, 150);
+  };
+  window.addEventListener("focus", onBack);
+  $("sk-import-files").click();
+}
 function skImportPicked() {
   const n = ($("sk-import-files").files || []).length;
-  $("sk-import-pick").textContent = n ? `${n} file(s) selected` : "No folder chosen";
+  $("sk-import-pick").textContent = n ? `✅ ${n} file(s) selected` : "No folder chosen";
 }
 function skCloseImport() { $("sk-import-modal").classList.add("hidden"); }
 
