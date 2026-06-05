@@ -320,6 +320,22 @@ def test_resource_id_inputs_are_readonly():
         assert "readonly" in m.group(0), input_id
 
 
+def test_kb_source_connectors_management_present():
+    html = ADMIN_HTML
+    # KB tab hosts a source-connector manager (Drive/Confluence) + add/edit modal
+    assert 'id="kbc-body"' in html
+    assert 'id="kbc-modal"' in html
+    assert 'id="kbc-kind"' in html
+    assert "function loadKbConnectors" in html
+    assert "function kbcSave" in html
+    # CRUD + check + dry-run sync wired to the API
+    assert 'api("GET", "/kb/connectors")' in html
+    assert 'api("POST", "/kb/connectors"' in html
+    assert "/check" in html and "/sync" in html
+    assert "KBC_FIELDS" in html  # per-kind field defs
+    assert "loadKbConnectors()" in html.split("async function loadKb", 1)[1].split("}", 1)[0]
+
+
 def test_textarea_themed():
     html = ADMIN_HTML
     import re
