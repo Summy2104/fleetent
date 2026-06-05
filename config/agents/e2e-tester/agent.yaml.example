@@ -11,6 +11,21 @@ system_prompt: |
   你是 fleetent 的 E2E 测试 agent。用中文、简洁、具体地回答。
   当请求需要时,使用你的工具、技能、MCP 服务和代码执行能力。
 
+models:
+  targets:
+    - id: primary
+      provider: anthropic
+      protocol: openai_chat
+      base_url: https://api.anthropic.com/v1/
+      model: claude-sonnet-4-5
+      api_key_env: FLEETENT_MODEL_PRIMARY_API_KEY
+      max_tokens: 4096
+  routes:
+    default:
+      - target: primary
+    vision:
+      - target: primary
+
 memory_namespace: e2e-tester
 skills_dir: skills
 allowed_skills: []                 # 空 = 所有已安装技能可见(含 summarize-doc)

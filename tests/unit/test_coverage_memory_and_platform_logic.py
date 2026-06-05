@@ -153,10 +153,30 @@ async def test_extract_and_update_applies_valid_actions_and_skips_invalid_target
             )
 
     fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
-    monkeypatch.setattr(
-        extraction,
-        "get_async_client_and_config",
-        lambda _purpose: (fake_client, SimpleNamespace(model="m", max_tokens=200)),
+    monkeypatch.setattr(extraction, "AsyncOpenAI", lambda **_: fake_client)
+    from fleetent.agent_config import AgentFile
+    from fleetent.model import ModelPolicySnapshot
+
+    policy = ModelPolicySnapshot.from_agent(
+        AgentFile.model_validate(
+            {
+                "name": "memory-agent",
+                "version": 1,
+                "models": {
+                    "targets": [
+                        {
+                            "id": "memory",
+                            "provider": "local",
+                            "protocol": "openai_chat",
+                            "base_url": "http://memory.local/v1/",
+                            "model": "m",
+                            "max_tokens": 200,
+                        }
+                    ],
+                    "routes": {"memory_extraction": [{"target": "memory"}]},
+                },
+            }
+        )
     )
     monkeypatch.setattr(
         extraction.store,
@@ -185,7 +205,9 @@ async def test_extract_and_update_applies_valid_actions_and_skips_invalid_target
     monkeypatch.setattr(extraction.vector_store, "upsert", fake_upsert)
     monkeypatch.setattr(extraction.vector_store, "delete", fake_delete)
 
-    await extraction.extract_and_update("u1", [{"role": "user", "content": "facts"}], "work")
+    await extraction.extract_and_update(
+        "u1", [{"role": "user", "content": "facts"}], "work", model_policy=policy
+    )
 
     assert [item.content for item in inserted] == ["User is an operator"]
     assert [(item.id, item.content, item.expires_at) for item in updated] == [

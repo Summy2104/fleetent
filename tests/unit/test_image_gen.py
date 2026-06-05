@@ -36,15 +36,35 @@ def _mock_async_openai(image_obj):
     return client
 
 
+def _image_agent() -> AgentFile:
+    return AgentFile.model_validate(
+        {
+            "name": "image-agent",
+            "version": 1,
+            "models": {
+                "targets": [
+                    {
+                        "id": "image",
+                        "provider": "local",
+                        "protocol": "openai_image_generation",
+                        "endpoint": "http://image.local/v1/images/generations",
+                        "model": "flux",
+                    }
+                ],
+                "routes": {"image_generation": [{"target": "image"}]},
+            },
+        }
+    )
+
+
 def test_generate_decodes_b64_json(monkeypatch):
     import fleetent.tools.image_gen_client as igc
 
     b64 = base64.b64encode(PNG_BYTES).decode("ascii")
     client = _mock_async_openai(SimpleNamespace(b64_json=b64, url=None))
-    monkeypatch.setattr(igc, "_build_client", lambda settings: client)
+    monkeypatch.setattr(igc, "_build_client", lambda *args, **kwargs: client)
 
-    settings = AgentFile(name="t", version=1, image_gen_url="http://localhost:9000/v1/")
-    result = asyncio_run(igc.generate("a red cube", config=settings))
+    result = asyncio_run(igc.generate("a red cube", config=_image_agent()))
 
     assert result == PNG_BYTES
     # b64_json requested explicitly
@@ -53,10 +73,48 @@ def test_generate_decodes_b64_json(monkeypatch):
     assert kwargs["prompt"] == "a red cube"
 
 
+def test_generate_uses_image_generation_route(monkeypatch):
+    import fleetent.tools.image_gen_client as igc
+
+    b64 = base64.b64encode(PNG_BYTES).decode("ascii")
+    client = _mock_async_openai(SimpleNamespace(b64_json=b64, url=None))
+    built: list[tuple[str, str | None]] = []
+
+    def build_client(endpoint: str, api_key: str | None = None):
+        built.append((endpoint, api_key))
+        return client
+
+    monkeypatch.setattr(igc, "_build_client", build_client)
+
+    result = asyncio_run(igc.generate("a red cube", config=_image_agent()))
+
+    assert result == PNG_BYTES
+    assert built == [("http://image.local/v1/images/generations", None)]
+    _, kwargs = client.images.generate.call_args
+    assert kwargs["model"] == "flux"
+
+
 def test_generate_requires_configured_url():
     import fleetent.tools.image_gen_client as igc
 
-    settings = AgentFile(name="t", version=1, image_gen_url="")
+    settings = AgentFile.model_validate(
+        {
+            "name": "t",
+            "version": 1,
+            "models": {
+                "targets": [
+                    {
+                        "id": "primary",
+                        "provider": "local",
+                        "protocol": "openai_chat",
+                        "base_url": "http://local.test/v1/",
+                        "model": "text",
+                    }
+                ],
+                "routes": {"default": [{"target": "primary"}]},
+            },
+        }
+    )
     with pytest.raises(igc.ImageGenError):
         asyncio_run(igc.generate("x", config=settings))
 
@@ -66,11 +124,10 @@ def test_generate_endpoint_error_raises_imagegenerror(monkeypatch):
 
     client = MagicMock()
     client.images.generate = AsyncMock(side_effect=RuntimeError("boom"))
-    monkeypatch.setattr(igc, "_build_client", lambda settings: client)
+    monkeypatch.setattr(igc, "_build_client", lambda *args, **kwargs: client)
 
-    settings = AgentFile(name="t", version=1, image_gen_url="http://localhost:9000/v1/")
     with pytest.raises(igc.ImageGenError):
-        asyncio_run(igc.generate("x", config=settings))
+        asyncio_run(igc.generate("x", config=_image_agent()))
 
 
 def test_generate_empty_data_raises(monkeypatch):
@@ -78,11 +135,10 @@ def test_generate_empty_data_raises(monkeypatch):
 
     client = MagicMock()
     client.images.generate = AsyncMock(return_value=SimpleNamespace(data=[]))
-    monkeypatch.setattr(igc, "_build_client", lambda settings: client)
+    monkeypatch.setattr(igc, "_build_client", lambda *args, **kwargs: client)
 
-    settings = AgentFile(name="t", version=1, image_gen_url="http://localhost:9000/v1/")
     with pytest.raises(igc.ImageGenError):
-        asyncio_run(igc.generate("x", config=settings))
+        asyncio_run(igc.generate("x", config=_image_agent()))
 
 
 def test_generate_fetches_url_when_no_b64(monkeypatch):
@@ -91,7 +147,7 @@ def test_generate_fetches_url_when_no_b64(monkeypatch):
     client = _mock_async_openai(
         SimpleNamespace(b64_json=None, url="http://localhost:9000/img/abc.png")
     )
-    monkeypatch.setattr(igc, "_build_client", lambda settings: client)
+    monkeypatch.setattr(igc, "_build_client", lambda *args, **kwargs: client)
 
     async def fake_fetch(url: str) -> bytes:
         assert url == "http://localhost:9000/img/abc.png"
@@ -99,8 +155,7 @@ def test_generate_fetches_url_when_no_b64(monkeypatch):
 
     monkeypatch.setattr(igc, "_fetch_url", fake_fetch)
 
-    settings = AgentFile(name="t", version=1, image_gen_url="http://localhost:9000/v1/")
-    result = asyncio_run(igc.generate("x", config=settings))
+    result = asyncio_run(igc.generate("x", config=_image_agent()))
     assert result == PNG_BYTES
 
 

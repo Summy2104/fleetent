@@ -56,7 +56,7 @@ LEGACY_FLATPATH_MODULES = (
 CANONICAL_PACKAGES = (
     ("fleetent.runtime", "run"),
     ("fleetent.tools", "get_schemas"),
-    ("fleetent.model", "get_client_and_config"),
+    ("fleetent.model", "ModelPolicySnapshot"),
     ("fleetent.skills", "scan"),
     ("fleetent.session", "load"),
     ("fleetent.integrations.sandbox", "SandboxClient"),

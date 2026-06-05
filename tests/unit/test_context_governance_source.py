@@ -5,7 +5,7 @@ fields from the file index by agent_name; with no agent it falls back to Setting
 """
 
 from fleetent import agent_config
-from fleetent.agent_config import AgentConfigIndex, AgentFile
+from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
 from fleetent.runtime import context
 
 
@@ -16,7 +16,13 @@ def _publish(agent: AgentFile) -> None:
 
 
 def test_default_config_from_agent(monkeypatch) -> None:
-    agent = AgentFile(name="a", version=1, context_max_tokens=12345, context_compress_threshold=0.5)
+    agent = AgentFile(
+        name="a",
+        version=1,
+        models=default_models(),
+        context_max_tokens=12345,
+        context_compress_threshold=0.5,
+    )
     _publish(agent)
     cfg = context._default_config(agent_name="a")
     assert cfg["max_tokens"] == 12345

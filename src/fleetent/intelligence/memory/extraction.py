@@ -8,10 +8,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+from openai import AsyncOpenAI
+
 from fleetent.intelligence import vector_store
 from fleetent.intelligence.memory import store
 from fleetent.intelligence.memory.models import MemoryItem, MemoryType
-from fleetent.model import get_async_client_and_config
+from fleetent.model import ModelConfigError, ModelPolicySnapshot
 
 EXTRACT_SYSTEM = (
     "Extract user semantic memories from the conversation. Return a JSON array of actions. "
@@ -36,19 +38,30 @@ IDENTITY_ROLE_SUFFIXES = (
 
 
 async def extract_and_update(
-    user_id: str, conversation: list[dict[str, Any]], namespace: str = "default"
+    user_id: str,
+    conversation: list[dict[str, Any]],
+    namespace: str = "default",
+    model_policy: ModelPolicySnapshot | None = None,
 ) -> None:
     """Extract structured memories from conversation and update the memory store."""
+    from fleetent import agent_config
+
     snapshot = store.memory_snapshot(user_id, namespace)
     vector_ns = vector_store.memory_namespace(user_id, namespace)
-    client, cfg = get_async_client_and_config("memory_extraction")
-    response = await client.chat.completions.create(
+    policy = model_policy or ModelPolicySnapshot.from_agent(agent_config.active_agent_or_default())
+    cfg = policy.resolve("memory_extraction")[0]
+    if cfg.protocol != "openai_chat" or not cfg.base_url or not cfg.model:
+        raise ModelConfigError("memory_extraction route must target an openai_chat model")
+    client = AsyncOpenAI(base_url=cfg.base_url, api_key=policy.require_api_key(cfg) or "fleetent")
+    create_completion = cast(Any, client.chat.completions.create)
+    response = await create_completion(
         model=cfg.model,
         messages=[
             {"role": "system", "content": EXTRACT_SYSTEM},
             {"role": "user", "content": extraction_user_message(conversation, snapshot)},
         ],
         max_tokens=cfg.max_tokens,
+        **cfg.params,
     )
     actions = parse_action_array(response.choices[0].message.content or "[]")
     if actions is None:

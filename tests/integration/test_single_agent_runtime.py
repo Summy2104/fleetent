@@ -7,7 +7,12 @@ from fleetent.runtime import snapshot
 
 
 def _write_home_agent(home, **overrides) -> None:
-    doc = {"name": "deployed", "version": 1, "system_prompt": "You are deployed."}
+    doc = {
+        "name": "deployed",
+        "version": 1,
+        "system_prompt": "You are deployed.",
+        "models": agent_config.default_models().model_dump(mode="json"),
+    }
     doc.update(overrides)
     home.mkdir(parents=True, exist_ok=True)
     (home / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")

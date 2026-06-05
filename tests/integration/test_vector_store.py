@@ -1,5 +1,13 @@
 import pytest
 
+from fleetent.agent_config import (
+    AgentFile,
+    AgentModels,
+    ModelRouteEntry,
+    ModelTarget,
+    default_models,
+)
+
 
 def _sqlite_database_url(path):
     return f"sqlite:///{path}"
@@ -7,6 +15,30 @@ def _sqlite_database_url(path):
 
 def _l2_norm(vector):
     return sum(value * value for value in vector) ** 0.5
+
+
+def _agent(**fields):
+    return AgentFile(name="t", version=1, models=default_models(), **fields)
+
+
+def _neutral_agent():
+    return AgentFile(name="", version=0, models=default_models())
+
+
+def _http_embedding_models(endpoint: str) -> AgentModels:
+    return AgentModels(
+        targets=[
+            ModelTarget(
+                id="embed",
+                provider="test",
+                protocol="http_embedding",
+                endpoint=endpoint,
+                model="bge-m3",
+                params={"dimensions": 2},
+            )
+        ],
+        routes={"embedding": [ModelRouteEntry(target="embed")]},
+    )
 
 
 def test_public_api_is_importable():
@@ -128,27 +160,21 @@ async def test_upsert_uses_configured_http_embedding_provider():
     import httpx
     import respx
 
-    from fleetent.agent_config import AgentFile
-    from fleetent.config import EmbeddingSettings
     from fleetent.intelligence.vector_store import runtime
     from fleetent.intelligence.vector_store.backend import InMemoryVectorBackend
 
+    endpoint = "http://runtime-embedding.test/v1/upsert-embeddings"
     runtime._configure(
         AgentFile(
             name="t",
             version=1,
-            embedding=EmbeddingSettings(
-                backend="http",
-                dimensions=2,
-                endpoint="http://runtime-embedding.test/v1/upsert-embeddings",
-                model="bge-m3",
-            ),
+            models=_http_embedding_models(endpoint),
         )
     )
 
     try:
         with respx.mock:
-            route = respx.post("http://runtime-embedding.test/v1/upsert-embeddings").mock(
+            route = respx.post(endpoint).mock(
                 return_value=httpx.Response(200, json={"data": [{"embedding": [1.0, 0.0]}]})
             )
 
@@ -158,33 +184,27 @@ async def test_upsert_uses_configured_http_embedding_provider():
         assert isinstance(runtime._backend, InMemoryVectorBackend)
         assert runtime._backend._vectors["mem:http-upsert"]["id-http"] == [1.0, 0.0]
     finally:
-        runtime._configure(AgentFile(name="t", version=1))
+        runtime._configure(_neutral_agent())
 
 
 async def test_search_uses_configured_http_embedding_provider():
     import httpx
     import respx
 
-    from fleetent.agent_config import AgentFile
-    from fleetent.config import EmbeddingSettings
     from fleetent.intelligence.vector_store import runtime
 
+    endpoint = "http://runtime-embedding.test/v1/search-embeddings"
     runtime._configure(
         AgentFile(
             name="t",
             version=1,
-            embedding=EmbeddingSettings(
-                backend="http",
-                dimensions=2,
-                endpoint="http://runtime-embedding.test/v1/search-embeddings",
-                model="bge-m3",
-            ),
+            models=_http_embedding_models(endpoint),
         )
     )
 
     try:
         with respx.mock:
-            route = respx.post("http://runtime-embedding.test/v1/search-embeddings").mock(
+            route = respx.post(endpoint).mock(
                 return_value=httpx.Response(200, json={"data": [{"embedding": [1.0, 0.0]}]})
             )
 
@@ -194,7 +214,7 @@ async def test_search_uses_configured_http_embedding_provider():
         assert route.call_count == 2
         assert [result.id for result in results] == ["id-http"]
     finally:
-        runtime._configure(AgentFile(name="t", version=1))
+        runtime._configure(_neutral_agent())
 
 
 async def test_search_limit_is_respected():
@@ -439,11 +459,10 @@ async def test_sqlite_backend_upsert_rejects_empty_vector(tmp_path):
 async def test_runtime_public_api_uses_sqlite_backend_with_global_database_url(
     tmp_path, monkeypatch
 ):
-    from fleetent.agent_config import AgentFile
     from fleetent.intelligence.vector_store import runtime
     from fleetent.intelligence.vector_store.backend import create_vector_backend
 
-    agent = AgentFile(name="t", version=1, vector_store={"backend": "sqlite"})
+    agent = _agent(vector_store={"backend": "sqlite"})
     database_url = _sqlite_database_url(tmp_path / "vectors.db")
     monkeypatch.setattr(
         runtime, "_backend", create_vector_backend(agent.vector_store, database_url=database_url)

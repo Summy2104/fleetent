@@ -36,6 +36,7 @@ def _bind_default_agent(tmp_path: Path, user_id: str) -> None:
     doc = {
         "name": "it-bot",
         "version": 1,
+        "models": agent_config.default_models().model_dump(mode="json"),
         "bindings": {"default": True},
         "access": {"allow_users": [user_id]},
     }

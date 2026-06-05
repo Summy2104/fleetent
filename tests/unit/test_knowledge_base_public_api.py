@@ -12,9 +12,11 @@ def test_knowledge_base_public_api_is_importable():
         GraphSearchChunk,
         GraphSearchResult,
         KnowledgeChunk,
+        KnowledgeConfigSnapshot,
         KnowledgeDocument,
         KnowledgeEntity,
         KnowledgeExtractionRun,
+        KnowledgeSourceConfig,
         ParsedDocument,
         ParsedSection,
         delete,
@@ -39,6 +41,8 @@ def test_knowledge_base_public_api_is_importable():
     assert EntityRef is not None
     assert GraphSearchChunk is not None
     assert GraphSearchResult is not None
+    assert KnowledgeConfigSnapshot is not None
+    assert KnowledgeSourceConfig is not None
     assert KnowledgeEntity is not None
     assert KnowledgeExtractionRun is not None
     assert KnowledgeDocument is not None

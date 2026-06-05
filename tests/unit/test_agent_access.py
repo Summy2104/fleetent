@@ -3,7 +3,20 @@
 import pytest
 from pydantic import ValidationError
 
-from fleetent.agent_config import AgentAccess, AgentFile, load_agent_home_file
+from fleetent.agent_config import AgentAccess, AgentFile, default_models, load_agent_home_file
+
+_MODELS = """
+models:
+  targets:
+    - id: primary
+      provider: local
+      protocol: openai_chat
+      base_url: http://local.test/v1/
+      model: text
+  routes:
+    default:
+      - target: primary
+"""
 
 
 def _write(path, body):
@@ -17,6 +30,9 @@ def test_access_block_parses(tmp_path):
         """
 name: alice
 version: 1
+"""
+        + _MODELS
+        + """
 access:
   allow_channels: ["C_ops", "C_eng"]
   allow_users: ["U_alice", "U_bob"]
@@ -35,6 +51,9 @@ def test_absent_access_block_defaults_closed(tmp_path):
         """
 name: alice
 version: 1
+"""
+        + _MODELS
+        + """
 """,
     )
     agent = load_agent_home_file(home)
@@ -57,6 +76,9 @@ def test_access_block_rejects_unknown_field(tmp_path):
         """
 name: alice
 version: 1
+"""
+        + _MODELS
+        + """
 access:
   allow_everyone: true
 """,
@@ -72,6 +94,9 @@ def test_inline_secret_still_rejected_with_access_block(tmp_path):
         """
 name: alice
 version: 1
+"""
+        + _MODELS
+        + """
 access:
   allow_users: ["U_alice"]
 connectors:
@@ -85,6 +110,6 @@ connectors:
 
 
 def test_agentfile_default_access_closed():
-    agent = AgentFile(name="alice", version=1)
+    agent = AgentFile(name="alice", version=1, models=default_models())
     assert agent.access.require_approval is True
     assert agent.access.allow_users == []

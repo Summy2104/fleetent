@@ -2,11 +2,20 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
-from fleetent.config import KnowledgeBaseSettings
+from fleetent import agent_config
+from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
 from fleetent.intelligence.knowledge_base import KnowledgeChunk
 from fleetent.intelligence.memory import MemoryItem
+
+
+def _publish_agent(monkeypatch, agent: AgentFile) -> None:
+    monkeypatch.setattr(
+        agent_config,
+        "_index",
+        AgentConfigIndex(agents={agent.name: agent}, by_channel={}, by_user={}, default=agent.name),
+    )
 
 
 async def test_public_api_is_importable():
@@ -125,10 +134,17 @@ async def test_missing_knowledge_provider_does_not_block_memory_context(monkeypa
 async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enabled(monkeypatch):
     from fleetent.intelligence import long_term_ctx
 
-    kb_config = KnowledgeBaseSettings(
-        enabled=True,
-        default_tenant_id="tenant-a",
-        default_kb_id="global",
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={
+                "enabled": True,
+                "bindings": [{"tenant_id": "tenant-a", "kb_id": "global"}],
+            },
+        ),
     )
     chunk = KnowledgeChunk(
         id="chunk-1",
@@ -143,10 +159,7 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
         source_url=None,
     )
     knowledge_search = AsyncMock(return_value=[chunk])
-    resolve_agent_kb_ids = Mock(return_value=["global"])
     monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
-    monkeypatch.setattr(long_term_ctx, "_kb_config", lambda: kb_config)
-    monkeypatch.setattr(long_term_ctx.knowledge_base, "resolve_agent_kb_ids", resolve_agent_kb_ids)
     monkeypatch.setattr(long_term_ctx.knowledge_base, "search", knowledge_search)
     long_term_ctx.set_knowledge_provider(None)
 
@@ -157,12 +170,12 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
         available_tokens=300,
     )
 
-    resolve_agent_kb_ids.assert_called_once_with("tenant-a", "agent-1")
     knowledge_search.assert_awaited_once_with(
         "markdown",
         tenant_id="tenant-a",
         kb_ids=["global"],
         limit=10,
+        mode="hybrid",
     )
     assert "[Knowledge]" in result.text
     assert "Fleetent can ingest markdown knowledge." in result.text
@@ -180,10 +193,17 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
 async def test_builtin_knowledge_provider_disabled_does_not_call_knowledge_base(monkeypatch):
     from fleetent.intelligence import long_term_ctx
 
-    kb_config = KnowledgeBaseSettings(enabled=False)
+    _publish_agent(
+        monkeypatch,
+        AgentFile(
+            name="agent-1",
+            version=1,
+            models=default_models(),
+            knowledge={"enabled": False},
+        ),
+    )
     knowledge_search = AsyncMock(return_value=[])
     monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
-    monkeypatch.setattr(long_term_ctx, "_kb_config", lambda: kb_config)
     monkeypatch.setattr(long_term_ctx.knowledge_base, "search", knowledge_search)
     long_term_ctx.set_knowledge_provider(None)
 

@@ -280,3 +280,73 @@ async def test_http_rerank_timeout_does_not_fallback_to_deterministic():
 
         with pytest.raises(RerankProviderError, match="timed out"):
             await provider.rerank("query", ["doc-a"])
+
+
+def _vector_policy():
+    from fleetent.agent_config import AgentFile
+    from fleetent.model import ModelPolicySnapshot
+
+    agent = AgentFile.model_validate(
+        {
+            "name": "knowledge-agent",
+            "version": 1,
+            "models": {
+                "targets": [
+                    {
+                        "id": "embed",
+                        "provider": "local",
+                        "protocol": "http_embedding",
+                        "endpoint": "http://embed.local/v1/embeddings",
+                        "model": "bge",
+                        "api_key_env": "FLEETENT_MODEL_EMBED_API_KEY",
+                        "params": {"dimensions": 128, "timeout_seconds": 3.5},
+                    },
+                    {
+                        "id": "rerank",
+                        "provider": "local",
+                        "protocol": "http_rerank",
+                        "endpoint": "http://rerank.local/v1/rerank",
+                        "model": "bge-reranker",
+                        "api_key_env": "FLEETENT_MODEL_RERANK_API_KEY",
+                        "params": {"timeout_seconds": 4.5},
+                    },
+                ],
+                "routes": {
+                    "embedding": [{"target": "embed"}],
+                    "rerank": [{"target": "rerank"}],
+                },
+            },
+        }
+    )
+    return ModelPolicySnapshot.from_agent(agent)
+
+
+def test_embedding_provider_can_be_created_from_model_policy() -> None:
+    from fleetent.intelligence.vector_store.embeddings import (
+        HttpEmbeddingProvider,
+        create_embedding_provider_from_policy,
+    )
+
+    provider = create_embedding_provider_from_policy(_vector_policy())
+
+    assert isinstance(provider, HttpEmbeddingProvider)
+    assert provider.endpoint == "http://embed.local/v1/embeddings"
+    assert provider.model == "bge"
+    assert provider.api_key_env == "FLEETENT_MODEL_EMBED_API_KEY"
+    assert provider.dimensions == 128
+    assert provider.timeout_seconds == 3.5
+
+
+def test_rerank_provider_can_be_created_from_model_policy() -> None:
+    from fleetent.intelligence.vector_store.rerank import (
+        HttpRerankProvider,
+        create_rerank_provider_from_policy,
+    )
+
+    provider = create_rerank_provider_from_policy(_vector_policy())
+
+    assert isinstance(provider, HttpRerankProvider)
+    assert provider.endpoint == "http://rerank.local/v1/rerank"
+    assert provider.model == "bge-reranker"
+    assert provider.api_key_env == "FLEETENT_MODEL_RERANK_API_KEY"
+    assert provider.timeout_seconds == 4.5

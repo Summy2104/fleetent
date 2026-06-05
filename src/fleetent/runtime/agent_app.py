@@ -166,6 +166,7 @@ def build_app(agent_name: str) -> FastAPI:
     """
     from collections.abc import AsyncGenerator
 
+    from fleetent.model import ModelPolicySnapshot
     from fleetent.runtime.loop import run_stream
     from fleetent.runtime.snapshot import _governance_from_file
     from fleetent.tools.plugin_loader import expand_plugin_patterns
@@ -196,6 +197,7 @@ def build_app(agent_name: str) -> FastAPI:
             kwargs["agent_features"] = agent.features
             kwargs["allowed_skills"] = agent.allowed_skills
             kwargs["governance"] = _governance_from_file(agent)
+            kwargs["model_policy"] = ModelPolicySnapshot.from_agent(agent)
 
         async def _stream() -> AsyncGenerator[str, None]:
             try:

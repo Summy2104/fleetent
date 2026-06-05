@@ -37,10 +37,17 @@ def _insert_memory_row(
 
 
 def _configure_memory_vector_runtime(monkeypatch):
-    from fleetent.agent_config import AgentFile
+    from fleetent.agent_config import AgentFile, default_models
     from fleetent.intelligence.vector_store import runtime
 
-    runtime._configure(AgentFile(name="t", version=1, vector_store={"backend": "memory"}))
+    runtime._configure(
+        AgentFile(
+            name="",
+            version=0,
+            models=default_models(),
+            vector_store={"backend": "memory"},
+        )
+    )
 
 
 def test_memory_rebuild_removes_stale_vectors_and_indexes_current_items(tmp_path, monkeypatch):

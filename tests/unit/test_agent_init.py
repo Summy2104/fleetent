@@ -22,7 +22,9 @@ def test_scaffold_env_lists_referenced_names_without_secrets(tmp_path) -> None:
     agent_init.scaffold_agent_home("my-bot", home=home)
 
     env = (home / ".env").read_text(encoding="utf-8")
-    assert "ANTHROPIC_API_KEY=" in env
+    assert "FLEETENT_MODEL_PRIMARY_API_KEY=" in env
+    assert "ANTHROPIC_API_KEY=" not in env
+    assert "model_overrides" not in (home / "agent.yaml").read_text(encoding="utf-8")
     # Scaffold lists names with empty values — never real secret material.
     for marker in ("sk-", "xoxb-", "xapp-", "ma-"):
         assert marker not in env
@@ -52,14 +54,16 @@ def test_force_overwrites_agent_yaml_but_preserves_env(tmp_path) -> None:
     home = tmp_path / "my-bot"
     agent_init.scaffold_agent_home("my-bot", home=home)
     (home / "agent.yaml").write_text("name: my-bot\nversion: 99\n", encoding="utf-8")
-    (home / ".env").write_text("ANTHROPIC_API_KEY=sk-real-keepme\n", encoding="utf-8")
+    (home / ".env").write_text("FLEETENT_MODEL_PRIMARY_API_KEY=sk-real-keepme\n", encoding="utf-8")
 
     agent_init.scaffold_agent_home("my-bot", home=home, force=True)
 
     assert "version: 99" not in (home / "agent.yaml").read_text(encoding="utf-8")
     assert agent_config.load_agent_file(home).name == "my-bot"
     # .env is never clobbered, even with --force (protects secrets).
-    assert (home / ".env").read_text(encoding="utf-8") == "ANTHROPIC_API_KEY=sk-real-keepme\n"
+    assert (home / ".env").read_text(
+        encoding="utf-8"
+    ) == "FLEETENT_MODEL_PRIMARY_API_KEY=sk-real-keepme\n"
 
 
 def test_default_home_is_fleetent_home_slash_id(tmp_path, monkeypatch) -> None:

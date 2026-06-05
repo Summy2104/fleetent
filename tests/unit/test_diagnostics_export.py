@@ -4,7 +4,7 @@ import json
 import zipfile
 from datetime import UTC, datetime
 
-from fleetent.agent_config import AgentFile
+from fleetent.agent_config import AgentFile, default_models
 from fleetent.config import DiagnosticsSettings
 
 
@@ -108,6 +108,7 @@ def test_export_diagnostics_includes_connector_environment_and_config(monkeypatc
             settings=AgentFile(
                 name="t",
                 version=1,
+                models=default_models(),
                 diagnostics=DiagnosticsSettings(export_dir=str(tmp_path)),
             ),
         )
@@ -168,7 +169,7 @@ def test_export_diagnostics_includes_latest_connector_status(monkeypatch, tmp_pa
             output_dir=tmp_path,
             include_logs=False,
             include_traces=False,
-            settings=AgentFile(name="t", version=1),
+            settings=AgentFile(name="t", version=1, models=default_models()),
         )
     )
 
@@ -240,7 +241,7 @@ def test_export_records_status_unavailable_when_status_lookup_raises(monkeypatch
             output_dir=tmp_path,
             include_logs=False,
             include_traces=False,
-            settings=AgentFile(name="t", version=1),
+            settings=AgentFile(name="t", version=1, models=default_models()),
         )
     )
 

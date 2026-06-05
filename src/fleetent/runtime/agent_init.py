@@ -13,11 +13,8 @@ from pathlib import Path
 
 import yaml
 
-from fleetent.agent_config import AgentFile
+from fleetent.agent_config import AgentFile, AgentModels, ModelRouteEntry, ModelTarget
 from fleetent.runtime.agent_app import resolve_home
-
-# Always-needed env var for the default route, even on a bare template.
-_ALWAYS_ENV = ("ANTHROPIC_API_KEY",)
 
 
 def _template_agent(agent_id: str) -> AgentFile:
@@ -26,14 +23,30 @@ def _template_agent(agent_id: str) -> AgentFile:
         name=agent_id,
         version=1,
         system_prompt="You are a helpful assistant.\n",
-        model_overrides={"default": {"provider": "anthropic", "model": "claude-opus-4-8"}},
+        models=AgentModels(
+            targets=[
+                ModelTarget(
+                    id="primary",
+                    provider="anthropic",
+                    protocol="openai_chat",
+                    base_url="https://api.anthropic.com/v1/",
+                    model="claude-opus-4-8",
+                    api_key_env="FLEETENT_MODEL_PRIMARY_API_KEY",
+                    max_tokens=4096,
+                )
+            ],
+            routes={"default": [ModelRouteEntry(target="primary")]},
+        ),
         allowed_tools=["search_*", "read_skill"],
     )
 
 
 def _referenced_env_names(agent: AgentFile) -> list[str]:
     """Collect env-var names the agent references (always + MCP/connector ``*_env``)."""
-    names: set[str] = set(_ALWAYS_ENV)
+    names: set[str] = set()
+    for target in agent.models.targets:
+        if target.api_key_env:
+            names.add(target.api_key_env)
     for server in agent.mcp_servers:
         for attr in ("api_key_env", "client_secret_env"):
             value = getattr(server, attr, "")

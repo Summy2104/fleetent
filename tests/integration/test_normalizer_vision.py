@@ -29,6 +29,7 @@ def _bind_default_agent(tmp_path, monkeypatch):
     doc = {
         "name": "vision-bot",
         "version": 1,
+        "models": agent_config.default_models().model_dump(mode="json"),
         "bindings": {"default": True},
         "access": {"allow_users": ["u1"]},
     }

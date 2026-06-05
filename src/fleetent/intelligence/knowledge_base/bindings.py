@@ -173,10 +173,8 @@ def _settings() -> Settings:
 
 
 def _kb_config() -> KnowledgeBaseSettings:
-    """knowledge_base config from the active agent (a neutral default when absent)."""
-    from fleetent import agent_config
-
-    return agent_config.active_agent_or_default().knowledge_base
+    """Neutral KB binding defaults; Agent-side access lives in agent.knowledge."""
+    return KnowledgeBaseSettings()
 
 
 def _database() -> SQLiteDatabase:

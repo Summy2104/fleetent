@@ -13,9 +13,9 @@ def _fp(args: str) -> str:
 
 
 def test_agentfile_guardrail_threshold_default_3():
-    from fleetent.agent_config import AgentFile
+    from fleetent.agent_config import AgentFile, default_models
 
-    assert AgentFile(name="x", version=1).guardrail_repeat_threshold == 3
+    assert AgentFile(name="x", version=1, models=default_models()).guardrail_repeat_threshold == 3
 
 
 # ── strict consecutive counting + trigger (group 3) ──────────────────────────

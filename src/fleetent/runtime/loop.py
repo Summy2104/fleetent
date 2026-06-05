@@ -21,9 +21,8 @@ from fleetent.governance.permission_gate import _default_gate
 from fleetent.integrations.sandbox import Mode, is_code_execution_enabled
 from fleetent.intelligence.long_term_ctx import ContextSource, build_context
 from fleetent.intelligence.memory import extract_and_update
-from fleetent.model import router as model_router
+from fleetent.model import ModelConfigError, ModelPolicySnapshot, ResolvedModelConfig
 from fleetent.model.provider_health import ProviderHealthCache, get_health_cache
-from fleetent.model.router import RouteConfig, RouteOverride, get_async_client_and_config
 from fleetent.observability import (
     InjectedContextTrace,
     TraceEvent,
@@ -707,54 +706,6 @@ def _backfill_slots(
         )
 
 
-def _candidates(models: list[str], cache: ProviderHealthCache) -> list[str]:
-    """Models to actually try, skipping those in cooldown (MR3, design D4).
-
-    When every candidate is cooling we fall back to the full original list rather
-    than skip all of them: probing the cooling providers preserves the existing
-    "providers exhausted → raise" contract instead of silently returning nothing.
-    """
-    available = [m for m in models if cache.is_available(m)]
-    return available or models
-
-
-async def _call_with_fallback(
-    client: AsyncOpenAI,
-    cfg: RouteConfig,
-    messages: list[Any],
-    schemas: list[Any],
-    models: list[str],
-) -> tuple[Any, str]:
-    """Try each model in order on 429/503; return (response, model_used).
-
-    Providers currently in cooldown (per the health cache, MR3) are skipped so a
-    known-bad provider no longer costs its timeout on every request. A successful
-    call closes that provider's breaker; a switchable failure records against it.
-    """
-    cache = get_health_cache()
-    last_exc: Exception | None = None
-    for model in _candidates(models, cache):
-        try:
-            resp = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                tools=schemas,
-                max_tokens=cfg.max_tokens,
-                **cfg.params,
-            )
-            cache.record_success(model)
-            return resp, model
-        except Exception as exc:
-            # Classification owns the "should we switch models?" decision; the
-            # loop no longer hardcodes status codes here (design D5). Only a
-            # switchable failure (429/503) counts against the provider's breaker.
-            if not classify(exc).should_switch_model:
-                raise
-            cache.record_failure(model)
-            last_exc = exc
-    raise last_exc  # type: ignore[misc]
-
-
 def _budget_add(usage: BudgetUsage, response_usage: Any) -> None:
     """Fold one main-loop turn into the budget accumulator (D1).
 
@@ -772,10 +723,10 @@ def _budget_add(usage: BudgetUsage, response_usage: Any) -> None:
 
 async def _grace_call(
     client: AsyncOpenAI,
-    cfg: RouteConfig,
+    cfg: ResolvedModelConfig,
     messages: list[Any],
     schemas: list[Any],
-    models: list[str],
+    model: str,
     budget_max_tokens: int,
     partial_reply: str,
 ) -> str:
@@ -789,8 +740,9 @@ async def _grace_call(
     grace_messages = [*messages, {"role": "user", "content": _GRACE_CALL_TEXT}]
     reserved = grace_max_tokens(budget_max_tokens)
     try:
-        resp = await client.chat.completions.create(
-            model=models[0],
+        create_completion = cast(Any, client.chat.completions.create)
+        resp = await create_completion(
+            model=model,
             messages=grace_messages,
             tools=schemas,
             max_tokens=reserved,
@@ -804,41 +756,6 @@ async def _grace_call(
     except Exception as exc:  # degrade to partial result; not swallowed silently
         logger.warning("grace_call_failed_fallback_partial", error=str(exc))
         return partial_reply
-
-
-async def _stream_with_fallback(
-    client: AsyncOpenAI,
-    cfg: RouteConfig,
-    messages: list[Any],
-    schemas: list[Any],
-    models: list[str],
-) -> tuple[Any, str]:
-    """Try each model in order on 429/503 for streaming; return (stream, model_used).
-
-    Shares the health cache with `_call_with_fallback`: cooling providers are
-    skipped, successes close the breaker, switchable failures record against it.
-    """
-    cache = get_health_cache()
-    last_exc: Exception | None = None
-    for model in _candidates(models, cache):
-        try:
-            stream = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                tools=schemas,
-                max_tokens=cfg.max_tokens,
-                stream=True,
-                stream_options={"include_usage": True},
-                **cfg.params,
-            )
-            cache.record_success(model)
-            return stream, model
-        except Exception as exc:
-            if not classify(exc).should_switch_model:
-                raise
-            cache.record_failure(model)
-            last_exc = exc
-    raise last_exc  # type: ignore[misc]
 
 
 def _content_to_text(content: Any) -> str:
@@ -866,20 +783,110 @@ def _first_user_input(messages: list[Any]) -> str:
     )
 
 
-def _select_route(messages: list[Any]) -> str:
-    """Pick the task_type for this run: vision when an image block is present.
-
-    Raises when images are present but no `vision` route is configured (D6,
-    option A) so the loop fails locally rather than sending an image to a
-    non-vision model.
-    """
+def _select_policy_route(messages: list[Any], policy: ModelPolicySnapshot) -> str:
     if not has_image_block(messages):
         return "default"
-    if "vision" not in model_router.ROUTES:
-        raise RuntimeError(
-            "消息含图片但未配置 vision 路由（model_router.ROUTES 缺少 'vision'），无法处理图片输入"
-        )
+    if "vision" not in policy.routes:
+        raise RuntimeError("消息含图片但未配置 vision 路由，无法处理图片输入")
     return "vision"
+
+
+def _active_model_policy() -> ModelPolicySnapshot:
+    return ModelPolicySnapshot.from_agent(agent_config.active_agent_or_default())
+
+
+def _build_async_client(resolved: ResolvedModelConfig, api_key: str | None) -> AsyncOpenAI:
+    if resolved.protocol != "openai_chat":
+        raise ModelConfigError(
+            f"model route '{resolved.route_key}' target '{resolved.target_id}' "
+            f"uses unsupported chat protocol '{resolved.protocol}'"
+        )
+    if not resolved.base_url:
+        raise ModelConfigError(
+            f"model route '{resolved.route_key}' target '{resolved.target_id}' missing base_url"
+        )
+    return AsyncOpenAI(base_url=resolved.base_url, api_key=api_key or "fleetent")
+
+
+def _model_name(resolved: ResolvedModelConfig) -> str:
+    if not resolved.model:
+        raise ModelConfigError(
+            f"model route '{resolved.route_key}' target '{resolved.target_id}' missing model"
+        )
+    return resolved.model
+
+
+async def _call_policy_chat(
+    policy: ModelPolicySnapshot,
+    chain: tuple[ResolvedModelConfig, ...],
+    messages: list[Any],
+    schemas: list[Any],
+) -> tuple[Any, ResolvedModelConfig]:
+    cache = get_health_cache()
+    last_exc: Exception | None = None
+    candidates = _policy_candidates(chain, cache)
+    for resolved in candidates:
+        model = _model_name(resolved)
+        try:
+            api_key = policy.require_api_key(resolved)
+            client = _build_async_client(resolved, api_key)
+            create_completion = cast(Any, client.chat.completions.create)
+            response = await create_completion(
+                model=model,
+                messages=messages,
+                tools=schemas,
+                max_tokens=resolved.max_tokens,
+                **resolved.params,
+            )
+            cache.record_success(model)
+            return response, resolved
+        except Exception as exc:
+            if isinstance(exc, ModelConfigError) or not classify(exc).should_switch_model:
+                raise
+            cache.record_failure(model)
+            last_exc = exc
+    raise last_exc  # type: ignore[misc]
+
+
+async def _stream_policy_chat(
+    policy: ModelPolicySnapshot,
+    chain: tuple[ResolvedModelConfig, ...],
+    messages: list[Any],
+    schemas: list[Any],
+) -> tuple[Any, ResolvedModelConfig]:
+    cache = get_health_cache()
+    last_exc: Exception | None = None
+    candidates = _policy_candidates(chain, cache)
+    for resolved in candidates:
+        model = _model_name(resolved)
+        try:
+            api_key = policy.require_api_key(resolved)
+            client = _build_async_client(resolved, api_key)
+            create_completion = cast(Any, client.chat.completions.create)
+            stream = await create_completion(
+                model=model,
+                messages=messages,
+                tools=schemas,
+                max_tokens=resolved.max_tokens,
+                stream=True,
+                stream_options={"include_usage": True},
+                **resolved.params,
+            )
+            cache.record_success(model)
+            return stream, resolved
+        except Exception as exc:
+            if isinstance(exc, ModelConfigError) or not classify(exc).should_switch_model:
+                raise
+            cache.record_failure(model)
+            last_exc = exc
+    raise last_exc  # type: ignore[misc]
+
+
+def _policy_candidates(
+    chain: tuple[ResolvedModelConfig, ...], cache: ProviderHealthCache
+) -> tuple[ResolvedModelConfig, ...]:
+    available = tuple(entry for entry in chain if cache.is_available(_model_name(entry)))
+    return available or chain
 
 
 def _log_run_error(
@@ -1057,6 +1064,7 @@ async def run(
     session_id: str | None = None,
     allowed_skills: list[str] | None = None,
     governance: GovernanceConfig | None = None,
+    model_policy: ModelPolicySnapshot | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1081,11 +1089,12 @@ async def run(
     # images are present but no vision route is configured, before any LLM call.
     # force_model layers a request-level override onto that route (MR1); when
     # None the call stays byte-identical to task_type routing.
-    route = _select_route(messages)
-    if force_model is None:
-        client, cfg = get_async_client_and_config(route)
-    else:
-        client, cfg = get_async_client_and_config(route, override=RouteOverride(model=force_model))
+    policy = model_policy or _active_model_policy()
+    route = _select_policy_route(messages, policy)
+    route_chain = policy.resolve(route)
+    if force_model is not None:
+        route_chain = (route_chain[0].model_copy(update={"model": force_model}),)
+    active_cfg = route_chain[0]
 
     # Determine effective tool schemas (exclude sub_agent for child agents)
     schemas = (
@@ -1116,7 +1125,9 @@ async def run(
     # injected-context trace. Best-effort — a missing DB / disabled KB must not
     # break the run (mirrors the sandbox/eval_logger best-effort pattern).
     try:
-        built_context = await build_context(user_id, user_input, agent_name or "", cfg.max_tokens)
+        built_context = await build_context(
+            user_id, user_input, agent_name or "", active_cfg.max_tokens or 4096
+        )
         _append_system_context(messages, system_prompt, built_context.text)
         _record_injected_context(run_id, built_context.sources)
     except Exception as exc:  # noqa: BLE001 — long-term context is auxiliary
@@ -1140,10 +1151,7 @@ async def run(
         return reply
     response = None
     msg: Any = None
-    # Override forces a single model with no fallback (D3); cfg.fallbacks is
-    # already empty here, but be explicit so the intent survives refactors.
-    models_to_try = [cfg.model] if force_model is not None else [cfg.model, *cfg.fallbacks]
-    model_used = cfg.model
+    model_used = _model_name(active_cfg)
 
     # None → a never-cancelling default token, keeping the no-token path identical.
     token = cancel_token if cancel_token is not None else CancelToken()
@@ -1199,9 +1207,8 @@ async def run(
         messages[:] = clean
         _accumulate_repairs(hygiene_repairs, report)
         try:
-            response, model_used = await _call_with_fallback(
-                client, cfg, messages, schemas, models_to_try
-            )
+            response, active_cfg = await _call_policy_chat(policy, route_chain, messages, schemas)
+            model_used = _model_name(active_cfg)
         except Exception as exc:
             # Record the error class on the trace before propagating (design D4).
             _log_run_error(exc, messages, start, model_used, user_id, agent_name)
@@ -1218,7 +1225,7 @@ async def run(
             getattr(response.usage, "prompt_tokens", 0),
             getattr(response.usage, "completion_tokens", 0),
         )
-        models_to_try = [model_used]  # stick with the winning model for subsequent turns
+        route_chain = (active_cfg,)  # stick with the winning target for subsequent turns
         choice = response.choices[0]
         msg = choice.message
         messages.append(msg.model_dump())  # dict for JSON serializability (session persistence)
@@ -1266,7 +1273,13 @@ async def run(
             budget_scope = layered_checker.triggered_scope
             budget_dimension = budget_dimension or layered_checker.triggered_dimension
         reply = await _grace_call(
-            client, cfg, messages, schemas, [model_used], budget_config.max_tokens, reply
+            _build_async_client(active_cfg, policy.require_api_key(active_cfg)),
+            active_cfg,
+            messages,
+            schemas,
+            model_used,
+            budget_config.max_tokens,
+            reply,
         )
     usage = response.usage if response else None
     user_input = _first_user_input(messages)
@@ -1305,7 +1318,7 @@ async def run(
     # Memory extraction unified onto intelligence/memory (class C). Best-effort and
     # awaited (same blocking profile as the prior inline extract_and_save).
     try:
-        await extract_and_update(user_id, messages)
+        await extract_and_update(user_id, messages, model_policy=policy)
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
         logger.debug("memory_extraction_skipped", error=str(exc))
     return reply
@@ -1345,6 +1358,7 @@ def run_sync(
     agent_name: str | None = None
     agent_features: dict[str, Any] | None = None
     governance: GovernanceConfig | None = None
+    model_policy: ModelPolicySnapshot | None = None
     if agent is not None:
         from fleetent.runtime.snapshot import _governance_from_file
         from fleetent.tools.plugin_loader import expand_plugin_patterns
@@ -1356,6 +1370,7 @@ def run_sync(
         agent_name = agent.name
         agent_features = agent.features
         governance = _governance_from_file(agent)
+        model_policy = ModelPolicySnapshot.from_agent(agent)
 
     skills_catalog = available_skills_prompt(allowed_skills=allowed_skills)
     disabled_trace = collect_disabled_trace() or None
@@ -1381,6 +1396,7 @@ def run_sync(
             disabled_skills_trace=disabled_trace,
             sandbox_mode=sandbox_mode,
             governance=governance,
+            model_policy=model_policy,
         )
 
     return asyncio.run(_run())
@@ -1406,6 +1422,7 @@ async def run_stream(
     session_id: str | None = None,
     allowed_skills: list[str] | None = None,
     governance: GovernanceConfig | None = None,
+    model_policy: ModelPolicySnapshot | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -1439,18 +1456,21 @@ async def run_stream(
     # images are present but no vision route is configured (D6, option A).
     # force_model layers a request-level override (MR1); None keeps task_type
     # routing byte-identical.
-    route = _select_route(messages)
-    if force_model is None:
-        client, cfg = get_async_client_and_config(route)
-    else:
-        client, cfg = get_async_client_and_config(route, override=RouteOverride(model=force_model))
+    policy = model_policy or _active_model_policy()
+    route = _select_policy_route(messages, policy)
+    route_chain = policy.resolve(route)
+    if force_model is not None:
+        route_chain = (route_chain[0].model_copy(update={"model": force_model}),)
+    active_cfg = route_chain[0]
 
     start = time.monotonic()
     run_id = str(uuid.uuid4())
     # Class-A wiring (streaming): inject long-term context + record injected-context
     # trace. Best-effort — missing DB / disabled KB must not break the stream.
     try:
-        built_context = await build_context(user_id, user_input, agent_name or "", cfg.max_tokens)
+        built_context = await build_context(
+            user_id, user_input, agent_name or "", active_cfg.max_tokens or 4096
+        )
         _append_system_context(messages, system_prompt, built_context.text)
         _record_injected_context(run_id, built_context.sources)
     except Exception as exc:  # noqa: BLE001 — long-term context is auxiliary
@@ -1473,8 +1493,7 @@ async def run_stream(
         )
         yield {"type": "done", "content": reply}
         return
-    models_to_try = [cfg.model] if force_model is not None else [cfg.model, *cfg.fallbacks]
-    model_used = cfg.model
+    model_used = _model_name(active_cfg)
     total_prompt_tokens = 0
     total_completion_tokens = 0
     cache_tokens: dict[str, int] | None = None
@@ -1540,10 +1559,11 @@ async def run_stream(
         stream_schemas = _filter_code_execution(stream_schemas, sandbox_mode, agent_features)
 
         try:
-            stream, model_used = await _stream_with_fallback(
-                client, cfg, messages, stream_schemas, models_to_try
+            stream, active_cfg = await _stream_policy_chat(
+                policy, route_chain, messages, stream_schemas
             )
-            models_to_try = [model_used]
+            model_used = _model_name(active_cfg)
+            route_chain = (active_cfg,)
         except (RateLimitError, APIStatusError) as exc:
             yield {"type": "error", "content": str(exc)}
             _log_run_error(exc, messages, start, model_used, user_id, agent_name)
@@ -1688,14 +1708,16 @@ async def run_stream(
         grace_parts: list[str] = []
         any_delta = False
         try:
-            grace_stream = await client.chat.completions.create(
+            grace_client = _build_async_client(active_cfg, policy.require_api_key(active_cfg))
+            create_completion = cast(Any, grace_client.chat.completions.create)
+            grace_stream = await create_completion(
                 model=model_used,
                 messages=grace_messages,
                 tools=[],
                 max_tokens=reserved,
                 stream=True,
                 stream_options={"include_usage": True},
-                **cfg.params,
+                **active_cfg.params,
             )
             grace_stream = cast(AsyncStream[ChatCompletionChunk], grace_stream)
             async for chunk in grace_stream:
@@ -1765,6 +1787,6 @@ async def run_stream(
     # Memory extraction unified onto intelligence/memory (class C). Best-effort and
     # awaited (same blocking profile as the prior inline extract_and_save).
     try:
-        await extract_and_update(user_id, messages)
+        await extract_and_update(user_id, messages, model_policy=policy)
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
         logger.debug("memory_extraction_skipped", error=str(exc))

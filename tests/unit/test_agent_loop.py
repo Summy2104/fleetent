@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from openai import APIStatusError, RateLimitError
 
 import fleetent.runtime.loop as al
-from fleetent.model.router import RouteConfig
 from fleetent.runtime.termination import LoopState, StopReason
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -60,6 +60,44 @@ def _tool_resp(name: str, args: str = "{}", call_id: str = "tc-1") -> MagicMock:
     return resp
 
 
+def _model_policy(agent_name: str = "support"):
+    from fleetent.agent_config import AgentFile
+    from fleetent.model import ModelPolicySnapshot
+
+    agent = AgentFile.model_validate(
+        {
+            "name": agent_name,
+            "version": 1,
+            "models": {
+                "targets": [
+                    {
+                        "id": "primary",
+                        "provider": "local",
+                        "protocol": "openai_chat",
+                        "base_url": f"http://{agent_name}.test/v1/",
+                        "model": f"{agent_name}-model",
+                        "api_key_env": f"FLEETENT_MODEL_{agent_name.upper()}_API_KEY",
+                        "max_tokens": 512,
+                    },
+                    {
+                        "id": "vision",
+                        "provider": "local",
+                        "protocol": "openai_chat",
+                        "base_url": f"http://{agent_name}-vision.test/v1/",
+                        "model": f"{agent_name}-vision-model",
+                        "max_tokens": 256,
+                    },
+                ],
+                "routes": {
+                    "default": [{"target": "primary"}],
+                    "vision": [{"target": "vision"}],
+                },
+            },
+        }
+    )
+    return ModelPolicySnapshot.from_agent(agent)
+
+
 async def _stream_chunks(*contents: str | None, finish: str = "stop"):
     """Async generator yielding fake stream chunks. Last chunk gets finish_reason."""
     for i, content in enumerate(contents):
@@ -92,10 +130,14 @@ def mock_client(monkeypatch) -> AsyncMock:
     cfg = MagicMock()
     cfg.model = "test-model"
     cfg.max_tokens = 512
+    cfg.params = {}
 
     cfg.fallbacks = ()
 
-    monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(
+        al, "get_async_client_and_config", lambda *a, **kw: (client, cfg), raising=False
+    )
+    monkeypatch.setattr(al, "_build_async_client", lambda resolved, api_key: client)
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
@@ -664,15 +706,56 @@ def _mk_http_error(status: int, cls=APIStatusError) -> APIStatusError:
 def mock_client_fb(monkeypatch) -> AsyncMock:
     """mock_client variant with one fallback model configured."""
     client = AsyncMock()
-    cfg = RouteConfig(
+    from fleetent.agent_config import AgentFile
+    from fleetent.model import ModelPolicySnapshot
+
+    policy = ModelPolicySnapshot.from_agent(
+        AgentFile.model_validate(
+            {
+                "name": "fallback-agent",
+                "version": 1,
+                "models": {
+                    "targets": [
+                        {
+                            "id": "primary",
+                            "provider": "local",
+                            "protocol": "openai_chat",
+                            "base_url": "https://api.test.com",
+                            "model": "primary-model",
+                            "api_key_env": "TEST_KEY",
+                            "max_tokens": 512,
+                        },
+                        {
+                            "id": "fallback",
+                            "provider": "local",
+                            "protocol": "openai_chat",
+                            "base_url": "https://api-fallback.test.com",
+                            "model": "fallback-model",
+                            "api_key_env": "TEST_KEY",
+                            "max_tokens": 512,
+                        },
+                    ],
+                    "routes": {"default": [{"target": "primary"}, {"target": "fallback"}]},
+                },
+            }
+        )
+    )
+    monkeypatch.setenv("TEST_KEY", "k")
+    monkeypatch.setattr(al, "_active_model_policy", lambda: policy)
+    monkeypatch.setattr(al, "_build_async_client", lambda resolved, api_key: client)
+    legacy_cfg = SimpleNamespace(
         base_url="https://api.test.com",
         model="primary-model",
         api_key_env="TEST_KEY",
         max_tokens=512,
         fallbacks=("fallback-model",),
     )
-    monkeypatch.setenv("TEST_KEY", "k")
-    monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(
+        al,
+        "get_async_client_and_config",
+        lambda *a, **kw: (client, legacy_cfg),
+        raising=False,
+    )
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
@@ -1040,19 +1123,15 @@ async def test_run_str_content_regression(mock_client):
 
 
 async def test_run_routes_to_vision_when_image_present(monkeypatch):
-    seen: list[str] = []
+    seen: list[str | None] = []
     client = AsyncMock()
-    cfg = MagicMock()
-    cfg.model = "vision-model"
-    cfg.max_tokens = 512
-    cfg.fallbacks = ()
     client.chat.completions.create = AsyncMock(return_value=_text_resp("seen"))
 
-    def spy(task_type):
-        seen.append(task_type)
-        return client, cfg
+    def spy(resolved, api_key):
+        seen.append(resolved.target_id)
+        return client
 
-    monkeypatch.setattr(al, "get_async_client_and_config", spy)
+    monkeypatch.setattr(al, "_build_async_client", spy)
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
@@ -1070,30 +1149,118 @@ async def test_run_routes_to_vision_when_image_present(monkeypatch):
 async def test_run_uses_default_route_for_text(mock_client, monkeypatch):
     seen: list[str] = []
     client = mock_client
-    cfg = MagicMock()
-    cfg.model = "test-model"
-    cfg.max_tokens = 512
-    cfg.fallbacks = ()
 
-    def spy(t):
-        seen.append(t)
-        return client, cfg
+    def spy(resolved, api_key):
+        seen.append(resolved.route_key)
+        return client
 
-    monkeypatch.setattr(al, "get_async_client_and_config", spy)
+    monkeypatch.setattr(al, "_build_async_client", spy)
     client.chat.completions.create = AsyncMock(return_value=_text_resp("t"))
     await al.run([{"role": "user", "content": "hello"}])
     assert seen == ["default"]
 
 
-async def test_run_raises_when_image_but_no_vision_route(mock_client, monkeypatch):
-    from fleetent.model import router as model_router
+async def test_run_uses_agent_model_policy_default_route(monkeypatch):
+    policy = _model_policy("alpha")
+    monkeypatch.setenv("FLEETENT_MODEL_ALPHA_API_KEY", "test-key")
+    monkeypatch.setattr(
+        al,
+        "get_async_client_and_config",
+        lambda *a, **kw: pytest.fail("legacy routes.yaml router must not be used"),
+        raising=False,
+    )
+    client = AsyncMock()
+    client.chat.completions.create = AsyncMock(return_value=_text_resp("policy ok"))
+    built: list[tuple[str | None, str | None]] = []
 
-    routes_no_vision = {k: v for k, v in model_router.ROUTES.items() if k != "vision"}
-    monkeypatch.setattr(model_router, "ROUTES", routes_no_vision)
+    def build_client(resolved, api_key):
+        built.append((resolved.base_url, api_key))
+        return client
+
+    monkeypatch.setattr(al, "_build_async_client", build_client, raising=False)
+    monkeypatch.setattr(al, "get_schemas", lambda: [])
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(
+        al,
+        "resolve_limits",
+        lambda max_turns=None, max_consecutive_failures=None, config=None: (50, 3),
+    )
+
+    result = await al.run([{"role": "user", "content": "hi"}], model_policy=policy)
+
+    assert result == "policy ok"
+    assert built == [("http://alpha.test/v1/", "test-key")]
+    _, kwargs = client.chat.completions.create.call_args
+    assert kwargs["model"] == "alpha-model"
+
+
+async def test_run_uses_agent_model_policy_vision_route(monkeypatch):
+    policy = _model_policy("beta")
+    monkeypatch.setenv("FLEETENT_MODEL_BETA_API_KEY", "test-key")
+    monkeypatch.setattr(
+        al,
+        "get_async_client_and_config",
+        lambda *a, **kw: pytest.fail("legacy routes.yaml router must not be used"),
+        raising=False,
+    )
+    client = AsyncMock()
+    client.chat.completions.create = AsyncMock(return_value=_text_resp("vision ok"))
+    built: list[str | None] = []
+    monkeypatch.setattr(
+        al,
+        "_build_async_client",
+        lambda resolved, api_key: built.append(resolved.base_url) or client,
+        raising=False,
+    )
+    monkeypatch.setattr(al, "get_schemas", lambda: [])
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(
+        al,
+        "resolve_limits",
+        lambda max_turns=None, max_consecutive_failures=None, config=None: (50, 3),
+    )
+
+    result = await al.run(
+        [{"role": "user", "content": [{"type": "text", "text": "x"}, _IMG_BLOCK]}],
+        model_policy=policy,
+    )
+
+    assert result == "vision ok"
+    assert built == ["http://beta-vision.test/v1/"]
+
+
+async def test_run_raises_when_image_but_no_vision_route(mock_client, monkeypatch):
+    from fleetent.agent_config import AgentFile
+    from fleetent.model import ModelPolicySnapshot
+
+    policy = ModelPolicySnapshot.from_agent(
+        AgentFile.model_validate(
+            {
+                "name": "no-vision",
+                "version": 1,
+                "models": {
+                    "targets": [
+                        {
+                            "id": "primary",
+                            "provider": "local",
+                            "protocol": "openai_chat",
+                            "base_url": "http://local.test/v1/",
+                            "model": "text",
+                        }
+                    ],
+                    "routes": {"default": [{"target": "primary"}]},
+                },
+            }
+        )
+    )
     create = AsyncMock(return_value=_text_resp("should not happen"))
     mock_client.chat.completions.create = create
     with pytest.raises(RuntimeError, match="vision|视觉"):
-        await al.run([{"role": "user", "content": [_IMG_BLOCK]}])
+        await al.run([{"role": "user", "content": [_IMG_BLOCK]}], model_policy=policy)
     create.assert_not_called()
 
 
@@ -1133,17 +1300,13 @@ async def test_run_stream_text_path_unchanged(mock_client):
 async def test_run_stream_routes_to_vision_with_images(monkeypatch):
     seen: list[str] = []
     client = AsyncMock()
-    cfg = MagicMock()
-    cfg.model = "vision-model"
-    cfg.max_tokens = 512
-    cfg.fallbacks = ()
     client.chat.completions.create = AsyncMock(return_value=_stream_chunks("x", None))
 
-    def spy(t):
-        seen.append(t)
-        return client, cfg
+    def spy(resolved, api_key):
+        seen.append(resolved.target_id)
+        return client
 
-    monkeypatch.setattr(al, "get_async_client_and_config", spy)
+    monkeypatch.setattr(al, "_build_async_client", spy)
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
@@ -1160,14 +1323,33 @@ async def test_run_stream_routes_to_vision_with_images(monkeypatch):
 
 
 async def test_run_stream_raises_when_image_but_no_vision_route(mock_client, monkeypatch):
-    from fleetent.model import router as model_router
+    from fleetent.agent_config import AgentFile
+    from fleetent.model import ModelPolicySnapshot
 
-    routes_no_vision = {k: v for k, v in model_router.ROUTES.items() if k != "vision"}
-    monkeypatch.setattr(model_router, "ROUTES", routes_no_vision)
+    policy = ModelPolicySnapshot.from_agent(
+        AgentFile.model_validate(
+            {
+                "name": "no-vision",
+                "version": 1,
+                "models": {
+                    "targets": [
+                        {
+                            "id": "primary",
+                            "provider": "local",
+                            "protocol": "openai_chat",
+                            "base_url": "http://local.test/v1/",
+                            "model": "text",
+                        }
+                    ],
+                    "routes": {"default": [{"target": "primary"}]},
+                },
+            }
+        )
+    )
     create = MagicMock()
     mock_client.chat.completions.create = create
     with pytest.raises(RuntimeError, match="vision|视觉"):
-        _ = [e async for e in al.run_stream("x", images=[(b"D", "image/png")])]
+        _ = [e async for e in al.run_stream("x", images=[(b"D", "image/png")], model_policy=policy)]
     create.assert_not_called()
 
 
@@ -1190,44 +1372,36 @@ def _route_spy(monkeypatch, calls: list[dict], fallbacks: tuple[str, ...] = ()):
         calls.append({"task_type": task_type, "override": override})
         return client, cfg
 
-    monkeypatch.setattr(al, "get_async_client_and_config", spy)
+    monkeypatch.setattr(al, "get_async_client_and_config", spy, raising=False)
     return client
 
 
 async def test_run_force_model_none_passes_no_override(mock_client, monkeypatch):
-    calls: list[dict] = []
-    client = _route_spy(monkeypatch, calls, fallbacks=("fb-1",))
-    client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
     await al.run([{"role": "user", "content": "hi"}], force_model=None)
-    assert calls[0]["override"] is None
+    assert mock_client.chat.completions.create.call_args.kwargs["model"] == "default"
 
 
 async def test_run_force_model_passes_override(mock_client, monkeypatch):
-    from fleetent.model.router import RouteOverride
-
-    calls: list[dict] = []
-    client = _route_spy(monkeypatch, calls)
-    client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
     await al.run([{"role": "user", "content": "hi"}], force_model="claude-haiku-4-5")
-    assert calls[0]["override"] == RouteOverride(model="claude-haiku-4-5")
+    assert mock_client.chat.completions.create.call_args.kwargs["model"] == "claude-haiku-4-5"
 
 
 async def test_run_force_model_used_for_every_llm_call(mock_client, monkeypatch):
-    calls: list[dict] = []
-    client = _route_spy(monkeypatch, calls, fallbacks=("fb-1",))
     # Two turns: tool call then final reply; both must use the forced model.
-    client.chat.completions.create = AsyncMock(side_effect=[_tool_resp("echo"), _text_resp("done")])
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_tool_resp("echo"), _text_resp("done")]
+    )
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "dispatch", lambda name, args, **kw: "r")
     await al.run([{"role": "user", "content": "hi"}], force_model="claude-haiku-4-5")
-    create_calls = client.chat.completions.create.call_args_list
+    create_calls = mock_client.chat.completions.create.call_args_list
     assert all(c.kwargs["model"] == "claude-haiku-4-5" for c in create_calls)
 
 
 async def test_run_force_model_trace_records_forced_model(mock_client, monkeypatch):
-    calls: list[dict] = []
-    client = _route_spy(monkeypatch, calls)
-    client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
     captured: dict = {}
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
     await al.run([{"role": "user", "content": "hi"}], force_model="claude-haiku-4-5")
@@ -1239,40 +1413,38 @@ async def test_run_no_force_model_trace_records_default(mock_client, monkeypatch
     captured: dict = {}
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
     await al.run([{"role": "user", "content": "hi"}])
-    assert captured["model_used"] == "test-model"
+    assert captured["model_used"] == "default"
 
 
 async def test_run_stream_force_model_none_passes_no_override(mock_client, monkeypatch):
-    calls: list[dict] = []
-    client = _route_spy(monkeypatch, calls, fallbacks=("fb-1",))
-    client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok", finish="stop"))
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_stream_chunks("ok", finish="stop")
+    )
     _ = [e async for e in al.run_stream("hi", force_model=None)]
-    assert calls[0]["override"] is None
+    assert mock_client.chat.completions.create.call_args.kwargs["model"] == "default"
 
 
 async def test_run_stream_force_model_passes_override(mock_client, monkeypatch):
-    from fleetent.model.router import RouteOverride
-
-    calls: list[dict] = []
-    client = _route_spy(monkeypatch, calls)
-    client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok", finish="stop"))
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_stream_chunks("ok", finish="stop")
+    )
     _ = [e async for e in al.run_stream("hi", force_model="claude-haiku-4-5")]
-    assert calls[0]["override"] == RouteOverride(model="claude-haiku-4-5")
+    assert mock_client.chat.completions.create.call_args.kwargs["model"] == "claude-haiku-4-5"
 
 
 async def test_run_stream_force_model_used_for_llm_call(mock_client, monkeypatch):
-    calls: list[dict] = []
-    client = _route_spy(monkeypatch, calls, fallbacks=("fb-1",))
-    client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok", finish="stop"))
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_stream_chunks("ok", finish="stop")
+    )
     _ = [e async for e in al.run_stream("hi", force_model="claude-haiku-4-5")]
-    create_calls = client.chat.completions.create.call_args_list
+    create_calls = mock_client.chat.completions.create.call_args_list
     assert all(c.kwargs["model"] == "claude-haiku-4-5" for c in create_calls)
 
 
 async def test_run_stream_force_model_trace_records_forced_model(mock_client, monkeypatch):
-    calls: list[dict] = []
-    client = _route_spy(monkeypatch, calls)
-    client.chat.completions.create = AsyncMock(return_value=_stream_chunks("ok", finish="stop"))
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_stream_chunks("ok", finish="stop")
+    )
     captured: dict = {}
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
     _ = [e async for e in al.run_stream("hi", force_model="claude-haiku-4-5")]
@@ -1416,8 +1588,38 @@ async def test_stream_records_failure_on_switchable(mock_client_fb, monkeypatch)
 
 def _wire_loop(monkeypatch, client, cfg):
     """Wire a real RouteConfig (with params) through the loop, mocking the rest."""
+    from fleetent.agent_config import AgentFile
+    from fleetent.model import ModelPolicySnapshot
+
+    policy = ModelPolicySnapshot.from_agent(
+        AgentFile.model_validate(
+            {
+                "name": "params-agent",
+                "version": 1,
+                "models": {
+                    "targets": [
+                        {
+                            "id": "primary",
+                            "provider": "local",
+                            "protocol": "openai_chat",
+                            "base_url": cfg.base_url,
+                            "model": cfg.model,
+                            "api_key_env": cfg.api_key_env,
+                            "max_tokens": cfg.max_tokens,
+                            "params": cfg.params,
+                        }
+                    ],
+                    "routes": {"default": [{"target": "primary"}]},
+                },
+            }
+        )
+    )
     monkeypatch.setenv(cfg.api_key_env, "k")
-    monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(al, "_active_model_policy", lambda: policy)
+    monkeypatch.setattr(al, "_build_async_client", lambda resolved, api_key: client)
+    monkeypatch.setattr(
+        al, "get_async_client_and_config", lambda *a, **kw: (client, cfg), raising=False
+    )
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
@@ -1434,8 +1636,8 @@ def _wire_loop(monkeypatch, client, cfg):
     )
 
 
-def _cfg_with_params(params: dict, fallbacks: tuple = ()) -> RouteConfig:
-    return RouteConfig(
+def _cfg_with_params(params: dict, fallbacks: tuple = ()) -> SimpleNamespace:
+    return SimpleNamespace(
         base_url="https://api.test.com",
         model="primary-model",
         api_key_env="TEST_KEY",
@@ -1511,7 +1713,7 @@ def _capture_stream_wire(monkeypatch, *, memory: str, catalog: str) -> dict:
         return _stream_chunks("ok", None)
 
     client.chat.completions.create = fake_create
-    monkeypatch.setattr(al, "get_async_client_and_config", lambda _: (client, cfg))
+    monkeypatch.setattr(al, "_build_async_client", lambda resolved, api_key: client)
     monkeypatch.setattr(al, "get_schemas", lambda: [])
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)

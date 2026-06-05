@@ -482,9 +482,9 @@ def test_scan_no_source_priority_override_logic(tmp_path, monkeypatch):
 
 
 def test_agentfile_has_disabled_skills_default_empty():
-    from fleetent.agent_config import AgentFile
+    from fleetent.agent_config import AgentFile, default_models
 
-    assert AgentFile(name="x", version=1).disabled_skills == []
+    assert AgentFile(name="x", version=1, models=default_models()).disabled_skills == []
 
 
 def test_match_disabled_skills_param_overrides(tmp_path):
