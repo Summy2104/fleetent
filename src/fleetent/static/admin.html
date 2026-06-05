@@ -1795,6 +1795,12 @@ function toggleMenu(btn) {
 }
 document.addEventListener("click", (e) => { if (!e.target.closest(".menu")) closeMenus(); });
 window.addEventListener("scroll", () => closeMenus(), true);
+// Multi-select dropdowns (agent bindings): clicking outside the widget collapses
+// the open panel so it stops covering the form.
+document.addEventListener("click", (e) => {
+  if (e.target.closest(".ms")) return;
+  for (const p of document.querySelectorAll(".ms-panel")) p.classList.add("hidden");
+});
 
 function openCreateModal() {
   $("users-err").textContent = "";

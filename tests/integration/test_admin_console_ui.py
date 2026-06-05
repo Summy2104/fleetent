@@ -456,6 +456,9 @@ def test_agent_bindings_are_searchable_multiselect():
     # the old standalone user filter input is gone
     assert 'id="agm-user-filter"' not in html
     assert "agmFilterUsers" not in html
+    # an outside click collapses an open panel so it stops covering the form
+    assert 'e.target.closest(".ms")' in html
+    assert 'for (const p of document.querySelectorAll(".ms-panel")) p.classList.add("hidden")' in html
 
 
 def test_agent_model_overrides_pick_from_providers():
