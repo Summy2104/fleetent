@@ -2763,7 +2763,8 @@ function agCollectModelOverrides() {
 }
 
 let AGM_CHANNELS = [];
-async function agLoadCreateBindings() {
+// `current` (edit mode) pre-checks existing bindings: {skills, mcp, oauth, kb, users, channels}.
+async function agLoadCreateBindings(current = null) {
   AGM_CHANNELS = [];
   $("agm-channels").innerHTML = "";
   if ($("agm-user-filter")) $("agm-user-filter").value = "";
@@ -2787,6 +2788,19 @@ async function agLoadCreateBindings() {
   $("agm-users").innerHTML = (users || []).map(u =>
     box("agm-user-row", u.id, esc(u.name || u.email || u.id) + (u.name || u.email ? ` <span class="muted">(${esc(u.id)})</span>` : ""),
       [u.id, u.name || "", u.email || ""].join(" "))).join("") || `<div class="muted">No users available.</div>`;
+  if (current) {
+    const check = (cls, set) => {
+      for (const cb of document.querySelectorAll(`#ag-bind-config .${cls} input[type=checkbox]`))
+        if (set.has(cb.value)) cb.checked = true;
+    };
+    check("agm-skill", new Set(current.skills || []));
+    check("agm-mcp-item", new Set(current.mcp || []));
+    check("agm-oauth-item", new Set(current.oauth || []));
+    check("agm-kb-item", new Set(current.kb || []));
+    check("agm-user-row", new Set(current.users || []));
+    AGM_CHANNELS = (current.channels || []).map(c => ({ platform: c.platform, channel_id: c.channel_id }));
+    agmRenderChannels();
+  }
 }
 function agmFilterUsers() {
   const q = ($("agm-user-filter").value || "").trim().toLowerCase();
@@ -2806,25 +2820,97 @@ function agmAddChannel() {
   agmRenderChannels();
 }
 function agmRemoveChannel(i) { AGM_CHANNELS.splice(i, 1); agmRenderChannels(); }
+function agFillModelOverrides(mo) {
+  for (const row of document.querySelectorAll("#ag-model-overrides [data-mo]")) {
+    const o = (mo || {})[row.dataset.mo];
+    if (!o) continue;
+    row.querySelector(".agmo-provider").value = o.provider || "anthropic";
+    row.querySelector(".agmo-model").value = o.model || "";
+    row.querySelector(".agmo-baseurl").value = o.base_url_env || "";
+  }
+}
+// Render current allowed_tools back into the capabilities YAML the modal edits.
+function agToolsToYaml(tools) {
+  if (!tools || !tools.length) return "";
+  const line = t => /[:*\s"'#]/.test(t) ? JSON.stringify(t) : t;
+  return "allowed_tools:\n" + tools.map(t => `  - ${line(t)}`).join("\n") + "\n";
+}
+
+// Edit reuses the new-agent modal, prefilled. AG_EDIT_ORIG holds the original
+// binding sets so save can apply the diff (add new, remove cleared).
+let AG_EDIT_ORIG = null;
 async function agEdit(name) {
   $("ag-err").textContent = "";
+  const enc = encodeURIComponent(name);
   try {
-    const a = await api("GET", `/agents/${encodeURIComponent(name)}`);
+    const [a, bindings, skills, kbs, oauth] = await Promise.all([
+      api("GET", `/agents/${enc}`),
+      api("GET", `/agents/${enc}/bindings`).catch(() => ({ users: [], channels: [], mcp_servers: [] })),
+      api("GET", `/agents/${enc}/skills`).catch(() => []),
+      api("GET", `/agents/${enc}/kbs`).catch(() => ({ kb_ids: [] })),
+      api("GET", `/agents/${enc}/bindings/oauth`).catch(() => ({ connector_ids: [] })),
+    ]);
+    const current = {
+      skills: (skills || []).filter(s => s.enabled).map(s => s.skill_name),
+      mcp: bindings.mcp_servers || [],
+      oauth: oauth.connector_ids || [],
+      kb: kbs.kb_ids || [],
+      users: bindings.users || [],
+      channels: bindings.channels || [],
+    };
+    AG_EDIT_ORIG = {
+      skills: new Set(current.skills), mcp: new Set(current.mcp), oauth: new Set(current.oauth),
+      kb: new Set(current.kb), users: new Set(current.users), channels: current.channels,
+    };
     $("ag-modal-title").textContent = "Edit agent: " + name;
     $("ag-name").value = name;
     $("ag-name").disabled = true;
     agRenderIconPalette();
     agSetIcon(a.icon || "");
     $("ag-system-prompt").value = a.system_prompt || "";
-    $("ag-allowed-tools").value = (a.allowed_tools || []).join(", ");
+    // Mirror the new-agent layout: template is creation-only; tools come from the YAML.
     $("ag-template-row").style.display = "none";
-    $("ag-bind-config").style.display = "none";
-    $("ag-create-extra").style.display = "none";
-    $("ag-allowed-tools").style.display = "";
+    $("ag-allowed-tools").style.display = "none";
+    $("ag-allowed-tools").value = "";
+    $("ag-create-extra").style.display = "";
+    $("ag-bind-config").style.display = "";
+    agRenderModelOverrides();
+    agFillModelOverrides(a.model_overrides);
+    $("ag-capabilities").value = agToolsToYaml(a.allowed_tools);
+    await agLoadCreateBindings(current);
     $("ag-modal").dataset.mode = "edit";
     $("ag-modal").dataset.name = name;
     $("ag-modal").classList.remove("hidden");
   } catch (e) { toast(e.message, "error"); }
+}
+
+async function agApplyEditBindings(name) {
+  const enc = encodeURIComponent(name);
+  const o = AG_EDIT_ORIG || { skills: new Set(), mcp: new Set(), oauth: new Set(), kb: new Set(), users: new Set(), channels: [] };
+  const checked = cls => new Set([...document.querySelectorAll(`#ag-bind-config .${cls} input:checked`)].map(i => i.value));
+  const chKey = c => `${c.platform} ${c.channel_id}`;
+  const calls = [];
+  const sk = checked("agm-skill");
+  for (const s of sk) if (!o.skills.has(s)) calls.push(api("PUT", `/agents/${enc}/skills/${encodeURIComponent(s)}`, { enabled: true }));
+  for (const s of o.skills) if (!sk.has(s)) calls.push(api("PUT", `/agents/${enc}/skills/${encodeURIComponent(s)}`, { enabled: false }));
+  const mcp = checked("agm-mcp-item");
+  for (const id of mcp) if (!o.mcp.has(id)) calls.push(api("POST", `/agents/${enc}/bindings/mcp/${encodeURIComponent(id)}`));
+  for (const id of o.mcp) if (!mcp.has(id)) calls.push(api("DELETE", `/agents/${enc}/bindings/mcp/${encodeURIComponent(id)}`));
+  const oa = checked("agm-oauth-item");
+  for (const id of oa) if (!o.oauth.has(id)) calls.push(api("POST", `/agents/${enc}/bindings/oauth/${encodeURIComponent(id)}`));
+  for (const id of o.oauth) if (!oa.has(id)) calls.push(api("DELETE", `/agents/${enc}/bindings/oauth/${encodeURIComponent(id)}`));
+  const kb = checked("agm-kb-item");
+  for (const id of kb) if (!o.kb.has(id)) calls.push(api("POST", `/agents/${enc}/kbs`, { kb_id: id }));
+  for (const id of o.kb) if (!kb.has(id)) calls.push(api("DELETE", `/agents/${enc}/kbs/${encodeURIComponent(id)}`));
+  const us = checked("agm-user-row");
+  for (const id of us) if (!o.users.has(id)) calls.push(api("POST", `/agents/${enc}/bindings/users/${encodeURIComponent(id)}`));
+  for (const id of o.users) if (!us.has(id)) calls.push(api("DELETE", `/agents/${enc}/bindings/users/${encodeURIComponent(id)}`));
+  const curCh = new Set(AGM_CHANNELS.map(chKey));
+  const origCh = new Set((o.channels || []).map(chKey));
+  for (const c of AGM_CHANNELS) if (!origCh.has(chKey(c))) calls.push(api("POST", `/agents/${enc}/bindings/channels/${encodeURIComponent(c.platform)}/${encodeURIComponent(c.channel_id)}`));
+  for (const c of (o.channels || [])) if (!curCh.has(chKey(c))) calls.push(api("DELETE", `/agents/${enc}/bindings/channels/${encodeURIComponent(c.platform)}/${encodeURIComponent(c.channel_id)}`));
+  const failed = (await Promise.allSettled(calls)).filter(r => r.status === "rejected").length;
+  if (failed) toast(`${failed} binding change(s) failed.`, "error");
 }
 function agCloseModal() { $("ag-modal").classList.add("hidden"); }
 async function agApplyCreateBindings(name) {
@@ -2849,7 +2935,6 @@ async function agApplyCreateBindings(name) {
 }
 async function agSave() {
   $("ag-err").textContent = "";
-  const tools = $("ag-allowed-tools").value.split(",").map(s => s.trim()).filter(Boolean);
   const sp = $("ag-system-prompt").value;
   const isEdit = $("ag-modal").dataset.mode === "edit";
   try {
@@ -2857,7 +2942,13 @@ async function agSave() {
     let name;
     if (isEdit) {
       name = $("ag-modal").dataset.name;
-      await api("PATCH", `/agents/${encodeURIComponent(name)}`, { system_prompt: sp, allowed_tools: tools, icon });
+      // Same shape as create: capabilities YAML drives allowed_tools.
+      await api("PATCH", `/agents/${encodeURIComponent(name)}`, {
+        system_prompt: sp, icon,
+        model_overrides: agCollectModelOverrides(),
+        capabilities_yaml: $("ag-capabilities").value,
+      });
+      await agApplyEditBindings(name);
     } else {
       name = $("ag-name").value.trim();
       if (!name) { $("ag-err").textContent = "name required"; return; }
@@ -2872,9 +2963,7 @@ async function agSave() {
     }
     agCloseModal();
     await loadAgents();
-    // Return to the management view so config edits and bindings stay in one place.
-    if (isEdit) agDrawerManage(name);
-    else agDrawer(name);
+    agDrawer(name);  // back to the read-only preview
   } catch (e) { $("ag-err").textContent = e.message; }
 }
 async function agDelete(name) {
@@ -2923,7 +3012,7 @@ async function agActivateVersion(name, version) {
 let AG_DRAWER = null;
 
 // Clicking an agent opens a read-only preview: the full agent.yaml. A single
-// "Edit" opens the management view (agDrawerManage): config editor + live bindings.
+// "Edit" opens the new-agent modal (agEdit), prefilled with config + bindings.
 let AG_YAML_CACHE = "";
 async function agDrawer(name) {
   AG_DRAWER = name;
@@ -2952,11 +3041,11 @@ function agRenderPreview(name, a, yamlText) {
   $("ag-drawer-title").textContent = (a.icon ? a.icon + " " : "") + name;
   const archived = a.status === "archived";
   const statusCls = a.status === "enabled" ? "active" : archived ? "" : "blocked";
-  // Single "Edit" opens the management view (config editor + live bindings); the
-  // former separate binding-management button is folded into it.
+  // Single "Edit" opens the new-agent modal, prefilled (config + bindings in one
+  // place); the former separate binding-management button is folded into it.
   const lifecycle = IS_VIEWER ? "" : `
     <button class="small" onclick="agDeploy('${esc(name)}')">🚀 Deploy</button>
-    <button class="small" onclick="agDrawerManage('${esc(name)}')">Edit</button>
+    <button class="small" onclick="agEdit('${esc(name)}')">Edit</button>
     <button class="small ghost" onclick="agOpenClone('${esc(name)}')">Clone</button>
     ${a.status === "enabled"
       ? `<button class="small ghost" onclick="agDisable('${esc(name)}')">Disable</button>`

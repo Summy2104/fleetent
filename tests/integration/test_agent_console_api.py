@@ -472,6 +472,19 @@ def test_patch_creates_new_active_version(client, monkeypatch):
     assert len(agent_store.list_versions("ops")) == 2
 
 
+def test_patch_capabilities_yaml_updates_tools(client, monkeypatch):
+    _wire_real_store(monkeypatch)
+    agent_store.create_agent("ops", "v1", ["shell"])
+    token, _ = _session_for("admin")
+    r = client.patch(
+        "/admin/agents/ops",
+        headers=_hdr(token),
+        json={"capabilities_yaml": "allowed_tools:\n  - search_*\n  - read_file\n"},
+    )
+    assert r.status_code == 200, r.text
+    assert agent_store.get_by_name("ops").allowed_tools == ["search_*", "read_file"]
+
+
 def test_patch_missing_404(client, monkeypatch):
     _wire_real_store(monkeypatch)
     token, _ = _session_for("admin")

@@ -479,11 +479,30 @@ def test_agent_drawer_preview_is_readonly_yaml():
     assert "function agRenderPreview" in html
     preview = html.split("function agRenderPreview", 1)[1].split("function agCopyYaml", 1)[0]
     assert 'id="ag-yaml-pre"' in preview
-    # A single "Edit" opens the management view; the separate "Manage bindings" is gone.
-    assert "agDrawerManage(" in preview
+    # A single "Edit" opens the new-agent modal (prefilled); no separate binding button.
+    assert "agEdit(" in preview
     assert "Manage bindings" not in preview
     # copy + download the previewed yaml
     assert "function agCopyYaml" in html and "function agDownloadYaml" in html
+
+
+def test_agent_edit_reuses_new_agent_modal_prefilled():
+    html = ADMIN_HTML
+    fn = html.split("async function agEdit", 1)[1].split("async function agApplyEditBindings", 1)[0]
+    # Edit opens the shared ag-modal in edit mode with the create sections visible.
+    assert 'dataset.mode = "edit"' in fn
+    assert 'getElementById' not in fn  # uses $() like the rest
+    for shown in ('"ag-create-extra"', '"ag-bind-config"'):
+        assert shown in fn
+    assert '"ag-template-row"' in fn  # template hidden in edit
+    # prefill: model overrides + capabilities YAML + bindings
+    assert "agFillModelOverrides(" in fn
+    assert "agToolsToYaml(" in fn
+    assert "agLoadCreateBindings(current)" in fn
+    # save applies a binding diff (add + remove)
+    diff = html.split("async function agApplyEditBindings", 1)[1].split("async function agSave", 1)[0]
+    assert "DELETE" in diff and "POST" in diff
+    assert "capabilities_yaml" in html.split("async function agSave", 1)[1].split("\n}", 1)[0]
 
 
 def test_drawer_loads_from_aggregate_endpoints():

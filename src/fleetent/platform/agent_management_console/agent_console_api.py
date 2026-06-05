@@ -172,6 +172,9 @@ class UpdateBody(BaseModel):
     model_overrides: dict[str, Any] | None = None
     memory_namespace: str | None = None
     icon: str | None = None
+    # Optional capabilities YAML (parsed server-side); when present its allowed_tools
+    # override the structured field, mirroring create.
+    capabilities_yaml: str | None = None
 
 
 # --- templates (literal path before /{name}) ----------------------------------
@@ -292,15 +295,19 @@ def _def_response(name: str) -> dict[str, Any]:
     return out
 
 
-def _resolve_capabilities(body: CreateBody) -> tuple[list[str], list[str], dict[str, Any]]:
+def _resolve_capabilities(
+    allowed_tools: list[str],
+    plugins: list[str],
+    features: dict[str, Any],
+    capabilities_yaml: str | None,
+) -> tuple[list[str], list[str], dict[str, Any]]:
     """Resolve allowed_tools/plugins/features, letting a pasted YAML block override them.
 
     The YAML is recorded as-is: whatever keys it carries replace the structured fields.
     """
-    allowed_tools, plugins, features = body.allowed_tools, body.plugins, body.features
-    if body.capabilities_yaml and body.capabilities_yaml.strip():
+    if capabilities_yaml and capabilities_yaml.strip():
         try:
-            parsed = yaml.safe_load(body.capabilities_yaml)
+            parsed = yaml.safe_load(capabilities_yaml)
         except yaml.YAMLError as exc:
             raise HTTPException(
                 status_code=422, detail=f"invalid capabilities YAML: {exc}"
@@ -320,7 +327,9 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
         raise HTTPException(status_code=409, detail="agent already exists")
     if agent_template_store.get_template(body.template_id) is None:
         raise HTTPException(status_code=404, detail="template not found")
-    allowed_tools, plugins, features = _resolve_capabilities(body)
+    allowed_tools, plugins, features = _resolve_capabilities(
+        body.allowed_tools, body.plugins, body.features, body.capabilities_yaml
+    )
     create_agent_def(
         body.name,
         body.system_prompt,
@@ -356,10 +365,14 @@ def update_agent(
     user = _require_admin(authorization)
     if get_agent_def(name) is None:
         raise HTTPException(status_code=404, detail="agent not found")
+    allowed_tools = body.allowed_tools
+    if body.capabilities_yaml is not None:
+        # Capabilities YAML drives allowed_tools; plugins/features are inherited unchanged.
+        allowed_tools, _, _ = _resolve_capabilities([], [], {}, body.capabilities_yaml)
     update_agent_def(
         name,
         body.system_prompt,
-        body.allowed_tools,
+        allowed_tools,
         body.skills_dir,
         body.mcp_server_ids,
         body.model_overrides,
