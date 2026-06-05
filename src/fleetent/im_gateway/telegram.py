@@ -57,6 +57,7 @@ def create_app(owner_id: str, config: dict[str, str]) -> object:
     async def handle_message(update: object, context: object) -> None:
         from telegram import Update
 
+        from fleetent.im_gateway.access import resolve_identity  # noqa: PLC0415
         from fleetent.im_gateway.normalizer import NormalizedMessage, route  # noqa: PLC0415
 
         assert isinstance(update, Update)
@@ -64,7 +65,8 @@ def create_app(owner_id: str, config: dict[str, str]) -> object:
             return
 
         tg_user_id = update.effective_user.id
-        user = im.get_or_create(owner_id, "telegram", str(tg_user_id))
+        # Identity is the platform-native id, resolved locally — no platform user_store.
+        identity = resolve_identity("telegram", str(tg_user_id))
 
         reply_to = update.message.reply_to_message
         chat_type = update.message.chat.type
@@ -86,7 +88,7 @@ def create_app(owner_id: str, config: dict[str, str]) -> object:
             platform="telegram",
             owner_id=owner_id,
             session_id=session_id,
-            user_id=user.id,
+            user_id=identity,
             text=text,
             attachments=attachments,
             reply_func=reply_func,

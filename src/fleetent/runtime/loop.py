@@ -1304,7 +1304,28 @@ def run_sync(
     from fleetent.tools.plugin_loader import load_plugins
 
     load_plugins()
-    skills_catalog = available_skills_prompt()
+
+    # agent-runtime-cli: apply the deployed home/default agent so the one-shot CLI runs
+    # AS that agent (its system_prompt / allowed_tools / allowed_skills), not the generic
+    # default. With no deployed agent, fall back to the generic behavior unchanged.
+    index = agent_config.current()
+    default_name = index.default_agent()
+    agent = index.get(default_name) if default_name else None
+    allowed_tools: list[str] | None = None
+    allowed_skills: list[str] | None = None
+    agent_name: str | None = None
+    agent_features: dict[str, Any] | None = None
+    if agent is not None:
+        from fleetent.tools.plugin_loader import expand_plugin_patterns
+
+        if agent.system_prompt:
+            system_prompt = agent.system_prompt
+        allowed_tools = agent.allowed_tools + expand_plugin_patterns(agent.plugins)
+        allowed_skills = agent.allowed_skills
+        agent_name = agent.name
+        agent_features = agent.features
+
+    skills_catalog = available_skills_prompt(allowed_skills=allowed_skills)
     disabled_trace = collect_disabled_trace() or None
 
     messages = _assemble_prompt(
@@ -1321,6 +1342,10 @@ def run_sync(
             messages,
             user_id=user_id,
             system_prompt=system_prompt,
+            allowed_tools=allowed_tools,
+            agent_name=agent_name,
+            agent_features=agent_features,
+            allowed_skills=allowed_skills,
             disabled_skills_trace=disabled_trace,
             sandbox_mode=sandbox_mode,
         )
