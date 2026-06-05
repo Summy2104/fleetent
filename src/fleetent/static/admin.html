@@ -1103,10 +1103,14 @@
           <code>.zip</code> of the skill folder. Single vs batch is detected automatically.
         </p>
         <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
-          <input type="file" id="sk-import-files" multiple accept=".zip,application/zip,.md,.txt,.py,.sh,.json,.yaml,.yml,*/*" onchange="skImportPicked()" style="max-width:320px;">
+          <input type="file" id="sk-import-files" multiple accept=".zip,application/zip,.md,.txt,.py,.sh,.json,.yaml,.yml,*/*" onchange="skImportPicked('files')" style="max-width:320px;">
+          <input type="file" id="sk-import-folder" webkitdirectory multiple onchange="skImportPicked('folder')" style="display:none;">
           <span id="sk-import-pick" class="muted" style="font-size:13px;">No files chosen</span>
           <button type="button" id="sk-upload-btn" class="primary" onclick="skDoUpload()">Upload &amp; import</button>
         </div>
+        <p class="muted" style="font-size:12px; margin:6px 0 0;">
+          <a href="#" onclick="$('sk-import-folder').click();return false;">📁 选择文件夹代替</a>
+        </p>
       </div>
 
       <div id="sk-import-err" class="err"></div>
@@ -2348,14 +2352,22 @@ async function skReject(id) {
 function skOpenImport() {
   $("sk-import-source").value = "adhoc";
   if ($("sk-import-files")) $("sk-import-files").value = "";
+  if ($("sk-import-folder")) $("sk-import-folder").value = "";
   skImportPicked();
   $("sk-import-err").textContent = "";
   const res = $("sk-import-result"); res.classList.add("hidden"); res.innerHTML = "";
   $("sk-import-modal").classList.remove("hidden");
 }
-function skImportPicked() {
-  const n = ($("sk-import-files").files || []).length;
+// Picking via one input clears the other — files/.zip and a folder are mutually exclusive sources.
+function skImportPicked(which) {
+  if (which === "files") $("sk-import-folder").value = "";
+  else if (which === "folder") $("sk-import-files").value = "";
+  const n = skPickedFiles().length;
   $("sk-import-pick").textContent = n ? `✅ ${n} file(s) selected` : "No files chosen";
+}
+function skPickedFiles() {
+  const f = [...($("sk-import-files").files || [])];
+  return f.length ? f : [...($("sk-import-folder").files || [])];
 }
 function skCloseImport() { $("sk-import-modal").classList.add("hidden"); }
 
@@ -2373,9 +2385,9 @@ function skImportShowResult(r) {
 }
 
 async function skDoUpload() {
-  const files = $("sk-import-files").files ? [...$("sk-import-files").files] : [];
+  const files = skPickedFiles();
   $("sk-import-err").textContent = "";
-  if (!files.length) { $("sk-import-err").textContent = "choose files or a .zip first"; return; }
+  if (!files.length) { $("sk-import-err").textContent = "choose files, a folder, or a .zip first"; return; }
   const fd = new FormData();
   fd.append("source", $("sk-import-source").value);
   for (const f of files) fd.append("files", f, f.webkitRelativePath || f.name);

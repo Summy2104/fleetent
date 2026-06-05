@@ -96,18 +96,23 @@ def test_skills_action_functions_present():
 
 def test_skill_import_single_file_or_zip_picker():
     html = ADMIN_HTML
-    # one merged picker: a plain multi-file input that takes the skill's files or a .zip
+    # one merged picker: a plain multi-file input that takes the skill's files or a .zip,
+    # plus a hidden webkitdirectory input toggled by a "select a folder instead" link
     assert 'id="sk-import-files"' in html
-    assert "webkitdirectory" not in html  # folder-only picker removed (unreliable)
+    assert 'id="sk-import-folder"' in html
+    assert "webkitdirectory" in html
+    assert "$('sk-import-folder').click()" in html
     assert 'accept=".zip' in html
     assert 'id="sk-import-pick"' in html
     assert "function skImportPicked" in html
+    assert "function skPickedFiles" in html
     # the separate zip input and the paste section are gone (merged into the one picker)
     assert 'id="sk-import-zip"' not in html
     assert "skImportPaste" not in html
     assert 'id="sk-paste-content"' not in html
     up = html.split("async function skDoUpload", 1)[1].split("\n}", 1)[0]
     assert "/skills/import/upload" in up
+    assert "skPickedFiles()" in up
 
 
 def test_skills_proposals_review_wired():
@@ -507,7 +512,9 @@ def test_agent_bindings_are_searchable_multiselect():
     assert "agmFilterUsers" not in html
     # an outside click collapses an open panel so it stops covering the form
     assert 'e.target.closest(".ms")' in html
-    assert 'for (const p of document.querySelectorAll(".ms-panel")) p.classList.add("hidden")' in html
+    assert (
+        'for (const p of document.querySelectorAll(".ms-panel")) p.classList.add("hidden")' in html
+    )
 
 
 def test_agent_model_overrides_pick_from_providers():
