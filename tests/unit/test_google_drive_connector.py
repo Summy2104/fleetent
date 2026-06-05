@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+
+import httpx
 import pytest
+import respx
 
 
 def test_google_drive_connector_config_public_api_is_importable():
@@ -35,6 +39,42 @@ def test_file_credential_ref_resolver_supports_local_token_file(tmp_path):
 
     assert credential.credential_ref == str(token_path)
     assert credential.payload == '{"refresh_token":"test"}'
+
+
+def test_google_drive_credential_ref_resolver_supports_env(monkeypatch):
+    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+        CredentialRefResolver,
+    )
+
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_TOKEN_JSON", '{"access_token":"env-token"}')
+    resolver = CredentialRefResolver()
+
+    credential = resolver.resolve("env:FLEETENT_GOOGLE_DRIVE_TOKEN_JSON")
+
+    assert credential.credential_ref == "env:FLEETENT_GOOGLE_DRIVE_TOKEN_JSON"
+    assert credential.payload == '{"access_token":"env-token"}'
+
+
+def test_google_drive_credential_ref_resolver_supports_flat_env_prefix(monkeypatch):
+    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+        CredentialRefResolver,
+    )
+
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN", "access-token")
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_REFRESH_TOKEN", "refresh-token")
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_CLIENT_ID", "client-id")
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET", "client-secret")
+
+    credential = CredentialRefResolver().resolve("env:FLEETENT_GOOGLE_DRIVE")
+
+    payload = json.loads(credential.payload)
+    assert payload == {
+        "access_token": "access-token",
+        "refresh_token": "refresh-token",
+        "client_id": "client-id",
+        "client_secret": "client-secret",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
 
 
 async def test_auth_failure_marks_summary_auth_failed():
@@ -89,6 +129,126 @@ def test_fake_drive_client_lists_only_requested_folder():
     )
 
     assert [file.id for file in client.list_files("folder-1", recursive=True)] == ["doc-1"]
+
+
+@respx.mock
+def test_http_google_drive_client_lists_files_with_bearer_auth(tmp_path):
+    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+        HttpGoogleDriveClient,
+    )
+
+    token_path = tmp_path / "google-token.json"
+    token_path.write_text(json.dumps({"access_token": "drive-access"}), encoding="utf-8")
+    route = respx.get("https://www.googleapis.com/drive/v3/files").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "files": [
+                    {
+                        "id": "doc-1",
+                        "name": "Runbook",
+                        "mimeType": "text/markdown",
+                        "modifiedTime": "2026-06-02T00:00:00.000Z",
+                        "headRevisionId": "rev-1",
+                        "webViewLink": "https://drive.google.com/file/d/doc-1/view",
+                    }
+                ]
+            },
+        )
+    )
+
+    files = HttpGoogleDriveClient(f"file://{token_path}").list_files(
+        "folder-1",
+        recursive=True,
+    )
+
+    assert [file.id for file in files] == ["doc-1"]
+    assert files[0].mime_type == "text/markdown"
+    assert files[0].revision_id == "rev-1"
+    assert files[0].web_url == "https://drive.google.com/file/d/doc-1/view"
+    request = route.calls.last.request
+    assert request.headers["Authorization"] == "Bearer drive-access"
+    assert request.url.params["q"] == "'folder-1' in parents and trashed = false"
+    assert request.url.params["supportsAllDrives"] == "true"
+    assert request.url.params["includeItemsFromAllDrives"] == "true"
+
+
+@respx.mock
+def test_http_google_drive_client_accepts_env_credential_ref(monkeypatch):
+    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+        HttpGoogleDriveClient,
+    )
+
+    monkeypatch.setenv("FLEETENT_GOOGLE_DRIVE_TOKEN_JSON", '{"access_token":"env-access"}')
+    route = respx.get("https://www.googleapis.com/drive/v3/files").mock(
+        return_value=httpx.Response(200, json={"files": []})
+    )
+
+    files = HttpGoogleDriveClient("env:FLEETENT_GOOGLE_DRIVE_TOKEN_JSON").list_files(
+        "folder-1",
+        recursive=True,
+    )
+
+    assert files == []
+    assert route.calls.last.request.headers["Authorization"] == "Bearer env-access"
+
+
+@respx.mock
+def test_http_google_drive_client_downloads_and_exports_files(tmp_path):
+    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+        XLSX_MIME,
+        HttpGoogleDriveClient,
+    )
+
+    token_path = tmp_path / "google-token.json"
+    token_path.write_text(json.dumps({"access_token": "drive-access"}), encoding="utf-8")
+    download_route = respx.get("https://www.googleapis.com/drive/v3/files/file-1").mock(
+        return_value=httpx.Response(200, content=b"plain text")
+    )
+    export_route = respx.get("https://www.googleapis.com/drive/v3/files/sheet-1/export").mock(
+        return_value=httpx.Response(200, content=b"xlsx bytes")
+    )
+    client = HttpGoogleDriveClient(f"file://{token_path}")
+
+    assert client.download("file-1") == b"plain text"
+    assert client.export("sheet-1", XLSX_MIME) == b"xlsx bytes"
+
+    assert download_route.calls.last.request.url.params["alt"] == "media"
+    assert export_route.calls.last.request.url.params["mimeType"] == XLSX_MIME
+
+
+@respx.mock
+def test_http_google_drive_client_refreshes_expired_oauth_token(tmp_path):
+    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+        HttpGoogleDriveClient,
+    )
+
+    token_path = tmp_path / "google-token.json"
+    token_path.write_text(
+        json.dumps(
+            {
+                "access_token": "expired-access",
+                "refresh_token": "refresh-token",
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "expiry": "2000-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    refresh_route = respx.post("https://oauth2.googleapis.com/token").mock(
+        return_value=httpx.Response(200, json={"access_token": "fresh-access", "expires_in": 3600})
+    )
+    list_route = respx.get("https://www.googleapis.com/drive/v3/files").mock(
+        return_value=httpx.Response(200, json={"files": []})
+    )
+
+    files = HttpGoogleDriveClient(f"file://{token_path}").list_files("folder-1", recursive=True)
+
+    assert files == []
+    assert "refresh_token=refresh-token" in refresh_route.calls.last.request.content.decode()
+    assert list_route.calls.last.request.headers["Authorization"] == "Bearer fresh-access"
 
 
 async def test_google_drive_listing_marks_supported_and_unsupported_mime_types():

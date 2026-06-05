@@ -142,8 +142,41 @@ def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
             )
 
 
+def load_agent_home_file(path: Path) -> AgentFile:
+    """Parse a home-root ``agent.yaml`` (deployed single agent).
+
+    Unlike :func:`load_agent_file`, this skips the directory-name check — a home-root
+    file has no ``<name>/`` parent. Inline-secret rejection still applies.
+    """
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path} must contain a mapping")
+    agent = AgentFile.model_validate(raw)
+    _reject_inline_secrets(agent, path)
+    return agent
+
+
+def _single_agent_index(agent: AgentFile) -> AgentConfigIndex:
+    """Build an index from one home-root agent: it is the sole, forced-default agent."""
+    by_channel = {ch: agent.name for ch in agent.bindings.channels}
+    by_user = {u: agent.name for u in agent.bindings.users}
+    return AgentConfigIndex(
+        agents={agent.name: agent}, by_channel=by_channel, by_user=by_user, default=agent.name
+    )
+
+
 def build_index(agents_dir: str | Path | None = None) -> AgentConfigIndex:
-    """Scan the agents directory and build a fresh resolution index (pure; no globals)."""
+    """Build a fresh resolution index (pure; no globals).
+
+    Single-file mode: when no explicit ``agents_dir`` / ``FLEETENT_AGENTS_DIR`` is given
+    and a home-root ``agent.yaml`` exists, load it as the sole, forced-default agent.
+    Otherwise scan the agents directory (multi-agent).
+    """
+    if agents_dir is None and "FLEETENT_AGENTS_DIR" not in os.environ:
+        home_file = paths.agent_file()
+        if home_file.is_file():
+            return _single_agent_index(load_agent_home_file(home_file))
+
     root = _resolve_agents_dir(agents_dir)
     agents: dict[str, AgentFile] = {}
     by_channel: dict[str, str] = {}

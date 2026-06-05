@@ -10,7 +10,8 @@ from fleetent.session import index as session_index
 from fleetent.session import manager as session_manager
 
 
-def test_db_and_session_constants_derive_from_paths() -> None:
+def test_db_and_session_constants_derive_from_paths(monkeypatch) -> None:
+    monkeypatch.delenv("FLEETENT_HOME", raising=False)
     # Names are preserved (no rename): fleetent.db / users.db / sessions.
     assert paths.data_dir() / "fleetent.db" == user_store.DB_PATH
     assert paths.data_dir() / "users.db" == session_index.DB_PATH

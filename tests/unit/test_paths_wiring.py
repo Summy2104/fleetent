@@ -11,7 +11,8 @@ from fleetent.integrations.sandbox import enablement as sandbox_enablement
 from fleetent.tools import builtin_tools
 
 
-def test_constants_derive_from_paths() -> None:
+def test_constants_derive_from_paths(monkeypatch) -> None:
+    monkeypatch.delenv("FLEETENT_HOME", raising=False)
     assert paths.data_dir() / "traces.jsonl" == eval_logger.TRACE_PATH
     assert paths.data_dir() / "generated" == builtin_tools.GENERATED_DIR
     assert paths.data_dir() / "uploads" == builtin_tools.UPLOADS_DIR

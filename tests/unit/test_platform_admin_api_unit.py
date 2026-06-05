@@ -845,7 +845,9 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
         kb_admin_api, "kb_chunk_preview", lambda tenant_id, kb_id, document_id: [{"chunk_id": "c1"}]
     )
     monkeypatch.setattr(
-        kb_admin_api, "kb_delete_document", lambda document_id: deleted_docs.append(document_id)
+        kb_admin_api,
+        "kb_delete_document",
+        lambda tenant_id, kb_id, document_id: deleted_docs.append(document_id),
     )
     monkeypatch.setattr(
         kb_admin_api,
@@ -930,7 +932,12 @@ def test_kb_admin_route_handlers_cover_management_and_documents(
         kb_admin_api.preview_chunks("kb2", "doc-1", authorization=auth_header)[0]["chunk_id"]
         == "c1"
     )
-    assert kb_admin_api.delete_document("kb2", "doc-1", auth_header, "true")["deleted"] is True
+    assert (
+        kb_admin_api.delete_document("kb2", "doc-1", authorization=auth_header, x_confirm="true")[
+            "deleted"
+        ]
+        is True
+    )
     assert deleted_docs == ["doc-1"]
     assert (
         kb_admin_api.retrieval_playground(

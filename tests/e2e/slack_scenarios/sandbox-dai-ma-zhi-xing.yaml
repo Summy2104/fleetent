@@ -1,0 +1,9 @@
+id: sandbox-dai-ma-zhi-xing
+coverage:
+- sandbox
+persona: 提出需要真正执行代码才能算的需求的用户。
+goal: 让 agent 计算一个模型不可靠、适合用代码算的东西(如「求字符串 'fleetent' 的 SHA-256,以及第 37 个斐波那契数」),迫使它用 sandbox 的 run_code。
+success_criteria: 返回可被独立核验的正确结果(SHA-256 / 斐波那契可自行验证),说明它真的执行了代码而非猜测。
+max_turns: 4
+channel: REPLACE_WITH_TEST_CHANNEL
+setup_hint: 测试 agent 需开启 features.code_execution,且 server 的 sandbox 模式为 on(Docker 可用)。

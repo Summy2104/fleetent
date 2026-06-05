@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
+
+import httpx
 
 from fleetent.intelligence.knowledge_base import runtime
 from fleetent.intelligence.knowledge_base.connectors.state import (
@@ -27,9 +31,12 @@ from fleetent.intelligence.knowledge_base.sync_planner import (
 GOOGLE_DOC_MIME = "application/vnd.google-apps.document"
 GOOGLE_SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 GOOGLE_SLIDE_MIME = "application/vnd.google-apps.presentation"
+GOOGLE_FOLDER_MIME = "application/vnd.google-apps.folder"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+GOOGLE_DRIVE_API_BASE = "https://www.googleapis.com/drive/v3"
+GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 
 @dataclass(frozen=True)
@@ -40,8 +47,13 @@ class GoogleDriveConnectorConfig:
     tenant_id: str
     kb_id: str
     folder_id: str
-    credential_ref: str
+    credential_ref: str = ""
     recursive: bool = True
+    access_token_env: str = ""
+    refresh_token_env: str = ""
+    client_id_env: str = ""
+    client_secret_env: str = ""
+    token_uri_env: str = ""
     include_patterns: tuple[str, ...] = ()
     exclude_patterns: tuple[str, ...] = ()
     supported_mime_types: tuple[str, ...] = (
@@ -121,15 +133,152 @@ class GoogleDriveClient(Protocol):
         """Export a Google-native file as the requested MIME type."""
 
 
-class FileCredentialRefResolver:
-    """Resolve file-based credential_ref values for OAuth token payloads."""
+class CredentialRefResolver:
+    """Resolve env: and file/path credential_ref values for OAuth token payloads."""
 
     def resolve(self, credential_ref: str) -> GoogleDriveCredential:
+        if credential_ref.startswith("env:"):
+            env_name = credential_ref.removeprefix("env:")
+            value = os.getenv(env_name)
+            if value is None and _has_flat_env_credential(env_name):
+                value = _flat_env_credential_payload(env_name)
+            if value is None:
+                raise GoogleDriveAuthError(f"missing credential env var: {env_name}")
+            return GoogleDriveCredential(credential_ref=credential_ref, payload=value)
         path = _credential_path(credential_ref)
         return GoogleDriveCredential(
             credential_ref=credential_ref,
             payload=path.read_text(encoding="utf-8"),
         )
+
+
+FileCredentialRefResolver = CredentialRefResolver
+
+
+@dataclass
+class HttpGoogleDriveClient:
+    """Google Drive API client backed by OAuth token JSON."""
+
+    credential_ref: str
+    access_token_env: str = ""
+    refresh_token_env: str = ""
+    client_id_env: str = ""
+    client_secret_env: str = ""
+    token_uri_env: str = ""
+    timeout_seconds: float = 20.0
+    api_base_url: str = GOOGLE_DRIVE_API_BASE
+
+    def list_files(self, folder_id: str, *, recursive: bool) -> list[GoogleDriveFile]:
+        """List files visible in one configured folder."""
+        files: list[GoogleDriveFile] = []
+        folders_to_scan = [folder_id]
+        seen_folders: set[str] = set()
+        while folders_to_scan:
+            current_folder = folders_to_scan.pop(0)
+            if current_folder in seen_folders:
+                continue
+            seen_folders.add(current_folder)
+            for item in self._list_folder_once(current_folder):
+                if recursive and item.mime_type == GOOGLE_FOLDER_MIME:
+                    folders_to_scan.append(item.id)
+                    continue
+                files.append(item)
+        return files
+
+    def download(self, file_id: str) -> bytes:
+        """Download a binary/text file."""
+        response = self._request(
+            "GET",
+            f"{self.api_base_url}/files/{file_id}",
+            params={"alt": "media"},
+        )
+        return response.content
+
+    def export(self, file_id: str, mime_type: str) -> bytes:
+        """Export a Google-native file as the requested MIME type."""
+        response = self._request(
+            "GET",
+            f"{self.api_base_url}/files/{file_id}/export",
+            params={"mimeType": mime_type},
+        )
+        return response.content
+
+    def _list_folder_once(self, folder_id: str) -> list[GoogleDriveFile]:
+        page_token: str | None = None
+        files: list[GoogleDriveFile] = []
+        while True:
+            params = {
+                "q": f"'{folder_id}' in parents and trashed = false",
+                "fields": (
+                    "nextPageToken,files(id,name,mimeType,modifiedTime,headRevisionId,webViewLink)"
+                ),
+                "pageSize": "1000",
+                "supportsAllDrives": "true",
+                "includeItemsFromAllDrives": "true",
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            response = self._request("GET", f"{self.api_base_url}/files", params=params)
+            body = response.json()
+            if not isinstance(body, dict):
+                raise RuntimeError("Google Drive list response is malformed")
+            raw_files = body.get("files", [])
+            if not isinstance(raw_files, list):
+                raise RuntimeError("Google Drive files response is malformed")
+            files.extend(_google_drive_files_from_json(raw_files))
+            next_page = body.get("nextPageToken")
+            if not isinstance(next_page, str) or not next_page:
+                return files
+            page_token = next_page
+
+    def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        try:
+            with httpx.Client(timeout=self.timeout_seconds) as client:
+                response = client.request(
+                    method,
+                    url,
+                    params=params,
+                    headers={"Authorization": f"Bearer {self._access_token()}"},
+                )
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"Google Drive request failed: {exc}") from exc
+        if response.status_code in {401, 403}:
+            raise GoogleDriveAuthError("google drive authorization failed")
+        if response.status_code < 200 or response.status_code >= 300:
+            raise RuntimeError(f"Google Drive API returned status {response.status_code}")
+        return response
+
+    def _access_token(self) -> str:
+        raw = _explicit_env_payload(
+            access_token_env=self.access_token_env,
+            refresh_token_env=self.refresh_token_env,
+            client_id_env=self.client_id_env,
+            client_secret_env=self.client_secret_env,
+            token_uri_env=self.token_uri_env,
+        )
+        if raw is None:
+            raw = CredentialRefResolver().resolve(self.credential_ref).payload
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise GoogleDriveAuthError("google drive credential payload is invalid") from exc
+        if not isinstance(payload, dict):
+            raise GoogleDriveAuthError("google drive credential payload is invalid")
+
+        access_token = payload.get("access_token")
+        if isinstance(access_token, str) and access_token and not _token_expired(payload):
+            return access_token
+        if _can_refresh(payload):
+            return _refresh_access_token(payload, timeout_seconds=self.timeout_seconds)
+        if isinstance(access_token, str) and access_token:
+            return access_token
+        raise GoogleDriveAuthError("google drive access token is missing")
 
 
 @dataclass
@@ -461,6 +610,134 @@ def _credential_path(credential_ref: str) -> Path:
     if credential_ref.startswith("file://"):
         return Path(credential_ref.removeprefix("file://")).expanduser()
     return Path(credential_ref).expanduser()
+
+
+def _google_drive_files_from_json(raw_files: list[object]) -> list[GoogleDriveFile]:
+    files: list[GoogleDriveFile] = []
+    for raw_file in raw_files:
+        if not isinstance(raw_file, dict):
+            raise RuntimeError("Google Drive file metadata is malformed")
+        file_id = raw_file.get("id")
+        name = raw_file.get("name")
+        mime_type = raw_file.get("mimeType")
+        modified_time = raw_file.get("modifiedTime")
+        if not all(isinstance(value, str) and value for value in (file_id, name, mime_type)):
+            raise RuntimeError("Google Drive file metadata is malformed")
+        if not isinstance(modified_time, str) or not modified_time:
+            raise RuntimeError("Google Drive file metadata is malformed")
+        revision_id = raw_file.get("headRevisionId")
+        web_url = raw_file.get("webViewLink")
+        files.append(
+            GoogleDriveFile(
+                id=file_id,
+                name=name,
+                mime_type=mime_type,
+                modified_time=modified_time,
+                revision_id=revision_id if isinstance(revision_id, str) else None,
+                web_url=web_url if isinstance(web_url, str) else None,
+            )
+        )
+    return files
+
+
+def _token_expired(payload: dict[object, object]) -> bool:
+    expiry = payload.get("expiry")
+    if not isinstance(expiry, str) or not expiry:
+        return False
+    try:
+        expires_at = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at <= datetime.now(UTC) + timedelta(seconds=60)
+
+
+def _can_refresh(payload: dict[object, object]) -> bool:
+    return all(
+        isinstance(payload.get(key), str) and payload.get(key)
+        for key in ("refresh_token", "client_id", "client_secret")
+    )
+
+
+def _has_flat_env_credential(prefix: str) -> bool:
+    return any(
+        os.getenv(f"{prefix}_{suffix}")
+        for suffix in (
+            "ACCESS_TOKEN",
+            "REFRESH_TOKEN",
+            "CLIENT_ID",
+            "CLIENT_SECRET",
+            "TOKEN_URI",
+        )
+    )
+
+
+def _explicit_env_payload(
+    *,
+    access_token_env: str,
+    refresh_token_env: str,
+    client_id_env: str,
+    client_secret_env: str,
+    token_uri_env: str,
+) -> str | None:
+    env_names = {
+        "access_token": access_token_env,
+        "refresh_token": refresh_token_env,
+        "client_id": client_id_env,
+        "client_secret": client_secret_env,
+        "token_uri": token_uri_env,
+    }
+    if not any(env_names.values()):
+        return None
+    payload = {
+        field: os.getenv(env_name, "")
+        for field, env_name in env_names.items()
+        if env_name and os.getenv(env_name)
+    }
+    if token_uri_env and "token_uri" not in payload:
+        payload["token_uri"] = GOOGLE_TOKEN_URI
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _flat_env_credential_payload(prefix: str) -> str:
+    mapping = {
+        "access_token": os.getenv(f"{prefix}_ACCESS_TOKEN", ""),
+        "refresh_token": os.getenv(f"{prefix}_REFRESH_TOKEN", ""),
+        "client_id": os.getenv(f"{prefix}_CLIENT_ID", ""),
+        "client_secret": os.getenv(f"{prefix}_CLIENT_SECRET", ""),
+        "token_uri": os.getenv(f"{prefix}_TOKEN_URI", GOOGLE_TOKEN_URI),
+    }
+    return json.dumps(
+        {key: value for key, value in mapping.items() if value},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _refresh_access_token(payload: dict[object, object], *, timeout_seconds: float) -> str:
+    token_uri = payload.get("token_uri")
+    url = token_uri if isinstance(token_uri, str) and token_uri else GOOGLE_TOKEN_URI
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": str(payload["refresh_token"]),
+        "client_id": str(payload["client_id"]),
+        "client_secret": str(payload["client_secret"]),
+    }
+    try:
+        with httpx.Client(timeout=timeout_seconds) as client:
+            response = client.post(url, data=data)
+    except httpx.HTTPError as exc:
+        raise GoogleDriveAuthError("google drive token refresh failed") from exc
+    if response.status_code < 200 or response.status_code >= 300:
+        raise GoogleDriveAuthError("google drive token refresh failed")
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise GoogleDriveAuthError("google drive token refresh returned malformed JSON") from exc
+    if not isinstance(body, dict) or not isinstance(body.get("access_token"), str):
+        raise GoogleDriveAuthError("google drive token refresh did not return an access token")
+    return str(body["access_token"])
 
 
 def _state_store_or_none() -> LocalSourceStateStore | None:

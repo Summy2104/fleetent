@@ -53,27 +53,43 @@ environment:
 - 一个 Google Drive Pilot fixture folder，只放脱敏文档。
 - 一个 Confluence Pilot fixture space 或 page scope，只放脱敏页面。
 
-真实外部依赖 opt-in 变量按需设置：
+真实外部依赖 opt-in 变量按需设置。真实 provider credential 只能放在本机 shell、未跟踪的 `.env`
+或 `secrets/` 文件中，不要写入本手册、验收记录、测试 fixture、commit、issue、日志或 trace。运行命令前只记录
+使用了哪个 provider 和 credential 来源类型，例如 `env:ANTHROPIC_API_KEY` 或 `file:///app/secrets/...`，不要记录值。
+
+Real LLM memory extraction evaluation 是显式 opt-in；默认门禁不会调用真实模型。需要本机先配置一个受支持的
+provider key（`ANTHROPIC_API_KEY`、`OPENAI_API_KEY` 或 `DEEPSEEK_API_KEY` 之一），再运行：
+
+```bash
+export FLEETENT_EVAL_REAL_LLM=1
+uv run pytest tests/evaluation/test_memory_extraction_eval.py -q -rs
+```
+
+如果 opt-in 后缺少真实 provider key，测试应跳过并给出需要配置真实 credential 的原因；如果 provider key 无效，
+记录为失败并由 operator 更换或撤销 credential。不要用 `env`、`set -x`、完整 shell transcript 或 diagnostics
+package 打印 secret。
+
+其他真实外部 smoke 按需设置 opt-in flag，并通过 credential reference 指向本机 secret：
 
 ```bash
 export FLEETENT_REAL_LLM_SMOKE=1
-export ANTHROPIC_API_KEY=...
+# 预先在本机 shell 或未跟踪 .env 中提供 ANTHROPIC_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY。
 
 export FLEETENT_REAL_EMBEDDING_SMOKE=1
-export FLEETENT_REAL_EMBEDDING_CREDENTIAL_REF=...
+export FLEETENT_REAL_EMBEDDING_CREDENTIAL_REF=file:///app/secrets/embedding-provider-token
 
 export FLEETENT_REAL_RERANK_SMOKE=1
-export FLEETENT_REAL_RERANK_CREDENTIAL_REF=...
+export FLEETENT_REAL_RERANK_CREDENTIAL_REF=file:///app/secrets/rerank-provider-token
 
 export FLEETENT_GOOGLE_DRIVE_SMOKE=1
-export FLEETENT_GOOGLE_DRIVE_CREDENTIAL_REF=...
-export FLEETENT_GOOGLE_DRIVE_FOLDER_ID=...
+export FLEETENT_GOOGLE_DRIVE_CREDENTIAL_REF=file:///app/secrets/google-drive-token.json
+export FLEETENT_GOOGLE_DRIVE_FOLDER_ID=<pilot_fixture_folder_id>
 
 export FLEETENT_CONFLUENCE_SMOKE=1
-export FLEETENT_CONFLUENCE_BASE_URL=...
-export FLEETENT_CONFLUENCE_USERNAME=...
-export FLEETENT_CONFLUENCE_CREDENTIAL_REF=...
-export FLEETENT_CONFLUENCE_SCOPE=...
+export FLEETENT_CONFLUENCE_BASE_URL=<confluence_base_url>
+export FLEETENT_CONFLUENCE_USERNAME=<pilot_user_email>
+export FLEETENT_CONFLUENCE_CREDENTIAL_REF=env:FLEETENT_CONFLUENCE_TOKEN
+export FLEETENT_CONFLUENCE_SCOPE=<pilot_space_or_page_scope>
 ```
 
 ## 3. 自动化快验
@@ -117,8 +133,8 @@ uv run pytest tests/integration/test_shared_memory.py \
 建议操作：
 
 ```bash
-uv run fleetent-admin shared-memory list --scope-type tenant --scope-id pilot-tenant
-uv run fleetent-admin shared-memory list --scope-type team --scope-id pilot-team
+uv run fleetent-admin memory shared list --scope-type tenant --scope-id pilot-tenant
+uv run fleetent-admin memory shared list --scope-type team --scope-id pilot-team
 uv run pytest tests/integration/test_shared_memory.py tests/integration/test_memory_retention_compaction.py -q
 ```
 

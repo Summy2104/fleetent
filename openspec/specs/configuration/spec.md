@@ -68,20 +68,24 @@ TBD - created by archiving change configuration-foundation. Update Purpose after
 
 #### Scenario: Google Drive connector config shape
 - **WHEN** `settings.yaml` 配置 Google Drive connector
-- **THEN** 配置包含 connector_id、enabled、tenant_id、kb_id、folder_id、recursive 和 credential_ref
+- **THEN** 配置包含 connector_id、enabled、tenant_id、kb_id、folder_id 和 recursive
+- **AND** OAuth credential 字段通过 `access_token_env`、`refresh_token_env`、`client_id_env` 和
+  `client_secret_env` 引用环境变量
+- **AND** Google token URI 使用代码默认值
 
 #### Scenario: Confluence connector config shape
 - **WHEN** `settings.yaml` 配置 Confluence connector
-- **THEN** 配置包含 connector_id、enabled、tenant_id、kb_id、base_url、username、scope 字段和 credential_ref
+- **THEN** 配置包含 connector_id、enabled、tenant_id、kb_id、base_url、scope 字段、`username_env` 和
+  `api_token_env`
 
-#### Scenario: Config stores credential reference only
+#### Scenario: Config stores credential env references only
 - **WHEN** `settings.yaml` 配置任意 knowledge-base connector
-- **THEN** 配置只包含 `credential_ref`
+- **THEN** 配置只包含 env var name references
 - **AND** 不包含 OAuth refresh token、client secret、Confluence API token 或其他真实 credential payload
 
-#### Scenario: Credential ref supports file and env
-- **WHEN** connector 配置 `credential_ref`
-- **THEN** 系统支持 `file://...`、本地文件路径和 `env:VAR_NAME` 引用形式
+#### Scenario: Legacy credential ref remains compatible
+- **WHEN** connector 仍配置 legacy `credential_ref`
+- **THEN** 系统保持兼容，不要求 operator 立即迁移已有本地配置
 
 ### Requirement: Diagnostics configuration
 系统 SHALL 提供 diagnostics 配置 namespace，用于控制诊断导出目录和手动 retention 策略。
@@ -154,13 +158,62 @@ TBD - created by archiving change configuration-foundation. Update Purpose after
 - **AND** 示例文件名不包含 scope
 - **AND** scope 由 connector config 或未来数据库配置表达
 
-### Requirement: Credential references use container secrets path in examples
-配置样例 SHALL 使用 Docker Compose mount 后的 `/app/secrets` 路径展示 file credential reference。
+### Requirement: Credential references use flat environment examples
+配置样例 SHALL 使用平铺环境变量引用展示 connector credential，不要求 operator 把 OAuth JSON 放入单个环境变量或文件路径。
 
-#### Scenario: Google Drive credential ref uses app secrets path
+#### Scenario: Google Drive config uses explicit env fields
 - **WHEN** operator 查看 `config/settings.yaml.example`
-- **THEN** Google Drive 示例 `credential_ref` 使用 `file:///app/secrets/google-drive-token.json`
+- **THEN** Google Drive 示例显式使用 `access_token_env`、`refresh_token_env`、`client_id_env` 和
+  `client_secret_env`
+
+#### Scenario: Confluence username uses env reference
+- **WHEN** operator 查看 `config/settings.yaml.example`
+- **THEN** Confluence 示例使用 `username_env`
+- **AND** token 使用 `api_token_env`
 
 #### Scenario: Credential ref does not encode scope in filename
 - **WHEN** operator 查看配置样例和 secrets 文档
 - **THEN** secret 文件名不使用 `eng`、`product` 或类似 connector scope 作为命名要求
+
+### Requirement: Global config files are optional
+agent 运行时 SHALL 在 `settings.yaml` / `mcp.yaml` / `mcp.servers.yaml` 缺失时回退到内置默认值，不得因其缺失而启动失败。这三个全局配置文件 SHALL NOT 作为部署/脚手架的默认产物（install.sh 部署扁平 home，`init-config` 不再 seed 它们）。
+
+#### Scenario: Settings falls back to defaults without settings.yaml
+- **WHEN** `settings.yaml` 不存在
+- **THEN** `Settings` 使用类型化默认值（env/.env 仍可覆盖）
+- **AND** 不抛错
+
+#### Scenario: MCP works without global mcp files
+- **WHEN** `mcp.yaml` 与 `mcp.servers.yaml` 均不存在
+- **THEN** 全局 MCP 文件注册为空（per-agent agent.yaml 的 `mcp_servers` 与 admin DB 仍生效）
+- **AND** 启动不报错
+
+#### Scenario: init-config does not seed global config files
+- **WHEN** operator 运行 `fleetent-admin init-config`
+- **THEN** 不创建 `config/settings.yaml` 或 `config/mcp.servers.yaml`
+- **AND** 仍创建 `.env` 与数据目录
+
+#### Scenario: Global example templates are absent from the repo
+- **WHEN** 查看仓库 `config/`
+- **THEN** 不存在 `settings.yaml.example` / `mcp.yaml.example` / `mcp.servers.yaml.example`
+- **AND** 存在 `config/agent.yaml.example`（部署 agent 的模板）
+
+### Requirement: Vector provider config uses env references
+Embedding and rerank HTTP provider configuration SHALL support environment-variable references for deploy-time provider values while keeping secrets out of tracked YAML.
+
+#### Scenario: Embedding HTTP provider env references
+- **WHEN** `settings.yaml` configures `embedding.backend: http`
+- **THEN** endpoint, model, and dimensions may be supplied through `endpoint_env`, `model_env`, and `dimensions_env`
+- **AND** the API key is supplied through `api_key_env`
+- **AND** direct literal `endpoint`, `model`, and `dimensions` fields remain compatible
+
+#### Scenario: Rerank HTTP provider env references
+- **WHEN** `settings.yaml` configures `rerank.backend: http`
+- **THEN** endpoint and model may be supplied through `endpoint_env` and `model_env`
+- **AND** the API key is supplied through `api_key_env`
+- **AND** direct literal `endpoint` and `model` fields remain compatible
+
+#### Scenario: Templates expose smoke env names without secrets
+- **WHEN** operator views `.env.example`
+- **THEN** the file shows the env var names used by real embedding and rerank smoke
+- **AND** the file does not contain provider API key values

@@ -8,6 +8,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol
+from urllib.parse import urljoin
+
+import httpx
 
 from fleetent.intelligence.knowledge_base import runtime
 from fleetent.intelligence.knowledge_base.connectors.state import (
@@ -23,6 +26,7 @@ from fleetent.intelligence.knowledge_base.sync_planner import (
 
 ConfluenceScopeType = Literal["space", "page"]
 SleepFn = Callable[[float], Awaitable[None]]
+_CONFLUENCE_EXPAND = "body.storage,version,space,ancestors,history.lastUpdated"
 
 
 @dataclass(frozen=True)
@@ -33,9 +37,11 @@ class ConfluenceConnectorConfig:
     tenant_id: str
     kb_id: str
     base_url: str
-    username: str
-    credential_ref: str
-    scope_type: ConfluenceScopeType
+    username: str = ""
+    credential_ref: str = ""
+    scope_type: ConfluenceScopeType = "space"
+    username_env: str = ""
+    api_token_env: str = ""
     space_key: str | None = None
     page_id: str | None = None
     include_children: bool = False
@@ -128,6 +134,99 @@ class CredentialRefResolver:
             credential_ref=credential_ref,
             payload=path.read_text(encoding="utf-8").strip(),
         )
+
+
+@dataclass
+class HttpConfluenceClient:
+    """Confluence Cloud REST client using username + API token basic auth."""
+
+    base_url: str
+    username: str
+    credential_ref: str
+    timeout_seconds: float = 20.0
+
+    def list_space_pages(self, space_key: str) -> list[list[ConfluencePage]]:
+        """Return paginated pages for one space."""
+        params = {
+            "spaceKey": space_key,
+            "type": "page",
+            "limit": "50",
+            "expand": _CONFLUENCE_EXPAND,
+        }
+        return self._list_paginated("/rest/api/content", params=params)
+
+    def get_page(self, page_id: str) -> ConfluencePage:
+        """Return one page."""
+        response = self._request(
+            "GET",
+            f"/rest/api/content/{page_id}",
+            params={"expand": _CONFLUENCE_EXPAND},
+        )
+        return _confluence_page_from_json(response.json())
+
+    def list_child_pages(self, page_id: str) -> list[ConfluencePage]:
+        """Return descendant pages for one page."""
+        groups = self._list_paginated(
+            f"/rest/api/content/{page_id}/child/page",
+            params={"limit": "50", "expand": _CONFLUENCE_EXPAND},
+        )
+        return [page for group in groups for page in group]
+
+    def _list_paginated(
+        self,
+        path_or_url: str,
+        *,
+        params: dict[str, str],
+    ) -> list[list[ConfluencePage]]:
+        groups: list[list[ConfluencePage]] = []
+        next_path: str | None = path_or_url
+        next_params: dict[str, str] | None = params
+        while next_path:
+            response = self._request("GET", next_path, params=next_params)
+            body = response.json()
+            if not isinstance(body, dict):
+                raise RuntimeError("Confluence response is malformed")
+            results = body.get("results", [])
+            if not isinstance(results, list):
+                raise RuntimeError("Confluence results response is malformed")
+            groups.append([_confluence_page_from_json(item) for item in results])
+            links = body.get("_links", {})
+            next_link = links.get("next") if isinstance(links, dict) else None
+            next_path = next_link if isinstance(next_link, str) and next_link else None
+            next_params = None
+        return groups
+
+    def _request(
+        self,
+        method: str,
+        path_or_url: str,
+        *,
+        params: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        url = _confluence_url(self.base_url, path_or_url)
+        token = CredentialRefResolver().resolve(self.credential_ref).payload
+        try:
+            with httpx.Client(timeout=self.timeout_seconds) as client:
+                response = client.request(
+                    method,
+                    url,
+                    params=params,
+                    auth=(self.username, token),
+                )
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"Confluence request failed: {exc}") from exc
+        if response.status_code in {401, 403}:
+            raise ConfluenceAuthError("confluence authorization failed")
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After", "1")
+            try:
+                seconds = float(retry_after)
+            except ValueError:
+                seconds = 1.0
+            raise ConfluenceRateLimitError(seconds)
+        if response.status_code < 200 or response.status_code >= 300:
+            raise RuntimeError(f"Confluence API returned status {response.status_code}")
+        return response
 
 
 @dataclass
@@ -460,3 +559,67 @@ def _state_store_or_none() -> LocalSourceStateStore | None:
     if row is None:
         return None
     return LocalSourceStateStore(database)
+
+
+def _confluence_url(base_url: str, path_or_url: str) -> str:
+    if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
+        return path_or_url
+    return urljoin(f"{base_url.rstrip('/')}/", path_or_url.lstrip("/"))
+
+
+def _confluence_page_from_json(raw: object) -> ConfluencePage:
+    if not isinstance(raw, dict):
+        raise RuntimeError("Confluence page response is malformed")
+    page_id = raw.get("id")
+    title = raw.get("title")
+    if not isinstance(page_id, str) or not page_id:
+        raise RuntimeError("Confluence page id is missing")
+    if not isinstance(title, str) or not title:
+        raise RuntimeError("Confluence page title is missing")
+
+    space = raw.get("space", {})
+    space_key = space.get("key") if isinstance(space, dict) else None
+    if not isinstance(space_key, str) or not space_key:
+        raise RuntimeError("Confluence page space key is missing")
+
+    body = raw.get("body", {})
+    storage = body.get("storage", {}) if isinstance(body, dict) else {}
+    storage_html = storage.get("value") if isinstance(storage, dict) else None
+    if not isinstance(storage_html, str):
+        raise RuntimeError("Confluence page storage HTML is missing")
+
+    version_body = raw.get("version", {})
+    version = version_body.get("number") if isinstance(version_body, dict) else None
+    if not isinstance(version, int):
+        raise RuntimeError("Confluence page version is missing")
+
+    modified_time = _confluence_modified_time(raw, version_body)
+    ancestors = raw.get("ancestors", [])
+    ancestor_titles = [
+        str(item["title"])
+        for item in ancestors
+        if isinstance(item, dict) and isinstance(item.get("title"), str)
+    ]
+    return ConfluencePage(
+        id=page_id,
+        title=title,
+        space_key=space_key,
+        storage_html=storage_html,
+        version=version,
+        modified_time=modified_time,
+        ancestors=ancestor_titles,
+    )
+
+
+def _confluence_modified_time(
+    raw: dict[object, object],
+    version_body: object,
+) -> str:
+    history = raw.get("history", {})
+    if isinstance(history, dict):
+        last_updated = history.get("lastUpdated", {})
+        if isinstance(last_updated, dict) and isinstance(last_updated.get("when"), str):
+            return str(last_updated["when"])
+    if isinstance(version_body, dict) and isinstance(version_body.get("when"), str):
+        return str(version_body["when"])
+    raise RuntimeError("Confluence page modified time is missing")
