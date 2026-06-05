@@ -94,6 +94,16 @@ def test_skills_action_functions_present():
         assert fn in html, fn
 
 
+def test_skill_import_has_clear_folder_picker():
+    html = ADMIN_HTML
+    # the raw file input is hidden; a visible button triggers it so the whole
+    # control is obviously clickable (fixes "clicking does nothing")
+    assert 'id="sk-import-files"' in html
+    assert "$('sk-import-files').click()" in html
+    assert 'id="sk-import-pick"' in html  # selected-folder label
+    assert "function skImportPicked" in html
+
+
 def test_skills_proposals_review_wired():
     html = ADMIN_HTML
     assert "/skills/proposals" in html

@@ -1100,8 +1100,10 @@
           Pick a skill folder (with <code>SKILL.md</code>) or a folder containing several
           skills. The whole folder uploads — single vs batch is detected automatically.
         </p>
-        <div class="row" style="gap:8px;">
-          <input type="file" id="sk-import-files" webkitdirectory directory multiple>
+        <div class="row" style="gap:8px; align-items:center;">
+          <input type="file" id="sk-import-files" webkitdirectory directory multiple style="display:none" onchange="skImportPicked()">
+          <button type="button" class="ghost" onclick="$('sk-import-files').click()">📁 Choose folder</button>
+          <span id="sk-import-pick" class="muted" style="font-size:13px;">No folder chosen</span>
           <button type="button" id="sk-upload-btn" class="primary" onclick="skDoUpload()">Upload &amp; import</button>
         </div>
       </div>
@@ -2345,9 +2347,14 @@ async function skReject(id) {
 function skOpenImport() {
   $("sk-import-source").value = "adhoc";
   if ($("sk-import-files")) $("sk-import-files").value = "";
+  skImportPicked();
   $("sk-import-err").textContent = "";
   const res = $("sk-import-result"); res.classList.add("hidden"); res.innerHTML = "";
   $("sk-import-modal").classList.remove("hidden");
+}
+function skImportPicked() {
+  const n = ($("sk-import-files").files || []).length;
+  $("sk-import-pick").textContent = n ? `${n} file(s) selected` : "No folder chosen";
 }
 function skCloseImport() { $("sk-import-modal").classList.add("hidden"); }
 
