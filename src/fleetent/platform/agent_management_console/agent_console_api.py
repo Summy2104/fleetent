@@ -2,7 +2,7 @@
 
 Layers the operational management face on top of the agent definition/binding store:
 enable/disable, archive (soft delete) with binding protection + restore, clone,
-the read-only template library, managed/adhoc provenance + drift, and the per-agent
+managed/adhoc provenance + drift, and the per-agent
 observation view.
 
 Agent CRUD/versioning and the binding tables come from agent_store; per-agent metric
@@ -24,7 +24,6 @@ from fleetent.governance import audit_log
 from fleetent.platform.agent_management_console import (
     agent_admin_store,
     agent_observability,
-    agent_template_store,
 )
 
 router = APIRouter(prefix="/admin")
@@ -53,7 +52,6 @@ def create_agent_def(
     mcp_server_ids: list[str] | None = None,
     model_overrides: dict[str, Any] | None = None,
     memory_namespace: str = "default",
-    template_id: str | None = None,
     plugins: list[str] | None = None,
     features: dict[str, Any] | None = None,
     icon: str | None = None,
@@ -91,6 +89,11 @@ def update_agent_def(
 def delete_agent_def(name: str) -> bool:
     """Hard-delete an agent definition. Bridges agent_store.delete_agent."""
     return False
+
+
+def rename_agent_def(old_name: str, new_name: str) -> None:
+    """Rename an agent + re-key its admin-state row. Bridges agent_store.rename_agent."""
+    return None
 
 
 def references_for(agent_name: str) -> dict[str, Any]:
@@ -149,7 +152,6 @@ class CloneBody(BaseModel):
 
 class CreateBody(BaseModel):
     name: str
-    template_id: str
     system_prompt: str = ""
     allowed_tools: list[str] = []
     plugins: list[str] = []
@@ -165,6 +167,7 @@ class CreateBody(BaseModel):
 
 
 class UpdateBody(BaseModel):
+    name: str | None = None  # rename the agent (optional)
     system_prompt: str | None = None
     allowed_tools: list[str] | None = None
     skills_dir: str | None = None
@@ -172,72 +175,9 @@ class UpdateBody(BaseModel):
     model_overrides: dict[str, Any] | None = None
     memory_namespace: str | None = None
     icon: str | None = None
-
-
-# --- templates (literal path before /{name}) ----------------------------------
-
-
-class TemplateCreateBody(BaseModel):
-    id: str
-    display_name: str
-    allowed_tools: list[str] = []
-    system_prompt: str = ""
-
-
-class TemplateUpdateBody(BaseModel):
-    display_name: str | None = None
-    allowed_tools: list[str] | None = None
-    system_prompt: str | None = None
-
-
-@router.get("/agent-templates")
-def list_templates(authorization: str | None = Header(None)) -> list[dict[str, Any]]:
-    _current_user(authorization)
-    return agent_template_store.list_templates()
-
-
-@router.post("/agent-templates", status_code=201)
-def create_template(
-    body: TemplateCreateBody, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    if not body.id.strip():
-        raise HTTPException(status_code=422, detail="id required")
-    if agent_template_store.get_template(body.id) is not None:
-        raise HTTPException(status_code=409, detail="template already exists")
-    template = agent_template_store.create_template(
-        body.id, body.display_name, body.allowed_tools, body.system_prompt
-    )
-    audit_log.write_audit(user.id, "template.create", "agent_template", body.id)
-    return template
-
-
-@router.patch("/agent-templates/{template_id}")
-def update_template(
-    template_id: str, body: TemplateUpdateBody, authorization: str | None = Header(None)
-) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    kwargs: dict[str, Any] = {}
-    if body.display_name is not None:
-        kwargs["display_name"] = body.display_name
-    if body.allowed_tools is not None:
-        kwargs["allowed_tools"] = body.allowed_tools
-    if body.system_prompt is not None:
-        kwargs["system_prompt"] = body.system_prompt
-    template = agent_template_store.update_template(template_id, **kwargs)
-    if template is None:
-        raise HTTPException(status_code=404, detail="template not found")
-    audit_log.write_audit(user.id, "template.update", "agent_template", template_id)
-    return template
-
-
-@router.delete("/agent-templates/{template_id}")
-def delete_template(template_id: str, authorization: str | None = Header(None)) -> dict[str, Any]:
-    user = _require_admin(authorization)
-    if not agent_template_store.delete_template(template_id):
-        raise HTTPException(status_code=404, detail="template not found")
-    audit_log.write_audit(user.id, "template.delete", "agent_template", template_id)
-    return {"id": template_id, "deleted": True}
+    # Optional capabilities YAML (parsed server-side); when present its allowed_tools
+    # override the structured field, mirroring create.
+    capabilities_yaml: str | None = None
 
 
 # --- list ---------------------------------------------------------------------
@@ -287,20 +227,23 @@ def _def_response(name: str) -> dict[str, Any]:
         out["mcp_server_ids"] = agent.get("mcp_server_ids")
         out["model_overrides"] = agent.get("model_overrides", {})
         out["memory_namespace"] = agent.get("memory_namespace", "default")
-        out["template_id"] = agent.get("template_id")
         out["icon"] = agent.get("icon")
     return out
 
 
-def _resolve_capabilities(body: CreateBody) -> tuple[list[str], list[str], dict[str, Any]]:
+def _resolve_capabilities(
+    allowed_tools: list[str],
+    plugins: list[str],
+    features: dict[str, Any],
+    capabilities_yaml: str | None,
+) -> tuple[list[str], list[str], dict[str, Any]]:
     """Resolve allowed_tools/plugins/features, letting a pasted YAML block override them.
 
     The YAML is recorded as-is: whatever keys it carries replace the structured fields.
     """
-    allowed_tools, plugins, features = body.allowed_tools, body.plugins, body.features
-    if body.capabilities_yaml and body.capabilities_yaml.strip():
+    if capabilities_yaml and capabilities_yaml.strip():
         try:
-            parsed = yaml.safe_load(body.capabilities_yaml)
+            parsed = yaml.safe_load(capabilities_yaml)
         except yaml.YAMLError as exc:
             raise HTTPException(
                 status_code=422, detail=f"invalid capabilities YAML: {exc}"
@@ -318,9 +261,9 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
     user = _require_admin(authorization)
     if get_agent_def(body.name) is not None:
         raise HTTPException(status_code=409, detail="agent already exists")
-    if agent_template_store.get_template(body.template_id) is None:
-        raise HTTPException(status_code=404, detail="template not found")
-    allowed_tools, plugins, features = _resolve_capabilities(body)
+    allowed_tools, plugins, features = _resolve_capabilities(
+        body.allowed_tools, body.plugins, body.features, body.capabilities_yaml
+    )
     create_agent_def(
         body.name,
         body.system_prompt,
@@ -329,7 +272,6 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
         body.mcp_server_ids,
         body.model_overrides,
         body.memory_namespace,
-        body.template_id,
         plugins=plugins,
         features=features,
         icon=body.icon,
@@ -356,20 +298,34 @@ def update_agent(
     user = _require_admin(authorization)
     if get_agent_def(name) is None:
         raise HTTPException(status_code=404, detail="agent not found")
+    # Optional rename: the agent name is editable; bindings key on agent_id so only
+    # the name + admin-state row move. Apply it first, then edit under the new name.
+    target = name
+    if body.name is not None and body.name.strip() and body.name.strip() != name:
+        try:
+            rename_agent_def(name, body.name.strip())
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        target = body.name.strip()
+        audit_log.write_audit(user.id, "agent.rename", "agent", target, detail={"from": name})
+    allowed_tools = body.allowed_tools
+    if body.capabilities_yaml is not None:
+        # Capabilities YAML drives allowed_tools; plugins/features are inherited unchanged.
+        allowed_tools, _, _ = _resolve_capabilities([], [], {}, body.capabilities_yaml)
     update_agent_def(
-        name,
+        target,
         body.system_prompt,
-        body.allowed_tools,
+        allowed_tools,
         body.skills_dir,
         body.mcp_server_ids,
         body.model_overrides,
         body.memory_namespace,
     )
     if body.icon is not None:
-        set_agent_icon(name, body.icon)
-    agent_admin_store.mark_drift(name)  # no-op unless provenance is managed
-    audit_log.write_audit(user.id, "agent.update", "agent", name)
-    return _def_response(name)
+        set_agent_icon(target, body.icon)
+    agent_admin_store.mark_drift(target)  # no-op unless provenance is managed
+    audit_log.write_audit(user.id, "agent.update", "agent", target)
+    return _def_response(target)
 
 
 @router.delete("/agents/{name}")

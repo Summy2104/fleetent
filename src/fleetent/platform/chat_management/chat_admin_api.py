@@ -199,9 +199,7 @@ def list_playground_sessions(authorization: str | None = Header(None)) -> list[d
 
 
 @router.delete("/chat/{session_id}", status_code=204)
-def delete_playground_session(
-    session_id: str, authorization: str | None = Header(None)
-) -> None:
+def delete_playground_session(session_id: str, authorization: str | None = Header(None)) -> None:
     user = _require_admin(authorization)
     _require_own_playground(session_id, user)
     clear_session(session_id)

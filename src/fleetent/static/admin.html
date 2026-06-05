@@ -251,6 +251,44 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .spin { display: inline-block; animation: spin 1s linear infinite; }
 
+  /* --- Bind IM identity picker --- */
+  .bind-im-summary { display:flex; align-items:center; gap:12px; padding:12px 14px;
+    border:1px solid var(--border); border-radius:10px; background:var(--surface); }
+  .bind-im-summary .bind-im-avatar { font-size:22px; line-height:1; flex:none; }
+  .bind-im-summary .bind-im-id { font-weight:600; }
+  .bind-im-summary .bind-im-owner { color:var(--muted); font-size:12px; margin-top:2px; }
+  .bind-user-list { max-height:300px; overflow-y:auto; border:1px solid var(--border);
+    border-radius:10px; }
+  .bind-user-list:empty { display:none; }
+  .bind-user-item { display:flex; align-items:center; gap:10px; padding:10px 12px;
+    border-bottom:1px solid var(--border); cursor:pointer; }
+  .bind-user-item:last-child { border-bottom:none; }
+  .bind-user-item:hover { background:var(--surface); }
+  .bind-user-item.is-current { opacity:.55; cursor:default; }
+  .bind-user-item .bind-user-main { flex:1; min-width:0; }
+  .bind-user-item .bind-user-name { font-weight:600; white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; }
+  .bind-user-item .bind-user-sub { color:var(--muted); font-size:12px; }
+  .bind-user-empty { padding:16px; text-align:center; color:var(--muted); font-size:13px; }
+  /* --- Multi-select dropdown (agent bindings) --- */
+  .ms { position:relative; }
+  .ms-control { min-height:36px; display:flex; flex-wrap:wrap; gap:4px; align-items:center;
+    padding:5px 8px; border:1px solid var(--border); border-radius:8px; background:var(--surface);
+    cursor:pointer; }
+  .ms-chips { display:flex; flex-wrap:wrap; gap:4px; flex:1; }
+  .ms-chip { display:inline-flex; align-items:center; gap:5px; padding:2px 6px; font-size:12px;
+    background:var(--line); border-radius:999px; }
+  .ms-chip button { border:none; background:none; color:var(--muted); cursor:pointer; font-size:13px;
+    line-height:1; padding:0; }
+  .ms-chip button:hover { color:var(--danger); }
+  .ms-panel { position:absolute; z-index:30; left:0; right:0; margin-top:4px; padding:6px;
+    background:var(--panel); border:1px solid var(--border); border-radius:8px;
+    box-shadow:0 6px 20px rgba(0,0,0,.4); }
+  .ms-panel.hidden { display:none; }
+  .ms-search { width:100%; margin-bottom:6px; }
+  .ms-opts { max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; }
+  .ms-opt { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; cursor:pointer; }
+  .ms-opt:hover { background:var(--surface); }
   /* --- Skills module --- */
   .sk-toolbar { display:flex; gap:10px; margin-bottom:10px; }
   .sk-search { flex:1; }
@@ -604,13 +642,7 @@
     <section id="tab-agents" class="hidden">
       <div class="page-header">
         <h2 class="ph-title">Agents</h2>
-        <div class="ph-filter">
-          <div class="subtabs">
-            <button id="ag-subtab-agents" class="subtab active" onclick="agSubTab('agents')">Agents</button>
-            <button id="ag-subtab-templates" class="subtab" onclick="agSubTab('templates')">Templates</button>
-          </div>
-        </div>
-        <div class="ph-actions"><button class="ghost small" onclick="agSubRefresh()">Refresh</button></div>
+        <div class="ph-actions"><button class="ghost small" onclick="loadAgents()">Refresh</button></div>
       </div>
       <div id="ag-pane">
         <div class="sk-toolbar">
@@ -620,16 +652,6 @@
         <div id="ag-tabs" class="sk-filter-tabs"></div>
         <div id="ag-count" class="muted" style="margin:2px 2px 12px;"></div>
         <div id="ag-grid" class="connector-grid"></div>
-      </div>
-      <div id="tmpl-pane" class="hidden">
-        <div class="row" style="margin-bottom:12px;">
-          <span id="tmpl-create-bar"></span>
-        </div>
-        <div class="table-scroll"><table>
-          <thead><tr><th>ID</th><th>Display name</th><th>allowed_tools</th><th>Actions</th></tr></thead>
-          <tbody id="tmpl-body"></tbody>
-        </table></div>
-        <div id="tmpl-list-err" class="err"></div>
       </div>
 
       <!-- Agent detail drawer -->
@@ -962,13 +984,29 @@
 
   <div id="bind-modal" class="modal hidden">
     <div class="modal-box" role="dialog" aria-modal="true">
-      <h3>Bind IM identity to user</h3>
-      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="doBindIm(); return false;">
-        <select id="bind-user-select"></select>
-        <div id="bind-err" class="err"></div>
+      <h3>Link IM identity to a user</h3>
+      <div id="bind-im-summary" class="bind-im-summary"></div>
+      <input id="bind-search" class="sk-search" style="margin:10px 0 6px;" placeholder="🔍  Search users by email, name or id" oninput="bindFilterUsers()">
+      <div id="bind-user-list" class="bind-user-list"></div>
+      <div id="bind-err" class="err"></div>
+      <div class="row" style="justify-content:flex-end; margin-top:8px;">
+        <button type="button" class="ghost" onclick="closeBindModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="im-edit-modal" class="modal hidden">
+    <div class="modal-box" role="dialog" aria-modal="true">
+      <h3>Edit IM identity</h3>
+      <div id="ie-head" class="bind-im-summary"></div>
+      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px; margin-top:10px;" onsubmit="doImEdit(); return false;">
+        <label class="field-label" for="ie-puid">User ID <span class="muted">— auto-captured, edit to override</span></label>
+        <input id="ie-puid" autocomplete="off">
+        <div id="ie-fields" style="display:flex; flex-direction:column; gap:10px;"></div>
+        <div id="ie-err" class="err"></div>
         <div class="row" style="justify-content:flex-end;">
-          <button type="button" class="ghost" onclick="closeBindModal()">Cancel</button>
-          <button type="submit">Bind</button>
+          <button type="button" class="ghost" onclick="closeImEdit()">Cancel</button>
+          <button type="submit">Save</button>
         </div>
       </form>
     </div>
@@ -1157,6 +1195,12 @@
             </div>
             <span class="form-hint">Leave blank to keep existing key when editing</span>
           </div>
+
+          <div class="form-group">
+            <label class="form-label" for="pv-api-key-env">API key env var</label>
+            <input id="pv-api-key-env" type="text" class="form-input" placeholder="e.g. FLEETENT_MODEL_FAST_API_KEY" autocomplete="off">
+            <span class="form-hint">Env var name holding the key (preferred over an inline key)</span>
+          </div>
         </div>
 
         <!-- Advanced Settings -->
@@ -1173,6 +1217,16 @@
               <input id="pv-temperature" type="number" class="form-input" placeholder="0.7" min="0" max="2" step="0.1" autocomplete="off">
               <span class="form-hint">Response randomness (0-2)</span>
             </div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label" for="pv-protocol">Protocol</label>
+            <input id="pv-protocol" type="text" class="form-input" placeholder="e.g. openai_chat" autocomplete="off">
+            <span class="form-hint">Wire protocol label</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="pv-params">Params (custom, JSON)</label>
+            <textarea id="pv-params" class="form-input" rows="4" placeholder='{"temperature": 0.3, "top_p": 0.9}' autocomplete="off" spellcheck="false" style="font-family:monospace;"></textarea>
+            <span class="form-hint">Free-form sampling params passed to the model</span>
           </div>
         </details>
 
@@ -1197,10 +1251,6 @@
           <span id="ag-icon-palette" style="display:flex; gap:4px; flex-wrap:wrap;"></span>
           <input id="ag-icon" type="hidden">
         </div>
-        <label id="ag-template-row" style="display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted);">
-          template (required)
-          <select id="ag-template" onchange="agTemplatePrefill()"></select>
-        </label>
         <label class="muted" style="font-size:12px;">System prompt / identity
           <textarea id="ag-system-prompt" placeholder="Describe the agent's identity and behavior…" rows="8" style="font-family:monospace; width:100%; margin-top:4px;"></textarea>
         </label>
@@ -1209,9 +1259,6 @@
           <h4 style="margin:14px 0 4px;">Model providers</h4>
           <div class="muted" style="font-size:12px; margin-bottom:6px;">Optional. One entry per level — leave a model blank to skip that level.</div>
           <div id="ag-model-overrides"></div>
-          <h4 style="margin:14px 0 4px;">Capabilities (YAML)</h4>
-          <div class="muted" style="font-size:12px;">Paste an allowed_tools / plugins / features block — recorded as-is.</div>
-          <textarea id="ag-capabilities" rows="10" autocomplete="off" spellcheck="false" style="font-family:monospace; width:100%; margin-top:4px;" placeholder="allowed_tools:&#10;  - &quot;search_*&quot;&#10;  - read_file&#10;plugins:&#10;  - acme-docs&#10;features:&#10;  code_execution: true&#10;  sandbox_env:&#10;    TZ: Asia/Shanghai"></textarea>
         </div>
         <div id="ag-bind-config">
           <div class="muted" style="font-size:12px;">Configure bindings for the new agent (optional — all editable later).</div>
@@ -1225,11 +1272,13 @@
           <h4 style="margin:14px 0 4px;">Knowledge bases</h4>
           <div id="agm-kb" style="display:flex; flex-direction:column; gap:4px;"></div>
           <h4 style="margin:14px 0 4px;">IM users (allowlist)</h4>
-          <input id="agm-user-filter" class="sk-search" style="margin:4px 0 6px;" placeholder="🔍  Filter users by name, email or id" oninput="agmFilterUsers()">
-          <div id="agm-users" style="display:flex; flex-direction:column; gap:4px;"></div>
+          <div id="agm-users"></div>
           <h4 style="margin:14px 0 4px;">Channels</h4>
           <div id="agm-channels"></div>
           <div class="row" style="margin-top:6px;"><input id="agm-ch-platform" placeholder="platform" style="max-width:120px;"><input id="agm-ch-id" placeholder="channel_id"><button type="button" class="small" onclick="agmAddChannel()">Add channel</button></div>
+          <h4 style="margin:14px 0 4px;">Custom (YAML)</h4>
+          <div class="muted" style="font-size:12px;">Paste an allowed_tools / plugins / features block — recorded as-is.</div>
+          <textarea id="ag-capabilities" rows="10" autocomplete="off" spellcheck="false" style="font-family:monospace; width:100%; margin-top:4px;" placeholder="allowed_tools:&#10;  - &quot;search_*&quot;&#10;  - read_file&#10;plugins:&#10;  - acme-docs&#10;features:&#10;  code_execution: true&#10;  sandbox_env:&#10;    TZ: Asia/Shanghai"></textarea>
         </div>
         <div id="ag-err" class="err"></div>
         <div class="row" style="justify-content:flex-end;">
@@ -1254,22 +1303,6 @@
     </div>
   </div>
 
-  <div id="tmpl-modal" class="modal hidden">
-    <div class="modal-box wide" role="dialog" aria-modal="true">
-      <h3 id="tmpl-modal-title">New template</h3>
-      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="tmplSave(); return false;">
-        <input id="tmpl-id" placeholder="auto-generated" autocomplete="off" readonly>
-        <input id="tmpl-display-name" placeholder="display name" autocomplete="off">
-        <input id="tmpl-allowed-tools" placeholder="allowed_tools (comma-separated, e.g. read_*, github__*)" autocomplete="off">
-        <textarea id="tmpl-system-prompt" placeholder="system prompt" rows="16" style="font-family:monospace;"></textarea>
-        <div id="tmpl-err" class="err"></div>
-        <div class="row" style="justify-content:flex-end;">
-          <button type="button" class="ghost" onclick="tmplCloseModal()">Cancel</button>
-          <button type="submit">Save</button>
-        </div>
-      </form>
-    </div>
-  </div>
 
   <div id="ag-versions-modal" class="modal hidden">
     <div class="modal-box" role="dialog" aria-modal="true">
@@ -1479,9 +1512,28 @@ async function api(method, path, body, extraHeaders) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 401) { setToken(null); show("login-view"); }
-    throw new Error(data.detail || ("HTTP " + res.status));
+    throw new Error(apiErrorMessage(data.detail) || ("HTTP " + res.status));
   }
   return data;
+}
+
+// FastAPI `detail` can be a plain string, a structured object (e.g. the
+// "agent still bound" 409 with {error, users, channels}), or a validation
+// array. Render any shape as a readable message instead of "[object Object]".
+function apiErrorMessage(detail) {
+  if (detail == null) return "";
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(d => (d && d.msg) ? d.msg : JSON.stringify(d)).join("; ");
+  }
+  if (typeof detail === "object") {
+    const base = detail.error || detail.message || detail.detail || "";
+    const extras = Object.entries(detail)
+      .filter(([k, v]) => !["error", "message", "detail"].includes(k) && Array.isArray(v) && v.length)
+      .map(([k, v]) => `${k}: ${v.join(", ")}`);
+    return [base, ...extras].filter(Boolean).join(" — ") || JSON.stringify(detail);
+  }
+  return String(detail);
 }
 
 async function doLogin() {
@@ -1570,18 +1622,21 @@ let ALL_USERS = [];
 // re-axis off existing joins: im_users.user_id = user.id, connectors.owner_id = user.id).
 let IM_BY_USER = {};
 let CONN_BY_OWNER = {};
+let IM_FIELDS = {};  // platform -> editable field definitions (from /im-users/fields)
 const USERS_PAGE_SIZE = 20;
 let USERS_PAGE = 1;
 
 async function loadUsers() {
   $("users-body").innerHTML = loadingRow(8);
   try {
-    const [users, imUsers, conns] = await Promise.all([
+    const [users, imUsers, conns, fields] = await Promise.all([
       api("GET", "/users"),
       api("GET", "/im-users"),
       api("GET", "/im/connectors"),
+      api("GET", "/im-users/fields").catch(() => ({})),
     ]);
     ALL_USERS = users;
+    IM_FIELDS = fields || {};
     IM_BY_USER = {};
     for (const iu of imUsers) (IM_BY_USER[iu.user_id] ||= []).push(iu);
     CONN_BY_OWNER = {};
@@ -1624,16 +1679,22 @@ function renderUsers() {
     const expander = ids.length
       ? `<button class="small ghost" title="Show IM identities" onclick="toggleUserRow('${u.id}')">▸</button>`
       : "";
+    // An IM identity is dependent — it can only attach to a platform user, never
+    // exist on its own. Its actions are limited to identity scope: reassign which
+    // platform user it attaches to, and toggle the allowlist. User-lifecycle config
+    // (role/profile/keys/delete) lives on the platform user row, not here.
     const idRows = ids.map(r => `
       <tr>
         <td>${esc(r.platform)}</td>
         <td>${esc(r.platform_user_id)}</td>
         <td><span class="pill ${r.allowed ? "active" : "blocked"}">${r.allowed ? "allowed" : "blocked"}</span></td>
         <td class="actions">
-          <button class="small ghost" onclick="openBindModal(${r.id})">Bind</button>
+          <button class="small ghost" onclick="openImEdit(${r.id})">Edit</button>
+          <button class="small ghost" onclick="openBindModal(${r.id})">Reassign user</button>
           ${r.allowed
             ? `<button class="small danger" onclick="imBlock(${r.id})">Block identity</button>`
             : `<button class="small ghost" onclick="imRestore(${r.id})">Restore</button>`}
+          <button class="small danger" onclick="imDelete(${r.id})">Delete</button>
         </td>
       </tr>`).join("");
     const idBlock = ids.length
@@ -1750,6 +1811,12 @@ function toggleMenu(btn) {
 }
 document.addEventListener("click", (e) => { if (!e.target.closest(".menu")) closeMenus(); });
 window.addEventListener("scroll", () => closeMenus(), true);
+// Multi-select dropdowns (agent bindings): clicking outside the widget collapses
+// the open panel so it stops covering the form.
+document.addEventListener("click", (e) => {
+  if (e.target.closest(".ms")) return;
+  for (const p of document.querySelectorAll(".ms-panel")) p.classList.add("hidden");
+});
 
 function openCreateModal() {
   $("users-err").textContent = "";
@@ -1816,24 +1883,124 @@ async function viewKeys(id) {
 async function imBlock(id) { const reason = prompt("Reason?"); if (reason === null) return; try { await api("POST", `/im-users/${id}/block`, { reason }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
 async function imRestore(id) { try { await api("POST", `/im-users/${id}/restore`, { reason: "" }); loadUsers(); } catch (e) { toast(e.message, "error"); } }
 
+let IM_EDIT_ID = null;
+function openImEdit(imId) {
+  const identity = Object.values(IM_BY_USER).flat().find(r => r.id === imId);
+  if (!identity) return;
+  IM_EDIT_ID = imId;
+  $("ie-err").textContent = "";
+  // Platform is fixed; the User ID is auto-captured but admin-overridable below.
+  const icon = PLATFORM_ICON[identity.platform] || "🔗";
+  $("ie-head").innerHTML = `<span class="bind-im-avatar">${icon}</span>
+    <div>
+      <div class="bind-im-id">${esc(identity.platform)}</div>
+      <div class="bind-im-owner">Platform — fixed</div>
+    </div>`;
+  $("ie-puid").value = identity.platform_user_id;
+  // Editable fields differ per platform; render from the field schema.
+  const fields = IM_FIELDS[identity.platform] || [];
+  const meta = identity.metadata || {};
+  $("ie-fields").innerHTML = fields.length
+    ? fields.map(f => {
+        const val = esc(meta[f.key] != null ? String(meta[f.key]) : "");
+        const ctrl = f.multiline
+          ? `<textarea id="ie-f-${f.key}" data-key="${f.key}" rows="3">${val}</textarea>`
+          : `<input id="ie-f-${f.key}" data-key="${f.key}" value="${val}" autocomplete="off">`;
+        return `<label class="field-label" for="ie-f-${f.key}">${esc(f.label)}</label>${ctrl}`;
+      }).join("")
+    : `<div class="muted">No editable fields for this platform.</div>`;
+  $("im-edit-modal").classList.remove("hidden");
+  const first = $("ie-fields").querySelector("input, textarea");
+  if (first) first.focus();
+}
+function closeImEdit() { $("im-edit-modal").classList.add("hidden"); IM_EDIT_ID = null; }
+async function doImEdit() {
+  $("ie-err").textContent = "";
+  const platform_user_id = $("ie-puid").value.trim();
+  if (!platform_user_id) { $("ie-err").textContent = "User ID is required"; return; }
+  const metadata = {};
+  for (const el of $("ie-fields").querySelectorAll("[data-key]")) {
+    const v = el.value.trim();
+    if (v) metadata[el.dataset.key] = v;
+  }
+  try {
+    await api("PATCH", `/im-users/${IM_EDIT_ID}`, { platform_user_id, metadata });
+    closeImEdit();
+    toast("IM identity updated", "success");
+    loadUsers();
+  } catch (e) { $("ie-err").textContent = apiErrorMessage(e.message || e); }
+}
+async function imDelete(id) {
+  if (!await confirmDialog("Delete this IM identity? The linked platform user is kept.")) return;
+  try { await api("DELETE", `/im-users/${id}`); toast("IM identity deleted", "success"); loadUsers(); }
+  catch (e) { toast(e.message, "error"); }
+}
+
+const PLATFORM_ICON = { slack: "💬", telegram: "✈️", whatsapp: "🟢" };
 let BIND_IM_ID = null;
+let BIND_IM_OWNER = null;
+
 async function openBindModal(imId) {
   BIND_IM_ID = imId;
   $("bind-err").textContent = "";
-  const users = await api("GET", "/users");
-  $("bind-user-select").innerHTML = users
-    .map(u => `<option value="${u.id}">${esc(u.email || u.name || u.id)} · ${esc(u.role)}</option>`)
-    .join("");
+  $("bind-search").value = "";
+  // Locate the identity in the already-loaded grouping to render a context summary.
+  const identity = Object.values(IM_BY_USER).flat().find(r => r.id === imId);
+  BIND_IM_OWNER = identity ? identity.user_id : null;
+  const icon = PLATFORM_ICON[identity?.platform] || "🔗";
+  const owner = ALL_USERS.find(u => u.id === BIND_IM_OWNER);
+  const ownerLabel = owner ? esc(owner.email || owner.name || owner.id) : "—";
+  $("bind-im-summary").innerHTML = identity
+    ? `<span class="bind-im-avatar">${icon}</span>
+       <div>
+         <div class="bind-im-id">${esc(identity.platform)} · ${esc(identity.platform_user_id)}</div>
+         <div class="bind-im-owner">Currently linked to ${ownerLabel}</div>
+       </div>`
+    : "";
+  bindRenderUsers();
   $("bind-modal").classList.remove("hidden");
+  $("bind-search").focus();
 }
-function closeBindModal() { $("bind-modal").classList.add("hidden"); BIND_IM_ID = null; }
-async function doBindIm() {
+
+function bindRenderUsers() {
+  const q = ($("bind-search").value || "").trim().toLowerCase();
+  const matches = ALL_USERS.filter(u => {
+    if (!q) return true;
+    return [u.email, u.name, u.id, u.role].some(v => (v || "").toLowerCase().includes(q));
+  });
+  if (!matches.length) {
+    $("bind-user-list").innerHTML = `<div class="bind-user-empty">No matching users</div>`;
+    return;
+  }
+  $("bind-user-list").innerHTML = matches.map(u => {
+    const current = u.id === BIND_IM_OWNER;
+    const onclick = current ? "" : `onclick="doBindIm('${u.id}')"`;
+    return `<div class="bind-user-item ${current ? "is-current" : ""}" ${onclick}>
+      <div class="bind-user-main">
+        <div class="bind-user-name">${esc(u.email || u.name || u.id)}</div>
+        <div class="bind-user-sub">${esc(u.role)}${u.email && u.name ? " · " + esc(u.name) : ""}</div>
+      </div>
+      ${current ? `<span class="pill active">current</span>` : `<span class="muted">Link →</span>`}
+    </div>`;
+  }).join("");
+}
+
+function bindFilterUsers() { bindRenderUsers(); }
+
+function closeBindModal() {
+  $("bind-modal").classList.add("hidden");
+  BIND_IM_ID = null;
+  BIND_IM_OWNER = null;
+}
+
+async function doBindIm(userId) {
   $("bind-err").textContent = "";
   try {
-    await api("POST", `/im-users/${BIND_IM_ID}/bind`, { user_id: $("bind-user-select").value });
+    await api("POST", `/im-users/${BIND_IM_ID}/bind`, { user_id: userId });
     closeBindModal();
+    toast("IM identity reassigned", "success");
     loadUsers();
-  } catch (e) { $("bind-err").textContent = e.message; }
+  } catch (e) { $("bind-err").textContent = apiErrorMessage(e.message || e); }
 }
 
 // Per-platform credential fields — must match im_connector_config.PLATFORM_CONFIG_KEYS.
@@ -2412,91 +2579,6 @@ function agDrawerOpen() { return !$("ag-drawer").classList.contains("hidden"); }
 function agCloseDrawer() { $("ag-drawer").classList.add("hidden"); }
 function agAfterChange(name) { loadAgents(); if (name && agDrawerOpen()) agDrawer(name); }
 
-let TEMPLATES = [];
-let AG_SUBTAB = "agents";
-function agSubTab(name) {
-  AG_SUBTAB = name;
-  $("ag-subtab-agents").classList.toggle("active", name === "agents");
-  $("ag-subtab-templates").classList.toggle("active", name === "templates");
-  $("ag-pane").classList.toggle("hidden", name !== "agents");
-  $("tmpl-pane").classList.toggle("hidden", name !== "templates");
-  if (name === "templates") tmplLoad();
-}
-function agSubRefresh() { AG_SUBTAB === "templates" ? tmplLoad() : loadAgents(); }
-async function tmplLoad() {
-  $("tmpl-list-err").textContent = "";
-  $("tmpl-create-bar").innerHTML = IS_VIEWER ? "" : `<button class="small" onclick="tmplCreate()">New template</button>`;
-  try { TEMPLATES = await api("GET", "/agent-templates"); tmplRender(); }
-  catch (e) {
-    // "Failed to fetch" = the request never reached the server (e.g. it restarted
-    // mid-request). Don't dead-end on a blip — show a clear message + a retry.
-    const network = /failed to fetch|networkerror|load failed/i.test(e.message || "");
-    const msg = network ? "Couldn't reach the server — it may be restarting." : e.message;
-    $("tmpl-body").innerHTML = `<tr><td colspan="4">
-      <div class="muted" style="padding:8px 0;">${esc(msg)}
-        <button class="small ghost" style="margin-left:8px;" onclick="tmplLoad()">Retry</button>
-      </div></td></tr>`;
-  }
-}
-function tmplRender() {
-  $("tmpl-body").innerHTML = TEMPLATES.map(t => `
-      <tr>
-        <td>${esc(t.id)}</td>
-        <td>${esc(t.display_name || "")}</td>
-        <td class="muted">${esc((t.allowed_tools || []).join(", "))}</td>
-        <td>${IS_VIEWER ? "" : `
-          <button class="small" onclick="tmplEdit('${esc(t.id)}')">Edit</button>
-          <button class="small danger" onclick="tmplDelete('${esc(t.id)}')">Delete</button>`}
-        </td>
-      </tr>`).join("") || `<tr><td colspan="4" class="muted">No templates.</td></tr>`;
-}
-function tmplCreate() {
-  $("tmpl-modal-title").textContent = "New template";
-  $("tmpl-err").textContent = "";
-  $("tmpl-id").value = genId();
-  $("tmpl-display-name").value = "";
-  $("tmpl-allowed-tools").value = "";
-  $("tmpl-system-prompt").value = "";
-  $("tmpl-modal").dataset.mode = "create";
-  $("tmpl-modal").classList.remove("hidden");
-}
-function tmplEdit(id) {
-  const t = TEMPLATES.find(x => x.id === id);
-  if (!t) return;
-  $("tmpl-modal-title").textContent = "Edit template: " + id;
-  $("tmpl-err").textContent = "";
-  $("tmpl-id").value = id;
-  $("tmpl-id").disabled = true;
-  $("tmpl-display-name").value = t.display_name || "";
-  $("tmpl-allowed-tools").value = (t.allowed_tools || []).join(", ");
-  $("tmpl-system-prompt").value = t.system_prompt || "";
-  $("tmpl-modal").dataset.mode = "edit";
-  $("tmpl-modal").dataset.id = id;
-  $("tmpl-modal").classList.remove("hidden");
-}
-function tmplCloseModal() { $("tmpl-modal").classList.add("hidden"); }
-async function tmplSave() {
-  $("tmpl-err").textContent = "";
-  const tools = $("tmpl-allowed-tools").value.split(",").map(s => s.trim()).filter(Boolean);
-  const displayName = $("tmpl-display-name").value.trim();
-  const sp = $("tmpl-system-prompt").value;
-  try {
-    if ($("tmpl-modal").dataset.mode === "edit") {
-      const id = $("tmpl-modal").dataset.id;
-      await api("PATCH", `/agent-templates/${encodeURIComponent(id)}`, { display_name: displayName, allowed_tools: tools, system_prompt: sp });
-    } else {
-      const id = $("tmpl-id").value.trim();
-      if (!id) { $("tmpl-err").textContent = "id required"; return; }
-      await api("POST", "/agent-templates", { id, display_name: displayName, allowed_tools: tools, system_prompt: sp });
-    }
-    tmplCloseModal(); tmplLoad();
-  } catch (e) { $("tmpl-err").textContent = e.message; }
-}
-async function tmplDelete(id) {
-  if (!await confirmDialog(`Delete template ${id}?`)) return;
-  try { await api("DELETE", `/agent-templates/${encodeURIComponent(id)}`); tmplLoad(); }
-  catch (e) { toast(e.message, "error"); }
-}
 async function agObservability(name) {
   try { const r = await api("GET", `/agents/${encodeURIComponent(name)}/observability`); showInfo("Details", JSON.stringify(r, null, 2)); }
   catch (e) { toast(e.message, "error"); }
@@ -2504,28 +2586,32 @@ async function agObservability(name) {
 async function agEnable(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/enable`); agAfterChange(name); } catch (e) { toast(e.message, "error"); } }
 async function agDisable(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/disable`); agAfterChange(name); } catch (e) { toast(e.message, "error"); } }
 async function agArchive(name) {
-  if (!await confirmDialog(`Archive agent ${name}? (must be unbound)`)) return;
-  try { await api("POST", `/agents/${encodeURIComponent(name)}/archive`, null, { "X-Confirm": "true" }); agAfterChange(name); }
-  catch (e) { toast(e.message, "error"); }
+  if (!await confirmDialog(`Archive agent ${name}?`)) return;
+  const enc = encodeURIComponent(name);
+  try {
+    await api("POST", `/agents/${enc}/archive`, null, { "X-Confirm": "true" });
+    agAfterChange(name);
+    return;
+  } catch (e) {
+    // Archive is blocked while the agent has bindings. Offer to unbind everything
+    // and archive in one step instead of dead-ending on the error.
+    const b = await api("GET", `/agents/${enc}/bindings`).catch(() => null);
+    const users = (b && b.users) || [];
+    const channels = (b && b.channels) || [];
+    if (!users.length && !channels.length) { toast(e.message, "error"); return; }
+    const parts = [];
+    if (users.length) parts.push(`${users.length} user(s)`);
+    if (channels.length) parts.push(`${channels.length} channel(s)`);
+    if (!await confirmDialog(`${name} is bound to ${parts.join(" and ")}. Unbind all and archive?`)) return;
+    for (const u of users) await api("DELETE", `/agents/${enc}/bindings/users/${encodeURIComponent(u)}`).catch(() => {});
+    for (const c of channels) await api("DELETE", `/agents/${enc}/bindings/channels/${encodeURIComponent(c.platform)}/${encodeURIComponent(c.channel_id)}`).catch(() => {});
+    try { await api("POST", `/agents/${enc}/archive`, null, { "X-Confirm": "true" }); agAfterChange(name); }
+    catch (e2) { toast(e2.message, "error"); }
+  }
 }
 async function agRestore(name) { try { await api("POST", `/agents/${encodeURIComponent(name)}/restore`); agAfterChange(name); } catch (e) { toast(e.message, "error"); } }
 
-let AG_TEMPLATES = [];
-async function agLoadTemplateOptions() {
-  const sel = $("ag-template");
-  try { AG_TEMPLATES = await api("GET", "/agent-templates"); }
-  catch (e) { AG_TEMPLATES = []; }
-  sel.innerHTML = '<option value="">— select a template —</option>'
-    + AG_TEMPLATES.map(t => `<option value="${esc(t.id)}">${esc(t.display_name || t.id)}</option>`).join("");
-  sel.value = "";
-}
-function agTemplatePrefill() {
-  const t = AG_TEMPLATES.find(x => x.id === $("ag-template").value);
-  if (!t) return;
-  $("ag-system-prompt").value = t.system_prompt || "";
-  $("ag-allowed-tools").value = (t.allowed_tools || []).join(", ");
-}
-const AG_ICONS = ["🤖","🦊","🐱","🐶","🧠","📚","🛠️","🔧","💬","📊","🚀","🛡️","🧩","⚙️","🌐","🔍","🤝","📈","✨","🧪"];
+const AG_ICONS =["🤖","🦊","🐱","🐶","🧠","📚","🛠️","🔧","💬","📊","🚀","🛡️","🧩","⚙️","🌐","🔍","🤝","📈","✨","🧪"];
 function agRenderIconPalette() {
   $("ag-icon-palette").innerHTML = AG_ICONS.map(e =>
     `<button type="button" class="small ghost" style="padding:2px 5px; font-size:16px;" onclick="agSetIcon('${e}')">${e}</button>`
@@ -2544,47 +2630,46 @@ async function agCreate() {
   agSetIcon("");
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
-  $("ag-template-row").style.display = "";
   $("ag-bind-config").style.display = "";
   $("ag-create-extra").style.display = "";
   $("ag-allowed-tools").style.display = "none";  // capabilities YAML supplies tools in create
+  AG_PROVIDERS = await api("GET", "/providers").catch(() => []);
   agRenderModelOverrides();
   $("ag-capabilities").value = "";
-  await agLoadTemplateOptions();
   await agLoadCreateBindings();
   $("ag-modal").dataset.mode = "create";
   $("ag-modal").classList.remove("hidden");
 }
 
-const AGM_MODEL_PROVIDERS = ["anthropic", "openai-compatible", "openai", "azure", "custom"];
+// Per-level model picks a CONFIGURED provider (Providers module) — no free-text
+// model. AG_PROVIDERS is loaded when the modal opens.
+let AG_PROVIDERS = [];
 function agRenderModelOverrides() {
-  const provs = AGM_MODEL_PROVIDERS.map(p => `<option value="${p}">${p}</option>`).join("");
-  $("ag-model-overrides").innerHTML = ["default", "fast", "reasoning"].map(lvl => `
+  const opts = `<option value="">— none —</option>`
+    + AG_PROVIDERS.map(p => `<option value="${esc(p.id)}">${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}</option>`).join("");
+  const hint = AG_PROVIDERS.length ? "" : `<div class="muted" style="font-size:12px;">No providers configured — add one under Providers first.</div>`;
+  $("ag-model-overrides").innerHTML = hint + ["default", "fast", "reasoning"].map(lvl => `
     <div class="row" data-mo="${lvl}" style="gap:6px; margin-bottom:6px; align-items:center;">
       <span style="min-width:74px; color:var(--muted);">${lvl}</span>
-      <select class="agmo-provider">${provs}</select>
-      <input class="agmo-model" placeholder="model" style="flex:1;" autocomplete="off">
-      <input class="agmo-baseurl" placeholder="base_url_env (optional)" style="flex:1;" autocomplete="off">
+      <select class="agmo-provider" style="flex:1;">${opts}</select>
     </div>`).join("");
 }
 function agCollectModelOverrides() {
   const mo = {};
   for (const row of document.querySelectorAll("#ag-model-overrides [data-mo]")) {
-    const model = row.querySelector(".agmo-model").value.trim();
-    if (!model) continue;
-    const o = { provider: row.querySelector(".agmo-provider").value, model };
-    const baseEnv = row.querySelector(".agmo-baseurl").value.trim();
-    if (baseEnv) o.base_url_env = baseEnv;
-    mo[row.dataset.mo] = o;
+    const pid = row.querySelector(".agmo-provider").value;
+    if (!pid) continue;
+    const p = AG_PROVIDERS.find(x => x.id === pid);
+    mo[row.dataset.mo] = { provider: pid, model: p ? (p.model || "") : "" };
   }
   return mo;
 }
 
 let AGM_CHANNELS = [];
-async function agLoadCreateBindings() {
+// `current` (edit mode) pre-checks existing bindings: {skills, mcp, oauth, kb, users, channels}.
+async function agLoadCreateBindings(current = null) {
   AGM_CHANNELS = [];
   $("agm-channels").innerHTML = "";
-  if ($("agm-user-filter")) $("agm-user-filter").value = "";
   const [skills, mcp, connectors, kbs, users] = await Promise.all([
     api("GET", "/skills").catch(() => []),
     api("GET", "/mcp/servers").catch(() => []),
@@ -2592,25 +2677,90 @@ async function agLoadCreateBindings() {
     api("GET", "/kb").catch(() => []),
     api("GET", "/users").catch(() => []),
   ]);
-  const box = (cls, val, label, q) =>
-    `<label class="row ${cls}" ${q != null ? `data-q="${esc(q.toLowerCase())}"` : ""}><input type="checkbox" value="${esc(val)}"> ${label}</label>`;
-  $("agm-skills").innerHTML = (skills || []).map(s => box("agm-skill", s.name, esc(s.name))).join("")
-    || `<div class="muted">No skills available.</div>`;
-  $("agm-mcp").innerHTML = (mcp || []).map(m => box("agm-mcp-item", m.id, esc(m.id))).join("")
-    || `<div class="muted">No MCP servers.</div>`;
-  $("agm-oauth").innerHTML = (connectors || []).map(c => box("agm-oauth-item", c.id, esc(c.display_name || c.id))).join("")
-    || `<div class="muted">No OAuth connectors.</div>`;
+  // Skills / connectors / IM users are searchable multi-select dropdowns; KB stays a
+  // simple list. The option checkboxes keep their binding classes so the save-diff
+  // read-paths (checked("agm-…")) are unchanged.
+  agMsWidget("agm-skills", "agm-skill", (skills || []).map(s => ({ value: s.name, label: s.name })), "Select skills…");
+  agMsWidget("agm-mcp", "agm-mcp-item", (mcp || []).map(m => ({ value: m.id, label: m.id })), "Select MCP servers…");
+  agMsWidget("agm-oauth", "agm-oauth-item",
+    (connectors || []).map(c => ({ value: c.id, label: c.display_name || c.id, q: `${c.display_name || ""} ${c.id}` })),
+    "Select OAuth connectors…");
+  agMsWidget("agm-users", "agm-user-row",
+    (users || []).map(u => ({
+      value: u.id,
+      label: (u.name || u.email || u.id) + (u.name || u.email ? ` (${u.id})` : ""),
+      q: [u.id, u.name || "", u.email || ""].join(" "),
+    })), "Select IM users…");
+  const box = (cls, val, label) => `<label class="row ${cls}"><input type="checkbox" value="${esc(val)}"> ${label}</label>`;
   $("agm-kb").innerHTML = (kbs || []).map(k => box("agm-kb-item", k.kb_id, esc(k.kb_id) + (k.description ? ` <span class="muted">— ${esc(k.description)}</span>` : ""))).join("")
     || `<div class="muted">No knowledge bases.</div>`;
-  $("agm-users").innerHTML = (users || []).map(u =>
-    box("agm-user-row", u.id, esc(u.name || u.email || u.id) + (u.name || u.email ? ` <span class="muted">(${esc(u.id)})</span>` : ""),
-      [u.id, u.name || "", u.email || ""].join(" "))).join("") || `<div class="muted">No users available.</div>`;
-}
-function agmFilterUsers() {
-  const q = ($("agm-user-filter").value || "").trim().toLowerCase();
-  for (const row of document.querySelectorAll("#agm-users .agm-user-row")) {
-    row.style.display = (!q || (row.dataset.q || "").includes(q)) ? "" : "none";
+  if (current) {
+    const check = (cls, set) => {
+      for (const cb of document.querySelectorAll(`#ag-bind-config .${cls} input[type=checkbox]`))
+        if (set.has(cb.value)) cb.checked = true;
+    };
+    check("agm-skill", new Set(current.skills || []));
+    check("agm-mcp-item", new Set(current.mcp || []));
+    check("agm-oauth-item", new Set(current.oauth || []));
+    check("agm-kb-item", new Set(current.kb || []));
+    check("agm-user-row", new Set(current.users || []));
+    for (const id of ["agm-skills", "agm-mcp", "agm-oauth", "agm-users"]) agMsSync(id);
+    AGM_CHANNELS = (current.channels || []).map(c => ({ platform: c.platform, channel_id: c.channel_id }));
+    agmRenderChannels();
   }
+}
+
+// Searchable multi-select: renders option checkboxes (keeping `cls` for read-paths)
+// inside a filterable dropdown, with selected items shown as removable chips.
+function agMsWidget(containerId, cls, items, placeholder) {
+  const opts = items.map(it =>
+    `<label class="ms-opt ${cls}" data-q="${esc((it.q || it.label).toLowerCase())}">
+       <input type="checkbox" value="${esc(it.value)}" onchange="agMsSync('${containerId}')"> ${esc(it.label)}
+     </label>`).join("") || `<div class="muted" style="padding:6px;">None available.</div>`;
+  $(containerId).innerHTML = `
+    <div class="ms">
+      <div class="ms-control" onclick="agMsOpen('${containerId}', event)">
+        <span class="ms-chips" id="${containerId}-chips"></span>
+      </div>
+      <div class="ms-panel hidden" id="${containerId}-panel">
+        <input class="ms-search sk-search" placeholder="🔍  Filter by name" oninput="agMsFilter('${containerId}')" onclick="event.stopPropagation()">
+        <div class="ms-opts">${opts}</div>
+      </div>
+    </div>`;
+  $(containerId).querySelector(".ms-control").dataset.placeholder = placeholder || "Select…";
+  agMsSync(containerId);
+}
+function agMsOpen(id, e) {
+  if (e) e.stopPropagation();
+  const panel = $(id + "-panel");
+  const wasHidden = panel.classList.contains("hidden");
+  for (const p of document.querySelectorAll("#ag-bind-config .ms-panel")) p.classList.add("hidden");
+  if (wasHidden) {
+    panel.classList.remove("hidden");
+    const s = panel.querySelector(".ms-search");
+    if (s) { s.value = ""; agMsFilter(id); s.focus(); }
+  }
+}
+function agMsFilter(id) {
+  const q = ($(id + "-panel").querySelector(".ms-search").value || "").trim().toLowerCase();
+  for (const o of $(id + "-panel").querySelectorAll(".ms-opt"))
+    o.style.display = (!q || (o.dataset.q || "").includes(q)) ? "" : "none";
+}
+function agMsSync(id) {
+  const checked = [...$(id).querySelectorAll(".ms-opt input:checked")];
+  const chips = $(id + "-chips");
+  const placeholder = $(id).querySelector(".ms-control").dataset.placeholder || "Select…";
+  if (!checked.length) { chips.innerHTML = `<span class="muted" style="font-size:12px;">${esc(placeholder)}</span>`; return; }
+  chips.innerHTML = checked.map(cb =>
+    `<span class="ms-chip">${esc(cb.parentElement.textContent.trim())}<button type="button" data-ms="${id}" data-val="${esc(cb.value)}" onclick="agMsUncheck(this, event)">×</button></span>`
+  ).join("");
+}
+function agMsUncheck(btn, e) {
+  e.stopPropagation();
+  const id = btn.dataset.ms, val = btn.dataset.val;
+  const cb = [...$(id).querySelectorAll(".ms-opt input")].find(i => i.value === val);
+  if (cb) cb.checked = false;
+  agMsSync(id);
 }
 function agmRenderChannels() {
   $("agm-channels").innerHTML = AGM_CHANNELS.map((c, i) =>
@@ -2624,25 +2774,97 @@ function agmAddChannel() {
   agmRenderChannels();
 }
 function agmRemoveChannel(i) { AGM_CHANNELS.splice(i, 1); agmRenderChannels(); }
+function agFillModelOverrides(mo) {
+  for (const row of document.querySelectorAll("#ag-model-overrides [data-mo]")) {
+    const o = (mo || {})[row.dataset.mo];
+    // Stored `provider` is a configured-provider id; select it (blank if it no
+    // longer exists in the registry).
+    row.querySelector(".agmo-provider").value = o ? (o.provider || "") : "";
+  }
+}
+// Render current allowed_tools back into the capabilities YAML the modal edits.
+function agToolsToYaml(tools) {
+  if (!tools || !tools.length) return "";
+  const line = t => /[:*\s"'#]/.test(t) ? JSON.stringify(t) : t;
+  return "allowed_tools:\n" + tools.map(t => `  - ${line(t)}`).join("\n") + "\n";
+}
+
+// Edit reuses the new-agent modal, prefilled. AG_EDIT_ORIG holds the original
+// binding sets so save can apply the diff (add new, remove cleared).
+let AG_EDIT_ORIG = null;
 async function agEdit(name) {
   $("ag-err").textContent = "";
+  const enc = encodeURIComponent(name);
   try {
-    const a = await api("GET", `/agents/${encodeURIComponent(name)}`);
+    const [a, bindings, skills, kbs, oauth, providers] = await Promise.all([
+      api("GET", `/agents/${enc}`),
+      api("GET", `/agents/${enc}/bindings`).catch(() => ({ users: [], channels: [], mcp_servers: [] })),
+      api("GET", `/agents/${enc}/skills`).catch(() => []),
+      api("GET", `/agents/${enc}/kbs`).catch(() => ({ kb_ids: [] })),
+      api("GET", `/agents/${enc}/bindings/oauth`).catch(() => ({ connector_ids: [] })),
+      api("GET", "/providers").catch(() => []),
+    ]);
+    AG_PROVIDERS = providers || [];
+    const current = {
+      skills: (skills || []).filter(s => s.enabled).map(s => s.skill_name),
+      mcp: bindings.mcp_servers || [],
+      oauth: oauth.connector_ids || [],
+      kb: kbs.kb_ids || [],
+      users: bindings.users || [],
+      channels: bindings.channels || [],
+    };
+    AG_EDIT_ORIG = {
+      skills: new Set(current.skills), mcp: new Set(current.mcp), oauth: new Set(current.oauth),
+      kb: new Set(current.kb), users: new Set(current.users), channels: current.channels,
+    };
     $("ag-modal-title").textContent = "Edit agent: " + name;
     $("ag-name").value = name;
-    $("ag-name").disabled = true;
+    $("ag-name").disabled = false;  // name is editable (rename)
     agRenderIconPalette();
     agSetIcon(a.icon || "");
     $("ag-system-prompt").value = a.system_prompt || "";
-    $("ag-allowed-tools").value = (a.allowed_tools || []).join(", ");
-    $("ag-template-row").style.display = "none";
-    $("ag-bind-config").style.display = "none";
-    $("ag-create-extra").style.display = "none";
-    $("ag-allowed-tools").style.display = "";
+    // Mirror the new-agent layout: tools come from the capabilities YAML.
+    $("ag-allowed-tools").style.display = "none";
+    $("ag-allowed-tools").value = "";
+    $("ag-create-extra").style.display = "";
+    $("ag-bind-config").style.display = "";
+    agRenderModelOverrides();
+    agFillModelOverrides(a.model_overrides);
+    $("ag-capabilities").value = agToolsToYaml(a.allowed_tools);
+    await agLoadCreateBindings(current);
     $("ag-modal").dataset.mode = "edit";
     $("ag-modal").dataset.name = name;
     $("ag-modal").classList.remove("hidden");
   } catch (e) { toast(e.message, "error"); }
+}
+
+async function agApplyEditBindings(name) {
+  const enc = encodeURIComponent(name);
+  const o = AG_EDIT_ORIG || { skills: new Set(), mcp: new Set(), oauth: new Set(), kb: new Set(), users: new Set(), channels: [] };
+  const checked = cls => new Set([...document.querySelectorAll(`#ag-bind-config .${cls} input:checked`)].map(i => i.value));
+  const chKey = c => `${c.platform} ${c.channel_id}`;
+  const calls = [];
+  const sk = checked("agm-skill");
+  for (const s of sk) if (!o.skills.has(s)) calls.push(api("PUT", `/agents/${enc}/skills/${encodeURIComponent(s)}`, { enabled: true }));
+  for (const s of o.skills) if (!sk.has(s)) calls.push(api("PUT", `/agents/${enc}/skills/${encodeURIComponent(s)}`, { enabled: false }));
+  const mcp = checked("agm-mcp-item");
+  for (const id of mcp) if (!o.mcp.has(id)) calls.push(api("POST", `/agents/${enc}/bindings/mcp/${encodeURIComponent(id)}`));
+  for (const id of o.mcp) if (!mcp.has(id)) calls.push(api("DELETE", `/agents/${enc}/bindings/mcp/${encodeURIComponent(id)}`));
+  const oa = checked("agm-oauth-item");
+  for (const id of oa) if (!o.oauth.has(id)) calls.push(api("POST", `/agents/${enc}/bindings/oauth/${encodeURIComponent(id)}`));
+  for (const id of o.oauth) if (!oa.has(id)) calls.push(api("DELETE", `/agents/${enc}/bindings/oauth/${encodeURIComponent(id)}`));
+  const kb = checked("agm-kb-item");
+  for (const id of kb) if (!o.kb.has(id)) calls.push(api("POST", `/agents/${enc}/kbs`, { kb_id: id }));
+  for (const id of o.kb) if (!kb.has(id)) calls.push(api("DELETE", `/agents/${enc}/kbs/${encodeURIComponent(id)}`));
+  const us = checked("agm-user-row");
+  for (const id of us) if (!o.users.has(id)) calls.push(api("POST", `/agents/${enc}/bindings/users/${encodeURIComponent(id)}`));
+  for (const id of o.users) if (!us.has(id)) calls.push(api("DELETE", `/agents/${enc}/bindings/users/${encodeURIComponent(id)}`));
+  const curCh = new Set(AGM_CHANNELS.map(chKey));
+  const origCh = new Set((o.channels || []).map(chKey));
+  for (const c of AGM_CHANNELS) if (!origCh.has(chKey(c))) calls.push(api("POST", `/agents/${enc}/bindings/channels/${encodeURIComponent(c.platform)}/${encodeURIComponent(c.channel_id)}`));
+  for (const c of (o.channels || [])) if (!curCh.has(chKey(c))) calls.push(api("DELETE", `/agents/${enc}/bindings/channels/${encodeURIComponent(c.platform)}/${encodeURIComponent(c.channel_id)}`));
+  const failed = (await Promise.allSettled(calls)).filter(r => r.status === "rejected").length;
+  if (failed) toast(`${failed} binding change(s) failed.`, "error");
 }
 function agCloseModal() { $("ag-modal").classList.add("hidden"); }
 async function agApplyCreateBindings(name) {
@@ -2667,22 +2889,28 @@ async function agApplyCreateBindings(name) {
 }
 async function agSave() {
   $("ag-err").textContent = "";
-  const tools = $("ag-allowed-tools").value.split(",").map(s => s.trim()).filter(Boolean);
   const sp = $("ag-system-prompt").value;
   const isEdit = $("ag-modal").dataset.mode === "edit";
   try {
     const icon = $("ag-icon").value || null;
     let name;
     if (isEdit) {
-      name = $("ag-modal").dataset.name;
-      await api("PATCH", `/agents/${encodeURIComponent(name)}`, { system_prompt: sp, allowed_tools: tools, icon });
+      const orig = $("ag-modal").dataset.name;
+      name = $("ag-name").value.trim();  // editable: may be a rename
+      if (!name) { $("ag-err").textContent = "name required"; return; }
+      // Same shape as create: capabilities YAML drives allowed_tools. The rename (if any)
+      // is applied server-side first, so bindings below target the new name.
+      await api("PATCH", `/agents/${encodeURIComponent(orig)}`, {
+        name, system_prompt: sp, icon,
+        model_overrides: agCollectModelOverrides(),
+        capabilities_yaml: $("ag-capabilities").value,
+      });
+      await agApplyEditBindings(name);
     } else {
       name = $("ag-name").value.trim();
       if (!name) { $("ag-err").textContent = "name required"; return; }
-      const templateId = $("ag-template").value;
-      if (!templateId) { $("ag-err").textContent = "template required"; return; }
       await api("POST", "/agents", {
-        name, template_id: templateId, system_prompt: sp, icon,
+        name, system_prompt: sp, icon,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
       });
@@ -2690,8 +2918,7 @@ async function agSave() {
     }
     agCloseModal();
     await loadAgents();
-    // Open the detail panel so the just-configured bindings are visible and editable.
-    agDrawer(name);
+    agDrawer(name);  // back to the read-only preview
   } catch (e) { $("ag-err").textContent = e.message; }
 }
 async function agDelete(name) {
@@ -2739,8 +2966,8 @@ async function agActivateVersion(name, version) {
 
 let AG_DRAWER = null;
 
-// Clicking an agent opens a read-only preview: the full agent.yaml. Editing /
-// binding management lives behind the "Manage bindings" button (agDrawerManage).
+// Clicking an agent opens a read-only preview: the full agent.yaml. A single
+// "Edit" opens the new-agent modal (agEdit), prefilled with config + bindings.
 let AG_YAML_CACHE = "";
 async function agDrawer(name) {
   AG_DRAWER = name;
@@ -2769,6 +2996,8 @@ function agRenderPreview(name, a, yamlText) {
   $("ag-drawer-title").textContent = (a.icon ? a.icon + " " : "") + name;
   const archived = a.status === "archived";
   const statusCls = a.status === "enabled" ? "active" : archived ? "" : "blocked";
+  // Single "Edit" opens the new-agent modal, prefilled (config + bindings in one
+  // place); the former separate binding-management button is folded into it.
   const lifecycle = IS_VIEWER ? "" : `
     <button class="small" onclick="agDeploy('${esc(name)}')">🚀 Deploy</button>
     <button class="small" onclick="agEdit('${esc(name)}')">Edit</button>
@@ -2779,8 +3008,7 @@ function agRenderPreview(name, a, yamlText) {
     ${archived
       ? `<button class="small ghost" onclick="agRestore('${esc(name)}')">Restore</button>`
       : `<button class="small ghost danger" onclick="agArchive('${esc(name)}')">Archive</button>`}
-    <button class="small ghost danger" onclick="agDelete('${esc(name)}')">Delete</button>
-    <button class="small ghost" onclick="agDrawerManage('${esc(name)}')">Manage bindings</button>`;
+    <button class="small ghost danger" onclick="agDelete('${esc(name)}')">Delete</button>`;
   $("ag-drawer-body").innerHTML = `
     <div class="sk-pills" style="margin-bottom:10px;">
       <span class="pill ${statusCls}">${esc(a.status || "")}</span>
@@ -2873,7 +3101,7 @@ function agRenderDrawer(name, d) {
 
   const actions = IS_VIEWER ? "" : `
     <div class="row" style="flex-wrap:wrap; gap:6px;">
-      <button class="small" onclick="agEdit('${esc(name)}')">Edit</button>
+      <button class="small" onclick="agEdit('${esc(name)}')">Edit config</button>
       <button class="small ghost" onclick="agOpenClone('${esc(name)}')">Clone</button>
       ${a.status === "enabled"
         ? `<button class="small ghost" onclick="agDisable('${esc(name)}')">Disable</button>`
@@ -3115,7 +3343,7 @@ function pvOpenCreate() {
   $("pv-modal-title").textContent = "Add Provider";
   $("pv-err").textContent = "";
   // Reset form
-  for (const id of ["pv-id", "pv-description", "pv-base-url", "pv-api-key", "pv-max-tokens", "pv-temperature"]) {
+  for (const id of ["pv-id", "pv-description", "pv-base-url", "pv-api-key", "pv-api-key-env", "pv-max-tokens", "pv-temperature", "pv-protocol", "pv-params"]) {
     if ($(id)) $(id).value = "";
   }
   $("pv-id").value = genId();
@@ -3150,20 +3378,23 @@ async function pvOpenEdit(id) {
   }
   
   $("pv-api-key").value = "";  // never prefill secret
+  $("pv-api-key-env").value = p.api_key_env || "";
   $("pv-max-tokens").value = p.max_tokens != null ? p.max_tokens : "";
   $("pv-temperature").value = p.temperature != null ? p.temperature : "";
-  
-  // Detect provider type from URL
-  if (p.base_url?.includes('openai.com')) {
-    pvUpdateProviderType('openai');
-  } else if (p.base_url?.includes('anthropic.com')) {
-    pvUpdateProviderType('anthropic');
-  } else if (p.base_url?.includes('azure.com')) {
-    pvUpdateProviderType('azure');
-  } else {
-    pvUpdateProviderType('custom');
+  $("pv-protocol").value = p.protocol || "";
+  $("pv-params").value = p.params ? JSON.stringify(p.params, null, 2) : "";
+
+  // Provider (vendor): use the stored value, else infer from the base URL.
+  let ptype = p.provider;
+  if (!document.querySelector(`input[name="provider-type"][value="${ptype}"]`)) {
+    ptype = p.base_url?.includes("openai.com") ? "openai"
+      : p.base_url?.includes("anthropic.com") ? "anthropic"
+      : p.base_url?.includes("azure.com") ? "azure" : "custom";
   }
-  
+  const radio = document.querySelector(`input[name="provider-type"][value="${ptype}"]`);
+  if (radio) radio.checked = true;
+  pvUpdateProviderType(ptype);
+
   $("pv-modal").classList.remove("hidden");
 }
 
@@ -3272,13 +3503,27 @@ function pvFormBody() {
   }
   
   if ($("pv-api-key").value) body.api_key = $("pv-api-key").value;
+  if ($("pv-api-key-env").value) body.api_key_env = $("pv-api-key-env").value.trim();
   if ($("pv-max-tokens").value) body.max_tokens = parseInt($("pv-max-tokens").value, 10);
   if ($("pv-temperature").value) body.temperature = parseFloat($("pv-temperature").value);
+  // Vendor comes from the provider-type radio; protocol is a free-text label.
+  const ptype = document.querySelector('input[name="provider-type"]:checked');
+  if (ptype) body.provider = ptype.value;
+  if ($("pv-protocol").value) body.protocol = $("pv-protocol").value.trim();
+  const raw = $("pv-params").value.trim();
+  if (raw) {
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { $("pv-err").textContent = "Params must be valid JSON"; return null; }
+    if (typeof parsed !== "object" || Array.isArray(parsed)) { $("pv-err").textContent = "Params must be a JSON object"; return null; }
+    body.params = parsed;
+  }
   return body;
 }
 async function pvSave() {
-  if (PV_EDIT_ID) return pvEdit(PV_EDIT_ID, pvFormBody());
-  return pvCreate($("pv-id").value, pvFormBody());
+  const body = pvFormBody();
+  if (!body) return;  // invalid params
+  if (PV_EDIT_ID) return pvEdit(PV_EDIT_ID, body);
+  return pvCreate($("pv-id").value, body);
 }
 async function pvCreate(id, body) {
   $("pv-err").textContent = "";

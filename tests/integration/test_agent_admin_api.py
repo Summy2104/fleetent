@@ -381,6 +381,21 @@ def test_export_agent_yaml(client):
     assert "u_alice" in doc["bindings"]["users"]
 
 
+def test_export_agent_yaml_indentation(client):
+    agent_store.create_agent(
+        "fmt-bot",
+        "line one\nline two\nline three",
+        ["search_*", "read_file"],
+    )
+    token, _ = _session_for("admin")
+    raw = client.get("/admin/agents/fmt-bot/agent-yaml", headers=_hdr(token)).json()["yaml"]
+    # sequence items are indented two spaces under their key (not flush-left)
+    assert "allowed_tools:\n  - search_*\n  - read_file" in raw
+    # a multiline system prompt is a literal block scalar, not a quoted scalar
+    assert "system_prompt: |" in raw
+    assert "  line one\n  line two\n  line three" in raw
+
+
 def test_export_agent_yaml_unknown_404(client):
     token, _ = _session_for("admin")
     r = client.get("/admin/agents/ghost/agent-yaml", headers=_hdr(token))

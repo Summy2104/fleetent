@@ -38,7 +38,11 @@ from fleetent.observability.startup_diagnostics import (
     log_config_loaded,
 )
 from fleetent.platform.agent_lifecycle import lifecycle_admin_api, materialize
-from fleetent.platform.agent_management_console import agent_admin_api, agent_console_api
+from fleetent.platform.agent_management_console import (
+    agent_admin_api,
+    agent_admin_store,
+    agent_console_api,
+)
 from fleetent.platform.agent_statistics import stats_admin_api
 from fleetent.platform.askit_console import agent_apply_api
 from fleetent.platform.chat_management import chat_admin_api
@@ -242,7 +246,6 @@ def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:
         "mcp_server_ids": agent.mcp_server_ids,
         "model_overrides": agent.model_overrides,
         "memory_namespace": agent.memory_namespace,
-        "template_id": agent.template_id,
         "icon": agent.icon,
     }
 
@@ -264,7 +267,6 @@ def wire_agent_store_seams() -> None:
         mcp_server_ids: list[str] | None = None,
         model_overrides: dict[str, Any] | None = None,
         memory_namespace: str = "default",
-        template_id: str | None = None,
         plugins: list[str] | None = None,
         features: dict[str, Any] | None = None,
         icon: str | None = None,
@@ -279,7 +281,6 @@ def wire_agent_store_seams() -> None:
             mcp_server_ids=mcp_server_ids,
             model_overrides=model_overrides,
             memory_namespace=memory_namespace,
-            template_id=template_id,
             icon=icon,
         )
         # platform-agent-lifecycle: materialize the runnable home on create.
@@ -314,6 +315,10 @@ def wire_agent_store_seams() -> None:
     def _console_delete(name: str) -> bool:
         return agent_store.delete_agent(name)
 
+    def _console_rename(old_name: str, new_name: str) -> None:
+        agent_store.rename_agent(old_name, new_name)
+        agent_admin_store.rename(old_name, new_name)
+
     def _apply_create(name: str, system_prompt: str, allowed_tools: list[str]) -> int:
         agent_id = agent_store.create_agent(name, system_prompt, allowed_tools).id
         materialize.materialize_from_store(name)
@@ -327,6 +332,7 @@ def wire_agent_store_seams() -> None:
     agent_console_api.create_agent_def = _console_create
     agent_console_api.update_agent_def = _console_update
     agent_console_api.delete_agent_def = _console_delete
+    agent_console_api.rename_agent_def = _console_rename
     agent_console_api.set_agent_icon = agent_store.set_icon
     agent_console_api.agent_icons = agent_store.icons_by_name
 

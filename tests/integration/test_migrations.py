@@ -452,13 +452,17 @@ def test_agent_v1_backfill_for_existing_rows(tmp_path):
     assert n_versions == 1
 
 
-def test_agent_versions_has_template_id_column(tmp_path):
+def test_agent_versions_template_id_dropped_at_head(tmp_path):
+    # The template module was removed (migration 049): no template_id column at head,
+    # and the agent_templates table is gone.
     db = tmp_path / "test.db"
     apply_migrations(db)
     conn = sqlite3.connect(db)
     av_cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_versions)")}
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
-    assert "template_id" in av_cols
+    assert "template_id" not in av_cols
+    assert "agent_templates" not in tables
 
 
 def test_downgrade_removes_template_id_column(tmp_path):
