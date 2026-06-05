@@ -615,30 +615,9 @@
     </section>
 
     <section id="tab-kb" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Knowledge Base</h2><div class="ph-filter"><input id="kb-filter" class="sk-search" placeholder="🔍  Search by id or description" oninput="renderKb()"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.kb?.()">Refresh</button></div></div>
-      <div class="card" id="kb-create-card">
-        <div class="row">
-          <input id="nkb-id" placeholder="auto-generated" readonly>
-          <input id="nkb-desc" placeholder="description">
-          <button onclick="createKb()">Create KB</button>
-        </div>
-        <div id="kb-err" class="err"></div>
-      </div>
-      <div class="card">
-        <div class="row">
-          <input id="kb-q" placeholder="retrieval query" style="flex:1;">
-          <input id="kb-q-ids" placeholder="kb_ids (comma-separated)">
-          <select id="kb-q-mode"><option value="hybrid">hybrid</option><option value="vector">vector</option><option value="keyword">keyword</option></select>
-          <button onclick="kbSearch()">Test retrieval</button>
-        </div>
-        <pre id="kb-search-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
-      </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>KB</th><th>Description</th><th>Docs</th><th>Bound agents</th><th>Actions</th></tr></thead>
-        <tbody id="kb-body"></tbody>
-      </table></div>
+      <div class="page-header"><h2 class="ph-title">Knowledge Base</h2><div class="ph-actions"><button class="ghost small" onclick="LOADERS.kb?.()">Refresh</button></div></div>
 
-      <div class="card" style="margin-top:14px;">
+      <div class="card">
         <div class="row" style="justify-content:space-between; align-items:center;">
           <h4 style="margin:0;">Source connectors <span class="muted" style="font-weight:normal; font-size:12px;">(Google Drive / Confluence)</span></h4>
           <span id="kbc-create-bar"><button class="small" onclick="kbcOpenCreate()">+ Add connector</button></span>
@@ -4665,11 +4644,8 @@ async function testOAuthConfigInModal() {
 
 LOADERS.oauth = () => { loadAllConnectors(); };
 
-let KB_ALL = [];
 async function loadKb() {
-  if (!$("nkb-id").value) $("nkb-id").value = genId();
-  KB_ALL = await api("GET", "/kb");
-  renderKb();
+  // The KB tab now only manages source connectors; KB CRUD/retrieval moved out.
   loadKbConnectors();
 }
 
@@ -4801,52 +4777,6 @@ async function kbcSync(id) {
     showInfo(`Dry-run: ${id}`, JSON.stringify(r, null, 2));
   } catch (e) { toast(e.message, "error"); }
 }
-function renderKb() {
-  const q = ($("kb-filter")?.value || "").trim().toLowerCase();
-  const rows = KB_ALL.filter(k => !q
-    || (k.kb_id || "").toLowerCase().includes(q)
-    || (k.description || "").toLowerCase().includes(q));
-  $("kb-body").innerHTML = rows.map(k => `
-    <tr>
-      <td>${esc(k.kb_id)}</td>
-      <td class="muted">${esc(k.description || "")}</td>
-      <td>${esc(k.doc_count != null ? k.doc_count : "—")}</td>
-      <td class="muted">${esc((k.bound_agents || []).join(", ") || "—")}</td>
-      <td class="actions">
-        <button class="small danger" onclick="archiveKb('${esc(k.kb_id)}')">Archive</button>
-      </td>
-    </tr>`).join("") || `<tr><td colspan="5" class="muted">No knowledge bases.</td></tr>`;
-}
-
-async function createKb() {
-  $("kb-err").textContent = "";
-  try {
-    await api("POST", "/kb", { kb_id: $("nkb-id").value, description: $("nkb-desc").value });
-    $("nkb-desc").value = "";
-    $("nkb-id").value = genId();
-    loadKb();
-  } catch (e) { $("kb-err").textContent = e.message; }
-}
-
-async function archiveKb(id) {
-  if (!await confirmDialog(`Archive KB ${id}?`)) return;
-  try {
-    await fetch("/admin/kb/" + encodeURIComponent(id), {
-      method: "DELETE",
-      headers: { "Authorization": "Session " + TOKEN, "X-Confirm": "true" },
-    }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || ("HTTP " + r.status)); });
-    loadKb();
-  } catch (e) { toast(typeof e.message === "string" ? e.message : JSON.stringify(e.message)); }
-}
-
-async function kbSearch() {
-  const ids = $("kb-q-ids").value.split(",").map(s => s.trim()).filter(Boolean);
-  try {
-    const r = await api("POST", "/kb/search", { query: $("kb-q").value, kb_ids: ids, mode: $("kb-q-mode").value });
-    $("kb-search-out").textContent = JSON.stringify(r.results, null, 2);
-  } catch (e) { $("kb-search-out").textContent = e.message; }
-}
-
 async function boot() {
   if (!TOKEN) { show("login-view"); return; }
   // Restore a persisted session on reload; fall back to login if the token is stale/expired.

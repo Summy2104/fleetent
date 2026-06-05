@@ -314,7 +314,7 @@ def test_resource_id_inputs_are_readonly():
     html = ADMIN_HTML
     import re
 
-    for input_id in ("nkb-id", "pv-id", "oc-id"):
+    for input_id in ("pv-id", "oc-id"):
         m = re.search(rf'<input[^>]*id="{input_id}"[^>]*>', html)
         assert m, input_id
         assert "readonly" in m.group(0), input_id
@@ -968,7 +968,6 @@ def test_viewer_hidden_write_containers_intact():
     html = ADMIN_HTML
     for cid in (
         "create-bar",
-        "kb-create-card",
         "sk-create-bar",
         "pv-create-bar",
         "ag-create-bar",
@@ -1275,7 +1274,6 @@ def test_legacy_modules_have_search_in_page_header():
     html = ADMIN_HTML
     # each legacy list module fills its .ph-filter slot with a search input
     for tab, fid in [
-        ("kb", "kb-filter"),
         ("sessions", "sess-filter"),
         ("monitoring", "mon-filter"),
         ("stats", "st-filter"),
@@ -1289,7 +1287,6 @@ def test_legacy_module_search_filters_rows():
     html = ADMIN_HTML
     # render/filter functions reference their search value, so typing narrows rows
     for fid, fn in [
-        ("kb-filter", "function renderKb"),
         ("sess-filter", "function renderSessions"),
         ("mon-filter", "function renderMonAlerts"),
         ("st-filter", "function renderStatsRows"),
