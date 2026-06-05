@@ -510,6 +510,7 @@ class ConnectorBody(BaseModel):
     kb_id: str = "global"
     enabled: bool = True
     config: dict[str, Any] = {}
+    custom: dict[str, Any] = {}  # free-form metadata, not schema-filtered
 
 
 class ConnectorEditBody(BaseModel):
@@ -517,6 +518,7 @@ class ConnectorEditBody(BaseModel):
     kb_id: str | None = None
     enabled: bool | None = None
     config: dict[str, Any] | None = None
+    custom: dict[str, Any] | None = None
 
 
 def _connector_settings() -> Any:
@@ -544,7 +546,13 @@ def add_kb_connector(
         raise HTTPException(status_code=409, detail="connector id already exists")
     try:
         kb_connector_store.add_connector(
-            body.connector_id, body.kind, body.tenant_id, body.kb_id, body.config, body.enabled
+            body.connector_id,
+            body.kind,
+            body.tenant_id,
+            body.kb_id,
+            body.config,
+            body.enabled,
+            custom=body.custom,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

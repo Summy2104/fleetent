@@ -334,6 +334,10 @@ def test_kb_source_connectors_management_present():
     assert "/check" in html and "/sync" in html
     assert "KBC_FIELDS" in html  # per-kind field defs
     assert "loadKbConnectors()" in html.split("async function loadKb", 1)[1].split("}", 1)[0]
+    # free-form custom (JSON) metadata field, like provider params
+    assert 'id="kbc-custom"' in html
+    save = html.split("async function kbcSave", 1)[1].split("async function kbcDelete", 1)[0]
+    assert "JSON.parse(rawCustom)" in save and "custom" in save
 
 
 def test_textarea_themed():

@@ -55,13 +55,14 @@ def _now() -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
-_COLS = "connector_id, kind, enabled, tenant_id, kb_id, config, created_at, updated_at"
+_COLS = "connector_id, kind, enabled, tenant_id, kb_id, config, custom, created_at, updated_at"
 
 
 def _decode(row: dict[str, Any]) -> dict[str, Any]:
     out = dict(row)
     out["enabled"] = bool(out["enabled"])
     out["config"] = json.loads(out["config"]) if out.get("config") else {}
+    out["custom"] = json.loads(out["custom"]) if out.get("custom") else {}
     return out
 
 
@@ -91,6 +92,7 @@ def add_connector(
     kb_id: str,
     config: dict[str, Any],
     enabled: bool = True,
+    custom: dict[str, Any] | None = None,
 ) -> None:
     if kind not in KINDS:
         raise ValueError(f"unknown connector kind: {kind}")
@@ -98,7 +100,7 @@ def add_connector(
     with _database().transaction() as conn:
         conn.execute(
             f"INSERT INTO kb_connectors ({_COLS}) VALUES "
-            "(:connector_id, :kind, :enabled, :tenant_id, :kb_id, :config, :created_at,"
+            "(:connector_id, :kind, :enabled, :tenant_id, :kb_id, :config, :custom, :created_at,"
             " :updated_at)",
             {
                 "connector_id": connector_id,
@@ -107,13 +109,14 @@ def add_connector(
                 "tenant_id": tenant_id,
                 "kb_id": kb_id,
                 "config": json.dumps(_clean_config(kind, config)),
+                "custom": json.dumps(custom or {}),
                 "created_at": now,
                 "updated_at": now,
             },
         )
 
 
-_EDITABLE = {"enabled", "tenant_id", "kb_id", "config"}
+_EDITABLE = {"enabled", "tenant_id", "kb_id", "config", "custom"}
 
 
 def edit_connector(connector_id: str, **fields: Any) -> None:
@@ -125,6 +128,8 @@ def edit_connector(connector_id: str, **fields: Any) -> None:
         updates["enabled"] = 1 if updates["enabled"] else 0
     if "config" in updates:
         updates["config"] = json.dumps(_clean_config(row["kind"], updates["config"]))
+    if "custom" in updates:
+        updates["custom"] = json.dumps(updates["custom"])  # free-form, not schema-filtered
     if not updates:
         return
     updates["updated_at"] = _now()

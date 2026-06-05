@@ -647,6 +647,9 @@
           </div>
           <label class="row" style="gap:6px;"><input type="checkbox" id="kbc-enabled" checked> Enabled</label>
           <div id="kbc-fields" style="display:flex; flex-direction:column; gap:8px;"></div>
+          <label class="field-label" for="kbc-custom">Custom (JSON)</label>
+          <textarea id="kbc-custom" rows="4" autocomplete="off" spellcheck="false" style="font-family:monospace;" placeholder='{"poll_interval": 3600, "labels": ["pilot"]}'></textarea>
+          <div class="muted" style="font-size:12px;">Free-form key/values attached to this connector.</div>
           <div id="kbc-err" class="err"></div>
           <div class="row" style="justify-content:flex-end;">
             <button type="button" class="ghost" onclick="kbcCloseModal()">Cancel</button>
@@ -4719,6 +4722,7 @@ function kbcOpenCreate() {
   $("kbc-kind").value = "google_drive"; $("kbc-kind").disabled = false;
   $("kbc-tenant").value = "pilot-tenant"; $("kbc-kb").value = "pilot-kb";
   $("kbc-enabled").checked = true;
+  $("kbc-custom").value = "";
   kbcRenderFields();
   $("kbc-modal").classList.remove("hidden");
 }
@@ -4732,6 +4736,7 @@ function kbcOpenEdit(id) {
   $("kbc-kind").value = c.kind; $("kbc-kind").disabled = true;  // kind fixed after create
   $("kbc-tenant").value = c.tenant_id; $("kbc-kb").value = c.kb_id;
   $("kbc-enabled").checked = c.enabled;
+  $("kbc-custom").value = c.custom && Object.keys(c.custom).length ? JSON.stringify(c.custom, null, 2) : "";
   kbcRenderFields(c.config || {});
   $("kbc-modal").classList.remove("hidden");
 }
@@ -4749,13 +4754,19 @@ async function kbcSave() {
   const config = kbcCollectConfig();
   const tenant_id = $("kbc-tenant").value.trim(), kb_id = $("kbc-kb").value.trim();
   const enabled = $("kbc-enabled").checked;
+  let custom = {};
+  const rawCustom = $("kbc-custom").value.trim();
+  if (rawCustom) {
+    try { custom = JSON.parse(rawCustom); } catch { $("kbc-err").textContent = "Custom must be valid JSON"; return; }
+    if (typeof custom !== "object" || Array.isArray(custom)) { $("kbc-err").textContent = "Custom must be a JSON object"; return; }
+  }
   try {
     if (KBC_EDIT_ID) {
-      await api("PATCH", `/kb/connectors/${encodeURIComponent(KBC_EDIT_ID)}`, { tenant_id, kb_id, enabled, config });
+      await api("PATCH", `/kb/connectors/${encodeURIComponent(KBC_EDIT_ID)}`, { tenant_id, kb_id, enabled, config, custom });
     } else {
       const connector_id = $("kbc-id").value.trim();
       if (!connector_id) { $("kbc-err").textContent = "connector id required"; return; }
-      await api("POST", "/kb/connectors", { connector_id, kind: $("kbc-kind").value, tenant_id, kb_id, enabled, config });
+      await api("POST", "/kb/connectors", { connector_id, kind: $("kbc-kind").value, tenant_id, kb_id, enabled, config, custom });
     }
     kbcCloseModal(); loadKbConnectors();
   } catch (e) { $("kbc-err").textContent = apiErrorMessage(e.message || e); }

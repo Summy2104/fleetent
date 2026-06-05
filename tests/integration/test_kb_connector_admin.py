@@ -168,6 +168,23 @@ def test_real_sync_requires_confirm(client, monkeypatch):
     assert r.status_code == 200 and r.json()["status"] == "synced"
 
 
+def test_custom_metadata_roundtrip_and_not_in_ingestion_model(client):
+    token = _session_for("admin")
+    body = {**_GDRIVE, "custom": {"poll_interval": 3600, "labels": ["pilot"]}}
+    r = client.post("/admin/kb/connectors", headers=_hdr(token), json=body)
+    assert r.status_code == 201, r.text
+    assert r.json()["custom"] == {"poll_interval": 3600, "labels": ["pilot"]}
+    # edit custom
+    e = client.patch(
+        "/admin/kb/connectors/pilot-drive", headers=_hdr(token), json={"custom": {"k": "v"}}
+    )
+    assert e.status_code == 200 and e.json()["custom"] == {"k": "v"}
+    # custom is metadata: it must NOT leak into the ingestion connector model
+    kb = store.as_knowledge_base_settings()
+    conn = kb.google_drive.connectors[0]
+    assert not hasattr(conn, "poll_interval") and not hasattr(conn, "k")
+
+
 def test_builder_assembles_settings(client):
     # store-level: rows -> KnowledgeBaseSettings the engine understands
     token = _session_for("admin")
