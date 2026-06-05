@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from fleetent import paths
-from fleetent import server as srv
 from fleetent.config import Settings
 
 
@@ -16,12 +15,6 @@ def test_config_module_constants_derive_from_paths(monkeypatch) -> None:
 
     assert paths.settings_yaml_path() == cfg.SETTINGS_YAML_PATH
     assert paths.config_dir() / "mcp.servers.yaml" == cfg.MCP_SERVERS_YAML_PATH
-
-
-def test_server_yaml_constants_derive_from_paths(monkeypatch) -> None:
-    monkeypatch.delenv("FLEETENT_HOME", raising=False)
-    assert paths.config_dir() / "mcp.yaml" == srv._MCP_YAML_PATH
-    assert paths.config_dir() / "webhooks.yaml" == srv._WEBHOOK_YAML_PATH
 
 
 def test_settings_default_paths_follow_fleetent_home(

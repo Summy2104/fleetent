@@ -7,22 +7,13 @@ import fleetent.im_gateway.telegram as telegram
 
 
 async def test_slack_handler_stamps_owner_and_agent(monkeypatch):
-    captured = {}
-
-    def fake_get_or_create(owner_id, platform, puid):
-        captured["owner_id"] = owner_id
-        captured["platform"] = platform
-        m = MagicMock()
-        m.id = "internal-1"
-        return m
-
     routed = {}
 
     async def fake_route(msg):
         routed["owner_id"] = msg.owner_id
         routed["agent_name"] = msg.agent_name
+        routed["user_id"] = msg.user_id
 
-    monkeypatch.setattr("fleetent.platform.im_gateway_management.get_or_create", fake_get_or_create)
     monkeypatch.setattr("fleetent.im_gateway.normalizer.route", fake_route)
 
     handler_holder = {}
@@ -43,9 +34,10 @@ async def test_slack_handler_stamps_owner_and_agent(monkeypatch):
         pass
 
     await handler_holder["fn"]({"user": "U1", "text": "hi", "ts": "1", "channel": "C1"}, say)
-    assert captured["owner_id"] == "ownerA"
     assert routed["owner_id"] == "ownerA"
     assert routed["agent_name"] == "support"
+    # Identity is the platform-native id resolved locally (no platform user_store).
+    assert routed["user_id"] == "U1"
 
 
 async def test_telegram_run_reports_status_with_owner(monkeypatch):

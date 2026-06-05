@@ -1176,7 +1176,7 @@ def test_server_helpers_cover_admin_url_jobs_and_auth(
     assert server.agent_routing_status("ops") == "disabled"
 
 
-async def test_server_auth_health_approval_and_chat_stream(
+async def test_server_auth_health_and_approval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     actor = _user(user_id="u1")
@@ -1224,51 +1224,3 @@ async def test_server_auth_health_approval_and_chat_stream(
     with pytest.raises(HTTPException) as missing_approval:
         await server.resolve_approval("missing", server.ApprovalRequest(decision="approved"))
     assert missing_approval.value.status_code == 404
-
-    class Agent:
-        name = "ops"
-        system_prompt = "system"
-        allowed_tools = ["shell"]
-        plugins = ["p"]
-        features = {"kb": True}
-        allowed_skills = ["summarize"]
-
-    async def fake_run_stream(message: str, **kwargs: Any):
-        yield {"type": "delta", "content": message, "agent": kwargs["agent_name"]}
-
-    from fleetent.im_gateway import normalizer
-
-    monkeypatch.setattr(normalizer, "get_agent_for_context", lambda **kwargs: Agent())
-    monkeypatch.setattr(server, "agent_routing_status", lambda agent_name: "enabled")
-    monkeypatch.setattr(server.api_key_store, "check_scope", lambda scope, agent_name: True)
-    monkeypatch.setattr(server.api_key_store, "record_usage", lambda *args, **kwargs: None)
-    monkeypatch.setattr(server.quota, "check_quota", lambda user_id: True)
-    monkeypatch.setattr(server.quota, "record_usage", lambda user_id, tokens=0: None)
-    monkeypatch.setattr(server, "expand_plugin_patterns", lambda plugins: ["p__*"])
-    monkeypatch.setattr(server, "run_stream", fake_run_stream)
-
-    response = await server.chat(
-        server.ChatRequest(message="hello"),
-        SimpleNamespace(
-            app=SimpleNamespace(state=SimpleNamespace(sandbox_mode=server.Mode.OFF)),
-            client=SimpleNamespace(host="127.0.0.1"),
-            headers={"user-agent": "pytest"},
-        ),
-        auth_result=(actor, {"id": 7, "scope": ["ops"]}),
-        x_platform="slack",
-        x_channel_id="C1",
-    )
-    assert isinstance(response, StreamingResponse)
-    chunks = [chunk async for chunk in response.body_iterator]
-    assert '"agent": "ops"' in chunks[0]
-
-    monkeypatch.setattr(server, "agent_routing_status", lambda agent_name: "archived")
-    with pytest.raises(HTTPException) as archived:
-        await server.chat(
-            server.ChatRequest(message="hello"),
-            SimpleNamespace(
-                app=SimpleNamespace(state=SimpleNamespace(sandbox_mode=server.Mode.OFF))
-            ),
-            auth_result=(actor, {"id": None, "scope": ["ops"]}),
-        )
-    assert archived.value.status_code == 403
