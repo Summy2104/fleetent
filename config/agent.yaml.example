@@ -149,3 +149,13 @@ bindings:
   users:
     - "u_alice"
     - "u_bob"
+
+# ── access control (per-agent IM authorization; closed by default) ──
+# Default is closed: with no rules the agent grants no implicit access and requires
+# approval. allow_channels empty = allow every channel the agent is bound to.
+access:
+  allow_channels:
+    - "slack:C0123ABCD"
+  allow_users:
+    - "u_alice"
+  require_approval: true

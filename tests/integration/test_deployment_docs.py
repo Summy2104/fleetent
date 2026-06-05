@@ -259,3 +259,29 @@ def test_deployment_docs_are_docker_compose_first_and_use_port_8765():
     combined = "\n".join(docs.values())
     assert "Pilot 默认" in combined
     assert "uv run uvicorn fleetent.server:app` 只作为开发模式" in combined
+
+
+def test_env_example_covers_agent_yaml_example_env_refs():
+    """Every env-var name referenced by agent.yaml.example must exist in .env.example."""
+    import yaml
+
+    doc = yaml.safe_load(Path("config/agent.yaml.example").read_text(encoding="utf-8"))
+    env_text = Path(".env.example").read_text(encoding="utf-8")
+
+    refs: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if isinstance(value, str) and key.endswith("_env"):
+                    refs.add(value)
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(doc)
+    refs.add("ANTHROPIC_API_KEY")  # required default route key
+
+    missing = sorted(name for name in refs if name and f"{name}=" not in env_text)
+    assert not missing, f".env.example missing referenced env names: {missing}"
