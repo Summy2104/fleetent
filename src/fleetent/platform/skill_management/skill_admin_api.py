@@ -388,8 +388,10 @@ async def import_skills_upload(
             dest = root / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
-        # webkitdirectory nests everything under the chosen folder; descend into it.
-        base = root / next(iter(tops)) if len(tops) == 1 else root
+        # A single top that is a directory (chosen folder, or a zip's root dir) is
+        # descended into; a single loose file (e.g. just SKILL.md) keeps base = root.
+        only = next(iter(tops)) if len(tops) == 1 else None
+        base = root / only if only and (root / only).is_dir() else root
         recursive = not (base / "SKILL.md").exists()
         summary = _run_import(base, recursive, source)
     audit_log.write_audit(user.id, "skill.import", "skill", "upload", detail=summary)

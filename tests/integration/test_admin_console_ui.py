@@ -94,24 +94,20 @@ def test_skills_action_functions_present():
         assert fn in html, fn
 
 
-def test_skill_import_has_clear_folder_picker():
+def test_skill_import_single_file_or_zip_picker():
     html = ADMIN_HTML
-    # the raw file input is hidden; a visible button triggers it so the whole
-    # control is obviously clickable (fixes "clicking does nothing")
-    # visible native folder input (direct click = the only 100%-reliable picker trigger)
+    # one merged picker: a plain multi-file input that takes the skill's files or a .zip
     assert 'id="sk-import-files"' in html
-    assert "webkitdirectory" in html
+    assert "webkitdirectory" not in html  # folder-only picker removed (unreliable)
+    assert 'accept=".zip' in html
     assert 'id="sk-import-pick"' in html
     assert "function skImportPicked" in html
-    # reliable fallback when the OS folder picker is blocked: a .zip upload
-    assert 'id="sk-import-zip"' in html
-    assert "function skDoUploadZip" in html
-    assert 'accept=".zip' in html
-    # dialog-free fallback: paste SKILL.md text (works in any webview)
-    assert 'id="sk-paste-content"' in html
-    assert "function skImportPaste" in html
-    paste = html.split("async function skImportPaste", 1)[1].split("\n}", 1)[0]
-    assert 'api("POST", "/skills"' in paste
+    # the separate zip input and the paste section are gone (merged into the one picker)
+    assert 'id="sk-import-zip"' not in html
+    assert "skImportPaste" not in html
+    assert 'id="sk-paste-content"' not in html
+    up = html.split("async function skDoUpload", 1)[1].split("\n}", 1)[0]
+    assert "/skills/import/upload" in up
 
 
 def test_skills_proposals_review_wired():

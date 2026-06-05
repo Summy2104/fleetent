@@ -1097,39 +1097,15 @@
       </select>
 
       <div class="sk-import-section">
-        <strong>📁 Upload a skill folder</strong>
+        <strong>📁 Upload a skill</strong>
         <p class="muted" style="font-size:13px; margin:4px 0 8px;">
-          Pick a skill folder (with <code>SKILL.md</code>) or a folder containing several
-          skills. The whole folder uploads — single vs batch is detected automatically.
+          Select the skill's files (<code>SKILL.md</code> + any assets) or a
+          <code>.zip</code> of the skill folder. Single vs batch is detected automatically.
         </p>
         <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
-          <!-- Visible native input: a direct click is the only 100%-reliable way to open
-               the OS picker (no JS/label proxy that some browsers block). -->
-          <input type="file" id="sk-import-files" webkitdirectory directory multiple onchange="skImportPicked()" style="max-width:260px;">
-          <span id="sk-import-pick" class="muted" style="font-size:13px;">No folder chosen</span>
+          <input type="file" id="sk-import-files" multiple accept=".zip,application/zip,.md,.txt,.py,.sh,.json,.yaml,.yml,*/*" onchange="skImportPicked()" style="max-width:320px;">
+          <span id="sk-import-pick" class="muted" style="font-size:13px;">No files chosen</span>
           <button type="button" id="sk-upload-btn" class="primary" onclick="skDoUpload()">Upload &amp; import</button>
-        </div>
-        <p class="muted" style="font-size:12px; margin:8px 0 0;">
-          Folder picker not opening? Some macOS Chrome setups block it — paste a single
-          skill with <strong>+ New skill</strong> instead, or upload a
-          <code>.zip</code> below.
-        </p>
-        <div class="row" style="gap:8px; align-items:center; margin-top:6px;">
-          <input type="file" id="sk-import-zip" accept=".zip,application/zip" onchange="skImportPicked()" style="max-width:260px;">
-          <button type="button" class="ghost" onclick="skDoUploadZip()">Upload .zip</button>
-        </div>
-      </div>
-
-      <div class="sk-import-section" style="margin-top:12px;">
-        <strong>📝 Or paste a skill — no file dialog needed</strong>
-        <p class="muted" style="font-size:13px; margin:4px 0 8px;">
-          Works in any browser/webview. Paste your <code>SKILL.md</code> (must have
-          <code>name</code>/<code>description</code> frontmatter).
-        </p>
-        <input id="sk-paste-name" placeholder="skill name (e.g. my-skill)" autocomplete="off" style="margin-bottom:6px; width:100%; box-sizing:border-box;">
-        <textarea id="sk-paste-content" rows="8" spellcheck="false" style="font-family:monospace; width:100%; box-sizing:border-box;" placeholder="---&#10;name: my-skill&#10;description: what it does&#10;---&#10;# My Skill&#10;…"></textarea>
-        <div class="row" style="margin-top:6px;">
-          <button type="button" class="primary" onclick="skImportPaste()">Import pasted skill</button>
         </div>
       </div>
 
@@ -2372,19 +2348,14 @@ async function skReject(id) {
 function skOpenImport() {
   $("sk-import-source").value = "adhoc";
   if ($("sk-import-files")) $("sk-import-files").value = "";
-  if ($("sk-import-zip")) $("sk-import-zip").value = "";
-  if ($("sk-paste-name")) $("sk-paste-name").value = "";
-  if ($("sk-paste-content")) $("sk-paste-content").value = "";
   skImportPicked();
   $("sk-import-err").textContent = "";
   const res = $("sk-import-result"); res.classList.add("hidden"); res.innerHTML = "";
   $("sk-import-modal").classList.remove("hidden");
 }
 function skImportPicked() {
-  const folderN = ($("sk-import-files").files || []).length;
-  const zipN = ($("sk-import-zip") && $("sk-import-zip").files || []).length;
-  const n = folderN + zipN;
-  $("sk-import-pick").textContent = n ? `✅ ${n} file(s) selected` : "No folder chosen";
+  const n = ($("sk-import-files").files || []).length;
+  $("sk-import-pick").textContent = n ? `✅ ${n} file(s) selected` : "No files chosen";
 }
 function skCloseImport() { $("sk-import-modal").classList.add("hidden"); }
 
@@ -2403,35 +2374,14 @@ function skImportShowResult(r) {
 
 async function skDoUpload() {
   const files = $("sk-import-files").files ? [...$("sk-import-files").files] : [];
-  if (!files.length) { $("sk-import-err").textContent = "pick a folder first"; return; }
-  return skUploadSkillFiles(files, $("sk-upload-btn"), "Upload & import");
-}
-async function skDoUploadZip() {
-  const files = $("sk-import-zip").files ? [...$("sk-import-zip").files] : [];
-  if (!files.length) { $("sk-import-err").textContent = "pick a .zip first"; return; }
-  return skUploadSkillFiles(files, null, null);
-}
-// Dialog-free path: paste SKILL.md text. Works in any browser/webview.
-async function skImportPaste() {
   $("sk-import-err").textContent = "";
-  const name = $("sk-paste-name").value.trim();
-  const content = $("sk-paste-content").value;
-  if (!name) { $("sk-import-err").textContent = "skill name required"; return; }
-  if (!content.trim()) { $("sk-import-err").textContent = "paste SKILL.md content"; return; }
-  try {
-    await api("POST", "/skills", { name, content, source: $("sk-import-source").value });
-    skCloseImport();
-    loadSkills();
-    toast(`Imported ${name}`, "success");
-  } catch (e) { $("sk-import-err").textContent = apiErrorMessage(e.message || e); }
-}
-async function skUploadSkillFiles(files, btn, btnLabel) {
-  $("sk-import-err").textContent = "";
+  if (!files.length) { $("sk-import-err").textContent = "choose files or a .zip first"; return; }
   const fd = new FormData();
   fd.append("source", $("sk-import-source").value);
   for (const f of files) fd.append("files", f, f.webkitRelativePath || f.name);
+  const btn = $("sk-upload-btn");
   const res = $("sk-import-result");
-  if (btn) { btn.disabled = true; btn.textContent = "⏳ Uploading…"; }
+  btn.disabled = true; btn.textContent = "⏳ Uploading…";
   res.classList.remove("hidden");
   res.innerHTML = `<div class="muted"><span class="spin">⏳</span> Uploading ${files.length} file(s)…</div>`;
   try {
@@ -2445,7 +2395,7 @@ async function skUploadSkillFiles(files, btn, btnLabel) {
     res.classList.add("hidden");
     $("sk-import-err").textContent = e.message;
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = btnLabel; }
+    btn.disabled = false; btn.textContent = "Upload & import";
   }
 }
 
