@@ -82,3 +82,31 @@
 - `_MAX_TOOL_PAGES=100`（约上限 100 页工具）是否合适。
 - `definitions`→`$defs` 重写：当同层已有 `$defs` 时不动以避免覆盖（罕见边界）。
 - nullable union 折叠未做——若实际接入的服务/provider 需要，再单独立项。
+
+---
+
+## 变更 3：mcp-stdio-isolation（stdio 子进程环境隔离 · 安全）
+
+**做了什么**
+- 新增 `_SAFE_ENV_KEYS_POSIX`/`_SAFE_ENV_KEYS_WIN` 白名单、`_safe_base_env()`、`_subprocess_env(server)`。
+- `_register_stdio_server` 与 `_probe_stdio_tools` 的子进程 env 由 `{**os.environ, **server.env} if server.env else None` 改为 `_subprocess_env(server)`（= 安全白名单 + server 显式 env）。
+- 新增 spec `mcp-stdio-isolation`；新增 `tests/unit/test_mcp_stdio_isolation.py`；更新 `docs/capabilities/mcp.md`。
+
+**问题**
+- P1（安全）：server 声明任意 env 时，`{**os.environ, ...}` 把整个平台环境（`DATABASE_URL`/`ANTHROPIC_API_KEY`/各类 token）透传给第三方 stdio MCP 子进程。接线红测的报错直接显示真实 `ATLASSIAN_API_TOKEN_ADMIN` 等被泄漏——确证漏洞。
+
+**决策**
+- **D1 自带白名单、不依赖 SDK 私有 API**：镜像 MCP SDK `DEFAULT_INHERITED_ENV_VARS` 并补 locale/temp 等运行必需项，避免 import SDK 内部 `get_default_environment`。
+- **D2 单点 `_subprocess_env` + 始终传 dict**：register 与 probe 一致；旧的「空 env→None→SDK 默认」与新「空 env→白名单」等价安全，非空 env 由泄漏全环境改为仅白名单（修复）。
+- **D3 显式转发模型**：`server.env` 对同名键覆盖白名单；需把宿主密钥传入子进程时在 `env` 显式声明（安全、可审计）。**不新增** `env_passthrough` 配置字段以保持本变更收敛在 client.py（记为未来增强）。
+
+**改进/优化/新增点**
+- 关闭「第三方 stdio MCP 子进程可读平台所有密钥」这一数据主权风险。
+- register/probe 行为一致化（始终传受控 env）。
+
+**验证**
+- 接线红测先暴露真实泄漏，再改为白名单后转绿；`make test-unit-ci` 全绿、coverage ≥ 75%；改动文件 ruff/mypy 零问题。
+
+**送审点（行为变化，非缺陷）**
+- 此前依赖**隐式继承**白名单外宿主变量的 stdio 服务，需改为在 `server.env` 显式声明——这是修复的安全意图。若有此类部署，部署时需补 `env`。
+- 白名单集合（POSIX/WIN）是否需要按实际接入的服务再补项。

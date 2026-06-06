@@ -52,3 +52,12 @@ A → B → C → D → E → F
   - **不审计"未知 skill 名"分支**：那是 LLM 笔误而非安全事件。
   - 验证 `tool_context` 不进 LLM schema（out-of-band 注入）。
 - 测试：4 unit（拒绝写日志 / 含上下文 / 正常不写 / 写入失败不阻断）；全套 3580 passed。
+
+### Change B — `skill-tier-precedence`（P1-D）✅
+- 实现：`_scan_dir` 冲突分支按层级优先 `keep_existing = builtin if tier_override else existing.path <= path`；告警加 `tier_override` 字段。复用 `SkillEntry.builtin`，无新字段。
+- 决策点：
+  - **复用 `builtin` 标志而非新增 `tier` 字段**：当前只有 builtin/user 两层，`builtin` bool 足够；避免 schema 膨胀。
+  - **判定 `keep_existing = builtin`（tiers 不同时）**：对两种到达顺序都正确，与 SK8 的"顺序无关"测试一致。
+  - **更新预存测试 `test_scan_no_source_priority_override_logic`**：该测试编码了被本 change 显式反转的旧"无来源优先"规则。按 MODIFIED requirement 重写为 `test_scan_user_overrides_builtin_regardless_of_path_sort`（断言 user 胜）。这是 spec 演进的必要同步，非破坏。
+  - 同层级（两 user）行为完全不变。
+- 测试：3 新 unit + 1 重写；registry 92 passed；全套 3605 passed。

@@ -179,17 +179,26 @@ def _scan_dir(
         path = str(skill_md)
         existing = index.get(name)
         if existing is not None:
-            # Deterministic selection independent of traversal order and source:
-            # the SKILL.md whose path string sorts first wins; warn on every
-            # loser. (SK8 strategy; not a builtin-vs-user priority rule.)
-            kept_path, dropped_path = sorted((existing.path, path))
+            # Deterministic selection independent of traversal order. Tier precedence
+            # first: a user skill (builtin=False) overrides a same-name builtin one so
+            # operators can predictably customize a builtin — regardless of path sort.
+            # Within the same tier, fall back to SK8 path-string sort (smaller wins).
+            tier_override = existing.builtin != builtin
+            # When tiers differ the user one wins. `builtin` is the NEW entry's tier:
+            # new is builtin (True) -> keep existing(user); new is user (False) ->
+            # overwrite existing(builtin). Both cases reduce to keep_existing = builtin.
+            # Same tier: SK8 path-string sort (smaller path wins).
+            keep_existing = builtin if tier_override else existing.path <= path
+            kept_path = existing.path if keep_existing else path
+            dropped_path = path if keep_existing else existing.path
             logger.warning(
                 "skill_name_conflict",
                 name=name,
                 kept_path=kept_path,
                 dropped_path=dropped_path,
+                tier_override=tier_override,
             )
-            if existing.path <= path:
+            if keep_existing:
                 continue
         description = str(frontmatter.get("description", ""))
         blocked = _audit_skill(path, _body_after_frontmatter(raw), description)
