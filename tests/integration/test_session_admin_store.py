@@ -185,3 +185,47 @@ def test_update_compaction_meta_truncates_preview_to_200_chars(tmp_path, monkeyp
     ).fetchone()
     conn.close()
     assert len(row[0]) == 200
+
+
+# --- migration 055: token columns ---
+
+
+def test_migration_055_adds_token_columns(tmp_path):
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    conn = sqlite3.connect(db_path)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(session_meta)").fetchall()}
+    conn.close()
+    assert "total_input_tokens" in cols
+    assert "total_output_tokens" in cols
+
+
+def test_add_token_usage_accumulates(tmp_path, monkeypatch):
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    store.add_token_usage("tok-s", 100, 50)
+    store.add_token_usage("tok-s", 100, 50)
+    m = store.get_meta("tok-s")
+    assert m["total_input_tokens"] == 200
+    assert m["total_output_tokens"] == 100
+
+
+def test_add_token_usage_creates_row_if_absent(tmp_path, monkeypatch):
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    store.add_token_usage("fresh-tok", 30, 20)
+    m = store.get_meta("fresh-tok")
+    assert m["total_input_tokens"] == 30
+    assert m["total_output_tokens"] == 20
+
+
+def test_get_meta_includes_token_fields(tmp_path, monkeypatch):
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    store.upsert_meta("meta-tok", origin="web")
+    m = store.get_meta("meta-tok")
+    assert "total_input_tokens" in m
+    assert "total_output_tokens" in m
