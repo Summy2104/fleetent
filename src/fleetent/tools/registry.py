@@ -6,9 +6,12 @@ The agent loop calls get_schemas() for the API payload and dispatch() to execute
 
 import inspect
 import json
+import logging
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any, cast, overload
+
+logger = logging.getLogger(__name__)
 
 ToolSchema = dict[str, Any]
 ToolReturn = str | Coroutine[Any, Any, str]
@@ -44,6 +47,10 @@ _self_truncating: set[str] = set()
 # Connector metadata parallel to _risk_levels (D1): name -> (connector, scopes).
 # Governance/dispatch-time runtime data; deliberately kept out of the LLM schema.
 _connectors: dict[str, tuple[str, list[str]]] = {}
+# Per-tool runtime availability predicate: name -> Callable[[], bool]. None means always
+# available. get_schemas() evaluates each predicate on every call (no caching) so
+# availability responds to runtime state changes (e.g. env vars set after startup).
+_availability: dict[str, Callable[[], bool]] = {}
 
 
 @overload
@@ -58,6 +65,7 @@ def tool(
     scopes: list[str] | None = None,
     timeout: float | None = None,
     self_truncates: bool = False,
+    availability: Callable[[], bool] | None = None,
 ) -> Callable[[ToolFn], ToolFn]: ...
 
 
@@ -69,6 +77,7 @@ def tool(
     scopes: list[str] | None = None,
     timeout: float | None = None,
     self_truncates: bool = False,
+    availability: Callable[[], bool] | None = None,
 ) -> Any:
     """Register a function as a callable tool.
 
@@ -88,6 +97,8 @@ def tool(
             _timeouts[target.__name__] = timeout
         if self_truncates:
             _self_truncating.add(target.__name__)
+        if availability is not None:
+            _availability[target.__name__] = availability
         return target
 
     if fn is not None:
@@ -135,13 +146,29 @@ def set_schema_visibility_filter(fn: Callable[[str], bool] | None) -> None:
 
 
 def get_schemas() -> list[ToolSchema]:
-    """Return OpenAI-format tool schemas for registered tools the filter allows.
+    """Return OpenAI-format tool schemas for registered tools that are currently available.
 
-    The filter is a view: a hidden tool stays in `_registry`, so recovery (the
-    predicate flipping back to True) re-exposes it with no re-registration.
+    Two filter layers applied on every call (no caching):
+    - MCP visibility filter: hides tools when their MCP server is degraded.
+    - Availability predicate: hides tools whose runtime condition is not met
+      (e.g. missing env var, absent binary). Exceptions in the predicate are
+      treated as unavailable and logged as warnings.
     """
     flt = _schema_visibility_filter
-    return [schema for name, (_fn, schema) in _registry.items() if flt is None or flt(name)]
+    result = []
+    for name, (_fn, schema) in _registry.items():
+        if flt is not None and not flt(name):
+            continue
+        avail_fn = _availability.get(name)
+        if avail_fn is not None:
+            try:
+                if not avail_fn():
+                    continue
+            except Exception:
+                logger.warning("availability check for tool %r raised; treating as unavailable", name)
+                continue
+        result.append(schema)
+    return result
 
 
 _SUB_AGENT_TOOL = "sub_agent"
@@ -254,27 +281,8 @@ def dispatch(
 
 
 def _build_schema(fn: Callable[..., Any]) -> ToolSchema:
-    sig = inspect.signature(fn)
-    description = (fn.__doc__ or "").strip().splitlines()[0] if fn.__doc__ else fn.__name__
-    properties: dict[str, dict[str, str]] = {}
-    required: list[str] = []
-    for param_name, param in sig.parameters.items():
-        # Exclude out-of-band params (cancel_token AR19 D3, tool_context SB3 D5):
-        # injected at dispatch time, not provided by the LLM, so they must not
-        # appear in the parameter schema (else they'd be required string fields).
-        if param_name in _OUT_OF_BAND_PARAMS:
-            continue
-        properties[param_name] = {"type": _py_type_to_json(param.annotation)}
-        if param.default is inspect.Parameter.empty:
-            required.append(param_name)
-    return {
-        "type": "function",
-        "function": {
-            "name": fn.__name__,
-            "description": description,
-            "parameters": {"type": "object", "properties": properties, "required": required},
-        },
-    }
+    from fleetent.tools.schema_builder import build_schema
+    return build_schema(fn)
 
 
 def _py_type_to_json(ann: object) -> str:
