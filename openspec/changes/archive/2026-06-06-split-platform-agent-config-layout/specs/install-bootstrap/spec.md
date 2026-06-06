@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Install bootstrap seeds explicit Platform and Agent homes
 
