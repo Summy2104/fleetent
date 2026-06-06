@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from fleetent import auth, user_store
 from fleetent.governance import audit_log
 from fleetent.platform.skill_management import skill_admin_store
+from fleetent.skills import audit as skill_audit
 from fleetent.skills import registry as skill_registry
 
 router = APIRouter(prefix="/admin/skills")
@@ -58,18 +59,14 @@ def engine_skills_dir() -> str:
 
 
 def engine_audit(content: str) -> dict[str, Any]:
-    """Security-audit a skill body. Owned by the skill domain (follow-up).
-
-    Placeholder default passes everything; tests monkeypatch to exercise the
-    suspicious / rejected branches. Returns ``{"verdict", "rules"}``.
-    """
-    return {"verdict": "pass", "rules": []}
+    """Security-audit a skill body using the static injection-pattern scanner."""
+    return skill_audit.audit(content)
 
 
 def engine_reload() -> dict[str, Any]:
-    """Trigger a hot re-scan of the skills directory. Defaults to skill_registry.scan."""
+    """Trigger an atomic hot-reload of the skills index."""
     try:
-        skill_registry.scan()
+        skill_registry.reload()
     except Exception as exc:  # noqa: BLE001 — surface failure to the UI, keep old index
         return {"ok": False, "error": str(exc)}
     return {"ok": True}
