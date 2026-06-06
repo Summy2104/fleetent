@@ -98,6 +98,8 @@ async def _start_infra(agent: AgentFile) -> None:
                 command=s.command,
                 args=list(s.args),
                 env=dict(s.env),
+                connect_timeout=s.connect_timeout,
+                call_timeout=s.call_timeout,
             )
             for s in agent.mcp_servers
         ]

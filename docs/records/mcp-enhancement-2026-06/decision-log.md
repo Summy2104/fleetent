@@ -110,3 +110,31 @@
 **送审点（行为变化，非缺陷）**
 - 此前依赖**隐式继承**白名单外宿主变量的 stdio 服务，需改为在 `server.env` 显式声明——这是修复的安全意图。若有此类部署，部署时需补 `env`。
 - 白名单集合（POSIX/WIN）是否需要按实际接入的服务再补项。
+
+---
+
+## 变更 4：mcp-per-server-timeout（per-server 可配超时）
+
+**做了什么**
+- `McpServerConfig` 加 `connect_timeout`（默认 10.0）/`call_timeout`（默认 30.0）。
+- client.py 5 处 httpx 用点改 per-server：`_probe_once`/`_fetch_client_credentials_token`/`_register_http_server`/`_probe_http_tools` 用 `connect_timeout`，`_call_http_tool` 用 `call_timeout`；`_close_http_sessions` 保持固定。
+- `config.McpServerSettings` 加同名可选字段；`agent_app` 的 `McpServerConfig(...)` 映射透传——agent.yaml 的 `mcp_servers` 条目可声明 per-server 超时。
+- 新增 spec `mcp-per-server-timeout`；新增 `tests/unit/test_mcp_per_server_timeout.py`；更新 `docs/capabilities/mcp.md`。
+
+**问题**
+- P1：所有 HTTP 超时写死（连接 10s / 调用 30s）。企业内网 MCP 服务快慢差异大，慢服务被 30s 硬切、快服务想更紧超时——应 per-server 可配。
+
+**决策**
+- **D1 两个 per-server 字段 + 用点映射**：连接类（发现/探活/OAuth/注册）用 `connect_timeout`，工具调用用 `call_timeout`；`_close_http_sessions` 单 client 服务全部、无单一 server 归属，保持固定。
+- **D2 经 agent.yaml 直达、不碰 DB 迁移**：`McpServerSettings` 加可选字段（默认等于现状，向后兼容）+ `agent_app` 透传，agent 运行时即可 per-server 调超时。DB/admin 持久化（store 加列 + 迁移 + admin API）记为未来机械跟进。
+- **D3 不做 `resetTimeoutOnProgress`**：fleetent HTTP 传输为非流式请求/响应（读完整 body），进度重置需流式读改造，宜与未来「Streamable HTTP 流恢复」一并做。
+
+**改进/优化/新增点**
+- 消除 6 处魔法数字超时；慢/快 MCP 服务可分别调；默认零行为变化。
+
+**验证**
+- `make test-unit-ci` 全绿、coverage ≥ 75%；改动文件 ruff/mypy 零问题。
+
+**送审点**
+- per-server 超时仅经 agent.yaml 可设；DB authoring 路径暂用默认（需要时补 store 列 + 迁移）。
+- 默认 10s/30s 是否合适；`_close_http_sessions` 固定 10s 是否需可配。
