@@ -9,6 +9,7 @@ import signal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import fleetent.__main__ as cli
+import fleetent.agent_config as agent_config
 from fleetent.runtime import agent_app
 
 
@@ -264,3 +265,100 @@ def test_main_dispatches_agent_restart(tmp_path, monkeypatch) -> None:
     assert len(stop_calls) == 1
     assert len(serve_calls) == 1
     assert serve_calls[0] == "my-bot"
+
+
+# ── agent home .env auto-load ─────────────────────────────────────────────────
+
+
+def _make_mock_agent(name: str = "test-bot") -> MagicMock:
+    agent = MagicMock()
+    agent.name = name
+    agent.mcp_servers = []
+    return agent
+
+
+async def test_boot_loads_dotenv_into_os_environ(tmp_path, monkeypatch) -> None:
+    """.env in agent home is loaded into os.environ before scan_home runs."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("TEST_DOTENV_SENTINEL=hello-from-dotenv\n")
+
+    monkeypatch.setattr(agent_config, "scan_home", lambda _: _make_mock_agent())
+    monkeypatch.setattr(agent_app, "_start_infra", AsyncMock())
+
+    import fleetent.intelligence.vector_store as vs
+    import fleetent.skills as skills_mod
+    import fleetent.tools.plugin_loader as pl
+
+    monkeypatch.setattr(vs, "configure_from_active_agent", lambda: None)
+    monkeypatch.setattr(skills_mod, "scan", lambda: None)
+    monkeypatch.setattr(pl, "load_plugins", lambda: None)
+
+    fake_supervisor = MagicMock()
+    fake_supervisor.start = AsyncMock()
+
+    monkeypatch.delenv("TEST_DOTENV_SENTINEL", raising=False)
+
+    await agent_app.boot("test-bot", home=tmp_path, supervisor=fake_supervisor, with_infra=False)
+
+    assert os.environ.get("TEST_DOTENV_SENTINEL") == "hello-from-dotenv"
+
+
+async def test_boot_silently_skips_missing_dotenv(tmp_path, monkeypatch) -> None:
+    """boot() does not raise when no .env file exists in agent home."""
+    assert not (tmp_path / ".env").exists()
+
+    monkeypatch.setattr(agent_config, "scan_home", lambda _: _make_mock_agent())
+    monkeypatch.setattr(agent_app, "_start_infra", AsyncMock())
+
+    import fleetent.intelligence.vector_store as vs
+    import fleetent.skills as skills_mod
+    import fleetent.tools.plugin_loader as pl
+
+    monkeypatch.setattr(vs, "configure_from_active_agent", lambda: None)
+    monkeypatch.setattr(skills_mod, "scan", lambda: None)
+    monkeypatch.setattr(pl, "load_plugins", lambda: None)
+
+    fake_supervisor = MagicMock()
+    fake_supervisor.start = AsyncMock()
+
+    # Should not raise
+    await agent_app.boot("test-bot", home=tmp_path, supervisor=fake_supervisor, with_infra=False)
+
+
+async def test_boot_dotenv_does_not_override_existing_env(tmp_path, monkeypatch) -> None:
+    """.env value is ignored when the same var is already in the process environment."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("TEST_OVERRIDE_SENTINEL=from-file\n")
+
+    monkeypatch.setenv("TEST_OVERRIDE_SENTINEL", "from-process")
+
+    monkeypatch.setattr(agent_config, "scan_home", lambda _: _make_mock_agent())
+    monkeypatch.setattr(agent_app, "_start_infra", AsyncMock())
+
+    import fleetent.intelligence.vector_store as vs
+    import fleetent.skills as skills_mod
+    import fleetent.tools.plugin_loader as pl
+
+    monkeypatch.setattr(vs, "configure_from_active_agent", lambda: None)
+    monkeypatch.setattr(skills_mod, "scan", lambda: None)
+    monkeypatch.setattr(pl, "load_plugins", lambda: None)
+
+    fake_supervisor = MagicMock()
+    fake_supervisor.start = AsyncMock()
+
+    await agent_app.boot("test-bot", home=tmp_path, supervisor=fake_supervisor, with_infra=False)
+
+    assert os.environ["TEST_OVERRIDE_SENTINEL"] == "from-process"
+
+
+def test_pyproject_declares_python_dotenv_directly() -> None:
+    """python-dotenv must be a direct dependency, not just a transitive one."""
+    import tomllib
+    from pathlib import Path
+
+    root = Path(__file__).parent.parent.parent
+    data = tomllib.loads((root / "pyproject.toml").read_text())
+    deps = data["project"]["dependencies"]
+    assert any("python-dotenv" in d for d in deps), (
+        "python-dotenv must be listed in pyproject.toml [project].dependencies"
+    )
