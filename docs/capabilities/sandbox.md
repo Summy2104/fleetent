@@ -62,7 +62,7 @@ flowchart TD
 - [x] **生命周期管理（scope）**：按配置决定沙箱存活粒度
   - `session`（默认）：会话开始创建，同一会话内复用，会话结束时销毁（已接线）
   - `agent`：每个 agent 定义独享一个沙箱，跨会话长期保留；已安装依赖通过 `docker commit` 固化为镜像层
-  - 闲置超时自动销毁（`idle_hours`，默认 2 小时，适用于 `agent` scope）——**`sweep_idle` 实现就绪，运行时调度接线见 `sandbox-runtime-lifecycle-wiring`**
+  - 闲置超时自动销毁（`idle_hours`，默认 2 小时，适用于 `agent` scope）——**已由 agent 运行时周期性后台任务调度 `sweep_idle`（`sandbox-runtime-lifecycle-wiring`）**
 
 - [x] **启用/关闭控制（三态模式）**：全局 `mode` + agent 级别开关双层控制
   - `off`：`run_code` 工具不注册，AI 完全不知道代码执行能力存在
@@ -100,7 +100,7 @@ flowchart TD
 - [x] **执行超时与强制终止**：默认 30s（可配置，最长 600s）——已在 `run_code` 接线
   - 超时对容器 `docker kill`（先 SIGTERM，5s 后 SIGKILL）强制终止
 
-- [ ] **孤儿容器清理**：检测并销毁上次崩溃遗留的孤儿容器（`sandbox-*` 前缀）——**实现就绪（`cleanup_orphans`），agent 运行时启动接线见 `sandbox-runtime-lifecycle-wiring`**
+- [x] **孤儿容器清理**：检测并销毁上次崩溃遗留的孤儿容器（`sandbox-*` 前缀）——**已在 agent 运行时启动（`_start_infra`，Docker 可用时）接线（`sandbox-runtime-lifecycle-wiring`）**
 
 - [x] **执行结果写入 trace**：记录执行时长、退出码、输出大小、使用的沙箱 scope
 
