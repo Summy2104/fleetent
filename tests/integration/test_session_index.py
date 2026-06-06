@@ -96,3 +96,88 @@ def test_total_message_count_empty_is_zero():
     session_index._init_db()
     assert session_index.total_message_count() == 0
     assert session_index.count() == 0
+
+
+# --- 7. delete / delete_batch ---
+
+
+def test_delete_removes_existing_row():
+    session_index.record_activity("del-s1", user_id="u1", message_count=1, agent_name=None)
+    assert session_index.get("del-s1") is not None
+    session_index.delete("del-s1")
+    assert session_index.get("del-s1") is None
+
+
+def test_delete_nonexistent_is_idempotent():
+    session_index._init_db()
+    # Should not raise
+    session_index.delete("no-such-session")
+
+
+def test_delete_batch_removes_multiple_rows():
+    session_index.record_activity("b1", user_id="u1", message_count=1, agent_name=None)
+    session_index.record_activity("b2", user_id="u1", message_count=1, agent_name=None)
+    session_index.record_activity("b3", user_id="u1", message_count=1, agent_name=None)
+    session_index.delete_batch(["b1", "b2"])
+    assert session_index.get("b1") is None
+    assert session_index.get("b2") is None
+    assert session_index.get("b3") is not None  # unaffected
+
+
+def test_delete_batch_empty_list_is_idempotent():
+    session_index._init_db()
+    # Should not raise
+    session_index.delete_batch([])
+
+
+def test_delete_reduces_count():
+    session_index.record_activity("c1", user_id="u1", message_count=1, agent_name=None)
+    session_index.record_activity("c2", user_id="u1", message_count=1, agent_name=None)
+    before = session_index.count()
+    session_index.delete("c1")
+    assert session_index.count() == before - 1
+
+
+# --- 8. list_by_user pagination ---
+
+
+def test_list_by_user_limit_truncates_results(monkeypatch):
+    t = 100.0
+    for i in range(5):
+        monkeypatch.setattr(session_index.time, "time", lambda _t=t + i: _t)
+        session_index.record_activity(f"pg-{i}", user_id="pguser", message_count=1, agent_name=None)
+
+    rows = session_index.list_by_user("pguser", limit=2)
+    assert len(rows) == 2
+
+
+def test_list_by_user_cursor_before_updated_at(monkeypatch):
+    for ts, sid in [(100.0, "pg-a"), (200.0, "pg-b"), (300.0, "pg-c")]:
+        monkeypatch.setattr(session_index.time, "time", lambda _t=ts: _t)
+        session_index.record_activity(sid, user_id="pguser2", message_count=1, agent_name=None)
+
+    # Cursor at 250 → only pg-a (100) and pg-b (200) qualify
+    rows = session_index.list_by_user("pguser2", before_updated_at=250.0)
+    assert {r["session_id"] for r in rows} == {"pg-a", "pg-b"}
+
+
+def test_list_by_user_default_limit_is_50(monkeypatch):
+    """Default limit=50 means at most 50 rows returned."""
+    for i in range(60):
+        monkeypatch.setattr(session_index.time, "time", lambda _i=i: float(_i))
+        session_index.record_activity(
+            f"many-{i}", user_id="biguser", message_count=1, agent_name=None
+        )
+
+    rows = session_index.list_by_user("biguser")
+    assert len(rows) == 50
+
+
+def test_list_by_user_cursor_and_limit_combined(monkeypatch):
+    for ts, sid in [(10.0, "x1"), (20.0, "x2"), (30.0, "x3"), (40.0, "x4")]:
+        monkeypatch.setattr(session_index.time, "time", lambda _t=ts: _t)
+        session_index.record_activity(sid, user_id="curuser", message_count=1, agent_name=None)
+
+    # before_updated_at=35 → x1(10), x2(20), x3(30); limit=2 → x3, x2 (desc)
+    rows = session_index.list_by_user("curuser", limit=2, before_updated_at=35.0)
+    assert [r["session_id"] for r in rows] == ["x3", "x2"]

@@ -14,6 +14,7 @@ from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export f
 
 logger = logging.getLogger(__name__)
 
+
 async def _agent_run(
     messages: list[dict[str, Any]], user_id: str, agent_name: str | None = None
 ) -> str:

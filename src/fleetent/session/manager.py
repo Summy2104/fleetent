@@ -6,11 +6,10 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
-import structlog
-
 from fleetent import paths
+from fleetent.observability.structured_logging import get_logger
 
-logger = structlog.get_logger(__name__)
+_logger = get_logger("session.manager")
 
 SESSIONS_DIR = paths.sessions_dir()
 
@@ -80,7 +79,7 @@ async def _session_maintenance_loop(interval: float) -> None:
             # without this, periodically-cleaned sessions would leak their containers.
             await _release_sandboxes(removed)
         except Exception as exc:  # noqa: BLE001 — a single failure must not kill the loop
-            logger.warning("session_maintenance_loop_iteration_failed", error=str(exc))
+            _logger.warn("session_maintenance_loop_iteration_failed", error=str(exc))
 
 
 def start_session_maintenance(*, interval: float | None = None) -> asyncio.Task[None]:
@@ -156,12 +155,19 @@ def cleanup_expired(
         try:
             path.unlink()
         except OSError as exc:
-            logger.warning("session_cleanup_delete_failed", session_id=session_id, error=str(exc))
+            _logger.warn("session_cleanup_delete_failed", session_id=session_id, error=str(exc))
             continue
         removed.append(session_id)
-        logger.info("session_cleanup_deleted", session_id=session_id)
+        _logger.info("session_cleanup_deleted", session_id=session_id)
 
-    logger.info("session_cleanup_done", removed_count=len(removed), ttl_seconds=ttl_seconds)
+    _logger.info("session_cleanup_done", removed_count=len(removed), ttl_seconds=ttl_seconds)
+    if removed:
+        from fleetent.session import index as session_index
+
+        try:
+            session_index.delete_batch(removed)
+        except Exception as exc:  # noqa: BLE001 — index sync must not break file cleanup
+            _logger.warn("session_cleanup_index_sync_failed", count=len(removed), error=str(exc))
     return removed
 
 
@@ -259,19 +265,37 @@ def enforce_capacity(
         try:
             path.unlink()
         except OSError as exc:
-            logger.warning("session_capacity_delete_failed", session_id=session_id, error=str(exc))
+            _logger.warn("session_capacity_delete_failed", session_id=session_id, error=str(exc))
             continue
         removed.append(session_id)
-        logger.info("session_capacity_evicted", session_id=session_id)
+        _logger.info("session_capacity_evicted", session_id=session_id)
 
-    logger.info(
+    _logger.info(
         "session_capacity_done",
         evicted_count=len(removed),
         reasons=reasons,
         max_total_bytes=max_total_bytes,
         max_count=max_count,
     )
+    if removed:
+        from fleetent.session import index as session_index
+
+        try:
+            session_index.delete_batch(removed)
+        except Exception as exc:  # noqa: BLE001 — index sync must not break capacity eviction
+            _logger.warn("session_capacity_index_sync_failed", count=len(removed), error=str(exc))
     return removed
+
+
+def list_by_user(
+    user_id: str,
+    limit: int = 50,
+    before_updated_at: float | None = None,
+) -> list[dict[str, object]]:
+    """Return sessions for a user, most-recently-active first, with cursor pagination."""
+    from fleetent.session import index as session_index
+
+    return session_index.list_by_user(user_id, limit=limit, before_updated_at=before_updated_at)
 
 
 def _get_lock(session_id: str) -> asyncio.Lock:
@@ -298,14 +322,15 @@ def _read(session_id: str) -> tuple[list[dict[str, object]], dict[str, object]]:
     return list(raw.get("messages", [])), dict(raw.get("meta", {}))
 
 
-def list_session_ids(prefix: str = "") -> list[str]:
+def list_session_ids(prefix: str = "", limit: int | None = None) -> list[str]:
     """Return persisted session ids, optionally filtered to those under ``prefix``.
 
     Additive read helper (tui-gateway): lets the TUI gateway enumerate a user's
     sessions without changing any existing session contract. Ids are derived the
     same way as the maintenance scanners (recurses subdirs, skips ``.json.tmp``).
     """
-    return sorted(sid for sid, _size, _mtime in _scan_sessions() if sid.startswith(prefix))
+    result = sorted(sid for sid, _size, _mtime in _scan_sessions() if sid.startswith(prefix))
+    return result[:limit] if limit is not None else result
 
 
 async def load(session_id: str) -> list[dict[str, object]]:
@@ -352,7 +377,7 @@ async def save(
             agent_name=agent_name,
         )
     except Exception as exc:  # noqa: BLE001 — auxiliary index must not break persistence
-        logger.warning("session_index_update_failed", session_id=session_id, error=str(exc))
+        _logger.warn("session_index_update_failed", session_id=session_id, error=str(exc))
 
     # Internal maintenance trigger (no external cron): opportunistically prune
     # expired sessions and enforce disk capacity as a side effect of activity,
@@ -362,7 +387,7 @@ async def save(
         removed = maybe_run_maintenance()
         await _release_sandboxes(removed)
     except Exception as exc:  # noqa: BLE001 — maintenance must not break persistence
-        logger.warning("session_maintenance_trigger_failed", session_id=session_id, error=str(exc))
+        _logger.warn("session_maintenance_trigger_failed", session_id=session_id, error=str(exc))
 
 
 async def clear(session_id: str) -> None:
@@ -408,4 +433,4 @@ async def _release_sandboxes(session_ids: list[str]) -> None:
         try:
             await manager.release_session(session_id)
         except Exception as exc:  # noqa: BLE001 — sandbox reclaim must not break persistence
-            logger.warning("sandbox_release_failed", session_id=session_id, error=str(exc))
+            _logger.warn("sandbox_release_failed", session_id=session_id, error=str(exc))
