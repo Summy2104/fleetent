@@ -1042,6 +1042,9 @@ def _record_agent_run_completed(
     )
 
 
+_active_runs: int = 0
+
+
 async def run(
     messages: list[dict[str, Any]],
     user_id: str = "default",
@@ -1085,6 +1088,50 @@ async def run(
     a future run()-builds-catalog path, and does not re-filter here (avoiding double
     narrowing). Callers narrow at the point they build the catalog.
     """
+    global _active_runs
+    _active_runs += 1
+    try:
+     return await _run_inner(
+        messages=messages, user_id=user_id, system_prompt=system_prompt,
+        is_sub_agent=is_sub_agent, reply_func=reply_func, allowed_tools=allowed_tools,
+        agent_name=agent_name, max_turns=max_turns,
+        max_consecutive_failures=max_consecutive_failures, max_tokens=max_tokens,
+        force_model=force_model, disabled_skills_trace=disabled_skills_trace,
+        loop_repeat_threshold=loop_repeat_threshold,
+        loop_ignore_arg_keys=loop_ignore_arg_keys,
+        guardrail_repeat_threshold=guardrail_repeat_threshold,
+        cancel_token=cancel_token, sandbox_mode=sandbox_mode,
+        agent_features=agent_features, session_id=session_id,
+        allowed_skills=allowed_skills, governance=governance, model_policy=model_policy,
+     )
+    finally:
+        _active_runs -= 1
+
+
+async def _run_inner(
+    messages: list[dict[str, Any]],
+    user_id: str = "default",
+    system_prompt: str = _SYSTEM,
+    is_sub_agent: bool = False,
+    reply_func: ReplyFunc | None = None,
+    allowed_tools: list[str] | None = None,
+    agent_name: str | None = None,
+    max_turns: int | None = None,
+    max_consecutive_failures: int | None = None,
+    max_tokens: int | None = None,
+    force_model: str | None = None,
+    disabled_skills_trace: list[dict[str, str]] | None = None,
+    loop_repeat_threshold: int | None = None,
+    loop_ignore_arg_keys: list[str] | None = None,
+    guardrail_repeat_threshold: int | None = None,
+    cancel_token: CancelToken | None = None,
+    sandbox_mode: Mode | None = None,
+    agent_features: dict[str, Any] | None = None,
+    session_id: str | None = None,
+    allowed_skills: list[str] | None = None,
+    governance: GovernanceConfig | None = None,
+    model_policy: ModelPolicySnapshot | None = None,
+) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
     # force_model layers a request-level override onto that route (MR1); when

@@ -3255,3 +3255,45 @@ async def test_run_stream_default_allowed_skills_is_none(mock_client, monkeypatc
     _ = [e async for e in al.run_stream("go")]
 
     assert captured["allowed_skills"] is None
+
+
+# ── _active_runs counter ──────────────────────────────────────────────────────
+
+
+async def test_active_runs_increments_during_run(mock_client) -> None:
+    """_active_runs is 1 while run() is executing."""
+    observed: list[int] = []
+
+    original_create = mock_client.chat.completions.create
+
+    async def spy_create(*args, **kwargs):
+        observed.append(al._active_runs)
+        return await original_create(*args, **kwargs)
+
+    mock_client.chat.completions.create = spy_create
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=lambda *a, **k: (observed.append(al._active_runs) or _text_resp("ok"))
+    )
+
+    await al.run([{"role": "user", "content": "hi"}])
+
+    assert observed == [1]
+
+
+async def test_active_runs_decrements_after_run(mock_client) -> None:
+    """_active_runs returns to 0 after run() completes."""
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
+
+    assert al._active_runs == 0
+    await al.run([{"role": "user", "content": "hi"}])
+    assert al._active_runs == 0
+
+
+async def test_active_runs_decrements_on_exception(mock_client) -> None:
+    """_active_runs returns to 0 even when run() raises."""
+    mock_client.chat.completions.create = AsyncMock(side_effect=RuntimeError("boom"))
+
+    assert al._active_runs == 0
+    with pytest.raises(Exception):  # noqa: B017
+        await al.run([{"role": "user", "content": "hi"}])
+    assert al._active_runs == 0
