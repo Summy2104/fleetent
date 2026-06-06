@@ -30,9 +30,10 @@ $EDITOR ~/.fleetent/agents/default/agent.yaml ~/.fleetent/agents/default/.env
 fleetent "hello"
 ```
 
-> 仓库示例模板按使用方分目录：`config/platform/`（平台 env/config）和 `config/agent/`
->（Agent runtime 文件形状）。平台部署 Agent 时会 materialize 到 `agents/<agent-id>/agent.yaml`
-> 和 `agents/<agent-id>/.env`。
+> 仓库示例模板贴近运行位置：Platform 使用根目录 `.env.example` 和
+> `platform.yaml.example`；默认 Agent 使用 `agents/default/agent.yaml.example` 和
+> `agents/default/.env.example`。平台部署 Agent 时会 materialize 到
+> `agents/<agent-id>/agent.yaml` 和 `agents/<agent-id>/.env`。
 
 > 这是面向开发者 / 单机快速体验的路径。**on-prem 生产部署请用 Docker**
 > （`Dockerfile` + `docker-compose.yml`），环境可复现、数据不出内网。

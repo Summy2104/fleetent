@@ -16,8 +16,8 @@ def test_constants_derive_from_paths(monkeypatch) -> None:
     assert paths.data_dir() / "traces.jsonl" == eval_logger.TRACE_PATH
     assert paths.data_dir() / "generated" == builtin_tools.GENERATED_DIR
     assert paths.data_dir() / "uploads" == builtin_tools.UPLOADS_DIR
-    assert paths.settings_yaml_path() == sandbox_config.SETTINGS_PATH
-    assert paths.settings_yaml_path() == sandbox_enablement.SETTINGS_PATH
+    assert paths.platform_yaml_path() == sandbox_config.SETTINGS_PATH
+    assert paths.platform_yaml_path() == sandbox_enablement.SETTINGS_PATH
 
 
 def test_fleetent_home_redirects_on_reload(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

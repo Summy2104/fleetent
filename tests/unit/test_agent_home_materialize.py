@@ -168,10 +168,7 @@ def test_materialize_splits_agent_knowledge_and_kb_service_config(tmp_path, monk
             "permissions": {"search": True},
         }
     ]
-    service_yaml = yaml.safe_load(
-        (tmp_path / "config" / "knowledge.yaml").read_text(encoding="utf-8")
-    )
-    assert service_yaml["knowledge_bases"][0]["sources"][0]["id"] == "support-drive"
+    assert not (tmp_path / "config" / "knowledge.yaml").exists()
     assert "google_drive" not in agent_yaml["knowledge"]
 
 
@@ -207,5 +204,6 @@ def test_materialize_preserves_kb_source_credential_env_values(tmp_path, monkeyp
     materialize.write_home(_agent(), knowledge_config=knowledge_config)
 
     env_text = (home / ".env").read_text(encoding="utf-8")
-    assert "FLEETENT_CONFLUENCE_TOKEN=secret-token" in env_text
-    assert "FLEETENT_CONFLUENCE_USERNAME=" in env_text
+    assert "FLEETENT_CONFLUENCE_TOKEN=" not in env_text
+    assert "FLEETENT_CONFLUENCE_USERNAME=" not in env_text
+    assert "SUP_BOT=xoxb-real" in env_text

@@ -150,7 +150,7 @@ install_tool() {
 }
 
 # Fix the state directory (FLEETENT_HOME) and persist it to the user's shell rc
-# so the global command resolves config/data there regardless of CWD.
+# so the global command resolves Platform, Agent, and data files there regardless of CWD.
 setup_home_env() {
     export FLEETENT_HOME="$FLEETENT_HOME_DIR"
     mkdir -p "$FLEETENT_HOME"
@@ -185,20 +185,25 @@ copy_config_templates() {
     local default_agent_home="$FLEETENT_HOME/agents/default"
     mkdir -p "$default_agent_home/data"
 
-    if [ -f "$REPO_ROOT/config/platform/.env.example" ] && [ ! -f "$FLEETENT_HOME/.env" ]; then
-        cp "$REPO_ROOT/config/platform/.env.example" "$FLEETENT_HOME/.env"
+    if [ -f "$REPO_ROOT/.env.example" ] && [ ! -f "$FLEETENT_HOME/.env" ]; then
+        cp "$REPO_ROOT/.env.example" "$FLEETENT_HOME/.env"
         log_success "Created $FLEETENT_HOME/.env"
     fi
 
-    if [ -f "$REPO_ROOT/config/agent/.env.example" ] && [ ! -f "$default_agent_home/.env" ]; then
-        cp "$REPO_ROOT/config/agent/.env.example" "$default_agent_home/.env"
+    if [ -f "$REPO_ROOT/platform.yaml.example" ] && [ ! -f "$FLEETENT_HOME/platform.yaml" ]; then
+        cp "$REPO_ROOT/platform.yaml.example" "$FLEETENT_HOME/platform.yaml"
+        log_success "Created $FLEETENT_HOME/platform.yaml"
+    fi
+
+    if [ -f "$REPO_ROOT/agents/default/.env.example" ] && [ ! -f "$default_agent_home/.env" ]; then
+        cp "$REPO_ROOT/agents/default/.env.example" "$default_agent_home/.env"
         log_success "Created $default_agent_home/.env"
     fi
 
-    if [ -f "$REPO_ROOT/config/agent/agent.yaml.example" ] && [ ! -f "$default_agent_home/agent.yaml" ]; then
+    if [ -f "$REPO_ROOT/agents/default/agent.yaml.example" ] && [ ! -f "$default_agent_home/agent.yaml" ]; then
         sed -e "s/^name:.*/name: default                  # required; matches agents\\/default\\//" \
             -e "s/^memory_namespace:.*/memory_namespace: default/" \
-            "$REPO_ROOT/config/agent/agent.yaml.example" > "$default_agent_home/agent.yaml"
+            "$REPO_ROOT/agents/default/agent.yaml.example" > "$default_agent_home/agent.yaml"
         log_success "Created $default_agent_home/agent.yaml"
     fi
 }
@@ -244,6 +249,7 @@ print_success() {
     echo "    then open a new shell and run:  fleetent \"hello\""
     echo "  - State / config live in:  $FLEETENT_HOME"
     echo "  - Edit platform env in:  $FLEETENT_HOME/.env"
+    echo "  - Edit platform config in:  $FLEETENT_HOME/platform.yaml"
     echo "  - Edit default Agent env in:  $FLEETENT_HOME/agents/default/.env"
     echo "  - For on-prem PRODUCTION deployment, use the Docker path (docker-compose.yml)."
 }

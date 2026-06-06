@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal
 import yaml
 
 from fleetent import paths
-from fleetent.config import MCP_SERVERS_YAML_PATH, SETTINGS_YAML_PATH, Settings
+from fleetent.config import MCP_SERVERS_YAML_PATH, PLATFORM_YAML_PATH, Settings
 
 if TYPE_CHECKING:
     from fleetent.agent_config import AgentFile
@@ -194,7 +194,7 @@ def _default_scan_paths() -> list[Path]:
     server file, and every discoverable per-agent ``agent.yaml`` (single- + multi-agent)."""
     from fleetent import agent_config
 
-    scan = [SETTINGS_YAML_PATH, MCP_SERVERS_YAML_PATH, paths.agent_file()]
+    scan = [PLATFORM_YAML_PATH, MCP_SERVERS_YAML_PATH, paths.agent_file()]
     root = agent_config._resolve_agents_dir(None)
     if root.is_dir():
         scan.extend(

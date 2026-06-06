@@ -108,18 +108,21 @@ class KnowledgeConfigSnapshot(BaseModel):
 
 
 def knowledge_config_path(base_dir: Path | None = None) -> Path:
-    """Return the default platform/KB-service knowledge config path."""
+    """Return the default Platform config path that contains embedded Knowledge config."""
     if base_dir is not None:
-        return base_dir / "config" / "knowledge.yaml"
-    return paths.config_dir() / "knowledge.yaml"
+        return base_dir / "platform.yaml"
+    return paths.base_dir() / "platform.yaml"
 
 
 def load_knowledge_config(path: Path | None = None) -> KnowledgeConfigSnapshot:
-    """Load and validate the platform/KB-service knowledge construction config."""
+    """Load and validate embedded Platform Knowledge construction config."""
     config_path = path or knowledge_config_path()
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"{config_path} must contain a mapping")
+    knowledge = raw.get("knowledge")
+    if isinstance(knowledge, dict):
+        raw = {"knowledge_bases": knowledge.get("knowledge_bases", [])}
     _reject_inline_source_secrets(raw, config_path)
     return KnowledgeConfigSnapshot.model_validate(raw)
 

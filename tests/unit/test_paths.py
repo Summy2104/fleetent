@@ -46,11 +46,12 @@ def test_repo_local_used_in_development(
     assert paths.data_dir() == repo / "data"
 
 
-def test_repo_local_detected_by_config_dir(
+def test_repo_local_detected_by_platform_example(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     repo = tmp_path / "checkout"
-    (repo / "config").mkdir(parents=True)
+    repo.mkdir(parents=True)
+    (repo / "platform.yaml.example").write_text("knowledge: {}\n", encoding="utf-8")
     monkeypatch.chdir(repo)
 
     assert paths.base_dir() == repo
@@ -83,7 +84,7 @@ def test_derived_paths_under_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path:
     home = tmp_path / "h"
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
-    assert paths.settings_yaml_path() == home / "config" / "settings.yaml"
+    assert paths.platform_yaml_path() == home / "platform.yaml"
     assert paths.sessions_dir() == home / "data" / "sessions"
 
 

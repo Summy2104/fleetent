@@ -8,7 +8,7 @@
 #                  src/fleetent/config.py (nested Settings models).
 #
 # Fields that MUST be configured (name, version, models, system_prompt, connectors,
-# bindings, access) live in config/agent/agent.yaml.example instead.
+# bindings, access) live in agents/default/agent.yaml.example instead.
 
 # ── context window management ─────────────────────────────────────────────────
 # Controls when and how the in-session message history is compressed.

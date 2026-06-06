@@ -109,7 +109,7 @@ scheduled_tasks (
 )
 ```
 
-Cron jobs 和 webhook sources 不写入 `config/settings.yaml`。Cron jobs 通过 SQLite-backed runtime management 创建和恢复；webhook source management 将由后续独立 change 接入 runtime API / store。`settings.yaml` 只保存 `scheduling.enabled`、`scheduling.default_timezone`、`webhooks.enabled`、`webhooks.max_body_bytes` 等全局策略。
+Cron jobs 和 webhook sources 不写入平台配置文件。Cron jobs 通过 SQLite-backed runtime management 创建和恢复；webhook source management 将由后续独立 change 接入 runtime API / store。`platform.yaml` 只保存 `scheduling.enabled`、`scheduling.default_timezone`、`webhooks.enabled`、`webhooks.max_body_bytes` 等全局策略。
 
 ## 接口定义
 
@@ -150,7 +150,7 @@ def extract_message(template: str | None, payload: Any) -> str:
 
 - ✅ **任务持久化**：任务定义存 SQLite（`data/fleetent.db`），server 重启后自动恢复调度
 
-- ✅ **全局调度配置**：`config/settings.yaml` 中只保存 `scheduling.enabled` 和 `scheduling.default_timezone`
+- ✅ **全局调度配置**：`platform.yaml` 中只保存 `scheduling.enabled` 和 `scheduling.default_timezone`
   - 旧 `config/cron.yaml` 不再读取；文件存在时启动失败并提示通过 SQLite-backed runtime management 创建任务
 
 ### Webhook
@@ -166,7 +166,7 @@ def extract_message(template: str | None, payload: Any) -> str:
 - ✅ **消息提取**：支持 `message_template` 从 payload 中提取字段（`{key}` / `{key[subkey]}` 语法）
   - 提取失败时降级为 JSON 序列化整个 payload
 
-- ✅ **全局 Webhook 策略**：`config/settings.yaml` 中保存 `webhooks.enabled` 和 `webhooks.max_body_bytes`
+- ✅ **全局 Webhook 策略**：`platform.yaml` 中保存 `webhooks.enabled` 和 `webhooks.max_body_bytes`
   - 禁用时请求在分发前被拒绝
   - 超过最大 body 大小时请求在分发前被拒绝
 
@@ -431,7 +431,7 @@ def extract_message(template: str | None, payload: Any) -> str:
 **需要 mock 的依赖**：
 - `agent_loop.run`：隔离 LLM 调用，只验证触发行为
 - SQLite DB 路径（`schedule_store.DB_PATH`）：`monkeypatch` 到 `tmp_path`
-- `config/settings.yaml` 路径：`monkeypatch` 到临时文件，仅注入全局 scheduling/webhooks 策略
+- `platform.yaml` 路径：`monkeypatch` 到临时文件，仅注入全局 scheduling/webhooks 策略
 - APScheduler：测试注册逻辑时可 mock `_scheduler.add_job`，不实际启动定时器
 
 ## 待决问题

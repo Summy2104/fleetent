@@ -557,8 +557,8 @@ def test_repo_agent_yaml_example_loads_as_single_agent_file() -> None:
     from pathlib import Path
 
     repo = Path(__file__).resolve().parents[2]
-    example = repo / "config" / "agent" / "agent.yaml.example"
-    assert example.is_file(), "config/agent/agent.yaml.example must exist (installer template)"
+    example = repo / "agents" / "default" / "agent.yaml.example"
+    assert example.is_file(), "agents/default/agent.yaml.example must exist (installer template)"
     raw = yaml.safe_load(example.read_text(encoding="utf-8"))
     assert "knowledge_base" not in raw
     agent = agent_config.load_agent_home_file(example)

@@ -193,17 +193,12 @@ def home_dir(name: str) -> Path:
 
 def _env_var_names(
     agent: AgentFile,
-    knowledge_config: KnowledgeConfigSnapshot | None = None,
 ) -> list[str]:
     """Collect the env-var names the agent's home references."""
     names: list[str] = []
     for key, value in _flatten(agent.model_dump(mode="json")):
         if key.endswith("_env") and isinstance(value, str) and value:
             names.append(value)
-    if knowledge_config is not None:
-        for key, value in _flatten(knowledge_config.model_dump(mode="json")):
-            if key.endswith("_env") and isinstance(value, str) and value:
-                names.append(value)
     # stable order, de-duplicated
     seen: set[str] = set()
     ordered: list[str] = []
@@ -212,6 +207,17 @@ def _env_var_names(
             seen.add(n)
             ordered.append(n)
     return ordered
+
+
+def _knowledge_env_var_names(knowledge_config: KnowledgeConfigSnapshot | None) -> set[str]:
+    """Collect Platform-owned Knowledge construction env names to exclude from Agent env."""
+    if knowledge_config is None:
+        return set()
+    names: set[str] = set()
+    for key, value in _flatten(knowledge_config.model_dump(mode="json")):
+        if key.endswith("_env") and isinstance(value, str) and value:
+            names.add(value)
+    return names
 
 
 def _parse_env(text: str) -> dict[str, str]:
@@ -230,6 +236,7 @@ def _seed_env(
     names: list[str],
     *,
     source_agent: agent_store.Agent | None = None,
+    exclude_existing: set[str] | None = None,
 ) -> None:
     """Write/refresh ``.env`` with the referenced names, preserving operator values.
 
@@ -256,7 +263,10 @@ def _seed_env(
             value = existing.get(name, "")
         lines.append(f"{name}={value}")
     # keep any operator-added vars not referenced by the definition
+    excluded = exclude_existing or set()
     for key, val in existing.items():
+        if key in excluded:
+            continue
         if key not in names:
             lines.append(f"{key}={val}")
     env_path.write_text("\n".join(lines) + "\n" if lines else "", encoding="utf-8")
@@ -293,32 +303,10 @@ def write_home(
     (home / AGENT_FILE_NAME).write_text(
         yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
-    if knowledge_config is not None:
-        write_knowledge_config(knowledge_config)
-    _seed_env(home, _env_var_names(agent, knowledge_config), source_agent=source_agent)
-    return home
-
-
-def write_knowledge_config(
-    knowledge_config: KnowledgeConfigSnapshot,
-    *,
-    service_home: Path | None = None,
-) -> Path:
-    """Materialize KB construction config to platform or standalone service home."""
-    config_dir = (service_home / "config") if service_home is not None else paths.config_dir()
-    config_dir.mkdir(parents=True, exist_ok=True)
-    path = config_dir / "knowledge.yaml"
-    path.write_text(
-        yaml.safe_dump(_knowledge_payload(knowledge_config), sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
+    _seed_env(
+        home,
+        _env_var_names(agent),
+        source_agent=source_agent,
+        exclude_existing=_knowledge_env_var_names(knowledge_config),
     )
-    return path
-
-
-def _knowledge_payload(knowledge_config: KnowledgeConfigSnapshot) -> dict[str, object]:
-    payload = knowledge_config.model_dump(mode="json", exclude_defaults=False)
-    for kb in payload["knowledge_bases"]:
-        for source in kb["sources"]:
-            source.pop("tenant_id", None)
-            source.pop("kb_id", None)
-    return payload
+    return home

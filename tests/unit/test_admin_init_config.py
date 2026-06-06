@@ -22,10 +22,9 @@ def run_admin(*args: str) -> tuple[str, str, int]:
 
 
 def write_config_examples(root: Path) -> None:
-    # init-config seeds .env from the platform template under config/platform/.
-    platform_dir = root / "config" / "platform"
-    platform_dir.mkdir(parents=True, exist_ok=True)
-    (platform_dir / ".env.example").write_text("FLEETENT_AUTO_UPGRADE=false\n", encoding="utf-8")
+    # init-config seeds Platform home files from root examples.
+    (root / ".env.example").write_text("FLEETENT_AUTO_UPGRADE=false\n", encoding="utf-8")
+    (root / "platform.yaml.example").write_text("knowledge:\n  mode: embedded\n", encoding="utf-8")
 
 
 def test_init_config_dry_run_prints_planned_paths_without_writing(tmp_path, monkeypatch):
@@ -38,6 +37,7 @@ def test_init_config_dry_run_prints_planned_paths_without_writing(tmp_path, monk
     assert err == ""
     for path in [
         ".env",
+        "platform.yaml",
         "data/",
         "data/logs/",
         "data/diagnostics/",
@@ -47,7 +47,7 @@ def test_init_config_dry_run_prints_planned_paths_without_writing(tmp_path, monk
     assert "config/settings.yaml" not in out
     assert "config/mcp.servers.yaml" not in out
 
-    for path in [".env", "data", "secrets"]:
+    for path in [".env", "platform.yaml", "data", "secrets"]:
         assert not (tmp_path / path).exists()
 
 
@@ -62,8 +62,12 @@ def test_init_config_skips_existing_files_by_default(tmp_path, monkeypatch):
     assert code == 0
     assert err == ""
     assert "skip .env" in out
+    assert "create platform.yaml" in out
     assert "config/settings.yaml" not in out
     assert existing_env.read_text(encoding="utf-8") == "OPENAI_API_KEY=local\n"
+    assert (tmp_path / "platform.yaml").read_text(
+        encoding="utf-8"
+    ) == "knowledge:\n  mode: embedded\n"
     assert (tmp_path / "data/logs").is_dir()
     assert (tmp_path / "data/diagnostics").is_dir()
     assert (tmp_path / "secrets").is_dir()
@@ -84,5 +88,6 @@ def test_init_config_force_overwrites_generated_files_and_keeps_unknown_files(
     assert code == 0
     assert err == ""
     assert "overwrite .env" in out
+    assert "create platform.yaml" in out
     assert (tmp_path / ".env").read_text(encoding="utf-8") == "FLEETENT_AUTO_UPGRADE=false\n"
     assert unknown_secret.read_text(encoding="utf-8") == "keep me\n"

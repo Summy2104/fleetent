@@ -147,7 +147,7 @@ flowchart TD
 **需要 mock 的依赖**：
 - Docker CLI 调用（`asyncio.create_subprocess_exec`，封装 `docker run / exec / rm`）：mock 子进程调用，隔离真实容器创建
 - `agent_store`：mock agent 的 `features.code_execution` 值
-- `config/settings.yaml` 路径：`monkeypatch` 到临时文件
+- `platform.yaml` 路径：`monkeypatch` 到临时文件
 
 ## 待决问题
 

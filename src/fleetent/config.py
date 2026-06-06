@@ -14,7 +14,7 @@ from pydantic_settings import (
 
 from fleetent import paths
 
-SETTINGS_YAML_PATH = paths.settings_yaml_path()
+PLATFORM_YAML_PATH = paths.platform_yaml_path()
 MCP_SERVERS_YAML_PATH = paths.config_dir() / "mcp.servers.yaml"
 # Empty after the config consolidation: the platform Settings carries no secret
 # fields. Kept as a defensive safety net so the YAML source still refuses any known
@@ -30,7 +30,7 @@ class SecretRejectingYamlSettingsSource(YamlConfigSettingsSource):
         if secret_fields:
             fields = ", ".join(secret_fields)
             raise ValueError(
-                f"Secret fields cannot appear in config/settings.yaml: {fields}. "
+                f"Secret fields cannot appear in platform.yaml: {fields}. "
                 "Move these values to env/.env."
             )
         return data
@@ -214,7 +214,7 @@ class Settings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         yaml_settings = SecretRejectingYamlSettingsSource(
-            settings_cls, yaml_file=SETTINGS_YAML_PATH
+            settings_cls, yaml_file=PLATFORM_YAML_PATH
         )
         return (
             init_settings,

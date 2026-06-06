@@ -1,12 +1,12 @@
 # Agent 配置模板 — 仅列出「需要明确配置」的字段。
 #
 # 使用方式：复制本文件到 agent home，重命名为 agent.yaml，按需填写。
-#   cp config/agent/agent.configure.yaml.example \
+#   cp agents/default/agent.configure.yaml.example \
 #      $FLEETENT_HOME/agents/<agent-id>/agent.yaml
 #
 # 不在本文件中的字段均有内置默认值，无需填写即可正常运行。
-# 完整字段参考：config/agent/agent.yaml.example
-# 治理/调优默认值参考：config/agent/agent.defaults.yaml.example
+# 完整字段参考：agents/default/agent.yaml.example
+# 治理/调优默认值参考：agents/default/agent.defaults.yaml.example
 
 # ── 必填 ──────────────────────────────────────────────────────────────────────
 name: ""                           # agent 名称（单 agent 模式下可任意值）

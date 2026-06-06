@@ -2,7 +2,7 @@
 
 Externalises the previously hardcoded `docker run` resource flags
 (`--memory`/`--cpus`/`--network`/`--read-only`) into a configurable
-`SandboxResources` dataclass loaded from `config/settings.yaml`'s shared
+`SandboxResources` dataclass loaded from `platform.yaml`'s shared
 `sandbox:` section (skeleton owned by SB3). The dataclass defaults are the
 single source of truth for the "safe defaults" used when the file, section, or
 a field is absent. Loading only overrides what is present and validates each
@@ -26,7 +26,7 @@ _logger = get_logger("sandbox.config")
 
 # Shared with sandbox_enablement.SETTINGS_PATH; an injectable module-level
 # constant (no global mutable state) so tests monkeypatch it to an isolated path.
-SETTINGS_PATH: Path = paths.settings_yaml_path()
+SETTINGS_PATH: Path = paths.platform_yaml_path()
 
 _EXEC_TIMEOUT_MIN = 1
 _EXEC_TIMEOUT_MAX = 600

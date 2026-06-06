@@ -19,10 +19,10 @@ from fleetent.observability.structured_logging import get_logger
 
 _logger = get_logger("sandbox.enablement")
 
-# config/settings.yaml is the home of the shared `sandbox:` section (SB3 owns the
+# platform.yaml is the home of the shared `sandbox:` section (SB3 owns the
 # skeleton; SB2 adds scope/idle_hours, SB4 adds resources). Injectable module-level
 # constant (no global mutable state) so tests monkeypatch it to an isolated path.
-SETTINGS_PATH: Path = paths.settings_yaml_path()
+SETTINGS_PATH: Path = paths.platform_yaml_path()
 
 _DEFAULT_MODE_NAME = "all"
 
@@ -34,7 +34,7 @@ class Mode(StrEnum):
 
 
 def load_sandbox_mode() -> Mode:
-    """Read the configured sandbox mode from `config/settings.yaml`'s sandbox section.
+    """Read the configured sandbox mode from `platform.yaml`'s sandbox section.
 
     Returns `Mode.ALL` when the file, the `sandbox:` section, or `mode` is absent or
     invalid (logging a warning on an unrecognised value), keeping the documented

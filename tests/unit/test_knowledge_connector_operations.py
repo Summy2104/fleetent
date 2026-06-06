@@ -91,22 +91,21 @@ def test_google_drive_connectors_load_explicit_env_fields_from_settings():
     assert definition.config.token_uri_env == ""
 
 
-def test_connectors_load_from_default_knowledge_yaml(tmp_path, monkeypatch):
+def test_connectors_load_from_platform_yaml_knowledge_section(tmp_path, monkeypatch):
     from fleetent.intelligence.knowledge_base import list_configured_connectors
 
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    (config_dir / "knowledge.yaml").write_text(
+    (tmp_path / "platform.yaml").write_text(
         """
-knowledge_bases:
-  - id: engineering
-    tenant_id: default
-    sources:
-      - id: eng-drive
-        type: google_drive
-        folder_id: folder-1
-        credential_ref: file:///secure/google.json
+knowledge:
+  knowledge_bases:
+    - id: engineering
+      tenant_id: default
+      sources:
+        - id: eng-drive
+          type: google_drive
+          folder_id: folder-1
+          credential_ref: file:///secure/google.json
 """,
         encoding="utf-8",
     )
@@ -569,5 +568,5 @@ async def test_sync_uses_real_confluence_client_factory_by_default(monkeypatch):
 
 
 # Removed test_connector_settings_example_contains_only_env_secret_references:
-# config/settings.yaml.example was dropped (drop-global-config-files); KB connector
-# secret-reference validation moves with the deferred intelligence -> agent.yaml work.
+# legacy settings.yaml examples were dropped; KB connector secret-reference validation
+# lives with Platform knowledge config.

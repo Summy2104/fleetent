@@ -228,7 +228,9 @@ def test_platform_env_and_default_agent_home_seeded(tmp_path: Path) -> None:
     fh = home / ".fleetent"
     agent_home = fh / "agents" / "default"
     assert (fh / ".env").is_file()
+    assert (fh / "platform.yaml").is_file()
     assert "FLEETENT_SECRET_KEY=" in (fh / ".env").read_text()
+    assert "knowledge:" in (fh / "platform.yaml").read_text()
     assert (agent_home / "agent.yaml").is_file()
     assert (agent_home / ".env").is_file()
     assert (agent_home / "data").is_dir()
@@ -258,6 +260,7 @@ def test_skip_config_seeds_nothing(tmp_path: Path) -> None:
 
     fh = home / ".fleetent"
     assert not (fh / ".env").exists()
+    assert not (fh / "platform.yaml").exists()
     assert not (fh / "agents" / "default" / "agent.yaml").exists()
     assert not (fh / "agents" / "default" / ".env").exists()
 

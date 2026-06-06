@@ -20,7 +20,7 @@ def _env_entries(path: Path) -> dict[str, str]:
 
 
 def test_platform_env_template_contains_only_empty_platform_vars():
-    entries = _env_entries(ROOT / "config" / "platform" / ".env.example")
+    entries = _env_entries(ROOT / ".env.example")
 
     assert "FLEETENT_SECRET_KEY" in entries
     assert entries
@@ -31,14 +31,14 @@ def test_platform_env_template_contains_only_empty_platform_vars():
         "SLACK_BOT_TOKEN",
         "SLACK_APP_TOKEN",
         "ACME_DOCS_MCP_TOKEN",
-        "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN",
-        "FLEETENT_CONFLUENCE_TOKEN",
     }
     assert forbidden_agent_envs.isdisjoint(entries)
+    assert "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN" in entries
+    assert "FLEETENT_CONFLUENCE_TOKEN" in entries
 
 
 def test_static_agent_env_template_has_no_agent_secret_inventory():
-    entries = _env_entries(ROOT / "config" / "agent" / ".env.example")
+    entries = _env_entries(ROOT / "agents" / "default" / ".env.example")
 
     assert entries == {}
 

@@ -16,10 +16,11 @@
 
 ## 现状
 
-- ✅ **单 agent 配置体系**：`agents/<agent-id>/.env` + `agents/<agent-id>/agent.yaml`
+- ✅ **Platform home 配置体系**：根目录 `.env` + `platform.yaml` 保存平台级 env 和非敏感配置；
+  `agents/<agent-id>/.env` + `agents/<agent-id>/agent.yaml` 保存 Agent 运行配置
   - `agents/<agent-id>/agent.yaml` 是部署 agent 的非敏感运行配置文件，保存 agent、model、MCP servers、knowledge binding、connector、embedding、rerank 等配置
   - 密钥不进 YAML、不进 DB、不进 git，仅通过 env var 注入；YAML 中只保存 `api_key_env`、`*_env` 这类环境变量名引用
-  - legacy `config/settings.yaml` / `config/mcp.servers.yaml` 加载器仍保留缺省兼容路径，但当前部署模板和 installer 不再要求它们存在
+  - legacy `config/mcp.servers.yaml` 加载器仍保留缺省兼容路径，但当前部署模板和 installer 不再要求它存在
   - 旧 `config/mcp.yaml`、`config/cron.yaml`、`config/webhooks.yaml` 存在时启动 fail fast，避免静默使用过期配置
 
 - ✅ **Docker Compose**：Pilot 默认部署入口
@@ -28,8 +29,8 @@
   - `uv run uvicorn fleetent.server:app` 只作为开发模式保留，不作为 Pilot 默认部署入口。
   - 当前 Dockerfile 和 docker-compose.yml 关键配置：
     - `extra_hosts: host.docker.internal:host-gateway`（Linux 宿主机访问，`fleetent.integrations.sandbox` 通过此地址调用宿主机工具进程）
-    - `volumes: ./data:/app/data, ./config:/app/config, ./secrets:/app/secrets:ro`
-      （持久化用户数据和配置，secret 文件只读挂载）
+    - `volumes: ./data:/app/data, ./agents:/app/agents, ./platform.yaml:/app/platform.yaml, ./secrets:/app/secrets:ro`
+      （持久化用户数据、Agent homes、平台配置，secret 文件只读挂载）
     - `env_file: .env`（本地 `.env` 由 init-config 从 `.env.example` 生成，不写入镜像）
     - `ports: 8765:8765`
 

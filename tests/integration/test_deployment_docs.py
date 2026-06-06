@@ -2,8 +2,8 @@ from pathlib import Path
 
 
 def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
-    agent_env = Path("config/agent/.env.example")
-    platform_env = Path("config/platform/.env.example")
+    agent_env = Path("agents/default/.env.example")
+    platform_env = Path(".env.example")
     gitignore = Path(".gitignore").read_text(encoding="utf-8")
 
     assert agent_env.exists() and platform_env.exists()
@@ -53,25 +53,26 @@ def test_secrets_documentation_describes_flat_untracked_directory():
 def test_global_config_example_templates_removed():
     # The deployed agent is self-contained (agent.yaml + .env); the global config
     # files are optional (loaders default when absent) and no longer shipped.
-    # Templates are split by component under config/agent/ and config/platform/.
+    # Examples live beside their runtime instance paths in Platform/Agent homes.
     assert not Path("config/settings.yaml.example").exists()
     assert not Path("config/mcp.yaml.example").exists()
     assert not Path("config/mcp.servers.yaml.example").exists()
     assert not Path("config/agent.yaml.example").exists()
     assert not Path("config/agent.yaml").exists()
     assert not Path("config/knowledge.yaml.example").exists()
-    assert not Path(".env.example").exists()
-    assert Path("config/agent/agent.yaml.example").exists()
-    assert Path("config/agent/.env.example").exists()
-    assert Path("config/platform/platform.yaml.example").exists()
-    assert Path("config/platform/.env.example").exists()
+    assert Path(".env.example").exists()
+    assert Path("platform.yaml.example").exists()
+    assert Path("agents/default/agent.yaml.example").exists()
+    assert Path("agents/default/.env.example").exists()
+    assert not Path("config/agent").exists()
+    assert not Path("config/platform").exists()
     assert not Path("config/knowledge-service").exists()
     assert not Path("config/agents").exists()
     assert not Path("examples/knowledge-service").exists()
 
 
 def test_active_config_directory_only_contains_canonical_templates():
-    assert sorted(path.name for path in Path("config").iterdir()) == ["agent", "platform"]
+    assert not Path("config").exists() or not any(Path("config").iterdir())
 
 
 def test_dockerfile_includes_deployment_runtime_assets_and_port():
@@ -79,7 +80,8 @@ def test_dockerfile_includes_deployment_runtime_assets_and_port():
 
     required_phrases = [
         "COPY scripts/ ./scripts/",
-        "COPY config/ ./config/",
+        "COPY platform.yaml.example ./.env.example ./",
+        "COPY agents/default/ ./agents/default/",
         'ENTRYPOINT ["./scripts/docker_entrypoint.sh"]',
         "EXPOSE 8765",
     ]
@@ -93,7 +95,8 @@ def test_docker_compose_uses_local_env_mounts_and_port():
     required_phrases = [
         "env_file: .env",
         "- ./data:/app/data",
-        "- ./config:/app/config",
+        "- ./agents:/app/agents",
+        "- ./platform.yaml:/app/platform.yaml",
         "- ./secrets:/app/secrets:ro",
         '"8765:8765"',
         "host.docker.internal:host-gateway",
@@ -292,7 +295,7 @@ def test_materialize_covers_agent_yaml_example_env_refs(tmp_path, monkeypatch):
     from fleetent.platform.agent_lifecycle import materialize
 
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    doc = yaml.safe_load(Path("config/agent/agent.yaml.example").read_text(encoding="utf-8"))
+    doc = yaml.safe_load(Path("agents/default/agent.yaml.example").read_text(encoding="utf-8"))
 
     refs: set[str] = set()
 

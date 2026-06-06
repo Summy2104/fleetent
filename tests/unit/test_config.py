@@ -115,11 +115,11 @@ def test_yaml_secret_fields_is_empty_safety_net():
     assert frozenset() == YAML_SECRET_FIELDS
 
 
-def test_settings_loads_non_secret_values_from_settings_yaml(tmp_path, monkeypatch):
+def test_settings_loads_non_secret_values_from_platform_yaml(tmp_path, monkeypatch):
     import fleetent.config as cfg
 
-    settings_yaml = tmp_path / "settings.yaml"
-    settings_yaml.write_text(
+    platform_yaml = tmp_path / "platform.yaml"
+    platform_yaml.write_text(
         "\n".join(
             [
                 "database_url: sqlite:///tmp/fleetent.db",
@@ -130,7 +130,7 @@ def test_settings_loads_non_secret_values_from_settings_yaml(tmp_path, monkeypat
             ]
         )
     )
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
+    monkeypatch.setattr(cfg, "PLATFORM_YAML_PATH", platform_yaml)
 
     s = Settings()
 
@@ -202,7 +202,7 @@ def test_alembic_ini_uses_default_fleetent_database_url():
 def test_settings_missing_yaml_file_uses_typed_defaults(tmp_path, monkeypatch):
     import fleetent.config as cfg
 
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", tmp_path / "missing.yaml")
+    monkeypatch.setattr(cfg, "PLATFORM_YAML_PATH", tmp_path / "missing.yaml")
 
     s = Settings()
 
@@ -210,13 +210,13 @@ def test_settings_missing_yaml_file_uses_typed_defaults(tmp_path, monkeypatch):
     assert s.log_format == "console"
 
 
-def test_settings_yaml_ignores_unknown_secret_like_keys(tmp_path, monkeypatch):
+def test_platform_yaml_ignores_unknown_secret_like_keys(tmp_path, monkeypatch):
     # The slim platform Settings has no secret fields, so stray secret-like keys in
-    # settings.yaml are simply ignored (extra="ignore"); non-secret values still load.
+    # platform.yaml unknown keys are simply ignored (extra="ignore"); non-secret values still load.
     import fleetent.config as cfg
 
-    settings_yaml = tmp_path / "settings.yaml"
-    settings_yaml.write_text(
+    platform_yaml = tmp_path / "platform.yaml"
+    platform_yaml.write_text(
         "\n".join(
             [
                 "anthropic_api_key: should-not-load",
@@ -225,7 +225,7 @@ def test_settings_yaml_ignores_unknown_secret_like_keys(tmp_path, monkeypatch):
             ]
         )
     )
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
+    monkeypatch.setattr(cfg, "PLATFORM_YAML_PATH", platform_yaml)
     monkeypatch.chdir(tmp_path)
 
     s = Settings()
