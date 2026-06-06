@@ -30,9 +30,9 @@
 
 ## 6. console CredentialField 控件 + 「所需密钥」面板
 
-- [ ] 6.1 Write failing tests: admin.html UI-marker 断言——CredentialField 控件（来源单选、inject password + set/unset chip、高级 env 名）、所需密钥面板（required 列表 + 复制 .env 模板 + 校验缺失）、模型密钥复用 provider 不重复输入（tests/integration/test_admin_console_ui.py）
-- [ ] 6.2 Implement: admin.html 控件 + 面板 + 调 凭据/required-env API
-- [ ] 6.3 Verify green: `uv run pytest tests/integration/test_admin_console_ui.py -x -q` + `node --check` 内联 JS
+- [x] 6.1 Write failing tests: admin.html UI-marker 断言——CredentialField 控件（来源单选、inject password + set/unset chip、高级 env 名）、所需密钥面板（required 列表 + 复制 .env 模板 + 校验缺失）、模型密钥复用 provider 不重复输入（tests/integration/test_admin_console_ui.py）
+- [x] 6.2 Implement: admin.html 控件 + 面板 + 调 凭据/required-env API
+- [x] 6.3 Verify green: `uv run pytest tests/integration/test_admin_console_ui.py -x -q` + `node --check` 内联 JS
 
 ## 7. Platform ENV 与 Agent ENV 分离
 
