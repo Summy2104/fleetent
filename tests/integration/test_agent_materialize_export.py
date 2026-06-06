@@ -120,3 +120,63 @@ def test_agent_file_from_store_defaults_models_when_no_overrides(db):
     exported = materialize.agent_file_from_store(agent)
 
     assert exported.models == default_models()
+
+
+# ── skill DB state → agent.yaml (skill-materialize-db-fields) ──────────────────
+
+
+def test_materialize_writes_global_disabled_skills(db):
+    """A globally-disabled skill lands in AgentFile.disabled_skills."""
+    from fleetent.platform.skill_management import skill_admin_store
+
+    agent = agent_store.create_agent("support", "p", [])
+    skill_admin_store.set_global_enabled("crm-ops", False)
+    skill_admin_store.set_global_enabled("jira", True)
+
+    exported = materialize.agent_file_from_store(agent)
+
+    assert "crm-ops" in exported.disabled_skills
+    assert "jira" not in exported.disabled_skills
+
+
+def test_materialize_disabled_skills_safe_when_no_states(db):
+    """No skill_admin_state rows → disabled_skills is empty, no error."""
+    agent = agent_store.create_agent("support", "p", [])
+
+    exported = materialize.agent_file_from_store(agent)
+
+    assert exported.disabled_skills == []
+
+
+def test_materialize_allowed_skills_from_binding(db):
+    """With bindings, allowed_skills is exactly the enabled=1 subset."""
+    from fleetent.platform.skill_management import skill_admin_store
+
+    agent = agent_store.create_agent("support", "p", [], allowed_skills=["authored"])
+    skill_admin_store.set_binding(str(agent.id), "crm-ops", True, updated_by=None)
+    skill_admin_store.set_binding(str(agent.id), "billing", False, updated_by=None)
+
+    exported = materialize.agent_file_from_store(agent)
+
+    assert exported.allowed_skills == ["crm-ops"]
+
+
+def test_materialize_allowed_skills_empty_when_all_bindings_disabled(db):
+    """All bindings disabled → allowed_skills empty (narrowed to none), no fallback."""
+    from fleetent.platform.skill_management import skill_admin_store
+
+    agent = agent_store.create_agent("support", "p", [], allowed_skills=["authored"])
+    skill_admin_store.set_binding(str(agent.id), "crm-ops", False, updated_by=None)
+
+    exported = materialize.agent_file_from_store(agent)
+
+    assert exported.allowed_skills == []
+
+
+def test_materialize_allowed_skills_falls_back_to_authored_when_no_binding(db):
+    """No agent_skills rows → fall back to authored allowed_skills."""
+    agent = agent_store.create_agent("support", "p", [], allowed_skills=["jira"])
+
+    exported = materialize.agent_file_from_store(agent)
+
+    assert exported.allowed_skills == ["jira"]
