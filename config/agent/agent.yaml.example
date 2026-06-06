@@ -6,6 +6,9 @@
 # The deployed agent runtime reads ONLY this file + .env; data is local under
 # FLEETENT_HOME/agents/<agent-id>/data/. Secrets are NEVER inlined — reference them
 # by env-var name.
+# The Agent `.env` is generated/refreshed from these references by platform
+# materialize (or copied from the console required-env panel), not maintained as a
+# static global secret inventory.
 # (This template ends in `.example`; install.sh copies it to
 #  FLEETENT_HOME/agents/default/agent.yaml for the default local Agent.)
 #
