@@ -39,6 +39,17 @@ class SkillEntry:
     # (skill-injection-audit). The entry stays in `_index` but is excluded from the
     # catalog and refused by read_skill; load() ignores this flag (manual triage).
     audit_blocked: bool = False
+    # Author hint: hide from the <available_skills> catalog (the model won't discover
+    # it) while keeping read_skill able to load it by name — for internal/composed
+    # skills invoked by other skills or hooks. Orthogonal to audit_blocked (a security
+    # block that read_skill refuses); this is discovery-only.
+    disable_model_invocation: bool = False
+    # Tool names this skill depends on. Filtered at catalog RENDER time against the
+    # session's available tool set (tool availability varies per session), not at scan.
+    requires_tools: list[str] = field(default_factory=list)
+    # Env vars needed before the skill can run, each {"name", optional?: bool}. Metadata
+    # only — surfaced by skill_readiness(); never blocks the catalog.
+    required_env_vars: list[dict[str, Any]] = field(default_factory=list)
 
 
 _index: dict[str, SkillEntry] = {}
@@ -212,6 +223,9 @@ def _scan_dir(
             enabled=bool(frontmatter.get("enabled", True)),
             builtin=builtin,
             audit_blocked=blocked,
+            disable_model_invocation=bool(frontmatter.get("disable_model_invocation", False)),
+            requires_tools=_as_str_list(frontmatter.get("requires_tools")),
+            required_env_vars=_as_env_var_list(frontmatter.get("required_env_vars")),
         )
 
 
@@ -293,16 +307,21 @@ def _disabled_reason(name: str, entry: SkillEntry, disabled: set[str]) -> str | 
 
     This is the single eligibility predicate that decides whether a skill enters
     the `available_skills_prompt` catalog; every catalog/match filter routes
-    through it so the four disable sources are judged in exactly one place.
+    through it so the disable sources are judged in exactly one place.
     Sources are checked in priority order — security first, author intent next,
     operator config, then the author's default-state hint:
-    `audit_blocked` > `frontmatter_disabled` (`enabled: false`) >
-    `config_disabled` (`disabled_skills`) > `default_disabled`
-    (`enabled_by_default: false`). The returned identifier is the highest-priority
+    `audit_blocked` > `model_invocation_disabled` (`disable_model_invocation: true`) >
+    `frontmatter_disabled` (`enabled: false`) > `config_disabled` (`disabled_skills`) >
+    `default_disabled` (`enabled_by_default: false`). The returned identifier is the
+    highest-priority
     match and is the value recorded in the run trace.
     """
     if entry.audit_blocked:
         return "audit_blocked"
+    if entry.disable_model_invocation:
+        # Author hid it from model discovery; read_skill (which ignores this predicate)
+        # can still load it by name for internal/composed use.
+        return "model_invocation_disabled"
     if not entry.enabled:
         return "frontmatter_disabled"
     if name in disabled:
@@ -310,6 +329,36 @@ def _disabled_reason(name: str, entry: SkillEntry, disabled: set[str]) -> str | 
     if not entry.enabled_by_default:
         return "default_disabled"
     return None
+
+
+def _tools_available(entry: SkillEntry, available_tools: set[str] | None) -> bool:
+    """Whether the skill's `requires_tools` are all in the session's available set.
+
+    Render-time gate (tool availability varies per session), orthogonal to the
+    scan-time `_disabled_reason`. `available_tools is None` means "don't filter"
+    (backward compatible) so callers that can't compute the set keep prior behavior.
+    """
+    if available_tools is None or not entry.requires_tools:
+        return True
+    return all(tool in available_tools for tool in entry.requires_tools)
+
+
+def skill_readiness(name: str) -> dict[str, list[str]]:
+    """Report a skill's missing required env vars (skill-frontmatter-extensions).
+
+    Returns ``{"missing": [names]}`` for each non-optional `required_env_vars` entry
+    not present in the process environment. Metadata only — never affects the catalog
+    or read_skill; powers an admin-console readiness view. Unknown skill → empty.
+    """
+    entry = _index.get(name)
+    if entry is None:
+        return {"missing": []}
+    missing = [
+        var["name"]
+        for var in entry.required_env_vars
+        if not var.get("optional", False) and var["name"] not in os.environ
+    ]
+    return {"missing": missing}
 
 
 # Mandatory scan instruction that precedes the <available_skills> catalog. Skills
@@ -331,6 +380,7 @@ def available_skills_prompt(
     allowed_skills: list[str] | None = None,
     max_skills: int = 150,
     max_chars: int = 18000,
+    available_tools: set[str] | None = None,
 ) -> str:
     """Render the enabled skills as an openclaw-style skills section for the prompt.
 
@@ -367,7 +417,9 @@ def available_skills_prompt(
     entries = [
         (name, entry)
         for name, entry in _index.items()
-        if _disabled_reason(name, entry, disabled) is None and (allowed is None or name in allowed)
+        if _disabled_reason(name, entry, disabled) is None
+        and (allowed is None or name in allowed)
+        and _tools_available(entry, available_tools)
     ]
     if not entries:
         return ""
@@ -534,3 +586,22 @@ def _as_opt_str(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _as_env_var_list(value: Any) -> list[dict[str, Any]]:
+    """Normalize `required_env_vars` into a list of {"name", optional} dicts.
+
+    Each item must be a mapping with a `name`; non-mapping or name-less items are
+    skipped. `optional` defaults to False. Missing/non-list input yields [].
+    """
+    if not isinstance(value, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        if not name:
+            continue
+        out.append({"name": str(name), "optional": bool(item.get("optional", False))})
+    return out
