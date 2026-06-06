@@ -133,3 +133,17 @@ def test_set_binding_skips_rematerialize_when_agent_unknown() -> None:
     ):
         skill_admin_api.set_skill_agent_binding("crm-ops", "999", body, authorization="Session t")
         mock_remat_one.assert_not_called()
+
+
+# --- engine_observability real data (skill-observability-tracking) ---
+
+
+def test_engine_observability_delegates_to_store_observe() -> None:
+    """engine_observability must call skill_admin_store.observe, not the stale stub."""
+    real = {"skill_name": "crm", "hits": 5, "sessions": ["s1", "s2"], "stale": False}
+    with patch.object(skill_admin_api.skill_admin_store, "observe", return_value=real) as mock_obs:
+        result = skill_admin_api.engine_observability("crm")
+
+    mock_obs.assert_called_once_with("crm")
+    assert result == real
+    assert result["stale"] is False

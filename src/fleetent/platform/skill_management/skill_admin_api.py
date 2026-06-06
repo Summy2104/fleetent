@@ -92,8 +92,8 @@ def engine_set_global_disabled(skill_name: str, disabled: bool) -> None:
 
 
 def engine_observability(skill_name: str) -> dict[str, Any]:
-    """Per-skill hit/injection metrics. Owned by observability (follow-up placeholder)."""
-    return {"skill_name": skill_name, "hits": 0, "sessions": [], "stale": True}
+    """Per-skill hit metrics from the skill_hits store (real data, not stale)."""
+    return skill_admin_store.observe(skill_name)
 
 
 def _rematerialize_all() -> list[str]:
