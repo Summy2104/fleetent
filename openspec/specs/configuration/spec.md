@@ -246,3 +246,4 @@ templates.
 - **WHEN** 查看仓库 `config/` 目录
 - **THEN** 只存在 `config/agent/` 与 `config/platform/`
 - **AND** 不存在 `config/agents/` 或 `config/knowledge-service/`
+

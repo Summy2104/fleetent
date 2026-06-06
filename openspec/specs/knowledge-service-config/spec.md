@@ -75,3 +75,4 @@ separate service.
 - **WHEN** Knowledge 作为独立服务部署
 - **THEN** Knowledge service 拥有自己的 `knowledge.yaml` 和 `.env`
 - **AND** Platform config 只保存连接该服务所需的 endpoint 和 auth env 引用
+
