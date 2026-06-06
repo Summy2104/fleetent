@@ -77,7 +77,20 @@ class CronScheduler:
         for task in db_jobs:
             self._register(task)
 
+        self._register_maintenance_jobs()
         self._scheduler.start()
+
+    def _register_maintenance_jobs(self) -> None:
+        from fleetent.tools.result_truncation import cleanup_spillover
+
+        self._scheduler.add_job(
+            cleanup_spillover,
+            trigger="cron",
+            hour=3,
+            minute=0,
+            id="__maintenance_spillover_cleanup__",
+            replace_existing=True,
+        )
 
     def add_job(self, task: dict[str, Any]) -> None:
         self._register(task)
