@@ -95,7 +95,7 @@ flowchart TD
 
 - [x] **输出截断**：防止海量输出占满对话空间
   - stdout 上限 50KB，stderr 上限 10KB；超限保留头尾 + 截断说明；UTF-8 边界安全
-  - **超限中段落盘留引用**（替代直接丢弃）见 `sandbox-large-output-spill`
+  - **超限已改为落盘 + 引用**（`sandbox-large-output-spill`）：超预算时完整（脱敏后）输出写入 `data/sandbox_output/{uuid}.txt`，返回 head+tail 预览 + 引用（路径 / 字节数 / 可用 `read_file` 读取），替代中段直接丢弃；落盘目录按保留期（默认 7 天）机会式自清理
 
 - [x] **执行超时与强制终止**：默认 30s（可配置，最长 600s）——已在 `run_code` 接线
   - 超时对容器 `docker kill`（先 SIGTERM，5s 后 SIGKILL）强制终止

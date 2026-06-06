@@ -91,9 +91,33 @@ fleetent 的 sandbox 使命是「在隔离容器内运行 agent 触发的代码�
 - **D5 先脱敏后截断**：`truncate_stream(redact_secrets(raw), budget)`，密钥不因截断在边界逃逸；trace 字节大小仍取**原始**输出（量指标）。
 - **定位**：纵深防御，非「零漏报」；首要防线仍是入站不注入凭证。
 
-### Change 4：sandbox-large-output-spill ⏳（计划）
+### Change 4：sandbox-large-output-spill ✅
 
-超限输出落盘返回引用路径，替代当前中段直接丢弃；与现有 `output_truncation` 协作。3/4 参考项目（claude-code/openclaw/opencode）均如此。决策落地时补录。
+超限输出落盘返回引用，替代中段直接丢弃。新增 `integrations/sandbox/output_spill.py`：`cap_or_spill(text, max_bytes, *, label)`——未超预算原样返回；超预算把完整文本写 `SANDBOX_OUTPUT_DIR/{uuid}.txt`，返回 head+tail 预览（复用 `truncate_stream`）+ 引用（路径 / 原始字节数 / `read_file` 提示）。
+
+关键决策：
+- **D1 新模块、复用 `truncate_stream` 生成预览**，与截断并列、不重复造轮子。
+- **D2 落盘前必须已脱敏**：run_code 调用点保持 `cap_or_spill(redact_secrets(raw), …)`，落盘文件即脱敏后文本，**密钥不落磁盘**（数据主权硬约束，由「落盘内容已脱敏」场景测试守护）。
+- **D3 落盘目录沿用 `builtin_tools.GENERATED_DIR`/`UPLOADS_DIR` 约定**（`paths.data_dir()/sandbox_output`，注入式常量、`uuid4` 名），落在 gitignored `data/` 下、不出内网。
+- **D4 保留期清理机会式触发**（默认 7 天，写时扫描删过期 `*.txt`），不依赖调度器；清理失败仅记录。
+- **D5 预览 + 引用略超 budget 可接受**（run_code 声明 self_truncates、豁免 T4）。
+- 模型用既有 `read_file` 读落盘路径（与 `analyze_image` 读 `UPLOADS_DIR` 引用同模式）。
+
+实施问题：改用 `cap_or_spill` 后，既有三个「超预算」run_code 测试行为由「截断」变「落盘」，且未隔离落盘目录会因**导入期冻结的 `SANDBOX_OUTPUT_DIR`**（同 4 个 path 测试的本机环境现象）写入真实 `~/.fleetent`——已在 `test_tools.py` 加 autouse fixture 将落盘目录重定向到 tmp，并更新断言。
+
+---
+
+## 批次收尾小结（4 个 change 全部完成）
+
+| change | PR | 一句话 |
+|---|---|---|
+| sandbox-container-hardening | #143 | docker run 按 scope 分层加固（cap-drop/pids/tmpfs/非 root/init/no-new-privileges）|
+| sandbox-runtime-lifecycle-wiring | #146 | 孤儿清理 + agent-scope 闲置回收接入 agent 运行时启动 |
+| sandbox-output-redaction | #150 | run_code 出站 stdout/stderr 返回前密钥脱敏 |
+| sandbox-large-output-spill | （本）| 超限输出落盘 + 引用，替代中段丢弃 |
+
+延后项（未做，理由见上）：网络出站白名单 / `public_only` 实装、磁盘配额 `--storage-opt`、自定义 seccomp/AppArmor、符号链接防护、per-command 命令前缀门控。
+既有 debt（与本批无关、未修）：本机 4 个 path 族 unit 失败（CI 不复现）、`tools/file_tools.py` 9 ruff + mypy、`test_config.py` 1 处 layer 违规。
 
 ## 实施过程中的问题与决策记录
 
