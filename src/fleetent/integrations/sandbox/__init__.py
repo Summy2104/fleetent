@@ -22,6 +22,7 @@ from fleetent.integrations.sandbox.enablement import (
     load_sandbox_mode,
     resolve_effective_mode,
 )
+from fleetent.integrations.sandbox.maintenance import start_idle_sweep, stop_idle_sweep
 from fleetent.integrations.sandbox.manager import SandboxManager, Scope
 from fleetent.integrations.sandbox.output_truncation import truncate_stream
 from fleetent.integrations.sandbox.secrets import build_sandbox_env, is_sensitive_name
@@ -45,5 +46,7 @@ __all__ = [
     "load_sandbox_mode",
     "load_sandbox_resources",
     "resolve_effective_mode",
+    "start_idle_sweep",
+    "stop_idle_sweep",
     "truncate_stream",
 ]
