@@ -22,7 +22,7 @@
 | Confluence real smoke | passed | 真实 API check 通过；page scope sync `scanned=1 planned=1 ingested=1`；本地 KB 写入 1 个 Confluence 文档。 |
 | Real embedding smoke | passed | `jina-embeddings-v3`，`dimensions=1024`；memory + KB embedding evaluation `38 passed`。 |
 | Real rerank smoke | passed | 真实 HTTP rerank 返回 3 个候选，score 存在且排序发生变化；provider adapter 已兼容 `relevance_score`。 |
-| Config / secret boundary | passed | Google Drive、Confluence、embedding、rerank 均使用 env reference；真实 secret 保留在本地 `.env`，不进入 git。 |
+| Config / secret boundary | passed | Google Drive、Confluence、embedding、rerank 均使用 env reference；真实 secret 保留在 Platform / Agent `.env` 或本地 secret source，不进入 git。 |
 | Real LLM smoke | passed | `FLEETENT_EVAL_REAL_LLM=1` memory extraction fixture `7 passed`；`FLEETENT_EVAL_REAL_LONG_TERM_CONTEXT=1` long-term context smoke `23 passed`；`FLEETENT_EVAL_REAL_REFLECTION=1` + explicit fixture reflection smoke `20 passed`。 |
 | Real KB retrieval E2E | passed | 已用真实 Google / Confluence 入库文档验证 hybrid search、rerank、query planner 和 source attribution；全量 228 chunk 真实 reindex 经 provider retry / pacing 修复后通过，`scanned=228 reindexed=228 failed=0`。 |
 | Production operations gaps | accepted non-blocking | policy admin API、review UI、scheduler / worker、full sync history、后台 reindex runtime 和告警尚未完成；作为 post-Go 管理和运维入口 backlog，不阻塞当前 Go。 |

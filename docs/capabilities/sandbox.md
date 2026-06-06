@@ -11,7 +11,7 @@
 **不负责**：决定是否执行代码（→ agent_loop）、工具访问控制（→ agent_policy）、执行结果写入 trace（→ eval_logger）。
 
 **调用关系**：
-- 依赖：config（sandbox 配置参数）、agent_store（agent 级别 `features.code_execution` 开关）
+- 依赖：`platform.yaml`（全局 sandbox 策略 / 资源默认值）、agent config（agent 级别 `features.code_execution` 开关）
 - 被依赖：tool_registry（注册 `run_code` 工具供 agent_loop 调用）
 
 ## 关键流程
@@ -52,7 +52,7 @@ flowchart TD
   - 当前实现：`sandbox_client.py` 封装 Docker CLI，资源限制（`--network none --memory 256m --cpus 0.5 --read-only`）硬编码
   - Docker 为既定沙箱后端，下述治理项均在此基础上演进
 
-- ⚡ **资源限制**：限制生效，但参数硬编码在 `sandbox_client.py`，无法通过配置调整
+- ✅ **资源限制**：限制生效，默认值可通过 `platform.yaml` 的 `sandbox.resources` 调整
 
 - ⚡ **文件系统隔离**：`--read-only` 模式，整个文件系统只读，`/tmp` 目录可写
   - 当前缺失：无符号链接攻击防护
@@ -74,7 +74,7 @@ flowchart TD
   - `all`（默认）：所有 agent 可用，agent 可显式设置 `code_execution: false` 关闭
   - Docker 不可用时自动降级为 `off`，不阻断平台启动
 
-- [ ] **资源限制可配置**：通过 `settings.yaml` 声明，不再硬编码
+- [x] **资源限制可配置**：通过 `platform.yaml` 声明，不再硬编码
   ```yaml
   sandbox:
     resources:

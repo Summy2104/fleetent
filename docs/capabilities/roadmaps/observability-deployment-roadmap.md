@@ -32,7 +32,7 @@ effective mode 为 `off`。这不是 Observability / Deployment blocker；是否
 | 能力 | 当前状态 | 已有基础 | 当前缺口 | 后续增强 |
 | --- | --- | --- | --- | --- |
 | Observability foundation | 基础完成 | structured logs、SQLite traces、usage summary、performance summary、source attribution、runtime event coverage、admin query CLI、diagnostics export / manual retention、contract tests | platform UI / HTTP 查询入口 | OTel / Prometheus、dashboard UI、告警 |
-| Deployment / config | 基础完成 | `agents/<agent-id>/agent.yaml` 单 agent 配置、env secret reference、legacy config fail-fast、本地 SQLite upgrade / backup 脚本、Pilot install checklist、Docker Compose Pilot 入口 | 准生产部署演练和 config docs 对 intelligence runtime prerequisites 的持续收敛 | config center、Admin UI、hot reload |
+| Deployment / config | 基础完成 | Platform root `.env` / `platform.yaml`、`agents/<agent-id>/agent.yaml` / `.env`、四个 canonical example、env secret reference、本地 SQLite upgrade / backup 脚本、Pilot install checklist、Docker Compose Pilot 入口 | 准生产部署演练和 config docs 对 intelligence runtime prerequisites 的持续收敛 | config center、Admin UI、hot reload |
 | Pilot verification | 基础完成 | `scripts/generate_pilot_verification_report.py` 可输出 `pilot-capability-verification.md` 和 `pilot-capability-verification.json`；报告包含默认测试命令、真实 smoke skip/pass/fail 和问题分类 | 真实 LLM / embedding / rerank / SaaS smoke 仍需显式 opt-in 运行 | 后续可接 dashboard / CI artifact / platform UI |
 
 ## M1：可观测、可排查

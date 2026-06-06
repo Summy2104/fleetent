@@ -15,7 +15,7 @@
 | 能力域 | 文档 | 负责范围 |
 | --- | --- | --- |
 | Agent Runtime | [../agent-runtime.md](../agent-runtime.md) | agent loop、termination、cancellation、budget、loop detection、message hygiene |
-| Model Router | [../model-router.md](../model-router.md) | task type route、provider fallback、route override、model params、provider health |
+| Model Router | [../model-router.md](../model-router.md) | Agent-scoped model targets / routes、provider fallback、route override、model params、provider health |
 | Tools | [../tools.md](../tools.md) | `@tool` registry、schema、dispatch、guardrails、timeout、result truncation |
 | MCP | [../mcp.md](../mcp.md) | stdio / HTTP MCP client、session continuity、health reconnect、degradation、OAuth |
 | Sandbox | [../sandbox.md](../sandbox.md) | sandbox enablement、resource limits、secret injection、timeout、cleanup、trace |
@@ -26,9 +26,9 @@
 
 | 能力 | 当前状态 | 已有基础 | 当前缺口 | 后续增强 |
 | --- | --- | --- | --- | --- |
-| Agent Runtime | 部分完成 | `run()` / `run_stream()`、termination、budget、cancellation、loop detection、message hygiene、多模态入口、trace 接线 | 全链路 E2E 稳定性、复杂 tool-use 场景回归、streaming approval 收敛 | 更细粒度 stop reason、parallel dispatch 体验、成本感知默认策略 |
-| Model Router | 部分完成 | OpenAI-compatible route、fallback、route override、external routes、provider health cache、参数配置 | 真实 provider smoke、路由配置文档和生产默认值 | 成本感知路由、provider dashboard、route policy UI |
-| Tools / MCP | 部分完成 | 内置工具、MCP HTTP / stdio、tool namespace、guardrails、timeout、result truncation | 真实 MCP server smoke、降级策略人工凭证、connector credential injection 生产路径 | Tool marketplace、细粒度策略、更多 connector |
+| Agent Runtime | 部分完成 | `run()` / `run_stream()`、termination、budget、cancellation、loop detection、message hygiene、多模态入口、trace 接线 | 全链路 E2E 稳定性、复杂 tool-use 场景回归、`streaming-approval-gating` 尚未实施 | 更细粒度 stop reason、parallel dispatch 体验、成本感知默认策略 |
+| Model Router | 部分完成 | Agent `models.targets` / `models.routes`、OpenAI-compatible provider、fallback、route override、provider health cache、参数配置 | 真实 provider smoke、Agent-scoped model config 文档和生产默认值 | 成本感知路由、provider dashboard、route policy UI |
+| Tools / MCP | 部分完成 | 内置工具、MCP HTTP / stdio、tool namespace、guardrails、timeout、result truncation、Agent-scoped MCP binding、Agent credential authoring / materialize 注入 | 真实 MCP server smoke、降级策略人工凭证、credential lifecycle / rotation 生产路径 | Tool marketplace、细粒度策略、更多 connector |
 | Sandbox | 部分完成 | Docker-based sandbox、enablement、resource limits、secret injection、timeout、orphan cleanup、trace | 生产默认隔离档位、network / read-only 策略确认、宿主环境差异 smoke | 更强隔离后端、artifact 管理、后台清理历史 |
 | Skill | 部分完成 | YAML frontmatter、nested scan、conflict handling、read-on-demand、builtin skills、disable、audit、agent scoping | skill review / publish 流程、scope 默认策略、真实工作流回归 | SkillProposal review UI、自动发布前置审核 |
 | Session | 基础完成 | JSON 原子写、metadata index、TTL cleanup、disk management、internal maintenance、scheduled task binding | 长期运行压测、迁移后路径一致性、UI / admin 操作入口 | session dashboard、导出/清理策略 UI |
@@ -39,7 +39,7 @@
 - streaming 和 non-streaming 路径在 approval、tool event、error handling、session persistence 上语义一致。
 - MCP / sandbox / built-in tools 的失败能被分类、记录、降级或清晰暴露。
 - session 持久化不会丢失用户消息、assistant 回复、tool result 或人工接管记录。
-- route / provider / sandbox / skill 配置错误能 fail fast，并给出可行动错误。
+- Agent model route / provider / sandbox / skill 配置错误能 fail fast，并给出可行动错误。
 
 ## Backlog 骨架
 
@@ -52,7 +52,7 @@
 
 ### Docs gap 候选
 
-- route、tool、MCP、sandbox、skill、session 的生产默认配置说明不足。
+- Agent model route、tool、MCP、sandbox、skill、session 的生产默认配置说明不足。
 - failure mode、skip reason、operator action 缺少 runbook。
 
 ### Enhancement 候选

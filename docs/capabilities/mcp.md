@@ -11,7 +11,7 @@
 **不负责**：工具的业务逻辑（→ tool_registry 执行层）、LLM 决策调用哪个工具（→ agent_loop）、工具访问控制（→ `fleetent.governance.agent_policy`）。
 
 **调用关系**：
-- 依赖：config（全局 MCP 策略、服务地址与认证配置）
+- 依赖：Platform DB（MCP authoring / global-default definitions）、`agents/<agent-id>/agent.yaml`（materialized Agent MCP definitions）、Agent `.env`（credential env refs）
 - 被依赖：tool_registry（注册 MCP 工具供 agent_loop 调用）
 
 **模块归属**：
