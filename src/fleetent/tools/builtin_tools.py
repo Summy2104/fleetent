@@ -13,6 +13,7 @@ from fleetent.integrations.sandbox import (
     SandboxClient,
     SandboxManager,
     build_sandbox_env,
+    redact_secrets,
 )
 from fleetent.integrations.sandbox import output_truncation as sot
 from fleetent.runtime.cancellation import CancelToken
@@ -279,11 +280,14 @@ async def run_code(
     # SB6: cap each stream for the AI-facing result (trace above kept original
     # bytes). stdout/stderr have independent budgets. run_code is exempt from T4
     # (declared self_truncates) so this is the sole truncation of its output.
+    # sandbox-output-redaction: redact secrets BEFORE truncating so a secret
+    # straddling the truncation boundary cannot survive; the trace byte sizes above
+    # stay on the original (un-redacted) output as a pure volume metric.
     parts = []
-    stdout = sot.truncate_stream(result.stdout, sot.MAX_STDOUT_BYTES)
+    stdout = sot.truncate_stream(redact_secrets(result.stdout), sot.MAX_STDOUT_BYTES)
     if stdout:
         parts.append(stdout.rstrip())
-    stderr = sot.truncate_stream(result.stderr, sot.MAX_STDERR_BYTES)
+    stderr = sot.truncate_stream(redact_secrets(result.stderr), sot.MAX_STDERR_BYTES)
     if stderr:
         parts.append(f"[stderr] {stderr.rstrip()}")
     if result.exit_code != 0:

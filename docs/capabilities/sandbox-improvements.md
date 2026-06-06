@@ -78,9 +78,18 @@ fleetent 的 sandbox 使命是「在隔离容器内运行 agent 触发的代码�
 
 补充发现：session-scope 容器释放本已接线（`session_mgr` 维护循环的 `_release_sandboxes`），仅 agent-scope `sweep_idle` 与启动期 `cleanup_orphans` 缺接线——本 change 补齐。
 
-### Change 3：sandbox-output-redaction ⏳（计划）
+### Change 3：sandbox-output-redaction ✅
 
-新增脱敏模块，`run_code` 的 stdout/stderr 在返回 LLM 与写 trace 前按模式脱敏（API key / JWT / 连接串 / 私钥 / Authorization 等）。参考 hermes `redact_sensitive_text`。决策落地时补录。
+新增 `integrations/sandbox/redaction.py`，`run_code` 的 stdout/stderr 在返回 agent loop 前按模式脱敏。参考 hermes `redact_sensitive_text`。
+
+关键决策：
+- **D0 范围修正**：原计划「返回 LLM 与写 trace 前脱敏」——核实后 `eval_logger.log_sandbox_exec` **只记大小/耗时/退出码、从不记内容**，故 trace 无需脱敏；本 change 只作用于返回值（它即进对话/发 LLM/存 session 的载体）。
+- **D1 独立模块 + 模块级模式列表**，镜像 `secrets.py` 风格，可注入扩展，零新依赖（仅 `re`）。
+- **D2 结构化高精度 + 命名型保守**：PEM 块 / JWT 三段 / 厂商前缀（`sk-`/`ghp_`/`AKIA…` 等）/ `scheme://user:pass@` / `Authorization:` 头以精确正则覆盖；命名型 `KEY=VALUE` 仅在键名含明确密钥词（`TOKEN`/`SECRET`/`PASSWORD`/`PASSWD`/`CREDENTIAL`/`(API|ACCESS|PRIVATE|SECRET)_KEY`）时脱敏其值。
+- **D3 刻意不含裸 `KEY`/`AUTH`**——避免 `MONKEY`/`AUTHOR`/`KEYBOARD` 误伤（比入站名过滤更克制，因出站误伤降低输出可用性）。值匹配兼顾引号内空格。
+- **D4 保留非敏感上下文**：`Authorization: [REDACTED]`（留头名）、`postgres://u:[REDACTED]@h`（留协议/用户/主机）、`API_KEY=[REDACTED]`（留键名）。
+- **D5 先脱敏后截断**：`truncate_stream(redact_secrets(raw), budget)`，密钥不因截断在边界逃逸；trace 字节大小仍取**原始**输出（量指标）。
+- **定位**：纵深防御，非「零漏报」；首要防线仍是入站不注入凭证。
 
 ### Change 4：sandbox-large-output-spill ⏳（计划）
 
