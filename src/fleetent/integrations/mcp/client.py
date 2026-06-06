@@ -580,15 +580,63 @@ async def _register_server(server: McpServerConfig, scope: int | None = None) ->
         await _register_http_server(server, scope)
 
 
+# stdio subprocess environment isolation (mcp-stdio-isolation): never inherit the full
+# platform environment — only a vetted whitelist of host vars plus the server's own env.
+_SAFE_ENV_KEYS_POSIX = (
+    "HOME",
+    "LOGNAME",
+    "PATH",
+    "SHELL",
+    "TERM",
+    "USER",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TMPDIR",
+    "TZ",
+)
+_SAFE_ENV_KEYS_WIN = (
+    "APPDATA",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "LOCALAPPDATA",
+    "PATH",
+    "PROCESSOR_ARCHITECTURE",
+    "SYSTEMDRIVE",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "USERNAME",
+    "USERPROFILE",
+)
+
+
+def _safe_base_env() -> dict[str, str]:
+    """A minimal, vetted subset of host env vars safe to pass to an MCP subprocess.
+
+    Excludes the full platform environment (database URLs, API keys, tokens); keeps only
+    the variables a process generally needs to run (PATH / HOME / locale / temp dir).
+    """
+    keys = _SAFE_ENV_KEYS_WIN if os.name == "nt" else _SAFE_ENV_KEYS_POSIX
+    return {k: os.environ[k] for k in keys if k in os.environ}
+
+
+def _subprocess_env(server: McpServerConfig) -> dict[str, str]:
+    """Environment for a stdio MCP subprocess: the safe host whitelist plus the server's
+    explicitly declared env (which overrides the whitelist for same-named keys). The full
+    platform environment is never inherited (mcp-stdio-isolation).
+    """
+    return {**_safe_base_env(), **server.env}
+
+
 async def _register_stdio_server(server: McpServerConfig, scope: int | None = None) -> None:
     from mcp import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client
 
-    merged_env = {**os.environ, **server.env} if server.env else None
     params = StdioServerParameters(
         command=server.command,
         args=server.args,
-        env=merged_env,
+        env=_subprocess_env(server),
     )
 
     stack = await get_exit_stack()
@@ -1009,8 +1057,9 @@ async def _probe_stdio_tools(server: McpServerConfig) -> list[dict[str, str]]:
     from mcp import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client
 
-    merged_env = {**os.environ, **server.env} if server.env else None
-    params = StdioServerParameters(command=server.command, args=server.args, env=merged_env)
+    params = StdioServerParameters(
+        command=server.command, args=server.args, env=_subprocess_env(server)
+    )
     async with AsyncExitStack() as stack:
         read, write = await stack.enter_async_context(stdio_client(params))
         session: Any = await stack.enter_async_context(ClientSession(read, write))
