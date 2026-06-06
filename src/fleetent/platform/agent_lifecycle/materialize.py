@@ -319,6 +319,23 @@ def materialize_from_store(name: str) -> Path | None:
     return write_home(agent_file_from_store(agent), source_agent=agent)
 
 
+def rematerialize_all() -> list[str]:
+    """Re-export every authored agent's home (platform-wide DB→file refresh).
+
+    Best-effort: a single agent's failure is logged and skipped so it never blocks the
+    rest. Returns the names successfully re-materialized. Used after a global skill state
+    change so every agent.yaml reflects the new decision.
+    """
+    done: list[str] = []
+    for name in agent_store.list_all_names():
+        try:
+            if materialize_from_store(name) is not None:
+                done.append(name)
+        except Exception as exc:  # noqa: BLE001 — one agent's failure must not block others
+            _logger.warn("rematerialize_failed", agent=name, error=str(exc))
+    return done
+
+
 def write_home(
     agent: AgentFile,
     *,

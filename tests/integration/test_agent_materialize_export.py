@@ -226,3 +226,37 @@ def test_write_home_skill_copy_is_idempotent(db, tmp_path, monkeypatch):
     home = materialize.write_home(materialize.agent_file_from_store(agent))
 
     assert (home / "skills" / "crm-ops" / "SKILL.md").is_file()
+
+
+# ── list_all_names + rematerialize_all (skill-admin-trigger-rematerialize) ────
+
+
+def test_list_all_names_returns_sorted_agent_names(db):
+    """agent_store.list_all_names() returns every authored agent, sorted."""
+    agent_store.create_agent("zeta", "p", [])
+    agent_store.create_agent("alpha", "p", [])
+    agent_store.create_agent("mid", "p", [])
+
+    assert agent_store.list_all_names() == ["alpha", "mid", "zeta"]
+
+
+def test_list_all_names_empty_when_no_agents(db):
+    """No authored agents → empty list, no error."""
+    assert agent_store.list_all_names() == []
+
+
+def test_rematerialize_all_writes_every_agent_home(db):
+    """rematerialize_all() exports a home for each agent and returns their names."""
+    agent_store.create_agent("alpha", "p", [])
+    agent_store.create_agent("beta", "p", [])
+
+    done = materialize.rematerialize_all()
+
+    assert set(done) == {"alpha", "beta"}
+    assert (materialize.home_dir("alpha") / "agent.yaml").is_file()
+    assert (materialize.home_dir("beta") / "agent.yaml").is_file()
+
+
+def test_rematerialize_all_empty_when_no_agents(db):
+    """No agents → empty result, no error."""
+    assert materialize.rematerialize_all() == []

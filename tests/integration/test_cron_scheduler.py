@@ -171,7 +171,9 @@ async def test_start_registers_spillover_cleanup_job(isolated_schedule_db):
     await scheduler.shutdown()
 
 
-async def test_spillover_cleanup_job_invokes_cleanup_spillover(tmp_path, monkeypatch, isolated_schedule_db):
+async def test_spillover_cleanup_job_invokes_cleanup_spillover(
+    tmp_path, monkeypatch, isolated_schedule_db
+):
     import fleetent.cron_scheduler as cs
     import fleetent.tools.result_truncation as trt
 

@@ -159,3 +159,61 @@ def test_session_mgr_exposes_list_by_user() -> None:
     assert hasattr(session_pkg, "list_by_user"), (
         "list_by_user must be exported from session package"
     )
+
+
+# ── save token_usage parameter ────────────────────────────────────────────────
+
+
+async def test_save_with_token_usage_calls_add_token_usage(tmp_path: Path, monkeypatch) -> None:
+    from unittest.mock import patch
+
+    import fleetent.session.manager as mgr
+
+    monkeypatch.setattr(mgr, "SESSIONS_DIR", tmp_path)
+    monkeypatch.setattr(mgr, "_last_cleanup_at", __import__("time").time())  # gate closed
+
+    with (
+        patch("fleetent.session.index.record_activity"),
+        patch("fleetent.platform.chat_management.session_admin_store.add_token_usage") as mock_add,
+    ):
+        await mgr.save("tok-save", [{"role": "user", "content": "hi"}], token_usage=(120, 80))
+
+    mock_add.assert_called_once_with("tok-save", 120, 80)
+
+
+async def test_save_without_token_usage_does_not_call_add(tmp_path: Path, monkeypatch) -> None:
+    from unittest.mock import patch
+
+    import fleetent.session.manager as mgr
+
+    monkeypatch.setattr(mgr, "SESSIONS_DIR", tmp_path)
+    monkeypatch.setattr(mgr, "_last_cleanup_at", __import__("time").time())
+
+    with (
+        patch("fleetent.session.index.record_activity"),
+        patch("fleetent.platform.chat_management.session_admin_store.add_token_usage") as mock_add,
+    ):
+        await mgr.save("no-tok", [{"role": "user", "content": "hi"}])
+
+    mock_add.assert_not_called()
+
+
+async def test_save_token_usage_failure_does_not_break_save(tmp_path: Path, monkeypatch) -> None:
+    from unittest.mock import patch
+
+    import fleetent.session.manager as mgr
+
+    monkeypatch.setattr(mgr, "SESSIONS_DIR", tmp_path)
+    monkeypatch.setattr(mgr, "_last_cleanup_at", __import__("time").time())
+
+    with (
+        patch("fleetent.session.index.record_activity"),
+        patch(
+            "fleetent.platform.chat_management.session_admin_store.add_token_usage",
+            side_effect=RuntimeError("db locked"),
+        ),
+    ):
+        await mgr.save("tok-fail", [{"role": "user", "content": "hi"}], token_usage=(10, 5))
+
+    # session file still written despite token failure
+    assert (tmp_path / "tok-fail.json").exists()
