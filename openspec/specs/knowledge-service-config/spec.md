@@ -5,20 +5,16 @@ TBD - created by archiving change split-agent-knowledge-config. Update Purpose a
 ## Requirements
 ### Requirement: Knowledge service config file
 
-The platform/KB service SHALL read KB construction configuration from
-`<FLEETENT_HOME>/config/knowledge.yaml` by default. When the KB service is deployed separately,
-the same contract SHALL be materialized to `<knowledge-service-home>/config/knowledge.yaml`.
-Repository templates for this optional standalone deployment SHALL NOT be shipped in the current
-MVP stage. Future standalone deployment templates MAY be introduced by a separate change when the
-service is actually supported as an independent deployment target.
+Default MVP deployment SHALL treat Knowledge as embedded in the Platform service. Embedded
+Knowledge construction config SHALL be read from Platform config (`platform.yaml`) and/or Platform
+DB managed connector state. The default deployment SHALL NOT read or materialize
+`<FLEETENT_HOME>/config/knowledge.yaml`. When Knowledge is deployed as a future standalone service,
+that service MAY define its own service home and config contract in a separate change.
 
-#### Scenario: Default platform path
-- **WHEN** the platform runtime loads KB construction config
-- **THEN** it reads `<FLEETENT_HOME>/config/knowledge.yaml`
-
-#### Scenario: Service path
-- **WHEN** KB service is deployed as a standalone service
-- **THEN** it uses `<knowledge-service-home>/config/knowledge.yaml`
+#### Scenario: Embedded knowledge uses Platform config
+- **WHEN** the platform runtime loads embedded KB construction config
+- **THEN** it reads the `knowledge` section from `platform.yaml` or the Platform DB snapshot
+- **AND** it does not require `<FLEETENT_HOME>/config/knowledge.yaml`
 
 #### Scenario: Standalone templates are deferred
 - **WHEN** 查看仓库模板
@@ -28,10 +24,11 @@ service is actually supported as an independent deployment target.
 
 ### Requirement: Knowledge bases contain unified sources
 
-`knowledge.yaml` SHALL define `knowledge_bases[]`. Each KB entry SHALL include `id`,
-`tenant_id`, and MAY include `indexing`, `sync`, and unified `sources[]`. Each source SHALL
-have `id`, `type`, `enabled`, and type-specific non-secret fields. Secrets SHALL be referenced
-by env var names or credential references only.
+Platform Knowledge config SHALL define embedded KB construction as `knowledge.knowledge_bases[]`
+when expressed in `platform.yaml`. Each KB entry SHALL include `id`, `tenant_id`, and MAY include
+`indexing`, `sync`, and unified `sources[]`. Each source SHALL have `id`, `type`, `enabled`, and
+type-specific non-secret fields. Secrets SHALL be referenced by env var names or credential
+references only.
 
 #### Scenario: Google Drive source
 - **WHEN** a source has `type: google_drive`
@@ -49,16 +46,13 @@ by env var names or credential references only.
 
 ### Requirement: KB operations use knowledge config
 
-KB connector listing, checking, dry-run, sync, and status operations SHALL use the validated
-knowledge service config/snapshot as the source of connector/source definitions.
+KB connector listing, checking, dry-run, sync, and status operations SHALL use a validated
+Knowledge config/snapshot supplied by Platform config or Platform DB managed connector state.
 
-#### Scenario: List configured sources
+#### Scenario: List configured sources from Platform snapshot
 - **WHEN** KB operations list configured connectors/sources
-- **THEN** the result is derived from `knowledge.yaml` `knowledge_bases[].sources[]`
-
-#### Scenario: Source status is scoped
-- **WHEN** a source sync records latest status
-- **THEN** the status includes source id, source type, tenant_id, and kb_id
+- **THEN** the result is derived from the active Platform Knowledge snapshot
+- **AND** the default source is not `<FLEETENT_HOME>/config/knowledge.yaml`
 
 ### Requirement: Knowledge config follows deployment boundary
 

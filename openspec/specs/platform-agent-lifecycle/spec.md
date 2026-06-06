@@ -50,11 +50,10 @@ agent processes.
 
 ### Requirement: Agent materialization writes self-contained Agent homes
 
-平台 materialize SHALL 将每个 Agent 写成 self-contained Agent home。该 home SHALL 包含
-`agent.yaml`, `.env`, and `data/`; runtime SHALL be able to run from that home without
-Platform DB access. 平台 materialize（DB→file）SHALL 从已存的 agent 定义生成**可真实部署**的
-`agent.yaml`，回填平台已存的全部字段，而非只导出核心几项后将其余落到 schema 默认。`models`
-SHALL 由 agent 的 model 选择/覆盖展开，而非无条件使用本地 `default_models()` 占位。
+平台 materialize SHALL 将每个 Agent 写成 self-contained Agent home under
+`agents/<agent-id>/`. 该 home SHALL 包含 `agent.yaml`, `.env`, and `data/`; runtime SHALL be
+able to run from that home without Platform DB access. Platform-owned config files such as
+`platform.yaml` and embedded Knowledge construction files SHALL NOT be written into Agent homes.
 
 #### Scenario: Materialize writes Agent home
 - **WHEN** 平台部署 Agent `support`
@@ -65,25 +64,13 @@ SHALL 由 agent 的 model 选择/覆盖展开，而非无条件使用本地 `def
 #### Scenario: Platform env does not leak into Agent home
 - **WHEN** materialize 写入 Agent `.env`
 - **THEN** `.env` 只含该 Agent required env
-- **AND** 不含 `FLEETENT_SECRET_KEY` 或平台 DB 变量
+- **AND** 不含 `FLEETENT_SECRET_KEY`、`DATABASE_URL` 或 Platform-owned KB construction env
 
-#### Scenario: 已存核心字段回填
-- **WHEN** 一个含 `tenant_id` / `team_id` / `skills_dir` 的 agent 被 materialize
-- **THEN** 生成的 `agent.yaml` 含这三个字段的真实值
-
-#### Scenario: model 覆盖展开为真实 targets/routes
-- **WHEN** 一个 agent 选定了一个或多个 provider
-- **THEN** `models.targets[*]` 由所选 provider 展开
-- **AND** 每个 target 的 `api_key_env` 复用对应 provider 的 `api_key_env`
-- **AND** 不出现 `localhost` 占位模型
-
-#### Scenario: 无 model 覆盖时回退默认
-- **WHEN** 一个 agent 没有任何 model 选择/覆盖
-- **THEN** `models` 回退到 `default_models()`
-
-#### Scenario: MCP / bindings / knowledge 接入导出
-- **WHEN** 一个 agent 绑定了 MCP server、channel/user、KB
-- **THEN** 生成的 `agent.yaml` 分别含 `mcp_servers`、`bindings.channels`/`bindings.users`、`knowledge.bindings`
+#### Scenario: Knowledge binding export only
+- **WHEN** 一个 agent 绑定了 KB
+- **THEN** 生成的 `agent.yaml` 含 `knowledge.bindings`
+- **AND** 不含 Google Drive / Confluence source construction details
+- **AND** materialize 不写 `config/knowledge.yaml`
 
 ### Requirement: `.env` materialization resolves by credential mode
 

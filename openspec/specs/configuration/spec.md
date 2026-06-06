@@ -3,25 +3,9 @@
 ## Purpose
 TBD - created by archiving change configuration-foundation. Update Purpose after archive.
 ## Requirements
-### Requirement: Unified settings file
-系统 SHALL 使用 `config/settings.yaml` 作为唯一非敏感应用配置文件。
+### Requirement: Secrets stay outside config YAML
 
-#### Scenario: Settings loaded from YAML
-- **WHEN** `config/settings.yaml` 存在并包含 typed settings 字段
-- **THEN** `Settings()` 使用这些值构造配置对象
-
-#### Scenario: Missing settings file uses defaults
-- **WHEN** `config/settings.yaml` 不存在
-- **THEN** `Settings()` 使用代码中的 typed defaults
-- **AND** 默认 database_url 为 `sqlite:///data/fleetent.db`
-
-#### Scenario: Environment overrides YAML
-- **WHEN** 同一配置同时存在于 `config/settings.yaml` 和环境变量
-- **THEN** 环境变量值优先
-
-### Requirement: Secrets stay outside settings YAML
-
-敏感值 SHALL 继续通过环境变量或 `.env` 注入,而不是写入 `config/settings.yaml` 或 `agent.yaml`。IM
+敏感值 SHALL 继续通过环境变量或 `.env` 注入,而不是写入 `platform.yaml` 或 `agent.yaml`。IM
 tokens(`slack_bot_token`、`slack_app_token`、`telegram_bot_token`)MUST NOT 作为 `Settings` 字段存在——
 IM 凭证经 per-agent `connectors` 的 `*_env` 引用提供。
 
@@ -37,57 +21,16 @@ IM 凭证经 per-agent `connectors` 的 `*_env` 引用提供。
 #### Scenario: Settings example is not required for deployed agent
 - **WHEN** 查看部署模板
 - **THEN** `config/settings.yaml.example` 不需要存在
-- **AND** 部署 agent 的非敏感示例配置位于 `config/agent.yaml.example`
-
-### Requirement: Legacy feature YAML files removed
-系统 SHALL 不再读取 `config/mcp.yaml`、`config/cron.yaml` 或 `config/webhooks.yaml`。
-
-#### Scenario: Old MCP config file is rejected
-- **WHEN** `config/mcp.yaml` 存在
-- **THEN** 启动 fail fast，并提示迁移到 `config/settings.yaml`
-
-#### Scenario: Old cron config file is rejected
-- **WHEN** `config/cron.yaml` 存在
-- **THEN** 启动 fail fast，并提示 cron jobs 通过 SQLite-backed runtime management 创建
-
-#### Scenario: Old webhook config file is rejected
-- **WHEN** `config/webhooks.yaml` 存在
-- **THEN** 启动 fail fast，并提示 webhook source management 后续通过 runtime API / store 管理
-
-### Requirement: Minimal settings surface
-
-全局 `Settings` SHALL 收缩为**平台控制面所需的精简集**:`database_url`(平台 authoring/control-plane DB,
-与 per-agent home 推导出的运行时 DB 分离)、平台进程日志(`log_format`、`observability`)及必要的平台
-密钥引用。agent 运行时配置(治理、部署、智能层 namespace)MUST NOT 出现在 `config/settings.yaml`——这些
-已收口到对应 agent 的 `agent.yaml`。
-
-#### Scenario: Supported settings fields
-- **WHEN** 构造 `Settings` 并查看其字段
-- **THEN** `Settings` 只暴露 `database_url`、`log_format`、`observability`
-- **AND** `database_url` 默认推导为 home 下的 `sqlite:///<data_dir>/fleetent.db`
-- **AND** 全局 `config/settings.yaml.example` 模板不再随仓库发布(`drop-global-config-files`),
-  部署 agent 自包含于 `agent.yaml` + `.env`
-
-#### Scenario: Agent-runtime namespaces are absent from Settings
-- **WHEN** 构造 `Settings`
-- **THEN** 不存在 `vector_store`、`embedding`、`rerank`、`knowledge_base`、`long_term_ctx`、`mcp`、
-  `scheduling`、`webhooks`、`diagnostics` 字段,也不存在任何治理/部署旋钮
-- **AND** 这些配置位于对应 agent 的 `agent.yaml`
-
-#### Scenario: Runtime objects stay out of settings
-- **WHEN** 加载 `config/settings.yaml`(若存在)
-- **THEN** 只解析 `database_url`、`log_format`、`observability`;cron jobs、webhook sources、
-  MCP server definitions、agent definitions、user bindings、memory items、knowledge documents 或
-  reindex jobs 一律不在此承载
+- **AND** 默认部署 agent 的非敏感示例配置位于 `agents/default/agent.yaml.example`
 
 ### Requirement: Local configuration initialization
-系统 SHALL 提供 `fleetent-admin init-config` 作为本地部署配置初始化入口。
 
-#### Scenario: Init config creates local deployment files
+系统 SHALL 提供 `fleetent-admin init-config` 作为 Platform home 配置初始化入口。
+
+#### Scenario: Init config creates local Platform files
 - **WHEN** operator 运行 `fleetent-admin init-config`
 - **THEN** 系统从 `.env.example` 创建 `.env`
-- **AND** 从 `config/settings.yaml.example` 创建 `config/settings.yaml`
-- **AND** 从 `config/mcp.servers.yaml.example` 创建 `config/mcp.servers.yaml`
+- **AND** 从 `platform.yaml.example` 创建 `platform.yaml`
 - **AND** 创建 `data/`、`data/logs/`、`data/diagnostics/` 和 `secrets/`
 
 #### Scenario: Init config does not overwrite by default
@@ -103,7 +46,7 @@ IM 凭证经 per-agent `connectors` 的 `*_env` 引用提供。
 
 #### Scenario: Init config force overwrites generated files
 - **WHEN** operator 运行 `fleetent-admin init-config --force`
-- **THEN** 系统覆盖 `.env`、`config/settings.yaml` 和 `config/mcp.servers.yaml`
+- **THEN** 系统覆盖 `.env` 和 `platform.yaml`
 - **AND** 不删除未知文件
 - **AND** 不生成任何真实 secret 文件
 
@@ -127,47 +70,6 @@ IM 凭证经 per-agent `connectors` 的 `*_env` 引用提供。
 - **AND** 示例文件名不包含 scope
 - **AND** scope 由 connector config 或未来数据库配置表达
 
-### Requirement: Credential references use flat environment examples
-配置样例 SHALL 使用平铺环境变量引用展示 connector credential，不要求 operator 把 OAuth JSON 放入单个环境变量或文件路径。
-
-#### Scenario: Google Drive config uses explicit env fields
-- **WHEN** operator 查看 `config/settings.yaml.example`
-- **THEN** Google Drive 示例显式使用 `access_token_env`、`refresh_token_env`、`client_id_env` 和
-  `client_secret_env`
-
-#### Scenario: Confluence username uses env reference
-- **WHEN** operator 查看 `config/settings.yaml.example`
-- **THEN** Confluence 示例使用 `username_env`
-- **AND** token 使用 `api_token_env`
-
-#### Scenario: Credential ref does not encode scope in filename
-- **WHEN** operator 查看配置样例和 secrets 文档
-- **THEN** secret 文件名不使用 `eng`、`product` 或类似 connector scope 作为命名要求
-
-### Requirement: Global config files are optional
-agent 运行时 SHALL 在 `settings.yaml` / `mcp.yaml` / `mcp.servers.yaml` 缺失时回退到内置默认值，不得因其缺失而启动失败。这三个全局配置文件 SHALL NOT 作为部署/脚手架的默认产物（install.sh 部署扁平 home，`init-config` 不再 seed 它们）。仓库示例模板按使用方分目录：`config/agent/`（agent.yaml + agent 的 .env）与 `config/platform/`（平台 .env）。
-
-#### Scenario: Settings falls back to defaults without settings.yaml
-- **WHEN** `settings.yaml` 不存在
-- **THEN** `Settings` 使用类型化默认值（env/.env 仍可覆盖）
-- **AND** 不抛错
-
-#### Scenario: MCP works without global mcp files
-- **WHEN** `mcp.yaml` 与 `mcp.servers.yaml` 均不存在
-- **THEN** 全局 MCP 文件注册为空（per-agent agent.yaml 的 `mcp_servers` 与 admin DB 仍生效）
-- **AND** 启动不报错
-
-#### Scenario: init-config does not seed global config files
-- **WHEN** operator 运行 `fleetent-admin init-config`
-- **THEN** 不创建 `config/settings.yaml` 或 `config/mcp.servers.yaml`
-- **AND** 仍创建 `.env` 与数据目录
-
-#### Scenario: Example templates split by component under config/
-- **WHEN** 查看仓库 `config/`
-- **THEN** 不存在 `settings.yaml.example` / `mcp.yaml.example` / `mcp.servers.yaml.example`，也不存在仓库根 `.env.example`
-- **AND** 存在 `config/agent/agent.yaml.example` 与 `config/agent/.env.example`（部署 agent 模板）
-- **AND** 存在 `config/platform/.env.example`（平台模板）
-
 ### Requirement: Vector provider config uses env references
 Embedding and rerank HTTP provider configuration SHALL support environment-variable references for deploy-time provider values while keeping secrets out of tracked YAML.
 
@@ -190,15 +92,17 @@ Embedding and rerank HTTP provider configuration SHALL support environment-varia
 
 ### Requirement: Configuration is split by Platform and Agent perspective
 
-配置 SHALL 按 Platform side 与 Agent side 两个视角组织，而不是按历史模板路径或内部模块名混放。
-Platform side SHALL own 平台进程配置、平台 env、平台 DB、Agent authoring/deployment/materialize，以及默认
-内嵌的 knowledge / memory / worker 能力。Agent side SHALL own 某个 Agent runtime 的 `agent.yaml`、
-`.env` 与 `data/`。
+配置 SHALL 按 Platform side 与 Agent side 两个视角组织。Platform home is the deployment root:
+repo root in local development and `FLEETENT_HOME` in installed deployments. Platform side SHALL
+own `.env`, `platform.yaml`, Platform DB, Agent authoring/deployment/materialize, and default
+embedded platform capabilities such as Knowledge / Memory / Worker. Agent side SHALL own
+`agents/<agent-id>/agent.yaml`, `agents/<agent-id>/.env`, and `agents/<agent-id>/data/`.
 
-#### Scenario: Platform config is the authoring source
-- **WHEN** 平台部署一个 Agent
-- **THEN** 平台从 Platform DB + Platform config/env 派生该 Agent 的 runtime home
-- **AND** Agent runtime 不读取 Platform DB 或 Platform config
+#### Scenario: Platform home has root config files
+- **WHEN** 查看一个 Platform home
+- **THEN** Platform env instance is `.env`
+- **AND** Platform non-secret config instance is `platform.yaml`
+- **AND** Platform runtime does not require `config/platform/` or `config/settings.yaml`
 
 #### Scenario: Agent home is self-contained
 - **WHEN** 查看一个已 materialize 的 Agent home
@@ -211,39 +115,42 @@ Platform side SHALL own 平台进程配置、平台 env、平台 DB、Agent auth
 The system SHALL keep Platform process environment variables separate from Agent runtime
 environment variables.
 
-`FLEETENT_SECRET_KEY`、`DATABASE_URL`、平台日志、sandbox endpoint、未来 remote service endpoint 等平台
-进程变量 SHALL 属于 Platform ENV。model provider key、IM token、MCP secret、KB connector secret 等
-Agent runtime 变量 SHALL 属于 Agent ENV。
+`FLEETENT_SECRET_KEY`、`DATABASE_URL`、平台日志、TUI token、embedded Platform service credentials
+等平台进程变量 SHALL belong to Platform `.env`. Model provider key、Agent IM token、Agent MCP
+secret、Agent-local runtime secret 等 Agent runtime variables SHALL belong to
+`agents/<agent-id>/.env`.
 
-#### Scenario: Platform secret key is not an Agent env
-- **WHEN** 平台 materialize 一个 Agent home
-- **THEN** `<agent-home>/.env` 不含 `FLEETENT_SECRET_KEY`
-- **AND** `FLEETENT_SECRET_KEY` 只出现在 Platform ENV 模板/部署环境中
+#### Scenario: Platform env template contains only Platform variables
+- **WHEN** 读取 `.env.example`
+- **THEN** 它包含 Platform process variables such as `FLEETENT_SECRET_KEY` and `DATABASE_URL`
+- **AND** 不包含 Agent model / Slack / MCP runtime secret placeholders
 
 #### Scenario: Agent required env is materialized
-- **WHEN** 一个 Agent 引用 model / MCP / connector / KB secret env
-- **THEN** materialize 在 `<agent-home>/.env` 中写入对应 env 名和值或空占位
+- **WHEN** 一个 Agent 引用 model / MCP / connector secret env
+- **THEN** materialize 在 `agents/<agent-id>/.env` 中写入对应 env 名和值或空占位
+- **AND** 不写入 `FLEETENT_SECRET_KEY`、`DATABASE_URL` 或 Platform-owned KB construction env
 
 ### Requirement: Canonical templates avoid ambiguous agent paths
 
-仓库 canonical 模板 SHALL 清楚区分 Platform 与 Agent 模板。`config/` SHALL only contain active
-canonical deployment templates for the default MVP deployment: `config/platform/` and `config/agent/`.
-Noncanonical test fixtures SHALL live outside `config/`. Optional standalone service examples SHALL
-NOT be shipped for services that are not supported as independent deployment targets in the current
-stage. Tracked concrete local files such as `config/agent.yaml` SHALL NOT be presented as canonical
-templates.
+Repository examples SHALL live beside the runtime files they template. The repository SHALL provide
+root Platform examples `.env.example` and `platform.yaml.example`, and default Agent examples
+`agents/default/agent.yaml.example` and `agents/default/.env.example`. The repository SHALL NOT use
+`config/` as a canonical deployment template namespace.
 
-#### Scenario: Canonical templates are discoverable
+#### Scenario: Root Platform examples are discoverable
 - **WHEN** 查看仓库配置模板
-- **THEN** 能区分 Platform YAML/ENV 模板与 Agent YAML/ENV 模板
-- **AND** 不需要通过 `agent` / `agents` 单复数差异理解部署语义
+- **THEN** 存在 `.env.example`
+- **AND** 存在 `platform.yaml.example`
+- **AND** 不需要通过 `config/platform/` 理解 Platform 配置
 
-#### Scenario: Multi-agent scan examples are not deployment templates
-- **WHEN** 文档描述部署模板
-- **THEN** 不把 `config/agents/<name>/agent.yaml.example` 描述为默认部署模板
+#### Scenario: Default Agent examples live with default Agent home
+- **WHEN** 查看默认 Agent 模板
+- **THEN** 存在 `agents/default/agent.yaml.example`
+- **AND** 存在 `agents/default/.env.example`
+- **AND** 不需要通过 `config/agent/` 理解 Agent 配置
 
-#### Scenario: Active config excludes noncanonical examples
-- **WHEN** 查看仓库 `config/` 目录
-- **THEN** 只存在 `config/agent/` 与 `config/platform/`
-- **AND** 不存在 `config/agents/` 或 `config/knowledge-service/`
-
+#### Scenario: Config directory is not a template namespace
+- **WHEN** 查看仓库根目录
+- **THEN** `config/` 不包含 canonical `.example` 配置模板
+- **AND** 不存在 `config/agent/`、`config/platform/`、`config/knowledge-service/` 或
+  `config/knowledge.yaml.example` 作为当前部署模板
