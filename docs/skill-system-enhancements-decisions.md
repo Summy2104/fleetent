@@ -61,3 +61,12 @@ A → B → C → D → E → F
   - **更新预存测试 `test_scan_no_source_priority_override_logic`**：该测试编码了被本 change 显式反转的旧"无来源优先"规则。按 MODIFIED requirement 重写为 `test_scan_user_overrides_builtin_regardless_of_path_sort`（断言 user 胜）。这是 spec 演进的必要同步，非破坏。
   - 同层级（两 user）行为完全不变。
 - 测试：3 新 unit + 1 重写；registry 92 passed；全套 3605 passed。
+
+### Change C — `skill-catalog-budget`（P1-C）✅
+- 实现：`available_skills_prompt` 加 `max_skills=150`/`max_chars=18000` keyword 参数；抽出 `_render_catalog(shown, total, *, compact)` helper。两级降级：超条数截前 N + 警告 → 超字符切 compact（省 description）→ compact 仍超则按条数再截（至少留 1）。
+- 决策点：
+  - **函数默认参数而非 agent_config 字段**：最简单，调用点（normalizer/loop）零改动；per-agent 调节是未实现需求（YAGNI）。
+  - **compact 是全有/全无 description**：避免半截描述误导模型；compact 只在超 18000 字符（极大库）触发。
+  - **截断警告置于指令之前**：模型先知"列表不完整"再读 catalog。
+  - **测试修正**：compact 测试初版 max_chars=600 触发了意外的条数再截（存活项依赖 dict 迭代序非 s0），改用 max_chars=1500 让 compact 容纳全部 5 个，干净测"切 compact 不再按条数截"。
+- 测试：3 新 unit；registry 95 passed；全套 3635 passed。

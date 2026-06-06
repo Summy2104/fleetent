@@ -329,6 +329,8 @@ _SKILLS_INSTRUCTION = (
 def available_skills_prompt(
     disabled_skills: list[str] | None = None,
     allowed_skills: list[str] | None = None,
+    max_skills: int = 150,
+    max_chars: int = 18000,
 ) -> str:
     """Render the enabled skills as an openclaw-style skills section for the prompt.
 
@@ -349,6 +351,16 @@ def available_skills_prompt(
     with the disable predicate so a disabled skill never appears even when listed
     (disable wins). This narrows catalog visibility only; it is NOT an authorization
     boundary — `read_skill`'s by-name `load` and tool access control are unaffected.
+
+    `max_skills` / `max_chars` bound the catalog so a growing skill library cannot
+    silently bloat the cached system-prefix (skill-catalog-budget). When the eligible
+    count exceeds `max_skills` the catalog is truncated to the first N and a warning
+    line (naming shown vs total) precedes the instruction. When the full-format render
+    exceeds `max_chars` it falls back to a compact format (name + location, no
+    description); a still-oversized compact render is further truncated by count.
+    Truncated skills remain loadable by name via read_skill — the catalog is a
+    discovery surface, not an authorization boundary. Defaults are large enough that
+    typical deployments render byte-identically to the pre-budget behavior.
     """
     disabled = _resolve_disabled_skills(disabled_skills)
     allowed = set(allowed_skills) if allowed_skills else None
@@ -359,11 +371,48 @@ def available_skills_prompt(
     ]
     if not entries:
         return ""
-    lines = [_SKILLS_INSTRUCTION, "", "<available_skills>"]
-    for name, entry in entries:
+
+    total = len(entries)
+    shown = entries[:max_skills] if total > max_skills else entries
+
+    rendered = _render_catalog(shown, total, compact=False)
+    if len(rendered) <= max_chars:
+        return rendered
+    # Full format blew the char budget: drop descriptions (compact) to keep
+    # discoverability cheap. If compact still overruns, trim by count until it fits
+    # (always keeping at least one entry so the section stays meaningful).
+    while shown:
+        compact = _render_catalog(shown, total, compact=True)
+        if len(compact) <= max_chars or len(shown) == 1:
+            return compact
+        shown = shown[: len(shown) - 1]
+    return rendered  # unreachable (entries non-empty), keeps type checker happy
+
+
+def _render_catalog(
+    shown: list[tuple[str, "SkillEntry"]], total: int, *, compact: bool
+) -> str:
+    """Render the <available_skills> section, optionally compact and/or truncated.
+
+    A leading warning line is emitted when fewer than `total` skills are shown or when
+    the compact format is used, so the model knows the catalog is reduced.
+    """
+    lines: list[str] = []
+    reduced = len(shown) < total
+    if reduced or compact:
+        note = f"⚠ Skills: showing {len(shown)} of {total}"
+        if reduced:
+            note += " (truncated)"
+        if compact:
+            note += " (compact: names only — read_skill for details)"
+        lines.append(note)
+        lines.append("")
+    lines.extend([_SKILLS_INSTRUCTION, "", "<available_skills>"])
+    for name, entry in shown:
         lines.append("  <skill>")
         lines.append(f"    <name>{name}</name>")
-        lines.append(f"    <description>{entry.description}</description>")
+        if not compact:
+            lines.append(f"    <description>{entry.description}</description>")
         lines.append(f"    <location>{entry.path}</location>")
         lines.append("  </skill>")
     lines.append("</available_skills>")
