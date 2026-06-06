@@ -34,11 +34,11 @@
 - [ ] 6.2 Implement: admin.html 控件 + 面板 + 调 凭据/required-env API
 - [ ] 6.3 Verify green: `uv run pytest tests/integration/test_admin_console_ui.py -x -q` + `node --check` 内联 JS
 
-## 7. `.env.example` 拆分为进程级模板
+## 7. Platform ENV 与 Agent ENV 分离
 
-- [ ] 7.1 Write failing tests: `config/agent/.env.example` 含 `FLEETENT_SECRET_KEY`、不含 agent 级 model/Slack/MCP/KB `*_env`、所有条目为 `NAME=` 无值（tests/integration 解析断言）
-- [ ] 7.2 Implement: 拆分模板，新增 `FLEETENT_SECRET_KEY`，删除 agent 引用密钥；更新 `agent.yaml.example` 注释指向生成路径
-- [ ] 7.3 Verify green: 跑模板解析测试
+- [ ] 7.1 Write failing tests: Platform ENV 模板含 `FLEETENT_SECRET_KEY`、不含 agent 级 model/Slack/MCP/KB `*_env`、所有条目为 `NAME=` 无值；materialize 生成的 `<agent-home>/.env` 含 Agent required env 且不含 `FLEETENT_SECRET_KEY`（tests/integration 解析断言）
+- [ ] 7.2 Implement: 平台 env 模板新增 `FLEETENT_SECRET_KEY`，删除静态模板中的 agent 引用密钥；更新 `agent.yaml.example` 注释指向 materialize 生成的 Agent `.env`
+- [ ] 7.3 Verify green: 跑模板解析与 materialize env 测试
 
 ## 8. Quality gates
 

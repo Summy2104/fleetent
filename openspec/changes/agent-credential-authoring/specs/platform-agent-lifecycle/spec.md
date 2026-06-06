@@ -50,20 +50,27 @@
 
 ## ADDED Requirements
 
-### Requirement: Process-level env template separated from agent secrets
+### Requirement: Platform env template separated from Agent env materialization
 
-部署 env 模板 SHALL 拆分：`config/agent/.env.example` 只保留 `agent.yaml` 中 `*_env` 引用不到的
-进程级变量（含新增的 `FLEETENT_SECRET_KEY`、`DATABASE_URL`、`MICROSANDBOX_URL`、运行调优等）。
-agent 引用的密钥占位 SHALL NOT 出现在该模板中——它们由 materialize 生成并经 console 面板提供。
+部署 env SHALL 按 Platform / Agent 边界拆分：`FLEETENT_SECRET_KEY`、`DATABASE_URL`、
+`MICROSANDBOX_URL`、`LOG_FORMAT` 等平台进程变量 SHALL 属于 Platform ENV 模板；Agent `.env`
+SHALL 由 materialize 写入对应 Agent home，只包含该 Agent 运行所需的 `*_env` 值或空占位。
+agent 引用的密钥占位 SHALL NOT 出现在 Platform ENV 模板中——它们由 materialize 生成并经 console
+面板提供。
 
-#### Scenario: 进程级模板含 secret key
-- **WHEN** 读取 `config/agent/.env.example`
+#### Scenario: Platform env 模板含 secret key
+- **WHEN** 读取 Platform ENV 模板
 - **THEN** 含 `FLEETENT_SECRET_KEY`
 
-#### Scenario: agent 密钥不在进程级模板
-- **WHEN** 读取 `config/agent/.env.example`
+#### Scenario: agent 密钥不在 Platform env 模板
+- **WHEN** 读取 Platform ENV 模板
 - **THEN** 不含 model / Slack / MCP / KB 的 agent 级 `*_env` 占位
 
+#### Scenario: Agent env 由 materialize 产生
+- **WHEN** materialize 一个含 operator 与 inject 槽的 Agent
+- **THEN** `<agent-home>/.env` 含该 Agent 所需 env 名
+- **AND** 不含 `FLEETENT_SECRET_KEY` 或平台进程变量
+
 #### Scenario: 模板无 inline 密钥值
-- **WHEN** 读取 `config/agent/.env.example`
+- **WHEN** 读取 Platform ENV 模板
 - **THEN** 所有条目为 `NAME=` 形式，不含任何真实密钥值
