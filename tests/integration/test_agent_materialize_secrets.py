@@ -64,9 +64,9 @@ def test_materialize_injects_decrypted_secret_and_keeps_yaml_secret_free(db, tmp
         source_agent=agent,
     )
 
-    assert "FLEETENT_AGENT_SUPPORT_MODEL=sk-live-secret" in (
-        home / ".env"
-    ).read_text(encoding="utf-8")
+    assert "FLEETENT_AGENT_SUPPORT_MODEL=sk-live-secret" in (home / ".env").read_text(
+        encoding="utf-8"
+    )
     assert "sk-live-secret" not in (home / "agent.yaml").read_text(encoding="utf-8")
 
 
@@ -88,9 +88,9 @@ def test_materialize_operator_preserves_existing_value_or_writes_empty(db, tmp_p
         source_agent=agent,
     )
 
-    assert "FLEETENT_AGENT_SUPPORT_MODEL=operator-secret" in (
-        home / ".env"
-    ).read_text(encoding="utf-8")
+    assert "FLEETENT_AGENT_SUPPORT_MODEL=operator-secret" in (home / ".env").read_text(
+        encoding="utf-8"
+    )
 
     (home / ".env").unlink()
     materialize.write_home(

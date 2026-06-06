@@ -560,7 +560,7 @@ def test_agent_required_env_and_credential_field_panel():
         "credential-source",
         "secret-status-chip",
         "credential-advanced-env",
-        "type=\"password\"",
+        'type="password"',
     ):
         assert marker in html, marker
 

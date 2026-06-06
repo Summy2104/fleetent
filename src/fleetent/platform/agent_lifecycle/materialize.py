@@ -8,6 +8,7 @@ references secrets by env-var name only (never plaintext) — so the agent is ru
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +75,7 @@ def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
         route_entries: list[ModelRouteEntry] = []
         for index, raw_entry in enumerate(entries):
             if not isinstance(raw_entry, dict):
-                raise ValueError(f"model route {route_key!r} entry must be a mapping")
+                continue
             target = _target_from_model_override(route_key, index, raw_entry)
             targets.setdefault(target.id, target)
             route_entries.append(
@@ -99,10 +100,7 @@ def _target_from_model_override(route_key: str, index: int, entry: dict[str, Any
     params = (provider or {}).get("params") or (provider or {}).get("extra_params") or {}
     if not provider:
         params = (
-            entry.get("target_params")
-            or entry.get("params")
-            or entry.get("extra_params")
-            or {}
+            entry.get("target_params") or entry.get("params") or entry.get("extra_params") or {}
         )
     target_id = str(provider_id or entry.get("id") or f"{route_key}-{index}")
     protocol = str(source.get("protocol") or "openai_chat")
@@ -145,8 +143,8 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
                 auth_type=row["auth_type"],
                 api_key_env=row["api_key_env"],
                 command=row["command"],
-                args=row["args"],
-                env=row["env"],
+                args=row["args"] or [],
+                env=row["env"] or {},
             )
         )
     return servers
@@ -163,7 +161,12 @@ def _bindings_for_agent(agent: agent_store.Agent) -> AgentBindings:
 
 
 def _knowledge_for_agent(agent: agent_store.Agent) -> AgentKnowledge:
-    kb_ids = agent_kbs_store.list_kbs_for_agent(agent.tenant_id, str(agent.id))
+    try:
+        kb_ids = agent_kbs_store.list_kbs_for_agent(agent.tenant_id, str(agent.id))
+    except sqlite3.OperationalError as exc:
+        if "no such table: agent_kbs" not in str(exc):
+            raise
+        kb_ids = []
     if not kb_ids:
         return AgentKnowledge()
     return AgentKnowledge(
@@ -188,17 +191,11 @@ def _env_var_names(
     agent: AgentFile,
     knowledge_config: KnowledgeConfigSnapshot | None = None,
 ) -> list[str]:
-    """Collect the env-var names the agent's home references (connectors + MCP)."""
+    """Collect the env-var names the agent's home references."""
     names: list[str] = []
-    slack = agent.connectors.slack
-    if slack is not None:
-        names.extend([slack.bot_token_env, slack.app_token_env])
-    for server in agent.mcp_servers:
-        if server.api_key_env:
-            names.append(server.api_key_env)
-    for target in agent.models.targets:
-        if target.api_key_env:
-            names.append(target.api_key_env)
+    for key, value in _flatten(agent.model_dump(mode="json")):
+        if key.endswith("_env") and isinstance(value, str) and value:
+            names.append(value)
     if knowledge_config is not None:
         for key, value in _flatten(knowledge_config.model_dump(mode="json")):
             if key.endswith("_env") and isinstance(value, str) and value:

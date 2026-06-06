@@ -28,14 +28,11 @@ def db(tmp_path, monkeypatch):
 
 def _model_overrides(agent_id: int) -> dict:
     db_runtime = agent_store._db()
-    row = (
-        db_runtime.execute(
-            "SELECT av.model_overrides FROM agent_versions av "
-            "JOIN agents a ON a.active_version_id = av.id WHERE a.id = :agent_id",
-            {"agent_id": agent_id},
-        )
-        .fetchone()
-    )
+    row = db_runtime.execute(
+        "SELECT av.model_overrides FROM agent_versions av "
+        "JOIN agents a ON a.active_version_id = av.id WHERE a.id = :agent_id",
+        {"agent_id": agent_id},
+    ).fetchone()
     assert row is not None
     return json.loads(row["model_overrides"])
 

@@ -60,13 +60,12 @@ def ensure_slot(
         next_env_name = (
             env_name or existing.get("env_name") or derive_env_name(agent.name, slot_key)
         )
-        next_mode: SlotMode = (mode or existing.get("mode") or "operator")  # type: ignore[assignment]
+        next_mode: SlotMode = mode or existing.get("mode") or "operator"  # type: ignore[assignment]
         _reject_duplicate_env(slots, slot_key, next_env_name)
         slots[slot_key] = {"env_name": next_env_name, "mode": next_mode}
         overrides[RESERVED_KEY] = slots
         conn.execute(
-            "UPDATE agent_versions SET model_overrides = :model_overrides "
-            "WHERE id = :version_id",
+            "UPDATE agent_versions SET model_overrides = :model_overrides WHERE id = :version_id",
             {
                 "model_overrides": json.dumps(overrides),
                 "version_id": row["id"],

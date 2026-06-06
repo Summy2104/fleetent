@@ -12,10 +12,9 @@ def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
     both = agent + "\n" + platform
 
     # Platform-side
-    assert "FLEETENT_AUTO_UPGRADE=false" in platform
-    assert "FLEETENT_SECRET_KEY=" in platform
-    assert "DATABASE_URL=" in platform
-    assert "LOG_FORMAT=" in platform
+    for key in ("FLEETENT_AUTO_UPGRADE", "FLEETENT_SECRET_KEY", "DATABASE_URL", "LOG_FORMAT"):
+        assert f"{key}=" in platform
+        assert f"{key}=\n" in platform
     assert "FLEETENT_MODEL_PRIMARY_API_KEY=" not in platform
     # Agent-side
     assert "FLEETENT_SECRET_KEY=" not in agent
@@ -24,16 +23,10 @@ def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
     assert "MICROSANDBOX_URL=" not in agent
     assert "ANTHROPIC_API_KEY=" not in agent
     assert "OPENAI_API_KEY=" not in agent
-    assert "FLEETENT_MODEL_PRIMARY_API_KEY=" in agent
-    assert "FLEETENT_MODEL_EMBEDDING_API_KEY=" in agent
-    assert "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN=" in agent
-    assert "FLEETENT_GOOGLE_DRIVE_CLIENT_SECRET=" in agent
-    assert "FLEETENT_CONFLUENCE_USERNAME=" in agent
-    assert "FLEETENT_CONFLUENCE_TOKEN=" in agent
-    assert "FLEETENT_EVAL_EMBEDDING_ENDPOINT=" in agent
-    assert "FLEETENT_EVAL_EMBEDDING_API_KEY=" in agent
-    assert "FLEETENT_EVAL_RERANK_ENDPOINT=" in agent
-    assert "FLEETENT_EVAL_RERANK_API_KEY=" in agent
+    assert "FLEETENT_MODEL_PRIMARY_API_KEY=" not in agent
+    assert "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN=" not in agent
+    assert "FLEETENT_CONFLUENCE_TOKEN=" not in agent
+    assert "materialize" in agent
     # No real secret material in either.
     for marker in ("sk-", "ma-", "xoxb-", "xapp-"):
         assert marker not in both
@@ -286,12 +279,15 @@ def test_deployment_docs_are_docker_compose_first_and_use_port_8765():
     assert "uv run uvicorn fleetent.server:app` 只作为开发模式" in combined
 
 
-def test_env_example_covers_agent_yaml_example_env_refs():
-    """Every env-var name referenced by agent.yaml.example must exist in .env.example."""
+def test_materialize_covers_agent_yaml_example_env_refs(tmp_path, monkeypatch):
+    """Every env-var name referenced by agent.yaml.example is generated into Agent .env."""
     import yaml
 
+    from fleetent.agent_config import AgentFile
+    from fleetent.platform.agent_lifecycle import materialize
+
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     doc = yaml.safe_load(Path("config/agent/agent.yaml.example").read_text(encoding="utf-8"))
-    env_text = Path("config/agent/.env.example").read_text(encoding="utf-8")
 
     refs: set[str] = set()
 
@@ -306,8 +302,11 @@ def test_env_example_covers_agent_yaml_example_env_refs():
                 walk(item)
 
     walk(doc)
+    agent = AgentFile.model_validate(doc)
+    home = materialize.write_home(agent)
+    env_text = (home / ".env").read_text(encoding="utf-8")
     missing = sorted(name for name in refs if name and f"{name}=" not in env_text)
-    assert not missing, f".env.example missing referenced env names: {missing}"
+    assert not missing, f"materialized .env missing referenced env names: {missing}"
 
 
 def test_deployment_docs_do_not_use_old_agent_config_paths_as_primary():

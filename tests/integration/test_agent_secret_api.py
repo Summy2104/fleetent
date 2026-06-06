@@ -130,9 +130,9 @@ def test_secret_api_is_write_only_and_delete_clears_value(client):
 
     listed = client.get("/admin/agents/support/secrets", headers=_hdr(token))
     assert "sk-live-secret" not in listed.text
-    slot = {
-        item["env_name"]: item for item in listed.json()["secrets"]
-    }["FLEETENT_AGENT_SUPPORT_MODEL"]
+    slot = {item["env_name"]: item for item in listed.json()["secrets"]}[
+        "FLEETENT_AGENT_SUPPORT_MODEL"
+    ]
     assert slot == {
         "env_name": "FLEETENT_AGENT_SUPPORT_MODEL",
         "mode": "inject",
