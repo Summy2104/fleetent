@@ -1048,9 +1048,7 @@ def test_same_tier_conflict_keeps_path_sort_and_no_tier_override(tmp_path, monke
 
 def test_catalog_truncates_over_max_skills_with_warning(tmp_path):
     for i in range(5):
-        _write_skill(
-            tmp_path, f"s{i}", f"---\nname: s{i}\ndescription: skill {i}.\n---\nbody"
-        )
+        _write_skill(tmp_path, f"s{i}", f"---\nname: s{i}\ndescription: skill {i}.\n---\nbody")
     sr.scan(str(tmp_path / "skills"))
     out = sr.available_skills_prompt(disabled_skills=[], max_skills=3)
     # Only 3 <skill> blocks rendered.
@@ -1066,9 +1064,7 @@ def test_catalog_switches_to_compact_over_max_chars(tmp_path):
     # five rather than truncating by count.
     long_desc = "x" * 400
     for i in range(5):
-        _write_skill(
-            tmp_path, f"s{i}", f"---\nname: s{i}\ndescription: {long_desc}\n---\nbody"
-        )
+        _write_skill(tmp_path, f"s{i}", f"---\nname: s{i}\ndescription: {long_desc}\n---\nbody")
     sr.scan(str(tmp_path / "skills"))
     out = sr.available_skills_prompt(disabled_skills=[], max_chars=1500)
     # Compact omits the long description but keeps every skill's name + location.

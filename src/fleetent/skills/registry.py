@@ -441,9 +441,7 @@ def available_skills_prompt(
     return rendered  # unreachable (entries non-empty), keeps type checker happy
 
 
-def _render_catalog(
-    shown: list[tuple[str, "SkillEntry"]], total: int, *, compact: bool
-) -> str:
+def _render_catalog(shown: list[tuple[str, "SkillEntry"]], total: int, *, compact: bool) -> str:
     """Render the <available_skills> section, optionally compact and/or truncated.
 
     A leading warning line is emitted when fewer than `total` skills are shown or when
