@@ -121,6 +121,30 @@ async def test_run_code_includes_stderr(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_code_redacts_secrets_in_output(monkeypatch):
+    """Secrets printed by the sandbox are redacted before reaching the agent loop."""
+    from unittest.mock import AsyncMock
+
+    import fleetent.tools.builtin_tools as tl
+    from fleetent.integrations.sandbox.client import ExecResult
+
+    client = _mock_lifecycle_client("cid-redact")
+    client.exec = AsyncMock(
+        return_value=ExecResult(
+            stdout="leaked=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+            stderr="Authorization: Bearer abc.def.ghi_secrettoken123",
+            exit_code=0,
+        )
+    )
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
+
+    result = await tl.run_code(code="print('x')")
+    assert "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" not in result
+    assert "abc.def.ghi_secrettoken123" not in result
+    assert "[REDACTED]" in result
+
+
+@pytest.mark.asyncio
 async def test_run_code_does_not_destroy_on_exec_error(monkeypatch):
     """An exec error propagates but the workspace is left for reuse (no destroy)."""
     from unittest.mock import AsyncMock
