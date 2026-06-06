@@ -1091,19 +1091,30 @@ async def run(
     global _active_runs
     _active_runs += 1
     try:
-     return await _run_inner(
-        messages=messages, user_id=user_id, system_prompt=system_prompt,
-        is_sub_agent=is_sub_agent, reply_func=reply_func, allowed_tools=allowed_tools,
-        agent_name=agent_name, max_turns=max_turns,
-        max_consecutive_failures=max_consecutive_failures, max_tokens=max_tokens,
-        force_model=force_model, disabled_skills_trace=disabled_skills_trace,
-        loop_repeat_threshold=loop_repeat_threshold,
-        loop_ignore_arg_keys=loop_ignore_arg_keys,
-        guardrail_repeat_threshold=guardrail_repeat_threshold,
-        cancel_token=cancel_token, sandbox_mode=sandbox_mode,
-        agent_features=agent_features, session_id=session_id,
-        allowed_skills=allowed_skills, governance=governance, model_policy=model_policy,
-     )
+        return await _run_inner(
+            messages=messages,
+            user_id=user_id,
+            system_prompt=system_prompt,
+            is_sub_agent=is_sub_agent,
+            reply_func=reply_func,
+            allowed_tools=allowed_tools,
+            agent_name=agent_name,
+            max_turns=max_turns,
+            max_consecutive_failures=max_consecutive_failures,
+            max_tokens=max_tokens,
+            force_model=force_model,
+            disabled_skills_trace=disabled_skills_trace,
+            loop_repeat_threshold=loop_repeat_threshold,
+            loop_ignore_arg_keys=loop_ignore_arg_keys,
+            guardrail_repeat_threshold=guardrail_repeat_threshold,
+            cancel_token=cancel_token,
+            sandbox_mode=sandbox_mode,
+            agent_features=agent_features,
+            session_id=session_id,
+            allowed_skills=allowed_skills,
+            governance=governance,
+            model_policy=model_policy,
+        )
     finally:
         _active_runs -= 1
 

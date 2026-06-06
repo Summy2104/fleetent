@@ -3272,7 +3272,7 @@ async def test_active_runs_increments_during_run(mock_client) -> None:
 
     mock_client.chat.completions.create = spy_create
     mock_client.chat.completions.create = AsyncMock(
-        side_effect=lambda *a, **k: (observed.append(al._active_runs) or _text_resp("ok"))
+        side_effect=lambda *a, **k: observed.append(al._active_runs) or _text_resp("ok")
     )
 
     await al.run([{"role": "user", "content": "hi"}])
