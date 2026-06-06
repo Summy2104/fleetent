@@ -133,7 +133,10 @@ async def boot(
     from fleetent.intelligence import vector_store
 
     vector_store.configure_from_active_agent()
-    scan_skills()
+    # Build this agent's skill index from its OWN home (self-contained: never the
+    # process CWD or FLEETENT_SKILLS_DIR). materialize copies skill files to home/skills/;
+    # a missing dir scans to builtin-only (skill-nested-scan safe).
+    scan_skills(skills_dir=str(home_dir / "skills"))
     load_plugins()
 
     if with_infra:

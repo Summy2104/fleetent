@@ -116,3 +116,38 @@ def test_resolve_home_uses_fleetent_home(tmp_path, monkeypatch):
     assert agent_app.resolve_home("support") == tmp_path / "agents" / "support"
     # explicit override wins
     assert agent_app.resolve_home("support", home=tmp_path / "x") == tmp_path / "x"
+
+
+# ── per-agent skill index from home/skills (skill-runtime-per-agent-index) ────
+
+
+async def test_boot_builds_skill_index_from_home_skills(tmp_path, monkeypatch):
+    """boot() scans <home>/skills/ so the process skill index reflects this agent."""
+    from fleetent.skills import registry as skill_registry
+
+    home = _write_home(tmp_path)
+    skill_dir = home / "skills" / "crm-ops"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: crm-ops\ndescription: CRM operations helper\n---\nbody", encoding="utf-8"
+    )
+    # Ensure the global env does not point the scanner elsewhere.
+    monkeypatch.delenv("FLEETENT_SKILLS_DIR", raising=False)
+
+    sup = _FakeSupervisor()
+    await agent_app.boot("support", home=home, supervisor=sup, with_infra=False)
+
+    assert "crm-ops" in skill_registry._index
+
+
+async def test_boot_safe_when_home_has_no_skills_dir(tmp_path, monkeypatch):
+    """No <home>/skills/ → boot succeeds; the home-specific skill is absent."""
+    from fleetent.skills import registry as skill_registry
+
+    home = _write_home(tmp_path)
+    monkeypatch.delenv("FLEETENT_SKILLS_DIR", raising=False)
+
+    sup = _FakeSupervisor()
+    await agent_app.boot("support", home=home, supervisor=sup, with_infra=False)
+
+    assert "crm-ops" not in skill_registry._index
