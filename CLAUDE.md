@@ -32,6 +32,11 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 
 ### OpenSpec 工作流
 
+> **前置条件（不可跳过）**：所有工作流从 main 最新代码出发。开始前执行：
+> ```bash
+> git pull origin main
+> ```
+
 **1. opsx:propose** — 定义「做什么」
 
 - 写 proposal.md、specs/、design.md（可选）、tasks.md
@@ -69,44 +74,115 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 
 ```
 src/fleetent/
-  runtime/loop.py          ← while tool-use 核心循环；run() + run_stream()（←agent_loop.py，旧路径留 shim）
-  runtime/context.py       ← in-session token 压缩，keep_tail identity check（←context_mgr.py）
-  runtime/snapshot.py      ← agent 快照 load_active（←agent_runtime.py）
-  runtime/sub_agent.py     ← asyncio.gather 并行子 agent；最大深度 1
-  runtime/{termination,loop_detector,budget,layered_budget,cancellation,message_hygiene,error_classifier,tool_guardrails,sub_agent_lifecycle}.py ← 运行治理（终止/循环检测/预算/取消/消息净化/错误分类/工具护栏/子 agent 生命周期）
-  model_router.py    ← task_type → provider 配置（OpenAI-compatible + fallback 链）
-  tools/registry.py        ← @tool 装饰器、schema 构建、dispatch；访问控制
-  tools/builtin_tools.py   ← 内置工具（import fleetent.tools 即注册，副作用经包 __init__ 保留）
-  skill_registry.py  ← 扫描 skills/，关键词匹配，注入 system prompt
-  memory_layer.py    ← 跨 session 事实：Haiku 提取 → JSONL → 注入
-  user_store.py      ← 用户/API key 持久化（当前 SQLite-first）
-  eval_logger.py     ← append-only JSONL 追踪日志
-  server.py          ← FastAPI：POST /chat (SSE)，GET /health，Bearer 认证
-  admin.py           ← CLI：create-user, list-users, rotate-key 等
-  config.py          ← pydantic-settings；加载 .env + config/settings.yaml
-  agent_policy.py    ← fnmatch tool 访问检查（allowed_tools 白名单）
-  agent_store.py     ← agent 定义 + 用户绑定 + channel 绑定（当前 SQLite-first）
-  im_user_store.py   ← (platform, platform_user_id) → 内部 User；allowlist 管理
-  session_mgr.py     ← JSON session 持久化；per-session asyncio.Lock
-  permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
-  sandbox_client.py  ← Docker CLI 封装：隔离 Python 执行
-  mcp_client.py      ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
-  cron_scheduler.py  ← APScheduler 定时任务；server 启动时初始化
-  schedule_store.py  ← 定时任务定义与状态持久化（当前 SQLite-first）
-  webhook_router.py  ← Webhook 来源配置加载、签名验证、消息提取
+  # ── 平台控制面 ──
+  platform/
+    admin_cli/                    ← CLI 管理命令（fleetent-admin 入口）
+    agent_lifecycle/              ← Agent 进程启停控制
+    agent_management_console/     ← Agent 版本/绑定管理 + 生命周期控制台 API
+    agent_statistics/             ← Agent 统计信息 API
+    askit_console/                ← Agent 定义幂等应用 API
+    chat_management/              ← 聊天会话管理和治理 API
+    connector_management/         ← 连接器/MCP 管理 API
+    im_gateway_management/        ← IM 网关管理 API
+    knowledge_base_management/    ← 知识库管理和绑定 API
+    model_provider_management/    ← 模型提供商管理 API
+    resource_monitoring/          ← 资源监控和告警
+    skill_management/             ← Skill 管理和上传 API
+    user_management/              ← 用户/API key 管理 API
+
+  # ── Agent 运行时 ──
+  runtime/
+    loop.py              ← while tool-use 核心循环；run() + run_stream()
+    context.py           ← in-session token 压缩，keep_tail identity check
+    snapshot.py          ← agent 快照 load_active
+    sub_agent.py         ← asyncio.gather 并行子 agent；最大深度 1
+    agent_app.py         ← 单机 Agent 运行时启动（fleetent agent run）
+    agent_init.py        ← Agent 主目录脚手架生成
+    {termination,loop_detector,budget,layered_budget,cancellation,
+     message_hygiene,error_classifier,tool_guardrails,sub_agent_lifecycle}.py
+
+  # ── 智能能力 ──
+  intelligence/
+    knowledge_base/      ← KB 检索/向量化/解析/持久化运行时
+    memory/              ← 用户记忆提取/存储/检索
+    vector_store/        ← 向量嵌入和重排运行时
+    long_term_ctx.py     ← 长期上下文构建（记忆 + 知识库注入）
+    reflection.py        ← 反思报告生成
+
+  # ── 治理 ──
+  governance/
+    agent_policy.py      ← fnmatch tool 访问检查（allowed_tools 白名单）
+    permission_gate.py   ← asyncio.Event 人工审批门（medium/high 风险）
+    audit_log.py         ← 平台管理操作审计日志
+    quota.py             ← 用户/全局配额限制
+    blocklist.py         ← 用户封禁和级联撤销
+
+  # ── 集成 ──
+  integrations/
+    mcp/client.py        ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
+    sandbox/             ← Docker 沙箱容器生命周期管理（run_code 工具后端）
+
+  # ── 模型 ──
+  model/
+    resolver.py          ← task_type → provider 配置（OpenAI-compatible + fallback 链）
+    provider_health.py   ← 提供商健康缓存和熔断
+
+  # ── 可观测性 ──
+  observability/
+    traces.py            ← Agent 运行轨迹追踪（append-only）
+    usage.py             ← 使用情况汇总查询
+    diagnostics.py       ← 诊断信息导出和保留
+    {performance,structured_logging,startup_diagnostics,pilot_verification}.py
+
+  # ── 会话 ──
+  session/
+    manager.py           ← JSON session 持久化；per-session asyncio.Lock
+    index.py             ← 会话元数据索引
+
+  # ── IM 网关 ──
   im_gateway/
-    normalizer.py    ← NormalizedMessage dataclass；统一路由 pipeline
-    slack.py         ← slack-bolt Socket Mode 适配器
-    telegram.py      ← python-telegram-bot polling 适配器
-  tui/               ← 交互式终端 TUI(agent 服务的又一客户端，前后端分离+协议)
-    protocol.py      ← newline-delimited JSON-RPC 2.0 编解码 + 方法/事件常量
-    transport.py     ← Transport 抽象 + WSTransport(peer-gone 分类)
-    dispatch.py      ← 单 dispatch：send/abort/approve/session.*；run_stream→event
-    backend.py       ← 客户端 GatewayBackend(websockets 连接、收发协程、重连钩子)
-    render.py        ← rich 渲染(流式文本/工具面板/审批提示/状态行)，Console 可注入
-    commands.py      ← 斜杠命令解析 + prompt_toolkit Completer
-    app.py           ← AppController + prompt_toolkit 主循环；fleetent-tui 入口
-  server.py 另新增 @app.websocket("/ws") 挂接 tui dispatch(SSE /chat 不变)
+    normalizer.py        ← NormalizedMessage dataclass；统一路由 pipeline
+    slack.py             ← slack-bolt Socket Mode 适配器
+    slack_supervisor.py  ← 多 Slack 连接器生命周期管理
+    telegram.py          ← python-telegram-bot polling 适配器
+    access.py            ← IM 访问控制
+
+  # ── 工具 ──
+  tools/
+    registry.py          ← @tool 装饰器、schema 构建、dispatch；访问控制
+    builtin_tools.py     ← 内置工具（import fleetent.tools 即注册，副作用经包 __init__ 保留）
+    plugin_loader.py     ← 外部插件动态加载
+    {multimodal,vision_client,image_gen_client,result_truncation}.py
+
+  # ── Skills ──
+  skills/
+    registry.py          ← 扫描 skills/，关键词匹配，注入 system prompt
+    audit.py             ← Skill 审计
+
+  # ── TUI ──
+  tui/                   ← 交互式终端 TUI（agent 服务的又一客户端，前后端分离+协议）
+    protocol.py          ← newline-delimited JSON-RPC 2.0 编解码 + 方法/事件常量
+    transport.py         ← Transport 抽象 + WSTransport（peer-gone 分类）
+    dispatch.py          ← 单 dispatch：send/abort/approve/session.*；run_stream→event
+    backend.py           ← 客户端 GatewayBackend（websockets 连接、收发协程、重连钩子）
+    render.py            ← rich 渲染（流式文本/工具面板/审批提示/状态行），Console 可注入
+    commands.py          ← 斜杠命令解析 + prompt_toolkit Completer
+    app.py               ← AppController + prompt_toolkit 主循环；fleetent-tui 入口
+
+  # ── 顶层模块 ──
+  server.py              ← FastAPI：POST /chat (SSE)，GET /health，@app.websocket("/ws")，Bearer 认证
+  config.py              ← pydantic-settings；加载 .env + config/settings.yaml（仅 platform 字段）
+  agent_config.py        ← AgentFile pydantic 定义；agent.yaml 加载和扫描
+  paths.py               ← 路径常量（FLEETENT_HOME 解析优先级）
+  db.py                  ← 数据库运行时边界层（Alembic + 连接管理）
+  auth.py                ← 密码哈希和登录会话
+  connectors.py          ← 工具 OAuth 凭证管理
+  agent_store.py         ← agent 定义 + 用户绑定 + channel 绑定
+  user_store.py          ← 用户/API key 持久化
+  im_user_store.py       ← (platform, platform_user_id) → 内部 User；allowlist 管理
+  cron_scheduler.py      ← APScheduler 定时任务；server 启动时初始化
+  schedule_store.py      ← 定时任务定义与状态持久化
+  webhook_router.py      ← Webhook 来源配置加载、签名验证、消息提取
 ```
 
 ### Forbidden Patterns
@@ -224,10 +300,19 @@ uv run fleetent-tui --token ma-<key>              # 交互式终端 TUI（连 /w
 ## 环境变量
 
 ```
-ANTHROPIC_API_KEY      # 默认路由必需
+# Platform
+DATABASE_URL           # 可选，默认 sqlite:///<data_dir>/fleetent.db
+LOG_FORMAT             # console | json，默认 console
+
+# Agent 运行时（agent.yaml 中配置；以下为进程级覆盖）
 FLEETENT_HOME          # 覆盖 config/data 家目录（未设时：仓库内→./；仓库外→~/.fleetent）
-FLEETENT_SKILLS_DIR  # 覆盖 skills/ 目录（默认 ./skills）
-FLEETENT_AGENTS_DIR  # 覆盖 agents 目录（默认 <config_dir>/agents）
+FLEETENT_AGENTS_DIR    # 覆盖 agents 目录（默认 <config_dir>/agents）
+FLEETENT_SKILLS_DIR    # 覆盖 skills/ 目录（默认 ./skills）
+FLEETENT_PLUGINS_DIR   # 覆盖 plugins/ 目录
+
+# TUI
+FLEETENT_TUI_URL       # WebSocket 地址，默认 ws://127.0.0.1:8765/ws
+FLEETENT_TOKEN         # Bearer token（--token 参数优先）
 ```
 
 ---
@@ -236,11 +321,11 @@ FLEETENT_AGENTS_DIR  # 覆盖 agents 目录（默认 <config_dir>/agents）
 
 - 路径常量（`DB_PATH`/`SESSIONS_DIR`/`SETTINGS_YAML_PATH` 等）在 import 时从 `paths.py` 求值一次（`paths.data_dir()/...`）——`FLEETENT_HOME` 须在进程启动前设定。测试中要在 import 后整体重定向，需 `monkeypatch.setenv("FLEETENT_HOME", ...)` 后 `importlib.reload(module)`，或直接 `monkeypatch.setattr(module, "<CONST>", ...)`（沿用既有注入习惯）。依赖 CWD-相对路径 + `chdir` 的旧测试在迁移后失效，改用常量注入
 - `tools/builtin_tools.py` 注册工具是 import 副作用——`tools/__init__.py` 顶部 `from fleetent.tools import builtin_tools` 承载此副作用，`runtime/loop.py` 顶部 `import fleetent.tools` 触发注册，否则 `get_schemas()` 返回空
-- `skill_registry.scan()` 在服务启动时运行（FastAPI lifespan），不是每次请求；CLI `run()` 每次调用
+- `skills/registry.scan()` 在服务启动时运行（FastAPI lifespan），不是每次请求；CLI `run()` 每次调用
 - `runtime/context.py` 的 `_keep_tail()` 用 identity check（`m is tail[0]`），不用 `==`——内容相同的 dict 相等但非同一对象（旧路径 `context_mgr` 留 shim；测试 patch/私有名访问改指 `fleetent.runtime.context`）
 - runtime 旧扁平路径（`agent_loop`/`context_mgr`/`agent_runtime`/`sub_agent`/`cancellation` 等 13 个）仅留 re-export shim；测试 `patch`/`monkeypatch.setattr` 目标须打在 `fleetent.runtime.loop` 等真实子模块上——`import *` 复制引用，patch shim 不生效
 - Bearer token 格式：`Authorization: Bearer ma-<64hex>`——`ma-` 前缀区分服务 key 与模型 API key
-- `model_router.get_async_client_and_config()` 每次调用新建 client——故意的，client 无状态且廉价
-- `permission_gate` 测试需要短超时：`PermissionGate(medium_timeout=0.1)`
+- `model/resolver.py` 每次调用新建 client——故意的，client 无状态且廉价
+- `governance/permission_gate` 测试需要短超时：`PermissionGate(medium_timeout=0.1)`
 - MCP 工具名用双下划线：`{server_id}__{tool_name}`——单下划线是工具名的一部分
-- `session_mgr` 原子写：`.json.tmp → rename`；测试中 monkeypatch `session_mgr.SESSIONS_DIR`
+- `session/manager.py` 原子写：`.json.tmp → rename`；测试中 monkeypatch `session_mgr.SESSIONS_DIR`
