@@ -8,21 +8,20 @@ process without monitoring it. Created by archiving change platform-agent-lifecy
 ### Requirement: Create/update materializes a runnable agent home
 
 When the platform creates or updates an agent, it SHALL materialize that agent's
-self-contained home: an `agent.yaml` (definition + `connectors` + per-agent `access`
-block) and a `.env` scaffold (env-var names only, no plaintext secrets), under the
-agent's home directory, so the agent is runnable by `fleetent agent run`.
+self-contained home under `FLEETENT_HOME/agents/<agent-id>/`: an `agent.yaml`
+(definition + `connectors` + per-agent `access` block), a `.env` scaffold, and `data/`,
+so the agent is runnable by `fleetent agent run`.
 
 #### Scenario: Create writes the home
-
 - **WHEN** an admin creates agent `support` on the platform
-- **THEN** `FLEETENT_HOME/support/agent.yaml` is written from the authored definition and
-  a `.env` scaffold is present, with secrets referenced only by env-var name
+- **THEN** `FLEETENT_HOME/agents/support/agent.yaml` is written from the authored definition
+- **AND** `FLEETENT_HOME/agents/support/.env` is present, with secrets referenced only by env-var name
+- **AND** `FLEETENT_HOME/agents/support/data/` exists
 
 #### Scenario: Update re-materializes
-
 - **WHEN** an admin edits `support`'s definition
-- **THEN** its home `agent.yaml` is rewritten to match, leaving operator-provided `.env`
-  secret values intact
+- **THEN** `FLEETENT_HOME/agents/support/agent.yaml` is rewritten to match
+- **AND** operator-provided `.env` secret values are preserved
 
 ### Requirement: Start and stop agent processes without monitoring
 
@@ -61,16 +60,16 @@ able to run from that home without Platform DB access. Platform-owned config fil
 - **AND** 写入或保留 `agents/support/.env`
 - **AND** 确保 `agents/support/data/` 存在
 
-#### Scenario: Platform env does not leak into Agent home
-- **WHEN** materialize 写入 Agent `.env`
-- **THEN** `.env` 只含该 Agent required env
-- **AND** 不含 `FLEETENT_SECRET_KEY`、`DATABASE_URL` 或 Platform-owned KB construction env
+#### Scenario: Old flat deploy path is not written
+- **WHEN** 平台部署 Agent `support`
+- **THEN** 不写入 `support/agent.yaml`
+- **AND** 不写入 Platform home root `agent.yaml`
 
 #### Scenario: Knowledge binding export only
 - **WHEN** 一个 agent 绑定了 KB
 - **THEN** 生成的 `agent.yaml` 含 `knowledge.bindings`
 - **AND** 不含 Google Drive / Confluence source construction details
-- **AND** materialize 不写 `config/knowledge.yaml`
+- **AND** materialize 不写 standalone Knowledge YAML
 
 ### Requirement: `.env` materialization resolves by credential mode
 
@@ -120,4 +119,3 @@ agent 引用的密钥占位 SHALL NOT 出现在 Platform ENV 模板中——它�
 #### Scenario: 模板无 inline 密钥值
 - **WHEN** 读取 Platform ENV 模板
 - **THEN** 所有条目为 `NAME=` 形式，不含任何真实密钥值
-

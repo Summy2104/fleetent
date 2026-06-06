@@ -512,25 +512,25 @@ def test_load_single_agent_file_still_rejects_inline_secret(tmp_path) -> None:
         agent_config.load_agent_home_file(tmp_path / "agent.yaml")
 
 
-def test_build_index_prefers_config_agent_file_as_sole_default(tmp_path, monkeypatch) -> None:
+def test_build_index_prefers_default_agent_home_as_sole_default(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()
-    # A multi-scan agents dir also exists; it must be ignored when home file is present.
-    agents_dir = home / "config" / "agents"
+    # Another agent also exists; it must be ignored when the default Agent home is present.
+    agents_dir = home / "agents"
     agents_dir.mkdir(parents=True)
     _write_agent(agents_dir, "other")
     # Default Agent home file, bindings.default false -> still forced default.
     default_home = home / "agents" / "default"
     _write_config_agent(
-        default_home, "deployed", bindings={"default": False, "channels": ["slack:C9"]}
+        default_home, "default", bindings={"default": False, "channels": ["slack:C9"]}
     )
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
     index = agent_config.build_index()
 
-    assert set(index.agents) == {"deployed"}  # multi-scan ignored
-    assert index.default == "deployed"  # forced default
-    assert index.by_channel.get("slack:C9") == "deployed"
+    assert set(index.agents) == {"default"}  # multi-scan ignored
+    assert index.default == "default"  # forced default
+    assert index.by_channel.get("slack:C9") == "default"
     assert index.get("other") is None
 
 
@@ -550,6 +550,19 @@ def test_build_index_falls_back_to_multiscan_without_config_agent_file(
 
     assert set(index.agents) == {"a", "b"}
     assert index.default == "a"  # multiscan: default decided by bindings.default
+
+
+def test_build_index_ignores_old_home_root_agent_yaml(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    _write_config_agent(home, "legacy")
+    monkeypatch.setenv("FLEETENT_HOME", str(home))
+    monkeypatch.delenv("FLEETENT_AGENTS_DIR", raising=False)
+
+    index = agent_config.build_index()
+
+    assert index.agents == {}
+    assert index.default is None
 
 
 def test_repo_agent_yaml_example_loads_as_single_agent_file() -> None:

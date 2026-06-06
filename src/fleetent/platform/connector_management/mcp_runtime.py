@@ -3,7 +3,7 @@
 Only global (``agent_id IS NULL``), enabled definitions from ``agent_mcp_server_store``
 are registered into the runtime so their tools become visible to agents; disabled or
 deleted definitions are unregistered. Per-agent scoped registration is out of scope
-here — this is the global layer only, the counterpart to ``config/mcp.servers.yaml``.
+here — this is the DB-authored global layer.
 """
 
 from typing import Any

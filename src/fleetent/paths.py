@@ -52,21 +52,29 @@ def base_dir() -> Path:
     return Path.home() / _DEFAULT_HOME_DIRNAME
 
 
-def config_dir() -> Path:
-    return base_dir() / "config"
-
-
 def data_dir() -> Path:
     return base_dir() / "data"
 
 
+def agents_dir() -> Path:
+    return base_dir() / "agents"
+
+
+def agent_home_dir(agent_id: str) -> Path:
+    return agents_dir() / agent_id
+
+
 def agent_file() -> Path:
     """The default deployed Agent's self-contained config."""
-    return base_dir() / "agents" / "default" / "agent.yaml"
+    return agent_home_dir("default") / "agent.yaml"
 
 
 def platform_yaml_path() -> Path:
     return base_dir() / "platform.yaml"
+
+
+def platform_env_path() -> Path:
+    return base_dir() / ".env"
 
 
 def sessions_dir() -> Path:

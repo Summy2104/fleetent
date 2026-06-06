@@ -24,7 +24,7 @@ def test_create_session_id_defaults_none(tmp_path, monkeypatch):
     assert ss.list_tasks()[0]["session_id"] is None
 
 
-# NOTE: zhangyang's S3 also defined cron jobs (with session_id) via config/cron.yaml.
+# NOTE: zhangyang's S3 also defined cron jobs (with session_id) via a legacy YAML file.
 # main deliberately dropped yaml cron loading in favour of DB-only runtime management
 # (cron_scheduler.test_cron_yaml_loader_is_removed enforces this), so the yaml-loader
 # test was removed during the merge. Session binding itself is preserved via the DB

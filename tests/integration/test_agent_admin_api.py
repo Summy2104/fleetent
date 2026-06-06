@@ -219,11 +219,10 @@ def test_bind_known_mcp_server(client, monkeypatch):
 
 
 def test_known_mcp_ids_include_store_registered(monkeypatch):
-    # _known_mcp_server_ids unions the YAML config seam with DB-registered global
-    # servers (the same set the drawer lists), so a store-only server is bindable.
+    # _known_mcp_server_ids uses DB-registered global servers, so a store-only
+    # server is bindable.
     from fleetent.platform.connector_management import agent_mcp_server_store
 
-    monkeypatch.setattr(api.config, "load_mcp_server_settings", lambda: [])
     monkeypatch.setattr(
         agent_mcp_server_store,
         "list_mcp_servers",
@@ -236,7 +235,6 @@ def test_bind_store_registered_mcp_server(client, monkeypatch):
     from fleetent.platform.connector_management import agent_mcp_server_store
 
     agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
-    monkeypatch.setattr(api.config, "load_mcp_server_settings", lambda: [])
     monkeypatch.setattr(
         agent_mcp_server_store,
         "list_mcp_servers",
@@ -419,7 +417,7 @@ def test_deploy_writes_agent_yaml(client, tmp_path, monkeypatch):
     token, _ = _session_for("admin")
     r = client.post("/admin/agents/dep-bot/deploy", headers=_hdr(token))
     assert r.status_code == 200, r.text
-    dest = home / "dep-bot" / "agent.yaml"
+    dest = home / "agents" / "dep-bot" / "agent.yaml"
     assert dest.exists()
     assert r.json()["path"] == str(dest)
     doc = _yaml.safe_load(dest.read_text())

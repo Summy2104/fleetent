@@ -1,5 +1,36 @@
 from pathlib import Path
 
+import yaml
+
+
+def _walk(node: object):
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield key, value
+            yield from _walk(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _walk(item)
+
+
+def _env_refs_from_yaml(path: Path) -> set[str]:
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    refs: set[str] = set()
+    for key, value in _walk(doc):
+        if isinstance(value, str) and key.endswith("_env") and value:
+            refs.add(value)
+    return refs
+
+
+def _env_keys(path: Path) -> set[str]:
+    keys: set[str] = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        keys.add(stripped.split("=", 1)[0].strip())
+    return keys
+
 
 def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
     agent_env = Path("agents/default/.env.example")
@@ -23,7 +54,7 @@ def test_env_example_is_safe_and_local_env_and_secrets_are_ignored():
     assert "MICROSANDBOX_URL=" not in agent
     assert "ANTHROPIC_API_KEY=" not in agent
     assert "OPENAI_API_KEY=" not in agent
-    assert "FLEETENT_MODEL_PRIMARY_API_KEY=" not in agent
+    assert "FLEETENT_MODEL_PRIMARY_API_KEY=" in agent
     assert "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN=" not in agent
     assert "FLEETENT_CONFLUENCE_TOKEN=" not in agent
     assert "materialize" in agent
@@ -64,6 +95,10 @@ def test_global_config_example_templates_removed():
     assert Path("platform.yaml.example").exists()
     assert Path("agents/default/agent.yaml.example").exists()
     assert Path("agents/default/.env.example").exists()
+    assert not Path("agents/default/.env.standalone.example").exists()
+    assert not Path("agents/default/agent.configure.yaml.example").exists()
+    assert not Path("agents/default/agent.defaults.yaml.example").exists()
+    assert not Path("config").exists()
     assert not Path("config/agent").exists()
     assert not Path("config/platform").exists()
     assert not Path("config/knowledge-service").exists()
@@ -71,8 +106,61 @@ def test_global_config_example_templates_removed():
     assert not Path("examples/knowledge-service").exists()
 
 
-def test_active_config_directory_only_contains_canonical_templates():
-    assert not Path("config").exists() or not any(Path("config").iterdir())
+def test_config_directory_is_not_a_runtime_or_template_namespace():
+    assert not Path("config").exists()
+
+
+def test_active_docs_and_source_do_not_reintroduce_legacy_config_paths():
+    forbidden = [
+        "config/mcp.servers.yaml",
+        "config/settings.yaml",
+        "config/agent/",
+        "config/platform/",
+        "config/agents",
+        "FLEETENT_HOME/<id>",
+        "FLEETENT_HOME/<agent-id>",
+        "FLEETENT_HOME/agent.yaml",
+        ".env.standalone.example",
+        "agent.configure.yaml.example",
+        "agent.defaults.yaml.example",
+    ]
+    roots = [Path("README.md"), Path("docs/capabilities"), Path("docs/deployment"), Path("src")]
+    offenders: list[str] = []
+    for root in roots:
+        paths = [root] if root.is_file() else sorted(root.rglob("*"))
+        for path in paths:
+            if not path.is_file() or path.suffix not in {".md", ".py", ".sh", ".yml", ".yaml"}:
+                continue
+            text = path.read_text(encoding="utf-8")
+            for needle in forbidden:
+                if needle in text:
+                    offenders.append(f"{path}: {needle}")
+    assert not offenders
+
+
+def test_four_canonical_examples_are_complete_references():
+    from fleetent.agent_config import AgentFile
+    from fleetent.intelligence.knowledge_base.config import load_knowledge_config
+
+    agent_yaml = Path("agents/default/agent.yaml.example")
+    agent_env = Path("agents/default/.env.example")
+    platform_yaml = Path("platform.yaml.example")
+    platform_env = Path(".env.example")
+
+    agent = AgentFile.model_validate(yaml.safe_load(agent_yaml.read_text(encoding="utf-8")))
+    agent_fields = set(AgentFile.model_fields)
+    example_fields = set((yaml.safe_load(agent_yaml.read_text(encoding="utf-8")) or {}).keys())
+    assert agent.name
+    assert not (agent_fields - example_fields)
+
+    missing_agent_env = _env_refs_from_yaml(agent_yaml) - _env_keys(agent_env)
+    assert not missing_agent_env
+    assert ".env.standalone.example" not in agent_env.read_text(encoding="utf-8")
+
+    missing_platform_env = _env_refs_from_yaml(platform_yaml) - _env_keys(platform_env)
+    assert not missing_platform_env
+    assert {"FLEETENT_SECRET_KEY", "DATABASE_URL"} <= _env_keys(platform_env)
+    load_knowledge_config(platform_yaml)
 
 
 def test_dockerfile_includes_deployment_runtime_assets_and_port():

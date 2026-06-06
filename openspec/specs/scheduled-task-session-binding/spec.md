@@ -34,7 +34,7 @@ TBD - created by archiving change scheduled-task-session-binding. Update Purpose
 
 ### Requirement: scheduled_tasks 承载可选 session_id 字段
 
-`scheduled_tasks` 表 SHALL 增加可选列 `session_id`（可空，NULL 表示每次独立）。`schedule_store.create` MUST 接受可选 `session_id` 参数并持久化；`list_tasks` 返回的任务字典 MUST 包含 `session_id`；从 `config/cron.yaml` 加载的静态任务 MUST 承载该字段，未声明时为 NULL。
+`scheduled_tasks` 表 SHALL 增加可选列 `session_id`（可空，NULL 表示每次独立）。`schedule_store.create` MUST 接受可选 `session_id` 参数并持久化；`list_tasks` 返回的任务字典 MUST 包含 `session_id`。Legacy static YAML task loading is not a current runtime source.
 
 #### Scenario: 创建任务持久化 session_id
 - **WHEN** `schedule_store.create(..., session_id="cron/daily")` 被调用
@@ -44,9 +44,9 @@ TBD - created by archiving change scheduled-task-session-binding. Update Purpose
 - **WHEN** `schedule_store.create(...)` 未传 `session_id`
 - **THEN** 该任务行 `session_id` 为 NULL，`list_tasks` 返回的字典中 `session_id` 为 None
 
-#### Scenario: 静态任务从 YAML 承载 session_id
-- **WHEN** `config/cron.yaml` 的某个 job 声明了 `session_id`
-- **THEN** `load_cron_yaml` 返回的该任务字典含对应 `session_id`；未声明该字段的 job 其 `session_id` 为 None
+#### Scenario: Legacy static YAML is not a session source
+- **WHEN** a legacy static schedule YAML declares `session_id`
+- **THEN** runtime does not load that YAML as current task configuration
 
 ### Requirement: 触发时据 session_id 接入 session 持久化
 

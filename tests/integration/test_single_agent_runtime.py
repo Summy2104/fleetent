@@ -8,7 +8,7 @@ from fleetent.runtime import snapshot
 
 def _write_home_agent(home, **overrides) -> None:
     doc = {
-        "name": "deployed",
+        "name": "default",
         "version": 1,
         "system_prompt": "You are deployed.",
         "models": agent_config.default_models().model_dump(mode="json"),
@@ -27,8 +27,8 @@ def test_scan_publishes_single_home_agent(tmp_path, monkeypatch) -> None:
     agent_config.scan()
     index = agent_config.current()
 
-    assert set(index.agents) == {"deployed"}
-    assert index.default == "deployed"
+    assert set(index.agents) == {"default"}
+    assert index.default == "default"
 
 
 def test_request_resolves_to_home_agent_via_default(tmp_path, monkeypatch) -> None:
@@ -41,7 +41,7 @@ def test_request_resolves_to_home_agent_via_default(tmp_path, monkeypatch) -> No
     snap = snapshot.resolve_agent_for_request(platform=None, channel_id=None, user_id=None)
 
     assert snap is not None
-    assert snap.name == "deployed"
+    assert snap.name == "default"
     assert snap.system_prompt == "You are deployed."
 
 
@@ -53,4 +53,4 @@ def test_channel_binding_resolves_to_home_agent(tmp_path, monkeypatch) -> None:
 
     snap = snapshot.resolve_agent_for_request(platform="slack", channel_id="C9", user_id=None)
 
-    assert snap is not None and snap.name == "deployed"
+    assert snap is not None and snap.name == "default"

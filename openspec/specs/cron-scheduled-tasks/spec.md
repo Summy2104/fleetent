@@ -27,7 +27,7 @@ APScheduler on every server startup. Cron jobs SHALL NOT be loaded from YAML fil
 - **THEN** the task is active again after calling `cron_scheduler.start()`
 
 #### Scenario: Old cron YAML is not loaded
-- **WHEN** `config/cron.yaml` exists
+- **WHEN** a legacy cron YAML file exists
 - **THEN** scheduler startup fails fast instead of loading static jobs
 
 ### Requirement: Cron trigger fires agent run asynchronously
@@ -77,7 +77,7 @@ The admin CLI SHALL provide `list-schedules`, `add-schedule`, and `remove-schedu
 - **THEN** exit code is 0 and the task no longer appears in list-schedules
 
 ### Requirement: Scheduler global settings
-The scheduler SHALL read deployment-level runtime settings from `config/settings.yaml`.
+The scheduler SHALL read deployment-level runtime settings from Platform settings.
 
 #### Scenario: Scheduler disabled
 - **WHEN** `scheduling.enabled=false`
@@ -86,4 +86,3 @@ The scheduler SHALL read deployment-level runtime settings from `config/settings
 #### Scenario: Default timezone is configured
 - **WHEN** a persisted task does not define timezone
 - **THEN** scheduler uses `scheduling.default_timezone`
-

@@ -45,7 +45,7 @@ TBD - created by archiving change compression-layered-retention. Update Purpose 
 
 ### Requirement: 初始意图保留条数受上界约束
 
-为防止异常长的开场把头部撑大到挤占 `Tretained`，纳入头部完整保留的初始意图消息条数 MUST 受一个上界约束（**默认 2**，覆盖「引子 + 真正需求」的分句开场）。该上界 SHALL 经配置动态可调（pydantic `Settings` 字段 `compression_initial_intent_max`，可由 `.env` / `config/settings.yaml` 覆盖），亦 MAY 经 config dict 注入，MUST NOT 引入全局可变状态。超过上界的开头用户消息不计入初始意图头部，按中段处理。
+为防止异常长的开场把头部撑大到挤占 `Tretained`，纳入头部完整保留的初始意图消息条数 MUST 受一个上界约束（**默认 2**，覆盖「引子 + 真正需求」的分句开场）。该上界 SHALL 经配置动态可调（可由 Platform env / Platform settings 覆盖），亦 MAY 经 config dict 注入，MUST NOT 引入全局可变状态。超过上界的开头用户消息不计入初始意图头部，按中段处理。
 
 #### Scenario: 上界经配置动态调整
 - **WHEN** 通过配置覆盖 `compression_initial_intent_max`
@@ -74,4 +74,3 @@ TBD - created by archiving change compression-layered-retention. Update Purpose 
 #### Scenario: 头尾重叠按标识去重
 - **WHEN** 同一条消息既属于头部又落入尾部
 - **THEN** 该消息在结果中只出现一次（按对象标识判定），序列顺序保持原始相对次序
-

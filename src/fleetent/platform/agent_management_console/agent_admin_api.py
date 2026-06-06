@@ -12,7 +12,7 @@ import yaml
 from fastapi import APIRouter, Body, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import agent_store, auth, config, paths, user_store
+from fleetent import agent_store, auth, paths, user_store
 from fleetent.governance import audit_log
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
@@ -89,13 +89,10 @@ def _require_agent(name: str) -> agent_store.Agent:
 def _known_mcp_server_ids() -> set[str]:
     """The set of MCP server ids an agent may bind to.
 
-    Unions the YAML config seam with DB-registered global servers (admin console),
-    matching what ``GET /admin/mcp/servers`` lists — so a server defined only in the
-    store (not config) is still bindable.
+    Uses DB-registered global servers (admin console), matching what
+    ``GET /admin/mcp/servers`` lists.
     """
-    ids = {s.id for s in config.load_mcp_server_settings()}
-    ids |= {str(r["server_id"]) for r in agent_mcp_server_store.list_mcp_servers(None)}
-    return ids
+    return {str(r["server_id"]) for r in agent_mcp_server_store.list_mcp_servers(None)}
 
 
 def _build_agent_yaml(agent: agent_store.Agent) -> str:
@@ -154,16 +151,16 @@ def export_agent_yaml(name: str, authorization: str | None = Header(None)) -> di
 
 @router.post("/agents/{name}/deploy")
 def deploy_agent(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
-    """Write (overwrite) the agent.yaml at ``<FLEETENT home>/<name>/agent.yaml``.
+    """Write (overwrite) the agent.yaml at ``<FLEETENT home>/agents/<name>/agent.yaml``.
 
-    Target: ``~/.fleetent/<name>/agent.yaml`` (honors FLEETENT_HOME). Picking it up
+    Target: ``~/.fleetent/agents/<name>/agent.yaml`` (honors FLEETENT_HOME). Picking it up
     into the runtime index is owned elsewhere; this just generates the file.
     """
     user = _require_admin(authorization)
     agent = _require_agent(name)
     if "/" in name or "\\" in name or name in (".", ".."):
         raise HTTPException(status_code=400, detail="invalid agent name")
-    dest = paths.base_dir() / name / "agent.yaml"
+    dest = paths.agent_home_dir(name) / "agent.yaml"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(_build_agent_yaml(agent), encoding="utf-8")
     audit_log.write_audit(

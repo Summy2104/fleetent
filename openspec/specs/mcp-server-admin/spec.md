@@ -8,7 +8,7 @@ The admin face SHALL list all configured MCP servers (stdio / HTTP transport) wi
 connection status aligned to the `mcp` domain: connected, startup-degraded (masked at
 startup), probe-failing-reconnecting (exponential backoff), and marked-permanently-
 unavailable. Each entry SHALL show its owning agent (or "global default" for entries
-sourced from `config/mcp.servers.yaml`), registered tool count, the `server__{tool}`
+authored without an agent scope), registered tool count, the `server__{tool}`
 namespace list, and the last handshake/probe time. The list SHALL support filtering by
 owning agent. Connection state is delegated to the `mcp` domain and SHALL NOT be
 recomputed here.
@@ -64,4 +64,3 @@ MCP server configuration changes and manual reconnects SHALL be admin-only; view
 #### Scenario: Unauthenticated rejected
 - **WHEN** a request to any `/admin/mcp/*` endpoint carries no valid login session
 - **THEN** the response is 401
-

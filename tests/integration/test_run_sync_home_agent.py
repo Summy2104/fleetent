@@ -13,7 +13,7 @@ def _write_home_agent(home, **fields):
     agent_home = home / "agents" / "default"
     agent_home.mkdir(parents=True, exist_ok=True)
     doc = {
-        "name": "deployed",
+        "name": "default",
         "version": 1,
         "models": agent_config.default_models().model_dump(mode="json"),
     }
@@ -47,7 +47,7 @@ def test_run_sync_applies_home_agent(tmp_path, monkeypatch):
     assert captured["system_prompt"] == "You are the DEPLOYED agent."
     assert captured["allowed_tools"] == ["shell"]
     assert captured["allowed_skills"] == ["weather"]
-    assert captured["agent_name"] == "deployed"
+    assert captured["agent_name"] == "default"
     # the deployed system prompt is what went into the assembled messages, not _SYSTEM
     assert "DEPLOYED" in captured["messages"][0]["content"]
     assert loop._SYSTEM not in captured["messages"][0]["content"]

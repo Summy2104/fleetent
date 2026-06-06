@@ -57,7 +57,7 @@ TBD - created by archiving change model-routes-externalize. Update Purpose after
 
 #### Scenario: 注入路径以隔离测试
 - **WHEN** 测试 `monkeypatch.setattr(model_router, "ROUTES_PATH", tmp_path / "routes.yaml")`
-- **THEN** 加载读取该临时文件，不触碰真实 `config/` 目录
+- **THEN** 加载读取该临时文件，不触碰真实部署配置目录
 
 #### Scenario: 运行中改文件不自动生效
 - **WHEN** 进程运行期间修改了路由文件内容
@@ -70,4 +70,3 @@ TBD - created by archiving change model-routes-externalize. Update Purpose after
 #### Scenario: 默认 task_type 行为不变
 - **WHEN** 不传 `task_type` 调用 `get_async_client_and_config`
 - **THEN** 返回 `default` 路由对应的 client 与 `RouteConfig`，调用方无需感知路由来源的变化
-

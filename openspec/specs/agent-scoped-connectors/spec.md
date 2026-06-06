@@ -47,12 +47,12 @@ names.
 ### Requirement: MCP server ownership by agent
 MCP server definitions SHALL be resolvable per agent. The same `server_id` MAY have a
 distinct definition (transport, endpoint/command, auth) per agent, plus an optional
-global-default definition sourced from `config/mcp.servers.yaml`. Agent-specific
+global-default definition authored in Platform DB. Agent-specific
 definitions SHALL override the global default for the same `server_id`.
 
 #### Scenario: Per-agent server definition wins
-- **WHEN** a global-default `github` MCP server is configured in
-  `config/mcp.servers.yaml` AND agent `billing` defines its own `github` MCP server
+- **WHEN** a global-default `github` MCP server is configured in Platform DB AND agent
+  `billing` defines its own `github` MCP server
 - **THEN** resolving MCP servers for agent `billing` uses the `billing`-owned `github`
   definition
 
@@ -90,4 +90,4 @@ entries.
 #### Scenario: MCP server list shows owner
 - **WHEN** an admin opens the MCP server list
 - **THEN** each server entry shows its owning agent, or "global default" for entries
-  sourced from `config/mcp.servers.yaml`
+  authored without an agent scope

@@ -104,15 +104,15 @@ name such as `ANTHROPIC_API_KEY`.
 ### Requirement: Runtime uses Agent-scoped resolver
 
 Runtime model calls SHALL resolve model configuration from the active Agent snapshot's
-`models` section. Runtime SHALL NOT use `config/routes.yaml` or built-in production routes as
+`models` section. Runtime SHALL NOT use legacy route YAML files or built-in production routes as
 the primary source of model routing.
 
 #### Scenario: Agent-specific route is used
 - **WHEN** two Agents define different `models.routes.default`
 - **THEN** each Agent runtime uses its own configured route
 
-#### Scenario: routes.yaml is not the runtime source
-- **WHEN** `config/routes.yaml` exists but the Agent snapshot defines `models`
+#### Scenario: Legacy route YAML is not the runtime source
+- **WHEN** a legacy route YAML exists but the Agent snapshot defines `models`
 - **THEN** runtime uses the Agent snapshot `models`
 
 ### Requirement: Model policy snapshot is service-readable
@@ -156,7 +156,7 @@ operator-provided values. Plaintext model API keys SHALL NOT be written to `agen
 ### Requirement: Old model config is removed
 
 MVP runtime SHALL reject or remove old `model_overrides` configuration and SHALL not depend on
-`config/routes.yaml` as a production route source.
+legacy route YAML files as a production route source.
 
 #### Scenario: model_overrides is not accepted
 - **WHEN** an Agent config uses `model_overrides` instead of `models`
@@ -166,4 +166,3 @@ MVP runtime SHALL reject or remove old `model_overrides` configuration and SHALL
 - **WHEN** `fleetent agent init` or example config generates model credentials
 - **THEN** it uses `FLEETENT_MODEL_<TARGET_ID_UPPER>_API_KEY`
 - **AND** it does not use `ANTHROPIC_API_KEY`
-

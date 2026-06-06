@@ -133,22 +133,10 @@ async def test_fire_message_in_user_content(tmp_path, monkeypatch):
 # ── settings-backed startup ───────────────────────────────────────────────────
 
 
-async def test_start_fails_fast_when_legacy_cron_yaml_exists(
-    tmp_path, monkeypatch, isolated_schedule_db
-):
-    import pytest
-
+def test_legacy_cron_yaml_path_is_removed():
     import fleetent.cron_scheduler as cs
 
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    legacy = config_dir / "cron.yaml"
-    legacy.write_text("jobs: []\n")
-    monkeypatch.setattr(cs, "LEGACY_CRON_CONFIG_PATH", legacy)
-
-    scheduler = cs.CronScheduler()
-    with pytest.raises(RuntimeError, match="SQLite-backed runtime management"):
-        await scheduler.start()
+    assert not hasattr(cs, "LEGACY_CRON_CONFIG_PATH")
 
 
 def test_cron_yaml_loader_is_removed():

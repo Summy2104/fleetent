@@ -47,10 +47,10 @@ flowchart TD
 - ✅ **stdio 传输**：通过子进程 stdin/stdout 接入本机 MCP 服务（文件系统、本地脚本等）
   - 子进程标准输出只能写协议消息，混入 `print()` 调试输出会破坏协议
 
-- ✅ **服务注册与启动配置**：`agents/<agent-id>/agent.yaml` 的 `mcp_servers` 声明服务列表，启动时自动连接并注册工具；服务凭据只保存环境变量名引用
+- ✅ **服务注册与启动配置**：Platform DB 负责 MCP authoring；Agent 绑定 MCP 后 materialize 到
+  `agents/<agent-id>/agent.yaml` 的 `mcp_servers`，Agent 启动时自动连接并注册工具；服务凭据只保存环境变量名引用
   - 某个服务连接失败 → 该服务工具不可用，不影响其他服务和平台正常启动
-  - legacy `config/mcp.servers.yaml` 缺失时返回空列表；当前部署模板不再要求该文件
-  - 旧 `config/mcp.yaml` 不再读取；文件存在时启动失败并提示迁移
+  - 不再读取默认 MCP YAML 文件；MCP 定义来自 Platform DB / materialized Agent config
 
 - ✅ **工具命名空间隔离**：来自不同服务的工具自动加 `{server_id}__{tool_name}` 前缀
   - 双下划线是命名空间分隔符，单下划线是工具名本身的合法字符

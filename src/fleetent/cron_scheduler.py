@@ -9,14 +9,10 @@ from typing import Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 
 import fleetent.schedule_store as _store
-from fleetent import paths
 from fleetent.config import SchedulingSettings
 from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatching
 
 logger = logging.getLogger(__name__)
-
-LEGACY_CRON_CONFIG_PATH = paths.config_dir() / "cron.yaml"
-
 
 async def _agent_run(
     messages: list[dict[str, Any]], user_id: str, agent_name: str | None = None
@@ -71,12 +67,6 @@ class CronScheduler:
 
     async def start(self) -> None:
         """Load persisted tasks from SQLite and start the scheduler."""
-
-        if LEGACY_CRON_CONFIG_PATH.exists():
-            raise RuntimeError(
-                "Legacy config/cron.yaml is no longer supported; create cron jobs through "
-                "SQLite-backed runtime management."
-            )
 
         if not self._settings.enabled:
             return

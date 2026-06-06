@@ -34,7 +34,7 @@ from fleetent.platform.config_validation import _flatten, _looks_inline_secret
 
 # Agents root directory. Module-level constant (injectable via monkeypatch per the
 # project's no-global-mutable-state rule); env override mirrors FLEETENT_SKILLS_DIR.
-AGENTS_DIR = paths.config_dir() / "agents"
+AGENTS_DIR = paths.agents_dir()
 
 AGENT_FILE_NAME = "agent.yaml"
 _ENV_VAR_NAME_RE = re.compile(r"^(env:)?[A-Z_][A-Z0-9_]*$")
@@ -400,14 +400,15 @@ def _single_agent_index(agent: AgentFile) -> AgentConfigIndex:
 def build_index(agents_dir: str | Path | None = None) -> AgentConfigIndex:
     """Build a fresh resolution index (pure; no globals).
 
-    Single-file mode: when no explicit ``agents_dir`` / ``FLEETENT_AGENTS_DIR`` is given
-    and a home-root ``agent.yaml`` exists, load it as the sole, forced-default agent.
-    Otherwise scan the agents directory (multi-agent).
+    Default installed Agent mode: when no explicit ``agents_dir`` /
+    ``FLEETENT_AGENTS_DIR`` is given and ``agents/default/agent.yaml`` exists, load it
+    as the sole, forced-default agent. The old home-root ``agent.yaml`` single-file
+    mode is not a current MVP deployment path. Otherwise scan the agents directory.
     """
     if agents_dir is None and "FLEETENT_AGENTS_DIR" not in os.environ:
-        home_file = paths.agent_file()
-        if home_file.is_file():
-            return _single_agent_index(load_agent_home_file(home_file))
+        default_file = paths.agent_file()
+        if default_file.is_file():
+            return _single_agent_index(load_agent_file(default_file.parent))
 
     root = _resolve_agents_dir(agents_dir)
     agents: dict[str, AgentFile] = {}

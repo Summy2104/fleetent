@@ -37,10 +37,23 @@ def test_platform_env_template_contains_only_empty_platform_vars():
     assert "FLEETENT_CONFLUENCE_TOKEN" in entries
 
 
-def test_static_agent_env_template_has_no_agent_secret_inventory():
+def test_agent_env_template_contains_complete_empty_agent_refs_not_platform_vars():
     entries = _env_entries(ROOT / "agents" / "default" / ".env.example")
 
-    assert entries == {}
+    assert "FLEETENT_MODEL_PRIMARY_API_KEY" in entries
+    assert "SUPPORT_SLACK_BOT" in entries
+    assert "ACME_DOCS_MCP_TOKEN" in entries
+    assert entries
+    for value in entries.values():
+        assert value == ""
+    forbidden_platform_envs = {
+        "FLEETENT_SECRET_KEY",
+        "DATABASE_URL",
+        "LOG_FORMAT",
+        "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN",
+        "FLEETENT_CONFLUENCE_TOKEN",
+    }
+    assert forbidden_platform_envs.isdisjoint(entries)
 
 
 def test_materialized_agent_env_contains_required_refs_not_platform_secret(tmp_path, monkeypatch):

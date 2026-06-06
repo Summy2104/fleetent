@@ -153,7 +153,7 @@ current MVP deployment path.
 - **AND** `--home` may still override the Agent home path
 
 #### Scenario: Root agent yaml is not the default path
-- **WHEN** `FLEETENT_HOME/agent.yaml` exists
+- **WHEN** a root-level Agent YAML exists in Platform home
 - **THEN** runtime does not treat it as the canonical default deployment config
 - **AND** docs instruct operators to use `agents/<agent-id>/agent.yaml`
 

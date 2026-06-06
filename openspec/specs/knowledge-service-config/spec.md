@@ -8,17 +8,17 @@ TBD - created by archiving change split-agent-knowledge-config. Update Purpose a
 Default MVP deployment SHALL treat Knowledge as embedded in the Platform service. Embedded
 Knowledge construction config SHALL be read from Platform config (`platform.yaml`) and/or Platform
 DB managed connector state. The default deployment SHALL NOT read or materialize
-`<FLEETENT_HOME>/config/knowledge.yaml`. When Knowledge is deployed as a future standalone service,
+legacy Knowledge YAML files. When Knowledge is deployed as a future standalone service,
 that service MAY define its own service home and config contract in a separate change.
 
 #### Scenario: Embedded knowledge uses Platform config
 - **WHEN** the platform runtime loads embedded KB construction config
 - **THEN** it reads the `knowledge` section from `platform.yaml` or the Platform DB snapshot
-- **AND** it does not require `<FLEETENT_HOME>/config/knowledge.yaml`
+- **AND** it does not require a standalone Knowledge YAML file
 
 #### Scenario: Standalone templates are deferred
 - **WHEN** 查看仓库模板
-- **THEN** 不存在 active `config/knowledge-service/`
+- **THEN** 不存在 active standalone Knowledge service template directory
 - **AND** 不存在 `examples/knowledge-service/`
 - **AND** standalone Knowledge Service 模板不作为当前阶段 setup requirement
 
@@ -52,7 +52,7 @@ Knowledge config/snapshot supplied by Platform config or Platform DB managed con
 #### Scenario: List configured sources from Platform snapshot
 - **WHEN** KB operations list configured connectors/sources
 - **THEN** the result is derived from the active Platform Knowledge snapshot
-- **AND** the default source is not `<FLEETENT_HOME>/config/knowledge.yaml`
+- **AND** the default source is not a standalone Knowledge YAML file
 
 ### Requirement: Knowledge config follows deployment boundary
 
@@ -69,4 +69,3 @@ separate service.
 - **WHEN** Knowledge 作为独立服务部署
 - **THEN** Knowledge service 拥有自己的 `knowledge.yaml` 和 `.env`
 - **AND** Platform config 只保存连接该服务所需的 endpoint 和 auth env 引用
-

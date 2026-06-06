@@ -14,7 +14,6 @@ def test_config_module_constants_derive_from_paths(monkeypatch) -> None:
     import fleetent.config as cfg
 
     assert paths.platform_yaml_path() == cfg.PLATFORM_YAML_PATH
-    assert paths.config_dir() / "mcp.servers.yaml" == cfg.MCP_SERVERS_YAML_PATH
 
 
 def test_settings_default_paths_follow_fleetent_home(

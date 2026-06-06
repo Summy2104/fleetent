@@ -10,7 +10,7 @@ change agent-runtime-cli.
 
 The `fleetent` command SHALL provide `agent run <agent-id> [--port N]` that boots a
 single agent as a self-contained foreground process: it resolves the agent home at
-`FLEETENT_HOME/<agent-id>/` (`agent.yaml` + `.env` + `data/` + local access), loads it,
+`FLEETENT_HOME/agents/<agent-id>/` (`agent.yaml` + `.env` + `data/` + local access), loads it,
 runs the agent loop, and starts that agent's IM connectors. The process SHALL run
 without any platform service.
 
@@ -21,44 +21,20 @@ by systemd `EnvironmentFile`, Docker `--env-file`, or shell `export`) SHALL take
 precedence over values in `.env`.
 
 #### Scenario: Boot one agent from its home
-
-- **WHEN** `fleetent agent run support` is invoked and `FLEETENT_HOME/support/agent.yaml`
+- **WHEN** `fleetent agent run support` is invoked and `FLEETENT_HOME/agents/support/agent.yaml`
   exists
 - **THEN** the process loads that home's agent and starts its IM connectors, with no
   platform server required
 
-#### Scenario: IM is always bound to the agent
-
-- **WHEN** the agent home declares `connectors.slack`
-- **THEN** the running agent process maintains that Slack connection; IM is not available
-  outside an agent process
-
 #### Scenario: .env is loaded before agent.yaml is scanned
-
 - **WHEN** `<home_dir>/.env` exists and contains `SLACK_BOT_TOKEN=xoxb-abc`
 - **THEN** `os.environ["SLACK_BOT_TOKEN"]` equals `xoxb-abc` by the time `scan_home()` runs
 - **AND** downstream consumers (`slack_supervisor`, `model/resolver`) read the correct value
 
-#### Scenario: Missing .env is silently skipped
-
-- **WHEN** `<home_dir>/.env` does not exist
-- **THEN** `boot()` proceeds normally without error
-- **AND** agent startup behaviour is identical to the pre-change state
-
-#### Scenario: Process-level env takes precedence over .env
-
-- **WHEN** `SLACK_BOT_TOKEN=xoxb-injected` is already set in the process environment
-- **AND** `<home_dir>/.env` contains `SLACK_BOT_TOKEN=xoxb-from-file`
-- **THEN** `os.environ["SLACK_BOT_TOKEN"]` remains `xoxb-injected`
-- **AND** the `.env` value is NOT applied
-
-#### Scenario: Multiple agents on the same server have isolated environments
-
-- **WHEN** two `fleetent agent run` processes start concurrently for `agent-a` and `agent-b`
-- **AND** each home contains a `.env` with the same variable name but different values
-- **THEN** the `agent-a` process sees only `agent-a`'s value
-- **AND** the `agent-b` process sees only `agent-b`'s value
-- **AND** neither process's `os.environ` is visible to the other
+#### Scenario: Old flat agent home is not used
+- **WHEN** a legacy flat Agent home exists outside `FLEETENT_HOME/agents/<agent-id>/`
+- **AND** the canonical `FLEETENT_HOME/agents/support/agent.yaml` does not exist
+- **THEN** `fleetent agent run support` fails rather than loading the old flat path
 
 ### Requirement: HTTP is opt-in via `--port`
 
@@ -88,36 +64,25 @@ without `--port` it runs IM/CLI/TUI-only with no HTTP listener.
   default
 
 ### Requirement: Scaffold an agent home via `fleetent agent init`
-`fleetent agent init <agent-id>` SHALL scaffold a self-contained, runnable agent home from a built-in template, with zero platform/DB dependency. The generated home SHALL be directly runnable by `fleetent agent run <agent-id>`.
+
+`fleetent agent init <agent-id>` SHALL scaffold a self-contained, runnable agent home under
+`FLEETENT_HOME/agents/<agent-id>/` from a built-in template, with zero platform/DB dependency.
+The generated home SHALL be directly runnable by `fleetent agent run <agent-id>`.
 
 #### Scenario: Init creates a runnable home
 - **WHEN** operator 运行 `fleetent agent init my-bot`
-- **THEN** 在 `FLEETENT_HOME/my-bot/` 下创建 `agent.yaml`
+- **THEN** 在 `FLEETENT_HOME/agents/my-bot/` 下创建 `agent.yaml`
 - **AND** `agent.yaml` 的 `name` 字段等于 `my-bot`（满足 `agent run` 的目录名==name 校验）
 - **AND** 生成的 `agent.yaml` 能被运行时加载器解析通过
 
 #### Scenario: Env scaffold lists referenced env-var names
 - **WHEN** init 写出 home
-- **THEN** 创建 `FLEETENT_HOME/my-bot/.env`，列出生成 agent 引用的 env-var 名（含 `ANTHROPIC_API_KEY`），值为空待填
+- **THEN** 创建 `FLEETENT_HOME/agents/my-bot/.env`，列出生成 agent 引用的 env-var 名，值为空待填
 - **AND** 不写入任何真实密钥
 
 #### Scenario: Home override
 - **WHEN** operator 运行 `fleetent agent init my-bot --home /opt/agents/my-bot`
-- **THEN** 在该路径而非 `FLEETENT_HOME/my-bot` 下 scaffold
-
-#### Scenario: Refuses to overwrite without --force
-- **WHEN** 目标 `agent.yaml` 已存在且未传 `--force`
-- **THEN** 命令报错并以非零退出码退出
-- **AND** 不修改已有 `agent.yaml`
-
-#### Scenario: --force overwrites agent.yaml but preserves .env
-- **WHEN** 目标已存在且传 `--force`
-- **THEN** 覆盖 `agent.yaml`
-- **AND** 已存在的 `.env` 不被覆盖
-
-#### Scenario: No platform or database dependency
-- **WHEN** init 运行
-- **THEN** 不访问平台服务或数据库（纯本地文件 scaffold）
+- **THEN** 在该路径而非 `FLEETENT_HOME/agents/my-bot` 下 scaffold
 
 ### Requirement: Restart running agent via `fleetent agent restart`
 
@@ -195,4 +160,3 @@ incremented on entry and decremented in a `finally` block on exit.
 
 - **WHEN** `loop.run()` raises an exception
 - **THEN** `_active_runs` is still decremented (via finally)
-

@@ -4,29 +4,25 @@
 Defines MCP server startup registration and transparent MCP tool dispatch.
 ## Requirements
 ### Requirement: Startup tool registration
-The system SHALL connect to MCP servers configured in `config/mcp.servers.yaml` at
-startup and register their tools into `tool_registry` as the global-default layer. MCP
-global policy SHALL remain in `config/settings.yaml` under `mcp`. In addition,
-agent-owned MCP server definitions SHALL be resolvable per request; an agent-owned
-definition for a given `server_id` SHALL override the global-default definition for that
-agent.
 
-#### Scenario: MCP tools available at runtime
-- **WHEN** the service starts with `config/mcp.servers.yaml` listing a GitHub MCP server with a
-  `create_issue` tool
-- **THEN** `tool_registry` contains a tool named `github__create_issue` before the first request is handled
+The system SHALL register MCP tools from Platform-authored MCP server definitions, not from
+legacy MCP YAML files. Global-default definitions are stored in Platform DB with no agent scope;
+agent-owned definitions are stored with an agent scope and override a global-default definition
+with the same `server_id` for that agent. Materialized Agent homes SHALL carry the Agent's
+effective MCP server definitions in `agent.yaml`.
+
+#### Scenario: Global DB-authored MCP tools available at runtime
+- **WHEN** Platform DB contains an enabled global-default GitHub MCP server with a `create_issue` tool
+- **THEN** startup registers a tool named `github__create_issue` before the first request is handled
 
 #### Scenario: No MCP servers configured
-- **WHEN** `config/mcp.servers.yaml` does not exist or contains no servers
+- **WHEN** Platform DB contains no enabled global-default MCP servers
 - **THEN** service startup continues normally and no global-default MCP tools are registered
 
-#### Scenario: MCP disabled globally
-- **WHEN** `config/settings.yaml` sets `mcp.enabled=false`
-- **THEN** service startup does not read or register MCP servers from `config/mcp.servers.yaml`
-
-#### Scenario: MCP server unreachable at startup
-- **WHEN** a configured MCP server is not reachable at startup
-- **THEN** a warning is logged, that server's tools are skipped, and service startup continues normally
+#### Scenario: Config file is not read
+- **WHEN** a legacy MCP YAML file exists in the working tree or Platform home
+- **THEN** startup ignores it
+- **AND** MCP registration is derived from Platform DB / materialized Agent config only
 
 #### Scenario: Agent-owned server overrides global default
 - **WHEN** a global-default `github` server is registered at startup AND agent `billing`
@@ -75,17 +71,16 @@ The MCP integration module SHALL expose `register_all` and `call_tool` through
   the appropriate MCP server
 
 ### Requirement: Dedicated MCP server definition file
-MCP server definitions SHALL live in `config/mcp.servers.yaml`, not in `config/settings.yaml`.
 
-#### Scenario: Settings file excludes MCP server definitions
-- **WHEN** `config/settings.yaml` contains `mcp.servers`
-- **THEN** startup rejects the configuration rather than silently treating it as the server registry
+MCP server definitions SHALL NOT live in default YAML config files.
+They SHALL be authored through Platform DB and materialized into Agent `agent.yaml` when needed by
+an Agent runtime.
 
-#### Scenario: Example file documents dedicated format
+#### Scenario: Repository has no MCP server config template
 - **WHEN** 查看配置样例
-- **THEN** `config/mcp.servers.yaml.example` documents the server list format and
-  `config/settings.yaml.example` does not include server list examples
+- **THEN** repository templates include no dedicated MCP server YAML example
+- **AND** only the canonical Platform and Agent examples are shipped
 
-#### Scenario: Legacy MCP config path remains rejected
-- **WHEN** `config/mcp.yaml` exists
-- **THEN** startup fails fast and points operators to `config/mcp.servers.yaml`
+#### Scenario: Legacy MCP config path is ignored
+- **WHEN** a legacy MCP YAML file exists
+- **THEN** startup does not load either file as current configuration

@@ -4,6 +4,38 @@
 # in the Platform service. Standalone Knowledge Service templates are deferred until
 # that deployment mode is supported.
 
+log_format: console
+
+observability:
+  logging:
+    console_level: info
+    file_level: debug
+    directory: data/logs
+    json_file: true
+
+sandbox:
+  mode: all
+  scope: session
+  idle_hours: 2.0
+  resources:
+    memory: 256
+    cpus: 0.5
+    network: none
+    exec_timeout: 30
+    read_only: true
+  agent_scope:
+    memory: 512
+    cpus: 1.0
+    network: public_only
+
+scheduling:
+  enabled: true
+  default_timezone: UTC
+
+webhooks:
+  enabled: true
+  max_body_bytes: 1048576
+
 knowledge:
   mode: embedded
   knowledge_bases:
@@ -22,7 +54,7 @@ knowledge:
         - id: pilot-drive
           type: google_drive
           enabled: false
-          folder_id: ""
+          folder_id: example-folder-id
           recursive: true
           access_token_env: FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN
           refresh_token_env: FLEETENT_GOOGLE_DRIVE_REFRESH_TOKEN
@@ -32,10 +64,10 @@ knowledge:
         - id: pilot-confluence
           type: confluence
           enabled: false
-          base_url: ""
+          base_url: https://example.atlassian.net/wiki
           username_env: FLEETENT_CONFLUENCE_USERNAME
           scope_type: space
-          space_key: ""
+          space_key: EXAMPLE
           include_children: true
           api_token_env: FLEETENT_CONFLUENCE_TOKEN
   remote:

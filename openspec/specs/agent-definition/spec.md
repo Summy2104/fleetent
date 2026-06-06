@@ -116,7 +116,7 @@ The store SHALL expose `agent_store.delete_agent(name)` that removes the agent a
 ### Requirement: Runtime agent resolution is file-sourced
 
 At runtime the system SHALL resolve an agent's executable `AgentSnapshot` from its
-self-contained file `config/agents/<name>/agent.yaml`, not from the
+self-contained file `agents/<name>/agent.yaml`, not from the
 `agents`/`agent_versions` SQLite read path. The snapshot's runtime fields
 (`system_prompt`, `allowed_tools`, `skills_dir`, `model_overrides`, `memory_namespace`)
 SHALL come from the file, and the agent's runtime identity SHALL be its `name`. The DB
@@ -125,13 +125,12 @@ and CLI) are unchanged; the file is the runtime artifact generated from them.
 
 #### Scenario: Active snapshot resolved from file, not DB
 
-- **WHEN** a message is routed to agent `assistant` and `config/agents/assistant/agent.yaml` exists
+- **WHEN** a message is routed to agent `assistant` and `agents/assistant/agent.yaml` exists
 - **THEN** the applied `AgentSnapshot` (system_prompt, allowed_tools, skills_dir,
   model_overrides, memory_namespace) is read from that file and identified by the name
   `assistant`, with no `agents`/`agent_versions` read
 
 #### Scenario: Missing agent file resolves to nothing
 
-- **WHEN** routing references agent name `ghost` but no `config/agents/ghost/agent.yaml` exists
+- **WHEN** routing references agent name `ghost` but no `agents/ghost/agent.yaml` exists
 - **THEN** runtime resolution returns no snapshot and the request proceeds as a bare run
-

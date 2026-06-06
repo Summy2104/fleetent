@@ -20,8 +20,7 @@
   `agents/<agent-id>/.env` + `agents/<agent-id>/agent.yaml` 保存 Agent 运行配置
   - `agents/<agent-id>/agent.yaml` 是部署 agent 的非敏感运行配置文件，保存 agent、model、MCP servers、knowledge binding、connector、embedding、rerank 等配置
   - 密钥不进 YAML、不进 DB、不进 git，仅通过 env var 注入；YAML 中只保存 `api_key_env`、`*_env` 这类环境变量名引用
-  - legacy `config/mcp.servers.yaml` 加载器仍保留缺省兼容路径，但当前部署模板和 installer 不再要求它存在
-  - 旧 `config/mcp.yaml`、`config/cron.yaml`、`config/webhooks.yaml` 存在时启动 fail fast，避免静默使用过期配置
+  - `config/` 不再是部署配置或模板命名空间；MCP 定义来自 Platform DB / materialized Agent config
 
 - ✅ **Docker Compose**：Pilot 默认部署入口
   - Pilot 默认从 `docker compose run --rm fleetent uv run fleetent-admin init-config` 开始，

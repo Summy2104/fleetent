@@ -87,7 +87,7 @@ skills 能力域 SHALL 组织为 `skills/` package：公共 API 收口于其 `__
 
 ### Requirement: model 域已迁入 model/
 
-model 能力域 SHALL 组织为 `model/` package：公共 API 收口于其 `__init__.py`；原 `src/fleetent/model_router.py`、`provider_health.py` 平铺路径 SHALL 已移除、不再可导入；迁移 SHALL 不改变路由解析、fallback 链、routes.yaml 契约或 provider 熔断语义。
+model 能力域 SHALL 组织为 `model/` package：公共 API 收口于其 `__init__.py`；原 `src/fleetent/model_router.py`、`provider_health.py` 平铺路径 SHALL 已移除、不再可导入；迁移 SHALL 不改变路由解析、fallback 链、Agent-scoped model routing 契约或 provider 熔断语义。
 
 #### Scenario: model 成包且公共 API 收口
 - **WHEN** 查看 `src/fleetent/model/`

@@ -91,7 +91,7 @@ runtime-adjacent repository examples. It SHALL create `.env` and `platform.yaml`
   `agents/default/agent.yaml.example`
 - **AND** creates `$FLEETENT_HOME/agents/default/.env` from `agents/default/.env.example`
 - **AND** creates `$FLEETENT_HOME/agents/default/data/`
-- **AND** does not create `$FLEETENT_HOME/config/`
+- **AND** does not create a Platform home config subdirectory
 
 #### Scenario: Existing Platform or Agent files are preserved
 - **WHEN** `$FLEETENT_HOME/.env`, `$FLEETENT_HOME/platform.yaml`,
@@ -153,5 +153,4 @@ and `data/`.
 #### Scenario: Default Agent home is under agents/default
 - **WHEN** install completes
 - **THEN** default Agent config lives at `$FLEETENT_HOME/agents/default/agent.yaml`
-- **AND** no default Agent config is created at `$FLEETENT_HOME/agent.yaml`
-
+- **AND** no default Agent config is created at Platform home root
