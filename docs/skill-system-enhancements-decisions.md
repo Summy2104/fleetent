@@ -70,3 +70,15 @@ A → B → C → D → E → F
   - **截断警告置于指令之前**：模型先知"列表不完整"再读 catalog。
   - **测试修正**：compact 测试初版 max_chars=600 触发了意外的条数再截（存活项依赖 dict 迭代序非 s0），改用 max_chars=1500 让 compact 容纳全部 5 个，干净测"切 compact 不再按条数截"。
 - 测试：3 新 unit；registry 95 passed；全套 3635 passed。
+
+### Change D — `skill-frontmatter-extensions`（P2-6 + P2-3 + P2-2）✅
+- 实现：SkillEntry + _scan_dir 加三字段。
+  - `disable_model_invocation`：_disabled_reason 加 "model_invocation_disabled"（audit_blocked 之后）→ catalog 隐藏；read_skill 不查 _disabled_reason 故仍可达。
+  - `requires_tools`：available_skills_prompt 加 `available_tools: set|None=None`（None 不过滤，兼容）+ helper `_tools_available`；loop.py 加 `_visible_tool_names(allowed_tools)`（get_schemas + check_tool_access 同源）在两处 catalog 调用传入。渲染期过滤（工具集每会话可变）。
+  - `required_env_vars`：`_as_env_var_list` 解析（过滤非 mapping/无 name）+ `skill_readiness(name)->{missing}` 查非 optional 且不在 os.environ 的 env；不阻塞 catalog。
+- 决策点：
+  - **顶层字段而非 metadata.fleetent 嵌套块**：更简单；未来需命名空间再迁移（YAGNI）。
+  - **disable_model_invocation 走 _disabled_reason（scan期），requires_tools 走渲染期过滤**：前者作者意图固定，后者工具可用性每会话可变，分两层正交。
+  - **available_tools=None 默认不过滤**：兼容未传工具集的调用方（纯渲染测试等）；loop.py 显式传。
+  - **测试修正**：read_skill 返回完整 SKILL.md（含 frontmatter），初版测试误期望仅 body，改为 `"the body" in loaded`。
+- 测试：5 新 unit；registry 100 passed；全套 3663 passed。

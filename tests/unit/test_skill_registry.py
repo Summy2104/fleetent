@@ -1088,3 +1088,93 @@ def test_catalog_small_dir_unchanged_by_defaults(tmp_path):
     assert with_defaults == explicit
     assert "⚠" not in with_defaults
     assert "gh for PRs." in with_defaults  # full format retained
+
+
+# --- frontmatter extensions (skill-frontmatter-extensions) ---
+
+
+def test_scan_parses_new_frontmatter_fields(tmp_path):
+    _write_skill(
+        tmp_path,
+        "ext",
+        "---\nname: ext\ndescription: d.\n"
+        "disable_model_invocation: true\n"
+        "requires_tools:\n  - run_code\n  - search_docs\n"
+        "required_env_vars:\n  - name: API_KEY\n  - name: OPT\n    optional: true\n"
+        "---\nbody",
+    )
+    sr.scan(str(tmp_path / "skills"))
+    e = sr._index["ext"]
+    assert e.disable_model_invocation is True
+    assert e.requires_tools == ["run_code", "search_docs"]
+    assert {v["name"] for v in e.required_env_vars} == {"API_KEY", "OPT"}
+
+
+def test_scan_new_fields_default_when_absent(tmp_path):
+    _write_skill(tmp_path, "plain", "---\nname: plain\ndescription: d.\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    e = sr._index["plain"]
+    assert e.disable_model_invocation is False
+    assert e.requires_tools == []
+    assert e.required_env_vars == []
+
+
+def test_disable_model_invocation_hidden_from_catalog_but_readable(tmp_path):
+    _write_skill(
+        tmp_path,
+        "internal",
+        "---\nname: internal\ndescription: internal helper.\n"
+        "disable_model_invocation: true\n---\nthe body",
+    )
+    _write_skill(tmp_path, "shown", "---\nname: shown\ndescription: visible.\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    catalog = sr.available_skills_prompt(disabled_skills=[])
+    assert "<name>internal</name>" not in catalog
+    assert "<name>shown</name>" in catalog
+    # read_skill still loads it (hiding is discovery-only, not a security block).
+    # load() returns the full SKILL.md (frontmatter + body), so assert the body is present.
+    from fleetent.tools import builtin_tools
+
+    loaded = builtin_tools.read_skill("internal")
+    assert "the body" in loaded
+    assert not loaded.startswith("error:")
+
+
+def test_requires_tools_filters_catalog_at_render_time(tmp_path):
+    _write_skill(
+        tmp_path,
+        "coder",
+        "---\nname: coder\ndescription: needs sandbox.\nrequires_tools:\n  - run_code\n---\nbody",
+    )
+    _write_skill(tmp_path, "free", "---\nname: free\ndescription: no deps.\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    # run_code absent -> coder hidden, free shown
+    out_absent = sr.available_skills_prompt(disabled_skills=[], available_tools={"search_docs"})
+    assert "<name>coder</name>" not in out_absent
+    assert "<name>free</name>" in out_absent
+    # run_code present -> coder shown
+    out_present = sr.available_skills_prompt(
+        disabled_skills=[], available_tools={"run_code", "search_docs"}
+    )
+    assert "<name>coder</name>" in out_present
+    # available_tools=None -> no filtering (backward compatible)
+    out_none = sr.available_skills_prompt(disabled_skills=[])
+    assert "<name>coder</name>" in out_none
+
+
+def test_skill_readiness_reports_missing_required_env(tmp_path, monkeypatch):
+    _write_skill(
+        tmp_path,
+        "needs-env",
+        "---\nname: needs-env\ndescription: d.\n"
+        "required_env_vars:\n  - name: MUST_HAVE\n  - name: MAYBE\n    optional: true\n---\nbody",
+    )
+    sr.scan(str(tmp_path / "skills"))
+    monkeypatch.delenv("MUST_HAVE", raising=False)
+    monkeypatch.delenv("MAYBE", raising=False)
+    readiness = sr.skill_readiness("needs-env")
+    assert "MUST_HAVE" in readiness["missing"]
+    assert "MAYBE" not in readiness["missing"]  # optional
+    # once set, no longer missing
+    monkeypatch.setenv("MUST_HAVE", "x")
+    assert sr.skill_readiness("needs-env")["missing"] == []
