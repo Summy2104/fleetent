@@ -90,6 +90,17 @@ async def _start_infra(agent: AgentFile) -> None:
         except Exception as exc:  # noqa: BLE001 — MCP unavailable must not abort boot
             _logger.warn("agent_runtime_mcp_register_failed", error=str(exc))
     session_mgr.start_session_maintenance()
+    # Restart recovery: flag sessions active just before this (re)start so the next
+    # request can be recognized as a resumed conversation. Best-effort — a scan
+    # failure must never abort boot.
+    try:
+        from fleetent.platform.chat_management import session_admin_store
+
+        marked = session_admin_store.scan_and_mark_recent()
+        if marked:
+            _logger.info("session_resume_pending_marked", count=len(marked))
+    except Exception as exc:  # noqa: BLE001 — recovery scan must not abort boot
+        _logger.warn("session_resume_scan_failed", error=str(exc))
 
 
 async def boot(
@@ -122,7 +133,10 @@ async def boot(
     from fleetent.intelligence import vector_store
 
     vector_store.configure_from_active_agent()
-    scan_skills()
+    # Build this agent's skill index from its OWN home (self-contained: never the
+    # process CWD or FLEETENT_SKILLS_DIR). materialize copies skill files to home/skills/;
+    # a missing dir scans to builtin-only (skill-nested-scan safe).
+    scan_skills(skills_dir=str(home_dir / "skills"))
     load_plugins()
 
     if with_infra:
