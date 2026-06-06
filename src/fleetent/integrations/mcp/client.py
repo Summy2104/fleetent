@@ -661,6 +661,7 @@ def _reregister_stdio_tools(server: McpServerConfig, tools: list[Any], scope: in
         del tr._registry[name]
     for tool_def in tools:
         _register_tool_stdio(server, _make_tool_name(server.id, tool_def.name), tool_def, scope)
+    _register_utility_tools(server, scope)
 
 
 async def _refresh_stdio_tools(server: McpServerConfig, scope: int | None, session: Any) -> None:
@@ -731,6 +732,7 @@ async def _register_stdio_server(server: McpServerConfig, scope: int | None = No
     logger.info(
         "mcp_server_registered server_id=%s transport=stdio tool_count=%d", server.id, len(tools)
     )
+    _register_utility_tools(server, scope)
 
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -1099,6 +1101,7 @@ async def _register_http_server(server: McpServerConfig, scope: int | None = Non
     logger.info(
         "mcp_server_registered server_id=%s transport=http tool_count=%d", server.id, len(tools)
     )
+    _register_utility_tools(server, scope)
 
 
 async def probe_server(server: McpServerConfig) -> dict[str, Any]:
@@ -1404,3 +1407,170 @@ async def call_tool(
     if server.transport == "stdio":
         return await _call_stdio_tool(server_id, tool_name, args, scope)
     return await _call_http_tool(server_id, tool_name, args, scope)
+
+
+# === MCP resources / prompts as capability-gated synthetic tools ============
+# Servers that advertise `resources` / `prompts` get utility tools under their
+# {server_id}__ namespace; invoking one dispatches to the matching MCP method and
+# returns the result serialized as JSON text.
+
+_UTILITY_METHODS = {
+    "list_resources": "resources/list",
+    "read_resource": "resources/read",
+    "list_prompts": "prompts/list",
+    "get_prompt": "prompts/get",
+}
+
+
+def _utility_params(util_name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """JSON-RPC params for a utility method, built from the tool-call arguments."""
+    if util_name == "read_resource":
+        return {"uri": args.get("uri")}
+    if util_name == "get_prompt":
+        return {"name": args.get("name"), "arguments": args.get("arguments") or {}}
+    return {}
+
+
+def _jsonify(obj: Any) -> str:
+    """Serialize a utility result (pydantic object or JSON dict) to text for the agent."""
+    dump = getattr(obj, "model_dump", None)
+    if callable(dump):
+        try:
+            obj = dump(mode="json", exclude_none=True)
+        except Exception:  # noqa: BLE001 — fall back to a string view if the model cannot dump
+            return str(obj)
+    try:
+        return json.dumps(obj, ensure_ascii=False, default=str)
+    except Exception:  # noqa: BLE001 — never fail a tool call on serialization
+        return str(obj)
+
+
+async def _call_http_utility(server: McpServerConfig, util_name: str, args: dict[str, Any]) -> str:
+    import httpx
+
+    method = _UTILITY_METHODS[util_name]
+    try:
+        async with httpx.AsyncClient(timeout=server.call_timeout, follow_redirects=True) as client:
+            obj = await _post_jsonrpc(client, server, method, _utility_params(util_name, args))
+    except Exception as exc:  # noqa: BLE001 — disconnects map to mcp_disconnect (D1); rest re-raised
+        if _is_disconnect_error(exc):
+            return _handle_disconnect(server)
+        raise
+    return _jsonify(obj.get("result"))
+
+
+async def _call_stdio_utility(
+    server: McpServerConfig, util_name: str, args: dict[str, Any], scope: int | None
+) -> str:
+    session = _active_sessions.get((scope, server.id))
+    if session is None:
+        raise KeyError(f"No active stdio session for MCP server: {server.id}")
+    try:
+        if util_name == "list_resources":
+            result = await session.list_resources()
+        elif util_name == "read_resource":
+            result = await session.read_resource(args.get("uri"))
+        elif util_name == "list_prompts":
+            result = await session.list_prompts()
+        elif util_name == "get_prompt":
+            result = await session.get_prompt(args.get("name"), args.get("arguments"))
+        else:
+            raise ValueError(f"Unknown MCP utility: {util_name}")
+    except Exception as exc:  # noqa: BLE001 — disconnects map to mcp_disconnect (D1); rest re-raised
+        if _is_disconnect_error(exc):
+            return _handle_disconnect(server)
+        raise
+    return _jsonify(result)
+
+
+async def _call_utility(
+    server_id: str, util_name: str, args: dict[str, Any], scope: int | None = None
+) -> str:
+    """Dispatch a resources/prompts utility tool to its MCP method (auth/health-aware)."""
+    server = _server_registry.get((scope, server_id))
+    if server is None:
+        raise KeyError(f"Unknown MCP server: {server_id}")
+    if server.auth_type == "oauth2" and server._auth_unavailable:
+        return (
+            f"MCP server '{server_id}' authentication unavailable: re-authorize or check the "
+            f"OAuth2 credentials."
+        )
+    if server._health is not HealthState.healthy:
+        return _unavailable_result(server_id)
+    if server.transport == "stdio":
+        return await _call_stdio_utility(server, util_name, args, scope)
+    return await _call_http_utility(server, util_name, args)
+
+
+# (util_name, capability_key, description, parameter schema) for the synthetic tools.
+_UTILITY_TOOL_SPECS = (
+    (
+        "list_resources",
+        "resources",
+        "List the resources this MCP server exposes.",
+        {"type": "object", "properties": {}},
+    ),
+    (
+        "read_resource",
+        "resources",
+        "Read a resource from this MCP server by its uri.",
+        {
+            "type": "object",
+            "properties": {"uri": {"type": "string", "description": "The resource uri to read."}},
+            "required": ["uri"],
+        },
+    ),
+    (
+        "list_prompts",
+        "prompts",
+        "List the prompts this MCP server exposes.",
+        {"type": "object", "properties": {}},
+    ),
+    (
+        "get_prompt",
+        "prompts",
+        "Get a prompt from this MCP server by name, with optional arguments.",
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "The prompt name."},
+                "arguments": {"type": "object", "description": "Optional prompt arguments."},
+            },
+            "required": ["name"],
+        },
+    ),
+)
+
+
+def _register_utility_tool(
+    server: McpServerConfig,
+    util_name: str,
+    description: str,
+    schema: dict[str, Any],
+    scope: int | None,
+) -> None:
+    import fleetent.tools.registry as tr
+
+    tool_name = _make_tool_name(server.id, util_name)
+
+    async def call(**kwargs: object) -> str:
+        return await _call_utility(server.id, util_name, dict(kwargs), server._agent_scope)
+
+    tool_schema: tr.ToolSchema = {
+        "type": "function",
+        "function": {"name": tool_name, "description": description, "parameters": schema},
+    }
+    tr._registry[tool_name] = (call, tool_schema)
+
+
+def _register_utility_tools(server: McpServerConfig, scope: int | None) -> None:
+    """Register resources/prompts synthetic tools for a server, gated by its advertised
+    capabilities. Only the global (scope=None) registration enters the shared registry,
+    consistent with regular tool registration.
+    """
+    if scope is not None:
+        return
+    caps = server.capabilities or {}
+    for util_name, cap_key, description, schema in _UTILITY_TOOL_SPECS:
+        if cap_key in caps:
+            _register_utility_tool(server, util_name, description, schema, scope)

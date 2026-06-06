@@ -78,13 +78,14 @@ flowchart TD
 
 - ✅ **动态工具刷新（stdio）**：stdio 服务发 `notifications/tools/list_changed` 时，经持久会话的 message handler 调度独立后台任务重新发现并原地重注册其工具（identity guard + 去重，规避 stdio 流 wedge），无需重启；HTTP 无持久 server→client 通道，其 list_changed 待未来流恢复一并做
 
-## 规划中（MCP 增强程序 2026-06）
+- ✅ **resources / prompts 合成工具**：对 advertised `resources`/`prompts` 的服务，注册 `{server}__list_resources`/`__read_resource`、`__list_prompts`/`__get_prompt` 合成工具（capability 门控），调用分派到对应 MCP 方法（http JSON-RPC / stdio SDK）、结果 JSON 文本化；走 `{server}__*` 命名空间故自动受降级隐藏、stdio 刷新后保留
 
-> 依据见 `docs/records/mcp-enhancement-2026-06/`（四参考项目差距分析 + 决策记录）。以下为本轮 6 变更程序中除已落地的「工具结果处理」「协议合规与发现完整性」「stdio 子进程环境隔离」「per-server 超时」「动态工具刷新(stdio)」外的剩余项。
+## 未来增强（本轮 6 变更程序已全部完成）
+
+> 依据见 `docs/records/mcp-enhancement-2026-06/`（四参考项目差距分析 + 决策记录）。本轮范围 B 的 6 个变更——工具结果处理、协议合规与发现完整性、stdio 子进程环境隔离、per-server 超时、动态工具刷新(stdio)、resources/prompts 合成工具——已全部落地。以下为延后 / 待评估项：
 
 - [ ] **schema 净化进阶（待评估）**：nullable `anyOf` union 折叠等 provider 专项适配（当前已做等价安全变换：`type:object` 保证、`definitions`→`$defs`、引用重写）
 - [ ] **进度重置超时（待评估）**：收到 `notifications/progress` 时重置调用超时；当前 HTTP 为非流式请求/响应，需流式读改造，宜与「Streamable HTTP 流恢复」一并做
-- [ ] **resources / prompts**：按服务 advertised capabilities 暴露为 capability-gated 合成工具
 - [ ] **Streamable HTTP 流恢复**：server→client 的 GET 流与 `Last-Event-ID` 断线恢复
 - [ ] **OAuth 富流程（待评估）**：DCR / PKCE / authorization_code / RFC 9728 discovery（自托管场景下 `client_credentials` 往往已足够，需产品决策）
 
