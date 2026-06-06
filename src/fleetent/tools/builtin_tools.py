@@ -13,6 +13,7 @@ from fleetent.integrations.sandbox import (
     SandboxClient,
     SandboxManager,
     build_sandbox_env,
+    cap_or_spill,
     redact_secrets,
 )
 from fleetent.integrations.sandbox import output_truncation as sot
@@ -280,14 +281,16 @@ async def run_code(
     # SB6: cap each stream for the AI-facing result (trace above kept original
     # bytes). stdout/stderr have independent budgets. run_code is exempt from T4
     # (declared self_truncates) so this is the sole truncation of its output.
-    # sandbox-output-redaction: redact secrets BEFORE truncating so a secret
-    # straddling the truncation boundary cannot survive; the trace byte sizes above
-    # stay on the original (un-redacted) output as a pure volume metric.
+    # sandbox-output-redaction: redact secrets BEFORE capping so a secret straddling
+    # the boundary cannot survive, and so anything spilled to disk is already redacted.
+    # sandbox-large-output-spill: over-budget output is spilled to a file (full, redacted)
+    # and replaced with a preview + reference, rather than dropping the middle. The trace
+    # byte sizes above stay on the original (un-redacted) output as a pure volume metric.
     parts = []
-    stdout = sot.truncate_stream(redact_secrets(result.stdout), sot.MAX_STDOUT_BYTES)
+    stdout = cap_or_spill(redact_secrets(result.stdout), sot.MAX_STDOUT_BYTES, label="stdout")
     if stdout:
         parts.append(stdout.rstrip())
-    stderr = sot.truncate_stream(redact_secrets(result.stderr), sot.MAX_STDERR_BYTES)
+    stderr = cap_or_spill(redact_secrets(result.stderr), sot.MAX_STDERR_BYTES, label="stderr")
     if stderr:
         parts.append(f"[stderr] {stderr.rstrip()}")
     if result.exit_code != 0:
