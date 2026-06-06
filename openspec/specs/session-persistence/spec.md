@@ -75,3 +75,15 @@ The system SHALL expose controlled write hooks for the management plane, reusing
 - **WHEN** write hooks are called on `session_id=A` while `session_id=B` runs concurrently
 - **THEN** each session loads and saves independently with no data mixing
 
+### Requirement: 压缩检查点备份文件管理
+
+系统 SHALL 提供 `write_compaction_checkpoint(session_id, messages)` 和 `delete_compaction_checkpoint(session_id)` 两个函数管理压缩备份文件。`write_compaction_checkpoint` MUST 使用原子写（tmp → rename），`delete_compaction_checkpoint` MUST 静默处理文件不存在的情况。
+
+#### Scenario: 写入压缩检查点
+- **WHEN** 调用 `write_compaction_checkpoint(session_id, messages)`
+- **THEN** messages 以 JSON 格式原子写入 `data/sessions/{session_id}.pre-compact.json`
+
+#### Scenario: 删除不存在的检查点不报错
+- **WHEN** 调用 `delete_compaction_checkpoint(session_id)` 且备份文件不存在
+- **THEN** 函数正常返回，不抛出异常
+

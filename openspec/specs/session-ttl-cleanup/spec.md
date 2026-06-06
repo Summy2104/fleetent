@@ -17,7 +17,19 @@ session 清理 SHALL 以 session 文件的最后活跃时间（文件 mtime）�
 
 ### Requirement: 过期 session 一次性清理
 
-清理函数 `cleanup_expired()` SHALL 扫描 session 目录，删除所有过期 session 文件，并返回被删除的 session_id 列表。清理 MUST 不影响未过期的 session，MUST 不删除原子写产生的 `.json.tmp` 临时文件。清理成功删除文件后 MUST 同步删除 `sessions` 表中对应的 index 行；index 行删除失败 MUST 记录 warn 日志，MUST NOT 中断整批清理。
+清理函数 `cleanup_expired()` SHALL 扫描 session 目录，删除所有过期 session 文件，并返回被删除的 session_id 列表。清理 MUST 不影响未过期的 session，MUST 不删除原子写产生的 `.json.tmp` 临时文件，MUST 不将 `.pre-compact.json` 备份文件纳入过期判定（备份文件跟随主文件删除，不独立判断 TTL）。清理成功删除主文件后 MUST 同步删除对应的 `.pre-compact.json` 备份文件（若存在），备份删除失败静默处理。清理成功删除文件后 MUST 同步删除 `sessions` 表中对应的 index 行；index 行删除失败 MUST 记录 warn 日志，MUST NOT 中断整批清理。
+
+#### Scenario: 清理跳过备份文件的过期判定
+- **WHEN** `cleanup_expired()` 扫描 session 目录时遇到 `.pre-compact.json` 文件
+- **THEN** 该文件不被纳入 TTL 过期判定，不被直接删除
+
+#### Scenario: 清理主文件时同步删除备份文件
+- **WHEN** `cleanup_expired()` 成功删除某 session 的主文件 `{session_id}.json`
+- **THEN** 对应的 `{session_id}.pre-compact.json` 若存在则被同步删除
+
+#### Scenario: 备份文件删除失败静默处理
+- **WHEN** 主文件删除成功但备份文件删除失败
+- **THEN** 失败被静默处理，不记录 warn 日志，不中断清理批次
 
 #### Scenario: 清理删除过期文件并返回列表
 - **WHEN** 调用 `cleanup_expired()` 且目录中存在过期与未过期 session
