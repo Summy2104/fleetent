@@ -37,6 +37,12 @@ _DEFAULT_SCOPE = "session"
 _VALID_SCOPES = ("session", "agent")
 _DEFAULT_IDLE_HOURS = 2.0
 
+# Minimal Linux capabilities the agent tier re-adds after `--cap-drop ALL` so an
+# in-container `pip install` can chown/chmod/own files and briefly drop privilege.
+# session tier adds none (it only runs code, never installs). Mirrors the hermes
+# Docker backend's "started as root" allow-set.
+_AGENT_CAP_ADD: tuple[str, ...] = ("CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID")
+
 
 class NetworkPolicy(StrEnum):
     NONE = "none"
@@ -62,6 +68,11 @@ class SandboxResources:
 
     `read_only` belongs to the resource tier (default True keeps session
     containers read-only); SB2 passes False for writable agent containers.
+
+    The hardening fields below default to the strictest (session) tier — a bare
+    `SandboxResources()` is the single source of truth for that tier. The agent
+    tier relaxes only `cap_add` (minimal install caps) and `run_as_user` (root)
+    via `build_resources_by_scope`, because installing deps needs them.
     """
 
     memory: int = 256
@@ -69,6 +80,14 @@ class SandboxResources:
     network: NetworkPolicy = NetworkPolicy.NONE
     exec_timeout: int = 30
     read_only: bool = True
+    # Container hardening (sandbox-container-hardening).
+    pids_limit: int = 256
+    tmpfs_size_mb: int = 64
+    cap_drop_all: bool = True
+    cap_add: tuple[str, ...] = ()
+    no_new_privileges: bool = True
+    init: bool = True
+    run_as_user: str | None = "65534:65534"
 
 
 def load_sandbox_resources(path: Path | None = None) -> SandboxResources:
@@ -101,9 +120,12 @@ def build_resources_by_scope(path: Path | None = None) -> dict[str, SandboxResou
     """Map each scope to its resource tier (SB2's scope→tier strategy).
 
     `session` uses the hardened `sandbox.resources` tier as-is (read_only stays
-    True, network none). `agent` inherits that base, applies the optional
-    `sandbox.agent_scope` override, then forces `read_only=False` so the writable
-    rootfs can hold installed deps for `docker commit` to capture (D3).
+    True, network none, strictest hardening: no extra caps, non-root). `agent`
+    inherits that base, applies the optional `sandbox.agent_scope` override, then
+    forces the agent-tier relaxations needed to install deps: `read_only=False`
+    (writable rootfs for `docker commit` to capture, D3), `cap_add` = minimal
+    install caps, and `run_as_user=None` (root). The non-policy hardening fields
+    (pids_limit / tmpfs_size_mb / no_new_privileges / init) inherit from base.
     """
     resolved = path or SETTINGS_PATH
     sandbox = _read_sandbox_section(resolved)
@@ -120,6 +142,8 @@ def build_resources_by_scope(path: Path | None = None) -> dict[str, SandboxResou
         cpus=_load_positive_float(override, "cpus", base.cpus),
         network=_load_network(override, base.network),
         read_only=False,
+        cap_add=_AGENT_CAP_ADD,
+        run_as_user=None,
     )
     return {_DEFAULT_SCOPE: base, "agent": agent}
 
@@ -177,6 +201,12 @@ def _resources_from_section(section: dict[str, object] | None) -> SandboxResourc
         network=_load_network(section, defaults.network),
         exec_timeout=_load_exec_timeout(section, defaults.exec_timeout),
         read_only=_load_read_only(section, defaults.read_only),
+        pids_limit=_load_positive_int(section, "pids_limit", defaults.pids_limit),
+        tmpfs_size_mb=_load_positive_int(section, "tmpfs_size_mb", defaults.tmpfs_size_mb),
+        cap_drop_all=_load_bool(section, "cap_drop_all", defaults.cap_drop_all),
+        no_new_privileges=_load_bool(section, "no_new_privileges", defaults.no_new_privileges),
+        init=_load_bool(section, "init", defaults.init),
+        run_as_user=_load_run_as_user(section, defaults.run_as_user),
     )
 
 
@@ -237,13 +267,41 @@ def _load_exec_timeout(section: dict[str, object], default: int) -> int:
     return max(_EXEC_TIMEOUT_MIN, min(_EXEC_TIMEOUT_MAX, value))
 
 
-def _load_read_only(section: dict[str, object], default: bool) -> bool:
-    if "read_only" not in section:
+def _load_bool(section: dict[str, object], key: str, default: bool) -> bool:
+    """Load a strict bool field; a non-bool (e.g. the string "yes") falls back.
+
+    YAML already maps `true`/`false`/`yes`/`no` keywords to bools, so a value that
+    survives as a non-bool here is a quoted string or other malformed input and is
+    rejected rather than coerced to a truthy/falsy value.
+    """
+    if key not in section:
         return default
-    value = section["read_only"]
+    value = section[key]
     if not isinstance(value, bool):
-        _logger.warn(
-            "sandbox_resource_invalid", field="read_only", value=repr(value), falling_back=default
-        )
+        _logger.warn("sandbox_resource_invalid", field=key, value=repr(value), falling_back=default)
         return default
     return value
+
+
+def _load_read_only(section: dict[str, object], default: bool) -> bool:
+    return _load_bool(section, "read_only", default)
+
+
+def _load_run_as_user(section: dict[str, object], default: str | None) -> str | None:
+    """Load run_as_user: a non-empty string, or explicit null (= run as root).
+
+    An explicit YAML `null` (→ None) is a valid value meaning "no --user, run as
+    the image's default user (root)". A non-string, non-null value is malformed
+    and falls back to the default rather than being silently accepted.
+    """
+    if "run_as_user" not in section:
+        return default
+    value = section["run_as_user"]
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip():
+        return value
+    _logger.warn(
+        "sandbox_resource_invalid", field="run_as_user", value=repr(value), falling_back=default
+    )
+    return default

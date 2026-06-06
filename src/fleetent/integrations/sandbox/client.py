@@ -59,15 +59,34 @@ class SandboxClient:
 
     @staticmethod
     def _resource_flags(resources: SandboxResources) -> list[str]:
-        """Map SandboxResources to docker run flags (D2).
+        """Map SandboxResources to docker run flags (D2 + container hardening).
 
         `exec_timeout` is deliberately absent — it is a per-exec timeout carried
-        for wave-3 forced termination, not a `docker run` concern. `--tmpfs /tmp`
-        is always present (writable scratch independent of read_only). `public_only`
+        for wave-3 forced termination, not a `docker run` concern. `public_only`
         has no provisioned network here, so it degrades to `--network none` rather
         than silently allowing the default bridge.
+
+        Container hardening (sandbox-container-hardening): `--pids-limit` caps the
+        process table (fork-bomb guard); `/tmp` is bounded + `nosuid` so a RAM-backed
+        tmpfs cannot exhaust host memory and cannot hold setuid binaries; `--cap-drop
+        ALL` (+ minimal `--cap-add` on the agent tier) and `--security-opt
+        no-new-privileges` shrink the capability surface; `--init` reaps zombies;
+        `--user` runs the session tier as a non-root uid. Each is gated by its field
+        so an operator can disable any of them.
         """
         flags = ["--memory", f"{resources.memory}m", "--cpus", str(resources.cpus)]
+        if resources.pids_limit:
+            flags += ["--pids-limit", str(resources.pids_limit)]
+        if resources.cap_drop_all:
+            flags += ["--cap-drop", "ALL"]
+        for cap in resources.cap_add:
+            flags += ["--cap-add", cap]
+        if resources.no_new_privileges:
+            flags += ["--security-opt", "no-new-privileges"]
+        if resources.init:
+            flags.append("--init")
+        if resources.run_as_user:
+            flags += ["--user", resources.run_as_user]
         if resources.network is NetworkPolicy.NONE:
             flags += ["--network", "none"]
         elif resources.network is NetworkPolicy.PUBLIC_ONLY:
@@ -75,7 +94,7 @@ class SandboxClient:
             flags += ["--network", "none"]
         if resources.read_only:
             flags.append("--read-only")
-        flags += ["--tmpfs", "/tmp"]
+        flags += ["--tmpfs", f"/tmp:rw,nosuid,size={resources.tmpfs_size_mb}m"]
         return flags
 
     @staticmethod
