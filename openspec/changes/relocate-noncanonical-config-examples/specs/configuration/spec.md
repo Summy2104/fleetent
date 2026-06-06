@@ -4,9 +4,10 @@
 
 仓库 canonical 模板 SHALL 清楚区分 Platform 与 Agent 模板。`config/` SHALL only contain active
 canonical deployment templates for the default MVP deployment: `config/platform/` and `config/agent/`.
-Noncanonical examples, test fixtures, and optional standalone service examples SHALL live outside
-`config/`. Tracked concrete local files such as `config/agent.yaml` SHALL NOT be presented as
-canonical templates.
+Noncanonical test fixtures SHALL live outside `config/`. Optional standalone service examples SHALL
+NOT be shipped for services that are not supported as independent deployment targets in the current
+stage. Tracked concrete local files such as `config/agent.yaml` SHALL NOT be presented as canonical
+templates.
 
 #### Scenario: Canonical templates are discoverable
 - **WHEN** 查看仓库配置模板

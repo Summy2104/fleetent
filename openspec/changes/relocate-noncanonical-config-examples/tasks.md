@@ -10,10 +10,10 @@
 - [ ] 2.2 Implement: move sample agent to E2E scenario/fixture path and update README.
 - [ ] 2.3 Verify green: run Slack E2E docs/static checks if present.
 
-## 3. Standalone Knowledge Service examples relocation
+## 3. Remove standalone Knowledge Service examples
 
-- [ ] 3.1 Write failing tests: knowledge service example templates live under `examples/knowledge-service/`; tests/specs no longer require `config/knowledge-service/*`.
-- [ ] 3.2 Implement: move templates and update `config/platform/platform.yaml.example`, docs/tests/specs.
+- [ ] 3.1 Write failing tests: `config/knowledge-service/` and `examples/knowledge-service/` do not exist; tests/specs no longer require repository standalone Knowledge Service templates.
+- [ ] 3.2 Implement: remove templates and update `config/platform/platform.yaml.example`, docs/tests/specs to treat standalone Knowledge Service examples as deferred.
 - [ ] 3.3 Verify green: run `tests/unit/test_knowledge_service_config.py` and deployment docs tests.
 
 ## 4. OpenSpec and quality gates
