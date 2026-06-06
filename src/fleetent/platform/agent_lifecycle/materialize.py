@@ -9,13 +9,28 @@ references secrets by env-var name only (never plaintext) — so the agent is ru
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 from fleetent import agent_store, paths
-from fleetent.agent_config import AGENT_FILE_NAME, AgentFile, default_models
+from fleetent.agent_config import (
+    AGENT_FILE_NAME,
+    AgentBindings,
+    AgentFile,
+    AgentKnowledge,
+    AgentKnowledgeBinding,
+    AgentModels,
+    ModelRouteEntry,
+    ModelTarget,
+    default_models,
+)
+from fleetent.config import McpServerSettings
 from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
 from fleetent.platform.config_validation import _flatten
+from fleetent.platform.connector_management import agent_mcp_server_store
+from fleetent.platform.knowledge_base_management import agent_kbs_store
+from fleetent.platform.model_provider_management import provider_admin_store
 
 
 def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
@@ -27,13 +42,136 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
     return AgentFile(
         name=agent.name,
         version=1,
+        tenant_id=agent.tenant_id,
+        team_id=agent.team_id,
         system_prompt=agent.system_prompt,
         allowed_tools=agent.allowed_tools,
+        skills_dir=agent.skills_dir,
         allowed_skills=agent.allowed_skills,
         plugins=agent.plugins,
         features=agent.features,
-        models=default_models(),
+        models=_models_from_overrides(agent.model_overrides),
+        mcp_servers=_mcp_servers_for_agent(agent),
+        bindings=_bindings_for_agent(agent),
+        knowledge=_knowledge_for_agent(agent),
         memory_namespace=agent.memory_namespace,
+    )
+
+
+def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
+    """Expand DB-authored provider selections into the runtime model policy."""
+    if not model_overrides:
+        return default_models()
+
+    targets: dict[str, ModelTarget] = {}
+    routes: dict[str, list[ModelRouteEntry]] = {}
+    for route_key, raw_entries in model_overrides.items():
+        entries = raw_entries if isinstance(raw_entries, list) else [raw_entries]
+        route_entries: list[ModelRouteEntry] = []
+        for index, raw_entry in enumerate(entries):
+            if not isinstance(raw_entry, dict):
+                raise ValueError(f"model route {route_key!r} entry must be a mapping")
+            target = _target_from_model_override(route_key, index, raw_entry)
+            targets.setdefault(target.id, target)
+            route_entries.append(
+                ModelRouteEntry(
+                    target=target.id,
+                    max_tokens=raw_entry.get("max_tokens"),
+                    params=raw_entry.get("params") or {},
+                )
+            )
+        if route_entries:
+            routes[str(route_key)] = route_entries
+
+    if not targets or not routes:
+        return default_models()
+    return AgentModels(targets=list(targets.values()), routes=routes)
+
+
+def _target_from_model_override(route_key: str, index: int, entry: dict[str, Any]) -> ModelTarget:
+    provider_id = entry.get("provider_id")
+    provider = provider_admin_store.get_provider(str(provider_id)) if provider_id else None
+    source = {**(provider or {}), **{k: v for k, v in entry.items() if k != "provider_id"}}
+    params = (provider or {}).get("params") or (provider or {}).get("extra_params") or {}
+    if not provider:
+        params = (
+            entry.get("target_params")
+            or entry.get("params")
+            or entry.get("extra_params")
+            or {}
+        )
+    target_id = str(provider_id or entry.get("id") or f"{route_key}-{index}")
+    protocol = str(source.get("protocol") or "openai_chat")
+    base_url = source.get("base_url")
+    endpoint = source.get("endpoint")
+    if protocol in {"http_embedding", "http_rerank", "openai_image_generation"}:
+        endpoint = endpoint or base_url
+        base_url = None
+    return ModelTarget(
+        id=target_id,
+        provider=str(source.get("provider") or provider_id or "custom"),
+        protocol=protocol,
+        base_url=base_url,
+        endpoint=endpoint,
+        model=source.get("model"),
+        api_key_env=source.get("api_key_env"),
+        max_tokens=source.get("max_tokens"),
+        params=params,
+    )
+
+
+def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
+    ids = list(
+        dict.fromkeys(
+            [*(agent.mcp_server_ids or []), *agent_store.list_mcp_servers_for_agent(agent.id)]
+        )
+    )
+    servers: list[McpServerSettings] = []
+    for server_id in ids:
+        row = agent_mcp_server_store.get_mcp_server(
+            agent.id, server_id
+        ) or agent_mcp_server_store.get_mcp_server(None, server_id)
+        if row is None:
+            continue
+        servers.append(
+            McpServerSettings(
+                id=server_id,
+                transport=row["transport"],
+                url=row["url"],
+                auth_type=row["auth_type"],
+                api_key_env=row["api_key_env"],
+                command=row["command"],
+                args=row["args"],
+                env=row["env"],
+            )
+        )
+    return servers
+
+
+def _bindings_for_agent(agent: agent_store.Agent) -> AgentBindings:
+    return AgentBindings(
+        channels=[
+            f"{channel['platform']}:{channel['channel_id']}"
+            for channel in agent_store.list_channels_for_agent(agent.id)
+        ],
+        users=agent_store.list_users_for_agent(agent.id),
+    )
+
+
+def _knowledge_for_agent(agent: agent_store.Agent) -> AgentKnowledge:
+    kb_ids = agent_kbs_store.list_kbs_for_agent(agent.tenant_id, str(agent.id))
+    if not kb_ids:
+        return AgentKnowledge()
+    return AgentKnowledge(
+        enabled=True,
+        bindings=[
+            AgentKnowledgeBinding(
+                tenant_id=agent.tenant_id,
+                kb_id=kb_id,
+                default=index == 0,
+            )
+            for index, kb_id in enumerate(kb_ids)
+        ],
     )
 
 
