@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-
-from fleetent.tools.web_tools import web_fetch, web_search
 from fleetent.tools import registry as tr
-
+from fleetent.tools.web_tools import web_fetch, web_search
 
 # ── web_fetch ─────────────────────────────────────────────────────────────────
 
 
 async def test_web_fetch_returns_markdown_by_default(respx_mock):
     import httpx
+
     respx_mock.get("https://example.com").mock(
         return_value=httpx.Response(
             200,
@@ -29,6 +25,7 @@ async def test_web_fetch_returns_markdown_by_default(respx_mock):
 
 async def test_web_fetch_text_format_strips_html(respx_mock):
     import httpx
+
     respx_mock.get("https://example.com/page").mock(
         return_value=httpx.Response(
             200,
@@ -44,6 +41,7 @@ async def test_web_fetch_text_format_strips_html(respx_mock):
 
 async def test_web_fetch_html_format_returns_raw(respx_mock):
     import httpx
+
     raw_html = b"<html><body><p>Hi</p></body></html>"
     respx_mock.get("https://example.com/raw").mock(
         return_value=httpx.Response(
@@ -58,6 +56,7 @@ async def test_web_fetch_html_format_returns_raw(respx_mock):
 
 async def test_web_fetch_binary_content_type_returns_error(respx_mock):
     import httpx
+
     respx_mock.get("https://example.com/img.png").mock(
         return_value=httpx.Response(
             200,
@@ -72,9 +71,8 @@ async def test_web_fetch_binary_content_type_returns_error(respx_mock):
 
 async def test_web_fetch_timeout_returns_error(respx_mock):
     import httpx
-    respx_mock.get("https://slow.example.com").mock(
-        side_effect=httpx.TimeoutException("timeout")
-    )
+
+    respx_mock.get("https://slow.example.com").mock(side_effect=httpx.TimeoutException("timeout"))
     result = await web_fetch("https://slow.example.com", timeout=1)
     assert "error" in result.lower()
     assert "超时" in result or "timeout" in result.lower()
@@ -82,6 +80,7 @@ async def test_web_fetch_timeout_returns_error(respx_mock):
 
 async def test_web_fetch_5mb_size_limit(respx_mock):
     import httpx
+
     big_content = b"x" * (6 * 1024 * 1024)  # 6MB > 5MB limit
     respx_mock.get("https://big.example.com").mock(
         return_value=httpx.Response(
@@ -96,6 +95,7 @@ async def test_web_fetch_5mb_size_limit(respx_mock):
 
 async def test_web_fetch_http_error_returns_error(respx_mock):
     import httpx
+
     respx_mock.get("https://example.com/404").mock(
         return_value=httpx.Response(404, content=b"Not Found")
     )
@@ -120,6 +120,7 @@ def test_web_search_in_schema_with_searxng_url(monkeypatch):
 
 async def test_web_search_returns_results(monkeypatch, respx_mock):
     import httpx
+
     monkeypatch.setenv("SEARXNG_URL", "http://searxng.local")
     payload = {
         "results": [
@@ -138,8 +139,13 @@ async def test_web_search_returns_results(monkeypatch, respx_mock):
 
 async def test_web_search_num_results_param(monkeypatch, respx_mock):
     import httpx
+
     monkeypatch.setenv("SEARXNG_URL", "http://searxng.local")
-    payload = {"results": [{"title": f"R{i}", "url": f"http://r{i}.com", "content": f"s{i}"} for i in range(10)]}
+    payload = {
+        "results": [
+            {"title": f"R{i}", "url": f"http://r{i}.com", "content": f"s{i}"} for i in range(10)
+        ]
+    }
     respx_mock.get("http://searxng.local/search").mock(
         return_value=httpx.Response(200, json=payload)
     )
@@ -150,6 +156,7 @@ async def test_web_search_num_results_param(monkeypatch, respx_mock):
 
 async def test_web_search_error_on_unreachable(monkeypatch, respx_mock):
     import httpx
+
     monkeypatch.setenv("SEARXNG_URL", "http://searxng.local")
     respx_mock.get("http://searxng.local/search").mock(
         side_effect=httpx.ConnectError("connection refused")
