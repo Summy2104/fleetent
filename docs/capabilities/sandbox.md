@@ -91,7 +91,7 @@ flowchart TD
 - [x] **密钥过滤（入站环境变量过滤）**：敏感环境变量不传入容器
   - Docker 无原生 Secret 机制，改为在启动容器时按名称过滤：变量名含 `TOKEN` / `KEY` / `SECRET` 等（大小写不敏感）一律不传入容器
   - 三层：宿主机进程环境、agent 配置注入、运行时显式传入，经同一过滤规则
-  - **出站输出脱敏**（代码 print 出的密钥）见 `sandbox-output-redaction`
+  - **出站输出脱敏已实现**（`sandbox-output-redaction`）：`run_code` 返回前对 stdout/stderr 按模式脱敏（PEM 私钥 / JWT / 厂商 key 前缀 / 连接串凭证 / `Authorization` 头 / 命名型 `KEY=VALUE`），先脱敏后截断；trace 仅记大小、无内容
 
 - [x] **输出截断**：防止海量输出占满对话空间
   - stdout 上限 50KB，stderr 上限 10KB；超限保留头尾 + 截断说明；UTF-8 边界安全
