@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Literal
 
 from fleetent.tools.schema_builder import build_schema
-
 
 # ── list[T] support ──────────────────────────────────────────────────────────
 
@@ -45,7 +44,7 @@ def test_list_bool_generates_array_of_boolean():
 
 
 def test_optional_str_not_in_required():
-    def fn(note: Optional[str] = None) -> str:  # noqa: UP007
+    def fn(note: str | None = None) -> str:  # noqa: UP007
         """Test."""
         return ""
 

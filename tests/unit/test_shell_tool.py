@@ -3,13 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
 
-import pytest
-
-from fleetent.tools.shell_tool import bash_exec
 from fleetent.tools import registry as tr
-
+from fleetent.tools.shell_tool import bash_exec
 
 # ── description required ──────────────────────────────────────────────────────
 
@@ -104,6 +100,7 @@ async def test_bash_exec_cancel_token_stops_command():
 
 async def test_bash_exec_large_output_uses_spillover(tmp_path, monkeypatch):
     import fleetent.tools.result_truncation as trt
+
     monkeypatch.setattr(trt, "SPILLOVER_DIR", tmp_path / "spillover")
     monkeypatch.setattr(trt, "MAX_TOOL_RESULT_BYTES", 100)
 

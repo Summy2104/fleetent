@@ -149,6 +149,8 @@ def cleanup_expired(
     for path in SESSIONS_DIR.rglob("*.json"):
         if path.name.endswith(".json.tmp"):
             continue
+        if path.name.endswith(".pre-compact.json"):
+            continue  # backup files follow the main file, not independent TTL
         if not is_expired(path.stat().st_mtime, now, ttl_seconds):
             continue
         session_id = path.relative_to(SESSIONS_DIR).with_suffix("").as_posix()
@@ -159,6 +161,9 @@ def cleanup_expired(
             continue
         removed.append(session_id)
         _logger.info("session_cleanup_deleted", session_id=session_id)
+        # Best-effort: remove the pre-compaction backup alongside the main file
+        with suppress(OSError):
+            (SESSIONS_DIR / f"{session_id}.pre-compact.json").unlink()
 
     _logger.info("session_cleanup_done", removed_count=len(removed), ttl_seconds=ttl_seconds)
     if removed:
@@ -296,6 +301,28 @@ def list_by_user(
     from fleetent.session import index as session_index
 
     return session_index.list_by_user(user_id, limit=limit, before_updated_at=before_updated_at)
+
+
+def write_compaction_checkpoint(session_id: str, messages: list[dict[str, object]]) -> None:
+    """Atomically write the pre-compaction message snapshot for a session.
+
+    Overwrites any previous checkpoint so only the most recent pre-compact state
+    is kept. Caller is responsible for best-effort error handling.
+    """
+    path = SESSIONS_DIR / f"{session_id}.pre-compact.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".pre-compact.json.tmp")
+    tmp.write_text(
+        json.dumps({"messages": messages, "compacted_at": time.time()}, ensure_ascii=False)
+    )
+    tmp.replace(path)
+
+
+def delete_compaction_checkpoint(session_id: str) -> None:
+    """Remove the pre-compaction backup file if it exists. Idempotent."""
+    path = SESSIONS_DIR / f"{session_id}.pre-compact.json"
+    with suppress(FileNotFoundError):
+        path.unlink()
 
 
 def _get_lock(session_id: str) -> asyncio.Lock:

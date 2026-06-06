@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 from typing import Annotated
 
-from fleetent.tools.registry import ToolContext, tool
+from fleetent.tools.registry import tool
 
 logger = logging.getLogger(__name__)
 
@@ -25,21 +25,21 @@ _BINARY_RATIO = 0.30
 
 # Common binary magic byte signatures
 _MAGIC_SIGNATURES: list[bytes] = [
-    b"\x89PNG",      # PNG
-    b"\xff\xd8\xff", # JPEG
-    b"GIF8",         # GIF
-    b"GIF9",         # GIF
-    b"%PDF",         # PDF
+    b"\x89PNG",  # PNG
+    b"\xff\xd8\xff",  # JPEG
+    b"GIF8",  # GIF
+    b"GIF9",  # GIF
+    b"%PDF",  # PDF
     b"PK\x03\x04",  # ZIP / DOCX / XLSX / JAR
-    b"\x7fELF",      # ELF binary
-    b"MZ",           # Windows PE
-    b"\x1f\x8b",    # gzip
-    b"BZh",          # bzip2
-    b"\xfd7zXZ",    # xz
-    b"RIFF",         # WAV/AVI
-    b"\x00\x00\x00",# various binary formats
+    b"\x7fELF",  # ELF binary
+    b"MZ",  # Windows PE
+    b"\x1f\x8b",  # gzip
+    b"BZh",  # bzip2
+    b"\xfd7zXZ",  # xz
+    b"RIFF",  # WAV/AVI
+    b"\x00\x00\x00",  # various binary formats
     b"\xca\xfe\xba\xbe",  # Java class
-    b"\xfe\xed\xfa",      # Mach-O
+    b"\xfe\xed\xfa",  # Mach-O
 ]
 
 _MAGIC_DESCRIPTIONS: dict[bytes, str] = {
@@ -78,7 +78,9 @@ def _detect_binary(path: Path) -> str | None:
         return None
 
     non_printable = sum(
-        1 for b in sample if b < 32 and b not in (9, 10, 13)  # tab, LF, CR are OK
+        1
+        for b in sample
+        if b < 32 and b not in (9, 10, 13)  # tab, LF, CR are OK
     )
     if non_printable / len(sample) > _BINARY_RATIO:
         return "application/binary"
@@ -104,7 +106,9 @@ def _dir_listing(path: Path) -> str:
     truncated = total > DIR_MAX_ENTRIES
     visible = entries[:DIR_MAX_ENTRIES]
 
-    lines = [f"{path}/ ({total} 个条目{'，已截断至前 ' + str(DIR_MAX_ENTRIES) + ' 条' if truncated else ''})"]
+    lines = [
+        f"{path}/ ({total} 个条目{'，已截断至前 ' + str(DIR_MAX_ENTRIES) + ' 条' if truncated else ''})"
+    ]
     for entry in visible:
         try:
             stat = entry.stat()
@@ -145,7 +149,11 @@ def read_file(
 
     binary_type = _detect_binary(p)
     if binary_type is not None:
-        hint = "图片请使用 analyze_image 工具" if binary_type.startswith("image") else "无法作为文本读取"
+        hint = (
+            "图片请使用 analyze_image 工具"
+            if binary_type.startswith("image")
+            else "无法作为文本读取"
+        )
         return f"error: 二进制文件 ({binary_type})，{hint}"
 
     try:
@@ -211,7 +219,7 @@ def _line_trimmed_replace(text: str, old: str, new: str, replace_all: bool) -> s
         chunk = text_lines[i : i + len(old_lines)]
         if all(a.rstrip() == b.rstrip() for a, b in zip(chunk, old_lines)):
             new_lines = new.splitlines()
-            replaced = text_lines[:i] + new_lines + text_lines[i + len(old_lines):]
+            replaced = text_lines[:i] + new_lines + text_lines[i + len(old_lines) :]
             result = "\n".join(replaced)
             if text.endswith("\n"):
                 result += "\n"
@@ -235,7 +243,7 @@ def _whitespace_normalized_replace(text: str, old: str, new: str, replace_all: b
         return None
     idx = text_norm.index(old_norm)
     # Map normalized index back to original by counting chars
-    return text[:idx] + new + text[idx + len(old):]
+    return text[:idx] + new + text[idx + len(old) :]
 
 
 def _line_ending_normalize(s: str) -> str:
@@ -268,7 +276,7 @@ def _indentation_flexible_replace(text: str, old: str, new: str, replace_all: bo
     if old_stripped not in text_stripped:
         return None
     idx = text_stripped.index(old_stripped)
-    return text[:idx] + new + text[idx + len(old_stripped):]
+    return text[:idx] + new + text[idx + len(old_stripped) :]
 
 
 def _context_aware_replace(text: str, old: str, new: str, replace_all: bool) -> str | None:
@@ -286,7 +294,7 @@ def _context_aware_replace(text: str, old: str, new: str, replace_all: bool) -> 
             continue
         if all(a.strip() == b.strip() for a, b in zip(chunk[1:-1], old_lines[1:-1])):
             new_lines = new.splitlines()
-            replaced = text_lines[:i] + new_lines + text_lines[i + len(old_lines):]
+            replaced = text_lines[:i] + new_lines + text_lines[i + len(old_lines) :]
             result = "\n".join(replaced)
             if text.endswith("\n"):
                 result += "\n"
@@ -416,7 +424,9 @@ def _py_search(pattern: str, path: str, include: str, max_results: int) -> str:
         if binary_type:
             continue
         try:
-            for lineno, line in enumerate(fp.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for lineno, line in enumerate(
+                fp.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+            ):
                 if regex.search(line):
                     results.append(f"{fp}:{lineno}:{line}")
                     if len(results) >= max_results:

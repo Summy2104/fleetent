@@ -170,3 +170,29 @@ def _update(session_id: str, fields: dict[str, Any]) -> None:
             f"UPDATE session_meta SET {assignments} WHERE session_id = :sid",
             {**safe, "sid": session_id},
         )
+
+
+def update_compaction_meta(
+    session_id: str,
+    messages_before: int,
+    messages_after: int,
+    summary_preview: str,
+    compacted_at: float,
+) -> None:
+    """Record compaction event metadata in session_meta. No-op if session row absent."""
+    with _database().transaction() as conn:
+        conn.execute(
+            "UPDATE session_meta SET "
+            "last_compaction_at = :at, "
+            "messages_before_compaction = :before, "
+            "messages_after_compaction = :after, "
+            "compaction_summary_preview = :preview "
+            "WHERE session_id = :sid",
+            {
+                "at": compacted_at,
+                "before": messages_before,
+                "after": messages_after,
+                "preview": summary_preview[:200] if summary_preview else None,
+                "sid": session_id,
+            },
+        )

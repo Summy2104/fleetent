@@ -11,6 +11,7 @@ from fleetent.session.manager import (
     SESSIONS_DIR,
     cleanup_expired,
     clear,
+    delete_compaction_checkpoint,
     enforce_capacity,
     inject_message,
     is_expired,
@@ -25,12 +26,15 @@ from fleetent.session.manager import (
     session_lock,
     start_session_maintenance,
     stop_session_maintenance,
+    write_compaction_checkpoint,
 )
 
 __all__ = [
     "SESSIONS_DIR",
     "cleanup_expired",
     "clear",
+    "delete_compaction_checkpoint",
+    "write_compaction_checkpoint",
     "enforce_capacity",
     "inject_message",
     "is_expired",

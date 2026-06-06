@@ -36,6 +36,7 @@ def _is_binary_content_type(ct: str) -> bool:
 
 def _html_to_markdown(html: str) -> str:
     import html2text as h2t
+
     converter = h2t.HTML2Text()
     converter.ignore_links = False
     converter.ignore_images = True
@@ -46,8 +47,11 @@ def _html_to_markdown(html: str) -> str:
 def _html_to_text(html: str) -> str:
     """Extract plain text from HTML, stripping scripts/styles."""
     import re
+
     # Remove script and style blocks
-    html = re.sub(r"<(script|style)[^>]*>.*?</(script|style)>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(
+        r"<(script|style)[^>]*>.*?</(script|style)>", "", html, flags=re.DOTALL | re.IGNORECASE
+    )
     # Strip tags
     text = re.sub(r"<[^>]+>", " ", html)
     # Collapse whitespace
@@ -59,7 +63,9 @@ def _html_to_text(html: str) -> str:
 @tool(risk_level="low")
 async def web_fetch(
     url: Annotated[str, "要获取的 URL"],
-    format: Annotated[Literal["markdown", "text", "html"], "返回格式（默认 markdown）"] = "markdown",
+    format: Annotated[
+        Literal["markdown", "text", "html"], "返回格式（默认 markdown）"
+    ] = "markdown",
     timeout: Annotated[int, "超时秒数（默认 30，最大 120）"] = 30,
 ) -> str:
     """Fetch a web page and return its content in the specified format.
@@ -86,7 +92,11 @@ async def web_fetch(
 
     content_type = response.headers.get("content-type", "")
     if _is_binary_content_type(content_type):
-        hint = "图片请使用 analyze_image 工具" if content_type.startswith("image/") else "二进制内容无法作为文本返回"
+        hint = (
+            "图片请使用 analyze_image 工具"
+            if content_type.startswith("image/")
+            else "二进制内容无法作为文本返回"
+        )
         return f"error: 内容类型为 {content_type}，{hint}"
 
     raw = response.content

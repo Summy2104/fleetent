@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from fleetent.governance.user_input_gate import UserInputGate, answer, wait_for_answer
 
 

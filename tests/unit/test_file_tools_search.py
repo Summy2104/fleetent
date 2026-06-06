@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from fleetent.tools.file_tools import search_content, search_files
 
 
@@ -60,6 +58,7 @@ def test_search_content_no_match_returns_no_results(tmp_path):
 def test_search_content_invalid_regex_returns_error(tmp_path, monkeypatch):
     # Force Python fallback by hiding rg
     import fleetent.tools.file_tools as ft
+
     monkeypatch.setattr(ft, "_RG_BIN", None)
     result = search_content("[invalid(regex", path=str(tmp_path))
     assert "error" in result.lower()
@@ -67,6 +66,7 @@ def test_search_content_invalid_regex_returns_error(tmp_path, monkeypatch):
 
 def test_search_content_python_fallback(tmp_path, monkeypatch):
     import fleetent.tools.file_tools as ft
+
     monkeypatch.setattr(ft, "_RG_BIN", None)
     _make_tree(tmp_path)
     result = search_content("def foo", path=str(tmp_path))
@@ -100,6 +100,7 @@ def test_search_files_recursive_glob(tmp_path):
 
 def test_search_files_sorted_by_mtime(tmp_path):
     import time
+
     old = tmp_path / "old.py"
     new = tmp_path / "new.py"
     old.write_text("x")
@@ -124,6 +125,7 @@ def test_search_files_no_match(tmp_path):
 
 def test_search_files_python_fallback(tmp_path, monkeypatch):
     import fleetent.tools.file_tools as ft
+
     monkeypatch.setattr(ft, "_RG_BIN", None)
     _make_tree(tmp_path)
     result = search_files("*.py", path=str(tmp_path))

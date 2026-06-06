@@ -97,4 +97,5 @@ async def bash_exec(
     # double-truncate, but we explicitly call with self_truncates=True so the
     # legacy head+tail path is used — preserving stdout start for debugging).
     from fleetent.tools.result_truncation import truncate_tool_result
+
     return truncate_tool_result(raw, self_truncates=True)
