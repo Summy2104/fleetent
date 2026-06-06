@@ -64,9 +64,19 @@ fleetent 的 sandbox 使命是「在隔离容器内运行 agent 触发的代码�
 
 内部 BREAKING：默认 `docker run` 命令变更（更安全），已同步更新 `test_sandbox_client` 既有断言；`run_code` 对外契约不变。
 
-### Change 2：sandbox-runtime-lifecycle-wiring ⏳（计划）
+### Change 2：sandbox-runtime-lifecycle-wiring ✅
 
-把 `cleanup_orphans` 接入 `runtime/agent_app._start_infra` 启动；新增后台任务定时调度 `manager.sweep_idle`（仿 `session_mgr.start_session_maintenance` 的后台维护模式）。决策与取舍在该 change 落地时补录于此。
+把 `cleanup_orphans` 与 agent-scope 闲置回收 `sweep_idle` 接入 agent 运行时启动。新增 `integrations/sandbox/maintenance.py`（`start_idle_sweep`/`stop_idle_sweep` 裸 asyncio 后台循环），并在 `runtime/agent_app._start_infra` 接线。
+
+关键决策：
+- **D1 裸 asyncio 后台循环，镜像 `session_mgr.start_session_maintenance`，不走 cron_scheduler**——与 session 维护一致、与 user-level 调度器解耦（既有先例）。模块级可重置 task、幂等 start、每迭代故障隔离、`stop_idle_sweep` 干净取消。
+- **D2 循环内惰性取 `_get_manager()`**——避免 `maintenance` 顶层 import `builtin_tools` 的循环依赖，且不强制启动期建管理器；sweep 始终作用于 run_code 所用的同一进程单例，空 registry 下 no-op。
+- **D3 复用启动期那一次 Docker 探测结果（`get_effective_mode`）做门控**——`mode != OFF` 才清理 + 启动 sweep，不新增第二次探测。
+- **D4 清理 best-effort**——`cleanup_orphans` 失败记录警告、不阻断启动（与 `_start_infra` 既有 MCP 注册姿态一致）。
+- **D5 sweep 固定默认间隔 1800s（30min），可注入**——闲置容器在 `idle_hours + 间隔` 内回收，足够及时且简单。
+- **D6 新建 capability `sandbox-runtime-lifecycle-wiring`，不 MODIFY 既有 spec**——在拆分后的 agent 运行时架构中*实现* `sandbox-orphan-cleanup` 既有的「启动时清理」意图（拆分前 spec 写「平台启动」，拆分后归 agent 运行时）。
+
+补充发现：session-scope 容器释放本已接线（`session_mgr` 维护循环的 `_release_sandboxes`），仅 agent-scope `sweep_idle` 与启动期 `cleanup_orphans` 缺接线——本 change 补齐。
 
 ### Change 3：sandbox-output-redaction ⏳（计划）
 
