@@ -172,6 +172,10 @@ class McpServerConfig:
     _health: HealthState = field(default=HealthState.healthy, repr=False, compare=False)
     _reconnect_attempts: int = field(default=0, repr=False, compare=False)
     _reconnect_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
+    # Coalesces tools/list_changed-driven refreshes for this stdio server (mcp-dynamic-tools).
+    _list_refresh_lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock, repr=False, compare=False
+    )
     # Agent-scope key dimension (next<-main integration): registries/sessions are keyed
     # by (agent_scope, id) so the same server id can carry distinct credentials/sessions
     # per agent. None = the global (startup) scope. Distinct from the oauth `scope` str.
@@ -634,6 +638,70 @@ def _subprocess_env(server: McpServerConfig) -> dict[str, str]:
     return {**_safe_base_env(), **server.env}
 
 
+def _is_tools_list_changed(message: Any) -> bool:
+    """Whether an incoming MCP server message is a tools/list_changed notification."""
+    root = getattr(message, "root", None)
+    return getattr(root, "method", None) == "notifications/tools/list_changed"
+
+
+def _reregister_stdio_tools(server: McpServerConfig, tools: list[Any], scope: int | None) -> None:
+    """Replace a stdio server's tools in the shared registry in place (scope=None only).
+
+    Synchronous and free of await points, so it is atomic w.r.t. other coroutines reading
+    the registry in the single-threaded event loop (no dict-changed-during-iteration race).
+    Agent-scoped tools are dispatched via call_tool(scope) and never enter the shared
+    registry, so a scoped refresh is a no-op here.
+    """
+    if scope is not None:
+        return
+    import fleetent.tools.registry as tr
+
+    prefix = f"{server.id}__"
+    for name in [n for n in tr._registry if n.startswith(prefix)]:
+        del tr._registry[name]
+    for tool_def in tools:
+        _register_tool_stdio(server, _make_tool_name(server.id, tool_def.name), tool_def, scope)
+
+
+async def _refresh_stdio_tools(server: McpServerConfig, scope: int | None, session: Any) -> None:
+    """Re-list and re-register a stdio server's tools after a list_changed notification.
+
+    Identity-guarded (ignores a notification from a session that has since been replaced)
+    and deduped via a per-server lock (coalesces a burst of notifications).
+    """
+    if _active_sessions.get((scope, server.id)) is not session:
+        return
+    if server._list_refresh_lock.locked():
+        return
+    async with server._list_refresh_lock:
+        if _active_sessions.get((scope, server.id)) is not session:
+            return
+        try:
+            tools = await _list_all_tools_stdio(session)
+        except Exception as exc:  # noqa: BLE001 — a refresh failure must not break the read loop
+            logger.warning("mcp_tools_refresh_failed server_id=%s error=%s", server.id, exc)
+            return
+        _reregister_stdio_tools(server, tools, scope)
+        logger.info("mcp_tools_refreshed server_id=%s tool_count=%d", server.id, len(tools))
+
+
+def _make_message_handler(server: McpServerConfig, scope: int | None) -> Any:
+    """Build a ClientSession message handler that refreshes tools on list_changed.
+
+    The refresh runs in a separate task (never inline) so the handler does not issue a
+    request on the stream while it is still processing the notification — the stdio wedge.
+    """
+
+    async def handler(message: Any) -> None:
+        if not _is_tools_list_changed(message):
+            return
+        current = _active_sessions.get((scope, server.id))
+        if current is not None:
+            asyncio.create_task(_refresh_stdio_tools(server, scope, current))
+
+    return handler
+
+
 async def _register_stdio_server(server: McpServerConfig, scope: int | None = None) -> None:
     from mcp import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -646,7 +714,9 @@ async def _register_stdio_server(server: McpServerConfig, scope: int | None = No
 
     stack = await get_exit_stack()
     read, write = await stack.enter_async_context(stdio_client(params))
-    session: Any = await stack.enter_async_context(ClientSession(read, write))
+    session: Any = await stack.enter_async_context(
+        ClientSession(read, write, message_handler=_make_message_handler(server, scope))
+    )
     init_result = await session.initialize()
     _capture_init_result(server, _init_result_to_dict(init_result))
 

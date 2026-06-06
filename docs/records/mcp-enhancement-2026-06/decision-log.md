@@ -138,3 +138,33 @@
 **送审点**
 - per-server 超时仅经 agent.yaml 可设；DB authoring 路径暂用默认（需要时补 store 列 + 迁移）。
 - 默认 10s/30s 是否合适；`_close_http_sessions` 固定 10s 是否需可配。
+
+---
+
+## 变更 5：mcp-list-changed（stdio `tools/list_changed` 动态刷新）
+
+**做了什么**
+- `McpServerConfig` 加 `_list_refresh_lock`（去重锁）。
+- 新增 `_is_tools_list_changed`（按 `root.method` 检测）、同步原子的 `_reregister_stdio_tools`（删 `{id}__*` + 重注册，仅 scope=None）、`_refresh_stdio_tools`（identity guard + 锁去重 + 原地重注册）、`_make_message_handler`（检测 list_changed → `asyncio.create_task` 独立刷新）。
+- `_register_stdio_server` 给 `ClientSession` 传 `message_handler=_make_message_handler(server, scope)`。
+- 新增 spec `mcp-dynamic-tools`；新增 `tests/unit/test_mcp_list_changed.py`；更新 `docs/capabilities/mcp.md`。
+
+**问题**
+- P1：stdio 服务运行时增删工具并发 `tools/list_changed`，fleetent 抓静态列表后忽略通知 → 工具变更需重启才反映。
+
+**决策**
+- **D1 独立任务刷新，绝不内联**：handler 内 `create_task`（同 `_schedule_reconnect` 的 fire-and-forget），避免在 handler 占用 stdio 读循环时向同一流发请求（hermes 实测 wedge）。
+- **D2 identity guard + 去重锁**：会话被替换（重连）后的陈旧通知忽略；锁 locked 即返回，合并通知风暴；锁内再校验 identity。
+- **D3 原地重注册、同步原子**：`_reregister_stdio_tools` 无 await，单线程协作调度下与 `get_schemas` 等同步读不交错——无 dict-changed-during-iteration 竞态。工具 call 闭包调用时动态查 `_active_sessions`，替换条目不破在途调用。
+- **D4 仅 stdio**：HTTP 无持久 server→client 通道（需 GET 流/流恢复），list_changed 不适用，记为与未来流恢复一并做。检测用 `method` 字符串、不硬绑 SDK 类型。
+
+**改进/优化/新增点**
+- stdio 工具变更可在不重启下反映到 agent 工具表，且并发安全。
+
+**验证**
+- `make test-unit-ci` 全绿、coverage ≥ 75%；改动文件 ruff/mypy 零问题；全链路（handler→任务→刷新）测试覆盖。
+
+**送审点**
+- 仅刷新 scope=None 共享注册表；agent-scoped 动态刷新记为后续（与现有 agent-scoped 注册局限一致）。
+- prompts/resources 的 list_changed（Change 6 的合成工具）其动态刷新可后续。
+- handler 中 `create_task` fire-and-forget（与既有 reconnect 一致，未存 task 引用）。
