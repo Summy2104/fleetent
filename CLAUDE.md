@@ -49,6 +49,10 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 
 **2. 建 worktree + 功能分支**
 
+- worktree 统一放在 `.worktrees/<change-name>/`（已在 `.gitignore` 中忽略）
+- 分支命名：`feat/<change-name>`
+- 命令：`git worktree add .worktrees/<change-name> -b feat/<change-name>`
+
 **3. opsx:apply** — 每个 task 强制 TDD（见上方 TDD Hard Gate）
 
 - 完成后将该 task 标记为 `[x]`
@@ -63,8 +67,13 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 
 - 清理前提（三条全满足）：分支已推送到 remote（或已建 PR）、worktree 干净、无未提交改动
 - 任一不满足不得清理 worktree，避免丢失未推送的工作
+- 清理命令：`git worktree remove .worktrees/<change-name>`
 
 **6. 后续决定 merge 或 PR** — 在主仓库基于已推送分支进行，与 worktree 生命周期解耦
+
+> **任务完成后必须执行**（所有 task checkbox 为 `[x]` 后）：
+> 1. `opsx:archive` — 归档变更并同步 specs 到 main specs
+> 2. `git worktree remove .worktrees/<change-name>` — 清理 worktree
 
 ---
 
