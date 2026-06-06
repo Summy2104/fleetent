@@ -47,7 +47,7 @@ class UserInputGate:
         entry = self._get_or_create(session_id)
         try:
             await asyncio.wait_for(entry.event.wait(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return f"{_TIMEOUT_MSG}（{timeout:.0f}s）"
         finally:
             # Always clean up after wait resolves to prevent memory leaks

@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from fleetent.tools.interaction_tools import clarify, todo
 from fleetent.tools.registry import ToolContext
-
 
 # ── clarify ───────────────────────────────────────────────────────────────────
 
 
 async def test_clarify_returns_user_answer(monkeypatch):
     import fleetent.governance.user_input_gate as uig
+
     session = "test_session_clarify"
 
     async def _answer():
@@ -43,6 +41,7 @@ async def test_clarify_timeout_returns_timeout_string():
 
 async def test_clarify_open_ended_no_choices(monkeypatch):
     import fleetent.governance.user_input_gate as uig
+
     session = "open_session"
 
     async def _reply():
@@ -57,6 +56,7 @@ async def test_clarify_open_ended_no_choices(monkeypatch):
 
 async def test_clarify_with_choices_records_question(monkeypatch):
     import fleetent.governance.user_input_gate as uig
+
     session = "choices_session"
 
     async def _pick():
@@ -126,7 +126,7 @@ def test_todo_set_replaces_existing():
 
 def test_todo_schema_has_list_items():
     from fleetent.tools import registry as tr
-    import fleetent.tools  # noqa: ensure registration
+
     schemas = tr.get_schemas()
     schema = next((s for s in schemas if s["function"]["name"] == "todo"), None)
     assert schema is not None

@@ -137,7 +137,9 @@ def maybe_compress(
     trigger_line = int(cfg["max_tokens"] * cfg["tmax_ratio"])
     if not force and estimate_tokens(messages) <= trigger_line:
         return messages
-    return _compress(
+    before_count = len(messages)
+    _write_compaction_checkpoint(session_id, messages)
+    result = _compress(
         messages,
         cfg,
         trigger="manual" if force else "tmax",
@@ -145,6 +147,8 @@ def maybe_compress(
         user_id=user_id,
         agent_name=agent_name,
     )
+    _record_compaction_meta(session_id, before_count, result)
+    return result
 
 
 def compress_for_context_overflow(
@@ -161,7 +165,9 @@ def compress_for_context_overflow(
     (Non-Goal here); this only performs the unconditional compression to Tretained.
     """
     cfg = _resolve_config(config, agent_name)
-    return _compress(
+    before_count = len(messages)
+    _write_compaction_checkpoint(session_id, messages)
+    result = _compress(
         messages,
         cfg,
         trigger="context_overflow",
@@ -169,6 +175,47 @@ def compress_for_context_overflow(
         user_id=user_id,
         agent_name=agent_name,
     )
+    _record_compaction_meta(session_id, before_count, result)
+    return result
+
+
+def _write_compaction_checkpoint(session_id: str | None, messages: list[Any]) -> None:
+    """Best-effort: write pre-compaction backup; never propagate errors."""
+    if session_id is None:
+        return
+    try:
+        from fleetent.session import manager as session_mgr
+
+        session_mgr.write_compaction_checkpoint(session_id, messages)
+    except Exception as exc:  # noqa: BLE001
+        _logger.warn("compaction_checkpoint_write_failed", session_id=session_id, error=str(exc))
+
+
+def _record_compaction_meta(session_id: str | None, before_count: int, result: list[Any]) -> None:
+    """Best-effort: update session_meta with compaction statistics."""
+    if session_id is None:
+        return
+    try:
+        import time as _time
+
+        from fleetent.platform.chat_management import session_admin_store
+
+        summary_preview = ""
+        for msg in result:
+            content = msg.get("content", "") if isinstance(msg, dict) else ""
+            if isinstance(content, str) and _SUMMARY_PREFIX in content:
+                summary_preview = content[len(_SUMMARY_PREFIX) :].lstrip("\n")[:200]
+                break
+
+        session_admin_store.update_compaction_meta(
+            session_id,
+            messages_before=before_count,
+            messages_after=len(result),
+            summary_preview=summary_preview,
+            compacted_at=_time.time(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        _logger.warn("compaction_meta_update_failed", session_id=session_id, error=str(exc))
 
 
 def _summary_fingerprint(text: str) -> str:

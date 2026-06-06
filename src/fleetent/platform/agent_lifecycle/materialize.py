@@ -34,6 +34,7 @@ from fleetent.platform.config_validation import _flatten
 from fleetent.platform.connector_management import agent_mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
+from fleetent.platform.skill_management import skill_admin_store
 
 _logger = get_logger("agent_lifecycle.materialize")
 
@@ -52,7 +53,8 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
         system_prompt=agent.system_prompt,
         allowed_tools=agent.allowed_tools,
         skills_dir=agent.skills_dir,
-        allowed_skills=agent.allowed_skills,
+        allowed_skills=_allowed_skills_for(agent),
+        disabled_skills=_global_disabled_skills(),
         plugins=agent.plugins,
         features=agent.features,
         models=_models_from_overrides(agent.model_overrides),
@@ -61,6 +63,38 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
         knowledge=_knowledge_for_agent(agent),
         memory_namespace=agent.memory_namespace,
     )
+
+
+def _global_disabled_skills() -> list[str]:
+    """Skill names globally disabled in the admin store (agent reads only agent.yaml).
+
+    Returns the names with ``global_enabled=0`` so the agent runtime suppresses them
+    via ``AgentFile.disabled_skills``. Missing table (legacy DB) safely yields [].
+    """
+    try:
+        states = skill_admin_store.list_states()
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+        return []
+    return [s["skill_name"] for s in states if not s["global_enabled"]]
+
+
+def _allowed_skills_for(agent: agent_store.Agent) -> list[str]:
+    """Resolve the agent's catalog narrowing from the agent_skills binding matrix.
+
+    With at least one binding row, the result is exactly the ``enabled=1`` subset
+    (possibly empty — an explicit narrowing to no skills). Without any binding row,
+    fall back to the authored ``allowed_skills``. Missing table (legacy DB) falls
+    back to authored too.
+    """
+    try:
+        if skill_admin_store.has_any_binding(str(agent.id)):
+            return sorted(skill_admin_store.enabled_skill_names(str(agent.id)))
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+    return agent.allowed_skills
 
 
 def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
