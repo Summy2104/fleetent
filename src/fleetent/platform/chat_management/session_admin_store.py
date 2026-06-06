@@ -13,7 +13,8 @@ from fleetent.db import SQLiteDatabase, create_database
 
 _COLS = (
     "session_id, origin, status, takeover_actor, takeover_at, pinned, pin_note, "
-    "agent_name, user_id, channel, updated_at"
+    "agent_name, user_id, channel, updated_at, total_input_tokens, total_output_tokens, "
+    "resume_pending"
 )
 
 
@@ -78,6 +79,9 @@ def get_meta(session_id: str) -> dict[str, Any]:
             "user_id": None,
             "channel": None,
             "updated_at": None,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "resume_pending": 0,
         }
     return row
 
@@ -196,3 +200,76 @@ def update_compaction_meta(
                 "sid": session_id,
             },
         )
+
+
+def add_token_usage(session_id: str, input_tokens: int, output_tokens: int) -> None:
+    """Accumulate token usage for a session. Creates the row if absent."""
+    with _database().transaction() as conn:
+        conn.execute(
+            "INSERT INTO session_meta (session_id, origin, status, pinned, updated_at) "
+            "VALUES (:sid, 'web', 'active', 0, :now) ON CONFLICT(session_id) DO NOTHING",
+            {"sid": session_id, "now": _now()},
+        )
+        conn.execute(
+            "UPDATE session_meta SET "
+            "total_input_tokens = COALESCE(total_input_tokens, 0) + :in_tok, "
+            "total_output_tokens = COALESCE(total_output_tokens, 0) + :out_tok "
+            "WHERE session_id = :sid",
+            {"in_tok": input_tokens, "out_tok": output_tokens, "sid": session_id},
+        )
+
+
+def mark_resume_pending(session_id: str) -> None:
+    """Mark a session as resume-pending (interrupted by restart). Creates row if absent."""
+    with _database().transaction() as conn:
+        conn.execute(
+            "INSERT INTO session_meta (session_id, origin, status, pinned, updated_at) "
+            "VALUES (:sid, 'web', 'active', 0, :now) ON CONFLICT(session_id) DO NOTHING",
+            {"sid": session_id, "now": _now()},
+        )
+        conn.execute(
+            "UPDATE session_meta SET resume_pending = 1 WHERE session_id = :sid",
+            {"sid": session_id},
+        )
+
+
+def clear_resume_pending(session_id: str) -> None:
+    """Clear the resume-pending flag once the session has been resumed."""
+    with _database().transaction() as conn:
+        conn.execute(
+            "UPDATE session_meta SET resume_pending = 0 WHERE session_id = :sid",
+            {"sid": session_id},
+        )
+
+
+def list_resume_pending() -> list[str]:
+    """Return session_ids currently flagged resume_pending."""
+    rows = (
+        _database()
+        .execute("SELECT session_id FROM session_meta WHERE resume_pending = 1")
+        .fetchall()
+    )
+    return [r["session_id"] for r in rows]
+
+
+def scan_and_mark_recent(window_seconds: int = 120) -> list[str]:
+    """Mark sessions active within the last window_seconds as resume_pending.
+
+    Called at agent startup so sessions interrupted by a restart can be resumed.
+    Returns the session_ids that were marked.
+    """
+    cutoff = (
+        datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=window_seconds)
+    ).isoformat()
+    with _database().transaction() as conn:
+        rows = conn.execute(
+            "SELECT session_id FROM session_meta WHERE updated_at >= :cutoff",
+            {"cutoff": cutoff},
+        ).fetchall()
+        marked = [r["session_id"] for r in rows]
+        if marked:
+            conn.execute(
+                "UPDATE session_meta SET resume_pending = 1 WHERE updated_at >= :cutoff",
+                {"cutoff": cutoff},
+            )
+    return marked

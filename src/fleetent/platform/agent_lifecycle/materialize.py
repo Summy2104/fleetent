@@ -8,6 +8,7 @@ references secrets by env-var name only (never plaintext) — so the agent is ru
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,7 @@ from fleetent.platform.connector_management import agent_mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
 from fleetent.platform.skill_management import skill_admin_store
+from fleetent.skills import registry as skill_registry
 
 _logger = get_logger("agent_lifecycle.materialize")
 
@@ -359,4 +361,22 @@ def write_home(
         source_agent=source_agent,
         exclude_existing=_knowledge_env_var_names(knowledge_config),
     )
+    _copy_skills(home)
     return home
+
+
+def _copy_skills(home: Path) -> None:
+    """Mirror the platform's global skills dir into ``<home>/skills/``.
+
+    Makes the agent home self-contained (the agent process reads only its own home).
+    Full copy: visibility is later narrowed at runtime by agent.yaml's allowed_skills /
+    disabled_skills. Best-effort: a missing source is skipped; a copy error is logged
+    but never aborts materialize (agent.yaml is already written).
+    """
+    src = Path(skill_registry._resolve_skills_dir(None))
+    if not src.exists():
+        return
+    try:
+        shutil.copytree(src, home / "skills", dirs_exist_ok=True)
+    except OSError as exc:
+        _logger.warn("agent_home_skill_copy_failed", path=str(src), error=str(exc))
