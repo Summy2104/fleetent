@@ -198,6 +198,7 @@ async def route(msg: NormalizedMessage) -> None:
 
         history.append({"role": "user", "content": await _build_user_content(msg)})
 
+        usage_out: list[tuple[int, int]] = []
         response = await agent_loop.run(
             messages=history,
             user_id=msg.user_id,
@@ -209,10 +210,15 @@ async def route(msg: NormalizedMessage) -> None:
             session_id=session_id,
             governance=governance,
             model_policy=model_policy,
+            usage_out=usage_out,
         )
 
         # agent_loop.run() already appended the assistant message to history in-place.
         # Do NOT append again here — that caused duplicate messages in every session.
-        await session_mgr.save(session_id, history)
+        await session_mgr.save(
+            session_id,
+            history,
+            token_usage=usage_out[0] if usage_out else None,
+        )
 
     await msg.reply_func(response)

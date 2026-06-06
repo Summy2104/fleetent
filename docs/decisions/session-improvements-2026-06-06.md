@@ -53,14 +53,14 @@
 **决策**：normalizer 在 load 后、跑 loop 前检测 resume_pending，命中则记 session_resumed 日志 + 立即 clear（非 save 后），整段 best-effort。
 **理由**：标记是「本次请求是中断恢复」的一次性提示，请求开始处理即完成使命；run 失败时 session 文件仍完整、下次正常 load，无需靠标记重试；立即清除避免误报循环。仅 IM 路径。续接数据基础是已落盘 session 文件，标记仅运营可见性。
 
-### D9：token usage wiring 不改 run() 返回类型（wiring 接入点 2，待实现）
+### D9：token usage wiring 不改 run() 返回类型（wiring 接入点 2，已实现）
 **决策**：run() 当前返回纯 str 且被 run_sync/normalizer/cron/大量测试调用，改返回类型破坏面大。改为给 run() 加可选参数 usage_out: list | None = None，run 内部拿到 usage 后若非 None 则 append (prompt_tokens, completion_tokens)；normalizer 传入空 list，run 后读取传给 save(token_usage=...)。零破坏现有调用方。
 
 ## wiring 完成说明
 原「建机制」的三项渐进 wiring 已接入运行路径：
 - 接入点 3（tool 外部化 save/load）：PR #158 已合并
 - 接入点 1（resume_pending 消费）：本批接入
-- 接入点 2（token usage）：本批接入（D9 方案）
+- 接入点 2（token usage）：本批接入完成（D9 方案，PR 见下）
 
 
 ## 遇到的问题与解决

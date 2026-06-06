@@ -1080,8 +1080,14 @@ async def run(
     allowed_skills: list[str] | None = None,
     governance: GovernanceConfig | None = None,
     model_policy: ModelPolicySnapshot | None = None,
+    usage_out: list[tuple[int, int]] | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
+
+    usage_out: optional sink — when provided, the final (prompt_tokens,
+    completion_tokens) is appended on normal completion so callers (e.g. the IM
+    normalizer) can persist per-session token usage without changing the str
+    return type. Left empty if the run returns before producing usage.
 
     When is_sub_agent=True the sub_agent tool is excluded from the tool schema
     so child agents cannot spawn further sub-agents.
@@ -1126,6 +1132,7 @@ async def run(
             allowed_skills=allowed_skills,
             governance=governance,
             model_policy=model_policy,
+            usage_out=usage_out,
         )
     finally:
         _active_runs -= 1
@@ -1154,6 +1161,7 @@ async def _run_inner(
     allowed_skills: list[str] | None = None,
     governance: GovernanceConfig | None = None,
     model_policy: ModelPolicySnapshot | None = None,
+    usage_out: list[tuple[int, int]] | None = None,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -1352,6 +1360,10 @@ async def _run_inner(
             reply,
         )
     usage = response.usage if response else None
+    if usage_out is not None and usage is not None:
+        usage_out.append(
+            (getattr(usage, "prompt_tokens", 0), getattr(usage, "completion_tokens", 0))
+        )
     user_input = _first_user_input(messages)
     _save_flap_state(session_id, flap_state)
     log_run(
