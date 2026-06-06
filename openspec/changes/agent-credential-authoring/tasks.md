@@ -6,9 +6,9 @@
 
 ## 2. 加密 secret store
 
-- [ ] 2.1 Write failing tests: `set` 后库里是密文非明文；`get_decrypted` 还原；`status` 只回 set/unset；缺/坏 `FLEETENT_SECRET_KEY` 时 inject 读写 fail loud；空值写入被拒（tests/integration，真实 DB + Alembic）
-- [ ] 2.2 Implement: `agent_secrets` 表 + Alembic 迁移（named params、统一 store 边界）；对称 AEAD 加解密，主密钥读 `FLEETENT_SECRET_KEY`；store API set/get_decrypted/status/delete
-- [ ] 2.3 Verify green: `uv run pytest tests/integration/test_agent_secret_store.py -x -q`
+- [x] 2.1 Write failing tests: `set` 后库里是密文非明文；`get_decrypted` 还原；`status` 只回 set/unset；缺/坏 `FLEETENT_SECRET_KEY` 时 inject 读写 fail loud；空值写入被拒（tests/integration，真实 DB + Alembic）
+- [x] 2.2 Implement: `agent_secrets` 表 + Alembic 迁移（named params、统一 store 边界）；对称 AEAD 加解密，主密钥读 `FLEETENT_SECRET_KEY`；store API set/get_decrypted/status/delete
+- [x] 2.3 Verify green: `uv run pytest tests/integration/test_agent_secret_store.py -x -q`
 
 ## 3. 密钥槽元数据（env_name + mode）
 
