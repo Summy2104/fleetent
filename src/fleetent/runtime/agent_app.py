@@ -67,7 +67,23 @@ async def _start_infra(agent: AgentFile) -> None:
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
     from fleetent.session import manager as session_mgr
 
-    await sandbox_enablement.get_effective_mode()  # one-time Docker probe, cached
+    mode = await sandbox_enablement.get_effective_mode()  # one-time Docker probe, cached
+    # sandbox-runtime-lifecycle-wiring: only when Docker is usable (effective mode != off)
+    # do we reap last-run orphan containers and schedule agent-scope idle reclamation.
+    # Orphan cleanup is best-effort (a failure is logged, never aborts boot); the idle
+    # sweep is a bare-asyncio loop mirroring session maintenance.
+    if mode is not sandbox_enablement.Mode.OFF:
+        from fleetent.integrations.sandbox import (
+            SandboxClient,
+            cleanup_orphans,
+            start_idle_sweep,
+        )
+
+        try:
+            await cleanup_orphans(SandboxClient())
+        except Exception as exc:  # noqa: BLE001 — orphan cleanup must not abort boot
+            _logger.warn("agent_runtime_sandbox_cleanup_failed", error=str(exc))
+        start_idle_sweep()
     if agent.mcp_servers:
         from fleetent.integrations import mcp as mcp_client
         from fleetent.integrations.mcp.client import McpServerConfig
