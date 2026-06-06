@@ -27,6 +27,7 @@ from fleetent.agent_config import (
 )
 from fleetent.config import McpServerSettings
 from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
+from fleetent.platform.agent_lifecycle.credential_slots import RESERVED_KEY
 from fleetent.platform.config_validation import _flatten
 from fleetent.platform.connector_management import agent_mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
@@ -60,12 +61,13 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
 
 def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
     """Expand DB-authored provider selections into the runtime model policy."""
-    if not model_overrides:
+    route_overrides = {k: v for k, v in model_overrides.items() if k != RESERVED_KEY}
+    if not route_overrides:
         return default_models()
 
     targets: dict[str, ModelTarget] = {}
     routes: dict[str, list[ModelRouteEntry]] = {}
-    for route_key, raw_entries in model_overrides.items():
+    for route_key, raw_entries in route_overrides.items():
         entries = raw_entries if isinstance(raw_entries, list) else [raw_entries]
         route_entries: list[ModelRouteEntry] = []
         for index, raw_entry in enumerate(entries):

@@ -12,9 +12,9 @@
 
 ## 3. 密钥槽元数据（env_name + mode）
 
-- [ ] 3.1 Write failing tests: 新槽默认 `operator`；env 名派生 `FLEETENT_AGENT_<NAME>_<SLOT>`；改名不静默变 env 名；撞名 fail loud；mode/value 不进生成的 agent.yaml（tests/integration）
-- [ ] 3.2 Implement: 槽元数据持久化（复用 `agent_versions` JSON 列，key 前缀隔离）；env 名派生 + 撞名校验
-- [ ] 3.3 Verify green: 跑新增槽元数据测试
+- [x] 3.1 Write failing tests: 新槽默认 `operator`；env 名派生 `FLEETENT_AGENT_<NAME>_<SLOT>`；改名不静默变 env 名；撞名 fail loud；mode/value 不进生成的 agent.yaml（tests/integration）
+- [x] 3.2 Implement: 槽元数据持久化（复用 `agent_versions` JSON 列，key 前缀隔离）；env 名派生 + 撞名校验
+- [x] 3.3 Verify green: 跑新增槽元数据测试
 
 ## 4. write-only 凭据 API + required-env
 
