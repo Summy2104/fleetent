@@ -129,7 +129,7 @@ def calculate(expression: str) -> str:
 
 
 @tool
-def read_skill(name: str) -> str:
+def read_skill(name: str, tool_context: ToolContext | None = None) -> str:
     """Read a skill's full instructions by name (from the <available_skills> list).
 
     When a skill in the available_skills catalog matches the task, call this with
@@ -145,8 +145,28 @@ def read_skill(name: str) -> str:
     if entry.audit_blocked:
         # Refuse before load(): a severe injection hit means the body must not
         # reach the model. load() itself still returns it for manual triage.
+        _audit_skill_refusal(name, tool_context)
         return f"error: skill {name!r} was blocked by the static injection audit"
     return skill_registry.load(name)
+
+
+def _audit_skill_refusal(name: str, tool_context: ToolContext | None) -> None:
+    """Record a read_skill refusal of an audit_blocked skill (skill-read-refusal-audit).
+
+    Best-effort: the refusal is the security guarantee; a failure of this side-channel
+    audit write must never change the refusal outcome (logged, then swallowed).
+    """
+    from fleetent.governance import audit_log
+
+    detail = {
+        "reason": "audit_blocked",
+        "session_id": tool_context.session_id if tool_context else None,
+        "agent_name": tool_context.agent_name if tool_context else None,
+    }
+    try:
+        audit_log.write_audit(None, "skill.read_refused", "skill", name, detail=detail)
+    except Exception as exc:  # noqa: BLE001 — audit is a side channel; never block the refusal
+        logger.warning("skill_read_refusal_audit_failed", extra={"skill": name, "error": str(exc)})
 
 
 # read_file and write_file have moved to file_tools.py.
