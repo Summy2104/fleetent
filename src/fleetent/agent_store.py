@@ -489,6 +489,12 @@ def get_agent_name_by_id(agent_id: int) -> str | None:
     return None if row is None else str(row["name"])
 
 
+def list_all_names() -> list[str]:
+    """Every authored agent's name, sorted (drives platform-wide re-materialize)."""
+    rows = _db().execute("SELECT name FROM agents ORDER BY name").fetchall()
+    return [str(r["name"]) for r in rows]
+
+
 def assign_user(user_id: str, agent_id: int) -> None:
     _db().execute(
         "INSERT OR IGNORE INTO user_agents (user_id, agent_id) VALUES (:user_id, :agent_id)",
