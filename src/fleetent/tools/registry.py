@@ -281,27 +281,8 @@ def dispatch(
 
 
 def _build_schema(fn: Callable[..., Any]) -> ToolSchema:
-    sig = inspect.signature(fn)
-    description = (fn.__doc__ or "").strip().splitlines()[0] if fn.__doc__ else fn.__name__
-    properties: dict[str, dict[str, str]] = {}
-    required: list[str] = []
-    for param_name, param in sig.parameters.items():
-        # Exclude out-of-band params (cancel_token AR19 D3, tool_context SB3 D5):
-        # injected at dispatch time, not provided by the LLM, so they must not
-        # appear in the parameter schema (else they'd be required string fields).
-        if param_name in _OUT_OF_BAND_PARAMS:
-            continue
-        properties[param_name] = {"type": _py_type_to_json(param.annotation)}
-        if param.default is inspect.Parameter.empty:
-            required.append(param_name)
-    return {
-        "type": "function",
-        "function": {
-            "name": fn.__name__,
-            "description": description,
-            "parameters": {"type": "object", "properties": properties, "required": required},
-        },
-    }
+    from fleetent.tools.schema_builder import build_schema
+    return build_schema(fn)
 
 
 def _py_type_to_json(ann: object) -> str:
