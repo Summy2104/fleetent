@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
@@ -10,6 +11,12 @@ from fleetent import paths
 from fleetent.observability.structured_logging import get_logger
 
 _logger = get_logger("session.manager")
+
+# Tool results larger than this are externalized to a sibling .tool_outputs dir so
+# the session JSON and the model context stay lean (tool-result-extern, cf claude-code).
+_TOOL_RESULT_INLINE_LIMIT = 50 * 1024
+_STORED_PREFIX = "[stored:"
+_STORED_SUFFIX = ".txt]"
 
 # Cross-process file lock primitive (P0-4). POSIX-only; non-POSIX platforms (Windows)
 # degrade to in-process asyncio.Lock alone. fleetent targets Linux deployment.
@@ -162,6 +169,8 @@ def cleanup_expired(
             continue
         if path.name.endswith(".pre-compact.json"):
             continue  # backup files follow the main file, not independent TTL
+        if ".tool_outputs/" in path.relative_to(SESSIONS_DIR).as_posix():
+            continue  # externalized tool result files are not sessions
         if not is_expired(path.stat().st_mtime, now, ttl_seconds):
             continue
         session_id = path.relative_to(SESSIONS_DIR).with_suffix("").as_posix()
@@ -175,6 +184,8 @@ def cleanup_expired(
         # Best-effort: remove the pre-compaction backup alongside the main file
         with suppress(OSError):
             (SESSIONS_DIR / f"{session_id}.pre-compact.json").unlink()
+        # Best-effort: remove the externalized tool-result directory
+        shutil.rmtree(SESSIONS_DIR / f"{session_id}.tool_outputs", ignore_errors=True)
 
     _logger.info("session_cleanup_done", removed_count=len(removed), ttl_seconds=ttl_seconds)
     if removed:
@@ -334,6 +345,65 @@ def delete_compaction_checkpoint(session_id: str) -> None:
     path = SESSIONS_DIR / f"{session_id}.pre-compact.json"
     with suppress(FileNotFoundError):
         path.unlink()
+
+
+def externalize_tool_results(
+    session_id: str, messages: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """Move oversized tool results to per-session external files, leaving references.
+
+    Returns a new list; the input is never mutated. Only ``role == "tool"`` messages
+    whose string content exceeds the inline limit and that carry a ``tool_call_id``
+    are externalized to ``{session_id}.tool_outputs/{tool_call_id}.txt``.
+    """
+    out_dir = SESSIONS_DIR / f"{session_id}.tool_outputs"
+    result: list[dict[str, object]] = []
+    for msg in messages:
+        content = msg.get("content")
+        call_id = msg.get("tool_call_id")
+        if (
+            msg.get("role") == "tool"
+            and isinstance(content, str)
+            and isinstance(call_id, str)
+            and len(content) > _TOOL_RESULT_INLINE_LIMIT
+        ):
+            out_dir.mkdir(parents=True, exist_ok=True)
+            path = out_dir / f"{call_id}.txt"
+            tmp = path.with_suffix(".txt.tmp")
+            tmp.write_text(content, encoding="utf-8")
+            tmp.replace(path)
+            result.append({**msg, "content": f"{_STORED_PREFIX}{call_id}{_STORED_SUFFIX}"})
+        else:
+            result.append(msg)
+    return result
+
+
+def rehydrate_tool_results(
+    session_id: str, messages: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """Inverse of externalize_tool_results: read external content back inline.
+
+    Returns a new list; the input is never mutated. A missing external file leaves
+    the ``[stored:...]`` reference in place rather than failing.
+    """
+    out_dir = SESSIONS_DIR / f"{session_id}.tool_outputs"
+    result: list[dict[str, object]] = []
+    for msg in messages:
+        content = msg.get("content")
+        if (
+            isinstance(content, str)
+            and content.startswith(_STORED_PREFIX)
+            and content.endswith(_STORED_SUFFIX)
+        ):
+            call_id = content[len(_STORED_PREFIX) : -len(_STORED_SUFFIX)]
+            path = out_dir / f"{call_id}.txt"
+            if path.exists():
+                result.append({**msg, "content": path.read_text(encoding="utf-8")})
+            else:
+                result.append(msg)  # external file gone — keep the placeholder
+        else:
+            result.append(msg)
+    return result
 
 
 def _get_lock(session_id: str) -> asyncio.Lock:
