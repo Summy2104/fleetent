@@ -10,14 +10,15 @@ from fleetent.integrations.sandbox import enablement as se
 
 
 def _write_home_agent(home, **fields):
-    home.mkdir(parents=True, exist_ok=True)
+    agent_home = home / "agents" / "default"
+    agent_home.mkdir(parents=True, exist_ok=True)
     doc = {
         "name": "deployed",
         "version": 1,
         "models": agent_config.default_models().model_dump(mode="json"),
     }
     doc.update(fields)
-    (home / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    (agent_home / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
 
 
 def test_run_sync_applies_home_agent(tmp_path, monkeypatch):
@@ -55,7 +56,7 @@ def test_run_sync_applies_home_agent(tmp_path, monkeypatch):
 def test_run_sync_no_agent_uses_generic_default(tmp_path, monkeypatch):
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     monkeypatch.delenv("FLEETENT_AGENTS_DIR", raising=False)
-    # no config/agent.yaml and no agents dir → no default agent
+    # no default Agent home and no explicit agents dir → no default agent
 
     captured = {}
 

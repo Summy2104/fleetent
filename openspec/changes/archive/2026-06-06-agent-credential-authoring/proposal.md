@@ -16,7 +16,7 @@
 - **API**：`PUT` 写值（write-only 收值，永不回显）、`GET` status（只回 set/unset）、`GET` required env names（复用 `_env_var_names` 扫当前配置）。
 - **materialize resolver**：`_seed_env` 接入 secret resolver——`inject` 槽解密写 `NAME=value`，`operator` 槽写 `NAME=` 并保留运维已填值。
 - **console CredentialField + 「所需密钥」面板**：每个密钥槽一个控件（来源单选 运维填 / 平台注入；inject 显示 password + set/unset chip；高级里显示自动 env 名）；面板列出当前配置 required `*_env` + mode + 状态 + 复制 `.env` 模板 + 校验缺失。模型密钥复用所选 provider，不让 agent 重填。
-- **`.env.example` 拆分**：保留**进程级**精简模板（`FLEETENT_SECRET_KEY` / `DATABASE_URL` / `MICROSANDBOX_URL` / `CONTEXT_*` / `PERMISSION_GATE_*` / `LOG_FORMAT`——`agent.yaml` 引用不到的）；agent 引用的密钥从模板删除，改由 materialize 生成 + 面板复制。
+- **Platform / Agent env 边界**：`FLEETENT_SECRET_KEY` / `DATABASE_URL` / `MICROSANDBOX_URL` / `LOG_FORMAT` 等平台进程变量属于 Platform ENV 模板；Agent `.env` 是 materialize 的部署产物，只包含该 Agent 运行所需的 `*_env` 值或空占位。agent 引用的密钥不再放入静态全局模板，改由 materialize 生成 + 面板复制。
 
 部署顺序：`0` 平台 bootstrap（含 `FLEETENT_SECRET_KEY`，先于一切）→ `1` console 配置 agent（inject 槽当场输值加密存，operator 槽只声明名）→ `2` materialize DB→file（写 `agent.yaml` 纯引用 + `.env` scaffold，inject 已填 / operator 留空）→ `3` 部署主机运维补 operator 空值 → `4` `fleetent agent run`。
 
@@ -28,21 +28,21 @@
 
 ### Modified Capabilities
 
-- `platform-agent-lifecycle`: materialize 导出完整 agent 定义（model/mcp/bindings/knowledge/tenant/team/skills_dir）并按密钥 mode resolve `.env`；`.env.example` 拆分为进程级模板。
+- `platform-agent-lifecycle`: materialize 导出完整 agent 定义（model/mcp/bindings/knowledge/tenant/team/skills_dir）并按密钥 mode resolve Agent `.env`；平台进程 env 模板与 Agent env 产物分离。
 
 ## Module Boundary Impact
 
 - **owning package**：`platform` 拥有 secret store、密钥槽元数据、凭据 API、materialize resolver；`agent_config` 拥有 `models.targets/routes` 的展开 schema；console 静态资源拥有 CredentialField/面板 UI。
 - **public API surface**：凭据 API 暴露 write-only 写值、status 查询、required-names 查询；secret store 暴露 set / get-decrypted（仅 materialize 内部用）/ status。
 - **owned tables**：新增 `agent_secrets`；密钥槽元数据复用 `agent_versions` 的 JSON 列或新增小表（design 定）。
-- **config namespace**：`agent.yaml` 仍只含 `*_env` 引用；mode/value 仅在平台 DB；进程级 env 在 `config/agent/.env.example`。
+- **config namespace**：`agent.yaml` 仍只含 `*_env` 引用；mode/value 仅在平台 DB；`FLEETENT_SECRET_KEY` 等平台进程变量属于 Platform ENV 模板；Agent `.env` 由 materialize 写入对应 agent home。
 - **cross-module dependencies**：materialize 依赖 secret store 解密；console 依赖凭据 API；secret store 不依赖 agent runtime 内部。
-- **migration / shim plan**：MVP 未上线，无运行期兼容 shim；`.env.example` 直接拆分；新增 `FLEETENT_SECRET_KEY` 为部署必需项。
+- **migration / shim plan**：MVP 未上线，无运行期兼容 shim；平台 env 模板与 Agent env 产物直接分离；新增 `FLEETENT_SECRET_KEY` 为平台部署必需项。
 
 ## Impact
 
 - **代码**：`platform/agent_lifecycle/materialize.py`、新 secret store 模块、凭据 API、`agent_config.py`（model 展开）、`src/fleetent/static/admin.html`。
-- **配置**：`config/agent/.env.example` 拆分 + 新增 `FLEETENT_SECRET_KEY`；`config/agent/agent.yaml.example` 注释更新。
+- **配置**：Platform ENV 模板新增 `FLEETENT_SECRET_KEY`；Agent `.env` 不再通过静态全局模板列出 agent 级密钥，而由 materialize / console required-env 生成；`agent.yaml.example` 注释更新。
 - **数据库**：新增 `agent_secrets` 表（Alembic 迁移）+ 可能的密钥槽元数据列。
-- **删除**：`.env.example` 中 agent 引用的密钥占位（移交 materialize 生成）。
+- **删除**：静态模板中的 agent 引用密钥占位（移交 materialize 生成）。
 - **分支**：基于并合回 `main`。

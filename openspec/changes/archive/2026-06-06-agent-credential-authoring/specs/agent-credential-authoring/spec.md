@@ -2,6 +2,9 @@
 
 ### Requirement: Per-agent credential slots
 
+The platform SHALL maintain per-agent credential slot metadata for every generated
+`*_env` reference.
+
 每个 `agent.yaml` 中需要 `*_env` 引用的位置（model target、MCP server、Slack connector、KB
 connector）SHALL 在平台侧对应一条凭据槽元数据 `{ env_name, mode }`。`mode` SHALL 为
 `operator`（默认）或 `inject`。槽元数据 SHALL NOT 出现在生成的 `agent.yaml` 中——`agent.yaml`

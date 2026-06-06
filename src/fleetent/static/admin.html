@@ -2745,9 +2745,10 @@ async function agCreate() {
 let AG_PROVIDERS = [];
 function agRenderModelOverrides() {
   const opts = `<option value="">— none —</option>`
-    + AG_PROVIDERS.map(p => `<option value="${esc(p.id)}">${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}</option>`).join("");
+    + AG_PROVIDERS.map(p => `<option value="${esc(p.id)}">${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}${p.api_key_env ? " · " + esc(p.api_key_env) : ""}</option>`).join("");
   const hint = AG_PROVIDERS.length ? "" : `<div class="muted" style="font-size:12px;">No providers configured — add one under Providers first.</div>`;
-  $("ag-model-overrides").innerHTML = hint + ["default", "fast", "reasoning"].map(lvl => `
+  const reuse = `<div class="muted model-key-provider-reuse" style="font-size:12px; margin-bottom:6px;">Model credentials reuse each provider api_key_env; no duplicate model key is stored on the agent.</div>`;
+  $("ag-model-overrides").innerHTML = hint + reuse + ["default", "fast", "reasoning"].map(lvl => `
     <div class="row" data-mo="${lvl}" style="gap:6px; margin-bottom:6px; align-items:center;">
       <span style="min-width:74px; color:var(--muted);">${lvl}</span>
       <select class="agmo-provider" style="flex:1;">${opts}</select>
@@ -3119,9 +3120,72 @@ function agRenderPreview(name, a, yamlText) {
       <button class="small ghost" onclick="agDownloadYaml('${esc(name)}')">Download</button>
       ${lifecycle}
     </div>
+    <div id="ag-required-env-panel" style="border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:12px;">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <h4 style="margin:0;">Required env</h4>
+        <button id="ag-required-env-copy" class="small ghost" onclick="agCopyEnvTemplate('${esc(name)}')">Copy .env template</button>
+      </div>
+      <div id="ag-required-env-list" style="display:flex; flex-direction:column; gap:8px; margin-top:8px;"></div>
+    </div>
     <h4 style="margin:8px 0 6px;">agent.yaml <span class="muted" style="font-weight:normal;">(read-only preview)</span></h4>
     <pre id="ag-yaml-pre" style="white-space:pre; overflow:auto; max-height:68vh; font-size:12px;"></pre>`;
   document.getElementById("ag-yaml-pre").textContent = AG_YAML_CACHE;
+  agLoadRequiredEnv(name);
+}
+
+let AG_REQUIRED_ENV = [];
+async function agLoadRequiredEnv(name) {
+  const box = $("ag-required-env-list");
+  if (!box) return;
+  box.innerHTML = `<div class="muted">Loading…</div>`;
+  try {
+    const r = await api("GET", `/agents/${encodeURIComponent(name)}/required-env`);
+    AG_REQUIRED_ENV = r.required_env || [];
+    box.innerHTML = AG_REQUIRED_ENV.map(item => agCredentialField(name, item)).join("")
+      || `<div class="muted">No required env vars.</div>`;
+  } catch (e) {
+    box.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  }
+}
+function agCredentialField(name, item) {
+  const env = item.env_name || "";
+  const set = item.status === "set";
+  const disabled = IS_VIEWER ? "disabled" : "";
+  return `
+    <div class="credential-field required-env-row ${set ? "" : "required-env-missing"}" data-env="${esc(env)}">
+      <div class="row" style="justify-content:space-between; gap:8px;">
+        <div><code>${esc(env)}</code> <span class="pill">${esc(item.source || "Custom")}</span></div>
+        <span class="secret-status-chip pill ${set ? "active" : "blocked"}">${set ? "set" : "unset"}</span>
+      </div>
+      <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:6px;">
+        <label class="credential-source"><input type="radio" name="cred-${esc(env)}" ${item.mode !== "inject" ? "checked" : ""} disabled> operator</label>
+        <label class="credential-source"><input type="radio" name="cred-${esc(env)}" ${item.mode === "inject" ? "checked" : ""} disabled> inject</label>
+        <input id="cred-value-${esc(env)}" type="password" autocomplete="off" placeholder="secret value" ${disabled}>
+        <button class="small" ${disabled} onclick="agSetSecret('${esc(name)}','${esc(env)}')">Set</button>
+        <button class="small ghost danger" ${disabled} onclick="agDeleteSecret('${esc(name)}','${esc(env)}')">Clear</button>
+      </div>
+      <details class="credential-advanced-env"><summary>Advanced env name</summary><code>${esc(env)}</code></details>
+    </div>`;
+}
+async function agSetSecret(name, env) {
+  const input = $(`cred-value-${env}`);
+  const value = input ? input.value : "";
+  try {
+    await api("PUT", `/agents/${encodeURIComponent(name)}/secrets/${encodeURIComponent(env)}`, { value });
+    if (input) input.value = "";
+    await agLoadRequiredEnv(name);
+  } catch (e) { toast(e.message, "error"); }
+}
+async function agDeleteSecret(name, env) {
+  try {
+    await api("DELETE", `/agents/${encodeURIComponent(name)}/secrets/${encodeURIComponent(env)}`);
+    await agLoadRequiredEnv(name);
+  } catch (e) { toast(e.message, "error"); }
+}
+function agCopyEnvTemplate(name) {
+  const text = (AG_REQUIRED_ENV || []).map(item => `${item.env_name}=`).join("\n") + "\n";
+  navigator.clipboard?.writeText(text);
+  toast(`Copied .env template for ${name}`, "ok");
 }
 
 function agCopyYaml() {

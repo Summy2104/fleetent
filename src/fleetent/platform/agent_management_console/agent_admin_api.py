@@ -10,9 +10,11 @@ from typing import Any
 
 import yaml
 from fastapi import APIRouter, Body, Header, HTTPException
+from pydantic import BaseModel
 
 from fleetent import agent_store, auth, config, paths, user_store
 from fleetent.governance import audit_log
+from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
 from fleetent.platform.connector_management import (
     agent_mcp_server_store,
@@ -45,6 +47,10 @@ router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
+
+
+class SecretWriteBody(BaseModel):
+    value: str
 
 
 def _session_user(authorization: str | None) -> user_store.User:
@@ -362,6 +368,113 @@ def unbind_agent_kb(
         user.id, "agent.kb.unbind", target_type="agent", target_id=name, detail={"kb_id": kb_id}
     )
     return {"agent": name, "kb_id": kb_id, "bound": False}
+
+
+# --- agent credential slots / secrets ----------------------------------------
+
+
+@router.get("/agents/{name}/required-env")
+def required_env(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    _current_user(authorization)
+    agent = _require_agent(name)
+    return {"agent": name, "required_env": _required_env_items(agent)}
+
+
+@router.get("/agents/{name}/secrets")
+def list_agent_secrets(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    _current_user(authorization)
+    agent = _require_agent(name)
+    required = {
+        item["env_name"]: {
+            "env_name": item["env_name"],
+            "mode": item["mode"],
+            "status": item["status"],
+        }
+        for item in _required_env_items(agent)
+    }
+    for slot in credential_slots.list_slots(agent):
+        required.setdefault(
+            slot.env_name,
+            {
+                "env_name": slot.env_name,
+                "mode": slot.mode,
+                "status": secret_store.status(agent.id, slot.env_name),
+            },
+        )
+    return {"agent": name, "secrets": sorted(required.values(), key=lambda item: item["env_name"])}
+
+
+@router.put("/agents/{name}/secrets/{env_name}")
+def set_agent_secret(
+    name: str,
+    env_name: str,
+    body: SecretWriteBody,
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    agent = _require_agent(name)
+    if body.value == "":
+        raise HTTPException(status_code=400, detail="empty value rejected; use delete to clear")
+    credential_slots.ensure_slot(agent, f"env:{env_name}", mode="inject", env_name=env_name)
+    try:
+        secret_store.set(agent.id, env_name, body.value, user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit_log.write_audit(
+        user.id,
+        "agent.secret_set",
+        target_type="agent",
+        target_id=name,
+        detail={"env_name": env_name},
+    )
+    return {"env_name": env_name, "status": secret_store.status(agent.id, env_name)}
+
+
+@router.delete("/agents/{name}/secrets/{env_name}")
+def delete_agent_secret(
+    name: str,
+    env_name: str,
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    agent = _require_agent(name)
+    secret_store.delete(agent.id, env_name)
+    audit_log.write_audit(
+        user.id,
+        "agent.secret_delete",
+        target_type="agent",
+        target_id=name,
+        detail={"env_name": env_name},
+    )
+    return {"env_name": env_name, "status": secret_store.status(agent.id, env_name)}
+
+
+def _required_env_items(agent: agent_store.Agent) -> list[dict[str, Any]]:
+    slots_by_env = {slot.env_name: slot for slot in credential_slots.list_slots(agent)}
+    sources: dict[str, str] = {}
+    agent_file = agent_file_from_store(agent)
+    for target in agent_file.models.targets:
+        if target.api_key_env:
+            sources.setdefault(target.api_key_env, "Models")
+    for server in agent_file.mcp_servers:
+        if server.api_key_env:
+            sources.setdefault(server.api_key_env, "MCP")
+    if agent_file.connectors.slack is not None:
+        sources.setdefault(agent_file.connectors.slack.bot_token_env, "Connectors")
+        sources.setdefault(agent_file.connectors.slack.app_token_env, "Connectors")
+
+    items: list[dict[str, Any]] = []
+    for env_name, source in sorted(sources.items()):
+        slot = slots_by_env.get(env_name)
+        items.append(
+            {
+                "env_name": env_name,
+                "source": source,
+                "mode": slot.mode if slot else "operator",
+                "status": secret_store.status(agent.id, env_name),
+            }
+        )
+    return items
 
 
 # --- agent OAuth connector bindings ------------------------------------------

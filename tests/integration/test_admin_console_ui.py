@@ -544,6 +544,37 @@ def test_agent_model_overrides_pick_from_providers():
     )
 
 
+def test_agent_required_env_and_credential_field_panel():
+    html = ADMIN_HTML
+    for marker in (
+        'id="ag-required-env-panel"',
+        'id="ag-required-env-list"',
+        'id="ag-required-env-copy"',
+        "function agCredentialField",
+        "function agLoadRequiredEnv",
+        "function agSetSecret",
+        "function agDeleteSecret",
+        "function agCopyEnvTemplate",
+        "/required-env",
+        "/secrets/${",
+        "credential-source",
+        "secret-status-chip",
+        "credential-advanced-env",
+        'type="password"',
+    ):
+        assert marker in html, marker
+
+
+def test_agent_model_credentials_reuse_provider_key():
+    html = ADMIN_HTML
+    render = html.split("function agRenderModelOverrides", 1)[1].split(
+        "function agCollectModelOverrides", 1
+    )[0]
+    assert "model-key-provider-reuse" in render
+    assert "api_key_env" in render
+    assert "agmo-api-key" not in render
+
+
 def test_agent_edit_reuses_new_agent_modal_prefilled():
     html = ADMIN_HTML
     fn = html.split("async function agEdit", 1)[1].split("async function agApplyEditBindings", 1)[0]

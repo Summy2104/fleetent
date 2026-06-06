@@ -26,7 +26,8 @@ runbook 的顺序执行；本清单用于核对安装、升级、备份、回滚
 
 配置文件只保存非敏感设置和 credential reference：
 
-- `config/agent.yaml`：保存默认 agent、model、MCP servers、knowledge base、connector scope 等非敏感配置。
+- `agents/<agent-id>/agent.yaml`：保存该 Agent 的 model、MCP servers、knowledge binding、connector scope 等非敏感配置。
+- 平台 `.env` 保存平台进程变量；`agents/<agent-id>/.env` 保存该 Agent runtime 所需 secret 值或空占位。
 - Google Drive / Confluence credential 使用平铺的 `*_env` 引用，例如
   `FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN`、`FLEETENT_CONFLUENCE_TOKEN`。
 - 真实 secret 文件、环境变量注入方式和权限由部署方管理。
@@ -42,7 +43,7 @@ Pilot 默认使用 Docker Compose。先初始化本地配置和目录：
 docker compose run --rm fleetent uv run fleetent-admin init-config
 ```
 
-编辑 `.env`、`config/agent.yaml`，并把真实 secret 文件放入 `secrets/` 后，升级前先 dry-run：
+编辑平台 `.env`、`agents/<agent-id>/agent.yaml`、`agents/<agent-id>/.env`，并把真实 secret 文件放入 `secrets/` 后，升级前先 dry-run：
 
 ```bash
 docker compose run --rm fleetent uv run python scripts/upgrade.py --dry-run
