@@ -1015,6 +1015,87 @@ def _register_tool_http(
         tr._registry[tool_name] = (call, schema)
 
 
+# === MCP result normalization (mcp-result-fidelity) =========================
+# A CallToolResult carries an ordered list of content blocks (text / image / audio /
+# embedded resource), an optional structuredContent, and an isError flag. The stdio
+# path yields typed SDK objects (attribute access) while the http path yields JSON
+# dicts; both are normalized here through one duck-typed path.
+
+_TOOL_ERROR_PREFIX = "MCP tool error: "
+
+
+def _field(block: Any, key: str, default: Any = None) -> Any:
+    """Read a field from a content block that may be a dict or an SDK object."""
+    if isinstance(block, dict):
+        return block.get(key, default)
+    return getattr(block, key, default)
+
+
+def _approx_bytes(data: Any) -> int:
+    """Best-effort decoded size of a base64 payload (0 when not a non-empty string)."""
+    if not isinstance(data, str) or not data:
+        return 0
+    return (len(data) * 3) // 4
+
+
+def _media_marker(kind: str, mime: Any, data: Any) -> str:
+    """Concise textual marker for non-text content — never the raw payload."""
+    mime_str = mime if isinstance(mime, str) and mime else "application/octet-stream"
+    size = _approx_bytes(data)
+    return f"[{kind}: {mime_str}, ~{size} bytes]" if size else f"[{kind}: {mime_str}]"
+
+
+def _block_to_text(block: Any) -> str:
+    """Render one MCP content block as text, for dict or SDK-object shapes.
+
+    Text blocks return their text; image/audio return a concise marker; an embedded
+    resource inlines its text when present, else a marker. Binary payloads are never
+    emitted as raw base64, and unknown blocks degrade to a short marker, never raise.
+    """
+    btype = _field(block, "type")
+    text = _field(block, "text")
+    if isinstance(text, str) and text:
+        return text
+    if btype in ("image", "audio"):
+        return _media_marker(btype, _field(block, "mimeType"), _field(block, "data"))
+    if btype == "resource":
+        resource = _field(block, "resource")
+        if resource is not None:
+            rtext = _field(resource, "text")
+            if isinstance(rtext, str) and rtext:
+                return rtext
+            marker = _media_marker(
+                "resource", _field(resource, "mimeType"), _field(resource, "blob")
+            )
+            uri = _field(resource, "uri")
+            return f"{marker[:-1]} {uri}]" if isinstance(uri, str) and uri else marker
+        return "[resource]"
+    if btype == "resource_link":
+        uri = _field(block, "uri")
+        return f"[resource_link: {uri}]" if isinstance(uri, str) and uri else "[resource_link]"
+    return f"[{btype}]" if isinstance(btype, str) and btype else "[content]"
+
+
+def _normalize_tool_result(content_blocks: Any, *, structured_content: Any, is_error: bool) -> str:
+    """Normalize an MCP CallToolResult into the string returned to the agent.
+
+    Aggregates all content blocks (not just the first), falls back to JSON-serialized
+    structuredContent when there are no content blocks, and marks isError results with a
+    pedagogical prefix so the agent can read and recover. Never raises on odd shapes.
+    """
+    parts = [_block_to_text(b) for b in (content_blocks or [])]
+    parts = [p for p in parts if p]
+    if parts:
+        text = "\n".join(parts)
+    elif structured_content is not None:
+        text = json.dumps(structured_content, ensure_ascii=False, default=str)
+    else:
+        text = ""
+    if is_error:
+        return f"{_TOOL_ERROR_PREFIX}{text}" if text else f"{_TOOL_ERROR_PREFIX}(no detail)"
+    return text
+
+
 async def _call_stdio_tool(
     server_id: str, tool_name: str, args: dict[str, Any], scope: int | None = None
 ) -> str:
@@ -1032,9 +1113,11 @@ async def _call_stdio_tool(
         if server is not None and _is_disconnect_error(exc):
             return _handle_disconnect(server)
         raise
-    if result.content:
-        return str(result.content[0].text)
-    return ""
+    return _normalize_tool_result(
+        getattr(result, "content", None),
+        structured_content=getattr(result, "structuredContent", None),
+        is_error=bool(getattr(result, "isError", False)),
+    )
 
 
 async def _call_http_tool(
@@ -1070,9 +1153,11 @@ async def _call_http_tool(
 
     result = obj.get("result")
     if isinstance(result, dict):
-        contents = result.get("content", [])
-        if contents and isinstance(contents[0], dict):
-            return str(contents[0].get("text", str(result)))
+        return _normalize_tool_result(
+            result.get("content"),
+            structured_content=result.get("structuredContent"),
+            is_error=bool(result.get("isError", False)),
+        )
     return str(result) if result is not None else ""
 
 
