@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import signal
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -121,10 +122,8 @@ async def test_serve_removes_pid_file_on_boot_exception(tmp_path, monkeypatch) -
 
     monkeypatch.setattr(agent_app, "boot", AsyncMock(side_effect=RuntimeError("boot failed")))
 
-    try:
+    with contextlib.suppress(RuntimeError):
         await agent_app.serve("test-bot")
-    except RuntimeError:
-        pass
 
     assert not (home_dir / ".fleetent.pid").exists()
 
@@ -251,7 +250,9 @@ def test_main_dispatches_agent_restart(tmp_path, monkeypatch) -> None:
     stop_calls: list[object] = []
     serve_calls: list[str] = []
 
-    monkeypatch.setattr(agent_app, "_stop_running", lambda home_dir, **kw: stop_calls.append(home_dir))
+    monkeypatch.setattr(
+        agent_app, "_stop_running", lambda home_dir, **kw: stop_calls.append(home_dir)
+    )
 
     async def fake_serve(agent_id: str, *, port: object = None, home: object = None) -> None:
         serve_calls.append(agent_id)

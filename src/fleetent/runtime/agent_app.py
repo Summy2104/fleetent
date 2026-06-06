@@ -11,6 +11,7 @@ are served only when a port is given.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import signal
@@ -192,10 +193,8 @@ def _stop_running(home_dir: Path, *, drain_timeout: float = 30.0) -> None:
             return
 
     # Phase 3: SIGKILL
-    try:
+    with contextlib.suppress(ProcessLookupError):
         os.kill(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
     pid_file.unlink(missing_ok=True)
 
 
@@ -252,9 +251,7 @@ async def serve(
             else:
                 wait_task = asyncio.ensure_future(_wait_forever())
                 drain_task = asyncio.ensure_future(drain_event.wait())
-                await asyncio.wait(
-                    [wait_task, drain_task], return_when=asyncio.FIRST_COMPLETED
-                )
+                await asyncio.wait([wait_task, drain_task], return_when=asyncio.FIRST_COMPLETED)
                 wait_task.cancel()
                 drain_task.cancel()
         finally:
