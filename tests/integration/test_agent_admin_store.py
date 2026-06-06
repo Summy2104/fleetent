@@ -122,5 +122,3 @@ def test_delete_state_removes_row(store_db):
 
 def test_delete_state_missing_is_noop(store_db):
     store.delete_state("never-existed")  # must not raise
-
-

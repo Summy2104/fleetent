@@ -166,7 +166,7 @@ def test_create_persists_version_config_via_wired_seam(tmp_path, monkeypatch, is
     assert a.model_overrides == {"model": "x"}
     assert a.memory_namespace == "team"
     # platform-agent-lifecycle: create materialized the runnable home
-    assert (tmp_path / "cfg" / "agent.yaml").exists()
+    assert (tmp_path / "agents" / "cfg" / "agent.yaml").exists()
 
 
 def test_update_overrides_only_provided_via_wired_seam(tmp_path, monkeypatch, isolated_schedule_db):

@@ -47,10 +47,10 @@ class AgentRuntime:
 
 
 def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
-    """Resolve the agent home: explicit ``home`` wins, else ``FLEETENT_HOME/<agent-id>``."""
+    """Resolve the agent home: explicit ``home`` wins, else ``FLEETENT_HOME/agents/<id>``."""
     if home is not None:
         return Path(home)
-    return paths.base_dir() / agent_id
+    return paths.base_dir() / "agents" / agent_id
 
 
 async def _start_infra(agent: AgentFile) -> None:

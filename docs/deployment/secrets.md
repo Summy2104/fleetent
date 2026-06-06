@@ -12,7 +12,7 @@ secrets/
   github-mcp-api-key
 ```
 
-scope 由 `config/agent.yaml` 的 connector 配置表达，不靠 secret 文件路径表达。Google Drive
+scope 由 `agents/<agent-id>/agent.yaml` 的 connector 配置表达，不靠 secret 文件路径表达。Google Drive
 推荐使用平铺环境变量，避免把整段 OAuth JSON 放入单个环境变量或文件：
 
 ```yaml

@@ -21,7 +21,7 @@ authoring (平台 DB)                materialize (DB→file)            runtime
 
 **Non-Goals:**
 
-- 不设计完整 `platform.yaml`。
+- 不设计完整 `platform.yaml` 的字段集；只声明平台进程 env 与 Agent env 的边界。
 - 不引入外部 secret manager（Vault/KMS）——本 change 用进程 env 主密钥 + 对称加密。
 - 不重做 providers / KB / bindings 的业务存储；只接它们到导出层。
 - 不在本 change 落 governance/deployment 旋钮（context_*/agent_*/session_* 等）的 per-agent authoring——它们继续走 schema 默认（后续 change）。
@@ -109,20 +109,18 @@ for env_name in required_names:
 - inject 槽解密写真值。
 - `agent.yaml` 生成与 mode 无关，永远纯引用。
 
-### D7 — `.env.example` 拆分为进程级模板
+### D7 — Platform ENV 与 Agent ENV 分离
 
-`agent.yaml` 的 `*_env` 引用不到的、跨 agent 的进程级 env 留在 `config/agent/.env.example`：
+`FLEETENT_SECRET_KEY`、`DATABASE_URL`、`MICROSANDBOX_URL`、`LOG_FORMAT` 等跨 agent 的平台进程变量属于 Platform ENV 模板。它们不进入 Agent `.env`，也不应放在任何 Agent 模板目录下。
 
 ```text
 FLEETENT_SECRET_KEY=        # 新增；secret store 主密钥，inject 模式必需
 DATABASE_URL=
 LOG_FORMAT=
 MICROSANDBOX_URL=
-VISION_URL=
-CONTEXT_*= / PERMISSION_GATE_*=   # 运行调优
 ```
 
-agent 引用的密钥（`FLEETENT_MODEL_*` / `SUPPORT_SLACK_*` / MCP / KB）从模板**删除**，改由 materialize 按实际配置生成 + console 面板 `[复制 .env 模板]` 提供。可选保留一个「完整 example」由示例 agent 跑 materialize 自动生成，标注「自动生成，勿手改」。
+Agent `.env` 是 materialize 写到 `<agent-home>/.env` 的部署产物。agent 引用的密钥（`FLEETENT_MODEL_*` / `SUPPORT_SLACK_*` / MCP / KB）不放入平台 env 模板，改由 materialize 按实际配置生成 + console 面板 `[复制 .env 模板]` 提供。可选保留一个「完整 Agent env example」由示例 agent 跑 materialize 自动生成，标注「自动生成，勿手改」。
 
 ### D8 — console CredentialField 控件 + 「所需密钥」面板
 
@@ -151,7 +149,7 @@ write-only：inject 值只显 set/unset chip，密文永不回浏览器。
 ## 部署顺序
 
 ```text
-0. 平台 bootstrap (一次性, 先于一切)
+0. 平台 bootstrap (一次性, 先于一切; Platform ENV)
    FLEETENT_SECRET_KEY / DATABASE_URL / MICROSANDBOX_URL …
         │
         ▼
@@ -168,14 +166,14 @@ write-only：inject 值只显 set/unset chip，密文永不回浏览器。
    面板列出 required + set/unset
         │
         ▼
-3. 部署主机
+3. Agent 部署主机
    运维补 operator 槽空值到 .env      ← 唯一的手动设 env
         │
         ▼
 4. fleetent agent run
 ```
 
-要点：inject 的值随 config 一起设了；部署前手填只剩 operator 槽；进程级 env（含 secret key）是前置第 0 步，不在派生链里；materialize 可每次保存就跑（持续 DB→file）。
+要点：inject 的值随 config 一起设了；部署前手填只剩 operator 槽；Platform ENV（含 secret key）是前置第 0 步，不写入 Agent home；materialize 可每次保存就跑（持续 DB→file）。
 
 ## Error Handling
 
