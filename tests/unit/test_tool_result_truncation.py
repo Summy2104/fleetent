@@ -16,7 +16,8 @@ def test_within_threshold_returned_unchanged():
     assert trt.truncate_tool_result(s, max_bytes=1000) == s
 
 
-def test_over_threshold_truncated_within_budget():
+def test_over_threshold_truncated_within_budget(tmp_path, monkeypatch):
+    monkeypatch.setattr(trt, "SPILLOVER_DIR", tmp_path / "spillover")
     s = "x" * 5000
     out = trt.truncate_tool_result(s, max_bytes=500)
     assert _nbytes(out) <= 500
@@ -30,23 +31,25 @@ def test_default_threshold_used_when_none(monkeypatch):
     assert _nbytes(out) <= 200
 
 
-def test_default_constant_is_about_40kb():
-    assert trt.MAX_TOOL_RESULT_BYTES == 40_000
+def test_default_constant_is_50kb():
+    assert trt.MAX_TOOL_RESULT_BYTES == 50_000
 
 
 # ── head/tail + breadcrumb (group 3) ─────────────────────────────────────────
 
 
-def test_truncation_keeps_head_and_tail_with_breadcrumb():
+def test_self_truncates_keeps_head_and_tail_with_breadcrumb():
+    # self_truncates=True uses the legacy head+tail path (no spillover file)
     s = "HEAD" + ("m" * 5000) + "TAIL"
-    out = trt.truncate_tool_result(s, max_bytes=200)
+    out = trt.truncate_tool_result(s, max_bytes=200, self_truncates=True)
     assert out.startswith("HEAD")
     assert out.endswith("TAIL")
-    assert "截断" in out  # breadcrumb present
+    assert "截断" in out
     assert "字节" in out
 
 
-def test_truncation_total_not_over_threshold():
+def test_truncation_total_not_over_threshold(tmp_path, monkeypatch):
+    monkeypatch.setattr(trt, "SPILLOVER_DIR", tmp_path / "spillover")
     s = "a" * 10_000
     for limit in (120, 300, 1000):
         assert _nbytes(trt.truncate_tool_result(s, max_bytes=limit)) <= limit

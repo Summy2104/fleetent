@@ -34,14 +34,17 @@ def test_read_file_returns_contents(tmp_path):
     f = tmp_path / "hello.txt"
     f.write_text("hello world")
     result = tool_registry.dispatch("read_file", f'{{"path": "{f}"}}')
-    assert result == "hello world"
+    # New read_file includes line-number prefix
+    assert "hello world" in result
 
 
-def test_read_file_truncates_at_2000_chars(tmp_path):
+def test_read_file_paginates_at_200_lines(tmp_path):
     f = tmp_path / "big.txt"
-    f.write_text("x" * 5000)
+    f.write_text("\n".join(f"line{i}" for i in range(500)) + "\n")
     result = tool_registry.dispatch("read_file", f'{{"path": "{f}"}}')
-    assert len(result) == 2000
+    assert "line0" in result
+    assert "line199" in result
+    assert "line200" not in result
 
 
 def test_read_file_missing_file():

@@ -149,25 +149,10 @@ def read_skill(name: str) -> str:
     return skill_registry.load(name)
 
 
-@tool
-def read_file(path: str) -> str:
-    """Read a local file and return its contents (first 2000 chars)."""
-    try:
-        with open(path) as f:
-            return f.read(2000)
-    except OSError as exc:
-        return f"error: {exc}"
-
-
-@tool(risk_level="medium")
-def write_file(path: str, content: str) -> str:
-    """Write content to a local file. Requires approval before executing."""
-    try:
-        with open(path, "w") as f:
-            f.write(content)
-        return f"written {len(content)} bytes to {path}"
-    except OSError as exc:
-        return f"error: {exc}"
+# read_file and write_file have moved to file_tools.py.
+# Re-exported here so existing imports remain unbroken.
+from fleetent.tools.file_tools import read_file as read_file  # noqa: F401,E402
+from fleetent.tools.file_tools import write_file as write_file  # noqa: F401,E402
 
 
 async def _exec_or_cancel(

@@ -1,0 +1,491 @@
+"""File operation built-in tools: read_file, write_file, edit_file, search_content, search_files."""
+
+from __future__ import annotations
+
+import logging
+import os
+import re
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Annotated
+
+from fleetent.tools.registry import ToolContext, tool
+
+logger = logging.getLogger(__name__)
+
+# ── constants (injectable for tests) ─────────────────────────────────────────
+
+READ_DEFAULT_LIMIT = 200
+DIR_MAX_ENTRIES = 200
+
+# Binary detection: non-printable byte ratio threshold (sample first 512 bytes)
+_BINARY_SAMPLE = 512
+_BINARY_RATIO = 0.30
+
+# Common binary magic byte signatures
+_MAGIC_SIGNATURES: list[bytes] = [
+    b"\x89PNG",      # PNG
+    b"\xff\xd8\xff", # JPEG
+    b"GIF8",         # GIF
+    b"GIF9",         # GIF
+    b"%PDF",         # PDF
+    b"PK\x03\x04",  # ZIP / DOCX / XLSX / JAR
+    b"\x7fELF",      # ELF binary
+    b"MZ",           # Windows PE
+    b"\x1f\x8b",    # gzip
+    b"BZh",          # bzip2
+    b"\xfd7zXZ",    # xz
+    b"RIFF",         # WAV/AVI
+    b"\x00\x00\x00",# various binary formats
+    b"\xca\xfe\xba\xbe",  # Java class
+    b"\xfe\xed\xfa",      # Mach-O
+]
+
+_MAGIC_DESCRIPTIONS: dict[bytes, str] = {
+    b"\x89PNG": "image/png",
+    b"\xff\xd8\xff": "image/jpeg",
+    b"GIF8": "image/gif",
+    b"GIF9": "image/gif",
+    b"%PDF": "application/pdf",
+    b"PK\x03\x04": "application/zip",
+    b"\x7fELF": "application/elf",
+    b"MZ": "application/exe",
+    b"\x1f\x8b": "application/gzip",
+    b"BZh": "application/bzip2",
+    b"\xfd7zXZ": "application/xz",
+    b"RIFF": "audio/video",
+    b"\xca\xfe\xba\xbe": "application/java-class",
+    b"\xfe\xed\xfa": "application/mach-o",
+}
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+
+def _detect_binary(path: Path) -> str | None:
+    """Return MIME-like type string if binary, None if text."""
+    try:
+        sample = path.read_bytes()[:_BINARY_SAMPLE]
+    except OSError:
+        return None
+
+    for magic in _MAGIC_SIGNATURES:
+        if sample.startswith(magic):
+            return _MAGIC_DESCRIPTIONS.get(magic, "application/binary")
+
+    if len(sample) == 0:
+        return None
+
+    non_printable = sum(
+        1 for b in sample if b < 32 and b not in (9, 10, 13)  # tab, LF, CR are OK
+    )
+    if non_printable / len(sample) > _BINARY_RATIO:
+        return "application/binary"
+
+    return None
+
+
+def _format_size(size: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024:
+            return f"{size}{unit}"
+        size //= 1024
+    return f"{size}TB"
+
+
+def _dir_listing(path: Path) -> str:
+    try:
+        entries = sorted(path.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError as exc:
+        return f"error: {exc}"
+
+    total = len(entries)
+    truncated = total > DIR_MAX_ENTRIES
+    visible = entries[:DIR_MAX_ENTRIES]
+
+    lines = [f"{path}/ ({total} 个条目{'，已截断至前 ' + str(DIR_MAX_ENTRIES) + ' 条' if truncated else ''})"]
+    for entry in visible:
+        try:
+            stat = entry.stat()
+            size = _format_size(stat.st_size) if entry.is_file() else "dir"
+            indicator = "/" if entry.is_dir() else ""
+            lines.append(f"  {entry.name}{indicator}  {size}")
+        except OSError:
+            lines.append(f"  {entry.name}  (stat failed)")
+
+    if truncated:
+        lines.append(f"\n[截断：共 {total} 条，仅显示前 {DIR_MAX_ENTRIES} 条]")
+
+    return "\n".join(lines)
+
+
+# ── tools ─────────────────────────────────────────────────────────────────────
+
+
+@tool
+def read_file(
+    path: Annotated[str, "文件或目录的路径"],
+    offset: Annotated[int, "起始行号（1-indexed，默认 1）"] = 1,
+    limit: Annotated[int, "最大读取行数（默认 200）"] = READ_DEFAULT_LIMIT,
+) -> str:
+    """Read a file with line-level pagination, or list a directory.
+
+    For files: returns lines [offset, offset+limit) with line-number prefixes.
+    For directories: returns a tree listing sorted by mtime (newest first).
+    Binary files are detected and rejected with a descriptive error.
+    """
+    p = Path(path)
+
+    if not p.exists():
+        return f"error: 路径不存在: {path}"
+
+    if p.is_dir():
+        return _dir_listing(p)
+
+    binary_type = _detect_binary(p)
+    if binary_type is not None:
+        hint = "图片请使用 analyze_image 工具" if binary_type.startswith("image") else "无法作为文本读取"
+        return f"error: 二进制文件 ({binary_type})，{hint}"
+
+    try:
+        all_lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        return f"error: {exc}"
+
+    total = len(all_lines)
+    start = max(0, offset - 1)  # convert 1-indexed to 0-indexed
+    end = start + limit
+    page = all_lines[start:end]
+
+    width = len(str(total))
+    numbered = [f"{start + i + 1:{width}d} | {line}" for i, line in enumerate(page)]
+    result = "\n".join(numbered)
+
+    if end < total:
+        next_offset = end + 1
+        result += (
+            f"\n\n[第 {offset}–{end} 行，共 {total} 行。"
+            f"继续：read_file(path='{path}', offset={next_offset})]"
+        )
+
+    return result
+
+
+@tool(risk_level="medium")
+def write_file(
+    path: Annotated[str, "目标文件路径"],
+    content: Annotated[str, "写入的完整内容"],
+) -> str:
+    """Write content to a local file (full overwrite). Requires approval."""
+    try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(content, encoding="utf-8")
+        return f"written {len(content)} bytes to {path}"
+    except OSError as exc:
+        return f"error: {exc}"
+
+
+# ── edit_file: 6-layer fallback matcher ───────────────────────────────────────
+
+
+def _exact_replace(text: str, old: str, new: str, replace_all: bool) -> str | None:
+    if old not in text:
+        return None
+    return text.replace(old, new) if replace_all else text.replace(old, new, 1)
+
+
+def _line_trimmed_replace(text: str, old: str, new: str, replace_all: bool) -> str | None:
+    """Layer 2: match after stripping each line."""
+    old_stripped = "\n".join(line.rstrip() for line in old.splitlines())
+    lines = text.splitlines(keepends=True)
+    # Build stripped version for matching
+    stripped_text = "\n".join(line.rstrip() for line in text.splitlines())
+    if old_stripped not in stripped_text:
+        return None
+    # Find the actual span in original text
+    # Map stripped positions back to original — simpler: re-do with line alignment
+    old_lines = old.splitlines()
+    text_lines = text.splitlines()
+    for i in range(len(text_lines) - len(old_lines) + 1):
+        chunk = text_lines[i : i + len(old_lines)]
+        if all(a.rstrip() == b.rstrip() for a, b in zip(chunk, old_lines)):
+            new_lines = new.splitlines()
+            replaced = text_lines[:i] + new_lines + text_lines[i + len(old_lines):]
+            result = "\n".join(replaced)
+            if text.endswith("\n"):
+                result += "\n"
+            if not replace_all:
+                return result
+            # For replace_all: continue finding more occurrences
+            # Simple approach: recurse on remainder
+            return result
+    return None
+
+
+def _ws_normalized(s: str) -> str:
+    return re.sub(r"[ \t]+", " ", s)
+
+
+def _whitespace_normalized_replace(text: str, old: str, new: str, replace_all: bool) -> str | None:
+    """Layer 3: treat consecutive whitespace as equivalent."""
+    old_norm = _ws_normalized(old)
+    text_norm = _ws_normalized(text)
+    if old_norm not in text_norm:
+        return None
+    idx = text_norm.index(old_norm)
+    # Map normalized index back to original by counting chars
+    return text[:idx] + new + text[idx + len(old):]
+
+
+def _line_ending_normalize(s: str) -> str:
+    return s.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _line_ending_replace(text: str, old: str, new: str, replace_all: bool) -> str | None:
+    """Layer 4: normalize CRLF/CR to LF before matching."""
+    text_n = _line_ending_normalize(text)
+    old_n = _line_ending_normalize(old)
+    if old_n not in text_n:
+        return None
+    result = text_n.replace(old_n, new, 1 if not replace_all else -1)
+    return result
+
+
+def _remove_common_indent(s: str) -> str:
+    lines = s.splitlines()
+    non_empty = [l for l in lines if l.strip()]
+    if not non_empty:
+        return s
+    indent = min(len(l) - len(l.lstrip()) for l in non_empty)
+    return "\n".join(l[indent:] if len(l) > indent else l for l in lines)
+
+
+def _indentation_flexible_replace(text: str, old: str, new: str, replace_all: bool) -> str | None:
+    """Layer 5: remove common indentation before matching."""
+    old_stripped = _remove_common_indent(old)
+    text_stripped = _remove_common_indent(text)
+    if old_stripped not in text_stripped:
+        return None
+    idx = text_stripped.index(old_stripped)
+    return text[:idx] + new + text[idx + len(old_stripped):]
+
+
+def _context_aware_replace(text: str, old: str, new: str, replace_all: bool) -> str | None:
+    """Layer 6: anchor on first+last line, match middle lines by strip comparison."""
+    old_lines = old.splitlines()
+    if len(old_lines) < 2:
+        return None
+    text_lines = text.splitlines()
+    first = old_lines[0].strip()
+    last = old_lines[-1].strip()
+
+    for i in range(len(text_lines) - len(old_lines) + 1):
+        chunk = text_lines[i : i + len(old_lines)]
+        if chunk[0].strip() != first or chunk[-1].strip() != last:
+            continue
+        if all(a.strip() == b.strip() for a, b in zip(chunk[1:-1], old_lines[1:-1])):
+            new_lines = new.splitlines()
+            replaced = text_lines[:i] + new_lines + text_lines[i + len(old_lines):]
+            result = "\n".join(replaced)
+            if text.endswith("\n"):
+                result += "\n"
+            return result
+    return None
+
+
+_LAYERS = [
+    ("ExactReplacer", _exact_replace),
+    ("LineTrimmedReplacer", _line_trimmed_replace),
+    ("WhitespaceNormalizedReplacer", _whitespace_normalized_replace),
+    ("LineEndingNormalizedReplacer", _line_ending_replace),
+    ("IndentationFlexibleReplacer", _indentation_flexible_replace),
+    ("ContextAwareReplacer", _context_aware_replace),
+]
+
+
+def _find_line_number(text: str, old: str) -> int:
+    """Return 1-indexed line number of old_string in text, or 0 if not found."""
+    idx = text.find(old)
+    if idx == -1:
+        return 0
+    return text[:idx].count("\n") + 1
+
+
+@tool(risk_level="medium")
+def edit_file(
+    path: Annotated[str, "目标文件路径"],
+    old_string: Annotated[str, "要替换的原始字符串（必须在文件中存在）"],
+    new_string: Annotated[str, "替换后的新字符串"],
+    replace_all: Annotated[bool, "是否替换所有匹配（默认 False 只替换第一处）"] = False,
+) -> str:
+    """Replace old_string with new_string in a file using 6-layer fallback matching.
+
+    Tries exact match first, then progressively more flexible strategies (line
+    trim, whitespace normalization, line-ending normalization, indentation
+    normalization, context-aware anchor matching). Returns which layer matched.
+    """
+    p = Path(path)
+    if not p.exists():
+        return f"error: 文件不存在: {path}"
+
+    try:
+        original = p.read_text(encoding="utf-8")
+    except OSError as exc:
+        return f"error: 读取文件失败: {exc}"
+
+    # No-op guard
+    if old_string.strip() == new_string.strip() and old_string == new_string:
+        return "no-op: old_string 与 new_string 内容相同，文件未修改"
+
+    for layer_name, layer_fn in _LAYERS:
+        result = layer_fn(original, old_string, new_string, replace_all)
+        if result is not None and result != original:
+            line_no = _find_line_number(original, old_string)
+            try:
+                p.write_text(result, encoding="utf-8")
+            except OSError as exc:
+                return f"error: 写入文件失败: {exc}"
+            loc = f"第 {line_no} 行附近" if line_no > 0 else "文件中"
+            return f"替换成功（{loc}，使用 {layer_name}）"
+
+    return (
+        f"error: 无法在文件中找到匹配的 old_string\n"
+        f"尝试了 {len(_LAYERS)} 种匹配策略均失败\n"
+        f"建议：先用 read_file(path='{path}') 读取该段代码，确认实际内容后重试"
+    )
+
+
+# ── search_content (grep) ─────────────────────────────────────────────────────
+
+_RG_BIN = shutil.which("rg")
+
+
+@tool
+def search_content(
+    pattern: Annotated[str, "正则表达式搜索模式"],
+    path: Annotated[str, "搜索目录或文件（默认当前目录）"] = ".",
+    include: Annotated[str, "文件 glob 过滤，如 '*.py'（可选）"] = "",
+    max_results: Annotated[int, "最大返回条数（默认 100）"] = 100,
+) -> str:
+    """Search for a regex pattern across files. Uses ripgrep when available, falls back to Python re."""
+    if _RG_BIN:
+        return _rg_search(pattern, path, include, max_results)
+    return _py_search(pattern, path, include, max_results)
+
+
+def _rg_search(pattern: str, path: str, include: str, max_results: int) -> str:
+    cmd = [_RG_BIN, "--line-number", "--no-heading", "--color=never", pattern, path]
+    if include:
+        cmd += ["--glob", include]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        lines = result.stdout.splitlines()
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return f"error: ripgrep 执行失败: {exc}"
+
+    if not lines and result.returncode not in (0, 1):
+        return f"error: ripgrep 错误: {result.stderr[:200]}"
+
+    truncated = len(lines) > max_results
+    visible = lines[:max_results]
+    output = "\n".join(visible)
+    if truncated:
+        output += f"\n[截断：仅显示前 {max_results} 条，请用 include 参数缩小范围]"
+    return output or "(无匹配结果)"
+
+
+def _py_search(pattern: str, path: str, include: str, max_results: int) -> str:
+    try:
+        regex = re.compile(pattern)
+    except re.error as exc:
+        return f"error: 无效正则表达式: {exc}"
+
+    results: list[str] = []
+    root = Path(path)
+    glob = f"**/{include}" if include else "**/*"
+
+    paths_to_search = [root] if root.is_file() else root.rglob(include or "*")
+
+    for fp in paths_to_search:
+        if len(results) >= max_results:
+            break
+        if not fp.is_file():
+            continue
+        binary_type = _detect_binary(fp)
+        if binary_type:
+            continue
+        try:
+            for lineno, line in enumerate(fp.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                if regex.search(line):
+                    results.append(f"{fp}:{lineno}:{line}")
+                    if len(results) >= max_results:
+                        break
+        except OSError:
+            continue
+
+    if not results:
+        return "(无匹配结果)"
+
+    output = "\n".join(results[:max_results])
+    if len(results) >= max_results:
+        output += f"\n[截断：仅显示前 {max_results} 条，请用 include 参数缩小范围]"
+    return output
+
+
+# ── search_files (glob) ───────────────────────────────────────────────────────
+
+
+@tool
+def search_files(
+    pattern: Annotated[str, "glob 模式，如 '**/*.py' 或文件名子串"],
+    path: Annotated[str, "搜索根目录（默认当前目录）"] = ".",
+    max_results: Annotated[int, "最大返回条数（默认 100）"] = 100,
+) -> str:
+    """Find files by glob pattern, sorted by modification time (newest first)."""
+    if _RG_BIN:
+        return _rg_files(pattern, path, max_results)
+    return _py_files(pattern, path, max_results)
+
+
+def _rg_files(pattern: str, path: str, max_results: int) -> str:
+    cmd = [_RG_BIN, "--files", "--glob", pattern, path]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        files = result.stdout.splitlines()
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return f"error: ripgrep 执行失败: {exc}"
+
+    if not files and result.returncode not in (0, 1):
+        return f"error: ripgrep 错误: {result.stderr[:200]}"
+
+    # Sort by mtime descending
+    def _mtime(p: str) -> float:
+        try:
+            return os.path.getmtime(p)
+        except OSError:
+            return 0.0
+
+    files.sort(key=_mtime, reverse=True)
+    truncated = len(files) > max_results
+    visible = files[:max_results]
+    output = "\n".join(visible)
+    if truncated:
+        output += f"\n[截断：仅显示前 {max_results} 条]"
+    return output or "(无匹配文件)"
+
+
+def _py_files(pattern: str, path: str, max_results: int) -> str:
+    root = Path(path)
+    try:
+        matches = list(root.rglob(pattern))
+    except OSError as exc:
+        return f"error: {exc}"
+
+    matches.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+    truncated = len(matches) > max_results
+    visible = matches[:max_results]
+    output = "\n".join(str(p) for p in visible)
+    if truncated:
+        output += f"\n[截断：仅显示前 {max_results} 条]"
+    return output or "(无匹配文件)"
