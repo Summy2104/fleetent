@@ -168,3 +168,52 @@
 - 仅刷新 scope=None 共享注册表；agent-scoped 动态刷新记为后续（与现有 agent-scoped 注册局限一致）。
 - prompts/resources 的 list_changed（Change 6 的合成工具）其动态刷新可后续。
 - handler 中 `create_task` fire-and-forget（与既有 reconnect 一致，未存 task 引用）。
+
+---
+
+## 变更 6：mcp-resources-prompts（resources/prompts 合成工具）
+
+**做了什么**
+- 新增 `_UTILITY_METHODS`/`_UTILITY_TOOL_SPECS`、`_utility_params`、`_jsonify`、`_call_http_utility`/`_call_stdio_utility`/`_call_utility`、`_register_utility_tool`/`_register_utility_tools`。
+- 对 advertised `resources`/`prompts` 的服务注册 `{id}__list_resources`/`__read_resource`、`__list_prompts`/`__get_prompt` 合成工具；调用分派到 MCP 方法（http JSON-RPC / stdio SDK），结果经 `_jsonify` JSON 文本化。
+- 在 `_register_http_server`/`_register_stdio_server`/`_reregister_stdio_tools` 末尾调用 `_register_utility_tools`（刷新后保留）。
+- 新增 spec `mcp-resources-prompts`；新增 `tests/unit/test_mcp_resources_prompts.py`；更新 `docs/capabilities/mcp.md`。
+
+**问题**
+- P1：fleetent 只暴露 MCP tools，resources/prompts 无法被 agent 使用，尽管服务已 advertise。
+
+**决策**
+- **D1 合成工具、不改 agent_loop**：resources/prompts 暴露为普通工具（`{id}__*` 命名空间），agent 经既有工具机制访问；无需新概念。
+- **D2 capability 门控**：仅 advertised 对应 capability 才注册，不给不支持的服务注册无效工具；仅 scope=None 进共享表（与现有一致）。
+- **D3 统一分派 + auth/health 短路**：`_call_utility` 复用 `_call_*_tool` 同款短路；http 用 `call_timeout`+disconnect 处理，stdio 按 util_name 调 SDK 方法；结果 `_jsonify`（pydantic model_dump / dict → JSON）。
+- **D4 与刷新/降级一致**：刷新（Change 5）末尾重注册合成工具避免丢失；降级经 `{id}__*` 前缀的 schema 可见性过滤自动隐藏，无需额外处理。
+
+**改进/优化/新增点**
+- fleetent 首次具备 resources/prompts 访问能力（此前仅 tools）。
+
+**验证**
+- `make test-unit-ci` 全绿、coverage ≥ 75%；改动文件 ruff/mypy 零问题。
+
+**送审点**
+- resources/prompts 结果统一 JSON 文本化（对 LLM 足够；更精细呈现可后续）。
+- resources/prompts 的 list_changed 动态刷新未做（本程序只对 tools）。
+- 仅 scope=None 注册；agent-scoped 合成工具记为后续。
+
+---
+
+## 程序总结（MCP 增强程序 2026-06 · 范围 B 全部完成）
+
+6 个聚焦 OpenSpec 变更已全部 TDD 实施、归档、并经 bb-pr 自动合并到 `main`（每个均 `make test-unit-ci` 全绿 + coverage ≥ 75% + 改动文件 ruff/mypy 干净）：
+
+| # | change | PR | 性质 |
+|---|---|---|---|
+| 1 | mcp-result-fidelity | #142 | 🔴 真 bug（stdio 图片崩溃、isError 被吞）+ 多块/structuredContent |
+| 2 | mcp-client-compliance | #145 | 🔴 分页正确性 + 🟠 schema 净化/协议版本合规 + 能力捕获 |
+| 3 | mcp-stdio-isolation | #148 | 🔴 安全（堵住平台密钥透传第三方子进程）|
+| 4 | mcp-per-server-timeout | #152 | 🟡 per-server 可配超时 |
+| 5 | mcp-list-changed | #154 | 🟡 stdio 动态工具刷新（并发安全）|
+| 6 | mcp-resources-prompts | (本变更) | 🟡 resources/prompts 合成工具 |
+
+**fleetent MCP 现已具备**：完整结果保真、分页/schema/协议版本合规、能力捕获、安全 stdio 隔离、per-server 超时、stdio 动态刷新、resources/prompts——叠加既有的双传输/会话连续性/健康重连/三档降级/OAuth2/agent-scoped，达到四参考项目中第一梯队的 MCP 客户端成熟度。
+
+**显式延后（未来，需要时再单独立项）**：OAuth 富流程（DCR/PKCE/authorization_code/RFC 9728）；Streamable HTTP 流恢复（GET 流 + Last-Event-ID）+ 其上的 HTTP list_changed、进度重置超时；schema nullable-union 折叠；per-server 超时与 MCP server 定义的 DB/admin 持久化；二进制结果落盘；resources/prompts 的 @mention/slash 一等公民 UX 与其 list_changed。
