@@ -163,7 +163,9 @@ def _stop_running(home_dir: Path, *, drain_timeout: float = 30.0) -> None:
     # Phase 1: SIGUSR1 → graceful drain
     try:
         os.kill(pid, signal.SIGUSR1)
+        _logger.info("agent_drain_requested", pid=pid, drain_timeout=drain_timeout)
     except ProcessLookupError:
+        _logger.debug("agent_process_already_gone", pid=pid, phase="sigusr1")
         pid_file.unlink(missing_ok=True)
         return
 
@@ -173,10 +175,12 @@ def _stop_running(home_dir: Path, *, drain_timeout: float = 30.0) -> None:
             os.kill(pid, 0)
             _sleep(0.05)
         except ProcessLookupError:
+            _logger.debug("agent_process_exited_gracefully", pid=pid)
             pid_file.unlink(missing_ok=True)
             return
 
     # Phase 2: SIGTERM fallback
+    _logger.warn("agent_drain_timeout", pid=pid, drain_timeout=drain_timeout)
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -193,6 +197,7 @@ def _stop_running(home_dir: Path, *, drain_timeout: float = 30.0) -> None:
             return
 
     # Phase 3: SIGKILL
+    _logger.warn("agent_force_kill", pid=pid)
     with contextlib.suppress(ProcessLookupError):
         os.kill(pid, signal.SIGKILL)
     pid_file.unlink(missing_ok=True)
@@ -223,10 +228,17 @@ async def serve(
     loop.add_signal_handler(signal.SIGUSR1, drain_event.set)
 
     async def _drain_and_exit(rt: AgentRuntime) -> None:
+        _logger.info(
+            "agent_drain_started", active_runs=_loop._active_runs, drain_timeout=drain_timeout
+        )  # noqa: E501
         await rt.stop()
         deadline = asyncio.get_event_loop().time() + drain_timeout
         while _loop._active_runs > 0 and asyncio.get_event_loop().time() < deadline:
             await asyncio.sleep(0.1)
+        if _loop._active_runs > 0:
+            _logger.warn("agent_drain_timed_out", active_runs_remaining=_loop._active_runs)
+        else:
+            _logger.info("agent_drain_completed")
 
     try:
         rt = await boot(agent_id, home=home, port=port)
