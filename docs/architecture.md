@@ -112,7 +112,7 @@ src/fleetent/
   schedule_store.py  ← SQLite：定时任务定义与状态持久化
   observability/     ← trace、log、usage、diagnostics
   config.py          ← pydantic-settings；加载 .env；legacy settings/MCP YAML 缺失时使用默认值
-  agent_config.py    ← 读取 config/agent.yaml 单 agent 配置
+  agent_config.py    ← 读取 agents/<agent-id>/agent.yaml 单 agent 配置
   platform/
     admin_cli/       ← CLI 管理工具；console script 为 fleetent-admin
 ```

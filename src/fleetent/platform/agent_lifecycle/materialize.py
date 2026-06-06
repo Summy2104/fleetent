@@ -1,7 +1,7 @@
 """Materialize a runnable agent home from an authored definition (DB→file export).
 
 The platform authors agents; this writes each agent's self-contained home —
-``FLEETENT_HOME/<name>/agent.yaml`` (the full home schema) plus a ``.env`` scaffold that
+``FLEETENT_HOME/agents/<name>/agent.yaml`` (the full home schema) plus a ``.env`` scaffold that
 references secrets by env-var name only (never plaintext) — so the agent is runnable by
 ``fleetent agent run`` (see openspec change ``platform-agent-lifecycle``).
 """
@@ -38,8 +38,8 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
 
 
 def home_dir(name: str) -> Path:
-    """The agent's home directory: ``FLEETENT_HOME/<name>/`` (matches the runtime)."""
-    return paths.base_dir() / name
+    """The agent's home directory: ``FLEETENT_HOME/agents/<name>/``."""
+    return paths.base_dir() / "agents" / name
 
 
 def _env_var_names(
@@ -122,6 +122,7 @@ def write_home(
     """
     home = home_dir(agent.name)
     home.mkdir(parents=True, exist_ok=True)
+    (home / "data").mkdir(parents=True, exist_ok=True)
     payload = agent.model_dump(mode="json", exclude_defaults=False)
     (home / AGENT_FILE_NAME).write_text(
         yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8"

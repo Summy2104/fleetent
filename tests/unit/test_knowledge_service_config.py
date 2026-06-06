@@ -140,13 +140,14 @@ def test_secret_like_source_values_must_use_env_reference_fields(tmp_path) -> No
         load_knowledge_config(path)
 
 
-def test_repo_knowledge_yaml_example_parses_without_inline_secrets() -> None:
+def test_repo_standalone_knowledge_service_example_parses_without_inline_secrets() -> None:
     from pathlib import Path
 
     from fleetent.intelligence.knowledge_base.config import load_knowledge_config
 
     repo = Path(__file__).resolve().parents[2]
-    example = repo / "config" / "knowledge.yaml.example"
+    assert not (repo / "config" / "knowledge.yaml.example").exists()
+    example = repo / "config" / "knowledge-service" / "knowledge.yaml.example"
     snapshot = load_knowledge_config(example)
 
     assert snapshot.knowledge_bases[0].id == "pilot-kb"

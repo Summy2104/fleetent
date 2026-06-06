@@ -360,9 +360,7 @@ def test_agent_console_agent_lifecycle(monkeypatch):
     ) == {"agent": "clone", "cloned_from": "ops", "provenance": "adhoc"}
     with pytest.raises(HTTPException) as bad_yaml:
         agent_console_api.create_agent(
-            agent_console_api.CreateBody(
-                name="bad", capabilities_yaml="- not-map"
-            ),
+            agent_console_api.CreateBody(name="bad", capabilities_yaml="- not-map"),
             authorization="Session token",
         )
     assert bad_yaml.value.status_code == 422

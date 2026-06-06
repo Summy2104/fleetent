@@ -476,11 +476,11 @@ def test_long_system_prompt_not_flagged_as_secret(tmp_path) -> None:
     assert index.get("support") is not None
 
 
-# ── single-file agent config (single-agent-config-file change) ────────────────
+# ── default Agent home config ────────────────────────────────────────────────
 
 
 def _write_config_agent(home, name: str, **overrides) -> None:
-    """Write a flat home-root agent.yaml (no config/ or <name>/ subdir)."""
+    """Write a single agent.yaml at the provided home-like directory."""
     doc = {"name": name, "version": 1, "models": _valid_models_doc()}
     doc.update(overrides)
     home.mkdir(parents=True, exist_ok=True)
@@ -519,8 +519,11 @@ def test_build_index_prefers_config_agent_file_as_sole_default(tmp_path, monkeyp
     agents_dir = home / "config" / "agents"
     agents_dir.mkdir(parents=True)
     _write_agent(agents_dir, "other")
-    # Config-dir agent.yaml, bindings.default false -> still forced default.
-    _write_config_agent(home, "deployed", bindings={"default": False, "channels": ["slack:C9"]})
+    # Default Agent home file, bindings.default false -> still forced default.
+    default_home = home / "agents" / "default"
+    _write_config_agent(
+        default_home, "deployed", bindings={"default": False, "channels": ["slack:C9"]}
+    )
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
     index = agent_config.build_index()
@@ -540,7 +543,7 @@ def test_build_index_falls_back_to_multiscan_without_config_agent_file(
     agents_dir.mkdir()
     _write_agent(agents_dir, "a", bindings={"default": True})
     _write_agent(agents_dir, "b")
-    monkeypatch.setenv("FLEETENT_HOME", str(home))  # no config/agent.yaml
+    monkeypatch.setenv("FLEETENT_HOME", str(home))  # no default agent home file
     monkeypatch.setenv("FLEETENT_AGENTS_DIR", str(agents_dir))  # explicit multi-scan dir
 
     index = agent_config.build_index()

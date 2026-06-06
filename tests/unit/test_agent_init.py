@@ -66,8 +66,8 @@ def test_force_overwrites_agent_yaml_but_preserves_env(tmp_path) -> None:
     ) == "FLEETENT_MODEL_PRIMARY_API_KEY=sk-real-keepme\n"
 
 
-def test_default_home_is_fleetent_home_slash_id(tmp_path, monkeypatch) -> None:
+def test_default_home_is_under_fleetent_home_agents_dir(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     returned = agent_init.scaffold_agent_home("my-bot")
-    assert returned == tmp_path / "my-bot"
-    assert (tmp_path / "my-bot" / "agent.yaml").is_file()
+    assert returned == tmp_path / "agents" / "my-bot"
+    assert (tmp_path / "agents" / "my-bot" / "agent.yaml").is_file()

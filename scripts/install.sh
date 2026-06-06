@@ -173,9 +173,8 @@ setup_home_env() {
         *) log_warn "~/.local/bin is not on your PATH — add it (e.g. 'uv tool update-shell') to run the fleetent command." ;;
     esac
 }
-# Seed the deployed agent config and env. The agent runtime reads config/agent.yaml,
-# .env, and local data/. Global settings/mcp files are not seeded — their loaders
-# fall back to defaults when absent.
+# Seed platform env plus a default self-contained Agent home. Platform env stays at
+# FLEETENT_HOME/.env; the default Agent runtime lives under FLEETENT_HOME/agents/default/.
 # Never clobber existing files.
 copy_config_templates() {
     if [ "$SKIP_CONFIG" = true ]; then
@@ -183,15 +182,24 @@ copy_config_templates() {
         return 0
     fi
     mkdir -p "$FLEETENT_HOME"
+    local default_agent_home="$FLEETENT_HOME/agents/default"
+    mkdir -p "$default_agent_home/data"
 
-    if [ -f "$REPO_ROOT/config/agent/.env.example" ] && [ ! -f "$FLEETENT_HOME/.env" ]; then
-        cp "$REPO_ROOT/config/agent/.env.example" "$FLEETENT_HOME/.env"
+    if [ -f "$REPO_ROOT/config/platform/.env.example" ] && [ ! -f "$FLEETENT_HOME/.env" ]; then
+        cp "$REPO_ROOT/config/platform/.env.example" "$FLEETENT_HOME/.env"
         log_success "Created $FLEETENT_HOME/.env"
     fi
 
-    if [ -f "$REPO_ROOT/config/agent/agent.yaml.example" ] && [ ! -f "$FLEETENT_HOME/agent.yaml" ]; then
-        cp "$REPO_ROOT/config/agent/agent.yaml.example" "$FLEETENT_HOME/agent.yaml"
-        log_success "Created $FLEETENT_HOME/agent.yaml"
+    if [ -f "$REPO_ROOT/config/agent/.env.example" ] && [ ! -f "$default_agent_home/.env" ]; then
+        cp "$REPO_ROOT/config/agent/.env.example" "$default_agent_home/.env"
+        log_success "Created $default_agent_home/.env"
+    fi
+
+    if [ -f "$REPO_ROOT/config/agent/agent.yaml.example" ] && [ ! -f "$default_agent_home/agent.yaml" ]; then
+        sed -e "s/^name:.*/name: default                  # required; matches agents\\/default\\//" \
+            -e "s/^memory_namespace:.*/memory_namespace: default/" \
+            "$REPO_ROOT/config/agent/agent.yaml.example" > "$default_agent_home/agent.yaml"
+        log_success "Created $default_agent_home/agent.yaml"
     fi
 }
 # Initialize the SQLite DB under FLEETENT_HOME via Alembic (idempotent). Schema
@@ -235,7 +243,8 @@ print_success() {
     echo "  - Ensure ~/.local/bin is on your PATH (e.g. 'uv tool update-shell'),"
     echo "    then open a new shell and run:  fleetent \"hello\""
     echo "  - State / config live in:  $FLEETENT_HOME"
-    echo "  - Edit secrets in:  $FLEETENT_HOME/.env"
+    echo "  - Edit platform env in:  $FLEETENT_HOME/.env"
+    echo "  - Edit default Agent env in:  $FLEETENT_HOME/agents/default/.env"
     echo "  - For on-prem PRODUCTION deployment, use the Docker path (docker-compose.yml)."
 }
 
