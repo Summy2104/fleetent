@@ -38,7 +38,6 @@ from fleetent.platform.model_provider_management import provider_admin_store
 _logger = get_logger("agent_lifecycle.materialize")
 
 
-
 def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
     """Build the home schema from the authored core definition.
 
