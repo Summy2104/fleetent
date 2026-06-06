@@ -8,9 +8,9 @@
 |---|------|----------|------|
 | 1 | session 日志迁移 + index 幽灵记录 + 分页 | session-reliability-baseline | ✅ 已合并归档 (PR #128/#129) |
 | 2 | P0-3 压缩检查点 | session-compaction-checkpoint | ✅ 已合并 (PR #134) |
-| 3 | P0-4 跨进程文件锁 | session-cross-process-safety | 进行中 |
-| 4 | P1-3 Token 累计持久化 | session-token-tracking | 待办 |
-| 5 | P1-1 重启后 session 恢复 | session-restart-recovery | 待办 |
+| 3 | P0-4 跨进程文件锁 | session-cross-process-safety | ✅ 已合并 (PR #135) |
+| 4 | P1-3 Token 累计持久化 | session-token-tracking | ✅ 已合并 (PR #137) |
+| 5 | P1-1 重启后 session 恢复 | session-restart-recovery | 进行中 |
 | 6 | Tool result 外部化 | session-tool-result-extern | 待办 |
 
 ---
@@ -32,6 +32,15 @@
 ### D3：session_meta 列而非 session JSON meta（P0-3）
 **决策**：压缩记录写入 SQLite session_meta 表（migration 054），而非 session JSON 文件的 meta 字段。
 **理由**：管理控制台需要按 session 查询压缩历史，SQLite 可索引、可聚合查询。
+
+### D5：token / resume 标记加在 session_meta（Alembic）而非 index.py sessions 表（P1-3/P1-1）
+**决策**：token 累计列、resume_pending 列均加到 session_meta（Alembic 管理），不加到 index.py 的 sessions 表。
+**理由**：index.py 的 sessions 表用 CREATE TABLE IF NOT EXISTS 自建，不归 Alembic，无法用 migration ALTER（全新 DB 只跑 migration 时表不存在会失败）。session_meta 是 Alembic 管理的正规表，符合 CLAUDE.md「schema 归 Alembic」。与 P0-3 compaction meta 一致。
+
+### D6：重启恢复扫描挂 agent_app._start_infra，非 server.py lifespan（P1-1）
+**决策**：resume_pending 启动扫描在 agent_app._start_infra 的 start_session_maintenance() 之后调用。
+**理由**：platform server 已不维护 session（server.py 注释 platform-control-plane）；session 维护任务本身就在 _start_infra 启动，恢复扫描与之同址，职责一致。agent run 进程才是 session 宿主。
+**窗口**：120 秒（对标 hermes-agent）；标记式恢复（不保存 loop 状态），下次请求靠已落盘 session 文件 + resume_pending 标记由上层决定续接。本 change 只建机制，消费逻辑（normalizer/loop 续接）属后续 wiring。
 
 ---
 
