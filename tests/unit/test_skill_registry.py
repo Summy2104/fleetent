@@ -1041,3 +1041,50 @@ def test_same_tier_conflict_keeps_path_sort_and_no_tier_override(tmp_path, monke
     conflict = [e for e in logs if e.get("name") == "dup" and e["log_level"] == "warning"]
     assert len(conflict) == 1
     assert conflict[0].get("tier_override") is False
+
+
+# --- catalog budget + compact fallback (skill-catalog-budget) ---
+
+
+def test_catalog_truncates_over_max_skills_with_warning(tmp_path):
+    for i in range(5):
+        _write_skill(
+            tmp_path, f"s{i}", f"---\nname: s{i}\ndescription: skill {i}.\n---\nbody"
+        )
+    sr.scan(str(tmp_path / "skills"))
+    out = sr.available_skills_prompt(disabled_skills=[], max_skills=3)
+    # Only 3 <skill> blocks rendered.
+    assert out.count("<skill>") == 3
+    # Truncation warning before the instruction, naming shown/total.
+    assert "3" in out and "5" in out
+    assert out.index("⚠") < out.index("## Skills")
+
+
+def test_catalog_switches_to_compact_over_max_chars(tmp_path):
+    # Full format (5 × ~400-char descriptions ≈ 2400 chars) exceeds the budget, but
+    # compact (names + locations ≈ 600 chars) fits — so it drops descriptions for ALL
+    # five rather than truncating by count.
+    long_desc = "x" * 400
+    for i in range(5):
+        _write_skill(
+            tmp_path, f"s{i}", f"---\nname: s{i}\ndescription: {long_desc}\n---\nbody"
+        )
+    sr.scan(str(tmp_path / "skills"))
+    out = sr.available_skills_prompt(disabled_skills=[], max_chars=1500)
+    # Compact omits the long description but keeps every skill's name + location.
+    assert long_desc not in out
+    assert out.count("<skill>") == 5
+    assert "<name>s0</name>" in out
+    assert "SKILL.md" in out
+
+
+def test_catalog_small_dir_unchanged_by_defaults(tmp_path):
+    _write_skill(tmp_path, "github", "---\nname: github\ndescription: gh for PRs.\n---\nbody")
+    _write_skill(tmp_path, "weather", "---\nname: weather\ndescription: forecasts.\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    with_defaults = sr.available_skills_prompt(disabled_skills=[])
+    explicit = sr.available_skills_prompt(disabled_skills=[], max_skills=150, max_chars=18000)
+    # Defaults leave small catalogs byte-identical and unwarned.
+    assert with_defaults == explicit
+    assert "⚠" not in with_defaults
+    assert "gh for PRs." in with_defaults  # full format retained
