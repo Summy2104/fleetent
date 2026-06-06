@@ -70,11 +70,13 @@ flowchart TD
 
 - ✅ **工具结果处理**：`CallToolResult` 经统一规范化为返回文本——聚合全部 content block（不止首块）；image/audio/embedded-resource 等非文本块以简洁文本标记表示（不把 base64 灌入上下文，stdio 返回图片不再崩溃）；`isError` 标记的工具错误以教学式错误文本回传给模型；无内容块但有 `structuredContent` 时序列化为 JSON
 
+- ✅ **协议合规与发现完整性**：`tools/list` 按 `nextCursor` 游标分页取尽（注册与 probe，双传输，带页数上限）；注册前对服务端输入 schema 做保守净化（保证 `type:object`+`properties`，`definitions`→`$defs` 并重写 `#/definitions/` 引用）；`initialize` 捕获服务端 `protocolVersion` 与 `capabilities`（per-server），HTTP 在握手后回发 `MCP-Protocol-Version` header
+
 ## 规划中（MCP 增强程序 2026-06）
 
-> 依据见 `docs/records/mcp-enhancement-2026-06/`（四参考项目差距分析 + 决策记录）。以下为本轮 6 变更程序中除已落地的「工具结果处理」外的剩余项。
+> 依据见 `docs/records/mcp-enhancement-2026-06/`（四参考项目差距分析 + 决策记录）。以下为本轮 6 变更程序中除已落地的「工具结果处理」「协议合规与发现完整性」外的剩余项。
 
-- [ ] **协议合规**：`tools/list` 游标分页（`nextCursor`）；服务端输入 schema 净化（`definitions`→`$defs`、nullable union 折叠、`type` 矫正）；捕获服务端协商版本并回发 `MCP-Protocol-Version` header
+- [ ] **schema 净化进阶（待评估）**：nullable `anyOf` union 折叠等 provider 专项适配（当前已做等价安全变换：`type:object` 保证、`definitions`→`$defs`、引用重写）
 - [ ] **stdio 子进程环境隔离**：以白名单替代向第三方子进程透传整个平台环境变量
 - [ ] **per-server 超时与进度**：可配置 connect / call 超时；收到 `notifications/progress` 时重置超时
 - [ ] **动态工具刷新**：处理 `notifications/tools/list_changed`（独立 task + per-server RPC 锁，规避 stdio 流竞态）

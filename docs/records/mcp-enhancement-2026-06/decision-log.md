@@ -51,3 +51,34 @@
 - marker 文本格式（`[image: <mime>, ~N bytes]`）是客户端内部约定、非 MCP 标准，仅供 LLM 阅读——如需可调。
 - 空内容且无 structuredContent 时由旧的「返回整个 result 的 dict repr」改为返回 `""`（更干净）；如有依赖旧行为处需指出。
 - 二进制落盘是否要在后续单独立项。
+
+---
+
+## 变更 2：mcp-client-compliance（协议合规与发现完整性）
+
+**做了什么**
+- **分页**：新增 `_list_all_tools_http`/`_list_all_tools_stdio`，按 `nextCursor` 取尽全部页，`_MAX_TOOL_PAGES=100` 上限保险；改造 `_register_http_server`/`_probe_http_tools`/`_register_stdio_server`/`_probe_stdio_tools` 复用之。
+- **schema 净化**：新增 `_sanitize_input_schema`+`_rewrite_refs`，保证顶层 `type:object`+`properties`、`definitions`→`$defs` 并重写 `#/definitions/` 引用；在 `_register_tool_http`/`_register_tool_stdio` 注册前应用。
+- **协议版本/能力捕获**：`McpServerConfig` 加 `protocol_version`/`capabilities` 运行时字段；`_open_session`（http）与 `_register_stdio_server`（stdio，经 `_init_result_to_dict`）经 `_capture_init_result` 捕获；`_base_headers` 在握手后回发 `MCP-Protocol-Version`。
+- 新增 spec `mcp-client-compliance`；新增 `tests/unit/test_mcp_client_compliance.py`；更新 `docs/capabilities/mcp.md`。
+
+**问题**
+- P1：`tools/list` 不读 `nextCursor` → 多页服务工具被静默截断。
+- P2：服务端 schema 原样塞 LLM → 缺 `type:object` 或用 `definitions` 的 schema 可致 provider 400。
+- P3：丢弃 `initialize` 返回 → 不合 2025-06-18 的 `MCP-Protocol-Version` 回发要求；能力信息缺失，无法为 resources/prompts 门控。
+
+**决策**
+- **D1 分页助手单点化**：注册与 probe 复用同一分页逻辑；`_MAX_TOOL_PAGES` 上限 + 警告日志，防死循环游标静默截断。
+- **D2 schema 净化保守化**：只做语义等价、不会破坏合法 schema 的变换（`type:object`+`properties` 兜底、`definitions`→`$defs`+ref 重写）；深拷贝、绝不抛、异常回退安全默认。**显式不做** nullable union 折叠（高风险、provider 专项）——记为待评估。理由：自动合并到 main，净化必须零破坏面。
+- **D3 能力存 dict、版本头时序**：`capabilities` 统一存 dict（http 原样；stdio 经 `model_dump(exclude_none=True)`），为 Change 6 resources/prompts 门控铺路；`MCP-Protocol-Version` 仅在 `protocol_version` 置位（即握手后）才加，故首个 initialize 不带、后续带，符合规范。
+
+**改进/优化/新增点**
+- 多页工具不再丢失（P1）；问题 schema 不再触发 provider 400（P2）；HTTP 合 2025-06-18 版本头（P3）；能力捕获为后续 resources/prompts 打基础。
+
+**验证**
+- `make test-unit-ci`（含合并 main 后回归）全绿、coverage ≥ 75%；改动文件 ruff/mypy 零问题；`check_test_layers` 未 flag 新测试。
+
+**送审点**
+- `_MAX_TOOL_PAGES=100`（约上限 100 页工具）是否合适。
+- `definitions`→`$defs` 重写：当同层已有 `$defs` 时不动以避免覆盖（罕见边界）。
+- nullable union 折叠未做——若实际接入的服务/provider 需要，再单独立项。

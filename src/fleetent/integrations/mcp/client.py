@@ -12,6 +12,7 @@ Stdio connections are kept alive via a module-level AsyncExitStack.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -42,6 +43,7 @@ _PROBE_INTERVAL = 30.0  # seconds between background health probes (D3)
 _BACKOFF_BASE = 1.0  # seconds; first reconnect delay (D4)
 _BACKOFF_CAP = 60.0  # seconds; reconnect backoff ceiling (D4)
 _RECONNECT_MAX_ATTEMPTS = 5  # consecutive failures -> unavailable (D4)
+_MAX_TOOL_PAGES = 100  # tools/list pagination safety cap: stop following nextCursor past this
 
 _UNAVAILABLE_RESULT_PREFIX = "MCP server"  # tool result text on degraded/unavailable (D5)
 
@@ -152,6 +154,10 @@ class McpServerConfig:
     env: dict[str, str] = field(default_factory=dict)  # extra env vars for the subprocess
     # Streamable HTTP runtime state (per-server, not module-level global)
     session_id: str | None = None  # assigned by server via Mcp-Session-Id on initialize
+    # Negotiated protocol version + server-advertised capabilities, captured at initialize
+    # (per-server runtime state, never module-level global; capabilities gate later features).
+    protocol_version: str | None = field(default=None, repr=False, compare=False)
+    capabilities: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
     _request_id: int = field(default=0, repr=False, compare=False)  # monotonic JSON-RPC id
     # OAuth2 runtime state, held per-server instance (D3/D5/D9: never module-level global)
     _token_store: _InMemoryTokenStore = field(
@@ -588,13 +594,13 @@ async def _register_stdio_server(server: McpServerConfig, scope: int | None = No
     stack = await get_exit_stack()
     read, write = await stack.enter_async_context(stdio_client(params))
     session: Any = await stack.enter_async_context(ClientSession(read, write))
-    await session.initialize()
+    init_result = await session.initialize()
+    _capture_init_result(server, _init_result_to_dict(init_result))
 
     _active_sessions[(scope, server.id)] = session
     _server_registry[(scope, server.id)] = server
 
-    tools_result = await session.list_tools()
-    tools = tools_result.tools
+    tools = await _list_all_tools_stdio(session)
     for tool_def in tools:
         tool_name = _make_tool_name(server.id, tool_def.name)
         _register_tool_stdio(server, tool_name, tool_def, scope)
@@ -606,6 +612,40 @@ async def _register_stdio_server(server: McpServerConfig, scope: int | None = No
 
 PROTOCOL_VERSION = "2025-06-18"
 CLIENT_INFO = {"name": "fleetent", "version": "1.0"}
+
+
+def _capture_init_result(server: McpServerConfig, result: Any) -> None:
+    """Capture negotiated protocolVersion + advertised capabilities from an initialize result.
+
+    Falls back to the client's PROTOCOL_VERSION when the server omits a version, and to an
+    empty capabilities mapping when none is advertised. Per-server state, never global.
+    """
+    if not isinstance(result, dict):
+        server.protocol_version = server.protocol_version or PROTOCOL_VERSION
+        return
+    server.protocol_version = result.get("protocolVersion") or PROTOCOL_VERSION
+    caps = result.get("capabilities")
+    server.capabilities = caps if isinstance(caps, dict) else {}
+
+
+def _init_result_to_dict(init_result: Any) -> dict[str, Any]:
+    """Coerce an SDK InitializeResult (stdio) into a {protocolVersion, capabilities} dict."""
+    if init_result is None:
+        return {}
+    caps = getattr(init_result, "capabilities", None)
+    caps_dict: dict[str, Any] = {}
+    dump = getattr(caps, "model_dump", None)
+    if callable(dump):
+        try:
+            caps_dict = dump(exclude_none=True)
+        except Exception:  # noqa: BLE001 — fall back to empty caps if the model cannot dump
+            caps_dict = {}
+    elif isinstance(caps, dict):
+        caps_dict = caps
+    return {
+        "protocolVersion": getattr(init_result, "protocolVersion", None),
+        "capabilities": caps_dict,
+    }
 
 
 def _base_headers(server: McpServerConfig, *, bearer: str | None = None) -> dict[str, str]:
@@ -627,6 +667,10 @@ def _base_headers(server: McpServerConfig, *, bearer: str | None = None) -> dict
             headers["Authorization"] = f"Bearer {key}"
     if server.session_id:
         headers["Mcp-Session-Id"] = server.session_id
+    # MCP 2025-06-18: echo the negotiated protocol version on requests issued after the
+    # initialize handshake (protocol_version is set only once a session is established).
+    if server.protocol_version:
+        headers["MCP-Protocol-Version"] = server.protocol_version
     return headers
 
 
@@ -829,7 +873,8 @@ async def _open_session(client: Any, server: McpServerConfig) -> None:
     session_id = init_resp.headers.get("Mcp-Session-Id")
     if session_id:
         server.session_id = session_id
-    _parse_jsonrpc_response(init_resp, request_id)
+    init_obj = _parse_jsonrpc_response(init_resp, request_id)
+    _capture_init_result(server, init_obj.get("result"))
     await _post_notification(client, server, "notifications/initialized")
 
 
@@ -886,14 +931,43 @@ async def _post_notification(client: Any, server: McpServerConfig, method: str) 
         )
 
 
+async def _list_all_tools_http(client: Any, server: McpServerConfig) -> list[dict[str, Any]]:
+    """Fetch every page of tools/list, following nextCursor, bounded by _MAX_TOOL_PAGES."""
+    tools: list[dict[str, Any]] = []
+    cursor: str | None = None
+    for _ in range(_MAX_TOOL_PAGES):
+        params: dict[str, Any] = {"cursor": cursor} if cursor else {}
+        obj = await _post_jsonrpc(client, server, "tools/list", params)
+        result = obj.get("result", {})
+        tools.extend(result.get("tools", []) or [])
+        cursor = result.get("nextCursor")
+        if not cursor:
+            return tools
+    logger.warning("mcp_tools_list_page_cap server_id=%s cap=%d", server.id, _MAX_TOOL_PAGES)
+    return tools
+
+
+async def _list_all_tools_stdio(session: Any) -> list[Any]:
+    """Fetch every page of stdio list_tools, following nextCursor, bounded by _MAX_TOOL_PAGES."""
+    tools: list[Any] = []
+    cursor: str | None = None
+    for _ in range(_MAX_TOOL_PAGES):
+        result = await session.list_tools(cursor=cursor)
+        tools.extend(result.tools or [])
+        cursor = getattr(result, "nextCursor", None)
+        if not cursor:
+            return tools
+    logger.warning("mcp_tools_list_page_cap transport=stdio cap=%d", _MAX_TOOL_PAGES)
+    return tools
+
+
 async def _register_http_server(server: McpServerConfig, scope: int | None = None) -> None:
     import httpx
 
     async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
         await _open_session(client, server)
-        list_obj = await _post_jsonrpc(client, server, "tools/list", {})
+        tools = await _list_all_tools_http(client, server)
 
-    tools = list_obj.get("result", {}).get("tools", [])
     for tool_def in tools:
         tool_name = _make_tool_name(server.id, tool_def["name"])
         _register_tool_http(server, tool_name, tool_def, scope)
@@ -927,11 +1001,8 @@ async def _probe_http_tools(server: McpServerConfig) -> list[dict[str, str]]:
 
     async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
         await _open_session(client, server)
-        list_obj = await _post_jsonrpc(client, server, "tools/list", {})
-    return [
-        {"name": t["name"], "description": t.get("description", "")}
-        for t in list_obj.get("result", {}).get("tools", [])
-    ]
+        tools = await _list_all_tools_http(client, server)
+    return [{"name": t["name"], "description": t.get("description", "")} for t in tools]
 
 
 async def _probe_stdio_tools(server: McpServerConfig) -> list[dict[str, str]]:
@@ -944,8 +1015,8 @@ async def _probe_stdio_tools(server: McpServerConfig) -> list[dict[str, str]]:
         read, write = await stack.enter_async_context(stdio_client(params))
         session: Any = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
-        result = await session.list_tools()
-        return [{"name": t.name, "description": t.description or ""} for t in result.tools]
+        tools = await _list_all_tools_stdio(session)
+        return [{"name": t.name, "description": t.description or ""} for t in tools]
 
 
 def unregister_server(server_id: str, scope: int | None = None) -> None:
@@ -965,16 +1036,52 @@ def unregister_server(server_id: str, scope: int | None = None) -> None:
     _active_sessions.pop((scope, server_id), None)
 
 
+def _rewrite_refs(node: Any) -> Any:
+    """Recursively rewrite ``#/definitions/...`` $ref strings to ``#/$defs/...``."""
+    if isinstance(node, dict):
+        out: dict[str, Any] = {}
+        for key, value in node.items():
+            if key == "$ref" and isinstance(value, str) and value.startswith("#/definitions/"):
+                out[key] = "#/$defs/" + value[len("#/definitions/") :]
+            else:
+                out[key] = _rewrite_refs(value)
+        return out
+    if isinstance(node, list):
+        return [_rewrite_refs(item) for item in node]
+    return node
+
+
+def _sanitize_input_schema(schema: Any) -> dict[str, Any]:
+    """Normalize a server-provided input schema into a provider-safe object schema.
+
+    Conservative and meaning-preserving: guarantee a top-level ``type: object`` and a
+    ``properties`` map; rename a top-level ``definitions`` block to ``$defs`` (only when
+    ``$defs`` is absent, to avoid clobbering) and rewrite ``#/definitions/`` refs to match.
+    Works on a copy and never raises — a malformed schema falls back to a safe default.
+    """
+    if not isinstance(schema, dict):
+        return {"type": "object", "properties": {}}
+    try:
+        out = copy.deepcopy(schema)
+        if "definitions" in out and "$defs" not in out:
+            out["$defs"] = out.pop("definitions")
+            out = _rewrite_refs(out)
+        if out.get("type") != "object":
+            out["type"] = "object"
+        if not isinstance(out.get("properties"), dict):
+            out["properties"] = {}
+        return out
+    except Exception:  # noqa: BLE001 — sanitization must never break registration
+        return {"type": "object", "properties": {}}
+
+
 def _register_tool_stdio(
     server: McpServerConfig, tool_name: str, tool_def: Any, scope: int | None = None
 ) -> None:
     import fleetent.tools.registry as tr
 
-    input_schema = (
-        tool_def.inputSchema
-        if hasattr(tool_def, "inputSchema")
-        else {"type": "object", "properties": {}}
-    )
+    raw_schema = tool_def.inputSchema if hasattr(tool_def, "inputSchema") else None
+    input_schema = _sanitize_input_schema(raw_schema)
 
     async def call(**kwargs: object) -> str:
         return await _call_stdio_tool(server.id, tool_def.name, dict(kwargs), server._agent_scope)
@@ -998,7 +1105,7 @@ def _register_tool_http(
 ) -> None:
     import fleetent.tools.registry as tr
 
-    input_schema = tool_def.get("inputSchema", {"type": "object", "properties": {}})
+    input_schema = _sanitize_input_schema(tool_def.get("inputSchema"))
 
     async def call(**kwargs: object) -> str:
         return await _call_http_tool(server.id, tool_def["name"], dict(kwargs), server._agent_scope)
