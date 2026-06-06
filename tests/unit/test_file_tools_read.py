@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
 from fleetent.tools.file_tools import read_file
-
 
 # ── pagination ────────────────────────────────────────────────────────────────
 

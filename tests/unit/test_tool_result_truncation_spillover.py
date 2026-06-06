@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import fleetent.tools.result_truncation as trt
 
 
@@ -117,6 +115,7 @@ def test_cleanup_removes_old_files(tmp_path):
     # Back-date mtime to 8 days ago
     old_mtime = time.time() - 8 * 86400
     import os
+
     os.utime(old_file, (old_mtime, old_mtime))
 
     fresh_file = spillover / "fresh.txt"

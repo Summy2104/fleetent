@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 @patch("fleetent.session.index.delete_batch")
 def test_cleanup_expired_calls_delete_batch_for_removed(mock_delete_batch, tmp_path, monkeypatch):
-    import fleetent.session.index as session_index
     import fleetent.session.manager as mgr
 
     monkeypatch.setattr(mgr, "SESSIONS_DIR", tmp_path)
@@ -27,7 +26,6 @@ def test_cleanup_expired_calls_delete_batch_for_removed(mock_delete_batch, tmp_p
 def test_cleanup_expired_no_delete_batch_when_nothing_removed(
     mock_delete_batch, tmp_path, monkeypatch
 ):
-    import fleetent.session.index as session_index
     import fleetent.session.manager as mgr
 
     monkeypatch.setattr(mgr, "SESSIONS_DIR", tmp_path)
@@ -40,7 +38,6 @@ def test_cleanup_expired_no_delete_batch_when_nothing_removed(
 
 @patch("fleetent.session.index.delete_batch")
 def test_cleanup_expired_index_failure_does_not_raise(mock_delete_batch, tmp_path, monkeypatch):
-    import fleetent.session.index as session_index
     import fleetent.session.manager as mgr
 
     monkeypatch.setattr(mgr, "SESSIONS_DIR", tmp_path)
@@ -58,7 +55,6 @@ def test_cleanup_expired_index_failure_does_not_raise(mock_delete_batch, tmp_pat
 
 @patch("fleetent.session.index.delete_batch")
 def test_enforce_capacity_calls_delete_batch_for_evicted(mock_delete_batch, tmp_path, monkeypatch):
-    import fleetent.session.index as session_index
     import fleetent.session.manager as mgr
 
     monkeypatch.setattr(mgr, "SESSIONS_DIR", tmp_path)
@@ -80,7 +76,6 @@ def test_enforce_capacity_calls_delete_batch_for_evicted(mock_delete_batch, tmp_
 def test_enforce_capacity_no_delete_batch_when_within_limits(
     mock_delete_batch, tmp_path, monkeypatch
 ):
-    import fleetent.session.index as session_index
     import fleetent.session.manager as mgr
 
     monkeypatch.setattr(mgr, "SESSIONS_DIR", tmp_path)

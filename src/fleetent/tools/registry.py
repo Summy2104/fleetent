@@ -165,7 +165,9 @@ def get_schemas() -> list[ToolSchema]:
                 if not avail_fn():
                     continue
             except Exception:
-                logger.warning("availability check for tool %r raised; treating as unavailable", name)
+                logger.warning(
+                    "availability check for tool %r raised; treating as unavailable", name
+                )
                 continue
         result.append(schema)
     return result
@@ -282,6 +284,7 @@ def dispatch(
 
 def _build_schema(fn: Callable[..., Any]) -> ToolSchema:
     from fleetent.tools.schema_builder import build_schema
+
     return build_schema(fn)
 
 

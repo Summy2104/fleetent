@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
-
 from fleetent.im_gateway.clarify_renderer import (
     render_clarify_slack,
     render_clarify_telegram,
     render_clarify_text,
 )
-
 
 # ── Slack Block Kit rendering ─────────────────────────────────────────────────
 
