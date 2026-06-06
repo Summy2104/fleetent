@@ -13,7 +13,7 @@ from fleetent.db import SQLiteDatabase, create_database
 
 _COLS = (
     "session_id, origin, status, takeover_actor, takeover_at, pinned, pin_note, "
-    "agent_name, user_id, channel, updated_at"
+    "agent_name, user_id, channel, updated_at, total_input_tokens, total_output_tokens"
 )
 
 
@@ -78,6 +78,8 @@ def get_meta(session_id: str) -> dict[str, Any]:
             "user_id": None,
             "channel": None,
             "updated_at": None,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
         }
     return row
 
@@ -195,4 +197,21 @@ def update_compaction_meta(
                 "preview": summary_preview[:200] if summary_preview else None,
                 "sid": session_id,
             },
+        )
+
+
+def add_token_usage(session_id: str, input_tokens: int, output_tokens: int) -> None:
+    """Accumulate token usage for a session. Creates the row if absent."""
+    with _database().transaction() as conn:
+        conn.execute(
+            "INSERT INTO session_meta (session_id, origin, status, pinned, updated_at) "
+            "VALUES (:sid, 'web', 'active', 0, :now) ON CONFLICT(session_id) DO NOTHING",
+            {"sid": session_id, "now": _now()},
+        )
+        conn.execute(
+            "UPDATE session_meta SET "
+            "total_input_tokens = COALESCE(total_input_tokens, 0) + :in_tok, "
+            "total_output_tokens = COALESCE(total_output_tokens, 0) + :out_tok "
+            "WHERE session_id = :sid",
+            {"in_tok": input_tokens, "out_tok": output_tokens, "sid": session_id},
         )
