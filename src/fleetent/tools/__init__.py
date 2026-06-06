@@ -16,6 +16,7 @@ through this ``__init__``.
 """
 
 from fleetent.tools import builtin_tools  # noqa: F401  # side-effect: register built-in tools
+from fleetent.tools import file_tools  # noqa: F401  # side-effect: register file tools
 from fleetent.tools.builtin_tools import _get_manager  # noqa: F401  # compat re-export
 from fleetent.tools.multimodal import build_message_with_images, has_image_block
 from fleetent.tools.plugin_loader import expand_plugin_patterns, load_plugins
