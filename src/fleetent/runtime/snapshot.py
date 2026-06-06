@@ -18,6 +18,9 @@ from fleetent.agent_config import AgentFile, default_models
 from fleetent.agent_store import AgentVersion
 from fleetent.governance.agent_policy import check_tool_access
 from fleetent.model import ModelPolicySnapshot
+from fleetent.observability.structured_logging import get_logger
+
+_logger = get_logger("runtime.snapshot")
 
 ToolSchema = dict[str, Any]
 
@@ -135,7 +138,12 @@ def _snapshot(name: str, version: AgentVersion) -> AgentSnapshot:
 def load_active(name: str) -> AgentSnapshot | None:
     """Resolve the agent's file-sourced snapshot, or ``None`` if absent. Zero DB."""
     agent = agent_config.current().get(name)
-    return None if agent is None else _snapshot_from_file(agent)
+    if agent is None:
+        _logger.warn("snapshot_not_found", agent=name)
+        return None
+    snap = _snapshot_from_file(agent)
+    _logger.info("snapshot_loaded", agent=name, version_id=snap.version_id)
+    return snap
 
 
 def load_active_db(name: str) -> AgentSnapshot | None:

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import re
 from dataclasses import dataclass
 
 from fleetent.integrations.sandbox.config import NetworkPolicy, SandboxResources
 from fleetent.integrations.sandbox.secrets import is_sensitive_name
+from fleetent.observability.structured_logging import get_logger
 
-logger = logging.getLogger(__name__)
+_logger = get_logger("sandbox.client")
 
 _SAFE_NAME = re.compile(r"[^a-zA-Z0-9_.-]")
 
@@ -50,10 +50,10 @@ class SandboxClient:
             )
             await proc.communicate()
         except (FileNotFoundError, OSError) as exc:
-            logger.warning("docker_probe_failed error=%s", exc)
+            _logger.warn("docker_probe_failed", error=str(exc))
             return False
         if proc.returncode != 0:
-            logger.warning("docker_probe_nonzero returncode=%s", proc.returncode)
+            _logger.warn("docker_probe_nonzero", returncode=proc.returncode)
             return False
         return True
 
@@ -71,7 +71,7 @@ class SandboxClient:
         if resources.network is NetworkPolicy.NONE:
             flags += ["--network", "none"]
         elif resources.network is NetworkPolicy.PUBLIC_ONLY:
-            logger.warning("sandbox_public_only_network_unprovisioned falling_back_to=none")
+            _logger.warn("sandbox_public_only_network_unprovisioned", falling_back_to="none")
             flags += ["--network", "none"]
         if resources.read_only:
             flags.append("--read-only")
@@ -134,7 +134,7 @@ class SandboxClient:
         if proc.returncode != 0:
             raise RuntimeError(f"docker run failed: {stderr.decode().strip()}")
         container_id = stdout.decode().strip()
-        logger.info("sandbox_created name=%s container_id=%s", name, container_id[:12])
+        _logger.info("sandbox_created", name=name, container_id=container_id[:12])
         return container_id
 
     async def find_workspace(self, name: str) -> str | None:
@@ -181,14 +181,14 @@ class SandboxClient:
             )
             stdout, stderr = await proc.communicate()
         except (FileNotFoundError, OSError) as exc:
-            logger.warning("docker_list_containers_failed prefix=%s error=%s", name_prefix, exc)
+            _logger.warn("docker_list_containers_failed", prefix=name_prefix, error=str(exc))
             return []
         if proc.returncode != 0:
-            logger.warning(
-                "docker_list_containers_nonzero prefix=%s returncode=%s error=%s",
-                name_prefix,
-                proc.returncode,
-                stderr.decode().strip(),
+            _logger.warn(
+                "docker_list_containers_nonzero",
+                prefix=name_prefix,
+                returncode=proc.returncode,
+                error=stderr.decode().strip(),
             )
             return []
         return [line for line in stdout.decode().splitlines() if line.strip()]
@@ -212,7 +212,7 @@ class SandboxClient:
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
             raise RuntimeError(f"docker commit failed: {stderr.decode().strip()}")
-        logger.info("sandbox_committed container_id=%s tag=%s", workspace_id[:12], image_tag)
+        _logger.info("sandbox_committed", container_id=workspace_id[:12], tag=image_tag)
 
     async def image_exists(self, image_tag: str) -> bool:
         """Return whether a local image with `image_tag` exists (never raising).
@@ -232,7 +232,7 @@ class SandboxClient:
             )
             await proc.communicate()
         except (FileNotFoundError, OSError) as exc:
-            logger.warning("docker_image_inspect_failed tag=%s error=%s", image_tag, exc)
+            _logger.warn("docker_image_inspect_failed", tag=image_tag, error=str(exc))
             return False
         return proc.returncode == 0
 
@@ -272,7 +272,7 @@ class SandboxClient:
             stderr=asyncio.subprocess.DEVNULL,
         )
         await proc.communicate()
-        logger.info("sandbox_destroyed", extra={"container_id": workspace_id[:12]})
+        _logger.info("sandbox_destroyed", container_id=workspace_id[:12])
 
     async def kill_workspace(self, workspace_id: str) -> None:
         """Forcefully terminate a container: SIGTERM, fixed grace, then SIGKILL (SB7).
@@ -300,9 +300,9 @@ class SandboxClient:
         if proc.returncode not in (0, None):
             # Best-effort: a nonzero code (e.g. SIGKILL on an already-stopped
             # container) must not crash the timeout path. Log and move on.
-            logger.warning(
-                "docker_kill_nonzero signal=%s container_id=%s returncode=%s",
-                signal,
-                workspace_id[:12],
-                proc.returncode,
+            _logger.warn(
+                "docker_kill_nonzero",
+                signal=signal,
+                container_id=workspace_id[:12],
+                returncode=proc.returncode,
             )

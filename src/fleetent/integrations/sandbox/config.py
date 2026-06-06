@@ -13,7 +13,6 @@ this change clamps it to [1, 600] but does not act on it in `docker run`.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -21,8 +20,9 @@ from pathlib import Path
 import yaml
 
 from fleetent import paths
+from fleetent.observability.structured_logging import get_logger
 
-logger = logging.getLogger(__name__)
+_logger = get_logger("sandbox.config")
 
 # Shared with sandbox_enablement.SETTINGS_PATH; an injectable module-level
 # constant (no global mutable state) so tests monkeypatch it to an isolated path.
@@ -130,7 +130,7 @@ def _load_scope(section: dict[str, object], default: str) -> str:
     value = section["scope"]
     if isinstance(value, str) and value in _VALID_SCOPES:
         return value
-    logger.warning("sandbox_scope_invalid value=%r falling_back=%s", value, default)
+    _logger.warn("sandbox_scope_invalid", value=repr(value), falling_back=default)
     return default
 
 
@@ -145,7 +145,7 @@ def _read_sandbox_section(path: Path) -> dict[str, object] | None:
     try:
         raw = yaml.safe_load(path.read_text())
     except yaml.YAMLError as exc:
-        logger.warning("settings_yaml_parse_failed path=%s error=%s", path, exc)
+        _logger.warn("settings_yaml_parse_failed", path=str(path), error=str(exc))
         return None
     if not isinstance(raw, dict):
         return None
@@ -185,9 +185,7 @@ def _load_positive_int(section: dict[str, object], key: str, default: int) -> in
         return default
     value = section[key]
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        logger.warning(
-            "sandbox_resource_invalid field=%s value=%r falling_back=%s", key, value, default
-        )
+        _logger.warn("sandbox_resource_invalid", field=key, value=repr(value), falling_back=default)
         return default
     return value
 
@@ -197,9 +195,7 @@ def _load_positive_float(section: dict[str, object], key: str, default: float) -
         return default
     value = section[key]
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-        logger.warning(
-            "sandbox_resource_invalid field=%s value=%r falling_back=%s", key, value, default
-        )
+        _logger.warn("sandbox_resource_invalid", field=key, value=repr(value), falling_back=default)
         return default
     return float(value)
 
@@ -211,8 +207,11 @@ def _load_network(section: dict[str, object], default: NetworkPolicy) -> Network
     try:
         return NetworkPolicy(str(value))
     except ValueError:
-        logger.warning(
-            "sandbox_resource_invalid field=network value=%r falling_back=%s", value, default.value
+        _logger.warn(
+            "sandbox_resource_invalid",
+            field="network",
+            value=repr(value),
+            falling_back=default.value,
         )
         return default
 
@@ -228,8 +227,11 @@ def _load_exec_timeout(section: dict[str, object], default: int) -> int:
         return default
     value = section["exec_timeout"]
     if isinstance(value, bool) or not isinstance(value, int):
-        logger.warning(
-            "sandbox_resource_invalid field=exec_timeout value=%r falling_back=%s", value, default
+        _logger.warn(
+            "sandbox_resource_invalid",
+            field="exec_timeout",
+            value=repr(value),
+            falling_back=default,
         )
         return default
     return max(_EXEC_TIMEOUT_MIN, min(_EXEC_TIMEOUT_MAX, value))
@@ -240,8 +242,8 @@ def _load_read_only(section: dict[str, object], default: bool) -> bool:
         return default
     value = section["read_only"]
     if not isinstance(value, bool):
-        logger.warning(
-            "sandbox_resource_invalid field=read_only value=%r falling_back=%s", value, default
+        _logger.warn(
+            "sandbox_resource_invalid", field="read_only", value=repr(value), falling_back=default
         )
         return default
     return value

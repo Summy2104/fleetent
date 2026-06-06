@@ -28,11 +28,15 @@ from fleetent.agent_config import (
 )
 from fleetent.config import McpServerSettings
 from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
+from fleetent.observability.structured_logging import get_logger
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.config_validation import _flatten
 from fleetent.platform.connector_management import agent_mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
+
+_logger = get_logger("agent_lifecycle.materialize")
+
 
 
 def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
@@ -283,6 +287,7 @@ def write_home(
     """
     home = home_dir(agent.name)
     home.mkdir(parents=True, exist_ok=True)
+    _logger.debug("agent_home_write_start", name=agent.name, path=str(home))
     (home / "data").mkdir(parents=True, exist_ok=True)
     payload = agent.model_dump(mode="json", exclude_defaults=False)
     (home / AGENT_FILE_NAME).write_text(

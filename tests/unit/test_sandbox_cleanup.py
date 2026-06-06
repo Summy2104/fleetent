@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from unittest.mock import AsyncMock
 
 from fleetent.integrations.sandbox.cleanup import cleanup_orphans
@@ -53,15 +52,18 @@ async def test_cleanup_orphans_skips_names_without_prefix():
     assert destroyed == {"sandbox-session-1"}
 
 
-async def test_cleanup_orphans_logs_count_and_names(caplog):
+async def test_cleanup_orphans_logs_count_and_names():
     """D4 audit: the count and the destroyed container names are logged."""
+    from unittest.mock import patch
+
     client = _client(["sandbox-session-1", "sandbox-agent-bot"])
-    with caplog.at_level(logging.INFO, logger="fleetent.integrations.sandbox.cleanup"):
+    with patch("fleetent.integrations.sandbox.cleanup._logger") as mock_log:
         await cleanup_orphans(client)
-    text = caplog.text
-    assert "2" in text
-    assert "sandbox-session-1" in text
-    assert "sandbox-agent-bot" in text
+    mock_log.info.assert_called_once()
+    kw = mock_log.info.call_args.kwargs
+    assert kw["count"] == 2
+    assert "sandbox-session-1" in kw["destroyed"]
+    assert "sandbox-agent-bot" in kw["destroyed"]
 
 
 async def test_cleanup_orphans_callable_standalone_returns_count():

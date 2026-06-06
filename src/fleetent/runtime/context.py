@@ -7,18 +7,18 @@ import time
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
-import structlog
 from openai import OpenAI
 
 from fleetent import eval_logger
 from fleetent.model import ModelConfigError, ModelPolicySnapshot, ResolvedModelConfig
+from fleetent.observability.structured_logging import get_logger
 from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatch
 
 _DEFAULT_FLAP_WINDOW = 3
 _DEFAULT_MIN_SAVINGS_RATIO = 0.10
 _DEFAULT_MIN_INTERVAL_TURNS = 1
 
-logger = structlog.get_logger(__name__)
+_logger = get_logger("runtime.context")
 
 ContextConfig = dict[str, Any]
 
@@ -183,7 +183,7 @@ def _resolve_summary_model() -> str | None:
     try:
         return str(_summary_route()[1].model)
     except Exception as exc:  # observability only — never propagate
-        logger.warning("compression_summary_model_resolve_failed", error=str(exc))
+        _logger.warn("compression_summary_model_resolve_failed", error=str(exc))
         return None
 
 
@@ -202,7 +202,7 @@ def _log_compression_safe(**kwargs: Any) -> None:
     try:
         eval_logger.log_compression(**kwargs)
     except Exception as exc:  # observability must not become a failure point
-        logger.warning("compression_trace_failed", error=str(exc))
+        _logger.warn("compression_trace_failed", error=str(exc))
 
 
 def _compress(
@@ -271,7 +271,7 @@ def _compress(
     # AR14 D3: LLM summary failed (exception / timeout / empty). Do NOT crash the
     # caller; degrade to static head/tail + a truncated-middle notice (no LLM).
     if summary_text is None:
-        logger.warning("compression_summary_degraded", middle_count=len(new_middle))
+        _logger.warn("compression_summary_degraded", middle_count=len(new_middle))
         notice_msg: dict[str, str] = {"role": "system", "content": _MIDDLE_OMITTED_NOTICE}
         result = [*head, notice_msg, *tail]
         _log_compression_safe(
@@ -421,11 +421,11 @@ def _summarize(
         )
         summary = response.choices[0].message.content
         if not summary:
-            logger.warning("compression_summary_empty_response")
+            _logger.warn("compression_summary_empty_response")
             return None
         return cast(str, summary)
     except Exception as exc:
-        logger.warning("compression_summary_failed", error=str(exc))
+        _logger.warn("compression_summary_failed", error=str(exc))
         return None
 
 
@@ -654,7 +654,7 @@ def apply_anti_flap(
     window = (*state.recent_savings, savings)[-flap_window:]
     auto_disabled = len(window) == flap_window and all(s < min_savings for s in window)
     if auto_disabled and not state.auto_disabled:
-        logger.warning(
+        _logger.warn(
             "compression_auto_flap_disabled",
             recent_savings=window,
             min_savings_ratio=min_savings,

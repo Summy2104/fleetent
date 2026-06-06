@@ -9,7 +9,6 @@ from collections.abc import AsyncGenerator, Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
-import structlog
 from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
 from openai.types.chat import ChatCompletionChunk
 
@@ -29,6 +28,7 @@ from fleetent.observability import (
     record_injected_context,
     record_trace_event,
 )
+from fleetent.observability.structured_logging import get_logger
 from fleetent.runtime.budget import BudgetChecker, BudgetConfig, BudgetUsage, grace_max_tokens
 from fleetent.runtime.cancellation import CancellationChecker, CancelToken
 from fleetent.runtime.context import (
@@ -67,7 +67,7 @@ from fleetent.tools.registry import (
 )
 from fleetent.tools.result_truncation import truncate_tool_result
 
-logger = structlog.get_logger(__name__)
+_logger = get_logger("runtime.loop")
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
 
@@ -220,9 +220,9 @@ def _strict_blocked_servers(allowed_tools: list[str] | None) -> list[str]:
         if mode == "strict":
             strict_blocked.append(server_id)
         elif mode == "silent":
-            logger.debug("mcp_degraded_silent", server_id=server_id)
+            _logger.debug("mcp_degraded_silent", server_id=server_id)
         else:
-            logger.warning("mcp_degraded", server_id=server_id)
+            _logger.warn("mcp_degraded", server_id=server_id)
     return strict_blocked
 
 
@@ -245,7 +245,7 @@ def _load_flap_state(session_id: str | None) -> AntiFlapState | None:
     try:
         return load_anti_flap_state(session_id)
     except Exception as exc:  # observability/governance must not break the run
-        logger.warning("anti_flap_load_failed", session_id=session_id, error=str(exc))
+        _logger.warn("anti_flap_load_failed", session_id=session_id, error=str(exc))
         return None
 
 
@@ -255,7 +255,7 @@ def _save_flap_state(session_id: str | None, state: AntiFlapState | None) -> Non
     try:
         save_anti_flap_state(session_id, state)
     except Exception as exc:
-        logger.warning("anti_flap_save_failed", session_id=session_id, error=str(exc))
+        _logger.warn("anti_flap_save_failed", session_id=session_id, error=str(exc))
 
 
 def _gated_compress(
@@ -750,11 +750,11 @@ async def _grace_call(
         )
         summary = resp.choices[0].message.content or ""
         if not summary:
-            logger.warning("grace_call_empty_fallback_partial")
+            _logger.warn("grace_call_empty_fallback_partial")
             return partial_reply
         return summary
     except Exception as exc:  # degrade to partial result; not swallowed silently
-        logger.warning("grace_call_failed_fallback_partial", error=str(exc))
+        _logger.warn("grace_call_failed_fallback_partial", error=str(exc))
         return partial_reply
 
 
@@ -1131,7 +1131,7 @@ async def run(
         _append_system_context(messages, system_prompt, built_context.text)
         _record_injected_context(run_id, built_context.sources)
     except Exception as exc:  # noqa: BLE001 — long-term context is auxiliary
-        logger.debug("long_term_context_skipped", error=str(exc))
+        _logger.debug("long_term_context_skipped", error=str(exc))
     # MCP4: a strict-mode MCP server the agent is bound to is unavailable → stop up
     # front with a clear error (rather than run without its tools). Also logs
     # degrade/silent degradations for bound servers. No MCP servers → no-op.
@@ -1314,13 +1314,13 @@ async def run(
             agent_name=agent_name,
         )
     except Exception as exc:  # noqa: BLE001 — completion trace is auxiliary
-        logger.debug("agent_run_completed_trace_skipped", error=str(exc))
+        _logger.debug("agent_run_completed_trace_skipped", error=str(exc))
     # Memory extraction unified onto intelligence/memory (class C). Best-effort and
     # awaited (same blocking profile as the prior inline extract_and_save).
     try:
         await extract_and_update(user_id, messages, model_policy=policy)
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
-        logger.debug("memory_extraction_skipped", error=str(exc))
+        _logger.debug("memory_extraction_skipped", error=str(exc))
     return reply
 
 
@@ -1474,7 +1474,7 @@ async def run_stream(
         _append_system_context(messages, system_prompt, built_context.text)
         _record_injected_context(run_id, built_context.sources)
     except Exception as exc:  # noqa: BLE001 — long-term context is auxiliary
-        logger.debug("long_term_context_skipped", error=str(exc))
+        _logger.debug("long_term_context_skipped", error=str(exc))
     reply = ""
     # MCP4: stop up front when a bound strict MCP server is unavailable (see run()).
     strict_blocked = _strict_blocked_servers(allowed_tools)
@@ -1731,10 +1731,10 @@ async def run_stream(
             reply = "".join(grace_parts) or partial_reply
         except Exception as exc:  # degrade, never crash the stream (D7)
             if any_delta:
-                logger.warning("grace_stream_failed_after_partial", error=str(exc))
+                _logger.warn("grace_stream_failed_after_partial", error=str(exc))
                 reply = "".join(grace_parts)
             else:
-                logger.warning("grace_stream_failed_before_delta", error=str(exc))
+                _logger.warn("grace_stream_failed_before_delta", error=str(exc))
                 reply = partial_reply
                 if partial_reply:
                     yield {"type": "text_delta", "content": partial_reply}
@@ -1783,10 +1783,10 @@ async def run_stream(
             agent_name=agent_name,
         )
     except Exception as exc:  # noqa: BLE001 — completion trace is auxiliary
-        logger.debug("agent_run_completed_trace_skipped", error=str(exc))
+        _logger.debug("agent_run_completed_trace_skipped", error=str(exc))
     # Memory extraction unified onto intelligence/memory (class C). Best-effort and
     # awaited (same blocking profile as the prior inline extract_and_save).
     try:
         await extract_and_update(user_id, messages, model_policy=policy)
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
-        logger.debug("memory_extraction_skipped", error=str(exc))
+        _logger.debug("memory_extraction_skipped", error=str(exc))

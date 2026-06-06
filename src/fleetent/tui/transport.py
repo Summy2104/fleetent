@@ -7,14 +7,14 @@ starlette WebSocket and (design D9) distinguishes *peer-gone* (client disconnect
 serialization errors (re-raised, never disguised as a clean disconnect).
 """
 
-import logging
 from typing import Any, Protocol, runtime_checkable
 
 from starlette.websockets import WebSocketDisconnect
 
+from fleetent.observability.structured_logging import get_logger
 from fleetent.tui import protocol as proto
 
-logger = logging.getLogger(__name__)
+_logger = get_logger("tui.transport")
 
 
 @runtime_checkable
@@ -68,4 +68,4 @@ class WSTransport:
             await self._ws.close()
         except Exception as exc:  # noqa: BLE001 — closing an already-gone socket is fine
             if not _is_peer_gone(exc):
-                logger.warning("ws_close_error error=%s", exc)
+                _logger.warn("ws_close_error", error=str(exc))

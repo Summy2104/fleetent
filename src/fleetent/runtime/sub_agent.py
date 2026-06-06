@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from fleetent.observability.structured_logging import get_logger
 from fleetent.runtime import sub_agent_lifecycle
 from fleetent.runtime.cancellation import CancelToken
 from fleetent.runtime.sub_agent_lifecycle import SubAgentLifecycle, SubAgentState
 
-logger = logging.getLogger(__name__)
+_logger = get_logger("runtime.sub_agent")
 
 
 @dataclass
@@ -104,7 +104,7 @@ class SubAgentExecutor:
                 cancel_token=child,
             )
         except Exception as exc:
-            logger.warning("sub_agent_task_failed task=%s error=%s", name, exc)
+            _logger.warn("sub_agent_task_failed", task=name, error=str(exc))
             self._transition(lc, SubAgentState.failed, error=str(exc))
             return SubAgentResult(
                 name=name, result=None, error=str(exc), parent_session_id=parent_session_id
