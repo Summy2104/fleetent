@@ -61,9 +61,7 @@ def test_read_skill_clean_does_not_write_refusal_audit() -> None:
 
 def test_read_skill_refusal_survives_audit_write_failure() -> None:
     with (
-        patch(
-            "fleetent.governance.audit_log.write_audit", side_effect=RuntimeError("db down")
-        ),
+        patch("fleetent.governance.audit_log.write_audit", side_effect=RuntimeError("db down")),
         patch("fleetent.skills.registry._index", {"bad": _blocked_entry()}),
     ):
         out = builtin_tools.read_skill("bad")
@@ -80,9 +78,7 @@ def test_read_skill_success_records_hit_with_context() -> None:
     with (
         patch("fleetent.skills.registry._index", {"ok": _clean_entry()}),
         patch("fleetent.skills.registry.load", return_value="full body"),
-        patch(
-            "fleetent.platform.skill_management.skill_admin_store.record_hit"
-        ) as mock_hit,
+        patch("fleetent.platform.skill_management.skill_admin_store.record_hit") as mock_hit,
     ):
         out = builtin_tools.read_skill("ok", tool_context=ctx)
 
@@ -109,9 +105,7 @@ def test_read_skill_blocked_does_not_record_hit() -> None:
     with (
         patch("fleetent.skills.registry._index", {"bad": _blocked_entry()}),
         patch("fleetent.governance.audit_log.write_audit"),
-        patch(
-            "fleetent.platform.skill_management.skill_admin_store.record_hit"
-        ) as mock_hit,
+        patch("fleetent.platform.skill_management.skill_admin_store.record_hit") as mock_hit,
     ):
         builtin_tools.read_skill("bad")
 

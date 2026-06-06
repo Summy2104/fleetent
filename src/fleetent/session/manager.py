@@ -464,7 +464,7 @@ def list_session_ids(prefix: str = "", limit: int | None = None) -> list[str]:
 
 async def load(session_id: str) -> list[dict[str, object]]:
     messages, _ = _read(session_id)
-    return messages
+    return rehydrate_tool_results(session_id, messages)
 
 
 async def load_meta(session_id: str) -> dict[str, object]:
@@ -490,8 +490,11 @@ async def save(
     # Create the target's parent (not just SESSIONS_DIR): session_ids may contain
     # "/" (e.g. IM platform/channel/user), nesting the file in subdirectories.
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Externalize oversized tool results before serialization; persists references
+    # in the JSON while the full content lives in the .tool_outputs sibling dir.
+    externalized = externalize_tool_results(session_id, messages)
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"meta": meta, "messages": messages}, ensure_ascii=False))
+    tmp.write_text(json.dumps({"meta": meta, "messages": externalized}, ensure_ascii=False))
     tmp.replace(path)
 
     # Best-effort metadata index update: the message file is the source of truth
