@@ -164,6 +164,10 @@ class McpServerSettings(BaseModel):
     command: str = ""
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
+    # Per-server HTTP timeouts in seconds (mcp-per-server-timeout); defaults match the
+    # client's built-in connect/call defaults so omitting them changes nothing.
+    connect_timeout: float = 10.0
+    call_timeout: float = 30.0
 
 
 class McpServersFile(BaseModel):

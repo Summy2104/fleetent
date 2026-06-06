@@ -152,6 +152,9 @@ class McpServerConfig:
         default_factory=list
     )  # e.g. ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
     env: dict[str, str] = field(default_factory=dict)  # extra env vars for the subprocess
+    # Per-server HTTP timeouts in seconds: connect/discovery/probe/token vs tool call.
+    connect_timeout: float = 10.0
+    call_timeout: float = 30.0
     # Streamable HTTP runtime state (per-server, not module-level global)
     session_id: str | None = None  # assigned by server via Mcp-Session-Id on initialize
     # Negotiated protocol version + server-advertised capabilities, captured at initialize
@@ -422,7 +425,9 @@ async def _probe_once(server: McpServerConfig) -> None:
     import httpx
 
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=server.connect_timeout, follow_redirects=True
+        ) as client:
             await _post_jsonrpc(client, server, "tools/list", {})
     except Exception as exc:  # noqa: BLE001 — probe maps disconnects; other errors logged
         if _is_disconnect_error(exc):
@@ -782,7 +787,7 @@ async def _fetch_client_credentials_token(server: McpServerConfig) -> OAuthToken
     if server.scope:
         data["scope"] = server.scope
 
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=server.connect_timeout, follow_redirects=True) as client:
         resp = await client.post(server.token_url, data=data)
 
     if _is_auth_error_response(resp):
@@ -1012,7 +1017,7 @@ async def _list_all_tools_stdio(session: Any) -> list[Any]:
 async def _register_http_server(server: McpServerConfig, scope: int | None = None) -> None:
     import httpx
 
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=server.connect_timeout, follow_redirects=True) as client:
         await _open_session(client, server)
         tools = await _list_all_tools_http(client, server)
 
@@ -1047,7 +1052,7 @@ async def probe_server(server: McpServerConfig) -> dict[str, Any]:
 async def _probe_http_tools(server: McpServerConfig) -> list[dict[str, str]]:
     import httpx
 
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=server.connect_timeout, follow_redirects=True) as client:
         await _open_session(client, server)
         tools = await _list_all_tools_http(client, server)
     return [{"name": t["name"], "description": t.get("description", "")} for t in tools]
@@ -1298,7 +1303,7 @@ async def _call_http_tool(
     import httpx
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=server.call_timeout, follow_redirects=True) as client:
             obj = await _post_jsonrpc(
                 client, server, "tools/call", {"name": tool_name, "arguments": args}
             )

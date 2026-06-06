@@ -74,12 +74,14 @@ flowchart TD
 
 - ✅ **stdio 子进程环境隔离**：stdio MCP 子进程仅继承经审定的安全宿主白名单（`PATH`/`HOME`/locale/临时目录等）+ server 显式声明的 `env`，**不再继承整个平台环境**（`DATABASE_URL`/API key/token 不外泄）；register 与 probe 一致；需把宿主值传入子进程时在 server `env` 显式声明
 
+- ✅ **per-server 超时**：HTTP 操作超时 per-server 可配——连接/发现/探活/OAuth 用 `connect_timeout`（默认 10s），工具调用用 `call_timeout`（默认 30s）；可在 agent.yaml 的 `mcp_servers` 条目声明，缺省用默认（DB/admin 持久化为未来跟进）
+
 ## 规划中（MCP 增强程序 2026-06）
 
-> 依据见 `docs/records/mcp-enhancement-2026-06/`（四参考项目差距分析 + 决策记录）。以下为本轮 6 变更程序中除已落地的「工具结果处理」「协议合规与发现完整性」「stdio 子进程环境隔离」外的剩余项。
+> 依据见 `docs/records/mcp-enhancement-2026-06/`（四参考项目差距分析 + 决策记录）。以下为本轮 6 变更程序中除已落地的「工具结果处理」「协议合规与发现完整性」「stdio 子进程环境隔离」「per-server 超时」外的剩余项。
 
 - [ ] **schema 净化进阶（待评估）**：nullable `anyOf` union 折叠等 provider 专项适配（当前已做等价安全变换：`type:object` 保证、`definitions`→`$defs`、引用重写）
-- [ ] **per-server 超时与进度**：可配置 connect / call 超时；收到 `notifications/progress` 时重置超时
+- [ ] **进度重置超时（待评估）**：收到 `notifications/progress` 时重置调用超时；当前 HTTP 为非流式请求/响应，需流式读改造，宜与「Streamable HTTP 流恢复」一并做
 - [ ] **动态工具刷新**：处理 `notifications/tools/list_changed`（独立 task + per-server RPC 锁，规避 stdio 流竞态）
 - [ ] **resources / prompts**：按服务 advertised capabilities 暴露为 capability-gated 合成工具
 - [ ] **Streamable HTTP 流恢复**：server→client 的 GET 流与 `Last-Event-ID` 断线恢复
