@@ -10,7 +10,11 @@ are served only when a port is given.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+import signal
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -130,33 +134,134 @@ async def boot(
     return AgentRuntime(agent=agent, supervisor=supervisor, app=app, port=port)
 
 
+def _sleep(seconds: float) -> None:
+    """Thin wrapper around time.sleep, injectable in tests."""
+    time.sleep(seconds)
+
+
 async def _wait_forever() -> None:
     """Block until cancelled (IM-only foreground runtime has no HTTP server to await)."""
-    import asyncio
-
     await asyncio.Event().wait()
 
 
-async def serve(agent_id: str, *, port: int | None = None, home: str | Path | None = None) -> None:
-    """Boot the agent and run it in the foreground until cancelled.
+def _stop_running(home_dir: Path, *, drain_timeout: float = 30.0) -> None:
+    """Send SIGUSR1 to the PID in ``home_dir/.fleetent.pid`` and wait for graceful exit.
+
+    Falls back to SIGTERM after drain_timeout, then SIGKILL after 5 more seconds.
+    Silently succeeds if no pid file exists or the process is already gone.
+    """
+    pid_file = home_dir / ".fleetent.pid"
+    if not pid_file.exists():
+        return
+    try:
+        pid = int(pid_file.read_text().strip())
+    except ValueError:
+        pid_file.unlink(missing_ok=True)
+        return
+
+    # Phase 1: SIGUSR1 → graceful drain
+    try:
+        os.kill(pid, signal.SIGUSR1)
+    except ProcessLookupError:
+        pid_file.unlink(missing_ok=True)
+        return
+
+    deadline = time.monotonic() + drain_timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+            _sleep(0.05)
+        except ProcessLookupError:
+            pid_file.unlink(missing_ok=True)
+            return
+
+    # Phase 2: SIGTERM fallback
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pid_file.unlink(missing_ok=True)
+        return
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+            _sleep(0.05)
+        except ProcessLookupError:
+            pid_file.unlink(missing_ok=True)
+            return
+
+    # Phase 3: SIGKILL
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    pid_file.unlink(missing_ok=True)
+
+
+async def serve(
+    agent_id: str,
+    *,
+    port: int | None = None,
+    home: str | Path | None = None,
+    drain_timeout: float = 30.0,
+) -> None:
+    """Boot the agent and run it in the foreground until cancelled or drained.
 
     With ``port`` the agent app is served over HTTP (``/chat`` + ``/ws``); without it the
-    process runs IM-only with no HTTP listener.
+    process runs IM-only with no HTTP listener. On SIGUSR1 the process drains in-flight
+    requests (up to drain_timeout) then exits.
     """
-    rt = await boot(agent_id, home=home, port=port)
-    try:
-        if port is not None:
-            import uvicorn
+    from fleetent.runtime import loop as _loop
 
-            assert rt.app is not None  # boot() builds the app whenever a port is given
-            server = uvicorn.Server(
-                uvicorn.Config(rt.app, host="0.0.0.0", port=port, log_level="info")
-            )
-            await server.serve()
-        else:
-            await _wait_forever()
-    finally:
+    home_dir = resolve_home(agent_id, home)
+    home_dir.mkdir(parents=True, exist_ok=True)
+    pid_file = home_dir / ".fleetent.pid"
+    pid_file.write_text(str(os.getpid()))
+
+    drain_event = asyncio.Event()
+    loop = asyncio.get_event_loop()
+    loop.add_signal_handler(signal.SIGUSR1, drain_event.set)
+
+    async def _drain_and_exit(rt: AgentRuntime) -> None:
         await rt.stop()
+        deadline = asyncio.get_event_loop().time() + drain_timeout
+        while _loop._active_runs > 0 and asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(0.1)
+
+    try:
+        rt = await boot(agent_id, home=home, port=port)
+        try:
+            if port is not None:
+                import uvicorn
+
+                assert rt.app is not None
+                server = uvicorn.Server(
+                    uvicorn.Config(rt.app, host="0.0.0.0", port=port, log_level="info")
+                )
+                drain_task = asyncio.ensure_future(drain_event.wait())
+                serve_task = asyncio.ensure_future(server.serve())
+                done, _ = await asyncio.wait(
+                    [drain_task, serve_task], return_when=asyncio.FIRST_COMPLETED
+                )
+                if drain_task in done:
+                    server.should_exit = True
+                    await serve_task
+                serve_task.cancel()
+                drain_task.cancel()
+            else:
+                wait_task = asyncio.ensure_future(_wait_forever())
+                drain_task = asyncio.ensure_future(drain_event.wait())
+                await asyncio.wait(
+                    [wait_task, drain_task], return_when=asyncio.FIRST_COMPLETED
+                )
+                wait_task.cancel()
+                drain_task.cancel()
+        finally:
+            await _drain_and_exit(rt)
+    finally:
+        loop.remove_signal_handler(signal.SIGUSR1)
+        pid_file.unlink(missing_ok=True)
 
 
 def build_app(agent_name: str) -> FastAPI:
