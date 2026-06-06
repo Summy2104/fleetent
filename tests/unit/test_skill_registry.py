@@ -458,13 +458,14 @@ def test_shipped_builtin_dir_exists():
     assert list(real_builtin.rglob("SKILL.md"))
 
 
-# --- regression: scan introduces no source-priority override (D2 / SK8) ---
+# --- tier precedence: user overrides builtin regardless of path sort (P1-D) ---
 
 
-def test_scan_no_source_priority_override_logic(tmp_path, monkeypatch):
-    # builtin-skills must NOT pick a same-name winner by source; conflict
-    # resolution is SK8's full-path-string sort, independent of source. The
-    # winner is whichever SKILL.md path sorts first, not "builtin wins".
+def test_scan_user_overrides_builtin_regardless_of_path_sort(tmp_path, monkeypatch):
+    # skill-tier-precedence: a user skill overrides a same-name builtin even when
+    # the builtin's path sorts first ('b' < 's', so …/builtin/dir-z sorts before
+    # …/skills/dir-a). Under the old pure path-sort the builtin would win; tier
+    # precedence keeps the user one.
     monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "builtin")
     builtin_md = tmp_path / "builtin" / "dir-z" / "SKILL.md"
     builtin_md.parent.mkdir(parents=True)
@@ -474,8 +475,8 @@ def test_scan_no_source_priority_override_logic(tmp_path, monkeypatch):
     user_md.write_text("---\nname: dup\ndescription: user dup.\n---\nbody")
     with structlog.testing.capture_logs():
         sr.scan(str(tmp_path / "skills"))
-    expected_winner = sorted((str(builtin_md), str(user_md)))[0]
-    assert sr._index["dup"].path == expected_winner
+    assert sr._index["dup"].path == str(user_md)
+    assert sr._index["dup"].builtin is False
 
 
 # --- disabled_skills injection (task 4) ---
@@ -998,3 +999,45 @@ def test_available_skills_prompt_disabled_wins_over_allowed_skills(tmp_path):
     )
     assert "<name>weather</name>" not in out
     assert "<name>billing</name>" in out
+
+
+# --- tier precedence: user overrides builtin (skill-tier-precedence) ---
+
+
+def test_user_skill_overrides_builtin_same_name(tmp_path, monkeypatch):
+    """A user skill wins over a same-name builtin, regardless of path sort."""
+    monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "builtin")
+    # builtin path ("…/builtin/dup") sorts BEFORE user path ("…/skills/dup"),
+    # so the old pure path-sort rule would keep the builtin. Tier precedence
+    # must keep the user one instead.
+    _write_builtin_skill(tmp_path, "dup", "builtin version.")
+    _write_skill(tmp_path, "dup", "---\nname: dup\ndescription: user version.\n---\nbody")
+    with structlog.testing.capture_logs():
+        sr.scan(str(tmp_path / "skills"))
+    assert sr._index["dup"].builtin is False
+    assert sr._index["dup"].description == "user version."
+
+
+def test_tier_override_flagged_in_conflict_warning(tmp_path, monkeypatch):
+    """Cross-tier conflict warns with tier_override=True."""
+    monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "builtin")
+    _write_builtin_skill(tmp_path, "dup", "builtin version.")
+    _write_skill(tmp_path, "dup", "---\nname: dup\ndescription: user version.\n---\nbody")
+    with structlog.testing.capture_logs() as logs:
+        sr.scan(str(tmp_path / "skills"))
+    conflict = [e for e in logs if e.get("name") == "dup" and e["log_level"] == "warning"]
+    assert len(conflict) == 1
+    assert conflict[0].get("tier_override") is True
+
+
+def test_same_tier_conflict_keeps_path_sort_and_no_tier_override(tmp_path, monkeypatch):
+    """Two user skills with the same name still resolve by path sort (tier_override False)."""
+    monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "_no_builtin")
+    _write_named_skill(tmp_path, "alpha", "dup")
+    _write_named_skill(tmp_path, "beta", "dup")
+    with structlog.testing.capture_logs() as logs:
+        sr.scan(str(tmp_path / "skills"))
+    assert sr._index["dup"].path.endswith("/alpha/SKILL.md")
+    conflict = [e for e in logs if e.get("name") == "dup" and e["log_level"] == "warning"]
+    assert len(conflict) == 1
+    assert conflict[0].get("tier_override") is False
