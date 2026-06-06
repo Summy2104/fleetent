@@ -30,6 +30,18 @@ def test_sandbox_resources_safe_defaults() -> None:
     assert res.read_only is True
 
 
+def test_sandbox_resources_hardening_defaults() -> None:
+    """Bare SandboxResources() is the strictest (session) hardening tier."""
+    res = SandboxResources()
+    assert res.pids_limit == 256
+    assert res.tmpfs_size_mb == 64
+    assert res.cap_drop_all is True
+    assert res.cap_add == ()
+    assert res.no_new_privileges is True
+    assert res.init is True
+    assert res.run_as_user == "65534:65534"
+
+
 def _write_settings(tmp_path: Path, body: str) -> Path:
     path = tmp_path / "settings.yaml"
     path.write_text(textwrap.dedent(body))
@@ -200,6 +212,128 @@ def test_exec_timeout_within_range_unchanged(
     assert load_sandbox_resources().exec_timeout == 45
 
 
+# --- container hardening config (sandbox-container-hardening) ---------------
+
+
+def test_load_overrides_hardening_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = _write_settings(
+        tmp_path,
+        """
+        sandbox:
+          resources:
+            pids_limit: 512
+            tmpfs_size_mb: 128
+            cap_drop_all: false
+            no_new_privileges: false
+            init: false
+            run_as_user: "1000:1000"
+        """,
+    )
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
+    res = load_sandbox_resources()
+    assert res.pids_limit == 512
+    assert res.tmpfs_size_mb == 128
+    assert res.cap_drop_all is False
+    assert res.no_new_privileges is False
+    assert res.init is False
+    assert res.run_as_user == "1000:1000"
+
+
+def test_load_missing_hardening_fields_fall_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _write_settings(
+        tmp_path,
+        """
+        sandbox:
+          resources:
+            memory: 512
+        """,
+    )
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
+    res = load_sandbox_resources()
+    assert res.pids_limit == 256
+    assert res.tmpfs_size_mb == 64
+    assert res.cap_drop_all is True
+    assert res.no_new_privileges is True
+    assert res.init is True
+    assert res.run_as_user == "65534:65534"
+
+
+def test_invalid_pids_limit_falls_back_to_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _write_settings(
+        tmp_path,
+        """
+        sandbox:
+          resources:
+            pids_limit: 0
+        """,
+    )
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
+    assert load_sandbox_resources().pids_limit == 256
+
+
+def test_invalid_tmpfs_size_falls_back_to_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _write_settings(
+        tmp_path,
+        """
+        sandbox:
+          resources:
+            tmpfs_size_mb: -1
+        """,
+    )
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
+    assert load_sandbox_resources().tmpfs_size_mb == 64
+
+
+def test_invalid_bool_hardening_field_falls_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-bool value for a bool hardening field falls back, not silently truthy."""
+    path = _write_settings(
+        tmp_path,
+        """
+        sandbox:
+          resources:
+            no_new_privileges: "yes"
+        """,
+    )
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
+    assert load_sandbox_resources().no_new_privileges is True
+
+
+def test_run_as_user_null_means_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit null run_as_user means run as root (no --user)."""
+    path = _write_settings(
+        tmp_path,
+        """
+        sandbox:
+          resources:
+            run_as_user: null
+        """,
+    )
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
+    assert load_sandbox_resources().run_as_user is None
+
+
+def test_invalid_run_as_user_falls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-string, non-null run_as_user falls back to the default."""
+    path = _write_settings(
+        tmp_path,
+        """
+        sandbox:
+          resources:
+            run_as_user: 1000
+        """,
+    )
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
+    assert load_sandbox_resources().run_as_user == "65534:65534"
+
+
 # --- SB2 lifecycle config (scope / idle_hours) -----------------------------
 
 
@@ -300,3 +434,52 @@ def test_build_resources_by_scope_agent_scope_override(
     assert by_scope["agent"].memory == 2048
     assert by_scope["agent"].network is NetworkPolicy.ALLOW_ALL
     assert by_scope["agent"].read_only is False
+
+
+def test_build_resources_by_scope_session_strictest_hardening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """session tier keeps the strictest hardening: no extra caps, non-root."""
+    from fleetent.integrations.sandbox.config import build_resources_by_scope
+
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", tmp_path / "absent.yaml")
+    session = build_resources_by_scope()["session"]
+    assert session.cap_drop_all is True
+    assert session.cap_add == ()
+    assert session.run_as_user == "65534:65534"
+
+
+def test_build_resources_by_scope_agent_caps_and_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """agent tier re-adds the minimal install caps and runs as root (no --user)."""
+    from fleetent.integrations.sandbox.config import build_resources_by_scope
+
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", tmp_path / "absent.yaml")
+    agent = build_resources_by_scope()["agent"]
+    assert agent.cap_drop_all is True
+    assert agent.cap_add == ("CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID")
+    assert agent.run_as_user is None
+
+
+def test_build_resources_by_scope_agent_inherits_base_hardening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Non-policy hardening (pids/tmpfs/no-new-privileges/init) inherits the base tier."""
+    from fleetent.integrations.sandbox.config import build_resources_by_scope
+
+    path = _write_settings(
+        tmp_path,
+        """
+        sandbox:
+          resources:
+            pids_limit: 512
+            tmpfs_size_mb: 128
+        """,
+    )
+    monkeypatch.setattr(sandbox_config, "SETTINGS_PATH", path)
+    agent = build_resources_by_scope()["agent"]
+    assert agent.pids_limit == 512
+    assert agent.tmpfs_size_mb == 128
+    assert agent.no_new_privileges is True
+    assert agent.init is True

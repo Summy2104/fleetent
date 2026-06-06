@@ -237,9 +237,10 @@ async def test_create_workspace_read_only_false_omits_flag(client):
 
 
 async def test_create_workspace_always_keeps_tmpfs(client):
+    """A writable /tmp is always present (now bounded + nosuid), even read_only=False."""
     res = SandboxResources(read_only=False, network=NetworkPolicy.ALLOW_ALL)
     argv = await _capture_create_workspace(client, resources=res)
-    assert argv[argv.index("--tmpfs") + 1] == "/tmp"
+    assert argv[argv.index("--tmpfs") + 1] == "/tmp:rw,nosuid,size=64m"
 
 
 async def test_create_workspace_exec_timeout_not_in_docker_run(client):
@@ -258,14 +259,87 @@ async def test_create_workspace_per_scope_does_not_bleed(client):
     assert "--read-only" not in writable
 
 
-async def test_create_workspace_default_command_matches_current_behaviour(client):
-    """No resources arg reproduces the pre-SB4 hardcoded command exactly."""
+async def test_create_workspace_default_command_is_hardened(client):
+    """No resources arg yields the default (session) tier: base resource flags plus
+    the hardened, bounded /tmp tmpfs."""
     argv = await _capture_create_workspace(client)
     assert argv[argv.index("--network") + 1] == "none"
     assert argv[argv.index("--memory") + 1] == "256m"
     assert argv[argv.index("--cpus") + 1] == "0.5"
     assert "--read-only" in argv
-    assert argv[argv.index("--tmpfs") + 1] == "/tmp"
+    assert argv[argv.index("--tmpfs") + 1] == "/tmp:rw,nosuid,size=64m"
+
+
+# ── container hardening flags (sandbox-container-hardening) ───────────────────
+
+
+def _security_opt_values(argv: list[str]) -> list[str]:
+    return [argv[i + 1] for i, a in enumerate(argv) if a == "--security-opt"]
+
+
+def _cap_add_values(argv: list[str]) -> list[str]:
+    return [argv[i + 1] for i, a in enumerate(argv) if a == "--cap-add"]
+
+
+async def test_create_workspace_adds_pids_limit(client):
+    argv = await _capture_create_workspace(client, resources=SandboxResources(pids_limit=256))
+    assert argv[argv.index("--pids-limit") + 1] == "256"
+
+
+async def test_create_workspace_tmpfs_has_nosuid_and_size(client):
+    """/tmp tmpfs is bounded and nosuid, not the old unbounded `--tmpfs /tmp`."""
+    argv = await _capture_create_workspace(client, resources=SandboxResources(tmpfs_size_mb=64))
+    assert argv[argv.index("--tmpfs") + 1] == "/tmp:rw,nosuid,size=64m"
+
+
+async def test_create_workspace_drops_all_caps_by_default(client):
+    argv = await _capture_create_workspace(client, resources=SandboxResources())
+    assert argv[argv.index("--cap-drop") + 1] == "ALL"
+
+
+async def test_create_workspace_adds_no_new_privileges_by_default(client):
+    argv = await _capture_create_workspace(client, resources=SandboxResources())
+    assert "no-new-privileges" in _security_opt_values(argv)
+
+
+async def test_create_workspace_adds_init_by_default(client):
+    argv = await _capture_create_workspace(client, resources=SandboxResources())
+    assert "--init" in argv
+
+
+async def test_create_workspace_session_runs_as_nobody(client):
+    """A non-null run_as_user (session default) maps to --user."""
+    argv = await _capture_create_workspace(client, resources=SandboxResources())
+    assert argv[argv.index("--user") + 1] == "65534:65534"
+
+
+async def test_create_workspace_run_as_user_none_omits_user_flag(client):
+    """run_as_user=None (agent tier) omits --user so the container runs as root."""
+    argv = await _capture_create_workspace(client, resources=SandboxResources(run_as_user=None))
+    assert "--user" not in argv
+
+
+async def test_create_workspace_cap_add_maps_each_capability(client):
+    """Each cap_add entry becomes its own --cap-add flag (agent install caps)."""
+    res = SandboxResources(cap_add=("CHOWN", "SETUID"))
+    argv = await _capture_create_workspace(client, resources=res)
+    assert _cap_add_values(argv) == ["CHOWN", "SETUID"]
+
+
+async def test_create_workspace_cap_drop_all_false_omits_flag(client):
+    argv = await _capture_create_workspace(client, resources=SandboxResources(cap_drop_all=False))
+    assert "--cap-drop" not in argv
+
+
+async def test_create_workspace_no_new_privileges_false_omits_flag(client):
+    res = SandboxResources(no_new_privileges=False)
+    argv = await _capture_create_workspace(client, resources=res)
+    assert "no-new-privileges" not in _security_opt_values(argv)
+
+
+async def test_create_workspace_init_false_omits_flag(client):
+    argv = await _capture_create_workspace(client, resources=SandboxResources(init=False))
+    assert "--init" not in argv
 
 
 async def test_create_workspace_injects_env_as_e_flag(client):
