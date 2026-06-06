@@ -27,7 +27,7 @@ from fleetent.agent_config import (
 )
 from fleetent.config import McpServerSettings
 from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
-from fleetent.platform.agent_lifecycle.credential_slots import RESERVED_KEY
+from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.config_validation import _flatten
 from fleetent.platform.connector_management import agent_mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
@@ -61,7 +61,9 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
 
 def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
     """Expand DB-authored provider selections into the runtime model policy."""
-    route_overrides = {k: v for k, v in model_overrides.items() if k != RESERVED_KEY}
+    route_overrides = {
+        k: v for k, v in model_overrides.items() if k != credential_slots.RESERVED_KEY
+    }
     if not route_overrides:
         return default_models()
 
@@ -222,7 +224,12 @@ def _parse_env(text: str) -> dict[str, str]:
     return values
 
 
-def _seed_env(home: Path, names: list[str]) -> None:
+def _seed_env(
+    home: Path,
+    names: list[str],
+    *,
+    source_agent: agent_store.Agent | None = None,
+) -> None:
     """Write/refresh ``.env`` with the referenced names, preserving operator values.
 
     Existing values are kept verbatim; missing names are added with an empty value. No
@@ -230,7 +237,23 @@ def _seed_env(home: Path, names: list[str]) -> None:
     """
     env_path = home / ".env"
     existing = _parse_env(env_path.read_text(encoding="utf-8")) if env_path.exists() else {}
-    lines = [f"{name}={existing.get(name, '')}" for name in names]
+    slots_by_env = (
+        {slot.env_name: slot for slot in credential_slots.list_slots(source_agent)}
+        if source_agent is not None
+        else {}
+    )
+    lines: list[str] = []
+    for name in names:
+        slot = slots_by_env.get(name)
+        if source_agent is not None and slot is not None and slot.mode == "inject":
+            value = (
+                secret_store.get_decrypted(source_agent.id, name)
+                if secret_store.status(source_agent.id, name) == "set"
+                else ""
+            )
+        else:
+            value = existing.get(name, "")
+        lines.append(f"{name}={value}")
     # keep any operator-added vars not referenced by the definition
     for key, val in existing.items():
         if key not in names:
@@ -247,13 +270,14 @@ def materialize_from_store(name: str) -> Path | None:
     agent = agent_store.get_by_name(name)
     if agent is None:
         return None
-    return write_home(agent_file_from_store(agent))
+    return write_home(agent_file_from_store(agent), source_agent=agent)
 
 
 def write_home(
     agent: AgentFile,
     *,
     knowledge_config: KnowledgeConfigSnapshot | None = None,
+    source_agent: agent_store.Agent | None = None,
 ) -> Path:
     """Materialize ``agent``'s home and return its directory.
 
@@ -269,7 +293,7 @@ def write_home(
     )
     if knowledge_config is not None:
         write_knowledge_config(knowledge_config)
-    _seed_env(home, _env_var_names(agent, knowledge_config))
+    _seed_env(home, _env_var_names(agent, knowledge_config), source_agent=source_agent)
     return home
 
 
