@@ -98,3 +98,90 @@ async def test_inject_appends_under_lock(tmp_path, monkeypatch):
     await session_mgr.inject_message("s1", "human_agent", "let me help")
     msgs = await session_mgr.load("s1")
     assert msgs[-1] == {"role": "human_agent", "content": "let me help"}
+
+
+# --- migration 054: session_meta compaction columns ---
+
+
+def test_migration_054_adds_compaction_columns(tmp_path):
+    """Migration 054 adds four compaction-related columns to session_meta."""
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    conn = sqlite3.connect(db_path)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(session_meta)").fetchall()}
+    conn.close()
+    assert "last_compaction_at" in cols
+    assert "messages_before_compaction" in cols
+    assert "messages_after_compaction" in cols
+    assert "compaction_summary_preview" in cols
+
+
+def test_migration_054_compaction_columns_are_nullable_for_existing_rows(tmp_path, monkeypatch):
+    """Existing session_meta rows have NULL in new compaction columns after migration."""
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    store.upsert_meta("s1", origin="web")
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT last_compaction_at, messages_before_compaction"
+        " FROM session_meta WHERE session_id = ?",
+        ("s1",),
+    ).fetchone()
+    conn.close()
+    assert row[0] is None
+    assert row[1] is None
+
+
+# --- update_compaction_meta ---
+
+
+def test_update_compaction_meta_sets_columns(tmp_path, monkeypatch):
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    store.upsert_meta("sess-c", origin="web")
+
+    store.update_compaction_meta(
+        "sess-c",
+        messages_before=50,
+        messages_after=12,
+        summary_preview="This is the summary",
+        compacted_at=1234567890.0,
+    )
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT last_compaction_at, messages_before_compaction, messages_after_compaction, "
+        "compaction_summary_preview FROM session_meta WHERE session_id = ?",
+        ("sess-c",),
+    ).fetchone()
+    conn.close()
+    assert row[0] == 1234567890.0
+    assert row[1] == 50
+    assert row[2] == 12
+    assert row[3] == "This is the summary"
+
+
+def test_update_compaction_meta_truncates_preview_to_200_chars(tmp_path, monkeypatch):
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    store.upsert_meta("sess-d", origin="web")
+
+    long_preview = "x" * 500
+    store.update_compaction_meta(
+        "sess-d",
+        messages_before=10,
+        messages_after=3,
+        summary_preview=long_preview,
+        compacted_at=0.0,
+    )
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT compaction_summary_preview FROM session_meta WHERE session_id = ?",
+        ("sess-d",),
+    ).fetchone()
+    conn.close()
+    assert len(row[0]) == 200
