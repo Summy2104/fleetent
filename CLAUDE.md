@@ -66,11 +66,9 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 **5. 推送分支 + 清理 worktree**
 
 - 推送：`git push origin feat/<change-name>`
-- 清理前提（三条全满足）：分支已推送到 remote（或已建 PR）、worktree 干净、无未提交改动
+- 清理前提（三条全满足）：分支已推送到 remote、worktree 干净、无未提交改动
 - 清理命令：`git worktree remove .worktrees/<change-name>`
 - 任一不满足不得清理 worktree，避免丢失未推送的工作
-
-**6. 后续决定 merge 或 PR** — 在主仓库基于已推送分支进行，与 worktree 生命周期解耦
 
 ---
 
