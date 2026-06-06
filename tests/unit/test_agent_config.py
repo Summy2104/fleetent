@@ -567,7 +567,7 @@ def test_repo_agent_yaml_example_loads_as_single_agent_file() -> None:
     assert agent.models.routes["default"][0].target == "primary"
     assert agent.models.targets[0].api_key_env == "FLEETENT_MODEL_PRIMARY_API_KEY"
     assert agent.vector_store.backend == "sqlite"
-    assert agent.embedding.api_key_env == "FLEETENT_EVAL_EMBEDDING_API_KEY"
-    assert agent.rerank.api_key_env == "FLEETENT_EVAL_RERANK_API_KEY"
+    assert agent.embedding.api_key_env == "FLEETENT_EMBED_API_KEY"
+    assert agent.rerank.api_key_env == "FLEETENT_RERANK_API_KEY"
     assert agent.knowledge.enabled is True
     assert agent.knowledge.bindings[0].kb_id == "pilot-kb"

@@ -111,6 +111,11 @@ async def boot(
     from fleetent.tools.plugin_loader import load_plugins
 
     home_dir = resolve_home(agent_id, home)
+    env_path = home_dir / ".env"
+    if env_path.exists():
+        from dotenv import load_dotenv
+
+        load_dotenv(env_path, override=False)
     agent = agent_config.scan_home(home_dir)
     # Re-point the vector/embedding singletons at this agent's intelligence config
     # (import-time config used global Settings; standalone runs AS this single agent).

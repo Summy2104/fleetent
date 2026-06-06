@@ -118,27 +118,27 @@ features:
 
 # ── intelligence configuration (non-secret; credentials via .env references) ──
 vector_store:
-  backend: sqlite
+  backend: sqlite                  # memory | sqlite; default "memory"
   database_url: sqlite:///data/vector_store.db
 
 embedding:
-  backend: http
+  backend: http                    # deterministic | http; default "deterministic"
   dimensions: 64
-  dimensions_env: FLEETENT_EVAL_EMBEDDING_DIMENSIONS
+  dimensions_env: FLEETENT_EMBED_DIMENSIONS   # overrides `dimensions` at runtime
   endpoint: ""
-  endpoint_env: FLEETENT_EVAL_EMBEDDING_ENDPOINT
+  endpoint_env: FLEETENT_EMBED_ENDPOINT
   model: ""
-  model_env: FLEETENT_EVAL_EMBEDDING_MODEL
-  api_key_env: FLEETENT_EVAL_EMBEDDING_API_KEY
+  model_env: FLEETENT_EMBED_MODEL
+  api_key_env: FLEETENT_EMBED_API_KEY
   timeout_seconds: 10.0
 
 rerank:
-  backend: http
+  backend: http                    # disabled | http; default "disabled"
   endpoint: ""
-  endpoint_env: FLEETENT_EVAL_RERANK_ENDPOINT
+  endpoint_env: FLEETENT_RERANK_ENDPOINT
   model: ""
-  model_env: FLEETENT_EVAL_RERANK_MODEL
-  api_key_env: FLEETENT_EVAL_RERANK_API_KEY
+  model_env: FLEETENT_RERANK_MODEL
+  api_key_env: FLEETENT_RERANK_API_KEY
   timeout_seconds: 10.0
 
 knowledge:
@@ -150,7 +150,7 @@ knowledge:
       permissions:
         search: true
   retrieval_policy:
-    mode: hybrid
+    mode: hybrid                   # vector | keyword | hybrid; default "hybrid"
     top_k: 10
     rerank: true
     embedding_route: embedding
@@ -162,7 +162,7 @@ long_term_ctx:
   knowledge_max_tokens: 1024
   memory_top_k: 10
   knowledge_top_k: 10
-  conflict_preference: auto
+  conflict_preference: auto        # auto | memory | knowledge; default "auto"
 
 # ── MCP servers (inline; secrets via env reference only) ──
 mcp_servers:
@@ -200,44 +200,95 @@ bindings:
 
 # ── per-agent runtime governance (resolved from this agent.yaml; config consolidation).
 #    All values below equal the current defaults; omit any you don't override. ──
-# context compression
-context_max_tokens: 200000
-context_compress_threshold: 0.8
-context_keep_recent: 10
-# loop / budget / guardrail
-agent_max_turns: 50
-agent_max_consecutive_failures: 3
-agent_max_tokens: -1            # -1 = unlimited
+
+# context window management
+context_max_tokens: 200000         # hard ceiling for the context window
+context_compress_threshold: 0.8   # trigger compression when token_count / context_max_tokens exceeds this
+context_tmax_ratio: 0.8           # Tmax = context_max_tokens * ratio; used by compressor as target ceiling
+context_tretained_ratio: 0.6      # Tretained = context_max_tokens * ratio; tokens to retain after compression
+context_keep_recent: 10           # number of most-recent messages always kept verbatim
+compression_initial_intent_max: 2 # max leading user messages preserved whole during compression
+context_flap_window: 3            # suppress re-compression within this many turns after one fires
+context_min_savings_ratio: 0.10   # skip compression if projected savings < this fraction
+context_min_interval_turns: 1     # minimum turns between consecutive compressions
+
+# loop detection / guardrails
+agent_loop_repeat_threshold: 3    # identical tool-call sequences before loop is declared
+guardrail_repeat_threshold: 3     # identical assistant utterances before guardrail fires
+loop_detect_ignore_arg_keys: []   # argument keys excluded from loop-detection fingerprint
+
+# turn / token limits
+agent_max_turns: 50               # max tool-use turns per request; -1 = unlimited
+agent_max_consecutive_failures: 3 # consecutive tool errors before aborting
+agent_max_tokens: -1              # max output tokens per LLM call; -1 = model default
 tool_default_timeout_seconds: 30.0
 sub_agent_timeout_seconds: 300
-agent_tool_parallel_max: 8
-# layered budget — session/user/agent dims only (global dimension intentionally dropped)
+agent_tool_parallel_max: 8        # max concurrent tool calls per turn
+
+# layered budget — session / user / agent dims (-1 = unlimited)
+agent_budget_session_turns: -1
+agent_budget_session_tokens: -1
+agent_budget_user_turns: -1
 agent_budget_user_tokens: -1
-agent_budget_user_window: weekly
+agent_budget_user_window: weekly   # rolling window: daily | weekly | monthly
+agent_budget_agent_turns: -1
+agent_budget_agent_tokens: -1
 agent_budget_agent_window: weekly
-# permission gate
+
+# grace-call budget (reserved for the final summary call after budget is nearly exhausted)
+agent_grace_call_token_ratio: 0.05  # fraction of session budget reserved for grace call
+agent_grace_call_min_tokens: 512    # minimum tokens guaranteed for grace call regardless of ratio
+
+# permission gate timeouts (seconds; 0 = deny immediately)
 permission_gate_medium_timeout_seconds: 300
 permission_gate_high_timeout_seconds: 3600
+
 # provider circuit breaker
-provider_failure_threshold: 3
-provider_cooldown_seconds: 60
+provider_failure_threshold: 3     # consecutive failures before a provider is marked unhealthy
+provider_cooldown_seconds: 60     # seconds a tripped provider stays in cooldown
 
 # ── per-agent deployment / process knobs ──
 microsandbox_url: http://host.docker.internal:7777
 log_format: console               # console | json
 session_ttl_days: 30
+session_max_total_mb: 1024        # total size cap for all sessions on disk (MB)
+session_max_count: 10000          # max number of sessions retained
+session_cleanup_interval_seconds: 3600.0
 disabled_skills: []
-# image / vision endpoints (self-hosted; empty = disabled)
+
+# image generation / vision (self-hosted; empty url = disabled)
 image_gen_url: ""
+image_gen_model: default          # model name passed to the image generation endpoint
 vision_url: ""
+vision_model: default             # model name passed to the vision endpoint
+
+# ── feature toggles (per-capability on/off + tuning) ──
+mcp:
+  enabled: true                   # set false to disable all MCP tool calls for this agent
+
+scheduling:
+  enabled: true                   # set false to disable APScheduler cron tasks for this agent
+  default_timezone: "UTC"
+
+webhooks:
+  enabled: true                   # set false to reject all inbound webhook calls
+  max_body_bytes: 1048576         # max webhook request body size (bytes); default 1 MiB
+
+# ── observability ──
 observability:
   logging:
-    console_level: info
-    file_level: debug
+    console_level: info           # log level for stderr: debug | info | warning | error
+    file_level: debug             # log level for the rotating file sink
+    directory: data/logs          # log file directory (relative to agent home)
+    json_file: true               # write structured JSON log file in addition to console
+
 diagnostics:
-  export_dir: data/diagnostics
+  export_dir: data/diagnostics    # directory for diagnostic export bundles
   retention:
-    enabled: false
+    enabled: false                # set true to auto-purge old diagnostic data
+    logs_days: null               # null = keep forever; integer = days to retain log files
+    traces_days: null             # days to retain agent run traces
+    diagnostic_exports_days: null # days to retain diagnostic export bundles
 
 # NOTE: agent_budget_global_* and database_url are intentionally NOT accepted here.
 # The database location is derived from the agent home (<home>/data/fleetent.db).

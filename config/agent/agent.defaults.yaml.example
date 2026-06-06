@@ -1,0 +1,168 @@
+# Agent runtime tuning defaults.
+#
+# These are ALL the fields that have built-in defaults and do NOT need to be set
+# for normal operation. Copy any section into your agent.yaml ONLY when you need
+# to override the default.
+#
+# Source of truth: src/fleetent/agent_config.py (AgentFile) and
+#                  src/fleetent/config.py (nested Settings models).
+#
+# Fields that MUST be configured (name, version, models, system_prompt, connectors,
+# bindings, access) live in config/agent/agent.yaml.example instead.
+
+# ── context window management ─────────────────────────────────────────────────
+# Controls when and how the in-session message history is compressed.
+# Runtime reads: src/fleetent/runtime/context.py (_default_config)
+
+context_max_tokens: 200000         # hard ceiling for the context window
+context_compress_threshold: 0.8   # trigger compression when token_count / context_max_tokens exceeds this
+context_tmax_ratio: 0.8           # Tmax = context_max_tokens × ratio; compressor target ceiling
+context_tretained_ratio: 0.6      # Tretained = context_max_tokens × ratio; tokens to keep after compression
+context_keep_recent: 10           # most-recent messages always kept verbatim regardless of compression
+compression_initial_intent_max: 2 # max leading user messages preserved whole during first compression
+context_flap_window: 3            # suppress re-compression within this many turns after one fires
+context_min_savings_ratio: 0.10   # skip compression if projected savings < this fraction of total tokens
+context_min_interval_turns: 1     # minimum turns between consecutive compressions
+
+# ── loop detection / guardrails ───────────────────────────────────────────────
+# Prevents infinite tool-call loops and repetitive assistant output.
+# Runtime reads: src/fleetent/runtime/loop_detector.py, tool_guardrails.py
+
+agent_loop_repeat_threshold: 3    # identical tool-call fingerprints before loop is declared
+guardrail_repeat_threshold: 3     # identical assistant utterances before guardrail fires
+loop_detect_ignore_arg_keys: []   # argument keys excluded from loop-detection fingerprint
+                                  # (e.g. ["timestamp", "request_id"] for volatile args)
+
+# ── turn / token limits ───────────────────────────────────────────────────────
+# Hard caps applied per request.
+# Runtime reads: src/fleetent/runtime/termination.py, loop.py
+
+agent_max_turns: 50               # max tool-use turns per request (-1 = unlimited)
+agent_max_consecutive_failures: 3 # consecutive tool errors before aborting the request
+agent_max_tokens: -1              # max output tokens per LLM call (-1 = model default)
+tool_default_timeout_seconds: 30.0
+sub_agent_timeout_seconds: 300
+agent_tool_parallel_max: 8        # max concurrent tool calls dispatched in a single turn
+
+# ── layered budget ────────────────────────────────────────────────────────────
+# Soft spending limits per rolling window. -1 = no limit for that dimension.
+# Runtime reads: src/fleetent/runtime/layered_budget.py
+
+agent_budget_session_turns: -1    # max turns across the current HTTP session
+agent_budget_session_tokens: -1   # max tokens across the current HTTP session
+agent_budget_user_turns: -1       # max turns per user per window
+agent_budget_user_tokens: -1      # max tokens per user per window
+agent_budget_user_window: weekly  # rolling window for user limits: daily | weekly | monthly
+agent_budget_agent_turns: -1      # max turns across all users of this agent per window
+agent_budget_agent_tokens: -1     # max tokens across all users of this agent per window
+agent_budget_agent_window: weekly
+
+# grace-call budget (tokens reserved for the final summary call after budget is almost exhausted)
+agent_grace_call_token_ratio: 0.05  # fraction of session budget held back for grace call
+agent_grace_call_min_tokens: 512    # minimum tokens guaranteed for grace call
+
+# ── permission gate ───────────────────────────────────────────────────────────
+# How long the agent waits for a human approval before timing out.
+# Runtime reads: src/fleetent/governance/permission_gate.py
+
+permission_gate_medium_timeout_seconds: 300   # 5 min; 0 = deny immediately
+permission_gate_high_timeout_seconds: 3600    # 1 hr
+
+# ── provider circuit breaker ──────────────────────────────────────────────────
+# Marks a model provider unhealthy after repeated failures.
+# Runtime reads: src/fleetent/model/provider_health.py
+
+provider_failure_threshold: 3     # consecutive errors before tripping the breaker
+provider_cooldown_seconds: 60     # seconds the tripped provider is bypassed
+
+# ── session management ────────────────────────────────────────────────────────
+# Controls on-disk session storage.
+# Runtime reads: src/fleetent/session/manager.py
+
+session_ttl_days: 30              # sessions older than this are eligible for cleanup
+session_max_total_mb: 1024        # total on-disk cap for all sessions (MB)
+session_max_count: 10000          # max number of session files retained
+session_cleanup_interval_seconds: 3600.0  # how often the cleanup job runs
+
+# ── sandbox / vision endpoints ────────────────────────────────────────────────
+# Self-hosted sidecar endpoints. Leave empty to disable the capability.
+# These can also be set in .env (MICROSANDBOX_URL / VISION_URL / VISION_MODEL).
+
+microsandbox_url: http://host.docker.internal:7777   # run_code sandbox (features.code_execution)
+image_gen_url: ""                 # empty = image generation disabled
+image_gen_model: default          # model name sent to the image generation endpoint
+vision_url: ""                    # empty = vision (analyze_image) disabled
+vision_model: default             # model name sent to the vision endpoint
+
+# ── feature toggles ───────────────────────────────────────────────────────────
+# Per-capability on/off switches. All default to enabled.
+
+mcp:
+  enabled: true                   # set false to disable all MCP tool calls for this agent
+
+scheduling:
+  enabled: true                   # set false to disable APScheduler cron tasks for this agent
+  default_timezone: "UTC"         # IANA tz; used when a cron expression has no explicit tz
+
+webhooks:
+  enabled: true                   # set false to reject all inbound webhook deliveries
+  max_body_bytes: 1048576         # max webhook request body (bytes); default 1 MiB
+
+# ── process / logging ─────────────────────────────────────────────────────────
+
+log_format: console               # console (human-readable) | json (structured, for log aggregators)
+disabled_skills: []               # skill names to hide from this agent regardless of skills_dir
+
+# ── observability ─────────────────────────────────────────────────────────────
+# Runtime reads: src/fleetent/observability/structured_logging.py
+
+observability:
+  logging:
+    console_level: info           # stderr log level: debug | info | warning | error
+    file_level: debug             # rotating file log level
+    directory: data/logs          # log directory (relative to agent home)
+    json_file: true               # also write a structured JSON log file
+
+# ── diagnostics ───────────────────────────────────────────────────────────────
+# Runtime reads: src/fleetent/observability/diagnostics.py
+
+diagnostics:
+  export_dir: data/diagnostics    # directory for diagnostic export bundles
+  retention:
+    enabled: false                # set true to enable automatic purging of old data
+    logs_days: null               # null = keep forever; integer = days before log files are deleted
+    traces_days: null             # days before agent run traces are deleted
+    diagnostic_exports_days: null # days before diagnostic export bundles are deleted
+
+# ── intelligence sub-field defaults ──────────────────────────────────────────
+# These sub-fields have defaults within their parent blocks (vector_store /
+# embedding / rerank / knowledge / long_term_ctx). Only set them when the parent
+# block is already present in agent.yaml and you need to override a specific value.
+
+# vector_store defaults (when block is omitted entirely: backend=memory)
+#   backend: memory          # memory (no persistence) | sqlite (persisted)
+#   database_url: null       # only used when backend=sqlite
+
+# embedding defaults (when block is omitted: deterministic hash, no HTTP call)
+#   backend: deterministic   # deterministic | http
+#   dimensions: 64
+#   timeout_seconds: 10.0
+
+# rerank defaults (when block is omitted: reranking disabled)
+#   backend: disabled        # disabled | http
+#   timeout_seconds: 10.0
+
+# knowledge.retrieval_policy defaults
+#   mode: hybrid             # vector | keyword | hybrid
+#   top_k: 10
+#   rerank: false
+#   embedding_route: ""
+#   rerank_route: ""
+
+# long_term_ctx defaults
+#   max_tokens: 2048
+#   memory_max_tokens: 1024
+#   knowledge_max_tokens: 1024
+#   memory_top_k: 10
+#   knowledge_top_k: 10
+#   conflict_preference: auto   # auto | memory | knowledge
