@@ -1,10 +1,23 @@
 ## MODIFIED Requirements
 
-### Requirement: Agent materialization exports the full authored definition
+### Requirement: Agent materialization writes self-contained Agent homes
 
-平台 materialize（DB→file）SHALL 从已存的 agent 定义生成**可真实部署**的 `agent.yaml`，回填平台
-已存的全部字段，而非只导出核心几项后将其余落到 schema 默认。`models` SHALL 由 agent 的 model
-选择/覆盖展开，而非无条件使用本地 `default_models()` 占位。
+平台 materialize SHALL 将每个 Agent 写成 self-contained Agent home。该 home SHALL 包含
+`agent.yaml`, `.env`, and `data/`; runtime SHALL be able to run from that home without
+Platform DB access. 平台 materialize（DB→file）SHALL 从已存的 agent 定义生成**可真实部署**的
+`agent.yaml`，回填平台已存的全部字段，而非只导出核心几项后将其余落到 schema 默认。`models`
+SHALL 由 agent 的 model 选择/覆盖展开，而非无条件使用本地 `default_models()` 占位。
+
+#### Scenario: Materialize writes Agent home
+- **WHEN** 平台部署 Agent `support`
+- **THEN** materialize 写入 `agents/support/agent.yaml`
+- **AND** 写入或保留 `agents/support/.env`
+- **AND** 确保 `agents/support/data/` 存在
+
+#### Scenario: Platform env does not leak into Agent home
+- **WHEN** materialize 写入 Agent `.env`
+- **THEN** `.env` 只含该 Agent required env
+- **AND** 不含 `FLEETENT_SECRET_KEY` 或平台 DB 变量
 
 #### Scenario: 已存核心字段回填
 - **WHEN** 一个含 `tenant_id` / `team_id` / `skills_dir` 的 agent 被 materialize
@@ -23,6 +36,8 @@
 #### Scenario: MCP / bindings / knowledge 接入导出
 - **WHEN** 一个 agent 绑定了 MCP server、channel/user、KB
 - **THEN** 生成的 `agent.yaml` 分别含 `mcp_servers`、`bindings.channels`/`bindings.users`、`knowledge.bindings`
+
+## ADDED Requirements
 
 ### Requirement: `.env` materialization resolves by credential mode
 
@@ -47,8 +62,6 @@
 #### Scenario: agent.yaml 不含密钥值
 - **WHEN** 任意 mode 组合下 materialize 运行
 - **THEN** 生成的 `agent.yaml` 不含任何密钥明文
-
-## ADDED Requirements
 
 ### Requirement: Platform env template separated from Agent env materialization
 
