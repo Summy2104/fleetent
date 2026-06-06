@@ -70,3 +70,49 @@ def test_read_skill_refusal_survives_audit_write_failure() -> None:
 
     # Refusal still returned despite audit failure.
     assert "blocked" in out.lower()
+
+
+# --- read_skill hit recording (skill-observability-tracking) ---
+
+
+def test_read_skill_success_records_hit_with_context() -> None:
+    ctx = ToolContext(agent_name="support", session_id="sess-9")
+    with (
+        patch("fleetent.skills.registry._index", {"ok": _clean_entry()}),
+        patch("fleetent.skills.registry.load", return_value="full body"),
+        patch(
+            "fleetent.platform.skill_management.skill_admin_store.record_hit"
+        ) as mock_hit,
+    ):
+        out = builtin_tools.read_skill("ok", tool_context=ctx)
+
+    assert out == "full body"
+    mock_hit.assert_called_once_with("ok", "support", "sess-9")
+
+
+def test_read_skill_hit_recording_failure_does_not_block() -> None:
+    with (
+        patch("fleetent.skills.registry._index", {"ok": _clean_entry()}),
+        patch("fleetent.skills.registry.load", return_value="full body"),
+        patch(
+            "fleetent.platform.skill_management.skill_admin_store.record_hit",
+            side_effect=RuntimeError("db down"),
+        ),
+    ):
+        out = builtin_tools.read_skill("ok")
+
+    # Body still returned despite hit-recording failure.
+    assert out == "full body"
+
+
+def test_read_skill_blocked_does_not_record_hit() -> None:
+    with (
+        patch("fleetent.skills.registry._index", {"bad": _blocked_entry()}),
+        patch("fleetent.governance.audit_log.write_audit"),
+        patch(
+            "fleetent.platform.skill_management.skill_admin_store.record_hit"
+        ) as mock_hit,
+    ):
+        builtin_tools.read_skill("bad")
+
+    mock_hit.assert_not_called()

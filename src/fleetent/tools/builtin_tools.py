@@ -149,7 +149,26 @@ def read_skill(name: str, tool_context: ToolContext | None = None) -> str:
         # reach the model. load() itself still returns it for manual triage.
         _audit_skill_refusal(name, tool_context)
         return f"error: skill {name!r} was blocked by the static injection audit"
-    return skill_registry.load(name)
+    body = skill_registry.load(name)
+    _record_skill_hit(name, tool_context)
+    return body
+
+
+def _record_skill_hit(name: str, tool_context: ToolContext | None) -> None:
+    """Record a successful read_skill load for per-skill observability.
+
+    Best-effort: a hit-recording failure (DB unavailable, etc.) is logged and
+    swallowed so it never blocks returning the skill body. Imported lazily to avoid
+    a builtin_tools -> platform import cycle.
+    """
+    from fleetent.platform.skill_management import skill_admin_store
+
+    agent_id = tool_context.agent_name if tool_context else None
+    session_id = tool_context.session_id if tool_context else None
+    try:
+        skill_admin_store.record_hit(name, agent_id, session_id)
+    except Exception as exc:  # noqa: BLE001 — observability is a side channel; never block
+        logger.warning("skill_hit_record_failed", extra={"skill": name, "error": str(exc)})
 
 
 def _audit_skill_refusal(name: str, tool_context: ToolContext | None) -> None:
