@@ -74,7 +74,7 @@ def test_start_materializes_and_spawns(client):
     assert body["status"] == "running"
     assert body["pid"] == 321
     # materialized the home
-    assert (tmp_path / "support" / "agent.yaml").exists()
+    assert (tmp_path / "agents" / "support" / "agent.yaml").exists()
     assert materialize.home_dir("support").joinpath(".env").exists()
 
 

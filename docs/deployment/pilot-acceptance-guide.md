@@ -67,7 +67,7 @@ environment:
 
 检查目标：
 
-- `config/agent.yaml` 只包含 agent、model、MCP server、knowledge base、connector、provider 等非敏感配置。
+- `agents/<agent-id>/agent.yaml` 只包含 agent、model、MCP server、knowledge binding、connector、provider 等非敏感配置。
 - Google Drive / Confluence credential 使用平铺的 `*_env` 引用，例如
   `FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN`、`FLEETENT_CONFLUENCE_TOKEN`。
 - MCP server credential 只包含 `api_key_env` 等非敏感引用。
@@ -78,7 +78,7 @@ environment:
 
 ```bash
 git status --short
-test -f config/agent.yaml
+test -f agents/<agent-id>/agent.yaml
 uv run fleetent-admin kb connectors list
 ```
 

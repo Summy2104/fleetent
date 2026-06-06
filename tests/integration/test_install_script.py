@@ -217,7 +217,7 @@ def test_path_hint_when_local_bin_absent(tmp_path: Path) -> None:
     assert ".local/bin" in (result.stdout + result.stderr)
 
 
-def test_agent_yaml_and_env_seeded_at_flat_home_root(tmp_path: Path) -> None:
+def test_platform_env_and_default_agent_home_seeded(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
@@ -226,24 +226,27 @@ def test_agent_yaml_and_env_seeded_at_flat_home_root(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     fh = home / ".fleetent"
-    # Flat home: agent.yaml + .env at the root, no config/ subdir.
-    assert (fh / "agent.yaml").is_file()
+    agent_home = fh / "agents" / "default"
     assert (fh / ".env").is_file()
-    assert not (fh / "config").exists()
-    assert "system_prompt" in (fh / "agent.yaml").read_text()
+    assert "FLEETENT_SECRET_KEY=" in (fh / ".env").read_text()
+    assert (agent_home / "agent.yaml").is_file()
+    assert (agent_home / ".env").is_file()
+    assert (agent_home / "data").is_dir()
+    assert "system_prompt" in (agent_home / "agent.yaml").read_text()
+    assert "FLEETENT_SECRET_KEY=" not in (agent_home / ".env").read_text()
 
 
 def test_existing_agent_yaml_not_overwritten(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
-    fh = home / ".fleetent"
-    fh.mkdir(parents=True)
-    (fh / "agent.yaml").write_text("name: keepme\nversion: 9\n")
+    agent_home = home / ".fleetent" / "agents" / "default"
+    agent_home.mkdir(parents=True)
+    (agent_home / "agent.yaml").write_text("name: keepme\nversion: 9\n")
     env = _fake_uv_env(home, tmp_path / "bin", tmp_path / "uv.log")
 
     _run_env(["--skip-db"], env, home)
 
-    assert (fh / "agent.yaml").read_text() == "name: keepme\nversion: 9\n"
+    assert (agent_home / "agent.yaml").read_text() == "name: keepme\nversion: 9\n"
 
 
 def test_skip_config_seeds_nothing(tmp_path: Path) -> None:
@@ -254,8 +257,9 @@ def test_skip_config_seeds_nothing(tmp_path: Path) -> None:
     _run_env(["--skip-db", "--skip-config"], env, home)
 
     fh = home / ".fleetent"
-    assert not (fh / "agent.yaml").exists()
     assert not (fh / ".env").exists()
+    assert not (fh / "agents" / "default" / "agent.yaml").exists()
+    assert not (fh / "agents" / "default" / ".env").exists()
 
 
 def test_init_db_runs_alembic_against_fleetent_home(tmp_path: Path) -> None:

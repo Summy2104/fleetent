@@ -11,7 +11,7 @@
 **不负责**：实际的 streaming / 调用（→ agent_loop）、工具调用执行（→ tool_registry）、成本追踪（→ observability）。
 
 **调用关系**：
-- 依赖：config（`config/agent.yaml` 中的 model provider / override 定义，legacy settings 路径仍保留兼容）
+- 依赖：config（`agents/<agent-id>/agent.yaml` 中的 model provider / override 定义，legacy settings 路径仍保留兼容）
 - 被依赖：agent_loop（每次 LLM 调用前取 client 和 config）、reflection（LLM 分析调用）
 
 ## 关键流程
@@ -51,7 +51,7 @@ class ModelConfig(TypedDict):
 - ✅ **task_type 路由**：task_type → provider config 列表查找
 - ✅ **OpenAI-compatible client**：复用 `AsyncOpenAI` SDK，base_url 可指向任意兼容端点（Anthropic / OpenRouter / 本地 Ollama 等）
 - ✅ **Fallback 链**：provider 列表顺序即优先级，前一个失败自动切到下一个
-- ✅ **config 驱动**：provider / model override 定义来自配置，不硬编码；当前部署入口使用 `config/agent.yaml`
+- ✅ **config 驱动**：provider / model override 定义来自配置，不硬编码；当前部署入口使用 `agents/<agent-id>/agent.yaml`
 
 ## 规划中（v1.0）
 

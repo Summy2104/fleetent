@@ -14,8 +14,9 @@ def _write_home_agent(home, **overrides) -> None:
         "models": agent_config.default_models().model_dump(mode="json"),
     }
     doc.update(overrides)
-    home.mkdir(parents=True, exist_ok=True)
-    (home / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    agent_home = home / "agents" / "default"
+    agent_home.mkdir(parents=True, exist_ok=True)
+    (agent_home / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
 
 
 def test_scan_publishes_single_home_agent(tmp_path, monkeypatch) -> None:

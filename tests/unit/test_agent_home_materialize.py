@@ -38,7 +38,7 @@ def test_create_writes_runnable_home(tmp_path, monkeypatch):
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     home = materialize.write_home(_agent())
 
-    assert home == tmp_path / "support"
+    assert home == tmp_path / "agents" / "support"
     af = load_agent_file(home)  # round-trips through the home schema (dir name == name)
     assert af.system_prompt == "Help the user."
     assert af.allowed_tools == ["shell"]
@@ -51,6 +51,9 @@ def test_env_scaffold_has_names_only_no_plaintext(tmp_path, monkeypatch):
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     home = materialize.write_home(_agent())
     env_text = (home / ".env").read_text(encoding="utf-8")
+    assert (home / "data").is_dir()
+    assert "FLEETENT_SECRET_KEY=" not in env_text
+    assert "DATABASE_URL=" not in env_text
     assert "SUP_BOT=" in env_text
     assert "SUP_APP=" in env_text
     # only names, no secret values seeded
@@ -194,8 +197,8 @@ def test_materialize_preserves_kb_source_credential_env_values(tmp_path, monkeyp
             ]
         }
     )
-    home = tmp_path / "support"
-    home.mkdir()
+    home = tmp_path / "agents" / "support"
+    home.mkdir(parents=True)
     (home / ".env").write_text(
         "FLEETENT_CONFLUENCE_TOKEN=secret-token\nSUP_BOT=xoxb-real\nSUP_APP=xapp-real\n",
         encoding="utf-8",
