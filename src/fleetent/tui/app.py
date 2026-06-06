@@ -11,7 +11,6 @@ input line coexist. ``main`` parses ``--url``/``--token`` and starts the loop.
 
 import argparse
 import asyncio
-import logging
 import os
 from collections.abc import Callable
 from typing import Any, Protocol
@@ -20,12 +19,13 @@ from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.patch_stdout import patch_stdout
 
+from fleetent.observability.structured_logging import get_logger
 from fleetent.tui import protocol as p
 from fleetent.tui import render
 from fleetent.tui.backend import GatewayBackend
 from fleetent.tui.commands import KNOWN_COMMANDS, SlashCommandCompleter, parse_command
 
-logger = logging.getLogger(__name__)
+_logger = get_logger("tui.app")
 
 DEFAULT_URL = "ws://127.0.0.1:8765/ws"
 _HELP = "commands: /new /session /abort [run_id] /approve <id> <approved|rejected> /quit /help"

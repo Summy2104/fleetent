@@ -13,6 +13,10 @@ import sys
 from collections.abc import Callable
 from typing import Protocol
 
+from fleetent.observability.structured_logging import get_logger
+
+_logger = get_logger("agent_lifecycle.controller")
+
 
 class _Proc(Protocol):
     pid: int
@@ -44,17 +48,23 @@ class AgentController:
 
     def start(self, name: str) -> int:
         """Spawn the agent runtime and record its process. Returns the PID."""
+        existing = self._procs.get(name)
+        if existing is not None and existing.poll() is None:
+            _logger.warn("agent_already_running", name=name, existing_pid=existing.pid)
         proc = self._spawn(name)
         self._procs[name] = proc
+        _logger.info("agent_started", name=name, pid=proc.pid)
         return proc.pid
 
     def stop(self, name: str) -> bool:
         """Terminate the tracked process. Returns False if nothing was tracked."""
         proc = self._procs.pop(name, None)
         if proc is None:
+            _logger.warn("agent_stop_not_tracked", name=name)
             return False
         if proc.poll() is None:
             proc.terminate()
+        _logger.info("agent_stopped", name=name, pid=proc.pid)
         return True
 
     def is_running(self, name: str) -> bool:

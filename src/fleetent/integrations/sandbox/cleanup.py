@@ -11,11 +11,10 @@ demand — and does not depend on any scheduler.
 
 from __future__ import annotations
 
-import logging
-
 from fleetent.integrations.sandbox.client import SANDBOX_NAME_PREFIX, SandboxClient
+from fleetent.observability.structured_logging import get_logger
 
-logger = logging.getLogger(__name__)
+_logger = get_logger("sandbox.cleanup")
 
 
 async def cleanup_orphans(client: SandboxClient) -> int:
@@ -33,9 +32,9 @@ async def cleanup_orphans(client: SandboxClient) -> int:
     destroyed: list[str] = []
     for name in names:
         if not name.startswith(SANDBOX_NAME_PREFIX):
-            logger.warning("sandbox_cleanup_skipped_non_prefix name=%s", name)
+            _logger.warn("sandbox_cleanup_skipped_non_prefix", name=name)
             continue
         await client.destroy_workspace(name)
         destroyed.append(name)
-    logger.info("sandbox_cleanup_done count=%d destroyed=%s", len(destroyed), destroyed)
+    _logger.info("sandbox_cleanup_done", count=len(destroyed), destroyed=destroyed)
     return len(destroyed)

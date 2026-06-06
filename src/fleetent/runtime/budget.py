@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from fleetent.observability.structured_logging import get_logger
 from fleetent.runtime.termination import LoopState, StopReason
+
+_logger = get_logger("runtime.budget")
 
 # Sentinel for an "unlimited" dimension. A dimension set to this never triggers
 # exhaustion regardless of usage.
@@ -73,6 +76,9 @@ class BudgetChecker:
         dimension = self._config.exhausted_dimension(self._usage)
         if dimension is not None:
             self.triggered_dimension = dimension
+            limit = self._config.max_turns if dimension == "turns" else self._config.max_tokens
+            actual = self._usage.turns if dimension == "turns" else self._usage.tokens
+            _logger.warn("budget_exhausted", dimension=dimension, limit=limit, actual=actual)
             return StopReason.budget_exceeded
         return None
 

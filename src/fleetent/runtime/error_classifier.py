@@ -19,6 +19,10 @@ from enum import StrEnum
 
 from openai import APIStatusError
 
+from fleetent.observability.structured_logging import get_logger
+
+_logger = get_logger("runtime.error")
+
 # Error-body `code` value emitted by OpenAI-compatible backends when the prompt
 # exceeds the model's context window. Surfaces as a 400 BadRequestError whose
 # `.code` property reads this from the response body.
@@ -101,7 +105,15 @@ def classify(error: Exception) -> ErrorClassification:
     every wave-2 reserved category) falls through to `unknown`.
     """
     category = _categorize(error)
-    return CLASSIFICATION_TABLE[category]
+    result = CLASSIFICATION_TABLE[category]
+    _logger.debug(
+        "error_classified",
+        category=result.category,
+        should_retry=result.should_retry,
+        should_compress=result.should_compress,
+        should_switch_model=result.should_switch_model,
+    )
+    return result
 
 
 def _categorize(error: Exception) -> ErrorCategory:

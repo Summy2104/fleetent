@@ -22,6 +22,10 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from fleetent.observability.structured_logging import get_logger
+
+_logger = get_logger("runtime.hygiene")
+
 # Placeholder content for a tool_call that never produced a result. Chinese and
 # explicitly labelled "auto-filled" so the model does not misread it as a real
 # tool output.
@@ -85,6 +89,9 @@ def sanitize(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], Hygi
     work = _remove_orphan_tool_results(work, report)
     work = _fill_missing_tool_results(work, report)
     work = _fix_consecutive_same_role(work, report)
+
+    if report.changed:
+        _logger.warn("message_hygiene_repairs", repairs=dict(report.repairs))
 
     return work, report
 

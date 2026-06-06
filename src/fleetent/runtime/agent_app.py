@@ -20,18 +20,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import structlog
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from fleetent import agent_config, paths, user_store
 from fleetent.agent_config import AgentFile
+from fleetent.observability.structured_logging import get_logger
 
 if TYPE_CHECKING:
     from fleetent.im_gateway.slack_supervisor import SlackSupervisor
 
-logger = structlog.get_logger(__name__)
+_logger = get_logger("runtime.agent_app")
 
 
 class ChatRequest(BaseModel):
@@ -88,7 +88,7 @@ async def _start_infra(agent: AgentFile) -> None:
         try:
             await mcp_client.register_all(configs)
         except Exception as exc:  # noqa: BLE001 — MCP unavailable must not abort boot
-            logger.warning("agent_runtime_mcp_register_failed", error=str(exc))
+            _logger.warn("agent_runtime_mcp_register_failed", error=str(exc))
     session_mgr.start_session_maintenance()
 
 
@@ -131,7 +131,7 @@ async def boot(
         await supervisor.start(agent.name)
 
     app = build_app(agent.name) if port is not None else None
-    logger.info("agent_runtime_booted", agent=agent.name, http_port=port, im=start_im)
+    _logger.info("agent_runtime_booted", agent=agent.name, http_port=port, im=start_im)
     return AgentRuntime(agent=agent, supervisor=supervisor, app=app, port=port)
 
 

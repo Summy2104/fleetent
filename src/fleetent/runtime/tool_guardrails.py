@@ -14,7 +14,10 @@ from __future__ import annotations
 
 from enum import Enum, auto
 
+from fleetent.observability.structured_logging import get_logger
 from fleetent.runtime.termination import LoopState
+
+_logger = get_logger("runtime.guardrails")
 
 
 class GuardrailAction(Enum):
@@ -42,5 +45,13 @@ def evaluate_guardrail(
     if state.consecutive_repeat < threshold:
         return GuardrailAction.proceed
     if state.loop_warning_injected:
+        _logger.error(
+            "guardrail_stop", tool_name=tool_name, consecutive_count=state.consecutive_repeat
+        )
         return GuardrailAction.stop
+    _logger.warn(
+        "guardrail_short_circuit",
+        tool_name=tool_name,
+        consecutive_count=state.consecutive_repeat,
+    )
     return GuardrailAction.short_circuit

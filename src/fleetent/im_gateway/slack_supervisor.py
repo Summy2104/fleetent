@@ -12,13 +12,12 @@ import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import structlog
-
 from fleetent import agent_config, user_store
 from fleetent.agent_config import SlackConnector
 from fleetent.im_gateway import slack
+from fleetent.observability.structured_logging import get_logger
 
-logger = structlog.get_logger(__name__)
+_logger = get_logger("im_gateway.slack")
 
 # Runner signature: (agent_name, owner_id, config) -> runs until cancelled.
 Runner = Callable[[str, str, dict[str, Any]], Awaitable[None]]
@@ -52,7 +51,7 @@ class SlackSupervisor:
         config = self._resolve_config(agent.connectors.slack)
         if config is None:
             self._status[agent_name] = "unconfigured"
-            logger.warning("slack_connector_unconfigured", agent=agent_name)
+            _logger.warn("slack_connector_unconfigured", agent=agent_name)
             return
         existing = self._tasks.get(agent_name)
         if existing is not None and not existing.done():
@@ -71,7 +70,7 @@ class SlackSupervisor:
             raise
         except Exception as exc:  # connection crashed — reflect status, isolate failure
             self._status[agent_name] = "error"
-            logger.warning("slack_connector_error", agent=agent_name, error=str(exc))
+            _logger.warn("slack_connector_error", agent=agent_name, error=str(exc))
 
     async def stop(self, agent_name: str) -> None:
         task = self._tasks.pop(agent_name, None)

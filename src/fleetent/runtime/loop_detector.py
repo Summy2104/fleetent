@@ -24,7 +24,10 @@ from collections import Counter
 from collections.abc import Sequence
 from typing import Any
 
+from fleetent.observability.structured_logging import get_logger
 from fleetent.runtime.termination import LoopState, StopReason
+
+_logger = get_logger("runtime.loop_detector")
 
 # Bytes kept from each end of a tool result before hashing into a digest. Long
 # results are truncated to head+tail so signal-B comparison stays constant-cost
@@ -108,8 +111,12 @@ class LoopDetectionChecker:
     def check(self, state: LoopState) -> StopReason | None:
         if not self._has_repeat(state.tool_history):
             return None
+        tool_name = state.tool_history[-1][0] if state.tool_history else ""
+        count = len(state.tool_history)
         if state.loop_warning_injected:
+            _logger.error("loop_detected_stop", signal="repeat", tool_name=tool_name, count=count)
             return StopReason.loop_detected
+        _logger.warn("loop_detected_warn", signal="repeat", tool_name=tool_name, count=count)
         state.loop_warning_requested = True
         return None
 

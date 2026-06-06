@@ -10,14 +10,14 @@ parallel orchestration. Standard-library `sqlite3` only (no ORM).
 
 from __future__ import annotations
 
-import logging
 import sqlite3
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from fleetent.observability.structured_logging import get_logger
 from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatch
 
-logger = logging.getLogger(__name__)
+_logger = get_logger("runtime.sub_agent")
 
 # Default per sub-agent wall-clock timeout; mirrors GovernanceConfig.sub_agent_timeout_seconds.
 SUB_AGENT_TIMEOUT_SECONDS = 300
@@ -64,7 +64,7 @@ class SubAgentLifecycle:
 def validate_transition(src: SubAgentState, dst: SubAgentState) -> None:
     """Raise ValueError on an illegal state transition (never swallow silently)."""
     if dst not in _LEGAL_TRANSITIONS.get(src, frozenset()):
-        logger.warning("sub_agent_illegal_transition src=%s dst=%s", src, dst)
+        _logger.warn("sub_agent_illegal_transition", src=src, dst=dst)
         raise ValueError(f"illegal sub-agent state transition: {src} -> {dst}")
 
 

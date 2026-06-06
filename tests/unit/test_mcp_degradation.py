@@ -201,8 +201,8 @@ def test_degrade_silent_log_levels(monkeypatch):
     from unittest.mock import MagicMock
 
     spy = MagicMock()
-    monkeypatch.setattr(al, "logger", spy)
+    monkeypatch.setattr(al, "_logger", spy)
     blocked = al._strict_blocked_servers(None)  # None → bound to both
     assert blocked == []  # neither is strict
-    assert spy.warning.called  # degrade → warning (prominent)
+    assert spy.warn.called  # degrade → warning (prominent)
     assert spy.debug.called  # silent → debug (quiet) — the distinction

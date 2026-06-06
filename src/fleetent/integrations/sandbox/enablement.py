@@ -9,15 +9,15 @@ side-effect free so the schema-filter point (agent_loop) only reads them.
 
 from __future__ import annotations
 
-import logging
 from enum import StrEnum
 from pathlib import Path
 
 import yaml
 
 from fleetent import paths
+from fleetent.observability.structured_logging import get_logger
 
-logger = logging.getLogger(__name__)
+_logger = get_logger("sandbox.enablement")
 
 # config/settings.yaml is the home of the shared `sandbox:` section (SB3 owns the
 # skeleton; SB2 adds scope/idle_hours, SB4 adds resources). Injectable module-level
@@ -51,7 +51,7 @@ def load_sandbox_mode() -> Mode:
     try:
         return Mode(str(raw_mode))
     except ValueError:
-        logger.warning("sandbox_mode_invalid value=%r falling_back_to=%s", raw_mode, Mode.ALL.value)
+        _logger.warn("sandbox_mode_invalid", value=repr(raw_mode), falling_back_to=Mode.ALL.value)
         return Mode.ALL
 
 
@@ -88,7 +88,7 @@ def _read_raw_mode() -> object | None:
     try:
         raw = yaml.safe_load(SETTINGS_PATH.read_text())
     except yaml.YAMLError as exc:
-        logger.warning("settings_yaml_parse_failed path=%s error=%s", SETTINGS_PATH, exc)
+        _logger.warn("settings_yaml_parse_failed", path=str(SETTINGS_PATH), error=str(exc))
         return None
     if not isinstance(raw, dict):
         return None
