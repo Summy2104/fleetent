@@ -226,6 +226,18 @@ def _strict_blocked_servers(allowed_tools: list[str] | None) -> list[str]:
     return strict_blocked
 
 
+def _visible_tool_names(allowed_tools: list[str] | None) -> set[str]:
+    """Tool names actually exposed to the model this request — for skill requires_tools.
+
+    Same source + allowed_tools filter the schema list uses, so a skill's
+    `requires_tools` is checked against exactly what the agent can call.
+    """
+    names = {s["function"]["name"] for s in get_schemas()}
+    if allowed_tools is not None:
+        names = {n for n in names if check_tool_access(n, allowed_tools)}
+    return names
+
+
 def _strict_unavailable_reply(blocked: list[str]) -> str:
     return (
         "无法运行：所依赖的 MCP 服务（"
@@ -1430,7 +1442,9 @@ def run_sync(
         governance = _governance_from_file(agent)
         model_policy = ModelPolicySnapshot.from_agent(agent)
 
-    skills_catalog = available_skills_prompt(allowed_skills=allowed_skills)
+    skills_catalog = available_skills_prompt(
+        allowed_skills=allowed_skills, available_tools=_visible_tool_names(allowed_tools)
+    )
     disabled_trace = collect_disabled_trace() or None
 
     messages = _assemble_prompt(
@@ -1496,7 +1510,9 @@ async def run_stream(
     """
     # agent-skill-scoping: narrow the catalog to the agent's allowed_skills (empty /
     # None = no narrowing, all enabled skills visible).
-    skills_catalog = available_skills_prompt(allowed_skills=allowed_skills)
+    skills_catalog = available_skills_prompt(
+        allowed_skills=allowed_skills, available_tools=_visible_tool_names(allowed_tools)
+    )
     disabled_trace = collect_disabled_trace() or None
 
     # SB3 D5: execution-time context channel (session/agent/features) for opt-in tools.
