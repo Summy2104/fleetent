@@ -1,9 +1,8 @@
 # Platform control-plane config.
 #
 # Default deployment keeps knowledge / memory / vector / worker capabilities embedded
-# in the Platform service. If Knowledge is deployed as a separate service, keep only
-# the remote endpoint/auth reference here and use config/knowledge-service/ templates
-# for that service.
+# in the Platform service. Standalone Knowledge Service templates are deferred until
+# that deployment mode is supported.
 
 knowledge:
   mode: embedded

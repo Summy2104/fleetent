@@ -65,8 +65,13 @@ def test_global_config_example_templates_removed():
     assert Path("config/agent/.env.example").exists()
     assert Path("config/platform/platform.yaml.example").exists()
     assert Path("config/platform/.env.example").exists()
-    assert Path("config/knowledge-service/knowledge.yaml.example").exists()
-    assert Path("config/knowledge-service/.env.example").exists()
+    assert not Path("config/knowledge-service").exists()
+    assert not Path("config/agents").exists()
+    assert not Path("examples/knowledge-service").exists()
+
+
+def test_active_config_directory_only_contains_canonical_templates():
+    assert sorted(path.name for path in Path("config").iterdir()) == ["agent", "platform"]
 
 
 def test_dockerfile_includes_deployment_runtime_assets_and_port():
