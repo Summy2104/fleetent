@@ -10,8 +10,8 @@
 | 2 | P0-3 压缩检查点 | session-compaction-checkpoint | ✅ 已合并 (PR #134) |
 | 3 | P0-4 跨进程文件锁 | session-cross-process-safety | ✅ 已合并 (PR #135) |
 | 4 | P1-3 Token 累计持久化 | session-token-tracking | ✅ 已合并 (PR #137) |
-| 5 | P1-1 重启后 session 恢复 | session-restart-recovery | 进行中 |
-| 6 | Tool result 外部化 | session-tool-result-extern | 待办 |
+| 5 | P1-1 重启后 session 恢复 | session-restart-recovery | ✅ 已合并 (PR #139) |
+| 6 | Tool result 外部化 | session-tool-result-extern | ✅ 已合并 |
 
 ---
 
@@ -41,6 +41,11 @@
 **决策**：resume_pending 启动扫描在 agent_app._start_infra 的 start_session_maintenance() 之后调用。
 **理由**：platform server 已不维护 session（server.py 注释 platform-control-plane）；session 维护任务本身就在 _start_infra 启动，恢复扫描与之同址，职责一致。agent run 进程才是 session 宿主。
 **窗口**：120 秒（对标 hermes-agent）；标记式恢复（不保存 loop 状态），下次请求靠已落盘 session 文件 + resume_pending 标记由上层决定续接。本 change 只建机制，消费逻辑（normalizer/loop 续接）属后续 wiring。
+
+### D7：tool result 外部化路径与引用（Tool result extern）
+**决策**：>50KB（_TOOL_RESULT_INLINE_LIMIT）的 role=tool 字符串 content 外部化到 `{session_id}.tool_outputs/{tool_call_id}.txt`，消息存 `[stored:{id}.txt]` 引用。
+**理由**：对标 claude-code（>50KB 单独持久化），减少 session JSON 体积和 LLM context 占用。externalize/rehydrate 为纯函数（不 mutate 入参），与 message_hygiene/压缩风格一致。cleanup 连带删除 .tool_outputs 目录，扫描跳过该目录。文件缺失时 rehydrate 保留引用占位（容忍解耦删除）。
+**范围**：本 change 建 externalize/rehydrate 能力 + 清理；save/load 路径接入（何时调用）属后续 wiring，不破坏现状。
 
 ---
 
