@@ -11,6 +11,17 @@ from fleetent.observability.structured_logging import get_logger
 
 _logger = get_logger("session.manager")
 
+# Cross-process file lock primitive (P0-4). POSIX-only; non-POSIX platforms (Windows)
+# degrade to in-process asyncio.Lock alone. fleetent targets Linux deployment.
+try:
+    import fcntl
+
+    _flock_available = True
+except ImportError:  # pragma: no cover — non-POSIX fallback
+    fcntl = None  # type: ignore[assignment]
+    _flock_available = False
+    _logger.warn("session_flock_unavailable_degraded_to_asyncio_lock")
+
 SESSIONS_DIR = paths.sessions_dir()
 
 _SECONDS_PER_DAY = 86_400
@@ -333,8 +344,29 @@ def _get_lock(session_id: str) -> asyncio.Lock:
 
 @asynccontextmanager
 async def session_lock(session_id: str) -> AsyncIterator[None]:
-    async with _get_lock(session_id):
-        yield
+    """Serialize same-session writes within and across processes.
+
+    Two-layer lock: a cross-process file lock (fcntl.flock on {session_id}.lock)
+    wraps the per-session in-process asyncio.Lock. On non-POSIX platforms the file
+    lock is unavailable and only the asyncio.Lock applies.
+    """
+    if not _flock_available:
+        async with _get_lock(session_id):
+            yield
+        return
+
+    lock_path = SESSIONS_DIR / f"{session_id}.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("w")
+    try:
+        # flock is blocking — offload to a thread so the event loop keeps running.
+        await asyncio.to_thread(fcntl.flock, handle.fileno(), fcntl.LOCK_EX)
+        async with _get_lock(session_id):
+            yield
+    finally:
+        with suppress(Exception):
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
 
 def _read(session_id: str) -> tuple[list[dict[str, object]], dict[str, object]]:
