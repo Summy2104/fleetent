@@ -158,11 +158,11 @@ def _bindings_from_store(agent_id: int) -> AgentBindings:
     channels = [
         f"{c['platform']}:{c['channel_id']}" for c in agent_store.list_channels_for_agent(agent_id)
     ]
-    # users bind by IM identity (like channels): expand each internal user to its
-    # ``platform:platform_user_id`` handles so the deployed agent matches incoming IM
-    # messages directly without a platform-DB lookup.
+    # users bind by raw IM user id (e.g. the Slack/Telegram/WhatsApp user id, no platform
+    # prefix): expand each internal user to its platform_user_id handles so the deployed
+    # agent matches incoming IM messages directly without a platform-DB lookup.
     users = [
-        f"{ident['platform']}:{ident['platform_user_id']}"
+        str(ident["platform_user_id"])
         for uid in agent_store.list_users_for_agent(agent_id)
         for ident in im_identity.list_im_identities(uid)
     ]

@@ -196,8 +196,8 @@ def test_exports_mcp_servers_bindings_and_knowledge(db):
 
     assert [s.id for s in af.mcp_servers] == ["docs"]
     assert af.mcp_servers[0].api_key_env == "ACME_DOCS_MCP_TOKEN"
-    # users bind by IM identity (platform:platform_user_id), not the internal UUID
-    assert af.bindings.users == ["slack:U_ALICE"]
+    # users bind by raw IM user id (no platform prefix), not the internal UUID
+    assert af.bindings.users == ["U_ALICE"]
     assert af.bindings.channels == ["slack:C123"]
     assert af.knowledge.enabled is True
     assert [(b.tenant_id, b.kb_id) for b in af.knowledge.bindings] == [("acme", "support-kb")]
