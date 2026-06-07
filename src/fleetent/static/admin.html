@@ -3121,8 +3121,14 @@ function agAnnotateKeyHints(yamlText, keyHints) {
   return (yamlText || "").split("\n").map(line => {
     const idm = line.match(/^\s*-?\s*id:\s*(\S+)\s*$/);
     if (idm) { lastId = idm[1]; return line; }
-    const km = line.match(/^\s*api_key_env:\s*\S/);
-    if (km && lastId && keyHints[lastId]) return `${line}  # 🔑 ${keyHints[lastId]}`;
+    const km = line.match(/^(\s*)api_key_env:\s*(\S.*)$/);
+    if (km && lastId && keyHints[lastId]) {
+      const [, indent, value] = km;
+      // null is noise — show the hint in place of it; a real env name keeps it + hint.
+      return value.trim() === "null"
+        ? `${indent}api_key_env: 🔑 ${keyHints[lastId]}`
+        : `${line}  # 🔑 ${keyHints[lastId]}`;
+    }
     return line;
   }).join("\n");
 }
