@@ -255,6 +255,7 @@ def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:
         "model_overrides": agent.model_overrides,
         "memory_namespace": agent.memory_namespace,
         "icon": agent.icon,
+        "config_overrides": agent.config_overrides,
     }
 
 
@@ -280,6 +281,7 @@ def wire_agent_store_seams() -> None:
         icon: str | None = None,
         tenant_id: str = "default",
         team_id: str | None = None,
+        config_overrides: dict[str, Any] | None = None,
     ) -> None:
         agent_store.create_agent(
             name,
@@ -294,6 +296,7 @@ def wire_agent_store_seams() -> None:
             icon=icon,
             tenant_id=tenant_id,
             team_id=team_id,
+            config_overrides=config_overrides,
         )
         # platform-agent-lifecycle: materialize the runnable home on create.
         materialize.materialize_from_store(name)
@@ -308,9 +311,10 @@ def wire_agent_store_seams() -> None:
         memory_namespace: str | None = None,
         tenant_id: str | object = _UNSET,
         team_id: str | None | object = _UNSET,
+        config_overrides: dict[str, Any] | object = _UNSET,
     ) -> None:
-        # tenant/team are agent-level identity (not versioned). Only set fields the caller
-        # passed; an explicit None clears (vs _UNSET = leave unchanged).
+        # tenant/team/config_overrides are agent-level (not versioned). Only set fields the
+        # caller passed; an explicit None clears tenant/team (vs _UNSET = leave unchanged).
         if tenant_id is not _UNSET or team_id is not _UNSET:
             current = agent_store.get_by_name(name)
             if current is not None:
@@ -319,6 +323,8 @@ def wire_agent_store_seams() -> None:
                     current.tenant_id if tenant_id is _UNSET else str(tenant_id),
                     current.team_id if team_id is _UNSET else team_id,  # type: ignore[arg-type]
                 )
+        if config_overrides is not _UNSET:
+            agent_store.set_config_overrides(name, config_overrides)  # type: ignore[arg-type]
         kwargs: dict[str, Any] = {}
         if system_prompt is not None:
             kwargs["system_prompt"] = system_prompt

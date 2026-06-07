@@ -38,7 +38,7 @@ def client(tmp_path, monkeypatch):
     # no references and no agent defs by default; tests override
     monkeypatch.setattr(api, "references_for", lambda name: {"users": [], "channels": []})
     monkeypatch.setattr(api, "get_agent_def", lambda name: None)
-    monkeypatch.setattr(api, "create_agent_def", lambda n, sp, at: None)
+    monkeypatch.setattr(api, "create_agent_def", lambda *a, **k: None)
     app = FastAPI()
     app.include_router(api.router)
     return TestClient(app, raise_server_exceptions=True)
@@ -172,6 +172,7 @@ def _wire_real_store(monkeypatch):
             "model_overrides": a.model_overrides,
             "memory_namespace": a.memory_namespace,
             "icon": a.icon,
+            "config_overrides": a.config_overrides,
         }
 
     def _create(
@@ -187,6 +188,7 @@ def _wire_real_store(monkeypatch):
         icon=None,
         tenant_id="default",
         team_id=None,
+        config_overrides=None,
     ):
         agent_store.create_agent(
             name,
@@ -201,6 +203,7 @@ def _wire_real_store(monkeypatch):
             icon=icon,
             tenant_id=tenant_id,
             team_id=team_id,
+            config_overrides=config_overrides,
         )
 
     def _update(
@@ -213,6 +216,7 @@ def _wire_real_store(monkeypatch):
         mn=None,
         tenant_id=None,
         team_id=None,
+        config_overrides=None,
     ):
         if tenant_id is not None or team_id is not None:
             cur = agent_store.get_by_name(name)
@@ -222,6 +226,8 @@ def _wire_real_store(monkeypatch):
                     tenant_id if tenant_id is not None else cur.tenant_id,
                     team_id if team_id is not None else cur.team_id,
                 )
+        if config_overrides is not None:
+            agent_store.set_config_overrides(name, config_overrides)
         kwargs = {}
         if system_prompt is not None:
             kwargs["system_prompt"] = system_prompt

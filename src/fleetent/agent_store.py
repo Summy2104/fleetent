@@ -33,7 +33,8 @@ _UNSET: Any = object()
 # Agent-row columns beyond the version-derived runtime fields. Caps are not
 # versioned, so they are read straight off the agents row.
 _AGENT_ROW_COLUMNS = (
-    "id, name, active_version_id, features, plugins, allowed_skills, tenant_id, team_id, icon"
+    "id, name, active_version_id, features, plugins, allowed_skills, tenant_id, team_id, "
+    "icon, config_overrides"
 )
 
 
@@ -67,6 +68,9 @@ class Agent:
     memory_namespace: str = "default"
     # Optional avatar emoji shown in the console; agent-level identity, not versioned.
     icon: str | None = None
+    # Per-agent agent.yaml field overrides (governance/deployment/intelligence/access…),
+    # deep-merged onto the materialized defaults. Agent-level, not versioned.
+    config_overrides: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -105,6 +109,10 @@ def _parse_caps(row: dict[str, Any]) -> dict[str, Any]:
         # icon column added in migration 047; guard legacy rows that predate it.
         # `row` is a sqlite3.Row (no .get), so `in` membership is the guard, not row.get.
         "icon": (row["icon"] if "icon" in row else None),  # noqa: SIM401
+        # config_overrides added in migration 053; guard legacy rows (NULL/absent -> {}).
+        "config_overrides": (
+            json.loads(row["config_overrides"] or "{}") if "config_overrides" in row else {}
+        ),
     }
 
 
@@ -123,6 +131,7 @@ def create_agent(
     tenant_id: str = "default",
     team_id: str | None = None,
     icon: str | None = None,
+    config_overrides: dict[str, Any] | None = None,
 ) -> Agent:
     """Create an agent plus its version-1 snapshot in a single transaction.
 
@@ -132,6 +141,7 @@ def create_agent(
     features = features or {}
     plugins = plugins or []
     allowed_skills = allowed_skills or []
+    config_overrides = config_overrides or {}
     db = _db()
     now = _now()
     with db.transaction() as conn:
@@ -140,9 +150,9 @@ def create_agent(
         agent_id = conn.execute(
             "INSERT INTO agents "
             "(name, system_prompt, allowed_tools, features, plugins, allowed_skills, "
-            " created_at, tenant_id, team_id, icon) "
+            " created_at, tenant_id, team_id, icon, config_overrides) "
             "VALUES (:name, :system_prompt, :allowed_tools, :features, :plugins, "
-            " :allowed_skills, :created_at, :tenant_id, :team_id, :icon)",
+            " :allowed_skills, :created_at, :tenant_id, :team_id, :icon, :config_overrides)",
             {
                 "name": name,
                 "system_prompt": system_prompt,
@@ -154,6 +164,7 @@ def create_agent(
                 "tenant_id": tenant_id,
                 "team_id": team_id,
                 "icon": icon,
+                "config_overrides": json.dumps(config_overrides),
             },
         ).lastrowid
         version_id = _insert_version(
@@ -188,6 +199,7 @@ def create_agent(
         model_overrides=model_overrides or {},
         memory_namespace=memory_namespace,
         icon=icon,
+        config_overrides=config_overrides,
     )
 
 
@@ -201,6 +213,14 @@ def set_identity(name: str, tenant_id: str, team_id: str | None) -> None:
     _db().execute(
         "UPDATE agents SET tenant_id = :tenant_id, team_id = :team_id WHERE name = :name",
         {"tenant_id": tenant_id, "team_id": team_id, "name": name},
+    )
+
+
+def set_config_overrides(name: str, config_overrides: dict[str, Any]) -> None:
+    """Replace an agent's agent.yaml field overrides (agent-level, not versioned)."""
+    _db().execute(
+        "UPDATE agents SET config_overrides = :co WHERE name = :name",
+        {"co": json.dumps(config_overrides or {}), "name": name},
     )
 
 

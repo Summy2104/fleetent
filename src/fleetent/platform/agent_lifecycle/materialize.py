@@ -179,15 +179,43 @@ def _active_version(agent: agent_store.Agent) -> int:
     return 1
 
 
+def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge ``over`` onto ``base`` (dicts merge, scalars/lists replace)."""
+    out = dict(base)
+    for key, value in over.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def _apply_overrides(base: AgentFile, overrides: dict[str, Any]) -> AgentFile:
+    """Deep-merge per-agent agent.yaml overrides onto the base, re-validating the result.
+
+    Lets operators configure any agent.yaml field (governance/deployment/intelligence/
+    access/…) without a column per knob. A malformed override is ignored (base kept) so a
+    bad value can never break deploy/preview.
+    """
+    if not overrides:
+        return base
+    try:
+        merged = _deep_merge(base.model_dump(mode="json", exclude_defaults=False), overrides)
+        return AgentFile.model_validate(merged)
+    except Exception:  # noqa: BLE001 — invalid override must not break materialize
+        return base
+
+
 def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
     """Build the full home schema from the authored definition + bindings.
 
     Materializes every field the platform authors: identity (tenant/team), model policy
-    (expanded from provider selections), MCP servers, IM bindings and knowledge bindings.
-    connectors/access are not yet stored per-agent; they materialize as their safe defaults
-    (no connectors; default-closed access) until authoring lands.
+    (expanded from provider selections), MCP servers, IM bindings and knowledge bindings,
+    then deep-merges the agent's config_overrides so any agent.yaml field is configurable.
+    connectors/access are not stored as discrete columns; they come from the defaults or
+    the overrides.
     """
-    return AgentFile(
+    base = AgentFile(
         name=agent.name,
         version=_active_version(agent),
         tenant_id=agent.tenant_id,
@@ -204,6 +232,7 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
         bindings=_bindings_from_store(agent.id),
         knowledge=_knowledge_from_store(agent.tenant_id, agent.id),
     )
+    return _apply_overrides(base, agent.config_overrides)
 
 
 def home_dir(name: str) -> Path:

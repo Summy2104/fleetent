@@ -44,6 +44,33 @@ def test_exports_real_active_version(db):
     assert materialize.agent_file_from_store(reloaded).version == 2
 
 
+def test_config_overrides_deep_merge_into_yaml(db):
+    agent = agent_store.create_agent(
+        "support",
+        "Help.",
+        ["shell"],
+        config_overrides={
+            "agent_max_turns": 80,
+            "session_ttl_days": 7,
+            "access": {"require_approval": False},  # nested merge, not full replace
+        },
+    )
+    af = materialize.agent_file_from_store(agent)
+    assert af.agent_max_turns == 80
+    assert af.session_ttl_days == 7
+    assert af.access.require_approval is False
+    assert af.access.allow_users == []  # untouched nested default preserved
+
+
+def test_invalid_config_override_is_ignored(db):
+    agent = agent_store.create_agent(
+        "support", "Help.", ["shell"], config_overrides={"not_a_real_field": 1}
+    )
+    # extra=forbid would reject it; materialize falls back to the valid base
+    af = materialize.agent_file_from_store(agent)
+    assert af.name == "support"
+
+
 def test_exports_tenant_team_skills_dir(db):
     agent = agent_store.create_agent(
         "support", "Help.", ["shell"], skills_dir="skills", tenant_id="acme", team_id="cs"

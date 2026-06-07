@@ -80,9 +80,14 @@ def test_agent_admin_yaml_bindings_versions_and_deploy(monkeypatch, tmp_path):
     monkeypatch.setattr(
         agent_admin_api.agent_store, "list_users_for_agent", lambda _agent_id: ["u1"]
     )
-    # agent_file_from_store now also materializes knowledge bindings — keep this a pure
-    # unit test by stubbing the KB store rather than hitting a real DB.
+    # agent_file_from_store now also materializes knowledge bindings + the active version —
+    # keep this a pure unit test by stubbing those rather than hitting a real DB.
     monkeypatch.setattr(agent_kbs_store, "list_kbs_for_agent", lambda _tenant, _agent: [])
+    monkeypatch.setattr(
+        agent_admin_api.agent_store,
+        "get_version_by_id",
+        lambda _vid: SimpleNamespace(version=1),
+    )
     monkeypatch.setattr(
         agent_admin_api.agent_store,
         "list_versions",

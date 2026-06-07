@@ -1292,6 +1292,10 @@
             <input id="ag-tenant" placeholder="default" autocomplete="off" style="width:100%; margin-top:4px;"></label>
           <label class="muted" style="font-size:12px; flex:1 1 160px;">team_id
             <input id="ag-team" placeholder="(none)" autocomplete="off" style="width:100%; margin-top:4px;"></label>
+          <label class="muted" style="font-size:12px; flex:1 1 160px;">memory_namespace
+            <input id="ag-memns" placeholder="default" autocomplete="off" style="width:100%; margin-top:4px;"></label>
+          <label class="muted" style="font-size:12px; flex:1 1 160px;">skills_dir
+            <input id="ag-skillsdir" placeholder="(global default)" autocomplete="off" style="width:100%; margin-top:4px;"></label>
         </div>
         <label class="muted" style="font-size:12px;">System prompt / identity
           <textarea id="ag-system-prompt" placeholder="Describe the agent's identity and behavior…" rows="8" style="font-family:monospace; width:100%; margin-top:4px;"></textarea>
@@ -1321,6 +1325,9 @@
           <h4 style="margin:14px 0 4px;">Custom (YAML)</h4>
           <div class="muted" style="font-size:12px;">Paste an allowed_tools / plugins / features block — recorded as-is.</div>
           <textarea id="ag-capabilities" rows="10" autocomplete="off" spellcheck="false" style="font-family:monospace; width:100%; margin-top:4px;" placeholder="allowed_tools:&#10;  - &quot;search_*&quot;&#10;  - read_file&#10;plugins:&#10;  - acme-docs&#10;features:&#10;  code_execution: true&#10;  sandbox_env:&#10;    TZ: Asia/Shanghai"></textarea>
+          <h4 style="margin:14px 0 4px;">Advanced overrides (YAML)</h4>
+          <div class="muted" style="font-size:12px;">Override any agent.yaml field not above — governance / deployment / intelligence / access / connectors. Deep-merged onto the defaults; invalid keys are ignored.</div>
+          <textarea id="ag-advanced" rows="8" autocomplete="off" spellcheck="false" style="font-family:monospace; width:100%; margin-top:4px;" placeholder="agent_max_turns: 80&#10;session_ttl_days: 7&#10;access:&#10;  require_approval: false&#10;long_term_ctx:&#10;  max_tokens: 4096"></textarea>
         </div>
         <div id="ag-err" class="err"></div>
         <div class="row" style="justify-content:flex-end;">
@@ -2740,6 +2747,9 @@ async function agCreate() {
   $("ag-version").value = "—";  // assigned on first save
   $("ag-tenant").value = "default";
   $("ag-team").value = "";
+  $("ag-memns").value = "default";
+  $("ag-skillsdir").value = "";
+  $("ag-advanced").value = "";
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
   $("ag-bind-config").style.display = "";
@@ -3044,6 +3054,11 @@ async function agEdit(name) {
     $("ag-version").value = a.version ?? "—";
     $("ag-tenant").value = a.tenant_id || "default";
     $("ag-team").value = a.team_id || "";
+    $("ag-memns").value = a.memory_namespace || "default";
+    $("ag-skillsdir").value = a.skills_dir || "";
+    // config_overrides round-trips as JSON (valid YAML); blank when empty
+    $("ag-advanced").value = (a.config_overrides && Object.keys(a.config_overrides).length)
+      ? JSON.stringify(a.config_overrides, null, 2) : "";
     $("ag-system-prompt").value = a.system_prompt || "";
     // Mirror the new-agent layout: tools come from the capabilities YAML.
     $("ag-allowed-tools").style.display = "none";
@@ -3125,8 +3140,11 @@ async function agSave() {
         name, system_prompt: sp, icon,
         tenant_id: $("ag-tenant").value.trim() || "default",
         team_id: $("ag-team").value.trim() || null,
+        memory_namespace: $("ag-memns").value.trim() || "default",
+        skills_dir: $("ag-skillsdir").value.trim() || null,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
+        config_overrides_yaml: $("ag-advanced").value,
       });
       await agApplyEditBindings(name);
     } else {
@@ -3136,8 +3154,11 @@ async function agSave() {
         name, system_prompt: sp, icon,
         tenant_id: $("ag-tenant").value.trim() || "default",
         team_id: $("ag-team").value.trim() || null,
+        memory_namespace: $("ag-memns").value.trim() || "default",
+        skills_dir: $("ag-skillsdir").value.trim() || null,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
+        config_overrides_yaml: $("ag-advanced").value,
       });
       await agApplyCreateBindings(name);
     }

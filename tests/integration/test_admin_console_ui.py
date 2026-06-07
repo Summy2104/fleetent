@@ -558,6 +558,19 @@ def test_agent_identity_fields_above_system_prompt():
     assert "tenant_id:" in save and "team_id:" in save
 
 
+def test_agent_advanced_overrides_and_extra_fields():
+    html = ADMIN_HTML
+    # memory_namespace / skills_dir discrete inputs + an Advanced overrides (YAML) box
+    for fid in ('id="ag-memns"', 'id="ag-skillsdir"', 'id="ag-advanced"'):
+        assert fid in html, fid
+    assert "Advanced overrides (YAML)" in html
+    # save sends them so any agent.yaml field is configurable
+    save = html.split("async function agSave", 1)[1].split("\n}", 1)[0]
+    assert "memory_namespace:" in save
+    assert "skills_dir:" in save
+    assert "config_overrides_yaml:" in save
+
+
 def test_agent_model_overrides_pick_from_providers():
     html = ADMIN_HTML
     render = html.split("function agRenderModelOverrides", 1)[1].split(
