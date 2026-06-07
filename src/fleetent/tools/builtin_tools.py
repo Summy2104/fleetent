@@ -13,6 +13,8 @@ from fleetent.integrations.sandbox import (
     SandboxClient,
     SandboxManager,
     build_sandbox_env,
+    cap_or_spill,
+    redact_secrets,
 )
 from fleetent.integrations.sandbox import output_truncation as sot
 from fleetent.runtime.cancellation import CancelToken
@@ -129,7 +131,7 @@ def calculate(expression: str) -> str:
 
 
 @tool
-def read_skill(name: str) -> str:
+def read_skill(name: str, tool_context: ToolContext | None = None) -> str:
     """Read a skill's full instructions by name (from the <available_skills> list).
 
     When a skill in the available_skills catalog matches the task, call this with
@@ -145,29 +147,53 @@ def read_skill(name: str) -> str:
     if entry.audit_blocked:
         # Refuse before load(): a severe injection hit means the body must not
         # reach the model. load() itself still returns it for manual triage.
+        _audit_skill_refusal(name, tool_context)
         return f"error: skill {name!r} was blocked by the static injection audit"
-    return skill_registry.load(name)
+    body = skill_registry.load(name)
+    _record_skill_hit(name, tool_context)
+    return body
 
 
-@tool
-def read_file(path: str) -> str:
-    """Read a local file and return its contents (first 2000 chars)."""
+def _record_skill_hit(name: str, tool_context: ToolContext | None) -> None:
+    """Record a successful read_skill load for per-skill observability.
+
+    Best-effort: a hit-recording failure (DB unavailable, etc.) is logged and
+    swallowed so it never blocks returning the skill body. Imported lazily to avoid
+    a builtin_tools -> platform import cycle.
+    """
+    from fleetent.platform.skill_management import skill_admin_store
+
+    agent_id = tool_context.agent_name if tool_context else None
+    session_id = tool_context.session_id if tool_context else None
     try:
-        with open(path) as f:
-            return f.read(2000)
-    except OSError as exc:
-        return f"error: {exc}"
+        skill_admin_store.record_hit(name, agent_id, session_id)
+    except Exception as exc:  # noqa: BLE001 — observability is a side channel; never block
+        logger.warning("skill_hit_record_failed", extra={"skill": name, "error": str(exc)})
 
 
-@tool(risk_level="medium")
-def write_file(path: str, content: str) -> str:
-    """Write content to a local file. Requires approval before executing."""
+def _audit_skill_refusal(name: str, tool_context: ToolContext | None) -> None:
+    """Record a read_skill refusal of an audit_blocked skill (skill-read-refusal-audit).
+
+    Best-effort: the refusal is the security guarantee; a failure of this side-channel
+    audit write must never change the refusal outcome (logged, then swallowed).
+    """
+    from fleetent.governance import audit_log
+
+    detail = {
+        "reason": "audit_blocked",
+        "session_id": tool_context.session_id if tool_context else None,
+        "agent_name": tool_context.agent_name if tool_context else None,
+    }
     try:
-        with open(path, "w") as f:
-            f.write(content)
-        return f"written {len(content)} bytes to {path}"
-    except OSError as exc:
-        return f"error: {exc}"
+        audit_log.write_audit(None, "skill.read_refused", "skill", name, detail=detail)
+    except Exception as exc:  # noqa: BLE001 — audit is a side channel; never block the refusal
+        logger.warning("skill_read_refusal_audit_failed", extra={"skill": name, "error": str(exc)})
+
+
+# read_file and write_file have moved to file_tools.py.
+# Re-exported here so existing imports remain unbroken.
+from fleetent.tools.file_tools import read_file as read_file  # noqa: F401,E402
+from fleetent.tools.file_tools import write_file as write_file  # noqa: F401,E402
 
 
 async def _exec_or_cancel(
@@ -274,11 +300,16 @@ async def run_code(
     # SB6: cap each stream for the AI-facing result (trace above kept original
     # bytes). stdout/stderr have independent budgets. run_code is exempt from T4
     # (declared self_truncates) so this is the sole truncation of its output.
+    # sandbox-output-redaction: redact secrets BEFORE capping so a secret straddling
+    # the boundary cannot survive, and so anything spilled to disk is already redacted.
+    # sandbox-large-output-spill: over-budget output is spilled to a file (full, redacted)
+    # and replaced with a preview + reference, rather than dropping the middle. The trace
+    # byte sizes above stay on the original (un-redacted) output as a pure volume metric.
     parts = []
-    stdout = sot.truncate_stream(result.stdout, sot.MAX_STDOUT_BYTES)
+    stdout = cap_or_spill(redact_secrets(result.stdout), sot.MAX_STDOUT_BYTES, label="stdout")
     if stdout:
         parts.append(stdout.rstrip())
-    stderr = sot.truncate_stream(result.stderr, sot.MAX_STDERR_BYTES)
+    stderr = cap_or_spill(redact_secrets(result.stderr), sot.MAX_STDERR_BYTES, label="stderr")
     if stderr:
         parts.append(f"[stderr] {stderr.rstrip()}")
     if result.exit_code != 0:

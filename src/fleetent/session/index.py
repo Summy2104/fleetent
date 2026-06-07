@@ -84,13 +84,24 @@ def get(session_id: str) -> dict[str, object] | None:
     return _row_to_dict(row) if row else None
 
 
-def list_by_user(user_id: str) -> list[dict[str, object]]:
-    """Return all sessions for a user, most-recently-active first."""
+def list_by_user(
+    user_id: str,
+    limit: int = 50,
+    before_updated_at: float | None = None,
+) -> list[dict[str, object]]:
+    """Return sessions for a user, most-recently-active first, with cursor pagination."""
     _init_db()
+    params: list[object] = [user_id]
+    cursor_clause = ""
+    if before_updated_at is not None:
+        cursor_clause = " AND updated_at < ?"
+        params.append(before_updated_at)
+    params.append(limit)
     with _conn() as conn:
         rows = conn.execute(
-            f"SELECT {_SELECT_COLS} FROM sessions WHERE user_id = ? ORDER BY updated_at DESC",
-            (user_id,),
+            f"SELECT {_SELECT_COLS} FROM sessions"
+            f" WHERE user_id = ?{cursor_clause} ORDER BY updated_at DESC LIMIT ?",
+            params,
         ).fetchall()
     return [_row_to_dict(row) for row in rows]
 
@@ -109,3 +120,22 @@ def total_message_count() -> int:
     with _conn() as conn:
         row = conn.execute("SELECT COALESCE(SUM(message_count), 0) FROM sessions").fetchone()
     return int(row[0])
+
+
+def delete(session_id: str) -> None:
+    """Remove a single session's metadata row. Idempotent: no-op if not present."""
+    _init_db()
+    with _conn() as conn:
+        conn.execute("DELETE FROM sessions WHERE session_id = :sid", {"sid": session_id})
+
+
+def delete_batch(session_ids: list[str]) -> None:
+    """Remove metadata rows for multiple sessions in a single transaction."""
+    if not session_ids:
+        return
+    _init_db()
+    with _conn() as conn:
+        conn.executemany(
+            "DELETE FROM sessions WHERE session_id = :sid",
+            [{"sid": sid} for sid in session_ids],
+        )

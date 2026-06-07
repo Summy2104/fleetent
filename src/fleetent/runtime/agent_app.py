@@ -67,7 +67,23 @@ async def _start_infra(agent: AgentFile) -> None:
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
     from fleetent.session import manager as session_mgr
 
-    await sandbox_enablement.get_effective_mode()  # one-time Docker probe, cached
+    mode = await sandbox_enablement.get_effective_mode()  # one-time Docker probe, cached
+    # sandbox-runtime-lifecycle-wiring: only when Docker is usable (effective mode != off)
+    # do we reap last-run orphan containers and schedule agent-scope idle reclamation.
+    # Orphan cleanup is best-effort (a failure is logged, never aborts boot); the idle
+    # sweep is a bare-asyncio loop mirroring session maintenance.
+    if mode is not sandbox_enablement.Mode.OFF:
+        from fleetent.integrations.sandbox import (
+            SandboxClient,
+            cleanup_orphans,
+            start_idle_sweep,
+        )
+
+        try:
+            await cleanup_orphans(SandboxClient())
+        except Exception as exc:  # noqa: BLE001 — orphan cleanup must not abort boot
+            _logger.warn("agent_runtime_sandbox_cleanup_failed", error=str(exc))
+        start_idle_sweep()
     if agent.mcp_servers:
         from fleetent.integrations import mcp as mcp_client
         from fleetent.integrations.mcp.client import McpServerConfig
@@ -82,6 +98,8 @@ async def _start_infra(agent: AgentFile) -> None:
                 command=s.command,
                 args=list(s.args),
                 env=dict(s.env),
+                connect_timeout=s.connect_timeout,
+                call_timeout=s.call_timeout,
             )
             for s in agent.mcp_servers
         ]
@@ -90,6 +108,15 @@ async def _start_infra(agent: AgentFile) -> None:
         except Exception as exc:  # noqa: BLE001 — MCP unavailable must not abort boot
             _logger.warn("agent_runtime_mcp_register_failed", error=str(exc))
     session_mgr.start_session_maintenance()
+    # Restart recovery: flag sessions active just before this (re)start so the next
+    # request can be recognized as a resumed conversation. Best-effort — a scan
+    # failure must never abort boot.
+    try:
+        marked = session_mgr.scan_and_mark_recent_resume()
+        if marked:
+            _logger.info("session_resume_pending_marked", count=len(marked))
+    except Exception as exc:  # noqa: BLE001 — recovery scan must not abort boot
+        _logger.warn("session_resume_scan_failed", error=str(exc))
 
 
 async def boot(
@@ -122,7 +149,10 @@ async def boot(
     from fleetent.intelligence import vector_store
 
     vector_store.configure_from_active_agent()
-    scan_skills()
+    # Build this agent's skill index from its OWN home (self-contained: never the
+    # process CWD or FLEETENT_SKILLS_DIR). materialize copies skill files to home/skills/;
+    # a missing dir scans to builtin-only (skill-nested-scan safe).
+    scan_skills(skills_dir=str(home_dir / "skills"))
     load_plugins()
 
     if with_infra:

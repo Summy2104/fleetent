@@ -48,27 +48,23 @@ flowchart TD
 
 ## 现状
 
-- ⚡ **Docker 沙箱基本执行**：代码在 Docker 容器内隔离运行，返回 stdout / stderr / exit_code
-  - 当前实现：`sandbox_client.py` 封装 Docker CLI，资源限制（`--network none --memory 256m --cpus 0.5 --read-only`）硬编码
-  - Docker 为既定沙箱后端，下述治理项均在此基础上演进
+- ⚡ **Docker 沙箱执行**：代码在 Docker 容器内隔离运行，返回 stdout / stderr / exit_code。`integrations/sandbox/client.py` 封装 Docker CLI；Docker 为既定沙箱后端，下述治理项均在此基础上演进
+- ✅ **资源限制可配置**：`memory` / `cpus` / `network` / `exec_timeout` / `read_only` 经 `platform.yaml` 的 `sandbox.resources` 声明，未配置回退安全默认（不再硬编码；见 `sandbox-resource-limits`）
+- ✅ **容器安全加固**：`--pids-limit`、`/tmp` tmpfs 限大小+`nosuid`、`--cap-drop ALL`（agent 档补最小 cap）、`--security-opt no-new-privileges`、`--init`、session 档非 root（`--user`）；按 scope 分层、可配置（见 `sandbox-container-hardening`）
+- ⚡ **文件系统隔离**：session 档 `--read-only`，`/tmp` 可写但限额 + `nosuid`
+  - 当前缺失：无符号链接攻击防护（见待决问题）
+- ✅ **执行过程可观测**：执行结果写入 trace（执行时长、退出码、输出字节、scope）
 
-- ✅ **资源限制**：限制生效，默认值可通过 `platform.yaml` 的 `sandbox.resources` 调整
+## 已实现（v1.0）
 
-- ⚡ **文件系统隔离**：`--read-only` 模式，整个文件系统只读，`/tmp` 目录可写
-  - 当前缺失：无符号链接攻击防护
+> 沙箱后端经评估保留 Docker（microsandbox 因依赖 KVM、标准 EC2 不支持嵌套虚拟化而放弃）；以下治理项均基于 Docker 后端，除标注外均已落地。
 
-- ⚡ **执行过程可观测**：返回 stdout / stderr / exit_code，但未写入运行日志（trace）
+- [x] **生命周期管理（scope）**：按配置决定沙箱存活粒度
+  - `session`（默认）：会话开始创建，同一会话内复用，会话结束时销毁（已接线）
+  - `agent`：每个 agent 定义独享一个沙箱，跨会话长期保留；已安装依赖通过 `docker commit` 固化为镜像层
+  - 闲置超时自动销毁（`idle_hours`，默认 2 小时，适用于 `agent` scope）——**已由 agent 运行时周期性后台任务调度 `sweep_idle`（`sandbox-runtime-lifecycle-wiring`）**
 
-## 规划中（v1.0）
-
-> 沙箱后端经评估保留 Docker（microsandbox 因依赖 KVM、标准 EC2 不支持嵌套虚拟化而放弃）；以下治理项均基于 Docker 后端。
-
-- [ ] **生命周期管理（scope）**：按配置决定沙箱存活粒度
-  - `session`（默认）：会话开始创建，同一会话内复用，会话结束时销毁
-  - `agent`：每个 agent 定义独享一个沙箱，跨会话长期保留；已安装依赖通过 `docker commit` 固化为镜像层（捕获已安装依赖的状态 → 下次基于该镜像快速恢复，无需重新安装）
-  - 闲置超时自动销毁（`idle_hours`，默认 2 小时，适用于 `agent` scope）
-
-- [ ] **启用/关闭控制（三态模式）**：全局 `mode` + agent 级别开关双层控制
+- [x] **启用/关闭控制（三态模式）**：全局 `mode` + agent 级别开关双层控制
   - `off`：`run_code` 工具不注册，AI 完全不知道代码执行能力存在
   - `selective`：全局默认关闭，仅 `features.code_execution: true` 的 agent 可用
   - `all`（默认）：所有 agent 可用，agent 可显式设置 `code_execution: false` 关闭
@@ -82,26 +78,33 @@ flowchart TD
       cpus: 0.5
       network: "none"   # none / public_only / allow_all
       exec_timeout: 30  # 单次执行超时（秒）
+      # 容器加固（sandbox-container-hardening，均可选、缺省即安全默认）
+      pids_limit: 256
+      tmpfs_size_mb: 64
+      cap_drop_all: true
+      no_new_privileges: true
+      init: true
+      run_as_user: "65534:65534"   # session 档非 root；null 即 root
   ```
   未配置时使用安全默认值；`network: none` 为默认且推荐值（对应 Docker `--network none`）
 
-- [ ] **密钥过滤（三层环境变量过滤）**：敏感环境变量不传入容器
-  - Docker 无原生 Secret 机制，改为在启动容器时按名称过滤宿主机环境变量：变量名含 `TOKEN` / `KEY` / `SECRET`（大小写不敏感）一律不传入容器
-  - 三层指：宿主机进程环境、agent 配置注入的变量、运行时显式传入的变量，均经过同一过滤规则
-  - 占位符级 Secret（代码内只见随机占位符、真实密钥在网络边界透明替换）非 Docker 原生能力，留作后续探索
+- [x] **密钥过滤（入站环境变量过滤）**：敏感环境变量不传入容器
+  - Docker 无原生 Secret 机制，改为在启动容器时按名称过滤：变量名含 `TOKEN` / `KEY` / `SECRET` 等（大小写不敏感）一律不传入容器
+  - 三层：宿主机进程环境、agent 配置注入、运行时显式传入，经同一过滤规则
+  - **出站输出脱敏已实现**（`sandbox-output-redaction`）：`run_code` 返回前对 stdout/stderr 按模式脱敏（PEM 私钥 / JWT / 厂商 key 前缀 / 连接串凭证 / `Authorization` 头 / 命名型 `KEY=VALUE`），先脱敏后截断；trace 仅记大小、无内容
 
-- [ ] **输出截断**：防止海量输出占满对话空间
-  - stdout 上限 50KB，stderr 上限 10KB
-  - 超限时保留开头 + 结尾，中间插入截断说明
-  - 非 UTF-8 字符做安全转义
+- [x] **输出截断**：防止海量输出占满对话空间
+  - stdout 上限 50KB，stderr 上限 10KB；超限保留头尾 + 截断说明；UTF-8 边界安全
+  - **超限已改为落盘 + 引用**（`sandbox-large-output-spill`）：超预算时完整（脱敏后）输出写入 `data/sandbox_output/{uuid}.txt`，返回 head+tail 预览 + 引用（路径 / 字节数 / 可用 `read_file` 读取），替代中段直接丢弃；落盘目录按保留期（默认 7 天）机会式自清理
 
-- [ ] **执行超时与强制终止**：默认 30s（可配置，最长 600s）
-  - 代码经 `docker exec` 执行，超时后对容器执行 `docker kill`（先 SIGTERM，5s 后 SIGKILL）强制终止
-  - 终止后按 scope 决定沙箱处理：`session` 保留沙箱供同 session 复用；`agent` 保留沙箱供该 agent 其他 session 使用
+- [x] **执行超时与强制终止**：默认 30s（可配置，最长 600s）——已在 `run_code` 接线
+  - 超时对容器 `docker kill`（先 SIGTERM，5s 后 SIGKILL）强制终止
 
-- [ ] **孤儿容器清理**：平台启动时检测并销毁上次崩溃遗留的孤儿容器（`sandbox-*` 前缀）
+- [x] **孤儿容器清理**：检测并销毁上次崩溃遗留的孤儿容器（`sandbox-*` 前缀）——**已在 agent 运行时启动（`_start_infra`，Docker 可用时）接线（`sandbox-runtime-lifecycle-wiring`）**
 
-- [ ] **执行结果写入 trace**：记录执行时长、退出码、输出大小、使用的沙箱类型
+- [x] **执行结果写入 trace**：记录执行时长、退出码、输出大小、使用的沙箱 scope
+
+- [x] **容器安全加固**：pids / tmpfs 限额+nosuid / cap-drop ALL / no-new-privileges / init / 非 root，按 scope 分层、可配置（`sandbox-container-hardening`）
 
 ## 验收标准
 
@@ -152,4 +155,6 @@ flowchart TD
 ## 待决问题
 
 - [ ] `scope=agent` 的容器是否支持手动重建（清空已安装依赖）？触发方式：admin CLI 还是 agent 配置变更？（负责人：待认领）
-- [ ] 符号链接攻击防护：是在 v1.0 中修复，还是接受当前 `--read-only` 作为足够的防护层？（负责人：待认领）
+- [ ] 符号链接攻击防护：是在 v1.0 中修复，还是接受当前防护层为足够？容器加固（`--read-only` + `/tmp` `nosuid` + session 档非 root + `--cap-drop ALL` + `no-new-privileges`）已显著收敛符号链接/提权的可利用面，但未专门防护 symlink 跨越。（负责人：待认领）
+
+> 延后项（本批不做，理由见 `sandbox-improvements.md`）：网络出站白名单与 `public_only` 实装、磁盘配额 `--storage-opt`、自定义 seccomp/AppArmor profile。

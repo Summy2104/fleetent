@@ -120,3 +120,143 @@ def test_agent_file_from_store_defaults_models_when_no_overrides(db):
     exported = materialize.agent_file_from_store(agent)
 
     assert exported.models == default_models()
+
+
+# ── skill DB state → agent.yaml (skill-materialize-db-fields) ──────────────────
+
+
+def test_materialize_writes_global_disabled_skills(db):
+    """A globally-disabled skill lands in AgentFile.disabled_skills."""
+    from fleetent.platform.skill_management import skill_admin_store
+
+    agent = agent_store.create_agent("support", "p", [])
+    skill_admin_store.set_global_enabled("crm-ops", False)
+    skill_admin_store.set_global_enabled("jira", True)
+
+    exported = materialize.agent_file_from_store(agent)
+
+    assert "crm-ops" in exported.disabled_skills
+    assert "jira" not in exported.disabled_skills
+
+
+def test_materialize_disabled_skills_safe_when_no_states(db):
+    """No skill_admin_state rows → disabled_skills is empty, no error."""
+    agent = agent_store.create_agent("support", "p", [])
+
+    exported = materialize.agent_file_from_store(agent)
+
+    assert exported.disabled_skills == []
+
+
+def test_materialize_allowed_skills_from_binding(db):
+    """With bindings, allowed_skills is exactly the enabled=1 subset."""
+    from fleetent.platform.skill_management import skill_admin_store
+
+    agent = agent_store.create_agent("support", "p", [], allowed_skills=["authored"])
+    skill_admin_store.set_binding(str(agent.id), "crm-ops", True, updated_by=None)
+    skill_admin_store.set_binding(str(agent.id), "billing", False, updated_by=None)
+
+    exported = materialize.agent_file_from_store(agent)
+
+    assert exported.allowed_skills == ["crm-ops"]
+
+
+def test_materialize_allowed_skills_empty_when_all_bindings_disabled(db):
+    """All bindings disabled → allowed_skills empty (narrowed to none), no fallback."""
+    from fleetent.platform.skill_management import skill_admin_store
+
+    agent = agent_store.create_agent("support", "p", [], allowed_skills=["authored"])
+    skill_admin_store.set_binding(str(agent.id), "crm-ops", False, updated_by=None)
+
+    exported = materialize.agent_file_from_store(agent)
+
+    assert exported.allowed_skills == []
+
+
+def test_materialize_allowed_skills_falls_back_to_authored_when_no_binding(db):
+    """No agent_skills rows → fall back to authored allowed_skills."""
+    agent = agent_store.create_agent("support", "p", [], allowed_skills=["jira"])
+
+    exported = materialize.agent_file_from_store(agent)
+
+    assert exported.allowed_skills == ["jira"]
+
+
+# ── skill files copied into agent home (skill-files-per-agent-home) ───────────
+
+
+def test_write_home_copies_skill_files_into_home(db, tmp_path, monkeypatch):
+    """write_home() copies the global skills dir into <home>/skills/."""
+    skills_src = tmp_path / "global_skills"
+    (skills_src / "crm-ops").mkdir(parents=True)
+    (skills_src / "crm-ops" / "SKILL.md").write_text(
+        "---\nname: crm-ops\ndescription: CRM ops\n---\nbody", encoding="utf-8"
+    )
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(skills_src))
+
+    agent = agent_store.create_agent("support", "p", [])
+    home = materialize.write_home(materialize.agent_file_from_store(agent))
+
+    copied = home / "skills" / "crm-ops" / "SKILL.md"
+    assert copied.is_file()
+    assert "CRM ops" in copied.read_text(encoding="utf-8")
+
+
+def test_write_home_safe_when_skills_dir_missing(db, tmp_path, monkeypatch):
+    """No global skills dir → write_home() still succeeds, no error."""
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(tmp_path / "does_not_exist"))
+
+    agent = agent_store.create_agent("support", "p", [])
+    home = materialize.write_home(materialize.agent_file_from_store(agent))
+
+    assert (home / "agent.yaml").is_file()  # home written despite no skills
+
+
+def test_write_home_skill_copy_is_idempotent(db, tmp_path, monkeypatch):
+    """Running write_home() twice does not error on the existing skills dir."""
+    skills_src = tmp_path / "global_skills"
+    (skills_src / "crm-ops").mkdir(parents=True)
+    (skills_src / "crm-ops" / "SKILL.md").write_text(
+        "---\nname: crm-ops\ndescription: CRM ops\n---\nbody", encoding="utf-8"
+    )
+    monkeypatch.setenv("FLEETENT_SKILLS_DIR", str(skills_src))
+
+    agent = agent_store.create_agent("support", "p", [])
+    materialize.write_home(materialize.agent_file_from_store(agent))
+    home = materialize.write_home(materialize.agent_file_from_store(agent))
+
+    assert (home / "skills" / "crm-ops" / "SKILL.md").is_file()
+
+
+# ── list_all_names + rematerialize_all (skill-admin-trigger-rematerialize) ────
+
+
+def test_list_all_names_returns_sorted_agent_names(db):
+    """agent_store.list_all_names() returns every authored agent, sorted."""
+    agent_store.create_agent("zeta", "p", [])
+    agent_store.create_agent("alpha", "p", [])
+    agent_store.create_agent("mid", "p", [])
+
+    assert agent_store.list_all_names() == ["alpha", "mid", "zeta"]
+
+
+def test_list_all_names_empty_when_no_agents(db):
+    """No authored agents → empty list, no error."""
+    assert agent_store.list_all_names() == []
+
+
+def test_rematerialize_all_writes_every_agent_home(db):
+    """rematerialize_all() exports a home for each agent and returns their names."""
+    agent_store.create_agent("alpha", "p", [])
+    agent_store.create_agent("beta", "p", [])
+
+    done = materialize.rematerialize_all()
+
+    assert set(done) == {"alpha", "beta"}
+    assert (materialize.home_dir("alpha") / "agent.yaml").is_file()
+    assert (materialize.home_dir("beta") / "agent.yaml").is_file()
+
+
+def test_rematerialize_all_empty_when_no_agents(db):
+    """No agents → empty result, no error."""
+    assert materialize.rematerialize_all() == []

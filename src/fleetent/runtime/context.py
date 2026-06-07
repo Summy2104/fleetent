@@ -137,6 +137,7 @@ def maybe_compress(
     trigger_line = int(cfg["max_tokens"] * cfg["tmax_ratio"])
     if not force and estimate_tokens(messages) <= trigger_line:
         return messages
+    _write_compaction_checkpoint(session_id, messages)
     return _compress(
         messages,
         cfg,
@@ -161,6 +162,7 @@ def compress_for_context_overflow(
     (Non-Goal here); this only performs the unconditional compression to Tretained.
     """
     cfg = _resolve_config(config, agent_name)
+    _write_compaction_checkpoint(session_id, messages)
     return _compress(
         messages,
         cfg,
@@ -169,6 +171,18 @@ def compress_for_context_overflow(
         user_id=user_id,
         agent_name=agent_name,
     )
+
+
+def _write_compaction_checkpoint(session_id: str | None, messages: list[Any]) -> None:
+    """Best-effort: write pre-compaction backup; never propagate errors."""
+    if session_id is None:
+        return
+    try:
+        from fleetent.session import manager as session_mgr
+
+        session_mgr.write_compaction_checkpoint(session_id, messages)
+    except Exception as exc:  # noqa: BLE001
+        _logger.warn("compaction_checkpoint_write_failed", session_id=session_id, error=str(exc))
 
 
 def _summary_fingerprint(text: str) -> str:

@@ -2,15 +2,33 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-
-import structlog
+from pathlib import Path
 
 from fleetent import paths
+from fleetent.observability.structured_logging import get_logger
 
-logger = structlog.get_logger(__name__)
+_logger = get_logger("session.manager")
+
+# Tool results larger than this are externalized to a sibling .tool_outputs dir so
+# the session JSON and the model context stay lean (tool-result-extern, cf claude-code).
+_TOOL_RESULT_INLINE_LIMIT = 50 * 1024
+_STORED_PREFIX = "[stored:"
+_STORED_SUFFIX = ".txt]"
+
+# Cross-process file lock primitive (P0-4). POSIX-only; non-POSIX platforms (Windows)
+# degrade to in-process asyncio.Lock alone. fleetent targets Linux deployment.
+try:
+    import fcntl
+
+    _flock_available = True
+except ImportError:  # pragma: no cover — non-POSIX fallback
+    fcntl = None  # type: ignore[assignment]
+    _flock_available = False
+    _logger.warn("session_flock_unavailable_degraded_to_asyncio_lock")
 
 SESSIONS_DIR = paths.sessions_dir()
 
@@ -80,7 +98,7 @@ async def _session_maintenance_loop(interval: float) -> None:
             # without this, periodically-cleaned sessions would leak their containers.
             await _release_sandboxes(removed)
         except Exception as exc:  # noqa: BLE001 — a single failure must not kill the loop
-            logger.warning("session_maintenance_loop_iteration_failed", error=str(exc))
+            _logger.warn("session_maintenance_loop_iteration_failed", error=str(exc))
 
 
 def start_session_maintenance(*, interval: float | None = None) -> asyncio.Task[None]:
@@ -150,18 +168,37 @@ def cleanup_expired(
     for path in SESSIONS_DIR.rglob("*.json"):
         if path.name.endswith(".json.tmp"):
             continue
+        if path.name.endswith(".pre-compact.json"):
+            continue  # backup files follow the main file, not independent TTL
+        if ".tool_outputs/" in path.relative_to(SESSIONS_DIR).as_posix():
+            continue  # externalized tool result files are not sessions
         if not is_expired(path.stat().st_mtime, now, ttl_seconds):
             continue
         session_id = path.relative_to(SESSIONS_DIR).with_suffix("").as_posix()
         try:
             path.unlink()
         except OSError as exc:
-            logger.warning("session_cleanup_delete_failed", session_id=session_id, error=str(exc))
+            _logger.warn("session_cleanup_delete_failed", session_id=session_id, error=str(exc))
             continue
         removed.append(session_id)
-        logger.info("session_cleanup_deleted", session_id=session_id)
+        _logger.info("session_cleanup_deleted", session_id=session_id)
+        # Best-effort: remove the pre-compaction backup alongside the main file
+        with suppress(OSError):
+            (SESSIONS_DIR / f"{session_id}.pre-compact.json").unlink()
+        # Best-effort: remove the externalized tool-result directory
+        shutil.rmtree(SESSIONS_DIR / f"{session_id}.tool_outputs", ignore_errors=True)
+        # Best-effort: remove the agent-side resume marker
+        with suppress(OSError):
+            (SESSIONS_DIR / f"{session_id}.resume").unlink()
 
-    logger.info("session_cleanup_done", removed_count=len(removed), ttl_seconds=ttl_seconds)
+    _logger.info("session_cleanup_done", removed_count=len(removed), ttl_seconds=ttl_seconds)
+    if removed:
+        from fleetent.session import index as session_index
+
+        try:
+            session_index.delete_batch(removed)
+        except Exception as exc:  # noqa: BLE001 — index sync must not break file cleanup
+            _logger.warn("session_cleanup_index_sync_failed", count=len(removed), error=str(exc))
     return removed
 
 
@@ -259,19 +296,158 @@ def enforce_capacity(
         try:
             path.unlink()
         except OSError as exc:
-            logger.warning("session_capacity_delete_failed", session_id=session_id, error=str(exc))
+            _logger.warn("session_capacity_delete_failed", session_id=session_id, error=str(exc))
             continue
         removed.append(session_id)
-        logger.info("session_capacity_evicted", session_id=session_id)
+        _logger.info("session_capacity_evicted", session_id=session_id)
 
-    logger.info(
+    _logger.info(
         "session_capacity_done",
         evicted_count=len(removed),
         reasons=reasons,
         max_total_bytes=max_total_bytes,
         max_count=max_count,
     )
+    if removed:
+        from fleetent.session import index as session_index
+
+        try:
+            session_index.delete_batch(removed)
+        except Exception as exc:  # noqa: BLE001 — index sync must not break capacity eviction
+            _logger.warn("session_capacity_index_sync_failed", count=len(removed), error=str(exc))
     return removed
+
+
+def list_by_user(
+    user_id: str,
+    limit: int = 50,
+    before_updated_at: float | None = None,
+) -> list[dict[str, object]]:
+    """Return sessions for a user, most-recently-active first, with cursor pagination."""
+    from fleetent.session import index as session_index
+
+    return session_index.list_by_user(user_id, limit=limit, before_updated_at=before_updated_at)
+
+
+def write_compaction_checkpoint(session_id: str, messages: list[dict[str, object]]) -> None:
+    """Atomically write the pre-compaction message snapshot for a session.
+
+    Overwrites any previous checkpoint so only the most recent pre-compact state
+    is kept. Caller is responsible for best-effort error handling.
+    """
+    path = SESSIONS_DIR / f"{session_id}.pre-compact.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".pre-compact.json.tmp")
+    tmp.write_text(
+        json.dumps({"messages": messages, "compacted_at": time.time()}, ensure_ascii=False)
+    )
+    tmp.replace(path)
+
+
+def delete_compaction_checkpoint(session_id: str) -> None:
+    """Remove the pre-compaction backup file if it exists. Idempotent."""
+    path = SESSIONS_DIR / f"{session_id}.pre-compact.json"
+    with suppress(FileNotFoundError):
+        path.unlink()
+
+
+def _resume_marker_path(session_id: str) -> Path:
+    return SESSIONS_DIR / f"{session_id}.resume"
+
+
+def mark_resume_pending(session_id: str) -> None:
+    """Mark a session as resume-pending via an agent-side .resume marker file.
+
+    Pure agent-side state (no DB, no platform): the marker's existence is the flag.
+    """
+    path = _resume_marker_path(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+
+
+def is_resume_pending(session_id: str) -> bool:
+    """True when the session's .resume marker exists."""
+    return _resume_marker_path(session_id).exists()
+
+
+def clear_resume_pending(session_id: str) -> None:
+    """Remove the .resume marker. Idempotent."""
+    with suppress(FileNotFoundError):
+        _resume_marker_path(session_id).unlink()
+
+
+def scan_and_mark_recent_resume(window_seconds: int = 120) -> list[str]:
+    """Mark sessions whose file mtime is within the last window_seconds as resume-pending.
+
+    Agent-side restart recovery: based purely on session file mtime, no platform/DB.
+    Returns the session_ids that were marked.
+    """
+    now = time.time()
+    marked: list[str] = []
+    for session_id, _size, mtime in _scan_sessions():
+        if now - mtime <= window_seconds:
+            mark_resume_pending(session_id)
+            marked.append(session_id)
+    return marked
+
+
+def externalize_tool_results(
+    session_id: str, messages: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """Move oversized tool results to per-session external files, leaving references.
+
+    Returns a new list; the input is never mutated. Only ``role == "tool"`` messages
+    whose string content exceeds the inline limit and that carry a ``tool_call_id``
+    are externalized to ``{session_id}.tool_outputs/{tool_call_id}.txt``.
+    """
+    out_dir = SESSIONS_DIR / f"{session_id}.tool_outputs"
+    result: list[dict[str, object]] = []
+    for msg in messages:
+        content = msg.get("content")
+        call_id = msg.get("tool_call_id")
+        if (
+            msg.get("role") == "tool"
+            and isinstance(content, str)
+            and isinstance(call_id, str)
+            and len(content) > _TOOL_RESULT_INLINE_LIMIT
+        ):
+            out_dir.mkdir(parents=True, exist_ok=True)
+            path = out_dir / f"{call_id}.txt"
+            tmp = path.with_suffix(".txt.tmp")
+            tmp.write_text(content, encoding="utf-8")
+            tmp.replace(path)
+            result.append({**msg, "content": f"{_STORED_PREFIX}{call_id}{_STORED_SUFFIX}"})
+        else:
+            result.append(msg)
+    return result
+
+
+def rehydrate_tool_results(
+    session_id: str, messages: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """Inverse of externalize_tool_results: read external content back inline.
+
+    Returns a new list; the input is never mutated. A missing external file leaves
+    the ``[stored:...]`` reference in place rather than failing.
+    """
+    out_dir = SESSIONS_DIR / f"{session_id}.tool_outputs"
+    result: list[dict[str, object]] = []
+    for msg in messages:
+        content = msg.get("content")
+        if (
+            isinstance(content, str)
+            and content.startswith(_STORED_PREFIX)
+            and content.endswith(_STORED_SUFFIX)
+        ):
+            call_id = content[len(_STORED_PREFIX) : -len(_STORED_SUFFIX)]
+            path = out_dir / f"{call_id}.txt"
+            if path.exists():
+                result.append({**msg, "content": path.read_text(encoding="utf-8")})
+            else:
+                result.append(msg)  # external file gone — keep the placeholder
+        else:
+            result.append(msg)
+    return result
 
 
 def _get_lock(session_id: str) -> asyncio.Lock:
@@ -282,8 +458,29 @@ def _get_lock(session_id: str) -> asyncio.Lock:
 
 @asynccontextmanager
 async def session_lock(session_id: str) -> AsyncIterator[None]:
-    async with _get_lock(session_id):
-        yield
+    """Serialize same-session writes within and across processes.
+
+    Two-layer lock: a cross-process file lock (fcntl.flock on {session_id}.lock)
+    wraps the per-session in-process asyncio.Lock. On non-POSIX platforms the file
+    lock is unavailable and only the asyncio.Lock applies.
+    """
+    if not _flock_available:
+        async with _get_lock(session_id):
+            yield
+        return
+
+    lock_path = SESSIONS_DIR / f"{session_id}.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("w")
+    try:
+        # flock is blocking — offload to a thread so the event loop keeps running.
+        await asyncio.to_thread(fcntl.flock, handle.fileno(), fcntl.LOCK_EX)
+        async with _get_lock(session_id):
+            yield
+    finally:
+        with suppress(Exception):
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
 
 def _read(session_id: str) -> tuple[list[dict[str, object]], dict[str, object]]:
@@ -298,19 +495,20 @@ def _read(session_id: str) -> tuple[list[dict[str, object]], dict[str, object]]:
     return list(raw.get("messages", [])), dict(raw.get("meta", {}))
 
 
-def list_session_ids(prefix: str = "") -> list[str]:
+def list_session_ids(prefix: str = "", limit: int | None = None) -> list[str]:
     """Return persisted session ids, optionally filtered to those under ``prefix``.
 
     Additive read helper (tui-gateway): lets the TUI gateway enumerate a user's
     sessions without changing any existing session contract. Ids are derived the
     same way as the maintenance scanners (recurses subdirs, skips ``.json.tmp``).
     """
-    return sorted(sid for sid, _size, _mtime in _scan_sessions() if sid.startswith(prefix))
+    result = sorted(sid for sid, _size, _mtime in _scan_sessions() if sid.startswith(prefix))
+    return result[:limit] if limit is not None else result
 
 
 async def load(session_id: str) -> list[dict[str, object]]:
     messages, _ = _read(session_id)
-    return messages
+    return rehydrate_tool_results(session_id, messages)
 
 
 async def load_meta(session_id: str) -> dict[str, object]:
@@ -335,8 +533,11 @@ async def save(
     # Create the target's parent (not just SESSIONS_DIR): session_ids may contain
     # "/" (e.g. IM platform/channel/user), nesting the file in subdirectories.
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Externalize oversized tool results before serialization; persists references
+    # in the JSON while the full content lives in the .tool_outputs sibling dir.
+    externalized = externalize_tool_results(session_id, messages)
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"meta": meta, "messages": messages}, ensure_ascii=False))
+    tmp.write_text(json.dumps({"meta": meta, "messages": externalized}, ensure_ascii=False))
     tmp.replace(path)
 
     # Best-effort metadata index update: the message file is the source of truth
@@ -352,7 +553,7 @@ async def save(
             agent_name=agent_name,
         )
     except Exception as exc:  # noqa: BLE001 — auxiliary index must not break persistence
-        logger.warning("session_index_update_failed", session_id=session_id, error=str(exc))
+        _logger.warn("session_index_update_failed", session_id=session_id, error=str(exc))
 
     # Internal maintenance trigger (no external cron): opportunistically prune
     # expired sessions and enforce disk capacity as a side effect of activity,
@@ -362,7 +563,7 @@ async def save(
         removed = maybe_run_maintenance()
         await _release_sandboxes(removed)
     except Exception as exc:  # noqa: BLE001 — maintenance must not break persistence
-        logger.warning("session_maintenance_trigger_failed", session_id=session_id, error=str(exc))
+        _logger.warn("session_maintenance_trigger_failed", session_id=session_id, error=str(exc))
 
 
 async def clear(session_id: str) -> None:
@@ -408,4 +609,4 @@ async def _release_sandboxes(session_ids: list[str]) -> None:
         try:
             await manager.release_session(session_id)
         except Exception as exc:  # noqa: BLE001 — sandbox reclaim must not break persistence
-            logger.warning("sandbox_release_failed", session_id=session_id, error=str(exc))
+            _logger.warn("sandbox_release_failed", session_id=session_id, error=str(exc))

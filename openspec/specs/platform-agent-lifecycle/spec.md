@@ -119,3 +119,48 @@ agent 引用的密钥占位 SHALL NOT 出现在 Platform ENV 模板中——它�
 #### Scenario: 模板无 inline 密钥值
 - **WHEN** 读取 Platform ENV 模板
 - **THEN** 所有条目为 `NAME=` 形式，不含任何真实密钥值
+
+### Requirement: Materialize 将全局 disabled skills 写入 agent.yaml 的 disabled_skills
+
+由于 agent 运行时只读 `agent.yaml`、从不访问 platform DB，平台的全局 skill disable 决策（`skill_admin_state.global_enabled=0`）SHALL 在 materialize 时被写入 `AgentFile.disabled_skills`。`agent_file_from_store()` SHALL 读取 `skill_admin_store.list_states()`，把所有 `global_enabled=0` 的 `skill_name` 汇集到 `disabled_skills`。
+
+当 `skill_admin_state` 表不存在（旧库）时，materialize SHALL 安全回退到空 `disabled_skills`，不抛异常。
+
+#### Scenario: 全局 disabled skill 写入 disabled_skills
+
+- **WHEN** skill "crm-ops" 在 `skill_admin_state` 中 `global_enabled=0`，对任一 agent 触发 materialize
+- **THEN** 产出的 agent.yaml 中 `disabled_skills` 包含 "crm-ops"
+
+#### Scenario: 全局 enabled skill 不出现在 disabled_skills
+
+- **WHEN** skill "jira" 在 `skill_admin_state` 中 `global_enabled=1`，触发 materialize
+- **THEN** 产出的 agent.yaml 中 `disabled_skills` 不包含 "jira"
+
+#### Scenario: 表缺失时安全回退
+
+- **WHEN** `skill_admin_state` 表不存在，触发 materialize
+- **THEN** materialize 正常完成，`disabled_skills` 为空列表，不抛异常
+
+### Requirement: Materialize 将平台 skill 文件分发到 agent home
+
+为使 agent home 自包含（agent 进程只读自己的 home），`write_home()` SHALL 在写出 `agent.yaml` 与 `data/` 后，把平台全局 skills 目录（`skill_registry._resolve_skills_dir(None)`）下的全部 skill 目录复制到 `<home>/skills/`。
+
+- 复制 SHALL 是幂等的（重复 materialize 覆盖同名文件，不报错）
+- 当全局 skills 目录不存在时，复制 SHALL 被跳过，不抛异常
+- 复制失败（IO 错误）SHALL 记录结构化告警但不阻断 materialize（agent.yaml 已写出）
+- 全量复制：所有 skill 进入 home，运行时可见性由 agent.yaml 的 `allowed_skills` / `disabled_skills` 决定（文件分发与可见性解耦）
+
+#### Scenario: skill 文件复制到 agent home
+
+- **WHEN** 全局 skills 目录含 `crm-ops/SKILL.md`，对 agent "support" 触发 materialize
+- **THEN** `<support-home>/skills/crm-ops/SKILL.md` 存在且内容与源一致
+
+#### Scenario: 源目录缺失时安全跳过
+
+- **WHEN** 全局 skills 目录不存在，触发 materialize
+- **THEN** materialize 正常完成，`<home>/skills/` 不被创建（或为空），不抛异常
+
+#### Scenario: 重复 materialize 幂等
+
+- **WHEN** 对同一 agent 连续两次 materialize
+- **THEN** 第二次覆盖 `<home>/skills/` 中的同名文件，不因目录已存在而报错

@@ -293,3 +293,46 @@ def _upsert_state(skill_name: str, fields: dict[str, Any]) -> None:
             """,
             merged,
         )
+
+
+# --- Hit tracking (skill-observability-tracking) ------------------------------
+
+
+def record_hit(skill_name: str, agent_id: str | None, session_id: str | None) -> None:
+    """Append one hit row for a successful read_skill load (append-only stream)."""
+    with _database().transaction() as conn:
+        conn.execute(
+            """
+            INSERT INTO skill_hits (skill_name, agent_id, session_id, triggered_at)
+            VALUES (:skill_name, :agent_id, :session_id, :triggered_at)
+            """,
+            {
+                "skill_name": skill_name,
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "triggered_at": _now(),
+            },
+        )
+
+
+def observe(skill_name: str) -> dict[str, Any]:
+    """Real per-skill observability: hit count + the deduped sessions that triggered it.
+
+    Replaces the old stale placeholder; ``stale`` is False because this is live data.
+    """
+    db = _database()
+    hits = db.execute(
+        "SELECT COUNT(*) AS n FROM skill_hits WHERE skill_name = :skill_name",
+        {"skill_name": skill_name},
+    ).fetchone()
+    sessions = db.execute(
+        "SELECT DISTINCT session_id FROM skill_hits "
+        "WHERE skill_name = :skill_name AND session_id IS NOT NULL ORDER BY session_id",
+        {"skill_name": skill_name},
+    ).fetchall()
+    return {
+        "skill_name": skill_name,
+        "hits": int(hits["n"]) if hits else 0,
+        "sessions": [str(r["session_id"]) for r in sessions],
+        "stale": False,
+    }
