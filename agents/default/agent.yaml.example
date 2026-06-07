@@ -21,13 +21,12 @@
 #   • intelligence: vector_store / embedding / rerank / knowledge / long_term_ctx / mcp
 #   • governance:   context_* / agent_budget_* / agent_max_* / permission_gate_* /
 #                   tool_default_timeout_seconds / provider_* (see "runtime governance" below)
-#   • deployment:   microsandbox_url / session_* / image_gen_* / vision_* / disabled_skills /
+#   • deployment:   log_format / session_* / disabled_skills /
 #                   observability / diagnostics / scheduling / webhooks
 #   • default agent: the old `default_agent_name` is now `bindings.default: true`
 #   • IM tokens:     the old slack_/telegram_ tokens are now `connectors.*` `*_env` refs (Slack)
 #                    or owner-level env vars (Telegram); never inline
 # The platform `config/settings.yaml` keeps only `database_url` / `log_format` / `observability`.
-
 name: support-bot                  # required; the agent's name (any value in single-agent mode)
 version: 3                         # required
 tenant_id: acme-corp               # optional, default "default"
@@ -262,19 +261,12 @@ provider_failure_threshold: 3     # consecutive failures before a provider is ma
 provider_cooldown_seconds: 60     # seconds a tripped provider stays in cooldown
 
 # ── per-agent deployment / process knobs ──
-microsandbox_url: http://host.docker.internal:7777
-log_format: console               # console | json
+log_format: console               # console | json (configures agent runtime log output format)
 session_ttl_days: 30
 session_max_total_mb: 1024        # total size cap for all sessions on disk (MB)
 session_max_count: 10000          # max number of sessions retained
 session_cleanup_interval_seconds: 3600.0
 disabled_skills: []
-
-# image generation / vision (self-hosted; empty url = disabled)
-image_gen_url: ""
-image_gen_model: default          # model name passed to the image generation endpoint
-vision_url: ""
-vision_model: default             # model name passed to the vision endpoint
 
 # ── feature toggles (per-capability on/off + tuning) ──
 mcp:
