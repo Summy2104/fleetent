@@ -1278,7 +1278,7 @@
     <div class="modal-box wide" role="dialog" aria-modal="true">
       <h3 id="ag-modal-title">New agent</h3>
       <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="agSave(); return false;">
-        <input id="ag-name" placeholder="agent name (unique)" autocomplete="off">
+        <input id="ag-name" placeholder="agent name (unique)" autocomplete="off" oninput="agSyncSkillsDir()">
         <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
           <span class="muted" style="font-size:12px;">Icon</span>
           <span id="ag-icon-preview" style="font-size:22px; line-height:1;">🤖</span>
@@ -2737,6 +2737,17 @@ function agSetIcon(emoji) {
   $("ag-icon").value = emoji || "";
   $("ag-icon-preview").textContent = emoji || "🤖";
 }
+// Auto-fill skills_dir from the agent name while it still holds an auto value (empty or the
+// ~/.fleetent/<x>/skills pattern); a custom path the operator typed is left untouched.
+function agSyncSkillsDir() {
+  const el = $("ag-skillsdir");
+  if (!el) return;
+  const cur = el.value.trim();
+  if (cur === "" || /^~\/\.fleetent\/[^/]*\/skills$/.test(cur)) {
+    const name = $("ag-name").value.trim();
+    el.value = name ? `~/.fleetent/${name}/skills` : "";
+  }
+}
 async function agCreate() {
   $("ag-modal-title").textContent = "New agent";
   $("ag-err").textContent = "";
@@ -3055,7 +3066,7 @@ async function agEdit(name) {
     $("ag-tenant").value = a.tenant_id || "default";
     $("ag-team").value = a.team_id || "";
     $("ag-memns").value = a.memory_namespace || "default";
-    $("ag-skillsdir").value = a.skills_dir || "";
+    $("ag-skillsdir").value = a.skills_dir || `~/.fleetent/${name}/skills`;
     // config_overrides round-trips as JSON (valid YAML); blank when empty
     $("ag-advanced").value = (a.config_overrides && Object.keys(a.config_overrides).length)
       ? JSON.stringify(a.config_overrides, null, 2) : "";
