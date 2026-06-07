@@ -232,3 +232,10 @@ C2 (todo 持久化, 最小, 验证 OpenSpec→TDD→bb-pr 全流程)
 - **实现**：`_build_summary_prompt` 重写为结构化模板（Goal/Completed/In Progress·Pending/Key Findings/Next Steps，首次与增量两分支同结构，要求逐字保留未完成工作+下一步）；新增 `_active_task_block(session_id)` 读 C2 的 `.todo` 未完成项，作为逐字 system 块在 summarized/degraded 路径注入 `[head, active-task, summary, tail]`（no_middle 不注入）；`_select_tail` 增 `extra_fixed` 把 active 块 token 计入投影。无 session / 无未完成 / 读失败安全退化。
 - **决策**：active 块用新建 dict，不入 head/tail identity 集合，不破坏既有去重；prompt 保持英文（跨模型稳健）。
 - **测试**：`tests/unit/test_compression_continuation.py`(6)；全量 **3725 passed, 14 skipped**；mypy / ruff（改动文件）/ openspec validate --strict 通过；既有压缩测试无回归（无 session 调用行为不变）。
+
+### 2026-06-07 — C3b `compression-overflow-handling` 完成（范围聚焦）
+
+- **范围聚焦（实施期决定）**：原 C3b 计划含「按模型 `context_window` 主动预算 + overflow + 守卫 + 工具 prune」。实施期收敛为**反应式上下文溢出恢复 + 压缩后守卫**——理由：反应式（捕获真实 API 溢出错误 → 压缩 → 重试）**通用、无需为每个 model 配 `context_window`**，对 on-prem 多后端最省心，且已覆盖"防崩溃"核心目标。**暂缓项**：① 按模型 `context_window` 主动预算（需 per-model 窗口配置，边际价值被反应式覆盖）；② 工具结果 prune（独立 token 回收优化）。二者列入 §5 暂缓，可后续单独立项。
+- **实现**：接通既有但从未消费的骨架——`run()` 新增 `_call_with_overflow_retry`、`run_stream()` 新增 `_stream_with_overflow_retry`，在 `classify(exc).should_compress`（context_overflow）时调 `compress_for_context_overflow` 原地/重绑压缩并重试同 target（不切模型）；守卫 = `_MAX_OVERFLOW_COMPRESSIONS=1` + 「压缩无 token 进展即放弃 re-raise」。
+- **新能力**：`compression-overflow-recovery`。
+- **测试**：`tests/unit/test_overflow_recovery.py`(6)；全量 **3731 passed, 14 skipped**；mypy / ruff（改动文件）/ openspec validate --strict 通过。
