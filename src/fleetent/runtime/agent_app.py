@@ -408,9 +408,7 @@ def build_app(agent_name: str) -> FastAPI:
         return list_approvals(status=status)
 
     @app.post("/approvals/{approval_id}/resolve")
-    async def resolve_approval(
-        approval_id: str, req: ApprovalRequest
-    ) -> dict:  # type: ignore[type-arg]
+    async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # type: ignore[type-arg]
         from fleetent.governance.permission_gate import _default_gate
 
         if req.decision not in ("approved", "rejected"):

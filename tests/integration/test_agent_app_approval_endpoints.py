@@ -41,9 +41,7 @@ def test_resolve_approval_unknown_id_returns_404(monkeypatch):
         "/approvals/nonexistent/resolve",
         json={"decision": "approved", "approver_user_id": "test"},
     )
-    assert resp.status_code == 404, (
-        f"Expected 404 for unknown approval, got {resp.status_code}"
-    )
+    assert resp.status_code == 404, f"Expected 404 for unknown approval, got {resp.status_code}"
 
 
 async def test_resolve_approval_happy_path(monkeypatch):
