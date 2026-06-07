@@ -7,7 +7,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from fleetent import paths
-from fleetent.platform.config_validation import _flatten, _looks_inline_secret
+from fleetent.secret_scan import flatten, looks_inline_secret
 
 SourceType = Literal["google_drive", "confluence"]
 _SECRET_KEY_PARTS = ("token", "secret", "password", "api_key", "credential")
@@ -128,14 +128,14 @@ def load_knowledge_config(path: Path | None = None) -> KnowledgeConfigSnapshot:
 
 
 def _reject_inline_source_secrets(raw: dict[str, object], path: Path) -> None:
-    for key, value in _flatten(raw):
+    for key, value in flatten(raw):
         if not isinstance(value, str):
             continue
         if key.endswith("_env") or key.endswith("credential_ref"):
             continue
         lowered_key = key.lower()
         secret_key = any(part in lowered_key for part in _SECRET_KEY_PARTS)
-        if not secret_key and not _looks_inline_secret(value):
+        if not secret_key and not looks_inline_secret(value):
             continue
         raise ValueError(
             f"inline secret-like value in knowledge config at '{key}' ({path}); "

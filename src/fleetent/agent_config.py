@@ -30,7 +30,7 @@ from fleetent.config import (
     VectorStoreSettings,
     WebhooksSettings,
 )
-from fleetent.platform.config_validation import _flatten, _looks_inline_secret
+from fleetent.secret_scan import flatten, looks_inline_secret
 
 # Agents root directory. Module-level constant (injectable via monkeypatch per the
 # project's no-global-mutable-state rule); env override mirrors FLEETENT_SKILLS_DIR.
@@ -342,20 +342,20 @@ def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
         "rerank": agent.rerank.model_dump(),
         "knowledge": agent.knowledge.model_dump(),
     }
-    for key, value in _flatten(payload):
+    for key, value in flatten(payload):
         if (
             isinstance(value, str)
-            and _looks_inline_secret(value)
+            and looks_inline_secret(value)
             and not _is_env_reference(key, value)
         ):
             raise ValueError(
                 f"inline secret-like value in agent '{agent.name}' at '{key}' ({path}); "
                 "reference secrets by environment-variable name instead"
             )
-    for key, value in _flatten(intelligence_payload):
+    for key, value in flatten(intelligence_payload):
         if not _is_secret_reference_key(key) or not isinstance(value, str):
             continue
-        if _looks_inline_secret(value) and not _is_env_reference(key, value):
+        if looks_inline_secret(value) and not _is_env_reference(key, value):
             raise ValueError(
                 f"inline secret-like value in agent '{agent.name}' at '{key}' ({path}); "
                 "reference secrets by environment-variable name instead"
