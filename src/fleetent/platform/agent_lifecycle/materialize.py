@@ -31,11 +31,11 @@ from fleetent.config import McpServerSettings
 from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
 from fleetent.observability.structured_logging import get_logger
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
-from fleetent.platform.config_validation import _flatten
 from fleetent.platform.connector_management import agent_mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
 from fleetent.platform.skill_management import skill_admin_store
+from fleetent.secret_scan import flatten
 from fleetent.skills import registry as skill_registry
 
 _logger = get_logger("agent_lifecycle.materialize")
@@ -231,7 +231,7 @@ def _env_var_names(
 ) -> list[str]:
     """Collect the env-var names the agent's home references."""
     names: list[str] = []
-    for key, value in _flatten(agent.model_dump(mode="json")):
+    for key, value in flatten(agent.model_dump(mode="json")):
         if key.endswith("_env") and isinstance(value, str) and value:
             names.append(value)
     # stable order, de-duplicated
@@ -249,7 +249,7 @@ def _knowledge_env_var_names(knowledge_config: KnowledgeConfigSnapshot | None) -
     if knowledge_config is None:
         return set()
     names: set[str] = set()
-    for key, value in _flatten(knowledge_config.model_dump(mode="json")):
+    for key, value in flatten(knowledge_config.model_dump(mode="json")):
         if key.endswith("_env") and isinstance(value, str) and value:
             names.add(value)
     return names
