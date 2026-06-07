@@ -16,7 +16,10 @@ class InitConfigPlanItem:
     path: str
 
 
-_GENERATED_FILES = (("config/platform/.env.example", ".env"),)
+_GENERATED_FILES = (
+    (".env.example", ".env"),
+    ("platform.yaml.example", "platform.yaml"),
+)
 _GENERATED_DIRS = (
     "data/",
     "data/logs/",
@@ -83,5 +86,5 @@ def handle(args: argparse.Namespace) -> bool:
 
     for item in plan:
         print(f"{item.action} {item.path}")
-    print("next: edit .env, then place real secret files in secrets/")
+    print("next: edit .env and platform.yaml, then place real secret files in secrets/")
     return True

@@ -10,7 +10,6 @@ from fastapi import HTTPException
 from fleetent import agent_store
 from fleetent.platform.agent_management_console import agent_admin_api, agent_console_api
 from fleetent.platform.connector_management import connector_admin_api
-from fleetent.platform.knowledge_base_management import agent_kbs_store
 
 
 @dataclass
@@ -80,18 +79,6 @@ def test_agent_admin_yaml_bindings_versions_and_deploy(monkeypatch, tmp_path):
     monkeypatch.setattr(
         agent_admin_api.agent_store, "list_users_for_agent", lambda _agent_id: ["u1"]
     )
-    # agent_file_from_store now also materializes knowledge bindings + the active version —
-    # keep this a pure unit test by stubbing those rather than hitting a real DB.
-    monkeypatch.setattr(agent_kbs_store, "list_kbs_for_agent", lambda _tenant, _agent: [])
-    monkeypatch.setattr(
-        agent_admin_api.agent_store,
-        "get_version_by_id",
-        lambda _vid: SimpleNamespace(version=1),
-    )
-    # deploy now copies enabled skills into the home — stub the store (pure unit test)
-    monkeypatch.setattr(
-        agent_admin_api.skill_admin_store, "enabled_skill_names", lambda _name: set()
-    )
     monkeypatch.setattr(
         agent_admin_api.agent_store,
         "list_versions",
@@ -111,7 +98,7 @@ def test_agent_admin_yaml_bindings_versions_and_deploy(monkeypatch, tmp_path):
 
     deployed = agent_admin_api.deploy_agent("ops", authorization="Session token")
     assert deployed["deployed"] is True
-    assert (tmp_path / "ops" / "agent.yaml").exists()
+    assert (tmp_path / "agents" / "ops" / "agent.yaml").exists()
     assert agent_admin_api.list_versions("ops", authorization="Session token")[0]["version"] == 1
     assert agent_admin_api.activate_version("ops", 2, authorization="Session token") == {
         "name": "ops",
@@ -142,15 +129,12 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
             name,
             lambda *args, _name=name, **kwargs: calls.append((_name, args, kwargs)),
         )
-    monkeypatch.setattr(
-        agent_admin_api.config, "load_mcp_server_settings", lambda: [SimpleNamespace(id="cfg")]
-    )
     monkeypatch.setattr(agent_admin_api.agent_store, "list_users_for_agent", lambda _agent_id: [])
     monkeypatch.setattr(
         agent_admin_api.agent_store, "list_channels_for_agent", lambda _agent_id: []
     )
     monkeypatch.setattr(
-        agent_admin_api.agent_store, "list_mcp_servers_for_agent", lambda _agent_id: ["cfg"]
+        agent_admin_api.agent_store, "list_mcp_servers_for_agent", lambda _agent_id: ["db"]
     )
     monkeypatch.setattr(
         agent_admin_api.agent_mcp_server_store,
@@ -224,7 +208,7 @@ def test_agent_admin_binding_skill_kb_oauth_and_mcp_handlers(monkeypatch):
     assert agent_admin_api.get_bindings("ops", authorization="Session token") == {
         "users": [],
         "channels": [],
-        "mcp_servers": ["cfg"],
+        "mcp_servers": ["db"],
     }
     assert agent_admin_api.list_agent_skills("ops", authorization="Session token") == [
         {"skill_name": "skill-a", "enabled": True},

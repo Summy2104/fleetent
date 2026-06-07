@@ -12,12 +12,13 @@ from fleetent.runtime import agent_app
 class _FakeSupervisor:
     def __init__(self):
         self.started: list[str] = []
+        self.stopped = False
 
     async def start(self, agent_name: str) -> None:
         self.started.append(agent_name)
 
     async def stop_all(self) -> None:
-        pass
+        self.stopped = True
 
 
 def _write_home(tmp_path, name="support", **fields):
@@ -58,6 +59,39 @@ async def test_boot_skips_im_when_disabled(tmp_path):
     sup = _FakeSupervisor()
     await agent_app.boot("support", home=home, supervisor=sup, with_infra=False, start_im=False)
     assert sup.started == []
+
+
+async def test_boot_starts_agent_telegram_connector(tmp_path):
+    home = _write_home(tmp_path)
+    sup, tg = _FakeSupervisor(), _FakeSupervisor()
+    await agent_app.boot(
+        "support", home=home, supervisor=sup, telegram_supervisor=tg, with_infra=False
+    )
+    assert tg.started == ["support"]
+
+
+async def test_boot_skips_telegram_when_im_disabled(tmp_path):
+    home = _write_home(tmp_path)
+    sup, tg = _FakeSupervisor(), _FakeSupervisor()
+    await agent_app.boot(
+        "support",
+        home=home,
+        supervisor=sup,
+        telegram_supervisor=tg,
+        with_infra=False,
+        start_im=False,
+    )
+    assert tg.started == []
+
+
+async def test_runtime_stop_stops_both_supervisors(tmp_path):
+    home = _write_home(tmp_path)
+    sup, tg = _FakeSupervisor(), _FakeSupervisor()
+    rt = await agent_app.boot(
+        "support", home=home, supervisor=sup, telegram_supervisor=tg, with_infra=False
+    )
+    await rt.stop()
+    assert sup.stopped and tg.stopped
 
 
 def test_build_app_serves_chat_ws_health_and_no_admin():
@@ -113,6 +147,41 @@ def test_chat_requires_auth(tmp_path, monkeypatch):
 
 def test_resolve_home_uses_fleetent_home(tmp_path, monkeypatch):
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    assert agent_app.resolve_home("support") == tmp_path / "support"
+    assert agent_app.resolve_home("support") == tmp_path / "agents" / "support"
     # explicit override wins
     assert agent_app.resolve_home("support", home=tmp_path / "x") == tmp_path / "x"
+
+
+# ── per-agent skill index from home/skills (skill-runtime-per-agent-index) ────
+
+
+async def test_boot_builds_skill_index_from_home_skills(tmp_path, monkeypatch):
+    """boot() scans <home>/skills/ so the process skill index reflects this agent."""
+    from fleetent.skills import registry as skill_registry
+
+    home = _write_home(tmp_path)
+    skill_dir = home / "skills" / "crm-ops"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: crm-ops\ndescription: CRM operations helper\n---\nbody", encoding="utf-8"
+    )
+    # Ensure the global env does not point the scanner elsewhere.
+    monkeypatch.delenv("FLEETENT_SKILLS_DIR", raising=False)
+
+    sup = _FakeSupervisor()
+    await agent_app.boot("support", home=home, supervisor=sup, with_infra=False)
+
+    assert "crm-ops" in skill_registry._index
+
+
+async def test_boot_safe_when_home_has_no_skills_dir(tmp_path, monkeypatch):
+    """No <home>/skills/ → boot succeeds; the home-specific skill is absent."""
+    from fleetent.skills import registry as skill_registry
+
+    home = _write_home(tmp_path)
+    monkeypatch.delenv("FLEETENT_SKILLS_DIR", raising=False)
+
+    sup = _FakeSupervisor()
+    await agent_app.boot("support", home=home, supervisor=sup, with_infra=False)
+
+    assert "crm-ops" not in skill_registry._index

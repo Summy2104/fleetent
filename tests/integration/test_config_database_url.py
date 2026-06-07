@@ -21,7 +21,7 @@ def test_settings_env_overrides_settings_yaml(tmp_path, monkeypatch):
             ]
         )
     )
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
+    monkeypatch.setattr(cfg, "PLATFORM_YAML_PATH", settings_yaml)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", "sqlite:///tmp/from-env.db")
 

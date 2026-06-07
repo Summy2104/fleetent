@@ -77,21 +77,31 @@ install script SHALL 将运行状态目录固定为 `FLEETENT_HOME`（默认 `~/
 - **THEN** script 使用 PATH 作为 `FLEETENT_HOME`，而非默认 `~/.fleetent`
 
 ### Requirement: Configuration templates
-install script SHALL seed a flat agent home: `.env` at `FLEETENT_HOME/.env` and the self-contained single-agent config at `FLEETENT_HOME/agent.yaml`（home 根，无 `config/` 子目录）from repository templates under `config/agent/`, preserving existing operator files. Global settings/mcp templates remain unseeded.
 
-#### Scenario: Fresh install seeds flat home agent yaml
-- **WHEN** `FLEETENT_HOME/agent.yaml` or `.env` is absent
-- **THEN** script creates `$FLEETENT_HOME/.env` from `config/agent/.env.example`
-- **AND** creates `$FLEETENT_HOME/agent.yaml` from `config/agent/agent.yaml.example`
-- **AND** does not create a `$FLEETENT_HOME/config/` subdirectory
+install script SHALL seed explicit Platform home files and the default Agent home from
+runtime-adjacent repository examples. It SHALL create `.env` and `platform.yaml` in
+`FLEETENT_HOME`, and `agents/default/agent.yaml`, `agents/default/.env`, and
+`agents/default/data/` under the same Platform home. It SHALL preserve existing operator files.
 
-#### Scenario: Existing home agent yaml or env is preserved
-- **WHEN** `$FLEETENT_HOME/agent.yaml` or `.env` already exists
+#### Scenario: Fresh install seeds Platform home and default Agent home
+- **WHEN** operator runs install with an empty `FLEETENT_HOME`
+- **THEN** script creates `$FLEETENT_HOME/.env` from `.env.example`
+- **AND** creates `$FLEETENT_HOME/platform.yaml` from `platform.yaml.example`
+- **AND** creates `$FLEETENT_HOME/agents/default/agent.yaml` from
+  `agents/default/agent.yaml.example`
+- **AND** creates `$FLEETENT_HOME/agents/default/.env` from `agents/default/.env.example`
+- **AND** creates `$FLEETENT_HOME/agents/default/data/`
+- **AND** does not create a Platform home config subdirectory
+
+#### Scenario: Existing Platform or Agent files are preserved
+- **WHEN** `$FLEETENT_HOME/.env`, `$FLEETENT_HOME/platform.yaml`,
+  `$FLEETENT_HOME/agents/default/agent.yaml`, or `$FLEETENT_HOME/agents/default/.env`
+  already exists
 - **THEN** script leaves existing files unchanged
 
 #### Scenario: Skip config skips seeding
 - **WHEN** operator passes `--skip-config`
-- **THEN** script does not seed `agent.yaml` or `.env`
+- **THEN** script does not seed Platform or Agent config/env files
 
 ### Requirement: Database initialization
 install script SHALL 通过 Alembic 在 `FLEETENT_HOME/data` 下初始化 SQLite 数据库，使 schema lifecycle 统一归 Alembic 管理。
@@ -134,3 +144,13 @@ install script SHALL 支持非交互安装 flag，便于在 CI 或脚本化环�
 - **THEN** script 打印错误与用法
 - **AND** 以非零退出码退出
 
+### Requirement: Install bootstrap seeds explicit Platform and Agent homes
+
+安装脚本 SHALL seed 明确的 Platform home 与默认 Agent home，而不是把 Platform home 根目录同时当成
+Agent home。默认 Agent home SHALL be `agents/default/` and SHALL contain `agent.yaml`, `.env`,
+and `data/`.
+
+#### Scenario: Default Agent home is under agents/default
+- **WHEN** install completes
+- **THEN** default Agent config lives at `$FLEETENT_HOME/agents/default/agent.yaml`
+- **AND** no default Agent config is created at Platform home root

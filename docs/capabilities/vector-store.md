@@ -12,14 +12,14 @@
 **不负责**：业务数据存储（→ memory / knowledge_base）、检索结果的业务过滤（如 TTL 过期判断，由调用方处理）、注入协调（→ long_term_ctx）。
 
 **调用关系**：
-- 依赖：embedding 模型（当前 deterministic，后续本地自托管 bge-m3 或 multilingual-e5）、向量后端（memory 或普通 SQLite persistent backend；sqlite-vec / Qdrant 后置）、config
+- 依赖：embedding 模型（默认 deterministic，可由 active Agent `models.routes.embedding` 指向 HTTP provider）、向量后端（memory 或普通 SQLite persistent backend；sqlite-vec / Qdrant 后置）、Agent / Platform config
 - 被依赖：`fleetent.intelligence.memory`（记忆条目的写入与检索）、knowledge_base（文档 chunk 的写入与检索）
 
 **模块归属**：
 - owning package：`intelligence.vector_store`
 - public API：`upsert(id, text, namespace)`、`search(query, namespace, limit)`、`delete(id, namespace)`、`clear_namespace(namespace)`、`reindex(ReindexRequest)`、`SearchResult`、`IndexableItem`、`ReindexSummary`
 - owned tables：`vector_items`（SQLite persistent backend owns）
-- config namespace：`vector_store.*`、`embedding.*`、`rerank.*`
+- config namespace：Agent `models.routes.embedding` / `models.routes.rerank`、Agent `embedding.*` / `rerank.*` compatibility blocks、`vector_store.*`
 
 ## 关键流程
 
@@ -110,7 +110,7 @@ def reindex(request: ReindexRequest) -> ReindexSummary:
   `rerank=True` 调用 provider 重排候选
 - in-memory vector backend，支持 namespace 隔离、upsert 覆盖、delete、score 排序
 - 普通 SQLite persistent backend，使用 `vector_items` 表持久化 namespace-scoped vectors，检索时在 Python 内做 cosine similarity
-- `vector_store.*` / `embedding.*` / `rerank.*` 基础配置命名空间
+- Agent model policy 可为 embedding / rerank 指定 HTTP provider；`vector_store.*` 保留向量后端配置
 - `vector_store.database_url` 可选配置；未配置时 SQLite backend 复用全局 `Settings.database_url`
 - 同步 reindex 边界支持 memory / knowledge-base 的 dry-run 和 rebuild；`rebuild` 先清空目标 namespace，再逐条 upsert 当前 source records，单条失败计入 failed 并继续后续 item
 - combined memory+KB embedding evaluation 使用 deterministic embedding 默认验证 memory 和 KB 都能通过 reindex 后检索；真实 HTTP embedding smoke 显式 opt-in
@@ -142,7 +142,7 @@ rerank provider 已接入 knowledge-base hybrid search 的显式 rerank 路径�
 ## 当前缺口
 
 - sqlite-vec / Qdrant 未实现：当前持久化后端是普通 SQLite + Python cosine，不提供 ANN 性能。
-- 真实 embedding 可通过 HTTP provider 接入，但当前默认仍是 deterministic，需部署自托管
+- 真实 embedding 可通过 Agent `models.routes.embedding` 的 HTTP provider 接入，但当前默认仍是 deterministic，需部署自托管
   embedding endpoint 后显式配置。
 - rerank 已接入 knowledge-base hybrid search 的显式路径，并有 deterministic evaluation；真实 rerank
   provider 仍需显式 opt-in smoke 和效果评估。
@@ -208,7 +208,7 @@ vector-store 未来有独立服务潜力，尤其是 embedding provider 和 Qdra
 ## 待决问题
 
 - [x] 默认后端选型（MVP）：普通 SQLite persistent backend，避免 sqlite-vec native extension 的安装和 on-premises 兼容风险；sqlite-vec / Qdrant 后置评估。
-- [x] embedding / rerank provider 边界：使用 HTTP provider 适配自托管或第三方 OpenAI-style API，默认仍为 deterministic / disabled，禁止静默 fallback。
+- [x] embedding / rerank provider 边界：可从 Agent model policy 或 compatibility settings 创建 HTTP provider，适配自托管或第三方 OpenAI-style API，默认仍为 deterministic / disabled，禁止静默 fallback。
 - [ ] embedding 模型部署方式：自托管 HTTP sidecar 的具体运行时选型（`infinity_emb` / `text-embeddings-inference` / 其他）和运维配置。
   - in-process：部署简单，但 bge-m3 约 500MB-1GB 内存、冷启动 30-60s，影响主进程重启体验
   - HTTP sidecar：多 fleetent 实例可共享同一 embedding 服务，主进程重启不影响 embedding；两者均完全自托管

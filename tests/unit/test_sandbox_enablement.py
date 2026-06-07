@@ -46,7 +46,7 @@ def test_resolve_effective_mode_docker_available_passthrough():
     assert resolve_effective_mode(Mode.OFF, docker_available=True) is Mode.OFF
 
 
-# ── sandbox: config section (config/settings.yaml) ───────────────────────────
+# ── sandbox: platform.yaml section ───────────────────────────────────────────
 
 
 def test_load_sandbox_mode_defaults_to_all_when_file_absent(tmp_path, monkeypatch):

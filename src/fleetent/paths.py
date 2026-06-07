@@ -1,11 +1,11 @@
 """Central runtime path resolver.
 
-All config/data paths derive from here. Resolution precedence for the base
+All runtime paths derive from here. Resolution precedence for the base
 directory:
 
 1. ``FLEETENT_HOME`` environment variable, when set (explicit override).
 2. The fleetent repository root, when running from inside a checkout
-   (development): zero-config so ``uv run`` keeps using ``./config`` + ``./data``.
+   (development): zero-config so ``uv run`` keeps using repo-local Platform and data files.
 3. ``~/.fleetent`` fallback, for globally-installed, working-directory-decoupled
    use.
 
@@ -30,7 +30,7 @@ def _has_repo_marker(directory: Path) -> bool:
                 return True
         except OSError:
             pass
-    return (directory / "config").is_dir()
+    return (directory / "platform.yaml.example").is_file()
 
 
 def _repo_root() -> Path | None:
@@ -42,7 +42,7 @@ def _repo_root() -> Path | None:
 
 
 def base_dir() -> Path:
-    """Resolve the base directory holding ``config/`` and ``data/``."""
+    """Resolve the Platform home directory."""
     explicit = os.environ.get("FLEETENT_HOME")
     if explicit:
         return Path(explicit).expanduser()
@@ -52,21 +52,29 @@ def base_dir() -> Path:
     return Path.home() / _DEFAULT_HOME_DIRNAME
 
 
-def config_dir() -> Path:
-    return base_dir() / "config"
-
-
 def data_dir() -> Path:
     return base_dir() / "data"
 
 
+def agents_dir() -> Path:
+    return base_dir() / "agents"
+
+
+def agent_home_dir(agent_id: str) -> Path:
+    return agents_dir() / agent_id
+
+
 def agent_file() -> Path:
-    """The deployed single agent's self-contained config, at the flat home root."""
-    return base_dir() / "agent.yaml"
+    """The default deployed Agent's self-contained config."""
+    return agent_home_dir("default") / "agent.yaml"
 
 
-def settings_yaml_path() -> Path:
-    return config_dir() / "settings.yaml"
+def platform_yaml_path() -> Path:
+    return base_dir() / "platform.yaml"
+
+
+def platform_env_path() -> Path:
+    return base_dir() / ".env"
 
 
 def sessions_dir() -> Path:

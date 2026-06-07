@@ -12,20 +12,16 @@ import yaml
 from fastapi import APIRouter, Body, Header, HTTPException
 from pydantic import BaseModel
 
-from fleetent import agent_store, auth, config, paths, user_store
+from fleetent import agent_store, auth, paths, user_store
 from fleetent.governance import audit_log
-from fleetent.platform.agent_lifecycle.materialize import (
-    agent_file_from_store,
-    copy_agent_skills,
-    required_env_slots,
-)
+from fleetent.platform.agent_lifecycle import credential_slots, secret_store
+from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
 from fleetent.platform.connector_management import (
     agent_mcp_server_store,
     agent_oauth_binding_store,
     connector_config_store,
 )
 from fleetent.platform.knowledge_base_management import agent_kbs_store
-from fleetent.platform.secret_management import agent_secret_store, credential_service
 from fleetent.platform.skill_management import skill_admin_store
 from fleetent.skills import registry as skill_registry
 
@@ -51,6 +47,10 @@ router = APIRouter(prefix="/admin")
 
 IDLE_TIMEOUT_SECONDS = 1800
 _ADMIN_ROLES = {"admin", "built_in_admin"}
+
+
+class SecretWriteBody(BaseModel):
+    value: str
 
 
 def _session_user(authorization: str | None) -> user_store.User:
@@ -89,26 +89,49 @@ def _require_agent(name: str) -> agent_store.Agent:
 def _known_mcp_server_ids() -> set[str]:
     """The set of MCP server ids an agent may bind to.
 
-    Unions the YAML config seam with DB-registered global servers (admin console),
-    matching what ``GET /admin/mcp/servers`` lists — so a server defined only in the
-    store (not config) is still bindable.
+    Uses DB-registered global servers (admin console), matching what
+    ``GET /admin/mcp/servers`` lists.
     """
-    ids = {s.id for s in config.load_mcp_server_settings()}
-    ids |= {str(r["server_id"]) for r in agent_mcp_server_store.list_mcp_servers(None)}
-    return ids
+    return {str(r["server_id"]) for r in agent_mcp_server_store.list_mcp_servers(None)}
 
 
 def _build_agent_yaml(agent: agent_store.Agent) -> str:
     """Assemble the runtime agent.yaml from the DB-authored config + bindings.
 
-    Single source of truth is ``agent_file_from_store``, which materializes model policy,
-    MCP servers, IM bindings and knowledge bindings — so the console preview matches the
-    deployed home byte-for-byte. connectors.slack is intentionally omitted: per-agent Slack
-    connectors are not authored in the DB.
+    Covers every field the admin console authors. connectors.slack is intentionally
+    omitted: per-agent Slack connectors are not authored in the DB.
     """
     data: dict[str, Any] = agent_file_from_store(agent).model_dump(
         mode="json", exclude_defaults=False
     )
+
+    servers: list[dict[str, Any]] = []
+    for sid in agent_store.list_mcp_servers_for_agent(agent.id):
+        row = agent_mcp_server_store.get_mcp_server(
+            agent.id, sid
+        ) or agent_mcp_server_store.get_mcp_server(None, sid)
+        if row is None:
+            continue
+        entry: dict[str, Any] = {"id": sid, "transport": row["transport"]}
+        for key in ("url", "auth_type", "api_key_env", "command", "args", "env"):
+            if row.get(key):
+                entry[key] = row[key]
+        servers.append(entry)
+    if servers:
+        data["mcp_servers"] = servers
+
+    bindings: dict[str, Any] = {}
+    channels = [
+        f"{c['platform']}:{c['channel_id']}" for c in agent_store.list_channels_for_agent(agent.id)
+    ]
+    users = agent_store.list_users_for_agent(agent.id)
+    if channels:
+        bindings["channels"] = channels
+    if users:
+        bindings["users"] = users
+    if bindings:
+        data["bindings"] = bindings
+
     return yaml.dump(
         data,
         Dumper=_AgentYamlDumper,
@@ -128,95 +151,22 @@ def export_agent_yaml(name: str, authorization: str | None = Header(None)) -> di
 
 @router.post("/agents/{name}/deploy")
 def deploy_agent(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
-    """Write (overwrite) the agent.yaml at ``<FLEETENT home>/<name>/agent.yaml``.
+    """Write (overwrite) the agent.yaml at ``<FLEETENT home>/agents/<name>/agent.yaml``.
 
-    Target: ``~/.fleetent/<name>/agent.yaml`` (honors FLEETENT_HOME). Picking it up
+    Target: ``~/.fleetent/agents/<name>/agent.yaml`` (honors FLEETENT_HOME). Picking it up
     into the runtime index is owned elsewhere; this just generates the file.
     """
     user = _require_admin(authorization)
     agent = _require_agent(name)
     if "/" in name or "\\" in name or name in (".", ".."):
         raise HTTPException(status_code=400, detail="invalid agent name")
-    dest = paths.base_dir() / name / "agent.yaml"
+    dest = paths.agent_home_dir(name) / "agent.yaml"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(_build_agent_yaml(agent), encoding="utf-8")
-    # copy the agent's enabled skills into its home so the deployed agent carries its own
-    copy_agent_skills(name, skill_admin_store.enabled_skill_names(name))
     audit_log.write_audit(
         user.id, "agent.deploy", target_type="agent", target_id=name, detail={"path": str(dest)}
     )
     return {"agent": name, "path": str(dest), "deployed": True}
-
-
-def _credential_slots(agent: agent_store.Agent) -> list[dict[str, str]]:
-    """Per-slot {env_name, source, mode, status} for the agent's referenced ``*_env``.
-
-    mode is derived (inject iff a value is stored); status never exposes the value.
-    """
-    slots = required_env_slots(agent_file_from_store(agent))
-    return [
-        {
-            "env_name": env_name,
-            "source": source,
-            "mode": credential_service.slot_mode(agent.id, env_name),
-            "status": agent_secret_store.status(agent.id, env_name),
-        }
-        for env_name, source in slots
-    ]
-
-
-@router.get("/agents/{name}/required-env")
-def required_env(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
-    _current_user(authorization)
-    agent = _require_agent(name)
-    return {"agent": name, "slots": _credential_slots(agent)}
-
-
-@router.get("/agents/{name}/secrets")
-def list_secrets(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
-    _current_user(authorization)
-    agent = _require_agent(name)
-    return {"agent": name, "slots": _credential_slots(agent)}
-
-
-class SecretBody(BaseModel):
-    value: str
-
-
-@router.put("/agents/{name}/secrets/{env_name}")
-def set_secret(
-    name: str, env_name: str, body: SecretBody, authorization: str | None = Header(None)
-) -> dict[str, str]:
-    """Write (encrypt) an inject-mode credential value. Write-only: never echoes it back."""
-    user = _require_admin(authorization)
-    agent = _require_agent(name)
-    try:
-        agent_secret_store.set_secret(agent.id, env_name, body.value, updated_by=user.id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except agent_secret_store.SecretKeyError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    audit_log.write_audit(
-        user.id, "agent.secret_set", target_type="agent", target_id=name, detail={"env": env_name}
-    )
-    return {"env_name": env_name, "status": "set"}
-
-
-@router.delete("/agents/{name}/secrets/{env_name}")
-def delete_secret(
-    name: str, env_name: str, authorization: str | None = Header(None)
-) -> dict[str, str]:
-    user = _require_admin(authorization)
-    agent = _require_agent(name)
-    agent_secret_store.delete_secret(agent.id, env_name)
-    audit_log.write_audit(
-        user.id,
-        "agent.secret_delete",
-        target_type="agent",
-        target_id=name,
-        detail={"env": env_name},
-    )
-    return {"env_name": env_name, "status": "unset"}
 
 
 @router.get("/agents/{name}/versions")
@@ -415,6 +365,113 @@ def unbind_agent_kb(
         user.id, "agent.kb.unbind", target_type="agent", target_id=name, detail={"kb_id": kb_id}
     )
     return {"agent": name, "kb_id": kb_id, "bound": False}
+
+
+# --- agent credential slots / secrets ----------------------------------------
+
+
+@router.get("/agents/{name}/required-env")
+def required_env(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    _current_user(authorization)
+    agent = _require_agent(name)
+    return {"agent": name, "required_env": _required_env_items(agent)}
+
+
+@router.get("/agents/{name}/secrets")
+def list_agent_secrets(name: str, authorization: str | None = Header(None)) -> dict[str, Any]:
+    _current_user(authorization)
+    agent = _require_agent(name)
+    required = {
+        item["env_name"]: {
+            "env_name": item["env_name"],
+            "mode": item["mode"],
+            "status": item["status"],
+        }
+        for item in _required_env_items(agent)
+    }
+    for slot in credential_slots.list_slots(agent):
+        required.setdefault(
+            slot.env_name,
+            {
+                "env_name": slot.env_name,
+                "mode": slot.mode,
+                "status": secret_store.status(agent.id, slot.env_name),
+            },
+        )
+    return {"agent": name, "secrets": sorted(required.values(), key=lambda item: item["env_name"])}
+
+
+@router.put("/agents/{name}/secrets/{env_name}")
+def set_agent_secret(
+    name: str,
+    env_name: str,
+    body: SecretWriteBody,
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    agent = _require_agent(name)
+    if body.value == "":
+        raise HTTPException(status_code=400, detail="empty value rejected; use delete to clear")
+    credential_slots.ensure_slot(agent, f"env:{env_name}", mode="inject", env_name=env_name)
+    try:
+        secret_store.set(agent.id, env_name, body.value, user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit_log.write_audit(
+        user.id,
+        "agent.secret_set",
+        target_type="agent",
+        target_id=name,
+        detail={"env_name": env_name},
+    )
+    return {"env_name": env_name, "status": secret_store.status(agent.id, env_name)}
+
+
+@router.delete("/agents/{name}/secrets/{env_name}")
+def delete_agent_secret(
+    name: str,
+    env_name: str,
+    authorization: str | None = Header(None),
+) -> dict[str, Any]:
+    user = _require_admin(authorization)
+    agent = _require_agent(name)
+    secret_store.delete(agent.id, env_name)
+    audit_log.write_audit(
+        user.id,
+        "agent.secret_delete",
+        target_type="agent",
+        target_id=name,
+        detail={"env_name": env_name},
+    )
+    return {"env_name": env_name, "status": secret_store.status(agent.id, env_name)}
+
+
+def _required_env_items(agent: agent_store.Agent) -> list[dict[str, Any]]:
+    slots_by_env = {slot.env_name: slot for slot in credential_slots.list_slots(agent)}
+    sources: dict[str, str] = {}
+    agent_file = agent_file_from_store(agent)
+    for target in agent_file.models.targets:
+        if target.api_key_env:
+            sources.setdefault(target.api_key_env, "Models")
+    for server in agent_file.mcp_servers:
+        if server.api_key_env:
+            sources.setdefault(server.api_key_env, "MCP")
+    if agent_file.connectors.slack is not None:
+        sources.setdefault(agent_file.connectors.slack.bot_token_env, "Connectors")
+        sources.setdefault(agent_file.connectors.slack.app_token_env, "Connectors")
+
+    items: list[dict[str, Any]] = []
+    for env_name, source in sorted(sources.items()):
+        slot = slots_by_env.get(env_name)
+        items.append(
+            {
+                "env_name": env_name,
+                "source": source,
+                "mode": slot.mode if slot else "operator",
+                "status": secret_store.status(agent.id, env_name),
+            }
+        )
+    return items
 
 
 # --- agent OAuth connector bindings ------------------------------------------

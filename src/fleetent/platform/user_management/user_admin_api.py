@@ -13,9 +13,9 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from fleetent import auth, user_store
-from fleetent.governance import audit_log, blocklist
+from fleetent.governance import audit_log
 from fleetent.platform import im_gateway_management as im
-from fleetent.platform.user_management import api_key_store
+from fleetent.platform.user_management import api_key_store, block_service
 
 router = APIRouter(prefix="/admin")
 
@@ -283,7 +283,7 @@ def block_user(
     admin = _require_admin(authorization)
     _enforce_2fa(admin, x_2fa_code)
     try:
-        blocklist.block_user(user_id, reason=body.reason, actor=admin.id)
+        block_service.block_user(user_id, reason=body.reason, actor=admin.id)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     return {"status": "blocked"}
@@ -292,7 +292,7 @@ def block_user(
 @router.post("/users/{user_id}/unblock")
 def unblock_user(user_id: str, authorization: str | None = Header(None)) -> dict[str, str]:
     admin = _require_admin(authorization)
-    blocklist.unblock_user(user_id, actor=admin.id)
+    block_service.unblock_user(user_id, actor=admin.id)
     return {"status": "active"}
 
 

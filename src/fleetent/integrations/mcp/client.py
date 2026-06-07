@@ -12,6 +12,7 @@ Stdio connections are kept alive via a module-level AsyncExitStack.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -42,6 +43,7 @@ _PROBE_INTERVAL = 30.0  # seconds between background health probes (D3)
 _BACKOFF_BASE = 1.0  # seconds; first reconnect delay (D4)
 _BACKOFF_CAP = 60.0  # seconds; reconnect backoff ceiling (D4)
 _RECONNECT_MAX_ATTEMPTS = 5  # consecutive failures -> unavailable (D4)
+_MAX_TOOL_PAGES = 100  # tools/list pagination safety cap: stop following nextCursor past this
 
 _UNAVAILABLE_RESULT_PREFIX = "MCP server"  # tool result text on degraded/unavailable (D5)
 
@@ -150,8 +152,15 @@ class McpServerConfig:
         default_factory=list
     )  # e.g. ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
     env: dict[str, str] = field(default_factory=dict)  # extra env vars for the subprocess
+    # Per-server HTTP timeouts in seconds: connect/discovery/probe/token vs tool call.
+    connect_timeout: float = 10.0
+    call_timeout: float = 30.0
     # Streamable HTTP runtime state (per-server, not module-level global)
     session_id: str | None = None  # assigned by server via Mcp-Session-Id on initialize
+    # Negotiated protocol version + server-advertised capabilities, captured at initialize
+    # (per-server runtime state, never module-level global; capabilities gate later features).
+    protocol_version: str | None = field(default=None, repr=False, compare=False)
+    capabilities: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
     _request_id: int = field(default=0, repr=False, compare=False)  # monotonic JSON-RPC id
     # OAuth2 runtime state, held per-server instance (D3/D5/D9: never module-level global)
     _token_store: _InMemoryTokenStore = field(
@@ -163,6 +172,10 @@ class McpServerConfig:
     _health: HealthState = field(default=HealthState.healthy, repr=False, compare=False)
     _reconnect_attempts: int = field(default=0, repr=False, compare=False)
     _reconnect_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
+    # Coalesces tools/list_changed-driven refreshes for this stdio server (mcp-dynamic-tools).
+    _list_refresh_lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock, repr=False, compare=False
+    )
     # Agent-scope key dimension (next<-main integration): registries/sessions are keyed
     # by (agent_scope, id) so the same server id can carry distinct credentials/sessions
     # per agent. None = the global (startup) scope. Distinct from the oauth `scope` str.
@@ -416,7 +429,9 @@ async def _probe_once(server: McpServerConfig) -> None:
     import httpx
 
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=server.connect_timeout, follow_redirects=True
+        ) as client:
             await _post_jsonrpc(client, server, "tools/list", {})
     except Exception as exc:  # noqa: BLE001 — probe maps disconnects; other errors logged
         if _is_disconnect_error(exc):
@@ -574,27 +589,142 @@ async def _register_server(server: McpServerConfig, scope: int | None = None) ->
         await _register_http_server(server, scope)
 
 
+# stdio subprocess environment isolation (mcp-stdio-isolation): never inherit the full
+# platform environment — only a vetted whitelist of host vars plus the server's own env.
+_SAFE_ENV_KEYS_POSIX = (
+    "HOME",
+    "LOGNAME",
+    "PATH",
+    "SHELL",
+    "TERM",
+    "USER",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TMPDIR",
+    "TZ",
+)
+_SAFE_ENV_KEYS_WIN = (
+    "APPDATA",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "LOCALAPPDATA",
+    "PATH",
+    "PROCESSOR_ARCHITECTURE",
+    "SYSTEMDRIVE",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "USERNAME",
+    "USERPROFILE",
+)
+
+
+def _safe_base_env() -> dict[str, str]:
+    """A minimal, vetted subset of host env vars safe to pass to an MCP subprocess.
+
+    Excludes the full platform environment (database URLs, API keys, tokens); keeps only
+    the variables a process generally needs to run (PATH / HOME / locale / temp dir).
+    """
+    keys = _SAFE_ENV_KEYS_WIN if os.name == "nt" else _SAFE_ENV_KEYS_POSIX
+    return {k: os.environ[k] for k in keys if k in os.environ}
+
+
+def _subprocess_env(server: McpServerConfig) -> dict[str, str]:
+    """Environment for a stdio MCP subprocess: the safe host whitelist plus the server's
+    explicitly declared env (which overrides the whitelist for same-named keys). The full
+    platform environment is never inherited (mcp-stdio-isolation).
+    """
+    return {**_safe_base_env(), **server.env}
+
+
+def _is_tools_list_changed(message: Any) -> bool:
+    """Whether an incoming MCP server message is a tools/list_changed notification."""
+    root = getattr(message, "root", None)
+    return getattr(root, "method", None) == "notifications/tools/list_changed"
+
+
+def _reregister_stdio_tools(server: McpServerConfig, tools: list[Any], scope: int | None) -> None:
+    """Replace a stdio server's tools in the shared registry in place (scope=None only).
+
+    Synchronous and free of await points, so it is atomic w.r.t. other coroutines reading
+    the registry in the single-threaded event loop (no dict-changed-during-iteration race).
+    Agent-scoped tools are dispatched via call_tool(scope) and never enter the shared
+    registry, so a scoped refresh is a no-op here.
+    """
+    if scope is not None:
+        return
+    import fleetent.tools.registry as tr
+
+    prefix = f"{server.id}__"
+    for name in [n for n in tr._registry if n.startswith(prefix)]:
+        del tr._registry[name]
+    for tool_def in tools:
+        _register_tool_stdio(server, _make_tool_name(server.id, tool_def.name), tool_def, scope)
+    _register_utility_tools(server, scope)
+
+
+async def _refresh_stdio_tools(server: McpServerConfig, scope: int | None, session: Any) -> None:
+    """Re-list and re-register a stdio server's tools after a list_changed notification.
+
+    Identity-guarded (ignores a notification from a session that has since been replaced)
+    and deduped via a per-server lock (coalesces a burst of notifications).
+    """
+    if _active_sessions.get((scope, server.id)) is not session:
+        return
+    if server._list_refresh_lock.locked():
+        return
+    async with server._list_refresh_lock:
+        if _active_sessions.get((scope, server.id)) is not session:
+            return
+        try:
+            tools = await _list_all_tools_stdio(session)
+        except Exception as exc:  # noqa: BLE001 — a refresh failure must not break the read loop
+            logger.warning("mcp_tools_refresh_failed server_id=%s error=%s", server.id, exc)
+            return
+        _reregister_stdio_tools(server, tools, scope)
+        logger.info("mcp_tools_refreshed server_id=%s tool_count=%d", server.id, len(tools))
+
+
+def _make_message_handler(server: McpServerConfig, scope: int | None) -> Any:
+    """Build a ClientSession message handler that refreshes tools on list_changed.
+
+    The refresh runs in a separate task (never inline) so the handler does not issue a
+    request on the stream while it is still processing the notification — the stdio wedge.
+    """
+
+    async def handler(message: Any) -> None:
+        if not _is_tools_list_changed(message):
+            return
+        current = _active_sessions.get((scope, server.id))
+        if current is not None:
+            asyncio.create_task(_refresh_stdio_tools(server, scope, current))
+
+    return handler
+
+
 async def _register_stdio_server(server: McpServerConfig, scope: int | None = None) -> None:
     from mcp import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client
 
-    merged_env = {**os.environ, **server.env} if server.env else None
     params = StdioServerParameters(
         command=server.command,
         args=server.args,
-        env=merged_env,
+        env=_subprocess_env(server),
     )
 
     stack = await get_exit_stack()
     read, write = await stack.enter_async_context(stdio_client(params))
-    session: Any = await stack.enter_async_context(ClientSession(read, write))
-    await session.initialize()
+    session: Any = await stack.enter_async_context(
+        ClientSession(read, write, message_handler=_make_message_handler(server, scope))
+    )
+    init_result = await session.initialize()
+    _capture_init_result(server, _init_result_to_dict(init_result))
 
     _active_sessions[(scope, server.id)] = session
     _server_registry[(scope, server.id)] = server
 
-    tools_result = await session.list_tools()
-    tools = tools_result.tools
+    tools = await _list_all_tools_stdio(session)
     for tool_def in tools:
         tool_name = _make_tool_name(server.id, tool_def.name)
         _register_tool_stdio(server, tool_name, tool_def, scope)
@@ -602,10 +732,45 @@ async def _register_stdio_server(server: McpServerConfig, scope: int | None = No
     logger.info(
         "mcp_server_registered server_id=%s transport=stdio tool_count=%d", server.id, len(tools)
     )
+    _register_utility_tools(server, scope)
 
 
 PROTOCOL_VERSION = "2025-06-18"
 CLIENT_INFO = {"name": "fleetent", "version": "1.0"}
+
+
+def _capture_init_result(server: McpServerConfig, result: Any) -> None:
+    """Capture negotiated protocolVersion + advertised capabilities from an initialize result.
+
+    Falls back to the client's PROTOCOL_VERSION when the server omits a version, and to an
+    empty capabilities mapping when none is advertised. Per-server state, never global.
+    """
+    if not isinstance(result, dict):
+        server.protocol_version = server.protocol_version or PROTOCOL_VERSION
+        return
+    server.protocol_version = result.get("protocolVersion") or PROTOCOL_VERSION
+    caps = result.get("capabilities")
+    server.capabilities = caps if isinstance(caps, dict) else {}
+
+
+def _init_result_to_dict(init_result: Any) -> dict[str, Any]:
+    """Coerce an SDK InitializeResult (stdio) into a {protocolVersion, capabilities} dict."""
+    if init_result is None:
+        return {}
+    caps = getattr(init_result, "capabilities", None)
+    caps_dict: dict[str, Any] = {}
+    dump = getattr(caps, "model_dump", None)
+    if callable(dump):
+        try:
+            caps_dict = dump(exclude_none=True)
+        except Exception:  # noqa: BLE001 — fall back to empty caps if the model cannot dump
+            caps_dict = {}
+    elif isinstance(caps, dict):
+        caps_dict = caps
+    return {
+        "protocolVersion": getattr(init_result, "protocolVersion", None),
+        "capabilities": caps_dict,
+    }
 
 
 def _base_headers(server: McpServerConfig, *, bearer: str | None = None) -> dict[str, str]:
@@ -627,6 +792,10 @@ def _base_headers(server: McpServerConfig, *, bearer: str | None = None) -> dict
             headers["Authorization"] = f"Bearer {key}"
     if server.session_id:
         headers["Mcp-Session-Id"] = server.session_id
+    # MCP 2025-06-18: echo the negotiated protocol version on requests issued after the
+    # initialize handshake (protocol_version is set only once a session is established).
+    if server.protocol_version:
+        headers["MCP-Protocol-Version"] = server.protocol_version
     return headers
 
 
@@ -690,7 +859,7 @@ async def _fetch_client_credentials_token(server: McpServerConfig) -> OAuthToken
     if server.scope:
         data["scope"] = server.scope
 
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=server.connect_timeout, follow_redirects=True) as client:
         resp = await client.post(server.token_url, data=data)
 
     if _is_auth_error_response(resp):
@@ -829,7 +998,8 @@ async def _open_session(client: Any, server: McpServerConfig) -> None:
     session_id = init_resp.headers.get("Mcp-Session-Id")
     if session_id:
         server.session_id = session_id
-    _parse_jsonrpc_response(init_resp, request_id)
+    init_obj = _parse_jsonrpc_response(init_resp, request_id)
+    _capture_init_result(server, init_obj.get("result"))
     await _post_notification(client, server, "notifications/initialized")
 
 
@@ -886,14 +1056,43 @@ async def _post_notification(client: Any, server: McpServerConfig, method: str) 
         )
 
 
+async def _list_all_tools_http(client: Any, server: McpServerConfig) -> list[dict[str, Any]]:
+    """Fetch every page of tools/list, following nextCursor, bounded by _MAX_TOOL_PAGES."""
+    tools: list[dict[str, Any]] = []
+    cursor: str | None = None
+    for _ in range(_MAX_TOOL_PAGES):
+        params: dict[str, Any] = {"cursor": cursor} if cursor else {}
+        obj = await _post_jsonrpc(client, server, "tools/list", params)
+        result = obj.get("result", {})
+        tools.extend(result.get("tools", []) or [])
+        cursor = result.get("nextCursor")
+        if not cursor:
+            return tools
+    logger.warning("mcp_tools_list_page_cap server_id=%s cap=%d", server.id, _MAX_TOOL_PAGES)
+    return tools
+
+
+async def _list_all_tools_stdio(session: Any) -> list[Any]:
+    """Fetch every page of stdio list_tools, following nextCursor, bounded by _MAX_TOOL_PAGES."""
+    tools: list[Any] = []
+    cursor: str | None = None
+    for _ in range(_MAX_TOOL_PAGES):
+        result = await session.list_tools(cursor=cursor)
+        tools.extend(result.tools or [])
+        cursor = getattr(result, "nextCursor", None)
+        if not cursor:
+            return tools
+    logger.warning("mcp_tools_list_page_cap transport=stdio cap=%d", _MAX_TOOL_PAGES)
+    return tools
+
+
 async def _register_http_server(server: McpServerConfig, scope: int | None = None) -> None:
     import httpx
 
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=server.connect_timeout, follow_redirects=True) as client:
         await _open_session(client, server)
-        list_obj = await _post_jsonrpc(client, server, "tools/list", {})
+        tools = await _list_all_tools_http(client, server)
 
-    tools = list_obj.get("result", {}).get("tools", [])
     for tool_def in tools:
         tool_name = _make_tool_name(server.id, tool_def["name"])
         _register_tool_http(server, tool_name, tool_def, scope)
@@ -902,6 +1101,7 @@ async def _register_http_server(server: McpServerConfig, scope: int | None = Non
     logger.info(
         "mcp_server_registered server_id=%s transport=http tool_count=%d", server.id, len(tools)
     )
+    _register_utility_tools(server, scope)
 
 
 async def probe_server(server: McpServerConfig) -> dict[str, Any]:
@@ -925,27 +1125,25 @@ async def probe_server(server: McpServerConfig) -> dict[str, Any]:
 async def _probe_http_tools(server: McpServerConfig) -> list[dict[str, str]]:
     import httpx
 
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=server.connect_timeout, follow_redirects=True) as client:
         await _open_session(client, server)
-        list_obj = await _post_jsonrpc(client, server, "tools/list", {})
-    return [
-        {"name": t["name"], "description": t.get("description", "")}
-        for t in list_obj.get("result", {}).get("tools", [])
-    ]
+        tools = await _list_all_tools_http(client, server)
+    return [{"name": t["name"], "description": t.get("description", "")} for t in tools]
 
 
 async def _probe_stdio_tools(server: McpServerConfig) -> list[dict[str, str]]:
     from mcp import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client
 
-    merged_env = {**os.environ, **server.env} if server.env else None
-    params = StdioServerParameters(command=server.command, args=server.args, env=merged_env)
+    params = StdioServerParameters(
+        command=server.command, args=server.args, env=_subprocess_env(server)
+    )
     async with AsyncExitStack() as stack:
         read, write = await stack.enter_async_context(stdio_client(params))
         session: Any = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
-        result = await session.list_tools()
-        return [{"name": t.name, "description": t.description or ""} for t in result.tools]
+        tools = await _list_all_tools_stdio(session)
+        return [{"name": t.name, "description": t.description or ""} for t in tools]
 
 
 def unregister_server(server_id: str, scope: int | None = None) -> None:
@@ -965,16 +1163,52 @@ def unregister_server(server_id: str, scope: int | None = None) -> None:
     _active_sessions.pop((scope, server_id), None)
 
 
+def _rewrite_refs(node: Any) -> Any:
+    """Recursively rewrite ``#/definitions/...`` $ref strings to ``#/$defs/...``."""
+    if isinstance(node, dict):
+        out: dict[str, Any] = {}
+        for key, value in node.items():
+            if key == "$ref" and isinstance(value, str) and value.startswith("#/definitions/"):
+                out[key] = "#/$defs/" + value[len("#/definitions/") :]
+            else:
+                out[key] = _rewrite_refs(value)
+        return out
+    if isinstance(node, list):
+        return [_rewrite_refs(item) for item in node]
+    return node
+
+
+def _sanitize_input_schema(schema: Any) -> dict[str, Any]:
+    """Normalize a server-provided input schema into a provider-safe object schema.
+
+    Conservative and meaning-preserving: guarantee a top-level ``type: object`` and a
+    ``properties`` map; rename a top-level ``definitions`` block to ``$defs`` (only when
+    ``$defs`` is absent, to avoid clobbering) and rewrite ``#/definitions/`` refs to match.
+    Works on a copy and never raises — a malformed schema falls back to a safe default.
+    """
+    if not isinstance(schema, dict):
+        return {"type": "object", "properties": {}}
+    try:
+        out = copy.deepcopy(schema)
+        if "definitions" in out and "$defs" not in out:
+            out["$defs"] = out.pop("definitions")
+            out = _rewrite_refs(out)
+        if out.get("type") != "object":
+            out["type"] = "object"
+        if not isinstance(out.get("properties"), dict):
+            out["properties"] = {}
+        return out
+    except Exception:  # noqa: BLE001 — sanitization must never break registration
+        return {"type": "object", "properties": {}}
+
+
 def _register_tool_stdio(
     server: McpServerConfig, tool_name: str, tool_def: Any, scope: int | None = None
 ) -> None:
     import fleetent.tools.registry as tr
 
-    input_schema = (
-        tool_def.inputSchema
-        if hasattr(tool_def, "inputSchema")
-        else {"type": "object", "properties": {}}
-    )
+    raw_schema = tool_def.inputSchema if hasattr(tool_def, "inputSchema") else None
+    input_schema = _sanitize_input_schema(raw_schema)
 
     async def call(**kwargs: object) -> str:
         return await _call_stdio_tool(server.id, tool_def.name, dict(kwargs), server._agent_scope)
@@ -998,7 +1232,7 @@ def _register_tool_http(
 ) -> None:
     import fleetent.tools.registry as tr
 
-    input_schema = tool_def.get("inputSchema", {"type": "object", "properties": {}})
+    input_schema = _sanitize_input_schema(tool_def.get("inputSchema"))
 
     async def call(**kwargs: object) -> str:
         return await _call_http_tool(server.id, tool_def["name"], dict(kwargs), server._agent_scope)
@@ -1013,6 +1247,87 @@ def _register_tool_http(
     }
     if scope is None:
         tr._registry[tool_name] = (call, schema)
+
+
+# === MCP result normalization (mcp-result-fidelity) =========================
+# A CallToolResult carries an ordered list of content blocks (text / image / audio /
+# embedded resource), an optional structuredContent, and an isError flag. The stdio
+# path yields typed SDK objects (attribute access) while the http path yields JSON
+# dicts; both are normalized here through one duck-typed path.
+
+_TOOL_ERROR_PREFIX = "MCP tool error: "
+
+
+def _field(block: Any, key: str, default: Any = None) -> Any:
+    """Read a field from a content block that may be a dict or an SDK object."""
+    if isinstance(block, dict):
+        return block.get(key, default)
+    return getattr(block, key, default)
+
+
+def _approx_bytes(data: Any) -> int:
+    """Best-effort decoded size of a base64 payload (0 when not a non-empty string)."""
+    if not isinstance(data, str) or not data:
+        return 0
+    return (len(data) * 3) // 4
+
+
+def _media_marker(kind: str, mime: Any, data: Any) -> str:
+    """Concise textual marker for non-text content — never the raw payload."""
+    mime_str = mime if isinstance(mime, str) and mime else "application/octet-stream"
+    size = _approx_bytes(data)
+    return f"[{kind}: {mime_str}, ~{size} bytes]" if size else f"[{kind}: {mime_str}]"
+
+
+def _block_to_text(block: Any) -> str:
+    """Render one MCP content block as text, for dict or SDK-object shapes.
+
+    Text blocks return their text; image/audio return a concise marker; an embedded
+    resource inlines its text when present, else a marker. Binary payloads are never
+    emitted as raw base64, and unknown blocks degrade to a short marker, never raise.
+    """
+    btype = _field(block, "type")
+    text = _field(block, "text")
+    if isinstance(text, str) and text:
+        return text
+    if btype in ("image", "audio"):
+        return _media_marker(btype, _field(block, "mimeType"), _field(block, "data"))
+    if btype == "resource":
+        resource = _field(block, "resource")
+        if resource is not None:
+            rtext = _field(resource, "text")
+            if isinstance(rtext, str) and rtext:
+                return rtext
+            marker = _media_marker(
+                "resource", _field(resource, "mimeType"), _field(resource, "blob")
+            )
+            uri = _field(resource, "uri")
+            return f"{marker[:-1]} {uri}]" if isinstance(uri, str) and uri else marker
+        return "[resource]"
+    if btype == "resource_link":
+        uri = _field(block, "uri")
+        return f"[resource_link: {uri}]" if isinstance(uri, str) and uri else "[resource_link]"
+    return f"[{btype}]" if isinstance(btype, str) and btype else "[content]"
+
+
+def _normalize_tool_result(content_blocks: Any, *, structured_content: Any, is_error: bool) -> str:
+    """Normalize an MCP CallToolResult into the string returned to the agent.
+
+    Aggregates all content blocks (not just the first), falls back to JSON-serialized
+    structuredContent when there are no content blocks, and marks isError results with a
+    pedagogical prefix so the agent can read and recover. Never raises on odd shapes.
+    """
+    parts = [_block_to_text(b) for b in (content_blocks or [])]
+    parts = [p for p in parts if p]
+    if parts:
+        text = "\n".join(parts)
+    elif structured_content is not None:
+        text = json.dumps(structured_content, ensure_ascii=False, default=str)
+    else:
+        text = ""
+    if is_error:
+        return f"{_TOOL_ERROR_PREFIX}{text}" if text else f"{_TOOL_ERROR_PREFIX}(no detail)"
+    return text
 
 
 async def _call_stdio_tool(
@@ -1032,9 +1347,11 @@ async def _call_stdio_tool(
         if server is not None and _is_disconnect_error(exc):
             return _handle_disconnect(server)
         raise
-    if result.content:
-        return str(result.content[0].text)
-    return ""
+    return _normalize_tool_result(
+        getattr(result, "content", None),
+        structured_content=getattr(result, "structuredContent", None),
+        is_error=bool(getattr(result, "isError", False)),
+    )
 
 
 async def _call_http_tool(
@@ -1059,7 +1376,7 @@ async def _call_http_tool(
     import httpx
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=server.call_timeout, follow_redirects=True) as client:
             obj = await _post_jsonrpc(
                 client, server, "tools/call", {"name": tool_name, "arguments": args}
             )
@@ -1070,9 +1387,11 @@ async def _call_http_tool(
 
     result = obj.get("result")
     if isinstance(result, dict):
-        contents = result.get("content", [])
-        if contents and isinstance(contents[0], dict):
-            return str(contents[0].get("text", str(result)))
+        return _normalize_tool_result(
+            result.get("content"),
+            structured_content=result.get("structuredContent"),
+            is_error=bool(result.get("isError", False)),
+        )
     return str(result) if result is not None else ""
 
 
@@ -1088,3 +1407,170 @@ async def call_tool(
     if server.transport == "stdio":
         return await _call_stdio_tool(server_id, tool_name, args, scope)
     return await _call_http_tool(server_id, tool_name, args, scope)
+
+
+# === MCP resources / prompts as capability-gated synthetic tools ============
+# Servers that advertise `resources` / `prompts` get utility tools under their
+# {server_id}__ namespace; invoking one dispatches to the matching MCP method and
+# returns the result serialized as JSON text.
+
+_UTILITY_METHODS = {
+    "list_resources": "resources/list",
+    "read_resource": "resources/read",
+    "list_prompts": "prompts/list",
+    "get_prompt": "prompts/get",
+}
+
+
+def _utility_params(util_name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """JSON-RPC params for a utility method, built from the tool-call arguments."""
+    if util_name == "read_resource":
+        return {"uri": args.get("uri")}
+    if util_name == "get_prompt":
+        return {"name": args.get("name"), "arguments": args.get("arguments") or {}}
+    return {}
+
+
+def _jsonify(obj: Any) -> str:
+    """Serialize a utility result (pydantic object or JSON dict) to text for the agent."""
+    dump = getattr(obj, "model_dump", None)
+    if callable(dump):
+        try:
+            obj = dump(mode="json", exclude_none=True)
+        except Exception:  # noqa: BLE001 — fall back to a string view if the model cannot dump
+            return str(obj)
+    try:
+        return json.dumps(obj, ensure_ascii=False, default=str)
+    except Exception:  # noqa: BLE001 — never fail a tool call on serialization
+        return str(obj)
+
+
+async def _call_http_utility(server: McpServerConfig, util_name: str, args: dict[str, Any]) -> str:
+    import httpx
+
+    method = _UTILITY_METHODS[util_name]
+    try:
+        async with httpx.AsyncClient(timeout=server.call_timeout, follow_redirects=True) as client:
+            obj = await _post_jsonrpc(client, server, method, _utility_params(util_name, args))
+    except Exception as exc:  # noqa: BLE001 — disconnects map to mcp_disconnect (D1); rest re-raised
+        if _is_disconnect_error(exc):
+            return _handle_disconnect(server)
+        raise
+    return _jsonify(obj.get("result"))
+
+
+async def _call_stdio_utility(
+    server: McpServerConfig, util_name: str, args: dict[str, Any], scope: int | None
+) -> str:
+    session = _active_sessions.get((scope, server.id))
+    if session is None:
+        raise KeyError(f"No active stdio session for MCP server: {server.id}")
+    try:
+        if util_name == "list_resources":
+            result = await session.list_resources()
+        elif util_name == "read_resource":
+            result = await session.read_resource(args.get("uri"))
+        elif util_name == "list_prompts":
+            result = await session.list_prompts()
+        elif util_name == "get_prompt":
+            result = await session.get_prompt(args.get("name"), args.get("arguments"))
+        else:
+            raise ValueError(f"Unknown MCP utility: {util_name}")
+    except Exception as exc:  # noqa: BLE001 — disconnects map to mcp_disconnect (D1); rest re-raised
+        if _is_disconnect_error(exc):
+            return _handle_disconnect(server)
+        raise
+    return _jsonify(result)
+
+
+async def _call_utility(
+    server_id: str, util_name: str, args: dict[str, Any], scope: int | None = None
+) -> str:
+    """Dispatch a resources/prompts utility tool to its MCP method (auth/health-aware)."""
+    server = _server_registry.get((scope, server_id))
+    if server is None:
+        raise KeyError(f"Unknown MCP server: {server_id}")
+    if server.auth_type == "oauth2" and server._auth_unavailable:
+        return (
+            f"MCP server '{server_id}' authentication unavailable: re-authorize or check the "
+            f"OAuth2 credentials."
+        )
+    if server._health is not HealthState.healthy:
+        return _unavailable_result(server_id)
+    if server.transport == "stdio":
+        return await _call_stdio_utility(server, util_name, args, scope)
+    return await _call_http_utility(server, util_name, args)
+
+
+# (util_name, capability_key, description, parameter schema) for the synthetic tools.
+_UTILITY_TOOL_SPECS = (
+    (
+        "list_resources",
+        "resources",
+        "List the resources this MCP server exposes.",
+        {"type": "object", "properties": {}},
+    ),
+    (
+        "read_resource",
+        "resources",
+        "Read a resource from this MCP server by its uri.",
+        {
+            "type": "object",
+            "properties": {"uri": {"type": "string", "description": "The resource uri to read."}},
+            "required": ["uri"],
+        },
+    ),
+    (
+        "list_prompts",
+        "prompts",
+        "List the prompts this MCP server exposes.",
+        {"type": "object", "properties": {}},
+    ),
+    (
+        "get_prompt",
+        "prompts",
+        "Get a prompt from this MCP server by name, with optional arguments.",
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "The prompt name."},
+                "arguments": {"type": "object", "description": "Optional prompt arguments."},
+            },
+            "required": ["name"],
+        },
+    ),
+)
+
+
+def _register_utility_tool(
+    server: McpServerConfig,
+    util_name: str,
+    description: str,
+    schema: dict[str, Any],
+    scope: int | None,
+) -> None:
+    import fleetent.tools.registry as tr
+
+    tool_name = _make_tool_name(server.id, util_name)
+
+    async def call(**kwargs: object) -> str:
+        return await _call_utility(server.id, util_name, dict(kwargs), server._agent_scope)
+
+    tool_schema: tr.ToolSchema = {
+        "type": "function",
+        "function": {"name": tool_name, "description": description, "parameters": schema},
+    }
+    tr._registry[tool_name] = (call, tool_schema)
+
+
+def _register_utility_tools(server: McpServerConfig, scope: int | None) -> None:
+    """Register resources/prompts synthetic tools for a server, gated by its advertised
+    capabilities. Only the global (scope=None) registration enters the shared registry,
+    consistent with regular tool registration.
+    """
+    if scope is not None:
+        return
+    caps = server.capabilities or {}
+    for util_name, cap_key, description, schema in _UTILITY_TOOL_SPECS:
+        if cap_key in caps:
+            _register_utility_tool(server, util_name, description, schema, scope)

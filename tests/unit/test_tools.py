@@ -4,6 +4,18 @@ from fleetent import tools  # noqa: F401 — registers tools as side effect
 from fleetent.tools import registry as tool_registry
 
 
+@pytest.fixture(autouse=True)
+def _isolate_sandbox_spill_dir(tmp_path, monkeypatch):
+    """Keep run_code spill files out of the real data dir.
+
+    SANDBOX_OUTPUT_DIR is a module constant frozen at import to the home fallback in
+    tests, so over-budget run_code output would otherwise spill into the real ~/.fleetent.
+    """
+    from fleetent.integrations.sandbox import output_spill
+
+    monkeypatch.setattr(output_spill, "SANDBOX_OUTPUT_DIR", tmp_path / "sandbox_output")
+
+
 def test_get_current_time_registered():
     assert "get_current_time" in tool_registry._registry
 
@@ -34,14 +46,17 @@ def test_read_file_returns_contents(tmp_path):
     f = tmp_path / "hello.txt"
     f.write_text("hello world")
     result = tool_registry.dispatch("read_file", f'{{"path": "{f}"}}')
-    assert result == "hello world"
+    # New read_file includes line-number prefix
+    assert "hello world" in result
 
 
-def test_read_file_truncates_at_2000_chars(tmp_path):
+def test_read_file_paginates_at_200_lines(tmp_path):
     f = tmp_path / "big.txt"
-    f.write_text("x" * 5000)
+    f.write_text("\n".join(f"line{i}" for i in range(500)) + "\n")
     result = tool_registry.dispatch("read_file", f'{{"path": "{f}"}}')
-    assert len(result) == 2000
+    assert "line0" in result
+    assert "line199" in result
+    assert "line200" not in result
 
 
 def test_read_file_missing_file():
@@ -115,6 +130,59 @@ async def test_run_code_includes_stderr(monkeypatch):
     assert "[stderr]" in result
     assert "NameError" in result
     assert "[exit 1]" in result
+
+
+@pytest.mark.asyncio
+async def test_run_code_redacts_secrets_in_output(monkeypatch):
+    """Secrets printed by the sandbox are redacted before reaching the agent loop."""
+    from unittest.mock import AsyncMock
+
+    import fleetent.tools.builtin_tools as tl
+    from fleetent.integrations.sandbox.client import ExecResult
+
+    client = _mock_lifecycle_client("cid-redact")
+    client.exec = AsyncMock(
+        return_value=ExecResult(
+            stdout="leaked=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+            stderr="Authorization: Bearer abc.def.ghi_secrettoken123",
+            exit_code=0,
+        )
+    )
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
+
+    result = await tl.run_code(code="print('x')")
+    assert "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" not in result
+    assert "abc.def.ghi_secrettoken123" not in result
+    assert "[REDACTED]" in result
+
+
+@pytest.mark.asyncio
+async def test_run_code_spills_large_output_and_redacts_before_disk(monkeypatch, tmp_path):
+    """Over-budget output is spilled to disk with a reference; the spilled file is redacted."""
+    from unittest.mock import AsyncMock
+
+    import fleetent.tools.builtin_tools as tl
+    from fleetent.integrations.sandbox import output_spill
+    from fleetent.integrations.sandbox.client import ExecResult
+
+    spill_dir = tmp_path / "sandbox_output"
+    monkeypatch.setattr(output_spill, "SANDBOX_OUTPUT_DIR", spill_dir)
+
+    secret = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    big = secret + "\n" + ("X" * 60000)
+    client = _mock_lifecycle_client("cid-spill")
+    client.exec = AsyncMock(return_value=ExecResult(stdout=big, stderr="", exit_code=0))
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
+
+    result = await tl.run_code(code="print('big')")
+
+    assert secret not in result  # redacted in the preview
+    assert "read_file" in result  # spill reference present
+    spilled = list(spill_dir.glob("*.txt"))
+    assert len(spilled) == 1
+    content = spilled[0].read_text()
+    assert secret not in content  # redacted BEFORE spill — no secret on disk
+    assert "[REDACTED]" in content
 
 
 @pytest.mark.asyncio
@@ -467,7 +535,8 @@ async def test_run_code_no_sandbox_env_passes_empty(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_code_truncates_stdout(monkeypatch):
+async def test_run_code_spills_oversize_stdout_with_bounded_preview(monkeypatch):
+    """Over-budget stdout is spilled to disk; the inline result is a bounded preview + ref."""
     from unittest.mock import AsyncMock
 
     import fleetent.integrations.sandbox.output_truncation as sot
@@ -481,8 +550,9 @@ async def test_run_code_truncates_stdout(monkeypatch):
     monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
 
     result = await tl.run_code(code="print('big')")
-    assert len(result.encode("utf-8")) <= 600  # stdout capped (+ small assembly overhead)
-    assert "截断" in result
+    assert "read_file" in result  # over-budget -> spilled, reference returned
+    assert "截断" in result  # preview is head+tail truncated
+    assert len(result.encode("utf-8")) < 1000  # preview stays bounded; ref line is small
 
 
 @pytest.mark.asyncio

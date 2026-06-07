@@ -6,10 +6,10 @@ from typing import Any, cast
 from fleetent.platform.im_gateway_management import connector_store
 
 # Credential keys per OWNER-LEVEL platform, and how they map to .env (config.Settings).
-# Slack is intentionally absent: it is per-agent (per-agent-slack-connector), declared
-# in agent.yaml `connectors.slack` with env-reference tokens, not an owner-level connector.
+# Slack and Telegram are intentionally absent: both are per-agent (per-agent-slack-connector
+# / per-agent-telegram-connector), declared in agent.yaml `connectors.*` with env-reference
+# tokens, not owner-level connectors.
 PLATFORM_CONFIG_KEYS: dict[str, list[str]] = {
-    "telegram": ["bot_token"],
     "whatsapp": [
         "phone_number_id",
         "access_token",
@@ -19,7 +19,6 @@ PLATFORM_CONFIG_KEYS: dict[str, list[str]] = {
 }
 
 _ENV_MAP: dict[tuple[str, str], str] = {
-    ("telegram", "bot_token"): "telegram_bot_token",
     ("whatsapp", "phone_number_id"): "whatsapp_phone_number_id",
     ("whatsapp", "access_token"): "whatsapp_access_token",
     ("whatsapp", "verify_token"): "whatsapp_verify_token",

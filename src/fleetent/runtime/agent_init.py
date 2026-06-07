@@ -4,7 +4,7 @@ Pure local scaffolding: no platform service and no database. Writes a self-conta
 ``<home>/agent.yaml`` (its ``name`` set to the agent id, so ``fleetent agent run <id>``'s
 directory-name check passes) plus a ``.env`` listing the env-var names the agent
 references (empty values, never real secrets). The template is embedded here — the
-installed global command has no repo working tree to read ``config/agent/agent.yaml.example``.
+installed global command has no repo working tree to read repository example templates.
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ def scaffold_agent_home(
 ) -> Path:
     """Scaffold a runnable agent home and return its directory.
 
-    home = ``home`` if given else ``FLEETENT_HOME/<agent_id>`` (same resolution as
+    home = ``home`` if given else ``FLEETENT_HOME/agents/<agent_id>`` (same resolution as
     ``fleetent agent run``). Refuses to overwrite an existing ``agent.yaml`` unless
     ``force``; an existing ``.env`` is always preserved.
     """

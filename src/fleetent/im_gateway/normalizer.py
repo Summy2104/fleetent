@@ -145,7 +145,11 @@ async def route(msg: NormalizedMessage) -> None:
         return
 
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
+    from fleetent.model import ModelPolicySnapshot
     from fleetent.runtime import loop as agent_loop
+    from fleetent.runtime import steering
+    from fleetent.runtime.cancellation import CancelToken
+    from fleetent.runtime.snapshot import _governance_from_file
     from fleetent.session import manager as session_mgr
     from fleetent.skills import available_skills_prompt, collect_disabled_trace
 
@@ -153,30 +157,53 @@ async def route(msg: NormalizedMessage) -> None:
     # never shares conversation state.
     session_id = f"{msg.owner_id}:{msg.session_id}" if msg.owner_id else msg.session_id
 
+    governance = _governance_from_file(agent) if agent else None
+    # Build the user content once (images are analyzed here) — reused by both the
+    # steering branch and the normal turn so analysis never runs twice.
+    user_content = await _build_user_content(msg)
+
+    # C1 steering: when a run is already in flight for this session, route the new
+    # message per the agent's steering_mode BEFORE taking the session lock (taking it
+    # would block and silently serialize into a brand-new turn). Default is "steer".
+    mode = governance.steering_mode if governance else "steer"
+    if steering.is_running(session_id):
+        if mode == "interrupt":
+            steering.interrupt(session_id)
+            await msg.reply_func("⏹️ 已请求停止当前任务。")
+            return
+        if mode == "steer" and steering.steer(session_id, user_content):
+            await msg.reply_func("📝 已把你的补充发给正在进行的任务。")
+            return
+        if mode == "queue":
+            await msg.reply_func("⏳ 正在处理上一条，处理完接着这条。")
+        # steer-but-run-just-ended (race) or queue → fall through to the locked path.
+
+    base_system = agent.system_prompt if agent else _SYSTEM
+    allowed_tools = agent.allowed_tools or None
+    agent_features = agent.features if agent else None
+    model_policy = ModelPolicySnapshot.from_agent(agent) if agent else None
+    # SB3: gate run_code on the IM path too; mode is resolved once per process.
+    sandbox_mode = await sandbox_enablement.get_effective_mode()
+    # System message ordered stable→variable for prefix caching: base system + the
+    # <available_skills> catalog. Per-user long-term context is injected by run().
+    catalog = available_skills_prompt(allowed_skills=agent.allowed_skills if agent else None)
+    disabled_trace = collect_disabled_trace() or None
+    system_content = "\n\n".join(p for p in [base_system, catalog] if p)
+
+    token = CancelToken()
+    max_pending = governance.steering_max_pending if governance else 8
+
     async with session_mgr.session_lock(session_id):
         history = await session_mgr.load(session_id)
 
-        from fleetent.model import ModelPolicySnapshot
-        from fleetent.runtime.snapshot import _governance_from_file
-
-        base_system = agent.system_prompt if agent else _SYSTEM
-        allowed_tools = agent.allowed_tools if agent else None
-        agent_features = agent.features if agent else None
-        governance = _governance_from_file(agent) if agent else None
-        model_policy = ModelPolicySnapshot.from_agent(agent) if agent else None
-        # SB3: gate run_code on the IM path too; mode is resolved once per process.
-        sandbox_mode = await sandbox_enablement.get_effective_mode()
-
-        # Build the system message ordered stable→variable for prefix caching:
-        # base system + the <available_skills> catalog (stable). Per-user long-term
-        # context (memory + knowledge) is injected by agent_loop.run via build_context
-        # (class C: memory unified onto intelligence/long_term_ctx).
-        # agent-skill-scoping: narrow the catalog to the bound agent's allowed_skills
-        # (empty/None → no narrowing, full catalog as before).
-        catalog = available_skills_prompt(allowed_skills=agent.allowed_skills if agent else None)
-        disabled_trace = collect_disabled_trace() or None
-        parts = [base_system, catalog]
-        system_content = "\n\n".join(p for p in parts if p)
+        # Consume the restart-recovery flag (agent-side .resume marker): best-effort,
+        # never block the turn.
+        try:
+            if session_mgr.is_resume_pending(session_id):
+                logger.info("session_resumed", session_id=session_id)
+                session_mgr.clear_resume_pending(session_id)
+        except Exception as exc:  # noqa: BLE001 — resume consume must not block the turn
+            logger.warning("session_resume_consume_failed", session_id=session_id, error=str(exc))
 
         # Replace existing system message or insert at position 0
         if history and isinstance(history[0], dict) and history[0].get("role") == "system":
@@ -184,20 +211,94 @@ async def route(msg: NormalizedMessage) -> None:
         else:
             history.insert(0, {"role": "system", "content": system_content})
 
-        history.append({"role": "user", "content": await _build_user_content(msg)})
+        # P3: on_user_input hook (IM path) — deny or rewrite before appending to history.
+        if governance is not None and governance.hooks_enabled:
+            from fleetent.runtime import hooks
+            from fleetent.runtime.hooks import HookContext
 
-        response = await agent_loop.run(
-            messages=history,
-            user_id=msg.user_id,
-            reply_func=msg.reply_func,
-            allowed_tools=allowed_tools,
-            disabled_skills_trace=disabled_trace,
-            sandbox_mode=sandbox_mode,
-            agent_features=agent_features,
-            session_id=session_id,
-            governance=governance,
-            model_policy=model_policy,
-        )
+            if hooks.has_hooks("on_user_input"):
+                _hres = await hooks.dispatch(
+                    "on_user_input",
+                    HookContext(
+                        event="on_user_input",
+                        session_id=session_id,
+                        agent_name=agent.name if agent else None,
+                        user_id=msg.user_id,
+                        payload={"content": user_content},
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=governance.hooks_decision_failure == "strict",
+                )
+                if _hres.decision == "deny":
+                    reason = _hres.reason or "请求被策略拒绝"
+                    await msg.reply_func(f"⛔ {reason}")
+                    return
+                if _hres.modified_content is not None:
+                    user_content = _hres.modified_content
+
+        history.append({"role": "user", "content": user_content})
+
+        # P4: session_start hook — inject enterprise context after user message appended.
+        if governance is not None and governance.hooks_enabled:
+            from fleetent.runtime import hooks as _hooks_ss
+            from fleetent.runtime.hooks import HookContext as _HCss
+
+            if _hooks_ss.has_hooks("session_start"):
+                _ss_res = await _hooks_ss.dispatch(
+                    "session_start",
+                    _HCss(
+                        event="session_start",
+                        session_id=session_id,
+                        agent_name=agent.name if agent else None,
+                        user_id=msg.user_id,
+                        payload={"session_id": session_id, "message_count": len(history)},
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=False,
+                )
+                if _ss_res.inject_context is not None:
+                    history.append({"role": "user", "content": _ss_res.inject_context})
+
+        # C1: register the active run so concurrent same-session messages can steer
+        # into it (and interrupt it via the cancel token); the registration is removed
+        # on exit so a finished session never looks "running".
+        async with steering.register_run(session_id, token, max_pending=max_pending):
+            response = await agent_loop.run(
+                messages=history,
+                user_id=msg.user_id,
+                reply_func=msg.reply_func,
+                allowed_tools=allowed_tools,
+                disabled_skills_trace=disabled_trace,
+                sandbox_mode=sandbox_mode,
+                agent_features=agent_features,
+                session_id=session_id,
+                governance=governance,
+                model_policy=model_policy,
+                cancel_token=token,
+            )
+
+        # P4: session_end hook — observe after run completes, before session save.
+        if governance is not None and governance.hooks_enabled:
+            from fleetent.runtime import hooks as _hooks_se
+            from fleetent.runtime.hooks import HookContext as _HCse
+
+            if _hooks_se.has_hooks("session_end"):
+                await _hooks_se.dispatch(
+                    "session_end",
+                    _HCse(
+                        event="session_end",
+                        session_id=session_id,
+                        agent_name=agent.name if agent else None,
+                        user_id=msg.user_id,
+                        payload={
+                            "session_id": session_id,
+                            "user_id": msg.user_id,
+                            "reply": response,
+                        },
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=False,
+                )
 
         # agent_loop.run() already appended the assistant message to history in-place.
         # Do NOT append again here — that caused duplicate messages in every session.

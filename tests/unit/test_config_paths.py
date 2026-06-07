@@ -13,15 +13,14 @@ def test_config_module_constants_derive_from_paths(monkeypatch) -> None:
     monkeypatch.delenv("FLEETENT_HOME", raising=False)
     import fleetent.config as cfg
 
-    assert paths.settings_yaml_path() == cfg.SETTINGS_YAML_PATH
-    assert paths.config_dir() / "mcp.servers.yaml" == cfg.MCP_SERVERS_YAML_PATH
+    assert paths.platform_yaml_path() == cfg.PLATFORM_YAML_PATH
 
 
 def test_settings_default_paths_follow_fleetent_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    monkeypatch.setattr("fleetent.config.SETTINGS_YAML_PATH", tmp_path / "missing.yaml")
+    monkeypatch.setattr("fleetent.config.PLATFORM_YAML_PATH", tmp_path / "missing.yaml")
 
     s = Settings()
 

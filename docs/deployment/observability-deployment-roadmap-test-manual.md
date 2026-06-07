@@ -122,14 +122,14 @@ uv run pytest tests/integration/test_trace_events.py \
 执行：
 
 ```bash
-test -f config/agent.yaml
+test -f agents/<agent-id>/agent.yaml
 uv run fleetent-admin validate-config --profile pilot --format json
 uv run fleetent-admin kb connectors list
 ```
 
 人工复核：
 
-- `config/agent.yaml` 不包含明文 API key、OAuth token、connector token 或 password。
+- `agents/<agent-id>/agent.yaml` 不包含明文 API key、OAuth token、connector token 或 password。
 - MCP server、Google Drive、Confluence、embedding、rerank 等 credential 只包含 `*_env`
   引用。
 - `fleetent-admin kb connectors list` 输出不包含 token、credential payload 或文档正文。
@@ -168,7 +168,7 @@ curl -fsS http://127.0.0.1:8765/health || true
 
 人工复核：
 
-- `.env`、`config/agent.yaml`、`data/`、`data/logs/`、
+- `.env`、`agents/<agent-id>/agent.yaml`、`agents/<agent-id>/.env`、`data/`、`data/logs/`、
   `data/diagnostics/` 和 `secrets/` 的创建或跳过行为符合预期。
 - 服务进程保持运行。
 - health check 或等效 CLI smoke 可执行。

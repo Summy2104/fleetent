@@ -102,7 +102,7 @@ API, scheduler, or worker behavior.
 
 #### Scenario: Credential boundary is documented
 - **WHEN** operator 阅读部署或运维文档
-- **THEN** 文档说明真实 credential 不应写入 `settings.yaml`
+- **THEN** 文档说明真实 credential 不应写入 YAML config
 - **AND** 文档说明 `credential_ref` 指向的文件或环境变量需要由部署方保护权限
 
 #### Scenario: Connector troubleshooting is documented

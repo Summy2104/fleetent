@@ -162,13 +162,6 @@
   .password-input-wrapper input { padding-right: 40px; flex: 1; }
   .password-toggle { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 38px; background: transparent; border: none; color: var(--text-muted); cursor: pointer; border-radius: 0 var(--r-1) var(--r-1) 0; display: flex; align-items: center; justify-content: center; }
   .password-toggle:hover { background: var(--surface-2); }
-  .cred-field { display: flex; flex-direction: column; gap: 4px; }
-  .cred-field .cred-row { display: flex; gap: 6px; align-items: center; }
-  .cred-field .cred-toggle { align-self: flex-start; background: none; border: none; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 0; }
-  .cred-field .cred-toggle:hover { color: var(--accent); }
-  .cred-chip { font-size: 11px; white-space: nowrap; }
-  .cred-chip.set { color: var(--ok); }
-  .cred-chip.unset { color: var(--text-muted); }
 
   .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
   button.primary { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: var(--r-1); font-size: 14px; font-weight: 500; cursor: pointer; }
@@ -1230,20 +1223,17 @@
 
           <div class="form-group">
             <label class="form-label" for="pv-api-key">API Key</label>
-            <div class="cred-field" data-cred="provider-key" data-mode="value">
-              <div class="cred-value cred-row">
-                <div class="password-input-wrapper">
-                  <input id="pv-api-key" type="password" class="form-input" placeholder="sk-..." autocomplete="off">
-                  <button type="button" class="password-toggle" onclick="pvTogglePassword()" aria-label="Toggle password visibility">👁</button>
-                </div>
-                <span id="pv-key-chip" class="cred-chip unset"></span>
-              </div>
-              <div class="cred-ref cred-row" style="display:none;">
-                <input id="pv-api-key-env" type="text" class="form-input" placeholder="e.g. FLEETENT_MODEL_FAST_API_KEY" autocomplete="off">
-              </div>
-              <button type="button" class="cred-toggle" onclick="credToggle(this)">⚙ 引用现有变量</button>
-              <span class="form-hint">输入值即可——平台自动命名并加密保存；或切到「引用现有变量」由运维在主机 .env 填。编辑时留空保持原值。</span>
+            <div class="password-input-wrapper">
+              <input id="pv-api-key" type="password" class="form-input" placeholder="sk-..." autocomplete="off">
+              <button type="button" class="password-toggle" onclick="pvTogglePassword()" aria-label="Toggle password visibility">👁</button>
             </div>
+            <span class="form-hint">Leave blank to keep existing key when editing</span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="pv-api-key-env">API key env var</label>
+            <input id="pv-api-key-env" type="text" class="form-input" placeholder="e.g. FLEETENT_MODEL_FAST_API_KEY" autocomplete="off">
+            <span class="form-hint">Env var name holding the key (preferred over an inline key)</span>
           </div>
         </div>
 
@@ -1344,17 +1334,6 @@
           <h4 style="margin:14px 0 4px;">Custom (YAML)</h4>
           <div class="muted" style="font-size:12px;">Any other agent.yaml field as YAML — allowed_tools / plugins / features plus anything not above. Deep-merged onto the defaults; invalid keys are ignored.</div>
           <textarea id="ag-capabilities" rows="12" autocomplete="off" spellcheck="false" style="font-family:monospace; width:100%; margin-top:4px;" placeholder="allowed_tools:&#10;  - &quot;search_*&quot;&#10;  - read_file&#10;plugins:&#10;  - acme-docs&#10;features:&#10;  code_execution: true&#10;agent_max_turns: 80&#10;session_ttl_days: 7&#10;access:&#10;  require_approval: false"></textarea>
-        </div>
-        <div id="ag-secrets" style="display:none;">
-          <h4 style="margin:14px 0 4px;">所需密钥 / Required secrets</h4>
-          <div class="muted" style="font-size:12px; margin-bottom:6px;">
-            部署就绪总览（只读）：列出当前配置引用的每个 <code>*_env</code> 及其来源与状态。值在来源处填写——provider / 知识库连接器的密钥字段直接输入即可；🔴 未设置的由运维在部署主机 <code>.env</code> 补齐。
-          </div>
-          <div id="ag-secrets-list" style="display:flex; flex-direction:column; gap:8px;"></div>
-          <div class="row" style="gap:8px; margin-top:8px;">
-            <button type="button" class="small" onclick="agCopyEnvTemplate()">复制 .env 模板</button>
-            <button type="button" class="small" onclick="agCheckMissingSecrets()">校验缺失</button>
-          </div>
         </div>
         <div id="ag-err" class="err"></div>
         <div class="row" style="justify-content:flex-end;">
@@ -2946,11 +2925,9 @@ async function agCreate() {
   $("ag-create-extra").style.display = "";
   $("ag-allowed-tools").style.display = "none";  // capabilities YAML supplies tools in create
   AG_PROVIDERS = await api("GET", "/providers").catch(() => []);
-  agFillModelOverrides({});  // reset selection + render the two-part model picker
+  agRenderModelOverrides();  // render the default/fast/reasoning provider pickers
   $("ag-capabilities").value = "";
   await agLoadCreateBindings();
-  // Secrets are keyed by the saved agent; author config first, manage secrets on edit.
-  $("ag-secrets").style.display = "none";
   $("ag-modal").dataset.mode = "create";
   $("ag-modal").classList.remove("hidden");
 }
@@ -2959,98 +2936,26 @@ async function agCreate() {
 // to an ordered fallback chain of {target, max_tokens}. Models are CONFIGURED providers.
 // AG_ROUTE_SEL holds the router state; targets come from the multi-select widget DOM.
 let AG_PROVIDERS = [];
-let AG_ROUTERS = [];  // [{name, entries:[{target, max_tokens}]}] — custom-named, ordered
-function _agProviderLabel(p) {
-  return p ? `${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}` : "";
-}
-function agChosenTargets() {
-  return [...document.querySelectorAll("#ag-models-ms .agmo-target input[type=checkbox]:checked")]
-    .map(cb => cb.value);
-}
-function agRenderModelOverrides(selectedTargets) {
-  const box = $("ag-model-overrides");
-  if (!AG_PROVIDERS.length) {
-    box.innerHTML = `<div class="muted" style="font-size:12px;">No providers configured — add one under Providers first.</div>`;
-    return;
-  }
-  box.innerHTML = `
-    <div class="muted" style="font-size:12px; margin:4px 0;">Models (this agent may use)</div>
-    <div id="ag-models-ms" style="margin-bottom:12px;"></div>
-    <div class="muted" style="font-size:12px; margin:4px 0;">Routing — add a router (custom name), then route it to one or more models (ordered fallbacks)</div>
-    <div id="ag-router"></div>`;
-  agMsWidget("ag-models-ms", "agmo-target",
-    AG_PROVIDERS.map(p => ({
-      value: p.id,
-      label: `${p.id}${p.model ? " · " + p.model : ""}${p.api_key ? " · 🔑 " + p.api_key : ""}`,
-      q: `${p.id} ${p.model || ""}`,
-    })), "Select models…");
-  const want = new Set(selectedTargets || []);
-  for (const cb of box.querySelectorAll("#ag-models-ms .agmo-target input[type=checkbox]")) {
-    if (want.has(cb.value)) cb.checked = true;
-  }
-  agMsSync("ag-models-ms");
-  // re-render the router whenever the model selection changes (checkbox events bubble here)
-  $("ag-models-ms").addEventListener("change", agRenderRouter);
-  agRenderRouter();
-}
-function agRenderRouter() {
-  const router = $("ag-router");
-  const chosen = agChosenTargets();
-  for (const rt of AG_ROUTERS) {  // drop entries whose model was unselected
-    rt.entries = rt.entries.filter(e => !e.target || chosen.includes(e.target));
-  }
-  if (!chosen.length) {
-    router.innerHTML = `<div class="muted" style="font-size:12px;">Select at least one model to add a router.</div>`;
-    return;
-  }
-  const provById = Object.fromEntries(AG_PROVIDERS.map(p => [p.id, p]));
-  const addBtn = `<div class="row" style="justify-content:flex-end; margin-bottom:6px;">
-    <button type="button" class="small ghost" onclick="agRouterAddRoute()">+ router</button></div>`;
-  const blocks = AG_ROUTERS.map((rt, ri) => {
-    const rows = rt.entries.map((e, ei) => {
-      const opts = `<option value="">— pick model —</option>` + chosen.map(pid =>
-        `<option value="${esc(pid)}" ${e.target === pid ? "selected" : ""}>${_agProviderLabel(provById[pid])}</option>`).join("");
-      return `<div class="row" style="gap:6px; align-items:center; margin:3px 0;">
-        <select onchange="agRouterSetEntry(${ri},${ei},'target',this.value)" style="flex:1;">${opts}</select>
-        <input type="number" min="1" placeholder="max_tokens" value="${e.max_tokens ?? ""}"
-          oninput="agRouterSetEntry(${ri},${ei},'max_tokens',this.value)" style="width:120px;">
-        <button type="button" class="small ghost" onclick="agRouterRemoveModel(${ri},${ei})">✕</button>
-      </div>`;
-    }).join("");
-    return `<div style="border:1px solid var(--border); border-radius:var(--r-1); padding:8px; margin-bottom:8px;">
-      <div class="row" style="gap:6px; align-items:center;">
-        <input placeholder="router name (e.g. default)" value="${esc(rt.name)}" oninput="agRouterSetName(${ri}, this.value)" style="flex:1;">
-        <button type="button" class="small ghost" onclick="agRouterAddModel(${ri})">+ model</button>
-        <button type="button" class="small ghost danger" onclick="agRouterRemoveRoute(${ri})">✕</button>
-      </div>
-      ${rows || `<div class="muted" style="font-size:12px; margin-top:4px;">No model yet — + model.</div>`}
-    </div>`;
-  }).join("");
-  router.innerHTML = addBtn + (blocks || `<div class="muted" style="font-size:12px;">No routers — + router to add one.</div>`);
-}
-function agRouterAddRoute() { AG_ROUTERS.push({ name: "", entries: [] }); agRenderRouter(); }
-function agRouterRemoveRoute(ri) { AG_ROUTERS.splice(ri, 1); agRenderRouter(); }
-function agRouterSetName(ri, val) { if (AG_ROUTERS[ri]) AG_ROUTERS[ri].name = val; }
-function agRouterAddModel(ri) { if (AG_ROUTERS[ri]) AG_ROUTERS[ri].entries.push({ target: "", max_tokens: null }); agRenderRouter(); }
-function agRouterRemoveModel(ri, ei) { if (AG_ROUTERS[ri]) AG_ROUTERS[ri].entries.splice(ei, 1); agRenderRouter(); }
-function agRouterSetEntry(ri, ei, field, val) {
-  const e = AG_ROUTERS[ri] && AG_ROUTERS[ri].entries[ei];
-  if (!e) return;
-  e[field] = field === "max_tokens" ? (val === "" ? null : Number(val)) : val;
+function agRenderModelOverrides() {
+  const opts = `<option value="">— none —</option>`
+    + AG_PROVIDERS.map(p => `<option value="${esc(p.id)}">${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}${p.api_key_env ? " · " + esc(p.api_key_env) : ""}</option>`).join("");
+  const hint = AG_PROVIDERS.length ? "" : `<div class="muted" style="font-size:12px;">No providers configured — add one under Providers first.</div>`;
+  const reuse = `<div class="muted model-key-provider-reuse" style="font-size:12px; margin-bottom:6px;">Model credentials reuse each provider api_key_env; no duplicate model key is stored on the agent.</div>`;
+  $("ag-model-overrides").innerHTML = hint + reuse + ["default", "fast", "reasoning"].map(lvl => `
+    <div class="row" data-mo="${lvl}" style="gap:6px; margin-bottom:6px; align-items:center;">
+      <span style="min-width:74px; color:var(--muted);">${lvl}</span>
+      <select class="agmo-provider" style="flex:1;">${opts}</select>
+    </div>`).join("");
 }
 function agCollectModelOverrides() {
-  const targets = agChosenTargets();
-  if (!targets.length) return {};
-  const routes = {};
-  for (const rt of AG_ROUTERS) {
-    const name = (rt.name || "").trim();
-    if (!name) continue;
-    const entries = rt.entries
-      .filter(e => e.target && targets.includes(e.target))
-      .map(e => ({ target: e.target, max_tokens: e.max_tokens ?? null, params: {} }));
-    if (entries.length) routes[name] = entries;
+  const mo = {};
+  for (const row of document.querySelectorAll("#ag-model-overrides [data-mo]")) {
+    const pid = row.querySelector(".agmo-provider").value;
+    if (!pid) continue;
+    const p = AG_PROVIDERS.find(x => x.id === pid);
+    mo[row.dataset.mo] = { provider: pid, model: p ? (p.model || "") : "" };
   }
-  return { targets, routes };
+  return mo;
 }
 
 let AGM_CHANNELS = [];
@@ -3187,28 +3092,12 @@ function agmAddChannel() {
 }
 function agmRemoveChannel(i) { AGM_CHANNELS.splice(i, 1); agmRenderChannels(); }
 function agFillModelOverrides(mo) {
-  mo = mo || {};
-  let targets = [];
-  AG_ROUTERS = [];
-  const toEntry = e => (typeof e === "string" ? { target: e, max_tokens: null }
-    : { target: e.target, max_tokens: e.max_tokens ?? null });
-  if (Array.isArray(mo.targets)) {
-    targets = mo.targets.slice();
-    for (const [name, v] of Object.entries(mo.routes || {})) {
-      AG_ROUTERS.push({ name, entries: (Array.isArray(v) ? v : [v]).map(toEntry) });
-    }
-  } else {
-    // legacy {route: {provider, model}} → derive targets + one-entry routers
-    const t = new Set();
-    for (const [name, sel] of Object.entries(mo)) {
-      if (sel && typeof sel === "object" && sel.provider) {
-        t.add(sel.provider);
-        AG_ROUTERS.push({ name, entries: [{ target: sel.provider, max_tokens: null }] });
-      }
-    }
-    targets = [...t];
+  for (const row of document.querySelectorAll("#ag-model-overrides [data-mo]")) {
+    const o = (mo || {})[row.dataset.mo];
+    // Stored `provider` is a configured-provider id; select it (blank if it no
+    // longer exists in the registry).
+    row.querySelector(".agmo-provider").value = o ? (o.provider || "") : "";
   }
-  agRenderModelOverrides(targets);
 }
 // Render current allowed_tools back into the capabilities YAML the modal edits.
 function agToolsToYaml(tools) {
@@ -3261,7 +3150,8 @@ async function agEdit(name) {
     $("ag-allowed-tools").value = "";
     $("ag-create-extra").style.display = "";
     $("ag-bind-config").style.display = "";
-    agFillModelOverrides(a.model_overrides);  // loads selection (new + legacy shape) + renders
+    agRenderModelOverrides();  // render the provider pickers, then select stored providers
+    agFillModelOverrides(a.model_overrides);
     // Curated knobs populate the Advanced fields; the Custom box round-trips only the
     // long tail (config_overrides minus the discrete keys). Legacy agents without any
     // overrides fall back to showing just their allowed_tools.
@@ -3280,92 +3170,8 @@ async function agEdit(name) {
     await agLoadCreateBindings(current);
     $("ag-modal").dataset.mode = "edit";
     $("ag-modal").dataset.name = name;
-    await agLoadSecrets(name);
     $("ag-modal").classList.remove("hidden");
   } catch (e) { toast(e.message, "error"); }
-}
-
-// --- required-secrets panel (write-only; values never round-trip to the browser) ---
-// Reusable value-first credential control. Defaults to data-mode="value" (type the secret,
-// the platform names + stores it); the advanced toggle switches to a reference to an existing
-// env var (operator fills the host .env, platform stores nothing).
-function credFieldHtml(o) {
-  // default data-mode="value": enter the secret inline unless the caller asks for reference
-  const mode = o.mode === "reference" ? "reference" : "value";
-  const set = o.status === "set";
-  const label = o.label ? `<label class="form-label">${esc(o.label)}</label>` : "";
-  const hint = o.hint ? `<span class="form-hint">${esc(o.hint)}</span>` : "";
-  return `<div class="cred-field" data-cred="${esc(o.key || "")}" data-mode="${mode}">
-    ${label}
-    <div class="cred-value cred-row" ${mode === "reference" ? 'style="display:none;"' : ""}>
-      <input type="password" id="${esc(o.valueId || "")}" data-cred-value
-             ${o.valueKey ? `data-key="${esc(o.valueKey)}"` : ""} autocomplete="off"
-             placeholder="${esc(o.placeholder || "输入值（写后不回显）")}" style="flex:1;">
-      <span class="cred-chip ${set ? "set" : "unset"}">${set ? "🟢 已设置" : "⚪ 未设置"}</span>
-    </div>
-    <div class="cred-ref cred-row" ${mode === "reference" ? "" : 'style="display:none;"'}>
-      <input type="text" id="${esc(o.envId || "")}" data-cred-env
-             ${o.envKey ? `data-key="${esc(o.envKey)}"` : ""} autocomplete="off"
-             value="${esc(o.envName || "")}" placeholder="ENV_VAR_NAME" style="flex:1;">
-    </div>
-    <button type="button" class="cred-toggle" onclick="credToggle(this)">⚙ 引用现有变量</button>
-    ${hint}
-  </div>`;
-}
-
-function credToggle(btn) {
-  const field = btn.closest(".cred-field");
-  credSetMode(field, field.dataset.mode === "reference" ? "value" : "reference");
-}
-
-function credSetMode(field, mode) {
-  if (!field) return;
-  const ref = mode === "reference";
-  field.dataset.mode = ref ? "reference" : "value";
-  field.querySelector(".cred-value").style.display = ref ? "none" : "";
-  field.querySelector(".cred-ref").style.display = ref ? "" : "none";
-  const toggle = field.querySelector(".cred-toggle");
-  if (toggle) toggle.textContent = ref ? "↩ 改为直接输入值" : "⚙ 引用现有变量";
-}
-
-let AG_SECRET_SLOTS = [];
-function agModalName() { return $("ag-modal").dataset.name; }
-async function agLoadSecrets(name) {
-  try {
-    const data = await api("GET", `/agents/${encodeURIComponent(name)}/required-env`);
-    AG_SECRET_SLOTS = data.slots || [];
-  } catch (e) { AG_SECRET_SLOTS = []; }
-  $("ag-secrets-list").innerHTML = AG_SECRET_SLOTS.length
-    ? AG_SECRET_SLOTS.map(agSecretSlotHtml).join("")
-    : `<div class="muted" style="font-size:12px;">No referenced secrets yet — add a provider, MCP server or connector.</div>`;
-  $("ag-secrets").style.display = "";
-}
-// Read-only deploy-readiness row: env name + where it comes from + set/unset.
-// Values are entered at the source field (provider / KB connector cred-field), not here.
-function agSecretSlotHtml(slot) {
-  const env = slot.env_name;
-  const chip = slot.status === "set"
-    ? `<span class="cred-chip set">🟢 已设置</span>`
-    : `<span class="cred-chip unset">⚪ 未设置</span>`;
-  return `<div class="ag-secret" data-env="${esc(env)}" style="border:1px solid var(--border); border-radius:6px; padding:8px;">
-    <div class="row" style="justify-content:space-between; align-items:center; gap:8px;">
-      <code style="font-size:12px;">${esc(env)}</code>
-      <span class="muted" style="font-size:11px;">${esc(slot.source)}</span>
-      ${chip}
-    </div>
-  </div>`;
-}
-function agCopyEnvTemplate() {
-  const lines = AG_SECRET_SLOTS.map(s => `${s.env_name}=`);
-  const text = "# Agent secrets — operator fills the blanks on the deploy host\n" + lines.join("\n") + "\n";
-  navigator.clipboard.writeText(text).then(
-    () => toast("已复制 .env 模板", "success"),
-    () => toast("复制失败", "error"),
-  );
-}
-function agCheckMissingSecrets() {
-  const missing = AG_SECRET_SLOTS.filter(s => s.status !== "set").map(s => s.env_name);
-  toast(missing.length ? `${missing.length} 个未设置: ${missing.join(", ")}` : "所有密钥已就绪", missing.length ? "error" : "success");
 }
 
 async function agApplyEditBindings(name) {
@@ -3585,9 +3391,72 @@ function agRenderPreview(name, a, yamlText, keyHints = {}) {
       <button class="small ghost" onclick="agDownloadYaml('${esc(name)}')">Download</button>
       ${lifecycle}
     </div>
+    <div id="ag-required-env-panel" style="border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:12px;">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <h4 style="margin:0;">Required env</h4>
+        <button id="ag-required-env-copy" class="small ghost" onclick="agCopyEnvTemplate('${esc(name)}')">Copy .env template</button>
+      </div>
+      <div id="ag-required-env-list" style="display:flex; flex-direction:column; gap:8px; margin-top:8px;"></div>
+    </div>
     <h4 style="margin:8px 0 6px;">agent.yaml <span class="muted" style="font-weight:normal;">(read-only preview)</span></h4>
     <pre id="ag-yaml-pre" style="white-space:pre; overflow:auto; max-height:68vh; font-size:12px;"></pre>`;
   document.getElementById("ag-yaml-pre").textContent = agAnnotateKeyHints(AG_YAML_CACHE, keyHints);
+  agLoadRequiredEnv(name);
+}
+
+let AG_REQUIRED_ENV = [];
+async function agLoadRequiredEnv(name) {
+  const box = $("ag-required-env-list");
+  if (!box) return;
+  box.innerHTML = `<div class="muted">Loading…</div>`;
+  try {
+    const r = await api("GET", `/agents/${encodeURIComponent(name)}/required-env`);
+    AG_REQUIRED_ENV = r.required_env || [];
+    box.innerHTML = AG_REQUIRED_ENV.map(item => agCredentialField(name, item)).join("")
+      || `<div class="muted">No required env vars.</div>`;
+  } catch (e) {
+    box.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  }
+}
+function agCredentialField(name, item) {
+  const env = item.env_name || "";
+  const set = item.status === "set";
+  const disabled = IS_VIEWER ? "disabled" : "";
+  return `
+    <div class="credential-field required-env-row ${set ? "" : "required-env-missing"}" data-env="${esc(env)}">
+      <div class="row" style="justify-content:space-between; gap:8px;">
+        <div><code>${esc(env)}</code> <span class="pill">${esc(item.source || "Custom")}</span></div>
+        <span class="secret-status-chip pill ${set ? "active" : "blocked"}">${set ? "set" : "unset"}</span>
+      </div>
+      <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:6px;">
+        <label class="credential-source"><input type="radio" name="cred-${esc(env)}" ${item.mode !== "inject" ? "checked" : ""} disabled> operator</label>
+        <label class="credential-source"><input type="radio" name="cred-${esc(env)}" ${item.mode === "inject" ? "checked" : ""} disabled> inject</label>
+        <input id="cred-value-${esc(env)}" type="password" autocomplete="off" placeholder="secret value" ${disabled}>
+        <button class="small" ${disabled} onclick="agSetSecret('${esc(name)}','${esc(env)}')">Set</button>
+        <button class="small ghost danger" ${disabled} onclick="agDeleteSecret('${esc(name)}','${esc(env)}')">Clear</button>
+      </div>
+      <details class="credential-advanced-env"><summary>Advanced env name</summary><code>${esc(env)}</code></details>
+    </div>`;
+}
+async function agSetSecret(name, env) {
+  const input = $(`cred-value-${env}`);
+  const value = input ? input.value : "";
+  try {
+    await api("PUT", `/agents/${encodeURIComponent(name)}/secrets/${encodeURIComponent(env)}`, { value });
+    if (input) input.value = "";
+    await agLoadRequiredEnv(name);
+  } catch (e) { toast(e.message, "error"); }
+}
+async function agDeleteSecret(name, env) {
+  try {
+    await api("DELETE", `/agents/${encodeURIComponent(name)}/secrets/${encodeURIComponent(env)}`);
+    await agLoadRequiredEnv(name);
+  } catch (e) { toast(e.message, "error"); }
+}
+function agCopyEnvTemplate(name) {
+  const text = (AG_REQUIRED_ENV || []).map(item => `${item.env_name}=`).join("\n") + "\n";
+  navigator.clipboard?.writeText(text);
+  toast(`Copied .env template for ${name}`, "ok");
 }
 
 function agCopyYaml() {
@@ -3916,9 +3785,6 @@ function pvOpenCreate() {
   $("pv-model").value = "";
   $("pv-model-custom").value = "";
   $("pv-model-custom").classList.add("hidden");
-  credSetMode(document.querySelector('[data-cred="provider-key"]'), "value");
-  $("pv-key-chip").className = "cred-chip unset";
-  $("pv-key-chip").textContent = "";
   // Reset provider type to OpenAI
   document.querySelector('input[name="provider-type"][value="openai"]').checked = true;
   pvUpdateProviderType('openai');
@@ -3948,13 +3814,6 @@ async function pvOpenEdit(id) {
   
   $("pv-api-key").value = "";  // never prefill secret
   $("pv-api-key-env").value = p.api_key_env || "";
-  // reference-only providers (env named, no platform-held key) open in reference mode
-  credSetMode(
-    document.querySelector('[data-cred="provider-key"]'),
-    !p.api_key_set && p.api_key_env ? "reference" : "value",
-  );
-  $("pv-key-chip").className = "cred-chip " + (p.api_key_set ? "set" : "unset");
-  $("pv-key-chip").textContent = p.api_key_set ? "🟢 已设置" : "⚪ 未设置";
   $("pv-max-tokens").value = p.max_tokens != null ? p.max_tokens : "";
   $("pv-temperature").value = p.temperature != null ? p.temperature : "";
   $("pv-protocol").value = p.protocol || "";
@@ -5268,14 +5127,6 @@ function kbcRenderFields(current = {}) {
       return `<label class="row" style="gap:6px;"><input type="checkbox" data-key="${f.key}" ${v ? "checked" : ""}> ${esc(f.label)}</label>`;
     if (f.type === "select")
       return `<label class="field-label">${esc(f.label)}</label><select data-key="${f.key}">${f.options.map(o => `<option value="${o}" ${v === o ? "selected" : ""}>${o || "—"}</option>`).join("")}</select>`;
-    if (f.key.endsWith("_env"))
-      // credential field: type the token (value mode) or reference an existing env var
-      return credFieldHtml({
-        label: f.label.replace(/ env var$/, ""),
-        valueKey: f.key + "_value", envKey: f.key, envName: v || "",
-        mode: v ? "reference" : "value", status: v ? "set" : "unset",
-        placeholder: "输入令牌（加密保存）",
-      });
     return `<label class="field-label">${esc(f.label)}</label><input data-key="${f.key}" autocomplete="off" value="${esc(v != null ? String(v) : "")}">`;
   }).join("");
 }

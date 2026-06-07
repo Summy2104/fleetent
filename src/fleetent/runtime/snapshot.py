@@ -18,6 +18,9 @@ from fleetent.agent_config import AgentFile, default_models
 from fleetent.agent_store import AgentVersion
 from fleetent.governance.agent_policy import check_tool_access
 from fleetent.model import ModelPolicySnapshot
+from fleetent.observability.structured_logging import get_logger
+
+_logger = get_logger("runtime.snapshot")
 
 ToolSchema = dict[str, Any]
 
@@ -55,6 +58,13 @@ class GovernanceConfig:
     # timeouts
     sub_agent_timeout_seconds: int = 300
     tool_default_timeout_seconds: float = 30.0
+    # run-time input steering (C1)
+    steering_mode: str = "steer"
+    steering_max_pending: int = 8
+    # hooks extension system (P1)
+    hooks_enabled: bool = False
+    hooks_decision_failure: str = "open"
+    hooks_timeout_seconds: float = 5.0
 
 
 def _governance_from_file(agent: AgentFile) -> GovernanceConfig:
@@ -78,6 +88,11 @@ def _governance_from_file(agent: AgentFile) -> GovernanceConfig:
         loop_detect_ignore_arg_keys=tuple(agent.loop_detect_ignore_arg_keys),
         sub_agent_timeout_seconds=agent.sub_agent_timeout_seconds,
         tool_default_timeout_seconds=agent.tool_default_timeout_seconds,
+        steering_mode=agent.steering_mode,
+        steering_max_pending=agent.steering_max_pending,
+        hooks_enabled=agent.hooks_enabled,
+        hooks_decision_failure=agent.hooks_decision_failure,
+        hooks_timeout_seconds=agent.hooks_timeout_seconds,
     )
 
 
@@ -135,7 +150,12 @@ def _snapshot(name: str, version: AgentVersion) -> AgentSnapshot:
 def load_active(name: str) -> AgentSnapshot | None:
     """Resolve the agent's file-sourced snapshot, or ``None`` if absent. Zero DB."""
     agent = agent_config.current().get(name)
-    return None if agent is None else _snapshot_from_file(agent)
+    if agent is None:
+        _logger.warn("snapshot_not_found", agent=name)
+        return None
+    snap = _snapshot_from_file(agent)
+    _logger.info("snapshot_loaded", agent=name, version_id=snap.version_id)
+    return snap
 
 
 def load_active_db(name: str) -> AgentSnapshot | None:

@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 SCENARIOS_DIR = Path(__file__).resolve().parents[1] / "e2e" / "slack_scenarios"
+SAMPLE_AGENT = SCENARIOS_DIR / "agent.yaml.example"
 
 REQUIRED_FIELDS = {"id", "coverage", "persona", "goal", "success_criteria", "max_turns", "channel"}
 
@@ -54,6 +55,15 @@ def _load_catalog() -> list[dict]:
 def test_catalog_is_non_empty():
     assert SCENARIOS_DIR.is_dir(), f"missing scenarios dir: {SCENARIOS_DIR}"
     assert _load_catalog(), "no scenario files found"
+
+
+def test_slack_e2e_sample_agent_lives_with_scenarios():
+    readme = (SCENARIOS_DIR / "README.md").read_text(encoding="utf-8")
+
+    assert SAMPLE_AGENT.is_file()
+    assert "tests/e2e/slack_scenarios/agent.yaml.example" in readme
+    assert "config/agents/e2e-tester" not in readme
+    assert not Path("config/agents/e2e-tester").exists()
 
 
 def test_each_scenario_well_formed_and_chinese():

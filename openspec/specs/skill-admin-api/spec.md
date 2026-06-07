@@ -96,3 +96,49 @@ Upload / edit / enable-disable / archive / per-agent assignment / proposal revie
 - **WHEN** a request to any `/admin/skills/*` write endpoint carries no valid session
 - **THEN** the response is 401
 
+### Requirement: Skill 写操作触发受影响 agent 的 re-materialize
+
+由于 agent 运行时只读 agent.yaml、不访问 platform DB，skill 管理的写操作 SHALL 在写 DB 后触发受影响 agent 的 re-materialize，把最新决策落到各 agent 的 agent.yaml。触发是 best-effort：单个 agent 的 re-materialize 失败 SHALL 被记录但不阻断接口响应或其余 agent 的刷新。
+
+- 全局 enable/disable（`POST /admin/skills/{name}/enable|disable`）影响所有 agent 的 `disabled_skills`，SHALL 触发全量 re-materialize
+- per-agent 绑定（`PUT /admin/skills/{name}/agents/{agent_id}`）只影响该 agent 的 `allowed_skills`，SHALL 只 re-materialize 该 agent
+
+#### Scenario: 全局 disable 触发全量 re-materialize
+
+- **WHEN** admin 调用 `POST /admin/skills/crm-ops/disable`
+- **THEN** DB 中该 skill 的 `global_enabled` 置为 0，写审计日志
+- **AND** 所有 authored agent 的 agent.yaml 被重新导出（best-effort）
+
+#### Scenario: per-agent 绑定只 re-materialize 对应 agent
+
+- **WHEN** admin 调用 `PUT /admin/skills/crm-ops/agents/{id}` 设置某 agent 的绑定
+- **THEN** 该 agent 的 agent.yaml 被重新导出
+- **AND** 其他 agent 的 agent.yaml 不被触碰
+
+#### Scenario: 单个 agent re-materialize 失败不阻断接口
+
+- **WHEN** 全量 re-materialize 过程中某个 agent 导出失败（如缺 provider 配置）
+- **THEN** 该失败被记录为结构化告警，接口仍返回成功，其余 agent 正常刷新
+
+
+### Requirement: Skill 命中追踪提供真实 observability 数据
+
+每次 `read_skill` 成功加载一个 skill 的全文 MUST 记录一条命中（skill 名、可得的 agent / session、时间戳）到持久化存储。per-skill observability 查询 MUST 据此返回真实数据——命中计数与触发它的去重 session 列表，且 `stale` MUST 为假——而非固定的空占位符。
+
+命中记录 MUST 为 best-effort：记录写入失败（DB 不可用等）SHALL 被捕获并记录告警，MUST NOT 阻断 `read_skill` 返回 skill 正文。被拒绝（audit_blocked）或未知名的 read_skill 调用 MUST NOT 记为命中。
+
+#### Scenario: read_skill 成功加载记一次命中
+- **WHEN** 对一个可用 skill 成功调用 `read_skill`
+- **THEN** 存储中新增一条该 skill 的命中记录（含可得的 agent/session 与时间戳）
+
+#### Scenario: observability 返回真实命中与 session
+- **WHEN** 某 skill 已被 read_skill 加载若干次（来自不同 session），admin 查询其 observability
+- **THEN** 返回真实命中计数与触发它的去重 session 列表，`stale` 为假
+
+#### Scenario: 命中记录失败不阻断 read_skill
+- **WHEN** `read_skill` 成功加载 skill 但命中记录写入抛异常
+- **THEN** 异常被捕获并记录告警，`read_skill` 仍返回 skill 正文
+
+#### Scenario: 拒绝与未知名不记命中
+- **WHEN** `read_skill` 因 audit_blocked 被拒，或因未知 skill 名返回错误
+- **THEN** 不记录命中

@@ -8,7 +8,7 @@ Webhook sources SHALL NOT be loaded from YAML files. Runtime source management i
 configuration-foundation and SHALL be handled by a later webhook source management change.
 
 #### Scenario: Old webhook YAML is not loaded
-- **WHEN** `config/webhooks.yaml` exists
+- **WHEN** a legacy webhook YAML file exists
 - **THEN** server startup fails fast instead of loading webhook sources
 
 #### Scenario: Missing webhook source returns 404
@@ -75,7 +75,7 @@ The `reply_func` passed to `normalizer.route()` for webhook-triggered runs SHALL
 - **THEN** no outbound HTTP call or IM message is sent; the result appears in eval trace
 
 ### Requirement: Webhook global settings
-Webhook trigger runtime SHALL read deployment-level policy from `config/settings.yaml`.
+Webhook trigger runtime SHALL read deployment-level policy from Platform settings.
 
 #### Scenario: Webhooks disabled
 - **WHEN** `webhooks.enabled=false`
@@ -84,4 +84,3 @@ Webhook trigger runtime SHALL read deployment-level policy from `config/settings
 #### Scenario: Max body size is configured
 - **WHEN** request body size exceeds `webhooks.max_body_bytes`
 - **THEN** the webhook endpoint rejects the request before dispatch
-

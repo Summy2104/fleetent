@@ -219,11 +219,10 @@ def test_bind_known_mcp_server(client, monkeypatch):
 
 
 def test_known_mcp_ids_include_store_registered(monkeypatch):
-    # _known_mcp_server_ids unions the YAML config seam with DB-registered global
-    # servers (the same set the drawer lists), so a store-only server is bindable.
+    # _known_mcp_server_ids uses DB-registered global servers, so a store-only
+    # server is bindable.
     from fleetent.platform.connector_management import agent_mcp_server_store
 
-    monkeypatch.setattr(api.config, "load_mcp_server_settings", lambda: [])
     monkeypatch.setattr(
         agent_mcp_server_store,
         "list_mcp_servers",
@@ -236,7 +235,6 @@ def test_bind_store_registered_mcp_server(client, monkeypatch):
     from fleetent.platform.connector_management import agent_mcp_server_store
 
     agent = agent_store.create_agent("ops", "Ops v1.", ["shell"])
-    monkeypatch.setattr(api.config, "load_mcp_server_settings", lambda: [])
     monkeypatch.setattr(
         agent_mcp_server_store,
         "list_mcp_servers",
@@ -360,10 +358,7 @@ def test_export_agent_yaml(client):
         api_key_env="ACME_DOCS_MCP_TOKEN",
     )
     agent_store.bind_mcp_server(agent.id, "docs")
-    from fleetent.platform.im_gateway_management import identity as im_identity
-
-    alice = im_identity.get_or_create("owner", "slack", "U_ALICE").id
-    agent_store.assign_user(alice, agent.id)
+    agent_store.assign_user("u_alice", agent.id)
     agent_store.assign_channel("slack", "C0123ABCD", agent.id)
 
     token, _ = _session_for("admin")
@@ -381,7 +376,7 @@ def test_export_agent_yaml(client):
     assert doc["memory_namespace"] == "support-bot"
     assert {s["id"]: s for s in doc["mcp_servers"]}["docs"]["api_key_env"] == "ACME_DOCS_MCP_TOKEN"
     assert "slack:C0123ABCD" in doc["bindings"]["channels"]
-    assert "U_ALICE" in doc["bindings"]["users"]  # raw IM user id, not the internal UUID
+    assert "u_alice" in doc["bindings"]["users"]
 
 
 def test_export_agent_yaml_indentation(client):
@@ -422,7 +417,7 @@ def test_deploy_writes_agent_yaml(client, tmp_path, monkeypatch):
     token, _ = _session_for("admin")
     r = client.post("/admin/agents/dep-bot/deploy", headers=_hdr(token))
     assert r.status_code == 200, r.text
-    dest = home / "dep-bot" / "agent.yaml"
+    dest = home / "agents" / "dep-bot" / "agent.yaml"
     assert dest.exists()
     assert r.json()["path"] == str(dest)
     doc = _yaml.safe_load(dest.read_text())

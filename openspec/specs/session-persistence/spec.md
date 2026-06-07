@@ -5,7 +5,7 @@ per-session isolation, plus the management metadata and controlled write hooks t
 admin console needs.
 ## Requirements
 ### Requirement: Load session history
-The system SHALL load the full conversation history for a session before running the agent.
+The system SHALL load the full conversation history for a session before running the agent. When loading, the system SHALL rehydrate externalized tool results (`[stored:xxx]` references) back to their full inline content, so callers always receive complete messages.
 
 #### Scenario: Existing session
 - **WHEN** a message arrives with `session_id` that has an existing `data/sessions/{session_id}.json`
@@ -15,8 +15,12 @@ The system SHALL load the full conversation history for a session before running
 - **WHEN** a message arrives with a `session_id` that has no existing file
 - **THEN** `session_mgr.load(session_id)` returns an empty list
 
+#### Scenario: Externalized tool results rehydrated on load
+- **WHEN** a session file contains a tool message whose content is a `[stored:xxx.txt]` reference and the external file exists
+- **THEN** `session_mgr.load(session_id)` returns that message with its full content read back inline
+
 ### Requirement: Save session history
-The system SHALL persist the updated conversation history after each agent run.
+The system SHALL persist the updated conversation history after each agent run. Before serialization, the system SHALL externalize oversized tool results (>50KB) to per-session external files, persisting references in the session JSON.
 
 #### Scenario: Save after agent completes
 - **WHEN** `agent_loop.run()` completes for a session
@@ -26,8 +30,12 @@ The system SHALL persist the updated conversation history after each agent run.
 - **WHEN** `context_mgr` compresses the history during the run
 - **THEN** the compressed (shorter) message list is what gets saved, not the original
 
+#### Scenario: Oversized tool result externalized on save
+- **WHEN** `save` is called with a tool message whose string content exceeds 50KB
+- **THEN** the content is written to `{session_id}.tool_outputs/{tool_call_id}.txt` and the session JSON stores a `[stored:...]` reference instead of the inline content
+
 ### Requirement: Session isolation
-The system SHALL ensure concurrent sessions do not interfere with each other.
+The system SHALL ensure concurrent sessions do not interfere with each other, both within a single process (asyncio coroutines) and across processes (CLI + server, multiple workers). Same-session writes SHALL be serialized by a two-layer lock: a cross-process file lock (`fcntl.flock` on `{session_id}.lock`) wrapping a per-session in-process `asyncio.Lock`.
 
 #### Scenario: Two sessions run concurrently
 - **WHEN** messages for `session_id=A` and `session_id=B` arrive simultaneously
@@ -36,6 +44,10 @@ The system SHALL ensure concurrent sessions do not interfere with each other.
 #### Scenario: Sequential messages in same session
 - **WHEN** two messages for the same `session_id` arrive before the first finishes processing
 - **THEN** the second message waits (via per-session asyncio.Lock) until the first completes before loading history
+
+#### Scenario: Cross-process writes to same session serialize
+- **WHEN** a CLI process and a server process write the same `session_id` concurrently
+- **THEN** the file lock serializes them so neither overwrites the other's changes
 
 ### Requirement: Session metadata
 
@@ -74,4 +86,16 @@ The system SHALL expose controlled write hooks for the management plane, reusing
 
 - **WHEN** write hooks are called on `session_id=A` while `session_id=B` runs concurrently
 - **THEN** each session loads and saves independently with no data mixing
+
+### Requirement: 压缩检查点备份文件管理
+
+系统 SHALL 提供 `write_compaction_checkpoint(session_id, messages)` 和 `delete_compaction_checkpoint(session_id)` 两个函数管理压缩备份文件。`write_compaction_checkpoint` MUST 使用原子写（tmp → rename），`delete_compaction_checkpoint` MUST 静默处理文件不存在的情况。
+
+#### Scenario: 写入压缩检查点
+- **WHEN** 调用 `write_compaction_checkpoint(session_id, messages)`
+- **THEN** messages 以 JSON 格式原子写入 `data/sessions/{session_id}.pre-compact.json`
+
+#### Scenario: 删除不存在的检查点不报错
+- **WHEN** 调用 `delete_compaction_checkpoint(session_id)` 且备份文件不存在
+- **THEN** 函数正常返回，不抛出异常
 

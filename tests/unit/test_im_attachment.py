@@ -135,7 +135,7 @@ def _capture_telegram_handler(monkeypatch):
         mock_cls.builder.return_value = mock_builder
         import fleetent.im_gateway.telegram as tg_mod
 
-        tg_mod.create_app("owner1", {"bot_token": "tg-test-token"})
+        tg_mod.create_app("support", "owner1", {"bot_token": "tg-test-token"})
 
     handler_obj = mock_app.add_handler.call_args[0][0]
     return handler_obj

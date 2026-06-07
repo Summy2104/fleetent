@@ -3,13 +3,14 @@
 import asyncio
 import inspect
 import json
+import random
 import time
 import uuid
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Literal, cast
 
-import structlog
 from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
 from openai.types.chat import ChatCompletionChunk
 
@@ -29,11 +30,14 @@ from fleetent.observability import (
     record_injected_context,
     record_trace_event,
 )
+from fleetent.observability.structured_logging import get_logger
 from fleetent.runtime.budget import BudgetChecker, BudgetConfig, BudgetUsage, grace_max_tokens
 from fleetent.runtime.cancellation import CancellationChecker, CancelToken
 from fleetent.runtime.context import (
     AntiFlapState,
     apply_anti_flap,
+    compress_for_context_overflow,
+    estimate_tokens,
     load_anti_flap_state,
     maybe_compress,
     save_anti_flap_state,
@@ -67,7 +71,7 @@ from fleetent.tools.registry import (
 )
 from fleetent.tools.result_truncation import truncate_tool_result
 
-logger = structlog.get_logger(__name__)
+_logger = get_logger("runtime.loop")
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
 
@@ -115,6 +119,12 @@ _LOOP_WARNING_TEXT = (
 _GUARDRAIL_FEEDBACK_TEXT = (
     "已跳过本次工具调用：检测到相同工具、相同参数连续重复多次。请改用其它方式或直接给出当前结论。"
 )
+
+# T2-2: appended when the model ends a turn with a blank final reply (finish_reason
+# != tool_calls and empty/whitespace content) — nudges weak models to actually answer
+# or act instead of returning "". Bounded by _MAX_EMPTY_REPLY_RETRIES so it can't loop.
+_MAX_EMPTY_REPLY_RETRIES = 2
+_EMPTY_REPLY_CORRECTION = "你的上一条回复是空的。请直接给出最终答案，或调用合适的工具继续完成任务。"
 
 # Appended as a final `user` message when a budget dimension is exhausted (AR2 D3):
 # the Grace Call asks the model to summarize progress in one go without further
@@ -220,10 +230,22 @@ def _strict_blocked_servers(allowed_tools: list[str] | None) -> list[str]:
         if mode == "strict":
             strict_blocked.append(server_id)
         elif mode == "silent":
-            logger.debug("mcp_degraded_silent", server_id=server_id)
+            _logger.debug("mcp_degraded_silent", server_id=server_id)
         else:
-            logger.warning("mcp_degraded", server_id=server_id)
+            _logger.warn("mcp_degraded", server_id=server_id)
     return strict_blocked
+
+
+def _visible_tool_names(allowed_tools: list[str] | None) -> set[str]:
+    """Tool names actually exposed to the model this request — for skill requires_tools.
+
+    Same source + allowed_tools filter the schema list uses, so a skill's
+    `requires_tools` is checked against exactly what the agent can call.
+    """
+    names = {s["function"]["name"] for s in get_schemas()}
+    if allowed_tools is not None:
+        names = {n for n in names if check_tool_access(n, allowed_tools)}
+    return names
 
 
 def _strict_unavailable_reply(blocked: list[str]) -> str:
@@ -245,7 +267,7 @@ def _load_flap_state(session_id: str | None) -> AntiFlapState | None:
     try:
         return load_anti_flap_state(session_id)
     except Exception as exc:  # observability/governance must not break the run
-        logger.warning("anti_flap_load_failed", session_id=session_id, error=str(exc))
+        _logger.warn("anti_flap_load_failed", session_id=session_id, error=str(exc))
         return None
 
 
@@ -255,7 +277,7 @@ def _save_flap_state(session_id: str | None, state: AntiFlapState | None) -> Non
     try:
         save_anti_flap_state(session_id, state)
     except Exception as exc:
-        logger.warning("anti_flap_save_failed", session_id=session_id, error=str(exc))
+        _logger.warn("anti_flap_save_failed", session_id=session_id, error=str(exc))
 
 
 def _gated_compress(
@@ -384,6 +406,23 @@ def _maybe_inject_loop_warning(messages: list[Any], state: LoopState) -> None:
     if state.loop_warning_requested and not state.loop_warning_injected:
         messages.append({"role": "user", "content": _LOOP_WARNING_TEXT})
         state.loop_warning_injected = True
+
+
+def _drain_steering(session_id: str | None, messages: list[Any]) -> None:
+    """C1: append any mid-run steered user input at the turn boundary.
+
+    Passive consumer of `runtime.steering`: a no-op when there is no session or no
+    active steering registration. Called after compression and before sanitize (like
+    the loop warning) so injected messages are part of the validated sequence and are
+    not swallowed by a same-turn compaction; only ever at a turn boundary, never
+    between a tool_call and its result.
+    """
+    if not session_id:
+        return
+    from fleetent.runtime import steering
+
+    for text in steering.drain(session_id):
+        messages.append({"role": "user", "content": text})
 
 
 async def _safe_dispatch(
@@ -577,12 +616,17 @@ async def _plan_run_slots(
     reply_func: ReplyFunc | None,
     user_id: str,
     session_id: str | None,
+    governance: GovernanceConfig | None = None,
+    agent_name: str | None = None,
 ) -> list[_PlanSlot]:
     """Phase one for run() (D2/D3/D6): serial, original order — produce one slot
-    per tool_call. Guardrail and (medium/high) approval are decided here in order;
-    sub_agent becomes a pending slot whose runner self-gathers (D6). The result
-    list preserves original `tool_calls` order so backfill can index 0..N-1.
+    per tool_call. Guardrail, pre_tool_use hook, and (medium/high) approval are decided
+    here in order; sub_agent becomes a pending slot whose runner self-gathers (D6). The
+    result list preserves original `tool_calls` order so backfill can index 0..N-1.
     """
+    from fleetent.runtime import hooks
+    from fleetent.runtime.hooks import HookContext
+
     slots: list[_PlanSlot] = []
     for tc in tool_calls:
         if not hasattr(tc, "function"):
@@ -633,19 +677,55 @@ async def _plan_run_slots(
 
             slots.append(_PlanSlot(tc_id=tc.id, name=name, tc_fp=tc_fp, runner=_sub_agent_runner))
             continue
-        risk = get_risk_level(name)
-        if risk in ("medium", "high") and reply_func is not None:
-            tool_args = (
+        # P1: pre_tool_use hook — decision (deny/ask) + arg rewrite, composed with the
+        # existing allowed_tools + permission_gate gate. Zero overhead when hooks are
+        # disabled or none registered.
+        slot_args: str | dict[str, Any] = tc.function.arguments
+        force_ask = False
+        if governance is not None and governance.hooks_enabled and hooks.has_hooks("pre_tool_use"):
+            parsed = (
                 json.loads(tc.function.arguments)
                 if isinstance(tc.function.arguments, str)
                 else tc.function.arguments
             )
+            hres = await hooks.dispatch(
+                "pre_tool_use",
+                HookContext(
+                    event="pre_tool_use",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"tool_name": name, "tool_args": parsed},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=governance.hooks_decision_failure == "strict",
+            )
+            if hres.decision == "deny":
+                slots.append(
+                    _PlanSlot(
+                        tc_id=tc.id,
+                        name=name,
+                        tc_fp=tc_fp,
+                        placeholder=(
+                            f"tool execution denied by policy: {hres.reason or name}",
+                            False,
+                        ),
+                        counts_failure=False,
+                    )
+                )
+                continue
+            if hres.modified_args is not None:
+                slot_args = hres.modified_args
+            force_ask = hres.decision == "ask"
+        risk = get_risk_level(name)
+        if (risk in ("medium", "high") or force_ask) and reply_func is not None:
+            tool_args = json.loads(slot_args) if isinstance(slot_args, str) else slot_args
             approval_id = str(uuid.uuid4())[:8]
             # D3: approvals are requested serially in original order; only approved
             # tools enter the parallel batch — never concurrent approval prompts.
             decision = await _default_gate.request_approval(
                 approval_id=approval_id,
-                risk_level=risk,
+                risk_level=risk if risk in ("medium", "high") else "medium",
                 tool_name=name,
                 tool_args=tool_args,
                 requester_user_id=user_id,
@@ -671,29 +751,70 @@ async def _plan_run_slots(
                 tc_id=tc.id,
                 name=name,
                 tc_fp=tc_fp,
-                args=tc.function.arguments,
+                args=slot_args,
                 resource_key=_resource_key(name, session_id),
             )
         )
     return slots
 
 
-def _backfill_slots(
+async def _backfill_slots(
     slots: list[_PlanSlot],
     results: dict[str, tuple[str, bool]],
     *,
     messages: list[Any],
     state: LoopState,
     loop_checker: LoopDetectionChecker,
+    governance: "GovernanceConfig | None" = None,
+    session_id: str | None = None,
+    agent_name: str | None = None,
+    user_id: str = "default",
 ) -> None:
     """Phase three (D1/D4): serial, original `tool_calls` order. Append each tool
     message, record the call into the loop-detection window, and fold
     `consecutive_failures` per-result — identical to sequential per-tool updates.
     """
+    from fleetent.runtime import hooks
+    from fleetent.runtime.hooks import HookContext
+
     for slot in slots:
-        content, failed = slot.placeholder if slot.placeholder is not None else results[slot.tc_id]
+        placeholder = slot.placeholder
+        is_placeholder = placeholder is not None
+        content, failed = placeholder if placeholder is not None else results[slot.tc_id]
         if slot.counts_failure:
             state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
+        # P2: post_tool_use hook — transform result before it enters messages.
+        # Only fires for real tool executions (not placeholder slots from deny/reject).
+        if (
+            not is_placeholder
+            and governance is not None
+            and governance.hooks_enabled
+            and hooks.has_hooks("post_tool_use")
+        ):
+            args_val = slot.args
+            try:
+                parsed_args = json.loads(args_val) if isinstance(args_val, str) else args_val
+            except Exception:
+                parsed_args = {}
+            hres = await hooks.dispatch(
+                "post_tool_use",
+                HookContext(
+                    event="post_tool_use",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={
+                        "tool_name": slot.name,
+                        "tool_args": parsed_args,
+                        "tool_result": content,
+                        "failed": failed,
+                    },
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if hres.modified_content is not None:
+                content = hres.modified_content
         # T4: cap the messages copy (self-truncating tools manage their own size).
         tool_content = content if is_self_truncating(slot.name) else truncate_tool_result(content)
         messages.append({"role": "tool", "tool_call_id": slot.tc_id, "content": tool_content})
@@ -704,6 +825,38 @@ def _backfill_slots(
             not failed,
             window=loop_checker.window,
         )
+
+
+async def _apply_output_transform(
+    reply: str,
+    governance: "GovernanceConfig | None",
+    session_id: str | None,
+    agent_name: str | None,
+    user_id: str,
+) -> str:
+    """P2: output_transform hook — rewrite final reply before it leaves the loop."""
+    from fleetent.runtime import hooks
+    from fleetent.runtime.hooks import HookContext
+
+    if (
+        governance is None
+        or not governance.hooks_enabled
+        or not hooks.has_hooks("output_transform")
+    ):
+        return reply
+    hres = await hooks.dispatch(
+        "output_transform",
+        HookContext(
+            event="output_transform",
+            session_id=session_id,
+            agent_name=agent_name,
+            user_id=user_id,
+            payload={"content": reply},
+        ),
+        timeout=governance.hooks_timeout_seconds,
+        strict=False,
+    )
+    return hres.modified_content if hres.modified_content is not None else reply
 
 
 def _budget_add(usage: BudgetUsage, response_usage: Any) -> None:
@@ -750,11 +903,11 @@ async def _grace_call(
         )
         summary = resp.choices[0].message.content or ""
         if not summary:
-            logger.warning("grace_call_empty_fallback_partial")
+            _logger.warn("grace_call_empty_fallback_partial")
             return partial_reply
         return summary
     except Exception as exc:  # degrade to partial result; not swallowed silently
-        logger.warning("grace_call_failed_fallback_partial", error=str(exc))
+        _logger.warn("grace_call_failed_fallback_partial", error=str(exc))
         return partial_reply
 
 
@@ -825,19 +978,24 @@ async def _call_policy_chat(
     cache = get_health_cache()
     last_exc: Exception | None = None
     candidates = _policy_candidates(chain, cache)
-    for resolved in candidates:
+    for i, resolved in enumerate(candidates):
         model = _model_name(resolved)
+        is_last = i == len(candidates) - 1
         try:
             api_key = policy.require_api_key(resolved)
             client = _build_async_client(resolved, api_key)
             create_completion = cast(Any, client.chat.completions.create)
-            response = await create_completion(
+            call = partial(
+                create_completion,
                 model=model,
                 messages=messages,
                 tools=schemas,
                 max_tokens=resolved.max_tokens,
                 **resolved.params,
             )
+            # Retry transient errors (e.g. 429) only on the last/only candidate;
+            # earlier candidates fall back immediately, preserving fallback semantics.
+            response = await _create_with_transient_retry(call, retry=is_last)
             cache.record_success(model)
             return response, resolved
         except Exception as exc:
@@ -857,13 +1015,15 @@ async def _stream_policy_chat(
     cache = get_health_cache()
     last_exc: Exception | None = None
     candidates = _policy_candidates(chain, cache)
-    for resolved in candidates:
+    for i, resolved in enumerate(candidates):
         model = _model_name(resolved)
+        is_last = i == len(candidates) - 1
         try:
             api_key = policy.require_api_key(resolved)
             client = _build_async_client(resolved, api_key)
             create_completion = cast(Any, client.chat.completions.create)
-            stream = await create_completion(
+            call = partial(
+                create_completion,
                 model=model,
                 messages=messages,
                 tools=schemas,
@@ -872,6 +1032,7 @@ async def _stream_policy_chat(
                 stream_options={"include_usage": True},
                 **resolved.params,
             )
+            stream = await _create_with_transient_retry(call, retry=is_last)
             cache.record_success(model)
             return stream, resolved
         except Exception as exc:
@@ -887,6 +1048,178 @@ def _policy_candidates(
 ) -> tuple[ResolvedModelConfig, ...]:
     available = tuple(entry for entry in chain if cache.is_available(_model_name(entry)))
     return available or chain
+
+
+# T2-1: same-target transient-error backoff retry. A transient failure (should_retry
+# and not should_compress — e.g. 429) is retried on the SAME target with backoff
+# before falling through to model failover. context_overflow (should_compress) is
+# excluded (handled by _call_with_overflow_retry).
+_MAX_TRANSIENT_RETRIES = 2
+_RETRY_BASE_DELAY = 1.0
+_RETRY_MAX_DELAY = 30.0
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """Parse a numeric Retry-After (seconds) header off an APIStatusError, else None.
+
+    The HTTP-date form is not parsed (caller falls back to exponential backoff).
+    """
+    resp = getattr(exc, "response", None)
+    headers = getattr(resp, "headers", None)
+    if headers is None:
+        return None
+    raw = headers.get("retry-after")
+    if raw is None:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def _backoff_delay(attempt: int, exc: Exception) -> float:
+    """Delay before the next same-target retry (attempt is 0-based).
+
+    Respects a Retry-After header when present; otherwise jittered exponential
+    backoff capped at `_RETRY_MAX_DELAY`. Patched to 0 in tests.
+    """
+    after = _retry_after_seconds(exc)
+    if after is not None:
+        return min(after, _RETRY_MAX_DELAY)
+    base = min(_RETRY_BASE_DELAY * (2.0**attempt), _RETRY_MAX_DELAY)
+    return base * (0.5 + 0.5 * random.random())  # half-to-full jitter (anti-herd)
+
+
+async def _create_with_transient_retry(
+    do_call: Callable[..., Coroutine[Any, Any, Any]], *, retry: bool = True
+) -> Any:
+    """Run ``do_call()`` (an awaitable factory), retrying transient errors on the
+    same target with backoff (T2-1).
+
+    ``retry=False`` runs a single attempt — used for non-last fallback candidates,
+    which fall back immediately on a switchable error rather than retrying. When
+    retrying, re-raises on a non-transient error (including context_overflow /
+    should_compress) or once the retry cap is reached, so the caller's failover logic
+    decides whether to switch target (covers the single/last-provider case where
+    there is nothing to fall back to).
+    """
+    if not retry:
+        return await do_call()
+    attempt = 0
+    while True:
+        try:
+            return await do_call()
+        except Exception as exc:
+            cls = classify(exc)
+            if (
+                isinstance(exc, ModelConfigError)
+                or not cls.should_retry
+                or cls.should_compress
+                or attempt >= _MAX_TRANSIENT_RETRIES
+            ):
+                raise
+            delay = _backoff_delay(attempt, exc)
+            _logger.warn(
+                "model_transient_retry",
+                attempt=attempt + 1,
+                delay=round(delay, 2),
+                error=str(exc),
+            )
+            await asyncio.sleep(delay)
+            attempt += 1
+
+
+# C3b: at most one overflow-driven compression+retry per LLM call. A context that
+# does not shrink (no-progress guard) or that overflows again after the cap stops
+# here, so an un-shrinkable context cannot loop "compress → still overflow → ...".
+_MAX_OVERFLOW_COMPRESSIONS = 1
+
+
+async def _call_with_overflow_retry(
+    policy: ModelPolicySnapshot,
+    chain: tuple[ResolvedModelConfig, ...],
+    messages: list[Any],
+    schemas: list[Any],
+    *,
+    session_id: str | None,
+    user_id: str | None,
+    agent_name: str | None,
+) -> tuple[Any, ResolvedModelConfig]:
+    """Call the LLM; on a context-overflow error, compress in place and retry (C3b).
+
+    Wires the previously-dormant `error_classifier.should_compress` flag +
+    `compress_for_context_overflow`: a "context too long" error triggers an
+    unconditional compression of `messages` (mutated in place so the caller's list
+    stays live) and one retry on the SAME target (context_overflow does not switch
+    model). The guard re-raises when compression makes no progress or the retry cap
+    is hit, so an un-shrinkable context cannot loop.
+    """
+    attempts = 0
+    while True:
+        try:
+            return await _call_policy_chat(policy, chain, messages, schemas)
+        except Exception as exc:
+            if not classify(exc).should_compress or attempts >= _MAX_OVERFLOW_COMPRESSIONS:
+                raise
+            before = estimate_tokens(messages)
+            compressed = compress_for_context_overflow(
+                messages, session_id=session_id, user_id=user_id, agent_name=agent_name
+            )
+            if estimate_tokens(compressed) >= before:
+                raise  # no-progress guard: compression did not shrink → do not loop
+            messages[:] = compressed
+            attempts += 1
+            _logger.warn(
+                "context_overflow_compressed_retry",
+                attempt=attempts,
+                tokens_before=before,
+                tokens_after=estimate_tokens(messages),
+                session_id=session_id,
+            )
+
+
+async def _stream_with_overflow_retry(
+    policy: ModelPolicySnapshot,
+    chain: tuple[ResolvedModelConfig, ...],
+    messages: list[Any],
+    schemas: list[Any],
+    *,
+    session_id: str | None,
+    user_id: str | None,
+    agent_name: str | None,
+) -> tuple[Any, ResolvedModelConfig, list[Any]]:
+    """Streaming variant of `_call_with_overflow_retry` (C3b).
+
+    Returns `(stream, active_cfg, messages)`; on overflow the messages are
+    compressed into a NEW list, so the caller MUST rebind to the returned list
+    (run_stream owns its messages locally). Same no-progress + cap guard. Overflow
+    on the streaming path surfaces at stream creation (the 400 before any chunk),
+    so no partial output has been emitted when we recover.
+    """
+    attempts = 0
+    current = messages
+    while True:
+        try:
+            stream, cfg = await _stream_policy_chat(policy, chain, current, schemas)
+            return stream, cfg, current
+        except Exception as exc:
+            if not classify(exc).should_compress or attempts >= _MAX_OVERFLOW_COMPRESSIONS:
+                raise
+            before = estimate_tokens(current)
+            compressed = compress_for_context_overflow(
+                current, session_id=session_id, user_id=user_id, agent_name=agent_name
+            )
+            if estimate_tokens(compressed) >= before:
+                raise  # no-progress guard
+            current = compressed
+            attempts += 1
+            _logger.warn(
+                "context_overflow_compressed_retry_stream",
+                attempt=attempts,
+                tokens_before=before,
+                tokens_after=estimate_tokens(current),
+                session_id=session_id,
+            )
 
 
 def _log_run_error(
@@ -1042,6 +1375,9 @@ def _record_agent_run_completed(
     )
 
 
+_active_runs: int = 0
+
+
 async def run(
     messages: list[dict[str, Any]],
     user_id: str = "default",
@@ -1085,6 +1421,61 @@ async def run(
     a future run()-builds-catalog path, and does not re-filter here (avoiding double
     narrowing). Callers narrow at the point they build the catalog.
     """
+    global _active_runs
+    _active_runs += 1
+    try:
+        return await _run_inner(
+            messages=messages,
+            user_id=user_id,
+            system_prompt=system_prompt,
+            is_sub_agent=is_sub_agent,
+            reply_func=reply_func,
+            allowed_tools=allowed_tools,
+            agent_name=agent_name,
+            max_turns=max_turns,
+            max_consecutive_failures=max_consecutive_failures,
+            max_tokens=max_tokens,
+            force_model=force_model,
+            disabled_skills_trace=disabled_skills_trace,
+            loop_repeat_threshold=loop_repeat_threshold,
+            loop_ignore_arg_keys=loop_ignore_arg_keys,
+            guardrail_repeat_threshold=guardrail_repeat_threshold,
+            cancel_token=cancel_token,
+            sandbox_mode=sandbox_mode,
+            agent_features=agent_features,
+            session_id=session_id,
+            allowed_skills=allowed_skills,
+            governance=governance,
+            model_policy=model_policy,
+        )
+    finally:
+        _active_runs -= 1
+
+
+async def _run_inner(
+    messages: list[dict[str, Any]],
+    user_id: str = "default",
+    system_prompt: str = _SYSTEM,
+    is_sub_agent: bool = False,
+    reply_func: ReplyFunc | None = None,
+    allowed_tools: list[str] | None = None,
+    agent_name: str | None = None,
+    max_turns: int | None = None,
+    max_consecutive_failures: int | None = None,
+    max_tokens: int | None = None,
+    force_model: str | None = None,
+    disabled_skills_trace: list[dict[str, str]] | None = None,
+    loop_repeat_threshold: int | None = None,
+    loop_ignore_arg_keys: list[str] | None = None,
+    guardrail_repeat_threshold: int | None = None,
+    cancel_token: CancelToken | None = None,
+    sandbox_mode: Mode | None = None,
+    agent_features: dict[str, Any] | None = None,
+    session_id: str | None = None,
+    allowed_skills: list[str] | None = None,
+    governance: GovernanceConfig | None = None,
+    model_policy: ModelPolicySnapshot | None = None,
+) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
     # force_model layers a request-level override onto that route (MR1); when
@@ -1131,7 +1522,7 @@ async def run(
         _append_system_context(messages, system_prompt, built_context.text)
         _record_injected_context(run_id, built_context.sources)
     except Exception as exc:  # noqa: BLE001 — long-term context is auxiliary
-        logger.debug("long_term_context_skipped", error=str(exc))
+        _logger.debug("long_term_context_skipped", error=str(exc))
     # MCP4: a strict-mode MCP server the agent is bound to is unavailable → stop up
     # front with a clear error (rather than run without its tools). Also logs
     # degrade/silent degradations for bound servers. No MCP servers → no-op.
@@ -1148,9 +1539,11 @@ async def run(
             agent_name=agent_name,
             stop_reason=StopReason.mcp_strict_unavailable,
         )
+        reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
         return reply
     response = None
     msg: Any = None
+    _msg_content: str = ""
     model_used = _model_name(active_cfg)
 
     # None → a never-cancelling default token, keeping the no-token path identical.
@@ -1181,6 +1574,7 @@ async def run(
     if layered_checker is not None:
         controller.register(layered_checker)
 
+    empty_reply_retries = 0  # T2-2: bounded self-correction for blank final replies
     while True:
         forced = controller.should_stop(state)
         if forced is not None:
@@ -1191,13 +1585,52 @@ async def run(
         # reference live: callers (e.g. im_gateway.normalizer) rely on run() mutating
         # the passed `messages` so session_mgr.save() persists the full conversation.
         # Rebinding (messages = ...) would detach it and lose appended turns.
+        # P4: pre_compact hook — inject context before compression.
+        from fleetent.runtime import hooks
+
+        if governance is not None and governance.hooks_enabled and hooks.has_hooks("pre_compact"):
+            from fleetent.runtime.hooks import HookContext
+
+            _prc = await hooks.dispatch(
+                "pre_compact",
+                HookContext(
+                    event="pre_compact",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"message_count": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _prc.inject_context is not None:
+                messages.append({"role": "user", "content": _prc.inject_context})
+        _msgs_before = len(messages)
         _compressed, flap_state = _gated_compress(
             messages, flap_state, session_id=session_id, user_id=user_id, agent_name=agent_name
         )
         messages[:] = _compressed
+        # P4: post_compact hook — observe compression outcome.
+        if governance is not None and governance.hooks_enabled and hooks.has_hooks("post_compact"):
+            from fleetent.runtime.hooks import HookContext as _HCpc
+
+            await hooks.dispatch(
+                "post_compact",
+                _HCpc(
+                    event="post_compact",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"messages_before": _msgs_before, "messages_after": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
         # D4b: inject the loop warning AFTER compression so a same-round compaction
         # cannot swallow it; it must be present in the sequence sent to the LLM.
         _maybe_inject_loop_warning(messages, state)
+        # C1: drain mid-run steered input at the turn boundary (before sanitize).
+        _drain_steering(session_id, messages)
         try:
             clean, report = sanitize(messages)
         except MessageContractError as exc:
@@ -1206,8 +1639,36 @@ async def run(
             return ""
         messages[:] = clean
         _accumulate_repairs(hygiene_repairs, report)
+        # P3: pre_llm_call hook — observe or inject context before each LLM call.
+        from fleetent.runtime import hooks
+
+        if governance is not None and governance.hooks_enabled and hooks.has_hooks("pre_llm_call"):
+            from fleetent.runtime.hooks import HookContext
+
+            _plc_res = await hooks.dispatch(
+                "pre_llm_call",
+                HookContext(
+                    event="pre_llm_call",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"message_count": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _plc_res.inject_context is not None:
+                messages.append({"role": "user", "content": _plc_res.inject_context})
         try:
-            response, active_cfg = await _call_policy_chat(policy, route_chain, messages, schemas)
+            response, active_cfg = await _call_with_overflow_retry(
+                policy,
+                route_chain,
+                messages,
+                schemas,
+                session_id=session_id,
+                user_id=user_id,
+                agent_name=agent_name,
+            )
             model_used = _model_name(active_cfg)
         except Exception as exc:
             # Record the error class on the trace before propagating (design D4).
@@ -1228,9 +1689,47 @@ async def run(
         route_chain = (active_cfg,)  # stick with the winning target for subsequent turns
         choice = response.choices[0]
         msg = choice.message
-        messages.append(msg.model_dump())  # dict for JSON serializability (session persistence)
+        # P3: on_assistant_reply hook — observe or rewrite text content before it enters messages.
+        # Skipped for tool_calls-only turns (msg.content is None/empty, no text to transform).
+        _msg_content = msg.content or ""
+        if (
+            _msg_content
+            and governance is not None
+            and governance.hooks_enabled
+            and hooks.has_hooks("on_assistant_reply")
+        ):
+            from fleetent.runtime.hooks import HookContext
+
+            _oar_res = await hooks.dispatch(
+                "on_assistant_reply",
+                HookContext(
+                    event="on_assistant_reply",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"content": _msg_content},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _oar_res.modified_content is not None:
+                _msg_content = _oar_res.modified_content
+                # Rebuild the message dict with rewritten content.
+                _dump = msg.model_dump()
+                _dump["content"] = _msg_content
+                messages.append(_dump)
+            else:
+                messages.append(msg.model_dump())
+        else:
+            messages.append(msg.model_dump())  # dict for JSON serializability
 
         if choice.finish_reason != "tool_calls":
+            # T2-2: a blank final reply (weak models) → nudge once more instead of
+            # returning "", bounded by the cap so it cannot loop forever.
+            if not (msg.content or "").strip() and empty_reply_retries < _MAX_EMPTY_REPLY_RETRIES:
+                empty_reply_retries += 1
+                messages.append({"role": "user", "content": _EMPTY_REPLY_CORRECTION})
+                continue
             break
 
         # AR3 three-phase (D1): plan (serial, original order) → execute (parallel,
@@ -1246,6 +1745,8 @@ async def run(
             reply_func=reply_func,
             user_id=user_id,
             session_id=session_id,
+            governance=governance,
+            agent_name=agent_name,
         )
         pending = [s for s in slots if s.placeholder is None]
         results = await _execute_pending(
@@ -1257,9 +1758,23 @@ async def run(
             parallel_max=parallel_max,
             default_tool_timeout=default_tool_timeout,
         )
-        _backfill_slots(slots, results, messages=messages, state=state, loop_checker=loop_checker)
+        await _backfill_slots(
+            slots,
+            results,
+            messages=messages,
+            state=state,
+            loop_checker=loop_checker,
+            governance=governance,
+            session_id=session_id,
+            agent_name=agent_name,
+            user_id=user_id,
+        )
 
-    reply = (msg.content if msg is not None else None) or ""
+    reply = (
+        _msg_content
+        if (msg is not None and _msg_content)
+        else ((msg.content if msg is not None else None) or "")
+    )
     budget_dimension: str | None = None
     budget_scope: str | None = None
     if stop_reason == StopReason.budget_exceeded:
@@ -1314,13 +1829,39 @@ async def run(
             agent_name=agent_name,
         )
     except Exception as exc:  # noqa: BLE001 — completion trace is auxiliary
-        logger.debug("agent_run_completed_trace_skipped", error=str(exc))
+        _logger.debug("agent_run_completed_trace_skipped", error=str(exc))
     # Memory extraction unified onto intelligence/memory (class C). Best-effort and
     # awaited (same blocking profile as the prior inline extract_and_save).
     try:
         await extract_and_update(user_id, messages, model_policy=policy)
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
-        logger.debug("memory_extraction_skipped", error=str(exc))
+        _logger.debug("memory_extraction_skipped", error=str(exc))
+    reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
+    # P4: on_run_complete hook — observe after reply is finalized.
+    from fleetent.runtime import hooks as _hooks_orc
+
+    if (
+        governance is not None
+        and governance.hooks_enabled
+        and _hooks_orc.has_hooks("on_run_complete")
+    ):
+        from fleetent.runtime.hooks import HookContext as _HCorc
+
+        await _hooks_orc.dispatch(
+            "on_run_complete",
+            _HCorc(
+                event="on_run_complete",
+                session_id=session_id,
+                agent_name=agent_name,
+                user_id=user_id,
+                payload={
+                    "reply": reply,
+                    "stop_reason_name": stop_reason.name if stop_reason is not None else "normal",
+                },
+            ),
+            timeout=governance.hooks_timeout_seconds,
+            strict=False,
+        )
     return reply
 
 
@@ -1372,7 +1913,9 @@ def run_sync(
         governance = _governance_from_file(agent)
         model_policy = ModelPolicySnapshot.from_agent(agent)
 
-    skills_catalog = available_skills_prompt(allowed_skills=allowed_skills)
+    skills_catalog = available_skills_prompt(
+        allowed_skills=allowed_skills, available_tools=_visible_tool_names(allowed_tools)
+    )
     disabled_trace = collect_disabled_trace() or None
 
     messages = _assemble_prompt(
@@ -1426,8 +1969,11 @@ async def run_stream(
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
-    Event types: tool_call, tool_result, text_delta, done.
-    text_delta events stream as tokens arrive from the LLM.
+    Event types: tool_call, tool_result, text_delta, reasoning_delta, done.
+    text_delta events stream as tokens arrive from the LLM; reasoning_delta carries
+    a backend reasoning trace (reasoning_content) when present, for display only
+    (kept out of the reply and never fed back to the LLM). To request reasoning,
+    set reasoning_effort / extra_body.reasoning in the target's params (agent.yaml).
 
     When `images` (a list of (bytes, mime)) is given, the user message is built
     as a content-block array (text + image_url blocks, base64-inlined) and the
@@ -1438,13 +1984,39 @@ async def run_stream(
     """
     # agent-skill-scoping: narrow the catalog to the agent's allowed_skills (empty /
     # None = no narrowing, all enabled skills visible).
-    skills_catalog = available_skills_prompt(allowed_skills=allowed_skills)
+    skills_catalog = available_skills_prompt(
+        allowed_skills=allowed_skills, available_tools=_visible_tool_names(allowed_tools)
+    )
     disabled_trace = collect_disabled_trace() or None
 
     # SB3 D5: execution-time context channel (session/agent/features) for opt-in tools.
     tool_context = ToolContext(
         agent_name=agent_name, features=agent_features or {}, session_id=session_id
     )
+
+    # P3: on_user_input hook — intercept/rewrite/deny before user message enters messages.
+    from fleetent.runtime import hooks
+
+    if governance is not None and governance.hooks_enabled and hooks.has_hooks("on_user_input"):
+        from fleetent.runtime.hooks import HookContext
+
+        _hres = await hooks.dispatch(
+            "on_user_input",
+            HookContext(
+                event="on_user_input",
+                session_id=session_id,
+                agent_name=agent_name,
+                user_id=user_id,
+                payload={"content": user_input},
+            ),
+            timeout=governance.hooks_timeout_seconds,
+            strict=governance.hooks_decision_failure == "strict",
+        )
+        if _hres.decision == "deny":
+            yield {"type": "error", "content": _hres.reason or "request denied by policy"}
+            return
+        if _hres.modified_content is not None:
+            user_input = _hres.modified_content
 
     if images:
         user_msg = build_message_with_images(user_input, images)
@@ -1474,7 +2046,7 @@ async def run_stream(
         _append_system_context(messages, system_prompt, built_context.text)
         _record_injected_context(run_id, built_context.sources)
     except Exception as exc:  # noqa: BLE001 — long-term context is auxiliary
-        logger.debug("long_term_context_skipped", error=str(exc))
+        _logger.debug("long_term_context_skipped", error=str(exc))
     reply = ""
     # MCP4: stop up front when a bound strict MCP server is unavailable (see run()).
     strict_blocked = _strict_blocked_servers(allowed_tools)
@@ -1491,6 +2063,7 @@ async def run_stream(
             agent_name=agent_name,
             stop_reason=StopReason.mcp_strict_unavailable,
         )
+        reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
         yield {"type": "done", "content": reply}
         return
     model_used = _model_name(active_cfg)
@@ -1525,17 +2098,65 @@ async def run_stream(
     if layered_checker is not None:
         controller.register(layered_checker)
 
+    empty_reply_retries = 0  # T2-2: bounded self-correction for blank final replies
     while True:
         forced = controller.should_stop(state)
         if forced is not None:
             stop_reason = forced
             break
         state.turn += 1
+        # P4: pre_compact (streaming path)
+        from fleetent.runtime import hooks as _hooks_pc
+
+        if (
+            governance is not None
+            and governance.hooks_enabled
+            and _hooks_pc.has_hooks("pre_compact")
+        ):
+            from fleetent.runtime.hooks import HookContext as _HCprc
+
+            _prc_s = await _hooks_pc.dispatch(
+                "pre_compact",
+                _HCprc(
+                    event="pre_compact",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"message_count": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _prc_s.inject_context is not None:
+                messages.append({"role": "user", "content": _prc_s.inject_context})
+        _smb = len(messages)
         messages, flap_state = _gated_compress(
             messages, flap_state, session_id=session_id, user_id=user_id, agent_name=agent_name
         )
+        # P4: post_compact (streaming path)
+        if (
+            governance is not None
+            and governance.hooks_enabled
+            and _hooks_pc.has_hooks("post_compact")
+        ):
+            from fleetent.runtime.hooks import HookContext as _HCpoc
+
+            await _hooks_pc.dispatch(
+                "post_compact",
+                _HCpoc(
+                    event="post_compact",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"messages_before": _smb, "messages_after": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
         # D4b: inject the loop warning after compression, before sanitize/LLM call.
         _maybe_inject_loop_warning(messages, state)
+        # C1: drain mid-run steered input at the turn boundary (before sanitize).
+        _drain_steering(session_id, messages)
         try:
             messages, report = sanitize(messages)
         except MessageContractError as exc:
@@ -1543,6 +2164,30 @@ async def run_stream(
             _log_run_error(exc, messages, start, model_used, user_id, agent_name)
             return
         _accumulate_repairs(hygiene_repairs, report)
+        # P3: pre_llm_call hook (streaming path) — inject context before each LLM call.
+        from fleetent.runtime import hooks as _hooks_plc
+
+        if (
+            governance is not None
+            and governance.hooks_enabled
+            and _hooks_plc.has_hooks("pre_llm_call")
+        ):
+            from fleetent.runtime.hooks import HookContext as _HC_plc
+
+            _plc_s = await _hooks_plc.dispatch(
+                "pre_llm_call",
+                _HC_plc(
+                    event="pre_llm_call",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"message_count": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _plc_s.inject_context is not None:
+                messages.append({"role": "user", "content": _plc_s.inject_context})
 
         # Accumulate streaming response
         reply_parts: list[str] = []
@@ -1559,8 +2204,14 @@ async def run_stream(
         stream_schemas = _filter_code_execution(stream_schemas, sandbox_mode, agent_features)
 
         try:
-            stream, active_cfg = await _stream_policy_chat(
-                policy, route_chain, messages, stream_schemas
+            stream, active_cfg, messages = await _stream_with_overflow_retry(
+                policy,
+                route_chain,
+                messages,
+                stream_schemas,
+                session_id=session_id,
+                user_id=user_id,
+                agent_name=agent_name,
             )
             model_used = _model_name(active_cfg)
             route_chain = (active_cfg,)
@@ -1585,6 +2236,15 @@ async def run_stream(
                 continue
             choice = chunk.choices[0]
             delta = choice.delta
+
+            # C4: surface a backend reasoning trace (reasoning_content; a non-standard
+            # delta field on e.g. DeepSeek-R1 / QwQ) so clients can display the thinking.
+            # isinstance(str) guards against absent / auto-mocked fields → no-op for
+            # standard backends. NOT added to reply text and NOT fed back to the LLM
+            # (some backends reject reasoning_content as input), so it stays out of messages.
+            reasoning = getattr(delta, "reasoning_content", None)
+            if isinstance(reasoning, str) and reasoning:
+                yield {"type": "reasoning_delta", "content": reasoning}
 
             if delta.content:
                 reply_parts.append(delta.content)
@@ -1611,6 +2271,38 @@ async def run_stream(
 
         if finish_reason != "tool_calls":
             reply = "".join(reply_parts)
+            # T2-2: blank final reply → nudge once more (bounded) instead of ending empty.
+            if not reply.strip() and empty_reply_retries < _MAX_EMPTY_REPLY_RETRIES:
+                empty_reply_retries += 1
+                messages.append({"role": "user", "content": _EMPTY_REPLY_CORRECTION})
+                continue
+            # P3: on_assistant_reply hook on the final text reply.
+            # Already-streamed text_delta events are not retractable; only done + output_transform
+            # will use the modified reply.
+            from fleetent.runtime import hooks as _hooks_oar
+
+            if (
+                reply
+                and governance is not None
+                and governance.hooks_enabled
+                and _hooks_oar.has_hooks("on_assistant_reply")
+            ):
+                from fleetent.runtime.hooks import HookContext as _HookCtx
+
+                _oar = await _hooks_oar.dispatch(
+                    "on_assistant_reply",
+                    _HookCtx(
+                        event="on_assistant_reply",
+                        session_id=session_id,
+                        agent_name=agent_name,
+                        user_id=user_id,
+                        payload={"content": reply},
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=False,
+                )
+                if _oar.modified_content is not None:
+                    reply = _oar.modified_content
             break
 
         # Reconstruct assistant message with tool_calls for messages list
@@ -1628,6 +2320,9 @@ async def run_stream(
         # planning (serial guardrail), execute pending in parallel (gather preserves
         # order, D7-batched, D5-serialized), then yield tool_result events + backfill
         # tool messages strictly in original order — never completion order.
+        from fleetent.runtime import hooks
+        from fleetent.runtime.hooks import HookContext
+
         slots: list[_PlanSlot] = []
         for tc_data in tool_calls_list:
             func: dict[str, str] = tc_data["function"]
@@ -1651,12 +2346,49 @@ async def run_stream(
                     )
                 )
                 continue
+            # P1: pre_tool_use hook. Streaming has no permission_gate, so `ask`
+            # degrades to deny + note. deny → placeholder; modified_args → rewrite.
+            slot_args: str | dict[str, Any] = args
+            if (
+                governance is not None
+                and governance.hooks_enabled
+                and hooks.has_hooks("pre_tool_use")
+            ):
+                parsed = json.loads(args) if isinstance(args, str) else args
+                hres = await hooks.dispatch(
+                    "pre_tool_use",
+                    HookContext(
+                        event="pre_tool_use",
+                        session_id=session_id,
+                        agent_name=agent_name,
+                        user_id=user_id,
+                        payload={"tool_name": name, "tool_args": parsed},
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=governance.hooks_decision_failure == "strict",
+                )
+                if hres.decision in ("deny", "ask"):
+                    note = hres.reason or name
+                    if hres.decision == "ask":
+                        note = f"需人工确认（流式不支持审批，已拦截）：{note}"
+                    slots.append(
+                        _PlanSlot(
+                            tc_id=tc_data["id"],
+                            name=name,
+                            tc_fp=tc_fp,
+                            placeholder=(f"tool execution blocked by policy: {note}", False),
+                            counts_failure=False,
+                        )
+                    )
+                    continue
+                if hres.modified_args is not None:
+                    slot_args = hres.modified_args
             slots.append(
                 _PlanSlot(
                     tc_id=tc_data["id"],
                     name=name,
                     tc_fp=tc_fp,
-                    args=args,
+                    args=slot_args,
                     resource_key=_resource_key(name, session_id),
                 )
             )
@@ -1671,12 +2403,46 @@ async def run_stream(
             default_tool_timeout=default_tool_timeout,
         )
         for slot in slots:
-            content, failed = (
-                slot.placeholder if slot.placeholder is not None else results[slot.tc_id]
-            )
+            placeholder = slot.placeholder
+            is_placeholder = placeholder is not None
+            content, failed = placeholder if placeholder is not None else results[slot.tc_id]
             if slot.counts_failure:
                 state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             yield {"type": "tool_result", "name": slot.name, "content": content}
+            # P2: post_tool_use hook, real executions only; SSE already sent (not retractable).
+            # modified_content only affects what enters messages (used by the LLM next turn).
+            if (
+                not is_placeholder
+                and governance is not None
+                and governance.hooks_enabled
+                and hooks.has_hooks("post_tool_use")
+            ):
+                from fleetent.runtime.hooks import HookContext
+
+                args_val = slot.args
+                try:
+                    parsed_args = json.loads(args_val) if isinstance(args_val, str) else args_val
+                except Exception:
+                    parsed_args = {}
+                hres = await hooks.dispatch(
+                    "post_tool_use",
+                    HookContext(
+                        event="post_tool_use",
+                        session_id=session_id,
+                        agent_name=agent_name,
+                        user_id=user_id,
+                        payload={
+                            "tool_name": slot.name,
+                            "tool_args": parsed_args,
+                            "tool_result": content,
+                            "failed": failed,
+                        },
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=False,
+                )
+                if hres.modified_content is not None:
+                    content = hres.modified_content
             # T4: truncate the messages copy only; the SSE event above kept the full result.
             tool_content = (
                 content if is_self_truncating(slot.name) else truncate_tool_result(content)
@@ -1731,14 +2497,15 @@ async def run_stream(
             reply = "".join(grace_parts) or partial_reply
         except Exception as exc:  # degrade, never crash the stream (D7)
             if any_delta:
-                logger.warning("grace_stream_failed_after_partial", error=str(exc))
+                _logger.warn("grace_stream_failed_after_partial", error=str(exc))
                 reply = "".join(grace_parts)
             else:
-                logger.warning("grace_stream_failed_before_delta", error=str(exc))
+                _logger.warn("grace_stream_failed_before_delta", error=str(exc))
                 reply = partial_reply
                 if partial_reply:
                     yield {"type": "text_delta", "content": partial_reply}
 
+    reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
     yield {"type": "done", "content": reply}
 
     from openai.types import CompletionUsage as _CU  # noqa: N814 — terse local alias
@@ -1783,10 +2550,10 @@ async def run_stream(
             agent_name=agent_name,
         )
     except Exception as exc:  # noqa: BLE001 — completion trace is auxiliary
-        logger.debug("agent_run_completed_trace_skipped", error=str(exc))
+        _logger.debug("agent_run_completed_trace_skipped", error=str(exc))
     # Memory extraction unified onto intelligence/memory (class C). Best-effort and
     # awaited (same blocking profile as the prior inline extract_and_save).
     try:
         await extract_and_update(user_id, messages, model_policy=policy)
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
-        logger.debug("memory_extraction_skipped", error=str(exc))
+        _logger.debug("memory_extraction_skipped", error=str(exc))

@@ -1,0 +1,52 @@
+# Slack E2E 套件用的样例测试 agent fixture。
+# 复制到隔离的测试 agent home 并命名为 agent.yaml,填 env 变量名 + 频道,并确保被引用的
+# 工具/skill/MCP/sandbox 真实可用。
+# 开启工具/skill/MCP/sandbox,以便用例能覆盖各项能力。
+
+name: e2e-tester
+version: 1
+tenant_id: default
+
+system_prompt: |
+  你是 fleetent 的 E2E 测试 agent。用中文、简洁、具体地回答。
+  当请求需要时,使用你的工具、技能、MCP 服务和代码执行能力。
+
+models:
+  targets:
+    - id: primary
+      provider: anthropic
+      protocol: openai_chat
+      base_url: https://api.anthropic.com/v1/
+      model: claude-sonnet-4-5
+      api_key_env: FLEETENT_MODEL_PRIMARY_API_KEY
+      max_tokens: 4096
+  routes:
+    default:
+      - target: primary
+    vision:
+      - target: primary
+
+memory_namespace: e2e-tester
+skills_dir: skills
+allowed_skills: []                 # 空 = 所有已安装技能可见(含 summarize-doc)
+
+allowed_tools:
+  - "search_*"
+  - "read_skill"
+  - "run_code"                     # sandbox / sandbox-error 用例
+  - "analyze_image"                # image / image-text 用例(名字按你的视觉工具)
+  - "mock__*"                      # mcp 用例(mock MCP server)
+features:
+  code_execution: true             # sandbox 用例(server 的 sandbox 模式需为 on)
+
+mcp_servers:
+  - id: mock                       # mcp 用例;指向可达/mock 的 MCP server
+    transport: http
+    url: "http://127.0.0.1:9100/mcp"
+    auth_type: none
+
+connectors:
+  slack:
+    bot_token_env: E2E_SLACK_BOT   # xoxb- token 存在该 env 变量
+    app_token_env: E2E_SLACK_APP   # xapp- Socket Mode token 存在该 env 变量
+    channels: []                   # 空 = 该 bot 所在频道全响应

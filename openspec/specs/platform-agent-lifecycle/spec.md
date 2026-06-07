@@ -8,21 +8,20 @@ process without monitoring it. Created by archiving change platform-agent-lifecy
 ### Requirement: Create/update materializes a runnable agent home
 
 When the platform creates or updates an agent, it SHALL materialize that agent's
-self-contained home: an `agent.yaml` (definition + `connectors` + per-agent `access`
-block) and a `.env` scaffold (env-var names only, no plaintext secrets), under the
-agent's home directory, so the agent is runnable by `fleetent agent run`.
+self-contained home under `FLEETENT_HOME/agents/<agent-id>/`: an `agent.yaml`
+(definition + `connectors` + per-agent `access` block), a `.env` scaffold, and `data/`,
+so the agent is runnable by `fleetent agent run`.
 
 #### Scenario: Create writes the home
-
 - **WHEN** an admin creates agent `support` on the platform
-- **THEN** `FLEETENT_HOME/support/agent.yaml` is written from the authored definition and
-  a `.env` scaffold is present, with secrets referenced only by env-var name
+- **THEN** `FLEETENT_HOME/agents/support/agent.yaml` is written from the authored definition
+- **AND** `FLEETENT_HOME/agents/support/.env` is present, with secrets referenced only by env-var name
+- **AND** `FLEETENT_HOME/agents/support/data/` exists
 
 #### Scenario: Update re-materializes
-
 - **WHEN** an admin edits `support`'s definition
-- **THEN** its home `agent.yaml` is rewritten to match, leaving operator-provided `.env`
-  secret values intact
+- **THEN** `FLEETENT_HOME/agents/support/agent.yaml` is rewritten to match
+- **AND** operator-provided `.env` secret values are preserved
 
 ### Requirement: Start and stop agent processes without monitoring
 
@@ -48,29 +47,29 @@ agent processes.
 - **THEN** the platform does not restart it and reports it as not-running; recovery
   requires an explicit start
 
-### Requirement: Agent materialization exports the full authored definition
+### Requirement: Agent materialization writes self-contained Agent homes
 
-平台 materialize（DB→file）SHALL 从已存的 agent 定义生成**可真实部署**的 `agent.yaml`，回填平台
-已存的全部字段，而非只导出核心几项后将其余落到 schema 默认。`models` SHALL 由 agent 的 model
-选择/覆盖展开，而非无条件使用本地 `default_models()` 占位。
+平台 materialize SHALL 将每个 Agent 写成 self-contained Agent home under
+`agents/<agent-id>/`. 该 home SHALL 包含 `agent.yaml`, `.env`, and `data/`; runtime SHALL be
+able to run from that home without Platform DB access. Platform-owned config files such as
+`platform.yaml` and embedded Knowledge construction files SHALL NOT be written into Agent homes.
 
-#### Scenario: 已存核心字段回填
-- **WHEN** 一个含 `tenant_id` / `team_id` / `skills_dir` 的 agent 被 materialize
-- **THEN** 生成的 `agent.yaml` 含这三个字段的真实值
+#### Scenario: Materialize writes Agent home
+- **WHEN** 平台部署 Agent `support`
+- **THEN** materialize 写入 `agents/support/agent.yaml`
+- **AND** 写入或保留 `agents/support/.env`
+- **AND** 确保 `agents/support/data/` 存在
 
-#### Scenario: model 覆盖展开为真实 targets/routes
-- **WHEN** 一个 agent 选定了一个或多个 provider
-- **THEN** `models.targets[*]` 由所选 provider 展开
-- **AND** 每个 target 的 `api_key_env` 复用对应 provider 的 `api_key_env`
-- **AND** 不出现 `localhost` 占位模型
+#### Scenario: Old flat deploy path is not written
+- **WHEN** 平台部署 Agent `support`
+- **THEN** 不写入 `support/agent.yaml`
+- **AND** 不写入 Platform home root `agent.yaml`
 
-#### Scenario: 无 model 覆盖时回退默认
-- **WHEN** 一个 agent 没有任何 model 选择/覆盖
-- **THEN** `models` 回退到 `default_models()`
-
-#### Scenario: MCP / bindings / knowledge 接入导出
-- **WHEN** 一个 agent 绑定了 MCP server、channel/user、KB
-- **THEN** 生成的 `agent.yaml` 分别含 `mcp_servers`、`bindings.channels`/`bindings.users`、`knowledge.bindings`
+#### Scenario: Knowledge binding export only
+- **WHEN** 一个 agent 绑定了 KB
+- **THEN** 生成的 `agent.yaml` 含 `knowledge.bindings`
+- **AND** 不含 Google Drive / Confluence source construction details
+- **AND** materialize 不写 standalone Knowledge YAML
 
 ### Requirement: `.env` materialization resolves by credential mode
 
@@ -96,20 +95,72 @@ agent processes.
 - **WHEN** 任意 mode 组合下 materialize 运行
 - **THEN** 生成的 `agent.yaml` 不含任何密钥明文
 
-### Requirement: Process-level env template separated from agent secrets
+### Requirement: Platform env template separated from Agent env materialization
 
-部署 env 模板 SHALL 拆分：`config/agent/.env.example` 只保留 `agent.yaml` 中 `*_env` 引用不到的
-进程级变量（含新增的 `FLEETENT_SECRET_KEY`、`DATABASE_URL`、`MICROSANDBOX_URL`、运行调优等）。
-agent 引用的密钥占位 SHALL NOT 出现在该模板中——它们由 materialize 生成并经 console 面板提供。
+部署 env SHALL 按 Platform / Agent 边界拆分：`FLEETENT_SECRET_KEY`、`DATABASE_URL`、
+`MICROSANDBOX_URL`、`LOG_FORMAT` 等平台进程变量 SHALL 属于 Platform ENV 模板；Agent `.env`
+SHALL 由 materialize 写入对应 Agent home，只包含该 Agent 运行所需的 `*_env` 值或空占位。
+agent 引用的密钥占位 SHALL NOT 出现在 Platform ENV 模板中——它们由 materialize 生成并经 console
+面板提供。
 
-#### Scenario: 进程级模板含 secret key
-- **WHEN** 读取 `config/agent/.env.example`
+#### Scenario: Platform env 模板含 secret key
+- **WHEN** 读取 Platform ENV 模板
 - **THEN** 含 `FLEETENT_SECRET_KEY`
 
-#### Scenario: agent 密钥不在进程级模板
-- **WHEN** 读取 `config/agent/.env.example`
+#### Scenario: agent 密钥不在 Platform env 模板
+- **WHEN** 读取 Platform ENV 模板
 - **THEN** 不含 model / Slack / MCP / KB 的 agent 级 `*_env` 占位
 
+#### Scenario: Agent env 由 materialize 产生
+- **WHEN** materialize 一个含 operator 与 inject 槽的 Agent
+- **THEN** `<agent-home>/.env` 含该 Agent 所需 env 名
+- **AND** 不含 `FLEETENT_SECRET_KEY` 或平台进程变量
+
 #### Scenario: 模板无 inline 密钥值
-- **WHEN** 读取 `config/agent/.env.example`
+- **WHEN** 读取 Platform ENV 模板
 - **THEN** 所有条目为 `NAME=` 形式，不含任何真实密钥值
+
+### Requirement: Materialize 将全局 disabled skills 写入 agent.yaml 的 disabled_skills
+
+由于 agent 运行时只读 `agent.yaml`、从不访问 platform DB，平台的全局 skill disable 决策（`skill_admin_state.global_enabled=0`）SHALL 在 materialize 时被写入 `AgentFile.disabled_skills`。`agent_file_from_store()` SHALL 读取 `skill_admin_store.list_states()`，把所有 `global_enabled=0` 的 `skill_name` 汇集到 `disabled_skills`。
+
+当 `skill_admin_state` 表不存在（旧库）时，materialize SHALL 安全回退到空 `disabled_skills`，不抛异常。
+
+#### Scenario: 全局 disabled skill 写入 disabled_skills
+
+- **WHEN** skill "crm-ops" 在 `skill_admin_state` 中 `global_enabled=0`，对任一 agent 触发 materialize
+- **THEN** 产出的 agent.yaml 中 `disabled_skills` 包含 "crm-ops"
+
+#### Scenario: 全局 enabled skill 不出现在 disabled_skills
+
+- **WHEN** skill "jira" 在 `skill_admin_state` 中 `global_enabled=1`，触发 materialize
+- **THEN** 产出的 agent.yaml 中 `disabled_skills` 不包含 "jira"
+
+#### Scenario: 表缺失时安全回退
+
+- **WHEN** `skill_admin_state` 表不存在，触发 materialize
+- **THEN** materialize 正常完成，`disabled_skills` 为空列表，不抛异常
+
+### Requirement: Materialize 将平台 skill 文件分发到 agent home
+
+为使 agent home 自包含（agent 进程只读自己的 home），`write_home()` SHALL 在写出 `agent.yaml` 与 `data/` 后，把平台全局 skills 目录（`skill_registry._resolve_skills_dir(None)`）下的全部 skill 目录复制到 `<home>/skills/`。
+
+- 复制 SHALL 是幂等的（重复 materialize 覆盖同名文件，不报错）
+- 当全局 skills 目录不存在时，复制 SHALL 被跳过，不抛异常
+- 复制失败（IO 错误）SHALL 记录结构化告警但不阻断 materialize（agent.yaml 已写出）
+- 全量复制：所有 skill 进入 home，运行时可见性由 agent.yaml 的 `allowed_skills` / `disabled_skills` 决定（文件分发与可见性解耦）
+
+#### Scenario: skill 文件复制到 agent home
+
+- **WHEN** 全局 skills 目录含 `crm-ops/SKILL.md`，对 agent "support" 触发 materialize
+- **THEN** `<support-home>/skills/crm-ops/SKILL.md` 存在且内容与源一致
+
+#### Scenario: 源目录缺失时安全跳过
+
+- **WHEN** 全局 skills 目录不存在，触发 materialize
+- **THEN** materialize 正常完成，`<home>/skills/` 不被创建（或为空），不抛异常
+
+#### Scenario: 重复 materialize 幂等
+
+- **WHEN** 对同一 agent 连续两次 materialize
+- **THEN** 第二次覆盖 `<home>/skills/` 中的同名文件，不因目录已存在而报错

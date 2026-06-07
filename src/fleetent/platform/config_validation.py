@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -9,22 +8,14 @@ from typing import TYPE_CHECKING, Literal
 import yaml
 
 from fleetent import paths
-from fleetent.config import MCP_SERVERS_YAML_PATH, SETTINGS_YAML_PATH, Settings
+from fleetent.config import PLATFORM_YAML_PATH, Settings
+from fleetent.secret_scan import flatten, looks_inline_secret
 
 if TYPE_CHECKING:
     from fleetent.agent_config import AgentFile
 
 ValidationProfile = Literal["dev", "pilot", "production"]
 ValidationStatus = Literal["pass", "warning", "skipped", "error"]
-
-_SECRET_RE = re.compile(
-    r"(sk-[A-Za-z0-9_-]{10,}|xox[baprs]-[A-Za-z0-9-]{10,}|"
-    r"bearer\s+[A-Za-z0-9._-]{10,}|[A-Za-z0-9_-]{24,})",
-    re.IGNORECASE,
-)
-_PLACEHOLDER_RE = re.compile(
-    r"(example|placeholder|changeme|replace-me|<.*>|\\$\\{|env:|file://)", re.IGNORECASE
-)
 
 
 @dataclass(frozen=True)
@@ -121,7 +112,6 @@ def _runtime_items(
     items = [ValidationItem("database.url", "pass", _database_reason(settings.database_url))]
     for key, path in {
         "paths.data_dir": data_dir or paths.data_dir(),
-        "paths.config_dir": config_dir or paths.config_dir(),
         "paths.secrets_dir": secrets_dir or Path("secrets"),
     }.items():
         if path.exists():
@@ -181,20 +171,23 @@ def _dependency_item(
 def _secret_scan_items(agent: AgentFile) -> list[ValidationItem]:
     payload = agent.model_dump(mode="json")
     items: list[ValidationItem] = []
-    for key, value in _flatten(payload):
+    for key, value in flatten(payload):
         if key.endswith("directory") or key.endswith("_dir") or key.endswith("export_dir"):
             continue
-        if isinstance(value, str) and _looks_inline_secret(value):
+        if isinstance(value, str) and looks_inline_secret(value):
             items.append(ValidationItem(f"agent.{key}", "error", "inline secret-like value"))
     return items
 
 
 def _default_scan_paths() -> list[Path]:
-    """Config files scanned for inline secrets by default: platform settings, the MCP
-    server file, and every discoverable per-agent ``agent.yaml`` (single- + multi-agent)."""
+    """Config files scanned for inline secrets by default.
+
+    Scans platform settings and every discoverable per-agent ``agent.yaml``. There is
+    no default ``config/`` or MCP file path.
+    """
     from fleetent import agent_config
 
-    scan = [SETTINGS_YAML_PATH, MCP_SERVERS_YAML_PATH, paths.agent_file()]
+    scan = [PLATFORM_YAML_PATH, paths.agent_file()]
     root = agent_config._resolve_agents_dir(None)
     if root.is_dir():
         scan.extend(
@@ -212,8 +205,8 @@ def _config_secret_scan_items(config_paths: list[Path] | None) -> list[Validatio
         if not path.exists():
             continue
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        for key, value in _flatten(raw):
-            if isinstance(value, str) and _looks_inline_secret(value):
+        for key, value in flatten(raw):
+            if isinstance(value, str) and looks_inline_secret(value):
                 items.append(
                     ValidationItem(
                         f"config.{path}.{key}",
@@ -222,28 +215,6 @@ def _config_secret_scan_items(config_paths: list[Path] | None) -> list[Validatio
                     )
                 )
     return items
-
-
-def _flatten(value: object, prefix: str = "") -> list[tuple[str, object]]:
-    if isinstance(value, dict):
-        items: list[tuple[str, object]] = []
-        for key, child in value.items():
-            next_prefix = f"{prefix}.{key}" if prefix else str(key)
-            items.extend(_flatten(child, next_prefix))
-        return items
-    if isinstance(value, list):
-        return [
-            item
-            for index, child in enumerate(value)
-            for item in _flatten(child, f"{prefix}.{index}")
-        ]
-    return [(prefix, value)]
-
-
-def _looks_inline_secret(value: str) -> bool:
-    if not value or _PLACEHOLDER_RE.search(value):
-        return False
-    return bool(_SECRET_RE.search(value))
 
 
 def _database_reason(database_url: str) -> str:

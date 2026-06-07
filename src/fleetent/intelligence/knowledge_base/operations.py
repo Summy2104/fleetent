@@ -676,7 +676,7 @@ def _settings() -> Settings:
 
 
 def _kb_config(settings: KnowledgeConfigSnapshot | None = None) -> KnowledgeConfigSnapshot:
-    """Knowledge service config from explicit snapshot or default knowledge.yaml."""
+    """Knowledge service config from explicit snapshot or platform.yaml."""
     if settings is not None:
         return settings
     try:

@@ -1,9 +1,8 @@
-"""Adapters thread their task's owner_id onto inbound messages and status reports."""
+"""Adapters thread their task's owner_id and agent onto inbound messages."""
 
 from unittest.mock import MagicMock, patch
 
 import fleetent.im_gateway.slack as slack
-import fleetent.im_gateway.telegram as telegram
 
 
 async def test_slack_handler_stamps_owner_and_agent(monkeypatch):
@@ -38,25 +37,3 @@ async def test_slack_handler_stamps_owner_and_agent(monkeypatch):
     assert routed["agent_name"] == "support"
     # Identity is the platform-native id resolved locally (no platform user_store).
     assert routed["user_id"] == "U1"
-
-
-async def test_telegram_run_reports_status_with_owner(monkeypatch):
-    statuses: list = []
-    monkeypatch.setattr(
-        telegram.im,
-        "report_status",
-        lambda o, p, s, error=None: statuses.append((o, p, s)),
-    )
-    monkeypatch.setattr(telegram.im, "heartbeat", lambda o, p: None)
-    monkeypatch.setattr(telegram, "create_app", lambda owner_id, config: object())
-
-    async def boom(app):
-        raise RuntimeError("x")
-
-    monkeypatch.setattr(telegram, "_run_polling", boom)
-
-    import pytest
-
-    with pytest.raises(RuntimeError):
-        await telegram.run("ownerB", {"bot_token": "b"})
-    assert ("ownerB", "telegram", "connected") in statuses

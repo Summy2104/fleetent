@@ -31,8 +31,8 @@ def test_explicit_fleetent_home_wins(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     monkeypatch.chdir(tmp_path)  # cwd irrelevant when env is set
 
     assert paths.base_dir() == home
-    assert paths.config_dir() == home / "config"
     assert paths.data_dir() == home / "data"
+    assert paths.agents_dir() == home / "agents"
 
 
 def test_repo_local_used_in_development(
@@ -42,15 +42,16 @@ def test_repo_local_used_in_development(
     monkeypatch.chdir(repo)
 
     assert paths.base_dir() == repo
-    assert paths.config_dir() == repo / "config"
     assert paths.data_dir() == repo / "data"
+    assert paths.agents_dir() == repo / "agents"
 
 
-def test_repo_local_detected_by_config_dir(
+def test_repo_local_detected_by_platform_example(
     isolated_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     repo = tmp_path / "checkout"
-    (repo / "config").mkdir(parents=True)
+    repo.mkdir(parents=True)
+    (repo / "platform.yaml.example").write_text("knowledge: {}\n", encoding="utf-8")
     monkeypatch.chdir(repo)
 
     assert paths.base_dir() == repo
@@ -64,8 +65,8 @@ def test_home_fallback_when_not_in_repo(
     monkeypatch.chdir(bare)
 
     assert paths.base_dir() == isolated_home / ".fleetent"
-    assert paths.config_dir() == isolated_home / ".fleetent" / "config"
     assert paths.data_dir() == isolated_home / ".fleetent" / "data"
+    assert paths.agents_dir() == isolated_home / ".fleetent" / "agents"
 
 
 def test_explicit_home_overrides_repo_local(
@@ -83,13 +84,17 @@ def test_derived_paths_under_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path:
     home = tmp_path / "h"
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
-    assert paths.settings_yaml_path() == home / "config" / "settings.yaml"
+    assert paths.platform_yaml_path() == home / "platform.yaml"
+    assert paths.platform_env_path() == home / ".env"
     assert paths.sessions_dir() == home / "data" / "sessions"
 
 
-def test_agent_file_at_home_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # Deployed single agent reads its config from the flat home root (no config/).
+def test_default_agent_file_under_agents_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The default materialized Agent runtime lives under agents/default.
     home = tmp_path / "h"
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
-    assert paths.agent_file() == home / "agent.yaml"
+    assert paths.agent_file() == home / "agents" / "default" / "agent.yaml"
+    assert paths.agent_home_dir("support") == home / "agents" / "support"

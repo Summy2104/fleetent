@@ -1,4 +1,5 @@
 import importlib
+import inspect
 import sys
 
 import pytest
@@ -30,12 +31,8 @@ GOVERNANCE_PUBLIC_APIS = {
     },
     "blocklist": {
         "DB_PATH",
-        "batch_block",
-        "block_user",
+        "ban_registration",
         "is_registration_blocked",
-        "unblock_user",
-        "_disable_im_accounts",
-        "_ban_registration",
         "_init_db",
     },
     "agent_policy": {"check_tool_access"},
@@ -55,6 +52,14 @@ def test_governance_canonical_public_api_remains_available():
 
         for public_name in public_names:
             assert getattr(canonical, public_name)
+
+
+@pytest.mark.parametrize("module_name", GOVERNANCE_PUBLIC_APIS)
+def test_governance_modules_do_not_import_platform(module_name: str) -> None:
+    """agent-runtime governance MUST NOT depend on the platform control plane."""
+    module = importlib.import_module(f"fleetent.governance.{module_name}")
+    source = inspect.getsource(module)
+    assert "fleetent.platform" not in source
 
 
 @pytest.mark.parametrize("module_name", GOVERNANCE_PUBLIC_APIS)

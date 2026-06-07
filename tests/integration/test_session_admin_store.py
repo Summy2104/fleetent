@@ -98,3 +98,34 @@ async def test_inject_appends_under_lock(tmp_path, monkeypatch):
     await session_mgr.inject_message("s1", "human_agent", "let me help")
     msgs = await session_mgr.load("s1")
     assert msgs[-1] == {"role": "human_agent", "content": "let me help"}
+
+
+# --- migration 058: drop runtime-coupling columns ---
+
+
+def test_migration_058_drops_token_and_compaction_columns(tmp_path):
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    conn = sqlite3.connect(db_path)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(session_meta)").fetchall()}
+    conn.close()
+    for dropped in (
+        "total_input_tokens",
+        "total_output_tokens",
+        "last_compaction_at",
+        "messages_before_compaction",
+        "messages_after_compaction",
+        "compaction_summary_preview",
+    ):
+        assert dropped not in cols, f"{dropped} should have been dropped by migration 058"
+
+
+def test_migration_059_drops_resume_pending_column(tmp_path):
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    conn = sqlite3.connect(db_path)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(session_meta)").fetchall()}
+    conn.close()
+    assert "resume_pending" not in cols  # dropped by migration 059
+    # core governance columns remain
+    assert {"session_id", "origin", "status", "pinned"} <= cols

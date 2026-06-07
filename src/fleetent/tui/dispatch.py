@@ -8,17 +8,17 @@ spawns a background task that consumes ``run_stream`` and pushes each event as a
 """
 
 import asyncio
-import logging
 import uuid
 from typing import Any, Literal, cast
 
 from fleetent.governance import permission_gate
+from fleetent.observability.structured_logging import get_logger
 from fleetent.runtime import CancelToken, run_stream
 from fleetent.session import manager as session_mgr
 from fleetent.tui import protocol as p
 from fleetent.tui.transport import Transport
 
-logger = logging.getLogger(__name__)
+_logger = get_logger("tui.dispatch")
 
 _SESSION_PREFIX = "tui:"
 
@@ -62,7 +62,7 @@ async def _stream_run(
             if event_type in (p.EVENT_DONE, p.EVENT_ERROR):
                 saw_terminal = True
     except Exception as exc:  # noqa: BLE001 — surface as an error event, never crash the conn
-        logger.warning("tui_run_failed run_id=%s error=%s", run_id, exc)
+        _logger.warn("tui_run_failed", run_id=run_id, error=str(exc))
         await conn.transport.write(
             p.make_event(p.EVENT_ERROR, {"content": str(exc)}, run_id=run_id)
         )

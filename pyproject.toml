@@ -12,6 +12,7 @@ dependencies = [
     "aiohttp>=3.9.0",
     "python-telegram-bot>=21.0",
     "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
     "structlog>=24.0.0",
     "alembic>=1.13.0",
     "mcp>=1.0.0",
@@ -25,7 +26,8 @@ dependencies = [
     "prompt_toolkit>=3.0.50",
     "rich>=14.0",
     "websockets>=12.0",
-    "cryptography>=43.0",
+    "cryptography>=48.0.0",
+    "html2text>=2024.2.26",
 ]
 
 [project.scripts]

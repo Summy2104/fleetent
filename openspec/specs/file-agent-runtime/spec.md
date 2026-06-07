@@ -6,9 +6,9 @@ TBD - created by archiving change file-driven-agent-config. Update Purpose after
 ### Requirement: Self-contained agent config file
 
 The system SHALL load each agent from a self-contained file at
-`config/agents/<name>/agent.yaml` (directory per agent, fixed filename). The agents
-root directory SHALL be an injectable constant overridable by the `FLEETENT_AGENTS_DIR`
-environment variable. The agent's identity SHALL be the directory name, which MUST
+`agents/<name>/agent.yaml` under Platform home (directory per agent, fixed filename).
+The agents root directory SHALL be an injectable constant overridable by the
+`FLEETENT_AGENTS_DIR` environment variable. The agent's identity SHALL be the directory name, which MUST
 equal the in-file `name` field.
 
 The file SHALL fully describe the agent with these fields: `name`, `version`
@@ -20,21 +20,21 @@ null means the global default), `allowed_skills` (empty means no narrowing),
 
 #### Scenario: Valid file resolves to an AgentSnapshot
 
-- **WHEN** `config/agents/support/agent.yaml` exists with `name: support` and a valid schema
+- **WHEN** `agents/support/agent.yaml` exists with `name: support` and a valid schema
 - **THEN** loading agent `support` returns an `AgentSnapshot` whose `system_prompt`,
   `allowed_tools`, `skills_dir`, `model_overrides`, and `memory_namespace` come from
   that file, and whose identity is the name `support`
 
 #### Scenario: Directory name must match in-file name
 
-- **WHEN** `config/agents/support/agent.yaml` declares `name: helpdesk`
+- **WHEN** `agents/support/agent.yaml` declares `name: helpdesk`
 - **THEN** the scan fails fast with an error naming the file and the mismatch
 
 #### Scenario: FLEETENT_AGENTS_DIR overrides the agents root
 
 - **WHEN** `FLEETENT_AGENTS_DIR` points at a temporary directory containing
   `assistant/agent.yaml`
-- **THEN** agent `assistant` is resolved from that directory and `config/agents/` is
+- **THEN** agent `assistant` is resolved from that directory and the default `agents/` root is
   not read
 
 ### Requirement: Zero-database runtime resolution
@@ -137,32 +137,25 @@ material under `connectors` MUST be referenced by environment-variable name only
 - **THEN** the agent loads normally
 
 ### Requirement: Single-file agent home loading
-当 agent home 根目录存在 `agent.yaml`（`FLEETENT_HOME/agent.yaml`，扁平、无 `config/` 子目录）时，运行时 SHALL 将其作为唯一且默认的 agent 加载，优先于 `config/agents/` 多扫描；该单文件不要求位于 `<name>/` 子目录，因此 SHALL 跳过「目录名等于 name」校验。
 
-#### Scenario: Home-root agent.yaml is loaded as the sole agent
-- **WHEN** `FLEETENT_HOME/agent.yaml` 存在且校验通过
-- **THEN** 索引只含该一个 agent（`name` 取自文件）
-- **AND** 不扫描 `config/agents/`
+Agent runtime SHALL load a self-contained Agent home at `agents/<agent-id>/`. The default installed
+Agent SHALL live at `agents/default/agent.yaml`. Root `agent.yaml` single-file mode is not a
+current MVP deployment path.
 
-#### Scenario: Home-root single agent is forced default
-- **WHEN** 以单文件模式加载 `FLEETENT_HOME/agent.yaml`，且其 `bindings.default` 为 false 或缺省
-- **THEN** 索引的 `default` 等于该 agent 的 `name`
-- **AND** 未匹配具体 channel/user 的请求路由到该默认 agent
+#### Scenario: Default Agent home is loaded
+- **WHEN** runtime loads the default installed Agent
+- **THEN** it reads `agents/default/agent.yaml`
+- **AND** it does not require `agent.yaml` at Platform home root
 
-#### Scenario: Home-root file skips directory-name check
-- **WHEN** `FLEETENT_HOME/agent.yaml` 的 `name` 与任何目录名无关（无 `<name>/` 父目录）
-- **THEN** 加载成功，不因目录名不匹配而失败
-- **AND** 仍执行 inline secret 拒绝校验
+#### Scenario: Explicit Agent home is loaded
+- **WHEN** operator runs `fleetent agent run support`
+- **THEN** runtime reads `agents/support/agent.yaml` by default
+- **AND** `--home` may still override the Agent home path
 
-#### Scenario: Falls back to multi-scan when home-root file absent
-- **WHEN** `FLEETENT_HOME/agent.yaml` 不存在
-- **THEN** 运行时回退到既有 `config/agents/` 多扫描
-- **AND** 多扫描的 default 仍由 `bindings.default` 决定
-
-#### Scenario: Home-root bindings still populate routing
-- **WHEN** 单文件 agent 声明 `bindings.channels` 或 `users`
-- **THEN** 这些绑定进入 `by_channel`/`by_user` 路由表
-- **AND** 同时该 agent 仍是 default
+#### Scenario: Root agent yaml is not the default path
+- **WHEN** a root-level Agent YAML exists in Platform home
+- **THEN** runtime does not treat it as the canonical default deployment config
+- **AND** docs instruct operators to use `agents/<agent-id>/agent.yaml`
 
 ### Requirement: Agent file may carry intelligence configuration
 The agent file model SHALL accept optional typed intelligence configuration blocks so the
@@ -287,4 +280,3 @@ and the intelligence layer.
 - **WHEN** a governance/deployment field that carries credentials is given an inline
   secret-looking value instead of an `*_env` reference
 - **THEN** loading fails fast with an inline-secret error naming the agent, field, and file
-

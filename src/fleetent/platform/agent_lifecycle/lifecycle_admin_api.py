@@ -13,7 +13,10 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException
 
 from fleetent import agent_store, auth, user_store
+from fleetent.observability.structured_logging import get_logger
 from fleetent.platform.agent_lifecycle import controller, materialize
+
+_logger = get_logger("agent_lifecycle.api")
 
 router = APIRouter(prefix="/admin/agents", tags=["agent-lifecycle"])
 
@@ -52,6 +55,7 @@ def start_agent(name: str, authorization: str | None = Header(default=None)) -> 
     if agent is None:
         raise HTTPException(status_code=404, detail=f"agent {name!r} not found")
     _materialize_if_needed(agent)
+    _logger.info("agent_start_requested", name=name)
     pid = _controller.start(name)
     return {"status": "running", "pid": pid}
 
@@ -59,6 +63,7 @@ def start_agent(name: str, authorization: str | None = Header(default=None)) -> 
 @router.post("/{name}/stop")
 def stop_agent(name: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     _require_admin(authorization)
+    _logger.info("agent_stop_requested", name=name)
     stopped = _controller.stop(name)
     return {"status": "stopped" if stopped else "not-running"}
 

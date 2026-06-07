@@ -16,11 +16,11 @@
 
 ## 现状
 
-- ✅ **单 agent 配置体系**：`.env` + `config/agent.yaml`
-  - `config/agent.yaml` 是部署 agent 的非敏感运行配置文件，保存 agent、model、MCP servers、knowledge base、connector、embedding、rerank 等配置
+- ✅ **Platform home 配置体系**：根目录 `.env` + `platform.yaml` 保存平台级 env 和非敏感配置；
+  `agents/<agent-id>/.env` + `agents/<agent-id>/agent.yaml` 保存 Agent 运行配置
+  - `agents/<agent-id>/agent.yaml` 是部署 agent 的非敏感运行配置文件，保存 agent、model、MCP servers、knowledge binding、connector、embedding、rerank 等配置
   - 密钥不进 YAML、不进 DB、不进 git，仅通过 env var 注入；YAML 中只保存 `api_key_env`、`*_env` 这类环境变量名引用
-  - legacy `config/settings.yaml` / `config/mcp.servers.yaml` 加载器仍保留缺省兼容路径，但当前部署模板和 installer 不再要求它们存在
-  - 旧 `config/mcp.yaml`、`config/cron.yaml`、`config/webhooks.yaml` 存在时启动 fail fast，避免静默使用过期配置
+  - `config/` 不再是部署配置或模板命名空间；MCP 定义来自 Platform DB / materialized Agent config
 
 - ✅ **Docker Compose**：Pilot 默认部署入口
   - Pilot 默认从 `docker compose run --rm fleetent uv run fleetent-admin init-config` 开始，
@@ -28,8 +28,8 @@
   - `uv run uvicorn fleetent.server:app` 只作为开发模式保留，不作为 Pilot 默认部署入口。
   - 当前 Dockerfile 和 docker-compose.yml 关键配置：
     - `extra_hosts: host.docker.internal:host-gateway`（Linux 宿主机访问，`fleetent.integrations.sandbox` 通过此地址调用宿主机工具进程）
-    - `volumes: ./data:/app/data, ./config:/app/config, ./secrets:/app/secrets:ro`
-      （持久化用户数据和配置，secret 文件只读挂载）
+    - `volumes: ./data:/app/data, ./agents:/app/agents, ./platform.yaml:/app/platform.yaml, ./secrets:/app/secrets:ro`
+      （持久化用户数据、Agent homes、平台配置，secret 文件只读挂载）
     - `env_file: .env`（本地 `.env` 由 init-config 从 `.env.example` 生成，不写入镜像）
     - `ports: 8765:8765`
 
@@ -60,7 +60,7 @@
   - migration 失败时不会自动 rollback；已创建 backup 会保留，脚本返回非 0
 
 - ✅ **Pilot connector operations CLI**：`fleetent-admin kb connectors ...`
-  - `list` 列出 settings 中的 Google Drive / Confluence connector 安全摘要
+  - `list` 列出 Platform Knowledge config / DB snapshot 中的 Google Drive / Confluence connector 安全摘要
   - `check <connector_id>` 检查 `credential_ref` 与 remote scope，返回 credential_missing / credential_invalid / auth_failed / scope_unreachable / ok
   - `sync <connector_id> --dry-run` 生成同步计划，不写 KB、source state 或 vector index
   - `sync <connector_id>` 手动执行同步并写入最近一次 status
@@ -112,7 +112,7 @@ docker compose run --rm fleetent uv run python scripts/upgrade.py --database-url
 
 ## Connector 运维
 
-Pilot 环境中，Google Drive / Confluence connector 的真实 credential 不写入 `config/agent.yaml`；
+Pilot 环境中，Google Drive / Confluence connector 的真实 credential 不写入 `agents/<agent-id>/agent.yaml`；
 配置文件只保存平铺的环境变量名引用，例如 `FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN` 和
 `FLEETENT_CONFLUENCE_TOKEN`。对应环境变量注入、文件权限和备份策略由部署方保护。
 
@@ -231,7 +231,7 @@ config validation 目录，服务拆分要等运行模块边界稳定后再做�
 - Then：DB migration 自动执行，存量数据完整保留，服务正常启动
 
 **场景 3：配置隔离**
-- Given：.env 文件包含 ANTHROPIC_API_KEY
+- Given：Agent `.env` 文件包含 `FLEETENT_MODEL_PRIMARY_API_KEY`
 - When：服务运行
 - Then：API key 不出现在任何日志、trace、system prompt 中
 

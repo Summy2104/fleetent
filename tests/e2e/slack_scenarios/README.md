@@ -16,9 +16,9 @@
 
 1. **测试 workspace + bot**:一个 Slack workspace,一个测试 bot(Socket Mode app),其
    `xoxb-`/`xapp-` token 放入 env 变量;以及一个该 bot 所在的测试频道。
-2. **测试 agent**:把 `config/agents/e2e-tester/agent.yaml.example` 复制为
-   `config/agents/e2e-tester/agent.yaml`,填 `bot_token_env`/`app_token_env`,并确保引用的
-   工具 / 技能 / MCP server / sandbox 真实可用。
+2. **测试 agent**:把 `tests/e2e/slack_scenarios/agent.yaml.example` 复制到隔离的测试
+   agent home 并命名为 `agent.yaml`,填 `bot_token_env`/`app_token_env`,并确保引用的
+   工具 / 技能 / MCP server / sandbox 真实可用。不要把测试 agent 写回 active `config/` 目录。
 3. **server 跑着**该测试 agent(`uvicorn fleetent.server:app`),其 per-agent Slack 连接已建立。
 4. **Slack MCP 已认证**同一 workspace,能在测试频道收发(`mcp__claude_ai_Slack__*`)。
 5. **允许名单**:MCP 认证的 Slack 用户在该 agent 的允许名单内。

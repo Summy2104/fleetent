@@ -7,13 +7,13 @@ injectable (``connect_fn``) so the backend is unit-testable without a real socke
 """
 
 import asyncio
-import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from fleetent.observability.structured_logging import get_logger
 from fleetent.tui import protocol as p
 
-logger = logging.getLogger(__name__)
+_logger = get_logger("tui.backend")
 
 EventCallback = Callable[[dict[str, Any]], None]
 ConnectFn = Callable[[], Awaitable[Any]]
@@ -109,7 +109,7 @@ class GatewayBackend:
         try:
             obj = p.decode_frame(raw)
         except p.ParseError:
-            logger.warning("backend_bad_frame frame=%r", raw[:200])
+            _logger.warn("backend_bad_frame", frame_preview=repr(raw[:200]))
             return
         if obj.get("method") == "event":
             self.on_event(obj.get("params", {}))
@@ -131,6 +131,6 @@ class GatewayBackend:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — connection dropped; surface via hook
-            logger.warning("backend_recv_ended error=%s", exc)
+            _logger.warn("backend_recv_ended", error=str(exc))
         if self.on_disconnect is not None:
             await self.on_disconnect()

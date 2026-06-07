@@ -50,12 +50,24 @@ def _write_yaml(path, doc: dict[str, object]) -> None:
     path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
 
 
-def test_default_knowledge_config_path_uses_config_dir(tmp_path, monkeypatch) -> None:
+def test_default_knowledge_config_path_uses_platform_yaml(tmp_path, monkeypatch) -> None:
     from fleetent.intelligence.knowledge_base.config import knowledge_config_path
 
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
 
-    assert knowledge_config_path() == tmp_path / "config" / "knowledge.yaml"
+    assert knowledge_config_path() == tmp_path / "platform.yaml"
+
+
+def test_load_knowledge_config_reads_platform_knowledge_section(tmp_path) -> None:
+    from fleetent.intelligence.knowledge_base.config import load_knowledge_config
+
+    path = tmp_path / "platform.yaml"
+    _write_yaml(path, {"knowledge": _knowledge_doc()})
+
+    snapshot = load_knowledge_config(path)
+
+    assert [kb.id for kb in snapshot.knowledge_bases] == ["support-kb"]
+    assert snapshot.knowledge_bases[0].sources[0].id == "support-drive"
 
 
 def test_load_knowledge_config_parses_sources_and_defaults(tmp_path) -> None:
@@ -140,16 +152,10 @@ def test_secret_like_source_values_must_use_env_reference_fields(tmp_path) -> No
         load_knowledge_config(path)
 
 
-def test_repo_knowledge_yaml_example_parses_without_inline_secrets() -> None:
+def test_repo_does_not_ship_standalone_knowledge_service_examples() -> None:
     from pathlib import Path
 
-    from fleetent.intelligence.knowledge_base.config import load_knowledge_config
-
     repo = Path(__file__).resolve().parents[2]
-    example = repo / "config" / "knowledge.yaml.example"
-    snapshot = load_knowledge_config(example)
-
-    assert snapshot.knowledge_bases[0].id == "pilot-kb"
-    assert snapshot.knowledge_bases[0].sources[0].access_token_env == (
-        "FLEETENT_GOOGLE_DRIVE_ACCESS_TOKEN"
-    )
+    assert not (repo / "config" / "knowledge.yaml.example").exists()
+    assert not (repo / "config" / "knowledge-service").exists()
+    assert not (repo / "examples" / "knowledge-service").exists()

@@ -511,7 +511,7 @@ def _settings() -> Settings:
 
 
 def _kb_config() -> KnowledgeBaseSettings:
-    """Neutral KB runtime defaults; source construction lives in knowledge.yaml."""
+    """Neutral KB runtime defaults; source construction lives in Platform config."""
     return KnowledgeBaseSettings()
 
 

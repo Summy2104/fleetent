@@ -1,9 +1,8 @@
 """Per-agent MCP server definitions (migration 034, db runtime, named params, no ORM).
 
-Each row is an agent-owned MCP server override. The global default layer lives in
-``config/mcp.servers.yaml``; ``resolve_mcp_servers`` overlays agent-owned rows on top
-of those defaults so an agent sees its own server set without leaking another agent's
-connection or credentials.
+Each row is an MCP server definition. ``agent_id IS NULL`` rows are global defaults;
+agent-owned rows override global defaults with the same server id so an agent sees its
+own server set without leaking another agent's connection or credentials.
 """
 
 import datetime

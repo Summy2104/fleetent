@@ -465,6 +465,40 @@ def test_env_reference_accepted(tmp_path) -> None:
     assert index.get("support").mcp_servers[0].api_key_env == "ACME_MCP_TOKEN"
 
 
+def test_agent_file_parses_telegram_connector() -> None:
+    af = agent_config.AgentFile.model_validate(
+        {
+            "name": "sales",
+            "version": 1,
+            "models": _valid_models_doc(),
+            "connectors": {"telegram": {"bot_token_env": "SALES_TG_BOT", "channels": ["-100123"]}},
+        }
+    )
+    assert af.connectors.telegram is not None
+    assert af.connectors.telegram.bot_token_env == "SALES_TG_BOT"
+    assert af.connectors.telegram.channels == ["-100123"]
+
+
+def test_telegram_agents_lists_declaring_agents(tmp_path) -> None:
+    _write_agent(tmp_path, "sales", connectors={"telegram": {"bot_token_env": "SALES_TG_BOT"}})
+    _write_agent(tmp_path, "plain")  # no telegram connector
+    index = agent_config.build_index(tmp_path)
+    assert index.telegram_agents() == ["sales"]
+
+
+def test_inline_secret_in_telegram_rejected(tmp_path) -> None:
+    _write_agent(
+        tmp_path,
+        "sales",
+        connectors={"telegram": {"bot_token_env": "123456789:AAHinlineLiveBotTokenXXXXXXXX"}},
+    )
+    with pytest.raises(ValueError) as exc:
+        agent_config.build_index(tmp_path)
+    msg = str(exc.value)
+    assert "sales" in msg
+    assert "bot_token_env" in msg
+
+
 def test_long_system_prompt_not_flagged_as_secret(tmp_path) -> None:
     # The secret scan targets MCP/connector defs, not free-text prompts.
     _write_agent(
@@ -476,11 +510,11 @@ def test_long_system_prompt_not_flagged_as_secret(tmp_path) -> None:
     assert index.get("support") is not None
 
 
-# ── single-file agent config (single-agent-config-file change) ────────────────
+# ── default Agent home config ────────────────────────────────────────────────
 
 
 def _write_config_agent(home, name: str, **overrides) -> None:
-    """Write a flat home-root agent.yaml (no config/ or <name>/ subdir)."""
+    """Write a single agent.yaml at the provided home-like directory."""
     doc = {"name": name, "version": 1, "models": _valid_models_doc()}
     doc.update(overrides)
     home.mkdir(parents=True, exist_ok=True)
@@ -512,22 +546,25 @@ def test_load_single_agent_file_still_rejects_inline_secret(tmp_path) -> None:
         agent_config.load_agent_home_file(tmp_path / "agent.yaml")
 
 
-def test_build_index_prefers_config_agent_file_as_sole_default(tmp_path, monkeypatch) -> None:
+def test_build_index_prefers_default_agent_home_as_sole_default(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()
-    # A multi-scan agents dir also exists; it must be ignored when home file is present.
-    agents_dir = home / "config" / "agents"
+    # Another agent also exists; it must be ignored when the default Agent home is present.
+    agents_dir = home / "agents"
     agents_dir.mkdir(parents=True)
     _write_agent(agents_dir, "other")
-    # Config-dir agent.yaml, bindings.default false -> still forced default.
-    _write_config_agent(home, "deployed", bindings={"default": False, "channels": ["slack:C9"]})
+    # Default Agent home file, bindings.default false -> still forced default.
+    default_home = home / "agents" / "default"
+    _write_config_agent(
+        default_home, "default", bindings={"default": False, "channels": ["slack:C9"]}
+    )
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
     index = agent_config.build_index()
 
-    assert set(index.agents) == {"deployed"}  # multi-scan ignored
-    assert index.default == "deployed"  # forced default
-    assert index.by_channel.get("slack:C9") == "deployed"
+    assert set(index.agents) == {"default"}  # multi-scan ignored
+    assert index.default == "default"  # forced default
+    assert index.by_channel.get("slack:C9") == "default"
     assert index.get("other") is None
 
 
@@ -540,7 +577,7 @@ def test_build_index_falls_back_to_multiscan_without_config_agent_file(
     agents_dir.mkdir()
     _write_agent(agents_dir, "a", bindings={"default": True})
     _write_agent(agents_dir, "b")
-    monkeypatch.setenv("FLEETENT_HOME", str(home))  # no config/agent.yaml
+    monkeypatch.setenv("FLEETENT_HOME", str(home))  # no default agent home file
     monkeypatch.setenv("FLEETENT_AGENTS_DIR", str(agents_dir))  # explicit multi-scan dir
 
     index = agent_config.build_index()
@@ -549,13 +586,26 @@ def test_build_index_falls_back_to_multiscan_without_config_agent_file(
     assert index.default == "a"  # multiscan: default decided by bindings.default
 
 
+def test_build_index_ignores_old_home_root_agent_yaml(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    _write_config_agent(home, "legacy")
+    monkeypatch.setenv("FLEETENT_HOME", str(home))
+    monkeypatch.delenv("FLEETENT_AGENTS_DIR", raising=False)
+
+    index = agent_config.build_index()
+
+    assert index.agents == {}
+    assert index.default is None
+
+
 def test_repo_agent_yaml_example_loads_as_single_agent_file() -> None:
     """The shipped single-agent template parses with the single-file loader."""
     from pathlib import Path
 
     repo = Path(__file__).resolve().parents[2]
-    example = repo / "config" / "agent" / "agent.yaml.example"
-    assert example.is_file(), "config/agent/agent.yaml.example must exist (installer template)"
+    example = repo / "agents" / "default" / "agent.yaml.example"
+    assert example.is_file(), "agents/default/agent.yaml.example must exist (installer template)"
     raw = yaml.safe_load(example.read_text(encoding="utf-8"))
     assert "knowledge_base" not in raw
     agent = agent_config.load_agent_home_file(example)
@@ -564,7 +614,46 @@ def test_repo_agent_yaml_example_loads_as_single_agent_file() -> None:
     assert agent.models.routes["default"][0].target == "primary"
     assert agent.models.targets[0].api_key_env == "FLEETENT_MODEL_PRIMARY_API_KEY"
     assert agent.vector_store.backend == "sqlite"
-    assert agent.embedding.api_key_env == "FLEETENT_EVAL_EMBEDDING_API_KEY"
-    assert agent.rerank.api_key_env == "FLEETENT_EVAL_RERANK_API_KEY"
+    assert agent.embedding.api_key_env == "FLEETENT_EMBED_API_KEY"
+    assert agent.rerank.api_key_env == "FLEETENT_RERANK_API_KEY"
     assert agent.knowledge.enabled is True
     assert agent.knowledge.bindings[0].kb_id == "pilot-kb"
+
+
+# ── dead-field removal tests ──────────────────────────────────────────────────
+
+
+def test_microsandbox_url_rejected() -> None:
+    """microsandbox_url is a dead field and must be rejected (extra='forbid')."""
+    doc = _valid_doc()
+    doc["microsandbox_url"] = "http://host.docker.internal:7777"
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
+
+
+def test_image_gen_url_rejected() -> None:
+    doc = _valid_doc()
+    doc["image_gen_url"] = "http://localhost:9004/v1/images/generations"
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
+
+
+def test_image_gen_model_rejected() -> None:
+    doc = _valid_doc()
+    doc["image_gen_model"] = "flux-schnell"
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
+
+
+def test_vision_url_rejected() -> None:
+    doc = _valid_doc()
+    doc["vision_url"] = "http://localhost:9005/v1"
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
+
+
+def test_vision_model_rejected() -> None:
+    doc = _valid_doc()
+    doc["vision_model"] = "llava"
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)

@@ -26,7 +26,6 @@ from fleetent import auth, user_store
 from fleetent.governance import audit_log
 from fleetent.intelligence import knowledge_base
 from fleetent.platform.knowledge_base_management import agent_kbs_store, kb_connector_store
-from fleetent.platform.secret_management import agent_secret_store, credential_service
 
 router = APIRouter(prefix="/admin/kb")
 
@@ -560,25 +559,6 @@ def _apply_kb_description(tenant_id: str, kb_id: str, description: str) -> None:
     knowledge_base.update_knowledge_base_description(tenant_id, kb_id, description)
 
 
-def _resolve_inline_secrets(connector_id: str, config: dict[str, Any]) -> dict[str, Any]:
-    """Encrypt inline token values into the shared secret scope, leaving only env refs.
-
-    A ``<field>_env_value`` key carries a secret typed inline (value mode). We store it
-    encrypted under a derived name and set ``<field>_env`` to that name — the config blob,
-    like ``agent.yaml``, only ever holds ``*_env`` references, never a secret value.
-    """
-    resolved = dict(config)
-    for key in [k for k in resolved if k.endswith("_env_value")]:
-        value = resolved.pop(key)
-        if not value:
-            continue
-        field = key[: -len("_value")]  # access_token_env_value -> access_token_env
-        env_name = credential_service.derive_kb_env_name(connector_id, field)
-        agent_secret_store.set_secret(None, env_name, str(value))
-        resolved[field] = env_name
-    return resolved
-
-
 def _connector_out(row: dict[str, Any]) -> dict[str, Any]:
     """Augment a stored connector with custom_yaml + its KB description for display/editing."""
     out = dict(row)
@@ -615,16 +595,12 @@ def add_kb_connector(
         raise HTTPException(status_code=409, detail="connector id already exists")
     custom = _parse_custom_yaml(body.custom_yaml) if body.custom_yaml is not None else body.custom
     try:
-        config = _resolve_inline_secrets(body.connector_id, body.config)
-    except agent_secret_store.SecretKeyError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    try:
         kb_connector_store.add_connector(
             body.connector_id,
             body.kind,
             body.tenant_id,
             body.kb_id,
-            config,
+            body.config,
             body.enabled,
             custom=custom,
         )
@@ -647,11 +623,6 @@ def edit_kb_connector(
         fields["custom"] = _parse_custom_yaml(fields.pop("custom_yaml"))
     # description lives on the KB, not the connector row — handle it separately.
     description = fields.pop("description", None)
-    if "config" in fields:
-        try:
-            fields["config"] = _resolve_inline_secrets(connector_id, fields["config"])
-        except agent_secret_store.SecretKeyError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         kb_connector_store.edit_connector(connector_id, **fields)
     except ValueError as exc:

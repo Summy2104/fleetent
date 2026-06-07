@@ -31,12 +31,16 @@ secrets/
 .playwright-mcp/
 
 # Config — *.example / *.yaml.example templates are committed; real configs are not.
-# `.env` (above) already ignores config/agent/.env, config/platform/.env, etc.
+# `.env` (above) ignores root Platform env and nested Agent env files.
+platform.yaml
 agent.yaml
 config/*.yaml
 config/agent/*.yaml
 config/platform/*.yaml
 config/agents/*/agent.yaml
+agents/*/agent.yaml
+agents/*/.env
+agents/*/data/
 
 # IDE
 .vscode/

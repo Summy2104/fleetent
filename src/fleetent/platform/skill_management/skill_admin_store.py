@@ -293,3 +293,32 @@ def _upsert_state(skill_name: str, fields: dict[str, Any]) -> None:
             """,
             merged,
         )
+
+
+# --- Hit tracking (skill-observability-tracking) ------------------------------
+
+
+def observe(skill_name: str) -> dict[str, Any]:
+    """Per-skill observability from the agent-side trace: hit count + deduped sessions.
+
+    Reads ``skill_hit`` trace events written by the agent runtime to observability, rather
+    than a platform-owned table — honoring the agent->platform data-flow direction (the
+    platform reads agent products; the agent never writes platform tables). ``stale`` is
+    False because this is live data.
+    """
+    from fleetent.observability.traces import TraceQuery, query_trace_events
+
+    hits = 0
+    sessions: set[str] = set()
+    for event in query_trace_events(TraceQuery(event_type="skill_hit", limit=100_000)):
+        if event.payload.get("skill_name") != skill_name:
+            continue
+        hits += 1
+        if event.session_id:
+            sessions.add(event.session_id)
+    return {
+        "skill_name": skill_name,
+        "hits": hits,
+        "sessions": sorted(sessions),
+        "stale": False,
+    }

@@ -4,7 +4,7 @@ import pytest
 
 from fleetent import paths
 from fleetent.agent_config import AgentFile, default_models
-from fleetent.config import Settings, configure_logging
+from fleetent.config import Settings, configure_logging, load_mcp_server_settings
 
 
 @pytest.fixture(autouse=True)
@@ -115,11 +115,11 @@ def test_yaml_secret_fields_is_empty_safety_net():
     assert frozenset() == YAML_SECRET_FIELDS
 
 
-def test_settings_loads_non_secret_values_from_settings_yaml(tmp_path, monkeypatch):
+def test_settings_loads_non_secret_values_from_platform_yaml(tmp_path, monkeypatch):
     import fleetent.config as cfg
 
-    settings_yaml = tmp_path / "settings.yaml"
-    settings_yaml.write_text(
+    platform_yaml = tmp_path / "platform.yaml"
+    platform_yaml.write_text(
         "\n".join(
             [
                 "database_url: sqlite:///tmp/fleetent.db",
@@ -130,13 +130,43 @@ def test_settings_loads_non_secret_values_from_settings_yaml(tmp_path, monkeypat
             ]
         )
     )
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
+    monkeypatch.setattr(cfg, "PLATFORM_YAML_PATH", platform_yaml)
 
     s = Settings()
 
     assert s.database_url == "sqlite:///tmp/fleetent.db"
     assert s.log_format == "json"
     assert s.observability.logging.console_level == "warning"
+
+
+def test_settings_loads_platform_dotenv_from_fleetent_home_not_cwd(tmp_path, monkeypatch):
+    import fleetent.config as cfg
+
+    home = tmp_path / "home"
+    cwd = tmp_path / "cwd"
+    home.mkdir()
+    cwd.mkdir()
+    (home / ".env").write_text("DATABASE_URL=sqlite:///from-home.db\nLOG_FORMAT=json\n")
+    (cwd / ".env").write_text("DATABASE_URL=sqlite:///from-cwd.db\nLOG_FORMAT=console\n")
+    monkeypatch.setenv("FLEETENT_HOME", str(home))
+    monkeypatch.chdir(cwd)
+    monkeypatch.setattr(cfg, "PLATFORM_YAML_PATH", home / "missing.yaml")
+
+    s = Settings()
+
+    assert s.database_url == "sqlite:///from-home.db"
+    assert s.log_format == "json"
+
+
+def test_process_env_overrides_platform_dotenv(tmp_path, monkeypatch):
+    import fleetent.config as cfg
+
+    (tmp_path / ".env").write_text("DATABASE_URL=sqlite:///from-dotenv.db\n")
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///from-process.db")
+    monkeypatch.setattr(cfg, "PLATFORM_YAML_PATH", tmp_path / "missing.yaml")
+
+    assert Settings().database_url == "sqlite:///from-process.db"
 
 
 def test_vector_provider_settings_accept_env_references():
@@ -192,6 +222,21 @@ def test_agent_rejects_mcp_policy_server_definitions():
         )
 
 
+def test_mcp_server_yaml_parser_requires_explicit_path(tmp_path):
+    implicit = tmp_path / "config" / "mcp.servers.yaml"
+    implicit.parent.mkdir()
+    implicit.write_text("servers:\n  - id: ignored\n", encoding="utf-8")
+    explicit = tmp_path / "servers.yaml"
+    explicit.write_text(
+        "servers:\n  - id: docs\n    transport: http\n    url: https://example.test/mcp\n",
+        encoding="utf-8",
+    )
+
+    assert load_mcp_server_settings() == []
+    servers = load_mcp_server_settings(explicit)
+    assert [server.id for server in servers] == ["docs"]
+
+
 def test_alembic_ini_uses_default_fleetent_database_url():
     alembic_ini = (Path(__file__).parents[2] / "alembic.ini").read_text()
 
@@ -202,7 +247,7 @@ def test_alembic_ini_uses_default_fleetent_database_url():
 def test_settings_missing_yaml_file_uses_typed_defaults(tmp_path, monkeypatch):
     import fleetent.config as cfg
 
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", tmp_path / "missing.yaml")
+    monkeypatch.setattr(cfg, "PLATFORM_YAML_PATH", tmp_path / "missing.yaml")
 
     s = Settings()
 
@@ -210,13 +255,13 @@ def test_settings_missing_yaml_file_uses_typed_defaults(tmp_path, monkeypatch):
     assert s.log_format == "console"
 
 
-def test_settings_yaml_ignores_unknown_secret_like_keys(tmp_path, monkeypatch):
+def test_platform_yaml_ignores_unknown_secret_like_keys(tmp_path, monkeypatch):
     # The slim platform Settings has no secret fields, so stray secret-like keys in
-    # settings.yaml are simply ignored (extra="ignore"); non-secret values still load.
+    # platform.yaml unknown keys are simply ignored (extra="ignore"); non-secret values still load.
     import fleetent.config as cfg
 
-    settings_yaml = tmp_path / "settings.yaml"
-    settings_yaml.write_text(
+    platform_yaml = tmp_path / "platform.yaml"
+    platform_yaml.write_text(
         "\n".join(
             [
                 "anthropic_api_key: should-not-load",
@@ -225,7 +270,7 @@ def test_settings_yaml_ignores_unknown_secret_like_keys(tmp_path, monkeypatch):
             ]
         )
     )
-    monkeypatch.setattr(cfg, "SETTINGS_YAML_PATH", settings_yaml)
+    monkeypatch.setattr(cfg, "PLATFORM_YAML_PATH", platform_yaml)
     monkeypatch.chdir(tmp_path)
 
     s = Settings()

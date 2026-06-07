@@ -30,11 +30,11 @@ from fleetent.config import (
     VectorStoreSettings,
     WebhooksSettings,
 )
-from fleetent.platform.config_validation import _flatten, _looks_inline_secret
+from fleetent.secret_scan import flatten, looks_inline_secret
 
 # Agents root directory. Module-level constant (injectable via monkeypatch per the
 # project's no-global-mutable-state rule); env override mirrors FLEETENT_SKILLS_DIR.
-AGENTS_DIR = paths.config_dir() / "agents"
+AGENTS_DIR = paths.agents_dir()
 
 AGENT_FILE_NAME = "agent.yaml"
 _ENV_VAR_NAME_RE = re.compile(r"^(env:)?[A-Z_][A-Z0-9_]*$")
@@ -60,10 +60,22 @@ class SlackConnector(BaseModel):
     channels: list[str] = Field(default_factory=list)
 
 
+class TelegramConnector(BaseModel):
+    """Per-agent Telegram connection. The token is an env-var name, never an inline secret."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bot_token_env: str
+    # Optional chat filter: when non-empty, the agent responds only in these chats among
+    # those its Telegram bot receives updates from. Empty = respond everywhere.
+    channels: list[str] = Field(default_factory=list)
+
+
 class AgentConnectors(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     slack: SlackConnector | None = None
+    telegram: TelegramConnector | None = None
 
 
 class AgentAccess(BaseModel):
@@ -249,6 +261,13 @@ class AgentFile(BaseModel):
     loop_detect_ignore_arg_keys: list[str] = Field(default_factory=list)
     sub_agent_timeout_seconds: int = 300
     tool_default_timeout_seconds: float = 30.0
+    # run-time input steering (C1)
+    steering_mode: Literal["steer", "queue", "interrupt"] = "steer"
+    steering_max_pending: int = 8
+    # hooks extension system (P1)
+    hooks_enabled: bool = False
+    hooks_decision_failure: Literal["open", "strict"] = "open"
+    hooks_timeout_seconds: float = 5.0
     # permission gate
     permission_gate_medium_timeout_seconds: int = 300
     permission_gate_high_timeout_seconds: int = 3600
@@ -256,16 +275,11 @@ class AgentFile(BaseModel):
     provider_failure_threshold: int = 3
     provider_cooldown_seconds: int = 60
     # ── per-agent deployment / process knobs (defaults mirror Settings) ──
-    microsandbox_url: str = "http://host.docker.internal:7777"
     log_format: str = "console"
     session_ttl_days: int = 30
     session_max_total_mb: int = 1024
     session_max_count: int = 10000
     session_cleanup_interval_seconds: float = 3600.0
-    image_gen_url: str = ""
-    image_gen_model: str = "default"
-    vision_url: str = ""
-    vision_model: str = "default"
     disabled_skills: list[str] = Field(default_factory=list)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     diagnostics: DiagnosticsSettings = Field(default_factory=DiagnosticsSettings)
@@ -301,6 +315,10 @@ class AgentConfigIndex:
     def slack_agents(self) -> list[str]:
         """Names of agents that declare a Slack connector."""
         return [name for name, a in self.agents.items() if a.connectors.slack is not None]
+
+    def telegram_agents(self) -> list[str]:
+        """Names of agents that declare a Telegram connector."""
+        return [name for name, a in self.agents.items() if a.connectors.telegram is not None]
 
 
 # Current published index. Empty until scan() runs (mirrors skill_registry._index).
@@ -342,20 +360,20 @@ def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
         "rerank": agent.rerank.model_dump(),
         "knowledge": agent.knowledge.model_dump(),
     }
-    for key, value in _flatten(payload):
+    for key, value in flatten(payload):
         if (
             isinstance(value, str)
-            and _looks_inline_secret(value)
+            and looks_inline_secret(value)
             and not _is_env_reference(key, value)
         ):
             raise ValueError(
                 f"inline secret-like value in agent '{agent.name}' at '{key}' ({path}); "
                 "reference secrets by environment-variable name instead"
             )
-    for key, value in _flatten(intelligence_payload):
+    for key, value in flatten(intelligence_payload):
         if not _is_secret_reference_key(key) or not isinstance(value, str):
             continue
-        if _looks_inline_secret(value) and not _is_env_reference(key, value):
+        if looks_inline_secret(value) and not _is_env_reference(key, value):
             raise ValueError(
                 f"inline secret-like value in agent '{agent.name}' at '{key}' ({path}); "
                 "reference secrets by environment-variable name instead"
@@ -400,14 +418,15 @@ def _single_agent_index(agent: AgentFile) -> AgentConfigIndex:
 def build_index(agents_dir: str | Path | None = None) -> AgentConfigIndex:
     """Build a fresh resolution index (pure; no globals).
 
-    Single-file mode: when no explicit ``agents_dir`` / ``FLEETENT_AGENTS_DIR`` is given
-    and a home-root ``agent.yaml`` exists, load it as the sole, forced-default agent.
-    Otherwise scan the agents directory (multi-agent).
+    Default installed Agent mode: when no explicit ``agents_dir`` /
+    ``FLEETENT_AGENTS_DIR`` is given and ``agents/default/agent.yaml`` exists, load it
+    as the sole, forced-default agent. The old home-root ``agent.yaml`` single-file
+    mode is not a current MVP deployment path. Otherwise scan the agents directory.
     """
     if agents_dir is None and "FLEETENT_AGENTS_DIR" not in os.environ:
-        home_file = paths.agent_file()
-        if home_file.is_file():
-            return _single_agent_index(load_agent_home_file(home_file))
+        default_file = paths.agent_file()
+        if default_file.is_file():
+            return _single_agent_index(load_agent_file(default_file.parent))
 
     root = _resolve_agents_dir(agents_dir)
     agents: dict[str, AgentFile] = {}

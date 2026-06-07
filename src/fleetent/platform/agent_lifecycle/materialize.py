@@ -1,7 +1,7 @@
 """Materialize a runnable agent home from an authored definition (DB→file export).
 
 The platform authors agents; this writes each agent's self-contained home —
-``FLEETENT_HOME/<name>/agent.yaml`` (the full home schema) plus a ``.env`` scaffold that
+``FLEETENT_HOME/agents/<name>/agent.yaml`` (the full home schema) plus a ``.env`` scaffold that
 references secrets by env-var name only (never plaintext) — so the agent is runnable by
 ``fleetent agent run`` (see openspec change ``platform-agent-lifecycle``).
 """
@@ -9,7 +9,7 @@ references secrets by env-var name only (never plaintext) — so the agent is ru
 from __future__ import annotations
 
 import shutil
-from collections.abc import Callable
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -29,298 +29,230 @@ from fleetent.agent_config import (
 )
 from fleetent.config import McpServerSettings
 from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
-from fleetent.platform.config_validation import _flatten
+from fleetent.observability.structured_logging import get_logger
+from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.connector_management import agent_mcp_server_store
-from fleetent.platform.im_gateway_management import list_im_identities
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
-from fleetent.platform.secret_management import agent_secret_store
 from fleetent.platform.skill_management import skill_admin_store
+from fleetent.secret_scan import flatten
+from fleetent.skills import registry as skill_registry
 
-# Resolves an env-var name to its inject-mode value, or None for operator-mode slots.
-SecretResolver = Callable[[str], str | None]
+_logger = get_logger("agent_lifecycle.materialize")
 
 
-def _provider_key_for_env(env_name: str) -> str | None:
-    """Return a provider's inline plaintext key whose api_key_env matches ``env_name``.
+def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
+    """Build the home schema from the authored core definition.
 
-    Lets a provider authored with an inline key seed the agent's ``.env`` without a
-    separate inject slot — the provider row is the shared source of truth for that key.
+    connectors/access are not yet stored per-agent on the platform; they materialize as
+    their safe defaults (no connectors; default-closed access) until authoring lands.
     """
-    for provider in provider_admin_store.list_providers():
-        if provider.get("api_key_env") == env_name and provider.get("api_key"):
-            return str(provider["api_key"])
-    return None
-
-
-def _target_from_provider(provider_id: str) -> ModelTarget | None:
-    """Build a ModelTarget from a configured provider (api_key_env reused at the provider
-    level). Returns None if the provider no longer exists."""
-    provider = provider_admin_store.get_provider(provider_id)
-    if provider is None:
-        return None
-    return ModelTarget(
-        id=provider_id,
-        provider=str(provider.get("provider") or provider_id),
-        protocol=str(provider.get("protocol") or "openai_chat"),
-        base_url=provider.get("base_url"),
-        model=provider.get("model"),
-        api_key_env=provider.get("api_key_env"),
-        max_tokens=provider.get("max_tokens"),
-        params=provider.get("params") or {},
+    return AgentFile(
+        name=agent.name,
+        version=1,
+        tenant_id=agent.tenant_id,
+        team_id=agent.team_id,
+        system_prompt=agent.system_prompt,
+        allowed_tools=agent.allowed_tools,
+        skills_dir=agent.skills_dir,
+        allowed_skills=_allowed_skills_for(agent),
+        disabled_skills=_global_disabled_skills(),
+        plugins=agent.plugins,
+        features=agent.features,
+        models=_models_from_overrides(agent.model_overrides),
+        mcp_servers=_mcp_servers_for_agent(agent),
+        bindings=_bindings_for_agent(agent),
+        knowledge=_knowledge_for_agent(agent),
+        memory_namespace=agent.memory_namespace,
     )
 
 
-def _route_entries(value: Any, targets: dict[str, ModelTarget]) -> list[ModelRouteEntry]:
-    """Build a route's ordered fallback entries, dropping any whose target isn't selected.
+def _global_disabled_skills() -> list[str]:
+    """Skill names globally disabled in the admin store (agent reads only agent.yaml).
 
-    Accepts a single provider id (``"pid"``), a list of ids, or a list of full entries
-    ``{target, max_tokens, params}`` — the structure the console router authors.
+    Returns the names with ``global_enabled=0`` so the agent runtime suppresses them
+    via ``AgentFile.disabled_skills``. Missing table (legacy DB) safely yields [].
     """
-    raw = value if isinstance(value, list) else [value]
-    entries: list[ModelRouteEntry] = []
-    for item in raw:
-        tid: Any
-        max_tokens: Any
-        params: dict[str, Any]
-        if isinstance(item, str):
-            tid, max_tokens, params = item, None, {}
-        elif isinstance(item, dict):
-            tid = item.get("target")
-            max_tokens = item.get("max_tokens")
-            params = item.get("params") or {}
-        else:
-            continue
-        if tid in targets:
-            entries.append(ModelRouteEntry(target=str(tid), max_tokens=max_tokens, params=params))
-    return entries
+    try:
+        states = skill_admin_store.list_states()
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+        return []
+    return [s["skill_name"] for s in states if not s["global_enabled"]]
 
 
-def _models_from_targets_routes(target_ids: list[Any], routes_sel: dict[str, Any]) -> AgentModels:
-    """New console shape: a selected model list + a route→ordered-fallback-entries map."""
-    targets: dict[str, ModelTarget] = {}
-    for pid in target_ids:
-        if isinstance(pid, str) and pid not in targets:
-            target = _target_from_provider(pid)
-            if target is not None:
-                targets[pid] = target
-    if not targets:
-        return default_models()
-    routes: dict[str, list[ModelRouteEntry]] = {}
-    for route_key, value in routes_sel.items():
-        entries = _route_entries(value, targets)
-        if entries:
-            routes[route_key] = entries
-    if not routes:  # at least a default route so the policy is runnable
-        routes["default"] = [ModelRouteEntry(target=next(iter(targets)))]
-    return AgentModels(targets=list(targets.values()), routes=routes)
+def _allowed_skills_for(agent: agent_store.Agent) -> list[str]:
+    """Resolve the agent's catalog narrowing from the agent_skills binding matrix.
+
+    With at least one binding row, the result is exactly the ``enabled=1`` subset
+    (possibly empty — an explicit narrowing to no skills). Without any binding row,
+    fall back to the authored ``allowed_skills``. Missing table (legacy DB) falls
+    back to authored too.
+    """
+    try:
+        if skill_admin_store.has_any_binding(str(agent.id)):
+            return sorted(skill_admin_store.enabled_skill_names(str(agent.id)))
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+    return agent.allowed_skills
 
 
 def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
-    """Expand the agent's model selection into real targets/routes.
+    """Expand DB-authored provider selections into the runtime model policy."""
+    route_overrides = {
+        k: v for k, v in model_overrides.items() if k != credential_slots.RESERVED_KEY
+    }
+    if not route_overrides:
+        return default_models()
 
-    New shape ``{targets: [provider_id], routes: {route: provider_id}}`` — a checked model
-    list plus a routing map. Legacy shape ``{route: {provider, model}}`` is still accepted.
-    The provider config supplies base_url/model/protocol/``api_key_env`` (reused at the
-    provider level). Falls back to the neutral local default policy when nothing is selected.
-    """
-    target_ids = model_overrides.get("targets")
-    if isinstance(target_ids, list):
-        return _models_from_targets_routes(target_ids, model_overrides.get("routes") or {})
-
-    # Legacy {route: {provider, model}} — one provider per route.
     targets: dict[str, ModelTarget] = {}
     routes: dict[str, list[ModelRouteEntry]] = {}
-    for route_key, sel in model_overrides.items():
-        if not isinstance(sel, dict):
-            continue
-        provider_id = sel.get("provider")
-        if not provider_id or provider_id in targets:
-            if provider_id and provider_id in targets:
-                routes[route_key] = [ModelRouteEntry(target=provider_id)]
-            continue
-        target = _target_from_provider(provider_id)
-        if target is None:
-            continue
-        targets[provider_id] = target
-        routes[route_key] = [ModelRouteEntry(target=provider_id)]
-    if not targets:
+    for route_key, raw_entries in route_overrides.items():
+        entries = raw_entries if isinstance(raw_entries, list) else [raw_entries]
+        route_entries: list[ModelRouteEntry] = []
+        for index, raw_entry in enumerate(entries):
+            if not isinstance(raw_entry, dict):
+                continue
+            target = _target_from_model_override(route_key, index, raw_entry)
+            targets.setdefault(target.id, target)
+            route_entries.append(
+                ModelRouteEntry(
+                    target=target.id,
+                    max_tokens=raw_entry.get("max_tokens"),
+                    params=raw_entry.get("params") or {},
+                )
+            )
+        if route_entries:
+            routes[str(route_key)] = route_entries
+
+    if not targets or not routes:
         return default_models()
     return AgentModels(targets=list(targets.values()), routes=routes)
 
 
-def _mcp_servers_from_store(agent_id: int) -> list[McpServerSettings]:
-    """Assemble bound MCP server definitions (agent-scoped first, then global)."""
+def _target_from_model_override(route_key: str, index: int, entry: dict[str, Any]) -> ModelTarget:
+    provider_id = entry.get("provider_id")
+    provider = provider_admin_store.get_provider(str(provider_id)) if provider_id else None
+    source = {**(provider or {}), **{k: v for k, v in entry.items() if k != "provider_id"}}
+    params = (provider or {}).get("params") or (provider or {}).get("extra_params") or {}
+    if not provider:
+        params = (
+            entry.get("target_params") or entry.get("params") or entry.get("extra_params") or {}
+        )
+    target_id = str(provider_id or entry.get("id") or f"{route_key}-{index}")
+    protocol = str(source.get("protocol") or "openai_chat")
+    base_url = source.get("base_url")
+    endpoint = source.get("endpoint")
+    if protocol in {"http_embedding", "http_rerank", "openai_image_generation"}:
+        endpoint = endpoint or base_url
+        base_url = None
+    return ModelTarget(
+        id=target_id,
+        provider=str(source.get("provider") or provider_id or "custom"),
+        protocol=protocol,
+        base_url=base_url,
+        endpoint=endpoint,
+        model=source.get("model"),
+        api_key_env=source.get("api_key_env"),
+        max_tokens=source.get("max_tokens"),
+        params=params,
+    )
+
+
+def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
+    ids = list(
+        dict.fromkeys(
+            [*(agent.mcp_server_ids or []), *agent_store.list_mcp_servers_for_agent(agent.id)]
+        )
+    )
     servers: list[McpServerSettings] = []
-    for sid in agent_store.list_mcp_servers_for_agent(agent_id):
+    for server_id in ids:
         row = agent_mcp_server_store.get_mcp_server(
-            agent_id, sid
-        ) or agent_mcp_server_store.get_mcp_server(None, sid)
+            agent.id, server_id
+        ) or agent_mcp_server_store.get_mcp_server(None, server_id)
         if row is None:
             continue
         servers.append(
             McpServerSettings(
-                id=sid,
-                transport=str(row.get("transport") or "http"),
-                url=str(row.get("url") or ""),
-                auth_type=str(row.get("auth_type") or "none"),
-                api_key_env=str(row.get("api_key_env") or ""),
-                command=str(row.get("command") or ""),
-                args=list(row.get("args") or []),
-                env=dict(row.get("env") or {}),
+                id=server_id,
+                transport=row["transport"],
+                url=row["url"],
+                auth_type=row["auth_type"],
+                api_key_env=row["api_key_env"],
+                command=row["command"],
+                args=row["args"] or [],
+                env=row["env"] or {},
             )
         )
     return servers
 
 
-def _bindings_from_store(agent_id: int) -> AgentBindings:
-    channels = [
-        f"{c['platform']}:{c['channel_id']}" for c in agent_store.list_channels_for_agent(agent_id)
-    ]
-    # users bind by raw IM user id (e.g. the Slack/Telegram/WhatsApp user id, no platform
-    # prefix): expand each internal user to its platform_user_id handles so the deployed
-    # agent matches incoming IM messages directly without a platform-DB lookup.
-    users = [
-        str(ident["platform_user_id"])
-        for uid in agent_store.list_users_for_agent(agent_id)
-        for ident in list_im_identities(uid)
-    ]
-    return AgentBindings(channels=channels, users=users)
+def _bindings_for_agent(agent: agent_store.Agent) -> AgentBindings:
+    return AgentBindings(
+        channels=[
+            f"{channel['platform']}:{channel['channel_id']}"
+            for channel in agent_store.list_channels_for_agent(agent.id)
+        ],
+        users=agent_store.list_users_for_agent(agent.id),
+    )
 
 
-def _knowledge_from_store(tenant_id: str, agent_id: int) -> AgentKnowledge:
-    kb_ids = agent_kbs_store.list_kbs_for_agent(tenant_id, str(agent_id))
+def _knowledge_for_agent(agent: agent_store.Agent) -> AgentKnowledge:
+    try:
+        kb_ids = agent_kbs_store.list_kbs_for_agent(agent.tenant_id, str(agent.id))
+    except sqlite3.OperationalError as exc:
+        if "no such table: agent_kbs" not in str(exc):
+            raise
+        kb_ids = []
     if not kb_ids:
         return AgentKnowledge()
     return AgentKnowledge(
         enabled=True,
-        bindings=[AgentKnowledgeBinding(tenant_id=tenant_id, kb_id=kb_id) for kb_id in kb_ids],
+        bindings=[
+            AgentKnowledgeBinding(
+                tenant_id=agent.tenant_id,
+                kb_id=kb_id,
+                default=index == 0,
+            )
+            for index, kb_id in enumerate(kb_ids)
+        ],
     )
-
-
-def _active_version(agent: agent_store.Agent) -> int:
-    """The agent's active version number (the real snapshot count), defaulting to 1."""
-    if agent.active_version_id is not None:
-        av = agent_store.get_version_by_id(agent.active_version_id)
-        if av is not None:
-            return av.version
-    return 1
-
-
-def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
-    """Recursively merge ``over`` onto ``base`` (dicts merge, scalars/lists replace)."""
-    out = dict(base)
-    for key, value in over.items():
-        if isinstance(value, dict) and isinstance(out.get(key), dict):
-            out[key] = _deep_merge(out[key], value)
-        else:
-            out[key] = value
-    return out
-
-
-def _apply_overrides(base: AgentFile, overrides: dict[str, Any]) -> AgentFile:
-    """Deep-merge per-agent agent.yaml overrides onto the base, re-validating the result.
-
-    Lets operators configure any agent.yaml field (governance/deployment/intelligence/
-    access/…) without a column per knob. A malformed override is ignored (base kept) so a
-    bad value can never break deploy/preview.
-    """
-    if not overrides:
-        return base
-    try:
-        merged = _deep_merge(base.model_dump(mode="json", exclude_defaults=False), overrides)
-        return AgentFile.model_validate(merged)
-    except Exception:  # noqa: BLE001 — invalid override must not break materialize
-        return base
-
-
-def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
-    """Build the full home schema from the authored definition + bindings.
-
-    Materializes identity (tenant/team), model policy (expanded from provider selections),
-    MCP servers, IM bindings and knowledge bindings, then deep-merges config_overrides so
-    any agent.yaml field is configurable.
-    """
-    base = AgentFile(
-        name=agent.name,
-        version=_active_version(agent),
-        tenant_id=agent.tenant_id,
-        team_id=agent.team_id,
-        system_prompt=agent.system_prompt,
-        allowed_tools=agent.allowed_tools,
-        allowed_skills=agent.allowed_skills,
-        plugins=agent.plugins,
-        features=agent.features,
-        skills_dir=agent.skills_dir,
-        models=_models_from_overrides(agent.model_overrides),
-        memory_namespace=agent.memory_namespace,
-        mcp_servers=_mcp_servers_from_store(agent.id),
-        bindings=_bindings_from_store(agent.id),
-        knowledge=_knowledge_from_store(agent.tenant_id, agent.id),
-    )
-    return _apply_overrides(base, agent.config_overrides)
 
 
 def home_dir(name: str) -> Path:
-    """The agent's home directory: ``FLEETENT_HOME/<name>/`` (matches the runtime)."""
-    return paths.base_dir() / name
-
-
-def copy_agent_skills(agent_name: str, skill_names: set[str]) -> None:
-    """Copy the agent's selected skills from the global skills dir into its home.
-
-    Source is the shared ``<home>/skills`` (where imports land); destination is
-    ``<home>/<agent>/skills`` so the deployed agent carries its own copy. Idempotent;
-    skips skills missing from the global dir.
-    """
-    src_root = paths.base_dir() / "skills"
-    dest_root = home_dir(agent_name) / "skills"
-    for name in skill_names:
-        src = src_root / name
-        if src.is_dir():
-            shutil.copytree(src, dest_root / name, dirs_exist_ok=True)
-
-
-def required_env_slots(
-    agent: AgentFile,
-    knowledge_config: KnowledgeConfigSnapshot | None = None,
-) -> list[tuple[str, str]]:
-    """Every ``*_env`` the agent's home references, as ``(env_name, source_label)``.
-
-    Source labels group the slot by purpose (Connectors / MCP / Models / Knowledge) for
-    the console's required-secrets panel. Stable order, de-duplicated by env name (first
-    label wins).
-    """
-    slots: list[tuple[str, str]] = []
-    slack = agent.connectors.slack
-    if slack is not None:
-        slots.append((slack.bot_token_env, "Connectors·slack"))
-        slots.append((slack.app_token_env, "Connectors·slack"))
-    for server in agent.mcp_servers:
-        if server.api_key_env:
-            slots.append((server.api_key_env, f"MCP·{server.id}"))
-    for target in agent.models.targets:
-        if target.api_key_env:
-            slots.append((target.api_key_env, f"Models·{target.id}"))
-    if knowledge_config is not None:
-        for key, value in _flatten(knowledge_config.model_dump(mode="json")):
-            if key.endswith("_env") and isinstance(value, str) and value:
-                slots.append((value, "Knowledge"))
-    seen: set[str] = set()
-    ordered: list[tuple[str, str]] = []
-    for name, label in slots:
-        if name and name not in seen:
-            seen.add(name)
-            ordered.append((name, label))
-    return ordered
+    """The agent's home directory: ``FLEETENT_HOME/agents/<name>/``."""
+    return paths.base_dir() / "agents" / name
 
 
 def _env_var_names(
     agent: AgentFile,
-    knowledge_config: KnowledgeConfigSnapshot | None = None,
 ) -> list[str]:
-    """Collect the env-var names the agent's home references (connectors + MCP)."""
-    return [name for name, _ in required_env_slots(agent, knowledge_config)]
+    """Collect the env-var names the agent's home references."""
+    names: list[str] = []
+    for key, value in flatten(agent.model_dump(mode="json")):
+        if key.endswith("_env") and isinstance(value, str) and value:
+            names.append(value)
+    # stable order, de-duplicated
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for n in names:
+        if n and n not in seen:
+            seen.add(n)
+            ordered.append(n)
+    return ordered
+
+
+def _knowledge_env_var_names(knowledge_config: KnowledgeConfigSnapshot | None) -> set[str]:
+    """Collect Platform-owned Knowledge construction env names to exclude from Agent env."""
+    if knowledge_config is None:
+        return set()
+    names: set[str] = set()
+    for key, value in flatten(knowledge_config.model_dump(mode="json")):
+        if key.endswith("_env") and isinstance(value, str) and value:
+            names.add(value)
+    return names
 
 
 def _parse_env(text: str) -> dict[str, str]:
@@ -337,23 +269,39 @@ def _parse_env(text: str) -> dict[str, str]:
 def _seed_env(
     home: Path,
     names: list[str],
-    secret_resolver: SecretResolver | None = None,
+    *,
+    source_agent: agent_store.Agent | None = None,
+    exclude_existing: set[str] | None = None,
 ) -> None:
-    """Write/refresh ``.env`` with the referenced names, resolving by credential mode.
+    """Write/refresh ``.env`` with the referenced names, preserving operator values.
 
-    A ``secret_resolver`` (bound to an agent) supplies inject-mode values: when it returns
-    a value for a name, that value is written (``NAME=value``); when it returns None the
-    slot is operator-mode and the existing operator value is preserved (or left blank). No
-    operator value is ever overwritten by the platform.
+    Existing values are kept verbatim; missing names are added with an empty value. No
+    secret value is ever written by the platform.
     """
     env_path = home / ".env"
     existing = _parse_env(env_path.read_text(encoding="utf-8")) if env_path.exists() else {}
+    slots_by_env = (
+        {slot.env_name: slot for slot in credential_slots.list_slots(source_agent)}
+        if source_agent is not None
+        else {}
+    )
     lines: list[str] = []
     for name in names:
-        injected = secret_resolver(name) if secret_resolver is not None else None
-        lines.append(f"{name}={injected if injected is not None else existing.get(name, '')}")
+        slot = slots_by_env.get(name)
+        if source_agent is not None and slot is not None and slot.mode == "inject":
+            value = (
+                secret_store.get_decrypted(source_agent.id, name)
+                if secret_store.status(source_agent.id, name) == "set"
+                else ""
+            )
+        else:
+            value = existing.get(name, "")
+        lines.append(f"{name}={value}")
     # keep any operator-added vars not referenced by the definition
+    excluded = exclude_existing or set()
     for key, val in existing.items():
+        if key in excluded:
+            continue
         if key not in names:
             lines.append(f"{key}={val}")
     env_path.write_text("\n".join(lines) + "\n" if lines else "", encoding="utf-8")
@@ -362,68 +310,73 @@ def _seed_env(
 def materialize_from_store(name: str) -> Path | None:
     """Materialize the home for a stored agent by name (the DB→file export on write).
 
-    inject-mode credential values are decrypted into ``.env``; operator slots stay blank.
     Returns the home dir, or None if no such agent exists. Best-effort callers may ignore
     a None (e.g. a delete racing a materialize).
     """
     agent = agent_store.get_by_name(name)
     if agent is None:
         return None
+    return write_home(agent_file_from_store(agent), source_agent=agent)
 
-    def resolver(env_name: str) -> str | None:
-        # per-agent inject slot → shared slot → a provider's inline plaintext key
-        resolved = agent_secret_store.get_resolved(agent.id, env_name)
-        return resolved if resolved is not None else _provider_key_for_env(env_name)
 
-    home = write_home(agent_file_from_store(agent), secret_resolver=resolver)
-    copy_agent_skills(name, skill_admin_store.enabled_skill_names(name))
-    return home
+def rematerialize_all() -> list[str]:
+    """Re-export every authored agent's home (platform-wide DB→file refresh).
+
+    Best-effort: a single agent's failure is logged and skipped so it never blocks the
+    rest. Returns the names successfully re-materialized. Used after a global skill state
+    change so every agent.yaml reflects the new decision.
+    """
+    done: list[str] = []
+    for name in agent_store.list_all_names():
+        try:
+            if materialize_from_store(name) is not None:
+                done.append(name)
+        except Exception as exc:  # noqa: BLE001 — one agent's failure must not block others
+            _logger.warn("rematerialize_failed", agent=name, error=str(exc))
+    return done
 
 
 def write_home(
     agent: AgentFile,
     *,
     knowledge_config: KnowledgeConfigSnapshot | None = None,
-    secret_resolver: SecretResolver | None = None,
+    source_agent: agent_store.Agent | None = None,
 ) -> Path:
     """Materialize ``agent``'s home and return its directory.
 
-    Rewrites ``agent.yaml`` (pure ``*_env`` references, never a secret value) and seeds the
-    ``.env`` scaffold, resolving inject-mode values via ``secret_resolver``. Idempotent:
-    re-running rewrites the yaml and preserves operator ``.env`` values.
+    Rewrites ``agent.yaml`` from the definition and seeds/refreshes the ``.env`` scaffold.
+    Idempotent: re-running rewrites the yaml and preserves operator ``.env`` values.
     """
     home = home_dir(agent.name)
     home.mkdir(parents=True, exist_ok=True)
+    _logger.debug("agent_home_write_start", name=agent.name, path=str(home))
+    (home / "data").mkdir(parents=True, exist_ok=True)
     payload = agent.model_dump(mode="json", exclude_defaults=False)
     (home / AGENT_FILE_NAME).write_text(
         yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
-    if knowledge_config is not None:
-        write_knowledge_config(knowledge_config)
-    _seed_env(home, _env_var_names(agent, knowledge_config), secret_resolver)
+    _seed_env(
+        home,
+        _env_var_names(agent),
+        source_agent=source_agent,
+        exclude_existing=_knowledge_env_var_names(knowledge_config),
+    )
+    _copy_skills(home)
     return home
 
 
-def write_knowledge_config(
-    knowledge_config: KnowledgeConfigSnapshot,
-    *,
-    service_home: Path | None = None,
-) -> Path:
-    """Materialize KB construction config to platform or standalone service home."""
-    config_dir = (service_home / "config") if service_home is not None else paths.config_dir()
-    config_dir.mkdir(parents=True, exist_ok=True)
-    path = config_dir / "knowledge.yaml"
-    path.write_text(
-        yaml.safe_dump(_knowledge_payload(knowledge_config), sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
-    )
-    return path
+def _copy_skills(home: Path) -> None:
+    """Mirror the platform's global skills dir into ``<home>/skills/``.
 
-
-def _knowledge_payload(knowledge_config: KnowledgeConfigSnapshot) -> dict[str, object]:
-    payload = knowledge_config.model_dump(mode="json", exclude_defaults=False)
-    for kb in payload["knowledge_bases"]:
-        for source in kb["sources"]:
-            source.pop("tenant_id", None)
-            source.pop("kb_id", None)
-    return payload
+    Makes the agent home self-contained (the agent process reads only its own home).
+    Full copy: visibility is later narrowed at runtime by agent.yaml's allowed_skills /
+    disabled_skills. Best-effort: a missing source is skipped; a copy error is logged
+    but never aborts materialize (agent.yaml is already written).
+    """
+    src = Path(skill_registry._resolve_skills_dir(None))
+    if not src.exists():
+        return
+    try:
+        shutil.copytree(src, home / "skills", dirs_exist_ok=True)
+    except OSError as exc:
+        _logger.warn("agent_home_skill_copy_failed", path=str(src), error=str(exc))

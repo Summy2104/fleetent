@@ -458,13 +458,14 @@ def test_shipped_builtin_dir_exists():
     assert list(real_builtin.rglob("SKILL.md"))
 
 
-# --- regression: scan introduces no source-priority override (D2 / SK8) ---
+# --- tier precedence: user overrides builtin regardless of path sort (P1-D) ---
 
 
-def test_scan_no_source_priority_override_logic(tmp_path, monkeypatch):
-    # builtin-skills must NOT pick a same-name winner by source; conflict
-    # resolution is SK8's full-path-string sort, independent of source. The
-    # winner is whichever SKILL.md path sorts first, not "builtin wins".
+def test_scan_user_overrides_builtin_regardless_of_path_sort(tmp_path, monkeypatch):
+    # skill-tier-precedence: a user skill overrides a same-name builtin even when
+    # the builtin's path sorts first ('b' < 's', so …/builtin/dir-z sorts before
+    # …/skills/dir-a). Under the old pure path-sort the builtin would win; tier
+    # precedence keeps the user one.
     monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "builtin")
     builtin_md = tmp_path / "builtin" / "dir-z" / "SKILL.md"
     builtin_md.parent.mkdir(parents=True)
@@ -474,8 +475,8 @@ def test_scan_no_source_priority_override_logic(tmp_path, monkeypatch):
     user_md.write_text("---\nname: dup\ndescription: user dup.\n---\nbody")
     with structlog.testing.capture_logs():
         sr.scan(str(tmp_path / "skills"))
-    expected_winner = sorted((str(builtin_md), str(user_md)))[0]
-    assert sr._index["dup"].path == expected_winner
+    assert sr._index["dup"].path == str(user_md)
+    assert sr._index["dup"].builtin is False
 
 
 # --- disabled_skills injection (task 4) ---
@@ -998,3 +999,212 @@ def test_available_skills_prompt_disabled_wins_over_allowed_skills(tmp_path):
     )
     assert "<name>weather</name>" not in out
     assert "<name>billing</name>" in out
+
+
+# --- tier precedence: user overrides builtin (skill-tier-precedence) ---
+
+
+def test_user_skill_overrides_builtin_same_name(tmp_path, monkeypatch):
+    """A user skill wins over a same-name builtin, regardless of path sort."""
+    monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "builtin")
+    # builtin path ("…/builtin/dup") sorts BEFORE user path ("…/skills/dup"),
+    # so the old pure path-sort rule would keep the builtin. Tier precedence
+    # must keep the user one instead.
+    _write_builtin_skill(tmp_path, "dup", "builtin version.")
+    _write_skill(tmp_path, "dup", "---\nname: dup\ndescription: user version.\n---\nbody")
+    with structlog.testing.capture_logs():
+        sr.scan(str(tmp_path / "skills"))
+    assert sr._index["dup"].builtin is False
+    assert sr._index["dup"].description == "user version."
+
+
+def test_tier_override_flagged_in_conflict_warning(tmp_path, monkeypatch):
+    """Cross-tier conflict warns with tier_override=True."""
+    monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "builtin")
+    _write_builtin_skill(tmp_path, "dup", "builtin version.")
+    _write_skill(tmp_path, "dup", "---\nname: dup\ndescription: user version.\n---\nbody")
+    with structlog.testing.capture_logs() as logs:
+        sr.scan(str(tmp_path / "skills"))
+    conflict = [e for e in logs if e.get("name") == "dup" and e["log_level"] == "warning"]
+    assert len(conflict) == 1
+    assert conflict[0].get("tier_override") is True
+
+
+def test_same_tier_conflict_keeps_path_sort_and_no_tier_override(tmp_path, monkeypatch):
+    """Two user skills with the same name still resolve by path sort (tier_override False)."""
+    monkeypatch.setattr(sr, "BUILTIN_SKILLS_DIR", tmp_path / "_no_builtin")
+    _write_named_skill(tmp_path, "alpha", "dup")
+    _write_named_skill(tmp_path, "beta", "dup")
+    with structlog.testing.capture_logs() as logs:
+        sr.scan(str(tmp_path / "skills"))
+    assert sr._index["dup"].path.endswith("/alpha/SKILL.md")
+    conflict = [e for e in logs if e.get("name") == "dup" and e["log_level"] == "warning"]
+    assert len(conflict) == 1
+    assert conflict[0].get("tier_override") is False
+
+
+# --- catalog budget + compact fallback (skill-catalog-budget) ---
+
+
+def test_catalog_truncates_over_max_skills_with_warning(tmp_path):
+    for i in range(5):
+        _write_skill(tmp_path, f"s{i}", f"---\nname: s{i}\ndescription: skill {i}.\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    out = sr.available_skills_prompt(disabled_skills=[], max_skills=3)
+    # Only 3 <skill> blocks rendered.
+    assert out.count("<skill>") == 3
+    # Truncation warning before the instruction, naming shown/total.
+    assert "3" in out and "5" in out
+    assert out.index("⚠") < out.index("## Skills")
+
+
+def test_catalog_switches_to_compact_over_max_chars(tmp_path):
+    # Full format (5 × ~400-char descriptions ≈ 2400 chars) exceeds the budget, but
+    # compact (names + locations ≈ 600 chars) fits — so it drops descriptions for ALL
+    # five rather than truncating by count.
+    long_desc = "x" * 400
+    for i in range(5):
+        _write_skill(tmp_path, f"s{i}", f"---\nname: s{i}\ndescription: {long_desc}\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    out = sr.available_skills_prompt(disabled_skills=[], max_chars=1500)
+    # Compact omits the long description but keeps every skill's name + location.
+    assert long_desc not in out
+    assert out.count("<skill>") == 5
+    assert "<name>s0</name>" in out
+    assert "SKILL.md" in out
+
+
+def test_catalog_small_dir_unchanged_by_defaults(tmp_path):
+    _write_skill(tmp_path, "github", "---\nname: github\ndescription: gh for PRs.\n---\nbody")
+    _write_skill(tmp_path, "weather", "---\nname: weather\ndescription: forecasts.\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    with_defaults = sr.available_skills_prompt(disabled_skills=[])
+    explicit = sr.available_skills_prompt(disabled_skills=[], max_skills=150, max_chars=18000)
+    # Defaults leave small catalogs byte-identical and unwarned.
+    assert with_defaults == explicit
+    assert "⚠" not in with_defaults
+    assert "gh for PRs." in with_defaults  # full format retained
+
+
+# --- frontmatter extensions (skill-frontmatter-extensions) ---
+
+
+def test_scan_parses_new_frontmatter_fields(tmp_path):
+    _write_skill(
+        tmp_path,
+        "ext",
+        "---\nname: ext\ndescription: d.\n"
+        "disable_model_invocation: true\n"
+        "requires_tools:\n  - run_code\n  - search_docs\n"
+        "required_env_vars:\n  - name: API_KEY\n  - name: OPT\n    optional: true\n"
+        "---\nbody",
+    )
+    sr.scan(str(tmp_path / "skills"))
+    e = sr._index["ext"]
+    assert e.disable_model_invocation is True
+    assert e.requires_tools == ["run_code", "search_docs"]
+    assert {v["name"] for v in e.required_env_vars} == {"API_KEY", "OPT"}
+
+
+def test_scan_new_fields_default_when_absent(tmp_path):
+    _write_skill(tmp_path, "plain", "---\nname: plain\ndescription: d.\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    e = sr._index["plain"]
+    assert e.disable_model_invocation is False
+    assert e.requires_tools == []
+    assert e.required_env_vars == []
+
+
+def test_disable_model_invocation_hidden_from_catalog_but_readable(tmp_path):
+    _write_skill(
+        tmp_path,
+        "internal",
+        "---\nname: internal\ndescription: internal helper.\n"
+        "disable_model_invocation: true\n---\nthe body",
+    )
+    _write_skill(tmp_path, "shown", "---\nname: shown\ndescription: visible.\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    catalog = sr.available_skills_prompt(disabled_skills=[])
+    assert "<name>internal</name>" not in catalog
+    assert "<name>shown</name>" in catalog
+    # read_skill still loads it (hiding is discovery-only, not a security block).
+    # load() returns the full SKILL.md (frontmatter + body), so assert the body is present.
+    from fleetent.tools import builtin_tools
+
+    loaded = builtin_tools.read_skill("internal")
+    assert "the body" in loaded
+    assert not loaded.startswith("error:")
+
+
+def test_requires_tools_filters_catalog_at_render_time(tmp_path):
+    _write_skill(
+        tmp_path,
+        "coder",
+        "---\nname: coder\ndescription: needs sandbox.\nrequires_tools:\n  - run_code\n---\nbody",
+    )
+    _write_skill(tmp_path, "free", "---\nname: free\ndescription: no deps.\n---\nbody")
+    sr.scan(str(tmp_path / "skills"))
+    # run_code absent -> coder hidden, free shown
+    out_absent = sr.available_skills_prompt(disabled_skills=[], available_tools={"search_docs"})
+    assert "<name>coder</name>" not in out_absent
+    assert "<name>free</name>" in out_absent
+    # run_code present -> coder shown
+    out_present = sr.available_skills_prompt(
+        disabled_skills=[], available_tools={"run_code", "search_docs"}
+    )
+    assert "<name>coder</name>" in out_present
+    # available_tools=None -> no filtering (backward compatible)
+    out_none = sr.available_skills_prompt(disabled_skills=[])
+    assert "<name>coder</name>" in out_none
+
+
+def test_skill_readiness_reports_missing_required_env(tmp_path, monkeypatch):
+    _write_skill(
+        tmp_path,
+        "needs-env",
+        "---\nname: needs-env\ndescription: d.\n"
+        "required_env_vars:\n  - name: MUST_HAVE\n  - name: MAYBE\n    optional: true\n---\nbody",
+    )
+    sr.scan(str(tmp_path / "skills"))
+    monkeypatch.delenv("MUST_HAVE", raising=False)
+    monkeypatch.delenv("MAYBE", raising=False)
+    readiness = sr.skill_readiness("needs-env")
+    assert "MUST_HAVE" in readiness["missing"]
+    assert "MAYBE" not in readiness["missing"]  # optional
+    # once set, no longer missing
+    monkeypatch.setenv("MUST_HAVE", "x")
+    assert sr.skill_readiness("needs-env")["missing"] == []
+
+
+def test_scan_follows_symlinked_skill_directory(tmp_path):
+    """scan() MUST discover SKILL.md files inside symlinked subdirectories.
+
+    Skills installed as directory symlinks (e.g. ai-skills-library) must be
+    detected without requiring physical copies.
+    """
+    # Real skill source elsewhere on disk
+    real_skill = tmp_path / "real_source" / "cool-skill"
+    real_skill.mkdir(parents=True)
+    (real_skill / "SKILL.md").write_text(
+        textwrap.dedent("""\
+            ---
+            name: cool-skill
+            description: Use when user wants to do something cool.
+            ---
+
+            ## Instructions
+            Do the cool thing.
+        """)
+    )
+
+    # Skills dir contains a symlink to the real skill dir
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    (skills_dir / "cool-skill").symlink_to(real_skill)
+
+    sr.scan(str(skills_dir))
+
+    assert "cool-skill" in sr._index, (
+        "Skill inside a symlinked directory was not discovered by scan(); "
+        "rglob() must use follow_symlinks=True"
+    )

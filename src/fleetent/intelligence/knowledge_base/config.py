@@ -7,7 +7,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from fleetent import paths
-from fleetent.platform.config_validation import _flatten, _looks_inline_secret
+from fleetent.secret_scan import flatten, looks_inline_secret
 
 SourceType = Literal["google_drive", "confluence"]
 _SECRET_KEY_PARTS = ("token", "secret", "password", "api_key", "credential")
@@ -108,31 +108,34 @@ class KnowledgeConfigSnapshot(BaseModel):
 
 
 def knowledge_config_path(base_dir: Path | None = None) -> Path:
-    """Return the default platform/KB-service knowledge config path."""
+    """Return the default Platform config path that contains embedded Knowledge config."""
     if base_dir is not None:
-        return base_dir / "config" / "knowledge.yaml"
-    return paths.config_dir() / "knowledge.yaml"
+        return base_dir / "platform.yaml"
+    return paths.base_dir() / "platform.yaml"
 
 
 def load_knowledge_config(path: Path | None = None) -> KnowledgeConfigSnapshot:
-    """Load and validate the platform/KB-service knowledge construction config."""
+    """Load and validate embedded Platform Knowledge construction config."""
     config_path = path or knowledge_config_path()
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raise ValueError(f"{config_path} must contain a mapping")
+    knowledge = raw.get("knowledge")
+    if isinstance(knowledge, dict):
+        raw = {"knowledge_bases": knowledge.get("knowledge_bases", [])}
     _reject_inline_source_secrets(raw, config_path)
     return KnowledgeConfigSnapshot.model_validate(raw)
 
 
 def _reject_inline_source_secrets(raw: dict[str, object], path: Path) -> None:
-    for key, value in _flatten(raw):
+    for key, value in flatten(raw):
         if not isinstance(value, str):
             continue
         if key.endswith("_env") or key.endswith("credential_ref"):
             continue
         lowered_key = key.lower()
         secret_key = any(part in lowered_key for part in _SECRET_KEY_PARTS)
-        if not secret_key and not _looks_inline_secret(value):
+        if not secret_key and not looks_inline_secret(value):
             continue
         raise ValueError(
             f"inline secret-like value in knowledge config at '{key}' ({path}); "

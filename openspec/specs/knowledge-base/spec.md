@@ -927,12 +927,12 @@ Confluence connector tests SHALL use fake clients by default and SHALL NOT conne
 ### Requirement: Connector configuration registry
 系统 SHALL 从非 secret 应用配置中加载 knowledge-base connector 定义，并以 `connector_id` 提供稳定查找入口。
 
-#### Scenario: Google Drive connectors load from settings
-- **WHEN** `settings.yaml` 包含 `knowledge_base.google_drive.connectors`
+#### Scenario: Google Drive connectors load from Platform Knowledge config
+- **WHEN** Platform Knowledge config contains Google Drive connector definitions
 - **THEN** 系统可以把每条配置解析为 Google Drive connector config
 
-#### Scenario: Confluence connectors load from settings
-- **WHEN** `settings.yaml` 包含 `knowledge_base.confluence.connectors`
+#### Scenario: Confluence connectors load from Platform Knowledge config
+- **WHEN** Platform Knowledge config contains Confluence connector definitions
 - **THEN** 系统可以把每条配置解析为 Confluence connector config
 
 #### Scenario: Connector ids are globally unique
@@ -1717,5 +1717,4 @@ explicit dependency injection.
 - **WHEN** Confluence connector config sets `username_env`
 - **THEN** connector operations resolve the username from that environment variable
 - **AND** Confluence API token is resolved from `api_token_env`
-- **AND** `settings.yaml` does not need to contain the account email
-
+- **AND** Platform YAML config does not need to contain the account email

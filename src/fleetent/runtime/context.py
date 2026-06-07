@@ -7,18 +7,18 @@ import time
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
-import structlog
 from openai import OpenAI
 
 from fleetent import eval_logger
 from fleetent.model import ModelConfigError, ModelPolicySnapshot, ResolvedModelConfig
+from fleetent.observability.structured_logging import get_logger
 from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatch
 
 _DEFAULT_FLAP_WINDOW = 3
 _DEFAULT_MIN_SAVINGS_RATIO = 0.10
 _DEFAULT_MIN_INTERVAL_TURNS = 1
 
-logger = structlog.get_logger(__name__)
+_logger = get_logger("runtime.context")
 
 ContextConfig = dict[str, Any]
 
@@ -137,6 +137,7 @@ def maybe_compress(
     trigger_line = int(cfg["max_tokens"] * cfg["tmax_ratio"])
     if not force and estimate_tokens(messages) <= trigger_line:
         return messages
+    _write_compaction_checkpoint(session_id, messages)
     return _compress(
         messages,
         cfg,
@@ -161,6 +162,7 @@ def compress_for_context_overflow(
     (Non-Goal here); this only performs the unconditional compression to Tretained.
     """
     cfg = _resolve_config(config, agent_name)
+    _write_compaction_checkpoint(session_id, messages)
     return _compress(
         messages,
         cfg,
@@ -169,6 +171,18 @@ def compress_for_context_overflow(
         user_id=user_id,
         agent_name=agent_name,
     )
+
+
+def _write_compaction_checkpoint(session_id: str | None, messages: list[Any]) -> None:
+    """Best-effort: write pre-compaction backup; never propagate errors."""
+    if session_id is None:
+        return
+    try:
+        from fleetent.session import manager as session_mgr
+
+        session_mgr.write_compaction_checkpoint(session_id, messages)
+    except Exception as exc:  # noqa: BLE001
+        _logger.warn("compaction_checkpoint_write_failed", session_id=session_id, error=str(exc))
 
 
 def _summary_fingerprint(text: str) -> str:
@@ -183,7 +197,7 @@ def _resolve_summary_model() -> str | None:
     try:
         return str(_summary_route()[1].model)
     except Exception as exc:  # observability only — never propagate
-        logger.warning("compression_summary_model_resolve_failed", error=str(exc))
+        _logger.warn("compression_summary_model_resolve_failed", error=str(exc))
         return None
 
 
@@ -202,7 +216,7 @@ def _log_compression_safe(**kwargs: Any) -> None:
     try:
         eval_logger.log_compression(**kwargs)
     except Exception as exc:  # observability must not become a failure point
-        logger.warning("compression_trace_failed", error=str(exc))
+        _logger.warn("compression_trace_failed", error=str(exc))
 
 
 def _compress(
@@ -226,7 +240,12 @@ def _compress(
     # (recent messages), middle summarized.
     head = _select_head(messages, max_intent)
     conv_msgs = [m for m in messages if _role(m) != "system"]
-    tail = _select_tail(conv_msgs, keep_recent, target, head)
+    # C3a: a verbatim unfinished-task block survives the middle being compressed.
+    # Its tokens are charged to the tail projection so the tail shrinks to fit.
+    active = _active_task_block(session_id)
+    active_list = [active] if active is not None else []
+    extra_fixed = estimate_tokens(active_list)
+    tail = _select_tail(conv_msgs, keep_recent, target, head, extra_fixed)
 
     head_ids = {id(m) for m in head}
     tail_ids = {id(m) for m in tail}
@@ -271,9 +290,9 @@ def _compress(
     # AR14 D3: LLM summary failed (exception / timeout / empty). Do NOT crash the
     # caller; degrade to static head/tail + a truncated-middle notice (no LLM).
     if summary_text is None:
-        logger.warning("compression_summary_degraded", middle_count=len(new_middle))
+        _logger.warn("compression_summary_degraded", middle_count=len(new_middle))
         notice_msg: dict[str, str] = {"role": "system", "content": _MIDDLE_OMITTED_NOTICE}
-        result = [*head, notice_msg, *tail]
+        result = [*head, *active_list, notice_msg, *tail]
         _log_compression_safe(
             trigger=trigger,
             outcome="degraded",
@@ -295,7 +314,7 @@ def _compress(
         "role": "system",
         "content": f"{_SUMMARY_PREFIX}\n{summary_text}",
     }
-    result = [*head, summary_msg, *tail]
+    result = [*head, *active_list, summary_msg, *tail]
     _log_compression_safe(
         trigger=trigger,
         outcome="summarized",
@@ -367,6 +386,7 @@ def _select_tail(
     keep_recent: int,
     target: int,
     head: list[Any],
+    extra_fixed: int = 0,
 ) -> list[Any]:
     """Pick the largest tail (down to a 1-message floor) whose estimate fits target.
 
@@ -377,7 +397,7 @@ def _select_tail(
     realized estimate MAY end up slightly above target — that relaxation is accepted.
     """
     n = min(keep_recent, len(conv_msgs)) if conv_msgs else 0
-    fixed = estimate_tokens(head) + _SUMMARY_OVERHEAD_TOKENS
+    fixed = estimate_tokens(head) + _SUMMARY_OVERHEAD_TOKENS + extra_fixed
     while n > 1:
         tail = _keep_tail(conv_msgs, n)
         if fixed + estimate_tokens(tail) <= target:
@@ -421,27 +441,70 @@ def _summarize(
         )
         summary = response.choices[0].message.content
         if not summary:
-            logger.warning("compression_summary_empty_response")
+            _logger.warn("compression_summary_empty_response")
             return None
         return cast(str, summary)
     except Exception as exc:
-        logger.warning("compression_summary_failed", error=str(exc))
+        _logger.warn("compression_summary_failed", error=str(exc))
         return None
 
 
+_SUMMARY_SECTIONS = (
+    "## Goal\n## Completed\n## In Progress / Pending\n## Key Findings & Files\n## Next Steps"
+)
+
+
 def _build_summary_prompt(text: str, prev_summary: str | None) -> str:
+    """Structured summary prompt that preserves continuation cues (C3a).
+
+    First-pass and incremental-merge branches share the SAME section structure;
+    unfinished work and the immediate next step are kept verbatim so the assistant
+    can resume after the middle is compressed away.
+    """
     if prev_summary:
         return (
-            "You maintain a running summary of an ongoing conversation. "
-            "Merge the NEW messages into the existing summary, keeping it concise "
-            "and focused on user goals and completed actions. Do not repeat or "
-            "re-derive content already captured.\n\n"
-            f"EXISTING SUMMARY:\n{prev_summary}\n\nNEW MESSAGES:\n{text}"
+            "You maintain a running STRUCTURED summary of an ongoing conversation. "
+            "Merge the NEW messages into the EXISTING summary under the SAME sections "
+            "below, keeping it concise and not re-deriving content already captured. "
+            "Preserve unfinished work and the immediate next step verbatim so the "
+            "assistant can resume.\n\n"
+            f"{_SUMMARY_SECTIONS}\n\nEXISTING SUMMARY:\n{prev_summary}\n\nNEW MESSAGES:\n{text}"
         )
     return (
-        "Summarize this conversation concisely. "
-        "Focus on user goals and completed actions:\n\n" + text
+        "Summarize this conversation as a STRUCTURED summary so the assistant can "
+        "resume the task. Use exactly these markdown sections, keep each concise, and "
+        "preserve unfinished work and the immediate next step verbatim:\n\n"
+        f"{_SUMMARY_SECTIONS}\n\nCONVERSATION:\n{text}"
     )
+
+
+# Prefix marking the verbatim unfinished-task block injected on compression (C3a).
+# Sourced from C2's agent-side {session_id}.todo so unfinished work survives when the
+# middle is summarized away. A single constant lets tests/inspection identify the block.
+_ACTIVE_TASK_PREFIX = "[未完成任务（压缩后续跑，逐字保留）]"
+
+
+def _active_task_block(session_id: str | None) -> dict[str, str] | None:
+    """A verbatim system block listing the session's unfinished todos, or None.
+
+    Reads C2's agent-side ``{session_id}.todo`` (status != completed). Returns None
+    when there is no session, no unfinished item, or the read fails — compression
+    then behaves exactly as before (no injection, no error). Pure agent-side.
+    """
+    if not session_id:
+        return None
+    try:
+        from fleetent.session import manager as session_mgr
+
+        todos = session_mgr.read_todo(session_id)
+    except Exception as exc:  # noqa: BLE001 — todo is auxiliary, never break compression
+        _logger.warn("active_task_block_read_failed", session_id=session_id, error=str(exc))
+        return None
+    unfinished = [t for t in todos if isinstance(t, dict) and t.get("status") != "completed"]
+    if not unfinished:
+        return None
+    lines = "\n".join(f"- [{t.get('status', 'pending')}] {t.get('text', '')}" for t in unfinished)
+    return {"role": "system", "content": f"{_ACTIVE_TASK_PREFIX}\n{lines}"}
 
 
 def _pre_cleanup(messages: list[Any]) -> list[Any]:
@@ -654,7 +717,7 @@ def apply_anti_flap(
     window = (*state.recent_savings, savings)[-flap_window:]
     auto_disabled = len(window) == flap_window and all(s < min_savings for s in window)
     if auto_disabled and not state.auto_disabled:
-        logger.warning(
+        _logger.warn(
             "compression_auto_flap_disabled",
             recent_savings=window,
             min_savings_ratio=min_savings,

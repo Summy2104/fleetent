@@ -7,6 +7,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import (
     BaseSettings,
+    DotEnvSettingsSource,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
     YamlConfigSettingsSource,
@@ -14,8 +15,7 @@ from pydantic_settings import (
 
 from fleetent import paths
 
-SETTINGS_YAML_PATH = paths.settings_yaml_path()
-MCP_SERVERS_YAML_PATH = paths.config_dir() / "mcp.servers.yaml"
+PLATFORM_YAML_PATH = paths.platform_yaml_path()
 # Empty after the config consolidation: the platform Settings carries no secret
 # fields. Kept as a defensive safety net so the YAML source still refuses any known
 # secret field, should one ever be reintroduced. Inline-secret scanning of agent.yaml
@@ -30,7 +30,7 @@ class SecretRejectingYamlSettingsSource(YamlConfigSettingsSource):
         if secret_fields:
             fields = ", ".join(secret_fields)
             raise ValueError(
-                f"Secret fields cannot appear in config/settings.yaml: {fields}. "
+                f"Secret fields cannot appear in platform.yaml: {fields}. "
                 "Move these values to env/.env."
             )
         return data
@@ -164,6 +164,10 @@ class McpServerSettings(BaseModel):
     command: str = ""
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
+    # Per-server HTTP timeouts in seconds (mcp-per-server-timeout); defaults match the
+    # client's built-in connect/call defaults so omitting them changes nothing.
+    connect_timeout: float = 10.0
+    call_timeout: float = 30.0
 
 
 class McpServersFile(BaseModel):
@@ -196,7 +200,7 @@ class Settings(BaseSettings):
     module purely so ``AgentFile`` can reuse them.
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", extra="ignore")
+    model_config = SettingsConfigDict(env_nested_delimiter="__", extra="ignore")
 
     log_format: str = "console"
     database_url: str = Field(
@@ -214,12 +218,17 @@ class Settings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         yaml_settings = SecretRejectingYamlSettingsSource(
-            settings_cls, yaml_file=SETTINGS_YAML_PATH
+            settings_cls, yaml_file=PLATFORM_YAML_PATH
+        )
+        home_dotenv_settings = DotEnvSettingsSource(
+            settings_cls,
+            env_file=paths.platform_env_path(),
+            env_nested_delimiter="__",
         )
         return (
             init_settings,
             env_settings,
-            dotenv_settings,
+            home_dotenv_settings,
             yaml_settings,
             file_secret_settings,
         )
@@ -268,12 +277,18 @@ def configure_logging(settings: Settings) -> None:
 def load_mcp_server_settings(
     path: Path | None = None,
 ) -> list[McpServerSettings]:
-    """Load static MCP server definitions from the dedicated server config file."""
-    config_path = path or MCP_SERVERS_YAML_PATH
+    """Parse MCP server definitions from an explicit YAML path.
+
+    There is no default MCP config file in the MVP runtime. Platform-authored MCP
+    definitions live in DB and are materialized into Agent ``agent.yaml``.
+    """
+    if path is None:
+        return []
+    config_path = path
     if not config_path.exists():
         return []
 
     raw = yaml.safe_load(config_path.read_text()) or {}
     if not isinstance(raw, dict):
-        raise ValueError("config/mcp.servers.yaml must contain a mapping with a servers list")
+        raise ValueError("MCP server YAML must contain a mapping with a servers list")
     return McpServersFile.model_validate(raw).servers

@@ -1211,17 +1211,17 @@ def test_summary_empty_response_degrades(monkeypatch):
 
 
 def test_summary_failure_is_logged(monkeypatch):
-    import fleetent.runtime.context as cm
+    from unittest.mock import patch
 
-    events: list[str] = []
-    monkeypatch.setattr(cm.logger, "warning", lambda event, **kw: events.append(event))
+    import fleetent.runtime.context as cm
 
     def raise_exc():
         raise RuntimeError("no key")
 
     monkeypatch.setattr(cm, "_summary_route", raise_exc)
-    cm._summarize([{"role": "user", "content": "hi"}])
-    assert events  # failure was logged, not silently swallowed
+    with patch("fleetent.runtime.context._logger") as mock_log:
+        cm._summarize([{"role": "user", "content": "hi"}])
+    mock_log.warn.assert_called_once()  # failure was logged, not silently swallowed
 
 
 # --- AR14: cumulative summary persists across save/load and stays incremental (D4) ---

@@ -133,22 +133,10 @@ async def test_fire_message_in_user_content(tmp_path, monkeypatch):
 # ── settings-backed startup ───────────────────────────────────────────────────
 
 
-async def test_start_fails_fast_when_legacy_cron_yaml_exists(
-    tmp_path, monkeypatch, isolated_schedule_db
-):
-    import pytest
-
+def test_legacy_cron_yaml_path_is_removed():
     import fleetent.cron_scheduler as cs
 
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    legacy = config_dir / "cron.yaml"
-    legacy.write_text("jobs: []\n")
-    monkeypatch.setattr(cs, "LEGACY_CRON_CONFIG_PATH", legacy)
-
-    scheduler = cs.CronScheduler()
-    with pytest.raises(RuntimeError, match="SQLite-backed runtime management"):
-        await scheduler.start()
+    assert not hasattr(cs, "LEGACY_CRON_CONFIG_PATH")
 
 
 def test_cron_yaml_loader_is_removed():
@@ -166,6 +154,45 @@ async def test_start_respects_disabled_scheduling_setting(isolated_schedule_db):
     await scheduler.start()
 
     assert not scheduler.running
+
+
+# ── spillover cleanup maintenance job ────────────────────────────────────────
+
+
+async def test_start_registers_spillover_cleanup_job(isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+
+    job = scheduler.get_job("__maintenance_spillover_cleanup__")
+    assert job is not None
+
+    await scheduler.shutdown()
+
+
+async def test_spillover_cleanup_job_invokes_cleanup_spillover(
+    tmp_path, monkeypatch, isolated_schedule_db
+):
+    import fleetent.cron_scheduler as cs
+    import fleetent.tools.result_truncation as trt
+
+    # Redirect SPILLOVER_DIR so job.func() operates on tmp_path, not real data dir.
+    spillover = tmp_path / "spillover"
+    spillover.mkdir()
+    monkeypatch.setattr(trt, "SPILLOVER_DIR", spillover)
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+
+    job = scheduler.get_job("__maintenance_spillover_cleanup__")
+    assert job is not None
+
+    # Directly invoke the job function — verifies multi-module wiring:
+    # cron_scheduler._register_maintenance_jobs → result_truncation.cleanup_spillover
+    job.func()  # must not raise
+
+    await scheduler.shutdown()
 
 
 async def test_start_uses_default_timezone_when_task_has_none(monkeypatch, isolated_schedule_db):

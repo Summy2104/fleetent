@@ -18,20 +18,22 @@ fleetent 是一个面向企业内网部署的轻量 Agent 平台。项目基于 
 
 Linux / macOS / WSL2：脚本会 bootstrap uv + Python 3.12，用 `uv tool install` 把
 `fleetent`/`fleetent-admin`/`fleetent-tui` 装成全局命令，并在 `FLEETENT_HOME`
-（默认 `~/.fleetent`，与工作目录解耦）下铺设**扁平布局**：`agent.yaml` + `.env` + `data/`（无 config/ 子目录）。
-部署的 agent 只读自己的 `agent.yaml`（从 `config/agent/agent.yaml.example` 生成）+ `.env`（从 `config/agent/.env.example`）。
+（默认 `~/.fleetent`，与工作目录解耦）下铺设 Platform env 和默认 Agent home：
+`agents/default/{agent.yaml,.env,data/}`。部署的 agent 只读自己 home 内的 `agent.yaml` + `.env`。
 
 ```bash
 git clone <repo-url> && cd fleetent
 scripts/install.sh                 # 或 --dir PATH / --skip-db / --skip-config
 # 编辑 agent 配置与密钥：
-$EDITOR ~/.fleetent/agent.yaml ~/.fleetent/.env
+$EDITOR ~/.fleetent/agents/default/agent.yaml ~/.fleetent/agents/default/.env
 # 新开 shell 后（确保 ~/.local/bin 在 PATH）：
 fleetent "hello"
 ```
 
-> 仓库示例模板按使用方分目录：`config/agent/`（`agent.yaml.example` + 该 agent 的 `.env.example`）、`config/platform/`（平台 `.env.example`）。
-> **迁移**：旧部署若是 `FLEETENT_HOME/config/agent.yaml`，把它移到 home 根 `FLEETENT_HOME/agent.yaml`。
+> 仓库示例模板贴近运行位置：Platform 使用根目录 `.env.example` 和
+> `platform.yaml.example`；默认 Agent 使用 `agents/default/agent.yaml.example` 和
+> `agents/default/.env.example`。平台部署 Agent 时会 materialize 到
+> `agents/<agent-id>/agent.yaml` 和 `agents/<agent-id>/.env`。
 
 > 这是面向开发者 / 单机快速体验的路径。**on-prem 生产部署请用 Docker**
 > （`Dockerfile` + `docker-compose.yml`），环境可复现、数据不出内网。
@@ -41,8 +43,8 @@ fleetent "hello"
 `fleetent agent init` 从内置模板 scaffold 出一个可独立运行的 agent home：
 
 ```bash
-fleetent agent init my-bot              # 生成 ~/.fleetent/my-bot/{agent.yaml,.env}
-$EDITOR ~/.fleetent/my-bot/agent.yaml ~/.fleetent/my-bot/.env
+fleetent agent init my-bot              # 生成 ~/.fleetent/agents/my-bot/{agent.yaml,.env}
+$EDITOR ~/.fleetent/agents/my-bot/agent.yaml ~/.fleetent/agents/my-bot/.env
 fleetent agent run my-bot --port 8766   # 把该 agent 当独立服务跑（loop + IM + sandbox）
 ```
 
@@ -57,8 +59,8 @@ fleetent agent run my-bot --port 8766   # 把该 agent 当独立服务跑（loop
 git clone <repo-url>
 cd fleetent
 uv sync
-cp config/agent.yaml.example config/agent.yaml
-export ANTHROPIC_API_KEY=sk-ant-...
+fleetent agent init my-bot --home .fleetent-dev/agents/my-bot
+$EDITOR .fleetent-dev/agents/my-bot/agent.yaml .fleetent-dev/agents/my-bot/.env
 ```
 
 运行一次 CLI 请求：
@@ -132,7 +134,7 @@ observability traces, usage, diagnostics, session persistence
 
 ## 配置
 
-部署 agent 配置从环境变量和 `config/agent.yaml` 读取。真实 secret 不写入 YAML；配置文件只保存
+部署后的 Agent runtime 从自己的 `agents/<agent-id>/agent.yaml` 和 `.env` 读取配置。真实 secret 不写入 YAML；配置文件只保存
 `api_key_env`、`*_env` 这类环境变量名引用。
 
 常规 LLM 路径需要：
@@ -204,7 +206,7 @@ def search_database(query: str, limit: int = 10) -> str:
     ...
 ```
 
-MCP-compatible 工具服务可以写入 `config/agent.yaml` 的 `mcp_servers`：
+MCP-compatible 工具服务可以写入 `agents/<agent-id>/agent.yaml` 的 `mcp_servers`：
 
 ```yaml
 mcp_servers:

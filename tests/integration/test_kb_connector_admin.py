@@ -67,35 +67,6 @@ _GDRIVE = {
 }
 
 
-def test_inline_token_value_encrypts_and_sets_env(client, monkeypatch):
-    from cryptography.fernet import Fernet
-
-    from fleetent.platform.secret_management import agent_secret_store
-
-    monkeypatch.setenv("FLEETENT_SECRET_KEY", Fernet.generate_key().decode())
-    token = _session_for("admin")
-    body = {
-        "connector_id": "drive2",
-        "kind": "google_drive",
-        "tenant_id": "t",
-        "kb_id": "k",
-        # value-mode inline entry: the *_value carries the secret, no env name typed
-        "config": {"folder_id": "F", "access_token_env_value": "ya29-secret-token"},
-    }
-    r = client.post("/admin/kb/connectors", headers=_hdr(token), json=body)
-    assert r.status_code == 201, r.text
-    cfg = r.json()["config"]
-    # inline value -> platform derives + sets the env name; raw value never persisted in config
-    assert cfg["access_token_env"] == "FLEETENT_KB_DRIVE2_ACCESS_TOKEN"
-    assert "access_token_env_value" not in cfg
-    assert "ya29-secret-token" not in r.text
-    # the value lives encrypted in the shared secret scope
-    assert (
-        agent_secret_store.get_decrypted(None, "FLEETENT_KB_DRIVE2_ACCESS_TOKEN")
-        == "ya29-secret-token"
-    )
-
-
 def test_add_list_edit_delete_connector(client):
     token = _session_for("admin")
     r = client.post("/admin/kb/connectors", headers=_hdr(token), json=_GDRIVE)
@@ -116,34 +87,6 @@ def test_add_list_edit_delete_connector(client):
     d = client.delete("/admin/kb/connectors/pilot-drive", headers=_hdr(token))
     assert d.status_code == 204
     assert not client.get("/admin/kb/connectors", headers=_hdr(token)).json()
-
-
-def test_connector_description_persists_to_kb_and_shows_in_kb_list(client):
-    token = _session_for("admin")
-    payload = {**_GDRIVE, "description": "Billing FAQ and refund policy"}
-    r = client.post("/admin/kb/connectors", headers=_hdr(token), json=payload)
-    assert r.status_code == 201, r.text
-    assert r.json()["description"] == "Billing FAQ and refund policy"
-
-    # the connector list carries the description
-    listed = client.get("/admin/kb/connectors", headers=_hdr(token)).json()
-    conn = next(c for c in listed if c["connector_id"] == "pilot-drive")
-    assert conn["description"] == "Billing FAQ and refund policy"
-
-    # and it landed on the KB the connector targets (what the agent picker reads)
-    kbs = client.get("/admin/kb?tenant_id=pilot-tenant", headers=_hdr(token)).json()
-    kb = next(k for k in kbs if k["kb_id"] == "pilot-kb")
-    assert kb["description"] == "Billing FAQ and refund policy"
-
-    # editing the description updates the KB
-    e = client.patch(
-        "/admin/kb/connectors/pilot-drive",
-        headers=_hdr(token),
-        json={"description": "Refunds only"},
-    )
-    assert e.status_code == 200 and e.json()["description"] == "Refunds only"
-    kbs = client.get("/admin/kb?tenant_id=pilot-tenant", headers=_hdr(token)).json()
-    assert next(k for k in kbs if k["kb_id"] == "pilot-kb")["description"] == "Refunds only"
 
 
 def test_add_confluence_connector(client):

@@ -39,6 +39,17 @@ class SkillEntry:
     # (skill-injection-audit). The entry stays in `_index` but is excluded from the
     # catalog and refused by read_skill; load() ignores this flag (manual triage).
     audit_blocked: bool = False
+    # Author hint: hide from the <available_skills> catalog (the model won't discover
+    # it) while keeping read_skill able to load it by name — for internal/composed
+    # skills invoked by other skills or hooks. Orthogonal to audit_blocked (a security
+    # block that read_skill refuses); this is discovery-only.
+    disable_model_invocation: bool = False
+    # Tool names this skill depends on. Filtered at catalog RENDER time against the
+    # session's available tool set (tool availability varies per session), not at scan.
+    requires_tools: list[str] = field(default_factory=list)
+    # Env vars needed before the skill can run, each {"name", optional?: bool}. Metadata
+    # only — surfaced by skill_readiness(); never blocks the catalog.
+    required_env_vars: list[dict[str, Any]] = field(default_factory=list)
 
 
 _index: dict[str, SkillEntry] = {}
@@ -163,7 +174,12 @@ def _scan_dir(
     """
     if not base.is_dir():
         return
-    for skill_md in base.rglob("SKILL.md"):
+    # followlinks=True ensures symlinked skill directories are traversed (Python
+    # Path.rglob does not follow symlinks by default until 3.13).
+    for root, _dirs, files in os.walk(base, followlinks=True):
+        if "SKILL.md" not in files:
+            continue
+        skill_md = Path(root) / "SKILL.md"
         raw = skill_md.read_text(encoding="utf-8")
         frontmatter = _parse_frontmatter(raw)
         if frontmatter is None:
@@ -181,17 +197,26 @@ def _scan_dir(
         path = str(skill_md)
         existing = index.get(name)
         if existing is not None:
-            # Deterministic selection independent of traversal order and source:
-            # the SKILL.md whose path string sorts first wins; warn on every
-            # loser. (SK8 strategy; not a builtin-vs-user priority rule.)
-            kept_path, dropped_path = sorted((existing.path, path))
+            # Deterministic selection independent of traversal order. Tier precedence
+            # first: a user skill (builtin=False) overrides a same-name builtin one so
+            # operators can predictably customize a builtin — regardless of path sort.
+            # Within the same tier, fall back to SK8 path-string sort (smaller wins).
+            tier_override = existing.builtin != builtin
+            # When tiers differ the user one wins. `builtin` is the NEW entry's tier:
+            # new is builtin (True) -> keep existing(user); new is user (False) ->
+            # overwrite existing(builtin). Both cases reduce to keep_existing = builtin.
+            # Same tier: SK8 path-string sort (smaller path wins).
+            keep_existing = builtin if tier_override else existing.path <= path
+            kept_path = existing.path if keep_existing else path
+            dropped_path = path if keep_existing else existing.path
             logger.warning(
                 "skill_name_conflict",
                 name=name,
                 kept_path=kept_path,
                 dropped_path=dropped_path,
+                tier_override=tier_override,
             )
-            if existing.path <= path:
+            if keep_existing:
                 continue
         description = str(frontmatter.get("description", ""))
         blocked = _audit_skill(path, _body_after_frontmatter(raw), description)
@@ -205,6 +230,9 @@ def _scan_dir(
             enabled=bool(frontmatter.get("enabled", True)),
             builtin=builtin,
             audit_blocked=blocked,
+            disable_model_invocation=bool(frontmatter.get("disable_model_invocation", False)),
+            requires_tools=_as_str_list(frontmatter.get("requires_tools")),
+            required_env_vars=_as_env_var_list(frontmatter.get("required_env_vars")),
         )
 
 
@@ -286,16 +314,21 @@ def _disabled_reason(name: str, entry: SkillEntry, disabled: set[str]) -> str | 
 
     This is the single eligibility predicate that decides whether a skill enters
     the `available_skills_prompt` catalog; every catalog/match filter routes
-    through it so the four disable sources are judged in exactly one place.
+    through it so the disable sources are judged in exactly one place.
     Sources are checked in priority order — security first, author intent next,
     operator config, then the author's default-state hint:
-    `audit_blocked` > `frontmatter_disabled` (`enabled: false`) >
-    `config_disabled` (`disabled_skills`) > `default_disabled`
-    (`enabled_by_default: false`). The returned identifier is the highest-priority
+    `audit_blocked` > `model_invocation_disabled` (`disable_model_invocation: true`) >
+    `frontmatter_disabled` (`enabled: false`) > `config_disabled` (`disabled_skills`) >
+    `default_disabled` (`enabled_by_default: false`). The returned identifier is the
+    highest-priority
     match and is the value recorded in the run trace.
     """
     if entry.audit_blocked:
         return "audit_blocked"
+    if entry.disable_model_invocation:
+        # Author hid it from model discovery; read_skill (which ignores this predicate)
+        # can still load it by name for internal/composed use.
+        return "model_invocation_disabled"
     if not entry.enabled:
         return "frontmatter_disabled"
     if name in disabled:
@@ -303,6 +336,36 @@ def _disabled_reason(name: str, entry: SkillEntry, disabled: set[str]) -> str | 
     if not entry.enabled_by_default:
         return "default_disabled"
     return None
+
+
+def _tools_available(entry: SkillEntry, available_tools: set[str] | None) -> bool:
+    """Whether the skill's `requires_tools` are all in the session's available set.
+
+    Render-time gate (tool availability varies per session), orthogonal to the
+    scan-time `_disabled_reason`. `available_tools is None` means "don't filter"
+    (backward compatible) so callers that can't compute the set keep prior behavior.
+    """
+    if available_tools is None or not entry.requires_tools:
+        return True
+    return all(tool in available_tools for tool in entry.requires_tools)
+
+
+def skill_readiness(name: str) -> dict[str, list[str]]:
+    """Report a skill's missing required env vars (skill-frontmatter-extensions).
+
+    Returns ``{"missing": [names]}`` for each non-optional `required_env_vars` entry
+    not present in the process environment. Metadata only — never affects the catalog
+    or read_skill; powers an admin-console readiness view. Unknown skill → empty.
+    """
+    entry = _index.get(name)
+    if entry is None:
+        return {"missing": []}
+    missing = [
+        var["name"]
+        for var in entry.required_env_vars
+        if not var.get("optional", False) and var["name"] not in os.environ
+    ]
+    return {"missing": missing}
 
 
 # Mandatory scan instruction that precedes the <available_skills> catalog. Skills
@@ -322,6 +385,9 @@ _SKILLS_INSTRUCTION = (
 def available_skills_prompt(
     disabled_skills: list[str] | None = None,
     allowed_skills: list[str] | None = None,
+    max_skills: int = 150,
+    max_chars: int = 18000,
+    available_tools: set[str] | None = None,
 ) -> str:
     """Render the enabled skills as an openclaw-style skills section for the prompt.
 
@@ -342,21 +408,68 @@ def available_skills_prompt(
     with the disable predicate so a disabled skill never appears even when listed
     (disable wins). This narrows catalog visibility only; it is NOT an authorization
     boundary — `read_skill`'s by-name `load` and tool access control are unaffected.
+
+    `max_skills` / `max_chars` bound the catalog so a growing skill library cannot
+    silently bloat the cached system-prefix (skill-catalog-budget). When the eligible
+    count exceeds `max_skills` the catalog is truncated to the first N and a warning
+    line (naming shown vs total) precedes the instruction. When the full-format render
+    exceeds `max_chars` it falls back to a compact format (name + location, no
+    description); a still-oversized compact render is further truncated by count.
+    Truncated skills remain loadable by name via read_skill — the catalog is a
+    discovery surface, not an authorization boundary. Defaults are large enough that
+    typical deployments render byte-identically to the pre-budget behavior.
     """
     disabled = _resolve_disabled_skills(disabled_skills)
     allowed = set(allowed_skills) if allowed_skills else None
     entries = [
         (name, entry)
         for name, entry in _index.items()
-        if _disabled_reason(name, entry, disabled) is None and (allowed is None or name in allowed)
+        if _disabled_reason(name, entry, disabled) is None
+        and (allowed is None or name in allowed)
+        and _tools_available(entry, available_tools)
     ]
     if not entries:
         return ""
-    lines = [_SKILLS_INSTRUCTION, "", "<available_skills>"]
-    for name, entry in entries:
+
+    total = len(entries)
+    shown = entries[:max_skills] if total > max_skills else entries
+
+    rendered = _render_catalog(shown, total, compact=False)
+    if len(rendered) <= max_chars:
+        return rendered
+    # Full format blew the char budget: drop descriptions (compact) to keep
+    # discoverability cheap. If compact still overruns, trim by count until it fits
+    # (always keeping at least one entry so the section stays meaningful).
+    while shown:
+        compact = _render_catalog(shown, total, compact=True)
+        if len(compact) <= max_chars or len(shown) == 1:
+            return compact
+        shown = shown[: len(shown) - 1]
+    return rendered  # unreachable (entries non-empty), keeps type checker happy
+
+
+def _render_catalog(shown: list[tuple[str, "SkillEntry"]], total: int, *, compact: bool) -> str:
+    """Render the <available_skills> section, optionally compact and/or truncated.
+
+    A leading warning line is emitted when fewer than `total` skills are shown or when
+    the compact format is used, so the model knows the catalog is reduced.
+    """
+    lines: list[str] = []
+    reduced = len(shown) < total
+    if reduced or compact:
+        note = f"⚠ Skills: showing {len(shown)} of {total}"
+        if reduced:
+            note += " (truncated)"
+        if compact:
+            note += " (compact: names only — read_skill for details)"
+        lines.append(note)
+        lines.append("")
+    lines.extend([_SKILLS_INSTRUCTION, "", "<available_skills>"])
+    for name, entry in shown:
         lines.append("  <skill>")
         lines.append(f"    <name>{name}</name>")
-        lines.append(f"    <description>{entry.description}</description>")
+        if not compact:
+            lines.append(f"    <description>{entry.description}</description>")
         lines.append(f"    <location>{entry.path}</location>")
         lines.append("  </skill>")
     lines.append("</available_skills>")
@@ -478,3 +591,22 @@ def _as_opt_str(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _as_env_var_list(value: Any) -> list[dict[str, Any]]:
+    """Normalize `required_env_vars` into a list of {"name", optional} dicts.
+
+    Each item must be a mapping with a `name`; non-mapping or name-less items are
+    skipped. `optional` defaults to False. Missing/non-list input yields [].
+    """
+    if not isinstance(value, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        if not name:
+            continue
+        out.append({"name": str(name), "optional": bool(item.get("optional", False))})
+    return out

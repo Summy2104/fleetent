@@ -213,39 +213,6 @@ def test_providers_secret_field_password_no_prefill():
     assert "autocomplete" in snippet
 
 
-def test_kb_connector_token_fields_use_credential_field():
-    html = ADMIN_HTML
-    fn = html.split("function kbcRenderFields", 1)[1].split("\n}", 1)[0]
-    # *_env credential fields render as the value-first cred-field, not a bare env-name box
-    assert "credFieldHtml" in fn
-    assert "_env" in fn  # detected by the _env suffix
-    assert "_value" in fn  # inline value carries a <field>_value data-key
-
-
-def test_credential_field_control_present():
-    html = ADMIN_HTML
-    # one reusable, value-first credential control with an advanced env-reference toggle
-    assert ".cred-field" in html
-    assert "function credFieldHtml" in html
-    assert "function credToggle" in html
-    builder = html.split("function credFieldHtml", 1)[1].split("\n}", 1)[0]
-    assert 'data-mode="value"' in builder  # defaults to entering a value
-    assert "cred-value" in builder and "cred-ref" in builder
-    assert 'type="password"' in builder  # value input is write-only
-    assert "引用现有变量" in builder  # advanced: reference an existing env var instead
-
-
-def test_providers_key_is_one_credential_field():
-    html = ADMIN_HTML
-    # the API key + its env-reference are merged into a single cred-field, not two boxes
-    parts = html.split('data-cred="provider-key"', 1)
-    assert len(parts) == 2, "provider key cred-field not found"
-    body = parts[1][:1400]
-    assert 'id="pv-api-key"' in body  # value input
-    assert 'id="pv-api-key-env"' in body  # reference input, inside the same control
-    assert "credToggle" in body  # advanced env-reference toggle
-
-
 def test_providers_write_controls_admin_gated():
     html = ADMIN_HTML
     assert "pv-create-bar" in html
@@ -280,35 +247,6 @@ def test_agents_detail_drawer_and_binding_sections():
     assert "function agAddKb" in html and "function agUnbindKb" in html
     for frag in ("/skills/", "/bindings/mcp/", "/bindings/oauth/", "/kbs"):
         assert frag in html, frag
-
-
-def test_agent_required_secrets_panel_is_readonly_overview():
-    html = ADMIN_HTML
-    # the edit modal hosts a read-only deploy-readiness overview, not an input entry point
-    assert 'id="ag-secrets"' in html
-    assert "/required-env" in html
-    for fn in (
-        "function agLoadSecrets",
-        "function agSecretSlotHtml",
-        "function agCopyEnvTemplate",
-        "function agCheckMissingSecrets",
-    ):
-        assert fn in html, fn
-    # each row is read-only: env name + source + status chip — no value input, no mode radios
-    slot = html.split("function agSecretSlotHtml", 1)[1].split("\n}", 1)[0]
-    assert "source" in slot
-    assert 'type="password"' not in slot
-    assert 'type="radio"' not in slot
-    assert "operator" not in slot and "inject" not in slot
-    # value entry moved to the source field's cred-field — the panel no longer writes secrets
-    assert "function agSetSecret" not in html
-    assert "function agClearSecret" not in html
-    assert "function agToggleSecretInput" not in html
-    # deploy-readiness affordances remain
-    assert "复制 .env 模板" in html
-    load = html.split("function agLoadSecrets", 1)[1].split("\n}", 1)[0]
-    assert "required-env" in load
-    assert ".value" not in load  # never prefills a secret value from the server
 
 
 def test_agents_lifecycle_functions_present():
@@ -405,27 +343,6 @@ def test_resource_id_inputs_are_readonly():
         m = re.search(rf'<input[^>]*id="{input_id}"[^>]*>', html)
         assert m, input_id
         assert "readonly" in m.group(0), input_id
-
-
-def test_kb_unified_list_no_separate_base_card():
-    html = ADMIN_HTML
-    # the KB tab is a single list — a knowledge base IS a source connector, so the
-    # separate KB-base card/modal was merged away
-    assert 'id="kb-modal"' not in html
-    assert "function loadKbBases" not in html
-    loadkb = html.split("async function loadKb", 1)[1].split("}", 1)[0]
-    assert "loadKbConnectors()" in loadkb
-    assert "loadKbBases" not in loadkb
-
-
-def test_kb_connector_carries_short_description():
-    html = ADMIN_HTML
-    # the (single) connector form authors a short description; the list shows it
-    assert 'id="kbc-desc"' in html
-    render = html.split("function kbcRender", 1)[1].split("function kbcRenderFields", 1)[0]
-    assert "c.description" in render  # Description column
-    save = html.split("async function kbcSave", 1)[1].split("async function kbcDelete", 1)[0]
-    assert "description" in save  # sent on create + edit
 
 
 def test_kb_source_connectors_management_present():
@@ -588,14 +505,8 @@ def test_agent_bindings_are_searchable_multiselect():
         'agMsWidget("agm-mcp"',
         'agMsWidget("agm-oauth"',
         'agMsWidget("agm-users"',
-        'agMsWidget("agm-kb"',
     ):
         assert call in fn, call
-    # the user allowlist is picked by IM identity (Slack/Telegram/WhatsApp id), sourced from
-    # /im-users; the bound value stays the internal user_id
-    assert '"/im-users"' in fn
-    assert "${iu.platform}:${iu.platform_user_id}" in fn
-    assert "value: iu.user_id" in fn
     # the widget supports name filtering + chip selection; classes preserved for save-diff
     widget = html.split("function agMsWidget", 1)[1].split("function agMsOpen", 1)[0]
     assert "ms-search" in widget and "agMsFilter(" in widget
@@ -611,69 +522,18 @@ def test_agent_bindings_are_searchable_multiselect():
     assert collapse_panels in html
 
 
-def test_agent_identity_fields_above_system_prompt():
-    html = ADMIN_HTML
-    # version (read-only) / tenant_id / team_id authored above the system prompt
-    for fid in ('id="ag-version"', 'id="ag-tenant"', 'id="ag-team"'):
-        assert fid in html, fid
-    assert html.index('id="ag-version"') < html.index('id="ag-system-prompt"')
-    assert html.index('id="ag-tenant"') < html.index('id="ag-system-prompt"')
-    # version input is read-only (platform-managed); tenant/team are editable + sent on save
-    vsnip = html.split('id="ag-version"', 1)[1][:80]
-    assert "disabled" in vsnip
-    save = html.split("async function agSave", 1)[1].split("\n}", 1)[0]
-    assert "tenant_id:" in save and "team_id:" in save
-
-
-def test_agent_advanced_overrides_and_extra_fields():
-    html = ADMIN_HTML
-    # memory_namespace / skills_dir discrete inputs + an Advanced settings section (curated
-    # knobs backed by config_overrides) + the Custom (YAML) box for the long tail.
-    for fid in (
-        'id="ag-memns"',
-        'id="ag-skillsdir"',
-        'id="ag-capabilities"',
-        'id="ag-advanced-fields"',
-    ):
-        assert fid in html, fid
-    assert "Advanced settings" in html
-    # curated knob registry covers governance/deployment/intelligence
-    for key in ("agent_max_turns", "session_ttl_days", "log_format"):
-        assert key in html, key
-    assert "function agCollectAdvFields" in html
-    # Access section: require_approval + allow_users/allow_channels sourced from bindings
-    for fid in ('id="ag-access-approval"', 'id="ag-access-users"', 'id="ag-access-channels"'):
-        assert fid in html, fid
-    assert "function agCollectAccess" in html
-    assert "function agBoundUserIds" in html  # options come from the bound users
-    # save sends discrete fields (+ access) + the Custom box → config_overrides
-    save = html.split("async function agSave", 1)[1].split("\n}", 1)[0]
-    assert "memory_namespace:" in save
-    assert "skills_dir:" in save
-    assert save.count("agCollectAccess()") >= 2
-    assert save.count('config_overrides_yaml: $("ag-capabilities").value') == 2
-
-
 def test_agent_model_overrides_pick_from_providers():
     html = ADMIN_HTML
     render = html.split("function agRenderModelOverrides", 1)[1].split(
-        "function agRenderRouter", 1
+        "function agCollectModelOverrides", 1
     )[0]
-    # Models is a multi-select dropdown (agMsWidget) of configured providers; no free-text.
+    # Each level is a provider dropdown sourced from the configured registry —
+    # no free-text model / base_url_env inputs.
     assert "AG_PROVIDERS" in render
-    assert 'agMsWidget("ag-models-ms", "agmo-target"' in render
     assert "agmo-model" not in render
     assert "agmo-baseurl" not in render
-    # Router: custom-named routers (default none), each routes to ordered model fallbacks
-    router = html.split("function agRenderRouter", 1)[1].split("function agRouterAddRoute", 1)[0]
-    assert "agRouterAddRoute" in router and "max_tokens" in router
-    assert "+ router" in router  # add-router affordance
-    assert "+ model" in router  # add-fallback-model within a router
-    assert "router name" in router  # custom route name input
-    # collect emits the {targets, routes:[{target,max_tokens,params}]} shape
     collect = html.split("function agCollectModelOverrides", 1)[1].split("\n}", 1)[0]
-    assert "targets" in collect and "routes" in collect
-    assert "max_tokens" in collect and "params" in collect
+    assert "AG_PROVIDERS.find" in collect  # model derived from the chosen provider
     # providers are loaded when the modal opens (create + edit)
     assert 'AG_PROVIDERS = await api("GET", "/providers")' in html
     assert (
@@ -682,6 +542,37 @@ def test_agent_model_overrides_pick_from_providers():
             0
         ]
     )
+
+
+def test_agent_required_env_and_credential_field_panel():
+    html = ADMIN_HTML
+    for marker in (
+        'id="ag-required-env-panel"',
+        'id="ag-required-env-list"',
+        'id="ag-required-env-copy"',
+        "function agCredentialField",
+        "function agLoadRequiredEnv",
+        "function agSetSecret",
+        "function agDeleteSecret",
+        "function agCopyEnvTemplate",
+        "/required-env",
+        "/secrets/${",
+        "credential-source",
+        "secret-status-chip",
+        "credential-advanced-env",
+        'type="password"',
+    ):
+        assert marker in html, marker
+
+
+def test_agent_model_credentials_reuse_provider_key():
+    html = ADMIN_HTML
+    render = html.split("function agRenderModelOverrides", 1)[1].split(
+        "function agCollectModelOverrides", 1
+    )[0]
+    assert "model-key-provider-reuse" in render
+    assert "api_key_env" in render
+    assert "agmo-api-key" not in render
 
 
 def test_agent_edit_reuses_new_agent_modal_prefilled():
@@ -710,7 +601,7 @@ def test_drawer_loads_from_aggregate_endpoints():
     # the manage view pulls every per-agent binding list in one fan-out
     for frag in ("/bindings`", "/skills`", "/kbs`", "/bindings/oauth`", "/versions`"):
         assert frag in fn, frag
-    # plus the available-option catalogs (KB options come from connectors — a KB IS one)
+    # plus the available-option catalogs
     assert '"/mcp/servers"' in fn and '"/connectors"' in fn and '"/kb/connectors"' in fn
     # each binding sub-list degrades to a default on failure so one erroring endpoint
     # (e.g. an unmigrated table -> HTTP 500) can't blank the whole drawer
