@@ -51,6 +51,20 @@ OpenSpec proposal / design 进入 implementation 前必须声明模块边界影�
 - cross-module dependencies（依赖哪些模块 public API，是否触碰共享契约）。
 - migration / shim plan（移动平铺模块时如何保留 re-export 兼容和迁移 import）。
 
+### Agent / Platform 解耦（核心架构契约）
+
+agent 运行时与 platform 控制面完全解耦。依赖方向单向不可逆：
+
+```
+platform（管理入口） ──→ agent runtime（被启停、被读取）
+agent runtime ──✗──→ platform        # 严格禁止反向依赖
+```
+
+- agent 运行时模块（`runtime/`、`session/`、`im_gateway/`、`intelligence/`、`tools/`、`integrations/`、`model/`、`observability/`、`governance/`，以及重构后平铺出的 `knowledge_base/`、`vector_store/`、`memory/`、`reflection/`、`long_term_ctx/`）MUST NOT `import fleetent.platform.*`，也不得调用 platform 模块触发行为。
+- agent 运行时产生的数据（会话历史、压缩/token/恢复等元数据、运行轨迹）只能落 agent 侧（session 文件、agent store、observability trace），严禁写入 platform 管理表。
+- platform 需要 agent 数据时读 agent 侧产物（trace / session 文件 / agent store），而非要求 agent 反向写 platform 表。
+- 验证基线：任何改动后，agent 必须能在「无 platform、platform 的 DB 表不存在」环境下完成 `fleetent agent run` 对话；相关功能不得依赖 platform 表才能工作。
+
 ## Project Structure & Module Organization
 
 核心代码在 `src/fleetent/`。当前仍有 legacy 平铺模块，新增代码优先按模块化单体 package 组织：
