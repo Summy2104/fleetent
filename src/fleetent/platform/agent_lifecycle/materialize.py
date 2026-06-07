@@ -33,38 +33,70 @@ from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
 
 
-def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
-    """Expand per-route provider selections into real targets/routes.
+def _target_from_provider(provider_id: str) -> ModelTarget | None:
+    """Build a ModelTarget from a configured provider (api_key_env reused at the provider
+    level). Returns None if the provider no longer exists."""
+    provider = provider_admin_store.get_provider(provider_id)
+    if provider is None:
+        return None
+    return ModelTarget(
+        id=provider_id,
+        provider=str(provider.get("provider") or provider_id),
+        protocol=str(provider.get("protocol") or "openai_chat"),
+        base_url=provider.get("base_url"),
+        model=provider.get("model"),
+        api_key_env=provider.get("api_key_env"),
+        max_tokens=provider.get("max_tokens"),
+        params=provider.get("params") or {},
+    )
 
-    Each route key maps to a chosen provider id; the provider config supplies base_url,
-    model, protocol and ``api_key_env`` (reused at the provider level, not re-authored
-    per agent). Routes referencing the same provider share one target. Falls back to the
-    neutral local default policy when no providers are selected.
+
+def _models_from_targets_routes(target_ids: list[Any], routes_sel: dict[str, Any]) -> AgentModels:
+    """New console shape: a checked model list + a route→model map."""
+    targets: dict[str, ModelTarget] = {}
+    for pid in target_ids:
+        if isinstance(pid, str) and pid not in targets:
+            target = _target_from_provider(pid)
+            if target is not None:
+                targets[pid] = target
+    if not targets:
+        return default_models()
+    routes: dict[str, list[ModelRouteEntry]] = {}
+    for route_key, pid in routes_sel.items():
+        if pid in targets:
+            routes[route_key] = [ModelRouteEntry(target=str(pid))]
+    if not routes:  # at least a default route so the policy is runnable
+        routes["default"] = [ModelRouteEntry(target=next(iter(targets)))]
+    return AgentModels(targets=list(targets.values()), routes=routes)
+
+
+def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
+    """Expand the agent's model selection into real targets/routes.
+
+    New shape ``{targets: [provider_id], routes: {route: provider_id}}`` — a checked model
+    list plus a routing map. Legacy shape ``{route: {provider, model}}`` is still accepted.
+    The provider config supplies base_url/model/protocol/``api_key_env`` (reused at the
+    provider level). Falls back to the neutral local default policy when nothing is selected.
     """
+    target_ids = model_overrides.get("targets")
+    if isinstance(target_ids, list):
+        return _models_from_targets_routes(target_ids, model_overrides.get("routes") or {})
+
+    # Legacy {route: {provider, model}} — one provider per route.
     targets: dict[str, ModelTarget] = {}
     routes: dict[str, list[ModelRouteEntry]] = {}
     for route_key, sel in model_overrides.items():
-        # Only the console's {route: {provider, model}} shape expands to a target; other
-        # legacy shapes (e.g. {"model": "fast"}) are ignored and fall back to defaults.
         if not isinstance(sel, dict):
             continue
         provider_id = sel.get("provider")
-        if not provider_id:
+        if not provider_id or provider_id in targets:
+            if provider_id and provider_id in targets:
+                routes[route_key] = [ModelRouteEntry(target=provider_id)]
             continue
-        provider = provider_admin_store.get_provider(provider_id)
-        if provider is None:
+        target = _target_from_provider(provider_id)
+        if target is None:
             continue
-        if provider_id not in targets:
-            targets[provider_id] = ModelTarget(
-                id=provider_id,
-                provider=str(provider.get("provider") or provider_id),
-                protocol=str(provider.get("protocol") or "openai_chat"),
-                base_url=provider.get("base_url"),
-                model=provider.get("model"),
-                api_key_env=provider.get("api_key_env"),
-                max_tokens=provider.get("max_tokens"),
-                params=provider.get("params") or {},
-            )
+        targets[provider_id] = target
         routes[route_key] = [ModelRouteEntry(target=provider_id)]
     if not targets:
         return default_models()

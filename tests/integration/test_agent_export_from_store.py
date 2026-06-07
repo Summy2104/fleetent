@@ -71,6 +71,42 @@ def test_model_overrides_expand_to_real_targets_reusing_provider_key(db):
     assert af.models.routes["default"][0].target == target.id
 
 
+def test_targets_routes_shape_expands(db):
+    for pid, model in (("p-fast", "claude-haiku"), ("p-smart", "claude-opus")):
+        provider_admin_store.add_provider(
+            pid,
+            base_url="https://api.anthropic.com/v1/",
+            model=model,
+            provider="anthropic",
+            protocol="openai_chat",
+            api_key_env=f"{pid.upper().replace('-', '_')}_KEY",
+        )
+    agent = agent_store.create_agent(
+        "support",
+        "Help.",
+        ["shell"],
+        model_overrides={
+            "targets": ["p-fast", "p-smart"],
+            "routes": {"default": "p-smart", "fast": "p-fast"},
+        },
+    )
+    af = materialize.agent_file_from_store(agent)
+    assert {t.id for t in af.models.targets} == {"p-fast", "p-smart"}
+    assert af.models.routes["default"][0].target == "p-smart"
+    assert af.models.routes["fast"][0].target == "p-fast"
+
+
+def test_targets_without_routes_get_default_route(db):
+    provider_admin_store.add_provider(
+        "only", base_url="https://x/v1/", model="m", provider="anthropic", protocol="openai_chat"
+    )
+    agent = agent_store.create_agent(
+        "support", "Help.", ["shell"], model_overrides={"targets": ["only"], "routes": {}}
+    )
+    af = materialize.agent_file_from_store(agent)
+    assert af.models.routes["default"][0].target == "only"
+
+
 def test_no_model_overrides_falls_back_to_default_models(db):
     agent = agent_store.create_agent("bare", "Help.", ["shell"])
     af = materialize.agent_file_from_store(agent)

@@ -547,15 +547,18 @@ def test_agent_bindings_are_searchable_multiselect():
 def test_agent_model_overrides_pick_from_providers():
     html = ADMIN_HTML
     render = html.split("function agRenderModelOverrides", 1)[1].split(
-        "function agCollectModelOverrides", 1
+        "function agToggleModelTarget", 1
     )[0]
-    # Each level is a provider dropdown sourced from the configured registry —
-    # no free-text model / base_url_env inputs.
+    # Two parts: a checked model list (targets) + a per-tier router, both sourced from the
+    # configured provider registry — no free-text model / base_url_env inputs.
     assert "AG_PROVIDERS" in render
+    assert "agmo-target" in render  # model checkboxes
+    assert "agmo-route" in render  # routing selects
     assert "agmo-model" not in render
     assert "agmo-baseurl" not in render
+    # collect emits the {targets, routes} shape
     collect = html.split("function agCollectModelOverrides", 1)[1].split("\n}", 1)[0]
-    assert "AG_PROVIDERS.find" in collect  # model derived from the chosen provider
+    assert "targets" in collect and "routes" in collect
     # providers are loaded when the modal opens (create + edit)
     assert 'AG_PROVIDERS = await api("GET", "/providers")' in html
     assert (

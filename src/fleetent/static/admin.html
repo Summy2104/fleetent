@@ -1290,8 +1290,8 @@
         </label>
         <input id="ag-allowed-tools" placeholder="allowed_tools (comma-separated, e.g. shell, github__*)" autocomplete="off">
         <div id="ag-create-extra">
-          <h4 style="margin:14px 0 4px;">Model providers</h4>
-          <div class="muted" style="font-size:12px; margin-bottom:6px;">Optional. One entry per level — leave a model blank to skip that level.</div>
+          <h4 style="margin:14px 0 4px;">Models</h4>
+          <div class="muted" style="font-size:12px; margin-bottom:6px;">Check the models this agent may use, then route each tier to one.</div>
           <div id="ag-model-overrides"></div>
         </div>
         <div id="ag-bind-config">
@@ -2735,35 +2735,74 @@ async function agCreate() {
   $("ag-create-extra").style.display = "";
   $("ag-allowed-tools").style.display = "none";  // capabilities YAML supplies tools in create
   AG_PROVIDERS = await api("GET", "/providers").catch(() => []);
-  agRenderModelOverrides();
+  agFillModelOverrides({});  // reset selection + render the two-part model picker
   $("ag-capabilities").value = "";
   await agLoadCreateBindings();
   $("ag-modal").dataset.mode = "create";
   $("ag-modal").classList.remove("hidden");
 }
 
-// Per-level model picks a CONFIGURED provider (Providers module) — no free-text
-// model. AG_PROVIDERS is loaded when the modal opens.
+// Two-part model config: a checked model list (targets) + a router (route→target).
+// Models are CONFIGURED providers (Providers module) — no free-text. AG_PROVIDERS is
+// loaded when the modal opens; AG_MODEL_SEL holds the in-modal selection.
 let AG_PROVIDERS = [];
+const AG_ROUTES = ["default", "fast", "reasoning"];
+let AG_MODEL_SEL = { targets: new Set(), routes: {} };
+function _agProviderLabel(p) {
+  return `${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}`;
+}
 function agRenderModelOverrides() {
-  const opts = `<option value="">— none —</option>`
-    + AG_PROVIDERS.map(p => `<option value="${esc(p.id)}">${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}${p.api_key ? " · 🔑 " + esc(p.api_key) : ""}</option>`).join("");
-  const hint = AG_PROVIDERS.length ? "" : `<div class="muted" style="font-size:12px;">No providers configured — add one under Providers first.</div>`;
-  $("ag-model-overrides").innerHTML = hint + ["default", "fast", "reasoning"].map(lvl => `
-    <div class="row" data-mo="${lvl}" style="gap:6px; margin-bottom:6px; align-items:center;">
-      <span style="min-width:74px; color:var(--muted);">${lvl}</span>
-      <select class="agmo-provider" style="flex:1;">${opts}</select>
-    </div>`).join("");
+  const box = $("ag-model-overrides");
+  if (!AG_PROVIDERS.length) {
+    box.innerHTML = `<div class="muted" style="font-size:12px;">No providers configured — add one under Providers first.</div>`;
+    return;
+  }
+  const models = AG_PROVIDERS.map(p => {
+    const checked = AG_MODEL_SEL.targets.has(p.id) ? "checked" : "";
+    const hint = p.api_key ? ` · 🔑 ${esc(p.api_key)}` : "";
+    return `<label class="row agmo-target" style="gap:6px; align-items:center;">
+      <input type="checkbox" value="${esc(p.id)}" ${checked} onchange="agToggleModelTarget('${esc(p.id)}', this.checked)"> ${_agProviderLabel(p)}${hint}</label>`;
+  }).join("");
+  const chosen = AG_PROVIDERS.filter(p => AG_MODEL_SEL.targets.has(p.id));
+  const routing = chosen.length
+    ? AG_ROUTES.map(r => {
+        const opts = `<option value="">— none —</option>` + chosen.map(p =>
+          `<option value="${esc(p.id)}" ${AG_MODEL_SEL.routes[r] === p.id ? "selected" : ""}>${_agProviderLabel(p)}</option>`).join("");
+        return `<div class="row" data-route="${r}" style="gap:6px; margin-bottom:6px; align-items:center;">
+          <span style="min-width:74px; color:var(--muted);">${r}</span>
+          <select class="agmo-route" onchange="agSetRoute('${r}', this.value)" style="flex:1;">${opts}</select>
+        </div>`;
+      }).join("")
+    : `<div class="muted" style="font-size:12px;">Select at least one model to route.</div>`;
+  box.innerHTML = `
+    <div class="muted" style="font-size:12px; margin:4px 0;">Models (this agent may use)</div>
+    <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:12px;">${models}</div>
+    <div class="muted" style="font-size:12px; margin:4px 0;">Routing (which model handles each tier)</div>
+    ${routing}`;
+}
+function agToggleModelTarget(pid, checked) {
+  if (checked) {
+    AG_MODEL_SEL.targets.add(pid);
+  } else {
+    AG_MODEL_SEL.targets.delete(pid);
+    for (const r of Object.keys(AG_MODEL_SEL.routes)) {
+      if (AG_MODEL_SEL.routes[r] === pid) delete AG_MODEL_SEL.routes[r];
+    }
+  }
+  agRenderModelOverrides();
+}
+function agSetRoute(route, pid) {
+  if (pid) AG_MODEL_SEL.routes[route] = pid;
+  else delete AG_MODEL_SEL.routes[route];
 }
 function agCollectModelOverrides() {
-  const mo = {};
-  for (const row of document.querySelectorAll("#ag-model-overrides [data-mo]")) {
-    const pid = row.querySelector(".agmo-provider").value;
-    if (!pid) continue;
-    const p = AG_PROVIDERS.find(x => x.id === pid);
-    mo[row.dataset.mo] = { provider: pid, model: p ? (p.model || "") : "" };
+  const targets = [...AG_MODEL_SEL.targets];
+  if (!targets.length) return {};
+  const routes = {};
+  for (const [r, pid] of Object.entries(AG_MODEL_SEL.routes)) {
+    if (targets.includes(pid)) routes[r] = pid;
   }
-  return mo;
+  return { targets, routes };
 }
 
 let AGM_CHANNELS = [];
@@ -2893,12 +2932,21 @@ function agmAddChannel() {
 }
 function agmRemoveChannel(i) { AGM_CHANNELS.splice(i, 1); agmRenderChannels(); }
 function agFillModelOverrides(mo) {
-  for (const row of document.querySelectorAll("#ag-model-overrides [data-mo]")) {
-    const o = (mo || {})[row.dataset.mo];
-    // Stored `provider` is a configured-provider id; select it (blank if it no
-    // longer exists in the registry).
-    row.querySelector(".agmo-provider").value = o ? (o.provider || "") : "";
+  AG_MODEL_SEL = { targets: new Set(), routes: {} };
+  mo = mo || {};
+  if (Array.isArray(mo.targets)) {
+    for (const pid of mo.targets) AG_MODEL_SEL.targets.add(pid);
+    for (const [r, pid] of Object.entries(mo.routes || {})) AG_MODEL_SEL.routes[r] = pid;
+  } else {
+    // legacy {route: {provider, model}} → derive targets + routes
+    for (const [r, sel] of Object.entries(mo)) {
+      if (sel && typeof sel === "object" && sel.provider) {
+        AG_MODEL_SEL.targets.add(sel.provider);
+        AG_MODEL_SEL.routes[r] = sel.provider;
+      }
+    }
   }
+  agRenderModelOverrides();
 }
 // Render current allowed_tools back into the capabilities YAML the modal edits.
 function agToolsToYaml(tools) {
@@ -2946,8 +2994,7 @@ async function agEdit(name) {
     $("ag-allowed-tools").value = "";
     $("ag-create-extra").style.display = "";
     $("ag-bind-config").style.display = "";
-    agRenderModelOverrides();
-    agFillModelOverrides(a.model_overrides);
+    agFillModelOverrides(a.model_overrides);  // loads selection (new + legacy shape) + renders
     $("ag-capabilities").value = agToolsToYaml(a.allowed_tools);
     await agLoadCreateBindings(current);
     $("ag-modal").dataset.mode = "edit";
