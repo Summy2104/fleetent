@@ -3341,3 +3341,42 @@ async def test_active_runs_decrements_on_exception(mock_client) -> None:
     with pytest.raises(Exception):  # noqa: B017
         await al.run([{"role": "user", "content": "hi"}])
     assert al._active_runs == 0
+
+
+# ── T2-2: empty-reply self-correction ────────────────────────────────────────
+
+
+async def test_run_corrects_empty_reply_then_succeeds(mock_client):
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_text_resp(""), _text_resp("real answer")]
+    )
+    result = await al.run([{"role": "user", "content": "hi"}])
+    assert result == "real answer"
+    assert mock_client.chat.completions.create.call_count == 2
+
+
+async def test_run_empty_reply_capped(mock_client):
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp(""))
+    result = await al.run([{"role": "user", "content": "hi"}])
+    assert result == ""  # gives up after the cap, no infinite loop
+    assert mock_client.chat.completions.create.call_count == al._MAX_EMPTY_REPLY_RETRIES + 1
+
+
+async def test_run_non_empty_reply_not_retried(mock_client):
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("done"))
+    result = await al.run([{"role": "user", "content": "hi"}])
+    assert result == "done"
+    assert mock_client.chat.completions.create.call_count == 1
+
+
+async def test_run_stream_corrects_empty_reply_then_succeeds(mock_client):
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _stream_chunks("", finish="stop"),
+            _stream_chunks("streamed answer", finish="stop"),
+        ]
+    )
+    events = [e async for e in al.run_stream("go")]
+    done = [e for e in events if e["type"] == "done"]
+    assert done[-1]["content"] == "streamed answer"
+    assert mock_client.chat.completions.create.call_count == 2

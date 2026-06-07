@@ -120,6 +120,12 @@ _GUARDRAIL_FEEDBACK_TEXT = (
     "已跳过本次工具调用：检测到相同工具、相同参数连续重复多次。请改用其它方式或直接给出当前结论。"
 )
 
+# T2-2: appended when the model ends a turn with a blank final reply (finish_reason
+# != tool_calls and empty/whitespace content) — nudges weak models to actually answer
+# or act instead of returning "". Bounded by _MAX_EMPTY_REPLY_RETRIES so it can't loop.
+_MAX_EMPTY_REPLY_RETRIES = 2
+_EMPTY_REPLY_CORRECTION = "你的上一条回复是空的。请直接给出最终答案，或调用合适的工具继续完成任务。"
+
 # Appended as a final `user` message when a budget dimension is exhausted (AR2 D3):
 # the Grace Call asks the model to summarize progress in one go without further
 # tool use, so the user gets a graceful conclusion instead of a half-cut reply.
@@ -1452,6 +1458,7 @@ async def _run_inner(
     if layered_checker is not None:
         controller.register(layered_checker)
 
+    empty_reply_retries = 0  # T2-2: bounded self-correction for blank final replies
     while True:
         forced = controller.should_stop(state)
         if forced is not None:
@@ -1512,6 +1519,12 @@ async def _run_inner(
         messages.append(msg.model_dump())  # dict for JSON serializability (session persistence)
 
         if choice.finish_reason != "tool_calls":
+            # T2-2: a blank final reply (weak models) → nudge once more instead of
+            # returning "", bounded by the cap so it cannot loop forever.
+            if not (msg.content or "").strip() and empty_reply_retries < _MAX_EMPTY_REPLY_RETRIES:
+                empty_reply_retries += 1
+                messages.append({"role": "user", "content": _EMPTY_REPLY_CORRECTION})
+                continue
             break
 
         # AR3 three-phase (D1): plan (serial, original order) → execute (parallel,
@@ -1813,6 +1826,7 @@ async def run_stream(
     if layered_checker is not None:
         controller.register(layered_checker)
 
+    empty_reply_retries = 0  # T2-2: bounded self-correction for blank final replies
     while True:
         forced = controller.should_stop(state)
         if forced is not None:
@@ -1916,6 +1930,11 @@ async def run_stream(
 
         if finish_reason != "tool_calls":
             reply = "".join(reply_parts)
+            # T2-2: blank final reply → nudge once more (bounded) instead of ending empty.
+            if not reply.strip() and empty_reply_retries < _MAX_EMPTY_REPLY_RETRIES:
+                empty_reply_retries += 1
+                messages.append({"role": "user", "content": _EMPTY_REPLY_CORRECTION})
+                continue
             break
 
         # Reconstruct assistant message with tool_calls for messages list
