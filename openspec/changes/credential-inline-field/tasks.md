@@ -12,9 +12,9 @@
 
 ## 3. 凭据 API 接受 inline 值 + 回填引用
 
-- [ ] 3.1 Write failing tests: value 模式 PUT 经凭据 API 加密存（shared 作用域）+ 派生名写回 provider.api_key_env / connector.<key>_env，响应不回显值；reference 模式只设 `*_env` 不存值；DELETE 清值 + 状态回 unset（tests/integration，FastAPI TestClient）
-- [ ] 3.2 Implement: 凭据 API / provider+connector 写路径接受 inline 值（走 secret store 而非明文塞 provider body）；核查 provider runtime 读 key 路径仍经 `*_env` resolver（必要时兼容垫片）
-- [ ] 3.3 Verify green: `uv run pytest tests/integration/test_agent_secret_api.py tests/integration/test_agent_admin_api.py -x -q`
+- [x] 3.1 Write failing tests: value 模式 PUT 经凭据 API 加密存（shared 作用域）+ 派生名写回 provider.api_key_env / connector.<key>_env，响应不回显值；reference 模式只设 `*_env` 不存值；DELETE 清值 + 状态回 unset（tests/integration，FastAPI TestClient）
+- [x] 3.2 Implement: 凭据 API / provider+connector 写路径接受 inline 值（走 secret store 而非明文塞 provider body）；核查 provider runtime 读 key 路径仍经 `*_env` resolver（必要时兼容垫片）
+- [x] 3.3 Verify green: `uv run pytest tests/integration/test_agent_secret_api.py tests/integration/test_agent_admin_api.py -x -q`
 
 ## 4. CredentialField 控件（前端，value-first + 高级引用）
 

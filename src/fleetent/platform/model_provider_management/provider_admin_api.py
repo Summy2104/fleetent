@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from fleetent import auth, user_store
 from fleetent.governance import audit_log
 from fleetent.platform.model_provider_management import provider_admin_store
+from fleetent.platform.secret_management import credential_service
 from fleetent.platform.model_provider_management.provider_connectivity import (
     test_provider_connectivity_sync,
 )
@@ -263,6 +264,10 @@ def add_provider(body: ProviderBody, authorization: str | None = Header(None)) -
     user = _require_admin(authorization)
     if provider_admin_store.get_provider(body.id) is not None:
         raise HTTPException(status_code=409, detail="provider id already exists")
+    # value mode: type the key, the platform names the env var — no separate field to fill.
+    api_key_env = body.api_key_env
+    if body.api_key and not api_key_env:
+        api_key_env = credential_service.derive_provider_env_name(body.id)
     provider_admin_store.add_provider(
         body.id,
         description=body.description,
@@ -271,7 +276,7 @@ def add_provider(body: ProviderBody, authorization: str | None = Header(None)) -
         base_url=body.base_url,
         model=body.model,
         api_key=body.api_key,
-        api_key_env=body.api_key_env,
+        api_key_env=api_key_env,
         max_tokens=body.max_tokens,
         temperature=body.temperature,
         extra_params=body.extra_params,
@@ -297,7 +302,10 @@ def edit_provider(
     user = _require_admin(authorization)
     if provider_admin_store.get_provider(provider_id) is None:
         raise HTTPException(status_code=404, detail="provider not found")
-    provider_admin_store.edit_provider(provider_id, **body.model_dump(exclude_unset=True))
+    updates = body.model_dump(exclude_unset=True)
+    if updates.get("api_key") and not updates.get("api_key_env"):
+        updates["api_key_env"] = credential_service.derive_provider_env_name(provider_id)
+    provider_admin_store.edit_provider(provider_id, **updates)
     audit_log.write_audit(user.id, "provider.edit", "provider", provider_id)
     edited = provider_admin_store.get_provider(provider_id)
     if edited is None:

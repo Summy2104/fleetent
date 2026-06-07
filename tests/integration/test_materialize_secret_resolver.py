@@ -94,6 +94,30 @@ def test_agent_yaml_never_contains_secret_value(db):
     assert "mode" not in data
 
 
+def test_provider_inline_key_seeds_env_from_plaintext(db):
+    # a provider authored with an inline key (no separate inject slot) still seeds the
+    # agent's .env: the resolver falls back to the provider's stored key for its env name.
+    provider_admin_store.add_provider(
+        "inline-prov",
+        base_url="https://api.anthropic.com/v1/",
+        model="claude-opus-4-8",
+        provider="anthropic",
+        protocol="openai_chat",
+        api_key="sk-provider-inline",
+        api_key_env="FLEETENT_MODEL_INLINE_PROV_API_KEY",
+    )
+    agent = agent_store.create_agent(
+        "support2",
+        "Help.",
+        ["shell"],
+        model_overrides={"default": {"provider": "inline-prov", "model": "claude-opus-4-8"}},
+    )
+    assert agent is not None
+    home = materialize.materialize_from_store("support2")
+    env_text = (home / ".env").read_text(encoding="utf-8")
+    assert "FLEETENT_MODEL_INLINE_PROV_API_KEY=sk-provider-inline" in env_text
+
+
 def test_inject_set_but_decrypt_fails_is_loud(db, monkeypatch):
     agent = _agent_with_model_and_mcp()
     agent_secret_store.set_secret(agent.id, "ACME_DOCS_MCP_TOKEN", "mcp-real-token")

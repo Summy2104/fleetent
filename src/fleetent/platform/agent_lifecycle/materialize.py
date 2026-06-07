@@ -41,6 +41,18 @@ from fleetent.platform.skill_management import skill_admin_store
 SecretResolver = Callable[[str], str | None]
 
 
+def _provider_key_for_env(env_name: str) -> str | None:
+    """Return a provider's inline plaintext key whose api_key_env matches ``env_name``.
+
+    Lets a provider authored with an inline key seed the agent's ``.env`` without a
+    separate inject slot — the provider row is the shared source of truth for that key.
+    """
+    for provider in provider_admin_store.list_providers():
+        if provider.get("api_key_env") == env_name and provider.get("api_key"):
+            return str(provider["api_key"])
+    return None
+
+
 def _target_from_provider(provider_id: str) -> ModelTarget | None:
     """Build a ModelTarget from a configured provider (api_key_env reused at the provider
     level). Returns None if the provider no longer exists."""
@@ -359,7 +371,9 @@ def materialize_from_store(name: str) -> Path | None:
         return None
 
     def resolver(env_name: str) -> str | None:
-        return agent_secret_store.get_decrypted(agent.id, env_name)
+        # per-agent inject slot → shared slot → a provider's inline plaintext key
+        resolved = agent_secret_store.get_resolved(agent.id, env_name)
+        return resolved if resolved is not None else _provider_key_for_env(env_name)
 
     home = write_home(agent_file_from_store(agent), secret_resolver=resolver)
     copy_agent_skills(name, skill_admin_store.enabled_skill_names(name))
