@@ -5,13 +5,9 @@ from typing import Any
 
 import structlog
 
-from fleetent.platform import im_gateway_management as im
-
 logger = structlog.get_logger(__name__)
 
-HEARTBEAT_INTERVAL_SECONDS = 30.0
-
-# Telegram photos carry no explicit MIME; the platform serves them as JPEG.
+# Telegram photos carry no explicit MIME; they are served as JPEG.
 _TELEGRAM_PHOTO_MIME = "image/jpeg"
 
 
@@ -43,14 +39,21 @@ def _derive_session_id(chat_type: str, user_id: int, reply_to_id: int | None) ->
     return f"user:{user_id}"
 
 
-def create_app(owner_id: str, config: dict[str, str]) -> object:
-    """Create and return a configured python-telegram-bot Application."""
+def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object:
+    """Create a python-telegram-bot Application bound to one agent's Telegram connection.
+
+    The receiving connection identifies the agent (per-agent-telegram-connector): the
+    handler stamps ``agent_name`` so routing skips channel→agent lookup. ``owner_id`` still
+    scopes user mapping / allowlist. ``config.channels``, when non-empty, filters which
+    chats the agent responds in.
+    """
     try:
         from telegram.ext import Application
     except ImportError:
         raise RuntimeError("python-telegram-bot not installed") from None
 
     bot_token = config.get("bot_token", "")
+    channels = config.get("channels") or []
     builder = Application.builder().token(bot_token).concurrent_updates(True)
     application = builder.build()
 
@@ -63,6 +66,10 @@ def create_app(owner_id: str, config: dict[str, str]) -> object:
         assert isinstance(update, Update)
         if not update.message or not update.effective_user:
             return
+
+        channel_id = str(update.message.chat.id)
+        if channels and channel_id not in channels:
+            return  # chat outside this agent's response filter
 
         tg_user_id = update.effective_user.id
         # Identity is the platform-native id, resolved locally — no platform user_store.
@@ -87,12 +94,13 @@ def create_app(owner_id: str, config: dict[str, str]) -> object:
         msg = NormalizedMessage(
             platform="telegram",
             owner_id=owner_id,
+            agent_name=agent_name,
             session_id=session_id,
             user_id=identity,
             text=text,
             attachments=attachments,
             reply_func=reply_func,
-            channel_id=str(update.message.chat.id),
+            channel_id=channel_id,
         )
         await route(msg)
 
@@ -113,26 +121,11 @@ async def _run_polling(app: object) -> None:
     await asyncio.Event().wait()
 
 
-async def _heartbeat_loop(owner_id: str) -> None:
-    while True:
-        await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
-        im.heartbeat(owner_id, "telegram")
+async def run(agent_name: str, owner_id: str, config: dict[str, Any]) -> None:
+    """Run one agent's Telegram connection until cancelled (network seam).
 
-
-async def run(owner_id: str, config: dict[str, str] | None = None) -> None:
-    """Run the Telegram adapter, reporting status to the registry until cancelled."""
-    if config is None:
-        config = im.resolve(owner_id, "telegram")
-    app = create_app(owner_id, config)
-    heartbeat = asyncio.create_task(_heartbeat_loop(owner_id))
-    try:
-        im.report_status(owner_id, "telegram", "connected")
-        await _run_polling(app)
-    except asyncio.CancelledError:
-        im.report_status(owner_id, "telegram", "stopped")
-        raise
-    except Exception as exc:
-        im.report_status(owner_id, "telegram", "error", error=str(exc))
-        raise
-    finally:
-        heartbeat.cancel()
+    Per-agent connection status is owned by the connector supervisor, which catches
+    errors here and records them per agent. This runner just opens the connection.
+    """
+    app = create_app(agent_name, owner_id, config)
+    await _run_polling(app)
