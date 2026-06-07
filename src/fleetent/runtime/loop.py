@@ -1585,10 +1585,47 @@ async def _run_inner(
         # reference live: callers (e.g. im_gateway.normalizer) rely on run() mutating
         # the passed `messages` so session_mgr.save() persists the full conversation.
         # Rebinding (messages = ...) would detach it and lose appended turns.
+        # P4: pre_compact hook — inject context before compression.
+        from fleetent.runtime import hooks
+
+        if governance is not None and governance.hooks_enabled and hooks.has_hooks("pre_compact"):
+            from fleetent.runtime.hooks import HookContext
+
+            _prc = await hooks.dispatch(
+                "pre_compact",
+                HookContext(
+                    event="pre_compact",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"message_count": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _prc.inject_context is not None:
+                messages.append({"role": "user", "content": _prc.inject_context})
+        _msgs_before = len(messages)
         _compressed, flap_state = _gated_compress(
             messages, flap_state, session_id=session_id, user_id=user_id, agent_name=agent_name
         )
         messages[:] = _compressed
+        # P4: post_compact hook — observe compression outcome.
+        if governance is not None and governance.hooks_enabled and hooks.has_hooks("post_compact"):
+            from fleetent.runtime.hooks import HookContext as _HCpc
+
+            await hooks.dispatch(
+                "post_compact",
+                _HCpc(
+                    event="post_compact",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"messages_before": _msgs_before, "messages_after": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
         # D4b: inject the loop warning AFTER compression so a same-round compaction
         # cannot swallow it; it must be present in the sequence sent to the LLM.
         _maybe_inject_loop_warning(messages, state)
@@ -1800,6 +1837,31 @@ async def _run_inner(
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
         _logger.debug("memory_extraction_skipped", error=str(exc))
     reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
+    # P4: on_run_complete hook — observe after reply is finalized.
+    from fleetent.runtime import hooks as _hooks_orc
+
+    if (
+        governance is not None
+        and governance.hooks_enabled
+        and _hooks_orc.has_hooks("on_run_complete")
+    ):
+        from fleetent.runtime.hooks import HookContext as _HCorc
+
+        await _hooks_orc.dispatch(
+            "on_run_complete",
+            _HCorc(
+                event="on_run_complete",
+                session_id=session_id,
+                agent_name=agent_name,
+                user_id=user_id,
+                payload={
+                    "reply": reply,
+                    "stop_reason_name": stop_reason.name if stop_reason is not None else "normal",
+                },
+            ),
+            timeout=governance.hooks_timeout_seconds,
+            strict=False,
+        )
     return reply
 
 
@@ -2043,9 +2105,54 @@ async def run_stream(
             stop_reason = forced
             break
         state.turn += 1
+        # P4: pre_compact (streaming path)
+        from fleetent.runtime import hooks as _hooks_pc
+
+        if (
+            governance is not None
+            and governance.hooks_enabled
+            and _hooks_pc.has_hooks("pre_compact")
+        ):
+            from fleetent.runtime.hooks import HookContext as _HCprc
+
+            _prc_s = await _hooks_pc.dispatch(
+                "pre_compact",
+                _HCprc(
+                    event="pre_compact",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"message_count": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _prc_s.inject_context is not None:
+                messages.append({"role": "user", "content": _prc_s.inject_context})
+        _smb = len(messages)
         messages, flap_state = _gated_compress(
             messages, flap_state, session_id=session_id, user_id=user_id, agent_name=agent_name
         )
+        # P4: post_compact (streaming path)
+        if (
+            governance is not None
+            and governance.hooks_enabled
+            and _hooks_pc.has_hooks("post_compact")
+        ):
+            from fleetent.runtime.hooks import HookContext as _HCpoc
+
+            await _hooks_pc.dispatch(
+                "post_compact",
+                _HCpoc(
+                    event="post_compact",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"messages_before": _smb, "messages_after": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
         # D4b: inject the loop warning after compression, before sanitize/LLM call.
         _maybe_inject_loop_warning(messages, state)
         # C1: drain mid-run steered input at the turn boundary (before sanitize).
