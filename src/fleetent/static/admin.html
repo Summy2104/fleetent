@@ -1348,7 +1348,7 @@
         <div id="ag-secrets" style="display:none;">
           <h4 style="margin:14px 0 4px;">所需密钥 / Required secrets</h4>
           <div class="muted" style="font-size:12px; margin-bottom:6px;">
-            每个 <code>*_env</code> 引用一个槽。默认运维在部署主机的 <code>.env</code> 填值；切到「平台注入」可在此加密保存（写后不回显）。模型密钥复用所选 provider，不在此重复维护。
+            部署就绪总览（只读）：列出当前配置引用的每个 <code>*_env</code> 及其来源与状态。值在来源处填写——provider / 知识库连接器的密钥字段直接输入即可；🔴 未设置的由运维在部署主机 <code>.env</code> 补齐。
           </div>
           <div id="ag-secrets-list" style="display:flex; flex-direction:column; gap:8px;"></div>
           <div class="row" style="gap:8px; margin-top:8px;">
@@ -3338,48 +3338,20 @@ async function agLoadSecrets(name) {
     : `<div class="muted" style="font-size:12px;">No referenced secrets yet — add a provider, MCP server or connector.</div>`;
   $("ag-secrets").style.display = "";
 }
+// Read-only deploy-readiness row: env name + where it comes from + set/unset.
+// Values are entered at the source field (provider / KB connector cred-field), not here.
 function agSecretSlotHtml(slot) {
-  const env = slot.env_name, inj = slot.mode === "inject";
+  const env = slot.env_name;
   const chip = slot.status === "set"
-    ? `<span style="color:var(--ok); font-size:11px;">🟢 已设置</span>`
-    : `<span class="muted" style="font-size:11px;">⚪ 未设置</span>`;
+    ? `<span class="cred-chip set">🟢 已设置</span>`
+    : `<span class="cred-chip unset">⚪ 未设置</span>`;
   return `<div class="ag-secret" data-env="${esc(env)}" style="border:1px solid var(--border); border-radius:6px; padding:8px;">
     <div class="row" style="justify-content:space-between; align-items:center; gap:8px;">
       <code style="font-size:12px;">${esc(env)}</code>
       <span class="muted" style="font-size:11px;">${esc(slot.source)}</span>
       ${chip}
     </div>
-    <div class="row" style="gap:10px; margin-top:6px; font-size:12px; align-items:center;">
-      <label><input type="radio" name="src-${esc(env)}" value="operator" ${inj ? "" : "checked"} onchange="agToggleSecretInput('${esc(env)}', false)"> 运维填</label>
-      <label><input type="radio" name="src-${esc(env)}" value="inject" ${inj ? "checked" : ""} onchange="agToggleSecretInput('${esc(env)}', true)"> 平台注入</label>
-    </div>
-    <div class="ag-secret-inject row" style="gap:6px; margin-top:6px; ${inj ? "" : "display:none;"}">
-      <input type="password" class="ag-secret-value" placeholder="输入密钥值（写后不回显）" autocomplete="off" style="flex:1;">
-      <button type="button" class="small" onclick="agSetSecret(agModalName(), '${esc(env)}')">保存</button>
-      <button type="button" class="small ghost" onclick="agClearSecret(agModalName(), '${esc(env)}')">清除</button>
-    </div>
   </div>`;
-}
-function agToggleSecretInput(env, show) {
-  const row = document.querySelector(`#ag-secrets-list .ag-secret[data-env="${env}"] .ag-secret-inject`);
-  if (row) row.style.display = show ? "" : "none";
-}
-async function agSetSecret(name, env) {
-  const row = document.querySelector(`#ag-secrets-list .ag-secret[data-env="${env}"]`);
-  const value = row.querySelector(".ag-secret-value").value;
-  if (!value) { toast("输入密钥值后再保存", "error"); return; }
-  try {
-    await api("PUT", `/agents/${encodeURIComponent(name)}/secrets/${encodeURIComponent(env)}`, { value });
-    toast(`已加密保存 ${env}`, "success");
-    await agLoadSecrets(name);
-  } catch (e) { toast(e.message, "error"); }
-}
-async function agClearSecret(name, env) {
-  try {
-    await api("DELETE", `/agents/${encodeURIComponent(name)}/secrets/${encodeURIComponent(env)}`);
-    toast(`已清除 ${env}`, "success");
-    await agLoadSecrets(name);
-  } catch (e) { toast(e.message, "error"); }
 }
 function agCopyEnvTemplate() {
   const lines = AG_SECRET_SLOTS.map(s => `${s.env_name}=`);

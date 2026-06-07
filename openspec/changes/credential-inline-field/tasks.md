@@ -36,9 +36,9 @@
 
 ## 7. 「所需密钥」面板降级为只读总览
 
-- [ ] 7.1 Write failing tests: `ag-secrets` 面板不再含 operator/inject 单选与 inject password/保存/清除控件；渲染 env/source/status 只读行；保留复制模板 + 校验缺失；source 提示指向来源字段（tests/integration/test_admin_console_ui.py）
-- [ ] 7.2 Implement: 重写 `agSecretSlotHtml` 为只读行；删 `agToggleSecretInput`/`agSetSecret`/`agClearSecret` 的面板入口（写操作移到 CredentialField）
-- [ ] 7.3 Verify green: `uv run pytest tests/integration/test_admin_console_ui.py -x -q` + `node --check`
+- [x] 7.1 Write failing tests: `ag-secrets` 面板不再含 operator/inject 单选与 inject password/保存/清除控件；渲染 env/source/status 只读行；保留复制模板 + 校验缺失；source 提示指向来源字段（tests/integration/test_admin_console_ui.py）
+- [x] 7.2 Implement: 重写 `agSecretSlotHtml` 为只读行；删 `agToggleSecretInput`/`agSetSecret`/`agClearSecret` 的面板入口（写操作移到 CredentialField）
+- [x] 7.3 Verify green: `uv run pytest tests/integration/test_admin_console_ui.py -x -q` + `node --check`
 
 ## 8. 质量门 + 浏览器冒烟
 

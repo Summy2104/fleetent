@@ -273,28 +273,30 @@ def test_agents_detail_drawer_and_binding_sections():
         assert frag in html, frag
 
 
-def test_agent_required_secrets_panel_wired():
+def test_agent_required_secrets_panel_is_readonly_overview():
     html = ADMIN_HTML
-    # the edit modal hosts a required-secrets panel driven by the required-env endpoint
+    # the edit modal hosts a read-only deploy-readiness overview, not an input entry point
     assert 'id="ag-secrets"' in html
     assert "/required-env" in html
-    assert "/secrets/" in html
     for fn in (
         "function agLoadSecrets",
         "function agSecretSlotHtml",
-        "function agSetSecret",
-        "function agClearSecret",
         "function agCopyEnvTemplate",
+        "function agCheckMissingSecrets",
     ):
         assert fn in html, fn
-    # each slot is a write-only credential field: a password input + set/unset chip + source
+    # each row is read-only: env name + source + status chip — no value input, no mode radios
     slot = html.split("function agSecretSlotHtml", 1)[1].split("\n}", 1)[0]
-    assert 'type="password"' in slot
     assert "source" in slot
-    assert "operator" in slot and "inject" in slot
-    # operator host fills the rest: a copy-.env-template affordance exists
+    assert 'type="password"' not in slot
+    assert 'type="radio"' not in slot
+    assert "operator" not in slot and "inject" not in slot
+    # value entry moved to the source field's cred-field — the panel no longer writes secrets
+    assert "function agSetSecret" not in html
+    assert "function agClearSecret" not in html
+    assert "function agToggleSecretInput" not in html
+    # deploy-readiness affordances remain
     assert "复制 .env 模板" in html
-    # write-only: the load path reads status, never a value field
     load = html.split("function agLoadSecrets", 1)[1].split("\n}", 1)[0]
     assert "required-env" in load
     assert ".value" not in load  # never prefills a secret value from the server
