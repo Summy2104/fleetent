@@ -101,34 +101,6 @@ def _build_agent_yaml(agent: agent_store.Agent) -> str:
     data: dict[str, Any] = agent_file_from_store(agent).model_dump(
         mode="json", exclude_defaults=False
     )
-
-    servers: list[dict[str, Any]] = []
-    for sid in agent_store.list_mcp_servers_for_agent(agent.id):
-        row = agent_mcp_server_store.get_mcp_server(
-            agent.id, sid
-        ) or agent_mcp_server_store.get_mcp_server(None, sid)
-        if row is None:
-            continue
-        entry: dict[str, Any] = {"id": sid, "transport": row["transport"]}
-        for key in ("url", "auth_type", "api_key_env", "command", "args", "env"):
-            if row.get(key):
-                entry[key] = row[key]
-        servers.append(entry)
-    if servers:
-        data["mcp_servers"] = servers
-
-    bindings: dict[str, Any] = {}
-    channels = [
-        f"{c['platform']}:{c['channel_id']}" for c in agent_store.list_channels_for_agent(agent.id)
-    ]
-    users = agent_store.list_users_for_agent(agent.id)
-    if channels:
-        bindings["channels"] = channels
-    if users:
-        bindings["users"] = users
-    if bindings:
-        data["bindings"] = bindings
-
     return yaml.dump(
         data,
         Dumper=_AgentYamlDumper,

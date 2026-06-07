@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from fleetent import agent_store
 from fleetent.platform.agent_management_console import agent_admin_api, agent_console_api
 from fleetent.platform.connector_management import connector_admin_api
+from fleetent.platform.knowledge_base_management import agent_kbs_store
 
 
 @dataclass
@@ -79,6 +80,9 @@ def test_agent_admin_yaml_bindings_versions_and_deploy(monkeypatch, tmp_path):
     monkeypatch.setattr(
         agent_admin_api.agent_store, "list_users_for_agent", lambda _agent_id: ["u1"]
     )
+    # agent_file_from_store now also materializes knowledge bindings — keep this a pure
+    # unit test by stubbing the KB store rather than hitting a real DB.
+    monkeypatch.setattr(agent_kbs_store, "list_kbs_for_agent", lambda _tenant, _agent: [])
     monkeypatch.setattr(
         agent_admin_api.agent_store,
         "list_versions",
@@ -360,9 +364,7 @@ def test_agent_console_agent_lifecycle(monkeypatch):
     ) == {"agent": "clone", "cloned_from": "ops", "provenance": "adhoc"}
     with pytest.raises(HTTPException) as bad_yaml:
         agent_console_api.create_agent(
-            agent_console_api.CreateBody(
-                name="bad", capabilities_yaml="- not-map"
-            ),
+            agent_console_api.CreateBody(name="bad", capabilities_yaml="- not-map"),
             authorization="Session token",
         )
     assert bad_yaml.value.status_code == 422
