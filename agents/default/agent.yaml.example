@@ -49,6 +49,11 @@ models:
       model: claude-opus-4-8
       api_key_env: FLEETENT_MODEL_PRIMARY_API_KEY
       max_tokens: 4096
+      # params flow straight to the chat.completions call. To enable backend
+      # reasoning (DeepSeek-R1 / QwQ / o-series, etc.), set reasoning_effort or
+      # extra_body.reasoning here; run_stream then emits reasoning_delta events.
+      # params:
+      #   reasoning_effort: high
     - id: fast
       provider: anthropic
       protocol: openai_chat

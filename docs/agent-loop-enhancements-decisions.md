@@ -247,3 +247,10 @@ C2 (todo 持久化, 最小, 验证 OpenSpec→TDD→bb-pr 全流程)
 - **暂缓（后续小项）**：TUI `METHOD_STEER`、`run_stream` 流式落库（TUI steer 持久化）、collect 合并/去抖。IM 路径经 `run()` 天然落库，是主场景。
 - **连带**：新增 AgentFile 字段触发 `test_deployment_docs` 完整性校验，已同步 `agents/default/agent.yaml.example`。
 - **测试**：`tests/unit/test_steering.py`(11)；现有 normalizer 测试无回归；全量 **3748 passed, 14 skipped**；mypy / ruff（改动）/ check_test_layers（test_steering 干净）/ validate --strict 通过。
+
+### 2026-06-07 — C4 `agent-reasoning-passthrough` 完成（范围重定）
+
+- **关键发现 / 重定**：调研 resolver 后确认**请求侧 reasoning 已可用**——`ResolvedModelConfig.params` 以 `**params` 透传给 `chat.completions.create`，运维在 `agent.yaml` 的 `models.targets[].params` 写 `reasoning_effort` 或 `extra_body.reasoning` 即开启后端推理。**故原计划新增 `models.targets[].reasoning` 字段冗余，不做**。C4 重定为：流式透出推理轨迹 + 文档化 params 用法。
+- **实现**：`run_stream` chunk 循环防御式检测 `reasoning_content`（`isinstance(str)` 守卫——标准 SDK/mock 自动 no-op）→ 额外 yield `reasoning_delta` 事件供客户端展示；**不计入回复文本、不回传 LLM**（避免 DeepSeek 等后端拒收 reasoning_content as input）。更新事件类型 docstring + `agent.yaml.example` 注明用 params 开启请求侧 reasoning。
+- **暂缓**：`reasoning_content` 跨轮保留/回传（后端语义不一、回传有风险）；阻塞 `run()` 的 reasoning 捕获（无流式出口、价值低）。
+- **测试**：`test_agent_loop.py` +2（带 reasoning 流透出、纯流不透出）；全量 **3750 passed, 14 skipped**；mypy / ruff（改动）/ validate --strict 通过。

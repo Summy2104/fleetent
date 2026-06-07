@@ -1620,8 +1620,11 @@ async def run_stream(
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
-    Event types: tool_call, tool_result, text_delta, done.
-    text_delta events stream as tokens arrive from the LLM.
+    Event types: tool_call, tool_result, text_delta, reasoning_delta, done.
+    text_delta events stream as tokens arrive from the LLM; reasoning_delta carries
+    a backend reasoning trace (reasoning_content) when present, for display only
+    (kept out of the reply and never fed back to the LLM). To request reasoning,
+    set reasoning_effort / extra_body.reasoning in the target's params (agent.yaml).
 
     When `images` (a list of (bytes, mime)) is given, the user message is built
     as a content-block array (text + image_url blocks, base64-inlined) and the
@@ -1789,6 +1792,15 @@ async def run_stream(
                 continue
             choice = chunk.choices[0]
             delta = choice.delta
+
+            # C4: surface a backend reasoning trace (reasoning_content; a non-standard
+            # delta field on e.g. DeepSeek-R1 / QwQ) so clients can display the thinking.
+            # isinstance(str) guards against absent / auto-mocked fields → no-op for
+            # standard backends. NOT added to reply text and NOT fed back to the LLM
+            # (some backends reject reasoning_content as input), so it stays out of messages.
+            reasoning = getattr(delta, "reasoning_content", None)
+            if isinstance(reasoning, str) and reasoning:
+                yield {"type": "reasoning_delta", "content": reasoning}
 
             if delta.content:
                 reply_parts.append(delta.content)
