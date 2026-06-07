@@ -162,7 +162,14 @@
   .password-input-wrapper input { padding-right: 40px; flex: 1; }
   .password-toggle { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 38px; background: transparent; border: none; color: var(--text-muted); cursor: pointer; border-radius: 0 var(--r-1) var(--r-1) 0; display: flex; align-items: center; justify-content: center; }
   .password-toggle:hover { background: var(--surface-2); }
-  
+  .cred-field { display: flex; flex-direction: column; gap: 4px; }
+  .cred-field .cred-row { display: flex; gap: 6px; align-items: center; }
+  .cred-field .cred-toggle { align-self: flex-start; background: none; border: none; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 0; }
+  .cred-field .cred-toggle:hover { color: var(--accent); }
+  .cred-chip { font-size: 11px; white-space: nowrap; }
+  .cred-chip.set { color: var(--ok); }
+  .cred-chip.unset { color: var(--text-muted); }
+
   .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
   button.primary { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: var(--r-1); font-size: 14px; font-weight: 500; cursor: pointer; }
   button.primary:hover { background: #6b9fff; }
@@ -3276,6 +3283,40 @@ async function agEdit(name) {
 }
 
 // --- required-secrets panel (write-only; values never round-trip to the browser) ---
+// Reusable value-first credential control. Defaults to data-mode="value" (type the secret,
+// the platform names + stores it); the advanced toggle switches to a reference to an existing
+// env var (operator fills the host .env, platform stores nothing).
+function credFieldHtml(o) {
+  // default data-mode="value": enter the secret inline unless the caller asks for reference
+  const mode = o.mode === "reference" ? "reference" : "value";
+  const set = o.status === "set";
+  const label = o.label ? `<label class="form-label">${esc(o.label)}</label>` : "";
+  const hint = o.hint ? `<span class="form-hint">${esc(o.hint)}</span>` : "";
+  return `<div class="cred-field" data-cred="${esc(o.key || "")}" data-mode="${mode}">
+    ${label}
+    <div class="cred-value cred-row" ${mode === "reference" ? 'style="display:none;"' : ""}>
+      <input type="password" id="${esc(o.valueId || "")}" data-cred-value autocomplete="off"
+             placeholder="${esc(o.placeholder || "输入值（写后不回显）")}" style="flex:1;">
+      <span class="cred-chip ${set ? "set" : "unset"}">${set ? "🟢 已设置" : "⚪ 未设置"}</span>
+    </div>
+    <div class="cred-ref cred-row" ${mode === "reference" ? "" : 'style="display:none;"'}>
+      <input type="text" id="${esc(o.envId || "")}" data-cred-env autocomplete="off"
+             value="${esc(o.envName || "")}" placeholder="ENV_VAR_NAME" style="flex:1;">
+    </div>
+    <button type="button" class="cred-toggle" onclick="credToggle(this)">⚙ 引用现有变量</button>
+    ${hint}
+  </div>`;
+}
+
+function credToggle(btn) {
+  const field = btn.closest(".cred-field");
+  const toRef = field.dataset.mode !== "reference";
+  field.dataset.mode = toRef ? "reference" : "value";
+  field.querySelector(".cred-value").style.display = toRef ? "none" : "";
+  field.querySelector(".cred-ref").style.display = toRef ? "" : "none";
+  btn.textContent = toRef ? "↩ 改为直接输入值" : "⚙ 引用现有变量";
+}
+
 let AG_SECRET_SLOTS = [];
 function agModalName() { return $("ag-modal").dataset.name; }
 async function agLoadSecrets(name) {

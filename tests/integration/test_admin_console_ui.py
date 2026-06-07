@@ -213,6 +213,19 @@ def test_providers_secret_field_password_no_prefill():
     assert "autocomplete" in snippet
 
 
+def test_credential_field_control_present():
+    html = ADMIN_HTML
+    # one reusable, value-first credential control with an advanced env-reference toggle
+    assert ".cred-field" in html
+    assert "function credFieldHtml" in html
+    assert "function credToggle" in html
+    builder = html.split("function credFieldHtml", 1)[1].split("\n}", 1)[0]
+    assert 'data-mode="value"' in builder  # defaults to entering a value
+    assert "cred-value" in builder and "cred-ref" in builder
+    assert 'type="password"' in builder  # value input is write-only
+    assert "引用现有变量" in builder  # advanced: reference an existing env var instead
+
+
 def test_providers_write_controls_admin_gated():
     html = ADMIN_HTML
     assert "pv-create-bar" in html

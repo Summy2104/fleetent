@@ -18,9 +18,9 @@
 
 ## 4. CredentialField 控件（前端，value-first + 高级引用）
 
-- [ ] 4.1 Write failing tests: admin.html UI-marker 断言——`cred-field` 控件含 value(password)/reference(text) 两态、`data-mode`、set/unset chip、「⚙ 引用现有变量」高级 toggle；value 默认态；编辑态不回显已存值（tests/integration/test_admin_console_ui.py）
-- [ ] 4.2 Implement: 可复用 CredentialField 渲染 + 状态机（value↔reference）+ 调凭据 API 存值/设名/清除
-- [ ] 4.3 Verify green: `uv run pytest tests/integration/test_admin_console_ui.py -x -q` + `node --check` 内联 JS
+- [x] 4.1 Write failing tests: admin.html UI-marker 断言——`cred-field` 控件含 value(password)/reference(text) 两态、`data-mode`、set/unset chip、「⚙ 引用现有变量」高级 toggle；value 默认态；编辑态不回显已存值（tests/integration/test_admin_console_ui.py）
+- [x] 4.2 Implement: 可复用 CredentialField 渲染 + 状态机（value↔reference）+ 调凭据 API 存值/设名/清除
+- [x] 4.3 Verify green: `uv run pytest tests/integration/test_admin_console_ui.py -x -q` + `node --check` 内联 JS
 
 ## 5. Provider 表单合并到 CredentialField
 
