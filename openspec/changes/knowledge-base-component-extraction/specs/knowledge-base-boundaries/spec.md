@@ -38,12 +38,17 @@ KB 是数据源的**派生视图**。KB 内容（文档/chunk/图谱）的写入
 
 ### Requirement: Ingest 经注入 settings 消解 connector 双源
 
-`knowledge_base.ingest` 的对外入口 SHALL 接收注入的 `KnowledgeBaseSettings`（经 `as_knowledge_base_settings` adapter），SHALL NOT 自读 agent 侧家目录配置来发现 connector。connector 配置来源由调用方（platform 控制面或单机 ingest CLI）注入。
+`knowledge_base.ingest` 的对外入口 SHALL 接收注入的 `KnowledgeBaseSettings`（经 `as_knowledge_base_settings` adapter），SHALL NOT 自读 agent 侧家目录配置来发现 connector。connector 配置的**单一真相源** SHALL 为 platform `kb_connector_store`（`kb_connectors` 表），由 platform 控制面读取并注入 ingest；agent 侧 `_kb_config` 的 connector 读取 SHALL 移除。单机无 platform 时由 ingest CLI 从本地来源注入。
 
 #### Scenario: ingest 不自读 agent config
 - **WHEN** 检查 ingest 摄取入口
 - **THEN** 它 SHALL 接收注入的 settings 参数
 - **AND** SHALL NOT 通过家目录 `_kb_config` 自行发现 connector 配置
+
+#### Scenario: connector 单一真相源在 platform
+- **WHEN** platform 控制面驱动摄取
+- **THEN** connector 配置 SHALL 取自 `kb_connector_store`
+- **AND** 不存在 agent 侧与 platform 侧并存的 connector 定义双源
 
 ### Requirement: KB 依赖方向护栏
 

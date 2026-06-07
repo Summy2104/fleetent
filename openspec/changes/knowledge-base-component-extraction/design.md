@@ -50,9 +50,16 @@ KB 现状（2026-06-08 核对）：`intelligence/knowledge_base/` 20 文件，�
 KB 是**派生视图**（纲领 §4）。原 proposal 的"预留 agent 自主写入口"是误判，本 change 纠正：retrieval 侧**不暴露任何写接口**。agent/reflection 对 KB 的贡献**不直接写 KB**，而是写它的真相源——agent-curated 沉淀源（阶段3 reflection 展开），再经 connector sync 流入 KB。这样下次 sync 不会与数据源不一致（无孤儿/可追溯/可重新摄取）。KB 内容写入路径因此唯一：`ingest/sync`。
 
 ### D4：ingest 接收注入的 settings，消解 connector 双源
-现状 `runtime._kb_config()` / `bindings._kb_config()` / `config.load_knowledge_config()` 让 ingest 自读 agent 侧 `_kb_config`，而 platform 另有 `kb_connectors` 表——双源。决策：ingest 的对外入口做成**接收 `KnowledgeBaseSettings` 的纯函数**，由调用方（platform `knowledge_base_management`）经 `as_knowledge_base_settings` adapter 注入 connector 配置。ingest 不再自读家目录 config。单机无 platform 时，由 ingest CLI（纲领 §9，本 change 不实现）注入。这是注入模式的应用，不是历史债遗留。
+现状 `runtime._kb_config()` / `bindings._kb_config()` / `config.load_knowledge_config()` 让 ingest 自读 agent 侧 `_kb_config`，而 platform 另有 `kb_connectors` 表——双源。决策：
 
-- *替代*：统一到 agent 侧 `_kb_config` 单源、platform 也读它。否决——connector 是 platform 运维概念，让 agent runtime 持有它违反归属判据；注入模式让 ingest 对配置来源无知，更解耦。
+1. **ingest 对来源无知**：对外入口做成**接收 `KnowledgeBaseSettings` 的纯函数**，经 `as_knowledge_base_settings` adapter 注入；ingest 不再自读家目录 config。
+2. **connector 单一真相源 = platform `kb_connector_store`（`kb_connectors` 表）**：platform `knowledge_base_management` 读该表、注入 ingest。**移除 agent 侧 `_kb_config` 的 connector 读取**——双源由此消除。
+3. 单机无 platform 时，由 ingest CLI（纲领 §9，本 change 不实现）从本地来源注入；agent 对话路径（retrieval）不碰 connector，不受影响。
+
+connector 是 platform 运维概念，单一源归 platform 表符合归属判据；注入模式让 ingest 对来源无知，二者正交、互不矛盾。
+
+- *替代*：统一到 agent 侧 `_kb_config` 单源、platform 也读它。否决——让 agent runtime 持有运维概念违反归属判据。
+- *替代*：保留双源、按部署选源。否决——双源维护负担不消除，正是本次要解决的别扭。
 
 ### D5：graph extraction 归 ingest，graph_search 归 retrieval
 实体/关系抽取（`extraction.py`/`extraction_store.py`）是对**已摄取文档**的加工——写边界，归 ingest。`graph_search.py` 是读——归 retrieval。两者共享 entity/relation 表，经 core 的 Readable/Writable 切：graph_search 用 Readable 读图，extraction 用 Writable 写图。
@@ -82,5 +89,5 @@ KB 是**派生视图**（纲领 §4）。原 proposal 的"预留 agent 自主写
 ## Open Questions
 
 - ingest 单机摄取入口（CLI / KB 服务）的形态——纲领 §9，阶段6 再定，本阶段只保证 ingest 对配置来源无知。
-- `config.py` 的 connector 定义模型最终留 ingest 还是上移 platform——本阶段留 ingest（注入源由 platform 提供），阶段6 服务化时再议。
+- connector 真相源已定 = platform `kb_connector_store`（D4）；`config.py` 的 connector 定义模型在 ingest 侧仅保留**被注入的 settings 形状**，不再作为 agent 侧来源。阶段6 服务化时若需独立 connector 配置 API 再议。
 - shim 删除时机：本 change 末尾 vs 阶段5 统一收口——倾向阶段5。

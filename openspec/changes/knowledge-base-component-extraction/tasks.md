@@ -21,7 +21,7 @@
 
 - [ ] 4.1 写失败测试：断言 ingest 摄取入口接收注入的 `KnowledgeBaseSettings`、不自读家目录 `_kb_config`；KB 内容写（ingest/delete/archive document、图谱抽取）只经 ingest
 - [ ] 4.2 搬迁：`runtime.py` 的 `ingest_text`/`ingest_parsed`/`_ingest_chunks`/`delete*`/`archive*`、`connectors/*`、`parsers.py`、`extraction.py`/`extraction_store.py`、`planner.py`/`sync_planner.py`、`config.py` → `knowledge_base/ingest/`
-- [ ] 4.3 ingest 对外入口改为接收 settings 纯函数 + 新增 `as_knowledge_base_settings` adapter（消解 connector 双源）
+- [ ] 4.3 ingest 对外入口改为接收 settings 纯函数 + 新增 `as_knowledge_base_settings` adapter；connector 真相源改为 platform `kb_connector_store`，移除 agent 侧 `_kb_config` 的 connector 读取（消解双源）
 - [ ] 4.4 跑测试 → 绿
 
 ## 5. management：容器/绑定写（TDD）
