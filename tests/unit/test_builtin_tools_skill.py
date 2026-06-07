@@ -78,12 +78,17 @@ def test_read_skill_success_records_hit_with_context() -> None:
     with (
         patch("fleetent.skills.registry._index", {"ok": _clean_entry()}),
         patch("fleetent.skills.registry.load", return_value="full body"),
-        patch("fleetent.platform.skill_management.skill_admin_store.record_hit") as mock_hit,
+        patch("fleetent.observability.traces.record_trace_event") as mock_rec,
     ):
         out = builtin_tools.read_skill("ok", tool_context=ctx)
 
     assert out == "full body"
-    mock_hit.assert_called_once_with("ok", "support", "sess-9")
+    mock_rec.assert_called_once()
+    event = mock_rec.call_args.args[0]
+    assert event.event_type == "skill_hit"
+    assert event.payload["skill_name"] == "ok"
+    assert event.agent_id == "support"
+    assert event.session_id == "sess-9"
 
 
 def test_read_skill_hit_recording_failure_does_not_block() -> None:
@@ -91,7 +96,7 @@ def test_read_skill_hit_recording_failure_does_not_block() -> None:
         patch("fleetent.skills.registry._index", {"ok": _clean_entry()}),
         patch("fleetent.skills.registry.load", return_value="full body"),
         patch(
-            "fleetent.platform.skill_management.skill_admin_store.record_hit",
+            "fleetent.observability.traces.record_trace_event",
             side_effect=RuntimeError("db down"),
         ),
     ):
@@ -105,8 +110,8 @@ def test_read_skill_blocked_does_not_record_hit() -> None:
     with (
         patch("fleetent.skills.registry._index", {"bad": _blocked_entry()}),
         patch("fleetent.governance.audit_log.write_audit"),
-        patch("fleetent.platform.skill_management.skill_admin_store.record_hit") as mock_hit,
+        patch("fleetent.observability.traces.record_trace_event") as mock_rec,
     ):
         builtin_tools.read_skill("bad")
 
-    mock_hit.assert_not_called()
+    mock_rec.assert_not_called()
