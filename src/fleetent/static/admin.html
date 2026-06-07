@@ -1293,7 +1293,7 @@
           <label class="muted" style="font-size:12px; flex:1 1 160px;">team_id
             <input id="ag-team" placeholder="(none)" autocomplete="off" style="width:100%; margin-top:4px;"></label>
           <label class="muted" style="font-size:12px; flex:1 1 160px;">memory_namespace
-            <input id="ag-memns" placeholder="default" autocomplete="off" style="width:100%; margin-top:4px;"></label>
+            <input id="ag-memns" placeholder="<agent> (default)" autocomplete="off" style="width:100%; margin-top:4px;"></label>
           <label class="muted" style="font-size:12px; flex:1 1 160px;">skills_dir
             <input id="ag-skillsdir" placeholder="~/.fleetent/<agent>/skills" autocomplete="off" style="width:100%; margin-top:4px;"></label>
         </div>
@@ -2734,15 +2734,25 @@ function agSetIcon(emoji) {
   $("ag-icon").value = emoji || "";
   $("ag-icon-preview").textContent = emoji || "🤖";
 }
-// Auto-fill skills_dir from the agent name while it still holds an auto value (empty or the
-// ~/.fleetent/<x>/skills pattern); a custom path the operator typed is left untouched.
+// Auto-fill skills_dir + memory_namespace from the agent name while they hold an auto value
+// (skills_dir empty/the ~/.fleetent/<x>/skills pattern; memns empty/"default"/a prior name).
+// A custom value the operator typed is left untouched.
 function agSyncSkillsDir() {
-  const el = $("ag-skillsdir");
-  if (!el) return;
-  const cur = el.value.trim();
-  if (cur === "" || /^~\/\.fleetent\/[^/]*\/skills$/.test(cur)) {
-    const name = $("ag-name").value.trim();
-    el.value = name ? `~/.fleetent/${name}/skills` : "";
+  const name = $("ag-name").value.trim();
+  const sd = $("ag-skillsdir");
+  if (sd) {
+    const cur = sd.value.trim();
+    if (cur === "" || /^~\/\.fleetent\/[^/]*\/skills$/.test(cur)) {
+      sd.value = name ? `~/.fleetent/${name}/skills` : "";
+    }
+  }
+  const mn = $("ag-memns");
+  if (mn) {
+    const cur = mn.value.trim();
+    if (cur === "" || cur === "default" || cur === (mn.dataset.auto || "\0")) {
+      mn.value = name || "default";
+      mn.dataset.auto = mn.value;
+    }
   }
 }
 async function agCreate() {
@@ -2755,7 +2765,7 @@ async function agCreate() {
   $("ag-version").value = "—";  // assigned on first save
   $("ag-tenant").value = "default";
   $("ag-team").value = "";
-  $("ag-memns").value = "default";
+  $("ag-memns").value = ""; delete $("ag-memns").dataset.auto;
   $("ag-skillsdir").value = "";
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
@@ -3061,7 +3071,7 @@ async function agEdit(name) {
     $("ag-version").value = a.version ?? "—";
     $("ag-tenant").value = a.tenant_id || "default";
     $("ag-team").value = a.team_id || "";
-    $("ag-memns").value = a.memory_namespace || "default";
+    $("ag-memns").value = a.memory_namespace || name;
     $("ag-skillsdir").value = a.skills_dir || `~/.fleetent/${name}/skills`;
     $("ag-system-prompt").value = a.system_prompt || "";
     // Mirror the new-agent layout: tools come from the capabilities YAML.
@@ -3149,7 +3159,7 @@ async function agSave() {
         name, system_prompt: sp, icon,
         tenant_id: $("ag-tenant").value.trim() || "default",
         team_id: $("ag-team").value.trim() || null,
-        memory_namespace: $("ag-memns").value.trim() || "default",
+        memory_namespace: $("ag-memns").value.trim() || name,
         skills_dir: $("ag-skillsdir").value.trim() || `~/.fleetent/${name}/skills`,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
@@ -3163,7 +3173,7 @@ async function agSave() {
         name, system_prompt: sp, icon,
         tenant_id: $("ag-tenant").value.trim() || "default",
         team_id: $("ag-team").value.trim() || null,
-        memory_namespace: $("ag-memns").value.trim() || "default",
+        memory_namespace: $("ag-memns").value.trim() || name,
         skills_dir: $("ag-skillsdir").value.trim() || `~/.fleetent/${name}/skills`,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
