@@ -758,22 +758,63 @@ async def _plan_run_slots(
     return slots
 
 
-def _backfill_slots(
+async def _backfill_slots(
     slots: list[_PlanSlot],
     results: dict[str, tuple[str, bool]],
     *,
     messages: list[Any],
     state: LoopState,
     loop_checker: LoopDetectionChecker,
+    governance: "GovernanceConfig | None" = None,
+    session_id: str | None = None,
+    agent_name: str | None = None,
+    user_id: str = "default",
 ) -> None:
     """Phase three (D1/D4): serial, original `tool_calls` order. Append each tool
     message, record the call into the loop-detection window, and fold
     `consecutive_failures` per-result — identical to sequential per-tool updates.
     """
+    from fleetent.runtime import hooks
+    from fleetent.runtime.hooks import HookContext
+
     for slot in slots:
-        content, failed = slot.placeholder if slot.placeholder is not None else results[slot.tc_id]
+        placeholder = slot.placeholder
+        is_placeholder = placeholder is not None
+        content, failed = placeholder if placeholder is not None else results[slot.tc_id]
         if slot.counts_failure:
             state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
+        # P2: post_tool_use hook — transform result before it enters messages.
+        # Only fires for real tool executions (not placeholder slots from deny/reject).
+        if (
+            not is_placeholder
+            and governance is not None
+            and governance.hooks_enabled
+            and hooks.has_hooks("post_tool_use")
+        ):
+            args_val = slot.args
+            try:
+                parsed_args = json.loads(args_val) if isinstance(args_val, str) else args_val
+            except Exception:
+                parsed_args = {}
+            hres = await hooks.dispatch(
+                "post_tool_use",
+                HookContext(
+                    event="post_tool_use",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={
+                        "tool_name": slot.name,
+                        "tool_args": parsed_args,
+                        "tool_result": content,
+                        "failed": failed,
+                    },
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if hres.modified_content is not None:
+                content = hres.modified_content
         # T4: cap the messages copy (self-truncating tools manage their own size).
         tool_content = content if is_self_truncating(slot.name) else truncate_tool_result(content)
         messages.append({"role": "tool", "tool_call_id": slot.tc_id, "content": tool_content})
@@ -784,6 +825,38 @@ def _backfill_slots(
             not failed,
             window=loop_checker.window,
         )
+
+
+async def _apply_output_transform(
+    reply: str,
+    governance: "GovernanceConfig | None",
+    session_id: str | None,
+    agent_name: str | None,
+    user_id: str,
+) -> str:
+    """P2: output_transform hook — rewrite final reply before it leaves the loop."""
+    from fleetent.runtime import hooks
+    from fleetent.runtime.hooks import HookContext
+
+    if (
+        governance is None
+        or not governance.hooks_enabled
+        or not hooks.has_hooks("output_transform")
+    ):
+        return reply
+    hres = await hooks.dispatch(
+        "output_transform",
+        HookContext(
+            event="output_transform",
+            session_id=session_id,
+            agent_name=agent_name,
+            user_id=user_id,
+            payload={"content": reply},
+        ),
+        timeout=governance.hooks_timeout_seconds,
+        strict=False,
+    )
+    return hres.modified_content if hres.modified_content is not None else reply
 
 
 def _budget_add(usage: BudgetUsage, response_usage: Any) -> None:
@@ -1466,6 +1539,7 @@ async def _run_inner(
             agent_name=agent_name,
             stop_reason=StopReason.mcp_strict_unavailable,
         )
+        reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
         return reply
     response = None
     msg: Any = None
@@ -1594,7 +1668,17 @@ async def _run_inner(
             parallel_max=parallel_max,
             default_tool_timeout=default_tool_timeout,
         )
-        _backfill_slots(slots, results, messages=messages, state=state, loop_checker=loop_checker)
+        await _backfill_slots(
+            slots,
+            results,
+            messages=messages,
+            state=state,
+            loop_checker=loop_checker,
+            governance=governance,
+            session_id=session_id,
+            agent_name=agent_name,
+            user_id=user_id,
+        )
 
     reply = (msg.content if msg is not None else None) or ""
     budget_dimension: str | None = None
@@ -1658,6 +1742,7 @@ async def _run_inner(
         await extract_and_update(user_id, messages, model_policy=policy)
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
         _logger.debug("memory_extraction_skipped", error=str(exc))
+    reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
     return reply
 
 
@@ -1835,6 +1920,7 @@ async def run_stream(
             agent_name=agent_name,
             stop_reason=StopReason.mcp_strict_unavailable,
         )
+        reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
         yield {"type": "done", "content": reply}
         return
     model_used = _model_name(active_cfg)
@@ -2078,12 +2164,46 @@ async def run_stream(
             default_tool_timeout=default_tool_timeout,
         )
         for slot in slots:
-            content, failed = (
-                slot.placeholder if slot.placeholder is not None else results[slot.tc_id]
-            )
+            placeholder = slot.placeholder
+            is_placeholder = placeholder is not None
+            content, failed = placeholder if placeholder is not None else results[slot.tc_id]
             if slot.counts_failure:
                 state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             yield {"type": "tool_result", "name": slot.name, "content": content}
+            # P2: post_tool_use hook, real executions only; SSE already sent (not retractable).
+            # modified_content only affects what enters messages (used by the LLM next turn).
+            if (
+                not is_placeholder
+                and governance is not None
+                and governance.hooks_enabled
+                and hooks.has_hooks("post_tool_use")
+            ):
+                from fleetent.runtime.hooks import HookContext
+
+                args_val = slot.args
+                try:
+                    parsed_args = json.loads(args_val) if isinstance(args_val, str) else args_val
+                except Exception:
+                    parsed_args = {}
+                hres = await hooks.dispatch(
+                    "post_tool_use",
+                    HookContext(
+                        event="post_tool_use",
+                        session_id=session_id,
+                        agent_name=agent_name,
+                        user_id=user_id,
+                        payload={
+                            "tool_name": slot.name,
+                            "tool_args": parsed_args,
+                            "tool_result": content,
+                            "failed": failed,
+                        },
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=False,
+                )
+                if hres.modified_content is not None:
+                    content = hres.modified_content
             # T4: truncate the messages copy only; the SSE event above kept the full result.
             tool_content = (
                 content if is_self_truncating(slot.name) else truncate_tool_result(content)
@@ -2146,6 +2266,7 @@ async def run_stream(
                 if partial_reply:
                     yield {"type": "text_delta", "content": partial_reply}
 
+    reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
     yield {"type": "done", "content": reply}
 
     from openai.types import CompletionUsage as _CU  # noqa: N814 — terse local alias
