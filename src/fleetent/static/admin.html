@@ -1322,6 +1322,12 @@
           <h4 style="margin:14px 0 4px;">Channels</h4>
           <div id="agm-channels"></div>
           <div class="row" style="margin-top:6px;"><input id="agm-ch-platform" placeholder="platform" style="max-width:120px;"><input id="agm-ch-id" placeholder="channel_id"><button type="button" class="small" onclick="agmAddChannel()">Add channel</button></div>
+          <h4 style="margin:14px 0 4px;">Access <span class="muted" style="font-weight:normal; font-size:12px;">(narrow to a subset of the bindings above)</span></h4>
+          <label class="row" style="gap:6px; font-size:12px;"><input type="checkbox" id="ag-access-approval" checked> require_approval</label>
+          <div class="muted" style="font-size:12px; margin-top:6px;">allow_users</div>
+          <div id="ag-access-users"></div>
+          <div class="muted" style="font-size:12px; margin-top:6px;">allow_channels</div>
+          <div id="ag-access-channels"></div>
           <h4 style="margin:14px 0 4px;">Advanced settings</h4>
           <div class="muted" style="font-size:12px;">Common agent.yaml knobs — defaults shown; only changed values are saved.</div>
           <div id="ag-advanced-fields"></div>
@@ -2780,7 +2786,6 @@ const AG_ADV_FIELDS = [
   { g: "Intelligence", k: "knowledge.retrieval_policy.mode", t: "select", opts: ["vector", "keyword", "hybrid"], d: "hybrid" },
   { g: "Intelligence", k: "knowledge.retrieval_policy.top_k", t: "number", d: 10 },
   { g: "Intelligence", k: "knowledge.retrieval_policy.rerank", t: "bool", d: false },
-  { g: "Access", k: "access.require_approval", t: "bool", d: true },
 ];
 const AG_ADV_KEYS = AG_ADV_FIELDS.map(f => f.k);
 function _agGet(obj, path) { return path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj); }
@@ -2838,8 +2843,67 @@ function agStripAdvKeys(co) {
     for (let i = 0; i < ks.length - 1 && o; i++) o = o[ks[i]];
     if (o && typeof o === "object") delete o[ks[ks.length - 1]];
   }
+  delete clone.access;  // owned by the Access section, not the Custom box
   _agPrune(clone);
   return clone;
+}
+
+// --- Access: require_approval + allow_users/allow_channels chosen FROM the bindings -------
+let AG_IM_USERS = [];           // [{user_id, platform, platform_user_id}] loaded with the modal
+let AG_ACCESS = { require_approval: true, allow_users: [], allow_channels: [] };
+// The user ids / channels currently bound in the modal — the only things access can allow.
+function agBoundUserIds() {
+  const set = new Set();
+  for (const pid of AG_ACCESS.allow_users) set.add(pid);  // keep any still-valid prior picks
+  const out = [];
+  const seen = new Set();
+  for (const uid of [...document.querySelectorAll("#agm-users .agm-user-row input:checked")].map(i => i.value)) {
+    for (const iu of AG_IM_USERS) {
+      if (iu.user_id === uid && !seen.has(iu.platform_user_id)) {
+        seen.add(iu.platform_user_id);
+        out.push({ pid: String(iu.platform_user_id), platform: iu.platform });
+      }
+    }
+  }
+  return out;
+}
+function agBoundChannels() {
+  return (AGM_CHANNELS || []).map(c => `${c.platform}:${c.channel_id}`);
+}
+function agRenderAccess() {
+  const users = agBoundUserIds();
+  agMsWidget("ag-access-users", "aac-user",
+    users.map(u => ({ value: u.pid, label: `${u.platform}:${u.pid}`, q: `${u.platform} ${u.pid}` })),
+    "Allow specific users… (empty = all bound)");
+  agMsWidget("ag-access-channels", "aac-ch",
+    agBoundChannels().map(c => ({ value: c, label: c })),
+    "Allow specific channels… (empty = all bound)");
+  const want = new Set(AG_ACCESS.allow_users);
+  for (const cb of document.querySelectorAll("#ag-access-users .aac-user input")) if (want.has(cb.value)) cb.checked = true;
+  const wantc = new Set(AG_ACCESS.allow_channels);
+  for (const cb of document.querySelectorAll("#ag-access-channels .aac-ch input")) if (wantc.has(cb.value)) cb.checked = true;
+  agMsSync("ag-access-users"); agMsSync("ag-access-channels");
+  $("ag-access-approval").checked = AG_ACCESS.require_approval !== false;
+}
+function agCollectAccess() {
+  const allow_users = [...document.querySelectorAll("#ag-access-users .aac-user input:checked")].map(i => i.value);
+  const allow_channels = [...document.querySelectorAll("#ag-access-channels .aac-ch input:checked")].map(i => i.value);
+  const require_approval = $("ag-access-approval").checked;
+  const access = {};
+  if (allow_users.length) access.allow_users = allow_users;
+  if (allow_channels.length) access.allow_channels = allow_channels;
+  if (require_approval !== true) access.require_approval = require_approval;  // true is the default
+  return access;  // {} when all default
+}
+// Re-derive access options whenever the bindings change; capture current DOM picks into
+// AG_ACCESS first (only if the widgets are already rendered — else we'd wipe loaded state).
+function agAccessSyncFromBindings() {
+  if (document.querySelector("#ag-access-users .ms")) {
+    AG_ACCESS.allow_users = [...document.querySelectorAll("#ag-access-users .aac-user input:checked")].map(i => i.value);
+    AG_ACCESS.allow_channels = [...document.querySelectorAll("#ag-access-channels .aac-ch input:checked")].map(i => i.value);
+    AG_ACCESS.require_approval = $("ag-access-approval").checked;
+  }
+  agRenderAccess();
 }
 async function agCreate() {
   $("ag-modal-title").textContent = "New agent";
@@ -2854,6 +2918,7 @@ async function agCreate() {
   $("ag-memns").value = ""; delete $("ag-memns").dataset.auto;
   $("ag-skillsdir").value = "";
   agRenderAdvFields({});  // advanced knobs at their defaults
+  AG_ACCESS = { require_approval: true, allow_users: [], allow_channels: [] };
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
   $("ag-bind-config").style.display = "";
@@ -2990,6 +3055,7 @@ async function agLoadCreateBindings(current = null) {
   ]);
   // A knowledge base IS a connector — list the same KBs the KB tab shows (deduped by kb_id).
   const kbs = kbOptionsFromConnectors(kbConnectors);
+  AG_IM_USERS = imUsers || [];  // user_id -> platform identities, for the Access allow-lists
   // Skills / connectors / IM users / KB all render as searchable multi-select dropdowns.
   // The option checkboxes keep their binding classes so the save-diff read-paths
   // (checked("agm-…")) are unchanged.
@@ -3027,6 +3093,9 @@ async function agLoadCreateBindings(current = null) {
     AGM_CHANNELS = (current.channels || []).map(c => ({ platform: c.platform, channel_id: c.channel_id }));
     agmRenderChannels();
   }
+  // Access allow-lists derive from the bindings; re-derive when the user picks change.
+  $("agm-users").addEventListener("change", agAccessSyncFromBindings);
+  agRenderAccess();
 }
 
 // Searchable multi-select: renders option checkboxes (keeping `cls` for read-paths)
@@ -3084,6 +3153,7 @@ function agMsUncheck(btn, e) {
 function agmRenderChannels() {
   $("agm-channels").innerHTML = AGM_CHANNELS.map((c, i) =>
     `<div class="row">${esc(c.platform)} / ${esc(c.channel_id)} <button type="button" class="small ghost danger" onclick="agmRemoveChannel(${i})">Remove</button></div>`).join("");
+  if ($("ag-access-channels")) agAccessSyncFromBindings();  // refresh access channel options
 }
 function agmAddChannel() {
   const pf = $("agm-ch-platform").value.trim(), ch = $("agm-ch-id").value.trim();
@@ -3174,6 +3244,12 @@ async function agEdit(name) {
     // overrides fall back to showing just their allowed_tools.
     const co = a.config_overrides || {};
     agRenderAdvFields(co);
+    const acc = co.access || {};
+    AG_ACCESS = {
+      require_approval: acc.require_approval !== false,
+      allow_users: acc.allow_users || [],
+      allow_channels: acc.allow_channels || [],
+    };
     const rest = agStripAdvKeys(co);
     $("ag-capabilities").value = Object.keys(rest).length
       ? JSON.stringify(rest, null, 2)
@@ -3256,7 +3332,7 @@ async function agSave() {
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
         config_overrides_yaml: $("ag-capabilities").value,
-        config_overrides_fields: agCollectAdvFields(),
+        config_overrides_fields: { ...agCollectAdvFields(), ...(Object.keys(agCollectAccess()).length ? { access: agCollectAccess() } : {}) },
       });
       await agApplyEditBindings(name);
     } else {
@@ -3271,7 +3347,7 @@ async function agSave() {
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
         config_overrides_yaml: $("ag-capabilities").value,
-        config_overrides_fields: agCollectAdvFields(),
+        config_overrides_fields: { ...agCollectAdvFields(), ...(Object.keys(agCollectAccess()).length ? { access: agCollectAccess() } : {}) },
       });
       await agApplyCreateBindings(name);
     }

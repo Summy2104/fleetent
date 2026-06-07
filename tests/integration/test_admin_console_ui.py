@@ -575,15 +575,20 @@ def test_agent_advanced_overrides_and_extra_fields():
     ):
         assert fid in html, fid
     assert "Advanced settings" in html
-    # curated knob registry covers governance/deployment/intelligence/access
-    for key in ("agent_max_turns", "session_ttl_days", "log_format", "access.require_approval"):
+    # curated knob registry covers governance/deployment/intelligence
+    for key in ("agent_max_turns", "session_ttl_days", "log_format"):
         assert key in html, key
     assert "function agCollectAdvFields" in html
-    # save sends discrete fields + the Custom box → config_overrides (merged server-side)
+    # Access section: require_approval + allow_users/allow_channels sourced from bindings
+    for fid in ('id="ag-access-approval"', 'id="ag-access-users"', 'id="ag-access-channels"'):
+        assert fid in html, fid
+    assert "function agCollectAccess" in html
+    assert "function agBoundUserIds" in html  # options come from the bound users
+    # save sends discrete fields (+ access) + the Custom box → config_overrides
     save = html.split("async function agSave", 1)[1].split("\n}", 1)[0]
     assert "memory_namespace:" in save
     assert "skills_dir:" in save
-    assert save.count("config_overrides_fields: agCollectAdvFields()") == 2
+    assert save.count("agCollectAccess()") >= 2
     assert save.count('config_overrides_yaml: $("ag-capabilities").value') == 2
 
 
