@@ -249,6 +249,9 @@ class AgentFile(BaseModel):
     loop_detect_ignore_arg_keys: list[str] = Field(default_factory=list)
     sub_agent_timeout_seconds: int = 300
     tool_default_timeout_seconds: float = 30.0
+    # run-time input steering (C1)
+    steering_mode: Literal["steer", "queue", "interrupt"] = "steer"
+    steering_max_pending: int = 8
     # permission gate
     permission_gate_medium_timeout_seconds: int = 300
     permission_gate_high_timeout_seconds: int = 3600

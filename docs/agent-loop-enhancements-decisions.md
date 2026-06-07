@@ -239,3 +239,11 @@ C2 (todo 持久化, 最小, 验证 OpenSpec→TDD→bb-pr 全流程)
 - **实现**：接通既有但从未消费的骨架——`run()` 新增 `_call_with_overflow_retry`、`run_stream()` 新增 `_stream_with_overflow_retry`，在 `classify(exc).should_compress`（context_overflow）时调 `compress_for_context_overflow` 原地/重绑压缩并重试同 target（不切模型）；守卫 = `_MAX_OVERFLOW_COMPRESSIONS=1` + 「压缩无 token 进展即放弃 re-raise」。
 - **新能力**：`compression-overflow-recovery`。
 - **测试**：`tests/unit/test_overflow_recovery.py`(6)；全量 **3731 passed, 14 skipped**；mypy / ruff（改动文件）/ openspec validate --strict 通过。
+
+### 2026-06-07 — C1 `agent-input-steering` 完成（本批最大项）
+
+- **实现**：新增 `runtime/steering.py`（per-session 活跃 run 登记表 + pending `asyncio.Queue` 邮箱 + `register_run`/`steer`/`interrupt`/`is_running`/`drain`/`reset`，cap 背压）；`loop.py` 新增 `_drain_steering`，在 `run()`/`run_stream()` 主循环压缩后、sanitize 前消费（被动——无 session/无 handle no-op）；`normalizer.route()` 抢锁前 `is_running` 分派 steer(默认)/interrupt/queue、内容只构建一次、`register_run` 包裹 run 并传 `cancel_token`；`AgentFile`+`GovernanceConfig`+`_governance_from_file` 加 `steering_mode`(默认 steer)/`steering_max_pending`(默认 8)。
+- **决策**：默认 `steer`（用户拍板）；登记由输入源做、loop 只被动 drain（agent-loop 不反向依赖输入源）；注入仅在轮间检查点（不破坏 tool_call↔result 契约）。
+- **暂缓（后续小项）**：TUI `METHOD_STEER`、`run_stream` 流式落库（TUI steer 持久化）、collect 合并/去抖。IM 路径经 `run()` 天然落库，是主场景。
+- **连带**：新增 AgentFile 字段触发 `test_deployment_docs` 完整性校验，已同步 `agents/default/agent.yaml.example`。
+- **测试**：`tests/unit/test_steering.py`(11)；现有 normalizer 测试无回归；全量 **3748 passed, 14 skipped**；mypy / ruff（改动）/ check_test_layers（test_steering 干净）/ validate --strict 通过。
