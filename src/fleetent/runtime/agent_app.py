@@ -62,7 +62,7 @@ def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
     return paths.base_dir() / "agents" / agent_id
 
 
-def _configure_logging_from_agent(agent: "AgentFile") -> None:
+def _configure_logging_from_agent(agent: AgentFile) -> None:
     """Apply agent.yaml log_format and observability.logging.* to the runtime logging system.
 
     Called once per standalone agent process after the agent file is loaded. The platform

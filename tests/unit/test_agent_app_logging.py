@@ -50,9 +50,7 @@ def _make_stack(stack: contextlib.ExitStack) -> dict[str, MagicMock]:
         patch("fleetent.runtime.agent_app._start_infra", AsyncMock())
     )
     mocks["scan_skills"] = stack.enter_context(patch("fleetent.skills.scan"))
-    mocks["load_plugins"] = stack.enter_context(
-        patch("fleetent.tools.plugin_loader.load_plugins")
-    )
+    mocks["load_plugins"] = stack.enter_context(patch("fleetent.tools.plugin_loader.load_plugins"))
     mocks["vector_store"] = stack.enter_context(
         patch("fleetent.intelligence.vector_store.configure_from_active_agent")
     )
@@ -66,8 +64,10 @@ def _mock_supervisor() -> MagicMock:
     return sup
 
 
-async def test_boot_configures_logging_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """boot() with log_format: json should call configure_structured_logging with agent's settings."""
+async def test_boot_configures_logging_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """boot() with log_format: json calls configure_structured_logging with agent's settings."""
     home = tmp_path / "myagent"
     home.mkdir()
     _write_agent_yaml(home, log_format="json")
