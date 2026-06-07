@@ -123,6 +123,50 @@ async def _stream_chunks_with_usage(prompt: int, completion: int, *contents: str
     yield u
 
 
+async def _stream_with_reasoning():
+    """Fake stream: a reasoning-only chunk, then a content chunk that finishes (C4)."""
+    r = MagicMock()
+    r.usage = None
+    r.choices = [MagicMock()]
+    r.choices[0].delta.content = None
+    r.choices[0].delta.tool_calls = None
+    r.choices[0].delta.reasoning_content = "let me think about it"
+    r.choices[0].finish_reason = None
+    yield r
+    c = MagicMock()
+    c.usage = None
+    c.choices = [MagicMock()]
+    c.choices[0].delta.content = "the answer"
+    c.choices[0].delta.tool_calls = None
+    c.choices[0].delta.reasoning_content = None
+    c.choices[0].finish_reason = "stop"
+    yield c
+
+
+async def test_run_stream_surfaces_reasoning_delta(mock_client):
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_with_reasoning())
+    events = [e async for e in al.run_stream("go")]
+    reasoning = [e["content"] for e in events if e["type"] == "reasoning_delta"]
+    text = "".join(e["content"] for e in events if e["type"] == "text_delta")
+    assert reasoning == ["let me think about it"]
+    assert "the answer" in text
+    assert "think" not in text  # reasoning trace kept out of the reply text
+
+
+async def test_run_stream_no_reasoning_delta_for_plain_stream(mock_client):
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_stream_chunks("hi", finish="stop")
+    )
+    events = [e async for e in al.run_stream("go")]
+    assert not any(e["type"] == "reasoning_delta" for e in events)
+
+
+@pytest.fixture(autouse=True)
+def _fast_backoff(monkeypatch):
+    """T2-1: zero same-target retry backoff so retry/exhaustion tests don't sleep."""
+    monkeypatch.setattr(al, "_backoff_delay", lambda attempt, exc: 0.0, raising=False)
+
+
 @pytest.fixture
 def mock_client(monkeypatch) -> AsyncMock:
     """Patch all external I/O in agent_loop, return the mock LLM client."""
@@ -797,7 +841,7 @@ async def test_run_falls_back_on_503(mock_client_fb):
 
 async def test_run_exhausted_fallbacks_raises(mock_client_fb):
     mock_client_fb.chat.completions.create = AsyncMock(
-        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+        side_effect=[_mk_http_error(429, RateLimitError)] * 4
     )
     with pytest.raises(RateLimitError):
         await al.run([{"role": "user", "content": "hi"}])
@@ -827,7 +871,7 @@ async def test_run_stream_falls_back_on_429(mock_client_fb):
 
 async def test_run_stream_exhausted_yields_error(mock_client_fb):
     mock_client_fb.chat.completions.create = AsyncMock(
-        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+        side_effect=[_mk_http_error(429, RateLimitError)] * 4
     )
     events = [e async for e in al.run_stream("hi")]
     assert any(e["type"] == "error" for e in events)
@@ -901,7 +945,7 @@ async def test_call_with_fallback_raises_on_non_switchable(mock_client_fb):
 
 async def test_run_logs_error_category_on_exhaustion(mock_client_fb, monkeypatch):
     mock_client_fb.chat.completions.create = AsyncMock(
-        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+        side_effect=[_mk_http_error(429, RateLimitError)] * 4
     )
     captured: dict = {}
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
@@ -920,7 +964,7 @@ async def test_run_no_error_category_on_success(mock_client, monkeypatch):
 
 async def test_run_stream_logs_error_category_on_exhaustion(mock_client_fb, monkeypatch):
     mock_client_fb.chat.completions.create = AsyncMock(
-        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+        side_effect=[_mk_http_error(429, RateLimitError)] * 4
     )
     captured: dict = {}
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
@@ -1540,7 +1584,7 @@ async def test_call_all_cooling_does_not_return_empty(mock_client_fb, monkeypatc
     cache.record_failure("primary-model")
     cache.record_failure("fallback-model")
     mock_client_fb.chat.completions.create = AsyncMock(
-        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+        side_effect=[_mk_http_error(429, RateLimitError)] * 4
     )
     with pytest.raises(RateLimitError):
         await al.run([{"role": "user", "content": "hi"}])
@@ -3297,3 +3341,42 @@ async def test_active_runs_decrements_on_exception(mock_client) -> None:
     with pytest.raises(Exception):  # noqa: B017
         await al.run([{"role": "user", "content": "hi"}])
     assert al._active_runs == 0
+
+
+# ── T2-2: empty-reply self-correction ────────────────────────────────────────
+
+
+async def test_run_corrects_empty_reply_then_succeeds(mock_client):
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[_text_resp(""), _text_resp("real answer")]
+    )
+    result = await al.run([{"role": "user", "content": "hi"}])
+    assert result == "real answer"
+    assert mock_client.chat.completions.create.call_count == 2
+
+
+async def test_run_empty_reply_capped(mock_client):
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp(""))
+    result = await al.run([{"role": "user", "content": "hi"}])
+    assert result == ""  # gives up after the cap, no infinite loop
+    assert mock_client.chat.completions.create.call_count == al._MAX_EMPTY_REPLY_RETRIES + 1
+
+
+async def test_run_non_empty_reply_not_retried(mock_client):
+    mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("done"))
+    result = await al.run([{"role": "user", "content": "hi"}])
+    assert result == "done"
+    assert mock_client.chat.completions.create.call_count == 1
+
+
+async def test_run_stream_corrects_empty_reply_then_succeeds(mock_client):
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _stream_chunks("", finish="stop"),
+            _stream_chunks("streamed answer", finish="stop"),
+        ]
+    )
+    events = [e async for e in al.run_stream("go")]
+    done = [e for e in events if e["type"] == "done"]
+    assert done[-1]["content"] == "streamed answer"
+    assert mock_client.chat.completions.create.call_count == 2

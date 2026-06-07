@@ -239,3 +239,54 @@ C2 (todo 持久化, 最小, 验证 OpenSpec→TDD→bb-pr 全流程)
 - **实现**：接通既有但从未消费的骨架——`run()` 新增 `_call_with_overflow_retry`、`run_stream()` 新增 `_stream_with_overflow_retry`，在 `classify(exc).should_compress`（context_overflow）时调 `compress_for_context_overflow` 原地/重绑压缩并重试同 target（不切模型）；守卫 = `_MAX_OVERFLOW_COMPRESSIONS=1` + 「压缩无 token 进展即放弃 re-raise」。
 - **新能力**：`compression-overflow-recovery`。
 - **测试**：`tests/unit/test_overflow_recovery.py`(6)；全量 **3731 passed, 14 skipped**；mypy / ruff（改动文件）/ openspec validate --strict 通过。
+
+### 2026-06-07 — C1 `agent-input-steering` 完成（本批最大项）
+
+- **实现**：新增 `runtime/steering.py`（per-session 活跃 run 登记表 + pending `asyncio.Queue` 邮箱 + `register_run`/`steer`/`interrupt`/`is_running`/`drain`/`reset`，cap 背压）；`loop.py` 新增 `_drain_steering`，在 `run()`/`run_stream()` 主循环压缩后、sanitize 前消费（被动——无 session/无 handle no-op）；`normalizer.route()` 抢锁前 `is_running` 分派 steer(默认)/interrupt/queue、内容只构建一次、`register_run` 包裹 run 并传 `cancel_token`；`AgentFile`+`GovernanceConfig`+`_governance_from_file` 加 `steering_mode`(默认 steer)/`steering_max_pending`(默认 8)。
+- **决策**：默认 `steer`（用户拍板）；登记由输入源做、loop 只被动 drain（agent-loop 不反向依赖输入源）；注入仅在轮间检查点（不破坏 tool_call↔result 契约）。
+- **暂缓（后续小项）**：TUI `METHOD_STEER`、`run_stream` 流式落库（TUI steer 持久化）、collect 合并/去抖。IM 路径经 `run()` 天然落库，是主场景。
+- **连带**：新增 AgentFile 字段触发 `test_deployment_docs` 完整性校验，已同步 `agents/default/agent.yaml.example`。
+- **测试**：`tests/unit/test_steering.py`(11)；现有 normalizer 测试无回归；全量 **3748 passed, 14 skipped**；mypy / ruff（改动）/ check_test_layers（test_steering 干净）/ validate --strict 通过。
+
+### 2026-06-07 — C4 `agent-reasoning-passthrough` 完成（范围重定）
+
+- **关键发现 / 重定**：调研 resolver 后确认**请求侧 reasoning 已可用**——`ResolvedModelConfig.params` 以 `**params` 透传给 `chat.completions.create`，运维在 `agent.yaml` 的 `models.targets[].params` 写 `reasoning_effort` 或 `extra_body.reasoning` 即开启后端推理。**故原计划新增 `models.targets[].reasoning` 字段冗余，不做**。C4 重定为：流式透出推理轨迹 + 文档化 params 用法。
+- **实现**：`run_stream` chunk 循环防御式检测 `reasoning_content`（`isinstance(str)` 守卫——标准 SDK/mock 自动 no-op）→ 额外 yield `reasoning_delta` 事件供客户端展示；**不计入回复文本、不回传 LLM**（避免 DeepSeek 等后端拒收 reasoning_content as input）。更新事件类型 docstring + `agent.yaml.example` 注明用 params 开启请求侧 reasoning。
+- **暂缓**：`reasoning_content` 跨轮保留/回传（后端语义不一、回传有风险）；阻塞 `run()` 的 reasoning 捕获（无流式出口、价值低）。
+- **测试**：`test_agent_loop.py` +2（带 reasoning 流透出、纯流不透出）；全量 **3750 passed, 14 skipped**；mypy / ruff（改动）/ validate --strict 通过。
+
+### 2026-06-07 — T2-1 `model-transient-retry` 完成（范围聚焦）
+
+- **范围聚焦（实施期决定）**：`error_classifier` 把 429/503 都标 `should_switch_model=True`（既有语义=立即 failover）。原"先重试再 failover"会破坏既有多目标 fallback 语义 + 约 10 个测试。**改为"仅在最后/唯一候选上退避重试"**——多目标 fallback 行为不变（既有 falls_back 测试零改动通过），只在无可切换目标时（单/最后 provider）重试，正好覆盖 on-prem 单 provider 的 429 痛点。波及面仅"全耗尽"类测试。
+- **实现**：`_create_with_transient_retry(do_call, retry=)`（`retry=False` 单次直跑；否则对 `should_retry and not should_compress` 退避重试至 `_MAX_TRANSIENT_RETRIES`）+ `_retry_after_seconds`（解析 Retry-After 头）+ `_backoff_delay`（Retry-After 优先，否则指数+半抖动 capped）；`_call_policy_chat`/`_stream_policy_chat` 改 `enumerate` + `partial(create,...)` + `retry=is_last`。context_overflow（should_compress）排除（归 C3b）。
+- **决策**：用 `functools.partial` 而非循环内 lambda（避免 ruff B023 + mypy lambda 推断）；`2.0**attempt` 避免 mypy 把 `int**int` 当 Any。
+- **测试连带**：`test_agent_loop.py` 加 autouse `_backoff_delay→0`（免真实 sleep）；"全耗尽/cooldown"测试 side_effect `[429,429]→[429]*4`（最后候选现会重试）。
+- **暂缓**：把 5xx（500/502/504）归类为可重试需扩 `error_classifier` category（当前仅 429/503 经 rate_limit 走此路）；重试参数 agent.yaml 可配。
+- **测试**：`tests/unit/test_transient_retry.py`(4)；全量 **3754 passed, 14 skipped**；mypy / ruff（改动）/ validate --strict 通过。
+
+### 2026-06-07 — T2-2 `agent-empty-reply-correction` 完成（范围聚焦）
+
+- **范围聚焦**：原 T2-2 含 "planning-only/空回复"。"planning-only"（非空但"光说不做"）的判定模糊、误纠正正常纯文本回答的风险高，**暂缓**；本 change 只做清晰可测的**空回复自纠错**。
+- **实现**：`run()` 与 `run_stream()` 的 `finish_reason != "tool_calls"` 分支——最终回复为空白且重试计数 < `_MAX_EMPTY_REPLY_RETRIES`(2) 时，追加 `_EMPTY_REPLY_CORRECTION` 的 user 消息并 `continue` 重跑（过终止检查）；非空或达上限照常返回（达上限仍返回 ""，不无限循环）。各路本地计数器。
+- **暂缓**：planning-only 语义检测。
+- **测试**：`test_agent_loop.py` +4（空→纠正→非空 / 持续空达上限 / 非空不重跑 / 流式空→纠正→非空）；全量 **3758 passed, 14 skipped**；mypy / ruff（改动）/ validate --strict 通过。
+
+---
+
+## 11. 批次总结（2026-06-07）
+
+7 个 change 全部实现并合并到 main（一改进一 PR，bb-pr + CI 绿后合并）：
+
+| # | change | PR | 交付 |
+|---|--------|----|------|
+| C2 | agent-task-tracking | #165 | todo 持久化状态机（agent 侧 `.todo` 兄弟文件，lock-free） |
+| C3a | compression-continuation-summary | #166 | 结构化压缩摘要 + active-task 续跑块 |
+| C3b | compression-overflow-handling | #168 | 反应式上下文溢出恢复 + 守卫 |
+| C1 | agent-input-steering | #170 | 运行中转向（默认 steer / interrupt / queue） |
+| C4 | agent-reasoning-passthrough | #171 | 流式透出 reasoning_delta（请求侧经既有 params） |
+| T2-1 | model-transient-retry | #172 | 最后/唯一 target 上瞬时错误退避重试（尊重 Retry-After） |
+| T2-2 | agent-empty-reply-correction | (pending) | 空最终回复自纠错重跑（带上限） |
+
+**贯穿原则**：严守 agent⊥platform 解耦（零 runtime→platform）、OpenAI-compatible、无 AI 框架、asyncio、纯 agent 侧持久化（兄弟文件）；每项 TDD 红绿、ruff/mypy/全量 pytest 门禁、openspec validate --strict。
+
+**暂缓清单（建议后续单独立项）**：Hooks 扩展体系、权限 ruleset 升级、Plan Mode、崩溃续跑（注：PR #164 已实现）、不可信工具结果包裹、Checkpoint/Revert、按模型 context_window 主动预算、工具结果 prune、reasoning_content 跨轮保留、5xx 归类可重试、planning-only 语义检测、steering 的 TUI/流式落库/collect。详见各 §10 条目与 §5。

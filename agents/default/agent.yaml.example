@@ -49,6 +49,11 @@ models:
       model: claude-opus-4-8
       api_key_env: FLEETENT_MODEL_PRIMARY_API_KEY
       max_tokens: 4096
+      # params flow straight to the chat.completions call. To enable backend
+      # reasoning (DeepSeek-R1 / QwQ / o-series, etc.), set reasoning_effort or
+      # extra_body.reasoning here; run_stream then emits reasoning_delta events.
+      # params:
+      #   reasoning_effort: high
     - id: fast
       provider: anthropic
       protocol: openai_chat
@@ -224,6 +229,10 @@ agent_max_tokens: -1              # max output tokens per LLM call; -1 = model d
 tool_default_timeout_seconds: 30.0
 sub_agent_timeout_seconds: 300
 agent_tool_parallel_max: 8        # max concurrent tool calls per turn
+
+# run-time input steering: how a new IM message is handled while a run is in flight
+steering_mode: steer              # steer (inject into the running task) | queue | interrupt
+steering_max_pending: 8           # max queued steered messages per session
 
 # layered budget — session / user / agent dims (-1 = unlimited)
 agent_budget_session_turns: -1

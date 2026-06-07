@@ -3,10 +3,12 @@
 import asyncio
 import inspect
 import json
+import random
 import time
 import uuid
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Literal, cast
 
 from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
@@ -117,6 +119,12 @@ _LOOP_WARNING_TEXT = (
 _GUARDRAIL_FEEDBACK_TEXT = (
     "已跳过本次工具调用：检测到相同工具、相同参数连续重复多次。请改用其它方式或直接给出当前结论。"
 )
+
+# T2-2: appended when the model ends a turn with a blank final reply (finish_reason
+# != tool_calls and empty/whitespace content) — nudges weak models to actually answer
+# or act instead of returning "". Bounded by _MAX_EMPTY_REPLY_RETRIES so it can't loop.
+_MAX_EMPTY_REPLY_RETRIES = 2
+_EMPTY_REPLY_CORRECTION = "你的上一条回复是空的。请直接给出最终答案，或调用合适的工具继续完成任务。"
 
 # Appended as a final `user` message when a budget dimension is exhausted (AR2 D3):
 # the Grace Call asks the model to summarize progress in one go without further
@@ -398,6 +406,23 @@ def _maybe_inject_loop_warning(messages: list[Any], state: LoopState) -> None:
     if state.loop_warning_requested and not state.loop_warning_injected:
         messages.append({"role": "user", "content": _LOOP_WARNING_TEXT})
         state.loop_warning_injected = True
+
+
+def _drain_steering(session_id: str | None, messages: list[Any]) -> None:
+    """C1: append any mid-run steered user input at the turn boundary.
+
+    Passive consumer of `runtime.steering`: a no-op when there is no session or no
+    active steering registration. Called after compression and before sanitize (like
+    the loop warning) so injected messages are part of the validated sequence and are
+    not swallowed by a same-turn compaction; only ever at a turn boundary, never
+    between a tool_call and its result.
+    """
+    if not session_id:
+        return
+    from fleetent.runtime import steering
+
+    for text in steering.drain(session_id):
+        messages.append({"role": "user", "content": text})
 
 
 async def _safe_dispatch(
@@ -839,19 +864,24 @@ async def _call_policy_chat(
     cache = get_health_cache()
     last_exc: Exception | None = None
     candidates = _policy_candidates(chain, cache)
-    for resolved in candidates:
+    for i, resolved in enumerate(candidates):
         model = _model_name(resolved)
+        is_last = i == len(candidates) - 1
         try:
             api_key = policy.require_api_key(resolved)
             client = _build_async_client(resolved, api_key)
             create_completion = cast(Any, client.chat.completions.create)
-            response = await create_completion(
+            call = partial(
+                create_completion,
                 model=model,
                 messages=messages,
                 tools=schemas,
                 max_tokens=resolved.max_tokens,
                 **resolved.params,
             )
+            # Retry transient errors (e.g. 429) only on the last/only candidate;
+            # earlier candidates fall back immediately, preserving fallback semantics.
+            response = await _create_with_transient_retry(call, retry=is_last)
             cache.record_success(model)
             return response, resolved
         except Exception as exc:
@@ -871,13 +901,15 @@ async def _stream_policy_chat(
     cache = get_health_cache()
     last_exc: Exception | None = None
     candidates = _policy_candidates(chain, cache)
-    for resolved in candidates:
+    for i, resolved in enumerate(candidates):
         model = _model_name(resolved)
+        is_last = i == len(candidates) - 1
         try:
             api_key = policy.require_api_key(resolved)
             client = _build_async_client(resolved, api_key)
             create_completion = cast(Any, client.chat.completions.create)
-            stream = await create_completion(
+            call = partial(
+                create_completion,
                 model=model,
                 messages=messages,
                 tools=schemas,
@@ -886,6 +918,7 @@ async def _stream_policy_chat(
                 stream_options={"include_usage": True},
                 **resolved.params,
             )
+            stream = await _create_with_transient_retry(call, retry=is_last)
             cache.record_success(model)
             return stream, resolved
         except Exception as exc:
@@ -901,6 +934,85 @@ def _policy_candidates(
 ) -> tuple[ResolvedModelConfig, ...]:
     available = tuple(entry for entry in chain if cache.is_available(_model_name(entry)))
     return available or chain
+
+
+# T2-1: same-target transient-error backoff retry. A transient failure (should_retry
+# and not should_compress — e.g. 429) is retried on the SAME target with backoff
+# before falling through to model failover. context_overflow (should_compress) is
+# excluded (handled by _call_with_overflow_retry).
+_MAX_TRANSIENT_RETRIES = 2
+_RETRY_BASE_DELAY = 1.0
+_RETRY_MAX_DELAY = 30.0
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """Parse a numeric Retry-After (seconds) header off an APIStatusError, else None.
+
+    The HTTP-date form is not parsed (caller falls back to exponential backoff).
+    """
+    resp = getattr(exc, "response", None)
+    headers = getattr(resp, "headers", None)
+    if headers is None:
+        return None
+    raw = headers.get("retry-after")
+    if raw is None:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def _backoff_delay(attempt: int, exc: Exception) -> float:
+    """Delay before the next same-target retry (attempt is 0-based).
+
+    Respects a Retry-After header when present; otherwise jittered exponential
+    backoff capped at `_RETRY_MAX_DELAY`. Patched to 0 in tests.
+    """
+    after = _retry_after_seconds(exc)
+    if after is not None:
+        return min(after, _RETRY_MAX_DELAY)
+    base = min(_RETRY_BASE_DELAY * (2.0**attempt), _RETRY_MAX_DELAY)
+    return base * (0.5 + 0.5 * random.random())  # half-to-full jitter (anti-herd)
+
+
+async def _create_with_transient_retry(
+    do_call: Callable[..., Coroutine[Any, Any, Any]], *, retry: bool = True
+) -> Any:
+    """Run ``do_call()`` (an awaitable factory), retrying transient errors on the
+    same target with backoff (T2-1).
+
+    ``retry=False`` runs a single attempt — used for non-last fallback candidates,
+    which fall back immediately on a switchable error rather than retrying. When
+    retrying, re-raises on a non-transient error (including context_overflow /
+    should_compress) or once the retry cap is reached, so the caller's failover logic
+    decides whether to switch target (covers the single/last-provider case where
+    there is nothing to fall back to).
+    """
+    if not retry:
+        return await do_call()
+    attempt = 0
+    while True:
+        try:
+            return await do_call()
+        except Exception as exc:
+            cls = classify(exc)
+            if (
+                isinstance(exc, ModelConfigError)
+                or not cls.should_retry
+                or cls.should_compress
+                or attempt >= _MAX_TRANSIENT_RETRIES
+            ):
+                raise
+            delay = _backoff_delay(attempt, exc)
+            _logger.warn(
+                "model_transient_retry",
+                attempt=attempt + 1,
+                delay=round(delay, 2),
+                error=str(exc),
+            )
+            await asyncio.sleep(delay)
+            attempt += 1
 
 
 # C3b: at most one overflow-driven compression+retry per LLM call. A context that
@@ -1346,6 +1458,7 @@ async def _run_inner(
     if layered_checker is not None:
         controller.register(layered_checker)
 
+    empty_reply_retries = 0  # T2-2: bounded self-correction for blank final replies
     while True:
         forced = controller.should_stop(state)
         if forced is not None:
@@ -1363,6 +1476,8 @@ async def _run_inner(
         # D4b: inject the loop warning AFTER compression so a same-round compaction
         # cannot swallow it; it must be present in the sequence sent to the LLM.
         _maybe_inject_loop_warning(messages, state)
+        # C1: drain mid-run steered input at the turn boundary (before sanitize).
+        _drain_steering(session_id, messages)
         try:
             clean, report = sanitize(messages)
         except MessageContractError as exc:
@@ -1404,6 +1519,12 @@ async def _run_inner(
         messages.append(msg.model_dump())  # dict for JSON serializability (session persistence)
 
         if choice.finish_reason != "tool_calls":
+            # T2-2: a blank final reply (weak models) → nudge once more instead of
+            # returning "", bounded by the cap so it cannot loop forever.
+            if not (msg.content or "").strip() and empty_reply_retries < _MAX_EMPTY_REPLY_RETRIES:
+                empty_reply_retries += 1
+                messages.append({"role": "user", "content": _EMPTY_REPLY_CORRECTION})
+                continue
             break
 
         # AR3 three-phase (D1): plan (serial, original order) → execute (parallel,
@@ -1601,8 +1722,11 @@ async def run_stream(
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
-    Event types: tool_call, tool_result, text_delta, done.
-    text_delta events stream as tokens arrive from the LLM.
+    Event types: tool_call, tool_result, text_delta, reasoning_delta, done.
+    text_delta events stream as tokens arrive from the LLM; reasoning_delta carries
+    a backend reasoning trace (reasoning_content) when present, for display only
+    (kept out of the reply and never fed back to the LLM). To request reasoning,
+    set reasoning_effort / extra_body.reasoning in the target's params (agent.yaml).
 
     When `images` (a list of (bytes, mime)) is given, the user message is built
     as a content-block array (text + image_url blocks, base64-inlined) and the
@@ -1702,6 +1826,7 @@ async def run_stream(
     if layered_checker is not None:
         controller.register(layered_checker)
 
+    empty_reply_retries = 0  # T2-2: bounded self-correction for blank final replies
     while True:
         forced = controller.should_stop(state)
         if forced is not None:
@@ -1713,6 +1838,8 @@ async def run_stream(
         )
         # D4b: inject the loop warning after compression, before sanitize/LLM call.
         _maybe_inject_loop_warning(messages, state)
+        # C1: drain mid-run steered input at the turn boundary (before sanitize).
+        _drain_steering(session_id, messages)
         try:
             messages, report = sanitize(messages)
         except MessageContractError as exc:
@@ -1769,6 +1896,15 @@ async def run_stream(
             choice = chunk.choices[0]
             delta = choice.delta
 
+            # C4: surface a backend reasoning trace (reasoning_content; a non-standard
+            # delta field on e.g. DeepSeek-R1 / QwQ) so clients can display the thinking.
+            # isinstance(str) guards against absent / auto-mocked fields → no-op for
+            # standard backends. NOT added to reply text and NOT fed back to the LLM
+            # (some backends reject reasoning_content as input), so it stays out of messages.
+            reasoning = getattr(delta, "reasoning_content", None)
+            if isinstance(reasoning, str) and reasoning:
+                yield {"type": "reasoning_delta", "content": reasoning}
+
             if delta.content:
                 reply_parts.append(delta.content)
                 yield {"type": "text_delta", "content": delta.content}
@@ -1794,6 +1930,11 @@ async def run_stream(
 
         if finish_reason != "tool_calls":
             reply = "".join(reply_parts)
+            # T2-2: blank final reply → nudge once more (bounded) instead of ending empty.
+            if not reply.strip() and empty_reply_retries < _MAX_EMPTY_REPLY_RETRIES:
+                empty_reply_retries += 1
+                messages.append({"role": "user", "content": _EMPTY_REPLY_CORRECTION})
+                continue
             break
 
         # Reconstruct assistant message with tool_calls for messages list
