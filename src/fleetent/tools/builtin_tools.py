@@ -155,18 +155,27 @@ def read_skill(name: str, tool_context: ToolContext | None = None) -> str:
 
 
 def _record_skill_hit(name: str, tool_context: ToolContext | None) -> None:
-    """Record a successful read_skill load for per-skill observability.
+    """Record a successful read_skill load as an agent-side observability trace event.
 
-    Best-effort: a hit-recording failure (DB unavailable, etc.) is logged and
-    swallowed so it never blocks returning the skill body. Imported lazily to avoid
-    a builtin_tools -> platform import cycle.
+    Best-effort: a recording failure (DB unavailable, etc.) is logged and swallowed so it
+    never blocks returning the skill body. Writes to the agent's observability trace —
+    never to a platform store (agent/platform decoupling); the platform reads per-skill
+    metrics from the trace.
     """
-    from fleetent.platform.skill_management import skill_admin_store
+    from fleetent.observability.traces import TraceEvent, record_trace_event
 
     agent_id = tool_context.agent_name if tool_context else None
     session_id = tool_context.session_id if tool_context else None
     try:
-        skill_admin_store.record_hit(name, agent_id, session_id)
+        record_trace_event(
+            TraceEvent(
+                run_id=session_id or "",
+                event_type="skill_hit",
+                payload={"skill_name": name},
+                session_id=session_id,
+                agent_id=agent_id,
+            )
+        )
     except Exception as exc:  # noqa: BLE001 — observability is a side channel; never block
         logger.warning("skill_hit_record_failed", extra={"skill": name, "error": str(exc)})
 

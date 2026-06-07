@@ -6,6 +6,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
+from fleetent.observability.traces import TraceEvent, record_trace_event
 from fleetent.platform.skill_management import skill_admin_store
 
 
@@ -25,11 +26,23 @@ def db(tmp_path, monkeypatch):
     return db_path
 
 
-def test_record_hit_then_observe_returns_real_counts(db):
-    skill_admin_store.record_hit("crm-ops", "agent-a", "sess-1")
-    skill_admin_store.record_hit("crm-ops", "agent-a", "sess-1")  # same session
-    skill_admin_store.record_hit("crm-ops", "agent-b", "sess-2")
-    skill_admin_store.record_hit("other", "agent-a", "sess-3")
+def _emit_hit(skill: str, session: str | None, agent: str = "agent-a") -> None:
+    record_trace_event(
+        TraceEvent(
+            run_id=session or "",
+            event_type="skill_hit",
+            payload={"skill_name": skill},
+            session_id=session,
+            agent_id=agent,
+        )
+    )
+
+
+def test_skill_hit_traces_then_observe_returns_real_counts(db):
+    _emit_hit("crm-ops", "sess-1", "agent-a")
+    _emit_hit("crm-ops", "sess-1", "agent-a")  # same session
+    _emit_hit("crm-ops", "sess-2", "agent-b")
+    _emit_hit("other", "sess-3", "agent-a")
 
     obs = skill_admin_store.observe("crm-ops")
     assert obs["skill_name"] == "crm-ops"
@@ -45,9 +58,9 @@ def test_observe_unhit_skill_is_zero_not_stale(db):
     assert obs["stale"] is False
 
 
-def test_record_hit_tolerates_null_session(db):
-    # CLI runs have no session id; the row is still recorded but excluded from sessions.
-    skill_admin_store.record_hit("cli-skill", None, None)
+def test_observe_tolerates_null_session(db):
+    # CLI runs have no session id; the hit is counted but excluded from sessions.
+    _emit_hit("cli-skill", None)
     obs = skill_admin_store.observe("cli-skill")
     assert obs["hits"] == 1
     assert obs["sessions"] == []
