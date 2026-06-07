@@ -618,3 +618,42 @@ def test_repo_agent_yaml_example_loads_as_single_agent_file() -> None:
     assert agent.rerank.api_key_env == "FLEETENT_RERANK_API_KEY"
     assert agent.knowledge.enabled is True
     assert agent.knowledge.bindings[0].kb_id == "pilot-kb"
+
+
+# ── dead-field removal tests ──────────────────────────────────────────────────
+
+
+def test_microsandbox_url_rejected() -> None:
+    """microsandbox_url is a dead field and must be rejected (extra='forbid')."""
+    doc = _valid_doc()
+    doc["microsandbox_url"] = "http://host.docker.internal:7777"
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
+
+
+def test_image_gen_url_rejected() -> None:
+    doc = _valid_doc()
+    doc["image_gen_url"] = "http://localhost:9004/v1/images/generations"
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
+
+
+def test_image_gen_model_rejected() -> None:
+    doc = _valid_doc()
+    doc["image_gen_model"] = "flux-schnell"
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
+
+
+def test_vision_url_rejected() -> None:
+    doc = _valid_doc()
+    doc["vision_url"] = "http://localhost:9005/v1"
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)
+
+
+def test_vision_model_rejected() -> None:
+    doc = _valid_doc()
+    doc["vision_model"] = "llava"
+    with pytest.raises(ValidationError):
+        agent_config.AgentFile.model_validate(doc)

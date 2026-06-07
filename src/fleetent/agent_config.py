@@ -275,16 +275,11 @@ class AgentFile(BaseModel):
     provider_failure_threshold: int = 3
     provider_cooldown_seconds: int = 60
     # ── per-agent deployment / process knobs (defaults mirror Settings) ──
-    microsandbox_url: str = "http://host.docker.internal:7777"
     log_format: str = "console"
     session_ttl_days: int = 30
     session_max_total_mb: int = 1024
     session_max_count: int = 10000
     session_cleanup_interval_seconds: float = 3600.0
-    image_gen_url: str = ""
-    image_gen_model: str = "default"
-    vision_url: str = ""
-    vision_model: str = "default"
     disabled_skills: list[str] = Field(default_factory=list)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     diagnostics: DiagnosticsSettings = Field(default_factory=DiagnosticsSettings)
