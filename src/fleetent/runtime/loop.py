@@ -3,10 +3,12 @@
 import asyncio
 import inspect
 import json
+import random
 import time
 import uuid
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Literal, cast
 
 from openai import APIStatusError, AsyncOpenAI, AsyncStream, RateLimitError
@@ -856,19 +858,24 @@ async def _call_policy_chat(
     cache = get_health_cache()
     last_exc: Exception | None = None
     candidates = _policy_candidates(chain, cache)
-    for resolved in candidates:
+    for i, resolved in enumerate(candidates):
         model = _model_name(resolved)
+        is_last = i == len(candidates) - 1
         try:
             api_key = policy.require_api_key(resolved)
             client = _build_async_client(resolved, api_key)
             create_completion = cast(Any, client.chat.completions.create)
-            response = await create_completion(
+            call = partial(
+                create_completion,
                 model=model,
                 messages=messages,
                 tools=schemas,
                 max_tokens=resolved.max_tokens,
                 **resolved.params,
             )
+            # Retry transient errors (e.g. 429) only on the last/only candidate;
+            # earlier candidates fall back immediately, preserving fallback semantics.
+            response = await _create_with_transient_retry(call, retry=is_last)
             cache.record_success(model)
             return response, resolved
         except Exception as exc:
@@ -888,13 +895,15 @@ async def _stream_policy_chat(
     cache = get_health_cache()
     last_exc: Exception | None = None
     candidates = _policy_candidates(chain, cache)
-    for resolved in candidates:
+    for i, resolved in enumerate(candidates):
         model = _model_name(resolved)
+        is_last = i == len(candidates) - 1
         try:
             api_key = policy.require_api_key(resolved)
             client = _build_async_client(resolved, api_key)
             create_completion = cast(Any, client.chat.completions.create)
-            stream = await create_completion(
+            call = partial(
+                create_completion,
                 model=model,
                 messages=messages,
                 tools=schemas,
@@ -903,6 +912,7 @@ async def _stream_policy_chat(
                 stream_options={"include_usage": True},
                 **resolved.params,
             )
+            stream = await _create_with_transient_retry(call, retry=is_last)
             cache.record_success(model)
             return stream, resolved
         except Exception as exc:
@@ -918,6 +928,85 @@ def _policy_candidates(
 ) -> tuple[ResolvedModelConfig, ...]:
     available = tuple(entry for entry in chain if cache.is_available(_model_name(entry)))
     return available or chain
+
+
+# T2-1: same-target transient-error backoff retry. A transient failure (should_retry
+# and not should_compress — e.g. 429) is retried on the SAME target with backoff
+# before falling through to model failover. context_overflow (should_compress) is
+# excluded (handled by _call_with_overflow_retry).
+_MAX_TRANSIENT_RETRIES = 2
+_RETRY_BASE_DELAY = 1.0
+_RETRY_MAX_DELAY = 30.0
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """Parse a numeric Retry-After (seconds) header off an APIStatusError, else None.
+
+    The HTTP-date form is not parsed (caller falls back to exponential backoff).
+    """
+    resp = getattr(exc, "response", None)
+    headers = getattr(resp, "headers", None)
+    if headers is None:
+        return None
+    raw = headers.get("retry-after")
+    if raw is None:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def _backoff_delay(attempt: int, exc: Exception) -> float:
+    """Delay before the next same-target retry (attempt is 0-based).
+
+    Respects a Retry-After header when present; otherwise jittered exponential
+    backoff capped at `_RETRY_MAX_DELAY`. Patched to 0 in tests.
+    """
+    after = _retry_after_seconds(exc)
+    if after is not None:
+        return min(after, _RETRY_MAX_DELAY)
+    base = min(_RETRY_BASE_DELAY * (2.0**attempt), _RETRY_MAX_DELAY)
+    return base * (0.5 + 0.5 * random.random())  # half-to-full jitter (anti-herd)
+
+
+async def _create_with_transient_retry(
+    do_call: Callable[..., Coroutine[Any, Any, Any]], *, retry: bool = True
+) -> Any:
+    """Run ``do_call()`` (an awaitable factory), retrying transient errors on the
+    same target with backoff (T2-1).
+
+    ``retry=False`` runs a single attempt — used for non-last fallback candidates,
+    which fall back immediately on a switchable error rather than retrying. When
+    retrying, re-raises on a non-transient error (including context_overflow /
+    should_compress) or once the retry cap is reached, so the caller's failover logic
+    decides whether to switch target (covers the single/last-provider case where
+    there is nothing to fall back to).
+    """
+    if not retry:
+        return await do_call()
+    attempt = 0
+    while True:
+        try:
+            return await do_call()
+        except Exception as exc:
+            cls = classify(exc)
+            if (
+                isinstance(exc, ModelConfigError)
+                or not cls.should_retry
+                or cls.should_compress
+                or attempt >= _MAX_TRANSIENT_RETRIES
+            ):
+                raise
+            delay = _backoff_delay(attempt, exc)
+            _logger.warn(
+                "model_transient_retry",
+                attempt=attempt + 1,
+                delay=round(delay, 2),
+                error=str(exc),
+            )
+            await asyncio.sleep(delay)
+            attempt += 1
 
 
 # C3b: at most one overflow-driven compression+retry per LLM call. A context that

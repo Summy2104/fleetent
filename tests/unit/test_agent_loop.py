@@ -161,6 +161,12 @@ async def test_run_stream_no_reasoning_delta_for_plain_stream(mock_client):
     assert not any(e["type"] == "reasoning_delta" for e in events)
 
 
+@pytest.fixture(autouse=True)
+def _fast_backoff(monkeypatch):
+    """T2-1: zero same-target retry backoff so retry/exhaustion tests don't sleep."""
+    monkeypatch.setattr(al, "_backoff_delay", lambda attempt, exc: 0.0, raising=False)
+
+
 @pytest.fixture
 def mock_client(monkeypatch) -> AsyncMock:
     """Patch all external I/O in agent_loop, return the mock LLM client."""
@@ -835,7 +841,7 @@ async def test_run_falls_back_on_503(mock_client_fb):
 
 async def test_run_exhausted_fallbacks_raises(mock_client_fb):
     mock_client_fb.chat.completions.create = AsyncMock(
-        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+        side_effect=[_mk_http_error(429, RateLimitError)] * 4
     )
     with pytest.raises(RateLimitError):
         await al.run([{"role": "user", "content": "hi"}])
@@ -865,7 +871,7 @@ async def test_run_stream_falls_back_on_429(mock_client_fb):
 
 async def test_run_stream_exhausted_yields_error(mock_client_fb):
     mock_client_fb.chat.completions.create = AsyncMock(
-        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+        side_effect=[_mk_http_error(429, RateLimitError)] * 4
     )
     events = [e async for e in al.run_stream("hi")]
     assert any(e["type"] == "error" for e in events)
@@ -939,7 +945,7 @@ async def test_call_with_fallback_raises_on_non_switchable(mock_client_fb):
 
 async def test_run_logs_error_category_on_exhaustion(mock_client_fb, monkeypatch):
     mock_client_fb.chat.completions.create = AsyncMock(
-        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+        side_effect=[_mk_http_error(429, RateLimitError)] * 4
     )
     captured: dict = {}
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
@@ -958,7 +964,7 @@ async def test_run_no_error_category_on_success(mock_client, monkeypatch):
 
 async def test_run_stream_logs_error_category_on_exhaustion(mock_client_fb, monkeypatch):
     mock_client_fb.chat.completions.create = AsyncMock(
-        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+        side_effect=[_mk_http_error(429, RateLimitError)] * 4
     )
     captured: dict = {}
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
@@ -1578,7 +1584,7 @@ async def test_call_all_cooling_does_not_return_empty(mock_client_fb, monkeypatc
     cache.record_failure("primary-model")
     cache.record_failure("fallback-model")
     mock_client_fb.chat.completions.create = AsyncMock(
-        side_effect=[_mk_http_error(429, RateLimitError), _mk_http_error(429, RateLimitError)]
+        side_effect=[_mk_http_error(429, RateLimitError)] * 4
     )
     with pytest.raises(RateLimitError):
         await al.run([{"role": "user", "content": "hi"}])
