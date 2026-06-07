@@ -25,6 +25,21 @@ def derive_env_name(agent_name: str, slot: str) -> str:
     return f"{_ENV_NAME_PREFIX}_{_upper_snake(agent_name)}_{_upper_snake(slot)}"
 
 
+def derive_provider_env_name(provider_id: str) -> str:
+    """Derive the stable env-var name for a provider's inline API key."""
+    return f"FLEETENT_MODEL_{_upper_snake(provider_id)}_API_KEY"
+
+
+def derive_kb_env_name(connector_id: str, field_key: str) -> str:
+    """Derive the env-var name for a KB connector credential field.
+
+    ``field_key`` is the connector config key (e.g. ``access_token_env``); the trailing
+    ``_env`` is dropped so the derived var name reads ``FLEETENT_KB_<ID>_ACCESS_TOKEN``.
+    """
+    slot = re.sub(r"_env$", "", field_key)
+    return f"FLEETENT_KB_{_upper_snake(connector_id)}_{_upper_snake(slot)}"
+
+
 def assert_no_env_collisions(env_names: list[str]) -> None:
     """Fail loud when two slots map to the same env-var name."""
     seen: set[str] = set()

@@ -44,6 +44,25 @@ def test_derive_env_name_sanitizes_non_alnum():
     )
 
 
+def test_derive_provider_env_name():
+    assert (
+        credential_service.derive_provider_env_name("fast-claude")
+        == "FLEETENT_MODEL_FAST_CLAUDE_API_KEY"
+    )
+
+
+def test_derive_kb_env_name_strips_env_suffix():
+    # field key carries the trailing _env; the derived var name drops it
+    assert (
+        credential_service.derive_kb_env_name("acme-drive", "access_token_env")
+        == "FLEETENT_KB_ACME_DRIVE_ACCESS_TOKEN"
+    )
+    assert (
+        credential_service.derive_kb_env_name("acme-conf", "api_token_env")
+        == "FLEETENT_KB_ACME_CONF_API_TOKEN"
+    )
+
+
 def test_collision_check_raises_on_duplicate_env_names():
     with pytest.raises(ValueError):
         credential_service.assert_no_env_collisions(["A_TOK", "B_TOK", "A_TOK"])

@@ -6,9 +6,9 @@
 
 ## 2. 自动 env 名派生（来源实体稳定派生）
 
-- [ ] 2.1 Write failing tests: provider 输值派生 `FLEETENT_MODEL_<ID>_API_KEY`、KB token 派生 `FLEETENT_KB_<ID>_<SLOT>`（大写、`-`→`_`）；派生名写回实体 `*_env`；撞名 fail loud（tests/integration）
-- [ ] 2.2 Implement: 派生函数（复用现有 `_env_var_names`/派生规则）+ 实体 `*_env` 回填 + 撞名校验
-- [ ] 2.3 Verify green: 跑派生测试
+- [x] 2.1 Write failing tests: provider 输值派生 `FLEETENT_MODEL_<ID>_API_KEY`、KB token 派生 `FLEETENT_KB_<ID>_<SLOT>`（大写、`-`→`_`）；派生名写回实体 `*_env`；撞名 fail loud（tests/integration）
+- [x] 2.2 Implement: 派生函数（复用现有 `_env_var_names`/派生规则）+ 实体 `*_env` 回填 + 撞名校验
+- [x] 2.3 Verify green: 跑派生测试
 
 ## 3. 凭据 API 接受 inline 值 + 回填引用
 
