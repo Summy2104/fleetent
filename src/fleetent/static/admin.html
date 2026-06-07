@@ -3157,7 +3157,7 @@ function agmRenderChannels() {
 }
 function agmAddChannel() {
   const pf = $("agm-ch-platform").value.trim(), ch = $("agm-ch-id").value.trim();
-  if (!pf || !ch) return;
+  if (!pf || !ch) { toast("Enter both platform and channel_id", "error"); return; }
   if (!AGM_CHANNELS.some(c => c.platform === pf && c.channel_id === ch)) AGM_CHANNELS.push({ platform: pf, channel_id: ch });
   $("agm-ch-platform").value = ""; $("agm-ch-id").value = "";
   agmRenderChannels();
