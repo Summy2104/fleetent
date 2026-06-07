@@ -34,6 +34,8 @@ from fleetent.runtime.cancellation import CancellationChecker, CancelToken
 from fleetent.runtime.context import (
     AntiFlapState,
     apply_anti_flap,
+    compress_for_context_overflow,
+    estimate_tokens,
     load_anti_flap_state,
     maybe_compress,
     save_anti_flap_state,
@@ -901,6 +903,99 @@ def _policy_candidates(
     return available or chain
 
 
+# C3b: at most one overflow-driven compression+retry per LLM call. A context that
+# does not shrink (no-progress guard) or that overflows again after the cap stops
+# here, so an un-shrinkable context cannot loop "compress → still overflow → ...".
+_MAX_OVERFLOW_COMPRESSIONS = 1
+
+
+async def _call_with_overflow_retry(
+    policy: ModelPolicySnapshot,
+    chain: tuple[ResolvedModelConfig, ...],
+    messages: list[Any],
+    schemas: list[Any],
+    *,
+    session_id: str | None,
+    user_id: str | None,
+    agent_name: str | None,
+) -> tuple[Any, ResolvedModelConfig]:
+    """Call the LLM; on a context-overflow error, compress in place and retry (C3b).
+
+    Wires the previously-dormant `error_classifier.should_compress` flag +
+    `compress_for_context_overflow`: a "context too long" error triggers an
+    unconditional compression of `messages` (mutated in place so the caller's list
+    stays live) and one retry on the SAME target (context_overflow does not switch
+    model). The guard re-raises when compression makes no progress or the retry cap
+    is hit, so an un-shrinkable context cannot loop.
+    """
+    attempts = 0
+    while True:
+        try:
+            return await _call_policy_chat(policy, chain, messages, schemas)
+        except Exception as exc:
+            if not classify(exc).should_compress or attempts >= _MAX_OVERFLOW_COMPRESSIONS:
+                raise
+            before = estimate_tokens(messages)
+            compressed = compress_for_context_overflow(
+                messages, session_id=session_id, user_id=user_id, agent_name=agent_name
+            )
+            if estimate_tokens(compressed) >= before:
+                raise  # no-progress guard: compression did not shrink → do not loop
+            messages[:] = compressed
+            attempts += 1
+            _logger.warn(
+                "context_overflow_compressed_retry",
+                attempt=attempts,
+                tokens_before=before,
+                tokens_after=estimate_tokens(messages),
+                session_id=session_id,
+            )
+
+
+async def _stream_with_overflow_retry(
+    policy: ModelPolicySnapshot,
+    chain: tuple[ResolvedModelConfig, ...],
+    messages: list[Any],
+    schemas: list[Any],
+    *,
+    session_id: str | None,
+    user_id: str | None,
+    agent_name: str | None,
+) -> tuple[Any, ResolvedModelConfig, list[Any]]:
+    """Streaming variant of `_call_with_overflow_retry` (C3b).
+
+    Returns `(stream, active_cfg, messages)`; on overflow the messages are
+    compressed into a NEW list, so the caller MUST rebind to the returned list
+    (run_stream owns its messages locally). Same no-progress + cap guard. Overflow
+    on the streaming path surfaces at stream creation (the 400 before any chunk),
+    so no partial output has been emitted when we recover.
+    """
+    attempts = 0
+    current = messages
+    while True:
+        try:
+            stream, cfg = await _stream_policy_chat(policy, chain, current, schemas)
+            return stream, cfg, current
+        except Exception as exc:
+            if not classify(exc).should_compress or attempts >= _MAX_OVERFLOW_COMPRESSIONS:
+                raise
+            before = estimate_tokens(current)
+            compressed = compress_for_context_overflow(
+                current, session_id=session_id, user_id=user_id, agent_name=agent_name
+            )
+            if estimate_tokens(compressed) >= before:
+                raise  # no-progress guard
+            current = compressed
+            attempts += 1
+            _logger.warn(
+                "context_overflow_compressed_retry_stream",
+                attempt=attempts,
+                tokens_before=before,
+                tokens_after=estimate_tokens(current),
+                session_id=session_id,
+            )
+
+
 def _log_run_error(
     exc: Exception,
     messages: list[Any],
@@ -1277,7 +1372,15 @@ async def _run_inner(
         messages[:] = clean
         _accumulate_repairs(hygiene_repairs, report)
         try:
-            response, active_cfg = await _call_policy_chat(policy, route_chain, messages, schemas)
+            response, active_cfg = await _call_with_overflow_retry(
+                policy,
+                route_chain,
+                messages,
+                schemas,
+                session_id=session_id,
+                user_id=user_id,
+                agent_name=agent_name,
+            )
             model_used = _model_name(active_cfg)
         except Exception as exc:
             # Record the error class on the trace before propagating (design D4).
@@ -1633,8 +1736,14 @@ async def run_stream(
         stream_schemas = _filter_code_execution(stream_schemas, sandbox_mode, agent_features)
 
         try:
-            stream, active_cfg = await _stream_policy_chat(
-                policy, route_chain, messages, stream_schemas
+            stream, active_cfg, messages = await _stream_with_overflow_retry(
+                policy,
+                route_chain,
+                messages,
+                stream_schemas,
+                session_id=session_id,
+                user_id=user_id,
+                agent_name=agent_name,
             )
             model_used = _model_name(active_cfg)
             route_chain = (active_cfg,)
