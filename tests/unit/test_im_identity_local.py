@@ -84,7 +84,7 @@ async def test_telegram_handler_resolves_identity_without_platform_db(monkeypatc
 
     with patch("telegram.ext.Application") as app_cls:
         app_cls.builder.return_value = FakeBuilder()
-        telegram.create_app("ownerA", {"bot_token": "b"})
+        telegram.create_app("support", "ownerA", {"bot_token": "b"})
 
     handler = captured["handler"]
     fn = handler.callback

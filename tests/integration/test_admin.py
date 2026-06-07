@@ -895,14 +895,14 @@ def test_seed_connectors_imports_env_tokens(monkeypatch):
     import fleetent.platform.im_gateway_management.connector_store as store
     import fleetent.user_store as user_store
 
-    # Slack is per-agent now; seed covers owner-level platforms (Telegram).
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tg-env")
+    # Slack and Telegram are per-agent now; seed covers owner-level platforms (WhatsApp).
+    monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "wa-env")
 
     out, _, code = run_admin("seed-connectors")
 
     assert code == 0
-    assert "telegram" in out
-    assert store.get_connector(user_store.admin_owner_id(), "telegram")["enabled"] == 1
+    assert "whatsapp" in out
+    assert store.get_connector(user_store.admin_owner_id(), "whatsapp")["enabled"] == 1
 
 
 def test_im_channel_allow_list_disallow():

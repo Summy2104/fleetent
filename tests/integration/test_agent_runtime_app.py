@@ -12,12 +12,13 @@ from fleetent.runtime import agent_app
 class _FakeSupervisor:
     def __init__(self):
         self.started: list[str] = []
+        self.stopped = False
 
     async def start(self, agent_name: str) -> None:
         self.started.append(agent_name)
 
     async def stop_all(self) -> None:
-        pass
+        self.stopped = True
 
 
 def _write_home(tmp_path, name="support", **fields):
@@ -58,6 +59,39 @@ async def test_boot_skips_im_when_disabled(tmp_path):
     sup = _FakeSupervisor()
     await agent_app.boot("support", home=home, supervisor=sup, with_infra=False, start_im=False)
     assert sup.started == []
+
+
+async def test_boot_starts_agent_telegram_connector(tmp_path):
+    home = _write_home(tmp_path)
+    sup, tg = _FakeSupervisor(), _FakeSupervisor()
+    await agent_app.boot(
+        "support", home=home, supervisor=sup, telegram_supervisor=tg, with_infra=False
+    )
+    assert tg.started == ["support"]
+
+
+async def test_boot_skips_telegram_when_im_disabled(tmp_path):
+    home = _write_home(tmp_path)
+    sup, tg = _FakeSupervisor(), _FakeSupervisor()
+    await agent_app.boot(
+        "support",
+        home=home,
+        supervisor=sup,
+        telegram_supervisor=tg,
+        with_infra=False,
+        start_im=False,
+    )
+    assert tg.started == []
+
+
+async def test_runtime_stop_stops_both_supervisors(tmp_path):
+    home = _write_home(tmp_path)
+    sup, tg = _FakeSupervisor(), _FakeSupervisor()
+    rt = await agent_app.boot(
+        "support", home=home, supervisor=sup, telegram_supervisor=tg, with_infra=False
+    )
+    await rt.stop()
+    assert sup.stopped and tg.stopped
 
 
 def test_build_app_serves_chat_ws_health_and_no_admin():

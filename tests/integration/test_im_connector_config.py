@@ -35,9 +35,9 @@ def test_resolve_prefers_db_config(db, monkeypatch):
 
 
 def test_resolve_falls_back_to_env(db, monkeypatch):
-    # Slack is per-agent now; owner-level .env fallback covers Telegram.
-    _env(monkeypatch, telegram_bot_token="tg-env")
-    assert icc.resolve(_owner(), "telegram") == {"bot_token": "tg-env"}
+    # Slack and Telegram are per-agent now; owner-level .env fallback covers WhatsApp.
+    _env(monkeypatch, whatsapp_access_token="wa-env")
+    assert icc.resolve(_owner(), "whatsapp") == {"access_token": "wa-env"}
 
 
 def test_resolve_masked_exposes_only_last4(db, monkeypatch):
@@ -55,19 +55,21 @@ def test_set_config_writes_db(db, monkeypatch):
 
 
 def test_seed_from_env_populates_and_enables(db, monkeypatch):
-    _env(monkeypatch, telegram_bot_token="tg-e")  # slack is per-agent, not seeded
+    _env(monkeypatch, whatsapp_access_token="wa-e")  # slack/telegram are per-agent, not seeded
     seeded = icc.seed_from_env()
-    assert "telegram" in seeded
-    assert "slack" not in seeded  # owner-level Slack removed
-    telegram = ics.get_connector(_owner(), "telegram")
-    assert json.loads(telegram["config"]) == {"bot_token": "tg-e"}
-    assert telegram["enabled"] == 1
+    assert "whatsapp" in seeded
+    assert (
+        "slack" not in seeded and "telegram" not in seeded
+    )  # owner-level per-agent platforms removed
+    whatsapp = ics.get_connector(_owner(), "whatsapp")
+    assert json.loads(whatsapp["config"]) == {"access_token": "wa-e"}
+    assert whatsapp["enabled"] == 1
 
 
 def test_platform_config_keys_schema():
     keys = icc.PLATFORM_CONFIG_KEYS
-    assert keys["telegram"] == ["bot_token"]
     assert "slack" not in keys  # per-agent (per-agent-slack-connector), not owner-level
+    assert "telegram" not in keys  # per-agent (per-agent-telegram-connector), not owner-level
     assert keys["whatsapp"] == [
         "phone_number_id",
         "access_token",
@@ -85,14 +87,15 @@ def test_resolve_masked_masks_whatsapp_access_token(db, monkeypatch):
 
 
 def test_seed_is_idempotent_unless_force(db, monkeypatch):
-    _env(monkeypatch, telegram_bot_token="tg-e")
+    _env(monkeypatch, whatsapp_access_token="wa-e")
     icc.seed_from_env()
-    # change env, seed again without force -> telegram config unchanged
-    _env(monkeypatch, telegram_bot_token="tg-CHANGED")
+    # change env, seed again without force -> whatsapp config unchanged
+    _env(monkeypatch, whatsapp_access_token="wa-CHANGED")
     icc.seed_from_env()
-    assert json.loads(ics.get_connector(_owner(), "telegram")["config"])["bot_token"] == "tg-e"
+    assert json.loads(ics.get_connector(_owner(), "whatsapp")["config"])["access_token"] == "wa-e"
     # with force -> overwritten
     icc.seed_from_env(force=True)
     assert (
-        json.loads(ics.get_connector(_owner(), "telegram")["config"])["bot_token"] == "tg-CHANGED"
+        json.loads(ics.get_connector(_owner(), "whatsapp")["config"])["access_token"]
+        == "wa-CHANGED"
     )

@@ -25,7 +25,6 @@ from fleetent.governance.permission_gate import (
     cleanup_stale_approvals,
     list_approvals,
 )
-from fleetent.im_gateway import telegram as telegram_adapter
 from fleetent.im_gateway.slack_supervisor import SlackSupervisor
 from fleetent.integrations.sandbox import (
     Mode,
@@ -81,13 +80,10 @@ def _admin_login_url(router_prefix: str) -> str:
     return f"http://{display_host}:{port}{router_prefix}/ui"
 
 
-# Owner-level connector manager. Slack is intentionally absent: it is per-agent,
-# supervised by `_slack_supervisor` from the agent index (per-agent-slack-connector).
-_connector_manager = connector_manager.ConnectorManager(
-    factories={
-        "telegram": telegram_adapter.run,
-    }
-)
+# Owner-level connector manager. Slack and Telegram are intentionally absent: both are
+# per-agent, supervised from the agent index (per-agent-slack-connector /
+# per-agent-telegram-connector). No owner-level adapter factories remain.
+_connector_manager = connector_manager.ConnectorManager(factories={})
 
 # Per-agent Slack supervisor: one Socket Mode connection per agent declaring
 # `connectors.slack`, sourced from the agent index.
@@ -416,16 +412,10 @@ def _slack_adapter_configured() -> bool:
 
 
 def _telegram_adapter_configured() -> bool:
-    """Whether the admin owner has a Telegram connector configured (owner-level IM).
-
-    Defensive: a missing/unmigrated connector store must not break /health."""
-    try:
-        from fleetent import user_store
-        from fleetent.platform.im_gateway_management import connector_config
-
-        return bool(connector_config.resolve(user_store.admin_owner_id(), "telegram"))
-    except Exception:
-        return False
+    """Whether any indexed agent declares a per-agent Telegram connector."""
+    return any(
+        agent.connectors.telegram is not None for agent in agent_config.current().agents.values()
+    )
 
 
 @app.get("/health")
