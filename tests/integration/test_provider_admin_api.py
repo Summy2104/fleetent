@@ -82,6 +82,16 @@ def test_add_provider_masks_key_in_response(client):
     assert r.json()["api_key_set"] is True
 
 
+def test_long_key_shows_first_last_hint(client):
+    token, _ = _session_for("admin")
+    r = _add(client, token, pid="hinted", api_key="sk-ABCD1234567890wxyz")
+    assert r.status_code == 200, r.text
+    # a first4…last4 hint to verify the key, never the full secret
+    assert r.json()["api_key"] == "sk-A…wxyz"
+    assert "ABCD1234567890" not in r.json()["api_key"]
+    assert r.json()["api_key_set"] is True
+
+
 def test_add_provider_vendor_protocol_env_params_roundtrip(client):
     token, _ = _session_for("admin")
     r = _add(

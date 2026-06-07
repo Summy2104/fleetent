@@ -105,11 +105,21 @@ def _require_admin(authorization: str | None) -> user_store.User:
 # --- masking serializer -------------------------------------------------------
 
 
+def _mask_key(key: str | None) -> str | None:
+    """Mask a secret for display: a ``first4…last4`` hint to verify the configured key
+    without exposing it. Keys too short to reveal safely stay fully masked."""
+    if not key:
+        return None
+    if len(key) < 12:
+        return "****"
+    return f"{key[:4]}…{key[-4:]}"
+
+
 def _serialize(provider: dict[str, Any]) -> dict[str, Any]:
     """Copy a provider row for output, masking the api_key (never returned plaintext)."""
     out = dict(provider)
     key = out.get("api_key")
-    out["api_key"] = "****" if key else None
+    out["api_key"] = _mask_key(key)
     out["api_key_set"] = bool(key)
     return out
 
