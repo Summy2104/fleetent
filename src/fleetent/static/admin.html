@@ -1291,7 +1291,7 @@
         <input id="ag-allowed-tools" placeholder="allowed_tools (comma-separated, e.g. shell, github__*)" autocomplete="off">
         <div id="ag-create-extra">
           <h4 style="margin:14px 0 4px;">Models</h4>
-          <div class="muted" style="font-size:12px; margin-bottom:6px;">Pick the models this agent may use, then route each tier — add more models as ordered fallbacks.</div>
+          <div class="muted" style="font-size:12px; margin-bottom:6px;">Pick the models this agent may use, then add routers (custom names) — each routes to one or more models as ordered fallbacks.</div>
           <div id="ag-model-overrides"></div>
         </div>
         <div id="ag-bind-config">
@@ -2746,8 +2746,7 @@ async function agCreate() {
 // to an ordered fallback chain of {target, max_tokens}. Models are CONFIGURED providers.
 // AG_ROUTE_SEL holds the router state; targets come from the multi-select widget DOM.
 let AG_PROVIDERS = [];
-const AG_ROUTES = ["default", "fast", "reasoning"];
-let AG_ROUTE_SEL = {};  // {route: [{target, max_tokens}]}
+let AG_ROUTERS = [];  // [{name, entries:[{target, max_tokens}]}] — custom-named, ordered
 function _agProviderLabel(p) {
   return p ? `${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}` : "";
 }
@@ -2764,7 +2763,7 @@ function agRenderModelOverrides(selectedTargets) {
   box.innerHTML = `
     <div class="muted" style="font-size:12px; margin:4px 0;">Models (this agent may use)</div>
     <div id="ag-models-ms" style="margin-bottom:12px;"></div>
-    <div class="muted" style="font-size:12px; margin:4px 0;">Routing — each tier picks a model; add more as ordered fallbacks</div>
+    <div class="muted" style="font-size:12px; margin:4px 0;">Routing — add a router (custom name), then route it to one or more models (ordered fallbacks)</div>
     <div id="ag-router"></div>`;
   agMsWidget("ag-models-ms", "agmo-target",
     AG_PROVIDERS.map(p => ({
@@ -2784,38 +2783,45 @@ function agRenderModelOverrides(selectedTargets) {
 function agRenderRouter() {
   const router = $("ag-router");
   const chosen = agChosenTargets();
+  for (const rt of AG_ROUTERS) {  // drop entries whose model was unselected
+    rt.entries = rt.entries.filter(e => !e.target || chosen.includes(e.target));
+  }
   if (!chosen.length) {
-    router.innerHTML = `<div class="muted" style="font-size:12px;">Select at least one model to route.</div>`;
+    router.innerHTML = `<div class="muted" style="font-size:12px;">Select at least one model to add a router.</div>`;
     return;
   }
   const provById = Object.fromEntries(AG_PROVIDERS.map(p => [p.id, p]));
-  for (const r of AG_ROUTES) {  // drop entries whose model was unselected
-    AG_ROUTE_SEL[r] = (AG_ROUTE_SEL[r] || []).filter(e => !e.target || chosen.includes(e.target));
-  }
-  router.innerHTML = AG_ROUTES.map(r => {
-    const rows = (AG_ROUTE_SEL[r] || []).map((e, i) => {
+  const addBtn = `<div class="row" style="justify-content:flex-end; margin-bottom:6px;">
+    <button type="button" class="small ghost" onclick="agRouterAddRoute()">+ router</button></div>`;
+  const blocks = AG_ROUTERS.map((rt, ri) => {
+    const rows = rt.entries.map((e, ei) => {
       const opts = `<option value="">— pick model —</option>` + chosen.map(pid =>
         `<option value="${esc(pid)}" ${e.target === pid ? "selected" : ""}>${_agProviderLabel(provById[pid])}</option>`).join("");
       return `<div class="row" style="gap:6px; align-items:center; margin:3px 0;">
-        <select onchange="agRouterSet('${r}',${i},'target',this.value)" style="flex:1;">${opts}</select>
+        <select onchange="agRouterSetEntry(${ri},${ei},'target',this.value)" style="flex:1;">${opts}</select>
         <input type="number" min="1" placeholder="max_tokens" value="${e.max_tokens ?? ""}"
-          oninput="agRouterSet('${r}',${i},'max_tokens',this.value)" style="width:120px;">
-        <button type="button" class="small ghost" onclick="agRouterRemove('${r}',${i})">✕</button>
+          oninput="agRouterSetEntry(${ri},${ei},'max_tokens',this.value)" style="width:120px;">
+        <button type="button" class="small ghost" onclick="agRouterRemoveModel(${ri},${ei})">✕</button>
       </div>`;
     }).join("");
-    return `<div style="margin-bottom:10px;">
-      <div class="row" style="justify-content:space-between; align-items:center;">
-        <strong style="font-size:13px;">${r}</strong>
-        <button type="button" class="small ghost" onclick="agRouterAdd('${r}')">+ model</button>
+    return `<div style="border:1px solid var(--border); border-radius:var(--r-1); padding:8px; margin-bottom:8px;">
+      <div class="row" style="gap:6px; align-items:center;">
+        <input placeholder="router name (e.g. default)" value="${esc(rt.name)}" oninput="agRouterSetName(${ri}, this.value)" style="flex:1;">
+        <button type="button" class="small ghost" onclick="agRouterAddModel(${ri})">+ model</button>
+        <button type="button" class="small ghost danger" onclick="agRouterRemoveRoute(${ri})">✕</button>
       </div>
-      ${rows || `<div class="muted" style="font-size:12px;">— falls back to default —</div>`}
+      ${rows || `<div class="muted" style="font-size:12px; margin-top:4px;">No model yet — + model.</div>`}
     </div>`;
   }).join("");
+  router.innerHTML = addBtn + (blocks || `<div class="muted" style="font-size:12px;">No routers — + router to add one.</div>`);
 }
-function agRouterAdd(route) { (AG_ROUTE_SEL[route] ||= []).push({ target: "", max_tokens: null }); agRenderRouter(); }
-function agRouterRemove(route, i) { (AG_ROUTE_SEL[route] || []).splice(i, 1); agRenderRouter(); }
-function agRouterSet(route, i, field, val) {
-  const e = (AG_ROUTE_SEL[route] || [])[i];
+function agRouterAddRoute() { AG_ROUTERS.push({ name: "", entries: [] }); agRenderRouter(); }
+function agRouterRemoveRoute(ri) { AG_ROUTERS.splice(ri, 1); agRenderRouter(); }
+function agRouterSetName(ri, val) { if (AG_ROUTERS[ri]) AG_ROUTERS[ri].name = val; }
+function agRouterAddModel(ri) { if (AG_ROUTERS[ri]) AG_ROUTERS[ri].entries.push({ target: "", max_tokens: null }); agRenderRouter(); }
+function agRouterRemoveModel(ri, ei) { if (AG_ROUTERS[ri]) AG_ROUTERS[ri].entries.splice(ei, 1); agRenderRouter(); }
+function agRouterSetEntry(ri, ei, field, val) {
+  const e = AG_ROUTERS[ri] && AG_ROUTERS[ri].entries[ei];
   if (!e) return;
   e[field] = field === "max_tokens" ? (val === "" ? null : Number(val)) : val;
 }
@@ -2823,11 +2829,13 @@ function agCollectModelOverrides() {
   const targets = agChosenTargets();
   if (!targets.length) return {};
   const routes = {};
-  for (const r of AG_ROUTES) {
-    const entries = (AG_ROUTE_SEL[r] || [])
+  for (const rt of AG_ROUTERS) {
+    const name = (rt.name || "").trim();
+    if (!name) continue;
+    const entries = rt.entries
       .filter(e => e.target && targets.includes(e.target))
       .map(e => ({ target: e.target, max_tokens: e.max_tokens ?? null, params: {} }));
-    if (entries.length) routes[r] = entries;
+    if (entries.length) routes[name] = entries;
   }
   return { targets, routes };
 }
@@ -2961,26 +2969,25 @@ function agmRemoveChannel(i) { AGM_CHANNELS.splice(i, 1); agmRenderChannels(); }
 function agFillModelOverrides(mo) {
   mo = mo || {};
   let targets = [];
-  AG_ROUTE_SEL = {};
+  AG_ROUTERS = [];
   const toEntry = e => (typeof e === "string" ? { target: e, max_tokens: null }
     : { target: e.target, max_tokens: e.max_tokens ?? null });
   if (Array.isArray(mo.targets)) {
     targets = mo.targets.slice();
-    for (const [r, v] of Object.entries(mo.routes || {})) {
-      AG_ROUTE_SEL[r] = (Array.isArray(v) ? v : [v]).map(toEntry);
+    for (const [name, v] of Object.entries(mo.routes || {})) {
+      AG_ROUTERS.push({ name, entries: (Array.isArray(v) ? v : [v]).map(toEntry) });
     }
   } else {
-    // legacy {route: {provider, model}} → derive targets + one-entry routes
+    // legacy {route: {provider, model}} → derive targets + one-entry routers
     const t = new Set();
-    for (const [r, sel] of Object.entries(mo)) {
+    for (const [name, sel] of Object.entries(mo)) {
       if (sel && typeof sel === "object" && sel.provider) {
         t.add(sel.provider);
-        AG_ROUTE_SEL[r] = [{ target: sel.provider, max_tokens: null }];
+        AG_ROUTERS.push({ name, entries: [{ target: sel.provider, max_tokens: null }] });
       }
     }
     targets = [...t];
   }
-  for (const r of AG_ROUTES) AG_ROUTE_SEL[r] = AG_ROUTE_SEL[r] || [];
   agRenderModelOverrides(targets);
 }
 // Render current allowed_tools back into the capabilities YAML the modal edits.

@@ -554,10 +554,12 @@ def test_agent_model_overrides_pick_from_providers():
     assert 'agMsWidget("ag-models-ms", "agmo-target"' in render
     assert "agmo-model" not in render
     assert "agmo-baseurl" not in render
-    # Router authors ordered fallback entries with max_tokens per tier
-    router = html.split("function agRenderRouter", 1)[1].split("function agRouterAdd", 1)[0]
-    assert "agRouterAdd" in router and "max_tokens" in router
-    assert "+ model" in router  # add-fallback affordance
+    # Router: custom-named routers (default none), each routes to ordered model fallbacks
+    router = html.split("function agRenderRouter", 1)[1].split("function agRouterAddRoute", 1)[0]
+    assert "agRouterAddRoute" in router and "max_tokens" in router
+    assert "+ router" in router  # add-router affordance
+    assert "+ model" in router  # add-fallback-model within a router
+    assert "router name" in router  # custom route name input
     # collect emits the {targets, routes:[{target,max_tokens,params}]} shape
     collect = html.split("function agCollectModelOverrides", 1)[1].split("\n}", 1)[0]
     assert "targets" in collect and "routes" in collect
