@@ -560,15 +560,17 @@ def test_agent_identity_fields_above_system_prompt():
 
 def test_agent_advanced_overrides_and_extra_fields():
     html = ADMIN_HTML
-    # memory_namespace / skills_dir discrete inputs + an Advanced overrides (YAML) box
-    for fid in ('id="ag-memns"', 'id="ag-skillsdir"', 'id="ag-advanced"'):
+    # memory_namespace / skills_dir discrete inputs; the single Custom (YAML) box carries
+    # both capabilities and any other agent.yaml field (the Advanced box was merged in).
+    for fid in ('id="ag-memns"', 'id="ag-skillsdir"', 'id="ag-capabilities"'):
         assert fid in html, fid
-    assert "Advanced overrides (YAML)" in html
-    # save sends them so any agent.yaml field is configurable
+    assert 'id="ag-advanced"' not in html  # merged into Custom (YAML)
+    assert "Advanced overrides (YAML)" not in html
+    # save sends them; the Custom box feeds both capabilities and config_overrides
     save = html.split("async function agSave", 1)[1].split("\n}", 1)[0]
     assert "memory_namespace:" in save
     assert "skills_dir:" in save
-    assert "config_overrides_yaml:" in save
+    assert save.count('config_overrides_yaml: $("ag-capabilities").value') == 2
 
 
 def test_agent_model_overrides_pick_from_providers():

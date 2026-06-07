@@ -1323,11 +1323,8 @@
           <div id="agm-channels"></div>
           <div class="row" style="margin-top:6px;"><input id="agm-ch-platform" placeholder="platform" style="max-width:120px;"><input id="agm-ch-id" placeholder="channel_id"><button type="button" class="small" onclick="agmAddChannel()">Add channel</button></div>
           <h4 style="margin:14px 0 4px;">Custom (YAML)</h4>
-          <div class="muted" style="font-size:12px;">Paste an allowed_tools / plugins / features block — recorded as-is.</div>
-          <textarea id="ag-capabilities" rows="10" autocomplete="off" spellcheck="false" style="font-family:monospace; width:100%; margin-top:4px;" placeholder="allowed_tools:&#10;  - &quot;search_*&quot;&#10;  - read_file&#10;plugins:&#10;  - acme-docs&#10;features:&#10;  code_execution: true&#10;  sandbox_env:&#10;    TZ: Asia/Shanghai"></textarea>
-          <h4 style="margin:14px 0 4px;">Advanced overrides (YAML)</h4>
-          <div class="muted" style="font-size:12px;">Override any agent.yaml field not above — governance / deployment / intelligence / access / connectors. Deep-merged onto the defaults; invalid keys are ignored.</div>
-          <textarea id="ag-advanced" rows="8" autocomplete="off" spellcheck="false" style="font-family:monospace; width:100%; margin-top:4px;" placeholder="agent_max_turns: 80&#10;session_ttl_days: 7&#10;access:&#10;  require_approval: false&#10;long_term_ctx:&#10;  max_tokens: 4096"></textarea>
+          <div class="muted" style="font-size:12px;">Any agent.yaml field as YAML — allowed_tools / plugins / features plus governance / deployment / intelligence / access / connectors. Deep-merged onto the defaults; invalid keys are ignored.</div>
+          <textarea id="ag-capabilities" rows="12" autocomplete="off" spellcheck="false" style="font-family:monospace; width:100%; margin-top:4px;" placeholder="allowed_tools:&#10;  - &quot;search_*&quot;&#10;  - read_file&#10;plugins:&#10;  - acme-docs&#10;features:&#10;  code_execution: true&#10;agent_max_turns: 80&#10;session_ttl_days: 7&#10;access:&#10;  require_approval: false"></textarea>
         </div>
         <div id="ag-err" class="err"></div>
         <div class="row" style="justify-content:flex-end;">
@@ -2760,7 +2757,6 @@ async function agCreate() {
   $("ag-team").value = "";
   $("ag-memns").value = "default";
   $("ag-skillsdir").value = "";
-  $("ag-advanced").value = "";
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
   $("ag-bind-config").style.display = "";
@@ -3067,9 +3063,6 @@ async function agEdit(name) {
     $("ag-team").value = a.team_id || "";
     $("ag-memns").value = a.memory_namespace || "default";
     $("ag-skillsdir").value = a.skills_dir || `~/.fleetent/${name}/skills`;
-    // config_overrides round-trips as JSON (valid YAML); blank when empty
-    $("ag-advanced").value = (a.config_overrides && Object.keys(a.config_overrides).length)
-      ? JSON.stringify(a.config_overrides, null, 2) : "";
     $("ag-system-prompt").value = a.system_prompt || "";
     // Mirror the new-agent layout: tools come from the capabilities YAML.
     $("ag-allowed-tools").style.display = "none";
@@ -3077,7 +3070,12 @@ async function agEdit(name) {
     $("ag-create-extra").style.display = "";
     $("ag-bind-config").style.display = "";
     agFillModelOverrides(a.model_overrides);  // loads selection (new + legacy shape) + renders
-    $("ag-capabilities").value = agToolsToYaml(a.allowed_tools);
+    // The Custom box round-trips the full config_overrides (allowed_tools/plugins/features
+    // + any other agent.yaml field) as JSON (valid YAML); legacy agents without overrides
+    // fall back to just their allowed_tools.
+    $("ag-capabilities").value = (a.config_overrides && Object.keys(a.config_overrides).length)
+      ? JSON.stringify(a.config_overrides, null, 2)
+      : agToolsToYaml(a.allowed_tools);
     await agLoadCreateBindings(current);
     $("ag-modal").dataset.mode = "edit";
     $("ag-modal").dataset.name = name;
@@ -3155,7 +3153,7 @@ async function agSave() {
         skills_dir: $("ag-skillsdir").value.trim() || `~/.fleetent/${name}/skills`,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
-        config_overrides_yaml: $("ag-advanced").value,
+        config_overrides_yaml: $("ag-capabilities").value,
       });
       await agApplyEditBindings(name);
     } else {
@@ -3169,7 +3167,7 @@ async function agSave() {
         skills_dir: $("ag-skillsdir").value.trim() || `~/.fleetent/${name}/skills`,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
-        config_overrides_yaml: $("ag-advanced").value,
+        config_overrides_yaml: $("ag-capabilities").value,
       });
       await agApplyCreateBindings(name);
     }
