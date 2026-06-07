@@ -44,4 +44,4 @@
 
 - [x] 8.1 收尾：`uv run ruff format src tests && uv run ruff check src tests`、`uv run mypy src`、`uv run python scripts/check_test_layers.py`、`uv run python scripts/check_module_boundaries.py`
 - [x] 8.2 全量：`uv run pytest -x -q`
-- [ ] 8.3 浏览器冒烟（chrome-devtools，本地 8765，admin/admin12345，进程设 `FLEETENT_SECRET_KEY`）：Provider 输值→自动 env 名→agent 面板只读总览显 set；KB token 输值同验；切高级引用→面板显 operator/unset；按 [always-self-test-after-change] 走完整流程再报完成
+- [x] 8.3 浏览器冒烟（chrome-devtools，本地 8765，admin/admin12345，进程设 `FLEETENT_SECRET_KEY`）：Provider 输值→自动 env 名→agent 面板只读总览显 set；KB token 输值同验；切高级引用→面板显 operator/unset；按 [always-self-test-after-change] 走完整流程再报完成
