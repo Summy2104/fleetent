@@ -24,9 +24,9 @@
 
 ## 5. Provider 表单合并到 CredentialField
 
-- [ ] 5.1 Write failing tests: Provider 表单只剩一个密钥控件（`pv-api-key-env` 独立框已移除）；value 模式存值 + 回填 api_key_env、不塞明文；reference 模式只设 api_key_env；编辑留空不改（tests/integration UI marker + provider save 路径）
-- [ ] 5.2 Implement: 删 `pv-api-key-env` 框，`pv-api-key` 升级为 CredentialField；改 prSave/body 组装
-- [ ] 5.3 Verify green: `uv run pytest tests/integration/test_admin_console_ui.py -x -q`
+- [x] 5.1 Write failing tests: Provider 表单只剩一个密钥控件（`pv-api-key-env` 独立框已移除）；value 模式存值 + 回填 api_key_env、不塞明文；reference 模式只设 api_key_env；编辑留空不改（tests/integration UI marker + provider save 路径）
+- [x] 5.2 Implement: 删 `pv-api-key-env` 框，`pv-api-key` 升级为 CredentialField；改 prSave/body 组装
+- [x] 5.3 Verify green: `uv run pytest tests/integration/test_admin_console_ui.py -x -q`
 
 ## 6. KB connector token 字段挂 CredentialField
 

@@ -226,6 +226,17 @@ def test_credential_field_control_present():
     assert "引用现有变量" in builder  # advanced: reference an existing env var instead
 
 
+def test_providers_key_is_one_credential_field():
+    html = ADMIN_HTML
+    # the API key + its env-reference are merged into a single cred-field, not two boxes
+    parts = html.split('data-cred="provider-key"', 1)
+    assert len(parts) == 2, "provider key cred-field not found"
+    body = parts[1][:1400]
+    assert 'id="pv-api-key"' in body  # value input
+    assert 'id="pv-api-key-env"' in body  # reference input, inside the same control
+    assert "credToggle" in body  # advanced env-reference toggle
+
+
 def test_providers_write_controls_admin_gated():
     html = ADMIN_HTML
     assert "pv-create-bar" in html

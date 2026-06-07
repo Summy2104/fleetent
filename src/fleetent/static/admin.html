@@ -1230,17 +1230,20 @@
 
           <div class="form-group">
             <label class="form-label" for="pv-api-key">API Key</label>
-            <div class="password-input-wrapper">
-              <input id="pv-api-key" type="password" class="form-input" placeholder="sk-..." autocomplete="off">
-              <button type="button" class="password-toggle" onclick="pvTogglePassword()" aria-label="Toggle password visibility">👁</button>
+            <div class="cred-field" data-cred="provider-key" data-mode="value">
+              <div class="cred-value cred-row">
+                <div class="password-input-wrapper">
+                  <input id="pv-api-key" type="password" class="form-input" placeholder="sk-..." autocomplete="off">
+                  <button type="button" class="password-toggle" onclick="pvTogglePassword()" aria-label="Toggle password visibility">👁</button>
+                </div>
+                <span id="pv-key-chip" class="cred-chip unset"></span>
+              </div>
+              <div class="cred-ref cred-row" style="display:none;">
+                <input id="pv-api-key-env" type="text" class="form-input" placeholder="e.g. FLEETENT_MODEL_FAST_API_KEY" autocomplete="off">
+              </div>
+              <button type="button" class="cred-toggle" onclick="credToggle(this)">⚙ 引用现有变量</button>
+              <span class="form-hint">输入值即可——平台自动命名并加密保存；或切到「引用现有变量」由运维在主机 .env 填。编辑时留空保持原值。</span>
             </div>
-            <span class="form-hint">Leave blank to keep existing key when editing</span>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label" for="pv-api-key-env">API key env var</label>
-            <input id="pv-api-key-env" type="text" class="form-input" placeholder="e.g. FLEETENT_MODEL_FAST_API_KEY" autocomplete="off">
-            <span class="form-hint">Env var name holding the key (preferred over an inline key)</span>
           </div>
         </div>
 
@@ -3310,11 +3313,17 @@ function credFieldHtml(o) {
 
 function credToggle(btn) {
   const field = btn.closest(".cred-field");
-  const toRef = field.dataset.mode !== "reference";
-  field.dataset.mode = toRef ? "reference" : "value";
-  field.querySelector(".cred-value").style.display = toRef ? "none" : "";
-  field.querySelector(".cred-ref").style.display = toRef ? "" : "none";
-  btn.textContent = toRef ? "↩ 改为直接输入值" : "⚙ 引用现有变量";
+  credSetMode(field, field.dataset.mode === "reference" ? "value" : "reference");
+}
+
+function credSetMode(field, mode) {
+  if (!field) return;
+  const ref = mode === "reference";
+  field.dataset.mode = ref ? "reference" : "value";
+  field.querySelector(".cred-value").style.display = ref ? "none" : "";
+  field.querySelector(".cred-ref").style.display = ref ? "" : "none";
+  const toggle = field.querySelector(".cred-toggle");
+  if (toggle) toggle.textContent = ref ? "↩ 改为直接输入值" : "⚙ 引用现有变量";
 }
 
 let AG_SECRET_SLOTS = [];
@@ -3933,6 +3942,9 @@ function pvOpenCreate() {
   $("pv-model").value = "";
   $("pv-model-custom").value = "";
   $("pv-model-custom").classList.add("hidden");
+  credSetMode(document.querySelector('[data-cred="provider-key"]'), "value");
+  $("pv-key-chip").className = "cred-chip unset";
+  $("pv-key-chip").textContent = "";
   // Reset provider type to OpenAI
   document.querySelector('input[name="provider-type"][value="openai"]').checked = true;
   pvUpdateProviderType('openai');
@@ -3962,6 +3974,13 @@ async function pvOpenEdit(id) {
   
   $("pv-api-key").value = "";  // never prefill secret
   $("pv-api-key-env").value = p.api_key_env || "";
+  // reference-only providers (env named, no platform-held key) open in reference mode
+  credSetMode(
+    document.querySelector('[data-cred="provider-key"]'),
+    !p.api_key_set && p.api_key_env ? "reference" : "value",
+  );
+  $("pv-key-chip").className = "cred-chip " + (p.api_key_set ? "set" : "unset");
+  $("pv-key-chip").textContent = p.api_key_set ? "🟢 已设置" : "⚪ 未设置";
   $("pv-max-tokens").value = p.max_tokens != null ? p.max_tokens : "";
   $("pv-temperature").value = p.temperature != null ? p.temperature : "";
   $("pv-protocol").value = p.protocol || "";
