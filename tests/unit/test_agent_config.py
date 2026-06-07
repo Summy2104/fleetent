@@ -622,6 +622,7 @@ def test_repo_agent_yaml_example_loads_as_single_agent_file() -> None:
 
 # ── dead-field removal tests ──────────────────────────────────────────────────
 
+
 def test_microsandbox_url_rejected() -> None:
     """microsandbox_url is a dead field and must be rejected (extra='forbid')."""
     doc = _valid_doc()
