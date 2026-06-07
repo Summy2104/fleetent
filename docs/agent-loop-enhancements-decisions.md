@@ -263,3 +263,30 @@ C2 (todo 持久化, 最小, 验证 OpenSpec→TDD→bb-pr 全流程)
 - **测试连带**：`test_agent_loop.py` 加 autouse `_backoff_delay→0`（免真实 sleep）；"全耗尽/cooldown"测试 side_effect `[429,429]→[429]*4`（最后候选现会重试）。
 - **暂缓**：把 5xx（500/502/504）归类为可重试需扩 `error_classifier` category（当前仅 429/503 经 rate_limit 走此路）；重试参数 agent.yaml 可配。
 - **测试**：`tests/unit/test_transient_retry.py`(4)；全量 **3754 passed, 14 skipped**；mypy / ruff（改动）/ validate --strict 通过。
+
+### 2026-06-07 — T2-2 `agent-empty-reply-correction` 完成（范围聚焦）
+
+- **范围聚焦**：原 T2-2 含 "planning-only/空回复"。"planning-only"（非空但"光说不做"）的判定模糊、误纠正正常纯文本回答的风险高，**暂缓**；本 change 只做清晰可测的**空回复自纠错**。
+- **实现**：`run()` 与 `run_stream()` 的 `finish_reason != "tool_calls"` 分支——最终回复为空白且重试计数 < `_MAX_EMPTY_REPLY_RETRIES`(2) 时，追加 `_EMPTY_REPLY_CORRECTION` 的 user 消息并 `continue` 重跑（过终止检查）；非空或达上限照常返回（达上限仍返回 ""，不无限循环）。各路本地计数器。
+- **暂缓**：planning-only 语义检测。
+- **测试**：`test_agent_loop.py` +4（空→纠正→非空 / 持续空达上限 / 非空不重跑 / 流式空→纠正→非空）；全量 **3758 passed, 14 skipped**；mypy / ruff（改动）/ validate --strict 通过。
+
+---
+
+## 11. 批次总结（2026-06-07）
+
+7 个 change 全部实现并合并到 main（一改进一 PR，bb-pr + CI 绿后合并）：
+
+| # | change | PR | 交付 |
+|---|--------|----|------|
+| C2 | agent-task-tracking | #165 | todo 持久化状态机（agent 侧 `.todo` 兄弟文件，lock-free） |
+| C3a | compression-continuation-summary | #166 | 结构化压缩摘要 + active-task 续跑块 |
+| C3b | compression-overflow-handling | #168 | 反应式上下文溢出恢复 + 守卫 |
+| C1 | agent-input-steering | #170 | 运行中转向（默认 steer / interrupt / queue） |
+| C4 | agent-reasoning-passthrough | #171 | 流式透出 reasoning_delta（请求侧经既有 params） |
+| T2-1 | model-transient-retry | #172 | 最后/唯一 target 上瞬时错误退避重试（尊重 Retry-After） |
+| T2-2 | agent-empty-reply-correction | (pending) | 空最终回复自纠错重跑（带上限） |
+
+**贯穿原则**：严守 agent⊥platform 解耦（零 runtime→platform）、OpenAI-compatible、无 AI 框架、asyncio、纯 agent 侧持久化（兄弟文件）；每项 TDD 红绿、ruff/mypy/全量 pytest 门禁、openspec validate --strict。
+
+**暂缓清单（建议后续单独立项）**：Hooks 扩展体系、权限 ruleset 升级、Plan Mode、崩溃续跑（注：PR #164 已实现）、不可信工具结果包裹、Checkpoint/Revert、按模型 context_window 主动预算、工具结果 prune、reasoning_content 跨轮保留、5xx 归类可重试、planning-only 语义检测、steering 的 TUI/流式落库/collect。详见各 §10 条目与 §5。
