@@ -123,6 +123,44 @@ async def _stream_chunks_with_usage(prompt: int, completion: int, *contents: str
     yield u
 
 
+async def _stream_with_reasoning():
+    """Fake stream: a reasoning-only chunk, then a content chunk that finishes (C4)."""
+    r = MagicMock()
+    r.usage = None
+    r.choices = [MagicMock()]
+    r.choices[0].delta.content = None
+    r.choices[0].delta.tool_calls = None
+    r.choices[0].delta.reasoning_content = "let me think about it"
+    r.choices[0].finish_reason = None
+    yield r
+    c = MagicMock()
+    c.usage = None
+    c.choices = [MagicMock()]
+    c.choices[0].delta.content = "the answer"
+    c.choices[0].delta.tool_calls = None
+    c.choices[0].delta.reasoning_content = None
+    c.choices[0].finish_reason = "stop"
+    yield c
+
+
+async def test_run_stream_surfaces_reasoning_delta(mock_client):
+    mock_client.chat.completions.create = AsyncMock(return_value=_stream_with_reasoning())
+    events = [e async for e in al.run_stream("go")]
+    reasoning = [e["content"] for e in events if e["type"] == "reasoning_delta"]
+    text = "".join(e["content"] for e in events if e["type"] == "text_delta")
+    assert reasoning == ["let me think about it"]
+    assert "the answer" in text
+    assert "think" not in text  # reasoning trace kept out of the reply text
+
+
+async def test_run_stream_no_reasoning_delta_for_plain_stream(mock_client):
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_stream_chunks("hi", finish="stop")
+    )
+    events = [e async for e in al.run_stream("go")]
+    assert not any(e["type"] == "reasoning_delta" for e in events)
+
+
 @pytest.fixture
 def mock_client(monkeypatch) -> AsyncMock:
     """Patch all external I/O in agent_loop, return the mock LLM client."""
