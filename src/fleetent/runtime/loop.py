@@ -1543,6 +1543,7 @@ async def _run_inner(
         return reply
     response = None
     msg: Any = None
+    _msg_content: str = ""
     model_used = _model_name(active_cfg)
 
     # None → a never-cancelling default token, keeping the no-token path identical.
@@ -1601,6 +1602,26 @@ async def _run_inner(
             return ""
         messages[:] = clean
         _accumulate_repairs(hygiene_repairs, report)
+        # P3: pre_llm_call hook — observe or inject context before each LLM call.
+        from fleetent.runtime import hooks
+
+        if governance is not None and governance.hooks_enabled and hooks.has_hooks("pre_llm_call"):
+            from fleetent.runtime.hooks import HookContext
+
+            _plc_res = await hooks.dispatch(
+                "pre_llm_call",
+                HookContext(
+                    event="pre_llm_call",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"message_count": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _plc_res.inject_context is not None:
+                messages.append({"role": "user", "content": _plc_res.inject_context})
         try:
             response, active_cfg = await _call_with_overflow_retry(
                 policy,
@@ -1631,7 +1652,39 @@ async def _run_inner(
         route_chain = (active_cfg,)  # stick with the winning target for subsequent turns
         choice = response.choices[0]
         msg = choice.message
-        messages.append(msg.model_dump())  # dict for JSON serializability (session persistence)
+        # P3: on_assistant_reply hook — observe or rewrite text content before it enters messages.
+        # Skipped for tool_calls-only turns (msg.content is None/empty, no text to transform).
+        _msg_content = msg.content or ""
+        if (
+            _msg_content
+            and governance is not None
+            and governance.hooks_enabled
+            and hooks.has_hooks("on_assistant_reply")
+        ):
+            from fleetent.runtime.hooks import HookContext
+
+            _oar_res = await hooks.dispatch(
+                "on_assistant_reply",
+                HookContext(
+                    event="on_assistant_reply",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"content": _msg_content},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _oar_res.modified_content is not None:
+                _msg_content = _oar_res.modified_content
+                # Rebuild the message dict with rewritten content.
+                _dump = msg.model_dump()
+                _dump["content"] = _msg_content
+                messages.append(_dump)
+            else:
+                messages.append(msg.model_dump())
+        else:
+            messages.append(msg.model_dump())  # dict for JSON serializability
 
         if choice.finish_reason != "tool_calls":
             # T2-2: a blank final reply (weak models) → nudge once more instead of
@@ -1680,7 +1733,11 @@ async def _run_inner(
             user_id=user_id,
         )
 
-    reply = (msg.content if msg is not None else None) or ""
+    reply = (
+        _msg_content
+        if (msg is not None and _msg_content)
+        else ((msg.content if msg is not None else None) or "")
+    )
     budget_dimension: str | None = None
     budget_scope: str | None = None
     if stop_reason == StopReason.budget_exceeded:
@@ -1875,6 +1932,30 @@ async def run_stream(
         agent_name=agent_name, features=agent_features or {}, session_id=session_id
     )
 
+    # P3: on_user_input hook — intercept/rewrite/deny before user message enters messages.
+    from fleetent.runtime import hooks
+
+    if governance is not None and governance.hooks_enabled and hooks.has_hooks("on_user_input"):
+        from fleetent.runtime.hooks import HookContext
+
+        _hres = await hooks.dispatch(
+            "on_user_input",
+            HookContext(
+                event="on_user_input",
+                session_id=session_id,
+                agent_name=agent_name,
+                user_id=user_id,
+                payload={"content": user_input},
+            ),
+            timeout=governance.hooks_timeout_seconds,
+            strict=governance.hooks_decision_failure == "strict",
+        )
+        if _hres.decision == "deny":
+            yield {"type": "error", "content": _hres.reason or "request denied by policy"}
+            return
+        if _hres.modified_content is not None:
+            user_input = _hres.modified_content
+
     if images:
         user_msg = build_message_with_images(user_input, images)
     else:
@@ -1976,6 +2057,30 @@ async def run_stream(
             _log_run_error(exc, messages, start, model_used, user_id, agent_name)
             return
         _accumulate_repairs(hygiene_repairs, report)
+        # P3: pre_llm_call hook (streaming path) — inject context before each LLM call.
+        from fleetent.runtime import hooks as _hooks_plc
+
+        if (
+            governance is not None
+            and governance.hooks_enabled
+            and _hooks_plc.has_hooks("pre_llm_call")
+        ):
+            from fleetent.runtime.hooks import HookContext as _HC_plc
+
+            _plc_s = await _hooks_plc.dispatch(
+                "pre_llm_call",
+                _HC_plc(
+                    event="pre_llm_call",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"message_count": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _plc_s.inject_context is not None:
+                messages.append({"role": "user", "content": _plc_s.inject_context})
 
         # Accumulate streaming response
         reply_parts: list[str] = []
@@ -2064,6 +2169,33 @@ async def run_stream(
                 empty_reply_retries += 1
                 messages.append({"role": "user", "content": _EMPTY_REPLY_CORRECTION})
                 continue
+            # P3: on_assistant_reply hook on the final text reply.
+            # Already-streamed text_delta events are not retractable; only done + output_transform
+            # will use the modified reply.
+            from fleetent.runtime import hooks as _hooks_oar
+
+            if (
+                reply
+                and governance is not None
+                and governance.hooks_enabled
+                and _hooks_oar.has_hooks("on_assistant_reply")
+            ):
+                from fleetent.runtime.hooks import HookContext as _HookCtx
+
+                _oar = await _hooks_oar.dispatch(
+                    "on_assistant_reply",
+                    _HookCtx(
+                        event="on_assistant_reply",
+                        session_id=session_id,
+                        agent_name=agent_name,
+                        user_id=user_id,
+                        payload={"content": reply},
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=False,
+                )
+                if _oar.modified_content is not None:
+                    reply = _oar.modified_content
             break
 
         # Reconstruct assistant message with tool_calls for messages list
