@@ -616,12 +616,17 @@ async def _plan_run_slots(
     reply_func: ReplyFunc | None,
     user_id: str,
     session_id: str | None,
+    governance: GovernanceConfig | None = None,
+    agent_name: str | None = None,
 ) -> list[_PlanSlot]:
     """Phase one for run() (D2/D3/D6): serial, original order — produce one slot
-    per tool_call. Guardrail and (medium/high) approval are decided here in order;
-    sub_agent becomes a pending slot whose runner self-gathers (D6). The result
-    list preserves original `tool_calls` order so backfill can index 0..N-1.
+    per tool_call. Guardrail, pre_tool_use hook, and (medium/high) approval are decided
+    here in order; sub_agent becomes a pending slot whose runner self-gathers (D6). The
+    result list preserves original `tool_calls` order so backfill can index 0..N-1.
     """
+    from fleetent.runtime import hooks
+    from fleetent.runtime.hooks import HookContext
+
     slots: list[_PlanSlot] = []
     for tc in tool_calls:
         if not hasattr(tc, "function"):
@@ -672,19 +677,55 @@ async def _plan_run_slots(
 
             slots.append(_PlanSlot(tc_id=tc.id, name=name, tc_fp=tc_fp, runner=_sub_agent_runner))
             continue
-        risk = get_risk_level(name)
-        if risk in ("medium", "high") and reply_func is not None:
-            tool_args = (
+        # P1: pre_tool_use hook — decision (deny/ask) + arg rewrite, composed with the
+        # existing allowed_tools + permission_gate gate. Zero overhead when hooks are
+        # disabled or none registered.
+        slot_args: str | dict[str, Any] = tc.function.arguments
+        force_ask = False
+        if governance is not None and governance.hooks_enabled and hooks.has_hooks("pre_tool_use"):
+            parsed = (
                 json.loads(tc.function.arguments)
                 if isinstance(tc.function.arguments, str)
                 else tc.function.arguments
             )
+            hres = await hooks.dispatch(
+                "pre_tool_use",
+                HookContext(
+                    event="pre_tool_use",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"tool_name": name, "tool_args": parsed},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=governance.hooks_decision_failure == "strict",
+            )
+            if hres.decision == "deny":
+                slots.append(
+                    _PlanSlot(
+                        tc_id=tc.id,
+                        name=name,
+                        tc_fp=tc_fp,
+                        placeholder=(
+                            f"tool execution denied by policy: {hres.reason or name}",
+                            False,
+                        ),
+                        counts_failure=False,
+                    )
+                )
+                continue
+            if hres.modified_args is not None:
+                slot_args = hres.modified_args
+            force_ask = hres.decision == "ask"
+        risk = get_risk_level(name)
+        if (risk in ("medium", "high") or force_ask) and reply_func is not None:
+            tool_args = json.loads(slot_args) if isinstance(slot_args, str) else slot_args
             approval_id = str(uuid.uuid4())[:8]
             # D3: approvals are requested serially in original order; only approved
             # tools enter the parallel batch — never concurrent approval prompts.
             decision = await _default_gate.request_approval(
                 approval_id=approval_id,
-                risk_level=risk,
+                risk_level=risk if risk in ("medium", "high") else "medium",
                 tool_name=name,
                 tool_args=tool_args,
                 requester_user_id=user_id,
@@ -710,7 +751,7 @@ async def _plan_run_slots(
                 tc_id=tc.id,
                 name=name,
                 tc_fp=tc_fp,
-                args=tc.function.arguments,
+                args=slot_args,
                 resource_key=_resource_key(name, session_id),
             )
         )
@@ -1540,6 +1581,8 @@ async def _run_inner(
             reply_func=reply_func,
             user_id=user_id,
             session_id=session_id,
+            governance=governance,
+            agent_name=agent_name,
         )
         pending = [s for s in slots if s.placeholder is None]
         results = await _execute_pending(
@@ -1952,6 +1995,9 @@ async def run_stream(
         # planning (serial guardrail), execute pending in parallel (gather preserves
         # order, D7-batched, D5-serialized), then yield tool_result events + backfill
         # tool messages strictly in original order — never completion order.
+        from fleetent.runtime import hooks
+        from fleetent.runtime.hooks import HookContext
+
         slots: list[_PlanSlot] = []
         for tc_data in tool_calls_list:
             func: dict[str, str] = tc_data["function"]
@@ -1975,12 +2021,49 @@ async def run_stream(
                     )
                 )
                 continue
+            # P1: pre_tool_use hook. Streaming has no permission_gate, so `ask`
+            # degrades to deny + note. deny → placeholder; modified_args → rewrite.
+            slot_args: str | dict[str, Any] = args
+            if (
+                governance is not None
+                and governance.hooks_enabled
+                and hooks.has_hooks("pre_tool_use")
+            ):
+                parsed = json.loads(args) if isinstance(args, str) else args
+                hres = await hooks.dispatch(
+                    "pre_tool_use",
+                    HookContext(
+                        event="pre_tool_use",
+                        session_id=session_id,
+                        agent_name=agent_name,
+                        user_id=user_id,
+                        payload={"tool_name": name, "tool_args": parsed},
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=governance.hooks_decision_failure == "strict",
+                )
+                if hres.decision in ("deny", "ask"):
+                    note = hres.reason or name
+                    if hres.decision == "ask":
+                        note = f"需人工确认（流式不支持审批，已拦截）：{note}"
+                    slots.append(
+                        _PlanSlot(
+                            tc_id=tc_data["id"],
+                            name=name,
+                            tc_fp=tc_fp,
+                            placeholder=(f"tool execution blocked by policy: {note}", False),
+                            counts_failure=False,
+                        )
+                    )
+                    continue
+                if hres.modified_args is not None:
+                    slot_args = hres.modified_args
             slots.append(
                 _PlanSlot(
                     tc_id=tc_data["id"],
                     name=name,
                     tc_fp=tc_fp,
-                    args=args,
+                    args=slot_args,
                     resource_key=_resource_key(name, session_id),
                 )
             )

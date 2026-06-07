@@ -234,6 +234,11 @@ agent_tool_parallel_max: 8        # max concurrent tool calls per turn
 steering_mode: steer              # steer (inject into the running task) | queue | interrupt
 steering_max_pending: 8           # max queued steered messages per session
 
+# hooks: in-process Python extension points (loaded from the plugins dir via @hook)
+hooks_enabled: false              # master switch; off = no dispatch, no behavior change
+hooks_decision_failure: open      # decision-hook failure: open(fail-open+audit) | strict(fail-closed)
+hooks_timeout_seconds: 5.0        # per-hook timeout (seconds)
+
 # layered budget — session / user / agent dims (-1 = unlimited)
 agent_budget_session_turns: -1
 agent_budget_session_tokens: -1

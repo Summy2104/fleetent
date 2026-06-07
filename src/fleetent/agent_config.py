@@ -252,6 +252,10 @@ class AgentFile(BaseModel):
     # run-time input steering (C1)
     steering_mode: Literal["steer", "queue", "interrupt"] = "steer"
     steering_max_pending: int = 8
+    # hooks extension system (P1)
+    hooks_enabled: bool = False
+    hooks_decision_failure: Literal["open", "strict"] = "open"
+    hooks_timeout_seconds: float = 5.0
     # permission gate
     permission_gate_medium_timeout_seconds: int = 300
     permission_gate_high_timeout_seconds: int = 3600
