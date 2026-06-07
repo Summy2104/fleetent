@@ -100,137 +100,6 @@ async def test_inject_appends_under_lock(tmp_path, monkeypatch):
     assert msgs[-1] == {"role": "human_agent", "content": "let me help"}
 
 
-# --- migration 054: session_meta compaction columns ---
-
-
-def test_migration_054_adds_compaction_columns(tmp_path):
-    """Migration 054 adds four compaction-related columns to session_meta."""
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    conn = sqlite3.connect(db_path)
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(session_meta)").fetchall()}
-    conn.close()
-    assert "last_compaction_at" in cols
-    assert "messages_before_compaction" in cols
-    assert "messages_after_compaction" in cols
-    assert "compaction_summary_preview" in cols
-
-
-def test_migration_054_compaction_columns_are_nullable_for_existing_rows(tmp_path, monkeypatch):
-    """Existing session_meta rows have NULL in new compaction columns after migration."""
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    store.upsert_meta("s1", origin="web")
-    conn = sqlite3.connect(db_path)
-    row = conn.execute(
-        "SELECT last_compaction_at, messages_before_compaction"
-        " FROM session_meta WHERE session_id = ?",
-        ("s1",),
-    ).fetchone()
-    conn.close()
-    assert row[0] is None
-    assert row[1] is None
-
-
-# --- update_compaction_meta ---
-
-
-def test_update_compaction_meta_sets_columns(tmp_path, monkeypatch):
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    store.upsert_meta("sess-c", origin="web")
-
-    store.update_compaction_meta(
-        "sess-c",
-        messages_before=50,
-        messages_after=12,
-        summary_preview="This is the summary",
-        compacted_at=1234567890.0,
-    )
-
-    conn = sqlite3.connect(db_path)
-    row = conn.execute(
-        "SELECT last_compaction_at, messages_before_compaction, messages_after_compaction, "
-        "compaction_summary_preview FROM session_meta WHERE session_id = ?",
-        ("sess-c",),
-    ).fetchone()
-    conn.close()
-    assert row[0] == 1234567890.0
-    assert row[1] == 50
-    assert row[2] == 12
-    assert row[3] == "This is the summary"
-
-
-def test_update_compaction_meta_truncates_preview_to_200_chars(tmp_path, monkeypatch):
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    store.upsert_meta("sess-d", origin="web")
-
-    long_preview = "x" * 500
-    store.update_compaction_meta(
-        "sess-d",
-        messages_before=10,
-        messages_after=3,
-        summary_preview=long_preview,
-        compacted_at=0.0,
-    )
-
-    conn = sqlite3.connect(db_path)
-    row = conn.execute(
-        "SELECT compaction_summary_preview FROM session_meta WHERE session_id = ?",
-        ("sess-d",),
-    ).fetchone()
-    conn.close()
-    assert len(row[0]) == 200
-
-
-# --- migration 055: token columns ---
-
-
-def test_migration_055_adds_token_columns(tmp_path):
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    conn = sqlite3.connect(db_path)
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(session_meta)").fetchall()}
-    conn.close()
-    assert "total_input_tokens" in cols
-    assert "total_output_tokens" in cols
-
-
-def test_add_token_usage_accumulates(tmp_path, monkeypatch):
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    store.add_token_usage("tok-s", 100, 50)
-    store.add_token_usage("tok-s", 100, 50)
-    m = store.get_meta("tok-s")
-    assert m["total_input_tokens"] == 200
-    assert m["total_output_tokens"] == 100
-
-
-def test_add_token_usage_creates_row_if_absent(tmp_path, monkeypatch):
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    store.add_token_usage("fresh-tok", 30, 20)
-    m = store.get_meta("fresh-tok")
-    assert m["total_input_tokens"] == 30
-    assert m["total_output_tokens"] == 20
-
-
-def test_get_meta_includes_token_fields(tmp_path, monkeypatch):
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    store.upsert_meta("meta-tok", origin="web")
-    m = store.get_meta("meta-tok")
-    assert "total_input_tokens" in m
-    assert "total_output_tokens" in m
-
-
 # --- migration 056: resume_pending ---
 
 
@@ -305,3 +174,25 @@ def test_get_meta_includes_resume_pending(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     store.upsert_meta("rp-meta", origin="web")
     assert "resume_pending" in store.get_meta("rp-meta")
+
+
+# --- migration 058: drop runtime-coupling columns ---
+
+
+def test_migration_058_drops_token_and_compaction_columns(tmp_path):
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    conn = sqlite3.connect(db_path)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(session_meta)").fetchall()}
+    conn.close()
+    for dropped in (
+        "total_input_tokens",
+        "total_output_tokens",
+        "last_compaction_at",
+        "messages_before_compaction",
+        "messages_after_compaction",
+        "compaction_summary_preview",
+    ):
+        assert dropped not in cols, f"{dropped} should have been dropped by migration 058"
+    # resume_pending survives (removed by a later change, not 057)
+    assert "resume_pending" in cols

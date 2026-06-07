@@ -478,7 +478,6 @@ async def save(
     meta: dict[str, object] | None = None,
     user_id: str | None = None,
     agent_name: str | None = None,
-    token_usage: tuple[int, int] | None = None,
 ) -> None:
     # main's meta envelope + zhangyang's session_index update, merged: omitting
     # meta preserves any meta already persisted (e.g. a pinned agent version)
@@ -511,15 +510,6 @@ async def save(
         )
     except Exception as exc:  # noqa: BLE001 — auxiliary index must not break persistence
         _logger.warn("session_index_update_failed", session_id=session_id, error=str(exc))
-
-    # Best-effort token accumulation into session_meta; never break persistence.
-    if token_usage is not None:
-        from fleetent.platform.chat_management import session_admin_store
-
-        try:
-            session_admin_store.add_token_usage(session_id, token_usage[0], token_usage[1])
-        except Exception as exc:  # noqa: BLE001 — token tracking is auxiliary
-            _logger.warn("session_token_update_failed", session_id=session_id, error=str(exc))
 
     # Internal maintenance trigger (no external cron): opportunistically prune
     # expired sessions and enforce disk capacity as a side effect of activity,
