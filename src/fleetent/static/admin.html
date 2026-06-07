@@ -1322,8 +1322,11 @@
           <h4 style="margin:14px 0 4px;">Channels</h4>
           <div id="agm-channels"></div>
           <div class="row" style="margin-top:6px;"><input id="agm-ch-platform" placeholder="platform" style="max-width:120px;"><input id="agm-ch-id" placeholder="channel_id"><button type="button" class="small" onclick="agmAddChannel()">Add channel</button></div>
+          <h4 style="margin:14px 0 4px;">Advanced settings</h4>
+          <div class="muted" style="font-size:12px;">Common agent.yaml knobs — defaults shown; only changed values are saved.</div>
+          <div id="ag-advanced-fields"></div>
           <h4 style="margin:14px 0 4px;">Custom (YAML)</h4>
-          <div class="muted" style="font-size:12px;">Any agent.yaml field as YAML — allowed_tools / plugins / features plus governance / deployment / intelligence / access / connectors. Deep-merged onto the defaults; invalid keys are ignored.</div>
+          <div class="muted" style="font-size:12px;">Any other agent.yaml field as YAML — allowed_tools / plugins / features plus anything not above. Deep-merged onto the defaults; invalid keys are ignored.</div>
           <textarea id="ag-capabilities" rows="12" autocomplete="off" spellcheck="false" style="font-family:monospace; width:100%; margin-top:4px;" placeholder="allowed_tools:&#10;  - &quot;search_*&quot;&#10;  - read_file&#10;plugins:&#10;  - acme-docs&#10;features:&#10;  code_execution: true&#10;agent_max_turns: 80&#10;session_ttl_days: 7&#10;access:&#10;  require_approval: false"></textarea>
         </div>
         <div id="ag-err" class="err"></div>
@@ -2755,6 +2758,89 @@ function agSyncSkillsDir() {
     }
   }
 }
+
+// --- Advanced settings: curated agent.yaml knobs backed by config_overrides ---------------
+// Each field reads/writes a (possibly dotted) path; only non-default values are persisted.
+// The Custom (YAML) box owns everything NOT listed here (the long tail + allowed_tools).
+const AG_ADV_FIELDS = [
+  { g: "Governance", k: "agent_max_turns", t: "number", d: 50 },
+  { g: "Governance", k: "agent_max_consecutive_failures", t: "number", d: 3 },
+  { g: "Governance", k: "agent_max_tokens", t: "number", d: -1 },
+  { g: "Governance", k: "agent_tool_parallel_max", t: "number", d: 8 },
+  { g: "Governance", k: "tool_default_timeout_seconds", t: "number", d: 30 },
+  { g: "Governance", k: "permission_gate_medium_timeout_seconds", t: "number", d: 300 },
+  { g: "Governance", k: "permission_gate_high_timeout_seconds", t: "number", d: 3600 },
+  { g: "Deployment", k: "session_ttl_days", t: "number", d: 30 },
+  { g: "Deployment", k: "log_format", t: "select", opts: ["console", "json"], d: "console" },
+  { g: "Deployment", k: "microsandbox_url", t: "text", d: "http://host.docker.internal:7777" },
+  { g: "Deployment", k: "image_gen_url", t: "text", d: "" },
+  { g: "Deployment", k: "vision_url", t: "text", d: "" },
+  { g: "Intelligence", k: "long_term_ctx.max_tokens", t: "number", d: 2048 },
+  { g: "Intelligence", k: "knowledge.enabled", t: "bool", d: false },
+  { g: "Intelligence", k: "knowledge.retrieval_policy.mode", t: "select", opts: ["vector", "keyword", "hybrid"], d: "hybrid" },
+  { g: "Intelligence", k: "knowledge.retrieval_policy.top_k", t: "number", d: 10 },
+  { g: "Intelligence", k: "knowledge.retrieval_policy.rerank", t: "bool", d: false },
+  { g: "Access", k: "access.require_approval", t: "bool", d: true },
+];
+const AG_ADV_KEYS = AG_ADV_FIELDS.map(f => f.k);
+function _agGet(obj, path) { return path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj); }
+function _agSet(obj, path, val) {
+  const ks = path.split(".");
+  let o = obj;
+  for (let i = 0; i < ks.length - 1; i++) { o[ks[i]] = o[ks[i]] || {}; o = o[ks[i]]; }
+  o[ks[ks.length - 1]] = val;
+}
+function _agPrune(o) {
+  if (o && typeof o === "object" && !Array.isArray(o)) {
+    for (const k of Object.keys(o)) {
+      _agPrune(o[k]);
+      if (o[k] && typeof o[k] === "object" && !Array.isArray(o[k]) && Object.keys(o[k]).length === 0) delete o[k];
+    }
+  }
+}
+function agRenderAdvFields(co) {
+  co = co || {};
+  const groups = {};
+  for (const f of AG_ADV_FIELDS) (groups[f.g] ||= []).push(f);
+  const field = f => {
+    const cur = _agGet(co, f.k);
+    const v = cur === undefined ? f.d : cur;
+    const id = "adv-" + f.k.replace(/\./g, "-");
+    if (f.t === "bool")
+      return `<label class="row" style="gap:6px; font-size:12px;"><input type="checkbox" id="${id}" data-advk="${f.k}" ${v ? "checked" : ""}> ${f.k}</label>`;
+    if (f.t === "select")
+      return `<label class="muted" style="font-size:12px; display:block;">${f.k}<select id="${id}" data-advk="${f.k}" style="width:100%; margin-top:2px;">${f.opts.map(o => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select></label>`;
+    return `<label class="muted" style="font-size:12px; display:block;">${f.k}<input id="${id}" data-advk="${f.k}" data-advt="${f.t}" value="${esc(String(v))}" style="width:100%; margin-top:2px;"></label>`;
+  };
+  $("ag-advanced-fields").innerHTML = Object.entries(groups).map(([g, fs]) =>
+    `<details style="margin:4px 0;"><summary style="cursor:pointer; font-size:13px; font-weight:600;">${g}</summary>
+      <div style="display:flex; flex-direction:column; gap:6px; padding:6px 0 6px 10px;">${fs.map(field).join("")}</div>
+    </details>`).join("");
+}
+function agCollectAdvFields() {
+  const out = {};
+  for (const f of AG_ADV_FIELDS) {
+    const el = document.querySelector(`#ag-advanced-fields [data-advk="${f.k}"]`);
+    if (!el) continue;
+    let v;
+    if (f.t === "bool") v = el.checked;
+    else if (f.t === "number") { const t = el.value.trim(); if (t === "") continue; v = Number(t); }
+    else v = el.value;
+    if (v !== f.d) _agSet(out, f.k, v);  // only persist non-defaults
+  }
+  return out;
+}
+function agStripAdvKeys(co) {
+  const clone = JSON.parse(JSON.stringify(co || {}));
+  for (const k of AG_ADV_KEYS) {
+    const ks = k.split(".");
+    let o = clone;
+    for (let i = 0; i < ks.length - 1 && o; i++) o = o[ks[i]];
+    if (o && typeof o === "object") delete o[ks[ks.length - 1]];
+  }
+  _agPrune(clone);
+  return clone;
+}
 async function agCreate() {
   $("ag-modal-title").textContent = "New agent";
   $("ag-err").textContent = "";
@@ -2767,6 +2853,7 @@ async function agCreate() {
   $("ag-team").value = "";
   $("ag-memns").value = ""; delete $("ag-memns").dataset.auto;
   $("ag-skillsdir").value = "";
+  agRenderAdvFields({});  // advanced knobs at their defaults
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
   $("ag-bind-config").style.display = "";
@@ -3080,12 +3167,15 @@ async function agEdit(name) {
     $("ag-create-extra").style.display = "";
     $("ag-bind-config").style.display = "";
     agFillModelOverrides(a.model_overrides);  // loads selection (new + legacy shape) + renders
-    // The Custom box round-trips the full config_overrides (allowed_tools/plugins/features
-    // + any other agent.yaml field) as JSON (valid YAML); legacy agents without overrides
-    // fall back to just their allowed_tools.
-    $("ag-capabilities").value = (a.config_overrides && Object.keys(a.config_overrides).length)
-      ? JSON.stringify(a.config_overrides, null, 2)
-      : agToolsToYaml(a.allowed_tools);
+    // Curated knobs populate the Advanced fields; the Custom box round-trips only the
+    // long tail (config_overrides minus the discrete keys). Legacy agents without any
+    // overrides fall back to showing just their allowed_tools.
+    const co = a.config_overrides || {};
+    agRenderAdvFields(co);
+    const rest = agStripAdvKeys(co);
+    $("ag-capabilities").value = Object.keys(rest).length
+      ? JSON.stringify(rest, null, 2)
+      : (Object.keys(co).length ? "" : agToolsToYaml(a.allowed_tools));
     await agLoadCreateBindings(current);
     $("ag-modal").dataset.mode = "edit";
     $("ag-modal").dataset.name = name;
@@ -3164,6 +3254,7 @@ async function agSave() {
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
         config_overrides_yaml: $("ag-capabilities").value,
+        config_overrides_fields: agCollectAdvFields(),
       });
       await agApplyEditBindings(name);
     } else {
@@ -3178,6 +3269,7 @@ async function agSave() {
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
         config_overrides_yaml: $("ag-capabilities").value,
+        config_overrides_fields: agCollectAdvFields(),
       });
       await agApplyCreateBindings(name);
     }

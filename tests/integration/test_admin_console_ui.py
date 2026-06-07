@@ -560,16 +560,25 @@ def test_agent_identity_fields_above_system_prompt():
 
 def test_agent_advanced_overrides_and_extra_fields():
     html = ADMIN_HTML
-    # memory_namespace / skills_dir discrete inputs; the single Custom (YAML) box carries
-    # both capabilities and any other agent.yaml field (the Advanced box was merged in).
-    for fid in ('id="ag-memns"', 'id="ag-skillsdir"', 'id="ag-capabilities"'):
+    # memory_namespace / skills_dir discrete inputs + an Advanced settings section (curated
+    # knobs backed by config_overrides) + the Custom (YAML) box for the long tail.
+    for fid in (
+        'id="ag-memns"',
+        'id="ag-skillsdir"',
+        'id="ag-capabilities"',
+        'id="ag-advanced-fields"',
+    ):
         assert fid in html, fid
-    assert 'id="ag-advanced"' not in html  # merged into Custom (YAML)
-    assert "Advanced overrides (YAML)" not in html
-    # save sends them; the Custom box feeds both capabilities and config_overrides
+    assert "Advanced settings" in html
+    # curated knob registry covers governance/deployment/intelligence/access
+    for key in ("agent_max_turns", "session_ttl_days", "log_format", "access.require_approval"):
+        assert key in html, key
+    assert "function agCollectAdvFields" in html
+    # save sends discrete fields + the Custom box → config_overrides (merged server-side)
     save = html.split("async function agSave", 1)[1].split("\n}", 1)[0]
     assert "memory_namespace:" in save
     assert "skills_dir:" in save
+    assert save.count("config_overrides_fields: agCollectAdvFields()") == 2
     assert save.count('config_overrides_yaml: $("ag-capabilities").value') == 2
 
 

@@ -175,6 +175,9 @@ class CreateBody(BaseModel):
     # Optional Advanced overrides: any agent.yaml field (governance/deployment/intelligence/
     # access/…) as YAML or JSON, deep-merged onto the materialized defaults.
     config_overrides_yaml: str | None = None
+    # Structured overrides from the discrete Advanced-settings inputs; deep-merged over the
+    # YAML block (so the curated fields win over the long-tail text).
+    config_overrides_fields: dict[str, Any] = {}
 
 
 class UpdateBody(BaseModel):
@@ -192,6 +195,7 @@ class UpdateBody(BaseModel):
     # override the structured field, mirroring create.
     capabilities_yaml: str | None = None
     config_overrides_yaml: str | None = None  # Advanced agent.yaml overrides (YAML/JSON)
+    config_overrides_fields: dict[str, Any] | None = None  # discrete Advanced-settings inputs
 
 
 # --- list ---------------------------------------------------------------------
@@ -289,6 +293,25 @@ def _parse_overrides_yaml(text: str | None) -> dict[str, Any]:
     return parsed
 
 
+def _merge_overrides(yaml_text: str | None, fields: dict[str, Any] | None) -> dict[str, Any]:
+    """Combine the long-tail YAML box with the discrete Advanced-settings fields.
+
+    Curated discrete fields win, deep-merged over the YAML block.
+    """
+
+    def deep(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
+        out = dict(base)
+        for key, value in over.items():
+            out[key] = (
+                deep(out[key], value)
+                if isinstance(value, dict) and isinstance(out.get(key), dict)
+                else value
+            )
+        return out
+
+    return deep(_parse_overrides_yaml(yaml_text), fields or {})
+
+
 @router.post("/agents", status_code=201)
 def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> dict[str, Any]:
     user = _require_admin(authorization)
@@ -310,7 +333,7 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
         icon=body.icon,
         tenant_id=body.tenant_id,
         team_id=body.team_id,
-        config_overrides=_parse_overrides_yaml(body.config_overrides_yaml),
+        config_overrides=_merge_overrides(body.config_overrides_yaml, body.config_overrides_fields),
     )
     agent_admin_store.set_provenance(body.name, "adhoc")
     agent_admin_store.enable(body.name)
@@ -355,8 +378,13 @@ def update_agent(
         identity["tenant_id"] = body.tenant_id
     if "team_id" in body.model_fields_set:
         identity["team_id"] = body.team_id
-    if "config_overrides_yaml" in body.model_fields_set:
-        identity["config_overrides"] = _parse_overrides_yaml(body.config_overrides_yaml)
+    if (
+        "config_overrides_yaml" in body.model_fields_set
+        or "config_overrides_fields" in body.model_fields_set
+    ):
+        identity["config_overrides"] = _merge_overrides(
+            body.config_overrides_yaml, body.config_overrides_fields
+        )
     update_agent_def(
         target,
         body.system_prompt,
