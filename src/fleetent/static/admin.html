@@ -1295,7 +1295,7 @@
           <label class="muted" style="font-size:12px; flex:1 1 160px;">memory_namespace
             <input id="ag-memns" placeholder="default" autocomplete="off" style="width:100%; margin-top:4px;"></label>
           <label class="muted" style="font-size:12px; flex:1 1 160px;">skills_dir
-            <input id="ag-skillsdir" placeholder="(global default)" autocomplete="off" style="width:100%; margin-top:4px;"></label>
+            <input id="ag-skillsdir" placeholder="~/.fleetent/<agent>/skills" autocomplete="off" style="width:100%; margin-top:4px;"></label>
         </div>
         <label class="muted" style="font-size:12px;">System prompt / identity
           <textarea id="ag-system-prompt" placeholder="Describe the agent's identity and behavior…" rows="8" style="font-family:monospace; width:100%; margin-top:4px;"></textarea>
@@ -3141,7 +3141,7 @@ async function agSave() {
         tenant_id: $("ag-tenant").value.trim() || "default",
         team_id: $("ag-team").value.trim() || null,
         memory_namespace: $("ag-memns").value.trim() || "default",
-        skills_dir: $("ag-skillsdir").value.trim() || null,
+        skills_dir: $("ag-skillsdir").value.trim() || `~/.fleetent/${name}/skills`,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
         config_overrides_yaml: $("ag-advanced").value,
@@ -3155,7 +3155,7 @@ async function agSave() {
         tenant_id: $("ag-tenant").value.trim() || "default",
         team_id: $("ag-team").value.trim() || null,
         memory_namespace: $("ag-memns").value.trim() || "default",
-        skills_dir: $("ag-skillsdir").value.trim() || null,
+        skills_dir: $("ag-skillsdir").value.trim() || `~/.fleetent/${name}/skills`,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
         config_overrides_yaml: $("ag-advanced").value,
