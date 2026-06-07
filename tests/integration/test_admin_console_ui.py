@@ -529,6 +529,11 @@ def test_agent_bindings_are_searchable_multiselect():
         'agMsWidget("agm-kb"',
     ):
         assert call in fn, call
+    # the user allowlist is picked by IM identity (Slack/Telegram/WhatsApp id), sourced from
+    # /im-users; the bound value stays the internal user_id
+    assert '"/im-users"' in fn
+    assert "${iu.platform}:${iu.platform_user_id}" in fn
+    assert "value: iu.user_id" in fn
     # the widget supports name filtering + chip selection; classes preserved for save-diff
     widget = html.split("function agMsWidget", 1)[1].split("function agMsOpen", 1)[0]
     assert "ms-search" in widget and "agMsFilter(" in widget

@@ -1317,7 +1317,7 @@
           <div id="agm-oauth" style="display:flex; flex-direction:column; gap:4px;"></div>
           <h4 style="margin:14px 0 4px;">Knowledge bases</h4>
           <div id="agm-kb" style="display:flex; flex-direction:column; gap:4px;"></div>
-          <h4 style="margin:14px 0 4px;">IM users (allowlist)</h4>
+          <h4 style="margin:14px 0 4px;">IM users (allowlist) <span class="muted" style="font-weight:normal; font-size:12px;">(by Slack / Telegram / WhatsApp id)</span></h4>
           <div id="agm-users"></div>
           <h4 style="margin:14px 0 4px;">Channels</h4>
           <div id="agm-channels"></div>
@@ -2981,12 +2981,12 @@ function kbOptionsFromConnectors(connectors) {
 async function agLoadCreateBindings(current = null) {
   AGM_CHANNELS = [];
   $("agm-channels").innerHTML = "";
-  const [skills, mcp, connectors, kbConnectors, users] = await Promise.all([
+  const [skills, mcp, connectors, kbConnectors, imUsers] = await Promise.all([
     api("GET", "/skills").catch(() => []),
     api("GET", "/mcp/servers").catch(() => []),
     api("GET", "/connectors").catch(() => []),
     api("GET", "/kb/connectors").catch(() => []),
-    api("GET", "/users").catch(() => []),
+    api("GET", "/im-users").catch(() => []),
   ]);
   // A knowledge base IS a connector — list the same KBs the KB tab shows (deduped by kb_id).
   const kbs = kbOptionsFromConnectors(kbConnectors);
@@ -2998,12 +2998,14 @@ async function agLoadCreateBindings(current = null) {
   agMsWidget("agm-oauth", "agm-oauth-item",
     (connectors || []).map(c => ({ value: c.id, label: c.display_name || c.id, q: `${c.display_name || ""} ${c.id}` })),
     "Select OAuth connectors…");
+  // Allowlist by IM identity: pick a user's Slack / Telegram / WhatsApp id. The chip shows
+  // platform:id; the bound value is still the internal user_id (binding unchanged).
   agMsWidget("agm-users", "agm-user-row",
-    (users || []).map(u => ({
-      value: u.id,
-      label: (u.name || u.email || u.id) + (u.name || u.email ? ` (${u.id})` : ""),
-      q: [u.id, u.name || "", u.email || ""].join(" "),
-    })), "Select IM users…");
+    (imUsers || []).map(iu => ({
+      value: iu.user_id,
+      label: `${iu.platform}:${iu.platform_user_id}`,
+      q: `${iu.platform} ${iu.platform_user_id} ${iu.user_id}`,
+    })), "Select by Slack / Telegram / WhatsApp id…");
   agMsWidget("agm-kb", "agm-kb-item",
     (kbs || []).map(k => ({
       value: k.kb_id,
