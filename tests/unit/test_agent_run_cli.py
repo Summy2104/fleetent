@@ -274,6 +274,10 @@ def _make_mock_agent(name: str = "test-bot") -> MagicMock:
     agent = MagicMock()
     agent.name = name
     agent.mcp_servers = []
+    agent.log_format = "console"
+    agent.observability.logging.console_level = "info"
+    agent.observability.logging.file_level = "debug"
+    agent.observability.logging.directory = "data/logs"
     return agent
 
 

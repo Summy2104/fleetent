@@ -85,13 +85,11 @@ def test_two_agents_carry_independent_governance() -> None:
 def test_deployment_scalar_fields_parse() -> None:
     af = agent_config.AgentFile.model_validate(
         _agent_doc(
-            microsandbox_url="http://sandbox:7777",
             session_ttl_days=7,
             disabled_skills=["x"],
             log_format="json",
         )
     )
-    assert af.microsandbox_url == "http://sandbox:7777"
     assert af.session_ttl_days == 7
     assert af.disabled_skills == ["x"]
     assert af.log_format == "json"
@@ -99,7 +97,6 @@ def test_deployment_scalar_fields_parse() -> None:
 
 def test_deployment_defaults_match_settings() -> None:
     af = agent_config.AgentFile.model_validate(_agent_doc(name="bare"))
-    assert af.microsandbox_url == "http://host.docker.internal:7777"
     assert af.log_format == "console"
     assert af.session_ttl_days == 30
     assert af.session_max_total_mb == 1024
