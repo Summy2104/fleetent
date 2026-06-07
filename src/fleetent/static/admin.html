@@ -3094,11 +3094,14 @@ async function agDrawer(name) {
   $("ag-drawer-body").innerHTML = `<div class="muted">Loading…</div>`;
   const enc = encodeURIComponent(name);
   try {
-    const [a, exp] = await Promise.all([
+    const [a, exp, providers] = await Promise.all([
       api("GET", `/agents/${enc}`),
       api("GET", `/agents/${enc}/agent-yaml`),
+      api("GET", "/providers").catch(() => []),
     ]);
-    agRenderPreview(name, a, exp.yaml);
+    const keyHints = {};
+    for (const p of providers || []) if (p.api_key) keyHints[p.id] = p.api_key;
+    agRenderPreview(name, a, exp.yaml, keyHints);
   } catch (e) {
     const network = /failed to fetch|networkerror|load failed/i.test(e.message || "");
     const msg = network ? "Couldn't reach the server — it may be restarting." : e.message;
@@ -3109,7 +3112,21 @@ async function agDrawer(name) {
   }
 }
 
-function agRenderPreview(name, a, yamlText) {
+// Annotate model-target api_key_env lines with the provider's key hint — DISPLAY ONLY
+// (the cached/copied/downloaded yaml stays a clean, comment-free deploy file). Tracks the
+// nearest `id:` and only annotates when it matches a known provider (model target), so
+// MCP api_key_env lines (env names, not providers) are left alone.
+function agAnnotateKeyHints(yamlText, keyHints) {
+  let lastId = null;
+  return (yamlText || "").split("\n").map(line => {
+    const idm = line.match(/^\s*-?\s*id:\s*(\S+)\s*$/);
+    if (idm) { lastId = idm[1]; return line; }
+    const km = line.match(/^\s*api_key_env:\s*\S/);
+    if (km && lastId && keyHints[lastId]) return `${line}  # 🔑 ${keyHints[lastId]}`;
+    return line;
+  }).join("\n");
+}
+function agRenderPreview(name, a, yamlText, keyHints = {}) {
   AG_YAML_CACHE = yamlText || "";
   $("ag-drawer-title").textContent = (a.icon ? a.icon + " " : "") + name;
   const archived = a.status === "archived";
@@ -3140,7 +3157,7 @@ function agRenderPreview(name, a, yamlText) {
     </div>
     <h4 style="margin:8px 0 6px;">agent.yaml <span class="muted" style="font-weight:normal;">(read-only preview)</span></h4>
     <pre id="ag-yaml-pre" style="white-space:pre; overflow:auto; max-height:68vh; font-size:12px;"></pre>`;
-  document.getElementById("ag-yaml-pre").textContent = AG_YAML_CACHE;
+  document.getElementById("ag-yaml-pre").textContent = agAnnotateKeyHints(AG_YAML_CACHE, keyHints);
 }
 
 function agCopyYaml() {
