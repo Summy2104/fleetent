@@ -62,6 +62,48 @@ def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
     return paths.base_dir() / "agents" / agent_id
 
 
+def _configure_logging_from_agent(agent: "AgentFile") -> None:
+    """Apply agent.yaml log_format and observability.logging.* to the runtime logging system.
+
+    Called once per standalone agent process after the agent file is loaded. The platform
+    server path (server.py) continues to use configure_logging(Settings) unchanged.
+    """
+    import logging
+
+    import structlog
+
+    from fleetent.observability.structured_logging import configure_structured_logging
+
+    log = agent.observability.logging
+    configure_structured_logging(
+        console_level=log.console_level,
+        file_level=log.file_level,
+        directory=log.directory,
+    )
+    shared_processors: list[structlog.types.Processor] = [
+        structlog.contextvars.merge_contextvars,
+        structlog.stdlib.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+    ]
+    if agent.log_format == "json":
+        renderer: structlog.types.Processor = structlog.processors.JSONRenderer()
+    else:
+        renderer = structlog.dev.ConsoleRenderer()
+    structlog.configure(
+        processors=shared_processors + [renderer],
+        wrapper_class=structlog.make_filtering_bound_logger(logging.DEBUG),
+        context_class=dict,
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+    logging.basicConfig(
+        format="%(message)s",
+        level=logging.INFO,
+        handlers=[logging.StreamHandler()],
+    )
+
+
 async def _start_infra(agent: AgentFile) -> None:
     """Best-effort process infrastructure: sandbox probe, per-agent MCP, session upkeep.
 
@@ -149,6 +191,7 @@ async def boot(
 
         load_dotenv(env_path, override=False)
     agent = agent_config.scan_home(home_dir)
+    _configure_logging_from_agent(agent)
     # Re-point the vector/embedding singletons at this agent's intelligence config
     # (import-time config used global Settings; standalone runs AS this single agent).
     from fleetent.intelligence import vector_store
