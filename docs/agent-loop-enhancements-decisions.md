@@ -254,3 +254,12 @@ C2 (todo 持久化, 最小, 验证 OpenSpec→TDD→bb-pr 全流程)
 - **实现**：`run_stream` chunk 循环防御式检测 `reasoning_content`（`isinstance(str)` 守卫——标准 SDK/mock 自动 no-op）→ 额外 yield `reasoning_delta` 事件供客户端展示；**不计入回复文本、不回传 LLM**（避免 DeepSeek 等后端拒收 reasoning_content as input）。更新事件类型 docstring + `agent.yaml.example` 注明用 params 开启请求侧 reasoning。
 - **暂缓**：`reasoning_content` 跨轮保留/回传（后端语义不一、回传有风险）；阻塞 `run()` 的 reasoning 捕获（无流式出口、价值低）。
 - **测试**：`test_agent_loop.py` +2（带 reasoning 流透出、纯流不透出）；全量 **3750 passed, 14 skipped**；mypy / ruff（改动）/ validate --strict 通过。
+
+### 2026-06-07 — T2-1 `model-transient-retry` 完成（范围聚焦）
+
+- **范围聚焦（实施期决定）**：`error_classifier` 把 429/503 都标 `should_switch_model=True`（既有语义=立即 failover）。原"先重试再 failover"会破坏既有多目标 fallback 语义 + 约 10 个测试。**改为"仅在最后/唯一候选上退避重试"**——多目标 fallback 行为不变（既有 falls_back 测试零改动通过），只在无可切换目标时（单/最后 provider）重试，正好覆盖 on-prem 单 provider 的 429 痛点。波及面仅"全耗尽"类测试。
+- **实现**：`_create_with_transient_retry(do_call, retry=)`（`retry=False` 单次直跑；否则对 `should_retry and not should_compress` 退避重试至 `_MAX_TRANSIENT_RETRIES`）+ `_retry_after_seconds`（解析 Retry-After 头）+ `_backoff_delay`（Retry-After 优先，否则指数+半抖动 capped）；`_call_policy_chat`/`_stream_policy_chat` 改 `enumerate` + `partial(create,...)` + `retry=is_last`。context_overflow（should_compress）排除（归 C3b）。
+- **决策**：用 `functools.partial` 而非循环内 lambda（避免 ruff B023 + mypy lambda 推断）；`2.0**attempt` 避免 mypy 把 `int**int` 当 Any。
+- **测试连带**：`test_agent_loop.py` 加 autouse `_backoff_delay→0`（免真实 sleep）；"全耗尽/cooldown"测试 side_effect `[429,429]→[429]*4`（最后候选现会重试）。
+- **暂缓**：把 5xx（500/502/504）归类为可重试需扩 `error_classifier` category（当前仅 429/503 经 rate_limit 走此路）；重试参数 agent.yaml 可配。
+- **测试**：`tests/unit/test_transient_retry.py`(4)；全量 **3754 passed, 14 skipped**；mypy / ruff（改动）/ validate --strict 通过。
