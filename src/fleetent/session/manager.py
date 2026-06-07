@@ -190,6 +190,9 @@ def cleanup_expired(
         # Best-effort: remove the agent-side resume marker
         with suppress(OSError):
             (SESSIONS_DIR / f"{session_id}.resume").unlink()
+        # Best-effort: remove the agent-side todo list
+        with suppress(OSError):
+            (SESSIONS_DIR / f"{session_id}.todo").unlink()
 
     _logger.info("session_cleanup_done", removed_count=len(removed), ttl_seconds=ttl_seconds)
     if removed:
@@ -389,6 +392,48 @@ def scan_and_mark_recent_resume(window_seconds: int = 120) -> list[str]:
             mark_resume_pending(session_id)
             marked.append(session_id)
     return marked
+
+
+def _todo_path(session_id: str) -> Path:
+    return SESSIONS_DIR / f"{session_id}.todo"
+
+
+def read_todo(session_id: str) -> list[dict[str, str]]:
+    """Read the agent-side persisted todo list for a session.
+
+    Returns [] when the file is absent or its content is unreadable — todo is a
+    best-effort task list and MUST NOT break a run on corruption.
+    """
+    path = _todo_path(session_id)
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        _logger.warn("session_todo_read_failed", session_id=session_id, error=str(exc))
+        return []
+    return list(data) if isinstance(data, list) else []
+
+
+def write_todo(session_id: str, items: list[dict[str, str]]) -> None:
+    """Persist the todo list to the agent-side ``{session_id}.todo`` sibling file.
+
+    Atomic (tmp→replace). Deliberately does NOT acquire ``session_lock``: the todo
+    tool runs inside the agent loop, and on the IM path the loop already holds the
+    session lock for the whole run — re-acquiring it here would deadlock (mirrors
+    ``write_compaction_checkpoint`` / ``mark_resume_pending``).
+    """
+    path = _todo_path(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.parent / f"{path.name}.tmp"
+    tmp.write_text(json.dumps(items, ensure_ascii=False))
+    tmp.replace(path)
+
+
+def clear_todo(session_id: str) -> None:
+    """Remove the ``{session_id}.todo`` file if it exists. Idempotent."""
+    with suppress(FileNotFoundError):
+        _todo_path(session_id).unlink()
 
 
 def externalize_tool_results(

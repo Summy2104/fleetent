@@ -2,9 +2,7 @@
 
 ## Purpose
 Agent 与用户交互工具集，提供暂停循环等待用户澄清（clarify）和 session 级任务列表管理（todo）能力。
-
 ## Requirements
-
 ### Requirement: clarify 暂停 agent 循环等待用户回答
 `clarify` SHALL 接受 `question`（必填，问题文本）和 `choices`（可选，`list[str]`，提供时为选择题，否则为开放问答）参数；调用后通过 `user_input_gate` 暂停当前 session 的 agent 循环，直到用户回答或超时。返回用户的回答字符串；超时时返回 `"timeout: 用户未在 {N} 秒内回答"`，agent 可自行处理（继续、再问、使用默认值）。
 
@@ -47,20 +45,38 @@ Agent 与用户交互工具集，提供暂停循环等待用户澄清（clarify�
 - **THEN** 该 session 的 `user_input_gate` entry 被清理，不泄漏内存
 
 ### Requirement: todo 维护 session 级任务列表
-`todo` SHALL 接受 `action`（`Literal["set", "get", "clear"]`）和 `items`（`list[str]`，`action="set"` 时必填）参数；在内存中维护 session 级别的任务列表；`set` 替换整个列表，`get` 返回当前列表，`clear` 清空；session 结束时自动释放，不持久化到数据库。
+
+`todo` SHALL 接受 `action`（`Literal["set", "update", "get", "clear"]`）参数维护 session 级任务列表；任务条目为 `{id, text, status}`，`status` ∈ `pending` / `in_progress` / `completed`，且任意时刻至多一个条目处于 `in_progress`。`set` 接受 `items`（`list[str]`）替换整个列表，每项自动赋唯一 `id` 与 `pending` 状态；`update` 接受 `item_id` 与目标 `status` 修改指定条目；`get` 返回当前列表（含状态）；`clear` 清空。任务列表 MUST 持久化到 agent 侧 `{session_id}.todo` 兄弟文件（JSON 内容），跨进程重启存活；持久化 MUST 为原子写（`tmp→rename`）且 MUST NOT 获取 `session_lock`（避免与运行中持锁的 agent 循环死锁）；MUST NOT 依赖 platform、MUST NOT 写入数据库或 session JSON 的 `meta`。无 `session_id` 时降级为进程内临时列表（不报错、不持久化）。
 
 #### Scenario: 设置任务列表
-- **WHEN** 调用 `todo(action="set", items=["处理文件A", "处理文件B", "生成报告"])`
-- **THEN** session 任务列表被替换为指定内容，返回确认信息
+- **WHEN** 调用 `todo(action="set", items=["处理文件A", "处理文件B"])`
+- **THEN** 列表被替换为两个条目，各自获得唯一 id 与 `pending` 状态，返回确认信息
 
-#### Scenario: 查询当前任务列表
+#### Scenario: 标记任务进行中
+- **WHEN** 对某 `pending` 条目调用 `todo(action="update", item_id=<id>, status="in_progress")`
+- **THEN** 该条目状态变为 `in_progress`，返回确认信息
+
+#### Scenario: 至多一个 in_progress
+- **WHEN** 已有条目处于 `in_progress`，再对另一条目 `update` 为 `in_progress`
+- **THEN** 操作被拒绝并返回提示（需先完成当前进行中的条目），列表状态不变
+
+#### Scenario: 完成任务
+- **WHEN** 对某条目调用 `todo(action="update", item_id=<id>, status="completed")`
+- **THEN** 该条目状态变为 `completed`，返回确认信息
+
+#### Scenario: 查询当前任务列表（含状态）
 - **WHEN** 调用 `todo(action="get")`
-- **THEN** 返回当前 session 任务列表；若为空返回 `"任务列表为空"`
+- **THEN** 返回当前列表，每条含 id、文本与状态；列表为空时返回空列表提示
 
 #### Scenario: 清空任务列表
 - **WHEN** 调用 `todo(action="clear")`
-- **THEN** 任务列表清空，返回确认信息
+- **THEN** 列表清空，`{session_id}.todo` 文件被删除，返回确认信息
 
-#### Scenario: session 结束后任务列表自动清理
-- **WHEN** session 结束（正常完成或超时）
-- **THEN** 该 session 的 todo 列表从内存中删除，不影响其他 session
+#### Scenario: 任务列表跨进程重启存活
+- **WHEN** 在某 session 设置任务后进程重启，再以同一 `session_id` 调用 `todo(action="get")`
+- **THEN** 返回重启前持久化的任务列表（从 `{session_id}.todo` 读回）
+
+#### Scenario: 无 session_id 时降级为临时列表
+- **WHEN** 工具调用缺少 `session_id`（如无会话的一次性调用）
+- **THEN** todo 在进程内临时维护、不写文件、不报错
+

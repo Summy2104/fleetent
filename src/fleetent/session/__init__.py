@@ -12,6 +12,7 @@ from fleetent.session.manager import (
     cleanup_expired,
     clear,
     clear_resume_pending,
+    clear_todo,
     delete_compaction_checkpoint,
     enforce_capacity,
     externalize_tool_results,
@@ -25,6 +26,7 @@ from fleetent.session.manager import (
     load_meta,
     mark_resume_pending,
     maybe_run_maintenance,
+    read_todo,
     rehydrate_tool_results,
     reset,
     save,
@@ -33,6 +35,7 @@ from fleetent.session.manager import (
     start_session_maintenance,
     stop_session_maintenance,
     write_compaction_checkpoint,
+    write_todo,
 )
 
 __all__ = [
@@ -40,6 +43,7 @@ __all__ = [
     "cleanup_expired",
     "clear",
     "clear_resume_pending",
+    "clear_todo",
     "delete_compaction_checkpoint",
     "write_compaction_checkpoint",
     "enforce_capacity",
@@ -54,6 +58,7 @@ __all__ = [
     "load_meta",
     "mark_resume_pending",
     "maybe_run_maintenance",
+    "read_todo",
     "rehydrate_tool_results",
     "scan_and_mark_recent_resume",
     "reset",
@@ -61,4 +66,5 @@ __all__ = [
     "session_lock",
     "start_session_maintenance",
     "stop_session_maintenance",
+    "write_todo",
 ]
