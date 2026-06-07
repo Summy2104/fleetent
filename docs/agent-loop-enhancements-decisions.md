@@ -225,3 +225,10 @@ C2 (todo 持久化, 最小, 验证 OpenSpec→TDD→bb-pr 全流程)
 - **决策**：`.todo` 后缀不带 `.json`（避开 `rglob("*.json")` 误判，仿 `.resume`）；穷举 Literal 的 `todo` 用 `assert_never(action)` 收尾（解决 mypy unreachable）。
 - **测试**：`tests/unit/test_session_todo_store.py`(9) + `test_interaction_tools.py` todo 段重写（含持锁不死锁回归）；全量 **3719 passed, 14 skipped**；mypy / ruff（改动文件）/ openspec validate --strict 均通过。
 - **既有漂移观察（非本 change，未修，避免污染 diff）**：`check_test_layers` 报 `tests/unit/test_config.py:166`（commit `e1762706` 引入）；`ruff check src tests` 报 `src/fleetent/tools/file_tools.py`(9) 与 `tests/unit/test_session_resume_marker.py`(1) unused import。建议另起 `chore` 清理。CI 门禁（`make test-unit-ci`/`test-integration`）不含 check_test_layers，故不阻塞本 PR。
+
+### 2026-06-07 — C3a `compression-continuation-summary` 完成
+
+- **范围微调（实施期决定）**：把**工具结果 prune** 从 C3a 挪到 **C3b**——prune 是"token 回收"，与 C3b 的"按窗口预算"主题更内聚；C3a 专注摘要质量，更小更聚焦。C3a = 结构化摘要模板 + active-task 续跑块。
+- **实现**：`_build_summary_prompt` 重写为结构化模板（Goal/Completed/In Progress·Pending/Key Findings/Next Steps，首次与增量两分支同结构，要求逐字保留未完成工作+下一步）；新增 `_active_task_block(session_id)` 读 C2 的 `.todo` 未完成项，作为逐字 system 块在 summarized/degraded 路径注入 `[head, active-task, summary, tail]`（no_middle 不注入）；`_select_tail` 增 `extra_fixed` 把 active 块 token 计入投影。无 session / 无未完成 / 读失败安全退化。
+- **决策**：active 块用新建 dict，不入 head/tail identity 集合，不破坏既有去重；prompt 保持英文（跨模型稳健）。
+- **测试**：`tests/unit/test_compression_continuation.py`(6)；全量 **3725 passed, 14 skipped**；mypy / ruff（改动文件）/ openspec validate --strict 通过；既有压缩测试无回归（无 session 调用行为不变）。
