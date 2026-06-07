@@ -19,10 +19,10 @@ from pydantic import BaseModel
 from fleetent import auth, user_store
 from fleetent.governance import audit_log
 from fleetent.platform.model_provider_management import provider_admin_store
-from fleetent.platform.secret_management import credential_service
 from fleetent.platform.model_provider_management.provider_connectivity import (
     test_provider_connectivity_sync,
 )
+from fleetent.platform.secret_management import credential_service
 
 router = APIRouter(prefix="/admin/providers")
 
