@@ -544,11 +544,25 @@ def test_agent_bindings_are_searchable_multiselect():
     assert collapse_panels in html
 
 
+def test_agent_identity_fields_above_system_prompt():
+    html = ADMIN_HTML
+    # version (read-only) / tenant_id / team_id authored above the system prompt
+    for fid in ('id="ag-version"', 'id="ag-tenant"', 'id="ag-team"'):
+        assert fid in html, fid
+    assert html.index('id="ag-version"') < html.index('id="ag-system-prompt"')
+    assert html.index('id="ag-tenant"') < html.index('id="ag-system-prompt"')
+    # version input is read-only (platform-managed); tenant/team are editable + sent on save
+    vsnip = html.split('id="ag-version"', 1)[1][:80]
+    assert "disabled" in vsnip
+    save = html.split("async function agSave", 1)[1].split("\n}", 1)[0]
+    assert "tenant_id:" in save and "team_id:" in save
+
+
 def test_agent_model_overrides_pick_from_providers():
     html = ADMIN_HTML
-    render = html.split("function agRenderModelOverrides", 1)[1].split("function agRenderRouter", 1)[
-        0
-    ]
+    render = html.split("function agRenderModelOverrides", 1)[1].split(
+        "function agRenderRouter", 1
+    )[0]
     # Models is a multi-select dropdown (agMsWidget) of configured providers; no free-text.
     assert "AG_PROVIDERS" in render
     assert 'agMsWidget("ag-models-ms", "agmo-target"' in render

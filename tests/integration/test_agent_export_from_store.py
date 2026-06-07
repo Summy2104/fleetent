@@ -36,6 +36,14 @@ def db(tmp_path, monkeypatch):
     return tmp_path
 
 
+def test_exports_real_active_version(db):
+    agent = agent_store.create_agent("support", "v1.", ["shell"])
+    assert materialize.agent_file_from_store(agent).version == 1
+    agent_store.create_version("support", system_prompt="v2.")  # active becomes v2
+    reloaded = agent_store.get_by_name("support")
+    assert materialize.agent_file_from_store(reloaded).version == 2
+
+
 def test_exports_tenant_team_skills_dir(db):
     agent = agent_store.create_agent(
         "support", "Help.", ["shell"], skills_dir="skills", tenant_id="acme", team_id="cs"

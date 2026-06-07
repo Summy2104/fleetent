@@ -170,6 +170,15 @@ def _knowledge_from_store(tenant_id: str, agent_id: int) -> AgentKnowledge:
     )
 
 
+def _active_version(agent: agent_store.Agent) -> int:
+    """The agent's active version number (the real snapshot count), defaulting to 1."""
+    if agent.active_version_id is not None:
+        av = agent_store.get_version_by_id(agent.active_version_id)
+        if av is not None:
+            return av.version
+    return 1
+
+
 def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
     """Build the full home schema from the authored definition + bindings.
 
@@ -180,7 +189,7 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
     """
     return AgentFile(
         name=agent.name,
-        version=1,
+        version=_active_version(agent),
         tenant_id=agent.tenant_id,
         team_id=agent.team_id,
         system_prompt=agent.system_prompt,

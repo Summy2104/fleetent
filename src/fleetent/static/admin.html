@@ -1285,6 +1285,14 @@
           <span id="ag-icon-palette" style="display:flex; gap:4px; flex-wrap:wrap;"></span>
           <input id="ag-icon" type="hidden">
         </div>
+        <div class="row" style="gap:8px; align-items:flex-end; flex-wrap:wrap;">
+          <label class="muted" style="font-size:12px; flex:0 0 auto;">version
+            <input id="ag-version" disabled title="active version — managed by the platform" style="width:70px; margin-top:4px; opacity:.7;"></label>
+          <label class="muted" style="font-size:12px; flex:1 1 160px;">tenant_id
+            <input id="ag-tenant" placeholder="default" autocomplete="off" style="width:100%; margin-top:4px;"></label>
+          <label class="muted" style="font-size:12px; flex:1 1 160px;">team_id
+            <input id="ag-team" placeholder="(none)" autocomplete="off" style="width:100%; margin-top:4px;"></label>
+        </div>
         <label class="muted" style="font-size:12px;">System prompt / identity
           <textarea id="ag-system-prompt" placeholder="Describe the agent's identity and behavior…" rows="8" style="font-family:monospace; width:100%; margin-top:4px;"></textarea>
         </label>
@@ -2729,6 +2737,9 @@ async function agCreate() {
   $("ag-name").disabled = false;
   agRenderIconPalette();
   agSetIcon("");
+  $("ag-version").value = "—";  // assigned on first save
+  $("ag-tenant").value = "default";
+  $("ag-team").value = "";
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
   $("ag-bind-config").style.display = "";
@@ -3030,6 +3041,9 @@ async function agEdit(name) {
     $("ag-name").disabled = false;  // name is editable (rename)
     agRenderIconPalette();
     agSetIcon(a.icon || "");
+    $("ag-version").value = a.version ?? "—";
+    $("ag-tenant").value = a.tenant_id || "default";
+    $("ag-team").value = a.team_id || "";
     $("ag-system-prompt").value = a.system_prompt || "";
     // Mirror the new-agent layout: tools come from the capabilities YAML.
     $("ag-allowed-tools").style.display = "none";
@@ -3109,6 +3123,8 @@ async function agSave() {
       // is applied server-side first, so bindings below target the new name.
       await api("PATCH", `/agents/${encodeURIComponent(orig)}`, {
         name, system_prompt: sp, icon,
+        tenant_id: $("ag-tenant").value.trim() || "default",
+        team_id: $("ag-team").value.trim() || null,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
       });
@@ -3118,6 +3134,8 @@ async function agSave() {
       if (!name) { $("ag-err").textContent = "name required"; return; }
       await api("POST", "/agents", {
         name, system_prompt: sp, icon,
+        tenant_id: $("ag-tenant").value.trim() || "default",
+        team_id: $("ag-team").value.trim() || null,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
       });

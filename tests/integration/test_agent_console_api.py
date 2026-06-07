@@ -163,6 +163,8 @@ def _wire_real_store(monkeypatch):
             return None
         return {
             "id": a.id,
+            "tenant_id": a.tenant_id,
+            "team_id": a.team_id,
             "system_prompt": a.system_prompt,
             "allowed_tools": a.allowed_tools,
             "skills_dir": a.skills_dir,
@@ -183,6 +185,8 @@ def _wire_real_store(monkeypatch):
         plugins=None,
         features=None,
         icon=None,
+        tenant_id="default",
+        team_id=None,
     ):
         agent_store.create_agent(
             name,
@@ -195,9 +199,29 @@ def _wire_real_store(monkeypatch):
             model_overrides=mo,
             memory_namespace=mn,
             icon=icon,
+            tenant_id=tenant_id,
+            team_id=team_id,
         )
 
-    def _update(name, system_prompt, allowed_tools, sd=None, mids=None, mo=None, mn=None):
+    def _update(
+        name,
+        system_prompt,
+        allowed_tools,
+        sd=None,
+        mids=None,
+        mo=None,
+        mn=None,
+        tenant_id=None,
+        team_id=None,
+    ):
+        if tenant_id is not None or team_id is not None:
+            cur = agent_store.get_by_name(name)
+            if cur is not None:
+                agent_store.set_identity(
+                    name,
+                    tenant_id if tenant_id is not None else cur.tenant_id,
+                    team_id if team_id is not None else cur.team_id,
+                )
         kwargs = {}
         if system_prompt is not None:
             kwargs["system_prompt"] = system_prompt

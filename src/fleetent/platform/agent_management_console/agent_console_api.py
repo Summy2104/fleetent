@@ -55,6 +55,8 @@ def create_agent_def(
     plugins: list[str] | None = None,
     features: dict[str, Any] | None = None,
     icon: str | None = None,
+    tenant_id: str = "default",
+    team_id: str | None = None,
 ) -> None:
     """Create a new agent definition (no bindings). Bridges agent_store.create_agent."""
     return None
@@ -78,6 +80,8 @@ def update_agent_def(
     mcp_server_ids: list[str] | None = None,
     model_overrides: dict[str, Any] | None = None,
     memory_namespace: str | None = None,
+    tenant_id: str | None = None,
+    team_id: str | None = None,
 ) -> None:
     """Edit an agent by snapshotting a new active version. Bridges create_version.
 
@@ -152,6 +156,8 @@ class CloneBody(BaseModel):
 
 class CreateBody(BaseModel):
     name: str
+    tenant_id: str = "default"
+    team_id: str | None = None
     system_prompt: str = ""
     allowed_tools: list[str] = []
     plugins: list[str] = []
@@ -168,6 +174,8 @@ class CreateBody(BaseModel):
 
 class UpdateBody(BaseModel):
     name: str | None = None  # rename the agent (optional)
+    tenant_id: str | None = None
+    team_id: str | None = None
     system_prompt: str | None = None
     allowed_tools: list[str] | None = None
     skills_dir: str | None = None
@@ -219,6 +227,9 @@ def _def_response(name: str) -> dict[str, Any]:
         "status": state["status"],
     }
     if agent is not None:
+        out["version"] = agent.get("version", 1)
+        out["tenant_id"] = agent.get("tenant_id", "default")
+        out["team_id"] = agent.get("team_id")
         out["system_prompt"] = agent["system_prompt"]
         out["allowed_tools"] = agent["allowed_tools"]
         out["plugins"] = agent.get("plugins", [])
@@ -275,6 +286,8 @@ def create_agent(body: CreateBody, authorization: str | None = Header(None)) -> 
         plugins=plugins,
         features=features,
         icon=body.icon,
+        tenant_id=body.tenant_id,
+        team_id=body.team_id,
     )
     agent_admin_store.set_provenance(body.name, "adhoc")
     agent_admin_store.enable(body.name)
@@ -312,6 +325,13 @@ def update_agent(
     if body.capabilities_yaml is not None:
         # Capabilities YAML drives allowed_tools; plugins/features are inherited unchanged.
         allowed_tools, _, _ = _resolve_capabilities([], [], {}, body.capabilities_yaml)
+    # Only forward identity fields the caller explicitly set, so a partial update can't
+    # null an unmentioned team_id (None here is a real value: clear it).
+    identity: dict[str, Any] = {}
+    if "tenant_id" in body.model_fields_set:
+        identity["tenant_id"] = body.tenant_id
+    if "team_id" in body.model_fields_set:
+        identity["team_id"] = body.team_id
     update_agent_def(
         target,
         body.system_prompt,
@@ -320,6 +340,7 @@ def update_agent(
         body.mcp_server_ids,
         body.model_overrides,
         body.memory_namespace,
+        **identity,
     )
     if body.icon is not None:
         set_agent_icon(target, body.icon)

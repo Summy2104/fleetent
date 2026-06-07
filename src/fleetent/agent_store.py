@@ -196,6 +196,14 @@ def set_icon(name: str, icon: str | None) -> None:
     _db().execute("UPDATE agents SET icon = :icon WHERE name = :name", {"icon": icon, "name": name})
 
 
+def set_identity(name: str, tenant_id: str, team_id: str | None) -> None:
+    """Update an agent's tenant/team (agent-level identity, not a versioned change)."""
+    _db().execute(
+        "UPDATE agents SET tenant_id = :tenant_id, team_id = :team_id WHERE name = :name",
+        {"tenant_id": tenant_id, "team_id": team_id, "name": name},
+    )
+
+
 def icons_by_name() -> dict[str, str]:
     """Map of agent name -> icon for the rows that have one (drives the list view)."""
     rows = _db().execute("SELECT name, icon FROM agents WHERE icon IS NOT NULL").fetchall()
