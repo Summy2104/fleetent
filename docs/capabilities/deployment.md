@@ -60,7 +60,7 @@
   - migration 失败时不会自动 rollback；已创建 backup 会保留，脚本返回非 0
 
 - ✅ **Pilot connector operations CLI**：`fleetent-admin kb connectors ...`
-  - `list` 列出 settings 中的 Google Drive / Confluence connector 安全摘要
+  - `list` 列出 Platform Knowledge config / DB snapshot 中的 Google Drive / Confluence connector 安全摘要
   - `check <connector_id>` 检查 `credential_ref` 与 remote scope，返回 credential_missing / credential_invalid / auth_failed / scope_unreachable / ok
   - `sync <connector_id> --dry-run` 生成同步计划，不写 KB、source state 或 vector index
   - `sync <connector_id>` 手动执行同步并写入最近一次 status
@@ -231,7 +231,7 @@ config validation 目录，服务拆分要等运行模块边界稳定后再做�
 - Then：DB migration 自动执行，存量数据完整保留，服务正常启动
 
 **场景 3：配置隔离**
-- Given：.env 文件包含 ANTHROPIC_API_KEY
+- Given：Agent `.env` 文件包含 `FLEETENT_MODEL_PRIMARY_API_KEY`
 - When：服务运行
 - Then：API key 不出现在任何日志、trace、system prompt 中
 

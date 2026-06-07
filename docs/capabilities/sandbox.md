@@ -11,7 +11,7 @@
 **不负责**：决定是否执行代码（→ agent_loop）、工具访问控制（→ agent_policy）、执行结果写入 trace（→ eval_logger）。
 
 **调用关系**：
-- 依赖：config（sandbox 配置参数）、agent_store（agent 级别 `features.code_execution` 开关）
+- 依赖：`platform.yaml`（全局 sandbox 策略 / 资源默认值）、agent config（agent 级别 `features.code_execution` 开关）
 - 被依赖：tool_registry（注册 `run_code` 工具供 agent_loop 调用）
 
 ## 关键流程
@@ -49,7 +49,7 @@ flowchart TD
 ## 现状
 
 - ⚡ **Docker 沙箱执行**：代码在 Docker 容器内隔离运行，返回 stdout / stderr / exit_code。`integrations/sandbox/client.py` 封装 Docker CLI；Docker 为既定沙箱后端，下述治理项均在此基础上演进
-- ✅ **资源限制可配置**：`memory` / `cpus` / `network` / `exec_timeout` / `read_only` 经 `settings.yaml` 的 `sandbox.resources` 声明，未配置回退安全默认（不再硬编码；见 `sandbox-resource-limits`）
+- ✅ **资源限制可配置**：`memory` / `cpus` / `network` / `exec_timeout` / `read_only` 经 `platform.yaml` 的 `sandbox.resources` 声明，未配置回退安全默认（不再硬编码；见 `sandbox-resource-limits`）
 - ✅ **容器安全加固**：`--pids-limit`、`/tmp` tmpfs 限大小+`nosuid`、`--cap-drop ALL`（agent 档补最小 cap）、`--security-opt no-new-privileges`、`--init`、session 档非 root（`--user`）；按 scope 分层、可配置（见 `sandbox-container-hardening`）
 - ⚡ **文件系统隔离**：session 档 `--read-only`，`/tmp` 可写但限额 + `nosuid`
   - 当前缺失：无符号链接攻击防护（见待决问题）
@@ -70,7 +70,7 @@ flowchart TD
   - `all`（默认）：所有 agent 可用，agent 可显式设置 `code_execution: false` 关闭
   - Docker 不可用时自动降级为 `off`，不阻断平台启动
 
-- [x] **资源限制可配置**：通过 `settings.yaml` 声明，不再硬编码
+- [x] **资源限制可配置**：通过 `platform.yaml` 声明，不再硬编码
   ```yaml
   sandbox:
     resources:

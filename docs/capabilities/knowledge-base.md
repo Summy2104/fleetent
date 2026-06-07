@@ -13,14 +13,14 @@
 **不负责**：注入 system prompt 的协调与 token 预算（→ long_term_ctx）、用户个人记忆（→ memory）。
 
 **调用关系**：
-- 依赖：vector_store（向量索引）、config
+- 依赖：vector_store（向量索引）、Platform Knowledge config / DB snapshot、Agent KB binding
 - 被依赖：long_term_ctx（检索注入内容）、reflection（只读，观察召回质量）
 
 **模块归属**：
 - owning package：`intelligence.knowledge_base`
 - public API：`parse_text(filename, content)`、`parse_markdown(filename, content)`、`parse_html(filename, content)`、`parse_pdf(filename, content)`、`parse_docx(filename, content)`、`parse_pptx(filename, content)`、`parse_xlsx(filename, content)`、`parse_document(filename, content, mime_type)`、`ingest_text(filename, content, tenant_id, kb_id, source, source_url)`、`ingest_parsed(parsed, tenant_id, kb_id, source, source_url)`、`search(query, tenant_id, kb_ids, limit, mode)`、`KnowledgeSearchOptions`、`KnowledgeSearchPlan`、`KnowledgeSearchStep`、`plan_knowledge_search(query, options)`、`execute_knowledge_search_plan(plan)`、`delete(document_id)`、`archive(document_id)`、`iter_indexable_knowledge_chunks(tenant_id, kb_id)`、`AgentKnowledgeBaseBinding`、`bind_agent_to_kb(tenant_id, agent_id, kb_id)`、`unbind_agent_from_kb(tenant_id, agent_id, kb_id)`、`list_agent_kb_bindings(tenant_id, agent_id)`、`resolve_agent_kb_ids(tenant_id, agent_id)`、`ConnectorSummary`、`ConnectorCheckResult`、`ConnectorSyncResult`、`ConnectorStatus`、`list_configured_connectors()`、`check_connector(connector_id)`、`run_connector_sync(connector_id, dry_run)`、`get_connector_status(connector_id)`、`DocumentRef`、`DataSource`、`LocalDirectoryDataSource`、`LocalDirectorySourceConfig`、`GoogleDriveConnectorConfig`、`ConfluenceConnectorConfig`、`SyncAction`、`SyncPlan`、`SyncPlanItem`、`SyncPlanSummary`、`SyncExecutionSummary`、`plan_local_directory_sync(config, tenant_id, kb_id)`、`execute_sync_plan(plan)`、`sync_local_directory(config, tenant_id, kb_id)`、`plan_google_drive_sync(config, client)`、`sync_google_drive(config, client)`、`plan_confluence_sync(config, client)`、`sync_confluence(config, client)`
 - owned tables：`knowledge_bases`、`knowledge_documents`、`knowledge_chunks`、`knowledge_chunks_fts`、`knowledge_source_states`、`knowledge_base_agent_bindings`、`knowledge_connector_status`
-- config namespace：`knowledge_base.*`
+- config namespace：Platform `knowledge.*` / Agent `knowledge_base.*` binding and retrieval policy
 
 ## 关键流程
 
@@ -387,7 +387,7 @@ def resolve_agent_kb_ids(tenant_id: str, agent_id: str) -> list[str]:
 
 
 def list_configured_connectors() -> list[ConnectorSummary]:
-    """列出 settings 中配置的 Google Drive / Confluence connector 安全摘要。"""
+    """列出 Platform Knowledge config 中配置的 Google Drive / Confluence connector 安全摘要。"""
 
 
 async def check_connector(connector_id: str) -> ConnectorCheckResult:
@@ -441,7 +441,7 @@ def get_connector_status(connector_id: str) -> ConnectorStatus:
 
 **需要重写（深度耦合 LlamaIndex 或违反 fleetent 约束）**：
 - 向量存储：LanceDB → fleetent `vector_store` public API（当前可用普通 SQLite persistent backend；sqlite-vec / Qdrant 后置）
-- Embedding：OpenAI Embeddings API（云托管，禁止默认）→ fleetent HTTP embedding provider，生产配置指向自托管 bge-m3 / multilingual-e5 等模型服务
+- Embedding：OpenAI Embeddings API（云托管，禁止默认）→ Agent model policy 的 HTTP embedding provider，生产配置指向自托管 bge-m3 / multilingual-e5 等模型服务
 - 分块器：逻辑参考 knowledge-bridge，但 `TextNode` 类型替换为 fleetent 自定义 dataclass
 - 检索引擎：逻辑参考，接口对齐 `search()` / `graph_search()`
 
@@ -574,7 +574,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - hybrid search 合并 vector 与 keyword candidates，同一 chunk 去重并通过 RRF 提升双命中结果
 - knowledge base 隔离：不同 `tenant_id + kb_id` 的检索结果互不干扰
 - delete 级联：删除文档后对应 chunk 和 vector entries 均被清理
-- long-term-ctx 在 `knowledge_base.enabled=true` 时调用内置 provider；disabled 或无结果时降级
+- long-term-ctx 在 Agent knowledge binding / policy 启用时调用内置 provider；disabled 或无结果时降级
 - local sync planner 为 new / changed / unchanged / missing source 生成确定性动作
 - execute_sync_plan 只在 item 成功后更新 source state，单 item 失败不阻断后续 item
 - sync_local_directory 通过 planner + executor 执行；本地文件删除后对应 KB document 和 chunks 被删除
@@ -588,7 +588,7 @@ knowledge-base 是未来最有独立服务潜力的模块，因为它会包含�
 - fixture loader 对 `name`、`documents`、`queries`、`expected_chunks`、`forbidden_chunks` 缺失 fail fast
 - deterministic runner 使用 tmp SQLite DB 和 tmp vector backend ingest fixture documents
 - vector-only query top-k 包含 expected chunk/snippet，且不包含 forbidden chunk/snippet
-- real embedding evaluation 默认 skip，缺少 provider credentials/config 时也 skip
+- real embedding evaluation 默认 skip，缺少 provider credentials / Agent model config 时也 skip
 
 **需要 mock / monkeypatch 的依赖**：
 - `vector_store`：隔离向量索引读写

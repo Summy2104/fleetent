@@ -4,96 +4,152 @@
 
 ## 概述
 
-按 `task_type` 将 LLM 调用路由到合适的 provider，并在主 provider 不可用时自动切换 fallback 链。是 agent_loop 与底层 LLM provider 之间的唯一中间层。
+按当前 Agent 的 `models` 配置解析模型调用目标，并在首选 target 不可用时按 route 顺序切换 fallback。它是
+agent runtime、memory extraction、embedding / rerank、image generation 等调用模型能力时共享的模型策略层。
 
-**负责**：task_type → provider config 映射、OpenAI-compatible client 实例化、fallback 链遍历与切换。
+**负责**：Agent-scoped `models.targets` / `models.routes` 解析、OpenAI-compatible client 实例化、fallback 链遍历、API key env 引用校验、provider / target / route 元数据供审计和计费用。
 
-**不负责**：实际的 streaming / 调用（→ agent_loop）、工具调用执行（→ tool_registry）、成本追踪（→ observability）。
+**不负责**：实际 streaming / 调用（→ agent runtime）、工具调用执行（→ tool registry）、模型用量和成本聚合（→ observability / stats）、明文密钥存储（→ Agent `.env` / secret source）。
 
 **调用关系**：
-- 依赖：config（`agents/<agent-id>/agent.yaml` 中的 model provider / override 定义，legacy settings 路径仍保留兼容）
-- 被依赖：agent_loop（每次 LLM 调用前取 client 和 config）、reflection（LLM 分析调用）
+- 依赖：`agents/<agent-id>/agent.yaml` 中的 `models` section，以及 Agent 进程环境中的 `api_key_env`。
+- 被依赖：agent runtime、memory / long-term context / reflection、embedding / rerank / image generation 相关 runtime。
 
 ## 关键流程
 
 ```mermaid
 flowchart TD
-    A["agent_loop 调用\nget_async_client_and_config(task_type)"] --> B["查 task_type → provider 列表\n（顺序即 fallback 优先级）"]
-    B --> C["取第一个 provider 配置\n（model / base_url / api_key）"]
-    C --> D["实例化 AsyncOpenAI client"]
-    D --> E["返回 (client, ModelConfig)"]
-    E --> F["agent_loop 发起 streaming 调用"]
-    F -->|provider 异常| G["fallback：取下一个 provider\n重新实例化 client"]
-    G --> F
-    F -->|所有 provider 耗尽| H["抛出错误\nagent_loop 处理"]
+    A["AgentSnapshot.model_policy"] --> B["读取 models.routes.<route_key>"]
+    B --> C["按顺序解析 target chain"]
+    C --> D["合并 target params + route entry override"]
+    D --> E{"target 声明 api_key_env?"}
+    E -->|是| F["从 Agent 进程环境读取 API key"]
+    E -->|否| G["允许无鉴权本地 target"]
+    F & G --> H["按 protocol 构造调用配置 / client"]
+    H --> I["发起模型调用"]
+    I -->|可切换 provider 错误| J["尝试下一个 target"]
+    J --> H
+    I -->|成功| K["返回结果并记录 route/provider/target/model"]
 ```
 
-> **client 无状态**：每次调用 `get_async_client_and_config` 均新建 client 实例，故意为之——client 无状态且廉价，避免跨请求状态泄漏。
+## 配置模型
 
-## 接口定义
+`agent.yaml` 必须包含 `models.targets` 和 `models.routes`。
 
-```python
-def get_async_client_and_config(task_type: str = "default") -> tuple[AsyncOpenAI, ModelConfig]:
-    """按 task_type 返回 (AsyncOpenAI client, ModelConfig)。
-    每次调用新建 client，不复用。
-    task_type 不存在时 fallback 到 "default"。
-    """
+```yaml
+models:
+  targets:
+    - id: primary
+      provider: openrouter
+      protocol: openai_chat
+      base_url: https://openrouter.ai/api/v1
+      model: anthropic/claude-3-5-sonnet
+      api_key_env: FLEETENT_MODEL_PRIMARY_API_KEY
+      max_tokens: 4096
+      params:
+        temperature: 0.2
 
-class ModelConfig(TypedDict):
-    model: str           # 模型 ID，如 "claude-opus-4-7"
-    max_tokens: int
-    temperature: float
-    extra_params: dict   # provider 特有参数透传
+    - id: fast
+      provider: local
+      protocol: openai_chat
+      base_url: http://localhost:11434/v1
+      model: qwen2.5
+
+  routes:
+    default:
+      - target: primary
+      - target: fast
+        max_tokens: 2048
+    memory_extraction:
+      - target: fast
 ```
+
+### targets
+
+- `id`：Agent 内唯一 target id。
+- `provider`：展示、审计、计费和 authoring 元数据；runtime 不按 provider 名写死分支。
+- `protocol`：决定 runtime 调用方式。当前标准协议包括：
+  - `openai_chat`
+  - `http_embedding`
+  - `http_rerank`
+  - `openai_image_generation`
+- `api_key_env`：可选。存在时 runtime 从 Agent 进程环境读取该变量；缺失时报配置错误，不静默 fallback。
+- `params` / `max_tokens`：target 默认参数，可被 route entry 覆盖。
+
+### routes
+
+`models.routes` 是 route key 到 target entries 的映射。entry 顺序就是 fallback 优先级。
+
+标准 route key：
+
+- `default`
+- `memory_extraction`
+- `vision`
+- `embedding`
+- `rerank`
+- `image_generation`
+- `audio_transcription`
+- `audio_generation`
 
 ## 现状
 
-- ✅ **task_type 路由**：task_type → provider config 列表查找
-- ✅ **OpenAI-compatible client**：复用 `AsyncOpenAI` SDK，base_url 可指向任意兼容端点（Anthropic / OpenRouter / 本地 Ollama 等）
-- ✅ **Fallback 链**：provider 列表顺序即优先级，前一个失败自动切到下一个
-- ✅ **config 驱动**：provider / model override 定义来自配置，不硬编码；当前部署入口使用 `agents/<agent-id>/agent.yaml`
+- ✅ **Agent-scoped model policy**：runtime 从 active Agent snapshot 的 `models` section 解析，不使用全局 route YAML。
+- ✅ **OpenAI-compatible chat**：`protocol: openai_chat` 复用 `AsyncOpenAI` SDK，`base_url` 可指向 OpenAI-compatible endpoint。
+- ✅ **Fallback 链**：route entry 顺序即 target fallback 顺序；可切换 provider 错误才尝试下一个 target。
+- ✅ **Route override**：route entry 可覆盖 `max_tokens` 和 `params`。
+- ✅ **API key env contract**：默认生成形如 `FLEETENT_MODEL_<TARGET_ID_UPPER>_API_KEY` 的变量名；不依赖 `ANTHROPIC_API_KEY` 等厂商固定变量名。
+- ✅ **Service-readable snapshot**：`ModelPolicySnapshot` 可传递给未来拆分服务，包含 env var 名和 target 元数据，不包含明文 API key。
+- ⚡ **Embedding / rerank / image routes**：schema 和 route key 已纳入 Agent `models`，具体调用适配按对应能力逐步接入。
 
 ## 规划中（v1.0）
 
-- [ ] **请求级路由覆盖**：agent_loop 可在单次调用时传入 override 参数（如 `force_model="claude-haiku-4-5"`），跳过 task_type 映射
-- [ ] **成本感知路由**：当月成本已接近预算上限时，自动降级到 cheap task_type
-- [ ] **健康探针缓存**：provider 连续失败后标记为暂时不可用，fallback 时跳过，避免每次都等超时
+- [ ] **真实 provider smoke 常态化**：把 OpenAI-compatible / embedding / rerank / image generation provider smoke 作为 Pilot 显式 opt-in 验证项维护。
+- [ ] **成本感知路由**：当月成本接近预算上限时，自动选择更便宜的 route / target。
+- [ ] **Provider dashboard**：按 agent / route / provider / target / model 展示健康、用量和成本。
+- [ ] **Route policy UI**：在 Platform 侧管理 Agent model targets / routes，并 materialize 到 Agent home。
 
 ## 验收标准
 
-**场景 1：task_type 路由**
-- Given：config 中 task_type "code" 映射到 provider A（首选）+ B（fallback）
-- When：`get_async_client_and_config("code")` 调用
-- Then：返回 provider A 的 client 和 ModelConfig
+**场景 1：Agent-specific route**
+- Given：两个 Agent 的 `models.routes.default` 指向不同 target
+- When：分别运行两个 Agent
+- Then：每个 Agent 使用自己的 default route，不读取全局 route 配置
 
 **场景 2：fallback 切换**
-- Given：task_type "default" 映射到 provider A（不可用）+ B（可用）
-- When：agent_loop 用 A 的 client 发起调用，A 返回连接错误
-- Then：自动用 B 的 client 重试，最终 LLM 调用成功返回
+- Given：`default` route 中 target A 排在 target B 前，A 发生可切换 provider 错误，B 可用
+- When：agent runtime 发起 LLM 调用
+- Then：runtime 尝试 A 失败后切到 B，最终返回模型结果
 
-**场景 3：所有 provider 耗尽**
-- Given：task_type "default" 的所有 provider 均不可用
-- When：fallback 链全部失败
-- Then：抛出异常，agent_loop 捕获后向用户报错，不静默丢失
+**场景 3：route entry override**
+- Given：target `primary` 默认 `temperature=0.5`，route entry 覆盖为 `temperature=0`
+- When：runtime 解析该 route
+- Then：实际调用配置使用 `temperature=0`
 
-**场景 4：未知 task_type fallback**
-- Given：config 中无 "rare_task" 的定义
-- When：`get_async_client_and_config("rare_task")` 调用
-- Then：自动使用 "default" task_type 的 provider 配置
+**场景 4：缺少 API key env**
+- Given：target 声明 `api_key_env: FLEETENT_MODEL_PRIMARY_API_KEY`
+- When：Agent 进程环境中没有该变量
+- Then：调用失败并报告配置错误，不把明文 key 写入 `agent.yaml`
+
+**场景 5：无鉴权本地 target**
+- Given：本地模型 target 未声明 `api_key_env`
+- When：runtime 调用该 target
+- Then：允许无 API key 调用
 
 ## 测试边界
 
 **需要单元测试的行为**：
-- task_type 路由：正确 task_type 返回对应 provider 的 ModelConfig（model / max_tokens 等字段）
-- fallback 切换：第一个 provider 抛出异常时，自动切到第二个 provider 重建 client
-- client 无状态：两次调用返回不同的 client 实例对象（`assert client1 is not client2`）
-- 未知 task_type：不存在的 task_type 不抛异常，使用 default
+- `models.targets` id 唯一性和 protocol 必填字段校验。
+- `models.routes` 引用未知 target 时 fail fast。
+- route chain 按顺序解析，route entry 覆盖 target 默认参数。
+- `api_key_env` 缺失时报配置错误；未声明 `api_key_env` 的本地 target 可无鉴权。
+- Agent A / Agent B 的 route 互不污染。
 
 **需要 mock 的依赖**：
-- `AsyncOpenAI`：mock 构造函数，验证 base_url / api_key 传参正确
-- `config`：注入测试用 provider 配置（无需真实 API key）
+- `AsyncOpenAI` / HTTP provider client：验证 base_url、model、api_key、params 传参。
+- 环境变量：隔离 Agent `.env` 中的 `api_key_env`。
 
 ## 待决问题
 
-- [ ] task_type 的标准值集合：除 "default" / "cheap" 外，哪些 task_type 是平台约定的标准值？（负责人：待认领）
-- [ ] 同一 task_type 同一 provider 的并发上限：单 provider 是否需要连接数限制？（负责人：待认领）
+- [ ] image / audio route 的生产默认 provider 和 smoke 策略。
+- [ ] 成本感知路由的默认阈值与回退策略。
+- [ ] Provider dashboard 是否直接编辑 Agent `models`，还是只读观测、由 Agent authoring 流程负责写入。

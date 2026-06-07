@@ -20,7 +20,7 @@ policy 任意指定，而是固定从 agent 自身的 `tenant_id` / `team_id` �
 无 policy row 时保持当前行为：User Memory + Knowledge Base 启用，Shared Memory 默认关闭。
 
 **调用关系**：
-- 依赖：`fleetent.intelligence.memory`（search）、knowledge_base optional provider（resolve_agent_kb_ids / search）、config（token 预算上限和来源分配策略）
+- 依赖：`fleetent.intelligence.memory`（search）、knowledge_base optional provider（resolve_agent_kb_ids / search）、agent / tenant context policy（token 预算上限和来源分配策略）
 - 被依赖：agent_loop（每次对话开始前调用）
 
 **模块归属**：
@@ -29,7 +29,7 @@ policy 任意指定，而是固定从 agent 自身的 `tenant_id` / `team_id` �
   `build_context_with_policy(identity, user_id, query, available_tokens)`、
   `resolve_context_policy(identity)`、`AgentContextIdentity` / `ContextPolicy`
 - owned tables：`long_term_context_policies`（tenant 默认 + agent 覆盖，wide row）
-- config namespace：`long_term_ctx.*`（无 policy row 时的默认 budget 来源）
+- config namespace：Agent `long_term_ctx.*` / tenant policy（无 policy row 时的默认 budget 来源）
 
 agent 归属字段 `tenant_id`（NOT NULL，默认 `default`）/ `team_id`（可空）由 agents 表拥有。
 
@@ -100,7 +100,7 @@ async def build_context(
     """检索 memory 和可选 knowledge_base，合并后返回注入文本和来源摘要。
 
     available_tokens: 调用方（agent_loop）传入的当前可用 token 数，
-        build_context.text 不超过此值与 config 预算上限中的较小值。
+        build_context.text 不超过此值与有效 policy / Agent config 预算上限中的较小值。
         为 0 时直接返回空 text 和空 sources，不发起检索。
     任意一侧检索无结果时正常降级，不报错；knowledge_base 未实现或未启用时
     视为空 knowledge 结果。
@@ -136,7 +136,7 @@ async def build_context(
   - 事实 / 参考类 query 优先 knowledge
   - `long_term_ctx.conflict_preference` 可显式指定 `auto` / `memory` / `knowledge`
 
-- [x] **token 预算控制**：注入文本总量不超过 config 配置的上限
+- [x] **token 预算控制**：注入文本总量不超过有效 policy / Agent config 配置的上限
   - 支持 `memory_max_tokens`、`knowledge_max_tokens`、`memory_top_k`、`knowledge_top_k`
   - 排除来源记录 `below_relevance_threshold`、`source_top_k_exceeded`、`source_budget_exceeded` 或 `total_budget_exceeded`
 
@@ -246,11 +246,11 @@ memory / knowledge / observability 的接口，未来可以独立成 package，�
 **需要 mock 的依赖**：
 - `fleetent.intelligence.memory.search`：隔离 memory 模块，控制返回内容和数量
 - `knowledge_base.resolve_agent_kb_ids` / `knowledge_base.search` 或 null provider：隔离 knowledge_base 模块
-- `config`：注入测试用 token 预算上限
+- context policy / Agent config：注入测试用 token 预算上限
 
 ## 待决问题
 
-- [ ] token 预算默认值：config 中配置的 token 上限设多少？与 `available_tokens` 取 min 时，两者的典型比例是多少？（负责人：待认领）
+- [ ] token 预算默认值：Agent config / policy 中配置的 token 上限设多少？与 `available_tokens` 取 min 时，两者的典型比例是多少？（负责人：待认领）
 - [ ] memory 与 knowledge 的 token 分配：各自固定比例，还是完全按相关度动态分配？（负责人：待认领）
 - [ ] 格式化模板：memory 和 knowledge 区段的具体格式由谁定义，是否需要可配置？（负责人：待认领）
 - [ ] knowledge provider 注入方式：通过 config 开关、依赖注入参数，还是模块级 provider registry？（负责人：待认领）

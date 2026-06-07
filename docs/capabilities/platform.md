@@ -11,7 +11,7 @@
 **调用关系**：
 - 依赖：user-center（用户创建、禁用、拉黑等写操作均通过 user-center 接口，不直接写 users 表）、user_store / im_user_store（只读，供 Bearer token 认证查询）、agent_store（Agent 定义与绑定的读写，供 Admin UI 的 Agent 管理页）、skill_registry（Skill 索引读取与热加载触发，供 Admin UI 的 Skill 管理页）、reflection（读取 skill_proposals 待审提案，供 Skill 提案审批入口）、session_mgr（只读 / 接管，供 Admin UI 的聊天会话管理页）、agent_loop（admin 试运行聊天经统一 run 入口发起）、knowledge_base（知识库的导入 / 检索 / 删除，供 Admin UI 的知识库管理页）、connectors（per-user OAuth 授权状态与凭证生命周期，供 Admin UI 的 connector 管理页）、mcp（MCP server 连接状态与工具注册，供 connector 管理页的 MCP 子视图）、model_router（provider / 模型路由配置与单价表的读写，供 Admin UI 的 model_provider 管理页）、askit（外部 spec 编译 / 部署工具链，供 Admin UI 的 askit 编排控制台调用，详见「askit 编排控制台」）
 - 被依赖：server.py（认证）、normalizer（用户查找）、admin CLI
-- **职责边界**：platform 只提供 Agent / Skill / 聊天 / 知识库 / connector / model_provider / askit 操作的**管理面**（Admin UI 上的增删改查、启停、绑定 / 分配、按系列触发与观测）；它们的**运行语义**——Agent 的 allowed_tools 校验、审批、路由解析归 [governance](./governance.md) / [agent-runtime](./agent-runtime.md)；Skill 的扫描 / 匹配 / 注入 / 禁用 / 安全审计归 [skill](./skill.md)，AI 自动生成的 Skill 提案与审批流归 [reflection](./reflection.md)；聊天会话的并发锁 / 原子持久化 / 上下文压缩归 [session](./session.md) / agent-runtime；知识库的解析 / 分块 / 索引 / 检索归 [knowledge-base](./knowledge-base.md)；connector 的 OAuth consent / 凭证刷新 / 注入归 [connectors](./connectors.md)，MCP 服务连接 / 工具注册 / 降级归 [mcp](./mcp.md)；model_provider 的 task_type 路由 / fallback / client 实例化归 [model-router](./model-router.md)；askit 的 spec 编译 / 校验 / 部署 / 覆盖回流等语义归 **ai-skills-toolkit 外部工具域**。本模块只交叉引用、不重复定义这些语义
+- **职责边界**：platform 只提供 Agent / Skill / 聊天 / 知识库 / connector / model_provider / askit 操作的**管理面**（Admin UI 上的增删改查、启停、绑定 / 分配、按系列触发与观测）；它们的**运行语义**——Agent 的 allowed_tools 校验、审批、路由解析归 [governance](./governance.md) / [agent-runtime](./agent-runtime.md)；Skill 的扫描 / 匹配 / 注入 / 禁用 / 安全审计归 [skill](./skill.md)，AI 自动生成的 Skill 提案与审批流归 [reflection](./reflection.md)；聊天会话的并发锁 / 原子持久化 / 上下文压缩归 [session](./session.md) / agent-runtime；知识库的解析 / 分块 / 索引 / 检索归 [knowledge-base](./knowledge-base.md)；connector 的 OAuth consent / 凭证刷新 / 注入归 [connectors](./connectors.md)，MCP 服务连接 / 工具注册 / 降级归 [mcp](./mcp.md)；model_provider 的 Agent-scoped targets / routes、fallback 和 client 实例化归 [model-router](./model-router.md)；askit 的 spec 编译 / 校验 / 部署 / 覆盖回流等语义归 **ai-skills-toolkit 外部工具域**。本模块只交叉引用、不重复定义这些语义
 - **不涉及**：config（属 deployment 域）
 
 ## 架构总览
@@ -55,7 +55,7 @@ flowchart TD
         KB["knowledge-base<br/>导入 / 检索"]
         CON["connectors<br/>OAuth / 凭证"]
         MCP["mcp<br/>服务连接 / 工具注册"]
-        MR["model-router<br/>task_type 路由 / fallback"]
+        MR["model-router<br/>Agent models routes / fallback"]
         ASKIT["askit<br/>ai-skills-toolkit"]
     end
     subgraph MONT["监控目标"]
@@ -256,7 +256,7 @@ flowchart TD
 
 - [ ] **克隆与模板库**：可对现有 Agent 一键"克隆"出一个新名称的副本（复制 system_prompt / allowed_tools / 模型配置，不复制绑定关系）；内置若干**模板**（如"只读问答 Agent""运维 Agent""客服 Agent"），从模板起一个新 Agent 时预填推荐的 allowed_tools 与提示词，降低从零配置的门槛
 
-- [ ] **按 Agent 配置模型与运行参数**：每个 Agent 可绑定 [model-router](./model-router.md) 的 task_type、温度、以及该 Agent 维度的成本 / 步数预算上限（五层预算中的"单 agent"层，见 [agent-runtime](./agent-runtime.md)）；未显式配置时回落到全局默认，配置仅声明意图，实际生效与回退由对应运行域解释
+- [ ] **按 Agent 配置模型与运行参数**：每个 Agent 可绑定 [model-router](./model-router.md) 的 `models.targets` / `models.routes`、温度等 route 参数、以及该 Agent 维度的成本 / 步数预算上限（五层预算中的"单 agent"层，见 [agent-runtime](./agent-runtime.md)）；未显式配置时使用 Agent 模板默认值，配置仅声明意图，实际生效与回退由对应运行域解释
 
 - [ ] **绑定管理（UI 化）**：在 Agent 详情页可视化管理 user→agent、channel→agent 绑定与"设为默认 Agent"，等价于现有 CLI 的 `assign-channel` / `unassign-channel` / `set-default-agent`，并展示该 Agent 当前被哪些用户 / channel 引用（与删除保护共用同一引用视图）
 
@@ -370,7 +370,7 @@ flowchart TD
 
 - [ ] **选 Agent 起会话**：admin 在 playground 下拉选择任一启用中的 Agent（含临管 / 受管），即时开启一段**隔离的试运行会话**——该会话标记 `origin=playground`，不计入该 Agent 的对外用量统计、不与任何真实用户 / channel 绑定，可随时丢弃
 - [ ] **流式对话与逐轮可观察**：发送消息后以 SSE 流式看到回复（语义同 `/chat`），同时右栏实时展开本轮的可观察细节——命中的 system prompt / 注入的 Skill / 知识库召回片段、每次工具调用的入参 / 出参、governance.permission_gate 决策、模型路由与 fallback、token 与耗时；便于 admin 验证"为什么这样回答"
-- [ ] **试运行参数覆盖**：playground 内可临时覆盖该次会话的 task_type / 模型（对齐 [model-router](./model-router.md) 的请求级路由覆盖）、temperature、是否启用某些 Skill / 知识库，仅作用于当前试运行会话，不改 Agent 持久配置
+- [ ] **试运行参数覆盖**：playground 内可临时覆盖该次会话的模型 / route 参数（对齐 [model-router](./model-router.md) 的请求级覆盖）、temperature、是否启用某些 Skill / 知识库，仅作用于当前试运行会话，不改 Agent 持久配置
 - [ ] **审批旁路开关（受控）**：playground 会话默认仍走 governance.permission_gate；admin 可对自己的试运行会话开启"自动批准 medium 风险"以快速迭代（high 风险仍需显式确认），该旁路仅对 `origin=playground` 会话生效、写审计，绝不影响真实用户会话
 - [ ] **试运行结果留存与分享**：可将一段满意 / 有问题的试运行会话"固定"保存并附备注，或导出为 JSON / Markdown 供回归对照；未固定的 playground 会话超过保留期自动清理
 
@@ -523,36 +523,36 @@ flowchart TD
 
 ### model_provider 管理（v1.0）
 
-> 设计哲学借鉴市面成熟的「模型供应商 / 模型接入后台」（Dify 的 Model Provider 设置、各网关的 provider + 路由配置、OpenRouter 式的多 provider 编排）：**provider 与 task_type 路由是后台里可配置、可测连通、可设 fallback 顺序、可维护单价表的一等公民**，让 admin 无需手改 `agents/<agent-id>/agent.yaml` 即可新增一个 OpenAI-compatible 端点并接入路由。本模块只写**管理面的可观察行为**；task_type → provider 映射、AsyncOpenAI client 实例化、fallback 链遍历与切换的**运行语义**由 [model-router](./model-router.md) 负责，成本追踪由 [observability](./observability.md) 负责，本节只提供这些能力的 UI 入口并交叉引用。
+> 设计哲学借鉴市面成熟的「模型供应商 / 模型接入后台」（Dify 的 Model Provider 设置、各网关的 provider + 路由配置、OpenRouter 式的多 provider 编排）：**provider target 与 Agent route 是后台里可配置、可测连通、可设 fallback 顺序、可维护单价表的一等公民**，让 admin 无需手改 `agents/<agent-id>/agent.yaml` 即可新增一个 OpenAI-compatible 端点并接入某个 Agent route。本模块只写**管理面的可观察行为**；Agent `models.targets` / `models.routes` 解析、AsyncOpenAI client 实例化、fallback 链遍历与切换的**运行语义**由 [model-router](./model-router.md) 负责，成本追踪由 [observability](./observability.md) 负责，本节只提供这些能力的 UI 入口并交叉引用。
 >
 > **自托管口径**：provider 的 base_url 可指向任意 OpenAI-compatible 端点（Anthropic / OpenRouter / 本地 Ollama / vLLM 等），符合"基础设施可自托管、数据不出内网"的部署原则；本页对自托管 / 自定义模型同样适用。
 
-- [ ] **provider 列表与配置**：列出所有已配置 provider 的名称、base_url、模型 id、所属 task_type、在各 task_type fallback 链中的优先级、最近连通状态；admin 可新增 / 编辑 / 删除 provider——填 base_url、model、api_key（脱敏存储与展示）、max_tokens、temperature、extra_params（provider 特有参数透传）；保存即生效，无需重启服务（落库语义经 fleetent 配置写入边界）
-- [ ] **task_type → provider 路由编排**：可视化管理每个 task_type（如 `default` / `cheap` / `code`）的 provider 列表，**列表顺序即 fallback 优先级**，admin 可拖拽调整顺序、增删某 task_type 下的 provider；未定义的 task_type 在运行时回落到 `default`（语义以 model-router 为准），UI 对此明示
+- [ ] **provider target 列表与配置**：按 Agent 列出已配置 target 的 id、provider、protocol、base_url / endpoint、模型 id、所属 route、fallback 优先级、最近连通状态；admin 可新增 / 编辑 / 删除 target——填 provider、protocol、base_url / endpoint、model、api_key_env（不保存明文 key）、max_tokens、params（provider 特有参数透传）；保存后经 Agent materialize 写入 `agents/<agent-id>/agent.yaml`
+- [ ] **Agent route → target 路由编排**：可视化管理每个 Agent 的标准 route（如 `default` / `memory_extraction` / `embedding` / `rerank` / `image_generation`）的 target 列表，**列表顺序即 fallback 优先级**，admin 可拖拽调整顺序、增删某 route 下的 target；未定义 route 由 model-router 按配置错误处理，UI 对此明示
 - [ ] **连通性测试**：对单个 provider 一键发起轻量探测调用，展示是否可达、握手延迟、返回的模型标识；用于"配完一个新端点先测通再挂到路由上"，测试不计入对外用量
-- [ ] **fallback 链预演**：选定一个 task_type 展示其完整 fallback 顺序，并可模拟"首选不可用"逐级回退的链路（对齐 model-router 的 fallback 遍历语义），帮助 admin 确认降级路径符合预期
+- [ ] **fallback 链预演**：选定一个 Agent route 展示其完整 fallback 顺序，并可模拟"首选不可用"逐级回退的链路（对齐 model-router 的 fallback 遍历语义），帮助 admin 确认降级路径符合预期
 - [ ] **模型单价表维护**：每个模型可维护 input / output 每 1k token 单价（对应「待决问题」已定的"单价表放 model_router 配置"）；单价供「统计面板」成本聚合按 `token × 单价` 计算；**未配置单价的模型在成本视图显示"未配置"而非 0**（自托管 / 自定义模型常无公开价），UI 对未配置项高亮提醒
 - [ ] **健康探针状态可见**：展示 model-router 规划中的健康探针缓存结果——某 provider 连续失败被标记暂时不可用、fallback 时被跳过的状态与恢复时间，便于定位"为什么请求总走到了备选模型"
-- [ ] **按 provider / 模型观测**：展示各 provider / 模型的调用次数、token 用量、成本（单价已配时）、错误率、平均时延、被哪些 task_type / Agent 使用（数据源为 observability，本页只做按 provider·model 的聚合视图，与「统计面板」的 agent 视角互补）
-- [ ] **model_provider 管理权限与审计**：provider 的增删改、task_type 路由编排、单价表维护、连通性测试均**仅 admin 角色可操作**，viewer 仅可浏览配置（密钥脱敏）、路由顺序与观测；删除 provider / 调整生产 task_type 路由 / 改单价等动作写审计；api_key 等敏感值在任何视图均脱敏，绝不明文回显
+- [ ] **按 provider / 模型观测**：展示各 provider / 模型的调用次数、token 用量、成本（单价已配时）、错误率、平均时延、被哪些 route / Agent 使用（数据源为 observability，本页只做按 provider·model 的聚合视图，与「统计面板」的 agent 视角互补）
+- [ ] **model_provider 管理权限与审计**：provider target 的增删改、Agent route 编排、单价表维护、连通性测试均**仅 admin 角色可操作**，viewer 仅可浏览配置（密钥脱敏）、路由顺序与观测；删除 target / 调整生产 Agent route / 改单价等动作写审计；api_key 等敏感值在任何视图均脱敏，绝不明文回显
 
 | 操作 | admin | viewer | CLI |
 |------|:-----:|:------:|:---:|
 | 浏览 provider / 路由 / 观测 | ✅ | ✅（密钥脱敏） | 部分（list 只读） |
 | 新增 / 编辑 / 删除 provider | ✅ | ❌ | ❌ |
-| 编排 task_type → provider 顺序 | ✅ | ❌ | ❌ |
+| 编排 Agent route → target 顺序 | ✅ | ❌ | ❌ |
 | 连通性测试 / fallback 预演 | ✅ | ✅（只读看结果） | ❌ |
 | 维护模型单价表 | ✅ | ❌ | ❌ |
 
 ```mermaid
 flowchart LR
     subgraph cfg["model_provider 管理（platform 提供 UI）"]
-        P1["provider 配置<br/>base_url / model / key(脱敏) / 参数"]
-        P2["task_type → provider 路由<br/>顺序 = fallback 优先级"]
+        P1["provider target 配置<br/>base_url / model / api_key_env / 参数"]
+        P2["Agent route → target 路由<br/>顺序 = fallback 优先级"]
         P3["模型单价表<br/>input/output per 1k(未配显示'未配置')"]
         P4["连通性测试 + fallback 预演"]
     end
-    P1 --> MR["model-router<br/>运行时按 task_type 路由 + fallback"]
+    P1 --> MR["model-router<br/>运行时按 Agent route 路由 + fallback"]
     P2 --> MR
     P3 -.成本聚合 token×单价.-> STAT["统计面板 / observability"]
     P4 -.探测调用.-> EP["OpenAI-compatible 端点<br/>Anthropic / OpenRouter / 本地"]
@@ -560,9 +560,9 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    A["admin 新增 provider"] --> B["填 base_url / model / key / 参数"]
+    A["admin 新增 provider target"] --> B["填 base_url / model / api_key_env / 参数"]
     B --> C["连通性测试"]
-    C -->|可达| D["挂到某 task_type 路由<br/>设 fallback 顺序"]
+    C -->|可达| D["挂到某 Agent route<br/>设 fallback 顺序"]
     C -->|不可达| E["提示握手失败,不挂路由"]
     D --> F["可选: 维护该模型单价"]
     F --> G["保存生效 + 写审计<br/>运行时由 model-router 解释"]
@@ -582,7 +582,7 @@ flowchart TD
 
 - [ ] **③ 工具与治理**：Top 工具调用排行、每次运行平均工具数 🟡；工具失败率 / 超时率 ⏳；**allowed_tools 覆盖率**——列出该 agent 配了白名单却从未被调用的工具，驱动最小权限收窄 🟡；governance.permission_gate 触发数与审批**通过 / 拒绝 / 超时率** ✅（approvals）
 
-- [ ] **④ 模型 · Skill · 绑定**：按模型的调用 / token / 成本分布、task_type 分布 ✅；该 agent 的 skill 命中 Top、memory 命中率、sub_agent 调用数与子任务成功率 ⏳；绑定用户数 / channel 数、是否默认 agent、受管 / 临管来源分布 ✅
+- [ ] **④ 模型 · Skill · 绑定**：按模型的调用 / token / 成本分布、Agent route key 分布 ✅；该 agent 的 skill 命中 Top、memory 命中率、sub_agent 调用数与子任务成功率 ⏳；绑定用户数 / channel 数、是否默认 agent、受管 / 临管来源分布 ✅
 
 - [ ] **⑤ 下钻维度（按用户 / channel / 模型 / 时间切片）**：任一 agent 指标都可沿这四个维度切片。重点支持 **per-user 视图**——在选定 agent 下，各用户的 **token 用量、调用频率（次数 / 活跃天数）、最近活跃**排行；并支持反向"按用户"看某用户在所有 agent 上的用量与频率汇总。用于识别重度用户、分配配额、定位异常激增 ✅（user_id 现有）
 
@@ -971,9 +971,9 @@ flowchart LR
 - Then：allowed_tools 与 system_prompt 已按模板预填，admin 微调名称后即可保存创建
 
 **场景 44：按 Agent 配置模型生效（v1.0）**
-- Given：admin 为 Agent "ops-bot" 配置了特定 task_type 与单 agent 成本上限
+- Given：admin 为 Agent "ops-bot" 配置了 `models.routes.default` 与单 agent 成本上限
 - When：通过 "ops-bot" 发起会话
-- Then：该会话按所配 task_type 路由模型；达到该 Agent 成本上限时按 agent-runtime 的预算策略停止（运行语义以 agent-runtime 为准）
+- Then：该会话按该 Agent 的 default route 路由模型；达到该 Agent 成本上限时按 agent-runtime 的预算策略停止（运行语义以 agent-runtime 为准）
 
 **场景 45：按 Agent 观测视图（v1.0）**
 - Given：Agent "ops-bot" 过去 24 小时有多次调用
@@ -1325,30 +1325,30 @@ flowchart LR
 - When：admin 或 viewer 浏览 connector 配置与授权状态
 - Then：client_secret、access / refresh token 均脱敏展示，任何视图与日志均不明文回显
 
-**场景 115：admin 新增 provider 并测连通（v1.0）**
-- Given：admin 在 model_provider 管理页新增一个指向本地 Ollama 的 OpenAI-compatible provider
+**场景 115：admin 新增 provider target 并测连通（v1.0）**
+- Given：admin 在 model_provider 管理页为某 Agent 新增一个指向本地 Ollama 的 OpenAI-compatible target
 - When：填好 base_url / model 后点"连通性测试"
-- Then：展示是否可达、握手延迟与返回的模型标识；测试不计入对外用量，可达后方可挂到某 task_type 路由
+- Then：展示是否可达、握手延迟与返回的模型标识；测试不计入对外用量，可达后方可挂到某 Agent route
 
-**场景 116：task_type fallback 顺序编排生效（v1.0）**
-- Given：task_type "default" 的 provider 列表为 [A, B]
+**场景 116：Agent route fallback 顺序编排生效（v1.0）**
+- Given：Agent "ops-bot" 的 `models.routes.default` target 列表为 [A, B]
 - When：admin 将顺序调整为 [B, A] 并保存
 - Then：运行时 "default" 优先用 B，B 不可用时回退到 A（运行语义以 model-router 为准）；调整写审计
 
-**场景 117：未知 task_type 回落提示（v1.0）**
-- Given：UI 中未为 "rare_task" 配置任何 provider
+**场景 117：缺失 route 配置提示（v1.0）**
+- Given：UI 中某 Agent 未配置 `memory_extraction` route
 - When：admin 查看路由编排
-- Then：UI 明示未定义的 task_type 运行时回落到 "default"，不报错
+- Then：UI 明示该 route 缺失时运行时会报配置错误，建议补齐 route 或确认该能力不启用
 
 **场景 118：未配单价模型成本显示"未配置"（v1.0）**
 - Given：某自托管模型未维护单价
 - When：在统计面板查看含该模型的成本视图
 - Then：该模型成本显示"未配置"而非 0，model_provider 管理页对该模型单价项高亮提醒
 
-**场景 119：删除 provider 写审计（v1.0）**
-- Given：某 provider 已不再使用
-- When：admin 删除该 provider 并确认
-- Then：provider 从配置与所有 task_type 路由中移除，删除动作写审计
+**场景 119：删除 provider target 写审计（v1.0）**
+- Given：某 provider target 已不再使用
+- When：admin 删除该 target 并确认
+- Then：target 从 Agent 配置与相关 route 中移除，删除动作写审计
 
 **场景 120：viewer 不可改 provider 配置（v1.0）**
 - Given：viewer 打开 model_provider 管理页
