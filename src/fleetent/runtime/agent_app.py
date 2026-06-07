@@ -401,7 +401,9 @@ def build_app(agent_name: str) -> FastAPI:
         kwargs: dict[str, Any] = {"user_id": user.id, "agent_name": agent_name}
         if agent is not None:
             kwargs["system_prompt"] = agent.system_prompt
-            kwargs["allowed_tools"] = agent.allowed_tools + expand_plugin_patterns(agent.plugins)
+            kwargs["allowed_tools"] = (
+                agent.allowed_tools + expand_plugin_patterns(agent.plugins)
+            ) or None
             kwargs["agent_features"] = agent.features
             kwargs["allowed_skills"] = agent.allowed_skills
             kwargs["governance"] = _governance_from_file(agent)
