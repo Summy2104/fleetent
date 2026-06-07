@@ -172,7 +172,12 @@ def _scan_dir(
     """
     if not base.is_dir():
         return
-    for skill_md in base.rglob("SKILL.md"):
+    # followlinks=True ensures symlinked skill directories are traversed (Python
+    # Path.rglob does not follow symlinks by default until 3.13).
+    for root, _dirs, files in os.walk(base, followlinks=True):
+        if "SKILL.md" not in files:
+            continue
+        skill_md = Path(root) / "SKILL.md"
         raw = skill_md.read_text(encoding="utf-8")
         frontmatter = _parse_frontmatter(raw)
         if frontmatter is None:
