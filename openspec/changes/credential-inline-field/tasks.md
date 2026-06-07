@@ -1,8 +1,8 @@
 ## 1. 共享密钥作用域（store + 迁移）
 
-- [ ] 1.1 Write failing tests: secret store 支持 shared 作用域（`agent_id` NULL / `scope=shared`）；shared 与 per-agent 同名槽并存且唯一约束不冲突；`get_decrypted` 解析顺序 agent 优先回退 shared；materialize resolver 能解出 shared 槽值（tests/integration，真实 DB + Alembic）
-- [ ] 1.2 Implement: Alembic 迁移放宽 `agent_secrets.agent_id` 非空 + 调唯一索引（`coalesce`）；store set/get/status/delete 接受可选 owner 维度（named params，统一 store 边界）
-- [ ] 1.3 Verify green: `uv run pytest tests/integration/test_agent_secret_store.py -x -q`
+- [x] 1.1 Write failing tests: secret store 支持 shared 作用域（`agent_id` NULL / `scope=shared`）；shared 与 per-agent 同名槽并存且唯一约束不冲突；`get_decrypted` 解析顺序 agent 优先回退 shared；materialize resolver 能解出 shared 槽值（tests/integration，真实 DB + Alembic）
+- [x] 1.2 Implement: Alembic 迁移放宽 `agent_secrets.agent_id` 非空 + 调唯一索引（`coalesce`）；store set/get/status/delete 接受可选 owner 维度（named params，统一 store 边界）
+- [x] 1.3 Verify green: `uv run pytest tests/integration/test_agent_secret_store.py -x -q`
 
 ## 2. 自动 env 名派生（来源实体稳定派生）
 

@@ -75,3 +75,38 @@ def test_invalid_secret_key_fails_loud(db, monkeypatch):
     monkeypatch.setenv("FLEETENT_SECRET_KEY", "not-a-valid-fernet-key")
     with pytest.raises(agent_secret_store.SecretKeyError):
         agent_secret_store.set_secret(1, "TOK", "v")
+
+
+def test_shared_scope_stores_with_null_agent(db):
+    # agent_id=None is the shared (cross-agent) scope: one provider key, many agents.
+    agent_secret_store.set_secret(None, "FLEETENT_MODEL_FAST_API_KEY", "sk-shared")
+    assert agent_secret_store.status(None, "FLEETENT_MODEL_FAST_API_KEY") == "set"
+    assert agent_secret_store.get_decrypted(None, "FLEETENT_MODEL_FAST_API_KEY") == "sk-shared"
+
+
+def test_shared_and_per_agent_same_name_coexist(db):
+    agent_secret_store.set_secret(None, "TOK", "shared-val")
+    agent_secret_store.set_secret(1, "TOK", "agent-val")
+    assert agent_secret_store.get_decrypted(None, "TOK") == "shared-val"
+    assert agent_secret_store.get_decrypted(1, "TOK") == "agent-val"
+
+
+def test_resolve_prefers_agent_then_falls_back_to_shared(db):
+    agent_secret_store.set_secret(None, "TOK", "shared-val")
+    # no per-agent slot yet -> resolves to shared
+    assert agent_secret_store.get_resolved(1, "TOK") == "shared-val"
+    # per-agent slot wins once present
+    agent_secret_store.set_secret(1, "TOK", "agent-val")
+    assert agent_secret_store.get_resolved(1, "TOK") == "agent-val"
+
+
+def test_resolve_returns_none_when_neither_scope_set(db):
+    assert agent_secret_store.get_resolved(1, "TOK") is None
+
+
+def test_shared_delete_does_not_touch_agent_slot(db):
+    agent_secret_store.set_secret(None, "TOK", "shared-val")
+    agent_secret_store.set_secret(1, "TOK", "agent-val")
+    agent_secret_store.delete_secret(None, "TOK")
+    assert agent_secret_store.status(None, "TOK") == "unset"
+    assert agent_secret_store.status(1, "TOK") == "set"

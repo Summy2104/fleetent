@@ -41,15 +41,21 @@ def _fernet() -> Fernet:
         raise SecretKeyError(f"{SECRET_KEY_ENV} is not a valid Fernet key") from exc
 
 
-def set_secret(agent_id: int, env_name: str, plaintext: str, updated_by: str | None = None) -> None:
-    """Encrypt and upsert a credential value. Empty values are rejected (use delete)."""
+def set_secret(
+    agent_id: int | None, env_name: str, plaintext: str, updated_by: str | None = None
+) -> None:
+    """Encrypt and upsert a credential value. Empty values are rejected (use delete).
+
+    ``agent_id=None`` targets the shared (cross-agent) scope used by provider/connector
+    credentials that many agents reuse.
+    """
     if not plaintext:
         raise ValueError("secret value must not be empty; use delete_secret to clear")
     ciphertext = _fernet().encrypt(plaintext.encode("utf-8")).decode("utf-8")
     _database().execute(
         "INSERT INTO agent_secrets (agent_id, env_name, ciphertext, updated_at, updated_by) "
         "VALUES (:agent_id, :env_name, :ciphertext, :updated_at, :updated_by) "
-        "ON CONFLICT(agent_id, env_name) DO UPDATE SET "
+        "ON CONFLICT(COALESCE(agent_id, -1), env_name) DO UPDATE SET "
         "ciphertext = :ciphertext, updated_at = :updated_at, updated_by = :updated_by",
         {
             "agent_id": agent_id,
@@ -61,13 +67,13 @@ def set_secret(agent_id: int, env_name: str, plaintext: str, updated_by: str | N
     )
 
 
-def get_decrypted(agent_id: int, env_name: str) -> str | None:
-    """Return the decrypted value, or None if no value is stored for this slot."""
+def get_decrypted(agent_id: int | None, env_name: str) -> str | None:
+    """Return the decrypted value for this exact scope, or None if no value is stored."""
     row = (
         _database()
         .execute(
             "SELECT ciphertext FROM agent_secrets "
-            "WHERE agent_id = :agent_id AND env_name = :env_name",
+            "WHERE agent_id IS :agent_id AND env_name = :env_name",
             {"agent_id": agent_id, "env_name": env_name},
         )
         .fetchone()
@@ -82,12 +88,17 @@ def get_decrypted(agent_id: int, env_name: str) -> str | None:
         ) from exc
 
 
-def status(agent_id: int, env_name: str) -> str:
+def get_resolved(agent_id: int, env_name: str) -> str | None:
+    """Resolve a slot value, preferring the per-agent scope then the shared scope."""
+    return get_decrypted(agent_id, env_name) or get_decrypted(None, env_name)
+
+
+def status(agent_id: int | None, env_name: str) -> str:
     """Return 'set' or 'unset' — never the value."""
     row = (
         _database()
         .execute(
-            "SELECT 1 FROM agent_secrets WHERE agent_id = :agent_id AND env_name = :env_name",
+            "SELECT 1 FROM agent_secrets WHERE agent_id IS :agent_id AND env_name = :env_name",
             {"agent_id": agent_id, "env_name": env_name},
         )
         .fetchone()
@@ -108,8 +119,8 @@ def list_status(agent_id: int) -> dict[str, str]:
     return {str(r["env_name"]): "set" for r in rows}
 
 
-def delete_secret(agent_id: int, env_name: str) -> None:
+def delete_secret(agent_id: int | None, env_name: str) -> None:
     _database().execute(
-        "DELETE FROM agent_secrets WHERE agent_id = :agent_id AND env_name = :env_name",
+        "DELETE FROM agent_secrets WHERE agent_id IS :agent_id AND env_name = :env_name",
         {"agent_id": agent_id, "env_name": env_name},
     )
