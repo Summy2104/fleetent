@@ -616,12 +616,17 @@ async def _plan_run_slots(
     reply_func: ReplyFunc | None,
     user_id: str,
     session_id: str | None,
+    governance: GovernanceConfig | None = None,
+    agent_name: str | None = None,
 ) -> list[_PlanSlot]:
     """Phase one for run() (D2/D3/D6): serial, original order — produce one slot
-    per tool_call. Guardrail and (medium/high) approval are decided here in order;
-    sub_agent becomes a pending slot whose runner self-gathers (D6). The result
-    list preserves original `tool_calls` order so backfill can index 0..N-1.
+    per tool_call. Guardrail, pre_tool_use hook, and (medium/high) approval are decided
+    here in order; sub_agent becomes a pending slot whose runner self-gathers (D6). The
+    result list preserves original `tool_calls` order so backfill can index 0..N-1.
     """
+    from fleetent.runtime import hooks
+    from fleetent.runtime.hooks import HookContext
+
     slots: list[_PlanSlot] = []
     for tc in tool_calls:
         if not hasattr(tc, "function"):
@@ -672,19 +677,55 @@ async def _plan_run_slots(
 
             slots.append(_PlanSlot(tc_id=tc.id, name=name, tc_fp=tc_fp, runner=_sub_agent_runner))
             continue
-        risk = get_risk_level(name)
-        if risk in ("medium", "high") and reply_func is not None:
-            tool_args = (
+        # P1: pre_tool_use hook — decision (deny/ask) + arg rewrite, composed with the
+        # existing allowed_tools + permission_gate gate. Zero overhead when hooks are
+        # disabled or none registered.
+        slot_args: str | dict[str, Any] = tc.function.arguments
+        force_ask = False
+        if governance is not None and governance.hooks_enabled and hooks.has_hooks("pre_tool_use"):
+            parsed = (
                 json.loads(tc.function.arguments)
                 if isinstance(tc.function.arguments, str)
                 else tc.function.arguments
             )
+            hres = await hooks.dispatch(
+                "pre_tool_use",
+                HookContext(
+                    event="pre_tool_use",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"tool_name": name, "tool_args": parsed},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=governance.hooks_decision_failure == "strict",
+            )
+            if hres.decision == "deny":
+                slots.append(
+                    _PlanSlot(
+                        tc_id=tc.id,
+                        name=name,
+                        tc_fp=tc_fp,
+                        placeholder=(
+                            f"tool execution denied by policy: {hres.reason or name}",
+                            False,
+                        ),
+                        counts_failure=False,
+                    )
+                )
+                continue
+            if hres.modified_args is not None:
+                slot_args = hres.modified_args
+            force_ask = hres.decision == "ask"
+        risk = get_risk_level(name)
+        if (risk in ("medium", "high") or force_ask) and reply_func is not None:
+            tool_args = json.loads(slot_args) if isinstance(slot_args, str) else slot_args
             approval_id = str(uuid.uuid4())[:8]
             # D3: approvals are requested serially in original order; only approved
             # tools enter the parallel batch — never concurrent approval prompts.
             decision = await _default_gate.request_approval(
                 approval_id=approval_id,
-                risk_level=risk,
+                risk_level=risk if risk in ("medium", "high") else "medium",
                 tool_name=name,
                 tool_args=tool_args,
                 requester_user_id=user_id,
@@ -710,29 +751,70 @@ async def _plan_run_slots(
                 tc_id=tc.id,
                 name=name,
                 tc_fp=tc_fp,
-                args=tc.function.arguments,
+                args=slot_args,
                 resource_key=_resource_key(name, session_id),
             )
         )
     return slots
 
 
-def _backfill_slots(
+async def _backfill_slots(
     slots: list[_PlanSlot],
     results: dict[str, tuple[str, bool]],
     *,
     messages: list[Any],
     state: LoopState,
     loop_checker: LoopDetectionChecker,
+    governance: "GovernanceConfig | None" = None,
+    session_id: str | None = None,
+    agent_name: str | None = None,
+    user_id: str = "default",
 ) -> None:
     """Phase three (D1/D4): serial, original `tool_calls` order. Append each tool
     message, record the call into the loop-detection window, and fold
     `consecutive_failures` per-result — identical to sequential per-tool updates.
     """
+    from fleetent.runtime import hooks
+    from fleetent.runtime.hooks import HookContext
+
     for slot in slots:
-        content, failed = slot.placeholder if slot.placeholder is not None else results[slot.tc_id]
+        placeholder = slot.placeholder
+        is_placeholder = placeholder is not None
+        content, failed = placeholder if placeholder is not None else results[slot.tc_id]
         if slot.counts_failure:
             state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
+        # P2: post_tool_use hook — transform result before it enters messages.
+        # Only fires for real tool executions (not placeholder slots from deny/reject).
+        if (
+            not is_placeholder
+            and governance is not None
+            and governance.hooks_enabled
+            and hooks.has_hooks("post_tool_use")
+        ):
+            args_val = slot.args
+            try:
+                parsed_args = json.loads(args_val) if isinstance(args_val, str) else args_val
+            except Exception:
+                parsed_args = {}
+            hres = await hooks.dispatch(
+                "post_tool_use",
+                HookContext(
+                    event="post_tool_use",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={
+                        "tool_name": slot.name,
+                        "tool_args": parsed_args,
+                        "tool_result": content,
+                        "failed": failed,
+                    },
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if hres.modified_content is not None:
+                content = hres.modified_content
         # T4: cap the messages copy (self-truncating tools manage their own size).
         tool_content = content if is_self_truncating(slot.name) else truncate_tool_result(content)
         messages.append({"role": "tool", "tool_call_id": slot.tc_id, "content": tool_content})
@@ -743,6 +825,38 @@ def _backfill_slots(
             not failed,
             window=loop_checker.window,
         )
+
+
+async def _apply_output_transform(
+    reply: str,
+    governance: "GovernanceConfig | None",
+    session_id: str | None,
+    agent_name: str | None,
+    user_id: str,
+) -> str:
+    """P2: output_transform hook — rewrite final reply before it leaves the loop."""
+    from fleetent.runtime import hooks
+    from fleetent.runtime.hooks import HookContext
+
+    if (
+        governance is None
+        or not governance.hooks_enabled
+        or not hooks.has_hooks("output_transform")
+    ):
+        return reply
+    hres = await hooks.dispatch(
+        "output_transform",
+        HookContext(
+            event="output_transform",
+            session_id=session_id,
+            agent_name=agent_name,
+            user_id=user_id,
+            payload={"content": reply},
+        ),
+        timeout=governance.hooks_timeout_seconds,
+        strict=False,
+    )
+    return hres.modified_content if hres.modified_content is not None else reply
 
 
 def _budget_add(usage: BudgetUsage, response_usage: Any) -> None:
@@ -1425,9 +1539,11 @@ async def _run_inner(
             agent_name=agent_name,
             stop_reason=StopReason.mcp_strict_unavailable,
         )
+        reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
         return reply
     response = None
     msg: Any = None
+    _msg_content: str = ""
     model_used = _model_name(active_cfg)
 
     # None → a never-cancelling default token, keeping the no-token path identical.
@@ -1469,10 +1585,47 @@ async def _run_inner(
         # reference live: callers (e.g. im_gateway.normalizer) rely on run() mutating
         # the passed `messages` so session_mgr.save() persists the full conversation.
         # Rebinding (messages = ...) would detach it and lose appended turns.
+        # P4: pre_compact hook — inject context before compression.
+        from fleetent.runtime import hooks
+
+        if governance is not None and governance.hooks_enabled and hooks.has_hooks("pre_compact"):
+            from fleetent.runtime.hooks import HookContext
+
+            _prc = await hooks.dispatch(
+                "pre_compact",
+                HookContext(
+                    event="pre_compact",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"message_count": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _prc.inject_context is not None:
+                messages.append({"role": "user", "content": _prc.inject_context})
+        _msgs_before = len(messages)
         _compressed, flap_state = _gated_compress(
             messages, flap_state, session_id=session_id, user_id=user_id, agent_name=agent_name
         )
         messages[:] = _compressed
+        # P4: post_compact hook — observe compression outcome.
+        if governance is not None and governance.hooks_enabled and hooks.has_hooks("post_compact"):
+            from fleetent.runtime.hooks import HookContext as _HCpc
+
+            await hooks.dispatch(
+                "post_compact",
+                _HCpc(
+                    event="post_compact",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"messages_before": _msgs_before, "messages_after": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
         # D4b: inject the loop warning AFTER compression so a same-round compaction
         # cannot swallow it; it must be present in the sequence sent to the LLM.
         _maybe_inject_loop_warning(messages, state)
@@ -1486,6 +1639,26 @@ async def _run_inner(
             return ""
         messages[:] = clean
         _accumulate_repairs(hygiene_repairs, report)
+        # P3: pre_llm_call hook — observe or inject context before each LLM call.
+        from fleetent.runtime import hooks
+
+        if governance is not None and governance.hooks_enabled and hooks.has_hooks("pre_llm_call"):
+            from fleetent.runtime.hooks import HookContext
+
+            _plc_res = await hooks.dispatch(
+                "pre_llm_call",
+                HookContext(
+                    event="pre_llm_call",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"message_count": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _plc_res.inject_context is not None:
+                messages.append({"role": "user", "content": _plc_res.inject_context})
         try:
             response, active_cfg = await _call_with_overflow_retry(
                 policy,
@@ -1516,7 +1689,39 @@ async def _run_inner(
         route_chain = (active_cfg,)  # stick with the winning target for subsequent turns
         choice = response.choices[0]
         msg = choice.message
-        messages.append(msg.model_dump())  # dict for JSON serializability (session persistence)
+        # P3: on_assistant_reply hook — observe or rewrite text content before it enters messages.
+        # Skipped for tool_calls-only turns (msg.content is None/empty, no text to transform).
+        _msg_content = msg.content or ""
+        if (
+            _msg_content
+            and governance is not None
+            and governance.hooks_enabled
+            and hooks.has_hooks("on_assistant_reply")
+        ):
+            from fleetent.runtime.hooks import HookContext
+
+            _oar_res = await hooks.dispatch(
+                "on_assistant_reply",
+                HookContext(
+                    event="on_assistant_reply",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"content": _msg_content},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _oar_res.modified_content is not None:
+                _msg_content = _oar_res.modified_content
+                # Rebuild the message dict with rewritten content.
+                _dump = msg.model_dump()
+                _dump["content"] = _msg_content
+                messages.append(_dump)
+            else:
+                messages.append(msg.model_dump())
+        else:
+            messages.append(msg.model_dump())  # dict for JSON serializability
 
         if choice.finish_reason != "tool_calls":
             # T2-2: a blank final reply (weak models) → nudge once more instead of
@@ -1540,6 +1745,8 @@ async def _run_inner(
             reply_func=reply_func,
             user_id=user_id,
             session_id=session_id,
+            governance=governance,
+            agent_name=agent_name,
         )
         pending = [s for s in slots if s.placeholder is None]
         results = await _execute_pending(
@@ -1551,9 +1758,23 @@ async def _run_inner(
             parallel_max=parallel_max,
             default_tool_timeout=default_tool_timeout,
         )
-        _backfill_slots(slots, results, messages=messages, state=state, loop_checker=loop_checker)
+        await _backfill_slots(
+            slots,
+            results,
+            messages=messages,
+            state=state,
+            loop_checker=loop_checker,
+            governance=governance,
+            session_id=session_id,
+            agent_name=agent_name,
+            user_id=user_id,
+        )
 
-    reply = (msg.content if msg is not None else None) or ""
+    reply = (
+        _msg_content
+        if (msg is not None and _msg_content)
+        else ((msg.content if msg is not None else None) or "")
+    )
     budget_dimension: str | None = None
     budget_scope: str | None = None
     if stop_reason == StopReason.budget_exceeded:
@@ -1615,6 +1836,32 @@ async def _run_inner(
         await extract_and_update(user_id, messages, model_policy=policy)
     except Exception as exc:  # noqa: BLE001 — memory extraction is auxiliary
         _logger.debug("memory_extraction_skipped", error=str(exc))
+    reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
+    # P4: on_run_complete hook — observe after reply is finalized.
+    from fleetent.runtime import hooks as _hooks_orc
+
+    if (
+        governance is not None
+        and governance.hooks_enabled
+        and _hooks_orc.has_hooks("on_run_complete")
+    ):
+        from fleetent.runtime.hooks import HookContext as _HCorc
+
+        await _hooks_orc.dispatch(
+            "on_run_complete",
+            _HCorc(
+                event="on_run_complete",
+                session_id=session_id,
+                agent_name=agent_name,
+                user_id=user_id,
+                payload={
+                    "reply": reply,
+                    "stop_reason_name": stop_reason.name if stop_reason is not None else "normal",
+                },
+            ),
+            timeout=governance.hooks_timeout_seconds,
+            strict=False,
+        )
     return reply
 
 
@@ -1747,6 +1994,30 @@ async def run_stream(
         agent_name=agent_name, features=agent_features or {}, session_id=session_id
     )
 
+    # P3: on_user_input hook — intercept/rewrite/deny before user message enters messages.
+    from fleetent.runtime import hooks
+
+    if governance is not None and governance.hooks_enabled and hooks.has_hooks("on_user_input"):
+        from fleetent.runtime.hooks import HookContext
+
+        _hres = await hooks.dispatch(
+            "on_user_input",
+            HookContext(
+                event="on_user_input",
+                session_id=session_id,
+                agent_name=agent_name,
+                user_id=user_id,
+                payload={"content": user_input},
+            ),
+            timeout=governance.hooks_timeout_seconds,
+            strict=governance.hooks_decision_failure == "strict",
+        )
+        if _hres.decision == "deny":
+            yield {"type": "error", "content": _hres.reason or "request denied by policy"}
+            return
+        if _hres.modified_content is not None:
+            user_input = _hres.modified_content
+
     if images:
         user_msg = build_message_with_images(user_input, images)
     else:
@@ -1792,6 +2063,7 @@ async def run_stream(
             agent_name=agent_name,
             stop_reason=StopReason.mcp_strict_unavailable,
         )
+        reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
         yield {"type": "done", "content": reply}
         return
     model_used = _model_name(active_cfg)
@@ -1833,9 +2105,54 @@ async def run_stream(
             stop_reason = forced
             break
         state.turn += 1
+        # P4: pre_compact (streaming path)
+        from fleetent.runtime import hooks as _hooks_pc
+
+        if (
+            governance is not None
+            and governance.hooks_enabled
+            and _hooks_pc.has_hooks("pre_compact")
+        ):
+            from fleetent.runtime.hooks import HookContext as _HCprc
+
+            _prc_s = await _hooks_pc.dispatch(
+                "pre_compact",
+                _HCprc(
+                    event="pre_compact",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"message_count": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _prc_s.inject_context is not None:
+                messages.append({"role": "user", "content": _prc_s.inject_context})
+        _smb = len(messages)
         messages, flap_state = _gated_compress(
             messages, flap_state, session_id=session_id, user_id=user_id, agent_name=agent_name
         )
+        # P4: post_compact (streaming path)
+        if (
+            governance is not None
+            and governance.hooks_enabled
+            and _hooks_pc.has_hooks("post_compact")
+        ):
+            from fleetent.runtime.hooks import HookContext as _HCpoc
+
+            await _hooks_pc.dispatch(
+                "post_compact",
+                _HCpoc(
+                    event="post_compact",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"messages_before": _smb, "messages_after": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
         # D4b: inject the loop warning after compression, before sanitize/LLM call.
         _maybe_inject_loop_warning(messages, state)
         # C1: drain mid-run steered input at the turn boundary (before sanitize).
@@ -1847,6 +2164,30 @@ async def run_stream(
             _log_run_error(exc, messages, start, model_used, user_id, agent_name)
             return
         _accumulate_repairs(hygiene_repairs, report)
+        # P3: pre_llm_call hook (streaming path) — inject context before each LLM call.
+        from fleetent.runtime import hooks as _hooks_plc
+
+        if (
+            governance is not None
+            and governance.hooks_enabled
+            and _hooks_plc.has_hooks("pre_llm_call")
+        ):
+            from fleetent.runtime.hooks import HookContext as _HC_plc
+
+            _plc_s = await _hooks_plc.dispatch(
+                "pre_llm_call",
+                _HC_plc(
+                    event="pre_llm_call",
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    user_id=user_id,
+                    payload={"message_count": len(messages)},
+                ),
+                timeout=governance.hooks_timeout_seconds,
+                strict=False,
+            )
+            if _plc_s.inject_context is not None:
+                messages.append({"role": "user", "content": _plc_s.inject_context})
 
         # Accumulate streaming response
         reply_parts: list[str] = []
@@ -1935,6 +2276,33 @@ async def run_stream(
                 empty_reply_retries += 1
                 messages.append({"role": "user", "content": _EMPTY_REPLY_CORRECTION})
                 continue
+            # P3: on_assistant_reply hook on the final text reply.
+            # Already-streamed text_delta events are not retractable; only done + output_transform
+            # will use the modified reply.
+            from fleetent.runtime import hooks as _hooks_oar
+
+            if (
+                reply
+                and governance is not None
+                and governance.hooks_enabled
+                and _hooks_oar.has_hooks("on_assistant_reply")
+            ):
+                from fleetent.runtime.hooks import HookContext as _HookCtx
+
+                _oar = await _hooks_oar.dispatch(
+                    "on_assistant_reply",
+                    _HookCtx(
+                        event="on_assistant_reply",
+                        session_id=session_id,
+                        agent_name=agent_name,
+                        user_id=user_id,
+                        payload={"content": reply},
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=False,
+                )
+                if _oar.modified_content is not None:
+                    reply = _oar.modified_content
             break
 
         # Reconstruct assistant message with tool_calls for messages list
@@ -1952,6 +2320,9 @@ async def run_stream(
         # planning (serial guardrail), execute pending in parallel (gather preserves
         # order, D7-batched, D5-serialized), then yield tool_result events + backfill
         # tool messages strictly in original order — never completion order.
+        from fleetent.runtime import hooks
+        from fleetent.runtime.hooks import HookContext
+
         slots: list[_PlanSlot] = []
         for tc_data in tool_calls_list:
             func: dict[str, str] = tc_data["function"]
@@ -1975,12 +2346,49 @@ async def run_stream(
                     )
                 )
                 continue
+            # P1: pre_tool_use hook. Streaming has no permission_gate, so `ask`
+            # degrades to deny + note. deny → placeholder; modified_args → rewrite.
+            slot_args: str | dict[str, Any] = args
+            if (
+                governance is not None
+                and governance.hooks_enabled
+                and hooks.has_hooks("pre_tool_use")
+            ):
+                parsed = json.loads(args) if isinstance(args, str) else args
+                hres = await hooks.dispatch(
+                    "pre_tool_use",
+                    HookContext(
+                        event="pre_tool_use",
+                        session_id=session_id,
+                        agent_name=agent_name,
+                        user_id=user_id,
+                        payload={"tool_name": name, "tool_args": parsed},
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=governance.hooks_decision_failure == "strict",
+                )
+                if hres.decision in ("deny", "ask"):
+                    note = hres.reason or name
+                    if hres.decision == "ask":
+                        note = f"需人工确认（流式不支持审批，已拦截）：{note}"
+                    slots.append(
+                        _PlanSlot(
+                            tc_id=tc_data["id"],
+                            name=name,
+                            tc_fp=tc_fp,
+                            placeholder=(f"tool execution blocked by policy: {note}", False),
+                            counts_failure=False,
+                        )
+                    )
+                    continue
+                if hres.modified_args is not None:
+                    slot_args = hres.modified_args
             slots.append(
                 _PlanSlot(
                     tc_id=tc_data["id"],
                     name=name,
                     tc_fp=tc_fp,
-                    args=args,
+                    args=slot_args,
                     resource_key=_resource_key(name, session_id),
                 )
             )
@@ -1995,12 +2403,46 @@ async def run_stream(
             default_tool_timeout=default_tool_timeout,
         )
         for slot in slots:
-            content, failed = (
-                slot.placeholder if slot.placeholder is not None else results[slot.tc_id]
-            )
+            placeholder = slot.placeholder
+            is_placeholder = placeholder is not None
+            content, failed = placeholder if placeholder is not None else results[slot.tc_id]
             if slot.counts_failure:
                 state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
             yield {"type": "tool_result", "name": slot.name, "content": content}
+            # P2: post_tool_use hook, real executions only; SSE already sent (not retractable).
+            # modified_content only affects what enters messages (used by the LLM next turn).
+            if (
+                not is_placeholder
+                and governance is not None
+                and governance.hooks_enabled
+                and hooks.has_hooks("post_tool_use")
+            ):
+                from fleetent.runtime.hooks import HookContext
+
+                args_val = slot.args
+                try:
+                    parsed_args = json.loads(args_val) if isinstance(args_val, str) else args_val
+                except Exception:
+                    parsed_args = {}
+                hres = await hooks.dispatch(
+                    "post_tool_use",
+                    HookContext(
+                        event="post_tool_use",
+                        session_id=session_id,
+                        agent_name=agent_name,
+                        user_id=user_id,
+                        payload={
+                            "tool_name": slot.name,
+                            "tool_args": parsed_args,
+                            "tool_result": content,
+                            "failed": failed,
+                        },
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=False,
+                )
+                if hres.modified_content is not None:
+                    content = hres.modified_content
             # T4: truncate the messages copy only; the SSE event above kept the full result.
             tool_content = (
                 content if is_self_truncating(slot.name) else truncate_tool_result(content)
@@ -2063,6 +2505,7 @@ async def run_stream(
                 if partial_reply:
                     yield {"type": "text_delta", "content": partial_reply}
 
+    reply = await _apply_output_transform(reply, governance, session_id, agent_name, user_id)
     yield {"type": "done", "content": reply}
 
     from openai.types import CompletionUsage as _CU  # noqa: N814 — terse local alias

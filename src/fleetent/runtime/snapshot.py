@@ -61,6 +61,10 @@ class GovernanceConfig:
     # run-time input steering (C1)
     steering_mode: str = "steer"
     steering_max_pending: int = 8
+    # hooks extension system (P1)
+    hooks_enabled: bool = False
+    hooks_decision_failure: str = "open"
+    hooks_timeout_seconds: float = 5.0
 
 
 def _governance_from_file(agent: AgentFile) -> GovernanceConfig:
@@ -86,6 +90,9 @@ def _governance_from_file(agent: AgentFile) -> GovernanceConfig:
         tool_default_timeout_seconds=agent.tool_default_timeout_seconds,
         steering_mode=agent.steering_mode,
         steering_max_pending=agent.steering_max_pending,
+        hooks_enabled=agent.hooks_enabled,
+        hooks_decision_failure=agent.hooks_decision_failure,
+        hooks_timeout_seconds=agent.hooks_timeout_seconds,
     )
 
 

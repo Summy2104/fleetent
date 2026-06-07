@@ -211,7 +211,53 @@ async def route(msg: NormalizedMessage) -> None:
         else:
             history.insert(0, {"role": "system", "content": system_content})
 
+        # P3: on_user_input hook (IM path) — deny or rewrite before appending to history.
+        if governance is not None and governance.hooks_enabled:
+            from fleetent.runtime import hooks
+            from fleetent.runtime.hooks import HookContext
+
+            if hooks.has_hooks("on_user_input"):
+                _hres = await hooks.dispatch(
+                    "on_user_input",
+                    HookContext(
+                        event="on_user_input",
+                        session_id=session_id,
+                        agent_name=agent.name if agent else None,
+                        user_id=msg.user_id,
+                        payload={"content": user_content},
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=governance.hooks_decision_failure == "strict",
+                )
+                if _hres.decision == "deny":
+                    reason = _hres.reason or "请求被策略拒绝"
+                    await msg.reply_func(f"⛔ {reason}")
+                    return
+                if _hres.modified_content is not None:
+                    user_content = _hres.modified_content
+
         history.append({"role": "user", "content": user_content})
+
+        # P4: session_start hook — inject enterprise context after user message appended.
+        if governance is not None and governance.hooks_enabled:
+            from fleetent.runtime import hooks as _hooks_ss
+            from fleetent.runtime.hooks import HookContext as _HCss
+
+            if _hooks_ss.has_hooks("session_start"):
+                _ss_res = await _hooks_ss.dispatch(
+                    "session_start",
+                    _HCss(
+                        event="session_start",
+                        session_id=session_id,
+                        agent_name=agent.name if agent else None,
+                        user_id=msg.user_id,
+                        payload={"session_id": session_id, "message_count": len(history)},
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=False,
+                )
+                if _ss_res.inject_context is not None:
+                    history.append({"role": "user", "content": _ss_res.inject_context})
 
         # C1: register the active run so concurrent same-session messages can steer
         # into it (and interrupt it via the cancel token); the registration is removed
@@ -230,6 +276,29 @@ async def route(msg: NormalizedMessage) -> None:
                 model_policy=model_policy,
                 cancel_token=token,
             )
+
+        # P4: session_end hook — observe after run completes, before session save.
+        if governance is not None and governance.hooks_enabled:
+            from fleetent.runtime import hooks as _hooks_se
+            from fleetent.runtime.hooks import HookContext as _HCse
+
+            if _hooks_se.has_hooks("session_end"):
+                await _hooks_se.dispatch(
+                    "session_end",
+                    _HCse(
+                        event="session_end",
+                        session_id=session_id,
+                        agent_name=agent.name if agent else None,
+                        user_id=msg.user_id,
+                        payload={
+                            "session_id": session_id,
+                            "user_id": msg.user_id,
+                            "reply": response,
+                        },
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=False,
+                )
 
         # agent_loop.run() already appended the assistant message to history in-place.
         # Do NOT append again here — that caused duplicate messages in every session.
