@@ -505,6 +505,7 @@ def test_agent_bindings_are_searchable_multiselect():
         'agMsWidget("agm-mcp"',
         'agMsWidget("agm-oauth"',
         'agMsWidget("agm-users"',
+        'agMsWidget("agm-kb"',
     ):
         assert call in fn, call
     # the widget supports name filtering + chip selection; classes preserved for save-diff

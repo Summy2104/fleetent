@@ -2776,9 +2776,9 @@ async function agLoadCreateBindings(current = null) {
     api("GET", "/kb").catch(() => []),
     api("GET", "/users").catch(() => []),
   ]);
-  // Skills / connectors / IM users are searchable multi-select dropdowns; KB stays a
-  // simple list. The option checkboxes keep their binding classes so the save-diff
-  // read-paths (checked("agm-…")) are unchanged.
+  // Skills / connectors / IM users / KB all render as searchable multi-select dropdowns.
+  // The option checkboxes keep their binding classes so the save-diff read-paths
+  // (checked("agm-…")) are unchanged.
   agMsWidget("agm-skills", "agm-skill", (skills || []).map(s => ({ value: s.name, label: s.name })), "Select skills…");
   agMsWidget("agm-mcp", "agm-mcp-item", (mcp || []).map(m => ({ value: m.id, label: m.id })), "Select MCP servers…");
   agMsWidget("agm-oauth", "agm-oauth-item",
@@ -2790,9 +2790,12 @@ async function agLoadCreateBindings(current = null) {
       label: (u.name || u.email || u.id) + (u.name || u.email ? ` (${u.id})` : ""),
       q: [u.id, u.name || "", u.email || ""].join(" "),
     })), "Select IM users…");
-  const box = (cls, val, label) => `<label class="row ${cls}"><input type="checkbox" value="${esc(val)}"> ${label}</label>`;
-  $("agm-kb").innerHTML = (kbs || []).map(k => box("agm-kb-item", k.kb_id, esc(k.kb_id) + (k.description ? ` <span class="muted">— ${esc(k.description)}</span>` : ""))).join("")
-    || `<div class="muted">No knowledge bases.</div>`;
+  agMsWidget("agm-kb", "agm-kb-item",
+    (kbs || []).map(k => ({
+      value: k.kb_id,
+      label: k.kb_id + (k.description ? ` — ${k.description}` : ""),
+      q: `${k.kb_id} ${k.description || ""}`,
+    })), "Select knowledge bases…");
   if (current) {
     const check = (cls, set) => {
       for (const cb of document.querySelectorAll(`#ag-bind-config .${cls} input[type=checkbox]`))
@@ -2803,7 +2806,7 @@ async function agLoadCreateBindings(current = null) {
     check("agm-oauth-item", new Set(current.oauth || []));
     check("agm-kb-item", new Set(current.kb || []));
     check("agm-user-row", new Set(current.users || []));
-    for (const id of ["agm-skills", "agm-mcp", "agm-oauth", "agm-users"]) agMsSync(id);
+    for (const id of ["agm-skills", "agm-mcp", "agm-oauth", "agm-users", "agm-kb"]) agMsSync(id);
     AGM_CHANNELS = (current.channels || []).map(c => ({ platform: c.platform, channel_id: c.channel_id }));
     agmRenderChannels();
   }
