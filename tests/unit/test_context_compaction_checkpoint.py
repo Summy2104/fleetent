@@ -1,4 +1,9 @@
-"""Unit tests: compaction checkpoint injection in runtime/context.py."""
+"""Unit tests: compaction checkpoint (pre-compact backup) injection in runtime/context.py.
+
+Only the agent-side backup file (write_compaction_checkpoint) is exercised here;
+session_meta stats recording was removed (Agent/Platform decoupling — compaction
+stats live in observability traces).
+"""
 
 from __future__ import annotations
 
@@ -26,41 +31,18 @@ _COMPRESS_CONFIG = {
 # ── maybe_compress ────────────────────────────────────────────────────────────
 
 
-def test_maybe_compress_calls_write_checkpoint_before_compress(monkeypatch):
+def test_maybe_compress_writes_checkpoint_before_compress(monkeypatch):
     import fleetent.runtime.context as cm
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs, **kw: "Summary text.")
 
-    with (
-        patch("fleetent.session.manager.write_compaction_checkpoint") as mock_write,
-        patch("fleetent.platform.chat_management.session_admin_store.update_compaction_meta"),
-    ):
+    with patch("fleetent.session.manager.write_compaction_checkpoint") as mock_write:
         result = cm.maybe_compress(_big_messages(), config=_COMPRESS_CONFIG, session_id="sess-x")
 
     assert result is not _big_messages()  # compression happened
     mock_write.assert_called_once()
-    call_args = mock_write.call_args
-    assert call_args[0][0] == "sess-x"  # session_id correct
-    assert isinstance(call_args[0][1], list)  # messages passed
-
-
-def test_maybe_compress_calls_update_meta_after_compress(monkeypatch):
-    import fleetent.runtime.context as cm
-
-    monkeypatch.setattr(cm, "_summarize", lambda msgs, **kw: "Summary text.")
-
-    with (
-        patch("fleetent.session.manager.write_compaction_checkpoint"),
-        patch(
-            "fleetent.platform.chat_management.session_admin_store.update_compaction_meta"
-        ) as mock_meta,
-    ):
-        cm.maybe_compress(_big_messages(), config=_COMPRESS_CONFIG, session_id="sess-y")
-
-    mock_meta.assert_called_once()
-    kw = mock_meta.call_args.kwargs if mock_meta.call_args.kwargs else {}
-    args = mock_meta.call_args.args
-    assert "sess-y" in (args[0] if args else kw.get("session_id", ""))
+    assert mock_write.call_args[0][0] == "sess-x"
+    assert isinstance(mock_write.call_args[0][1], list)
 
 
 def test_maybe_compress_no_checkpoint_when_no_session_id(monkeypatch):
@@ -68,28 +50,16 @@ def test_maybe_compress_no_checkpoint_when_no_session_id(monkeypatch):
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs, **kw: "Summary text.")
 
-    with (
-        patch("fleetent.session.manager.write_compaction_checkpoint") as mock_write,
-        patch(
-            "fleetent.platform.chat_management.session_admin_store.update_compaction_meta"
-        ) as mock_meta,
-    ):
+    with patch("fleetent.session.manager.write_compaction_checkpoint") as mock_write:
         cm.maybe_compress(_big_messages(), config=_COMPRESS_CONFIG, session_id=None)
 
     mock_write.assert_not_called()
-    mock_meta.assert_not_called()
 
 
 def test_maybe_compress_no_checkpoint_when_below_threshold(monkeypatch):
     import fleetent.runtime.context as cm
 
-    with (
-        patch("fleetent.session.manager.write_compaction_checkpoint") as mock_write,
-        patch(
-            "fleetent.platform.chat_management.session_admin_store.update_compaction_meta"
-        ) as mock_meta,
-    ):
-        # Very short messages — below threshold
+    with patch("fleetent.session.manager.write_compaction_checkpoint") as mock_write:
         cm.maybe_compress(
             [{"role": "user", "content": "hi"}],
             config=_COMPRESS_CONFIG,
@@ -97,7 +67,6 @@ def test_maybe_compress_no_checkpoint_when_below_threshold(monkeypatch):
         )
 
     mock_write.assert_not_called()
-    mock_meta.assert_not_called()
 
 
 def test_maybe_compress_checkpoint_write_failure_does_not_break_compress(monkeypatch):
@@ -105,16 +74,13 @@ def test_maybe_compress_checkpoint_write_failure_does_not_break_compress(monkeyp
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs, **kw: "Summary text.")
 
-    with (
-        patch(
-            "fleetent.session.manager.write_compaction_checkpoint",
-            side_effect=OSError("disk full"),
-        ),
-        patch("fleetent.platform.chat_management.session_admin_store.update_compaction_meta"),
+    with patch(
+        "fleetent.session.manager.write_compaction_checkpoint",
+        side_effect=OSError("disk full"),
     ):
         result = cm.maybe_compress(_big_messages(), config=_COMPRESS_CONFIG, session_id="sess-fail")
 
-    # Compression still happened despite checkpoint write failure
+    # Compression still happened despite checkpoint write failure (best-effort)
     assert result is not _big_messages()
     assert len(result) < len(_big_messages())
 
@@ -122,21 +88,15 @@ def test_maybe_compress_checkpoint_write_failure_does_not_break_compress(monkeyp
 # ── compress_for_context_overflow ─────────────────────────────────────────────
 
 
-def test_compress_for_context_overflow_calls_checkpoint(monkeypatch):
+def test_compress_for_context_overflow_writes_checkpoint(monkeypatch):
     import fleetent.runtime.context as cm
 
     monkeypatch.setattr(cm, "_summarize", lambda msgs, **kw: "Overflow summary.")
 
-    with (
-        patch("fleetent.session.manager.write_compaction_checkpoint") as mock_write,
-        patch(
-            "fleetent.platform.chat_management.session_admin_store.update_compaction_meta"
-        ) as mock_meta,
-    ):
+    with patch("fleetent.session.manager.write_compaction_checkpoint") as mock_write:
         cm.compress_for_context_overflow(
             _big_messages(), config=_COMPRESS_CONFIG, session_id="sess-ov"
         )
 
     mock_write.assert_called_once()
-    mock_meta.assert_called_once()
     assert mock_write.call_args[0][0] == "sess-ov"

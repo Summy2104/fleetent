@@ -13,8 +13,7 @@ from fleetent.db import SQLiteDatabase, create_database
 
 _COLS = (
     "session_id, origin, status, takeover_actor, takeover_at, pinned, pin_note, "
-    "agent_name, user_id, channel, updated_at, total_input_tokens, total_output_tokens, "
-    "resume_pending"
+    "agent_name, user_id, channel, updated_at, resume_pending"
 )
 
 
@@ -79,8 +78,6 @@ def get_meta(session_id: str) -> dict[str, Any]:
             "user_id": None,
             "channel": None,
             "updated_at": None,
-            "total_input_tokens": 0,
-            "total_output_tokens": 0,
             "resume_pending": 0,
         }
     return row
@@ -173,49 +170,6 @@ def _update(session_id: str, fields: dict[str, Any]) -> None:
         conn.execute(
             f"UPDATE session_meta SET {assignments} WHERE session_id = :sid",
             {**safe, "sid": session_id},
-        )
-
-
-def update_compaction_meta(
-    session_id: str,
-    messages_before: int,
-    messages_after: int,
-    summary_preview: str,
-    compacted_at: float,
-) -> None:
-    """Record compaction event metadata in session_meta. No-op if session row absent."""
-    with _database().transaction() as conn:
-        conn.execute(
-            "UPDATE session_meta SET "
-            "last_compaction_at = :at, "
-            "messages_before_compaction = :before, "
-            "messages_after_compaction = :after, "
-            "compaction_summary_preview = :preview "
-            "WHERE session_id = :sid",
-            {
-                "at": compacted_at,
-                "before": messages_before,
-                "after": messages_after,
-                "preview": summary_preview[:200] if summary_preview else None,
-                "sid": session_id,
-            },
-        )
-
-
-def add_token_usage(session_id: str, input_tokens: int, output_tokens: int) -> None:
-    """Accumulate token usage for a session. Creates the row if absent."""
-    with _database().transaction() as conn:
-        conn.execute(
-            "INSERT INTO session_meta (session_id, origin, status, pinned, updated_at) "
-            "VALUES (:sid, 'web', 'active', 0, :now) ON CONFLICT(session_id) DO NOTHING",
-            {"sid": session_id, "now": _now()},
-        )
-        conn.execute(
-            "UPDATE session_meta SET "
-            "total_input_tokens = COALESCE(total_input_tokens, 0) + :in_tok, "
-            "total_output_tokens = COALESCE(total_output_tokens, 0) + :out_tok "
-            "WHERE session_id = :sid",
-            {"in_tok": input_tokens, "out_tok": output_tokens, "sid": session_id},
         )
 
 
