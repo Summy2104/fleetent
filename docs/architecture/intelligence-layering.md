@@ -79,10 +79,12 @@
 | --- | --- | --- |
 | user memory | reflection maintenance 提案 | 对话提取（agent 自己） |
 | shared memory | reflection suggest（source=`reflection_proposal`） | 人工录入（`manual`） |
-| KB | reflection `suggest_..._or_kb` | connector 外部摄取 |
+| KB（派生视图） | **不直接写**——reflection 建议 → 审批 → agent-curated 沉淀源 → sync | connector 外部摄取 |
 | skill | reflection skill 提案 | 人工上传 |
 
-除 **KB connector 外部摄取**（受信运维，唯一实质控制面，不经审批门）外，其它所有「写」要么是 agent 对话自然产生、要么是自进化经审批门落地——**全在 agent 侧，审批门是统一治理点**。
+**真相源 vs 派生视图（关键区分）**：memory / shared memory / skill 本身就是权威数据（真相源），自进化经审批门**直接写**它们；而 **KB 是唯一的派生视图**（内容是数据源的投影），agent 贡献**不能直接写 KB**，否则下次 sync 会与数据源不一致（孤儿/被删/不可追溯）。正确做法：agent 贡献写它的**真相源**——一个 agent-curated 沉淀源（skill-like：proposal → platform/agent 控制台 → 人审 → curated source），再经 connector sync 流入 KB，保证 KB 始终是所有数据源的纯派生、可追溯、可重新摄取。这意味着 **KB 写入路径单一（只 ingest/sync）**。（沉淀源形态在阶段3 reflection 展开。）
+
+除 **KB connector 外部摄取**（受信运维，不经审批门）外，其它所有「写」要么是 agent 对话自然产生、要么是自进化经审批门落地——审批门是统一治理点。
 
 ## 5. 目标架构与物理布局
 
@@ -96,9 +98,10 @@ src/fleetent/
   # ── 能力域 ──
   memory/           提取·检索·自维护·shared 核心
   knowledge_base/   【独立组件 = 未来服务雏形】
-    core/      store · models
-    retrieval/ search · graph_search · scope   (agent 消费; 预留 agent 自主写入口)
-    ingest/    connectors · parsers · sync · extraction  (platform 驱动)
+    core/        store(Readable/Writable Protocol) · models       ← 数据底层
+    retrieval/   search · graph_search · scope                    (agent 消费, 只读)
+    ingest/      connectors · parsers · sync · extraction · 内容写  (platform 驱动, 唯一写 KB 内容的路径)
+    management/  建库/归档/改描述 · agent↔KB 绑定                   (platform 驱动)
 
   # ── 基础设施底座 ──
   vector_store/     embedding · rerank · backend   (KB+memory 消费)
@@ -130,7 +133,16 @@ reflection 自进化「写」 ─▶ 统一审批门(governance) ─▶ 落地�
 
 ## 7. 迁移路线（每阶段兼容垫片先行，测试全程绿）
 
-复用 roadmap 的 Shim 策略：旧路径保留 re-export shim，调用方分批迁移，最后收窄。
+复用 roadmap 的 Shim 策略：旧路径保留 re-export shim，调用方分批迁移。
+
+**推荐实施顺序（2026-06-08 定，"架构纯净优先"）**：`阶段1 → 阶段2 → 阶段4 → 阶段3 → 阶段5`（阶段6 后置），连续推进、不中途插生产化功能（scheduler/audit 等等重构全完再回头加）。注意 4 在 3 前（memory 是 reflection/long_term_ctx 的被依赖项，先就位），且 **3、4 设计合并**（破 memory↔reflection 的 shared-memory 提案链循环）。
+
+节奏选择：
+- **shim 每阶段迁完即删**（非统一收口）——中间态最干净；代价是每阶段调用方迁移要做透。
+- **依赖护栏渐进上**——每抽出一个组件即加它的护栏断言，杜绝漂移。
+- **CLAUDE.md 契约阶段5 统一收口**——避免中间态反复改契约文字。
+- **每阶段独立 change / feat 分支 / PR**，合一个起下一个。
+- **前置**：实施前须一次性定完阶段2/3/4 的「待讨论决策点」，避免一气呵成时边做边卡。**阶段2 是重头**（最大、决策最多、connector 双源是历史债），讨论重心在此。
 
 ```
 阶段1  vector_store 提为顶层基础设施组件（底座先稳, KB+memory 都依赖它）
@@ -157,7 +169,7 @@ reflection 自进化「写」 ─▶ 统一审批门(governance) ─▶ 落地�
 2. **重新定位平铺出来的组件**：`knowledge_base` = 独立组件、`vector_store` = 基础设施，不再属于「agent 运行时模块」列表、不受"不得 import platform"约束（它们本就不该依赖 platform，但理由从"是 agent runtime"改为"是独立组件/基础设施"）；`long_term_ctx` / `reflection` / `memory` 仍是 agent 能力，留 agent 侧。
 3. 明确 **KB 读写边界**：`knowledge_base.retrieval`（agent 消费）/ `knowledge_base.ingest`（platform 驱动），retrieval ✗→ ingest。
 4. 记录三条判据（§2）作为 agent 能力 vs 控制面归属的判断标准。
-5. 明确**自进化的写经统一审批门**（governance），以及 KB 的 agent 自主写入口子。
+5. 明确**自进化的写经统一审批门**（governance）；区分真相源（memory/shared/skill：经审批直接写）与派生视图（KB：**不直接写**，agent 贡献经 agent-curated 沉淀源 → sync 流入，KB 写入路径单一）。
 6. 更新「现存待审计的 agent→platform 依赖」条目：`knowledge_base/config` 等随重构清理。
 
 ## 9. 开放问题
@@ -166,3 +178,19 @@ reflection 自进化「写」 ─▶ 统一审批门(governance) ─▶ 落地�
 - **单机 agent（无 platform）摄取**：摄取做成 agent 进程之外的独立单元（ingest CLI 或 KB 服务）；单机是否运行它是部署选择，不影响 agent 只读纯净。
 - **governance 自身**也混了 agent 治理（permission_gate）与 platform 治理（audit_log），与本重构相关但属另一条线，暂不扩入。
 - reflection **异步执行的调度**（定时触发自进化）与 KB connector sync 调度同属 cron_scheduler 横切关注，归 platform 驱动。
+- **agent / platform 物理分库**（独立基础话题，比本重构更底层，单独立项）：现状单库 `fleetent.db` 混了 platform 数据（users/agents/connectors/audit_log）与 agent 数据（traces/memory/chunks/proposals/approvals）。理想是分离，呼应解耦原则的数据层延伸。关键张力 = **platform 审批决策怎么回写 agent 库**（仅 skill/KB 走 platform console 审批的两类才有此问题；memory/shared 走 IM 全在 agent 侧无张力）；候选：platform 调 agent 审批 HTTP API（正向、需 agent 长驻）vs platform 直连 agent 库写。touches agent 部署形态（长驻 server vs 一次性 CLI）。
+
+## 10. 审批门设计要点（阶段3/4，permission_gate 泛化）
+
+审批门是 **agent 侧 governance 能力**（`permission_gate` 的异步非阻塞泛化），不是 platform 服务。proposal/approval 存 **agent 数据**；审批门统一，**渠道按 proposal 类型路由**：
+
+| proposal 类型 | 渠道 | 找谁 |
+| --- | --- | --- |
+| user memory | IM（agent 自主，`reply_func` 式推送） | 该 user 本人 |
+| shared memory | IM（agent 自主） | team/tenant 负责人（非必产生提案者——"找对人"逻辑待细化） |
+| skill | platform console（`list_*` 拉取展示） | 管理员 |
+| KB（经 agent-curated 沉淀源） | platform console | 管理员 |
+
+判据 = **影响范围/权限层级**：个人贴身·轻量·高频 → agent 自主 IM；组织级·重·影响面大 → platform 集中审。
+
+落地（P）：审批门 `resolve()` 后**调对应真相源的写接口**落地（memory/shared 直接写、skill 写 skill 库、KB 写沉淀源 → sync）。reflection 只「分析 + 生成 proposal」，memory 不再 import reflection——**memory↔reflection 循环经审批门居中而破**。
