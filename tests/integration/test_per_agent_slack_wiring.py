@@ -16,11 +16,13 @@ def _migrate(db_path):
     command.upgrade(cfg, "head")
 
 
-def test_slack_removed_from_owner_connector_manager():
+def test_per_agent_platforms_removed_from_owner_connector_manager():
+    # Slack and Telegram are per-agent (supervised from the agent index), not owner-level.
     assert "slack" not in srv._connector_manager._factories
-    assert "telegram" in srv._connector_manager._factories
+    assert "telegram" not in srv._connector_manager._factories
 
 
-def test_slack_removed_from_owner_connector_config_schema():
+def test_per_agent_platforms_removed_from_owner_connector_config_schema():
     assert "slack" not in im_connector_config.PLATFORM_CONFIG_KEYS
-    assert "telegram" in im_connector_config.PLATFORM_CONFIG_KEYS
+    assert "telegram" not in im_connector_config.PLATFORM_CONFIG_KEYS
+    assert "whatsapp" in im_connector_config.PLATFORM_CONFIG_KEYS

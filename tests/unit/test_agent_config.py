@@ -465,6 +465,40 @@ def test_env_reference_accepted(tmp_path) -> None:
     assert index.get("support").mcp_servers[0].api_key_env == "ACME_MCP_TOKEN"
 
 
+def test_agent_file_parses_telegram_connector() -> None:
+    af = agent_config.AgentFile.model_validate(
+        {
+            "name": "sales",
+            "version": 1,
+            "models": _valid_models_doc(),
+            "connectors": {"telegram": {"bot_token_env": "SALES_TG_BOT", "channels": ["-100123"]}},
+        }
+    )
+    assert af.connectors.telegram is not None
+    assert af.connectors.telegram.bot_token_env == "SALES_TG_BOT"
+    assert af.connectors.telegram.channels == ["-100123"]
+
+
+def test_telegram_agents_lists_declaring_agents(tmp_path) -> None:
+    _write_agent(tmp_path, "sales", connectors={"telegram": {"bot_token_env": "SALES_TG_BOT"}})
+    _write_agent(tmp_path, "plain")  # no telegram connector
+    index = agent_config.build_index(tmp_path)
+    assert index.telegram_agents() == ["sales"]
+
+
+def test_inline_secret_in_telegram_rejected(tmp_path) -> None:
+    _write_agent(
+        tmp_path,
+        "sales",
+        connectors={"telegram": {"bot_token_env": "123456789:AAHinlineLiveBotTokenXXXXXXXX"}},
+    )
+    with pytest.raises(ValueError) as exc:
+        agent_config.build_index(tmp_path)
+    msg = str(exc.value)
+    assert "sales" in msg
+    assert "bot_token_env" in msg
+
+
 def test_long_system_prompt_not_flagged_as_secret(tmp_path) -> None:
     # The secret scan targets MCP/connector defs, not free-text prompts.
     _write_agent(

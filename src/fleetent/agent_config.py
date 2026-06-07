@@ -60,10 +60,22 @@ class SlackConnector(BaseModel):
     channels: list[str] = Field(default_factory=list)
 
 
+class TelegramConnector(BaseModel):
+    """Per-agent Telegram connection. The token is an env-var name, never an inline secret."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bot_token_env: str
+    # Optional chat filter: when non-empty, the agent responds only in these chats among
+    # those its Telegram bot receives updates from. Empty = respond everywhere.
+    channels: list[str] = Field(default_factory=list)
+
+
 class AgentConnectors(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     slack: SlackConnector | None = None
+    telegram: TelegramConnector | None = None
 
 
 class AgentAccess(BaseModel):
@@ -308,6 +320,10 @@ class AgentConfigIndex:
     def slack_agents(self) -> list[str]:
         """Names of agents that declare a Slack connector."""
         return [name for name, a in self.agents.items() if a.connectors.slack is not None]
+
+    def telegram_agents(self) -> list[str]:
+        """Names of agents that declare a Telegram connector."""
+        return [name for name, a in self.agents.items() if a.connectors.telegram is not None]
 
 
 # Current published index. Empty until scan() runs (mirrors skill_registry._index).

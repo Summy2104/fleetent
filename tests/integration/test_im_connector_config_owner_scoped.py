@@ -24,33 +24,34 @@ def db(tmp_path, monkeypatch):
             " VALUES ('admin1', 'admin', 'ma-x', ?, 'built_in_admin')",
             (now,),
         )
-    fake = types.SimpleNamespace(telegram_bot_token="env-tg", slack_bot_token="")
+    # Slack and Telegram are per-agent now; WhatsApp is the owner-level platform.
+    fake = types.SimpleNamespace(whatsapp_access_token="env-wa")
     monkeypatch.setattr(cfg, "get_settings", lambda: fake)
     return p
 
 
 def test_admin_owner_inherits_env(db):
-    assert cfg.resolve("admin1", "telegram") == {"bot_token": "env-tg"}
+    assert cfg.resolve("admin1", "whatsapp") == {"access_token": "env-wa"}
 
 
 def test_non_admin_owner_no_env(db):
-    assert cfg.resolve("ownerB", "telegram") == {}
+    assert cfg.resolve("ownerB", "whatsapp") == {}
 
 
 def test_db_config_overrides_env(db):
-    cfg.set_config("ownerB", "telegram", {"bot_token": "db-tg"})
-    assert cfg.resolve("ownerB", "telegram") == {"bot_token": "db-tg"}
-    assert cfg.resolve("admin1", "telegram") == {"bot_token": "env-tg"}
+    cfg.set_config("ownerB", "whatsapp", {"access_token": "db-wa"})
+    assert cfg.resolve("ownerB", "whatsapp") == {"access_token": "db-wa"}
+    assert cfg.resolve("admin1", "whatsapp") == {"access_token": "env-wa"}
 
 
 def test_masked(db):
-    cfg.set_config("ownerB", "telegram", {"bot_token": "abcd1234"})
-    assert cfg.resolve_masked("ownerB", "telegram") == {"bot_token": "****1234"}
+    cfg.set_config("ownerB", "whatsapp", {"access_token": "abcd1234"})
+    assert cfg.resolve_masked("ownerB", "whatsapp") == {"access_token": "****1234"}
 
 
 def test_seed_from_env_targets_admin_owner(db):
     seeded = cfg.seed_from_env()
-    assert "telegram" in seeded
-    assert store.get_connector("admin1", "telegram") is not None
+    assert "whatsapp" in seeded
+    assert store.get_connector("admin1", "whatsapp") is not None
     # nothing seeded under a non-admin owner
     assert store.list_connectors("ownerB") == []

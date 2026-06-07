@@ -30,6 +30,7 @@ from fleetent.observability.structured_logging import get_logger
 
 if TYPE_CHECKING:
     from fleetent.im_gateway.slack_supervisor import SlackSupervisor
+    from fleetent.im_gateway.telegram_supervisor import TelegramSupervisor
 
 _logger = get_logger("runtime.agent_app")
 
@@ -44,11 +45,14 @@ class AgentRuntime:
 
     agent: AgentFile
     supervisor: SlackSupervisor
+    telegram_supervisor: TelegramSupervisor | None = None
     app: FastAPI | None = None
     port: int | None = None
 
     async def stop(self) -> None:
         await self.supervisor.stop_all()
+        if self.telegram_supervisor is not None:
+            await self.telegram_supervisor.stop_all()
 
 
 def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
@@ -125,14 +129,15 @@ async def boot(
     home: str | Path | None = None,
     port: int | None = None,
     supervisor: SlackSupervisor | None = None,
+    telegram_supervisor: TelegramSupervisor | None = None,
     start_im: bool = True,
     with_infra: bool = True,
 ) -> AgentRuntime:
     """Boot a single self-contained agent: load its home, bind IM, optionally serve HTTP.
 
-    Publishes a single-agent index so routing resolves only this agent. Starts the
-    agent's Slack connector (the only per-agent connector in the home schema). With
-    ``port``, builds the agent app serving ``/chat`` + ``/ws``.
+    Publishes a single-agent index so routing resolves only this agent. Starts the agent's
+    per-agent IM connectors (Slack + Telegram) from its home schema. With ``port``, builds
+    the agent app serving ``/chat`` + ``/ws``.
     """
     from fleetent.skills import scan as scan_skills
     from fleetent.tools.plugin_loader import load_plugins
@@ -162,12 +167,23 @@ async def boot(
         from fleetent.im_gateway.slack_supervisor import SlackSupervisor
 
         supervisor = SlackSupervisor()
+    if telegram_supervisor is None:
+        from fleetent.im_gateway.telegram_supervisor import TelegramSupervisor
+
+        telegram_supervisor = TelegramSupervisor()
     if start_im:
         await supervisor.start(agent.name)
+        await telegram_supervisor.start(agent.name)
 
     app = build_app(agent.name) if port is not None else None
     _logger.info("agent_runtime_booted", agent=agent.name, http_port=port, im=start_im)
-    return AgentRuntime(agent=agent, supervisor=supervisor, app=app, port=port)
+    return AgentRuntime(
+        agent=agent,
+        supervisor=supervisor,
+        telegram_supervisor=telegram_supervisor,
+        app=app,
+        port=port,
+    )
 
 
 def _sleep(seconds: float) -> None:
