@@ -57,19 +57,21 @@ environment:
 或 `secrets/` 文件中，不要写入本手册、验收记录、测试 fixture、commit、issue、日志或 trace。运行命令前只记录
 使用了哪个 provider 和 credential 来源类型，例如 `env:ANTHROPIC_API_KEY` 或 `file:///app/secrets/...`，不要记录值。
 
-Real LLM memory extraction evaluation 是显式 opt-in；默认门禁不会调用真实模型。需要本机先配置一个受支持的
-provider key（`ANTHROPIC_API_KEY`、`OPENAI_API_KEY` 或 `DEEPSEEK_API_KEY` 之一），再运行：
+Real LLM memory extraction evaluation 是显式 opt-in；默认门禁不会调用真实模型。该评测在本模块使用
+`FLEETENT_EVAL_MEMORY_LLM_API_KEY` 作为凭据变量，并受 `FLEETENT_EVAL_REAL_LLM` 控制。需要本机先设置：
 
 ```bash
+export FLEETENT_EVAL_MEMORY_LLM_API_KEY=<provider api key>
 export FLEETENT_EVAL_REAL_LLM=1
 uv run pytest tests/evaluation/test_memory_extraction_eval.py -q -rs
 ```
 
-如果 opt-in 后缺少真实 provider key，测试应跳过并给出需要配置真实 credential 的原因；如果 provider key 无效，
+如果 opt-in 后缺少 `FLEETENT_EVAL_MEMORY_LLM_API_KEY`，测试应跳过并给出需要配置真实 credential 的原因；如果
+provider key 无效，
 记录为失败并由 operator 更换或撤销 credential。不要用 `env`、`set -x`、完整 shell transcript 或 diagnostics
 package 打印 secret。
 
-其他真实外部 smoke 按需设置 opt-in flag，并通过 credential reference 指向本机 secret：
+Runtime/Provider 级真实 smoke 按需设置 opt-in flag，并通过 credential reference 指向本机 secret：
 
 ```bash
 export FLEETENT_REAL_LLM_SMOKE=1
