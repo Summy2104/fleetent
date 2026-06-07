@@ -4,6 +4,7 @@ import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
 import fleetent.governance.blocklist as blocklist
 import fleetent.platform.user_management.api_key_store as aks
+import fleetent.platform.user_management.block_service as block_service
 import fleetent.user_store as user_store
 from fleetent.platform.im_gateway_management import identity as im_user_store
 
@@ -31,7 +32,7 @@ def test_block_user_cascade(db):
     with sqlite3.connect(db) as conn:
         conn.execute("UPDATE im_users SET user_id = ? WHERE platform='slack'", (u.id,))
 
-    blocklist.block_user(u.id, reason="abuse", actor="admin1")
+    block_service.block_user(u.id, reason="abuse", actor="admin1")
 
     assert user_store.get_by_id(u.id).status == "blocked"
     assert aks.resolve(plaintext) is None  # key revoked
@@ -47,13 +48,13 @@ def test_block_user_cascade(db):
 def test_blocked_key_rejected_via_authenticate(db):
     u = user_store.create_web_user("b@x.com", "Bob")
     plaintext, _ = aks.issue_key(u.id)
-    blocklist.block_user(u.id, reason="x")
+    block_service.block_user(u.id, reason="x")
     assert user_store.authenticate(plaintext) is None
 
 
 def test_blocked_email_cannot_reregister(db):
     u = user_store.create_web_user("c@x.com", "Cara")
-    blocklist.block_user(u.id, reason="x")
+    block_service.block_user(u.id, reason="x")
     with pytest.raises(PermissionError):
         user_store.create_web_user("c@x.com", "Cara2")
 
@@ -61,8 +62,8 @@ def test_blocked_email_cannot_reregister(db):
 def test_unblock_does_not_revive_keys(db):
     u = user_store.create_web_user("d@x.com", "Dan")
     plaintext, _ = aks.issue_key(u.id)
-    blocklist.block_user(u.id, reason="x")
-    blocklist.unblock_user(u.id, actor="admin1")
+    block_service.block_user(u.id, reason="x")
+    block_service.unblock_user(u.id, actor="admin1")
     assert user_store.get_by_id(u.id).status == "active"
     assert aks.resolve(plaintext) is None  # still revoked
 
@@ -70,7 +71,7 @@ def test_unblock_does_not_revive_keys(db):
 def test_batch_block_shared_id(db):
     u1 = user_store.create_web_user("e@x.com", "E")
     u2 = user_store.create_web_user("f@x.com", "F")
-    batch_id = blocklist.batch_block([u1.id, u2.id], reason="raid", actor="admin1")
+    batch_id = block_service.batch_block([u1.id, u2.id], reason="raid", actor="admin1")
     rows = [r for r in audit.search_audit(action="block_user") if r["batch_id"] == batch_id]
     assert len(rows) == 2
 
@@ -78,4 +79,4 @@ def test_batch_block_shared_id(db):
 def test_builtin_admin_cannot_be_blocked(db):
     admin, _ = auth.seed_builtin_admin()
     with pytest.raises(PermissionError):
-        blocklist.block_user(admin.id, reason="x")
+        block_service.block_user(admin.id, reason="x")

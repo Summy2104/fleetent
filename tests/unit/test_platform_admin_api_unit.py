@@ -319,12 +319,12 @@ def test_user_admin_route_handlers_cover_management(monkeypatch: pytest.MonkeyPa
         ),
     )
     monkeypatch.setattr(
-        user_admin_api.blocklist,
+        user_admin_api.block_service,
         "block_user",
         lambda user_id, reason, actor: setattr(users[user_id], "status", "blocked"),
     )
     monkeypatch.setattr(
-        user_admin_api.blocklist,
+        user_admin_api.block_service,
         "unblock_user",
         lambda user_id, actor: setattr(users[user_id], "status", "active"),
     )
