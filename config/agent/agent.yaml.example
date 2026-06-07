@@ -5,7 +5,11 @@
 # The deployed agent runtime reads ONLY this file + .env; data is local under
 # FLEETENT_HOME/data/. Secrets are NEVER inlined — reference them by env-var name.
 # (This template ends in `.example`; install.sh copies it to FLEETENT_HOME/agent.yaml.
-#  The matching env template is config/agent/.env.example.)
+#  When the platform authors an agent it MATERIALIZES this file + a tailored .env
+#  scaffold automatically — the .env lists exactly the `*_env` this agent references,
+#  with platform-injected values filled and operator slots left blank. The committed
+#  config/agent/.env.example holds only the cross-agent PROCESS-LEVEL vars, e.g.
+#  FLEETENT_SECRET_KEY — the secret-store master key for inject-mode values.)
 #
 # Single-agent mode: this agent is the sole, forced-default agent, so there is no
 # routing table and `bindings.default` does not apply. `bindings.channels/users`

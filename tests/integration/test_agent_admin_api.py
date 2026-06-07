@@ -360,7 +360,10 @@ def test_export_agent_yaml(client):
         api_key_env="ACME_DOCS_MCP_TOKEN",
     )
     agent_store.bind_mcp_server(agent.id, "docs")
-    agent_store.assign_user("u_alice", agent.id)
+    from fleetent.platform.im_gateway_management import identity as im_identity
+
+    alice = im_identity.get_or_create("owner", "slack", "U_ALICE").id
+    agent_store.assign_user(alice, agent.id)
     agent_store.assign_channel("slack", "C0123ABCD", agent.id)
 
     token, _ = _session_for("admin")
@@ -378,7 +381,7 @@ def test_export_agent_yaml(client):
     assert doc["memory_namespace"] == "support-bot"
     assert {s["id"]: s for s in doc["mcp_servers"]}["docs"]["api_key_env"] == "ACME_DOCS_MCP_TOKEN"
     assert "slack:C0123ABCD" in doc["bindings"]["channels"]
-    assert "u_alice" in doc["bindings"]["users"]
+    assert "U_ALICE" in doc["bindings"]["users"]  # raw IM user id, not the internal UUID
 
 
 def test_export_agent_yaml_indentation(client):
