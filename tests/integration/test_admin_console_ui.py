@@ -345,6 +345,29 @@ def test_resource_id_inputs_are_readonly():
         assert "readonly" in m.group(0), input_id
 
 
+def test_kb_base_create_edit_with_description_present():
+    html = ADMIN_HTML
+    # KB tab hosts a knowledge-base manager (kb_id + short description) + add/edit modal
+    assert 'id="kb-modal"' in html
+    assert 'id="kb-id"' in html  # kb_id input (create only)
+    assert 'id="kb-desc"' in html  # short description input
+    for fn in (
+        "function loadKbBases",
+        "function kbOpenCreate",
+        "function kbOpenEdit",
+        "function kbSave",
+    ):
+        assert fn in html, fn
+    # the KB list loader runs alongside the connector loader
+    loadkb = html.split("async function loadKb", 1)[1].split("}", 1)[0]
+    assert "loadKbBases()" in loadkb
+    # create posts kb_id + description; edit patches description
+    save = html.split("async function kbSave", 1)[1].split("\n}", 1)[0]
+    assert "description" in save
+    assert '"/kb"' in save  # POST create
+    assert "/kb/${" in save  # PATCH edit by id
+
+
 def test_kb_source_connectors_management_present():
     html = ADMIN_HTML
     # KB tab hosts a source-connector manager (Drive/Confluence) + add/edit modal

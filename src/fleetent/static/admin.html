@@ -625,6 +625,18 @@
 
       <div class="card">
         <div class="row" style="justify-content:space-between; align-items:center;">
+          <h4 style="margin:0;">Knowledge bases</h4>
+          <span id="kb-create-bar"><button class="small" onclick="kbOpenCreate()">+ Add knowledge base</button></span>
+        </div>
+        <div class="table-scroll" style="margin-top:8px;"><table>
+          <thead><tr><th>KB ID</th><th>Description</th><th>Docs</th><th>Chunks</th><th>Agents</th><th>Actions</th></tr></thead>
+          <tbody id="kb-body"></tbody>
+        </table></div>
+        <div id="kb-list-err" class="err"></div>
+      </div>
+
+      <div class="card" style="margin-top:14px;">
+        <div class="row" style="justify-content:space-between; align-items:center;">
           <h4 style="margin:0;">Source connectors <span class="muted" style="font-weight:normal; font-size:12px;">(Google Drive / Confluence)</span></h4>
           <span id="kbc-create-bar"><button class="small" onclick="kbcOpenCreate()">+ Add connector</button></span>
         </div>
@@ -635,6 +647,23 @@
         <div id="kbc-list-err" class="err"></div>
       </div>
     </section>
+
+    <div id="kb-modal" class="modal hidden">
+      <div class="modal-box" role="dialog" aria-modal="true">
+        <h3 id="kb-modal-title">Add knowledge base</h3>
+        <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="kbSave(); return false;">
+          <label class="field-label" for="kb-id">KB ID</label>
+          <input id="kb-id" autocomplete="off" placeholder="e.g. support-kb">
+          <label class="field-label" for="kb-desc">Short description</label>
+          <input id="kb-desc" autocomplete="off" placeholder="One line — shown when agents pick this KB">
+          <div id="kb-err" class="err"></div>
+          <div class="row" style="justify-content:flex-end;">
+            <button type="button" class="ghost" onclick="kbCloseModal()">Cancel</button>
+            <button type="submit">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <div id="kbc-modal" class="modal hidden">
       <div class="modal-box wide" role="dialog" aria-modal="true">
@@ -2793,7 +2822,8 @@ async function agLoadCreateBindings(current = null) {
   agMsWidget("agm-kb", "agm-kb-item",
     (kbs || []).map(k => ({
       value: k.kb_id,
-      label: k.kb_id + (k.description ? ` — ${k.description}` : ""),
+      // lead with the description (the human-meaningful label); kb_id is the secondary id
+      label: k.description ? `${k.description} (${k.kb_id})` : k.kb_id,
       q: `${k.kb_id} ${k.description || ""}`,
     })), "Select knowledge bases…");
   if (current) {
@@ -3238,7 +3268,7 @@ function agRenderDrawer(name, d) {
     ? boundKb.map(id => `<div class="row">${esc(id)}${IS_VIEWER ? "" : ` <button class="small ghost danger" onclick="agUnbindKb('${esc(id)}')">Remove</button>`}</div>`).join("")
     : `<div class="muted">No knowledge bases bound.</div>`;
   const kbOpts = (d.allKbs || []).filter(k => !boundKb.includes(k.kb_id))
-    .map(k => `<option value="${esc(k.kb_id)}">${esc(k.kb_id)}${k.description ? " — " + esc(k.description) : ""}</option>`).join("");
+    .map(k => `<option value="${esc(k.kb_id)}">${k.description ? esc(k.description) + " (" + esc(k.kb_id) + ")" : esc(k.kb_id)}</option>`).join("");
   const kbAdd = IS_VIEWER || !kbOpts ? "" :
     `<div class="row" style="margin-top:8px;"><select id="ag-kb-select"><option value="">— select a KB —</option>${kbOpts}</select><button class="small" onclick="agAddKb()">Bind</button></div>`;
 
@@ -4730,8 +4760,68 @@ async function testOAuthConfigInModal() {
 LOADERS.oauth = () => { loadAllConnectors(); };
 
 async function loadKb() {
-  // The KB tab now only manages source connectors; KB CRUD/retrieval moved out.
+  loadKbBases();
   loadKbConnectors();
+}
+
+// --- Knowledge bases (kb_id + short description) ---
+let KB_ALL = [];
+let KB_EDIT_ID = null;  // null = create mode
+async function loadKbBases() {
+  $("kb-list-err").textContent = "";
+  try { KB_ALL = await api("GET", "/kb"); kbRender(); }
+  catch (e) { $("kb-body").innerHTML = `<tr><td colspan="6" class="muted">${esc(e.message)}</td></tr>`; }
+}
+function kbRender() {
+  $("kb-body").innerHTML = KB_ALL.map(k => `
+    <tr>
+      <td>${esc(k.kb_id)}</td>
+      <td class="muted">${k.description ? esc(k.description) : "—"}</td>
+      <td>${k.doc_count ?? 0}</td>
+      <td>${k.chunk_count ?? 0}</td>
+      <td class="muted">${(k.bound_agents || []).length}</td>
+      <td class="actions">
+        ${IS_VIEWER ? "" : `<button class="small ghost" onclick="kbOpenEdit('${esc(k.kb_id)}')">Edit</button>
+        <button class="small danger" onclick="kbArchive('${esc(k.kb_id)}')">Archive</button>`}
+      </td>
+    </tr>`).join("") || `<tr><td colspan="6" class="muted">No knowledge bases.</td></tr>`;
+}
+function kbOpenCreate() {
+  KB_EDIT_ID = null;
+  $("kb-modal-title").textContent = "Add knowledge base";
+  $("kb-id").value = ""; $("kb-id").disabled = false;
+  $("kb-desc").value = ""; $("kb-err").textContent = "";
+  $("kb-modal").classList.remove("hidden");
+}
+function kbOpenEdit(kbId) {
+  const kb = KB_ALL.find(k => k.kb_id === kbId);
+  KB_EDIT_ID = kbId;
+  $("kb-modal-title").textContent = "Edit knowledge base: " + kbId;
+  $("kb-id").value = kbId; $("kb-id").disabled = true;  // kb_id immutable on edit
+  $("kb-desc").value = kb ? kb.description || "" : "";
+  $("kb-err").textContent = "";
+  $("kb-modal").classList.remove("hidden");
+}
+function kbCloseModal() { $("kb-modal").classList.add("hidden"); }
+async function kbSave() {
+  $("kb-err").textContent = "";
+  const description = $("kb-desc").value.trim();
+  try {
+    if (KB_EDIT_ID === null) {
+      const kb_id = $("kb-id").value.trim();
+      if (!kb_id) { $("kb-err").textContent = "kb_id required"; return; }
+      await api("POST", "/kb", { kb_id, description });
+    } else {
+      await api("PATCH", `/kb/${encodeURIComponent(KB_EDIT_ID)}`, { description });
+    }
+    kbCloseModal();
+    loadKbBases();
+  } catch (e) { $("kb-err").textContent = apiErrorMessage(e); }
+}
+async function kbArchive(kbId) {
+  if (!await confirmDialog(`Archive knowledge base ${kbId}?`)) return;
+  try { await api("DELETE", `/kb/${encodeURIComponent(kbId)}`, null, { "X-Confirm": "true" }); loadKbBases(); }
+  catch (e) { toast(apiErrorMessage(e), "error"); }
 }
 
 // --- KB source connectors (Google Drive / Confluence) ---
