@@ -546,19 +546,22 @@ def test_agent_bindings_are_searchable_multiselect():
 
 def test_agent_model_overrides_pick_from_providers():
     html = ADMIN_HTML
-    render = html.split("function agRenderModelOverrides", 1)[1].split(
-        "function agToggleModelTarget", 1
-    )[0]
-    # Two parts: a checked model list (targets) + a per-tier router, both sourced from the
-    # configured provider registry — no free-text model / base_url_env inputs.
+    render = html.split("function agRenderModelOverrides", 1)[1].split("function agRenderRouter", 1)[
+        0
+    ]
+    # Models is a multi-select dropdown (agMsWidget) of configured providers; no free-text.
     assert "AG_PROVIDERS" in render
-    assert "agmo-target" in render  # model checkboxes
-    assert "agmo-route" in render  # routing selects
+    assert 'agMsWidget("ag-models-ms", "agmo-target"' in render
     assert "agmo-model" not in render
     assert "agmo-baseurl" not in render
-    # collect emits the {targets, routes} shape
+    # Router authors ordered fallback entries with max_tokens per tier
+    router = html.split("function agRenderRouter", 1)[1].split("function agRouterAdd", 1)[0]
+    assert "agRouterAdd" in router and "max_tokens" in router
+    assert "+ model" in router  # add-fallback affordance
+    # collect emits the {targets, routes:[{target,max_tokens,params}]} shape
     collect = html.split("function agCollectModelOverrides", 1)[1].split("\n}", 1)[0]
     assert "targets" in collect and "routes" in collect
+    assert "max_tokens" in collect and "params" in collect
     # providers are loaded when the modal opens (create + edit)
     assert 'AG_PROVIDERS = await api("GET", "/providers")' in html
     assert (

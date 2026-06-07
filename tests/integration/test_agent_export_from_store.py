@@ -96,6 +96,31 @@ def test_targets_routes_shape_expands(db):
     assert af.models.routes["fast"][0].target == "p-fast"
 
 
+def test_route_entries_carry_max_tokens_and_fallback_order(db):
+    for pid in ("p-a", "p-b"):
+        provider_admin_store.add_provider(
+            pid, base_url="https://x/v1/", model=pid, provider="anthropic", protocol="openai_chat"
+        )
+    agent = agent_store.create_agent(
+        "support",
+        "Help.",
+        ["shell"],
+        model_overrides={
+            "targets": ["p-a", "p-b"],
+            "routes": {
+                "default": [
+                    {"target": "p-a", "max_tokens": 2048, "params": {}},
+                    {"target": "p-b", "max_tokens": None, "params": {}},  # fallback
+                ]
+            },
+        },
+    )
+    af = materialize.agent_file_from_store(agent)
+    entries = af.models.routes["default"]
+    assert [e.target for e in entries] == ["p-a", "p-b"]  # order preserved
+    assert entries[0].max_tokens == 2048
+
+
 def test_targets_without_routes_get_default_route(db):
     provider_admin_store.add_provider(
         "only", base_url="https://x/v1/", model="m", provider="anthropic", protocol="openai_chat"

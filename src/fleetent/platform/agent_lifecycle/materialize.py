@@ -51,8 +51,33 @@ def _target_from_provider(provider_id: str) -> ModelTarget | None:
     )
 
 
+def _route_entries(value: Any, targets: dict[str, ModelTarget]) -> list[ModelRouteEntry]:
+    """Build a route's ordered fallback entries, dropping any whose target isn't selected.
+
+    Accepts a single provider id (``"pid"``), a list of ids, or a list of full entries
+    ``{target, max_tokens, params}`` — the structure the console router authors.
+    """
+    raw = value if isinstance(value, list) else [value]
+    entries: list[ModelRouteEntry] = []
+    for item in raw:
+        tid: Any
+        max_tokens: Any
+        params: dict[str, Any]
+        if isinstance(item, str):
+            tid, max_tokens, params = item, None, {}
+        elif isinstance(item, dict):
+            tid = item.get("target")
+            max_tokens = item.get("max_tokens")
+            params = item.get("params") or {}
+        else:
+            continue
+        if tid in targets:
+            entries.append(ModelRouteEntry(target=str(tid), max_tokens=max_tokens, params=params))
+    return entries
+
+
 def _models_from_targets_routes(target_ids: list[Any], routes_sel: dict[str, Any]) -> AgentModels:
-    """New console shape: a checked model list + a route→model map."""
+    """New console shape: a selected model list + a route→ordered-fallback-entries map."""
     targets: dict[str, ModelTarget] = {}
     for pid in target_ids:
         if isinstance(pid, str) and pid not in targets:
@@ -62,9 +87,10 @@ def _models_from_targets_routes(target_ids: list[Any], routes_sel: dict[str, Any
     if not targets:
         return default_models()
     routes: dict[str, list[ModelRouteEntry]] = {}
-    for route_key, pid in routes_sel.items():
-        if pid in targets:
-            routes[route_key] = [ModelRouteEntry(target=str(pid))]
+    for route_key, value in routes_sel.items():
+        entries = _route_entries(value, targets)
+        if entries:
+            routes[route_key] = entries
     if not routes:  # at least a default route so the policy is runnable
         routes["default"] = [ModelRouteEntry(target=next(iter(targets)))]
     return AgentModels(targets=list(targets.values()), routes=routes)
