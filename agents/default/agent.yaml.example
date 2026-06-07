@@ -175,6 +175,8 @@ mcp_servers:
     url: https://docs.acme.internal/mcp
     auth_type: bearer
     api_key_env: ACME_DOCS_MCP_TOKEN   # env-var NAME, never the token value
+    connect_timeout: 10.0              # seconds for connect-phase ops (default 10.0)
+    call_timeout: 30.0                 # seconds for tool-call ops (default 30.0)
   - id: billing
     transport: stdio
     command: /usr/local/bin/billing-mcp
@@ -192,6 +194,10 @@ connectors:
     channels:                          # optional filter; empty = respond everywhere
       - C0123ABCD
       - C0456EFGH
+  telegram:
+    bot_token_env: SUPPORT_TG_BOT      # env-var NAME (bot token lives in .env)
+    channels:                          # optional chat filter; empty = respond everywhere
+      - "-1001234567890"
 
 # ── bindings (ingress filters; the deployed single agent is always default) ──
 bindings:
