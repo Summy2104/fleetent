@@ -1,13 +1,8 @@
 ## 1. 导出层补齐（model/mcp/bindings/knowledge/tenant/team/skills_dir）
 
 - [x] 1.1 Write failing tests: `agent_file_from_store` 回填 `tenant_id`/`team_id`/`skills_dir`；有 model_overrides 时展开真实 `models.targets/routes`（target `api_key_env` 复用 provider 级、无 localhost 占位）、无覆盖时回退 `default_models()`；`mcp_server_ids`→`mcp_servers`、`channel_agents`/`user_agents`→`bindings`、`agent_kbs`→`knowledge.bindings`（tests/integration，DB fixture 隔离）
-<<<<<<<< HEAD:openspec/changes/archive/2026-06-05-agent-credential-authoring/tasks.md
-- [x] 1.2 Implement: 扩展 `agent_file_from_store` 与 provider 展开逻辑；接入 mcp/bindings/knowledge 查询；`_build_agent_yaml` 改为单一委托（console 预览 == 部署 home）
-- [x] 1.3 Verify green: `uv run pytest tests/integration/test_agent_export_from_store.py -x -q`（含 agent_admin/lifecycle 回归）
-========
 - [x] 1.2 Implement: 扩展 `agent_file_from_store` 与 provider 展开逻辑；接入 mcp/bindings/knowledge 查询
 - [x] 1.3 Verify green: `uv run pytest tests/integration/test_agent_materialize.py -x -q`（或对应文件）
->>>>>>>> origin/main:openspec/changes/archive/2026-06-06-agent-credential-authoring/tasks.md
 
 ## 2. 加密 secret store
 
@@ -41,15 +36,9 @@
 
 ## 7. Platform ENV 与 Agent ENV 分离
 
-<<<<<<<< HEAD:openspec/changes/archive/2026-06-05-agent-credential-authoring/tasks.md
-- [x] 7.1 Write failing tests: `config/agent/.env.example` 含 `FLEETENT_SECRET_KEY`、不含 agent 级 model/Slack/MCP/KB `*_env`、所有条目为 `NAME=` 无值（tests/integration 解析断言）
-- [x] 7.2 Implement: 拆分模板，新增 `FLEETENT_SECRET_KEY`，删除 agent 引用密钥；更新 `agent.yaml.example` 注释指向生成路径
-- [x] 7.3 Verify green: 跑模板解析测试
-========
 - [x] 7.1 Write failing tests: Platform ENV 模板含 `FLEETENT_SECRET_KEY`、不含 agent 级 model/Slack/MCP/KB `*_env`、所有条目为 `NAME=` 无值；materialize 生成的 `<agent-home>/.env` 含 Agent required env 且不含 `FLEETENT_SECRET_KEY`（tests/integration 解析断言）
 - [x] 7.2 Implement: 平台 env 模板新增 `FLEETENT_SECRET_KEY`，删除静态模板中的 agent 引用密钥；更新 `agent.yaml.example` 注释指向 materialize 生成的 Agent `.env`
 - [x] 7.3 Verify green: 跑模板解析与 materialize env 测试
->>>>>>>> origin/main:openspec/changes/archive/2026-06-06-agent-credential-authoring/tasks.md
 
 ## 8. Quality gates
 
