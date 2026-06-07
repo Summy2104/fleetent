@@ -8,6 +8,7 @@ references secrets by env-var name only (never plaintext) — so the agent is ru
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,7 @@ from fleetent.platform.im_gateway_management import list_im_identities
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
 from fleetent.platform.secret_management import agent_secret_store
+from fleetent.platform.skill_management import skill_admin_store
 
 # Resolves an env-var name to its inject-mode value, or None for operator-mode slots.
 SecretResolver = Callable[[str], str | None]
@@ -252,6 +254,21 @@ def home_dir(name: str) -> Path:
     return paths.base_dir() / name
 
 
+def copy_agent_skills(agent_name: str, skill_names: set[str]) -> None:
+    """Copy the agent's selected skills from the global skills dir into its home.
+
+    Source is the shared ``<home>/skills`` (where imports land); destination is
+    ``<home>/<agent>/skills`` so the deployed agent carries its own copy. Idempotent;
+    skips skills missing from the global dir.
+    """
+    src_root = paths.base_dir() / "skills"
+    dest_root = home_dir(agent_name) / "skills"
+    for name in skill_names:
+        src = src_root / name
+        if src.is_dir():
+            shutil.copytree(src, dest_root / name, dirs_exist_ok=True)
+
+
 def required_env_slots(
     agent: AgentFile,
     knowledge_config: KnowledgeConfigSnapshot | None = None,
@@ -344,7 +361,9 @@ def materialize_from_store(name: str) -> Path | None:
     def resolver(env_name: str) -> str | None:
         return agent_secret_store.get_decrypted(agent.id, env_name)
 
-    return write_home(agent_file_from_store(agent), secret_resolver=resolver)
+    home = write_home(agent_file_from_store(agent), secret_resolver=resolver)
+    copy_agent_skills(name, skill_admin_store.enabled_skill_names(name))
+    return home
 
 
 def write_home(

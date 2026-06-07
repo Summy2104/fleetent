@@ -53,9 +53,11 @@ _STOP_WORDS = {"the", "a", "an", "when", "use", "for", "to", "and", "or", "is", 
 
 
 def _resolve_skills_dir(skills_dir: str | None) -> str:
-    """Return the user skills directory, falling back to env then the default."""
+    """Return the user skills directory, falling back to env then ``<home>/skills``."""
     if skills_dir is None:
-        return os.environ.get("FLEETENT_SKILLS_DIR", "skills")
+        from fleetent import paths
+
+        return os.environ.get("FLEETENT_SKILLS_DIR") or str(paths.base_dir() / "skills")
     return skills_dir
 
 

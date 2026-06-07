@@ -167,6 +167,24 @@ def test_targets_without_routes_get_default_route(db):
     assert af.models.routes["default"][0].target == "only"
 
 
+def test_materialize_copies_enabled_skills_into_agent_home(db):
+    from fleetent.platform.skill_management import skill_admin_store
+
+    # skills live in the global <home>/skills dir (where imports land)
+    for s in ("weather", "unused"):
+        (db / "skills" / s).mkdir(parents=True)
+        (db / "skills" / s / "SKILL.md").write_text(f"---\nname: {s}\ndescription: x\n---\n# {s}\n")
+
+    agent_store.create_agent("support", "Help.", ["shell"])
+    skill_admin_store.set_binding("support", "weather", True, None)  # only weather enabled
+
+    materialize.materialize_from_store("support")
+
+    dest = materialize.home_dir("support") / "skills"
+    assert (dest / "weather" / "SKILL.md").exists()  # enabled skill copied into the home
+    assert not (dest / "unused").exists()  # non-enabled skill not copied
+
+
 def test_no_model_overrides_falls_back_to_default_models(db):
     agent = agent_store.create_agent("bare", "Help.", ["shell"])
     af = materialize.agent_file_from_store(agent)

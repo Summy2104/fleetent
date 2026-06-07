@@ -88,6 +88,10 @@ def test_agent_admin_yaml_bindings_versions_and_deploy(monkeypatch, tmp_path):
         "get_version_by_id",
         lambda _vid: SimpleNamespace(version=1),
     )
+    # deploy now copies enabled skills into the home — stub the store (pure unit test)
+    monkeypatch.setattr(
+        agent_admin_api.skill_admin_store, "enabled_skill_names", lambda _name: set()
+    )
     monkeypatch.setattr(
         agent_admin_api.agent_store,
         "list_versions",

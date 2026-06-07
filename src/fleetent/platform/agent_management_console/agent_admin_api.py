@@ -14,7 +14,11 @@ from pydantic import BaseModel
 
 from fleetent import agent_store, auth, config, paths, user_store
 from fleetent.governance import audit_log
-from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store, required_env_slots
+from fleetent.platform.agent_lifecycle.materialize import (
+    agent_file_from_store,
+    copy_agent_skills,
+    required_env_slots,
+)
 from fleetent.platform.connector_management import (
     agent_mcp_server_store,
     agent_oauth_binding_store,
@@ -136,6 +140,8 @@ def deploy_agent(name: str, authorization: str | None = Header(None)) -> dict[st
     dest = paths.base_dir() / name / "agent.yaml"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(_build_agent_yaml(agent), encoding="utf-8")
+    # copy the agent's enabled skills into its home so the deployed agent carries its own
+    copy_agent_skills(name, skill_admin_store.enabled_skill_names(name))
     audit_log.write_audit(
         user.id, "agent.deploy", target_type="agent", target_id=name, detail={"path": str(dest)}
     )
