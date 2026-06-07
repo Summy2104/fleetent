@@ -211,6 +211,31 @@ async def route(msg: NormalizedMessage) -> None:
         else:
             history.insert(0, {"role": "system", "content": system_content})
 
+        # P3: on_user_input hook (IM path) — deny or rewrite before appending to history.
+        if governance is not None and governance.hooks_enabled:
+            from fleetent.runtime import hooks
+            from fleetent.runtime.hooks import HookContext
+
+            if hooks.has_hooks("on_user_input"):
+                _hres = await hooks.dispatch(
+                    "on_user_input",
+                    HookContext(
+                        event="on_user_input",
+                        session_id=session_id,
+                        agent_name=agent.name if agent else None,
+                        user_id=msg.user_id,
+                        payload={"content": user_content},
+                    ),
+                    timeout=governance.hooks_timeout_seconds,
+                    strict=governance.hooks_decision_failure == "strict",
+                )
+                if _hres.decision == "deny":
+                    reason = _hres.reason or "请求被策略拒绝"
+                    await msg.reply_func(f"⛔ {reason}")
+                    return
+                if _hres.modified_content is not None:
+                    user_content = _hres.modified_content
+
         history.append({"role": "user", "content": user_content})
 
         # C1: register the active run so concurrent same-session messages can steer
