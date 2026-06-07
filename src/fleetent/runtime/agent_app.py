@@ -112,9 +112,7 @@ async def _start_infra(agent: AgentFile) -> None:
     # request can be recognized as a resumed conversation. Best-effort — a scan
     # failure must never abort boot.
     try:
-        from fleetent.platform.chat_management import session_admin_store
-
-        marked = session_admin_store.scan_and_mark_recent()
+        marked = session_mgr.scan_and_mark_recent_resume()
         if marked:
             _logger.info("session_resume_pending_marked", count=len(marked))
     except Exception as exc:  # noqa: BLE001 — recovery scan must not abort boot

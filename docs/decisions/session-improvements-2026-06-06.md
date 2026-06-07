@@ -80,3 +80,19 @@
 ### P4：_database() 不支持 context manager 协议
 - session_admin_store 中应使用 `_database().transaction()` 而非 `with _database()`
 - 解决：统一用 `.transaction()`
+
+
+## Agent/Platform 解耦返工（2026-06-07）
+
+发现并修复：此前 token/compaction/resume 三类 agent 运行时数据被写入 platform 的 session_meta 表，违反 Agent/Platform 解耦（agent 独立运行时该表不存在，功能静默失效）。
+
+### D10：resume_pending 迁移到 agent 侧 .resume 标记文件
+**决策**：resume_pending 从 platform session_meta 列迁移到 agent 侧 `{session_id}.resume` 兄弟标记文件（与 .pre-compact.json / .tool_outputs 同模式）。mark=touch、is=exists、clear=unlink、scan 基于 session 文件 mtime。
+**理由**：纯 agent 侧、零 DB、零 platform，agent 独立运行天然可用；独立标记文件零副作用（不刷新主文件 mtime）。
+
+### 返工结果：4 处违规依赖全部清除
+- token usage（PR #163 返工 1/2）：回退，走 observability trace
+- compaction stats（PR #163）：回退 session_meta 写入，保留 .pre-compact.json，走 trace
+- resume_pending（返工 2/2）：迁移到 agent 侧 .resume 标记文件
+- migration 058（降 token×2+compaction×4 列）+ 059（降 resume_pending 列）
+- 验证：runtime/session/im_gateway 不再 import platform.chat_management，agent 可真正脱离 platform 独立运行
