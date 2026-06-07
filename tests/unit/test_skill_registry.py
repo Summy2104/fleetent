@@ -1174,3 +1174,37 @@ def test_skill_readiness_reports_missing_required_env(tmp_path, monkeypatch):
     # once set, no longer missing
     monkeypatch.setenv("MUST_HAVE", "x")
     assert sr.skill_readiness("needs-env")["missing"] == []
+
+
+def test_scan_follows_symlinked_skill_directory(tmp_path):
+    """scan() MUST discover SKILL.md files inside symlinked subdirectories.
+
+    Skills installed as directory symlinks (e.g. ai-skills-library) must be
+    detected without requiring physical copies.
+    """
+    # Real skill source elsewhere on disk
+    real_skill = tmp_path / "real_source" / "cool-skill"
+    real_skill.mkdir(parents=True)
+    (real_skill / "SKILL.md").write_text(
+        textwrap.dedent("""\
+            ---
+            name: cool-skill
+            description: Use when user wants to do something cool.
+            ---
+
+            ## Instructions
+            Do the cool thing.
+        """)
+    )
+
+    # Skills dir contains a symlink to the real skill dir
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    (skills_dir / "cool-skill").symlink_to(real_skill)
+
+    sr.scan(str(skills_dir))
+
+    assert "cool-skill" in sr._index, (
+        "Skill inside a symlinked directory was not discovered by scan(); "
+        "rglob() must use follow_symlinks=True"
+    )

@@ -39,6 +39,11 @@ class ChatRequest(BaseModel):
     message: str
 
 
+class ApprovalRequest(BaseModel):
+    decision: str  # "approved" | "rejected"
+    approver_user_id: str = "anonymous"
+
+
 @dataclass
 class AgentRuntime:
     """Handle for a running standalone agent: its definition, IM supervisor, app."""
@@ -392,6 +397,33 @@ def build_app(agent_name: str) -> FastAPI:
     async def health() -> dict[str, Any]:
         return {"status": "ok", "agent": agent_name}
 
+    # Approval endpoints: allow medium/high-risk tool calls to be approved without
+    # requiring the full platform server. Standalone agents need these so that IM
+    # users can unblock pending tool approvals via the /chat WebSocket or external
+    # tooling.
+    @app.get("/approvals")
+    async def get_approvals(status: str | None = None) -> list:  # type: ignore[type-arg]
+        from fleetent.governance.permission_gate import list_approvals
+
+        return list_approvals(status=status)
+
+    @app.post("/approvals/{approval_id}/resolve")
+    async def resolve_approval(approval_id: str, req: ApprovalRequest) -> dict:  # type: ignore[type-arg]
+        from fleetent.governance.permission_gate import _default_gate
+
+        if req.decision not in ("approved", "rejected"):
+            raise HTTPException(status_code=400, detail="decision must be 'approved' or 'rejected'")
+        found = await _default_gate.resolve(
+            approval_id=approval_id,
+            decision=req.decision,  # type: ignore[arg-type]
+            approver_user_id=req.approver_user_id,
+        )
+        if not found:
+            raise HTTPException(
+                status_code=404, detail=f"approval {approval_id} not found or expired"
+            )
+        return {"status": "ok", "approval_id": approval_id, "decision": req.decision}
+
     @app.post("/chat")
     async def chat(
         req: ChatRequest,
@@ -401,7 +433,9 @@ def build_app(agent_name: str) -> FastAPI:
         kwargs: dict[str, Any] = {"user_id": user.id, "agent_name": agent_name}
         if agent is not None:
             kwargs["system_prompt"] = agent.system_prompt
-            kwargs["allowed_tools"] = agent.allowed_tools + expand_plugin_patterns(agent.plugins)
+            kwargs["allowed_tools"] = (
+                agent.allowed_tools + expand_plugin_patterns(agent.plugins)
+            ) or None
             kwargs["agent_features"] = agent.features
             kwargs["allowed_skills"] = agent.allowed_skills
             kwargs["governance"] = _governance_from_file(agent)
