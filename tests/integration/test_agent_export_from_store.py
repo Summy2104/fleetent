@@ -184,7 +184,11 @@ def test_exports_mcp_servers_bindings_and_knowledge(db):
     )
     agent = agent_store.create_agent("support", "Help.", ["shell"], tenant_id="acme")
     agent_store.bind_mcp_server(agent.id, "docs")
-    agent_store.assign_user("u_alice", agent.id)
+    # an internal user reached via a Slack identity, bound to the agent
+    from fleetent.platform.im_gateway_management import identity as im_identity
+
+    alice = im_identity.get_or_create("owner", "slack", "U_ALICE").id
+    agent_store.assign_user(alice, agent.id)
     agent_store.assign_channel("slack", "C123", agent.id)
     agent_kbs_store.bind("acme", "support-kb", str(agent.id))
 
@@ -192,7 +196,8 @@ def test_exports_mcp_servers_bindings_and_knowledge(db):
 
     assert [s.id for s in af.mcp_servers] == ["docs"]
     assert af.mcp_servers[0].api_key_env == "ACME_DOCS_MCP_TOKEN"
-    assert af.bindings.users == ["u_alice"]
+    # users bind by IM identity (platform:platform_user_id), not the internal UUID
+    assert af.bindings.users == ["slack:U_ALICE"]
     assert af.bindings.channels == ["slack:C123"]
     assert af.knowledge.enabled is True
     assert [(b.tenant_id, b.kb_id) for b in af.knowledge.bindings] == [("acme", "support-kb")]

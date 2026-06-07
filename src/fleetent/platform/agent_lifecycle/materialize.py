@@ -29,6 +29,7 @@ from fleetent.config import McpServerSettings
 from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
 from fleetent.platform.config_validation import _flatten
 from fleetent.platform.connector_management import agent_mcp_server_store
+from fleetent.platform.im_gateway_management import identity as im_identity
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
 
@@ -157,7 +158,15 @@ def _bindings_from_store(agent_id: int) -> AgentBindings:
     channels = [
         f"{c['platform']}:{c['channel_id']}" for c in agent_store.list_channels_for_agent(agent_id)
     ]
-    return AgentBindings(channels=channels, users=agent_store.list_users_for_agent(agent_id))
+    # users bind by IM identity (like channels): expand each internal user to its
+    # ``platform:platform_user_id`` handles so the deployed agent matches incoming IM
+    # messages directly without a platform-DB lookup.
+    users = [
+        f"{ident['platform']}:{ident['platform_user_id']}"
+        for uid in agent_store.list_users_for_agent(agent_id)
+        for ident in im_identity.list_im_identities(uid)
+    ]
+    return AgentBindings(channels=channels, users=users)
 
 
 def _knowledge_from_store(tenant_id: str, agent_id: int) -> AgentKnowledge:
