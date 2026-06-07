@@ -2767,17 +2767,30 @@ function agCollectModelOverrides() {
 }
 
 let AGM_CHANNELS = [];
+// KB pickers source from connectors (a KB IS a connector). Dedupe by kb_id; keep the
+// first non-empty description so the picker label is meaningful.
+function kbOptionsFromConnectors(connectors) {
+  const byId = new Map();
+  for (const c of connectors || []) {
+    const existing = byId.get(c.kb_id);
+    if (existing === undefined) byId.set(c.kb_id, c.description || "");
+    else if (!existing && c.description) byId.set(c.kb_id, c.description);
+  }
+  return [...byId].map(([kb_id, description]) => ({ kb_id, description }));
+}
 // `current` (edit mode) pre-checks existing bindings: {skills, mcp, oauth, kb, users, channels}.
 async function agLoadCreateBindings(current = null) {
   AGM_CHANNELS = [];
   $("agm-channels").innerHTML = "";
-  const [skills, mcp, connectors, kbs, users] = await Promise.all([
+  const [skills, mcp, connectors, kbConnectors, users] = await Promise.all([
     api("GET", "/skills").catch(() => []),
     api("GET", "/mcp/servers").catch(() => []),
     api("GET", "/connectors").catch(() => []),
-    api("GET", "/kb").catch(() => []),
+    api("GET", "/kb/connectors").catch(() => []),
     api("GET", "/users").catch(() => []),
   ]);
+  // A knowledge base IS a connector — list the same KBs the KB tab shows (deduped by kb_id).
+  const kbs = kbOptionsFromConnectors(kbConnectors);
   // Skills / connectors / IM users / KB all render as searchable multi-select dropdowns.
   // The option checkboxes keep their binding classes so the save-diff read-paths
   // (checked("agm-…")) are unchanged.
@@ -3169,11 +3182,12 @@ async function agDrawerManage(name) {
         api("GET", `/agents/${enc}/bindings/oauth`).catch(() => ({ connector_ids: [] })),
         api("GET", "/mcp/servers").catch(() => []),
         api("GET", "/connectors").catch(() => []),
-        api("GET", "/kb").catch(() => []),
+        api("GET", "/kb/connectors").catch(() => []),
         api("GET", `/agents/${enc}/versions`).catch(() => []),
         api("GET", "/users").catch(() => []),
       ]);
-    agRenderDrawer(name, { a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions, allUsers });
+    // a KB IS a connector — offer the same deduped list the KB tab shows
+    agRenderDrawer(name, { a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs: kbOptionsFromConnectors(allKbs), versions, allUsers });
   } catch (e) {
     const network = /failed to fetch|networkerror|load failed/i.test(e.message || "");
     const msg = network ? "Couldn't reach the server — it may be restarting." : e.message;

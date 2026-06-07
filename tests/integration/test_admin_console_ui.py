@@ -592,8 +592,8 @@ def test_drawer_loads_from_aggregate_endpoints():
     # the manage view pulls every per-agent binding list in one fan-out
     for frag in ("/bindings`", "/skills`", "/kbs`", "/bindings/oauth`", "/versions`"):
         assert frag in fn, frag
-    # plus the available-option catalogs
-    assert '"/mcp/servers"' in fn and '"/connectors"' in fn and '"/kb"' in fn
+    # plus the available-option catalogs (KB options come from connectors — a KB IS one)
+    assert '"/mcp/servers"' in fn and '"/connectors"' in fn and '"/kb/connectors"' in fn
     # each binding sub-list degrades to a default on failure so one erroring endpoint
     # (e.g. an unmigrated table -> HTTP 500) can't blank the whole drawer
     for frag in (
