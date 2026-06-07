@@ -67,6 +67,35 @@ _GDRIVE = {
 }
 
 
+def test_inline_token_value_encrypts_and_sets_env(client, monkeypatch):
+    from cryptography.fernet import Fernet
+
+    from fleetent.platform.secret_management import agent_secret_store
+
+    monkeypatch.setenv("FLEETENT_SECRET_KEY", Fernet.generate_key().decode())
+    token = _session_for("admin")
+    body = {
+        "connector_id": "drive2",
+        "kind": "google_drive",
+        "tenant_id": "t",
+        "kb_id": "k",
+        # value-mode inline entry: the *_value carries the secret, no env name typed
+        "config": {"folder_id": "F", "access_token_env_value": "ya29-secret-token"},
+    }
+    r = client.post("/admin/kb/connectors", headers=_hdr(token), json=body)
+    assert r.status_code == 201, r.text
+    cfg = r.json()["config"]
+    # inline value -> platform derives + sets the env name; raw value never persisted in config
+    assert cfg["access_token_env"] == "FLEETENT_KB_DRIVE2_ACCESS_TOKEN"
+    assert "access_token_env_value" not in cfg
+    assert "ya29-secret-token" not in r.text
+    # the value lives encrypted in the shared secret scope
+    assert (
+        agent_secret_store.get_decrypted(None, "FLEETENT_KB_DRIVE2_ACCESS_TOKEN")
+        == "ya29-secret-token"
+    )
+
+
 def test_add_list_edit_delete_connector(client):
     token = _session_for("admin")
     r = client.post("/admin/kb/connectors", headers=_hdr(token), json=_GDRIVE)

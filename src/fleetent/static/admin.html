@@ -3298,12 +3298,14 @@ function credFieldHtml(o) {
   return `<div class="cred-field" data-cred="${esc(o.key || "")}" data-mode="${mode}">
     ${label}
     <div class="cred-value cred-row" ${mode === "reference" ? 'style="display:none;"' : ""}>
-      <input type="password" id="${esc(o.valueId || "")}" data-cred-value autocomplete="off"
+      <input type="password" id="${esc(o.valueId || "")}" data-cred-value
+             ${o.valueKey ? `data-key="${esc(o.valueKey)}"` : ""} autocomplete="off"
              placeholder="${esc(o.placeholder || "输入值（写后不回显）")}" style="flex:1;">
       <span class="cred-chip ${set ? "set" : "unset"}">${set ? "🟢 已设置" : "⚪ 未设置"}</span>
     </div>
     <div class="cred-ref cred-row" ${mode === "reference" ? "" : 'style="display:none;"'}>
-      <input type="text" id="${esc(o.envId || "")}" data-cred-env autocomplete="off"
+      <input type="text" id="${esc(o.envId || "")}" data-cred-env
+             ${o.envKey ? `data-key="${esc(o.envKey)}"` : ""} autocomplete="off"
              value="${esc(o.envName || "")}" placeholder="ENV_VAR_NAME" style="flex:1;">
     </div>
     <button type="button" class="cred-toggle" onclick="credToggle(this)">⚙ 引用现有变量</button>
@@ -5266,6 +5268,14 @@ function kbcRenderFields(current = {}) {
       return `<label class="row" style="gap:6px;"><input type="checkbox" data-key="${f.key}" ${v ? "checked" : ""}> ${esc(f.label)}</label>`;
     if (f.type === "select")
       return `<label class="field-label">${esc(f.label)}</label><select data-key="${f.key}">${f.options.map(o => `<option value="${o}" ${v === o ? "selected" : ""}>${o || "—"}</option>`).join("")}</select>`;
+    if (f.key.endsWith("_env"))
+      // credential field: type the token (value mode) or reference an existing env var
+      return credFieldHtml({
+        label: f.label.replace(/ env var$/, ""),
+        valueKey: f.key + "_value", envKey: f.key, envName: v || "",
+        mode: v ? "reference" : "value", status: v ? "set" : "unset",
+        placeholder: "输入令牌（加密保存）",
+      });
     return `<label class="field-label">${esc(f.label)}</label><input data-key="${f.key}" autocomplete="off" value="${esc(v != null ? String(v) : "")}">`;
   }).join("");
 }

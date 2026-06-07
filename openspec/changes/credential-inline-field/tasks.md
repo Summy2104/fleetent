@@ -30,9 +30,9 @@
 
 ## 6. KB connector token 字段挂 CredentialField
 
-- [ ] 6.1 Write failing tests: KBC google_drive/confluence 的 token 类字段渲染为 CredentialField（value 默认 + 引用高级），非密钥字段（folder_id/base_url 等）不变（tests/integration UI marker）
-- [ ] 6.2 Implement: `KBC_FIELDS` 标记密钥字段 + `kbcRenderFields` 对密钥字段用 CredentialField；保存走 secret store + 回填 `*_env`
-- [ ] 6.3 Verify green: 跑 UI 测试 + `node --check`
+- [x] 6.1 Write failing tests: KBC google_drive/confluence 的 token 类字段渲染为 CredentialField（value 默认 + 引用高级），非密钥字段（folder_id/base_url 等）不变（tests/integration UI marker）
+- [x] 6.2 Implement: `KBC_FIELDS` 标记密钥字段 + `kbcRenderFields` 对密钥字段用 CredentialField；保存走 secret store + 回填 `*_env`
+- [x] 6.3 Verify green: 跑 UI 测试 + `node --check`
 
 ## 7. 「所需密钥」面板降级为只读总览
 

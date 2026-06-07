@@ -213,6 +213,15 @@ def test_providers_secret_field_password_no_prefill():
     assert "autocomplete" in snippet
 
 
+def test_kb_connector_token_fields_use_credential_field():
+    html = ADMIN_HTML
+    fn = html.split("function kbcRenderFields", 1)[1].split("\n}", 1)[0]
+    # *_env credential fields render as the value-first cred-field, not a bare env-name box
+    assert "credFieldHtml" in fn
+    assert "_env" in fn  # detected by the _env suffix
+    assert "_value" in fn  # inline value carries a <field>_value data-key
+
+
 def test_credential_field_control_present():
     html = ADMIN_HTML
     # one reusable, value-first credential control with an advanced env-reference toggle
