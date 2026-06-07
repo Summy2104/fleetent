@@ -625,45 +625,16 @@
 
       <div class="card">
         <div class="row" style="justify-content:space-between; align-items:center;">
-          <h4 style="margin:0;">Knowledge bases</h4>
-          <span id="kb-create-bar"><button class="small" onclick="kbOpenCreate()">+ Add knowledge base</button></span>
+          <h4 style="margin:0;">Knowledge bases <span class="muted" style="font-weight:normal; font-size:12px;">(a source connector — Google Drive / Confluence)</span></h4>
+          <span id="kbc-create-bar"><button class="small" onclick="kbcOpenCreate()">+ Add knowledge base</button></span>
         </div>
         <div class="table-scroll" style="margin-top:8px;"><table>
-          <thead><tr><th>KB ID</th><th>Description</th><th>Docs</th><th>Chunks</th><th>Agents</th><th>Actions</th></tr></thead>
-          <tbody id="kb-body"></tbody>
-        </table></div>
-        <div id="kb-list-err" class="err"></div>
-      </div>
-
-      <div class="card" style="margin-top:14px;">
-        <div class="row" style="justify-content:space-between; align-items:center;">
-          <h4 style="margin:0;">Source connectors <span class="muted" style="font-weight:normal; font-size:12px;">(Google Drive / Confluence)</span></h4>
-          <span id="kbc-create-bar"><button class="small" onclick="kbcOpenCreate()">+ Add connector</button></span>
-        </div>
-        <div class="table-scroll" style="margin-top:8px;"><table>
-          <thead><tr><th>ID</th><th>Kind</th><th>Enabled</th><th>Tenant / KB</th><th>Scope</th><th>Actions</th></tr></thead>
+          <thead><tr><th>ID</th><th>Kind</th><th>Description</th><th>Enabled</th><th>Tenant / KB</th><th>Scope</th><th>Actions</th></tr></thead>
           <tbody id="kbc-body"></tbody>
         </table></div>
         <div id="kbc-list-err" class="err"></div>
       </div>
     </section>
-
-    <div id="kb-modal" class="modal hidden">
-      <div class="modal-box" role="dialog" aria-modal="true">
-        <h3 id="kb-modal-title">Add knowledge base</h3>
-        <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="kbSave(); return false;">
-          <label class="field-label" for="kb-id">KB ID</label>
-          <input id="kb-id" autocomplete="off" placeholder="e.g. support-kb">
-          <label class="field-label" for="kb-desc">Short description</label>
-          <input id="kb-desc" autocomplete="off" placeholder="One line — shown when agents pick this KB">
-          <div id="kb-err" class="err"></div>
-          <div class="row" style="justify-content:flex-end;">
-            <button type="button" class="ghost" onclick="kbCloseModal()">Cancel</button>
-            <button type="submit">Save</button>
-          </div>
-        </form>
-      </div>
-    </div>
 
     <div id="kbc-modal" class="modal hidden">
       <div class="modal-box wide" role="dialog" aria-modal="true">
@@ -680,6 +651,8 @@
             <input id="kbc-tenant" placeholder="tenant_id" autocomplete="off">
             <input id="kbc-kb" placeholder="kb_id" autocomplete="off">
           </div>
+          <label class="field-label" for="kbc-desc">Short description</label>
+          <input id="kbc-desc" autocomplete="off" placeholder="One line — shown when agents pick this knowledge base">
           <label class="row" style="gap:6px;"><input type="checkbox" id="kbc-enabled" checked> Enabled</label>
           <div id="kbc-fields" style="display:flex; flex-direction:column; gap:8px;"></div>
           <label class="field-label" for="kbc-custom">Custom (YAML)</label>
@@ -4760,68 +4733,8 @@ async function testOAuthConfigInModal() {
 LOADERS.oauth = () => { loadAllConnectors(); };
 
 async function loadKb() {
-  loadKbBases();
+  // One list: each knowledge base IS a source connector (Drive/Confluence).
   loadKbConnectors();
-}
-
-// --- Knowledge bases (kb_id + short description) ---
-let KB_ALL = [];
-let KB_EDIT_ID = null;  // null = create mode
-async function loadKbBases() {
-  $("kb-list-err").textContent = "";
-  try { KB_ALL = await api("GET", "/kb"); kbRender(); }
-  catch (e) { $("kb-body").innerHTML = `<tr><td colspan="6" class="muted">${esc(e.message)}</td></tr>`; }
-}
-function kbRender() {
-  $("kb-body").innerHTML = KB_ALL.map(k => `
-    <tr>
-      <td>${esc(k.kb_id)}</td>
-      <td class="muted">${k.description ? esc(k.description) : "—"}</td>
-      <td>${k.doc_count ?? 0}</td>
-      <td>${k.chunk_count ?? 0}</td>
-      <td class="muted">${(k.bound_agents || []).length}</td>
-      <td class="actions">
-        ${IS_VIEWER ? "" : `<button class="small ghost" onclick="kbOpenEdit('${esc(k.kb_id)}')">Edit</button>
-        <button class="small danger" onclick="kbArchive('${esc(k.kb_id)}')">Archive</button>`}
-      </td>
-    </tr>`).join("") || `<tr><td colspan="6" class="muted">No knowledge bases.</td></tr>`;
-}
-function kbOpenCreate() {
-  KB_EDIT_ID = null;
-  $("kb-modal-title").textContent = "Add knowledge base";
-  $("kb-id").value = ""; $("kb-id").disabled = false;
-  $("kb-desc").value = ""; $("kb-err").textContent = "";
-  $("kb-modal").classList.remove("hidden");
-}
-function kbOpenEdit(kbId) {
-  const kb = KB_ALL.find(k => k.kb_id === kbId);
-  KB_EDIT_ID = kbId;
-  $("kb-modal-title").textContent = "Edit knowledge base: " + kbId;
-  $("kb-id").value = kbId; $("kb-id").disabled = true;  // kb_id immutable on edit
-  $("kb-desc").value = kb ? kb.description || "" : "";
-  $("kb-err").textContent = "";
-  $("kb-modal").classList.remove("hidden");
-}
-function kbCloseModal() { $("kb-modal").classList.add("hidden"); }
-async function kbSave() {
-  $("kb-err").textContent = "";
-  const description = $("kb-desc").value.trim();
-  try {
-    if (KB_EDIT_ID === null) {
-      const kb_id = $("kb-id").value.trim();
-      if (!kb_id) { $("kb-err").textContent = "kb_id required"; return; }
-      await api("POST", "/kb", { kb_id, description });
-    } else {
-      await api("PATCH", `/kb/${encodeURIComponent(KB_EDIT_ID)}`, { description });
-    }
-    kbCloseModal();
-    loadKbBases();
-  } catch (e) { $("kb-err").textContent = apiErrorMessage(e); }
-}
-async function kbArchive(kbId) {
-  if (!await confirmDialog(`Archive knowledge base ${kbId}?`)) return;
-  try { await api("DELETE", `/kb/${encodeURIComponent(kbId)}`, null, { "X-Confirm": "true" }); loadKbBases(); }
-  catch (e) { toast(apiErrorMessage(e), "error"); }
 }
 
 // --- KB source connectors (Google Drive / Confluence) ---
@@ -4853,7 +4766,7 @@ let KBC_EDIT_ID = null;
 async function loadKbConnectors() {
   $("kbc-list-err").textContent = "";
   try { KBC_ALL = await api("GET", "/kb/connectors"); kbcRender(); }
-  catch (e) { $("kbc-body").innerHTML = `<tr><td colspan="6" class="muted">${esc(e.message)}</td></tr>`; }
+  catch (e) { $("kbc-body").innerHTML = `<tr><td colspan="7" class="muted">${esc(e.message)}</td></tr>`; }
 }
 function kbcScope(c) {
   if (c.kind === "google_drive") return "folder:" + (c.config.folder_id || "—");
@@ -4864,6 +4777,7 @@ function kbcRender() {
     <tr>
       <td>${esc(c.connector_id)}</td>
       <td>${esc(c.kind)}</td>
+      <td class="muted">${c.description ? esc(c.description) : "—"}</td>
       <td><span class="pill ${c.enabled ? "active" : "blocked"}">${c.enabled ? "enabled" : "disabled"}</span></td>
       <td class="muted">${esc(c.tenant_id)} / ${esc(c.kb_id)}</td>
       <td class="muted">${esc(kbcScope(c))}</td>
@@ -4873,7 +4787,7 @@ function kbcRender() {
         ${IS_VIEWER ? "" : `<button class="small ghost" onclick="kbcOpenEdit('${esc(c.connector_id)}')">Edit</button>
         <button class="small danger" onclick="kbcDelete('${esc(c.connector_id)}')">Delete</button>`}
       </td>
-    </tr>`).join("") || `<tr><td colspan="6" class="muted">No source connectors.</td></tr>`;
+    </tr>`).join("") || `<tr><td colspan="7" class="muted">No knowledge bases.</td></tr>`;
 }
 function kbcRenderFields(current = {}) {
   const kind = $("kbc-kind").value;
@@ -4888,11 +4802,12 @@ function kbcRenderFields(current = {}) {
 }
 function kbcOpenCreate() {
   KBC_EDIT_ID = null;
-  $("kbc-modal-title").textContent = "Add source connector";
+  $("kbc-modal-title").textContent = "Add knowledge base";
   $("kbc-err").textContent = "";
   $("kbc-id").value = ""; $("kbc-id").disabled = false;
   $("kbc-kind").value = "google_drive"; $("kbc-kind").disabled = false;
   $("kbc-tenant").value = "pilot-tenant"; $("kbc-kb").value = "pilot-kb";
+  $("kbc-desc").value = "";
   $("kbc-enabled").checked = true;
   $("kbc-custom").value = "";
   kbcRenderFields();
@@ -4902,11 +4817,12 @@ function kbcOpenEdit(id) {
   const c = KBC_ALL.find(x => x.connector_id === id);
   if (!c) return;
   KBC_EDIT_ID = id;
-  $("kbc-modal-title").textContent = "Edit connector: " + id;
+  $("kbc-modal-title").textContent = "Edit knowledge base: " + id;
   $("kbc-err").textContent = "";
   $("kbc-id").value = id; $("kbc-id").disabled = true;   // id is the key, not editable
   $("kbc-kind").value = c.kind; $("kbc-kind").disabled = true;  // kind fixed after create
   $("kbc-tenant").value = c.tenant_id; $("kbc-kb").value = c.kb_id;
+  $("kbc-desc").value = c.description || "";
   $("kbc-enabled").checked = c.enabled;
   $("kbc-custom").value = c.custom_yaml || "";
   kbcRenderFields(c.config || {});
@@ -4926,14 +4842,15 @@ async function kbcSave() {
   const config = kbcCollectConfig();
   const tenant_id = $("kbc-tenant").value.trim(), kb_id = $("kbc-kb").value.trim();
   const enabled = $("kbc-enabled").checked;
+  const description = $("kbc-desc").value.trim();
   const custom_yaml = $("kbc-custom").value;  // YAML; parsed + validated server-side
   try {
     if (KBC_EDIT_ID) {
-      await api("PATCH", `/kb/connectors/${encodeURIComponent(KBC_EDIT_ID)}`, { tenant_id, kb_id, enabled, config, custom_yaml });
+      await api("PATCH", `/kb/connectors/${encodeURIComponent(KBC_EDIT_ID)}`, { tenant_id, kb_id, enabled, config, custom_yaml, description });
     } else {
       const connector_id = $("kbc-id").value.trim();
       if (!connector_id) { $("kbc-err").textContent = "connector id required"; return; }
-      await api("POST", "/kb/connectors", { connector_id, kind: $("kbc-kind").value, tenant_id, kb_id, enabled, config, custom_yaml });
+      await api("POST", "/kb/connectors", { connector_id, kind: $("kbc-kind").value, tenant_id, kb_id, enabled, config, custom_yaml, description });
     }
     kbcCloseModal(); loadKbConnectors();
   } catch (e) { $("kbc-err").textContent = apiErrorMessage(e.message || e); }

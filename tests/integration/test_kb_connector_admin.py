@@ -89,6 +89,34 @@ def test_add_list_edit_delete_connector(client):
     assert not client.get("/admin/kb/connectors", headers=_hdr(token)).json()
 
 
+def test_connector_description_persists_to_kb_and_shows_in_kb_list(client):
+    token = _session_for("admin")
+    payload = {**_GDRIVE, "description": "Billing FAQ and refund policy"}
+    r = client.post("/admin/kb/connectors", headers=_hdr(token), json=payload)
+    assert r.status_code == 201, r.text
+    assert r.json()["description"] == "Billing FAQ and refund policy"
+
+    # the connector list carries the description
+    listed = client.get("/admin/kb/connectors", headers=_hdr(token)).json()
+    conn = next(c for c in listed if c["connector_id"] == "pilot-drive")
+    assert conn["description"] == "Billing FAQ and refund policy"
+
+    # and it landed on the KB the connector targets (what the agent picker reads)
+    kbs = client.get("/admin/kb?tenant_id=pilot-tenant", headers=_hdr(token)).json()
+    kb = next(k for k in kbs if k["kb_id"] == "pilot-kb")
+    assert kb["description"] == "Billing FAQ and refund policy"
+
+    # editing the description updates the KB
+    e = client.patch(
+        "/admin/kb/connectors/pilot-drive",
+        headers=_hdr(token),
+        json={"description": "Refunds only"},
+    )
+    assert e.status_code == 200 and e.json()["description"] == "Refunds only"
+    kbs = client.get("/admin/kb?tenant_id=pilot-tenant", headers=_hdr(token)).json()
+    assert next(k for k in kbs if k["kb_id"] == "pilot-kb")["description"] == "Refunds only"
+
+
 def test_add_confluence_connector(client):
     token = _session_for("admin")
     r = client.post(
