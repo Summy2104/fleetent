@@ -58,6 +58,9 @@ class GovernanceConfig:
     # timeouts
     sub_agent_timeout_seconds: int = 300
     tool_default_timeout_seconds: float = 30.0
+    # run-time input steering (C1)
+    steering_mode: str = "steer"
+    steering_max_pending: int = 8
 
 
 def _governance_from_file(agent: AgentFile) -> GovernanceConfig:
@@ -81,6 +84,8 @@ def _governance_from_file(agent: AgentFile) -> GovernanceConfig:
         loop_detect_ignore_arg_keys=tuple(agent.loop_detect_ignore_arg_keys),
         sub_agent_timeout_seconds=agent.sub_agent_timeout_seconds,
         tool_default_timeout_seconds=agent.tool_default_timeout_seconds,
+        steering_mode=agent.steering_mode,
+        steering_max_pending=agent.steering_max_pending,
     )
 
 

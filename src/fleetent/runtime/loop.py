@@ -400,6 +400,23 @@ def _maybe_inject_loop_warning(messages: list[Any], state: LoopState) -> None:
         state.loop_warning_injected = True
 
 
+def _drain_steering(session_id: str | None, messages: list[Any]) -> None:
+    """C1: append any mid-run steered user input at the turn boundary.
+
+    Passive consumer of `runtime.steering`: a no-op when there is no session or no
+    active steering registration. Called after compression and before sanitize (like
+    the loop warning) so injected messages are part of the validated sequence and are
+    not swallowed by a same-turn compaction; only ever at a turn boundary, never
+    between a tool_call and its result.
+    """
+    if not session_id:
+        return
+    from fleetent.runtime import steering
+
+    for text in steering.drain(session_id):
+        messages.append({"role": "user", "content": text})
+
+
 async def _safe_dispatch(
     name: str,
     arguments: str | dict[str, Any],
@@ -1363,6 +1380,8 @@ async def _run_inner(
         # D4b: inject the loop warning AFTER compression so a same-round compaction
         # cannot swallow it; it must be present in the sequence sent to the LLM.
         _maybe_inject_loop_warning(messages, state)
+        # C1: drain mid-run steered input at the turn boundary (before sanitize).
+        _drain_steering(session_id, messages)
         try:
             clean, report = sanitize(messages)
         except MessageContractError as exc:
@@ -1713,6 +1732,8 @@ async def run_stream(
         )
         # D4b: inject the loop warning after compression, before sanitize/LLM call.
         _maybe_inject_loop_warning(messages, state)
+        # C1: drain mid-run steered input at the turn boundary (before sanitize).
+        _drain_steering(session_id, messages)
         try:
             messages, report = sanitize(messages)
         except MessageContractError as exc:

@@ -225,6 +225,10 @@ tool_default_timeout_seconds: 30.0
 sub_agent_timeout_seconds: 300
 agent_tool_parallel_max: 8        # max concurrent tool calls per turn
 
+# run-time input steering: how a new IM message is handled while a run is in flight
+steering_mode: steer              # steer (inject into the running task) | queue | interrupt
+steering_max_pending: 8           # max queued steered messages per session
+
 # layered budget — session / user / agent dims (-1 = unlimited)
 agent_budget_session_turns: -1
 agent_budget_session_tokens: -1
