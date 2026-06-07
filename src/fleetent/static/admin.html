@@ -2747,7 +2747,7 @@ async function agCreate() {
 let AG_PROVIDERS = [];
 function agRenderModelOverrides() {
   const opts = `<option value="">— none —</option>`
-    + AG_PROVIDERS.map(p => `<option value="${esc(p.id)}">${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}</option>`).join("");
+    + AG_PROVIDERS.map(p => `<option value="${esc(p.id)}">${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}${p.api_key ? " · 🔑 " + esc(p.api_key) : ""}</option>`).join("");
   const hint = AG_PROVIDERS.length ? "" : `<div class="muted" style="font-size:12px;">No providers configured — add one under Providers first.</div>`;
   $("ag-model-overrides").innerHTML = hint + ["default", "fast", "reasoning"].map(lvl => `
     <div class="row" data-mo="${lvl}" style="gap:6px; margin-bottom:6px; align-items:center;">
