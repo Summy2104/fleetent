@@ -156,6 +156,18 @@ async def route(msg: NormalizedMessage) -> None:
     async with session_mgr.session_lock(session_id):
         history = await session_mgr.load(session_id)
 
+        # Consume the restart-recovery flag: if this session was marked
+        # resume_pending (active just before an agent restart), log it once and
+        # clear the flag so it does not linger. Best-effort — never block the turn.
+        try:
+            from fleetent.platform.chat_management import session_admin_store
+
+            if session_admin_store.get_meta(session_id).get("resume_pending"):
+                logger.info("session_resumed", session_id=session_id)
+                session_admin_store.clear_resume_pending(session_id)
+        except Exception as exc:  # noqa: BLE001 — resume consume must not block the turn
+            logger.warning("session_resume_consume_failed", session_id=session_id, error=str(exc))
+
         from fleetent.model import ModelPolicySnapshot
         from fleetent.runtime.snapshot import _governance_from_file
 
@@ -186,6 +198,7 @@ async def route(msg: NormalizedMessage) -> None:
 
         history.append({"role": "user", "content": await _build_user_content(msg)})
 
+        usage_out: list[tuple[int, int]] = []
         response = await agent_loop.run(
             messages=history,
             user_id=msg.user_id,
@@ -197,10 +210,15 @@ async def route(msg: NormalizedMessage) -> None:
             session_id=session_id,
             governance=governance,
             model_policy=model_policy,
+            usage_out=usage_out,
         )
 
         # agent_loop.run() already appended the assistant message to history in-place.
         # Do NOT append again here — that caused duplicate messages in every session.
-        await session_mgr.save(session_id, history)
+        await session_mgr.save(
+            session_id,
+            history,
+            token_usage=usage_out[0] if usage_out else None,
+        )
 
     await msg.reply_func(response)

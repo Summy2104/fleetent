@@ -92,6 +92,10 @@ def test_skill_admin_route_handlers_cover_lifecycle(monkeypatch: pytest.MonkeyPa
         "engine_set_global_disabled",
         lambda name, disabled_: disabled.append((name, disabled_)),
     )
+    # skill-admin-trigger-rematerialize: stub the materialize seams so this unit test
+    # never touches a real DB / filesystem.
+    monkeypatch.setattr(skill_admin_api, "_rematerialize_all", lambda: [])
+    monkeypatch.setattr(skill_admin_api, "_rematerialize_agent", lambda name: None)
     monkeypatch.setattr(
         skill_admin_api, "engine_observability", lambda name: {"skill_name": name, "hits": 3}
     )

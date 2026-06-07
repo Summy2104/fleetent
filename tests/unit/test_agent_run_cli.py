@@ -290,7 +290,7 @@ async def test_boot_loads_dotenv_into_os_environ(tmp_path, monkeypatch) -> None:
     import fleetent.tools.plugin_loader as pl
 
     monkeypatch.setattr(vs, "configure_from_active_agent", lambda: None)
-    monkeypatch.setattr(skills_mod, "scan", lambda: None)
+    monkeypatch.setattr(skills_mod, "scan", lambda skills_dir=None: None)
     monkeypatch.setattr(pl, "load_plugins", lambda: None)
 
     fake_supervisor = MagicMock()
@@ -315,7 +315,7 @@ async def test_boot_silently_skips_missing_dotenv(tmp_path, monkeypatch) -> None
     import fleetent.tools.plugin_loader as pl
 
     monkeypatch.setattr(vs, "configure_from_active_agent", lambda: None)
-    monkeypatch.setattr(skills_mod, "scan", lambda: None)
+    monkeypatch.setattr(skills_mod, "scan", lambda skills_dir=None: None)
     monkeypatch.setattr(pl, "load_plugins", lambda: None)
 
     fake_supervisor = MagicMock()
@@ -340,7 +340,7 @@ async def test_boot_dotenv_does_not_override_existing_env(tmp_path, monkeypatch)
     import fleetent.tools.plugin_loader as pl
 
     monkeypatch.setattr(vs, "configure_from_active_agent", lambda: None)
-    monkeypatch.setattr(skills_mod, "scan", lambda: None)
+    monkeypatch.setattr(skills_mod, "scan", lambda skills_dir=None: None)
     monkeypatch.setattr(pl, "load_plugins", lambda: None)
 
     fake_supervisor = MagicMock()

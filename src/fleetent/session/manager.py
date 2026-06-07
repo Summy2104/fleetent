@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
@@ -10,6 +11,23 @@ from fleetent import paths
 from fleetent.observability.structured_logging import get_logger
 
 _logger = get_logger("session.manager")
+
+# Tool results larger than this are externalized to a sibling .tool_outputs dir so
+# the session JSON and the model context stay lean (tool-result-extern, cf claude-code).
+_TOOL_RESULT_INLINE_LIMIT = 50 * 1024
+_STORED_PREFIX = "[stored:"
+_STORED_SUFFIX = ".txt]"
+
+# Cross-process file lock primitive (P0-4). POSIX-only; non-POSIX platforms (Windows)
+# degrade to in-process asyncio.Lock alone. fleetent targets Linux deployment.
+try:
+    import fcntl
+
+    _flock_available = True
+except ImportError:  # pragma: no cover — non-POSIX fallback
+    fcntl = None  # type: ignore[assignment]
+    _flock_available = False
+    _logger.warn("session_flock_unavailable_degraded_to_asyncio_lock")
 
 SESSIONS_DIR = paths.sessions_dir()
 
@@ -151,6 +169,8 @@ def cleanup_expired(
             continue
         if path.name.endswith(".pre-compact.json"):
             continue  # backup files follow the main file, not independent TTL
+        if ".tool_outputs/" in path.relative_to(SESSIONS_DIR).as_posix():
+            continue  # externalized tool result files are not sessions
         if not is_expired(path.stat().st_mtime, now, ttl_seconds):
             continue
         session_id = path.relative_to(SESSIONS_DIR).with_suffix("").as_posix()
@@ -164,6 +184,8 @@ def cleanup_expired(
         # Best-effort: remove the pre-compaction backup alongside the main file
         with suppress(OSError):
             (SESSIONS_DIR / f"{session_id}.pre-compact.json").unlink()
+        # Best-effort: remove the externalized tool-result directory
+        shutil.rmtree(SESSIONS_DIR / f"{session_id}.tool_outputs", ignore_errors=True)
 
     _logger.info("session_cleanup_done", removed_count=len(removed), ttl_seconds=ttl_seconds)
     if removed:
@@ -325,6 +347,65 @@ def delete_compaction_checkpoint(session_id: str) -> None:
         path.unlink()
 
 
+def externalize_tool_results(
+    session_id: str, messages: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """Move oversized tool results to per-session external files, leaving references.
+
+    Returns a new list; the input is never mutated. Only ``role == "tool"`` messages
+    whose string content exceeds the inline limit and that carry a ``tool_call_id``
+    are externalized to ``{session_id}.tool_outputs/{tool_call_id}.txt``.
+    """
+    out_dir = SESSIONS_DIR / f"{session_id}.tool_outputs"
+    result: list[dict[str, object]] = []
+    for msg in messages:
+        content = msg.get("content")
+        call_id = msg.get("tool_call_id")
+        if (
+            msg.get("role") == "tool"
+            and isinstance(content, str)
+            and isinstance(call_id, str)
+            and len(content) > _TOOL_RESULT_INLINE_LIMIT
+        ):
+            out_dir.mkdir(parents=True, exist_ok=True)
+            path = out_dir / f"{call_id}.txt"
+            tmp = path.with_suffix(".txt.tmp")
+            tmp.write_text(content, encoding="utf-8")
+            tmp.replace(path)
+            result.append({**msg, "content": f"{_STORED_PREFIX}{call_id}{_STORED_SUFFIX}"})
+        else:
+            result.append(msg)
+    return result
+
+
+def rehydrate_tool_results(
+    session_id: str, messages: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """Inverse of externalize_tool_results: read external content back inline.
+
+    Returns a new list; the input is never mutated. A missing external file leaves
+    the ``[stored:...]`` reference in place rather than failing.
+    """
+    out_dir = SESSIONS_DIR / f"{session_id}.tool_outputs"
+    result: list[dict[str, object]] = []
+    for msg in messages:
+        content = msg.get("content")
+        if (
+            isinstance(content, str)
+            and content.startswith(_STORED_PREFIX)
+            and content.endswith(_STORED_SUFFIX)
+        ):
+            call_id = content[len(_STORED_PREFIX) : -len(_STORED_SUFFIX)]
+            path = out_dir / f"{call_id}.txt"
+            if path.exists():
+                result.append({**msg, "content": path.read_text(encoding="utf-8")})
+            else:
+                result.append(msg)  # external file gone — keep the placeholder
+        else:
+            result.append(msg)
+    return result
+
+
 def _get_lock(session_id: str) -> asyncio.Lock:
     if session_id not in _locks:
         _locks[session_id] = asyncio.Lock()
@@ -333,8 +414,29 @@ def _get_lock(session_id: str) -> asyncio.Lock:
 
 @asynccontextmanager
 async def session_lock(session_id: str) -> AsyncIterator[None]:
-    async with _get_lock(session_id):
-        yield
+    """Serialize same-session writes within and across processes.
+
+    Two-layer lock: a cross-process file lock (fcntl.flock on {session_id}.lock)
+    wraps the per-session in-process asyncio.Lock. On non-POSIX platforms the file
+    lock is unavailable and only the asyncio.Lock applies.
+    """
+    if not _flock_available:
+        async with _get_lock(session_id):
+            yield
+        return
+
+    lock_path = SESSIONS_DIR / f"{session_id}.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("w")
+    try:
+        # flock is blocking — offload to a thread so the event loop keeps running.
+        await asyncio.to_thread(fcntl.flock, handle.fileno(), fcntl.LOCK_EX)
+        async with _get_lock(session_id):
+            yield
+    finally:
+        with suppress(Exception):
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
 
 def _read(session_id: str) -> tuple[list[dict[str, object]], dict[str, object]]:
@@ -362,7 +464,7 @@ def list_session_ids(prefix: str = "", limit: int | None = None) -> list[str]:
 
 async def load(session_id: str) -> list[dict[str, object]]:
     messages, _ = _read(session_id)
-    return messages
+    return rehydrate_tool_results(session_id, messages)
 
 
 async def load_meta(session_id: str) -> dict[str, object]:
@@ -376,6 +478,7 @@ async def save(
     meta: dict[str, object] | None = None,
     user_id: str | None = None,
     agent_name: str | None = None,
+    token_usage: tuple[int, int] | None = None,
 ) -> None:
     # main's meta envelope + zhangyang's session_index update, merged: omitting
     # meta preserves any meta already persisted (e.g. a pinned agent version)
@@ -387,8 +490,11 @@ async def save(
     # Create the target's parent (not just SESSIONS_DIR): session_ids may contain
     # "/" (e.g. IM platform/channel/user), nesting the file in subdirectories.
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Externalize oversized tool results before serialization; persists references
+    # in the JSON while the full content lives in the .tool_outputs sibling dir.
+    externalized = externalize_tool_results(session_id, messages)
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"meta": meta, "messages": messages}, ensure_ascii=False))
+    tmp.write_text(json.dumps({"meta": meta, "messages": externalized}, ensure_ascii=False))
     tmp.replace(path)
 
     # Best-effort metadata index update: the message file is the source of truth
@@ -405,6 +511,15 @@ async def save(
         )
     except Exception as exc:  # noqa: BLE001 — auxiliary index must not break persistence
         _logger.warn("session_index_update_failed", session_id=session_id, error=str(exc))
+
+    # Best-effort token accumulation into session_meta; never break persistence.
+    if token_usage is not None:
+        from fleetent.platform.chat_management import session_admin_store
+
+        try:
+            session_admin_store.add_token_usage(session_id, token_usage[0], token_usage[1])
+        except Exception as exc:  # noqa: BLE001 — token tracking is auxiliary
+            _logger.warn("session_token_update_failed", session_id=session_id, error=str(exc))
 
     # Internal maintenance trigger (no external cron): opportunistically prune
     # expired sessions and enforce disk capacity as a side effect of activity,

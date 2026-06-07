@@ -226,6 +226,18 @@ def _strict_blocked_servers(allowed_tools: list[str] | None) -> list[str]:
     return strict_blocked
 
 
+def _visible_tool_names(allowed_tools: list[str] | None) -> set[str]:
+    """Tool names actually exposed to the model this request — for skill requires_tools.
+
+    Same source + allowed_tools filter the schema list uses, so a skill's
+    `requires_tools` is checked against exactly what the agent can call.
+    """
+    names = {s["function"]["name"] for s in get_schemas()}
+    if allowed_tools is not None:
+        names = {n for n in names if check_tool_access(n, allowed_tools)}
+    return names
+
+
 def _strict_unavailable_reply(blocked: list[str]) -> str:
     return (
         "无法运行：所依赖的 MCP 服务（"
@@ -1068,8 +1080,14 @@ async def run(
     allowed_skills: list[str] | None = None,
     governance: GovernanceConfig | None = None,
     model_policy: ModelPolicySnapshot | None = None,
+    usage_out: list[tuple[int, int]] | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
+
+    usage_out: optional sink — when provided, the final (prompt_tokens,
+    completion_tokens) is appended on normal completion so callers (e.g. the IM
+    normalizer) can persist per-session token usage without changing the str
+    return type. Left empty if the run returns before producing usage.
 
     When is_sub_agent=True the sub_agent tool is excluded from the tool schema
     so child agents cannot spawn further sub-agents.
@@ -1114,6 +1132,7 @@ async def run(
             allowed_skills=allowed_skills,
             governance=governance,
             model_policy=model_policy,
+            usage_out=usage_out,
         )
     finally:
         _active_runs -= 1
@@ -1142,6 +1161,7 @@ async def _run_inner(
     allowed_skills: list[str] | None = None,
     governance: GovernanceConfig | None = None,
     model_policy: ModelPolicySnapshot | None = None,
+    usage_out: list[tuple[int, int]] | None = None,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -1340,6 +1360,10 @@ async def _run_inner(
             reply,
         )
     usage = response.usage if response else None
+    if usage_out is not None and usage is not None:
+        usage_out.append(
+            (getattr(usage, "prompt_tokens", 0), getattr(usage, "completion_tokens", 0))
+        )
     user_input = _first_user_input(messages)
     _save_flap_state(session_id, flap_state)
     log_run(
@@ -1430,7 +1454,9 @@ def run_sync(
         governance = _governance_from_file(agent)
         model_policy = ModelPolicySnapshot.from_agent(agent)
 
-    skills_catalog = available_skills_prompt(allowed_skills=allowed_skills)
+    skills_catalog = available_skills_prompt(
+        allowed_skills=allowed_skills, available_tools=_visible_tool_names(allowed_tools)
+    )
     disabled_trace = collect_disabled_trace() or None
 
     messages = _assemble_prompt(
@@ -1496,7 +1522,9 @@ async def run_stream(
     """
     # agent-skill-scoping: narrow the catalog to the agent's allowed_skills (empty /
     # None = no narrowing, all enabled skills visible).
-    skills_catalog = available_skills_prompt(allowed_skills=allowed_skills)
+    skills_catalog = available_skills_prompt(
+        allowed_skills=allowed_skills, available_tools=_visible_tool_names(allowed_tools)
+    )
     disabled_trace = collect_disabled_trace() or None
 
     # SB3 D5: execution-time context channel (session/agent/features) for opt-in tools.

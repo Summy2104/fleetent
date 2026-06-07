@@ -25,8 +25,9 @@ from typing import Any
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from fleetent import auth, user_store
+from fleetent import agent_store, auth, user_store
 from fleetent.governance import audit_log
+from fleetent.platform.agent_lifecycle import materialize
 from fleetent.platform.skill_management import skill_admin_store
 from fleetent.skills import audit as skill_audit
 from fleetent.skills import registry as skill_registry
@@ -59,8 +60,21 @@ def engine_skills_dir() -> str:
 
 
 def engine_audit(content: str) -> dict[str, Any]:
-    """Security-audit a skill body using the static injection-pattern scanner."""
-    return skill_audit.audit(content)
+    """Security-audit a skill body using the static injection-pattern scanner.
+
+    Adapts the scanner's ``list[Hit]`` to the ``{"verdict", "rules"}`` contract that
+    ``_publish`` consumes: any severe hit → ``rejected`` (quarantine); else any
+    suspicious hit → ``suspicious`` (publish + flag); no hits → ``pass``.
+    """
+    hits = skill_audit.audit(content, content)
+    rules = sorted({h.rule_id for h in hits})
+    if skill_audit.has_severe(hits):
+        verdict = "rejected"
+    elif hits:
+        verdict = "suspicious"
+    else:
+        verdict = "pass"
+    return {"verdict": verdict, "rules": rules}
 
 
 def engine_reload() -> dict[str, Any]:
@@ -78,8 +92,18 @@ def engine_set_global_disabled(skill_name: str, disabled: bool) -> None:
 
 
 def engine_observability(skill_name: str) -> dict[str, Any]:
-    """Per-skill hit/injection metrics. Owned by observability (follow-up placeholder)."""
-    return {"skill_name": skill_name, "hits": 0, "sessions": [], "stale": True}
+    """Per-skill hit metrics from the skill_hits store (real data, not stale)."""
+    return skill_admin_store.observe(skill_name)
+
+
+def _rematerialize_all() -> list[str]:
+    """Re-export every agent's home after a global skill-state change. Injectable seam."""
+    return materialize.rematerialize_all()
+
+
+def _rematerialize_agent(name: str) -> None:
+    """Re-export one agent's home after a per-agent binding change. Injectable seam."""
+    materialize.materialize_from_store(name)
 
 
 def _proposal_dict(p: Any) -> dict[str, Any]:
@@ -428,6 +452,7 @@ def disable_skill(name: str, authorization: str | None = Header(None)) -> dict[s
     skill_admin_store.set_global_enabled(name, False)
     engine_set_global_disabled(name, True)
     audit_log.write_audit(user.id, "skill.disable", "skill", name)
+    _rematerialize_all()
     return {"name": name, "global_enabled": 0}
 
 
@@ -437,6 +462,7 @@ def enable_skill(name: str, authorization: str | None = Header(None)) -> dict[st
     skill_admin_store.set_global_enabled(name, True)
     engine_set_global_disabled(name, False)
     audit_log.write_audit(user.id, "skill.enable", "skill", name)
+    _rematerialize_all()
     return {"name": name, "global_enabled": 1}
 
 
@@ -497,6 +523,12 @@ def set_skill_agent_binding(
     skill_admin_store.set_binding(agent_id, name, body.enabled, updated_by=user.id)
     action = "skill.agent_enable" if body.enabled else "skill.agent_disable"
     audit_log.write_audit(user.id, action, "skill", name, detail={"agent_id": agent_id})
+    try:
+        agent_name = agent_store.get_agent_name_by_id(int(agent_id))
+    except ValueError:
+        agent_name = None  # non-numeric id → cannot resolve a name; binding still written
+    if agent_name is not None:
+        _rematerialize_agent(agent_name)
     return {"name": name, "agent_id": agent_id, "enabled": body.enabled}
 
 

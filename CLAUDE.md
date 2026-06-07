@@ -70,6 +70,26 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 - 清理命令：`git worktree remove .worktrees/<change-name>`
 - 任一不满足不得清理 worktree，避免丢失未推送的工作
 
+### Agent / Platform 解耦
+
+**核心架构契约**：agent 运行时与 platform 控制面**完全解耦**。agent 必须能在**没有 platform 的环境下独立运行**（`fleetent agent run`）；两者唯一的联系是 `agent.yaml` 和 `.env` 配置，不通过代码依赖或共享 platform 数据表耦合。
+
+依赖方向（单向，不可逆）：
+
+```
+platform（管理入口） ──→ agent runtime（被启停、被读取）
+agent runtime ──✗──→ platform        # 严格禁止反向依赖
+```
+
+- **agent 运行时模块**（`runtime/`、`session/`、`im_gateway/`、`intelligence/`、`tools/`、`integrations/`、`model/`、`observability/`、`governance/`）MUST NOT `import fleetent.platform.*`，也不得调用 platform 模块来触发行为
+- **agent 运行时产生的数据**（会话历史、压缩/token/恢复等元数据、运行轨迹）只能落到 agent 侧：session 文件、agent 侧 store、observability trace。**严禁写入 platform 的管理表**（如 `platform/chat_management` 的 `session_meta`）
+- platform 需要 agent 数据时，**读** agent 侧产物（trace / session 文件 / agent store），而非要求 agent 反向写入 platform 表
+- **验证基线**：任何改动后，agent 必须能在「无 platform、platform 的 DB 表不存在」的环境下完成 `fleetent agent run` 对话，相关功能不得依赖 platform 表才能工作
+
+> 反例（已发生并返工）：把 compaction / token / resume_pending 写进 `session_meta`——agent 独立运行时该表不存在，功能静默失效。正确做法：状态存 session 文件 `meta` 字段，统计读 observability trace（`observability/usage.py`）。
+>
+> 现存待审计的 agent→platform 依赖（不得新增同类；逐一确认合规性或清理）：`im_gateway/telegram`、`intelligence/knowledge_base/config`、`tools/builtin_tools` 各有一处 import `platform.*`。
+
 ---
 
 ## 架构
@@ -199,6 +219,7 @@ src/fleetent/
 - **SQL 参数规范**：store 层 SQL 使用 named parameters（如 `:user_id`），不要新增 `?` 占位符风格
 - **schema lifecycle 归 Alembic**：不要在新 store 中复制 `_init_db()` 建表/补列模式
 - **禁止全局可变状态**：legacy 模块级路径常量（`DB_PATH` / `SESSIONS_DIR` 等）在迁移前必须可通过 `monkeypatch` 注入，方便测试隔离
+- **禁止 agent 运行时反向依赖 platform**：`runtime/`、`session/`、`im_gateway/`、`intelligence/`、`tools/`、`integrations/` 等 agent 运行时模块不得 `import fleetent.platform.*`，不得写入 platform 管理表；agent 必须可脱离 platform 独立运行（详见「Agent / Platform 解耦」）
 - **新依赖必须经过讨论**：区分三类——
   - 基础设施服务（PostgreSQL、Redis、Qdrant 等）：可引入，需在 PR 中说明必要性和自托管方案
   - AI 框架（LangChain / LlamaIndex / LangGraph）：永久禁止，无论何种理由
