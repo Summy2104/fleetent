@@ -55,14 +55,12 @@ def _wire_common(monkeypatch, tmp_path):
 
 
 async def test_resume_pending_detected_clears_flag(monkeypatch, tmp_path):
-    from fleetent.platform.chat_management import session_admin_store
+    from fleetent.session import manager as session_mgr
 
     _wire_common(monkeypatch, tmp_path)
-    monkeypatch.setattr(session_admin_store, "get_meta", lambda _sid: {"resume_pending": 1})
+    monkeypatch.setattr(session_mgr, "is_resume_pending", lambda _sid: True)
     cleared: list[str] = []
-    monkeypatch.setattr(
-        session_admin_store, "clear_resume_pending", lambda sid: cleared.append(sid)
-    )
+    monkeypatch.setattr(session_mgr, "clear_resume_pending", lambda sid: cleared.append(sid))
 
     await normalizer.route(_msg([]))
 
@@ -70,14 +68,12 @@ async def test_resume_pending_detected_clears_flag(monkeypatch, tmp_path):
 
 
 async def test_no_resume_pending_does_not_clear(monkeypatch, tmp_path):
-    from fleetent.platform.chat_management import session_admin_store
+    from fleetent.session import manager as session_mgr
 
     _wire_common(monkeypatch, tmp_path)
-    monkeypatch.setattr(session_admin_store, "get_meta", lambda _sid: {"resume_pending": 0})
+    monkeypatch.setattr(session_mgr, "is_resume_pending", lambda _sid: False)
     cleared: list[str] = []
-    monkeypatch.setattr(
-        session_admin_store, "clear_resume_pending", lambda sid: cleared.append(sid)
-    )
+    monkeypatch.setattr(session_mgr, "clear_resume_pending", lambda sid: cleared.append(sid))
 
     await normalizer.route(_msg([]))
 
@@ -85,14 +81,14 @@ async def test_no_resume_pending_does_not_clear(monkeypatch, tmp_path):
 
 
 async def test_resume_consume_failure_does_not_block(monkeypatch, tmp_path):
-    from fleetent.platform.chat_management import session_admin_store
+    from fleetent.session import manager as session_mgr
 
     _wire_common(monkeypatch, tmp_path)
 
     def _boom(_sid):
-        raise RuntimeError("db down")
+        raise RuntimeError("marker io error")
 
-    monkeypatch.setattr(session_admin_store, "get_meta", _boom)
+    monkeypatch.setattr(session_mgr, "is_resume_pending", _boom)
     replies: list[str] = []
 
     # Message must still be processed despite resume-consume failure

@@ -156,15 +156,13 @@ async def route(msg: NormalizedMessage) -> None:
     async with session_mgr.session_lock(session_id):
         history = await session_mgr.load(session_id)
 
-        # Consume the restart-recovery flag: if this session was marked
-        # resume_pending (active just before an agent restart), log it once and
-        # clear the flag so it does not linger. Best-effort — never block the turn.
+        # Consume the restart-recovery flag (agent-side .resume marker): if this
+        # session was marked resume_pending (active just before an agent restart),
+        # log it once and clear the marker. Best-effort — never block the turn.
         try:
-            from fleetent.platform.chat_management import session_admin_store
-
-            if session_admin_store.get_meta(session_id).get("resume_pending"):
+            if session_mgr.is_resume_pending(session_id):
                 logger.info("session_resumed", session_id=session_id)
-                session_admin_store.clear_resume_pending(session_id)
+                session_mgr.clear_resume_pending(session_id)
         except Exception as exc:  # noqa: BLE001 — resume consume must not block the turn
             logger.warning("session_resume_consume_failed", session_id=session_id, error=str(exc))
 

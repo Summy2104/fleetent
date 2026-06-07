@@ -6,6 +6,7 @@ import shutil
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 
 from fleetent import paths
 from fleetent.observability.structured_logging import get_logger
@@ -186,6 +187,9 @@ def cleanup_expired(
             (SESSIONS_DIR / f"{session_id}.pre-compact.json").unlink()
         # Best-effort: remove the externalized tool-result directory
         shutil.rmtree(SESSIONS_DIR / f"{session_id}.tool_outputs", ignore_errors=True)
+        # Best-effort: remove the agent-side resume marker
+        with suppress(OSError):
+            (SESSIONS_DIR / f"{session_id}.resume").unlink()
 
     _logger.info("session_cleanup_done", removed_count=len(removed), ttl_seconds=ttl_seconds)
     if removed:
@@ -345,6 +349,46 @@ def delete_compaction_checkpoint(session_id: str) -> None:
     path = SESSIONS_DIR / f"{session_id}.pre-compact.json"
     with suppress(FileNotFoundError):
         path.unlink()
+
+
+def _resume_marker_path(session_id: str) -> Path:
+    return SESSIONS_DIR / f"{session_id}.resume"
+
+
+def mark_resume_pending(session_id: str) -> None:
+    """Mark a session as resume-pending via an agent-side .resume marker file.
+
+    Pure agent-side state (no DB, no platform): the marker's existence is the flag.
+    """
+    path = _resume_marker_path(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+
+
+def is_resume_pending(session_id: str) -> bool:
+    """True when the session's .resume marker exists."""
+    return _resume_marker_path(session_id).exists()
+
+
+def clear_resume_pending(session_id: str) -> None:
+    """Remove the .resume marker. Idempotent."""
+    with suppress(FileNotFoundError):
+        _resume_marker_path(session_id).unlink()
+
+
+def scan_and_mark_recent_resume(window_seconds: int = 120) -> list[str]:
+    """Mark sessions whose file mtime is within the last window_seconds as resume-pending.
+
+    Agent-side restart recovery: based purely on session file mtime, no platform/DB.
+    Returns the session_ids that were marked.
+    """
+    now = time.time()
+    marked: list[str] = []
+    for session_id, _size, mtime in _scan_sessions():
+        if now - mtime <= window_seconds:
+            mark_resume_pending(session_id)
+            marked.append(session_id)
+    return marked
 
 
 def externalize_tool_results(

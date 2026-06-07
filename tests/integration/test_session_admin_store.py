@@ -100,82 +100,6 @@ async def test_inject_appends_under_lock(tmp_path, monkeypatch):
     assert msgs[-1] == {"role": "human_agent", "content": "let me help"}
 
 
-# --- migration 056: resume_pending ---
-
-
-def test_migration_056_adds_resume_pending_column(tmp_path):
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    conn = sqlite3.connect(db_path)
-    cols = {row[1] for row in conn.execute("PRAGMA table_info(session_meta)").fetchall()}
-    conn.close()
-    assert "resume_pending" in cols
-
-
-def test_mark_and_list_resume_pending(tmp_path, monkeypatch):
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    store.mark_resume_pending("rp1")
-    assert "rp1" in store.list_resume_pending()
-
-
-def test_clear_resume_pending(tmp_path, monkeypatch):
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    store.mark_resume_pending("rp2")
-    store.clear_resume_pending("rp2")
-    assert "rp2" not in store.list_resume_pending()
-
-
-def test_mark_resume_pending_creates_row(tmp_path, monkeypatch):
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    store.mark_resume_pending("rp-fresh")
-    assert store.get_meta("rp-fresh")["resume_pending"] == 1
-
-
-def test_scan_and_mark_recent_marks_window(tmp_path, monkeypatch):
-
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    # recent session
-    store.upsert_meta("recent", origin="web")
-    marked = store.scan_and_mark_recent(window_seconds=120)
-    assert "recent" in marked
-    assert store.get_meta("recent")["resume_pending"] == 1
-
-
-def test_scan_and_mark_recent_skips_old(tmp_path, monkeypatch):
-    import datetime
-
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    store.upsert_meta("oldsess", origin="web")
-    # Force updated_at far in the past
-    old_iso = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=1)).isoformat()
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        "UPDATE session_meta SET updated_at = ? WHERE session_id = ?", (old_iso, "oldsess")
-    )
-    conn.commit()
-    conn.close()
-    marked = store.scan_and_mark_recent(window_seconds=120)
-    assert "oldsess" not in marked
-
-
-def test_get_meta_includes_resume_pending(tmp_path, monkeypatch):
-    db_path = tmp_path / "users.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    store.upsert_meta("rp-meta", origin="web")
-    assert "resume_pending" in store.get_meta("rp-meta")
-
-
 # --- migration 058: drop runtime-coupling columns ---
 
 
@@ -194,5 +118,14 @@ def test_migration_058_drops_token_and_compaction_columns(tmp_path):
         "compaction_summary_preview",
     ):
         assert dropped not in cols, f"{dropped} should have been dropped by migration 058"
-    # resume_pending survives (removed by a later change, not 057)
-    assert "resume_pending" in cols
+
+
+def test_migration_059_drops_resume_pending_column(tmp_path):
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    conn = sqlite3.connect(db_path)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(session_meta)").fetchall()}
+    conn.close()
+    assert "resume_pending" not in cols  # dropped by migration 059
+    # core governance columns remain
+    assert {"session_id", "origin", "status", "pinned"} <= cols
