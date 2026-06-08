@@ -671,6 +671,91 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(microsecond=0)
 
 
+def ensure_schema(db: SQLiteDatabase) -> None:
+    """Create all KB tables and indices if they do not exist. Idempotent. (migrations 006-009)"""
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_bases (
+            tenant_id   TEXT NOT NULL,
+            kb_id       TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            PRIMARY KEY (tenant_id, kb_id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_documents (
+            id          TEXT PRIMARY KEY,
+            tenant_id   TEXT NOT NULL,
+            kb_id       TEXT NOT NULL,
+            filename    TEXT NOT NULL,
+            source      TEXT NOT NULL,
+            source_url  TEXT,
+            created_at  TEXT NOT NULL,
+            FOREIGN KEY (tenant_id, kb_id)
+                REFERENCES knowledge_bases (tenant_id, kb_id) ON DELETE CASCADE
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_chunks (
+            id              TEXT PRIMARY KEY,
+            document_id     TEXT NOT NULL,
+            tenant_id       TEXT NOT NULL,
+            kb_id           TEXT NOT NULL,
+            position        INTEGER NOT NULL,
+            content         TEXT NOT NULL,
+            metadata_json   TEXT NOT NULL DEFAULT '{}',
+            created_at      TEXT NOT NULL,
+            FOREIGN KEY (document_id)
+                REFERENCES knowledge_documents (id) ON DELETE CASCADE
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_source_states (
+            source_id       TEXT NOT NULL,
+            tenant_id       TEXT NOT NULL,
+            kb_id           TEXT NOT NULL,
+            source_path     TEXT NOT NULL,
+            mtime_ns        INTEGER NOT NULL,
+            content_hash    TEXT NOT NULL,
+            document_id     TEXT NOT NULL,
+            updated_at      TEXT NOT NULL,
+            PRIMARY KEY (source_id, tenant_id, kb_id, source_path)
+        )
+        """
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_documents_scope"
+        " ON knowledge_documents (tenant_id, kb_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_document_position"
+        " ON knowledge_chunks (document_id, position)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_scope"
+        " ON knowledge_chunks (tenant_id, kb_id)"
+    )
+    # FTS5 virtual table (migration 008); IF NOT EXISTS supported in SQLite 3.7+
+    db.execute(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunks_fts
+        USING fts5(
+            chunk_id UNINDEXED,
+            tenant_id UNINDEXED,
+            kb_id UNINDEXED,
+            content,
+            tokenize = 'unicode61'
+        )
+        """
+    )
+
+
 def _settings() -> Settings:
     return Settings()
 

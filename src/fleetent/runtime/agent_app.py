@@ -132,12 +132,34 @@ def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
     )
 
 
+def _init_agent_db_schema(database_url: str) -> None:
+    """Create all agent-side DB tables in database_url if they do not exist.
+
+    Called once at boot after DATABASE_URL is redirected to the per-agent path.
+    Each store's ensure_schema is idempotent; repeated calls are safe.
+    """
+    from fleetent.db import create_database
+    from fleetent.intelligence import reflection
+    from fleetent.intelligence.knowledge_base import operations as kb_ops
+    from fleetent.intelligence.memory import store as memory_store
+    from fleetent.observability import traces
+
+    db = create_database(database_url)
+    traces.ensure_schema(db)
+    memory_store.ensure_schema(db)
+    reflection.ensure_schema(db)
+    kb_ops.ensure_schema(db)
+
+
 async def _start_infra(agent: AgentFile) -> None:
     """Best-effort process infrastructure: sandbox probe, per-agent MCP, session upkeep.
 
     Each step mirrors the platform lifespan but scoped to this one agent; a failure is
     logged and never aborts boot (same best-effort posture as the platform).
     """
+    _db_url = os.environ.get("DATABASE_URL", "")
+    if _db_url:
+        _init_agent_db_schema(_db_url)
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
     from fleetent.session import manager as session_mgr
 
