@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fleetent.structured_logging import get_logger
 from fleetent.runtime.termination import LoopState, StopReason
+from fleetent.structured_logging import get_logger
 
 _logger = get_logger("runtime.budget")
 

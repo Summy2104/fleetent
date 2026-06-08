@@ -14,9 +14,9 @@ from fleetent.agent_config import AgentFile
 from fleetent.config import DiagnosticsSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
 from fleetent.observability.performance import PerformanceQuery, get_performance_summary
-from fleetent.structured_logging import _redact_value
 from fleetent.observability.traces import TraceEvent, TraceQuery, query_trace_events
 from fleetent.observability.usage import UsageQuery, get_usage_summary
+from fleetent.structured_logging import _redact_value
 
 _MAX_TEXT_LENGTH = 2048
 _SECRET_WORD_RE = re.compile(

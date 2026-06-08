@@ -27,7 +27,6 @@ from fleetent.agent_config import (
     default_models,
 )
 from fleetent.config import McpServerSettings
-from fleetent.structured_logging import get_logger
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.connector_management import agent_mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
@@ -35,6 +34,7 @@ from fleetent.platform.model_provider_management import provider_admin_store
 from fleetent.platform.skill_management import skill_admin_store
 from fleetent.secret_scan import flatten
 from fleetent.skills import registry as skill_registry
+from fleetent.structured_logging import get_logger
 
 if TYPE_CHECKING:
     from fleetent.knowledge_base.config import KnowledgeConfigSnapshot

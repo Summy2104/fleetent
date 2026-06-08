@@ -13,8 +13,8 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException
 
 from fleetent import agent_store, auth, user_store
-from fleetent.structured_logging import get_logger
 from fleetent.platform.agent_lifecycle import controller, materialize
+from fleetent.structured_logging import get_logger
 
 _logger = get_logger("agent_lifecycle.api")
 
