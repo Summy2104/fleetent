@@ -269,6 +269,7 @@ class AgentFile(BaseModel):
     hooks_decision_failure: Literal["open", "strict"] = "open"
     hooks_timeout_seconds: float = 5.0
     # permission gate
+    permission_gate_enabled: bool = True
     permission_gate_medium_timeout_seconds: int = 300
     permission_gate_high_timeout_seconds: int = 3600
     # provider circuit breaker

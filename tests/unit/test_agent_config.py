@@ -657,3 +657,15 @@ def test_vision_model_rejected() -> None:
     doc["vision_model"] = "llava"
     with pytest.raises(ValidationError):
         agent_config.AgentFile.model_validate(doc)
+
+
+def test_permission_gate_enabled_default_true() -> None:
+    agent = agent_config.AgentFile.model_validate(_valid_doc())
+    assert agent.permission_gate_enabled is True
+
+
+def test_permission_gate_enabled_false() -> None:
+    doc = _valid_doc()
+    doc["permission_gate_enabled"] = False
+    agent = agent_config.AgentFile.model_validate(doc)
+    assert agent.permission_gate_enabled is False
