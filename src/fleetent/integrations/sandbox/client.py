@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from fleetent.integrations.sandbox.config import NetworkPolicy, SandboxResources
 from fleetent.integrations.sandbox.secrets import is_sensitive_name
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 
 _logger = get_logger("sandbox.client")
 

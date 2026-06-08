@@ -8,7 +8,7 @@ from datetime import datetime
 def sanitize_cli_value(value: object) -> str:
     """Return a CLI-safe string with secrets redacted."""
     from fleetent.knowledge_base.operations import _sanitize_text
-    from fleetent.observability.structured_logging import _redact_value
+    from fleetent.structured_logging import _redact_value
 
     return _sanitize_text(str(_redact_value(value)))
 

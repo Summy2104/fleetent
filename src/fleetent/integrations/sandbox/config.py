@@ -20,7 +20,7 @@ from pathlib import Path
 import yaml
 
 from fleetent import paths
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 
 _logger = get_logger("sandbox.config")
 

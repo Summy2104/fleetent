@@ -15,7 +15,7 @@ from typing import Any
 from fleetent import agent_config, user_store
 from fleetent.agent_config import TelegramConnector
 from fleetent.im_gateway import telegram
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 
 _logger = get_logger("im_gateway.telegram")
 

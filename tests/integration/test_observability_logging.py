@@ -1,8 +1,8 @@
 import json
 from io import StringIO
 
+from fleetent import structured_logging as sl
 from fleetent.observability import get_logger
-from fleetent.observability import structured_logging as sl
 
 
 def test_get_logger_returns_component_logger_with_standard_levels():

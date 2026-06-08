@@ -20,7 +20,7 @@ class LoggerProtocol(Protocol):
 
 
 def _logger() -> LoggerProtocol:
-    from fleetent.observability.structured_logging import get_logger
+    from fleetent.structured_logging import get_logger
 
     return get_logger("knowledge_base")
 

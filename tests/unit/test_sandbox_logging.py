@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 def test_sandbox_client_logger_is_custom() -> None:
     import fleetent.integrations.sandbox.client as mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(mod._logger, Logger)
 
@@ -54,7 +54,7 @@ async def test_sandbox_client_logs_warn_on_docker_probe_fail() -> None:
 
 def test_sandbox_config_logger_is_custom() -> None:
     import fleetent.integrations.sandbox.config as mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(mod._logger, Logger)
 
@@ -73,7 +73,7 @@ def test_sandbox_config_warns_on_invalid_scope() -> None:
 
 def test_sandbox_cleanup_logger_is_custom() -> None:
     import fleetent.integrations.sandbox.cleanup as mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(mod._logger, Logger)
 
@@ -83,7 +83,7 @@ def test_sandbox_cleanup_logger_is_custom() -> None:
 
 def test_sandbox_enablement_logger_is_custom() -> None:
     import fleetent.integrations.sandbox.enablement as mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(mod._logger, Logger)
 

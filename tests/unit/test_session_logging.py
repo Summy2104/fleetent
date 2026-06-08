@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 def test_session_manager_logger_is_custom() -> None:
     import fleetent.session.manager as mgr
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(mgr._logger, Logger)
 

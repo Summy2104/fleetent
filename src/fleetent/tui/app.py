@@ -19,7 +19,7 @@ from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.patch_stdout import patch_stdout
 
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 from fleetent.tui import protocol as p
 from fleetent.tui import render
 from fleetent.tui.backend import GatewayBackend

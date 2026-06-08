@@ -27,7 +27,7 @@ from fleetent.agent_config import (
     default_models,
 )
 from fleetent.config import McpServerSettings
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.connector_management import agent_mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store

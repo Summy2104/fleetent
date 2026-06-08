@@ -10,7 +10,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 from fleetent.tui import protocol as p
 
 _logger = get_logger("tui.backend")

@@ -33,7 +33,7 @@ from fleetent.observability.pilot_verification import (
     render_markdown_report,
     write_pilot_smoke_artifact,
 )
-from fleetent.observability.structured_logging import Logger, get_logger
+from fleetent.structured_logging import Logger, get_logger
 from fleetent.observability.traces import (
     InjectedContextTrace,
     TraceEvent,

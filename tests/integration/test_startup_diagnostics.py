@@ -1,7 +1,7 @@
 import json
 from io import StringIO
 
-from fleetent.observability import structured_logging as sl
+from fleetent import structured_logging as sl
 from fleetent.observability.startup_diagnostics import diagnose_database_writable
 
 

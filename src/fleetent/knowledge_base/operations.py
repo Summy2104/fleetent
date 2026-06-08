@@ -31,7 +31,7 @@ from fleetent.knowledge_base.connectors.google_drive import (
     plan_google_drive_sync,
     sync_google_drive,
 )
-from fleetent.observability.structured_logging import _redact_value
+from fleetent.structured_logging import _redact_value
 
 ConnectorType = Literal["google_drive", "confluence"]
 _SECRET_WORD_RE = re.compile(

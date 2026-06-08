@@ -16,12 +16,12 @@
 ## 3. 调用方分批迁移（每批跑受影响层）
 
 - [x] 3.1 迁移 `runtime`（13 处）import 到 `fleetent.structured_logging`；跑 `tests/unit` 相关 + `tests/integration` 受影响
-- [ ] 3.2 迁移 `integrations`(6) + `im_gateway`(2) import；跑受影响层
-- [ ] 3.3 迁移 `knowledge_base`(4) + `session`(1) import；跑受影响层
-- [ ] 3.4 迁移 `tui`(4) import；跑受影响层
-- [ ] 3.5 迁移 `platform`(4) + `config.py` import；跑受影响层
-- [ ] 3.6 迁移 `observability` 内部（`__init__` / `traces` / `diagnostics`，3 处）import 到新路径
-- [ ] 3.7 修正测试中对 `observability.structured_logging` 的 monkeypatch/patch 目标，改打到 `fleetent.structured_logging` 真实模块
+- [x] 3.2 迁移 `integrations`(6) + `im_gateway`(2) import；跑受影响层
+- [x] 3.3 迁移 `knowledge_base`(4) + `session`(1) import；跑受影响层
+- [x] 3.4 迁移 `tui`(4) import；跑受影响层
+- [x] 3.5 迁移 `platform`(4) + `config.py` import；跑受影响层
+- [x] 3.6 迁移 `observability` 内部（`__init__` / `traces` / `diagnostics`，3 处）import 到新路径
+- [x] 3.7 修正测试中对 `observability.structured_logging` 的 monkeypatch/patch 目标，改打到 `fleetent.structured_logging` 真实模块
 
 ## 4. 删 shim + 契约收口
 

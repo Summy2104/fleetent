@@ -13,7 +13,7 @@ import sys
 from collections.abc import Callable
 from typing import Protocol
 
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 
 _logger = get_logger("agent_lifecycle.controller")
 
