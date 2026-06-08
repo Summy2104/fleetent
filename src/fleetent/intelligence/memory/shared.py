@@ -16,6 +16,10 @@ from fleetent.intelligence.memory.models import (
     SharedMemoryStatus,
     SharedMemoryType,
 )
+from fleetent.intelligence.memory.proposal_store import (
+    get_memory_maintenance_proposal,
+    mark_shared_memory_proposal_applied,
+)
 
 _SCOPE_TYPES = {"team", "tenant"}
 _TYPES = {"context", "preference", "procedure"}
@@ -169,11 +173,7 @@ def list_shared_memory(
 
 async def apply_shared_memory_proposal(proposal_id: str, *, actor_id: str) -> SharedMemoryItem:
     """Apply an approved reflection maintenance proposal as Shared Memory."""
-    from fleetent.intelligence import reflection
-
-    proposal = reflection.get_memory_maintenance_proposal(proposal_id)
-    if proposal.status != "approved":
-        raise ValueError(f"cannot apply {proposal.status} proposal")
+    proposal = get_memory_maintenance_proposal(proposal_id)
     if proposal.action != "suggest_shared_memory_or_kb":
         raise ValueError("proposal is not a shared memory suggestion")
     if proposal.metadata_patch.get("target") != "shared_memory":
@@ -191,7 +191,7 @@ async def apply_shared_memory_proposal(proposal_id: str, *, actor_id: str) -> Sh
         source="reflection_proposal",
         source_ref=proposal.id,
     )
-    reflection.mark_shared_memory_proposal_applied(proposal.id)
+    mark_shared_memory_proposal_applied(proposal.id)
     return item
 
 

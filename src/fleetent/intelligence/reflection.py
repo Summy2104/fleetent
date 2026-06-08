@@ -11,7 +11,7 @@ from typing import Any, Literal, cast
 from fleetent import observability
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.intelligence import knowledge_base, memory
+from fleetent.intelligence import memory
 
 FindingType = Literal["memory_candidate", "memory_conflict", "skill_opportunity"]
 KnowledgeBaseFindingType = Literal[
@@ -972,6 +972,8 @@ def _generate_kb_findings(
 
 
 def _connector_findings() -> list[KnowledgeBaseReflectionFinding]:
+    from fleetent.intelligence import knowledge_base
+
     findings: list[KnowledgeBaseReflectionFinding] = []
     try:
         connectors = knowledge_base.list_configured_connectors()

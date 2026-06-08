@@ -2,8 +2,8 @@
 
 ## 1. 三刀切结构契约 + 护栏（TDD 红先行）
 
-- [ ] 1.1 写失败测试：断言 `fleetent.reflection` 顶层包（引擎 + `store`）存在；`governance.reflection_gate` 存在；`platform.reflection_management` 存在（此时不存在 → 红）（`tests/unit/`，import 静态检查）
-- [ ] 1.2 写失败测试：断言护栏边——`reflection` ✗→ `knowledge_base.ingest`；`reflection` / `governance` ✗→ `fleetent.platform`；`memory` ✗→ `reflection`（启用阶段4 TODO）（此时未拆 → 红）
+- [x] 1.1 写失败测试：断言 `fleetent.reflection` 顶层包（引擎 + `store`）存在；`governance.reflection_gate` 存在；`platform.reflection_management` 存在（此时不存在 → 红）（`tests/unit/`，import 静态检查）
+- [x] 1.2 写失败测试：断言护栏边——`reflection` ✗→ `knowledge_base.ingest`；`reflection` / `governance` ✗→ `fleetent.platform`；`memory` ✗→ `reflection`（启用阶段4 TODO）（此时未拆 → 红）
 
 ## 2. 自进化引擎提为顶层 agent（TDD）
 

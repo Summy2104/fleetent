@@ -7,6 +7,9 @@ from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from fleetent.intelligence.memory import store
+from fleetent.intelligence.memory.proposal_store import (
+    list_memory_maintenance_proposals,
+)
 
 TrendBucketSize = Literal["day", "week"]
 
@@ -202,11 +205,9 @@ def _shared_memory_rows(query: MemoryQualityTrendQuery) -> list[dict[str, Any]]:
 def _memory_maintenance_proposals(query: MemoryQualityTrendQuery) -> list[Any]:
     if query.user_id is None:
         return []
-    from fleetent.intelligence import reflection
-
     return [
         proposal
-        for proposal in reflection.list_memory_maintenance_proposals(query.user_id)
+        for proposal in list_memory_maintenance_proposals(query.user_id)
         if query.start_ts <= proposal.updated_at < query.end_ts
     ]
 
