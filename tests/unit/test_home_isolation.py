@@ -25,7 +25,7 @@ def test_logging_default_dir_never_leaks_to_real_home(monkeypatch, tmp_path) -> 
     # Reproduce the leak path: chdir outside any repo, configure logging with no
     # explicit directory. It must resolve under the isolated FLEETENT_HOME.
     monkeypatch.chdir(tmp_path)
-    from fleetent.observability import structured_logging
+    from fleetent import structured_logging
 
     structured_logging.configure_structured_logging()
     log_dir = structured_logging._config.directory

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from fleetent.observability import structured_logging
+from fleetent import structured_logging
 
 
 def test_logging_config_default_directory_follows_home(

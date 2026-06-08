@@ -2,10 +2,10 @@
 
 ## 1. 物理迁移 + 兼容 shim
 
-- [ ] 1.1 写失败测试：断言 `from fleetent.structured_logging import get_logger`（新顶层路径）可用 —— 先红（模块尚不存在）
-- [ ] 1.2 移动 `src/fleetent/observability/structured_logging.py` → `src/fleetent/structured_logging.py`；在旧路径放 re-export shim（`from fleetent.structured_logging import *` + 显式 re-export 公共名）—— 1.1 转绿
-- [ ] 1.3 写失败测试：断言旧路径 `from fleetent.observability.structured_logging import get_logger` 经 shim 仍可用 —— 应已绿（验证 shim 正确）；若红则修 shim
-- [ ] 1.4 跑 import smoke（server 启动链 + `runtime/loop` 触发链）确认无 circular import；受影响层 `uv run pytest tests/unit -q` 无新增失败
+- [x] 1.1 写失败测试：断言 `from fleetent.structured_logging import get_logger`（新顶层路径）可用 —— 先红（模块尚不存在）
+- [x] 1.2 移动 `src/fleetent/observability/structured_logging.py` → `src/fleetent/structured_logging.py`；在旧路径放 re-export shim（`from fleetent.structured_logging import *` + 显式 re-export 公共名）—— 1.1 转绿
+- [x] 1.3 写失败测试：断言旧路径 `from fleetent.observability.structured_logging import get_logger` 经 shim 仍可用 —— 应已绿（验证 shim 正确）；若红则修 shim
+- [x] 1.4 跑 import smoke（server 启动链 + `runtime/loop` 触发链）确认无 circular import；受影响层 `uv run pytest tests/unit -q` 无新增失败
 
 ## 2. 依赖护栏（先红后绿）
 
