@@ -1,20 +1,10 @@
 """Integration tests for skill hit tracking + observability (skill-observability-tracking)."""
 
-from pathlib import Path
-
 import pytest
-from alembic import command
-from alembic.config import Config
 
 from fleetent.observability.traces import TraceEvent, record_trace_event
 from fleetent.platform.skill_management import skill_admin_store
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture

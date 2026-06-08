@@ -1,10 +1,6 @@
 """Integration tests for DB-authored agent definitions materialized to agent.yaml."""
 
-from pathlib import Path
-
 import pytest
-from alembic import command
-from alembic.config import Config
 
 import fleetent.agent_store as agent_store
 from fleetent.agent_config import default_models
@@ -12,13 +8,7 @@ from fleetent.platform.agent_lifecycle import materialize
 from fleetent.platform.connector_management import agent_mcp_server_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store
 from fleetent.platform.model_provider_management import provider_admin_store
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture

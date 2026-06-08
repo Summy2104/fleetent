@@ -1,21 +1,12 @@
 """Tests for session_admin_store (migration 014) + session_mgr clear/inject hooks."""
 
 import sqlite3
-from pathlib import Path
 
 import pytest
-from alembic import command
-from alembic.config import Config
 
 from fleetent.platform.chat_management import session_admin_store as store
 from fleetent.session import manager as session_mgr
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture

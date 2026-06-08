@@ -5,20 +5,11 @@ migrations against a tmp_path database, isolated via the DATABASE_URL env var.
 """
 
 import sqlite3
-from pathlib import Path
 
 import pytest
-from alembic import command
-from alembic.config import Config
 
 from fleetent.platform.skill_management import skill_admin_store
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture

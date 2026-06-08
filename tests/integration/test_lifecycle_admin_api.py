@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 import fleetent.auth as auth
 import fleetent.user_store as us
 from fleetent.platform.agent_lifecycle import controller, lifecycle_admin_api, materialize
+from tests.integration._migration_template import apply_migrations
 
 
 class _FakeProc:
@@ -22,15 +23,8 @@ class _FakeProc:
 
 
 def _migrate(db_path):
-    from pathlib import Path
 
-    from alembic import command
-    from alembic.config import Config
-
-    cfg = Config()
-    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+    apply_migrations(db_path)
 
 
 @pytest.fixture

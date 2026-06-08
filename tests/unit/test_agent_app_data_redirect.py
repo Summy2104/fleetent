@@ -56,11 +56,11 @@ def test_redirect_does_not_override_explicit_database_url(
     from fleetent.runtime import agent_app
 
     home = tmp_path / "myagent"
-    monkeypatch.setenv("DATABASE_URL", "sqlite:///custom/path.db")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://custom-explicit")
 
     agent_app._redirect_agent_data_paths(home)
 
-    assert os.environ["DATABASE_URL"] == "sqlite:///custom/path.db"
+    assert os.environ["DATABASE_URL"] == "postgresql://custom-explicit"
 
 
 def test_redirect_updates_diagnostics_default_data_dir(

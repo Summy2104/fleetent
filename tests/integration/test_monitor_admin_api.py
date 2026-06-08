@@ -1,10 +1,6 @@
 """Tests for monitor_admin_api (/admin/monitoring, /admin/alerts). Scenarios 86-96."""
 
-from pathlib import Path
-
 import pytest
-from alembic import command
-from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -13,13 +9,7 @@ import fleetent.governance.audit_log as audit
 import fleetent.platform.resource_monitoring.monitor_admin_api as api
 import fleetent.platform.resource_monitoring.monitoring_store as store
 import fleetent.user_store as user_store
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture

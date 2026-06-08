@@ -7,13 +7,9 @@ route each agent to its own session/credential. Crucially, agent B's call must
 never be satisfied by agent A's authorization.
 """
 
-from pathlib import Path
-
 import httpx
 import pytest
 import respx
-from alembic import command
-from alembic.config import Config
 
 import fleetent.integrations.mcp.client as mcp_client
 from fleetent.integrations.mcp.client import McpServerConfig
@@ -21,16 +17,10 @@ from fleetent.platform.connector_management import (
     agent_mcp_server_store,
     connector_config_store,
 )
+from tests.integration._migration_template import apply_migrations as _apply_migrations
 
 AGENT_A = 1
 AGENT_B = 2
-
-
-def _apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
 
 
 @pytest.fixture

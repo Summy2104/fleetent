@@ -1,19 +1,12 @@
 """Owner-level Slack removed; per-agent Slack started from the index at lifespan."""
 
-from pathlib import Path
-
-from alembic import command
-from alembic.config import Config
-
 import fleetent.server as srv
 from fleetent.platform.im_gateway_management import im_connector_config
+from tests.integration._migration_template import apply_migrations
 
 
 def _migrate(db_path):
-    cfg = Config()
-    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+    apply_migrations(db_path)
 
 
 def test_per_agent_platforms_removed_from_owner_connector_manager():

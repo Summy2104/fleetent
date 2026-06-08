@@ -8,20 +8,12 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from alembic import command
-from alembic.config import Config
 
 import fleetent.governance.permission_gate as permission_gate
 import fleetent.session.manager as session_mgr
 import fleetent.user_store as user_store
 from fleetent.platform.im_gateway_management import identity as im_user_store
-
-
-def _apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations as _apply_migrations
 
 
 def _bind_default_agent(tmp_path: Path, user_id: str) -> None:

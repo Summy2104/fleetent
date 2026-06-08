@@ -4,20 +4,10 @@ Schema created by Alembic migrations against a tmp_path database, isolated via t
 DATABASE_URL env var (named params, no legacy _init_db / DB_PATH path).
 """
 
-from pathlib import Path
-
 import pytest
-from alembic import command
-from alembic.config import Config
 
 import fleetent.agent_store as agent_store
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
