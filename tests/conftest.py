@@ -99,6 +99,23 @@ def _isolate_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_agent_data_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Restore module-level constants mutated by _redirect_agent_data_paths after each test.
+
+    boot() mutates diagnostics._default_data_dir, session_mgr.SESSIONS_DIR, and
+    access.APPROVALS_PATH directly (not via os.environ). Without restoration these
+    leak across tests, causing ordering-dependent failures in path-wiring tests.
+    """
+    from fleetent.im_gateway import access
+    from fleetent.observability import diagnostics
+    from fleetent.session import manager as session_mgr
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", session_mgr.SESSIONS_DIR)
+    monkeypatch.setattr(access, "APPROVALS_PATH", access.APPROVALS_PATH)
+    monkeypatch.setattr(diagnostics, "_default_data_dir", diagnostics._default_data_dir)
+
+
 @pytest.fixture
 def isolated_schedule_db(tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
     db_path = tmp_path / "sched.db"
