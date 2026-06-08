@@ -34,6 +34,30 @@ secrets anywhere under `connectors`.
 - **WHEN** an `agent.yaml` declares `connectors.slack` with `access.allow_users: ["U123"]`
 - **THEN** the agent loads and only user `U123` is allowed to interact via Slack
 
+### Requirement: Slack adapter responds only to @mention in channels, all messages in DMs
+
+The Slack adapter SHALL register two event handlers:
+- `app_mention`: handles all @mentions of the bot in channels
+- `message` filtered to `channel_type == "im"`: handles direct messages
+
+Regular channel messages that do not @mention the bot SHALL be ignored. The Slack application
+MUST have the `app_mention` event subscription enabled in its Event Subscriptions configuration.
+
+#### Scenario: @mention in channel triggers response
+
+- **WHEN** a user sends `<@BOT_USER_ID> hello` in a channel
+- **THEN** the message is routed to the agent loop via the `app_mention` handler
+
+#### Scenario: DM without mention triggers response
+
+- **WHEN** a user sends a direct message to the bot without any @mention
+- **THEN** the message is routed to the agent loop via the `message` handler
+
+#### Scenario: Channel message without mention is ignored
+
+- **WHEN** a user sends a message in a channel without @mentioning the bot
+- **THEN** the message is NOT routed to the agent loop
+
 ### Requirement: One Socket Mode connection per declaring agent
 
 The system SHALL run exactly one Slack Socket Mode connection per agent whose
