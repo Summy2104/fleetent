@@ -7,7 +7,7 @@ in-memory vector store (no real LLM / embedding service).
 """
 
 from fleetent import long_term_ctx
-from fleetent import long_term_ctx_policy as policy
+from fleetent.long_term_ctx import _policy as policy
 from fleetent.vector_store import SearchResult
 from tests.integration.test_migrations import apply_migrations
 
