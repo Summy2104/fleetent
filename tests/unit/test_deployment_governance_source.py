@@ -10,9 +10,7 @@ from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
 
 def _publish_single(**fields) -> None:
     agent = AgentFile(name="a", version=1, models=default_models(), **fields)
-    agent_config._index = AgentConfigIndex(
-        agents={"a": agent}, default="a"
-    )
+    agent_config._index = AgentConfigIndex(agents={"a": agent}, default="a")
 
 
 def test_session_config_from_active_agent() -> None:

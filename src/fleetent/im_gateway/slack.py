@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import structlog
@@ -7,6 +8,7 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 _IMAGE_MIME_PREFIX = "image/"
+_PROGRESS_THROTTLE_SECONDS = 1.0
 
 
 async def _download_image_attachments(
@@ -52,8 +54,8 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
     The receiving connection identifies the agent (per-agent-slack-connector): the
     handler stamps ``agent_name`` so routing skips channel→agent lookup. ``owner_id``
     still scopes user mapping / allowlist (per-agent isolation of those is deferred to
-    per-agent-im-access). ``config.channels``, when non-empty, filters which channels
-    the agent responds in.
+    per-agent-im-access). Channel access is enforced by the normalizer access gate,
+    not this handler.
     """
     try:
         from slack_bolt.async_app import AsyncApp
@@ -63,7 +65,7 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
     bot_token = config.get("bot_token", "")
     app = AsyncApp(token=bot_token)
 
-    async def _handle(event: dict[str, Any], say: object) -> None:
+    async def _handle(event: dict[str, Any], client: Any, say: Any = None) -> None:
         from fleetent.im_gateway.access import resolve_identity
         from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
@@ -82,8 +84,51 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
 
         reply_thread = thread_ts or event.get("ts")
 
-        async def reply_func(text: str) -> None:
-            await say(text=text, thread_ts=reply_thread)  # type: ignore[operator]
+        # Attempt to post a placeholder message immediately so the user sees activity.
+        # On success, both reply_func and progress_func update this message in-place.
+        # On failure, fall back to the original say()-based reply with no progress.
+        placeholder_ts: str | None = None
+        try:
+            resp = await client.chat_postMessage(
+                channel=channel,
+                text="🤔 思考中…",
+                thread_ts=reply_thread,
+            )
+            if isinstance(resp, dict):
+                placeholder_ts = resp.get("ts")
+        except Exception as exc:  # noqa: BLE001 — placeholder failure must not abort handler
+            logger.warning("slack_placeholder_failed", error=str(exc))
+
+        if placeholder_ts is not None:
+            _placeholder_ts = placeholder_ts  # captured for closures
+
+            async def reply_func(text: str) -> None:
+                await client.chat_update(channel=channel, ts=_placeholder_ts, text=text)
+
+            last_update: list[float] = [0.0]
+
+            async def progress_func(evt: dict[str, Any]) -> None:
+                now = time.monotonic()
+                if now - last_update[0] < _PROGRESS_THROTTLE_SECONDS:
+                    return
+                last_update[0] = now
+                tool_name = evt.get("name", "tool")
+                try:
+                    await client.chat_update(
+                        channel=channel,
+                        ts=_placeholder_ts,
+                        text=f"🔧 正在调用 {tool_name}…",
+                    )
+                except Exception as exc:  # noqa: BLE001 — progress update failure is non-critical
+                    logger.debug("slack_progress_update_failed", error=str(exc))
+
+        else:
+            # Degraded path: no placeholder — use say() for the final reply, no progress.
+            async def reply_func(text: str) -> None:  # noqa: F811
+                if say is not None:
+                    await say(text=text, thread_ts=reply_thread)
+
+            progress_func = None  # type: ignore[assignment]
 
         files = event.get("files") or []
         attachments = await _download_image_attachments(list(files), bot_token)
@@ -97,20 +142,21 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
             text=event.get("text") or "",
             attachments=attachments,
             reply_func=reply_func,
+            progress_func=progress_func,
             channel_id=channel,
         )
         await route(msg)
 
     @app.event("app_mention")
-    async def handle_mention(event: dict[str, Any], say: object) -> None:
+    async def handle_mention(event: dict[str, Any], client: Any, say: Any = None) -> None:
         """Handle @mention in channels."""
-        await _handle(event, say)
+        await _handle(event, client, say)
 
     @app.event("message")
-    async def handle_dm(event: dict[str, Any], say: object) -> None:
+    async def handle_dm(event: dict[str, Any], client: Any, say: Any = None) -> None:
         """Handle DMs only; channel messages are handled via app_mention."""
         if (event.get("channel_type") or "") == "im":
-            await _handle(event, say)
+            await _handle(event, client, say)
 
     return app
 

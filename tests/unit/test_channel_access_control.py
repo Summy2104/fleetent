@@ -92,7 +92,9 @@ def _msg(channel_id: str = "C1", user_id: str = "U_unknown", platform: str = "sl
     ), replies
 
 
-async def _route_with_agent(agent: AgentFile, channel_id: str, user_id: str, platform: str = "slack"):
+async def _route_with_agent(
+    agent: AgentFile, channel_id: str, user_id: str, platform: str = "slack"
+):
     """Route a message through normalizer.route() with the given agent monkeypatched."""
     from fleetent import agent_config
     from fleetent.agent_config import AgentConfigIndex

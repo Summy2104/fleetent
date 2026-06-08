@@ -136,9 +136,7 @@ def test_agentfile_default_connector_access_closed():
         name="alice",
         version=1,
         models=default_models(),
-        connectors=AgentConnectors(
-            slack=SlackConnector(bot_token_env="BOT", app_token_env="APP")
-        ),
+        connectors=AgentConnectors(slack=SlackConnector(bot_token_env="BOT", app_token_env="APP")),
     )
     assert agent.connectors.slack is not None
     assert agent.connectors.slack.access.require_approval is True

@@ -10,9 +10,7 @@ from fleetent.runtime import context
 
 
 def _publish(agent: AgentFile) -> None:
-    agent_config._index = AgentConfigIndex(
-        agents={agent.name: agent}, default=agent.name
-    )
+    agent_config._index = AgentConfigIndex(agents={agent.name: agent}, default=agent.name)
 
 
 def test_default_config_from_agent(monkeypatch) -> None:

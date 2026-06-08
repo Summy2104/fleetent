@@ -84,6 +84,14 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
         async def reply_func(text: str) -> None:
             await update.message.reply_text(text)  # type: ignore[union-attr]
 
+        async def progress_func(evt: dict) -> None:  # type: ignore[type-arg]
+            try:  # noqa: SIM105 — cannot use contextlib.suppress with async await
+                await context.bot.send_chat_action(  # type: ignore[attr-defined]
+                    chat_id=channel_id, action="typing"
+                )
+            except Exception:  # noqa: BLE001 — typing action is non-critical
+                pass
+
         attachments = await _download_photo_attachments(update.message, context)
         # Image messages carry their text in `caption`, not `text`.
         text = update.message.caption or update.message.text or ""
@@ -97,6 +105,7 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
             text=text,
             attachments=attachments,
             reply_func=reply_func,
+            progress_func=progress_func,
             channel_id=channel_id,
         )
         await route(msg)

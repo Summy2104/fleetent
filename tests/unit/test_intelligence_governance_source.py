@@ -11,9 +11,7 @@ from fleetent.intelligence import long_term_ctx as ltcp
 
 
 def _publish_single(agent: AgentFile) -> None:
-    agent_config._index = AgentConfigIndex(
-        agents={agent.name: agent}, default=agent.name
-    )
+    agent_config._index = AgentConfigIndex(agents={agent.name: agent}, default=agent.name)
 
 
 def _publish_empty() -> None:

@@ -22,7 +22,13 @@ def _msg(owner_id, replies, *, session_id="s1", channel_id="C1"):
 async def test_session_namespaced_by_owner(monkeypatch, tmp_path):
     import contextlib
 
-    from fleetent.agent_config import AgentConnectors, AgentFile, ConnectorAccess, SlackConnector, default_models
+    from fleetent.agent_config import (
+        AgentConnectors,
+        AgentFile,
+        ConnectorAccess,
+        SlackConnector,
+        default_models,
+    )
     from fleetent.im_gateway import access
     from fleetent.runtime import loop as agent_loop
     from fleetent.session import manager as session_mgr
@@ -72,7 +78,13 @@ async def test_normalizer_propagates_permission_gate_config(monkeypatch, tmp_pat
     """normalizer.route() passes agent's permission_gate_enabled + timeouts to loop.run()."""
     import contextlib
 
-    from fleetent.agent_config import AgentConnectors, AgentFile, ConnectorAccess, SlackConnector, default_models
+    from fleetent.agent_config import (
+        AgentConnectors,
+        AgentFile,
+        ConnectorAccess,
+        SlackConnector,
+        default_models,
+    )
     from fleetent.im_gateway import access
     from fleetent.runtime import loop as agent_loop
     from fleetent.session import manager as session_mgr
