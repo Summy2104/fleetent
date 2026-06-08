@@ -1,19 +1,19 @@
 ## 1. Unit-layer gate false-positives
 
-- [ ] 1.1 Establish red: run `uv run python scripts/check_test_layers.py` and confirm it
+- [x] 1.1 Establish red: run `uv run python scripts/check_test_layers.py` and confirm it
       flags `test_config.py` and `test_agent_app_data_redirect.py` (`sqlite-database-url`, exit 1)
-- [ ] 1.2 Switch the precedence-only `DATABASE_URL` values in both files to a
+- [x] 1.2 Switch the precedence-only `DATABASE_URL` values in both files to a
       `postgresql://` scheme (and matching assertions); run the two affected unit tests
       green and confirm `check_test_layers.py` exits 0
 
 ## 2. Shared cached migration helper (TDD)
 
-- [ ] 2.1 Write failing tests `tests/integration/test_migration_template.py`: (a) helper
+- [x] 2.1 Write failing tests `tests/integration/test_migration_template.py`: (a) helper
       produces a DB whose `sqlite_master` schema is identical to a freshly `upgrade head`
       DB; (b) a second call copies the template instead of re-running Alembic (assert
       `command.upgrade` invoked once via spy); (c) two calls yield distinct, independently
       mutable files. Run `uv run pytest tests/integration/test_migration_template.py -x -q` → red
-- [ ] 2.2 Implement `tests/integration/_migration_template.py`: `lru_cache`-backed template
+- [x] 2.2 Implement `tests/integration/_migration_template.py`: `lru_cache`-backed template
       built by one real `upgrade head`, `apply_migrations(db_path)` via `shutil.copy`,
       `atexit` cleanup. Run the same tests → green
 

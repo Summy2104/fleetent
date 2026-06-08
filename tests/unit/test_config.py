@@ -161,12 +161,12 @@ def test_settings_loads_platform_dotenv_from_fleetent_home_not_cwd(tmp_path, mon
 def test_process_env_overrides_platform_dotenv(tmp_path, monkeypatch):
     import fleetent.config as cfg
 
-    (tmp_path / ".env").write_text("DATABASE_URL=sqlite:///from-dotenv.db\n")
+    (tmp_path / ".env").write_text("DATABASE_URL=postgresql://from-dotenv\n")
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    monkeypatch.setenv("DATABASE_URL", "sqlite:///from-process.db")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://from-process")
     monkeypatch.setattr(cfg, "PLATFORM_YAML_PATH", tmp_path / "missing.yaml")
 
-    assert Settings().database_url == "sqlite:///from-process.db"
+    assert Settings().database_url == "postgresql://from-process"
 
 
 def test_vector_provider_settings_accept_env_references():
