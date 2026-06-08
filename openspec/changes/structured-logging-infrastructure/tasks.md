@@ -25,10 +25,10 @@
 
 ## 4. 删 shim + 契约收口
 
-- [ ] 4.1 `grep -rn "observability.structured_logging" src tests`（排除 shim 自身与 binary）确认零旧路径残留
-- [ ] 4.2 删除 `observability/structured_logging.py` shim；新增「收口后无残留旧路径」测试转绿（§spec structured-logging 第三 Requirement 末 scenario）
-- [ ] 4.3 更新 CLAUDE.md：把 `structured_logging` 从「agent 运行时模块」列表移出，标为基础设施底座（理由：跨域日志底座，被 agent 与 platform 共同消费）；同步「现存待审计 agent→platform 依赖」相关措辞如涉及
-- [ ] 4.4 更新 `openspec/specs/observability/spec.md` Purpose 注记：structured logger 的模块归属移交 `structured-logging` spec（仅 Purpose 文字，非 Requirement 改动）
+- [x] 4.1 `grep -rn "observability.structured_logging" src tests`（排除 shim 自身与 binary）确认零旧路径残留
+- [x] 4.2 删除 `observability/structured_logging.py` shim；新增「收口后无残留旧路径」测试转绿（§spec structured-logging 第三 Requirement 末 scenario）
+- [x] 4.3 更新 CLAUDE.md：把 `structured_logging` 从「agent 运行时模块」列表移出，标为基础设施底座（理由：跨域日志底座，被 agent 与 platform 共同消费）；同步「现存待审计 agent→platform 依赖」相关措辞如涉及
+- [x] 4.4 更新 `openspec/specs/observability/spec.md` Purpose 注记：structured logger 的模块归属移交 `structured-logging` spec（仅 Purpose 文字，非 Requirement 改动）
 
 ## 5. 收尾验收
 

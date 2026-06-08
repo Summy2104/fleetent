@@ -85,7 +85,7 @@ agent runtime ──✗──→ platform        # 严格禁止反向依赖
 ```
 
 - **agent 运行时模块**（`runtime/`、`session/`、`im_gateway/`、`tools/`、`integrations/`、`model/`、`observability/`、`governance/`、`memory/`、`long_term_ctx/`、`reflection/`）MUST NOT `import fleetent.platform.*`，也不得调用 platform 模块来触发行为
-- **独立组件 / 基础设施**（`knowledge_base/` = 独立组件、`vector_store/` = 基础设施）同样 MUST NOT `import fleetent.platform.*`，但理由不是"属 agent 运行时"，而是它们是自包含的独立组件 / 基础设施；platform 仅通过管理薄壳驱动其 ingest，不被反向依赖
+- **独立组件 / 基础设施**（`knowledge_base/` = 独立组件、`vector_store/` = 基础设施、`structured_logging.py` = 跨域日志底座）同样 MUST NOT `import fleetent.platform.*`，但理由不是"属 agent 运行时"，而是它们是自包含的独立组件 / 基础设施；`structured_logging` 被 agent runtime 与 platform 共同消费（被消费、不反向依赖业务或控制面），定位等同 `vector_store`，故为顶层基础设施而非 agent 运行时业务
 - **agent 运行时产生的数据**（会话历史、压缩/token/恢复等元数据、运行轨迹）只能落到 agent 侧：session 文件、agent 侧 store、observability trace。**严禁写入 platform 的管理表**（如 `platform/chat_management` 的 `session_meta`）
 - platform 需要 agent 数据时，**读** agent 侧产物（trace / session 文件 / agent store），而非要求 agent 反向写入 platform 表
 - **验证基线**：任何改动后，agent 必须能在「无 platform、platform 的 DB 表不存在」的环境下完成 `fleetent agent run` 对话，相关功能不得依赖 platform 表才能工作
@@ -146,6 +146,7 @@ src/fleetent/
   # ── 平台与组件基础设施 ──
   knowledge_base/          ← KB 检索/向量化/解析/持久化运行时
   vector_store/            ← 向量嵌入和重排运行时
+  structured_logging.py    ← 跨域结构化日志底座（agent 与 platform 共同消费；顶层基础设施）
 
   # ── 治理 ──
   governance/
@@ -170,7 +171,7 @@ src/fleetent/
     traces.py            ← Agent 运行轨迹追踪（append-only）
     usage.py             ← 使用情况汇总查询
     diagnostics.py       ← 诊断信息导出和保留
-    {performance,structured_logging,startup_diagnostics,pilot_verification}.py
+    {performance,startup_diagnostics,pilot_verification}.py
 
   # ── 会话 ──
   session/

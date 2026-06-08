@@ -23,12 +23,24 @@ def test_module_lives_at_top_level_path() -> None:
     assert located.parent.name == "fleetent"
 
 
-def test_legacy_observability_path_still_works_via_shim() -> None:
-    shim = importlib.import_module("fleetent.observability.structured_logging")
-    target = importlib.import_module("fleetent.structured_logging")
+def test_legacy_observability_path_is_removed() -> None:
+    import pytest
 
-    # Shim re-exports the same objects from the relocated module.
-    assert shim.get_logger is target.get_logger
-    assert shim.configure_structured_logging is target.configure_structured_logging
-    assert shim.Logger is target.Logger
-    assert shim._redact_value is target._redact_value
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("fleetent.observability.structured_logging")
+
+
+def test_no_residual_legacy_path_imports() -> None:
+    legacy_module = "fleetent.observability" + ".structured_logging"
+    legacy_from = "fleetent.observability import " + "structured_logging"
+    self_path = Path(__file__).resolve()
+    roots = (Path("src/fleetent"), Path("tests"))
+    offenders: list[str] = []
+    for root in roots:
+        for py in root.rglob("*.py"):
+            if py.resolve() == self_path:
+                continue
+            text = py.read_text(encoding="utf-8")
+            if legacy_module in text or legacy_from in text:
+                offenders.append(str(py))
+    assert not offenders, f"residual legacy structured_logging path imports: {offenders}"
