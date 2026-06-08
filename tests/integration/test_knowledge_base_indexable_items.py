@@ -4,7 +4,7 @@ from tests.integration.test_migrations import apply_migrations
 
 
 def _patch_runtime_database(monkeypatch, tmp_path):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)
@@ -14,7 +14,7 @@ def _patch_runtime_database(monkeypatch, tmp_path):
 
 
 def _patch_runtime_settings(monkeypatch, **knowledge_base):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     settings = Settings(
         anthropic_api_key="test-key",
@@ -28,7 +28,7 @@ async def _noop_upsert(chunk_id: str, content: str, namespace: str) -> None:
 
 
 async def test_iter_indexable_knowledge_chunks_returns_tenant_kb_chunks(tmp_path, monkeypatch):
-    from fleetent.intelligence.knowledge_base import iter_indexable_knowledge_chunks, runtime
+    from fleetent.knowledge_base import iter_indexable_knowledge_chunks, runtime
 
     _patch_runtime_database(monkeypatch, tmp_path)
     _patch_runtime_settings(monkeypatch, chunk_size=20, chunk_overlap=0)
@@ -54,7 +54,7 @@ async def test_iter_indexable_knowledge_chunks_returns_tenant_kb_chunks(tmp_path
 
 
 async def test_iter_indexable_knowledge_chunks_excludes_other_kbs(tmp_path, monkeypatch):
-    from fleetent.intelligence.knowledge_base import iter_indexable_knowledge_chunks, runtime
+    from fleetent.knowledge_base import iter_indexable_knowledge_chunks, runtime
 
     _patch_runtime_database(monkeypatch, tmp_path)
     _patch_runtime_settings(monkeypatch, chunk_size=20, chunk_overlap=0)

@@ -7,9 +7,8 @@ from typing import Any
 
 import pytest
 
-from fleetent import observability
-from fleetent.intelligence import reflection
-from fleetent.intelligence.memory.models import MemoryItem
+from fleetent import observability, reflection
+from fleetent.memory.models import MemoryItem
 
 
 class _Cursor:

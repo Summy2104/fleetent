@@ -8,8 +8,8 @@ from tests.integration.test_migrations import apply_migrations
 async def test_new_google_drive_file_is_planned_for_ingest(monkeypatch, tmp_path):
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
     del database
-    from fleetent.intelligence.knowledge_base import SyncAction
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base import SyncAction
+    from fleetent.knowledge_base.connectors.google_drive import (
         FakeGoogleDriveClient,
         plan_google_drive_sync,
     )
@@ -28,12 +28,12 @@ async def test_new_google_drive_file_is_planned_for_ingest(monkeypatch, tmp_path
 
 async def test_changed_google_drive_file_is_planned_for_reingest(monkeypatch, tmp_path):
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import SyncAction, runtime
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base import SyncAction, runtime
+    from fleetent.knowledge_base.connectors import (
         LocalSourceState,
         LocalSourceStateStore,
     )
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base.connectors.google_drive import (
         FakeGoogleDriveClient,
         google_drive_fingerprint,
         plan_google_drive_sync,
@@ -65,12 +65,12 @@ async def test_changed_google_drive_file_is_planned_for_reingest(monkeypatch, tm
 
 async def test_unchanged_google_drive_file_is_planned_for_skip(monkeypatch, tmp_path):
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import SyncAction
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base import SyncAction
+    from fleetent.knowledge_base.connectors import (
         LocalSourceState,
         LocalSourceStateStore,
     )
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base.connectors.google_drive import (
         FakeGoogleDriveClient,
         google_drive_fingerprint,
         plan_google_drive_sync,
@@ -100,12 +100,12 @@ async def test_unchanged_google_drive_file_is_planned_for_skip(monkeypatch, tmp_
 
 async def test_missing_google_drive_source_state_is_planned_for_archive(monkeypatch, tmp_path):
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import SyncAction
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base import SyncAction
+    from fleetent.knowledge_base.connectors import (
         LocalSourceState,
         LocalSourceStateStore,
     )
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base.connectors.google_drive import (
         FakeGoogleDriveClient,
         plan_google_drive_sync,
     )
@@ -133,7 +133,7 @@ async def test_missing_google_drive_source_state_is_planned_for_archive(monkeypa
 
 
 def _config():
-    from fleetent.intelligence.knowledge_base import GoogleDriveConnectorConfig
+    from fleetent.knowledge_base import GoogleDriveConnectorConfig
 
     return GoogleDriveConnectorConfig(
         connector_id="gdrive-team",
@@ -145,7 +145,7 @@ def _config():
 
 
 def _file(file_id: str, *, rev: str):
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import GoogleDriveFile
+    from fleetent.knowledge_base.connectors.google_drive import GoogleDriveFile
 
     return GoogleDriveFile(
         id=file_id,
@@ -157,13 +157,13 @@ def _file(file_id: str, *, rev: str):
 
 
 def plan_modified_time_ns(file) -> int:
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import _modified_time_ns
+    from fleetent.knowledge_base.connectors.google_drive import _modified_time_ns
 
     return _modified_time_ns(file)
 
 
 def _patch_knowledge_runtime(monkeypatch, tmp_path):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)

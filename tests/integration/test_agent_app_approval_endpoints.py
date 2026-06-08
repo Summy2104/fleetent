@@ -7,6 +7,8 @@ approved without requiring the full platform server.
 
 from __future__ import annotations
 
+import contextlib
+import uuid
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
@@ -58,9 +60,10 @@ async def test_resolve_approval_happy_path(monkeypatch):
     async def noop(_msg: str) -> None:
         pass
 
+    approval_id = uuid.uuid4().hex[:12]
     task = asyncio.create_task(
         gate.request_approval(
-            approval_id="abc12345",
+            approval_id=approval_id,
             risk_level="medium",
             tool_name="run_code",
             tool_args={"code": "x=1"},
@@ -73,14 +76,12 @@ async def test_resolve_approval_happy_path(monkeypatch):
 
     client = _make_client(monkeypatch)
     resp = client.post(
-        "/approvals/abc12345/resolve",
+        f"/approvals/{approval_id}/resolve",
         json={"decision": "approved", "approver_user_id": "test"},
     )
     assert resp.status_code == 200
     assert resp.json()["decision"] == "approved"
 
     task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass

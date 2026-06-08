@@ -5,7 +5,7 @@ import pytest
 
 
 def test_reindex_public_api_shape_is_importable():
-    from fleetent.intelligence.vector_store import (
+    from fleetent.vector_store import (
         ReindexRequest,
         ReindexSummary,
         reindex,
@@ -45,17 +45,17 @@ def test_reindex_public_api_shape_is_importable():
     ],
 )
 def test_reindex_request_validation_fails_fast(request_kwargs, message):
-    from fleetent.intelligence.vector_store import ReindexRequest, reindex
+    from fleetent.vector_store import ReindexRequest, reindex
 
     with pytest.raises(ValueError, match=message):
         reindex(ReindexRequest(**request_kwargs))
 
 
 def test_reindex_memory_dry_run_scans_without_vector_writes(monkeypatch):
-    from fleetent.intelligence import memory
-    from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
+    from fleetent import memory
+    from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
-    reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
+    reindex_module = importlib.import_module("fleetent.vector_store.reindex")
     writes: list[tuple[str, object]] = []
     monkeypatch.setattr(
         memory,
@@ -89,9 +89,9 @@ def test_reindex_memory_dry_run_scans_without_vector_writes(monkeypatch):
 
 
 def test_reindex_knowledge_base_dry_run_scans_without_vector_writes(monkeypatch):
-    from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
+    from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
-    reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
+    reindex_module = importlib.import_module("fleetent.vector_store.reindex")
     writes: list[tuple[str, object]] = []
     monkeypatch.setattr(
         reindex_module.knowledge_base,
@@ -131,10 +131,10 @@ def test_reindex_knowledge_base_dry_run_scans_without_vector_writes(monkeypatch)
 
 
 def test_reindex_memory_rebuild_clears_namespace_before_upserts(monkeypatch):
-    from fleetent.intelligence import memory
-    from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
+    from fleetent import memory
+    from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
-    reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
+    reindex_module = importlib.import_module("fleetent.vector_store.reindex")
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
         memory,
@@ -169,10 +169,10 @@ def test_reindex_memory_rebuild_clears_namespace_before_upserts(monkeypatch):
 
 
 def test_reindex_memory_rebuild_upserts_each_item_with_content_and_namespace(monkeypatch):
-    from fleetent.intelligence import memory
-    from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
+    from fleetent import memory
+    from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
-    reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
+    reindex_module = importlib.import_module("fleetent.vector_store.reindex")
     upserts: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
         memory,
@@ -198,10 +198,10 @@ def test_reindex_memory_rebuild_upserts_each_item_with_content_and_namespace(mon
 
 
 def test_reindex_memory_rebuild_continues_after_item_failure(monkeypatch):
-    from fleetent.intelligence import memory
-    from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
+    from fleetent import memory
+    from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
-    reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
+    reindex_module = importlib.import_module("fleetent.vector_store.reindex")
     upserts: list[str] = []
     monkeypatch.setattr(
         memory,
@@ -233,10 +233,10 @@ def test_reindex_memory_rebuild_continues_after_item_failure(monkeypatch):
 
 
 def test_reindex_retries_transient_item_failure(monkeypatch):
-    from fleetent.intelligence import memory
-    from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
+    from fleetent import memory
+    from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
-    reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
+    reindex_module = importlib.import_module("fleetent.vector_store.reindex")
     calls: list[str] = []
     monkeypatch.setattr(
         memory,
@@ -262,10 +262,10 @@ def test_reindex_retries_transient_item_failure(monkeypatch):
 
 
 def test_reindex_applies_injectable_pacing_between_items(monkeypatch):
-    from fleetent.intelligence import memory
-    from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
+    from fleetent import memory
+    from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
-    reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
+    reindex_module = importlib.import_module("fleetent.vector_store.reindex")
     sleeps: list[float] = []
     monkeypatch.setattr(
         memory,
@@ -288,9 +288,9 @@ def test_reindex_applies_injectable_pacing_between_items(monkeypatch):
 
 
 def test_reindex_knowledge_base_rebuild_clears_namespace_before_upserts(monkeypatch):
-    from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
+    from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
-    reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
+    reindex_module = importlib.import_module("fleetent.vector_store.reindex")
     calls: list[tuple[str, str]] = []
     monkeypatch.setattr(
         reindex_module.knowledge_base,
@@ -325,9 +325,9 @@ def test_reindex_knowledge_base_rebuild_clears_namespace_before_upserts(monkeypa
 
 
 def test_reindex_knowledge_base_rebuild_upserts_each_chunk_content_and_namespace(monkeypatch):
-    from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
+    from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
-    reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
+    reindex_module = importlib.import_module("fleetent.vector_store.reindex")
     upserts: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
         reindex_module.knowledge_base,
@@ -353,9 +353,9 @@ def test_reindex_knowledge_base_rebuild_upserts_each_chunk_content_and_namespace
 
 
 def test_reindex_knowledge_base_rebuild_continues_after_chunk_failure(monkeypatch):
-    from fleetent.intelligence.vector_store import IndexableItem, ReindexRequest, reindex
+    from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
-    reindex_module = importlib.import_module("fleetent.intelligence.vector_store.reindex")
+    reindex_module = importlib.import_module("fleetent.vector_store.reindex")
     upserts: list[str] = []
     monkeypatch.setattr(
         reindex_module.knowledge_base,

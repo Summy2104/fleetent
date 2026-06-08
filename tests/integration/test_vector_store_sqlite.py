@@ -3,7 +3,7 @@ def _sqlite_database_url(path):
 
 
 async def test_sqlite_backend_clear_namespace_removes_only_target_namespace(tmp_path):
-    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+    from fleetent.vector_store.backend import SQLiteVectorBackend
 
     backend = SQLiteVectorBackend(database_url=_sqlite_database_url(tmp_path / "vectors.db"))
     await backend.upsert("id-a", [1.0, 0.0], namespace="mem:a")
@@ -16,7 +16,7 @@ async def test_sqlite_backend_clear_namespace_removes_only_target_namespace(tmp_
 
 
 async def test_sqlite_backend_clear_namespace_is_idempotent(tmp_path):
-    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+    from fleetent.vector_store.backend import SQLiteVectorBackend
 
     backend = SQLiteVectorBackend(database_url=_sqlite_database_url(tmp_path / "vectors.db"))
 

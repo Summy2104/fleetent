@@ -230,7 +230,7 @@ async def route(msg: NormalizedMessage) -> None:
         # steer-but-run-just-ended (race) or queue → fall through to the locked path.
 
     base_system = agent.system_prompt if agent else _SYSTEM
-    allowed_tools = agent.allowed_tools or None
+    allowed_tools = agent.allowed_tools if agent is not None and agent.allowed_tools else None
     agent_features = agent.features if agent else None
     model_policy = ModelPolicySnapshot.from_agent(agent) if agent else None
     # SB3: gate run_code on the IM path too; mode is resolved once per process.

@@ -3,7 +3,7 @@ from tests.integration.test_migrations import apply_migrations
 
 
 def _patch_reflection_db(monkeypatch, tmp_path):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     db_path = tmp_path / "skill-proposals.db"
     apply_migrations(db_path)
@@ -13,8 +13,8 @@ def _patch_reflection_db(monkeypatch, tmp_path):
 
 
 def test_skill_proposal_persistence_redacts_raw_transcript(monkeypatch, tmp_path):
-    from fleetent.intelligence import reflection
-    from fleetent.intelligence.reflection import ReflectionFinding
+    from fleetent import reflection
+    from fleetent.reflection import ReflectionFinding
 
     database = _patch_reflection_db(monkeypatch, tmp_path)
     raw_transcript = "RAW TRANSCRIPT SHOULD NOT BE STORED"
@@ -49,8 +49,8 @@ def test_skill_proposal_persistence_redacts_raw_transcript(monkeypatch, tmp_path
 
 
 async def test_apply_skill_proposal_updates_state_after_boundary(monkeypatch, tmp_path):
-    from fleetent.intelligence import reflection
-    from fleetent.intelligence.reflection import ReflectionFinding
+    from fleetent import reflection
+    from fleetent.reflection import ReflectionFinding
 
     _patch_reflection_db(monkeypatch, tmp_path)
     calls: list[str] = []

@@ -4,8 +4,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from fleetent import memory
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.intelligence import memory
 from tests.integration.test_migrations import apply_migrations
 
 FIXTURE = Path(__file__).parent / "fixtures" / "memory_quality_trend" / "basic.json"

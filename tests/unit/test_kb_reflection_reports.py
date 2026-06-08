@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 
 def test_kb_reflection_public_api_is_importable():
-    from fleetent.intelligence.reflection import (
+    from fleetent.reflection import (
         KnowledgeBaseReflectionFinding,
         KnowledgeBaseReflectionReport,
         run_kb_reflection_report,
@@ -16,7 +16,7 @@ def test_kb_reflection_public_api_is_importable():
 
 
 async def test_kb_reflection_uses_observability_and_kb_public_apis(monkeypatch):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     trace_calls = []
     connector_calls = []
@@ -60,7 +60,7 @@ async def test_kb_reflection_uses_observability_and_kb_public_apis(monkeypatch):
 
 
 async def test_kb_reflection_generates_quality_and_graph_gap_findings(monkeypatch):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     events = [
         SimpleNamespace(

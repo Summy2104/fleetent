@@ -106,9 +106,10 @@ def _dir_listing(path: Path) -> str:
     truncated = total > DIR_MAX_ENTRIES
     visible = entries[:DIR_MAX_ENTRIES]
 
-    lines = [
-        f"{path}/ ({total} 个条目{'，已截断至前 ' + str(DIR_MAX_ENTRIES) + ' 条' if truncated else ''})"
-    ]
+    suffix = (
+        f"（共 {total} 项，已截断至前 {DIR_MAX_ENTRIES} 条）" if truncated else f"（共 {total} 项）"
+    )
+    lines = [f"{path}/ {suffix}"]
     for entry in visible:
         try:
             stat = entry.stat()
@@ -206,7 +207,6 @@ def _exact_replace(text: str, old: str, new: str, replace_all: bool) -> str | No
 def _line_trimmed_replace(text: str, old: str, new: str, replace_all: bool) -> str | None:
     """Layer 2: match after stripping each line."""
     old_stripped = "\n".join(line.rstrip() for line in old.splitlines())
-    lines = text.splitlines(keepends=True)
     # Build stripped version for matching
     stripped_text = "\n".join(line.rstrip() for line in text.splitlines())
     if old_stripped not in stripped_text:
@@ -217,7 +217,7 @@ def _line_trimmed_replace(text: str, old: str, new: str, replace_all: bool) -> s
     text_lines = text.splitlines()
     for i in range(len(text_lines) - len(old_lines) + 1):
         chunk = text_lines[i : i + len(old_lines)]
-        if all(a.rstrip() == b.rstrip() for a, b in zip(chunk, old_lines)):
+        if all(a.rstrip() == b.rstrip() for a, b in zip(chunk, old_lines, strict=True)):
             new_lines = new.splitlines()
             replaced = text_lines[:i] + new_lines + text_lines[i + len(old_lines) :]
             result = "\n".join(replaced)
@@ -262,11 +262,11 @@ def _line_ending_replace(text: str, old: str, new: str, replace_all: bool) -> st
 
 def _remove_common_indent(s: str) -> str:
     lines = s.splitlines()
-    non_empty = [l for l in lines if l.strip()]
+    non_empty = [line for line in lines if line.strip()]
     if not non_empty:
         return s
-    indent = min(len(l) - len(l.lstrip()) for l in non_empty)
-    return "\n".join(l[indent:] if len(l) > indent else l for l in lines)
+    indent = min(len(line) - len(line.lstrip()) for line in non_empty)
+    return "\n".join(line[indent:] if len(line) > indent else line for line in lines)
 
 
 def _indentation_flexible_replace(text: str, old: str, new: str, replace_all: bool) -> str | None:
@@ -292,7 +292,7 @@ def _context_aware_replace(text: str, old: str, new: str, replace_all: bool) -> 
         chunk = text_lines[i : i + len(old_lines)]
         if chunk[0].strip() != first or chunk[-1].strip() != last:
             continue
-        if all(a.strip() == b.strip() for a, b in zip(chunk[1:-1], old_lines[1:-1])):
+        if all(a.strip() == b.strip() for a, b in zip(chunk[1:-1], old_lines[1:-1], strict=True)):
             new_lines = new.splitlines()
             replaced = text_lines[:i] + new_lines + text_lines[i + len(old_lines) :]
             result = "\n".join(replaced)
@@ -376,14 +376,25 @@ def search_content(
     include: Annotated[str, "文件 glob 过滤，如 '*.py'（可选）"] = "",
     max_results: Annotated[int, "最大返回条数（默认 100）"] = 100,
 ) -> str:
-    """Search for a regex pattern across files. Uses ripgrep when available, falls back to Python re."""
+    """Search for a regex pattern across files.
+
+    Uses ripgrep when available, falls back to Python regular expressions.
+    """
     if _RG_BIN:
         return _rg_search(pattern, path, include, max_results)
     return _py_search(pattern, path, include, max_results)
 
 
 def _rg_search(pattern: str, path: str, include: str, max_results: int) -> str:
-    cmd = [_RG_BIN, "--line-number", "--no-heading", "--color=never", pattern, path]
+    assert _RG_BIN is not None
+    cmd: list[str] = [
+        _RG_BIN,
+        "--line-number",
+        "--no-heading",
+        "--color=never",
+        pattern,
+        path,
+    ]
     if include:
         cmd += ["--glob", include]
     try:
@@ -411,8 +422,6 @@ def _py_search(pattern: str, path: str, include: str, max_results: int) -> str:
 
     results: list[str] = []
     root = Path(path)
-    glob = f"**/{include}" if include else "**/*"
-
     paths_to_search = [root] if root.is_file() else root.rglob(include or "*")
 
     for fp in paths_to_search:
@@ -459,7 +468,8 @@ def search_files(
 
 
 def _rg_files(pattern: str, path: str, max_results: int) -> str:
-    cmd = [_RG_BIN, "--files", "--glob", pattern, path]
+    assert _RG_BIN is not None
+    cmd: list[str] = [_RG_BIN, "--files", "--glob", pattern, path]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         files = result.stdout.splitlines()

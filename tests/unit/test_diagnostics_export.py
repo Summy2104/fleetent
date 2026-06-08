@@ -126,7 +126,7 @@ def test_export_diagnostics_includes_connector_environment_and_config(monkeypatc
 
 
 def test_export_diagnostics_includes_latest_connector_status(monkeypatch, tmp_path):
-    from fleetent.intelligence.knowledge_base.operations import (
+    from fleetent.knowledge_base.operations import (
         ConnectorStatus,
         ConnectorSummary,
     )
@@ -211,7 +211,7 @@ def test_export_diagnostics_excludes_business_data_and_database_files(tmp_path):
 
 
 def test_export_records_status_unavailable_when_status_lookup_raises(monkeypatch, tmp_path):
-    from fleetent.intelligence.knowledge_base.operations import ConnectorSummary
+    from fleetent.knowledge_base.operations import ConnectorSummary
     from fleetent.observability import diagnostics
     from fleetent.observability.diagnostics import DiagnosticsExportRequest, export_diagnostics
 
@@ -253,7 +253,7 @@ def test_export_records_status_unavailable_when_status_lookup_raises(monkeypatch
 
 
 def test_get_connector_status_delegates_to_operations(monkeypatch):
-    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.knowledge_base import operations
     from fleetent.observability import diagnostics
 
     monkeypatch.setattr(
@@ -264,7 +264,7 @@ def test_get_connector_status_delegates_to_operations(monkeypatch):
 
 
 def test_list_configured_connectors_delegates_to_operations(monkeypatch):
-    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.knowledge_base import operations
     from fleetent.observability import diagnostics
 
     monkeypatch.setattr(

@@ -1,0 +1,54 @@
+from fleetent.db import create_database
+from tests.integration.test_migrations import apply_migrations
+
+
+def _patch_reflection_db(monkeypatch, tmp_path):
+    from fleetent import reflection
+
+    db_path = tmp_path / "reflection-mgmt.db"
+    apply_migrations(db_path)
+    database = create_database(f"sqlite:///{db_path}")
+    monkeypatch.setattr(reflection, "_database", lambda: database)
+    return database
+
+
+def test_reflection_management_lists_skill_proposals_from_agent_store(monkeypatch, tmp_path):
+    from fleetent import reflection
+    from fleetent.platform import reflection_management
+    from fleetent.reflection import ReflectionFinding
+
+    _patch_reflection_db(monkeypatch, tmp_path)
+    [proposal] = reflection.generate_skill_proposals(
+        findings=[
+            ReflectionFinding(
+                type="skill_opportunity",
+                summary="Repeated task pattern may become a skill: triage inbox",
+                evidence_ids=["trace-a", "trace-b"],
+                metadata={"pattern": "triage inbox"},
+            )
+        ]
+    )
+
+    rows = reflection_management.reflection_list_proposals()
+    assert any(r["id"] == proposal.id for r in rows)
+
+    diff = reflection_management.reflection_proposal_diff(proposal.id)
+    assert diff["proposal_id"] == proposal.id
+
+
+def test_skill_admin_api_consumes_reflection_management():
+    from fleetent.platform import reflection_management
+    from fleetent.platform.skill_management import skill_admin_api
+
+    assert (
+        skill_admin_api.reflection_list_proposals is reflection_management.reflection_list_proposals
+    )
+    assert (
+        skill_admin_api.reflection_proposal_diff is reflection_management.reflection_proposal_diff
+    )
+
+
+def test_reflection_management_exposes_trend_summary_over_agent_store():
+    from fleetent.platform import reflection_management
+
+    assert hasattr(reflection_management, "get_reflection_trend_summary")

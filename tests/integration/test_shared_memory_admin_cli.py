@@ -21,7 +21,7 @@ def _run_admin(*args: str) -> tuple[str, str, int]:
 
 
 def _patch_shared_db(monkeypatch, tmp_path):
-    from fleetent.intelligence.memory import store
+    from fleetent.memory import store
     from tests.integration.test_migrations import apply_migrations
 
     db_path = tmp_path / "shared-memory-cli.db"

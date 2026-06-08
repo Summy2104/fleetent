@@ -13,8 +13,7 @@ async def test_memory_candidate_generates_pending_proposal_without_modifying_mem
     tmp_path,
     monkeypatch,
 ):
-    from fleetent import observability
-    from fleetent.intelligence import reflection
+    from fleetent import observability, reflection
 
     db_path = tmp_path / "reflection_maintenance.db"
     apply_migrations(db_path)
@@ -56,9 +55,8 @@ async def test_memory_conflict_generates_owner_review_proposal_without_memory_wr
     tmp_path,
     monkeypatch,
 ):
-    from fleetent import observability
-    from fleetent.intelligence import memory as memory_layer
-    from fleetent.intelligence import reflection
+    from fleetent import memory as memory_layer
+    from fleetent import observability, reflection
 
     db_path = tmp_path / "reflection_maintenance.db"
     apply_migrations(db_path)
@@ -135,8 +133,7 @@ async def test_memory_conflict_generates_owner_review_proposal_without_memory_wr
 
 
 async def test_team_or_project_fact_suggests_shared_memory_or_kb(tmp_path, monkeypatch):
-    from fleetent import observability
-    from fleetent.intelligence import reflection
+    from fleetent import observability, reflection
 
     db_path = tmp_path / "reflection_maintenance.db"
     apply_migrations(db_path)
@@ -172,7 +169,7 @@ async def test_team_or_project_fact_suggests_shared_memory_or_kb(tmp_path, monke
 
 
 async def test_memory_layer_public_mutation_rejects_cross_user_target(tmp_path, monkeypatch):
-    from fleetent.intelligence import memory as memory_layer
+    from fleetent import memory as memory_layer
 
     db_path = tmp_path / "reflection_maintenance.db"
     apply_migrations(db_path)

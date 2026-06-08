@@ -11,8 +11,8 @@ def test_skill_proposal_evaluation_fixture_covers_expected_and_forbidden_proposa
     monkeypatch,
     tmp_path,
 ):
-    from fleetent.intelligence import reflection
-    from fleetent.intelligence.reflection import ReflectionFinding
+    from fleetent import reflection
+    from fleetent.reflection import ReflectionFinding
 
     payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
     db_path = tmp_path / "skill-proposals-eval.db"

@@ -68,7 +68,7 @@ def _reset_long_term_ctx_knowledge_provider():  # type: ignore[no-untyped-def]
     # long_term_ctx holds the knowledge provider in a module global; tests that
     # set it must not leak it into later tests (ordering-dependent failures).
     yield
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     long_term_ctx.set_knowledge_provider(None)
 

@@ -2,14 +2,14 @@ from pathlib import Path
 
 
 def test_connector_boundary_public_api_is_importable():
-    from fleetent.intelligence.knowledge_base.connectors import DataSource, DocumentRef
+    from fleetent.knowledge_base.connectors import DataSource, DocumentRef
 
     assert DataSource is not None
     assert DocumentRef is not None
 
 
 def test_document_ref_contains_connector_document_identity_and_location():
-    from fleetent.intelligence.knowledge_base.connectors import DocumentRef
+    from fleetent.knowledge_base.connectors import DocumentRef
 
     ref = DocumentRef(
         id="local:runbook.md",
@@ -29,7 +29,7 @@ def test_document_ref_contains_connector_document_identity_and_location():
 
 
 def test_local_directory_source_requires_root_under_explicit_allowlist(tmp_path):
-    from fleetent.intelligence.knowledge_base.connectors import LocalDirectoryDataSource
+    from fleetent.knowledge_base.connectors import LocalDirectoryDataSource
 
     allowed_root = tmp_path / "allowed"
     outside_root = tmp_path / "outside"
@@ -51,7 +51,7 @@ def test_local_directory_source_requires_root_under_explicit_allowlist(tmp_path)
 
 
 def test_local_directory_source_maps_supported_file_extensions(tmp_path):
-    from fleetent.intelligence.knowledge_base.connectors import LocalDirectoryDataSource
+    from fleetent.knowledge_base.connectors import LocalDirectoryDataSource
 
     root = tmp_path / "docs"
     root.mkdir()
@@ -81,7 +81,7 @@ def test_local_directory_source_maps_supported_file_extensions(tmp_path):
 
 
 def test_local_directory_source_fetch_reads_content_and_preserves_path_metadata(tmp_path):
-    from fleetent.intelligence.knowledge_base.connectors import LocalDirectoryDataSource
+    from fleetent.knowledge_base.connectors import LocalDirectoryDataSource
 
     root = tmp_path / "docs"
     nested = root / "team"
@@ -99,7 +99,7 @@ def test_local_directory_source_fetch_reads_content_and_preserves_path_metadata(
 
 
 def test_local_directory_source_fetch_rejects_path_traversal_outside_root(tmp_path):
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base.connectors import (
         DocumentRef,
         LocalDirectoryDataSource,
     )

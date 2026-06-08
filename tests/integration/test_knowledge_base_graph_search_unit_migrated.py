@@ -1,16 +1,16 @@
 from fleetent.db import create_database
-from fleetent.intelligence.knowledge_base.extraction import (
+from fleetent.knowledge_base.extraction import (
     ExtractedEntity,
     ExtractedRelation,
 )
-from fleetent.intelligence.knowledge_base.extraction_store import KnowledgeEntityStore
-from fleetent.intelligence.knowledge_base.models import KnowledgeChunk, KnowledgeDocument
-from fleetent.intelligence.knowledge_base.store import KnowledgeStore
+from fleetent.knowledge_base.extraction_store import KnowledgeEntityStore
+from fleetent.knowledge_base.models import KnowledgeChunk, KnowledgeDocument
+from fleetent.knowledge_base.store import KnowledgeStore
 from tests.integration.test_migrations import apply_migrations
 
 
 def test_match_entities_by_normalized_query_with_tenant_kb_scope(tmp_path):
-    from fleetent.intelligence.knowledge_base.graph_search import match_entities
+    from fleetent.knowledge_base.retrieval.graph_search import match_entities
 
     database = _seed_entities(tmp_path)
 
@@ -24,7 +24,7 @@ def test_match_entities_by_normalized_query_with_tenant_kb_scope(tmp_path):
 
 
 def test_match_entities_uses_metadata_aliases(tmp_path):
-    from fleetent.intelligence.knowledge_base.graph_search import match_entities
+    from fleetent.knowledge_base.retrieval.graph_search import match_entities
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)
@@ -49,7 +49,7 @@ async def test_graph_search_depth_greater_than_one_fails_fast(monkeypatch, tmp_p
     database = _seed_entities(tmp_path)
     _patch_graph_runtime(monkeypatch, database)
 
-    from fleetent.intelligence.knowledge_base import graph_search
+    from fleetent.knowledge_base import graph_search
 
     try:
         await graph_search("Acme", "tenant-a", ["support"], depth=2)
@@ -63,7 +63,7 @@ async def test_graph_search_limit_less_than_one_returns_empty(monkeypatch, tmp_p
     database = _seed_entities(tmp_path)
     _patch_graph_runtime(monkeypatch, database)
 
-    from fleetent.intelligence.knowledge_base import graph_search
+    from fleetent.knowledge_base import graph_search
 
     result = await graph_search("Acme", "tenant-a", ["support"], limit=0)
 
@@ -71,7 +71,7 @@ async def test_graph_search_limit_less_than_one_returns_empty(monkeypatch, tmp_p
 
 
 def test_match_entities_empty_kb_ids_returns_empty(tmp_path):
-    from fleetent.intelligence.knowledge_base.graph_search import match_entities
+    from fleetent.knowledge_base.retrieval.graph_search import match_entities
 
     database = _seed_entities(tmp_path)
 
@@ -79,7 +79,7 @@ def test_match_entities_empty_kb_ids_returns_empty(tmp_path):
 
 
 def test_match_entities_handles_list_aliases_and_bad_metadata(tmp_path):
-    from fleetent.intelligence.knowledge_base.graph_search import match_entities
+    from fleetent.knowledge_base.retrieval.graph_search import match_entities
 
     db_path = tmp_path / "aliases.db"
     apply_migrations(db_path)
@@ -145,7 +145,7 @@ async def test_graph_search_merges_scores_for_shared_chunk(monkeypatch, tmp_path
     )
     _patch_graph_runtime(monkeypatch, database)
 
-    from fleetent.intelligence.knowledge_base import graph_search
+    from fleetent.knowledge_base import graph_search
 
     result = await graph_search("tell me about Acme", "tenant-a", ["support"], depth=1)
 
@@ -162,7 +162,7 @@ async def test_graph_search_no_matched_entities_returns_empty(monkeypatch, tmp_p
     database = _seed_entities(tmp_path)
     _patch_graph_runtime(monkeypatch, database)
 
-    from fleetent.intelligence.knowledge_base import graph_search
+    from fleetent.knowledge_base import graph_search
 
     result = await graph_search("nothing relevant here", "tenant-a", ["support"])
 
@@ -175,7 +175,7 @@ async def test_graph_search_depth_zero_only_direct_matches(monkeypatch, tmp_path
     database = _seed_graph(tmp_path)
     _patch_graph_runtime(monkeypatch, database)
 
-    from fleetent.intelligence.knowledge_base import graph_search
+    from fleetent.knowledge_base import graph_search
 
     result = await graph_search("tell me about Acme", "tenant-a", ["support"], depth=0)
 
@@ -189,7 +189,7 @@ async def test_graph_search_depth_one_collects_relation_and_related_evidence(mon
     database = _seed_graph(tmp_path)
     _patch_graph_runtime(monkeypatch, database)
 
-    from fleetent.intelligence.knowledge_base import graph_search
+    from fleetent.knowledge_base import graph_search
 
     result = await graph_search("tell me about Acme", "tenant-a", ["support"], depth=1)
 
@@ -212,7 +212,7 @@ async def test_graph_search_orders_by_score_then_position_and_respects_limit(mon
     database = _seed_graph(tmp_path)
     _patch_graph_runtime(monkeypatch, database)
 
-    from fleetent.intelligence.knowledge_base import graph_search
+    from fleetent.knowledge_base import graph_search
 
     result = await graph_search("tell me about Acme", "tenant-a", ["support"], limit=2)
 
@@ -317,7 +317,7 @@ def _seed_entities(tmp_path):
 
 def _patch_graph_runtime(monkeypatch, database):
     from fleetent.config import KnowledgeBaseSettings
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     config = KnowledgeBaseSettings(default_tenant_id="tenant-a", default_kb_id="support")
     monkeypatch.setattr(runtime, "_database", lambda: database)

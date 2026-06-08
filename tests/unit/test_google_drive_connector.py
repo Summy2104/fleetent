@@ -8,7 +8,7 @@ import respx
 
 
 def test_google_drive_connector_config_public_api_is_importable():
-    from fleetent.intelligence.knowledge_base import GoogleDriveConnectorConfig
+    from fleetent.knowledge_base import GoogleDriveConnectorConfig
 
     config = GoogleDriveConnectorConfig(
         connector_id="gdrive-team",
@@ -27,7 +27,7 @@ def test_google_drive_connector_config_public_api_is_importable():
 
 
 def test_file_credential_ref_resolver_supports_local_token_file(tmp_path):
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base.connectors.google_drive import (
         FileCredentialRefResolver,
     )
 
@@ -42,7 +42,7 @@ def test_file_credential_ref_resolver_supports_local_token_file(tmp_path):
 
 
 def test_google_drive_credential_ref_resolver_supports_env(monkeypatch):
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base.connectors.google_drive import (
         CredentialRefResolver,
     )
 
@@ -56,7 +56,7 @@ def test_google_drive_credential_ref_resolver_supports_env(monkeypatch):
 
 
 def test_google_drive_credential_ref_resolver_supports_flat_env_prefix(monkeypatch):
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base.connectors.google_drive import (
         CredentialRefResolver,
     )
 
@@ -78,8 +78,8 @@ def test_google_drive_credential_ref_resolver_supports_flat_env_prefix(monkeypat
 
 
 async def test_auth_failure_marks_summary_auth_failed():
-    from fleetent.intelligence.knowledge_base import GoogleDriveConnectorConfig
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base import GoogleDriveConnectorConfig
+    from fleetent.knowledge_base.connectors.google_drive import (
         FakeGoogleDriveClient,
         plan_google_drive_sync,
     )
@@ -101,7 +101,7 @@ async def test_auth_failure_marks_summary_auth_failed():
 
 
 def test_fake_drive_client_lists_only_requested_folder():
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base.connectors.google_drive import (
         FakeGoogleDriveClient,
         GoogleDriveFile,
     )
@@ -133,7 +133,7 @@ def test_fake_drive_client_lists_only_requested_folder():
 
 @respx.mock
 def test_http_google_drive_client_lists_files_with_bearer_auth(tmp_path):
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base.connectors.google_drive import (
         HttpGoogleDriveClient,
     )
 
@@ -175,7 +175,7 @@ def test_http_google_drive_client_lists_files_with_bearer_auth(tmp_path):
 
 @respx.mock
 def test_http_google_drive_client_accepts_env_credential_ref(monkeypatch):
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base.connectors.google_drive import (
         HttpGoogleDriveClient,
     )
 
@@ -195,7 +195,7 @@ def test_http_google_drive_client_accepts_env_credential_ref(monkeypatch):
 
 @respx.mock
 def test_http_google_drive_client_downloads_and_exports_files(tmp_path):
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base.connectors.google_drive import (
         XLSX_MIME,
         HttpGoogleDriveClient,
     )
@@ -219,7 +219,7 @@ def test_http_google_drive_client_downloads_and_exports_files(tmp_path):
 
 @respx.mock
 def test_http_google_drive_client_refreshes_expired_oauth_token(tmp_path):
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base.connectors.google_drive import (
         HttpGoogleDriveClient,
     )
 
@@ -252,8 +252,8 @@ def test_http_google_drive_client_refreshes_expired_oauth_token(tmp_path):
 
 
 async def test_google_drive_listing_marks_supported_and_unsupported_mime_types():
-    from fleetent.intelligence.knowledge_base import GoogleDriveConnectorConfig, SyncAction
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base import GoogleDriveConnectorConfig, SyncAction
+    from fleetent.knowledge_base.connectors.google_drive import (
         FakeGoogleDriveClient,
         GoogleDriveFile,
         plan_google_drive_sync,
@@ -306,8 +306,8 @@ async def test_google_drive_listing_marks_supported_and_unsupported_mime_types()
 
 
 async def test_google_drive_malformed_file_metadata_is_counted_as_failed():
-    from fleetent.intelligence.knowledge_base import GoogleDriveConnectorConfig
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base import GoogleDriveConnectorConfig
+    from fleetent.knowledge_base.connectors.google_drive import (
         FakeGoogleDriveClient,
         GoogleDriveFile,
         plan_google_drive_sync,
@@ -341,8 +341,8 @@ async def test_google_drive_malformed_file_metadata_is_counted_as_failed():
 
 
 async def test_google_drive_export_or_download_failure_is_counted_per_item():
-    from fleetent.intelligence.knowledge_base import GoogleDriveConnectorConfig
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base import GoogleDriveConnectorConfig
+    from fleetent.knowledge_base.connectors.google_drive import (
         FakeGoogleDriveClient,
         GoogleDriveFile,
         execute_google_drive_sync_plan,
@@ -406,7 +406,7 @@ async def test_google_drive_export_or_download_failure_is_counted_per_item():
     ],
 )
 def test_google_drive_format_detection(filename, mime_type, expected_format):
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base.connectors.google_drive import (
         GoogleDriveFile,
         google_drive_document_format,
     )
@@ -425,7 +425,7 @@ def test_google_drive_format_detection(filename, mime_type, expected_format):
 
 
 def test_google_drive_parser_dispatch_uses_export_or_download():
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base.connectors.google_drive import (
         FakeGoogleDriveClient,
         GoogleDriveFile,
         parse_google_drive_file,
@@ -458,13 +458,13 @@ def test_google_drive_parser_dispatch_uses_export_or_download():
 
 
 def test_google_drive_advanced_parser_dispatch_uses_registry(monkeypatch):
-    from fleetent.intelligence.knowledge_base.connectors import google_drive
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base.connectors import google_drive
+    from fleetent.knowledge_base.connectors.google_drive import (
         FakeGoogleDriveClient,
         GoogleDriveFile,
         parse_google_drive_file,
     )
-    from fleetent.intelligence.knowledge_base.parsers import ParsedDocument, ParsedSection
+    from fleetent.knowledge_base.parsers import ParsedDocument, ParsedSection
 
     calls = []
 

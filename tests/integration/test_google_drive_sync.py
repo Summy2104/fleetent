@@ -9,8 +9,8 @@ from tests.integration.test_migrations import apply_migrations
 
 async def test_google_drive_sync_ingests_new_files_into_tenant_kb(monkeypatch, tmp_path):
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import sync_google_drive
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base import sync_google_drive
+    from fleetent.knowledge_base.connectors.google_drive import (
         FakeGoogleDriveClient,
     )
 
@@ -47,8 +47,8 @@ async def test_google_drive_sync_ingests_new_files_into_tenant_kb(monkeypatch, t
 
 async def test_google_drive_reingest_changed_replaces_old_document(monkeypatch, tmp_path):
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import sync_google_drive
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import FakeGoogleDriveClient
+    from fleetent.knowledge_base import sync_google_drive
+    from fleetent.knowledge_base.connectors.google_drive import FakeGoogleDriveClient
 
     first = await sync_google_drive(
         _config(),
@@ -77,8 +77,8 @@ async def test_google_drive_reingest_changed_replaces_old_document(monkeypatch, 
 
 async def test_google_drive_archive_missing_does_not_call_physical_delete(monkeypatch, tmp_path):
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import runtime, sync_google_drive
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import FakeGoogleDriveClient
+    from fleetent.knowledge_base import runtime, sync_google_drive
+    from fleetent.knowledge_base.connectors.google_drive import FakeGoogleDriveClient
 
     await sync_google_drive(
         _config(),
@@ -107,8 +107,8 @@ async def test_google_drive_archive_missing_does_not_call_physical_delete(monkey
 
 async def test_google_drive_item_failure_does_not_block_following_items(monkeypatch, tmp_path):
     _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import sync_google_drive
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import FakeGoogleDriveClient
+    from fleetent.knowledge_base import sync_google_drive
+    from fleetent.knowledge_base.connectors.google_drive import FakeGoogleDriveClient
 
     summary = await sync_google_drive(
         _config(),
@@ -129,8 +129,8 @@ async def test_google_drive_item_failure_does_not_block_following_items(monkeypa
 
 async def test_sync_google_drive_uses_plan_then_executor(monkeypatch, tmp_path):
     _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import sync_google_drive
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base import sync_google_drive
+    from fleetent.knowledge_base.connectors.google_drive import (
         FakeGoogleDriveClient,
         GoogleDriveSyncPlan,
     )
@@ -146,11 +146,11 @@ async def test_sync_google_drive_uses_plan_then_executor(monkeypatch, tmp_path):
         return _execution_summary()
 
     monkeypatch.setattr(
-        "fleetent.intelligence.knowledge_base.connectors.google_drive.plan_google_drive_sync",
+        "fleetent.knowledge_base.connectors.google_drive.plan_google_drive_sync",
         fake_plan,
     )
     monkeypatch.setattr(
-        "fleetent.intelligence.knowledge_base.connectors.google_drive.execute_google_drive_sync_plan",
+        "fleetent.knowledge_base.connectors.google_drive.execute_google_drive_sync_plan",
         fake_execute,
     )
 
@@ -161,7 +161,7 @@ async def test_sync_google_drive_uses_plan_then_executor(monkeypatch, tmp_path):
 
 
 def _config():
-    from fleetent.intelligence.knowledge_base import GoogleDriveConnectorConfig
+    from fleetent.knowledge_base import GoogleDriveConnectorConfig
 
     return GoogleDriveConnectorConfig(
         connector_id="gdrive-team",
@@ -173,7 +173,7 @@ def _config():
 
 
 def _google_doc(file_id: str, name: str, *, rev: str = "rev-1"):
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import GoogleDriveFile
+    from fleetent.knowledge_base.connectors.google_drive import GoogleDriveFile
 
     return GoogleDriveFile(
         id=file_id,
@@ -185,19 +185,19 @@ def _google_doc(file_id: str, name: str, *, rev: str = "rev-1"):
 
 
 def _empty_summary():
-    from fleetent.intelligence.knowledge_base import SyncPlanSummary
+    from fleetent.knowledge_base import SyncPlanSummary
 
     return SyncPlanSummary(scanned=0, planned=0)
 
 
 def _execution_summary():
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import GoogleDriveSyncSummary
+    from fleetent.knowledge_base.connectors.google_drive import GoogleDriveSyncSummary
 
     return GoogleDriveSyncSummary(scanned=0, planned=0)
 
 
 def _patch_knowledge_runtime(monkeypatch, tmp_path):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)

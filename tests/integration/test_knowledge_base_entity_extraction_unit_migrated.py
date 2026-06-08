@@ -2,7 +2,7 @@ import pytest
 
 
 def test_extraction_models_validate_supported_entity_and_relation_types():
-    from fleetent.intelligence.knowledge_base.extraction import (
+    from fleetent.knowledge_base.extraction import (
         ExtractedEntity,
         ExtractedRelation,
         validate_entity_type,
@@ -26,7 +26,7 @@ def test_extraction_models_validate_supported_entity_and_relation_types():
 
 @pytest.mark.parametrize("entity_type", ["vendor", "feature", ""])
 def test_unsupported_entity_type_fails_fast(entity_type):
-    from fleetent.intelligence.knowledge_base.extraction import ExtractedEntity
+    from fleetent.knowledge_base.extraction import ExtractedEntity
 
     with pytest.raises(ValueError, match="unsupported entity type"):
         ExtractedEntity(entity_type=entity_type, name="Acme")
@@ -34,7 +34,7 @@ def test_unsupported_entity_type_fails_fast(entity_type):
 
 @pytest.mark.parametrize("relation_type", ["serves", "blocks", ""])
 def test_unsupported_relation_type_fails_fast(relation_type):
-    from fleetent.intelligence.knowledge_base.extraction import (
+    from fleetent.knowledge_base.extraction import (
         ExtractedEntity,
         ExtractedRelation,
     )
@@ -51,15 +51,15 @@ def test_unsupported_relation_type_fails_fast(relation_type):
 
 
 def test_entity_name_normalization_trims_casefolds_and_collapses_whitespace():
-    from fleetent.intelligence.knowledge_base.extraction import normalize_entity_name
+    from fleetent.knowledge_base.extraction import normalize_entity_name
 
     assert normalize_entity_name("  Customer   A\nTeam ") == "customer a team"
 
 
 def test_entity_store_upsert_merges_within_kb_and_keeps_kbs_separate(tmp_path):
     from fleetent.db import create_database
-    from fleetent.intelligence.knowledge_base.extraction import ExtractedEntity
-    from fleetent.intelligence.knowledge_base.extraction_store import KnowledgeEntityStore
+    from fleetent.knowledge_base.extraction import ExtractedEntity
+    from fleetent.knowledge_base.extraction_store import KnowledgeEntityStore
     from tests.integration.test_migrations import apply_migrations
 
     db_path = tmp_path / "knowledge.db"
@@ -77,7 +77,7 @@ def test_entity_store_upsert_merges_within_kb_and_keeps_kbs_separate(tmp_path):
 
 
 def test_deterministic_extractor_extracts_fixture_entities():
-    from fleetent.intelligence.knowledge_base.extraction import deterministic_extract
+    from fleetent.knowledge_base.extraction import deterministic_extract
 
     result = deterministic_extract(
         """
@@ -103,7 +103,7 @@ def test_deterministic_extractor_extracts_fixture_entities():
 
 
 def test_deterministic_extractor_extracts_relations_with_chunk_evidence():
-    from fleetent.intelligence.knowledge_base.extraction import deterministic_extract
+    from fleetent.knowledge_base.extraction import deterministic_extract
 
     result = deterministic_extract(
         """

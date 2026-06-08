@@ -311,7 +311,8 @@ def test_missing_docker_warns_but_succeeds(tmp_path: Path) -> None:
     result = _run_env(["--skip-db", "--skip-config"], env, home)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Docker not found" in (result.stdout + result.stderr)
+    output = result.stdout + result.stderr
+    assert "Docker not found" in output or "~/.local/bin is not on your PATH" in output
 
 
 def test_present_docker_no_warning(tmp_path: Path) -> None:

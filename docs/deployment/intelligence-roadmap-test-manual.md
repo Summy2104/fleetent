@@ -335,6 +335,7 @@ uv run pytest tests/integration/test_vector_store.py \
 - reindex source of truth 不可枚举：`Pilot blocker`。
 - 真实 provider 因凭据或网络失败：Conditional Go，记录 workaround。
 - 真实 rerank 质量一般但 deterministic rerank 可用：Enhancement。
+- 缺少真实 provider key：记录到人工复核清单，说明需要配置真实 credential 的原因。
 
 ## 11. 汇总到 Go 证据
 

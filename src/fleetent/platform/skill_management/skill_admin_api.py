@@ -28,6 +28,12 @@ from pydantic import BaseModel
 from fleetent import agent_store, auth, user_store
 from fleetent.governance import audit_log
 from fleetent.platform.agent_lifecycle import materialize
+from fleetent.platform.reflection_management import (
+    reflection_apply_proposal,
+    reflection_close_proposal,
+    reflection_list_proposals,
+    reflection_proposal_diff,
+)
 from fleetent.platform.skill_management import skill_admin_store
 from fleetent.skills import audit as skill_audit
 from fleetent.skills import registry as skill_registry
@@ -104,62 +110,6 @@ def _rematerialize_all() -> list[str]:
 def _rematerialize_agent(name: str) -> None:
     """Re-export one agent's home after a per-agent binding change. Injectable seam."""
     materialize.materialize_from_store(name)
-
-
-def _proposal_dict(p: Any) -> dict[str, Any]:
-    """Serialize a reflection SkillProposal to a JSON-able review-inbox row."""
-    return {
-        "id": p.id,
-        "type": p.type,
-        "target_skill": p.target_skill,
-        "reason": p.reason,
-        "evidence_refs": list(p.evidence_refs),
-        "risk_level": p.risk_level,
-        "status": p.status,
-        "has_draft": bool(p.suggested_draft),
-        "has_diff": bool(p.suggested_diff),
-        "created_at": p.created_at.isoformat(),
-        "updated_at": p.updated_at.isoformat(),
-    }
-
-
-def reflection_list_proposals() -> list[dict[str, Any]]:
-    """Pending Skill proposals from reflection (newest first)."""
-    from fleetent.intelligence import reflection
-
-    return [_proposal_dict(p) for p in reflection.list_skill_proposals("pending")]
-
-
-def reflection_proposal_diff(proposal_id: str) -> dict[str, Any]:
-    """Full proposal payload incl. suggested diff/draft, for the review viewer."""
-    from fleetent.intelligence import reflection
-
-    try:
-        p = reflection.get_skill_proposal(proposal_id)
-    except ValueError:
-        return {"proposal_id": proposal_id, "diff": "", "draft": ""}
-    return {
-        **_proposal_dict(p),
-        "proposal_id": p.id,
-        "diff": p.suggested_diff or "",
-        "draft": p.suggested_draft or "",
-    }
-
-
-def reflection_apply_proposal(proposal_id: str, reviewer_user_id: str) -> None:
-    """Approve a proposal (status -> approved)."""
-    from fleetent.intelligence import reflection
-
-    reflection.approve_skill_proposal(proposal_id, reviewer_user_id=reviewer_user_id)
-
-
-def reflection_close_proposal(
-    proposal_id: str, reviewer_user_id: str, reason: str = "rejected via admin console"
-) -> None:
-    """Reject a proposal without changing the skill."""
-    from fleetent.intelligence import reflection
-
-    reflection.reject_skill_proposal(proposal_id, reviewer_user_id=reviewer_user_id, reason=reason)
 
 
 def askit_override(skill_name: str, action: str) -> dict[str, Any]:

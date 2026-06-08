@@ -14,8 +14,8 @@ async def test_deterministic_rerank_promotes_expected_chunk(monkeypatch, tmp_pat
     payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
     database = _patch_runtime(monkeypatch, tmp_path)
 
-    from fleetent.intelligence.knowledge_base import runtime
-    from fleetent.intelligence.vector_store import SearchResult
+    from fleetent.knowledge_base import runtime
+    from fleetent.vector_store import SearchResult
 
     documents: dict[str, str] = {}
     for item in payload["documents"]:
@@ -79,7 +79,7 @@ def test_real_rerank_evaluation_is_opt_in(monkeypatch):
 
 
 def _patch_runtime(monkeypatch, tmp_path):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)

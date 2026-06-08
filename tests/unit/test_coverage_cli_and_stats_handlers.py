@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 
 from fleetent import user_store
-from fleetent.intelligence.knowledge_base import operations as kb_operations
+from fleetent.knowledge_base import operations as kb_operations
 from fleetent.platform.admin_cli import agents, im_connectors, kb_connectors, users
 from fleetent.platform.agent_statistics import stats_admin_api
 

@@ -140,7 +140,7 @@ def test_active_docs_and_source_do_not_reintroduce_legacy_config_paths():
 
 def test_four_canonical_examples_are_complete_references():
     from fleetent.agent_config import AgentFile
-    from fleetent.intelligence.knowledge_base.config import load_knowledge_config
+    from fleetent.knowledge_base.config import load_knowledge_config
 
     agent_yaml = Path("agents/default/agent.yaml.example")
     agent_env = Path("agents/default/.env.example")

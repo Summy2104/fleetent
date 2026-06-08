@@ -1,7 +1,7 @@
 """Pure sync-action decision: new vs unchanged vs changed."""
 
-from fleetent.intelligence.knowledge_base.connectors.state import LocalSourceState
-from fleetent.intelligence.knowledge_base.sync_planner import SyncAction, _action_for_state
+from fleetent.knowledge_base.connectors.state import LocalSourceState
+from fleetent.knowledge_base.sync_planner import SyncAction, _action_for_state
 
 
 def _state(mtime_ns: int, content_hash: str) -> LocalSourceState:

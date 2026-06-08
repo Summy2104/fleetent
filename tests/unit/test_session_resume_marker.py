@@ -49,7 +49,6 @@ def test_mark_resume_pending_slash_session_id(tmp_path: Path, monkeypatch) -> No
 
 
 def test_scan_and_mark_recent_resume_marks_window(tmp_path: Path, monkeypatch) -> None:
-    import time
 
     import fleetent.session.manager as mgr
 

@@ -1,5 +1,5 @@
 def test_reflection_trend_summary_public_api_is_importable():
-    from fleetent.intelligence.reflection import (
+    from fleetent.reflection import (
         ReflectionTrendBucket,
         ReflectionTrendQuery,
         ReflectionTrendSummary,
@@ -15,8 +15,8 @@ def test_reflection_trend_summary_public_api_is_importable():
 def test_skill_proposals_are_only_counted_for_global_scope(monkeypatch, tmp_path):
     from datetime import UTC, datetime, timedelta
 
+    from fleetent import reflection
     from fleetent.db import create_database
-    from fleetent.intelligence import reflection
     from tests.integration.test_migrations import apply_migrations
 
     db_path = tmp_path / "reflection-trend-scope.db"
@@ -25,7 +25,7 @@ def test_skill_proposals_are_only_counted_for_global_scope(monkeypatch, tmp_path
     monkeypatch.setattr(reflection, "_database", lambda: database)
 
     now = datetime.now(UTC).replace(microsecond=0)
-    reflection.generate_skill_proposals(
+    for proposal in reflection.generate_skill_proposals(
         findings=[
             reflection.ReflectionFinding(
                 type="skill_opportunity",
@@ -34,7 +34,8 @@ def test_skill_proposals_are_only_counted_for_global_scope(monkeypatch, tmp_path
                 metadata={"pattern": "deployment checklist"},
             )
         ]
-    )
+    ):
+        reflection._persist_skill_proposal(proposal)
 
     scoped = reflection.get_reflection_trend_summary(
         reflection.ReflectionTrendQuery(

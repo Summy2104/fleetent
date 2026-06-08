@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import fleetent.runtime.loop as agent_loop
 from fleetent.agent_config import AgentModels, ModelRouteEntry, ModelTarget
-from fleetent.intelligence.long_term_ctx import BuiltContext, ContextSource
+from fleetent.long_term_ctx import BuiltContext, ContextSource
 from fleetent.model import ModelPolicySnapshot
 
 

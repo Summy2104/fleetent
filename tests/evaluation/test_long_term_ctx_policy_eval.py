@@ -6,9 +6,9 @@ real policy + shared-memory stores against a tmp database with a deterministic
 in-memory vector store (no real LLM / embedding service).
 """
 
-from fleetent.intelligence import long_term_ctx
-from fleetent.intelligence import long_term_ctx_policy as policy
-from fleetent.intelligence.vector_store import SearchResult
+from fleetent import long_term_ctx
+from fleetent.long_term_ctx import _policy as policy
+from fleetent.vector_store import SearchResult
 from tests.integration.test_migrations import apply_migrations
 
 SEED = [
@@ -42,8 +42,8 @@ def _record(tenant_id, agent_id, **overrides):
 
 
 async def test_long_term_ctx_policy_evaluation(monkeypatch, tmp_path):
-    from fleetent.intelligence import memory
-    from fleetent.intelligence.memory import shared
+    from fleetent import memory
+    from fleetent.memory import shared
 
     db_path = tmp_path / "policy-eval.db"
     apply_migrations(db_path)

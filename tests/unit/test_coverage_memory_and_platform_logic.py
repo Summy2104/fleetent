@@ -8,8 +8,8 @@ import httpx
 import pytest
 
 from fleetent.governance import quota
-from fleetent.intelligence.memory import extraction, maintenance, shared, trends
-from fleetent.intelligence.memory.models import (
+from fleetent.memory import extraction, maintenance, shared, trends
+from fleetent.memory.models import (
     MemoryCompactionCandidate,
     MemoryItem,
     MemoryMaintenancePolicy,
@@ -305,10 +305,7 @@ def test_memory_trends_buckets_counts_and_filters_with_fake_store(monkeypatch):
         ),
     ]
     monkeypatch.setattr(trends.store, "database", lambda: FakeDb())
-    monkeypatch.setattr(
-        "fleetent.intelligence.reflection.list_memory_maintenance_proposals",
-        lambda user_id: proposals,
-    )
+    monkeypatch.setattr(trends, "_list_memory_maintenance_proposals", lambda user_id: proposals)
 
     summary = trends.get_memory_quality_trend_summary(query)
 
@@ -531,8 +528,30 @@ def test_shared_memory_new_item_insert_update_and_audit_paths(monkeypatch):
         "fleetent.observability.record_trace_event",
         lambda event: events.append(event),
     )
-    shared.record_shared_memory_admin_audit("create", item.id, "admin")
+    from fleetent.platform.admin_cli import shared_memory
+
+    shared_memory.record_shared_memory_admin_audit("create", item.id, "admin")
     assert events[0].payload == {"action": "create", "item_id": item.id, "actor": "admin"}
+
+
+def test_shared_memory_audit_not_implemented_in_memory_core(monkeypatch):
+    """Shared-memory admin audit should be implemented in platform shell, not core."""
+
+    assert not hasattr(shared, "record_shared_memory_admin_audit")
+
+    events: list[Any] = []
+    monkeypatch.setattr(
+        "fleetent.platform.admin_cli.shared_memory.observability.record_trace_event",
+        lambda event: events.append(event),
+    )
+    from fleetent.platform.admin_cli import shared_memory
+
+    shared_memory.record_shared_memory_admin_audit("shared_memory.create", "item-1", "admin")
+    assert events[0].payload == {
+        "action": "shared_memory.create",
+        "item_id": "item-1",
+        "actor": "admin",
+    }
 
 
 def test_alerting_evaluates_sustained_breaches_and_suppression():

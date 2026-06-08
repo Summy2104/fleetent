@@ -38,7 +38,7 @@ def _insert_memory_row(
 
 def _configure_memory_vector_runtime(monkeypatch):
     from fleetent.agent_config import AgentFile, default_models
-    from fleetent.intelligence.vector_store import runtime
+    from fleetent.vector_store import runtime
 
     runtime._configure(
         AgentFile(
@@ -51,7 +51,7 @@ def _configure_memory_vector_runtime(monkeypatch):
 
 
 def test_memory_rebuild_removes_stale_vectors_and_indexes_current_items(tmp_path, monkeypatch):
-    from fleetent.intelligence.vector_store import ReindexRequest, reindex, search, upsert
+    from fleetent.vector_store import ReindexRequest, reindex, search, upsert
 
     db_path = _patch_memory_database(tmp_path, monkeypatch)
     _configure_memory_vector_runtime(monkeypatch)
@@ -83,7 +83,7 @@ def test_memory_rebuild_removes_stale_vectors_and_indexes_current_items(tmp_path
 
 def _patch_knowledge_runtime(monkeypatch, tmp_path):
     from fleetent.config import KnowledgeBaseSettings
-    from fleetent.intelligence.knowledge_base import runtime as knowledge_runtime
+    from fleetent.knowledge_base import runtime as knowledge_runtime
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)
@@ -100,7 +100,7 @@ def _patch_knowledge_runtime(monkeypatch, tmp_path):
 def test_knowledge_base_rebuild_removes_stale_vectors_and_indexes_current_chunks(
     tmp_path, monkeypatch
 ):
-    from fleetent.intelligence.vector_store import ReindexRequest, reindex, search, upsert
+    from fleetent.vector_store import ReindexRequest, reindex, search, upsert
 
     knowledge_runtime = _patch_knowledge_runtime(monkeypatch, tmp_path)
     _configure_memory_vector_runtime(monkeypatch)

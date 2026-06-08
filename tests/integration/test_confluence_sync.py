@@ -9,8 +9,8 @@ from tests.integration.test_migrations import apply_migrations
 
 async def test_confluence_sync_ingests_pages_into_tenant_kb(monkeypatch, tmp_path):
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import sync_confluence
-    from fleetent.intelligence.knowledge_base.connectors.confluence import FakeConfluenceClient
+    from fleetent.knowledge_base import sync_confluence
+    from fleetent.knowledge_base.connectors.confluence import FakeConfluenceClient
 
     summary = await sync_confluence(
         _config(),
@@ -38,8 +38,8 @@ async def test_confluence_sync_ingests_pages_into_tenant_kb(monkeypatch, tmp_pat
 
 async def test_confluence_reingest_changed_replaces_old_document(monkeypatch, tmp_path):
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import sync_confluence
-    from fleetent.intelligence.knowledge_base.connectors.confluence import FakeConfluenceClient
+    from fleetent.knowledge_base import sync_confluence
+    from fleetent.knowledge_base.connectors.confluence import FakeConfluenceClient
 
     first = await sync_confluence(
         _config(),
@@ -64,8 +64,8 @@ async def test_confluence_reingest_changed_replaces_old_document(monkeypatch, tm
 
 async def test_confluence_archive_missing_does_not_call_physical_delete(monkeypatch, tmp_path):
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import runtime, sync_confluence
-    from fleetent.intelligence.knowledge_base.connectors.confluence import FakeConfluenceClient
+    from fleetent.knowledge_base import runtime, sync_confluence
+    from fleetent.knowledge_base.connectors.confluence import FakeConfluenceClient
 
     await sync_confluence(
         _config(),
@@ -90,8 +90,8 @@ async def test_confluence_archive_missing_does_not_call_physical_delete(monkeypa
 
 async def test_confluence_item_failure_does_not_block_following_items(monkeypatch, tmp_path):
     _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import sync_confluence
-    from fleetent.intelligence.knowledge_base.connectors.confluence import FakeConfluenceClient
+    from fleetent.knowledge_base import sync_confluence
+    from fleetent.knowledge_base.connectors.confluence import FakeConfluenceClient
 
     summary = await sync_confluence(
         _config(),
@@ -113,8 +113,8 @@ async def test_confluence_item_failure_does_not_block_following_items(monkeypatc
 
 async def test_sync_confluence_uses_plan_then_executor(monkeypatch, tmp_path):
     _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import sync_confluence
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base import sync_confluence
+    from fleetent.knowledge_base.connectors.confluence import (
         ConfluenceSyncPlan,
         FakeConfluenceClient,
     )
@@ -130,11 +130,11 @@ async def test_sync_confluence_uses_plan_then_executor(monkeypatch, tmp_path):
         return _execution_summary()
 
     monkeypatch.setattr(
-        "fleetent.intelligence.knowledge_base.connectors.confluence.plan_confluence_sync",
+        "fleetent.knowledge_base.connectors.confluence.plan_confluence_sync",
         fake_plan,
     )
     monkeypatch.setattr(
-        "fleetent.intelligence.knowledge_base.connectors.confluence.execute_confluence_sync_plan",
+        "fleetent.knowledge_base.connectors.confluence.execute_confluence_sync_plan",
         fake_execute,
     )
 
@@ -145,7 +145,7 @@ async def test_sync_confluence_uses_plan_then_executor(monkeypatch, tmp_path):
 
 
 def _config():
-    from fleetent.intelligence.knowledge_base import ConfluenceConnectorConfig
+    from fleetent.knowledge_base import ConfluenceConnectorConfig
 
     return ConfluenceConnectorConfig(
         connector_id="conf-eng",
@@ -160,7 +160,7 @@ def _config():
 
 
 def _page(page_id: str, title: str, *, version: int = 1, body: str = "Body"):
-    from fleetent.intelligence.knowledge_base.connectors.confluence import ConfluencePage
+    from fleetent.knowledge_base.connectors.confluence import ConfluencePage
 
     return ConfluencePage(
         id=page_id,
@@ -174,19 +174,19 @@ def _page(page_id: str, title: str, *, version: int = 1, body: str = "Body"):
 
 
 def _empty_summary():
-    from fleetent.intelligence.knowledge_base import SyncPlanSummary
+    from fleetent.knowledge_base import SyncPlanSummary
 
     return SyncPlanSummary(scanned=0, planned=0)
 
 
 def _execution_summary():
-    from fleetent.intelligence.knowledge_base.connectors.confluence import ConfluenceSyncSummary
+    from fleetent.knowledge_base.connectors.confluence import ConfluenceSyncSummary
 
     return ConfluenceSyncSummary(scanned=0, planned=0)
 
 
 def _patch_knowledge_runtime(monkeypatch, tmp_path):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)

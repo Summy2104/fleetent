@@ -8,7 +8,7 @@ from fleetent.config import EmbeddingSettings
 
 
 async def test_default_embedding_provider_is_deterministic_and_stable():
-    from fleetent.intelligence.vector_store.embeddings import (
+    from fleetent.vector_store.embeddings import (
         DeterministicEmbeddingProvider,
         create_embedding_provider,
     )
@@ -20,7 +20,7 @@ async def test_default_embedding_provider_is_deterministic_and_stable():
 
 
 def test_http_embedding_provider_can_be_configured():
-    from fleetent.intelligence.vector_store.embeddings import (
+    from fleetent.vector_store.embeddings import (
         HttpEmbeddingProvider,
         create_embedding_provider,
     )
@@ -38,7 +38,7 @@ def test_http_embedding_provider_can_be_configured():
 
 
 async def test_http_embedding_sends_openai_payload_and_authorization(monkeypatch):
-    from fleetent.intelligence.vector_store.embeddings import create_embedding_provider
+    from fleetent.vector_store.embeddings import create_embedding_provider
 
     monkeypatch.setenv("EMBEDDING_API_KEY", "secret-token")
     provider = create_embedding_provider(
@@ -74,7 +74,7 @@ async def test_http_embedding_sends_openai_payload_and_authorization(monkeypatch
 
 
 async def test_http_embedding_empty_text_returns_zero_vector_without_request():
-    from fleetent.intelligence.vector_store.embeddings import create_embedding_provider
+    from fleetent.vector_store.embeddings import create_embedding_provider
 
     provider = create_embedding_provider(
         EmbeddingSettings(
@@ -105,7 +105,7 @@ async def test_http_embedding_empty_text_returns_zero_vector_without_request():
     ],
 )
 async def test_http_embedding_errors_are_explicit(response, message):
-    from fleetent.intelligence.vector_store.embeddings import (
+    from fleetent.vector_store.embeddings import (
         EmbeddingProviderError,
         create_embedding_provider,
     )
@@ -127,7 +127,7 @@ async def test_http_embedding_errors_are_explicit(response, message):
 
 
 async def test_http_embedding_timeout_is_explicit():
-    from fleetent.intelligence.vector_store.embeddings import (
+    from fleetent.vector_store.embeddings import (
         EmbeddingProviderError,
         create_embedding_provider,
     )
@@ -151,7 +151,7 @@ async def test_http_embedding_timeout_is_explicit():
 
 
 async def test_http_embedding_failure_does_not_fallback_to_deterministic():
-    from fleetent.intelligence.vector_store.embeddings import (
+    from fleetent.vector_store.embeddings import (
         EmbeddingProviderError,
         create_embedding_provider,
     )

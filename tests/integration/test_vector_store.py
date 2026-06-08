@@ -42,7 +42,7 @@ def _http_embedding_models(endpoint: str) -> AgentModels:
 
 
 def test_public_api_is_importable():
-    from fleetent.intelligence.vector_store import (
+    from fleetent.vector_store import (
         SearchResult,
         delete,
         knowledge_namespace,
@@ -60,7 +60,7 @@ def test_public_api_is_importable():
 
 
 def test_namespace_helpers_return_fixed_formats():
-    from fleetent.intelligence.vector_store import (
+    from fleetent.vector_store import (
         knowledge_namespace,
         memory_namespace,
         shared_namespace,
@@ -73,14 +73,14 @@ def test_namespace_helpers_return_fixed_formats():
 
 
 def test_memory_namespace_default_is_backwards_compatible():
-    from fleetent.intelligence.vector_store import memory_namespace
+    from fleetent.vector_store import memory_namespace
 
     assert memory_namespace("u1", "default") == "mem:u1"
     assert memory_namespace("u1") == "mem:u1"
 
 
 def test_memory_namespace_non_default_appends_namespace():
-    from fleetent.intelligence.vector_store import memory_namespace
+    from fleetent.vector_store import memory_namespace
 
     assert memory_namespace("u1", "analyst") == "mem:u1:analyst"
     assert memory_namespace("u1", "cs") == "mem:u1:cs"
@@ -94,7 +94,7 @@ def test_memory_namespace_non_default_appends_namespace():
     ],
 )
 def test_memory_namespace_rejects_empty_user_id(user_id):
-    from fleetent.intelligence.vector_store import memory_namespace
+    from fleetent.vector_store import memory_namespace
 
     with pytest.raises(ValueError, match="user_id"):
         memory_namespace(user_id)
@@ -110,14 +110,14 @@ def test_memory_namespace_rejects_empty_user_id(user_id):
     ],
 )
 def test_knowledge_namespace_rejects_empty_parts(tenant_id, kb_id, message):
-    from fleetent.intelligence.vector_store import knowledge_namespace
+    from fleetent.vector_store import knowledge_namespace
 
     with pytest.raises(ValueError, match=message):
         knowledge_namespace(tenant_id, kb_id)
 
 
 async def test_deterministic_embedding_is_stable_with_default_dimensions():
-    from fleetent.intelligence.vector_store.embeddings import DeterministicEmbedding
+    from fleetent.vector_store.embeddings import DeterministicEmbedding
 
     embedding = DeterministicEmbedding()
 
@@ -126,7 +126,7 @@ async def test_deterministic_embedding_is_stable_with_default_dimensions():
 
 
 async def test_deterministic_embedding_normalizes_non_empty_text():
-    from fleetent.intelligence.vector_store.embeddings import DeterministicEmbedding
+    from fleetent.vector_store.embeddings import DeterministicEmbedding
 
     vector = await DeterministicEmbedding().embed("Python debugging")
 
@@ -134,7 +134,7 @@ async def test_deterministic_embedding_normalizes_non_empty_text():
 
 
 async def test_deterministic_embedding_returns_stable_zero_vector_for_empty_text():
-    from fleetent.intelligence.vector_store.embeddings import DeterministicEmbedding
+    from fleetent.vector_store.embeddings import DeterministicEmbedding
 
     embedding = DeterministicEmbedding(dimensions=4)
 
@@ -145,7 +145,7 @@ async def test_deterministic_embedding_returns_stable_zero_vector_for_empty_text
 async def test_upsert_then_search_returns_id_and_score():
     from dataclasses import fields
 
-    from fleetent.intelligence.vector_store import SearchResult, search, upsert
+    from fleetent.vector_store import SearchResult, search, upsert
 
     await upsert("id-1", "python debugging", namespace="mem:user-1")
 
@@ -160,8 +160,8 @@ async def test_upsert_uses_configured_http_embedding_provider():
     import httpx
     import respx
 
-    from fleetent.intelligence.vector_store import runtime
-    from fleetent.intelligence.vector_store.backend import InMemoryVectorBackend
+    from fleetent.vector_store import runtime
+    from fleetent.vector_store.backend import InMemoryVectorBackend
 
     endpoint = "http://runtime-embedding.test/v1/upsert-embeddings"
     runtime._configure(
@@ -191,7 +191,7 @@ async def test_search_uses_configured_http_embedding_provider():
     import httpx
     import respx
 
-    from fleetent.intelligence.vector_store import runtime
+    from fleetent.vector_store import runtime
 
     endpoint = "http://runtime-embedding.test/v1/search-embeddings"
     runtime._configure(
@@ -218,7 +218,7 @@ async def test_search_uses_configured_http_embedding_provider():
 
 
 async def test_search_limit_is_respected():
-    from fleetent.intelligence.vector_store import search, upsert
+    from fleetent.vector_store import search, upsert
 
     namespace = "mem:limit-user"
     await upsert("id-1", "alpha python", namespace=namespace)
@@ -231,7 +231,7 @@ async def test_search_limit_is_respected():
 
 
 async def test_search_does_not_cross_namespaces():
-    from fleetent.intelligence.vector_store import search, upsert
+    from fleetent.vector_store import search, upsert
 
     await upsert("id-a", "python debugging", namespace="mem:namespace-a")
     await upsert("id-b", "python debugging", namespace="mem:namespace-b")
@@ -242,7 +242,7 @@ async def test_search_does_not_cross_namespaces():
 
 
 async def test_upsert_same_id_overwrites_without_duplicates():
-    from fleetent.intelligence.vector_store import search, upsert
+    from fleetent.vector_store import search, upsert
 
     namespace = "mem:overwrite-user"
     await upsert("same-id", "python debugging", namespace=namespace)
@@ -255,7 +255,7 @@ async def test_upsert_same_id_overwrites_without_duplicates():
 
 
 async def test_delete_removes_vector_from_namespace():
-    from fleetent.intelligence.vector_store import delete, search, upsert
+    from fleetent.vector_store import delete, search, upsert
 
     namespace = "mem:delete-user"
     await upsert("id-1", "python debugging", namespace=namespace)
@@ -266,7 +266,7 @@ async def test_delete_removes_vector_from_namespace():
 
 
 async def test_search_sorts_by_score_descending_then_id_ascending():
-    from fleetent.intelligence.vector_store.backend import InMemoryVectorBackend
+    from fleetent.vector_store.backend import InMemoryVectorBackend
 
     backend = InMemoryVectorBackend()
     await backend.upsert("b", [1.0, 0.0], namespace="mem:ordering")
@@ -280,7 +280,7 @@ async def test_search_sorts_by_score_descending_then_id_ascending():
 
 def test_unsupported_vector_backend_fails_fast():
     from fleetent.config import VectorStoreSettings
-    from fleetent.intelligence.vector_store.backend import create_vector_backend
+    from fleetent.vector_store.backend import create_vector_backend
 
     with pytest.raises(ValueError, match="Unsupported vector_store.backend 'qdrant'.*memory"):
         create_vector_backend(VectorStoreSettings(backend="qdrant"))
@@ -288,7 +288,7 @@ def test_unsupported_vector_backend_fails_fast():
 
 def test_unsupported_embedding_backend_fails_fast():
     from fleetent.config import EmbeddingSettings
-    from fleetent.intelligence.vector_store.embeddings import create_embedding_backend
+    from fleetent.vector_store.embeddings import create_embedding_backend
 
     with pytest.raises(ValueError, match="Unsupported embedding.backend 'bge-m3'.*deterministic"):
         create_embedding_backend(EmbeddingSettings(backend="bge-m3"))
@@ -297,7 +297,7 @@ def test_unsupported_embedding_backend_fails_fast():
 async def test_sqlite_backend_first_use_creates_vector_items_schema(tmp_path):
     import aiosqlite
 
-    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+    from fleetent.vector_store.backend import SQLiteVectorBackend
 
     database_path = tmp_path / "vectors.db"
     backend = SQLiteVectorBackend(database_url=_sqlite_database_url(database_path))
@@ -319,7 +319,7 @@ async def test_sqlite_backend_first_use_creates_vector_items_schema(tmp_path):
 
 
 async def test_sqlite_backend_persists_vectors_across_backend_instances(tmp_path):
-    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+    from fleetent.vector_store.backend import SQLiteVectorBackend
 
     database_url = _sqlite_database_url(tmp_path / "vectors.db")
     await SQLiteVectorBackend(database_url=database_url).upsert(
@@ -336,7 +336,7 @@ async def test_sqlite_backend_persists_vectors_across_backend_instances(tmp_path
 async def test_sqlite_backend_overwrites_same_namespace_and_id(tmp_path):
     import aiosqlite
 
-    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+    from fleetent.vector_store.backend import SQLiteVectorBackend
 
     database_path = tmp_path / "vectors.db"
     backend = SQLiteVectorBackend(database_url=_sqlite_database_url(database_path))
@@ -356,7 +356,7 @@ async def test_sqlite_backend_overwrites_same_namespace_and_id(tmp_path):
 
 
 async def test_sqlite_backend_search_is_namespace_scoped(tmp_path):
-    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+    from fleetent.vector_store.backend import SQLiteVectorBackend
 
     backend = SQLiteVectorBackend(database_url=_sqlite_database_url(tmp_path / "vectors.db"))
     await backend.upsert("id-a", [1.0, 0.0], namespace="mem:a")
@@ -368,7 +368,7 @@ async def test_sqlite_backend_search_is_namespace_scoped(tmp_path):
 
 
 async def test_sqlite_backend_search_respects_limit(tmp_path):
-    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+    from fleetent.vector_store.backend import SQLiteVectorBackend
 
     backend = SQLiteVectorBackend(database_url=_sqlite_database_url(tmp_path / "vectors.db"))
     await backend.upsert("id-1", [1.0, 0.0], namespace="mem:user-1")
@@ -379,7 +379,7 @@ async def test_sqlite_backend_search_respects_limit(tmp_path):
 
 
 async def test_sqlite_backend_delete_is_namespace_scoped(tmp_path):
-    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+    from fleetent.vector_store.backend import SQLiteVectorBackend
 
     backend = SQLiteVectorBackend(database_url=_sqlite_database_url(tmp_path / "vectors.db"))
     await backend.upsert("same-id", [1.0, 0.0], namespace="mem:a")
@@ -394,7 +394,7 @@ async def test_sqlite_backend_delete_is_namespace_scoped(tmp_path):
 
 
 async def test_sqlite_backend_search_sorts_by_score_desc_then_id_asc(tmp_path):
-    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+    from fleetent.vector_store.backend import SQLiteVectorBackend
 
     backend = SQLiteVectorBackend(database_url=_sqlite_database_url(tmp_path / "vectors.db"))
     await backend.upsert("b", [1.0, 0.0], namespace="mem:ordering")
@@ -407,7 +407,7 @@ async def test_sqlite_backend_search_sorts_by_score_desc_then_id_asc(tmp_path):
 
 
 async def test_sqlite_backend_search_skips_dimension_mismatch(tmp_path):
-    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+    from fleetent.vector_store.backend import SQLiteVectorBackend
 
     backend = SQLiteVectorBackend(database_url=_sqlite_database_url(tmp_path / "vectors.db"))
     await backend.upsert("valid", [1.0, 0.0], namespace="mem:user-1")
@@ -421,7 +421,7 @@ async def test_sqlite_backend_search_skips_dimension_mismatch(tmp_path):
 async def test_sqlite_backend_search_skips_corrupt_vector_json(tmp_path):
     import aiosqlite
 
-    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+    from fleetent.vector_store.backend import SQLiteVectorBackend
 
     database_path = tmp_path / "vectors.db"
     backend = SQLiteVectorBackend(database_url=_sqlite_database_url(database_path))
@@ -448,7 +448,7 @@ async def test_sqlite_backend_search_skips_corrupt_vector_json(tmp_path):
 
 
 async def test_sqlite_backend_upsert_rejects_empty_vector(tmp_path):
-    from fleetent.intelligence.vector_store.backend import SQLiteVectorBackend
+    from fleetent.vector_store.backend import SQLiteVectorBackend
 
     backend = SQLiteVectorBackend(database_url=_sqlite_database_url(tmp_path / "vectors.db"))
 
@@ -459,8 +459,8 @@ async def test_sqlite_backend_upsert_rejects_empty_vector(tmp_path):
 async def test_runtime_public_api_uses_sqlite_backend_with_global_database_url(
     tmp_path, monkeypatch
 ):
-    from fleetent.intelligence.vector_store import runtime
-    from fleetent.intelligence.vector_store.backend import create_vector_backend
+    from fleetent.vector_store import runtime
+    from fleetent.vector_store.backend import create_vector_backend
 
     agent = _agent(vector_store={"backend": "sqlite"})
     database_url = _sqlite_database_url(tmp_path / "vectors.db")

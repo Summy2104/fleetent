@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from fleetent.intelligence.memory import extraction
+from fleetent.memory import extraction
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -16,7 +16,7 @@ def _db_url(db_path) -> str:
 
 
 def test_memory_maintenance_public_api_is_importable():
-    from fleetent.intelligence.reflection import (
+    from fleetent.reflection import (
         AutoMaintenancePolicy,
         MemoryMaintenanceProposal,
         create_memory_maintenance_proposal,
@@ -75,7 +75,7 @@ def test_migration_creates_memory_maintenance_proposals_table(tmp_path):
 
 
 def test_create_proposal_defaults_to_pending_and_persists_json_fields(tmp_path, monkeypatch):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
@@ -101,7 +101,7 @@ def test_create_proposal_defaults_to_pending_and_persists_json_fields(tmp_path, 
 
 
 def test_pending_proposal_can_be_approved_or_rejected(tmp_path, monkeypatch):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
@@ -137,7 +137,7 @@ def test_pending_proposal_can_be_approved_or_rejected(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("status", ["rejected", "expired"])
 async def test_rejected_or_expired_proposal_cannot_apply(tmp_path, monkeypatch, status):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
@@ -168,7 +168,7 @@ async def test_rejected_or_expired_proposal_cannot_apply(tmp_path, monkeypatch, 
 
 
 async def test_apply_approved_proposal_updates_status_to_applied(tmp_path, monkeypatch):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
@@ -196,7 +196,7 @@ async def test_apply_approved_proposal_updates_status_to_applied(tmp_path, monke
 
 
 async def test_apply_requires_owner_for_default_path(tmp_path, monkeypatch):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
@@ -224,7 +224,7 @@ async def test_apply_requires_owner_for_default_path(tmp_path, monkeypatch):
 
 
 async def test_high_risk_delete_cannot_be_auto_applied(tmp_path, monkeypatch):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
@@ -251,7 +251,7 @@ async def test_high_risk_delete_cannot_be_auto_applied(tmp_path, monkeypatch):
 
 
 async def test_low_risk_mark_stale_can_auto_apply_when_policy_enabled(tmp_path, monkeypatch):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
@@ -280,7 +280,7 @@ async def test_low_risk_mark_stale_can_auto_apply_when_policy_enabled(tmp_path, 
 
 @pytest.mark.parametrize("action", ["merge", "rewrite", "compact"])
 async def test_medium_risk_actions_need_owner_approval(tmp_path, monkeypatch, action):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
@@ -305,7 +305,7 @@ async def test_medium_risk_actions_need_owner_approval(tmp_path, monkeypatch, ac
 
 
 async def test_suggest_shared_memory_or_kb_does_not_write_user_memory(tmp_path, monkeypatch):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
@@ -333,8 +333,7 @@ async def test_suggest_shared_memory_or_kb_does_not_write_user_memory(tmp_path, 
 
 
 async def test_proposal_lifecycle_events_are_recorded(tmp_path, monkeypatch):
-    from fleetent import observability
-    from fleetent.intelligence import reflection
+    from fleetent import observability, reflection
 
     db_path = tmp_path / "maintenance.db"
     apply_migrations(db_path)
@@ -364,7 +363,7 @@ async def test_proposal_lifecycle_events_are_recorded(tmp_path, monkeypatch):
 
 
 async def test_extract_ignores_unsupported_shared_memory_or_kb_actions(tmp_path, monkeypatch):
-    from fleetent.intelligence import memory as memory_layer
+    from fleetent import memory as memory_layer
 
     db_path = tmp_path / "memory.db"
     apply_migrations(db_path)
@@ -400,7 +399,7 @@ async def test_extract_ignores_unsupported_shared_memory_or_kb_actions(tmp_path,
 
 
 async def test_context_update_refreshes_ttl_and_rejects_cross_type_target(tmp_path, monkeypatch):
-    from fleetent.intelligence import memory as memory_layer
+    from fleetent import memory as memory_layer
 
     db_path = tmp_path / "memory.db"
     apply_migrations(db_path)
@@ -487,9 +486,8 @@ async def test_context_update_refreshes_ttl_and_rejects_cross_type_target(tmp_pa
 
 
 def test_reflection_finding_filters_existing_and_single_evidence_memory_candidates():
-    from fleetent import observability
-    from fleetent.intelligence import memory as memory_layer
-    from fleetent.intelligence import reflection
+    from fleetent import memory as memory_layer
+    from fleetent import observability, reflection
 
     existing = [
         memory_layer.MemoryItem(

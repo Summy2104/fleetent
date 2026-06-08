@@ -152,10 +152,10 @@ def _init_agent_db_schema(database_url: str) -> None:
     Called once at boot after DATABASE_URL is redirected to the per-agent path.
     Each store's ensure_schema is idempotent; repeated calls are safe.
     """
+    from fleetent import reflection
     from fleetent.db import create_database
-    from fleetent.intelligence import reflection
-    from fleetent.intelligence.knowledge_base import operations as kb_ops
-    from fleetent.intelligence.memory import store as memory_store
+    from fleetent.knowledge_base import operations as kb_ops
+    from fleetent.memory import store as memory_store
     from fleetent.observability import traces
 
     db = create_database(database_url)
@@ -259,7 +259,7 @@ async def boot(
     _configure_logging_from_agent(agent, home_dir)
     # Re-point the vector/embedding singletons at this agent's intelligence config
     # (import-time config used global Settings; standalone runs AS this single agent).
-    from fleetent.intelligence import vector_store
+    from fleetent import vector_store
 
     vector_store.configure_from_active_agent()
     # Build this agent's skill index from its OWN home (self-contained: never the

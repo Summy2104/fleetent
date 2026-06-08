@@ -6,7 +6,7 @@ from tests.integration.test_migrations import apply_migrations
 
 
 async def test_run_kb_reflection_report_persists_redacted_payload(tmp_path, monkeypatch):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     db_path = tmp_path / "reflection-kb.db"
     apply_migrations(db_path)
@@ -56,7 +56,7 @@ async def test_run_kb_reflection_report_persists_redacted_payload(tmp_path, monk
 async def test_run_kb_reflection_report_returns_insufficient_signal_when_kb_unavailable(
     monkeypatch,
 ):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     monkeypatch.setattr(reflection.observability, "query_trace_events", lambda query: [])
     monkeypatch.setattr(

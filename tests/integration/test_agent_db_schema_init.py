@@ -30,6 +30,7 @@ def _index_names(db: SQLiteDatabase) -> set[str]:
 
 # ── traces ────────────────────────────────────────────────────────────────────
 
+
 def test_traces_ensure_schema_creates_table(tmp_path: Path) -> None:
     from fleetent.observability.traces import ensure_schema
 
@@ -61,8 +62,9 @@ def test_traces_ensure_schema_idempotent(tmp_path: Path) -> None:
 
 # ── memory ─────────────────────────────────────────────────────────────────────
 
+
 def test_memory_ensure_schema_creates_table(tmp_path: Path) -> None:
-    from fleetent.intelligence.memory.store import ensure_schema
+    from fleetent.memory.store import ensure_schema
 
     db = _db(tmp_path)
     ensure_schema(db)
@@ -70,7 +72,7 @@ def test_memory_ensure_schema_creates_table(tmp_path: Path) -> None:
 
 
 def test_memory_ensure_schema_creates_indices(tmp_path: Path) -> None:
-    from fleetent.intelligence.memory.store import ensure_schema
+    from fleetent.memory.store import ensure_schema
 
     db = _db(tmp_path)
     ensure_schema(db)
@@ -80,7 +82,7 @@ def test_memory_ensure_schema_creates_indices(tmp_path: Path) -> None:
 
 
 def test_memory_ensure_schema_idempotent(tmp_path: Path) -> None:
-    from fleetent.intelligence.memory.store import ensure_schema
+    from fleetent.memory.store import ensure_schema
 
     db = _db(tmp_path)
     ensure_schema(db)
@@ -90,8 +92,9 @@ def test_memory_ensure_schema_idempotent(tmp_path: Path) -> None:
 
 # ── reflection ─────────────────────────────────────────────────────────────────
 
+
 def test_reflection_ensure_schema_creates_table(tmp_path: Path) -> None:
-    from fleetent.intelligence.reflection import ensure_schema
+    from fleetent.reflection import ensure_schema
 
     db = _db(tmp_path)
     ensure_schema(db)
@@ -99,7 +102,7 @@ def test_reflection_ensure_schema_creates_table(tmp_path: Path) -> None:
 
 
 def test_reflection_ensure_schema_creates_index(tmp_path: Path) -> None:
-    from fleetent.intelligence.reflection import ensure_schema
+    from fleetent.reflection import ensure_schema
 
     db = _db(tmp_path)
     ensure_schema(db)
@@ -107,7 +110,7 @@ def test_reflection_ensure_schema_creates_index(tmp_path: Path) -> None:
 
 
 def test_reflection_ensure_schema_idempotent(tmp_path: Path) -> None:
-    from fleetent.intelligence.reflection import ensure_schema
+    from fleetent.reflection import ensure_schema
 
     db = _db(tmp_path)
     ensure_schema(db)
@@ -117,8 +120,9 @@ def test_reflection_ensure_schema_idempotent(tmp_path: Path) -> None:
 
 # ── knowledge base ─────────────────────────────────────────────────────────────
 
+
 def test_kb_ensure_schema_creates_all_tables(tmp_path: Path) -> None:
-    from fleetent.intelligence.knowledge_base.operations import ensure_schema
+    from fleetent.knowledge_base.operations import ensure_schema
 
     db = _db(tmp_path)
     ensure_schema(db)
@@ -130,7 +134,7 @@ def test_kb_ensure_schema_creates_all_tables(tmp_path: Path) -> None:
 
 
 def test_kb_ensure_schema_creates_fts_table(tmp_path: Path) -> None:
-    from fleetent.intelligence.knowledge_base.operations import ensure_schema
+    from fleetent.knowledge_base.operations import ensure_schema
 
     db = _db(tmp_path)
     ensure_schema(db)
@@ -139,7 +143,7 @@ def test_kb_ensure_schema_creates_fts_table(tmp_path: Path) -> None:
 
 
 def test_kb_ensure_schema_idempotent(tmp_path: Path) -> None:
-    from fleetent.intelligence.knowledge_base.operations import ensure_schema
+    from fleetent.knowledge_base.operations import ensure_schema
 
     db = _db(tmp_path)
     ensure_schema(db)
@@ -148,6 +152,7 @@ def test_kb_ensure_schema_idempotent(tmp_path: Path) -> None:
 
 
 # ── _init_agent_db_schema ──────────────────────────────────────────────────────
+
 
 def test_init_agent_db_schema_creates_all_agent_tables(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -179,6 +184,9 @@ def test_init_agent_db_schema_idempotent(tmp_path: Path) -> None:
 
     _init_agent_db_schema(database_url)
     _init_agent_db_schema(database_url)
-    assert SQLiteDatabase(path=db_path).execute(
-        "SELECT name FROM sqlite_master WHERE name='traces'"
-    ).fetchone() is not None
+    assert (
+        SQLiteDatabase(path=db_path)
+        .execute("SELECT name FROM sqlite_master WHERE name='traces'")
+        .fetchone()
+        is not None
+    )

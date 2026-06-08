@@ -27,7 +27,9 @@ def find_violations(root: Path) -> list[Violation]:
             continue
         tree = ast.parse(path.read_text(), filename=str(path))
         for imported in _imported_modules(tree):
-            imported_package = _package_from_module(imported)
+            imported_package = _package_from_module(
+                root=root, module=imported, importer_package=importer_package
+            )
             if imported_package is None or imported_package == importer_package:
                 continue
             if _is_internal_import(imported):
@@ -61,15 +63,28 @@ def _owning_package(root: Path, path: Path) -> str | None:
     return parts[1]
 
 
-def _package_from_module(module: str) -> str | None:
+def _package_from_module(
+    *, root: Path, module: str, importer_package: str
+) -> str | None:
     parts = module.split(".")
-    if len(parts) < 3 or parts[0] != "fleetent":
+    if parts[0] != "fleetent":
+        return None
+    if len(parts) == 2 and parts[1].startswith("_"):
+        internal_dir = root / "fleetent" / importer_package / "_internal"
+        if internal_dir.is_dir():
+            return importer_package
+        return parts[1]
+    if len(parts) < 3:
         return None
     return parts[1]
 
 
 def _is_internal_import(module: str) -> bool:
     parts = module.split(".")
+    if len(parts) < 2:
+        return False
+    if parts[1].startswith("_"):
+        return True
     return any(part == "_internal" or part.startswith("_") for part in parts[2:])
 
 

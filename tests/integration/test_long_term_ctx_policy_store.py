@@ -8,7 +8,7 @@ import sqlite3
 
 import pytest
 
-from fleetent.intelligence import long_term_ctx_policy as policy
+from fleetent.long_term_ctx import _policy as policy
 from tests.integration._migration_template import apply_migrations
 
 

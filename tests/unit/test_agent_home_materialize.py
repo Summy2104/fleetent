@@ -13,7 +13,7 @@ from fleetent.agent_config import (
     default_models,
     load_agent_file,
 )
-from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
+from fleetent.knowledge_base.config import KnowledgeConfigSnapshot
 from fleetent.platform.agent_lifecycle import materialize
 
 

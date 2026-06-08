@@ -2,7 +2,8 @@
 
 import pytest
 
-from fleetent.intelligence.knowledge_base.graph_search import (
+from fleetent.knowledge_base.models import KnowledgeChunk
+from fleetent.knowledge_base.retrieval.graph_search import (
     EntityRef,
     GraphSearchChunk,
     RelationRef,
@@ -16,7 +17,6 @@ from fleetent.intelligence.knowledge_base.graph_search import (
     _relations_for_entities,
     graph_search,
 )
-from fleetent.intelligence.knowledge_base.models import KnowledgeChunk
 
 
 class _FakeDB:

@@ -13,8 +13,8 @@ import fleetent.governance.audit_log as audit
 import fleetent.platform.knowledge_base_management.agent_kbs_store as kbs_store
 import fleetent.platform.knowledge_base_management.kb_admin_api as api
 import fleetent.user_store as user_store
-from fleetent.intelligence import vector_store
-from fleetent.intelligence.vector_store import SearchResult
+from fleetent import vector_store
+from fleetent.vector_store import SearchResult
 from tests.integration._migration_template import apply_migrations
 
 

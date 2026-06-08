@@ -11,7 +11,7 @@ from __future__ import annotations
 import shutil
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -27,7 +27,6 @@ from fleetent.agent_config import (
     default_models,
 )
 from fleetent.config import McpServerSettings
-from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
 from fleetent.observability.structured_logging import get_logger
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.connector_management import agent_mcp_server_store
@@ -36,6 +35,9 @@ from fleetent.platform.model_provider_management import provider_admin_store
 from fleetent.platform.skill_management import skill_admin_store
 from fleetent.secret_scan import flatten
 from fleetent.skills import registry as skill_registry
+
+if TYPE_CHECKING:
+    from fleetent.knowledge_base.config import KnowledgeConfigSnapshot
 
 _logger = get_logger("agent_lifecycle.materialize")
 

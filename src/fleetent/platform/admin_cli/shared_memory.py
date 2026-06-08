@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 
+from fleetent import observability
 from fleetent.platform.admin_cli.common import sanitize_cli_value
 
 
@@ -44,7 +45,7 @@ def handle(args: argparse.Namespace) -> bool:
     if args.memory_cmd != "shared":
         return True
 
-    from fleetent.intelligence import memory
+    from fleetent import memory
 
     if args.shared_cmd == "list":
         rows = memory.list_shared_memory(
@@ -107,6 +108,13 @@ def _add_scope_args(parser: argparse.ArgumentParser) -> None:
 
 def record_shared_memory_admin_audit(action: str, item_id: str, actor: str) -> None:
     """Delegate Shared Memory admin audit recording."""
-    from fleetent.intelligence.memory.shared import record_shared_memory_admin_audit as record
-
-    record(action, item_id, actor)
+    try:
+        observability.record_trace_event(
+            observability.TraceEvent(
+                run_id=f"admin:{action}",
+                event_type="shared_memory_admin_action",
+                payload={"action": action, "item_id": item_id, "actor": actor},
+            )
+        )
+    except Exception:
+        return

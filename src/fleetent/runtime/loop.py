@@ -20,8 +20,8 @@ from fleetent.eval_logger import log_run
 from fleetent.governance.agent_policy import check_tool_access
 from fleetent.governance.permission_gate import _default_gate
 from fleetent.integrations.sandbox import Mode, is_code_execution_enabled
-from fleetent.intelligence.long_term_ctx import ContextSource, build_context
-from fleetent.intelligence.memory import extract_and_update
+from fleetent.long_term_ctx import ContextSource, build_context
+from fleetent.memory import extract_and_update
 from fleetent.model import ModelConfigError, ModelPolicySnapshot, ResolvedModelConfig
 from fleetent.model.provider_health import ProviderHealthCache, get_health_cache
 from fleetent.observability import (

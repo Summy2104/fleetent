@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from fleetent.db import create_database
-from fleetent.intelligence.vector_store import SearchResult
+from fleetent.vector_store import SearchResult
 
 FIXTURE = Path("tests/evaluation/fixtures/shared_memory/basic.json")
 
@@ -10,8 +10,8 @@ FIXTURE = Path("tests/evaluation/fixtures/shared_memory/basic.json")
 async def test_shared_memory_evaluation_covers_scope_archive_and_proposal_apply(
     monkeypatch, tmp_path
 ):
-    from fleetent.intelligence import memory, reflection
-    from fleetent.intelligence.memory import shared, store
+    from fleetent import memory, reflection
+    from fleetent.memory import shared, store
     from tests.integration.test_migrations import apply_migrations
 
     fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))

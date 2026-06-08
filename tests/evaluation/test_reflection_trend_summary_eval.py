@@ -10,7 +10,7 @@ FIXTURE = Path("tests/evaluation/fixtures/reflection_trend_summary/basic.json")
 
 
 def test_reflection_trend_summary_fixture_covers_direction_and_redaction(monkeypatch, tmp_path):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     payload = json.loads(FIXTURE.read_text())
     db_path = tmp_path / "reflection-trend-eval.db"

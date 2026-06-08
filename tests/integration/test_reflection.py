@@ -7,7 +7,7 @@ from tests.integration.test_migrations import apply_migrations
 
 
 async def test_reflection_public_api_is_importable():
-    from fleetent.intelligence.reflection import (
+    from fleetent.reflection import (
         ReflectionFinding,
         ReflectionReport,
         run_reflection,
@@ -19,8 +19,7 @@ async def test_reflection_public_api_is_importable():
 
 
 async def test_run_reflection_returns_report_with_required_fields(monkeypatch):
-    from fleetent import observability
-    from fleetent.intelligence import reflection
+    from fleetent import observability, reflection
 
     monkeypatch.setattr(observability, "query_trace_events", lambda query: [])
 
@@ -35,8 +34,7 @@ async def test_run_reflection_returns_report_with_required_fields(monkeypatch):
 
 
 async def test_run_reflection_queries_observability_public_api(monkeypatch):
-    from fleetent import observability
-    from fleetent.intelligence import reflection
+    from fleetent import observability, reflection
 
     queries = []
 
@@ -57,8 +55,7 @@ async def test_run_reflection_queries_observability_public_api(monkeypatch):
 
 
 async def test_run_reflection_returns_empty_report_when_no_traces(monkeypatch):
-    from fleetent import observability
-    from fleetent.intelligence import reflection
+    from fleetent import observability, reflection
 
     monkeypatch.setattr(observability, "query_trace_events", lambda query: [])
 
@@ -69,8 +66,7 @@ async def test_run_reflection_returns_empty_report_when_no_traces(monkeypatch):
 
 
 async def test_run_reflection_reads_memory_layer_signals(monkeypatch):
-    from fleetent import observability
-    from fleetent.intelligence import reflection
+    from fleetent import observability, reflection
 
     event = observability.TraceEvent(
         id="trace-1",
@@ -91,9 +87,8 @@ async def test_run_reflection_reads_memory_layer_signals(monkeypatch):
 
 
 async def test_run_reflection_does_not_call_memory_write_api(monkeypatch):
-    from fleetent import observability
-    from fleetent.intelligence import memory as memory_layer
-    from fleetent.intelligence import reflection
+    from fleetent import memory as memory_layer
+    from fleetent import observability, reflection
 
     write_memory = AsyncMock()
     monkeypatch.setattr(observability, "query_trace_events", lambda query: [])
@@ -106,8 +101,7 @@ async def test_run_reflection_does_not_call_memory_write_api(monkeypatch):
 
 
 async def test_repeated_user_fact_generates_memory_candidate(monkeypatch):
-    from fleetent import observability
-    from fleetent.intelligence import reflection
+    from fleetent import observability, reflection
 
     events = [
         observability.TraceEvent(
@@ -140,9 +134,8 @@ async def test_repeated_user_fact_generates_memory_candidate(monkeypatch):
 
 
 async def test_conflicting_memory_signals_generate_memory_conflict(monkeypatch):
-    from fleetent import observability
-    from fleetent.intelligence import memory as memory_layer
-    from fleetent.intelligence import reflection
+    from fleetent import memory as memory_layer
+    from fleetent import observability, reflection
 
     now = datetime.now(UTC)
     memories = [
@@ -188,8 +181,7 @@ async def test_conflicting_memory_signals_generate_memory_conflict(monkeypatch):
 
 
 async def test_repeated_task_pattern_generates_skill_opportunity(monkeypatch):
-    from fleetent import observability
-    from fleetent.intelligence import reflection
+    from fleetent import observability, reflection
 
     events = [
         observability.TraceEvent(
@@ -224,8 +216,7 @@ async def test_repeated_task_pattern_generates_skill_opportunity(monkeypatch):
 
 
 async def test_run_reflection_persists_report_without_raw_transcript(tmp_path, monkeypatch):
-    from fleetent import observability
-    from fleetent.intelligence import reflection
+    from fleetent import observability, reflection
 
     db_path = tmp_path / "reflection.db"
     apply_migrations(db_path)
@@ -291,9 +282,8 @@ async def test_run_reflection_persists_report_without_raw_transcript(tmp_path, m
 
 
 async def test_memory_findings_do_not_modify_memory_items_table(tmp_path, monkeypatch):
-    from fleetent import observability
-    from fleetent.intelligence import memory as memory_layer
-    from fleetent.intelligence import reflection
+    from fleetent import memory as memory_layer
+    from fleetent import observability, reflection
 
     db_path = tmp_path / "reflection.db"
     apply_migrations(db_path)
@@ -366,8 +356,7 @@ async def test_memory_findings_do_not_modify_memory_items_table(tmp_path, monkey
 
 
 async def test_skill_opportunity_does_not_modify_skills_directory(tmp_path, monkeypatch):
-    from fleetent import observability
-    from fleetent.intelligence import reflection
+    from fleetent import observability, reflection
 
     skills_dir = tmp_path / "skills"
     skills_dir.mkdir()

@@ -7,7 +7,7 @@ from tests.integration.test_migrations import apply_migrations
 
 
 def _patch_reflection_db(monkeypatch, tmp_path):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     db_path = tmp_path / "reflection-trends.db"
     apply_migrations(db_path)
@@ -17,7 +17,7 @@ def _patch_reflection_db(monkeypatch, tmp_path):
 
 
 def test_reflection_trend_summary_buckets_report_findings(monkeypatch, tmp_path):
-    from fleetent.intelligence.reflection import (
+    from fleetent.reflection import (
         ReflectionTrendQuery,
         get_reflection_trend_summary,
     )
@@ -109,7 +109,7 @@ def test_reflection_trend_summary_buckets_report_findings(monkeypatch, tmp_path)
 
 
 def test_reflection_trend_summary_buckets_scoped_memory_proposal_lifecycle(monkeypatch, tmp_path):
-    from fleetent.intelligence.reflection import (
+    from fleetent.reflection import (
         ReflectionTrendQuery,
         get_reflection_trend_summary,
     )

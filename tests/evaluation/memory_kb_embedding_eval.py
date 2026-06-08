@@ -19,7 +19,7 @@ from fleetent.agent_config import (
 )
 from fleetent.config import EmbeddingSettings, KnowledgeBaseSettings, Settings, VectorStoreSettings
 from fleetent.db import create_database
-from fleetent.intelligence.vector_store import ReindexSummary
+from fleetent.vector_store import ReindexSummary
 from tests.integration.test_migrations import apply_migrations
 
 REQUIRED_FIXTURE_FIELDS = (
@@ -161,10 +161,9 @@ async def _run_fixture(
     vector_db_path: Path,
     embedding: EmbeddingSettings,
 ) -> CombinedEmbeddingEvaluationResult:
-    from fleetent import agent_config
-    from fleetent.intelligence import knowledge_base, vector_store
-    from fleetent.intelligence.knowledge_base import runtime as kb_runtime
-    from fleetent.intelligence.vector_store import runtime as vector_runtime
+    from fleetent import agent_config, knowledge_base, vector_store
+    from fleetent.knowledge_base import runtime as kb_runtime
+    from fleetent.vector_store import runtime as vector_runtime
 
     apply_migrations(db_path)
     database_url = f"sqlite:///{db_path}"
@@ -319,8 +318,8 @@ def _insert_memories(db_path: Path, user_id: str, memories: object) -> None:
 
 
 async def _run_queries(fixture: Mapping[str, Any]) -> list[CombinedQueryResult]:
-    from fleetent.intelligence import knowledge_base
-    from fleetent.intelligence import memory as memory_layer
+    from fleetent import knowledge_base
+    from fleetent import memory as memory_layer
 
     results: list[CombinedQueryResult] = []
     for query in fixture["queries"]:

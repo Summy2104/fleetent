@@ -27,7 +27,8 @@ def test_approvals_id_accepts_uuid_string(migrated_db):
     try:
         conn.execute(
             "INSERT INTO approvals "
-            "(id, session_id, requester_user_id, risk_level, tool_name, tool_args, status, created_at) "
+            "(id, session_id, requester_user_id, risk_level, tool_name, tool_args, status, "
+            "created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             ("a1b2c3d4", "sess-1", "user-1", "medium", "run_code", "{}", "pending", "2024-01-01"),
         )
