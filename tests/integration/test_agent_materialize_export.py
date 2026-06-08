@@ -144,6 +144,29 @@ def test_agent_file_from_store_ignores_invalid_config_override(db):
     assert materialize.agent_file_from_store(agent).name == "ov2"
 
 
+def test_seed_env_falls_back_to_provider_inline_key(db, tmp_path, monkeypatch):
+    """A provider authored with an inline key seeds the agent .env for its derived env name."""
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    provider_admin_store.add_provider(
+        "inline-prov",
+        "https://api.anthropic.com/v1/",
+        "claude-opus-4-8",
+        provider="anthropic",
+        protocol="openai_chat",
+        api_key="sk-inline-secret",
+        api_key_env="FLEETENT_MODEL_INLINE_PROV_API_KEY",
+    )
+    agent = agent_store.create_agent(
+        "seeded",
+        "p",
+        [],
+        model_overrides={"default": {"provider": "inline-prov", "model": "claude-opus-4-8"}},
+    )
+    home = materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
+    env_text = (home / ".env").read_text(encoding="utf-8")
+    assert "FLEETENT_MODEL_INLINE_PROV_API_KEY=sk-inline-secret" in env_text
+
+
 def test_agent_file_from_store_exports_active_version(db):
     agent_store.create_agent("ver", "v1", [])
     assert materialize.agent_file_from_store(agent_store.get_by_name("ver")).version == 1

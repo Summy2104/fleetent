@@ -11,6 +11,7 @@ loop, so it is testable in isolation.
 Auth mirrors user_admin_api: reads allow viewer+admin, writes require admin.
 """
 
+import re
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
@@ -103,6 +104,12 @@ def _require_admin(authorization: str | None) -> user_store.User:
 
 
 # --- masking serializer -------------------------------------------------------
+
+
+def _derive_api_key_env(provider_id: str) -> str:
+    """Stable env-var name for a provider's inline key, so value-mode entry needs no name."""
+    slug = re.sub(r"[^0-9A-Za-z]+", "_", provider_id).strip("_").upper()
+    return f"FLEETENT_MODEL_{slug}_API_KEY"
 
 
 def _mask_key(key: str | None) -> str | None:
@@ -263,6 +270,8 @@ def add_provider(body: ProviderBody, authorization: str | None = Header(None)) -
     user = _require_admin(authorization)
     if provider_admin_store.get_provider(body.id) is not None:
         raise HTTPException(status_code=409, detail="provider id already exists")
+    # value mode: an inline key auto-derives its env-var name (no separate field to fill)
+    api_key_env = body.api_key_env or (_derive_api_key_env(body.id) if body.api_key else None)
     provider_admin_store.add_provider(
         body.id,
         description=body.description,
@@ -271,7 +280,7 @@ def add_provider(body: ProviderBody, authorization: str | None = Header(None)) -
         base_url=body.base_url,
         model=body.model,
         api_key=body.api_key,
-        api_key_env=body.api_key_env,
+        api_key_env=api_key_env,
         max_tokens=body.max_tokens,
         temperature=body.temperature,
         extra_params=body.extra_params,
@@ -297,7 +306,10 @@ def edit_provider(
     user = _require_admin(authorization)
     if provider_admin_store.get_provider(provider_id) is None:
         raise HTTPException(status_code=404, detail="provider not found")
-    provider_admin_store.edit_provider(provider_id, **body.model_dump(exclude_unset=True))
+    updates = body.model_dump(exclude_unset=True)
+    if updates.get("api_key") and not updates.get("api_key_env"):
+        updates["api_key_env"] = _derive_api_key_env(provider_id)
+    provider_admin_store.edit_provider(provider_id, **updates)
     audit_log.write_audit(user.id, "provider.edit", "provider", provider_id)
     edited = provider_admin_store.get_provider(provider_id)
     if edited is None:

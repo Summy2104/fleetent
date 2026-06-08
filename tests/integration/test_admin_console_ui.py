@@ -215,6 +215,18 @@ def test_providers_secret_field_password_no_prefill():
     assert "autocomplete" in snippet
 
 
+def test_providers_key_is_inline_credential_field():
+    html = ADMIN_HTML
+    # provider API key + its env-reference are one value-first cred-field (not two boxes)
+    parts = html.split('data-cred="provider-key"', 1)
+    assert len(parts) == 2, "provider key cred-field not found"
+    body = parts[1][:1400]
+    assert 'id="pv-api-key"' in body and 'id="pv-api-key-env"' in body
+    assert "credToggle" in body  # advanced env-reference toggle
+    # the reusable control + helpers exist
+    assert "function credFieldHtml" in html and "function credToggle" in html
+
+
 def test_providers_write_controls_admin_gated():
     html = ADMIN_HTML
     assert "pv-create-bar" in html

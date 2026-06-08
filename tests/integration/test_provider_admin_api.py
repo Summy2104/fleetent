@@ -82,6 +82,30 @@ def test_add_provider_masks_key_in_response(client):
     assert r.json()["api_key_set"] is True
 
 
+def test_inline_key_auto_derives_env_name(client):
+    # value mode: type the key, the platform names the env var (no api_key_env field)
+    token, _ = _session_for("admin")
+    r = _add(client, token, pid="fast-claude")
+    assert r.status_code == 200, r.text
+    assert r.json()["api_key_env"] == "FLEETENT_MODEL_FAST_CLAUDE_API_KEY"
+    assert r.json()["api_key_set"] is True
+
+
+def test_explicit_env_reference_preserved(client):
+    # reference mode: an explicit env name is kept as-is, not auto-derived
+    token, _ = _session_for("admin")
+    body = {
+        "id": "ref",
+        "base_url": "https://api.openai.com/v1/",
+        "model": "gpt-5.5",
+        "api_key_env": "MY_TEAM_KEY",
+    }
+    r = client.post("/admin/providers", headers=_hdr(token), json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["api_key_env"] == "MY_TEAM_KEY"
+    assert r.json()["api_key_set"] is False
+
+
 def test_add_provider_vendor_protocol_env_params_roundtrip(client):
     token, _ = _session_for("admin")
     r = _add(

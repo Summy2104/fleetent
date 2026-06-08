@@ -162,6 +162,13 @@
   .password-input-wrapper input { padding-right: 40px; flex: 1; }
   .password-toggle { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 38px; background: transparent; border: none; color: var(--text-muted); cursor: pointer; border-radius: 0 var(--r-1) var(--r-1) 0; display: flex; align-items: center; justify-content: center; }
   .password-toggle:hover { background: var(--surface-2); }
+  .cred-field { display: flex; flex-direction: column; gap: 4px; }
+  .cred-field .cred-row { display: flex; gap: 6px; align-items: center; }
+  .cred-field .cred-toggle { align-self: flex-start; background: none; border: none; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 0; }
+  .cred-field .cred-toggle:hover { color: var(--accent); }
+  .cred-chip { font-size: 11px; white-space: nowrap; }
+  .cred-chip.set { color: var(--ok); }
+  .cred-chip.unset { color: var(--text-muted); }
 
   .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
   button.primary { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: var(--r-1); font-size: 14px; font-weight: 500; cursor: pointer; }
@@ -1223,17 +1230,20 @@
 
           <div class="form-group">
             <label class="form-label" for="pv-api-key">API Key</label>
-            <div class="password-input-wrapper">
-              <input id="pv-api-key" type="password" class="form-input" placeholder="sk-..." autocomplete="off">
-              <button type="button" class="password-toggle" onclick="pvTogglePassword()" aria-label="Toggle password visibility">👁</button>
+            <div class="cred-field" data-cred="provider-key" data-mode="value">
+              <div class="cred-value cred-row">
+                <div class="password-input-wrapper" style="flex:1;">
+                  <input id="pv-api-key" type="password" class="form-input" placeholder="sk-..." autocomplete="off">
+                  <button type="button" class="password-toggle" onclick="pvTogglePassword()" aria-label="Toggle password visibility">👁</button>
+                </div>
+                <span id="pv-key-chip" class="cred-chip unset"></span>
+              </div>
+              <div class="cred-ref cred-row" style="display:none;">
+                <input id="pv-api-key-env" type="text" class="form-input" placeholder="e.g. FLEETENT_MODEL_FAST_API_KEY" autocomplete="off">
+              </div>
+              <button type="button" class="cred-toggle" onclick="credToggle(this)">⚙ 引用现有变量</button>
+              <span class="form-hint">输入值即可——平台自动命名并把 agent.yaml 指向它（部署时注入 .env）；或切到「引用现有变量」由运维在主机 .env 填。编辑时留空保持原值。</span>
             </div>
-            <span class="form-hint">Leave blank to keep existing key when editing</span>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label" for="pv-api-key-env">API key env var</label>
-            <input id="pv-api-key-env" type="text" class="form-input" placeholder="e.g. FLEETENT_MODEL_FAST_API_KEY" autocomplete="off">
-            <span class="form-hint">Env var name holding the key (preferred over an inline key)</span>
           </div>
         </div>
 
@@ -3492,6 +3502,44 @@ function agRenderPreview(name, a, yamlText, keyHints = {}) {
   agLoadRequiredEnv(name);
 }
 
+// Reusable value-first credential control: default enters the secret inline (auto-named);
+// the advanced toggle switches to referencing an existing env var (operator fills host .env).
+function credFieldHtml(o) {
+  const mode = o.mode === "reference" ? "reference" : "value";  // default data-mode="value"
+  const set = o.status === "set";
+  const label = o.label ? `<label class="form-label">${esc(o.label)}</label>` : "";
+  const hint = o.hint ? `<span class="form-hint">${esc(o.hint)}</span>` : "";
+  return `<div class="cred-field" data-cred="${esc(o.key || "")}" data-mode="${mode}">
+    ${label}
+    <div class="cred-value cred-row" ${mode === "reference" ? 'style="display:none;"' : ""}>
+      <input type="password" id="${esc(o.valueId || "")}" data-cred-value
+             ${o.valueKey ? `data-key="${esc(o.valueKey)}"` : ""} autocomplete="off"
+             placeholder="${esc(o.placeholder || "输入值（写后不回显）")}" style="flex:1;">
+      <span class="cred-chip ${set ? "set" : "unset"}">${set ? "🟢 已设置" : "⚪ 未设置"}</span>
+    </div>
+    <div class="cred-ref cred-row" ${mode === "reference" ? "" : 'style="display:none;"'}>
+      <input type="text" id="${esc(o.envId || "")}" data-cred-env
+             ${o.envKey ? `data-key="${esc(o.envKey)}"` : ""} autocomplete="off"
+             value="${esc(o.envName || "")}" placeholder="ENV_VAR_NAME" style="flex:1;">
+    </div>
+    <button type="button" class="cred-toggle" onclick="credToggle(this)">⚙ 引用现有变量</button>
+    ${hint}
+  </div>`;
+}
+function credToggle(btn) {
+  const field = btn.closest(".cred-field");
+  credSetMode(field, field.dataset.mode === "reference" ? "value" : "reference");
+}
+function credSetMode(field, mode) {
+  if (!field) return;
+  const ref = mode === "reference";
+  field.dataset.mode = ref ? "reference" : "value";
+  field.querySelector(".cred-value").style.display = ref ? "none" : "";
+  field.querySelector(".cred-ref").style.display = ref ? "" : "none";
+  const toggle = field.querySelector(".cred-toggle");
+  if (toggle) toggle.textContent = ref ? "↩ 改为直接输入值" : "⚙ 引用现有变量";
+}
+
 let AG_REQUIRED_ENV = [];
 async function agLoadRequiredEnv(name) {
   const box = $("ag-required-env-list");
@@ -3873,6 +3921,9 @@ function pvOpenCreate() {
   $("pv-model").value = "";
   $("pv-model-custom").value = "";
   $("pv-model-custom").classList.add("hidden");
+  credSetMode(document.querySelector('[data-cred="provider-key"]'), "value");
+  $("pv-key-chip").className = "cred-chip unset";
+  $("pv-key-chip").textContent = "";
   // Reset provider type to OpenAI
   document.querySelector('input[name="provider-type"][value="openai"]').checked = true;
   pvUpdateProviderType('openai');
@@ -3902,6 +3953,13 @@ async function pvOpenEdit(id) {
   
   $("pv-api-key").value = "";  // never prefill secret
   $("pv-api-key-env").value = p.api_key_env || "";
+  // a provider with only an env reference (no platform-held key) opens in reference mode
+  credSetMode(
+    document.querySelector('[data-cred="provider-key"]'),
+    !p.api_key_set && p.api_key_env ? "reference" : "value",
+  );
+  $("pv-key-chip").className = "cred-chip " + (p.api_key_set ? "set" : "unset");
+  $("pv-key-chip").textContent = p.api_key_set ? "🟢 已设置" : "⚪ 未设置";
   $("pv-max-tokens").value = p.max_tokens != null ? p.max_tokens : "";
   $("pv-temperature").value = p.temperature != null ? p.temperature : "";
   $("pv-protocol").value = p.protocol || "";
