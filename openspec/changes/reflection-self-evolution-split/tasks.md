@@ -8,15 +8,15 @@
 ## 2. 自进化引擎提为顶层 agent（TDD）
 
 - [x] 2.1 写失败测试：断言 `reflection` 引擎产出 proposal 而不直接执行变更；引擎只读 trace/memory/`knowledge_base.retrieval`
-- [ ] 2.2 `git mv reflection.py → reflection/`：引擎（run_*/generate_*/findings/`_read_memory_signals`）+ `reflection/store.py`（proposal/report 表 CRUD、save_report）；引擎内不细分
-- [ ] 2.3 旧路径 `intelligence/reflection.py` 留 re-export shim
-- [ ] 2.4 跑测试 → 绿
+- [x] 2.2 `git mv reflection.py → reflection/`：引擎（run_*/generate_*/findings/`_read_memory_signals`）+ `reflection/store.py`（proposal/report 表 CRUD、save_report）；引擎内不细分
+- [x] 2.3 旧路径 `intelligence/reflection.py` 留 re-export shim
+- [x] 2.4 跑测试 → 绿
 
 ## 3. 变更审批门 → governance（TDD）
 
-- [ ] 3.1 写失败测试：断言 `governance/reflection_gate` 的 `resolve(approve)` 回调对应真相源写接口（user/shared memory→memory.shared 写、skill→skill 库、KB→沉淀源不直接写 KB）；异步不阻塞引擎
-- [ ] 3.2 抽 approve/reject/expire/apply + `_apply_maintenance_action`/`_auto_apply_allowed`/`_require_*` 到 `governance/reflection_gate.py`；经 `reflection.store` 改 proposal 状态
-- [ ] 3.3 实现 `resolve()` 后回调真相源写（落地逻辑复用原 `apply_*`，仅换调用位置）
+- [x] 3.1 写失败测试：断言 `governance/reflection_gate` 的 `resolve(approve)` 回调对应真相源写接口（user/shared memory→memory.shared 写、skill→skill 库、KB→沉淀源不直接写 KB）；异步不阻塞引擎
+- [x] 3.2 抽 approve/reject/expire/apply + `_apply_maintenance_action`/`_auto_apply_allowed`/`_require_*` 到 `governance/reflection_gate.py`；经 `reflection.store` 改 proposal 状态
+- [x] 3.3 实现 `resolve()` 后回调真相源写（落地逻辑复用原 `apply_*`，仅换调用位置）
 - [ ] 3.4 跑测试 → 绿
 
 ## 4. 审批渠道按类型路由（TDD）
