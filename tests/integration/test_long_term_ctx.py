@@ -14,7 +14,7 @@ def _publish_agent(monkeypatch, agent: AgentFile) -> None:
     monkeypatch.setattr(
         agent_config,
         "_index",
-        AgentConfigIndex(agents={agent.name: agent}, by_channel={}, by_user={}, default=agent.name),
+        AgentConfigIndex(agents={agent.name: agent}, default=agent.name),
     )
 
 

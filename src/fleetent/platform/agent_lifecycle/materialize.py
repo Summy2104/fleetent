@@ -18,7 +18,6 @@ import yaml
 from fleetent import agent_store, paths
 from fleetent.agent_config import (
     AGENT_FILE_NAME,
-    AgentBindings,
     AgentFile,
     AgentKnowledge,
     AgentKnowledgeBinding,
@@ -106,7 +105,6 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
         features=agent.features,
         models=_models_from_overrides(agent.model_overrides),
         mcp_servers=_mcp_servers_for_agent(agent),
-        bindings=_bindings_for_agent(agent),
         knowledge=_knowledge_for_agent(agent),
         memory_namespace=agent.memory_namespace,
     )
@@ -249,16 +247,6 @@ def _mcp_servers_for_agent(agent: agent_store.Agent) -> list[McpServerSettings]:
             )
         )
     return servers
-
-
-def _bindings_for_agent(agent: agent_store.Agent) -> AgentBindings:
-    return AgentBindings(
-        channels=[
-            f"{channel['platform']}:{channel['channel_id']}"
-            for channel in agent_store.list_channels_for_agent(agent.id)
-        ],
-        users=agent_store.list_users_for_agent(agent.id),
-    )
 
 
 def _knowledge_for_agent(agent: agent_store.Agent) -> AgentKnowledge:

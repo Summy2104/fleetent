@@ -1,8 +1,8 @@
 """Agent-local IM access: approval store, identity resolution, and access gates.
 
 Runtime-side (not platform) IM access for a self-contained agent. The static allow
-rules live in the agent home (`agent.yaml` `access` block, parsed by
-:mod:`fleetent.agent_config`); dynamic approvals live in a JSON store under the agent
+rules live in the connector's `access` block in `agent.yaml`, parsed by
+:mod:`fleetent.agent_config`; dynamic approvals live in a JSON store under the agent
 home `data/`. All evaluation here is local — no platform-DB read — so a standalone agent
 enforces its own access without a platform database (see openspec change
 ``per-agent-im-access``).
@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 
 from fleetent import paths
-from fleetent.agent_config import AgentAccess
+from fleetent.agent_config import ConnectorAccess
 
 # Default agent-local approval store path (single-agent home). Injectable: the standalone
 # agent runtime points this at its own home `data/`; tests pass an explicit path.
@@ -73,18 +73,18 @@ def resolve_identity(platform: str, platform_user_id: str) -> str:
 
     The agent runtime uses the platform-native IM user id directly as the identity, so
     it never reads the platform ``user_store``. Author-facing ``allow_users`` entries in
-    the agent home are matched against this same native id.
+    the connector's access block are matched against this same native id.
     """
     return platform_user_id
 
 
-def channel_allowed(access: AgentAccess, channel_id: str) -> bool:
-    """Channel gate: empty ``allow_channels`` allows all the agent's bound channels."""
+def channel_allowed(access: ConnectorAccess, channel_id: str) -> bool:
+    """Channel gate: empty ``allow_channels`` allows all channels the connector receives."""
     if not access.allow_channels:
         return True
     return channel_id in access.allow_channels
 
 
-def user_allowed(access: AgentAccess, store: LocalApprovalStore, identity: str) -> bool:
+def user_allowed(access: ConnectorAccess, store: LocalApprovalStore, identity: str) -> bool:
     """User gate: allowed if statically listed or locally approved."""
     return identity in access.allow_users or store.is_approved(identity)

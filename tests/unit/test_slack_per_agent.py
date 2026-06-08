@@ -1,4 +1,4 @@
-"""Per-agent Slack adapter: agent-keyed app, stamps agent, channel filter."""
+"""Per-agent Slack adapter: agent-keyed app, stamps agent and owner."""
 
 from unittest.mock import MagicMock, patch
 
@@ -44,17 +44,12 @@ async def test_create_app_stamps_agent_and_owner(monkeypatch):
     assert msg.platform == "slack"
 
 
-async def test_channel_filter_drops_unlisted(monkeypatch):
+async def test_create_app_passes_all_channels_to_normalizer(monkeypatch):
+    # Channel filtering now handled by the normalizer via ConnectorAccess.allow_channels,
+    # not by the Slack handler; all messages that arrive here are forwarded.
     fn, routed = _build_handler(
-        monkeypatch, "support", "ownerA", {"bot_token": "b", "channels": ["C1"]}
+        monkeypatch, "support", "ownerA", {"bot_token": "b", "app_token": "a"}
     )
-    await fn({"user": "U1", "text": "hi", "ts": "1", "channel": "C2"}, _say)
-    assert "msg" not in routed  # dropped: C2 not in the filter
-
-
-async def test_channel_filter_empty_allows_all(monkeypatch):
-    fn, routed = _build_handler(
-        monkeypatch, "support", "ownerA", {"bot_token": "b", "channels": []}
-    )
-    await fn({"user": "U1", "text": "hi", "ts": "1", "channel": "C9"}, _say)
-    assert "msg" in routed
+    await fn({"user": "U1", "text": "hi", "ts": "1", "channel": "C99"}, _say)
+    assert "msg" in routed  # forwarded to normalizer; access gate decides
+    assert routed["msg"].channel_id == "C99"

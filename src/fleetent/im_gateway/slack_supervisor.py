@@ -42,7 +42,7 @@ class SlackSupervisor:
         app = os.environ.get(connector.app_token_env)
         if not bot or not app:
             return None
-        return {"bot_token": bot, "app_token": app, "channels": list(connector.channels)}
+        return {"bot_token": bot, "app_token": app}
 
     async def start(self, agent_name: str) -> None:
         agent = agent_config.current().get(agent_name)

@@ -41,7 +41,7 @@ class TelegramSupervisor:
         bot = os.environ.get(connector.bot_token_env)
         if not bot:
             return None
-        return {"bot_token": bot, "channels": list(connector.channels)}
+        return {"bot_token": bot}
 
     async def start(self, agent_name: str) -> None:
         agent = agent_config.current().get(agent_name)

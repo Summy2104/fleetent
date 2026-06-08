@@ -1,10 +1,10 @@
 """File-driven agent configuration: self-contained `agent.yaml` per agent.
 
 Each agent lives at ``<agents_dir>/<name>/agent.yaml`` and fully describes the agent
-(definition, capability switches, inline MCP servers, and channel/user bindings). This
-module parses and validates those files and builds the in-memory index the runtime
-uses to resolve agents and route requests — with zero database access. The DB and
-admin console remain the authoring source of truth; these files are generated artifacts
+(definition, capability switches, inline MCP servers, and per-platform IM access rules).
+This module parses and validates those files and builds the in-memory index the runtime
+uses to resolve agents — with zero database access. The DB and admin console remain the
+authoring source of truth; these files are generated artifacts
 (see openspec change ``file-driven-agent-config``).
 """
 
@@ -40,12 +40,22 @@ AGENT_FILE_NAME = "agent.yaml"
 _ENV_VAR_NAME_RE = re.compile(r"^(env:)?[A-Z_][A-Z0-9_]*$")
 
 
-class AgentBindings(BaseModel):
+class ConnectorAccess(BaseModel):
+    """Per-platform IM access rules, embedded in each connector declaration.
+
+    The default is closed: with no rules the agent grants no implicit access and
+    requires approval. Empty allow_channels = allow all channels the connector receives
+    events from.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    default: bool = False
-    channels: list[str] = Field(default_factory=list)
-    users: list[str] = Field(default_factory=list)
+    allow_channels: list[str] = Field(default_factory=list)
+    allow_users: list[str] = Field(default_factory=list)
+    # When true, skip the user gate entirely — all users are allowed on this connector.
+    # Intended for open internal bots; does not affect channel gate.
+    allow_all_users: bool = False
+    require_approval: bool = True
 
 
 class SlackConnector(BaseModel):
@@ -55,9 +65,7 @@ class SlackConnector(BaseModel):
 
     bot_token_env: str
     app_token_env: str
-    # Optional channel filter: when non-empty, the agent responds only in these channels
-    # among those its Slack app receives events from. Empty = respond everywhere.
-    channels: list[str] = Field(default_factory=list)
+    access: ConnectorAccess = Field(default_factory=ConnectorAccess)
 
 
 class TelegramConnector(BaseModel):
@@ -66,9 +74,7 @@ class TelegramConnector(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     bot_token_env: str
-    # Optional chat filter: when non-empty, the agent responds only in these chats among
-    # those its Telegram bot receives updates from. Empty = respond everywhere.
-    channels: list[str] = Field(default_factory=list)
+    access: ConnectorAccess = Field(default_factory=ConnectorAccess)
 
 
 class AgentConnectors(BaseModel):
@@ -76,21 +82,6 @@ class AgentConnectors(BaseModel):
 
     slack: SlackConnector | None = None
     telegram: TelegramConnector | None = None
-
-
-class AgentAccess(BaseModel):
-    """Per-agent IM access rules, read from the agent home (no platform-DB lookup).
-
-    The default is closed: with no rules an agent grants no implicit access and
-    requires approval, rather than the legacy allowlist-off = allow-all behaviour.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    # Empty allow_channels = allow all channels the agent is bound to.
-    allow_channels: list[str] = Field(default_factory=list)
-    allow_users: list[str] = Field(default_factory=list)
-    require_approval: bool = True
 
 
 class ModelTarget(BaseModel):
@@ -288,8 +279,6 @@ class AgentFile(BaseModel):
     scheduling: SchedulingSettings = Field(default_factory=SchedulingSettings)
     webhooks: WebhooksSettings = Field(default_factory=WebhooksSettings)
     connectors: AgentConnectors = Field(default_factory=AgentConnectors)
-    bindings: AgentBindings = Field(default_factory=AgentBindings)
-    access: AgentAccess = Field(default_factory=AgentAccess)
 
 
 @dataclass(frozen=True)
@@ -297,18 +286,10 @@ class AgentConfigIndex:
     """In-memory resolution index built from scanning the agents directory."""
 
     agents: dict[str, AgentFile]
-    by_channel: dict[str, str]
-    by_user: dict[str, str]
     default: str | None
 
     def get(self, name: str) -> AgentFile | None:
         return self.agents.get(name)
-
-    def agent_for_channel(self, platform: str, channel_id: str) -> str | None:
-        return self.by_channel.get(f"{platform}:{channel_id}")
-
-    def agent_for_user(self, user_id: str) -> str | None:
-        return self.by_user.get(user_id)
 
     def default_agent(self) -> str | None:
         return self.default
@@ -323,7 +304,7 @@ class AgentConfigIndex:
 
 
 # Current published index. Empty until scan() runs (mirrors skill_registry._index).
-_index = AgentConfigIndex(agents={}, by_channel={}, by_user={}, default=None)
+_index = AgentConfigIndex(agents={}, default=None)
 
 
 def _resolve_agents_dir(agents_dir: str | Path | None) -> Path:
@@ -411,11 +392,7 @@ def load_agent_home_file(path: Path) -> AgentFile:
 
 def _single_agent_index(agent: AgentFile) -> AgentConfigIndex:
     """Build an index from one single-file agent: it is the sole, forced-default agent."""
-    by_channel = {ch: agent.name for ch in agent.bindings.channels}
-    by_user = {u: agent.name for u in agent.bindings.users}
-    return AgentConfigIndex(
-        agents={agent.name: agent}, by_channel=by_channel, by_user=by_user, default=agent.name
-    )
+    return AgentConfigIndex(agents={agent.name: agent}, default=agent.name)
 
 
 def build_index(agents_dir: str | Path | None = None) -> AgentConfigIndex:
@@ -433,35 +410,14 @@ def build_index(agents_dir: str | Path | None = None) -> AgentConfigIndex:
 
     root = _resolve_agents_dir(agents_dir)
     agents: dict[str, AgentFile] = {}
-    by_channel: dict[str, str] = {}
-    by_user: dict[str, str] = {}
     default: str | None = None
 
     if root.is_dir():
         for agent_dir in sorted(p for p in root.iterdir() if (p / AGENT_FILE_NAME).is_file()):
             agent = load_agent_file(agent_dir)
             agents[agent.name] = agent
-            for channel in agent.bindings.channels:
-                if channel in by_channel:
-                    raise ValueError(
-                        f"channel '{channel}' is bound by both '{by_channel[channel]}' "
-                        f"and '{agent.name}'"
-                    )
-                by_channel[channel] = agent.name
-            for user in agent.bindings.users:
-                if user in by_user:
-                    raise ValueError(
-                        f"user '{user}' is bound by both '{by_user[user]}' and '{agent.name}'"
-                    )
-                by_user[user] = agent.name
-            if agent.bindings.default:
-                if default is not None:
-                    raise ValueError(
-                        f"multiple default agents declared: '{default}' and '{agent.name}'"
-                    )
-                default = agent.name
 
-    return AgentConfigIndex(agents=agents, by_channel=by_channel, by_user=by_user, default=default)
+    return AgentConfigIndex(agents=agents, default=default)
 
 
 def scan(agents_dir: str | Path | None = None) -> None:

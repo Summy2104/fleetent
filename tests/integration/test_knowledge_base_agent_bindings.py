@@ -189,7 +189,7 @@ async def test_long_term_context_searches_resolved_agent_kbs(monkeypatch):
     monkeypatch.setattr(
         agent_config,
         "_index",
-        AgentConfigIndex(agents={"agent-1": agent}, by_channel={}, by_user={}, default="agent-1"),
+        AgentConfigIndex(agents={"agent-1": agent}, default="agent-1"),
     )
     monkeypatch.setattr(long_term_ctx.memory, "search", _empty_memory_search)
     calls = []
@@ -234,7 +234,7 @@ async def test_long_term_context_skips_search_when_agent_kb_scope_is_empty(monke
     monkeypatch.setattr(
         agent_config,
         "_index",
-        AgentConfigIndex(agents={"agent-1": agent}, by_channel={}, by_user={}, default="agent-1"),
+        AgentConfigIndex(agents={"agent-1": agent}, default="agent-1"),
     )
     monkeypatch.setattr(long_term_ctx.memory, "search", _empty_memory_search)
 

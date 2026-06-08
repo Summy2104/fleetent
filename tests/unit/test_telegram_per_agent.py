@@ -1,4 +1,4 @@
-"""Per-agent Telegram adapter: agent-keyed app, stamps agent, channel filter, no platform."""
+"""Per-agent Telegram adapter: agent-keyed app, stamps agent and owner, no platform."""
 
 import inspect
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -61,18 +61,12 @@ async def test_create_app_stamps_agent_and_owner(monkeypatch):
     assert msg.platform == "telegram"
 
 
-async def test_channel_filter_drops_unlisted(monkeypatch):
-    handler = _capture_handler(
-        monkeypatch, "sales", "ownerA", {"bot_token": "b", "channels": ["-100123"]}
-    )
+async def test_channel_filter_all_chats_forwarded(monkeypatch):
+    # Channel filtering now handled by the normalizer via ConnectorAccess.allow_channels;
+    # the Telegram handler forwards all messages regardless of channel.
+    handler = _capture_handler(monkeypatch, "sales", "ownerA", {"bot_token": "b"})
     captured = await _run(handler, _private_update("-100999"), monkeypatch)
-    captured.assert_not_called()  # chat outside the filter
-
-
-async def test_channel_filter_empty_allows_all(monkeypatch):
-    handler = _capture_handler(monkeypatch, "sales", "ownerA", {"bot_token": "b", "channels": []})
-    captured = await _run(handler, _private_update("-100999"), monkeypatch)
-    captured.assert_called_once()
+    captured.assert_called_once()  # forwarded to normalizer; access gate decides
 
 
 def test_adapter_has_no_platform_import():
