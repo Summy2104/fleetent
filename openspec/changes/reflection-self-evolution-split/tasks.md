@@ -17,7 +17,7 @@
 - [x] 3.1 写失败测试：断言 `governance/reflection_gate` 的 `resolve(approve)` 回调对应真相源写接口（user/shared memory→memory.shared 写、skill→skill 库、KB→沉淀源不直接写 KB）；异步不阻塞引擎
 - [x] 3.2 抽 approve/reject/expire/apply + `_apply_maintenance_action`/`_auto_apply_allowed`/`_require_*` 到 `governance/reflection_gate.py`；经 `reflection.store` 改 proposal 状态
 - [x] 3.3 实现 `resolve()` 后回调真相源写（落地逻辑复用原 `apply_*`，仅换调用位置）
-- [ ] 3.4 跑测试 → 绿
+ - [x] 3.4 跑测试 → 绿
 
 ## 4. 审批渠道按类型路由（TDD）
 
