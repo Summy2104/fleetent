@@ -60,3 +60,49 @@ def _async(value):
         return value
 
     return _coro()
+
+
+async def test_normalizer_propagates_permission_gate_config(monkeypatch, tmp_path):
+    """normalizer.route() passes agent's permission_gate_enabled + timeouts to loop.run()."""
+    import contextlib
+
+    from fleetent.agent_config import AgentAccess, AgentFile, default_models
+    from fleetent.im_gateway import access
+    from fleetent.runtime import loop as agent_loop
+    from fleetent.session import manager as session_mgr
+
+    agent = AgentFile(
+        name="b",
+        version=1,
+        models=default_models(),
+        access=AgentAccess(allow_users=["u1"]),
+        permission_gate_enabled=False,
+        permission_gate_medium_timeout_seconds=60,
+        permission_gate_high_timeout_seconds=120,
+    )
+    monkeypatch.setattr(normalizer, "get_agent_for_context", lambda *a, **k: agent)
+    monkeypatch.setattr(access, "APPROVALS_PATH", tmp_path / "data" / "im_approvals.json")
+
+    @contextlib.asynccontextmanager
+    async def fake_lock(sid):
+        yield
+
+    monkeypatch.setattr(session_mgr, "session_lock", fake_lock)
+    monkeypatch.setattr(session_mgr, "load", lambda _sid: _async([]))
+    monkeypatch.setattr(session_mgr, "load_meta", lambda _sid: _async({}))
+    monkeypatch.setattr(session_mgr, "save", lambda *a, **k: _async(None))
+
+    captured: list[dict] = []
+
+    async def capture_run(**kwargs):
+        captured.append(kwargs)
+        return "ok"
+
+    monkeypatch.setattr(agent_loop, "run", capture_run)
+
+    await normalizer.route(_msg("ownerC", []))
+
+    assert captured, "loop.run should have been called"
+    assert captured[0].get("permission_gate_enabled") is False
+    assert captured[0].get("permission_gate_medium_timeout") == 60
+    assert captured[0].get("permission_gate_high_timeout") == 120
