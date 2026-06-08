@@ -524,18 +524,32 @@ def test_agent_bindings_are_searchable_multiselect():
     assert collapse_panels in html
 
 
-def test_agent_model_overrides_pick_from_providers():
+def test_agent_model_overrides_two_part_model_list_and_router():
     html = ADMIN_HTML
     render = html.split("function agRenderModelOverrides", 1)[1].split(
-        "function agCollectModelOverrides", 1
+        "function agRenderRouter", 1
     )[0]
-    # Each level is a provider dropdown sourced from the configured registry —
-    # no free-text model / base_url_env inputs.
+    # Part 1: a multi-select MODEL list sourced from the configured providers.
     assert "AG_PROVIDERS" in render
-    assert "agmo-model" not in render
-    assert "agmo-baseurl" not in render
+    assert 'agMsWidget("ag-models-ms"' in render
+    assert 'id="ag-router"' in render
+    assert "agmo-model" not in render and "agmo-baseurl" not in render  # no free-text fields
+    # Part 2: custom-named routers, each an ordered fallback chain of models.
+    rt = html.split("function agRenderRouter", 1)[1].split("function agRouterAddRoute", 1)[0]
+    assert "+ router" in rt and "+ model" in rt
+    assert "router name" in rt and "max_tokens" in rt
+    for fn in (
+        "function agRouterAddRoute",
+        "function agRouterRemoveRoute",
+        "function agRouterAddModel",
+        "function agRouterRemoveModel",
+        "function agRouterSetName",
+        "function agRouterSetEntry",
+    ):
+        assert fn in html, fn
+    # collect emits the {targets, routes:{name:[{target,max_tokens}]}} shape
     collect = html.split("function agCollectModelOverrides", 1)[1].split("\n}", 1)[0]
-    assert "AG_PROVIDERS.find" in collect  # model derived from the chosen provider
+    assert "targets" in collect and "routes" in collect
     # providers are loaded when the modal opens (create + edit)
     assert 'AG_PROVIDERS = await api("GET", "/providers")' in html
     assert (
@@ -570,10 +584,11 @@ def test_agent_required_env_and_credential_field_panel():
 def test_agent_model_credentials_reuse_provider_key():
     html = ADMIN_HTML
     render = html.split("function agRenderModelOverrides", 1)[1].split(
-        "function agCollectModelOverrides", 1
+        "function agRenderRouter", 1
     )[0]
-    assert "model-key-provider-reuse" in render
-    assert "api_key_env" in render
+    # the model multi-select labels each provider with its key hint; the agent never
+    # stores a separate model key (it reuses the provider's).
+    assert "🔑 " in render and "p.api_key" in render
     assert "agmo-api-key" not in render
 
 

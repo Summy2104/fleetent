@@ -2926,7 +2926,7 @@ async function agCreate() {
   $("ag-create-extra").style.display = "";
   $("ag-allowed-tools").style.display = "none";  // capabilities YAML supplies tools in create
   AG_PROVIDERS = await api("GET", "/providers").catch(() => []);
-  agRenderModelOverrides();  // render the default/fast/reasoning provider pickers
+  agFillModelOverrides({});  // reset selection + render the two-part model/router picker
   $("ag-capabilities").value = "";
   await agLoadCreateBindings();
   $("ag-modal").dataset.mode = "create";
@@ -2937,26 +2937,98 @@ async function agCreate() {
 // to an ordered fallback chain of {target, max_tokens}. Models are CONFIGURED providers.
 // AG_ROUTE_SEL holds the router state; targets come from the multi-select widget DOM.
 let AG_PROVIDERS = [];
-function agRenderModelOverrides() {
-  const opts = `<option value="">— none —</option>`
-    + AG_PROVIDERS.map(p => `<option value="${esc(p.id)}">${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}${p.api_key_env ? " · " + esc(p.api_key_env) : ""}</option>`).join("");
-  const hint = AG_PROVIDERS.length ? "" : `<div class="muted" style="font-size:12px;">No providers configured — add one under Providers first.</div>`;
-  const reuse = `<div class="muted model-key-provider-reuse" style="font-size:12px; margin-bottom:6px;">Model credentials reuse each provider api_key_env; no duplicate model key is stored on the agent.</div>`;
-  $("ag-model-overrides").innerHTML = hint + reuse + ["default", "fast", "reasoning"].map(lvl => `
-    <div class="row" data-mo="${lvl}" style="gap:6px; margin-bottom:6px; align-items:center;">
-      <span style="min-width:74px; color:var(--muted);">${lvl}</span>
-      <select class="agmo-provider" style="flex:1;">${opts}</select>
-    </div>`).join("");
+let AG_ROUTERS = [];  // [{name, entries:[{target, max_tokens}]}] — custom-named, ordered
+function _agProviderLabel(p) {
+  return p ? `${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}` : "";
+}
+function agChosenTargets() {
+  return [...document.querySelectorAll("#ag-models-ms .agmo-target input[type=checkbox]:checked")]
+    .map(cb => cb.value);
+}
+function agRenderModelOverrides(selectedTargets) {
+  const box = $("ag-model-overrides");
+  if (!AG_PROVIDERS.length) {
+    box.innerHTML = `<div class="muted" style="font-size:12px;">No providers configured — add one under Providers first.</div>`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="muted" style="font-size:12px; margin:4px 0;">Models (this agent may use)</div>
+    <div id="ag-models-ms" style="margin-bottom:12px;"></div>
+    <div class="muted" style="font-size:12px; margin:4px 0;">Routing — add a router (custom name), then route it to one or more models (ordered fallbacks)</div>
+    <div id="ag-router"></div>`;
+  agMsWidget("ag-models-ms", "agmo-target",
+    AG_PROVIDERS.map(p => ({
+      value: p.id,
+      label: `${p.id}${p.model ? " · " + p.model : ""}${p.api_key ? " · 🔑 " + p.api_key : ""}`,
+      q: `${p.id} ${p.model || ""}`,
+    })), "Select models…");
+  const want = new Set(selectedTargets || []);
+  for (const cb of box.querySelectorAll("#ag-models-ms .agmo-target input[type=checkbox]")) {
+    if (want.has(cb.value)) cb.checked = true;
+  }
+  agMsSync("ag-models-ms");
+  // re-render the router whenever the model selection changes (checkbox events bubble here)
+  $("ag-models-ms").addEventListener("change", agRenderRouter);
+  agRenderRouter();
+}
+function agRenderRouter() {
+  const router = $("ag-router");
+  const chosen = agChosenTargets();
+  for (const rt of AG_ROUTERS) {  // drop entries whose model was unselected
+    rt.entries = rt.entries.filter(e => !e.target || chosen.includes(e.target));
+  }
+  if (!chosen.length) {
+    router.innerHTML = `<div class="muted" style="font-size:12px;">Select at least one model to add a router.</div>`;
+    return;
+  }
+  const provById = Object.fromEntries(AG_PROVIDERS.map(p => [p.id, p]));
+  const addBtn = `<div class="row" style="justify-content:flex-end; margin-bottom:6px;">
+    <button type="button" class="small ghost" onclick="agRouterAddRoute()">+ router</button></div>`;
+  const blocks = AG_ROUTERS.map((rt, ri) => {
+    const rows = rt.entries.map((e, ei) => {
+      const opts = `<option value="">— pick model —</option>` + chosen.map(pid =>
+        `<option value="${esc(pid)}" ${e.target === pid ? "selected" : ""}>${_agProviderLabel(provById[pid])}</option>`).join("");
+      return `<div class="row" style="gap:6px; align-items:center; margin:3px 0;">
+        <select onchange="agRouterSetEntry(${ri},${ei},'target',this.value)" style="flex:1;">${opts}</select>
+        <input type="number" min="1" placeholder="max_tokens" value="${e.max_tokens ?? ""}"
+          oninput="agRouterSetEntry(${ri},${ei},'max_tokens',this.value)" style="width:120px;">
+        <button type="button" class="small ghost" onclick="agRouterRemoveModel(${ri},${ei})">✕</button>
+      </div>`;
+    }).join("");
+    return `<div style="border:1px solid var(--border); border-radius:var(--r-1); padding:8px; margin-bottom:8px;">
+      <div class="row" style="gap:6px; align-items:center;">
+        <input placeholder="router name (e.g. default)" value="${esc(rt.name)}" oninput="agRouterSetName(${ri}, this.value)" style="flex:1;">
+        <button type="button" class="small ghost" onclick="agRouterAddModel(${ri})">+ model</button>
+        <button type="button" class="small ghost danger" onclick="agRouterRemoveRoute(${ri})">✕</button>
+      </div>
+      ${rows || `<div class="muted" style="font-size:12px; margin-top:4px;">No model yet — + model.</div>`}
+    </div>`;
+  }).join("");
+  router.innerHTML = addBtn + (blocks || `<div class="muted" style="font-size:12px;">No routers — + router to add one.</div>`);
+}
+function agRouterAddRoute() { AG_ROUTERS.push({ name: "", entries: [] }); agRenderRouter(); }
+function agRouterRemoveRoute(ri) { AG_ROUTERS.splice(ri, 1); agRenderRouter(); }
+function agRouterSetName(ri, val) { if (AG_ROUTERS[ri]) AG_ROUTERS[ri].name = val; }
+function agRouterAddModel(ri) { if (AG_ROUTERS[ri]) AG_ROUTERS[ri].entries.push({ target: "", max_tokens: null }); agRenderRouter(); }
+function agRouterRemoveModel(ri, ei) { if (AG_ROUTERS[ri]) AG_ROUTERS[ri].entries.splice(ei, 1); agRenderRouter(); }
+function agRouterSetEntry(ri, ei, field, val) {
+  const e = AG_ROUTERS[ri] && AG_ROUTERS[ri].entries[ei];
+  if (!e) return;
+  e[field] = field === "max_tokens" ? (val === "" ? null : Number(val)) : val;
 }
 function agCollectModelOverrides() {
-  const mo = {};
-  for (const row of document.querySelectorAll("#ag-model-overrides [data-mo]")) {
-    const pid = row.querySelector(".agmo-provider").value;
-    if (!pid) continue;
-    const p = AG_PROVIDERS.find(x => x.id === pid);
-    mo[row.dataset.mo] = { provider: pid, model: p ? (p.model || "") : "" };
+  const targets = agChosenTargets();
+  if (!targets.length) return {};
+  const routes = {};
+  for (const rt of AG_ROUTERS) {
+    const name = (rt.name || "").trim();
+    if (!name) continue;
+    const entries = rt.entries
+      .filter(e => e.target && targets.includes(e.target))
+      .map(e => ({ target: e.target, max_tokens: e.max_tokens ?? null, params: {} }));
+    if (entries.length) routes[name] = entries;
   }
-  return mo;
+  return { targets, routes };
 }
 
 let AGM_CHANNELS = [];
@@ -3093,12 +3165,28 @@ function agmAddChannel() {
 }
 function agmRemoveChannel(i) { AGM_CHANNELS.splice(i, 1); agmRenderChannels(); }
 function agFillModelOverrides(mo) {
-  for (const row of document.querySelectorAll("#ag-model-overrides [data-mo]")) {
-    const o = (mo || {})[row.dataset.mo];
-    // Stored `provider` is a configured-provider id; select it (blank if it no
-    // longer exists in the registry).
-    row.querySelector(".agmo-provider").value = o ? (o.provider || "") : "";
+  mo = mo || {};
+  let targets = [];
+  AG_ROUTERS = [];
+  const toEntry = e => (typeof e === "string" ? { target: e, max_tokens: null }
+    : { target: e.target, max_tokens: e.max_tokens ?? null });
+  if (Array.isArray(mo.targets)) {
+    targets = mo.targets.slice();
+    for (const [name, v] of Object.entries(mo.routes || {})) {
+      AG_ROUTERS.push({ name, entries: (Array.isArray(v) ? v : [v]).map(toEntry) });
+    }
+  } else {
+    // legacy {route: {provider, model}} → derive targets + one-entry routers
+    const t = new Set();
+    for (const [name, sel] of Object.entries(mo)) {
+      if (sel && typeof sel === "object" && sel.provider) {
+        t.add(sel.provider);
+        AG_ROUTERS.push({ name, entries: [{ target: sel.provider, max_tokens: null }] });
+      }
+    }
+    targets = [...t];
   }
+  agRenderModelOverrides(targets);
 }
 // Render current allowed_tools back into the capabilities YAML the modal edits.
 function agToolsToYaml(tools) {
@@ -3151,8 +3239,7 @@ async function agEdit(name) {
     $("ag-allowed-tools").value = "";
     $("ag-create-extra").style.display = "";
     $("ag-bind-config").style.display = "";
-    agRenderModelOverrides();  // render the provider pickers, then select stored providers
-    agFillModelOverrides(a.model_overrides);
+    agFillModelOverrides(a.model_overrides);  // selection (new + legacy shape) + renders router
     // Curated knobs populate the Advanced fields; the Custom box round-trips only the
     // long tail (config_overrides minus the discrete keys). Legacy agents without any
     // overrides fall back to showing just their allowed_tools.
