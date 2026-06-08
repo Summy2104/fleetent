@@ -5,8 +5,8 @@
 
 ## 2. agent_app.boot() — data path redirection
 
-- [ ] 2.1 Write failing tests for `boot()` path redirection: sessions, DB URL default, approvals, diagnostics
-- [ ] 2.2 Implement `_redirect_agent_data_paths(home_dir)` helper in `agent_app.py` and call it from `boot()` before `_start_infra()`
+- [x] 2.1 Write failing tests for `boot()` path redirection: sessions, DB URL default, approvals, diagnostics
+- [x] 2.2 Implement `_redirect_agent_data_paths(home_dir)` helper in `agent_app.py` and call it from `boot()` before `_start_infra()`
 
 ## 3. Log directory — resolve blank to agent home
 

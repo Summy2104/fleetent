@@ -67,6 +67,27 @@ def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
     return paths.base_dir() / "agents" / agent_id
 
 
+def _redirect_agent_data_paths(home_dir: Path) -> None:
+    """Redirect all per-agent runtime data sinks to ``home_dir/data/``.
+
+    Called once per standalone agent boot before any infra initialisation. Assigns
+    directly to module-level constants so the change takes effect for all subsequent
+    operations in this process without introducing new env vars.
+    """
+    from fleetent.im_gateway import access
+    from fleetent.observability import diagnostics
+    from fleetent.session import manager as session_mgr
+
+    data_dir = home_dir / "data"
+    session_mgr.SESSIONS_DIR = data_dir / "sessions"
+    access.APPROVALS_PATH = data_dir / "im_approvals.json"
+    # Replace the _default_data_dir callable so diagnostics export/retention
+    # resolve to this agent's data dir, not the global FLEETENT_HOME/data/.
+    diagnostics._default_data_dir = lambda: data_dir  # type: ignore[assignment]
+    # Only set DATABASE_URL if not already configured (explicit .env or system env wins).
+    os.environ.setdefault("DATABASE_URL", f"sqlite:///{data_dir / 'fleetent.db'}")
+
+
 def _configure_logging_from_agent(agent: AgentFile) -> None:
     """Apply agent.yaml log_format and observability.logging.* to the runtime logging system.
 
@@ -195,6 +216,7 @@ async def boot(
         from dotenv import load_dotenv
 
         load_dotenv(env_path, override=False)
+    _redirect_agent_data_paths(home_dir)
     agent = agent_config.scan_home(home_dir)
     _configure_logging_from_agent(agent)
     # Re-point the vector/embedding singletons at this agent's intelligence config
