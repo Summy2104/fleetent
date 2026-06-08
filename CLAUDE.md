@@ -81,14 +81,24 @@ platform（管理入口） ──→ agent runtime（被启停、被读取）
 agent runtime ──✗──→ platform        # 严格禁止反向依赖
 ```
 
-- **agent 运行时模块**（`runtime/`、`session/`、`im_gateway/`、`intelligence/`、`tools/`、`integrations/`、`model/`、`observability/`、`governance/`）MUST NOT `import fleetent.platform.*`，也不得调用 platform 模块来触发行为
+- **agent 运行时模块**（`runtime/`、`session/`、`im_gateway/`、`tools/`、`integrations/`、`model/`、`observability/`、`governance/`、`memory/`、`long_term_ctx/`、`reflection/`）MUST NOT `import fleetent.platform.*`，也不得调用 platform 模块来触发行为
+- **独立组件 / 基础设施**（`knowledge_base/` = 独立组件、`vector_store/` = 基础设施）同样 MUST NOT `import fleetent.platform.*`，但理由不是"属 agent 运行时"，而是它们是自包含的独立组件 / 基础设施；platform 仅通过管理薄壳驱动其 ingest，不被反向依赖
 - **agent 运行时产生的数据**（会话历史、压缩/token/恢复等元数据、运行轨迹）只能落到 agent 侧：session 文件、agent 侧 store、observability trace。**严禁写入 platform 的管理表**（如 `platform/chat_management` 的 `session_meta`）
 - platform 需要 agent 数据时，**读** agent 侧产物（trace / session 文件 / agent store），而非要求 agent 反向写入 platform 表
 - **验证基线**：任何改动后，agent 必须能在「无 platform、platform 的 DB 表不存在」的环境下完成 `fleetent agent run` 对话，相关功能不得依赖 platform 表才能工作
+- **KB 读写边界**：`knowledge_base.retrieval`（agent 消费侧）MUST NOT import `knowledge_base.ingest`（platform 驱动侧）——retrieval ✗→ ingest，由依赖护栏测试强制
+
+**归属判据（agent 能力 vs 控制面）**——判断一个能力归 agent 侧还是 platform 控制面，靠以下三条，不靠"在不在对话回合里"：
+
+1. **关于自己 vs 外部对它**：能力是 agent「关于自己」（记忆 / 反思 / 上下文）还是「外部对它的管理」决定归属；时间尺度（同步 / 异步、在不在对话回合）**不决定**归属
+2. **审批门 ≠ 归控制面**：一个能力即使其「变更」需人工审批门，能力本体仍归 agent 侧；审批门是横切治理（governance），变更 / 审批的管理 API 才是 platform 的薄暴露面
+3. **自进化是纵向元能力**：reflection 不与 memory / retrieval 平铺，而是纵向贯穿各能力域——读 trace / memory / KB，产出对 user-memory / shared-memory / KB / skill 的改进建议，经统一审批门落地
+
+**自进化的写经统一审批门**：所有自进化「写」经 `governance` 统一审批门落地（与 `permission_gate` 同类）。区分**真相源**（memory / shared-memory / skill：经审批**直接写**）与**派生视图**（KB：**不直接写**——agent 贡献写 agent-curated 沉淀源 → connector sync 流入 KB，保证 KB 始终是数据源的纯派生、可追溯；KB 写入路径单一，只 ingest / sync）。KB connector 外部摄取属受信运维，不经审批门
 
 > 反例（已发生并返工）：把 compaction / token / resume_pending 写进 `session_meta`——agent 独立运行时该表不存在，功能静默失效。正确做法：状态存 session 文件 `meta` 字段，统计读 observability trace（`observability/usage.py`）。
 >
-> 现存待审计的 agent→platform 依赖（不得新增同类；逐一确认合规性或清理）：`im_gateway/telegram`、`intelligence/knowledge_base/config`、`tools/builtin_tools` 各有一处 import `platform.*`。
+> 现存待审计的 agent→platform 依赖（不得新增同类；逐一确认合规性或清理）：`im_gateway/telegram`、`tools/builtin_tools` 各有一处 import `platform.*`。
 
 ---
 
@@ -125,13 +135,14 @@ src/fleetent/
     {termination,loop_detector,budget,layered_budget,cancellation,
      message_hygiene,error_classifier,tool_guardrails,sub_agent_lifecycle}.py
 
-  # ── 智能能力 ──
-  intelligence/
-    knowledge_base/      ← KB 检索/向量化/解析/持久化运行时
-    memory/              ← 用户记忆提取/存储/检索
-    vector_store/        ← 向量嵌入和重排运行时
-    long_term_ctx.py     ← 长期上下文构建（记忆 + 知识库注入）
-    reflection.py        ← 反思报告生成
+  # ── Agent 运行时能力 ──
+  memory/                  ← 用户记忆提取/存储/检索
+  long_term_ctx/           ← 长期上下文构建（记忆 + 知识库注入）
+  reflection/              ← 反思报告生成
+
+  # ── 平台与组件基础设施 ──
+  knowledge_base/          ← KB 检索/向量化/解析/持久化运行时
+  vector_store/            ← 向量嵌入和重排运行时
 
   # ── 治理 ──
   governance/
@@ -219,7 +230,7 @@ src/fleetent/
 - **SQL 参数规范**：store 层 SQL 使用 named parameters（如 `:user_id`），不要新增 `?` 占位符风格
 - **schema lifecycle 归 Alembic**：不要在新 store 中复制 `_init_db()` 建表/补列模式
 - **禁止全局可变状态**：legacy 模块级路径常量（`DB_PATH` / `SESSIONS_DIR` 等）在迁移前必须可通过 `monkeypatch` 注入，方便测试隔离
-- **禁止 agent 运行时反向依赖 platform**：`runtime/`、`session/`、`im_gateway/`、`intelligence/`、`tools/`、`integrations/` 等 agent 运行时模块不得 `import fleetent.platform.*`，不得写入 platform 管理表；agent 必须可脱离 platform 独立运行（详见「Agent / Platform 解耦」）
+- **禁止 agent 运行时反向依赖 platform**：`runtime/`、`session/`、`im_gateway/`、`tools/`、`integrations/`、`knowledge_base/`、`memory/`、`reflection/`、`long_term_ctx/` 等 agent 运行时模块不得 `import fleetent.platform.*`，不得写入 platform 管理表；agent 必须可脱离 platform 独立运行（详见「Agent / Platform 解耦」）
 - **新依赖必须经过讨论**：区分三类——
   - 基础设施服务（PostgreSQL、Redis、Qdrant 等）：可引入，需在 PR 中说明必要性和自托管方案
   - AI 框架（LangChain / LlamaIndex / LangGraph）：永久禁止，无论何种理由
