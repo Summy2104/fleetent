@@ -122,6 +122,35 @@ def test_agent_file_from_store_defaults_models_when_no_overrides(db):
     assert exported.models == default_models()
 
 
+def test_agent_file_from_store_applies_config_overrides(db):
+    """The per-agent config_overrides blob deep-merges onto the materialized agent.yaml."""
+    agent = agent_store.create_agent(
+        "ov",
+        "p",
+        [],
+        config_overrides={"agent_max_turns": 80, "access": {"require_approval": False}},
+    )
+
+    af = materialize.agent_file_from_store(agent)
+
+    assert af.agent_max_turns == 80
+    assert af.access.require_approval is False
+    assert af.access.allow_users == []  # untouched nested default preserved
+
+
+def test_agent_file_from_store_ignores_invalid_config_override(db):
+    agent = agent_store.create_agent("ov2", "p", [], config_overrides={"not_a_real_field": 1})
+    # a bad override must not break materialize — fall back to the valid base
+    assert materialize.agent_file_from_store(agent).name == "ov2"
+
+
+def test_agent_file_from_store_exports_active_version(db):
+    agent_store.create_agent("ver", "v1", [])
+    assert materialize.agent_file_from_store(agent_store.get_by_name("ver")).version == 1
+    agent_store.create_version("ver", system_prompt="v2")  # active becomes v2
+    assert materialize.agent_file_from_store(agent_store.get_by_name("ver")).version == 2
+
+
 def test_agent_file_from_store_handles_targets_routes_shape(db):
     """Agents authored with the {targets, routes:{name:[{target}]}} shape still materialize.
 

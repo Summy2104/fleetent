@@ -41,15 +41,60 @@ from fleetent.skills import registry as skill_registry
 _logger = get_logger("agent_lifecycle.materialize")
 
 
+def _active_version(agent: agent_store.Agent) -> int:
+    """The agent's active version number (the real snapshot count), defaulting to 1.
+
+    Tolerates a legacy/partial DB without the ``agent_versions`` table (returns 1).
+    """
+    if agent.active_version_id is None:
+        return 1
+    try:
+        av = agent_store.get_version_by_id(agent.active_version_id)
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            raise
+        return 1
+    return av.version if av is not None else 1
+
+
+def _deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge ``over`` onto ``base`` (dicts merge, scalars/lists replace)."""
+    out = dict(base)
+    for key, value in over.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def _apply_overrides(base: AgentFile, overrides: dict[str, Any]) -> AgentFile:
+    """Deep-merge per-agent agent.yaml overrides onto the base, re-validating the result.
+
+    Lets operators configure any agent.yaml field (governance/deployment/intelligence/
+    access/…) without a column per knob. A malformed override is ignored (base kept) so a
+    bad value can never break deploy/preview.
+    """
+    if not overrides:
+        return base
+    try:
+        merged = _deep_merge(base.model_dump(mode="json", exclude_defaults=False), overrides)
+        return AgentFile.model_validate(merged)
+    except Exception:  # noqa: BLE001 — invalid override must not break materialize
+        return base
+
+
 def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
     """Build the home schema from the authored core definition.
 
     connectors/access are not yet stored per-agent on the platform; they materialize as
     their safe defaults (no connectors; default-closed access) until authoring lands.
+    Finally deep-merges the per-agent ``config_overrides`` so any agent.yaml field is
+    configurable without a dedicated column.
     """
-    return AgentFile(
+    base = AgentFile(
         name=agent.name,
-        version=1,
+        version=_active_version(agent),
         tenant_id=agent.tenant_id,
         team_id=agent.team_id,
         system_prompt=agent.system_prompt,
@@ -65,6 +110,7 @@ def agent_file_from_store(agent: agent_store.Agent) -> AgentFile:
         knowledge=_knowledge_for_agent(agent),
         memory_namespace=agent.memory_namespace,
     )
+    return _apply_overrides(base, agent.config_overrides)
 
 
 def _global_disabled_skills() -> list[str]:
