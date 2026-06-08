@@ -6,18 +6,16 @@ import os
 from pathlib import Path
 
 import pytest
-from alembic import command
-from alembic.config import Config
 
 import fleetent.model.provider_health as provider_health
 from fleetent import db
 
 
 def _apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "migrations"))
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+    # Lazy import keeps the integration-only helper out of unit-test collection.
+    from tests.integration._migration_template import apply_migrations
+
+    apply_migrations(db_path)
 
 
 @pytest.fixture(autouse=True)

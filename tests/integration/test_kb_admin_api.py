@@ -4,11 +4,7 @@ Engine seams are monkeypatched so the tests exercise the management behaviour
 (uniqueness, binding protection, role guards, audit, seam pass-through).
 """
 
-from pathlib import Path
-
 import pytest
-from alembic import command
-from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -19,13 +15,7 @@ import fleetent.platform.knowledge_base_management.kb_admin_api as api
 import fleetent.user_store as user_store
 from fleetent.intelligence import vector_store
 from fleetent.intelligence.vector_store import SearchResult
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture

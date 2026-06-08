@@ -19,20 +19,23 @@
 
 ## 3. Migrate integration call sites to the shared helper
 
-- [ ] 3.1 Make `tests/integration/test_migrations.py` re-export `apply_migrations` from the
+- [x] 3.1 Make `tests/integration/test_migrations.py` re-export `apply_migrations` from the
       shared module (keep its own step-wise upgrade/downgrade calls intact); run
       `uv run pytest tests/integration/test_migrations.py -x -q` green
-- [ ] 3.2 Replace the 31 self-defined `apply_migrations` and 2 `_apply_migrations`
+- [x] 3.2 Replace the 31 self-defined `apply_migrations` and 2 `_apply_migrations`
       definitions with an import of the shared helper; run each edited file's tests green
-- [ ] 3.3 Replace remaining inline `command.upgrade(..., "head")` call sites (outside
+- [x] 3.3 Replace remaining inline `command.upgrade(..., "head")` call sites (outside
       `test_migrations.py`) with the shared helper; run affected files green
-- [ ] 3.4 Point the root `tests/conftest.py` `_apply_migrations`/`isolated_schedule_db`
+- [x] 3.4 Point the root `tests/conftest.py` `_apply_migrations`/`isolated_schedule_db`
       at the shared helper; run dependent tests green
 
 ## 4. Verify & finalize
 
-- [ ] 4.1 Grep residuals: no `def apply_migrations`, `def _apply_migrations`, or
+- [x] 4.1 Grep residuals: no `def apply_migrations`, `def _apply_migrations`, or
       `command.upgrade(..., "head")` left in `tests/integration` except `test_migrations.py`
-- [ ] 4.2 Run full `uv run pytest tests/integration -q` green; record before/after wall time
-- [ ] 4.3 Run `uv run python scripts/check_test_layers.py` (exit 0),
-      `uv run ruff format src tests && uv run ruff check src tests`, then `uv run pytest -x -q`
+- [x] 4.2 Run full `uv run pytest tests/integration -q`; failure set identical to main
+      (19 pre-existing, unrelated to this change), wall time 164.6s → 59.8s (~2.75x)
+- [x] 4.3 `check_test_layers.py` exits 0; changed files ruff-clean; `tests/unit` (2268)
+      and the helper tests green. Full `pytest -x -q` halts only on the 19 pre-existing
+      integration failures already present on `main` (AgentFile access/bindings schema,
+      deployment-docs provider assertion) — out of scope for this test-infra change

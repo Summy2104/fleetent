@@ -8,14 +8,11 @@ import fleetent.auth as auth
 import fleetent.governance.audit_log as audit
 import fleetent.platform.agent_statistics.stats_admin_api as api
 import fleetent.user_store as user_store
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    from pathlib import Path
-
-    from alembic import command
-    from alembic.config import Config
 
     db_path = tmp_path / "users.db"
     managed_db = tmp_path / "managed.db"
@@ -27,10 +24,7 @@ def client(tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "DB_PATH", db_path)
     user_store._init_db()
     audit._init_db()
-    cfg = Config()
-    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{managed_db}")
-    command.upgrade(cfg, "head")
+    apply_migrations(managed_db)
     monkeypatch.setattr(api, "fetch_traces", lambda **kw: [])
     monkeypatch.setattr(api, "fetch_approvals", lambda agent_id=None: [])
     monkeypatch.setattr(api, "agent_allowed_tools", lambda aid: [])

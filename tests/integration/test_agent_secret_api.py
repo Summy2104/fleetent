@@ -1,11 +1,8 @@
 """Integration tests for write-only agent credential APIs."""
 
 import base64
-from pathlib import Path
 
 import pytest
-from alembic import command
-from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -16,13 +13,7 @@ import fleetent.platform.agent_management_console.agent_admin_api as api
 import fleetent.user_store as user_store
 from fleetent.platform.connector_management import agent_mcp_server_store
 from fleetent.platform.model_provider_management import provider_admin_store
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture

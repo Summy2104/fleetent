@@ -17,6 +17,7 @@ from fleetent.im_gateway import access, normalizer
 from fleetent.platform.im_gateway_management import im_channel_allowlist as acl
 from fleetent.platform.im_gateway_management import im_connector_store as ics
 from fleetent.tools.multimodal import has_image_block
+from tests.integration._migration_template import apply_migrations
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"payload" * 4
 
@@ -39,20 +40,13 @@ def _bind_default_agent(tmp_path, monkeypatch):
 
 
 def _setup_db(tmp_path, monkeypatch):
-    from pathlib import Path
-
-    from alembic import command
-    from alembic.config import Config
 
     db_path = tmp_path / "users.db"
     for mod in (user_store, ics, acl):
         monkeypatch.setattr(mod, "DB_PATH", db_path)
     # normalizer routing queries agent_store, which runs on the unified db runtime.
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    cfg = Config()
-    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+    apply_migrations(db_path)
     ics._init_db()
     acl._init_db()
 

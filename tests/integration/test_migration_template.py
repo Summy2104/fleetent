@@ -39,9 +39,7 @@ def test_helper_schema_matches_fresh_migrate(tmp_path):
 
 def test_second_call_copies_template_without_rerunning_alembic(tmp_path):
     mt._template_db.cache_clear()
-    with mock.patch.object(
-        mt.command, "upgrade", side_effect=command.upgrade
-    ) as upgrade_spy:
+    with mock.patch.object(mt.command, "upgrade", side_effect=command.upgrade) as upgrade_spy:
         mt.apply_migrations(tmp_path / "a.db")
         mt.apply_migrations(tmp_path / "b.db")
     assert upgrade_spy.call_count == 1

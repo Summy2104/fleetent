@@ -1,21 +1,11 @@
 """Bridge from agent_mcp_server_store global definitions into the live MCP client."""
 
-from pathlib import Path
-
 import pytest
-from alembic import command
-from alembic.config import Config
 
 import fleetent.integrations.mcp.client as mcp_client
 from fleetent.platform.connector_management import agent_mcp_server_store as store
 from fleetent.platform.connector_management import mcp_runtime
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture

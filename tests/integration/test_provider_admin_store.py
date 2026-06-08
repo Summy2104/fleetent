@@ -4,20 +4,10 @@ New management-source tables created by Alembic migration 011, accessed via the
 unified db runtime (named params). api_key is stored but never returned plaintext.
 """
 
-from pathlib import Path
-
 import pytest
-from alembic import command
-from alembic.config import Config
 
 from fleetent.platform.model_provider_management import provider_admin_store as store
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
