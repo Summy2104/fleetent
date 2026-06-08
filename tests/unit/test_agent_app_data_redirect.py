@@ -13,8 +13,9 @@ def test_redirect_sets_sessions_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     from fleetent.session import manager as session_mgr
 
     home = tmp_path / "myagent"
-    # Register cleanup so session_mgr.SESSIONS_DIR is restored after the test.
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", session_mgr.SESSIONS_DIR)
+    # Ensure DATABASE_URL set by _redirect_agent_data_paths is cleaned up on teardown.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
     agent_app._redirect_agent_data_paths(home)
 
@@ -27,6 +28,7 @@ def test_redirect_sets_approvals_path(tmp_path: Path, monkeypatch: pytest.Monkey
 
     home = tmp_path / "myagent"
     monkeypatch.setattr(access, "APPROVALS_PATH", access.APPROVALS_PATH)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
     agent_app._redirect_agent_data_paths(home)
 
@@ -69,6 +71,7 @@ def test_redirect_updates_diagnostics_default_data_dir(
 
     home = tmp_path / "myagent"
     monkeypatch.setattr(diagnostics, "_default_data_dir", diagnostics._default_data_dir)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
     agent_app._redirect_agent_data_paths(home)
 

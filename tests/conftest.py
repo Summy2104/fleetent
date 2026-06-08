@@ -88,6 +88,17 @@ def _reset_agent_config_index():  # type: ignore[no-untyped-def]
     agent_config._index = original
 
 
+@pytest.fixture(autouse=True)
+def _isolate_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent DATABASE_URL set by agent_app.boot() from leaking between tests.
+
+    boot() calls _redirect_agent_data_paths() which uses os.environ.setdefault to
+    wire the per-agent DB path. Without this fixture the env mutation persists across
+    tests, causing ordering-dependent failures in tests that rely on the default value.
+    """
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+
 @pytest.fixture
 def isolated_schedule_db(tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
     db_path = tmp_path / "sched.db"
