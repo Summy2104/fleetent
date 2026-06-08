@@ -141,7 +141,14 @@ async def route(msg: NormalizedMessage) -> None:
     if not access.channel_allowed(access_cfg, msg.channel_id):
         await msg.reply_func(_REJECTION_MSG)
         return
-    if not access.user_allowed(access_cfg, store, msg.user_id):
+    # Skip user gate when allow_all_users is set OR when the channel is explicitly listed
+    # in allow_channels (channel membership implies authorization). Empty allow_channels
+    # means "allow all channels" but does NOT grant implicit user access.
+    channel_explicitly_allowed = (
+        bool(access_cfg.allow_channels) and msg.channel_id in access_cfg.allow_channels
+    )
+    skip_user_gate = access_cfg.allow_all_users or channel_explicitly_allowed
+    if not skip_user_gate and not access.user_allowed(access_cfg, store, msg.user_id):
         # Record the pending user so the platform/admin can approve them later; either
         # way the message never reaches the loop, decided entirely from local state.
         if access_cfg.require_approval:
