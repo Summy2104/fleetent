@@ -25,9 +25,39 @@ def test_scaffold_env_lists_referenced_names_without_secrets(tmp_path) -> None:
     assert "FLEETENT_MODEL_PRIMARY_API_KEY=" in env
     assert "ANTHROPIC_API_KEY=" not in env
     assert "model_overrides" not in (home / "agent.yaml").read_text(encoding="utf-8")
-    # Scaffold lists names with empty values — never real secret material.
-    for marker in ("sk-", "xoxb-", "xapp-", "ma-"):
+    # Scaffold lists names with empty values — never real secret material,
+    # except FLEETENT_TUI_TOKEN which is auto-generated with a ma- prefix.
+    for marker in ("sk-", "xoxb-", "xapp-"):
         assert marker not in env
+
+
+def test_scaffold_generates_tui_token_in_env(tmp_path) -> None:
+    home = tmp_path / "my-bot"
+    agent_init.scaffold_agent_home("my-bot", home=home)
+
+    env = (home / ".env").read_text(encoding="utf-8")
+    lines = dict(line.split("=", 1) for line in env.strip().splitlines() if "=" in line)
+    assert "FLEETENT_TUI_TOKEN" in lines
+    token = lines["FLEETENT_TUI_TOKEN"]
+    assert token.startswith("ma-")
+    assert len(token) == 67  # "ma-" + 64 hex chars
+
+
+def test_scaffold_tui_token_unique_per_init(tmp_path) -> None:
+    home_a = tmp_path / "bot-a"
+    home_b = tmp_path / "bot-b"
+    agent_init.scaffold_agent_home("bot-a", home=home_a)
+    agent_init.scaffold_agent_home("bot-b", home=home_b)
+
+    def token(home):  # type: ignore[no-untyped-def]
+        lines = dict(
+            line.split("=", 1)
+            for line in (home / ".env").read_text(encoding="utf-8").strip().splitlines()
+            if "=" in line
+        )
+        return lines["FLEETENT_TUI_TOKEN"]
+
+    assert token(home_a) != token(home_b)
 
 
 def test_scaffold_no_platform_or_db_import() -> None:
