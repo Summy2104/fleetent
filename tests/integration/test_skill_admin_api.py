@@ -5,11 +5,7 @@ management behaviour (gating, reference protection, audit, role guards) rather
 than engine semantics. Covers platform.md scenarios 47-57.
 """
 
-from pathlib import Path
-
 import pytest
-from alembic import command
-from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -18,13 +14,7 @@ import fleetent.governance.audit_log as audit
 import fleetent.platform.skill_management.skill_admin_api as api
 import fleetent.platform.skill_management.skill_admin_store as store
 import fleetent.user_store as user_store
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture

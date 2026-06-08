@@ -5,20 +5,11 @@ via the DATABASE_URL env var (named params, wide tenant/agent policy rows).
 """
 
 import sqlite3
-from pathlib import Path
 
 import pytest
-from alembic import command
-from alembic.config import Config
 
 from fleetent.intelligence import long_term_ctx_policy as policy
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture

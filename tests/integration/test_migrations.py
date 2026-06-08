@@ -4,15 +4,14 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 
+# Re-exported so the many `from tests.integration.test_migrations import apply_migrations`
+# call sites get the shared, process-cached helper unchanged.
+from tests.integration._migration_template import apply_migrations
+
 # Absolute so tests that chdir (e.g. test_server) still find the scripts.
 _MIGRATIONS_DIR = str(Path(__file__).resolve().parents[2] / "migrations")
 
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", _MIGRATIONS_DIR)
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+__all__ = ["apply_migrations", "downgrade_migrations"]
 
 
 def downgrade_migrations(db_path: Path) -> None:

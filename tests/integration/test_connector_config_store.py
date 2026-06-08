@@ -1,20 +1,11 @@
 """Tests for connector_config_store (migration 013, db runtime). Secret never stored."""
 
 import sqlite3
-from pathlib import Path
 
 import pytest
-from alembic import command
-from alembic.config import Config
 
 from fleetent.platform.connector_management import connector_config_store as store
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture

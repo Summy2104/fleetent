@@ -8,17 +8,9 @@ import contextlib
 from pathlib import Path
 
 import pytest
-from alembic import command
-from alembic.config import Config
 
 import fleetent.agent_store as agent_store
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "migrations"))
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
@@ -428,7 +420,6 @@ def test_init_db_create_table_includes_features_column(db):
 
 def _load_migration_002():
     import importlib.util
-    from pathlib import Path
 
     path = (
         Path(__file__).resolve().parents[2]

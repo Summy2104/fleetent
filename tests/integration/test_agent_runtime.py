@@ -6,23 +6,14 @@ loaders (``load_version``/``load_version_by_name``) stay DB-backed (authoring si
 """
 
 import dataclasses
-from pathlib import Path
 
 import pytest
 import yaml
-from alembic import command
-from alembic.config import Config
 
 import fleetent.agent_config as agent_config
 import fleetent.agent_store as agent_store
 import fleetent.runtime.snapshot as agent_runtime
-
-
-def apply_migrations(db_path: Path) -> None:
-    cfg = Config()
-    cfg.set_main_option("script_location", "migrations")
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
-    command.upgrade(cfg, "head")
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
