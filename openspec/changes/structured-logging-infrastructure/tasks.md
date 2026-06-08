@@ -9,9 +9,9 @@
 
 ## 2. 依赖护栏（先红后绿）
 
-- [ ] 2.1 在 `tests/unit/test_module_dependency_guardrails.py` 加失败断言：`structured_logging` MUST NOT import 业务能力模块（runtime/memory/kb/reflection/long_term_ctx/session/tools）与 `fleetent.platform.*`，且可经顶层路径导入 —— 跑该测试见红（断言尚未覆盖新模块即视为未就位）
-- [ ] 2.2 确认/实现护栏逻辑使 2.1 转绿（structured_logging 本就不该 import 业务/平台；若实测有违规 import 则清理）
-- [ ] 2.3 `uv run pytest tests/unit/test_module_dependency_guardrails.py -q` 全绿
+- [x] 2.1 在 `tests/unit/test_module_dependency_guardrails.py` 加失败断言：`structured_logging` MUST NOT import 业务能力模块（runtime/memory/kb/reflection/long_term_ctx/session/tools）与 `fleetent.platform.*`，且可经顶层路径导入 —— 跑该测试见红（断言尚未覆盖新模块即视为未就位）
+- [x] 2.2 确认/实现护栏逻辑使 2.1 转绿（structured_logging 本就不该 import 业务/平台；若实测有违规 import 则清理）
+- [x] 2.3 `uv run pytest tests/unit/test_module_dependency_guardrails.py -q` 全绿
 
 ## 3. 调用方分批迁移（每批跑受影响层）
 
