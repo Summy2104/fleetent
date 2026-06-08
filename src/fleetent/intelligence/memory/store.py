@@ -259,6 +259,30 @@ def duplicate_compaction_candidates(user_id: str) -> list[MemoryCompactionCandid
     return candidates
 
 
+def ensure_schema(db: SQLiteDatabase) -> None:
+    """Create memory_items table and indices if they do not exist. Idempotent. (migration 004)"""
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memory_items (
+            id          TEXT PRIMARY KEY,
+            user_id     TEXT NOT NULL,
+            type        TEXT NOT NULL,
+            content     TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL,
+            expires_at  TEXT
+        )
+        """
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_items_user_type ON memory_items (user_id, type)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_items_user_expires"
+        " ON memory_items (user_id, expires_at)"
+    )
+
+
 def database() -> SQLiteDatabase:
     return create_database(Settings().database_url)
 

@@ -11,6 +11,31 @@ _IMAGE_MIME_PREFIX = "image/"
 _PROGRESS_THROTTLE_SECONDS = 1.0
 
 
+def _make_upload_func(
+    client: Any,
+    channel: str,
+    reply_thread: str | None,
+) -> Any:
+    """Return an async callable that uploads a list of local image paths to Slack.
+
+    Wraps ``files_upload_v2``; single-file failures are logged and skipped so
+    that one bad upload never prevents the rest from going through.
+    """
+
+    async def upload_func(paths: list[str]) -> None:
+        for path in paths:
+            try:
+                await client.files_upload_v2(
+                    channel=channel,
+                    thread_ts=reply_thread,
+                    file=path,
+                )
+            except Exception as exc:  # noqa: BLE001 — upload failure must not break the response
+                logger.warning("slack_image_upload_failed", path=path, error=str(exc))
+
+    return upload_func
+
+
 async def _download_image_attachments(
     files: list[dict[str, Any]], bot_token: str
 ) -> list[tuple[bytes, str]]:
@@ -144,6 +169,7 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
             reply_func=reply_func,
             progress_func=progress_func,
             channel_id=channel,
+            upload_func=_make_upload_func(client, channel, reply_thread),
         )
         await route(msg)
 
