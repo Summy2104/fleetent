@@ -7,7 +7,7 @@
 
 ## 2. 自进化引擎提为顶层 agent（TDD）
 
-- [ ] 2.1 写失败测试：断言 `reflection` 引擎产出 proposal 而不直接执行变更；引擎只读 trace/memory/`knowledge_base.retrieval`
+- [x] 2.1 写失败测试：断言 `reflection` 引擎产出 proposal 而不直接执行变更；引擎只读 trace/memory/`knowledge_base.retrieval`
 - [ ] 2.2 `git mv reflection.py → reflection/`：引擎（run_*/generate_*/findings/`_read_memory_signals`）+ `reflection/store.py`（proposal/report 表 CRUD、save_report）；引擎内不细分
 - [ ] 2.3 旧路径 `intelligence/reflection.py` 留 re-export shim
 - [ ] 2.4 跑测试 → 绿

@@ -39,6 +39,14 @@ MaintenanceStatus = Literal["pending", "approved", "rejected", "applied", "expir
 ReflectionTrendGranularity = Literal["day", "week"]
 ReflectionTrendDomain = Literal["memory", "knowledge_base", "skill"]
 
+
+def __getattr__(name: str) -> object:
+    if name == "knowledge_base":
+        from fleetent.intelligence import knowledge_base as _knowledge_base
+
+        return _knowledge_base
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 _MUTATING_ACTIONS = {"mark_stale", "merge", "rewrite", "compact", "delete"}
 
 
@@ -239,6 +247,10 @@ async def run_reflection(scope: str) -> ReflectionReport:
         findings=findings,
         created_at=now,
     )
+    for proposal in generate_memory_maintenance_proposals(scope, findings):
+        _persist_memory_maintenance_proposal(proposal)
+    for proposal in generate_skill_proposals(findings=findings):
+        _persist_skill_proposal(proposal)
     _save_report(report)
     return report
 
@@ -295,7 +307,7 @@ def generate_memory_maintenance_proposals(
                 continue
             if _looks_like_shared_knowledge(fact):
                 proposals.append(
-                    create_memory_maintenance_proposal(
+                    _build_memory_maintenance_proposal(
                         user_id=user_id,
                         action="suggest_shared_memory_or_kb",
                         target_memory_ids=[],
@@ -311,7 +323,7 @@ def generate_memory_maintenance_proposals(
                 )
                 continue
             proposals.append(
-                create_memory_maintenance_proposal(
+                _build_memory_maintenance_proposal(
                     user_id=user_id,
                     action="rewrite",
                     target_memory_ids=[],
@@ -328,7 +340,7 @@ def generate_memory_maintenance_proposals(
             continue
         if finding.type == "memory_conflict":
             proposals.append(
-                create_memory_maintenance_proposal(
+                _build_memory_maintenance_proposal(
                     user_id=user_id,
                     action="merge",
                     target_memory_ids=finding.evidence_ids,
@@ -358,7 +370,7 @@ def generate_skill_proposals(
         pattern = finding.metadata.get("pattern") or finding.summary.rsplit(":", 1)[-1].strip()
         target_skill = _skill_name(pattern)
         proposals.append(
-            _create_skill_proposal(
+            _build_skill_proposal(
                 proposal_type="create_skill",
                 target_skill=target_skill,
                 reason=finding.summary,
@@ -379,7 +391,7 @@ def generate_skill_proposals(
         reason = str(signal.get("reason") or "deterministic skill quality signal")
         if trigger_count >= 5 and failure_count >= max(3, trigger_count // 3):
             proposals.append(
-                _create_skill_proposal(
+                _build_skill_proposal(
                     proposal_type="update_skill",
                     target_skill=skill_name,
                     reason=reason,
@@ -391,7 +403,7 @@ def generate_skill_proposals(
             )
         elif trigger_count == 0 and days_unused >= 90:
             proposals.append(
-                _create_skill_proposal(
+                _build_skill_proposal(
                     proposal_type="deprecate_skill",
                     target_skill=skill_name,
                     reason=reason,
@@ -501,10 +513,39 @@ def create_memory_maintenance_proposal(
     metadata_patch: dict[str, str] | None = None,
     expires_at: datetime | None = None,
 ) -> MemoryMaintenanceProposal:
-    """Create a pending User Memory maintenance proposal without modifying memory."""
+    """Create and persist a pending User Memory maintenance proposal."""
+    proposal = _build_memory_maintenance_proposal(
+        user_id=user_id,
+        action=action,
+        target_memory_ids=target_memory_ids,
+        proposed_content=proposed_content,
+        risk=risk,
+        reason=reason,
+        evidence_ids=evidence_ids,
+        metadata_patch=metadata_patch,
+        expires_at=expires_at,
+    )
+    _insert_maintenance_proposal(proposal)
+    _record_maintenance_event("memory_maintenance_proposal_created", proposal)
+    return proposal
+
+
+def _build_memory_maintenance_proposal(
+    *,
+    user_id: str,
+    action: MaintenanceAction,
+    target_memory_ids: list[str],
+    proposed_content: str | None,
+    risk: MaintenanceRisk,
+    reason: str,
+    evidence_ids: list[str],
+    metadata_patch: dict[str, str] | None = None,
+    expires_at: datetime | None = None,
+) -> MemoryMaintenanceProposal:
+    """Build a pending User Memory maintenance proposal without side effects."""
     _validate_proposal_input(user_id, action, risk, target_memory_ids)
     now = datetime.now(UTC).replace(microsecond=0)
-    proposal = MemoryMaintenanceProposal(
+    return MemoryMaintenanceProposal(
         id=str(uuid.uuid4()),
         user_id=user_id,
         action=action,
@@ -519,9 +560,6 @@ def create_memory_maintenance_proposal(
         updated_at=now,
         expires_at=expires_at,
     )
-    _insert_maintenance_proposal(proposal)
-    _record_maintenance_event("memory_maintenance_proposal_created", proposal)
-    return proposal
 
 
 def get_memory_maintenance_proposal(proposal_id: str) -> MemoryMaintenanceProposal:
@@ -697,6 +735,25 @@ def _save_kb_reflection_report(report: KnowledgeBaseReflectionReport) -> None:
             "created_at": report.created_at.isoformat(),
         },
     )
+
+
+def _persist_memory_maintenance_proposal(proposal: MemoryMaintenanceProposal) -> None:
+    database = _database()
+    if not database.path.exists():
+        return
+    if not _has_table(database, "memory_maintenance_proposals"):
+        return
+    _insert_maintenance_proposal(proposal)
+    _record_maintenance_event("memory_maintenance_proposal_created", proposal)
+
+
+def _persist_skill_proposal(proposal: SkillProposal) -> None:
+    database = _database()
+    if not database.path.exists():
+        return
+    if not _has_table(database, "skill_proposals"):
+        return
+    _insert_skill_proposal(proposal)
 
 
 def _trend_bucket_ranges(query: ReflectionTrendQuery) -> list[tuple[datetime, datetime]]:
@@ -1098,8 +1155,30 @@ def _create_skill_proposal(
     suggested_draft: str | None,
     suggested_diff: str | None,
 ) -> SkillProposal:
+    return _build_skill_proposal(
+        proposal_type=proposal_type,
+        target_skill=target_skill,
+        reason=reason,
+        evidence_refs=evidence_refs,
+        risk_level=risk_level,
+        suggested_draft=suggested_draft,
+        suggested_diff=suggested_diff,
+    )
+
+
+def _build_skill_proposal(
+    *,
+    proposal_type: SkillProposalType,
+    target_skill: str,
+    reason: str,
+    evidence_refs: list[str],
+    risk_level: SkillProposalRisk,
+    suggested_draft: str | None,
+    suggested_diff: str | None,
+) -> SkillProposal:
+    """Build a pending Skill proposal without persistence side effects."""
     now = datetime.now(UTC).replace(microsecond=0)
-    proposal = SkillProposal(
+    return SkillProposal(
         id=str(uuid.uuid4()),
         type=proposal_type,
         target_skill=target_skill,
@@ -1112,8 +1191,6 @@ def _create_skill_proposal(
         created_at=now,
         updated_at=now,
     )
-    _insert_skill_proposal(proposal)
-    return proposal
 
 
 def _insert_skill_proposal(proposal: SkillProposal) -> None:
