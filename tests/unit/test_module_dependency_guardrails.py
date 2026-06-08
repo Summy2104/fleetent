@@ -30,6 +30,20 @@ _ALLOWED_VECTOR_STORE_EXTERNAL_IMPORTS = {
     "fleetent.model",
 }
 
+# Top-level shared modules (e.g. ``fleetent.user_store``) sit outside the component
+# allowlist the direct-edge guard checks, so an agent runtime module that imports one
+# of them — which in turn imports ``fleetent.platform`` — leaks the platform dependency
+# transitively without tripping the direct check. This set pins the *currently known*
+# leaks so any NEW transitive leak fails the build; the ratchet test also fails if a
+# pinned module stops leaking, forcing this set to shrink as the leaks get fixed.
+_KNOWN_TRANSITIVE_PLATFORM_LEAKS: set[str] = {
+    # user_store.authenticate()/get_or_create_im_user() hard-import
+    # fleetent.platform.user_management / im_gateway_management unconditionally, so the
+    # standalone `fleetent agent run` Bearer-auth path (agent_app:_authenticate) reaches
+    # platform. Remove once those imports degrade gracefully when platform is absent.
+    "fleetent.user_store",
+}
+
 
 def _iter_imported_modules(node: ast.AST) -> list[str]:
     modules: list[str] = []
@@ -161,3 +175,95 @@ def test_forbidden_edges_for_dissolution() -> None:
                     f"{module_name} imports business module {imported}, "
                     "violating vector_store -> infrastructure-only"
                 )
+
+
+def _fleetent_import_targets(node: ast.AST) -> set[str]:
+    """Every ``fleetent.*`` dotted name referenced by import statements, including lazy
+    (function-local) ones an ``ast.walk`` reaches.
+
+    Unlike ``_iter_imported_modules``, this expands ``from fleetent import user_store``
+    to ``fleetent.user_store`` so module-to-module edges survive graph traversal.
+    """
+    names: set[str] = set()
+    for statement in ast.walk(node):
+        if isinstance(statement, ast.Import):
+            names.update(alias.name for alias in statement.names)
+        elif isinstance(statement, ast.ImportFrom) and statement.module and statement.level == 0:
+            names.add(statement.module)
+            names.update(f"{statement.module}.{alias.name}" for alias in statement.names)
+    return {name for name in names if name == "fleetent" or name.startswith("fleetent.")}
+
+
+def _resolve_module(dotted: str, universe: set[str]) -> str | None:
+    """Map an imported dotted name to the longest prefix that is a real module."""
+    parts = dotted.split(".")
+    for end in range(len(parts), 0, -1):
+        candidate = ".".join(parts[:end])
+        if candidate in universe:
+            return candidate
+    return None
+
+
+def _agent_reachable_platform_leaks() -> dict[str, list[str]]:
+    """Modules reachable from an agent runtime component that import ``fleetent.platform``.
+
+    Returns a map of leaking module -> an import path back to a seed component, so a
+    failure message can point at the chain that introduced the leak.
+    """
+    paths = [p for p in _SRC_ROOT.rglob("*.py") if p.is_file() and "intelligence" not in p.parts]
+    universe = {_module_name(p) for p in paths}
+
+    edges: dict[str, set[str]] = {}
+    leaks: set[str] = set()
+    for path in paths:
+        module = _module_name(path)
+        targets = _fleetent_import_targets(ast.parse(path.read_text(encoding="utf-8")))
+        if any(target.startswith("fleetent.platform") for target in targets):
+            leaks.add(module)
+        resolved = {_resolve_module(t, universe) for t in targets}
+        # Platform is a sink: we record the leak above but never traverse into it.
+        edges[module] = {
+            m for m in resolved if m and m != module and not m.startswith("fleetent.platform")
+        }
+
+    seeds = [m for m in universe if _top_level_component(m) in _COMPONENTS]
+    parent: dict[str, str] = {}
+    seen: set[str] = set()
+    stack = list(seeds)
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        for target in edges.get(current, set()):
+            if target not in seen:
+                parent.setdefault(target, current)
+                stack.append(target)
+
+    found: dict[str, list[str]] = {}
+    for module in sorted(seen & leaks):
+        chain = [module]
+        cursor = module
+        while cursor in parent:
+            cursor = parent[cursor]
+            chain.append(cursor)
+        found[module] = chain
+    return found
+
+
+def test_no_transitive_platform_leak_through_shared_modules() -> None:
+    leaks = _agent_reachable_platform_leaks()
+
+    new_leaks = {
+        m: chain for m, chain in leaks.items() if m not in _KNOWN_TRANSITIVE_PLATFORM_LEAKS
+    }
+    assert not new_leaks, "agent runtime transitively reaches fleetent.platform via: " + "; ".join(
+        f"{module} (imported through {' <- '.join(chain)})" for module, chain in new_leaks.items()
+    )
+
+    # Ratchet: a pinned leak that no longer leaks must be removed from the allowlist so
+    # the exception set only ever shrinks.
+    stale = _KNOWN_TRANSITIVE_PLATFORM_LEAKS - set(leaks)
+    assert not stale, (
+        f"these modules no longer leak platform; drop them from the allowlist: {stale}"
+    )
