@@ -368,13 +368,18 @@ def _seed_env(
                 if secret_store.status(source_agent.id, name) == "set"
                 else ""
             )
-        else:
-            # operator value (host .env) → provider inline key → shared secret (e.g. KB token)
-            value = (
-                existing.get(name, "")
-                or (_provider_key_for_env(name) or "")
-                or (secret_store.get_decrypted(None, name) or "")
+        elif source_agent is not None:
+            # real materialize (secret/provider tables exist): operator host value →
+            # provider inline key → shared secret (e.g. KB token). status() needs no key.
+            shared = (
+                secret_store.get_decrypted(None, name)
+                if secret_store.status(None, name) == "set"
+                else ""
             )
+            value = existing.get(name, "") or (_provider_key_for_env(name) or "") or shared
+        else:
+            # bare write_home (no store context): keep the operator value, never touch tables
+            value = existing.get(name, "")
         lines.append(f"{name}={value}")
     # keep any operator-added vars not referenced by the definition
     excluded = exclude_existing or set()
