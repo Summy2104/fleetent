@@ -12,6 +12,8 @@ diagnostics、IM approvals）写入该 agent 专属的 `agents/<id>/data/` 目�
 `agent_app.boot()` SHALL redirect all per-agent runtime data sinks to `home_dir/data/`
 immediately after `home_dir` is resolved and before any infrastructure initialisation.
 The redirection SHALL cover sessions, database, IM approvals, diagnostics, and log directory.
+After redirection, `_start_infra()` SHALL initialize the agent DB schema so that all
+agent-side tables exist before any store operation.
 
 #### Scenario: Sessions land in agent home
 
@@ -23,6 +25,12 @@ The redirection SHALL cover sessions, database, IM approvals, diagnostics, and l
 
 - **WHEN** `fleetent agent run my-bot` starts and `DATABASE_URL` is not set in environment
 - **THEN** the default SQLite database SHALL be at `~/.fleetent/agents/my-bot/data/fleetent.db`
+
+#### Scenario: Agent DB tables exist after boot
+
+- **WHEN** `fleetent agent run my-bot` completes `_start_infra()`
+- **THEN** `agents/my-bot/data/fleetent.db` SHALL contain all agent-side tables
+  (`traces`, `memory_items`, `reflection_reports`, knowledge base tables)
 
 #### Scenario: IM approvals land in agent home
 
