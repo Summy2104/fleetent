@@ -22,11 +22,14 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 
 每个实现 task 必须严格按顺序执行，不可跳步：
 
-1. **写测试** → 运行 `uv run pytest -x -q` → **必须看到红**（测试失败）
+1. **写测试** → 运行**最窄相关命令**（单测试/单文件，如 `uv run pytest <file>::<test> -x -q`）→ **必须看到红**（测试失败）
    - 若直接绿：测试写错了，回去修
-2. **写实现** → 运行 `uv run pytest -x -q` → **必须看到绿**
+2. **写实现** → 运行同一最窄命令 → **必须看到绿**
    - 若仍红：修到绿才能继续
 3. 可选 refactor → 确保仍然绿
+
+> Hard Gate 管的是「必须见红 → 见绿」的纪律，**不规定范围**：红绿循环用最窄命令求快；
+> task / PR 收尾跑什么范围见「测试规范 · 何时跑什么」。
 
 跳过任何一步 = 违反流程。
 
@@ -284,8 +287,22 @@ data/
 - 命名：`test_{模块名}.py`，一模块一文件
 - 每个测试函数只测一个行为，不在同一函数里断言多个不相关的事情
 - `permission_gate` 测试必须传短超时：`PermissionGate(medium_timeout=0.1)`
-- TDD 红绿循环优先运行最近相关分层命令，例如 `uv run pytest tests/unit -x -q` 或 `uv run pytest tests/integration -x -q`；收尾必须运行 `uv run pytest -x -q`
-- 涉及测试归位、测试层规则或新增 unit 测试时，收尾同时运行 `uv run python scripts/check_test_layers.py`
+
+### 何时跑什么（测试范围）
+
+| 时机 | 命令 | 判据 |
+|------|------|------|
+| TDD 红/绿每一步 | `uv run pytest <file>::<test> -x -q`（最窄） | 见红 / 见绿 |
+| 单个 task 收尾 | 受影响那一层：`uv run pytest tests/unit -q`（或 `tests/integration -q`） | 该层无新增失败 |
+| change / PR 收尾 | `make test-pr`（unit〔除 quarantine〕+ 层边界 + **改动文件的** ruff format/lint，硬门禁必须全绿）＋ `uv run pytest tests/integration -q` 对照 main 基线 | test-pr 全绿；integration **不得引入新增失败** |
+| e2e / evaluation | `make test-e2e` / `make test-evaluation` | 仅显式需要时手动跑，不进默认门禁 |
+
+- **门禁判据是「无新增失败」，不是「零失败」**：当前（2026-06）约有 **2 个 unit + 19 个 integration** 预先存在失败，均属 `permission_gate` / agent-access 重构遗留（owner 非测试改动者）：
+  - 2 个 unit（`test_loop_permission_gate.py`，permission_gate approvals 共享状态导致 flaky）已在 `make test-pr` 用 `--deselect` **quarantine**，owner 修复后移除该清单；plain `uv run pytest tests/unit` 仍会暴露它们。
+  - integration 收尾用**不带 `-x`** 的 `uv run pytest tests/integration -q` 取完整失败集，与 `main` 对比，只确认没有**新增**失败。`-x` 只用于红绿循环（首个失败即停）。
+- **`make test-pr` 的 ruff 只扫本分支 changed-vs-main 的 `.py`**：main 还带有约 36 个预先存在 lint + 2 个未格式化文件（分散在他人模块），全树 ruff 门禁不可行，你只对自己改过的文件负责。
+- 裸 `uv run pytest` 会连 e2e / evaluation 一起跑（起真实服务 / 真 LLM），**不是 PR 门禁命令**；门禁用 `make test-pr` ＋ integration 基线对比。
+- 涉及测试归位、测试层规则或新增 unit 测试时收尾跑 `uv run python scripts/check_test_layers.py`（已含在 `make test-pr`）。
 
 ---
 
@@ -305,10 +322,11 @@ data/
 
 ```bash
 uv sync                          # 安装依赖
-uv run pytest                    # 运行测试
-uv run pytest -x -q              # fail-fast
+make test-pr                     # PR 门禁：unit〔除 quarantine〕+ 层边界 + 改动文件 ruff（必须全绿）
+uv run pytest                    # 运行全部 4 层（含 e2e/evaluation，起真实服务，非门禁命令）
+uv run pytest -x -q              # fail-fast，仅 TDD 红绿循环用
 uv run pytest tests/unit         # 单元测试
-uv run pytest tests/integration  # 集成测试
+uv run pytest tests/integration  # 集成测试（收尾对照 main 基线，确认无新增失败）
 uv run pytest tests/e2e          # 端到端测试
 uv run pytest tests/evaluation   # 效果评估测试
 uv run python scripts/check_test_layers.py  # 检查 unit/integration 测试层边界

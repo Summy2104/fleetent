@@ -16,11 +16,11 @@ type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`。
 
 每个实现 task 必须严格按顺序执行：
 
-1. 写测试，运行 `uv run pytest -x -q`，必须看到红。
-2. 写实现，运行 `uv run pytest -x -q`，必须看到绿。
+1. 写测试，运行**最窄相关命令**（单测试/单文件 `uv run pytest <file>::<test> -x -q`），必须看到红。
+2. 写实现，运行同一命令，必须看到绿。
 3. 可选 refactor，确保测试仍然绿。
 
-如果测试直接绿，说明测试没有覆盖目标行为，需要先修测试。
+如果测试直接绿，说明测试没有覆盖目标行为，需要先修测试。Hard Gate 管「见红 → 见绿」纪律，不规定范围；task / PR 收尾跑什么见 Testing Guidelines。
 
 ### OpenSpec 工作流
 
@@ -67,10 +67,11 @@ re-export shim，但 shim 不承载业务逻辑。
 ## Build, Test, and Development Commands
 
 - `uv sync`：安装依赖。
-- `uv run pytest`：运行完整测试。
-- `uv run pytest -x -q`：fail-fast 测试，TDD 循环使用。
+- `make test-pr`：PR 门禁——unit〔除 quarantine〕+ 层边界 + 改动文件的 ruff format/lint，必须全绿。
+- `uv run pytest`：运行全部 4 层（含 e2e/evaluation，起真实服务/真 LLM），**非 PR 门禁命令**。
+- `uv run pytest -x -q`：fail-fast，**仅 TDD 红绿循环使用**。
 - `uv run pytest tests/unit` / `make test-unit`：运行快速单元测试。
-- `uv run pytest tests/integration` / `make test-integration`：运行集成测试。
+- `uv run pytest tests/integration` / `make test-integration`：运行集成测试（收尾对照 main 基线，确认无新增失败）。
 - `uv run pytest tests/e2e` / `make test-e2e`：运行端到端测试；真实服务 smoke 需显式开启。
 - `uv run pytest tests/evaluation` / `make test-evaluation`：运行效果评估测试。
 - `uv run python scripts/check_test_layers.py` / `make test-layers`：检查 unit / integration 测试层边界。
@@ -116,9 +117,14 @@ pytest 配置为 `asyncio_mode = auto`，async 测试无需 `@pytest.mark.asynci
 - `tests/evaluation/`：memory、reflection、long-term context、knowledge-base 等效果评估；不得接入真实 LLM / embedding 服务作为默认测试。
 历史平铺测试已迁移到分层目录；不得继续向 `tests/` 根目录新增 `test_*.py`。
 
-TDD 红绿循环优先运行最近相关分层命令，例如 `uv run pytest tests/unit -x -q` 或
-`uv run pytest tests/integration -x -q`；收尾必须运行 `uv run pytest -x -q`。
-涉及测试归位、测试层规则或新增 unit 测试时，收尾同时运行 `uv run python scripts/check_test_layers.py`。
+何时跑什么：红/绿每一步用最窄命令 `uv run pytest <file>::<test> -x -q`；单个 task 收尾跑受影响那一层
+（`uv run pytest tests/unit -q` 或 `tests/integration -q`）；change / PR 收尾跑 `make test-pr`
+（unit〔除 quarantine〕+ 层边界 + 改动文件的 ruff format/lint，硬门禁必须全绿），再用**不带 `-x`** 的
+`uv run pytest tests/integration -q` 对照 main 基线。门禁判据是**无新增失败**，不是零失败：当前（2026-06）
+约 2 个 unit + 19 个 integration 预先存在失败（`permission_gate` / agent-access 重构遗留，owner 非测试改动者）；
+其中 2 个 unit（`test_loop_permission_gate.py`，flaky）已在 `make test-pr` 用 `--deselect` quarantine，owner 修复后移除。
+`-x` 仅用于红绿循环；裸 `uv run pytest` 含 e2e/evaluation（起真实服务），非门禁命令。测试归位 / 层规则 /
+新增 unit 测试时收尾跑 `uv run python scripts/check_test_layers.py`（已含在 `make test-pr`）。
 
 测试必须隔离外部依赖：LLM 调用 patch `get_client_and_config`，数据库测试放在 integration 并用 `tmp_path` 或统一 DB fixture 隔离，MCP / sandbox / 外部 HTTP 用 `respx` 或 `unittest.mock`。每个测试函数只测一个行为；`permission_gate` 测试使用短超时：`PermissionGate(medium_timeout=0.1)`。
 
