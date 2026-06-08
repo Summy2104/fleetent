@@ -122,3 +122,60 @@ async def test_timeout_sets_status_in_db(gate, db):
     row = conn.execute("SELECT status FROM approvals WHERE id = ?", (approval_id,)).fetchone()
     conn.close()
     assert row[0] == "timeout"
+
+
+# ── per-call timeout override tests ──────────────────────────────────────────
+
+
+async def test_medium_timeout_override_auto_rejects(db):
+    """medium_timeout kwarg overrides instance default; auto-rejects after override value."""
+    gate_long = PermissionGate(medium_timeout=300.0, high_timeout=3600.0)
+    reply_func = AsyncMock()
+
+    result = await gate_long.request_approval(
+        approval_id="override-01",
+        risk_level="medium",
+        tool_name="write_file",
+        tool_args={"path": "/tmp/x"},
+        requester_user_id="user1",
+        reply_func=reply_func,
+        medium_timeout=0.05,
+    )
+
+    assert result == "timeout"
+    reply_func.assert_called_once()
+
+
+async def test_high_timeout_override_auto_rejects(db):
+    """high_timeout kwarg overrides instance default for high-risk tools."""
+    gate_long = PermissionGate(medium_timeout=300.0, high_timeout=3600.0)
+    reply_func = AsyncMock()
+
+    result = await gate_long.request_approval(
+        approval_id="override-02",
+        risk_level="high",
+        tool_name="bash_exec",
+        tool_args={"command": "ls"},
+        requester_user_id="user1",
+        reply_func=reply_func,
+        high_timeout=0.05,
+    )
+
+    assert result == "timeout"
+
+
+async def test_no_override_uses_instance_default(db):
+    """Without override kwargs, short instance default still applies (behaviour unchanged)."""
+    gate_short = PermissionGate(medium_timeout=0.05, high_timeout=3600.0)
+    reply_func = AsyncMock()
+
+    result = await gate_short.request_approval(
+        approval_id="override-03",
+        risk_level="medium",
+        tool_name="write_file",
+        tool_args={},
+        requester_user_id="user1",
+        reply_func=reply_func,
+    )
+
+    assert result == "timeout"
