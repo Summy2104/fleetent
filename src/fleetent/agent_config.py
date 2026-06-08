@@ -52,6 +52,9 @@ class ConnectorAccess(BaseModel):
 
     allow_channels: list[str] = Field(default_factory=list)
     allow_users: list[str] = Field(default_factory=list)
+    # When true, skip the user gate entirely — all users are allowed on this connector.
+    # Intended for open internal bots; does not affect channel gate.
+    allow_all_users: bool = False
     require_approval: bool = True
 
 
