@@ -63,12 +63,15 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
     bot_token = config.get("bot_token", "")
     app = AsyncApp(token=bot_token)
 
-    async def _handle(event: dict[str, Any], say: object) -> None:
+    @app.event("message")
+    async def handle_message(event: dict[str, Any], say: object) -> None:
         from fleetent.im_gateway.access import resolve_identity
         from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
         channel = event.get("channel") or ""
+
         slack_user_id = event.get("user") or "unknown"
+        # Identity is the platform-native id, resolved locally — no platform user_store.
         identity = resolve_identity("slack", slack_user_id)
         thread_ts = event.get("thread_ts")
         channel_type = event.get("channel_type") or "channel"
@@ -99,17 +102,6 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
             channel_id=channel,
         )
         await route(msg)
-
-    @app.event("app_mention")
-    async def handle_mention(event: dict[str, Any], say: object) -> None:
-        """Handle @mention in channels."""
-        await _handle(event, say)
-
-    @app.event("message")
-    async def handle_dm(event: dict[str, Any], say: object) -> None:
-        """Handle DMs only; channel messages are handled via app_mention."""
-        if (event.get("channel_type") or "") == "im":
-            await _handle(event, say)
 
     return app
 
