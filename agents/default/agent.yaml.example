@@ -293,7 +293,7 @@ observability:
   logging:
     console_level: info           # log level for stderr: debug | info | warning | error
     file_level: debug             # log level for the rotating file sink
-    directory: data/logs          # log file directory (relative to agent home)
+    directory: ""                    # blank = agents/<id>/data/logs/ (recommended); set explicit path to override
     json_file: true               # write structured JSON log file in addition to console
 
 diagnostics:

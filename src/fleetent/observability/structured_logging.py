@@ -95,7 +95,7 @@ def configure_structured_logging(
 ) -> None:
     """Configure structured logging outputs."""
     global _config
-    resolved_dir = Path(directory) if directory is not None else paths.data_dir() / "logs"
+    resolved_dir = Path(directory) if directory else paths.data_dir() / "logs"
     _config = _LoggingConfig(
         console_level=console_level,
         file_level=file_level,

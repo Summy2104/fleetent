@@ -67,11 +67,33 @@ def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
     return paths.base_dir() / "agents" / agent_id
 
 
-def _configure_logging_from_agent(agent: AgentFile) -> None:
+def _redirect_agent_data_paths(home_dir: Path) -> None:
+    """Redirect all per-agent runtime data sinks to ``home_dir/data/``.
+
+    Called once per standalone agent boot before any infra initialisation. Assigns
+    directly to module-level constants so the change takes effect for all subsequent
+    operations in this process without introducing new env vars.
+    """
+    from fleetent.im_gateway import access
+    from fleetent.observability import diagnostics
+    from fleetent.session import manager as session_mgr
+
+    data_dir = home_dir / "data"
+    session_mgr.SESSIONS_DIR = data_dir / "sessions"
+    access.APPROVALS_PATH = data_dir / "im_approvals.json"
+    # Replace the _default_data_dir callable so diagnostics export/retention
+    # resolve to this agent's data dir, not the global FLEETENT_HOME/data/.
+    diagnostics._default_data_dir = lambda: data_dir  # type: ignore[assignment]
+    # Only set DATABASE_URL if not already configured (explicit .env or system env wins).
+    os.environ.setdefault("DATABASE_URL", f"sqlite:///{data_dir / 'fleetent.db'}")
+
+
+def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
     """Apply agent.yaml log_format and observability.logging.* to the runtime logging system.
 
     Called once per standalone agent process after the agent file is loaded. The platform
     server path (server.py) continues to use configure_logging(Settings) unchanged.
+    A blank ``directory`` resolves to ``home_dir/data/logs/`` so log files land per-agent.
     """
     import logging
 
@@ -80,10 +102,11 @@ def _configure_logging_from_agent(agent: AgentFile) -> None:
     from fleetent.observability.structured_logging import configure_structured_logging
 
     log = agent.observability.logging
+    resolved_dir: str | Path = log.directory if log.directory else home_dir / "data" / "logs"
     configure_structured_logging(
         console_level=log.console_level,
         file_level=log.file_level,
-        directory=log.directory,
+        directory=resolved_dir,
     )
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
@@ -195,8 +218,9 @@ async def boot(
         from dotenv import load_dotenv
 
         load_dotenv(env_path, override=False)
+    _redirect_agent_data_paths(home_dir)
     agent = agent_config.scan_home(home_dir)
-    _configure_logging_from_agent(agent)
+    _configure_logging_from_agent(agent, home_dir)
     # Re-point the vector/embedding singletons at this agent's intelligence config
     # (import-time config used global Settings; standalone runs AS this single agent).
     from fleetent.intelligence import vector_store
