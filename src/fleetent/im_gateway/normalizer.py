@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -39,6 +40,10 @@ class NormalizedMessage:
     # each tool executes. Adapters that want to show real-time feedback supply this;
     # omitting it (None) preserves the existing silent behavior.
     progress_func: Callable[[dict[str, Any]], Awaitable[None]] | None = field(default=None)
+    # Optional upload callback: called with a list of local image paths generated during
+    # this turn. Adapters that support file uploads (e.g. Slack) supply this; omitting it
+    # (None) means generated images are not forwarded to the platform.
+    upload_func: Callable[[list[str]], Awaitable[None]] | None = field(default=None)
 
 
 def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> AgentFile | None:
@@ -65,6 +70,31 @@ def _get_connector_access(agent: AgentFile | None, platform: str) -> ConnectorAc
 
 
 _IMAGE_MIME_PREFIX = "image/"
+
+_IMAGE_GENERATED_RE = re.compile(r"image generated: (.+)")
+
+
+def _extract_generated_image_paths(messages: list[dict[str, Any]]) -> list[str]:
+    """Extract local image paths from generate_image tool results in *messages*.
+
+    Only scans messages with role == "tool" and matches the format produced by
+    builtin_tools.generate_image: ``"image generated: <path>"``. Paths that no
+    longer exist on disk are silently skipped.
+    """
+    paths: list[str] = []
+    for msg in messages:
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content", "")
+        if not isinstance(content, str):
+            continue
+        m = _IMAGE_GENERATED_RE.search(content)
+        if not m:
+            continue
+        p = m.group(1).strip()
+        if p and Path(p).is_file():
+            paths.append(p)
+    return paths
 
 
 def _image_attachments(attachments: list[Any]) -> list[tuple[bytes, str]]:
@@ -278,6 +308,7 @@ async def route(msg: NormalizedMessage) -> None:
         # C1: register the active run so concurrent same-session messages can steer
         # into it (and interrupt it via the cancel token); the registration is removed
         # on exit so a finished session never looks "running".
+        history_len_before = len(history)
         async with steering.register_run(session_id, token, max_pending=max_pending):
             response = await agent_loop.run(
                 messages=history,
@@ -329,3 +360,10 @@ async def route(msg: NormalizedMessage) -> None:
         await session_mgr.save(session_id, history)
 
     await msg.reply_func(response)
+
+    # Upload any images generated during this turn. Only scan new messages added by the
+    # loop (history[history_len_before:]) so historical tool results are never re-sent.
+    if msg.upload_func is not None:
+        image_paths = _extract_generated_image_paths(history[history_len_before:])
+        if image_paths:
+            await msg.upload_func(image_paths)
