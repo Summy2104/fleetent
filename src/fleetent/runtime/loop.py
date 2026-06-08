@@ -618,6 +618,9 @@ async def _plan_run_slots(
     session_id: str | None,
     governance: GovernanceConfig | None = None,
     agent_name: str | None = None,
+    permission_gate_enabled: bool = True,
+    permission_gate_medium_timeout: int | None = None,
+    permission_gate_high_timeout: int | None = None,
 ) -> list[_PlanSlot]:
     """Phase one for run() (D2/D3/D6): serial, original order — produce one slot
     per tool_call. Guardrail, pre_tool_use hook, and (medium/high) approval are decided
@@ -718,7 +721,7 @@ async def _plan_run_slots(
                 slot_args = hres.modified_args
             force_ask = hres.decision == "ask"
         risk = get_risk_level(name)
-        if (risk in ("medium", "high") or force_ask) and reply_func is not None:
+        if (risk in ("medium", "high") or force_ask) and reply_func is not None and permission_gate_enabled:
             tool_args = json.loads(slot_args) if isinstance(slot_args, str) else slot_args
             approval_id = str(uuid.uuid4())[:8]
             # D3: approvals are requested serially in original order; only approved
@@ -730,6 +733,8 @@ async def _plan_run_slots(
                 tool_args=tool_args,
                 requester_user_id=user_id,
                 reply_func=reply_func,
+                medium_timeout=permission_gate_medium_timeout,
+                high_timeout=permission_gate_high_timeout,
             )
             if decision != "approved":
                 state.approval_rejected = True
@@ -1401,6 +1406,9 @@ async def run(
     allowed_skills: list[str] | None = None,
     governance: GovernanceConfig | None = None,
     model_policy: ModelPolicySnapshot | None = None,
+    permission_gate_enabled: bool = True,
+    permission_gate_medium_timeout: int | None = None,
+    permission_gate_high_timeout: int | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1447,6 +1455,9 @@ async def run(
             allowed_skills=allowed_skills,
             governance=governance,
             model_policy=model_policy,
+            permission_gate_enabled=permission_gate_enabled,
+            permission_gate_medium_timeout=permission_gate_medium_timeout,
+            permission_gate_high_timeout=permission_gate_high_timeout,
         )
     finally:
         _active_runs -= 1
@@ -1475,6 +1486,9 @@ async def _run_inner(
     allowed_skills: list[str] | None = None,
     governance: GovernanceConfig | None = None,
     model_policy: ModelPolicySnapshot | None = None,
+    permission_gate_enabled: bool = True,
+    permission_gate_medium_timeout: int | None = None,
+    permission_gate_high_timeout: int | None = None,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -1747,6 +1761,9 @@ async def _run_inner(
             session_id=session_id,
             governance=governance,
             agent_name=agent_name,
+            permission_gate_enabled=permission_gate_enabled,
+            permission_gate_medium_timeout=permission_gate_medium_timeout,
+            permission_gate_high_timeout=permission_gate_high_timeout,
         )
         pending = [s for s in slots if s.placeholder is None]
         results = await _execute_pending(
