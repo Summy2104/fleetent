@@ -72,14 +72,18 @@ def _get_connector_access(agent: AgentFile | None, platform: str) -> ConnectorAc
 _IMAGE_MIME_PREFIX = "image/"
 
 _IMAGE_GENERATED_RE = re.compile(r"image generated: (.+)")
+_FILE_WRITTEN_RE = re.compile(r"written \d+ bytes to (.+)")
 
 
 def _extract_generated_image_paths(messages: list[dict[str, Any]]) -> list[str]:
-    """Extract local image paths from generate_image tool results in *messages*.
+    """Extract local file paths from tool results that wrote or generated files.
 
-    Only scans messages with role == "tool" and matches the format produced by
-    builtin_tools.generate_image: ``"image generated: <path>"``. Paths that no
-    longer exist on disk are silently skipped.
+    Matches two formats produced by built-in tools:
+    - ``generate_image``: ``"image generated: <path>"``
+    - ``write_file``:     ``"written N bytes to <path>"``
+
+    Only scans messages with role == "tool". Paths that no longer exist on disk
+    are silently skipped.
     """
     paths: list[str] = []
     for msg in messages:
@@ -88,12 +92,13 @@ def _extract_generated_image_paths(messages: list[dict[str, Any]]) -> list[str]:
         content = msg.get("content", "")
         if not isinstance(content, str):
             continue
-        m = _IMAGE_GENERATED_RE.search(content)
-        if not m:
-            continue
-        p = m.group(1).strip()
-        if p and Path(p).is_file():
-            paths.append(p)
+        for pattern in (_IMAGE_GENERATED_RE, _FILE_WRITTEN_RE):
+            m = pattern.search(content)
+            if m:
+                p = m.group(1).strip()
+                if p and Path(p).is_file():
+                    paths.append(p)
+                break
     return paths
 
 
@@ -364,6 +369,6 @@ async def route(msg: NormalizedMessage) -> None:
     # Upload any images generated during this turn. Only scan new messages added by the
     # loop (history[history_len_before:]) so historical tool results are never re-sent.
     if msg.upload_func is not None:
-        image_paths = _extract_generated_image_paths(history[history_len_before:])
-        if image_paths:
-            await msg.upload_func(image_paths)
+        file_paths = _extract_generated_image_paths(history[history_len_before:])
+        if file_paths:
+            await msg.upload_func(file_paths)

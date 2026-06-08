@@ -26,6 +26,24 @@ def test_skips_missing_file():
     assert _extract_generated_image_paths(msgs) == []
 
 
+def test_finds_written_file_path(tmp_path):
+    f = tmp_path / "bubble_sort.py"
+    f.write_text("def bubble_sort(): pass")
+
+    from fleetent.im_gateway.normalizer import _extract_generated_image_paths
+
+    msgs = [{"role": "tool", "content": f"written 22 bytes to {f}"}]
+    result = _extract_generated_image_paths(msgs)
+    assert result == [str(f)]
+
+
+def test_skips_written_file_if_missing():
+    from fleetent.im_gateway.normalizer import _extract_generated_image_paths
+
+    msgs = [{"role": "tool", "content": "written 100 bytes to /nonexistent/file.py"}]
+    assert _extract_generated_image_paths(msgs) == []
+
+
 def test_ignores_non_tool_messages(tmp_path):
     img = tmp_path / "img.png"
     img.write_bytes(b"PNG")
