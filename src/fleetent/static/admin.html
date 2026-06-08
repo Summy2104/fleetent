@@ -5273,6 +5273,14 @@ function kbcRenderFields(current = {}) {
       return `<label class="row" style="gap:6px;"><input type="checkbox" data-key="${f.key}" ${v ? "checked" : ""}> ${esc(f.label)}</label>`;
     if (f.type === "select")
       return `<label class="field-label">${esc(f.label)}</label><select data-key="${f.key}">${f.options.map(o => `<option value="${o}" ${v === o ? "selected" : ""}>${o || "—"}</option>`).join("")}</select>`;
+    if (f.key.endsWith("_env"))
+      // credential field: type the token (value mode) or reference an existing env var
+      return credFieldHtml({
+        label: f.label.replace(/ env var$/, ""),
+        valueKey: f.key + "_value", envKey: f.key, envName: v || "",
+        mode: v ? "reference" : "value", status: v ? "set" : "unset",
+        placeholder: "输入令牌（加密保存）",
+      });
     return `<label class="field-label">${esc(f.label)}</label><input data-key="${f.key}" autocomplete="off" value="${esc(v != null ? String(v) : "")}">`;
   }).join("");
 }

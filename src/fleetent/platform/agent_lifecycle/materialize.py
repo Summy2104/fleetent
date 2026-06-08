@@ -369,8 +369,12 @@ def _seed_env(
                 else ""
             )
         else:
-            # operator value (host .env), else a provider's inline key authored for this env
-            value = existing.get(name, "") or (_provider_key_for_env(name) or "")
+            # operator value (host .env) → provider inline key → shared secret (e.g. KB token)
+            value = (
+                existing.get(name, "")
+                or (_provider_key_for_env(name) or "")
+                or (secret_store.get_decrypted(None, name) or "")
+            )
         lines.append(f"{name}={value}")
     # keep any operator-added vars not referenced by the definition
     excluded = exclude_existing or set()

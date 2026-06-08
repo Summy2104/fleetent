@@ -81,3 +81,27 @@ def test_empty_secret_value_is_rejected(db):
 
     with pytest.raises(ValueError, match="empty"):
         secret_store.set(agent.id, "FLEETENT_AGENT_SUPPORT_MODEL", "")
+
+
+def test_shared_scope_stores_with_null_agent(db):
+    # agent_id=None is the shared (cross-agent) scope used by provider/connector keys
+    secret_store.set(None, "FLEETENT_KB_DRIVE_TOKEN", "ya29-shared")
+    assert secret_store.status(None, "FLEETENT_KB_DRIVE_TOKEN") == "set"
+    assert secret_store.get_decrypted(None, "FLEETENT_KB_DRIVE_TOKEN") == "ya29-shared"
+
+
+def test_shared_and_per_agent_same_name_coexist(db):
+    agent = agent_store.create_agent("support", "p", [])
+    secret_store.set(None, "TOK", "shared-val")
+    secret_store.set(agent.id, "TOK", "agent-val")
+    assert secret_store.get_decrypted(None, "TOK") == "shared-val"
+    assert secret_store.get_decrypted(agent.id, "TOK") == "agent-val"
+
+
+def test_get_resolved_prefers_agent_then_shared(db):
+    agent = agent_store.create_agent("support", "p", [])
+    secret_store.set(None, "TOK", "shared-val")
+    assert secret_store.get_resolved(agent.id, "TOK") == "shared-val"  # falls back to shared
+    secret_store.set(agent.id, "TOK", "agent-val")
+    assert secret_store.get_resolved(agent.id, "TOK") == "agent-val"  # per-agent wins
+    assert secret_store.get_resolved(agent.id, "MISSING") is None
