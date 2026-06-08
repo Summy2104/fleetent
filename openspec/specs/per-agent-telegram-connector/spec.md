@@ -9,9 +9,10 @@ Per-agent Telegram connectivity: each agent declares its own Telegram bot in age
 
 An agent SHALL declare its Telegram connection in its `agent.yaml` under
 `connectors.telegram` with `bot_token_env` (an environment-variable name, never an inline
-token) and an optional `channels` list. The token SHALL be resolved from the named
-environment variable at connection time. The config scanner SHALL reject inline plaintext
-secrets anywhere under `connectors`.
+token) and an optional `access: ConnectorAccess` block. The `channels` field is removed;
+chat filtering is handled by `access.allow_channels`. The token SHALL be resolved from
+the named environment variable at connection time. The config scanner SHALL reject inline
+plaintext secrets anywhere under `connectors`.
 
 #### Scenario: Connector parsed with env reference
 
@@ -28,6 +29,11 @@ secrets anywhere under `connectors`.
 
 - **WHEN** an `agent.yaml` has no `connectors.telegram`
 - **THEN** the agent loads normally and no Telegram connection is started for it
+
+#### Scenario: Connector with access block
+
+- **WHEN** an `agent.yaml` declares `connectors.telegram` with `access.require_approval: false`
+- **THEN** the agent loads and unknown Telegram users are rejected silently (not queued as pending)
 
 ### Requirement: One Telegram connection per declaring agent
 
@@ -87,21 +93,21 @@ NOT write status or heartbeat to any platform store and SHALL NOT import
 
 For Telegram, the agent SHALL be determined by the connection that received the update, not
 by a channel→agent lookup. The adapter SHALL stamp the resolved agent onto the
-`NormalizedMessage`, and routing SHALL use it directly. When `connectors.telegram.channels`
-is non-empty, updates from chats not in the list SHALL be ignored.
+`NormalizedMessage`, and routing SHALL use it directly. Chat filtering (formerly
+`connectors.telegram.channels`) is now handled by the access gate via `access.allow_channels`.
 
 #### Scenario: Message handled by the receiving agent
 
 - **WHEN** a Telegram message arrives on agent `sales`'s connection
 - **THEN** the message is processed with agent `sales`'s snapshot, with no channel→agent lookup
 
-#### Scenario: Channel filter drops unlisted chats
+#### Scenario: Chat filter via access.allow_channels
 
-- **WHEN** agent `sales` sets `connectors.telegram.channels: ["-100123"]` and a message
+- **WHEN** agent `sales` sets `connectors.telegram.access.allow_channels: ["-100123"]` and a message
   arrives in chat `-100999`
-- **THEN** the message is ignored
+- **THEN** the message is rejected by the access gate
 
-#### Scenario: Empty channel filter responds everywhere
+#### Scenario: Empty allow_channels responds everywhere
 
-- **WHEN** agent `sales` omits `connectors.telegram.channels` (or leaves it empty)
+- **WHEN** agent `sales` omits `connectors.telegram.access.allow_channels` (or leaves it empty)
 - **THEN** the agent responds in every chat its Telegram bot receives updates from
