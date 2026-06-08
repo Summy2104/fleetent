@@ -64,6 +64,11 @@ def agent_home_dir(agent_id: str) -> Path:
     return agents_dir() / agent_id
 
 
+def agent_data_dir(agent_id: str) -> Path:
+    """Per-agent runtime data root: ``agents/<id>/data/``."""
+    return agents_dir() / agent_id / "data"
+
+
 def agent_file() -> Path:
     """The default deployed Agent's self-contained config."""
     return agent_home_dir("default") / "agent.yaml"

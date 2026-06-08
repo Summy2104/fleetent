@@ -135,3 +135,87 @@ async def test_boot_configures_logging_console(
     import structlog as sl
 
     assert isinstance(structlog_kwargs["processors"][-1], sl.dev.ConsoleRenderer)
+
+
+def _write_agent_yaml_blank_log_dir(home: Path) -> None:
+    agent_yaml = {
+        "name": home.name,
+        "version": 1,
+        "models": {
+            "targets": [
+                {
+                    "id": "default",
+                    "provider": "local",
+                    "protocol": "openai_chat",
+                    "base_url": "http://localhost:11434/v1/",
+                    "model": "default",
+                }
+            ],
+            "routes": {"default": [{"target": "default"}]},
+        },
+        "observability": {"logging": {"directory": ""}},
+    }
+    (home / "agent.yaml").write_text(yaml.dump(agent_yaml))
+
+
+async def test_blank_log_directory_resolves_to_agent_home_data_logs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """blank directory in agent.yaml → logs go to agents/<id>/data/logs/."""
+    home = tmp_path / "logagent"
+    home.mkdir()
+    _write_agent_yaml_blank_log_dir(home)
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+
+    with contextlib.ExitStack() as stack:
+        _make_stack(stack)
+        mock_csl = stack.enter_context(
+            patch("fleetent.observability.structured_logging.configure_structured_logging")
+        )
+        stack.enter_context(patch("structlog.configure"))
+
+        from fleetent.runtime import agent_app
+
+        await agent_app.boot(
+            "logagent",
+            home=home,
+            start_im=False,
+            with_infra=False,
+            supervisor=_mock_supervisor(),
+            telegram_supervisor=_mock_supervisor(),
+        )
+
+    mock_csl.assert_called_once()
+    assert mock_csl.call_args.kwargs["directory"] == home / "data" / "logs"
+
+
+async def test_explicit_log_directory_used_as_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """explicit directory in agent.yaml is forwarded unchanged."""
+    home = tmp_path / "explicitagent"
+    home.mkdir()
+    # Use the existing helper that sets directory: "data/logs"
+    _write_agent_yaml(home, log_format="console")
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+
+    with contextlib.ExitStack() as stack:
+        _make_stack(stack)
+        mock_csl = stack.enter_context(
+            patch("fleetent.observability.structured_logging.configure_structured_logging")
+        )
+        stack.enter_context(patch("structlog.configure"))
+
+        from fleetent.runtime import agent_app
+
+        await agent_app.boot(
+            "explicitagent",
+            home=home,
+            start_im=False,
+            with_infra=False,
+            supervisor=_mock_supervisor(),
+            telegram_supervisor=_mock_supervisor(),
+        )
+
+    mock_csl.assert_called_once()
+    assert mock_csl.call_args.kwargs["directory"] == "data/logs"

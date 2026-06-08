@@ -285,7 +285,9 @@ def test_observability_logging_defaults():
 
     assert s.observability.logging.console_level == "info"
     assert s.observability.logging.file_level == "debug"
-    assert s.observability.logging.directory == str(paths.data_dir() / "logs")
+    # Blank means "resolve at runtime": agent_app resolves to home_dir/data/logs/,
+    # configure_structured_logging falls back to data_dir()/logs when blank.
+    assert s.observability.logging.directory == ""
 
 
 def test_vector_store_defaults():

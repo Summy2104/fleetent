@@ -39,7 +39,8 @@ class SecretRejectingYamlSettingsSource(YamlConfigSettingsSource):
 class LoggingSettings(BaseModel):
     console_level: str = "info"
     file_level: str = "debug"
-    directory: str = Field(default_factory=lambda: str(paths.data_dir() / "logs"))
+    # Blank means "resolve to agent home data/logs/"; explicit path used as-is.
+    directory: str = ""
     json_file: bool = True
 
 
