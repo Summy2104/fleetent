@@ -98,3 +98,20 @@ def test_default_agent_file_under_agents_home(
 
     assert paths.agent_file() == home / "agents" / "default" / "agent.yaml"
     assert paths.agent_home_dir("support") == home / "agents" / "support"
+
+
+def test_agent_data_dir_derives_from_agents_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "h"
+    monkeypatch.setenv("FLEETENT_HOME", str(home))
+
+    assert paths.agent_data_dir("my-bot") == home / "agents" / "my-bot" / "data"
+
+
+def test_agent_data_dir_injectable_via_monkeypatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(paths, "agents_dir", lambda: tmp_path)
+
+    assert paths.agent_data_dir("test-agent") == tmp_path / "test-agent" / "data"
