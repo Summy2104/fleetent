@@ -12,12 +12,12 @@ from fleetent.intelligence import long_term_ctx as ltcp
 
 def _publish_single(agent: AgentFile) -> None:
     agent_config._index = AgentConfigIndex(
-        agents={agent.name: agent}, by_channel={}, by_user={}, default=agent.name
+        agents={agent.name: agent}, default=agent.name
     )
 
 
 def _publish_empty() -> None:
-    agent_config._index = AgentConfigIndex(agents={}, by_channel={}, by_user={}, default=None)
+    agent_config._index = AgentConfigIndex(agents={}, default=None)
 
 
 def test_ltc_config_from_active_agent() -> None:

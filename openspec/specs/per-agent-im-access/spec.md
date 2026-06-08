@@ -7,21 +7,27 @@ with zero platform-database access. Created by archiving change per-agent-im-acc
 ## Requirements
 ### Requirement: Per-agent IM access config in the agent home
 
-An agent SHALL carry its IM access rules in its home configuration: an `access` block
-with `allow_channels` (list), `allow_users` (list), and `require_approval` (bool). These
-rules SHALL be read from the agent home, not from an owner-keyed platform table.
+An agent SHALL carry its IM access rules inside its connector declarations, not in a
+top-level `access` block. Each connector (`connectors.slack`, `connectors.telegram`)
+SHALL embed an `access: ConnectorAccess` object with `allow_channels` (list),
+`allow_users` (list), and `require_approval` (bool). The runtime SHALL resolve access
+policy by reading the connector that matches `msg.platform`, with zero platform-DB access.
+The top-level `AgentFile.access` field and `AgentAccess` class are removed.
 
-#### Scenario: Access rules loaded from the agent home
+#### Scenario: Access rules loaded from the connector's access block
 
-- **WHEN** an agent home declares `access.allow_users: ["u_alice"]` and the agent loads
-- **THEN** the resolved agent exposes that allow rule for runtime evaluation, with no
-  platform-DB read
+- **WHEN** an agent home declares `connectors.slack.access.allow_users: ["u_alice"]` and the agent loads
+- **THEN** the resolved agent exposes that allow rule under `connectors.slack.access` for runtime evaluation, with no platform-DB read
 
 #### Scenario: Absent access block defaults to closed-with-approval
 
-- **WHEN** an agent home has no `access` block
-- **THEN** the agent applies a safe default (no implicit allow; approval required) rather
-  than allowing everyone
+- **WHEN** an agent home declares `connectors.slack` with no `access` sub-block
+- **THEN** the agent applies a safe default (`ConnectorAccess()`: no implicit allow, approval required) for Slack messages
+
+#### Scenario: Slack and Telegram can have independent access policies
+
+- **WHEN** an agent declares `connectors.slack.access.allow_all_users: false` and `connectors.telegram.access.require_approval: false`
+- **THEN** the runtime enforces the Slack policy for Slack messages and the Telegram policy for Telegram messages independently
 
 ### Requirement: Agent-local approval store
 
@@ -49,19 +55,24 @@ platform-DB `get_or_create`/user lookup occurs on the runtime path.
 - **THEN** the message is still attributed to a stable per-agent identity and routing
   proceeds, proving identity resolution is local
 
-### Requirement: Runtime access gate is local and zero-DB
+### Requirement: Runtime access gate reads per-connector access config
 
-The agent runtime SHALL evaluate the channel and user gates against the agent's local
-access config and local approval store via the `im` module, and SHALL NOT read the
-owner-keyed channel allowlist or user store on the runtime path.
+The agent runtime SHALL resolve the `ConnectorAccess` for an incoming message by
+matching `msg.platform` to the corresponding connector's `access` field. It SHALL NOT
+read `AgentFile.access` (removed). When no matching connector is found, a default-closed
+`ConnectorAccess()` SHALL be applied.
 
-#### Scenario: Allowed user proceeds
+#### Scenario: Allowed user proceeds via connector access
 
-- **WHEN** a message arrives from a user in `access.allow_users` (or approved locally)
+- **WHEN** a Slack message arrives from a user in `connectors.slack.access.allow_users`
 - **THEN** routing proceeds to the agent loop with no platform-DB lookup
 
-#### Scenario: Disallowed user blocked locally
+#### Scenario: Disallowed user blocked by connector access
 
-- **WHEN** a message arrives from a user not allowed and `require_approval` is set
-- **THEN** the agent replies with the rejection/approval prompt and the message never
-  reaches the loop, decided entirely from local state
+- **WHEN** a Slack message arrives from a user not in `allow_users` and not locally approved, and `require_approval` is set
+- **THEN** the agent replies with the rejection message and the message never reaches the loop, decided entirely from local state
+
+#### Scenario: Unknown platform falls back to default-closed
+
+- **WHEN** a message arrives on a platform with no matching connector declaration
+- **THEN** `ConnectorAccess()` is applied and the user is rejected (require_approval default)

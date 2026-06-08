@@ -193,22 +193,21 @@ connectors:
   slack:
     bot_token_env: SUPPORT_SLACK_BOT   # env-var NAME (xoxb- token lives in .env)
     app_token_env: SUPPORT_SLACK_APP   # env-var NAME (xapp- Socket Mode token)
-    channels:                          # optional filter; empty = respond everywhere
-      - C0123ABCD
-      - C0456EFGH
+    access:                            # per-connector access rules (default-closed)
+      allow_channels:
+        - C0123ABCD
+        - C0456EFGH
+      allow_users:
+        - "u_alice"
+      require_approval: true
   telegram:
     bot_token_env: SUPPORT_TG_BOT      # env-var NAME (bot token lives in .env)
-    channels:                          # optional chat filter; empty = respond everywhere
-      - "-1001234567890"
-
-# ── bindings (ingress filters; the deployed single agent is always default) ──
-bindings:
-  channels:
-    - "slack:C0123ABCD"
-    - "telegram:-1001234567890"
-  users:
-    - "u_alice"
-    - "u_bob"
+    access:                            # per-connector access rules (default-closed)
+      allow_channels:
+        - "-1001234567890"
+      allow_users:
+        - "u_alice"
+      require_approval: true
 
 # ── per-agent runtime governance (resolved from this agent.yaml; config consolidation).
 #    All values below equal the current defaults; omit any you don't override. ──
@@ -306,13 +305,3 @@ diagnostics:
 
 # NOTE: agent_budget_global_* and database_url are intentionally NOT accepted here.
 # The database location is derived from the agent home (<home>/data/fleetent.db).
-
-# ── access control (per-agent IM authorization; closed by default) ──
-# Default is closed: with no rules the agent grants no implicit access and requires
-# approval. allow_channels empty = allow every channel the agent is bound to.
-access:
-  allow_channels:
-    - "slack:C0123ABCD"
-  allow_users:
-    - "u_alice"
-  require_approval: true

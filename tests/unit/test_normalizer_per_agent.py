@@ -13,12 +13,18 @@ from fleetent.integrations.sandbox import enablement as se
 
 
 def _write(root, name, **fields):
-    # Default access allows the test user U1 so the local per-agent gate passes.
+    # Default connector access allows the test user U1 so the local per-agent gate passes.
     doc = {
         "name": name,
         "version": 1,
         "models": agent_config.default_models().model_dump(),
-        "access": {"allow_users": ["U1"]},
+        "connectors": {
+            "slack": {
+                "bot_token_env": "BOT",
+                "app_token_env": "APP",
+                "access": {"allow_users": ["U1"]},
+            }
+        },
     }
     doc.update(fields)
     d = root / name
@@ -76,12 +82,18 @@ async def test_route_uses_preresolved_agent_for_slack(tmp_path, monkeypatch):
 
 async def test_route_without_preresolved_agent_uses_index(tmp_path, monkeypatch):
     # Telegram-style: no agent_name stamped → falls back to index resolution.
-    _write(tmp_path / "agents", "chan", system_prompt="C", bindings={"channels": ["slack:C1"]})
+    # Channel/user routing removed; only default-agent fallback matters now.
+    _write(tmp_path / "agents", "def", system_prompt="D")
     agent_config.scan(tmp_path / "agents")
+    # Force the single agent as default (scan doesn't auto-default in multi-scan mode)
+    agent_config._index = agent_config.AgentConfigIndex(
+        agents={"def": agent_config._index.get("def")},
+        default="def",
+    )
     captured: dict = {}
     _patches(monkeypatch, tmp_path, captured)
 
     await normalizer.route(_msg(agent_name=""))
 
-    assert captured["system"] == "C"
+    assert captured["system"] == "D"
     assert captured["gac_calls"] == [1]  # index lookup used

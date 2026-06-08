@@ -40,7 +40,13 @@ async def test_route_loads_history_calls_agent_saves_replies(
     mock_session_mgr, mock_agent_loop, mock_memory_skill, monkeypatch
 ):
     import fleetent.im_gateway.normalizer as norm
-    from fleetent.agent_config import AgentAccess, AgentFile, default_models
+    from fleetent.agent_config import (
+        AgentConnectors,
+        AgentFile,
+        ConnectorAccess,
+        SlackConnector,
+        default_models,
+    )
 
     # Bind an agent that allows this user so the per-agent local gate passes (an allowed
     # user short-circuits before the approval store is read, so no path patch is needed).
@@ -48,7 +54,13 @@ async def test_route_loads_history_calls_agent_saves_replies(
         name="a",
         version=1,
         models=default_models(),
-        access=AgentAccess(allow_users=["internal-user-1"]),
+        connectors=AgentConnectors(
+            slack=SlackConnector(
+                bot_token_env="BOT",
+                app_token_env="APP",
+                access=ConnectorAccess(allow_users=["internal-user-1"]),
+            )
+        ),
     )
     monkeypatch.setattr(norm, "get_agent_for_context", lambda *a, **k: agent)
 
@@ -265,7 +277,13 @@ async def test_route_channel_agent_takes_priority(
 ):
     """Channel-bound agent's system prompt is used for the run (file-driven AgentFile)."""
     import fleetent.im_gateway.normalizer as norm
-    from fleetent.agent_config import AgentAccess, AgentFile, default_models
+    from fleetent.agent_config import (
+        AgentConnectors,
+        AgentFile,
+        ConnectorAccess,
+        SlackConnector,
+        default_models,
+    )
 
     channel_agent = AgentFile(
         name="channel-bot",
@@ -273,7 +291,13 @@ async def test_route_channel_agent_takes_priority(
         models=default_models(),
         system_prompt="Channel sys.",
         allowed_tools=["shell"],
-        access=AgentAccess(allow_users=["some-user"]),
+        connectors=AgentConnectors(
+            slack=SlackConnector(
+                bot_token_env="BOT",
+                app_token_env="APP",
+                access=ConnectorAccess(allow_users=["some-user"]),
+            )
+        ),
     )
     monkeypatch.setattr(
         norm, "get_agent_for_context", lambda platform, channel_id, user_id: channel_agent

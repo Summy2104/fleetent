@@ -61,7 +61,6 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
         raise RuntimeError("slack-bolt not installed") from None
 
     bot_token = config.get("bot_token", "")
-    channels = config.get("channels") or []
     app = AsyncApp(token=bot_token)
 
     @app.event("message")
@@ -70,8 +69,6 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
         from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
         channel = event.get("channel") or ""
-        if channels and channel not in channels:
-            return  # channel outside this agent's response filter
 
         slack_user_id = event.get("user") or "unknown"
         # Identity is the platform-native id, resolved locally — no platform user_store.

@@ -18,42 +18,34 @@ def _explode(*a, **k):
     raise AssertionError("runtime routing must not touch the database")
 
 
-def test_get_agent_for_context_channel_beats_user_and_default(tmp_path, monkeypatch):
-    _write(tmp_path, "chan", system_prompt="C", bindings={"channels": ["slack:C1"]})
-    _write(tmp_path, "usr", system_prompt="U", bindings={"users": ["u1"]})
-    _write(tmp_path, "def", system_prompt="D", bindings={"default": True})
+def test_get_agent_for_context_returns_default_agent(tmp_path, monkeypatch):
+    # Channel/user routing removed; only default agent is returned.
+    _write(tmp_path, "def", system_prompt="D")
     agent_config.scan(tmp_path)
+    # All single-agent indexes are forced-default; but scan() does not force default
+    # in multi-scan mode. Use a single-agent index here.
+    agent_config._index = agent_config.AgentConfigIndex(
+        agents={"def": agent_config._index.get("def")},
+        default="def",
+    )
     agent = normalizer.get_agent_for_context("slack", "C1", "u1")
-    assert agent is not None and agent.name == "chan"
-    assert agent.system_prompt == "C"
-
-
-def test_get_agent_for_context_user_fallback(tmp_path, monkeypatch):
-    _write(tmp_path, "usr", system_prompt="U", bindings={"users": ["u1"]})
-    _write(tmp_path, "def", system_prompt="D", bindings={"default": True})
-    agent_config.scan(tmp_path)
-    agent = normalizer.get_agent_for_context("slack", "C-none", "u1")
-    assert agent is not None and agent.name == "usr"
-
-
-def test_get_agent_for_context_default_fallback(tmp_path, monkeypatch):
-    _write(tmp_path, "def", system_prompt="D", bindings={"default": True})
-    agent_config.scan(tmp_path)
-    agent = normalizer.get_agent_for_context("slack", "C-none", "u-none")
     assert agent is not None and agent.name == "def"
+    assert agent.system_prompt == "D"
 
 
-def test_get_agent_for_context_none_when_unbound(tmp_path, monkeypatch):
-    _write(tmp_path, "lonely", system_prompt="P")  # no bindings, no default
+def test_get_agent_for_context_none_when_no_default(tmp_path, monkeypatch):
+    # Without a default agent, returns None regardless of channel/user.
+    _write(tmp_path, "lonely", system_prompt="P")
     agent_config.scan(tmp_path)
+    # scan sets default=None for multi-agent scans
     assert normalizer.get_agent_for_context("slack", "C-none", "u-none") is None
 
 
 def test_get_agent_for_context_does_not_touch_db(tmp_path, monkeypatch):
-    _write(tmp_path, "chan", system_prompt="C", bindings={"channels": ["slack:C1"]})
+    _write(tmp_path, "solo", system_prompt="S")
     agent_config.scan(tmp_path)
     monkeypatch.setattr(agent_store, "get_agent_for_channel", _explode)
     monkeypatch.setattr(agent_store, "get_agent_for_user", _explode)
     monkeypatch.setattr(agent_store, "get_default_agent", _explode)
-    agent = normalizer.get_agent_for_context("slack", "C1", "u1")
-    assert agent is not None and agent.name == "chan"
+    # Does not raise despite db being wired to explode
+    normalizer.get_agent_for_context("slack", "C1", "u1")

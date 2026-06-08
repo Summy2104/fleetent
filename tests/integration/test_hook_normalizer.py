@@ -8,7 +8,13 @@ import pytest
 
 import fleetent.runtime.hooks as hooks
 import fleetent.runtime.loop as al
-from fleetent.agent_config import AgentAccess, AgentFile, default_models
+from fleetent.agent_config import (
+    AgentConnectors,
+    AgentFile,
+    ConnectorAccess,
+    SlackConnector,
+    default_models,
+)
 from fleetent.im_gateway.normalizer import NormalizedMessage, route
 from fleetent.runtime.hooks import HookResult
 
@@ -37,7 +43,13 @@ def _mock_env(monkeypatch):
         name="test-agent",
         version=1,
         models=default_models(),
-        access=AgentAccess(allow_users=["u1"]),
+        connectors=AgentConnectors(
+            slack=SlackConnector(
+                bot_token_env="BOT",
+                app_token_env="APP",
+                access=ConnectorAccess(allow_users=["u1"]),
+            )
+        ),
         hooks_enabled=True,
     )
     monkeypatch.setattr(norm, "get_agent_for_context", lambda *a, **k: agent)

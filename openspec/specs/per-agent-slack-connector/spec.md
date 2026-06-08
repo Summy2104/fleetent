@@ -5,11 +5,12 @@ TBD - created by archiving change per-agent-slack-connector. Update Purpose afte
 ## Requirements
 ### Requirement: agent.yaml declares a Slack connector
 
-An agent SHALL declare its Slack connection in its `agent.yaml` under
-`connectors.slack` with `bot_token_env` and `app_token_env` (environment-variable
-names, never inline tokens) and an optional `channels` list. Tokens SHALL be resolved
-from the named environment variables at connection time. The config scanner SHALL
-reject inline plaintext secrets anywhere under `connectors`.
+An agent SHALL declare its Slack connection in its `agent.yaml` under `connectors.slack`
+with `bot_token_env` and `app_token_env` (environment-variable names, never inline tokens)
+and an optional `access: ConnectorAccess` block. The `channels` field is removed; channel
+filtering is handled by `access.allow_channels`. Tokens SHALL be resolved from the named
+environment variables at connection time. The config scanner SHALL reject inline plaintext
+secrets anywhere under `connectors`.
 
 #### Scenario: Connector parsed with env references
 
@@ -27,6 +28,11 @@ reject inline plaintext secrets anywhere under `connectors`.
 
 - **WHEN** an `agent.yaml` has no `connectors.slack`
 - **THEN** the agent loads normally and no Slack connection is started for it
+
+#### Scenario: Connector with access block
+
+- **WHEN** an `agent.yaml` declares `connectors.slack` with `access.allow_users: ["U123"]`
+- **THEN** the agent loads and only user `U123` is allowed to interact via Slack
 
 ### Requirement: One Socket Mode connection per declaring agent
 
@@ -69,8 +75,8 @@ removed ones, and restarting agents whose connector config changed.
 For Slack, the agent SHALL be determined by the connection that received the event, not
 by a channel→agent lookup. The adapter SHALL stamp the resolved agent onto the
 `NormalizedMessage`, and routing SHALL use it directly without calling
-`get_agent_for_context`. When `connectors.slack.channels` is non-empty, events from
-channels not in the list SHALL be ignored.
+`get_agent_for_context`. Channel filtering (formerly `connectors.slack.channels`) is
+now handled by the access gate via `access.allow_channels`.
 
 #### Scenario: Message handled by the receiving agent
 
@@ -78,14 +84,14 @@ channels not in the list SHALL be ignored.
 - **THEN** the message is processed with agent `support`'s snapshot, with no
   channel→agent lookup
 
-#### Scenario: Channel filter drops unlisted channels
+#### Scenario: Channel filter via access.allow_channels
 
-- **WHEN** agent `support` sets `connectors.slack.channels: ["C1"]` and a message arrives
+- **WHEN** agent `support` sets `connectors.slack.access.allow_channels: ["C1"]` and a message arrives
   in channel `C2`
-- **THEN** the message is ignored
+- **THEN** the message is rejected by the access gate
 
-#### Scenario: Empty channel filter responds everywhere
+#### Scenario: Empty allow_channels responds everywhere
 
-- **WHEN** agent `support` omits `connectors.slack.channels` (or leaves it empty)
+- **WHEN** agent `support` omits `connectors.slack.access.allow_channels` (or leaves it empty)
 - **THEN** the agent responds in every channel its Slack app receives events from
 

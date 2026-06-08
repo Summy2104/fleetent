@@ -28,7 +28,13 @@ def _write_agent(agents_dir, name, allowed_tools):
         "name": name,
         "version": 1,
         "models": agent_config.default_models().model_dump(),
-        "access": {"allow_users": ["U1"]},
+        "connectors": {
+            "slack": {
+                "bot_token_env": "BOT",
+                "app_token_env": "APP",
+                "access": {"allow_users": ["U1"]},
+            }
+        },
         "allowed_tools": allowed_tools,
     }
     d = agents_dir / name
