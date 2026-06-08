@@ -2449,6 +2449,7 @@ async function skDrop(e) {
   $("sk-import-err").textContent = "只接受文件夹或 .zip，不接受单个文件";
 }
 function skCloseImport() { $("sk-import-modal").classList.add("hidden"); }
+function skCloseAgents() { $("sk-agents-modal").classList.add("hidden"); }
 
 function skImportShowResult(r) {
   const res = $("sk-import-result");
