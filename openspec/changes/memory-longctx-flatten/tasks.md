@@ -13,9 +13,9 @@
 
 ## 3. long_term_ctx 提为独立顶层包（TDD）
 
-- [ ] 3.1 写失败测试：断言 `long_term_ctx` 是独立顶层包（含 `_policy`）、不是 runtime 子模块；runtime → long_term_ctx 单向
-- [ ] 3.2 `git mv` `long_term_ctx.py` → `long_term_ctx/__init__.py`、`long_term_ctx_policy.py` → `long_term_ctx/_policy.py`；修内部 import；旧路径留 shim
-- [ ] 3.3 跑测试 → 绿
+- [x] 3.1 写失败测试：断言 `long_term_ctx` 是独立顶层包（含 `_policy`）、不是 runtime 子模块；runtime → long_term_ctx 单向
+- [x] 3.2 `git mv` `long_term_ctx.py` → `long_term_ctx/__init__.py`、`long_term_ctx_policy.py` → `long_term_ctx/_policy.py`；修内部 import；旧路径留 shim
+- [x] 3.3 跑测试 → 绿
 
 ## 4. shared-memory 审计薄壳归 platform（TDD）
 
@@ -25,7 +25,7 @@
 
 ## 5. 调用方迁移 + 循环铺路
 
-- [ ] 5.1 迁 `runtime/loop`（memory extraction + long_term_ctx 构建上下文）→ 顶层 `memory` / `long_term_ctx`
+- [x] 5.1 迁 `runtime/loop`（memory extraction + long_term_ctx 构建上下文）→ 顶层 `memory` / `long_term_ctx`
 - [ ] 5.2 迁 `agent_config`（long_term_ctx_policy）→ `long_term_ctx._policy`
 - [ ] 5.3 保留 `memory/shared.py`、`memory/trends.py` 的 lazy-import reflection（经 shim 可用）；在测试/注释标注 `memory ✗→ reflection` 护栏 TODO（阶段3 门落地后启用）
 - [ ] 5.4 全仓 grep 确认无残留硬编码 `intelligence.memory` / `intelligence.long_term_ctx`（shim 除外）

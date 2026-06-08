@@ -1,7 +1,7 @@
 import ast
 import importlib
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -41,7 +41,11 @@ def test_long_term_ctx_top_level_package_is_importable() -> None:
 
 
 def test_memory_and_long_term_ctx_do_not_import_platform_modules() -> None:
-    for package_name in ("fleetent.memory", "fleetent.long_term_ctx", "fleetent.long_term_ctx._policy"):
+    for package_name in (
+        "fleetent.memory",
+        "fleetent.long_term_ctx",
+        "fleetent.long_term_ctx._policy",
+    ):
         package = importlib.import_module(package_name)
         if package.__file__ is None:
             continue
@@ -80,10 +84,29 @@ def test_memory_longterm_ctx_layer_separation() -> None:
 
 
 def test_long_term_ctx_memory_shim_remains_compatible() -> None:
-    import fleetent
+    from fleetent import long_term_ctx, memory
     from fleetent.intelligence import long_term_ctx as legacy_long_term_ctx
     from fleetent.intelligence import memory as legacy_memory
-    from fleetent import long_term_ctx, memory
 
     assert legacy_long_term_ctx is long_term_ctx
     assert legacy_memory is memory
+
+
+def test_long_term_ctx_top_level_package_contains_policy() -> None:
+    policy = importlib.import_module("fleetent.long_term_ctx._policy")
+    assert policy.__name__ == "fleetent.long_term_ctx._policy"
+
+
+def test_runtime_loop_imports_long_term_ctx_from_top_level() -> None:
+    runtime_loop = importlib.import_module("fleetent.runtime.loop")
+    if runtime_loop.__file__ is None:
+        raise RuntimeError("runtime.loop module file missing")
+    runtime_loop_path = Path(runtime_loop.__file__).resolve()
+    runtime_tree = ast.parse(runtime_loop_path.read_text(encoding="utf-8"))
+    imported_modules = {
+        node.module
+        for node in ast.walk(runtime_tree)
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+    assert "fleetent.long_term_ctx" in imported_modules
+    assert "fleetent.intelligence.long_term_ctx" not in imported_modules
