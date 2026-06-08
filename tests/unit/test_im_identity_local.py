@@ -31,7 +31,7 @@ def _build_slack_handler(monkeypatch, agent_name, owner_id, config):
 
     def event_deco(name):
         def wrap(fn):
-            holder["fn"] = fn
+            holder[name] = fn
             return fn
 
         return wrap
@@ -39,7 +39,7 @@ def _build_slack_handler(monkeypatch, agent_name, owner_id, config):
     app.event = event_deco
     with patch("slack_bolt.async_app.AsyncApp", return_value=app):
         slack.create_app(agent_name, owner_id, config)
-    return holder["fn"], routed
+    return holder["app_mention"], routed
 
 
 async def _say(text, thread_ts=None):
