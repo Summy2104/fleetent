@@ -260,7 +260,8 @@ agent_budget_agent_window: weekly
 agent_grace_call_token_ratio: 0.05  # fraction of session budget reserved for grace call
 agent_grace_call_min_tokens: 512    # minimum tokens guaranteed for grace call regardless of ratio
 
-# permission gate timeouts (seconds; 0 = deny immediately)
+# permission gate — controls human-in-the-loop approval for medium/high-risk tools
+permission_gate_enabled: true             # false = skip approval gate entirely (all risk levels auto-execute)
 permission_gate_medium_timeout_seconds: 300
 permission_gate_high_timeout_seconds: 3600
 
