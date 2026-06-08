@@ -41,6 +41,7 @@ config/agents/*/agent.yaml
 agents/*/agent.yaml
 agents/*/.env
 agents/*/data/
+agents/*/skills/
 
 # IDE
 .vscode/
