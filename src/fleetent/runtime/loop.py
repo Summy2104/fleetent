@@ -721,7 +721,11 @@ async def _plan_run_slots(
                 slot_args = hres.modified_args
             force_ask = hres.decision == "ask"
         risk = get_risk_level(name)
-        if (risk in ("medium", "high") or force_ask) and reply_func is not None and permission_gate_enabled:
+        if (
+            (risk in ("medium", "high") or force_ask)
+            and reply_func is not None
+            and permission_gate_enabled
+        ):
             tool_args = json.loads(slot_args) if isinstance(slot_args, str) else slot_args
             approval_id = str(uuid.uuid4())[:8]
             # D3: approvals are requested serially in original order; only approved
