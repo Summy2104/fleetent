@@ -104,6 +104,11 @@ def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
     route_overrides = {
         k: v for k, v in model_overrides.items() if k != credential_slots.RESERVED_KEY
     }
+    # Backward-compat: the console's two-part picker stored {targets:[...], routes:{name:[...]}}.
+    # The route map lives under "routes"; the flat "targets" list is informational only.
+    routes_block = route_overrides.get("routes")
+    if isinstance(routes_block, dict):
+        route_overrides = routes_block
     if not route_overrides:
         return default_models()
 
@@ -133,9 +138,20 @@ def _models_from_overrides(model_overrides: dict[str, Any]) -> AgentModels:
 
 
 def _target_from_model_override(route_key: str, index: int, entry: dict[str, Any]) -> ModelTarget:
-    provider_id = entry.get("provider_id")
-    provider = provider_admin_store.get_provider(str(provider_id)) if provider_id else None
-    source = {**(provider or {}), **{k: v for k, v in entry.items() if k != "provider_id"}}
+    # A provider id may arrive under any of these keys depending on the authoring path:
+    # "provider_id" (canonical), "target" (two-part router), "provider" (console picker).
+    provider_id = None
+    provider = None
+    matched_key = None
+    for key in ("provider_id", "target", "provider"):
+        candidate = entry.get(key)
+        if candidate and (row := provider_admin_store.get_provider(str(candidate))) is not None:
+            provider_id, provider, matched_key = candidate, row, key
+            break
+    # the id-carrying keys are lookup hints, not target fields — drop the matched one plus
+    # the always-aliases so a provider id can't leak into the target's vendor/id columns.
+    drop = {"provider_id", "target"} | ({matched_key} if matched_key else set())
+    source = {**(provider or {}), **{k: v for k, v in entry.items() if k not in drop}}
     params = (provider or {}).get("params") or (provider or {}).get("extra_params") or {}
     if not provider:
         params = (

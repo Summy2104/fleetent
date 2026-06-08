@@ -122,6 +122,59 @@ def test_agent_file_from_store_defaults_models_when_no_overrides(db):
     assert exported.models == default_models()
 
 
+def test_agent_file_from_store_handles_targets_routes_shape(db):
+    """Agents authored with the {targets, routes:{name:[{target}]}} shape still materialize.
+
+    Pre-existing agents store this shape; the expander must resolve each route entry's
+    ``target`` against the provider registry (not choke on the wrapper keys).
+    """
+    provider_admin_store.add_provider(
+        "p-router",
+        "https://api.anthropic.com/v1/",
+        "claude-opus-4-8",
+        provider="anthropic",
+        protocol="openai_chat",
+        api_key_env="FLEETENT_P_ROUTER",
+    )
+    agent = agent_store.create_agent(
+        "routed",
+        "p",
+        [],
+        model_overrides={
+            "targets": ["p-router"],
+            "routes": {"reasoning": [{"target": "p-router", "max_tokens": None, "params": {}}]},
+        },
+    )
+
+    exported = materialize.agent_file_from_store(agent)
+
+    assert exported.models.routes["reasoning"][0].target == "p-router"
+    target = {t.id: t for t in exported.models.targets}["p-router"]
+    assert target.base_url == "https://api.anthropic.com/v1/"
+    assert target.model == "claude-opus-4-8"
+
+
+def test_agent_file_from_store_handles_ui_provider_key(db):
+    """The console emits {route: {provider: <id>, model}}; resolve <id> against providers."""
+    provider_admin_store.add_provider(
+        "p-ui",
+        "https://api.openai.com/v1/",
+        "gpt-5.5",
+        provider="openai",
+        protocol="openai_chat",
+        api_key_env="FLEETENT_P_UI",
+    )
+    agent = agent_store.create_agent(
+        "uimodel", "p", [], model_overrides={"default": {"provider": "p-ui", "model": "gpt-5.5"}}
+    )
+
+    exported = materialize.agent_file_from_store(agent)
+
+    target = {t.id: t for t in exported.models.targets}["p-ui"]
+    assert target.base_url == "https://api.openai.com/v1/"
+    assert exported.models.routes["default"][0].target == "p-ui"
+
+
 # ── skill DB state → agent.yaml (skill-materialize-db-fields) ──────────────────
 
 
