@@ -21,38 +21,38 @@
 
 ## 4. 审批渠道按类型路由（TDD）
 
-- [ ] 4.1 写失败测试：断言 user memory proposal 走 IM（agent 自主，不依赖 platform）；skill/KB proposal 走 platform console 暴露面
-- [ ] 4.2 门内实现按 proposal 类型路由（user/shared→IM；skill/KB→console）；shared-memory "找对人" 留可注入 resolver 接口（草案，apply 时定具体映射）
-- [ ] 4.3 跑测试 → 绿
+- [x] 4.1 写失败测试：断言 user memory proposal 走 IM（agent 自主，不依赖 platform）；skill/KB proposal 走 platform console 暴露面
+- [x] 4.2 门内实现按 proposal 类型路由（user/shared→IM；skill/KB→console）；shared-memory "找对人" 留可注入 resolver 接口（草案，apply 时定具体映射）
+- [x] 4.3 跑测试 → 绿
 
 ## 5. 管理 API → platform/reflection_management（TDD）
 
-- [ ] 5.1 写失败测试：断言 `platform/reflection_management` 提供 list/get proposal + 趋势查询，只读 agent 侧 reflection store
-- [ ] 5.2 新建 `platform/reflection_management/`；迁 `get/list_*_proposals`、`get_reflection_trend_summary` + `_trend_*`/`_aggregate_*` 到此
-- [ ] 5.3 跑测试 → 绿
+- [x] 5.1 写失败测试：断言 `platform/reflection_management` 提供 list/get proposal + 趋势查询，只读 agent 侧 reflection store
+- [x] 5.2 新建 `platform/reflection_management/`；迁 `get/list_*_proposals`、`get_reflection_trend_summary` + `_trend_*`/`_aggregate_*` 到此
+- [x] 5.3 跑测试 → 绿
 
 ## 6. 破 memory↔reflection 循环（与阶段4 合并）
 
-- [ ] 6.1 写失败测试：断言 `memory` 不 import `reflection`；shared-memory proposal 落地经门回调 `memory.shared` 写接口
-- [ ] 6.2 移除 `memory/shared.py`、`memory/trends.py` 的 lazy-import reflection；`mark_shared_memory_proposal_applied` 迁 `reflection.store`，由门调用；trends 的 proposal 聚合迁 reflection_management
-- [ ] 6.3 启用 `memory ✗→ reflection` 护栏（阶段4 标 TODO）
-- [ ] 6.4 跑第 1 组护栏测试 → 绿
+- [x] 6.1 写失败测试：断言 `memory` 不 import `reflection`；shared-memory proposal 落地经门回调 `memory.shared` 写接口
+- [x] 6.2 移除 `memory/shared.py`、`memory/trends.py` 的 lazy-import reflection；`mark_shared_memory_proposal_applied` 迁 `reflection.store`，由门调用；trends 的 proposal 聚合迁 reflection_management
+- [x] 6.3 启用 `memory ✗→ reflection` 护栏（阶段4 标 TODO）
+- [x] 6.4 跑第 1 组护栏测试 → 绿
 
 ## 7. skill 评审消费方迁移
 
-- [ ] 7.1 迁 `skill_admin_api.reflection_list_proposals`/`reflection_proposal_diff`/apply 到 `reflection_management`；`skill_management` 评审 inbox 改为消费 reflection_management（行为不变，过渡期可留薄 re-export）
-- [ ] 7.2 全仓 grep 确认无残留硬编码 `intelligence.reflection`（shim 除外）
-- [ ] 7.3 `uv run pytest -x -q` → 全绿
+- [x] 7.1 迁 `skill_admin_api.reflection_list_proposals`/`reflection_proposal_diff`/apply 到 `reflection_management`；`skill_management` 评审 inbox 改为消费 reflection_management（行为不变，过渡期可留薄 re-export）
+- [x] 7.2 全仓 grep 确认无残留硬编码 `intelligence.reflection`（shim 除外）
+- [x] 7.3 `uv run pytest -x -q` → 全绿
 
 ## 8. 解耦基线验证
 
-- [ ] 8.1 验证 agent 在「无 platform、platform 表不存在」环境下，`fleetent agent run` + 自进化引擎产出 proposal + user-memory IM 审批落地（除 skill/KB 的 console 审批外）正常工作
+- [x] 8.1 验证 agent 在「无 platform、platform 表不存在」环境下，`fleetent agent run` + 自进化引擎产出 proposal + user-memory IM 审批落地（除 skill/KB 的 console 审批外）正常工作
 
 ## 9. 收尾
 
-- [ ] 9.1 `uv run ruff format src tests && uv run ruff check src tests`
-- [ ] 9.2 `uv run mypy src`
-- [ ] 9.3 `uv run python scripts/check_test_layers.py`
-- [ ] 9.4 `uv run pytest -x -q`（全量绿）
+- [x] 9.1 `uv run ruff format src tests && uv run ruff check src tests`
+- [x] 9.2 `uv run mypy src`
+- [x] 9.3 `uv run python scripts/check_test_layers.py`
+- [x] 9.4 `uv run pytest -x -q`（全量绿）
 
 > reflection 异步调度（cron）后置（纲领 §9）。shim 删除时机：本 change 末尾或阶段5 统一收口（见 design §Open Questions）。

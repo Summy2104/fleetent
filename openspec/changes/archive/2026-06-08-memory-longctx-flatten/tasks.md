@@ -26,20 +26,20 @@
 ## 5. 调用方迁移 + 循环铺路
 
 - [x] 5.1 迁 `runtime/loop`（memory extraction + long_term_ctx 构建上下文）→ 顶层 `memory` / `long_term_ctx`
-- [ ] 5.2 迁 `agent_config`（long_term_ctx_policy）→ `long_term_ctx._policy`
-- [ ] 5.3 保留 `memory/shared.py`、`memory/trends.py` 的 lazy-import reflection（经 shim 可用）；在测试/注释标注 `memory ✗→ reflection` 护栏 TODO（阶段3 门落地后启用）
-- [ ] 5.4 全仓 grep 确认无残留硬编码 `intelligence.memory` / `intelligence.long_term_ctx`（shim 除外）
-- [ ] 5.5 跑第 1 组护栏测试 → 绿
+- [x] 5.2 迁 `agent_config`（long_term_ctx_policy）→ `long_term_ctx._policy`
+- [x] 5.3 保留 `memory/shared.py`、`memory/trends.py` 的 lazy-import reflection（经 shim 可用）；在测试/注释标注 `memory ✗→ reflection` 护栏 TODO（阶段3 门落地后启用）
+- [x] 5.4 全仓 grep 确认无残留硬编码 `intelligence.memory` / `intelligence.long_term_ctx`（shim 除外）
+- [x] 5.5 跑第 1 组护栏测试 → 绿
 
 ## 6. 解耦基线验证
 
-- [ ] 6.1 验证 agent 在「无 platform、platform 表不存在」环境下，`fleetent agent run` 对话 + 记忆提取/检索 + long_term_ctx 注入正常工作（集成测试或 smoke）
+- [x] 6.1 验证 agent 在「无 platform、platform 表不存在」环境下，`fleetent agent run` 对话 + 记忆提取/检索 + long_term_ctx 注入正常工作（集成测试或 smoke）
 
 ## 7. 收尾
 
-- [ ] 7.1 `uv run ruff format src tests && uv run ruff check src tests`
-- [ ] 7.2 `uv run mypy src`
-- [ ] 7.3 `uv run python scripts/check_test_layers.py`
-- [ ] 7.4 `uv run pytest -x -q`（全量绿）
+- [x] 7.1 `uv run ruff format src tests && uv run ruff check src tests`
+- [x] 7.2 `uv run mypy src`
+- [x] 7.3 `uv run python scripts/check_test_layers.py`
+- [x] 7.4 `uv run pytest -x -q`（全量绿）
 
 > `memory ✗→ reflection` 的护栏在阶段3（governance 审批门居中破环）启用。shim 删除时机：本 change 末尾或阶段5 统一收口（见 design §Open Questions）。
