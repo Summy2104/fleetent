@@ -5,9 +5,12 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Literal
 
+from fleetent import memory
 from fleetent.config import LongTermContextSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent import memory
+from fleetent.knowledge_base.core import KnowledgeStore
+from fleetent.knowledge_base.retrieval.search import SearchMode
+from fleetent.knowledge_base.retrieval.search import search as kb_search
 from fleetent.long_term_ctx import _policy as long_term_ctx_policy
 from fleetent.long_term_ctx._policy import (
     AgentContextIdentity as AgentContextIdentity,
@@ -21,9 +24,6 @@ from fleetent.long_term_ctx._policy import (
 from fleetent.long_term_ctx._policy import (
     resolve_context_policy as resolve_context_policy,
 )
-from fleetent.knowledge_base.core import KnowledgeStore
-from fleetent.knowledge_base.retrieval.search import SearchMode
-from fleetent.knowledge_base.retrieval.search import search as kb_search
 
 _MEMORY_LIMIT = 10
 _KNOWLEDGE_LIMIT = 10

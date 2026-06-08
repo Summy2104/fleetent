@@ -3,12 +3,12 @@ from datetime import UTC, datetime
 
 import pytest
 
+from fleetent import memory
 from fleetent.db import create_database
-from fleetent.intelligence import memory
 
 
 def _patch_trend_db(monkeypatch, tmp_path):
-    from fleetent.intelligence.memory import store
+    from fleetent.memory import store
     from tests.integration.test_migrations import apply_migrations
 
     db_path = tmp_path / "trends.db"
@@ -23,14 +23,14 @@ def _ts(day: int) -> datetime:
 
 
 def _fmt(value: datetime) -> str:
-    from fleetent.intelligence.memory import store
+    from fleetent.memory import store
 
     return store.format_datetime(value)
 
 
 def _insert_memory(item_id, user_id, type_, content, updated, expires=None):
-    from fleetent.intelligence.memory import store
-    from fleetent.intelligence.memory.models import MemoryItem
+    from fleetent.memory import store
+    from fleetent.memory.models import MemoryItem
 
     store.insert_memory(
         MemoryItem(
@@ -66,7 +66,7 @@ def _insert_shared(database, item_id, type_, updated, scope_type="team", scope_i
 
 
 def test_memory_quality_trend_public_api_is_importable() -> None:
-    from fleetent.intelligence.memory import (
+    from fleetent.memory import (
         MemoryQualityTrendBucket,
         MemoryQualityTrendQuery,
         MemoryQualityTrendSummary,
@@ -96,9 +96,9 @@ def test_build_empty_buckets_validates(start, end, bucket, message) -> None:
 
 
 def _no_proposals(monkeypatch) -> None:
-    from fleetent.intelligence import reflection
-
-    monkeypatch.setattr(reflection, "list_memory_maintenance_proposals", lambda user_id: [])
+    monkeypatch.setattr(
+        "fleetent.memory.trends._list_memory_maintenance_proposals", lambda user_id: []
+    )
 
 
 def test_daily_buckets_count_user_memories_and_expiry(monkeypatch, tmp_path) -> None:
@@ -188,9 +188,9 @@ def test_maintenance_proposals_counted(monkeypatch, tmp_path) -> None:
         # far outside the window -> ignored
         _Proposal(datetime(2026, 2, 1, tzinfo=UTC), "pending", "delete", "low"),
     ]
-    from fleetent.intelligence import reflection
-
-    monkeypatch.setattr(reflection, "list_memory_maintenance_proposals", lambda user_id: proposals)
+    monkeypatch.setattr(
+        "fleetent.memory.trends._list_memory_maintenance_proposals", lambda user_id: proposals
+    )
 
     query = memory.MemoryQualityTrendQuery(
         user_id="u1",

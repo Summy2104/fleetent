@@ -2,9 +2,9 @@
 
 from datetime import UTC, datetime
 
-from fleetent.intelligence import long_term_ctx
-from fleetent.intelligence import long_term_ctx_policy as policy
-from fleetent.intelligence.memory.models import SharedMemoryItem
+from fleetent import long_term_ctx
+from fleetent import long_term_ctx_policy as policy
+from fleetent.memory.models import SharedMemoryItem
 
 
 def _record(

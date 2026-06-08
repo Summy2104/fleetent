@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 
 from fleetent.db import create_database
-from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
+from fleetent.knowledge_base.config import KnowledgeConfigSnapshot
 from tests.integration.test_migrations import apply_migrations
 
 
 def _patch_operations_database(monkeypatch, tmp_path):
-    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.knowledge_base import operations
 
     db_path = tmp_path / "connectors.db"
     apply_migrations(db_path)
@@ -39,7 +39,7 @@ def _settings(**knowledge_base: object) -> KnowledgeConfigSnapshot:
 
 def test_never_run_connector_status_is_stable(monkeypatch, tmp_path):
     _patch_operations_database(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import get_connector_status
+    from fleetent.knowledge_base import get_connector_status
 
     settings = _settings(
         google_drive={
@@ -64,7 +64,7 @@ def test_never_run_connector_status_is_stable(monkeypatch, tmp_path):
 
 def test_connector_status_overwrites_previous_status(monkeypatch, tmp_path):
     _patch_operations_database(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.knowledge_base import operations
 
     operations.record_connector_status(
         connector_id="eng-drive",
@@ -98,7 +98,7 @@ def test_connector_status_overwrites_previous_status(monkeypatch, tmp_path):
 
 def test_connector_status_redacts_summary_and_error(monkeypatch, tmp_path):
     _patch_operations_database(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.knowledge_base import operations
 
     operations.record_connector_status(
         connector_id="eng-drive",
@@ -123,8 +123,8 @@ def test_connector_status_redacts_summary_and_error(monkeypatch, tmp_path):
 
 async def test_dry_run_records_status_without_mutating_knowledge(monkeypatch, tmp_path):
     database = _patch_operations_database(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import run_connector_sync
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+    from fleetent.knowledge_base import run_connector_sync
+    from fleetent.knowledge_base.connectors.google_drive import (
         FakeGoogleDriveClient,
         GoogleDriveFile,
     )
@@ -171,8 +171,8 @@ async def test_dry_run_records_status_without_mutating_knowledge(monkeypatch, tm
 
 async def test_sync_records_success_status(monkeypatch, tmp_path):
     database = _patch_operations_database(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import run_connector_sync
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import FakeGoogleDriveClient
+    from fleetent.knowledge_base import run_connector_sync
+    from fleetent.knowledge_base.connectors.google_drive import FakeGoogleDriveClient
 
     settings = _settings(
         google_drive={

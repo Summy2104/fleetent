@@ -1,6 +1,6 @@
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.db import create_database
-from fleetent.intelligence.knowledge_base.parsers import ParsedDocument, ParsedSection
+from fleetent.knowledge_base.parsers import ParsedDocument, ParsedSection
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -19,7 +19,7 @@ async def test_run_entity_extraction_document_scope_writes_summary_entities_and_
         ),
     )
 
-    from fleetent.intelligence.knowledge_base import run_entity_extraction
+    from fleetent.knowledge_base import run_entity_extraction
 
     summary = await run_entity_extraction("default", "global", document_id=document.id)
 
@@ -56,7 +56,7 @@ async def test_run_entity_extraction_kb_scope_isolates_document_failures(monkeyp
     good = await _ingest_fixture_document("good.md", "Customer: Acme")
     bad = await _ingest_fixture_document("bad.md", "Customer: Broken")
 
-    from fleetent.intelligence.knowledge_base import extraction, run_entity_extraction
+    from fleetent.knowledge_base import extraction, run_entity_extraction
 
     original = extraction.deterministic_extract
 
@@ -85,7 +85,7 @@ async def test_successful_document_rerun_replaces_old_evidence(monkeypatch, tmp_
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
     document = await _ingest_fixture_document("runbook.md", "Customer: Acme")
 
-    from fleetent.intelligence.knowledge_base import run_entity_extraction
+    from fleetent.knowledge_base import run_entity_extraction
 
     first = await run_entity_extraction("default", "global", document_id=document.id)
     await _replace_document_chunk(database, document.id, "Customer: Beta")
@@ -105,7 +105,7 @@ async def test_failed_document_rerun_keeps_previous_evidence(monkeypatch, tmp_pa
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
     document = await _ingest_fixture_document("runbook.md", "Customer: Acme")
 
-    from fleetent.intelligence.knowledge_base import extraction, run_entity_extraction
+    from fleetent.knowledge_base import extraction, run_entity_extraction
 
     await run_entity_extraction("default", "global", document_id=document.id)
 
@@ -127,7 +127,7 @@ async def test_failed_document_rerun_keeps_previous_evidence(monkeypatch, tmp_pa
 
 
 async def _ingest_fixture_document(filename: str, content: str):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     return await runtime.ingest_parsed(
         ParsedDocument(
@@ -163,7 +163,7 @@ async def _replace_document_chunk(database, document_id: str, content: str) -> N
 
 
 def _patch_knowledge_runtime(monkeypatch, tmp_path):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)

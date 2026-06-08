@@ -2,9 +2,9 @@ import sqlite3
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from fleetent import memory as memory_layer
 from fleetent import vector_store
-from fleetent.intelligence import memory as memory_layer
-from fleetent.intelligence.memory import extraction
+from fleetent.memory import extraction
 from tests.integration.test_migrations import apply_migrations
 
 

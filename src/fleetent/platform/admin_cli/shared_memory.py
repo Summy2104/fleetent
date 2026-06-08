@@ -45,7 +45,7 @@ def handle(args: argparse.Namespace) -> bool:
     if args.memory_cmd != "shared":
         return True
 
-    from fleetent.intelligence import memory
+    from fleetent import memory
 
     if args.shared_cmd == "list":
         rows = memory.list_shared_memory(

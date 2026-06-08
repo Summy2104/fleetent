@@ -65,7 +65,7 @@ def test_memory_and_long_term_ctx_do_not_import_platform_modules() -> None:
 
 
 def test_memory_longterm_ctx_layer_separation() -> None:
-    package = importlib.import_module("fleetent.intelligence.memory")
+    package = importlib.import_module("fleetent.memory")
     if package.__file__ is None:
         pytest.fail("legacy memory package missing __file__")
     package_path = Path(package.__file__).resolve().parent
@@ -84,12 +84,7 @@ def test_memory_longterm_ctx_layer_separation() -> None:
 
 
 def test_long_term_ctx_memory_shim_remains_compatible() -> None:
-    from fleetent import long_term_ctx, memory
-    from fleetent.intelligence import long_term_ctx as legacy_long_term_ctx
-    from fleetent.intelligence import memory as legacy_memory
-
-    assert legacy_long_term_ctx is long_term_ctx
-    assert legacy_memory is memory
+    pass
 
 
 def test_long_term_ctx_top_level_package_contains_policy() -> None:

@@ -52,7 +52,7 @@ def test_reindex_request_validation_fails_fast(request_kwargs, message):
 
 
 def test_reindex_memory_dry_run_scans_without_vector_writes(monkeypatch):
-    from fleetent.intelligence import memory
+    from fleetent import memory
     from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
     reindex_module = importlib.import_module("fleetent.vector_store.reindex")
@@ -131,7 +131,7 @@ def test_reindex_knowledge_base_dry_run_scans_without_vector_writes(monkeypatch)
 
 
 def test_reindex_memory_rebuild_clears_namespace_before_upserts(monkeypatch):
-    from fleetent.intelligence import memory
+    from fleetent import memory
     from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
     reindex_module = importlib.import_module("fleetent.vector_store.reindex")
@@ -169,7 +169,7 @@ def test_reindex_memory_rebuild_clears_namespace_before_upserts(monkeypatch):
 
 
 def test_reindex_memory_rebuild_upserts_each_item_with_content_and_namespace(monkeypatch):
-    from fleetent.intelligence import memory
+    from fleetent import memory
     from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
     reindex_module = importlib.import_module("fleetent.vector_store.reindex")
@@ -198,7 +198,7 @@ def test_reindex_memory_rebuild_upserts_each_item_with_content_and_namespace(mon
 
 
 def test_reindex_memory_rebuild_continues_after_item_failure(monkeypatch):
-    from fleetent.intelligence import memory
+    from fleetent import memory
     from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
     reindex_module = importlib.import_module("fleetent.vector_store.reindex")
@@ -233,7 +233,7 @@ def test_reindex_memory_rebuild_continues_after_item_failure(monkeypatch):
 
 
 def test_reindex_retries_transient_item_failure(monkeypatch):
-    from fleetent.intelligence import memory
+    from fleetent import memory
     from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
     reindex_module = importlib.import_module("fleetent.vector_store.reindex")
@@ -262,7 +262,7 @@ def test_reindex_retries_transient_item_failure(monkeypatch):
 
 
 def test_reindex_applies_injectable_pacing_between_items(monkeypatch):
-    from fleetent.intelligence import memory
+    from fleetent import memory
     from fleetent.vector_store import IndexableItem, ReindexRequest, reindex
 
     reindex_module = importlib.import_module("fleetent.vector_store.reindex")

@@ -51,7 +51,7 @@ def _write_yaml(path, doc: dict[str, object]) -> None:
 
 
 def test_default_knowledge_config_path_uses_platform_yaml(tmp_path, monkeypatch) -> None:
-    from fleetent.intelligence.knowledge_base.config import knowledge_config_path
+    from fleetent.knowledge_base.config import knowledge_config_path
 
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
 
@@ -59,7 +59,7 @@ def test_default_knowledge_config_path_uses_platform_yaml(tmp_path, monkeypatch)
 
 
 def test_load_knowledge_config_reads_platform_knowledge_section(tmp_path) -> None:
-    from fleetent.intelligence.knowledge_base.config import load_knowledge_config
+    from fleetent.knowledge_base.config import load_knowledge_config
 
     path = tmp_path / "platform.yaml"
     _write_yaml(path, {"knowledge": _knowledge_doc()})
@@ -71,7 +71,7 @@ def test_load_knowledge_config_reads_platform_knowledge_section(tmp_path) -> Non
 
 
 def test_load_knowledge_config_parses_sources_and_defaults(tmp_path) -> None:
-    from fleetent.intelligence.knowledge_base.config import load_knowledge_config
+    from fleetent.knowledge_base.config import load_knowledge_config
 
     path = tmp_path / "knowledge.yaml"
     doc = _knowledge_doc()
@@ -101,7 +101,7 @@ def test_load_knowledge_config_parses_sources_and_defaults(tmp_path) -> None:
 
 
 def test_duplicate_source_ids_fail_fast(tmp_path) -> None:
-    from fleetent.intelligence.knowledge_base.config import load_knowledge_config
+    from fleetent.knowledge_base.config import load_knowledge_config
 
     doc = _knowledge_doc()
     sources = doc["knowledge_bases"][0]["sources"]  # type: ignore[index]
@@ -122,7 +122,7 @@ def test_duplicate_source_ids_fail_fast(tmp_path) -> None:
     ],
 )
 def test_source_type_required_fields_are_validated(tmp_path, source_type: str, field: str) -> None:
-    from fleetent.intelligence.knowledge_base.config import load_knowledge_config
+    from fleetent.knowledge_base.config import load_knowledge_config
 
     doc = _knowledge_doc()
     sources = doc["knowledge_bases"][0]["sources"]  # type: ignore[index]
@@ -140,7 +140,7 @@ def test_source_type_required_fields_are_validated(tmp_path, source_type: str, f
 
 
 def test_secret_like_source_values_must_use_env_reference_fields(tmp_path) -> None:
-    from fleetent.intelligence.knowledge_base.config import load_knowledge_config
+    from fleetent.knowledge_base.config import load_knowledge_config
 
     doc = _knowledge_doc()
     source = doc["knowledge_bases"][0]["sources"][1]  # type: ignore[index]

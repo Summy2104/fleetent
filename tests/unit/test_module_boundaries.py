@@ -9,14 +9,14 @@ def test_reports_cross_package_internal_import(tmp_path: Path) -> None:
     imported = root / "fleetent" / "intelligence" / "_internal" / "store.py"
     importer.parent.mkdir(parents=True)
     imported.parent.mkdir(parents=True)
-    importer.write_text("from fleetent.intelligence._internal import store\n")
+    importer.write_text("from fleetent._internal import store\n")
     imported.write_text("VALUE = 1\n")
 
     violations = find_violations(root)
 
     assert len(violations) == 1
     assert violations[0].path == importer
-    assert violations[0].imported == "fleetent.intelligence._internal"
+    assert violations[0].imported == "fleetent._internal"
 
 
 def test_allows_same_package_internal_import(tmp_path: Path) -> None:
@@ -25,7 +25,7 @@ def test_allows_same_package_internal_import(tmp_path: Path) -> None:
     imported = root / "fleetent" / "intelligence" / "_internal" / "store.py"
     importer.parent.mkdir(parents=True)
     imported.parent.mkdir(parents=True)
-    importer.write_text("from fleetent.intelligence._internal import store\n")
+    importer.write_text("from fleetent._internal import store\n")
     imported.write_text("VALUE = 1\n")
 
     assert find_violations(root) == []

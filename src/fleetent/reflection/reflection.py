@@ -8,10 +8,9 @@ from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 
-from fleetent import observability
+from fleetent import memory, observability
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.intelligence import memory
 
 FindingType = Literal["memory_candidate", "memory_conflict", "skill_opportunity"]
 KnowledgeBaseFindingType = Literal[
@@ -40,12 +39,13 @@ ReflectionTrendGranularity = Literal["day", "week"]
 ReflectionTrendDomain = Literal["memory", "knowledge_base", "skill"]
 
 
-def __getattr__(name: str) -> object:
+def __getattr__(name: str) -> Any:
     if name == "knowledge_base":
-        from fleetent.intelligence import knowledge_base as _knowledge_base
+        from fleetent import knowledge_base as _knowledge_base
 
         return _knowledge_base
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 _MUTATING_ACTIONS = {"mark_stale", "merge", "rewrite", "compact", "delete"}
 
@@ -247,10 +247,10 @@ async def run_reflection(scope: str) -> ReflectionReport:
         findings=findings,
         created_at=now,
     )
-    for proposal in generate_memory_maintenance_proposals(scope, findings):
-        _persist_memory_maintenance_proposal(proposal)
-    for proposal in generate_skill_proposals(findings=findings):
-        _persist_skill_proposal(proposal)
+    for memory_proposal in generate_memory_maintenance_proposals(scope, findings):
+        _persist_memory_maintenance_proposal(memory_proposal)
+    for skill_proposal in generate_skill_proposals(findings=findings):
+        _persist_skill_proposal(skill_proposal)
     _save_report(report)
     return report
 
@@ -370,7 +370,7 @@ def generate_skill_proposals(
         pattern = finding.metadata.get("pattern") or finding.summary.rsplit(":", 1)[-1].strip()
         target_skill = _skill_name(pattern)
         proposals.append(
-            _build_skill_proposal(
+            _create_skill_proposal(
                 proposal_type="create_skill",
                 target_skill=target_skill,
                 reason=finding.summary,
@@ -391,7 +391,7 @@ def generate_skill_proposals(
         reason = str(signal.get("reason") or "deterministic skill quality signal")
         if trigger_count >= 5 and failure_count >= max(3, trigger_count // 3):
             proposals.append(
-                _build_skill_proposal(
+                _create_skill_proposal(
                     proposal_type="update_skill",
                     target_skill=skill_name,
                     reason=reason,
@@ -403,7 +403,7 @@ def generate_skill_proposals(
             )
         elif trigger_count == 0 and days_unused >= 90:
             proposals.append(
-                _build_skill_proposal(
+                _create_skill_proposal(
                     proposal_type="deprecate_skill",
                     target_skill=skill_name,
                     reason=reason,
@@ -1029,11 +1029,14 @@ def _generate_kb_findings(
 
 
 def _connector_findings() -> list[KnowledgeBaseReflectionFinding]:
-    from fleetent.intelligence import knowledge_base
+    from typing import Any, cast
+
+    from fleetent import knowledge_base
 
     findings: list[KnowledgeBaseReflectionFinding] = []
+    kb_api = cast(Any, knowledge_base)
     try:
-        connectors = knowledge_base.list_configured_connectors()
+        connectors = kb_api.list_configured_connectors()
     except Exception:
         return [
             _kb_finding(
@@ -1048,7 +1051,7 @@ def _connector_findings() -> list[KnowledgeBaseReflectionFinding]:
     for connector in connectors:
         connector_id = str(getattr(connector, "connector_id", "unknown"))
         try:
-            status = knowledge_base.get_connector_status(connector_id)
+            status = kb_api.get_connector_status(connector_id)
         except Exception:
             findings.append(
                 _kb_finding(
@@ -1155,7 +1158,7 @@ def _create_skill_proposal(
     suggested_draft: str | None,
     suggested_diff: str | None,
 ) -> SkillProposal:
-    return _build_skill_proposal(
+    proposal = _build_skill_proposal(
         proposal_type=proposal_type,
         target_skill=target_skill,
         reason=reason,
@@ -1164,6 +1167,8 @@ def _create_skill_proposal(
         suggested_draft=suggested_draft,
         suggested_diff=suggested_diff,
     )
+    _persist_skill_proposal(proposal)
+    return proposal
 
 
 def _build_skill_proposal(
@@ -1199,7 +1204,7 @@ def _insert_skill_proposal(proposal: SkillProposal) -> None:
         return
     database.execute(
         """
-        INSERT INTO skill_proposals (
+        INSERT OR IGNORE INTO skill_proposals (
             id, type, target_skill, reason, evidence_refs_json, risk_level,
             suggested_draft, suggested_diff, status, reviewer_user_id, reviewed_at,
             rejection_reason, actor_user_id, applied_at, created_at, updated_at

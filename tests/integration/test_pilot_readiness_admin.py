@@ -58,7 +58,7 @@ def test_kb_sync_execute_requires_yes():
 
 
 def test_kb_connector_execute_sync_requires_cli_safeguards(monkeypatch):
-    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.knowledge_base import operations
 
     called = False
 
@@ -88,7 +88,7 @@ def test_kb_connector_execute_sync_requires_cli_safeguards(monkeypatch):
 
 
 def test_kb_connector_execute_sync_runs_with_all_safeguards(monkeypatch):
-    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.knowledge_base import operations
 
     calls: list[tuple[str, bool]] = []
 

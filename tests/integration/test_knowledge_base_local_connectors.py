@@ -32,7 +32,7 @@ def test_migration_creates_local_source_state_table(tmp_path):
 
 
 def test_local_source_state_store_records_path_mtime_hash_and_document(tmp_path):
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base.connectors import (
         LocalSourceState,
         LocalSourceStateStore,
     )
@@ -64,7 +64,7 @@ def test_local_source_state_store_records_path_mtime_hash_and_document(tmp_path)
 
 
 def test_local_source_state_store_detects_unchanged_and_changed_files(tmp_path):
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base.connectors import (
         LocalSourceState,
         LocalSourceStateStore,
     )
@@ -121,7 +121,7 @@ async def test_sync_local_directory_ingests_supported_files_into_tenant_kb(
     (root / "notes.txt").write_text("Plain note", encoding="utf-8")
     (root / "page.html").write_text("<h1>Page</h1><p>HTML note</p>", encoding="utf-8")
 
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base.connectors import (
         LocalDirectorySourceConfig,
         sync_local_directory,
     )
@@ -168,7 +168,7 @@ async def test_sync_local_directory_skips_unsupported_extensions(monkeypatch, tm
     (root / "runbook.md").write_text("# Runbook\nSupported", encoding="utf-8")
     (root / "archive.bin").write_bytes(b"binary")
 
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base.connectors import (
         LocalDirectorySourceConfig,
         sync_local_directory,
     )
@@ -200,7 +200,7 @@ async def test_sync_local_directory_skips_unchanged_files_and_reingests_changed_
     document_path = root / "runbook.md"
     document_path.write_text("# Runbook\nFirst version", encoding="utf-8")
 
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base.connectors import (
         LocalDirectorySourceConfig,
         sync_local_directory,
     )
@@ -252,7 +252,7 @@ async def test_sync_local_directory_rejects_root_outside_allowlist(monkeypatch, 
     allowed_root.mkdir()
     outside_root.mkdir()
 
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base.connectors import (
         LocalDirectorySourceConfig,
         sync_local_directory,
     )
@@ -270,7 +270,7 @@ async def test_sync_local_directory_rejects_root_outside_allowlist(monkeypatch, 
 
 
 def _patch_knowledge_runtime(monkeypatch, tmp_path):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)

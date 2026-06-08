@@ -3,15 +3,15 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from fleetent.intelligence.knowledge_base import runtime
-from fleetent.intelligence.knowledge_base.connectors.base import DocumentRef
-from fleetent.intelligence.knowledge_base.connectors.local import LocalDirectoryDataSource
-from fleetent.intelligence.knowledge_base.connectors.state import (
+from fleetent.knowledge_base import runtime
+from fleetent.knowledge_base.connectors.base import DocumentRef
+from fleetent.knowledge_base.connectors.local import LocalDirectoryDataSource
+from fleetent.knowledge_base.connectors.state import (
     LocalSourceState,
     LocalSourceStateStore,
 )
-from fleetent.intelligence.knowledge_base.connectors.sync import LocalDirectorySourceConfig
-from fleetent.intelligence.knowledge_base.parsers import (
+from fleetent.knowledge_base.connectors.sync import LocalDirectorySourceConfig
+from fleetent.knowledge_base.parsers import (
     ParsedDocument,
     parse_document,
 )

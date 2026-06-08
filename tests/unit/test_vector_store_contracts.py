@@ -27,7 +27,6 @@ _EXPECTED_PUBLIC_SYMBOLS = {
 
 _BANNED_SUBSTRINGS = (
     "fleetent.platform",
-    "fleetent.intelligence",
     "fleetent.knowledge_base",
     "fleetent.memory",
 )

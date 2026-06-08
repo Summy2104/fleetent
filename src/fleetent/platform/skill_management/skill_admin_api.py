@@ -125,14 +125,14 @@ def _proposal_dict(p: Any) -> dict[str, Any]:
 
 def reflection_list_proposals() -> list[dict[str, Any]]:
     """Pending Skill proposals from reflection (newest first)."""
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     return [_proposal_dict(p) for p in reflection.list_skill_proposals("pending")]
 
 
 def reflection_proposal_diff(proposal_id: str) -> dict[str, Any]:
     """Full proposal payload incl. suggested diff/draft, for the review viewer."""
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     try:
         p = reflection.get_skill_proposal(proposal_id)
@@ -148,7 +148,7 @@ def reflection_proposal_diff(proposal_id: str) -> dict[str, Any]:
 
 def reflection_apply_proposal(proposal_id: str, reviewer_user_id: str) -> None:
     """Approve a proposal (status -> approved)."""
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     reflection.approve_skill_proposal(proposal_id, reviewer_user_id=reviewer_user_id)
 
@@ -157,7 +157,7 @@ def reflection_close_proposal(
     proposal_id: str, reviewer_user_id: str, reason: str = "rejected via admin console"
 ) -> None:
     """Reject a proposal without changing the skill."""
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     reflection.reject_skill_proposal(proposal_id, reviewer_user_id=reviewer_user_id, reason=reason)
 

@@ -10,19 +10,19 @@ from typing import Protocol
 
 import httpx
 
-from fleetent.intelligence.knowledge_base import runtime
-from fleetent.intelligence.knowledge_base.connectors.state import (
+from fleetent.knowledge_base import runtime
+from fleetent.knowledge_base.connectors.state import (
     LocalSourceState,
     LocalSourceStateStore,
 )
-from fleetent.intelligence.knowledge_base.parsers import (
+from fleetent.knowledge_base.parsers import (
     ParsedDocument,
     parse_document,
     parse_html,
     parse_markdown,
     parse_text,
 )
-from fleetent.intelligence.knowledge_base.sync_planner import (
+from fleetent.knowledge_base.sync_planner import (
     SyncAction,
     SyncPlanItem,
     SyncPlanSummary,

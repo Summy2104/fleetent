@@ -7,8 +7,8 @@ from tests.integration.test_migrations import apply_migrations
 
 async def test_new_confluence_page_is_planned_for_ingest(monkeypatch, tmp_path):
     _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import SyncAction
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base import SyncAction
+    from fleetent.knowledge_base.connectors.confluence import (
         FakeConfluenceClient,
         plan_confluence_sync,
     )
@@ -25,12 +25,12 @@ async def test_new_confluence_page_is_planned_for_ingest(monkeypatch, tmp_path):
 
 async def test_changed_confluence_page_is_planned_for_reingest(monkeypatch, tmp_path):
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import SyncAction
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base import SyncAction
+    from fleetent.knowledge_base.connectors import (
         LocalSourceState,
         LocalSourceStateStore,
     )
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base.connectors.confluence import (
         FakeConfluenceClient,
         confluence_fingerprint,
         plan_confluence_sync,
@@ -61,12 +61,12 @@ async def test_changed_confluence_page_is_planned_for_reingest(monkeypatch, tmp_
 
 async def test_unchanged_confluence_page_is_planned_for_skip(monkeypatch, tmp_path):
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import SyncAction
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base import SyncAction
+    from fleetent.knowledge_base.connectors import (
         LocalSourceState,
         LocalSourceStateStore,
     )
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base.connectors.confluence import (
         FakeConfluenceClient,
         _modified_time_ns,
         confluence_fingerprint,
@@ -97,12 +97,12 @@ async def test_unchanged_confluence_page_is_planned_for_skip(monkeypatch, tmp_pa
 
 async def test_missing_confluence_source_state_is_planned_for_archive(monkeypatch, tmp_path):
     database = _patch_knowledge_runtime(monkeypatch, tmp_path)
-    from fleetent.intelligence.knowledge_base import SyncAction
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base import SyncAction
+    from fleetent.knowledge_base.connectors import (
         LocalSourceState,
         LocalSourceStateStore,
     )
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base.connectors.confluence import (
         FakeConfluenceClient,
         plan_confluence_sync,
     )
@@ -130,7 +130,7 @@ async def test_missing_confluence_source_state_is_planned_for_archive(monkeypatc
 
 
 def _config():
-    from fleetent.intelligence.knowledge_base import ConfluenceConnectorConfig
+    from fleetent.knowledge_base import ConfluenceConnectorConfig
 
     return ConfluenceConnectorConfig(
         connector_id="conf-eng",
@@ -145,7 +145,7 @@ def _config():
 
 
 def _page(page_id: str, title: str, *, version: int = 1):
-    from fleetent.intelligence.knowledge_base.connectors.confluence import ConfluencePage
+    from fleetent.knowledge_base.connectors.confluence import ConfluencePage
 
     return ConfluencePage(
         id=page_id,
@@ -159,7 +159,7 @@ def _page(page_id: str, title: str, *, version: int = 1):
 
 
 def _patch_knowledge_runtime(monkeypatch, tmp_path):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)

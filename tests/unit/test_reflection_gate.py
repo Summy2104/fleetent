@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
@@ -78,14 +77,10 @@ async def test_resolve_approve_user_memory_proposal_calls_memory_boundary(
         "_record_maintenance_event",
         lambda _event_type, _proposal: None,
     )
-    memory_module = importlib.import_module("fleetent.intelligence")
+    from fleetent import memory as memory_module
+
     monkeypatch.setattr(
         memory_module,
-        "memory",
-        importlib.import_module("fleetent.intelligence.memory"),
-    )
-    monkeypatch.setattr(
-        memory_module.memory,
         "mark_user_memory_stale",
         mark_user_memory_stale,
     )
@@ -145,7 +140,7 @@ async def test_resolve_approve_shared_memory_proposal_calls_shared_memory_bounda
         "_record_maintenance_event",
         lambda _event_type, _proposal: None,
     )
-    import fleetent.intelligence.memory.shared as shared_memory
+    from fleetent.memory import shared as shared_memory
 
     monkeypatch.setattr(
         shared_memory,
@@ -165,6 +160,52 @@ async def test_resolve_approve_shared_memory_proposal_calls_shared_memory_bounda
         actor_id=proposal.user_id,
     )
     assert [proposal.status for proposal in updates] == ["approved", "applied"]
+
+
+async def test_shared_memory_reviewer_resolver_is_injected(monkeypatch) -> None:
+    proposal = _memory_proposal(
+        id="mp-shared-review",
+        action="suggest_shared_memory_or_kb",
+        metadata_patch={"target": "shared_memory"},
+        target_memory_ids=[],
+    )
+    updates: list[MemoryMaintenanceProposal] = []
+    apply_shared_memory_proposal = AsyncMock()
+
+    monkeypatch.setattr(store, "_get_maintenance_proposal", lambda _id: proposal)
+    monkeypatch.setattr(store, "_get_skill_proposal", lambda _id: None)
+    monkeypatch.setattr(store, "_update_maintenance_proposal", updates.append)
+    monkeypatch.setattr(
+        reflection_gate,
+        "_record_maintenance_event",
+        lambda _event_type, _proposal: None,
+    )
+    from fleetent.memory import shared as shared_memory
+
+    monkeypatch.setattr(
+        shared_memory,
+        "apply_shared_memory_proposal",
+        apply_shared_memory_proposal,
+    )
+    original_reviewer = reflection_gate._shared_memory_reviewer
+
+    try:
+        reflection_gate.set_shared_memory_reviewer(
+            lambda _proposal, actor_id: "resolved-reviewer",
+        )
+
+        await reflection_gate.resolve(
+            proposal.id,
+            decision="approved",
+            actor_user_id=proposal.user_id,
+        )
+    finally:
+        reflection_gate.set_shared_memory_reviewer(original_reviewer)
+
+    apply_shared_memory_proposal.assert_awaited_once_with(
+        proposal.id,
+        actor_id="resolved-reviewer",
+    )
 
 
 async def test_resolve_approve_skill_proposal_calls_skill_boundary(
@@ -197,3 +238,53 @@ async def test_resolve_approve_skill_proposal_calls_skill_boundary(
     assert awaited_proposal.id == proposal.id
     assert awaited_proposal.status == "approved"
     assert [proposal.status for proposal in updates] == ["approved", "applied"]
+
+
+def test_resolve_review_channel_user_memory_proposal_goes_im(monkeypatch) -> None:
+    proposal = _memory_proposal()
+    monkeypatch.setattr(store, "_get_maintenance_proposal", lambda _id: proposal)
+    monkeypatch.setattr(store, "_get_skill_proposal", lambda _id: None)
+
+    channel = reflection_gate.resolve_review_channel("proposal-1")
+
+    assert channel == "im"
+
+
+def test_resolve_review_channel_shared_memory_proposal_goes_im(monkeypatch) -> None:
+    proposal = _memory_proposal(
+        id="shared-1",
+        action="suggest_shared_memory_or_kb",
+        metadata_patch={"target": "shared_memory"},
+        target_memory_ids=[],
+    )
+    monkeypatch.setattr(store, "_get_maintenance_proposal", lambda _id: proposal)
+    monkeypatch.setattr(store, "_get_skill_proposal", lambda _id: None)
+
+    channel = reflection_gate.resolve_review_channel("shared-1")
+
+    assert channel == "im"
+
+
+def test_resolve_review_channel_kb_memory_proposal_goes_platform_console(monkeypatch) -> None:
+    proposal = _memory_proposal(
+        id="kb-1",
+        action="suggest_shared_memory_or_kb",
+        metadata_patch={"target": "knowledge_base"},
+        target_memory_ids=[],
+    )
+    monkeypatch.setattr(store, "_get_maintenance_proposal", lambda _id: proposal)
+    monkeypatch.setattr(store, "_get_skill_proposal", lambda _id: None)
+
+    channel = reflection_gate.resolve_review_channel("kb-1")
+
+    assert channel == "platform_console"
+
+
+def test_resolve_review_channel_skill_proposal_goes_platform_console(monkeypatch) -> None:
+    proposal = _skill_proposal()
+    monkeypatch.setattr(store, "_get_maintenance_proposal", lambda _id: None)
+    monkeypatch.setattr(store, "_get_skill_proposal", lambda _id: proposal)
+
+    channel = reflection_gate.resolve_review_channel("skill-1")
+
+    assert channel == "platform_console"

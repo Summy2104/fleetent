@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from fleetent.config import LongTermContextSettings
-from fleetent.intelligence.memory import MemoryItem
+from fleetent.memory import MemoryItem
 
 
 def _memory(memory_id: str, content: str) -> MemoryItem:
@@ -35,7 +35,7 @@ def _ltc(**long_term_ctx_kwargs: object) -> LongTermContextSettings:
 
 
 def test_budget_policy_public_api_is_importable():
-    from fleetent.intelligence.long_term_ctx import (
+    from fleetent.long_term_ctx import (
         BudgetDecision,
         BudgetMetadata,
         BudgetPolicy,
@@ -68,7 +68,7 @@ def test_budget_policy_public_api_is_importable():
 
 
 def test_built_context_exposes_budget_metadata_without_breaking_existing_callers():
-    from fleetent.intelligence.long_term_ctx import BudgetMetadata, BuiltContext, ContextSource
+    from fleetent.long_term_ctx import BudgetMetadata, BuiltContext, ContextSource
 
     source = ContextSource(
         source_type="memory",
@@ -87,7 +87,7 @@ def test_built_context_exposes_budget_metadata_without_breaking_existing_callers
 
 
 async def test_effective_budget_uses_available_tokens_and_configured_maximum(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     now = datetime(2026, 6, 2, tzinfo=UTC)
     memory = MemoryItem(
@@ -117,7 +117,7 @@ async def test_effective_budget_uses_available_tokens_and_configured_maximum(mon
 
 
 async def test_zero_available_tokens_short_circuits_with_metadata(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     memory_search = AsyncMock(return_value=[])
     knowledge_search = AsyncMock(return_value=[])
@@ -157,7 +157,7 @@ def test_long_term_context_settings_include_source_budget_policy_fields():
 
 
 async def test_source_token_budgets_are_applied_per_source_type(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     monkeypatch.setattr(
         long_term_ctx,
@@ -207,7 +207,7 @@ async def test_source_token_budgets_are_applied_per_source_type(monkeypatch):
 
 
 async def test_source_top_k_limits_are_applied_per_source_type(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     monkeypatch.setattr(
         long_term_ctx,
@@ -247,7 +247,7 @@ async def test_source_top_k_limits_are_applied_per_source_type(monkeypatch):
 
 
 async def test_total_budget_excludes_candidates_that_do_not_fit(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     monkeypatch.setattr(
         long_term_ctx,
@@ -285,7 +285,7 @@ async def test_total_budget_excludes_candidates_that_do_not_fit(monkeypatch):
 
 
 async def test_equal_score_candidates_use_stable_source_id_tie_breaker(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     monkeypatch.setattr(
         long_term_ctx,
@@ -319,7 +319,7 @@ async def test_equal_score_candidates_use_stable_source_id_tie_breaker(monkeypat
 
 
 async def test_factual_queries_prefer_knowledge_when_budget_forces_a_choice(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     monkeypatch.setattr(
         long_term_ctx,
@@ -351,7 +351,7 @@ async def test_factual_queries_prefer_knowledge_when_budget_forces_a_choice(monk
 
 
 async def test_personal_history_queries_prefer_memory_when_budget_forces_a_choice(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     monkeypatch.setattr(
         long_term_ctx,
@@ -383,7 +383,7 @@ async def test_personal_history_queries_prefer_memory_when_budget_forces_a_choic
 
 
 async def test_explicit_conflict_preference_overrides_auto_intent(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     monkeypatch.setattr(
         long_term_ctx,
@@ -415,7 +415,7 @@ async def test_explicit_conflict_preference_overrides_auto_intent(monkeypatch):
 
 
 async def test_included_sources_have_budget_decision_metadata(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     monkeypatch.setattr(
         long_term_ctx,
@@ -451,7 +451,7 @@ async def test_included_sources_have_budget_decision_metadata(monkeypatch):
 
 
 async def test_below_relevance_threshold_sources_are_excluded_with_reason(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     monkeypatch.setattr(
         long_term_ctx,

@@ -391,7 +391,7 @@ def test_remove_schedule_not_found_exits_nonzero(tmp_sched_db):
 
 
 def test_kb_connectors_list_outputs_configured_connectors(monkeypatch):
-    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.knowledge_base import operations
 
     monkeypatch.setattr(
         operations,
@@ -417,7 +417,7 @@ def test_kb_connectors_list_outputs_configured_connectors(monkeypatch):
 
 
 def test_kb_connectors_check_outputs_status(monkeypatch):
-    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.knowledge_base import operations
 
     async def check_connector(connector_id: str):
         return operations.ConnectorCheckResult(
@@ -436,7 +436,7 @@ def test_kb_connectors_check_outputs_status(monkeypatch):
 
 
 def test_kb_connectors_status_outputs_never_run(monkeypatch):
-    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.knowledge_base import operations
 
     monkeypatch.setattr(
         operations,
@@ -461,7 +461,7 @@ def test_kb_connectors_status_outputs_never_run(monkeypatch):
 
 
 def test_kb_connectors_sync_dry_run_outputs_summary(monkeypatch):
-    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.knowledge_base import operations
 
     async def run_connector_sync(connector_id: str, *, dry_run: bool = False):
         assert dry_run is True
@@ -482,7 +482,7 @@ def test_kb_connectors_sync_dry_run_outputs_summary(monkeypatch):
 
 
 def test_kb_connectors_cli_output_is_sanitized(monkeypatch):
-    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.knowledge_base import operations
 
     async def run_connector_sync(connector_id: str, *, dry_run: bool = False):
         return operations.ConnectorSyncResult(
@@ -502,7 +502,7 @@ def test_kb_connectors_cli_output_is_sanitized(monkeypatch):
 
 
 def test_kb_extract_entities_outputs_sanitized_summary(monkeypatch):
-    from fleetent.intelligence.knowledge_base.extraction_store import KnowledgeExtractionRun
+    from fleetent.knowledge_base.extraction_store import KnowledgeExtractionRun
     from fleetent.platform.admin_cli import kb_connectors
 
     async def run_entity_extraction(

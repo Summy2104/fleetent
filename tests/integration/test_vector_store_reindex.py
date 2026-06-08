@@ -83,7 +83,7 @@ def test_memory_rebuild_removes_stale_vectors_and_indexes_current_items(tmp_path
 
 def _patch_knowledge_runtime(monkeypatch, tmp_path):
     from fleetent.config import KnowledgeBaseSettings
-    from fleetent.intelligence.knowledge_base import runtime as knowledge_runtime
+    from fleetent.knowledge_base import runtime as knowledge_runtime
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)

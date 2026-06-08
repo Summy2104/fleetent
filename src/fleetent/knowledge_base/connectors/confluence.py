@@ -12,13 +12,13 @@ from urllib.parse import urljoin
 
 import httpx
 
-from fleetent.intelligence.knowledge_base import runtime
-from fleetent.intelligence.knowledge_base.connectors.state import (
+from fleetent.knowledge_base import runtime
+from fleetent.knowledge_base.connectors.state import (
     LocalSourceState,
     LocalSourceStateStore,
 )
-from fleetent.intelligence.knowledge_base.parsers import ParsedDocument, parse_html
-from fleetent.intelligence.knowledge_base.sync_planner import (
+from fleetent.knowledge_base.parsers import ParsedDocument, parse_html
+from fleetent.knowledge_base.sync_planner import (
     SyncAction,
     SyncPlanItem,
     SyncPlanSummary,

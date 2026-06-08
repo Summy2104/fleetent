@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from fleetent.intelligence.knowledge_base import KnowledgeSearchOptions, plan_knowledge_search
+from fleetent.knowledge_base import KnowledgeSearchOptions, plan_knowledge_search
 
 FIXTURE = Path("tests/evaluation/fixtures/knowledge_search_planner/basic.json")
 

@@ -5,9 +5,9 @@ multi-agent / no-agent indexes fall back to a neutral default agent's schema def
 """
 
 from fleetent import agent_config
+from fleetent import long_term_ctx as ltcp
 from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
 from fleetent.config import LongTermContextSettings
-from fleetent.intelligence import long_term_ctx as ltcp
 
 
 def _publish_single(agent: AgentFile) -> None:
@@ -40,7 +40,7 @@ def test_ltc_config_falls_back_to_default_without_agent() -> None:
 
 
 def test_kb_runtime_config_is_neutral_without_agent_source_construction() -> None:
-    from fleetent.intelligence.knowledge_base import runtime as kb_runtime
+    from fleetent.knowledge_base import runtime as kb_runtime
 
     _publish_empty()
     assert kb_runtime._kb_config().default_kb_id == "global"  # schema default

@@ -4,7 +4,7 @@ import dataclasses
 
 import pytest
 
-from fleetent.intelligence import long_term_ctx_policy as policy
+from fleetent import long_term_ctx_policy as policy
 
 
 def _record(**overrides: object) -> policy.ContextPolicyRecord:

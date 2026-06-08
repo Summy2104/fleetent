@@ -11,7 +11,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 
-from fleetent.intelligence import long_term_ctx_policy as policy
+from fleetent import long_term_ctx_policy as policy
 
 
 def apply_migrations(db_path: Path) -> None:

@@ -3,9 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock
 
-
-from fleetent import observability
-from fleetent.intelligence import reflection
+from fleetent import observability, reflection
+from fleetent.reflection import reflection as reflection_impl
 
 
 async def test_run_reflection_generates_pending_proposals_without_auto_apply(
@@ -63,19 +62,33 @@ async def test_run_reflection_generates_pending_proposals_without_auto_apply(
 
     monkeypatch.setattr(observability, "query_trace_events", lambda query: fake_events)
     monkeypatch.setattr(reflection.memory, "search", AsyncMock(return_value=[]))
-    monkeypatch.setattr(reflection, "generate_memory_maintenance_proposals", lambda _user, _findings: memory_proposals)
-    monkeypatch.setattr(reflection, "generate_skill_proposals", lambda *, findings=None, skill_signals=None: skill_proposals)
+    monkeypatch.setattr(
+        reflection_impl,
+        "generate_memory_maintenance_proposals",
+        lambda _user, _findings: memory_proposals,
+    )
+    monkeypatch.setattr(
+        reflection_impl,
+        "generate_skill_proposals",
+        lambda *, findings=None, skill_signals=None: skill_proposals,
+    )
     persist_memory = []
     persist_skill = []
-    monkeypatch.setattr(reflection, "_persist_memory_maintenance_proposal", lambda proposal: persist_memory.append(proposal))
-    monkeypatch.setattr(reflection, "_persist_skill_proposal", lambda proposal: persist_skill.append(proposal))
-    monkeypatch.setattr(reflection, "_save_report", lambda report: None)
+    monkeypatch.setattr(
+        reflection_impl,
+        "_persist_memory_maintenance_proposal",
+        lambda proposal: persist_memory.append(proposal),
+    )
+    monkeypatch.setattr(
+        reflection_impl, "_persist_skill_proposal", lambda proposal: persist_skill.append(proposal)
+    )
+    monkeypatch.setattr(reflection_impl, "_save_report", lambda report: None)
 
     apply_memory = Mock()
     apply_skill = Mock()
     monkeypatch.setattr(reflection, "apply_memory_maintenance_proposal", apply_memory)
     monkeypatch.setattr(reflection, "apply_skill_proposal", apply_skill)
-    monkeypatch.setattr(reflection, "_apply_maintenance_action", AsyncMock())
+    monkeypatch.setattr(reflection_impl, "_apply_maintenance_action", AsyncMock())
 
     result = await reflection.run_reflection("user-1")
 
@@ -92,8 +105,8 @@ async def test_run_reflection_generates_pending_proposals_without_auto_apply(
 async def test_run_kb_reflection_report_is_read_only(monkeypatch) -> None:
 
     monkeypatch.setattr(observability, "query_trace_events", lambda query: [])
-    monkeypatch.setattr(reflection, "_save_kb_reflection_report", lambda report: None)
-    monkeypatch.setattr(reflection, "_connector_findings", Mock(return_value=[]))
+    monkeypatch.setattr(reflection_impl, "_save_kb_reflection_report", lambda report: None)
+    monkeypatch.setattr(reflection_impl, "_connector_findings", Mock(return_value=[]))
 
     apply_memory = Mock()
     apply_skill = Mock()

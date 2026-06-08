@@ -16,7 +16,7 @@ from fleetent.memory.models import (
     SharedMemoryStatus,
     SharedMemoryType,
 )
-from fleetent.intelligence.memory.proposal_store import (
+from fleetent.memory.proposal_store import (
     get_memory_maintenance_proposal,
     mark_shared_memory_proposal_applied,
 )

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
-from fleetent.intelligence.memory import store
+from fleetent.memory import store
 
 MaintenanceAction = Literal[
     "mark_stale",
@@ -77,23 +78,6 @@ def _to_dict(row: dict[str, Any]) -> MemoryMaintenanceProposal:
     )
 
 
-def _has_table() -> bool:
-    return (
-        store.database()
-        .execute(
-            """
-            SELECT 1
-            FROM sqlite_master
-            WHERE type = 'table'
-              AND name = 'memory_maintenance_proposals'
-            """,
-            {},
-        )
-        .fetchone()
-        is not None
-    )
-
-
 def get_memory_maintenance_proposal(proposal_id: str) -> MemoryMaintenanceProposal:
     """Load one User Memory maintenance proposal by id."""
     row = (
@@ -115,31 +99,39 @@ def get_memory_maintenance_proposal(proposal_id: str) -> MemoryMaintenancePropos
 
 def list_memory_maintenance_proposals(
     user_id: str,
+    start_ts: datetime | None = None,
     *,
     status: MaintenanceStatus | None = None,
 ) -> list[MemoryMaintenanceProposal]:
     """List User Memory maintenance proposals for one owner."""
-    if not _has_table():
-        return []
     clauses = ["user_id = :user_id"]
     params: dict[str, object] = {"user_id": user_id}
+    if start_ts is not None:
+        clauses.append("updated_at >= :start_ts")
+        params["start_ts"] = store.format_datetime(start_ts)
     if status is not None:
         clauses.append("status = :status")
         params["status"] = status
 
-    rows = (
-        store.database()
-        .execute(
-            f"""
+    query = f"""
             SELECT *
             FROM memory_maintenance_proposals
             WHERE {" AND ".join(clauses)}
             ORDER BY updated_at DESC, id ASC
-            """,
-            params,
+            """
+    try:
+        rows = (
+            store.database()
+            .execute(
+                query,
+                params,
+            )
+            .fetchall()
         )
-        .fetchall()
-    )
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return []
+        raise
     return [_to_dict(row) for row in rows]
 
 

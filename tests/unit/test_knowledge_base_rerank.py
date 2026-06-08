@@ -1,7 +1,7 @@
 import pytest
 
 from fleetent.config import RerankSettings, Settings
-from fleetent.intelligence.knowledge_base.models import KnowledgeChunk
+from fleetent.knowledge_base.models import KnowledgeChunk
 from fleetent.vector_store.rerank import (
     DeterministicRerankProvider,
     DisabledRerankProvider,
@@ -28,7 +28,7 @@ def _chunk(chunk_id: str, position: int, score: float) -> KnowledgeChunk:
 
 
 def test_rerank_candidate_limit_uses_stable_runtime_constants():
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     assert runtime._rerank_candidate_limit(1) == 20
     assert runtime._rerank_candidate_limit(10) == 50
@@ -39,7 +39,7 @@ def test_rerank_candidate_limit_uses_stable_runtime_constants():
 
 
 def test_apply_rerank_results_maps_valid_indexes_and_appends_missing_candidates():
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     candidates = [
         _chunk("chunk-a", 0, 0.30),
@@ -60,7 +60,7 @@ def test_apply_rerank_results_maps_valid_indexes_and_appends_missing_candidates(
 
 
 async def test_search_rejects_rerank_for_vector_and_keyword_modes(monkeypatch):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     called = False
 
@@ -81,7 +81,7 @@ async def test_search_rejects_rerank_for_vector_and_keyword_modes(monkeypatch):
 
 
 async def test_non_positive_limit_short_circuits_before_rerank_provider(monkeypatch):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     called = False
 
@@ -97,7 +97,7 @@ async def test_non_positive_limit_short_circuits_before_rerank_provider(monkeypa
 
 
 async def test_rerank_provider_failure_falls_back_to_hybrid_order(monkeypatch):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     candidates = [_chunk("chunk-a", 0, 0.30), _chunk("chunk-b", 1, 0.20)]
     events: list[tuple[str, dict[str, object]]] = []

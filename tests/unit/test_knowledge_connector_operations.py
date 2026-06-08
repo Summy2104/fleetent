@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
+from fleetent.knowledge_base.config import KnowledgeConfigSnapshot
 
 
 def _settings(**knowledge_base: object) -> KnowledgeConfigSnapshot:
@@ -28,7 +28,7 @@ def _settings(**knowledge_base: object) -> KnowledgeConfigSnapshot:
 
 
 def test_google_drive_connectors_load_from_settings():
-    from fleetent.intelligence.knowledge_base import list_configured_connectors
+    from fleetent.knowledge_base import list_configured_connectors
 
     settings = _settings(
         google_drive={
@@ -58,7 +58,7 @@ def test_google_drive_connectors_load_from_settings():
 
 
 def test_google_drive_connectors_load_explicit_env_fields_from_settings():
-    from fleetent.intelligence.knowledge_base import (
+    from fleetent.knowledge_base import (
         get_connector_config,
         list_configured_connectors,
     )
@@ -92,7 +92,7 @@ def test_google_drive_connectors_load_explicit_env_fields_from_settings():
 
 
 def test_connectors_load_from_platform_yaml_knowledge_section(tmp_path, monkeypatch):
-    from fleetent.intelligence.knowledge_base import list_configured_connectors
+    from fleetent.knowledge_base import list_configured_connectors
 
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     (tmp_path / "platform.yaml").write_text(
@@ -118,7 +118,7 @@ knowledge:
 
 
 def test_confluence_connectors_load_from_settings():
-    from fleetent.intelligence.knowledge_base import list_configured_connectors
+    from fleetent.knowledge_base import list_configured_connectors
 
     settings = _settings(
         confluence={
@@ -147,7 +147,7 @@ def test_confluence_connectors_load_from_settings():
 
 
 def test_confluence_connectors_load_api_token_env_from_settings():
-    from fleetent.intelligence.knowledge_base import (
+    from fleetent.knowledge_base import (
         get_connector_config,
         list_configured_connectors,
     )
@@ -180,7 +180,7 @@ def test_confluence_connectors_load_api_token_env_from_settings():
 
 
 def test_confluence_page_id_accepts_yaml_numeric_value():
-    from fleetent.intelligence.knowledge_base import get_connector_config
+    from fleetent.knowledge_base import get_connector_config
 
     settings = _settings(
         confluence={
@@ -206,8 +206,8 @@ def test_confluence_page_id_accepts_yaml_numeric_value():
 
 
 async def test_confluence_connector_username_can_load_from_env(monkeypatch):
-    from fleetent.intelligence.knowledge_base import operations, run_connector_sync
-    from fleetent.intelligence.knowledge_base.connectors.confluence import FakeConfluenceClient
+    from fleetent.knowledge_base import operations, run_connector_sync
+    from fleetent.knowledge_base.connectors.confluence import FakeConfluenceClient
 
     monkeypatch.setenv("FLEETENT_CONFLUENCE_USERNAME", "bot@example.com")
     monkeypatch.setenv("FLEETENT_CONFLUENCE_TOKEN", "test-token")
@@ -299,7 +299,7 @@ def test_missing_required_connector_field_mentions_field_name():
 
 
 async def test_disabled_connector_is_listed_but_not_synced(monkeypatch):
-    from fleetent.intelligence.knowledge_base import (
+    from fleetent.knowledge_base import (
         list_configured_connectors,
         operations,
         run_connector_sync,
@@ -329,7 +329,7 @@ async def test_disabled_connector_is_listed_but_not_synced(monkeypatch):
 
 
 async def test_missing_file_credential_is_reported(tmp_path):
-    from fleetent.intelligence.knowledge_base import check_connector
+    from fleetent.knowledge_base import check_connector
 
     settings = _settings(
         google_drive={
@@ -352,7 +352,7 @@ async def test_missing_file_credential_is_reported(tmp_path):
 
 
 async def test_missing_env_credential_is_reported(monkeypatch):
-    from fleetent.intelligence.knowledge_base import check_connector
+    from fleetent.knowledge_base import check_connector
 
     monkeypatch.delenv("FLEETENT_CONFLUENCE_TOKEN", raising=False)
     settings = _settings(
@@ -377,7 +377,7 @@ async def test_missing_env_credential_is_reported(monkeypatch):
 
 
 async def test_invalid_google_credential_payload_is_reported(tmp_path):
-    from fleetent.intelligence.knowledge_base import check_connector
+    from fleetent.knowledge_base import check_connector
 
     credential = tmp_path / "google.json"
     credential.write_text("not-json")
@@ -403,7 +403,7 @@ async def test_invalid_google_credential_payload_is_reported(tmp_path):
 @dataclass
 class _AuthFailDriveClient:
     def list_files(self, folder_id: str, *, recursive: bool) -> list[object]:
-        from fleetent.intelligence.knowledge_base.connectors.google_drive import (
+        from fleetent.knowledge_base.connectors.google_drive import (
             GoogleDriveAuthError,
         )
 
@@ -411,7 +411,7 @@ class _AuthFailDriveClient:
 
 
 async def test_fake_client_auth_failure_is_sanitized(tmp_path):
-    from fleetent.intelligence.knowledge_base import check_connector
+    from fleetent.knowledge_base import check_connector
 
     credential = tmp_path / "google.json"
     credential.write_text("{}")
@@ -446,7 +446,7 @@ class _ScopeFailDriveClient:
 
 
 async def test_remote_scope_unreachable_is_reported(tmp_path):
-    from fleetent.intelligence.knowledge_base import check_connector
+    from fleetent.knowledge_base import check_connector
 
     credential = tmp_path / "google.json"
     credential.write_text("{}")
@@ -474,8 +474,8 @@ async def test_remote_scope_unreachable_is_reported(tmp_path):
 
 
 async def test_check_connector_uses_real_google_client_factory_by_default(tmp_path, monkeypatch):
-    from fleetent.intelligence.knowledge_base import check_connector, operations
-    from fleetent.intelligence.knowledge_base.connectors.google_drive import FakeGoogleDriveClient
+    from fleetent.knowledge_base import check_connector, operations
+    from fleetent.knowledge_base.connectors.google_drive import FakeGoogleDriveClient
 
     credential = tmp_path / "google.json"
     credential.write_text('{"access_token":"test-token"}')
@@ -507,8 +507,8 @@ async def test_check_connector_uses_real_google_client_factory_by_default(tmp_pa
 
 
 async def test_sync_uses_real_confluence_client_factory_by_default(monkeypatch):
-    from fleetent.intelligence.knowledge_base import operations, run_connector_sync
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base import operations, run_connector_sync
+    from fleetent.knowledge_base.connectors.confluence import (
         ConfluencePage,
         FakeConfluenceClient,
     )

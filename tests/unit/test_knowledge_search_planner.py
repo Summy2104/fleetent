@@ -1,5 +1,5 @@
 def test_planner_public_api_is_importable():
-    from fleetent.intelligence.knowledge_base import (
+    from fleetent.knowledge_base import (
         KnowledgeSearchOptions,
         KnowledgeSearchPlan,
         KnowledgeSearchStep,
@@ -15,7 +15,7 @@ def test_planner_public_api_is_importable():
 
 
 def test_default_query_uses_hybrid_search_with_reason():
-    from fleetent.intelligence.knowledge_base import KnowledgeSearchOptions, plan_knowledge_search
+    from fleetent.knowledge_base import KnowledgeSearchOptions, plan_knowledge_search
 
     plan = plan_knowledge_search(
         "How do I restart the cache service?",
@@ -33,7 +33,7 @@ def test_default_query_uses_hybrid_search_with_reason():
 
 
 def test_entity_or_relation_query_uses_graph_first_with_hybrid_fill():
-    from fleetent.intelligence.knowledge_base import KnowledgeSearchOptions, plan_knowledge_search
+    from fleetent.knowledge_base import KnowledgeSearchOptions, plan_knowledge_search
 
     plan = plan_knowledge_search(
         "Which service depends on Billing API?",
@@ -48,7 +48,7 @@ def test_entity_or_relation_query_uses_graph_first_with_hybrid_fill():
 
 
 def test_chinese_relation_query_uses_graph_first_with_hybrid_fill():
-    from fleetent.intelligence.knowledge_base import KnowledgeSearchOptions, plan_knowledge_search
+    from fleetent.knowledge_base import KnowledgeSearchOptions, plan_knowledge_search
 
     plan = plan_knowledge_search(
         "Acme 的 SSO 依赖哪个系统？",
@@ -62,7 +62,7 @@ def test_chinese_relation_query_uses_graph_first_with_hybrid_fill():
 
 
 def test_rerank_option_marks_hybrid_steps_only():
-    from fleetent.intelligence.knowledge_base import KnowledgeSearchOptions, plan_knowledge_search
+    from fleetent.knowledge_base import KnowledgeSearchOptions, plan_knowledge_search
 
     default_plan = plan_knowledge_search(
         "Cache restart",
@@ -81,8 +81,8 @@ def test_rerank_option_marks_hybrid_steps_only():
 
 
 async def test_executor_records_retrieval_summary_log(monkeypatch):
-    from fleetent.intelligence.knowledge_base import planner
-    from fleetent.intelligence.knowledge_base.models import KnowledgeChunk
+    from fleetent.knowledge_base import planner
+    from fleetent.knowledge_base.models import KnowledgeChunk
 
     events: list[tuple[str, dict[str, object]]] = []
 

@@ -16,7 +16,7 @@ from fleetent.agent_config import (
 )
 from fleetent.config import EmbeddingSettings, KnowledgeBaseSettings, Settings, VectorStoreSettings
 from fleetent.db import create_database
-from fleetent.intelligence.knowledge_base.models import KnowledgeChunk
+from fleetent.knowledge_base.models import KnowledgeChunk
 from tests.integration.test_migrations import apply_migrations
 
 REQUIRED_FIXTURE_FIELDS = (
@@ -170,7 +170,7 @@ async def _run_fixture(
     embedding: EmbeddingSettings,
 ) -> RetrievalEvaluationResult:
     from fleetent import agent_config
-    from fleetent.intelligence.knowledge_base import runtime as kb_runtime
+    from fleetent.knowledge_base import runtime as kb_runtime
     from fleetent.vector_store import runtime as vector_runtime
 
     apply_migrations(db_path)

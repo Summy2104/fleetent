@@ -38,7 +38,7 @@ from fleetent.secret_scan import flatten
 from fleetent.skills import registry as skill_registry
 
 if TYPE_CHECKING:
-    from fleetent.intelligence.knowledge_base.config import KnowledgeConfigSnapshot
+    from fleetent.knowledge_base.config import KnowledgeConfigSnapshot
 
 _logger = get_logger("agent_lifecycle.materialize")
 

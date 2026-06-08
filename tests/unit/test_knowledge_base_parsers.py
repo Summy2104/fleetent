@@ -2,7 +2,7 @@ from io import BytesIO
 
 import pytest
 
-from fleetent.intelligence.knowledge_base import (
+from fleetent.knowledge_base import (
     parse_document,
     parse_docx,
     parse_html,
@@ -51,7 +51,7 @@ def test_parse_document_dispatches_basic_formats_by_extension_and_mime_type():
 def test_parse_document_dispatches_advanced_formats(
     monkeypatch, filename, mime_type, expected_format
 ):
-    from fleetent.intelligence.knowledge_base import parsers
+    from fleetent.knowledge_base import parsers
 
     def fake_parser(name: str, content: bytes):
         return parsers.ParsedDocument(
@@ -85,7 +85,7 @@ def test_parse_document_unsupported_media_type_fails_without_content():
 
 
 def test_parse_pdf_pages_become_sections_with_page_metadata(monkeypatch):
-    from fleetent.intelligence.knowledge_base import parsers
+    from fleetent.knowledge_base import parsers
 
     class FakePage:
         def __init__(self, text: str | None) -> None:
@@ -115,7 +115,7 @@ def test_parse_pdf_pages_become_sections_with_page_metadata(monkeypatch):
 
 
 def test_parse_pdf_encrypted_file_fails_without_content(monkeypatch):
-    from fleetent.intelligence.knowledge_base import parsers
+    from fleetent.knowledge_base import parsers
 
     class FakeReader:
         is_encrypted = True
@@ -135,7 +135,7 @@ def test_parse_pdf_encrypted_file_fails_without_content(monkeypatch):
 
 
 def test_parse_pdf_empty_extraction_fails_without_content(monkeypatch):
-    from fleetent.intelligence.knowledge_base import parsers
+    from fleetent.knowledge_base import parsers
 
     class FakePage:
         def extract_text(self) -> str:

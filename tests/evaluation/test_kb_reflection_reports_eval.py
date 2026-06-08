@@ -8,7 +8,7 @@ FIXTURE = Path("tests/evaluation/fixtures/kb_reflection_reports/basic.json")
 async def test_kb_reflection_evaluation_fixture_validates_expected_and_forbidden_findings(
     monkeypatch,
 ):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
     events = [

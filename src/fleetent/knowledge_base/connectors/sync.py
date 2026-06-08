@@ -31,7 +31,7 @@ async def sync_local_directory(
 ) -> LocalSyncSummary:
     """Manually import supported files from an allowlisted local directory."""
 
-    from fleetent.intelligence.knowledge_base.sync_planner import (
+    from fleetent.knowledge_base.sync_planner import (
         execute_sync_plan,
         plan_local_directory_sync,
     )

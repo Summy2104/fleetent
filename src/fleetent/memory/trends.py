@@ -6,8 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
-from fleetent.memory import store
-from fleetent.memory.proposal_store import list_memory_maintenance_proposals
+from fleetent.memory import proposal_store, store
+
+
+def _list_memory_maintenance_proposals(user_id: str) -> list[Any]:
+    return proposal_store.list_memory_maintenance_proposals(user_id)
+
 
 TrendBucketSize = Literal["day", "week"]
 
@@ -205,7 +209,7 @@ def _memory_maintenance_proposals(query: MemoryQualityTrendQuery) -> list[Any]:
         return []
     return [
         proposal
-        for proposal in list_memory_maintenance_proposals(query.user_id)
+        for proposal in _list_memory_maintenance_proposals(query.user_id)
         if query.start_ts <= proposal.updated_at < query.end_ts
     ]
 

@@ -8,10 +8,10 @@ import os
 import sys
 from typing import Any
 
-from fleetent.intelligence.knowledge_base.extraction import (
+from fleetent.knowledge_base.extraction import (
     run_entity_extraction as _run_entity_extraction,
 )
-from fleetent.intelligence.knowledge_base.extraction_store import KnowledgeExtractionRun
+from fleetent.knowledge_base.extraction_store import KnowledgeExtractionRun
 from fleetent.platform.admin_cli.common import sanitize_cli_value, summary_line
 
 

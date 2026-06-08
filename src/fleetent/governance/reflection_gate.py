@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Literal, cast
@@ -27,6 +28,45 @@ DecisionInput = Literal[
 
 
 DecisionState = Literal["approve", "reject", "expire", "apply"]
+ReviewRoute = Literal["im", "platform_console"]
+
+
+def _default_shared_memory_reviewer(
+    proposal: MemoryMaintenanceProposal,
+    actor_user_id: str | None,
+) -> str:
+    return actor_user_id or proposal.user_id
+
+
+_shared_memory_reviewer: Callable[[MemoryMaintenanceProposal, str | None], str] = (
+    _default_shared_memory_reviewer
+)
+
+
+def set_shared_memory_reviewer(
+    reviewer: Callable[[MemoryMaintenanceProposal, str | None], str],
+) -> None:
+    """Inject a resolver for shared-memory reviewer identity."""
+    global _shared_memory_reviewer
+    _shared_memory_reviewer = reviewer
+
+
+def resolve_review_channel(
+    proposal_id: str,
+    *,
+    actor_user_id: str | None = None,
+) -> ReviewRoute:
+    """Return the review channel for one proposal id."""
+    kind, proposal = _load_proposal_type(proposal_id)
+    if kind == "memory":
+        memory_proposal = cast(MemoryMaintenanceProposal, proposal)
+        if (
+            memory_proposal.action == "suggest_shared_memory_or_kb"
+            and memory_proposal.metadata_patch.get("target") == "knowledge_base"
+        ):
+            return "platform_console"
+        return "im"
+    return "platform_console"
 
 
 def _decision(decision: DecisionInput) -> DecisionState:
@@ -355,7 +395,7 @@ async def _apply_maintenance_action(
     actor_user_id: str | None = None,
 ) -> None:
     if proposal.action == "mark_stale":
-        from fleetent.intelligence import memory
+        from fleetent import memory
 
         for memory_id in proposal.target_memory_ids:
             await memory.mark_user_memory_stale(proposal.user_id, memory_id)
@@ -365,7 +405,7 @@ async def _apply_maintenance_action(
         content = _require_proposed_content(proposal)
         if not proposal.target_memory_ids:
             raise ValueError("target_memory_ids must not be empty")
-        from fleetent.intelligence import memory
+        from fleetent import memory
 
         await memory.update_user_memory_content(
             proposal.user_id,
@@ -375,7 +415,7 @@ async def _apply_maintenance_action(
         return
 
     if proposal.action == "merge":
-        from fleetent.intelligence import memory
+        from fleetent import memory
 
         await memory.merge_user_memories(
             proposal.user_id,
@@ -385,7 +425,7 @@ async def _apply_maintenance_action(
         return
 
     if proposal.action == "delete":
-        from fleetent.intelligence import memory
+        from fleetent import memory
 
         for memory_id in proposal.target_memory_ids:
             await memory.delete_user_memory(proposal.user_id, memory_id)
@@ -394,8 +434,11 @@ async def _apply_maintenance_action(
     if proposal.action == "suggest_shared_memory_or_kb":
         target = proposal.metadata_patch.get("target")
         if target == "shared_memory":
-            actor = actor_user_id or proposal.user_id
-            from fleetent.intelligence.memory import shared as shared_memory
+            actor = _shared_memory_reviewer(
+                proposal,
+                actor_user_id or proposal.user_id,
+            )
+            from fleetent.memory import shared as shared_memory
 
             await shared_memory.apply_shared_memory_proposal(
                 proposal.id,

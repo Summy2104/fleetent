@@ -4,7 +4,7 @@ from fleetent.db import create_database
 
 
 def _patch_reflection_db(monkeypatch, tmp_path):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
     from tests.integration.test_migrations import apply_migrations
 
     db_path = tmp_path / "skill-proposals.db"
@@ -15,7 +15,7 @@ def _patch_reflection_db(monkeypatch, tmp_path):
 
 
 def test_skill_proposal_public_api_is_importable():
-    from fleetent.intelligence.reflection import (
+    from fleetent.reflection import (
         SkillProposal,
         apply_skill_proposal,
         approve_skill_proposal,
@@ -35,7 +35,7 @@ def test_generate_skill_proposals_creates_updates_deprecates_and_ignores_noise(
     tmp_path,
 ):
     _patch_reflection_db(monkeypatch, tmp_path)
-    from fleetent.intelligence.reflection import ReflectionFinding, generate_skill_proposals
+    from fleetent.reflection import ReflectionFinding, generate_skill_proposals
 
     proposals = generate_skill_proposals(
         findings=[
@@ -81,7 +81,7 @@ def test_generate_skill_proposals_creates_updates_deprecates_and_ignores_noise(
 
 def test_skill_proposal_review_lifecycle(monkeypatch, tmp_path):
     _patch_reflection_db(monkeypatch, tmp_path)
-    from fleetent.intelligence.reflection import (
+    from fleetent.reflection import (
         ReflectionFinding,
         approve_skill_proposal,
         generate_skill_proposals,
@@ -127,8 +127,8 @@ def test_skill_proposal_review_lifecycle(monkeypatch, tmp_path):
 
 async def test_apply_skill_proposal_requires_approval_and_uses_boundary(monkeypatch, tmp_path):
     _patch_reflection_db(monkeypatch, tmp_path)
-    from fleetent.intelligence import reflection
-    from fleetent.intelligence.reflection import (
+    from fleetent import reflection
+    from fleetent.reflection import (
         ReflectionFinding,
         apply_skill_proposal,
         approve_skill_proposal,
@@ -178,7 +178,7 @@ async def test_apply_skill_proposal_requires_approval_and_uses_boundary(monkeypa
 
 
 def test_real_llm_skill_draft_generation_is_opt_in(monkeypatch):
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     monkeypatch.delenv("FLEETENT_REFLECTION_REAL_SKILL_DRAFT", raising=False)
 

@@ -1,12 +1,12 @@
-from fleetent.intelligence.knowledge_base.graph_search import GraphSearchChunk, GraphSearchResult
-from fleetent.intelligence.knowledge_base.models import KnowledgeChunk
-from fleetent.intelligence.knowledge_base.planner import (
+from fleetent.knowledge_base.models import KnowledgeChunk
+from fleetent.knowledge_base.planner import (
     KnowledgeSearchOptions,
     KnowledgeSearchPlan,
     KnowledgeSearchStep,
     execute_knowledge_search_plan,
     plan_knowledge_search,
 )
+from fleetent.knowledge_base.retrieval.graph_search import GraphSearchChunk, GraphSearchResult
 
 
 def _chunk(chunk_id: str, score: float = 0.5) -> KnowledgeChunk:
@@ -25,7 +25,7 @@ def _chunk(chunk_id: str, score: float = 0.5) -> KnowledgeChunk:
 
 
 async def test_execute_default_hybrid_plan_passes_scope_and_limit(monkeypatch):
-    from fleetent.intelligence.knowledge_base import planner
+    from fleetent.knowledge_base import planner
 
     calls: list[dict[str, object]] = []
 
@@ -71,7 +71,7 @@ async def test_execute_default_hybrid_plan_passes_scope_and_limit(monkeypatch):
 
 
 async def test_execute_graph_plan_fills_dedupes_and_respects_limit(monkeypatch):
-    from fleetent.intelligence.knowledge_base import planner
+    from fleetent.knowledge_base import planner
 
     calls: list[tuple[str, int, bool]] = []
     graph_chunk = _chunk("graph-a", score=1.0)

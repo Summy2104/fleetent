@@ -57,3 +57,11 @@ class KnowledgeWritable(Protocol):
     def delete_document(self, document_id: str) -> None: ...
 
     def delete_scoped_document(self, tenant_id: str, kb_id: str, document_id: str) -> bool: ...
+
+
+__all__ = [
+    "KnowledgeReadable",
+    "KnowledgeWritable",
+    "KnowledgeChunk",
+    "KnowledgeDocument",
+]

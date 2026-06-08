@@ -81,7 +81,7 @@ def test_pilot_report_includes_config_diagnostics_and_connector_evidence(tmp_pat
 
 
 def test_real_connector_execute_requires_execute_opt_in_and_pilot_fixture():
-    from fleetent.intelligence.knowledge_base.operations import real_connector_smoke_gate
+    from fleetent.knowledge_base.operations import real_connector_smoke_gate
 
     skipped = real_connector_smoke_gate(
         connector_id="gdrive",

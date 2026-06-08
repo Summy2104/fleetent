@@ -2,7 +2,7 @@
 
 import pytest
 
-from fleetent.intelligence.knowledge_base.extraction import (
+from fleetent.knowledge_base.extraction import (
     ExtractedEntity,
     ExtractedRelation,
     deterministic_extract,

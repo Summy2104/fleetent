@@ -194,7 +194,7 @@ async def graph_search(
 
 def _database() -> SQLiteDatabase:
     try:
-        from fleetent.intelligence.knowledge_base import runtime
+        from fleetent.knowledge_base import runtime
 
         return runtime._database()
     except Exception:

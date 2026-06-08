@@ -6,7 +6,7 @@ import respx
 
 
 def test_confluence_connector_config_public_api_is_importable():
-    from fleetent.intelligence.knowledge_base import ConfluenceConnectorConfig
+    from fleetent.knowledge_base import ConfluenceConnectorConfig
 
     config = ConfluenceConnectorConfig(
         connector_id="conf-eng",
@@ -30,7 +30,7 @@ def test_confluence_connector_config_public_api_is_importable():
 
 
 def test_confluence_config_supports_page_scope_with_children():
-    from fleetent.intelligence.knowledge_base import ConfluenceConnectorConfig
+    from fleetent.knowledge_base import ConfluenceConnectorConfig
 
     config = ConfluenceConnectorConfig(
         connector_id="conf-page",
@@ -49,7 +49,7 @@ def test_confluence_config_supports_page_scope_with_children():
 
 
 def test_confluence_credential_ref_resolver_supports_env_and_file(tmp_path, monkeypatch):
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base.connectors.confluence import (
         CredentialRefResolver,
     )
 
@@ -64,7 +64,7 @@ def test_confluence_credential_ref_resolver_supports_env_and_file(tmp_path, monk
 
 @respx.mock
 def test_http_confluence_client_lists_space_pages_with_pagination(monkeypatch):
-    from fleetent.intelligence.knowledge_base.connectors.confluence import HttpConfluenceClient
+    from fleetent.knowledge_base.connectors.confluence import HttpConfluenceClient
 
     monkeypatch.setenv("CONFLUENCE_TOKEN", "conf-token")
     first = respx.get("https://example.atlassian.net/wiki/rest/api/content").mock(
@@ -97,7 +97,7 @@ def test_http_confluence_client_lists_space_pages_with_pagination(monkeypatch):
 
 @respx.mock
 def test_http_confluence_client_gets_page_and_children(monkeypatch):
-    from fleetent.intelligence.knowledge_base.connectors.confluence import HttpConfluenceClient
+    from fleetent.knowledge_base.connectors.confluence import HttpConfluenceClient
 
     monkeypatch.setenv("CONFLUENCE_TOKEN", "conf-token")
     page_route = respx.get("https://example.atlassian.net/wiki/rest/api/content/root").mock(
@@ -134,8 +134,8 @@ def test_http_confluence_client_gets_page_and_children(monkeypatch):
     ],
 )
 def test_http_confluence_client_maps_http_errors(monkeypatch, status_code, expected_error):
-    from fleetent.intelligence.knowledge_base.connectors import confluence
-    from fleetent.intelligence.knowledge_base.connectors.confluence import HttpConfluenceClient
+    from fleetent.knowledge_base.connectors import confluence
+    from fleetent.knowledge_base.connectors.confluence import HttpConfluenceClient
 
     monkeypatch.setenv("CONFLUENCE_TOKEN", "conf-token")
     respx.get("https://example.atlassian.net/wiki/rest/api/content").mock(
@@ -152,7 +152,7 @@ def test_http_confluence_client_maps_http_errors(monkeypatch, status_code, expec
 
 
 async def test_confluence_auth_failure_marks_summary_auth_failed():
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base.connectors.confluence import (
         FakeConfluenceClient,
         plan_confluence_sync,
     )
@@ -168,8 +168,8 @@ async def test_confluence_auth_failure_marks_summary_auth_failed():
 
 
 async def test_confluence_space_scope_lists_pages_with_pagination():
-    from fleetent.intelligence.knowledge_base import SyncAction
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base import SyncAction
+    from fleetent.knowledge_base.connectors.confluence import (
         FakeConfluenceClient,
         plan_confluence_sync,
     )
@@ -193,7 +193,7 @@ async def test_confluence_space_scope_lists_pages_with_pagination():
 
 
 async def test_confluence_page_scope_lists_page_and_optional_descendants():
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base.connectors.confluence import (
         FakeConfluenceClient,
         plan_confluence_sync,
     )
@@ -213,7 +213,7 @@ async def test_confluence_page_scope_lists_page_and_optional_descendants():
 
 
 async def test_confluence_malformed_page_metadata_is_counted_as_failed():
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base.connectors.confluence import (
         ConfluencePage,
         FakeConfluenceClient,
         plan_confluence_sync,
@@ -245,18 +245,18 @@ async def test_confluence_malformed_page_metadata_is_counted_as_failed():
 
 
 async def test_confluence_archive_missing_failure_is_counted_per_item(monkeypatch):
-    from fleetent.intelligence.knowledge_base import SyncAction
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base import SyncAction
+    from fleetent.knowledge_base.connectors.confluence import (
         ConfluenceSyncPlan,
         FakeConfluenceClient,
         execute_confluence_sync_plan,
     )
-    from fleetent.intelligence.knowledge_base.sync_planner import SyncPlanItem, SyncPlanSummary
+    from fleetent.knowledge_base.sync_planner import SyncPlanItem, SyncPlanSummary
 
     async def fail_archive(document_id: str) -> None:
         raise RuntimeError(f"cannot archive {document_id}")
 
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     monkeypatch.setattr(runtime, "archive", fail_archive)
     plan = ConfluenceSyncPlan(
@@ -286,7 +286,7 @@ async def test_confluence_archive_missing_failure_is_counted_per_item(monkeypatc
 
 
 def test_parse_confluence_page_uses_storage_html_and_metadata():
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base.connectors.confluence import (
         ConfluencePage,
         parse_confluence_page,
     )
@@ -311,7 +311,7 @@ def test_parse_confluence_page_uses_storage_html_and_metadata():
 
 
 async def test_confluence_retry_after_retries_once(monkeypatch):
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base.connectors.confluence import (
         ConfluenceRateLimitError,
         FakeConfluenceClient,
         list_confluence_scope_pages,
@@ -338,7 +338,7 @@ async def test_confluence_retry_after_retries_once(monkeypatch):
 
 
 async def test_confluence_retry_limit_returns_failure():
-    from fleetent.intelligence.knowledge_base.connectors.confluence import (
+    from fleetent.knowledge_base.connectors.confluence import (
         ConfluenceRateLimitError,
         FakeConfluenceClient,
         list_confluence_scope_pages,
@@ -360,7 +360,7 @@ async def test_confluence_retry_limit_returns_failure():
 
 
 def _space_config(**overrides):
-    from fleetent.intelligence.knowledge_base import ConfluenceConnectorConfig
+    from fleetent.knowledge_base import ConfluenceConnectorConfig
 
     values = {
         "connector_id": "conf-eng",
@@ -377,7 +377,7 @@ def _space_config(**overrides):
 
 
 def _page_config(*, include_children: bool):
-    from fleetent.intelligence.knowledge_base import ConfluenceConnectorConfig
+    from fleetent.knowledge_base import ConfluenceConnectorConfig
 
     return ConfluenceConnectorConfig(
         connector_id="conf-page",
@@ -393,7 +393,7 @@ def _page_config(*, include_children: bool):
 
 
 def _page(page_id: str, title: str):
-    from fleetent.intelligence.knowledge_base.connectors.confluence import ConfluencePage
+    from fleetent.knowledge_base.connectors.confluence import ConfluencePage
 
     return ConfluencePage(
         id=page_id,

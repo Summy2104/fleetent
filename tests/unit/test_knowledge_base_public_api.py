@@ -4,25 +4,18 @@ import pytest
 
 
 def test_knowledge_base_public_api_is_importable():
-    from fleetent.intelligence.knowledge_base import (
-        EntityRef,
+    from fleetent.knowledge_base.config import KnowledgeConfigSnapshot, KnowledgeSourceConfig
+    from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeDocument
+    from fleetent.knowledge_base.extraction import (
         ExtractedEntity,
         ExtractedRelation,
         ExtractionResult,
-        GraphSearchChunk,
-        GraphSearchResult,
-        KnowledgeChunk,
-        KnowledgeConfigSnapshot,
-        KnowledgeDocument,
-        KnowledgeEntity,
-        KnowledgeExtractionRun,
-        KnowledgeSourceConfig,
+        run_entity_extraction,
+    )
+    from fleetent.knowledge_base.extraction_store import KnowledgeEntity, KnowledgeExtractionRun
+    from fleetent.knowledge_base.parsers import (
         ParsedDocument,
         ParsedSection,
-        delete,
-        graph_search,
-        ingest_parsed,
-        ingest_text,
         parse_document,
         parse_docx,
         parse_html,
@@ -31,14 +24,20 @@ def test_knowledge_base_public_api_is_importable():
         parse_pptx,
         parse_text,
         parse_xlsx,
-        run_entity_extraction,
-        search,
     )
+    from fleetent.knowledge_base.retrieval.graph_search import (
+        EntityRef,
+        GraphSearchChunk,
+        GraphSearchResult,
+        graph_search,
+    )
+    from fleetent.knowledge_base.runtime import delete, ingest_parsed, ingest_text, search
+
+    assert EntityRef is not None
 
     assert ExtractedEntity is not None
     assert ExtractedRelation is not None
     assert ExtractionResult is not None
-    assert EntityRef is not None
     assert GraphSearchChunk is not None
     assert GraphSearchResult is not None
     assert KnowledgeConfigSnapshot is not None
@@ -66,7 +65,7 @@ def test_knowledge_base_public_api_is_importable():
 
 
 def test_parse_text_returns_parsed_document_shape():
-    from fleetent.intelligence.knowledge_base import ParsedDocument, ParsedSection, parse_text
+    from fleetent.knowledge_base.parsers import ParsedDocument, ParsedSection, parse_text
 
     parsed = parse_text("notes.txt", "hello world")
 
@@ -86,7 +85,7 @@ def test_parse_text_returns_parsed_document_shape():
 
 
 def test_search_accepts_search_mode_with_vector_default():
-    from fleetent.intelligence.knowledge_base import search
+    from fleetent.knowledge_base.runtime import search
 
     signature = inspect.signature(search)
 
@@ -94,7 +93,7 @@ def test_search_accepts_search_mode_with_vector_default():
 
 
 async def test_search_rejects_unsupported_mode_before_backend_access():
-    from fleetent.intelligence.knowledge_base import search
+    from fleetent.knowledge_base.runtime import search
 
     with pytest.raises(ValueError, match="unsupported knowledge search mode: graph"):
         await search("query", mode="graph")

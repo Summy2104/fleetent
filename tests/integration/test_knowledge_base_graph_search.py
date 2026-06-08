@@ -1,6 +1,6 @@
 from fleetent.config import KnowledgeBaseSettings
 from fleetent.db import create_database
-from fleetent.intelligence.knowledge_base.parsers import ParsedDocument, ParsedSection
+from fleetent.knowledge_base.parsers import ParsedDocument, ParsedSection
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -9,7 +9,7 @@ async def test_graph_search_depth_zero_returns_direct_entity_mentions(monkeypatc
     acme = await _ingest("acme.md", "Customer: Acme\nProject: Atlas")
     await _ingest("beta.md", "Customer: Beta\nProject: Beacon")
 
-    from fleetent.intelligence.knowledge_base import graph_search, run_entity_extraction
+    from fleetent.knowledge_base import graph_search, run_entity_extraction
 
     await run_entity_extraction("default", "global")
 
@@ -33,7 +33,7 @@ async def test_graph_search_depth_one_expands_relation_evidence_and_related_ment
     warehouse = await _ingest("warehouse.md", "System: Data Warehouse")
     relation = await _ingest("relation.md", "Depends on: Billing API -> Data Warehouse")
 
-    from fleetent.intelligence.knowledge_base import graph_search, run_entity_extraction
+    from fleetent.knowledge_base import graph_search, run_entity_extraction
 
     await run_entity_extraction("default", "global")
 
@@ -52,7 +52,7 @@ async def test_graph_search_directional_relations_do_not_reverse_expand(monkeypa
     warehouse = await _ingest("warehouse.md", "System: Data Warehouse")
     await _ingest("relation.md", "Depends on: Billing API -> Data Warehouse")
 
-    from fleetent.intelligence.knowledge_base import graph_search, run_entity_extraction
+    from fleetent.knowledge_base import graph_search, run_entity_extraction
 
     await run_entity_extraction("default", "global")
 
@@ -63,7 +63,7 @@ async def test_graph_search_directional_relations_do_not_reverse_expand(monkeypa
 
 
 async def _ingest(filename: str, content: str):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     return await runtime.ingest_parsed(
         ParsedDocument(
@@ -78,7 +78,7 @@ async def _ingest(filename: str, content: str):
 
 
 def _patch_knowledge_runtime(monkeypatch, tmp_path):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)

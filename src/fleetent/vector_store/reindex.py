@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import inspect
 import time
 from collections.abc import Awaitable
@@ -12,20 +13,19 @@ _memory: ModuleType | None = None
 
 
 def _memory_module() -> ModuleType:
-    global _memory
-    if _memory is None:
-        _memory = __import__("fleetent.intelligence.memory", fromlist=["*"])
-    return _memory
+    return _memory_module_impl()
+
+
+def _memory_module_impl() -> ModuleType:
+    return importlib.import_module("fleetent.memory")
 
 
 def _knowledge_base_module() -> ModuleType:
-    global _knowledge_base
-    if _knowledge_base is None:
-        try:
-            _knowledge_base = __import__("fleetent.intelligence.knowledge_base", fromlist=["*"])
-        except Exception:
-            _knowledge_base = __import__("fleetent.knowledge_base", fromlist=["*"])
-    return _knowledge_base
+    return _knowledge_base_module_impl()
+
+
+def _knowledge_base_module_impl() -> ModuleType:
+    return importlib.import_module("fleetent.knowledge_base")
 
 
 def _set_imported_modules(

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.db import create_database
-from fleetent.intelligence.knowledge_base.parsers import ParsedDocument, ParsedSection
+from fleetent.knowledge_base.parsers import ParsedDocument, ParsedSection
 from tests.integration.test_migrations import apply_migrations
 
 FIXTURE = Path("tests/evaluation/fixtures/knowledge_base_graph_search/basic.json")
@@ -16,7 +16,7 @@ async def test_graph_search_evaluation_fixture_covers_direct_relation_and_direct
     payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
     _patch_knowledge_runtime(monkeypatch, tmp_path)
 
-    from fleetent.intelligence.knowledge_base import graph_search, run_entity_extraction, runtime
+    from fleetent.knowledge_base import graph_search, run_entity_extraction, runtime
 
     document_ids: dict[str, str] = {}
     for item in payload["documents"]:
@@ -48,7 +48,7 @@ async def test_graph_search_evaluation_fixture_covers_direct_relation_and_direct
 
 
 def _patch_knowledge_runtime(monkeypatch, tmp_path):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)

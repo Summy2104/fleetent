@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from fleetent.intelligence.memory import MemoryItem
+from fleetent.memory import MemoryItem
 from tests.integration.test_migrations import apply_migrations
 
 REQUIRED_FIXTURE_FIELDS = (
@@ -79,8 +79,7 @@ async def run_deterministic_fixture(
     fixture: Mapping[str, Any], tmp_path: Path, monkeypatch: Any
 ) -> ReflectionEvaluationResult:
     """Run one fixture through run_reflection() with deterministic fake inputs."""
-    from fleetent import observability
-    from fleetent.intelligence import reflection
+    from fleetent import observability, reflection
 
     validate_fixture(fixture)
     db_path = tmp_path / "reflection-report-eval.db"

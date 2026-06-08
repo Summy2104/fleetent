@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 
 from fleetent import agent_config
 from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
-from fleetent.intelligence.knowledge_base import KnowledgeChunk
-from fleetent.intelligence.memory import MemoryItem
+from fleetent.knowledge_base import KnowledgeChunk
+from fleetent.memory import MemoryItem
 
 
 def _publish_agent(monkeypatch, agent: AgentFile) -> None:
@@ -19,7 +19,7 @@ def _publish_agent(monkeypatch, agent: AgentFile) -> None:
 
 
 async def test_public_api_is_importable():
-    from fleetent.intelligence.long_term_ctx import BuiltContext, ContextSource, build_context
+    from fleetent.long_term_ctx import BuiltContext, ContextSource, build_context
 
     source = ContextSource(
         source_type="memory",
@@ -35,7 +35,7 @@ async def test_public_api_is_importable():
 
 
 async def test_zero_token_budget_returns_empty_context_without_provider_calls(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     memory_search = AsyncMock()
     knowledge_search = AsyncMock()
@@ -56,7 +56,7 @@ async def test_zero_token_budget_returns_empty_context_without_provider_calls(mo
 
 
 async def test_build_context_calls_memory_search_with_user_query_and_limit(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     memory_search = AsyncMock(return_value=[])
     monkeypatch.setattr(long_term_ctx.memory, "search", memory_search)
@@ -75,7 +75,7 @@ async def test_build_context_calls_memory_search_with_user_query_and_limit(monke
 
 
 async def test_memory_results_are_formatted_with_memory_source_summary(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     now = datetime(2026, 5, 31, tzinfo=UTC)
     memory = MemoryItem(
@@ -105,7 +105,7 @@ async def test_memory_results_are_formatted_with_memory_source_summary(monkeypat
 
 
 async def test_missing_knowledge_provider_does_not_block_memory_context(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     now = datetime(2026, 5, 31, tzinfo=UTC)
     memory = MemoryItem(
@@ -132,7 +132,7 @@ async def test_missing_knowledge_provider_does_not_block_memory_context(monkeypa
 
 
 async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enabled(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     _publish_agent(
         monkeypatch,
@@ -191,7 +191,7 @@ async def test_builtin_knowledge_provider_uses_knowledge_base_search_when_enable
 
 
 async def test_builtin_knowledge_provider_disabled_does_not_call_knowledge_base(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     _publish_agent(
         monkeypatch,
@@ -220,7 +220,7 @@ async def test_builtin_knowledge_provider_disabled_does_not_call_knowledge_base(
 
 
 async def test_empty_knowledge_results_are_omitted(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     monkeypatch.setattr(long_term_ctx.memory, "search", AsyncMock(return_value=[]))
     knowledge_search = AsyncMock(return_value=[])
@@ -240,7 +240,7 @@ async def test_empty_knowledge_results_are_omitted(monkeypatch):
 
 
 async def test_memory_and_knowledge_results_are_included_with_sources(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     now = datetime(2026, 5, 31, tzinfo=UTC)
     memory = MemoryItem(
@@ -277,7 +277,7 @@ async def test_memory_and_knowledge_results_are_included_with_sources(monkeypatc
 
 
 async def test_budget_pressure_keeps_memory_and_omits_low_priority_knowledge(monkeypatch):
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     now = datetime(2026, 5, 31, tzinfo=UTC)
     memory = MemoryItem(

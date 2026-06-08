@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fleetent.intelligence.knowledge_base.connectors.base import DocumentRef
+from fleetent.knowledge_base.connectors.base import DocumentRef
 
 _FORMAT_BY_SUFFIX = {
     ".txt": "text",

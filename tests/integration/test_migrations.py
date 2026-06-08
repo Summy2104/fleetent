@@ -615,7 +615,7 @@ def test_migrated_schedule_store_does_not_create_schema():
 
 
 def test_knowledge_base_store_uses_database_boundary_and_named_parameters():
-    store_source = Path("src/fleetent/intelligence/knowledge_base/store.py").read_text()
+    store_source = Path("src/fleetent/knowledge_base/store.py").read_text()
 
     assert "sqlite3.connect" not in store_source
     assert "DB_PATH" not in store_source

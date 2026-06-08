@@ -5,7 +5,7 @@ from fleetent.vector_store import SearchResult
 
 
 def _patch_shared_db(monkeypatch, tmp_path):
-    from fleetent.intelligence.memory import store
+    from fleetent.memory import store
     from tests.integration.test_migrations import apply_migrations
 
     db_path = tmp_path / "shared-memory.db"
@@ -16,7 +16,7 @@ def _patch_shared_db(monkeypatch, tmp_path):
 
 
 def test_shared_memory_public_api_is_importable():
-    from fleetent.intelligence.memory import (
+    from fleetent.memory import (
         SharedMemoryItem,
         archive_shared_memory,
         create_shared_memory,
@@ -43,7 +43,7 @@ def test_shared_memory_public_api_is_importable():
 )
 async def test_create_shared_memory_rejects_invalid_input(monkeypatch, tmp_path, kwargs, message):
     _patch_shared_db(monkeypatch, tmp_path)
-    from fleetent.intelligence.memory import create_shared_memory
+    from fleetent.memory import create_shared_memory
 
     params = {
         "scope_type": "team",
@@ -60,8 +60,8 @@ async def test_create_shared_memory_rejects_invalid_input(monkeypatch, tmp_path,
 
 async def test_create_update_and_archive_sync_vector_store(monkeypatch, tmp_path):
     _patch_shared_db(monkeypatch, tmp_path)
-    from fleetent.intelligence import memory
-    from fleetent.intelligence.memory import shared
+    from fleetent import memory
+    from fleetent.memory import shared
 
     upserts: list[tuple[str, str, str]] = []
     deletes: list[tuple[str, str]] = []
@@ -97,8 +97,8 @@ async def test_search_shared_memory_is_scope_isolated_and_preserves_vector_order
     monkeypatch, tmp_path
 ):
     _patch_shared_db(monkeypatch, tmp_path)
-    from fleetent.intelligence import memory
-    from fleetent.intelligence.memory import shared
+    from fleetent import memory
+    from fleetent.memory import shared
 
     first = await memory.create_shared_memory(
         scope_type="team",
@@ -140,7 +140,7 @@ async def test_search_shared_memory_is_scope_isolated_and_preserves_vector_order
 
 async def test_iter_indexable_shared_memories_excludes_archived(monkeypatch, tmp_path):
     _patch_shared_db(monkeypatch, tmp_path)
-    from fleetent.intelligence import memory
+    from fleetent import memory
 
     item = await memory.create_shared_memory(
         scope_type="tenant",
@@ -168,7 +168,7 @@ async def test_iter_indexable_shared_memories_excludes_archived(monkeypatch, tmp
 
 async def test_update_shared_memory_rejects_invalid_status(monkeypatch, tmp_path):
     _patch_shared_db(monkeypatch, tmp_path)
-    from fleetent.intelligence import memory
+    from fleetent import memory
 
     item = await memory.create_shared_memory(
         scope_type="team",

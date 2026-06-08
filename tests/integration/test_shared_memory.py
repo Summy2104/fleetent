@@ -6,8 +6,8 @@ from fleetent.db import create_database
 
 
 def _patch_db(monkeypatch, tmp_path):
-    from fleetent.intelligence import reflection
-    from fleetent.intelligence.memory import store
+    from fleetent import reflection
+    from fleetent.memory import store
     from tests.integration.test_migrations import apply_migrations
 
     db_path = tmp_path / "shared-memory-apply.db"
@@ -21,8 +21,8 @@ def _patch_db(monkeypatch, tmp_path):
 
 async def test_approved_shared_memory_proposal_apply_creates_item(monkeypatch, tmp_path):
     db_path = _patch_db(monkeypatch, tmp_path)
-    from fleetent.intelligence import memory, reflection
-    from fleetent.intelligence.memory import shared
+    from fleetent import memory, reflection
+    from fleetent.memory import shared
 
     upserts: list[tuple[str, str, str]] = []
 
@@ -66,8 +66,8 @@ async def test_approved_shared_memory_proposal_apply_creates_item(monkeypatch, t
 
 async def test_shared_memory_proposal_apply_allows_non_owner_admin_actor(monkeypatch, tmp_path):
     db_path = _patch_db(monkeypatch, tmp_path)
-    from fleetent.intelligence import memory, reflection
-    from fleetent.intelligence.memory import shared
+    from fleetent import memory, reflection
+    from fleetent.memory import shared
 
     upserts: list[tuple[str, str, str]] = []
 
@@ -121,7 +121,7 @@ async def test_shared_memory_proposal_apply_rejects_invalid_target_or_scope(
     monkeypatch, tmp_path, metadata_patch
 ):
     _patch_db(monkeypatch, tmp_path)
-    from fleetent.intelligence import memory, reflection
+    from fleetent import memory, reflection
 
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="owner",
@@ -141,7 +141,7 @@ async def test_shared_memory_proposal_apply_rejects_invalid_target_or_scope(
 
 async def test_shared_memory_proposal_apply_requires_approved_status(monkeypatch, tmp_path):
     _patch_db(monkeypatch, tmp_path)
-    from fleetent.intelligence import memory, reflection
+    from fleetent import memory, reflection
 
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="owner",

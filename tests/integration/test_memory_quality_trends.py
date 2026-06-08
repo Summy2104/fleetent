@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+from fleetent import memory
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.intelligence import memory
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -102,7 +102,7 @@ def test_memory_quality_trend_keeps_shared_memory_counts_separate(tmp_path, monk
 
 def test_memory_quality_trend_includes_maintenance_proposal_counts(tmp_path, monkeypatch) -> None:
     _patch_database(tmp_path, monkeypatch)
-    from fleetent.intelligence import reflection
+    from fleetent import reflection
 
     monkeypatch.setattr(reflection.observability, "record_trace_event", lambda event: None)
     pending = reflection.create_memory_maintenance_proposal(

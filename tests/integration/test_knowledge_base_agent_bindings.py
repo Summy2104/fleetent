@@ -10,7 +10,7 @@ from tests.integration.test_migrations import apply_migrations
 
 
 def _patch_binding_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path):
-    from fleetent.intelligence.knowledge_base import bindings
+    from fleetent.knowledge_base import bindings
 
     db_path = tmp_path / "bindings.db"
     apply_migrations(db_path)
@@ -20,7 +20,7 @@ def _patch_binding_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path):
 
 
 def _patch_binding_settings(monkeypatch: pytest.MonkeyPatch, default_kb_id: str = "global"):
-    from fleetent.intelligence.knowledge_base import bindings
+    from fleetent.knowledge_base import bindings
 
     config = KnowledgeBaseSettings(default_kb_id=default_kb_id)
     monkeypatch.setattr(bindings, "_kb_config", lambda: config)
@@ -28,7 +28,7 @@ def _patch_binding_settings(monkeypatch: pytest.MonkeyPatch, default_kb_id: str 
 
 
 def test_binding_public_api_is_importable():
-    from fleetent.intelligence.knowledge_base import (
+    from fleetent.knowledge_base import (
         AgentKnowledgeBaseBinding,
         bind_agent_to_kb,
         list_agent_kb_bindings,
@@ -47,7 +47,7 @@ def test_bind_agent_to_kb_is_idempotent(monkeypatch, tmp_path):
     _patch_binding_runtime(monkeypatch, tmp_path)
     _patch_binding_settings(monkeypatch)
 
-    from fleetent.intelligence.knowledge_base import bind_agent_to_kb, list_agent_kb_bindings
+    from fleetent.knowledge_base import bind_agent_to_kb, list_agent_kb_bindings
 
     first = bind_agent_to_kb("tenant-a", "agent-1", "engineering")
     second = bind_agent_to_kb("tenant-a", "agent-1", "engineering")
@@ -62,7 +62,7 @@ def test_unbind_agent_from_kb_is_idempotent(monkeypatch, tmp_path):
     _patch_binding_runtime(monkeypatch, tmp_path)
     _patch_binding_settings(monkeypatch)
 
-    from fleetent.intelligence.knowledge_base import unbind_agent_from_kb
+    from fleetent.knowledge_base import unbind_agent_from_kb
 
     unbind_agent_from_kb("tenant-a", "agent-1", "missing")
     unbind_agent_from_kb("tenant-a", "agent-1", "missing")
@@ -72,7 +72,7 @@ def test_agent_kb_bindings_are_tenant_and_agent_isolated(monkeypatch, tmp_path):
     _patch_binding_runtime(monkeypatch, tmp_path)
     _patch_binding_settings(monkeypatch)
 
-    from fleetent.intelligence.knowledge_base import bind_agent_to_kb, list_agent_kb_bindings
+    from fleetent.knowledge_base import bind_agent_to_kb, list_agent_kb_bindings
 
     bind_agent_to_kb("tenant-a", "agent-1", "engineering")
     bind_agent_to_kb("tenant-b", "agent-1", "sales")
@@ -100,7 +100,7 @@ def test_empty_binding_identifiers_fail_fast(monkeypatch, tmp_path, tenant_id, a
     _patch_binding_runtime(monkeypatch, tmp_path)
     _patch_binding_settings(monkeypatch)
 
-    from fleetent.intelligence.knowledge_base import bind_agent_to_kb
+    from fleetent.knowledge_base import bind_agent_to_kb
 
     with pytest.raises(ValueError, match="must not be empty"):
         bind_agent_to_kb(tenant_id, agent_id, kb_id)
@@ -110,7 +110,7 @@ def test_binding_can_reference_future_kb(monkeypatch, tmp_path):
     database = _patch_binding_runtime(monkeypatch, tmp_path)
     _patch_binding_settings(monkeypatch)
 
-    from fleetent.intelligence.knowledge_base import bind_agent_to_kb
+    from fleetent.knowledge_base import bind_agent_to_kb
 
     bind_agent_to_kb("tenant-a", "agent-1", "future-kb")
 
@@ -122,7 +122,7 @@ def test_explicit_bindings_override_default_kb(monkeypatch, tmp_path):
     _patch_binding_runtime(monkeypatch, tmp_path)
     _patch_binding_settings(monkeypatch, default_kb_id="global")
 
-    from fleetent.intelligence.knowledge_base import bind_agent_to_kb, resolve_agent_kb_ids
+    from fleetent.knowledge_base import bind_agent_to_kb, resolve_agent_kb_ids
 
     bind_agent_to_kb("tenant-a", "agent-1", "engineering")
     bind_agent_to_kb("tenant-a", "agent-1", "support")
@@ -134,7 +134,7 @@ def test_missing_binding_falls_back_to_default_kb(monkeypatch, tmp_path):
     _patch_binding_runtime(monkeypatch, tmp_path)
     _patch_binding_settings(monkeypatch, default_kb_id="global")
 
-    from fleetent.intelligence.knowledge_base import resolve_agent_kb_ids
+    from fleetent.knowledge_base import resolve_agent_kb_ids
 
     assert resolve_agent_kb_ids("tenant-a", "agent-1") == ["global"]
 
@@ -143,7 +143,7 @@ def test_missing_default_kb_returns_empty_scope_and_records_diagnostic(monkeypat
     _patch_binding_runtime(monkeypatch, tmp_path)
     _patch_binding_settings(monkeypatch, default_kb_id=" ")
 
-    from fleetent.intelligence.knowledge_base import bindings, resolve_agent_kb_ids
+    from fleetent.knowledge_base import bindings, resolve_agent_kb_ids
 
     events = []
     monkeypatch.setattr(bindings, "record_trace_event", lambda event: events.append(event))
@@ -169,9 +169,8 @@ class _KnowledgeResult:
 
 
 async def test_long_term_context_searches_resolved_agent_kbs(monkeypatch):
-    from fleetent import agent_config
+    from fleetent import agent_config, long_term_ctx
     from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
-    from fleetent.intelligence import long_term_ctx
 
     agent = AgentFile(
         name="agent-1",
@@ -221,9 +220,8 @@ async def test_long_term_context_searches_resolved_agent_kbs(monkeypatch):
 
 
 async def test_long_term_context_skips_search_when_agent_kb_scope_is_empty(monkeypatch):
-    from fleetent import agent_config
+    from fleetent import agent_config, long_term_ctx
     from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
-    from fleetent.intelligence import long_term_ctx
 
     agent = AgentFile(
         name="agent-1",

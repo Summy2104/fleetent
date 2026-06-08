@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from fleetent.intelligence.memory import extraction
+from fleetent.memory import extraction
 from tests.evaluation.memory_extraction_eval import (
     _REAL_LLM_API_KEY_ENV,
     REQUIRED_FIXTURE_FIELDS,

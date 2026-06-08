@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from fleetent.intelligence.memory import MemoryItem
+from fleetent.memory import MemoryItem
 
 REQUIRED_FIXTURE_FIELDS = (
     "name",
@@ -94,7 +94,7 @@ async def run_deterministic_fixture(
     fixture: Mapping[str, Any], monkeypatch: Any
 ) -> ContextEvaluationResult:
     """Run one fixture through build_context() with deterministic fake providers."""
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     validate_fixture(fixture)
     memory_queries: list[tuple[str, str, int]] = []
@@ -141,7 +141,7 @@ async def run_real_provider_smoke(fixture: Mapping[str, Any]) -> ContextEvaluati
     if not any(os.environ.get(env_name) for env_name in _REAL_PROVIDER_ENVS):
         pytest.skip("real long-term context smoke requires provider credentials/config")
 
-    from fleetent.intelligence import long_term_ctx
+    from fleetent import long_term_ctx
 
     validate_fixture(fixture)
     built = await long_term_ctx.build_context(

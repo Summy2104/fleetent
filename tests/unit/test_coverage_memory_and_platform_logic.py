@@ -6,15 +6,15 @@ from typing import Any
 
 import httpx
 import pytest
-from fleetent.intelligence.memory.models import (
+
+from fleetent.governance import quota
+from fleetent.memory import extraction, maintenance, shared, trends
+from fleetent.memory.models import (
     MemoryCompactionCandidate,
     MemoryItem,
     MemoryMaintenancePolicy,
     SharedMemoryItem,
 )
-
-from fleetent.governance import quota
-from fleetent.intelligence.memory import extraction, maintenance, shared, trends
 from fleetent.platform.model_provider_management import provider_connectivity
 from fleetent.platform.resource_monitoring import alerting
 
@@ -305,10 +305,7 @@ def test_memory_trends_buckets_counts_and_filters_with_fake_store(monkeypatch):
         ),
     ]
     monkeypatch.setattr(trends.store, "database", lambda: FakeDb())
-    monkeypatch.setattr(
-        "fleetent.intelligence.reflection.list_memory_maintenance_proposals",
-        lambda user_id: proposals,
-    )
+    monkeypatch.setattr(trends, "_list_memory_maintenance_proposals", lambda user_id: proposals)
 
     summary = trends.get_memory_quality_trend_summary(query)
 

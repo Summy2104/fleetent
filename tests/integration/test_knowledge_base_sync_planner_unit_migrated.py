@@ -6,7 +6,7 @@ from tests.integration.test_migrations import apply_migrations
 
 
 def test_sync_planner_public_api_is_importable():
-    from fleetent.intelligence.knowledge_base import (
+    from fleetent.knowledge_base import (
         SyncAction,
         SyncExecutionSummary,
         SyncPlan,
@@ -33,8 +33,8 @@ async def test_empty_local_directory_plan_has_no_items(monkeypatch, tmp_path):
     root = tmp_path / "docs"
     root.mkdir()
 
-    from fleetent.intelligence.knowledge_base import plan_local_directory_sync
-    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+    from fleetent.knowledge_base import plan_local_directory_sync
+    from fleetent.knowledge_base.connectors import LocalDirectorySourceConfig
 
     plan = await plan_local_directory_sync(
         LocalDirectorySourceConfig(
@@ -59,8 +59,8 @@ async def test_new_file_is_planned_for_ingest(monkeypatch, tmp_path):
     document_path = root / "runbook.md"
     document_path.write_text("# Runbook\nStart service", encoding="utf-8")
 
-    from fleetent.intelligence.knowledge_base import SyncAction, plan_local_directory_sync
-    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+    from fleetent.knowledge_base import SyncAction, plan_local_directory_sync
+    from fleetent.knowledge_base.connectors import LocalDirectorySourceConfig
 
     plan = await plan_local_directory_sync(
         LocalDirectorySourceConfig(
@@ -86,8 +86,8 @@ async def test_changed_file_is_planned_for_reingest(monkeypatch, tmp_path):
     document_path = root / "runbook.md"
     document_path.write_text("# Runbook\nSecond version", encoding="utf-8")
 
-    from fleetent.intelligence.knowledge_base import SyncAction, plan_local_directory_sync, runtime
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base import SyncAction, plan_local_directory_sync, runtime
+    from fleetent.knowledge_base.connectors import (
         LocalDirectorySourceConfig,
         LocalSourceState,
         LocalSourceStateStore,
@@ -128,8 +128,8 @@ async def test_unchanged_file_is_planned_for_skip(monkeypatch, tmp_path):
     document_path.write_bytes(content)
     stat = document_path.stat()
 
-    from fleetent.intelligence.knowledge_base import SyncAction, plan_local_directory_sync, runtime
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base import SyncAction, plan_local_directory_sync, runtime
+    from fleetent.knowledge_base.connectors import (
         LocalDirectorySourceConfig,
         LocalSourceState,
         LocalSourceStateStore,
@@ -167,8 +167,8 @@ async def test_unsupported_files_are_counted_but_not_planned_for_ingest(monkeypa
     root.mkdir()
     (root / "archive.bin").write_bytes(b"binary")
 
-    from fleetent.intelligence.knowledge_base import plan_local_directory_sync
-    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+    from fleetent.knowledge_base import plan_local_directory_sync
+    from fleetent.knowledge_base.connectors import LocalDirectorySourceConfig
 
     plan = await plan_local_directory_sync(
         LocalDirectorySourceConfig(
@@ -193,8 +193,8 @@ async def test_advanced_files_are_planned_for_ingest(monkeypatch, tmp_path):
     for filename in ["report.pdf", "guide.docx", "deck.pptx", "book.xlsx"]:
         (root / filename).write_bytes(b"advanced")
 
-    from fleetent.intelligence.knowledge_base import SyncAction, plan_local_directory_sync
-    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+    from fleetent.knowledge_base import SyncAction, plan_local_directory_sync
+    from fleetent.knowledge_base.connectors import LocalDirectorySourceConfig
 
     plan = await plan_local_directory_sync(
         LocalDirectorySourceConfig(
@@ -222,8 +222,8 @@ async def test_missing_source_state_is_planned_for_delete(monkeypatch, tmp_path)
     root.mkdir()
     missing_path = str((root / "deleted.md").resolve())
 
-    from fleetent.intelligence.knowledge_base import SyncAction, plan_local_directory_sync, runtime
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base import SyncAction, plan_local_directory_sync, runtime
+    from fleetent.knowledge_base.connectors import (
         LocalDirectorySourceConfig,
         LocalSourceState,
         LocalSourceStateStore,
@@ -265,8 +265,8 @@ async def test_execute_sync_plan_skips_unchanged_items(monkeypatch, tmp_path):
     root = tmp_path / "docs"
     root.mkdir()
 
-    from fleetent.intelligence.knowledge_base import SyncAction, execute_sync_plan
-    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+    from fleetent.knowledge_base import SyncAction, execute_sync_plan
+    from fleetent.knowledge_base.connectors import LocalDirectorySourceConfig
 
     plan = _build_plan(
         root,
@@ -295,8 +295,8 @@ async def test_execute_sync_plan_ingests_new_file_and_records_state(monkeypatch,
 
     ingested = _fake_ingest(monkeypatch, document_id="doc-new")
 
-    from fleetent.intelligence.knowledge_base import SyncAction, execute_sync_plan
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base import SyncAction, execute_sync_plan
+    from fleetent.knowledge_base.connectors import (
         LocalDirectorySourceConfig,
         LocalSourceStateStore,
     )
@@ -335,8 +335,8 @@ async def test_execute_sync_plan_reingest_deletes_then_ingests(monkeypatch, tmp_
     deleted = _fake_delete(monkeypatch)
     _fake_ingest(monkeypatch, document_id="doc-reingest")
 
-    from fleetent.intelligence.knowledge_base import SyncAction, execute_sync_plan
-    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+    from fleetent.knowledge_base import SyncAction, execute_sync_plan
+    from fleetent.knowledge_base.connectors import LocalDirectorySourceConfig
 
     item = _plan_item(
         SyncAction.REINGEST_CHANGED,
@@ -366,8 +366,8 @@ async def test_execute_sync_plan_deletes_missing_document(monkeypatch, tmp_path)
 
     deleted = _fake_delete(monkeypatch)
 
-    from fleetent.intelligence.knowledge_base import SyncAction, execute_sync_plan
-    from fleetent.intelligence.knowledge_base.connectors import (
+    from fleetent.knowledge_base import SyncAction, execute_sync_plan
+    from fleetent.knowledge_base.connectors import (
         LocalDirectorySourceConfig,
         LocalSourceState,
         LocalSourceStateStore,
@@ -412,8 +412,8 @@ async def test_execute_sync_plan_delete_without_document_id_counts_failed(monkey
     root.mkdir()
     _fake_delete(monkeypatch)
 
-    from fleetent.intelligence.knowledge_base import SyncAction, execute_sync_plan
-    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+    from fleetent.knowledge_base import SyncAction, execute_sync_plan
+    from fleetent.knowledge_base.connectors import LocalDirectorySourceConfig
 
     item = _plan_item(SyncAction.DELETE_MISSING, root, "gone.md", document_id=None)
     config = LocalDirectorySourceConfig(
@@ -432,8 +432,8 @@ async def test_execute_sync_plan_unsupported_action_counts_failed(monkeypatch, t
     root = tmp_path / "docs"
     root.mkdir()
 
-    from fleetent.intelligence.knowledge_base import SyncAction, execute_sync_plan
-    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+    from fleetent.knowledge_base import SyncAction, execute_sync_plan
+    from fleetent.knowledge_base.connectors import LocalDirectorySourceConfig
 
     item = _plan_item(SyncAction.AUTH_FAILED, root, "a.md")
     config = LocalDirectorySourceConfig(
@@ -454,8 +454,8 @@ async def test_execute_sync_plan_unsupported_format_counts_failed(monkeypatch, t
     (root / "data.bin").write_bytes(b"binary")
     _fake_ingest(monkeypatch, document_id="doc-x")
 
-    from fleetent.intelligence.knowledge_base import SyncAction, execute_sync_plan
-    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+    from fleetent.knowledge_base import SyncAction, execute_sync_plan
+    from fleetent.knowledge_base.connectors import LocalDirectorySourceConfig
 
     item = _plan_item(
         SyncAction.INGEST_NEW,
@@ -480,9 +480,9 @@ async def test_plan_local_directory_sync_rejects_ref_without_path(monkeypatch, t
     root = tmp_path / "docs"
     root.mkdir()
 
-    from fleetent.intelligence.knowledge_base import plan_local_directory_sync, sync_planner
-    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
-    from fleetent.intelligence.knowledge_base.connectors.base import DocumentRef
+    from fleetent.knowledge_base import plan_local_directory_sync, sync_planner
+    from fleetent.knowledge_base.connectors import LocalDirectorySourceConfig
+    from fleetent.knowledge_base.connectors.base import DocumentRef
 
     class _PathlessSource:
         def __init__(self, *args, **kwargs):
@@ -512,8 +512,8 @@ async def test_plan_local_directory_sync_rejects_ref_without_path(monkeypatch, t
 
 
 def _build_plan(root, items, unsupported=0):
-    from fleetent.intelligence.knowledge_base import SyncPlan, SyncPlanSummary
-    from fleetent.intelligence.knowledge_base.connectors import LocalDirectorySourceConfig
+    from fleetent.knowledge_base import SyncPlan, SyncPlanSummary
+    from fleetent.knowledge_base.connectors import LocalDirectorySourceConfig
 
     config = LocalDirectorySourceConfig(
         source_id="local-docs", root_path=root, allowed_roots=[root]
@@ -548,7 +548,7 @@ def _plan_item(
     content_hash=None,
     document_id=None,
 ):
-    from fleetent.intelligence.knowledge_base import SyncPlanItem
+    from fleetent.knowledge_base import SyncPlanItem
 
     return SyncPlanItem(
         action=action,
@@ -565,8 +565,8 @@ def _plan_item(
 
 
 def _fake_ingest(monkeypatch, *, document_id):
-    from fleetent.intelligence.knowledge_base import runtime
-    from fleetent.intelligence.knowledge_base.models import KnowledgeDocument
+    from fleetent.knowledge_base import runtime
+    from fleetent.knowledge_base.models import KnowledgeDocument
 
     calls = []
 
@@ -586,7 +586,7 @@ def _fake_ingest(monkeypatch, *, document_id):
 
 
 def _fake_delete(monkeypatch):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     deleted = []
 
@@ -598,7 +598,7 @@ def _fake_delete(monkeypatch):
 
 
 def _patch_knowledge_runtime(monkeypatch, tmp_path):
-    from fleetent.intelligence.knowledge_base import runtime
+    from fleetent.knowledge_base import runtime
 
     db_path = tmp_path / "knowledge.db"
     apply_migrations(db_path)

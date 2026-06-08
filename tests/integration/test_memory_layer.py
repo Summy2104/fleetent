@@ -5,11 +5,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from fleetent import memory as memory_layer
 from fleetent import vector_store
 from fleetent.agent_config import AgentFile, default_models
-from fleetent.intelligence import memory as memory_layer
-from fleetent.intelligence.memory import extraction, store
-from fleetent.intelligence.memory.models import MemoryItem
+from fleetent.memory import extraction, store
+from fleetent.memory.models import MemoryItem
 from fleetent.vector_store import runtime as vector_runtime
 from tests.integration.test_migrations import apply_migrations
 
