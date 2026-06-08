@@ -72,7 +72,7 @@ async def test_normalizer_propagates_permission_gate_config(monkeypatch, tmp_pat
     """normalizer.route() passes agent's permission_gate_enabled + timeouts to loop.run()."""
     import contextlib
 
-    from fleetent.agent_config import AgentAccess, AgentFile, default_models
+    from fleetent.agent_config import AgentConnectors, AgentFile, ConnectorAccess, SlackConnector, default_models
     from fleetent.im_gateway import access
     from fleetent.runtime import loop as agent_loop
     from fleetent.session import manager as session_mgr
@@ -81,7 +81,13 @@ async def test_normalizer_propagates_permission_gate_config(monkeypatch, tmp_pat
         name="b",
         version=1,
         models=default_models(),
-        access=AgentAccess(allow_users=["u1"]),
+        connectors=AgentConnectors(
+            slack=SlackConnector(
+                bot_token_env="SLACK_BOT",
+                app_token_env="SLACK_APP",
+                access=ConnectorAccess(allow_users=["u1"]),
+            )
+        ),
         permission_gate_enabled=False,
         permission_gate_medium_timeout_seconds=60,
         permission_gate_high_timeout_seconds=120,
