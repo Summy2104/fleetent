@@ -111,6 +111,8 @@ class ModelTarget(BaseModel):
             raise ValueError(f"model target '{self.id}' requires base_url and model")
         if self.protocol == "openai_image_generation" and (not self.endpoint or not self.model):
             raise ValueError(f"model target '{self.id}' requires endpoint and model")
+        if self.protocol == "openai_image_chat" and (not self.base_url or not self.model):
+            raise ValueError(f"model target '{self.id}' requires base_url and model")
         if self.protocol in {"http_embedding", "http_rerank"} and not self.endpoint:
             raise ValueError(f"model target '{self.id}' requires endpoint")
         return self
