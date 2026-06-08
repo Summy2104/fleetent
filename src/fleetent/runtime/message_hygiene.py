@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 
 _logger = get_logger("runtime.hygiene")
 

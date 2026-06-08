@@ -19,7 +19,7 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 
 _logger = get_logger("runtime.hooks")
 

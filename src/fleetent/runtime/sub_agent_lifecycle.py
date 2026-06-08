@@ -14,7 +14,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatch
 
 _logger = get_logger("runtime.sub_agent")

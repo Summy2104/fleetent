@@ -11,7 +11,7 @@ from openai import OpenAI
 
 from fleetent import eval_logger
 from fleetent.model import ModelConfigError, ModelPolicySnapshot, ResolvedModelConfig
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatch
 
 _DEFAULT_FLAP_WINDOW = 3

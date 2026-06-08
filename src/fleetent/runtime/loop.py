@@ -30,7 +30,7 @@ from fleetent.observability import (
     record_injected_context,
     record_trace_event,
 )
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 from fleetent.runtime.budget import BudgetChecker, BudgetConfig, BudgetUsage, grace_max_tokens
 from fleetent.runtime.cancellation import CancellationChecker, CancelToken
 from fleetent.runtime.context import (

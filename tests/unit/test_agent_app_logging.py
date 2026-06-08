@@ -76,7 +76,7 @@ async def test_boot_configures_logging_json(
     with contextlib.ExitStack() as stack:
         _make_stack(stack)
         mock_csl = stack.enter_context(
-            patch("fleetent.observability.structured_logging.configure_structured_logging")
+            patch("fleetent.structured_logging.configure_structured_logging")
         )
         mock_structlog = stack.enter_context(patch("structlog.configure"))
 
@@ -114,7 +114,7 @@ async def test_boot_configures_logging_console(
     with contextlib.ExitStack() as stack:
         _make_stack(stack)
         mock_csl = stack.enter_context(
-            patch("fleetent.observability.structured_logging.configure_structured_logging")
+            patch("fleetent.structured_logging.configure_structured_logging")
         )
         mock_structlog = stack.enter_context(patch("structlog.configure"))
 
@@ -170,7 +170,7 @@ async def test_blank_log_directory_resolves_to_agent_home_data_logs(
     with contextlib.ExitStack() as stack:
         _make_stack(stack)
         mock_csl = stack.enter_context(
-            patch("fleetent.observability.structured_logging.configure_structured_logging")
+            patch("fleetent.structured_logging.configure_structured_logging")
         )
         stack.enter_context(patch("structlog.configure"))
 
@@ -202,7 +202,7 @@ async def test_explicit_log_directory_used_as_is(
     with contextlib.ExitStack() as stack:
         _make_stack(stack)
         mock_csl = stack.enter_context(
-            patch("fleetent.observability.structured_logging.configure_structured_logging")
+            patch("fleetent.structured_logging.configure_structured_logging")
         )
         stack.enter_context(patch("structlog.configure"))
 

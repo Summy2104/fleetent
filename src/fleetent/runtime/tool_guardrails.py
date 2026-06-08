@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from enum import Enum, auto
 
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 from fleetent.runtime.termination import LoopState
 
 _logger = get_logger("runtime.guardrails")

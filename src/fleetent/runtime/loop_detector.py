@@ -24,7 +24,7 @@ from collections import Counter
 from collections.abc import Sequence
 from typing import Any
 
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 from fleetent.runtime.termination import LoopState, StopReason
 
 _logger = get_logger("runtime.loop_detector")

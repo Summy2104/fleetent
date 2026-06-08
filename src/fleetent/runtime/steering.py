@@ -20,7 +20,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 from fleetent.runtime.cancellation import CancelToken
 
 _logger = get_logger("runtime.steering")
