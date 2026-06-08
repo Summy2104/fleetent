@@ -21,7 +21,10 @@ def _memory_module() -> ModuleType:
 def _knowledge_base_module() -> ModuleType:
     global _knowledge_base
     if _knowledge_base is None:
-        _knowledge_base = __import__("fleetent.intelligence.knowledge_base", fromlist=["*"])
+        try:
+            _knowledge_base = __import__("fleetent.intelligence.knowledge_base", fromlist=["*"])
+        except Exception:
+            _knowledge_base = __import__("fleetent.knowledge_base", fromlist=["*"])
     return _knowledge_base
 
 

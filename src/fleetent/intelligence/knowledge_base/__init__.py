@@ -1,5 +1,10 @@
 """Knowledge-base runtime public API."""
 
+import sys
+import types
+import typing as _typing
+from typing import TYPE_CHECKING
+
 from fleetent.intelligence.knowledge_base.bindings import (
     AgentKnowledgeBaseBinding,
     bind_agent_to_kb,
@@ -40,13 +45,6 @@ from fleetent.intelligence.knowledge_base.extraction import (
 from fleetent.intelligence.knowledge_base.extraction_store import (
     KnowledgeEntity,
     KnowledgeExtractionRun,
-)
-from fleetent.intelligence.knowledge_base.graph_search import (
-    EntityRef,
-    GraphSearchChunk,
-    GraphSearchResult,
-    RelationRef,
-    graph_search,
 )
 from fleetent.intelligence.knowledge_base.models import KnowledgeChunk, KnowledgeDocument
 from fleetent.intelligence.knowledge_base.operations import (
@@ -106,6 +104,51 @@ from fleetent.intelligence.knowledge_base.sync_planner import (
     execute_sync_plan,
     plan_local_directory_sync,
 )
+from fleetent.knowledge_base.retrieval.graph_search import graph_search
+
+if TYPE_CHECKING:
+    from fleetent.intelligence.knowledge_base.graph_search import (
+        EntityRef,
+        GraphSearchChunk,
+        GraphSearchResult,
+        RelationRef,
+    )
+
+
+def __getattr__(name: str) -> object:
+    if name in {
+        "EntityRef",
+        "GraphSearchChunk",
+        "GraphSearchResult",
+        "RelationRef",
+        "graph_search",
+    }:
+        from importlib import import_module
+
+        graph_search_module = import_module("fleetent.knowledge_base.retrieval.graph_search")
+
+        return getattr(graph_search_module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+_PUBLIC_GRAPH_SEARCH: _typing.Any = graph_search
+
+
+class _IntelligenceKnowledgeBasePublicModule(types.ModuleType):
+    """Keep legacy package-level imports compatible for callable graph search."""
+
+    def __setattr__(self, name: str, value: _typing.Any) -> None:
+        if name == "graph_search" and isinstance(value, types.ModuleType):
+            return
+        super().__setattr__(name, value)
+
+    def __getattribute__(self, name: str) -> _typing.Any:
+        if name == "graph_search":
+            return _PUBLIC_GRAPH_SEARCH
+        return super().__getattribute__(name)
+
+
+sys.modules[__name__].__class__ = _IntelligenceKnowledgeBasePublicModule
 
 __all__ = [
     "ConfluenceConnectorConfig",

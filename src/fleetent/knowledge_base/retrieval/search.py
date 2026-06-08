@@ -1,0 +1,205 @@
+from __future__ import annotations
+
+from dataclasses import replace
+from typing import Literal, Protocol
+
+from fleetent import vector_store
+from fleetent.config import KnowledgeBaseSettings, RerankSettings
+from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeReadable
+from fleetent.vector_store import rerank as rerank_runtime
+
+SearchMode = Literal["vector", "keyword", "hybrid"]
+_SEARCH_MODES: set[str] = {"vector", "keyword", "hybrid"}
+RERANK_CANDIDATE_MULTIPLIER = 5
+RERANK_CANDIDATE_MIN = 20
+RERANK_CANDIDATE_MAX = 100
+
+
+class LoggerProtocol(Protocol):
+    def warn(self, message: str, **fields: object) -> None: ...
+
+
+def _logger() -> LoggerProtocol:
+    from fleetent.observability.structured_logging import get_logger
+
+    return get_logger("knowledge_base")
+
+
+async def search(
+    query: str,
+    store: KnowledgeReadable,
+    tenant_id: str | None = None,
+    kb_ids: list[str] | None = None,
+    limit: int = 10,
+    mode: SearchMode = "vector",
+    rerank: bool = False,
+) -> list[KnowledgeChunk]:
+    """Search knowledge chunks using vector, keyword, or hybrid retrieval."""
+
+    if mode not in _SEARCH_MODES:
+        raise ValueError(f"unsupported knowledge search mode: {mode}")
+    if rerank and mode != "hybrid":
+        raise ValueError("rerank only supports hybrid knowledge search mode")
+    if limit <= 0:
+        return []
+
+    settings = _scope_settings()
+    resolved_tenant_id = tenant_id or settings.default_tenant_id
+    resolved_kb_ids = kb_ids or [settings.default_kb_id]
+    if mode == "keyword":
+        return store.search_keyword(query, resolved_tenant_id, resolved_kb_ids, limit)
+    if mode == "hybrid":
+        return await _search_hybrid(
+            query,
+            resolved_tenant_id,
+            resolved_kb_ids,
+            limit,
+            store,
+            rerank=rerank,
+        )
+
+    return await _search_vector(query, resolved_tenant_id, resolved_kb_ids, limit, store)
+
+
+async def _search_vector(
+    query: str,
+    tenant_id: str,
+    kb_ids: list[str],
+    limit: int,
+    store: KnowledgeReadable,
+) -> list[KnowledgeChunk]:
+    score_by_id: dict[str, float] = {}
+    for kb_id in kb_ids:
+        namespace = vector_store.knowledge_namespace(tenant_id, kb_id)
+        vector_results = await vector_store.search(query, namespace, limit)
+        for result in vector_results:
+            score_by_id[result.id] = max(score_by_id.get(result.id, result.score), result.score)
+
+    chunks = store.get_chunks_by_ids(tenant_id, list(score_by_id))
+    requested_kbs = set(kb_ids)
+    scored_chunks = [
+        replace(chunk, score=score_by_id[chunk.id])
+        for chunk in chunks
+        if chunk.kb_id in requested_kbs
+    ]
+    return sorted(
+        scored_chunks,
+        key=lambda chunk: (-chunk.score, chunk.position, chunk.id),
+    )[:limit]
+
+
+async def _search_hybrid(
+    query: str,
+    tenant_id: str,
+    kb_ids: list[str],
+    limit: int,
+    store: KnowledgeReadable,
+    *,
+    rerank: bool = False,
+) -> list[KnowledgeChunk]:
+    candidate_limit = _rerank_candidate_limit(limit) if rerank else limit
+    vector_chunks = await _search_vector(query, tenant_id, kb_ids, candidate_limit, store)
+    keyword_chunks = store.search_keyword(query, tenant_id, kb_ids, candidate_limit)
+    chunk_by_id = {chunk.id: chunk for chunk in vector_chunks}
+    chunk_by_id.update({chunk.id: chunk for chunk in keyword_chunks})
+
+    rrf_scores: dict[str, float] = {}
+    for rank, chunk in enumerate(vector_chunks, start=1):
+        rrf_scores[chunk.id] = rrf_scores.get(chunk.id, 0.0) + _rrf_score(rank)
+    for rank, chunk in enumerate(keyword_chunks, start=1):
+        rrf_scores[chunk.id] = rrf_scores.get(chunk.id, 0.0) + _rrf_score(rank)
+
+    fused = [
+        replace(chunk_by_id[chunk_id], score=score)
+        for chunk_id, score in rrf_scores.items()
+        if chunk_id in chunk_by_id
+    ]
+    candidates = sorted(fused, key=lambda chunk: (-chunk.score, chunk.position, chunk.id))
+    if not rerank:
+        return candidates[:limit]
+    return await _rerank_hybrid_candidates(
+        query,
+        candidates[:candidate_limit],
+        tenant_id=tenant_id,
+        kb_ids=kb_ids,
+        limit=limit,
+    )
+
+
+def _rerank_candidate_limit(limit: int) -> int:
+    return min(
+        max(limit * RERANK_CANDIDATE_MULTIPLIER, RERANK_CANDIDATE_MIN),
+        RERANK_CANDIDATE_MAX,
+    )
+
+
+async def _rerank_hybrid_candidates(
+    query: str,
+    candidates: list[KnowledgeChunk],
+    *,
+    tenant_id: str,
+    kb_ids: list[str],
+    limit: int,
+) -> list[KnowledgeChunk]:
+    provider = rerank_runtime.create_rerank_provider(_rerank_config())
+    try:
+        results = await provider.rerank(
+            query,
+            [candidate.content for candidate in candidates],
+            top_n=limit,
+        )
+    except Exception as exc:
+        reason = str(exc) or exc.__class__.__name__
+        _logger().warn(
+            "kb_rerank_failed",
+            tenant_id=tenant_id,
+            kb_ids=kb_ids,
+            limit=limit,
+            candidate_count=len(candidates),
+            reason=reason,
+        )
+        return candidates[:limit]
+
+    return _apply_rerank_results(candidates, results, limit)
+
+
+def _apply_rerank_results(
+    candidates: list[KnowledgeChunk],
+    results: list[rerank_runtime.RerankResult],
+    limit: int,
+) -> list[KnowledgeChunk]:
+    selected: list[KnowledgeChunk] = []
+    selected_indexes: set[int] = set()
+    for result in results:
+        if result.index < 0 or result.index >= len(candidates):
+            continue
+        if result.index in selected_indexes:
+            continue
+        selected_indexes.add(result.index)
+        selected.append(replace(candidates[result.index], score=result.score))
+        if len(selected) >= limit:
+            return selected
+
+    for index, candidate in enumerate(candidates):
+        if index not in selected_indexes:
+            selected.append(candidate)
+        if len(selected) >= limit:
+            break
+
+    return selected
+
+
+def _scope_settings() -> KnowledgeBaseSettings:
+    from fleetent.knowledge_base.retrieval.scope import _kb_config
+
+    return _kb_config()
+
+
+def _rerank_config() -> RerankSettings:
+    from fleetent import agent_config
+
+    return agent_config.active_agent_or_default().rerank
+
+
+def _rrf_score(rank: int, k: int = 60) -> float:
+    return 1.0 / (k + rank)

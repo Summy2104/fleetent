@@ -6,12 +6,13 @@ import argparse
 import asyncio
 import os
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from fleetent.intelligence.knowledge_base.extraction import (
+    run_entity_extraction as _run_entity_extraction,
+)
+from fleetent.intelligence.knowledge_base.extraction_store import KnowledgeExtractionRun
 from fleetent.platform.admin_cli.common import sanitize_cli_value, summary_line
-
-if TYPE_CHECKING:
-    from fleetent.intelligence.knowledge_base.extraction_store import KnowledgeExtractionRun
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -54,14 +55,11 @@ async def run_entity_extraction(
     document_id: str | None = None,
 ) -> KnowledgeExtractionRun:
     """Delegate entity extraction to the knowledge-base public API."""
-
-    from fleetent.intelligence.knowledge_base import run_entity_extraction as run
-
-    return await run(tenant_id, kb_id, document_id=document_id)
+    return await _run_entity_extraction(tenant_id, kb_id, document_id=document_id)
 
 
 def _handle_connectors(args: argparse.Namespace) -> None:
-    from fleetent.intelligence.knowledge_base import operations
+    from fleetent.knowledge_base import operations
 
     if args.connector_cmd == "list":
         connectors = operations.list_configured_connectors()

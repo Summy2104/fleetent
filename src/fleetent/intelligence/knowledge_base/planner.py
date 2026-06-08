@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from fleetent.intelligence.knowledge_base.graph_search import graph_search
 from fleetent.intelligence.knowledge_base.models import KnowledgeChunk
 from fleetent.intelligence.knowledge_base.runtime import search
 from fleetent.observability.structured_logging import get_logger
 
 KnowledgeSearchStepKind = Literal["hybrid_search", "graph_search", "hybrid_fill"]
+
+if TYPE_CHECKING:
+    from fleetent.knowledge_base.retrieval.graph_search import GraphSearchResult
 
 _RELATION_MARKERS = (
     " depends on ",
@@ -121,6 +123,7 @@ async def execute_knowledge_search_plan(plan: KnowledgeSearchPlan) -> list[Knowl
                 tenant_id=plan.tenant_id,
                 kb_ids=plan.kb_ids,
                 limit=remaining,
+                depth=1,
             )
             graph_chunks = [item.chunk for item in graph_result.chunks]
             graph_count += len(graph_chunks)
@@ -151,6 +154,28 @@ async def execute_knowledge_search_plan(plan: KnowledgeSearchPlan) -> list[Knowl
         rerank_requested=any(step.rerank for step in plan.steps),
     )
     return chunks
+
+
+async def graph_search(
+    query: str,
+    tenant_id: str | None = None,
+    kb_ids: list[str] | None = None,
+    limit: int = 10,
+    depth: int = 1,
+) -> GraphSearchResult:
+    """Compatibility wrapper for legacy planner monkeypatches/tests."""
+
+    from fleetent.knowledge_base.retrieval.graph_search import (
+        graph_search as retrieval_graph_search,
+    )
+
+    return await retrieval_graph_search(
+        query,
+        tenant_id=tenant_id,
+        kb_ids=kb_ids,
+        limit=limit,
+        depth=depth,
+    )
 
 
 def _append_deduped(

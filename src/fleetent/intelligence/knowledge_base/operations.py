@@ -120,6 +120,20 @@ def get_connector_config(
     raise ValueError(f"unknown connector_id: {connector_id}")
 
 
+def _get_connector_definition(
+    connector_id: str,
+    settings: KnowledgeConfigSnapshot | None,
+) -> ConnectorDefinition:
+    if settings is None:
+        try:
+            return get_connector_config(connector_id)
+        except TypeError:
+            # Backward compatibility for monkeypatched callables that still expose
+            # a legacy signature without keyword-only settings.
+            return get_connector_config(connector_id, settings=None)
+    return get_connector_config(connector_id, settings=settings)
+
+
 async def check_connector(
     connector_id: str,
     *,
@@ -128,7 +142,7 @@ async def check_connector(
     confluence_client: ConfluenceClient | None = None,
 ) -> ConnectorCheckResult:
     """Check connector credential reference and remote scope accessibility."""
-    definition = get_connector_config(connector_id, settings=settings)
+    definition = _get_connector_definition(connector_id, settings)
     if not definition.enabled:
         return ConnectorCheckResult(connector_id, "disabled", "connector is disabled")
     credential_result = _check_credential(definition)
@@ -171,7 +185,7 @@ async def run_connector_sync(
     confluence_client: ConfluenceClient | None = None,
 ) -> ConnectorSyncResult:
     """Run connector dry-run or manual sync and persist latest status."""
-    definition = get_connector_config(connector_id, settings=settings)
+    definition = _get_connector_definition(connector_id, settings)
     started_at = _now()
     if not definition.enabled:
         result = ConnectorSyncResult(connector_id, "disabled", {})
@@ -199,7 +213,7 @@ def get_connector_status(
     settings: KnowledgeConfigSnapshot | None = None,
 ) -> ConnectorStatus:
     """Read the latest known connector operation status."""
-    definition = get_connector_config(connector_id, settings=settings)
+    definition = _get_connector_definition(connector_id, settings)
     row = (
         _database()
         .execute(

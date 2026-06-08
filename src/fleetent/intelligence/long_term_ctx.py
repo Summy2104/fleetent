@@ -2,10 +2,12 @@
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Literal
 
-from fleetent.config import LongTermContextSettings
-from fleetent.intelligence import knowledge_base, long_term_ctx_policy, memory
+from fleetent.config import LongTermContextSettings, Settings
+from fleetent.db import SQLiteDatabase, create_database
+from fleetent.intelligence import long_term_ctx_policy, memory
 from fleetent.intelligence.long_term_ctx_policy import (
     AgentContextIdentity as AgentContextIdentity,
 )
@@ -18,6 +20,9 @@ from fleetent.intelligence.long_term_ctx_policy import (
 from fleetent.intelligence.long_term_ctx_policy import (
     resolve_context_policy as resolve_context_policy,
 )
+from fleetent.knowledge_base.core import KnowledgeStore
+from fleetent.knowledge_base.retrieval.search import SearchMode
+from fleetent.knowledge_base.retrieval.search import search as kb_search
 
 _MEMORY_LIMIT = 10
 _KNOWLEDGE_LIMIT = 10
@@ -93,6 +98,30 @@ class _ContextCandidate:
 
 
 KnowledgeProvider = Callable[[str, str, str, int], Awaitable[list[object]]]
+
+
+# Back-compat seam for existing monkeypatch-based unit and integration tests that
+# patch ``long_term_ctx.knowledge_base.search``.
+async def _kb_search_compat(
+    query: str,
+    tenant_id: str | None = None,
+    kb_ids: list[str] | None = None,
+    limit: int = 10,
+    mode: SearchMode = "vector",
+) -> list[object]:
+    return list(
+        await kb_search(
+            query,
+            store=KnowledgeStore(_database()),
+            tenant_id=tenant_id,
+            kb_ids=kb_ids,
+            limit=limit,
+            mode=mode,
+        )
+    )
+
+
+knowledge_base = SimpleNamespace(search=_kb_search_compat)
 
 _knowledge_provider: KnowledgeProvider | None = None
 
@@ -580,3 +609,7 @@ def _knowledge_source(item: object) -> ContextSource:
         score=float(getattr(item, "score", 1.0)),
         metadata=metadata,
     )
+
+
+def _database() -> SQLiteDatabase:
+    return create_database(Settings().database_url)

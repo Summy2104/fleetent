@@ -262,7 +262,7 @@ def _write_connector_status(archive: zipfile.ZipFile, settings: AgentFile) -> li
 
 
 def list_configured_connectors(settings: AgentFile | None = None) -> list[object]:
-    from fleetent.intelligence.knowledge_base.operations import (
+    from fleetent.knowledge_base.operations import (
         list_configured_connectors as list_kb_connectors,
     )
 
@@ -270,7 +270,7 @@ def list_configured_connectors(settings: AgentFile | None = None) -> list[object
 
 
 def get_connector_status(connector_id: str, settings: AgentFile | None = None) -> object:
-    from fleetent.intelligence.knowledge_base.operations import (
+    from fleetent.knowledge_base.operations import (
         get_connector_status as get_kb_connector_status,
     )
 

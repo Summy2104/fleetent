@@ -23,8 +23,42 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from fleetent import auth, user_store
+from fleetent.config import KnowledgeBaseSettings, Settings
+from fleetent.db import SQLiteDatabase, create_database
 from fleetent.governance import audit_log
-from fleetent.intelligence import knowledge_base
+from fleetent.intelligence.knowledge_base import parsers as legacy_parsers
+from fleetent.knowledge_base import operations as knowledge_base
+from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeStore
+from fleetent.knowledge_base.ingest.config import as_knowledge_base_settings
+from fleetent.knowledge_base.ingest.connectors.sync import (
+    LocalDirectorySourceConfig,
+    sync_local_directory,
+)
+from fleetent.knowledge_base.ingest.runtime import delete_document as _kb_delete_document
+from fleetent.knowledge_base.ingest.runtime import ingest_parsed as kb_ingest_parsed
+from fleetent.knowledge_base.management.runtime import (
+    archive_knowledge_base as _kb_archive_knowledge_base,
+)
+from fleetent.knowledge_base.management.runtime import (
+    create_knowledge_base as _kb_create_knowledge_base,
+)
+from fleetent.knowledge_base.management.runtime import (
+    is_active_knowledge_base as _kb_is_active_knowledge_base,
+)
+from fleetent.knowledge_base.management.runtime import (
+    list_documents as _kb_list_documents,
+)
+from fleetent.knowledge_base.management.runtime import (
+    list_knowledge_bases as _kb_list_knowledge_bases,
+)
+from fleetent.knowledge_base.management.runtime import (
+    preview_document_chunks as _kb_preview_document_chunks,
+)
+from fleetent.knowledge_base.management.runtime import (
+    update_knowledge_base_description as _kb_update_knowledge_base_description,
+)
+from fleetent.knowledge_base.retrieval.search import SearchMode
+from fleetent.knowledge_base.retrieval.search import search as search_kb
 from fleetent.platform.knowledge_base_management import agent_kbs_store, kb_connector_store
 
 router = APIRouter(prefix="/admin/kb")
@@ -42,20 +76,37 @@ _VALID_MODES = {"vector", "keyword", "hybrid"}
 
 def kb_engine_list(tenant_id: str) -> list[dict[str, Any]]:
     """List KBs (kb_id/description/doc_count/chunk_count/last_import/archived)."""
-    return [dict(row) for row in knowledge_base.list_knowledge_bases(tenant_id)]
+    rows: list[dict[str, Any]] = []
+    for row in _kb_list_knowledge_bases(tenant_id):
+        data = dict(row)
+        archived = (
+            data.get("archived") if "archived" in data else data.get("archived_at") is not None
+        )
+        rows.append(
+            {
+                "tenant_id": data.get("tenant_id"),
+                "kb_id": data["kb_id"],
+                "description": data.get("description", ""),
+                "doc_count": int(data.get("doc_count") or 0),
+                "chunk_count": int(data.get("chunk_count") or 0),
+                "last_import": data.get("last_import"),
+                "archived": bool(archived),
+            }
+        )
+    return rows
 
 
 def kb_engine_create(tenant_id: str, kb_id: str, description: str) -> None:
-    knowledge_base.create_knowledge_base(tenant_id, kb_id, description)
+    _kb_create_knowledge_base(tenant_id, kb_id, description)
 
 
 def kb_engine_edit(tenant_id: str, kb_id: str, description: str) -> None:
-    if not knowledge_base.update_knowledge_base_description(tenant_id, kb_id, description):
+    if not _kb_update_knowledge_base_description(tenant_id, kb_id, description):
         raise HTTPException(status_code=404, detail="kb not found")
 
 
 def kb_engine_archive(tenant_id: str, kb_id: str) -> None:
-    archived = asyncio.run(knowledge_base.archive_knowledge_base(tenant_id, kb_id))
+    archived = asyncio.run(_kb_archive_knowledge_base(tenant_id, kb_id))
     if not archived:
         raise HTTPException(status_code=404, detail="kb not found or already archived")
 
@@ -67,14 +118,16 @@ def kb_ingest_text(
     _require_active_kb(tenant_id, kb_id)
     parsed = _parse_import_document(source, content, document_format)
     document = asyncio.run(
-        knowledge_base.ingest_parsed(
+        kb_ingest_parsed(
             parsed,
             tenant_id=tenant_id,
             kb_id=kb_id,
             source=source,
+            source_url=None,
+            settings=_ingest_settings(),
         )
     )
-    chunks = knowledge_base.preview_document_chunks(tenant_id, kb_id, document.id)
+    chunks = _kb_preview_document_chunks(tenant_id, kb_id, document.id)
     return {
         "document_id": document.id,
         "chunks": len(chunks),
@@ -89,15 +142,12 @@ def kb_sync_directory(tenant_id: str, kb_id: str, path: str) -> dict[str, Any]:
     """Sync a local directory source. Bridges connectors.sync_local_directory on host."""
     _require_active_kb(tenant_id, kb_id)
     try:
-        config = knowledge_base.LocalDirectorySourceConfig(
+        config = LocalDirectorySourceConfig(
             source_id=f"admin-local:{tenant_id}:{kb_id}:{Path(path).expanduser().resolve()}",
             root_path=path,
             allowed_roots=[path],
         )
-        plan = asyncio.run(
-            knowledge_base.plan_local_directory_sync(config, tenant_id=tenant_id, kb_id=kb_id)
-        )
-        summary = asyncio.run(knowledge_base.execute_sync_plan(plan))
+        summary = asyncio.run(sync_local_directory(config, tenant_id=tenant_id, kb_id=kb_id))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
@@ -108,26 +158,27 @@ def kb_sync_directory(tenant_id: str, kb_id: str, path: str) -> dict[str, Any]:
         "unsupported": summary.unsupported,
         "unchanged": summary.unchanged,
         "deleted": summary.deleted,
-        "archived": summary.archived,
-        "changed": summary.changed,
-        "auth_failed": summary.auth_failed,
+        "archived": getattr(summary, "archived", 0),
+        "changed": getattr(summary, "changed", 0),
+        "auth_failed": getattr(summary, "auth_failed", 0),
         "wired": True,
     }
 
 
 def kb_list_documents(tenant_id: str, kb_id: str) -> list[dict[str, Any]]:
-    return [dict(row) for row in knowledge_base.list_documents(tenant_id, kb_id)]
+    return [dict(row) for row in _kb_list_documents(tenant_id, kb_id)]
 
 
 def kb_chunk_preview(tenant_id: str, kb_id: str, document_id: str) -> list[dict[str, Any]]:
     return [
-        dict(row) for row in knowledge_base.preview_document_chunks(tenant_id, kb_id, document_id)
+        _chunk_to_search_result(chunk)
+        for chunk in _kb_preview_document_chunks(tenant_id, kb_id, document_id)
     ]
 
 
 def kb_delete_document(tenant_id: str, kb_id: str, document_id: str) -> None:
     """Delete a document + cascade its chunks/vectors. Bridges knowledge_base.delete."""
-    deleted = asyncio.run(knowledge_base.delete_document(tenant_id, kb_id, document_id))
+    deleted = asyncio.run(_kb_delete_document(tenant_id, kb_id, document_id))
     if not deleted:
         raise HTTPException(status_code=404, detail="document not found in kb")
 
@@ -136,10 +187,11 @@ def kb_search(
     query: str, tenant_id: str, kb_ids: list[str], mode: str, limit: int
 ) -> list[dict[str, Any]]:
     """Retrieval test. Bridges knowledge_base.search (vector/keyword/hybrid) on host."""
-    search_mode = cast(knowledge_base.SearchMode, mode)
+    search_mode = cast(SearchMode, mode)
     chunks = asyncio.run(
-        knowledge_base.search(
+        search_kb(
             query,
+            store=KnowledgeStore(_knowledge_database()),
             tenant_id=tenant_id,
             kb_ids=kb_ids,
             mode=search_mode,
@@ -172,6 +224,10 @@ def _session_user(authorization: str | None) -> user_store.User:
     if user is None:
         raise HTTPException(status_code=401, detail="invalid session")
     return user
+
+
+def _knowledge_database() -> SQLiteDatabase:
+    return create_database(Settings().database_url)
 
 
 def _current_user(authorization: str | None) -> user_store.User:
@@ -238,23 +294,29 @@ class EvalBody(BaseModel):
 
 def _parse_import_document(
     source: str, content: str, document_format: str
-) -> knowledge_base.ParsedDocument:
+) -> legacy_parsers.ParsedDocument:
     normalized_format = document_format.lower()
     if normalized_format in {"text", "txt"}:
-        return knowledge_base.parse_text(source, content)
+        return legacy_parsers.parse_text(source, content)
     if normalized_format in {"markdown", "md"}:
-        return knowledge_base.parse_markdown(source, content)
+        return legacy_parsers.parse_markdown(source, content)
     if normalized_format in {"html", "htm"}:
-        return knowledge_base.parse_html(source, content)
+        return legacy_parsers.parse_html(source, content)
     raise HTTPException(status_code=422, detail=f"unsupported document_format: {document_format}")
 
 
+def _ingest_settings() -> KnowledgeBaseSettings:
+    """Return knowledge-base ingest settings derived from stored connector definitions."""
+
+    return as_knowledge_base_settings(connectors=kb_connector_store.list_connectors())
+
+
 def _require_active_kb(tenant_id: str, kb_id: str) -> None:
-    if not knowledge_base.is_active_knowledge_base(tenant_id, kb_id):
+    if not _kb_is_active_knowledge_base(tenant_id, kb_id):
         raise HTTPException(status_code=404, detail="kb not found or archived")
 
 
-def _chunk_to_search_result(chunk: knowledge_base.KnowledgeChunk) -> dict[str, Any]:
+def _chunk_to_search_result(chunk: KnowledgeChunk) -> dict[str, Any]:
     return {
         "chunk_id": chunk.id,
         "document_id": chunk.document_id,
