@@ -41,6 +41,8 @@ class PermissionGate:
         tool_args: dict[str, Any],
         requester_user_id: str,
         reply_func: Callable[..., Coroutine[Any, Any, None]],
+        medium_timeout: float | None = None,
+        high_timeout: float | None = None,
     ) -> ApprovalResult:
         _init_db()
         now = datetime.datetime.now(datetime.UTC).isoformat()
@@ -64,7 +66,12 @@ class PermissionGate:
         event = asyncio.Event()
         self._events[approval_id] = event
 
-        timeout = self._medium_timeout if risk_level == "medium" else self._high_timeout
+        # Per-call overrides take precedence over instance defaults, enabling
+        # per-agent timeout configuration without creating a new gate instance.
+        if risk_level == "medium":
+            timeout = medium_timeout if medium_timeout is not None else self._medium_timeout
+        else:
+            timeout = high_timeout if high_timeout is not None else self._high_timeout
         await reply_func(
             f"Tool `{tool_name}` requires approval (risk: {risk_level}). Approval ID: {approval_id}"
         )

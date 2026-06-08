@@ -287,6 +287,13 @@ async def route(msg: NormalizedMessage) -> None:
                 governance=governance,
                 model_policy=model_policy,
                 cancel_token=token,
+                permission_gate_enabled=agent.permission_gate_enabled if agent else True,
+                permission_gate_medium_timeout=(
+                    agent.permission_gate_medium_timeout_seconds if agent else None
+                ),
+                permission_gate_high_timeout=(
+                    agent.permission_gate_high_timeout_seconds if agent else None
+                ),
             )
 
         # P4: session_end hook — observe after run completes, before session save.

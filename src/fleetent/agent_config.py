@@ -260,6 +260,7 @@ class AgentFile(BaseModel):
     hooks_decision_failure: Literal["open", "strict"] = "open"
     hooks_timeout_seconds: float = 5.0
     # permission gate
+    permission_gate_enabled: bool = True
     permission_gate_medium_timeout_seconds: int = 300
     permission_gate_high_timeout_seconds: int = 3600
     # provider circuit breaker
@@ -310,7 +311,9 @@ def _resolve_agents_dir(agents_dir: str | Path | None) -> Path:
     """Return the agents root, falling back to env then the default."""
     if agents_dir is not None:
         return Path(agents_dir)
-    return Path(os.environ.get("FLEETENT_AGENTS_DIR", str(AGENTS_DIR)))
+    # Evaluate paths.agents_dir() at call time so FLEETENT_HOME monkeypatching in
+    # tests takes effect. AGENTS_DIR module constant stays for backwards compat.
+    return Path(os.environ.get("FLEETENT_AGENTS_DIR", str(paths.agents_dir())))
 
 
 def load_agent_file(agent_dir: Path) -> AgentFile:
