@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from fleetent import paths
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.observability.structured_logging import _redact_value
+from fleetent.structured_logging import _redact_value
 
 _MAX_STRING_LENGTH = 2048
 _MAX_SEQUENCE_LENGTH = 50

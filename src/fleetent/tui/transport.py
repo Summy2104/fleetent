@@ -11,7 +11,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from starlette.websockets import WebSocketDisconnect
 
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 from fleetent.tui import protocol as proto
 
 _logger = get_logger("tui.transport")

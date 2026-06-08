@@ -236,7 +236,7 @@ class Settings(BaseSettings):
 
 
 def configure_logging(settings: Settings) -> None:
-    from fleetent.observability.structured_logging import configure_structured_logging
+    from fleetent.structured_logging import configure_structured_logging
 
     configure_structured_logging(
         console_level=settings.observability.logging.console_level,

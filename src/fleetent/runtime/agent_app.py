@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from fleetent import agent_config, paths, user_store
 from fleetent.agent_config import AgentFile
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 
 if TYPE_CHECKING:
     from fleetent.im_gateway.slack_supervisor import SlackSupervisor
@@ -113,7 +113,7 @@ def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
 
     import structlog
 
-    from fleetent.observability.structured_logging import configure_structured_logging
+    from fleetent.structured_logging import configure_structured_logging
 
     log = agent.observability.logging
     resolved_dir: str | Path = log.directory if log.directory else home_dir / "data" / "logs"

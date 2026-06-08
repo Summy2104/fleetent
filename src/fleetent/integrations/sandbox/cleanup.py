@@ -12,7 +12,7 @@ demand — and does not depend on any scheduler.
 from __future__ import annotations
 
 from fleetent.integrations.sandbox.client import SANDBOX_NAME_PREFIX, SandboxClient
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 
 _logger = get_logger("sandbox.cleanup")
 

@@ -19,7 +19,7 @@ from enum import StrEnum
 
 from openai import APIStatusError
 
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 
 _logger = get_logger("runtime.error")
 

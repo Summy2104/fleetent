@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 
 _logger = get_logger("sandbox.maintenance")
 

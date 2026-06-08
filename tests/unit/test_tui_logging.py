@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 def test_transport_logger_is_custom() -> None:
     import fleetent.tui.transport as mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(mod._logger, Logger)
 
@@ -40,7 +40,7 @@ async def test_transport_warns_on_close_error() -> None:
 
 def test_backend_logger_is_custom() -> None:
     import fleetent.tui.backend as mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(mod._logger, Logger)
 
@@ -50,7 +50,7 @@ def test_backend_logger_is_custom() -> None:
 
 def test_dispatch_logger_is_custom() -> None:
     import fleetent.tui.dispatch as mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(mod._logger, Logger)
 
@@ -60,6 +60,6 @@ def test_dispatch_logger_is_custom() -> None:
 
 def test_app_logger_is_custom() -> None:
     import fleetent.tui.app as mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(mod._logger, Logger)

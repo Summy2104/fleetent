@@ -57,7 +57,7 @@ async def test_agent_permission_gate_enabled_readable_at_boot(
         patch("fleetent.skills.scan"),
         patch("fleetent.tools.plugin_loader.load_plugins"),
         patch("fleetent.vector_store.configure_from_active_agent"),
-        patch("fleetent.observability.structured_logging.configure_structured_logging"),
+        patch("fleetent.structured_logging.configure_structured_logging"),
         patch("structlog.configure"),
     ):
         from fleetent.runtime import agent_app

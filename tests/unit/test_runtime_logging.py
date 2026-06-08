@@ -262,7 +262,7 @@ def test_error_classifier_logs_debug_on_classify() -> None:
 
 def test_loop_logger_is_custom_not_structlog() -> None:
     import fleetent.runtime.loop as loop_mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(loop_mod._logger, Logger)
 
@@ -292,7 +292,7 @@ def test_loop_has_no_structlog_import() -> None:
 
 def test_context_logger_is_custom_not_structlog() -> None:
     import fleetent.runtime.context as ctx_mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(ctx_mod._logger, Logger)
 
@@ -302,14 +302,14 @@ def test_context_logger_is_custom_not_structlog() -> None:
 
 def test_sub_agent_logger_is_custom_not_stdlib() -> None:
     import fleetent.runtime.sub_agent as sa_mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(sa_mod._logger, Logger)
 
 
 def test_sub_agent_lifecycle_logger_is_custom_not_stdlib() -> None:
     import fleetent.runtime.sub_agent_lifecycle as sal_mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(sal_mod._logger, Logger)
 
@@ -319,6 +319,6 @@ def test_sub_agent_lifecycle_logger_is_custom_not_stdlib() -> None:
 
 def test_agent_app_logger_is_custom_not_structlog() -> None:
     import fleetent.runtime.agent_app as app_mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(app_mod._logger, Logger)

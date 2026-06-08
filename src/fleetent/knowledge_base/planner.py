@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Literal
 
 from fleetent.knowledge_base.models import KnowledgeChunk
 from fleetent.knowledge_base.runtime import search
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 
 KnowledgeSearchStepKind = Literal["hybrid_search", "graph_search", "hybrid_fill"]
 

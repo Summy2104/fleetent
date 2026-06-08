@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 def test_controller_logger_is_custom() -> None:
     import fleetent.platform.agent_lifecycle.controller as mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(mod._logger, Logger)
 
@@ -83,7 +83,7 @@ def test_controller_logs_warn_on_duplicate_start() -> None:
 
 def test_materialize_logger_is_custom() -> None:
     import fleetent.platform.agent_lifecycle.materialize as mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(mod._logger, Logger)
 
@@ -93,7 +93,7 @@ def test_materialize_logger_is_custom() -> None:
 
 def test_lifecycle_api_logger_is_custom() -> None:
     import fleetent.platform.agent_lifecycle.lifecycle_admin_api as mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(mod._logger, Logger)
 
@@ -103,6 +103,6 @@ def test_lifecycle_api_logger_is_custom() -> None:
 
 def test_slack_supervisor_logger_is_custom() -> None:
     import fleetent.im_gateway.slack_supervisor as mod
-    from fleetent.observability.structured_logging import Logger
+    from fleetent.structured_logging import Logger
 
     assert isinstance(mod._logger, Logger)

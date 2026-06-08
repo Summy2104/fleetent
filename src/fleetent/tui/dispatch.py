@@ -12,9 +12,9 @@ import uuid
 from typing import Any, Literal, cast
 
 from fleetent.governance import permission_gate
-from fleetent.observability.structured_logging import get_logger
 from fleetent.runtime import CancelToken, run_stream
 from fleetent.session import manager as session_mgr
+from fleetent.structured_logging import get_logger
 from fleetent.tui import protocol as p
 from fleetent.tui.transport import Transport
 

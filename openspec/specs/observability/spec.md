@@ -4,6 +4,10 @@
 定义 fleetent 的 observability 行为边界。当前规范覆盖 structured logging：程序日志、
 启动诊断、脱敏基线、console/file 输出和日志通道故障隔离。agent run traces、usage metrics
 和 dashboard 由后续 changes 独立扩展。
+
+> 注：structured logger 的**模块归属/放置**契约（顶层基础设施模块 `fleetent.structured_logging`
+> + 依赖方向规则 + 旧路径迁移）已移交 `structured-logging` spec 承载；本 spec 仅保留其
+> **行为** requirements（public API / level / 通道 / 脱敏 / 故障隔离），不再定义其物理位置。
 ## Requirements
 ### Requirement: Structured logger public API
 系统 SHALL 提供 observability structured logger public API，供组件按 component 名称写入结构化程序日志。

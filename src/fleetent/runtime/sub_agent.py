@@ -8,10 +8,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from fleetent.observability.structured_logging import get_logger
 from fleetent.runtime import sub_agent_lifecycle
 from fleetent.runtime.cancellation import CancelToken
 from fleetent.runtime.sub_agent_lifecycle import SubAgentLifecycle, SubAgentState
+from fleetent.structured_logging import get_logger
 
 _logger = get_logger("runtime.sub_agent")
 

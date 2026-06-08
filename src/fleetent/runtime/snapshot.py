@@ -18,7 +18,7 @@ from fleetent.agent_config import AgentFile, default_models
 from fleetent.agent_store import AgentVersion
 from fleetent.governance.agent_policy import check_tool_access
 from fleetent.model import ModelPolicySnapshot
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 
 _logger = get_logger("runtime.snapshot")
 

@@ -79,6 +79,39 @@ def _top_level_component(module_name: str) -> str | None:
     return parts[1]
 
 
+_BUSINESS_CAPABILITY_PREFIXES = (
+    "fleetent.runtime",
+    "fleetent.memory",
+    "fleetent.knowledge_base",
+    "fleetent.reflection",
+    "fleetent.long_term_ctx",
+    "fleetent.session",
+    "fleetent.tools",
+)
+
+
+def test_structured_logging_infra_boundary() -> None:
+    import importlib
+
+    module = importlib.import_module("fleetent.structured_logging")
+    assert module.__file__ is not None
+    located = Path(module.__file__)
+    assert located.name == "structured_logging.py"
+    assert located.parent.name == "fleetent"
+
+    tree = ast.parse(located.read_text(encoding="utf-8"), filename=str(located))
+    imported_modules = set(_iter_imported_modules(tree))
+
+    assert not _is_imported_from(_BUSINESS_CAPABILITY_PREFIXES, imported_modules), (
+        "fleetent.structured_logging imports a business capability module, "
+        "violating its infrastructure-only boundary"
+    )
+    assert not _is_imported_from(["fleetent.platform"], imported_modules), (
+        "fleetent.structured_logging imports fleetent.platform, "
+        "violating its infrastructure-only boundary"
+    )
+
+
 def test_forbidden_edges_for_dissolution() -> None:
     for path in _src_python_paths():
         module_name = _module_name(path)

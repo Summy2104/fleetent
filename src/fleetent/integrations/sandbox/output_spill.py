@@ -18,7 +18,7 @@ from pathlib import Path
 
 from fleetent import paths
 from fleetent.integrations.sandbox.output_truncation import truncate_stream
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 
 _logger = get_logger("sandbox.output_spill")
 

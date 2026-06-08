@@ -66,7 +66,7 @@ from fleetent.knowledge_base.retrieval.search import (
 from fleetent.knowledge_base.retrieval.search import (
     search as _search_chunks,
 )
-from fleetent.observability.structured_logging import get_logger
+from fleetent.structured_logging import get_logger
 from fleetent.vector_store import rerank as rerank_runtime
 
 _logger = get_logger("knowledge_base")

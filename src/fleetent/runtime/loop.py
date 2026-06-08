@@ -30,7 +30,6 @@ from fleetent.observability import (
     record_injected_context,
     record_trace_event,
 )
-from fleetent.observability.structured_logging import get_logger
 from fleetent.runtime.budget import BudgetChecker, BudgetConfig, BudgetUsage, grace_max_tokens
 from fleetent.runtime.cancellation import CancellationChecker, CancelToken
 from fleetent.runtime.context import (
@@ -60,6 +59,7 @@ from fleetent.runtime.tool_guardrails import GuardrailAction, evaluate_guardrail
 from fleetent.skills import available_skills_prompt, collect_disabled_trace
 from fleetent.skills import match as match_skill  # noqa: F401  # patch target + API parity
 from fleetent.skills import scan as scan_skills
+from fleetent.structured_logging import get_logger
 from fleetent.tools.multimodal import build_message_with_images, has_image_block
 from fleetent.tools.registry import (
     ToolContext,
