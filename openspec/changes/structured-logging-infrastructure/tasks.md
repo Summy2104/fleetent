@@ -32,7 +32,7 @@
 
 ## 5. 收尾验收
 
-- [ ] 5.1 `uv run python scripts/check_test_layers.py` 通过
-- [ ] 5.2 `make test-pr` 全绿
-- [ ] 5.3 `uv run pytest tests/integration -q` 对照 main 基线，确认无新增失败
-- [ ] 5.4 解耦基线复核：`fleetent agent run` 在无 platform 环境下日志正常（structured_logging 作为底座不引入 platform 依赖）
+- [x] 5.1 `uv run python scripts/check_test_layers.py` 通过
+- [x] 5.2 `make test-pr` 全绿
+- [x] 5.3 `uv run pytest tests/integration -q` 对照 main 基线，确认无新增失败
+- [x] 5.4 解耦基线复核：`fleetent agent run` 在无 platform 环境下日志正常（structured_logging 作为底座不引入 platform 依赖）
