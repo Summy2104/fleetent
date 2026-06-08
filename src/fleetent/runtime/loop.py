@@ -6,7 +6,7 @@ import json
 import random
 import time
 import uuid
-from collections.abc import AsyncGenerator, Callable, Coroutine
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Literal, cast
@@ -78,6 +78,7 @@ _SYSTEM = "You are a helpful assistant with access to tools. Use them when neede
 _SUB_AGENT_TOOL = "sub_agent"
 
 ReplyFunc = Callable[[str], Coroutine[Any, Any, None]]
+ProgressFunc = Callable[[dict[str, Any]], Awaitable[None]]
 
 # The single code-execution tool gated by the SB3 three-state mode. Filtered out
 # of an agent's schema (the one enablement point, D1) when code execution is not
@@ -621,6 +622,7 @@ async def _plan_run_slots(
     permission_gate_enabled: bool = True,
     permission_gate_medium_timeout: int | None = None,
     permission_gate_high_timeout: int | None = None,
+    progress_func: ProgressFunc | None = None,
 ) -> list[_PlanSlot]:
     """Phase one for run() (D2/D3/D6): serial, original order — produce one slot
     per tool_call. Guardrail, pre_tool_use hook, and (medium/high) approval are decided
@@ -755,6 +757,11 @@ async def _plan_run_slots(
                     )
                 )
                 continue
+        if progress_func is not None:
+            try:  # noqa: SIM105 — cannot use contextlib.suppress with async await
+                await progress_func({"type": "tool_call", "name": name})
+            except Exception:  # noqa: BLE001 — progress feedback must not break the run
+                pass
         slots.append(
             _PlanSlot(
                 tc_id=tc.id,
@@ -1413,6 +1420,7 @@ async def run(
     permission_gate_enabled: bool = True,
     permission_gate_medium_timeout: int | None = None,
     permission_gate_high_timeout: int | None = None,
+    progress_func: ProgressFunc | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1462,6 +1470,7 @@ async def run(
             permission_gate_enabled=permission_gate_enabled,
             permission_gate_medium_timeout=permission_gate_medium_timeout,
             permission_gate_high_timeout=permission_gate_high_timeout,
+            progress_func=progress_func,
         )
     finally:
         _active_runs -= 1
@@ -1493,6 +1502,7 @@ async def _run_inner(
     permission_gate_enabled: bool = True,
     permission_gate_medium_timeout: int | None = None,
     permission_gate_high_timeout: int | None = None,
+    progress_func: ProgressFunc | None = None,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -1768,6 +1778,7 @@ async def _run_inner(
             permission_gate_enabled=permission_gate_enabled,
             permission_gate_medium_timeout=permission_gate_medium_timeout,
             permission_gate_high_timeout=permission_gate_high_timeout,
+            progress_func=progress_func if not is_sub_agent else None,
         )
         pending = [s for s in slots if s.placeholder is None]
         results = await _execute_pending(

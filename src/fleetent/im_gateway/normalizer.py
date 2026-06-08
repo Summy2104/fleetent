@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,6 +35,10 @@ class NormalizedMessage:
     # Pre-resolved agent name (per-agent-slack-connector): set when the receiving
     # connection already identifies the agent (Slack). Empty = resolve via the index.
     agent_name: str = field(default="")
+    # Optional progress callback: called with {"type": "tool_call", "name": ...} before
+    # each tool executes. Adapters that want to show real-time feedback supply this;
+    # omitting it (None) preserves the existing silent behavior.
+    progress_func: Callable[[dict[str, Any]], Awaitable[None]] | None = field(default=None)
 
 
 def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> AgentFile | None:
@@ -294,6 +298,7 @@ async def route(msg: NormalizedMessage) -> None:
                 permission_gate_high_timeout=(
                     agent.permission_gate_high_timeout_seconds if agent else None
                 ),
+                progress_func=msg.progress_func,
             )
 
         # P4: session_end hook — observe after run completes, before session save.

@@ -32,7 +32,9 @@ async def test_slack_handler_stamps_owner_and_agent(monkeypatch):
     async def say(text, thread_ts=None):
         pass
 
-    await handler_holder["app_mention"]({"user": "U1", "text": "hi", "ts": "1", "channel": "C1"}, say)
+    await handler_holder["app_mention"](
+        {"user": "U1", "text": "hi", "ts": "1", "channel": "C1"}, say
+    )
     assert routed["owner_id"] == "ownerA"
     assert routed["agent_name"] == "support"
     # Identity is the platform-native id resolved locally (no platform user_store).
