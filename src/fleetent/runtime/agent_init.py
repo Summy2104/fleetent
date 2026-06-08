@@ -9,6 +9,7 @@ installed global command has no repo working tree to read repository example tem
 
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 
 import yaml
@@ -81,7 +82,9 @@ def scaffold_agent_home(
 
     env_path = home_dir / ".env"
     if not env_path.exists():
+        tui_token = f"ma-{secrets.token_hex(32)}"
         body = "".join(f"{name}=\n" for name in _referenced_env_names(agent))
+        body += f"FLEETENT_TUI_TOKEN={tui_token}\n"
         env_path.write_text(body, encoding="utf-8")
 
     return home_dir

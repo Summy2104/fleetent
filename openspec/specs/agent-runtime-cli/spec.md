@@ -182,3 +182,14 @@ incremented on entry and decremented in a `finally` block on exit.
 
 - **WHEN** 两个不同 home 的 agent 进程在同一 CWD 启动，各自 home 的 `skills/` 内容不同
 - **THEN** 每个进程的 skill 索引反映它自己 home 的 skills，互不影响
+
+### Requirement: agent init generates TUI token in .env
+
+`fleetent agent init` SHALL append `FLEETENT_TUI_TOKEN=ma-<64hex>` to the agent's `.env`
+when the `.env` does not already contain a `FLEETENT_TUI_TOKEN` entry. The token is
+generated with `secrets.token_hex(32)`.
+
+#### Scenario: .env contains FLEETENT_TUI_TOKEN after init
+
+- **WHEN** `fleetent agent init my-bot` is run
+- **THEN** `~/.fleetent/agents/my-bot/.env` SHALL contain a non-empty `FLEETENT_TUI_TOKEN` value
