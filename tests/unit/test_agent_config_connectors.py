@@ -22,7 +22,7 @@ def test_slack_connector_parsed(tmp_path):
             "slack": {
                 "bot_token_env": "SUPPORT_SLACK_BOT",
                 "app_token_env": "SUPPORT_SLACK_APP",
-                "channels": ["C1"],
+                "access": {"allow_channels": ["C1"]},
             }
         },
     )
@@ -30,7 +30,7 @@ def test_slack_connector_parsed(tmp_path):
     assert af.connectors.slack is not None
     assert af.connectors.slack.bot_token_env == "SUPPORT_SLACK_BOT"
     assert af.connectors.slack.app_token_env == "SUPPORT_SLACK_APP"
-    assert af.connectors.slack.channels == ["C1"]
+    assert af.connectors.slack.access.allow_channels == ["C1"]
 
 
 def test_connectors_optional(tmp_path):
@@ -46,7 +46,8 @@ def test_channels_default_empty(tmp_path):
         connectors={"slack": {"bot_token_env": "B", "app_token_env": "A"}},
     )
     af = agent_config.load_agent_file(tmp_path / "support")
-    assert af.connectors.slack.channels == []
+    # No access block → allow_channels defaults to empty (open to all channels).
+    assert af.connectors.slack.access.allow_channels == []
 
 
 def test_inline_token_under_connectors_rejected(tmp_path):

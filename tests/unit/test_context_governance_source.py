@@ -11,7 +11,7 @@ from fleetent.runtime import context
 
 def _publish(agent: AgentFile) -> None:
     agent_config._index = AgentConfigIndex(
-        agents={agent.name: agent}, by_channel={}, by_user={}, default=agent.name
+        agents={agent.name: agent}, default=agent.name
     )
 
 
@@ -34,6 +34,6 @@ def test_default_config_falls_back_to_settings_without_agent() -> None:
 
 
 def test_default_config_unknown_agent_falls_back() -> None:
-    agent_config._index = AgentConfigIndex(agents={}, by_channel={}, by_user={}, default=None)
+    agent_config._index = AgentConfigIndex(agents={}, default=None)
     cfg = context._default_config(agent_name="missing")
     assert cfg["max_tokens"] == 200_000

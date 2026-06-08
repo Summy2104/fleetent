@@ -8,7 +8,7 @@ from typing import Any
 import structlog
 
 from fleetent import agent_config
-from fleetent.agent_config import AgentAccess, AgentFile
+from fleetent.agent_config import AgentFile, ConnectorAccess
 from fleetent.im_gateway import access
 
 logger = structlog.get_logger(__name__)
@@ -38,20 +38,26 @@ class NormalizedMessage:
 
 
 def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> AgentFile | None:
-    """Resolve agent from the file index: channel → user → default → None (bare run).
+    """Resolve agent from the file index: default → None (bare run).
 
-    Zero DB: bindings and definitions come from the scanned ``agent.yaml`` index
-    (file-driven-agent-config).
+    Bindings-based routing (channel/user) has been removed; the agent is identified by
+    the per-agent connector connection. This function now returns only the default agent.
+    Zero DB: definitions come from the scanned ``agent.yaml`` index.
     """
     index = agent_config.current()
-    name: str | None = None
-    if channel_id:
-        name = index.agent_for_channel(platform, channel_id)
-    if name is None and user_id:
-        name = index.agent_for_user(user_id)
-    if name is None:
-        name = index.default_agent()
+    name = index.default_agent()
     return None if name is None else index.get(name)
+
+
+def _get_connector_access(agent: AgentFile | None, platform: str) -> ConnectorAccess:
+    """Return the ConnectorAccess for the given platform, or a default-closed policy."""
+    if agent is None:
+        return ConnectorAccess()
+    if platform == "slack" and agent.connectors.slack is not None:
+        return agent.connectors.slack.access
+    if platform == "telegram" and agent.connectors.telegram is not None:
+        return agent.connectors.telegram.access
+    return ConnectorAccess()
 
 
 _IMAGE_MIME_PREFIX = "image/"
@@ -120,18 +126,17 @@ async def route(msg: NormalizedMessage) -> None:
             await msg.reply_func(f"⚠️ approval {approval_id} not found or already expired")
         return
 
-    # Resolve agent config first — the access gate is per-agent. When the receiving
-    # connection already identifies the agent (per-agent-slack-connector stamps
-    # msg.agent_name), use it directly and skip channel→agent lookup; otherwise fall
-    # back to channel → user → default. Zero DB: the index is file-sourced.
+    # Resolve agent config first — the access gate is per-platform-connector. When the
+    # receiving connection already identifies the agent (per-agent-slack-connector stamps
+    # msg.agent_name), use it directly; otherwise fall back to default. Zero DB.
     if msg.agent_name:
         agent = agent_config.current().get(msg.agent_name)
     else:
         agent = get_agent_for_context(msg.platform, msg.channel_id, msg.user_id)
 
-    # Local, zero-platform-DB access gate against the agent's own access config + an
+    # Local, zero-platform-DB access gate against the connector's access config + an
     # agent-local approval store. No agent resolved (bare run) → default-closed.
-    access_cfg = agent.access if agent else AgentAccess()
+    access_cfg = _get_connector_access(agent, msg.platform)
     store = access.LocalApprovalStore(access.APPROVALS_PATH)
     if not access.channel_allowed(access_cfg, msg.channel_id):
         await msg.reply_func(_REJECTION_MSG)

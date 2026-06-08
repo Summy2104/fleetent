@@ -1,9 +1,17 @@
-"""Per-agent IM access config in the agent home (`access` block on `agent.yaml`)."""
+"""Per-connector IM access config in agent.yaml (`connectors.<platform>.access` block)."""
 
 import pytest
 from pydantic import ValidationError
 
-from fleetent.agent_config import AgentAccess, AgentFile, default_models, load_agent_home_file
+from fleetent.agent_config import (
+    AgentConnectors,
+    AgentFile,
+    ConnectorAccess,
+    SlackConnector,
+    TelegramConnector,
+    default_models,
+    load_agent_home_file,
+)
 
 _MODELS = """
 models:
@@ -24,7 +32,7 @@ def _write(path, body):
     return path
 
 
-def test_access_block_parses(tmp_path):
+def test_slack_access_block_parses(tmp_path):
     home = _write(
         tmp_path / "agent.yaml",
         """
@@ -33,16 +41,21 @@ version: 1
 """
         + _MODELS
         + """
-access:
-  allow_channels: ["C_ops", "C_eng"]
-  allow_users: ["U_alice", "U_bob"]
-  require_approval: false
+connectors:
+  slack:
+    bot_token_env: BOT_TOKEN
+    app_token_env: APP_TOKEN
+    access:
+      allow_channels: ["C_ops", "C_eng"]
+      allow_users: ["U_alice", "U_bob"]
+      require_approval: false
 """,
     )
     agent = load_agent_home_file(home)
-    assert agent.access.allow_channels == ["C_ops", "C_eng"]
-    assert agent.access.allow_users == ["U_alice", "U_bob"]
-    assert agent.access.require_approval is False
+    assert agent.connectors.slack is not None
+    assert agent.connectors.slack.access.allow_channels == ["C_ops", "C_eng"]
+    assert agent.connectors.slack.access.allow_users == ["U_alice", "U_bob"]
+    assert agent.connectors.slack.access.require_approval is False
 
 
 def test_absent_access_block_defaults_closed(tmp_path):
@@ -54,23 +67,28 @@ version: 1
 """
         + _MODELS
         + """
+connectors:
+  slack:
+    bot_token_env: BOT_TOKEN
+    app_token_env: APP_TOKEN
 """,
     )
     agent = load_agent_home_file(home)
+    assert agent.connectors.slack is not None
     # Safe default: no implicit allow, approval required.
-    assert agent.access.allow_channels == []
-    assert agent.access.allow_users == []
-    assert agent.access.require_approval is True
+    assert agent.connectors.slack.access.allow_channels == []
+    assert agent.connectors.slack.access.allow_users == []
+    assert agent.connectors.slack.access.require_approval is True
 
 
-def test_access_model_default_is_closed():
-    access = AgentAccess()
+def test_connector_access_model_default_is_closed():
+    access = ConnectorAccess()
     assert access.allow_channels == []
     assert access.allow_users == []
     assert access.require_approval is True
 
 
-def test_access_block_rejects_unknown_field(tmp_path):
+def test_slack_access_block_rejects_unknown_field(tmp_path):
     home = _write(
         tmp_path / "agent.yaml",
         """
@@ -79,8 +97,12 @@ version: 1
 """
         + _MODELS
         + """
-access:
-  allow_everyone: true
+connectors:
+  slack:
+    bot_token_env: BOT_TOKEN
+    app_token_env: APP_TOKEN
+    access:
+      allow_everyone: true
 """,
     )
     with pytest.raises(ValidationError):
@@ -97,19 +119,68 @@ version: 1
 """
         + _MODELS
         + """
-access:
-  allow_users: ["U_alice"]
 connectors:
   slack:
     bot_token_env: "xoxb-1234567890-abcdefghijklmnop"
     app_token_env: APP_TOKEN
+    access:
+      allow_users: ["U_alice"]
 """,
     )
     with pytest.raises(ValueError, match="inline secret"):
         load_agent_home_file(home)
 
 
-def test_agentfile_default_access_closed():
-    agent = AgentFile(name="alice", version=1, models=default_models())
-    assert agent.access.require_approval is True
-    assert agent.access.allow_users == []
+def test_agentfile_default_connector_access_closed():
+    agent = AgentFile(
+        name="alice",
+        version=1,
+        models=default_models(),
+        connectors=AgentConnectors(
+            slack=SlackConnector(bot_token_env="BOT", app_token_env="APP")
+        ),
+    )
+    assert agent.connectors.slack is not None
+    assert agent.connectors.slack.access.require_approval is True
+    assert agent.connectors.slack.access.allow_users == []
+
+
+def test_telegram_access_block_parses(tmp_path):
+    home = _write(
+        tmp_path / "agent.yaml",
+        """
+name: alice
+version: 1
+"""
+        + _MODELS
+        + """
+connectors:
+  telegram:
+    bot_token_env: TG_BOT_TOKEN
+    access:
+      allow_users: ["12345"]
+      require_approval: false
+""",
+    )
+    agent = load_agent_home_file(home)
+    assert agent.connectors.telegram is not None
+    assert agent.connectors.telegram.access.allow_users == ["12345"]
+    assert agent.connectors.telegram.access.require_approval is False
+
+
+def test_agentfile_with_connector_access_via_constructor():
+    agent = AgentFile(
+        name="alice",
+        version=1,
+        models=default_models(),
+        connectors=AgentConnectors(
+            slack=SlackConnector(
+                bot_token_env="BOT",
+                app_token_env="APP",
+                access=ConnectorAccess(allow_users=["U_alice"], require_approval=False),
+            )
+        ),
+    )
+    assert agent.connectors.slack is not None
+    assert agent.connectors.slack.access.allow_users == ["U_alice"]
+    assert agent.connectors.slack.access.require_approval is False

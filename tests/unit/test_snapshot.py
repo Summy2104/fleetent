@@ -55,8 +55,6 @@ def _version(**overrides: Any) -> AgentVersion:
 def _index(**overrides: Any) -> AgentConfigIndex:
     base: dict[str, Any] = {
         "agents": {},
-        "by_channel": {},
-        "by_user": {},
         "default": None,
     }
     base.update(overrides)
@@ -162,25 +160,22 @@ def test_load_version_none_when_name_missing(monkeypatch: Any) -> None:
 # --- request resolution -----------------------------------------------------
 
 
-def test_resolve_agent_prefers_channel(monkeypatch: Any) -> None:
+def test_resolve_agent_prefers_named_agent(monkeypatch: Any) -> None:
+    # When msg.agent_name is set, the snapshot is resolved directly by name.
     agent = _agent_file(name="chan")
-    index = _index(
-        agents={"chan": agent, "usr": _agent_file(name="usr")},
-        by_channel={"slack:C1": "chan"},
-        by_user={"u1": "usr"},
-        default="def",
-    )
+    index = _index(agents={"chan": agent, "def": _agent_file(name="def")}, default="def")
     monkeypatch.setattr(agent_config, "current", lambda: index)
     snap = snapshot.resolve_agent_for_request("slack", "C1", "u1")
-    assert snap is not None and snap.name == "chan"
+    # resolve_agent_for_request uses default path (no bindings-based routing)
+    assert snap is not None and snap.name == "def"
 
 
-def test_resolve_agent_falls_back_to_user(monkeypatch: Any) -> None:
-    agent = _agent_file(name="usr")
-    index = _index(agents={"usr": agent}, by_user={"u1": "usr"}, default="def")
+def test_resolve_agent_falls_back_to_default(monkeypatch: Any) -> None:
+    agent = _agent_file(name="def")
+    index = _index(agents={"def": agent}, default="def")
     monkeypatch.setattr(agent_config, "current", lambda: index)
     snap = snapshot.resolve_agent_for_request("slack", "C9", "u1")
-    assert snap is not None and snap.name == "usr"
+    assert snap is not None and snap.name == "def"
 
 
 def test_resolve_agent_falls_back_to_default(monkeypatch: Any) -> None:

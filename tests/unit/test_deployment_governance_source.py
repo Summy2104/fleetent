@@ -11,7 +11,7 @@ from fleetent.agent_config import AgentConfigIndex, AgentFile, default_models
 def _publish_single(**fields) -> None:
     agent = AgentFile(name="a", version=1, models=default_models(), **fields)
     agent_config._index = AgentConfigIndex(
-        agents={"a": agent}, by_channel={}, by_user={}, default="a"
+        agents={"a": agent}, default="a"
     )
 
 
@@ -25,7 +25,7 @@ def test_session_config_from_active_agent() -> None:
 
 
 def test_session_config_falls_back_without_agent() -> None:
-    agent_config._index = AgentConfigIndex(agents={}, by_channel={}, by_user={}, default=None)
+    agent_config._index = AgentConfigIndex(agents={}, default=None)
     from fleetent.session import manager
 
     cfg = manager._default_config()

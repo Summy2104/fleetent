@@ -3,12 +3,12 @@
 import yaml
 
 from fleetent.agent_config import (
-    AgentAccess,
     AgentConnectors,
     AgentFile,
     AgentKnowledge,
     AgentKnowledgeBinding,
     AgentRetrievalPolicy,
+    ConnectorAccess,
     SlackConnector,
     default_models,
     load_agent_file,
@@ -25,9 +25,12 @@ def _agent(name="support", **fields):
         allowed_tools=["shell"],
         allowed_skills=["weather"],
         models=default_models(),
-        access=AgentAccess(allow_users=["u_alice"]),
         connectors=AgentConnectors(
-            slack=SlackConnector(bot_token_env="SUP_BOT", app_token_env="SUP_APP")
+            slack=SlackConnector(
+                bot_token_env="SUP_BOT",
+                app_token_env="SUP_APP",
+                access=ConnectorAccess(allow_users=["u_alice"]),
+            )
         ),
     )
     base.update(fields)
@@ -42,8 +45,8 @@ def test_create_writes_runnable_home(tmp_path, monkeypatch):
     af = load_agent_file(home)  # round-trips through the home schema (dir name == name)
     assert af.system_prompt == "Help the user."
     assert af.allowed_tools == ["shell"]
-    assert af.access.allow_users == ["u_alice"]
     assert af.connectors.slack is not None
+    assert af.connectors.slack.access.allow_users == ["u_alice"]
     assert af.connectors.slack.bot_token_env == "SUP_BOT"
 
 
@@ -106,11 +109,12 @@ def test_update_rewrites_yaml_preserves_env_values(tmp_path, monkeypatch):
 
 def test_default_closed_access_when_not_authored(tmp_path, monkeypatch):
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
-    agent = AgentFile(name="bare", version=1, models=default_models())  # no access block authored
+    agent = AgentFile(name="bare", version=1, models=default_models())  # no connectors authored
     home = materialize.write_home(agent)
     af = load_agent_file(home)
-    assert af.access.require_approval is True
-    assert af.access.allow_users == []
+    # No connectors means no access config; default-closed policy is per-connector.
+    assert af.connectors.slack is None
+    assert af.connectors.telegram is None
 
 
 def test_materialize_splits_agent_knowledge_and_kb_service_config(tmp_path, monkeypatch):

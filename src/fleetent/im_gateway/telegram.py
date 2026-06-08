@@ -53,7 +53,6 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
         raise RuntimeError("python-telegram-bot not installed") from None
 
     bot_token = config.get("bot_token", "")
-    channels = config.get("channels") or []
     builder = Application.builder().token(bot_token).concurrent_updates(True)
     application = builder.build()
 
@@ -68,8 +67,6 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
             return
 
         channel_id = str(update.message.chat.id)
-        if channels and channel_id not in channels:
-            return  # chat outside this agent's response filter
 
         tg_user_id = update.effective_user.id
         # Identity is the platform-native id, resolved locally — no platform user_store.

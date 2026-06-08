@@ -30,11 +30,6 @@ def _valid_doc() -> dict:
                 "api_key_env": "ACME_MCP_TOKEN",
             }
         ],
-        "bindings": {
-            "default": False,
-            "channels": ["slack:C0123"],
-            "users": ["u_alice"],
-        },
     }
 
 
@@ -79,8 +74,6 @@ def test_agent_file_parses_all_fields() -> None:
     assert af.features == {"code_execution": True}
     assert af.models.targets[0].id == "primary"
     assert af.models.routes["memory_extraction"][0].max_tokens == 1024
-    assert af.bindings.channels == ["slack:C0123"]
-    assert af.bindings.users == ["u_alice"]
     # inline mcp_servers reuse the config McpServerSettings model
     assert len(af.mcp_servers) == 1
     assert af.mcp_servers[0].id == "acme"
@@ -99,9 +92,6 @@ def test_agent_file_defaults() -> None:
     assert af.features == {}
     assert af.tenant_id == "default"
     assert af.team_id is None
-    assert af.bindings.default is False
-    assert af.bindings.channels == []
-    assert af.bindings.users == []
 
 
 def test_agent_file_requires_models() -> None:
@@ -352,32 +342,14 @@ def _write_agent(root, name: str, **overrides) -> None:
     (agent_dir / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
 
 
-def test_build_index_maps_names_channels_users_default(tmp_path) -> None:
-    _write_agent(
-        tmp_path,
-        "support",
-        bindings={"channels": ["slack:C123"], "users": ["u_alice"]},
-    )
-    _write_agent(
-        tmp_path,
-        "sales",
-        bindings={"default": True, "channels": ["telegram:-100"], "users": ["u_bob"]},
-    )
+def test_build_index_maps_names_and_default(tmp_path) -> None:
+    _write_agent(tmp_path, "support")
+    _write_agent(tmp_path, "sales")
     index = agent_config.build_index(tmp_path)
 
     assert index.get("support").name == "support"
     assert index.get("sales").name == "sales"
     assert index.get("ghost") is None
-
-    assert index.agent_for_channel("slack", "C123") == "support"
-    assert index.agent_for_channel("telegram", "-100") == "sales"
-    assert index.agent_for_channel("slack", "nope") is None
-
-    assert index.agent_for_user("u_alice") == "support"
-    assert index.agent_for_user("u_bob") == "sales"
-    assert index.agent_for_user("nobody") is None
-
-    assert index.default_agent() == "sales"
 
 
 def test_build_index_missing_dir_is_empty(tmp_path) -> None:
@@ -389,7 +361,6 @@ def test_build_index_missing_dir_is_empty(tmp_path) -> None:
 def test_build_index_empty_dir_is_empty(tmp_path) -> None:
     index = agent_config.build_index(tmp_path)
     assert index.default_agent() is None
-    assert index.agent_for_channel("slack", "C1") is None
 
 
 def test_build_index_dir_name_mismatch_fails_fast(tmp_path) -> None:
@@ -402,40 +373,9 @@ def test_build_index_dir_name_mismatch_fails_fast(tmp_path) -> None:
 
 def test_scan_sets_current_index(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FLEETENT_AGENTS_DIR", str(tmp_path))
-    _write_agent(tmp_path, "support", bindings={"default": True})
+    _write_agent(tmp_path, "support")
     agent_config.scan()
     assert agent_config.current().get("support").name == "support"
-    assert agent_config.current().default_agent() == "support"
-
-
-# ── conflict detection (§2.3) ─────────────────────────────────────────────────
-
-
-def test_duplicate_channel_binding_fails_fast(tmp_path) -> None:
-    _write_agent(tmp_path, "support", bindings={"channels": ["slack:C123"]})
-    _write_agent(tmp_path, "sales", bindings={"channels": ["slack:C123"]})
-    with pytest.raises(ValueError) as exc:
-        agent_config.build_index(tmp_path)
-    msg = str(exc.value)
-    assert "slack:C123" in msg
-    assert "support" in msg and "sales" in msg
-
-
-def test_duplicate_user_binding_fails_fast(tmp_path) -> None:
-    _write_agent(tmp_path, "support", bindings={"users": ["u_alice"]})
-    _write_agent(tmp_path, "sales", bindings={"users": ["u_alice"]})
-    with pytest.raises(ValueError) as exc:
-        agent_config.build_index(tmp_path)
-    assert "u_alice" in str(exc.value)
-
-
-def test_multiple_default_agents_fails_fast(tmp_path) -> None:
-    _write_agent(tmp_path, "support", bindings={"default": True})
-    _write_agent(tmp_path, "sales", bindings={"default": True})
-    with pytest.raises(ValueError) as exc:
-        agent_config.build_index(tmp_path)
-    msg = str(exc.value)
-    assert "support" in msg and "sales" in msg
 
 
 # ── secret rejection (§2.5) ───────────────────────────────────────────────────
@@ -471,12 +411,11 @@ def test_agent_file_parses_telegram_connector() -> None:
             "name": "sales",
             "version": 1,
             "models": _valid_models_doc(),
-            "connectors": {"telegram": {"bot_token_env": "SALES_TG_BOT", "channels": ["-100123"]}},
+            "connectors": {"telegram": {"bot_token_env": "SALES_TG_BOT"}},
         }
     )
     assert af.connectors.telegram is not None
     assert af.connectors.telegram.bot_token_env == "SALES_TG_BOT"
-    assert af.connectors.telegram.channels == ["-100123"]
 
 
 def test_telegram_agents_lists_declaring_agents(tmp_path) -> None:
@@ -553,18 +492,15 @@ def test_build_index_prefers_default_agent_home_as_sole_default(tmp_path, monkey
     agents_dir = home / "agents"
     agents_dir.mkdir(parents=True)
     _write_agent(agents_dir, "other")
-    # Default Agent home file, bindings.default false -> still forced default.
+    # Default Agent home file: still forced default regardless.
     default_home = home / "agents" / "default"
-    _write_config_agent(
-        default_home, "default", bindings={"default": False, "channels": ["slack:C9"]}
-    )
+    _write_config_agent(default_home, "default")
     monkeypatch.setenv("FLEETENT_HOME", str(home))
 
     index = agent_config.build_index()
 
     assert set(index.agents) == {"default"}  # multi-scan ignored
     assert index.default == "default"  # forced default
-    assert index.by_channel.get("slack:C9") == "default"
     assert index.get("other") is None
 
 
@@ -575,7 +511,7 @@ def test_build_index_falls_back_to_multiscan_without_config_agent_file(
     home.mkdir()
     agents_dir = tmp_path / "agents"
     agents_dir.mkdir()
-    _write_agent(agents_dir, "a", bindings={"default": True})
+    _write_agent(agents_dir, "a")
     _write_agent(agents_dir, "b")
     monkeypatch.setenv("FLEETENT_HOME", str(home))  # no default agent home file
     monkeypatch.setenv("FLEETENT_AGENTS_DIR", str(agents_dir))  # explicit multi-scan dir
@@ -583,7 +519,6 @@ def test_build_index_falls_back_to_multiscan_without_config_agent_file(
     index = agent_config.build_index()
 
     assert set(index.agents) == {"a", "b"}
-    assert index.default == "a"  # multiscan: default decided by bindings.default
 
 
 def test_build_index_ignores_old_home_root_agent_yaml(tmp_path, monkeypatch) -> None:
@@ -592,6 +527,9 @@ def test_build_index_ignores_old_home_root_agent_yaml(tmp_path, monkeypatch) -> 
     _write_config_agent(home, "legacy")
     monkeypatch.setenv("FLEETENT_HOME", str(home))
     monkeypatch.delenv("FLEETENT_AGENTS_DIR", raising=False)
+    # AGENTS_DIR is evaluated at import time; patch it so _resolve_agents_dir picks up the
+    # isolated tmp directory instead of the real ~/.fleetent/agents.
+    monkeypatch.setattr(agent_config, "AGENTS_DIR", home / "agents")
 
     index = agent_config.build_index()
 

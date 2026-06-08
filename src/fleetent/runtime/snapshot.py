@@ -182,15 +182,9 @@ def resolve_agent_for_request(
     channel_id: str | None,
     user_id: str | None,
 ) -> AgentSnapshot | None:
-    """Resolve the agent for a request from the file index: channel > user > default."""
+    """Resolve the agent for a request from the file index: default only."""
     index = agent_config.current()
-    name: str | None = None
-    if platform and channel_id:
-        name = index.agent_for_channel(platform, channel_id)
-    if name is None and user_id:
-        name = index.agent_for_user(user_id)
-    if name is None:
-        name = index.default_agent()
+    name = index.default_agent()
     return None if name is None else load_active(name)
 
 

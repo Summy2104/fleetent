@@ -5,7 +5,13 @@ import contextlib
 import pytest
 
 import fleetent.im_gateway.access as access
-from fleetent.agent_config import AgentAccess, AgentFile, default_models
+from fleetent.agent_config import (
+    AgentConnectors,
+    AgentFile,
+    ConnectorAccess,
+    SlackConnector,
+    default_models,
+)
 from fleetent.im_gateway import normalizer
 from fleetent.runtime import loop as agent_loop
 from fleetent.session import manager as session_mgr
@@ -45,8 +51,19 @@ def approvals(tmp_path, monkeypatch):
     return access.LocalApprovalStore(path)
 
 
-def _agent(access_cfg):
-    return AgentFile(name="a", version=1, models=default_models(), access=access_cfg)
+def _agent(access_cfg: ConnectorAccess):
+    return AgentFile(
+        name="a",
+        version=1,
+        models=default_models(),
+        connectors=AgentConnectors(
+            slack=SlackConnector(
+                bot_token_env="BOT",
+                app_token_env="APP",
+                access=access_cfg,
+            )
+        ),
+    )
 
 
 def _set_agent(monkeypatch, agent):
@@ -70,14 +87,14 @@ def _msg(replies, *, user_id="u1", channel_id="C1"):
 
 
 async def test_allowed_user_proceeds(monkeypatch, stub_loop, approvals):
-    _set_agent(monkeypatch, _agent(AgentAccess(allow_users=["u1"])))
+    _set_agent(monkeypatch, _agent(ConnectorAccess(allow_users=["u1"])))
     await normalizer.route(_msg([]))
     assert stub_loop["loop"] is True
 
 
 async def test_locally_approved_user_proceeds(monkeypatch, stub_loop, approvals):
     approvals.approve("u1")
-    _set_agent(monkeypatch, _agent(AgentAccess(require_approval=True)))
+    _set_agent(monkeypatch, _agent(ConnectorAccess(require_approval=True)))
     await normalizer.route(_msg([]))
     assert stub_loop["loop"] is True
 
@@ -85,7 +102,7 @@ async def test_locally_approved_user_proceeds(monkeypatch, stub_loop, approvals)
 async def test_disallowed_user_with_require_approval_blocked_and_pending(
     monkeypatch, stub_loop, approvals
 ):
-    _set_agent(monkeypatch, _agent(AgentAccess(require_approval=True)))
+    _set_agent(monkeypatch, _agent(ConnectorAccess(require_approval=True)))
     replies = []
     await normalizer.route(_msg(replies))
     assert stub_loop["loop"] is False  # never reached the loop
@@ -94,7 +111,7 @@ async def test_disallowed_user_with_require_approval_blocked_and_pending(
 
 
 async def test_channel_not_in_allow_channels_blocked(monkeypatch, stub_loop, approvals):
-    _set_agent(monkeypatch, _agent(AgentAccess(allow_channels=["C_ok"], allow_users=["u1"])))
+    _set_agent(monkeypatch, _agent(ConnectorAccess(allow_channels=["C_ok"], allow_users=["u1"])))
     replies = []
     await normalizer.route(_msg(replies, channel_id="C_bad"))
     assert stub_loop["loop"] is False
@@ -102,7 +119,7 @@ async def test_channel_not_in_allow_channels_blocked(monkeypatch, stub_loop, app
 
 
 async def test_empty_allow_channels_allows_any(monkeypatch, stub_loop, approvals):
-    _set_agent(monkeypatch, _agent(AgentAccess(allow_users=["u1"])))
+    _set_agent(monkeypatch, _agent(ConnectorAccess(allow_users=["u1"])))
     await normalizer.route(_msg([], channel_id="C_anything"))
     assert stub_loop["loop"] is True
 
@@ -119,6 +136,6 @@ async def test_zero_db_proof_routing_decides_locally(monkeypatch, stub_loop, app
     monkeypatch.setattr(platform_im, "check_allowed_by_user_id", boom)
     monkeypatch.setattr(user_store, "_conn", boom)
 
-    _set_agent(monkeypatch, _agent(AgentAccess(allow_users=["u1"])))
+    _set_agent(monkeypatch, _agent(ConnectorAccess(allow_users=["u1"])))
     await normalizer.route(_msg([]))
     assert stub_loop["loop"] is True
