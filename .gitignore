@@ -53,3 +53,4 @@ agents/*/skills/
 
 # Claude Code runtime locks
 .claude/*.lock
+docs/local/
