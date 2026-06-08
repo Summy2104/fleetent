@@ -2,33 +2,23 @@
 # ============================================================================
 # fleetent one-click installer (developers / single machine)
 # ============================================================================
-# Bootstraps a globally-usable, working-directory-decoupled fleetent install on
-# Linux / macOS / WSL2:
-#   - provisions uv + a Python 3.12 runtime
-#   - installs the fleetent / fleetent-admin / fleetent-tui commands globally
-#     via `uv tool install`
-#   - fixes state under FLEETENT_HOME (default ~/.fleetent): config templates +
-#     Alembic-initialised database
+# Installs BOTH the platform control plane and a default standalone agent in
+# editable mode — suitable for local development where the source tree must
+# stay as the live import path.
 #
-# NOTE: This is for developer / single-machine use. For on-prem PRODUCTION
-# deployment use the Docker path (Dockerfile + docker-compose.yml), which keeps
-# the environment reproducible and data inside the customer network.
+# For production deployment use the role-specific scripts instead:
+#   scripts/install-agent.sh <agent-id>   — standalone agent only
+#   scripts/install-platform.sh           — platform control plane only
 #
 # Usage:
-#   scripts/install.sh [--skip-db] [--skip-config] [--dir PATH] [--help]
+#   scripts/install.sh [--agent-only] [--platform-only]
+#                      [--agent-id ID] [--dir PATH] [--help]
 # ============================================================================
 
 set -e
 
-# Drop inherited Python env that could shadow the modules we install (a pre-set
-# PYTHONPATH from the launching tool makes entrypoints import a different
-# checkout). POSIX-only concern; harmless to always clear.
-if [ -n "${PYTHONPATH:-}" ]; then
-    unset PYTHONPATH
-fi
-if [ -n "${PYTHONHOME:-}" ]; then
-    unset PYTHONHOME
-fi
+if [ -n "${PYTHONPATH:-}" ]; then unset PYTHONPATH; fi
+if [ -n "${PYTHONHOME:-}" ]; then unset PYTHONHOME; fi
 
 # ── Colors / logging ────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -36,235 +26,117 @@ if [ -t 1 ]; then
 else
     RED=''; GREEN=''; YELLOW=''; BLUE=''; NC=''
 fi
-
 log_info()    { printf "${BLUE}==>${NC} %s\n" "$1"; }
 log_success() { printf "${GREEN}✓${NC} %s\n" "$1"; }
 log_warn()    { printf "${YELLOW}⚠${NC} %s\n" "$1" >&2; }
 log_error()   { printf "${RED}✗${NC} %s\n" "$1" >&2; }
 
-# ── Configuration / flags ───────────────────────────────────────────────────
+# ── Configuration ────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 FLEETENT_HOME_DIR="${FLEETENT_HOME:-$HOME/.fleetent}"
-SKIP_DB=false
-SKIP_CONFIG=false
-ENTRYPOINTS="fleetent fleetent-admin fleetent-tui"
+AGENT_ID="default"
+INSTALL_AGENT=true
+INSTALL_PLATFORM=true
 
 usage() {
     cat <<'EOF'
-fleetent installer — bootstrap a global, working-directory-decoupled install.
+fleetent developer installer — install both agent and platform in editable mode.
 
 Usage:
   scripts/install.sh [options]
 
 Options:
-  --dir PATH      Override FLEETENT_HOME (state directory; default ~/.fleetent)
-  --skip-db       Skip Alembic database initialization
-  --skip-config   Skip copying config templates
-  --help          Show this help and exit
+  --agent-only        Install only the standalone agent component
+  --platform-only     Install only the platform control plane
+  --agent-id ID       Agent id to initialise (default: "default")
+  --dir PATH          Override FLEETENT_HOME (default ~/.fleetent)
+  --help              Show this help and exit
 
-For on-prem production deployment use the Docker path instead
-(Dockerfile + docker-compose.yml).
+For production deployment use role-specific scripts:
+  scripts/install-agent.sh <agent-id>
+  scripts/install-platform.sh
 EOF
 }
 
 parse_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
-            --help|-h)
-                usage
-                exit 0
-                ;;
-            --skip-db)
-                SKIP_DB=true
-                shift
-                ;;
-            --skip-config)
-                SKIP_CONFIG=true
-                shift
-                ;;
+            --help|-h) usage; exit 0 ;;
+            --agent-only)   INSTALL_PLATFORM=false; shift ;;
+            --platform-only) INSTALL_AGENT=false; shift ;;
+            --agent-id)
+                if [ -z "${2:-}" ]; then
+                    log_error "--agent-id requires an ID"; exit 2
+                fi
+                AGENT_ID="$2"; shift 2 ;;
             --dir)
                 if [ -z "${2:-}" ]; then
-                    log_error "--dir requires a PATH argument"
-                    usage >&2
-                    exit 2
+                    log_error "--dir requires a PATH"; exit 2
                 fi
-                FLEETENT_HOME_DIR="$2"
-                shift 2
-                ;;
+                FLEETENT_HOME_DIR="$2"; shift 2 ;;
             *)
-                log_error "Unknown option: $1"
-                usage >&2
-                exit 2
-                ;;
+                log_error "Unknown option: $1"; usage >&2; exit 2 ;;
         esac
     done
 }
 
-# ── Steps (filled in by later tasks) ────────────────────────────────────────
-detect_os()              { :; }
-
-# Reuse uv from PATH or its standard install locations; only fetch if absent.
 ensure_uv() {
-    if command -v uv >/dev/null 2>&1; then
-        return 0
-    fi
-    if [ -x "$HOME/.local/bin/uv" ]; then
-        export PATH="$HOME/.local/bin:$PATH"
-        return 0
-    fi
-    if [ -x "$HOME/.cargo/bin/uv" ]; then
-        export PATH="$HOME/.cargo/bin:$PATH"
-        return 0
-    fi
-    log_info "Installing uv (fast Python package manager)..."
-    if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
-        log_error "uv install failed. Install it manually: https://docs.astral.sh/uv/"
-        exit 1
-    fi
+    if command -v uv >/dev/null 2>&1; then return 0; fi
+    if [ -x "$HOME/.local/bin/uv" ]; then export PATH="$HOME/.local/bin:$PATH"; return 0; fi
+    if [ -x "$HOME/.cargo/bin/uv" ]; then export PATH="$HOME/.cargo/bin:$PATH"; return 0; fi
+    log_info "Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
     export PATH="$HOME/.local/bin:$PATH"
 }
 
-# uv provisions the interpreter; fail fast if a >=3.12 runtime can't be found.
 check_python() {
     if ! uv python find ">=3.12" >/dev/null 2>&1; then
-        log_error "Python >=3.12 is required and uv could not provide it."
-        exit 1
+        log_error "Python >=3.12 is required."; exit 1
     fi
 }
 
-# Install the three console-script entrypoints globally (into ~/.local/bin),
-# editable so the dev checkout stays the source of truth.
-install_tool() {
-    log_info "Installing fleetent commands via uv tool..."
+install_editable() {
+    log_info "Installing fleetent in editable mode (developer)..."
+    # --editable: source tree stays the live import path.
     uv tool install --force --editable "$REPO_ROOT"
-    for cmd in $ENTRYPOINTS; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
-            log_error "Expected command '$cmd' not found after install."
-            log_info "Try manually: uv tool install --editable \"$REPO_ROOT\""
-            log_info "Ensure ~/.local/bin is on your PATH (uv tool update-shell)."
-            exit 1
-        fi
-    done
-    log_success "Installed: $ENTRYPOINTS"
-}
-
-# Fix the state directory (FLEETENT_HOME) and persist it to the user's shell rc
-# so the global command resolves Platform, Agent, and data files there regardless of CWD.
-setup_home_env() {
-    export FLEETENT_HOME="$FLEETENT_HOME_DIR"
-    mkdir -p "$FLEETENT_HOME"
-    log_info "FLEETENT_HOME = $FLEETENT_HOME"
-
-    local rc
-    case "$(basename "${SHELL:-/bin/bash}")" in
-        zsh)  rc="$HOME/.zshrc" ;;
-        bash) rc="$HOME/.bashrc" ;;
-        *)    rc="$HOME/.profile" ;;
-    esac
-    # Idempotent: only append if no FLEETENT_HOME export is already present.
-    if [ ! -f "$rc" ] || ! grep -qF "export FLEETENT_HOME=" "$rc"; then
-        echo "export FLEETENT_HOME=\"$FLEETENT_HOME\"" >> "$rc"
-        log_success "Persisted FLEETENT_HOME to $rc"
-    fi
-
-    case ":$PATH:" in
-        *":$HOME/.local/bin:"*) : ;;
-        *) log_warn "~/.local/bin is not on your PATH — add it (e.g. 'uv tool update-shell') to run the fleetent command." ;;
-    esac
-}
-# Seed platform env plus a default self-contained Agent home. Platform env stays at
-# FLEETENT_HOME/.env; the default Agent runtime lives under FLEETENT_HOME/agents/default/.
-# Never clobber existing files.
-copy_config_templates() {
-    if [ "$SKIP_CONFIG" = true ]; then
-        log_info "Skipping config templates (--skip-config)"
-        return 0
-    fi
-    mkdir -p "$FLEETENT_HOME"
-    local default_agent_home="$FLEETENT_HOME/agents/default"
-    mkdir -p "$default_agent_home/data"
-
-    if [ -f "$REPO_ROOT/.env.example" ] && [ ! -f "$FLEETENT_HOME/.env" ]; then
-        cp "$REPO_ROOT/.env.example" "$FLEETENT_HOME/.env"
-        log_success "Created $FLEETENT_HOME/.env"
-    fi
-
-    if [ -f "$REPO_ROOT/platform.yaml.example" ] && [ ! -f "$FLEETENT_HOME/platform.yaml" ]; then
-        cp "$REPO_ROOT/platform.yaml.example" "$FLEETENT_HOME/platform.yaml"
-        log_success "Created $FLEETENT_HOME/platform.yaml"
-    fi
-
-    if [ -f "$REPO_ROOT/agents/default/.env.example" ] && [ ! -f "$default_agent_home/.env" ]; then
-        cp "$REPO_ROOT/agents/default/.env.example" "$default_agent_home/.env"
-        log_success "Created $default_agent_home/.env"
-    fi
-
-    if [ -f "$REPO_ROOT/agents/default/agent.yaml.example" ] && [ ! -f "$default_agent_home/agent.yaml" ]; then
-        sed -e "s/^name:.*/name: default                  # required; matches agents\\/default\\//" \
-            -e "s/^memory_namespace:.*/memory_namespace: default/" \
-            "$REPO_ROOT/agents/default/agent.yaml.example" > "$default_agent_home/agent.yaml"
-        log_success "Created $default_agent_home/agent.yaml"
-    fi
-}
-# Initialize the SQLite DB under FLEETENT_HOME via Alembic (idempotent). Schema
-# lifecycle stays with Alembic — we only point it at the resolved DB path by
-# rewriting a transient copy of the repo's alembic.ini (no env.py changes).
-init_db() {
-    if [ "$SKIP_DB" = true ]; then
-        log_info "Skipping database init (--skip-db)"
-        return 0
-    fi
-    mkdir -p "$FLEETENT_HOME/data"
-    log_info "Initializing database (alembic upgrade head)..."
-
-    local tmp_ini
-    tmp_ini="$(mktemp)"
-    sed -e "s|^script_location = .*|script_location = $REPO_ROOT/migrations|" \
-        -e "s|^sqlalchemy.url = .*|sqlalchemy.url = sqlite:///$FLEETENT_HOME/data/fleetent.db|" \
-        "$REPO_ROOT/alembic.ini" > "$tmp_ini"
-
-    if uv run --project "$REPO_ROOT" alembic -c "$tmp_ini" upgrade head; then
-        log_success "Database ready at $FLEETENT_HOME/data/fleetent.db"
-    else
-        rm -f "$tmp_ini"
-        log_error "Alembic migration failed."
-        exit 1
-    fi
-    rm -f "$tmp_ini"
-}
-# Sandbox (run_code) needs a host Docker. Absence is a warning, never fatal —
-# many dev setups don't use the sandbox.
-precheck_docker() {
-    if command -v docker >/dev/null 2>&1; then
-        return 0
-    fi
-    log_warn "Docker not found — the sandbox (run_code) tool will be unavailable. Install Docker to enable it."
-}
-print_success() {
-    log_success "fleetent installed."
-    echo
-    echo "Next steps:"
-    echo "  - Ensure ~/.local/bin is on your PATH (e.g. 'uv tool update-shell'),"
-    echo "    then open a new shell and run:  fleetent \"hello\""
-    echo "  - State / config live in:  $FLEETENT_HOME"
-    echo "  - Edit platform env in:  $FLEETENT_HOME/.env"
-    echo "  - Edit platform config in:  $FLEETENT_HOME/platform.yaml"
-    echo "  - Edit default Agent env in:  $FLEETENT_HOME/agents/default/.env"
-    echo "  - For on-prem PRODUCTION deployment, use the Docker path (docker-compose.yml)."
+    log_success "Installed (editable): fleetent fleetent-admin fleetent-tui"
 }
 
 main() {
-    detect_os
+    parse_args "$@"
     ensure_uv
     check_python
-    install_tool
-    setup_home_env
-    copy_config_templates
-    init_db
-    precheck_docker
-    print_success
+    install_editable
+
+    export FLEETENT_HOME="$FLEETENT_HOME_DIR"
+
+    if [ "$INSTALL_PLATFORM" = true ]; then
+        log_info "Setting up platform..."
+        bash "$SCRIPT_DIR/install-platform.sh" \
+            --dir "$FLEETENT_HOME_DIR" --skip-db 2>/dev/null || true
+        # Run db init ourselves since binary is already installed.
+        mkdir -p "$FLEETENT_HOME/data"
+        local tmp_ini
+        tmp_ini="$(mktemp)"
+        sed -e "s|^script_location = .*|script_location = $REPO_ROOT/migrations|" \
+            -e "s|^sqlalchemy.url = .*|sqlalchemy.url = sqlite:///$FLEETENT_HOME/data/fleetent.db|" \
+            "$REPO_ROOT/alembic.ini" > "$tmp_ini"
+        uv run --project "$REPO_ROOT" alembic -c "$tmp_ini" upgrade head \
+            && log_success "Platform database ready"
+        rm -f "$tmp_ini"
+    fi
+
+    if [ "$INSTALL_AGENT" = true ]; then
+        log_info "Setting up agent '$AGENT_ID'..."
+        bash "$SCRIPT_DIR/install-agent.sh" "$AGENT_ID" \
+            --dir "$FLEETENT_HOME_DIR" || true
+    fi
+
+    log_success "Developer install complete."
+    echo
+    echo "Editable install: changes in $REPO_ROOT/src take effect immediately."
+    echo "State / config:   $FLEETENT_HOME"
 }
 
-parse_args "$@"
-main
+main "$@"
