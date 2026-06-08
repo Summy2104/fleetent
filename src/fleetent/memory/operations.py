@@ -6,9 +6,9 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 
 from fleetent import vector_store
-from fleetent.intelligence.memory import store
-from fleetent.intelligence.memory.extraction import expires_at
-from fleetent.intelligence.memory.models import MemoryItem
+from fleetent.memory import store
+from fleetent.memory.extraction import expires_at
+from fleetent.memory.models import MemoryItem
 
 
 async def update_user_memory_content(user_id: str, memory_id: str, content: str) -> None:

@@ -8,8 +8,8 @@ from datetime import UTC, datetime
 from typing import cast
 
 from fleetent import vector_store
-from fleetent.intelligence.memory import store
-from fleetent.intelligence.memory.models import (
+from fleetent.memory import store
+from fleetent.memory.models import (
     SharedMemoryItem,
     SharedMemoryScopeType,
     SharedMemorySource,
@@ -193,22 +193,6 @@ async def apply_shared_memory_proposal(proposal_id: str, *, actor_id: str) -> Sh
     )
     mark_shared_memory_proposal_applied(proposal.id)
     return item
-
-
-def record_shared_memory_admin_audit(action: str, item_id: str, actor: str) -> None:
-    """Record a minimal admin audit event for Shared Memory writes."""
-    try:
-        from fleetent import observability
-
-        observability.record_trace_event(
-            observability.TraceEvent(
-                run_id=f"admin:{action}",
-                event_type="shared_memory_admin_action",
-                payload={"action": action, "item_id": item_id, "actor": actor},
-            )
-        )
-    except Exception:
-        return
 
 
 def _new_item(

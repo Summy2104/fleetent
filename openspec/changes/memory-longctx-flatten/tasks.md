@@ -2,14 +2,14 @@
 
 ## 1. 顶层化结构契约 + 护栏（TDD 红先行）
 
-- [ ] 1.1 写失败测试：断言 `fleetent.memory` / `fleetent.long_term_ctx` 顶层包存在且公共符号齐（此时不存在 → 红）（`tests/unit/`，import 静态检查）
-- [ ] 1.2 写失败测试：断言护栏边——`memory` ✗→ `long_term_ctx`；`memory` / `long_term_ctx` ✗→ `fleetent.platform`（此时未迁 → 红）
+- [x] 1.1 写失败测试：断言 `fleetent.memory` / `fleetent.long_term_ctx` 顶层包存在且公共符号齐（此时不存在 → 红）（`tests/unit/`，import 静态检查）
+- [x] 1.2 写失败测试：断言护栏边——`memory` ✗→ `long_term_ctx`；`memory` / `long_term_ctx` ✗→ `fleetent.platform`（此时未迁 → 红）
 
 ## 2. memory 提为顶层（TDD）
 
-- [ ] 2.1 `git mv src/fleetent/intelligence/memory/ src/fleetent/memory/`；修内部相对/绝对 import 到顶层
-- [ ] 2.2 旧路径 `intelligence/memory/__init__.py` 留 re-export shim（旧公共符号全可达）
-- [ ] 2.3 跑第 1 组 memory 断言 → 绿（memory 顶层可导入、护栏 memory✗→platform 绿）
+- [x] 2.1 `git mv src/fleetent/intelligence/memory/ src/fleetent/memory/`；修内部相对/绝对 import 到顶层
+- [x] 2.2 旧路径 `intelligence/memory/__init__.py` 留 re-export shim（旧公共符号全可达）
+- [x] 2.3 跑第 1 组 memory 断言 → 绿（memory 顶层可导入、护栏 memory✗→platform 绿）
 
 ## 3. long_term_ctx 提为独立顶层包（TDD）
 
@@ -19,9 +19,9 @@
 
 ## 4. shared-memory 审计薄壳归 platform（TDD）
 
-- [ ] 4.1 写失败测试：断言 `record_shared_memory_admin_audit` 审计写经 platform 薄壳完成，agent 侧 memory.shared 能力本体（create/update/archive/search/apply）不依赖 platform
-- [ ] 4.2 把审计记录迁到 platform 薄壳；`admin_cli/shared_memory.py` 调整为经薄壳记录审计、经 agent 侧核心写
-- [ ] 4.3 跑测试 → 绿
+- [x] 4.1 写失败测试：断言 `record_shared_memory_admin_audit` 审计写经 platform 薄壳完成，agent 侧 memory.shared 能力本体（create/update/archive/search/apply）不依赖 platform
+- [x] 4.2 把审计记录迁到 platform 薄壳；`admin_cli/shared_memory.py` 调整为经薄壳记录审计、经 agent 侧核心写
+- [x] 4.3 跑测试 → 绿
 
 ## 5. 调用方迁移 + 循环铺路
 

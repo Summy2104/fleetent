@@ -7,17 +7,18 @@ from typing import Literal
 
 from fleetent.config import LongTermContextSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.intelligence import long_term_ctx_policy, memory
-from fleetent.intelligence.long_term_ctx_policy import (
+from fleetent import memory
+from fleetent.long_term_ctx import _policy as long_term_ctx_policy
+from fleetent.long_term_ctx._policy import (
     AgentContextIdentity as AgentContextIdentity,
 )
-from fleetent.intelligence.long_term_ctx_policy import (
+from fleetent.long_term_ctx._policy import (
     ContextPolicy as ContextPolicy,
 )
-from fleetent.intelligence.long_term_ctx_policy import (
+from fleetent.long_term_ctx._policy import (
     ContextPolicySourceBudget as ContextPolicySourceBudget,
 )
-from fleetent.intelligence.long_term_ctx_policy import (
+from fleetent.long_term_ctx._policy import (
     resolve_context_policy as resolve_context_policy,
 )
 from fleetent.knowledge_base.core import KnowledgeStore

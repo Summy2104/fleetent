@@ -7,7 +7,7 @@ from typing import Any, cast
 
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.intelligence.memory.models import (
+from fleetent.memory.models import (
     MemoryCompactionCandidate,
     MemoryItem,
     MemoryMaintenancePolicy,

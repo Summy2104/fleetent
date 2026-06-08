@@ -6,10 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
-from fleetent.intelligence.memory import store
-from fleetent.intelligence.memory.proposal_store import (
-    list_memory_maintenance_proposals,
-)
+from fleetent.memory import store
+from fleetent.memory.proposal_store import list_memory_maintenance_proposals
 
 TrendBucketSize = Literal["day", "week"]
 

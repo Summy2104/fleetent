@@ -11,8 +11,8 @@ from typing import Any, cast
 from openai import AsyncOpenAI
 
 from fleetent import vector_store
-from fleetent.intelligence.memory import store
-from fleetent.intelligence.memory.models import MemoryItem, MemoryType
+from fleetent.memory import store
+from fleetent.memory.models import MemoryItem, MemoryType
 from fleetent.model import ModelConfigError, ModelPolicySnapshot
 
 EXTRACT_SYSTEM = (

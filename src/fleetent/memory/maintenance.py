@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from fleetent import vector_store
-from fleetent.intelligence.memory import store
-from fleetent.intelligence.memory.models import (
+from fleetent.memory import store
+from fleetent.memory.models import (
     MemoryMaintenancePolicy,
     MemoryMaintenanceSummary,
 )
