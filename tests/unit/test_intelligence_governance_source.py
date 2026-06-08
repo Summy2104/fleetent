@@ -47,8 +47,8 @@ def test_kb_runtime_config_is_neutral_without_agent_source_construction() -> Non
 
 
 def test_vector_configure_from_active_agent_uses_agent_embedding() -> None:
-    from fleetent.intelligence import vector_store
-    from fleetent.intelligence.vector_store import runtime as vrt
+    from fleetent import vector_store
+    from fleetent.vector_store import runtime as vrt
 
     agent = AgentFile.model_validate(
         {

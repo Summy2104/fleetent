@@ -139,7 +139,7 @@ async def web_search(
         return "error: SEARXNG_URL 未配置"
 
     n = min(max(num_results, 1), 20)
-    params = {"q": query, "format": "json", "pageno": 1}
+    params: dict[str, str | int] = {"q": query, "format": "json", "pageno": 1}
 
     async with httpx.AsyncClient(timeout=30) as client:
         try:

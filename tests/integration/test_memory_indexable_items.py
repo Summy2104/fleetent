@@ -37,7 +37,7 @@ def _insert_memory_row(
 def test_indexable_item_public_shape_is_importable():
     from dataclasses import fields
 
-    from fleetent.intelligence.vector_store import IndexableItem
+    from fleetent.vector_store import IndexableItem
 
     item = IndexableItem(
         id="mem-1",

@@ -1,7 +1,7 @@
 import pytest
 
 from fleetent.db import create_database
-from fleetent.intelligence.vector_store import SearchResult
+from fleetent.vector_store import SearchResult
 
 
 def _patch_shared_db(monkeypatch, tmp_path):

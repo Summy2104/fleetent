@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from fleetent.intelligence import vector_store
+from fleetent import vector_store
 from fleetent.intelligence.memory import store
 from fleetent.intelligence.memory.extraction import expires_at
 from fleetent.intelligence.memory.models import MemoryItem

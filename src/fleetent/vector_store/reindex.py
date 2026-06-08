@@ -3,9 +3,42 @@ import inspect
 import time
 from collections.abc import Awaitable
 from dataclasses import dataclass, field
+from types import ModuleType
 
-from fleetent.intelligence import knowledge_base
-from fleetent.intelligence.vector_store import namespaces, runtime
+from fleetent.vector_store import namespaces, runtime
+
+_knowledge_base: ModuleType | None = None
+_memory: ModuleType | None = None
+
+
+def _memory_module() -> ModuleType:
+    global _memory
+    if _memory is None:
+        _memory = __import__("fleetent.intelligence.memory", fromlist=["*"])
+    return _memory
+
+
+def _knowledge_base_module() -> ModuleType:
+    global _knowledge_base
+    if _knowledge_base is None:
+        _knowledge_base = __import__("fleetent.intelligence.knowledge_base", fromlist=["*"])
+    return _knowledge_base
+
+
+def _set_imported_modules(
+    memory_module: ModuleType | None = None, kb_module: ModuleType | None = None
+) -> None:
+    global memory, knowledge_base, _memory, _knowledge_base
+    if memory_module is not None:
+        memory = memory_module
+        _memory = memory_module
+    if kb_module is not None:
+        knowledge_base = kb_module
+        _knowledge_base = kb_module
+
+
+memory: ModuleType | None = _memory_module()
+knowledge_base: ModuleType | None = _knowledge_base_module()
 
 _BACKOFF_SECONDS = (1.0, 2.0, 4.0)
 _PACING_SECONDS = 0.2
@@ -93,21 +126,18 @@ def _namespace_for_request(request: ReindexRequest) -> str:
 
 def _items_for_request(request: ReindexRequest) -> list[IndexableItem]:
     if request.owner == "memory":
-        from fleetent.intelligence import memory
-
-        return list(memory.iter_indexable_memories(request.user_id or ""))
+        module = memory if memory is not None else _memory_module()
+        return list(module.iter_indexable_memories(request.user_id or ""))
     if request.owner == "shared_memory":
-        from fleetent.intelligence import memory
-
+        module = memory if memory is not None else _memory_module()
         return list(
-            memory.iter_indexable_shared_memories(
+            module.iter_indexable_shared_memories(
                 request.scope_type or "",
                 request.scope_id or "",
             )
         )
-    return list(
-        knowledge_base.iter_indexable_knowledge_chunks(request.tenant_id, request.kb_id or "")
-    )
+    module = knowledge_base if knowledge_base is not None else _knowledge_base_module()
+    return list(module.iter_indexable_knowledge_chunks(request.tenant_id, request.kb_id or ""))
 
 
 def _rebuild(request: ReindexRequest, namespace: str, items: list[IndexableItem]) -> ReindexSummary:

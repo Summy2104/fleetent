@@ -171,7 +171,7 @@ async def _run_fixture(
 ) -> RetrievalEvaluationResult:
     from fleetent import agent_config
     from fleetent.intelligence.knowledge_base import runtime as kb_runtime
-    from fleetent.intelligence.vector_store import runtime as vector_runtime
+    from fleetent.vector_store import runtime as vector_runtime
 
     apply_migrations(db_path)
     database_url = f"sqlite:///{db_path}"

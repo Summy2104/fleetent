@@ -9,14 +9,14 @@ from fleetent.config import RerankSettings
 
 
 def test_rerank_result_shape_is_public():
-    from fleetent.intelligence.vector_store.rerank import RerankResult
+    from fleetent.vector_store.rerank import RerankResult
 
     assert [field.name for field in fields(RerankResult)] == ["index", "score"]
     assert RerankResult(index=1, score=0.5).index == 1
 
 
 async def test_disabled_rerank_provider_fails_explicitly():
-    from fleetent.intelligence.vector_store.rerank import (
+    from fleetent.vector_store.rerank import (
         RerankProviderError,
         create_rerank_provider,
     )
@@ -28,7 +28,7 @@ async def test_disabled_rerank_provider_fails_explicitly():
 
 
 async def test_deterministic_rerank_provider_returns_stable_order():
-    from fleetent.intelligence.vector_store.rerank import create_rerank_provider
+    from fleetent.vector_store.rerank import create_rerank_provider
 
     provider = create_rerank_provider(RerankSettings(backend="deterministic"))
 
@@ -41,7 +41,7 @@ async def test_deterministic_rerank_provider_returns_stable_order():
 
 
 async def test_http_rerank_sends_payload_and_authorization(monkeypatch):
-    from fleetent.intelligence.vector_store.rerank import create_rerank_provider
+    from fleetent.vector_store.rerank import create_rerank_provider
 
     monkeypatch.setenv("RERANK_API_KEY", "secret-token")
     provider = create_rerank_provider(
@@ -76,7 +76,7 @@ async def test_http_rerank_sends_payload_and_authorization(monkeypatch):
 
 
 async def test_http_rerank_parses_provider_result_order():
-    from fleetent.intelligence.vector_store.rerank import create_rerank_provider
+    from fleetent.vector_store.rerank import create_rerank_provider
 
     provider = create_rerank_provider(
         RerankSettings(
@@ -109,7 +109,7 @@ async def test_http_rerank_parses_provider_result_order():
     ],
 )
 async def test_http_rerank_errors_are_explicit(response, message):
-    from fleetent.intelligence.vector_store.rerank import (
+    from fleetent.vector_store.rerank import (
         RerankProviderError,
         create_rerank_provider,
     )
@@ -130,7 +130,7 @@ async def test_http_rerank_errors_are_explicit(response, message):
 
 
 async def test_http_rerank_timeout_is_explicit():
-    from fleetent.intelligence.vector_store.rerank import (
+    from fleetent.vector_store.rerank import (
         RerankProviderError,
         create_rerank_provider,
     )
@@ -151,7 +151,7 @@ async def test_http_rerank_timeout_is_explicit():
 
 
 async def test_http_rerank_failure_does_not_fallback_to_deterministic():
-    from fleetent.intelligence.vector_store.rerank import (
+    from fleetent.vector_store.rerank import (
         RerankProviderError,
         create_rerank_provider,
     )

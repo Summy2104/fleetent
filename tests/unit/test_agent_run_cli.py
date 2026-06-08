@@ -289,9 +289,9 @@ async def test_boot_loads_dotenv_into_os_environ(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(agent_config, "scan_home", lambda _: _make_mock_agent())
     monkeypatch.setattr(agent_app, "_start_infra", AsyncMock())
 
-    import fleetent.intelligence.vector_store as vs
     import fleetent.skills as skills_mod
     import fleetent.tools.plugin_loader as pl
+    import fleetent.vector_store as vs
 
     monkeypatch.setattr(vs, "configure_from_active_agent", lambda: None)
     monkeypatch.setattr(skills_mod, "scan", lambda skills_dir=None: None)
@@ -314,9 +314,9 @@ async def test_boot_silently_skips_missing_dotenv(tmp_path, monkeypatch) -> None
     monkeypatch.setattr(agent_config, "scan_home", lambda _: _make_mock_agent())
     monkeypatch.setattr(agent_app, "_start_infra", AsyncMock())
 
-    import fleetent.intelligence.vector_store as vs
     import fleetent.skills as skills_mod
     import fleetent.tools.plugin_loader as pl
+    import fleetent.vector_store as vs
 
     monkeypatch.setattr(vs, "configure_from_active_agent", lambda: None)
     monkeypatch.setattr(skills_mod, "scan", lambda skills_dir=None: None)
@@ -339,9 +339,9 @@ async def test_boot_dotenv_does_not_override_existing_env(tmp_path, monkeypatch)
     monkeypatch.setattr(agent_config, "scan_home", lambda _: _make_mock_agent())
     monkeypatch.setattr(agent_app, "_start_infra", AsyncMock())
 
-    import fleetent.intelligence.vector_store as vs
     import fleetent.skills as skills_mod
     import fleetent.tools.plugin_loader as pl
+    import fleetent.vector_store as vs
 
     monkeypatch.setattr(vs, "configure_from_active_agent", lambda: None)
     monkeypatch.setattr(skills_mod, "scan", lambda skills_dir=None: None)

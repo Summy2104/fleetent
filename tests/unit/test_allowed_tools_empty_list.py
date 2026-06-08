@@ -17,7 +17,6 @@ from fleetent import agent_config
 from fleetent.im_gateway import access, normalizer
 from fleetent.integrations.sandbox import enablement as se
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

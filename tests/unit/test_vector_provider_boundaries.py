@@ -8,7 +8,7 @@ from fleetent.config import EmbeddingSettings, RerankSettings
 
 
 async def test_http_embedding_sends_dimensions_payload_and_authorization(monkeypatch):
-    from fleetent.intelligence.vector_store.embeddings import create_embedding_provider
+    from fleetent.vector_store.embeddings import create_embedding_provider
 
     monkeypatch.setenv("EMBEDDING_API_KEY", "secret-token")
     provider = create_embedding_provider(
@@ -43,7 +43,7 @@ async def test_http_embedding_sends_dimensions_payload_and_authorization(monkeyp
 
 
 async def test_http_embedding_resolves_endpoint_model_and_dimensions_from_env(monkeypatch):
-    from fleetent.intelligence.vector_store.embeddings import create_embedding_provider
+    from fleetent.vector_store.embeddings import create_embedding_provider
 
     monkeypatch.setenv("EMBEDDING_ENDPOINT", "http://embedding.test/v1/embeddings")
     monkeypatch.setenv("EMBEDDING_MODEL", "bge-m3")
@@ -77,7 +77,7 @@ async def test_http_embedding_resolves_endpoint_model_and_dimensions_from_env(mo
     ],
 )
 async def test_http_embedding_rejects_malformed_or_wrong_dimension_response(response, message):
-    from fleetent.intelligence.vector_store.embeddings import (
+    from fleetent.vector_store.embeddings import (
         EmbeddingProviderError,
         create_embedding_provider,
     )
@@ -99,7 +99,7 @@ async def test_http_embedding_rejects_malformed_or_wrong_dimension_response(resp
 
 
 async def test_http_embedding_failure_does_not_fallback_to_deterministic():
-    from fleetent.intelligence.vector_store.embeddings import (
+    from fleetent.vector_store.embeddings import (
         EmbeddingProviderError,
         create_embedding_provider,
     )
@@ -121,7 +121,7 @@ async def test_http_embedding_failure_does_not_fallback_to_deterministic():
 
 
 async def test_http_rerank_sends_payload_and_authorization(monkeypatch):
-    from fleetent.intelligence.vector_store.rerank import create_rerank_provider
+    from fleetent.vector_store.rerank import create_rerank_provider
 
     monkeypatch.setenv("RERANK_API_KEY", "secret-token")
     provider = create_rerank_provider(
@@ -156,7 +156,7 @@ async def test_http_rerank_sends_payload_and_authorization(monkeypatch):
 
 
 async def test_http_rerank_resolves_endpoint_and_model_from_env(monkeypatch):
-    from fleetent.intelligence.vector_store.rerank import create_rerank_provider
+    from fleetent.vector_store.rerank import create_rerank_provider
 
     monkeypatch.setenv("RERANK_ENDPOINT", "http://rerank.test/rerank")
     monkeypatch.setenv("RERANK_MODEL", "bge-reranker")
@@ -179,7 +179,7 @@ async def test_http_rerank_resolves_endpoint_and_model_from_env(monkeypatch):
 
 
 async def test_http_rerank_preserves_provider_rank_and_score_order():
-    from fleetent.intelligence.vector_store.rerank import create_rerank_provider
+    from fleetent.vector_store.rerank import create_rerank_provider
 
     provider = create_rerank_provider(
         RerankSettings(
@@ -203,7 +203,7 @@ async def test_http_rerank_preserves_provider_rank_and_score_order():
 
 
 async def test_http_rerank_accepts_relevance_score_field():
-    from fleetent.intelligence.vector_store.rerank import create_rerank_provider
+    from fleetent.vector_store.rerank import create_rerank_provider
 
     provider = create_rerank_provider(
         RerankSettings(
@@ -241,7 +241,7 @@ async def test_http_rerank_accepts_relevance_score_field():
     ],
 )
 async def test_http_rerank_rejects_timeout_malformed_and_provider_error(response, message):
-    from fleetent.intelligence.vector_store.rerank import (
+    from fleetent.vector_store.rerank import (
         RerankProviderError,
         create_rerank_provider,
     )
@@ -262,7 +262,7 @@ async def test_http_rerank_rejects_timeout_malformed_and_provider_error(response
 
 
 async def test_http_rerank_timeout_does_not_fallback_to_deterministic():
-    from fleetent.intelligence.vector_store.rerank import (
+    from fleetent.vector_store.rerank import (
         RerankProviderError,
         create_rerank_provider,
     )
@@ -322,7 +322,7 @@ def _vector_policy():
 
 
 def test_embedding_provider_can_be_created_from_model_policy() -> None:
-    from fleetent.intelligence.vector_store.embeddings import (
+    from fleetent.vector_store.embeddings import (
         HttpEmbeddingProvider,
         create_embedding_provider_from_policy,
     )
@@ -338,7 +338,7 @@ def test_embedding_provider_can_be_created_from_model_policy() -> None:
 
 
 def test_rerank_provider_can_be_created_from_model_policy() -> None:
-    from fleetent.intelligence.vector_store.rerank import (
+    from fleetent.vector_store.rerank import (
         HttpRerankProvider,
         create_rerank_provider_from_policy,
     )

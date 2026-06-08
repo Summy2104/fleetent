@@ -52,7 +52,7 @@ def _make_stack(stack: contextlib.ExitStack) -> dict[str, MagicMock]:
     mocks["scan_skills"] = stack.enter_context(patch("fleetent.skills.scan"))
     mocks["load_plugins"] = stack.enter_context(patch("fleetent.tools.plugin_loader.load_plugins"))
     mocks["vector_store"] = stack.enter_context(
-        patch("fleetent.intelligence.vector_store.configure_from_active_agent")
+        patch("fleetent.vector_store.configure_from_active_agent")
     )
     return mocks
 

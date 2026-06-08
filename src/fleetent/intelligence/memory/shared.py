@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import cast
 
-from fleetent.intelligence import vector_store
+from fleetent import vector_store
 from fleetent.intelligence.memory import store
 from fleetent.intelligence.memory.models import (
     SharedMemoryItem,

@@ -8,7 +8,7 @@ in-memory vector store (no real LLM / embedding service).
 
 from fleetent.intelligence import long_term_ctx
 from fleetent.intelligence import long_term_ctx_policy as policy
-from fleetent.intelligence.vector_store import SearchResult
+from fleetent.vector_store import SearchResult
 from tests.integration.test_migrations import apply_migrations
 
 SEED = [

@@ -5,14 +5,14 @@ from collections.abc import Iterator
 from dataclasses import replace
 from typing import Literal
 
+from fleetent import vector_store
 from fleetent.config import KnowledgeBaseSettings, RerankSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.intelligence import vector_store
 from fleetent.intelligence.knowledge_base.models import KnowledgeChunk, KnowledgeDocument
 from fleetent.intelligence.knowledge_base.parsers import ParsedDocument
 from fleetent.intelligence.knowledge_base.store import KnowledgeStore
-from fleetent.intelligence.vector_store import rerank as rerank_runtime
 from fleetent.observability.structured_logging import get_logger
+from fleetent.vector_store import rerank as rerank_runtime
 
 SearchMode = Literal["vector", "keyword", "hybrid"]
 _SEARCH_MODES: set[str] = {"vector", "keyword", "hybrid"}

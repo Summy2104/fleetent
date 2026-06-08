@@ -199,7 +199,7 @@ async def boot(
     _configure_logging_from_agent(agent)
     # Re-point the vector/embedding singletons at this agent's intelligence config
     # (import-time config used global Settings; standalone runs AS this single agent).
-    from fleetent.intelligence import vector_store
+    from fleetent import vector_store
 
     vector_store.configure_from_active_agent()
     # Build this agent's skill index from its OWN home (self-contained: never the

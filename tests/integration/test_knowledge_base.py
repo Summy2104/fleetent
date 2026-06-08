@@ -169,7 +169,7 @@ async def test_ingest_parsed_preserves_section_metadata_on_chunks(monkeypatch, t
     _patch_runtime_settings(monkeypatch, chunk_size=100, chunk_overlap=0)
 
     from fleetent.intelligence.knowledge_base import ParsedDocument, ParsedSection, runtime
-    from fleetent.intelligence.vector_store import SearchResult
+    from fleetent.vector_store import SearchResult
 
     monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
     parsed = ParsedDocument(
@@ -241,7 +241,7 @@ async def test_search_queries_vector_store_by_knowledge_namespace(monkeypatch, t
     _patch_runtime_settings(monkeypatch, chunk_size=20, chunk_overlap=0)
 
     from fleetent.intelligence.knowledge_base import runtime
-    from fleetent.intelligence.vector_store import SearchResult
+    from fleetent.vector_store import SearchResult
 
     monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
     document = await runtime.ingest_text(
@@ -271,7 +271,7 @@ async def test_search_merges_multiple_kbs_with_stable_ordering(monkeypatch, tmp_
     _patch_runtime_settings(monkeypatch, chunk_size=6, chunk_overlap=0)
 
     from fleetent.intelligence.knowledge_base import runtime
-    from fleetent.intelligence.vector_store import SearchResult
+    from fleetent.vector_store import SearchResult
 
     monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
     global_doc = await runtime.ingest_text(
@@ -315,7 +315,7 @@ async def test_search_is_tenant_isolated(monkeypatch, tmp_path):
     _patch_runtime_settings(monkeypatch, chunk_size=20, chunk_overlap=0)
 
     from fleetent.intelligence.knowledge_base import runtime
-    from fleetent.intelligence.vector_store import SearchResult
+    from fleetent.vector_store import SearchResult
 
     monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
     tenant_a_doc = await runtime.ingest_text(
@@ -448,7 +448,7 @@ async def test_hybrid_search_merges_vector_and_keyword_candidates(monkeypatch, t
     _patch_runtime_settings(monkeypatch, chunk_size=120, chunk_overlap=0)
 
     from fleetent.intelligence.knowledge_base import runtime
-    from fleetent.intelligence.vector_store import SearchResult
+    from fleetent.vector_store import SearchResult
 
     monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
     vector_doc = await runtime.ingest_text(
@@ -488,7 +488,7 @@ async def test_hybrid_search_deduplicates_and_boosts_dual_matches(monkeypatch, t
     _patch_runtime_settings(monkeypatch, chunk_size=120, chunk_overlap=0)
 
     from fleetent.intelligence.knowledge_base import runtime
-    from fleetent.intelligence.vector_store import SearchResult
+    from fleetent.vector_store import SearchResult
 
     monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
     vector_only_doc = await runtime.ingest_text(
@@ -531,7 +531,7 @@ async def test_hybrid_search_degrades_when_one_side_is_empty(monkeypatch, tmp_pa
     _patch_runtime_settings(monkeypatch, chunk_size=120, chunk_overlap=0)
 
     from fleetent.intelligence.knowledge_base import runtime
-    from fleetent.intelligence.vector_store import SearchResult
+    from fleetent.vector_store import SearchResult
 
     monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
     keyword_doc = await runtime.ingest_text(
@@ -581,7 +581,7 @@ async def test_hybrid_rerank_uses_public_provider_results_to_reorder(monkeypatch
 
     from fleetent.config import RerankSettings, Settings
     from fleetent.intelligence.knowledge_base import runtime
-    from fleetent.intelligence.vector_store import RerankResult, SearchResult
+    from fleetent.vector_store import RerankResult, SearchResult
 
     monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
     distractor_doc = await runtime.ingest_text(
@@ -655,8 +655,8 @@ async def test_hybrid_rerank_provider_failure_returns_original_hybrid_order(
 
     from fleetent.config import Settings
     from fleetent.intelligence.knowledge_base import runtime
-    from fleetent.intelligence.vector_store import SearchResult
-    from fleetent.intelligence.vector_store.rerank import RerankProviderError
+    from fleetent.vector_store import SearchResult
+    from fleetent.vector_store.rerank import RerankProviderError
 
     monkeypatch.setattr(runtime.vector_store, "upsert", _noop_upsert)
     first_doc = await runtime.ingest_text(

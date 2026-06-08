@@ -1,15 +1,15 @@
 from fleetent.agent_config import AgentFile
-from fleetent.intelligence.vector_store.backend import (
+from fleetent.model import ModelPolicySnapshot
+from fleetent.vector_store.backend import (
     SearchResult,
     VectorBackend,
     create_vector_backend,
 )
-from fleetent.intelligence.vector_store.embeddings import (
+from fleetent.vector_store.embeddings import (
     DeterministicEmbeddingProvider,
     EmbeddingProvider,
     create_embedding_provider_from_policy,
 )
-from fleetent.model import ModelPolicySnapshot
 
 _embedding: EmbeddingProvider
 _backend: VectorBackend

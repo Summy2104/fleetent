@@ -8,10 +8,10 @@ from typing import Any
 import pytest
 
 from fleetent.config import VectorStoreSettings
-from fleetent.intelligence.vector_store import backend
 from fleetent.observability import startup_diagnostics, structured_logging
 from fleetent.platform import maintenance as platform_maintenance
 from fleetent.platform.resource_monitoring import collectors
+from fleetent.vector_store import backend
 
 
 def test_structured_logging_redacts_serializes_and_writes_outputs(tmp_path):

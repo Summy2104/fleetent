@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fleetent.intelligence import vector_store
+from fleetent import vector_store
 from fleetent.intelligence.memory import store
 from fleetent.intelligence.memory.models import (
     MemoryMaintenancePolicy,

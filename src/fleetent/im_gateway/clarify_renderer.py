@@ -17,14 +17,14 @@ def render_clarify_slack(
     question: str,
     choices: list[str] | None,
     session_id: str,
-) -> list[dict]:
+) -> list[dict[str, object]]:
     """Build a Slack Block Kit message for a clarify prompt.
 
     Returns a blocks list:
     - A section block with the question text.
     - An actions block with one Button per choice (omitted for open questions).
     """
-    blocks: list[dict] = [
+    blocks: list[dict[str, object]] = [
         {
             "type": "section",
             "text": {"type": "mrkdwn", "text": question},
@@ -52,7 +52,7 @@ def render_clarify_telegram(
     question: str,
     choices: list[str] | None,
     session_id: str,
-) -> dict | None:
+) -> dict[str, object] | None:
     """Build a Telegram InlineKeyboardMarkup dict for a clarify prompt.
 
     Returns a dict with `inline_keyboard` key (list of button rows), or None

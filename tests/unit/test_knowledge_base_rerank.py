@@ -2,7 +2,7 @@ import pytest
 
 from fleetent.config import RerankSettings, Settings
 from fleetent.intelligence.knowledge_base.models import KnowledgeChunk
-from fleetent.intelligence.vector_store.rerank import (
+from fleetent.vector_store.rerank import (
     DeterministicRerankProvider,
     DisabledRerankProvider,
     HttpRerankProvider,

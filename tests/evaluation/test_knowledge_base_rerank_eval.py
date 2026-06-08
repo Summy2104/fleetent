@@ -15,7 +15,7 @@ async def test_deterministic_rerank_promotes_expected_chunk(monkeypatch, tmp_pat
     database = _patch_runtime(monkeypatch, tmp_path)
 
     from fleetent.intelligence.knowledge_base import runtime
-    from fleetent.intelligence.vector_store import SearchResult
+    from fleetent.vector_store import SearchResult
 
     documents: dict[str, str] = {}
     for item in payload["documents"]:

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from fleetent.db import create_database
-from fleetent.intelligence.vector_store import SearchResult
+from fleetent.vector_store import SearchResult
 
 FIXTURE = Path("tests/evaluation/fixtures/shared_memory/basic.json")
 
