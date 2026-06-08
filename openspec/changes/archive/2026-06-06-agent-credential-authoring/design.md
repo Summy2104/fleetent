@@ -59,9 +59,9 @@ slot = {
 
 - `env_name` 进 `agent.yaml` 的对应 `*_env` 字段（纯引用，不变）。
 - `mode` 决定 `.env` 由谁填，**不出现在 `agent.yaml`**——保证 agent.yaml 仍是纯引用、可审计、无平台耦合。
-- 存储位置：复用 `agent_versions` 的 JSON 列承载槽元数据（与 model_overrides 同位），避免新增表；密钥**值**单独进 D4 的 `agent_secrets`。
+- **mode 不单独持久化**（apply 期细化）：一个槽 `inject` ⟺ `agent_secrets` 里存了它的值，否则 `operator`。从「存了值即 inject」派生，不可能与值脱节，省一张表。`credential_service.slot_mode()` 即按 `agent_secret_store.status` 派生；密钥**值**进 D4 的 `agent_secrets`。
 
-env_name 派生需稳定 + 防撞：`<NAME>` 取 agent name 的 upper-snake、`<SLOT>` 取 `slack_bot` / `mcp_<id>` / `kb_<id>` 等槽标识。运维改名后 env_name 不自动变（避免 silent 漂移），改名走显式「重算 env 名」动作。
+env_name 仅对**新 author 的槽**（如 Slack connector）需派生：`<NAME>` 取 agent name 的 upper-snake、`<SLOT>` 取 `slack_bot` 等标识；provider/MCP 槽复用实体上已有的 `*_env`。`credential_service.derive_env_name()` + `assert_no_env_collisions()` 负责派生与撞名；改名不自动变 env 名。
 
 ### D4 — 加密 secret store（仅 inject 模式用值）
 

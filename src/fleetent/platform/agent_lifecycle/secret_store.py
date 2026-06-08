@@ -36,8 +36,11 @@ def _fernet() -> Fernet:
         raise SecretKeyError("FLEETENT_SECRET_KEY must be a valid Fernet key") from exc
 
 
-def set(agent_id: int, env_name: str, plaintext: str, updated_by: str | None = None) -> None:
-    """Encrypt and store a secret value for one agent/env slot."""
+def set(agent_id: int | None, env_name: str, plaintext: str, updated_by: str | None = None) -> None:
+    """Encrypt and store a secret value for one slot.
+
+    ``agent_id=None`` targets the shared (cross-agent) scope used by provider/connector keys.
+    """
     if plaintext == "":
         raise ValueError("empty secret values are rejected; use delete to clear a value")
     ciphertext = _fernet().encrypt(plaintext.encode("utf-8")).decode("ascii")
@@ -46,7 +49,7 @@ def set(agent_id: int, env_name: str, plaintext: str, updated_by: str | None = N
             """
             INSERT INTO agent_secrets (agent_id, env_name, ciphertext, updated_at, updated_by)
             VALUES (:agent_id, :env_name, :ciphertext, :updated_at, :updated_by)
-            ON CONFLICT(agent_id, env_name) DO UPDATE SET
+            ON CONFLICT(COALESCE(agent_id, -1), env_name) DO UPDATE SET
                 ciphertext = :ciphertext,
                 updated_at = :updated_at,
                 updated_by = :updated_by
@@ -61,13 +64,13 @@ def set(agent_id: int, env_name: str, plaintext: str, updated_by: str | None = N
         )
 
 
-def get_decrypted(agent_id: int, env_name: str) -> str | None:
-    """Return the decrypted value, or None when the slot is unset."""
+def get_decrypted(agent_id: int | None, env_name: str) -> str | None:
+    """Return the decrypted value for this exact scope, or None when the slot is unset."""
     fernet = _fernet()
     row = (
         _database()
         .execute(
-            "SELECT ciphertext FROM agent_secrets WHERE agent_id = :agent_id "
+            "SELECT ciphertext FROM agent_secrets WHERE agent_id IS :agent_id "
             "AND env_name = :env_name",
             {"agent_id": agent_id, "env_name": env_name},
         )
@@ -81,12 +84,17 @@ def get_decrypted(agent_id: int, env_name: str) -> str | None:
         raise SecretKeyError("FLEETENT_SECRET_KEY cannot decrypt the stored secret") from exc
 
 
-def status(agent_id: int, env_name: str) -> SecretStatus:
+def get_resolved(agent_id: int, env_name: str) -> str | None:
+    """Resolve a slot value, preferring the per-agent scope then the shared scope."""
+    return get_decrypted(agent_id, env_name) or get_decrypted(None, env_name)
+
+
+def status(agent_id: int | None, env_name: str) -> SecretStatus:
     """Return only whether a value exists; never expose plaintext or ciphertext."""
     row = (
         _database()
         .execute(
-            "SELECT 1 FROM agent_secrets WHERE agent_id = :agent_id AND env_name = :env_name",
+            "SELECT 1 FROM agent_secrets WHERE agent_id IS :agent_id AND env_name = :env_name",
             {"agent_id": agent_id, "env_name": env_name},
         )
         .fetchone()
@@ -94,9 +102,9 @@ def status(agent_id: int, env_name: str) -> SecretStatus:
     return "set" if row is not None else "unset"
 
 
-def delete(agent_id: int, env_name: str) -> None:
+def delete(agent_id: int | None, env_name: str) -> None:
     """Delete an injected secret value. Missing rows are a no-op."""
     _database().execute(
-        "DELETE FROM agent_secrets WHERE agent_id = :agent_id AND env_name = :env_name",
+        "DELETE FROM agent_secrets WHERE agent_id IS :agent_id AND env_name = :env_name",
         {"agent_id": agent_id, "env_name": env_name},
     )

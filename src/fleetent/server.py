@@ -225,12 +225,23 @@ app.include_router(agent_apply_api.router)
 app.include_router(lifecycle_admin_api.router)
 
 
+_UNSET: Any = object()  # distinguishes "field omitted" from an explicit None (clear)
+
+
 def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:
     """Serialize an Agent to the dict shape the console/apply seams promise."""
     if agent is None:
         return None
+    version = 1
+    if agent.active_version_id is not None:
+        av = agent_store.get_version_by_id(agent.active_version_id)
+        if av is not None:
+            version = av.version
     return {
         "id": agent.id,
+        "version": version,  # active snapshot number (read-only in the console)
+        "tenant_id": agent.tenant_id,
+        "team_id": agent.team_id,
         "system_prompt": agent.system_prompt,
         "allowed_tools": agent.allowed_tools,
         "plugins": agent.plugins,
@@ -240,6 +251,7 @@ def _agent_def_dict(agent: agent_store.Agent | None) -> dict[str, Any] | None:
         "model_overrides": agent.model_overrides,
         "memory_namespace": agent.memory_namespace,
         "icon": agent.icon,
+        "config_overrides": agent.config_overrides,
     }
 
 
@@ -263,6 +275,9 @@ def wire_agent_store_seams() -> None:
         plugins: list[str] | None = None,
         features: dict[str, Any] | None = None,
         icon: str | None = None,
+        tenant_id: str = "default",
+        team_id: str | None = None,
+        config_overrides: dict[str, Any] | None = None,
     ) -> None:
         agent_store.create_agent(
             name,
@@ -275,6 +290,9 @@ def wire_agent_store_seams() -> None:
             model_overrides=model_overrides,
             memory_namespace=memory_namespace,
             icon=icon,
+            tenant_id=tenant_id,
+            team_id=team_id,
+            config_overrides=config_overrides,
         )
         # platform-agent-lifecycle: materialize the runnable home on create.
         materialize.materialize_from_store(name)
@@ -287,7 +305,22 @@ def wire_agent_store_seams() -> None:
         mcp_server_ids: list[str] | None = None,
         model_overrides: dict[str, Any] | None = None,
         memory_namespace: str | None = None,
+        tenant_id: str | object = _UNSET,
+        team_id: str | None | object = _UNSET,
+        config_overrides: dict[str, Any] | object = _UNSET,
     ) -> None:
+        # tenant/team/config_overrides are agent-level (not versioned). Only set fields the
+        # caller passed; an explicit None clears tenant/team (vs _UNSET = leave unchanged).
+        if tenant_id is not _UNSET or team_id is not _UNSET:
+            current = agent_store.get_by_name(name)
+            if current is not None:
+                agent_store.set_identity(
+                    name,
+                    current.tenant_id if tenant_id is _UNSET else str(tenant_id),
+                    current.team_id if team_id is _UNSET else team_id,  # type: ignore[arg-type]
+                )
+        if config_overrides is not _UNSET:
+            agent_store.set_config_overrides(name, config_overrides)  # type: ignore[arg-type]
         kwargs: dict[str, Any] = {}
         if system_prompt is not None:
             kwargs["system_prompt"] = system_prompt

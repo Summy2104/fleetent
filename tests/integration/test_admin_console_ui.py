@@ -5,11 +5,13 @@ controls, and action wiring are present. No server needed — the console is a s
 asset; functional behaviour is browser-verified separately.
 """
 
+import re
 from pathlib import Path
 
 ADMIN_HTML = (Path(__file__).parents[2] / "src" / "fleetent" / "static" / "admin.html").read_text(
     encoding="utf-8"
 )
+_INLINE_JS = "\n".join(re.findall(r"<script>(.*?)</script>", ADMIN_HTML, re.S))
 
 
 # --- 1. two-level navigation --------------------------------------------------
@@ -211,6 +213,18 @@ def test_providers_secret_field_password_no_prefill():
     snippet = html.split('id="pv-api-key"', 1)[1][:120]
     assert 'type="password"' in snippet
     assert "autocomplete" in snippet
+
+
+def test_providers_key_is_inline_credential_field():
+    html = ADMIN_HTML
+    # provider API key + its env-reference are one value-first cred-field (not two boxes)
+    parts = html.split('data-cred="provider-key"', 1)
+    assert len(parts) == 2, "provider key cred-field not found"
+    body = parts[1][:1400]
+    assert 'id="pv-api-key"' in body and 'id="pv-api-key-env"' in body
+    assert "credToggle" in body  # advanced env-reference toggle
+    # the reusable control + helpers exist
+    assert "function credFieldHtml" in html and "function credToggle" in html
 
 
 def test_providers_write_controls_admin_gated():
@@ -522,18 +536,32 @@ def test_agent_bindings_are_searchable_multiselect():
     assert collapse_panels in html
 
 
-def test_agent_model_overrides_pick_from_providers():
+def test_agent_model_overrides_two_part_model_list_and_router():
     html = ADMIN_HTML
     render = html.split("function agRenderModelOverrides", 1)[1].split(
-        "function agCollectModelOverrides", 1
+        "function agRenderRouter", 1
     )[0]
-    # Each level is a provider dropdown sourced from the configured registry —
-    # no free-text model / base_url_env inputs.
+    # Part 1: a multi-select MODEL list sourced from the configured providers.
     assert "AG_PROVIDERS" in render
-    assert "agmo-model" not in render
-    assert "agmo-baseurl" not in render
+    assert 'agMsWidget("ag-models-ms"' in render
+    assert 'id="ag-router"' in render
+    assert "agmo-model" not in render and "agmo-baseurl" not in render  # no free-text fields
+    # Part 2: custom-named routers, each an ordered fallback chain of models.
+    rt = html.split("function agRenderRouter", 1)[1].split("function agRouterAddRoute", 1)[0]
+    assert "+ router" in rt and "+ model" in rt
+    assert "router name" in rt and "max_tokens" in rt
+    for fn in (
+        "function agRouterAddRoute",
+        "function agRouterRemoveRoute",
+        "function agRouterAddModel",
+        "function agRouterRemoveModel",
+        "function agRouterSetName",
+        "function agRouterSetEntry",
+    ):
+        assert fn in html, fn
+    # collect emits the {targets, routes:{name:[{target,max_tokens}]}} shape
     collect = html.split("function agCollectModelOverrides", 1)[1].split("\n}", 1)[0]
-    assert "AG_PROVIDERS.find" in collect  # model derived from the chosen provider
+    assert "targets" in collect and "routes" in collect
     # providers are loaded when the modal opens (create + edit)
     assert 'AG_PROVIDERS = await api("GET", "/providers")' in html
     assert (
@@ -568,10 +596,11 @@ def test_agent_required_env_and_credential_field_panel():
 def test_agent_model_credentials_reuse_provider_key():
     html = ADMIN_HTML
     render = html.split("function agRenderModelOverrides", 1)[1].split(
-        "function agCollectModelOverrides", 1
+        "function agRenderRouter", 1
     )[0]
-    assert "model-key-provider-reuse" in render
-    assert "api_key_env" in render
+    # the model multi-select labels each provider with its key hint; the agent never
+    # stores a separate model key (it reuses the provider's).
+    assert "🔑 " in render and "p.api_key" in render
     assert "agmo-api-key" not in render
 
 
@@ -602,7 +631,7 @@ def test_drawer_loads_from_aggregate_endpoints():
     for frag in ("/bindings`", "/skills`", "/kbs`", "/bindings/oauth`", "/versions`"):
         assert frag in fn, frag
     # plus the available-option catalogs
-    assert '"/mcp/servers"' in fn and '"/connectors"' in fn and '"/kb"' in fn
+    assert '"/mcp/servers"' in fn and '"/connectors"' in fn and '"/kb/connectors"' in fn
     # each binding sub-list degrades to a default on failure so one erroring endpoint
     # (e.g. an unmigrated table -> HTTP 500) can't blank the whole drawer
     for frag in (
@@ -1358,3 +1387,340 @@ def test_legacy_module_search_filters_rows():
         assert fn in html, f"missing render fn {fn}"
         body = html.split(fn, 1)[1][:1400]
         assert fid in body, f"{fn} does not consult #{fid}"
+
+
+# --- comprehensive per-control coverage (every button + every edit box) -------
+# Two guards prove wiring exhaustively-by-construction; the per-module inventories
+# pin the concrete set of controls so removing one fails loudly.
+
+
+def _event_handler_fns(html: str) -> set[str]:
+    """Every function name an inline event handler (onclick/onchange/oninput/onsubmit) calls."""
+    return set(
+        re.findall(r'on(?:click|change|input|submit)=\\?["\']?\s*([A-Za-z_$][\w$]*)\s*\(', html)
+    )
+
+
+def _js_defines(name: str) -> bool:
+    pat = (
+        rf"(?:function\s+{re.escape(name)}\b"
+        rf"|(?:const|let|var)\s+{re.escape(name)}\b"
+        rf"|{re.escape(name)}\s*=\s*(?:async\s*)?(?:function|\()"
+        rf"|{re.escape(name)}\s*:\s*(?:async\s*)?(?:function|\())"
+    )
+    return re.search(pat, _INLINE_JS) is not None
+
+
+def test_no_dangling_event_handlers():
+    """Every onclick/onchange/oninput/onsubmit handler resolves to a defined function.
+
+    Comprehensive button guard: a control wired to a removed or renamed function (the exact
+    breakage a big refactor/merge introduces) fails here before it ships.
+    """
+    referenced = _event_handler_fns(ADMIN_HTML)
+    assert referenced, "no event handlers found — extraction regex broke"
+    dangling = sorted(n for n in referenced if not _js_defines(n))
+    assert dangling == [], f"buttons wired to undefined functions: {dangling}"
+
+
+# Pre-existing dynamic/absent id references (present on origin/main too; tracked separately).
+_KNOWN_DYNAMIC_ID_REFS = {
+    "mcp-body",
+    "mcp-out",
+    "mcp-agent-filter",
+    "oc-out",
+    "oc-grants-body",
+    "oc-offboard-user",
+}
+
+
+def test_no_dangling_element_references():
+    """Every ``$("literal-id")`` / ``getElementById("literal-id")`` targets an element that exists.
+
+    Catches a JS reference to a DOM node that was removed/renamed. Concatenated lookups
+    (``$("row-" + id)``) are skipped — only fully-literal references are checked.
+    """
+    refs = set(
+        re.findall(r'(?:\$\(|getElementById\()\s*["\']([A-Za-z0-9_-]+)["\']\s*\)', _INLINE_JS)
+    )
+    ids = set(re.findall(r'\bid="([A-Za-z0-9_-]+)"', ADMIN_HTML))
+    missing = sorted(r for r in refs if r not in ids and r not in _KNOWN_DYNAMIC_ID_REFS)
+    assert missing == [], f"JS references missing DOM ids: {missing}"
+
+
+# Every editable control per module — id must be present in the shipped SPA.
+_MODULE_INPUTS = {
+    "users": [
+        "nu-name",
+        "nu-email",
+        "nu-password",
+        "nu-role",
+        "eu-name",
+        "eu-email",
+        "reset-password",
+        "user-filter",
+        "role-filter",
+        "status-filter",
+        "source-filter",
+        "ie-puid",
+        "bind-search",
+    ],
+    "agents": [
+        "ag-name",
+        "ag-icon",
+        "ag-tenant",
+        "ag-team",
+        "ag-version",
+        "ag-system-prompt",
+        "ag-skillsdir",
+        "ag-memns",
+        "ag-allowed-tools",
+        "ag-capabilities",
+        "ag-kb-select",
+        "ag-access-approval",
+        "ag-ch-platform",
+        "ag-ch-id",
+        "ag-clone-name",
+        "ag-filter",
+        "ag-user-filter",
+        "agm-ch-platform",
+        "agm-ch-id",
+    ],
+    "chat": ["chat-agent", "chat-input"],
+    "kb": ["kbc-id", "kbc-kind", "kbc-tenant", "kbc-kb", "kbc-desc", "kbc-enabled", "kbc-custom"],
+    "providers": [
+        "pv-id",
+        "pv-description",
+        "pv-base-url",
+        "pv-api-key",
+        "pv-api-key-env",
+        "pv-model",
+        "pv-model-custom",
+        "pv-protocol",
+        "pv-params",
+        "pv-max-tokens",
+        "pv-temperature",
+        "pv-filter",
+        "pv-route-tt",
+        "pv-route-ids",
+    ],
+    "connectors": [
+        "mcp-id",
+        "mcp-name",
+        "mcp-desc",
+        "mcp-transport",
+        "mcp-command",
+        "mcp-args",
+        "mcp-env",
+        "mcp-url",
+        "mcp-ws-url",
+        "mcp-headers",
+        "mcp-subprotocols",
+        "mcp-enabled",
+        "conn-platform",
+        "oc-id",
+        "oc-name",
+        "oc-client-id",
+        "oc-client-secret",
+        "oc-auth-url",
+        "oc-token-url",
+        "oc-scopes",
+        "oc-enabled",
+    ],
+    "skills": [
+        "sk-name",
+        "sk-content",
+        "sk-source",
+        "sk-search",
+        "sk-source-filter",
+        "sk-import-folder",
+        "sk-import-source",
+    ],
+    "sessions": [
+        "sess-agent",
+        "sess-user",
+        "sess-status",
+        "sess-filter",
+        "sess-all",
+        "sess-pg-agent",
+        "sess-pg-msg",
+    ],
+    "stats": [
+        "st-agent",
+        "st-user",
+        "st-session",
+        "st-request",
+        "st-window",
+        "st-filter",
+        "st-sort",
+        "st-compare",
+        "st-report-period",
+        "st-report-to",
+        "st-export-view",
+        "st-trace-user",
+    ],
+    "monitoring": [
+        "mon-filter",
+        "mon-metric",
+        "mon-target",
+        "mon-since",
+        "mon-alert-status",
+        "mon-rule-metric",
+        "mon-rule-target",
+        "mon-rule-comp",
+        "mon-rule-threshold",
+        "mon-rule-for",
+        "mon-rule-severity",
+        "mon-rule-channels",
+        "mon-maint-target",
+        "mon-maint-start",
+        "mon-maint-end",
+    ],
+}
+
+
+def test_every_module_edit_field_present():
+    """Every editable control (input/select/textarea) of every module is in the shipped SPA."""
+    missing: dict[str, list[str]] = {}
+    for module, ids in _MODULE_INPUTS.items():
+        gone = [i for i in ids if f'id="{i}"' not in ADMIN_HTML]
+        if gone:
+            missing[module] = gone
+    assert missing == {}, f"removed/renamed edit fields: {missing}"
+
+
+# Every module's action buttons — the handler functions must be defined AND wired.
+_MODULE_BUTTONS = {
+    "users": [
+        "createUser",
+        "saveUser",
+        "openEditUser",
+        "resetPassword",
+        "setRole",
+        "block",
+        "unblock",
+        "viewKeys",
+        "doBindIm",
+        "openImEdit",
+    ],
+    "agents": [
+        "agCreate",
+        "agSave",
+        "agEdit",
+        "agDeploy",
+        "agDelete",
+        "agEnable",
+        "agDisable",
+        "agArchive",
+        "agRestore",
+        "agOpenClone",
+        "agDoClone",
+        "agAddKb",
+        "agUnbindKb",
+        "agToggleMcp",
+        "agToggleOauth",
+        "agSetSkill",
+        "agActivateVersion",
+        "agmAddChannel",
+    ],
+    "chat": ["chatNew", "chatSend", "chatOpen", "chatPin", "chatExport"],
+    "kb": ["kbcOpenCreate", "kbcSave", "kbcOpenEdit", "kbcDelete", "kbcCheck", "kbcSync"],
+    "providers": [
+        "pvOpenCreate",
+        "pvSave",
+        "pvOpenEdit",
+        "pvDelete",
+        "pvTest",
+        "pvSetRoute",
+        "pvPreviewRoute",
+        "pvTogglePassword",
+    ],
+    "connectors": [
+        "openConnModal",
+        "saveMcpConnector",
+        "mcpOpenEdit",
+        "mcpReconnect",
+        "mcpTools",
+        "ocOpenCreate",
+        "ocSave",
+        "ocOpenEdit",
+        "ocRevoke",
+        "connEnable",
+        "connDisable",
+    ],
+    "skills": [
+        "skOpenCreate",
+        "skSave",
+        "skOpenEdit",
+        "skDelete",
+        "skEnable",
+        "skDisable",
+        "skOpenImport",
+        "skDoUpload",
+        "skApprove",
+        "skReject",
+        "skPromote",
+    ],
+    "sessions": [
+        "sessTakeover",
+        "sessRelease",
+        "sessInject",
+        "sessForceEnd",
+        "sessClear",
+        "sessReset",
+        "sessBulk",
+        "sessExport",
+        "sessMessage",
+        "sessPin",
+    ],
+    "stats": [
+        "stOverview",
+        "stPerUser",
+        "stTools",
+        "stRequest",
+        "stTrace",
+        "stCompare",
+        "stReport",
+        "stExport",
+    ],
+    "monitoring": [
+        "monMetrics",
+        "monAlerts",
+        "monAck",
+        "monSilence",
+        "monOpenRule",
+        "monCreateRule",
+        "monDeleteRule",
+        "monDisableRule",
+        "monMaintenance",
+    ],
+}
+
+
+def test_every_module_action_button_present():
+    """Every module's CRUD/action button is wired (referenced) and its handler defined."""
+    problems: dict[str, list[str]] = {}
+    for module, fns in _MODULE_BUTTONS.items():
+        bad = [f"{fn}(not wired)" for fn in fns if f"{fn}(" not in ADMIN_HTML]
+        bad += [f"{fn}(undefined)" for fn in fns if f"{fn}(" in ADMIN_HTML and not _js_defines(fn)]
+        if bad:
+            problems[module] = bad
+    assert problems == {}, f"module action buttons broken: {problems}"
+
+
+def test_all_ten_tabs_have_inventories():
+    """Guard the guard: all ten console tabs are covered by both inventories above."""
+    tabs = {
+        "users",
+        "agents",
+        "chat",
+        "kb",
+        "providers",
+        "connectors",
+        "skills",
+        "sessions",
+        "stats",
+        "monitoring",
+    }
+    assert set(_MODULE_INPUTS) == tabs
+    assert set(_MODULE_BUTTONS) == tabs

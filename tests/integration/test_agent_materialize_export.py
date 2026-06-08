@@ -122,6 +122,111 @@ def test_agent_file_from_store_defaults_models_when_no_overrides(db):
     assert exported.models == default_models()
 
 
+def test_agent_file_from_store_applies_config_overrides(db):
+    """The per-agent config_overrides blob deep-merges onto the materialized agent.yaml."""
+    agent = agent_store.create_agent(
+        "ov",
+        "p",
+        [],
+        config_overrides={"agent_max_turns": 80, "access": {"require_approval": False}},
+    )
+
+    af = materialize.agent_file_from_store(agent)
+
+    assert af.agent_max_turns == 80
+    assert af.access.require_approval is False
+    assert af.access.allow_users == []  # untouched nested default preserved
+
+
+def test_agent_file_from_store_ignores_invalid_config_override(db):
+    agent = agent_store.create_agent("ov2", "p", [], config_overrides={"not_a_real_field": 1})
+    # a bad override must not break materialize — fall back to the valid base
+    assert materialize.agent_file_from_store(agent).name == "ov2"
+
+
+def test_seed_env_falls_back_to_provider_inline_key(db, tmp_path, monkeypatch):
+    """A provider authored with an inline key seeds the agent .env for its derived env name."""
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    provider_admin_store.add_provider(
+        "inline-prov",
+        "https://api.anthropic.com/v1/",
+        "claude-opus-4-8",
+        provider="anthropic",
+        protocol="openai_chat",
+        api_key="sk-inline-secret",
+        api_key_env="FLEETENT_MODEL_INLINE_PROV_API_KEY",
+    )
+    agent = agent_store.create_agent(
+        "seeded",
+        "p",
+        [],
+        model_overrides={"default": {"provider": "inline-prov", "model": "claude-opus-4-8"}},
+    )
+    home = materialize.write_home(materialize.agent_file_from_store(agent), source_agent=agent)
+    env_text = (home / ".env").read_text(encoding="utf-8")
+    assert "FLEETENT_MODEL_INLINE_PROV_API_KEY=sk-inline-secret" in env_text
+
+
+def test_agent_file_from_store_exports_active_version(db):
+    agent_store.create_agent("ver", "v1", [])
+    assert materialize.agent_file_from_store(agent_store.get_by_name("ver")).version == 1
+    agent_store.create_version("ver", system_prompt="v2")  # active becomes v2
+    assert materialize.agent_file_from_store(agent_store.get_by_name("ver")).version == 2
+
+
+def test_agent_file_from_store_handles_targets_routes_shape(db):
+    """Agents authored with the {targets, routes:{name:[{target}]}} shape still materialize.
+
+    Pre-existing agents store this shape; the expander must resolve each route entry's
+    ``target`` against the provider registry (not choke on the wrapper keys).
+    """
+    provider_admin_store.add_provider(
+        "p-router",
+        "https://api.anthropic.com/v1/",
+        "claude-opus-4-8",
+        provider="anthropic",
+        protocol="openai_chat",
+        api_key_env="FLEETENT_P_ROUTER",
+    )
+    agent = agent_store.create_agent(
+        "routed",
+        "p",
+        [],
+        model_overrides={
+            "targets": ["p-router"],
+            "routes": {"reasoning": [{"target": "p-router", "max_tokens": None, "params": {}}]},
+        },
+    )
+
+    exported = materialize.agent_file_from_store(agent)
+
+    assert exported.models.routes["reasoning"][0].target == "p-router"
+    target = {t.id: t for t in exported.models.targets}["p-router"]
+    assert target.base_url == "https://api.anthropic.com/v1/"
+    assert target.model == "claude-opus-4-8"
+
+
+def test_agent_file_from_store_handles_ui_provider_key(db):
+    """The console emits {route: {provider: <id>, model}}; resolve <id> against providers."""
+    provider_admin_store.add_provider(
+        "p-ui",
+        "https://api.openai.com/v1/",
+        "gpt-5.5",
+        provider="openai",
+        protocol="openai_chat",
+        api_key_env="FLEETENT_P_UI",
+    )
+    agent = agent_store.create_agent(
+        "uimodel", "p", [], model_overrides={"default": {"provider": "p-ui", "model": "gpt-5.5"}}
+    )
+
+    exported = materialize.agent_file_from_store(agent)
+
+    target = {t.id: t for t in exported.models.targets}["p-ui"]
+    assert target.base_url == "https://api.openai.com/v1/"
+    assert exported.models.routes["default"][0].target == "p-ui"
+
+
 # ── skill DB state → agent.yaml (skill-materialize-db-fields) ──────────────────
 
 

@@ -15,6 +15,7 @@ Auth mirrors user_admin_api: reads allow viewer+admin, writes require admin.
 """
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -25,6 +26,7 @@ from pydantic import BaseModel
 from fleetent import auth, user_store
 from fleetent.governance import audit_log
 from fleetent.intelligence import knowledge_base
+from fleetent.platform.agent_lifecycle import secret_store
 from fleetent.platform.knowledge_base_management import agent_kbs_store, kb_connector_store
 
 router = APIRouter(prefix="/admin/kb")
@@ -510,6 +512,9 @@ class ConnectorBody(BaseModel):
     tenant_id: str = _DEFAULT_TENANT
     kb_id: str = "global"
     enabled: bool = True
+    # A connector IS a knowledge base: this short description lives on the KB it targets
+    # and is shown when agents pick the KB.
+    description: str = ""
     config: dict[str, Any] = {}
     custom: dict[str, Any] = {}  # free-form metadata, not schema-filtered
     # Console sends custom as YAML (friendlier to author); parsed server-side. When
@@ -521,6 +526,7 @@ class ConnectorEditBody(BaseModel):
     tenant_id: str | None = None
     kb_id: str | None = None
     enabled: bool | None = None
+    description: str | None = None
     config: dict[str, Any] | None = None
     custom: dict[str, Any] | None = None
     custom_yaml: str | None = None
@@ -541,13 +547,28 @@ def _parse_custom_yaml(text: str) -> dict[str, Any]:
     return parsed
 
 
+def _kb_description(tenant_id: str, kb_id: str) -> str:
+    """The description stored on the KB this connector targets (empty if none)."""
+    for kb in kb_engine_list(tenant_id):
+        if kb["kb_id"] == kb_id:
+            return str(kb.get("description") or "")
+    return ""
+
+
+def _apply_kb_description(tenant_id: str, kb_id: str, description: str) -> None:
+    """A connector IS a KB: ensure the KB row exists and set its description."""
+    knowledge_base.create_knowledge_base(tenant_id, kb_id, description)
+    knowledge_base.update_knowledge_base_description(tenant_id, kb_id, description)
+
+
 def _connector_out(row: dict[str, Any]) -> dict[str, Any]:
-    """Augment a stored connector with custom_yaml for friendly display/editing."""
+    """Augment a stored connector with custom_yaml + its KB description for display/editing."""
     out = dict(row)
     custom = out.get("custom") or {}
     out["custom_yaml"] = (
         yaml.safe_dump(custom, sort_keys=False, allow_unicode=True) if custom else ""
     )
+    out["description"] = _kb_description(str(out.get("tenant_id", "")), str(out.get("kb_id", "")))
     return out
 
 
@@ -565,6 +586,27 @@ def list_kb_connectors(authorization: str | None = Header(None)) -> list[dict[st
     return [_connector_out(r) for r in kb_connector_store.list_connectors()]
 
 
+def _resolve_inline_secrets(connector_id: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Encrypt inline token values into the shared secret scope, leaving only env refs.
+
+    A ``<field>_env_value`` key carries a token typed inline (value mode). Store it encrypted
+    under a derived ``FLEETENT_KB_<id>_<slot>`` name and set ``<field>_env`` to that name — the
+    config blob, like agent.yaml, only ever holds ``*_env`` references, never a secret value.
+    """
+    resolved = dict(config)
+    for key in [k for k in resolved if k.endswith("_env_value")]:
+        value = resolved.pop(key)
+        if not value:
+            continue
+        field = key[: -len("_value")]  # access_token_env_value -> access_token_env
+        slot = re.sub(r"_env$", "", field)
+        cid = re.sub(r"[^0-9A-Za-z]+", "_", connector_id).strip("_").upper()
+        env_name = f"FLEETENT_KB_{cid}_{re.sub(r'[^0-9A-Za-z]+', '_', slot).strip('_').upper()}"
+        secret_store.set(None, env_name, str(value))
+        resolved[field] = env_name
+    return resolved
+
+
 @router.post("/connectors", status_code=201)
 def add_kb_connector(
     body: ConnectorBody, authorization: str | None = Header(None)
@@ -576,17 +618,22 @@ def add_kb_connector(
         raise HTTPException(status_code=409, detail="connector id already exists")
     custom = _parse_custom_yaml(body.custom_yaml) if body.custom_yaml is not None else body.custom
     try:
+        config = _resolve_inline_secrets(body.connector_id, body.config)
+    except secret_store.SecretKeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
         kb_connector_store.add_connector(
             body.connector_id,
             body.kind,
             body.tenant_id,
             body.kb_id,
-            body.config,
+            config,
             body.enabled,
             custom=custom,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _apply_kb_description(body.tenant_id, body.kb_id, body.description)
     audit_log.write_audit(user.id, "kb_connector.add", "kb_connector", body.connector_id)
     created = kb_connector_store.get_connector(body.connector_id)
     assert created is not None
@@ -601,14 +648,23 @@ def edit_kb_connector(
     fields = body.model_dump(exclude_unset=True)
     if "custom_yaml" in fields:
         fields["custom"] = _parse_custom_yaml(fields.pop("custom_yaml"))
+    # description lives on the KB, not the connector row — handle it separately.
+    description = fields.pop("description", None)
+    if "config" in fields:
+        try:
+            fields["config"] = _resolve_inline_secrets(connector_id, fields["config"])
+        except secret_store.SecretKeyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         kb_connector_store.edit_connector(connector_id, **fields)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    audit_log.write_audit(user.id, "kb_connector.edit", "kb_connector", connector_id)
     edited = kb_connector_store.get_connector(connector_id)
     if edited is None:
         raise HTTPException(status_code=404, detail="connector not found")
+    if description is not None:
+        _apply_kb_description(edited["tenant_id"], edited["kb_id"], description)
+    audit_log.write_audit(user.id, "kb_connector.edit", "kb_connector", connector_id)
     return _connector_out(edited)
 
 

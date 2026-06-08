@@ -8,7 +8,9 @@
 # by env-var name.
 # The Agent `.env` is generated/refreshed from these references by platform
 # materialize (or copied from the console required-env panel), not maintained as a
-# static global secret inventory.
+# static global secret inventory. The committed process-level .env.example holds only
+# cross-agent vars, e.g. FLEETENT_SECRET_KEY — the secret-store master key for
+# inject-mode values.
 # (This template ends in `.example`; install.sh copies it to
 #  FLEETENT_HOME/agents/default/agent.yaml for the default local Agent.)
 #

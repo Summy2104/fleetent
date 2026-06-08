@@ -162,7 +162,14 @@
   .password-input-wrapper input { padding-right: 40px; flex: 1; }
   .password-toggle { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 38px; background: transparent; border: none; color: var(--text-muted); cursor: pointer; border-radius: 0 var(--r-1) var(--r-1) 0; display: flex; align-items: center; justify-content: center; }
   .password-toggle:hover { background: var(--surface-2); }
-  
+  .cred-field { display: flex; flex-direction: column; gap: 4px; }
+  .cred-field .cred-row { display: flex; gap: 6px; align-items: center; }
+  .cred-field .cred-toggle { align-self: flex-start; background: none; border: none; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 0; }
+  .cred-field .cred-toggle:hover { color: var(--accent); }
+  .cred-chip { font-size: 11px; white-space: nowrap; }
+  .cred-chip.set { color: var(--ok); }
+  .cred-chip.unset { color: var(--text-muted); }
+
   .modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
   button.primary { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: var(--r-1); font-size: 14px; font-weight: 500; cursor: pointer; }
   button.primary:hover { background: #6b9fff; }
@@ -625,11 +632,11 @@
 
       <div class="card">
         <div class="row" style="justify-content:space-between; align-items:center;">
-          <h4 style="margin:0;">Source connectors <span class="muted" style="font-weight:normal; font-size:12px;">(Google Drive / Confluence)</span></h4>
-          <span id="kbc-create-bar"><button class="small" onclick="kbcOpenCreate()">+ Add connector</button></span>
+          <h4 style="margin:0;">Knowledge bases <span class="muted" style="font-weight:normal; font-size:12px;">(a source connector — Google Drive / Confluence)</span></h4>
+          <span id="kbc-create-bar"><button class="small" onclick="kbcOpenCreate()">+ Add knowledge base</button></span>
         </div>
         <div class="table-scroll" style="margin-top:8px;"><table>
-          <thead><tr><th>ID</th><th>Kind</th><th>Enabled</th><th>Tenant / KB</th><th>Scope</th><th>Actions</th></tr></thead>
+          <thead><tr><th>ID</th><th>Kind</th><th>Description</th><th>Enabled</th><th>Tenant / KB</th><th>Scope</th><th>Actions</th></tr></thead>
           <tbody id="kbc-body"></tbody>
         </table></div>
         <div id="kbc-list-err" class="err"></div>
@@ -651,6 +658,8 @@
             <input id="kbc-tenant" placeholder="tenant_id" autocomplete="off">
             <input id="kbc-kb" placeholder="kb_id" autocomplete="off">
           </div>
+          <label class="field-label" for="kbc-desc">Short description</label>
+          <input id="kbc-desc" autocomplete="off" placeholder="One line — shown when agents pick this knowledge base">
           <label class="row" style="gap:6px;"><input type="checkbox" id="kbc-enabled" checked> Enabled</label>
           <div id="kbc-fields" style="display:flex; flex-direction:column; gap:8px;"></div>
           <label class="field-label" for="kbc-custom">Custom (YAML)</label>
@@ -1221,17 +1230,20 @@
 
           <div class="form-group">
             <label class="form-label" for="pv-api-key">API Key</label>
-            <div class="password-input-wrapper">
-              <input id="pv-api-key" type="password" class="form-input" placeholder="sk-..." autocomplete="off">
-              <button type="button" class="password-toggle" onclick="pvTogglePassword()" aria-label="Toggle password visibility">👁</button>
+            <div class="cred-field" data-cred="provider-key" data-mode="value">
+              <div class="cred-value cred-row">
+                <div class="password-input-wrapper" style="flex:1;">
+                  <input id="pv-api-key" type="password" class="form-input" placeholder="sk-..." autocomplete="off">
+                  <button type="button" class="password-toggle" onclick="pvTogglePassword()" aria-label="Toggle password visibility">👁</button>
+                </div>
+                <span id="pv-key-chip" class="cred-chip unset"></span>
+              </div>
+              <div class="cred-ref cred-row" style="display:none;">
+                <input id="pv-api-key-env" type="text" class="form-input" placeholder="e.g. FLEETENT_MODEL_FAST_API_KEY" autocomplete="off">
+              </div>
+              <button type="button" class="cred-toggle" onclick="credToggle(this)">⚙ 引用现有变量</button>
+              <span class="form-hint">输入值即可——平台自动命名并把 agent.yaml 指向它（部署时注入 .env）；或切到「引用现有变量」由运维在主机 .env 填。编辑时留空保持原值。</span>
             </div>
-            <span class="form-hint">Leave blank to keep existing key when editing</span>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label" for="pv-api-key-env">API key env var</label>
-            <input id="pv-api-key-env" type="text" class="form-input" placeholder="e.g. FLEETENT_MODEL_FAST_API_KEY" autocomplete="off">
-            <span class="form-hint">Env var name holding the key (preferred over an inline key)</span>
           </div>
         </div>
 
@@ -1276,20 +1288,32 @@
     <div class="modal-box wide" role="dialog" aria-modal="true">
       <h3 id="ag-modal-title">New agent</h3>
       <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="agSave(); return false;">
-        <input id="ag-name" placeholder="agent name (unique)" autocomplete="off">
+        <input id="ag-name" placeholder="agent name (unique)" autocomplete="off" oninput="agSyncSkillsDir()">
         <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
           <span class="muted" style="font-size:12px;">Icon</span>
           <span id="ag-icon-preview" style="font-size:22px; line-height:1;">🤖</span>
           <span id="ag-icon-palette" style="display:flex; gap:4px; flex-wrap:wrap;"></span>
           <input id="ag-icon" type="hidden">
         </div>
+        <div class="row" style="gap:8px; align-items:flex-end; flex-wrap:wrap;">
+          <label class="muted" style="font-size:12px; flex:0 0 auto;">version
+            <input id="ag-version" disabled title="active version — managed by the platform" style="width:70px; margin-top:4px; opacity:.7;"></label>
+          <label class="muted" style="font-size:12px; flex:1 1 160px;">tenant_id
+            <input id="ag-tenant" placeholder="default" autocomplete="off" style="width:100%; margin-top:4px;"></label>
+          <label class="muted" style="font-size:12px; flex:1 1 160px;">team_id
+            <input id="ag-team" placeholder="(none)" autocomplete="off" style="width:100%; margin-top:4px;"></label>
+          <label class="muted" style="font-size:12px; flex:1 1 160px;">memory_namespace
+            <input id="ag-memns" placeholder="<agent> (default)" autocomplete="off" style="width:100%; margin-top:4px;"></label>
+          <label class="muted" style="font-size:12px; flex:1 1 160px;">skills_dir
+            <input id="ag-skillsdir" placeholder="~/.fleetent/<agent>/skills" autocomplete="off" style="width:100%; margin-top:4px;"></label>
+        </div>
         <label class="muted" style="font-size:12px;">System prompt / identity
           <textarea id="ag-system-prompt" placeholder="Describe the agent's identity and behavior…" rows="8" style="font-family:monospace; width:100%; margin-top:4px;"></textarea>
         </label>
         <input id="ag-allowed-tools" placeholder="allowed_tools (comma-separated, e.g. shell, github__*)" autocomplete="off">
         <div id="ag-create-extra">
-          <h4 style="margin:14px 0 4px;">Model providers</h4>
-          <div class="muted" style="font-size:12px; margin-bottom:6px;">Optional. One entry per level — leave a model blank to skip that level.</div>
+          <h4 style="margin:14px 0 4px;">Models</h4>
+          <div class="muted" style="font-size:12px; margin-bottom:6px;">Pick the models this agent may use, then add routers (custom names) — each routes to one or more models as ordered fallbacks.</div>
           <div id="ag-model-overrides"></div>
         </div>
         <div id="ag-bind-config">
@@ -1303,14 +1327,23 @@
           <div id="agm-oauth" style="display:flex; flex-direction:column; gap:4px;"></div>
           <h4 style="margin:14px 0 4px;">Knowledge bases</h4>
           <div id="agm-kb" style="display:flex; flex-direction:column; gap:4px;"></div>
-          <h4 style="margin:14px 0 4px;">IM users (allowlist)</h4>
+          <h4 style="margin:14px 0 4px;">IM users (allowlist) <span class="muted" style="font-weight:normal; font-size:12px;">(by Slack / Telegram / WhatsApp id)</span></h4>
           <div id="agm-users"></div>
           <h4 style="margin:14px 0 4px;">Channels</h4>
           <div id="agm-channels"></div>
           <div class="row" style="margin-top:6px;"><input id="agm-ch-platform" placeholder="platform" style="max-width:120px;"><input id="agm-ch-id" placeholder="channel_id"><button type="button" class="small" onclick="agmAddChannel()">Add channel</button></div>
+          <h4 style="margin:14px 0 4px;">Access <span class="muted" style="font-weight:normal; font-size:12px;">(narrow to a subset of the bindings above)</span></h4>
+          <label class="row" style="gap:6px; font-size:12px;"><input type="checkbox" id="ag-access-approval" checked> require_approval</label>
+          <div class="muted" style="font-size:12px; margin-top:6px;">allow_users</div>
+          <div id="ag-access-users"></div>
+          <div class="muted" style="font-size:12px; margin-top:6px;">allow_channels</div>
+          <div id="ag-access-channels"></div>
+          <h4 style="margin:14px 0 4px;">Advanced settings</h4>
+          <div class="muted" style="font-size:12px;">Common agent.yaml knobs — defaults shown; only changed values are saved.</div>
+          <div id="ag-advanced-fields"></div>
           <h4 style="margin:14px 0 4px;">Custom (YAML)</h4>
-          <div class="muted" style="font-size:12px;">Paste an allowed_tools / plugins / features block — recorded as-is.</div>
-          <textarea id="ag-capabilities" rows="10" autocomplete="off" spellcheck="false" style="font-family:monospace; width:100%; margin-top:4px;" placeholder="allowed_tools:&#10;  - &quot;search_*&quot;&#10;  - read_file&#10;plugins:&#10;  - acme-docs&#10;features:&#10;  code_execution: true&#10;  sandbox_env:&#10;    TZ: Asia/Shanghai"></textarea>
+          <div class="muted" style="font-size:12px;">Any other agent.yaml field as YAML — allowed_tools / plugins / features plus anything not above. Deep-merged onto the defaults; invalid keys are ignored.</div>
+          <textarea id="ag-capabilities" rows="12" autocomplete="off" spellcheck="false" style="font-family:monospace; width:100%; margin-top:4px;" placeholder="allowed_tools:&#10;  - &quot;search_*&quot;&#10;  - read_file&#10;plugins:&#10;  - acme-docs&#10;features:&#10;  code_execution: true&#10;agent_max_turns: 80&#10;session_ttl_days: 7&#10;access:&#10;  require_approval: false"></textarea>
         </div>
         <div id="ag-err" class="err"></div>
         <div class="row" style="justify-content:flex-end;">
@@ -2426,6 +2459,7 @@ async function skDrop(e) {
   $("sk-import-err").textContent = "只接受文件夹或 .zip，不接受单个文件";
 }
 function skCloseImport() { $("sk-import-modal").classList.add("hidden"); }
+function skCloseAgents() { $("sk-agents-modal").classList.add("hidden"); }
 
 function skImportShowResult(r) {
   const res = $("sk-import-result");
@@ -2720,6 +2754,168 @@ function agSetIcon(emoji) {
   $("ag-icon").value = emoji || "";
   $("ag-icon-preview").textContent = emoji || "🤖";
 }
+// Auto-fill skills_dir + memory_namespace from the agent name while they hold an auto value
+// (skills_dir empty/the ~/.fleetent/<x>/skills pattern; memns empty/"default"/a prior name).
+// A custom value the operator typed is left untouched.
+function agSyncSkillsDir() {
+  const name = $("ag-name").value.trim();
+  const sd = $("ag-skillsdir");
+  if (sd) {
+    const cur = sd.value.trim();
+    if (cur === "" || /^~\/\.fleetent\/[^/]*\/skills$/.test(cur)) {
+      sd.value = name ? `~/.fleetent/${name}/skills` : "";
+    }
+  }
+  const mn = $("ag-memns");
+  if (mn) {
+    const cur = mn.value.trim();
+    if (cur === "" || cur === "default" || cur === (mn.dataset.auto || "\0")) {
+      mn.value = name || "default";
+      mn.dataset.auto = mn.value;
+    }
+  }
+}
+
+// --- Advanced settings: curated agent.yaml knobs backed by config_overrides ---------------
+// Each field reads/writes a (possibly dotted) path; only non-default values are persisted.
+// The Custom (YAML) box owns everything NOT listed here (the long tail + allowed_tools).
+const AG_ADV_FIELDS = [
+  { g: "Governance", k: "agent_max_turns", t: "number", d: 50 },
+  { g: "Governance", k: "agent_max_consecutive_failures", t: "number", d: 3 },
+  { g: "Governance", k: "agent_max_tokens", t: "number", d: -1 },
+  { g: "Governance", k: "agent_tool_parallel_max", t: "number", d: 8 },
+  { g: "Governance", k: "tool_default_timeout_seconds", t: "number", d: 30 },
+  { g: "Governance", k: "permission_gate_medium_timeout_seconds", t: "number", d: 300 },
+  { g: "Governance", k: "permission_gate_high_timeout_seconds", t: "number", d: 3600 },
+  { g: "Deployment", k: "session_ttl_days", t: "number", d: 30 },
+  { g: "Deployment", k: "log_format", t: "select", opts: ["console", "json"], d: "console" },
+  { g: "Deployment", k: "microsandbox_url", t: "text", d: "http://host.docker.internal:7777" },
+  { g: "Deployment", k: "image_gen_url", t: "text", d: "" },
+  { g: "Deployment", k: "vision_url", t: "text", d: "" },
+  { g: "Intelligence", k: "long_term_ctx.max_tokens", t: "number", d: 2048 },
+  { g: "Intelligence", k: "knowledge.enabled", t: "bool", d: false },
+  { g: "Intelligence", k: "knowledge.retrieval_policy.mode", t: "select", opts: ["vector", "keyword", "hybrid"], d: "hybrid" },
+  { g: "Intelligence", k: "knowledge.retrieval_policy.top_k", t: "number", d: 10 },
+  { g: "Intelligence", k: "knowledge.retrieval_policy.rerank", t: "bool", d: false },
+];
+const AG_ADV_KEYS = AG_ADV_FIELDS.map(f => f.k);
+function _agGet(obj, path) { return path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj); }
+function _agSet(obj, path, val) {
+  const ks = path.split(".");
+  let o = obj;
+  for (let i = 0; i < ks.length - 1; i++) { o[ks[i]] = o[ks[i]] || {}; o = o[ks[i]]; }
+  o[ks[ks.length - 1]] = val;
+}
+function _agPrune(o) {
+  if (o && typeof o === "object" && !Array.isArray(o)) {
+    for (const k of Object.keys(o)) {
+      _agPrune(o[k]);
+      if (o[k] && typeof o[k] === "object" && !Array.isArray(o[k]) && Object.keys(o[k]).length === 0) delete o[k];
+    }
+  }
+}
+function agRenderAdvFields(co) {
+  co = co || {};
+  const groups = {};
+  for (const f of AG_ADV_FIELDS) (groups[f.g] ||= []).push(f);
+  const field = f => {
+    const cur = _agGet(co, f.k);
+    const v = cur === undefined ? f.d : cur;
+    const id = "adv-" + f.k.replace(/\./g, "-");
+    if (f.t === "bool")
+      return `<label class="row" style="gap:6px; font-size:12px;"><input type="checkbox" id="${id}" data-advk="${f.k}" ${v ? "checked" : ""}> ${f.k}</label>`;
+    if (f.t === "select")
+      return `<label class="muted" style="font-size:12px; display:block;">${f.k}<select id="${id}" data-advk="${f.k}" style="width:100%; margin-top:2px;">${f.opts.map(o => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select></label>`;
+    return `<label class="muted" style="font-size:12px; display:block;">${f.k}<input id="${id}" data-advk="${f.k}" data-advt="${f.t}" value="${esc(String(v))}" style="width:100%; margin-top:2px;"></label>`;
+  };
+  $("ag-advanced-fields").innerHTML = Object.entries(groups).map(([g, fs]) =>
+    `<details style="margin:4px 0;"><summary style="cursor:pointer; font-size:13px; font-weight:600;">${g}</summary>
+      <div style="display:flex; flex-direction:column; gap:6px; padding:6px 0 6px 10px;">${fs.map(field).join("")}</div>
+    </details>`).join("");
+}
+function agCollectAdvFields() {
+  const out = {};
+  for (const f of AG_ADV_FIELDS) {
+    const el = document.querySelector(`#ag-advanced-fields [data-advk="${f.k}"]`);
+    if (!el) continue;
+    let v;
+    if (f.t === "bool") v = el.checked;
+    else if (f.t === "number") { const t = el.value.trim(); if (t === "") continue; v = Number(t); }
+    else v = el.value;
+    if (v !== f.d) _agSet(out, f.k, v);  // only persist non-defaults
+  }
+  return out;
+}
+function agStripAdvKeys(co) {
+  const clone = JSON.parse(JSON.stringify(co || {}));
+  for (const k of AG_ADV_KEYS) {
+    const ks = k.split(".");
+    let o = clone;
+    for (let i = 0; i < ks.length - 1 && o; i++) o = o[ks[i]];
+    if (o && typeof o === "object") delete o[ks[ks.length - 1]];
+  }
+  delete clone.access;  // owned by the Access section, not the Custom box
+  _agPrune(clone);
+  return clone;
+}
+
+// --- Access: require_approval + allow_users/allow_channels chosen FROM the bindings -------
+let AG_IM_USERS = [];           // [{user_id, platform, platform_user_id}] loaded with the modal
+let AG_ACCESS = { require_approval: true, allow_users: [], allow_channels: [] };
+// The user ids / channels currently bound in the modal — the only things access can allow.
+function agBoundUserIds() {
+  const set = new Set();
+  for (const pid of AG_ACCESS.allow_users) set.add(pid);  // keep any still-valid prior picks
+  const out = [];
+  const seen = new Set();
+  for (const uid of [...document.querySelectorAll("#agm-users .agm-user-row input:checked")].map(i => i.value)) {
+    for (const iu of AG_IM_USERS) {
+      if (iu.user_id === uid && !seen.has(iu.platform_user_id)) {
+        seen.add(iu.platform_user_id);
+        out.push({ pid: String(iu.platform_user_id), platform: iu.platform });
+      }
+    }
+  }
+  return out;
+}
+function agBoundChannels() {
+  return (AGM_CHANNELS || []).map(c => `${c.platform}:${c.channel_id}`);
+}
+function agRenderAccess() {
+  const users = agBoundUserIds();
+  agMsWidget("ag-access-users", "aac-user",
+    users.map(u => ({ value: u.pid, label: `${u.platform}:${u.pid}`, q: `${u.platform} ${u.pid}` })),
+    "Allow specific users… (empty = all bound)");
+  agMsWidget("ag-access-channels", "aac-ch",
+    agBoundChannels().map(c => ({ value: c, label: c })),
+    "Allow specific channels… (empty = all bound)");
+  const want = new Set(AG_ACCESS.allow_users);
+  for (const cb of document.querySelectorAll("#ag-access-users .aac-user input")) if (want.has(cb.value)) cb.checked = true;
+  const wantc = new Set(AG_ACCESS.allow_channels);
+  for (const cb of document.querySelectorAll("#ag-access-channels .aac-ch input")) if (wantc.has(cb.value)) cb.checked = true;
+  agMsSync("ag-access-users"); agMsSync("ag-access-channels");
+  $("ag-access-approval").checked = AG_ACCESS.require_approval !== false;
+}
+function agCollectAccess() {
+  const allow_users = [...document.querySelectorAll("#ag-access-users .aac-user input:checked")].map(i => i.value);
+  const allow_channels = [...document.querySelectorAll("#ag-access-channels .aac-ch input:checked")].map(i => i.value);
+  const require_approval = $("ag-access-approval").checked;
+  const access = {};
+  if (allow_users.length) access.allow_users = allow_users;
+  if (allow_channels.length) access.allow_channels = allow_channels;
+  if (require_approval !== true) access.require_approval = require_approval;  // true is the default
+  return access;  // {} when all default
+}
+// Re-derive access options whenever the bindings change; capture current DOM picks into
+// AG_ACCESS first (only if the widgets are already rendered — else we'd wipe loaded state).
+function agAccessSyncFromBindings() {
+  if (document.querySelector("#ag-access-users .ms")) {
+    AG_ACCESS.allow_users = [...document.querySelectorAll("#ag-access-users .aac-user input:checked")].map(i => i.value);
+    AG_ACCESS.allow_channels = [...document.querySelectorAll("#ag-access-channels .aac-ch input:checked")].map(i => i.value);
+    AG_ACCESS.require_approval = $("ag-access-approval").checked;
+  }
+  agRenderAccess();
+}
 async function agCreate() {
   $("ag-modal-title").textContent = "New agent";
   $("ag-err").textContent = "";
@@ -2727,73 +2923,173 @@ async function agCreate() {
   $("ag-name").disabled = false;
   agRenderIconPalette();
   agSetIcon("");
+  $("ag-version").value = "—";  // assigned on first save
+  $("ag-tenant").value = "default";
+  $("ag-team").value = "";
+  $("ag-memns").value = ""; delete $("ag-memns").dataset.auto;
+  $("ag-skillsdir").value = "";
+  agRenderAdvFields({});  // advanced knobs at their defaults
+  AG_ACCESS = { require_approval: true, allow_users: [], allow_channels: [] };
   $("ag-system-prompt").value = "";
   $("ag-allowed-tools").value = "";
   $("ag-bind-config").style.display = "";
   $("ag-create-extra").style.display = "";
   $("ag-allowed-tools").style.display = "none";  // capabilities YAML supplies tools in create
   AG_PROVIDERS = await api("GET", "/providers").catch(() => []);
-  agRenderModelOverrides();
+  agFillModelOverrides({});  // reset selection + render the two-part model/router picker
   $("ag-capabilities").value = "";
   await agLoadCreateBindings();
   $("ag-modal").dataset.mode = "create";
   $("ag-modal").classList.remove("hidden");
 }
 
-// Per-level model picks a CONFIGURED provider (Providers module) — no free-text
-// model. AG_PROVIDERS is loaded when the modal opens.
+// Two-part model config: a multi-select MODEL list (targets) + a ROUTER mapping each tier
+// to an ordered fallback chain of {target, max_tokens}. Models are CONFIGURED providers.
+// AG_ROUTE_SEL holds the router state; targets come from the multi-select widget DOM.
 let AG_PROVIDERS = [];
-function agRenderModelOverrides() {
-  const opts = `<option value="">— none —</option>`
-    + AG_PROVIDERS.map(p => `<option value="${esc(p.id)}">${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}${p.api_key_env ? " · " + esc(p.api_key_env) : ""}</option>`).join("");
-  const hint = AG_PROVIDERS.length ? "" : `<div class="muted" style="font-size:12px;">No providers configured — add one under Providers first.</div>`;
-  const reuse = `<div class="muted model-key-provider-reuse" style="font-size:12px; margin-bottom:6px;">Model credentials reuse each provider api_key_env; no duplicate model key is stored on the agent.</div>`;
-  $("ag-model-overrides").innerHTML = hint + reuse + ["default", "fast", "reasoning"].map(lvl => `
-    <div class="row" data-mo="${lvl}" style="gap:6px; margin-bottom:6px; align-items:center;">
-      <span style="min-width:74px; color:var(--muted);">${lvl}</span>
-      <select class="agmo-provider" style="flex:1;">${opts}</select>
-    </div>`).join("");
+let AG_ROUTERS = [];  // [{name, entries:[{target, max_tokens}]}] — custom-named, ordered
+function _agProviderLabel(p) {
+  return p ? `${esc(p.id)}${p.model ? " · " + esc(p.model) : ""}` : "";
+}
+function agChosenTargets() {
+  return [...document.querySelectorAll("#ag-models-ms .agmo-target input[type=checkbox]:checked")]
+    .map(cb => cb.value);
+}
+function agRenderModelOverrides(selectedTargets) {
+  const box = $("ag-model-overrides");
+  if (!AG_PROVIDERS.length) {
+    box.innerHTML = `<div class="muted" style="font-size:12px;">No providers configured — add one under Providers first.</div>`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="muted" style="font-size:12px; margin:4px 0;">Models (this agent may use)</div>
+    <div id="ag-models-ms" style="margin-bottom:12px;"></div>
+    <div class="muted" style="font-size:12px; margin:4px 0;">Routing — add a router (custom name), then route it to one or more models (ordered fallbacks)</div>
+    <div id="ag-router"></div>`;
+  agMsWidget("ag-models-ms", "agmo-target",
+    AG_PROVIDERS.map(p => ({
+      value: p.id,
+      label: `${p.id}${p.model ? " · " + p.model : ""}${p.api_key ? " · 🔑 " + p.api_key : ""}`,
+      q: `${p.id} ${p.model || ""}`,
+    })), "Select models…");
+  const want = new Set(selectedTargets || []);
+  for (const cb of box.querySelectorAll("#ag-models-ms .agmo-target input[type=checkbox]")) {
+    if (want.has(cb.value)) cb.checked = true;
+  }
+  agMsSync("ag-models-ms");
+  // re-render the router whenever the model selection changes (checkbox events bubble here)
+  $("ag-models-ms").addEventListener("change", agRenderRouter);
+  agRenderRouter();
+}
+function agRenderRouter() {
+  const router = $("ag-router");
+  const chosen = agChosenTargets();
+  for (const rt of AG_ROUTERS) {  // drop entries whose model was unselected
+    rt.entries = rt.entries.filter(e => !e.target || chosen.includes(e.target));
+  }
+  if (!chosen.length) {
+    router.innerHTML = `<div class="muted" style="font-size:12px;">Select at least one model to add a router.</div>`;
+    return;
+  }
+  const provById = Object.fromEntries(AG_PROVIDERS.map(p => [p.id, p]));
+  const addBtn = `<div class="row" style="justify-content:flex-end; margin-bottom:6px;">
+    <button type="button" class="small ghost" onclick="agRouterAddRoute()">+ router</button></div>`;
+  const blocks = AG_ROUTERS.map((rt, ri) => {
+    const rows = rt.entries.map((e, ei) => {
+      const opts = `<option value="">— pick model —</option>` + chosen.map(pid =>
+        `<option value="${esc(pid)}" ${e.target === pid ? "selected" : ""}>${_agProviderLabel(provById[pid])}</option>`).join("");
+      return `<div class="row" style="gap:6px; align-items:center; margin:3px 0;">
+        <select onchange="agRouterSetEntry(${ri},${ei},'target',this.value)" style="flex:1;">${opts}</select>
+        <input type="number" min="1" placeholder="max_tokens" value="${e.max_tokens ?? ""}"
+          oninput="agRouterSetEntry(${ri},${ei},'max_tokens',this.value)" style="width:120px;">
+        <button type="button" class="small ghost" onclick="agRouterRemoveModel(${ri},${ei})">✕</button>
+      </div>`;
+    }).join("");
+    return `<div style="border:1px solid var(--border); border-radius:var(--r-1); padding:8px; margin-bottom:8px;">
+      <div class="row" style="gap:6px; align-items:center;">
+        <input placeholder="router name (e.g. default)" value="${esc(rt.name)}" oninput="agRouterSetName(${ri}, this.value)" style="flex:1;">
+        <button type="button" class="small ghost" onclick="agRouterAddModel(${ri})">+ model</button>
+        <button type="button" class="small ghost danger" onclick="agRouterRemoveRoute(${ri})">✕</button>
+      </div>
+      ${rows || `<div class="muted" style="font-size:12px; margin-top:4px;">No model yet — + model.</div>`}
+    </div>`;
+  }).join("");
+  router.innerHTML = addBtn + (blocks || `<div class="muted" style="font-size:12px;">No routers — + router to add one.</div>`);
+}
+function agRouterAddRoute() { AG_ROUTERS.push({ name: "", entries: [] }); agRenderRouter(); }
+function agRouterRemoveRoute(ri) { AG_ROUTERS.splice(ri, 1); agRenderRouter(); }
+function agRouterSetName(ri, val) { if (AG_ROUTERS[ri]) AG_ROUTERS[ri].name = val; }
+function agRouterAddModel(ri) { if (AG_ROUTERS[ri]) AG_ROUTERS[ri].entries.push({ target: "", max_tokens: null }); agRenderRouter(); }
+function agRouterRemoveModel(ri, ei) { if (AG_ROUTERS[ri]) AG_ROUTERS[ri].entries.splice(ei, 1); agRenderRouter(); }
+function agRouterSetEntry(ri, ei, field, val) {
+  const e = AG_ROUTERS[ri] && AG_ROUTERS[ri].entries[ei];
+  if (!e) return;
+  e[field] = field === "max_tokens" ? (val === "" ? null : Number(val)) : val;
 }
 function agCollectModelOverrides() {
-  const mo = {};
-  for (const row of document.querySelectorAll("#ag-model-overrides [data-mo]")) {
-    const pid = row.querySelector(".agmo-provider").value;
-    if (!pid) continue;
-    const p = AG_PROVIDERS.find(x => x.id === pid);
-    mo[row.dataset.mo] = { provider: pid, model: p ? (p.model || "") : "" };
+  const targets = agChosenTargets();
+  if (!targets.length) return {};
+  const routes = {};
+  for (const rt of AG_ROUTERS) {
+    const name = (rt.name || "").trim();
+    if (!name) continue;
+    const entries = rt.entries
+      .filter(e => e.target && targets.includes(e.target))
+      .map(e => ({ target: e.target, max_tokens: e.max_tokens ?? null, params: {} }));
+    if (entries.length) routes[name] = entries;
   }
-  return mo;
+  return { targets, routes };
 }
 
 let AGM_CHANNELS = [];
+// KB pickers source from connectors (a KB IS a connector). Dedupe by kb_id; keep the
+// first non-empty description so the picker label is meaningful.
+function kbOptionsFromConnectors(connectors) {
+  const byId = new Map();
+  for (const c of connectors || []) {
+    const existing = byId.get(c.kb_id);
+    if (existing === undefined) byId.set(c.kb_id, c.description || "");
+    else if (!existing && c.description) byId.set(c.kb_id, c.description);
+  }
+  return [...byId].map(([kb_id, description]) => ({ kb_id, description }));
+}
 // `current` (edit mode) pre-checks existing bindings: {skills, mcp, oauth, kb, users, channels}.
 async function agLoadCreateBindings(current = null) {
   AGM_CHANNELS = [];
   $("agm-channels").innerHTML = "";
-  const [skills, mcp, connectors, kbs, users] = await Promise.all([
+  const [skills, mcp, connectors, kbConnectors, imUsers] = await Promise.all([
     api("GET", "/skills").catch(() => []),
     api("GET", "/mcp/servers").catch(() => []),
     api("GET", "/connectors").catch(() => []),
-    api("GET", "/kb").catch(() => []),
-    api("GET", "/users").catch(() => []),
+    api("GET", "/kb/connectors").catch(() => []),
+    api("GET", "/im-users").catch(() => []),
   ]);
-  // Skills / connectors / IM users are searchable multi-select dropdowns; KB stays a
-  // simple list. The option checkboxes keep their binding classes so the save-diff
-  // read-paths (checked("agm-…")) are unchanged.
+  // A knowledge base IS a connector — list the same KBs the KB tab shows (deduped by kb_id).
+  const kbs = kbOptionsFromConnectors(kbConnectors);
+  AG_IM_USERS = imUsers || [];  // user_id -> platform identities, for the Access allow-lists
+  // Skills / connectors / IM users / KB all render as searchable multi-select dropdowns.
+  // The option checkboxes keep their binding classes so the save-diff read-paths
+  // (checked("agm-…")) are unchanged.
   agMsWidget("agm-skills", "agm-skill", (skills || []).map(s => ({ value: s.name, label: s.name })), "Select skills…");
   agMsWidget("agm-mcp", "agm-mcp-item", (mcp || []).map(m => ({ value: m.id, label: m.id })), "Select MCP servers…");
   agMsWidget("agm-oauth", "agm-oauth-item",
     (connectors || []).map(c => ({ value: c.id, label: c.display_name || c.id, q: `${c.display_name || ""} ${c.id}` })),
     "Select OAuth connectors…");
+  // Allowlist by IM identity: pick a user's Slack / Telegram / WhatsApp id. The chip shows
+  // platform:id; the bound value is still the internal user_id (binding unchanged).
   agMsWidget("agm-users", "agm-user-row",
-    (users || []).map(u => ({
-      value: u.id,
-      label: (u.name || u.email || u.id) + (u.name || u.email ? ` (${u.id})` : ""),
-      q: [u.id, u.name || "", u.email || ""].join(" "),
-    })), "Select IM users…");
-  const box = (cls, val, label) => `<label class="row ${cls}"><input type="checkbox" value="${esc(val)}"> ${label}</label>`;
-  $("agm-kb").innerHTML = (kbs || []).map(k => box("agm-kb-item", k.kb_id, esc(k.kb_id) + (k.description ? ` <span class="muted">— ${esc(k.description)}</span>` : ""))).join("")
-    || `<div class="muted">No knowledge bases.</div>`;
+    (imUsers || []).map(iu => ({
+      value: iu.user_id,
+      label: `${iu.platform}:${iu.platform_user_id}`,
+      q: `${iu.platform} ${iu.platform_user_id} ${iu.user_id}`,
+    })), "Select by Slack / Telegram / WhatsApp id…");
+  agMsWidget("agm-kb", "agm-kb-item",
+    (kbs || []).map(k => ({
+      value: k.kb_id,
+      // lead with the description (the human-meaningful label); kb_id is the secondary id
+      label: k.description ? `${k.description} (${k.kb_id})` : k.kb_id,
+      q: `${k.kb_id} ${k.description || ""}`,
+    })), "Select knowledge bases…");
   if (current) {
     const check = (cls, set) => {
       for (const cb of document.querySelectorAll(`#ag-bind-config .${cls} input[type=checkbox]`))
@@ -2804,10 +3100,13 @@ async function agLoadCreateBindings(current = null) {
     check("agm-oauth-item", new Set(current.oauth || []));
     check("agm-kb-item", new Set(current.kb || []));
     check("agm-user-row", new Set(current.users || []));
-    for (const id of ["agm-skills", "agm-mcp", "agm-oauth", "agm-users"]) agMsSync(id);
+    for (const id of ["agm-skills", "agm-mcp", "agm-oauth", "agm-users", "agm-kb"]) agMsSync(id);
     AGM_CHANNELS = (current.channels || []).map(c => ({ platform: c.platform, channel_id: c.channel_id }));
     agmRenderChannels();
   }
+  // Access allow-lists derive from the bindings; re-derive when the user picks change.
+  $("agm-users").addEventListener("change", agAccessSyncFromBindings);
+  agRenderAccess();
 }
 
 // Searchable multi-select: renders option checkboxes (keeping `cls` for read-paths)
@@ -2865,22 +3164,39 @@ function agMsUncheck(btn, e) {
 function agmRenderChannels() {
   $("agm-channels").innerHTML = AGM_CHANNELS.map((c, i) =>
     `<div class="row">${esc(c.platform)} / ${esc(c.channel_id)} <button type="button" class="small ghost danger" onclick="agmRemoveChannel(${i})">Remove</button></div>`).join("");
+  if ($("ag-access-channels")) agAccessSyncFromBindings();  // refresh access channel options
 }
 function agmAddChannel() {
   const pf = $("agm-ch-platform").value.trim(), ch = $("agm-ch-id").value.trim();
-  if (!pf || !ch) return;
+  if (!pf || !ch) { toast("Enter both platform and channel_id", "error"); return; }
   if (!AGM_CHANNELS.some(c => c.platform === pf && c.channel_id === ch)) AGM_CHANNELS.push({ platform: pf, channel_id: ch });
   $("agm-ch-platform").value = ""; $("agm-ch-id").value = "";
   agmRenderChannels();
 }
 function agmRemoveChannel(i) { AGM_CHANNELS.splice(i, 1); agmRenderChannels(); }
 function agFillModelOverrides(mo) {
-  for (const row of document.querySelectorAll("#ag-model-overrides [data-mo]")) {
-    const o = (mo || {})[row.dataset.mo];
-    // Stored `provider` is a configured-provider id; select it (blank if it no
-    // longer exists in the registry).
-    row.querySelector(".agmo-provider").value = o ? (o.provider || "") : "";
+  mo = mo || {};
+  let targets = [];
+  AG_ROUTERS = [];
+  const toEntry = e => (typeof e === "string" ? { target: e, max_tokens: null }
+    : { target: e.target, max_tokens: e.max_tokens ?? null });
+  if (Array.isArray(mo.targets)) {
+    targets = mo.targets.slice();
+    for (const [name, v] of Object.entries(mo.routes || {})) {
+      AG_ROUTERS.push({ name, entries: (Array.isArray(v) ? v : [v]).map(toEntry) });
+    }
+  } else {
+    // legacy {route: {provider, model}} → derive targets + one-entry routers
+    const t = new Set();
+    for (const [name, sel] of Object.entries(mo)) {
+      if (sel && typeof sel === "object" && sel.provider) {
+        t.add(sel.provider);
+        AG_ROUTERS.push({ name, entries: [{ target: sel.provider, max_tokens: null }] });
+      }
+    }
+    targets = [...t];
   }
+  agRenderModelOverrides(targets);
 }
 // Render current allowed_tools back into the capabilities YAML the modal edits.
 function agToolsToYaml(tools) {
@@ -2922,15 +3238,33 @@ async function agEdit(name) {
     $("ag-name").disabled = false;  // name is editable (rename)
     agRenderIconPalette();
     agSetIcon(a.icon || "");
+    $("ag-version").value = a.version ?? "—";
+    $("ag-tenant").value = a.tenant_id || "default";
+    $("ag-team").value = a.team_id || "";
+    $("ag-memns").value = a.memory_namespace || name;
+    $("ag-skillsdir").value = a.skills_dir || `~/.fleetent/${name}/skills`;
     $("ag-system-prompt").value = a.system_prompt || "";
     // Mirror the new-agent layout: tools come from the capabilities YAML.
     $("ag-allowed-tools").style.display = "none";
     $("ag-allowed-tools").value = "";
     $("ag-create-extra").style.display = "";
     $("ag-bind-config").style.display = "";
-    agRenderModelOverrides();
-    agFillModelOverrides(a.model_overrides);
-    $("ag-capabilities").value = agToolsToYaml(a.allowed_tools);
+    agFillModelOverrides(a.model_overrides);  // selection (new + legacy shape) + renders router
+    // Curated knobs populate the Advanced fields; the Custom box round-trips only the
+    // long tail (config_overrides minus the discrete keys). Legacy agents without any
+    // overrides fall back to showing just their allowed_tools.
+    const co = a.config_overrides || {};
+    agRenderAdvFields(co);
+    const acc = co.access || {};
+    AG_ACCESS = {
+      require_approval: acc.require_approval !== false,
+      allow_users: acc.allow_users || [],
+      allow_channels: acc.allow_channels || [],
+    };
+    const rest = agStripAdvKeys(co);
+    $("ag-capabilities").value = Object.keys(rest).length
+      ? JSON.stringify(rest, null, 2)
+      : (Object.keys(co).length ? "" : agToolsToYaml(a.allowed_tools));
     await agLoadCreateBindings(current);
     $("ag-modal").dataset.mode = "edit";
     $("ag-modal").dataset.name = name;
@@ -3002,8 +3336,14 @@ async function agSave() {
       // is applied server-side first, so bindings below target the new name.
       await api("PATCH", `/agents/${encodeURIComponent(orig)}`, {
         name, system_prompt: sp, icon,
+        tenant_id: $("ag-tenant").value.trim() || "default",
+        team_id: $("ag-team").value.trim() || null,
+        memory_namespace: $("ag-memns").value.trim() || name,
+        skills_dir: $("ag-skillsdir").value.trim() || `~/.fleetent/${name}/skills`,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
+        config_overrides_yaml: $("ag-capabilities").value,
+        config_overrides_fields: { ...agCollectAdvFields(), ...(Object.keys(agCollectAccess()).length ? { access: agCollectAccess() } : {}) },
       });
       await agApplyEditBindings(name);
     } else {
@@ -3011,8 +3351,14 @@ async function agSave() {
       if (!name) { $("ag-err").textContent = "name required"; return; }
       await api("POST", "/agents", {
         name, system_prompt: sp, icon,
+        tenant_id: $("ag-tenant").value.trim() || "default",
+        team_id: $("ag-team").value.trim() || null,
+        memory_namespace: $("ag-memns").value.trim() || name,
+        skills_dir: $("ag-skillsdir").value.trim() || `~/.fleetent/${name}/skills`,
         model_overrides: agCollectModelOverrides(),
         capabilities_yaml: $("ag-capabilities").value,
+        config_overrides_yaml: $("ag-capabilities").value,
+        config_overrides_fields: { ...agCollectAdvFields(), ...(Object.keys(agCollectAccess()).length ? { access: agCollectAccess() } : {}) },
       });
       await agApplyCreateBindings(name);
     }
@@ -3076,11 +3422,14 @@ async function agDrawer(name) {
   $("ag-drawer-body").innerHTML = `<div class="muted">Loading…</div>`;
   const enc = encodeURIComponent(name);
   try {
-    const [a, exp] = await Promise.all([
+    const [a, exp, providers] = await Promise.all([
       api("GET", `/agents/${enc}`),
       api("GET", `/agents/${enc}/agent-yaml`),
+      api("GET", "/providers").catch(() => []),
     ]);
-    agRenderPreview(name, a, exp.yaml);
+    const keyHints = {};
+    for (const p of providers || []) if (p.api_key) keyHints[p.id] = p.api_key;
+    agRenderPreview(name, a, exp.yaml, keyHints);
   } catch (e) {
     const network = /failed to fetch|networkerror|load failed/i.test(e.message || "");
     const msg = network ? "Couldn't reach the server — it may be restarting." : e.message;
@@ -3091,7 +3440,27 @@ async function agDrawer(name) {
   }
 }
 
-function agRenderPreview(name, a, yamlText) {
+// Annotate model-target api_key_env lines with the provider's key hint — DISPLAY ONLY
+// (the cached/copied/downloaded yaml stays a clean, comment-free deploy file). Tracks the
+// nearest `id:` and only annotates when it matches a known provider (model target), so
+// MCP api_key_env lines (env names, not providers) are left alone.
+function agAnnotateKeyHints(yamlText, keyHints) {
+  let lastId = null;
+  return (yamlText || "").split("\n").map(line => {
+    const idm = line.match(/^\s*-?\s*id:\s*(\S+)\s*$/);
+    if (idm) { lastId = idm[1]; return line; }
+    const km = line.match(/^(\s*)api_key_env:\s*(\S.*)$/);
+    if (km && lastId && keyHints[lastId]) {
+      const [, indent, value] = km;
+      // null is noise — show the hint in place of it; a real env name keeps it + hint.
+      return value.trim() === "null"
+        ? `${indent}api_key_env: 🔑 ${keyHints[lastId]}`
+        : `${line}  # 🔑 ${keyHints[lastId]}`;
+    }
+    return line;
+  }).join("\n");
+}
+function agRenderPreview(name, a, yamlText, keyHints = {}) {
   AG_YAML_CACHE = yamlText || "";
   $("ag-drawer-title").textContent = (a.icon ? a.icon + " " : "") + name;
   const archived = a.status === "archived";
@@ -3129,8 +3498,46 @@ function agRenderPreview(name, a, yamlText) {
     </div>
     <h4 style="margin:8px 0 6px;">agent.yaml <span class="muted" style="font-weight:normal;">(read-only preview)</span></h4>
     <pre id="ag-yaml-pre" style="white-space:pre; overflow:auto; max-height:68vh; font-size:12px;"></pre>`;
-  document.getElementById("ag-yaml-pre").textContent = AG_YAML_CACHE;
+  document.getElementById("ag-yaml-pre").textContent = agAnnotateKeyHints(AG_YAML_CACHE, keyHints);
   agLoadRequiredEnv(name);
+}
+
+// Reusable value-first credential control: default enters the secret inline (auto-named);
+// the advanced toggle switches to referencing an existing env var (operator fills host .env).
+function credFieldHtml(o) {
+  const mode = o.mode === "reference" ? "reference" : "value";  // default data-mode="value"
+  const set = o.status === "set";
+  const label = o.label ? `<label class="form-label">${esc(o.label)}</label>` : "";
+  const hint = o.hint ? `<span class="form-hint">${esc(o.hint)}</span>` : "";
+  return `<div class="cred-field" data-cred="${esc(o.key || "")}" data-mode="${mode}">
+    ${label}
+    <div class="cred-value cred-row" ${mode === "reference" ? 'style="display:none;"' : ""}>
+      <input type="password" id="${esc(o.valueId || "")}" data-cred-value
+             ${o.valueKey ? `data-key="${esc(o.valueKey)}"` : ""} autocomplete="off"
+             placeholder="${esc(o.placeholder || "输入值（写后不回显）")}" style="flex:1;">
+      <span class="cred-chip ${set ? "set" : "unset"}">${set ? "🟢 已设置" : "⚪ 未设置"}</span>
+    </div>
+    <div class="cred-ref cred-row" ${mode === "reference" ? "" : 'style="display:none;"'}>
+      <input type="text" id="${esc(o.envId || "")}" data-cred-env
+             ${o.envKey ? `data-key="${esc(o.envKey)}"` : ""} autocomplete="off"
+             value="${esc(o.envName || "")}" placeholder="ENV_VAR_NAME" style="flex:1;">
+    </div>
+    <button type="button" class="cred-toggle" onclick="credToggle(this)">⚙ 引用现有变量</button>
+    ${hint}
+  </div>`;
+}
+function credToggle(btn) {
+  const field = btn.closest(".cred-field");
+  credSetMode(field, field.dataset.mode === "reference" ? "value" : "reference");
+}
+function credSetMode(field, mode) {
+  if (!field) return;
+  const ref = mode === "reference";
+  field.dataset.mode = ref ? "reference" : "value";
+  field.querySelector(".cred-value").style.display = ref ? "none" : "";
+  field.querySelector(".cred-ref").style.display = ref ? "" : "none";
+  const toggle = field.querySelector(".cred-toggle");
+  if (toggle) toggle.textContent = ref ? "↩ 改为直接输入值" : "⚙ 引用现有变量";
 }
 
 let AG_REQUIRED_ENV = [];
@@ -3227,11 +3634,12 @@ async function agDrawerManage(name) {
         api("GET", `/agents/${enc}/bindings/oauth`).catch(() => ({ connector_ids: [] })),
         api("GET", "/mcp/servers").catch(() => []),
         api("GET", "/connectors").catch(() => []),
-        api("GET", "/kb").catch(() => []),
+        api("GET", "/kb/connectors").catch(() => []),
         api("GET", `/agents/${enc}/versions`).catch(() => []),
         api("GET", "/users").catch(() => []),
       ]);
-    agRenderDrawer(name, { a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs, versions, allUsers });
+    // a KB IS a connector — offer the same deduped list the KB tab shows
+    agRenderDrawer(name, { a, bindings, skills, kbs, oauth, mcpServers, connectors, allKbs: kbOptionsFromConnectors(allKbs), versions, allUsers });
   } catch (e) {
     const network = /failed to fetch|networkerror|load failed/i.test(e.message || "");
     const msg = network ? "Couldn't reach the server — it may be restarting." : e.message;
@@ -3299,7 +3707,7 @@ function agRenderDrawer(name, d) {
     ? boundKb.map(id => `<div class="row">${esc(id)}${IS_VIEWER ? "" : ` <button class="small ghost danger" onclick="agUnbindKb('${esc(id)}')">Remove</button>`}</div>`).join("")
     : `<div class="muted">No knowledge bases bound.</div>`;
   const kbOpts = (d.allKbs || []).filter(k => !boundKb.includes(k.kb_id))
-    .map(k => `<option value="${esc(k.kb_id)}">${esc(k.kb_id)}${k.description ? " — " + esc(k.description) : ""}</option>`).join("");
+    .map(k => `<option value="${esc(k.kb_id)}">${k.description ? esc(k.description) + " (" + esc(k.kb_id) + ")" : esc(k.kb_id)}</option>`).join("");
   const kbAdd = IS_VIEWER || !kbOpts ? "" :
     `<div class="row" style="margin-top:8px;"><select id="ag-kb-select"><option value="">— select a KB —</option>${kbOpts}</select><button class="small" onclick="agAddKb()">Bind</button></div>`;
 
@@ -3513,6 +3921,9 @@ function pvOpenCreate() {
   $("pv-model").value = "";
   $("pv-model-custom").value = "";
   $("pv-model-custom").classList.add("hidden");
+  credSetMode(document.querySelector('[data-cred="provider-key"]'), "value");
+  $("pv-key-chip").className = "cred-chip unset";
+  $("pv-key-chip").textContent = "";
   // Reset provider type to OpenAI
   document.querySelector('input[name="provider-type"][value="openai"]').checked = true;
   pvUpdateProviderType('openai');
@@ -3542,6 +3953,13 @@ async function pvOpenEdit(id) {
   
   $("pv-api-key").value = "";  // never prefill secret
   $("pv-api-key-env").value = p.api_key_env || "";
+  // a provider with only an env reference (no platform-held key) opens in reference mode
+  credSetMode(
+    document.querySelector('[data-cred="provider-key"]'),
+    !p.api_key_set && p.api_key_env ? "reference" : "value",
+  );
+  $("pv-key-chip").className = "cred-chip " + (p.api_key_set ? "set" : "unset");
+  $("pv-key-chip").textContent = p.api_key_set ? "🟢 已设置" : "⚪ 未设置";
   $("pv-max-tokens").value = p.max_tokens != null ? p.max_tokens : "";
   $("pv-temperature").value = p.temperature != null ? p.temperature : "";
   $("pv-protocol").value = p.protocol || "";
@@ -4791,7 +5209,7 @@ async function testOAuthConfigInModal() {
 LOADERS.oauth = () => { loadAllConnectors(); };
 
 async function loadKb() {
-  // The KB tab now only manages source connectors; KB CRUD/retrieval moved out.
+  // One list: each knowledge base IS a source connector (Drive/Confluence).
   loadKbConnectors();
 }
 
@@ -4824,7 +5242,7 @@ let KBC_EDIT_ID = null;
 async function loadKbConnectors() {
   $("kbc-list-err").textContent = "";
   try { KBC_ALL = await api("GET", "/kb/connectors"); kbcRender(); }
-  catch (e) { $("kbc-body").innerHTML = `<tr><td colspan="6" class="muted">${esc(e.message)}</td></tr>`; }
+  catch (e) { $("kbc-body").innerHTML = `<tr><td colspan="7" class="muted">${esc(e.message)}</td></tr>`; }
 }
 function kbcScope(c) {
   if (c.kind === "google_drive") return "folder:" + (c.config.folder_id || "—");
@@ -4835,6 +5253,7 @@ function kbcRender() {
     <tr>
       <td>${esc(c.connector_id)}</td>
       <td>${esc(c.kind)}</td>
+      <td class="muted">${c.description ? esc(c.description) : "—"}</td>
       <td><span class="pill ${c.enabled ? "active" : "blocked"}">${c.enabled ? "enabled" : "disabled"}</span></td>
       <td class="muted">${esc(c.tenant_id)} / ${esc(c.kb_id)}</td>
       <td class="muted">${esc(kbcScope(c))}</td>
@@ -4844,7 +5263,7 @@ function kbcRender() {
         ${IS_VIEWER ? "" : `<button class="small ghost" onclick="kbcOpenEdit('${esc(c.connector_id)}')">Edit</button>
         <button class="small danger" onclick="kbcDelete('${esc(c.connector_id)}')">Delete</button>`}
       </td>
-    </tr>`).join("") || `<tr><td colspan="6" class="muted">No source connectors.</td></tr>`;
+    </tr>`).join("") || `<tr><td colspan="7" class="muted">No knowledge bases.</td></tr>`;
 }
 function kbcRenderFields(current = {}) {
   const kind = $("kbc-kind").value;
@@ -4854,16 +5273,25 @@ function kbcRenderFields(current = {}) {
       return `<label class="row" style="gap:6px;"><input type="checkbox" data-key="${f.key}" ${v ? "checked" : ""}> ${esc(f.label)}</label>`;
     if (f.type === "select")
       return `<label class="field-label">${esc(f.label)}</label><select data-key="${f.key}">${f.options.map(o => `<option value="${o}" ${v === o ? "selected" : ""}>${o || "—"}</option>`).join("")}</select>`;
+    if (f.key.endsWith("_env"))
+      // credential field: type the token (value mode) or reference an existing env var
+      return credFieldHtml({
+        label: f.label.replace(/ env var$/, ""),
+        valueKey: f.key + "_value", envKey: f.key, envName: v || "",
+        mode: v ? "reference" : "value", status: v ? "set" : "unset",
+        placeholder: "输入令牌（加密保存）",
+      });
     return `<label class="field-label">${esc(f.label)}</label><input data-key="${f.key}" autocomplete="off" value="${esc(v != null ? String(v) : "")}">`;
   }).join("");
 }
 function kbcOpenCreate() {
   KBC_EDIT_ID = null;
-  $("kbc-modal-title").textContent = "Add source connector";
+  $("kbc-modal-title").textContent = "Add knowledge base";
   $("kbc-err").textContent = "";
   $("kbc-id").value = ""; $("kbc-id").disabled = false;
   $("kbc-kind").value = "google_drive"; $("kbc-kind").disabled = false;
   $("kbc-tenant").value = "pilot-tenant"; $("kbc-kb").value = "pilot-kb";
+  $("kbc-desc").value = "";
   $("kbc-enabled").checked = true;
   $("kbc-custom").value = "";
   kbcRenderFields();
@@ -4873,11 +5301,12 @@ function kbcOpenEdit(id) {
   const c = KBC_ALL.find(x => x.connector_id === id);
   if (!c) return;
   KBC_EDIT_ID = id;
-  $("kbc-modal-title").textContent = "Edit connector: " + id;
+  $("kbc-modal-title").textContent = "Edit knowledge base: " + id;
   $("kbc-err").textContent = "";
   $("kbc-id").value = id; $("kbc-id").disabled = true;   // id is the key, not editable
   $("kbc-kind").value = c.kind; $("kbc-kind").disabled = true;  // kind fixed after create
   $("kbc-tenant").value = c.tenant_id; $("kbc-kb").value = c.kb_id;
+  $("kbc-desc").value = c.description || "";
   $("kbc-enabled").checked = c.enabled;
   $("kbc-custom").value = c.custom_yaml || "";
   kbcRenderFields(c.config || {});
@@ -4897,14 +5326,15 @@ async function kbcSave() {
   const config = kbcCollectConfig();
   const tenant_id = $("kbc-tenant").value.trim(), kb_id = $("kbc-kb").value.trim();
   const enabled = $("kbc-enabled").checked;
+  const description = $("kbc-desc").value.trim();
   const custom_yaml = $("kbc-custom").value;  // YAML; parsed + validated server-side
   try {
     if (KBC_EDIT_ID) {
-      await api("PATCH", `/kb/connectors/${encodeURIComponent(KBC_EDIT_ID)}`, { tenant_id, kb_id, enabled, config, custom_yaml });
+      await api("PATCH", `/kb/connectors/${encodeURIComponent(KBC_EDIT_ID)}`, { tenant_id, kb_id, enabled, config, custom_yaml, description });
     } else {
       const connector_id = $("kbc-id").value.trim();
       if (!connector_id) { $("kbc-err").textContent = "connector id required"; return; }
-      await api("POST", "/kb/connectors", { connector_id, kind: $("kbc-kind").value, tenant_id, kb_id, enabled, config, custom_yaml });
+      await api("POST", "/kb/connectors", { connector_id, kind: $("kbc-kind").value, tenant_id, kb_id, enabled, config, custom_yaml, description });
     }
     kbcCloseModal(); loadKbConnectors();
   } catch (e) { $("kbc-err").textContent = apiErrorMessage(e.message || e); }
