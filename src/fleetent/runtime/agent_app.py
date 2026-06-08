@@ -67,6 +67,20 @@ def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
     return paths.base_dir() / "agents" / agent_id
 
 
+def _validate_tui_token(authorization_header: str) -> bool:
+    """Check Bearer token against FLEETENT_TUI_TOKEN env var.
+
+    Returns False when the token is missing/wrong OR when the env var is not set,
+    so the /ws endpoint can reject connections without platform user_store access.
+    """
+    expected = os.environ.get("FLEETENT_TUI_TOKEN", "")
+    if not expected:
+        return False
+    if not authorization_header.startswith("Bearer "):
+        return False
+    return authorization_header.removeprefix("Bearer ").strip() == expected
+
+
 def _redirect_agent_data_paths(home_dir: Path) -> None:
     """Redirect all per-agent runtime data sinks to ``home_dir/data/``.
 
@@ -482,18 +496,18 @@ def build_app(agent_name: str) -> FastAPI:
         from fleetent.tui.transport import WSTransport
 
         auth = websocket.headers.get("authorization", "")
-        result = (
-            user_store.authenticate(auth.removeprefix("Bearer ").strip())
-            if auth.startswith("Bearer ")
-            else None
-        )
-        if result is None:
+        if not _validate_tui_token(auth):
+            # No FLEETENT_TUI_TOKEN configured or token mismatch.
+            # Run `fleetent agent init --force` or add FLEETENT_TUI_TOKEN to .env.
+            _logger.warning(
+                "tui_ws_auth_rejected",
+                hint="Set FLEETENT_TUI_TOKEN in agent .env; run: fleetent agent init --force",
+            )
             await websocket.close(code=1008)
             return
-        user, _ = result
         await websocket.accept()
         transport = WSTransport(websocket)
-        conn = tui_dispatch.Connection(user_id=user.id, transport=transport)
+        conn = tui_dispatch.Connection(user_id="local", transport=transport)
         await transport.write(tui_proto.make_event(tui_proto.EVENT_GATEWAY_READY, {}))
         try:
             while True:
