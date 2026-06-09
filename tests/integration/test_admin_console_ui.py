@@ -711,53 +711,7 @@ def test_stats_endpoints_present():
         assert frag in html, frag
 
 
-# --- 6. Monitoring + Alerts module --------------------------------------------
-
-
-def test_monitoring_tab_and_metrics_wiring():
-    html = ADMIN_HTML
-    assert 'id="tab-monitoring"' in html
-    assert "mon-rules-body" in html
-    assert "/monitoring/metrics" in html
-    assert "LOADERS.monitoring" in html
-
-
-def test_monitoring_functions_present():
-    html = ADMIN_HTML
-    for fn in (
-        "function monMetrics",
-        "function monRules",
-        "function monCreateRule",
-        "function monDisableRule",
-        "function monDeleteRule",
-        "function monAlerts",
-        "function monAck",
-        "function monSilence",
-        "function monMaintenance",
-    ):
-        assert fn in html, fn
-
-
-def test_monitoring_endpoints_present():
-    html = ADMIN_HTML
-    for frag in (
-        '"/alerts/rules"',
-        "/alerts/rules/",
-        "/disable",
-        '"/alerts"',
-        "/ack",
-        "/silence",
-        '"/alerts/maintenance"',
-    ):
-        assert frag in html, frag
-
-
-def test_monitoring_write_controls_admin_gated():
-    html = ADMIN_HTML
-    assert "mon-create-bar" in html
-
-
-# --- 7. Sessions module -------------------------------------------------------
+# --- 6. Sessions module -------------------------------------------------------
 
 
 def test_sessions_tab_and_list_wiring():
@@ -974,7 +928,6 @@ def test_sidebar_all_modules_reachable():
         "providers",
         "oauth",
         "stats",
-        "monitoring",
         "sessions",
     ):
         assert f'data-tab="{tab}"' in sidebar, tab
@@ -1020,7 +973,7 @@ def test_tables_wrapped_in_scroll_container():
     html = ADMIN_HTML
     # every data table lives inside a horizontal scroll container
     assert html.count('class="table-scroll"') >= html.count("<table>")
-    assert html.count("<table>") >= 10
+    assert html.count("<table>") >= 8
 
 
 def test_empty_and_loading_state_helpers_present():
@@ -1065,8 +1018,6 @@ def test_viewer_hidden_write_containers_intact():
         "pv-create-bar",
         "ag-create-bar",
         "st-report-bar",
-        "mon-create-bar",
-        "mon-maint-bar",
         "sess-create-bar",
         "sess-bulk-bar",
     ):
@@ -1368,7 +1319,6 @@ def test_legacy_modules_have_search_in_page_header():
     # each legacy list module fills its .ph-filter slot with a search input
     for tab, fid in [
         ("sessions", "sess-filter"),
-        ("monitoring", "mon-filter"),
         ("stats", "st-filter"),
     ]:
         sec = _section(html, tab)
@@ -1381,7 +1331,6 @@ def test_legacy_module_search_filters_rows():
     # render/filter functions reference their search value, so typing narrows rows
     for fid, fn in [
         ("sess-filter", "function renderSessions"),
-        ("mon-filter", "function renderMonAlerts"),
         ("st-filter", "function renderStatsRows"),
     ]:
         assert fn in html, f"missing render fn {fn}"
@@ -1559,23 +1508,6 @@ _MODULE_INPUTS = {
         "st-export-view",
         "st-trace-user",
     ],
-    "monitoring": [
-        "mon-filter",
-        "mon-metric",
-        "mon-target",
-        "mon-since",
-        "mon-alert-status",
-        "mon-rule-metric",
-        "mon-rule-target",
-        "mon-rule-comp",
-        "mon-rule-threshold",
-        "mon-rule-for",
-        "mon-rule-severity",
-        "mon-rule-channels",
-        "mon-maint-target",
-        "mon-maint-start",
-        "mon-maint-end",
-    ],
 }
 
 
@@ -1683,17 +1615,6 @@ _MODULE_BUTTONS = {
         "stReport",
         "stExport",
     ],
-    "monitoring": [
-        "monMetrics",
-        "monAlerts",
-        "monAck",
-        "monSilence",
-        "monOpenRule",
-        "monCreateRule",
-        "monDeleteRule",
-        "monDisableRule",
-        "monMaintenance",
-    ],
 }
 
 
@@ -1709,7 +1630,7 @@ def test_every_module_action_button_present():
 
 
 def test_all_ten_tabs_have_inventories():
-    """Guard the guard: all ten console tabs are covered by both inventories above."""
+    """Guard the guard: all nine console tabs are covered by both inventories above."""
     tabs = {
         "users",
         "agents",
@@ -1720,7 +1641,6 @@ def test_all_ten_tabs_have_inventories():
         "skills",
         "sessions",
         "stats",
-        "monitoring",
     }
     assert set(_MODULE_INPUTS) == tabs
     assert set(_MODULE_BUTTONS) == tabs

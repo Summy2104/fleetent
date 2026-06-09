@@ -16,7 +16,6 @@ from fleetent.memory.models import (
     SharedMemoryItem,
 )
 from fleetent.platform.model_provider_management import provider_connectivity
-from fleetent.platform.resource_monitoring import alerting
 
 
 def _memory_item(
@@ -552,49 +551,6 @@ def test_shared_memory_audit_not_implemented_in_memory_core(monkeypatch):
         "item_id": "item-1",
         "actor": "admin",
     }
-
-
-def test_alerting_evaluates_sustained_breaches_and_suppression():
-    now = datetime(2026, 1, 1, 12, 0)
-    rule = {"enabled": 1, "for_seconds": 60, "comparator": ">=", "threshold": 90}
-    samples = [
-        {"ts": "2026-01-01T11:58:30", "value": 91},
-        {"ts": "2026-01-01T11:59:30", "value": 92},
-        {"ts": "2026-01-01T12:00:00", "value": 95},
-    ]
-    assert alerting.breach(91, ">=", 90)
-    assert not alerting.breach(89, ">=", 90)
-    assert alerting.evaluate(rule, samples, now)
-    assert not alerting.evaluate({**rule, "enabled": 0}, samples, now)
-    assert not alerting.evaluate(rule, [{"ts": "2026-01-01T12:00:00", "value": 95}], now)
-    assert not alerting.evaluate(
-        rule,
-        [{"ts": "2026-01-01T11:58:30", "value": 80}, {"ts": "2026-01-01T12:00:00", "value": 95}],
-        now,
-    )
-    assert not alerting.evaluate(rule, [], now)
-    assert alerting.in_maintenance(
-        [{"target": None, "start_ts": "2026-01-01T11:00:00", "end_ts": "2026-01-01T13:00:00"}],
-        "host:h1",
-        now,
-    )
-    assert not alerting.in_maintenance(
-        [{"target": "host:h2", "start_ts": "2026-01-01T11:00:00", "end_ts": "2026-01-01T13:00:00"}],
-        "host:h1",
-        now,
-    )
-    assert alerting.is_suppressed("host:h1/container:c1", {"host:h1"})
-    assert not alerting.is_suppressed("host:h1", {"host:h1"})
-    assert alerting.should_escalate(
-        {"severity": "critical", "status": "notified", "fired_at": "2026-01-01T11:00:00"},
-        now,
-        1800,
-    )
-    assert not alerting.should_escalate(
-        {"severity": "warning", "status": "notified", "fired_at": "2026-01-01T11:00:00"},
-        now,
-        1800,
-    )
 
 
 def test_quota_system_user_is_exempt_and_limits_are_evaluated(monkeypatch):
