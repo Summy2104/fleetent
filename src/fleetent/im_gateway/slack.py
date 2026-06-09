@@ -398,5 +398,15 @@ async def run(agent_name: str, owner_id: str, config: dict[str, Any]) -> None:
     Per-agent connection status is owned by the connector supervisor, which catches
     errors here and records them per agent. This runner just opens the connection.
     """
+    from fleetent.im_gateway import connector_registry
+
     app = create_app(agent_name, owner_id, config)
-    await _run_socket_mode(app, config.get("app_token", ""))
+    # Register the live web client so the cron scheduler can deliver fired-task replies
+    # to this agent's Slack at fire time (resolved per fire, cleared on disconnect).
+    client = getattr(app, "client", None)
+    if client is not None:
+        connector_registry.register("slack", agent_name, client)
+    try:
+        await _run_socket_mode(app, config.get("app_token", ""))
+    finally:
+        connector_registry.unregister("slack", agent_name)
