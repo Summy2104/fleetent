@@ -12,10 +12,8 @@ from importlib import import_module
 
 from .bindings import (
     AgentKnowledgeBaseBinding,
-    bind_agent_to_kb,
     list_agent_kb_bindings,
     resolve_agent_kb_ids,
-    unbind_agent_from_kb,
 )
 from .config import (
     KnowledgeBaseConfig,
@@ -175,7 +173,6 @@ _ATTRIBUTE_EXPORTS: dict[str, Callable[[], object]] = {
     "ConnectorSyncResult": lambda: ConnectorSyncResult,
     "archive": lambda: archive,
     "archive_knowledge_base": lambda: archive_knowledge_base,
-    "bind_agent_to_kb": lambda: bind_agent_to_kb,
     "check_connector": lambda: check_connector,
     "create_knowledge_base": lambda: create_knowledge_base,
     "delete": lambda: delete,
@@ -205,7 +202,6 @@ _ATTRIBUTE_EXPORTS: dict[str, Callable[[], object]] = {
     "search": lambda: search,
     "sync_confluence": lambda: sync_confluence,
     "sync_google_drive": lambda: sync_google_drive,
-    "unbind_agent_from_kb": lambda: unbind_agent_from_kb,
     "update_knowledge_base_description": lambda: update_knowledge_base_description,
     "EntityRef": lambda: import_module("fleetent.knowledge_base.retrieval.graph_search").EntityRef,
     "RelationRef": lambda: (
