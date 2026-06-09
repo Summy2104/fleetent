@@ -17,5 +17,5 @@
 
 ## 4. 收尾验证
 
-- [ ] 4.1 解耦验证：改动零 platform import；模块依赖护栏通过；既有 sandbox manager/client/secrets 单测不回归
-- [ ] 4.2 全量收尾：`make test-pr` 全绿（仅 4 个 paths-wiring 基线）＋ ruff/mypy 改动文件 + integration 对照 main 基线无新增失败 + 单 alembic head（推前 merge 最新 main）
+- [x] 4.1 解耦验证：改动零 platform import；模块依赖护栏通过；既有 sandbox manager/client/secrets 单测不回归
+- [x] 4.2 全量收尾：`make test-pr` 全绿（仅 4 个 paths-wiring 基线）＋ ruff/mypy 改动文件 + integration 对照 main 基线无新增失败 + 单 alembic head（推前 merge 最新 main）
