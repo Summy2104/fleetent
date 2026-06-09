@@ -5,8 +5,8 @@
 
 ## 2. workspace 挂载路径黑名单
 
-- [ ] 2.1 Write failing unit tests `tests/unit/test_sandbox_mount_blocklist.py`：`is_blocked_mount("~/.ssh/...")`/`/etc/...`/`/root` 为真；正常 `data/workspaces/x` 为假；`manager.workspace_host_path` 当派生路径落在黑名单内时 raise（monkeypatch `paths.workspaces_dir` 到敏感根）（tests/unit）
-- [ ] 2.2 Implement `is_blocked_mount` + `BLOCKED_MOUNT_SUBPATHS` + manager.workspace_host_path 校验，pass unit tests
+- [x] 2.1 Write failing unit tests `tests/unit/test_sandbox_mount_blocklist.py`：`is_blocked_mount("~/.ssh/...")`/`/etc/...`/`/root` 为真；正常 `data/workspaces/x` 为假；`manager.workspace_host_path` 当派生路径落在黑名单内时 raise（monkeypatch `paths.workspaces_dir` 到敏感根）（tests/unit）
+- [x] 2.2 Implement `is_blocked_mount` + `BLOCKED_MOUNT_SUBPATHS` + manager.workspace_host_path 校验，pass unit tests
 
 ## 3. config-hash 容器复用失效
 

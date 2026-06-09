@@ -27,6 +27,7 @@ from fleetent.integrations.sandbox.config import (
     build_resources_by_scope,
     load_sandbox_lifecycle,
 )
+from fleetent.integrations.sandbox.hardening import is_blocked_mount
 
 # Image tag committed for an agent-scope container's dependencies; the next
 # acquire boots from it when present, else falls back to the client default.
@@ -173,6 +174,11 @@ class SandboxManager:
         """
         key = session_id if scope is Scope.SESSION else agent_name
         ws_path = paths.workspaces_dir() / _sanitise(key)
+        # sandbox-hardening: never bind-mount a host dir under a sensitive root (a
+        # misconfigured FLEETENT_HOME could otherwise expose ~/.ssh, /etc, etc.).
+        # Checked before mkdir so a blocked path leaves no directory behind.
+        if is_blocked_mount(ws_path):
+            raise ValueError(f"refusing to mount workspace under a blocked host path: {ws_path}")
         ws_path.mkdir(parents=True, exist_ok=True)
         return ws_path
 
