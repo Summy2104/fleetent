@@ -1452,6 +1452,7 @@ async def run(
     approval_routing: Any | None = None,
     outbound_connectors: dict[str, Any] | None = None,
     progress_func: ProgressFunc | None = None,
+    session_context: Any = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
 
@@ -1504,6 +1505,7 @@ async def run(
             approval_routing=approval_routing,
             outbound_connectors=outbound_connectors,
             progress_func=progress_func,
+            session_context=session_context,
         )
     finally:
         _active_runs -= 1
@@ -1538,6 +1540,7 @@ async def _run_inner(
     approval_routing: Any | None = None,
     outbound_connectors: dict[str, Any] | None = None,
     progress_func: ProgressFunc | None = None,
+    session_context: Any = None,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
     # images are present but no vision route is configured, before any LLM call.
@@ -1569,7 +1572,10 @@ async def _run_inner(
     # SB3 D5: execution-time context channel for run_code (session/agent/features),
     # injected out-of-band only into tools that opt in; harmless for the rest.
     tool_context = ToolContext(
-        agent_name=agent_name, features=agent_features or {}, session_id=session_id
+        agent_name=agent_name,
+        features=agent_features or {},
+        session_id=session_id,
+        session_context=session_context,
     )
 
     start = time.monotonic()
@@ -2043,6 +2049,7 @@ async def run_stream(
     allowed_skills: list[str] | None = None,
     governance: GovernanceConfig | None = None,
     model_policy: ModelPolicySnapshot | None = None,
+    session_context: Any = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Async streaming version of run(). Yields SSE event dicts.
 
@@ -2068,7 +2075,10 @@ async def run_stream(
 
     # SB3 D5: execution-time context channel (session/agent/features) for opt-in tools.
     tool_context = ToolContext(
-        agent_name=agent_name, features=agent_features or {}, session_id=session_id
+        agent_name=agent_name,
+        features=agent_features or {},
+        session_id=session_id,
+        session_context=session_context,
     )
 
     # P3: on_user_input hook — intercept/rewrite/deny before user message enters messages.
