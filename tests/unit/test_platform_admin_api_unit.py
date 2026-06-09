@@ -27,7 +27,6 @@ def _user(
     *,
     user_id: str = "admin-1",
     must_reset: int = 0,
-    totp_secret: str | None = None,
     status: str = "active",
 ) -> user_store.User:
     return user_store.User(
@@ -40,7 +39,6 @@ def _user(
         status=status,
         must_reset=must_reset,
         password_hash="hashed",
-        totp_secret=totp_secret,
     )
 
 
@@ -283,9 +281,6 @@ def test_user_admin_route_handlers_cover_management(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         user_admin_api.auth, "logout", lambda token: audits.append(("logout", token))
     )
-    monkeypatch.setattr(
-        user_admin_api.auth, "verify_user_2fa", lambda user_id, code: code == "123456"
-    )
     monkeypatch.setattr(user_admin_api.user_store, "get_by_id", lambda user_id: users.get(user_id))
     monkeypatch.setattr(
         user_admin_api.user_store,
@@ -442,18 +437,14 @@ def test_user_admin_route_handlers_cover_management(monkeypatch: pytest.MonkeyPa
 
 
 def test_user_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> None:
-    admin = _user(totp_secret="secret")
+    admin = _user()
     monkeypatch.setattr(user_admin_api.auth, "validate_session", lambda token, idle: admin.id)
     monkeypatch.setattr(user_admin_api.auth, "has_role", lambda user, roles: user.role in roles)
-    monkeypatch.setattr(user_admin_api.auth, "verify_user_2fa", lambda user_id, code: False)
     monkeypatch.setattr(user_admin_api.user_store, "get_by_id", lambda user_id: admin)
     monkeypatch.setattr(user_admin_api.user_store, "get_by_email", lambda email: None)
     with pytest.raises(HTTPException) as login_failed:
         user_admin_api.login(user_admin_api.LoginBody(email="missing@example.com", password="pw"))
     assert login_failed.value.status_code == 401
-    with pytest.raises(HTTPException) as two_factor:
-        user_admin_api.revoke_key(1, "Session token")
-    assert two_factor.value.status_code == 403
     monkeypatch.setattr(
         user_admin_api.user_store,
         "get_by_id",

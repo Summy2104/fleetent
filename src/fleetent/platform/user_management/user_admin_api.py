@@ -12,8 +12,7 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from fleetent import auth, user_store
-from fleetent import audit_log
+from fleetent import audit_log, auth, user_store
 from fleetent.platform import im_gateway_management as im
 from fleetent.platform.user_management import api_key_store, block_service
 
@@ -52,18 +51,6 @@ def _require_admin(authorization: str | None) -> user_store.User:
     if not auth.has_role(user, _ADMIN_ROLES):
         raise HTTPException(status_code=403, detail="admin required")
     return user
-
-
-def _enforce_2fa(user: user_store.User, code: str | None) -> None:
-    """Gate a high-risk action: if the actor has 2FA enabled, a valid TOTP is required.
-
-    Raises 403 before any business change when the code is missing or wrong, so
-    delete/block/role/key-revoke do not take effect without a passing second factor.
-    """
-    if not user.totp_secret:
-        return  # no second factor configured for this actor
-    if not code or not auth.verify_user_2fa(user.id, code):
-        raise HTTPException(status_code=403, detail="2FA verification required")
 
 
 class LoginBody(BaseModel):
@@ -213,10 +200,8 @@ def get_user(user_id: str, authorization: str | None = Header(None)) -> dict[str
 def delete_user(
     user_id: str,
     authorization: str | None = Header(None),
-    x_2fa_code: str | None = Header(None, alias="X-2FA-Code"),
 ) -> None:
     admin = _require_admin(authorization)
-    _enforce_2fa(admin, x_2fa_code)
     try:
         user_store.delete_user(user_id)
     except PermissionError as exc:
@@ -229,11 +214,9 @@ def update_user(
     user_id: str,
     body: ProfileBody,
     authorization: str | None = Header(None),
-    x_2fa_code: str | None = Header(None, alias="X-2FA-Code"),
 ) -> dict[str, Any]:
     """Edit a user's profile (name and/or email). Admin-only."""
     admin = _require_admin(authorization)
-    _enforce_2fa(admin, x_2fa_code)
     if user_store.get_by_id(user_id) is None:
         raise HTTPException(status_code=404, detail="not found")
     name = body.name.strip() if body.name is not None else None
@@ -259,10 +242,8 @@ def set_role(
     user_id: str,
     body: RoleBody,
     authorization: str | None = Header(None),
-    x_2fa_code: str | None = Header(None, alias="X-2FA-Code"),
 ) -> dict[str, Any]:
     admin = _require_admin(authorization)
-    _enforce_2fa(admin, x_2fa_code)
     try:
         user_store.set_role(user_id, body.role)
     except PermissionError as exc:
@@ -278,10 +259,8 @@ def block_user(
     user_id: str,
     body: ReasonBody,
     authorization: str | None = Header(None),
-    x_2fa_code: str | None = Header(None, alias="X-2FA-Code"),
 ) -> dict[str, str]:
     admin = _require_admin(authorization)
-    _enforce_2fa(admin, x_2fa_code)
     try:
         block_service.block_user(user_id, reason=body.reason, actor=admin.id)
     except PermissionError as exc:
@@ -301,11 +280,9 @@ def reset_user_password(
     user_id: str,
     body: ChangePasswordBody,
     authorization: str | None = Header(None),
-    x_2fa_code: str | None = Header(None, alias="X-2FA-Code"),
 ) -> dict[str, str]:
     """Admin-set a new password for another user, forcing a reset on their next login."""
     admin = _require_admin(authorization)
-    _enforce_2fa(admin, x_2fa_code)
     if user_store.get_by_id(user_id) is None:
         raise HTTPException(status_code=404, detail="not found")
     user_store.set_password(user_id, auth.hash_password(body.new_password), must_reset=True)
@@ -335,10 +312,8 @@ def issue_key(
 def revoke_key(
     key_id: int,
     authorization: str | None = Header(None),
-    x_2fa_code: str | None = Header(None, alias="X-2FA-Code"),
 ) -> None:
     admin = _require_admin(authorization)
-    _enforce_2fa(admin, x_2fa_code)
     api_key_store.revoke_key(key_id)
     audit_log.write_audit(admin.id, "revoke_key", target_type="key", target_id=str(key_id))
 

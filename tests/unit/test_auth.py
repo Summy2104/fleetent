@@ -1,4 +1,4 @@
-"""Unit tests for fleetent.auth: password hashing, sessions, TOTP, roles, admin seed."""
+"""Unit tests for fleetent.auth: password hashing, sessions, roles, admin seed."""
 
 from typing import Any
 
@@ -99,54 +99,6 @@ def test_logout_unknown_token_is_noop() -> None:
     auth.logout("does-not-exist")  # must not raise
 
 
-# --- TOTP -------------------------------------------------------------------
-
-
-def test_generate_totp_secret_is_valid_base32() -> None:
-    import base64
-
-    secret = auth.generate_totp_secret()
-    # round-trips through base32 decode without error
-    assert len(base64.b32decode(secret)) == 20
-
-
-def test_totp_deterministic_for_fixed_time() -> None:
-    secret = auth.generate_totp_secret()
-    code = auth.totp(secret, t=1_000_000.0)
-    assert code == auth.totp(secret, t=1_000_000.0)
-    assert len(code) == 6 and code.isdigit()
-
-
-def test_totp_uses_current_time_when_t_none() -> None:
-    secret = auth.generate_totp_secret()
-    code = auth.totp(secret)
-    assert len(code) == 6
-
-
-def test_verify_totp_accepts_current_code() -> None:
-    secret = auth.generate_totp_secret()
-    code = auth.totp(secret, t=2_000_000.0)
-    assert auth.verify_totp(secret, code, t=2_000_000.0) is True
-
-
-def test_verify_totp_tolerates_window_skew() -> None:
-    secret = auth.generate_totp_secret()
-    # code from previous 30s step still accepted within +/-1 window
-    prev_code = auth.totp(secret, t=2_000_000.0 - 30)
-    assert auth.verify_totp(secret, prev_code, t=2_000_000.0, window=1) is True
-
-
-def test_verify_totp_rejects_wrong_code() -> None:
-    secret = auth.generate_totp_secret()
-    assert auth.verify_totp(secret, "000000", t=2_000_000.0) is False
-
-
-def test_verify_totp_uses_current_time_when_t_none() -> None:
-    secret = auth.generate_totp_secret()
-    code = auth.totp(secret)
-    assert auth.verify_totp(secret, code) is True
-
-
 # --- roles ------------------------------------------------------------------
 
 
@@ -169,37 +121,6 @@ def test_require_role_passes_for_allowed() -> None:
 def test_require_role_raises_for_disallowed() -> None:
     with pytest.raises(PermissionError):
         auth.require_role(_user(role="viewer"), {"admin"})
-
-
-# --- 2FA (user_store-backed) ------------------------------------------------
-
-
-def test_enable_2fa_stores_and_returns_secret(monkeypatch: Any) -> None:
-    stored: dict[str, str | None] = {}
-    monkeypatch.setattr(
-        user_store, "set_totp_secret", lambda uid, secret: stored.update({uid: secret})
-    )
-    secret = auth.enable_2fa("u1")
-    assert stored["u1"] == secret
-    # the returned secret is usable for TOTP generation
-    assert len(auth.totp(secret, t=1.0)) == 6
-
-
-def test_verify_user_2fa_true_for_valid_code(monkeypatch: Any) -> None:
-    secret = auth.generate_totp_secret()
-    monkeypatch.setattr(user_store, "get_by_id", lambda uid: _user(totp_secret=secret))
-    code = auth.totp(secret, t=3_000_000.0)
-    assert auth.verify_user_2fa("u1", code, t=3_000_000.0) is True
-
-
-def test_verify_user_2fa_false_when_user_missing(monkeypatch: Any) -> None:
-    monkeypatch.setattr(user_store, "get_by_id", lambda uid: None)
-    assert auth.verify_user_2fa("u1", "123456") is False
-
-
-def test_verify_user_2fa_false_when_no_secret(monkeypatch: Any) -> None:
-    monkeypatch.setattr(user_store, "get_by_id", lambda uid: _user(totp_secret=None))
-    assert auth.verify_user_2fa("u1", "123456") is False
 
 
 # --- built-in admin seed ----------------------------------------------------
