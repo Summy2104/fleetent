@@ -15,8 +15,8 @@
 
 ## 4. 反逃逸 + no_reply→reject 契约
 
-- [ ] 4.1 Write failing unit tests：风险定级只来自 registry——tool_args 内塞 `risk`/`risk_level` 字段不改变 critical 工具被拒（反逃逸）；permission_gate 在 reply_func 联系不到审批人时返回非 approved → loop 拒绝执行（no_reply→reject 回归，permission_gate 用短超时）（tests/unit）
-- [ ] 4.2 Implement / 确认：定级路径不读 tool_args（如已满足则仅加 guard 测试）；no_reply→reject 复用 permission_gate default-closed，pass tests
+- [x] 4.1 Write failing unit tests：风险定级只来自 registry——tool_args 内塞 `risk`/`risk_level` 字段不改变 critical 工具被拒（反逃逸）；permission_gate 在 reply_func 联系不到审批人时返回非 approved → loop 拒绝执行（no_reply→reject 回归，permission_gate 用短超时）（tests/unit）
+- [x] 4.2 Implement / 确认：定级路径不读 tool_args（如已满足则仅加 guard 测试）；no_reply→reject 复用 permission_gate default-closed，pass tests
 
 ## 5. 收尾验证
 
