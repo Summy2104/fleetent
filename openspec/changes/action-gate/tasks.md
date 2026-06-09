@@ -5,8 +5,8 @@
 
 ## 2. GovernanceConfig + AgentFile 配置字段
 
-- [ ] 2.1 Write failing unit tests：GovernanceConfig 默认 `action_gate_medium_mode=="approval"`/`action_gate_high_mode=="approval"`；AgentFile 接受 `direct|sandbox|approval`、拒绝非法值；`_governance_from_file` 透传两字段（tests/unit）
-- [ ] 2.2 Implement GovernanceConfig 两字段 + AgentFile 两字段（Literal 校验）+ `_governance_from_file` 透传，pass unit tests
+- [x] 2.1 Write failing unit tests：GovernanceConfig 默认 `action_gate_medium_mode=="approval"`/`action_gate_high_mode=="approval"`；AgentFile 接受 `direct|sandbox|approval`、拒绝非法值；`_governance_from_file` 透传两字段（tests/unit）
+- [x] 2.2 Implement GovernanceConfig 两字段 + AgentFile 两字段（Literal 校验）+ `_governance_from_file` 透传，pass unit tests
 
 ## 3. loop 接入 Action Gate（替换硬编码风险分支）
 
