@@ -22,6 +22,23 @@ _REJECTION_MSG = "你还没有权限使用此 bot，请联系管理员审批。"
 
 
 @dataclass
+class SessionContext:
+    """Sender/channel metadata for one inbound message, injected into the LLM.
+
+    Populated by IM adapters. ``platform``/``sender_id``/``chat_type`` are
+    platform-provided (authoritative); ``sender_name`` is user-settable.
+    """
+
+    platform: str
+    sender_id: str
+    sender_name: str = ""
+    chat_type: str = "dm"  # "dm" | "channel"
+    channel_name: str = ""
+    was_mentioned: bool = False
+    thread_root: str = ""
+
+
+@dataclass
 class NormalizedMessage:
     platform: str
     session_id: str
@@ -42,6 +59,9 @@ class NormalizedMessage:
     # each tool executes. Adapters that want to show real-time feedback supply this;
     # omitting it (None) preserves the existing silent behavior.
     progress_func: Callable[[dict[str, Any]], Awaitable[None]] | None = field(default=None)
+    # Optional sender/channel metadata injected into the LLM (im-message-context).
+    # None = no context injected (behavior identical to before).
+    session_context: SessionContext | None = field(default=None)
     # Optional upload callback: called with a list of local image paths generated during
     # this turn. Adapters that support file uploads (e.g. Slack) supply this; omitting it
     # (None) means generated images are not forwarded to the platform.

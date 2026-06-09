@@ -240,7 +240,7 @@ async def _route_assistant_message(
     batch so multi-tool turns show every in-flight tool, not only the last.
     """
     from fleetent.im_gateway.access import resolve_identity
-    from fleetent.im_gateway.normalizer import NormalizedMessage, route
+    from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext, route
 
     channel = getattr(context, "channel_id", None) or payload.get("channel") or ""
     thread_ts = getattr(context, "thread_ts", None)
@@ -276,6 +276,15 @@ async def _route_assistant_message(
             channel_id=channel,
             user_id=slack_user_id,
             thread_root=thread_ts or payload.get("ts") or slack_user_id,
+        ),
+        session_context=SessionContext(
+            platform="slack",
+            sender_id=slack_user_id,
+            sender_name=(payload.get("user_profile") or {}).get("display_name") or "",
+            chat_type="dm",
+            channel_name=channel,
+            was_mentioned=False,
+            thread_root=thread_ts or payload.get("ts") or "",
         ),
         user_id=identity,
         text=payload.get("text") or "",
@@ -341,7 +350,7 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
 
     async def _handle(event: dict[str, Any], client: Any, say: Any = None) -> None:
         from fleetent.im_gateway.access import resolve_identity
-        from fleetent.im_gateway.normalizer import NormalizedMessage, route
+        from fleetent.im_gateway.normalizer import NormalizedMessage, SessionContext, route
 
         channel = event.get("channel") or ""
         slack_user_id = event.get("user") or "unknown"
@@ -370,6 +379,15 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
             owner_id=owner_id,
             agent_name=agent_name,
             session_id=session_id,
+            session_context=SessionContext(
+                platform="slack",
+                sender_id=slack_user_id,
+                sender_name=(event.get("user_profile") or {}).get("display_name") or "",
+                chat_type="dm" if channel_type == "im" else "channel",
+                channel_name=channel,
+                was_mentioned=channel_type != "im",
+                thread_root=reply_thread or "",
+            ),
             user_id=identity,
             text=event.get("text") or "",
             attachments=attachments,
