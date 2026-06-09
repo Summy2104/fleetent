@@ -225,3 +225,47 @@ async def test_acquire_env_defaults_to_none():
     await mgr.acquire(Scope.SESSION, "s1", "bot")
     _, kwargs = client.create_workspace.call_args
     assert kwargs["env"] is None
+
+
+# --- workspace mount (sandbox-workspace-mount) -----------------------------
+
+
+async def test_acquire_session_creates_workspace_dir_and_passes_path(monkeypatch, tmp_path):
+    """session scope derives workspaces_dir()/<session_id>, creates it, and threads
+    the host path to create_workspace."""
+    from fleetent import paths
+
+    monkeypatch.setattr(paths, "workspaces_dir", lambda: tmp_path)
+    client = _mock_client()
+    mgr = _manager(client)
+    await mgr.acquire(Scope.SESSION, session_id="s1", agent_name="bot")
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["workspace_host_path"] == str(tmp_path / "s1")
+    assert (tmp_path / "s1").is_dir()
+
+
+async def test_acquire_agent_scope_workspace_uses_agent_name(monkeypatch, tmp_path):
+    """agent scope keys the workspace subdir on the agent name, not the session id."""
+    from fleetent import paths
+
+    monkeypatch.setattr(paths, "workspaces_dir", lambda: tmp_path)
+    client = _mock_client()
+    mgr = _manager(client, scope=Scope.AGENT)
+    await mgr.acquire(Scope.AGENT, session_id="s1", agent_name="bot")
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["workspace_host_path"] == str(tmp_path / "bot")
+    assert (tmp_path / "bot").is_dir()
+
+
+async def test_acquire_workspace_subdir_is_sanitised(monkeypatch, tmp_path):
+    """Unsafe key chars are sanitised in the workspace subdir name (same policy as
+    the container name), so the path stays a single safe directory."""
+    from fleetent import paths
+
+    monkeypatch.setattr(paths, "workspaces_dir", lambda: tmp_path)
+    client = _mock_client()
+    mgr = _manager(client)
+    await mgr.acquire(Scope.SESSION, session_id="user:U1/chan#a", agent_name="bot")
+    _, kwargs = client.create_workspace.call_args
+    assert kwargs["workspace_host_path"] == str(tmp_path / "user-U1-chan-a")
+    assert (tmp_path / "user-U1-chan-a").is_dir()

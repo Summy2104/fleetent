@@ -114,6 +114,27 @@ async def test_run_code_returns_stdout(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_code_execs_with_session_id_for_snapshot(monkeypatch):
+    """run_code threads its session id into client.exec so the workspace runs with
+    session-snapshot continuity (cwd defaults to the mounted /workspace)."""
+    from unittest.mock import AsyncMock
+
+    import fleetent.tools.builtin_tools as tl
+    from fleetent.integrations.sandbox.client import ExecResult
+    from fleetent.tools.registry import ToolContext
+
+    client = _mock_lifecycle_client("cid-1")
+    client.exec = AsyncMock(return_value=ExecResult(stdout="ok\n", stderr="", exit_code=0))
+    monkeypatch.setattr(tl, "_MANAGER", _make_manager(client))
+
+    ctx = ToolContext(agent_name="a", features={}, session_id="sess-7")
+    await tl.run_code(code="print('ok')", tool_context=ctx)
+
+    _, kwargs = client.exec.call_args
+    assert kwargs.get("session_id") == "sess-7"
+
+
+@pytest.mark.asyncio
 async def test_run_code_includes_stderr(monkeypatch):
     from unittest.mock import AsyncMock
 
@@ -230,7 +251,7 @@ async def test_run_code_aborts_and_destroys_on_cancel(monkeypatch):
     import fleetent.tools.builtin_tools as tl
     from fleetent.runtime.cancellation import CancelToken
 
-    async def never_returns(ws_id, command):
+    async def never_returns(ws_id, command, session_id=None):
         await asyncio.Event().wait()
 
     client = _mock_lifecycle_client("cid-cancel")
@@ -257,7 +278,7 @@ async def test_run_code_cancel_forgets_registry_then_reacquires(monkeypatch):
     from fleetent.integrations.sandbox.client import ExecResult
     from fleetent.runtime.cancellation import CancelToken
 
-    async def never_returns(ws_id, command):
+    async def never_returns(ws_id, command, session_id=None):
         await asyncio.Event().wait()
 
     client = _mock_lifecycle_client("cid-first")
@@ -287,7 +308,7 @@ async def test_run_code_cancel_path_finally_does_not_double_raise(monkeypatch):
     import fleetent.tools.builtin_tools as tl
     from fleetent.runtime.cancellation import CancelToken
 
-    async def never_returns(ws_id, command):
+    async def never_returns(ws_id, command, session_id=None):
         await asyncio.Event().wait()
 
     client = _mock_lifecycle_client("cid-x")
@@ -339,7 +360,7 @@ async def test_run_code_does_not_log_trace_on_cancel(monkeypatch):
     import fleetent.tools.builtin_tools as tl
     from fleetent.runtime.cancellation import CancelToken
 
-    async def never_returns(ws_id, command):
+    async def never_returns(ws_id, command, session_id=None):
         await asyncio.Event().wait()
 
     client = _mock_lifecycle_client("cid-cancel-trace")
@@ -638,7 +659,7 @@ async def test_run_code_sandbox_timeout_kills_and_classifies(monkeypatch):
 
     import fleetent.tools.builtin_tools as tl
 
-    async def never_returns(ws_id, command):
+    async def never_returns(ws_id, command, session_id=None):
         await asyncio.Event().wait()
 
     client = _mock_lifecycle_client("cid-timeout")
@@ -658,7 +679,7 @@ async def test_run_code_external_cancel_kills_but_not_timeout(monkeypatch):
     import fleetent.tools.builtin_tools as tl
     from fleetent.runtime.cancellation import CancelToken
 
-    async def never_returns(ws_id, command):
+    async def never_returns(ws_id, command, session_id=None):
         await asyncio.Event().wait()
 
     client = _mock_lifecycle_client("cid-cancel2")
