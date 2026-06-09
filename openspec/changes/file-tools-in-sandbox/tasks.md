@@ -1,7 +1,7 @@
 ## 1. 容器文件 IO helper + 路径解析
 
-- [ ] 1.1 Write failing unit tests: `resolve_ws_path`（相对路径相对 `/workspace`、绝对路径越界拒绝、`..` 规范化后越界拒绝）；helper 的 read/write/list/search 命令组装（cat/sed/ls/grep/find）（tests/unit）
-- [ ] 1.2 Implement `tools/file_sandbox_io.py` helper（路径解析 + 命令组装），pass unit tests
+- [x] 1.1 Write failing unit tests: `resolve_ws_path`（相对路径相对 `/workspace`、绝对路径越界拒绝、`..` 规范化后越界拒绝、`/workspace-evil` 前缀 lookalike 拒绝）；helper 命令组装（cat/wc/ls）（tests/unit）
+- [x] 1.2 Implement `tools/file_sandbox_io.py` helper（resolve_ws_path 边界校验 + build_read/size/list_command），pass unit tests
 
 ## 2. sandbox 可用性探测 + 降级路径围栏
 
