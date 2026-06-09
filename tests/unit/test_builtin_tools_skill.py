@@ -19,7 +19,7 @@ def _clean_entry() -> SkillEntry:
 
 def test_read_skill_audit_blocked_writes_audit_log() -> None:
     with (
-        patch("fleetent.governance.audit_log.write_audit") as mock_audit,
+        patch("fleetent.audit_log.write_audit") as mock_audit,
         patch("fleetent.skills.registry._index", {"bad": _blocked_entry()}),
     ):
         out = builtin_tools.read_skill("bad")
@@ -35,7 +35,7 @@ def test_read_skill_audit_blocked_writes_audit_log() -> None:
 def test_read_skill_audit_detail_carries_context() -> None:
     ctx = ToolContext(agent_name="support", session_id="sess-1")
     with (
-        patch("fleetent.governance.audit_log.write_audit") as mock_audit,
+        patch("fleetent.audit_log.write_audit") as mock_audit,
         patch("fleetent.skills.registry._index", {"bad": _blocked_entry()}),
     ):
         builtin_tools.read_skill("bad", tool_context=ctx)
@@ -49,7 +49,7 @@ def test_read_skill_audit_detail_carries_context() -> None:
 
 def test_read_skill_clean_does_not_write_refusal_audit() -> None:
     with (
-        patch("fleetent.governance.audit_log.write_audit") as mock_audit,
+        patch("fleetent.audit_log.write_audit") as mock_audit,
         patch("fleetent.skills.registry._index", {"ok": _clean_entry()}),
         patch("fleetent.skills.registry.load", return_value="full body"),
     ):
@@ -61,7 +61,7 @@ def test_read_skill_clean_does_not_write_refusal_audit() -> None:
 
 def test_read_skill_refusal_survives_audit_write_failure() -> None:
     with (
-        patch("fleetent.governance.audit_log.write_audit", side_effect=RuntimeError("db down")),
+        patch("fleetent.audit_log.write_audit", side_effect=RuntimeError("db down")),
         patch("fleetent.skills.registry._index", {"bad": _blocked_entry()}),
     ):
         out = builtin_tools.read_skill("bad")
@@ -109,7 +109,7 @@ def test_read_skill_hit_recording_failure_does_not_block() -> None:
 def test_read_skill_blocked_does_not_record_hit() -> None:
     with (
         patch("fleetent.skills.registry._index", {"bad": _blocked_entry()}),
-        patch("fleetent.governance.audit_log.write_audit"),
+        patch("fleetent.audit_log.write_audit"),
         patch("fleetent.observability.traces.record_trace_event") as mock_rec,
     ):
         builtin_tools.read_skill("bad")

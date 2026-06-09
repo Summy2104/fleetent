@@ -8,7 +8,8 @@ Lives in the platform control plane because it coordinates platform-owned stores
 import secrets
 
 from fleetent import user_store
-from fleetent.governance import audit_log, blocklist
+from fleetent import audit_log
+from fleetent.governance import blocklist
 from fleetent.platform import im_gateway_management as im
 from fleetent.platform.user_management import api_key_store
 

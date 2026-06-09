@@ -26,7 +26,7 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from fleetent import agent_store, auth, user_store
-from fleetent.governance import audit_log
+from fleetent import audit_log
 from fleetent.platform.agent_lifecycle import materialize
 from fleetent.platform.reflection_management import (
     reflection_apply_proposal,
