@@ -12,15 +12,6 @@ GOVERNANCE_PUBLIC_APIS = {
         "cleanup_stale_approvals",
         "list_approvals",
     },
-    "quota": {
-        "DB_PATH",
-        "check_quota",
-        "record_usage",
-        "set_quota",
-        "_get_quota",
-        "_get_usage",
-        "_init_db",
-    },
     "blocklist": {
         "DB_PATH",
         "ban_registration",

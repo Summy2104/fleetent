@@ -5,7 +5,7 @@ import fleetent.platform.im_gateway_management.connector_store as im_connector_s
 import fleetent.platform.user_management.api_key_store as api_key_store
 import fleetent.platform.user_management.invite_store as invite_store
 from fleetent import paths, user_store
-from fleetent.governance import audit_log, blocklist, quota
+from fleetent.governance import audit_log, blocklist
 from fleetent.platform.im_gateway_management import identity as im_user_store
 
 DEFAULT_USER_STORE_DB_PATH = user_store.DB_PATH
@@ -17,7 +17,6 @@ DEFAULT_LEGACY_RE_EXPORT_DB_PATHS = {
     "im_connector_store": im_connector_store.DB_PATH,
     "im_user_store": im_user_store.DB_PATH,
     "invite_store": invite_store.DB_PATH,
-    "quota": quota.DB_PATH,
 }
 
 

@@ -365,9 +365,21 @@ def wire_agent_store_seams() -> None:
 wire_agent_store_seams()
 
 
-def _emit_over_quota_event(user_id: str) -> None:
-    """Emit an over-quota event so operators can see who hit their limit."""
-    logger.warning("over_quota user_id=%s", user_id)
+def _run_monitoring_cycle() -> None:
+    """One periodic monitoring tick: collect samples, prune, escalate stale criticals.
+
+    Failures never crash the scheduler — each step is logged and isolated so a flaky
+    collection source cannot stop alert escalation.
+    """
+    for step in (
+        collectors.collect_once,
+        collectors.purge_expired,
+        monitor_admin_api.escalate_pending,
+    ):
+        try:
+            step()
+        except Exception:  # noqa: BLE001 — keep the periodic job alive
+            logger.exception("monitoring_cycle_step_failed step=%s", step.__name__)
 
 
 _PLAYGROUND_RETENTION_INTERVAL_SECONDS = 24 * 3600
