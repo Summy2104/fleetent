@@ -206,7 +206,11 @@ from fleetent.tools.file_tools import write_file as write_file  # noqa: F401,E40
 
 
 async def _exec_or_cancel(
-    client: SandboxClient, ws_id: str, command: str, cancel_token: CancelToken
+    client: SandboxClient,
+    ws_id: str,
+    command: str,
+    cancel_token: CancelToken,
+    session_id: str | None = None,
 ) -> ExecResult | None:
     """Run exec, aborting if the token cancels or its deadline passes.
 
@@ -214,9 +218,10 @@ async def _exec_or_cancel(
     passed deadline) is observed first — in which case the container is terminated
     gracefully (SB7: SIGTERM → grace → SIGKILL) and then removed, rather than left
     hanging on a blocked exec. The caller distinguishes timeout from external
-    cancel by whether the token's own deadline has passed.
+    cancel by whether the token's own deadline has passed. `session_id` enables
+    session-snapshot continuity (cwd defaults to the mounted /workspace).
     """
-    exec_task = asyncio.create_task(client.exec(ws_id, command))
+    exec_task = asyncio.create_task(client.exec(ws_id, command, session_id=session_id))
     while True:
         if cancel_token.is_cancelled():
             exec_task.cancel()
@@ -277,7 +282,7 @@ async def run_code(
     exec_timeout = manager.resources_for(scope).exec_timeout
     start = time.monotonic()
     child = CancelToken(deadline=start + exec_timeout, parent=token)
-    result = await _exec_or_cancel(manager.client, ws_id, command, child)
+    result = await _exec_or_cancel(manager.client, ws_id, command, child, session_id=session_id)
     elapsed = time.monotonic() - start
     if result is None:
         manager.forget(manager.container_name(scope, session_id, agent_name or "default"))

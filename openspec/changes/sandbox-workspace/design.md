@@ -50,3 +50,11 @@ session 隔离用 `/tmp/snap-<session>.sh`，容器生命周期天然回收。
 ## Migration Plan
 
 增量、对现有 run_code 调用方透明：未挂载/未 snapshot 的旧行为是新行为的子集。无数据迁移。Rollback：还原 `create_workspace` 不挂载、`exec` 不包装即可，无残留状态（snapshot 在容器内 /tmp，workspace 目录留存但不影响旧路径）。
+
+## 实施记录（apply 阶段决策与发现）
+
+- **uid 写权限（D-risk 落地）**：`acquire` 创建 workspace 子目录后 `chmod 0o777`，使 session tier（`nobody`）与 agent tier（root）都能写挂载点。真实 docker integration 验证两 tier 写入均生效、宿主可读。单租户 on-prem 下 workspace 仅存 agent 工作数据，0o777 风险可接受。
+- **snapshot 分层**：纯字符串构建（`snapshot_path`/`cwd_marker`/`build_capture_script`/`wrap_command`/`extract_cwd`）独立到 `session_snapshot.py`（仅依赖标准库，unit 可测无需 docker）；`client.exec` 加 `session_id` 参数做编排（首次 `bash -lc` 捕获→后续 `bash -c` 包装→失败降级 `bash -l`），原 docker exec 逻辑提为 `_run_exec`。`source`/`declare -f`/`export -p` 需 bash，故包装命令经 `bash -c` 运行（容器默认 `sh`=dash 不支持）。
+- **integration docker 守卫**：新建 `tests/integration/test_sandbox_workspace.py`，模块级 `pytest.mark.skipif(not _docker_available())`——为 sandbox 建立真实 docker integration 的 skip 守卫模式（此前 sandbox 测试全为 unit+mock）。
+- **cwd marker 取最后一对**：`extract_cwd` 用最后一对 marker，防命令输出含 marker-like 文本伪造；marker 行从返回输出剥离，不入 agent 上下文/trace。
+- **预存在失败（非本 change 引入，已对照 main 基线确认）**：① 4 个 unit paths-wiring 测试（`test_paths_wiring`/`test_config_paths`/`test_db_session_paths`/`test_misc_config_paths`）在 main 同样失败，根因是本机 `~/.fleetent` 存在致 import 时求值的常量解析到家目录；② integration main 与 worktree 均 37 failed / 80 errors（多为最近合入的持久化重构移除 `session.index.DB_PATH` 的测试遗留），worktree 仅净增 6 passed 的本 change 测试。
