@@ -40,6 +40,39 @@ AGENT_FILE_NAME = "agent.yaml"
 _ENV_VAR_NAME_RE = re.compile(r"^(env:)?[A-Z_][A-Z0-9_]*$")
 
 
+class ApprovalEntry(BaseModel):
+    """One approval routing entry: a list of approver addresses and the quorum policy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    approvers: list[str] = Field(default_factory=list)
+    policy: Literal["any", "all"] = "any"
+
+
+class ApprovalRiskRoutes(BaseModel):
+    """Per-risk-level approval routing."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    medium: ApprovalEntry | None = None
+    high: ApprovalEntry | None = None
+
+
+class ApprovalRouting(BaseModel):
+    """Agent-level approval routing configuration.
+
+    Approver addresses are opaque strings in ``platform:target_id`` format
+    (e.g. ``slack:UXXXXXXXX``, ``telegram:123456789``).
+    ``by_tool`` takes precedence over ``by_risk`` when both match a tool call.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    on_no_approver: Literal["reject"] = "reject"
+    by_risk: ApprovalRiskRoutes = Field(default_factory=ApprovalRiskRoutes)
+    by_tool: dict[str, ApprovalEntry] = Field(default_factory=dict)
+
+
 class ConnectorAccess(BaseModel):
     """Per-platform IM access rules, embedded in each connector declaration.
 
@@ -281,6 +314,41 @@ class AgentFile(BaseModel):
     scheduling: SchedulingSettings = Field(default_factory=SchedulingSettings)
     webhooks: WebhooksSettings = Field(default_factory=WebhooksSettings)
     connectors: AgentConnectors = Field(default_factory=AgentConnectors)
+    approval: ApprovalRouting | None = None
+
+
+def resolve_approvers(
+    routing: ApprovalRouting,
+    risk_level: str,
+    tool_name: str,
+) -> tuple[list[tuple[str, str]], str]:
+    """Resolve approver addresses and quorum policy for a tool call.
+
+    Returns ``([(platform, target_id), ...], policy)``.  Empty list means no
+    approvers were found — the caller must apply ``on_no_approver`` (default-closed).
+
+    Resolution order: ``by_tool`` overrides ``by_risk``.  Each approver string
+    must be in ``platform:target_id`` format; malformed entries are silently skipped.
+    """
+    entry = routing.by_tool.get(tool_name)
+    if entry is None:
+        if risk_level == "medium":
+            entry = routing.by_risk.medium
+        elif risk_level == "high":
+            entry = routing.by_risk.high
+
+    if entry is None:
+        return [], "any"
+
+    addresses: list[tuple[str, str]] = []
+    for raw in entry.approvers:
+        if ":" not in raw:
+            continue
+        platform, _, target = raw.partition(":")
+        if platform and target:
+            addresses.append((platform, target))
+
+    return addresses, entry.policy
 
 
 @dataclass(frozen=True)

@@ -11,8 +11,6 @@ GOVERNANCE_PUBLIC_APIS = {
         "_default_gate",
         "cleanup_stale_approvals",
         "list_approvals",
-        "_init_db",
-        "DB_PATH",
     },
     "quota": {
         "DB_PATH",
@@ -68,3 +66,11 @@ def test_legacy_governance_imports_are_removed(module_name: str) -> None:
 
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module(f"fleetent.{module_name}")
+
+
+def test_permission_gate_does_not_import_user_store() -> None:
+    """permission_gate MUST NOT import fleetent.user_store (agent→platform leak #1)."""
+    module = importlib.import_module("fleetent.governance.permission_gate")
+    source = inspect.getsource(module)
+    assert "fleetent.user_store" not in source
+    assert "user_store" not in source
