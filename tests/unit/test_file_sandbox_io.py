@@ -54,3 +54,36 @@ def test_build_list_command_quotes_path() -> None:
     cmd = fsio.build_list_command("/workspace/a b")
     assert "ls" in cmd
     assert "'/workspace/a b'" in cmd
+
+
+# ── host-degrade path fence (Task 2) ──────────────────────────────────────────
+
+
+def test_resolve_host_relative_under_root(tmp_path) -> None:
+    p = fsio.resolve_host_path(tmp_path, "a/b.txt")
+    assert p == tmp_path / "a" / "b.txt"
+
+
+def test_resolve_host_bare_relative_under_root(tmp_path) -> None:
+    p = fsio.resolve_host_path(tmp_path, "out.txt")
+    assert p == tmp_path / "out.txt"
+
+
+def test_resolve_host_root_itself_ok(tmp_path) -> None:
+    assert fsio.resolve_host_path(tmp_path, ".") == tmp_path
+
+
+def test_resolve_host_traversal_rejected(tmp_path) -> None:
+    with pytest.raises(ValueError):
+        fsio.resolve_host_path(tmp_path, "../escape.txt")
+
+
+def test_resolve_host_absolute_outside_rejected(tmp_path) -> None:
+    with pytest.raises(ValueError):
+        fsio.resolve_host_path(tmp_path, "/etc/passwd")
+
+
+def test_resolve_host_prefix_lookalike_rejected(tmp_path) -> None:
+    sibling = str(tmp_path) + "-evil"
+    with pytest.raises(ValueError):
+        fsio.resolve_host_path(tmp_path, sibling + "/x")

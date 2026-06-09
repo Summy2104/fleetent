@@ -7,10 +7,16 @@ import os
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
-from fleetent.tools.registry import tool
+from fleetent.integrations.sandbox.enablement import Mode, get_effective_mode
+from fleetent.tools.registry import ToolContext, tool
+
+if TYPE_CHECKING:
+    from fleetent.integrations.sandbox.client import SandboxClient
+    from fleetent.integrations.sandbox.manager import SandboxManager
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +129,66 @@ def _dir_listing(path: Path) -> str:
         lines.append(f"\n[截断：共 {total} 条，仅显示前 {DIR_MAX_ENTRIES} 条]")
 
     return "\n".join(lines)
+
+
+# ── sandbox backend selection ─────────────────────────────────────────────────
+
+# Default scope key when a tool is called without a ToolContext (direct/unbound
+# call) — mirrors run_code's "run-code" fallback so both share a coherent default.
+_DEFAULT_KEY = "file-tools"
+
+
+def _get_sandbox_manager() -> SandboxManager:
+    """Return the process-wide SandboxManager, shared with run_code.
+
+    Imported lazily to avoid the import cycle (builtin_tools imports this module to
+    re-export read_file/write_file). Sharing run_code's manager means the file tools
+    reuse the same per-session container/registry instead of booting their own.
+    """
+    from fleetent.tools.builtin_tools import _get_manager
+
+    return _get_manager()
+
+
+@dataclass
+class _ContainerBackend:
+    """File IO executed inside the sandbox container, locked to ``/workspace``."""
+
+    client: SandboxClient
+    ws_id: str
+    session_id: str
+
+
+@dataclass
+class _HostBackend:
+    """File IO on the host (docker-unavailable degrade), fenced to ``root``."""
+
+    root: Path
+
+
+async def _select_backend(tool_context: ToolContext | None) -> _ContainerBackend | _HostBackend:
+    """Pick the container backend when the sandbox is usable, else the host fence.
+
+    Container is the structural-defense path (mount namespace makes workspace-external
+    host paths physically unreachable). When docker is unavailable the effective mode
+    degrades to OFF; we then operate on the same host workspace dir behind a normpath
+    path fence (no namespace — the documented degrade).
+    """
+    session_id = (
+        tool_context.session_id if tool_context and tool_context.session_id else _DEFAULT_KEY
+    )
+    agent_name = (tool_context.agent_name if tool_context else None) or "default"
+    manager = _get_sandbox_manager()
+    mode = await get_effective_mode()
+    if mode is Mode.OFF:
+        root = manager.workspace_host_path(manager.scope, session_id, agent_name)
+        return _HostBackend(root=root)
+    from fleetent.integrations.sandbox import build_sandbox_env
+
+    features = tool_context.features if tool_context else {}
+    env = build_sandbox_env(agent_env=features.get("sandbox_env"))
+    ws_id = await manager.acquire(manager.scope, session_id, agent_name, env=env)
+    return _ContainerBackend(client=manager.client, ws_id=ws_id, session_id=session_id)
 
 
 # ── tools ─────────────────────────────────────────────────────────────────────

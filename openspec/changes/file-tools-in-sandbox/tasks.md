@@ -5,8 +5,8 @@
 
 ## 2. sandbox 可用性探测 + 降级路径围栏
 
-- [ ] 2.1 Write failing unit tests: sandbox 可用→走容器后端；不可用→宿主后端且路径经 `normpath`+workspace 根前缀判定限制、越界拒绝（tests/unit，mock 可用性）
-- [ ] 2.2 Implement 可用性探测 + 容器/宿主双后端选择，pass unit tests
+- [x] 2.1 Write failing unit tests: sandbox 可用→走容器后端；不可用→宿主后端且路径经 `normpath`+workspace 根前缀判定限制、越界拒绝（tests/unit，mock 可用性）
+- [x] 2.2 Implement 可用性探测 + 容器/宿主双后端选择，pass unit tests
 
 ## 3. read_file 走容器（保留分页/二进制/目录）
 

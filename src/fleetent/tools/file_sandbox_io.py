@@ -8,8 +8,10 @@ it is unit-testable without docker.
 
 from __future__ import annotations
 
+import os
 import posixpath
 import shlex
+from pathlib import Path
 
 # Container-side workspace mount point (matches sandbox-workspace-mount).
 WORKSPACE = "/workspace"
@@ -45,3 +47,23 @@ def build_size_command(ws_path: str) -> str:
 def build_list_command(ws_path: str) -> str:
     """List a directory (one entry per line)."""
     return f"ls -1 -- {shlex.quote(ws_path)}"
+
+
+def resolve_host_path(root: Path, path: str) -> Path:
+    """Resolve a tool path inside the host workspace dir (docker-unavailable degrade).
+
+    Mirrors :func:`resolve_ws_path` but for the host fallback: ``root`` is the host
+    directory that *would* be mounted at ``/workspace``. Relative paths resolve under
+    ``root``; absolute paths must already be inside it. Uses ``normpath`` (not
+    ``realpath``) — ``..`` is rejected, but symlinks are NOT followed, so this fence
+    stops direct path attacks (the prompt-injection main case) and accepts the
+    symlink/TOCTOU gap documented in the design (no mount namespace without docker).
+    """
+    base = os.path.normpath(str(root))
+    if os.path.isabs(path):
+        candidate = os.path.normpath(path)
+    else:
+        candidate = os.path.normpath(os.path.join(base, path))
+    if candidate != base and not candidate.startswith(base + os.sep):
+        raise ValueError(f"path escapes workspace: {path!r}")
+    return Path(candidate)
