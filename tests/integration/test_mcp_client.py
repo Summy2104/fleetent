@@ -1,3 +1,14 @@
+"""Integration tests for the MCP client's registry/tool wiring over the SDK transport.
+
+All transports go through the official SDK ClientSession now, so these mock the SDK
+transport + ClientSession (not the httpx wire) and assert the registry/tool/scope/probe
+collaboration around that single seam.
+"""
+
+import contextlib
+from types import SimpleNamespace
+from typing import Any
+
 import pytest
 
 import fleetent.integrations.mcp.client as mcp_client
@@ -21,6 +32,67 @@ def clean_registry():
     mcp_client._active_sessions.update(sess_before)
 
 
+def _obj(**kw: Any) -> SimpleNamespace:
+    return SimpleNamespace(**kw)
+
+
+def _tool(name: str, desc: str = "d") -> SimpleNamespace:
+    return SimpleNamespace(
+        name=name, description=desc, inputSchema={"type": "object", "properties": {}}
+    )
+
+
+class _FakeSession:
+    """Minimal stand-in for mcp.ClientSession across all transports."""
+
+    def __init__(self, tools: list[Any] | None = None, call_result: Any = None) -> None:
+        self._tools = tools or []
+        self._call_result = call_result
+
+    async def initialize(self) -> Any:
+        return SimpleNamespace(protocolVersion="2025-11-25", capabilities={})
+
+    async def list_tools(self, cursor: str | None = None) -> Any:
+        return SimpleNamespace(tools=self._tools, nextCursor=None)
+
+    async def call_tool(self, name: str, args: dict, **kw: Any) -> Any:
+        return self._call_result
+
+
+def _install_sdk(
+    monkeypatch,
+    session: _FakeSession,
+    *,
+    capture_headers: list | None = None,
+    transport_exc: Exception | None = None,
+) -> None:
+    """Patch the SDK transport + ClientSession the client imported at module top."""
+
+    def fake_streamable(*a: Any, **k: Any) -> Any:
+        if capture_headers is not None:
+            capture_headers.append(k.get("headers"))
+        if transport_exc is not None:
+            raise transport_exc
+
+        @contextlib.asynccontextmanager
+        async def _cm():
+            yield ("read", "write", None)
+
+        return _cm()
+
+    monkeypatch.setattr(mcp_client, "streamablehttp_client", fake_streamable)
+    monkeypatch.setattr(mcp_client, "sse_client", fake_streamable)
+
+    @contextlib.asynccontextmanager
+    async def _session_cm(*a: Any, **k: Any):
+        yield session
+
+    monkeypatch.setattr(mcp_client, "ClientSession", lambda *a, **k: _session_cm())
+
+
+# ── tool naming convention ────────────────────────────────────────────────────
+
+
 def test_tool_naming_convention():
     assert _make_tool_name("linear", "create_ticket") == "linear__create_ticket"
 
@@ -38,12 +110,14 @@ def test_tool_naming_double_underscore():
     assert tool == "create_issue"
 
 
-@pytest.mark.asyncio
+# ── registration ──────────────────────────────────────────────────────────────
+
+
 async def test_register_all_skips_unreachable_server(monkeypatch):
     """register_all should not raise when a server is unreachable."""
     import httpx
 
-    async def fake_register_server(server: McpServerConfig) -> None:
+    async def fake_register_server(server: McpServerConfig, scope: int | None = None) -> None:
         raise httpx.ConnectError("All connection attempts failed")
 
     monkeypatch.setattr(mcp_client, "_register_server", fake_register_server)
@@ -53,18 +127,11 @@ async def test_register_all_skips_unreachable_server(monkeypatch):
     await mcp_client.register_all([bad_server])
 
 
-@pytest.mark.asyncio
 async def test_register_tool_puts_in_registry():
     import fleetent.tools.registry as tr
 
     server = McpServerConfig(id="testsvr", url="http://localhost:9999", auth_type="none")
-    tool_def = {
-        "name": "do_thing",
-        "description": "does a thing",
-        "inputSchema": {"type": "object", "properties": {}},
-    }
-
-    mcp_client._register_tool_http(server, "testsvr__do_thing", tool_def)
+    mcp_client._register_tool(server, "testsvr__do_thing", _tool("do_thing", "does a thing"))
 
     assert "testsvr__do_thing" in tr._registry
     fn, schema = tr._registry["testsvr__do_thing"]
@@ -73,169 +140,106 @@ async def test_register_tool_puts_in_registry():
     assert schema["function"]["description"] == "does a thing"
 
 
-@pytest.mark.asyncio
 async def test_register_tool_schema_format():
     """Registered MCP tool schema should be OpenAI function-call format."""
     import fleetent.tools.registry as tr
 
     server = McpServerConfig(id="linear", url="http://localhost:9998", auth_type="none")
-    tool_def = {
-        "name": "create_ticket",
-        "description": "Create a Linear ticket",
-        "inputSchema": {
+    tool_def = _obj(
+        name="create_ticket",
+        description="Create a Linear ticket",
+        inputSchema={
             "type": "object",
             "properties": {"title": {"type": "string"}},
             "required": ["title"],
         },
-    }
-
-    mcp_client._register_tool_http(server, "linear__create_ticket", tool_def)
+    )
+    mcp_client._register_tool(server, "linear__create_ticket", tool_def)
 
     assert "linear__create_ticket" in tr._registry
-    fn, schema = tr._registry["linear__create_ticket"]
+    _fn, schema = tr._registry["linear__create_ticket"]
     assert schema["type"] == "function"
     assert schema["function"]["name"] == "linear__create_ticket"
     assert "parameters" in schema["function"]
 
 
-@pytest.mark.asyncio
 async def test_register_server_registers_tools_from_response(monkeypatch):
-    """_register_server fetches tools/list and registers each tool."""
-    import httpx
-    import respx
-
+    """_register_server lists tools through the held SDK session and registers each."""
     import fleetent.tools.registry as tr
-    from fleetent.integrations.mcp.client import McpServerConfig, _register_server
+    from fleetent.integrations.mcp.client import _register_server
 
+    _install_sdk(monkeypatch, _FakeSession(tools=[_tool("do_thing", "does a thing")]))
     server = McpServerConfig(id="mysvr", url="http://mcp.test", auth_type="none")
-
-    tools_response = {
-        "result": {
-            "tools": [
-                {
-                    "name": "do_thing",
-                    "description": "does a thing",
-                    "inputSchema": {"type": "object", "properties": {}},
-                }
-            ]
-        }
-    }
-
-    with respx.mock:
-        respx.post("http://mcp.test/").mock(return_value=httpx.Response(200, json=tools_response))
-        await _register_server(server)
+    await _register_server(server)
 
     assert "mysvr__do_thing" in tr._registry
 
 
-@pytest.mark.asyncio
 async def test_register_server_with_api_key_auth(monkeypatch):
-    """_register_server sets Authorization header when auth_type=api_key."""
-    import httpx
-    import respx
-
-    from fleetent.integrations.mcp.client import McpServerConfig, _register_server
+    """_register_server sets the Authorization header passed to the SDK transport."""
+    from fleetent.integrations.mcp.client import _register_server
 
     monkeypatch.setenv("MY_API_KEY", "secret-token")
     server = McpServerConfig(
         id="authsvr", url="http://auth.test", auth_type="api_key", api_key_env="MY_API_KEY"
     )
+    headers: list = []
+    _install_sdk(monkeypatch, _FakeSession(tools=[]), capture_headers=headers)
+    await _register_server(server)
 
-    captured_headers: list[dict] = []
-
-    def capture(request: httpx.Request) -> httpx.Response:
-        captured_headers.append(dict(request.headers))
-        return httpx.Response(200, json={"result": {"tools": []}})
-
-    with respx.mock:
-        respx.post("http://auth.test/").mock(side_effect=capture)
-        await _register_server(server)
-
-    assert captured_headers[0].get("authorization") == "Bearer secret-token"
+    assert headers[0].get("Authorization") == "Bearer secret-token"
 
 
-@pytest.mark.asyncio
-async def test_call_tool_sends_jsonrpc_and_returns_result(monkeypatch):
-    """call_tool posts tools/call and returns result field from response."""
-    import httpx
-    import respx
+# ── call_tool ───────────────────────────────────────────────────────────────
 
-    import fleetent.integrations.mcp.client as mcp
-    from fleetent.integrations.mcp.client import McpServerConfig
 
+async def test_call_tool_returns_normalized_result(monkeypatch):
+    """call_tool dispatches through the held session and normalizes the result."""
     server = McpServerConfig(id="callee", url="http://callee.test", auth_type="none")
-    monkeypatch.setitem(mcp._server_registry, (None, "callee"), server)
+    monkeypatch.setitem(mcp_client._server_registry, (None, "callee"), server)
+    result = _obj(content=[_obj(type="text", text="42")], structuredContent=None, isError=False)
+    monkeypatch.setitem(
+        mcp_client._active_sessions, (None, "callee"), _FakeSession(call_result=result)
+    )
 
-    with respx.mock:
-        respx.post("http://callee.test/").mock(
-            return_value=httpx.Response(
-                200,
-                json={"result": {"content": [{"type": "text", "text": "42"}]}},
-            )
-        )
-        result = await mcp.call_tool("callee", "compute", {"x": 1})
-
-    assert result == "42"
+    assert await mcp_client.call_tool("callee", "compute", {"x": 1}) == "42"
 
 
-@pytest.mark.asyncio
 async def test_call_tool_unknown_server_raises():
-    import fleetent.integrations.mcp.client as mcp
-
     with pytest.raises(KeyError, match="Unknown MCP server"):
-        await mcp.call_tool("no_such_server", "tool", {})
+        await mcp_client.call_tool("no_such_server", "tool", {})
 
 
-@pytest.mark.asyncio
+# ── (scope, server_id) keying ─────────────────────────────────────────────────
+
+
 async def test_registry_keyed_by_scope(monkeypatch):
     """Same server_id under two scopes yields distinct registry entries."""
-    import httpx
-    import respx
-
+    _install_sdk(monkeypatch, _FakeSession(tools=[]))
     s_a = McpServerConfig(id="github", url="http://a.test", auth_type="none")
     s_b = McpServerConfig(id="github", url="http://b.test", auth_type="none")
-
-    with respx.mock:
-        respx.post("http://a.test/").mock(
-            return_value=httpx.Response(200, json={"result": {"tools": []}})
-        )
-        respx.post("http://b.test/").mock(
-            return_value=httpx.Response(200, json={"result": {"tools": []}})
-        )
-        await mcp_client.register_all([s_a], scope=5)
-        await mcp_client.register_all([s_b], scope=7)
+    await mcp_client.register_all([s_a], scope=5)
+    await mcp_client.register_all([s_b], scope=7)
 
     assert mcp_client._server_registry[(5, "github")].url == "http://a.test"
     assert mcp_client._server_registry[(7, "github")].url == "http://b.test"
 
 
-@pytest.mark.asyncio
 async def test_call_tool_scope_selects_distinct_servers(monkeypatch):
-    """Two scopes for one server_id route to their own url/credential."""
-    import httpx
-    import respx
-
+    """Two scopes for one server_id route to their own held session."""
     s_a = McpServerConfig(id="github", url="http://a.test", auth_type="none")
     s_b = McpServerConfig(id="github", url="http://b.test", auth_type="none")
     monkeypatch.setitem(mcp_client._server_registry, (5, "github"), s_a)
     monkeypatch.setitem(mcp_client._server_registry, (7, "github"), s_b)
+    res_a = _obj(content=[_obj(type="text", text="A")], structuredContent=None, isError=False)
+    res_b = _obj(content=[_obj(type="text", text="B")], structuredContent=None, isError=False)
+    monkeypatch.setitem(mcp_client._active_sessions, (5, "github"), _FakeSession(call_result=res_a))
+    monkeypatch.setitem(mcp_client._active_sessions, (7, "github"), _FakeSession(call_result=res_b))
 
-    with respx.mock:
-        respx.post("http://a.test/").mock(
-            return_value=httpx.Response(
-                200, json={"result": {"content": [{"type": "text", "text": "A"}]}}
-            )
-        )
-        respx.post("http://b.test/").mock(
-            return_value=httpx.Response(
-                200, json={"result": {"content": [{"type": "text", "text": "B"}]}}
-            )
-        )
-        assert await mcp_client.call_tool("github", "t", {}, scope=5) == "A"
-        assert await mcp_client.call_tool("github", "t", {}, scope=7) == "B"
+    assert await mcp_client.call_tool("github", "t", {}, scope=5) == "A"
+    assert await mcp_client.call_tool("github", "t", {}, scope=7) == "B"
 
 
-@pytest.mark.asyncio
 async def test_call_tool_unknown_scope_raises(monkeypatch):
     """A scope with no registered server_id is rejected, not silently global."""
     s_global = McpServerConfig(id="github", url="http://g.test", auth_type="none")
@@ -245,22 +249,17 @@ async def test_call_tool_unknown_scope_raises(monkeypatch):
         await mcp_client.call_tool("github", "t", {}, scope=5)
 
 
-@pytest.mark.asyncio
+# ── probe_server ──────────────────────────────────────────────────────────────
+
+
 async def test_probe_server_http_success(monkeypatch):
     """probe_server connects, lists tools, returns connected + count without registering."""
     import fleetent.tools.registry as tr
 
-    async def fake_open(client, server):
-        return None
-
-    async def fake_post(client, server, method, params, **kw):
-        return {"result": {"tools": [{"name": "a"}, {"name": "b"}]}}
-
-    monkeypatch.setattr(mcp_client, "_open_session", fake_open)
-    monkeypatch.setattr(mcp_client, "_post_jsonrpc", fake_post)
-
+    _install_sdk(monkeypatch, _FakeSession(tools=[_tool("a"), _tool("b")]))
     server = McpServerConfig(id="probe1", url="http://localhost:9999", auth_type="none")
     result = await mcp_client.probe_server(server)
+
     assert result["connected"] is True
     assert result["tool_count"] == 2
     assert {t["name"] for t in result["tools"]} == {"a", "b"}
@@ -269,26 +268,26 @@ async def test_probe_server_http_success(monkeypatch):
     assert "probe1__a" not in tr._registry
 
 
-@pytest.mark.asyncio
 async def test_probe_server_http_failure(monkeypatch):
     import httpx
 
-    async def fake_open(client, server):
-        raise httpx.ConnectError("refused")
-
-    monkeypatch.setattr(mcp_client, "_open_session", fake_open)
+    _install_sdk(monkeypatch, _FakeSession(), transport_exc=httpx.ConnectError("refused"))
     server = McpServerConfig(id="probe2", url="http://localhost:1", auth_type="none")
     result = await mcp_client.probe_server(server)
+
     assert result["connected"] is False
     assert "refused" in result["error"]
+
+
+# ── unregister ────────────────────────────────────────────────────────────────
 
 
 def test_unregister_server_removes_tools():
     import fleetent.tools.registry as tr
 
     server = McpServerConfig(id="gone", url="http://x", auth_type="none")
-    mcp_client._register_tool_http(server, "gone__t1", {"name": "t1"})
-    mcp_client._register_tool_http(server, "gone__t2", {"name": "t2"})
+    mcp_client._register_tool(server, "gone__t1", _tool("t1"))
+    mcp_client._register_tool(server, "gone__t2", _tool("t2"))
     mcp_client._server_registry[(None, "gone")] = server
     assert "gone__t1" in tr._registry
 
@@ -299,8 +298,10 @@ def test_unregister_server_removes_tools():
     assert (None, "gone") not in mcp_client._server_registry
 
 
-def test_base_headers_includes_custom_headers():
+# ── header assembly ───────────────────────────────────────────────────────────
+
+
+async def test_http_headers_includes_custom_headers():
     server = McpServerConfig(id="h", url="http://x", auth_type="none", headers={"X-API-Key": "k"})
-    headers = mcp_client._base_headers(server)
+    headers = await mcp_client._http_headers(server)
     assert headers["X-API-Key"] == "k"
-    assert headers["Accept"]  # baseline preserved

@@ -3,59 +3,39 @@
 ## Purpose
 TBD - created by archiving change mcp-session-management. Update Purpose after archive.
 ## Requirements
-### Requirement: 会话过期透明重建并重试
+### Requirement: 调用失败时懒重连重试一次
 
-当 `transport: http` 服务的 `tools/list` 或 `tools/call` 请求收到服务端会话失效响应（HTTP 404，或 4xx 且响应明确指示 `Mcp-Session-Id` 失效）时，平台 SHALL 清空该服务本地保存的会话标识、重新发起 `initialize` 取得新会话标识，并以新标识对原请求重试。重建成功时调用方 MUST 无感知地拿到正常结果。
+当持有 SDK `ClientSession` 的 MCP 服务在 `tools/call` 或 `tools/list` 因会话/连接级失效(SDK 抛出连接错误或会话失效)时,平台 SHALL 就地重开该服务的 `ClientSession`(重新经对应 SDK transport 建立 + `initialize`)并对原请求重试一次。重建成功时调用方 MUST 无感知地拿到正常结果。该懒重连取代旧的"手写 404/marker 检测 + 重新 initialize"机制。
 
-#### Scenario: 会话过期后透明重建并取得结果
-- **WHEN** 某 `http` 服务的 `tools/call` 请求因会话过期收到 HTTP 404
-- **THEN** 平台清空旧会话标识、重新 `initialize` 取得新会话标识、以新标识重试该工具调用，调用方拿到与会话有效时一致的工具结果
+#### Scenario: 会话失效后懒重连并取得结果
+- **WHEN** 某 `http` 服务的 `tools/call` 因会话/连接失效抛错
+- **THEN** 平台就地重开该服务 `ClientSession`、以新会话重试该调用,调用方拿到与会话有效时一致的工具结果
 
-#### Scenario: 注册期会话过期同样重建
-- **WHEN** 某 `http` 服务在 `tools/list`（注册阶段）因会话过期收到 HTTP 404
-- **THEN** 平台重新 `initialize` 后重试列举，服务工具仍以 `{server_id}__{tool_name}` 命名空间正常注册
+#### Scenario: 注册期失效同样懒重连
+- **WHEN** 某服务在 `tools/list`(注册阶段)因会话/连接失效抛错
+- **THEN** 平台重开 `ClientSession` 后重试列举,工具仍以 `{server_id}__{tool_name}` 命名空间正常注册
 
-### Requirement: 会话重建至多一次
+### Requirement: 懒重连至多一次,仍失败则降级
 
-会话过期触发的透明重建 SHALL 对同一请求至多发生一次。该「至多一次」守卫与请求路径无关：无论会话失效发生在 `tools/call`（调用期）还是 `tools/list`（注册期），守卫都作用于二者共享的请求层（`_post_jsonrpc`）。若重建并重试后仍返回会话失效或失败，平台 MUST NOT 继续重建，而是按既有错误路径上抛，交由降级/上层处理。
+懒重连 SHALL 对同一请求至多发生一次。重开并重试后若仍失败,平台 MUST NOT 继续重连,而是将该服务标记为不可用并返回降级结果(「服务暂时不可用」),不崩溃 agent loop。
 
-#### Scenario: 连续过期不无限重建
-- **WHEN** 某请求重建会话并重试后，重试响应仍为会话失效（HTTP 404）
-- **THEN** 平台不再发起第二次重建，直接将该错误上抛
+#### Scenario: 连续失败不无限重连
+- **WHEN** 某请求懒重连并重试后仍失败
+- **THEN** 平台不再发起第二次重连,将该服务标记不可用并返回降级结果
 
-#### Scenario: 注册期连续过期同样不无限重建
-- **WHEN** 某 `http` 服务在 `tools/list`（注册阶段）重建会话并重试后，重试响应仍为会话失效（HTTP 404）
-- **THEN** 平台不再发起第二次重建，直接将该错误上抛（与调用期对称，守卫在共享请求层）
+### Requirement: 会话生命周期随 SDK ClientSession 按服务隔离持有
 
-### Requirement: 认证失败不触发会话重建
+每个服务的 `ClientSession`(及其底层传输连接)SHALL 按服务实例隔离持有,存于 `_active_sessions[(scope, server_id)]`,生命周期挂在统一的 `AsyncExitStack`。MUST NOT 置于裸模块级可变全局状态之外的位置。后续对同一服务的调用复用其 `ClientSession`;不同服务互不影响。
 
-收到认证失败响应（HTTP 401/403）时，平台 MUST NOT 将其判定为会话过期，MUST NOT 清空会话标识或重新 `initialize`，而是按错误路径上抛。会话重建仅针对会话失效语义，不掩盖认证问题。
+#### Scenario: 会话随服务实例持有
+- **WHEN** 某服务注册成功
+- **THEN** 其 `ClientSession` 存于 `_active_sessions[(scope, id)]`,后续同服务调用复用,且不影响其他服务
 
-#### Scenario: 401 不触发会话重建
-- **WHEN** 某 `http` 服务的工具调用收到 HTTP 401
-- **THEN** 平台不清空该服务会话标识、不重新 `initialize`，直接上抛该错误
+### Requirement: 关停时经 AsyncExitStack 释放会话
 
-### Requirement: 会话生命周期按服务隔离持有
+平台关停时 SHALL 通过关闭统一的 `AsyncExitStack` 释放所有服务的 `ClientSession` 与底层传输(由 SDK 负责其会话端点的 `DELETE` / 连接关闭,如 `terminate_on_close`)。该释放为 best-effort:单个会话关闭失败 MUST 仅记录日志,不得抛出或阻断关停。
 
-会话标识的开启、复用、过期与关闭 SHALL 按服务实例隔离持有，MUST NOT 置于模块级可变全局状态。后续对同一服务的请求复用其会话标识；过期时清空该服务标识；不同服务的会话标识互不影响。
-
-#### Scenario: 会话标识随服务实例持有
-- **WHEN** `initialize` 响应为某服务分配会话标识
-- **THEN** 该标识保存在该服务实例上，后续同服务请求回携，且不影响其他服务的会话标识
-
-### Requirement: 关停时主动释放会话
-
-平台关停时 SHALL 对每个持有会话标识的 `http` 服务向其会话端点发送 HTTP `DELETE`（携带 `Mcp-Session-Id` 头）以通知服务端释放会话，随后清空本地会话标识。该释放为 best-effort：`DELETE` 失败 MUST 仅记录日志，不得抛出或阻断关停。
-
-#### Scenario: 关停时对活跃会话发 DELETE
-- **WHEN** 平台关停且某 `http` 服务持有会话标识
-- **THEN** 平台向该服务会话端点发送携带 `Mcp-Session-Id` 的 `DELETE`，并清空本地会话标识
-
-#### Scenario: 无会话标识时不发 DELETE
-- **WHEN** 平台关停且某 `http` 服务未持有会话标识
-- **THEN** 平台不对该服务发送 `DELETE`
-
-#### Scenario: DELETE 失败不阻断关停
-- **WHEN** 关停时对某活跃会话发送的 `DELETE` 失败（服务端不可达或不支持）
-- **THEN** 平台仅记录日志，关停流程继续完成，不抛出异常
+#### Scenario: 关停释放所有会话
+- **WHEN** 平台关停
+- **THEN** 关闭 `AsyncExitStack`,所有持有的 `ClientSession` 经 SDK 释放,失败仅记日志不阻断
 

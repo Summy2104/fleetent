@@ -141,50 +141,9 @@ def test_normalize_none_content():
     assert mc._normalize_tool_result(None, structured_content=None, is_error=False) == ""
 
 
-# ── call-path wiring: _call_http_tool (mock _post_jsonrpc, no network) ────────
-
-
-async def test_call_http_tool_aggregates_blocks(monkeypatch):
-    server = mc.McpServerConfig(id="svr", url="http://x", auth_type="none")
-    monkeypatch.setitem(mc._server_registry, (None, "svr"), server)
-
-    async def fake_post(*args: object, **kwargs: object) -> dict:
-        return {
-            "result": {"content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}
-        }
-
-    monkeypatch.setattr(mc, "_post_jsonrpc", fake_post)
-    out = await mc._call_http_tool("svr", "t", {})
-    assert "a" in out
-    assert "b" in out
-
-
-async def test_call_http_tool_surfaces_is_error(monkeypatch):
-    server = mc.McpServerConfig(id="svr", url="http://x", auth_type="none")
-    monkeypatch.setitem(mc._server_registry, (None, "svr"), server)
-
-    async def fake_post(*args: object, **kwargs: object) -> dict:
-        return {"result": {"content": [{"type": "text", "text": "boom"}], "isError": True}}
-
-    monkeypatch.setattr(mc, "_post_jsonrpc", fake_post)
-    out = await mc._call_http_tool("svr", "t", {})
-    assert "boom" in out
-    assert "error" in out.lower()
-
-
-async def test_call_http_tool_structured_only(monkeypatch):
-    server = mc.McpServerConfig(id="svr", url="http://x", auth_type="none")
-    monkeypatch.setitem(mc._server_registry, (None, "svr"), server)
-
-    async def fake_post(*args: object, **kwargs: object) -> dict:
-        return {"result": {"content": [], "structuredContent": {"n": 5}}}
-
-    monkeypatch.setattr(mc, "_post_jsonrpc", fake_post)
-    out = await mc._call_http_tool("svr", "t", {})
-    assert json.loads(out) == {"n": 5}
-
-
-# ── call-path wiring: _call_stdio_tool (fake session, no subprocess) ──────────
+# ── call-path wiring: _call_via_session (held SDK session, no network) ────────
+# All transports collapse onto one path: the result object is normalized identically
+# whether it came from stdio or streamable HTTP, so these exercise the shared seam.
 
 
 class _FakeSession:
@@ -195,29 +154,62 @@ class _FakeSession:
         return self._result
 
 
-async def test_call_stdio_tool_image_first_no_crash(monkeypatch):
-    server = mc.McpServerConfig(id="s", transport="stdio")
-    monkeypatch.setitem(mc._server_registry, (None, "s"), server)
+def _wire(monkeypatch, server_id: str, result: object, *, transport: str = "http") -> None:
+    server = mc.McpServerConfig(id=server_id, transport=transport, url="http://x")
+    monkeypatch.setitem(mc._server_registry, (None, server_id), server)
+    monkeypatch.setitem(mc._active_sessions, (None, server_id), _FakeSession(result))
+
+
+async def test_call_aggregates_blocks(monkeypatch):
+    result = _obj(
+        content=[_obj(type="text", text="a"), _obj(type="text", text="b")],
+        structuredContent=None,
+        isError=False,
+    )
+    _wire(monkeypatch, "svr", result)
+    out = await mc._call_via_session("svr", "t", {})
+    assert "a" in out
+    assert "b" in out
+
+
+async def test_call_surfaces_is_error(monkeypatch):
+    result = _obj(
+        content=[_obj(type="text", text="boom")],
+        structuredContent=None,
+        isError=True,
+    )
+    _wire(monkeypatch, "svr", result)
+    out = await mc._call_via_session("svr", "t", {})
+    assert "boom" in out
+    assert "error" in out.lower()
+
+
+async def test_call_structured_only(monkeypatch):
+    result = _obj(content=[], structuredContent={"n": 5}, isError=False)
+    _wire(monkeypatch, "svr", result)
+    out = await mc._call_via_session("svr", "t", {})
+    assert json.loads(out) == {"n": 5}
+
+
+async def test_call_image_first_no_crash(monkeypatch):
     result = _obj(
         content=[_obj(type="image", data="aGVsbG8=", mimeType="image/png")],
         structuredContent=None,
         isError=False,
     )
-    monkeypatch.setitem(mc._active_sessions, (None, "s"), _FakeSession(result))
-    out = await mc._call_stdio_tool("s", "t", {})
+    _wire(monkeypatch, "s", result, transport="stdio")
+    out = await mc._call_via_session("s", "t", {})
     assert "image/png" in out  # marker; previously crashed on .text
 
 
-async def test_call_stdio_tool_multi_block_and_error(monkeypatch):
-    server = mc.McpServerConfig(id="s", transport="stdio")
-    monkeypatch.setitem(mc._server_registry, (None, "s"), server)
+async def test_call_multi_block_and_error(monkeypatch):
     result = _obj(
         content=[_obj(type="text", text="line1"), _obj(type="text", text="line2")],
         structuredContent=None,
         isError=True,
     )
-    monkeypatch.setitem(mc._active_sessions, (None, "s"), _FakeSession(result))
-    out = await mc._call_stdio_tool("s", "t", {})
+    _wire(monkeypatch, "s", result, transport="stdio")
+    out = await mc._call_via_session("s", "t", {})
     assert "line1" in out
     assert "line2" in out
     assert "error" in out.lower()

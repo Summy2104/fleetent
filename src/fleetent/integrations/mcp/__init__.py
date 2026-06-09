@@ -6,8 +6,6 @@ from fleetent.integrations.mcp.client import (
     close,
     probe_server,
     register_all,
-    start_health_monitor,
-    stop_health_monitor,
     unregister_server,
 )
 
@@ -17,7 +15,5 @@ __all__ = [
     "close",
     "probe_server",
     "register_all",
-    "start_health_monitor",
-    "stop_health_monitor",
     "unregister_server",
 ]
