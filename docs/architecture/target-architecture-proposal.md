@@ -101,6 +101,12 @@ flowchart TB
 
 谁都可依赖、自身只向下的叶子：`db`、`config`、`paths`、`structured_logging`、`secret_scan`、`eval_logger`、`vector_store`（向量 infra）、`observability`（核发射 trace、面读取；**含 `resource_monitoring` 运行健康监控**）、`Identity` 端口（authn：本地 key / OIDC 适配器，详见 §6）。
 
+**`db` 与 `vector_store` 的物理形态**（决议详见 `data-model.md` §5.1–§5.2、§5.7）：
+
+- **5 物理库**：管理库（Alembic 唯一权威，受管模式专用）/ per-agent 运行库（每 agent 一文件）/ 共享记忆库 / KB 关系库 / 向量底座；各层**按主体（tenant）物理分区**（多租户，§5.7）。
+- **schema 权威二元**：管理库 Alembic-only；agent 侧三库（per-agent / 共享记忆 / KB 关系）用**嵌入式 forward-only 迁移**（schema 定义在代码、`migrate-on-open`、无需 Alembic 编排），取代 `ensure_schema`。
+- **`vector_store`** 按 `VectorFamily`（`mem:` / `shared:` / `kb:`）枚举路由到不同物理后端，namespace 标识是路由键而非自由字符串。
+
 ---
 
 ## 5. 横跨边界的模块 —— 必须沿面边界拆开
@@ -228,7 +234,9 @@ flowchart TB
 - **物理形态 = 单体**：四个面做成一等限界上下文，边界按「可拆服务」画；不现在拆微服务。
 - **用户体系 = 内置模块 + `Identity` 端口**（§6）：authn→基座端口、user 管理→②；**首发 OIDC/Google 适配器**（pilot 客户接受外部登录）；结构性修掉泄漏 #1。
 - **governance / reflection 拆分**（§5 两节）：**能力本体/运行时执行→核**、**管理/审批/review API→②**、**审计/策略/建议数据→基座**（核写、②只读，不反向写 platform 表）。沿用 CLAUDE.md「审批门≠归控制面」与「自进化纵向元能力」判据。
+- **多租户物理隔离**（data-model.md §5.7，2026-06-09）：`tenant`=主体实体；各层（per-agent 运行库 / 共享记忆库 / KB 库）**按主体物理分区**；管理库单库跨主体注册中心；Identity 端口解析后的 `principal` 携带 `tenant_id`（从 `users.tenant_id` + `team_members` 解析）。
+- **持久层执行 roadmap**（data-model.md §6）：persistence-hygiene（✅已完成）→ 审批重设计(A) + 管理表收编(#2) → 五库物理分离(#3，吸收 R2 全部拓扑) → Identity 端口(#4)；串行推进，各期 detailed spec 即时生成。
 
 ### 仍待讨论
-1. **迁移顺序**（方向认可后细化）：先拆巨型文件（正交、低风险）还是先立面边界（结构优先）？
+1. **模块迁移顺序**（本提案范围）：先拆巨型文件（正交、低风险）还是先立面边界（结构优先）？注：DB 层执行顺序已在 data-model.md §6 独立锁定，与本问题正交。
 ```

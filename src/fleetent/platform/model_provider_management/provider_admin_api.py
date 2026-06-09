@@ -18,7 +18,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from fleetent import auth, user_store
-from fleetent.governance import audit_log
+from fleetent import audit_log
 from fleetent.platform.model_provider_management import provider_admin_store
 from fleetent.platform.model_provider_management.provider_connectivity import (
     test_provider_connectivity_sync,

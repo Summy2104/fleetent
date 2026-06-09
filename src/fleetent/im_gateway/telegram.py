@@ -107,6 +107,7 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
             reply_func=reply_func,
             progress_func=progress_func,
             channel_id=channel_id,
+            outbound_connectors={"telegram": context.bot},
         )
         await route(msg)
 

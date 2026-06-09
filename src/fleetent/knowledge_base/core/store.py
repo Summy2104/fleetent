@@ -3,14 +3,17 @@ import re
 from datetime import UTC, datetime
 
 from fleetent.db import Row, SQLiteDatabase
-from fleetent.knowledge_base.core.contracts import KnowledgeReadable, KnowledgeWritable
 from fleetent.knowledge_base.core.models import KnowledgeChunk, KnowledgeDocument
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+|[\u4e00-\u9fff]")
 
 
-class KnowledgeStore(KnowledgeReadable, KnowledgeWritable):
-    """Database boundary for knowledge-base owned tables."""
+class KnowledgeStore:
+    """Database boundary for knowledge-base owned tables.
+
+    Satisfies KnowledgeReadable and KnowledgeWritable via structural subtyping
+    (typing.Protocol); no explicit inheritance needed.
+    """
 
     def __init__(self, database: SQLiteDatabase) -> None:
         self._database = database

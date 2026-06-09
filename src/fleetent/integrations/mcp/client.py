@@ -21,10 +21,13 @@ import json
 import logging
 import os
 import time
+from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+
+import httpx
 
 from mcp import ClientSession
 from mcp.client.sse import sse_client
@@ -305,6 +308,14 @@ def _unavailable_result(server_id: str) -> str:
     )
 
 
+def _auth_unavailable_result(server_id: str) -> str:
+    """Tool-call result text when an oauth2 server's authentication is unavailable (D5)."""
+    return (
+        f"{_UNAVAILABLE_RESULT_PREFIX} '{server_id}' authentication unavailable: re-authorize "
+        f"or check the OAuth2 credentials."
+    )
+
+
 async def get_exit_stack() -> AsyncExitStack:
     global _exit_stack
     if _exit_stack is None:
@@ -493,10 +504,9 @@ async def _http_headers(server: McpServerConfig) -> dict[str, str]:
     headers: dict[str, str] = {}
     if server.headers:
         headers.update({k: _resolve_env_ref(v) for k, v in server.headers.items()})
-    bearer = await _bearer_for(server)
-    if bearer:
-        headers["Authorization"] = f"Bearer {bearer}"
-    elif server.auth_type == "api_key" and server.api_key_env:
+    # The oauth2 Bearer rides the transport `auth=` (per-request, refreshable); only the
+    # static api_key Bearer is baked into the session headers here.
+    if server.auth_type == "api_key" and server.api_key_env:
         key = os.environ.get(server.api_key_env, "")
         if key:
             headers["Authorization"] = f"Bearer {key}"
@@ -523,6 +533,7 @@ def _transport_cm(server: McpServerConfig, headers: dict[str, str]) -> Any:
             headers=headers,
             timeout=server.connect_timeout,
             sse_read_timeout=server.call_timeout,
+            auth=_oauth_auth(server),
         )
     # default: streamable http
     return streamablehttp_client(
@@ -530,6 +541,7 @@ def _transport_cm(server: McpServerConfig, headers: dict[str, str]) -> Any:
         headers=headers,
         timeout=server.connect_timeout,
         sse_read_timeout=server.call_timeout,
+        auth=_oauth_auth(server),
     )
 
 
@@ -738,10 +750,37 @@ async def _resolve_oauth_token(server: McpServerConfig) -> str:
         return token.access_token
 
 
-async def _bearer_for(server: McpServerConfig) -> str | None:
-    """Resolve the oauth2 Bearer ahead of sync header assembly (D6a); None otherwise."""
+class _ClientCredentialsAuth(httpx.Auth):
+    """httpx.Auth that injects the oauth2 client_credentials Bearer per request and
+    refreshes once on a 401.
+
+    Passed to the SDK transport via ``auth=`` so token attachment runs on every request of
+    the held session — restoring per-request freshness the persistent session would
+    otherwise lose. The token fetch / cache / sticky-unavailable logic is reused from
+    ``_resolve_oauth_token``; this class only attaches and retries.
+    """
+
+    def __init__(self, server: McpServerConfig) -> None:
+        self._server = server
+
+    async def async_auth_flow(
+        self, request: httpx.Request
+    ) -> AsyncGenerator[httpx.Request, httpx.Response]:
+        token = await _resolve_oauth_token(self._server)
+        request.headers["Authorization"] = f"Bearer {token}"
+        response = yield request
+        if response.status_code == 401:
+            # Token rejected mid-session: drop the cached token, refresh, retry once.
+            self._server._token_store.clear(self._server.id)
+            token = await _resolve_oauth_token(self._server)
+            request.headers["Authorization"] = f"Bearer {token}"
+            yield request
+
+
+def _oauth_auth(server: McpServerConfig) -> httpx.Auth | None:
+    """The httpx.Auth to hand the SDK transport: per-request oauth2 injection, else None."""
     if server.auth_type == "oauth2":
-        return await _resolve_oauth_token(server)
+        return _ClientCredentialsAuth(server)
     return None
 
 
@@ -978,10 +1017,7 @@ async def _call_via_session(
 
     # oauth2 server marked auth-unavailable: return directly, no call.
     if server.auth_type == "oauth2" and server._auth_unavailable:
-        return (
-            f"MCP server '{server_id}' authentication unavailable: re-authorize or check the "
-            f"OAuth2 credentials."
-        )
+        return _auth_unavailable_result(server_id)
     # Known-unavailable server: short-circuit without touching the connection.
     if server._health is not HealthState.healthy:
         return _unavailable_result(server_id)
@@ -990,12 +1026,21 @@ async def _call_via_session(
     if session is None:
         session = await _reopen_session(server, scope)
         if session is None:
+            # An oauth genuine-auth failure during open sets the sticky flag; report it
+            # specifically rather than as a connection problem.
+            if server.auth_type == "oauth2" and server._auth_unavailable:
+                return _auth_unavailable_result(server_id)
             set_health(server, HealthState.unavailable)
             return _unavailable_result(server_id)
 
     try:
         result = await session.call_tool(tool_name, args)
     except Exception as exc:  # noqa: BLE001 — connection drop → lazy reconnect once
+        # A genuine oauth failure surfaced from the per-request auth flow sets the sticky
+        # flag (inside _resolve_oauth_token); detect it via that side effect so a wrapped
+        # exception is handled too. Degrade, never crash the agent loop.
+        if server.auth_type == "oauth2" and server._auth_unavailable:
+            return _auth_unavailable_result(server_id)
         if not _is_disconnect_error(exc):
             raise
         new_session = await _reopen_session(server, scope)
@@ -1005,6 +1050,8 @@ async def _call_via_session(
         try:
             result = await new_session.call_tool(tool_name, args)
         except Exception as retry_exc:  # noqa: BLE001 — reopen+retry still failed → degrade
+            if server.auth_type == "oauth2" and server._auth_unavailable:
+                return _auth_unavailable_result(server_id)
             logger.warning("mcp_call_retry_failed server_id=%s error=%s", server_id, retry_exc)
             set_health(server, HealthState.unavailable)
             return _unavailable_result(server_id)
@@ -1085,10 +1132,7 @@ async def _call_utility(
     if server is None:
         raise KeyError(f"Unknown MCP server: {server_id}")
     if server.auth_type == "oauth2" and server._auth_unavailable:
-        return (
-            f"MCP server '{server_id}' authentication unavailable: re-authorize or check the "
-            f"OAuth2 credentials."
-        )
+        return _auth_unavailable_result(server_id)
     if server._health is not HealthState.healthy:
         return _unavailable_result(server_id)
 
@@ -1096,12 +1140,16 @@ async def _call_utility(
     if session is None:
         session = await _reopen_session(server, scope)
         if session is None:
+            if server.auth_type == "oauth2" and server._auth_unavailable:
+                return _auth_unavailable_result(server_id)
             set_health(server, HealthState.unavailable)
             return _unavailable_result(server_id)
 
     try:
         result = await _invoke_utility(session, util_name, args)
     except Exception as exc:  # noqa: BLE001 — connection drop → lazy reconnect once
+        if server.auth_type == "oauth2" and server._auth_unavailable:
+            return _auth_unavailable_result(server_id)
         if not _is_disconnect_error(exc):
             raise
         new_session = await _reopen_session(server, scope)
@@ -1111,6 +1159,8 @@ async def _call_utility(
         try:
             result = await _invoke_utility(new_session, util_name, args)
         except Exception as retry_exc:  # noqa: BLE001 — reopen+retry still failed → degrade
+            if server.auth_type == "oauth2" and server._auth_unavailable:
+                return _auth_unavailable_result(server_id)
             logger.warning("mcp_utility_retry_failed server_id=%s error=%s", server_id, retry_exc)
             set_health(server, HealthState.unavailable)
             return _unavailable_result(server_id)

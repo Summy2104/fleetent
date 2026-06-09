@@ -1,8 +1,12 @@
 """Human-in-the-loop permission gate.
 
-Tools annotated with a risk_level pause execution until an out-of-band approver
-resolves the request (or the timeout elapses). State is persisted to the
-`approvals` SQLite table so an audit trail survives restarts.
+Tools annotated with a risk_level pause execution until an approver resolves
+the request (or the timeout elapses). State is persisted to the agent-side
+approval store so an audit trail survives restarts.
+
+Approval routing is driven by ApprovalRouting from agent_config: approvers are
+contacted via im_gateway outbound DM; actor identifiers stored as opaque strings.
+No platform imports.
 """
 
 from __future__ import annotations
@@ -14,12 +18,7 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any, Literal
 
-from fleetent.user_store import (
-    DB_PATH as DB_PATH,  # noqa: F401 — re-export for test monkeypatching
-)
-from fleetent.user_store import (
-    _conn,
-)
+from fleetent.governance import approval_store
 
 logger = logging.getLogger(__name__)
 
@@ -41,39 +40,65 @@ class PermissionGate:
         tool_args: dict[str, Any],
         requester_user_id: str,
         reply_func: Callable[..., Coroutine[Any, Any, None]],
+        session_id: str = "",
+        approval_routing: Any | None = None,
+        outbound_connectors: dict[str, Any] | None = None,
         medium_timeout: float | None = None,
         high_timeout: float | None = None,
     ) -> ApprovalResult:
-        _init_db()
         now = datetime.datetime.now(datetime.UTC).isoformat()
-        with _conn() as conn:
-            conn.execute(
-                "INSERT INTO approvals "
-                "(id, session_id, requester_user_id, risk_level, tool_name, "
-                "tool_args, status, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)",
-                (
-                    approval_id,
-                    "",
-                    requester_user_id,
-                    risk_level,
-                    tool_name,
-                    json.dumps(tool_args),
-                    now,
-                ),
-            )
+        approval_store.insert_approval(
+            id=approval_id,
+            session_id=session_id,
+            requester_user_id=requester_user_id,
+            risk_level=risk_level,
+            tool_name=tool_name,
+            tool_args=json.dumps(tool_args),
+            created_at=now,
+        )
 
         event = asyncio.Event()
         self._events[approval_id] = event
 
-        # Per-call overrides take precedence over instance defaults, enabling
-        # per-agent timeout configuration without creating a new gate instance.
         if risk_level == "medium":
             timeout = medium_timeout if medium_timeout is not None else self._medium_timeout
         else:
             timeout = high_timeout if high_timeout is not None else self._high_timeout
+
+        # Resolve and contact approvers via outbound DM (D2, D3).
+        approver_actors = await self._notify_approvers(
+            approval_id=approval_id,
+            tool_name=tool_name,
+            risk_level=risk_level,
+            approval_routing=approval_routing,
+            outbound_connectors=outbound_connectors or {},
+        )
+
+        # No approvers reachable → default-closed reject immediately (D5).
+        if not approver_actors:
+            await reply_func(
+                f"❌ Tool `{tool_name}` requires approval but no approver could be reached "
+                f"(risk: {risk_level}). Request rejected."
+            )
+            resolved_at = datetime.datetime.now(datetime.UTC).isoformat()
+            approval_store.update_approval(
+                id=approval_id,
+                status="rejected",
+                resolved_at=resolved_at,
+            )
+            self._events.pop(approval_id, None)
+            logger.info(
+                "approval_rejected_no_approver id=%s tool=%s risk=%s",
+                approval_id,
+                tool_name,
+                risk_level,
+            )
+            return "rejected"
+
+        # Notify requester that the request is in flight.
         await reply_func(
-            f"Tool `{tool_name}` requires approval (risk: {risk_level}). Approval ID: {approval_id}"
+            f"⏳ Tool `{tool_name}` requires approval (risk: {risk_level}). "
+            f"Approval ID: `{approval_id}` — waiting for approver."
         )
 
         try:
@@ -83,14 +108,16 @@ class PermissionGate:
             decision = "timeout"
 
         resolved_at = datetime.datetime.now(datetime.UTC).isoformat()
-        with _conn() as conn:
-            conn.execute(
-                "UPDATE approvals SET status = ?, resolved_at = ? WHERE id = ?",
-                (decision, resolved_at, approval_id),
-            )
+        approval_store.update_approval(
+            id=approval_id,
+            status=decision,
+            resolved_at=resolved_at,
+            approver_actor=self._decisions.get(approval_id + ":actor"),
+        )
 
         self._events.pop(approval_id, None)
         self._decisions.pop(approval_id, None)
+        self._decisions.pop(approval_id + ":actor", None)
         logger.info(
             "approval_resolved id=%s tool=%s risk=%s decision=%s",
             approval_id,
@@ -99,6 +126,62 @@ class PermissionGate:
             decision,
         )
         return decision  # type: ignore[return-value]
+
+    async def _notify_approvers(
+        self,
+        approval_id: str,
+        tool_name: str,
+        risk_level: str,
+        approval_routing: Any | None,
+        outbound_connectors: dict[str, Any],
+    ) -> list[str]:
+        """Contact approvers via outbound DM. Returns opaque actor tags for those reached."""
+        if approval_routing is None:
+            return []
+
+        from fleetent.agent_config import resolve_approvers
+        from fleetent.outbound import is_reachable, send_to
+
+        addresses, _policy = resolve_approvers(approval_routing, risk_level, tool_name)
+        if not addresses:
+            return []
+
+        msg = (
+            f"🔐 Approval required for tool `{tool_name}` (risk: {risk_level}).\n"
+            f"Approval ID: `{approval_id}`\n"
+            f"Reply with: `approve {approval_id}` or `reject {approval_id}`"
+        )
+
+        reached: list[str] = []
+        for platform, target in addresses:
+            connector = outbound_connectors.get(platform)
+            if connector is None:
+                logger.warning(
+                    "approval_no_connector platform=%s approval_id=%s", platform, approval_id
+                )
+                continue
+            reachable = await is_reachable(platform, connector, target)
+            if not reachable:
+                logger.warning(
+                    "approval_target_unreachable platform=%s target=%s approval_id=%s",
+                    platform,
+                    target,
+                    approval_id,
+                )
+                continue
+            sent = await send_to(platform, connector, target, msg)
+            if sent:
+                actor = f"{platform}:{target}"
+                reached.append(actor)
+            else:
+                logger.warning(
+                    "approval_send_failed platform=%s target=%s approval_id=%s",
+                    platform,
+                    target,
+                    approval_id,
+                )
+
+        return reached
 
     async def resolve(
         self,
@@ -109,16 +192,13 @@ class PermissionGate:
         """Resolve an approval request.
 
         Returns True if the request was found, False if expired or unknown.
+        The approver_user_id is stored as an opaque actor string (D4).
         """
         event = self._events.get(approval_id)
         if event is None:
             return False
-        with _conn() as conn:
-            conn.execute(
-                "UPDATE approvals SET approver_user_id = ? WHERE id = ?",
-                (approver_user_id, approval_id),
-            )
         self._decisions[approval_id] = decision
+        self._decisions[approval_id + ":actor"] = approver_user_id
         event.set()
         return True
 
@@ -127,62 +207,12 @@ _default_gate: PermissionGate = PermissionGate()
 
 
 def list_approvals(status: str | None = None) -> list[dict[str, Any]]:
-    """Return approvals from DB, optionally filtered by status."""
-    _init_db()
-    with _conn() as conn:
-        if status:
-            rows = conn.execute(
-                "SELECT id, tool_name, risk_level, tool_args, status, "
-                "requester_user_id, approver_user_id, created_at, resolved_at "
-                "FROM approvals WHERE status = ? ORDER BY created_at DESC",
-                (status,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, tool_name, risk_level, tool_args, status, "
-                "requester_user_id, approver_user_id, created_at, resolved_at "
-                "FROM approvals ORDER BY created_at DESC LIMIT 50",
-            ).fetchall()
-    cols = [
-        "id",
-        "tool_name",
-        "risk_level",
-        "tool_args",
-        "status",
-        "requester_user_id",
-        "approver_user_id",
-        "created_at",
-        "resolved_at",
-    ]
-    return [dict(zip(cols, r, strict=True)) for r in rows]
+    """Return approvals from the agent-side store, optionally filtered by status."""
+    return approval_store.list_approvals(status=status)
 
 
 def cleanup_stale_approvals() -> None:
     """Mark all pending approvals as timeout. Call at server startup after a restart."""
-    _init_db()
-    now = datetime.datetime.now(datetime.UTC).isoformat()
-    with _conn() as conn:
-        count = conn.execute(
-            "UPDATE approvals SET status = 'timeout', resolved_at = ? WHERE status = 'pending'",
-            (now,),
-        ).rowcount
+    count = approval_store.cleanup_stale()
     if count:
         logger.info("startup_cleanup stale_approvals_marked_timeout count=%d", count)
-
-
-def _init_db() -> None:
-    with _conn() as conn:
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS approvals (
-                id                TEXT PRIMARY KEY,
-                session_id        TEXT NOT NULL,
-                requester_user_id TEXT NOT NULL,
-                risk_level        TEXT NOT NULL,
-                tool_name         TEXT NOT NULL,
-                tool_args         TEXT NOT NULL,
-                status            TEXT NOT NULL,
-                approver_user_id  TEXT,
-                created_at        TEXT NOT NULL,
-                resolved_at       TEXT
-            )"""
-        )
