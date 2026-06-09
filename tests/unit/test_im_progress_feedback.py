@@ -455,6 +455,23 @@ async def test_telegram_progress_func_sends_typing_action(monkeypatch):
     assert "typing" in str(call_args).lower()
 
 
+async def test_telegram_progress_func_handles_batch_event(monkeypatch):
+    """Telegram still sends typing on the batch event shape ({"names": [...]})."""
+    handler, routed = _telegram_handler(monkeypatch)
+
+    update = _make_tg_update("-100", "hello")
+    context = MagicMock()
+    context.bot.send_chat_action = AsyncMock()
+
+    await handler.callback(update, context)
+    msg = routed["msg"]
+
+    await msg.progress_func({"type": "tool_call", "names": ["web_search", "read_file"]})
+
+    context.bot.send_chat_action.assert_called_once()
+    assert "typing" in str(context.bot.send_chat_action.call_args).lower()
+
+
 async def test_telegram_progress_func_failure_does_not_interrupt(monkeypatch):
     """send_chat_action failure is swallowed; does not propagate."""
     handler, routed = _telegram_handler(monkeypatch)
