@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 
 def _async(value):
@@ -90,9 +90,7 @@ async def _route_and_capture(monkeypatch, session_context):
 async def test_session_frame_injected_into_system(monkeypatch):
     from fleetent.im_gateway.normalizer import SessionContext
 
-    sc = SessionContext(
-        platform="slack", sender_id="U123", chat_type="channel", channel_name="C9"
-    )
+    sc = SessionContext(platform="slack", sender_id="U123", chat_type="channel", channel_name="C9")
     messages = await _route_and_capture(monkeypatch, sc)
     system = messages[0]
     assert system["role"] == "system"
@@ -105,9 +103,7 @@ async def test_session_frame_injected_into_system(monkeypatch):
 async def test_sender_prefix_injected_into_user(monkeypatch):
     from fleetent.im_gateway.normalizer import SessionContext
 
-    sc = SessionContext(
-        platform="slack", sender_id="U123", sender_name="张洋", chat_type="channel"
-    )
+    sc = SessionContext(platform="slack", sender_id="U123", sender_name="张洋", chat_type="channel")
     messages = await _route_and_capture(monkeypatch, sc)
     user = [m for m in messages if m.get("role") == "user"][-1]
     assert "U123" in user["content"]  # sender id in prefix
@@ -131,7 +127,11 @@ def test_whoami_returns_sender():
     from fleetent.tools.registry import ToolContext
 
     sc = SessionContext(
-        platform="slack", sender_id="U123", sender_name="张洋", chat_type="channel", channel_name="C9"
+        platform="slack",
+        sender_id="U123",
+        sender_name="张洋",
+        chat_type="channel",
+        channel_name="C9",
     )
     out = whoami(tool_context=ToolContext(session_context=sc))
     assert "U123" in out
@@ -151,9 +151,6 @@ def test_whoami_degrades_without_context():
 
 async def test_run_threads_session_context_to_tool(monkeypatch):
     """run(session_context=...) reaches the tool via ToolContext at dispatch time."""
-    from unittest.mock import AsyncMock as _AM
-    from unittest.mock import MagicMock as _MM
-
     import fleetent.runtime.loop as al
     from fleetent.im_gateway.normalizer import SessionContext
 
@@ -165,39 +162,43 @@ async def test_run_threads_session_context_to_tool(monkeypatch):
         return f"{name}_result"
 
     def _tool_resp():
-        tc = _MM()
+        tc = MagicMock()
         tc.id = "tc-1"
         tc.function.name = "web_search"
         tc.function.arguments = "{}"
-        m = _MM()
+        m = MagicMock()
         m.content = None
         m.tool_calls = [tc]
         m.model_dump = lambda: {
             "role": "assistant",
             "content": None,
             "tool_calls": [
-                {"id": "tc-1", "type": "function", "function": {"name": "web_search", "arguments": "{}"}}
+                {
+                    "id": "tc-1",
+                    "type": "function",
+                    "function": {"name": "web_search", "arguments": "{}"},
+                }
             ],
         }
-        ch = _MM()
+        ch = MagicMock()
         ch.finish_reason = "tool_calls"
         ch.message = m
-        r = _MM()
+        r = MagicMock()
         r.choices = [ch]
-        r.usage = _MM()
+        r.usage = MagicMock()
         return r
 
     def _text_resp():
-        m = _MM()
+        m = MagicMock()
         m.content = "done"
         m.tool_calls = None
         m.model_dump = lambda: {"role": "assistant", "content": "done"}
-        ch = _MM()
+        ch = MagicMock()
         ch.finish_reason = "stop"
         ch.message = m
-        r = _MM()
+        r = MagicMock()
         r.choices = [ch]
-        r.usage = _MM()
+        r.usage = MagicMock()
         return r
 
     n = 0
@@ -208,31 +209,32 @@ async def test_run_threads_session_context_to_tool(monkeypatch):
         return _tool_resp() if n == 1 else _text_resp()
 
     def _client():
-        c = _AM()
-        c.chat = _MM()
-        c.chat.completions = _MM()
-        c.chat.completions.create = _AM(side_effect=fake_create)
+        c = AsyncMock()
+        c.chat = MagicMock()
+        c.chat.completions = MagicMock()
+        c.chat.completions.create = AsyncMock(side_effect=fake_create)
         return c
 
-    monkeypatch.setattr(al, "get_schemas", lambda: [{"type": "function", "function": {"name": "web_search", "parameters": {}}}])
+    monkeypatch.setattr(
+        al,
+        "get_schemas",
+        lambda: [{"type": "function", "function": {"name": "web_search", "parameters": {}}}],
+    )
     monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
-    monkeypatch.setattr(al, "extract_and_update", _AM())
+    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
     monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
-        al, "resolve_limits",
+        al,
+        "resolve_limits",
         lambda max_turns=None, max_consecutive_failures=None, config=None: (50, 3),
     )
     monkeypatch.setattr(al, "_build_async_client", lambda r, k: _client())
-    monkeypatch.setattr(
-        al, "build_context", _AM(return_value=_MM(text="", sources=[]))
-    )
+    monkeypatch.setattr(al, "build_context", AsyncMock(return_value=MagicMock(text="", sources=[])))
     monkeypatch.setattr(al, "record_trace_event", lambda *a, **kw: None, raising=False)
     monkeypatch.setattr(al, "dispatch", fake_dispatch)
 
-    result = await al.run(
-        messages=[{"role": "user", "content": "hi"}], session_context=sc
-    )
+    result = await al.run(messages=[{"role": "user", "content": "hi"}], session_context=sc)
     assert result == "done"
     assert captured["tool_context"] is not None
     assert captured["tool_context"].session_context is sc
