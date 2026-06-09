@@ -1,7 +1,7 @@
 """drop askit task-queue tables (dead code cleanup)
 
-Revision ID: 063
-Revises: 062
+Revision ID: 064
+Revises: 063
 Create Date: 2026-06-09
 
 These three tables were created in migration 025 but have never been referenced
@@ -12,8 +12,8 @@ task-queue approach before it shipped; the tables are unreachable dead schema.
 import sqlalchemy as sa
 from alembic import op
 
-revision = "063"
-down_revision = "062"
+revision = "064"
+down_revision = "063"
 branch_labels = None
 depends_on = None
 
