@@ -10,8 +10,8 @@
 
 ## 3. read_file 走容器（保留分页/二进制/目录）
 
-- [ ] 3.1 Write failing unit tests: read_file 经 helper 读 workspace 文件、行级分页、目录列举、二进制检测拒绝；越界路径拒绝（tests/unit，mock client）
-- [ ] 3.2 Implement read_file 改造（容器 IO + 保留功能逻辑），pass unit tests
+- [x] 3.1 Write failing unit tests: read_file 经 helper 读 workspace 文件、行级分页、目录列举、二进制检测拒绝；越界路径拒绝（tests/unit，mock client）
+- [x] 3.2 Implement read_file 改造（容器 IO + 保留功能逻辑），pass unit tests
 
 ## 4. write_file 走容器
 

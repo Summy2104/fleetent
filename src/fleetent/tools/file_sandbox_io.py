@@ -49,6 +49,39 @@ def build_list_command(ws_path: str) -> str:
     return f"ls -1 -- {shlex.quote(ws_path)}"
 
 
+def build_probe_command(ws_path: str) -> str:
+    """Classify a path inside the container: ``dir`` / ``file <bytes>`` / ``other`` / ``missing``.
+
+    A single test cascade so existence, type and size come back in one exec.
+    """
+    q = shlex.quote(ws_path)
+    return (
+        f"if [ -d {q} ]; then echo dir; "
+        f'elif [ -f {q} ]; then echo "file $(wc -c < {q})"; '
+        f"elif [ -e {q} ]; then echo other; "
+        f"else echo missing; fi"
+    )
+
+
+def build_read_b64_command(ws_path: str) -> str:
+    """Read a file as base64 so arbitrary bytes survive the text exec channel.
+
+    The host decodes the base64 back to bytes, then runs binary detection / decoding —
+    keeping the functional logic on the host (design D3) while the IO stays in-container.
+    """
+    return f"base64 -- {shlex.quote(ws_path)}"
+
+
+def build_listdir_command(ws_path: str) -> str:
+    r"""List a directory with per-entry type/size/mtime for the host to format.
+
+    ``find -printf`` emits ``name\ttype\tsize\tmtime`` per entry (type ``d`` for dirs);
+    the host reconstructs the mtime-sorted listing that the non-sandbox tool produced.
+    """
+    q = shlex.quote(ws_path)
+    return f"find {q} -maxdepth 1 -mindepth 1 -printf '%f\\t%y\\t%s\\t%T@\\n'"
+
+
 def resolve_host_path(root: Path, path: str) -> Path:
     """Resolve a tool path inside the host workspace dir (docker-unavailable degrade).
 

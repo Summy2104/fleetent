@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import re
@@ -12,10 +13,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
 from fleetent.integrations.sandbox.enablement import Mode, get_effective_mode
+from fleetent.tools import file_sandbox_io as fsio
 from fleetent.tools.registry import ToolContext, tool
 
 if TYPE_CHECKING:
-    from fleetent.integrations.sandbox.client import SandboxClient
+    from fleetent.integrations.sandbox.client import ExecResult, SandboxClient
     from fleetent.integrations.sandbox.manager import SandboxManager
 
 logger = logging.getLogger(__name__)
@@ -69,13 +71,8 @@ _MAGIC_DESCRIPTIONS: dict[bytes, str] = {
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-def _detect_binary(path: Path) -> str | None:
-    """Return MIME-like type string if binary, None if text."""
-    try:
-        sample = path.read_bytes()[:_BINARY_SAMPLE]
-    except OSError:
-        return None
-
+def _detect_binary_bytes(sample: bytes) -> str | None:
+    """Return MIME-like type string if the byte sample looks binary, else None."""
     for magic in _MAGIC_SIGNATURES:
         if sample.startswith(magic):
             return _MAGIC_DESCRIPTIONS.get(magic, "application/binary")
@@ -94,6 +91,15 @@ def _detect_binary(path: Path) -> str | None:
     return None
 
 
+def _detect_binary(path: Path) -> str | None:
+    """Return MIME-like type string if binary, None if text (host-path overload)."""
+    try:
+        sample = path.read_bytes()[:_BINARY_SAMPLE]
+    except OSError:
+        return None
+    return _detect_binary_bytes(sample)
+
+
 def _format_size(size: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if size < 1024:
@@ -102,12 +108,9 @@ def _format_size(size: int) -> str:
     return f"{size}TB"
 
 
-def _dir_listing(path: Path) -> str:
-    try:
-        entries = sorted(path.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
-    except OSError as exc:
-        return f"error: {exc}"
-
+def _format_dir_listing(path: str, entries: list[_DirEntry]) -> str:
+    """Format a directory listing (mtime-sorted, sizes), backend-agnostic."""
+    entries = sorted(entries, key=lambda e: e.mtime, reverse=True)
     total = len(entries)
     truncated = total > DIR_MAX_ENTRIES
     visible = entries[:DIR_MAX_ENTRIES]
@@ -117,13 +120,9 @@ def _dir_listing(path: Path) -> str:
     )
     lines = [f"{path}/ {suffix}"]
     for entry in visible:
-        try:
-            stat = entry.stat()
-            size = _format_size(stat.st_size) if entry.is_file() else "dir"
-            indicator = "/" if entry.is_dir() else ""
-            lines.append(f"  {entry.name}{indicator}  {size}")
-        except OSError:
-            lines.append(f"  {entry.name}  (stat failed)")
+        size = "dir" if entry.is_dir else _format_size(entry.size)
+        indicator = "/" if entry.is_dir else ""
+        lines.append(f"  {entry.name}{indicator}  {size}")
 
     if truncated:
         lines.append(f"\n[截断：共 {total} 条，仅显示前 {DIR_MAX_ENTRIES} 条]")
@@ -136,6 +135,57 @@ def _dir_listing(path: Path) -> str:
 # Default scope key when a tool is called without a ToolContext (direct/unbound
 # call) — mirrors run_code's "run-code" fallback so both share a coherent default.
 _DEFAULT_KEY = "file-tools"
+
+
+class _BackendError(Exception):
+    """A backend IO command failed (non-zero exit / unreadable path)."""
+
+
+@dataclass
+class _Stat:
+    kind: str  # "file" | "dir" | "missing" | "other"
+    size: int = 0
+
+
+@dataclass
+class _DirEntry:
+    name: str
+    is_dir: bool
+    size: int
+    mtime: float
+
+
+def _parse_probe(stdout: str) -> _Stat:
+    head = stdout.strip()
+    if head.startswith("file"):
+        parts = head.split()
+        size = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        return _Stat("file", size)
+    if head == "dir":
+        return _Stat("dir")
+    if head == "other":
+        return _Stat("other")
+    return _Stat("missing")
+
+
+def _parse_listdir(stdout: str) -> list[_DirEntry]:
+    entries: list[_DirEntry] = []
+    for line in stdout.splitlines():
+        if not line:
+            continue
+        parts = line.split("\t")
+        if len(parts) != 4:
+            continue
+        name, kind, size, mtime = parts
+        entries.append(
+            _DirEntry(
+                name=name,
+                is_dir=kind == "d",
+                size=int(size) if size.isdigit() else 0,
+                mtime=float(mtime) if mtime else 0.0,
+            )
+        )
+    return entries
 
 
 def _get_sandbox_manager() -> SandboxManager:
@@ -158,12 +208,69 @@ class _ContainerBackend:
     ws_id: str
     session_id: str
 
+    async def _exec(self, command: str) -> ExecResult:
+        return await self.client.exec(self.ws_id, command, session_id=self.session_id)
+
+    async def probe(self, path: str) -> _Stat:
+        rp = fsio.resolve_ws_path(path)
+        res = await self._exec(fsio.build_probe_command(rp))
+        return _parse_probe(res.stdout)
+
+    async def read_bytes(self, path: str) -> bytes:
+        rp = fsio.resolve_ws_path(path)
+        res = await self._exec(fsio.build_read_b64_command(rp))
+        if res.exit_code != 0:
+            raise _BackendError(res.stderr.strip() or "读取文件失败")
+        try:
+            return base64.b64decode(res.stdout)
+        except ValueError as exc:  # binascii.Error is a ValueError subclass
+            raise _BackendError(f"解码失败: {exc}") from exc
+
+    async def list_dir(self, path: str) -> list[_DirEntry]:
+        rp = fsio.resolve_ws_path(path)
+        res = await self._exec(fsio.build_listdir_command(rp))
+        return _parse_listdir(res.stdout)
+
 
 @dataclass
 class _HostBackend:
     """File IO on the host (docker-unavailable degrade), fenced to ``root``."""
 
     root: Path
+
+    def _resolve(self, path: str) -> Path:
+        return fsio.resolve_host_path(self.root, path)
+
+    async def probe(self, path: str) -> _Stat:
+        p = self._resolve(path)
+        if p.is_dir():
+            return _Stat("dir")
+        if p.is_file():
+            return _Stat("file", p.stat().st_size)
+        if p.exists():
+            return _Stat("other")
+        return _Stat("missing")
+
+    async def read_bytes(self, path: str) -> bytes:
+        try:
+            return self._resolve(path).read_bytes()
+        except OSError as exc:
+            raise _BackendError(str(exc)) from exc
+
+    async def list_dir(self, path: str) -> list[_DirEntry]:
+        p = self._resolve(path)
+        entries: list[_DirEntry] = []
+        try:
+            children = list(p.iterdir())
+        except OSError as exc:
+            raise _BackendError(str(exc)) from exc
+        for child in children:
+            try:
+                st = child.stat()
+                entries.append(_DirEntry(child.name, child.is_dir(), st.st_size, st.st_mtime))
+            except OSError:
+                entries.append(_DirEntry(child.name, False, 0, 0.0))
+        return entries
 
 
 async def _select_backend(tool_context: ToolContext | None) -> _ContainerBackend | _HostBackend:
@@ -195,26 +302,43 @@ async def _select_backend(tool_context: ToolContext | None) -> _ContainerBackend
 
 
 @tool
-def read_file(
-    path: Annotated[str, "文件或目录的路径"],
+async def read_file(
+    path: Annotated[str, "文件或目录的路径（限定在 workspace 内）"],
     offset: Annotated[int, "起始行号（1-indexed，默认 1）"] = 1,
     limit: Annotated[int, "最大读取行数（默认 200）"] = READ_DEFAULT_LIMIT,
+    tool_context: ToolContext | None = None,
 ) -> str:
     """Read a file with line-level pagination, or list a directory.
 
-    For files: returns lines [offset, offset+limit) with line-number prefixes.
-    For directories: returns a tree listing sorted by mtime (newest first).
-    Binary files are detected and rejected with a descriptive error.
+    Runs inside the sandbox container locked to the workspace (host degrade fenced to
+    the same dir when docker is unavailable). For files: returns lines [offset,
+    offset+limit) with line-number prefixes. For directories: a listing sorted by
+    mtime (newest first). Binary files are detected and rejected.
     """
-    p = Path(path)
+    backend = await _select_backend(tool_context)
+    try:
+        stat = await backend.probe(path)
+    except ValueError as exc:  # path escapes the workspace
+        return f"error: {exc}"
+    except _BackendError as exc:
+        return f"error: {exc}"
 
-    if not p.exists():
+    if stat.kind == "missing":
         return f"error: 路径不存在: {path}"
 
-    if p.is_dir():
-        return _dir_listing(p)
+    if stat.kind == "dir":
+        try:
+            entries = await backend.list_dir(path)
+        except _BackendError as exc:
+            return f"error: {exc}"
+        return _format_dir_listing(path, entries)
 
-    binary_type = _detect_binary(p)
+    try:
+        data = await backend.read_bytes(path)
+    except _BackendError as exc:
+        return f"error: {exc}"
+
+    binary_type = _detect_binary_bytes(data[:_BINARY_SAMPLE])
     if binary_type is not None:
         hint = (
             "图片请使用 analyze_image 工具"
@@ -223,10 +347,7 @@ def read_file(
         )
         return f"error: 二进制文件 ({binary_type})，{hint}"
 
-    try:
-        all_lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as exc:
-        return f"error: {exc}"
+    all_lines = data.decode("utf-8", errors="replace").splitlines()
 
     total = len(all_lines)
     start = max(0, offset - 1)  # convert 1-indexed to 0-indexed
