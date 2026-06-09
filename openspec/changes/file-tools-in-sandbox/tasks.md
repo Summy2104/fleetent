@@ -40,5 +40,5 @@
 
 ## 9. 收尾验证
 
-- [ ] 9.1 解耦验证：file_tools + file_sandbox_io 零 platform import；模块依赖护栏测试通过；无 platform DB 环境下文件工具可用（容器路径 + 降级路径）
-- [ ] 9.2 全量收尾：`make test-pr` + ruff format/check + mypy 改动文件 + integration 对照 main 基线无新增失败
+- [x] 9.1 解耦验证：file_tools + file_sandbox_io 零 platform import；模块依赖护栏测试通过；无 platform DB 环境下文件工具可用（容器路径 + 降级路径）
+- [x] 9.2 全量收尾：`make test-pr` + ruff format/check + mypy 改动文件 + integration 对照 main 基线无新增失败
