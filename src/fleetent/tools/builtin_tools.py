@@ -406,10 +406,10 @@ async def schedule(
     if action == "run_now":
         from fleetent import cron_scheduler
 
-        task = schedule_store.get(task_id)
-        if task is None:
+        existing = schedule_store.get(task_id)
+        if existing is None:
             return f"error: task {task_id!r} not found"
-        await cron_scheduler._fire(task)
+        await cron_scheduler._fire(existing)
         return f"Scheduled task {task_id!r} fired"
 
     return f"error: unknown action {action!r} (use create/list/remove/run_now/pause/resume)"

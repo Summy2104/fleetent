@@ -51,9 +51,7 @@ async def _agent_run(
     return await agent_loop.run(messages, user_id=user_id, agent_name=agent_name)
 
 
-async def _fire(
-    task: dict[str, Any], connectors: dict[str, Any] | None = None
-) -> None:
+async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) -> None:
     """Construct messages, run the agent, and proactively deliver the reply (S3 + delivery).
 
     session_id binding:
@@ -99,7 +97,9 @@ async def _fire(
     _record_run(task, now, "error" if delivery_error else "ok", delivery_error)
 
 
-async def _deliver(task: dict[str, Any], reply: str | None, connectors: dict[str, Any]) -> str | None:
+async def _deliver(
+    task: dict[str, Any], reply: str | None, connectors: dict[str, Any]
+) -> str | None:
     """Send the fired reply to the resolved target. Returns an error string or None.
 
     Target resolution: explicit ``deliver`` (mode=explicit) wins; otherwise fall back to
@@ -150,9 +150,7 @@ def _resolve_delivery(task: dict[str, Any]) -> tuple[str, str, str, Any] | None:
 def _record_run(task: dict[str, Any], when: str, status: str, error: str | None) -> None:
     """Best-effort writeback of run-state columns; never raise from the fire path."""
     try:
-        _store.update_run_state(
-            task["id"], last_run_at=when, last_status=status, last_error=error
-        )
+        _store.update_run_state(task["id"], last_run_at=when, last_status=status, last_error=error)
     except Exception as exc:  # noqa: BLE001 — observability writeback is a side channel
         logger.warning("cron_run_state_writeback_failed task=%s error=%s", task.get("id"), exc)
 

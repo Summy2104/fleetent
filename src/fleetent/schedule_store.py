@@ -180,9 +180,7 @@ def update_run_state(
 def delete(task_id: str) -> bool:
     db = _database()
     ensure_schema(db)
-    result = db.execute(
-        "DELETE FROM scheduled_tasks WHERE id = :task_id", {"task_id": task_id}
-    )
+    result = db.execute("DELETE FROM scheduled_tasks WHERE id = :task_id", {"task_id": task_id})
     return result.rowcount > 0
 
 

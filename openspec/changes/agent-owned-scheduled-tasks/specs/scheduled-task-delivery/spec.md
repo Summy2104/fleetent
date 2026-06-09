@@ -14,9 +14,9 @@ When a scheduled task fires, the system SHALL run the agent and then proactively
 ### Requirement: Delivery target resolved at fire time
 The delivery target SHALL be resolved at fire time, not bound at creation time. Each task SHALL store an `origin` descriptor capturing its creation context (platform, chat_id, optional thread_id) and an optional explicit `deliver` descriptor (`mode` = `origin`/`explicit`/`none`, plus platform/target/target_type/thread for `explicit`). When `deliver` is absent or `mode="origin"`, delivery SHALL go back to the `origin` context.
 
-#### Scenario: Default delivery to origin
-- **WHEN** a task created from a Slack DM fires and has no explicit `deliver`
-- **THEN** the reply is delivered back to that same Slack DM (the origin platform/chat/thread)
+#### Scenario: Default delivery to stored origin
+- **WHEN** a task with a stored `origin` (platform/chat_id) fires and has no explicit `deliver`
+- **THEN** the reply is delivered back to that origin platform/chat/thread
 
 #### Scenario: Connector resolved at fire time, not creation time
 - **WHEN** the IM connector for the target platform was not yet connected when the task was created but is live at fire time
@@ -39,10 +39,3 @@ When the agent's final reply for a fired task is exactly the sentinel `[SILENT]`
 #### Scenario: Silent run delivers nothing
 - **WHEN** a fired task's agent reply is exactly `[SILENT]`
 - **THEN** no message is sent to any target and the run is recorded as `ok`
-
-### Requirement: Media attachments reuse the IM upload path
-When a fired task's reply includes media produced by the agent (e.g. a `generate_image` artifact), the system SHALL deliver those attachments by reusing the existing IM reply upload path (the same mechanism that uploads generated images on a normal reply), rather than a separate bespoke upload implementation.
-
-#### Scenario: Generated image delivered as attachment
-- **WHEN** a fired task's agent run produces an image artifact and a reply
-- **THEN** the image is delivered to the resolved target as a native attachment via the same upload path used for normal IM replies

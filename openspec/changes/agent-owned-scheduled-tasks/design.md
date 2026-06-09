@@ -60,3 +60,16 @@
 ## Open Questions
 
 - 平台态下确认每个 agent 均以独立进程运行（`fleetent agent run`），从而 D2 单点放置充分——按 platform-agent-lifecycle 现状假定成立；若平台存在 in-process 多 agent 运行路径，需在该路径另起 per-agent 调度器（当前不认为存在）。
+
+## Update (implementation, 2026-06-10)
+
+实现期发现一个设计期双方都未注意到的纠缠：平台 `agent_statistics/stats_admin_api.schedule_report` 用 `schedule_store.create(..., agent_name=agent_id)` 注册**统计邮件报表**，由 platform server 的 `CronScheduler` 触发——这是**多 agent、平台触发、依赖 `agent_name`** 的平台功能。
+
+因此原 D3「彻底移除平台侧」（drop 表 / 去 server cron / 删 admin CLI / 删 `agent_name`）会**破坏平台统计报表**。据「不破坏外部功能、发现矛盾先暴露」的工程原则，本 PR 改为**非破坏迁移**：
+
+- Alembic `067` **加列**（非 drop），与 `schedule_store.ensure_schema` 的 DDL 对齐（受 `test_schema_drift_guard` 强制）；**保留 `agent_name`（可空）**。
+- agent 侧经 `ensure_schema` 自建 `scheduled_tasks`（加入 `_init_agent_db_schema`），独立态 `fleetent agent run` 不再缺表（修 BUG-2）。
+- agent 运行时自带 `CronScheduler`（`agent_app` 起停）+ 投递；**平台 server 的调度器维持现状**，继续服务 stats 报表与维护任务。
+- 因 agent 进程与 platform 进程是**独立 DB**（各自 `fleetent.db`），agent 的 `schedule` 工具写 agent DB、平台 stats 写平台 DB，天然隔离——用户的定时任务已与 platform 解耦。
+
+**彻底移除平台侧**留作后续，前置决策：stats 邮件报表是迁为「绑定 agent 的定时任务」还是「平台保留自有调度」。媒体附件投递、origin 自动捕获同列后续（见 tasks.md §5.4 / §7、proposal Non-Goals）。

@@ -123,7 +123,3 @@ A single `schedule` built-in tool SHALL let an agent manage scheduled tasks via 
 ### Requirement: cancel_task tool for removing schedules
 **Reason**: Folded into the unified `schedule(action=...)` tool.
 **Migration**: Use `schedule(action="remove", task_id=...)` instead of `cancel_task(task_id=...)`.
-
-### Requirement: Admin CLI commands for schedule management
-**Reason**: Scheduled tasks are now agent-runtime-owned and have no platform side; the platform `scheduled_tasks` table is dropped, so the operator CLI commands become dead.
-**Migration**: Manage schedules conversationally via the agent's `schedule` tool; there is no platform-side schedule administration.
