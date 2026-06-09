@@ -343,6 +343,7 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
             progress_func=progress_func,
             channel_id=channel,
             upload_func=_make_upload_func(client, channel, reply_thread),
+            outbound_connectors={"slack": client},
         )
         await route(msg)
 

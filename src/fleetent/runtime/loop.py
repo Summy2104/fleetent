@@ -622,6 +622,8 @@ async def _plan_run_slots(
     permission_gate_enabled: bool = True,
     permission_gate_medium_timeout: int | None = None,
     permission_gate_high_timeout: int | None = None,
+    approval_routing: Any | None = None,
+    outbound_connectors: dict[str, Any] | None = None,
 ) -> list[_PlanSlot]:
     """Phase one for run() (D2/D3/D6): serial, original order — produce one slot
     per tool_call. Guardrail, pre_tool_use hook, and (medium/high) approval are decided
@@ -738,6 +740,9 @@ async def _plan_run_slots(
                 tool_args=tool_args,
                 requester_user_id=user_id,
                 reply_func=reply_func,
+                session_id=session_id or "",
+                approval_routing=approval_routing,
+                outbound_connectors=outbound_connectors or {},
                 medium_timeout=permission_gate_medium_timeout,
                 high_timeout=permission_gate_high_timeout,
             )
@@ -1414,6 +1419,8 @@ async def run(
     permission_gate_enabled: bool = True,
     permission_gate_medium_timeout: int | None = None,
     permission_gate_high_timeout: int | None = None,
+    approval_routing: Any | None = None,
+    outbound_connectors: dict[str, Any] | None = None,
     progress_func: ProgressFunc | None = None,
 ) -> str:
     """Async agent loop accepting a messages list. Return the final text reply.
@@ -1464,6 +1471,8 @@ async def run(
             permission_gate_enabled=permission_gate_enabled,
             permission_gate_medium_timeout=permission_gate_medium_timeout,
             permission_gate_high_timeout=permission_gate_high_timeout,
+            approval_routing=approval_routing,
+            outbound_connectors=outbound_connectors,
             progress_func=progress_func,
         )
     finally:
@@ -1496,6 +1505,8 @@ async def _run_inner(
     permission_gate_enabled: bool = True,
     permission_gate_medium_timeout: int | None = None,
     permission_gate_high_timeout: int | None = None,
+    approval_routing: Any | None = None,
+    outbound_connectors: dict[str, Any] | None = None,
     progress_func: ProgressFunc | None = None,
 ) -> str:
     # Image-bearing messages route to the vision model (D6); raises here if
@@ -1772,6 +1783,8 @@ async def _run_inner(
             permission_gate_enabled=permission_gate_enabled,
             permission_gate_medium_timeout=permission_gate_medium_timeout,
             permission_gate_high_timeout=permission_gate_high_timeout,
+            approval_routing=approval_routing,
+            outbound_connectors=outbound_connectors,
         )
         pending = [s for s in slots if s.placeholder is None]
         # Progress is emitted once per execution batch (not per tool during planning):

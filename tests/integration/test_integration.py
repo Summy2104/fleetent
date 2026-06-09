@@ -9,7 +9,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-import fleetent.governance.permission_gate as permission_gate
+import fleetent.governance.approval_store as approval_store
+import fleetent.im_gateway.outbound as outbound_mod
 import fleetent.session.manager as session_mgr
 import fleetent.user_store as user_store
 from fleetent.platform.im_gateway_management import identity as im_user_store
@@ -40,15 +41,16 @@ def _bind_default_agent(tmp_path: Path, user_id: str) -> None:
 def isolated_db(tmp_path, monkeypatch):
     """Redirect all data paths to tmp_path.
 
-    Legacy stores share ``users.db`` via DB_PATH; the managed agent_store uses a
-    separate Alembic-managed database so its schema does not collide with the
-    legacy permission_gate ``approvals`` table.
+    Legacy stores share ``users.db`` via DB_PATH; approval_store (agent-side)
+    uses a separate SQLite in tmp_path; the managed agent_store uses a separate
+    Alembic-managed database so schemas do not collide.
     """
     db = tmp_path / "users.db"
     managed_db = tmp_path / "managed.db"
+    approval_db = tmp_path / "agent.db"
     monkeypatch.setattr(user_store, "DB_PATH", db)
     monkeypatch.setattr(im_user_store, "DB_PATH", db)
-    monkeypatch.setattr(permission_gate, "DB_PATH", db)
+    monkeypatch.setattr(approval_store, "DB_PATH", approval_db)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{managed_db}")
     _apply_migrations(managed_db)
@@ -104,14 +106,22 @@ async def test_full_slack_message_pipeline(isolated_db):
     assert saved[-1]["content"] == "Hello from agent"
 
 
-async def test_permission_gate_approved_tool_executes(isolated_db):
-    """Tool with medium risk + approval → executes successfully."""
+async def test_permission_gate_approved_tool_executes(isolated_db, monkeypatch):
+    """Tool with medium risk + approval routing → executes successfully."""
     import asyncio
 
+    from fleetent.agent_config import ApprovalRouting
     from fleetent.governance.permission_gate import PermissionGate
+
+    # Mock outbound so DM send succeeds without real Slack.
+    monkeypatch.setattr(outbound_mod, "send_to", AsyncMock(return_value=True))
+    monkeypatch.setattr(outbound_mod, "is_reachable", AsyncMock(return_value=True))
 
     gate = PermissionGate(medium_timeout=1.0, high_timeout=1.0)
     reply_func = AsyncMock()
+    routing = ApprovalRouting(
+        by_risk={"medium": {"approvers": ["slack:U_APPROVER"], "policy": "any"}}
+    )
 
     async def approve_it():
         await asyncio.sleep(0.05)
@@ -126,12 +136,15 @@ async def test_permission_gate_approved_tool_executes(isolated_db):
         tool_args={"to": "test@example.com"},
         requester_user_id="user-1",
         reply_func=reply_func,
+        session_id="test-session",
+        approval_routing=routing,
+        outbound_connectors={"slack": AsyncMock()},
     )
 
     assert result == "approved"
 
-    # Verify approvals table has approved row
-    conn = sqlite3.connect(isolated_db / "users.db")
+    # Verify approvals table has approved row in agent-side store.
+    conn = sqlite3.connect(isolated_db / "agent.db")
     row = conn.execute("SELECT status FROM approvals WHERE id = ?", ("test-appr-1",)).fetchone()
     conn.close()
     assert row[0] == "approved"
