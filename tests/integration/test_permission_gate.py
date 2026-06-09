@@ -4,30 +4,47 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-import fleetent.governance.permission_gate as permission_gate
+import fleetent.governance.approval_store as approval_store
+import fleetent.im_gateway.outbound as outbound_mod
+from fleetent.agent_config import ApprovalRouting
 from fleetent.governance.permission_gate import PermissionGate
+
+
+def _routing(risk: str = "medium") -> ApprovalRouting:
+    return ApprovalRouting(by_risk={risk: {"approvers": ["slack:U_APPROVER"], "policy": "any"}})
+
+
+def _connectors() -> dict:
+    connector = AsyncMock()
+    connector.conversations_open = AsyncMock(return_value={"channel": {"id": "DM"}})
+    connector.chat_postMessage = AsyncMock(return_value={"ok": True})
+    return {"slack": connector}
 
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
-    import fleetent.user_store as user_store
-
-    db_path = tmp_path / "users.db"
-    monkeypatch.setattr(user_store, "DB_PATH", db_path)
-    monkeypatch.setattr(permission_gate, "DB_PATH", db_path)
-    permission_gate._init_db()
+    db_path = tmp_path / "agent.db"
+    monkeypatch.setattr(approval_store, "DB_PATH", db_path)
+    approval_store.ensure_schema(db_path)
     return db_path
+
+
+@pytest.fixture
+def _mock_outbound(monkeypatch):
+    """Mock outbound so sends succeed and targets are reachable."""
+    monkeypatch.setattr(outbound_mod, "send_to", AsyncMock(return_value=True))
+    monkeypatch.setattr(outbound_mod, "is_reachable", AsyncMock(return_value=True))
 
 
 @pytest.fixture
 def gate(db):
     return PermissionGate(
-        medium_timeout=0.2,  # short for tests
+        medium_timeout=0.2,
         high_timeout=0.2,
     )
 
 
-async def test_approved_path(gate, db):
+async def test_approved_path(gate, db, _mock_outbound):
     reply_func = AsyncMock()
     approval_id = "appr-1"
 
@@ -43,12 +60,15 @@ async def test_approved_path(gate, db):
         tool_args={"to": "test@example.com"},
         requester_user_id="user-1",
         reply_func=reply_func,
+        session_id="test-session",
+        approval_routing=_routing("medium"),
+        outbound_connectors=_connectors(),
     )
     assert result == "approved"
-    reply_func.assert_called_once()
+    reply_func.assert_called()
 
 
-async def test_rejected_path(gate, db):
+async def test_rejected_path(gate, db, _mock_outbound):
     reply_func = AsyncMock()
     approval_id = "appr-2"
 
@@ -64,11 +84,15 @@ async def test_rejected_path(gate, db):
         tool_args={},
         requester_user_id="user-1",
         reply_func=reply_func,
+        session_id="test-session",
+        approval_routing=_routing("medium"),
+        outbound_connectors=_connectors(),
     )
     assert result == "rejected"
 
 
-async def test_timeout_path(gate, db):
+async def test_timeout_path(gate, db, _mock_outbound):
+    """No resolve before timeout → gate returns 'timeout'."""
     reply_func = AsyncMock()
     result = await gate.request_approval(
         approval_id="appr-3",
@@ -77,11 +101,14 @@ async def test_timeout_path(gate, db):
         tool_args={},
         requester_user_id="user-1",
         reply_func=reply_func,
+        session_id="test-session",
+        approval_routing=_routing("medium"),
+        outbound_connectors=_connectors(),
     )
     assert result == "timeout"
 
 
-async def test_approvals_table_updated(gate, db):
+async def test_approvals_table_updated(gate, db, _mock_outbound):
     reply_func = AsyncMock()
     approval_id = "appr-4"
 
@@ -97,17 +124,21 @@ async def test_approvals_table_updated(gate, db):
         tool_args={"name": "users"},
         requester_user_id="user-1",
         reply_func=reply_func,
+        session_id="test-session",
+        approval_routing=_routing("high"),
+        outbound_connectors=_connectors(),
     )
     conn = sqlite3.connect(db)
     row = conn.execute(
-        "SELECT status, approver_user_id FROM approvals WHERE id = ?", (approval_id,)
+        "SELECT status, approver_actor FROM approvals WHERE id = ?", (approval_id,)
     ).fetchone()
     conn.close()
     assert row[0] == "approved"
+    # approver_actor is set from gate.resolve(approver_user_id=...) call
     assert row[1] == "approver-1"
 
 
-async def test_timeout_sets_status_in_db(gate, db):
+async def test_timeout_sets_status_in_db(gate, db, _mock_outbound):
     reply_func = AsyncMock()
     approval_id = "appr-5"
     await gate.request_approval(
@@ -117,6 +148,9 @@ async def test_timeout_sets_status_in_db(gate, db):
         tool_args={},
         requester_user_id="user-1",
         reply_func=reply_func,
+        session_id="test-session",
+        approval_routing=_routing("medium"),
+        outbound_connectors=_connectors(),
     )
     conn = sqlite3.connect(db)
     row = conn.execute("SELECT status FROM approvals WHERE id = ?", (approval_id,)).fetchone()
@@ -127,7 +161,7 @@ async def test_timeout_sets_status_in_db(gate, db):
 # ── per-call timeout override tests ──────────────────────────────────────────
 
 
-async def test_medium_timeout_override_auto_rejects(db):
+async def test_medium_timeout_override_auto_rejects(db, _mock_outbound):
     """medium_timeout kwarg overrides instance default; auto-rejects after override value."""
     gate_long = PermissionGate(medium_timeout=300.0, high_timeout=3600.0)
     reply_func = AsyncMock()
@@ -139,14 +173,17 @@ async def test_medium_timeout_override_auto_rejects(db):
         tool_args={"path": "/tmp/x"},
         requester_user_id="user1",
         reply_func=reply_func,
+        session_id="test-session",
+        approval_routing=_routing("medium"),
+        outbound_connectors=_connectors(),
         medium_timeout=0.05,
     )
 
     assert result == "timeout"
-    reply_func.assert_called_once()
+    reply_func.assert_called()
 
 
-async def test_high_timeout_override_auto_rejects(db):
+async def test_high_timeout_override_auto_rejects(db, _mock_outbound):
     """high_timeout kwarg overrides instance default for high-risk tools."""
     gate_long = PermissionGate(medium_timeout=300.0, high_timeout=3600.0)
     reply_func = AsyncMock()
@@ -158,13 +195,16 @@ async def test_high_timeout_override_auto_rejects(db):
         tool_args={"command": "ls"},
         requester_user_id="user1",
         reply_func=reply_func,
+        session_id="test-session",
+        approval_routing=_routing("high"),
+        outbound_connectors=_connectors(),
         high_timeout=0.05,
     )
 
     assert result == "timeout"
 
 
-async def test_no_override_uses_instance_default(db):
+async def test_no_override_uses_instance_default(db, _mock_outbound):
     """Without override kwargs, short instance default still applies (behaviour unchanged)."""
     gate_short = PermissionGate(medium_timeout=0.05, high_timeout=3600.0)
     reply_func = AsyncMock()
@@ -176,6 +216,9 @@ async def test_no_override_uses_instance_default(db):
         tool_args={},
         requester_user_id="user1",
         reply_func=reply_func,
+        session_id="test-session",
+        approval_routing=_routing("medium"),
+        outbound_connectors=_connectors(),
     )
 
     assert result == "timeout"

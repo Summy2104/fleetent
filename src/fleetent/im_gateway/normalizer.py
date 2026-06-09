@@ -44,6 +44,9 @@ class NormalizedMessage:
     # this turn. Adapters that support file uploads (e.g. Slack) supply this; omitting it
     # (None) means generated images are not forwarded to the platform.
     upload_func: Callable[[list[str]], Awaitable[None]] | None = field(default=None)
+    # Platform IM connectors keyed by platform name (e.g. {"slack": client}). Passed to
+    # loop.run() so permission_gate can DM approvers via outbound primitives.
+    outbound_connectors: dict[str, Any] = field(default_factory=dict)
 
 
 def get_agent_for_context(platform: str, channel_id: str, user_id: str) -> AgentFile | None:
@@ -334,6 +337,8 @@ async def route(msg: NormalizedMessage) -> None:
                 permission_gate_high_timeout=(
                     agent.permission_gate_high_timeout_seconds if agent else None
                 ),
+                approval_routing=agent.approval if agent else None,
+                outbound_connectors=msg.outbound_connectors,
                 progress_func=msg.progress_func,
             )
 
