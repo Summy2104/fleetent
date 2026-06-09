@@ -20,7 +20,7 @@ from fleetent.eval_logger import log_run
 from fleetent.governance.action_gate import ActionMode, is_sandbox_backed, resolve_action_mode
 from fleetent.governance.agent_policy import check_tool_access
 from fleetent.governance.permission_gate import _default_gate
-from fleetent.integrations.sandbox import Mode, is_code_execution_enabled
+from fleetent.integrations.sandbox import Mode, is_code_execution_enabled, redact_secrets
 from fleetent.long_term_ctx import ContextSource, build_context
 from fleetent.memory import extract_and_update
 from fleetent.model import ModelConfigError, ModelPolicySnapshot, ResolvedModelConfig
@@ -854,6 +854,12 @@ async def _backfill_slots(
             )
             if hres.modified_content is not None:
                 content = hres.modified_content
+        # output-firewall: redact secrets from every real tool result before it reaches
+        # the model / persisted session — after the hook (covers its output) and before
+        # truncation (so a secret straddling the cap boundary can't leave a fragment).
+        # Placeholders are system-authored text with no external secrets, so skip them.
+        if not is_placeholder:
+            content = redact_secrets(content)
         # T4: cap the messages copy (self-truncating tools manage their own size).
         tool_content = content if is_self_truncating(slot.name) else truncate_tool_result(content)
         messages.append({"role": "tool", "tool_call_id": slot.tc_id, "content": tool_content})
@@ -2479,6 +2485,10 @@ async def run_stream(
             content, failed = placeholder if placeholder is not None else results[slot.tc_id]
             if slot.counts_failure:
                 state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
+            # output-firewall: redact before the result is streamed out (the event is not
+            # retractable) and before it enters messages. Placeholders are system text.
+            if not is_placeholder:
+                content = redact_secrets(content)
             yield {"type": "tool_result", "name": slot.name, "content": content}
             # P2: post_tool_use hook, real executions only; SSE already sent (not retractable).
             # modified_content only affects what enters messages (used by the LLM next turn).
@@ -2513,7 +2523,9 @@ async def run_stream(
                     strict=False,
                 )
                 if hres.modified_content is not None:
-                    content = hres.modified_content
+                    # Re-redact: the hook may have reintroduced secrets into the content
+                    # that now enters messages (the streamed event already went out clean).
+                    content = redact_secrets(hres.modified_content)
             # T4: truncate the messages copy only; the SSE event above kept the full result.
             tool_content = (
                 content if is_self_truncating(slot.name) else truncate_tool_result(content)
