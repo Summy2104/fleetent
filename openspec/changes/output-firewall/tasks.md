@@ -10,5 +10,5 @@
 
 ## 3. 收尾验证
 
-- [ ] 3.1 解耦验证：改动零 platform import；模块依赖护栏测试通过；无 platform DB 环境下脱敏生效（纯文本变换，无 DB 依赖）
-- [ ] 3.2 全量收尾：`make test-pr` 全绿（run_code 既有脱敏测试不回归）＋ ruff format/check + mypy 改动文件 + integration 对照 main 基线无新增失败
+- [x] 3.1 解耦验证：改动零 platform import；模块依赖护栏测试通过；无 platform DB 环境下脱敏生效（纯文本变换，无 DB 依赖）
+- [x] 3.2 全量收尾：`make test-pr` 全绿（run_code 既有脱敏测试不回归）＋ ruff format/check + mypy 改动文件 + integration 对照 main 基线无新增失败
