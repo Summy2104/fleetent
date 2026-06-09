@@ -1,7 +1,7 @@
 """drop invites table (invite_store dead code cleanup)
 
-Revision ID: 064
-Revises: 063
+Revision ID: 066
+Revises: 065
 Create Date: 2026-06-09
 
 The invites table was created at runtime by invite_store._init_db() (never in alembic).
@@ -13,8 +13,8 @@ that ran the invite_store code gets cleaned up.
 import sqlalchemy as sa
 from alembic import op
 
-revision = "064"
-down_revision = "063"
+revision = "066"
+down_revision = "065"
 branch_labels = None
 depends_on = None
 

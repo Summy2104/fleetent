@@ -1,7 +1,7 @@
 """drop quota tables (descope non-functional quota half-feature)
 
-Revision ID: 064
-Revises: 063
+Revision ID: 065
+Revises: 064
 Create Date: 2026-06-09
 
 governance/quota.py created these tables at runtime via _init_db (never via alembic).
@@ -13,8 +13,8 @@ downgrade recreates them per the original _init_db DDL to preserve reversibility
 import sqlalchemy as sa
 from alembic import op
 
-revision = "064"
-down_revision = "063"
+revision = "065"
+down_revision = "064"
 branch_labels = None
 depends_on = None
 
