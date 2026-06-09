@@ -132,12 +132,12 @@ erDiagram
   alert_rules ||--o{ alerts : fires
 ```
 
-**幻影实体**：`tenant_id` / `team_id` 贯穿 agents / KB / traces / policies，但**没有 `tenants` / `teams` 表**——多租户是裸列、无根实体（§4-②）。
+**幻影实体（已决议解决，见 §5.7）**：`tenant_id` / `team_id` 贯穿 agents / KB / traces / policies，但**当前没有 `tenants` / `teams` 表**——多租户是裸列、无根实体（§4-②）。2026-06-09 决议：立 `tenants`(=主体)/`teams` 实体 + 物理 per-tenant 隔离。
 
 ## 4. 设计问题（讨论议程）
 
 1. **关系几乎全隐式**：全库**仅 3 条 SQL 外键**（`agent_id`→agents、`document_id`→knowledge_documents CASCADE、复合 `(tenant_id,kb_id)`→knowledge_bases）。其余引用整性全靠 `*_id` 约定 + store 逻辑，DB 无保障。→ **要不要补外键？** 权衡：SQLite-first/可审计/手写 SQL ⟷ 完整性与级联删除。
-2. **多租户无根实体**：无 `tenants`/`teams` 表。→ **要不要立 tenants/teams 实体**做多租户根、承载配额/隔离/级联？
+2. **多租户无根实体**：无 `tenants`/`teams` 表。→ **✅ 已决议（2026-06-09，见 §5.7）**：立 `tenants`(=主体/法人实体)/`teams` 实体做根，主体间**物理 per-tenant 强隔离**。
 3. **身份策略不统一**：多数表 surrogate `id`；KB 用复合自然键 `(tenant_id,kb_id)`；绑定表用复合自然键（user_id+agent_id）。→ **是否统一**（全 surrogate id？还是明确「聚合根用自然键」）？
 4. **疑似重复绑定**：`agent_kbs` 与 `knowledge_base_agent_bindings` 均为 agent↔KB。→ **核实并合并其一**。
 5. **`session_meta` 禁忌表**：CLAUDE.md 明令 agent 运行时数据不得入 platform 管理表；迁移 `054–059` 正是「加运行时列（compaction/token/resume_pending）→删」的返工实证。但残留 `origin/status/takeover/pinned/agent_name/channel` 等——→ **逐列审计**：哪些是 platform 治理（合法）、哪些是运行时残留（该回 session 文件）？
@@ -165,6 +165,7 @@ erDiagram
 - **per-agent 库**：隔离、爆炸半径小、单机/受管同一套存储布局、SQLite 写不互锁。（PR #190 已起步）
 - **共享层按写者再拆（R2-叉1=1b）**：shared_memory 是**多 agent 写的真相源**、KB 是 **ingest 单写 / agent 只读的派生视图**，两类写者/生命周期不混 → 各自成库；每层回到「单一写者域」，无多写者协调。一个 KB = **关系底座 + 向量底座**两个物理 substrate。
 - **向量随消费侧分层**：per-agent 记忆的向量必须落 per-agent 向量库，否则 per-agent 隔离在向量层是假的。
+- **多租户维度**：受多租户时，以上各层按**主体（tenant）物理分区**——共享记忆库 / KB 库 / per-agent 库 per-tenant，管理库保持单库跨主体（详见 §5.7）。
 
 ### 5.2 schema 权威：管理库 Alembic、agent 侧库嵌入式迁移（Y，R2-叉3）
 
@@ -206,6 +207,27 @@ authn 抽成基座端口（`凭证→principal`）：单机本地实现 + 平台
 ### 5.6 向量 namespace 命名整改（R2，必做）
 
 namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后端的键**，须：① 家族判别符**显式枚举** `VectorFamily` + 单一 `family_of()` 路由入口（禁 ad-hoc `startswith`，未知前缀 raise）；② 拆解「namespace」一词的**三重过载**（向量路由串 / agent 隔离字段 `memory_namespace` / `memory_namespace()` 第二参）。叉2 锁死后 `memory_namespace()` 第二参删除、`mem:{user_id}` 即足；token 按层改名（如 `umem`/`smem`/`kb`）为可选低优项。
+
+### 5.7 多租户：tenant=主体 + 物理 per-tenant 隔离（2026-06-09 决议）
+
+**背景**：客户公司存在多法人主体（如 A 主体 / B 主体），主体间数据（尤其财务的 KB / 记忆 / 会话）**必须强隔离、互不可见**（合规 / 数据主权硬要求）。故 §4-② 幻影实体的决议是 **立实体 + 物理隔离**，而非裁掉多租户。
+
+**实体**（裸列 → 真实体/外键）：
+- `tenants`（= 主体）：`id · name · status · created_at · 主体级配额/配置`
+- `teams`：`id · tenant_id`→tenants `· name · created_at`
+- `users` 补 `tenant_id`→tenants（**今天 users 无任何组织归属——真缺口**）
+- `team_members`：`team_id`→teams `· user_id`→users（M:N）
+- agents/KB/traces/policies 的 `tenant_id`/`team_id` 升真外键；`shared_memory.scope_id` 按 `scope_type` 指向 tenants/teams
+
+**隔离 = 物理 per-tenant**（不靠 `tenant_id` 列 + 纪律）：
+- `管理库`：**单库、跨主体注册中心**（tenants/teams/users/team_members/agent 定义，带 `tenant_id` 列），platform 专用，**不存业务对话/KB**。
+- 每主体一个目录 `<tenant>/`，内含：每 agent 一个 `per-agent 库` + **per-tenant 的 `共享记忆库`** + **per-tenant 的 `KB 库(+向量)`**。
+- agent 进程经 `agent.yaml` 只开本主体目录下的文件，**物理上够不到别主体的库**。
+- 示例（2 主体 × 各 2 agent）：`管理库`×1 + 每主体（2×per-agent + 1 共享记忆 + 1 KB）= **9 库**。
+
+**与 R2 的关系**：给 §5.1「共享层」补上 tenant 维度——共享记忆库 / KB 库 / per-agent 库**按主体物理分区**。物理 vs 逻辑的实际差别**只在共享层**（KB + 共享记忆：per-主体一库靠文件分 vs 共用一库靠 `tenant_id` 列分）；`管理库` 与 `per-agent 库` 两方案相同。
+
+**连带**：① **amends #3**——五库拓扑带 tenant 维度、按主体物理分区（#3 范围变大，或单拆一个「立 tenants/teams + 物理分区」change）；② 喂 **#4 Identity**——principal 组织归属从 `users.tenant_id` + `team_members` 解析（§5.3 F2「tenant 来自 agent 配置」的折中升级为「真有归属」）。
 
 ---
 
