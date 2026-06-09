@@ -1,7 +1,7 @@
 """Five-layer turns/tokens budget control (AR18): task/session/user/agent/global.
 
 AR2's `budget.py` is the per-run turns/tokens budget. This module adds cross-run,
-layered turns/tokens budgets persisted in `users.db` keyed by (scope, key, period),
+layered turns/tokens budgets persisted in `fleetent.db` keyed by (scope, key, period),
 reusing AR2's NO_LIMIT sentinel and turns/tokens accumulation semantics. The cost
 dimension was dropped (post-review: cost tracking has no real meaning here), so
 this is purely a usage (turns/tokens) governance layer. Standard-library sqlite3
@@ -153,7 +153,7 @@ def init_db() -> None:
 
 
 class BudgetStore:
-    """Cross-run usage accumulation keyed by (scope, key, period) in users.db.
+    """Cross-run usage accumulation keyed by (scope, key, period) in fleetent.db.
 
     Only the four cross-run scopes persist; task scope is per-run (AR2) and is
     rejected. `period` is derived from each scope's window and an injected `now`,

@@ -663,7 +663,7 @@ class AntiFlapState:
     since the last auto compression, and whether auto compression is circuit-broken.
 
     Updated functionally (dataclasses.replace, never in place) so callers thread it
-    explicitly; persisted per session_id in users.db, not in the message array.
+    explicitly; persisted per session_id in the per-agent fleetent.db, not in the message array.
     """
 
     recent_savings: tuple[float, ...] = ()
@@ -754,7 +754,7 @@ def init_anti_flap_db() -> None:
 
 
 def load_anti_flap_state(session_id: str) -> AntiFlapState:
-    """Load a session's AntiFlapState from users.db, or a fresh default if absent."""
+    """Load a session's AntiFlapState from fleetent.db, or a fresh default if absent."""
     init_anti_flap_db()
     with _anti_flap_conn() as conn:
         row = conn.execute(
@@ -772,7 +772,7 @@ def load_anti_flap_state(session_id: str) -> AntiFlapState:
 
 
 def save_anti_flap_state(session_id: str, state: AntiFlapState) -> None:
-    """Persist a session's AntiFlapState to users.db (insert or replace)."""
+    """Persist a session's AntiFlapState to fleetent.db (insert or replace)."""
     init_anti_flap_db()
     with _anti_flap_conn() as conn:
         conn.execute(

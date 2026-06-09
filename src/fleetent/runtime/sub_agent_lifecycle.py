@@ -3,7 +3,7 @@
 A sub-agent task moves through a single-direction state machine
 (`pending → running → {succeeded,failed,timed_out,cancelled}`, plus
 `pending → cancelled`) and is recorded in the `sub_agent_runs` table of the
-shared `users.db`, queryable by `parent_session_id` for observability. This
+per-agent `fleetent.db`, queryable by `parent_session_id` for observability. This
 module owns the lifecycle record and persistence; `sub_agent.py` keeps the
 parallel orchestration. Standard-library `sqlite3` only (no ORM).
 """

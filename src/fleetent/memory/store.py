@@ -260,7 +260,10 @@ def duplicate_compaction_candidates(user_id: str) -> list[MemoryCompactionCandid
 
 
 def ensure_schema(db: SQLiteDatabase) -> None:
-    """Create memory_items table and indices if they do not exist. Idempotent. (migration 004)"""
+    """Create memory_items table and indices if they do not exist. Idempotent.
+
+    Covers migrations 004, 032.
+    """
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS memory_items (
@@ -270,7 +273,8 @@ def ensure_schema(db: SQLiteDatabase) -> None:
             content     TEXT NOT NULL,
             created_at  TEXT NOT NULL,
             updated_at  TEXT NOT NULL,
-            expires_at  TEXT
+            expires_at  TEXT,
+            namespace   TEXT NOT NULL DEFAULT 'default'
         )
         """
     )
@@ -280,6 +284,10 @@ def ensure_schema(db: SQLiteDatabase) -> None:
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_memory_items_user_expires"
         " ON memory_items (user_id, expires_at)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_items_user_namespace_type"
+        " ON memory_items (user_id, namespace, type)"
     )
 
 
