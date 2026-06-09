@@ -205,13 +205,19 @@ async def _download_image_attachments(
     return attachments
 
 
-def _derive_session_id(user_id: str, channel_type: str, thread_ts: str | None) -> str:
+def _derive_session_id(
+    *, channel_type: str, channel_id: str, user_id: str, thread_root: str
+) -> str:
+    """Thread-first session id keyed by the thread the bot replies into.
+
+    ``thread_root`` is ``thread_ts or the message's own ts`` — a top-level message
+    (the bot threads on it) and its follow-ups inside that thread therefore share one
+    session. DMs are namespaced per user, channels per channel, so the two never
+    collide; each new top-level message / assistant-pane conversation is a new session.
+    """
     if channel_type == "im":
-        return f"user:{user_id}"
-    if thread_ts:
-        return f"thread:{thread_ts}"
-    # Channel message without thread: use user as session (bot will reply in thread)
-    return f"user:{user_id}"
+        return f"slack:dm:{user_id}:{thread_root}"
+    return f"slack:thread:{channel_id}:{thread_root}"
 
 
 async def _route_assistant_message(
@@ -265,7 +271,12 @@ async def _route_assistant_message(
         platform="slack",
         owner_id=owner_id,
         agent_name=agent_name,
-        session_id=_derive_session_id(slack_user_id, "im", thread_ts),
+        session_id=_derive_session_id(
+            channel_type="im",
+            channel_id=channel,
+            user_id=slack_user_id,
+            thread_root=thread_ts or payload.get("ts") or slack_user_id,
+        ),
         user_id=identity,
         text=payload.get("text") or "",
         attachments=attachments,
@@ -339,13 +350,13 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
         thread_ts = event.get("thread_ts")
         channel_type = event.get("channel_type") or "channel"
 
-        session_id = _derive_session_id(
-            user_id=slack_user_id,
-            channel_type=channel_type,
-            thread_ts=thread_ts,
-        )
-
         reply_thread = thread_ts or event.get("ts")
+        session_id = _derive_session_id(
+            channel_type=channel_type,
+            channel_id=channel,
+            user_id=slack_user_id,
+            thread_root=reply_thread or slack_user_id,
+        )
 
         # Native Assistants API status indicator (shows below the bot name, no extra
         # thread message). Degrades to a plain say() reply if the feature is disabled.
