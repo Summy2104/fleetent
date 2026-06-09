@@ -32,6 +32,9 @@ class ToolContext:
     agent_name: str | None = None
     features: dict[str, Any] = field(default_factory=dict)
     session_id: str | None = None
+    # Inbound sender/channel metadata (im_gateway.SessionContext) for whoami-style
+    # tools; typed Any to avoid an im_gateway import cycle. None = unavailable.
+    session_context: Any = None
 
 
 _registry: dict[str, tuple[Callable[..., Any], ToolSchema]] = {}

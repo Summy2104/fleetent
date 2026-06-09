@@ -120,3 +120,119 @@ async def test_no_session_context_no_injection(monkeypatch):
     user = [m for m in messages if m.get("role") == "user"][-1]
     assert "当前日期" not in system["content"]
     assert user["content"] == "原始问题"  # unchanged
+
+
+# ── whoami tool ──────────────────────────────────────────────────────────────
+
+
+def test_whoami_returns_sender():
+    from fleetent.im_gateway.normalizer import SessionContext
+    from fleetent.tools.builtin_tools import whoami
+    from fleetent.tools.registry import ToolContext
+
+    sc = SessionContext(
+        platform="slack", sender_id="U123", sender_name="张洋", chat_type="channel", channel_name="C9"
+    )
+    out = whoami(tool_context=ToolContext(session_context=sc))
+    assert "U123" in out
+    assert "张洋" in out
+    assert "slack" in out
+
+
+def test_whoami_degrades_without_context():
+    from fleetent.tools.builtin_tools import whoami
+    from fleetent.tools.registry import ToolContext
+
+    out = whoami(tool_context=ToolContext())
+    assert "未知" in out or "unknown" in out.lower()
+    # must not raise even with no tool_context at all
+    assert isinstance(whoami(tool_context=None), str)
+
+
+async def test_run_threads_session_context_to_tool(monkeypatch):
+    """run(session_context=...) reaches the tool via ToolContext at dispatch time."""
+    from unittest.mock import AsyncMock as _AM
+    from unittest.mock import MagicMock as _MM
+
+    import fleetent.runtime.loop as al
+    from fleetent.im_gateway.normalizer import SessionContext
+
+    sc = SessionContext(platform="slack", sender_id="U777")
+    captured: dict = {}
+
+    def fake_dispatch(name, args, **kw):
+        captured["tool_context"] = kw.get("tool_context")
+        return f"{name}_result"
+
+    def _tool_resp():
+        tc = _MM()
+        tc.id = "tc-1"
+        tc.function.name = "web_search"
+        tc.function.arguments = "{}"
+        m = _MM()
+        m.content = None
+        m.tool_calls = [tc]
+        m.model_dump = lambda: {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "tc-1", "type": "function", "function": {"name": "web_search", "arguments": "{}"}}
+            ],
+        }
+        ch = _MM()
+        ch.finish_reason = "tool_calls"
+        ch.message = m
+        r = _MM()
+        r.choices = [ch]
+        r.usage = _MM()
+        return r
+
+    def _text_resp():
+        m = _MM()
+        m.content = "done"
+        m.tool_calls = None
+        m.model_dump = lambda: {"role": "assistant", "content": "done"}
+        ch = _MM()
+        ch.finish_reason = "stop"
+        ch.message = m
+        r = _MM()
+        r.choices = [ch]
+        r.usage = _MM()
+        return r
+
+    n = 0
+
+    async def fake_create(**kwargs):
+        nonlocal n
+        n += 1
+        return _tool_resp() if n == 1 else _text_resp()
+
+    def _client():
+        c = _AM()
+        c.chat = _MM()
+        c.chat.completions = _MM()
+        c.chat.completions.create = _AM(side_effect=fake_create)
+        return c
+
+    monkeypatch.setattr(al, "get_schemas", lambda: [{"type": "function", "function": {"name": "web_search", "parameters": {}}}])
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "extract_and_update", _AM())
+    monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
+    monkeypatch.setattr(
+        al, "resolve_limits",
+        lambda max_turns=None, max_consecutive_failures=None, config=None: (50, 3),
+    )
+    monkeypatch.setattr(al, "_build_async_client", lambda r, k: _client())
+    monkeypatch.setattr(
+        al, "build_context", _AM(return_value=_MM(text="", sources=[]))
+    )
+    monkeypatch.setattr(al, "record_trace_event", lambda *a, **kw: None, raising=False)
+    monkeypatch.setattr(al, "dispatch", fake_dispatch)
+
+    result = await al.run(
+        messages=[{"role": "user", "content": "hi"}], session_context=sc
+    )
+    assert result == "done"
+    assert captured["tool_context"] is not None
+    assert captured["tool_context"].session_context is sc

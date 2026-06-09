@@ -411,6 +411,7 @@ async def route(msg: NormalizedMessage) -> None:
                 approval_routing=agent.approval if agent else None,
                 outbound_connectors=msg.outbound_connectors,
                 progress_func=msg.progress_func,
+                session_context=msg.session_context,
             )
 
         # P4: session_end hook — observe after run completes, before session save.

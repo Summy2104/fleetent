@@ -131,6 +131,33 @@ def calculate(expression: str) -> str:
 
 
 @tool
+def whoami(tool_context: ToolContext | None = None) -> str:
+    """Return the current requester's identity and conversation context.
+
+    Use when you need to know who is talking to you (platform user id + name),
+    where (DM vs which channel), or the current time. Reads the inbound message's
+    session context; returns "未知" fields when unavailable (e.g. a CLI run with no
+    IM context). Never raises.
+    """
+    sc = getattr(tool_context, "session_context", None) if tool_context else None
+    now = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    if sc is None:
+        return f"发起人: 未知 (无 IM 上下文)\n当前时间: {now}"
+
+    def _g(attr: str) -> str:
+        return str(getattr(sc, attr, "") or "未知")
+
+    scene = "私信 (DM)" if _g("chat_type") == "dm" else f"频道 {_g('channel_name')}"
+    return (
+        f"平台: {_g('platform')}\n"
+        f"发起人 ID: {_g('sender_id')}\n"
+        f"发起人名称: {_g('sender_name')}\n"
+        f"场景: {scene}\n"
+        f"当前时间: {now}"
+    )
+
+
+@tool
 def read_skill(name: str, tool_context: ToolContext | None = None) -> str:
     """Read a skill's full instructions by name (from the <available_skills> list).
 
