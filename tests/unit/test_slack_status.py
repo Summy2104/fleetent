@@ -117,3 +117,46 @@ async def test_status_funcs_degrades_when_setstatus_unavailable():
     await reply("answer despite no status")
 
     assert said == ["answer despite no status"]
+
+
+async def test_status_funcs_initial_passes_loading_messages():
+    from fleetent.im_gateway import slack as slack_mod
+
+    calls: list[dict] = []
+    client = MagicMock()
+
+    async def fake_set(**kwargs):
+        calls.append(kwargs)
+
+    client.assistant_threads_setStatus = fake_set
+
+    await slack_mod._make_status_funcs(client, "C1", "123.456", say=None)
+
+    assert calls[0].get("loading_messages")
+    assert "思考中" in " ".join(calls[0]["loading_messages"])
+
+
+async def test_status_funcs_progress_passes_loading_messages():
+    from fleetent.im_gateway import slack as slack_mod
+
+    calls: list[dict] = []
+    client = MagicMock()
+
+    async def fake_set(**kwargs):
+        calls.append(kwargs)
+
+    client.assistant_threads_setStatus = fake_set
+
+    _reply, progress = await slack_mod._make_status_funcs(client, "C1", "123.456", say=None)
+    await progress(
+        {
+            "type": "tool_call",
+            "names": ["google-workspace__manage_calendar", "google-workspace__manage_drive"],
+        }
+    )
+
+    progress_call = calls[-1]
+    lm = progress_call.get("loading_messages")
+    assert lm is not None
+    joined = " ".join(lm)
+    assert "日历" in joined and "Google Drive" in joined

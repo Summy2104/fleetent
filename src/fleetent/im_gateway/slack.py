@@ -120,7 +120,8 @@ async def _make_status_funcs(
         await client.assistant_threads_setStatus(
             channel_id=channel,
             thread_ts=reply_thread,
-            status="🤔 思考中...",
+            status=_THINKING_STATUS,
+            loading_messages=[_THINKING_STATUS],
         )
         status_ok = True
     except Exception as exc:  # noqa: BLE001 — feature may be disabled; degrade, don't abort
@@ -143,6 +144,7 @@ async def _make_status_funcs(
                 channel_id=channel,
                 thread_ts=reply_thread,
                 status=_status_text_for_event(evt),
+                loading_messages=_loading_messages_for_event(evt),
             )
         except Exception as exc:  # noqa: BLE001 — status update failure must not break the run
             logger.warning("slack_progress_status_failed", error=str(exc))
