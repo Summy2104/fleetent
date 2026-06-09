@@ -47,7 +47,6 @@ from fleetent.platform.connector_management import connector_admin_api
 from fleetent.platform.im_gateway_management import admin_api, connector_manager
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
-from fleetent.platform.resource_monitoring import collectors, monitor_admin_api
 from fleetent.platform.skill_management import skill_admin_api
 from fleetent.platform.user_management import user_admin_api
 from fleetent.runtime import run_stream
@@ -191,9 +190,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         await cron.start()
         cron.add_interval_job(
-            _run_monitoring_cycle, collectors.COLLECT_INTERVAL_SECONDS, "monitoring_collect"
-        )
-        cron.add_interval_job(
             _run_playground_retention,
             _PLAYGROUND_RETENTION_INTERVAL_SECONDS,
             "playground_retention",
@@ -220,7 +216,6 @@ app.include_router(chat_admin_api.router)
 app.include_router(agent_console_api.router)
 app.include_router(agent_admin_api.router)
 app.include_router(stats_admin_api.router)
-app.include_router(monitor_admin_api.router)
 app.include_router(agent_apply_api.router)
 app.include_router(lifecycle_admin_api.router)
 
@@ -373,23 +368,6 @@ wire_agent_store_seams()
 def _emit_over_quota_event(user_id: str) -> None:
     """Emit an over-quota event so operators can see who hit their limit."""
     logger.warning("over_quota user_id=%s", user_id)
-
-
-def _run_monitoring_cycle() -> None:
-    """One periodic monitoring tick: collect samples, prune, escalate stale criticals.
-
-    Failures never crash the scheduler — each step is logged and isolated so a flaky
-    collection source cannot stop alert escalation.
-    """
-    for step in (
-        collectors.collect_once,
-        collectors.purge_expired,
-        monitor_admin_api.escalate_pending,
-    ):
-        try:
-            step()
-        except Exception:  # noqa: BLE001 — keep the periodic job alive
-            logger.exception("monitoring_cycle_step_failed step=%s", step.__name__)
 
 
 _PLAYGROUND_RETENTION_INTERVAL_SECONDS = 24 * 3600

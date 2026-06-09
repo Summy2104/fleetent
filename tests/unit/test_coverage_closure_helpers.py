@@ -11,7 +11,6 @@ from fleetent import structured_logging
 from fleetent.config import VectorStoreSettings
 from fleetent.observability import startup_diagnostics
 from fleetent.platform import maintenance as platform_maintenance
-from fleetent.platform.resource_monitoring import collectors
 from fleetent.vector_store import backend
 
 
@@ -181,64 +180,3 @@ async def test_vector_backend_memory_backend_and_pure_helpers(tmp_path):
         backend.create_vector_backend(VectorStoreSettings(backend="sqlite"))
     with pytest.raises(ValueError, match="Unsupported"):
         backend.create_vector_backend(VectorStoreSettings(backend="unknown"))  # type: ignore[arg-type]
-
-
-def test_resource_collectors_collect_once_failure_alerts_and_purge(monkeypatch):
-    recorded: list[tuple[str, str, float, str]] = []
-    alerts: list[tuple[str, str, str, dict[str, Any]]] = []
-    monkeypatch.setattr(collectors, "collect_host", lambda: [("load_pct", "host:local", 10.0)])
-    monkeypatch.setattr(collectors, "collect_process", lambda: [("rss_mb", "process:self", 20.0)])
-    monkeypatch.setattr(
-        collectors,
-        "collect_containers",
-        lambda: (_ for _ in ()).throw(RuntimeError("docker missing")),
-    )
-    monkeypatch.setattr(collectors, "collect_infra", lambda: [])
-    monkeypatch.setattr(
-        collectors.store,
-        "record_sample",
-        lambda metric, target, value, ts: recorded.append((metric, target, value, ts)),
-    )
-    monkeypatch.setattr(collectors.store, "find_active_alert", lambda rule, target: None)
-    monkeypatch.setattr(collectors.store, "create_alert", lambda *args: alerts.append(args))
-    monkeypatch.setattr(collectors.store, "purge_before", lambda cutoff: 7)
-
-    summary = collectors.collect_once("2026-01-01T00:00:00+00:00")
-
-    assert summary == {"recorded": 2, "failed": ["container"]}
-    assert ("collection_status", "layer:container", 0.0, "2026-01-01T00:00:00+00:00") in recorded
-    assert alerts == [
-        (
-            collectors.COLLECTION_FAILURE_RULE,
-            "layer:container",
-            "critical",
-            {"error": "docker missing"},
-        )
-    ]
-    assert collectors.purge_expired("2026-01-08T00:00:00+00:00") == 7
-
-    monkeypatch.setattr(
-        collectors.store, "find_active_alert", lambda rule, target: {"id": "active"}
-    )
-    alerts.clear()
-    collectors._emit_collection_alert("container", "still down")  # noqa: SLF001
-    assert alerts == []
-
-
-def test_resource_collectors_host_process_and_container_seams(monkeypatch):
-    monkeypatch.setattr(collectors.os, "getloadavg", lambda: (2.0, 0.0, 0.0))
-    monkeypatch.setattr(collectors.os, "cpu_count", lambda: 4)
-    assert collectors.collect_host() == [("load_pct", "host:local", 50.0)]
-
-    monkeypatch.setattr(collectors.shutil, "which", lambda _cmd: None)
-    with pytest.raises(RuntimeError, match="docker CLI"):
-        collectors.collect_containers()
-
-    monkeypatch.setattr(collectors.shutil, "which", lambda _cmd: "/usr/bin/docker")
-    monkeypatch.setattr(
-        collectors.subprocess,
-        "run",
-        lambda *args, **kwargs: SimpleNamespace(stdout="one\n\ntwo\n"),
-    )
-    assert collectors.collect_containers() == [("active", "container:sandbox", 2.0)]
-    assert collectors.collect_infra() == []
