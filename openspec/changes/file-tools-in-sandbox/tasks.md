@@ -15,8 +15,8 @@
 
 ## 4. write_file 走容器
 
-- [ ] 4.1 Write failing unit tests: write_file 经 helper 把内容经 stdin 写入 workspace；越界路径拒绝（tests/unit）
-- [ ] 4.2 Implement write_file 改造，pass unit tests
+- [x] 4.1 Write failing unit tests: write_file 经 helper 把内容经 stdin 写入 workspace；越界路径拒绝（tests/unit）
+- [x] 4.2 Implement write_file 改造，pass unit tests
 
 ## 5. edit_file 走容器（保留 6 层 fallback）
 

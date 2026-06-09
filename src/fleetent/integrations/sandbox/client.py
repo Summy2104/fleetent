@@ -284,16 +284,22 @@ class SandboxClient:
         return proc.returncode == 0
 
     async def exec(
-        self, workspace_id: str, command: str, session_id: str | None = None
+        self,
+        workspace_id: str,
+        command: str,
+        session_id: str | None = None,
+        stdin: bytes | None = None,
     ) -> ExecResult:
         """Execute a shell command inside the running container.
 
         When ``session_id`` is given, the command runs with session-snapshot
         continuity (sandbox-session-snapshot): env/cwd persist across calls via a
         captured-then-restored snapshot. ``None`` runs the command verbatim.
+        ``stdin`` (bytes) is piped to the command via ``docker exec -i`` — used by
+        the file tools to stream a write payload without hitting ARG_MAX.
         """
         if session_id is None:
-            return await self._run_exec(workspace_id, command)
+            return await self._run_exec(workspace_id, command, stdin=stdin)
         if session_id not in self._snap_ready:
             capture = build_capture_script(session_id)
             cap_res = await self._run_exec(workspace_id, f"bash -lc {shlex.quote(capture)}")
@@ -302,27 +308,33 @@ class SandboxClient:
         if session_id not in self._snap_ready:
             # Capture failed: degrade to a login shell so the command still runs
             # correctly, only losing cross-exec continuity.
-            return await self._run_exec(workspace_id, f"bash -lc {shlex.quote(command)}")
+            return await self._run_exec(
+                workspace_id, f"bash -lc {shlex.quote(command)}", stdin=stdin
+            )
         cwd = self._cwd.get(session_id, DEFAULT_CWD)
         wrapped = wrap_command(command, session_id, cwd)
-        result = await self._run_exec(workspace_id, f"bash -c {shlex.quote(wrapped)}")
+        result = await self._run_exec(workspace_id, f"bash -c {shlex.quote(wrapped)}", stdin=stdin)
         new_cwd, cleaned = extract_cwd(result.stdout, session_id)
         if new_cwd:
             self._cwd[session_id] = new_cwd
         return ExecResult(stdout=cleaned, stderr=result.stderr, exit_code=result.exit_code)
 
-    async def _run_exec(self, workspace_id: str, command: str) -> ExecResult:
+    async def _run_exec(
+        self, workspace_id: str, command: str, stdin: bytes | None = None
+    ) -> ExecResult:
+        # `-i` keeps stdin open so a piped write payload reaches the command; omitted
+        # otherwise so non-stdin execs behave exactly as before.
+        exec_args = ["docker", "exec"]
+        if stdin is not None:
+            exec_args.append("-i")
+        exec_args += [workspace_id, "sh", "-c", command]
         proc = await asyncio.create_subprocess_exec(
-            "docker",
-            "exec",
-            workspace_id,
-            "sh",
-            "-c",
-            command,
+            *exec_args,
+            stdin=asyncio.subprocess.PIPE if stdin is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate()
+        stdout, stderr = await proc.communicate(input=stdin)
         return ExecResult(
             stdout=stdout.decode(),
             stderr=stderr.decode(),

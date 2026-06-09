@@ -82,6 +82,16 @@ def build_listdir_command(ws_path: str) -> str:
     return f"find {q} -maxdepth 1 -mindepth 1 -printf '%f\\t%y\\t%s\\t%T@\\n'"
 
 
+def build_write_command(ws_path: str) -> str:
+    """Overwrite a file with content streamed on stdin (``cat >``), creating parents.
+
+    The payload travels via ``docker exec -i`` stdin (not argv), so size is bounded by
+    the file system, not ARG_MAX. ``cat`` writes the bytes verbatim — no added newline.
+    """
+    q = shlex.quote(ws_path)
+    return f'mkdir -p -- "$(dirname -- {q})" && cat > {q}'
+
+
 def resolve_host_path(root: Path, path: str) -> Path:
     """Resolve a tool path inside the host workspace dir (docker-unavailable degrade).
 

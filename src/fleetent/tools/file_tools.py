@@ -231,6 +231,14 @@ class _ContainerBackend:
         res = await self._exec(fsio.build_listdir_command(rp))
         return _parse_listdir(res.stdout)
 
+    async def write_bytes(self, path: str, data: bytes) -> None:
+        rp = fsio.resolve_ws_path(path)
+        res = await self.client.exec(
+            self.ws_id, fsio.build_write_command(rp), session_id=self.session_id, stdin=data
+        )
+        if res.exit_code != 0:
+            raise _BackendError(res.stderr.strip() or "写入文件失败")
+
 
 @dataclass
 class _HostBackend:
@@ -271,6 +279,14 @@ class _HostBackend:
             except OSError:
                 entries.append(_DirEntry(child.name, False, 0, 0.0))
         return entries
+
+    async def write_bytes(self, path: str, data: bytes) -> None:
+        p = self._resolve(path)
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(data)
+        except OSError as exc:
+            raise _BackendError(str(exc)) from exc
 
 
 async def _select_backend(tool_context: ToolContext | None) -> _ContainerBackend | _HostBackend:
@@ -369,17 +385,25 @@ async def read_file(
 
 
 @tool(risk_level="medium")
-def write_file(
-    path: Annotated[str, "目标文件路径"],
+async def write_file(
+    path: Annotated[str, "目标文件路径（限定在 workspace 内）"],
     content: Annotated[str, "写入的完整内容"],
+    tool_context: ToolContext | None = None,
 ) -> str:
-    """Write content to a local file (full overwrite). Requires approval."""
+    """Write content to a workspace file (full overwrite). Requires approval.
+
+    Runs inside the sandbox container (content streamed over stdin) or the host fence
+    when docker is unavailable; the path is locked to the workspace.
+    """
+    backend = await _select_backend(tool_context)
+    data = content.encode("utf-8")
     try:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        Path(path).write_text(content, encoding="utf-8")
-        return f"written {len(content)} bytes to {path}"
-    except OSError as exc:
+        await backend.write_bytes(path, data)
+    except ValueError as exc:  # path escapes the workspace
         return f"error: {exc}"
+    except _BackendError as exc:
+        return f"error: {exc}"
+    return f"written {len(content)} bytes to {path}"
 
 
 # ── edit_file: 6-layer fallback matcher ───────────────────────────────────────
