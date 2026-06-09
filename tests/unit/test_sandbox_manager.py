@@ -16,6 +16,9 @@ def _mock_client() -> MagicMock:
     client.destroy_workspace = AsyncMock(return_value=None)
     client.commit_workspace = AsyncMock(return_value=None)
     client.image_exists = AsyncMock(return_value=False)
+    # sandbox-hardening: re-adopt path inspects the config-hash label; None = pre-label
+    # container, conservatively reused (no rebuild), preserving prior reuse behavior.
+    client.inspect_config_hash = AsyncMock(return_value=None)
     return client
 
 

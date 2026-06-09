@@ -139,6 +139,13 @@ class SandboxClient:
             return []
         return ["-v", f"{workspace_host_path}:{_WORKSPACE_MOUNT}"]
 
+    @staticmethod
+    def _label_flags(config_hash: str | None) -> list[str]:
+        """Stamp the container with its config-hash so reuse can detect stale config."""
+        if not config_hash:
+            return []
+        return ["--label", f"fleetent.confighash={config_hash}"]
+
     async def create_workspace(
         self,
         name: str,
@@ -146,6 +153,7 @@ class SandboxClient:
         image: str | None = None,
         env: dict[str, str] | None = None,
         workspace_host_path: str | None = None,
+        config_hash: str | None = None,
     ) -> str:
         """Start an isolated container, return container ID as workspace_id.
 
@@ -159,6 +167,8 @@ class SandboxClient:
         variables to inject as `-e` (SB5); None/empty keeps the clean environment.
         `workspace_host_path` bind-mounts a host directory at /workspace
         (sandbox-workspace-mount); None keeps the container with no host mount.
+        `config_hash` (sandbox-hardening) stamps a label so a later reuse can
+        rebuild on config change; None omits the label.
         """
         if resources is None:
             resources = SandboxResources()
@@ -171,6 +181,7 @@ class SandboxClient:
             *self._resource_flags(resources),
             *self._env_flags(env),
             *self._workspace_flags(workspace_host_path),
+            *self._label_flags(config_hash),
             image or self._image,
             "sleep",
             "infinity",
@@ -183,6 +194,27 @@ class SandboxClient:
         container_id = stdout.decode().strip()
         _logger.info("sandbox_created", name=name, container_id=container_id[:12])
         return container_id
+
+    async def inspect_config_hash(self, name: str) -> str | None:
+        """Read a container's ``fleetent.confighash`` label, or None when absent.
+
+        Used by the manager to decide whether a reused container was created under a
+        now-stale config. Docker prints an empty line for an unset label.
+        """
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "inspect",
+            "-f",
+            '{{index .Config.Labels "fleetent.confighash"}}',
+            name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return None
+        value = stdout.decode().strip()
+        return value or None
 
     async def find_workspace(self, name: str) -> str | None:
         """Return the id of a running container named `name`, or None if absent.
