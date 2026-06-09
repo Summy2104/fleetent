@@ -152,7 +152,7 @@ def _init_agent_db_schema(database_url: str) -> None:
     Called once at boot after DATABASE_URL is redirected to the per-agent path.
     Each store's ensure_schema is idempotent; repeated calls are safe.
     """
-    from fleetent import reflection
+    from fleetent import reflection, schedule_store
     from fleetent.db import create_database
     from fleetent.knowledge_base import operations as kb_ops
     from fleetent.memory import store as memory_store
@@ -165,6 +165,7 @@ def _init_agent_db_schema(database_url: str) -> None:
     reflection.ensure_schema(db)
     kb_ops.ensure_schema(db)
     session_index.ensure_schema(db)
+    schedule_store.ensure_schema(db)
 
 
 async def _start_infra(agent: AgentFile) -> None:

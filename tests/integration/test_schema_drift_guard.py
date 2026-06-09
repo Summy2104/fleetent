@@ -52,6 +52,8 @@ def _build_ensure_schema_db(tmp_path: Path) -> Path:
     from fleetent.reflection import ensure_schema as reflection_ensure_schema
     from fleetent.session import index as session_index
 
+    import fleetent.schedule_store as schedule_store
+
     tmp_path.mkdir(parents=True, exist_ok=True)
     db_path = tmp_path / "ensure_schema.db"
     db = SQLiteDatabase(path=db_path)
@@ -60,6 +62,7 @@ def _build_ensure_schema_db(tmp_path: Path) -> Path:
     reflection_ensure_schema(db)
     kb_ops.ensure_schema(db)
     session_index.ensure_schema(db)  # session.index.ensure_schema added in task 3.2
+    schedule_store.ensure_schema(db)  # agent-owned-scheduled-tasks
     return db_path
 
 
