@@ -347,6 +347,11 @@ def _reject_inline_secrets(agent: AgentFile, path: Path) -> None:
         "knowledge": agent.knowledge.model_dump(),
     }
     for key, value in flatten(payload):
+        # Skip structural, non-secret fields: CLI args (e.g. npm package specs), command
+        # names, plain ids, transport names. `.url` is intentionally NOT skipped — a URL
+        # may embed a credential (e.g. ?token=...) and must still be scanned.
+        if any(seg in key for seg in (".args.", ".command", ".id", ".transport")):
+            continue
         if (
             isinstance(value, str)
             and looks_inline_secret(value)
@@ -371,6 +376,10 @@ def _is_env_reference(key: str, value: str) -> bool:
         return _ENV_VAR_NAME_RE.fullmatch(value) is not None
     if key.endswith("credential_ref"):
         return _ENV_VAR_NAME_RE.fullmatch(value) is not None or value.startswith("file://")
+    # Allow env:VAR_NAME syntax in any field (e.g. mcp_servers[*].env dict values) so
+    # secrets can live in .env and be referenced without being flagged as inline secrets.
+    if value.startswith("env:"):
+        return _ENV_VAR_NAME_RE.fullmatch(value) is not None
     return False
 
 

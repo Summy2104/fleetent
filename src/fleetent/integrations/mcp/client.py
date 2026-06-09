@@ -555,7 +555,7 @@ async def _close_http_sessions() -> None:
         for server in active:
             try:
                 bearer = await _bearer_for(server)
-                await client.delete(f"{server.url}/", headers=_base_headers(server, bearer=bearer))
+                await client.delete(server.url, headers=_base_headers(server, bearer=bearer))
             except Exception as exc:  # noqa: BLE001 — DELETE is best-effort on shutdown
                 logger.debug("mcp_session_delete_failed server_id=%s error=%s", server.id, exc)
             finally:
@@ -630,12 +630,28 @@ def _safe_base_env() -> dict[str, str]:
     return {k: os.environ[k] for k in keys if k in os.environ}
 
 
+def _resolve_env_ref(value: str) -> str:
+    """Resolve an ``env:VAR_NAME`` reference from the parent process environment.
+
+    Values prefixed with ``env:`` are looked up in ``os.environ`` (populated by the agent
+    `.env` via ``load_dotenv``), returning an empty string when the var is unset. Any other
+    value is returned verbatim. This lets secrets live in `.env` rather than inline in
+    ``agent.yaml`` — used for both stdio env values and HTTP header values.
+    """
+    if value.startswith("env:"):
+        return os.environ.get(value[4:], "")
+    return value
+
+
 def _subprocess_env(server: McpServerConfig) -> dict[str, str]:
     """Environment for a stdio MCP subprocess: the safe host whitelist plus the server's
     explicitly declared env (which overrides the whitelist for same-named keys). The full
     platform environment is never inherited (mcp-stdio-isolation).
+
+    ``env:VAR_NAME`` values are resolved from the parent process environment.
     """
-    return {**_safe_base_env(), **server.env}
+    resolved = {k: _resolve_env_ref(v) for k, v in server.env.items()}
+    return {**_safe_base_env(), **resolved}
 
 
 def _is_tools_list_changed(message: Any) -> bool:
@@ -735,7 +751,10 @@ async def _register_stdio_server(server: McpServerConfig, scope: int | None = No
     _register_utility_tools(server, scope)
 
 
-PROTOCOL_VERSION = "2025-06-18"
+# Latest official MCP spec revision (modelcontextprotocol.io). Hand-pinned because this
+# client hand-writes the HTTP transport; when migrated to the official mcp SDK this should
+# be replaced with mcp.types.LATEST_PROTOCOL_VERSION (see mcp-http-sdk-migration).
+PROTOCOL_VERSION = "2025-11-25"
 CLIENT_INFO = {"name": "fleetent", "version": "1.0"}
 
 
@@ -783,7 +802,8 @@ def _base_headers(server: McpServerConfig, *, bearer: str | None = None) -> dict
     """
     headers: dict[str, str] = {"Accept": "application/json, text/event-stream"}
     if server.headers:
-        headers.update(server.headers)
+        # Resolve env:VAR_NAME references in custom header values (e.g. X-API-Key).
+        headers.update({k: _resolve_env_ref(v) for k, v in server.headers.items()})
     if bearer:
         headers["Authorization"] = f"Bearer {bearer}"
     elif server.auth_type == "api_key" and server.api_key_env:
@@ -981,7 +1001,7 @@ async def _open_session(client: Any, server: McpServerConfig) -> None:
     request_id = _next_request_id(server)
     bearer = await _bearer_for(server)
     init_resp = await client.post(
-        f"{server.url}/",
+        server.url,
         json={
             "jsonrpc": "2.0",
             "method": "initialize",
@@ -1026,7 +1046,7 @@ async def _post_jsonrpc(
     request_id = _next_request_id(server)
     bearer = await _bearer_for(server)
     resp = await client.post(
-        f"{server.url}/",
+        server.url,
         json={"jsonrpc": "2.0", "method": method, "params": params, "id": request_id},
         headers=_base_headers(server, bearer=bearer),
     )
@@ -1046,7 +1066,7 @@ async def _post_notification(client: Any, server: McpServerConfig, method: str) 
     try:
         bearer = await _bearer_for(server)
         await client.post(
-            f"{server.url}/",
+            server.url,
             json={"jsonrpc": "2.0", "method": method},
             headers=_base_headers(server, bearer=bearer),
         )
