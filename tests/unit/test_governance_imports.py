@@ -21,12 +21,6 @@ GOVERNANCE_PUBLIC_APIS = {
         "_get_usage",
         "_init_db",
     },
-    "audit_log": {
-        "DB_PATH",
-        "search_audit",
-        "write_audit",
-        "_init_db",
-    },
     "blocklist": {
         "DB_PATH",
         "ban_registration",

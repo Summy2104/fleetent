@@ -295,3 +295,214 @@ def test_no_transitive_platform_leak_through_shared_modules() -> None:
     assert not stale, (
         f"these modules no longer leak platform; drop them from the allowlist: {stale}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Plane boundary guardrails (核 + 4面 architecture)
+# ---------------------------------------------------------------------------
+
+# 核（core）module prefixes — must not import any 面 (face) namespace
+_CORE_MODULE_PREFIXES = (
+    "fleetent.runtime",
+    "fleetent.session",
+    "fleetent.model",
+    "fleetent.tools",
+    "fleetent.integrations",
+    "fleetent.governance",
+    "fleetent.memory",
+    "fleetent.long_term_ctx",
+    "fleetent.reflection",
+    "fleetent.skills",
+    "fleetent.knowledge_base.retrieval",
+)
+
+# 面（face）namespaces — cores must not import from these
+_FACE_NAMESPACES = (
+    "fleetent.platform",
+    "fleetent.im_gateway",
+)
+
+# Modules in 核 that are composition roots / bootstrappers and intentionally
+# wire the core to the edge face at app startup. Each entry must shrink as
+# the coupling is eliminated.
+_KNOWN_CORE_EDGE_EXCEPTIONS: set[str] = {
+    # agent_app.py bootstraps standalone agent mode: starts IM supervisors (SlackSupervisor,
+    # TelegramSupervisor) from the edge face and redirects im_gateway.access.APPROVALS_PATH.
+    # Coupling is intentional at the composition-root level (not core logic).
+    "fleetent.runtime.agent_app",
+}
+
+# ②控制 face sub-packages (must not import ③ orchestration)
+_CONTROL_FACE_PREFIXES = (
+    "fleetent.platform.agent_management_console",
+    "fleetent.platform.connector_management",
+    "fleetent.platform.knowledge_base_management",
+    "fleetent.platform.model_provider_management",
+    "fleetent.platform.skill_management",
+    "fleetent.platform.user_management",
+    "fleetent.platform.chat_management",
+    "fleetent.platform.askit_console",
+    "fleetent.platform.reflection_management",
+    "fleetent.platform.admin_cli",
+    "fleetent.platform.agent_statistics",
+    "fleetent.platform.resource_monitoring",
+    "fleetent.platform.im_gateway_management",
+)
+
+# ③编排 face sub-packages (must not import ②控制 subpackages)
+_ORCHESTRATION_FACE_PREFIXES = (
+    "fleetent.platform.agent_lifecycle",
+)
+
+# ④摄取 face sub-packages
+_INGEST_FACE_PREFIXES = (
+    "fleetent.knowledge_base.ingest",
+)
+
+# ①边缘 face sub-packages
+_EDGE_FACE_PREFIXES = (
+    "fleetent.im_gateway",
+)
+
+# Pairs (source_prefix, forbidden_target_prefix) — cross-face violations that have not
+# yet been fixed; each entry represents an architectural debt to eliminate.
+# Ratchet: if an entry disappears the test will fail, forcing removal from this set.
+_KNOWN_PLANE_BOUNDARY_VIOLATIONS: set[tuple[str, str]] = {
+    # ③编排.materialize aggregates from all ②控制 stores to build agent.yaml
+    # Fix: move materialize/secret_store/credential_slots to platform/ shared level
+    ("fleetent.platform.agent_lifecycle.materialize", "fleetent.platform.connector_management"),
+    ("fleetent.platform.agent_lifecycle.materialize", "fleetent.platform.knowledge_base_management"),
+    ("fleetent.platform.agent_lifecycle.materialize", "fleetent.platform.model_provider_management"),
+    ("fleetent.platform.agent_lifecycle.materialize", "fleetent.platform.skill_management"),
+    # ②控制 modules call ③编排 to trigger re-materialization after store changes
+    ("fleetent.platform.skill_management.skill_admin_api", "fleetent.platform.agent_lifecycle"),
+    ("fleetent.platform.knowledge_base_management.kb_admin_api", "fleetent.platform.agent_lifecycle"),
+    ("fleetent.platform.agent_management_console.agent_admin_api", "fleetent.platform.agent_lifecycle"),
+}
+
+
+def _is_core_module(module_name: str) -> bool:
+    return any(module_name.startswith(p) for p in _CORE_MODULE_PREFIXES)
+
+
+def test_core_modules_do_not_import_face_namespaces() -> None:
+    """核 modules MUST NOT import face namespaces (platform.* or im_gateway.*)."""
+    violations: list[str] = []
+    for path in _src_python_paths():
+        module_name = _module_name(path)
+        if not _is_core_module(module_name):
+            continue
+        if module_name in _KNOWN_CORE_EDGE_EXCEPTIONS:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imported_modules = set(_iter_imported_modules(tree))
+        for face in _FACE_NAMESPACES:
+            if _is_imported_from([face], imported_modules):
+                violations.append(f"{module_name} → {face}")
+    assert not violations, (
+        "核 modules import face namespaces, violating core→face boundary:\n"
+        + "\n".join(f"  {v}" for v in violations)
+    )
+
+
+def _cross_face_violations() -> list[tuple[str, str]]:
+    """Collect all (source_module, forbidden_target_prefix) face-to-face import pairs."""
+    violations: list[tuple[str, str]] = []
+    for path in _src_python_paths():
+        module_name = _module_name(path)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imported_modules = set(_iter_imported_modules(tree))
+
+        # ②控制 → ③编排
+        if any(module_name.startswith(p) for p in _CONTROL_FACE_PREFIXES):
+            for orch in _ORCHESTRATION_FACE_PREFIXES:
+                if _is_imported_from([orch], imported_modules):
+                    violations.append((module_name, orch))
+
+        # ③编排 → ②控制
+        if any(module_name.startswith(p) for p in _ORCHESTRATION_FACE_PREFIXES):
+            for ctrl in _CONTROL_FACE_PREFIXES:
+                if _is_imported_from([ctrl], imported_modules):
+                    violations.append((module_name, ctrl))
+
+        # ①边缘 → ②控制 or ③编排
+        if any(module_name.startswith(p) for p in _EDGE_FACE_PREFIXES):
+            for ctrl in _CONTROL_FACE_PREFIXES:
+                if _is_imported_from([ctrl], imported_modules):
+                    violations.append((module_name, ctrl))
+            for orch in _ORCHESTRATION_FACE_PREFIXES:
+                if _is_imported_from([orch], imported_modules):
+                    violations.append((module_name, orch))
+
+    return violations
+
+
+def test_no_new_plane_boundary_violations() -> None:
+    """面①②③④ MUST NOT directly import each other (no new violations beyond allowlist)."""
+    found = _cross_face_violations()
+
+    # Normalise to (module, target_prefix) pairs matching the known-violations format
+    new_violations = [
+        (src, tgt)
+        for src, tgt in found
+        if not any(
+            src.startswith(known_src) and tgt.startswith(known_tgt)
+            for known_src, known_tgt in _KNOWN_PLANE_BOUNDARY_VIOLATIONS
+        )
+    ]
+    assert not new_violations, (
+        "New plane boundary violations detected (face→face imports):\n"
+        + "\n".join(f"  {src} → {tgt}" for src, tgt in new_violations)
+    )
+
+    # Ratchet: a pinned violation that no longer exists must be removed from the set.
+    stale = {
+        (known_src, known_tgt)
+        for known_src, known_tgt in _KNOWN_PLANE_BOUNDARY_VIOLATIONS
+        if not any(
+            src.startswith(known_src) and tgt.startswith(known_tgt)
+            for src, tgt in found
+        )
+    }
+    assert not stale, (
+        f"These plane boundary violations no longer exist; remove them from the allowlist: {stale}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Reflection two-way guardrail
+# ---------------------------------------------------------------------------
+
+def test_reflection_engine_does_not_import_reflection_management() -> None:
+    """reflection/ engine MUST NOT import platform.reflection_management (management API)."""
+    violations: list[str] = []
+    for path in _src_python_paths():
+        module_name = _module_name(path)
+        if not module_name.startswith("fleetent.reflection"):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imported_modules = set(_iter_imported_modules(tree))
+        if _is_imported_from(["fleetent.platform.reflection_management"], imported_modules):
+            violations.append(module_name)
+    assert not violations, (
+        "reflection engine imports platform.reflection_management (management API), "
+        "violating reflection→management boundary: " + ", ".join(violations)
+    )
+
+
+def test_reflection_management_does_not_import_reflection_engine() -> None:
+    """platform.reflection_management MUST NOT import fleetent.reflection.reflection (engine)."""
+    violations: list[str] = []
+    for path in _src_python_paths():
+        module_name = _module_name(path)
+        if not module_name.startswith("fleetent.platform.reflection_management"):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imported_modules = set(_iter_imported_modules(tree))
+        # reflection.store (product store) is allowed; reflection.reflection (engine) is not
+        if _is_imported_from(["fleetent.reflection.reflection"], imported_modules):
+            violations.append(module_name)
+    assert not violations, (
+        "platform.reflection_management imports fleetent.reflection.reflection (engine private), "
+        "violating management→engine boundary: " + ", ".join(violations)
+    )

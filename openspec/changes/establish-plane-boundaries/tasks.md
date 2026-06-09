@@ -8,16 +8,16 @@
 
 ## 2. reflection 两拆收口护栏
 
-- [ ] 2.1 Write failing tests: `reflection.* ✗→ platform.reflection_management.*`；`platform.reflection_management.* ✗→ reflection.reflection`（两条分别）
-- [ ] 2.2 检查现有代码是否已符合（grep 确认），若有违反则修复
-- [ ] 2.3 运行测试确认绿
+- [x] 2.1 Write failing tests: `reflection.* ✗→ platform.reflection_management.*`；`platform.reflection_management.* ✗→ reflection.reflection`（两条分别）
+- [x] 2.2 检查现有代码是否已符合（grep 确认），若有违反则修复
+- [x] 2.3 运行测试确认绿
 
 ## 3. 面间隔离护栏
 
-- [ ] 3.1 Write failing tests: 核集合 ✗→ im_gateway 规则；面①②③④互不直接 import 规则
-- [ ] 3.2 跑测试看红——列出所有当前违反（预期：可能有面间 import）
-- [ ] 3.3 逐一修复违反（按 design.md D1：先立规则，违反者当场修）
-- [ ] 3.4 运行完整 `make test-pr` 确认无新增失败
+- [x] 3.1 Write failing tests: 核集合 ✗→ im_gateway 规则；面①②③④互不直接 import 规则
+- [x] 3.2 跑测试看红——列出所有当前违反（预期：可能有面间 import）
+- [x] 3.3 逐一修复违反（按 design.md D1：先立规则，违反者当场修）
+- [x] 3.4 运行完整 `make test-pr` 确认无新增失败
 
 ## 4. KnowledgeReadable / KnowledgeWritable Protocol
 

@@ -140,7 +140,7 @@ class PermissionGate:
             return []
 
         from fleetent.agent_config import resolve_approvers
-        from fleetent.im_gateway.outbound import is_reachable, send_to
+        from fleetent.outbound import is_reachable, send_to
 
         addresses, _policy = resolve_approvers(approval_routing, risk_level, tool_name)
         if not addresses:
