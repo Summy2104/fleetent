@@ -7,8 +7,8 @@
 
 ## 2. request_approval 命中指纹自动放行
 
-- [ ] 2.1 Write failing unit tests：指纹在 allow-list 中→`request_approval` 返回 "approved" 且**不调用** `_notify_approvers`、写一条 auto_approved 审计；不在 allow-list→照常走 notify（mock store + mock notify）（tests/unit，permission_gate 短超时）
-- [ ] 2.2 Implement request_approval 前置查指纹（scope=requester_user_id）+ pending 指纹记账，pass unit tests
+- [x] 2.1 Write failing unit tests：指纹在 allow-list 中→`request_approval` 返回 "approved" 且**不调用** `_notify_approvers`、写一条 auto_approved 审计；不在 allow-list→照常走 notify（mock store + mock notify）（tests/unit，permission_gate 短超时）
+- [x] 2.2 Implement request_approval 前置查指纹（scope=requester_user_id）+ pending 指纹记账，pass unit tests
 
 ## 3. resolve allow-always 持久化
 

@@ -18,6 +18,7 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any, Literal
 
+from fleetent.governance import approval_allowlist_store as allowlist
 from fleetent.governance import approval_store
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,9 @@ class PermissionGate:
         self._high_timeout = high_timeout
         self._events: dict[str, asyncio.Event] = {}
         self._decisions: dict[str, str] = {}
+        # Per-pending-approval fingerprint context (approval-minimization) so resolve()
+        # can persist an allow-always grant for the right (scope, tool) on "approve always".
+        self._pending_fp: dict[str, tuple[str, str, str]] = {}
 
     async def request_approval(
         self,
@@ -56,6 +60,22 @@ class PermissionGate:
             tool_args=json.dumps(tool_args),
             created_at=now,
         )
+
+        # approval-minimization: a prior "approve always" grant for this exact
+        # (requester, tool, args) fingerprint auto-approves without paging anyone.
+        scope_key = requester_user_id
+        fp = allowlist.fingerprint(scope_key, tool_name, tool_args)
+        if allowlist.is_allowed(fp):
+            approval_store.update_approval(
+                id=approval_id,
+                status="auto_approved",
+                resolved_at=datetime.datetime.now(datetime.UTC).isoformat(),
+            )
+            logger.info(
+                "approval_auto_approved id=%s tool=%s scope=%s", approval_id, tool_name, scope_key
+            )
+            return "approved"
+        self._pending_fp[approval_id] = (fp, scope_key, tool_name)
 
         event = asyncio.Event()
         self._events[approval_id] = event
