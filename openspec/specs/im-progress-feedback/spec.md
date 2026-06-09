@@ -42,37 +42,38 @@ indicators (e.g., Slack message updates, Telegram typing action) when tools are 
 - **WHEN** agent run 中包含 sub_agent 调用，sub_agent 内部执行工具
 - **THEN** 仅顶层 agent 的工具调用触发 `progress_func`，sub_agent 的工具调用不触发
 
-### Requirement: Slack 适配器立即发送占位消息并原地更新
+### Requirement: Slack 适配器使用 Assistants API 状态指示器展示进度
 
-Slack 适配器 SHALL 在收到消息时立即发送一条占位消息，并在 agent 运行期间
-通过 `chat.update` 原地更新，展示当前正在调用的工具名称；最终回复替换该占位消息。
+Slack 适配器 SHALL 在 agent 运行期间通过 Slack Agents & Assistants 的 `assistant_threads_setStatus` 展示原生状态指示器(显示在 bot 名下方,不占消息位,完成后清除),而非发送占位消息。状态文案 SHALL 在工具调用时更新为该工具的可读中文描述。未启用该功能的 App SHALL 平滑降级为纯 `say()` 回复。
 
-#### Scenario: 消息到达时立即发送占位
+#### Scenario: 消息到达时设置初始状态
 
-- **WHEN** Slack handle_message 收到用户消息
-- **THEN** 在进入 session_lock / agent run 前，发送一条 "🤔 思考中…" 占位消息至目标 thread
-- **AND** 记录返回的 `ts`（消息 ID），用于后续更新
+- **WHEN** Slack `_handle()` 收到用户消息
+- **THEN** 调用 `assistant_threads_setStatus(channel_id, thread_ts, status="🤔 思考中...")`
+- **AND** 成功则标记状态可用,失败则记 warning 并标记降级
 
-#### Scenario: 工具调用时更新占位消息
+#### Scenario: 工具调用时更新为可读中文状态
 
-- **WHEN** `progress_func` 收到 `{"type": "tool_call", "name": "some_tool"}` 事件
-- **THEN** 若距上次 `chat.update` 超过 1 秒，调用 `chat.update` 将消息更新为 "🔧 正在调用 some_tool…"
+- **WHEN** `progress_func` 收到 `{"type": "tool_call", "name": "google-workspace__manage_drive"}` 事件且状态可用
+- **THEN** 调用 `setStatus` 将状态更新为可读文案(如 "📂 正在操作 Google Drive...")
+- **AND** 未命中映射的工具名通过前缀匹配或去命名空间 fallback 生成合理文案
 
-#### Scenario: 频繁工具调用时节流
+#### Scenario: agent 完成后清除状态并发送回复
 
-- **WHEN** 连续两次 `tool_call` 事件间隔不足 1 秒
-- **THEN** 第二次不触发 `chat.update`，避免超出 Slack API 频率限制（~1次/秒/channel）
+- **WHEN** agent run 完成,`reply_func` 被调用且状态可用
+- **THEN** 先调用 `setStatus(status="")` 清除状态指示器
+- **AND** 通过 `say()` 发送最终回复到目标 thread
 
-#### Scenario: agent 完成后最终回复替换占位消息
+#### Scenario: 未启用 Assistants 功能时降级
 
-- **WHEN** agent run 完成，`reply_func` 被调用
-- **THEN** 通过 `chat.update` 将占位消息替换为完整回复内容
-- **AND** 不产生新消息，用户看到的仍是同一条消息（内容变为最终答案）
+- **WHEN** 首次 `setStatus` 调用失败(App 未开启 Agents & Assistants 功能)
+- **THEN** 记 warning 并标记状态不可用,后续 progress 更新与清除均跳过
+- **AND** agent run 正常进行,`reply_func` 仍通过 `say()` 发送最终回复
 
-#### Scenario: Slack API 失败时降级为静默
+#### Scenario: 状态更新失败不中断 run
 
-- **WHEN** 占位消息发送失败（如网络错误或权限问题）
-- **THEN** 适配器 log 错误并降级：不发占位消息，agent run 继续，完成后 reply_func 照常发送最终回复
+- **WHEN** 工具调用期间某次 `setStatus` 更新抛异常
+- **THEN** 异常被捕获并 log,agent run 继续,不因状态更新失败而中断
 
 ### Requirement: Telegram 适配器在 agent 运行期间持续发送 typing action
 
