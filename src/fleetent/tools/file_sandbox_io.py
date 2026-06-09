@@ -92,6 +92,34 @@ def build_write_command(ws_path: str) -> str:
     return f'mkdir -p -- "$(dirname -- {q})" && cat > {q}'
 
 
+def build_grep_command(pattern: str, ws_path: str, include: str, max_results: int) -> str:
+    """Recursive content search inside the workspace via ``grep`` (container default).
+
+    ``-r`` recurse, ``-n`` line numbers, ``-I`` skip binary, ``-E`` extended regex.
+    An ``include`` glob maps to ``--include``. The search root is the resolved workspace
+    path, so matches can never escape ``/workspace``. ``-m`` caps matches per file to keep
+    output bounded; the host applies the final cross-file truncation.
+    """
+    parts = ["grep", "-rnI", "-E", f"-m{int(max_results)}"]
+    if include:
+        parts.append(f"--include={shlex.quote(include)}")
+    parts += ["-e", shlex.quote(pattern), "--", shlex.quote(ws_path)]
+    return " ".join(parts)
+
+
+def build_find_command(pattern: str, ws_path: str) -> str:
+    r"""Find files by name glob inside the workspace, sorted by mtime (newest first).
+
+    ``find -name`` matches the basename, so a recursive glob like ``**/*.py`` collapses
+    to its trailing component. ``-printf '%T@\t%p'`` + ``sort -rn`` reproduces the
+    mtime-descending order the non-sandbox tool returned; ``cut`` drops the sort key.
+    """
+    name = posixpath.basename(pattern) or pattern
+    q = shlex.quote(ws_path)
+    n = shlex.quote(name)
+    return f"find {q} -type f -name {n} -printf '%T@\\t%p\\n' | sort -rn | cut -f2-"
+
+
 def resolve_host_path(root: Path, path: str) -> Path:
     """Resolve a tool path inside the host workspace dir (docker-unavailable degrade).
 

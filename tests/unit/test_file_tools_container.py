@@ -75,3 +75,48 @@ async def test_container_read_escape_rejected() -> None:
 
     with pytest.raises(ValueError):
         await backend.probe("../etc/passwd")
+
+
+# ── container search (Task 6) ─────────────────────────────────────────────────
+
+
+async def test_container_search_content_finds_matches() -> None:
+    out = "/workspace/a.py:1:def foo():\n"
+    backend = _backend(_CannedClient({"grep": ExecResult(out, "", 0)}))
+    result = await backend.search_content("def foo", ".", "", 100)
+    assert "a.py" in result
+    assert "def foo" in result
+
+
+async def test_container_search_content_no_match() -> None:
+    backend = _backend(_CannedClient({"grep": ExecResult("", "", 1)}))
+    result = await backend.search_content("nope", ".", "", 100)
+    assert "无匹配" in result
+
+
+async def test_container_search_content_error() -> None:
+    backend = _backend(_CannedClient({"grep": ExecResult("", "grep: bad regex", 2)}))
+    result = await backend.search_content("[bad", ".", "", 100)
+    assert "error" in result.lower()
+
+
+async def test_container_search_content_escape_rejected() -> None:
+    backend = _backend(_CannedClient({}))
+    import pytest
+
+    with pytest.raises(ValueError):
+        await backend.search_content("x", "../etc", "", 100)
+
+
+async def test_container_search_files_lists_matches() -> None:
+    out = "/workspace/new.py\n/workspace/old.py\n"
+    backend = _backend(_CannedClient({"find": ExecResult(out, "", 0)}))
+    result = await backend.search_files("*.py", ".", 100)
+    assert "new.py" in result
+
+
+async def test_container_search_files_truncates() -> None:
+    out = "".join(f"/workspace/f{i}.py\n" for i in range(20))
+    backend = _backend(_CannedClient({"find": ExecResult(out, "", 0)}))
+    result = await backend.search_files("*.py", ".", 5)
+    assert "截断" in result

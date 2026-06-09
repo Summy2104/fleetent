@@ -239,6 +239,18 @@ class _ContainerBackend:
         if res.exit_code != 0:
             raise _BackendError(res.stderr.strip() or "写入文件失败")
 
+    async def search_content(self, pattern: str, path: str, include: str, max_results: int) -> str:
+        rp = fsio.resolve_ws_path(path)
+        res = await self._exec(fsio.build_grep_command(pattern, rp, include, max_results))
+        if res.exit_code not in (0, 1):  # grep: 0=match, 1=no match, >=2=error
+            return f"error: 搜索失败: {res.stderr.strip()[:200]}"
+        return _format_content_results(res.stdout.splitlines(), max_results)
+
+    async def search_files(self, pattern: str, path: str, max_results: int) -> str:
+        rp = fsio.resolve_ws_path(path)
+        res = await self._exec(fsio.build_find_command(pattern, rp))
+        return _format_file_results(res.stdout.splitlines(), max_results)
+
 
 @dataclass
 class _HostBackend:
@@ -287,6 +299,18 @@ class _HostBackend:
             p.write_bytes(data)
         except OSError as exc:
             raise _BackendError(str(exc)) from exc
+
+    async def search_content(self, pattern: str, path: str, include: str, max_results: int) -> str:
+        root = str(self._resolve(path))
+        if _RG_BIN:
+            return _rg_search(pattern, root, include, max_results)
+        return _py_search(pattern, root, include, max_results)
+
+    async def search_files(self, pattern: str, path: str, max_results: int) -> str:
+        root = str(self._resolve(path))
+        if _RG_BIN:
+            return _rg_files(pattern, root, max_results)
+        return _py_files(pattern, root, max_results)
 
 
 async def _select_backend(tool_context: ToolContext | None) -> _ContainerBackend | _HostBackend:
@@ -589,20 +613,47 @@ async def edit_file(
 _RG_BIN = shutil.which("rg")
 
 
+def _format_content_results(lines: list[str], max_results: int) -> str:
+    """Truncate + frame content-search lines (shared by the container backend)."""
+    if not lines:
+        return "(无匹配结果)"
+    truncated = len(lines) > max_results
+    output = "\n".join(lines[:max_results])
+    if truncated:
+        output += f"\n[截断：仅显示前 {max_results} 条，请用 include 参数缩小范围]"
+    return output
+
+
+def _format_file_results(files: list[str], max_results: int) -> str:
+    """Truncate + frame file-search lines (shared by the container backend)."""
+    if not files:
+        return "(无匹配文件)"
+    truncated = len(files) > max_results
+    output = "\n".join(files[:max_results])
+    if truncated:
+        output += f"\n[截断：仅显示前 {max_results} 条]"
+    return output
+
+
 @tool
-def search_content(
+async def search_content(
     pattern: Annotated[str, "正则表达式搜索模式"],
-    path: Annotated[str, "搜索目录或文件（默认当前目录）"] = ".",
+    path: Annotated[str, "搜索目录或文件（默认当前目录，限定在 workspace 内）"] = ".",
     include: Annotated[str, "文件 glob 过滤，如 '*.py'（可选）"] = "",
     max_results: Annotated[int, "最大返回条数（默认 100）"] = 100,
+    tool_context: ToolContext | None = None,
 ) -> str:
-    """Search for a regex pattern across files.
+    """Search for a regex pattern across workspace files.
 
-    Uses ripgrep when available, falls back to Python regular expressions.
+    Runs inside the sandbox container (grep) locked to the workspace, or the host fence
+    (ripgrep/Python fallback) when docker is unavailable. The search root is locked to
+    the workspace, so it can never scan host paths outside it.
     """
-    if _RG_BIN:
-        return _rg_search(pattern, path, include, max_results)
-    return _py_search(pattern, path, include, max_results)
+    backend = await _select_backend(tool_context)
+    try:
+        return await backend.search_content(pattern, path, include, max_results)
+    except ValueError as exc:  # path escapes the workspace
+        return f"error: {exc}"
 
 
 def _rg_search(pattern: str, path: str, include: str, max_results: int) -> str:
@@ -676,15 +727,22 @@ def _py_search(pattern: str, path: str, include: str, max_results: int) -> str:
 
 
 @tool
-def search_files(
+async def search_files(
     pattern: Annotated[str, "glob 模式，如 '**/*.py' 或文件名子串"],
-    path: Annotated[str, "搜索根目录（默认当前目录）"] = ".",
+    path: Annotated[str, "搜索根目录（默认当前目录，限定在 workspace 内）"] = ".",
     max_results: Annotated[int, "最大返回条数（默认 100）"] = 100,
+    tool_context: ToolContext | None = None,
 ) -> str:
-    """Find files by glob pattern, sorted by modification time (newest first)."""
-    if _RG_BIN:
-        return _rg_files(pattern, path, max_results)
-    return _py_files(pattern, path, max_results)
+    """Find files by glob pattern in the workspace, sorted by mtime (newest first).
+
+    Runs inside the sandbox container (find) locked to the workspace, or the host fence
+    (ripgrep/Python fallback) when docker is unavailable.
+    """
+    backend = await _select_backend(tool_context)
+    try:
+        return await backend.search_files(pattern, path, max_results)
+    except ValueError as exc:  # path escapes the workspace
+        return f"error: {exc}"
 
 
 def _rg_files(pattern: str, path: str, max_results: int) -> str:

@@ -25,8 +25,8 @@
 
 ## 6. search_content / search_files 走容器
 
-- [ ] 6.1 Write failing unit tests: search_content（grep/rg 正则）、search_files（find/rg glob）限定在 workspace；越界根路径拒绝（tests/unit）
-- [ ] 6.2 Implement search 改造，pass unit tests
+- [x] 6.1 Write failing unit tests: search_content（grep/rg 正则）、search_files（find/rg glob）限定在 workspace；越界根路径拒绝（tests/unit）
+- [x] 6.2 Implement search 改造，pass unit tests
 
 ## 7. 风险定级 + tool_context 贯穿
 
