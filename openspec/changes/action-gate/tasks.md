@@ -10,8 +10,8 @@
 
 ## 3. loop 接入 Action Gate（替换硬编码风险分支）
 
-- [ ] 3.1 Write failing unit tests `tests/unit/test_loop_action_gate.py`（mock LLM + mock gate）：critical 工具→不调 gate、产 reject placeholder 且 `counts_failure=False`、置 `approval_rejected`；medium/high→仍调 `request_approval`（默认 approval 不变，回归）；配 medium_mode=sandbox 且工具 sandbox-backed→不调 gate、直接进执行批；配 medium_mode=sandbox 但工具非 sandbox-backed→仍调 gate（fail-closed）（tests/unit）
-- [ ] 3.2 Implement `_plan_run_slots` 用 `resolve_action_mode` 路由（REJECT/APPROVAL/DIRECT·SANDBOX 三分支），pass unit tests
+- [x] 3.1 Write failing unit tests `tests/unit/test_loop_action_gate.py`（mock LLM + mock gate）：critical 工具→不调 gate、产 reject placeholder 且 `counts_failure=False`、置 `approval_rejected`；medium/high→仍调 `request_approval`（默认 approval 不变，回归）；配 medium_mode=sandbox 且工具 sandbox-backed→不调 gate、直接进执行批；配 medium_mode=sandbox 但工具非 sandbox-backed→仍调 gate（fail-closed）（tests/unit）
+- [x] 3.2 Implement `_plan_run_slots` 用 `resolve_action_mode` 路由（REJECT/APPROVAL/DIRECT·SANDBOX 三分支），pass unit tests
 
 ## 4. 反逃逸 + no_reply→reject 契约
 

@@ -17,6 +17,7 @@ from openai.types.chat import ChatCompletionChunk
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent import agent_config
 from fleetent.eval_logger import log_run
+from fleetent.governance.action_gate import ActionMode, is_sandbox_backed, resolve_action_mode
 from fleetent.governance.agent_policy import check_tool_access
 from fleetent.governance.permission_gate import _default_gate
 from fleetent.integrations.sandbox import Mode, is_code_execution_enabled
@@ -723,12 +724,35 @@ async def _plan_run_slots(
             if hres.modified_args is not None:
                 slot_args = hres.modified_args
             force_ask = hres.decision == "ask"
+        # Action Gate (C2): the tool's registry risk (never LLM args — anti-escape) maps
+        # to a disposition. CRITICAL is hardcoded REJECT; medium/high follow the agent's
+        # configured mode (default approval); unknown/uncontainable fail closed upward.
         risk = get_risk_level(name)
-        if (
-            (risk in ("medium", "high") or force_ask)
-            and reply_func is not None
-            and permission_gate_enabled
-        ):
+        gate_mode = resolve_action_mode(
+            risk,
+            medium_mode=(
+                governance.action_gate_medium_mode if governance is not None else "approval"
+            ),
+            high_mode=(governance.action_gate_high_mode if governance is not None else "approval"),
+            sandbox_capable=is_sandbox_backed(name),
+            force_ask=force_ask,
+        )
+        if gate_mode is ActionMode.REJECT:
+            state.approval_rejected = True
+            slots.append(
+                _PlanSlot(
+                    tc_id=tc.id,
+                    name=name,
+                    tc_fp=tc_fp,
+                    placeholder=(
+                        f"tool execution rejected by action gate: {name} (critical risk)",
+                        False,
+                    ),
+                    counts_failure=False,
+                )
+            )
+            continue
+        if gate_mode is ActionMode.APPROVAL and reply_func is not None and permission_gate_enabled:
             tool_args = json.loads(slot_args) if isinstance(slot_args, str) else slot_args
             approval_id = str(uuid.uuid4())[:8]
             # D3: approvals are requested serially in original order; only approved
