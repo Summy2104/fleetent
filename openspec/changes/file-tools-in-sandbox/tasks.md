@@ -35,8 +35,8 @@
 
 ## 8. integration（真实 docker）
 
-- [ ] 8.1 Write failing integration tests: 文件工具在容器内读写 workspace、越界路径拒绝、workspace 外宿主路径不可达、edit/search 端到端（tests/integration，无 docker 则 skip）
-- [ ] 8.2 Implement 直到 integration 通过
+- [x] 8.1 Write failing integration tests: 文件工具在容器内读写 workspace、越界路径拒绝、workspace 外宿主路径不可达、edit/search 端到端（tests/integration，无 docker 则 skip）
+- [x] 8.2 Implement 直到 integration 通过
 
 ## 9. 收尾验证
 
