@@ -21,6 +21,44 @@ _APPROVAL_RE = re.compile(
 _REJECTION_MSG = "你还没有权限使用此 bot，请联系管理员审批。"
 
 
+def _current_date_tz() -> tuple[str, str]:
+    """Return (date string, timezone name) for context injection.
+
+    Date-level granularity keeps the injected system frame stable within a day so it
+    does not churn the cacheable prefix on every message. TZ comes from the `TZ` env
+    (agent sandbox/runtime config), defaulting to UTC.
+    """
+    import datetime
+    import os
+    from zoneinfo import ZoneInfo
+
+    tzname = os.environ.get("TZ") or "UTC"
+    try:
+        tz: datetime.tzinfo = ZoneInfo(tzname)
+    except Exception:  # noqa: BLE001 — bad TZ falls back to UTC, never breaks a turn
+        tz, tzname = datetime.timezone.utc, "UTC"
+    return datetime.datetime.now(tz).strftime("%Y-%m-%d (%A)"), tzname
+
+
+def _session_frame_text(sc: SessionContext) -> str:
+    """Stable session frame for the system message: platform, scene, date+tz."""
+    date_str, tzname = _current_date_tz()
+    scene = "私信 (DM)" if sc.chat_type == "dm" else f"频道 {sc.channel_name}".rstrip()
+    return (
+        "## 会话上下文\n"
+        f"- 平台: {sc.platform}\n"
+        f"- 场景: {scene}\n"
+        f"- 当前日期: {date_str} ({tzname})"
+    )
+
+
+def _sender_prefix_text(sc: SessionContext) -> str:
+    """One-line sender attribution prefixed to the user message."""
+    name = f" ({sc.sender_name})" if sc.sender_name else ""
+    mention = " [已@bot]" if sc.was_mentioned else ""
+    return f"[发送人 {sc.platform}:{sc.sender_id}{name}{mention}]"
+
+
 @dataclass
 class SessionContext:
     """Sender/channel metadata for one inbound message, injected into the LLM.
@@ -242,6 +280,9 @@ async def route(msg: NormalizedMessage) -> None:
     # Build the user content once (images are analyzed here) — reused by both the
     # steering branch and the normal turn so analysis never runs twice.
     user_content = await _build_user_content(msg)
+    # im-message-context: prefix the sender attribution onto this turn's user message.
+    if msg.session_context is not None:
+        user_content = f"{_sender_prefix_text(msg.session_context)}\n\n{user_content}"
 
     # C1 steering: when a run is already in flight for this session, route the new
     # message per the agent's steering_mode BEFORE taking the session lock (taking it
@@ -270,6 +311,9 @@ async def route(msg: NormalizedMessage) -> None:
     catalog = available_skills_prompt(allowed_skills=agent.allowed_skills if agent else None)
     disabled_trace = collect_disabled_trace() or None
     system_content = "\n\n".join(p for p in [base_system, catalog] if p)
+    # im-message-context: append the stable session frame (platform/scene/date+tz).
+    if msg.session_context is not None:
+        system_content = f"{system_content}\n\n{_session_frame_text(msg.session_context)}"
 
     token = CancelToken()
     max_pending = governance.steering_max_pending if governance else 8
