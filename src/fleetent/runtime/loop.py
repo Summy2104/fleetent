@@ -622,7 +622,6 @@ async def _plan_run_slots(
     permission_gate_enabled: bool = True,
     permission_gate_medium_timeout: int | None = None,
     permission_gate_high_timeout: int | None = None,
-    progress_func: ProgressFunc | None = None,
 ) -> list[_PlanSlot]:
     """Phase one for run() (D2/D3/D6): serial, original order — produce one slot
     per tool_call. Guardrail, pre_tool_use hook, and (medium/high) approval are decided
@@ -757,11 +756,6 @@ async def _plan_run_slots(
                     )
                 )
                 continue
-        if progress_func is not None:
-            try:  # noqa: SIM105 — cannot use contextlib.suppress with async await
-                await progress_func({"type": "tool_call", "name": name})
-            except Exception:  # noqa: BLE001 — progress feedback must not break the run
-                pass
         slots.append(
             _PlanSlot(
                 tc_id=tc.id,
@@ -1778,9 +1772,17 @@ async def _run_inner(
             permission_gate_enabled=permission_gate_enabled,
             permission_gate_medium_timeout=permission_gate_medium_timeout,
             permission_gate_high_timeout=permission_gate_high_timeout,
-            progress_func=progress_func if not is_sub_agent else None,
         )
         pending = [s for s in slots if s.placeholder is None]
+        # Progress is emitted once per execution batch (not per tool during planning):
+        # carry every in-flight tool name so adapters can show the whole batch rather
+        # than only the last. sub_agent runs never surface to the parent's progress.
+        if progress_func is not None and not is_sub_agent and pending:
+            _names = [s.name for s in pending]
+            try:  # noqa: SIM105 — cannot use contextlib.suppress with async await
+                await progress_func({"type": "tool_call", "names": _names, "name": _names[0]})
+            except Exception:  # noqa: BLE001 — progress feedback must not break the run
+                pass
         results = await _execute_pending(
             pending,
             is_sub_agent=is_sub_agent,
