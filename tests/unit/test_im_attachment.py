@@ -18,6 +18,9 @@ def _capture_slack_handler(monkeypatch):
 
             return deco
 
+        def assistant(self, assistant):  # noqa: ANN001, ANN201
+            captured["assistant"] = assistant
+
     with patch("slack_bolt.async_app.AsyncApp", return_value=FakeApp()):
         import fleetent.im_gateway.slack as slack_mod
 
