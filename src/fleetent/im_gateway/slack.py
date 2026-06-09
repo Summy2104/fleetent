@@ -84,6 +84,24 @@ def _status_text_for_event(evt: dict[str, Any]) -> str:
     return _aggregate_status_text(list(names))
 
 
+_THINKING_STATUS = "🤔 思考中..."
+
+
+def _loading_messages_for_event(evt: dict[str, Any]) -> list[str]:
+    """Per-tool rotation messages for the assistant message area.
+
+    Slack rotates these while the agent works; supplying our own keeps the rotation
+    showing fleetent's tool labels instead of Slack's built-in default placeholders.
+    """
+    names = evt.get("names")
+    if not names:
+        single = evt.get("name")
+        names = [single] if single else []
+    if not names:
+        return [_THINKING_STATUS]
+    return [_tool_status_text(n) for n in names]
+
+
 async def _make_status_funcs(
     client: Any,
     channel: str,
@@ -222,7 +240,7 @@ async def _route_assistant_message(
     identity = resolve_identity("slack", slack_user_id)
 
     with contextlib.suppress(Exception):
-        await set_status("🤔 思考中...")
+        await set_status(_THINKING_STATUS, loading_messages=[_THINKING_STATUS])
 
     async def reply_func(text: str) -> None:
         with contextlib.suppress(Exception):
@@ -231,7 +249,10 @@ async def _route_assistant_message(
 
     async def progress_func(evt: dict[str, Any]) -> None:
         try:
-            await set_status(_status_text_for_event(evt))
+            await set_status(
+                _status_text_for_event(evt),
+                loading_messages=_loading_messages_for_event(evt),
+            )
         except Exception as exc:  # noqa: BLE001 — status update failure must not break the run
             logger.warning("slack_progress_status_failed", error=str(exc))
 
