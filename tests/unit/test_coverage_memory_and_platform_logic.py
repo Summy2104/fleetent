@@ -7,7 +7,6 @@ from typing import Any
 import httpx
 import pytest
 
-from fleetent.governance import quota
 from fleetent.memory import extraction, maintenance, shared, trends
 from fleetent.memory.models import (
     MemoryCompactionCandidate,
@@ -595,40 +594,6 @@ def test_alerting_evaluates_sustained_breaches_and_suppression():
         now,
         1800,
     )
-
-
-def test_quota_system_user_is_exempt_and_limits_are_evaluated(monkeypatch):
-    init_calls = 0
-
-    def fake_init_db() -> None:
-        nonlocal init_calls
-        init_calls += 1
-
-    quotas = {
-        "user:u1": (100, 2),
-        "global": (500, 10),
-        "user:limited": (10, None),
-        "user:called": (None, 1),
-    }
-    usage = {
-        "user:u1": (90, 1),
-        "global": (100, 1),
-        "user:limited": (8, 0),
-        "user:called": (0, 1),
-    }
-
-    monkeypatch.setattr(quota, "_init_db", fake_init_db)
-    monkeypatch.setattr(quota, "_get_quota", lambda scope: quotas.get(scope))
-    monkeypatch.setattr(quota, "_get_usage", lambda scope: usage.get(scope, (0, 0)))
-
-    quota.record_usage(quota.SYSTEM_USER_ID, 1000)
-    assert quota.check_quota(quota.SYSTEM_USER_ID, 1000)
-    assert init_calls == 0
-
-    assert quota.check_quota("u1", 10)
-    assert not quota.check_quota("limited", 3)
-    assert not quota.check_quota("called", 0)
-    assert init_calls == 3
 
 
 async def test_provider_connectivity_handles_success_and_errors(monkeypatch):

@@ -370,11 +370,6 @@ def wire_agent_store_seams() -> None:
 wire_agent_store_seams()
 
 
-def _emit_over_quota_event(user_id: str) -> None:
-    """Emit an over-quota event so operators can see who hit their limit."""
-    logger.warning("over_quota user_id=%s", user_id)
-
-
 def _run_monitoring_cycle() -> None:
     """One periodic monitoring tick: collect samples, prune, escalate stale criticals.
 
