@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
-from fleetent.tools.registry import tool
+from fleetent.integrations.sandbox.enablement import Mode, get_effective_mode
+from fleetent.tools import file_sandbox_io as fsio
+from fleetent.tools.registry import ToolContext, tool
+
+if TYPE_CHECKING:
+    from fleetent.integrations.sandbox.client import ExecResult, SandboxClient
+    from fleetent.integrations.sandbox.manager import SandboxManager
 
 logger = logging.getLogger(__name__)
 
@@ -63,13 +71,8 @@ _MAGIC_DESCRIPTIONS: dict[bytes, str] = {
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-def _detect_binary(path: Path) -> str | None:
-    """Return MIME-like type string if binary, None if text."""
-    try:
-        sample = path.read_bytes()[:_BINARY_SAMPLE]
-    except OSError:
-        return None
-
+def _detect_binary_bytes(sample: bytes) -> str | None:
+    """Return MIME-like type string if the byte sample looks binary, else None."""
     for magic in _MAGIC_SIGNATURES:
         if sample.startswith(magic):
             return _MAGIC_DESCRIPTIONS.get(magic, "application/binary")
@@ -88,6 +91,15 @@ def _detect_binary(path: Path) -> str | None:
     return None
 
 
+def _detect_binary(path: Path) -> str | None:
+    """Return MIME-like type string if binary, None if text (host-path overload)."""
+    try:
+        sample = path.read_bytes()[:_BINARY_SAMPLE]
+    except OSError:
+        return None
+    return _detect_binary_bytes(sample)
+
+
 def _format_size(size: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if size < 1024:
@@ -96,12 +108,9 @@ def _format_size(size: int) -> str:
     return f"{size}TB"
 
 
-def _dir_listing(path: Path) -> str:
-    try:
-        entries = sorted(path.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
-    except OSError as exc:
-        return f"error: {exc}"
-
+def _format_dir_listing(path: str, entries: list[_DirEntry]) -> str:
+    """Format a directory listing (mtime-sorted, sizes), backend-agnostic."""
+    entries = sorted(entries, key=lambda e: e.mtime, reverse=True)
     total = len(entries)
     truncated = total > DIR_MAX_ENTRIES
     visible = entries[:DIR_MAX_ENTRIES]
@@ -111,13 +120,9 @@ def _dir_listing(path: Path) -> str:
     )
     lines = [f"{path}/ {suffix}"]
     for entry in visible:
-        try:
-            stat = entry.stat()
-            size = _format_size(stat.st_size) if entry.is_file() else "dir"
-            indicator = "/" if entry.is_dir() else ""
-            lines.append(f"  {entry.name}{indicator}  {size}")
-        except OSError:
-            lines.append(f"  {entry.name}  (stat failed)")
+        size = "dir" if entry.is_dir else _format_size(entry.size)
+        indicator = "/" if entry.is_dir else ""
+        lines.append(f"  {entry.name}{indicator}  {size}")
 
     if truncated:
         lines.append(f"\n[截断：共 {total} 条，仅显示前 {DIR_MAX_ENTRIES} 条]")
@@ -125,30 +130,255 @@ def _dir_listing(path: Path) -> str:
     return "\n".join(lines)
 
 
+# ── sandbox backend selection ─────────────────────────────────────────────────
+
+# Default scope key when a tool is called without a ToolContext (direct/unbound
+# call) — mirrors run_code's "run-code" fallback so both share a coherent default.
+_DEFAULT_KEY = "file-tools"
+
+
+class _BackendError(Exception):
+    """A backend IO command failed (non-zero exit / unreadable path)."""
+
+
+@dataclass
+class _Stat:
+    kind: str  # "file" | "dir" | "missing" | "other"
+    size: int = 0
+
+
+@dataclass
+class _DirEntry:
+    name: str
+    is_dir: bool
+    size: int
+    mtime: float
+
+
+def _parse_probe(stdout: str) -> _Stat:
+    head = stdout.strip()
+    if head.startswith("file"):
+        parts = head.split()
+        size = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        return _Stat("file", size)
+    if head == "dir":
+        return _Stat("dir")
+    if head == "other":
+        return _Stat("other")
+    return _Stat("missing")
+
+
+def _parse_listdir(stdout: str) -> list[_DirEntry]:
+    entries: list[_DirEntry] = []
+    for line in stdout.splitlines():
+        if not line:
+            continue
+        parts = line.split("\t")
+        if len(parts) != 4:
+            continue
+        name, kind, size, mtime = parts
+        entries.append(
+            _DirEntry(
+                name=name,
+                is_dir=kind == "d",
+                size=int(size) if size.isdigit() else 0,
+                mtime=float(mtime) if mtime else 0.0,
+            )
+        )
+    return entries
+
+
+def _get_sandbox_manager() -> SandboxManager:
+    """Return the process-wide SandboxManager, shared with run_code.
+
+    Imported lazily to avoid the import cycle (builtin_tools imports this module to
+    re-export read_file/write_file). Sharing run_code's manager means the file tools
+    reuse the same per-session container/registry instead of booting their own.
+    """
+    from fleetent.tools.builtin_tools import _get_manager
+
+    return _get_manager()
+
+
+@dataclass
+class _ContainerBackend:
+    """File IO executed inside the sandbox container, locked to ``/workspace``."""
+
+    client: SandboxClient
+    ws_id: str
+    session_id: str
+
+    async def _exec(self, command: str) -> ExecResult:
+        return await self.client.exec(self.ws_id, command, session_id=self.session_id)
+
+    async def probe(self, path: str) -> _Stat:
+        rp = fsio.resolve_ws_path(path)
+        res = await self._exec(fsio.build_probe_command(rp))
+        return _parse_probe(res.stdout)
+
+    async def read_bytes(self, path: str) -> bytes:
+        rp = fsio.resolve_ws_path(path)
+        res = await self._exec(fsio.build_read_b64_command(rp))
+        if res.exit_code != 0:
+            raise _BackendError(res.stderr.strip() or "读取文件失败")
+        try:
+            return base64.b64decode(res.stdout)
+        except ValueError as exc:  # binascii.Error is a ValueError subclass
+            raise _BackendError(f"解码失败: {exc}") from exc
+
+    async def list_dir(self, path: str) -> list[_DirEntry]:
+        rp = fsio.resolve_ws_path(path)
+        res = await self._exec(fsio.build_listdir_command(rp))
+        return _parse_listdir(res.stdout)
+
+    async def write_bytes(self, path: str, data: bytes) -> None:
+        rp = fsio.resolve_ws_path(path)
+        res = await self.client.exec(
+            self.ws_id, fsio.build_write_command(rp), session_id=self.session_id, stdin=data
+        )
+        if res.exit_code != 0:
+            raise _BackendError(res.stderr.strip() or "写入文件失败")
+
+    async def search_content(self, pattern: str, path: str, include: str, max_results: int) -> str:
+        rp = fsio.resolve_ws_path(path)
+        res = await self._exec(fsio.build_grep_command(pattern, rp, include, max_results))
+        if res.exit_code not in (0, 1):  # grep: 0=match, 1=no match, >=2=error
+            return f"error: 搜索失败: {res.stderr.strip()[:200]}"
+        return _format_content_results(res.stdout.splitlines(), max_results)
+
+    async def search_files(self, pattern: str, path: str, max_results: int) -> str:
+        rp = fsio.resolve_ws_path(path)
+        res = await self._exec(fsio.build_find_command(pattern, rp))
+        return _format_file_results(res.stdout.splitlines(), max_results)
+
+
+@dataclass
+class _HostBackend:
+    """File IO on the host (docker-unavailable degrade), fenced to ``root``."""
+
+    root: Path
+
+    def _resolve(self, path: str) -> Path:
+        return fsio.resolve_host_path(self.root, path)
+
+    async def probe(self, path: str) -> _Stat:
+        p = self._resolve(path)
+        if p.is_dir():
+            return _Stat("dir")
+        if p.is_file():
+            return _Stat("file", p.stat().st_size)
+        if p.exists():
+            return _Stat("other")
+        return _Stat("missing")
+
+    async def read_bytes(self, path: str) -> bytes:
+        try:
+            return self._resolve(path).read_bytes()
+        except OSError as exc:
+            raise _BackendError(str(exc)) from exc
+
+    async def list_dir(self, path: str) -> list[_DirEntry]:
+        p = self._resolve(path)
+        entries: list[_DirEntry] = []
+        try:
+            children = list(p.iterdir())
+        except OSError as exc:
+            raise _BackendError(str(exc)) from exc
+        for child in children:
+            try:
+                st = child.stat()
+                entries.append(_DirEntry(child.name, child.is_dir(), st.st_size, st.st_mtime))
+            except OSError:
+                entries.append(_DirEntry(child.name, False, 0, 0.0))
+        return entries
+
+    async def write_bytes(self, path: str, data: bytes) -> None:
+        p = self._resolve(path)
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(data)
+        except OSError as exc:
+            raise _BackendError(str(exc)) from exc
+
+    async def search_content(self, pattern: str, path: str, include: str, max_results: int) -> str:
+        root = str(self._resolve(path))
+        if _RG_BIN:
+            return _rg_search(pattern, root, include, max_results)
+        return _py_search(pattern, root, include, max_results)
+
+    async def search_files(self, pattern: str, path: str, max_results: int) -> str:
+        root = str(self._resolve(path))
+        if _RG_BIN:
+            return _rg_files(pattern, root, max_results)
+        return _py_files(pattern, root, max_results)
+
+
+async def _select_backend(tool_context: ToolContext | None) -> _ContainerBackend | _HostBackend:
+    """Pick the container backend when the sandbox is usable, else the host fence.
+
+    Container is the structural-defense path (mount namespace makes workspace-external
+    host paths physically unreachable). When docker is unavailable the effective mode
+    degrades to OFF; we then operate on the same host workspace dir behind a normpath
+    path fence (no namespace — the documented degrade).
+    """
+    session_id = (
+        tool_context.session_id if tool_context and tool_context.session_id else _DEFAULT_KEY
+    )
+    agent_name = (tool_context.agent_name if tool_context else None) or "default"
+    manager = _get_sandbox_manager()
+    mode = await get_effective_mode()
+    if mode is Mode.OFF:
+        root = manager.workspace_host_path(manager.scope, session_id, agent_name)
+        return _HostBackend(root=root)
+    from fleetent.integrations.sandbox import build_sandbox_env
+
+    features = tool_context.features if tool_context else {}
+    env = build_sandbox_env(agent_env=features.get("sandbox_env"))
+    ws_id = await manager.acquire(manager.scope, session_id, agent_name, env=env)
+    return _ContainerBackend(client=manager.client, ws_id=ws_id, session_id=session_id)
+
+
 # ── tools ─────────────────────────────────────────────────────────────────────
 
 
 @tool
-def read_file(
-    path: Annotated[str, "文件或目录的路径"],
+async def read_file(
+    path: Annotated[str, "文件或目录的路径（限定在 workspace 内）"],
     offset: Annotated[int, "起始行号（1-indexed，默认 1）"] = 1,
     limit: Annotated[int, "最大读取行数（默认 200）"] = READ_DEFAULT_LIMIT,
+    tool_context: ToolContext | None = None,
 ) -> str:
     """Read a file with line-level pagination, or list a directory.
 
-    For files: returns lines [offset, offset+limit) with line-number prefixes.
-    For directories: returns a tree listing sorted by mtime (newest first).
-    Binary files are detected and rejected with a descriptive error.
+    Runs inside the sandbox container locked to the workspace (host degrade fenced to
+    the same dir when docker is unavailable). For files: returns lines [offset,
+    offset+limit) with line-number prefixes. For directories: a listing sorted by
+    mtime (newest first). Binary files are detected and rejected.
     """
-    p = Path(path)
+    backend = await _select_backend(tool_context)
+    try:
+        stat = await backend.probe(path)
+    except ValueError as exc:  # path escapes the workspace
+        return f"error: {exc}"
+    except _BackendError as exc:
+        return f"error: {exc}"
 
-    if not p.exists():
+    if stat.kind == "missing":
         return f"error: 路径不存在: {path}"
 
-    if p.is_dir():
-        return _dir_listing(p)
+    if stat.kind == "dir":
+        try:
+            entries = await backend.list_dir(path)
+        except _BackendError as exc:
+            return f"error: {exc}"
+        return _format_dir_listing(path, entries)
 
-    binary_type = _detect_binary(p)
+    try:
+        data = await backend.read_bytes(path)
+    except _BackendError as exc:
+        return f"error: {exc}"
+
+    binary_type = _detect_binary_bytes(data[:_BINARY_SAMPLE])
     if binary_type is not None:
         hint = (
             "图片请使用 analyze_image 工具"
@@ -157,10 +387,7 @@ def read_file(
         )
         return f"error: 二进制文件 ({binary_type})，{hint}"
 
-    try:
-        all_lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as exc:
-        return f"error: {exc}"
+    all_lines = data.decode("utf-8", errors="replace").splitlines()
 
     total = len(all_lines)
     start = max(0, offset - 1)  # convert 1-indexed to 0-indexed
@@ -182,17 +409,25 @@ def read_file(
 
 
 @tool(risk_level="medium")
-def write_file(
-    path: Annotated[str, "目标文件路径"],
+async def write_file(
+    path: Annotated[str, "目标文件路径（限定在 workspace 内）"],
     content: Annotated[str, "写入的完整内容"],
+    tool_context: ToolContext | None = None,
 ) -> str:
-    """Write content to a local file (full overwrite). Requires approval."""
+    """Write content to a workspace file (full overwrite). Requires approval.
+
+    Runs inside the sandbox container (content streamed over stdin) or the host fence
+    when docker is unavailable; the path is locked to the workspace.
+    """
+    backend = await _select_backend(tool_context)
+    data = content.encode("utf-8")
     try:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        Path(path).write_text(content, encoding="utf-8")
-        return f"written {len(content)} bytes to {path}"
-    except OSError as exc:
+        await backend.write_bytes(path, data)
+    except ValueError as exc:  # path escapes the workspace
         return f"error: {exc}"
+    except _BackendError as exc:
+        return f"error: {exc}"
+    return f"written {len(content)} bytes to {path}"
 
 
 # ── edit_file: 6-layer fallback matcher ───────────────────────────────────────
@@ -321,26 +556,35 @@ def _find_line_number(text: str, old: str) -> int:
 
 
 @tool(risk_level="medium")
-def edit_file(
-    path: Annotated[str, "目标文件路径"],
+async def edit_file(
+    path: Annotated[str, "目标文件路径（限定在 workspace 内）"],
     old_string: Annotated[str, "要替换的原始字符串（必须在文件中存在）"],
     new_string: Annotated[str, "替换后的新字符串"],
     replace_all: Annotated[bool, "是否替换所有匹配（默认 False 只替换第一处）"] = False,
+    tool_context: ToolContext | None = None,
 ) -> str:
     """Replace old_string with new_string in a file using 6-layer fallback matching.
 
-    Tries exact match first, then progressively more flexible strategies (line
-    trim, whitespace normalization, line-ending normalization, indentation
-    normalization, context-aware anchor matching). Returns which layer matched.
+    Reads the file through the workspace-fenced backend, runs the matcher on the host
+    (exact → line trim → whitespace → line-ending → indentation → context anchor), then
+    writes the result back through the backend. Returns which layer matched.
     """
-    p = Path(path)
-    if not p.exists():
+    backend = await _select_backend(tool_context)
+    try:
+        stat = await backend.probe(path)
+    except ValueError as exc:  # path escapes the workspace
+        return f"error: {exc}"
+    except _BackendError as exc:
+        return f"error: {exc}"
+    if stat.kind != "file":
         return f"error: 文件不存在: {path}"
 
     try:
-        original = p.read_text(encoding="utf-8")
-    except OSError as exc:
+        original = (await backend.read_bytes(path)).decode("utf-8")
+    except _BackendError as exc:
         return f"error: 读取文件失败: {exc}"
+    except UnicodeDecodeError:
+        return f"error: 读取文件失败: 非 UTF-8 文本文件: {path}"
 
     # No-op guard
     if old_string.strip() == new_string.strip() and old_string == new_string:
@@ -351,8 +595,8 @@ def edit_file(
         if result is not None and result != original:
             line_no = _find_line_number(original, old_string)
             try:
-                p.write_text(result, encoding="utf-8")
-            except OSError as exc:
+                await backend.write_bytes(path, result.encode("utf-8"))
+            except _BackendError as exc:
                 return f"error: 写入文件失败: {exc}"
             loc = f"第 {line_no} 行附近" if line_no > 0 else "文件中"
             return f"替换成功（{loc}，使用 {layer_name}）"
@@ -369,20 +613,47 @@ def edit_file(
 _RG_BIN = shutil.which("rg")
 
 
+def _format_content_results(lines: list[str], max_results: int) -> str:
+    """Truncate + frame content-search lines (shared by the container backend)."""
+    if not lines:
+        return "(无匹配结果)"
+    truncated = len(lines) > max_results
+    output = "\n".join(lines[:max_results])
+    if truncated:
+        output += f"\n[截断：仅显示前 {max_results} 条，请用 include 参数缩小范围]"
+    return output
+
+
+def _format_file_results(files: list[str], max_results: int) -> str:
+    """Truncate + frame file-search lines (shared by the container backend)."""
+    if not files:
+        return "(无匹配文件)"
+    truncated = len(files) > max_results
+    output = "\n".join(files[:max_results])
+    if truncated:
+        output += f"\n[截断：仅显示前 {max_results} 条]"
+    return output
+
+
 @tool
-def search_content(
+async def search_content(
     pattern: Annotated[str, "正则表达式搜索模式"],
-    path: Annotated[str, "搜索目录或文件（默认当前目录）"] = ".",
+    path: Annotated[str, "搜索目录或文件（默认当前目录，限定在 workspace 内）"] = ".",
     include: Annotated[str, "文件 glob 过滤，如 '*.py'（可选）"] = "",
     max_results: Annotated[int, "最大返回条数（默认 100）"] = 100,
+    tool_context: ToolContext | None = None,
 ) -> str:
-    """Search for a regex pattern across files.
+    """Search for a regex pattern across workspace files.
 
-    Uses ripgrep when available, falls back to Python regular expressions.
+    Runs inside the sandbox container (grep) locked to the workspace, or the host fence
+    (ripgrep/Python fallback) when docker is unavailable. The search root is locked to
+    the workspace, so it can never scan host paths outside it.
     """
-    if _RG_BIN:
-        return _rg_search(pattern, path, include, max_results)
-    return _py_search(pattern, path, include, max_results)
+    backend = await _select_backend(tool_context)
+    try:
+        return await backend.search_content(pattern, path, include, max_results)
+    except ValueError as exc:  # path escapes the workspace
+        return f"error: {exc}"
 
 
 def _rg_search(pattern: str, path: str, include: str, max_results: int) -> str:
@@ -456,15 +727,22 @@ def _py_search(pattern: str, path: str, include: str, max_results: int) -> str:
 
 
 @tool
-def search_files(
+async def search_files(
     pattern: Annotated[str, "glob 模式，如 '**/*.py' 或文件名子串"],
-    path: Annotated[str, "搜索根目录（默认当前目录）"] = ".",
+    path: Annotated[str, "搜索根目录（默认当前目录，限定在 workspace 内）"] = ".",
     max_results: Annotated[int, "最大返回条数（默认 100）"] = 100,
+    tool_context: ToolContext | None = None,
 ) -> str:
-    """Find files by glob pattern, sorted by modification time (newest first)."""
-    if _RG_BIN:
-        return _rg_files(pattern, path, max_results)
-    return _py_files(pattern, path, max_results)
+    """Find files by glob pattern in the workspace, sorted by mtime (newest first).
+
+    Runs inside the sandbox container (find) locked to the workspace, or the host fence
+    (ripgrep/Python fallback) when docker is unavailable.
+    """
+    backend = await _select_backend(tool_context)
+    try:
+        return await backend.search_files(pattern, path, max_results)
+    except ValueError as exc:  # path escapes the workspace
+        return f"error: {exc}"
 
 
 def _rg_files(pattern: str, path: str, max_results: int) -> str:

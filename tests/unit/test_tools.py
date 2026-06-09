@@ -42,25 +42,35 @@ def test_calculate_invalid_expression():
     assert result.startswith("error:")
 
 
-def test_read_file_returns_contents(tmp_path):
-    f = tmp_path / "hello.txt"
-    f.write_text("hello world")
-    result = tool_registry.dispatch("read_file", f'{{"path": "{f}"}}')
+@pytest.fixture
+def _workspace(tmp_path, monkeypatch):
+    """read_file is async + workspace-fenced; drive it via the host backend."""
+    from fleetent.tools import file_tools
+
+    async def _select(tool_context):
+        return file_tools._HostBackend(root=tmp_path)
+
+    monkeypatch.setattr(file_tools, "_select_backend", _select)
+    return tmp_path
+
+
+async def test_read_file_returns_contents(_workspace):
+    (_workspace / "hello.txt").write_text("hello world")
+    result = await tool_registry.dispatch("read_file", '{"path": "hello.txt"}')
     # New read_file includes line-number prefix
     assert "hello world" in result
 
 
-def test_read_file_paginates_at_200_lines(tmp_path):
-    f = tmp_path / "big.txt"
-    f.write_text("\n".join(f"line{i}" for i in range(500)) + "\n")
-    result = tool_registry.dispatch("read_file", f'{{"path": "{f}"}}')
+async def test_read_file_paginates_at_200_lines(_workspace):
+    (_workspace / "big.txt").write_text("\n".join(f"line{i}" for i in range(500)) + "\n")
+    result = await tool_registry.dispatch("read_file", '{"path": "big.txt"}')
     assert "line0" in result
     assert "line199" in result
     assert "line200" not in result
 
 
-def test_read_file_missing_file():
-    result = tool_registry.dispatch("read_file", '{"path": "/nonexistent/path/file.txt"}')
+async def test_read_file_missing_file(_workspace):
+    result = await tool_registry.dispatch("read_file", '{"path": "nope.txt"}')
     assert result.startswith("error:")
 
 
