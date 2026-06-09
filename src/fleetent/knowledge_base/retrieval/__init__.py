@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     )
     from .scope import (
         AgentKnowledgeBaseBinding,
-        _get_binding,
         resolve_agent_kb_ids,
     )
     from .search import SearchMode
@@ -28,13 +27,11 @@ def __getattr__(name: str) -> object:
     if name in {
         "AgentKnowledgeBaseBinding",
         "resolve_agent_kb_ids",
-        "_get_binding",
     }:
-        from .scope import AgentKnowledgeBaseBinding, _get_binding, resolve_agent_kb_ids
+        from .scope import AgentKnowledgeBaseBinding, resolve_agent_kb_ids
 
         return {
             "AgentKnowledgeBaseBinding": AgentKnowledgeBaseBinding,
-            "_get_binding": _get_binding,
             "resolve_agent_kb_ids": resolve_agent_kb_ids,
         }[name]
     if name in {"SearchMode", "_search_hybrid", "_search_vector"}:
@@ -102,7 +99,6 @@ def __dir__() -> list[str]:
             "RelationRef",
             "SearchMode",
             "resolve_agent_kb_ids",
-            "_get_binding",
             "search",
             "scope",
             "graph_search",
@@ -129,7 +125,6 @@ __all__ = [
     "scope",
     "graph_search",
     "match_entities",
-    "_get_binding",
     "_search_vector",
     "_search_hybrid",
     "_rerank_candidate_limit",
