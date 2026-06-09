@@ -533,3 +533,35 @@ async def test_exec_with_session_strips_cwd_marker(client):
 
     assert marker not in result.stdout
     assert "hello" in result.stdout
+
+
+# ── stdin support (file-tools-sandbox-execution, Task 4) ──────────────────────
+
+
+async def test_exec_passes_stdin_with_interactive_flag(client):
+    captured: dict = {}
+
+    async def fake_exec(*args, **kwargs):
+        captured["args"] = args
+        captured["stdin"] = kwargs.get("stdin")
+        proc = _mock_proc(stdout="ok")
+        return proc
+
+    with patch("asyncio.create_subprocess_exec", fake_exec):
+        result = await client.exec("container-id", "cat > /workspace/f.txt", stdin=b"hello")
+    assert result.exit_code == 0
+    # `-i` must be present so docker attaches stdin
+    assert "-i" in captured["args"]
+    assert captured["stdin"] is not None
+
+
+async def test_exec_without_stdin_omits_interactive_flag(client):
+    captured: dict = {}
+
+    async def fake_exec(*args, **kwargs):
+        captured["args"] = args
+        return _mock_proc(stdout="ok")
+
+    with patch("asyncio.create_subprocess_exec", fake_exec):
+        await client.exec("container-id", "echo hi")
+    assert "-i" not in captured["args"]

@@ -18,6 +18,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 
 from fleetent import paths
 from fleetent.integrations.sandbox.client import _SAFE_NAME, SANDBOX_NAME_PREFIX, SandboxClient
@@ -126,8 +127,7 @@ class SandboxManager:
             return existing
 
         image = await self._image_for(scope, key)
-        ws_path = paths.workspaces_dir() / _sanitise(key)
-        ws_path.mkdir(parents=True, exist_ok=True)
+        ws_path = self.workspace_host_path(scope, session_id, agent_name)
         # Session tier runs as `nobody`; make the host workspace dir writable by the
         # container's run uid. Single-tenant on-prem: workspace holds only the agent's
         # own working data (see design risk: mount-point uid write permission).
@@ -163,6 +163,18 @@ class SandboxManager:
         """Public name resolver so callers (run_code) can forget by name on abort."""
         key = session_id if scope is Scope.SESSION else agent_name
         return _container_name(scope, key)
+
+    def workspace_host_path(self, scope: Scope, session_id: str, agent_name: str) -> Path:
+        """Return (creating) the host dir mounted at ``/workspace`` for (scope, key).
+
+        Shared by `acquire` (the bind-mount source) and the file tools' host-degrade
+        backend (the path fence root), so both agree on exactly one directory per
+        scope key. Idempotent: creates the dir tree if missing.
+        """
+        key = session_id if scope is Scope.SESSION else agent_name
+        ws_path = paths.workspaces_dir() / _sanitise(key)
+        ws_path.mkdir(parents=True, exist_ok=True)
+        return ws_path
 
     async def release_session(self, session_id: str) -> None:
         """Destroy the `session`-scope container for this session, if registered.
