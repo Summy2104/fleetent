@@ -1,7 +1,7 @@
 ## 1. 输出防火墙：run() 路径（_backfill_slots）
 
-- [ ] 1.1 Write failing unit tests `tests/unit/test_loop_output_firewall.py`：含密钥的工具结果（如 `sk-ant-...`、`API_KEY=xxx`、`Authorization: Bearer xxx`）经 `_backfill_slots` 后进入 messages 的内容已被 `[REDACTED]`；不含密钥的结果原样保留；placeholder slot 内容不被脱敏改写；脱敏发生在截断之前（构造跨边界密钥，断言被掩码）（tests/unit）
-- [ ] 1.2 Implement：`_backfill_slots` 在 post_tool_use hook 之后、`truncate_tool_result` 之前对非 placeholder content 调 `redact_secrets`，pass unit tests
+- [x] 1.1 Write failing unit tests `tests/unit/test_loop_output_firewall.py`：含密钥的工具结果（如 `sk-ant-...`、`API_KEY=xxx`、`Authorization: Bearer xxx`）经 `_backfill_slots` 后进入 messages 的内容已被 `[REDACTED]`；不含密钥的结果原样保留；placeholder slot 内容不被脱敏改写；脱敏发生在截断之前（构造跨边界密钥，断言被掩码）（tests/unit）
+- [x] 1.2 Implement：`_backfill_slots` 在 post_tool_use hook 之后、`truncate_tool_result` 之前对非 placeholder content 调 `redact_secrets`，pass unit tests
 
 ## 2. 输出防火墙：run_stream 路径
 
