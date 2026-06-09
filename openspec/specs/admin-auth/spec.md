@@ -54,13 +54,6 @@ The system SHALL authenticate admins via email + password, issuing a server-side
 - **WHEN** a login session is idle beyond the configured timeout
 - **THEN** the next request requires re-authentication
 
-### Requirement: 2FA for high-risk operations
-High-risk operations (delete user, block, change role, revoke key) SHALL require a passing 2FA (TOTP) check for the current action.
-
-#### Scenario: High-risk without 2FA blocked
-- **WHEN** an admin attempts to delete a user without passing 2FA
-- **THEN** the operation is rejected pending 2FA; once verified it proceeds and is audited
-
 ### Requirement: No public self-registration
 The system SHALL NOT expose a public self-registration endpoint.
 
