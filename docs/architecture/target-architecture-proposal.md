@@ -236,7 +236,7 @@ flowchart TB
 - **governance / reflection 拆分**（§5 两节）：**能力本体/运行时执行→核**、**管理/审批/review API→②**、**审计/策略/建议数据→基座**（核写、②只读，不反向写 platform 表）。沿用 CLAUDE.md「审批门≠归控制面」与「自进化纵向元能力」判据。
 - **多租户物理隔离**（data-model.md §5.7，2026-06-09）：`tenant`=主体实体；各层（per-agent 运行库 / 共享记忆库 / KB 库）**按主体物理分区**；管理库单库跨主体注册中心；Identity 端口解析后的 `principal` 携带 `tenant_id`（从 `users.tenant_id` + `team_members` 解析）。
 - **持久层执行 roadmap**（data-model.md §6）：persistence-hygiene（✅已完成）→ 审批重设计(A) + 管理表收编(#2) → 五库物理分离(#3，吸收 R2 全部拓扑) → Identity 端口(#4)；串行推进，各期 detailed spec 即时生成。
-- **v1 实体减法**（data-model.md §5.8，2026-06-09）：**砍** askit/KB 死代码(`dead-schema-cleanup`)、`invites`+2FA(`trim-user-auth`)；**descope** `quotas`/`quota_usage`(`descope-quota`)；**外置** 自建 fleet 监控 → Prometheus/Grafana(`externalize-monitoring`)；**保留** 知识图谱/自进化;**defer** `connectors.agent_id`。对本提案的影响:`resource_monitoring` 不入基座而整体外置;`governance` 执行门去掉 `quota`(留 blocklist)；②用户管理去掉自助邀请。
+- **v1 实体减法**（data-model.md §5.8，2026-06-09，**4 个 change 均 ✅ 已合并 main，迁移 063-066**）：**砍** askit/KB 死代码(`dead-schema-cleanup`)、`invites`+2FA(`trim-user-auth`)；**descope** `quotas`/`quota_usage`(`descope-quota`)；**外置** 自建 fleet 监控 → Prometheus/Grafana(`externalize-monitoring`)；**保留** 知识图谱/自进化;**defer** `connectors.agent_id`。对本提案的影响:`resource_monitoring` 不入基座而整体外置;`governance` 执行门去掉 `quota`(留 blocklist)；②用户管理去掉自助邀请。
 
 ### 仍待讨论
 1. **模块迁移顺序**（本提案范围）：先拆巨型文件（正交、低风险）还是先立面边界（结构优先）？注：DB 层执行顺序已在 data-model.md §6 独立锁定，与本问题正交。

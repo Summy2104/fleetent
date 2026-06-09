@@ -30,7 +30,7 @@
 ### 身份 & 用户（基座 / ②）
 - **users** — `id`(PK) · name · api_key · email · password_hash · role · status · must_reset · totp_secret　〔根主体〕
 - **api_keys**〔store〕 — `id` · `user_id`→users · key_hash · prefix · scope · expires_at · revoked_at · last_used_at · call_count
-- **invites**〔store〕 — `id` · email · token_hash · expires_at · used_at　〔**v1 砍 → `trim-user-auth`**:自助注册不可达、不发邮件、与 admin 建用户重叠〕
+- **invites**〔store〕 — `id` · email · token_hash · expires_at · used_at　〔**✅ 已删**（`trim-user-auth` 合并，迁移 066）:自助注册不可达、不发邮件、与 admin 建用户重叠〕
 - **im_users** — `id` · `owner_id`→users · platform · platform_user_id · `user_id`→users · allowed · meta_json　〔(platform,platform_user_id)→内部 user 映射〕
 - **im_connectors** — `id` · `owner_id`→users · platform · enabled · allowlist_enforced · config · status · last_heartbeat_at
 - **im_channel_allowlist**〔store〕 — `id` · `owner_id` · platform · scope_type · `scope_id` · allowed
@@ -86,19 +86,19 @@
 ### 治理（核执行 / 基座数据）
 - **approvals** — `id` · `session_id` · `requester_user_id` · risk_level · tool_name · tool_args · status · `approver_actor`(不透明) · resolved_at　〔**已迁 agent 侧 `governance/approval_store`**(R1/A 已合并);alembic 060 的旧定义待 #2/#3 退场(双权威延后项)〕
 - **audit_log** — `id`(PK) · `actor_user_id` · action · target_type · `target_id` · detail · `batch_id`
-- **quotas / quota_usage**〔store，懒建〕 — per-user / 全局配额与用量　〔**v1 descope → `descope-quota`**:check/record 全仓零调用,非功能态〕
+- **quotas / quota_usage**〔store，懒建〕 — per-user / 全局配额与用量　〔**✅ 已删**（`descope-quota` 合并，迁移 065）:曾 check/record 全仓零调用、非功能态〕
 
 ### 模型（②控制）
 - **model_providers** — `id` · base_url · model · api_key · max_tokens · 价格字段 · vendor/protocol/params〔050〕
 - **model_routes** — task_type · `provider_id`→model_providers · priority
 
-### 监控（基座 observability）〔**v1 外置 Prometheus/Grafana → `externalize-monitoring`**，下列 4 表移除〕
+### 监控（基座 observability）〔**✅ 已外置移除**（`externalize-monitoring` 合并，迁移 063 drop 下列 4 表 + resource_monitoring 模块已删）〕
 - **alert_rules** — `id` · metric · target · comparator · threshold · severity · channels
 - **alerts** — `id` · `rule_id`→alert_rules · target · status · fired_at · acked_by
 - **metric_samples** — `id` · metric · target · value · ts
 - **maintenance_windows** — `id` · target · start_ts · end_ts
 
-### Askit（②控制）〔任务队列三表 DEAD、**v1 砍 → `dead-schema-cleanup`**;`agent_apply_api` 不依赖它们〕
+### Askit（②控制）〔任务队列三表 DEAD、**✅ 已删**（`dead-schema-cleanup` 合并，迁移 064）;`agent_apply_api` 保留、不依赖它们〕
 - **askit_tasks** — `id` · series · command · params · workspace · status · exit_code · artifact
 - **askit_task_logs** — `id` · `task_id`→askit_tasks · seq · stream · line
 - **askit_workspaces** — `id` · env · repo_path · endpoint
@@ -234,12 +234,12 @@ namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后
 
 对 ~50 表做减法审计（4 个 Explore agent 代码核实），定 v1 范围。被砍/外置的表 §2 仍列出（现状），各 change 合并后移除：
 
-| 处置 | 实体 | change / 去向 |
+| 处置 | 实体 | change / 去向（状态） |
 |---|---|---|
-| **砍** | askit 三表 · KB binding 死代码 | `dead-schema-cleanup`（执行中） |
-| **砍** | `invites` · 2FA(`totp_secret`/`_enforce_2fa`) | `trim-user-auth`（spec 完）。`totp_secret` 列物理 drop 留 #2 |
-| **descope** | `quotas`/`quota_usage` | `descope-quota`（spec 完）——非功能态(check/record 零调用) |
-| **外置** | `alert_rules`/`alerts`/`metric_samples`/`maintenance_windows` + resource_monitoring | `externalize-monitoring`（spec 完）→ Prometheus/Grafana/Alertmanager |
+| **砍** | askit 三表 · KB binding 死代码 | `dead-schema-cleanup` **✅ 已合并 main**（迁移 064 drop askit 表） |
+| **砍** | `invites` · 2FA(`totp_secret`/`_enforce_2fa`) | `trim-user-auth` **✅ 已合并 main**（迁移 066 drop invites）。`totp_secret` 列物理 drop 留 #2 |
+| **descope** | `quotas`/`quota_usage` | `descope-quota` **✅ 已合并 main**（迁移 065 drop quota 表）——曾为非功能态(check/record 零调用) |
+| **外置** | `alert_rules`/`alerts`/`metric_samples`/`maintenance_windows` + resource_monitoring | `externalize-monitoring` **✅ 已合并 main**（迁移 063 drop 监控表；模块删除；server 残留死函数 `_run_monitoring_cycle` 后补删）→ Prometheus/Grafana/Alertmanager |
 | **保留** | 知识图谱(`kb_entities`/`mentions`/`relations`,检索零用但留作未来) · 自进化(reflection/proposals) · `session_anti_flap` · `sub_agent_runs` · KB 同步态 | 不动 |
 | **defer** | `connectors.agent_id` | spec 与 MCP scoping + `client_secret`-不持久化安全保证纠缠、store 织进 5 函数;effort/benefit 差,留 OAuth 重做时一并 |
 | **路由别处** | `users.tenant_id`+team 归属 → §5.7 tenancy · OIDC → #4 · 邮件/SMTP → 暂缓 | — |
