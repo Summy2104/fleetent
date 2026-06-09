@@ -147,24 +147,37 @@ erDiagram
 
 ## 5. 目标拓扑与决议（已定，2026-06-09）
 
-经讨论敲定的 DB 终态——**三层库 + 双 schema 权威 + Identity 端口**。它是 §6 roadmap 的标尺。
+经讨论敲定的 DB 终态——**逻辑 4 层 / 物理 5 库 + 嵌入式迁移（Y）+ Identity 端口**，外加横切的向量 infra 按 namespace 家族路由分层。它是 §6 roadmap 的标尺。（2026-06-09 R1/R2 收口后更新，取代早期「三层库 + 双权威」措辞。）
 
-### 5.1 三层库（物理拓扑）
+### 5.1 物理拓扑（逻辑 4 层 / 物理 5 库）
 
-| 层 | 库形态 | 装什么 | schema 权威 |
+| 逻辑层 | 库形态 | 装什么 | schema 权威 |
 |---|---|---|---|
-| **管理库** | 单库（平台） | users · agent 定义/版本/绑定 · connectors · providers · approvals · audit · monitoring · askit · api_keys/quotas/invites/im allowlist | **Alembic** |
-| **per-agent 运行库** | **每 agent 一个文件** | sessions · traces · session_meta · session_anti_flap · sub_agent_runs · memory_items(按 `memory_namespace` 隔离) · per-agent reflection | **ensure_schema**（单机须脱离 alembic） |
-| **共享资源库** | 跨 agent 独立 | KB(+vector) · shared_memory(team/tenant) · 自进化建议 | （随其消费侧；单机时退化为本 agent 自己的） |
+| **管理库** | 单库（仅受管模式存在） | users · agent 定义/版本/绑定 · connectors · providers · audit · monitoring · askit · api_keys/quotas/invites/im allowlist · **审批治理记录**（身份解析后 who/when，R1） | **Alembic（唯一 alembic 库）** |
+| **per-agent 运行库** | **每 agent 一个文件** | sessions · traces · session_meta(运行列) · session_anti_flap · sub_agent_runs · memory_items(**仅 `user_id` 键、无 namespace 列**，R2-叉2) · skill 提案草稿 · per-agent reflection · **审批请求+门状态**(R1) | **嵌入式迁移**（Y） |
+| **共享记忆库** | 跨 agent | shared_memory(team/tenant)——多 agent 写的**真相源** | **嵌入式迁移**（Y） |
+| **KB 关系库** | 跨 agent | knowledge_*/kb_*/chunks_fts · 摄取/同步态——**ingest 单写、agent 只读**的派生视图 | **嵌入式迁移**（Y） |
+
+**第 5 个物理库 = 向量底座**：`vector_store` 是横切 **infra**（非 KB 子件），后端**按 namespace 家族路由分层**——`mem:`→per-agent 向量库、`shared:`→共享记忆向量库、`kb:`→KB 向量库（可换 Qdrant）。同一套 `vector_store` API，连接目标由 config 驱动（单机=本地文件、受管=各连各服务）。
 
 **决议依据**：
 - **管理库 ≠ agent 库**（物理分开）= agent/platform 解耦契约的 DB 层落实：agent 不打开管理库，物理上无法写管理表（根治 `#1 泄漏`、`session_meta` 反例那类越界）。platform **只读** agent 库。
 - **per-agent 库**：隔离、爆炸半径小、单机/受管同一套存储布局、SQLite 写不互锁。（PR #190 已起步）
-- **共享资源库（A 决策）**：KB/共享记忆**天然跨 agent**，不能塞进单个 agent 库；独立成层，单机退化无成本。
+- **共享层按写者再拆（R2-叉1=1b）**：shared_memory 是**多 agent 写的真相源**、KB 是 **ingest 单写 / agent 只读的派生视图**，两类写者/生命周期不混 → 各自成库；每层回到「单一写者域」，无多写者协调。一个 KB = **关系底座 + 向量底座**两个物理 substrate。
+- **向量随消费侧分层**：per-agent 记忆的向量必须落 per-agent 向量库，否则 per-agent 隔离在向量层是假的。
 
-### 5.2 双 schema 权威 + 漂移护栏
+### 5.2 schema 权威：管理库 Alembic、agent 侧库嵌入式迁移（Y，R2-叉3）
 
-管理库 alembic、per-agent 库 ensure_schema——**不合并**（合并会破坏单机 agent）。靠**自动漂移护栏**（测试断言 `alembic head` 与 `ensure_schema` 同名表列一致）防分叉，取代手工保持一致。
+仅**管理库 alembic-only**（管理表只在受管模式存在、单机无对应 → 单一权威，不会漂移）。**per-agent / 共享记忆 / KB 关系库走嵌入式 forward-only 迁移**：
+
+- schema 定义在**代码**（有序 `MIGRATIONS = [(ver, sql), ...]` + `CURRENT` 版本号），随 agent 发版、进 PR review；
+- DB 文件只存**版本戳**（SQLite `PRAGMA user_version`，或自建极小 `_schema_meta` 表）；
+- **migrate-on-open**（开库即迁）、**每文件自迁**（每 agent 启动迁自己那份，无需中央编排）、每步在事务内执行且成功才 bump 版本、**库版本 > 代码已知版本则拒启动**（防降级）；
+- 空库（v=0 跑全部步）与旧库（只跑增量步）**同一代码路径**。
+
+> 取代今天「无版本 `CREATE IF NOT EXISTS` + 手工 ALTER」的乱补——是结构化升级，不是开倒车。
+> **漂移护栏（#1 已立）降级为过渡件**：仅在 #3 物理拆分前（agent 表仍混在 `fleetent.db`、与 Alembic 双定义，如 `approvals`）防漂移；#3 拆完 agent 库与管理库表集合不相交，护栏退役。
+> **需同步改 CLAUDE.md**：「schema lifecycle 归 Alembic / 不要 ensure_schema 补列」→「仅管理库归 Alembic；agent 侧库用结构化嵌入式迁移」。
 
 ### 5.3 Identity 端口
 
@@ -172,26 +185,48 @@ authn 抽成基座端口（`凭证→principal`）：单机本地实现 + 平台
 
 ### 5.4 仍待后续决定（不阻塞 roadmap，留作 schema 设计专题）
 
-§4-①②③④：DB 外键 vs store 约定、立 tenants/teams 实体、身份键统一、合并 `agent_kbs`/`knowledge_base_agent_bindings`。这些是**schema 设计**，与下方「卫生/拓扑」roadmap 正交，单独成题。
+§4-①②③④：DB 外键 vs store 约定、立 tenants/teams 实体、身份键统一、合并 `agent_kbs`/`knowledge_base_agent_bindings`。这些是**schema 设计**，与下方「卫生/拓扑」roadmap 正交，单独成题。（R2 收口的是**拓扑/归属**，这 4 项 schema 设计仍未决。）
+
+### 5.5 审批/提案归属契约（R1，2026-06-09）
+
+审批是 **agent 全权能力**，platform 不参与握手、只做最终一致的**只读下游投影**（CQRS：agent 侧=写模型/真相源，platform=只读投影）。闭环全程 agent 侧，**请求者 ≠ 审批人**：
+
+1. agent 撞风险门 → 查**审批人路由** → 经 im_gateway **主动外呼/私信**指定审批人；
+2. 审批人人工 approve/reject（agent 阻塞等、带超时）；
+3. agent 据结果继续执行 + 把记忆/skill/KB 等产物**写 agent 侧**（落点按 §5.1 + 下方 copy-up 分叉）。
+
+**承重假设**：platform **不能同步 gate、不能事后回拦**已被 agent 本地批准并执行的动作；中央治理只以**配置时**表达（agent.yaml / allowlist / `agent_policy` 白名单），不以运行时 gate 表达。这是「agent 必须脱离 platform 跑」唯一自洽的模型，也是 CLAUDE.md 既有「读产物不反向写」「curated 源→sync→KB」从 KB **推广到所有审批/提案流**。
+
+**copy-up 语义按真相源/派生视图分叉**：user-memory=platform 可选读投影；shared-memory=读投影；skill 提案=platform **二次部署门**（本地批准≠全局生效，部署成全局资产落管理库+skills_dir）；KB=**sync 重建**（绕审批门，受信运维）。
+
+**现状判定**（`governance/permission_gate.py` 摸查）：delivery 方向已对（审批请求顺响应流回、resolve 走 agent 自己的 API，TUI/IM/HTTP 皆其客户端）；但 **state 模型错且只因单体未暴露**——① 活门是进程内 `asyncio.Event`，跨进程 resolve 直接失效（platform 消费者全是 placeholder 佐证）；② `approvals` 表在管理库（经 `user_store._conn`），**agent runtime 写管理库** = 越界 + #1 泄漏链；③ `approvals` 双 schema 权威（alembic 060 + `_init_db`）；另：`session_id` 永远写 `""`、重启把 pending 全标 timeout（「重启存活」是假的）。**需重构**——自成一个 change（见 §6「审批重设计」）。Identity 端口（§5.3）是其前提：agent 侧只存**不透明 actor 标签**，platform 负责解析真实身份。
+
+**审批人路由 schema（基线）**：挂在 `AgentFile`（agent.yaml）的 `approval` 块，主轴 = **风险等级 `by_risk` + 按工具 `by_tool` 覆盖**；approver 用内部 user_id（经 im_user_store 解析成 IM 地址）；多人策略先 **any/all**（N-of-M 后置）；兜底 `on_no_approver: reject`（没配/DM 发失败/超时一律拒，default-closed）；新 `approval` 块**取代**连接器级 `require_approval`。⚠️**Gap A（承重）**：现有 im_gateway **无「主动外呼指定人」能力**（出站只有 telegram 打字指示器），必须新增出站发送原语（Slack `chat_postMessage` DM / Telegram `send_message`）；平台约束：Telegram bot 不能私信没 /start 过的用户、Slack 可向任意工作区用户开 DM → 可达性按平台校验。
+
+### 5.6 向量 namespace 命名整改（R2，必做）
+
+namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后端的键**，须：① 家族判别符**显式枚举** `VectorFamily` + 单一 `family_of()` 路由入口（禁 ad-hoc `startswith`，未知前缀 raise）；② 拆解「namespace」一词的**三重过载**（向量路由串 / agent 隔离字段 `memory_namespace` / `memory_namespace()` 第二参）。叉2 锁死后 `memory_namespace()` 第二参删除、`mem:{user_id}` 即足；token 按层改名（如 `umem`/`smem`/`kb`）为可选低优项。
 
 ---
 
 ## 6. 执行 roadmap（串行，护栏保底）
 
-4 个 change **都动同一批文件/表**（db.py、各 store、migrations、agent_app、users/api_keys）→ **串行执行**（并行只增冲突）。#1 的漂移护栏一旦立起，后续每步自动校验不退步。
+各 change **都动同一批文件/表**（db.py、各 store、migrations、agent_app、users/api_keys）→ **串行执行**（并行只增冲突）。#1 的漂移护栏已立，作为过渡件保后续不退步（§5.2）。
 
 ```
-#1 persistence-hygiene ──(地基/护栏先立)──┐
-                                          ├─→ #2 管理表收编 alembic ──┐
-                                          │                          ├─→ #4 Identity 端口
-                                          └─→ #3 三层库分离 ─────────┘
+#1 persistence-hygiene ✅ ──(地基/护栏已立)──┐
+                                            ├─→ A 审批重设计 ──┐
+                                            ├─→ #2 管理表收编 ──┤
+                                            │                  ├─→ #4 Identity 端口
+                                            └─→ #3 五库物理分离 ┘（吸收 R2 全部拓扑）
 ```
 
 | # | change | 范围 | 状态 |
 |---|---|---|---|
-| **1** | `persistence-hygiene` | env.py 读 DATABASE_URL · 漂移护栏 · 消灭 users.db · 文档对齐 | **proposal 已写**（`openspec/changes/persistence-hygiene/`） |
+| **1** | `persistence-hygiene` | env.py 读 DATABASE_URL · 漂移护栏 · 消灭 users.db · 文档对齐 | **✅ 已完成并合并 main**（98de655 实现 / 9bbcd48 archive） |
+| **A** | 审批重设计（R1，§5.5） | im_gateway 出站原语（Gap A）+ 审批人路由 schema（AgentFile）+ permission_gate 重构（请求者≠审批人、门状态落 per-agent、停 `import user_store`、`approvals` 移出管理库）+ platform 只读投影 | 待 `opsx:propose`；**提前吃掉 #2/#3 部分管理表搬迁** |
 | 2 | 管理表收编 alembic | users/api_keys/quotas/invites/im_allowlist/audit_log 等 `_init_db` 表纳入迁移，使 `upgrade head` 建出完整管理 schema | 待该期 `opsx:propose` |
-| 3 | 三层库物理分离 | 落实管理/per-agent/共享三库；KB+vector+共享记忆迁入共享库；vector 库改名 `fleetent_vector.db`；platform 只读 agent 库 | 待该期（最大、最可能返工，detailed spec 即时生成） |
-| 4 | Identity 端口 | authn 抽端口 + 本地/平台/OIDC 适配器；users/key 归管理库；根除 #1 | 待该期 |
+| 3 | 五库物理分离（吸收 R2） | 落实 管理/per-agent/共享记忆/KB关系/向量(按家族路由) 五库；**嵌入式迁移（Y）取代 ensure_schema**；`memory_items` 去 `namespace` 列；shared/KB 拆库；vector 后端分层；platform 只读 agent 库 | 待该期（最大、最可能返工，detailed spec 即时生成） |
+| 4 | Identity 端口 | authn 抽端口 + 本地/平台/OIDC 适配器；users/key 归管理库；agent 侧只认不透明 principal；根除 #1（亦为 A 的前提） | 待该期 |
 
-**节奏**：蓝图（本节）现在锁定；各期 detailed spec **即时生成**（反映当时真实代码，避免 #3 类返工）；一期一个聚焦会话，串行推进。
+**节奏**：蓝图（本节）现在锁定；各期 detailed spec **即时生成**（反映当时真实代码，避免 #3 类返工）；一期一个聚焦会话，串行推进。A 与 #2 谁先视实现耦合而定，但 A 解耦收益大且为 #4 铺路，倾向先 A。
