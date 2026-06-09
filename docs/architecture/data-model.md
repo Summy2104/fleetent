@@ -10,7 +10,7 @@
 - **已核实**：迁移 **047–062 不新增表，只改列/索引**——故 dev 库的 50 张表即 head 的完整表集合（个别新列在下文标注）。
 - **三处需特别注意（也是发现）**：
   1. **迁移链是健康的**（更正早期误判）：用临时 ini 指向空库，`alembic upgrade head` 干净跑到 062（含 049）。早先「链坏了」是因 `migrations/env.py` **忽略 `DATABASE_URL`**、命令误打真实 `data/fleetent.db`（其 schema 已偏离历史）所致——非迁移代码问题。详见 §4-⑧。
-  2. 部分表**不在 Alembic**，由 store `_init_db` 运行时创建：`users`、`audit_log`、`im_connectors`、`session_anti_flap`、`sub_agent_runs`、`api_keys`、`quotas`、`quota_usage`、`invites`、`im_channel_allowlist`、`sessions`(users.db)。后果：`alembic upgrade head` 从空库只建出**半套** schema（连 `users` 都缺）。
+  2. 部分表**不在 Alembic**，由 store `_init_db` 运行时创建：`users`、`audit_log`、`im_connectors`、`session_anti_flap`、`sub_agent_runs`、`api_keys`、`quotas`、`quota_usage`、`invites`、`im_channel_allowlist`、`sessions`(users.db)。后果：`alembic upgrade head` 从空库只建出**半套** schema（连 `users` 都缺）。（其中 `quotas`/`quota_usage`/`invites` v1 **删除**、不收编——见 §5.8。）
   3. **双 schema 权威是有意设计**：管理库走 alembic、per-agent 库走各 store 的 `ensure_schema()`（单机 agent 须脱离 alembic 启动）；二者对 agent-side 表各写一份 DDL、靠手工保持一致 → 可漂移。
 
 ## 1. 三个数据库（物理分布）
@@ -30,7 +30,7 @@
 ### 身份 & 用户（基座 / ②）
 - **users** — `id`(PK) · name · api_key · email · password_hash · role · status · must_reset · totp_secret　〔根主体〕
 - **api_keys**〔store〕 — `id` · `user_id`→users · key_hash · prefix · scope · expires_at · revoked_at · last_used_at · call_count
-- **invites**〔store〕 — `id` · email · token_hash · expires_at · used_at
+- **invites**〔store〕 — `id` · email · token_hash · expires_at · used_at　〔**v1 砍 → `trim-user-auth`**:自助注册不可达、不发邮件、与 admin 建用户重叠〕
 - **im_users** — `id` · `owner_id`→users · platform · platform_user_id · `user_id`→users · allowed · meta_json　〔(platform,platform_user_id)→内部 user 映射〕
 - **im_connectors** — `id` · `owner_id`→users · platform · enabled · allowlist_enforced · config · status · last_heartbeat_at
 - **im_channel_allowlist**〔store〕 — `id` · `owner_id` · platform · scope_type · `scope_id` · allowed
@@ -62,7 +62,7 @@
 - **knowledge_connector_status** — `connector_id` · connector_type · `tenant_id` · `kb_id` · last_status · last_error　〔connector 同步态〕
 
 ### 记忆（核能力）
-- **memory_items** — `id` · `user_id`→users · type · content · namespace · expires_at　〔per-user 语义记忆〕
+- **memory_items** — `id` · `user_id`→users · type · content · ~~namespace~~ · expires_at　〔per-user 语义记忆;**`namespace` 列 R2-叉2 废弃**(agent 隔离改物理 per-agent 库),#3 落地〕
 - **memory_maintenance_proposals** — `id` · `user_id` · action · proposed_content · risk · status　〔记忆自维护建议〕
 - **shared_memory_items** — `id` · scope_type · `scope_id` · type · content · status · source　〔团队/租户共享记忆〕
 
@@ -84,21 +84,21 @@
 - **scheduled_tasks** — `id` · name · cron_expr · timezone · `user_id` · agent_name · message · `session_id` · source
 
 ### 治理（核执行 / 基座数据）
-- **approvals** — `id` · `session_id` · `requester_user_id` · risk_level · tool_name · tool_args · status · `approver_user_id` · resolved_at
+- **approvals** — `id` · `session_id` · `requester_user_id` · risk_level · tool_name · tool_args · status · `approver_actor`(不透明) · resolved_at　〔**已迁 agent 侧 `governance/approval_store`**(R1/A 已合并);alembic 060 的旧定义待 #2/#3 退场(双权威延后项)〕
 - **audit_log** — `id`(PK) · `actor_user_id` · action · target_type · `target_id` · detail · `batch_id`
-- **quotas / quota_usage**〔store，懒建〕 — per-user / 全局配额与用量
+- **quotas / quota_usage**〔store，懒建〕 — per-user / 全局配额与用量　〔**v1 descope → `descope-quota`**:check/record 全仓零调用,非功能态〕
 
 ### 模型（②控制）
 - **model_providers** — `id` · base_url · model · api_key · max_tokens · 价格字段 · vendor/protocol/params〔050〕
 - **model_routes** — task_type · `provider_id`→model_providers · priority
 
-### 监控（基座 observability）
+### 监控（基座 observability）〔**v1 外置 Prometheus/Grafana → `externalize-monitoring`**，下列 4 表移除〕
 - **alert_rules** — `id` · metric · target · comparator · threshold · severity · channels
 - **alerts** — `id` · `rule_id`→alert_rules · target · status · fired_at · acked_by
 - **metric_samples** — `id` · metric · target · value · ts
 - **maintenance_windows** — `id` · target · start_ts · end_ts
 
-### Askit（②控制）
+### Askit（②控制）〔任务队列三表 DEAD、**v1 砍 → `dead-schema-cleanup`**;`agent_apply_api` 不依赖它们〕
 - **askit_tasks** — `id` · series · command · params · workspace · status · exit_code · artifact
 - **askit_task_logs** — `id` · `task_id`→askit_tasks · seq · stream · line
 - **askit_workspaces** — `id` · env · repo_path · endpoint
@@ -130,6 +130,7 @@ erDiagram
   agents ||--o{ traces : runs
   agents ||--o{ long_term_context_policies : tunes
   alert_rules ||--o{ alerts : fires
+  %% 注:alert_rules/alerts v1 外置移除(externalize-monitoring),见 §5.8
 ```
 
 **幻影实体（已决议解决，见 §5.7）**：`tenant_id` / `team_id` 贯穿 agents / KB / traces / policies，但**当前没有 `tenants` / `teams` 表**——多租户是裸列、无根实体（§4-②）。2026-06-09 决议：立 `tenants`(=主体)/`teams` 实体 + 物理 per-tenant 隔离。
@@ -139,10 +140,10 @@ erDiagram
 1. **关系几乎全隐式**：全库**仅 3 条 SQL 外键**（`agent_id`→agents、`document_id`→knowledge_documents CASCADE、复合 `(tenant_id,kb_id)`→knowledge_bases）。其余引用整性全靠 `*_id` 约定 + store 逻辑，DB 无保障。→ **要不要补外键？** 权衡：SQLite-first/可审计/手写 SQL ⟷ 完整性与级联删除。
 2. **多租户无根实体**：无 `tenants`/`teams` 表。→ **✅ 已决议（2026-06-09，见 §5.7）**：立 `tenants`(=主体/法人实体)/`teams` 实体做根，主体间**物理 per-tenant 强隔离**。
 3. **身份策略不统一**：多数表 surrogate `id`；KB 用复合自然键 `(tenant_id,kb_id)`；绑定表用复合自然键（user_id+agent_id）。→ **是否统一**（全 surrogate id？还是明确「聚合根用自然键」）？
-4. **疑似重复绑定**：`agent_kbs` 与 `knowledge_base_agent_bindings` 均为 agent↔KB。→ **核实并合并其一**。
+4. **疑似重复绑定**：`agent_kbs` 与 `knowledge_base_agent_bindings` 均为 agent↔KB。→ **核实(2026-06-09)**：两表分属平台侧(agent_kbs,带 `created_by` 审计)与 agent 侧(无审计),**之间无同步**;`dead-schema-cleanup` 清了 KB binding 死代码 + scope.py/bindings.py 去重,但**表收敛(R1a)仍 deferred**(收敛成"单一真相源+派生只读",随 #3)。
 5. **`session_meta` 禁忌表**：CLAUDE.md 明令 agent 运行时数据不得入 platform 管理表；迁移 `054–059` 正是「加运行时列（compaction/token/resume_pending）→删」的返工实证。但残留 `origin/status/takeover/pinned/agent_name/channel` 等——→ **逐列审计**：哪些是 platform 治理（合法）、哪些是运行时残留（该回 session 文件）？
 6. **`users.db` 残留 / 会话数据 split-brain**：`sessions`(users.db, 裸 sqlite3) / `session_meta`(fleetent.db) / `vector_items`(vector_store.db)。→ **已决议三层拓扑**（§5）：消灭 users.db、vector 独立成共享库。
-7. **Schema lifecycle 分裂**：`users`/`audit_log`/`im_connectors`/`session_anti_flap`/`sub_agent_runs`/`api_keys`/`quotas`/`quota_usage`/`invites`/`im_channel_allowlist`/`sessions` 由 store `_init_db` 运行时建，不在 Alembic → `alembic upgrade head` 只建半套。`im_channel_allowlist` 源码还有**两处 CREATE TABLE** 重复。→ 管理表收编 Alembic（roadmap #2）；agent-side 表保留 ensure_schema 但加漂移护栏（#1）。
+7. **Schema lifecycle 分裂**：`users`/`audit_log`/`im_connectors`/`session_anti_flap`/`sub_agent_runs`/`api_keys`/`quotas`/`quota_usage`/`invites`/`im_channel_allowlist`/`sessions` 由 store `_init_db` 运行时建，不在 Alembic → `alembic upgrade head` 只建半套。`im_channel_allowlist` 源码还有**两处 CREATE TABLE** 重复。→ 管理表收编 Alembic（roadmap #2）；agent-side 表保留 ensure_schema 但加漂移护栏（#1）。**例外**：`quotas`/`quota_usage`/`invites` v1 **删除**（不收编，见 §5.8）。
 8. **迁移链健康，但 env.py 与 app 脱节**（更正）：迁移链空库可重放到 062。真问题是 `migrations/env.py` 忽略 `DATABASE_URL`、用 ini 硬编码 url → app 与迁移指向不同库；dev 库因「`_init_db` + 部分 alembic + stamp」混合路径建出而**偏离历史**。→ env.py 读 `DATABASE_URL`（roadmap #1）。
 
 ## 5. 目标拓扑与决议（已定，2026-06-09）
@@ -228,6 +229,22 @@ namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后
 **与 R2 的关系**：给 §5.1「共享层」补上 tenant 维度——共享记忆库 / KB 库 / per-agent 库**按主体物理分区**。物理 vs 逻辑的实际差别**只在共享层**（KB + 共享记忆：per-主体一库靠文件分 vs 共用一库靠 `tenant_id` 列分）；`管理库` 与 `per-agent 库` 两方案相同。
 
 **连带**：① **amends #3**——五库拓扑带 tenant 维度、按主体物理分区（#3 范围变大，或单拆一个「立 tenants/teams + 物理分区」change）；② 喂 **#4 Identity**——principal 组织归属从 `users.tenant_id` + `team_members` 解析（§5.3 F2「tenant 来自 agent 配置」的折中升级为「真有归属」）。
+
+### 5.8 v1 实体减法（2026-06-09 决议）
+
+对 ~50 表做减法审计（4 个 Explore agent 代码核实），定 v1 范围。被砍/外置的表 §2 仍列出（现状），各 change 合并后移除：
+
+| 处置 | 实体 | change / 去向 |
+|---|---|---|
+| **砍** | askit 三表 · KB binding 死代码 | `dead-schema-cleanup`（执行中） |
+| **砍** | `invites` · 2FA(`totp_secret`/`_enforce_2fa`) | `trim-user-auth`（spec 完）。`totp_secret` 列物理 drop 留 #2 |
+| **descope** | `quotas`/`quota_usage` | `descope-quota`（spec 完）——非功能态(check/record 零调用) |
+| **外置** | `alert_rules`/`alerts`/`metric_samples`/`maintenance_windows` + resource_monitoring | `externalize-monitoring`（spec 完）→ Prometheus/Grafana/Alertmanager |
+| **保留** | 知识图谱(`kb_entities`/`mentions`/`relations`,检索零用但留作未来) · 自进化(reflection/proposals) · `session_anti_flap` · `sub_agent_runs` · KB 同步态 | 不动 |
+| **defer** | `connectors.agent_id` | spec 与 MCP scoping + `client_secret`-不持久化安全保证纠缠、store 织进 5 函数;effort/benefit 差,留 OAuth 重做时一并 |
+| **路由别处** | `users.tenant_id`+team 归属 → §5.7 tenancy · OIDC → #4 · 邮件/SMTP → 暂缓 | — |
+
+> 模式发现：仓库有多个**"逻辑实现了但生产没接线"的半成品**(invites / 2FA enable / quota enforcement)——审减法按"有无真路由/调用点"核实,不被"有 store/函数/spec"误导。
 
 ---
 
