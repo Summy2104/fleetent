@@ -6,11 +6,8 @@ downgrade/upgrade round-trip leaves the schema clean.
 
 from __future__ import annotations
 
-import shutil
-import tempfile
 from pathlib import Path
 
-import pytest
 from alembic import command
 from alembic.config import Config
 
@@ -48,7 +45,9 @@ def test_monitoring_migration_round_trip(tmp_path: Path) -> None:
     cfg = _make_cfg(db)
 
     command.upgrade(cfg, "head")
-    assert not _MONITORING_TABLES & _table_names(db), "monitoring tables present after first upgrade"
+    assert not _MONITORING_TABLES & _table_names(db), (
+        "monitoring tables present after first upgrade"
+    )
 
     command.downgrade(cfg, "-1")
     # After downgrade the monitoring tables should be present again (recreated by downgrade)

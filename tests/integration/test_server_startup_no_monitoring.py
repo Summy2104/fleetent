@@ -8,8 +8,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -42,14 +40,13 @@ def test_no_monitoring_collect_job_registered(tmp_path, monkeypatch):
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
     monkeypatch.chdir(tmp_path)
 
-    captured: list[CronScheduler] = []
     original_add_interval = CronScheduler.add_interval_job
+    captured_jobs: list[str] = []
 
     def _capture_add_interval(self, func, seconds, job_id):
         captured_jobs.append(job_id)
         return original_add_interval(self, func, seconds, job_id)
 
-    captured_jobs: list[str] = []
     monkeypatch.setattr(CronScheduler, "add_interval_job", _capture_add_interval)
 
     with TestClient(srv.app):

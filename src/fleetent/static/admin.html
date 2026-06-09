@@ -589,7 +589,6 @@
       <div class="nav-group">
         <button class="nav-group-label" data-group="ops" onclick="switchGroup('ops')">Ops</button>
         <button class="nav-item" data-tab="stats" onclick="switchTab('stats')"><span class="nav-ico">📊</span>Statistics</button>
-        <button class="nav-item" data-tab="monitoring" onclick="switchTab('monitoring')"><span class="nav-ico">🩺</span>Monitoring</button>
         <button class="nav-item" data-tab="sessions" onclick="switchTab('sessions')"><span class="nav-ico">🗂️</span>Sessions</button>
       </div>
     </nav>
@@ -860,42 +859,6 @@
         </div>
         <pre id="st-trace-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
       </div>
-    </section>
-
-    <section id="tab-monitoring" class="hidden">
-      <div class="page-header"><h2 class="ph-title">Monitoring &amp; Alerts</h2><div class="ph-filter"><input id="mon-filter" class="sk-search" placeholder="🔍  Search rules & alerts by metric / target" oninput="renderMonRules(); renderMonAlerts()"></div><div class="ph-actions"><button class="ghost small" onclick="LOADERS.monitoring?.()">Refresh</button></div></div>
-      <div class="card">
-        <div class="row">
-          <input id="mon-metric" placeholder="metric (e.g. cpu)">
-          <input id="mon-target" placeholder="target (e.g. host-1)">
-          <input id="mon-since" placeholder="since (ISO, optional)">
-          <button onclick="monMetrics()">Query metrics</button>
-        </div>
-        <pre id="mon-metrics-out" class="muted" style="white-space:pre-wrap; margin:8px 0 0;"></pre>
-      </div>
-      <div class="row" style="margin:12px 0;">
-        <h3 style="flex:1; margin:0;">Alert rules</h3>
-        <span id="mon-create-bar"><button onclick="monOpenRule()">New rule</button></span>
-      </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Metric</th><th>Cond</th><th>Severity</th><th>Target</th><th>Enabled</th><th>Actions</th></tr></thead>
-        <tbody id="mon-rules-body"></tbody>
-      </table></div>
-      <h3 style="margin-top:24px;">Alerts</h3>
-      <div class="card row">
-        <select id="mon-alert-status"><option value="">all</option><option value="firing">firing</option><option value="ack">ack</option><option value="silenced">silenced</option></select>
-        <button onclick="monAlerts()">Refresh alerts</button>
-        <span id="mon-maint-bar">
-          <input id="mon-maint-target" placeholder="maint target (optional)">
-          <input id="mon-maint-start" placeholder="start_ts (ISO)">
-          <input id="mon-maint-end" placeholder="end_ts (ISO)">
-          <button class="ghost" onclick="monMaintenance()">Add maintenance</button>
-        </span>
-      </div>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Severity</th><th>Metric</th><th>Target</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody id="mon-alerts-body"></tbody>
-      </table></div>
     </section>
 
     <section id="tab-sessions" class="hidden">
@@ -1393,29 +1356,6 @@
     </div>
   </div>
 
-  <div id="mon-rule-modal" class="modal hidden">
-    <div class="modal-box" role="dialog" aria-modal="true">
-      <h3>New alert rule</h3>
-      <form class="row" style="flex-direction:column; align-items:stretch; gap:10px;" onsubmit="monCreateRule(); return false;">
-        <input id="mon-rule-metric" placeholder="metric" autocomplete="off">
-        <div class="row">
-          <select id="mon-rule-comp"><option value=">">&gt;</option><option value=">=">&gt;=</option><option value="<">&lt;</option><option value="<=">&lt;=</option></select>
-          <input id="mon-rule-threshold" placeholder="threshold" autocomplete="off">
-        </div>
-        <input id="mon-rule-target" placeholder="target (optional)" autocomplete="off">
-        <div class="row">
-          <input id="mon-rule-for" placeholder="for_seconds (0)" autocomplete="off">
-          <select id="mon-rule-severity"><option value="warning">warning</option><option value="critical">critical</option></select>
-        </div>
-        <input id="mon-rule-channels" placeholder="channels (comma, optional)" autocomplete="off">
-        <div id="mon-rule-err" class="err"></div>
-        <div class="row" style="justify-content:flex-end;">
-          <button type="button" class="ghost" onclick="monCloseRule()">Cancel</button>
-          <button type="submit">Create</button>
-        </div>
-      </form>
-    </div>
-  </div>
 
   <div id="oc-modal" class="modal hidden">
     <div class="modal-box" role="dialog" aria-modal="true" style="width: 720px; max-width: calc(100% - 32px);">
@@ -1628,7 +1568,7 @@ async function enterApp() {
   IS_VIEWER = me.role === "viewer";
   $("whoami").textContent = (me.email || me.id) + " · " + me.role;
   if (IS_VIEWER) {
-    for (const id of ["create-bar", "kb-create-card", "sk-create-bar", "pv-create-bar", "ag-create-bar", "st-report-bar", "mon-create-bar", "mon-maint-bar", "sess-create-bar", "sess-bulk-bar", "oc-create-bar"]) {
+    for (const id of ["create-bar", "kb-create-card", "sk-create-bar", "pv-create-bar", "ag-create-bar", "st-report-bar", "sess-create-bar", "sess-bulk-bar", "oc-create-bar"]) {
       const el = $(id); if (el) el.classList.add("hidden");
     }
   }
@@ -1660,7 +1600,7 @@ const TAB_GROUP = {
   agents: "agents", chat: "agents",
   // optional building blocks an agent can be configured with
   skills: "resources", kb: "resources", providers: "resources", oauth: "resources",
-  stats: "ops", monitoring: "ops", sessions: "ops",
+  stats: "ops", sessions: "ops",
 };
 const GROUP_DEFAULT_TAB = { access: "users", agents: "agents", resources: "skills", ops: "stats" };
 const LOADERS = {};  // each module registers its loader; switchTab calls it if present
@@ -4271,108 +4211,6 @@ async function stReport() {
 }
 
 LOADERS.stats = () => stPerUser();
-
-// --- Monitoring + Alerts ----------------------------------------------------
-
-async function monMetrics() {
-  const metric = $("mon-metric").value.trim(), target = $("mon-target").value.trim();
-  if (!metric || !target) { $("mon-metrics-out").textContent = "metric and target required"; return; }
-  const qs = [`metric=${encodeURIComponent(metric)}`, `target=${encodeURIComponent(target)}`];
-  if ($("mon-since").value.trim()) qs.push(`since=${encodeURIComponent($("mon-since").value.trim())}`);
-  try { const r = await api("GET", "/monitoring/metrics?" + qs.join("&")); $("mon-metrics-out").textContent = JSON.stringify(r, null, 2); }
-  catch (e) { $("mon-metrics-out").textContent = e.message; }
-}
-
-let MON_RULES = [];
-function _monMatch(q, ...vals) {
-  return !q || vals.some(v => (v || "").toString().toLowerCase().includes(q));
-}
-async function monRules() {
-  try { MON_RULES = await api("GET", "/alerts/rules"); renderMonRules(); }
-  catch (e) { $("mon-rules-body").innerHTML = `<tr><td colspan="6" class="err">${esc(e.message)}</td></tr>`; }
-}
-function renderMonRules() {
-  const q = ($("mon-filter")?.value || "").trim().toLowerCase();
-  const rows = MON_RULES.filter(r => _monMatch(q, r.metric, r.target, r.severity));
-  $("mon-rules-body").innerHTML = rows.map(r => `
-      <tr>
-        <td>${esc(r.metric)}</td>
-        <td class="muted">${esc(r.comparator)} ${esc(r.threshold)}</td>
-        <td><span class="pill ${r.severity === "critical" ? "blocked" : ""}">${esc(r.severity)}</span></td>
-        <td class="muted">${esc(r.target || "—")}</td>
-        <td><span class="pill ${r.enabled ? "active" : "blocked"}">${r.enabled ? "on" : "off"}</span></td>
-        <td class="actions">${IS_VIEWER ? "" : `
-          ${r.enabled ? `<button class="small ghost" onclick="monDisableRule('${esc(r.id)}')">Disable</button>` : ""}
-          <button class="small danger" onclick="monDeleteRule('${esc(r.id)}')">Delete</button>`}
-        </td>
-      </tr>`).join("") || `<tr><td colspan="6" class="muted">No rules.</td></tr>`;
-}
-function monOpenRule() {
-  $("mon-rule-err").textContent = "";
-  for (const id of ["mon-rule-metric", "mon-rule-threshold", "mon-rule-target", "mon-rule-for", "mon-rule-channels"]) $(id).value = "";
-  $("mon-rule-modal").classList.remove("hidden");
-}
-function monCloseRule() { $("mon-rule-modal").classList.add("hidden"); }
-async function monCreateRule() {
-  $("mon-rule-err").textContent = "";
-  const body = {
-    metric: $("mon-rule-metric").value.trim(),
-    comparator: $("mon-rule-comp").value,
-    threshold: parseFloat($("mon-rule-threshold").value),
-    severity: $("mon-rule-severity").value,
-    for_seconds: parseInt($("mon-rule-for").value || "0", 10),
-  };
-  if ($("mon-rule-target").value.trim()) body.target = $("mon-rule-target").value.trim();
-  const ch = $("mon-rule-channels").value.split(",").map(s => s.trim()).filter(Boolean);
-  if (ch.length) body.channels = ch;
-  try { await api("POST", "/alerts/rules", body); monCloseRule(); monRules(); }
-  catch (e) { $("mon-rule-err").textContent = e.message; }
-}
-async function monDisableRule(id) {
-  try { await api("POST", `/alerts/rules/${encodeURIComponent(id)}/disable`); monRules(); } catch (e) { toast(e.message, "error"); }
-}
-async function monDeleteRule(id) {
-  if (!await confirmDialog("Delete this alert rule?")) return;
-  try { await api("DELETE", `/alerts/rules/${encodeURIComponent(id)}`); monRules(); } catch (e) { toast(e.message, "error"); }
-}
-
-let MON_ALERTS = [];
-async function monAlerts() {
-  const status = $("mon-alert-status").value;
-  try { MON_ALERTS = await api("GET", "/alerts" + (status ? `?status=${encodeURIComponent(status)}` : "")); renderMonAlerts(); }
-  catch (e) { $("mon-alerts-body").innerHTML = `<tr><td colspan="5" class="err">${esc(e.message)}</td></tr>`; }
-}
-function renderMonAlerts() {
-  const q = ($("mon-filter")?.value || "").trim().toLowerCase();
-  const rows = MON_ALERTS.filter(a => _monMatch(q, a.metric, a.target, a.severity));
-  $("mon-alerts-body").innerHTML = rows.map(a => `
-      <tr>
-        <td><span class="pill ${a.severity === "critical" ? "blocked" : ""}">${esc(a.severity)}</span></td>
-        <td>${esc(a.metric || "")}</td>
-        <td class="muted">${esc(a.target || "—")}</td>
-        <td>${esc(a.status || "")}</td>
-        <td class="actions">${IS_VIEWER ? "" : `
-          <button class="small ghost" onclick="monAck('${esc(a.id)}')">Ack</button>
-          <button class="small ghost" onclick="monSilence('${esc(a.id)}')">Silence</button>`}
-        </td>
-      </tr>`).join("") || `<tr><td colspan="5" class="muted">No alerts.</td></tr>`;
-}
-async function monAck(id) {
-  const assignee = prompt("Assignee (optional)") || null;
-  try { await api("POST", `/alerts/${encodeURIComponent(id)}/ack`, { assignee }); monAlerts(); } catch (e) { toast(e.message, "error"); }
-}
-async function monSilence(id) {
-  if (!await confirmDialog("Silence this alert?")) return;
-  try { await api("POST", `/alerts/${encodeURIComponent(id)}/silence`); monAlerts(); } catch (e) { toast(e.message, "error"); }
-}
-async function monMaintenance() {
-  const body = { start_ts: $("mon-maint-start").value.trim(), end_ts: $("mon-maint-end").value.trim() };
-  if ($("mon-maint-target").value.trim()) body.target = $("mon-maint-target").value.trim();
-  if (!body.start_ts || !body.end_ts) { toast("start_ts and end_ts required"); return; }
-  try { await api("POST", "/alerts/maintenance", body); toast("maintenance window added"); } catch (e) { toast(e.message, "error"); }
-}
-
-LOADERS.monitoring = () => { monRules(); monAlerts(); };
 
 // --- Sessions + Chat playground ---------------------------------------------
 
