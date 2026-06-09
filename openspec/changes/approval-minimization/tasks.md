@@ -1,9 +1,9 @@
 ## 1. 指纹纯函数 + allow-list 存储
 
-- [ ] 1.1 Write failing unit tests `tests/unit/test_approval_allowlist.py`：`fingerprint(scope, tool, args)` 对相同输入稳定、对 args 键序无关（`{"a":1,"b":2}` == `{"b":2,"a":1}`）、对值/工具/scope 敏感（任一不同→不同指纹）（tests/unit）
-- [ ] 1.2 Implement `governance/approval_allowlist_store.py` 的 `fingerprint`（canonical json + sha256）+ `ensure_schema`/`is_allowed`/`add_grant`/`list_grants` 骨架，pass unit tests
-- [ ] 1.3 Write failing integration tests `tests/integration/test_approval_allowlist_store.py`：真实 SQLite——add_grant 后 is_allowed 为真、未授予为假、list_grants 返回、重复 add 幂等（tests/integration，tmp_path DB）
-- [ ] 1.4 Implement store CRUD（named params、SQLiteDatabase、db_path 可注入），pass integration tests
+- [x] 1.1 Write failing unit tests `tests/unit/test_approval_allowlist.py`：`fingerprint(scope, tool, args)` 对相同输入稳定、对 args 键序无关（`{"a":1,"b":2}` == `{"b":2,"a":1}`）、对值/工具/scope 敏感（任一不同→不同指纹）（tests/unit）
+- [x] 1.2 Implement `governance/approval_allowlist_store.py` 的 `fingerprint`（canonical json + sha256）+ `ensure_schema`/`is_allowed`/`add_grant`/`list_grants` 骨架，pass unit tests
+- [x] 1.3 Write failing integration tests `tests/integration/test_approval_allowlist_store.py`：真实 SQLite——add_grant 后 is_allowed 为真、未授予为假、list_grants 返回、重复 add 幂等（tests/integration，tmp_path DB）
+- [x] 1.4 Implement store CRUD（named params、SQLiteDatabase、db_path 可注入），pass integration tests
 
 ## 2. request_approval 命中指纹自动放行
 
