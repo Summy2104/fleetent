@@ -27,6 +27,7 @@ from fleetent.integrations.sandbox.config import (
     build_resources_by_scope,
     load_sandbox_lifecycle,
 )
+from fleetent.integrations.sandbox.hardening import config_hash, is_blocked_mount
 
 # Image tag committed for an agent-scope container's dependencies; the next
 # acquire boots from it when present, else falls back to the client default.
@@ -118,16 +119,26 @@ class SandboxManager:
 
         entry = self._registry.get(name)
         if entry is not None:
+            # Created this process under the current config — trust it (no inspect).
             entry.last_used = now
             return entry.workspace_id
 
-        existing = await self.client.find_workspace(name)
-        if existing is not None:
-            self._registry[name] = _Entry(existing, scope, key, now)
-            return existing
-
         image = await self._image_for(scope, key)
         ws_path = self.workspace_host_path(scope, session_id, agent_name)
+        desired_hash = config_hash(image, self.resources_for(scope), env, str(ws_path))
+
+        existing = await self.client.find_workspace(name)
+        if existing is not None:
+            # sandbox-hardening: re-adopt a surviving container only if its config-hash
+            # still matches (or is absent on a pre-label container, reused conservatively);
+            # a mismatch means the config changed since it was built, so rebuild.
+            actual_hash = await self.client.inspect_config_hash(name)
+            if actual_hash is None or actual_hash == desired_hash:
+                self._registry[name] = _Entry(existing, scope, key, now)
+                return existing
+            await self.client.destroy_workspace(name)
+            self._registry.pop(name, None)
+
         # Session tier runs as `nobody`; make the host workspace dir writable by the
         # container's run uid. Single-tenant on-prem: workspace holds only the agent's
         # own working data (see design risk: mount-point uid write permission).
@@ -138,6 +149,7 @@ class SandboxManager:
             image=image,
             env=env,
             workspace_host_path=str(ws_path),
+            config_hash=desired_hash,
         )
         self._registry[name] = _Entry(workspace_id, scope, key, now)
         return workspace_id
@@ -173,6 +185,11 @@ class SandboxManager:
         """
         key = session_id if scope is Scope.SESSION else agent_name
         ws_path = paths.workspaces_dir() / _sanitise(key)
+        # sandbox-hardening: never bind-mount a host dir under a sensitive root (a
+        # misconfigured FLEETENT_HOME could otherwise expose ~/.ssh, /etc, etc.).
+        # Checked before mkdir so a blocked path leaves no directory behind.
+        if is_blocked_mount(ws_path):
+            raise ValueError(f"refusing to mount workspace under a blocked host path: {ws_path}")
         ws_path.mkdir(parents=True, exist_ok=True)
         return ws_path
 
