@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
 from contextlib import suppress
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
@@ -13,6 +15,26 @@ from fleetent.config import SchedulingSettings
 from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatching
 
 logger = logging.getLogger(__name__)
+
+# Missed runs after process downtime coalesce into a single fire within this window
+# (APScheduler misfire_grace_time + coalesce); a one-shot past it is skipped, not fired
+# late. max_instances=1 prevents a slow fire from overlapping its next trigger.
+_MISFIRE_GRACE_SECONDS = 3600
+_MAX_INSTANCES = 1
+
+_RELATIVE_RUN_AT = re.compile(r"\+?(\d+)([smhd])")
+_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def _parse_run_at(run_at: str) -> datetime:
+    """Resolve a one-shot ``run_at`` to a datetime: ISO-8601 absolute, or relative
+    duration like ``+30m`` / ``2h`` (offset from now)."""
+    spec = run_at.strip()
+    match = _RELATIVE_RUN_AT.fullmatch(spec)
+    if match:
+        seconds = int(match.group(1)) * _UNIT_SECONDS[match.group(2)]
+        return datetime.now(UTC) + timedelta(seconds=seconds)
+    return datetime.fromisoformat(spec)
 
 
 async def _agent_run(
@@ -121,15 +143,28 @@ class CronScheduler:
         async def _task_fire(t: dict[str, Any] = task) -> None:
             await _fire(t)
 
-        fields = _parse_cron(task["cron_expr"])
-        self._scheduler.add_job(
-            _task_fire,
-            trigger="cron",
-            id=task["id"],
-            timezone=task.get("timezone") or self._settings.default_timezone,
-            replace_existing=True,
-            **fields,
-        )
+        tz = task.get("timezone") or self._settings.default_timezone
+        common: dict[str, Any] = {
+            "id": task["id"],
+            "timezone": tz,
+            "replace_existing": True,
+            "misfire_grace_time": _MISFIRE_GRACE_SECONDS,
+            "coalesce": True,
+            "max_instances": _MAX_INSTANCES,
+        }
+        kind = task.get("schedule_kind") or "cron"
+        if kind == "once":
+            self._scheduler.add_job(
+                _task_fire, trigger="date", run_date=_parse_run_at(task["run_at"]), **common
+            )
+        elif kind == "interval":
+            self._scheduler.add_job(
+                _task_fire, trigger="interval", seconds=int(task["interval_seconds"]), **common
+            )
+        else:
+            self._scheduler.add_job(
+                _task_fire, trigger="cron", **_parse_cron(task["cron_expr"]), **common
+            )
 
 
 def _parse_cron(expr: str) -> dict[str, str]:
