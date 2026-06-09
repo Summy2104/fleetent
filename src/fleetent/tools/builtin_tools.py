@@ -186,7 +186,7 @@ def _audit_skill_refusal(name: str, tool_context: ToolContext | None) -> None:
     Best-effort: the refusal is the security guarantee; a failure of this side-channel
     audit write must never change the refusal outcome (logged, then swallowed).
     """
-    from fleetent.governance import audit_log
+    from fleetent import audit_log
 
     detail = {
         "reason": "audit_blocked",

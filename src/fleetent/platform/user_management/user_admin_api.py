@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from fleetent import auth, user_store
-from fleetent.governance import audit_log
+from fleetent import audit_log
 from fleetent.platform import im_gateway_management as im
 from fleetent.platform.user_management import api_key_store, block_service
 

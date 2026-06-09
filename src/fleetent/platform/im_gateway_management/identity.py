@@ -150,7 +150,7 @@ def block_im_user(
     batch_id: str | None = None,
 ) -> None:
     """Block a single IM identity (admin workbench). Audited."""
-    from fleetent.governance import audit_log
+    from fleetent import audit_log
 
     _init_db()
     with _conn() as conn:
@@ -172,7 +172,7 @@ def restore_im_user(
     batch_id: str | None = None,
 ) -> None:
     """Restore a single IM identity (admin workbench). Audited."""
-    from fleetent.governance import audit_log
+    from fleetent import audit_log
 
     _init_db()
     with _conn() as conn:
@@ -201,7 +201,7 @@ def rebind_im_identity(im_user_id: int, target_user_id: str, actor: str | None =
 
     The previously-bound user is left untouched (it may become an orphan with no IM identities).
     """
-    from fleetent.governance import audit_log
+    from fleetent import audit_log
 
     _init_db()
     if get_by_id(target_user_id) is None:
@@ -248,7 +248,7 @@ def update_im_identity(
     import json
     import sqlite3
 
-    from fleetent.governance import audit_log
+    from fleetent import audit_log
 
     _init_db()
     detail: dict[str, Any] = {}
@@ -289,7 +289,7 @@ def delete_im_identity(im_user_id: int, actor: str | None = None) -> None:
 
     The previously-bound platform user is left untouched.
     """
-    from fleetent.governance import audit_log
+    from fleetent import audit_log
 
     _init_db()
     with _conn() as conn:

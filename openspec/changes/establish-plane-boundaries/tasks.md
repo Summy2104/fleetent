@@ -1,10 +1,10 @@
 ## 1. audit_log 归基座
 
-- [ ] 1.1 Write failing test: `fleetent.audit_log` 可经顶层路径导入且不依赖业务模块或 platform
-- [ ] 1.2 将 `src/fleetent/governance/audit_log.py` 移至 `src/fleetent/audit_log.py`
-- [ ] 1.3 在原路径 `src/fleetent/governance/audit_log.py` 保留 re-export shim
-- [ ] 1.4 更新全仓 14 个 caller（`platform/*` + `tools/builtin_tools`）的 import 到 `fleetent.audit_log`
-- [ ] 1.5 运行测试确认绿（单元 + 依赖护栏）
+- [x] 1.1 Write failing test: `fleetent.audit_log` 可经顶层路径导入且不依赖业务模块或 platform
+- [x] 1.2 将 `src/fleetent/governance/audit_log.py` 移至 `src/fleetent/audit_log.py`
+- [x] 1.3 在原路径 `src/fleetent/governance/audit_log.py` 保留 re-export shim
+- [x] 1.4 更新全仓 14 个 caller（`platform/*` + `tools/builtin_tools`）的 import 到 `fleetent.audit_log`
+- [x] 1.5 运行测试确认绿（单元 + 依赖护栏）
 
 ## 2. reflection 两拆收口护栏
 

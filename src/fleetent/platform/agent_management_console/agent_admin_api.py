@@ -13,7 +13,7 @@ from fastapi import APIRouter, Body, Header, HTTPException
 from pydantic import BaseModel
 
 from fleetent import agent_store, auth, paths, user_store
-from fleetent.governance import audit_log
+from fleetent import audit_log
 from fleetent.platform.agent_lifecycle import credential_slots, secret_store
 from fleetent.platform.agent_lifecycle.materialize import agent_file_from_store
 from fleetent.platform.connector_management import (

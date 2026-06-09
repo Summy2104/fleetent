@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from fleetent import auth, user_store
 from fleetent.config import KnowledgeBaseSettings, Settings
 from fleetent.db import SQLiteDatabase, create_database
-from fleetent.governance import audit_log
+from fleetent import audit_log
 from fleetent.knowledge_base import operations as knowledge_base
 from fleetent.knowledge_base import parsers as legacy_parsers
 from fleetent.knowledge_base.core import KnowledgeChunk, KnowledgeStore
