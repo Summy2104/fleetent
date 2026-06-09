@@ -76,3 +76,48 @@ async def test_non_allowlisted_goes_through_notify(monkeypatch):
 
     notify.assert_called_once()
     assert decision == "rejected"
+
+
+# ── resolve(always=True) persists the grant (task 3) ──────────────────────────
+
+
+async def _gate_with_pending(monkeypatch, fp: str):
+    import asyncio
+
+    gate = PermissionGate(medium_timeout=0.1, high_timeout=0.1)
+    gate._events["a1"] = asyncio.Event()
+    gate._pending_fp["a1"] = (fp, "user:alice", "run_code")
+    return gate
+
+
+async def test_resolve_always_persists_grant(monkeypatch):
+    add = MagicMock()
+    monkeypatch.setattr(allowlist, "add_grant", add)
+    fp = allowlist.fingerprint("user:alice", "run_code", {"code": "ls"})
+    gate = await _gate_with_pending(monkeypatch, fp)
+
+    ok = await gate.resolve("a1", "approved", "slack:U_LEAD", always=True)
+    assert ok is True
+    assert add.called
+    assert add.call_args.kwargs["fingerprint"] == fp
+    assert add.call_args.kwargs["created_by"] == "slack:U_LEAD"
+
+
+async def test_resolve_without_always_does_not_persist(monkeypatch):
+    add = MagicMock()
+    monkeypatch.setattr(allowlist, "add_grant", add)
+    fp = allowlist.fingerprint("user:alice", "run_code", {"code": "ls"})
+    gate = await _gate_with_pending(monkeypatch, fp)
+
+    await gate.resolve("a1", "approved", "slack:U_LEAD", always=False)
+    add.assert_not_called()
+
+
+async def test_resolve_reject_always_does_not_persist(monkeypatch):
+    add = MagicMock()
+    monkeypatch.setattr(allowlist, "add_grant", add)
+    fp = allowlist.fingerprint("user:alice", "run_code", {"code": "ls"})
+    gate = await _gate_with_pending(monkeypatch, fp)
+
+    await gate.resolve("a1", "rejected", "slack:U_LEAD", always=True)
+    add.assert_not_called()

@@ -12,8 +12,8 @@
 
 ## 3. resolve allow-always 持久化
 
-- [ ] 3.1 Write failing unit tests：`resolve(id, "approved", approver, always=True)` 把 pending 指纹写入 allow-list（mock/真实 store）；`always=False`（默认）不写；`reject` + always 不写（tests/unit）
-- [ ] 3.2 Implement resolve 增 `always` 参数 + 授予分支，pass unit tests
+- [x] 3.1 Write failing unit tests：`resolve(id, "approved", approver, always=True)` 把 pending 指纹写入 allow-list（mock/真实 store）；`always=False`（默认）不写；`reject` + always 不写（tests/unit）
+- [x] 3.2 Implement resolve 增 `always` 参数 + 授予分支，pass unit tests
 
 ## 4. IM `approve always` 解析
 

@@ -138,6 +138,7 @@ class PermissionGate:
         self._events.pop(approval_id, None)
         self._decisions.pop(approval_id, None)
         self._decisions.pop(approval_id + ":actor", None)
+        self._pending_fp.pop(approval_id, None)
         logger.info(
             "approval_resolved id=%s tool=%s risk=%s decision=%s",
             approval_id,
@@ -208,15 +209,30 @@ class PermissionGate:
         approval_id: str,
         decision: Literal["approved", "rejected"],
         approver_user_id: str,
+        always: bool = False,
     ) -> bool:
         """Resolve an approval request.
 
         Returns True if the request was found, False if expired or unknown.
-        The approver_user_id is stored as an opaque actor string (D4).
+        The approver_user_id is stored as an opaque actor string (D4). When
+        ``always`` is set and the decision is "approved", the pending request's
+        fingerprint is persisted to the allow-list so future identical calls
+        auto-approve (approval-minimization).
         """
         event = self._events.get(approval_id)
         if event is None:
             return False
+        if always and decision == "approved":
+            pending = self._pending_fp.get(approval_id)
+            if pending is not None:
+                fp, scope_key, tool_name = pending
+                allowlist.add_grant(
+                    fingerprint=fp,
+                    scope_key=scope_key,
+                    tool_name=tool_name,
+                    created_at=datetime.datetime.now(datetime.UTC).isoformat(),
+                    created_by=approver_user_id,
+                )
         self._decisions[approval_id] = decision
         self._decisions[approval_id + ":actor"] = approver_user_id
         event.set()
