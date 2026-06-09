@@ -532,26 +532,35 @@ def _find_line_number(text: str, old: str) -> int:
 
 
 @tool(risk_level="medium")
-def edit_file(
-    path: Annotated[str, "目标文件路径"],
+async def edit_file(
+    path: Annotated[str, "目标文件路径（限定在 workspace 内）"],
     old_string: Annotated[str, "要替换的原始字符串（必须在文件中存在）"],
     new_string: Annotated[str, "替换后的新字符串"],
     replace_all: Annotated[bool, "是否替换所有匹配（默认 False 只替换第一处）"] = False,
+    tool_context: ToolContext | None = None,
 ) -> str:
     """Replace old_string with new_string in a file using 6-layer fallback matching.
 
-    Tries exact match first, then progressively more flexible strategies (line
-    trim, whitespace normalization, line-ending normalization, indentation
-    normalization, context-aware anchor matching). Returns which layer matched.
+    Reads the file through the workspace-fenced backend, runs the matcher on the host
+    (exact → line trim → whitespace → line-ending → indentation → context anchor), then
+    writes the result back through the backend. Returns which layer matched.
     """
-    p = Path(path)
-    if not p.exists():
+    backend = await _select_backend(tool_context)
+    try:
+        stat = await backend.probe(path)
+    except ValueError as exc:  # path escapes the workspace
+        return f"error: {exc}"
+    except _BackendError as exc:
+        return f"error: {exc}"
+    if stat.kind != "file":
         return f"error: 文件不存在: {path}"
 
     try:
-        original = p.read_text(encoding="utf-8")
-    except OSError as exc:
+        original = (await backend.read_bytes(path)).decode("utf-8")
+    except _BackendError as exc:
         return f"error: 读取文件失败: {exc}"
+    except UnicodeDecodeError:
+        return f"error: 读取文件失败: 非 UTF-8 文本文件: {path}"
 
     # No-op guard
     if old_string.strip() == new_string.strip() and old_string == new_string:
@@ -562,8 +571,8 @@ def edit_file(
         if result is not None and result != original:
             line_no = _find_line_number(original, old_string)
             try:
-                p.write_text(result, encoding="utf-8")
-            except OSError as exc:
+                await backend.write_bytes(path, result.encode("utf-8"))
+            except _BackendError as exc:
                 return f"error: 写入文件失败: {exc}"
             loc = f"第 {line_no} 行附近" if line_no > 0 else "文件中"
             return f"替换成功（{loc}，使用 {layer_name}）"

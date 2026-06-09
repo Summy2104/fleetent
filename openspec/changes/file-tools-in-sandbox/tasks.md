@@ -20,8 +20,8 @@
 
 ## 5. edit_file 走容器（保留 6 层 fallback）
 
-- [ ] 5.1 Write failing unit tests: edit_file 容器读内容→宿主 6 层 match→容器写回；保留命中层名、no-op 防护、未找到错误；越界拒绝（tests/unit）
-- [ ] 5.2 Implement edit_file 改造，pass unit tests
+- [x] 5.1 Write failing unit tests: edit_file 容器读内容→宿主 6 层 match→容器写回；保留命中层名、no-op 防护、未找到错误；越界拒绝（tests/unit）
+- [x] 5.2 Implement edit_file 改造，pass unit tests
 
 ## 6. search_content / search_files 走容器
 
