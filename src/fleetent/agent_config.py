@@ -298,6 +298,10 @@ class AgentFile(BaseModel):
     permission_gate_enabled: bool = True
     permission_gate_medium_timeout_seconds: int = 300
     permission_gate_high_timeout_seconds: int = 3600
+    # action gate — risk→mode policy (C2). none/low always direct, critical always
+    # reject; only medium/high are configurable, and only to non-reject modes.
+    action_gate_medium_mode: Literal["direct", "sandbox", "approval"] = "approval"
+    action_gate_high_mode: Literal["direct", "sandbox", "approval"] = "approval"
     # provider circuit breaker
     provider_failure_threshold: int = 3
     provider_cooldown_seconds: int = 60

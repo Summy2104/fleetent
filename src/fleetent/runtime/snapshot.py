@@ -65,6 +65,11 @@ class GovernanceConfig:
     hooks_enabled: bool = False
     hooks_decision_failure: str = "open"
     hooks_timeout_seconds: float = 5.0
+    # action gate — risk→mode policy for medium/high (none/low always direct, critical
+    # always reject). Defaults keep the approval-routing contract; "sandbox"/"direct"
+    # opt-in per deployment (C2 action-gate).
+    action_gate_medium_mode: str = "approval"
+    action_gate_high_mode: str = "approval"
 
 
 def _governance_from_file(agent: AgentFile) -> GovernanceConfig:
@@ -93,6 +98,8 @@ def _governance_from_file(agent: AgentFile) -> GovernanceConfig:
         hooks_enabled=agent.hooks_enabled,
         hooks_decision_failure=agent.hooks_decision_failure,
         hooks_timeout_seconds=agent.hooks_timeout_seconds,
+        action_gate_medium_mode=agent.action_gate_medium_mode,
+        action_gate_high_mode=agent.action_gate_high_mode,
     )
 
 
