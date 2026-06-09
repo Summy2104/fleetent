@@ -1,7 +1,7 @@
 ## 1. Action Gate 纯函数 + mode 枚举
 
-- [ ] 1.1 Write failing unit tests `tests/unit/test_action_gate.py`：`resolve_action_mode` 全档——none/low→DIRECT、medium→medium_mode、high→high_mode；critical→REJECT（且配 medium_mode/high_mode 任意值、force_ask=True 均不改变 critical 的 REJECT）；未知 risk 字符串→APPROVAL（fail-closed）；mode 解析 SANDBOX 但 sandbox_capable=False→APPROVAL（fail-closed）；force_ask=True 把非 critical 升 APPROVAL；`is_sandbox_backed` 对 run_code/5 文件工具为 True、其他为 False（tests/unit）
-- [ ] 1.2 Implement `governance/action_gate.py`（`ActionMode` 枚举 + `resolve_action_mode` + `SANDBOX_BACKED_TOOLS`/`is_sandbox_backed`），pass unit tests
+- [x] 1.1 Write failing unit tests `tests/unit/test_action_gate.py`：`resolve_action_mode` 全档——none/low→DIRECT、medium→medium_mode、high→high_mode；critical→REJECT（且配 medium_mode/high_mode 任意值、force_ask=True 均不改变 critical 的 REJECT）；未知 risk 字符串→APPROVAL（fail-closed）；mode 解析 SANDBOX 但 sandbox_capable=False→APPROVAL（fail-closed）；force_ask=True 把非 critical 升 APPROVAL；`is_sandbox_backed` 对 run_code/5 文件工具为 True、其他为 False（tests/unit）
+- [x] 1.2 Implement `governance/action_gate.py`（`ActionMode` 枚举 + `resolve_action_mode` + `SANDBOX_BACKED_TOOLS`/`is_sandbox_backed`），pass unit tests
 
 ## 2. GovernanceConfig + AgentFile 配置字段
 
