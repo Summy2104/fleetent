@@ -13,6 +13,17 @@ import pytest
 import fleetent.runtime.loop as loop
 
 
+@pytest.fixture(autouse=True)
+def _mock_store(monkeypatch):
+    """Patch approval_store so unit tests never touch real SQLite."""
+    from fleetent.governance import approval_store
+
+    monkeypatch.setattr(approval_store, "insert_approval", MagicMock())
+    monkeypatch.setattr(approval_store, "update_approval", MagicMock())
+    monkeypatch.setattr(approval_store, "list_approvals", MagicMock(return_value=[]))
+    monkeypatch.setattr(approval_store, "cleanup_stale", MagicMock(return_value=0))
+
+
 @pytest.fixture
 def mock_loop_env(monkeypatch) -> MagicMock:
     """Standard loop mock: simple text LLM response, no real tools/dispatch."""
