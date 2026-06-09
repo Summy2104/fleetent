@@ -97,7 +97,71 @@ async def test_run_calls_progress_func_on_tool_call(monkeypatch):
     )
     assert result == "done"
     assert len(called) == 1
-    assert called[0] == {"type": "tool_call", "name": "web_search"}
+    # Batch contract: names list carries all tools of the turn; name kept for back-compat.
+    assert called[0] == {"type": "tool_call", "names": ["web_search"], "name": "web_search"}
+
+
+async def test_run_emits_single_batch_event_for_parallel_tools(monkeypatch):
+    """A turn with multiple tool_calls emits ONE progress event carrying all names."""
+    import fleetent.runtime.loop as al
+
+    called: list[dict] = []
+
+    async def progress(event: dict) -> None:
+        called.append(dict(event))
+
+    multi_resp = _make_multi_tool_resp(["web_search", "read_file"])
+    text_resp = _make_text_resp("done")
+    call_count = 0
+
+    async def fake_create(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        return multi_resp if call_count == 1 else text_resp
+
+    monkeypatch.setattr(
+        al, "get_schemas", lambda: [_fake_schema("web_search"), _fake_schema("read_file")]
+    )
+    _patch_loop_basics(monkeypatch, al, fake_create)
+
+    result = await al.run(
+        messages=[{"role": "user", "content": "do two things"}],
+        progress_func=progress,
+    )
+    assert result == "done"
+    # Exactly one batch event, listing both tools (not two separate per-tool events).
+    assert len(called) == 1
+    assert called[0]["type"] == "tool_call"
+    assert called[0]["names"] == ["web_search", "read_file"]
+
+
+async def test_sub_agent_run_does_not_emit_parent_progress(monkeypatch):
+    """A sub_agent run (is_sub_agent=True) never surfaces tool batches to progress_func."""
+    import fleetent.runtime.loop as al
+
+    called: list[dict] = []
+
+    async def progress(event: dict) -> None:
+        called.append(dict(event))
+
+    tool_resp = _make_tool_resp("web_search")
+    text_resp = _make_text_resp("done")
+    call_count = 0
+
+    async def fake_create(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        return tool_resp if call_count == 1 else text_resp
+
+    _patch_loop_basics(monkeypatch, al, fake_create)
+
+    result = await al.run(
+        messages=[{"role": "user", "content": "test"}],
+        is_sub_agent=True,
+        progress_func=progress,
+    )
+    assert result == "done"
+    assert called == []
 
 
 async def test_run_progress_func_exception_does_not_interrupt(monkeypatch):
@@ -168,7 +232,7 @@ async def test_run_progress_func_only_gets_name_not_args(monkeypatch):
     )
     assert received
     event = received[0]
-    assert set(event.keys()) == {"type", "name"}
+    assert set(event.keys()) == {"type", "names", "name"}
     assert "args" not in event
     assert "query" not in str(event)
 
@@ -391,6 +455,23 @@ async def test_telegram_progress_func_sends_typing_action(monkeypatch):
     assert "typing" in str(call_args).lower()
 
 
+async def test_telegram_progress_func_handles_batch_event(monkeypatch):
+    """Telegram still sends typing on the batch event shape ({"names": [...]})."""
+    handler, routed = _telegram_handler(monkeypatch)
+
+    update = _make_tg_update("-100", "hello")
+    context = MagicMock()
+    context.bot.send_chat_action = AsyncMock()
+
+    await handler.callback(update, context)
+    msg = routed["msg"]
+
+    await msg.progress_func({"type": "tool_call", "names": ["web_search", "read_file"]})
+
+    context.bot.send_chat_action.assert_called_once()
+    assert "typing" in str(context.bot.send_chat_action.call_args).lower()
+
+
 async def test_telegram_progress_func_failure_does_not_interrupt(monkeypatch):
     """send_chat_action failure is swallowed; does not propagate."""
     handler, routed = _telegram_handler(monkeypatch)
@@ -436,6 +517,34 @@ def _make_tool_resp(name: str, args: str = "{}"):
         "content": None,
         "tool_calls": [
             {"id": "tc-1", "type": "function", "function": {"name": name, "arguments": args}}
+        ],
+    }
+    choice = MagicMock()
+    choice.finish_reason = "tool_calls"
+    choice.message = m
+    resp = MagicMock()
+    resp.choices = [choice]
+    resp.usage = MagicMock()
+    return resp
+
+
+def _make_multi_tool_resp(names: list[str]):
+    tcs = []
+    for i, name in enumerate(names):
+        tc = MagicMock()
+        tc.id = f"tc-{i}"
+        tc.function.name = name
+        tc.function.arguments = "{}"
+        tcs.append(tc)
+    m = MagicMock()
+    m.content = None
+    m.tool_calls = tcs
+    m.model_dump = lambda: {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {"id": f"tc-{i}", "type": "function", "function": {"name": n, "arguments": "{}"}}
+            for i, n in enumerate(names)
         ],
     }
     choice = MagicMock()
