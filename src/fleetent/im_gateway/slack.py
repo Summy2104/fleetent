@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import time
+import contextlib
 from typing import Any
 
 import structlog
@@ -8,7 +8,91 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 _IMAGE_MIME_PREFIX = "image/"
-_PROGRESS_THROTTLE_SECONDS = 1.0
+
+# Human-readable status labels for common tool names shown in the Slack
+# Assistants API status indicator while the agent is running.
+_TOOL_STATUS: dict[str, str] = {
+    # Google Workspace
+    "google-workspace__manage_drive": "📂 正在操作 Google Drive",
+    "google-workspace__manage_email": "📧 正在处理邮件",
+    "google-workspace__manage_calendar": "📅 正在查询日历",
+    "google-workspace__manage_docs": "📄 正在处理文档",
+    "google-workspace__manage_sheets": "📊 正在处理表格",
+    "google-workspace__manage_meet": "🎥 正在查询会议",
+    "google-workspace__manage_tasks": "✅ 正在处理任务",
+    "google-workspace__manage_accounts": "👤 正在管理账号",
+    "google-workspace__manage_scratchpad": "📝 正在编辑草稿",
+    "google-workspace__queue_operations": "⚙️ 正在批量处理",
+    # Built-ins
+    "run_code": "💻 正在执行代码",
+    "web_search": "🔍 正在搜索网页",
+    "read_file": "📖 正在读取文件",
+    "write_file": "✍️ 正在写入文件",
+    "generate_image": "🎨 正在生成图片",
+    "analyze_image": "🔍 正在分析图片",
+}
+
+
+def _tool_status_text(tool_name: str) -> str:
+    """Return a human-readable status string for the given tool name."""
+    if tool_name in _TOOL_STATUS:
+        return _TOOL_STATUS[tool_name] + "..."
+    # Prefix match (e.g. custom MCP servers)
+    for prefix, label in _TOOL_STATUS.items():
+        if tool_name.startswith(prefix):
+            return label + "..."
+    # Generic fallback: strip namespace, replace underscores
+    short = tool_name.split("__")[-1].replace("_", " ")
+    return f"🔧 {short}..."
+
+
+async def _make_status_funcs(
+    client: Any,
+    channel: str,
+    reply_thread: str | None,
+    say: Any,
+) -> tuple[Any, Any]:
+    """Set the initial Assistants API status and return ``(reply_func, progress_func)``.
+
+    Uses the native ``assistant_threads_setStatus`` indicator (shown below the bot name,
+    no extra thread message). If the App has not enabled Agents & Assistants, the first
+    call fails and both returned funcs degrade gracefully — ``progress_func`` becomes a
+    no-op and ``reply_func`` still delivers the final answer via ``say()``.
+    """
+    status_ok = False
+    try:
+        await client.assistant_threads_setStatus(
+            channel_id=channel,
+            thread_ts=reply_thread,
+            status="🤔 思考中...",
+        )
+        status_ok = True
+    except Exception as exc:  # noqa: BLE001 — feature may be disabled; degrade, don't abort
+        logger.warning("slack_assistant_status_failed", channel=channel, error=str(exc))
+
+    async def reply_func(text: str) -> None:
+        if status_ok:
+            with contextlib.suppress(Exception):
+                await client.assistant_threads_setStatus(
+                    channel_id=channel, thread_ts=reply_thread, status=""
+                )
+        if say is not None:
+            await say(text=text, thread_ts=reply_thread)
+
+    async def progress_func(evt: dict[str, Any]) -> None:
+        if not status_ok:
+            return
+        tool_name = evt.get("name", "tool")
+        try:
+            await client.assistant_threads_setStatus(
+                channel_id=channel,
+                thread_ts=reply_thread,
+                status=_tool_status_text(tool_name),
+            )
+        except Exception as exc:  # noqa: BLE001 — status update failure must not break the run
+            logger.warning("slack_progress_status_failed", tool=tool_name, error=str(exc))
+
+    return reply_func, progress_func
 
 
 def _make_upload_func(
@@ -109,51 +193,9 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
 
         reply_thread = thread_ts or event.get("ts")
 
-        # Attempt to post a placeholder message immediately so the user sees activity.
-        # On success, both reply_func and progress_func update this message in-place.
-        # On failure, fall back to the original say()-based reply with no progress.
-        placeholder_ts: str | None = None
-        try:
-            resp = await client.chat_postMessage(
-                channel=channel,
-                text="🤔 思考中…",
-                thread_ts=reply_thread,
-            )
-            if isinstance(resp, dict):
-                placeholder_ts = resp.get("ts")
-        except Exception as exc:  # noqa: BLE001 — placeholder failure must not abort handler
-            logger.warning("slack_placeholder_failed", error=str(exc))
-
-        if placeholder_ts is not None:
-            _placeholder_ts = placeholder_ts  # captured for closures
-
-            async def reply_func(text: str) -> None:
-                await client.chat_update(channel=channel, ts=_placeholder_ts, text=text)
-
-            last_update: list[float] = [0.0]
-
-            async def progress_func(evt: dict[str, Any]) -> None:
-                now = time.monotonic()
-                if now - last_update[0] < _PROGRESS_THROTTLE_SECONDS:
-                    return
-                last_update[0] = now
-                tool_name = evt.get("name", "tool")
-                try:
-                    await client.chat_update(
-                        channel=channel,
-                        ts=_placeholder_ts,
-                        text=f"🔧 正在调用 {tool_name}…",
-                    )
-                except Exception as exc:  # noqa: BLE001 — progress update failure is non-critical
-                    logger.debug("slack_progress_update_failed", error=str(exc))
-
-        else:
-            # Degraded path: no placeholder — use say() for the final reply, no progress.
-            async def reply_func(text: str) -> None:  # noqa: F811
-                if say is not None:
-                    await say(text=text, thread_ts=reply_thread)
-
-            progress_func = None  # type: ignore[assignment]
+        # Native Assistants API status indicator (shows below the bot name, no extra
+        # thread message). Degrades to a plain say() reply if the feature is disabled.
+        reply_func, progress_func = await _make_status_funcs(client, channel, reply_thread, say)
 
         files = event.get("files") or []
         attachments = await _download_image_attachments(list(files), bot_token)
