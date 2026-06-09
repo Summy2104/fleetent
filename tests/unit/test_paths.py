@@ -115,3 +115,18 @@ def test_agent_data_dir_injectable_via_monkeypatch(
     monkeypatch.setattr(paths, "agents_dir", lambda: tmp_path)
 
     assert paths.agent_data_dir("test-agent") == tmp_path / "test-agent" / "data"
+
+
+def test_workspaces_dir_under_data_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    home = tmp_path / "h"
+    monkeypatch.setenv("FLEETENT_HOME", str(home))
+
+    assert paths.workspaces_dir() == home / "data" / "workspaces"
+
+
+def test_workspaces_dir_injectable_via_monkeypatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path)
+
+    assert paths.workspaces_dir() == tmp_path / "workspaces"
