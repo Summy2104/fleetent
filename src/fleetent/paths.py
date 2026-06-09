@@ -84,3 +84,8 @@ def platform_env_path() -> Path:
 
 def sessions_dir() -> Path:
     return data_dir() / "sessions"
+
+
+def workspaces_dir() -> Path:
+    """Root for per-scope sandbox workspace directories (bind-mounted into containers)."""
+    return data_dir() / "workspaces"

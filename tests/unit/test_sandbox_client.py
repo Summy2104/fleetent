@@ -376,6 +376,38 @@ async def test_create_workspace_defensive_filters_sensitive_env(client):
     assert [argv[i + 1] for i in e_idxs] == ["DATA_DIR=/x"]
 
 
+# ── workspace bind mount (sandbox-workspace-mount) ────────────────────────────
+
+
+async def _capture_argv(client: SandboxClient, **kwargs) -> list[str]:
+    captured: list[list[str]] = []
+
+    async def fake_exec(*args, **kw):
+        captured.append(list(args))
+        return _mock_proc(stdout="cid\n")
+
+    with patch("asyncio.create_subprocess_exec", fake_exec):
+        await client.create_workspace(
+            kwargs.pop("name", "sandbox-session-1"),
+            resources=kwargs.pop("resources", SandboxResources()),
+            **kwargs,
+        )
+    return captured[0]
+
+
+async def test_create_workspace_mounts_workspace_when_path_given(client):
+    """A workspace_host_path adds `-v <host>:/workspace` to docker run."""
+    argv = await _capture_argv(client, workspace_host_path="/host/ws/s1")
+    mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "-v"]
+    assert "/host/ws/s1:/workspace" in mounts
+
+
+async def test_create_workspace_no_mount_when_path_none(client):
+    """No workspace_host_path keeps current behaviour: no -v flag."""
+    argv = await _capture_argv(client, workspace_host_path=None)
+    assert "-v" not in argv
+
+
 # ── list_containers (SB8 orphan enumeration) ──────────────────────────────────
 
 
@@ -451,3 +483,53 @@ async def test_kill_workspace_nonzero_does_not_raise(client, monkeypatch):
     # SIGKILL on an already-stopped container returns nonzero — must not raise.
     with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(returncode=1))):
         await client.kill_workspace("cid-stopped")  # no exception
+
+
+# ── session snapshot orchestration (sandbox-session-snapshot) ─────────────────
+
+
+async def test_exec_without_session_runs_command_verbatim(client):
+    """session_id=None keeps current behaviour: command runs verbatim via sh -c."""
+    captured: list[list[str]] = []
+
+    async def fake_exec(*args, **kw):
+        captured.append(list(args))
+        return _mock_proc(stdout="hi\n")
+
+    with patch("asyncio.create_subprocess_exec", fake_exec):
+        await client.exec("cid", "echo hi")
+
+    assert captured[0][:3] == ["docker", "exec", "cid"]
+    assert captured[0][-1] == "echo hi"
+
+
+async def test_exec_with_session_captures_then_wraps(client):
+    """First session exec captures the env snapshot, then runs the wrapped command."""
+    scripts: list[str] = []
+
+    async def fake_exec(*args, **kw):
+        scripts.append(args[-1])
+        return _mock_proc(stdout="out\n")
+
+    with patch("asyncio.create_subprocess_exec", fake_exec):
+        await client.exec("cid", "echo hi", session_id="s1")
+
+    assert any("export -p" in s for s in scripts)
+    assert any("source /tmp/snap-s1.sh" in s for s in scripts)
+
+
+async def test_exec_with_session_strips_cwd_marker(client):
+    """The cwd marker line is stripped from the returned stdout."""
+    from fleetent.integrations.sandbox import session_snapshot as ss
+
+    marker = ss.cwd_marker("s1")
+    outputs = iter(["", f"hello\n{marker}/workspace{marker}\n"])
+
+    async def fake_exec(*args, **kw):
+        return _mock_proc(stdout=next(outputs, ""))
+
+    with patch("asyncio.create_subprocess_exec", fake_exec):
+        result = await client.exec("cid", "echo hello", session_id="s1")
+
+    assert marker not in result.stdout
+    assert "hello" in result.stdout

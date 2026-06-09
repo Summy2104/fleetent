@@ -19,6 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from fleetent import paths
 from fleetent.integrations.sandbox.client import _SAFE_NAME, SANDBOX_NAME_PREFIX, SandboxClient
 from fleetent.integrations.sandbox.config import (
     SandboxResources,
@@ -125,8 +126,18 @@ class SandboxManager:
             return existing
 
         image = await self._image_for(scope, key)
+        ws_path = paths.workspaces_dir() / _sanitise(key)
+        ws_path.mkdir(parents=True, exist_ok=True)
+        # Session tier runs as `nobody`; make the host workspace dir writable by the
+        # container's run uid. Single-tenant on-prem: workspace holds only the agent's
+        # own working data (see design risk: mount-point uid write permission).
+        ws_path.chmod(0o777)
         workspace_id = await self.client.create_workspace(
-            name=name, resources=self.resources_for(scope), image=image, env=env
+            name=name,
+            resources=self.resources_for(scope),
+            image=image,
+            env=env,
+            workspace_host_path=str(ws_path),
         )
         self._registry[name] = _Entry(workspace_id, scope, key, now)
         return workspace_id

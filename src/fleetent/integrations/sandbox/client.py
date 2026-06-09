@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shlex
 from dataclasses import dataclass
 
 from fleetent.integrations.sandbox.config import NetworkPolicy, SandboxResources
 from fleetent.integrations.sandbox.secrets import is_sensitive_name
+from fleetent.integrations.sandbox.session_snapshot import (
+    DEFAULT_CWD,
+    build_capture_script,
+    extract_cwd,
+    wrap_command,
+)
 from fleetent.structured_logging import get_logger
 
 _logger = get_logger("sandbox.client")
@@ -21,6 +28,10 @@ _KILL_GRACE_SECONDS = 5.0
 # without a circular import. SB2 builds `sandbox-{scope}-{key}` atop it.
 SANDBOX_NAME_PREFIX = "sandbox-"
 
+# Container-side mount point for the per-scope host workspace directory
+# (sandbox-workspace-mount). The host path is the caller/manager's responsibility.
+_WORKSPACE_MOUNT = "/workspace"
+
 
 @dataclass
 class ExecResult:
@@ -32,6 +43,10 @@ class ExecResult:
 class SandboxClient:
     def __init__(self, image: str = "python:3.12-slim") -> None:
         self._image = image
+        # Per-session snapshot state (instance-scoped, not module-global): which
+        # sessions have captured their env, and each session's persisted cwd.
+        self._snap_ready: set[str] = set()
+        self._cwd: dict[str, str] = {}
 
     async def docker_available(self) -> bool:
         """Probe whether the Docker CLI is usable (D2), never raising.
@@ -115,12 +130,22 @@ class SandboxClient:
             flags += ["-e", f"{key}={value}"]
         return flags
 
+    @staticmethod
+    def _workspace_flags(workspace_host_path: str | None) -> list[str]:
+        """Bind-mount the host workspace dir into the container at /workspace.
+
+        None keeps the current no-mount behaviour (sandbox-workspace-mount)."""
+        if not workspace_host_path:
+            return []
+        return ["-v", f"{workspace_host_path}:{_WORKSPACE_MOUNT}"]
+
     async def create_workspace(
         self,
         name: str,
         resources: SandboxResources | None = None,
         image: str | None = None,
         env: dict[str, str] | None = None,
+        workspace_host_path: str | None = None,
     ) -> str:
         """Start an isolated container, return container ID as workspace_id.
 
@@ -132,6 +157,8 @@ class SandboxClient:
         agent scope can boot from a committed dependency image; None keeps the
         client's default base image. `env` carries already-filtered non-sensitive
         variables to inject as `-e` (SB5); None/empty keeps the clean environment.
+        `workspace_host_path` bind-mounts a host directory at /workspace
+        (sandbox-workspace-mount); None keeps the container with no host mount.
         """
         if resources is None:
             resources = SandboxResources()
@@ -143,6 +170,7 @@ class SandboxClient:
             name,
             *self._resource_flags(resources),
             *self._env_flags(env),
+            *self._workspace_flags(workspace_host_path),
             image or self._image,
             "sleep",
             "infinity",
@@ -255,8 +283,35 @@ class SandboxClient:
             return False
         return proc.returncode == 0
 
-    async def exec(self, workspace_id: str, command: str) -> ExecResult:
-        """Execute a shell command inside the running container."""
+    async def exec(
+        self, workspace_id: str, command: str, session_id: str | None = None
+    ) -> ExecResult:
+        """Execute a shell command inside the running container.
+
+        When ``session_id`` is given, the command runs with session-snapshot
+        continuity (sandbox-session-snapshot): env/cwd persist across calls via a
+        captured-then-restored snapshot. ``None`` runs the command verbatim.
+        """
+        if session_id is None:
+            return await self._run_exec(workspace_id, command)
+        if session_id not in self._snap_ready:
+            capture = build_capture_script(session_id)
+            cap_res = await self._run_exec(workspace_id, f"bash -lc {shlex.quote(capture)}")
+            if cap_res.exit_code == 0:
+                self._snap_ready.add(session_id)
+        if session_id not in self._snap_ready:
+            # Capture failed: degrade to a login shell so the command still runs
+            # correctly, only losing cross-exec continuity.
+            return await self._run_exec(workspace_id, f"bash -lc {shlex.quote(command)}")
+        cwd = self._cwd.get(session_id, DEFAULT_CWD)
+        wrapped = wrap_command(command, session_id, cwd)
+        result = await self._run_exec(workspace_id, f"bash -c {shlex.quote(wrapped)}")
+        new_cwd, cleaned = extract_cwd(result.stdout, session_id)
+        if new_cwd:
+            self._cwd[session_id] = new_cwd
+        return ExecResult(stdout=cleaned, stderr=result.stderr, exit_code=result.exit_code)
+
+    async def _run_exec(self, workspace_id: str, command: str) -> ExecResult:
         proc = await asyncio.create_subprocess_exec(
             "docker",
             "exec",
