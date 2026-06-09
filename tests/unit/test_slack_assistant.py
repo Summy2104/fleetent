@@ -187,3 +187,60 @@ async def test_assistant_degrade_setstatus_fails_still_says(monkeypatch):
     await routed["msg"].reply_func("answer despite no status")
 
     say.assert_awaited_with("answer despite no status")
+
+
+async def test_assistant_progress_passes_loading_messages(monkeypatch):
+    """set_status receives loading_messages mirroring every tool in the batch."""
+    from fleetent.im_gateway import slack as slack_mod
+
+    routed = _capture_routed(monkeypatch)
+    set_status = AsyncMock()
+    say = AsyncMock()
+
+    await slack_mod._route_assistant_message(
+        payload={"user": "U1", "text": "hi"},
+        context=_ctx(),
+        set_status=set_status,
+        say=say,
+        client=MagicMock(),
+        agent_name="a",
+        owner_id="o",
+        bot_token="b",
+    )
+    set_status.reset_mock()  # drop the initial "thinking" call
+    await routed["msg"].progress_func(
+        {
+            "type": "tool_call",
+            "names": ["google-workspace__manage_calendar", "google-workspace__manage_drive"],
+        }
+    )
+
+    lm = set_status.call_args.kwargs.get("loading_messages")
+    assert lm is not None
+    joined = " ".join(lm)
+    assert "日历" in joined and "Google Drive" in joined
+    assert len(lm) >= 2  # one entry per in-flight tool
+
+
+async def test_assistant_initial_status_passes_loading_messages(monkeypatch):
+    """The initial thinking status also sets loading_messages (no Slack default leak)."""
+    from fleetent.im_gateway import slack as slack_mod
+
+    _capture_routed(monkeypatch)
+    set_status = AsyncMock()
+
+    await slack_mod._route_assistant_message(
+        payload={"user": "U1", "text": "hi"},
+        context=_ctx(),
+        set_status=set_status,
+        say=AsyncMock(),
+        client=MagicMock(),
+        agent_name="a",
+        owner_id="o",
+        bot_token="b",
+    )
+
+    # First set_status call is the initial "thinking" state.
+    first = set_status.call_args_list[0]
+    assert first.kwargs.get("loading_messages")
+    assert "思考中" in " ".join(first.kwargs["loading_messages"])

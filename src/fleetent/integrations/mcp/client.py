@@ -20,19 +20,22 @@ import copy
 import json
 import logging
 import os
-import time
-from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
 from mcp import ClientSession
+from mcp.client.auth import OAuthFlowError, OAuthTokenError
+from mcp.client.auth.extensions.client_credentials import ClientCredentialsOAuthProvider
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.shared.auth import OAuthClientInformationFull, OAuthMetadata
+from mcp.shared.auth import OAuthToken as SdkOAuthToken
 from mcp.types import LATEST_PROTOCOL_VERSION
 
 logger = logging.getLogger(__name__)
@@ -63,28 +66,6 @@ class HealthState(StrEnum):
     unavailable = "unavailable"  # reopen/retry failed; tools hidden until re-registration
 
 
-# Refresh slightly before the server-stated expiry to avoid a "valid at check, expired at
-# the server" race (D4). Conservative TTL used when the token response omits expires_in.
-_OAUTH_EXPIRY_SAFETY_MARGIN = 30.0  # seconds
-_OAUTH_DEFAULT_TTL = 300.0  # seconds, when expires_in is missing
-
-
-def _now() -> float:
-    """Current wall-clock time source for token-expiry decisions (D4: injectable).
-
-    Indirected through this function so tests can monkeypatch a deterministic clock
-    instead of relying on real time.time().
-    """
-    return time.time()
-
-
-@dataclass
-class OAuthToken:
-    access_token: str
-    expires_at: float  # absolute wall-clock time (seconds), per _now()
-    refresh_token: str | None = None
-
-
 class OAuthAuthUnavailableError(RuntimeError):
     """Raised when an oauth2 server's credentials/authorization are unusable (D5).
 
@@ -92,41 +73,6 @@ class OAuthAuthUnavailableError(RuntimeError):
     401 / invalid_client / invalid_grant): retrying with the same credentials is futile,
     so callers stop and surface re-authorization guidance.
     """
-
-
-class _InMemoryTokenStore:
-    """Per-server in-memory OAuth token cache (D3).
-
-    Each oauth2 server instance holds its own store, so there is no module-level mutable
-    token table. The keying by server_id is internal bookkeeping within one store.
-    """
-
-    def __init__(self) -> None:
-        self._tokens: dict[str, OAuthToken] = {}
-
-    def get(self, server_id: str) -> OAuthToken | None:
-        return self._tokens.get(server_id)
-
-    def set(
-        self,
-        server_id: str,
-        *,
-        access_token: str,
-        expires_at: float,
-        refresh_token: str | None,
-    ) -> None:
-        self._tokens[server_id] = OAuthToken(
-            access_token=access_token,
-            expires_at=expires_at,
-            refresh_token=refresh_token,
-        )
-
-    def clear(self, server_id: str) -> None:
-        self._tokens.pop(server_id, None)
-
-
-def _default_token_store() -> _InMemoryTokenStore:
-    return _InMemoryTokenStore()
 
 
 @dataclass
@@ -163,11 +109,8 @@ class McpServerConfig:
     # (per-server runtime state, never module-level global; capabilities gate later features).
     protocol_version: str | None = field(default=None, repr=False, compare=False)
     capabilities: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
-    # OAuth2 runtime state, held per-server instance (D3/D5/D9: never module-level global)
-    _token_store: _InMemoryTokenStore = field(
-        default_factory=_default_token_store, repr=False, compare=False
-    )
-    _refresh_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
+    # OAuth2 sticky auth-unavailable flag (D5: per-server; token cache lives in the SDK
+    # provider's storage, not here). Cleared on (re-)registration by _clear_oauth_auth_state.
     _auth_unavailable: bool = field(default=False, repr=False, compare=False)
     # MCP3 connection-health state, held per-server (D2: never module-level global).
     _health: HealthState = field(default=HealthState.healthy, repr=False, compare=False)
@@ -314,6 +257,24 @@ def _auth_unavailable_result(server_id: str) -> str:
         f"{_UNAVAILABLE_RESULT_PREFIX} '{server_id}' authentication unavailable: re-authorize "
         f"or check the OAuth2 credentials."
     )
+
+
+def _oauth_degraded_result(server: McpServerConfig, exc: BaseException) -> str | None:
+    """Map an oauth2 error bubbling from a call to a degraded result, else None (D5).
+
+    Genuine credential failure (sticky flag set by the provider, or OAuthAuthUnavailableError)
+    → sticky "authentication unavailable". Transient SDK oauth/token errors (e.g. token
+    endpoint 5xx) → "temporarily unavailable", retryable, NOT sticky. Never crashes the loop.
+    """
+    if server.auth_type != "oauth2":
+        return None
+    if server._auth_unavailable or isinstance(exc, OAuthAuthUnavailableError):
+        server._auth_unavailable = True
+        return _auth_unavailable_result(server.id)
+    if isinstance(exc, (OAuthFlowError, OAuthTokenError)):
+        logger.warning("mcp_oauth_transient server_id=%s error=%s", server.id, exc)
+        return _unavailable_result(server.id)
+    return None
 
 
 async def get_exit_stack() -> AsyncExitStack:
@@ -632,27 +593,6 @@ def _clear_oauth_auth_state(server: McpServerConfig) -> None:
     next resolve. Recovery is by this explicit signal, not by timed backoff.
     """
     server._auth_unavailable = False
-    server._token_store.clear(server.id)
-
-
-def _token_is_valid(token: OAuthToken | None) -> bool:
-    if token is None:
-        return False
-    return _now() < token.expires_at
-
-
-def _is_transient_token_error(exc: Exception) -> bool:
-    """Whether a token-endpoint failure is transient (D5: must NOT be sticky).
-
-    5xx / network / timeout errors mean the authorization server hiccupped, not that the
-    credentials are wrong — these are retryable. Only genuine auth errors (401 /
-    invalid_client / invalid_grant) are sticky and surface as OAuthAuthUnavailableError.
-    """
-    import httpx
-
-    if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code >= 500
-    return isinstance(exc, (httpx.TransportError, httpx.TimeoutException))
 
 
 def _is_auth_error_response(resp: Any) -> bool:
@@ -668,120 +608,85 @@ def _is_auth_error_response(resp: Any) -> bool:
     return False
 
 
-async def _fetch_client_credentials_token(server: McpServerConfig) -> OAuthToken:
-    """POST grant_type=client_credentials to the token endpoint and parse the token (D1).
+def _oauth_auth(server: McpServerConfig) -> httpx.Auth | None:
+    """The httpx.Auth handed to the SDK transport: the official client_credentials provider
+    for oauth2 (SDK-maintained token acquisition/refresh + RFC 8707), None otherwise."""
+    if server.auth_type == "oauth2":
+        return _FleetentClientCredentialsProvider(server)
+    return None
 
-    Raises OAuthAuthUnavailableError on a genuine auth error (sticky). Transient failures
-    (5xx / network / timeout) propagate as httpx errors so callers treat them as retryable.
+
+class _FleetentTokenStorage:
+    """Minimal in-memory TokenStorage for the SDK oauth2 provider (structural Protocol).
+
+    Per provider/session instance — token caching holds for the session lifetime; a fresh
+    session (reopen) starts cold (see decisions.md D6).
     """
-    import httpx
 
-    secret = os.environ.get(server.client_secret_env, "") if server.client_secret_env else ""
-    data: dict[str, str] = {
-        "grant_type": "client_credentials",
-        "client_id": server.client_id,
-        "client_secret": secret,
-    }
-    if server.scope:
-        data["scope"] = server.scope
+    def __init__(self) -> None:
+        self._tokens: SdkOAuthToken | None = None
+        self._client_info: OAuthClientInformationFull | None = None
 
-    async with httpx.AsyncClient(timeout=server.connect_timeout, follow_redirects=True) as client:
-        resp = await client.post(server.token_url, data=data)
+    async def get_tokens(self) -> SdkOAuthToken | None:
+        return self._tokens
 
-    if _is_auth_error_response(resp):
-        raise OAuthAuthUnavailableError(
-            f"OAuth2 authentication unavailable for server '{server.id}': token endpoint "
-            f"rejected the credentials (status={resp.status_code}). Re-authorize or check the "
-            f"OAuth2 credentials (client_id / {server.client_secret_env})."
-        )
-    resp.raise_for_status()  # transient 5xx surfaces as retryable HTTPStatusError
+    async def set_tokens(self, tokens: SdkOAuthToken) -> None:
+        self._tokens = tokens
 
-    body = resp.json()
-    access_token = body.get("access_token")
-    if not access_token:
-        raise OAuthAuthUnavailableError(
-            f"OAuth2 token response for server '{server.id}' has no access_token."
-        )
-    expires_in = body.get("expires_in")
-    ttl = float(expires_in) if expires_in is not None else _OAUTH_DEFAULT_TTL
-    expires_at = _now() + ttl - _OAUTH_EXPIRY_SAFETY_MARGIN
-    return OAuthToken(
-        access_token=access_token,
-        expires_at=expires_at,
-        refresh_token=body.get("refresh_token"),
-    )
+    async def get_client_info(self) -> OAuthClientInformationFull | None:
+        return self._client_info
+
+    async def set_client_info(self, client_info: OAuthClientInformationFull) -> None:
+        self._client_info = client_info
 
 
-async def _resolve_oauth_token(server: McpServerConfig) -> str:
-    """Resolve a valid access token for an oauth2 server, refreshing if needed (D4/D9).
+class _FleetentClientCredentialsProvider(ClientCredentialsOAuthProvider):
+    """fleetent adapter over the SDK's client_credentials provider.
 
-    Short-circuits if the server is already marked auth-unavailable (D5/D8). Serializes
-    fetch/refresh through the server's own asyncio.Lock and double-checks the cached token
-    inside the lock so concurrent callers coalesce into a single token request (D9).
-    On a genuine auth error sets the sticky flag; transient errors propagate without it.
-    """
-    if server._auth_unavailable:
-        raise OAuthAuthUnavailableError(
-            f"OAuth2 authentication unavailable for server '{server.id}'. Re-authorize or "
-            f"check the OAuth2 credentials."
-        )
-
-    cached = server._token_store.get(server.id)
-    if _token_is_valid(cached):
-        assert cached is not None
-        return cached.access_token
-
-    async with server._refresh_lock:
-        cached = server._token_store.get(server.id)
-        if _token_is_valid(cached):
-            assert cached is not None
-            return cached.access_token
-        try:
-            token = await _fetch_client_credentials_token(server)
-        except OAuthAuthUnavailableError:
-            server._auth_unavailable = True  # sticky: stop retrying with bad credentials
-            raise
-        server._token_store.set(
-            server.id,
-            access_token=token.access_token,
-            expires_at=token.expires_at,
-            refresh_token=token.refresh_token,
-        )
-        return token.access_token
-
-
-class _ClientCredentialsAuth(httpx.Auth):
-    """httpx.Auth that injects the oauth2 client_credentials Bearer per request and
-    refreshes once on a 401.
-
-    Passed to the SDK transport via ``auth=`` so token attachment runs on every request of
-    the held session — restoring per-request freshness the persistent session would
-    otherwise lose. The token fetch / cache / sticky-unavailable logic is reused from
-    ``_resolve_oauth_token``; this class only attaches and retries.
+    Maps McpServerConfig onto the SDK provider, preseeds the authorization-server metadata
+    from the explicit ``token_url`` (so the token endpoint works without requiring server
+    ``.well-known`` discovery — discovery still wins if the server exposes it), and splits
+    genuine credential errors (sticky auth-unavailable) from transient ones (retryable).
+    See decisions.md D2/D3/D4.
     """
 
     def __init__(self, server: McpServerConfig) -> None:
+        secret = os.environ.get(server.client_secret_env, "") if server.client_secret_env else ""
+        super().__init__(
+            server_url=server.url,
+            storage=_FleetentTokenStorage(),
+            client_id=server.client_id,
+            client_secret=secret,
+            token_endpoint_auth_method="client_secret_post",
+            scopes=server.scope or None,
+        )
         self._server = server
+        self._token_url = server.token_url
 
-    async def async_auth_flow(
-        self, request: httpx.Request
-    ) -> AsyncGenerator[httpx.Request, httpx.Response]:
-        token = await _resolve_oauth_token(self._server)
-        request.headers["Authorization"] = f"Bearer {token}"
-        response = yield request
-        if response.status_code == 401:
-            # Token rejected mid-session: drop the cached token, refresh, retry once.
-            self._server._token_store.clear(self._server.id)
-            token = await _resolve_oauth_token(self._server)
-            request.headers["Authorization"] = f"Bearer {token}"
-            yield request
+    async def _initialize(self) -> None:
+        await super()._initialize()
+        if self._token_url:
+            parsed = urlparse(self._token_url)
+            base = f"{parsed.scheme}://{parsed.netloc}"
+            # Preseed the AS metadata so _get_token_endpoint() resolves to the explicit
+            # token_url without a .well-known round-trip. issuer/authorization_endpoint are
+            # required by the model but unused for client_credentials.
+            self.context.oauth_metadata = OAuthMetadata(
+                issuer=base,  # type: ignore[arg-type]
+                authorization_endpoint=urljoin(base, "/authorize"),  # type: ignore[arg-type]
+                token_endpoint=self._token_url,  # type: ignore[arg-type]
+            )
 
-
-def _oauth_auth(server: McpServerConfig) -> httpx.Auth | None:
-    """The httpx.Auth to hand the SDK transport: per-request oauth2 injection, else None."""
-    if server.auth_type == "oauth2":
-        return _ClientCredentialsAuth(server)
-    return None
+    async def _handle_token_response(self, response: httpx.Response) -> None:
+        if _is_auth_error_response(response):
+            self._server._auth_unavailable = True  # sticky: bad credentials, do not retry
+            raise OAuthAuthUnavailableError(
+                f"OAuth2 authentication unavailable for server '{self._server.id}': token "
+                f"endpoint rejected the credentials (status={response.status_code}). "
+                f"Re-authorize or check the OAuth2 credentials."
+            )
+        # Transient (5xx / non-credential 4xx): let the SDK raise OAuthTokenError (retryable).
+        await super()._handle_token_response(response)
 
 
 async def _list_all_tools(session: Any) -> list[Any]:
@@ -1036,11 +941,11 @@ async def _call_via_session(
     try:
         result = await session.call_tool(tool_name, args)
     except Exception as exc:  # noqa: BLE001 — connection drop → lazy reconnect once
-        # A genuine oauth failure surfaced from the per-request auth flow sets the sticky
-        # flag (inside _resolve_oauth_token); detect it via that side effect so a wrapped
-        # exception is handled too. Degrade, never crash the agent loop.
-        if server.auth_type == "oauth2" and server._auth_unavailable:
-            return _auth_unavailable_result(server_id)
+        # oauth2 errors degrade (genuine→sticky auth-unavailable, transient→retryable),
+        # never crash the agent loop; the sticky-flag check is robust to wrapped exceptions.
+        oauth_degraded = _oauth_degraded_result(server, exc)
+        if oauth_degraded is not None:
+            return oauth_degraded
         if not _is_disconnect_error(exc):
             raise
         new_session = await _reopen_session(server, scope)
@@ -1050,8 +955,9 @@ async def _call_via_session(
         try:
             result = await new_session.call_tool(tool_name, args)
         except Exception as retry_exc:  # noqa: BLE001 — reopen+retry still failed → degrade
-            if server.auth_type == "oauth2" and server._auth_unavailable:
-                return _auth_unavailable_result(server_id)
+            oauth_degraded = _oauth_degraded_result(server, retry_exc)
+            if oauth_degraded is not None:
+                return oauth_degraded
             logger.warning("mcp_call_retry_failed server_id=%s error=%s", server_id, retry_exc)
             set_health(server, HealthState.unavailable)
             return _unavailable_result(server_id)
@@ -1148,8 +1054,9 @@ async def _call_utility(
     try:
         result = await _invoke_utility(session, util_name, args)
     except Exception as exc:  # noqa: BLE001 — connection drop → lazy reconnect once
-        if server.auth_type == "oauth2" and server._auth_unavailable:
-            return _auth_unavailable_result(server_id)
+        oauth_degraded = _oauth_degraded_result(server, exc)
+        if oauth_degraded is not None:
+            return oauth_degraded
         if not _is_disconnect_error(exc):
             raise
         new_session = await _reopen_session(server, scope)
@@ -1159,8 +1066,9 @@ async def _call_utility(
         try:
             result = await _invoke_utility(new_session, util_name, args)
         except Exception as retry_exc:  # noqa: BLE001 — reopen+retry still failed → degrade
-            if server.auth_type == "oauth2" and server._auth_unavailable:
-                return _auth_unavailable_result(server_id)
+            oauth_degraded = _oauth_degraded_result(server, retry_exc)
+            if oauth_degraded is not None:
+                return oauth_degraded
             logger.warning("mcp_utility_retry_failed server_id=%s error=%s", server_id, retry_exc)
             set_health(server, HealthState.unavailable)
             return _unavailable_result(server_id)

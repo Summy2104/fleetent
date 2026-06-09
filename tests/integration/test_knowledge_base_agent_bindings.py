@@ -27,56 +27,42 @@ def _patch_binding_settings(monkeypatch: pytest.MonkeyPatch, default_kb_id: str 
     return config
 
 
+def _insert_binding(database, tenant_id: str, agent_id: str, kb_id: str) -> None:
+    database.execute(
+        """
+        INSERT OR IGNORE INTO knowledge_base_agent_bindings (tenant_id, agent_id, kb_id, created_at)
+        VALUES (:tenant_id, :agent_id, :kb_id, :created_at)
+        """,
+        {
+            "tenant_id": tenant_id,
+            "agent_id": agent_id,
+            "kb_id": kb_id,
+            "created_at": "2026-01-01T00:00:00+00:00",
+        },
+    )
+
+
 def test_binding_public_api_is_importable():
     from fleetent.knowledge_base import (
         AgentKnowledgeBaseBinding,
-        bind_agent_to_kb,
         list_agent_kb_bindings,
         resolve_agent_kb_ids,
-        unbind_agent_from_kb,
     )
 
     assert AgentKnowledgeBaseBinding is not None
-    assert callable(bind_agent_to_kb)
-    assert callable(unbind_agent_from_kb)
     assert callable(list_agent_kb_bindings)
     assert callable(resolve_agent_kb_ids)
 
 
-def test_bind_agent_to_kb_is_idempotent(monkeypatch, tmp_path):
-    _patch_binding_runtime(monkeypatch, tmp_path)
-    _patch_binding_settings(monkeypatch)
-
-    from fleetent.knowledge_base import bind_agent_to_kb, list_agent_kb_bindings
-
-    first = bind_agent_to_kb("tenant-a", "agent-1", "engineering")
-    second = bind_agent_to_kb("tenant-a", "agent-1", "engineering")
-
-    assert first == second
-    assert [binding.kb_id for binding in list_agent_kb_bindings("tenant-a", "agent-1")] == [
-        "engineering"
-    ]
-
-
-def test_unbind_agent_from_kb_is_idempotent(monkeypatch, tmp_path):
-    _patch_binding_runtime(monkeypatch, tmp_path)
-    _patch_binding_settings(monkeypatch)
-
-    from fleetent.knowledge_base import unbind_agent_from_kb
-
-    unbind_agent_from_kb("tenant-a", "agent-1", "missing")
-    unbind_agent_from_kb("tenant-a", "agent-1", "missing")
-
-
 def test_agent_kb_bindings_are_tenant_and_agent_isolated(monkeypatch, tmp_path):
-    _patch_binding_runtime(monkeypatch, tmp_path)
+    database = _patch_binding_runtime(monkeypatch, tmp_path)
     _patch_binding_settings(monkeypatch)
 
-    from fleetent.knowledge_base import bind_agent_to_kb, list_agent_kb_bindings
+    from fleetent.knowledge_base import list_agent_kb_bindings
 
-    bind_agent_to_kb("tenant-a", "agent-1", "engineering")
-    bind_agent_to_kb("tenant-b", "agent-1", "sales")
-    bind_agent_to_kb("tenant-a", "agent-2", "support")
+    _insert_binding(database, "tenant-a", "agent-1", "engineering")
+    _insert_binding(database, "tenant-b", "agent-1", "sales")
+    _insert_binding(database, "tenant-a", "agent-2", "support")
 
     assert [binding.kb_id for binding in list_agent_kb_bindings("tenant-a", "agent-1")] == [
         "engineering"
@@ -87,45 +73,14 @@ def test_agent_kb_bindings_are_tenant_and_agent_isolated(monkeypatch, tmp_path):
     ]
 
 
-@pytest.mark.parametrize(
-    ("tenant_id", "agent_id", "kb_id"),
-    [
-        ("", "agent-1", "engineering"),
-        ("tenant-a", "", "engineering"),
-        ("tenant-a", "agent-1", ""),
-        ("  ", "agent-1", "engineering"),
-    ],
-)
-def test_empty_binding_identifiers_fail_fast(monkeypatch, tmp_path, tenant_id, agent_id, kb_id):
-    _patch_binding_runtime(monkeypatch, tmp_path)
-    _patch_binding_settings(monkeypatch)
-
-    from fleetent.knowledge_base import bind_agent_to_kb
-
-    with pytest.raises(ValueError, match="must not be empty"):
-        bind_agent_to_kb(tenant_id, agent_id, kb_id)
-
-
-def test_binding_can_reference_future_kb(monkeypatch, tmp_path):
-    database = _patch_binding_runtime(monkeypatch, tmp_path)
-    _patch_binding_settings(monkeypatch)
-
-    from fleetent.knowledge_base import bind_agent_to_kb
-
-    bind_agent_to_kb("tenant-a", "agent-1", "future-kb")
-
-    rows = database.execute("SELECT tenant_id, kb_id FROM knowledge_bases").fetchall()
-    assert rows == []
-
-
 def test_explicit_bindings_override_default_kb(monkeypatch, tmp_path):
-    _patch_binding_runtime(monkeypatch, tmp_path)
+    database = _patch_binding_runtime(monkeypatch, tmp_path)
     _patch_binding_settings(monkeypatch, default_kb_id="global")
 
-    from fleetent.knowledge_base import bind_agent_to_kb, resolve_agent_kb_ids
+    from fleetent.knowledge_base import resolve_agent_kb_ids
 
-    bind_agent_to_kb("tenant-a", "agent-1", "engineering")
-    bind_agent_to_kb("tenant-a", "agent-1", "support")
+    _insert_binding(database, "tenant-a", "agent-1", "engineering")
+    _insert_binding(database, "tenant-a", "agent-1", "support")
 
     assert resolve_agent_kb_ids("tenant-a", "agent-1") == ["engineering", "support"]
 
