@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -11,10 +12,15 @@ from typing import Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 
 import fleetent.schedule_store as _store
+from fleetent import outbound
 from fleetent.config import SchedulingSettings
 from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatching
 
 logger = logging.getLogger(__name__)
+
+# A fired task whose final reply is exactly this sentinel runs successfully but
+# delivers nothing — for "alert only when something changed" tasks.
+_SILENT_SENTINEL = "[SILENT]"
 
 # Missed runs after process downtime coalesce into a single fire within this window
 # (APScheduler misfire_grace_time + coalesce); a one-shot past it is skipped, not fired
@@ -45,15 +51,20 @@ async def _agent_run(
     return await agent_loop.run(messages, user_id=user_id, agent_name=agent_name)
 
 
-async def _fire(task: dict[str, Any]) -> None:
-    """Construct messages and dispatch an agent run for a cron task (S3).
+async def _fire(
+    task: dict[str, Any], connectors: dict[str, Any] | None = None
+) -> None:
+    """Construct messages, run the agent, and proactively deliver the reply (S3 + delivery).
 
-    session_id binding (re-grafted from zhangyang's S3 onto main's scheduler):
+    session_id binding:
     - None  → each fire derives a fresh, unique session `cron/{id}/{uuid}` and runs
       independently (no carried-over context).
-    - set   → the task accumulates context in that fixed session: prior transcript is
-      loaded, the new user message appended, and the full conversation persisted back
-      so the next fire continues it.
+    - set   → the task accumulates context in that fixed session.
+
+    Delivery: the agent's final reply is sent at fire time to the resolved target
+    (explicit ``deliver`` or, by default, the creation ``origin``) via the agent's live
+    connector for that platform. ``[SILENT]`` suppresses delivery. Best-effort: a
+    delivery failure is recorded on the task, never raised.
     """
     import uuid
 
@@ -68,18 +79,95 @@ async def _fire(task: dict[str, Any]) -> None:
         messages = list(await session_mgr.load(sid))
         messages.append({"role": "user", "content": task["message"]})
 
-    await _agent_run(messages, user_id=task["user_id"], agent_name=task.get("agent_name"))
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        reply = await _agent_run(
+            messages, user_id=task["user_id"], agent_name=task.get("agent_name")
+        )
+    except Exception as exc:  # noqa: BLE001 — record the failure, never crash the scheduler
+        logger.warning("cron_fire_run_failed task=%s error=%s", task.get("id"), exc)
+        _record_run(task, now, "error", str(exc))
+        return
+
     # agent_loop.run mutates `messages` in place into the full conversation; persist it
     # so a fixed-session task continues from here next fire.
     await session_mgr.save(
         sid, messages, user_id=task["user_id"], agent_name=task.get("agent_name")
     )
 
+    delivery_error = await _deliver(task, reply, connectors or {})
+    _record_run(task, now, "error" if delivery_error else "ok", delivery_error)
+
+
+async def _deliver(task: dict[str, Any], reply: str | None, connectors: dict[str, Any]) -> str | None:
+    """Send the fired reply to the resolved target. Returns an error string or None.
+
+    Target resolution: explicit ``deliver`` (mode=explicit) wins; otherwise fall back to
+    the creation ``origin``. ``deliver.mode == "none"`` or a ``[SILENT]`` reply skips
+    delivery. Unknown/absent connectors are logged and skipped (not an error per se).
+    """
+    if reply is None or reply.strip() == _SILENT_SENTINEL:
+        return None
+    target = _resolve_delivery(task)
+    if target is None:
+        return None
+    platform, to, target_type, thread = target
+    connector = connectors.get(platform)
+    if connector is None:
+        logger.warning("cron_deliver_no_connector task=%s platform=%s", task.get("id"), platform)
+        return f"no connector for platform {platform}"
+    try:
+        sent = await outbound.send_to(
+            platform, connector, to, reply, target_type=target_type, thread=thread
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort delivery
+        logger.warning("cron_deliver_failed task=%s error=%s", task.get("id"), exc)
+        return str(exc)
+    return None if sent else "delivery returned false"
+
+
+def _resolve_delivery(task: dict[str, Any]) -> tuple[str, str, str, Any] | None:
+    """Resolve (platform, target, target_type, thread) at fire time, or None to skip."""
+    deliver = task.get("deliver")
+    if isinstance(deliver, dict):
+        mode = deliver.get("mode", "origin")
+        if mode == "none":
+            return None
+        if mode == "explicit":
+            platform = deliver.get("platform")
+            to = deliver.get("target")
+            if platform and to:
+                return (platform, to, deliver.get("target_type", "user"), deliver.get("thread"))
+    origin = task.get("origin")
+    if isinstance(origin, dict):
+        platform = origin.get("platform")
+        to = origin.get("chat_id")
+        if platform and to:
+            return (platform, to, origin.get("target_type", "user"), origin.get("thread_id"))
+    return None
+
+
+def _record_run(task: dict[str, Any], when: str, status: str, error: str | None) -> None:
+    """Best-effort writeback of run-state columns; never raise from the fire path."""
+    try:
+        _store.update_run_state(
+            task["id"], last_run_at=when, last_status=status, last_error=error
+        )
+    except Exception as exc:  # noqa: BLE001 — observability writeback is a side channel
+        logger.warning("cron_run_state_writeback_failed task=%s error=%s", task.get("id"), exc)
+
 
 class CronScheduler:
-    def __init__(self, settings: SchedulingSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: SchedulingSettings | None = None,
+        connectors_resolver: Callable[[], dict[str, Any]] | None = None,
+    ) -> None:
         self._settings = settings or SchedulingSettings()
         self._scheduler = AsyncIOScheduler()
+        # Resolved at fire time so a connector that connects after a job is registered
+        # (or reconnects) is still reachable; None → no proactive delivery.
+        self._connectors_resolver = connectors_resolver
 
     @property
     def running(self) -> bool:
@@ -141,7 +229,8 @@ class CronScheduler:
     def _register(self, task: dict[str, Any]) -> None:
 
         async def _task_fire(t: dict[str, Any] = task) -> None:
-            await _fire(t)
+            connectors = self._connectors_resolver() if self._connectors_resolver else None
+            await _fire(t, connectors=connectors)
 
         tz = task.get("timezone") or self._settings.default_timezone
         common: dict[str, Any] = {
