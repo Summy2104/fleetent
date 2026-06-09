@@ -23,12 +23,9 @@ class User:
     status: str = "active"
     must_reset: int = 0
     password_hash: str | None = None
-    totp_secret: str | None = None
 
 
-_FULL_COLS = (
-    "id, name, api_key, created_at, email, role, status, must_reset, password_hash, totp_secret"
-)
+_FULL_COLS = "id, name, api_key, created_at, email, role, status, must_reset, password_hash"
 
 
 def create_user(name: str, email: str | None = None) -> User:
@@ -221,10 +218,6 @@ def set_must_reset(user_id: str, must_reset: bool) -> None:
     _update_field(user_id, "must_reset", int(must_reset))
 
 
-def set_totp_secret(user_id: str, secret: str | None) -> None:
-    _update_field(user_id, "totp_secret", secret)
-
-
 def create_web_user(
     email: str,
     name: str,
@@ -313,7 +306,6 @@ _EXTRA_COLUMNS = (
     ("role", "TEXT NOT NULL DEFAULT 'viewer'"),
     ("status", "TEXT NOT NULL DEFAULT 'active'"),
     ("must_reset", "INTEGER NOT NULL DEFAULT 0"),
-    ("totp_secret", "TEXT"),
 )
 
 

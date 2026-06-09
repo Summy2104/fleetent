@@ -18,18 +18,6 @@ An admin SHALL create a user by email + name with either an initial password or 
 - **WHEN** an admin creates a user whose email already exists
 - **THEN** the operation is rejected and nothing is persisted
 
-### Requirement: One-time invite links
-An admin SHALL generate a one-time invite link for an email; the user sets a password to activate; the token expires after use or timeout.
-
-#### Scenario: Invite then activate
-- **WHEN** an admin generates an invite for an email
-- **AND** the user opens the link within the validity window and sets a password
-- **THEN** the account is activated, the first API key is issued, and the invite token is invalidated
-
-#### Scenario: Reused/expired invite
-- **WHEN** an already-used or expired invite link is opened
-- **THEN** the response is "invite invalid" and no account is created
-
 ### Requirement: CSV bulk import
 An admin SHALL bulk-import users from a CSV; rows that fail are reported without aborting the batch.
 
