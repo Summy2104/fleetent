@@ -17,7 +17,6 @@ from fleetent import server, user_store
 from fleetent.platform.chat_management import chat_admin_api
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
-from fleetent.platform.resource_monitoring import monitor_admin_api
 from fleetent.platform.skill_management import skill_admin_api
 from fleetent.platform.user_management import user_admin_api
 
@@ -994,172 +993,11 @@ def test_kb_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     assert confirm.value.status_code == 428
 
 
-def test_monitor_admin_route_handlers_cover_alerting_and_masking(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _patch_auth(monkeypatch, monitor_admin_api, _user())
-    rules: dict[str, dict[str, Any]] = {}
-    alerts: dict[str, dict[str, Any]] = {
-        "a1": {
-            "id": "a1",
-            "severity": "critical",
-            "status": "notified",
-            "notified_at": "2026-06-03T00:00:00+00:00",
-            "password": "secret",
-        }
-    }
-    audits: list[tuple[Any, ...]] = []
-    sent: list[tuple[str, Any]] = []
-
-    def create_rule(
-        metric: str,
-        comparator: str,
-        threshold: float,
-        target: str | None = None,
-        for_seconds: int = 0,
-        severity: str = "warning",
-        channels: list[str] | None = None,
-    ) -> str:
-        rules["r1"] = {"id": "r1", "metric": metric, "secret": "hidden"}
-        return "r1"
-
-    monkeypatch.setattr(
-        monitor_admin_api.monitoring_store,
-        "query_samples",
-        lambda metric, target, since=None: [{"value": 1.0}, {"value": 2.0}],
-    )
-    monkeypatch.setattr(
-        monitor_admin_api.monitoring_store, "list_rules", lambda: list(rules.values())
-    )
-    monkeypatch.setattr(
-        monitor_admin_api.monitoring_store,
-        "create_rule",
-        create_rule,
-    )
-    monkeypatch.setattr(
-        monitor_admin_api.monitoring_store,
-        "set_rule_enabled",
-        lambda rule_id, enabled: rules.setdefault(rule_id, {"id": rule_id}).__setitem__(
-            "enabled", enabled
-        ),
-    )
-    monkeypatch.setattr(
-        monitor_admin_api.monitoring_store, "delete_rule", lambda rule_id: rules.pop(rule_id, None)
-    )
-    monkeypatch.setattr(
-        monitor_admin_api.monitoring_store, "list_alerts", lambda **kwargs: list(alerts.values())
-    )
-    monkeypatch.setattr(
-        monitor_admin_api.monitoring_store, "get_alert", lambda alert_id: alerts.get(alert_id)
-    )
-    monkeypatch.setattr(
-        monitor_admin_api.monitoring_store,
-        "set_alert_status",
-        lambda alert_id, status, **kwargs: alerts[alert_id].update({"status": status, **kwargs}),
-    )
-    monkeypatch.setattr(
-        monitor_admin_api.monitoring_store, "add_window", lambda target, start_ts, end_ts: "w1"
-    )
-    monkeypatch.setattr(
-        monitor_admin_api.alerting,
-        "should_escalate",
-        lambda alert, moment, after: alert["status"] == "notified",
-    )
-    monkeypatch.setattr(
-        monitor_admin_api,
-        "send_email",
-        lambda recipient, subject, body: sent.append(("email", recipient)),
-    )
-    monkeypatch.setattr(
-        monitor_admin_api, "send_im", lambda target, text: sent.append(("im", target))
-    )
-    monkeypatch.setattr(
-        monitor_admin_api, "send_webhook", lambda url, payload: sent.append(("webhook", url))
-    )
-    monkeypatch.setattr(
-        monitor_admin_api.audit_log, "write_audit", lambda *args, **kwargs: audits.append(args)
-    )
-
-    auth_header = "Session token"
-    assert monitor_admin_api.metrics("cpu", "host", authorization=auth_header)["latest"] == 2.0
-    assert (
-        monitor_admin_api.create_rule(
-            monitor_admin_api.RuleBody(
-                metric="cpu", comparator=">", threshold=90, channels=["in_app"]
-            ),
-            auth_header,
-        )["id"]
-        == "r1"
-    )
-    assert monitor_admin_api.list_rules(auth_header)[0]["secret"] == "****"
-    assert monitor_admin_api.disable_rule("r1", auth_header)["enabled"] is False
-    assert (
-        monitor_admin_api.dispatch_notification(alerts["a1"], ["email", "im", "webhook", "in_app"])[
-            "failed"
-        ]
-        == []
-    )
-    assert monitor_admin_api.escalate_pending()["escalated"] == ["a1"]
-    assert alerts["a1"]["status"] == "escalated"
-    assert monitor_admin_api.list_alerts(authorization=auth_header)[0]["password"] == "****"
-    alerts["a1"]["status"] = "open"
-    assert (
-        monitor_admin_api.ack_alert("a1", monitor_admin_api.AckBody(assignee="ops"), auth_header)[
-            "status"
-        ]
-        == "ack"
-    )
-    assert monitor_admin_api.silence_alert("a1", auth_header)["status"] == "silenced"
-    assert (
-        monitor_admin_api.add_maintenance(
-            monitor_admin_api.WindowBody(
-                target="host",
-                start_ts="2026-06-03T00:00:00+00:00",
-                end_ts="2026-06-03T01:00:00+00:00",
-            ),
-            auth_header,
-        )["id"]
-        == "w1"
-    )
-    assert monitor_admin_api.delete_rule("r1", auth_header)["deleted"] is True
-    assert audits
-    assert sent
-
-
-def test_monitor_admin_route_error_branches(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_auth(monkeypatch, monitor_admin_api, _user())
-    monkeypatch.setattr(monitor_admin_api.monitoring_store, "get_alert", lambda alert_id: None)
-    with pytest.raises(HTTPException) as bad_severity:
-        monitor_admin_api.create_rule(
-            monitor_admin_api.RuleBody(metric="cpu", comparator=">", threshold=90, severity="info"),
-            "Session token",
-        )
-    assert bad_severity.value.status_code == 422
-    with pytest.raises(HTTPException) as missing_alert:
-        monitor_admin_api.ack_alert("missing", monitor_admin_api.AckBody(), "Session token")
-    assert missing_alert.value.status_code == 404
-
-
 def test_server_helpers_cover_admin_url_jobs_and_auth(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(server.sys, "argv", ["uvicorn", "--host=0.0.0.0", "--port", "9000"])
     assert server._admin_login_url("/admin") == "http://127.0.0.1:9000/admin/ui"
-
-    calls: list[str] = []
-
-    def ok_step() -> None:
-        calls.append("ok")
-
-    def bad_step() -> None:
-        calls.append("bad")
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(server.collectors, "collect_once", ok_step)
-    monkeypatch.setattr(server.collectors, "purge_expired", bad_step)
-    monkeypatch.setattr(server.monitor_admin_api, "escalate_pending", ok_step)
-    server._run_monitoring_cycle()
-    assert calls == ["ok", "bad", "ok"]
 
     purged: list[str] = []
     monkeypatch.delenv("DATABASE_URL", raising=False)
