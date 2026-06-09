@@ -30,8 +30,8 @@
 
 ## 7. 风险定级 + tool_context 贯穿
 
-- [ ] 7.1 Write failing unit tests: read_file/search_content/search_files 为 LOW、write_file/edit_file 为 medium；5 工具接受 tool_context 并据此定位 scope 容器（与 run_code 一致）（tests/unit）
-- [ ] 7.2 Implement 风险定级 + tool_context 贯穿，pass unit tests
+- [x] 7.1 Write failing unit tests: read_file/search_content/search_files 为 LOW、write_file/edit_file 为 medium；5 工具接受 tool_context 并据此定位 scope 容器（与 run_code 一致）（tests/unit）
+- [x] 7.2 Implement 风险定级 + tool_context 贯穿，pass unit tests
 
 ## 8. integration（真实 docker）
 
