@@ -34,7 +34,7 @@ flowchart TB
 
   CORE["★ Agent 运行时（核）<br/>loop · tools · model · session · skills<br/>memory · long_term_ctx · reflection(生成) · kb.retrieval<br/>governance(执行门) · 自包含、可 fleetent agent run 独立运行"]
 
-  INFRA["共享基座（谁都可依赖，自身只向下）<br/>db · config · paths · structured_logging · secret_scan<br/>vector_store · observability(含 resource_monitoring)<br/>governance(审计/策略数据) · Identity端口(authn)"]
+  INFRA["共享基座（谁都可依赖，自身只向下）<br/>db · config · paths · structured_logging · secret_scan<br/>vector_store · observability(trace;fleet 监控已外置)<br/>governance(审计/策略数据) · Identity端口(authn)"]
 
   EDGE -->|喂入消息| CORE
   CTRL -->|配置/审批 → 核| CORE
@@ -68,7 +68,7 @@ flowchart TB
 | Skill | `skills/` | 扫描/注入（运行时侧） |
 | 能力（关于自己） | `memory/`、`long_term_ctx/`、`reflection/`(生成) | 记忆/上下文/反思 |
 | 知识检索 | `knowledge_base.retrieval` | **仅消费侧**，不含 ingest |
-| 治理执行 | `governance`(permission_gate, agent_policy, quota 执行) | 运行时侧的门 |
+| 治理执行 | `governance`(permission_gate, agent_policy, blocklist 执行) | 运行时侧的门（`quota` v1 descope，见 data-model §5.8） |
 
 > 核内部的「巨型文件」（`loop.py`/`reflection.py`/`context.py`）是**正交的内聚问题**：拆它们不改外部行为、不动依赖方向，可独立先做。
 
@@ -87,7 +87,7 @@ flowchart TB
 ### ③ 编排 / 监管面 —— 管 agent 的生命周期
 - **性质**：把②的配置 materialize 成 `agent.yaml`、启停 agent 进程、定时触发。**daemon / 调度** character，独立于②的同步 CRUD（独立可用性：本面挂了配置照样能改，跑着的 agent 才失去监管）。
 - **模块**：`platform/agent_lifecycle`（materialize, controller, secret_store, credential_slots）、`cron_scheduler` + `schedule_store`。
-- **边界注记**：`materialize`（store 配置 → `agent.yaml`）是 **②→③ 的转换桥**——由②动作触发、产出③要用的运行时产物，归③（执行侧），别误当②的一部分。`resource_monitoring` **已移出本面 → 基座 `observability`**（§4）：它是可观测性，不是编排。
+- **边界注记**：`materialize`（store 配置 → `agent.yaml`）是 **②→③ 的转换桥**——由②动作触发、产出③要用的运行时产物，归③（执行侧），别误当②的一部分。`resource_monitoring` **v1 整体外置移除**（→ Prometheus/Grafana，change `externalize-monitoring`，见 data-model §5.8）——原拟移入基座 `observability`，现因自建监控是 Prometheus 生态的弱重造而整体删除;`observability` 仅保留 agent 运行 trace。
 
 ### ④ 摄取 / 数据管道面 —— 异步把数据沉淀进可检索源
 - **性质**：异步、定时、批量、数据重；外部源 → 解析/向量化 → 写入核可检索的 store。
@@ -99,7 +99,7 @@ flowchart TB
 
 ## 4. 共享基座
 
-谁都可依赖、自身只向下的叶子：`db`、`config`、`paths`、`structured_logging`、`secret_scan`、`eval_logger`、`vector_store`（向量 infra）、`observability`（核发射 trace、面读取；**含 `resource_monitoring` 运行健康监控**）、`Identity` 端口（authn：本地 key / OIDC 适配器，详见 §6）。
+谁都可依赖、自身只向下的叶子：`db`、`config`、`paths`、`structured_logging`、`secret_scan`、`eval_logger`、`vector_store`（向量 infra）、`observability`（核发射 trace、面读取；**fleet 资源监控 v1 已外置 Prometheus，不再含 `resource_monitoring`**，见 §5.8）、`Identity` 端口（authn：本地 key / OIDC 适配器，详见 §6）。
 
 **`db` 与 `vector_store` 的物理形态**（决议详见 `data-model.md` §5.1–§5.2、§5.7）：
 
@@ -117,7 +117,7 @@ flowchart TB
 |---|---|---|
 | `user_store` | 鉴权 + 用户 CRUD + IM 身份，且反向 import platform/governance | **authn→基座 `Identity` 端口**、用户/key 管理→②控制面、IM 身份→①边缘；解开与 governance 的循环、消除 platform 泄漏(#1)。详见 §6 |
 | `knowledge_base` | retrieval(消费) 与 ingest(管道) 同包 | retrieval→核、ingest→④面；用现有护栏升级为硬边界 |
-| `governance` | 执行门(policy/permission/quota/blocklist) 与 管理 API 与 审计数据 混在一起 | **执行→核**、**管理 API→②**、**审计/策略数据→基座**（详见下表） |
+| `governance` | 执行门(policy/permission/blocklist) 与 管理 API 与 审计数据 混在一起（`quota` v1 descope） | **执行→核**、**管理 API→②**、**审计/策略数据→基座**（详见下表） |
 | `reflection` | 反思「生成」与「管理 API」分属不同面（`platform/reflection_management` 已半成形） | **生成→核**、**review/approve API→②**（详见下表） |
 
 **一般规则**：一个模块若横跨两个面，就是该拆的信号。
@@ -128,7 +128,7 @@ flowchart TB
 |---|---|---|
 | `agent_policy` | fnmatch 工具白名单检查（运行时） | **核** |
 | `permission_gate`（门机制） | medium/high 风险工具调用阻塞等审批（`asyncio.Event`，运行时） | **核** |
-| `quota` 检查 / `blocklist` 检查 | 运行时按用户限流 / 拦截调用 | **核** |
+| `blocklist` 检查 | 运行时拦截被封用户调用 | **核**（`quota` 检查 v1 descope，删除，见 data-model §5.8） |
 | 审批**解析**、封禁/配额**管理** API | 人对治理的管理（薄暴露面） | **② 控制面** |
 | `audit_log`（平台管理操作审计）、策略/封禁数据 | 横切数据落地 | **基座** |
 
@@ -155,7 +155,7 @@ flowchart TB
 | 关注点 | 是什么 | 归属 |
 |---|---|---|
 | **authn（核验）** | `凭证 → principal 或拒绝`；核服务 /chat /ws 必须有、且要脱离 platform | **基座的 `Identity` 端口** |
-| **user/key/角色管理** | 建用户、签发/吊销 key、邀请、封禁 | **② 控制面** CRUD |
+| **user/key/角色管理** | 建用户、签发/吊销 key、封禁（自助**邀请 v1 砍**，见 §5.8） | **② 控制面** CRUD |
 | **per-user 配额/封禁** | 运行时策略 | 横切治理（基座侧策略数据） |
 
 **为何不做独立服务**：外部 SaaS 身份违反数据主权；自托管独立进程的运维负担违背 lean；企业客户多半自带 IdP（LDAP/AD/OIDC），自建反而和客户身份系统冲突。正解是**依赖反转**——核定义 `Identity` 端口，多种实现作适配器接入。
@@ -206,18 +206,18 @@ flowchart TB
 ```
 核    : runtime · session · model · tools · integrations · skills
         memory · long_term_ctx · reflection(生成) · knowledge_base.retrieval
-        governance(执行: agent_policy · permission_gate机制 · quota/blocklist检查)
+        governance(执行: agent_policy · permission_gate机制 · blocklist检查)
         agent_config         〔依赖 Identity 端口，不依赖其实现〕
 ①边缘 : im_gateway · webhook_router · im_user_store · server(/chat /ws)
 ②控制 : platform/{askit_console, agent_management_console, connector_management,
         knowledge_base_management, model_provider_management, skill_management,
         user_management, chat_management, reflection_management}
-        · governance 管理 API(审批解析/封禁/配额) · agent_store · user_store(CRUD)
+        · governance 管理 API(审批解析/封禁) · agent_store · user_store(CRUD)
         · connectors · admin_cli · server(管理端点)
 ③编排 : platform/agent_lifecycle · cron_scheduler · schedule_store
 ④摄取 : knowledge_base.ingest · connector sync
 基座  : db · config · paths · structured_logging · secret_scan · eval_logger
-        · vector_store · observability(含 resource_monitoring)
+        · vector_store · observability(trace;fleet 监控已外置)
         · governance(audit_log + 策略/封禁数据) · 反思建议 store(核写、②读)
         · Identity 端口 + 适配器(本地 key / OIDC-Google / 企业 IdP)   ← 新增，#1 修法核心
 ```
@@ -230,12 +230,13 @@ flowchart TB
 - **面的数量 = 4**：① 边缘、② 控制、③ 编排、④ 摄取，互不合并。
   - ④ 摄取**保持独立**（不并入②）。理由见 §3-④。
   - ②控制 与 ③编排**不合并**：靠「定义 vs 执行」同一把尺——③ 是 daemon/调度 character、独立可用性，与 ② 的同步人工 CRUD 是两种东西。
-  - `resource_monitoring` **移出 ③ → 基座 `observability`**（可观测性，非编排）；`materialize` 标为 ②→③ 的转换桥。
+  - `resource_monitoring` **v1 整体外置移除 → Prometheus/Grafana**（change `externalize-monitoring`，见 data-model §5.8）；原拟移入基座 `observability`，现因是 Prometheus 生态弱重造而整体删除。`materialize` 标为 ②→③ 的转换桥。
 - **物理形态 = 单体**：四个面做成一等限界上下文，边界按「可拆服务」画；不现在拆微服务。
 - **用户体系 = 内置模块 + `Identity` 端口**（§6）：authn→基座端口、user 管理→②；**首发 OIDC/Google 适配器**（pilot 客户接受外部登录）；结构性修掉泄漏 #1。
 - **governance / reflection 拆分**（§5 两节）：**能力本体/运行时执行→核**、**管理/审批/review API→②**、**审计/策略/建议数据→基座**（核写、②只读，不反向写 platform 表）。沿用 CLAUDE.md「审批门≠归控制面」与「自进化纵向元能力」判据。
 - **多租户物理隔离**（data-model.md §5.7，2026-06-09）：`tenant`=主体实体；各层（per-agent 运行库 / 共享记忆库 / KB 库）**按主体物理分区**；管理库单库跨主体注册中心；Identity 端口解析后的 `principal` 携带 `tenant_id`（从 `users.tenant_id` + `team_members` 解析）。
 - **持久层执行 roadmap**（data-model.md §6）：persistence-hygiene（✅已完成）→ 审批重设计(A) + 管理表收编(#2) → 五库物理分离(#3，吸收 R2 全部拓扑) → Identity 端口(#4)；串行推进，各期 detailed spec 即时生成。
+- **v1 实体减法**（data-model.md §5.8，2026-06-09）：**砍** askit/KB 死代码(`dead-schema-cleanup`)、`invites`+2FA(`trim-user-auth`)；**descope** `quotas`/`quota_usage`(`descope-quota`)；**外置** 自建 fleet 监控 → Prometheus/Grafana(`externalize-monitoring`)；**保留** 知识图谱/自进化;**defer** `connectors.agent_id`。对本提案的影响:`resource_monitoring` 不入基座而整体外置;`governance` 执行门去掉 `quota`(留 blocklist)；②用户管理去掉自助邀请。
 
 ### 仍待讨论
 1. **模块迁移顺序**（本提案范围）：先拆巨型文件（正交、低风险）还是先立面边界（结构优先）？注：DB 层执行顺序已在 data-model.md §6 独立锁定，与本问题正交。
