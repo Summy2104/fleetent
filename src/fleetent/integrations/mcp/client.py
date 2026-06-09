@@ -1,12 +1,16 @@
 """MCP (Model Context Protocol) client for connecting to external tool servers.
 
-Supports two transports:
-  - http: standard MCP Streamable HTTP (initialize handshake, Accept negotiation for
-    JSON/SSE responses, Mcp-Session-Id session management, monotonic request ids)
-  - stdio: subprocess stdin/stdout (official MCP servers like filesystem, github)
+All transports go through the official `mcp` SDK's ClientSession over a transport-specific
+stream pair, held alive in a module-level AsyncExitStack:
+  - stdio: `stdio_client` (subprocess stdin/stdout)
+  - http:  `streamablehttp_client` (Streamable HTTP)
+  - sse:   `sse_client` (legacy Server-Sent Events)
 
-Tools are registered into tool_registry under namespaced names: server_id__tool_name.
-Stdio connections are kept alive via a module-level AsyncExitStack.
+The SDK owns the wire protocol (JSON-RPC, initialize handshake, session id, Accept
+negotiation, SSE parsing, protocol-version negotiation). This module keeps the
+application/operational layer: tool registration ({server_id}__{tool_name}), result
+normalization, degradation/visibility, schema sanitization, header/env: resolution,
+scope isolation, and lazy reconnect on a dropped session.
 """
 
 from __future__ import annotations
@@ -17,13 +21,16 @@ import json
 import logging
 import os
 import time
-from contextlib import AsyncExitStack, suppress
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from fleetent.runtime.error_classifier import ErrorClassification
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.client.streamable_http import streamablehttp_client
+from mcp.types import LATEST_PROTOCOL_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -34,29 +41,23 @@ _failed_strict_servers: set[str] = set()
 _active_sessions: dict[tuple[int | None, str], Any] = {}  # (scope, server_id) -> stdio session
 _exit_stack: AsyncExitStack | None = None
 
-# --- MCP3: connection health & reconnect tunables (injectable defaults) ----
-# Reconnect backoff (D4): 1s -> 2s -> 4s -> ... capped at 60s; after this many
-# consecutive failed reconnects a server is marked permanently unavailable.
-# These are module-level *constants* (read-only defaults), not mutable per-server
-# state — per-server state (health, attempt count) lives on the server instance.
-_PROBE_INTERVAL = 30.0  # seconds between background health probes (D3)
-_BACKOFF_BASE = 1.0  # seconds; first reconnect delay (D4)
-_BACKOFF_CAP = 60.0  # seconds; reconnect backoff ceiling (D4)
-_RECONNECT_MAX_ATTEMPTS = 5  # consecutive failures -> unavailable (D4)
 _MAX_TOOL_PAGES = 100  # tools/list pagination safety cap: stop following nextCursor past this
 
 _UNAVAILABLE_RESULT_PREFIX = "MCP server"  # tool result text on degraded/unavailable (D5)
 
-# Single background health-monitor task (server-process lifespan only, D6).
-_health_monitor_task: asyncio.Task[None] | None = None
-
 
 class HealthState(StrEnum):
-    """Connection health of an MCP server (D2). str-valued for trace output."""
+    """Connection health of an MCP server (D2). str-valued for trace output.
+
+    With lazy reconnect there is no background prober: a server stays ``healthy`` until a
+    call hits a disconnect, then a single in-line reopen+retry decides ``healthy`` (retry
+    succeeded) or ``unavailable`` (reopen/retry failed). ``unavailable`` drops its tools
+    from the schema filter and short-circuits later calls until a re-registration.
+    """
 
     healthy = "healthy"  # connection live, tools callable
-    degraded = "degraded"  # disconnect detected, reconnecting in background
-    unavailable = "unavailable"  # reconnect threshold hit; auto-reconnect stopped
+    degraded = "degraded"  # disconnect seen; reopen+retry in flight on the current call
+    unavailable = "unavailable"  # reopen/retry failed; tools hidden until re-registration
 
 
 # Refresh slightly before the server-stated expiry to avoid a "valid at check, expired at
@@ -155,13 +156,10 @@ class McpServerConfig:
     # Per-server HTTP timeouts in seconds: connect/discovery/probe/token vs tool call.
     connect_timeout: float = 10.0
     call_timeout: float = 30.0
-    # Streamable HTTP runtime state (per-server, not module-level global)
-    session_id: str | None = None  # assigned by server via Mcp-Session-Id on initialize
     # Negotiated protocol version + server-advertised capabilities, captured at initialize
     # (per-server runtime state, never module-level global; capabilities gate later features).
     protocol_version: str | None = field(default=None, repr=False, compare=False)
     capabilities: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
-    _request_id: int = field(default=0, repr=False, compare=False)  # monotonic JSON-RPC id
     # OAuth2 runtime state, held per-server instance (D3/D5/D9: never module-level global)
     _token_store: _InMemoryTokenStore = field(
         default_factory=_default_token_store, repr=False, compare=False
@@ -171,7 +169,6 @@ class McpServerConfig:
     # MCP3 connection-health state, held per-server (D2: never module-level global).
     _health: HealthState = field(default=HealthState.healthy, repr=False, compare=False)
     _reconnect_attempts: int = field(default=0, repr=False, compare=False)
-    _reconnect_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
     # Coalesces tools/list_changed-driven refreshes for this stdio server (mcp-dynamic-tools).
     _list_refresh_lock: asyncio.Lock = field(
         default_factory=asyncio.Lock, repr=False, compare=False
@@ -256,12 +253,6 @@ def unavailable_servers() -> list[tuple[str, str]]:
     return out
 
 
-def _next_request_id(server: McpServerConfig) -> int:
-    """Return the next monotonic JSON-RPC request id for a server (per-server counter)."""
-    server._request_id += 1
-    return server._request_id
-
-
 def _make_tool_name(server_id: str, tool_name: str) -> str:
     return f"{server_id}__{tool_name}"
 
@@ -306,214 +297,12 @@ def _is_disconnect_error(exc: BaseException) -> bool:
     return isinstance(exc, (ConnectionError, BrokenPipeError, EOFError, OSError))
 
 
-def _disconnect_classification() -> ErrorClassification:
-    """Read AR5's mcp_disconnect classification directly (D1).
-
-    The disconnect→category decision is mcp_client's own domain knowledge; we then
-    consume AR5's read-only ``should_retry`` flag straight from CLASSIFICATION_TABLE.
-    We deliberately do NOT call ``error_classifier.classify()`` — it only recognizes
-    ``APIStatusError`` and would return ``unknown`` for a disconnect exception.
-    """
-    from fleetent.runtime.error_classifier import CLASSIFICATION_TABLE, ErrorCategory
-
-    return CLASSIFICATION_TABLE[ErrorCategory.mcp_disconnect]
-
-
 def _unavailable_result(server_id: str) -> str:
     """Tool-call result text when a server is degraded/unavailable (D5)."""
     return (
         f"{_UNAVAILABLE_RESULT_PREFIX} '{server_id}' is temporarily unavailable "
-        f"(connection lost; reconnecting in the background)."
+        f"(connection lost; it will be retried on the next call)."
     )
-
-
-def _handle_disconnect(server: McpServerConfig) -> str:
-    """Map a caught disconnect to AR5 mcp_disconnect and degrade + schedule reconnect (D1).
-
-    Reads the mcp_disconnect classification's ``should_retry``: when true (it is, per
-    AR5), transitions the server to ``degraded`` and kicks off a background reconnect.
-    Returns the user-facing unavailable text (D5).
-    """
-    classification = _disconnect_classification()
-    if classification.should_retry and server._health is HealthState.healthy:
-        set_health(server, HealthState.degraded)
-        _schedule_reconnect(server)
-    return _unavailable_result(server.id)
-
-
-def _backoff_delay(
-    attempt: int, *, base: float = _BACKOFF_BASE, cap: float = _BACKOFF_CAP
-) -> float:
-    """Exponential backoff delay for reconnect attempt ``attempt`` (0-based), capped (D4)."""
-    return min(base * (2.0**attempt), cap)
-
-
-async def _attempt_reconnect(server: McpServerConfig) -> None:
-    """One reconnect attempt (D4): re-register on success, count failures, cap to unavailable.
-
-    Idempotent / deduplicated via the server's reconnect lock so concurrent triggers
-    coalesce into a single in-flight reconnect.
-    """
-    if server._reconnect_lock.locked():
-        return
-    async with server._reconnect_lock:
-        try:
-            await _register_server(server)
-        except Exception as exc:  # noqa: BLE001 — reconnect failure is expected; counted below
-            server._reconnect_attempts += 1
-            if server._reconnect_attempts >= _RECONNECT_MAX_ATTEMPTS:
-                set_health(server, HealthState.unavailable)
-                logger.warning(
-                    "mcp_server_unavailable server_id=%s attempts=%d error=%s",
-                    server.id,
-                    server._reconnect_attempts,
-                    exc,
-                )
-            else:
-                logger.info(
-                    "mcp_reconnect_failed server_id=%s attempt=%d error=%s",
-                    server.id,
-                    server._reconnect_attempts,
-                    exc,
-                )
-            return
-        reset_health(server)
-        logger.info("mcp_server_reconnected server_id=%s", server.id)
-
-
-async def _reconnect_with_backoff(server: McpServerConfig) -> None:
-    """Background reconnect loop with exponential backoff until healthy or unavailable (D4)."""
-    while server._health is HealthState.degraded:
-        delay = _backoff_delay(server._reconnect_attempts)
-        await asyncio.sleep(delay)
-        await _attempt_reconnect(server)
-
-
-def _schedule_reconnect(server: McpServerConfig) -> None:
-    """Kick off a background reconnect loop for a degraded server (D4/D6).
-
-    Fire-and-forget asyncio task; dedup is enforced inside ``_attempt_reconnect`` via
-    the per-server reconnect lock so concurrent callers do not stack reconnects.
-    """
-    asyncio.create_task(_reconnect_with_backoff(server))
-
-
-async def reconnect(server_id: str) -> None:
-    """Manual reconnect entry point (D4): retry an unavailable/degraded server once.
-
-    Clears the failure count so a previously ``unavailable`` server gets a fresh attempt.
-    Targets the global (scope=None) registration.
-    """
-    server = _server_registry.get((None, server_id))
-    if server is None:
-        raise KeyError(f"Unknown MCP server: {server_id}")
-    server._reconnect_attempts = 0
-    set_health(server, HealthState.degraded)
-    await _attempt_reconnect(server)
-
-
-async def _probe_once(server: McpServerConfig) -> None:
-    """Probe one server's liveness (D3): HTTP light request / stdio session check.
-
-    Auto-probe skips ``unavailable`` servers (they need a manual reconnect). On a
-    detected disconnect the server is degraded and a background reconnect scheduled.
-    """
-    if server._health is not HealthState.healthy:
-        return  # degraded already reconnecting; unavailable needs manual reconnect
-    if server.transport == "stdio":
-        if _active_sessions.get((server._agent_scope, server.id)) is None:
-            set_health(server, HealthState.degraded)
-            _schedule_reconnect(server)
-        return
-
-    import httpx
-
-    try:
-        async with httpx.AsyncClient(
-            timeout=server.connect_timeout, follow_redirects=True
-        ) as client:
-            await _post_jsonrpc(client, server, "tools/list", {})
-    except Exception as exc:  # noqa: BLE001 — probe maps disconnects; other errors logged
-        if _is_disconnect_error(exc):
-            set_health(server, HealthState.degraded)
-            _schedule_reconnect(server)
-        else:
-            logger.debug("mcp_probe_non_disconnect server_id=%s error=%s", server.id, exc)
-
-
-async def _health_monitor_loop(interval: float) -> None:
-    """Periodically probe all registered servers (D3/D6: bare asyncio, no cron)."""
-    while True:
-        await asyncio.sleep(interval)
-        for server in list(_server_registry.values()):
-            await _probe_once(server)
-
-
-def start_health_monitor(*, interval: float = _PROBE_INTERVAL) -> asyncio.Task[None]:
-    """Start the background health-monitor task (D6: server lifespan only, not CLI).
-
-    Implemented as a bare ``asyncio.create_task`` loop — deliberately NOT routed through
-    cron_scheduler/APScheduler (D6: decoupled from the deferred user-level scheduler).
-    """
-    global _health_monitor_task
-    if _health_monitor_task is not None and not _health_monitor_task.done():
-        return _health_monitor_task
-    _health_monitor_task = asyncio.create_task(_health_monitor_loop(interval))
-    return _health_monitor_task
-
-
-async def stop_health_monitor() -> None:
-    """Cancel the background health-monitor task, leaving no residual task (D6)."""
-    global _health_monitor_task
-    if _health_monitor_task is None:
-        return
-    _health_monitor_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await _health_monitor_task
-    _health_monitor_task = None
-
-
-def _extract_jsonrpc_from_sse(body: str, request_id: int) -> dict[str, Any]:
-    """Extract the JSON-RPC response matching request_id from an SSE response body.
-
-    Parses Server-Sent Events: comment lines (starting with ':') are ignored,
-    consecutive 'data:' lines within one event are concatenated, and a blank line
-    terminates an event. Each event whose 'data' payload is a JSON-RPC object with
-    the matching id is returned. Raises ValueError if no matching response is found.
-    """
-    data_lines: list[str] = []
-
-    def try_match(lines: list[str]) -> dict[str, Any] | None:
-        if not lines:
-            return None
-        payload = "\n".join(lines)
-        try:
-            obj = json.loads(payload)
-        except json.JSONDecodeError:
-            return None
-        if isinstance(obj, dict) and obj.get("id") == request_id:
-            return obj
-        return None
-
-    for raw_line in body.splitlines():
-        if raw_line == "":
-            matched = try_match(data_lines)
-            if matched is not None:
-                return matched
-            data_lines = []
-            continue
-        if raw_line.startswith(":"):
-            continue
-        field_name, _, value = raw_line.partition(":")
-        if field_name != "data":
-            continue
-        data_lines.append(value[1:] if value.startswith(" ") else value)
-
-    matched = try_match(data_lines)
-    if matched is not None:
-        return matched
-
-    raise ValueError(f"No JSON-RPC response with id={request_id} found in SSE body")
 
 
 async def get_exit_stack() -> AsyncExitStack:
@@ -527,39 +316,16 @@ async def get_exit_stack() -> AsyncExitStack:
 async def close() -> None:
     """Close all connections on shutdown.
 
-    Closes stdio connections and proactively releases active Streamable HTTP sessions
-    by sending a DELETE (with the Mcp-Session-Id header) to each http server's session
-    endpoint, then clears its local session id. The DELETE is best-effort: failures are
-    logged at debug and never block shutdown.
+    The SDK owns every transport's wire (stdio subprocess / Streamable HTTP / SSE) and
+    holds each session in the shared AsyncExitStack — unwinding the stack runs each
+    transport's own teardown (HTTP DELETE handshake included), so there is nothing to
+    close by hand here.
     """
     global _exit_stack
-    await stop_health_monitor()  # MCP3: cancel background prober, leave no residual task (D6)
-    await _close_http_sessions()
     if _exit_stack is not None:
         await _exit_stack.__aexit__(None, None, None)
         _exit_stack = None
     _active_sessions.clear()
-
-
-async def _close_http_sessions() -> None:
-    """Send DELETE for each active HTTP session (best-effort), then expire it locally."""
-    active = [
-        s for s in _server_registry.values() if s.transport == "http" and s.session_id is not None
-    ]
-    if not active:
-        return
-
-    import httpx
-
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-        for server in active:
-            try:
-                bearer = await _bearer_for(server)
-                await client.delete(server.url, headers=_base_headers(server, bearer=bearer))
-            except Exception as exc:  # noqa: BLE001 — DELETE is best-effort on shutdown
-                logger.debug("mcp_session_delete_failed server_id=%s error=%s", server.id, exc)
-            finally:
-                _expire_session(server)
 
 
 async def register_all(servers: list[McpServerConfig], scope: int | None = None) -> None:
@@ -583,10 +349,8 @@ async def _register_server(server: McpServerConfig, scope: int | None = None) ->
     server._agent_scope = scope
     if server.auth_type == "oauth2":
         _clear_oauth_auth_state(server)  # (re-)registration clears sticky auth state (D5)
-    if server.transport == "stdio":
-        await _register_stdio_server(server, scope)
-    else:
-        await _register_http_server(server, scope)
+    # All transports go through one SDK-ClientSession path (stdio / http / sse).
+    await _register_session_server(server, scope)
 
 
 # stdio subprocess environment isolation (mcp-stdio-isolation): never inherit the full
@@ -676,7 +440,7 @@ def _reregister_stdio_tools(server: McpServerConfig, tools: list[Any], scope: in
     for name in [n for n in tr._registry if n.startswith(prefix)]:
         del tr._registry[name]
     for tool_def in tools:
-        _register_tool_stdio(server, _make_tool_name(server.id, tool_def.name), tool_def, scope)
+        _register_tool(server, _make_tool_name(server.id, tool_def.name), tool_def, scope)
     _register_utility_tools(server, scope)
 
 
@@ -694,7 +458,7 @@ async def _refresh_stdio_tools(server: McpServerConfig, scope: int | None, sessi
         if _active_sessions.get((scope, server.id)) is not session:
             return
         try:
-            tools = await _list_all_tools_stdio(session)
+            tools = await _list_all_tools(session)
         except Exception as exc:  # noqa: BLE001 — a refresh failure must not break the read loop
             logger.warning("mcp_tools_refresh_failed server_id=%s error=%s", server.id, exc)
             return
@@ -719,42 +483,99 @@ def _make_message_handler(server: McpServerConfig, scope: int | None) -> Any:
     return handler
 
 
-async def _register_stdio_server(server: McpServerConfig, scope: int | None = None) -> None:
-    from mcp import ClientSession
-    from mcp.client.stdio import StdioServerParameters, stdio_client
+async def _http_headers(server: McpServerConfig) -> dict[str, str]:
+    """Build request headers for an http/sse transport: custom headers (with env: refs
+    resolved) plus an Authorization Bearer when a token is available.
 
-    params = StdioServerParameters(
-        command=server.command,
-        args=server.args,
-        env=_subprocess_env(server),
+    Accept negotiation, Mcp-Session-Id and the MCP-Protocol-Version header are NOT set
+    here — the SDK transport / ClientSession owns them.
+    """
+    headers: dict[str, str] = {}
+    if server.headers:
+        headers.update({k: _resolve_env_ref(v) for k, v in server.headers.items()})
+    bearer = await _bearer_for(server)
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+    elif server.auth_type == "api_key" and server.api_key_env:
+        key = os.environ.get(server.api_key_env, "")
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+    return headers
+
+
+def _transport_cm(server: McpServerConfig, headers: dict[str, str]) -> Any:
+    """Return the SDK transport context manager for the server's transport.
+
+    All three SDK clients yield a stream tuple whose first two items are the
+    (read, write) streams fed to a ClientSession.
+    """
+    if server.transport == "stdio":
+        params = StdioServerParameters(
+            command=server.command, args=server.args, env=_subprocess_env(server)
+        )
+        return stdio_client(params)
+    # Per-server timeouts map onto the SDK transport: connect_timeout governs the
+    # connection / request POST (`timeout`), call_timeout the streamed tool-result read
+    # (`sse_read_timeout`) — the long-lived session means both are set once, at open.
+    if server.transport == "sse":
+        return sse_client(
+            server.url,
+            headers=headers,
+            timeout=server.connect_timeout,
+            sse_read_timeout=server.call_timeout,
+        )
+    # default: streamable http
+    return streamablehttp_client(
+        server.url,
+        headers=headers,
+        timeout=server.connect_timeout,
+        sse_read_timeout=server.call_timeout,
     )
 
+
+async def _open_session_for(server: McpServerConfig, scope: int | None) -> Any:
+    """Open a transport-specific ClientSession, hold it in the exit stack, initialize it.
+
+    Unified across stdio / http / sse: the SDK owns the wire; we hold the resulting
+    ClientSession in _active_sessions[(scope, id)] for reuse and lazy reconnect.
+    """
+    headers = {} if server.transport == "stdio" else await _http_headers(server)
     stack = await get_exit_stack()
-    read, write = await stack.enter_async_context(stdio_client(params))
+    streams = await stack.enter_async_context(_transport_cm(server, headers))
+    read, write = streams[0], streams[1]
     session: Any = await stack.enter_async_context(
         ClientSession(read, write, message_handler=_make_message_handler(server, scope))
     )
     init_result = await session.initialize()
     _capture_init_result(server, _init_result_to_dict(init_result))
-
     _active_sessions[(scope, server.id)] = session
+    return session
+
+
+async def _register_session_server(server: McpServerConfig, scope: int | None = None) -> None:
+    """Register a server (any transport) via a held SDK ClientSession."""
+    session = await _open_session_for(server, scope)
     _server_registry[(scope, server.id)] = server
 
-    tools = await _list_all_tools_stdio(session)
+    tools = await _list_all_tools(session)
     for tool_def in tools:
         tool_name = _make_tool_name(server.id, tool_def.name)
-        _register_tool_stdio(server, tool_name, tool_def, scope)
+        _register_tool(server, tool_name, tool_def, scope)
 
     logger.info(
-        "mcp_server_registered server_id=%s transport=stdio tool_count=%d", server.id, len(tools)
+        "mcp_server_registered server_id=%s transport=%s tool_count=%d",
+        server.id,
+        server.transport,
+        len(tools),
     )
     _register_utility_tools(server, scope)
 
 
-# Latest official MCP spec revision (modelcontextprotocol.io). Hand-pinned because this
-# client hand-writes the HTTP transport; when migrated to the official mcp SDK this should
-# be replaced with mcp.types.LATEST_PROTOCOL_VERSION (see mcp-http-sdk-migration).
-PROTOCOL_VERSION = "2025-11-25"
+# Protocol version sourced from the official SDK (auto-tracks; no hand-pinned literal).
+# The SDK ClientSession negotiates the version and echoes the MCP-Protocol-Version header
+# internally; this constant is only the fallback used by _capture_init_result when a
+# server omits a version.
+PROTOCOL_VERSION = LATEST_PROTOCOL_VERSION
 CLIENT_INFO = {"name": "fleetent", "version": "1.0"}
 
 
@@ -790,33 +611,6 @@ def _init_result_to_dict(init_result: Any) -> dict[str, Any]:
         "protocolVersion": getattr(init_result, "protocolVersion", None),
         "capabilities": caps_dict,
     }
-
-
-def _base_headers(server: McpServerConfig, *, bearer: str | None = None) -> dict[str, str]:
-    """Build request headers: Accept negotiation, optional Bearer auth, session id echo.
-
-    Stays synchronous and pure assembly (D6a method a): the api_key Bearer is read from
-    the environment here, while the oauth2 Bearer is resolved asynchronously by the caller
-    before header construction and passed in via ``bearer`` — never fetched inside this
-    sync function.
-    """
-    headers: dict[str, str] = {"Accept": "application/json, text/event-stream"}
-    if server.headers:
-        # Resolve env:VAR_NAME references in custom header values (e.g. X-API-Key).
-        headers.update({k: _resolve_env_ref(v) for k, v in server.headers.items()})
-    if bearer:
-        headers["Authorization"] = f"Bearer {bearer}"
-    elif server.auth_type == "api_key" and server.api_key_env:
-        key = os.environ.get(server.api_key_env, "")
-        if key:
-            headers["Authorization"] = f"Bearer {key}"
-    if server.session_id:
-        headers["Mcp-Session-Id"] = server.session_id
-    # MCP 2025-06-18: echo the negotiated protocol version on requests issued after the
-    # initialize handshake (protocol_version is set only once a session is established).
-    if server.protocol_version:
-        headers["MCP-Protocol-Version"] = server.protocol_version
-    return headers
 
 
 def _clear_oauth_auth_state(server: McpServerConfig) -> None:
@@ -951,149 +745,9 @@ async def _bearer_for(server: McpServerConfig) -> str | None:
     return None
 
 
-def _parse_jsonrpc_response(resp: Any, request_id: int) -> dict[str, Any]:
-    """Parse a JSON or SSE response into the JSON-RPC object matching request_id."""
-    content_type = resp.headers.get("content-type", "")
-    if "text/event-stream" in content_type:
-        return _extract_jsonrpc_from_sse(resp.text, request_id)
-    data = resp.json()
-    if not isinstance(data, dict):
-        raise ValueError("Unexpected JSON-RPC response shape")
-    return data
-
-
-def _is_session_expired(resp: Any) -> bool:
-    """Whether an HTTP response indicates an expired/invalid Mcp-Session-Id (D1).
-
-    HTTP 404 is the primary anchor for a server rejecting a stale session. Other 4xx
-    statuses are treated as session expiry only when an explicit session-invalid marker
-    is present in the response (header or body). 401/403 are authentication errors and
-    MUST NOT be treated as session expiry — they propagate so callers/MCP5 can handle
-    them rather than triggering a session rebuild.
-    """
-    status = resp.status_code
-    if status == 404:
-        return True
-    if status in (401, 403):
-        return False
-    if 400 <= status < 500:
-        return _has_session_invalid_marker(resp)
-    return False
-
-
-def _has_session_invalid_marker(resp: Any) -> bool:
-    """Whether a 4xx response carries an explicit session-invalid marker (header/body)."""
-    if resp.headers.get("Mcp-Session-Invalid"):
-        return True
-    try:
-        body = resp.text.lower()
-    except Exception:  # noqa: BLE001 — marker detection must not mask the real error
-        return False
-    return "session" in body and ("expired" in body or "invalid" in body or "not found" in body)
-
-
-async def _open_session(client: Any, server: McpServerConfig) -> None:
-    """Open a session: send initialize, store the Mcp-Session-Id, send initialized.
-
-    This is the handshake shared by initial registration and session rebuild; the
-    session id lives on the server instance (no module-level session table).
-    """
-    request_id = _next_request_id(server)
-    bearer = await _bearer_for(server)
-    init_resp = await client.post(
-        server.url,
-        json={
-            "jsonrpc": "2.0",
-            "method": "initialize",
-            "params": {
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": CLIENT_INFO,
-            },
-            "id": request_id,
-        },
-        headers=_base_headers(server, bearer=bearer),
-    )
-    init_resp.raise_for_status()
-    session_id = init_resp.headers.get("Mcp-Session-Id")
-    if session_id:
-        server.session_id = session_id
-    init_obj = _parse_jsonrpc_response(init_resp, request_id)
-    _capture_init_result(server, init_obj.get("result"))
-    await _post_notification(client, server, "notifications/initialized")
-
-
-def _expire_session(server: McpServerConfig) -> None:
-    """Clear the server's local session id ahead of a rebuild or on close."""
-    server.session_id = None
-
-
-async def _post_jsonrpc(
-    client: Any,
-    server: McpServerConfig,
-    method: str,
-    params: dict[str, Any],
-    *,
-    _allow_session_retry: bool = True,
-) -> dict[str, Any]:
-    """Send a JSON-RPC request and return the matched JSON-RPC response object.
-
-    On a session-expiry response (D1), the session is expired, re-opened via initialize,
-    and the original request is retried exactly once (guarded by _allow_session_retry).
-    Session-expiry detection happens before raise_for_status so the 404/4xx branch is
-    reachable (D1a).
-    """
-    request_id = _next_request_id(server)
-    bearer = await _bearer_for(server)
-    resp = await client.post(
-        server.url,
-        json={"jsonrpc": "2.0", "method": method, "params": params, "id": request_id},
-        headers=_base_headers(server, bearer=bearer),
-    )
-    if _allow_session_retry and _is_session_expired(resp):
-        _expire_session(server)
-        await _open_session(client, server)
-        return await _post_jsonrpc(client, server, method, params, _allow_session_retry=False)
-    resp.raise_for_status()
-    obj = _parse_jsonrpc_response(resp, request_id)
-    if "error" in obj:
-        raise RuntimeError(f"MCP {method} error: {obj['error']}")
-    return obj
-
-
-async def _post_notification(client: Any, server: McpServerConfig, method: str) -> None:
-    """Send a JSON-RPC notification (no id, no response expected); tolerate failures."""
-    try:
-        bearer = await _bearer_for(server)
-        await client.post(
-            server.url,
-            json={"jsonrpc": "2.0", "method": method},
-            headers=_base_headers(server, bearer=bearer),
-        )
-    except Exception as exc:  # noqa: BLE001 — notification is best-effort
-        logger.debug(
-            "mcp_notification_failed server_id=%s method=%s error=%s", server.id, method, exc
-        )
-
-
-async def _list_all_tools_http(client: Any, server: McpServerConfig) -> list[dict[str, Any]]:
-    """Fetch every page of tools/list, following nextCursor, bounded by _MAX_TOOL_PAGES."""
-    tools: list[dict[str, Any]] = []
-    cursor: str | None = None
-    for _ in range(_MAX_TOOL_PAGES):
-        params: dict[str, Any] = {"cursor": cursor} if cursor else {}
-        obj = await _post_jsonrpc(client, server, "tools/list", params)
-        result = obj.get("result", {})
-        tools.extend(result.get("tools", []) or [])
-        cursor = result.get("nextCursor")
-        if not cursor:
-            return tools
-    logger.warning("mcp_tools_list_page_cap server_id=%s cap=%d", server.id, _MAX_TOOL_PAGES)
-    return tools
-
-
-async def _list_all_tools_stdio(session: Any) -> list[Any]:
-    """Fetch every page of stdio list_tools, following nextCursor, bounded by _MAX_TOOL_PAGES."""
+async def _list_all_tools(session: Any) -> list[Any]:
+    """Fetch every page of `session.list_tools()`, following nextCursor, bounded by
+    _MAX_TOOL_PAGES. Works for any transport (all go through the SDK ClientSession)."""
     tools: list[Any] = []
     cursor: str | None = None
     for _ in range(_MAX_TOOL_PAGES):
@@ -1102,68 +756,29 @@ async def _list_all_tools_stdio(session: Any) -> list[Any]:
         cursor = getattr(result, "nextCursor", None)
         if not cursor:
             return tools
-    logger.warning("mcp_tools_list_page_cap transport=stdio cap=%d", _MAX_TOOL_PAGES)
+    logger.warning("mcp_tools_list_page_cap cap=%d", _MAX_TOOL_PAGES)
     return tools
-
-
-async def _register_http_server(server: McpServerConfig, scope: int | None = None) -> None:
-    import httpx
-
-    async with httpx.AsyncClient(timeout=server.connect_timeout, follow_redirects=True) as client:
-        await _open_session(client, server)
-        tools = await _list_all_tools_http(client, server)
-
-    for tool_def in tools:
-        tool_name = _make_tool_name(server.id, tool_def["name"])
-        _register_tool_http(server, tool_name, tool_def, scope)
-
-    _server_registry[(scope, server.id)] = server
-    logger.info(
-        "mcp_server_registered server_id=%s transport=http tool_count=%d", server.id, len(tools)
-    )
-    _register_utility_tools(server, scope)
 
 
 async def probe_server(server: McpServerConfig) -> dict[str, Any]:
     """One-shot connectivity check for the admin "Test" action.
 
-    Connects, runs the initialize handshake, and lists tools — then discards the
-    connection. Never mutates the shared registry/sessions, so it is safe to run
-    against an unregistered or candidate config. Returns connected/tool_count/tools,
-    or connected=False with the error string on any failure.
+    Opens a throwaway SDK ClientSession (any transport), runs the initialize handshake,
+    lists tools — then discards the connection. Never touches the shared registry /
+    AsyncExitStack / _active_sessions, so it is safe to run against an unregistered or
+    candidate config. Returns connected/tool_count/tools, or connected=False + error.
     """
     try:
-        if server.transport == "stdio":
-            tools = await _probe_stdio_tools(server)
-        else:
-            tools = await _probe_http_tools(server)
+        headers = {} if server.transport == "stdio" else await _http_headers(server)
+        async with AsyncExitStack() as stack:
+            streams = await stack.enter_async_context(_transport_cm(server, headers))
+            session: Any = await stack.enter_async_context(ClientSession(streams[0], streams[1]))
+            await session.initialize()
+            tool_defs = await _list_all_tools(session)
+        tools = [{"name": t.name, "description": t.description or ""} for t in tool_defs]
     except Exception as exc:  # noqa: BLE001 — surface any failure as a clean result
         return {"connected": False, "error": str(exc)}
     return {"connected": True, "tool_count": len(tools), "tools": tools}
-
-
-async def _probe_http_tools(server: McpServerConfig) -> list[dict[str, str]]:
-    import httpx
-
-    async with httpx.AsyncClient(timeout=server.connect_timeout, follow_redirects=True) as client:
-        await _open_session(client, server)
-        tools = await _list_all_tools_http(client, server)
-    return [{"name": t["name"], "description": t.get("description", "")} for t in tools]
-
-
-async def _probe_stdio_tools(server: McpServerConfig) -> list[dict[str, str]]:
-    from mcp import ClientSession
-    from mcp.client.stdio import StdioServerParameters, stdio_client
-
-    params = StdioServerParameters(
-        command=server.command, args=server.args, env=_subprocess_env(server)
-    )
-    async with AsyncExitStack() as stack:
-        read, write = await stack.enter_async_context(stdio_client(params))
-        session: Any = await stack.enter_async_context(ClientSession(read, write))
-        await session.initialize()
-        tools = await _list_all_tools_stdio(session)
-        return [{"name": t.name, "description": t.description or ""} for t in tools]
 
 
 def unregister_server(server_id: str, scope: int | None = None) -> None:
@@ -1222,16 +837,17 @@ def _sanitize_input_schema(schema: Any) -> dict[str, Any]:
         return {"type": "object", "properties": {}}
 
 
-def _register_tool_stdio(
+def _register_tool(
     server: McpServerConfig, tool_name: str, tool_def: Any, scope: int | None = None
 ) -> None:
+    """Register one MCP tool. tool_def is an SDK Tool object (all transports go through
+    the SDK ClientSession now), so name/description/inputSchema are attribute access."""
     import fleetent.tools.registry as tr
 
-    raw_schema = tool_def.inputSchema if hasattr(tool_def, "inputSchema") else None
-    input_schema = _sanitize_input_schema(raw_schema)
+    input_schema = _sanitize_input_schema(getattr(tool_def, "inputSchema", None))
 
     async def call(**kwargs: object) -> str:
-        return await _call_stdio_tool(server.id, tool_def.name, dict(kwargs), server._agent_scope)
+        return await _call_via_session(server.id, tool_def.name, dict(kwargs), server._agent_scope)
 
     schema: tr.ToolSchema = {
         "type": "function",
@@ -1243,28 +859,6 @@ def _register_tool_stdio(
     }
     # Only globally-registered (scope=None) tools enter the shared schema/registry;
     # agent-scoped tools are dispatched via call_tool(scope) to avoid name collisions.
-    if scope is None:
-        tr._registry[tool_name] = (call, schema)
-
-
-def _register_tool_http(
-    server: McpServerConfig, tool_name: str, tool_def: dict[str, Any], scope: int | None = None
-) -> None:
-    import fleetent.tools.registry as tr
-
-    input_schema = _sanitize_input_schema(tool_def.get("inputSchema"))
-
-    async def call(**kwargs: object) -> str:
-        return await _call_http_tool(server.id, tool_def["name"], dict(kwargs), server._agent_scope)
-
-    schema: tr.ToolSchema = {
-        "type": "function",
-        "function": {
-            "name": tool_name,
-            "description": tool_def.get("description", ""),
-            "parameters": input_schema,
-        },
-    }
     if scope is None:
         tr._registry[tool_name] = (call, schema)
 
@@ -1350,23 +944,18 @@ def _normalize_tool_result(content_blocks: Any, *, structured_content: Any, is_e
     return text
 
 
-async def _call_stdio_tool(
-    server_id: str, tool_name: str, args: dict[str, Any], scope: int | None = None
-) -> str:
-    server = _server_registry.get((scope, server_id))
-    # D5: short-circuit degraded/unavailable servers without touching the subprocess.
-    if server is not None and server._health is not HealthState.healthy:
-        return _unavailable_result(server_id)
-
-    session = _active_sessions.get((scope, server_id))
-    if session is None:
-        raise KeyError(f"No active stdio session for MCP server: {server_id}")
+async def _reopen_session(server: McpServerConfig, scope: int | None) -> Any | None:
+    """Lazily re-open a dropped ClientSession (any transport) once. Returns the new
+    session, or None if reopen failed. Replaces the prior server's _active_sessions entry."""
     try:
-        result = await session.call_tool(tool_name, args)
-    except Exception as exc:  # noqa: BLE001 — disconnects map to mcp_disconnect (D1); rest re-raised
-        if server is not None and _is_disconnect_error(exc):
-            return _handle_disconnect(server)
-        raise
+        return await _open_session_for(server, scope)
+    except Exception as exc:  # noqa: BLE001 — reopen failure → caller marks unavailable
+        logger.warning("mcp_reopen_failed server_id=%s error=%s", server.id, exc)
+        return None
+
+
+def _result_to_text(result: Any) -> str:
+    """Normalize an SDK CallToolResult into the agent-facing text (base64 never inlined)."""
     return _normalize_tool_result(
         getattr(result, "content", None),
         structured_content=getattr(result, "structuredContent", None),
@@ -1374,45 +963,53 @@ async def _call_stdio_tool(
     )
 
 
-async def _call_http_tool(
+async def _call_via_session(
     server_id: str, tool_name: str, args: dict[str, Any], scope: int | None = None
 ) -> str:
+    """Invoke a tool through the held SDK ClientSession (any transport).
+
+    On a connection-level failure, lazily re-open the session once and retry. If the
+    server is already known-unavailable, or the auth is sticky-unavailable, or reopen
+    fails, return a degraded result rather than raising — never crash the agent loop.
+    """
     server = _server_registry.get((scope, server_id))
     if server is None:
         raise KeyError(f"Unknown MCP server: {server_id}")
 
-    # D8: an oauth2 server already marked auth-unavailable returns an error result directly —
-    # no token fetch, no request, no raise. Orthogonal to MCP3 connection health.
+    # oauth2 server marked auth-unavailable: return directly, no call.
     if server.auth_type == "oauth2" and server._auth_unavailable:
         return (
             f"MCP server '{server_id}' authentication unavailable: re-authorize or check the "
             f"OAuth2 credentials."
         )
-
-    # D5: short-circuit degraded/unavailable servers without making a network request.
+    # Known-unavailable server: short-circuit without touching the connection.
     if server._health is not HealthState.healthy:
         return _unavailable_result(server_id)
 
-    import httpx
+    session = _active_sessions.get((scope, server_id))
+    if session is None:
+        session = await _reopen_session(server, scope)
+        if session is None:
+            set_health(server, HealthState.unavailable)
+            return _unavailable_result(server_id)
 
     try:
-        async with httpx.AsyncClient(timeout=server.call_timeout, follow_redirects=True) as client:
-            obj = await _post_jsonrpc(
-                client, server, "tools/call", {"name": tool_name, "arguments": args}
-            )
-    except Exception as exc:  # noqa: BLE001 — disconnects map to mcp_disconnect (D1); rest re-raised
-        if _is_disconnect_error(exc):
-            return _handle_disconnect(server)
-        raise
-
-    result = obj.get("result")
-    if isinstance(result, dict):
-        return _normalize_tool_result(
-            result.get("content"),
-            structured_content=result.get("structuredContent"),
-            is_error=bool(result.get("isError", False)),
-        )
-    return str(result) if result is not None else ""
+        result = await session.call_tool(tool_name, args)
+    except Exception as exc:  # noqa: BLE001 — connection drop → lazy reconnect once
+        if not _is_disconnect_error(exc):
+            raise
+        new_session = await _reopen_session(server, scope)
+        if new_session is None:
+            set_health(server, HealthState.unavailable)
+            return _unavailable_result(server_id)
+        try:
+            result = await new_session.call_tool(tool_name, args)
+        except Exception as retry_exc:  # noqa: BLE001 — reopen+retry still failed → degrade
+            logger.warning("mcp_call_retry_failed server_id=%s error=%s", server_id, retry_exc)
+            set_health(server, HealthState.unavailable)
+            return _unavailable_result(server_id)
+        reset_health(server)  # retry succeeded → server is healthy again
+    return _result_to_text(result)
 
 
 # Public API. `scope` keys the (scope, server_id) registry: None = global (startup)
@@ -1424,9 +1021,7 @@ async def call_tool(
     server = _server_registry.get((scope, server_id))
     if server is None:
         raise KeyError(f"Unknown MCP server: {server_id}")
-    if server.transport == "stdio":
-        return await _call_stdio_tool(server_id, tool_name, args, scope)
-    return await _call_http_tool(server_id, tool_name, args, scope)
+    return await _call_via_session(server_id, tool_name, args, scope)
 
 
 # === MCP resources / prompts as capability-gated synthetic tools ============
@@ -1465,48 +1060,27 @@ def _jsonify(obj: Any) -> str:
         return str(obj)
 
 
-async def _call_http_utility(server: McpServerConfig, util_name: str, args: dict[str, Any]) -> str:
-    import httpx
-
-    method = _UTILITY_METHODS[util_name]
-    try:
-        async with httpx.AsyncClient(timeout=server.call_timeout, follow_redirects=True) as client:
-            obj = await _post_jsonrpc(client, server, method, _utility_params(util_name, args))
-    except Exception as exc:  # noqa: BLE001 — disconnects map to mcp_disconnect (D1); rest re-raised
-        if _is_disconnect_error(exc):
-            return _handle_disconnect(server)
-        raise
-    return _jsonify(obj.get("result"))
-
-
-async def _call_stdio_utility(
-    server: McpServerConfig, util_name: str, args: dict[str, Any], scope: int | None
-) -> str:
-    session = _active_sessions.get((scope, server.id))
-    if session is None:
-        raise KeyError(f"No active stdio session for MCP server: {server.id}")
-    try:
-        if util_name == "list_resources":
-            result = await session.list_resources()
-        elif util_name == "read_resource":
-            result = await session.read_resource(args.get("uri"))
-        elif util_name == "list_prompts":
-            result = await session.list_prompts()
-        elif util_name == "get_prompt":
-            result = await session.get_prompt(args.get("name"), args.get("arguments"))
-        else:
-            raise ValueError(f"Unknown MCP utility: {util_name}")
-    except Exception as exc:  # noqa: BLE001 — disconnects map to mcp_disconnect (D1); rest re-raised
-        if _is_disconnect_error(exc):
-            return _handle_disconnect(server)
-        raise
-    return _jsonify(result)
+async def _invoke_utility(session: Any, util_name: str, args: dict[str, Any]) -> Any:
+    """Dispatch one resources/prompts utility method on a held SDK ClientSession."""
+    if util_name == "list_resources":
+        return await session.list_resources()
+    if util_name == "read_resource":
+        return await session.read_resource(args.get("uri"))
+    if util_name == "list_prompts":
+        return await session.list_prompts()
+    if util_name == "get_prompt":
+        return await session.get_prompt(args.get("name"), args.get("arguments"))
+    raise ValueError(f"Unknown MCP utility: {util_name}")
 
 
 async def _call_utility(
     server_id: str, util_name: str, args: dict[str, Any], scope: int | None = None
 ) -> str:
-    """Dispatch a resources/prompts utility tool to its MCP method (auth/health-aware)."""
+    """Dispatch a resources/prompts utility tool through the held SDK ClientSession.
+
+    Same auth/health/lazy-reconnect contract as ``_call_via_session`` — all transports go
+    through one session method; a dropped connection re-opens once and retries.
+    """
     server = _server_registry.get((scope, server_id))
     if server is None:
         raise KeyError(f"Unknown MCP server: {server_id}")
@@ -1517,9 +1091,31 @@ async def _call_utility(
         )
     if server._health is not HealthState.healthy:
         return _unavailable_result(server_id)
-    if server.transport == "stdio":
-        return await _call_stdio_utility(server, util_name, args, scope)
-    return await _call_http_utility(server, util_name, args)
+
+    session = _active_sessions.get((scope, server_id))
+    if session is None:
+        session = await _reopen_session(server, scope)
+        if session is None:
+            set_health(server, HealthState.unavailable)
+            return _unavailable_result(server_id)
+
+    try:
+        result = await _invoke_utility(session, util_name, args)
+    except Exception as exc:  # noqa: BLE001 — connection drop → lazy reconnect once
+        if not _is_disconnect_error(exc):
+            raise
+        new_session = await _reopen_session(server, scope)
+        if new_session is None:
+            set_health(server, HealthState.unavailable)
+            return _unavailable_result(server_id)
+        try:
+            result = await _invoke_utility(new_session, util_name, args)
+        except Exception as retry_exc:  # noqa: BLE001 — reopen+retry still failed → degrade
+            logger.warning("mcp_utility_retry_failed server_id=%s error=%s", server_id, retry_exc)
+            set_health(server, HealthState.unavailable)
+            return _unavailable_result(server_id)
+        reset_health(server)
+    return _jsonify(result)
 
 
 # (util_name, capability_key, description, parameter schema) for the synthetic tools.
