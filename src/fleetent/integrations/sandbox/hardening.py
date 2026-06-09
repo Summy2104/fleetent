@@ -36,10 +36,9 @@ def is_blocked_mount(path: str | Path) -> bool:
     sneak a blocked target past the prefix check.
     """
     resolved = os.path.realpath(str(path))
-    for root in _blocked_roots():
-        if resolved == root or resolved.startswith(root + os.sep):
-            return True
-    return False
+    return any(
+        resolved == root or resolved.startswith(root + os.sep) for root in _blocked_roots()
+    )
 
 
 def config_hash(

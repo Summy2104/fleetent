@@ -10,10 +10,10 @@
 
 ## 3. config-hash 容器复用失效
 
-- [ ] 3.1 Write failing unit tests `tests/unit/test_sandbox_config_hash.py`：`config_hash` 对相同输入稳定、对 image/资源/env keys/ws_path 任一变化敏感、对 env **值** 变化不敏感（只取 keys）（tests/unit）
-- [ ] 3.2 Implement `config_hash` 纯函数 + `create_workspace` 打 `--label fleetent.confighash` + `client.inspect_config_hash`，pass unit tests（mock subprocess）
-- [ ] 3.3 Write failing unit tests `tests/unit/test_sandbox_manager_config_hash.py`：re-adopt 时 actual≠desired→销毁重建（mock find_workspace 命中 + inspect 返回旧 hash，断言 destroy_workspace 被调 + create_workspace 被调）；actual==desired→复用不重建；actual=None（旧容器）→保守复用不重建（tests/unit，mock client）
-- [ ] 3.4 Implement acquire re-adopt 的 config-hash 比对 + 不一致销毁重建，pass unit tests
+- [x] 3.1 Write failing unit tests `tests/unit/test_sandbox_config_hash.py`：`config_hash` 对相同输入稳定、对 image/资源/env keys/ws_path 任一变化敏感、对 env **值** 变化不敏感（只取 keys）（tests/unit）
+- [x] 3.2 Implement `config_hash` 纯函数 + `create_workspace` 打 `--label fleetent.confighash` + `client.inspect_config_hash`，pass unit tests（mock subprocess）
+- [x] 3.3 Write failing unit tests `tests/unit/test_sandbox_manager_config_hash.py`：re-adopt 时 actual≠desired→销毁重建（mock find_workspace 命中 + inspect 返回旧 hash，断言 destroy_workspace 被调 + create_workspace 被调）；actual==desired→复用不重建；actual=None（旧容器）→保守复用不重建（tests/unit，mock client）
+- [x] 3.4 Implement acquire re-adopt 的 config-hash 比对 + 不一致销毁重建，pass unit tests
 
 ## 4. 收尾验证
 

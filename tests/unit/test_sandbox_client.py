@@ -565,3 +565,44 @@ async def test_exec_without_stdin_omits_interactive_flag(client):
     with patch("asyncio.create_subprocess_exec", fake_exec):
         await client.exec("container-id", "echo hi")
     assert "-i" not in captured["args"]
+
+
+# ── config-hash label (sandbox-hardening, task 3) ─────────────────────────────
+
+
+async def test_create_workspace_adds_confighash_label(client):
+    captured: dict = {}
+
+    async def fake_exec(*args, **kwargs):
+        captured["args"] = args
+        return _mock_proc(stdout="cid")
+
+    with patch("asyncio.create_subprocess_exec", fake_exec):
+        await client.create_workspace(name="c", config_hash="abc123")
+    assert "--label" in captured["args"]
+    assert "fleetent.confighash=abc123" in captured["args"]
+
+
+async def test_create_workspace_no_label_without_confighash(client):
+    captured: dict = {}
+
+    async def fake_exec(*args, **kwargs):
+        captured["args"] = args
+        return _mock_proc(stdout="cid")
+
+    with patch("asyncio.create_subprocess_exec", fake_exec):
+        await client.create_workspace(name="c")
+    assert "fleetent.confighash" not in " ".join(captured["args"])
+
+
+async def test_inspect_config_hash_returns_label(client):
+    with patch(
+        "asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(stdout="hh99\n"))
+    ):
+        assert await client.inspect_config_hash("c") == "hh99"
+
+
+async def test_inspect_config_hash_none_when_absent(client):
+    # docker prints an empty line when the label is unset
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=_mock_proc(stdout="\n"))):
+        assert await client.inspect_config_hash("c") is None
