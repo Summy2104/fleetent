@@ -55,6 +55,14 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    import os
+
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        # Override the ini-level sqlalchemy.url so app and migration always target the same DB.
+        # When DATABASE_URL is unset we leave the ini default in place.
+        config.set_main_option("sqlalchemy.url", db_url)
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
@@ -62,9 +70,7 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
+        context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()

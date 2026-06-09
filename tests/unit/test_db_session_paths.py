@@ -12,9 +12,12 @@ from fleetent.session import manager as session_manager
 
 def test_db_and_session_constants_derive_from_paths(monkeypatch) -> None:
     monkeypatch.delenv("FLEETENT_HOME", raising=False)
-    # Names are preserved (no rename): fleetent.db / users.db / sessions.
     assert paths.data_dir() / "fleetent.db" == user_store.DB_PATH
-    assert paths.data_dir() / "users.db" == session_index.DB_PATH
+    # session/index.py migrated away from users.db; it no longer exposes DB_PATH.
+    # Verify it uses db.py (create_database) instead of the old sqlite3 path constant.
+    assert not hasattr(session_index, "DB_PATH"), (
+        "session.index must not expose DB_PATH after migration to db.py"
+    )
     assert paths.data_dir() / "sessions" == session_manager.SESSIONS_DIR
 
 

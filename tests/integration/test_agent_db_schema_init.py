@@ -174,6 +174,7 @@ def test_init_agent_db_schema_creates_all_agent_tables(
     assert "knowledge_chunks" in tables
     assert "knowledge_chunks_fts" in tables
     assert "knowledge_source_states" in tables
+    assert "sessions" in tables
 
 
 def test_init_agent_db_schema_idempotent(tmp_path: Path) -> None:

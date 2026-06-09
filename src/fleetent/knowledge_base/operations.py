@@ -686,13 +686,18 @@ def _now() -> datetime:
 
 
 def ensure_schema(db: SQLiteDatabase) -> None:
-    """Create all KB tables and indices if they do not exist. Idempotent. (migrations 006-009)"""
+    """Create all KB tables and indices if they do not exist. Idempotent.
+
+    Covers migrations 006-009, 011, 046.
+    """
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS knowledge_bases (
             tenant_id   TEXT NOT NULL,
             kb_id       TEXT NOT NULL,
             created_at  TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            archived_at TEXT,
             PRIMARY KEY (tenant_id, kb_id)
         )
         """
@@ -707,6 +712,7 @@ def ensure_schema(db: SQLiteDatabase) -> None:
             source      TEXT NOT NULL,
             source_url  TEXT,
             created_at  TEXT NOT NULL,
+            archived_at TEXT,
             FOREIGN KEY (tenant_id, kb_id)
                 REFERENCES knowledge_bases (tenant_id, kb_id) ON DELETE CASCADE
         )
@@ -744,8 +750,16 @@ def ensure_schema(db: SQLiteDatabase) -> None:
         """
     )
     db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_bases_archive"
+        " ON knowledge_bases (tenant_id, archived_at)"
+    )
+    db.execute(
         "CREATE INDEX IF NOT EXISTS idx_knowledge_documents_scope"
         " ON knowledge_documents (tenant_id, kb_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_documents_archive"
+        " ON knowledge_documents (tenant_id, kb_id, archived_at)"
     )
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_document_position"

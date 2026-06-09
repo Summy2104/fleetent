@@ -157,12 +157,14 @@ def _init_agent_db_schema(database_url: str) -> None:
     from fleetent.knowledge_base import operations as kb_ops
     from fleetent.memory import store as memory_store
     from fleetent.observability import traces
+    from fleetent.session import index as session_index
 
     db = create_database(database_url)
     traces.ensure_schema(db)
     memory_store.ensure_schema(db)
     reflection.ensure_schema(db)
     kb_ops.ensure_schema(db)
+    session_index.ensure_schema(db)
 
 
 async def _start_infra(agent: AgentFile) -> None:

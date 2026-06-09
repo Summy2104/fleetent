@@ -244,16 +244,19 @@ src/fleetent/
 
 ## 数据目录
 
+**双 schema 权威**：管理库（`fleetent.db`）的 schema 由 alembic 迁移维护；per-agent 库（standalone `fleetent agent run` 时也是 `fleetent.db`）的 agent-side 表由各 store 的 `ensure_schema()` 自建，其 DDL 必须与 alembic head 保持一致（漂移护栏测试强制）。
+
 ```
 data/
-  users.db                        # SQLite 主库 — gitignored
-    ├── users / im_users / agents / user_agents / channel_agents
+  fleetent.db                     # SQLite 统一库 — gitignored
+    ├── users / im_users / agents / user_agents / channel_agents  # 管理表（仅 alembic）
     ├── scheduled_tasks / approvals
-    ├── traces                    # eval 日志（append-only，按 agent_id/user_id/时间可查）
-    ├── memory_items              # per-user 语义记忆（v1.0，替换 memories.jsonl）
-    ├── documents / chunks / chunks_fts / entities / relations  # knowledge_base（v1.0）
-    └── skill_proposals / kb_reflection_reports                 # reflection（v1.0）
-  users/{user_id}/memories.jsonl  # per-user 记忆（当前实现，v1.0 前迁移到 users.db）
+    ├── traces                    # agent-side（ensure_schema + alembic 双权威）
+    ├── memory_items              # agent-side（ensure_schema + alembic 双权威）
+    ├── knowledge_bases / knowledge_documents / knowledge_chunks  # agent-side
+    ├── sessions                  # agent-side（session 元数据，ensure_schema 自建）
+    └── skill_proposals / kb_reflection_reports / reflection_reports  # agent-side
+  users/{user_id}/memories.jsonl  # per-user 记忆（当前实现，v1.0 前迁移到 memory_items）
 ```
 
 测试用 `tmp_path + monkeypatch` 隔离，绝不触碰 `data/`。但 `tmp_path` 不决定测试层级：只要创建真实 DB file、验证 schema、执行 CRUD 或 store/runtime 协作，就属于 integration。
