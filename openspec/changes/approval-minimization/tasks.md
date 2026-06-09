@@ -22,5 +22,5 @@
 
 ## 5. 收尾验证
 
-- [ ] 5.1 解耦验证：新增模块零 platform import；模块依赖护栏 + schema drift guard 通过（新表 ensure_schema-only 不破坏 guard）；无 platform DB 环境下指纹自动放行可用
-- [ ] 5.2 全量收尾：`make test-pr` 全绿（approval-routing/action-gate 回归不破）＋ ruff/mypy 改动文件 + integration 对照 main 基线无新增失败 + 本机 `uv run alembic heads` 单 head（推前 merge 最新 main）
+- [x] 5.1 解耦验证：新增模块零 platform import；模块依赖护栏 + schema drift guard 通过（新表 ensure_schema-only 不破坏 guard）；无 platform DB 环境下指纹自动放行可用
+- [x] 5.2 全量收尾：`make test-pr` 全绿（approval-routing/action-gate 回归不破）＋ ruff/mypy 改动文件 + integration 对照 main 基线无新增失败 + 本机 `uv run alembic heads` 单 head（推前 merge 最新 main）
