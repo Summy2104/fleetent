@@ -1,7 +1,7 @@
 ## 1. env 注入白名单
 
-- [ ] 1.1 Write failing unit tests `tests/unit/test_sandbox_env_allowlist.py`：`build_sandbox_env(agent_env=..., allowlist={"FOO"})` 只保留 FOO；allowlist=None 保持现状（全部非 sensitive 通过）；白名单内但 sensitive 的名字仍被剔除（双过滤）（tests/unit）
-- [ ] 1.2 Implement `build_sandbox_env` 增可选 `allowlist` 参数，pass unit tests
+- [x] 1.1 Write failing unit tests `tests/unit/test_sandbox_env_allowlist.py`：`build_sandbox_env(agent_env=..., allowlist={"FOO"})` 只保留 FOO；allowlist=None 保持现状（全部非 sensitive 通过）；白名单内但 sensitive 的名字仍被剔除（双过滤）（tests/unit）
+- [x] 1.2 Implement `build_sandbox_env` 增可选 `allowlist` 参数，pass unit tests
 
 ## 2. workspace 挂载路径黑名单
 

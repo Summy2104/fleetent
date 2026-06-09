@@ -45,6 +45,7 @@ def build_sandbox_env(
     agent_env: dict[str, str] | None = None,
     runtime_env: dict[str, str] | None = None,
     include_host: bool = False,
+    allowlist: set[str] | None = None,
 ) -> dict[str, str]:
     """Merge the three env sources then drop every sensitive-named variable.
 
@@ -53,6 +54,10 @@ def build_sandbox_env(
     current process env); otherwise the result starts empty, preserving the
     clean-environment default. Filtering runs once over the merged set so a
     sensitive name from ANY source is removed.
+
+    When ``allowlist`` is given (sandbox-hardening), only names in it survive —
+    layered on top of (not instead of) the sensitive blocklist, so an allowlisted
+    sensitive name is still dropped. ``None`` keeps the current behaviour.
 
     `runtime_env` exists for pipeline completeness; SB5 wires no caller into it
     (injection is driven solely by agent-declared `features.sandbox_env`).
@@ -64,4 +69,8 @@ def build_sandbox_env(
         merged.update(agent_env)
     if runtime_env:
         merged.update(runtime_env)
-    return {k: v for k, v in merged.items() if not is_sensitive_name(k)}
+    return {
+        k: v
+        for k, v in merged.items()
+        if not is_sensitive_name(k) and (allowlist is None or k in allowlist)
+    }
