@@ -64,7 +64,7 @@ def _capture_stdio_params_env(monkeypatch) -> dict:
         captured["env"] = env
         raise _BoomError()
 
-    monkeypatch.setattr("mcp.client.stdio.StdioServerParameters", fake_params)
+    monkeypatch.setattr(mc, "StdioServerParameters", fake_params)
     return captured
 
 
@@ -74,7 +74,7 @@ async def test_register_stdio_does_not_leak_platform_env(monkeypatch):
     server = mc.McpServerConfig(id="s", transport="stdio", command="x", env={"FOO": "bar"})
     captured = _capture_stdio_params_env(monkeypatch)
     with pytest.raises(_BoomError):
-        await mc._register_stdio_server(server)
+        await mc._register_session_server(server)
     assert "SUPER_SECRET_TOKEN" not in captured["env"]
     assert captured["env"]["FOO"] == "bar"
     assert captured["env"]["PATH"] == "/usr/bin"
@@ -85,8 +85,9 @@ async def test_probe_stdio_does_not_leak_platform_env(monkeypatch):
     monkeypatch.setenv("SUPER_SECRET_TOKEN", "leak")
     server = mc.McpServerConfig(id="s", transport="stdio", command="x", env={"FOO": "bar"})
     captured = _capture_stdio_params_env(monkeypatch)
-    with pytest.raises(_BoomError):
-        await mc._probe_stdio_tools(server)
+    # probe_server swallows the failure into a clean result; the env was still captured.
+    result = await mc.probe_server(server)
+    assert result["connected"] is False
     assert "SUPER_SECRET_TOKEN" not in captured["env"]
     assert captured["env"]["FOO"] == "bar"
     assert captured["env"]["PATH"] == "/usr/bin"

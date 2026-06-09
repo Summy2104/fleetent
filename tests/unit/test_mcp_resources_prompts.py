@@ -82,11 +82,11 @@ async def test_call_utility_http_list(monkeypatch, _clean_registry):
     server = mc.McpServerConfig(id="s", url="http://x", capabilities={"resources": {}})
     monkeypatch.setitem(mc._server_registry, (None, "s"), server)
 
-    async def fake_post(client, srv, method, params, **kw):
-        assert method == "resources/list"
-        return {"result": {"resources": [{"uri": "u1"}]}}
+    class _Sess:
+        async def list_resources(self):
+            return _Dumpable({"resources": [{"uri": "u1"}]})
 
-    monkeypatch.setattr(mc, "_post_jsonrpc", fake_post)
+    monkeypatch.setitem(mc._active_sessions, (None, "s"), _Sess())
     out = await mc._call_utility("s", "list_resources", {}, None)
     assert json.loads(out) == {"resources": [{"uri": "u1"}]}
 
@@ -96,15 +96,14 @@ async def test_call_utility_http_read_resource_forwards_uri(monkeypatch, _clean_
     monkeypatch.setitem(mc._server_registry, (None, "s"), server)
     seen: dict = {}
 
-    async def fake_post(client, srv, method, params, **kw):
-        seen["method"] = method
-        seen["params"] = params
-        return {"result": {"contents": []}}
+    class _Sess:
+        async def read_resource(self, uri):
+            seen["uri"] = uri
+            return _Dumpable({"contents": []})
 
-    monkeypatch.setattr(mc, "_post_jsonrpc", fake_post)
+    monkeypatch.setitem(mc._active_sessions, (None, "s"), _Sess())
     await mc._call_utility("s", "read_resource", {"uri": "file:///a"}, None)
-    assert seen["method"] == "resources/read"
-    assert seen["params"] == {"uri": "file:///a"}
+    assert seen["uri"] == "file:///a"
 
 
 # ── _call_utility over stdio ─────────────────────────────────────────────────

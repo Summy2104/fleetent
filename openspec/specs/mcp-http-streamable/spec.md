@@ -3,87 +3,51 @@
 ## Purpose
 TBD - created by archiving change mcp-http-streamable. Update Purpose after archive.
 ## Requirements
-### Requirement: Streamable HTTP 传输接入服务注册
+### Requirement: Streamable HTTP 传输经官方 SDK 接入服务注册
 
-平台 SHALL 支持以 `transport: http`（标准 Streamable HTTP）声明的远程 MCP 服务；该传输 MUST 经既有的服务注册分派接入，注册成功后其工具 MUST 以 `{server_id}__{tool_name}` 命名空间注册进工具表，与 stdio 传输的命名约定一致。
+平台 SHALL 支持以 `transport: http`（Streamable HTTP）与 `transport: sse`（旧式 SSE）声明的远程 MCP 服务,经官方 `mcp` SDK 的 `streamablehttp_client` / `sse_client` 建立传输、产出 `(read, write)` 流并喂给 `ClientSession`。注册成功后其工具 MUST 以 `{server_id}__{tool_name}` 命名空间注册进工具表,与 stdio 传输的命名约定一致。
 
 #### Scenario: 标准服务工具按命名空间注册
 - **WHEN** 配置声明一个 `transport: http` 的 MCP 服务并启动注册
-- **THEN** 该服务返回的每个工具以 `{server_id}__{tool_name}` 形式注册进工具表，可被 agent 调用
+- **THEN** 平台经 SDK `streamablehttp_client` + `ClientSession` 完成注册,该服务每个工具以 `{server_id}__{tool_name}` 形式注册进工具表,可被 agent 调用
+
+#### Scenario: SSE 传输按命名空间注册
+- **WHEN** 配置声明一个 `transport: sse` 的 MCP 服务并启动注册
+- **THEN** 平台经 SDK `sse_client` + `ClientSession` 完成注册,工具同样以命名空间注册
 
 #### Scenario: stdio 传输行为不变
 - **WHEN** 配置中存在 `transport: stdio` 的服务
-- **THEN** 该类服务沿用原有注册与调用路径，行为与现状一致，不受标准 HTTP 传输引入影响
+- **THEN** 该类服务沿用既有的 SDK `stdio_client` + `ClientSession` 路径,行为不变
 
-### Requirement: initialize 握手与会话标识管理
+### Requirement: 握手、会话标识、协议协商、SSE 解析委托给 SDK
 
-标准传输在注册时 SHALL 先发起 `initialize` 握手再列举工具。若 `initialize` 响应携带 `Mcp-Session-Id` 响应头，平台 MUST 保存该会话标识，并在同一服务后续的 `tools/list` 与 `tools/call` 请求头中回携该标识。会话标识 MUST 按服务隔离持有，不得置于模块级可变全局状态。
+`initialize` 握手、`Mcp-Session-Id` 会话标识的捕获与回携、`Accept` 协商、JSON / SSE 响应解析、单调递增请求 id 与响应匹配、协议版本协商——全部 MUST 由官方 SDK 的传输层与 `ClientSession` 内部处理,平台 MUST NOT 自行手写这些协议细节。平台持有 SDK 返回的 `ClientSession`(按服务隔离,见会话生命周期),经其 `list_tools()` / `call_tool()` 方法收发,不直接构造 JSON-RPC 请求体或解析 SSE 事件。
 
-#### Scenario: 保存并回携会话标识
-- **WHEN** 某 `http` 服务的 `initialize` 响应返回 `Mcp-Session-Id` 头
-- **THEN** 该服务后续的工具列举与工具调用请求头携带相同的 `Mcp-Session-Id`
+#### Scenario: 协议细节由 SDK 处理
+- **WHEN** 某 `http` 服务完成注册并调用工具
+- **THEN** 握手、会话标识管理、Accept 协商、SSE/JSON 解析、请求 id 匹配均由 SDK 完成,平台仅调用 `ClientSession.call_tool()` 并消费返回的结构化结果
 
-#### Scenario: 服务端未分配会话标识
-- **WHEN** `initialize` 响应不含 `Mcp-Session-Id` 头
-- **THEN** 后续请求不携带 `Mcp-Session-Id` 头，注册与调用仍正常进行
+#### Scenario: 工具列举经 SDK 分页
+- **WHEN** 某服务的 `tools/list` 跨多页(SDK 返回 nextCursor)
+- **THEN** 平台经 `ClientSession.list_tools(cursor=…)` 循环取尽各页(封顶页数防失控),聚合注册
 
-### Requirement: Accept 协商与 JSON/SSE 双响应解析
+### Requirement: 自定义 HTTP headers 经 SDK transport 透传
 
-标准传输的每个请求 SHALL 在请求头声明同时接受 `application/json` 与 `text/event-stream`。平台 MUST 根据响应的 `Content-Type` 解析结果：`application/json` 时直接解析响应体的 JSON-RPC 对象；`text/event-stream` 时解析 SSE 事件，提取其中承载本次请求 JSON-RPC 响应的数据并还原为结果。
+HTTP/SSE 传输的 MCP 服务 SHALL 支持在 agent 配置中声明任意自定义 header(`mcp_servers[*].headers`),平台 MUST 在解析 `env:VAR_NAME` 引用后,将其作为 `headers=` 参数传给 SDK 的 `streamablehttp_client` / `sse_client`,由 SDK 并入每个请求。header 值为 `env:VAR_NAME` 形式时 MUST 解析为进程环境真实值,绝不发送字面 `env:VAR_NAME`。
 
-#### Scenario: 服务端返回 JSON 响应
-- **WHEN** 某工具调用的响应 `Content-Type` 为 `application/json`
-- **THEN** 平台从响应体解析 JSON-RPC 结果并将工具结果文本返回给调用方
+#### Scenario: 自定义 header 经 SDK 发送
+- **WHEN** 某 `transport: http` 服务声明 `headers: {X-API-Key: "literal-key"}`
+- **THEN** 平台将其作为 `headers=` 传给 SDK transport,该服务请求头携带 `X-API-Key: literal-key`
 
-#### Scenario: 服务端返回 SSE 响应
-- **WHEN** 某工具调用的响应 `Content-Type` 为 `text/event-stream`，其 `data:` 行承载对应本次请求的 JSON-RPC 响应
-- **THEN** 平台解析 SSE 事件、取出该 JSON-RPC 响应并将工具结果文本返回给调用方
-
-### Requirement: 单调递增请求 id 与响应匹配
-
-标准传输的每次 JSON-RPC 请求 SHALL 使用单调递增的请求 id，不得固定为同一值。当 SSE 响应包含多个事件时，平台 MUST 仅采纳 id 等于本次请求 id 的 JSON-RPC 响应对象。请求 id 计数 MUST 按服务隔离，不得置于模块级可变全局状态。
-
-#### Scenario: SSE 夹带额外事件时取本次响应
-- **WHEN** SSE 流中除本次请求的响应外还包含其他事件
-- **THEN** 平台仅采纳 id 与本次请求一致的 JSON-RPC 响应，忽略其余事件
-
-#### Scenario: 连续请求使用递增 id
-- **WHEN** 对同一服务连续发起多次请求
-- **THEN** 各次请求使用不同且递增的 id，互不冲突
+#### Scenario: header 值的 env: 引用被解析
+- **WHEN** 某服务声明 `headers: {X-API-Key: env:MIDDLE_KEY}` 且 `MIDDLE_KEY` 已在进程环境设置
+- **THEN** 传给 SDK 的 header 值为 `MIDDLE_KEY` 的解析值,而非字面 `env:MIDDLE_KEY`
 
 ### Requirement: 连接失败降级
 
-`transport: http` 服务在注册（握手或工具列举）阶段连接失败时，平台 MUST 沿用既有的启动降级语义：记录告警、该服务工具不可用，且不阻断平台启动与其他服务注册。
+`transport: http` / `sse` 服务在注册(握手或工具列举)阶段连接失败时,平台 MUST 沿用既有启动降级语义:记录告警、该服务工具不可用、不阻断平台启动与其他服务注册。
 
-#### Scenario: 单个标准服务握手失败不影响平台启动
-- **WHEN** 配置了两个服务，其中一个 `transport: http` 服务在 `initialize` 阶段不可达
-- **THEN** 平台正常完成启动，失败服务的工具不可用并记录告警，另一服务正常注册
-
-### Requirement: 自定义 HTTP headers 透传
-
-HTTP 传输的 MCP 服务 SHALL 支持在 agent 配置中声明任意自定义 header(`mcp_servers[*].headers`),平台 MUST 将其逐项并入该服务每个请求的请求头,与 Accept 协商头、`Authorization`(Bearer/api_key)、`Mcp-Session-Id` 等内建头共存。header 值为 `env:VAR_NAME` 形式时 MUST 从进程环境解析为真实值后再发送,绝不发送字面 `env:VAR_NAME`。
-
-#### Scenario: 自定义 header 随请求发送
-- **WHEN** 某 `transport: http` 服务声明 `headers: {X-API-Key: "literal-key"}`
-- **THEN** 该服务的 initialize / tools/list / tools/call 请求头携带 `X-API-Key: literal-key`
-
-#### Scenario: header 值的 env: 引用被解析
-- **WHEN** 某服务声明 `headers: {X-API-Key: env:MIDDLE_KEY}` 且 `MIDDLE_KEY` 在进程环境中已设置
-- **THEN** 请求头携带 `X-API-Key` 为 `MIDDLE_KEY` 的解析值,而非字面 `env:MIDDLE_KEY`
-
-#### Scenario: 自定义 header 与内建认证共存
-- **WHEN** 某服务同时配置 `auth_type: api_key` / `api_key_env` 与自定义 `headers`
-- **THEN** 请求头同时包含 `Authorization` 与声明的自定义 header,互不覆盖
-
-### Requirement: HTTP 请求 URL 原样发送
-
-HTTP 传输的 MCP 请求 SHALL 使用配置的 `url` 原样作为请求目标,MUST NOT 强制追加尾斜杠。这样既支持以 `/mcp` 结尾的严格路径服务,也支持服务端自有的路径规范。
-
-#### Scenario: 严格路径服务不被追加尾斜杠
-- **WHEN** 某服务配置 `url: https://host/mcp`(无尾斜杠)
-- **THEN** initialize / tools/list / tools/call 的请求目标为 `https://host/mcp`,不是 `https://host/mcp/`
-
-#### Scenario: 配置带尾斜杠时按原样发送
-- **WHEN** 某服务配置 `url: https://host/mcp/`(带尾斜杠)
-- **THEN** 请求目标为 `https://host/mcp/`,与配置一致
+#### Scenario: 单个服务握手失败不影响平台启动
+- **WHEN** 配置了两个服务,其中一个 `transport: http` 服务在注册阶段不可达
+- **THEN** 平台正常完成启动,失败服务工具不可用并记录告警,另一服务正常注册
 

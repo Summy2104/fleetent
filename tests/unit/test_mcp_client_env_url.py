@@ -40,10 +40,10 @@ def test_subprocess_env_resolves_env_ref(monkeypatch):
     assert env["PLAIN"] == "literal"
 
 
-# ── _base_headers resolves env: in header values ──────────────────────────────
+# ── _http_headers resolves env: in header values ──────────────────────────────
 
 
-def test_base_headers_resolves_env_ref(monkeypatch):
+async def test_http_headers_resolves_env_ref(monkeypatch):
     monkeypatch.setenv("MIDDLE_KEY_X", "middle-real-key")
     server = McpServerConfig(
         id="middle",
@@ -51,7 +51,7 @@ def test_base_headers_resolves_env_ref(monkeypatch):
         url="https://middle.example/mcp",
         headers={"X-API-Key": "env:MIDDLE_KEY_X", "X-Static": "stay"},
     )
-    headers = mcp_client._base_headers(server)
+    headers = await mcp_client._http_headers(server)
     assert headers["X-API-Key"] == "middle-real-key"
     assert headers["X-Static"] == "stay"
 
@@ -59,5 +59,8 @@ def test_base_headers_resolves_env_ref(monkeypatch):
 # ── protocol version ──────────────────────────────────────────────────────────
 
 
-def test_protocol_version_is_latest():
-    assert PROTOCOL_VERSION == "2025-11-25"
+def test_protocol_version_sourced_from_sdk():
+    # No hand-pinned literal: the client's protocol version must track the SDK's latest.
+    from mcp.types import LATEST_PROTOCOL_VERSION
+
+    assert PROTOCOL_VERSION == LATEST_PROTOCOL_VERSION

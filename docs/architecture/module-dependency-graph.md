@@ -20,7 +20,169 @@ agent 运行时必须能在**没有 platform、platform 的 DB 表不存在**的
 
 ---
 
-## 全景图
+## 怎么看这组图
+
+全景图把 30 个模块画在一起必然是毛球，**看清靠分层切片**：先看「① 宏观 6 层」建立坐标，再按需看
+某一层的细节。每张切片只讲一个故事。文末附密集全景图供对照。
+
+---
+
+## ① 宏观 6 层（先看这张）
+
+```mermaid
+flowchart TB
+  classDef leak stroke:#e00,stroke-width:3px,color:#c00;
+
+  C["客户端 / 入口<br/>CLI · server · TUI · admin_cli · cron"]
+  P["platform/ 控制面<br/>（12 个管理子包）"]
+  R["agent 运行时<br/>runtime · tools · integrations · model<br/>governance · session · im_gateway · skills"]
+  K["agent 能力<br/>memory · long_term_ctx · reflection"]
+  I["组件 / 基础设施<br/>knowledge_base · vector_store · structured_logging"]
+  F["顶层共享 / 基础<br/>config · agent_config · paths · db · auth · *_store …"]
+
+  C --> P & R
+  P -->|单向驱动 / 读取| R
+  P --> K & I & F
+  R --> K & I & F
+  K --> I & F
+  I --> F
+  R -.->|⚠ 唯一反向泄漏：user_store→platform| P
+
+  class F leak
+```
+
+只有一条边逆着层走（红色虚线，即 #1）。在这个粒度上结构是**无环、自上而下**的——骨架是健康的。
+
+---
+
+## ② platform 控制面内部
+
+```mermaid
+flowchart TB
+  SRV["server.py<br/>挂载全部管理 API"]
+  ADM["admin_cli<br/>(fleetent-admin)"]
+  CONSOLE["agent_management_console<br/>（编排）"]
+  ASKIT["askit_console"]
+  LIFE["agent_lifecycle<br/>★ materialize 中枢"]
+  CONN["connector_management"]
+  KBM["knowledge_base_management"]
+  MODELM["model_provider_management"]
+  SKM["skill_management"]
+  REFM["reflection_management"]
+  UM["user_management"]
+  IMM["im_gateway_management"]
+
+  SRV --> CONSOLE & ASKIT & UM & IMM & CONN & KBM & MODELM & SKM
+  ADM --> CONSOLE & CONN & KBM
+  ASKIT --> CONSOLE
+  CONSOLE --> LIFE & CONN & KBM & SKM
+  SKM --> REFM & LIFE
+  LIFE --> CONN & KBM & MODELM & SKM
+  UM --> IMM
+
+  KBM -.->|drives| KBrt["knowledge_base/（agent 侧）"]
+  REFM -.->|drives| REFrt["reflection/（agent 侧）"]
+  SKM -.->|drives| SKrt["skills/（agent 侧）"]
+  CONN -.->|drives| INTrt["integrations/（agent 侧）"]
+```
+
+**故事**：`server` 挂载所有管理 API；`agent_management_console` 做编排；`agent_lifecycle` 是
+**materialize 中枢**——把各域 store（connector / kb / model / skill）组装成 `agent.yaml`。每个
+`*_management` 单向驱动 agent 侧对应物（虚线）。这是清晰的「中枢 + 每域驱动」结构。
+
+---
+
+## ③ agent 运行时 + 能力层
+
+```mermaid
+flowchart TB
+  classDef misplaced stroke:#e80,stroke-width:2px;
+
+  RT["runtime/<br/>loop · agent_app"]
+  TOOLS["tools/"]
+  INTEG["integrations/<br/>mcp · sandbox"]
+  MODEL["model/"]
+  GOV["governance/<br/>统一审批门"]
+  SESS["session/"]
+  IMG["im_gateway/"]
+  SKILLS["skills/"]
+  OBS["observability/"]
+  MEM["memory/"]
+  LTC["long_term_ctx/"]
+  REF["reflection/"]
+
+  RT --> TOOLS & MODEL & INTEG & GOV & SESS & SKILLS & OBS
+  RT --> MEM & LTC & REF & IMG
+  TOOLS --> MODEL & INTEG & GOV & SESS & SKILLS
+  LTC --> MEM
+  REF --> MEM
+  GOV -.->|审批自进化写| REF
+  GOV -.-> MEM
+
+  IMG -.->|lazy：回调循环| RT
+  INTEG -.->|lazy| RT
+  TOOLS -.->|lazy：子 agent| RT
+
+  PRIM["runtime.cancellation / error_classifier<br/>★ 实为跨切原语，放错在 runtime/ 下"]
+  TOOLS ==> PRIM
+  INTEG ==> PRIM
+  class PRIM misplaced
+```
+
+**故事**：`runtime` 是编排中枢（高扇出是合理的）。三条 `-.->` 虚线（im_gateway / integrations /
+tools 回调 `runtime.loop`）**全是函数内 lazy import**——适配器调用核心循环的标准做法，不是 smell，
+只是聚合图上看着像环。橙色 `==>` 才是真问题：`CancelToken` / `error_classifier` 是跨切原语却住在
+`runtime/`，凭空制造了 `runtime↔tools`、`runtime↔integrations` 双向耦合——下沉到中性模块即可消除。
+
+---
+
+## ④ 顶层共享 / 基础（「乱感」的主战场）
+
+```mermaid
+flowchart TB
+  classDef leak stroke:#e00,stroke-width:3px,color:#c00;
+
+  subgraph LEAF["纯叶子（只依赖 paths/config，无业务）"]
+    PATHS["paths"]
+    SLOG["structured_logging"]
+    SECRET["secret_scan"]
+    DB["db"]
+    EVAL["eval_logger"]
+  end
+  subgraph CFGG["配置"]
+    CONFIG["config"]
+    ACFG["agent_config"]
+  end
+  subgraph STORE["存储 / 服务（被 platform 与 agent 两侧依赖）"]
+    ASTORE["agent_store"]
+    SCHED["schedule_store"]
+    CONN["connectors"]
+    AUTH["auth"]
+    IMUS["im_user_store<br/>(shim → platform)"]
+  end
+
+  USTORE["user_store ⚠<br/>一个模块三件事：鉴权 + 用户CRUD + IM身份"]
+
+  CONFIG --> PATHS & SLOG
+  ACFG --> CONFIG & SECRET & PATHS
+  ASTORE --> DB & CONFIG
+  SCHED --> DB
+  AUTH --> USTORE
+  USTORE --> DB
+  USTORE -.->|① 反向泄漏 #1| PLAT["platform/user_management"]
+  USTORE -.->|② 真循环（lazy 打破）| GOVN["governance/blocklist"]
+  IMUS -.-> PLAT
+
+  class USTORE leak
+```
+
+**故事**：这一层没有内部结构——~17 个模块平铺在 `src/fleetent/` 根目录，被两侧一起依赖。「叶子 /
+配置 / 存储服务」三类本应分开，现在混在一起，这是「formless」的根本来源。`user_store` 是单点最乱的
+模块：同时干鉴权、用户 CRUD、IM 身份三件事，还① 泄漏进 platform、② 和 governance 形成真循环。
+
+---
+
+## 全景图（参考 · 密集，看清请用上面的切片）
 
 ```mermaid
 flowchart TB
