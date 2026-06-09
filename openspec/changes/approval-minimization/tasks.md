@@ -17,8 +17,8 @@
 
 ## 4. IM `approve always` 解析
 
-- [ ] 4.1 Write failing unit tests `tests/unit/test_normalizer_approve_always.py`：`approve always <id>` → resolve 以 always=True 调用；`approve <id>` → always=False；`reject <id>` 不变（mock _default_gate.resolve）（tests/unit）
-- [ ] 4.2 Implement `normalizer._APPROVAL_RE` + route 分支传 always，pass unit tests
+- [x] 4.1 Write failing unit tests `tests/unit/test_normalizer_approve_always.py`：`approve always <id>` → resolve 以 always=True 调用；`approve <id>` → always=False；`reject <id>` 不变（mock _default_gate.resolve）（tests/unit）
+- [x] 4.2 Implement `normalizer._APPROVAL_RE` + route 分支传 always，pass unit tests
 
 ## 5. 收尾验证
 

@@ -15,7 +15,9 @@ from fleetent.im_gateway import access
 logger = structlog.get_logger(__name__)
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
-_APPROVAL_RE = re.compile(r"^(approve|reject)\s+([a-f0-9-]{6,36})\s*$", re.IGNORECASE)
+_APPROVAL_RE = re.compile(
+    r"^(approve|reject)(\s+always)?\s+([a-f0-9-]{6,36})\s*$", re.IGNORECASE
+)
 _REJECTION_MSG = "你还没有权限使用此 bot，请联系管理员审批。"
 
 
@@ -153,12 +155,17 @@ async def route(msg: NormalizedMessage) -> None:
     if m:
         from fleetent.governance.permission_gate import _default_gate
 
-        decision = "approved" if m.group(1).lower() == "approve" else "rejected"
-        approval_id = m.group(2)
+        action = m.group(1).lower()
+        decision = "approved" if action == "approve" else "rejected"
+        # "approve always <id>" grants a persistent allow-always for the call's
+        # fingerprint (approval-minimization); only meaningful on approve.
+        always = m.group(2) is not None and action == "approve"
+        approval_id = m.group(3)
         found = await _default_gate.resolve(
             approval_id=approval_id,
             decision=decision,  # type: ignore[arg-type]
             approver_user_id=msg.user_id,
+            always=always,
         )
         if found:
             await msg.reply_func(
