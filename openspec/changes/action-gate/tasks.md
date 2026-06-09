@@ -20,5 +20,5 @@
 
 ## 5. 收尾验证
 
-- [ ] 5.1 解耦验证：action_gate 零 platform import；模块依赖护栏测试通过；无 platform DB 环境下 gate 路由可用（critical→reject、low→direct 不依赖任何 DB）
-- [ ] 5.2 全量收尾：`make test-pr` 全绿（含刚合并的 approval-routing 回归不破）＋ ruff format/check + mypy 改动文件 + integration 对照 main 基线无新增失败
+- [x] 5.1 解耦验证：action_gate 零 platform import；模块依赖护栏测试通过；无 platform DB 环境下 gate 路由可用（critical→reject、low→direct 不依赖任何 DB）
+- [x] 5.2 全量收尾：`make test-pr` 全绿（含刚合并的 approval-routing 回归不破）＋ ruff format/check + mypy 改动文件 + integration 对照 main 基线无新增失败
