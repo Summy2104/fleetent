@@ -21,8 +21,8 @@
 
 ## 4. KnowledgeReadable / KnowledgeWritable Protocol
 
-- [ ] 4.1 Write failing test: `retrieval/` 函数签名接受 `KnowledgeReadable`；mypy strict 下写方法不可见
-- [ ] 4.2 在 `knowledge_base/core/protocols.py` 定义 `KnowledgeReadable` 和 `KnowledgeWritable` Protocol
-- [ ] 4.3 更新 `knowledge_base/core/store.py` 的 `KnowledgeStore`（无需继承，structural typing 自动满足）
-- [ ] 4.4 更新 `knowledge_base/retrieval/` 中接受 store 的函数签名为 `KnowledgeReadable`
-- [ ] 4.5 运行 `uv run mypy src` 确认类型检查通过；运行测试确认绿
+- [x] 4.1 Write failing test: `retrieval/` 函数签名接受 `KnowledgeReadable`；mypy strict 下写方法不可见
+- [x] 4.2 在 `knowledge_base/core/protocols.py` 定义 `KnowledgeReadable` 和 `KnowledgeWritable` Protocol
+- [x] 4.3 更新 `knowledge_base/core/store.py` 的 `KnowledgeStore`（无需继承，structural typing 自动满足）
+- [x] 4.4 更新 `knowledge_base/retrieval/` 中接受 store 的函数签名为 `KnowledgeReadable`
+- [x] 4.5 运行 `uv run mypy src` 确认类型检查通过；运行测试确认绿
