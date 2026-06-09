@@ -27,7 +27,7 @@
 
 ## 6. 收尾验证
 
-- [ ] 6.1 `make test-pr` 全绿。
+- [x] 6.1 `make test-pr` 全绿。
 - [ ] 6.2 `uv run pytest tests/integration -q` 对照 main 基线**无新增失败**。
-- [ ] 6.3 `openspec validate externalize-monitoring` 通过。
-- [ ] 6.4 复核:未触及 `agent-resource-isolation`/`sandbox-resource-limits`、observability、`/health`、任何 agent runtime 或业务表。
+- [x] 6.3 `openspec validate externalize-monitoring` 通过。
+- [x] 6.4 复核:未触及 `agent-resource-isolation`/`sandbox-resource-limits`、observability、`/health`、任何 agent runtime 或业务表。
