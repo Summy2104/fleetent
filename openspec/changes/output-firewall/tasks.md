@@ -5,8 +5,8 @@
 
 ## 2. 输出防火墙：run_stream 路径
 
-- [ ] 2.1 Write failing unit tests：run_stream 的工具结果同样在进入 messages/事件前被脱敏（mock LLM 产一个返回密钥的工具调用，断言流出的 tool 结果已 `[REDACTED]`）（tests/unit）
-- [ ] 2.2 Implement：run_stream 内联 backfill 同样插入 `redact_secrets`（与 _backfill_slots 同语义），pass unit tests
+- [x] 2.1 Write failing unit tests：run_stream 的工具结果同样在进入 messages/事件前被脱敏（mock LLM 产一个返回密钥的工具调用，断言流出的 tool 结果已 `[REDACTED]`）（tests/unit）
+- [x] 2.2 Implement：run_stream 内联 backfill 同样插入 `redact_secrets`（与 _backfill_slots 同语义），pass unit tests
 
 ## 3. 收尾验证
 

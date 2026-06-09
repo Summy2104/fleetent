@@ -2485,6 +2485,10 @@ async def run_stream(
             content, failed = placeholder if placeholder is not None else results[slot.tc_id]
             if slot.counts_failure:
                 state.consecutive_failures = state.consecutive_failures + 1 if failed else 0
+            # output-firewall: redact before the result is streamed out (the event is not
+            # retractable) and before it enters messages. Placeholders are system text.
+            if not is_placeholder:
+                content = redact_secrets(content)
             yield {"type": "tool_result", "name": slot.name, "content": content}
             # P2: post_tool_use hook, real executions only; SSE already sent (not retractable).
             # modified_content only affects what enters messages (used by the LLM next turn).
@@ -2519,7 +2523,9 @@ async def run_stream(
                     strict=False,
                 )
                 if hres.modified_content is not None:
-                    content = hres.modified_content
+                    # Re-redact: the hook may have reintroduced secrets into the content
+                    # that now enters messages (the streamed event already went out clean).
+                    content = redact_secrets(hres.modified_content)
             # T4: truncate the messages copy only; the SSE event above kept the full result.
             tool_content = (
                 content if is_self_truncating(slot.name) else truncate_tool_result(content)
