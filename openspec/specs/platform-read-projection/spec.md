@@ -1,4 +1,10 @@
-## ADDED Requirements
+# platform-read-projection Specification
+
+## Purpose
+
+控制面（platform）对 agent 侧物理库的统一只读投影机制：只读 router 句柄（不迁移）+ 共享 store 读函数 + management.db registry 发现/遍历聚合。禁物化副本、禁 agent 反向写（target-architecture-proposal.md §7 落地）。
+
+## Requirements
 
 ### Requirement: platform 只读 agent 侧库
 
