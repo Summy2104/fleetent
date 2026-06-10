@@ -12,7 +12,6 @@ from fleetent.platform.admin_cli import (
     kb_connectors,
     maintenance,
     observability,
-    schedules,
     shared_memory,
     users,
 )
@@ -22,7 +21,6 @@ _COMMAND_MODULES = (
     im,
     im_connectors,
     agents,
-    schedules,
     kb_connectors,
     init_config,
     config_validation,

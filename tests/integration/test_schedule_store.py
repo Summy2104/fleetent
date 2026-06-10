@@ -13,7 +13,6 @@ def test_create_returns_dict_with_uuid_id(isolated_schedule_db):
         cron_expr="0 9 * * 1-5",
         timezone="UTC",
         user_id="u-1",
-        agent_name=None,
         message="run report",
         source="dynamic",
     )
@@ -27,8 +26,8 @@ def test_create_returns_dict_with_uuid_id(isolated_schedule_db):
 
 
 def test_list_tasks_returns_all_rows(isolated_schedule_db):
-    ss.create("a", "* * * * *", "UTC", "u-1", None, "msg-a", "dynamic")
-    ss.create("b", "0 0 * * *", "UTC", "u-2", "bot", "msg-b", "static")
+    ss.create("a", "* * * * *", "UTC", "u-1", "msg-a", "dynamic")
+    ss.create("b", "0 0 * * *", "UTC", "u-2", "msg-b", "static")
     tasks = ss.list_tasks()
     assert len(tasks) == 2
     names = {t["name"] for t in tasks}
@@ -36,7 +35,7 @@ def test_list_tasks_returns_all_rows(isolated_schedule_db):
 
 
 def test_delete_removes_task(isolated_schedule_db):
-    task = ss.create("x", "* * * * *", "UTC", "u-1", None, "msg", "dynamic")
+    task = ss.create("x", "* * * * *", "UTC", "u-1", "msg", "dynamic")
     deleted = ss.delete(task["id"])
     assert deleted is True
     assert ss.list_tasks() == []

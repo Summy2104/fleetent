@@ -31,7 +31,9 @@ def test_upgrade_creates_tables(tmp_path):
     assert "agents" in tables
     assert "user_agents" in tables
     assert "approvals" in tables
-    assert "scheduled_tasks" in tables
+    # scheduled_tasks dropped from the management DB (agent-owned-scheduled-tasks):
+    # it is now a pure agent-side table created only by schedule_store.ensure_schema.
+    assert "scheduled_tasks" not in tables
     assert "traces" in tables
     assert "memory_items" in tables
     assert "reflection_reports" in tables
@@ -154,20 +156,6 @@ def test_column_structure(tmp_path):
         "approver_user_id",
         "created_at",
         "resolved_at",
-    }
-
-    schedule_cols = {row[1] for row in conn.execute("PRAGMA table_info(scheduled_tasks)")}
-    assert schedule_cols >= {
-        "id",
-        "name",
-        "cron_expr",
-        "timezone",
-        "user_id",
-        "agent_name",
-        "message",
-        "enabled",
-        "source",
-        "created_at",
     }
 
     memory_cols = {row[1] for row in conn.execute("PRAGMA table_info(memory_items)")}

@@ -2,7 +2,7 @@
 
 An aggregation layer over observability traces / approvals / agent_store. It fetches
 data through injectable seams and runs the pure aggregators in stats_store. The panel
-emits nothing and (apart from export / scheduled-report config) has no writes.
+emits nothing and (apart from export) has no writes.
 
 request_id-based request tracing degrades to session-level grouping when request_id
 has not been emitted yet (cross-domain follow-up). ⏳ fields surface as placeholders
@@ -15,10 +15,8 @@ flag MASK_PER_USER_FOR_VIEWER is on.
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Response
-from pydantic import BaseModel
 
-from fleetent import auth, schedule_store, user_store
-from fleetent import audit_log
+from fleetent import audit_log, auth, user_store
 from fleetent.platform.agent_statistics import stats_store
 
 router = APIRouter(prefix="/admin/stats")
@@ -56,27 +54,6 @@ def pricing_table() -> dict[str, Any] | None:
     return None
 
 
-# period -> cron: weekly = Monday 09:00, monthly = 1st of month 09:00.
-_PERIOD_CRON = {"weekly": "0 9 * * 1", "monthly": "0 9 1 * *"}
-_REPORT_TIMEZONE = "UTC"
-
-
-def schedule_report(period: str, agent_id: str, recipient: str, user_id: str) -> str:
-    """Register a recurring stats email report via schedule_store. Returns task id.
-
-    The recurring job is a normal scheduled task whose message carries the report
-    directive; the email sender is wired by the scheduling runtime (mocked in tests).
-    """
-    task = schedule_store.create(
-        name=f"stats-report:{agent_id}:{period}",
-        cron_expr=_PERIOD_CRON[period],
-        timezone=_REPORT_TIMEZONE,
-        user_id=user_id,
-        agent_name=agent_id,
-        message=f"__stats_report__ period={period} recipient={recipient}",
-        source="stats_report",
-    )
-    return str(task["id"])
 
 
 # --- auth helpers -------------------------------------------------------------
@@ -98,12 +75,6 @@ def _current_user(authorization: str | None) -> user_store.User:
 
 def _is_admin(user: user_store.User) -> bool:
     return auth.has_role(user, _ADMIN_ROLES)
-
-
-class ReportBody(BaseModel):
-    period: str  # "weekly" | "monthly"
-    agent_id: str
-    recipient: str
 
 
 # --- aggregated views ---------------------------------------------------------
@@ -213,21 +184,3 @@ def export(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="stats-{view}.csv"'},
     )
-
-
-@router.post("/reports")
-def configure_report(body: ReportBody, authorization: str | None = Header(None)) -> dict[str, Any]:
-    user = _current_user(authorization)
-    if not _is_admin(user):
-        raise HTTPException(status_code=403, detail="admin required")
-    if body.period not in {"weekly", "monthly"}:
-        raise HTTPException(status_code=422, detail="period must be weekly or monthly")
-    task_id = schedule_report(body.period, body.agent_id, body.recipient, user.id)
-    audit_log.write_audit(
-        user.id,
-        "stats_report_config",
-        "stats",
-        body.agent_id,
-        detail={"period": body.period, "task_id": task_id},
-    )
-    return {"task_id": task_id, "period": body.period}

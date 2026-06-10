@@ -178,17 +178,23 @@ def test_degraded_trace_without_request_id(client, monkeypatch):  # 场景 85
     assert "request_id" in r.json()["note"]
 
 
-def test_export_and_report_audited(client):  # 场景 81
+def test_export_audited(client):  # 场景 81
     token, _ = _session_for("admin")
     assert client.post("/admin/stats/export", headers=_hdr(token)).status_code == 200
+    actions = {a["action"] for a in audit.search_audit()}
+    assert "stats_export" in actions
+
+
+def test_scheduled_report_endpoint_removed(client):
+    """agent-owned-scheduled-tasks: the stats-report stub (which only registered a
+    scheduled task + audit, never sent an email) was removed; scheduling is agent-owned."""
+    token, _ = _session_for("admin")
     r = client.post(
         "/admin/stats/reports",
         headers=_hdr(token),
         json={"period": "weekly", "agent_id": "ops", "recipient": "a@x.com"},
     )
-    assert r.status_code == 200
-    actions = {a["action"] for a in audit.search_audit()}
-    assert {"stats_export", "stats_report_config"} <= actions
+    assert r.status_code == 404
 
 
 def test_export_returns_csv_per_user(client, monkeypatch):  # 场景 81 (CSV)
@@ -208,33 +214,3 @@ def test_export_returns_csv_per_user(client, monkeypatch):  # 场景 81 (CSV)
     assert detail["view"] == "per-user"
 
 
-def test_configure_report_persists_schedule(client, monkeypatch):  # 场景 81 (定时报告)
-    captured = {}
-
-    def _fake_create(**kw):
-        captured.update(kw)
-        return {"id": "task-xyz"}
-
-    import fleetent.schedule_store as schedule_store
-
-    monkeypatch.setattr(schedule_store, "create", _fake_create)
-    token, uid = _session_for("admin")
-    r = client.post(
-        "/admin/stats/reports",
-        headers=_hdr(token),
-        json={"period": "weekly", "agent_id": "ops", "recipient": "a@x.com"},
-    )
-    assert r.status_code == 200
-    assert r.json()["task_id"] == "task-xyz"
-    assert captured["cron_expr"] == "0 9 * * 1"  # weekly -> Monday 09:00
-    assert captured["agent_name"] == "ops"
-
-
-def test_viewer_cannot_configure_report(client):
-    token, _ = _session_for("viewer")
-    r = client.post(
-        "/admin/stats/reports",
-        headers=_hdr(token),
-        json={"period": "weekly", "agent_id": "ops", "recipient": "a@x.com"},
-    )
-    assert r.status_code == 403

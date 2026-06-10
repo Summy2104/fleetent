@@ -20,10 +20,9 @@ from typing import Any
 from fleetent.config import Settings
 from fleetent.db import SQLiteDatabase, create_database
 
-# Single source for the table DDL so ensure_schema and the Alembic migration stay in
-# sync (drift guard). ``agent_name`` is retained (nullable) for the platform
-# stats-report scheduler, which routes a fired job to a named agent; the agent
-# runtime leaves it NULL (one agent per process).
+# Single source for the table DDL. scheduled_tasks is a pure agent-side table (no
+# Alembic counterpart after the platform table was dropped): one agent per process, so
+# there is no agent_name column — routing is implicit to the process's single agent.
 _TABLE_DDL = (
     "CREATE TABLE IF NOT EXISTS scheduled_tasks ("
     "id TEXT PRIMARY KEY, "
@@ -35,7 +34,6 @@ _TABLE_DDL = (
     "anchor TEXT, "
     "timezone TEXT, "
     "user_id TEXT, "
-    "agent_name TEXT, "
     "message TEXT, "
     "session_id TEXT, "
     "origin TEXT, "
@@ -62,7 +60,6 @@ def create(
     cron_expr: str | None = None,
     timezone: str = "UTC",
     user_id: str = "default",
-    agent_name: str | None = None,
     message: str = "",
     source: str = "dynamic",
     session_id: str | None = None,
@@ -76,9 +73,8 @@ def create(
 ) -> dict[str, Any]:
     """Persist a scheduled task and return it as a dict.
 
-    Positional params stay backward-compatible with the platform stats scheduler and
-    admin CLI (name, cron_expr, timezone, user_id, agent_name, message, source). The
-    ``schedule_kind`` and one-shot/interval/delivery fields are keyword-only.
+    Positional params: name, cron_expr, timezone, user_id, message, source, session_id.
+    The ``schedule_kind`` and one-shot/interval/delivery fields are keyword-only.
     """
     task_id = str(uuid.uuid4())
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -92,7 +88,6 @@ def create(
         "anchor": anchor,
         "timezone": timezone,
         "user_id": user_id,
-        "agent_name": agent_name,
         "message": message,
         "session_id": session_id,
         "origin": json.dumps(origin) if origin is not None else None,
@@ -111,11 +106,11 @@ def create(
         conn.execute(
             "INSERT INTO scheduled_tasks ("
             "id, name, schedule_kind, cron_expr, run_at, interval_seconds, anchor, "
-            "timezone, user_id, agent_name, message, session_id, origin, deliver, "
+            "timezone, user_id, message, session_id, origin, deliver, "
             "enabled, source, created_at, last_run_at, last_status, last_error, next_run_at"
             ") VALUES ("
             ":id, :name, :schedule_kind, :cron_expr, :run_at, :interval_seconds, :anchor, "
-            ":timezone, :user_id, :agent_name, :message, :session_id, :origin, :deliver, "
+            ":timezone, :user_id, :message, :session_id, :origin, :deliver, "
             ":enabled, :source, :created_at, :last_run_at, :last_status, :last_error, :next_run_at"
             ")",
             row,
