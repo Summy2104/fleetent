@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import yaml
 from fastapi.testclient import TestClient
 
+import fleetent.identity as identity_mod
 import fleetent.runtime.loop as loop_mod
 from fleetent import agent_config, user_store
 from fleetent.runtime import agent_app
@@ -37,7 +38,9 @@ def _make_client(monkeypatch, agent_name, captured):
 
     fake_user = MagicMock(spec=user_store.User)
     fake_user.id = "U1"
-    monkeypatch.setattr(user_store, "authenticate", lambda _token: (fake_user, {}))
+    fake_user.status = "active"
+    fake_user.tenant_id = "default"
+    monkeypatch.setattr(identity_mod, "_legacy_key_lookup", lambda _token: fake_user)
 
     app = agent_app.build_app(agent_name)
     return TestClient(app, raise_server_exceptions=True)

@@ -63,9 +63,7 @@ async def _agent_run(
 ) -> str:
     from fleetent.runtime import loop as agent_loop
 
-    return await agent_loop.run(
-        messages, user_id=user_id, agent_name=agent_name, principal=principal
-    )
+    return await agent_loop.run(messages, agent_name=agent_name, principal=principal)
 
 
 async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) -> None:

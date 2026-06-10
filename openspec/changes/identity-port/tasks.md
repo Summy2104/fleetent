@@ -26,5 +26,5 @@
 
 - [x] 5.1 写失败测试 + 实现：cron 从 `scheduled_tasks.user_id` load 后**复检状态**（block/删/移出主体则拒），产出 Principal 传核
 - [x] 5.2 写失败测试 + 实现：纯基础设施任务（TTL 清理等）用显式 `system` 标识，不冒充 user，审计记 `system`
-- [ ] 5.3 收口核签名为纯 `Principal`（去过渡兼容）；全仓确认核/edge 不再直传裸 `user_id` 绕过 Principal
+- [x] 5.3 收口核签名为纯 `Principal`（去过渡兼容）；全仓确认核/edge 不再直传裸 `user_id` 绕过 Principal
 - [ ] 5.4 change 收尾：依赖护栏（agent 运行时无 platform import）+ standalone 无 platform 鉴权基线 + `make test-pr` 全绿 + `uv run pytest tests/integration -q` 对照 main 基线无新增失败 + `openspec validate identity-port --strict`

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
+from fleetent.identity import Principal
+
+_STUB_PRINCIPAL = Principal(user_id="u-1", tenant_id="default")
+
 # ── CronScheduler lifecycle ──────────────────────────────────────────────────
 
 
@@ -80,6 +84,7 @@ async def test_fire_calls_agent_loop_run(tmp_path, monkeypatch):
     import fleetent.session.manager as session_mgr
 
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
     run_mock = AsyncMock(return_value="reply")
     monkeypatch.setattr(cs, "_agent_run", run_mock)
 
@@ -88,7 +93,7 @@ async def test_fire_calls_agent_loop_run(tmp_path, monkeypatch):
         "name": "n",
         "cron_expr": "* * * * *",
         "timezone": "UTC",
-        "user_id": "fire-user",
+        "user_id": "u-1",
         "agent_name": "bot",
         "message": "hello from cron",
         "enabled": 1,
@@ -99,7 +104,7 @@ async def test_fire_calls_agent_loop_run(tmp_path, monkeypatch):
 
     run_mock.assert_called_once()
     call_kwargs = run_mock.call_args[1]
-    assert call_kwargs["user_id"] == "fire-user"
+    assert call_kwargs["principal"] == _STUB_PRINCIPAL
     assert call_kwargs.get("agent_name") == "bot"
 
 
@@ -108,6 +113,7 @@ async def test_fire_message_in_user_content(tmp_path, monkeypatch):
     import fleetent.session.manager as session_mgr
 
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
     run_mock = AsyncMock(return_value="ok")
     monkeypatch.setattr(cs, "_agent_run", run_mock)
 
@@ -330,6 +336,7 @@ async def test_fire_delivers_reply_to_origin(tmp_path, monkeypatch):
     import fleetent.session.manager as session_mgr
 
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
     monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="your standup is at 9"))
     send = AsyncMock(return_value=True)
     monkeypatch.setattr(cs.outbound, "send_to", send)
@@ -358,6 +365,7 @@ async def test_fire_explicit_deliver_to_channel(tmp_path, monkeypatch):
     import fleetent.session.manager as session_mgr
 
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
     monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="daily report"))
     send = AsyncMock(return_value=True)
     monkeypatch.setattr(cs.outbound, "send_to", send)
@@ -388,6 +396,7 @@ async def test_fire_silent_reply_suppresses_delivery(tmp_path, monkeypatch):
     import fleetent.session.manager as session_mgr
 
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
     monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="[SILENT]"))
     send = AsyncMock(return_value=True)
     monkeypatch.setattr(cs.outbound, "send_to", send)
@@ -414,6 +423,7 @@ async def test_fire_missing_connector_records_error(tmp_path, monkeypatch):
     import fleetent.session.manager as session_mgr
 
     monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_resolve_cron_principal", lambda uid: _STUB_PRINCIPAL)
     monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="hi"))
     captured = {}
     monkeypatch.setattr(
