@@ -26,7 +26,7 @@
 - [x] 5.1 Tests: 投递回 origin / 显式 channel / `[SILENT]` 抑制 / 无连接器记 error
 - [x] 5.2 `_fire` 捕获回复、解析 deliver/origin、`outbound.send_to` 投递、运行态写回；`outbound` 加频道/线程
 - [x] 5.3 `connector_registry` + slack/telegram 适配器连接时注册、断开注销
-- [ ] 5.4 （DEFERRED v2）origin 自动捕获：把 IM 上下文（platform/chat/thread）透传进 `ToolContext`，create 时自动填 `origin`。当前支持显式 `notify_*`，解析逻辑已就位
+- [x] 5.4 origin 自动捕获：`schedule` create 从 `tool_context.session_context` 自动构建 `origin`（platform / chat_id=channel_name / thread_id=thread_root, target_type=channel），默认投递回创建会话/线程；显式 `notify_*` 仍优先，无 IM 上下文时 origin=None
 
 ## 6. 工具合并为单个 schedule(action=...)
 
