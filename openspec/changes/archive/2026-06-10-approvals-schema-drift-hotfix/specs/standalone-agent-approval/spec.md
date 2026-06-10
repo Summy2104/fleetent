@@ -1,0 +1,27 @@
+# standalone-agent-approval — Delta（approvals-schema-drift-hotfix）
+
+## ADDED Requirements
+
+### Requirement: 存量 approvals 表缺 approver_actor 列时 ensure_schema 自愈
+
+`governance/approval_store.py` 的 `ensure_schema()` SHALL 在建表语句之后探测 `approvals` 表的 `approver_actor` 列；列缺失时 SHALL 执行 `ALTER TABLE approvals ADD COLUMN approver_actor TEXT` 补列，并且仅在本次实际补列的分支内 SHALL 从旧列回填：`UPDATE approvals SET approver_actor = approver_user_id WHERE approver_actor IS NULL`。该自愈 MUST 幂等（重复调用不报错、不重复改动），且 MUST NOT 引入 `PRAGMA user_version` 戳或新的迁移列表。并发补列触发的 `duplicate column` 错误 SHALL 被识别为已自愈并忽略；其它异常 MUST NOT 被吞没。
+
+#### Scenario: 旧形态存量库自愈并回填
+
+- **WHEN** `ensure_schema()` 作用于旧形态库（`approvals` 含 `approver_user_id`、无 `approver_actor`，且存在 `approver_user_id` 已填值的历史行）
+- **THEN** `approver_actor` 列被补上，历史行的 `approver_actor` 取 `approver_user_id` 的值，随后 `update_approval(..., approver_actor=...)` 成功执行
+
+#### Scenario: 新形态库 no-op
+
+- **WHEN** `ensure_schema()` 作用于当前 DDL 新建的库（已有 `approver_actor`、无 `approver_user_id`）
+- **THEN** 不执行 ALTER 也不执行回填，表结构与数据不变
+
+#### Scenario: 重复调用幂等
+
+- **WHEN** `ensure_schema()` 在同一库上连续调用两次
+- **THEN** 第二次调用不报错，表结构与数据与第一次调用后一致
+
+#### Scenario: 双列形态（手动止血过）不回填
+
+- **WHEN** `ensure_schema()` 作用于已同时含 `approver_user_id` 与 `approver_actor` 两列的库
+- **THEN** 不执行 ALTER 也不执行回填（`approver_actor` 为 NULL 的历史行保持 NULL）
