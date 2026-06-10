@@ -10,6 +10,7 @@ import structlog
 
 from fleetent import agent_config
 from fleetent.agent_config import AgentFile, ConnectorAccess
+from fleetent.identity import Principal
 from fleetent.im_gateway import access
 
 logger = structlog.get_logger(__name__)
@@ -391,7 +392,7 @@ async def route(msg: NormalizedMessage) -> None:
         async with steering.register_run(session_id, token, max_pending=max_pending):
             response = await agent_loop.run(
                 messages=history,
-                user_id=msg.user_id,
+                principal=Principal(user_id=msg.user_id, tenant_id="default"),
                 reply_func=msg.reply_func,
                 allowed_tools=allowed_tools,
                 disabled_skills_trace=disabled_trace,

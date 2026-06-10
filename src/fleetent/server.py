@@ -48,7 +48,10 @@ from fleetent.platform.im_gateway_management import admin_api, connector_manager
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.skill_management import skill_admin_api
+from fleetent.identity import Principal
 from fleetent.platform.user_management import user_admin_api
+from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
+from fleetent.platform.user_management.platform_bearer_adapter import PlatformBearerAdapter
 from fleetent.runtime import run_stream
 from fleetent.session import manager as session_mgr
 from fleetent.skills import scan as scan_skills
@@ -91,6 +94,10 @@ _slack_supervisor = SlackSupervisor()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    # Wire platform api_keys resolver so user_store.authenticate queries the api_keys
+    # table (+ legacy fallback) without the module-level platform import removed by #4.
+    user_store.set_api_key_resolver(_resolve_api_key)
+
     scan_skills()
     # file-driven-agent-config: scan agent.yaml files once at startup (same lifecycle
     # as scan_skills); the in-memory index drives zero-DB runtime agent resolution.
@@ -142,7 +149,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from fleetent.runtime.snapshot import _governance_from_file
 
         af = agent_config.current().get(agent_name) if agent_name else None
-        kwargs: dict[str, Any] = {"user_id": "playground", "session_id": session_id}
+        kwargs: dict[str, Any] = {
+            "principal": Principal(user_id="playground", tenant_id="default"),
+            "session_id": session_id,
+        }
         if af is not None:
             kwargs["system_prompt"] = af.system_prompt
             kwargs["allowed_tools"] = af.allowed_tools + expand_plugin_patterns(af.plugins)
@@ -403,15 +413,18 @@ def agent_routing_status(agent_name: str) -> str:
         return "enabled"
 
 
-async def _authenticate(authorization: str = Header()) -> tuple[user_store.User, dict[str, Any]]:
-    """Resolve a Bearer API key to (User, key_metadata). Raises 401 if invalid/blocked."""
+_platform_bearer = PlatformBearerAdapter()
+
+
+async def _authenticate(authorization: str = Header()) -> Principal:
+    """Resolve a Bearer API key to a Principal. Raises 401 if invalid/blocked."""
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Bearer token required")
     api_key = authorization.removeprefix("Bearer ").strip()
-    result = user_store.authenticate(api_key)
-    if result is None:
+    principal = _platform_bearer(api_key)
+    if principal is None:
         raise HTTPException(status_code=401, detail="Invalid API key")
-    return result
+    return principal
 
 
 def _slack_adapter_configured() -> bool:

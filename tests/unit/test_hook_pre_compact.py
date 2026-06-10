@@ -82,7 +82,7 @@ async def test_pre_compact_inject_context_appended_before_compression(mock_clien
     monkeypatch.setattr(loop, "maybe_compress", lambda msgs, **kw: msgs)
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
     governance = GovernanceConfig(hooks_enabled=True)
-    await loop.run([{"role": "user", "content": "hi"}], governance=governance, user_id="u")
+    await loop.run([{"role": "user", "content": "hi"}], governance=governance, principal=None)
     injected = [m for m in compress_input if "[MUST RETAIN" in str(m.get("content", ""))]
     assert len(injected) >= 1
 
@@ -107,7 +107,7 @@ async def test_post_compact_receives_before_after_counts(mock_client, monkeypatc
     await loop.run(
         [{"role": "user", "content": "hi"}],
         governance=governance,
-        user_id="u",
+        principal=None,
     )
     assert len(observed) >= 1
     last = observed[-1]
@@ -130,5 +130,5 @@ async def test_pre_compact_disabled_no_effect(mock_client, monkeypatch):
     monkeypatch.setattr(loop, "maybe_compress", lambda msgs, **kw: msgs)
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
     governance = GovernanceConfig(hooks_enabled=False)
-    await loop.run([{"role": "user", "content": "hi"}], governance=governance, user_id="u")
+    await loop.run([{"role": "user", "content": "hi"}], governance=governance, principal=None)
     assert not any("should not appear" in str(m.get("content", "")) for m in compress_input)

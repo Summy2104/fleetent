@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import fleetent.runtime.loop as agent_loop
+from fleetent.identity import Principal
 from fleetent.agent_config import AgentModels, ModelRouteEntry, ModelTarget
 from fleetent.long_term_ctx import BuiltContext, ContextSource
 from fleetent.model import ModelPolicySnapshot
@@ -159,7 +160,7 @@ async def test_non_streaming_run_persists_context_and_completion_trace_contract(
 
     reply = await agent_loop.run(
         [{"role": "user", "content": "What should I deploy?"}],
-        user_id="user-contract",
+        principal=Principal(user_id="user-contract", tenant_id="default"),
         agent_name="agent-contract",
         model_policy=agent_runtime.model_policy,
     )
@@ -197,7 +198,7 @@ async def test_streaming_run_persists_context_and_completion_trace_contract(
         event
         async for event in agent_loop.run_stream(
             "What should I deploy?",
-            user_id="user-contract",
+            principal=Principal(user_id="user-contract", tenant_id="default"),
             agent_name="agent-contract",
             model_policy=agent_runtime.model_policy,
         )
@@ -232,7 +233,7 @@ async def test_source_attribution_payload_excludes_raw_content_and_is_sanitized(
 
     await agent_loop.run(
         [{"role": "user", "content": "Find deployment notes"}],
-        user_id="user-contract",
+        principal=Principal(user_id="user-contract", tenant_id="default"),
         agent_name="agent-contract",
         model_policy=agent_runtime.model_policy,
     )
@@ -278,7 +279,7 @@ async def test_usage_summary_counts_only_completion_events_when_context_is_injec
 
     await agent_loop.run(
         [{"role": "user", "content": "What should I deploy?"}],
-        user_id="user-contract",
+        principal=Principal(user_id="user-contract", tenant_id="default"),
         agent_name="agent-contract",
         model_policy=agent_runtime.model_policy,
     )

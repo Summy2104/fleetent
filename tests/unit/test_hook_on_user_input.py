@@ -77,7 +77,7 @@ def _streaming_text(text: str = "hello"):
 
 async def _stream(user_input: str, governance: GovernanceConfig) -> list[dict]:
     events = []
-    async for ev in loop.run_stream(user_input, governance=governance, user_id="u"):
+    async for ev in loop.run_stream(user_input, governance=governance, principal=None):
         events.append(ev)
     return events
 

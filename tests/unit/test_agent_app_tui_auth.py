@@ -13,9 +13,12 @@ def test_validate_tui_token_accepts_matching_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("FLEETENT_TUI_TOKEN", "ma-test-token-12345")
+    from fleetent.identity import Principal
     from fleetent.runtime.agent_app import _validate_tui_token
 
-    assert _validate_tui_token("Bearer ma-test-token-12345") is True
+    result = _validate_tui_token("Bearer ma-test-token-12345")
+    assert isinstance(result, Principal)
+    assert result.user_id == "local"
 
 
 def test_validate_tui_token_rejects_wrong_token(
@@ -24,7 +27,7 @@ def test_validate_tui_token_rejects_wrong_token(
     monkeypatch.setenv("FLEETENT_TUI_TOKEN", "ma-correct-token")
     from fleetent.runtime.agent_app import _validate_tui_token
 
-    assert _validate_tui_token("Bearer ma-wrong-token") is False
+    assert _validate_tui_token("Bearer ma-wrong-token") is None
 
 
 def test_validate_tui_token_rejects_when_not_configured(
@@ -33,7 +36,7 @@ def test_validate_tui_token_rejects_when_not_configured(
     monkeypatch.delenv("FLEETENT_TUI_TOKEN", raising=False)
     from fleetent.runtime.agent_app import _validate_tui_token
 
-    assert _validate_tui_token("Bearer ma-anything") is False
+    assert _validate_tui_token("Bearer ma-anything") is None
 
 
 def test_validate_tui_token_rejects_missing_bearer_prefix(
@@ -42,4 +45,4 @@ def test_validate_tui_token_rejects_missing_bearer_prefix(
     monkeypatch.setenv("FLEETENT_TUI_TOKEN", "ma-token")
     from fleetent.runtime.agent_app import _validate_tui_token
 
-    assert _validate_tui_token("ma-token") is False
+    assert _validate_tui_token("ma-token") is None

@@ -26,7 +26,7 @@ async def test_tasks_run_concurrently_not_sequentially(tmp_path, monkeypatch):
                 {"name": "t1", "prompt": "p1"},
                 {"name": "t2", "prompt": "p2"},
             ],
-            parent_user_id="u",
+            parent_principal=None,
             parent_agent_id=None,
             parent_session_id="s",
         )
@@ -53,7 +53,7 @@ async def test_lifecycle_records_succeeded_with_timestamps(tmp_path, monkeypatch
     with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
-            parent_user_id="u",
+            parent_principal=None,
             parent_agent_id=None,
             parent_session_id="sess",
         )
@@ -79,7 +79,7 @@ async def test_cancel_token_passed_with_parent_link(tmp_path, monkeypatch):
     with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
-            parent_user_id="u",
+            parent_principal=None,
             parent_agent_id=None,
             parent_session_id="sess",
             cancel_token=batch,
@@ -109,7 +109,7 @@ async def test_one_task_times_out_others_succeed(tmp_path, monkeypatch):
     with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         results = await executor.run(
             tasks=[{"name": "slow", "prompt": "slow"}, {"name": "fast", "prompt": "fast"}],
-            parent_user_id="u",
+            parent_principal=None,
             parent_agent_id=None,
             parent_session_id="sess",
         )
@@ -135,7 +135,7 @@ async def test_parent_cancel_marks_cancelled(tmp_path, monkeypatch):
     with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
-            parent_user_id="u",
+            parent_principal=None,
             parent_agent_id=None,
             parent_session_id="sess",
         )
@@ -160,7 +160,7 @@ async def test_pending_cancelled_when_batch_precancelled(tmp_path, monkeypatch):
     with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
-            parent_user_id="u",
+            parent_principal=None,
             parent_agent_id=None,
             parent_session_id="sess",
             cancel_token=batch,
@@ -183,7 +183,7 @@ async def test_failure_marks_failed_with_error(tmp_path, monkeypatch):
     with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         await executor.run(
             tasks=[{"name": "a", "prompt": "p"}],
-            parent_user_id="u",
+            parent_principal=None,
             parent_agent_id=None,
             parent_session_id="sess",
         )

@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import fleetent.runtime.loop as agent_loop
+from fleetent.identity import Principal
 from fleetent.agent_config import AgentModels, ModelRouteEntry, ModelTarget
 from fleetent.long_term_ctx import BuiltContext, ContextSource
 from fleetent.model import ModelPolicySnapshot
@@ -57,7 +58,7 @@ async def test_agent_runtime_calls_long_term_context_builder_with_existing_signa
 
     await agent_loop.run(
         [{"role": "user", "content": "what should I use?"}],
-        user_id="user-1",
+        principal=Principal(user_id="user-1", tenant_id="default"),
         agent_name="agent-1",
         model_policy=policy,
     )

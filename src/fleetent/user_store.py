@@ -4,12 +4,27 @@ import datetime
 import secrets
 import sqlite3
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from fleetent import paths
 
 DB_PATH = paths.data_dir() / "fleetent.db"
+
+# Injectable hook for resolving api_keys table entries.
+# Platform startup wires this to api_key_store.resolve; standalone agents leave it None,
+# falling back to the legacy users.api_key column only (no platform import needed).
+_api_key_resolver: Callable[[str], dict[str, Any] | None] | None = None
+
+
+def set_api_key_resolver(resolver: Callable[[str], dict[str, Any] | None]) -> None:
+    """Wire the platform api_keys resolver into the user store.
+
+    Called once by the platform server lifespan. Must not be called by agent runtime code.
+    """
+    global _api_key_resolver
+    _api_key_resolver = resolver
 
 
 @dataclass
@@ -54,19 +69,19 @@ def create_user(name: str, email: str | None = None, tenant_id: str = "default")
 def authenticate(plaintext: str) -> tuple[User, dict[str, Any]] | None:
     """Resolve a plaintext API key to (User, key_metadata).
 
-    Checks the api_keys table first (validity handled there), then falls back to the
-    legacy users.api_key column for keys not yet migrated. Returns None if the key is
+    When the platform api_keys resolver is wired (set_api_key_resolver was called at
+    startup), checks the api_keys table first. Falls back to the legacy users.api_key
+    column for standalone agents or unmigrated keys. Returns None if the key is
     invalid/revoked/expired or the owning user is blocked.
     """
-    from fleetent.platform.user_management import api_key_store
-
     _init_db()
-    meta = api_key_store.resolve(plaintext)
-    if meta is not None:
-        user = get_by_id(meta["user_id"])
-        if user is None or user.status == "blocked":
-            return None
-        return user, meta
+    if _api_key_resolver is not None:
+        meta = _api_key_resolver(plaintext)
+        if meta is not None:
+            user = get_by_id(meta["user_id"])
+            if user is None or user.status == "blocked":
+                return None
+            return user, meta
 
     # Legacy fallback: key still lives only in the users.api_key column.
     user = _get_by_legacy_key(plaintext)

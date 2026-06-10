@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import fleetent.runtime.loop as al
+from fleetent.identity import Principal
 
 
 def _text_resp(text: str | None = "reply") -> MagicMock:
@@ -133,7 +134,7 @@ async def test_run_layered_budget_trips_and_logs_scope(mock_client, monkeypatch,
 
     mock_client.chat.completions.create = AsyncMock(side_effect=_resp)
 
-    await al.run([{"role": "user", "content": "x"}], user_id="u1", session_id="s1", max_turns=50)
+    await al.run([{"role": "user", "content": "x"}], principal=Principal(user_id="u1", tenant_id="default"), session_id="s1", max_turns=50)
     assert captured.get("stop_reason") == StopReason.budget_exceeded
     assert captured.get("budget_scope") == "user"  # layered user scope reported
     from datetime import UTC, datetime
