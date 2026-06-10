@@ -1,5 +1,10 @@
 # Source Module Organization Roadmap
 
+> **状态：LEGACY / 历史参考（已被 superseded）**。模块重组已基本完成；目标模块归属与边界以
+> [`target-architecture-proposal.md`](./target-architecture-proposal.md)（§5 横跨边界模块拆分、§9 现模块→目标归属速查）
+> + 依赖护栏测试为权威。本文档保留作迁移决策的历史记录，不再更新。
+> （`module-boundaries` spec 的 "Source module organization roadmap" requirement 仍引用本文件；如将来做 spec 卫生，可把该 requirement 重指向 target-arch 后再退场本文件。）
+
 ## 目标
 
 `src/fleetent` 当前是模块化单体的过渡状态：部分能力已经进入 package，仍有大量 legacy 平铺模块保留在

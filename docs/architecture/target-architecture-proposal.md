@@ -1,7 +1,7 @@
 # fleetent 目标架构提案：一个核 + 四个面 + 共享基座
 
 > **状态：草案 / 待讨论（DRAFT）**。这不是已批准的设计，是供讨论的靶子。
-> 配套阅读现状文档 [`module-dependency-graph.md`](./module-dependency-graph.md)（当前模块依赖 + 切片图）。
+> 当前模块依赖与切片以 §9（现模块→目标归属速查）+ 依赖护栏测试为准。
 > 基线：`main @ 9307525`，2026-06-09。
 
 ---
@@ -143,6 +143,30 @@ flowchart TB
 | 反思建议**存储**（skill_proposals / kb_reflection_reports） | 核产出的数据 | **基座 / agent 侧 store**——核**写 agent 侧产物**，②的管理 API **只读**它做 review，**不可让核反向写 platform 表**（遵 §1 解耦：platform 读 agent 产物，不要求 agent 反向写入） |
 
 注：建议经审批后的「落地写」遵 §1 自进化规则——**真相源**（memory/shared-memory/skill）经门直接写、**派生视图**（KB）不直接写（走 agent-curated 沉淀源 → connector sync）。
+
+### 审批门泛化：自进化提案的路由
+
+> R1（§6.5）实现了**工具调用**的审批门；这里是它向**自进化提案**的泛化设计（部分未实现，设计保留）。审批门是 agent 侧 governance 能力（`permission_gate` 的异步非阻塞泛化），不是 platform 服务；proposal/approval 存 agent 数据。**统一一道门，按 proposal 类型路由渠道/审批人**：
+
+| proposal 类型 | 渠道 | 找谁 |
+|---|---|---|
+| user memory | IM（agent 自主，`reply_func` 式推送） | 该 user 本人 |
+| shared memory | IM（agent 自主） | team/tenant 负责人 |
+| skill | platform console（`list_*` 拉取展示） | 管理员 |
+| KB（经 agent-curated 沉淀源） | platform console | 管理员 |
+
+- **判据 = 影响范围/权限层级**：个人贴身·轻量·高频 → agent 自主 IM；组织级·重·影响面大 → platform 集中审。
+- **落地**：门 `resolve()` 后**调对应真相源的写接口**（memory/shared 直接写、skill 写 skill 库、KB 写沉淀源 → sync）。**reflection 只「分析 + 生成 proposal」，memory 不 import reflection——memory↔reflection 循环经审批门居中而破。**
+
+### knowledge_base 组件内四分
+
+KB 是顶层独立组件（未来服务雏形，见 data-model §5.7 KB 库），内部沿读写边界四分：
+- `core/` — `store`（Readable/Writable Protocol）· `models`（数据底层）
+- `retrieval/` — `search` · `graph_search` · `scope`（**agent 消费，只读**）
+- `ingest/` — `connectors` · `parsers` · `sync` · `extraction` · 内容写（**platform 驱动，唯一写 KB 内容的路径**）
+- `management/` — 建库/归档/改描述 · agent↔KB 绑定（platform 驱动）
+
+**KB = 唯一派生视图**：内容是数据源的投影；agent 贡献**不直接写 KB**（否则下次 sync 不一致/孤儿/不可追溯），而是写 agent-curated 沉淀源 → connector sync 流入 KB，保证 KB 可追溯/可重新摄取。**KB 写入路径单一（只 ingest/sync）。**
 
 ---
 

@@ -1,8 +1,7 @@
 # fleetent 数据模型与实体关系（2026-06-09）
 
 > **状态：草案 / 待讨论（DRAFT）**。供「数据库与实体关系设计」讨论用。
-> 配套：[`target-architecture-proposal.md`](./target-architecture-proposal.md)（目标架构：核+4面+基座）、
-> [`module-dependency-graph.md`](./module-dependency-graph.md)（模块依赖）。
+> 配套：[`target-architecture-proposal.md`](./target-architecture-proposal.md)（目标架构：核+4面+基座、模块边界与依赖）。
 
 ## 0. 取数方法与口径
 
