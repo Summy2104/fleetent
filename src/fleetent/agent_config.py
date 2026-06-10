@@ -49,6 +49,11 @@ class ApprovalEntry(BaseModel):
     policy: Literal["any", "all"] = "any"
 
 
+# Sentinel approver address: route the approval prompt back to the requesting
+# conversation (reply_func) instead of an outbound DM. Reserved as a platform name.
+REQUESTER_SENTINEL = "requester"
+
+
 class ApprovalRiskRoutes(BaseModel):
     """Per-risk-level approval routing."""
 
@@ -332,7 +337,10 @@ def resolve_approvers(
     approvers were found — the caller must apply ``on_no_approver`` (default-closed).
 
     Resolution order: ``by_tool`` overrides ``by_risk``.  Each approver string
-    must be in ``platform:target_id`` format; malformed entries are silently skipped.
+    must be in ``platform:target_id`` format, except the literal ``requester``
+    sentinel which resolves to ``("requester", "")`` — route the prompt back to
+    the requesting conversation. ``requester:<target>`` is reserved (never an
+    outbound platform); malformed entries are silently skipped.
     """
     entry = routing.by_tool.get(tool_name)
     if entry is None:
@@ -346,9 +354,14 @@ def resolve_approvers(
 
     addresses: list[tuple[str, str]] = []
     for raw in entry.approvers:
+        if raw == REQUESTER_SENTINEL:
+            addresses.append((REQUESTER_SENTINEL, ""))
+            continue
         if ":" not in raw:
             continue
         platform, _, target = raw.partition(":")
+        if platform == REQUESTER_SENTINEL:
+            continue
         if platform and target:
             addresses.append((platform, target))
 

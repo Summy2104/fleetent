@@ -14,7 +14,7 @@ All tests mock the approval_store layer (unit: no real DB).
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -31,9 +31,7 @@ def _make_routing(platform: str = "slack", target: str = "U_APPROVER", policy: s
 
 def _make_connectors(platform: str = "slack"):
     connector = AsyncMock()
-    connector.conversations_open = AsyncMock(
-        return_value={"channel": {"id": "DM_APPROVER"}}
-    )
+    connector.conversations_open = AsyncMock(return_value={"channel": {"id": "DM_APPROVER"}})
     connector.chat_postMessage = AsyncMock(return_value={"ok": True})
     return {platform: connector}
 
@@ -46,7 +44,6 @@ async def _resolve_after(gate, approval_id, decision, actor, delay):
 @pytest.fixture(autouse=True)
 def _mock_store(monkeypatch):
     """Patch approval_store so unit tests never touch real SQLite."""
-    import fleetent.governance.permission_gate as gate_mod
     from fleetent.governance import approval_store
 
     monkeypatch.setattr(approval_store, "insert_approval", MagicMock())
@@ -209,9 +206,7 @@ async def test_no_approver_in_routing_is_default_closed_reject() -> None:
     from fleetent.agent_config import ApprovalRouting
 
     gate = PermissionGate(high_timeout=0.1)
-    routing = ApprovalRouting(
-        by_risk={"high": {"approvers": [], "policy": "any"}}
-    )
+    routing = ApprovalRouting(by_risk={"high": {"approvers": [], "policy": "any"}})
 
     result = await gate.request_approval(
         approval_id="empty_approver_1",
@@ -297,9 +292,7 @@ async def test_any_policy_resolves_on_first_approval() -> None:
         }
     )
     connector = AsyncMock()
-    connector.conversations_open = AsyncMock(
-        return_value={"channel": {"id": "DM"}}
-    )
+    connector.conversations_open = AsyncMock(return_value={"channel": {"id": "DM"}})
     connector.chat_postMessage = AsyncMock(return_value={"ok": True})
 
     # Only U_A approves.
@@ -338,9 +331,7 @@ async def test_medium_risk_uses_routing_not_self_confirm() -> None:
         }
     )
     connector = AsyncMock()
-    connector.conversations_open = AsyncMock(
-        return_value={"channel": {"id": "DM"}}
-    )
+    connector.conversations_open = AsyncMock(return_value={"channel": {"id": "DM"}})
     connector.chat_postMessage = AsyncMock(return_value={"ok": True})
 
     asyncio.create_task(_resolve_after(gate, "med_1", "approved", "slack:U_MED", 0.01))
@@ -369,9 +360,7 @@ async def test_medium_risk_no_routing_is_rejected() -> None:
 
     gate = PermissionGate(medium_timeout=0.1)
     # No medium entry in routing
-    routing = ApprovalRouting(
-        by_risk={"high": {"approvers": ["slack:U_LEAD"], "policy": "any"}}
-    )
+    routing = ApprovalRouting(by_risk={"high": {"approvers": ["slack:U_LEAD"], "policy": "any"}})
 
     result = await gate.request_approval(
         approval_id="med_noconfig",
@@ -387,3 +376,176 @@ async def test_medium_risk_no_routing_is_rejected() -> None:
     )
 
     assert result == "rejected"
+
+
+# ── requester sentinel routing (approval-requester-routing) ───────────────────
+
+
+async def test_requester_sentinel_prompts_via_reply_func_without_outbound() -> None:
+    """'requester' routing sends the approval prompt in-conversation; no outbound DM."""
+    from fleetent.agent_config import ApprovalRouting
+
+    gate = PermissionGate(medium_timeout=0.2)
+    routing = ApprovalRouting(by_risk={"medium": {"approvers": ["requester"], "policy": "any"}})
+    connectors = _make_connectors()
+
+    reply_calls: list[str] = []
+
+    async def reply(text: str) -> None:
+        reply_calls.append(text)
+
+    asyncio.create_task(_resolve_after(gate, "req_route_1", "approved", "U_REQUESTER", 0.01))
+
+    result = await gate.request_approval(
+        approval_id="req_route_1",
+        risk_level="medium",
+        tool_name="send_im_message",
+        tool_args={},
+        requester_user_id="U_REQUESTER",
+        reply_func=reply,
+        session_id="s1",
+        approval_routing=routing,
+        outbound_connectors=connectors,
+        medium_timeout=0.1,
+    )
+
+    assert result == "approved"
+    # Prompt went to the conversation with actionable instructions
+    assert any("approve req_route_1" in r for r in reply_calls)
+    # No outbound DM was attempted
+    connectors["slack"].conversations_open.assert_not_called()
+    connectors["slack"].chat_postMessage.assert_not_called()
+
+
+async def test_requester_mixed_with_outbound_notifies_both_channels() -> None:
+    """['requester', 'slack:U_ADMIN'] prompts the conversation AND DMs the approver."""
+    from fleetent.agent_config import ApprovalRouting
+
+    gate = PermissionGate(medium_timeout=0.2)
+    routing = ApprovalRouting(
+        by_risk={"medium": {"approvers": ["requester", "slack:U_ADMIN"], "policy": "any"}}
+    )
+    connectors = _make_connectors()
+
+    reply_calls: list[str] = []
+
+    async def reply(text: str) -> None:
+        reply_calls.append(text)
+
+    asyncio.create_task(_resolve_after(gate, "req_mix_1", "approved", "U_REQUESTER", 0.01))
+
+    result = await gate.request_approval(
+        approval_id="req_mix_1",
+        risk_level="medium",
+        tool_name="send_im_message",
+        tool_args={},
+        requester_user_id="U_REQUESTER",
+        reply_func=reply,
+        session_id="s1",
+        approval_routing=routing,
+        outbound_connectors=connectors,
+        medium_timeout=0.1,
+    )
+
+    assert result == "approved"
+    assert any("approve req_mix_1" in r for r in reply_calls)
+    connectors["slack"].conversations_open.assert_called_once()
+
+
+# ── decision authorization (approval-requester-routing) ───────────────────────
+
+
+async def test_bystander_cannot_resolve_requester_routed_approval() -> None:
+    """A non-requester identity cannot decide a requester-routed approval."""
+    from fleetent.agent_config import ApprovalRouting
+
+    gate = PermissionGate(medium_timeout=0.3)
+    routing = ApprovalRouting(by_risk={"medium": {"approvers": ["requester"], "policy": "any"}})
+
+    outcomes: list[bool] = []
+
+    async def bystander_then_requester() -> None:
+        await asyncio.sleep(0.01)
+        outcomes.append(await gate.resolve("auth_1", "approved", "U_BYSTANDER"))
+        outcomes.append(await gate.resolve("auth_1", "approved", "U_REQUESTER"))
+
+    asyncio.create_task(bystander_then_requester())
+
+    result = await gate.request_approval(
+        approval_id="auth_1",
+        risk_level="medium",
+        tool_name="send_im_message",
+        tool_args={},
+        requester_user_id="U_REQUESTER",
+        reply_func=AsyncMock(),
+        session_id="s1",
+        approval_routing=routing,
+        outbound_connectors={},
+        medium_timeout=0.2,
+    )
+
+    assert result == "approved"
+    assert outcomes == [False, True]  # bystander rejected; requester accepted
+
+
+async def test_unnotified_configured_address_cannot_decide() -> None:
+    """A configured approver who was NOT reached during notification cannot decide."""
+    from fleetent.agent_config import ApprovalRouting
+
+    gate = PermissionGate(high_timeout=0.3)
+    # Two configured approvers, but only slack has a connector — telegram unreachable.
+    routing = ApprovalRouting(
+        by_risk={"high": {"approvers": ["telegram:T_GHOST", "slack:U_REAL"], "policy": "any"}}
+    )
+    connectors = _make_connectors()  # slack only
+
+    outcomes: list[bool] = []
+
+    async def ghost_then_real() -> None:
+        await asyncio.sleep(0.01)
+        outcomes.append(await gate.resolve("auth_2", "rejected", "T_GHOST"))
+        outcomes.append(await gate.resolve("auth_2", "approved", "U_REAL"))
+
+    asyncio.create_task(ghost_then_real())
+
+    result = await gate.request_approval(
+        approval_id="auth_2",
+        risk_level="high",
+        tool_name="delete_db",
+        tool_args={},
+        requester_user_id="U_REQ",
+        reply_func=AsyncMock(),
+        session_id="s2",
+        approval_routing=routing,
+        outbound_connectors=connectors,
+        high_timeout=0.2,
+    )
+
+    assert result == "approved"
+    assert outcomes == [False, True]  # un-notified rejected; reached approver accepted
+
+
+async def test_qualified_actor_form_accepted_for_notified_approver() -> None:
+    """A reached approver may decide using the qualified 'platform:target' actor form."""
+    from fleetent.agent_config import ApprovalRouting
+
+    gate = PermissionGate(high_timeout=0.3)
+    routing = ApprovalRouting(by_risk={"high": {"approvers": ["slack:U_QUAL"], "policy": "any"}})
+    connectors = _make_connectors()
+
+    asyncio.create_task(_resolve_after(gate, "auth_3", "approved", "slack:U_QUAL", 0.01))
+
+    result = await gate.request_approval(
+        approval_id="auth_3",
+        risk_level="high",
+        tool_name="run_code",
+        tool_args={},
+        requester_user_id="U_REQ",
+        reply_func=AsyncMock(),
+        session_id="s3",
+        approval_routing=routing,
+        outbound_connectors=connectors,
+        high_timeout=0.2,
+    )
+
+    assert result == "approved"
