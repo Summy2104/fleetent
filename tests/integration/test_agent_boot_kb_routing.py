@@ -1,8 +1,8 @@
-"""Integration tests for boot-path KB schema routing.
+"""Integration tests for boot-path KB and memory schema routing.
 
-Verifies that _init_agent_db_schema routes KB schema setup through the
-TenantRouter + migrate-on-open, not through kb_ops.ensure_schema into the main db.
-Other agent-side stores (traces, memory, reflection) continue using ensure_schema.
+Verifies that _init_agent_db_schema routes KB and memory schema setup through the
+TenantRouter + migrate-on-open (AGENT_STATE_MIGRATIONS), not via ensure_schema into
+the main db.
 """
 
 from __future__ import annotations
@@ -56,8 +56,8 @@ def test_kb_tables_absent_from_main_agent_db(tmp_path) -> None:
         assert "knowledge_chunks" not in tables
 
 
-def test_memory_still_uses_ensure_schema_in_main_db(tmp_path) -> None:
-    """memory_items remains in the main db via ensure_schema (not yet migrated to Y)."""
+def test_memory_items_is_y_managed_in_agent_state_db(tmp_path) -> None:
+    """memory_items is now Y-managed in agent_state.db (3b-3); NOT in the main db."""
     from fleetent.runtime.agent_app import _init_agent_db_schema
 
     data_dir = tmp_path / "data"
@@ -69,14 +69,14 @@ def test_memory_still_uses_ensure_schema_in_main_db(tmp_path) -> None:
     main_db_path = data_dir / "fleetent.db"
     assert main_db_path.exists()
     tables = _tables_in(main_db_path)
-    assert "memory_items" in tables
-    # traces and reflection_reports are now Y-managed in per-agent agent_state.db (3b-2).
+    # memory_items, traces, and reflection_reports are all Y-managed in agent_state.db.
+    assert "memory_items" not in tables
     assert "traces" not in tables
     assert "reflection_reports" not in tables
 
 
 def test_traces_and_reflection_land_in_agent_state_db(tmp_path) -> None:
-    """traces + reflection_reports are now Y-managed in per-agent agent_state.db (3b-2)."""
+    """traces + reflection_reports + memory_items all Y-managed in agent_state.db (3b-2/3b-3)."""
     from fleetent.runtime.agent_app import _init_agent_db_schema
 
     data_dir = tmp_path / "data"
@@ -91,3 +91,4 @@ def test_traces_and_reflection_land_in_agent_state_db(tmp_path) -> None:
     assert "traces" in agent_tables
     assert "reflection_reports" in agent_tables
     assert "sessions" in agent_tables
+    assert "memory_items" in agent_tables
