@@ -141,7 +141,7 @@ erDiagram
 1. **关系几乎全隐式**：全库**仅 3 条 SQL 外键**（`agent_id`→agents、`document_id`→knowledge_documents CASCADE、复合 `(tenant_id,kb_id)`→knowledge_bases）。其余引用整性全靠 `*_id` 约定 + store 逻辑，DB 无保障。→ **要不要补外键？** 权衡：SQLite-first/可审计/手写 SQL ⟷ 完整性与级联删除。
 2. **多租户无根实体**：无 `tenants`/`teams` 表。→ **✅ 已决议并落地（见 §5.7；`establish-tenancy` 迁移 067-070）**：立 `tenants`(=主体/法人实体)/`teams` 实体做根（**v1 不建 `team_members`**），主体间**物理 per-tenant 强隔离**（物理分区留 #3）。
 3. **身份策略不统一**：多数表 surrogate `id`；KB 用复合自然键 `(tenant_id,kb_id)`；绑定表用复合自然键（user_id+agent_id）。→ **是否统一**（全 surrogate id？还是明确「聚合根用自然键」）？
-4. **疑似重复绑定**：`agent_kbs` 与 `knowledge_base_agent_bindings` 均为 agent↔KB。→ **核实(2026-06-09)**：两表分属平台侧(agent_kbs,带 `created_by` 审计)与 agent 侧(无审计),**之间无同步**;`dead-schema-cleanup` 清了 KB binding 死代码 + scope.py/bindings.py 去重,但**表收敛(R1a)仍 deferred**(收敛成"单一真相源+派生只读",随 #3)。
+4. **疑似重复绑定**：`agent_kbs` 与 `knowledge_base_agent_bindings` 均为 agent↔KB。→ **核实(2026-06-09)**：两表分属平台侧(agent_kbs,带 `created_by` 审计)与 agent 侧(无审计),**之间无同步**;`dead-schema-cleanup` 清了 KB binding 死代码 + scope.py/bindings.py 去重。→ **收敛方式已定(2026-06-10，B2，随 #3 落地)**：照 §6.5 审批人同款模式——**平台侧 `agent_kbs`(带审计)= 唯一真相源**;部署/materialize 时把 agent 绑定的 KB **同步进 `agent.yaml`**;`retrieval/scope` 改读已加载的 agent 配置、不再查表 → **agent 侧 `knowledge_base_agent_bindings` 运行时表消灭**(agent.yaml 是真相源的物化投影)。既解耦(核不反查平台表)又消重。
 5. **`session_meta` 禁忌表**：CLAUDE.md 明令 agent 运行时数据不得入 platform 管理表；迁移 `054–059` 正是「加运行时列（compaction/token/resume_pending）→删」的返工实证。但残留 `origin/status/takeover/pinned/agent_name/channel` 等——→ **逐列审计**：哪些是 platform 治理（合法）、哪些是运行时残留（该回 session 文件）？
 6. **`users.db` 残留 / 会话数据 split-brain**：`sessions`(users.db, 裸 sqlite3) / `session_meta`(fleetent.db) / `vector_items`(vector_store.db)。→ **已决议三层拓扑**（§5）：消灭 users.db、vector 独立成共享库。
 7. **Schema lifecycle 分裂**：`users`/`audit_log`/`im_connectors`/`session_anti_flap`/`sub_agent_runs`/`api_keys`/`quotas`/`quota_usage`/`invites`/`im_channel_allowlist`/`sessions` 由 store `_init_db` 运行时建，不在 Alembic → `alembic upgrade head` 只建半套。`im_channel_allowlist` 源码还有**两处 CREATE TABLE** 重复。→ 管理表收编 Alembic（roadmap #2）；agent-side 表保留 ensure_schema 但加漂移护栏（#1）。**例外**：`quotas`/`quota_usage`/`invites` v1 **删除**（不收编，见 §5.8）。
@@ -237,6 +237,8 @@ namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后
 
 **实现成"租户作用域边界 + 可换后端"(接住将来上 PG)**：隔离做成抽象——调用点只表达"在 tenant X 作用域里访问",后端**可插拔**:今天 SQLite=路由到 `<tenant>/` 文件;将来 PG 可换 **per-tenant database**(同路由换 DSN)或 **RLS**(单库 + 会话 tenant 变量、DB 按行强制,调用点基本不动)。**故物理现在做不浪费**——它建立的是"租户作用域边界",SQLite 文件只是当下后端。(团队已规划上 PG,时机待定。)
 
+> **agent 侧表的 `tenant_id` 列：保留、不删(B2 决议 2026-06-10)**。物理 per-tenant 分库后，文件本身即隔离、`WHERE tenant_id` 表面冗余，但**保留该列**——它是"可换后端"的接缝：SQLite 文件路由**忽略**它，将来 **RLS 后端按它做行级强制**(删了就锁死只能 per-tenant-DB、上不了 RLS)。代价为零(per-tenant 文件里就是个常量列)。**这点与 memory 分道**：memory 的 `namespace`(R2-叉2)是删的——因 per-agent 隔离没有 RLS 未来，tenant 有。KB 因此 schema 几乎不动(换文件、列不动)。
+
 **连带**：① **amends #3**——五库拓扑带 tenant 维度、按主体物理分区(#3 设计成"租户作用域边界 + 可换后端";加"不迁移数据/上线前重建内测环境"可大幅简化,见 §6 roadmap 笔记);② 喂 **#4 Identity**——`Principal{user_id, tenant_id}` 的 tenant 从 `users.tenant_id` 解析（**不带 team**；agent 的 team 来自 `agents.team_id` 配置，见 `target-architecture-proposal.md §6.3`），把早期「tenant 来自 agent 配置」的折中升级为「真有归属」。
 
 ### 5.8 v1 实体减法（2026-06-09 决议）
@@ -275,7 +277,21 @@ namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后
 | **A** | 审批重设计（R1，§5.5） | im_gateway 出站原语 + 审批人路由 schema + permission_gate 重构（请求者≠审批人、approvals 移 agent 侧 `approval_store`、停 `import user_store`） | **✅ 已合并 main**（e5c4cb7）；platform 只读投影后置 |
 | **2** | 管理表收编 alembic | `users`/`api_keys`/`audit_log`/`im_connectors`/`im_channel_allowlist` 入迁移（quotas/invites 已删、approvals 已移 agent 侧——均不在此列） | **✅ 已合并 main** |
 | **2.5** | establish-tenancy | `tenants`/`teams`/`users.tenant_id`/两级 `approver_user_id` + 回填 default 主体 + 最小 provisioning（**只逻辑实体、不建 `team_members`**，物理分区留 #3） | **✅ 已合并 main**（迁移 067-069；070 升级 tenant 外键约束） |
-| 3 | 五库物理分离（吸收 R2 + tenancy 物理） | 路由器/**租户作用域边界（可换后端→PG/RLS）** + 嵌入式迁移（Y）+ per-agent/共享/KB/向量**按主体物理分区**；approvals 落 per-agent + 退管理库孤立定义；memory 去 `namespace`。**简化：上线前不迁移数据**（重建内测环境，难题消失）——窗口关在上线 → **赶上线前做** | 待该期（detailed spec 即时生成；拆 **3a** 路由+Y / **3b** per-tenant+投影） |
+| 3 | 五库物理分离（吸收 R2 + tenancy 物理） | 路由器/**租户作用域边界（可换后端→PG/RLS）** + 嵌入式迁移（Y）+ per-agent/共享/KB/向量**按主体物理分区**；approvals 落 per-agent + 退管理库孤立定义；memory 去 `namespace`。**简化：上线前不迁移数据**（重建内测环境，难题消失）——窗口关在上线 → **赶上线前做** | 待该期（detailed spec 即时生成；切片见下方 B2） |
 | 4 | Identity 端口 | authn 抽端口（**认证属 edge、核只消费 `Principal{user_id,tenant_id}`**）+ 本地/平台/OIDC 适配器；根除 #1（`user_store.authenticate`）| **设计定稿**（§6 + memory）；实现待该期 |
 
 **节奏**：各期 detailed spec **即时生成**（反映当时真实代码，避免 #3 类返工）；一期一个聚焦会话，串行推进。**进度（2026-06-10）**：#1 / A / 4 减法 / #2 / #2.5 **均已合并 main**；剩 **#3**（最大；"不迁移"捷径**绑上线前窗口** → 赶上线前做）→ **#4**（设计定稿、实现最后）。
+
+### B2 协调：KB 模块四分 ↔ #3 物理库（3a 切片，2026-06-10）
+
+写 3a 前，把 **KB 模块四分**（`core`/`retrieval`/`ingest`/`management`，已落地、`retrieval ✗→ ingest` 有 unit test 强制）与 **#3 的 KB 物理库**（关系库 + 向量库两个 substrate、per-tenant、嵌入式迁移 Y）对齐。**核心发现**：四分已做完，且 `KnowledgeStore(database: SQLiteDatabase)` 是**构造注入连接**——#3 的租户路由从这里插，**`core/store` 内部零改动**（只清 `bindings.py`/`operations.py` 两条 `create_database(settings)` 自连接旁路）。
+
+**3a（路由 + Y，单主体先）** —— "库的物理路由"一件事，一起做：
+1. **tenant-scope 路由 + 可换后端抽象**：`scope(tenant) → {KB 关系 db, KB 向量后端}`；SQLite 后端路由到 `<tenant>/` 文件。
+2. **嵌入式 Y 引擎（共享一个，§5.2）+ KB 的 `MIGRATIONS` 清单**（把现 `operations.ensure_schema` 的 DDL 原样 lift 成 v1…vN，**保留 tenant_id/kb_id 列**，见 §5.7）。
+3. **所有 `KnowledgeStore` 构造走路由**、杀两条自连接旁路。
+4. **§5.6 向量家族整改**（`VectorFamily` + `family_of`）——KB 关系库与向量库由**同一个 tenant-scope** 驱动，否则只路由关系库、向量仍走扁平 `kb:` 串 → 半路由返工。
+
+**3a-binding（兄弟切片）** —— "agent 怎么发现 KB"另一件事，单独做：agent↔KB 绑定 materialize 进 agent.yaml、消灭 `knowledge_base_agent_bindings` 运行时表（§4-④ 收敛方式）。
+
+**3b**：per-tenant 目录 fan-out（多主体）+ platform 只读投影。

@@ -168,6 +168,8 @@ KB 是顶层独立组件（未来服务雏形，见 data-model §5.7 KB 库）�
 
 **KB = 唯一派生视图**：内容是数据源的投影；agent 贡献**不直接写 KB**（否则下次 sync 不一致/孤儿/不可追溯），而是写 agent-curated 沉淀源 → connector sync 流入 KB，保证 KB 可追溯/可重新摄取。**KB 写入路径单一（只 ingest/sync）。**
 
+> **与 #3 物理库的接缝（B2，详见 data-model §6「B2 协调」）**：四分已落地，`KnowledgeStore(database)` 构造注入连接即 #3 租户路由的插入点（`core/store` 零改动）。agent↔KB 绑定走**平台真相源 → 部署 materialize 进 agent.yaml** 的同款模式（同 §6.5 审批人），`retrieval/scope` 读配置不查表，消灭 agent 侧绑定表。
+
 ---
 
 ## 6. 身份与认证（identity & auth）
