@@ -14,6 +14,8 @@
 
 ## 1. 三个数据库（物理分布）
 
+> 〔**✅ #1 persistence-hygiene 已消灭 `users.db`**（`sessions` 并入 `fleetent.db`；paths/db 已无 users.db 引用）。下表与 §4-⑥/⑦/⑧ 为 **#1 前现状快照**，留作分析背景。现状=`fleetent.db` + `vector_store.db` 两库。〕
+
 | DB 文件 | 内容 | 备注 |
 |---|---|---|
 | `data/fleetent.db` | 50 张主表（agent / KB / memory / 治理 / 监控 / 会话元…） | 主库，Alembic 管理 |
@@ -137,7 +139,7 @@ erDiagram
 ## 4. 设计问题（讨论议程）
 
 1. **关系几乎全隐式**：全库**仅 3 条 SQL 外键**（`agent_id`→agents、`document_id`→knowledge_documents CASCADE、复合 `(tenant_id,kb_id)`→knowledge_bases）。其余引用整性全靠 `*_id` 约定 + store 逻辑，DB 无保障。→ **要不要补外键？** 权衡：SQLite-first/可审计/手写 SQL ⟷ 完整性与级联删除。
-2. **多租户无根实体**：无 `tenants`/`teams` 表。→ **✅ 已决议（2026-06-09，见 §5.7）**：立 `tenants`(=主体/法人实体)/`teams` 实体做根，主体间**物理 per-tenant 强隔离**。
+2. **多租户无根实体**：无 `tenants`/`teams` 表。→ **✅ 已决议并落地（见 §5.7；`establish-tenancy` 迁移 067-070）**：立 `tenants`(=主体/法人实体)/`teams` 实体做根（**v1 不建 `team_members`**），主体间**物理 per-tenant 强隔离**（物理分区留 #3）。
 3. **身份策略不统一**：多数表 surrogate `id`；KB 用复合自然键 `(tenant_id,kb_id)`；绑定表用复合自然键（user_id+agent_id）。→ **是否统一**（全 surrogate id？还是明确「聚合根用自然键」）？
 4. **疑似重复绑定**：`agent_kbs` 与 `knowledge_base_agent_bindings` 均为 agent↔KB。→ **核实(2026-06-09)**：两表分属平台侧(agent_kbs,带 `created_by` 审计)与 agent 侧(无审计),**之间无同步**;`dead-schema-cleanup` 清了 KB binding 死代码 + scope.py/bindings.py 去重,但**表收敛(R1a)仍 deferred**(收敛成"单一真相源+派生只读",随 #3)。
 5. **`session_meta` 禁忌表**：CLAUDE.md 明令 agent 运行时数据不得入 platform 管理表；迁移 `054–059` 正是「加运行时列（compaction/token/resume_pending）→删」的返工实证。但残留 `origin/status/takeover/pinned/agent_name/channel` 等——→ **逐列审计**：哪些是 platform 治理（合法）、哪些是运行时残留（该回 session 文件）？
@@ -153,7 +155,7 @@ erDiagram
 
 | 逻辑层 | 库形态 | 装什么 | schema 权威 |
 |---|---|---|---|
-| **管理库** | 单库（仅受管模式存在） | users · agent 定义/版本/绑定 · connectors · providers · audit · monitoring · askit · api_keys/quotas/invites/im allowlist · **审批治理记录**（身份解析后 who/when，R1） | **Alembic（唯一 alembic 库）** |
+| **管理库** | 单库（仅受管模式存在） | users(+`tenant_id`) · tenants/teams · agent 定义/版本/绑定 · connectors · providers · audit · api_keys · im allowlist · **审批治理记录**（身份解析后 who/when，R1）〔monitoring/askit/quotas/invites 已 v1 删除，见 §5.8〕 | **Alembic（唯一 alembic 库）** |
 | **per-agent 运行库** | **每 agent 一个文件** | sessions · traces · session_meta(运行列) · session_anti_flap · sub_agent_runs · memory_items(**仅 `user_id` 键、无 namespace 列**，R2-叉2) · skill 提案草稿 · per-agent reflection · **审批请求+门状态**(R1) | **嵌入式迁移**（Y） |
 | **共享记忆库** | 跨 agent | shared_memory(team/tenant)——多 agent 写的**真相源** | **嵌入式迁移**（Y） |
 | **KB 关系库** | 跨 agent | knowledge_*/kb_*/chunks_fts · 摄取/同步态——**ingest 单写、agent 只读**的派生视图 | **嵌入式迁移**（Y） |
@@ -186,7 +188,7 @@ authn 抽成基座端口（`凭证→principal`）：单机本地实现 + 平台
 
 ### 5.4 仍待后续决定（不阻塞 roadmap，留作 schema 设计专题）
 
-§4-①②③④：DB 外键 vs store 约定、立 tenants/teams 实体、身份键统一、合并 `agent_kbs`/`knowledge_base_agent_bindings`。这些是**schema 设计**，与下方「卫生/拓扑」roadmap 正交，单独成题。（R2 收口的是**拓扑/归属**，这 4 项 schema 设计仍未决。）
+§4-①③④：DB 外键 vs store 约定、身份键统一、合并 `agent_kbs`/`knowledge_base_agent_bindings`。这些是**schema 设计**，与下方「卫生/拓扑」roadmap 正交，单独成题。（§4-② 立 tenants/teams 实体**已由 `establish-tenancy` 落地**，067-070；R2 收口的是**拓扑/归属**，余下 3 项 schema 设计仍未决。）
 
 ### 5.5 审批/提案归属契约（R1，2026-06-09）
 
@@ -199,6 +201,8 @@ authn 抽成基座端口（`凭证→principal`）：单机本地实现 + 平台
 **承重假设**：platform **不能同步 gate、不能事后回拦**已被 agent 本地批准并执行的动作；中央治理只以**配置时**表达（agent.yaml / allowlist / `agent_policy` 白名单），不以运行时 gate 表达。这是「agent 必须脱离 platform 跑」唯一自洽的模型，也是 CLAUDE.md 既有「读产物不反向写」「curated 源→sync→KB」从 KB **推广到所有审批/提案流**。
 
 **copy-up 语义按真相源/派生视图分叉**：user-memory=platform 可选读投影；shared-memory=读投影；skill 提案=platform **二次部署门**（本地批准≠全局生效，部署成全局资产落管理库+skills_dir）；KB=**sync 重建**（绕审批门，受信运维）。
+
+> 〔**✅ 已由 change A 修复**（§6，e5c4cb7）：approvals 迁 agent 侧 `governance/approval_store`、停 `import user_store`、请求者≠审批人、不透明 actor 标签均已落地；**platform 只读投影**后置。以下为修复前诊断，留作背景。〕
 
 **现状判定**（`governance/permission_gate.py` 摸查）：delivery 方向已对（审批请求顺响应流回、resolve 走 agent 自己的 API，TUI/IM/HTTP 皆其客户端）；但 **state 模型错且只因单体未暴露**——① 活门是进程内 `asyncio.Event`，跨进程 resolve 直接失效（platform 消费者全是 placeholder 佐证）；② `approvals` 表在管理库（经 `user_store._conn`），**agent runtime 写管理库** = 越界 + #1 泄漏链；③ `approvals` 双 schema 权威（alembic 060 + `_init_db`）；另：`session_id` 永远写 `""`、重启把 pending 全标 timeout（「重启存活」是假的）。**需重构**——自成一个 change（见 §6「审批重设计」）。Identity 端口（§5.3）是其前提：agent 侧只存**不透明 actor 标签**，platform 负责解析真实身份。
 
@@ -215,14 +219,14 @@ namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后
 **实体**（裸列 → 真实体/外键）：
 - `tenants`（= 主体）：`id · name · status · created_at · approver_user_id · 主体级配额/配置`
 - `teams`：`id · tenant_id`→tenants `· name · approver_user_id · created_at`
-- `users` 补 `tenant_id`→tenants（**今天 users 无任何组织归属——真缺口**）
-- `team_members`：`team_id`→teams `· user_id`→users（M:N）
+- `users` 补 `tenant_id`→tenants（**今天 users 无任何组织归属——真缺口**；v1 **只加 `tenant_id`、不加 `team_id`**）
+- ~~`team_members`（M:N）~~ — **v1 不建**（已发布 `establish-tenancy` 067-069 未建）：全仓无任何地方读「用户的 team」，共享记忆/KB/审批都走 **agent 归属 team**（`agents.team_id`，配置）；将来要按 team 授权再加（单 team→`users.team_id`，多 team→`team_members`）。
 - agents/KB/traces/policies 的 `tenant_id`/`team_id` 升真外键；`shared_memory.scope_id` 按 `scope_type` 指向 tenants/teams
 
 **审批人(org 两级,2026-06-10)**：`teams.approver_user_id` / `tenants.approver_user_id` —— agent 可被多 team 的人使用,但其共享记忆/KB/高危工具的**审批归 agent 归属 team 的审批人**(非请求者 team)。解析链:`agent.team_id 的审批人 → (无) tenant 的审批人 → (无) reject(default-closed)`。部署/materialize 时沿链解析出审批人写进 agent.yaml `approval` 块,核运行只读配置、不实时查 org（保解耦);默认单审批人,config 可覆盖多人 + `any/all`。详见 `target-architecture-proposal.md §6.5`。
 
 **隔离 = 物理 per-tenant**（不靠 `tenant_id` 列 + 纪律）：
-- `管理库`：**单库、跨主体注册中心**（tenants/teams/users/team_members/agent 定义，带 `tenant_id` 列），platform 专用，**不存业务对话/KB**。
+- `管理库`：**单库、跨主体注册中心**（tenants/teams/users〔带 `tenant_id`〕/agent 定义），platform 专用，**不存业务对话/KB**。
 - 每主体一个目录 `<tenant>/`，内含：每 agent 一个 `per-agent 库` + **per-tenant 的 `共享记忆库`** + **per-tenant 的 `KB 库(+向量)`**。
 - agent 进程经 `agent.yaml` 只开本主体目录下的文件，**物理上够不到别主体的库**。
 - 示例（2 主体 × 各 2 agent）：`管理库`×1 + 每主体（2×per-agent + 1 共享记忆 + 1 KB）= **9 库**。
@@ -233,7 +237,7 @@ namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后
 
 **实现成"租户作用域边界 + 可换后端"(接住将来上 PG)**：隔离做成抽象——调用点只表达"在 tenant X 作用域里访问",后端**可插拔**:今天 SQLite=路由到 `<tenant>/` 文件;将来 PG 可换 **per-tenant database**(同路由换 DSN)或 **RLS**(单库 + 会话 tenant 变量、DB 按行强制,调用点基本不动)。**故物理现在做不浪费**——它建立的是"租户作用域边界",SQLite 文件只是当下后端。(团队已规划上 PG,时机待定。)
 
-**连带**：① **amends #3**——五库拓扑带 tenant 维度、按主体物理分区(#3 设计成"租户作用域边界 + 可换后端";加"不迁移数据/上线前重建内测环境"可大幅简化,见 §6 roadmap 笔记);② 喂 **#4 Identity**——principal 组织归属从 `users.tenant_id` + `team_members` 解析(§5.3 F2「tenant 来自 agent 配置」的折中升级为「真有归属」)。
+**连带**：① **amends #3**——五库拓扑带 tenant 维度、按主体物理分区(#3 设计成"租户作用域边界 + 可换后端";加"不迁移数据/上线前重建内测环境"可大幅简化,见 §6 roadmap 笔记);② 喂 **#4 Identity**——`Principal{user_id, tenant_id}` 的 tenant 从 `users.tenant_id` 解析（**不带 team**；agent 的 team 来自 `agents.team_id` 配置，见 `target-architecture-proposal.md §6.3`），把早期「tenant 来自 agent 配置」的折中升级为「真有归属」。
 
 ### 5.8 v1 实体减法（2026-06-09 决议）
 
@@ -270,7 +274,7 @@ namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后
 | **1** | `persistence-hygiene` | env.py 读 DATABASE_URL · 漂移护栏 · 消灭 users.db · 文档对齐 | **✅ 已完成并合并 main**（98de655 实现 / 9bbcd48 archive） |
 | **A** | 审批重设计（R1，§5.5） | im_gateway 出站原语 + 审批人路由 schema + permission_gate 重构（请求者≠审批人、approvals 移 agent 侧 `approval_store`、停 `import user_store`） | **✅ 已合并 main**（e5c4cb7）；platform 只读投影后置 |
 | **2** | 管理表收编 alembic | `users`/`api_keys`/`audit_log`/`im_connectors`/`im_channel_allowlist` 入迁移（quotas/invites 已删、approvals 已移 agent 侧——均不在此列） | **✅ 已合并 main** |
-| **2.5** | establish-tenancy | `tenants`/`teams`/`users.tenant_id`/两级 `approver_user_id` + 回填 default 主体 + 最小 provisioning（**只逻辑实体**，物理分区留 #3） | **✅ 已合并 main**（迁移 067-069） |
+| **2.5** | establish-tenancy | `tenants`/`teams`/`users.tenant_id`/两级 `approver_user_id` + 回填 default 主体 + 最小 provisioning（**只逻辑实体、不建 `team_members`**，物理分区留 #3） | **✅ 已合并 main**（迁移 067-069；070 升级 tenant 外键约束） |
 | 3 | 五库物理分离（吸收 R2 + tenancy 物理） | 路由器/**租户作用域边界（可换后端→PG/RLS）** + 嵌入式迁移（Y）+ per-agent/共享/KB/向量**按主体物理分区**；approvals 落 per-agent + 退管理库孤立定义；memory 去 `namespace`。**简化：上线前不迁移数据**（重建内测环境，难题消失）——窗口关在上线 → **赶上线前做** | 待该期（detailed spec 即时生成；拆 **3a** 路由+Y / **3b** per-tenant+投影） |
 | 4 | Identity 端口 | authn 抽端口（**认证属 edge、核只消费 `Principal{user_id,tenant_id}`**）+ 本地/平台/OIDC 适配器；根除 #1（`user_store.authenticate`）| **设计定稿**（§6 + memory）；实现待该期 |
 
