@@ -177,32 +177,71 @@ def _make_upload_func(
     return upload_func
 
 
-async def _download_image_attachments(
-    files: list[dict[str, Any]], bot_token: str
-) -> list[tuple[bytes, str]]:
-    """Download `image/*` Slack files via their authenticated `url_private`.
+# Inbound non-image files larger than this are not downloaded: run_code's container
+# is memory-bounded and the agent reads files there. Over-cap files surface as a
+# placeholder note rather than being silently dropped.
+_MAX_FILE_BYTES = 20 * 1024 * 1024
 
-    Best-effort: a file that fails to download is logged and skipped rather than
-    aborting the whole message. Non-image files are ignored.
+
+async def _download_attachments(files: list[dict[str, Any]], bot_token: str) -> list[Any]:
+    """Download inbound Slack files for the agent (im-file-attachment).
+
+    `image/*` files are downloaded into `(bytes, mime)` tuples (the vision path,
+    unchanged). Non-image files are downloaded into `FileAttachment` items; an
+    over-cap or failed download degrades to a `data=None` placeholder carrying a
+    note, never raising. Shared by all three receive paths so one fix covers them.
     """
     import httpx
 
-    attachments: list[tuple[bytes, str]] = []
+    from fleetent.im_gateway.normalizer import FileAttachment
+
+    out: list[Any] = []
     headers = {"Authorization": f"Bearer {bot_token}"}
+    cap_mb = _MAX_FILE_BYTES // (1024 * 1024)
+    over_cap_note = f"超过大小上限（{cap_mb} MB）"
     async with httpx.AsyncClient() as client:
         for f in files:
             mime = f.get("mimetype") or ""
             url = f.get("url_private")
-            if not mime.startswith(_IMAGE_MIME_PREFIX) or not url:
+            if not url:
+                continue
+            if mime.startswith(_IMAGE_MIME_PREFIX):
+                try:
+                    resp = await client.get(url, headers=headers)
+                    resp.raise_for_status()
+                except httpx.HTTPError as exc:
+                    logger.warning("slack_image_download_failed", url=url, error=str(exc))
+                    continue
+                out.append((resp.content, mime))
+                continue
+            filename = f.get("name") or f.get("title") or "file"
+            size = f.get("size")
+            if isinstance(size, int) and size > _MAX_FILE_BYTES:
+                logger.warning("slack_file_too_large", filename=filename, size=size)
+                out.append(
+                    FileAttachment(data=None, mime=mime, filename=filename, note=over_cap_note)
+                )
                 continue
             try:
                 resp = await client.get(url, headers=headers)
                 resp.raise_for_status()
             except httpx.HTTPError as exc:
-                logger.warning("slack_image_download_failed", url=url, error=str(exc))
+                logger.warning(
+                    "slack_file_download_failed", url=url, filename=filename, error=str(exc)
+                )
+                out.append(
+                    FileAttachment(data=None, mime=mime, filename=filename, note="文件下载失败")
+                )
                 continue
-            attachments.append((resp.content, mime))
-    return attachments
+            content = resp.content
+            if len(content) > _MAX_FILE_BYTES:
+                logger.warning("slack_file_too_large", filename=filename, size=len(content))
+                out.append(
+                    FileAttachment(data=None, mime=mime, filename=filename, note=over_cap_note)
+                )
+                continue
+            out.append(FileAttachment(data=content, mime=mime, filename=filename))
+    return out
 
 
 def _derive_session_id(
@@ -265,7 +304,7 @@ async def _route_assistant_message(
             logger.warning("slack_progress_status_failed", error=str(exc))
 
     files = payload.get("files") or []
-    attachments = await _download_image_attachments(list(files), bot_token)
+    attachments = await _download_attachments(list(files), bot_token)
 
     msg = NormalizedMessage(
         platform="slack",
@@ -372,7 +411,7 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
         reply_func, progress_func = await _make_status_funcs(client, channel, reply_thread, say)
 
         files = event.get("files") or []
-        attachments = await _download_image_attachments(list(files), bot_token)
+        attachments = await _download_attachments(list(files), bot_token)
 
         msg = NormalizedMessage(
             platform="slack",

@@ -97,7 +97,7 @@ def _capture_routed(monkeypatch):
         "fleetent.im_gateway.access.resolve_identity", lambda p, uid: uid, raising=False
     )
     monkeypatch.setattr(
-        "fleetent.im_gateway.slack._download_image_attachments", AsyncMock(return_value=[])
+        "fleetent.im_gateway.slack._download_attachments", AsyncMock(return_value=[])
     )
     return routed
 

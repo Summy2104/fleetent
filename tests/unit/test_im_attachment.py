@@ -70,7 +70,11 @@ async def test_slack_image_file_downloaded_into_attachments(monkeypatch):
 
 
 @respx.mock
-async def test_slack_non_image_file_ignored(monkeypatch):
+async def test_slack_non_image_file_downloaded_into_file_attachment(monkeypatch):
+    # im-file-attachment: non-image files are no longer dropped — they are downloaded
+    # (bot-token auth) into a FileAttachment the agent reads from its workspace.
+    from fleetent.im_gateway.normalizer import FileAttachment
+
     handler = _capture_slack_handler(monkeypatch)
     pdf_route = respx.get("https://files.slack.com/doc.pdf").mock(
         return_value=httpx.Response(200, content=b"PDF")
@@ -82,13 +86,22 @@ async def test_slack_non_image_file_ignored(monkeypatch):
         "channel_type": "im",
         "ts": "111.0",
         "files": [
-            {"mimetype": "application/pdf", "url_private": "https://files.slack.com/doc.pdf"}
+            {
+                "name": "doc.pdf",
+                "mimetype": "application/pdf",
+                "url_private": "https://files.slack.com/doc.pdf",
+            }
         ],
     }
     msg = await _run_slack(handler, event, monkeypatch)
 
-    assert msg.attachments == []
-    assert not pdf_route.called
+    assert len(msg.attachments) == 1
+    fa = msg.attachments[0]
+    assert isinstance(fa, FileAttachment)
+    assert fa.data == b"PDF"
+    assert fa.filename == "doc.pdf"
+    assert pdf_route.called
+    assert pdf_route.calls.last.request.headers["Authorization"] == "Bearer xoxb-test-token"
 
 
 async def test_slack_no_files_empty_attachments(monkeypatch):

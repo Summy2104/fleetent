@@ -5,15 +5,15 @@ TBD - created by archiving change im-image-attachment-extraction. Update Purpose
 ## Requirements
 ### Requirement: Slack 适配器下载入站图片填入 attachments
 
-Slack `handle_message` SHALL 读取入站消息的 `files` 字段,对每个 `mimetype` 以 `image/` 开头的 file,用 bot token 鉴权下载其 `url_private` 字节,并将 `(bytes, mimetype)` 加入 `NormalizedMessage.attachments`。非图片 file MUST 被忽略。消息无 file 时 attachments MUST 为空列表。下载某个图片失败时 handler MUST 记 warning 并跳过该图片,MUST NOT 抛异常中断消息处理。
+Slack `handle_message` SHALL 读取入站消息的 `files` 字段,对每个 `mimetype` 以 `image/` 开头的 file,用 bot token 鉴权下载其 `url_private` 字节,并将 `(bytes, mimetype)` 加入 `NormalizedMessage.attachments`。非图片 file MUST NOT 进入图片下载分支,SHALL 交由文件附件通道（`im-file-attachment`）下载处理。消息无 file 时 attachments MUST 为空列表。下载某个图片失败时 handler MUST 记 warning 并跳过该图片,MUST NOT 抛异常中断消息处理。
 
 #### Scenario: 含图片消息下载并填入 attachments
 - **WHEN** Slack 收到一条含 `image/*` file 的消息
 - **THEN** handler 用 bot token 鉴权下载其 `url_private` 字节,`NormalizedMessage.attachments` 含对应的 `(bytes, mimetype)` 项
 
-#### Scenario: 非图片 file 被忽略
-- **WHEN** Slack 消息的 file 是非 `image/` 类型(如 PDF)
-- **THEN** 该 file 不被下载、不进入 attachments
+#### Scenario: 非图片 file 走文件附件通道
+- **WHEN** Slack 消息的 file 是非 `image/` 类型(如 xlsx、PDF)
+- **THEN** 该 file 不进入图片下载分支、不产出 `(bytes, mimetype)` 图片项,而是按 `im-file-attachment` 的要求产出文件附件项
 
 #### Scenario: 无 file 消息 attachments 为空
 - **WHEN** Slack 收到一条不含 file 的纯文本消息
@@ -45,11 +45,15 @@ Telegram 的消息 handler 注册 SHALL 同时接收 photo 消息(在文本 filt
 
 ### Requirement: attachments 契约与 vision 抽取判据一致
 
-适配器组装的 `NormalizedMessage.attachments` 项 MUST 为 `(bytes, str)` 二元组,其中第二元为以 `image/` 开头的 MIME 字符串,使其满足 normalizer `_image_attachments` 既有判据并触发 vision-as-tool 的含图自动抽取。本 change MUST NOT 修改 normalizer 的抽取逻辑。
+适配器组装的 `NormalizedMessage.attachments` 中**图片项** MUST 为 `(bytes, str)` 二元组,其中第二元为以 `image/` 开头的 MIME 字符串,使其满足 normalizer `_image_attachments` 既有判据并触发 vision-as-tool 的含图自动抽取。attachments MAY 同时含非图片的文件附件项（`im-file-attachment`）;文件附件项 MUST NOT 满足图片判据,`_image_attachments` 的图片识别逻辑 MUST 保持不变。
 
 #### Scenario: 组装项被 normalizer 识别为图片
 - **WHEN** 适配器将一张下载的图片以 `(bytes, "image/png")` 形式放入 attachments
 - **THEN** normalizer 的 `_image_attachments` 将其识别为图片项,交由 vision-as-tool 自动抽取
+
+#### Scenario: 文件附件项不被识别为图片
+- **WHEN** attachments 同时含图片二元组与文件附件项
+- **THEN** `_image_attachments` 只挑出图片二元组,文件附件项不触发 vision 抽取
 
 
 ### Requirement: NormalizedMessage 支持出站图片上传（upload_func）
