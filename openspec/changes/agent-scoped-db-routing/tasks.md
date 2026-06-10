@@ -6,14 +6,14 @@
 
 ## 2. per-agent 库的 MIGRATIONS（session 元数据 DDL lift）
 
-- [ ] 2.1 写失败测试：空 per-agent 库经 Y 迁移后，含 `session/index.py` 现 `ensure_schema` 所建的元数据表（`sessions` 等运行表），结构等价
-- [ ] 2.2 实现：把 `session/index.py` 的 DDL 原样 lift 成 per-agent 库 `MIGRATIONS`（v1），跑绿 2.1（不改 schema，仅搬迁）
+- [x] 2.1 写失败测试：空 per-agent 库经 Y 迁移后，含 `session/index.py` 现 `ensure_schema` 所建的元数据表（`sessions` 等运行表），结构等价
+- [x] 2.2 实现：把 `session/index.py` 的 DDL 原样 lift 成 per-agent 库 `MIGRATIONS`（v1），跑绿 2.1（不改 schema，仅搬迁）
 
 ## 3. session 元数据连接走 agent_scope + boot 接线
 
-- [ ] 3.1 写失败测试：session 元数据索引的连接来自 `agent_scope(...).state_db`（migrate-on-open）；护栏断言 `session/index.py` 无 `create_database(...)` 自连接全局库
-- [ ] 3.2 实现：`session/index.py` 连接改走 `agent_scope`；删其 `create_database` 自连接；`agent_app._init_agent_db_schema` 中 session 部分接线到 agent_scope + migrate-on-open，跑绿 3.1
-- [ ] 3.3 跑既有 session/index（元数据 upsert/查询/批量删/统计）测试确认行为不变（连接来源改、语义不改）；确认 traces/memory/reflection 仍走 ensure_schema、未被波及
+- [x] 3.1 写失败测试：session 元数据索引的连接来自 `agent_scope(...).state_db`（migrate-on-open）；护栏断言 `session/index.py` 无 `create_database(...)` 自连接全局库
+- [x] 3.2 实现：`session/index.py` 连接改走 `agent_scope`；删其 `create_database` 自连接；`agent_app._init_agent_db_schema` 中 session 部分接线到 agent_scope + migrate-on-open，跑绿 3.1
+- [x] 3.3 跑既有 session/index（元数据 upsert/查询/批量删/统计）测试确认行为不变（连接来源改、语义不改）；确认 traces/memory/reflection 仍走 ensure_schema、未被波及
 
 ## 4. 收尾、护栏与门禁
 

@@ -170,7 +170,7 @@ uv run fleetent-tui --token ma-<key>                        # 交互式终端 TU
 
 `tmp_path` 只用于纯解析/配置/序列化；一旦用于真实 DB/schema/CRUD，测试必须放 integration。历史平铺测试已迁移；不得继续向 `tests/` 根目录新增 `test_*.py`。
 
-unit 不得：使用 FastAPI `TestClient` / app lifespan、运行 Alembic migration、导入 `tests.integration.*` helper、验证真实 SQLite schema lifecycle / DB runtime orchestration、导入 `sqlite3` 后创建真实 DB file、调用生产 `_init_db()`。
+unit 不得涉及真实 DB file、schema、CRUD 或 store/runtime 协作：禁止使用 FastAPI `TestClient` / app lifespan、运行 Alembic migration、导入 `tests.integration.*` helper、验证真实 SQLite schema lifecycle / DB runtime orchestration、导入 `sqlite3` 后创建真实 DB file、调用生产 `_init_db()`、用 `DATABASE_URL=sqlite:///...` 指向持久路径。unit 只可覆盖：只读 legacy shim / public API / path constant 级别的代码逻辑。
 
 ### 何时跑什么
 

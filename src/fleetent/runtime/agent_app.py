@@ -24,7 +24,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocke
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from fleetent import agent_config, paths, user_store
+from fleetent import agent_config, paths
 from fleetent.agent_config import AgentFile
 from fleetent.identity import LocalBearerAdapter, Principal
 from fleetent.structured_logging import get_logger

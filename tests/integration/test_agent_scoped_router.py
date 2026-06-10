@@ -21,7 +21,7 @@ from fleetent.tenant_router import (
     SQLiteTenantBackend,
     TenantRouter,
 )
-from fleetent.vector_store.backend import SQLiteVectorBackend, VectorBackend
+from fleetent.vector_store.backend import SQLiteVectorBackend
 
 
 class _FakeVectorBackend:
@@ -30,9 +30,7 @@ class _FakeVectorBackend:
     async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
         pass
 
-    async def search(
-        self, vector: list[float], namespace: str, limit: int = 10
-    ) -> list[Any]:
+    async def search(self, vector: list[float], namespace: str, limit: int = 10) -> list[Any]:
         return []
 
     async def delete(self, id: str, namespace: str) -> None:
@@ -108,9 +106,7 @@ def test_tenant_scope_and_agent_scope_are_peers(tmp_path: Path) -> None:
 def test_open_state_db_returns_state_db(tmp_path: Path) -> None:
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
     scope = router.agent_scope("default", "my-agent")
-    migrations: list[tuple[int, str]] = [
-        (1, "CREATE TABLE IF NOT EXISTS t (id TEXT PRIMARY KEY)")
-    ]
+    migrations: list[tuple[int, str]] = [(1, "CREATE TABLE IF NOT EXISTS t (id TEXT PRIMARY KEY)")]
     db = scope.open_state_db(migrations)
     assert db is scope.state_db
 
@@ -124,8 +120,7 @@ def test_open_state_db_runs_migrations(tmp_path: Path) -> None:
     scope.open_state_db(migrations)
     conn = sqlite3.connect(scope.state_db.path)
     tables = {
-        r[0]
-        for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
     conn.close()
     assert "hello" in tables
@@ -134,9 +129,7 @@ def test_open_state_db_runs_migrations(tmp_path: Path) -> None:
 def test_open_state_db_is_idempotent(tmp_path: Path) -> None:
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
     scope = router.agent_scope("default", "my-agent")
-    migrations: list[tuple[int, str]] = [
-        (1, "CREATE TABLE IF NOT EXISTS t (id TEXT PRIMARY KEY)")
-    ]
+    migrations: list[tuple[int, str]] = [(1, "CREATE TABLE IF NOT EXISTS t (id TEXT PRIMARY KEY)")]
     scope.open_state_db(migrations)
     scope.open_state_db(migrations)  # second call must not raise
 
@@ -194,8 +187,6 @@ def test_replacing_backend_does_not_change_agent_call_sites(tmp_path: Path) -> N
     assert isinstance(real_scope.state_db, SQLiteDatabase)
 
     # Fake backend — identical call site
-    fake_router = TenantRouter(
-        _FakeAgentBackend(tmp_path / "f.db", _FakeVectorBackend())
-    )
+    fake_router = TenantRouter(_FakeAgentBackend(tmp_path / "f.db", _FakeVectorBackend()))
     fake_scope = call_site(fake_router, "default", "bot")
     assert fake_scope.state_db.path == tmp_path / "f.db"

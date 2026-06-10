@@ -44,16 +44,16 @@ def _build_alembic_db(tmp_path: Path) -> Path:
 def _build_ensure_schema_db(tmp_path: Path) -> Path:
     """Run all agent-side ensure_schema() functions on a fresh DB.
 
-    KB tables are intentionally excluded: they are now managed by the Y embedded
-    migration engine (TenantRouter + migrate-on-open in a tenant-scoped db) and
-    must not appear in the ensure_schema path.
+    KB tables and session metadata tables are intentionally excluded: both are now
+    managed by the Y embedded migration engine (TenantRouter/agent_scope +
+    migrate-on-open in their respective scoped dbs) and must not appear in the
+    ensure_schema path.
     """
     import fleetent.schedule_store as schedule_store
     from fleetent.db import SQLiteDatabase
     from fleetent.memory import store as memory_store
     from fleetent.observability import traces
     from fleetent.reflection import ensure_schema as reflection_ensure_schema
-    from fleetent.session import index as session_index
 
     tmp_path.mkdir(parents=True, exist_ok=True)
     db_path = tmp_path / "ensure_schema.db"
@@ -61,7 +61,6 @@ def _build_ensure_schema_db(tmp_path: Path) -> Path:
     traces.ensure_schema(db)
     memory_store.ensure_schema(db)
     reflection_ensure_schema(db)
-    session_index.ensure_schema(db)
     schedule_store.ensure_schema(db)
     return db_path
 

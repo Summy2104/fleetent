@@ -18,7 +18,6 @@ from fleetent.db import SQLiteDatabase
 from fleetent.schema_migrations import migrate
 from fleetent.session.migrations import MIGRATIONS as SESSION_MIGRATIONS
 
-
 # ── Guard: no self-connection in session/index.py ──────────────────────────
 
 
@@ -47,8 +46,7 @@ def test_session_index_has_no_database_url_self_resolve() -> None:
 
     src = inspect.getsource(module)
     assert "DATABASE_URL" not in src, (
-        "session/index.py must not read DATABASE_URL; "
-        "DB must be injected via set_state_db"
+        "session/index.py must not read DATABASE_URL; DB must be injected via set_state_db"
     )
 
 

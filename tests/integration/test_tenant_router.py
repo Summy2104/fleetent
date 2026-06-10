@@ -11,18 +11,14 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
-
-import pytest
 
 from fleetent.db import SQLiteDatabase
 from fleetent.tenant_router import (
+    AgentScope,
     KbScope,
     SQLiteTenantBackend,
     TenantRouter,
-    VectorBackendHandle,
 )
-from fleetent.vector_store.backend import VectorBackend
 
 
 class _FakeVectorBackend:
@@ -31,9 +27,7 @@ class _FakeVectorBackend:
     async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
         pass
 
-    async def search(
-        self, vector: list[float], namespace: str, limit: int = 10
-    ) -> list[Any]:
+    async def search(self, vector: list[float], namespace: str, limit: int = 10) -> list[Any]:
         return []
 
     async def delete(self, id: str, namespace: str) -> None:
@@ -112,9 +106,7 @@ class _FakeTenantBackend:
             kb_vector_backend=self._vector,
         )
 
-    def resolve_agent(self, tenant_id: str, agent_id: str) -> "AgentScope":
-        from fleetent.tenant_router import AgentScope
-
+    def resolve_agent(self, tenant_id: str, agent_id: str) -> AgentScope:
         return AgentScope(
             state_db=SQLiteDatabase(path=self._db_path),
             vector_backend=self._vector,  # type: ignore[arg-type]
@@ -136,6 +128,7 @@ def test_backend_is_replaceable(tmp_path: Path) -> None:
 
 def test_replacing_backend_does_not_change_call_sites(tmp_path: Path) -> None:
     """Call sites only call router.tenant_scope(tenant_id) — not changed by backend swap."""
+
     # Call site code — identical regardless of which backend is injected:
     def call_site(router: TenantRouter, tenant_id: str) -> KbScope:
         return router.tenant_scope(tenant_id)
@@ -146,8 +139,6 @@ def test_replacing_backend_does_not_change_call_sites(tmp_path: Path) -> None:
     assert isinstance(real_scope.kb_db, SQLiteDatabase)
 
     # Fake backend — same call site, different backend.
-    fake_router = TenantRouter(
-        _FakeTenantBackend(tmp_path / "f.db", _FakeVectorBackend())
-    )
+    fake_router = TenantRouter(_FakeTenantBackend(tmp_path / "f.db", _FakeVectorBackend()))
     fake_scope = call_site(fake_router, "default")
     assert fake_scope.kb_db.path == tmp_path / "f.db"

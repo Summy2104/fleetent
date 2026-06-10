@@ -41,9 +41,7 @@ def test_module_has_no_sqlite3_connect() -> None:
     assert "sqlite3.connect" not in src, (
         "session/index.py must not call sqlite3.connect — use db.py instead"
     )
-    assert "users.db" not in src, (
-        "session/index.py must not reference users.db"
-    )
+    assert "users.db" not in src, "session/index.py must not reference users.db"
 
 
 def test_no_sqlite3_import_in_module() -> None:
@@ -91,9 +89,7 @@ def test_record_activity_writes_to_injected_db(
     assert not users_db.exists(), "users.db must not be created by session.index"
 
 
-def test_get_returns_correct_metadata(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_get_returns_correct_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _setup_db(tmp_path, monkeypatch)
     from fleetent.session.index import get, record_activity
 
@@ -131,9 +127,7 @@ def test_list_by_user_returns_sessions_newest_first(
     assert results[1]["session_id"] == "old"
 
 
-def test_count_reflects_recorded_sessions(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_count_reflects_recorded_sessions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _setup_db(tmp_path, monkeypatch)
     from fleetent.session.index import count, record_activity
 
@@ -142,9 +136,7 @@ def test_count_reflects_recorded_sessions(
     assert count() == 1
 
 
-def test_delete_removes_session(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_delete_removes_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _setup_db(tmp_path, monkeypatch)
     from fleetent.session.index import delete, get, record_activity
 
