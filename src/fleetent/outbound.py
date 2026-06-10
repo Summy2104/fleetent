@@ -25,27 +25,85 @@ async def send_to(
     *,
     target_type: str = "user",
     thread: Any = None,
+    blocks: list[dict[str, Any]] | None = None,
 ) -> bool:
     """Send text to target on platform. Returns True on success, False on any failure.
 
     ``target_type`` selects DM (``user``) vs a channel/group post (``channel``);
     ``thread`` optionally threads the message (Slack ``thread_ts`` / Telegram topic).
+    ``blocks`` is an optional platform-specific rich payload (Slack Block Kit);
+    platforms without rich rendering ignore it and send the text fallback.
     """
     if platform == "slack":
         if target_type == "channel":
-            return await _slack_send_channel(connector, target, text, thread)
-        return await _slack_send_dm(connector, target, text)
+            return await _slack_send_channel(connector, target, text, thread, blocks)
+        return await _slack_send_dm(connector, target, text, blocks)
     if platform == "telegram":
         return await _telegram_send(connector, target, text, thread)
     logger.warning("outbound_unsupported_platform", platform=platform)
     return False
 
 
-async def _slack_send_channel(client: Any, channel: str, text: str, thread: Any = None) -> bool:
+def approval_prompt_blocks(
+    approval_id: str, tool_name: str, risk_level: str
+) -> list[dict[str, Any]]:
+    """Slack Block Kit payload for an approval prompt: summary + three decision buttons.
+
+    The gate passes this payload opaquely; only Slack delivery paths render it.
+    Button action_ids are the contract consumed by the Slack ``block_actions`` handler.
+    """
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"🔐 工具 `{tool_name}` 请求执行（风险等级: {risk_level}）\n"
+                    f"Approval ID: `{approval_id}`"
+                ),
+            },
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "action_id": "approval_approve",
+                    "text": {"type": "plain_text", "text": "✅ 批准"},
+                    "style": "primary",
+                    "value": approval_id,
+                },
+                {
+                    "type": "button",
+                    "action_id": "approval_reject",
+                    "text": {"type": "plain_text", "text": "❌ 拒绝"},
+                    "style": "danger",
+                    "value": approval_id,
+                },
+                {
+                    "type": "button",
+                    "action_id": "approval_approve_always",
+                    "text": {"type": "plain_text", "text": "✅ 始终允许"},
+                    "value": approval_id,
+                },
+            ],
+        },
+    ]
+
+
+async def _slack_send_channel(
+    client: Any,
+    channel: str,
+    text: str,
+    thread: Any = None,
+    blocks: list[dict[str, Any]] | None = None,
+) -> bool:
     try:
         kwargs: dict[str, Any] = {"channel": channel, "text": text}
         if thread:
             kwargs["thread_ts"] = thread
+        if blocks is not None:
+            kwargs["blocks"] = blocks
         await client.chat_postMessage(**kwargs)
         return True
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the caller
@@ -68,11 +126,16 @@ async def is_reachable(platform: str, connector: Any, target: str) -> bool:
     return False
 
 
-async def _slack_send_dm(client: Any, user_id: str, text: str) -> bool:
+async def _slack_send_dm(
+    client: Any, user_id: str, text: str, blocks: list[dict[str, Any]] | None = None
+) -> bool:
     try:
         result = await client.conversations_open(users=[user_id])
         channel = result["channel"]["id"]
-        await client.chat_postMessage(channel=channel, text=text)
+        kwargs: dict[str, Any] = {"channel": channel, "text": text}
+        if blocks is not None:
+            kwargs["blocks"] = blocks
+        await client.chat_postMessage(**kwargs)
         return True
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the gate
         logger.warning("slack_send_dm_failed", user_id=user_id, error=str(exc))

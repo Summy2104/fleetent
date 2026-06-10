@@ -47,12 +47,28 @@
   任务内异常不传播，断言被吞、测试假绿。重构为协程收集结果列表、测试主体断言。
   （教训：并发测试的断言必须落在主协程。）
 
-## Change 2：slack-approval-buttons（待实施）
+## Change 2：slack-approval-buttons（已实现）
 
-- 审批提示 Block Kit 化：描述 + 内容预览 + [批准][拒绝][始终允许] 按钮
-- Socket Mode `app.action` 处理点击；点击者身份取自 Slack 事件（比文本命令更可靠），
-  过 Change 1 的授权校验；`chat.update` 写结果态防重复点击
-- 文本命令 `approve/reject <id>` 保留（Telegram/TUI/降级）
+### 决策
+
+- **D1 Block Kit 渲染助手放 `outbound.py`**（`approval_prompt_blocks`）：governance 不感知
+  Slack 结构、只透传 opaque payload；outbound 本就承载 Slack API 细节，是平台渲染知识的归属地
+- **D2 能力探测降级**：gate 调 `reply_func(text, blocks=...)`，文本-only 通道（Telegram/TUI）
+  抛 TypeError → 纯文本重发。零侵入，旧适配器与测试 mock 自然兼容
+- **D3 三个独立 action_id**（`approval_approve` / `approval_reject` / `approval_approve_always`），
+  value 携带 approval_id；`^approval_` 前缀单处理器注册
+- **D4 点击反馈**：成功 → `chat.update` 原消息为结果态（含决策人）并清空按钮（防重复点击）；
+  非授权/过期 → `chat_postEphemeral` 仅点击者可见提示，原提示保持。点击者身份取自交互
+  payload 的 `body.user.id`（比文本命令更可靠），过 Change 1 授权校验
+- **D5 `send_to` 增可选 `blocks` 参数**：Slack DM/频道路径透传（text 保留作通知 fallback），
+  Telegram 忽略；签名向后兼容
+- 文本命令 `approve/reject <id>` 全平台保留（按钮与文本双轨，先到先定，gate 幂等兜底）
+
+### 部署要求
+
+- **Slack App 必须开启 Interactivity**（App 设置 → Interactivity & Shortcuts）。Socket Mode
+  下 block_actions 走现有连接，无需公网回调 URL。未开启时按钮显示但点击无响应——文本命令
+  仍可用作兜底
 
 ## Change 3：send-im-message-tool（待实施）
 

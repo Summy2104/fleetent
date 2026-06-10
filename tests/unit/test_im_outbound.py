@@ -8,9 +8,6 @@ from __future__ import annotations
 import inspect
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
-
 # ── send_to: Slack ─────────────────────────────────────────────────────────────
 
 
@@ -19,18 +16,14 @@ async def test_send_to_slack_opens_dm_then_posts() -> None:
     from fleetent.im_gateway.outbound import send_to
 
     client = AsyncMock()
-    client.conversations_open = AsyncMock(
-        return_value={"channel": {"id": "DM_CHANNEL_123"}}
-    )
+    client.conversations_open = AsyncMock(return_value={"channel": {"id": "DM_CHANNEL_123"}})
     client.chat_postMessage = AsyncMock(return_value={"ok": True})
 
     result = await send_to("slack", client, "U_USER_456", "hello approver")
 
     assert result is True
     client.conversations_open.assert_called_once_with(users=["U_USER_456"])
-    client.chat_postMessage.assert_called_once_with(
-        channel="DM_CHANNEL_123", text="hello approver"
-    )
+    client.chat_postMessage.assert_called_once_with(channel="DM_CHANNEL_123", text="hello approver")
 
 
 async def test_send_to_slack_returns_false_on_failure() -> None:
@@ -161,3 +154,61 @@ def test_outbound_module_has_no_platform_imports() -> None:
     source = inspect.getsource(outbound_mod)
     assert "fleetent.platform" not in source, "outbound must not import fleetent.platform.*"
     assert "fleetent.user_store" not in source, "outbound must not import fleetent.user_store"
+
+
+# ── approval prompt blocks (slack-approval-buttons) ───────────────────────────
+
+
+def test_approval_prompt_blocks_carry_three_actions_with_id() -> None:
+    """Blocks include approve / reject / approve_always buttons valued with the id."""
+    from fleetent.outbound import approval_prompt_blocks
+
+    blocks = approval_prompt_blocks("appr-42", "send_im_message", "medium")
+
+    actions = [b for b in blocks if b.get("type") == "actions"]
+    assert len(actions) == 1
+    by_action_id = {e["action_id"]: e for e in actions[0]["elements"]}
+    assert set(by_action_id) == {"approval_approve", "approval_reject", "approval_approve_always"}
+    assert all(e["value"] == "appr-42" for e in by_action_id.values())
+
+
+def test_approval_prompt_blocks_include_text_section_with_tool() -> None:
+    """A section block names the tool and risk so the prompt reads standalone."""
+    from fleetent.outbound import approval_prompt_blocks
+
+    blocks = approval_prompt_blocks("appr-43", "run_code", "high")
+
+    sections = [b for b in blocks if b.get("type") == "section"]
+    joined = " ".join(str(s) for s in sections)
+    assert "run_code" in joined
+    assert "appr-43" in joined
+
+
+async def test_send_to_slack_dm_forwards_blocks() -> None:
+    """send_to(..., blocks=...) passes blocks to chat_postMessage on the DM path."""
+    from fleetent.im_gateway.outbound import send_to
+
+    client = AsyncMock()
+    client.conversations_open = AsyncMock(return_value={"channel": {"id": "DM_1"}})
+    client.chat_postMessage = AsyncMock(return_value={"ok": True})
+    blocks = [{"type": "actions", "elements": []}]
+
+    result = await send_to("slack", client, "U_X", "fallback text", blocks=blocks)
+
+    assert result is True
+    kwargs = client.chat_postMessage.call_args.kwargs
+    assert kwargs["blocks"] == blocks
+    assert kwargs["text"] == "fallback text"
+
+
+async def test_send_to_telegram_ignores_blocks() -> None:
+    """Telegram path accepts the blocks kwarg but does not forward it."""
+    from fleetent.im_gateway.outbound import send_to
+
+    bot = AsyncMock()
+    bot.send_message = AsyncMock()
+
+    result = await send_to("telegram", bot, "12345", "hello", blocks=[{"type": "actions"}])
+
+    assert result is True
+    assert "blocks" not in (bot.send_message.call_args.kwargs or {})

@@ -128,7 +128,7 @@ async def test_standalone_approval_no_platform(
     # Simulated approver resolves after outbound DM is sent.
     captured_id: list[str] = []
 
-    async def _intercept_send(platform, connector_obj, target, text):
+    async def _intercept_send(platform, connector_obj, target, text, **kwargs):
         # Extract approval_id from the DM text and schedule a resolve.
         import re
 

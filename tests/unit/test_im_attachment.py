@@ -11,6 +11,12 @@ def _capture_slack_handler(monkeypatch):
     captured: dict[str, object] = {}
 
     class FakeApp:
+        def action(self, pattern):  # noqa: ANN001, ANN201 — approval buttons registration
+            def deco(fn):  # noqa: ANN001, ANN202
+                return fn
+
+            return deco
+
         def event(self, name: str):  # noqa: ANN201
             def deco(fn):  # noqa: ANN001, ANN202
                 captured["handler"] = fn

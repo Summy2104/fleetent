@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import re
 from typing import Any
 
 import structlog
@@ -127,14 +128,17 @@ async def _make_status_funcs(
     except Exception as exc:  # noqa: BLE001 — feature may be disabled; degrade, don't abort
         logger.warning("slack_assistant_status_failed", channel=channel, error=str(exc))
 
-    async def reply_func(text: str) -> None:
+    async def reply_func(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
         if status_ok:
             with contextlib.suppress(Exception):
                 await client.assistant_threads_setStatus(
                     channel_id=channel, thread_ts=reply_thread, status=""
                 )
         if say is not None:
-            await say(text=text, thread_ts=reply_thread)
+            kwargs: dict[str, Any] = {"text": text, "thread_ts": reply_thread}
+            if blocks is not None:
+                kwargs["blocks"] = blocks
+            await say(**kwargs)
 
     async def progress_func(evt: dict[str, Any]) -> None:
         if not status_ok:
@@ -150,6 +154,55 @@ async def _make_status_funcs(
             logger.warning("slack_progress_status_failed", error=str(exc))
 
     return reply_func, progress_func
+
+
+async def handle_approval_action(ack: Any, body: Any, client: Any) -> None:
+    """Resolve a permission-gate approval from a Block Kit button click.
+
+    The clicking user's Slack id (interaction payload) is the decision actor, so
+    the gate's authorization check applies — a bystander's click is rejected with
+    an ephemeral notice while the prompt keeps its buttons. On an accepted
+    decision the prompt message is rewritten to a result state (buttons removed)
+    to prevent double-clicks.
+    """
+    from fleetent.governance.permission_gate import _default_gate
+
+    await ack()
+    action = (body.get("actions") or [{}])[0]
+    action_id = action.get("action_id", "")
+    approval_id = action.get("value", "")
+    clicker = (body.get("user") or {}).get("id", "")
+    channel = (body.get("channel") or {}).get("id", "")
+    message_ts = (body.get("message") or {}).get("ts", "")
+
+    decision = "rejected" if action_id == "approval_reject" else "approved"
+    always = action_id == "approval_approve_always"
+
+    found = await _default_gate.resolve(
+        approval_id=approval_id,
+        decision=decision,  # type: ignore[arg-type]
+        approver_user_id=clicker,
+        always=always,
+    )
+
+    if not found:
+        with contextlib.suppress(Exception):
+            await client.chat_postEphemeral(
+                channel=channel,
+                user=clicker,
+                text=f"⚠️ 无权审批 `{approval_id}`，或该请求已过期/已被处理。",
+            )
+        return
+
+    verdict = "✅ 已批准" if decision == "approved" else "❌ 已拒绝"
+    suffix = "（始终允许）" if always else ""
+    with contextlib.suppress(Exception):  # decision already took effect; update is cosmetic
+        await client.chat_update(
+            channel=channel,
+            ts=message_ts,
+            text=f"{verdict}{suffix} `{approval_id}` — by <@{clicker}>",
+            blocks=[],
+        )
 
 
 def _make_upload_func(
@@ -289,10 +342,13 @@ async def _route_assistant_message(
     with contextlib.suppress(Exception):
         await set_status(_THINKING_STATUS, loading_messages=[_THINKING_STATUS])
 
-    async def reply_func(text: str) -> None:
+    async def reply_func(text: str, blocks: list[dict[str, Any]] | None = None) -> None:
         with contextlib.suppress(Exception):
             await set_status("")
-        await say(text)
+        if blocks is not None:
+            await say(text=text, blocks=blocks)
+        else:
+            await say(text)
 
     async def progress_func(evt: dict[str, Any]) -> None:
         try:
@@ -358,6 +414,10 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
 
     bot_token = config.get("bot_token", "")
     app = AsyncApp(token=bot_token)
+
+    # Approval button clicks (requires Interactivity enabled on the Slack App;
+    # Socket Mode delivers block_actions over the existing connection).
+    app.action(re.compile(r"^approval_"))(handle_approval_action)
 
     assistant = AsyncAssistant()
 

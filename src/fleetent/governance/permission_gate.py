@@ -147,11 +147,21 @@ class PermissionGate:
 
         if requester_routed:
             # The in-flight notice doubles as the requester's approval prompt.
-            await reply_func(
+            # Interactive blocks ride along when the reply channel supports them
+            # (Slack); a TypeError from a text-only channel degrades to plain text.
+            from fleetent.outbound import approval_prompt_blocks
+
+            prompt = (
                 f"🔐 Tool `{tool_name}` requires your approval (risk: {risk_level}).\n"
                 f"Approval ID: `{approval_id}`\n"
                 f"Reply with: `approve {approval_id}` or `reject {approval_id}`"
             )
+            try:
+                await reply_func(
+                    prompt, blocks=approval_prompt_blocks(approval_id, tool_name, risk_level)
+                )
+            except TypeError:
+                await reply_func(prompt)
         else:
             # Notify requester that the request is in flight.
             await reply_func(
@@ -200,7 +210,7 @@ class PermissionGate:
             return []
 
         from fleetent.agent_config import REQUESTER_SENTINEL, resolve_approvers
-        from fleetent.outbound import is_reachable, send_to
+        from fleetent.outbound import approval_prompt_blocks, is_reachable, send_to
 
         addresses, _policy = resolve_approvers(approval_routing, risk_level, tool_name)
         # The requester sentinel is handled by the caller via reply_func — it is
@@ -214,6 +224,7 @@ class PermissionGate:
             f"Approval ID: `{approval_id}`\n"
             f"Reply with: `approve {approval_id}` or `reject {approval_id}`"
         )
+        blocks = approval_prompt_blocks(approval_id, tool_name, risk_level)
 
         reached: list[str] = []
         for platform, target in addresses:
@@ -232,7 +243,7 @@ class PermissionGate:
                     approval_id,
                 )
                 continue
-            sent = await send_to(platform, connector, target, msg)
+            sent = await send_to(platform, connector, target, msg, blocks=blocks)
             if sent:
                 actor = f"{platform}:{target}"
                 reached.append(actor)
