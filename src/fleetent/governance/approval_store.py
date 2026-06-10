@@ -8,9 +8,14 @@ Uses named parameters throughout.  No platform imports.
 from __future__ import annotations
 
 import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any, Union
 
-from fleetent.db import SQLiteDatabase
+from fleetent.db import ReadOnlySQLiteDatabase, SQLiteDatabase
+
+if TYPE_CHECKING:
+    pass
+
+_AnyDatabase = Union[SQLiteDatabase, ReadOnlySQLiteDatabase]
 
 _state_db: SQLiteDatabase | None = None
 
@@ -87,6 +92,27 @@ def list_approvals(
     status: str | None = None,
 ) -> list[dict[str, Any]]:
     db = database()
+    if status is not None:
+        rows = db.execute(
+            f"{_SELECT} WHERE status = :status ORDER BY created_at DESC",
+            {"status": status},
+        ).fetchall()
+    else:
+        rows = db.execute(
+            f"{_SELECT} ORDER BY created_at DESC LIMIT 50",
+        ).fetchall()
+    return list(rows)
+
+
+def list_approvals_with_db(
+    db: "_AnyDatabase",
+    status: str | None = None,
+) -> list[dict[str, Any]]:
+    """Read-only variant of list_approvals that accepts an explicit DB handle.
+
+    Used by platform read projection to read from agent DBs via read-only connections
+    without touching the module-level _state_db.
+    """
     if status is not None:
         rows = db.execute(
             f"{_SELECT} WHERE status = :status ORDER BY created_at DESC",

@@ -17,8 +17,8 @@ SQLite backend layout under ``<data_dir>/``::
 Directory structure is private to SQLiteTenantBackend; call sites only
 express scope and get typed handles — they never see file paths.
 
-Multi-tenant fan-out (3d) will extend SQLiteTenantBackend; call sites are
-already abstracted and will not change.
+Multi-tenant fan-out (3d): call sites pass the real tenant_id from agent config;
+SQLiteTenantBackend maps each to its physical partition under ``<data_dir>/``.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from fleetent.db import SQLiteDatabase
+from fleetent.db import ReadOnlySQLiteDatabase, SQLiteDatabase
 from fleetent.vector_store.backend import SQLiteVectorBackend, VectorBackend
 
 
@@ -79,6 +79,25 @@ class KbScope:
         migrate(self.shared_memory_db, migrations)
         return self.shared_memory_db
 
+    def open_kb_db_ro(self) -> ReadOnlySQLiteDatabase:
+        """Return a read-only handle to kb_db — no migration, no writes allowed.
+
+        For platform-side projection only.  Raises if the DB file does not exist.
+        """
+        return ReadOnlySQLiteDatabase(path=self.kb_db.path)
+
+    def open_shared_memory_db_ro(self) -> ReadOnlySQLiteDatabase:
+        """Return a read-only handle to shared_memory_db — no migration, no writes.
+
+        For platform-side projection only.  Raises if the DB file does not exist.
+        """
+        if self.shared_memory_db is None:
+            raise ValueError(
+                "shared_memory_db not provisioned in this KbScope — "
+                "use SQLiteTenantBackend or supply shared_memory_db explicitly"
+            )
+        return ReadOnlySQLiteDatabase(path=self.shared_memory_db.path)
+
 
 @dataclass(frozen=True)
 class AgentScope:
@@ -97,6 +116,13 @@ class AgentScope:
         migrate(self.state_db, migrations)
         return self.state_db
 
+    def open_state_db_ro(self) -> ReadOnlySQLiteDatabase:
+        """Return a read-only handle to state_db — no migration, no writes allowed.
+
+        For platform-side projection only.  Raises if the DB file does not exist.
+        """
+        return ReadOnlySQLiteDatabase(path=self.state_db.path)
+
 
 class TenantBackend(Protocol):
     """Pluggable backend: resolves tenant/agent scopes to physical handles."""
@@ -114,6 +140,7 @@ class SQLiteTenantBackend:
 
     def resolve(self, tenant_id: str) -> KbScope:
         tenant_dir = self.data_dir / tenant_id
+        tenant_dir.mkdir(parents=True, exist_ok=True)
         kb_db = SQLiteDatabase(path=tenant_dir / "kb.db")
         kb_vector_backend = SQLiteVectorBackend(
             database_url=f"sqlite:///{tenant_dir / 'kb_vectors.db'}"
@@ -132,6 +159,7 @@ class SQLiteTenantBackend:
 
     def resolve_agent(self, tenant_id: str, agent_id: str) -> AgentScope:
         agent_dir = self.data_dir / tenant_id / agent_id
+        agent_dir.mkdir(parents=True, exist_ok=True)
         state_db = SQLiteDatabase(path=agent_dir / "agent_state.db")
         vector_backend = SQLiteVectorBackend(
             database_url=f"sqlite:///{agent_dir / 'agent_vectors.db'}"
