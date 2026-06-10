@@ -53,6 +53,11 @@ def test_lifespan_starts_platform_maintenance_scheduler(tmp_path, monkeypatch):
 
     import fleetent.server as srv
 
+    db = tmp_path / "users.db"
+    apply_migrations(db)
+    monkeypatch.setattr(us, "DB_PATH", db)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
+
     instance = MagicMock()
     instance.running = True
     with (
@@ -76,6 +81,11 @@ def test_lifespan_does_not_load_scheduled_tasks(tmp_path, monkeypatch):
 
     import fleetent.schedule_store as schedule_store
     import fleetent.server as srv
+
+    db = tmp_path / "users.db"
+    apply_migrations(db)
+    monkeypatch.setattr(us, "DB_PATH", db)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
 
     with patch.object(schedule_store, "list_tasks") as list_mock, TestClient(srv.app):
         pass

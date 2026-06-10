@@ -7,16 +7,16 @@ stub, and the admin-CLI schedule commands were removed), so the management DB no
 needs this table. scheduled_tasks becomes a pure agent-side table (like `sessions`),
 created only by ensure_schema — the drift guard skips tables with no Alembic counterpart.
 
-Revision ID: 067
-Revises: 066
+Revision ID: 071
+Revises: 070
 Create Date: 2026-06-10
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "067"
-down_revision = "066"
+revision = "071"
+down_revision = "070"
 branch_labels = None
 depends_on = None
 
