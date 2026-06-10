@@ -11,6 +11,17 @@ from urllib.parse import unquote, urlparse
 Params = Mapping[str, object]
 Row = dict[str, Any]
 
+_WAL_BUSY_TIMEOUT_MS = 5000
+
+
+def _connect(path: Path) -> sqlite3.Connection:
+    """Open a SQLite connection with WAL journal mode and busy_timeout set."""
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(f"PRAGMA busy_timeout={_WAL_BUSY_TIMEOUT_MS}")
+    return conn
+
 
 @dataclass(frozen=True)
 class DbResult:
@@ -42,8 +53,7 @@ class SQLiteDatabase:
 
     def execute(self, sql: str, params: Params | None = None) -> DbResult:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
+        with _connect(self.path) as conn:
             cursor = conn.execute(sql, dict(params or {}))
             rows = _rows_from_cursor(cursor)
             return DbResult(rows=rows, rowcount=cursor.rowcount, lastrowid=cursor.lastrowid)
@@ -51,8 +61,7 @@ class SQLiteDatabase:
     @contextmanager
     def transaction(self) -> Iterator[SQLiteConnection]:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
+        conn = _connect(self.path)
         try:
             yield SQLiteConnection(conn)
         except Exception:
