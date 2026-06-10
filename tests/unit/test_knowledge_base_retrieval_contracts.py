@@ -9,7 +9,8 @@ def test_retrieval_search_functions_accept_readable_store() -> None:
     scope_sig = inspect.signature(scope.resolve_agent_kb_ids)
     assert "KnowledgeReadable" in str(search_sig.parameters["store"].annotation)
     assert "KnowledgeReadable" in str(graph_sig.parameters["store"].annotation)
-    assert len(scope_sig.parameters) == 2
+    # 3rd param is optional `database` for test injection; public call-site contract unchanged
+    assert len(scope_sig.parameters) == 3
 
 
 def test_retrieval_modules_do_not_reference_writes() -> None:

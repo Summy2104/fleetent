@@ -31,4 +31,4 @@
 - [x] 6.1 写失败测试 + 实现：boot 路径（`_start_infra`/agent_app）下 KB schema 经路由 + migrate-on-open 建立，不再由 KB `ensure_schema()` 建；其余 ensure_schema 库（traces/memory/reflection）行为不变
 - [x] 6.2 写测试 + 实现：漂移护栏排除已迁入 Y 的 KB 表（KB 不在 ensure_schema↔alembic 校验范围）
 - [x] 6.3 确认无 `import fleetent.platform.*`、无新增裸 `sqlite3.connect`、SQL 用 named parameters（跑依赖护栏 + `scripts/check_module_boundaries.py` 相关）
-- [ ] 6.4 change 收尾：`make test-pr` 全绿 + `uv run pytest tests/integration -q` 对照 main 基线无新增失败 + `openspec validate tenant-scoped-db-routing --strict`
+- [x] 6.4 change 收尾：`make test-pr` 全绿 + `uv run pytest tests/integration -q` 对照 main 基线无新增失败 + `openspec validate tenant-scoped-db-routing --strict`
