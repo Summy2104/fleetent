@@ -32,7 +32,9 @@ def test_upgrade_creates_tables(tmp_path):
     assert "im_users" in tables
     assert "agents" in tables
     assert "user_agents" in tables
-    assert "approvals" in tables
+    # approvals dropped from management DB (agent-owned-approvals, 3b-4):
+    # now lives in agent_state.db via per-agent MIGRATIONS v12.
+    assert "approvals" not in tables
     # scheduled_tasks dropped from the management DB (agent-owned-scheduled-tasks):
     # it is now a pure agent-side table created only by schedule_store.ensure_schema.
     assert "scheduled_tasks" not in tables
@@ -144,21 +146,6 @@ def test_column_structure(tmp_path):
     # agents columns
     agent_cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)")}
     assert agent_cols >= {"id", "name", "system_prompt", "allowed_tools", "created_at"}
-
-    # approvals columns
-    approval_cols = {row[1] for row in conn.execute("PRAGMA table_info(approvals)")}
-    assert approval_cols >= {
-        "id",
-        "session_id",
-        "requester_user_id",
-        "risk_level",
-        "tool_name",
-        "tool_args",
-        "status",
-        "approver_user_id",
-        "created_at",
-        "resolved_at",
-    }
 
     memory_cols = {row[1] for row in conn.execute("PRAGMA table_info(memory_items)")}
     assert memory_cols >= {
@@ -465,6 +452,24 @@ def test_downgrade_removes_template_id_column(tmp_path):
     av_cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_versions)")}
     conn.close()
     assert "template_id" not in av_cols
+
+
+def test_approvals_not_in_management_db_after_upgrade(tmp_path):
+    """approvals table must NOT exist in the management DB after upgrade head (3b-4).
+
+    approvals is now agent-owned (agent_state.db via per-agent MIGRATIONS v12).
+    The alembic management-DB definition is a dropped orphan; once migration 073
+    runs, this table must be absent from the management DB.
+    """
+    db = tmp_path / "test.db"
+    apply_migrations(db)
+    conn = sqlite3.connect(db)
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.close()
+    assert "approvals" not in tables, (
+        "approvals must not exist in the management DB after upgrade head; "
+        "it is now owned by agent_state.db (per-agent MIGRATIONS v12)"
+    )
 
 
 def test_agent_mcp_server_bindings_table_created(tmp_path):
