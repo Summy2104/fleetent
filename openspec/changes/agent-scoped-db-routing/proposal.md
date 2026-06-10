@@ -19,7 +19,7 @@
 
 ### Modified Capabilities
 - `tenant-scoped-db-routing`: 路由从单一 `scope(tenant)` 泛化为两个平级 typed 解析器——`tenant_scope(tenant)`（per-tenant 资源）+ `agent_scope(tenant, agent_id)`（per-agent 资源，返回 `agent_state.db` + `agent_vectors.db` 句柄）；`<tenant>/<agent_id>/` 包含关系沉进后端。单主体先行不变。
-- `agent-db-schema-self-init`: session 元数据索引（`session/index.py`）的 DB 表加入「迁入嵌入式 Y、经 `agent_scope` 取 per-agent `agent_state.db`」之列（继 KB 之后第二个迁出 `ensure_schema`-into-global 的 store）；traces/memory/reflection 仍 `ensure_schema`（过渡）。
+- `session-metadata-index`: session 元数据的存储从「`fleetent.db.create_database` + `ensure_schema` 建于 `DATABASE_URL` 单库」改为「经 `agent_scope(tenant, agent_id)` 取 per-agent `agent_state.db` + 嵌入式 Y（migrate-on-open）」；元数据存 DB 表、与消息 JSON 分离、不写 `users.db`、不裸 `sqlite3.connect` 不变。（session 是继 KB 之后第二个迁出 `ensure_schema`-into-global 的 store；traces/memory/reflection 留 3b-2/3 迁，approvals 留 3b-4。）
 
 ## Impact
 
