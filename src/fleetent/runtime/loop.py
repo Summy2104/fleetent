@@ -16,11 +16,11 @@ from openai.types.chat import ChatCompletionChunk
 
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent import agent_config
-from fleetent.identity import Principal
 from fleetent.eval_logger import log_run
 from fleetent.governance.action_gate import ActionMode, is_sandbox_backed, resolve_action_mode
 from fleetent.governance.agent_policy import check_tool_access
 from fleetent.governance.permission_gate import _default_gate
+from fleetent.identity import Principal
 from fleetent.integrations.sandbox import Mode, is_code_execution_enabled, redact_secrets
 from fleetent.long_term_ctx import ContextSource, build_context
 from fleetent.memory import extract_and_update
@@ -1482,6 +1482,7 @@ async def run(
         return await _run_inner(
             messages=messages,
             user_id=user_id,
+            principal=principal,
             system_prompt=system_prompt,
             is_sub_agent=is_sub_agent,
             reply_func=reply_func,
@@ -1517,6 +1518,7 @@ async def run(
 async def _run_inner(
     messages: list[dict[str, Any]],
     user_id: str = "default",
+    principal: Principal | None = None,
     system_prompt: str = _SYSTEM,
     is_sub_agent: bool = False,
     reply_func: ReplyFunc | None = None,
@@ -1579,6 +1581,7 @@ async def _run_inner(
         features=agent_features or {},
         session_id=session_id,
         session_context=session_context,
+        principal=principal,
     )
 
     start = time.monotonic()
@@ -2084,6 +2087,7 @@ async def run_stream(
         features=agent_features or {},
         session_id=session_id,
         session_context=session_context,
+        principal=principal,
     )
 
     # P3: on_user_input hook — intercept/rewrite/deny before user message enters messages.

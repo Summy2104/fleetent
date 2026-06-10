@@ -591,3 +591,137 @@ async def test_once_task_marked_completed_after_fire(tmp_path, monkeypatch, isol
         assert row["last_status"] == "completed"
     finally:
         await scheduler.shutdown()
+
+
+# ── Domain-aware principal recheck at fire time ──────────────────────────────
+
+
+def _platform_user(user_id, status="active", tenant_id="default"):
+    from fleetent import user_store
+
+    return user_store.User(
+        id=user_id,
+        name="Test",
+        api_key="k",
+        created_at="2024-01-01",
+        status=status,
+        tenant_id=tenant_id,
+    )
+
+
+async def test_fire_skips_blocked_platform_user(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.user_store as user_store
+
+    monkeypatch.setattr(user_store, "get_by_id", lambda uid: _platform_user(uid, "blocked"))
+    run_mock = AsyncMock(return_value="r")
+    monkeypatch.setattr(cs, "_agent_run", run_mock)
+
+    task = {
+        "id": "p1",
+        "user_id": "u-blocked",
+        "message": "x",
+        "session_id": None,
+        "agent_name": None,
+        "deliver": None,
+        "origin": None,
+    }
+    await cs._fire(task)
+    run_mock.assert_not_called()
+
+
+async def test_fire_allows_im_channel_guaranteed_identity(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+    import fleetent.user_store as user_store
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(user_store, "get_by_id", lambda uid: None)  # not a platform user
+    run_mock = AsyncMock(return_value="[SILENT]")
+    monkeypatch.setattr(cs, "_agent_run", run_mock)
+
+    task = {
+        "id": "p2",
+        "user_id": "U09SLACK",
+        "message": "x",
+        "session_id": None,
+        "agent_name": None,
+        "deliver": None,
+        "origin": {"platform": "slack", "chat_id": "D123"},
+    }
+    await cs._fire(task)
+
+    run_mock.assert_called_once()
+    assert run_mock.call_args[1]["principal"].user_id == "U09SLACK"
+
+
+async def test_fire_skips_unknown_identity_without_im_origin(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.user_store as user_store
+
+    monkeypatch.setattr(user_store, "get_by_id", lambda uid: None)
+    run_mock = AsyncMock(return_value="r")
+    monkeypatch.setattr(cs, "_agent_run", run_mock)
+
+    task = {
+        "id": "p3",
+        "user_id": "deleted-user",
+        "message": "x",
+        "session_id": None,
+        "agent_name": None,
+        "deliver": None,
+        "origin": None,
+    }
+    await cs._fire(task)
+    run_mock.assert_not_called()
+
+
+async def test_fire_allows_when_user_management_absent(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+    import fleetent.user_store as user_store
+
+    def _no_table(uid):
+        raise RuntimeError("no such table: users")
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(user_store, "get_by_id", _no_table)
+    run_mock = AsyncMock(return_value="[SILENT]")
+    monkeypatch.setattr(cs, "_agent_run", run_mock)
+
+    task = {
+        "id": "p4",
+        "user_id": "anyone",
+        "message": "x",
+        "session_id": None,
+        "agent_name": None,
+        "deliver": None,
+        "origin": None,
+    }
+    await cs._fire(task)
+
+    run_mock.assert_called_once()
+    assert run_mock.call_args[1]["principal"].user_id == "anyone"
+
+
+async def test_fire_allows_default_placeholder_identity(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+    import fleetent.user_store as user_store
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(user_store, "get_by_id", lambda uid: None)
+    run_mock = AsyncMock(return_value="[SILENT]")
+    monkeypatch.setattr(cs, "_agent_run", run_mock)
+
+    task = {
+        "id": "p5",
+        "user_id": "default",
+        "message": "x",
+        "session_id": None,
+        "agent_name": None,
+        "deliver": None,
+        "origin": None,
+    }
+    await cs._fire(task)
+    run_mock.assert_called_once()

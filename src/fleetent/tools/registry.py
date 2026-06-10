@@ -35,6 +35,10 @@ class ToolContext:
     # Inbound sender/channel metadata (im_gateway.SessionContext) for whoami-style
     # tools; typed Any to avoid an im_gateway import cycle. None = unavailable.
     session_context: Any = None
+    # Resolved execution identity (fleetent.identity.Principal) so tools that
+    # persist ownership (e.g. schedule) record who is acting, not what the model
+    # typed; typed Any to keep registry free of identity imports. None = unavailable.
+    principal: Any = None
 
 
 _registry: dict[str, tuple[Callable[..., Any], ToolSchema]] = {}

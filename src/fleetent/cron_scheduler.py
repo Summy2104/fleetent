@@ -45,14 +45,34 @@ def _parse_run_at(run_at: str) -> datetime:
     return datetime.fromisoformat(spec)
 
 
-def _resolve_cron_principal(user_id: str) -> Principal | None:
-    """Recheck user status before firing. Returns None if blocked or deleted."""
+def _resolve_cron_principal(task: dict[str, Any]) -> Principal | None:
+    """Recheck the archived identity in its own domain before firing.
+
+    Platform users (present in the users table) keep platform semantics: blocked →
+    reject; a row that disappeared (deleted user) with no IM origin → reject.
+    Channel-guaranteed IM identities never live in the users table (the identity-port
+    spec forbids resolving them through user_store), so a task carrying an IM origin
+    fires with its archived identity. Deployments without user management (no users
+    table at all) trust the archived identity — the agent-independence baseline.
+    """
+    user_id = str(task.get("user_id") or "default")
     if user_id == "system":
         return SYSTEM_PRINCIPAL
-    u = user_store.get_by_id(user_id)
-    if u is None or u.status == "blocked":
-        return None
-    return Principal(user_id=u.id, tenant_id=u.tenant_id)
+    if user_id == "default":  # placeholder, no platform identity claimed
+        return Principal(user_id="default", tenant_id="default")
+    try:
+        u = user_store.get_by_id(user_id)
+    except Exception:  # noqa: BLE001 — users table absent: no platform domain to consult
+        return Principal(user_id=user_id, tenant_id="default")
+    if u is not None:
+        if u.status == "blocked":
+            return None
+        return Principal(user_id=u.id, tenant_id=u.tenant_id)
+    origin = task.get("origin")
+    if isinstance(origin, dict) and origin.get("platform"):
+        # Channel-guaranteed IM identity: the edge authenticated the creator.
+        return Principal(user_id=user_id, tenant_id="default")
+    return None
 
 
 async def _agent_run(
@@ -83,8 +103,8 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
 
     from fleetent.session import manager as session_mgr
 
-    # Recheck user status before firing; skip if blocked or deleted.
-    principal = _resolve_cron_principal(task["user_id"])
+    # Recheck the archived identity in its own domain; skip when its domain rejects it.
+    principal = _resolve_cron_principal(task)
     if principal is None:
         logger.warning(
             "cron_fire_skipped task=%s reason=user_blocked_or_missing user_id=%s",

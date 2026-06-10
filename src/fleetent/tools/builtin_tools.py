@@ -416,11 +416,15 @@ async def schedule(
                 "target_type": notify_target_type,
             }
         origin = _origin_from_context(tool_context)
+        # Owner = who is acting (resolved principal), never what the model typed;
+        # the user_id parameter is only a fallback for principal-less runs.
+        ctx_principal = getattr(tool_context, "principal", None) if tool_context else None
+        owner = ctx_principal.user_id if ctx_principal is not None else user_id
         task = cron_scheduler.create_task(
             name=name,
             cron_expr=cron_expr or None,
             timezone=timezone,
-            user_id=user_id,
+            user_id=owner,
             message=message,
             source="tool",
             schedule_kind=schedule_kind,

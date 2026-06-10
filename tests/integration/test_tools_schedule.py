@@ -254,3 +254,37 @@ def test_tools_layer_does_not_import_schedule_store():
         py.name for py in pkg_dir.glob("*.py") if "schedule_store" in py.read_text(encoding="utf-8")
     ]
     assert offenders == []
+
+
+# ── Task owner stamped from the execution principal ──────────────────────────
+
+
+async def test_schedule_create_owner_from_principal(isolated_schedule_db):
+    import fleetent.schedule_store as ss
+    from fleetent.identity import Principal
+    from fleetent.tools.registry import ToolContext
+
+    ctx = ToolContext(principal=Principal(user_id="internal-u9", tenant_id="default"))
+    payload = (
+        '{"action":"create","name":"t","cron_expr":"0 9 * * *",'
+        '"message":"x","user_id":"model-made-this-up"}'
+    )
+    await dispatch("schedule", payload, tool_context=ctx)
+
+    rows = ss.list_tasks()
+    assert len(rows) == 1
+    assert rows[0]["user_id"] == "internal-u9"
+
+
+async def test_schedule_create_owner_falls_back_to_param_without_principal(isolated_schedule_db):
+    import fleetent.schedule_store as ss
+    from fleetent.tools.registry import ToolContext
+
+    payload = (
+        '{"action":"create","name":"t","cron_expr":"0 9 * * *","message":"x","user_id":"u-param"}'
+    )
+    await dispatch("schedule", payload, tool_context=ToolContext())
+
+    rows = ss.list_tasks()
+    assert len(rows) == 1
+    assert rows[0]["user_id"] == "u-param"

@@ -39,7 +39,7 @@ async def test_fire_independent_semantics_unique_sessions(tmp_path, monkeypatch)
     import fleetent.session.manager as sm
 
     monkeypatch.setattr(sm, "SESSIONS_DIR", tmp_path / "sessions")
-    monkeypatch.setattr(cron, "_resolve_cron_principal", lambda uid: Principal(user_id=uid, tenant_id="default"))
+    monkeypatch.setattr(cron, "_resolve_cron_principal", lambda task: Principal(user_id=task["user_id"], tenant_id="default"))
     sids: list[str] = []
 
     async def fake_run(messages, agent_name=None, principal=None):
@@ -61,7 +61,7 @@ async def test_fire_fixed_semantics_accumulates(tmp_path, monkeypatch):
     import fleetent.session.manager as sm
 
     monkeypatch.setattr(sm, "SESSIONS_DIR", tmp_path / "sessions")
-    monkeypatch.setattr(cron, "_resolve_cron_principal", lambda uid: Principal(user_id=uid, tenant_id="default"))
+    monkeypatch.setattr(cron, "_resolve_cron_principal", lambda task: Principal(user_id=task["user_id"], tenant_id="default"))
     captured_msgs: list = []
 
     async def fake_run(messages, agent_name=None, principal=None):
@@ -96,7 +96,7 @@ async def test_fire_saves_with_user_and_agent(tmp_path, monkeypatch):
     import fleetent.session.manager as sm
 
     monkeypatch.setattr(sm, "SESSIONS_DIR", tmp_path / "sessions")
-    monkeypatch.setattr(cron, "_resolve_cron_principal", lambda uid: Principal(user_id=uid, tenant_id="default"))
+    monkeypatch.setattr(cron, "_resolve_cron_principal", lambda task: Principal(user_id=task["user_id"], tenant_id="default"))
     captured: dict = {}
 
     async def fake_run(messages, agent_name=None, principal=None):
