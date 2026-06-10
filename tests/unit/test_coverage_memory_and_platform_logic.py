@@ -393,19 +393,25 @@ def test_memory_maintenance_validation_and_dedupe():
 async def test_shared_memory_validators_mapping_and_vector_sync(monkeypatch):
     active = _shared_item(status="active")
     archived = _shared_item(id="sm2", status="archived")
-    upserts: list[tuple[str, str, str]] = []
+    upserts: list[tuple[str, str]] = []  # (id, namespace)
     deletes: list[tuple[str, str]] = []
 
     monkeypatch.setattr(shared.vector_store, "shared_namespace", lambda scope, id: f"{scope}:{id}")
 
-    async def fake_upsert(id: str, content: str, namespace: str) -> None:
-        upserts.append((id, content, namespace))
+    class _TrackingBackend:
+        async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+            upserts.append((id, namespace))
 
-    async def fake_delete(id: str, namespace: str) -> None:
-        deletes.append((id, namespace))
+        async def search(self, vector: list[float], namespace: str, limit: int = 10) -> list[Any]:
+            return []
 
-    monkeypatch.setattr(shared.vector_store, "upsert", fake_upsert)
-    monkeypatch.setattr(shared.vector_store, "delete", fake_delete)
+        async def delete(self, id: str, namespace: str) -> None:
+            deletes.append((id, namespace))
+
+        async def clear_namespace(self, namespace: str) -> None:
+            pass
+
+    monkeypatch.setattr(shared, "_shared_memory_vector_backend", _TrackingBackend())
 
     assert shared._validate_scope_type("team") == "team"  # noqa: SLF001
     assert shared._validate_type("procedure") == "procedure"  # noqa: SLF001
@@ -432,7 +438,8 @@ async def test_shared_memory_validators_mapping_and_vector_sync(monkeypatch):
 
     await shared._sync_vector(active)  # noqa: SLF001
     await shared._sync_vector(archived)  # noqa: SLF001
-    assert upserts == [("sm1", "Deploys happen on Fridays", "team:eng")]
+    # vector was embedded → can only verify id+namespace, not content
+    assert upserts == [("sm1", "team:eng")]
     assert deletes == [("sm2", "team:eng")]
 
 
@@ -465,17 +472,27 @@ async def test_shared_memory_search_and_listing_use_fake_database(monkeypatch):
                 return FakeCursor(rows)
             return FakeCursor(rows)
 
-    monkeypatch.setattr(shared.store, "database", lambda: FakeDb())
+    monkeypatch.setattr(shared, "_shared_memory_db", FakeDb())
 
-    async def fake_search(_query: str, _namespace: str, _limit: int) -> list[Any]:
-        return [
-            SimpleNamespace(id="archived"),
-            SimpleNamespace(id="second"),
-            SimpleNamespace(id="missing"),
-            SimpleNamespace(id="first"),
-        ]
+    class _SearchBackend:
+        async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+            pass
 
-    monkeypatch.setattr(shared.vector_store, "search", fake_search)
+        async def search(self, vector: list[float], namespace: str, limit: int = 10) -> list[Any]:
+            return [
+                SimpleNamespace(id="archived"),
+                SimpleNamespace(id="second"),
+                SimpleNamespace(id="missing"),
+                SimpleNamespace(id="first"),
+            ]
+
+        async def delete(self, id: str, namespace: str) -> None:
+            pass
+
+        async def clear_namespace(self, namespace: str) -> None:
+            pass
+
+    monkeypatch.setattr(shared, "_shared_memory_vector_backend", _SearchBackend())
     monkeypatch.setattr(shared.vector_store, "shared_namespace", lambda scope, id: f"{scope}:{id}")
 
     assert shared.get_shared_memory("first").id == "first"
@@ -503,7 +520,7 @@ def test_shared_memory_new_item_insert_update_and_audit_paths(monkeypatch):
         def execute(self, _sql: str, params: dict[str, object]) -> None:
             inserted.append(params)
 
-    monkeypatch.setattr(shared.store, "database", lambda: FakeDb())
+    monkeypatch.setattr(shared, "_shared_memory_db", FakeDb())
     item = shared._new_item(  # noqa: SLF001
         scope_type="team",
         scope_id="eng",

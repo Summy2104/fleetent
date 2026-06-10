@@ -1,4 +1,14 @@
-"""Shared Memory public operations."""
+"""Shared Memory public operations.
+
+Connection source: the per-tenant shared_memory.db obtained via
+``tenant_scope(tenant_id).open_shared_memory_db(MIGRATIONS)`` in
+agent_app._init_agent_db_schema.  Call ``set_shared_memory_db(db, backend)``
+once at agent boot before any reads or writes.
+
+Vector operations use the injected ``_shared_memory_vector_backend``
+(shared: family, per-tenant) rather than the global vector_store backend.
+Embedding still uses the global provider via ``vector_store.embed_text``.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +18,7 @@ from datetime import UTC, datetime
 from typing import cast
 
 from fleetent import vector_store
+from fleetent.db import SQLiteDatabase
 from fleetent.memory import store
 from fleetent.memory.models import (
     SharedMemoryItem,
@@ -20,11 +31,43 @@ from fleetent.memory.proposal_store import (
     get_memory_maintenance_proposal,
     mark_shared_memory_proposal_applied,
 )
+from fleetent.vector_store.backend import VectorBackend
 
 _SCOPE_TYPES = {"team", "tenant"}
 _TYPES = {"context", "preference", "procedure"}
 _STATUSES = {"active", "stale", "archived"}
 _SOURCES = {"manual", "reflection_proposal"}
+
+_shared_memory_db: SQLiteDatabase | None = None
+_shared_memory_vector_backend: VectorBackend | None = None
+
+
+def set_shared_memory_db(db: SQLiteDatabase, vector_backend: VectorBackend) -> None:
+    """Inject the per-tenant shared memory DB and vector backend.
+
+    Called once at agent boot after ``tenant_scope.open_shared_memory_db()``.
+    """
+    global _shared_memory_db, _shared_memory_vector_backend
+    _shared_memory_db = db
+    _shared_memory_vector_backend = vector_backend
+
+
+def _shared_memory_database() -> SQLiteDatabase:
+    if _shared_memory_db is None:
+        raise RuntimeError(
+            "memory/shared: shared_memory_db not initialized"
+            " — call set_shared_memory_db(db, backend) at boot"
+        )
+    return _shared_memory_db
+
+
+def _shared_memory_backend() -> VectorBackend:
+    if _shared_memory_vector_backend is None:
+        raise RuntimeError(
+            "memory/shared: shared_memory_vector_backend not initialized"
+            " — call set_shared_memory_db(db, backend) at boot"
+        )
+    return _shared_memory_vector_backend
 
 
 async def create_shared_memory(
@@ -95,7 +138,8 @@ async def search_shared_memory(
     scope = _validate_scope_type(scope_type)
     scope_identifier = _validate_non_empty(scope_id, "scope_id")
     namespace = vector_store.shared_namespace(scope, scope_identifier)
-    vector_results = await vector_store.search(query, namespace, limit)
+    query_vector = await vector_store.embed_text(query)
+    vector_results = await _shared_memory_backend().search(query_vector, namespace, limit)
     ids = [result.id for result in vector_results]
     by_id = _items_by_ids(scope, scope_identifier, ids)
     return [
@@ -125,7 +169,7 @@ def iter_indexable_shared_memories(
 def get_shared_memory(item_id: str) -> SharedMemoryItem:
     """Load one Shared Memory item by id."""
     row = (
-        store.database()
+        _shared_memory_database()
         .execute(
             """
             SELECT *
@@ -156,7 +200,7 @@ def list_shared_memory(
         clauses.append("status != :archived")
         params["archived"] = "archived"
     rows = (
-        store.database()
+        _shared_memory_database()
         .execute(
             f"""
             SELECT *
@@ -222,7 +266,7 @@ def _new_item(
 
 
 def _insert(item: SharedMemoryItem) -> None:
-    store.database().execute(
+    _shared_memory_database().execute(
         """
         INSERT INTO shared_memory_items (
             id, scope_type, scope_id, type, content, status, source, source_ref,
@@ -238,7 +282,7 @@ def _insert(item: SharedMemoryItem) -> None:
 
 
 def _update(item: SharedMemoryItem) -> None:
-    store.database().execute(
+    _shared_memory_database().execute(
         """
         UPDATE shared_memory_items
         SET type = :type,
@@ -265,7 +309,7 @@ def _items_by_ids(
         **{f"id_{index}": item_id for index, item_id in enumerate(ids)},
     }
     rows = (
-        store.database()
+        _shared_memory_database()
         .execute(
             f"""
             SELECT *
@@ -283,10 +327,12 @@ def _items_by_ids(
 
 async def _sync_vector(item: SharedMemoryItem) -> None:
     namespace = vector_store.shared_namespace(item.scope_type, item.scope_id)
+    backend = _shared_memory_backend()
     if item.status in {"active", "stale"}:
-        await vector_store.upsert(item.id, item.content, namespace)
+        vector = await vector_store.embed_text(item.content)
+        await backend.upsert(item.id, vector, namespace)
         return
-    await vector_store.delete(item.id, namespace)
+    await backend.delete(item.id, namespace)
 
 
 def _row_to_item(row: dict[str, object]) -> SharedMemoryItem:

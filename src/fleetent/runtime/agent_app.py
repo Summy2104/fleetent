@@ -182,7 +182,9 @@ def _init_agent_db_schema(database_url: str, *, agent_id: str) -> None:
     from fleetent import reflection, schedule_store
     from fleetent.db import create_database
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
+    from fleetent.memory import shared as shared_memory
     from fleetent.memory import store as memory_store
+    from fleetent.memory.shared_memory_migrations import MIGRATIONS as SHARED_MEMORY_MIGRATIONS
     from fleetent.observability import traces
     from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
     from fleetent.session import index as session_index
@@ -193,7 +195,13 @@ def _init_agent_db_schema(database_url: str, *, agent_id: str) -> None:
 
     data_dir = db.path.parent
     router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
-    router.tenant_scope("default").open_kb_db(KB_MIGRATIONS)
+    tenant_scope = router.tenant_scope("default")
+    tenant_scope.open_kb_db(KB_MIGRATIONS)
+    sm_db = tenant_scope.open_shared_memory_db(SHARED_MEMORY_MIGRATIONS)
+    shared_memory.set_shared_memory_db(
+        sm_db,
+        tenant_scope.shared_memory_vector_backend,  # type: ignore[arg-type]
+    )
     agent_state_db = router.agent_scope("default", agent_id).open_state_db(AGENT_STATE_MIGRATIONS)
     session_index.set_state_db(agent_state_db)
     traces.set_state_db(agent_state_db)

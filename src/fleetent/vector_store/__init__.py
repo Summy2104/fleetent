@@ -20,6 +20,7 @@ from fleetent.vector_store.runtime import (
     clear_namespace,
     configure_from_active_agent,
     delete,
+    embed_text,
     search,
     upsert,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "configure_from_active_agent",
     "create_rerank_provider",
     "delete",
+    "embed_text",
     "knowledge_namespace",
     "memory_namespace",
     "shared_namespace",

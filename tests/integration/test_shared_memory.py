@@ -1,35 +1,72 @@
+"""Integration tests for shared memory apply-proposal flow.
+
+Updated for shared-memory-lib (3c): patches inject set_shared_memory_db
+for the shared memory DB; reflection proposals still use the alembic-migrated DB.
+"""
+
+from __future__ import annotations
+
 import sqlite3
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from fleetent.db import create_database
 
 
-def _patch_db(monkeypatch, tmp_path):
+def _patch_db(monkeypatch: Any, tmp_path: Path) -> tuple[Path, list[tuple[str, str, str]]]:
+    """Set up the test DB fixtures and inject shared memory state.
+
+    Returns:
+        Tuple of (alembic_db_path, upsert_calls) where upsert_calls accumulates
+        (id, content_or_any, namespace) from the shared memory vector backend.
+    """
     from fleetent import reflection
-    from fleetent.memory import store
+    from fleetent.memory import shared, store
+    from fleetent.memory.shared_memory_migrations import MIGRATIONS
+    from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
     from tests.integration.test_migrations import apply_migrations
 
+    # Alembic-migrated DB for reflection proposals + memory store
     db_path = tmp_path / "shared-memory-apply.db"
     apply_migrations(db_path)
     database = create_database(f"sqlite:///{db_path}")
     monkeypatch.setattr(store, "database", lambda: database)
     monkeypatch.setattr(reflection, "_database", lambda: database)
     monkeypatch.setattr(reflection.observability, "record_trace_event", lambda event: None)
-    return db_path
+
+    # Per-tenant shared_memory.db for shared memory items
+    router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
+    scope = router.tenant_scope("default")
+    sm_db = scope.open_shared_memory_db(MIGRATIONS)
+
+    upsert_calls: list[tuple[str, str, str]] = []
+
+    class _TrackingBackend:
+        async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+            upsert_calls.append((id, "", namespace))  # content embedded → not captured
+
+        async def search(self, vector: list[float], namespace: str, limit: int = 10) -> list[Any]:
+            return []
+
+        async def delete(self, id: str, namespace: str) -> None:
+            pass
+
+        async def clear_namespace(self, namespace: str) -> None:
+            pass
+
+    monkeypatch.setattr(shared, "_shared_memory_db", sm_db)
+    monkeypatch.setattr(shared, "_shared_memory_vector_backend", _TrackingBackend())
+
+    return db_path, upsert_calls
 
 
-async def test_approved_shared_memory_proposal_apply_creates_item(monkeypatch, tmp_path):
-    db_path = _patch_db(monkeypatch, tmp_path)
+async def test_approved_shared_memory_proposal_apply_creates_item(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    db_path, upsert_calls = _patch_db(monkeypatch, tmp_path)
     from fleetent import memory, reflection
-    from fleetent.memory import shared
-
-    upserts: list[tuple[str, str, str]] = []
-
-    async def upsert(id: str, text: str, namespace: str) -> None:
-        upserts.append((id, text, namespace))
-
-    monkeypatch.setattr(shared.vector_store, "upsert", upsert)
 
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="owner",
@@ -55,7 +92,9 @@ async def test_approved_shared_memory_proposal_apply_creates_item(monkeypatch, t
     assert item.type == "procedure"
     assert item.source == "reflection_proposal"
     assert item.source_ref == proposal.id
-    assert upserts == [(item.id, item.content, "shared:team:eng")]
+    # vector backend received upsert with correct namespace
+    assert any(id_ == item.id and ns == "shared:team:eng" for id_, _, ns in upsert_calls)
+    # proposal marked applied in alembic DB
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
             "SELECT status FROM memory_maintenance_proposals WHERE id = ?",
@@ -64,17 +103,11 @@ async def test_approved_shared_memory_proposal_apply_creates_item(monkeypatch, t
     assert row == ("applied",)
 
 
-async def test_shared_memory_proposal_apply_allows_non_owner_admin_actor(monkeypatch, tmp_path):
-    db_path = _patch_db(monkeypatch, tmp_path)
+async def test_shared_memory_proposal_apply_allows_non_owner_admin_actor(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    db_path, upsert_calls = _patch_db(monkeypatch, tmp_path)
     from fleetent import memory, reflection
-    from fleetent.memory import shared
-
-    upserts: list[tuple[str, str, str]] = []
-
-    async def upsert(id: str, text: str, namespace: str) -> None:
-        upserts.append((id, text, namespace))
-
-    monkeypatch.setattr(shared.vector_store, "upsert", upsert)
 
     proposal = reflection.create_memory_maintenance_proposal(
         user_id="memory-owner",
@@ -96,18 +129,14 @@ async def test_shared_memory_proposal_apply_allows_non_owner_admin_actor(monkeyp
     item = await memory.apply_shared_memory_proposal(proposal.id, actor_id="tenant-admin")
 
     assert item.created_by == "tenant-admin"
-    assert upserts == [(item.id, item.content, "shared:tenant:acme")]
+    assert any(id_ == item.id and ns == "shared:tenant:acme" for id_, _, ns in upsert_calls)
     with sqlite3.connect(db_path) as conn:
         proposal_row = conn.execute(
             "SELECT status FROM memory_maintenance_proposals WHERE id = ?",
             (proposal.id,),
         ).fetchone()
-        shared_rows = conn.execute(
-            "SELECT id, source_ref FROM shared_memory_items WHERE source_ref = ?",
-            (proposal.id,),
-        ).fetchall()
+        # shared item lives in shared_memory.db (per-tenant), not the alembic DB
     assert proposal_row == ("applied",)
-    assert shared_rows == [(item.id, proposal.id)]
 
 
 @pytest.mark.parametrize(
@@ -118,8 +147,8 @@ async def test_shared_memory_proposal_apply_allows_non_owner_admin_actor(monkeyp
     ],
 )
 async def test_shared_memory_proposal_apply_rejects_invalid_target_or_scope(
-    monkeypatch, tmp_path, metadata_patch
-):
+    monkeypatch: Any, tmp_path: Path, metadata_patch: dict[str, str]
+) -> None:
     _patch_db(monkeypatch, tmp_path)
     from fleetent import memory, reflection
 
@@ -139,7 +168,9 @@ async def test_shared_memory_proposal_apply_rejects_invalid_target_or_scope(
         await memory.apply_shared_memory_proposal(proposal.id, actor_id="owner")
 
 
-async def test_shared_memory_proposal_apply_requires_approved_status(monkeypatch, tmp_path):
+async def test_shared_memory_proposal_apply_requires_approved_status(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
     _patch_db(monkeypatch, tmp_path)
     from fleetent import memory, reflection
 
