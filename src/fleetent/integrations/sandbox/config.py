@@ -80,6 +80,9 @@ class SandboxResources:
     network: NetworkPolicy = NetworkPolicy.NONE
     exec_timeout: int = 30
     read_only: bool = True
+    # 内存硬上限（sandbox-memory-hard-limit）：None → --memory-swap 等于 memory（禁 swap，
+    # 内存限制即硬 RAM 上限）；正整数 → memory+swap 总额（MB）。钳制见 client._resource_flags。
+    memory_swap_mb: int | None = None
     # Container hardening (sandbox-container-hardening).
     pids_limit: int = 256
     tmpfs_size_mb: int = 64
@@ -141,6 +144,7 @@ def build_resources_by_scope(path: Path | None = None) -> dict[str, SandboxResou
         memory=_load_positive_int(override, "memory", base.memory),
         cpus=_load_positive_float(override, "cpus", base.cpus),
         network=_load_network(override, base.network),
+        memory_swap_mb=_load_optional_positive_int(override, "memory_swap_mb", base.memory_swap_mb),
         read_only=False,
         cap_add=_AGENT_CAP_ADD,
         run_as_user=None,
@@ -201,6 +205,9 @@ def _resources_from_section(section: dict[str, object] | None) -> SandboxResourc
         network=_load_network(section, defaults.network),
         exec_timeout=_load_exec_timeout(section, defaults.exec_timeout),
         read_only=_load_read_only(section, defaults.read_only),
+        memory_swap_mb=_load_optional_positive_int(
+            section, "memory_swap_mb", defaults.memory_swap_mb
+        ),
         pids_limit=_load_positive_int(section, "pids_limit", defaults.pids_limit),
         tmpfs_size_mb=_load_positive_int(section, "tmpfs_size_mb", defaults.tmpfs_size_mb),
         cap_drop_all=_load_bool(section, "cap_drop_all", defaults.cap_drop_all),
@@ -211,6 +218,24 @@ def _resources_from_section(section: dict[str, object] | None) -> SandboxResourc
 
 
 def _load_positive_int(section: dict[str, object], key: str, default: int) -> int:
+    if key not in section:
+        return default
+    value = section[key]
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        _logger.warn("sandbox_resource_invalid", field=key, value=repr(value), falling_back=default)
+        return default
+    return value
+
+
+def _load_optional_positive_int(
+    section: dict[str, object], key: str, default: int | None
+) -> int | None:
+    """Load an optional positive int; missing → default, invalid → default (with warn).
+
+    Distinct from `_load_positive_int` because the field's default is ``None`` (not an
+    int): absent keeps the inherited default, a present-but-invalid value falls back to
+    it rather than being silently accepted.
+    """
     if key not in section:
         return default
     value = section[key]

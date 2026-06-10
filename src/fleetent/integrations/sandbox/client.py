@@ -88,8 +88,23 @@ class SandboxClient:
         no-new-privileges` shrink the capability surface; `--init` reaps zombies;
         `--user` runs the session tier as a non-root uid. Each is gated by its field
         so an operator can disable any of them.
+
+        Memory hard limit (sandbox-memory-hard-limit): `--memory-swap` is always set so
+        the memory cap is not silently relaxed by Docker's default 2x swap. `None`
+        disables swap (`--memory-swap == --memory`, a hard RAM cap); a configured total
+        is clamped to ``>= memory`` (Docker rejects a smaller swap total) with a warning,
+        so no config combination can fail `docker run`.
         """
         flags = ["--memory", f"{resources.memory}m", "--cpus", str(resources.cpus)]
+        swap = resources.memory if resources.memory_swap_mb is None else resources.memory_swap_mb
+        if swap < resources.memory:
+            _logger.warn(
+                "sandbox_memory_swap_below_memory_clamped",
+                memory_swap_mb=resources.memory_swap_mb,
+                memory=resources.memory,
+            )
+            swap = resources.memory
+        flags += ["--memory-swap", f"{swap}m"]
         if resources.pids_limit:
             flags += ["--pids-limit", str(resources.pids_limit)]
         if resources.cap_drop_all:
