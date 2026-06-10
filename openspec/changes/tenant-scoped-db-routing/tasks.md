@@ -6,8 +6,8 @@
 
 ## 2. KB 关系库的 MIGRATIONS 清单
 
-- [ ] 2.1 写失败测试：空 KB 关系库经 Y 迁移后，表/列/索引等价于现 `knowledge_base/operations.py:ensure_schema()` 的产出，且**含 `tenant_id`/`kb_id` 列**（建库后比对 schema）
-- [ ] 2.2 实现：把现 `ensure_schema()` 的 DDL 原样 lift 成 KB `MIGRATIONS`（v1..vN）放 `knowledge_base/core/`，跑绿 2.1（不改 schema，仅搬迁）
+- [x] 2.1 写失败测试：空 KB 关系库经 Y 迁移后，表/列/索引等价于现 `knowledge_base/operations.py:ensure_schema()` 的产出，且**含 `tenant_id`/`kb_id` 列**（建库后比对 schema）
+- [x] 2.2 实现：把现 `ensure_schema()` 的 DDL 原样 lift 成 KB `MIGRATIONS`（v1..vN）放 `knowledge_base/core/`，跑绿 2.1（不改 schema，仅搬迁）
 
 ## 3. 租户作用域路由 + 可换后端抽象
 
