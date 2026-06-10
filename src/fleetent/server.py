@@ -13,13 +13,13 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from fleetent import agent_config, agent_store, user_store
 from fleetent.auth import seed_builtin_admin
 from fleetent.config import Settings, configure_logging
-from fleetent.cron_scheduler import CronScheduler
 from fleetent.governance.permission_gate import (
     _default_gate,
     cleanup_stale_approvals,
@@ -183,26 +183,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         session_mgr.reset(session_id, keep_turns), loop
     ).result()
 
-    # Best-effort scheduler start: a missing/locked scheduled_tasks table (e.g. an
-    # unmigrated DB) must not prevent the HTTP API from serving, consistent with the
-    # sandbox-cleanup / IM-adapter best-effort pattern above. Surfaced via warning.
-    cron = CronScheduler(settings=agent_config.active_agent_or_default().scheduling)
+    # Platform-maintenance scheduler only (agent-owned-scheduled-tasks): user scheduled
+    # tasks are agent-runtime-owned and fired by each agent process, NOT the platform
+    # server. The platform keeps a bare scheduler purely for its own housekeeping
+    # (expired-playground purge); best-effort so a failure never blocks serving.
+    maint = AsyncIOScheduler()
     try:
-        await cron.start()
-        cron.add_interval_job(
+        maint.add_job(
             _run_playground_retention,
-            _PLAYGROUND_RETENTION_INTERVAL_SECONDS,
-            "playground_retention",
+            trigger="interval",
+            seconds=_PLAYGROUND_RETENTION_INTERVAL_SECONDS,
+            id="playground_retention",
+            replace_existing=True,
         )
+        maint.start()
     except Exception as exc:
-        logger.warning("cron_scheduler_start_failed error=%s", exc)
+        logger.warning("platform_maintenance_scheduler_start_failed error=%s", exc)
 
     yield
 
     try:
-        await cron.shutdown()
+        if maint.running:
+            maint.shutdown(wait=False)
     except Exception as exc:
-        logger.warning("cron_scheduler_shutdown_failed error=%s", exc)
+        logger.warning("platform_maintenance_scheduler_shutdown_failed error=%s", exc)
 
 
 app = FastAPI(title="fleetent", lifespan=lifespan)

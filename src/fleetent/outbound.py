@@ -17,14 +17,40 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
-async def send_to(platform: str, connector: Any, target: str, text: str) -> bool:
-    """Send text to target on platform. Returns True on success, False on any failure."""
+async def send_to(
+    platform: str,
+    connector: Any,
+    target: str,
+    text: str,
+    *,
+    target_type: str = "user",
+    thread: Any = None,
+) -> bool:
+    """Send text to target on platform. Returns True on success, False on any failure.
+
+    ``target_type`` selects DM (``user``) vs a channel/group post (``channel``);
+    ``thread`` optionally threads the message (Slack ``thread_ts`` / Telegram topic).
+    """
     if platform == "slack":
+        if target_type == "channel":
+            return await _slack_send_channel(connector, target, text, thread)
         return await _slack_send_dm(connector, target, text)
     if platform == "telegram":
-        return await _telegram_send(connector, target, text)
+        return await _telegram_send(connector, target, text, thread)
     logger.warning("outbound_unsupported_platform", platform=platform)
     return False
+
+
+async def _slack_send_channel(client: Any, channel: str, text: str, thread: Any = None) -> bool:
+    try:
+        kwargs: dict[str, Any] = {"channel": channel, "text": text}
+        if thread:
+            kwargs["thread_ts"] = thread
+        await client.chat_postMessage(**kwargs)
+        return True
+    except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the caller
+        logger.warning("slack_send_channel_failed", channel=channel, error=str(exc))
+        return False
 
 
 async def is_reachable(platform: str, connector: Any, target: str) -> bool:
@@ -53,9 +79,12 @@ async def _slack_send_dm(client: Any, user_id: str, text: str) -> bool:
         return False
 
 
-async def _telegram_send(bot: Any, chat_id: str, text: str) -> bool:
+async def _telegram_send(bot: Any, chat_id: str, text: str, thread: Any = None) -> bool:
     try:
-        await bot.send_message(chat_id=chat_id, text=text)
+        kwargs: dict[str, Any] = {"chat_id": chat_id, "text": text}
+        if thread:
+            kwargs["message_thread_id"] = thread
+        await bot.send_message(**kwargs)
         return True
     except Exception as exc:  # noqa: BLE001 — outbound failure must not abort the gate
         logger.warning("telegram_send_message_failed", chat_id=chat_id, error=str(exc))

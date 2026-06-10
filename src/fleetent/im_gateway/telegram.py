@@ -147,5 +147,15 @@ async def run(agent_name: str, owner_id: str, config: dict[str, Any]) -> None:
     Per-agent connection status is owned by the connector supervisor, which catches
     errors here and records them per agent. This runner just opens the connection.
     """
+    from fleetent.im_gateway import connector_registry
+
     app = create_app(agent_name, owner_id, config)
-    await _run_polling(app)
+    # Register the live bot so the cron scheduler can deliver fired-task replies to this
+    # agent's Telegram at fire time (resolved per fire, cleared on disconnect).
+    bot = getattr(app, "bot", None)
+    if bot is not None:
+        connector_registry.register("telegram", agent_name, bot)
+    try:
+        await _run_polling(app)
+    finally:
+        connector_registry.unregister("telegram", agent_name)

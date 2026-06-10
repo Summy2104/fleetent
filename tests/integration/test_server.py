@@ -44,50 +44,53 @@ def test_lifespan_loads_plugins(tmp_path, monkeypatch):
     mock_load.assert_called_once()
 
 
-def test_lifespan_starts_and_stops_cron_scheduler(tmp_path, monkeypatch):
-    from unittest.mock import AsyncMock, patch
+def test_lifespan_starts_platform_maintenance_scheduler(tmp_path, monkeypatch):
+    """agent-owned-scheduled-tasks: platform lifespan runs a bare maintenance scheduler
+    (playground retention only) — it no longer loads/fires user scheduled tasks."""
+    from unittest.mock import MagicMock, patch
 
     from starlette.testclient import TestClient
 
     import fleetent.server as srv
 
-    start_mock = AsyncMock()
-    shutdown_mock = AsyncMock()
+    db = tmp_path / "users.db"
+    apply_migrations(db)
+    monkeypatch.setattr(us, "DB_PATH", db)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
 
-    with patch("fleetent.server.CronScheduler") as mock_cls:
-        instance = mock_cls.return_value
-        instance.start = start_mock
-        instance.shutdown = shutdown_mock
+    instance = MagicMock()
+    instance.running = True
+    with (
+        patch("fleetent.server.AsyncIOScheduler", return_value=instance) as mock_cls,
+        TestClient(srv.app),
+    ):
+        pass  # lifespan runs on enter/exit
 
-        with TestClient(srv.app):
-            pass  # lifespan runs on enter/exit
+    mock_cls.assert_called_once()
+    instance.start.assert_called_once()
+    instance.shutdown.assert_called_once()
+    job_ids = {c.kwargs.get("id") for c in instance.add_job.call_args_list}
+    assert "playground_retention" in job_ids
 
-    start_mock.assert_called_once()
-    shutdown_mock.assert_called_once()
 
-
-def test_lifespan_registers_monitoring_collection_job(tmp_path, monkeypatch, isolated_schedule_db):
-    """server lifespan wires a periodic monitoring collect/evaluate job (task 9.1)."""
-    from unittest.mock import AsyncMock, MagicMock, patch
+def test_lifespan_does_not_load_scheduled_tasks(tmp_path, monkeypatch):
+    """The platform server must not touch schedule_store (user tasks are agent-owned)."""
+    from unittest.mock import patch
 
     from starlette.testclient import TestClient
 
+    import fleetent.schedule_store as schedule_store
     import fleetent.server as srv
 
-    with patch("fleetent.server.CronScheduler") as mock_cls:
-        instance = mock_cls.return_value
-        instance.start = AsyncMock()
-        instance.shutdown = AsyncMock()
-        instance.add_interval_job = MagicMock()
+    db = tmp_path / "users.db"
+    apply_migrations(db)
+    monkeypatch.setattr(us, "DB_PATH", db)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
 
-        with TestClient(srv.app):
-            pass
+    with patch.object(schedule_store, "list_tasks") as list_mock, TestClient(srv.app):
+        pass
 
-    job_ids = {
-        c.kwargs.get("job_id", (c.args[2] if len(c.args) > 2 else None))
-        for c in instance.add_interval_job.call_args_list
-    }
-    assert "monitoring_collect" in job_ids
+    list_mock.assert_not_called()
 
 
 # --- agent_store seam wiring (clone/apply persist in production) --------------

@@ -358,35 +358,88 @@ async def run_code(
     return "\n".join(parts) if parts else "(no output)"
 
 
-@tool(risk_level="high")
-def schedule_task(
-    name: str, cron_expr: str, message: str, timezone: str = "UTC", user_id: str = "default"
+@tool(risk_level="low")
+async def schedule(
+    action: str,
+    name: str = "",
+    schedule_kind: str = "cron",
+    cron_expr: str = "",
+    run_at: str = "",
+    interval_seconds: int = 0,
+    message: str = "",
+    timezone: str = "UTC",
+    user_id: str = "default",
+    task_id: str = "",
+    notify_platform: str = "",
+    notify_target: str = "",
+    notify_target_type: str = "user",
 ) -> str:
-    """Create a recurring cron task that runs the agent with the given message.
-    cron_expr is a standard 5-field expression e.g. '0 9 * * 1-5'."""
+    """Manage scheduled tasks. ``action`` is one of create/list/remove/run_now/pause/resume.
+
+    create: schedule_kind=cron (cron_expr like '0 9 * * 1-5'), once (run_at: ISO time or
+    a relative duration like '+30m'), or interval (interval_seconds). The fired reply is
+    delivered to notify_platform/notify_target (target_type user|channel) when given.
+    pause/resume toggle a task; remove deletes it; run_now fires it immediately; list
+    shows all tasks.
+    """
     from fleetent import schedule_store
 
-    task = schedule_store.create(
-        name=name,
-        cron_expr=cron_expr,
-        timezone=timezone,
-        user_id=user_id,
-        agent_name=None,
-        message=message,
-        source="tool",
-    )
-    return f"Scheduled task created: id={task['id']!r} name={name!r} cron={cron_expr!r}"
+    if action == "create":
+        deliver = None
+        if notify_platform and notify_target:
+            deliver = {
+                "mode": "explicit",
+                "platform": notify_platform,
+                "target": notify_target,
+                "target_type": notify_target_type,
+            }
+        task = schedule_store.create(
+            name=name,
+            cron_expr=cron_expr or None,
+            timezone=timezone,
+            user_id=user_id,
+            message=message,
+            source="tool",
+            schedule_kind=schedule_kind,
+            run_at=run_at or None,
+            interval_seconds=interval_seconds or None,
+            deliver=deliver,
+        )
+        return f"Scheduled task created: id={task['id']!r} name={name!r} kind={schedule_kind!r}"
 
+    if action == "list":
+        tasks = schedule_store.list_tasks(include_disabled=True)
+        if not tasks:
+            return "No scheduled tasks"
+        lines = [
+            f"{t['id']} | {t.get('name')} | {t.get('schedule_kind')} | "
+            f"{'enabled' if t.get('enabled') else 'paused'}"
+            for t in tasks
+        ]
+        return "\n".join(lines)
 
-@tool(risk_level="medium")
-def cancel_task(task_id: str) -> str:
-    """Cancel a scheduled cron task by its id."""
-    from fleetent import schedule_store
+    if action == "remove":
+        deleted = schedule_store.delete(task_id)
+        if not deleted:
+            return f"error: task {task_id!r} not found"
+        return f"Scheduled task {task_id!r} removed"
 
-    deleted = schedule_store.delete(task_id)
-    if not deleted:
-        return f"error: task {task_id!r} not found"
-    return f"Scheduled task {task_id!r} removed"
+    if action in ("pause", "resume"):
+        matched = schedule_store.set_enabled(task_id, action == "resume")
+        if not matched:
+            return f"error: task {task_id!r} not found"
+        return f"Scheduled task {task_id!r} {action}d"
+
+    if action == "run_now":
+        from fleetent import cron_scheduler
+
+        existing = schedule_store.get(task_id)
+        if existing is None:
+            return f"error: task {task_id!r} not found"
+        await cron_scheduler._fire(existing)
+        return f"Scheduled task {task_id!r} fired"
+
+    return f"error: unknown action {action!r} (use create/list/remove/run_now/pause/resume)"
 
 
 @tool(risk_level="low")

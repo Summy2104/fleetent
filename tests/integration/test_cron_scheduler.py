@@ -225,3 +225,212 @@ async def test_start_uses_default_timezone_when_task_has_none(monkeypatch, isola
     assert str(job.trigger.timezone) == "Asia/Shanghai"
 
     await scheduler.shutdown()
+
+
+# ── schedule kinds: cron / once / interval (agent-owned-scheduled-tasks) ──────
+
+
+async def test_register_once_uses_date_trigger(isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+    scheduler.add_job(
+        {
+            "id": "once-1",
+            "name": "t",
+            "schedule_kind": "once",
+            "run_at": "2099-01-01T00:00:00",
+            "timezone": "UTC",
+            "user_id": "u-1",
+            "message": "ping",
+            "enabled": 1,
+            "source": "tool",
+        }
+    )
+    job = scheduler.get_job("once-1")
+    assert job is not None
+    assert type(job.trigger).__name__ == "DateTrigger"
+    await scheduler.shutdown()
+
+
+async def test_register_interval_uses_interval_trigger(isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+    scheduler.add_job(
+        {
+            "id": "iv-1",
+            "name": "t",
+            "schedule_kind": "interval",
+            "interval_seconds": 5400,
+            "timezone": "UTC",
+            "user_id": "u-1",
+            "message": "ping",
+            "enabled": 1,
+            "source": "tool",
+        }
+    )
+    job = scheduler.get_job("iv-1")
+    assert job is not None
+    assert type(job.trigger).__name__ == "IntervalTrigger"
+    await scheduler.shutdown()
+
+
+async def test_agent_task_job_has_misfire_params(isolated_schedule_db):
+    import fleetent.cron_scheduler as cs
+
+    scheduler = cs.CronScheduler()
+    await scheduler.start()
+    scheduler.add_job(
+        {
+            "id": "mp-1",
+            "name": "t",
+            "schedule_kind": "cron",
+            "cron_expr": "0 9 * * *",
+            "timezone": "UTC",
+            "user_id": "u-1",
+            "message": "ping",
+            "enabled": 1,
+            "source": "tool",
+        }
+    )
+    job = scheduler.get_job("mp-1")
+    assert job is not None
+    assert job.coalesce is True
+    assert job.misfire_grace_time and job.misfire_grace_time > 0
+    assert job.max_instances == 1
+    await scheduler.shutdown()
+
+
+def test_parse_run_at_accepts_relative_duration():
+    import datetime
+
+    import fleetent.cron_scheduler as cs
+
+    before = datetime.datetime.now(datetime.UTC)
+    dt = cs._parse_run_at("+30m")
+    delta = (dt - before).total_seconds()
+    assert 29 * 60 <= delta <= 31 * 60
+
+
+def test_parse_run_at_accepts_iso_timestamp():
+    import fleetent.cron_scheduler as cs
+
+    dt = cs._parse_run_at("2099-01-01T00:00:00")
+    assert dt.year == 2099 and dt.month == 1 and dt.day == 1
+
+
+# ── fire-time delivery (scheduled-task-delivery) ──────────────────────────────
+
+
+async def test_fire_delivers_reply_to_origin(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="your standup is at 9"))
+    send = AsyncMock(return_value=True)
+    monkeypatch.setattr(cs.outbound, "send_to", send)
+    monkeypatch.setattr(cs._store, "update_run_state", lambda *a, **k: None)
+
+    task = {
+        "id": "d1",
+        "message": "remind standup",
+        "user_id": "u-1",
+        "session_id": None,
+        "origin": {"platform": "slack", "chat_id": "U123"},
+        "deliver": None,
+    }
+    conn = object()
+    await cs._fire(task, connectors={"slack": conn})
+
+    send.assert_awaited_once()
+    args, kwargs = send.call_args
+    assert args[0] == "slack" and args[1] is conn and args[2] == "U123"
+    assert args[3] == "your standup is at 9"
+    assert kwargs.get("target_type") == "user"
+
+
+async def test_fire_explicit_deliver_to_channel(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="daily report"))
+    send = AsyncMock(return_value=True)
+    monkeypatch.setattr(cs.outbound, "send_to", send)
+    monkeypatch.setattr(cs._store, "update_run_state", lambda *a, **k: None)
+
+    task = {
+        "id": "d2",
+        "message": "report",
+        "user_id": "u-1",
+        "session_id": None,
+        "origin": {"platform": "slack", "chat_id": "U123"},
+        "deliver": {
+            "mode": "explicit",
+            "platform": "slack",
+            "target": "C999",
+            "target_type": "channel",
+        },
+    }
+    await cs._fire(task, connectors={"slack": object()})
+
+    args, kwargs = send.call_args
+    assert args[2] == "C999"
+    assert kwargs.get("target_type") == "channel"
+
+
+async def test_fire_silent_reply_suppresses_delivery(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="[SILENT]"))
+    send = AsyncMock(return_value=True)
+    monkeypatch.setattr(cs.outbound, "send_to", send)
+    statuses = []
+    monkeypatch.setattr(
+        cs._store, "update_run_state", lambda tid, **k: statuses.append(k.get("last_status"))
+    )
+
+    task = {
+        "id": "d3",
+        "message": "check changes",
+        "user_id": "u-1",
+        "session_id": None,
+        "origin": {"platform": "slack", "chat_id": "U123"},
+    }
+    await cs._fire(task, connectors={"slack": object()})
+
+    send.assert_not_awaited()
+    assert statuses == ["ok"]
+
+
+async def test_fire_missing_connector_records_error(tmp_path, monkeypatch):
+    import fleetent.cron_scheduler as cs
+    import fleetent.session.manager as session_mgr
+
+    monkeypatch.setattr(session_mgr, "SESSIONS_DIR", tmp_path / "sessions")
+    monkeypatch.setattr(cs, "_agent_run", AsyncMock(return_value="hi"))
+    captured = {}
+    monkeypatch.setattr(
+        cs._store,
+        "update_run_state",
+        lambda tid, **k: captured.update(k),
+    )
+
+    task = {
+        "id": "d4",
+        "message": "ping",
+        "user_id": "u-1",
+        "session_id": None,
+        "origin": {"platform": "telegram", "chat_id": "555"},
+    }
+    # No telegram connector available at fire time.
+    await cs._fire(task, connectors={})
+
+    assert captured.get("last_status") == "error"
+    assert "connector" in (captured.get("last_error") or "")

@@ -53,11 +53,14 @@ class AgentRuntime:
     telegram_supervisor: TelegramSupervisor | None = None
     app: FastAPI | None = None
     port: int | None = None
+    scheduler: Any = None
 
     async def stop(self) -> None:
         await self.supervisor.stop_all()
         if self.telegram_supervisor is not None:
             await self.telegram_supervisor.stop_all()
+        if self.scheduler is not None:
+            await self.scheduler.shutdown()
 
 
 def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
@@ -152,7 +155,7 @@ def _init_agent_db_schema(database_url: str) -> None:
     Called once at boot after DATABASE_URL is redirected to the per-agent path.
     Each store's ensure_schema is idempotent; repeated calls are safe.
     """
-    from fleetent import reflection
+    from fleetent import reflection, schedule_store
     from fleetent.db import create_database
     from fleetent.knowledge_base import operations as kb_ops
     from fleetent.memory import store as memory_store
@@ -165,6 +168,7 @@ def _init_agent_db_schema(database_url: str) -> None:
     reflection.ensure_schema(db)
     kb_ops.ensure_schema(db)
     session_index.ensure_schema(db)
+    schedule_store.ensure_schema(db)
 
 
 async def _start_infra(agent: AgentFile) -> None:
@@ -232,6 +236,27 @@ async def _start_infra(agent: AgentFile) -> None:
         _logger.warn("session_resume_scan_failed", error=str(exc))
 
 
+async def _start_scheduler(agent: AgentFile) -> Any:
+    """Start this agent's CronScheduler (agent-owned-scheduled-tasks), or None if disabled.
+
+    Delivery connectors are resolved at fire time from the per-process connector
+    registry the IM adapters populate, so a task fired after a connector connects (or
+    reconnects) still reaches the user.
+    """
+    if not agent.scheduling.enabled:
+        return None
+    from fleetent.cron_scheduler import CronScheduler
+    from fleetent.im_gateway import connector_registry
+
+    agent_name = agent.name
+    scheduler = CronScheduler(
+        settings=agent.scheduling,
+        connectors_resolver=lambda: connector_registry.snapshot(agent_name),
+    )
+    await scheduler.start()
+    return scheduler
+
+
 async def boot(
     agent_id: str,
     *,
@@ -286,6 +311,8 @@ async def boot(
         await supervisor.start(agent.name)
         await telegram_supervisor.start(agent.name)
 
+    scheduler = await _start_scheduler(agent) if with_infra else None
+
     app = build_app(agent.name) if port is not None else None
     _logger.info("agent_runtime_booted", agent=agent.name, http_port=port, im=start_im)
     return AgentRuntime(
@@ -294,6 +321,7 @@ async def boot(
         telegram_supervisor=telegram_supervisor,
         app=app,
         port=port,
+        scheduler=scheduler,
     )
 
 
