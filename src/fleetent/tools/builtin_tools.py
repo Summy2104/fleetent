@@ -358,6 +358,27 @@ async def run_code(
     return "\n".join(parts) if parts else "(no output)"
 
 
+def _origin_from_context(tool_context: ToolContext | None) -> dict[str, str | None] | None:
+    """Build a scheduled-task `origin` from the inbound IM context, or None.
+
+    Captures the creation chat so a fired reminder defaults back to where it was
+    created (delivery resolves `origin` when no explicit `deliver` is set). The
+    chat id is the connector's channel id (Slack channel/DM id, Telegram chat id),
+    posted back via the channel path so the original thread is preserved.
+    """
+    sc = getattr(tool_context, "session_context", None) if tool_context else None
+    platform = getattr(sc, "platform", None) if sc else None
+    chat_id = getattr(sc, "channel_name", None) if sc else None
+    if not platform or not chat_id:
+        return None
+    return {
+        "platform": platform,
+        "chat_id": chat_id,
+        "target_type": "channel",
+        "thread_id": getattr(sc, "thread_root", None) or None,
+    }
+
+
 @tool(risk_level="low")
 async def schedule(
     action: str,
@@ -373,14 +394,15 @@ async def schedule(
     notify_platform: str = "",
     notify_target: str = "",
     notify_target_type: str = "user",
+    tool_context: ToolContext | None = None,
 ) -> str:
     """Manage scheduled tasks. ``action`` is one of create/list/remove/run_now/pause/resume.
 
     create: schedule_kind=cron (cron_expr like '0 9 * * 1-5'), once (run_at: ISO time or
     a relative duration like '+30m'), or interval (interval_seconds). The fired reply is
-    delivered to notify_platform/notify_target (target_type user|channel) when given.
-    pause/resume toggle a task; remove deletes it; run_now fires it immediately; list
-    shows all tasks.
+    delivered to notify_platform/notify_target (target_type user|channel) when given;
+    otherwise it defaults back to the chat/thread the task was created in. pause/resume
+    toggle a task; remove deletes it; run_now fires it immediately; list shows all tasks.
     """
     from fleetent import schedule_store
 
@@ -393,6 +415,7 @@ async def schedule(
                 "target": notify_target,
                 "target_type": notify_target_type,
             }
+        origin = _origin_from_context(tool_context)
         task = schedule_store.create(
             name=name,
             cron_expr=cron_expr or None,
@@ -403,6 +426,7 @@ async def schedule(
             schedule_kind=schedule_kind,
             run_at=run_at or None,
             interval_seconds=interval_seconds or None,
+            origin=origin,
             deliver=deliver,
         )
         return f"Scheduled task created: id={task['id']!r} name={name!r} kind={schedule_kind!r}"
