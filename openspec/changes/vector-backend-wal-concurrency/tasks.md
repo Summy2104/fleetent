@@ -5,5 +5,5 @@
 
 ## 2. 回归与收尾
 
-- [ ] 2.1 跑既有 vector_store 单测/集成确认行为不变；`tmp_path` 隔离不受 sidecar 影响
-- [ ] 2.2 `make test-pr` 全绿 + `uv run pytest tests/integration -q` 对照 main 基线无新增失败 + `openspec validate vector-backend-wal-concurrency --strict`
+- [x] 2.1 跑既有 vector_store 单测/集成确认行为不变；`tmp_path` 隔离不受 sidecar 影响
+- [x] 2.2 `make test-pr` 全绿 + `uv run pytest tests/integration -q` 对照 main 基线无新增失败 + `openspec validate vector-backend-wal-concurrency --strict`
