@@ -74,7 +74,7 @@ async def test_output_transform_rewrites_final_reply(mock_client):
 
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("hello world"))
     governance = GovernanceConfig(hooks_enabled=True)
-    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, user_id="u")
+    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, principal=None)
     assert result == "HELLO WORLD"
 
 
@@ -85,7 +85,7 @@ async def test_output_transform_none_keeps_original(mock_client):
 
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("unchanged"))
     governance = GovernanceConfig(hooks_enabled=True)
-    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, user_id="u")
+    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, principal=None)
     assert result == "unchanged"
 
 
@@ -96,5 +96,5 @@ async def test_output_transform_disabled_no_effect(mock_client):
 
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("hello world"))
     governance = GovernanceConfig(hooks_enabled=False)
-    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, user_id="u")
+    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, principal=None)
     assert result == "hello world"

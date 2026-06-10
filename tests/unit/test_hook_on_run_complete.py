@@ -72,7 +72,7 @@ async def test_on_run_complete_called_with_reply(mock_client):
 
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("final answer"))
     governance = GovernanceConfig(hooks_enabled=True)
-    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, user_id="u")
+    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, principal=None)
     assert result == "final answer"
     assert len(observed) == 1
     assert observed[0]["reply"] == "final answer"
@@ -85,7 +85,7 @@ async def test_on_run_complete_return_does_not_affect_reply(mock_client):
 
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("original"))
     governance = GovernanceConfig(hooks_enabled=True)
-    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, user_id="u")
+    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, principal=None)
     assert result == "original"
 
 
@@ -99,5 +99,5 @@ async def test_on_run_complete_disabled_not_called(mock_client):
 
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("reply"))
     governance = GovernanceConfig(hooks_enabled=False)
-    await loop.run([{"role": "user", "content": "hi"}], governance=governance, user_id="u")
+    await loop.run([{"role": "user", "content": "hi"}], governance=governance, principal=None)
     assert called == []

@@ -149,7 +149,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from fleetent.runtime.snapshot import _governance_from_file
 
         af = agent_config.current().get(agent_name) if agent_name else None
-        kwargs: dict[str, Any] = {"user_id": "playground", "session_id": session_id}
+        kwargs: dict[str, Any] = {
+            "principal": Principal(user_id="playground", tenant_id="default"),
+            "session_id": session_id,
+        }
         if af is not None:
             kwargs["system_prompt"] = af.system_prompt
             kwargs["allowed_tools"] = af.allowed_tools + expand_plugin_patterns(af.plugins)

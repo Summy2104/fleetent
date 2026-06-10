@@ -8,6 +8,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from fleetent.identity import Principal
 from fleetent.runtime import sub_agent_lifecycle
 from fleetent.runtime.cancellation import CancelToken
 from fleetent.runtime.sub_agent_lifecycle import SubAgentLifecycle, SubAgentState
@@ -32,7 +33,7 @@ class SubAgentExecutor:
     async def run(
         self,
         tasks: list[dict[str, str]],
-        parent_user_id: str,
+        parent_principal: Principal | None,
         parent_agent_id: int | None,
         parent_session_id: str,
         *,
@@ -45,7 +46,7 @@ class SubAgentExecutor:
         coros = [
             self._run_one(
                 task,
-                parent_user_id,
+                parent_principal,
                 parent_agent_id,
                 parent_session_id,
                 effective_timeout,
@@ -58,7 +59,7 @@ class SubAgentExecutor:
     async def _run_one(
         self,
         task: dict[str, str],
-        parent_user_id: str,
+        parent_principal: Principal | None,
         parent_agent_id: int | None,
         parent_session_id: str,
         timeout_seconds: int,
@@ -99,7 +100,7 @@ class SubAgentExecutor:
         try:
             result = await agent_loop.run(
                 messages=[{"role": "user", "content": prompt}],
-                user_id=parent_user_id,
+                principal=parent_principal,
                 is_sub_agent=True,
                 cancel_token=child,
             )
