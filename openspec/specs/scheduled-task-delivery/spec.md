@@ -1,4 +1,9 @@
-## ADDED Requirements
+# scheduled-task-delivery Specification
+
+## Purpose
+Proactive delivery of a fired scheduled task's reply to a resolved IM target — the explicit `deliver` descriptor or, by default, the creation `origin` (auto-captured from the IM context) — using the agent's own live connectors, best-effort and `[SILENT]`-suppressible.
+
+## Requirements
 
 ### Requirement: Fired task output delivered to the user
 When a scheduled task fires, the system SHALL run the agent and then proactively deliver the agent's final reply to a resolved IM target, so the user receives the reminder without polling. Delivery SHALL use the agent's own live IM connectors (no platform dependency) and SHALL be best-effort: a delivery failure SHALL be recorded (`last_error`/`last_status`) and MUST NOT crash the fire.
@@ -12,11 +17,19 @@ When a scheduled task fires, the system SHALL run the agent and then proactively
 - **THEN** the failure is recorded on the task and the fire completes without raising
 
 ### Requirement: Delivery target resolved at fire time
-The delivery target SHALL be resolved at fire time, not bound at creation time. Each task SHALL store an `origin` descriptor capturing its creation context (platform, chat_id, optional thread_id) and an optional explicit `deliver` descriptor (`mode` = `origin`/`explicit`/`none`, plus platform/target/target_type/thread for `explicit`). When `deliver` is absent or `mode="origin"`, delivery SHALL go back to the `origin` context.
+The delivery target SHALL be resolved at fire time, not bound at creation time. Each task SHALL store an `origin` descriptor capturing its creation context (platform, chat_id, optional thread_id) and an optional explicit `deliver` descriptor (`mode` = `origin`/`explicit`/`none`, plus platform/target/target_type/thread for `explicit`). When `deliver` is absent or `mode="origin"`, delivery SHALL go back to the `origin` context. When a task is created via the `schedule` tool from an IM conversation, the `origin` SHALL be auto-captured from the inbound IM context (the tool context's session metadata: platform, channel/chat id, thread); when there is no IM context (e.g. a non-IM caller), `origin` SHALL be absent.
 
 #### Scenario: Default delivery to stored origin
 - **WHEN** a task with a stored `origin` (platform/chat_id) fires and has no explicit `deliver`
 - **THEN** the reply is delivered back to that origin platform/chat/thread
+
+#### Scenario: Origin auto-captured from the creating IM conversation
+- **WHEN** a task is created via the `schedule` tool from an IM conversation and no explicit `notify_*` target is given
+- **THEN** the task's `origin` is auto-filled from the inbound context (platform, chat id, thread) so a later fire delivers back to that conversation
+
+#### Scenario: No origin captured without IM context
+- **WHEN** a task is created via the `schedule` tool with no inbound IM context (no session metadata)
+- **THEN** the task is stored with no `origin`, and a fire without an explicit `deliver` performs no delivery
 
 #### Scenario: Connector resolved at fire time, not creation time
 - **WHEN** the IM connector for the target platform was not yet connected when the task was created but is live at fire time
