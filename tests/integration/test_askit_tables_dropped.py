@@ -72,10 +72,10 @@ def test_roundtrip_upgrade_downgrade_upgrade(tmp_path):
 
 
 def test_downgrade_restores_askit_tables(tmp_path):
-    """After downgrade -1 from head, askit tables MUST exist (downgrade reconstructs them)."""
+    """Downgrading below the drop migration (064) MUST reconstruct the askit tables."""
     db = tmp_path / "downgrade.db"
     _upgrade(db)
-    _downgrade(db, "-1")
+    _downgrade(db, "063")
     tables = _tables(db)
     assert _ASKIT_TABLES <= tables, (
         f"downgrade did not restore askit tables; missing: {_ASKIT_TABLES - tables}"

@@ -105,10 +105,10 @@ def test_roundtrip_upgrade_downgrade_upgrade(tmp_path):
 
 
 def test_downgrade_restores_quota_tables(tmp_path):
-    """After downgrade -1 from head, quota tables MUST exist (downgrade recreates them)."""
+    """Downgrading below the drop migration (065) MUST recreate the quota tables."""
     db = tmp_path / "downgrade.db"
     _upgrade(db)
-    _downgrade(db, "-1")
+    _downgrade(db, "064")
     tables = _tables(db)
     assert _QUOTA_TABLES <= tables, (
         f"downgrade did not restore quota tables; missing: {_QUOTA_TABLES - tables}"
