@@ -25,7 +25,6 @@ def client(tmp_path, monkeypatch):
     for mod in (user_store, audit):
         monkeypatch.setattr(mod, "DB_PATH", db_path)
     user_store._init_db()
-    audit._init_db()
     monkeypatch.setattr(api, "load_transcript", lambda sid: [])
     monkeypatch.setattr(api, "clear_session", lambda sid: None)
     monkeypatch.setattr(api, "inject", lambda sid, role, content: None)

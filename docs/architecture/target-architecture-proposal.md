@@ -148,33 +148,81 @@ flowchart TB
 
 ## 6. 身份与认证（identity & auth）
 
-> **结论：内置模块，不做独立服务；authn 下沉为基座端口，user 管理留在 ②。**
+> **结论：认证(authn)属 edge，核只消费已解析的 `Principal`、自己从不认证；authn 实现按部署可插拔(基座 `Identity` 端口)；user 管理留 ②；一切身份落到 User。**（2026-06-10 讨论细化,取代早先"核 import 端口"的框架。）
 
-「用户体系」其实是两件性质相反的事，分两处放：
+### 6.1 核心原则:一切是 User;认证在 edge、不在核
+
+- **一切落 User**：不分"人 principal / 服务 principal"——服务账号就是"为服务建的、用 key 认证的 user"。`Principal` 携带的就是一个 user 引用。**凭证 ≠ 身份**:`api_key` / `session` / `Slack 用户id` 是**凭证**,解析后得到 `user_id` 才是**身份**。
+- **认证是 edge 的事**:每个入口(`im_gateway`、`/chat`、`/ws`)各用自己方式确立身份 → 递进核一个**已解析的 `Principal`**;**核从不认证、只消费**。这把"核调 `user_store.authenticate`(耦合 platform)= #1 泄漏"从根拆掉。
 
 | 关注点 | 是什么 | 归属 |
 |---|---|---|
-| **authn（核验）** | `凭证 → principal 或拒绝`；核服务 /chat /ws 必须有、且要脱离 platform | **基座的 `Identity` 端口** |
-| **user/key/角色管理** | 建用户、签发/吊销 key、封禁（自助**邀请 v1 砍**，见 §5.8） | **② 控制面** CRUD |
-| **per-user 配额/封禁** | 运行时策略 | 横切治理（基座侧策略数据） |
+| **authn(核验)** | `凭证 → Principal 或拒绝` | **edge 调用基座 `Identity` 端口** |
+| **user/key/角色管理** | 建用户、签发/吊销 key、封禁(自助注册/邀请 v1 砍,§5.8) | **② 控制面** CRUD |
+| **运行时策略** | blocklist 拦截(quota 已 descope,§5.8) | 横切治理(基座策略数据) |
 
-**为何不做独立服务**：外部 SaaS 身份违反数据主权；自托管独立进程的运维负担违背 lean；企业客户多半自带 IdP（LDAP/AD/OIDC），自建反而和客户身份系统冲突。正解是**依赖反转**——核定义 `Identity` 端口，多种实现作适配器接入。
+### 6.2 Principal 怎么得到(4 条路,终点都是 User;system 例外)
 
-**端口与适配器**：
-- **单机 agent**：最小本地实现（env / static token，如现 `_validate_tui_token`）。
-- **platform**：完整实现（api_keys 表、角色、吊销）。
-- **企业 / 外部登录**：**OIDC 适配器，首发 Google**（Google 是认证过的 OIDC Provider）；同一适配器天然覆盖 Okta / Azure AD / Keycloak。主权要求严格的客户改挂内网 IdP（自托管 Keycloak / 客户 AD），**端口不变**。
+- **① 验活凭证(2 个解析器)**:`bearer token → user`(API key `ma-` 与登录 session **同类合一**)；`渠道担保 → user`(IM:`(platform,platform_user_id)` → 内部 user 映射,信任渠道、无密钥)。
+- **② 继承**:sub-agent / 回合内内部调用(压缩/记忆抽取/反思)← 父/会话已解析的 Principal,不重认。
+- **③ 存档复检**:cron ← `scheduled_tasks.user_id`(创建时存),触发时 load + **复检状态**(可能已封/删/移出主体)。
+- **④ 纯基础设施**(session TTL 清理 / KB sync,无人类 owner)→ 显式 `system` 标识,**不冒充 user**、不走此模型(审计如实记 system)。
+- OIDC/Google 折进 ①(验完发 session 或当 bearer 验),不新增第三种。
 
-**两类凭证、一个出口**：`Identity` 端口统一解析二者，返回统一 principal。
+### 6.3 Principal 契约
+
+```
+Principal { user_id, tenant_id }
+```
+- **`user_id`**:内部 user id(与 `memory_items.user_id` 等同值);核用它 scope 记忆/会话。
+- **`tenant_id`**:主体;核用它路由到该主体的物理库(§5.7);单机 = `default`。
+- **刻意精瘦**:`role` / 密码 / `scopes` / `display_name` 挡在端口外(edge/governance/platform 的事);**不带 team**——共享记忆/KB/审批都走 **agent 的归属 team**(配置),不需要请求者的 team(见 §6.5)。字段名沿用全库惯例(`user_id`/`tenant_id`),不用裸 `id`。
+
+**`Principal`(请求者) ≠ `AgentContextIdentity`(运行的 agent)** —— 核运行时同时握两个身份对象,别混:
+
+| 对象 | 是谁 | 字段 | 来源 |
+|---|---|---|---|
+| `Principal` | 请求者(谁在问) | `{ user_id, tenant_id }` | edge 从凭证解析 |
+| `AgentContextIdentity` | 运行的 agent | `{ agent_id, tenant_id, team_id }` | agent 配置/定义 |
+
+- **`team_id` 只在 `AgentContextIdentity`**(= **agent 的归属 team**,驱动共享记忆 team-scope);**用户的 team 不带**——所以 "Principal 不带 team" 与 `long_term_ctx` 用 `AgentContextIdentity.team_id` **不冲突**(那是 agent 的 team)。
+- **两个 `tenant_id`**:edge 校验 `Principal.tenant_id == agent 主体`(**跨主体不许访问**);核**物理路由按 agent 的主体**开库(经校验后二者相等)。Principal 留 `tenant_id` 供 edge 校验 + 审计 + 防御性核对。
+
+### 6.4 一条流程(Slack 消息)
+
+```
+1. 到 edge     im_gateway 收到 Slack(U123) 消息
+2. 解析身份     (slack,U123) → user_id  → Principal{user_id, tenant_id=连接器的主体}
+3. 访问控制     该 user 能用此 agent?(查绑定/allowlist,用到"人的 team")  ← 人的 team 在 edge 用掉、不进核
+4. 递进核       loop.run(principal, message)
+5. 核运行       principal.user_id → scope 记忆/会话;tenant_id → 路由库;agent 配置的归属 team → 共享记忆桶
+```
+
+### 6.5 审批人解析(归属 team/主体,materialize 进配置)
+
+agent 可被**多个 team 的人使用**,但对它的**共享记忆/KB/高危工具审批**,归 **agent 归属 team 的审批人**(非请求者的 team)。解析链:
+
+```
+agent.team_id 的审批人  ──无──►  tenant(主体) 的审批人  ──无──►  on_no_approver: reject(default-closed)
+```
+- 需 org 字段:**`teams.approver_user_id`、`tenants.approver_user_id`**(§5.7)。
+- **部署/materialize 时**沿链解析出审批人(IM 地址)写进 agent.yaml 的 `approval` 块;核运行**只读配置**、不实时查 org 表(保解耦)。默认=归属 team/主体审批人,config 可覆盖成多人 + `any/all`(R1)。
+
+### 6.6 端口与适配器(实现按部署"插")
+
+- **单机 agent**:最小本地实现(env / static token,如现 `_validate_tui_token`)——无 platform。
+- **platform**:完整实现(api_keys 表、角色、吊销)。
+- **企业/外部登录**:**OIDC 适配器,首发 Google**;同一适配器覆盖 Okta / Azure AD / Keycloak;严格内网客户改挂内网 IdP(Keycloak / 客户 AD),**端口不变**。
 
 | 凭证 | 谁用 | 解析 |
 |---|---|---|
-| OIDC `id_token`(JWT) | 人（登录 / 控制台） | OIDC 适配器验签 |
-| API key(`ma-`) | 服务间 · IM · TUI · cron | 本地 key store |
+| bearer token(`ma-` key / 登录 session) | 服务 · IM 回执 · TUI · cron / 控制台登录 | 本地 token store → user |
+| 渠道担保(IM 平台用户 id) | IM 终端用户 | im_users 映射 → user |
+| OIDC `id_token`(将来) | 人(企业登录) | OIDC 适配器验签 →(发 session) |
 
-**这结构性修掉 #1**：核只 import `Identity` 端口，**永不** import platform 的 user 管理——standalone agent 鉴权不再反向够进 platform，泄漏从根消失（不是打补丁）。
+**修掉 #1**:核只依赖 `Principal` 类型 + 基座 `Identity` 端口,**永不** import platform 的 user 管理——standalone agent 鉴权不再够进 platform,泄漏从根消失(不是打补丁)。
 
-> 主权注记：Google OIDC 登录流需联通 `accounts.google.com`、身份/邮箱经过 Google。当前 pilot 客户**接受外部登录**，故首发 Google；气隙 / 严格内网客户改挂内网 IdP。
+> 主权注记:Google OIDC 登录流需联通 `accounts.google.com`、身份/邮箱经过 Google。当前 pilot 客户**接受外部登录**,故首发 Google;气隙 / 严格内网客户改挂内网 IdP。
 
 ---
 
@@ -236,7 +284,7 @@ flowchart TB
 - **governance / reflection 拆分**（§5 两节）：**能力本体/运行时执行→核**、**管理/审批/review API→②**、**审计/策略/建议数据→基座**（核写、②只读，不反向写 platform 表）。沿用 CLAUDE.md「审批门≠归控制面」与「自进化纵向元能力」判据。
 - **多租户物理隔离**（data-model.md §5.7，2026-06-09）：`tenant`=主体实体；各层（per-agent 运行库 / 共享记忆库 / KB 库）**按主体物理分区**；管理库单库跨主体注册中心；Identity 端口解析后的 `principal` 携带 `tenant_id`（从 `users.tenant_id` + `team_members` 解析）。
 - **持久层执行 roadmap**（data-model.md §6）：persistence-hygiene（✅已完成）→ 审批重设计(A) + 管理表收编(#2) → 五库物理分离(#3，吸收 R2 全部拓扑) → Identity 端口(#4)；串行推进，各期 detailed spec 即时生成。
-- **v1 实体减法**（data-model.md §5.8，2026-06-09）：**砍** askit/KB 死代码(`dead-schema-cleanup`)、`invites`+2FA(`trim-user-auth`)；**descope** `quotas`/`quota_usage`(`descope-quota`)；**外置** 自建 fleet 监控 → Prometheus/Grafana(`externalize-monitoring`)；**保留** 知识图谱/自进化;**defer** `connectors.agent_id`。对本提案的影响:`resource_monitoring` 不入基座而整体外置;`governance` 执行门去掉 `quota`(留 blocklist)；②用户管理去掉自助邀请。
+- **v1 实体减法**（data-model.md §5.8，2026-06-09，**4 个 change 均 ✅ 已合并 main，迁移 063-066**）：**砍** askit/KB 死代码(`dead-schema-cleanup`)、`invites`+2FA(`trim-user-auth`)；**descope** `quotas`/`quota_usage`(`descope-quota`)；**外置** 自建 fleet 监控 → Prometheus/Grafana(`externalize-monitoring`)；**保留** 知识图谱/自进化;**defer** `connectors.agent_id`。对本提案的影响:`resource_monitoring` 不入基座而整体外置;`governance` 执行门去掉 `quota`(留 blocklist)；②用户管理去掉自助邀请。
 
 ### 仍待讨论
 1. **模块迁移顺序**（本提案范围）：先拆巨型文件（正交、低风险）还是先立面边界（结构优先）？注：DB 层执行顺序已在 data-model.md §6 独立锁定，与本问题正交。

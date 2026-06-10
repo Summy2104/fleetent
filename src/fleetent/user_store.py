@@ -23,12 +23,15 @@ class User:
     status: str = "active"
     must_reset: int = 0
     password_hash: str | None = None
+    tenant_id: str = "default"
 
 
-_FULL_COLS = "id, name, api_key, created_at, email, role, status, must_reset, password_hash"
+_FULL_COLS = (
+    "id, name, api_key, created_at, email, role, status, must_reset, password_hash, tenant_id"
+)
 
 
-def create_user(name: str, email: str | None = None) -> User:
+def create_user(name: str, email: str | None = None, tenant_id: str = "default") -> User:
     """Create a new user with a generated uuid and API key."""
     _init_db()
     user = User(
@@ -37,11 +40,13 @@ def create_user(name: str, email: str | None = None) -> User:
         api_key=f"ma-{secrets.token_hex(32)}",
         created_at=datetime.datetime.now(datetime.UTC).isoformat(),
         email=email,
+        tenant_id=tenant_id,
     )
     with _conn() as conn:
         conn.execute(
-            "INSERT INTO users (id, name, api_key, created_at, email) VALUES (?, ?, ?, ?, ?)",
-            (user.id, user.name, user.api_key, user.created_at, user.email),
+            "INSERT INTO users (id, name, api_key, created_at, email, tenant_id)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (user.id, user.name, user.api_key, user.created_at, user.email, user.tenant_id),
         )
     return user
 
@@ -93,7 +98,6 @@ def migrate_api_keys() -> list[str]:
     from fleetent.platform.user_management import api_key_store
 
     _init_db()
-    api_key_store._init_db()
     moved: list[str] = []
     with _conn() as conn:
         users = conn.execute("SELECT id, api_key FROM users WHERE api_key IS NOT NULL").fetchall()
@@ -300,26 +304,7 @@ def _conn() -> sqlite3.Connection:
     return sqlite3.connect(DB_PATH)
 
 
-_EXTRA_COLUMNS = (
-    ("email", "TEXT"),
-    ("password_hash", "TEXT"),
-    ("role", "TEXT NOT NULL DEFAULT 'viewer'"),
-    ("status", "TEXT NOT NULL DEFAULT 'active'"),
-    ("must_reset", "INTEGER NOT NULL DEFAULT 0"),
-)
-
-
 def _init_db() -> None:
-    with _conn() as conn:
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS users (
-                id         TEXT PRIMARY KEY,
-                name       TEXT NOT NULL,
-                api_key    TEXT UNIQUE NOT NULL,
-                created_at TEXT NOT NULL
-            )"""
-        )
-        existing = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
-        for column, decl in _EXTRA_COLUMNS:
-            if column not in existing:
-                conn.execute(f"ALTER TABLE users ADD COLUMN {column} {decl}")
+    # users table is now managed by Alembic (migration 068+).
+    # Deployments must run `alembic upgrade head` before starting the application.
+    pass

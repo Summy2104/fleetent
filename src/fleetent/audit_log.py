@@ -23,7 +23,6 @@ def write_audit(
     detail: dict[str, Any] | None = None,
     batch_id: str | None = None,
 ) -> None:
-    _init_db()
     with _conn() as conn:
         conn.execute(
             """INSERT INTO audit_log
@@ -49,7 +48,6 @@ def search_audit(
     since: str | None = None,
     until: str | None = None,
 ) -> list[dict[str, Any]]:
-    _init_db()
     clauses: list[str] = []
     params: list[str] = []
     for column, value in (
@@ -79,19 +77,3 @@ def _row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
     d = dict(zip(_FIELDS, row, strict=True))
     d["detail"] = json.loads(d["detail"]) if d["detail"] else None
     return d
-
-
-def _init_db() -> None:
-    with _conn() as conn:
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS audit_log (
-                id            INTEGER PRIMARY KEY,
-                actor_user_id TEXT,
-                action        TEXT NOT NULL,
-                target_type   TEXT,
-                target_id     TEXT,
-                detail        TEXT,
-                batch_id      TEXT,
-                created_at    TEXT NOT NULL
-            )"""
-        )

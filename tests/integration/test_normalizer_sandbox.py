@@ -8,21 +8,16 @@ import yaml
 import fleetent.agent_config as agent_config
 import fleetent.user_store as user_store
 from fleetent.im_gateway import access, normalizer
-from fleetent.platform.im_gateway_management import im_channel_allowlist as acl
-from fleetent.platform.im_gateway_management import im_connector_store as ics
 from tests.integration._migration_template import apply_migrations
 
 
 def _setup_db(tmp_path, monkeypatch):
 
     db_path = tmp_path / "users.db"
-    for mod in (user_store, ics, acl):
-        monkeypatch.setattr(mod, "DB_PATH", db_path)
+    monkeypatch.setattr(user_store, "DB_PATH", db_path)
     # normalizer routing queries agent_store, which runs on the unified db runtime.
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     apply_migrations(db_path)
-    ics._init_db()
-    acl._init_db()
 
 
 def _msg(replies):

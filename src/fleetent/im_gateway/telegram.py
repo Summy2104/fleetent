@@ -60,7 +60,11 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
         from telegram import Update
 
         from fleetent.im_gateway.access import resolve_identity  # noqa: PLC0415
-        from fleetent.im_gateway.normalizer import NormalizedMessage, route  # noqa: PLC0415
+        from fleetent.im_gateway.normalizer import (  # noqa: PLC0415
+            NormalizedMessage,
+            SessionContext,
+            route,
+        )
 
         assert isinstance(update, Update)
         if not update.message or not update.effective_user:
@@ -101,6 +105,15 @@ def create_app(agent_name: str, owner_id: str, config: dict[str, Any]) -> object
             owner_id=owner_id,
             agent_name=agent_name,
             session_id=session_id,
+            session_context=SessionContext(
+                platform="telegram",
+                sender_id=str(tg_user_id),
+                sender_name=update.effective_user.full_name or "",
+                chat_type="dm" if chat_type == "private" else "channel",
+                channel_name=channel_id,
+                was_mentioned=False,
+                thread_root=str(reply_to.message_id) if reply_to else "",
+            ),
             user_id=identity,
             text=text,
             attachments=attachments,

@@ -12,10 +12,10 @@ from fastapi.testclient import TestClient
 
 import fleetent.auth as auth
 import fleetent.platform.im_gateway_management.admin_api as api
-import fleetent.platform.im_gateway_management.channel_allowlist as allowlist
 import fleetent.platform.im_gateway_management.connector_config as cfg
 import fleetent.platform.im_gateway_management.connector_store as store
 import fleetent.user_store as user_store
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
@@ -24,9 +24,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr(user_store, "DB_PATH", db_path)
     monkeypatch.setattr(store, "DB_PATH", db_path)
+    apply_migrations(db_path)
     user_store._init_db()
-    store._init_db()
-    allowlist._init_db()
     owner = user_store.admin_owner_id()
     store.upsert_connector(
         owner, "slack", config='{"bot_token": "xoxb-secret123", "app_token": "x"}'

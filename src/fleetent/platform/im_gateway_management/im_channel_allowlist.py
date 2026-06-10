@@ -7,7 +7,6 @@ from fleetent.platform.im_gateway_management.channel_allowlist import (  # noqa:
     DB_PATH as DB_PATH,
 )
 from fleetent.platform.im_gateway_management.channel_allowlist import (  # noqa: F401
-    _init_db,
     add_entry,
     is_allowed,
     list_entries,

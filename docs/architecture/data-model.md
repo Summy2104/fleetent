@@ -30,7 +30,7 @@
 ### 身份 & 用户（基座 / ②）
 - **users** — `id`(PK) · name · api_key · email · password_hash · role · status · must_reset · totp_secret　〔根主体〕
 - **api_keys**〔store〕 — `id` · `user_id`→users · key_hash · prefix · scope · expires_at · revoked_at · last_used_at · call_count
-- **invites**〔store〕 — `id` · email · token_hash · expires_at · used_at　〔**v1 砍 → `trim-user-auth`**:自助注册不可达、不发邮件、与 admin 建用户重叠〕
+- **invites**〔store〕 — `id` · email · token_hash · expires_at · used_at　〔**✅ 已删**（`trim-user-auth` 合并，迁移 066）:自助注册不可达、不发邮件、与 admin 建用户重叠〕
 - **im_users** — `id` · `owner_id`→users · platform · platform_user_id · `user_id`→users · allowed · meta_json　〔(platform,platform_user_id)→内部 user 映射〕
 - **im_connectors** — `id` · `owner_id`→users · platform · enabled · allowlist_enforced · config · status · last_heartbeat_at
 - **im_channel_allowlist**〔store〕 — `id` · `owner_id` · platform · scope_type · `scope_id` · allowed
@@ -86,19 +86,19 @@
 ### 治理（核执行 / 基座数据）
 - **approvals** — `id` · `session_id` · `requester_user_id` · risk_level · tool_name · tool_args · status · `approver_actor`(不透明) · resolved_at　〔**已迁 agent 侧 `governance/approval_store`**(R1/A 已合并);alembic 060 的旧定义待 #2/#3 退场(双权威延后项)〕
 - **audit_log** — `id`(PK) · `actor_user_id` · action · target_type · `target_id` · detail · `batch_id`
-- **quotas / quota_usage**〔store，懒建〕 — per-user / 全局配额与用量　〔**v1 descope → `descope-quota`**:check/record 全仓零调用,非功能态〕
+- **quotas / quota_usage**〔store，懒建〕 — per-user / 全局配额与用量　〔**✅ 已删**（`descope-quota` 合并，迁移 065）:曾 check/record 全仓零调用、非功能态〕
 
 ### 模型（②控制）
 - **model_providers** — `id` · base_url · model · api_key · max_tokens · 价格字段 · vendor/protocol/params〔050〕
 - **model_routes** — task_type · `provider_id`→model_providers · priority
 
-### 监控（基座 observability）〔**v1 外置 Prometheus/Grafana → `externalize-monitoring`**，下列 4 表移除〕
+### 监控（基座 observability）〔**✅ 已外置移除**（`externalize-monitoring` 合并，迁移 063 drop 下列 4 表 + resource_monitoring 模块已删）〕
 - **alert_rules** — `id` · metric · target · comparator · threshold · severity · channels
 - **alerts** — `id` · `rule_id`→alert_rules · target · status · fired_at · acked_by
 - **metric_samples** — `id` · metric · target · value · ts
 - **maintenance_windows** — `id` · target · start_ts · end_ts
 
-### Askit（②控制）〔任务队列三表 DEAD、**v1 砍 → `dead-schema-cleanup`**;`agent_apply_api` 不依赖它们〕
+### Askit（②控制）〔任务队列三表 DEAD、**✅ 已删**（`dead-schema-cleanup` 合并，迁移 064）;`agent_apply_api` 保留、不依赖它们〕
 - **askit_tasks** — `id` · series · command · params · workspace · status · exit_code · artifact
 - **askit_task_logs** — `id` · `task_id`→askit_tasks · seq · stream · line
 - **askit_workspaces** — `id` · env · repo_path · endpoint
@@ -214,11 +214,13 @@ namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后
 **背景**：客户公司存在多法人主体（如 A 主体 / B 主体），主体间数据（尤其财务的 KB / 记忆 / 会话）**必须强隔离、互不可见**（合规 / 数据主权硬要求）。故 §4-② 幻影实体的决议是 **立实体 + 物理隔离**，而非裁掉多租户。
 
 **实体**（裸列 → 真实体/外键）：
-- `tenants`（= 主体）：`id · name · status · created_at · 主体级配额/配置`
-- `teams`：`id · tenant_id`→tenants `· name · created_at`
+- `tenants`（= 主体）：`id · name · status · created_at · approver_user_id · 主体级配额/配置`
+- `teams`：`id · tenant_id`→tenants `· name · approver_user_id · created_at`
 - `users` 补 `tenant_id`→tenants（**今天 users 无任何组织归属——真缺口**）
 - `team_members`：`team_id`→teams `· user_id`→users（M:N）
 - agents/KB/traces/policies 的 `tenant_id`/`team_id` 升真外键；`shared_memory.scope_id` 按 `scope_type` 指向 tenants/teams
+
+**审批人(org 两级,2026-06-10)**：`teams.approver_user_id` / `tenants.approver_user_id` —— agent 可被多 team 的人使用,但其共享记忆/KB/高危工具的**审批归 agent 归属 team 的审批人**(非请求者 team)。解析链:`agent.team_id 的审批人 → (无) tenant 的审批人 → (无) reject(default-closed)`。部署/materialize 时沿链解析出审批人写进 agent.yaml `approval` 块,核运行只读配置、不实时查 org（保解耦);默认单审批人,config 可覆盖多人 + `any/all`。详见 `target-architecture-proposal.md §6.5`。
 
 **隔离 = 物理 per-tenant**（不靠 `tenant_id` 列 + 纪律）：
 - `管理库`：**单库、跨主体注册中心**（tenants/teams/users/team_members/agent 定义，带 `tenant_id` 列），platform 专用，**不存业务对话/KB**。
@@ -228,18 +230,22 @@ namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后
 
 **与 R2 的关系**：给 §5.1「共享层」补上 tenant 维度——共享记忆库 / KB 库 / per-agent 库**按主体物理分区**。物理 vs 逻辑的实际差别**只在共享层**（KB + 共享记忆：per-主体一库靠文件分 vs 共用一库靠 `tenant_id` 列分）；`管理库` 与 `per-agent 库` 两方案相同。
 
-**连带**：① **amends #3**——五库拓扑带 tenant 维度、按主体物理分区（#3 范围变大，或单拆一个「立 tenants/teams + 物理分区」change）；② 喂 **#4 Identity**——principal 组织归属从 `users.tenant_id` + `team_members` 解析（§5.3 F2「tenant 来自 agent 配置」的折中升级为「真有归属」）。
+**物理 vs 逻辑(2026-06-10 重估,结论:保持物理)**：重估过"单库 + `tenant_id` 列做逻辑隔离"。保持物理,因为:① "财务互不可见"是**合规硬要求** → 需结构性保证;② **SQLite 无 RLS**,逻辑隔离在 SQLite 上只能纪律级、非结构性(漏一个 `WHERE tenant_id` 即泄漏);③ 个位数主体 → 物理多文件/fan-out 成本可忽略;④ per-agent 物理本就要做,tenant 物理只是路由加目录前缀、增量小;⑤ 最敏感的财务数据住共享/KB 层,正是不该用纪律级隔离之处。
+
+**实现成"租户作用域边界 + 可换后端"(接住将来上 PG)**：隔离做成抽象——调用点只表达"在 tenant X 作用域里访问",后端**可插拔**:今天 SQLite=路由到 `<tenant>/` 文件;将来 PG 可换 **per-tenant database**(同路由换 DSN)或 **RLS**(单库 + 会话 tenant 变量、DB 按行强制,调用点基本不动)。**故物理现在做不浪费**——它建立的是"租户作用域边界",SQLite 文件只是当下后端。(团队已规划上 PG,时机待定。)
+
+**连带**：① **amends #3**——五库拓扑带 tenant 维度、按主体物理分区(#3 设计成"租户作用域边界 + 可换后端";加"不迁移数据/上线前重建内测环境"可大幅简化,见 §6 roadmap 笔记);② 喂 **#4 Identity**——principal 组织归属从 `users.tenant_id` + `team_members` 解析(§5.3 F2「tenant 来自 agent 配置」的折中升级为「真有归属」)。
 
 ### 5.8 v1 实体减法（2026-06-09 决议）
 
 对 ~50 表做减法审计（4 个 Explore agent 代码核实），定 v1 范围。被砍/外置的表 §2 仍列出（现状），各 change 合并后移除：
 
-| 处置 | 实体 | change / 去向 |
+| 处置 | 实体 | change / 去向（状态） |
 |---|---|---|
-| **砍** | askit 三表 · KB binding 死代码 | `dead-schema-cleanup`（执行中） |
-| **砍** | `invites` · 2FA(`totp_secret`/`_enforce_2fa`) | `trim-user-auth`（spec 完）。`totp_secret` 列物理 drop 留 #2 |
-| **descope** | `quotas`/`quota_usage` | `descope-quota`（spec 完）——非功能态(check/record 零调用) |
-| **外置** | `alert_rules`/`alerts`/`metric_samples`/`maintenance_windows` + resource_monitoring | `externalize-monitoring`（spec 完）→ Prometheus/Grafana/Alertmanager |
+| **砍** | askit 三表 · KB binding 死代码 | `dead-schema-cleanup` **✅ 已合并 main**（迁移 064 drop askit 表） |
+| **砍** | `invites` · 2FA(`totp_secret`/`_enforce_2fa`) | `trim-user-auth` **✅ 已合并 main**（迁移 066 drop invites）。`totp_secret` 列物理 drop 留 #2 |
+| **descope** | `quotas`/`quota_usage` | `descope-quota` **✅ 已合并 main**（迁移 065 drop quota 表）——曾为非功能态(check/record 零调用) |
+| **外置** | `alert_rules`/`alerts`/`metric_samples`/`maintenance_windows` + resource_monitoring | `externalize-monitoring` **✅ 已合并 main**（迁移 063 drop 监控表；模块删除；server 残留死函数 `_run_monitoring_cycle` 后补删）→ Prometheus/Grafana/Alertmanager |
 | **保留** | 知识图谱(`kb_entities`/`mentions`/`relations`,检索零用但留作未来) · 自进化(reflection/proposals) · `session_anti_flap` · `sub_agent_runs` · KB 同步态 | 不动 |
 | **defer** | `connectors.agent_id` | spec 与 MCP scoping + `client_secret`-不持久化安全保证纠缠、store 织进 5 函数;effort/benefit 差,留 OAuth 重做时一并 |
 | **路由别处** | `users.tenant_id`+team 归属 → §5.7 tenancy · OIDC → #4 · 邮件/SMTP → 暂缓 | — |

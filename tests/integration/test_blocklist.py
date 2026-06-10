@@ -7,15 +7,15 @@ import fleetent.platform.user_management.api_key_store as aks
 import fleetent.platform.user_management.block_service as block_service
 import fleetent.user_store as user_store
 from fleetent.platform.im_gateway_management import identity as im_user_store
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     for mod in (user_store, aks, audit, blocklist, im_user_store):
         monkeypatch.setattr(mod, "DB_PATH", tmp_path / "users.db")
+    apply_migrations(tmp_path / "users.db")
     user_store._init_db()
-    aks._init_db()
-    audit._init_db()
     im_user_store._init_db()
     return tmp_path / "users.db"
 
