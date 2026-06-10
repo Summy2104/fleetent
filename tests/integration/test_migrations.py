@@ -31,7 +31,9 @@ def test_upgrade_creates_tables(tmp_path):
     assert "agents" in tables
     assert "user_agents" in tables
     assert "approvals" in tables
-    assert "scheduled_tasks" in tables
+    # scheduled_tasks dropped from the management DB (agent-owned-scheduled-tasks):
+    # it is now a pure agent-side table created only by schedule_store.ensure_schema.
+    assert "scheduled_tasks" not in tables
     assert "traces" in tables
     assert "memory_items" in tables
     assert "reflection_reports" in tables
@@ -154,20 +156,6 @@ def test_column_structure(tmp_path):
         "approver_user_id",
         "created_at",
         "resolved_at",
-    }
-
-    schedule_cols = {row[1] for row in conn.execute("PRAGMA table_info(scheduled_tasks)")}
-    assert schedule_cols >= {
-        "id",
-        "name",
-        "cron_expr",
-        "timezone",
-        "user_id",
-        "agent_name",
-        "message",
-        "enabled",
-        "source",
-        "created_at",
     }
 
     memory_cols = {row[1] for row in conn.execute("PRAGMA table_info(memory_items)")}
@@ -603,12 +591,18 @@ def test_downgrade_removes_agent_scoped_connector_schema(tmp_path):
     assert "agent_id" not in connector_cols
 
 
-def test_migrated_schedule_store_does_not_create_schema():
+def test_schedule_store_is_agent_owned_self_init():
+    """agent-owned-scheduled-tasks: schedule_store joins the agent-side dual-authority
+    tables — it self-creates via ensure_schema (CREATE TABLE IF NOT EXISTS), uses named
+    params (no ``?``), and does not hand-roll column migrations (no PRAGMA table_info).
+    The DDL/alembic-head consistency is enforced by test_schema_drift_guard."""
     schedule_source = Path("src/fleetent/schedule_store.py").read_text()
     runtime_source = Path("src/fleetent/db.py").read_text()
 
-    assert "CREATE TABLE IF NOT EXISTS" not in schedule_source
+    assert "CREATE TABLE IF NOT EXISTS" in schedule_source
     assert "PRAGMA table_info" not in schedule_source
+    assert "?" not in schedule_source
+    # db.py stays a pure runtime boundary (no schema lifecycle).
     assert "CREATE TABLE IF NOT EXISTS" not in runtime_source
     assert "PRAGMA table_info" not in runtime_source
 

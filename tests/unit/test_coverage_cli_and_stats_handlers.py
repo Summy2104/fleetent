@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import HTTPException
 
 from fleetent import user_store
 from fleetent.knowledge_base import operations as kb_operations
@@ -313,7 +312,6 @@ def test_kb_connector_cli_sync_guards_and_extract_summary(monkeypatch, capsys):
 
 def test_stats_admin_api_handlers_with_mocked_auth_and_data(monkeypatch):
     user = SimpleNamespace(id="viewer", role="viewer")
-    admin = SimpleNamespace(id="admin", role="admin")
     traces = [
         {
             "agent_id": "a1",
@@ -343,8 +341,6 @@ def test_stats_admin_api_handlers_with_mocked_auth_and_data(monkeypatch):
         "write_audit",
         lambda *args, **kwargs: audit_calls.append(args),
     )
-    monkeypatch.setattr(stats_admin_api, "schedule_report", lambda *args: "task-1")
-
     assert stats_admin_api.overview("a1", authorization="Session token")["agent_id"] == "a1"
     assert stats_admin_api.compare("a1,a2", authorization="Session token")
     assert stats_admin_api.tools("a1", authorization="Session token")["coverage"]["used"] == [
@@ -356,26 +352,4 @@ def test_stats_admin_api_handlers_with_mocked_auth_and_data(monkeypatch):
     assert stats_admin_api.degraded_trace("s1", "u1", authorization="Session token")
     response = stats_admin_api.export(view="tools", agent_id="a1", authorization="Session token")
     assert response.media_type == "text/csv"
-
-    monkeypatch.setattr(stats_admin_api, "_current_user", lambda authorization: admin)
-    configured = stats_admin_api.configure_report(
-        stats_admin_api.ReportBody(period="weekly", agent_id="a1", recipient="ops@example.com"),
-        authorization="Session token",
-    )
-    assert configured == {"task_id": "task-1", "period": "weekly"}
-    assert audit_calls
-
-    monkeypatch.setattr(stats_admin_api, "_current_user", lambda authorization: user)
-    with pytest.raises(HTTPException) as forbidden:
-        stats_admin_api.configure_report(
-            stats_admin_api.ReportBody(period="weekly", agent_id="a1", recipient="ops@example.com"),
-            authorization="Session token",
-        )
-    assert forbidden.value.status_code == 403
-    monkeypatch.setattr(stats_admin_api, "_current_user", lambda authorization: admin)
-    with pytest.raises(HTTPException) as bad_period:
-        stats_admin_api.configure_report(
-            stats_admin_api.ReportBody(period="daily", agent_id="a1", recipient="ops@example.com"),
-            authorization="Session token",
-        )
-    assert bad_period.value.status_code == 422
+    assert audit_calls  # export writes an audit entry

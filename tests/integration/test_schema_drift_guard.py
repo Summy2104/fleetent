@@ -17,8 +17,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import pytest
-
 from tests.integration._migration_template import apply_migrations
 
 
@@ -45,6 +43,7 @@ def _build_alembic_db(tmp_path: Path) -> Path:
 
 def _build_ensure_schema_db(tmp_path: Path) -> Path:
     """Run all agent-side ensure_schema() functions on a fresh DB."""
+    import fleetent.schedule_store as schedule_store
     from fleetent.db import SQLiteDatabase
     from fleetent.knowledge_base import operations as kb_ops
     from fleetent.memory import store as memory_store
@@ -60,6 +59,7 @@ def _build_ensure_schema_db(tmp_path: Path) -> Path:
     reflection_ensure_schema(db)
     kb_ops.ensure_schema(db)
     session_index.ensure_schema(db)  # session.index.ensure_schema added in task 3.2
+    schedule_store.ensure_schema(db)  # agent-owned-scheduled-tasks
     return db_path
 
 

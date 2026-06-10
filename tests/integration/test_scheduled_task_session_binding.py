@@ -11,7 +11,7 @@ def test_create_persists_session_id(tmp_path, monkeypatch):
     db = tmp_path / "sched.db"
     apply_migrations(db)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
-    ss.create("daily", "0 9 * * *", "UTC", "u1", None, "report", session_id="cron/daily")
+    ss.create("daily", "0 9 * * *", "UTC", "u1", "report", session_id="cron/daily")
     tasks = ss.list_tasks()
     assert tasks[0]["session_id"] == "cron/daily"
 
@@ -20,7 +20,7 @@ def test_create_session_id_defaults_none(tmp_path, monkeypatch):
     db = tmp_path / "sched.db"
     apply_migrations(db)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
-    ss.create("oneoff", "0 9 * * *", "UTC", "u1", None, "do it")
+    ss.create("oneoff", "0 9 * * *", "UTC", "u1", "do it")
     assert ss.list_tasks()[0]["session_id"] is None
 
 
