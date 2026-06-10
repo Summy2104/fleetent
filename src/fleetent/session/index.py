@@ -10,8 +10,11 @@ any reads or writes.
 """
 
 import time
+from typing import Union
 
-from fleetent.db import SQLiteDatabase
+from fleetent.db import ReadOnlySQLiteDatabase, SQLiteDatabase
+
+_AnyDatabase = Union[SQLiteDatabase, ReadOnlySQLiteDatabase]
 
 _state_db: SQLiteDatabase | None = None
 
@@ -125,6 +128,24 @@ def total_message_count() -> int:
     """Return the sum of `message_count` across all recorded sessions."""
     row = _db().execute("SELECT COALESCE(SUM(message_count), 0) AS s FROM sessions").fetchone()
     return int(row["s"]) if row else 0
+
+
+def count_with_db(db: "_AnyDatabase") -> int:
+    """Read-only variant of count() accepting an explicit DB handle.
+
+    Used by platform read projection.
+    """
+    row = db.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()
+    return int(row["n"]) if row else 0
+
+
+def list_sessions_with_db(db: "_AnyDatabase", limit: int = 50) -> list[dict[str, object]]:
+    """Read-only variant of listing sessions accepting an explicit DB handle."""
+    rows = db.execute(
+        f"SELECT {_SELECT_COLS} FROM sessions ORDER BY updated_at DESC LIMIT :limit",
+        {"limit": limit},
+    ).fetchall()
+    return [_row_to_dict(row) for row in rows]
 
 
 def delete(session_id: str) -> None:

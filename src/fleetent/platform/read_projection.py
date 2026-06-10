@@ -1,0 +1,120 @@
+"""Platform read-only projection of agent-side databases (§7 implementation).
+
+Platform reads agent-side physical databases through read-only connections only —
+never writing, never migrating. Discovery uses the management.db registry
+(agent_store); each agent's DB is opened via router.agent_scope(...).open_state_db_ro()
+which returns a ReadOnlySQLiteDatabase.
+
+Aggregation happens at the application layer; no materialized views, no data
+is copied into platform tables.
+
+Design constraints (3d):
+- platform → read-only agent libs: allowed direction
+- agent ✗→ platform: strictly forbidden (this module respects that)
+- Reads never trigger migrate (open_*_ro never sets user_version)
+- No materialized copies; platform reads live agent files directly
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from fleetent.tenant_router import TenantRouter
+
+
+def aggregate_session_counts_across_agents(
+    router: TenantRouter,
+    agents: list[tuple[str, str]],
+) -> int:
+    """Return total session count across all given (tenant_id, agent_id) pairs.
+
+    Opens each agent's state_db read-only; no migration is triggered.  Agents
+    whose DB file does not exist yet (never booted) are silently skipped.
+
+    Args:
+        router: Initialized TenantRouter pointing at the data directory.
+        agents: List of (tenant_id, agent_id) tuples from the registry.
+
+    Returns:
+        Sum of session counts across all accessible agent DBs.
+    """
+    import sqlite3
+
+    from fleetent.session import index as session_index
+
+    total = 0
+    for tenant_id, agent_id in agents:
+        scope = router.agent_scope(tenant_id, agent_id)
+        try:
+            ro_db = scope.open_state_db_ro()
+            total += session_index.count_with_db(ro_db)
+        except sqlite3.OperationalError:
+            # DB file doesn't exist — agent never booted; skip silently
+            pass
+    return total
+
+
+def aggregate_approvals_across_agents(
+    router: TenantRouter,
+    agents: list[tuple[str, str]],
+    status: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return approval records across all given (tenant_id, agent_id) pairs.
+
+    Each record is enriched with agent_id so the caller can identify the source.
+    Opens each agent's state_db read-only; agents whose DB does not exist are skipped.
+
+    Args:
+        router: Initialized TenantRouter pointing at the data directory.
+        agents: List of (tenant_id, agent_id) tuples from the registry.
+        status: Optional status filter ('pending', 'approved', 'rejected', etc.).
+
+    Returns:
+        Merged list of approval dicts, each carrying an ``agent_id`` field.
+    """
+    import sqlite3
+
+    from fleetent.governance import approval_store
+
+    results: list[dict[str, Any]] = []
+    for tenant_id, agent_id in agents:
+        scope = router.agent_scope(tenant_id, agent_id)
+        try:
+            ro_db = scope.open_state_db_ro()
+            rows = approval_store.list_approvals_with_db(ro_db, status=status)
+            for row in rows:
+                enriched = dict(row)
+                enriched["agent_id"] = agent_id
+                enriched["tenant_id"] = tenant_id
+                results.append(enriched)
+        except sqlite3.OperationalError:
+            pass
+    return results
+
+
+def read_shared_memory_for_tenant(
+    router: TenantRouter,
+    tenant_id: str,
+) -> list[dict[str, Any]]:
+    """Return shared memory items for a tenant by reading its shared_memory.db read-only.
+
+    Opens the tenant's shared_memory.db in read-only mode; no migration runs.
+    Returns an empty list if the DB file does not exist yet.
+
+    Args:
+        router: Initialized TenantRouter pointing at the data directory.
+        tenant_id: The tenant whose shared memory to read.
+
+    Returns:
+        List of shared memory item rows.
+    """
+    import sqlite3
+
+    scope = router.tenant_scope(tenant_id)
+    try:
+        ro_db = scope.open_shared_memory_db_ro()
+        result = ro_db.execute("SELECT * FROM shared_memory_items ORDER BY created_at DESC LIMIT 100")
+        return result.fetchall()
+    except sqlite3.OperationalError:
+        # DB doesn't exist or table not yet created — return empty
+        return []
