@@ -549,3 +549,102 @@ async def test_qualified_actor_form_accepted_for_notified_approver() -> None:
     )
 
     assert result == "approved"
+
+
+# ── approval prompt interactive blocks (slack-approval-buttons) ───────────────
+
+
+async def test_requester_prompt_passes_blocks_to_supporting_reply_func() -> None:
+    """Requester-routed prompt includes the interactive blocks payload."""
+    from fleetent.agent_config import ApprovalRouting
+
+    gate = PermissionGate(medium_timeout=0.2)
+    routing = ApprovalRouting(by_risk={"medium": {"approvers": ["requester"], "policy": "any"}})
+
+    captured: list[dict] = []
+
+    async def reply(text: str, blocks: list | None = None) -> None:
+        captured.append({"text": text, "blocks": blocks})
+
+    asyncio.create_task(_resolve_after(gate, "blk_1", "approved", "U_REQ", 0.01))
+
+    result = await gate.request_approval(
+        approval_id="blk_1",
+        risk_level="medium",
+        tool_name="send_im_message",
+        tool_args={},
+        requester_user_id="U_REQ",
+        reply_func=reply,
+        session_id="s1",
+        approval_routing=routing,
+        outbound_connectors={},
+        medium_timeout=0.1,
+    )
+
+    assert result == "approved"
+    prompt = next(c for c in captured if "approve blk_1" in c["text"])
+    assert prompt["blocks"] is not None
+    action_ids = {
+        e["action_id"]
+        for b in prompt["blocks"]
+        if b.get("type") == "actions"
+        for e in b["elements"]
+    }
+    assert "approval_approve" in action_ids
+
+
+async def test_requester_prompt_degrades_when_reply_func_rejects_blocks() -> None:
+    """A reply_func without a blocks parameter still gets the plain-text prompt."""
+    from fleetent.agent_config import ApprovalRouting
+
+    gate = PermissionGate(medium_timeout=0.2)
+    routing = ApprovalRouting(by_risk={"medium": {"approvers": ["requester"], "policy": "any"}})
+
+    texts: list[str] = []
+
+    async def reply(text: str) -> None:  # no blocks kwarg → TypeError on rich call
+        texts.append(text)
+
+    asyncio.create_task(_resolve_after(gate, "blk_2", "approved", "U_REQ", 0.01))
+
+    result = await gate.request_approval(
+        approval_id="blk_2",
+        risk_level="medium",
+        tool_name="send_im_message",
+        tool_args={},
+        requester_user_id="U_REQ",
+        reply_func=reply,
+        session_id="s1",
+        approval_routing=routing,
+        outbound_connectors={},
+        medium_timeout=0.1,
+    )
+
+    assert result == "approved"
+    assert any("approve blk_2" in t for t in texts)
+
+
+async def test_outbound_approver_dm_carries_blocks() -> None:
+    """Outbound approver notification posts the interactive blocks payload."""
+    gate = PermissionGate(high_timeout=0.2)
+    routing = _make_routing()
+    connectors = _make_connectors()
+
+    asyncio.create_task(_resolve_after(gate, "blk_3", "approved", "slack:U_APPROVER", 0.01))
+
+    result = await gate.request_approval(
+        approval_id="blk_3",
+        risk_level="high",
+        tool_name="delete_db",
+        tool_args={},
+        requester_user_id="U_REQ",
+        reply_func=AsyncMock(),
+        session_id="s3",
+        approval_routing=routing,
+        outbound_connectors=connectors,
+        high_timeout=0.1,
+    )
+
+    assert result == "approved"
+    kwargs = connectors["slack"].chat_postMessage.call_args.kwargs
+    assert kwargs.get("blocks"), "approver DM must carry the interactive blocks"
