@@ -17,5 +17,5 @@
 
 ## 4. 收尾、护栏与门禁
 
-- [ ] 4.1 确认不得 `import fleetent.platform.*`、无新增裸 `sqlite3.connect`、SQL named parameters；跑依赖护栏 + `scripts/check_module_boundaries.py` 相关
-- [ ] 4.2 change 收尾：`make test-pr` 全绿 + `uv run pytest tests/integration -q` 对照 main 基线无新增失败 + `openspec validate agent-scoped-db-routing --strict`
+- [x] 4.1 确认不得 `import fleetent.platform.*`、无新增裸 `sqlite3.connect`、SQL named parameters；跑依赖护栏 + `scripts/check_module_boundaries.py` 相关
+- [x] 4.2 change 收尾：`make test-pr` 全绿 + `uv run pytest tests/integration -q` 对照 main 基线无新增失败 + `openspec validate agent-scoped-db-routing --strict`
