@@ -1,7 +1,7 @@
-# fleetent 数据模型与实体关系（2026-06-09）
+# fleetent 数据模型与实体关系
 
-> **状态：草案 / 待讨论（DRAFT）**。供「数据库与实体关系设计」讨论用。
-> 配套：[`target-architecture-proposal.md`](./target-architecture-proposal.md)（目标架构：核+4面+基座、模块边界与依赖）。
+> **状态：已落地 / AS-BUILT 参考**（2026-06-11 更新）。持久层重设计 #1–#4（含 3a–3d）**已全部合并 main 并归档**——五库物理拓扑、按主体物理隔离、嵌入式迁移（Y）、Identity 端口、platform 只读投影均已实现。本文档为**现状权威参考**；§5 的"目标态/决议"现已是现状，§6 roadmap 为执行历史。
+> 配套：[`target-architecture-proposal.md`](./target-architecture-proposal.md)（核+4面+基座、模块边界、Identity §6、只读投影 §7）。
 
 ## 0. 取数方法与口径
 
@@ -300,10 +300,10 @@ data/
 | **A** | 审批重设计（R1，§5.5） | im_gateway 出站原语 + 审批人路由 schema + permission_gate 重构（请求者≠审批人、approvals 移 agent 侧 `approval_store`、停 `import user_store`） | **✅ 已合并 main**（e5c4cb7）；platform 只读投影后置 |
 | **2** | 管理表收编 alembic | `users`/`api_keys`/`audit_log`/`im_connectors`/`im_channel_allowlist` 入迁移（quotas/invites 已删、approvals 已移 agent 侧——均不在此列） | **✅ 已合并 main** |
 | **2.5** | establish-tenancy | `tenants`/`teams`/`users.tenant_id`/两级 `approver_user_id` + 回填 default 主体 + 最小 provisioning（**只逻辑实体、不建 `team_members`**，物理分区留 #3） | **✅ 已合并 main**（迁移 067-069；070 升级 tenant 外键约束） |
-| 3 | 五库物理分离（吸收 R2 + tenancy 物理） | 路由器/**租户作用域边界（可换后端→PG/RLS）** + 嵌入式迁移（Y）+ per-agent/共享/KB/向量**按主体物理分区**；approvals 落 per-agent + 退管理库孤立定义；memory 去 `namespace`。**简化：上线前不迁移数据**（重建内测环境，难题消失）——窗口关在上线 → **赶上线前做** | 待该期（detailed spec 即时生成；切片见下方 B2） |
-| 4 | Identity 端口 | authn 抽端口（**认证属 edge、核只消费 `Principal{user_id,tenant_id}`**）+ 本地/平台/OIDC 适配器；根除 #1（`user_store.authenticate`）| **设计定稿**（§6 + memory）；实现待该期 |
+| 3 | 五库物理分离（吸收 R2 + tenancy 物理） | 路由器/**租户作用域边界（可换后端→PG/RLS）** + 嵌入式迁移（Y）+ per-agent/共享/KB/向量**按主体物理分区**；approvals 落 per-agent + 退管理库孤立定义；memory 去 `namespace` | **✅ 已全部合并 main**（切片 3a–3d，见下方 B2；含 WAL 并发、只读投影） |
+| 4 | Identity 端口 | authn 抽端口（**认证属 edge、核只消费 `Principal{user_id,tenant_id}`**）+ 本地/平台 适配器；根除 #1（`user_store.authenticate`）| **✅ 已合并 main**（`identity-port`；OIDC/Google 适配器后续） |
 
-**节奏**：各期 detailed spec **即时生成**（反映当时真实代码，避免 #3 类返工）；一期一个聚焦会话，串行推进。**进度（2026-06-10）**：#1 / A / 4 减法 / #2 / #2.5 **均已合并 main**；剩 **#3**（最大；"不迁移"捷径**绑上线前窗口** → 赶上线前做）→ **#4**（设计定稿、实现最后）。
+**节奏 / 进度（2026-06-11：全部落地）**：#1 / A / 4 减法 / #2 / #2.5 / **#3（3a–3d + WAL + 向量 WAL）** / **#4** **均已合并 main 并归档**。持久层重设计完成——五库物理拓扑、按主体隔离、嵌入式迁移（Y）、Identity 端口、platform 只读投影全部实现。"各期 detailed spec 即时生成、串行推进、逐片复核下游"的节奏在 3a→3d 全程奏效（多次在前一片落地后修正下游 spec，避免返工）。
 
 ### B2 协调：KB 模块四分 ↔ #3 物理库（3a 切片，2026-06-10）
 
