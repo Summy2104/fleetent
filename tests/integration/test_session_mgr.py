@@ -273,6 +273,34 @@ async def test_cleanup_slash_session_id_restored(sessions_dir):
     assert not (sessions_dir / f"{sid}.json").exists()
 
 
+# --- cleanup_expired: flock anchor file sibling cleanup ---
+
+
+async def test_cleanup_removes_lock_sibling(sessions_dir):
+    await session_mgr.save("old", [{"role": "user", "content": "x"}])
+    (sessions_dir / "old.lock").write_text("")
+    now = 1_000_000.0
+    ttl = 100.0
+    _set_mtime(sessions_dir / "old.json", now - ttl - 10)
+
+    removed = session_mgr.cleanup_expired(ttl_seconds=ttl, _now=now)
+
+    assert removed == ["old"]
+    assert not (sessions_dir / "old.lock").exists()
+
+
+async def test_cleanup_keeps_lock_of_unexpired_session(sessions_dir):
+    await session_mgr.save("fresh", [{"role": "user", "content": "y"}])
+    (sessions_dir / "fresh.lock").write_text("")
+    now = 1_000_000.0
+    _set_mtime(sessions_dir / "fresh.json", now - 1)
+
+    removed = session_mgr.cleanup_expired(ttl_seconds=100.0, _now=now)
+
+    assert removed == []
+    assert (sessions_dir / "fresh.lock").exists()
+
+
 # --- cleanup_expired: delete fault tolerance ---
 
 
