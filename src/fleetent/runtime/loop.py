@@ -16,6 +16,7 @@ from openai.types.chat import ChatCompletionChunk
 
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent import agent_config
+from fleetent.identity import Principal
 from fleetent.eval_logger import log_run
 from fleetent.governance.action_gate import ActionMode, is_sandbox_backed, resolve_action_mode
 from fleetent.governance.agent_policy import check_tool_access
@@ -1426,6 +1427,7 @@ _active_runs: int = 0
 async def run(
     messages: list[dict[str, Any]],
     user_id: str = "default",
+    principal: Principal | str | None = None,
     system_prompt: str = _SYSTEM,
     is_sub_agent: bool = False,
     reply_func: ReplyFunc | None = None,
@@ -1473,6 +1475,11 @@ async def run(
     a future run()-builds-catalog path, and does not re-filter here (avoiding double
     narrowing). Callers narrow at the point they build the catalog.
     """
+    # Transitional compat: principal takes precedence over legacy user_id param.
+    # hasattr guard is module-reload-safe (isinstance fails if fleetent.identity was reloaded).
+    if principal is not None:
+        user_id = principal.user_id if hasattr(principal, "user_id") else str(principal)
+
     global _active_runs
     _active_runs += 1
     try:
@@ -2031,6 +2038,7 @@ def run_sync(
 async def run_stream(
     user_input: str,
     user_id: str = "default",
+    principal: Principal | str | None = None,
     system_prompt: str = _SYSTEM,
     allowed_tools: list[str] | None = None,
     agent_name: str | None = None,
@@ -2066,6 +2074,11 @@ async def run_stream(
     Termination covers max_turns / consecutive_failures; approval gating is not
     performed on the streaming path, so approval_rejected does not apply here.
     """
+    # Transitional compat: principal takes precedence over legacy user_id param.
+    # hasattr guard is module-reload-safe (isinstance fails if fleetent.identity was reloaded).
+    if principal is not None:
+        user_id = principal.user_id if hasattr(principal, "user_id") else str(principal)
+
     # agent-skill-scoping: narrow the catalog to the agent's allowed_skills (empty /
     # None = no narrowing, all enabled skills visible).
     skills_catalog = available_skills_prompt(

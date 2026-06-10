@@ -53,16 +53,18 @@ def test_local_bearer_does_not_import_platform():
     """LocalBearerAdapter's resolve path must not touch fleetent.platform.*."""
     import sys
 
-    # Remove any previously cached platform submodules to get a clean check.
-    platform_mods = [k for k in sys.modules if k.startswith("fleetent.platform")]
-    for mod in platform_mods:
-        sys.modules.pop(mod, None)
+    saved = {k: v for k, v in sys.modules.items() if k.startswith("fleetent.platform")}
+    for key in list(saved):
+        del sys.modules[key]
 
-    from fleetent.identity import LocalBearerAdapter
+    try:
+        from fleetent.identity import LocalBearerAdapter
 
-    adapter = LocalBearerAdapter()
-    with patch("fleetent.identity._legacy_key_lookup", return_value=None):
-        adapter("ma-anytoken")
+        adapter = LocalBearerAdapter()
+        with patch("fleetent.identity._legacy_key_lookup", return_value=None):
+            adapter("ma-anytoken")
 
-    loaded = [k for k in sys.modules if k.startswith("fleetent.platform")]
-    assert loaded == [], f"platform modules loaded during LocalBearerAdapter.resolve: {loaded}"
+        loaded = [k for k in sys.modules if k.startswith("fleetent.platform")]
+        assert loaded == [], f"platform modules loaded during LocalBearerAdapter.resolve: {loaded}"
+    finally:
+        sys.modules.update(saved)

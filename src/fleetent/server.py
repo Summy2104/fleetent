@@ -48,8 +48,10 @@ from fleetent.platform.im_gateway_management import admin_api, connector_manager
 from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.skill_management import skill_admin_api
+from fleetent.identity import Principal
 from fleetent.platform.user_management import user_admin_api
 from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
+from fleetent.platform.user_management.platform_bearer_adapter import PlatformBearerAdapter
 from fleetent.runtime import run_stream
 from fleetent.session import manager as session_mgr
 from fleetent.skills import scan as scan_skills
@@ -408,15 +410,18 @@ def agent_routing_status(agent_name: str) -> str:
         return "enabled"
 
 
-async def _authenticate(authorization: str = Header()) -> tuple[user_store.User, dict[str, Any]]:
-    """Resolve a Bearer API key to (User, key_metadata). Raises 401 if invalid/blocked."""
+_platform_bearer = PlatformBearerAdapter()
+
+
+async def _authenticate(authorization: str = Header()) -> Principal:
+    """Resolve a Bearer API key to a Principal. Raises 401 if invalid/blocked."""
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Bearer token required")
     api_key = authorization.removeprefix("Bearer ").strip()
-    result = user_store.authenticate(api_key)
-    if result is None:
+    principal = _platform_bearer(api_key)
+    if principal is None:
         raise HTTPException(status_code=401, detail="Invalid API key")
-    return result
+    return principal
 
 
 def _slack_adapter_configured() -> bool:

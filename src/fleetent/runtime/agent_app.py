@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 from fleetent import agent_config, paths, user_store
 from fleetent.agent_config import AgentFile
+from fleetent.identity import LocalBearerAdapter, Principal
 from fleetent.structured_logging import get_logger
 
 if TYPE_CHECKING:
@@ -70,18 +71,31 @@ def resolve_home(agent_id: str, home: str | Path | None = None) -> Path:
     return paths.base_dir() / "agents" / agent_id
 
 
-def _validate_tui_token(authorization_header: str) -> bool:
+def _validate_tui_token(authorization_header: str) -> Principal | None:
     """Check Bearer token against FLEETENT_TUI_TOKEN env var.
 
-    Returns False when the token is missing/wrong OR when the env var is not set,
-    so the /ws endpoint can reject connections without platform user_store access.
+    Returns a local Principal on match, None when the token is missing/wrong or the
+    env var is not set — so the /ws endpoint can reject without platform user_store access.
     """
     expected = os.environ.get("FLEETENT_TUI_TOKEN", "")
     if not expected:
-        return False
+        return None
     if not authorization_header.startswith("Bearer "):
-        return False
-    return authorization_header.removeprefix("Bearer ").strip() == expected
+        return None
+    if authorization_header.removeprefix("Bearer ").strip() != expected:
+        return None
+    return Principal(user_id="local", tenant_id="default")
+
+
+def _check_tenant(principal: Principal, agent_tenant: str) -> bool:
+    """Return True when the Principal's tenant matches the agent's deployment tenant.
+
+    When agent_tenant is 'default' (single-tenant standalone), all callers are allowed.
+    In multi-tenant deployments, the principal must belong to the same tenant.
+    """
+    if agent_tenant == "default":
+        return True
+    return principal.tenant_id == agent_tenant
 
 
 def _redirect_agent_data_paths(home_dir: Path) -> None:
@@ -486,12 +500,14 @@ def build_app(agent_name: str) -> FastAPI:
 
     app = FastAPI(title=f"fleetent-agent:{agent_name}")
 
-    def _authenticate(authorization: str = Header(default="")) -> user_store.User:  # noqa: B008
+    _local_bearer = LocalBearerAdapter()
+
+    def _authenticate(authorization: str = Header(default="")) -> Principal:  # noqa: B008
         token = authorization.removeprefix("Bearer ").strip()
-        result = user_store.authenticate(token) if authorization.startswith("Bearer ") else None
-        if result is None:
+        principal = _local_bearer(token) if authorization.startswith("Bearer ") else None
+        if principal is None:
             raise HTTPException(status_code=401, detail="invalid or missing bearer token")
-        return result[0]
+        return principal
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
@@ -527,10 +543,10 @@ def build_app(agent_name: str) -> FastAPI:
     @app.post("/chat")
     async def chat(
         req: ChatRequest,
-        user: user_store.User = Depends(_authenticate),  # noqa: B008
+        principal: Principal = Depends(_authenticate),  # noqa: B008
     ) -> StreamingResponse:
         agent = agent_config.current().get(agent_name)
-        kwargs: dict[str, Any] = {"user_id": user.id, "agent_name": agent_name}
+        kwargs: dict[str, Any] = {"principal": principal, "agent_name": agent_name}
         if agent is not None:
             kwargs["system_prompt"] = agent.system_prompt
             kwargs["allowed_tools"] = (
@@ -558,7 +574,8 @@ def build_app(agent_name: str) -> FastAPI:
         from fleetent.tui.transport import WSTransport
 
         auth = websocket.headers.get("authorization", "")
-        if not _validate_tui_token(auth):
+        tui_principal = _validate_tui_token(auth)
+        if tui_principal is None:
             # No FLEETENT_TUI_TOKEN configured or token mismatch.
             # Run `fleetent agent init --force` or add FLEETENT_TUI_TOKEN to .env.
             _logger.warn(
@@ -569,7 +586,7 @@ def build_app(agent_name: str) -> FastAPI:
             return
         await websocket.accept()
         transport = WSTransport(websocket)
-        conn = tui_dispatch.Connection(user_id="local", transport=transport)
+        conn = tui_dispatch.Connection(user_id=tui_principal.user_id, transport=transport)
         await transport.write(tui_proto.make_event(tui_proto.EVENT_GATEWAY_READY, {}))
         try:
             while True:

@@ -1012,14 +1012,15 @@ def test_server_helpers_cover_admin_url_jobs_and_auth(
 async def test_server_auth_health_and_approval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    actor = _user(user_id="u1")
+    from fleetent.identity import Principal
+
     monkeypatch.setattr(
-        server.user_store,
-        "authenticate",
-        lambda api_key: (actor, {"id": 7, "scope": ["ops"]}) if api_key == "ma-valid" else None,
+        server,
+        "_platform_bearer",
+        lambda api_key: Principal(user_id="u1", tenant_id="default") if api_key == "ma-valid" else None,
     )
     resolved = await server._authenticate("Bearer ma-valid")
-    assert resolved[0].id == "u1"
+    assert resolved.user_id == "u1"
     with pytest.raises(HTTPException) as invalid_auth:
         await server._authenticate("Basic nope")
     assert invalid_auth.value.status_code == 401

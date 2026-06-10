@@ -39,13 +39,16 @@ def test_resolve_principal_does_not_import_platform():
     """resolve_principal must not load any fleetent.platform.* module."""
     import sys
 
-    for key in list(sys.modules):
-        if key.startswith("fleetent.platform"):
-            del sys.modules[key]
+    saved = {k: v for k, v in sys.modules.items() if k.startswith("fleetent.platform")}
+    for key in list(saved):
+        del sys.modules[key]
 
-    from fleetent.im_gateway.access import resolve_principal
+    try:
+        from fleetent.im_gateway.access import resolve_principal
 
-    resolve_principal("slack", "U1")
+        resolve_principal("slack", "U1")
 
-    loaded = [k for k in sys.modules if k.startswith("fleetent.platform")]
-    assert loaded == [], f"platform modules loaded by resolve_principal: {loaded}"
+        loaded = [k for k in sys.modules if k.startswith("fleetent.platform")]
+        assert loaded == [], f"platform modules loaded by resolve_principal: {loaded}"
+    finally:
+        sys.modules.update(saved)

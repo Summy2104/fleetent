@@ -17,9 +17,9 @@
 
 ## 4. 核消费 Principal + edge 接线
 
-- [ ] 4.1 写失败测试：`loop.run`/`run_stream` 接收 `Principal`；核内部用 `principal.user_id` 维持 memory/session/budget scope 行为不变（带过渡兼容：`Principal | str` 归一）
-- [ ] 4.2 实现核签名改造 + 过渡兼容，跑绿 4.1
-- [ ] 4.3 写失败测试 + 实现：edge 在入口解析 `Principal` 并传核——`server._authenticate` / `agent_app._authenticate` 返回 Principal；`_validate_tui_token` 通过后产出 local Principal；edge 校验 `Principal.tenant_id == agent 主体`（跨主体拒）
+- [x] 4.1 写失败测试：`loop.run`/`run_stream` 接收 `Principal`；核内部用 `principal.user_id` 维持 memory/session/budget scope 行为不变（带过渡兼容：`Principal | str` 归一）
+- [x] 4.2 实现核签名改造 + 过渡兼容，跑绿 4.1
+- [x] 4.3 写失败测试 + 实现：edge 在入口解析 `Principal` 并传核——`server._authenticate` / `agent_app._authenticate` 返回 Principal；`_validate_tui_token` 通过后产出 local Principal；edge 校验 `Principal.tenant_id == agent 主体`（跨主体拒）
 - [ ] 4.4 跑既有 /chat、/ws、TUI 端到端测试确认行为不变
 
 ## 5. cron 存档复检 + system 路径 + 收口

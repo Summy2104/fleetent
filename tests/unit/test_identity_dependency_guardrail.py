@@ -75,17 +75,23 @@ def test_im_gateway_access_no_platform_import_static():
 
 def test_importing_identity_does_not_load_platform_modules():
     """Importing fleetent.identity must not cause fleetent.platform.* to load."""
-    # Purge cached platform modules to get a clean slate.
-    for key in list(sys.modules):
-        if key.startswith("fleetent.platform"):
-            del sys.modules[key]
-    # Also purge identity so we get a fresh import.
-    for key in list(sys.modules):
-        if key in ("fleetent.identity",):
-            del sys.modules[key]
+    # Save existing module state so downstream tests are not broken by the purge.
+    saved_platform = {k: v for k, v in sys.modules.items() if k.startswith("fleetent.platform")}
+    saved_identity = sys.modules.get("fleetent.identity")
 
-    import fleetent.identity  # noqa: F401
+    for key in list(saved_platform):
+        del sys.modules[key]
+    if saved_identity is not None:
+        del sys.modules["fleetent.identity"]
 
-    loaded = [k for k in sys.modules if k.startswith("fleetent.platform")]
-    assert loaded == [], f"platform modules loaded by importing fleetent.identity: {loaded}"
+    try:
+        import fleetent.identity  # noqa: F401
+
+        loaded = [k for k in sys.modules if k.startswith("fleetent.platform")]
+        assert loaded == [], f"platform modules loaded by importing fleetent.identity: {loaded}"
+    finally:
+        # Restore pre-test state so subsequent tests see a consistent module registry.
+        sys.modules.update(saved_platform)
+        if saved_identity is not None:
+            sys.modules["fleetent.identity"] = saved_identity
 
