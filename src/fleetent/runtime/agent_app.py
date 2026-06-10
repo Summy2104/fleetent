@@ -110,7 +110,9 @@ def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
 
     Called once per standalone agent process after the agent file is loaded. The platform
     server path (server.py) continues to use configure_logging(Settings) unchanged.
-    A blank ``directory`` resolves to ``home_dir/data/logs/`` so log files land per-agent.
+    A blank ``directory`` resolves to ``home_dir/data/logs/``; a relative ``directory``
+    resolves against ``home_dir`` (anchored like agent.yaml/.env, never the process CWD);
+    an absolute ``directory`` is used as-is.
     """
     import logging
 
@@ -119,7 +121,11 @@ def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
     from fleetent.structured_logging import configure_structured_logging
 
     log = agent.observability.logging
-    resolved_dir: str | Path = log.directory if log.directory else home_dir / "data" / "logs"
+    if log.directory:
+        configured = Path(log.directory)
+        resolved_dir = configured if configured.is_absolute() else home_dir / configured
+    else:
+        resolved_dir = home_dir / "data" / "logs"
     configure_structured_logging(
         console_level=log.console_level,
         file_level=log.file_level,
