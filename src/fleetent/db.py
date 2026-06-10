@@ -23,6 +23,19 @@ def _connect(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _connect_ro(path: Path) -> sqlite3.Connection:
+    """Open a SQLite connection in read-only mode (mode=ro URI flag).
+
+    Does NOT set journal_mode or busy_timeout — those are write-side concerns.
+    Raises sqlite3.OperationalError if the file does not exist (mode=ro requires an
+    existing file; it never creates one).
+    """
+    uri = path.as_uri() + "?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 @dataclass(frozen=True)
 class DbResult:
     rows: list[Row]
@@ -62,6 +75,42 @@ class SQLiteDatabase:
     def transaction(self) -> Iterator[SQLiteConnection]:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = _connect(self.path)
+        try:
+            yield SQLiteConnection(conn)
+        except Exception:
+            conn.rollback()
+            raise
+        else:
+            conn.commit()
+        finally:
+            conn.close()
+
+
+@dataclass(frozen=True)
+class ReadOnlySQLiteDatabase:
+    """Read-only view of a SQLite database.
+
+    Opens with SQLite ``mode=ro`` — writes are rejected at the driver level.
+    Does NOT run any migrations on open; schema version is left entirely untouched.
+    Intended for platform-side projection of agent databases: the platform reads
+    without ever migrating or writing agent-side state.
+
+    Raises ``sqlite3.OperationalError`` if the underlying file does not exist
+    (mode=ro never creates files).
+    """
+
+    path: Path
+    dialect: str = "sqlite"
+
+    def execute(self, sql: str, params: Params | None = None) -> DbResult:
+        with _connect_ro(self.path) as conn:
+            cursor = conn.execute(sql, dict(params or {}))
+            rows = _rows_from_cursor(cursor)
+            return DbResult(rows=rows, rowcount=cursor.rowcount, lastrowid=cursor.lastrowid)
+
+    @contextmanager
+    def transaction(self) -> Iterator[SQLiteConnection]:
+        conn = _connect_ro(self.path)
         try:
             yield SQLiteConnection(conn)
         except Exception:

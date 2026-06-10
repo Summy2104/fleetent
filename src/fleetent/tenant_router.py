@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from fleetent.db import SQLiteDatabase
+from fleetent.db import ReadOnlySQLiteDatabase, SQLiteDatabase
 from fleetent.vector_store.backend import SQLiteVectorBackend, VectorBackend
 
 
@@ -79,6 +79,25 @@ class KbScope:
         migrate(self.shared_memory_db, migrations)
         return self.shared_memory_db
 
+    def open_kb_db_ro(self) -> ReadOnlySQLiteDatabase:
+        """Return a read-only handle to kb_db — no migration, no writes allowed.
+
+        For platform-side projection only.  Raises if the DB file does not exist.
+        """
+        return ReadOnlySQLiteDatabase(path=self.kb_db.path)
+
+    def open_shared_memory_db_ro(self) -> ReadOnlySQLiteDatabase:
+        """Return a read-only handle to shared_memory_db — no migration, no writes.
+
+        For platform-side projection only.  Raises if the DB file does not exist.
+        """
+        if self.shared_memory_db is None:
+            raise ValueError(
+                "shared_memory_db not provisioned in this KbScope — "
+                "use SQLiteTenantBackend or supply shared_memory_db explicitly"
+            )
+        return ReadOnlySQLiteDatabase(path=self.shared_memory_db.path)
+
 
 @dataclass(frozen=True)
 class AgentScope:
@@ -96,6 +115,13 @@ class AgentScope:
 
         migrate(self.state_db, migrations)
         return self.state_db
+
+    def open_state_db_ro(self) -> ReadOnlySQLiteDatabase:
+        """Return a read-only handle to state_db — no migration, no writes allowed.
+
+        For platform-side projection only.  Raises if the DB file does not exist.
+        """
+        return ReadOnlySQLiteDatabase(path=self.state_db.path)
 
 
 class TenantBackend(Protocol):
