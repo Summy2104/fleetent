@@ -25,7 +25,7 @@ def _table_names(db_path: Path) -> set[str]:
 
 def test_open_scope_triggers_migrate_on_open(tmp_path: Path) -> None:
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
-    scope = router.scope("default")
+    scope = router.tenant_scope("default")
 
     # Opening the scope with migrations applied should build the schema.
     scope.open_kb_db(KB_MIGRATIONS)
@@ -37,7 +37,7 @@ def test_open_scope_triggers_migrate_on_open(tmp_path: Path) -> None:
 
 def test_open_scope_twice_is_idempotent(tmp_path: Path) -> None:
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
-    scope = router.scope("default")
+    scope = router.tenant_scope("default")
 
     scope.open_kb_db(KB_MIGRATIONS)
     scope.open_kb_db(KB_MIGRATIONS)  # second call must not raise
@@ -48,7 +48,7 @@ def test_open_scope_twice_is_idempotent(tmp_path: Path) -> None:
 
 def test_open_scope_returns_the_same_db(tmp_path: Path) -> None:
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
-    scope = router.scope("default")
+    scope = router.tenant_scope("default")
 
     db = scope.open_kb_db(KB_MIGRATIONS)
     assert db is scope.kb_db
@@ -57,8 +57,8 @@ def test_open_scope_returns_the_same_db(tmp_path: Path) -> None:
 def test_two_tenants_migrate_independently(tmp_path: Path) -> None:
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
 
-    scope_a = router.scope("tenant-a")
-    scope_b = router.scope("tenant-b")
+    scope_a = router.tenant_scope("tenant-a")
+    scope_b = router.tenant_scope("tenant-b")
 
     scope_a.open_kb_db(KB_MIGRATIONS)
     scope_b.open_kb_db(KB_MIGRATIONS)

@@ -162,19 +162,20 @@ def test_init_agent_db_schema_creates_all_agent_tables(
 
     from fleetent.runtime.agent_app import _init_agent_db_schema
 
-    _init_agent_db_schema(database_url)
+    _init_agent_db_schema(database_url, agent_id="test-agent")
 
-    # Non-KB agent-side stores land in the main agent db via ensure_schema.
+    # Non-KB/non-session agent-side stores land in the main agent db via ensure_schema.
     main_tables = _table_names(SQLiteDatabase(path=db_path))
     assert "traces" in main_tables
     assert "memory_items" in main_tables
     assert "reflection_reports" in main_tables
-    assert "sessions" in main_tables
-    # KB tables must NOT be in the main db — they are Y-managed in a tenant-scoped db.
+    # sessions table is now in the per-agent agent_state.db (3b-1)
+    assert "sessions" not in main_tables
+    # KB tables must NOT be in the main db — Y-managed in tenant-scoped db.
     assert "knowledge_bases" not in main_tables
     assert "knowledge_documents" not in main_tables
 
-    # KB tables land in data/default/kb.db via TenantRouter + migrate-on-open.
+    # KB tables land in default/kb.db via TenantRouter + migrate-on-open.
     kb_db_path = tmp_path / "default" / "kb.db"
     assert kb_db_path.exists()
     kb_tables = _table_names(SQLiteDatabase(path=kb_db_path))
@@ -184,6 +185,12 @@ def test_init_agent_db_schema_creates_all_agent_tables(
     assert "knowledge_chunks_fts" in kb_tables
     assert "knowledge_source_states" in kb_tables
 
+    # sessions table lands in per-agent agent_state.db via agent_scope + Y (3b-1).
+    agent_state_db_path = tmp_path / "default" / "test-agent" / "agent_state.db"
+    assert agent_state_db_path.exists()
+    agent_tables = _table_names(SQLiteDatabase(path=agent_state_db_path))
+    assert "sessions" in agent_tables
+
 
 def test_init_agent_db_schema_idempotent(tmp_path: Path) -> None:
     db_path = tmp_path / "agent.db"
@@ -191,8 +198,8 @@ def test_init_agent_db_schema_idempotent(tmp_path: Path) -> None:
 
     from fleetent.runtime.agent_app import _init_agent_db_schema
 
-    _init_agent_db_schema(database_url)
-    _init_agent_db_schema(database_url)
+    _init_agent_db_schema(database_url, agent_id="test-agent")
+    _init_agent_db_schema(database_url, agent_id="test-agent")
     assert (
         SQLiteDatabase(path=db_path)
         .execute("SELECT name FROM sqlite_master WHERE name='traces'")

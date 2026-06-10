@@ -28,7 +28,7 @@ def test_kb_schema_established_in_tenant_scoped_db(tmp_path) -> None:
     data_dir.mkdir()
     db_url = f"sqlite:///{data_dir / 'fleetent.db'}"
 
-    _init_agent_db_schema(db_url)
+    _init_agent_db_schema(db_url, agent_id="test-agent")
 
     kb_db_path = data_dir / "default" / "kb.db"
     assert kb_db_path.exists(), "router must create data/default/kb.db"
@@ -48,7 +48,7 @@ def test_kb_tables_absent_from_main_agent_db(tmp_path) -> None:
     data_dir.mkdir()
     db_url = f"sqlite:///{data_dir / 'fleetent.db'}"
 
-    _init_agent_db_schema(db_url)
+    _init_agent_db_schema(db_url, agent_id="test-agent")
 
     main_db_path = data_dir / "fleetent.db"
     if main_db_path.exists():
@@ -66,7 +66,7 @@ def test_other_stores_still_use_ensure_schema(tmp_path) -> None:
     data_dir.mkdir()
     db_url = f"sqlite:///{data_dir / 'fleetent.db'}"
 
-    _init_agent_db_schema(db_url)
+    _init_agent_db_schema(db_url, agent_id="test-agent")
 
     main_db_path = data_dir / "fleetent.db"
     assert main_db_path.exists()

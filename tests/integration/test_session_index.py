@@ -1,17 +1,19 @@
 import pytest
 
 import fleetent.session.index as session_index
+from fleetent.db import SQLiteDatabase
+from fleetent.schema_migrations import migrate
+from fleetent.session.migrations import MIGRATIONS as SESSION_MIGRATIONS
 
 
 @pytest.fixture(autouse=True)
 def _isolate_db(tmp_path, monkeypatch):
-    # session.index resolves its DB from DATABASE_URL (the module-level DB_PATH was
-    # removed by the session-reliability refactor); sessions is an agent-side
-    # self-init table, so the fixture creates the schema the way agent boot does.
-    db_path = tmp_path / "x.db"
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    session_index.ensure_schema(session_index._db())
-    return db_path
+    # Inject a fresh per-agent state DB for each test, mirroring how agent boot wires
+    # session.index via agent_scope + migrate-on-open (3b-1).
+    db = SQLiteDatabase(path=tmp_path / "agent_state.db")
+    migrate(db, SESSION_MIGRATIONS)
+    monkeypatch.setattr(session_index, "_state_db", db)
+    return db.path
 
 
 # --- 2. table / schema ---

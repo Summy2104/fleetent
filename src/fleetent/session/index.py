@@ -1,40 +1,33 @@
-"""Lightweight per-session metadata index stored in the unified agent DB.
+"""Lightweight per-session metadata index stored in the per-agent state DB.
 
 Records creation/last-active time, message count, owning user and agent name for
-each session. Physically separate from the session message files (manager);
+each session.  Physically separate from the session message files (manager);
 written as a best-effort side effect after a successful message save.
+
+Connection source: the per-agent agent_state.db obtained via agent_scope in
+agent_app._init_agent_db_schema.  Call set_state_db(db) once at boot before
+any reads or writes.
 """
 
-import os
 import time
 
-from fleetent import paths
-from fleetent.db import SQLiteDatabase, create_database
+from fleetent.db import SQLiteDatabase
+
+_state_db: SQLiteDatabase | None = None
 
 
-def _database_url() -> str:
-    default = f"sqlite:///{paths.data_dir() / 'fleetent.db'}"
-    return os.environ.get("DATABASE_URL", default)
+def set_state_db(db: SQLiteDatabase) -> None:
+    """Inject the per-agent state DB.  Called once at agent boot."""
+    global _state_db
+    _state_db = db
 
 
 def _db() -> SQLiteDatabase:
-    return create_database(_database_url())
-
-
-def ensure_schema(db: SQLiteDatabase) -> None:
-    """Create sessions table if it does not exist. Idempotent."""
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS sessions (
-            session_id    TEXT PRIMARY KEY,
-            user_id       TEXT,
-            created_at    REAL,
-            updated_at    REAL,
-            message_count INTEGER,
-            agent_name    TEXT
+    if _state_db is None:
+        raise RuntimeError(
+            "session.index: state_db not initialized — call set_state_db(db) at boot"
         )
-        """
-    )
+    return _state_db
 
 
 def record_activity(

@@ -8,6 +8,9 @@ import fleetent.session.index as session_index
 import fleetent.session.manager as session_mgr
 from fleetent import agent_config
 from fleetent.agent_config import AgentFile
+from fleetent.db import SQLiteDatabase
+from fleetent.schema_migrations import migrate
+from fleetent.session.migrations import MIGRATIONS as SESSION_MIGRATIONS
 
 
 @pytest.fixture
@@ -19,13 +22,12 @@ def sessions_dir(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def index_db(tmp_path, monkeypatch):
-    # Isolate the metadata index DB for every test: save() writes to it as a side
-    # effect. session.index resolves its DB from DATABASE_URL (module DB_PATH was
-    # removed); sessions is agent-side self-init, mirrored here via ensure_schema.
-    db_path = tmp_path / "x.db"
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    session_index.ensure_schema(session_index._db())
-    return db_path
+    # Inject a fresh per-agent state DB for each test; save() writes metadata to it
+    # as a side effect (3b-1: session index now uses agent_scope, not DATABASE_URL).
+    db = SQLiteDatabase(path=tmp_path / "agent_state.db")
+    migrate(db, SESSION_MIGRATIONS)
+    monkeypatch.setattr(session_index, "_state_db", db)
+    return db.path
 
 
 @pytest.fixture(autouse=True)

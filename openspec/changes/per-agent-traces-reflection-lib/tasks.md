@@ -1,7 +1,7 @@
-## 1. lift DDL 进 per-agent MIGRATIONS
+## 1. 统一 per-agent MIGRATIONS（合并 3b-1 session 列表 + append traces/reflection）
 
-- [ ] 1.1 写失败测试：空 per-agent 库经 Y 迁移后含 `traces` + `reflection_reports` 表，结构等价于现 `traces.py`/`reflection.py` 的 `ensure_schema` 产出
-- [ ] 1.2 实现：把两处 `ensure_schema` 的 DDL 原样 lift 进 per-agent 库 `MIGRATIONS`（接 3b-1 版本之后），跑绿 1.1
+- [ ] 1.1 写失败测试：① 空 `agent_state.db` 经**统一** per-agent MIGRATIONS 迁移后含 `sessions`(v1) + `traces`(v2) + `reflection_reports`(v3)，结构等价于各自 `ensure_schema` 产出；② **回归保护**：连续两次 open（含已建库）不报 `SchemaTooNewError`、不重建（验证单文件单 user_version 由统一列表正确推进）
+- [ ] 1.2 实现：新建统一 per-agent 迁移模块（含 3b-1 `session/migrations.py` 的 v1 步并入，traces=v2、reflection=v3，DDL 原样 lift 不改 schema）；`agent_app._init_agent_db_schema` 改为对该统一列表**单次** `open_state_db(AGENT_STATE_MIGRATIONS)`（替掉 3b-1 的 `open_state_db(SESSION_MIGRATIONS)`），跑绿 1.1。**不得给 traces/reflection 各建独立列表跑同一文件**（user_version 撞戳）
 
 ## 2. 连接走 agent_scope + 接线
 
