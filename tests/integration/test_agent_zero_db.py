@@ -16,19 +16,20 @@ def _boom(*args, **kwargs):
     raise AssertionError("database accessed on the zero-DB runtime path")
 
 
-def _write_agent(root) -> None:
-    d = root / "support"
+def _write_agent(home) -> None:
+    # Deployed single-agent home layout: agents/default/agent.yaml is the forced
+    # default (bindings were removed from AgentFile; resolution is default-only).
+    d = home / "agents" / "default"
     d.mkdir(parents=True)
     (d / "agent.yaml").write_text(
         yaml.safe_dump(
             {
-                "name": "support",
+                "name": "default",
                 "version": 1,
                 "system_prompt": "S",
                 "models": agent_config.default_models().model_dump(mode="json"),
                 "allowed_tools": ["shell"],
                 "mcp_servers": [{"id": "acme", "transport": "http", "url": "https://acme"}],
-                "bindings": {"channels": ["slack:C1"], "users": ["u1"], "default": True},
             }
         ),
         encoding="utf-8",
@@ -36,14 +37,16 @@ def _write_agent(root) -> None:
 
 
 def test_runtime_resolution_does_not_touch_db(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    monkeypatch.delenv("FLEETENT_AGENTS_DIR", raising=False)
     _write_agent(tmp_path)
-    agent_config.scan(tmp_path)
+    agent_config.scan()
     # Any real sqlite connection now raises — proves the path below is DB-free.
     monkeypatch.setattr(db.sqlite3, "connect", _boom)
 
     snap = snapshot.resolve_agent_for_request("slack", "C1", "u1")
-    assert snap is not None and snap.name == "support"
-    assert snapshot.connector_scope(snap) == "support"
+    assert snap is not None and snap.name == "default"
+    assert snapshot.connector_scope(snap) == "default"
 
     resolved = {
         s["id"]
@@ -54,5 +57,5 @@ def test_runtime_resolution_does_not_touch_db(tmp_path, monkeypatch):
     assert resolved == {"acme", "default"}
 
     agent = normalizer.get_agent_for_context("slack", "C1", "u1")
-    assert agent is not None and agent.name == "support"
+    assert agent is not None and agent.name == "default"
     assert agent.system_prompt == "S"

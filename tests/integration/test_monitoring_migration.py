@@ -40,7 +40,7 @@ def test_head_schema_has_no_monitoring_tables(tmp_path: Path) -> None:
 
 
 def test_monitoring_migration_round_trip(tmp_path: Path) -> None:
-    """upgrade head → downgrade -1 → upgrade head must all succeed cleanly."""
+    """upgrade head → downgrade below the drop (063) → upgrade head must succeed cleanly."""
     db = tmp_path / "rt.db"
     cfg = _make_cfg(db)
 
@@ -49,11 +49,11 @@ def test_monitoring_migration_round_trip(tmp_path: Path) -> None:
         "monitoring tables present after first upgrade"
     )
 
-    command.downgrade(cfg, "-1")
-    # After downgrade the monitoring tables should be present again (recreated by downgrade)
+    command.downgrade(cfg, "062")
+    # Below the drop migration the monitoring tables are present again (recreated)
     tables_after_down = _table_names(db)
     for table in _MONITORING_TABLES:
-        assert table in tables_after_down, f"Expected {table!r} after downgrade -1"
+        assert table in tables_after_down, f"Expected {table!r} after downgrade to 062"
 
     command.upgrade(cfg, "head")
     tables_after_reup = _table_names(db)

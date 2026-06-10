@@ -552,7 +552,7 @@ def build_app(agent_name: str) -> FastAPI:
         if not _validate_tui_token(auth):
             # No FLEETENT_TUI_TOKEN configured or token mismatch.
             # Run `fleetent agent init --force` or add FLEETENT_TUI_TOKEN to .env.
-            _logger.warning(
+            _logger.warn(
                 "tui_ws_auth_rejected",
                 hint="Set FLEETENT_TUI_TOKEN in agent .env; run: fleetent agent init --force",
             )

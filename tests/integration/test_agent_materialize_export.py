@@ -75,8 +75,6 @@ def test_agent_file_from_store_exports_authored_runtime_config(db):
     assert exported.memory_namespace == "support-memory"
     assert exported.mcp_servers[0].id == "docs"
     assert exported.mcp_servers[0].api_key_env == "FLEETENT_AGENT_SUPPORT_DOCS"
-    assert exported.bindings.users == ["u_alice"]
-    assert exported.bindings.channels == ["slack:C0123"]
     assert exported.knowledge.enabled is True
     assert exported.knowledge.bindings[0].tenant_id == "acme"
     assert exported.knowledge.bindings[0].kb_id == "support-kb"
@@ -118,14 +116,20 @@ def test_agent_file_from_store_applies_config_overrides(db):
         "ov",
         "p",
         [],
-        config_overrides={"agent_max_turns": 80, "access": {"require_approval": False}},
+        # top-level `access` moved into per-connector declarations; exercise the
+        # deep-merge with a current scalar + nested block instead.
+        config_overrides={
+            "agent_max_turns": 80,
+            "knowledge": {"retrieval_policy": {"top_k": 7}},
+        },
     )
 
     af = materialize.agent_file_from_store(agent)
 
     assert af.agent_max_turns == 80
-    assert af.access.require_approval is False
-    assert af.access.allow_users == []  # untouched nested default preserved
+    assert af.knowledge.retrieval_policy.top_k == 7
+    assert af.knowledge.retrieval_policy.mode == "hybrid"  # untouched nested default
+    assert af.knowledge.enabled is False  # untouched sibling default preserved
 
 
 def test_agent_file_from_store_ignores_invalid_config_override(db):

@@ -14,11 +14,13 @@ from fastapi.testclient import TestClient
 from fleetent import server as srv
 from fleetent import user_store as us
 from fleetent.cron_scheduler import CronScheduler
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    apply_migrations(tmp_path / "users.db")
     monkeypatch.chdir(tmp_path)
     with TestClient(srv.app) as c:
         yield c
@@ -38,6 +40,7 @@ def test_admin_route_is_present(client):
 def test_no_monitoring_collect_job_registered(tmp_path, monkeypatch):
     """monitoring_collect must not appear in the scheduler after startup."""
     monkeypatch.setattr(us, "DB_PATH", tmp_path / "users.db")
+    apply_migrations(tmp_path / "users.db")
     monkeypatch.chdir(tmp_path)
 
     original_add_interval = CronScheduler.add_interval_job

@@ -17,24 +17,31 @@ from fleetent.platform.im_gateway_management import identity as im_user_store
 from tests.integration._migration_template import apply_migrations as _apply_migrations
 
 
-def _bind_default_agent(tmp_path: Path, user_id: str) -> None:
-    """Bind a default agent allowing ``user_id`` so the per-agent local gate passes."""
+def _bind_default_agent(tmp_path: Path, user_id: str, monkeypatch) -> None:
+    """Deploy a single home agent allowing ``user_id`` (forced default — bindings were
+    removed from AgentFile; the IM gate lives on the connector declaration)."""
     import yaml
 
     import fleetent.agent_config as agent_config
 
-    root = tmp_path / "agents"
-    d = root / "it-bot"
+    d = tmp_path / "agents" / "default"
     d.mkdir(parents=True, exist_ok=True)
     doc = {
-        "name": "it-bot",
+        "name": "default",
         "version": 1,
         "models": agent_config.default_models().model_dump(mode="json"),
-        "bindings": {"default": True},
-        "access": {"allow_users": [user_id]},
+        "connectors": {
+            "slack": {
+                "bot_token_env": "TEST_BOT_TOKEN",
+                "app_token_env": "TEST_APP_TOKEN",
+                "access": {"allow_users": [user_id]},
+            }
+        },
     }
     (d / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
-    agent_config.scan(root)
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    monkeypatch.delenv("FLEETENT_AGENTS_DIR", raising=False)
+    agent_config.scan()
 
 
 @pytest.fixture
@@ -58,11 +65,11 @@ def isolated_db(tmp_path, monkeypatch):
     return tmp_path
 
 
-async def test_full_slack_message_pipeline(isolated_db):
+async def test_full_slack_message_pipeline(isolated_db, monkeypatch):
     """Mock Slack message → full pipeline → reply sent + session saved."""
     from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
-    _bind_default_agent(isolated_db, "internal-user-1")
+    _bind_default_agent(isolated_db, "internal-user-1", monkeypatch)
 
     reply_calls: list[str] = []
 
@@ -168,11 +175,11 @@ async def test_tool_not_in_allowed_tools_raises_before_approval(isolated_db):
         pass
 
 
-async def test_session_history_accumulates_across_messages(isolated_db):
+async def test_session_history_accumulates_across_messages(isolated_db, monkeypatch):
     """Two messages to same session → history grows correctly."""
     from fleetent.im_gateway.normalizer import NormalizedMessage, route
 
-    _bind_default_agent(isolated_db, "internal-user-2")
+    _bind_default_agent(isolated_db, "internal-user-2", monkeypatch)
 
     reply_calls: list[str] = []
 

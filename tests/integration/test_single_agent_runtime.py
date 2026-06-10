@@ -45,10 +45,12 @@ def test_request_resolves_to_home_agent_via_default(tmp_path, monkeypatch) -> No
     assert snap.system_prompt == "You are deployed."
 
 
-def test_channel_binding_resolves_to_home_agent(tmp_path, monkeypatch) -> None:
+def test_home_agent_resolves_regardless_of_channel(tmp_path, monkeypatch) -> None:
+    # bindings were removed from AgentFile: the deployed home agent is the forced
+    # default, so any channel id resolves to it.
     monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
     monkeypatch.delenv("FLEETENT_AGENTS_DIR", raising=False)
-    _write_home_agent(tmp_path, bindings={"channels": ["slack:C9"]})
+    _write_home_agent(tmp_path)
     agent_config.scan()
 
     snap = snapshot.resolve_agent_for_request(platform="slack", channel_id="C9", user_id=None)

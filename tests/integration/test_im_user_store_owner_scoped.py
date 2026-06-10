@@ -4,6 +4,7 @@ import pytest
 
 from fleetent import user_store
 from fleetent.platform.im_gateway_management import identity as im_user_store
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
@@ -11,6 +12,7 @@ def db(tmp_path, monkeypatch):
     p = tmp_path / "users.db"
     monkeypatch.setattr(user_store, "DB_PATH", p)
     monkeypatch.setattr(im_user_store, "DB_PATH", p)
+    apply_migrations(p)
     return p
 
 

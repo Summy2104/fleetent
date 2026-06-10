@@ -3,9 +3,10 @@ import pytest
 import fleetent.platform.im_gateway_management.channel_allowlist as im_channel_allowlist
 import fleetent.platform.im_gateway_management.connector_store as im_connector_store
 import fleetent.platform.user_management.api_key_store as api_key_store
-from fleetent import paths, user_store
+from fleetent import user_store
 from fleetent.governance import audit_log, blocklist
 from fleetent.platform.im_gateway_management import identity as im_user_store
+from tests.integration._migration_template import apply_migrations
 
 DEFAULT_USER_STORE_DB_PATH = user_store.DB_PATH
 DEFAULT_LEGACY_RE_EXPORT_DB_PATHS = {
@@ -21,6 +22,7 @@ DEFAULT_LEGACY_RE_EXPORT_DB_PATHS = {
 @pytest.fixture(autouse=True)
 def tmp_db(tmp_path, monkeypatch):
     monkeypatch.setattr(user_store, "DB_PATH", tmp_path / "users.db")
+    apply_migrations(tmp_path / "users.db")
 
 
 def test_create_user_returns_user():
@@ -30,16 +32,43 @@ def test_create_user_returns_user():
     assert len(user.id) == 36  # uuid4
 
 
-def test_default_db_path_uses_fleetent_database(monkeypatch):
-    monkeypatch.delenv("FLEETENT_HOME", raising=False)
-    assert paths.data_dir() / "fleetent.db" == DEFAULT_USER_STORE_DB_PATH
+def _assert_derivation_in_clean_env(code: str) -> None:
+    """Run an import-time derivation assertion in a child interpreter.
+
+    Constants are frozen at import. Comparing an in-process constant against a
+    call-time paths.X() is fragile: an ambient FLEETENT_HOME in the developer
+    shell freezes a different base than a post-delenv call resolves. A child
+    interpreter with FLEETENT_HOME stripped checks constant == derivation under
+    one consistent environment.
+    """
+    import os
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if k != "FLEETENT_HOME"}
+    subprocess.run([sys.executable, "-c", code], env=env, check=True)
 
 
-def test_legacy_re_exports_inherit_default_db_path(monkeypatch):
-    monkeypatch.delenv("FLEETENT_HOME", raising=False)
-    assert DEFAULT_LEGACY_RE_EXPORT_DB_PATHS
-    for db_path in DEFAULT_LEGACY_RE_EXPORT_DB_PATHS.values():
-        assert db_path == paths.data_dir() / "fleetent.db"
+def test_default_db_path_uses_fleetent_database():
+    _assert_derivation_in_clean_env(
+        "from fleetent import paths, user_store; "
+        "assert user_store.DB_PATH == paths.data_dir() / 'fleetent.db', user_store.DB_PATH"
+    )
+
+
+def test_legacy_re_exports_inherit_default_db_path():
+    _assert_derivation_in_clean_env(
+        "from fleetent import paths; "
+        "import fleetent.platform.im_gateway_management.channel_allowlist as a; "
+        "import fleetent.platform.im_gateway_management.connector_store as c; "
+        "import fleetent.platform.user_management.api_key_store as k; "
+        "from fleetent.governance import audit_log, blocklist; "
+        "from fleetent.platform.im_gateway_management import identity as iu; "
+        "expected = paths.data_dir() / 'fleetent.db'; "
+        "mods = [a, c, k, audit_log, blocklist, iu]; "
+        "bad = [m.__name__ for m in mods if m.DB_PATH != expected]; "
+        "assert not bad, bad"
+    )
 
 
 def test_get_by_api_key_found():

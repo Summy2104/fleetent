@@ -36,27 +36,35 @@ def _msg(replies):
     )
 
 
-def _write_default_agent(root, name, **fields):
-    # A default agent allowing u1 so the per-agent gate passes; no features declared so
+def _write_default_agent(home, monkeypatch, **fields):
+    # Deployed single home agent allowing u1 (forced default — bindings were removed;
+    # the IM gate lives on the connector declaration); no features declared so
     # agent_features stays {} and run_code remains gated by the resolved sandbox mode.
     doc = {
-        "name": name,
+        "name": "default",
         "version": 1,
         "models": agent_config.default_models().model_dump(mode="json"),
-        "access": {"allow_users": ["u1"]},
-        "bindings": {"default": True},
+        "connectors": {
+            "slack": {
+                "bot_token_env": "TEST_BOT_TOKEN",
+                "app_token_env": "TEST_APP_TOKEN",
+                "access": {"allow_users": ["u1"]},
+            }
+        },
     }
     doc.update(fields)
-    d = root / name
+    d = home / "agents" / "default"
     d.mkdir(parents=True, exist_ok=True)
     (d / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
-    agent_config.scan(root)
+    monkeypatch.setenv("FLEETENT_HOME", str(home))
+    monkeypatch.delenv("FLEETENT_AGENTS_DIR", raising=False)
+    agent_config.scan()
 
 
 async def test_route_passes_sandbox_context_to_run(tmp_path, monkeypatch):
     _setup_db(tmp_path, monkeypatch)
     monkeypatch.setattr(access, "APPROVALS_PATH", tmp_path / "data" / "im_approvals.json")
-    _write_default_agent(tmp_path / "agents", "sb3-bot")
+    _write_default_agent(tmp_path, monkeypatch)
 
     import fleetent.integrations.sandbox.enablement as se
     import fleetent.runtime.loop as agent_loop

@@ -118,25 +118,39 @@ def test_load_version_by_id(db):
 # --- resolve_agent_for_request: channel > user > default (file index) ---
 
 
-def test_resolve_prefers_channel_over_user_and_default(agents):
-    agents("chan-bot", system_prompt="channel", bindings={"channels": ["slack:C1"]})
-    agents("user-bot", system_prompt="user", bindings={"users": ["u1"]})
-    agents("default-bot", system_prompt="default", bindings={"default": True})
+def test_resolve_is_default_only_in_multi_agent_scan(agents):
+    # bindings were removed from AgentFile; a multi-agent directory scan publishes no
+    # default, so request resolution returns None regardless of channel/user inputs.
+    agents("chan-bot", system_prompt="channel")
+    agents("user-bot", system_prompt="user")
     snap = agent_runtime.resolve_agent_for_request("slack", "C1", "u1")
-    assert snap is not None and snap.name == "chan-bot"
+    assert snap is None
 
 
-def test_resolve_falls_back_to_user_when_no_channel(agents):
-    agents("user-bot", system_prompt="user", bindings={"users": ["u1"]})
-    agents("default-bot", system_prompt="default", bindings={"default": True})
-    snap = agent_runtime.resolve_agent_for_request("slack", "C-none", "u1")
-    assert snap is not None and snap.name == "user-bot"
-
-
-def test_resolve_falls_back_to_default_when_no_channel_or_user(agents):
-    agents("default-bot", system_prompt="default", bindings={"default": True})
-    snap = agent_runtime.resolve_agent_for_request("slack", "C-none", "u-none")
-    assert snap is not None and snap.name == "default-bot"
+def test_resolve_returns_forced_default_in_single_agent_mode(tmp_path, monkeypatch):
+    # Deployed single-agent mode (agents/default/agent.yaml under FLEETENT_HOME) is the
+    # sole forced default; channel/user identifiers no longer influence resolution.
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    monkeypatch.delenv("FLEETENT_AGENTS_DIR", raising=False)
+    home_agent = tmp_path / "agents" / "default"
+    home_agent.mkdir(parents=True)
+    (home_agent / "agent.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "name": "default",
+                "version": 1,
+                "system_prompt": "deployed",
+                "models": agent_config.default_models().model_dump(mode="json"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    agent_config.scan()
+    try:
+        snap = agent_runtime.resolve_agent_for_request("slack", "C-any", "u-any")
+        assert snap is not None and snap.name == "default"
+    finally:
+        agent_config.scan(tmp_path / "nonexistent")  # drop the published index
 
 
 def test_resolve_returns_none_when_nothing_matches(agents):

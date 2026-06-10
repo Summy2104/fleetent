@@ -39,6 +39,11 @@ def test_lifespan_loads_plugins(tmp_path, monkeypatch):
 
     import fleetent.server as srv
 
+    db = tmp_path / "users.db"
+    apply_migrations(db)
+    monkeypatch.setattr(us, "DB_PATH", db)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db}")
+
     with patch("fleetent.server.load_plugins") as mock_load, TestClient(srv.app):
         pass
     mock_load.assert_called_once()
