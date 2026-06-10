@@ -404,7 +404,7 @@ async def schedule(
     otherwise it defaults back to the chat/thread the task was created in. pause/resume
     toggle a task; remove deletes it; run_now fires it immediately; list shows all tasks.
     """
-    from fleetent import schedule_store
+    from fleetent import cron_scheduler
 
     if action == "create":
         deliver = None
@@ -416,11 +416,15 @@ async def schedule(
                 "target_type": notify_target_type,
             }
         origin = _origin_from_context(tool_context)
-        task = schedule_store.create(
+        # Owner = who is acting (resolved principal), never what the model typed;
+        # the user_id parameter is only a fallback for principal-less runs.
+        ctx_principal = getattr(tool_context, "principal", None) if tool_context else None
+        owner = ctx_principal.user_id if ctx_principal is not None else user_id
+        task = cron_scheduler.create_task(
             name=name,
             cron_expr=cron_expr or None,
             timezone=timezone,
-            user_id=user_id,
+            user_id=owner,
             message=message,
             source="tool",
             schedule_kind=schedule_kind,
@@ -429,10 +433,21 @@ async def schedule(
             origin=origin,
             deliver=deliver,
         )
-        return f"Scheduled task created: id={task['id']!r} name={name!r} kind={schedule_kind!r}"
+        if cron_scheduler.current() is None:
+            # No live scheduler in this process — be truthful so the AI does not
+            # promise the user a fire time that will never come.
+            return (
+                f"Scheduled task saved: id={task['id']!r} name={name!r} "
+                f"kind={schedule_kind!r} — takes effect when the agent service is running "
+                "(no scheduler in this process)"
+            )
+        return (
+            f"Scheduled task created and registered: id={task['id']!r} "
+            f"name={name!r} kind={schedule_kind!r}"
+        )
 
     if action == "list":
-        tasks = schedule_store.list_tasks(include_disabled=True)
+        tasks = cron_scheduler.list_tasks(include_disabled=True)
         if not tasks:
             return "No scheduled tasks"
         lines = [
@@ -443,24 +458,21 @@ async def schedule(
         return "\n".join(lines)
 
     if action == "remove":
-        deleted = schedule_store.delete(task_id)
+        deleted = cron_scheduler.remove_task(task_id)
         if not deleted:
             return f"error: task {task_id!r} not found"
         return f"Scheduled task {task_id!r} removed"
 
     if action in ("pause", "resume"):
-        matched = schedule_store.set_enabled(task_id, action == "resume")
+        matched = cron_scheduler.set_task_enabled(task_id, action == "resume")
         if not matched:
             return f"error: task {task_id!r} not found"
         return f"Scheduled task {task_id!r} {action}d"
 
     if action == "run_now":
-        from fleetent import cron_scheduler
-
-        existing = schedule_store.get(task_id)
-        if existing is None:
+        fired = await cron_scheduler.run_task_now(task_id)
+        if not fired:
             return f"error: task {task_id!r} not found"
-        await cron_scheduler._fire(existing)
         return f"Scheduled task {task_id!r} fired"
 
     return f"error: unknown action {action!r} (use create/list/remove/run_now/pause/resume)"
@@ -533,3 +545,49 @@ async def invoke_agent(agent_name: str, message: str) -> str:
         agent_name=agent_name,
         model_policy=snapshot.model_policy,
     )
+
+
+@tool(risk_level="medium")
+async def send_im_message(
+    target: str,
+    text: str,
+    target_type: str = "user",
+    platform: str = "",
+    tool_context: ToolContext | None = None,
+) -> str:
+    """Proactively send an IM message to a user (DM) or a channel.
+
+    Use when the user asks you to notify or message someone, or to post to a
+    channel — beyond replying in the current conversation (replying needs no
+    tool). `target` is the platform-native id (Slack `U…`/`C…`, Telegram chat
+    id); `target_type` is "user" for a DM (default) or "channel" for a channel
+    post. `platform` defaults to the current conversation's platform.
+    """
+    # Lazy import: keeps module load light and avoids cycles (builtin convention).
+    from fleetent import outbound
+
+    connectors = tool_context.outbound_connectors if tool_context else {}
+    sc = getattr(tool_context, "session_context", None) if tool_context else None
+    resolved_platform = platform or str(getattr(sc, "platform", "") or "")
+    if not resolved_platform:
+        return "发送失败：未指定平台且当前会话无平台信息，请显式传入 platform。"
+    connector = connectors.get(resolved_platform)
+    if connector is None:
+        return (
+            f"发送失败：当前通道不支持主动外发（无可用 {resolved_platform} 连接器）。"
+            "该功能仅在 IM 网关运行时可用。"
+        )
+    if target_type == "user":
+        reachable = await outbound.is_reachable(resolved_platform, connector, target)
+        if not reachable:
+            return (
+                f"发送失败：目标 {target} 在 {resolved_platform} 上不可达/无法触达"
+                "（Telegram 用户需先与 bot 对话过）。"
+            )
+    sent = await outbound.send_to(
+        resolved_platform, connector, target, text, target_type=target_type
+    )
+    if not sent:
+        return f"发送失败：{resolved_platform} 投递 {target} 时出错，请稍后重试。"
+    kind = "私信" if target_type == "user" else "频道消息"
+    return f"已发送{kind}到 {resolved_platform}:{target}。"

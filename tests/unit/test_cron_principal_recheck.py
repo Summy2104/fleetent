@@ -14,8 +14,12 @@ def _make_user(user_id: str, status: str = "active", tenant_id: str = "default")
     from fleetent import user_store
 
     return user_store.User(
-        id=user_id, name="Test", api_key="k", created_at="2024-01-01",
-        status=status, tenant_id=tenant_id,
+        id=user_id,
+        name="Test",
+        api_key="k",
+        created_at="2024-01-01",
+        status=status,
+        tenant_id=tenant_id,
     )
 
 
@@ -27,7 +31,7 @@ def test_resolve_cron_principal_returns_none_for_blocked_user(monkeypatch) -> No
     from fleetent.cron_scheduler import _resolve_cron_principal
 
     monkeypatch.setattr(user_store, "get_by_id", lambda uid: _make_user(uid, status="blocked"))
-    assert _resolve_cron_principal("u1") is None
+    assert _resolve_cron_principal({"id": "t", "user_id": "u1", "origin": None}) is None
 
 
 def test_resolve_cron_principal_returns_none_when_user_missing(monkeypatch) -> None:
@@ -35,7 +39,8 @@ def test_resolve_cron_principal_returns_none_when_user_missing(monkeypatch) -> N
     from fleetent.cron_scheduler import _resolve_cron_principal
 
     monkeypatch.setattr(user_store, "get_by_id", lambda uid: None)
-    assert _resolve_cron_principal("ghost") is None
+    # Unknown identity with no IM origin: platform-domain "deleted user" semantics.
+    assert _resolve_cron_principal({"id": "t", "user_id": "ghost", "origin": None}) is None
 
 
 def test_resolve_cron_principal_returns_principal_for_active_user(monkeypatch) -> None:
@@ -44,7 +49,7 @@ def test_resolve_cron_principal_returns_principal_for_active_user(monkeypatch) -
     from fleetent.identity import Principal
 
     monkeypatch.setattr(user_store, "get_by_id", lambda uid: _make_user(uid, tenant_id="acme"))
-    result = _resolve_cron_principal("u2")
+    result = _resolve_cron_principal({"id": "t", "user_id": "u2", "origin": None})
     assert result == Principal(user_id="u2", tenant_id="acme")
 
 
@@ -64,8 +69,15 @@ async def test_fire_skips_agent_run_when_user_blocked(monkeypatch) -> None:
 
     monkeypatch.setattr(cron_scheduler, "_agent_run", _fake_agent_run)
 
-    task = {"id": "t1", "user_id": "u3", "message": "hello", "session_id": None,
-            "agent_name": None, "deliver": None, "origin": None}
+    task = {
+        "id": "t1",
+        "user_id": "u3",
+        "message": "hello",
+        "session_id": None,
+        "agent_name": None,
+        "deliver": None,
+        "origin": None,
+    }
     await cron_scheduler._fire(task)
     assert called == [], "blocked user must not trigger _agent_run"
 
@@ -74,9 +86,9 @@ async def test_fire_skips_agent_run_when_user_blocked(monkeypatch) -> None:
 
 
 async def test_fire_passes_principal_to_agent_run_for_active_user(monkeypatch) -> None:
+    import fleetent.session.manager as session_mgr
     from fleetent import cron_scheduler, user_store
     from fleetent.identity import Principal
-    import fleetent.session.manager as session_mgr
 
     monkeypatch.setattr(user_store, "get_by_id", lambda uid: _make_user(uid, tenant_id="default"))
 
@@ -89,8 +101,15 @@ async def test_fire_passes_principal_to_agent_run_for_active_user(monkeypatch) -
     monkeypatch.setattr(cron_scheduler, "_agent_run", _fake_agent_run)
     monkeypatch.setattr(session_mgr, "save", AsyncMock())
 
-    task = {"id": "t2", "user_id": "u4", "message": "ping", "session_id": None,
-            "agent_name": None, "deliver": None, "origin": None}
+    task = {
+        "id": "t2",
+        "user_id": "u4",
+        "message": "ping",
+        "session_id": None,
+        "agent_name": None,
+        "deliver": None,
+        "origin": None,
+    }
     await cron_scheduler._fire(task)
 
     assert "principal" in captured, "_agent_run must receive principal= kwarg"

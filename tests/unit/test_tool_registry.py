@@ -467,3 +467,17 @@ def test_no_credential_in_trace(monkeypatch):
 
     blob = _json.dumps(serialized)
     assert secret not in blob
+
+
+# ── ToolContext outbound connectors (send-im-message-tool) ─────────────────────
+
+
+def test_tool_context_carries_outbound_connectors() -> None:
+    """ToolContext exposes outbound_connectors, defaulting to an empty dict."""
+    from fleetent.tools.registry import ToolContext
+
+    assert ToolContext().outbound_connectors == {}
+
+    connector = object()
+    ctx = ToolContext(outbound_connectors={"slack": connector})
+    assert ctx.outbound_connectors["slack"] is connector
