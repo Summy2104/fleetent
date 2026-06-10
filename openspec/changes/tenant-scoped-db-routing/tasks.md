@@ -17,9 +17,9 @@
 
 ## 4. KB 连接走路由 + 清自连接旁路
 
-- [ ] 4.1 写失败测试：`KnowledgeStore` 的 `database` 来自路由；护栏断言 KB 模块**无** `create_database(...settings...)` 自连接路径
-- [ ] 4.2 实现：所有 `KnowledgeStore` 构造改由路由供连接；删 `knowledge_base/bindings.py`、`operations.py` 两条 `create_database(_settings().database_url)` 旁路，跑绿 4.1
-- [ ] 4.3 跑既有 KB 单测/集成（retrieval/ingest/operations）确认行为不变（连接来源改、语义不改）
+- [x] 4.1 写失败测试：`KnowledgeStore` 的 `database` 来自路由；护栏断言 KB 模块**无** `create_database(...settings...)` 自连接路径
+- [x] 4.2 实现：所有 `KnowledgeStore` 构造改由路由供连接；删 `knowledge_base/bindings.py`、`operations.py` 两条 `create_database(_settings().database_url)` 旁路，跑绿 4.1
+- [x] 4.3 跑既有 KB 单测/集成（retrieval/ingest/operations）确认行为不变（连接来源改、语义不改）
 
 ## 5. 向量家族路由整改（§5.6）
 
