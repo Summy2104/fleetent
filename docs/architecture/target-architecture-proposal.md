@@ -5,17 +5,10 @@
 
 ---
 
-## 0. 这篇要回答的问题
+## 0. 本文定位
 
-项目「怎么看怎么乱」的根因，经依赖扫描 + 模块体量分析，定位为：
-
-1. 把**四种性质完全不同**的外围功能压进了一个 `platform/` 命名空间 + 一堆顶层散文件；
-2. 少数**巨型文件**（`loop.py` 2591 行、`reflection.py` 1747 行、`agent_store.py` 685 行…）一个文件干多件事；
-3. 几个模块（`user_store`、`knowledge_base`、`governance`）的职责**横跨了本应分开的边界**。
-
-包级（package-level）的职责切分其实**大体健康**——乱不在「切错了架构」，而在「外围没有结构」+「少数模块太胖/横跨边界」。
-
-本提案给出一个能收编以上全部问题的目标模型。
+本文是 fleetent 的**模块架构模型**（一个核 + 四个面 + 共享基座）+ 实现进度。是 [`architecture.md`](../architecture.md)（总览/入口/数据流/能力索引）的**详细架构层**——两者分工：总览看 architecture.md，模型/边界看本文，数据/物理库看 [`data-model.md`](./data-model.md)。
+**根因诊断、设计依据、"解决了什么"**（为何这个结构）见 [`records/decision-logs/architecture-decisions.md`](../records/decision-logs/architecture-decisions.md)。
 
 ---
 
@@ -91,7 +84,7 @@ flowchart TB
 ### ④ 摄取 / 数据管道面 —— 异步把数据沉淀进可检索源
 - **性质**：异步、定时、批量、数据重；外部源 → 解析/向量化 → 写入核可检索的 store。
 - **模块**：`knowledge_base.ingest`（config, connectors/sync, runtime ingest）、connector sync。
-- **关键**：与核的 `knowledge_base.retrieval` **同源数据、反向流向**——retrieval 读、ingest 写，二者不互相 import（现有护栏已强制 retrieval ✗→ ingest，本提案把它升级为「核 ✗→ ④面」的硬边界）。
+- **关键**：与核的 `knowledge_base.retrieval` **同源数据、反向流向**——retrieval 读、ingest 写，二者不互相 import（现有护栏已强制 retrieval ✗→ ingest，目标态把它升级为「核 ✗→ ④面」的硬边界）。
 - **为何独立成面（而非并入②）**〔已决议保留独立〕：判据是**定义 vs 执行**——② 控制面是「人同步定义配置」（绑定一个 KB 数据源，点完即返回）；④ 是「系统异步执行数据处理」（cron/webhook 触发、解析、本地 embedding 上千 chunk、写入）。运行特征、失败模式（断点/重试/幂等）、扩容需求都不同；④ 也是整个系统**最可能将来需独立扩容/加队列**的部分。今天住户只有 KB ingest，但面的成立靠「运行特征 + 已存在的 retrieval✗→ingest 硬边界」，不靠模块数量。
 
 ---
@@ -304,16 +297,9 @@ platform 经"共享 store 读函数"读 = 依赖 agent 侧库的**读 schema**�
 
 ---
 
-## 9. 这个模型如何收编已发现的问题
+## 9. 设计依据 / 解决了什么
 
-| 已发现问题 | 在目标模型里如何消解 |
-|---|---|
-| 顶层「杂物抽屉」17 个散文件 | 每个文件归入某个面或基座，抽屉消失 |
-| `platform/` 一个命名空间塞四种东西 | 拆成①②③④四个面 |
-| `user_store` 三职责 + 泄漏#1 + 与 governance 真循环 | 沿面边界拆三处（§6）；authn 走 `Identity` 端口，泄漏#1 结构性消失 |
-| `knowledge_base` retrieval/ingest 混 | 升级为核↔④面硬边界 |
-| 巨型文件（loop/reflection/agent_store…） | 核/面**内部**的内聚拆分，正交，可独立先做 |
-| A/B 严格分层之争 | 退化为「面→核单向 + 全员→基座向下」，比抽象 N 层好懂，且就是「核+外围」直觉的精确版 |
+本模型如何收编重设计前的问题（platform 命名空间过载、巨型文件、横跨边界模块、#1 泄漏等）→ 见 [`records/decision-logs/architecture-decisions.md`](../records/decision-logs/architecture-decisions.md)「解决了哪些问题」。
 
 ---
 
@@ -340,20 +326,11 @@ platform 经"共享 store 读函数"读 = 依赖 agent 侧库的**读 schema**�
 
 ---
 
-## 11. 决议记录与待讨论
+## 11. 实现进度与 open questions
 
-### 已决议（本轮讨论确定）
-- **面的数量 = 4**：① 边缘、② 控制、③ 编排、④ 摄取，互不合并。
-  - ④ 摄取**保持独立**（不并入②）。理由见 §3-④。
-  - ②控制 与 ③编排**不合并**：靠「定义 vs 执行」同一把尺——③ 是 daemon/调度 character、独立可用性，与 ② 的同步人工 CRUD 是两种东西。
-  - `resource_monitoring` **v1 整体外置移除 → Prometheus/Grafana**（change `externalize-monitoring`，见 data-model §5.8）；原拟移入基座 `observability`，现因是 Prometheus 生态弱重造而整体删除。`materialize` 标为 ②→③ 的转换桥。
-- **物理形态 = 单体**：四个面做成一等限界上下文，边界按「可拆服务」画；不现在拆微服务。
-- **用户体系 = 内置模块 + `Identity` 端口**（§6）：authn→基座端口、user 管理→②；**首发 OIDC/Google 适配器**（pilot 客户接受外部登录）；结构性修掉泄漏 #1。
-- **governance / reflection 拆分**（§5 两节）：**能力本体/运行时执行→核**、**管理/审批/review API→②**、**审计/策略/建议数据→基座**（核写、②只读，不反向写 platform 表）。沿用 CLAUDE.md「审批门≠归控制面」与「自进化纵向元能力」判据。
-- **多租户物理隔离**（data-model.md §5.7，2026-06-09；实体已由 `establish-tenancy` 落地，迁移 067-070）：`tenant`=主体实体；各层（per-agent 运行库 / 共享记忆库 / KB 库）**按主体物理分区**；管理库单库跨主体注册中心；`Principal` 携带 `tenant_id`（**从 `users.tenant_id` 解析，不带 team**——agent 的 team 来自 `agents.team_id` 配置，见 §6.3；**v1 不建 `team_members`**）。
-- **持久层执行 roadmap**（data-model.md §6）：#1 persistence-hygiene → A 审批重设计 → #2 管理表收编 → #2.5 establish-tenancy（以上**均 ✅ 已合并 main**）→ #3 五库物理分离（吸收 R2 全部拓扑，**待做**，绑上线前窗口）→ #4 Identity 端口（**设计定稿**、实现最后）；串行推进，各期 detailed spec 即时生成。
-- **v1 实体减法**（data-model.md §5.8，2026-06-09，**4 个 change 均 ✅ 已合并 main，迁移 063-066**）：**砍** askit/KB 死代码(`dead-schema-cleanup`)、`invites`+2FA(`trim-user-auth`)；**descope** `quotas`/`quota_usage`(`descope-quota`)；**外置** 自建 fleet 监控 → Prometheus/Grafana(`externalize-monitoring`)；**保留** 知识图谱/自进化;**defer** `connectors.agent_id`。对本提案的影响:`resource_monitoring` 不入基座而整体外置;`governance` 执行门去掉 `quota`(留 blocklist)；②用户管理去掉自助邀请。
+**进度**：持久层数据架构（§4 五库 / §6 Identity / §7 只读投影）+ 多租户物理隔离**已落地**（持久层 #1–#4，详见 [`data-model.md`](./data-model.md) + [`persistence-redesign-decisions`](../records/decision-logs/persistence-redesign-decisions.md)）；模块边界重组（§3 四面 / §5 governance 三拆·reflection 两拆·KB 四分）**部分落地、持续推进**（KB 四分、Identity、向量整改、只读投影已成；四面/三拆按需逐步）。
 
-### 仍待讨论
-1. **模块迁移顺序**（本提案范围）：先拆巨型文件（正交、低风险）还是先立面边界（结构优先）？注：DB 层执行顺序已在 data-model.md §6 独立锁定，与本问题正交。
-```
+**已定架构决策**（4 面不合并 / 单体可拆边界 / identity-属-edge / 三拆两拆 / resource_monitoring 外置等）的依据：见 [`architecture-decisions`](../records/decision-logs/architecture-decisions.md)。
+
+**open questions**：
+- 模块迁移顺序：先拆巨型文件（正交、低风险）还是先立面边界（结构优先）？（DB 层执行顺序已随持久层 #3 完成，与此正交。）
