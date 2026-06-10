@@ -1,0 +1,86 @@
+"""Unified per-agent embedded migration list for agent_state.db (Y engine).
+
+One file, one PRAGMA user_version — every store that persists in agent_state.db
+appends here rather than carrying its own list.  The Y engine's single-file
+user_version stamp means independent lists on the same file would collide.
+
+Version history:
+  v1   sessions          (3b-1) session metadata index
+  v2   traces            (3b-2) agent run trace event table
+  v3   idx_traces_run_id
+  v4   idx_traces_user_ts
+  v5   idx_traces_agent_ts
+  v6   idx_traces_tenant_event_ts
+  v7   reflection_reports (3b-2) reflection summary table
+  v8   idx_reflection_reports_scope_created
+  v9+  reserved for 3b-3 (memory), 3b-4 (approvals), …
+
+DDL is lifted verbatim from the originating ensure_schema() functions; schema is
+intentionally unchanged so existing rows remain valid after the DB is moved to
+the per-agent agent_state.db.
+"""
+
+from __future__ import annotations
+
+MIGRATIONS: list[tuple[int, str]] = [
+    # ── v1: session metadata (3b-1) ──────────────────────────────────────────
+    (
+        1,
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+            session_id    TEXT PRIMARY KEY,
+            user_id       TEXT,
+            created_at    REAL,
+            updated_at    REAL,
+            message_count INTEGER,
+            agent_name    TEXT
+        )
+        """,
+    ),
+    # ── v2-v6: agent run trace events (3b-2) ─────────────────────────────────
+    (
+        2,
+        """
+        CREATE TABLE IF NOT EXISTS traces (
+            id              TEXT PRIMARY KEY,
+            run_id          TEXT NOT NULL,
+            span_id         TEXT,
+            parent_span_id  TEXT,
+            session_id      TEXT,
+            user_id         TEXT,
+            agent_id        TEXT,
+            tenant_id       TEXT NOT NULL DEFAULT 'default',
+            event_type      TEXT NOT NULL,
+            ts              TEXT NOT NULL,
+            payload_json    TEXT NOT NULL
+        )
+        """,
+    ),
+    (3, "CREATE INDEX IF NOT EXISTS idx_traces_run_id ON traces (run_id)"),
+    (4, "CREATE INDEX IF NOT EXISTS idx_traces_user_ts ON traces (user_id, ts)"),
+    (5, "CREATE INDEX IF NOT EXISTS idx_traces_agent_ts ON traces (agent_id, ts)"),
+    (
+        6,
+        "CREATE INDEX IF NOT EXISTS idx_traces_tenant_event_ts"
+        " ON traces (tenant_id, event_type, ts)",
+    ),
+    # ── v7-v8: reflection reports (3b-2) ─────────────────────────────────────
+    (
+        7,
+        """
+        CREATE TABLE IF NOT EXISTS reflection_reports (
+            id                  TEXT PRIMARY KEY,
+            scope               TEXT NOT NULL,
+            time_window_start   TEXT NOT NULL,
+            time_window_end     TEXT NOT NULL,
+            findings_json       TEXT NOT NULL,
+            created_at          TEXT NOT NULL
+        )
+        """,
+    ),
+    (
+        8,
+        "CREATE INDEX IF NOT EXISTS idx_reflection_reports_scope_created"
+        " ON reflection_reports (scope, created_at)",
+    ),
+]

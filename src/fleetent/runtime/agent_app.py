@@ -173,33 +173,33 @@ def _init_agent_db_schema(database_url: str, *, agent_id: str) -> None:
     """Create all agent-side DB tables in database_url if they do not exist.
 
     Called once at boot after DATABASE_URL is redirected to the per-agent path.
-    Each store's ensure_schema is idempotent; repeated calls are safe.
 
     KB schema is bootstrapped via TenantRouter + migrate-on-open so that KB tables
     land in the tenant-scoped directory (data/<tenant_id>/kb.db), not the main db.
-    Session metadata index is bootstrapped via agent_scope + migrate-on-open.
-    traces/memory/reflection continue using ensure_schema (3b-2/3/4 will migrate them).
+    sessions/traces/reflection_reports are bootstrapped via a single unified
+    AGENT_STATE_MIGRATIONS run-on-open against agent_state.db (3b-2).
+    memory/approvals continue using ensure_schema until 3b-3/3b-4.
     """
     from fleetent import reflection, schedule_store
     from fleetent.db import create_database
     from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.memory import store as memory_store
     from fleetent.observability import traces
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
     from fleetent.session import index as session_index
-    from fleetent.session.migrations import MIGRATIONS as SESSION_MIGRATIONS
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
     db = create_database(database_url)
-    traces.ensure_schema(db)
     memory_store.ensure_schema(db)
-    reflection.ensure_schema(db)
     schedule_store.ensure_schema(db)
 
     data_dir = db.path.parent
     router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
     router.tenant_scope("default").open_kb_db(KB_MIGRATIONS)
-    agent_state_db = router.agent_scope("default", agent_id).open_state_db(SESSION_MIGRATIONS)
+    agent_state_db = router.agent_scope("default", agent_id).open_state_db(AGENT_STATE_MIGRATIONS)
     session_index.set_state_db(agent_state_db)
+    traces.set_state_db(agent_state_db)
+    reflection.set_state_db(agent_state_db)
 
 
 async def _start_infra(agent: AgentFile) -> None:

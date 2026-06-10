@@ -114,6 +114,25 @@ def _isolate_agent_data_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(diagnostics, "_default_data_dir", diagnostics._default_data_dir)
 
 
+@pytest.fixture(autouse=True)
+def _reset_traces_reflection_state_db():  # type: ignore[no-untyped-def]
+    """Reset traces._state_db and reflection._state_db between tests.
+
+    _init_agent_db_schema calls set_state_db() on both modules, which sets
+    a process-wide module global.  Without this fixture a test that exercises
+    the agent boot path would leak its tmp-path DB handle into subsequent
+    tests that rely on DATABASE_URL fallback (e.g. test_trace_events fixtures).
+    """
+    from fleetent import reflection
+    from fleetent.observability import traces
+
+    original_traces = traces._state_db
+    original_reflection = reflection._state_db
+    yield
+    traces._state_db = original_traces
+    reflection._state_db = original_reflection
+
+
 @pytest.fixture
 def isolated_schedule_db(tmp_path, monkeypatch):  # type: ignore[no-untyped-def]
     db_path = tmp_path / "sched.db"
