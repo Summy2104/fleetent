@@ -1,3 +1,5 @@
+import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
@@ -91,3 +93,109 @@ def test_transaction_rolls_back_on_error(tmp_path):
         raise RuntimeError("boom")
 
     assert database.execute("SELECT id FROM items").fetchall() == []
+
+
+# --- WAL + busy_timeout PRAGMA verification (task 1.1) ---
+
+
+def test_sqlite_database_enables_wal_journal_mode(tmp_path: Path) -> None:
+    database = db.create_database(_sqlite_url(tmp_path / "wal.db"))
+    database.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+
+    result = database.execute("PRAGMA journal_mode")
+
+    assert result.fetchone() == {"journal_mode": "wal"}
+
+
+def test_sqlite_database_sets_nonzero_busy_timeout(tmp_path: Path) -> None:
+    database = db.create_database(_sqlite_url(tmp_path / "wal.db"))
+    database.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+
+    result = database.execute("PRAGMA busy_timeout")
+
+    row = result.fetchone()
+    assert row is not None
+    assert row["timeout"] > 0
+
+
+# --- Concurrent behaviour (task 1.2) ---
+
+
+def test_concurrent_reader_not_blocked_by_open_write_transaction(tmp_path: Path) -> None:
+    """WAL: an in-progress write transaction does not block a concurrent reader."""
+    db_path = tmp_path / "concurrent.db"
+    writer_db = db.create_database(_sqlite_url(db_path))
+    writer_db.execute("CREATE TABLE items (id INTEGER PRIMARY KEY, v TEXT)")
+    writer_db.execute("INSERT INTO items VALUES (1, 'initial')")
+
+    write_started = threading.Event()
+    write_finish = threading.Event()
+    reader_row: list[dict] = []
+    writer_errors: list[Exception] = []
+
+    def long_writer() -> None:
+        try:
+            with writer_db.transaction() as conn:
+                conn.execute("INSERT INTO items VALUES (2, 'pending')")
+                write_started.set()
+                write_finish.wait(timeout=3.0)
+        except Exception as exc:
+            writer_errors.append(exc)
+
+    t = threading.Thread(target=long_writer)
+    t.start()
+    write_started.wait(timeout=3.0)
+
+    reader_db = db.create_database(_sqlite_url(db_path))
+    row = reader_db.execute("SELECT v FROM items WHERE id = 1").fetchone()
+    reader_row.append(row or {})
+
+    write_finish.set()
+    t.join(timeout=5.0)
+
+    assert not writer_errors, f"Writer raised: {writer_errors}"
+    assert reader_row[0].get("v") == "initial"
+
+
+def test_busy_timeout_allows_second_writer_after_exclusive_lock_released(
+    tmp_path: Path,
+) -> None:
+    """busy_timeout: second writer waits while a raw EXCLUSIVE lock is held, then succeeds."""
+    db_path = tmp_path / "concurrent.db"
+    setup_db = db.create_database(_sqlite_url(db_path))
+    setup_db.execute("CREATE TABLE items (id INTEGER PRIMARY KEY, v TEXT)")
+
+    exclusive_held = threading.Event()
+    release_exclusive = threading.Event()
+    holder_errors: list[Exception] = []
+
+    def exclusive_holder() -> None:
+        # timeout=0 so the holder itself fails fast if something goes wrong
+        conn = sqlite3.connect(str(db_path), timeout=0)
+        try:
+            conn.isolation_level = None
+            conn.execute("BEGIN EXCLUSIVE")
+            conn.execute("INSERT INTO items VALUES (1, 'first')")
+            exclusive_held.set()
+            release_exclusive.wait(timeout=3.0)
+            conn.execute("COMMIT")
+        except Exception as exc:
+            holder_errors.append(exc)
+        finally:
+            conn.close()
+
+    t = threading.Thread(target=exclusive_holder)
+    t.start()
+    exclusive_held.wait(timeout=3.0)
+
+    # Release the lock after 100 ms — the second writer must wait for it
+    threading.Timer(0.1, release_exclusive.set).start()
+
+    second_db = db.create_database(_sqlite_url(db_path))
+    second_db.execute("INSERT INTO items VALUES (2, 'second')")
+
+    t.join(timeout=5.0)
+    assert not holder_errors, f"Exclusive holder raised: {holder_errors}"
+
+    rows = setup_db.execute("SELECT id FROM items ORDER BY id").fetchall()
+    assert rows == [{"id": 1}, {"id": 2}]

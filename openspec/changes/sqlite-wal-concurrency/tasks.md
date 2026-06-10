@@ -1,8 +1,8 @@
 ## 1. WAL + busy_timeout 接入
 
-- [ ] 1.1 写失败测试（integration，真实 SQLite 文件）：经 `db.py` 打开连接后 `PRAGMA journal_mode` 返回 `wal`、`PRAGMA busy_timeout` 为配置的非零值
-- [ ] 1.2 写失败测试：并发场景——一连接写、另一连接同时读同库不报 `database is locked`（WAL）；两连接近乎同时写，后者在 busy_timeout 内成功而非立即失败
-- [ ] 1.3 实现：`db.py` 加统一内部连接入口 `_connect(path)`（connect → `PRAGMA journal_mode=WAL` + `PRAGMA busy_timeout=<ms>`），`execute` 与游标/迭代路径都改走它，跑绿 1.1/1.2
+- [x] 1.1 写失败测试（integration，真实 SQLite 文件）：经 `db.py` 打开连接后 `PRAGMA journal_mode` 返回 `wal`、`PRAGMA busy_timeout` 为配置的非零值
+- [x] 1.2 写失败测试：并发场景——一连接写、另一连接同时读同库不报 `database is locked`（WAL）；两连接近乎同时写，后者在 busy_timeout 内成功而非立即失败
+- [x] 1.3 实现：`db.py` 加统一内部连接入口 `_connect(path)`（connect → `PRAGMA journal_mode=WAL` + `PRAGMA busy_timeout=<ms>`），`execute` 与游标/迭代路径都改走它，跑绿 1.1/1.2
 
 ## 2. 回归与收尾
 
