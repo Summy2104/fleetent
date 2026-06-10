@@ -20,7 +20,6 @@ def client(tmp_path, monkeypatch):
     for mod in (user_store, audit):
         monkeypatch.setattr(mod, "DB_PATH", db_path)
     user_store._init_db()
-    audit._init_db()
 
     # Keep endpoint tests hermetic: the live-runtime sync/probe seams must not touch
     # the network. Tests that exercise them monkeypatch these explicitly.

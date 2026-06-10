@@ -29,7 +29,6 @@ def upsert_connector(
     status: str | None = None,
 ) -> None:
     """Insert a connector row or update the given fields, keyed by (owner_id, platform)."""
-    _init_db()
     now = _now()
     with _conn() as conn:
         conn.execute(
@@ -62,7 +61,6 @@ def report_status(owner_id: str, platform: str, status: str, error: str | None =
     """Update a connector's status (creating the row if absent). Sets last_error if given."""
     if status not in STATUSES:
         raise ValueError(f"unknown status: {status!r}")
-    _init_db()
     now = _now()
     with _conn() as conn:
         conn.execute(
@@ -85,7 +83,6 @@ def report_status(owner_id: str, platform: str, status: str, error: str | None =
 
 def heartbeat(owner_id: str, platform: str) -> None:
     """Refresh last_heartbeat_at without changing status."""
-    _init_db()
     now = _now()
     with _conn() as conn:
         conn.execute(
@@ -104,7 +101,6 @@ def set_allowlist_enforced(owner_id: str, platform: str, enforced: bool) -> None
 
 
 def get_connector(owner_id: str, platform: str) -> dict[str, Any] | None:
-    _init_db()
     with _conn() as conn:
         row = conn.execute(
             f"SELECT {_COLS} FROM im_connectors"
@@ -116,7 +112,6 @@ def get_connector(owner_id: str, platform: str) -> dict[str, Any] | None:
 
 def list_connectors(owner_id: str | None = None) -> list[dict[str, Any]]:
     """List connectors for one owner, or all owners (admin scope) when owner_id is None."""
-    _init_db()
     with _conn() as conn:
         if owner_id is None:
             rows = conn.execute(
@@ -146,76 +141,9 @@ def _bool(value: bool | None) -> int | None:
 
 
 def _set_flag(owner_id: str, platform: str, column: str, value: bool) -> None:
-    _init_db()
     with _conn() as conn:
         conn.execute(
             f"""UPDATE im_connectors SET {column} = :value, updated_at = :now
                 WHERE owner_id = :owner_id AND platform = :platform""",
             {"value": int(value), "now": _now(), "owner_id": owner_id, "platform": platform},
         )
-
-
-def _init_db() -> None:
-    from fleetent import user_store
-
-    # Resolve the backfill owner before opening our connection — admin_owner_id() opens
-    # its own connection on the same SQLite file and would deadlock against a held write.
-    admin_owner = user_store.admin_owner_id()
-    with _conn() as conn:
-        _rebuild_legacy_if_needed(conn, admin_owner)
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS im_connectors (
-                id                 INTEGER PRIMARY KEY,
-                owner_id           TEXT NOT NULL,
-                platform           TEXT NOT NULL,
-                enabled            INTEGER NOT NULL DEFAULT 0,
-                allowlist_enforced INTEGER NOT NULL DEFAULT 0,
-                config             TEXT,
-                status             TEXT NOT NULL DEFAULT 'stopped',
-                last_heartbeat_at  TEXT,
-                last_error         TEXT,
-                created_at         TEXT NOT NULL,
-                updated_at         TEXT NOT NULL,
-                UNIQUE(owner_id, platform)
-            )"""
-        )
-
-
-def _rebuild_legacy_if_needed(conn: Any, owner: str) -> None:
-    """Rebuild a pre-multi-tenant `im_connectors` (platform-unique, no owner_id) in place,
-    backfilling owner_id with the built-in admin owner. Idempotent."""
-    exists = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='im_connectors'"
-    ).fetchone()
-    if not exists:
-        return
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(im_connectors)")}
-    if "owner_id" in cols:
-        return
-    conn.execute("ALTER TABLE im_connectors RENAME TO im_connectors_legacy")
-    conn.execute(
-        """CREATE TABLE im_connectors (
-            id                 INTEGER PRIMARY KEY,
-            owner_id           TEXT NOT NULL,
-            platform           TEXT NOT NULL,
-            enabled            INTEGER NOT NULL DEFAULT 0,
-            allowlist_enforced INTEGER NOT NULL DEFAULT 0,
-            config             TEXT,
-            status             TEXT NOT NULL DEFAULT 'stopped',
-            last_heartbeat_at  TEXT,
-            last_error         TEXT,
-            created_at         TEXT NOT NULL,
-            updated_at         TEXT NOT NULL,
-            UNIQUE(owner_id, platform)
-        )"""
-    )
-    conn.execute(
-        """INSERT INTO im_connectors
-               (id, owner_id, platform, enabled, allowlist_enforced, config, status,
-                last_heartbeat_at, last_error, created_at, updated_at)
-           SELECT id, :owner, platform, enabled, allowlist_enforced, config, status,
-                  last_heartbeat_at, last_error, created_at, updated_at
-           FROM im_connectors_legacy""",
-        {"owner": owner},
-    )
-    conn.execute("DROP TABLE im_connectors_legacy")

@@ -7,6 +7,7 @@ import fleetent.platform.im_gateway_management.connector_config as icc
 import fleetent.platform.im_gateway_management.connector_manager as mgr
 import fleetent.platform.im_gateway_management.connector_store as ics
 import fleetent.user_store as user_store
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
@@ -18,7 +19,7 @@ def db(tmp_path, monkeypatch):
         "get_settings",
         lambda: SimpleNamespace(slack_bot_token="", slack_app_token="", telegram_bot_token=""),
     )
-    ics._init_db()
+    apply_migrations(tmp_path / "users.db")
     return tmp_path / "users.db"
 
 

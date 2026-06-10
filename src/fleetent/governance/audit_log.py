@@ -2,7 +2,6 @@
 
 from fleetent.audit_log import (  # noqa: F401 — re-exports for callers still on old path
     DB_PATH,
-    _init_db,
     _row_to_dict,
     search_audit,
     write_audit,
