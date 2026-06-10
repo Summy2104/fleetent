@@ -19,6 +19,9 @@
 **D3 platform 只读投影 = 只读 router + 共享读函数 + registry 遍历（§7 模型落地）。** 不物化、不让 agent 反向写。读 stopped agent 历史靠直接读文件（WAL 下与写并发安全）。
 - 备选：agent 出 API / 物化副本。否决（§7 已论：耦合可用性 / = session_meta 反例）。
 
+**D3a 只读 open 不得触发 migrate（3c 落地复核新增）。** 已落地的 `open_kb_db`/`open_state_db`/`open_shared_memory_db`（KbScope/AgentScope）都是 **migrate-on-open（写 user_version）**；platform 投影 **MUST NOT 复用**它们读，否则只读路径会偷偷迁移=写 agent 库。3d 须给 router 加一个**不迁移的只读 open（mode=ro）**；迁移只属 agent 写侧/部署侧。平台进程用只读连接 + 已落地的 store 驱动模式（`set_state_db` / `KnowledgeStore(database)` 注入）调读函数。
+- 备选：复用 open_*_db。否决——它们 migrate=写，破坏只读。
+
 **D4 聚合 = registry 遍历逐个只读开。** fleetent 个位数主体规模够用；热路径统计仍读 append-only trace。approvals 投影 join 身份（#4 解析不透明 actor）。
 
 ## Risks / Trade-offs

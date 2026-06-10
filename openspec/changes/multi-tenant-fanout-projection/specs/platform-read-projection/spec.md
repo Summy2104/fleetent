@@ -2,12 +2,17 @@
 
 ### Requirement: platform 只读 agent 侧库
 
-platform 控制面 SHALL 经**只读连接**读 agent 侧物理库（per-agent / KB / 共享记忆），MUST NOT 写它们、MUST NOT 要求 agent 把数据反向推送/写入 platform 库（禁物化副本）。router SHALL 提供只读模式句柄供 platform 使用。
+platform 控制面 SHALL 经**只读连接**读 agent 侧物理库（per-agent / KB / 共享记忆），MUST NOT 写它们、MUST NOT 要求 agent 把数据反向推送/写入 platform 库（禁物化副本）。router SHALL 提供**只读模式句柄（mode=ro）**供 platform 使用。该只读 open **MUST NOT 触发 migrate**——现有 `open_kb_db` / `open_state_db` / `open_shared_memory_db` 是 migrate-on-open（会写 `user_version`），platform 投影 **MUST NOT 复用它们**，须走单独的不迁移只读 open（迁移只属 agent 写侧 / 部署侧）。
 
 #### Scenario: 只读打开 agent 库
 
 - **WHEN** platform 读某 agent/主体的库
 - **THEN** 经 router 的只读句柄打开，结构上写不进去
+
+#### Scenario: 只读 open 不迁移
+
+- **WHEN** platform 只读打开一个 agent 库
+- **THEN** 不执行任何 migrate（不改 `user_version`、不建/改表）；若库版本与代码不符，只读路径按现状读、把迁移留给 agent 写侧/部署侧，不在投影路径写库
 
 #### Scenario: 读停机 agent 的历史
 
