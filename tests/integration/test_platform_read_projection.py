@@ -76,7 +76,7 @@ def test_readonly_state_db_rejects_writes(tmp_path: Path) -> None:
 
     ro_db = scope.open_state_db_ro()
 
-    with pytest.raises(Exception):  # sqlite3.OperationalError or PermissionError
+    with pytest.raises(sqlite3.OperationalError):
         ro_db.execute("INSERT INTO sessions(id) VALUES (:id)", {"id": "x"})
 
 
@@ -93,7 +93,7 @@ def test_readonly_kb_db_rejects_writes(tmp_path: Path) -> None:
 
     ro_db = scope.open_kb_db_ro()
 
-    with pytest.raises(Exception):
+    with pytest.raises(sqlite3.OperationalError):
         ro_db.execute(
             "INSERT INTO knowledge_bases(id, name, tenant_id) VALUES (:id, :name, :tid)",
             {"id": "x", "name": "x", "tid": "acme"},
@@ -120,9 +120,7 @@ def test_readonly_open_does_not_change_user_version(tmp_path: Path) -> None:
     scope.open_state_db_ro()
     version_after_ro = _user_version(db_path)
 
-    assert version_after_ro == version_after_write, (
-        "read-only open must not change user_version"
-    )
+    assert version_after_ro == version_after_write, "read-only open must not change user_version"
 
 
 def test_readonly_open_does_not_create_tables(tmp_path: Path) -> None:
@@ -140,7 +138,7 @@ def test_readonly_open_does_not_create_tables(tmp_path: Path) -> None:
 
     # Read-only open on a non-existent file should either raise or return an empty DB
     # (SQLite mode=ro raises OperationalError when file doesn't exist).
-    with pytest.raises(Exception):
+    with pytest.raises(sqlite3.OperationalError):
         ro_db = scope.open_state_db_ro()
         # If the above doesn't raise, a read attempt must fail
         ro_db.execute("SELECT 1")

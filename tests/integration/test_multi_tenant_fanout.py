@@ -41,14 +41,16 @@ def test_init_agent_db_schema_routes_by_tenant_id(tmp_path: Path) -> None:
 
     # KB must be under <tenant>/
     kb_path = data_dir / "acme" / "kb.db"
-    assert kb_path.exists(), f"KB must be at data/acme/kb.db, not default/"
+    assert kb_path.exists(), "KB must be at data/acme/kb.db, not default/"
 
     # Agent state must be under <tenant>/<agent_id>/
     state_path = data_dir / "acme" / "bot" / "agent_state.db"
-    assert state_path.exists(), f"Agent state must be at data/acme/bot/agent_state.db"
+    assert state_path.exists(), "Agent state must be at data/acme/bot/agent_state.db"
 
     # No 'default' directory should be created
-    assert not (data_dir / "default").exists(), "Must not fall back to 'default' when tenant_id given"
+    assert not (data_dir / "default").exists(), (
+        "Must not fall back to 'default' when tenant_id given"
+    )
 
 
 def test_init_agent_db_schema_default_tenant_still_works(tmp_path: Path) -> None:

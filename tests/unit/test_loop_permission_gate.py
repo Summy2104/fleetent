@@ -15,13 +15,14 @@ import fleetent.runtime.loop as loop
 
 @pytest.fixture(autouse=True)
 def _mock_store(monkeypatch):
-    """Patch approval_store so unit tests never touch real SQLite."""
-    from fleetent.governance import approval_store
+    """Patch approval_store and allowlist_store so unit tests never touch real SQLite."""
+    from fleetent.governance import approval_allowlist_store, approval_store
 
     monkeypatch.setattr(approval_store, "insert_approval", MagicMock())
     monkeypatch.setattr(approval_store, "update_approval", MagicMock())
     monkeypatch.setattr(approval_store, "list_approvals", MagicMock(return_value=[]))
     monkeypatch.setattr(approval_store, "cleanup_stale", MagicMock(return_value=0))
+    monkeypatch.setattr(approval_allowlist_store, "is_allowed", MagicMock(return_value=False))
 
 
 @pytest.fixture

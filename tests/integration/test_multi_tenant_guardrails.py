@@ -9,10 +9,7 @@ Verifies the three invariants from 3d spec:
 
 from __future__ import annotations
 
-import importlib
-import pkgutil
 from pathlib import Path
-
 
 # ── Guardrail 1: platform can read agent DBs read-only (direction allowed) ────
 
@@ -38,7 +35,9 @@ def test_platform_read_projection_uses_readonly_connections(tmp_path: Path) -> N
 
     # Must use _ro variants, not the migrate-on-open originals
     assert "open_state_db_ro" in attr_calls, "read_projection must call open_state_db_ro"
-    assert "open_shared_memory_db_ro" in attr_calls, "read_projection must call open_shared_memory_db_ro"
+    assert "open_shared_memory_db_ro" in attr_calls, (
+        "read_projection must call open_shared_memory_db_ro"
+    )
 
     # Must NOT call the write-side open (which would trigger migrations)
     forbidden = {"open_state_db", "open_kb_db", "open_shared_memory_db"}
@@ -92,9 +91,8 @@ def test_agent_runtime_modules_do_not_import_platform() -> None:
             if "fleetent.platform" in content:
                 violations.append(f"{src_path}: imports fleetent.platform.*")
 
-    assert not violations, (
-        "Agent runtime modules must not import fleetent.platform:\n"
-        + "\n".join(violations)
+    assert not violations, "Agent runtime modules must not import fleetent.platform:\n" + "\n".join(
+        violations
     )
 
 
