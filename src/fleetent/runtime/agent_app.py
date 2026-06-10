@@ -169,7 +169,9 @@ def _configure_logging_from_agent(agent: AgentFile, home_dir: Path) -> None:
     )
 
 
-def _init_agent_db_schema(database_url: str, *, agent_id: str) -> None:
+def _init_agent_db_schema(
+    database_url: str, *, agent_id: str, tenant_id: str = "default"
+) -> None:
     """Create all agent-side DB tables in database_url if they do not exist.
 
     Called once at boot after DATABASE_URL is redirected to the per-agent path.
@@ -197,14 +199,14 @@ def _init_agent_db_schema(database_url: str, *, agent_id: str) -> None:
 
     data_dir = db.path.parent
     router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
-    tenant_scope = router.tenant_scope("default")
+    tenant_scope = router.tenant_scope(tenant_id)
     tenant_scope.open_kb_db(KB_MIGRATIONS)
     sm_db = tenant_scope.open_shared_memory_db(SHARED_MEMORY_MIGRATIONS)
     shared_memory.set_shared_memory_db(
         sm_db,
         tenant_scope.shared_memory_vector_backend,  # type: ignore[arg-type]
     )
-    agent_state_db = router.agent_scope("default", agent_id).open_state_db(AGENT_STATE_MIGRATIONS)
+    agent_state_db = router.agent_scope(tenant_id, agent_id).open_state_db(AGENT_STATE_MIGRATIONS)
     session_index.set_state_db(agent_state_db)
     traces.set_state_db(agent_state_db)
     reflection.set_state_db(agent_state_db)
@@ -221,7 +223,7 @@ async def _start_infra(agent: AgentFile) -> None:
     """
     _db_url = os.environ.get("DATABASE_URL", "")
     if _db_url:
-        _init_agent_db_schema(_db_url, agent_id=agent.name)
+        _init_agent_db_schema(_db_url, agent_id=agent.name, tenant_id=agent.tenant_id)
     from fleetent.integrations.sandbox import enablement as sandbox_enablement
     from fleetent.session import manager as session_mgr
 

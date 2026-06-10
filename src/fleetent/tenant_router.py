@@ -17,8 +17,8 @@ SQLite backend layout under ``<data_dir>/``::
 Directory structure is private to SQLiteTenantBackend; call sites only
 express scope and get typed handles — they never see file paths.
 
-Multi-tenant fan-out (3d) will extend SQLiteTenantBackend; call sites are
-already abstracted and will not change.
+Multi-tenant fan-out (3d): call sites pass the real tenant_id from agent config;
+SQLiteTenantBackend maps each to its physical partition under ``<data_dir>/``.
 """
 
 from __future__ import annotations
