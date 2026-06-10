@@ -197,7 +197,7 @@ def _init_agent_db_schema(database_url: str) -> None:
     # KB schema goes into the tenant-scoped db via the router, not the main agent db.
     data_dir = db.path.parent
     router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
-    router.scope("default").open_kb_db(KB_MIGRATIONS)
+    router.tenant_scope("default").open_kb_db(KB_MIGRATIONS)
 
 
 async def _start_infra(agent: AgentFile) -> None:
