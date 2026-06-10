@@ -230,7 +230,11 @@ namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后
 
 **与 R2 的关系**：给 §5.1「共享层」补上 tenant 维度——共享记忆库 / KB 库 / per-agent 库**按主体物理分区**。物理 vs 逻辑的实际差别**只在共享层**（KB + 共享记忆：per-主体一库靠文件分 vs 共用一库靠 `tenant_id` 列分）；`管理库` 与 `per-agent 库` 两方案相同。
 
-**连带**：① **amends #3**——五库拓扑带 tenant 维度、按主体物理分区（#3 范围变大，或单拆一个「立 tenants/teams + 物理分区」change）；② 喂 **#4 Identity**——principal 组织归属从 `users.tenant_id` + `team_members` 解析（§5.3 F2「tenant 来自 agent 配置」的折中升级为「真有归属」）。
+**物理 vs 逻辑(2026-06-10 重估,结论:保持物理)**：重估过"单库 + `tenant_id` 列做逻辑隔离"。保持物理,因为:① "财务互不可见"是**合规硬要求** → 需结构性保证;② **SQLite 无 RLS**,逻辑隔离在 SQLite 上只能纪律级、非结构性(漏一个 `WHERE tenant_id` 即泄漏);③ 个位数主体 → 物理多文件/fan-out 成本可忽略;④ per-agent 物理本就要做,tenant 物理只是路由加目录前缀、增量小;⑤ 最敏感的财务数据住共享/KB 层,正是不该用纪律级隔离之处。
+
+**实现成"租户作用域边界 + 可换后端"(接住将来上 PG)**：隔离做成抽象——调用点只表达"在 tenant X 作用域里访问",后端**可插拔**:今天 SQLite=路由到 `<tenant>/` 文件;将来 PG 可换 **per-tenant database**(同路由换 DSN)或 **RLS**(单库 + 会话 tenant 变量、DB 按行强制,调用点基本不动)。**故物理现在做不浪费**——它建立的是"租户作用域边界",SQLite 文件只是当下后端。(团队已规划上 PG,时机待定。)
+
+**连带**：① **amends #3**——五库拓扑带 tenant 维度、按主体物理分区(#3 设计成"租户作用域边界 + 可换后端";加"不迁移数据/上线前重建内测环境"可大幅简化,见 §6 roadmap 笔记);② 喂 **#4 Identity**——principal 组织归属从 `users.tenant_id` + `team_members` 解析(§5.3 F2「tenant 来自 agent 配置」的折中升级为「真有归属」)。
 
 ### 5.8 v1 实体减法（2026-06-09 决议）
 
