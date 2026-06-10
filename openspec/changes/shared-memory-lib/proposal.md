@@ -25,6 +25,6 @@
 
 - **代码**：`tenant_router`（tenant_scope 加共享记忆句柄 + 后端路径）；`memory/shared.py`（连接走 tenant_scope、DDL lift）；`vector_store` `shared:` 路由到共享记忆向量库。
 - **数据/schema**：shared_memory_items 移到 per-tenant `shared_memory.db`；上线前不迁移数据。
-- **约束**：per-tenant 库走 Y；多写者靠 WAL（依赖 `sqlite-wal-concurrency`）；不 import platform。
-- **依赖**：3a（tenant_scope）+ `sqlite-wal-concurrency`（WAL）。**与 3b-1/3d 同改 tenant_router → 串行协调。**
+- **约束**：per-tenant 库走 Y；多写者靠 WAL（关系库 `sqlite-wal-concurrency` + **向量库 `vector-backend-wal-concurrency`**）；不 import platform。
+- **依赖**：3a（tenant_scope）+ `sqlite-wal-concurrency`（关系库 WAL）+ `vector-backend-wal-concurrency`（共享向量库多写需向量后端 WAL）。**与 3b-1/3d 同改 tenant_router → 串行协调。**
 - **文档**：data-model.md §5.1/§5.7、roadmap R2-叉1。
