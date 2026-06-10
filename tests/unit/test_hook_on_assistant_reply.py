@@ -73,7 +73,7 @@ async def test_on_assistant_reply_rewrites_final_reply(mock_client):
 
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("original reply"))
     governance = GovernanceConfig(hooks_enabled=True)
-    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, user_id="u")
+    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, principal=None)
     assert result == "[CENSORED]"
 
 
@@ -84,7 +84,7 @@ async def test_on_assistant_reply_none_keeps_original(mock_client):
 
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("unchanged"))
     governance = GovernanceConfig(hooks_enabled=True)
-    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, user_id="u")
+    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, principal=None)
     assert result == "unchanged"
 
 
@@ -95,5 +95,5 @@ async def test_on_assistant_reply_disabled_no_effect(mock_client):
 
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("original reply"))
     governance = GovernanceConfig(hooks_enabled=False)
-    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, user_id="u")
+    result = await loop.run([{"role": "user", "content": "hi"}], governance=governance, principal=None)
     assert result == "original reply"

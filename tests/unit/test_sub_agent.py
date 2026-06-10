@@ -17,7 +17,7 @@ async def test_two_tasks_run_and_return_results():
                 {"name": "task_a", "prompt": "do_a"},
                 {"name": "task_b", "prompt": "do_b"},
             ],
-            parent_user_id="user-1",
+            parent_principal=None,
             parent_agent_id=None,
             parent_session_id="sess-parent",
         )
@@ -43,7 +43,7 @@ async def test_partial_failure_returns_error_for_failed_task():
                 {"name": "good", "prompt": "do_good"},
                 {"name": "bad", "prompt": "do_fail"},
             ],
-            parent_user_id="user-1",
+            parent_principal=None,
             parent_agent_id=None,
             parent_session_id="sess-parent",
         )
@@ -74,7 +74,7 @@ async def test_child_cannot_spawn_sub_agent():
     with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         results = await executor.run(
             tasks=[{"name": "t1", "prompt": "test"}],
-            parent_user_id="user-1",
+            parent_principal=None,
             parent_agent_id=None,
             parent_session_id="sess-parent",
         )
@@ -91,7 +91,7 @@ async def test_results_contain_parent_session_id():
     with patch("fleetent.runtime.loop.run", side_effect=fake_run):
         results = await executor.run(
             tasks=[{"name": "t1", "prompt": "go"}],
-            parent_user_id="user-1",
+            parent_principal=None,
             parent_agent_id=None,
             parent_session_id="sess-xyz",
         )

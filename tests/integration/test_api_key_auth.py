@@ -11,6 +11,9 @@ def db(tmp_path, monkeypatch):
     monkeypatch.setattr(aks, "DB_PATH", tmp_path / "users.db")
     apply_migrations(tmp_path / "users.db")
     user_store._init_db()
+    # Wire the platform api_keys resolver so authenticate checks the api_keys table in
+    # this test context, matching production platform behaviour.
+    monkeypatch.setattr(user_store, "_api_key_resolver", aks.resolve)
     return tmp_path / "users.db"
 
 

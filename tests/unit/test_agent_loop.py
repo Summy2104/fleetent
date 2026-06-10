@@ -10,6 +10,7 @@ import pytest
 from openai import APIStatusError, RateLimitError
 
 import fleetent.runtime.loop as al
+from fleetent.identity import Principal
 from fleetent.runtime.termination import LoopState, StopReason
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -646,7 +647,7 @@ async def test_run_sub_agent_tool_intercepted_and_executed(mock_client):
     assert result == "all done"
     mock_instance.run.assert_called_once()
     call_kwargs = mock_instance.run.call_args[1]
-    assert call_kwargs["parent_user_id"] == "default"
+    assert call_kwargs["parent_principal"] == Principal(user_id="default", tenant_id="default")
 
 
 async def test_run_sub_agent_result_formatted_in_tool_message(mock_client):
@@ -683,7 +684,7 @@ async def test_run_sub_agent_result_formatted_in_tool_message(mock_client):
         inst.run = AsyncMock(return_value=fake_results)
         mock_cls.return_value = inst
 
-        await al.run([{"role": "user", "content": "go"}], user_id="u1")
+        await al.run([{"role": "user", "content": "go"}], principal=None)
 
     # The tool result message passed to second LLM call contains formatted output
     call_messages = mock_client.chat.completions.create.call_args_list[1][1]["messages"]
@@ -884,7 +885,7 @@ async def test_run_passes_user_id_to_log_run(mock_client, monkeypatch):
     mock_client.chat.completions.create = AsyncMock(return_value=_text_resp("ok"))
     captured: dict = {}
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
-    await al.run([{"role": "user", "content": "hi"}], user_id="user-99")
+    await al.run([{"role": "user", "content": "hi"}], principal=Principal(user_id="user-99", tenant_id="default"))
     assert captured.get("user_id") == "user-99"
 
 
@@ -902,7 +903,7 @@ async def test_run_stream_passes_user_id_and_agent_name_to_log_run(mock_client, 
     )
     captured: dict = {}
     monkeypatch.setattr(al, "log_run", lambda *a, **kw: captured.update(kw))
-    [_ async for _ in al.run_stream("hi", user_id="user-7", agent_name="myagent")]
+    [_ async for _ in al.run_stream("hi", principal=Principal(user_id="user-7", tenant_id="default"), agent_name="myagent")]
     assert captured.get("user_id") == "user-7"
     assert captured.get("agent_name") == "myagent"
 

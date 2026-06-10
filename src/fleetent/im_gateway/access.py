@@ -78,6 +78,17 @@ def resolve_identity(platform: str, platform_user_id: str) -> str:
     return platform_user_id
 
 
+def resolve_principal(platform: str, platform_user_id: str, tenant_id: str = "default") -> "Principal":  # noqa: F821
+    """Wrap an IM channel-guaranteed identity as a Principal.
+
+    Trusts the channel: the native IM user id becomes user_id with no user_store read.
+    The tenant_id is supplied by the connector's edge configuration.
+    """
+    from fleetent.identity import Principal  # noqa: PLC0415
+
+    return Principal(user_id=resolve_identity(platform, platform_user_id), tenant_id=tenant_id)
+
+
 def channel_allowed(access: ConnectorAccess, channel_id: str) -> bool:
     """Channel gate: empty ``allow_channels`` allows all channels the connector receives."""
     if not access.allow_channels:

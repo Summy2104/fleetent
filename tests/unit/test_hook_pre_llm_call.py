@@ -79,7 +79,7 @@ async def test_pre_llm_call_inject_context_appended_to_messages(mock_client):
 
     mock_client.chat.completions.create = fake_create
     governance = GovernanceConfig(hooks_enabled=True)
-    await loop.run([{"role": "user", "content": "hi"}], governance=governance, user_id="u")
+    await loop.run([{"role": "user", "content": "hi"}], governance=governance, principal=None)
     injected = [m for m in captured if "[ENTERPRISE POLICY" in str(m.get("content", ""))]
     assert len(injected) >= 1
 
@@ -97,7 +97,7 @@ async def test_pre_llm_call_none_no_change(mock_client):
 
     mock_client.chat.completions.create = fake_create
     governance = GovernanceConfig(hooks_enabled=True)
-    await loop.run([{"role": "user", "content": "hi"}], governance=governance, user_id="u")
+    await loop.run([{"role": "user", "content": "hi"}], governance=governance, principal=None)
     # No injection
     assert not any("[ENTERPRISE" in str(m.get("content", "")) for m in captured)
 
@@ -115,5 +115,5 @@ async def test_pre_llm_call_disabled_no_effect(mock_client):
 
     mock_client.chat.completions.create = fake_create
     governance = GovernanceConfig(hooks_enabled=False)
-    await loop.run([{"role": "user", "content": "hi"}], governance=governance, user_id="u")
+    await loop.run([{"role": "user", "content": "hi"}], governance=governance, principal=None)
     assert not any("should not appear" in str(m.get("content", "")) for m in captured)
