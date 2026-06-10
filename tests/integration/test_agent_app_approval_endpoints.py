@@ -9,23 +9,34 @@ from __future__ import annotations
 
 import contextlib
 import uuid
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
 from fleetent import user_store
-from fleetent.governance import approval_store
+from fleetent.db import SQLiteDatabase
+from fleetent.governance import approval_allowlist_store, approval_store
 from fleetent.governance.permission_gate import PermissionGate
 from fleetent.runtime import agent_app
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
+
+
+def _make_state_db(tmp_path: Path) -> SQLiteDatabase:
+    db = SQLiteDatabase(path=tmp_path / "agent_state.db")
+    migrate(db, AGENT_STATE_MIGRATIONS)
+    return db
 
 
 def _make_client(monkeypatch, tmp_path):
     fake_user = MagicMock(spec=user_store.User)
     fake_user.id = "U1"
     monkeypatch.setattr(user_store, "authenticate", lambda _token: (fake_user, {}))
-    # approval_store.DB_PATH freezes at import from the ambient FLEETENT_HOME; pin it
-    # to tmp so the endpoints never touch a real (possibly legacy-schema) home DB.
-    monkeypatch.setattr(approval_store, "DB_PATH", tmp_path / "agent.db")
+    # Inject a fresh per-agent state DB so endpoints never touch a real home DB.
+    state_db = _make_state_db(tmp_path)
+    monkeypatch.setattr(approval_store, "_state_db", state_db)
+    monkeypatch.setattr(approval_allowlist_store, "_state_db", state_db)
     app = agent_app.build_app("test-agent")
     return TestClient(app, raise_server_exceptions=True)
 
@@ -56,19 +67,17 @@ async def test_resolve_approval_happy_path(monkeypatch, tmp_path):
 
     from fleetent.governance import permission_gate as pg
 
-    # Isolate the agent-side approval store BEFORE the background request_approval
-    # writes its pending row (DB_PATH freezes at import from the ambient home).
-    monkeypatch.setattr(approval_store, "DB_PATH", tmp_path / "agent.db")
+    # Inject a fresh per-agent state DB BEFORE the background request_approval writes.
+    state_db = _make_state_db(tmp_path)
+    monkeypatch.setattr(approval_store, "_state_db", state_db)
+    monkeypatch.setattr(approval_allowlist_store, "_state_db", state_db)
     # Install a fresh gate with short timeouts so the test doesn't hang
     gate = PermissionGate(medium_timeout=5.0, high_timeout=5.0)
     monkeypatch.setattr(pg, "_default_gate", gate)
 
-    # Register an approval in the background
     async def noop(_msg: str) -> None:
         pass
 
-    # R1 default-closed: with no reachable approver the request is rejected
-    # immediately, so a pending approval requires routing + a mocked outbound DM.
     from unittest.mock import AsyncMock
 
     import fleetent.outbound as outbound_mod
@@ -91,10 +100,13 @@ async def test_resolve_approval_happy_path(monkeypatch, tmp_path):
             outbound_connectors={"slack": AsyncMock()},
         )
     )
-    # yield to let the task register the event
     await asyncio.sleep(0)
 
-    client = _make_client(monkeypatch, tmp_path)
+    fake_user = MagicMock(spec=user_store.User)
+    fake_user.id = "U1"
+    monkeypatch.setattr(user_store, "authenticate", lambda _token: (fake_user, {}))
+    app = agent_app.build_app("test-agent")
+    client = TestClient(app, raise_server_exceptions=True)
     resp = client.post(
         f"/approvals/{approval_id}/resolve",
         json={"decision": "approved", "approver_user_id": "U_LEAD"},
