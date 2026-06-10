@@ -2,155 +2,221 @@
 
 面向企业 on-premises 部署的 Lean Agent 平台。Python + FastAPI，无 AI 框架依赖，支持 Slack / Telegram / WhatsApp，数据不出内网。
 
+**基础设施原则**：所有外部服务组件必须可自托管（self-hostable），数据不出客户内网。PostgreSQL、Redis、Qdrant、RabbitMQ 等有官方 Docker 镜像的组件均可引入；Pinecone Cloud、OpenAI Embeddings API 等云托管专有服务禁止使用。
+
+---
+
 ## 不可逾越的规则
+
+AI 和所有团队成员必须遵守。违反任何一条 = 违反流程，需要回退重来。
 
 ### Commit 规范
 
-格式：`type(scope): 简短描述`，英文、动词开头，scope 可选。
+格式：`type(scope): 简短描述`（英文，动词开头，scope 可选）
 
-type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`。
+type 只能是：`feat` / `fix` / `refactor` / `test` / `docs` / `chore`
 
-禁止使用 `update`、`fix bug`、`wip` 等模糊描述；一次 commit 不要混入多个不相关改动。
+禁止：`update`、`fix bug`、`wip` 等模糊描述；一次 commit 不要混入多个不相关改动。
 
 ### TDD Hard Gate
 
-每个实现 task 必须严格按顺序执行：
+每个实现 task 必须严格按顺序执行，不可跳步：
 
-1. 写测试，运行**最窄相关命令**（单测试/单文件 `uv run pytest <file>::<test> -x -q`），必须看到红。
-2. 写实现，运行同一命令，必须看到绿。
-3. 可选 refactor，确保测试仍然绿。
+1. **写测试** → 运行**最窄相关命令**（`uv run pytest <file>::<test> -x -q`）→ **必须看到红**（若直接绿：测试未覆盖目标行为，先修测试）
+2. **写实现** → 运行同一命令 → **必须看到绿**
+3. 可选 refactor → 确保仍然绿
 
-如果测试直接绿，说明测试没有覆盖目标行为，需要先修测试。Hard Gate 管「见红 → 见绿」纪律，不规定范围；task / PR 收尾跑什么见 Testing Guidelines。
+Hard Gate 管「必须见红 → 见绿」纪律，**不规定范围**；task / PR 收尾跑什么范围见「测试规范 · 何时跑什么」。跳过任何一步 = 违反流程。
 
 ### OpenSpec 工作流
 
-本项目有 `openspec/` 目录，默认使用 OpenSpec 流：
+> **前置条件**：所有工作流从 main 最新代码出发，开始前执行 `git pull origin main`。
 
-1. `opsx:propose`：定义 proposal、specs、design（可选）、tasks；`tasks.md` 必须体现 TDD 顺序。
-2. 建 worktree + 功能分支。
-3. `opsx:apply`：按 task 执行，每个 task 强制 TDD。
-4. `opsx:archive`：所有 checkbox 为 `[x]` 后，在当前功能分支归档并同步 specs。
-5. 推送分支并清理 worktree；后续在主仓库基于已推送分支决定 merge / PR。
+1. **opsx:propose** — 写 proposal.md、specs/、design.md（可选）、tasks.md；tasks.md 中**测试任务必须在对应实现任务之前**
+2. **建 worktree + 功能分支** — `git worktree add .worktrees/<change-name> -b feat/<change-name>`
+3. **opsx:apply** — 按 task 执行，每个 task 强制 TDD；完成后标记 `[x]`
+4. **opsx:archive** — 所有 checkbox 为 `[x]` 后，在**功能分支**归档并同步 specs（archive 表示"实现完成"，不代表已上线到 main）
+5. **推送 + 清理 worktree** — 清理前提：分支已推送到 remote、worktree 干净、无未提交改动
 
-`tasks.md` 中所有实现任务必须拆成 TDD 红绿步骤：先 `Write failing tests` 并运行
-`uv run pytest -x -q` 确认红，再实现并运行同一命令确认绿；测试任务必须在对应实现任务之前。
-如果 proposal / tasks 没有体现红绿循环，不能进入 implementation。
-
-归档先于合并决策：`opsx:archive` 在功能分支上执行，spec 同步随同一分支进入后续 PR，便于一并
-review；archive 表示"实现完成"，不代表已上线到 `main`。
-
-worktree 清理必须满足三个条件：对应分支已推送到 remote（或已建 PR）、worktree 干净、没有未提交
-的用户改动。分支尚未推送或存在未提交改动时不得清理，避免丢失工作。
-
-OpenSpec proposal / design 进入 implementation 前必须声明模块边界影响：
-
-- owning package（例如 `runtime` / `platform` / `intelligence` / `observability`）。
-- public API surface（允许其他模块 import / 调用的函数、dataclass、service interface）。
-- owned tables（新增或修改的持久化表；无则写无）。
-- config namespace（新增配置所属命名空间；无则写无）。
-- cross-module dependencies（依赖哪些模块 public API，是否触碰共享契约）。
-- migration / shim plan（移动平铺模块时如何保留 re-export 兼容和迁移 import）。
+**proposal / design 进入 implementation 前必须声明模块边界影响**：
+- owning package（如 `runtime` / `platform` / `governance` / ...）
+- public API surface（允许其他模块 import 的函数、dataclass、service interface）
+- owned tables（新增或修改的持久化表；无则写无）
+- config namespace（新增配置所属命名空间；无则写无）
+- cross-module dependencies（依赖哪些模块 public API，是否触碰共享契约）
+- migration / shim plan（移动平铺模块时如何保留 re-export 兼容）
 
 ### Agent / Platform 解耦（核心架构契约）
 
-agent 运行时与 platform 控制面完全解耦。依赖方向单向不可逆：
+agent 必须能在**没有 platform 的环境下独立运行**（`fleetent agent run`）。依赖方向**单向不可逆**：
 
 ```
 platform（管理入口） ──→ agent runtime（被启停、被读取）
 agent runtime ──✗──→ platform        # 严格禁止反向依赖
 ```
 
-- agent 运行时模块（`runtime/`、`session/`、`im_gateway/`、`intelligence/`、`tools/`、`integrations/`、`model/`、`observability/`、`governance/`，以及重构后平铺出的 `knowledge_base/`、`vector_store/`、`memory/`、`reflection/`、`long_term_ctx/`）MUST NOT `import fleetent.platform.*`，也不得调用 platform 模块触发行为。
-- agent 运行时产生的数据（会话历史、压缩/token/恢复等元数据、运行轨迹）只能落 agent 侧（session 文件、agent store、observability trace），严禁写入 platform 管理表。
-- platform 需要 agent 数据时读 agent 侧产物（trace / session 文件 / agent store），而非要求 agent 反向写 platform 表。
-- 验证基线：任何改动后，agent 必须能在「无 platform、platform 的 DB 表不存在」环境下完成 `fleetent agent run` 对话；相关功能不得依赖 platform 表才能工作。
+- **agent 运行时模块**（`runtime/`、`session/`、`im_gateway/`、`tools/`、`integrations/`、`model/`、`observability/`、`governance/`、`memory/`、`long_term_ctx/`、`reflection/`）MUST NOT `import fleetent.platform.*`
+- **独立组件 / 基础设施**（`knowledge_base/`、`vector_store/`、`structured_logging.py`）同样 MUST NOT `import fleetent.platform.*`
+- **KB 读写边界**：`knowledge_base.retrieval` MUST NOT import `knowledge_base.ingest`（依赖护栏测试强制）
+- agent 运行时产生的数据（会话历史、压缩/token/恢复元数据、运行轨迹）只能落 agent 侧（session 文件、agent store、observability trace），**严禁写入 platform 管理表**
+- platform 需要 agent 数据时读 agent 侧产物，而非要求 agent 反向写入 platform 表
+- **验证基线**：任何改动后，agent 必须能在「无 platform、platform 的 DB 表不存在」环境下完成 `fleetent agent run` 对话
 
-## Project Structure & Module Organization
+> 2026-06-10 审计：`im_gateway/telegram`、`tools/builtin_tools` 的反向 import 已清理。仍存一处根因：`user_store.authenticate` import `platform.user_management.api_key_store`——由 #4 Identity 端口结构性根除。不得新增同类反向依赖。
 
-核心代码在 `src/fleetent/`。当前仍有 legacy 平铺模块，新增代码优先按模块化单体 package 组织：
-`runtime/`、`governance/`、`platform/`、`channels/`、`intelligence/`、`integrations/`、
-`observability/`、`infrastructure/`。平铺模块在被大幅触碰时迁移，旧 import 路径可暂时保留
-re-export shim，但 shim 不承载业务逻辑。
+---
 
-关键 legacy 模块包括：`agent_loop.py`（tool-use 循环）、`model_router.py`（模型路由）、
-`tool_registry.py` / `tools.py`（工具注册与内置工具）、`server.py`（FastAPI）、`admin.py`（管理 CLI）、
-`im_gateway/`（Slack / Telegram 适配器）。
+## 项目结构
 
-测试按层放在 `tests/unit/`、`tests/integration/`、`tests/e2e/`、`tests/evaluation/`，命名为 `test_<module>.py`。配置样例在 `config/`，Alembic 迁移在 `migrations/`，技能在 `skills/`，文档在 `docs/`。`data/` 是本地运行数据，测试不得直接触碰。
+代码在 `src/fleetent/`，模块化单体，每个顶层包一个职责：
 
-## Build, Test, and Development Commands
+```
+src/fleetent/
+  platform/          # 平台控制面（管理 API / CLI）
+  runtime/           # agent 核心循环与生命周期
+  memory/            # 用户记忆提取/存储/检索
+  long_term_ctx/     # 长期上下文构建
+  reflection/        # 反思报告生成
+  knowledge_base/    # KB 检索/向量化/持久化
+  vector_store/      # 向量嵌入和重排
+  governance/        # 审批门 / 权限 / 审计
+  integrations/      # MCP client / 沙箱
+  model/             # 模型路由和提供商健康
+  observability/     # trace / usage / diagnostics
+  session/           # 会话持久化
+  im_gateway/        # Slack / Telegram 适配器
+  tools/             # 工具注册 / 内置工具
+  skills/            # Skill 注册和注入
+  tui/               # 交互式终端 TUI
+  structured_logging.py  # 跨域日志底座（顶层基础设施）
+  server.py          # FastAPI 入口
+  db.py              # 数据库运行时边界层
+  agent_config.py    # agent.yaml 定义和加载
+  paths.py           # 路径常量（统一优先级解析）
+```
 
-- `uv sync`：安装依赖。
-- `make test-pr`：PR 门禁——unit〔除 quarantine〕+ 层边界 + 改动文件的 ruff format/lint，必须全绿。
-- `uv run pytest`：运行全部 4 层（含 e2e/evaluation，起真实服务/真 LLM），**非 PR 门禁命令**。
-- `uv run pytest -x -q`：fail-fast，**仅 TDD 红绿循环使用**。
-- `uv run pytest tests/unit` / `make test-unit`：运行快速单元测试。
-- `uv run pytest tests/integration` / `make test-integration`：运行集成测试（收尾对照 main 基线，确认无新增失败）。
-- `uv run pytest tests/e2e` / `make test-e2e`：运行端到端测试；真实服务 smoke 需显式开启。
-- `uv run pytest tests/evaluation` / `make test-evaluation`：运行效果评估测试。
-- `uv run python scripts/check_test_layers.py` / `make test-layers`：检查 unit / integration 测试层边界。
-- `PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py`：检查已迁移 package 是否跨模块 import internal 实现。
-- `uv run ruff format src tests`：格式化。
-- `uv run ruff check src tests`：lint。
-- `uv run mypy src`：严格类型检查。
-- `uv run fleetent "hello"`：运行 CLI agent。
-- `uv run fleetent-admin create-user --name "Alice"`：创建用户/API key。
-- `uv run uvicorn fleetent.server:app --reload`：启动 HTTP 服务。
+平铺 legacy 模块在被大幅触碰时迁移；旧 import 路径保留 re-export shim（shim 不承载业务逻辑）。
 
-## Coding Style & Architecture Rules
+---
 
-- 行长 100，ruff 强制；mypy strict。
-- 公开函数必须有完整类型注解；公开 API 使用 Google 风格 docstring。
-- 注释只解释“为什么”，不复述“做什么”。
-- 新模块结构：import → 可注入常量/配置 → dataclass → 函数。
-- 禁止引入 LangChain / LlamaIndex / LangGraph。
-- 禁止 ORM；数据库策略是 SQLite-first，不是 SQLite-only。
-- 新增或改造数据库代码必须经过统一 DB runtime / store 边界；不得继续扩散 `sqlite3.connect`、`DB_PATH` re-export、SQLite 专属方言到业务层。
-- store 层 SQL 使用 named parameters（如 `:user_id`），不要新增 `?` 占位符风格。
-- schema lifecycle 由 Alembic 管理；不要在新 store 中复制 `_init_db()` 建表/补列模式。
-- 已迁移 package 的 internal 实现不得被其他 package import；跨模块调用必须走 public API。
-- 禁止不可注入的全局可变状态；legacy 路径常量在迁移前必须方便 `monkeypatch` 隔离。
-- 禁止云托管专有服务破坏数据主权；基础设施组件必须可 self-host。
+## 数据与 Schema 生命周期
 
-## Testing Guidelines
+当前单库 `data/fleetent.db`（目标：5 物理库，见 `docs/architecture/data-model.md`）。
 
-pytest 配置为 `asyncio_mode = auto`，async 测试无需 `@pytest.mark.asyncio`。
+**双权威**：
+- **管理表**（users/api_keys/tenants/teams/scheduled_tasks 等）→ 仅由 **Alembic** 维护，不在 store 中 `_init_db()` 建表
+- **agent 侧表**（traces/memory_items/sessions/approvals/KB/reflection 等）→ `ensure_schema()` 自建，DDL 与 alembic head 保持一致（漂移护栏强制）；目标态改用嵌入式 forward-only 迁移（`user_version` 戳）
 
-测试按成本和依赖范围分层：
+测试用 `tmp_path + monkeypatch` 隔离，绝不触碰 `data/`。
 
-- `tests/unit/`：单模块行为，mock LLM、数据库、HTTP、sandbox 等外部依赖，作为新增单元测试默认位置。
-  unit 不得使用 FastAPI `TestClient` / app lifespan，不得运行 Alembic migration，不得导入
-  `tests.integration.*` helper，也不得验证真实 SQLite schema lifecycle / DB runtime orchestration。
-  unit 不得导入 `sqlite3`、monkeypatch `DB_PATH` 后创建真实 DB file、调用生产 `_init_db()`，也不得用
-  `DATABASE_URL=sqlite:///...` 或 `create_database("sqlite:///...")` 验证 store/runtime 持久化。
-  `tmp_path` 只可用于纯解析、配置路径、序列化和可注入文件边界；一旦用于真实 DB file、schema、CRUD 或 store/runtime 协作，
-  测试必须放在 integration。只读 legacy shim / public API / path constant 兼容断言可留在 unit。
-- `tests/integration/`：多模块协作、SQLite/Alembic/FastAPI、observability trace / usage / logging 等需要真实本地组件的测试。
-  FastAPI `TestClient`、Alembic migration、migrated SQLite tables、store/runtime wiring 都属于 integration。
-- `tests/e2e/`：启动服务或走 CLI/HTTP/IM 完整链路的端到端测试；默认不进入 PR 门禁，真实服务 smoke 需显式开启。
-- `tests/evaluation/`：memory、reflection、long-term context、knowledge-base 等效果评估；不得接入真实 LLM / embedding 服务作为默认测试。
-历史平铺测试已迁移到分层目录；不得继续向 `tests/` 根目录新增 `test_*.py`。
+---
 
-何时跑什么：红/绿每一步用最窄命令 `uv run pytest <file>::<test> -x -q`；单个 task 收尾跑受影响那一层
-（`uv run pytest tests/unit -q` 或 `tests/integration -q`）；change / PR 收尾跑 `make test-pr`
-（unit〔除 quarantine〕+ 层边界 + 改动文件的 ruff format/lint，硬门禁必须全绿），再用**不带 `-x`** 的
-`uv run pytest tests/integration -q` 对照 main 基线。门禁判据是**无新增失败**，不是零失败：当前（2026-06）
-约 2 个 unit + 19 个 integration 预先存在失败（`permission_gate` / agent-access 重构遗留，owner 非测试改动者）；
-其中 2 个 unit（`test_loop_permission_gate.py`，flaky）已在 `make test-pr` 用 `--deselect` quarantine，owner 修复后移除。
-`-x` 仅用于红绿循环；裸 `uv run pytest` 含 e2e/evaluation（起真实服务），非门禁命令。测试归位 / 层规则 /
-新增 unit 测试时收尾跑 `uv run python scripts/check_test_layers.py`（已含在 `make test-pr`）。
+## 常用命令
 
-测试必须隔离外部依赖：LLM 调用 patch `get_client_and_config`，数据库测试放在 integration 并用 `tmp_path` 或统一 DB fixture 隔离，MCP / sandbox / 外部 HTTP 用 `respx` 或 `unittest.mock`。每个测试函数只测一个行为；`permission_gate` 测试使用短超时：`PermissionGate(medium_timeout=0.1)`。
+```bash
+uv sync                                                     # 安装依赖
+make test-pr                                                # PR 门禁（unit + 层边界 + 改动文件 ruff，必须全绿）
+uv run pytest <file>::<test> -x -q                          # TDD 红/绿每一步（最窄命令）
+uv run pytest tests/unit -q                                 # 单元测试
+uv run pytest tests/integration -q                         # 集成测试（收尾对照 main 基线）
+make test-unit                                              # 同上（make 快捷）
+make test-integration                                       # 同上（make 快捷）
+uv run pytest tests/e2e                                     # 端到端测试
+uv run pytest tests/evaluation                              # 效果评估测试
+uv run python scripts/check_test_layers.py                  # 检查 unit/integration 层边界（已含在 make test-pr）
+PYTHONPATH=src:. uv run python scripts/check_module_boundaries.py  # 检查跨包 internal import
+uv run ruff format src tests                                # 格式化
+uv run ruff check src tests                                 # lint
+uv run mypy src                                             # 类型检查
+uv run fleetent "hello"                                     # CLI agent
+uv run fleetent-admin create-user --name "Alice"            # 用户管理
+uvicorn fleetent.server:app --reload --port 8765            # HTTP 服务（默认端口 8765）
+uv run fleetent-tui --token ma-<key>                        # 交互式终端 TUI
+```
+
+---
+
+## 代码风格
+
+- 行长 100（ruff 强制）；mypy strict
+- 公开函数必须有完整类型注解；公开 API 用 Google 风格 docstring
+- 注释只写"为什么"，不复述"做什么"
+- 新模块结构：import → 可注入常量/配置 → dataclass → 函数
+- 不吞异常，catch 后必须 log 或 re-raise
+- 已迁移 package 的 internal 实现不得被其他 package import；跨模块调用必须走 public API
+
+**禁止**：
+- AI 框架（LangChain / LlamaIndex / LangGraph）—— 永久禁止
+- ORM —— 手写 SQL，通过 store 边界保持可审计
+- 云托管专有服务 —— 违反数据主权原则
+- 绕过统一 `db.py` 边界（不得扩散 `sqlite3.connect`、`DB_PATH` re-export 到业务层）
+- store 层新增 `?` 占位符风格 SQL（统一用 named parameters，如 `:user_id`）
+- 不可注入的全局可变状态（legacy 路径常量在迁移前必须方便 `monkeypatch` 隔离）
+
+---
+
+## 测试规范
+
+`asyncio_mode = auto`，async 测试无需 `@pytest.mark.asyncio`。
+
+### 测试分层
+
+| 层 | 位置 | 规则 |
+|----|------|------|
+| unit | `tests/unit/` | mock LLM/DB/HTTP；不得用 FastAPI TestClient / Alembic / 真实 DB file |
+| integration | `tests/integration/` | 多模块协作、SQLite/Alembic/FastAPI、真实本地组件 |
+| e2e | `tests/e2e/` | 完整链路；默认不进 PR 门禁 |
+| evaluation | `tests/evaluation/` | 效果评估；不得接入真实 LLM |
+
+`tmp_path` 只用于纯解析/配置/序列化；一旦用于真实 DB/schema/CRUD，测试必须放 integration。历史平铺测试已迁移；不得继续向 `tests/` 根目录新增 `test_*.py`。
+
+unit 不得：使用 FastAPI `TestClient` / app lifespan、运行 Alembic migration、导入 `tests.integration.*` helper、验证真实 SQLite schema lifecycle / DB runtime orchestration、导入 `sqlite3` 后创建真实 DB file、调用生产 `_init_db()`。
+
+### 何时跑什么
+
+| 时机 | 命令 | 判据 |
+|------|------|------|
+| TDD 红/绿每步 | `uv run pytest <file>::<test> -x -q` | 见红/见绿 |
+| 单 task 收尾 | 受影响层（unit 或 integration） | 该层无新增失败 |
+| change / PR 收尾 | `make test-pr` + `uv run pytest tests/integration -q`（不带 `-x`，对照 main 基线） | test-pr 全绿；integration 无新增失败 |
+
+**门禁判据是「无新增失败」，不是零失败**：当前（2026-06）约有 2 unit + 19 integration 预先存在失败（`permission_gate` / agent-access 重构遗留，owner 非测试改动者）；其中 2 个 unit（`test_loop_permission_gate.py`，flaky）已在 `make test-pr` 用 `--deselect` quarantine。`make test-pr` 的 ruff 只扫本分支 changed-vs-main 的 `.py`——你只对自己改过的文件负责。
+
+### Mock 策略
+
+- LLM：patch `get_client_and_config`
+- 数据库：integration 层，`tmp_path` 或统一 DB fixture
+- 外部 HTTP（MCP/sandbox）：`respx` 或 `unittest.mock`
+- `permission_gate` 测试：`PermissionGate(medium_timeout=0.1)`
+- `conftest.py` autouse `_isolate_fleetent_home` 把 FLEETENT_HOME 钉在临时目录；测路径优先级的测试用自身 monkeypatch 覆盖
+
+---
+
+## 环境变量
+
+```
+DATABASE_URL           # 可选，默认 sqlite:///<data_dir>/fleetent.db
+LOG_FORMAT             # console | json，默认 console
+FLEETENT_HOME          # 覆盖 config/data 家目录（未设时：仓库内→./；仓库外→~/.fleetent）
+FLEETENT_AGENTS_DIR    # 覆盖 agents 目录（默认 <config_dir>/agents）
+FLEETENT_SKILLS_DIR    # 覆盖 skills/ 目录（默认 ./skills）
+FLEETENT_PLUGINS_DIR   # 覆盖 plugins/ 目录
+FLEETENT_TUI_URL       # WebSocket 地址，默认 ws://127.0.0.1:8765/ws
+FLEETENT_TOKEN         # Bearer token（--token 参数优先）
+```
+
+不要提交真实配置或 secret：复制 `config/*.example.*` 后本地修改；API key、Slack/Telegram token、`.env` 留在本机。
+
+---
 
 ## Gotchas
 
-- `tools.py` 通过 import 副作用注册工具，`agent_loop.py` 顶部必须 import。
-- `skill_registry.scan()` 在服务启动时运行，CLI `run()` 每次调用时扫描。
-- `context_mgr._keep_tail()` 使用 identity check，不要替换为 `==`。
-- Bearer token 格式：`Authorization: Bearer ma-<64hex>`。
-- MCP 工具名格式：`{server_id}__{tool_name}`。
-- `session_mgr` 原子写：`.json.tmp → rename`；测试中 monkeypatch `session_mgr.SESSIONS_DIR`。
-
-## Security & Configuration
-
-不要提交真实配置或 secret。复制 `config/*.example.*` 后本地修改；API key、Slack/Telegram token、`.env` 都必须留在本机。
+- **工具注册**：`tools/builtin_tools.py` 通过 import 副作用注册工具；`tools/__init__.py` 顶部 `from fleetent.tools import builtin_tools` 承载此副作用，`runtime/loop.py` 顶部 `import fleetent.tools` 触发注册，否则 `get_schemas()` 返回空
+- **Skill 扫描**：`skills/registry.scan()` 在服务启动时运行（FastAPI lifespan）；CLI `run()` 每次调用时扫描
+- **Context identity check**：`runtime/context.py` 的 `_keep_tail()` 使用 identity check（`m is tail[0]`），不用 `==`；patch/monkeypatch 目标须指 `fleetent.runtime.context`，patch 旧 shim `fleetent.context_mgr` 不生效
+- **Runtime shim**：旧扁平路径（`agent_loop`/`context_mgr`/`agent_runtime`/`sub_agent`/`cancellation` 等 13 个）仅留 re-export shim；`monkeypatch.setattr` 须指真实子模块（如 `fleetent.runtime.loop`），patch shim 不生效
+- **Session 原子写**：`session/manager.py` 写 `.json.tmp → rename`；测试中 monkeypatch `session_mgr.SESSIONS_DIR`
+- **路径常量**：`DB_PATH`/`SESSIONS_DIR` 等在 import 时从 `paths.py` 求值一次；测试整体重定向用 `monkeypatch.setenv("FLEETENT_HOME", tmp_path)` + `importlib.reload()`，或 `monkeypatch.setattr(module, "<CONST>", ...)`
+- **Bearer token 格式**：`Authorization: Bearer ma-<64hex>`（`ma-` 前缀区分服务 key 与模型 API key）
+- **MCP 工具名**：`{server_id}__{tool_name}`（双下划线）
+- **model/resolver.py**：每次调用新建 client——故意的，client 无状态且廉价
