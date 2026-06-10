@@ -238,3 +238,95 @@ async def test_run_threads_session_context_to_tool(monkeypatch):
     assert result == "done"
     assert captured["tool_context"] is not None
     assert captured["tool_context"].session_context is sc
+
+
+async def test_run_threads_outbound_connectors_to_tool(monkeypatch):
+    """run(outbound_connectors=...) reaches the tool via ToolContext at dispatch time."""
+    import fleetent.runtime.loop as al
+
+    connector = object()
+    captured: dict = {}
+
+    def fake_dispatch(name, args, **kw):
+        captured["tool_context"] = kw.get("tool_context")
+        return f"{name}_result"
+
+    def _tool_resp():
+        tc = MagicMock()
+        tc.id = "tc-1"
+        tc.function.name = "web_search"
+        tc.function.arguments = "{}"
+        m = MagicMock()
+        m.content = None
+        m.tool_calls = [tc]
+        m.model_dump = lambda: {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "tc-1",
+                    "type": "function",
+                    "function": {"name": "web_search", "arguments": "{}"},
+                }
+            ],
+        }
+        ch = MagicMock()
+        ch.finish_reason = "tool_calls"
+        ch.message = m
+        r = MagicMock()
+        r.choices = [ch]
+        r.usage = MagicMock()
+        return r
+
+    def _text_resp():
+        m = MagicMock()
+        m.content = "done"
+        m.tool_calls = None
+        m.model_dump = lambda: {"role": "assistant", "content": "done"}
+        ch = MagicMock()
+        ch.finish_reason = "stop"
+        ch.message = m
+        r = MagicMock()
+        r.choices = [ch]
+        r.usage = MagicMock()
+        return r
+
+    n = 0
+
+    async def fake_create(**kwargs):
+        nonlocal n
+        n += 1
+        return _tool_resp() if n == 1 else _text_resp()
+
+    def _client():
+        c = AsyncMock()
+        c.chat = MagicMock()
+        c.chat.completions = MagicMock()
+        c.chat.completions.create = AsyncMock(side_effect=fake_create)
+        return c
+
+    monkeypatch.setattr(
+        al,
+        "get_schemas",
+        lambda: [{"type": "function", "function": {"name": "web_search", "parameters": {}}}],
+    )
+    monkeypatch.setattr(al, "maybe_compress", lambda msgs, **kw: msgs)
+    monkeypatch.setattr(al, "log_run", lambda *a, **kw: None)
+    monkeypatch.setattr(al, "extract_and_update", AsyncMock())
+    monkeypatch.setattr(al, "available_skills_prompt", lambda *a, **k: "")
+    monkeypatch.setattr(
+        al,
+        "resolve_limits",
+        lambda max_turns=None, max_consecutive_failures=None, config=None: (50, 3),
+    )
+    monkeypatch.setattr(al, "_build_async_client", lambda r, k: _client())
+    monkeypatch.setattr(al, "build_context", AsyncMock(return_value=MagicMock(text="", sources=[])))
+    monkeypatch.setattr(al, "record_trace_event", lambda *a, **kw: None, raising=False)
+    monkeypatch.setattr(al, "dispatch", fake_dispatch)
+
+    result = await al.run(
+        messages=[{"role": "user", "content": "hi"}],
+        outbound_connectors={"slack": connector},
+    )
+    assert result == "done"
+    assert captured["tool_context"].outbound_connectors["slack"] is connector

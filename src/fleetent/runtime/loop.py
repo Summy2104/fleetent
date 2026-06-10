@@ -16,11 +16,11 @@ from openai.types.chat import ChatCompletionChunk
 
 import fleetent.tools  # noqa: F401  # side-effect: register built-in tools
 from fleetent import agent_config
-from fleetent.identity import Principal
 from fleetent.eval_logger import log_run
 from fleetent.governance.action_gate import ActionMode, is_sandbox_backed, resolve_action_mode
 from fleetent.governance.agent_policy import check_tool_access
 from fleetent.governance.permission_gate import _default_gate
+from fleetent.identity import Principal
 from fleetent.integrations.sandbox import Mode, is_code_execution_enabled, redact_secrets
 from fleetent.long_term_ctx import ContextSource, build_context
 from fleetent.memory import extract_and_update
@@ -1579,6 +1579,7 @@ async def _run_inner(
         features=agent_features or {},
         session_id=session_id,
         session_context=session_context,
+        outbound_connectors=outbound_connectors or {},
     )
 
     start = time.monotonic()

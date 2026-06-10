@@ -533,3 +533,49 @@ async def invoke_agent(agent_name: str, message: str) -> str:
         agent_name=agent_name,
         model_policy=snapshot.model_policy,
     )
+
+
+@tool(risk_level="medium")
+async def send_im_message(
+    target: str,
+    text: str,
+    target_type: str = "user",
+    platform: str = "",
+    tool_context: ToolContext | None = None,
+) -> str:
+    """Proactively send an IM message to a user (DM) or a channel.
+
+    Use when the user asks you to notify or message someone, or to post to a
+    channel — beyond replying in the current conversation (replying needs no
+    tool). `target` is the platform-native id (Slack `U…`/`C…`, Telegram chat
+    id); `target_type` is "user" for a DM (default) or "channel" for a channel
+    post. `platform` defaults to the current conversation's platform.
+    """
+    # Lazy import: keeps module load light and avoids cycles (builtin convention).
+    from fleetent import outbound
+
+    connectors = tool_context.outbound_connectors if tool_context else {}
+    sc = getattr(tool_context, "session_context", None) if tool_context else None
+    resolved_platform = platform or str(getattr(sc, "platform", "") or "")
+    if not resolved_platform:
+        return "发送失败：未指定平台且当前会话无平台信息，请显式传入 platform。"
+    connector = connectors.get(resolved_platform)
+    if connector is None:
+        return (
+            f"发送失败：当前通道不支持主动外发（无可用 {resolved_platform} 连接器）。"
+            "该功能仅在 IM 网关运行时可用。"
+        )
+    if target_type == "user":
+        reachable = await outbound.is_reachable(resolved_platform, connector, target)
+        if not reachable:
+            return (
+                f"发送失败：目标 {target} 在 {resolved_platform} 上不可达/无法触达"
+                "（Telegram 用户需先与 bot 对话过）。"
+            )
+    sent = await outbound.send_to(
+        resolved_platform, connector, target, text, target_type=target_type
+    )
+    if not sent:
+        return f"发送失败：{resolved_platform} 投递 {target} 时出错，请稍后重试。"
+    kind = "私信" if target_type == "user" else "频道消息"
+    return f"已发送{kind}到 {resolved_platform}:{target}。"

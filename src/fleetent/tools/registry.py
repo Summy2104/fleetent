@@ -35,6 +35,10 @@ class ToolContext:
     # Inbound sender/channel metadata (im_gateway.SessionContext) for whoami-style
     # tools; typed Any to avoid an im_gateway import cycle. None = unavailable.
     session_context: Any = None
+    # Live IM connectors keyed by platform (e.g. {"slack": client}) for tools that
+    # send proactively (send_im_message). Empty when the run path has no IM gateway
+    # (TUI / HTTP) — such tools must degrade with an explanatory result.
+    outbound_connectors: dict[str, Any] = field(default_factory=dict)
 
 
 _registry: dict[str, tuple[Callable[..., Any], ToolSchema]] = {}
