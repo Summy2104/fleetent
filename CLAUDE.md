@@ -101,7 +101,7 @@ agent runtime ──✗──→ platform        # 严格禁止反向依赖
 
 > 反例（已发生并返工）：把 compaction / token / resume_pending 写进 `session_meta`——agent 独立运行时该表不存在，功能静默失效。正确做法：状态存 session 文件 `meta` 字段，统计读 observability trace（`observability/usage.py`）。
 >
-> 现存待审计的 agent→platform 依赖（不得新增同类；逐一确认合规性或清理）：`im_gateway/telegram`、`tools/builtin_tools` 各有一处 import `platform.*`。
+> agent→platform 依赖现状（2026-06-10 复核）：`im_gateway/telegram`、`tools/builtin_tools` 早期那两处 import `platform.*` **已清理**（现无）。`permission_gate` 也已停止 import `user_store`（审批移 agent 侧 `approval_store`）。**仍存一处根因**：`user_store.authenticate` 仍 import `platform.user_management.api_key_store`——由 **#4 Identity 端口**结构性根除（认证下沉为基座端口，核只消费已解析的 Principal，详见 `docs/architecture/target-architecture-proposal.md §6`）。不得新增同类反向依赖。
 
 ---
 
@@ -123,7 +123,6 @@ src/fleetent/
     im_gateway_management/        ← IM 网关管理 API
     knowledge_base_management/    ← 知识库管理和绑定 API
     model_provider_management/    ← 模型提供商管理 API
-    resource_monitoring/          ← 资源监控和告警
     skill_management/             ← Skill 管理和上传 API
     user_management/              ← 用户/API key 管理 API
 
@@ -151,10 +150,11 @@ src/fleetent/
   # ── 治理 ──
   governance/
     agent_policy.py      ← fnmatch tool 访问检查（allowed_tools 白名单）
-    permission_gate.py   ← asyncio.Event 人工审批门（medium/high 风险）
+    permission_gate.py   ← 人工审批门（medium/high 风险；agent 主动外呼审批人，R1）
+    approval_store.py    ← 审批请求 + 门状态持久化（agent 侧，R1）
     audit_log.py         ← 平台管理操作审计日志
-    quota.py             ← 用户/全局配额限制
     blocklist.py         ← 用户封禁和级联撤销
+    # quota.py 已 v1 descope 删除（迁移 065）
 
   # ── 集成 ──
   integrations/
@@ -232,7 +232,7 @@ src/fleetent/
 - **禁止 ORM**：数据库策略是 SQLite-first，不是 SQLite-only；手写 SQL 通过 store 边界保持可审计
 - **禁止扩散 SQLite 细节**：新增或改造数据库代码必须经过统一 DB runtime / store 边界，不得继续扩散 `sqlite3.connect`、`DB_PATH` re-export、SQLite 专属方言到业务层
 - **SQL 参数规范**：store 层 SQL 使用 named parameters（如 `:user_id`），不要新增 `?` 占位符风格
-- **schema lifecycle 归 Alembic**：不要在新 store 中复制 `_init_db()` 建表/补列模式
+- **schema lifecycle 双权威（按库分）**：**管理库表**（users/api_keys/audit_log/im_connectors/im_channel_allowlist/tenants/teams/scheduled_tasks/approvals-platform 等）**仅由 Alembic** 维护——不要在 store `_init_db()` 建表/补列。**agent 侧库表**（traces/memory_items/sessions/approvals-agent/reflection/KB 等）须脱离 alembic 单机自建：现状用 `ensure_schema()`、目标态用**结构化嵌入式 forward-only 迁移（Y，`user_version` 戳）**（详见 data-model §5.2）。不得用裸 `sqlite3.connect` 绕过统一 `db.py`。
 - **禁止全局可变状态**：legacy 模块级路径常量（`DB_PATH` / `SESSIONS_DIR` 等）在迁移前必须可通过 `monkeypatch` 注入，方便测试隔离
 - **禁止 agent 运行时反向依赖 platform**：`runtime/`、`session/`、`im_gateway/`、`tools/`、`integrations/`、`knowledge_base/`、`memory/`、`reflection/`、`long_term_ctx/` 等 agent 运行时模块不得 `import fleetent.platform.*`，不得写入 platform 管理表；agent 必须可脱离 platform 独立运行（详见「Agent / Platform 解耦」）
 - **新依赖必须经过讨论**：区分三类——
@@ -244,18 +244,19 @@ src/fleetent/
 
 ## 数据目录
 
-**双 schema 权威**：管理库（`fleetent.db`）的 schema 由 alembic 迁移维护；per-agent 库（standalone `fleetent agent run` 时也是 `fleetent.db`）的 agent-side 表由各 store 的 `ensure_schema()` 自建，其 DDL 必须与 alembic head 保持一致（漂移护栏测试强制）。
+**双 schema 权威（现状·单库）**：今天仍是单 `fleetent.db`。**管理表**由 Alembic 维护——`users`/`api_keys`/`audit_log`/`im_connectors`/`im_channel_allowlist`/`tenants`/`teams` 等已**全部入 alembic**（迁移至 069，store 不再 `_init_db` 建表）。**agent 侧表**为支持单机脱离 alembic 启动,由各 store `ensure_schema()` 自建、DDL 与 alembic head 一致（漂移护栏强制）；**目标态改用嵌入式迁移（Y，§5.2）**。**目标拓扑 = 5 物理库 + 按主体(tenant)物理分区**（管理 / per-agent / 共享记忆 / KB / 向量，见 `docs/architecture/data-model.md §5.1 / §5.7`），由 #3 落地。
 
 ```
-data/
-  fleetent.db                     # SQLite 统一库 — gitignored
-    ├── users / im_users / agents / user_agents / channel_agents  # 管理表（仅 alembic）
-    ├── scheduled_tasks / approvals
-    ├── traces                    # agent-side（ensure_schema + alembic 双权威）
-    ├── memory_items              # agent-side（ensure_schema + alembic 双权威）
-    ├── knowledge_bases / knowledge_documents / knowledge_chunks  # agent-side
-    ├── sessions                  # agent-side（session 元数据，ensure_schema 自建）
-    └── skill_proposals / kb_reflection_reports / reflection_reports  # agent-side
+data/  （现状单库；目标 5 物理库见 data-model §5.1，按主体物理分区见 §5.7）
+  fleetent.db                     # gitignored
+    ├── users / im_users / agents / user_agents / channel_agents       # 管理表（alembic）
+    ├── api_keys / audit_log / im_connectors / im_channel_allowlist     # 管理表（alembic，v1 收编）
+    ├── tenants / teams                                                 # 多租户根实体（alembic，迁移 067-069）
+    ├── scheduled_tasks                                                 # 管理表（alembic）
+    ├── traces / memory_items / sessions                               # agent-side（ensure_schema→嵌入式迁移 Y）
+    ├── approvals                                                       # agent-side（governance/approval_store，R1）
+    ├── knowledge_bases / knowledge_documents / knowledge_chunks        # agent-side（KB）
+    └── reflection_reports / kb_reflection_reports / skill_proposals    # agent-side（自进化）
   users/{user_id}/memories.jsonl  # per-user 记忆（当前实现，v1.0 前迁移到 memory_items）
 ```
 

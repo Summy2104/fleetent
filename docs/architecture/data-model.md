@@ -269,9 +269,10 @@ namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后
 | # | change | 范围 | 状态 |
 |---|---|---|---|
 | **1** | `persistence-hygiene` | env.py 读 DATABASE_URL · 漂移护栏 · 消灭 users.db · 文档对齐 | **✅ 已完成并合并 main**（98de655 实现 / 9bbcd48 archive） |
-| **A** | 审批重设计（R1，§5.5） | im_gateway 出站原语（Gap A）+ 审批人路由 schema（AgentFile）+ permission_gate 重构（请求者≠审批人、门状态落 per-agent、停 `import user_store`、`approvals` 移出管理库）+ platform 只读投影 | 待 `opsx:propose`；**提前吃掉 #2/#3 部分管理表搬迁** |
-| 2 | 管理表收编 alembic | users/api_keys/quotas/invites/im_allowlist/audit_log 等 `_init_db` 表纳入迁移，使 `upgrade head` 建出完整管理 schema | 待该期 `opsx:propose` |
-| 3 | 五库物理分离（吸收 R2） | 落实 管理/per-agent/共享记忆/KB关系/向量(按家族路由) 五库；**嵌入式迁移（Y）取代 ensure_schema**；`memory_items` 去 `namespace` 列；shared/KB 拆库；vector 后端分层；platform 只读 agent 库 | 待该期（最大、最可能返工，detailed spec 即时生成） |
-| 4 | Identity 端口 | authn 抽端口 + 本地/平台/OIDC 适配器；users/key 归管理库；agent 侧只认不透明 principal；根除 #1（亦为 A 的前提） | 待该期 |
+| **A** | 审批重设计（R1，§5.5） | im_gateway 出站原语 + 审批人路由 schema + permission_gate 重构（请求者≠审批人、approvals 移 agent 侧 `approval_store`、停 `import user_store`） | **✅ 已合并 main**（e5c4cb7）；platform 只读投影后置 |
+| **2** | 管理表收编 alembic | `users`/`api_keys`/`audit_log`/`im_connectors`/`im_channel_allowlist` 入迁移（quotas/invites 已删、approvals 已移 agent 侧——均不在此列） | **✅ 已合并 main** |
+| **2.5** | establish-tenancy | `tenants`/`teams`/`users.tenant_id`/两级 `approver_user_id` + 回填 default 主体 + 最小 provisioning（**只逻辑实体**，物理分区留 #3） | **✅ 已合并 main**（迁移 067-069） |
+| 3 | 五库物理分离（吸收 R2 + tenancy 物理） | 路由器/**租户作用域边界（可换后端→PG/RLS）** + 嵌入式迁移（Y）+ per-agent/共享/KB/向量**按主体物理分区**；approvals 落 per-agent + 退管理库孤立定义；memory 去 `namespace`。**简化：上线前不迁移数据**（重建内测环境，难题消失）——窗口关在上线 → **赶上线前做** | 待该期（detailed spec 即时生成；拆 **3a** 路由+Y / **3b** per-tenant+投影） |
+| 4 | Identity 端口 | authn 抽端口（**认证属 edge、核只消费 `Principal{user_id,tenant_id}`**）+ 本地/平台/OIDC 适配器；根除 #1（`user_store.authenticate`）| **设计定稿**（§6 + memory）；实现待该期 |
 
-**节奏**：蓝图（本节）现在锁定；各期 detailed spec **即时生成**（反映当时真实代码，避免 #3 类返工）；一期一个聚焦会话，串行推进。A 与 #2 谁先视实现耦合而定，但 A 解耦收益大且为 #4 铺路，倾向先 A。
+**节奏**：各期 detailed spec **即时生成**（反映当时真实代码，避免 #3 类返工）；一期一个聚焦会话，串行推进。**进度（2026-06-10）**：#1 / A / 4 减法 / #2 / #2.5 **均已合并 main**；剩 **#3**（最大；"不迁移"捷径**绑上线前窗口** → 赶上线前做）→ **#4**（设计定稿、实现最后）。
