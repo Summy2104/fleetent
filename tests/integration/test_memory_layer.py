@@ -79,6 +79,32 @@ def _insert_memory_row(
         )
 
 
+def _insert_memory_rows(db_path, rows: list[dict]) -> None:
+    now = datetime.now(UTC).replace(microsecond=0).isoformat()
+    params = [
+        (
+            r["id"],
+            r.get("user_id", "alice"),
+            r.get("type", "identity"),
+            r["content"],
+            now,
+            r.get("updated_at") or now,
+            r.get("expires_at"),
+        )
+        for r in rows
+    ]
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO memory_items (
+                id, user_id, type, content, created_at, updated_at, expires_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            params,
+        )
+
+
 async def test_extract_and_update_writes_create_actions(tmp_path, monkeypatch):
     db_path = _patch_database(tmp_path, monkeypatch)
     _patch_extraction(
@@ -221,36 +247,46 @@ async def test_extract_and_update_limits_snapshot_and_excludes_expired_context(
 ):
     db_path = _patch_database(tmp_path, monkeypatch)
     base = datetime(2026, 1, 1, tzinfo=UTC)
-    for index in range(25):
-        _insert_memory_row(
-            db_path,
-            id=f"identity-{index}",
-            content=f"identity memory {index}",
-            updated_at=(base + timedelta(minutes=index)).isoformat(),
-        )
-    for index in range(35):
-        _insert_memory_row(
-            db_path,
-            id=f"preference-{index}",
-            type="preferences",
-            content=f"preference memory {index}",
-            updated_at=(base + timedelta(minutes=index)).isoformat(),
-        )
-    for index in range(25):
-        _insert_memory_row(
-            db_path,
-            id=f"context-{index}",
-            type="context",
-            content=f"context memory {index}",
-            updated_at=(base + timedelta(minutes=index)).isoformat(),
-            expires_at=(datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)).isoformat(),
-        )
-    _insert_memory_row(
+    context_expiry = (datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)).isoformat()
+    _insert_memory_rows(
         db_path,
-        id="expired-context",
-        type="context",
-        content="expired context memory",
-        expires_at=(datetime.now(UTC).replace(microsecond=0) - timedelta(days=1)).isoformat(),
+        [
+            {
+                "id": f"identity-{i}",
+                "content": f"identity memory {i}",
+                "updated_at": (base + timedelta(minutes=i)).isoformat(),
+            }
+            for i in range(25)
+        ]
+        + [
+            {
+                "id": f"preference-{i}",
+                "type": "preferences",
+                "content": f"preference memory {i}",
+                "updated_at": (base + timedelta(minutes=i)).isoformat(),
+            }
+            for i in range(35)
+        ]
+        + [
+            {
+                "id": f"context-{i}",
+                "type": "context",
+                "content": f"context memory {i}",
+                "updated_at": (base + timedelta(minutes=i)).isoformat(),
+                "expires_at": context_expiry,
+            }
+            for i in range(25)
+        ]
+        + [
+            {
+                "id": "expired-context",
+                "type": "context",
+                "content": "expired context memory",
+                "expires_at": (
+                    datetime.now(UTC).replace(microsecond=0) - timedelta(days=1)
+                ).isoformat(),
+            }
+        ],
     )
     create = _patch_extraction(monkeypatch, "[]")
 

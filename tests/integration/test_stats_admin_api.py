@@ -11,27 +11,29 @@ import fleetent.user_store as user_store
 from tests.integration._migration_template import apply_migrations
 
 
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-
+@pytest.fixture(scope="module")
+def client(tmp_path_factory):
+    mp = pytest.MonkeyPatch()
+    tmp_path = tmp_path_factory.mktemp("db")
     db_path = tmp_path / "users.db"
     managed_db = tmp_path / "managed.db"
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    mp.setenv("ANTHROPIC_API_KEY", "test-key")
     # schedule_store (report scheduling) runs on the unified runtime; point it at a
     # migrated managed DB so scheduled_tasks exists.
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{managed_db}")
+    mp.setenv("DATABASE_URL", f"sqlite:///{managed_db}")
     for mod in (user_store, audit):
-        monkeypatch.setattr(mod, "DB_PATH", db_path)
+        mp.setattr(mod, "DB_PATH", db_path)
     apply_migrations(db_path)
     user_store._init_db()
     apply_migrations(managed_db)
-    monkeypatch.setattr(api, "fetch_traces", lambda **kw: [])
-    monkeypatch.setattr(api, "fetch_approvals", lambda agent_id=None: [])
-    monkeypatch.setattr(api, "agent_allowed_tools", lambda aid: [])
-    monkeypatch.setattr(api, "pricing_table", lambda: None)
+    mp.setattr(api, "fetch_traces", lambda **kw: [])
+    mp.setattr(api, "fetch_approvals", lambda agent_id=None: [])
+    mp.setattr(api, "agent_allowed_tools", lambda aid: [])
+    mp.setattr(api, "pricing_table", lambda: None)
     app = FastAPI()
     app.include_router(api.router)
-    return TestClient(app, raise_server_exceptions=True)
+    yield TestClient(app, raise_server_exceptions=True)
+    mp.undo()
 
 
 def _session_for(role: str) -> tuple[str, str]:
@@ -212,5 +214,3 @@ def test_export_returns_csv_per_user(client, monkeypatch):  # 场景 81 (CSV)
     assert "alice" in body
     detail = next(a for a in audit.search_audit() if a["action"] == "stats_export")["detail"]
     assert detail["view"] == "per-user"
-
-
