@@ -1,8 +1,8 @@
 ## 1. Principal + Identity 端口（基座）
 
-- [ ] 1.1 写失败测试：`Principal{user_id, tenant_id}` 类型存在且精瘦（无 role/scopes/team）；构造/字段断言
-- [ ] 1.2 实现 `Principal` + 基座 `Identity` 端口协议（`凭证 → Principal | None`），跑绿 1.1
-- [ ] 1.3 写失败测试 + 实现：单机本地 bearer 适配器（env/static token 或 agent 侧 key 解析）产出 `Principal`，**不 import platform**
+- [x] 1.1 写失败测试：`Principal{user_id, tenant_id}` 类型存在且精瘦（无 role/scopes/team）；构造/字段断言
+- [x] 1.2 实现 `Principal` + 基座 `Identity` 端口协议（`凭证 → Principal | None`），跑绿 1.1
+- [x] 1.3 写失败测试 + 实现：单机本地 bearer 适配器（env/static token 或 agent 侧 key 解析）产出 `Principal`，**不 import platform**
 
 ## 2. bearer 拆分 → 根除 #1（核心目标）
 
