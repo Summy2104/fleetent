@@ -14,11 +14,13 @@ from fleetent.platform.admin_cli import (
     observability,
     schedules,
     shared_memory,
+    tenancy,
     users,
 )
 
 _COMMAND_MODULES = (
     users,
+    tenancy,
     im,
     im_connectors,
     agents,
