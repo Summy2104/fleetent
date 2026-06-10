@@ -16,9 +16,7 @@ from fleetent.im_gateway import access
 logger = structlog.get_logger(__name__)
 
 _SYSTEM = "You are a helpful assistant with access to tools. Use them when needed."
-_APPROVAL_RE = re.compile(
-    r"^(approve|reject)(\s+always)?\s+([a-f0-9-]{6,36})\s*$", re.IGNORECASE
-)
+_APPROVAL_RE = re.compile(r"^(approve|reject)(\s+always)?\s+([a-f0-9-]{6,36})\s*$", re.IGNORECASE)
 _REJECTION_MSG = "你还没有权限使用此 bot，请联系管理员审批。"
 
 
@@ -37,7 +35,7 @@ def _current_date_tz() -> tuple[str, str]:
     try:
         tz: datetime.tzinfo = ZoneInfo(tzname)
     except Exception:  # noqa: BLE001 — bad TZ falls back to UTC, never breaks a turn
-        tz, tzname = datetime.timezone.utc, "UTC"
+        tz, tzname = datetime.UTC, "UTC"
     return datetime.datetime.now(tz).strftime("%Y-%m-%d (%A)"), tzname
 
 
@@ -46,10 +44,7 @@ def _session_frame_text(sc: SessionContext) -> str:
     date_str, tzname = _current_date_tz()
     scene = "私信 (DM)" if sc.chat_type == "dm" else f"频道 {sc.channel_name}".rstrip()
     return (
-        "## 会话上下文\n"
-        f"- 平台: {sc.platform}\n"
-        f"- 场景: {scene}\n"
-        f"- 当前日期: {date_str} ({tzname})"
+        f"## 会话上下文\n- 平台: {sc.platform}\n- 场景: {scene}\n- 当前日期: {date_str} ({tzname})"
     )
 
 
@@ -75,6 +70,22 @@ class SessionContext:
     channel_name: str = ""
     was_mentioned: bool = False
     thread_root: str = ""
+
+
+@dataclass
+class FileAttachment:
+    """One inbound non-image file attachment (im-file-attachment).
+
+    ``data`` carries the downloaded bytes, or ``None`` when the gateway could not
+    deliver the file (download failed or over the size cap); ``note`` then explains
+    why so the user message can surface it instead of silently dropping the file.
+    Images keep their ``(bytes, mime)`` tuple shape and are NOT represented here.
+    """
+
+    data: bytes | None
+    mime: str
+    filename: str
+    note: str = ""
 
 
 @dataclass
@@ -181,30 +192,92 @@ def _image_attachments(attachments: list[Any]) -> list[tuple[bytes, str]]:
     return images
 
 
-async def _build_user_content(msg: NormalizedMessage) -> str:
-    """Build the user message content, extracting images first (D3).
+def _file_attachments(attachments: list[Any]) -> list[FileAttachment]:
+    """Pick out `FileAttachment` items; ignore image tuples and other entries."""
+    return [att for att in attachments if isinstance(att, FileAttachment)]
 
-    With no image attachments this is just the user text. With images, each is
-    saved to uploads, analyzed once (user text as instruction), and the message
-    becomes the user text plus the structured analysis and on-disk references —
-    base64 never enters the main context, so the loop routes to the text model.
-    Look-back is left to the model via analyze_image on the same references.
+
+def _safe_filename(name: str) -> str:
+    """Sanitise an inbound filename for writing under uploads/.
+
+    Basename-only (drops any path components, defeating `../` traversal), strips
+    control characters, and falls back to ``file`` when nothing usable remains.
+    The extension is preserved by `os.path.basename` keeping the tail segment.
     """
-    from fleetent.tools import builtin_tools, vision_client
+    base = Path(name).name.replace("\x00", "")
+    base = "".join(ch for ch in base if ch.isprintable()).strip()
+    # A name that was only separators/dots (e.g. "///", "..") yields nothing useful.
+    if not base or base in {".", ".."}:
+        return "file"
+    return base
 
+
+def _save_file_to_workspace(
+    data: bytes, filename: str, session_id: str, agent_name: str | None
+) -> str:
+    """Write an inbound file into the session workspace's uploads/ and return a ref.
+
+    The destination is the same per-session sandbox workspace that `read_file` /
+    `run_code` are fenced to, so the agent can read the file by the returned
+    workspace-relative path in both container and host-degrade modes. ``agent_name``
+    mirrors the tools' own fallback (``None`` → ``"default"``) so the key matches the
+    workspace the tools resolve. Locating the workspace is a pure directory op — it
+    never opens a docker connection.
+    """
+    import uuid
+
+    from fleetent.tools.builtin_tools import _get_manager
+
+    manager = _get_manager()
+    root = manager.workspace_host_path(manager.scope, session_id, agent_name or "default")
+    uploads = root / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
+    safe = _safe_filename(filename)
+    dest = uploads / safe
+    if dest.exists():
+        dest = uploads / f"{uuid.uuid4().hex[:8]}_{safe}"
+    dest.write_bytes(data)
+    return f"uploads/{dest.name}"
+
+
+async def _build_user_content(msg: NormalizedMessage, session_id: str) -> str:
+    """Build the user message content from text, images, and file attachments (D3/D4).
+
+    Images are saved to uploads and analyzed once (user text as instruction) — base64
+    never enters the main context. Non-image files are written into the session
+    workspace and referenced by their workspace-relative path so the agent reads them
+    on demand via read_file / run_code; files are NOT vision-analyzed, and a file the
+    gateway could not deliver surfaces as a placeholder rather than being dropped. With
+    neither images nor files this is just the user text (behavior unchanged).
+    """
     images = _image_attachments(msg.attachments)
-    if not images:
+    files = _file_attachments(msg.attachments)
+    if not images and not files:
         return msg.text
 
-    instruction = msg.text or "Describe this image."
     sections = [msg.text] if msg.text else []
-    for data, mime in images:
-        ref = builtin_tools._save_upload(data, mime)
-        try:
-            analysis = await vision_client.analyze(data, instruction)
-        except vision_client.VisionError as exc:
-            analysis = f"(image analysis failed: {exc})"
-        sections.append(f"[图片 {ref}]\n{analysis}")
+
+    if images:
+        from fleetent.tools import builtin_tools, vision_client
+
+        instruction = msg.text or "Describe this image."
+        for data, mime in images:
+            ref = builtin_tools._save_upload(data, mime)
+            try:
+                analysis = await vision_client.analyze(data, instruction)
+            except vision_client.VisionError as exc:
+                analysis = f"(image analysis failed: {exc})"
+            sections.append(f"[图片 {ref}]\n{analysis}")
+
+    for fa in files:
+        if fa.data is not None:
+            # agent_name is None here to mirror the tools' own fallback ("default"):
+            # route() does not pass agent_name to run(), so the workspace key matches.
+            ref = _save_file_to_workspace(fa.data, fa.filename, session_id, None)
+            sections.append(f"[文件 {fa.filename} 已保存到 {ref}，可用 read_file 或 run_code 读取]")
+        else:
+            sections.append(f"[文件 {fa.filename} 未能接收：{fa.note or '未知原因'}]")
+
     return "\n\n".join(sections)
 
 
@@ -280,7 +353,7 @@ async def route(msg: NormalizedMessage) -> None:
     governance = _governance_from_file(agent) if agent else None
     # Build the user content once (images are analyzed here) — reused by both the
     # steering branch and the normal turn so analysis never runs twice.
-    user_content = await _build_user_content(msg)
+    user_content = await _build_user_content(msg, session_id)
     # im-message-context: prefix the sender attribution onto this turn's user message.
     if msg.session_context is not None:
         user_content = f"{_sender_prefix_text(msg.session_context)}\n\n{user_content}"
