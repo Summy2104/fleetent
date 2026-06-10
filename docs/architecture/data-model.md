@@ -166,7 +166,7 @@ erDiagram
 - **管理库 ≠ agent 库**（物理分开）= agent/platform 解耦契约的 DB 层落实：agent 不打开管理库，物理上无法写管理表（根治 `#1 泄漏`、`session_meta` 反例那类越界）。platform **只读** agent 库。
 - **per-agent 库**：隔离、爆炸半径小、单机/受管同一套存储布局、SQLite 写不互锁。（PR #190 已起步）
 - **共享层按写者再拆（R2-叉1=1b）**：shared_memory 是**多 agent 写的真相源**、KB 是 **ingest 单写 / agent 只读的派生视图**，两类写者/生命周期不混 → 各自成库；每层回到「单一写者域」，无多写者协调。一个 KB = **关系底座 + 向量底座**两个物理 substrate。
-- **向量随消费侧分层**：per-agent 记忆的向量必须落 per-agent 向量库，否则 per-agent 隔离在向量层是假的。
+- **向量随消费侧分层**：per-agent 记忆的向量必须落 per-agent 向量库，否则 per-agent 隔离在向量层是假的。向量是**独立 substrate（独立文件/后端、不寄居关系库）**——保住"可换 Qdrant"（模型 A，B2 决议；计数见 §5.7）。
 - **多租户维度**：受多租户时，以上各层按**主体（tenant）物理分区**——共享记忆库 / KB 库 / per-agent 库 per-tenant，管理库保持单库跨主体（详见 §5.7）。
 
 ### 5.2 schema 权威：管理库 Alembic、agent 侧库嵌入式迁移（Y，R2-叉3）
@@ -229,7 +229,8 @@ namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后
 - `管理库`：**单库、跨主体注册中心**（tenants/teams/users〔带 `tenant_id`〕/agent 定义），platform 专用，**不存业务对话/KB**。
 - 每主体一个目录 `<tenant>/`，内含：每 agent 一个 `per-agent 库` + **per-tenant 的 `共享记忆库`** + **per-tenant 的 `KB 库(+向量)`**。
 - agent 进程经 `agent.yaml` 只开本主体目录下的文件，**物理上够不到别主体的库**。
-- 示例（2 主体 × 各 2 agent）：`管理库`×1 + 每主体（2×per-agent + 1 共享记忆 + 1 KB）= **9 库**。
+- 示例（2 主体 × 各 2 agent）：`管理库`×1 + 每主体〔2 agent ×（per-agent 关系库 + per-agent 向量库）=4 + 共享记忆（关系 + 向量）=2 + KB（关系 + 向量）=2 = 8〕× 2 = **17 库**。
+  > **向量计入物理库数（B2 决议 2026-06-10，模型 A）**：向量是经 `vector_store`（横切 infra）的**独立 substrate**、各 scope 一个独立后端/文件，**不寄居关系库**——否则无法单独把向量层换成 Qdrant（破坏"可换后端"）。故每个关系层都配一个向量库：per-agent 向量随 per-agent 关系库物理分（隔离一致），共享记忆/KB 各自独立向量库（体量大、Qdrant 候选）。计数把向量算进去 → 2×2 = 17（非早先简化的 9）。物理 substrate 类型仍是 §5.1 的 5 类（管理 / per-agent / 共享记忆 / KB 关系 / 向量），"5"是**类型数**、非部署文件数。
 
 **与 R2 的关系**：给 §5.1「共享层」补上 tenant 维度——共享记忆库 / KB 库 / per-agent 库**按主体物理分区**。物理 vs 逻辑的实际差别**只在共享层**（KB + 共享记忆：per-主体一库靠文件分 vs 共用一库靠 `tenant_id` 列分）；`管理库` 与 `per-agent 库` 两方案相同。
 
