@@ -1,8 +1,8 @@
 ## 1. 嵌入式迁移引擎（Y，基座）
 
-- [ ] 1.1 写失败测试：引擎核心行为——空库(v=0 跑全部步)、旧库(只跑增量步)、每步事务内 bump、失败回滚不前进、超前库(版本戳 > 代码当前)拒启动、空库与旧库同一路径（`tests/integration` 真实 SQLite 文件 + `PRAGMA user_version`）
-- [ ] 1.2 实现共享 Y 引擎（基座，`db.py` 邻近）：`MIGRATIONS=[(ver,sql)]` 接口 + `user_version` 读写 + migrate-on-open + 版本闸，跑绿 1.1
-- [ ] 1.3 写失败测试 + 实现：引擎为"各库供自己的清单与目标版本"的通用件（同一引擎驱动两个不同清单的库互不干扰）
+- [x] 1.1 写失败测试：引擎核心行为——空库(v=0 跑全部步)、旧库(只跑增量步)、每步事务内 bump、失败回滚不前进、超前库(版本戳 > 代码当前)拒启动、空库与旧库同一路径（`tests/integration` 真实 SQLite 文件 + `PRAGMA user_version`）
+- [x] 1.2 实现共享 Y 引擎（基座，`db.py` 邻近）：`MIGRATIONS=[(ver,sql)]` 接口 + `user_version` 读写 + migrate-on-open + 版本闸，跑绿 1.1
+- [x] 1.3 写失败测试 + 实现：引擎为"各库供自己的清单与目标版本"的通用件（同一引擎驱动两个不同清单的库互不干扰）
 
 ## 2. KB 关系库的 MIGRATIONS 清单
 

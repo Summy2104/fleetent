@@ -73,22 +73,24 @@ def _read_user_version(db_path: Path) -> int:
 
 
 def _apply_step(db_path: Path, version: int, sql: str) -> None:
-    """Execute *sql* inside a transaction; bump user_version on success."""
+    """Execute *sql* and bump user_version atomically inside one transaction.
+
+    SQLite PRAGMA user_version changes are transactional; DDL (CREATE TABLE /
+    ALTER TABLE) is also transactional in SQLite.  Using isolation_level=None
+    gives manual BEGIN/COMMIT/ROLLBACK control so both changes land together.
+    """
     conn = sqlite3.connect(db_path)
+    conn.isolation_level = None  # manual transaction control
     try:
         conn.execute("BEGIN")
         try:
-            conn.executescript(sql)
-            # PRAGMA user_version cannot run inside BEGIN…COMMIT, so we commit
-            # the DDL first, then set the version in a separate connection step.
-            conn.commit()
+            conn.execute(sql)
+            conn.execute(f"PRAGMA user_version = {version}")
+            conn.execute("COMMIT")
         except Exception as exc:
-            conn.rollback()
+            conn.execute("ROLLBACK")
             raise MigrationError(
                 f"Migration step v{version} failed: {exc}"
             ) from exc
-        # Bump version after the DDL has been safely committed.
-        conn.execute(f"PRAGMA user_version = {version}")
-        conn.commit()
     finally:
         conn.close()
