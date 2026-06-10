@@ -1,7 +1,7 @@
 # fleetent 目标架构提案：一个核 + 四个面 + 共享基座
 
 > **状态：草案 / 待讨论（DRAFT）**。这不是已批准的设计，是供讨论的靶子。
-> 当前模块依赖与切片以 §9（现模块→目标归属速查）+ 依赖护栏测试为准。
+> 当前模块依赖与切片以 §10（现模块→目标归属速查）+ 依赖护栏测试为准。
 > 基线：`main @ 9307525`，2026-06-09。
 
 ---
@@ -252,7 +252,50 @@ agent.team_id 的审批人  ──无──►  tenant(主体) 的审批人  ─
 
 ---
 
-## 7. 物理形态：先单体，边界按「可拆服务」画
+## 7. Platform 读侧投影（control plane 只读 agent 产物）
+
+物理分库后（§4、data-model §5.7），agent 侧状态散落在 N 个 agent 拥有的库里。Platform 控制面要观测这些状态（chat 管理 / 统计 / 审批状态 / 自进化审核等），其读取方式由本节定，确保不破坏 agent/platform 解耦。
+
+### 7.1 原则：读，不是复制
+
+"投影"**不是物化副本**。否决"agent 把数据推一份到 platform 读模型"——那是 `session_meta` 反例的翻版（agent 反向写 platform 表 + agent 不能脱离 platform 跑），违反解耦。正确形态 = **platform 只读地打开 agent 自己拥有的库**，是 §1 依赖铁律「platform 读 agent 产物、agent ✗→ platform」在物理分库后的直接落地。
+
+| 选项 | 做法 | 判 |
+|---|---|---|
+| **A 直接只读** | platform 用只读连接开 agent 库查 | ✅ 采纳 |
+| B agent 出 API | platform 调 agent HTTP 取数 | ✗ 要 agent 在跑才读得到历史；耦合可用性 |
+| C 物化副本 | agent 推送到 platform 读模型 | ✗ 违反解耦（= `session_meta` 反例） |
+
+A 的好处：读停掉的 agent 的历史也行（读文件不需进程）；零复制；不要 agent 参与；SQLite WAL 下 platform 读 / agent 写并发安全。
+
+### 7.2 模型：只读 router + 共享读函数 + registry 发现
+
+> **platform 读侧 = 只读 router（可换后端）+ 各 store 的只读查询函数 + 管理库 registry（发现）**
+
+- **发现**：从 `management.db`（tenants/agents registry）知道有哪些主体/agent → 用同一个 `tenant_router` 按 `<tenant>/<agent_id>/` 布局定位文件。
+- **打开**：router 提供**只读模式**句柄（如 SQLite `mode=ro`），结构上写不进去。
+- **查询**：platform **不手写 SQL**，调 **agent 侧 store 的只读查询函数**（与 agent 共享同一份代码、喂只读连接）——schema 变时读函数随之改，不漂移。
+- **聚合**：跨 agent/主体统计 = 遍历 registry → 逐个只读开 → app 内聚合（fleetent 个位数主体规模够用）；热路径统计读 append-only `trace`（`observability/usage.py` 已是此模式）。
+
+依赖方向仍单向：platform → 读 agent 侧（允许）；agent ✗→ platform。**配置反向也是 platform→agent 单向**：platform 的决定（绑定/审批人等）部署时 **materialize 进 `agent.yaml`（推）**，agent 只读自己 home（不拉 `management.db`）。
+
+### 7.3 各资源的读侧应用
+
+| 资源 | 真相源（物理） | platform 读什么 | 聚合 |
+|---|---|---|---|
+| user memory | per-agent `agent_state.db` | **维护提案审核**（自进化）；用户记忆**内容投影 = 可选、v1 暂不接 console**（隐私） | 跨该 user 谈过的 agent 遍历 |
+| approvals | per-agent `agent_state.db` | R1 只读下游投影：审批状态/历史 | 单 agent；**join 身份**（不透明 actor → 真实身份经 #4/management 解析） |
+| shared memory | per-tenant `shared_memory.db` | R2 读投影：团队/租户共享记忆审核 | per-tenant 一库直读（不遍历 agent） |
+
+注：approvals 的"显示是谁批"软依赖 #4（身份解析）；读部分独立可先做。shared memory 的**多写者协调是写侧问题、与本读侧投影正交**。
+
+### 7.4 schema 读耦合（取舍）
+
+platform 经"共享 store 读函数"读 = 依赖 agent 侧库的**读 schema**。这是**允许方向的读耦合**，单体同仓里 schema 与读函数原子同改、无漂移。将来若把 agent 拆独立服务，这层换成稳定读 API 契约——"可换后端"接得住：SQLite=只读开文件，PG=只读连同库，**只读 router 抽象不变**。
+
+---
+
+## 8. 物理形态：先单体，边界按「可拆服务」画
 
 项目哲学是 **on-prem · lean · 模块化单体 · 不引框架 · 数据主权**。因此：
 
@@ -262,7 +305,7 @@ agent.team_id 的审批人  ──无──►  tenant(主体) 的审批人  ─
 
 ---
 
-## 8. 这个模型如何收编已发现的问题
+## 9. 这个模型如何收编已发现的问题
 
 | 已发现问题 | 在目标模型里如何消解 |
 |---|---|
@@ -275,7 +318,7 @@ agent.team_id 的审批人  ──无──►  tenant(主体) 的审批人  ─
 
 ---
 
-## 9. 现模块 → 目标归属（速查）
+## 10. 现模块 → 目标归属（速查）
 
 ```
 核    : runtime · session · model · tools · integrations · skills
@@ -298,7 +341,7 @@ agent.team_id 的审批人  ──无──►  tenant(主体) 的审批人  ─
 
 ---
 
-## 10. 决议记录与待讨论
+## 11. 决议记录与待讨论
 
 ### 已决议（本轮讨论确定）
 - **面的数量 = 4**：① 边缘、② 控制、③ 编排、④ 摄取，互不合并。
