@@ -235,6 +235,25 @@ namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后
 - 示例（2 主体 × 各 2 agent）：`管理库`×1 + 每主体〔2 agent ×（per-agent 关系库 + per-agent 向量库）=4 + 共享记忆（关系 + 向量）=2 + KB（关系 + 向量）=2 = 8〕× 2 = **17 库**。
   > **向量计入物理库数（B2 决议 2026-06-10，模型 A）**：向量是经 `vector_store`（横切 infra）的**独立 substrate**、各 scope 一个独立后端/文件，**不寄居关系库**——否则无法单独把向量层换成 Qdrant（破坏"可换后端"）。故每个关系层都配一个向量库：per-agent 向量随 per-agent 关系库物理分（隔离一致），共享记忆/KB 各自独立向量库（体量大、Qdrant 候选）。计数把向量算进去 → 2×2 = 17（非早先简化的 9）。物理 substrate 类型仍是 §5.1 的 5 类（管理 / per-agent / 共享记忆 / KB 关系 / 向量），"5"是**类型数**、非部署文件数。
 
+**物理布局与命名约定（2026-06-10 定）**：
+
+```
+data/
+  management.db                        # 管理库（单库·跨主体·Alembic）
+  <tenant>/
+    kb.db / kb_vectors.db              # KB 关系真相源 / 向量（per-tenant，M:N 共享、ingest 单写、agent 只读）
+    shared_memory.db / shared_memory_vectors.db   # 共享记忆 关系 / 向量（per-tenant，多 agent 写）
+    <agent_id>/
+      agent_state.db                   # 该 agent 关系真相源（sessions/session_meta/anti_flap/sub_agent_runs/traces/memory_items〔无 namespace〕/skill 草稿/per-agent reflection/approvals）
+      agent_vectors.db                 # 该 agent 向量（记忆向量）
+```
+
+**命名规则 = `X.db`（关系真相源）/ `X_vectors.db`（向量索引）配对**，`X` 取决于该物理库的"是什么"：
+- **per-tenant 层一资源一文件**（KB / 共享记忆 写者与生命周期不同 → 分文件）→ `X` = **资源名**（`kb` / `shared_memory`）。
+- **per-agent 层一 agent 一文件**（会话/记忆/轨迹/审批均由该 agent 写、同生命周期 → 捆一文件）→ `X` = **归属（`agent`）**，不按内容（故 `memory_items` 在 `agent_state.db`、其向量在 `agent_vectors.db`，不另立 `memory.db`）。
+- 目录 `<tenant>/<agent_id>/` 已圈定主体与 agent，文件名只表达"关系 vs 向量"。`agent_state` 而非 `runtime`（避免撞执行引擎）或 `agent`（避免撞 agent 定义）。
+- 2 主体 × 各 2 agent → 上述展开为 **17 个文件**（管理 1 + 每主体〔kb 2 + shared_memory 2 + 2 agent ×（agent_state + agent_vectors）4〕×2）。
+
 **与 R2 的关系**：给 §5.1「共享层」补上 tenant 维度——共享记忆库 / KB 库 / per-agent 库**按主体物理分区**。物理 vs 逻辑的实际差别**只在共享层**（KB + 共享记忆：per-主体一库靠文件分 vs 共用一库靠 `tenant_id` 列分）；`管理库` 与 `per-agent 库` 两方案相同。
 
 **物理 vs 逻辑(2026-06-10 重估,结论:保持物理)**：重估过"单库 + `tenant_id` 列做逻辑隔离"。保持物理,因为:① "财务互不可见"是**合规硬要求** → 需结构性保证;② **SQLite 无 RLS**,逻辑隔离在 SQLite 上只能纪律级、非结构性(漏一个 `WHERE tenant_id` 即泄漏);③ 个位数主体 → 物理多文件/fan-out 成本可忽略;④ per-agent 物理本就要做,tenant 物理只是路由加目录前缀、增量小;⑤ 最敏感的财务数据住共享/KB 层,正是不该用纪律级隔离之处。
