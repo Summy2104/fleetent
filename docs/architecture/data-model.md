@@ -48,6 +48,34 @@ data/
 
 > 实体名 + 一句话职责；列级以迁移为准（见文首）。关系多为 `*_id` 约定引用（非 DB 外键）。
 
+**关系骨架（ER）** —— 实线为同库关系，跨物理库引用为 `*_id` 逻辑约定（agent 侧库物理分离、无跨文件外键）：
+
+```mermaid
+erDiagram
+  tenants ||--o{ teams : "下设"
+  tenants ||--o{ users : "tenant_id"
+  tenants ||--o{ agents : "tenant_id"
+  teams ||--o{ agents : "team_id(归属)"
+  users ||--o{ api_keys : "has"
+  users ||--o{ user_agents : ""
+  agents ||--o{ user_agents : ""
+  agents ||--o{ agent_versions : "versions"
+  agents ||--o{ channel_agents : "渠道绑定"
+  agents ||--o{ agent_kbs : "KB 绑定(真相源)"
+  knowledge_bases ||--o{ agent_kbs : ""
+  model_providers ||--o{ model_routes : "routes"
+  knowledge_bases ||--o{ knowledge_documents : "contains"
+  knowledge_documents ||--o{ knowledge_chunks : "split"
+  knowledge_bases ||--o{ kb_entities : "extracts"
+  kb_entities ||--o{ kb_relations : "source/target"
+  users ||..o{ memory_items : "owns · per-agent库"
+  agents ||..o{ traces : "agent_id · per-agent库"
+  agents ||..o{ approvals : "审批 · per-agent库"
+  tenants ||..o{ shared_memory_items : "scope · 共享库"
+```
+
+> 虚线/跨库：`memory_items`/`approvals`/`traces` 等在 **per-agent 库**（按 `user_id`/`agent_id` 逻辑关联管理库的 users/agents）；`shared_memory_items` 在 **per-tenant 共享库**；KB 各表在 **per-tenant KB 库**。物理库间无 DB 外键，仅 id 约定。
+
 ### 管理库（Alembic）
 - **身份/租户**：`users`(根主体，含 `tenant_id`) · `api_keys`(→users) · `tenants`(主体，含 `approver_user_id`) · `teams`(→tenants，含 `approver_user_id`)
 - **IM**：`im_users`((platform,platform_user_id)→内部 user) · `im_connectors` · `im_channel_allowlist`
