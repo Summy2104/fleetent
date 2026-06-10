@@ -8,7 +8,7 @@
 
 ### Requirement: 多主体 fan-out 与主体来源
 
-`tenant_scope(tenant)` / `agent_scope(tenant, agent_id)` SHALL 按**真实主体**路由到 `<tenant>/` 物理分区（不再固定 `default`）。物理路由的主体 SHALL 取自**运行 agent 的归属主体**（`AgentContextIdentity.tenant_id`，来自 agent 配置/materialize），而非请求者 `Principal`。不同主体的库 SHALL 物理分处不同目录，一个 agent 进程 MUST 够不到别主体的库。
+`tenant_scope(tenant)` / `agent_scope(tenant, agent_id)` SHALL 按**真实主体**路由到 `<tenant>/` 物理分区（不再固定 `default`）。物理路由的主体 SHALL 取自**运行 agent 的归属主体**（agent 配置 `tenant_id`（`agent_tenant`），来自 agent 配置/materialize），而非请求者 `Principal`。不同主体的库 SHALL 物理分处不同目录，一个 agent 进程 MUST 够不到别主体的库。
 
 #### Scenario: 按 agent 归属主体路由
 
