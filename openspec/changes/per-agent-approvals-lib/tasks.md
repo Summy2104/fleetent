@@ -1,7 +1,7 @@
 ## 1. approvals schema 迁 per-agent 库
 
 - [ ] 1.1 写失败测试：空 per-agent 库经 Y 迁移后含 `approvals`（+ allowlist）表，结构等价于现 approval_store ensure_schema
-- [ ] 1.2 实现：lift approvals + allowlist DDL 进 per-agent `MIGRATIONS`（接 3b-1 之后），跑绿 1.1
+- [ ] 1.2 实现：把 approvals + allowlist DDL 作为新版本步 **append 进统一列表 `runtime/agent_state_migrations.py`**（版本号接该列表**当前 max 之后**，勿硬编；**不另起独立列表**），跑绿 1.1
 
 ## 2. 连接走 agent_scope + 接线
 

@@ -12,9 +12,11 @@
 **D1 agent 隔离 = per-agent 物理库,不是 namespace 列（R2-叉2）。** 删 `memory_items.namespace` 列 + `memory_namespace`/操作的第二参。新库全新建即无该列，无搬迁键难题。
 - 备选：保留 namespace 列做逻辑隔离。否决——既已 per-agent 物理分库，namespace 冗余；删之简化向量串与 API。
 
-**D2 DDL lift 进 per-agent MIGRATIONS（去 namespace 列）+ 连接走 agent_scope。** 同 3b-1。
+**D2 memory_items DDL（去 namespace 列）append 进统一列表 `runtime/agent_state_migrations.py`（3b-2 建立）+ 连接走 agent_scope。** 版本号**接该列表当前 max 之后**（3b-2 落地后 sessions/traces/reflection 已用到 v5~v6 量级，**勿硬编 v4**——按实际 max 追加）；**不另起独立 MIGRATIONS 列表**（单文件单 user_version）。
 
 **D3 ADDED 焦点 requirement,不 re-MODIFY「ensure_schema list」。** 同 3b-2，避免并发改冲突。
+
+**D4 顺带清 3b-2 遗留死码。** 3b-2 把 sessions DDL inline 进了统一列表，但旧 `session/migrations.py`（及其测试 `test_session_agent_migrations.py`）未删、已成孤儿。本切片删 `session/migrations.py`、重指向或删该测试（指向 `agent_state_migrations`）。
 
 ## Risks / Trade-offs
 
