@@ -55,9 +55,11 @@ def test_lifespan_starts_platform_maintenance_scheduler(tmp_path, monkeypatch):
 
     instance = MagicMock()
     instance.running = True
-    with patch("fleetent.server.AsyncIOScheduler", return_value=instance) as mock_cls:
-        with TestClient(srv.app):
-            pass  # lifespan runs on enter/exit
+    with (
+        patch("fleetent.server.AsyncIOScheduler", return_value=instance) as mock_cls,
+        TestClient(srv.app),
+    ):
+        pass  # lifespan runs on enter/exit
 
     mock_cls.assert_called_once()
     instance.start.assert_called_once()
@@ -75,9 +77,8 @@ def test_lifespan_does_not_load_scheduled_tasks(tmp_path, monkeypatch):
     import fleetent.schedule_store as schedule_store
     import fleetent.server as srv
 
-    with patch.object(schedule_store, "list_tasks") as list_mock:
-        with TestClient(srv.app):
-            pass
+    with patch.object(schedule_store, "list_tasks") as list_mock, TestClient(srv.app):
+        pass
 
     list_mock.assert_not_called()
 

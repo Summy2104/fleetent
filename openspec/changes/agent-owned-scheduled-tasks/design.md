@@ -73,3 +73,17 @@
 - 因 agent 进程与 platform 进程是**独立 DB**（各自 `fleetent.db`），agent 的 `schedule` 工具写 agent DB、平台 stats 写平台 DB，天然隔离——用户的定时任务已与 platform 解耦。
 
 **彻底移除平台侧**留作后续，前置决策：stats 邮件报表是迁为「绑定 agent 的定时任务」还是「平台保留自有调度」。媒体附件投递、origin 自动捕获同列后续（见 tasks.md §5.4 / §7、proposal Non-Goals）。
+
+## Update 2 (platform removal completed, 2026-06-10)
+
+经核查，平台 stats 邮件报表 `agent_statistics.stats_admin_api.schedule_report` **是未实现的桩**：全仓无 `__stats_report__` 触发处理器、无任何 SMTP/邮件发送，其测试也仅断言"登记任务 + 写审计"，从不验证邮件。即没有可工作的功能会被破坏。
+
+故按用户决策（option 1）**彻底移除平台侧**，取代 Update 1 的非破坏暂缓：
+
+- 删 stats 报表桩（`POST /admin/stats/reports` + `schedule_report`/`ReportBody`）。
+- Alembic `067` 改为 **drop** 平台 `scheduled_tasks` 表（downgrade 重建 002+042 schema）；表成纯 agent-side（仅 ensure_schema 自建，漂移护栏跳过无 Alembic 对应表）。
+- `server.py` 用裸 `AsyncIOScheduler` 仅跑平台维护（playground 保留），不再加载/触发用户任务；删监控外置后遗留的死代码 `_run_monitoring_cycle`。
+- 删 admin CLI `list/add/remove-schedule`（删 `schedules.py` + main.py 注销）。
+- 删 `agent_name` 列（一进程一 agent，隐含）。
+
+agent⊥platform 解耦达成：平台进程不再读写/触发任何用户定时任务。

@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Scheduled task definition and persistence
-The system SHALL store scheduled task definitions in an **agent-side** SQLite `scheduled_tasks` table whose schema is owned by `schedule_store` itself (idempotent `ensure_schema` with `CREATE TABLE IF NOT EXISTS`, named parameters, injectable `db_path` defaulting to `paths.data_dir()/fleetent.db`) — NOT by Alembic and NOT in the platform database. Each task SHALL have: `id` (UUID), `name`, `schedule_kind` (`cron`/`once`/`interval`), the kind's schedule fields (`cron_expr` for cron, `run_at` for once, `interval_seconds` + optional `anchor` for interval), `timezone`, `user_id`, `message` (prompt text), optional `session_id`, `origin` (creation-context JSON), optional `deliver` (delivery-target JSON), `enabled` flag, `source` (`static`/`dynamic`/`tool`), `created_at`, and runtime-state columns `last_run_at`, `last_status`, `last_error`, `next_run_at`. The `agent_name` column SHALL NOT exist (one agent per process).
+The system SHALL store scheduled task definitions in an **agent-side** SQLite `scheduled_tasks` table whose schema is owned by `schedule_store` itself (idempotent `ensure_schema` with `CREATE TABLE IF NOT EXISTS`, named parameters; the database is resolved from `DATABASE_URL`, which the agent process points at its own data dir) — NOT by Alembic and NOT in the platform database (the management-DB table is dropped; `scheduled_tasks` becomes a pure agent-side table). Each task SHALL have: `id` (UUID), `name`, `schedule_kind` (`cron`/`once`/`interval`), the kind's schedule fields (`cron_expr` for cron, `run_at` for once, `interval_seconds` + optional `anchor` for interval), `timezone`, `user_id`, `message` (prompt text), optional `session_id`, `origin` (creation-context JSON), optional `deliver` (delivery-target JSON), `enabled` flag, `source` (`static`/`dynamic`/`tool`), `created_at`, and runtime-state columns `last_run_at`, `last_status`, `last_error`, `next_run_at`. The `agent_name` column SHALL NOT exist (one agent per process).
 
 #### Scenario: Task created and persisted in agent DB
 - **WHEN** `schedule_store.create(name=..., schedule_kind="cron", cron_expr="0 9 * * 1-5", user_id=..., message=...)` is called
@@ -123,3 +123,7 @@ A single `schedule` built-in tool SHALL let an agent manage scheduled tasks via 
 ### Requirement: cancel_task tool for removing schedules
 **Reason**: Folded into the unified `schedule(action=...)` tool.
 **Migration**: Use `schedule(action="remove", task_id=...)` instead of `cancel_task(task_id=...)`.
+
+### Requirement: Admin CLI commands for schedule management
+**Reason**: Scheduled tasks are now agent-runtime-owned with no platform side; the platform `scheduled_tasks` table is dropped, so the operator CLI commands become dead.
+**Migration**: Manage schedules conversationally via the agent `schedule` tool; there is no platform-side schedule administration.
