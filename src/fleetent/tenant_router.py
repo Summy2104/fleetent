@@ -114,6 +114,7 @@ class SQLiteTenantBackend:
 
     def resolve(self, tenant_id: str) -> KbScope:
         tenant_dir = self.data_dir / tenant_id
+        tenant_dir.mkdir(parents=True, exist_ok=True)
         kb_db = SQLiteDatabase(path=tenant_dir / "kb.db")
         kb_vector_backend = SQLiteVectorBackend(
             database_url=f"sqlite:///{tenant_dir / 'kb_vectors.db'}"
@@ -132,6 +133,7 @@ class SQLiteTenantBackend:
 
     def resolve_agent(self, tenant_id: str, agent_id: str) -> AgentScope:
         agent_dir = self.data_dir / tenant_id / agent_id
+        agent_dir.mkdir(parents=True, exist_ok=True)
         state_db = SQLiteDatabase(path=agent_dir / "agent_state.db")
         vector_backend = SQLiteVectorBackend(
             database_url=f"sqlite:///{agent_dir / 'agent_vectors.db'}"
