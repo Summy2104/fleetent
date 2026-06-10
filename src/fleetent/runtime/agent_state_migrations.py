@@ -16,7 +16,8 @@ Version history:
   v9   memory_items       (3b-3) per-user memory records (no namespace col)
   v10  idx_memory_items_user_type
   v11  idx_memory_items_user_expires
-  v12+ reserved for 3b-4 (approvals), …
+  v12  approvals          (3b-4) tool approval requests
+  v13  approval_allowlist (3b-4) allow-always grants
 """
 
 from __future__ import annotations
@@ -102,5 +103,35 @@ MIGRATIONS: list[tuple[int, str]] = [
         11,
         "CREATE INDEX IF NOT EXISTS idx_memory_items_user_expires"
         " ON memory_items (user_id, expires_at)",
+    ),
+    # ── v12-v13: approval requests + allow-always grants (3b-4) ──────────────
+    (
+        12,
+        """
+        CREATE TABLE IF NOT EXISTS approvals (
+            id                TEXT PRIMARY KEY,
+            session_id        TEXT NOT NULL,
+            requester_user_id TEXT NOT NULL,
+            risk_level        TEXT NOT NULL,
+            tool_name         TEXT NOT NULL,
+            tool_args         TEXT NOT NULL,
+            status            TEXT NOT NULL,
+            approver_actor    TEXT,
+            created_at        TEXT NOT NULL,
+            resolved_at       TEXT
+        )
+        """,
+    ),
+    (
+        13,
+        """
+        CREATE TABLE IF NOT EXISTS approval_allowlist (
+            fingerprint TEXT PRIMARY KEY,
+            scope_key   TEXT NOT NULL,
+            tool_name   TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            created_by  TEXT
+        )
+        """,
     ),
 ]
