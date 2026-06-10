@@ -12,8 +12,10 @@ from typing import Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore[import-untyped]
 
 import fleetent.schedule_store as _store
+import fleetent.user_store as user_store
 from fleetent import outbound
 from fleetent.config import SchedulingSettings
+from fleetent.identity import SYSTEM_PRINCIPAL, Principal
 from fleetent.user_store import DB_PATH as DB_PATH  # noqa: F401 — re-export for monkeypatching
 
 logger = logging.getLogger(__name__)
@@ -43,12 +45,27 @@ def _parse_run_at(run_at: str) -> datetime:
     return datetime.fromisoformat(spec)
 
 
+def _resolve_cron_principal(user_id: str) -> Principal | None:
+    """Recheck user status before firing. Returns None if blocked or deleted."""
+    if user_id == "system":
+        return SYSTEM_PRINCIPAL
+    u = user_store.get_by_id(user_id)
+    if u is None or u.status == "blocked":
+        return None
+    return Principal(user_id=u.id, tenant_id=u.tenant_id)
+
+
 async def _agent_run(
-    messages: list[dict[str, Any]], user_id: str, agent_name: str | None = None
+    messages: list[dict[str, Any]],
+    user_id: str = "default",
+    agent_name: str | None = None,
+    principal: Principal | None = None,
 ) -> str:
     from fleetent.runtime import loop as agent_loop
 
-    return await agent_loop.run(messages, user_id=user_id, agent_name=agent_name)
+    return await agent_loop.run(
+        messages, user_id=user_id, agent_name=agent_name, principal=principal
+    )
 
 
 async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) -> None:
@@ -68,6 +85,16 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
 
     from fleetent.session import manager as session_mgr
 
+    # Recheck user status before firing; skip if blocked or deleted.
+    principal = _resolve_cron_principal(task["user_id"])
+    if principal is None:
+        logger.warning(
+            "cron_fire_skipped task=%s reason=user_blocked_or_missing user_id=%s",
+            task.get("id"),
+            task.get("user_id"),
+        )
+        return
+
     sid_spec = task.get("session_id")
     if sid_spec is None:
         sid = f"cron/{task['id']}/{uuid.uuid4().hex}"
@@ -80,7 +107,7 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         reply = await _agent_run(
-            messages, user_id=task["user_id"], agent_name=task.get("agent_name")
+            messages, agent_name=task.get("agent_name"), principal=principal
         )
     except Exception as exc:  # noqa: BLE001 — record the failure, never crash the scheduler
         logger.warning("cron_fire_run_failed task=%s error=%s", task.get("id"), exc)
@@ -90,7 +117,7 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
     # agent_loop.run mutates `messages` in place into the full conversation; persist it
     # so a fixed-session task continues from here next fire.
     await session_mgr.save(
-        sid, messages, user_id=task["user_id"], agent_name=task.get("agent_name")
+        sid, messages, user_id=principal.user_id, agent_name=task.get("agent_name")
     )
 
     delivery_error = await _deliver(task, reply, connectors or {})
