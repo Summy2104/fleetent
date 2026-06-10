@@ -50,7 +50,9 @@ def _configure_memory_vector_runtime(monkeypatch):
     )
 
 
-def test_memory_rebuild_removes_stale_vectors_and_indexes_current_items(tmp_path, monkeypatch):
+async def test_memory_rebuild_removes_stale_vectors_and_indexes_current_items(
+    tmp_path, monkeypatch
+):
     from fleetent.vector_store import ReindexRequest, reindex, search, upsert
 
     db_path = _patch_memory_database(tmp_path, monkeypatch)
@@ -67,13 +69,15 @@ def test_memory_rebuild_removes_stale_vectors_and_indexes_current_items(tmp_path
         content="User works on old billing migration",
         expires_at=(datetime.now(UTC).replace(microsecond=0) - timedelta(days=1)).isoformat(),
     )
-    asyncio.run(upsert("mem-stale", "User likes stale vectors", namespace="mem:alice"))
-    asyncio.run(upsert("other-user", "Other user memory", namespace="mem:bob"))
+    await upsert("mem-stale", "User likes stale vectors", namespace="mem:alice")
+    await upsert("other-user", "Other user memory", namespace="mem:bob")
 
-    summary = reindex(ReindexRequest(owner="memory", user_id="alice"))
+    # reindex() calls asyncio.run() internally; run it in a thread to avoid
+    # "cannot be called from a running event loop" in async test context.
+    summary = await asyncio.to_thread(reindex, ReindexRequest(owner="memory", user_id="alice"))
 
-    alice_results = asyncio.run(search("User likes Python debugging", namespace="mem:alice"))
-    bob_results = asyncio.run(search("Other user memory", namespace="mem:bob"))
+    alice_results = await search("User likes Python debugging", namespace="mem:alice")
+    bob_results = await search("Other user memory", namespace="mem:bob")
     assert summary.scanned == 1
     assert summary.reindexed == 1
     assert summary.failed == 0
@@ -97,38 +101,38 @@ def _patch_knowledge_runtime(monkeypatch, tmp_path):
     return knowledge_runtime
 
 
-def test_knowledge_base_rebuild_removes_stale_vectors_and_indexes_current_chunks(
+async def test_knowledge_base_rebuild_removes_stale_vectors_and_indexes_current_chunks(
     tmp_path, monkeypatch
 ):
     from fleetent.vector_store import ReindexRequest, reindex, search, upsert
 
     knowledge_runtime = _patch_knowledge_runtime(monkeypatch, tmp_path)
     _configure_memory_vector_runtime(monkeypatch)
-    document = asyncio.run(
-        knowledge_runtime.ingest_text(
-            filename="guide.txt",
-            content="Tenant handbook covers Python debugging",
-            tenant_id="tenant-a",
-            kb_id="global",
-        )
+    document = await knowledge_runtime.ingest_text(
+        filename="guide.txt",
+        content="Tenant handbook covers Python debugging",
+        tenant_id="tenant-a",
+        kb_id="global",
     )
-    asyncio.run(
-        knowledge_runtime.ingest_text(
-            filename="other.txt",
-            content="Tenant runbook covers billing",
-            tenant_id="tenant-a",
-            kb_id="runbook",
-        )
+    await knowledge_runtime.ingest_text(
+        filename="other.txt",
+        content="Tenant runbook covers billing",
+        tenant_id="tenant-a",
+        kb_id="runbook",
     )
-    asyncio.run(upsert("chunk-stale", "stale handbook vector", namespace="kb:tenant-a:global"))
-    asyncio.run(upsert("other-kb", "runbook vector", namespace="kb:tenant-a:runbook"))
+    await upsert("chunk-stale", "stale handbook vector", namespace="kb:tenant-a:global")
+    await upsert("other-kb", "runbook vector", namespace="kb:tenant-a:runbook")
 
-    summary = reindex(ReindexRequest(owner="knowledge_base", tenant_id="tenant-a", kb_id="global"))
-
-    global_results = asyncio.run(
-        search("Tenant handbook covers Python debugging", namespace="kb:tenant-a:global")
+    # reindex() calls asyncio.run() internally; run it in a thread to avoid
+    # "cannot be called from a running event loop" in async test context.
+    summary = await asyncio.to_thread(
+        reindex, ReindexRequest(owner="knowledge_base", tenant_id="tenant-a", kb_id="global")
     )
-    runbook_results = asyncio.run(search("runbook vector", namespace="kb:tenant-a:runbook"))
+
+    global_results = await search(
+        "Tenant handbook covers Python debugging", namespace="kb:tenant-a:global"
+    )
+    runbook_results = await search("runbook vector", namespace="kb:tenant-a:runbook")
     assert summary.scanned == 1
     assert summary.reindexed == 1
     assert summary.failed == 0
