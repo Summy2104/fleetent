@@ -23,4 +23,4 @@
 ## 5. 收尾
 
 - [x] 5.1 `make test-pr` 全绿；`uv run pytest tests/integration -q`（不带 `-x`）对照 main 基线无新增失败
-- [ ] 5.2 本地真实验证：重装/重启 my-bot，Slack 复现 AAA-8039 场景（「两分钟后给我发一个通知」），确认到点真实送达
+- [x] 5.2 本地真实验证：重装/重启 my-bot，Slack 复现 AAA-8039 场景（「两分钟后给我发一个通知」），确认到点真实送达
