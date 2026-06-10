@@ -4,8 +4,10 @@ from unittest.mock import AsyncMock
 
 from fleetent import memory as memory_layer
 from fleetent import vector_store
-from fleetent.memory import extraction
-from tests.integration.test_migrations import apply_migrations
+from fleetent.db import SQLiteDatabase
+from fleetent.memory import extraction, store
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 def test_parse_action_array_reads_standalone_fenced_json_array() -> None:
@@ -51,8 +53,9 @@ def test_normalize_action_content_preserves_ambiguous_identity_text() -> None:
 
 def _patch_database(tmp_path, monkeypatch):
     db_path = tmp_path / "memory-extraction.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    db = SQLiteDatabase(path=db_path)
+    migrate(db, AGENT_STATE_MIGRATIONS)
+    monkeypatch.setattr(store, "_state_db", db)
     return db_path
 
 

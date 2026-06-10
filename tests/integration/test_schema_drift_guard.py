@@ -44,14 +44,13 @@ def _build_alembic_db(tmp_path: Path) -> Path:
 def _build_ensure_schema_db(tmp_path: Path) -> Path:
     """Run all agent-side ensure_schema() functions on a fresh DB.
 
-    KB tables and session metadata tables are intentionally excluded: both are now
-    managed by the Y embedded migration engine (TenantRouter/agent_scope +
+    KB tables, session metadata tables, and memory_items are intentionally excluded:
+    all are now managed by the Y embedded migration engine (TenantRouter/agent_scope +
     migrate-on-open in their respective scoped dbs) and must not appear in the
     ensure_schema path.
     """
     import fleetent.schedule_store as schedule_store
     from fleetent.db import SQLiteDatabase
-    from fleetent.memory import store as memory_store
     from fleetent.observability import traces
     from fleetent.reflection import ensure_schema as reflection_ensure_schema
 
@@ -59,17 +58,15 @@ def _build_ensure_schema_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "ensure_schema.db"
     db = SQLiteDatabase(path=db_path)
     traces.ensure_schema(db)
-    memory_store.ensure_schema(db)
     reflection_ensure_schema(db)
     schedule_store.ensure_schema(db)
     return db_path
 
 
 def _build_ensure_schema_db_without_session(tmp_path: Path) -> Path:
-    """Run ensure_schema() for all stores except session.index (which is pending task 3.2)."""
+    """Run ensure_schema() for all stores except session.index and memory (both Y-managed)."""
     from fleetent.db import SQLiteDatabase
     from fleetent.knowledge_base import operations as kb_ops
-    from fleetent.memory import store as memory_store
     from fleetent.observability import traces
     from fleetent.reflection import ensure_schema as reflection_ensure_schema
 
@@ -77,7 +74,6 @@ def _build_ensure_schema_db_without_session(tmp_path: Path) -> Path:
     db_path = tmp_path / "ensure_schema.db"
     db = SQLiteDatabase(path=db_path)
     traces.ensure_schema(db)
-    memory_store.ensure_schema(db)
     reflection_ensure_schema(db)
     kb_ops.ensure_schema(db)
     return db_path

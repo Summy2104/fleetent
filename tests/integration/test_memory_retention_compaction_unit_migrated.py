@@ -1,13 +1,16 @@
 import pytest
 
-from fleetent.memory import maintenance
-from tests.integration.test_migrations import apply_migrations
+from fleetent.db import SQLiteDatabase
+from fleetent.memory import maintenance, store
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 def _patch_database(tmp_path, monkeypatch):
     db_path = tmp_path / "memory-retention.db"
-    apply_migrations(db_path)
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    db = SQLiteDatabase(path=db_path)
+    migrate(db, AGENT_STATE_MIGRATIONS)
+    monkeypatch.setattr(store, "_state_db", db)
     return db_path
 
 

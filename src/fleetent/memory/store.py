@@ -1,12 +1,17 @@
-"""SQLite access for User Memory records."""
+"""SQLite access for User Memory records.
+
+Connection source: the per-agent agent_state.db obtained via agent_scope in
+agent_app._init_agent_db_schema.  Call set_state_db(db) once at agent boot
+before any reads or writes.  Agent isolation is physical (one DB per agent);
+namespace column is not used.
+"""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from fleetent.config import Settings
-from fleetent.db import SQLiteDatabase, create_database
+from fleetent.db import SQLiteDatabase
 from fleetent.memory.models import (
     MemoryCompactionCandidate,
     MemoryItem,
@@ -20,13 +25,27 @@ SNAPSHOT_LIMITS: dict[MemoryType, int] = {
     "context": 20,
 }
 
+_state_db: SQLiteDatabase | None = None
+
+
+def set_state_db(db: SQLiteDatabase) -> None:
+    """Inject the per-agent state DB.  Called once at agent boot."""
+    global _state_db
+    _state_db = db
+
+
+def database() -> SQLiteDatabase:
+    if _state_db is None:
+        raise RuntimeError("memory/store: state_db not initialized — call set_state_db(db) at boot")
+    return _state_db
+
 
 def get_user_memory(user_id: str, memory_id: str) -> MemoryItem | None:
     row = (
         database()
         .execute(
             """
-            SELECT id, user_id, type, content, created_at, updated_at, expires_at, namespace
+            SELECT id, user_id, type, content, created_at, updated_at, expires_at
             FROM memory_items
             WHERE user_id = :user_id AND id = :id
             """,
@@ -43,10 +62,10 @@ def insert_memory(item: MemoryItem) -> None:
     database().execute(
         """
         INSERT INTO memory_items (
-            id, user_id, type, content, created_at, updated_at, expires_at, namespace
+            id, user_id, type, content, created_at, updated_at, expires_at
         )
         VALUES (
-            :id, :user_id, :type, :content, :created_at, :updated_at, :expires_at, :namespace
+            :id, :user_id, :type, :content, :created_at, :updated_at, :expires_at
         )
         """,
         {
@@ -57,7 +76,6 @@ def insert_memory(item: MemoryItem) -> None:
             "created_at": format_datetime(item.created_at),
             "updated_at": format_datetime(item.updated_at),
             "expires_at": format_datetime(item.expires_at),
-            "namespace": item.namespace,
         },
     )
 
@@ -94,25 +112,22 @@ def delete_memory(user_id: str, target_id: str) -> None:
     )
 
 
-def memory_snapshot(user_id: str, namespace: str = "default") -> dict[MemoryType, list[MemoryItem]]:
+def memory_snapshot(user_id: str) -> dict[MemoryType, list[MemoryItem]]:
     return {
-        memory_type: memory_snapshot_by_type(user_id, memory_type, limit, namespace)
+        memory_type: memory_snapshot_by_type(user_id, memory_type, limit)
         for memory_type, limit in SNAPSHOT_LIMITS.items()
     }
 
 
-def memory_snapshot_by_type(
-    user_id: str, memory_type: MemoryType, limit: int, namespace: str = "default"
-) -> list[MemoryItem]:
+def memory_snapshot_by_type(user_id: str, memory_type: MemoryType, limit: int) -> list[MemoryItem]:
     now = datetime.now(UTC).replace(microsecond=0)
     rows = (
         database()
         .execute(
             """
-            SELECT id, user_id, type, content, created_at, updated_at, expires_at, namespace
+            SELECT id, user_id, type, content, created_at, updated_at, expires_at
             FROM memory_items
             WHERE user_id = :user_id
-              AND namespace = :namespace
               AND type = :type
               AND (:type != 'context' OR expires_at IS NULL OR expires_at >= :now)
             ORDER BY updated_at DESC
@@ -120,7 +135,6 @@ def memory_snapshot_by_type(
             """,
             {
                 "user_id": user_id,
-                "namespace": namespace,
                 "type": memory_type,
                 "now": format_datetime(now),
                 "limit": limit,
@@ -131,22 +145,19 @@ def memory_snapshot_by_type(
     return [row_to_memory_item(row) for row in rows]
 
 
-def memory_items_by_ids(
-    user_id: str, ids: list[str], namespace: str = "default"
-) -> dict[str, MemoryItem]:
+def memory_items_by_ids(user_id: str, ids: list[str]) -> dict[str, MemoryItem]:
     if not ids:
         return {}
     placeholders = ", ".join(f":id_{index}" for index in range(len(ids)))
-    params = {f"id_{index}": id for index, id in enumerate(ids)}
+    params: dict[str, Any] = {f"id_{index}": id for index, id in enumerate(ids)}
     params["user_id"] = user_id
-    params["namespace"] = namespace
     rows = (
         database()
         .execute(
             f"""
-            SELECT id, user_id, type, content, created_at, updated_at, expires_at, namespace
+            SELECT id, user_id, type, content, created_at, updated_at, expires_at
             FROM memory_items
-            WHERE user_id = :user_id AND namespace = :namespace AND id IN ({placeholders})
+            WHERE user_id = :user_id AND id IN ({placeholders})
             """,
             params,
         )
@@ -259,42 +270,6 @@ def duplicate_compaction_candidates(user_id: str) -> list[MemoryCompactionCandid
     return candidates
 
 
-def ensure_schema(db: SQLiteDatabase) -> None:
-    """Create memory_items table and indices if they do not exist. Idempotent.
-
-    Covers migrations 004, 032.
-    """
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS memory_items (
-            id          TEXT PRIMARY KEY,
-            user_id     TEXT NOT NULL,
-            type        TEXT NOT NULL,
-            content     TEXT NOT NULL,
-            created_at  TEXT NOT NULL,
-            updated_at  TEXT NOT NULL,
-            expires_at  TEXT,
-            namespace   TEXT NOT NULL DEFAULT 'default'
-        )
-        """
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_memory_items_user_type ON memory_items (user_id, type)"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_memory_items_user_expires"
-        " ON memory_items (user_id, expires_at)"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_memory_items_user_namespace_type"
-        " ON memory_items (user_id, namespace, type)"
-    )
-
-
-def database() -> SQLiteDatabase:
-    return create_database(Settings().database_url)
-
-
 def format_datetime(value: datetime | None) -> str | None:
     if value is None:
         return None
@@ -324,7 +299,6 @@ def row_to_memory_item(row: dict[str, Any]) -> MemoryItem:
         created_at=parse_datetime(row["created_at"]),
         updated_at=parse_datetime(row["updated_at"]),
         expires_at=parse_optional_datetime(row["expires_at"]),
-        namespace=str(row["namespace"]) if row.get("namespace") is not None else "default",
     )
 
 

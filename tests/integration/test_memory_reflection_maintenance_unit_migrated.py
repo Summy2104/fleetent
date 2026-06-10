@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from fleetent.memory import extraction
+from fleetent.db import SQLiteDatabase
+from fleetent.memory import extraction, store as memory_store
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -368,6 +369,7 @@ async def test_extract_ignores_unsupported_shared_memory_or_kb_actions(tmp_path,
     db_path = tmp_path / "memory.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    monkeypatch.setattr(memory_store, "_state_db", SQLiteDatabase(path=db_path))
     monkeypatch.setattr(extraction.vector_store, "upsert", AsyncMock())
     _patch_extraction(
         monkeypatch,
@@ -404,6 +406,7 @@ async def test_context_update_refreshes_ttl_and_rejects_cross_type_target(tmp_pa
     db_path = tmp_path / "memory.db"
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", _db_url(db_path))
+    monkeypatch.setattr(memory_store, "_state_db", SQLiteDatabase(path=db_path))
     monkeypatch.setattr(extraction.vector_store, "upsert", AsyncMock())
     created_at = datetime(2026, 5, 1, tzinfo=UTC).isoformat()
     old_expiry = (datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)).isoformat()

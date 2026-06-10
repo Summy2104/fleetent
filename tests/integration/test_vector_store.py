@@ -72,18 +72,20 @@ def test_namespace_helpers_return_fixed_formats():
     assert shared_namespace("tenant", "acme") == "shared:tenant:acme"
 
 
-def test_memory_namespace_default_is_backwards_compatible():
+def test_memory_namespace_single_param_returns_user_scoped():
     from fleetent.vector_store import memory_namespace
 
-    assert memory_namespace("u1", "default") == "mem:u1"
     assert memory_namespace("u1") == "mem:u1"
+    assert memory_namespace("alice") == "mem:alice"
 
 
-def test_memory_namespace_non_default_appends_namespace():
+def test_memory_namespace_two_arg_raises_type_error():
+    import pytest
+
     from fleetent.vector_store import memory_namespace
 
-    assert memory_namespace("u1", "analyst") == "mem:u1:analyst"
-    assert memory_namespace("u1", "cs") == "mem:u1:cs"
+    with pytest.raises(TypeError):
+        memory_namespace("u1", "analyst")  # type: ignore[call-arg]
 
 
 @pytest.mark.parametrize(

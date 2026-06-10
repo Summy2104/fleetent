@@ -33,7 +33,6 @@ def _memory_item(
         created_at=now,
         updated_at=now,
         expires_at=expires_at,
-        namespace="work",
     )
 
 
@@ -179,7 +178,7 @@ async def test_extract_and_update_applies_valid_actions_and_skips_invalid_target
     monkeypatch.setattr(
         extraction.store,
         "memory_snapshot",
-        lambda _user_id, _namespace: {
+        lambda _user_id: {
             "identity": [],
             "preferences": [existing],
             "context": [deleted],
@@ -191,7 +190,7 @@ async def test_extract_and_update_applies_valid_actions_and_skips_invalid_target
         extraction.store, "delete_memory", lambda _user_id, id: deleted_ids.append(id)
     )
     monkeypatch.setattr(
-        extraction.vector_store, "memory_namespace", lambda user_id, ns: f"{user_id}:{ns}"
+        extraction.vector_store, "memory_namespace", lambda user_id: f"mem:{user_id}"
     )
 
     async def fake_upsert(id: str, content: str, namespace: str) -> None:
@@ -204,7 +203,7 @@ async def test_extract_and_update_applies_valid_actions_and_skips_invalid_target
     monkeypatch.setattr(extraction.vector_store, "delete", fake_delete)
 
     await extraction.extract_and_update(
-        "u1", [{"role": "user", "content": "facts"}], "work", model_policy=policy
+        "u1", [{"role": "user", "content": "facts"}], model_policy=policy
     )
 
     assert [item.content for item in inserted] == ["User is an operator"]
@@ -213,10 +212,10 @@ async def test_extract_and_update_applies_valid_actions_and_skips_invalid_target
     ]
     assert deleted_ids == ["deleted"]
     assert [(content, namespace) for _id, content, namespace in vector_upserts] == [
-        ("User is an operator", "u1:work"),
-        ("User prefers terse summaries", "u1:work"),
+        ("User is an operator", "mem:u1"),
+        ("User prefers terse summaries", "mem:u1"),
     ]
-    assert vector_deletes == [("deleted", "u1:work")]
+    assert vector_deletes == [("deleted", "mem:u1")]
 
 
 def test_memory_trends_buckets_counts_and_filters_with_fake_store(monkeypatch):

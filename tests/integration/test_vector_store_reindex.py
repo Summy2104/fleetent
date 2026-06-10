@@ -2,15 +2,19 @@ import asyncio
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
-from fleetent.db import create_database
+from fleetent.db import SQLiteDatabase, create_database
+from fleetent.memory import store as memory_store
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 from tests.integration.test_migrations import apply_migrations
 
 
 def _patch_memory_database(tmp_path, monkeypatch):
     db_path = tmp_path / "memory.db"
-    apply_migrations(db_path)
+    db = SQLiteDatabase(path=db_path)
+    migrate(db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setattr(memory_store, "_state_db", db)
     return db_path
 
 

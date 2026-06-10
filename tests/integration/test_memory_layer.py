@@ -8,10 +8,12 @@ import pytest
 from fleetent import memory as memory_layer
 from fleetent import vector_store
 from fleetent.agent_config import AgentFile, default_models
+from fleetent.db import SQLiteDatabase
 from fleetent.memory import extraction, store
 from fleetent.memory.models import MemoryItem
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 from fleetent.vector_store import runtime as vector_runtime
-from tests.integration.test_migrations import apply_migrations
 
 
 @pytest.fixture(autouse=True)
@@ -30,10 +32,11 @@ def test_memory_layer_public_api_exports_semantic_store_contract():
 
 
 def _patch_database(tmp_path, monkeypatch):
-    db_path = tmp_path / "memory.db"
-    apply_migrations(db_path)
+    db_path = tmp_path / "agent_state.db"
+    db = SQLiteDatabase(path=db_path)
+    migrate(db, AGENT_STATE_MIGRATIONS)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setattr(store, "_state_db", db)
     return db_path
 
 
@@ -647,111 +650,18 @@ async def test_search_uses_vector_ids_and_filters_expired_memory(tmp_path, monke
     assert [item.content for item in results] == ["User debugs FastAPI", "User likes Python"]
 
 
-def _item(id: str, *, user_id: str = "u1", content: str, namespace: str = "default") -> MemoryItem:
-    now = datetime.now(UTC).replace(microsecond=0)
-    return MemoryItem(
-        id=id,
-        user_id=user_id,
-        type="identity",
-        content=content,
-        created_at=now,
-        updated_at=now,
-        expires_at=None,
-        namespace=namespace,
-    )
-
-
-def test_memory_item_namespace_defaults_to_default():
-    now = datetime.now(UTC).replace(microsecond=0)
-    item = MemoryItem(
-        id="x",
-        user_id="u",
-        type="identity",
-        content="c",
-        created_at=now,
-        updated_at=now,
-        expires_at=None,
-    )
-    assert item.namespace == "default"
-
-
-def test_store_namespace_isolates_snapshot(tmp_path, monkeypatch):
-    _patch_database(tmp_path, monkeypatch)
-    store.insert_memory(_item("a1", content="analyst fact", namespace="analyst"))
-    store.insert_memory(_item("c1", content="cs fact", namespace="cs"))
-
-    analyst = store.memory_snapshot("u1", namespace="analyst")
-    cs = store.memory_snapshot("u1", namespace="cs")
-
-    analyst_contents = {item.content for items in analyst.values() for item in items}
-    cs_contents = {item.content for items in cs.values() for item in items}
-    assert analyst_contents == {"analyst fact"}
-    assert cs_contents == {"cs fact"}
-
-
-def test_store_namespace_defaults_to_default_scope(tmp_path, monkeypatch):
-    _patch_database(tmp_path, monkeypatch)
-    store.insert_memory(_item("d1", content="default fact"))
-    store.insert_memory(_item("a1", content="analyst fact", namespace="analyst"))
-
-    default = store.memory_snapshot("u1")
-    default_contents = {item.content for items in default.values() for item in items}
-    assert default_contents == {"default fact"}
-
-
-def test_memory_items_by_ids_respects_namespace(tmp_path, monkeypatch):
-    _patch_database(tmp_path, monkeypatch)
-    store.insert_memory(_item("a1", content="analyst fact", namespace="analyst"))
-    store.insert_memory(_item("c1", content="cs fact", namespace="cs"))
-
-    found = store.memory_items_by_ids("u1", ["a1", "c1"], namespace="analyst")
-    assert set(found) == {"a1"}
-
-
-async def test_extract_and_update_writes_into_given_namespace(tmp_path, monkeypatch):
+async def test_extract_and_update_user_scoping_isolates_snapshot(tmp_path, monkeypatch):
+    """User-scoping by user_id is preserved: alice's snapshot excludes bob's memories."""
     db_path = _patch_database(tmp_path, monkeypatch)
-    upsert = AsyncMock()
-    monkeypatch.setattr(vector_store, "upsert", upsert)
-    _patch_extraction(
-        monkeypatch,
-        """[{"action": "create", "type": "identity", "content": "Analyst fact"}]""",
-    )
-
-    await memory_layer.extract_and_update(
-        "alice", [{"role": "user", "content": "fact"}], namespace="analyst"
-    )
-
-    [row] = _memory_rows(db_path)
-    assert row["namespace"] == "analyst"
-    upsert.assert_awaited_once_with(row["id"], "Analyst fact", "mem:alice:analyst")
-
-
-async def test_extract_and_update_snapshot_is_namespace_scoped(tmp_path, monkeypatch):
-    _patch_database(tmp_path, monkeypatch)
-    monkeypatch.setattr(vector_store, "upsert", AsyncMock())
-    store.insert_memory(
-        _item("other-ns", user_id="alice", content="default-only fact", namespace="default")
-    )
+    _insert_memory_row(db_path, id="alice-id", user_id="alice", content="Alice fact")
+    _insert_memory_row(db_path, id="bob-id", user_id="bob", content="Bob fact")
     create = _patch_extraction(monkeypatch, "[]")
 
-    await memory_layer.extract_and_update(
-        "alice", [{"role": "user", "content": "fact"}], namespace="analyst"
-    )
+    await memory_layer.extract_and_update("alice", [{"role": "user", "content": "facts"}])
 
     user_message = create.await_args.kwargs["messages"][1]["content"]
-    assert "default-only fact" not in user_message
-
-
-async def test_search_is_namespace_scoped(tmp_path, monkeypatch):
-    _patch_database(tmp_path, monkeypatch)
-    store.insert_memory(_item("a1", user_id="alice", content="analyst fact", namespace="analyst"))
-    vector_search = AsyncMock(return_value=[vector_store.SearchResult(id="a1", score=0.9)])
-    monkeypatch.setattr(vector_store, "search", vector_search)
-
-    results = await memory_layer.search("alice", "fact", limit=4, namespace="analyst")
-
-    vector_search.assert_awaited_once_with("fact", "mem:alice:analyst", 4)
-    assert [item.id for item in results] == ["a1"]
+    assert "Alice fact" in user_message
+    assert "Bob fact" not in user_message
 
 
 async def test_extract_and_update_does_not_write_legacy_jsonl(tmp_path, monkeypatch):

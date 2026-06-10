@@ -63,30 +63,33 @@ def test_traces_ensure_schema_idempotent(tmp_path: Path) -> None:
 # ── memory ─────────────────────────────────────────────────────────────────────
 
 
-def test_memory_ensure_schema_creates_table(tmp_path: Path) -> None:
-    from fleetent.memory.store import ensure_schema
+def test_memory_y_migrations_creates_table(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+    from fleetent.schema_migrations import migrate
 
     db = _db(tmp_path)
-    ensure_schema(db)
+    migrate(db, AGENT_STATE_MIGRATIONS)
     assert "memory_items" in _table_names(db)
 
 
-def test_memory_ensure_schema_creates_indices(tmp_path: Path) -> None:
-    from fleetent.memory.store import ensure_schema
+def test_memory_y_migrations_creates_indices(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+    from fleetent.schema_migrations import migrate
 
     db = _db(tmp_path)
-    ensure_schema(db)
+    migrate(db, AGENT_STATE_MIGRATIONS)
     indices = _index_names(db)
     assert "idx_memory_items_user_type" in indices
     assert "idx_memory_items_user_expires" in indices
 
 
-def test_memory_ensure_schema_idempotent(tmp_path: Path) -> None:
-    from fleetent.memory.store import ensure_schema
+def test_memory_y_migrations_idempotent(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+    from fleetent.schema_migrations import migrate
 
     db = _db(tmp_path)
-    ensure_schema(db)
-    ensure_schema(db)
+    migrate(db, AGENT_STATE_MIGRATIONS)
+    migrate(db, AGENT_STATE_MIGRATIONS)
     assert "memory_items" in _table_names(db)
 
 
@@ -164,10 +167,10 @@ def test_init_agent_db_schema_creates_all_agent_tables(
 
     _init_agent_db_schema(database_url, agent_id="test-agent")
 
-    # memory_items / schedule still land in the main agent db via ensure_schema (3b-3/4 pending).
+    # memory_items is now Y-managed in agent_state.db (3b-3); NOT in the main db.
     main_tables = _table_names(SQLiteDatabase(path=db_path))
-    assert "memory_items" in main_tables
-    # traces and reflection_reports are now Y-managed in agent_state.db (3b-2).
+    assert "memory_items" not in main_tables
+    # traces and reflection_reports are also Y-managed in agent_state.db (3b-2).
     assert "traces" not in main_tables
     assert "reflection_reports" not in main_tables
     # sessions never in main db (3b-1).
@@ -186,13 +189,14 @@ def test_init_agent_db_schema_creates_all_agent_tables(
     assert "knowledge_chunks_fts" in kb_tables
     assert "knowledge_source_states" in kb_tables
 
-    # sessions + traces + reflection_reports land in per-agent agent_state.db (3b-1/3b-2).
+    # sessions + traces + reflection_reports + memory_items all Y-managed in agent_state.db.
     agent_state_db_path = tmp_path / "default" / "test-agent" / "agent_state.db"
     assert agent_state_db_path.exists()
     agent_tables = _table_names(SQLiteDatabase(path=agent_state_db_path))
     assert "sessions" in agent_tables
     assert "traces" in agent_tables
     assert "reflection_reports" in agent_tables
+    assert "memory_items" in agent_tables
 
 
 def test_init_agent_db_schema_idempotent(tmp_path: Path) -> None:

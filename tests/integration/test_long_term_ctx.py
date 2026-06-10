@@ -70,7 +70,7 @@ async def test_build_context_calls_memory_search_with_user_query_and_limit(monke
     )
 
     memory_search.assert_awaited_once_with(
-        "user-1", "python debugging", limit=10, namespace="default"
+        "user-1", "python debugging", limit=10
     )
 
 

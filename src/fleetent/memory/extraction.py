@@ -40,14 +40,13 @@ IDENTITY_ROLE_SUFFIXES = (
 async def extract_and_update(
     user_id: str,
     conversation: list[dict[str, Any]],
-    namespace: str = "default",
     model_policy: ModelPolicySnapshot | None = None,
 ) -> None:
     """Extract structured memories from conversation and update the memory store."""
     from fleetent import agent_config
 
-    snapshot = store.memory_snapshot(user_id, namespace)
-    vector_ns = vector_store.memory_namespace(user_id, namespace)
+    snapshot = store.memory_snapshot(user_id)
+    vector_ns = vector_store.memory_namespace(user_id)
     policy = model_policy or ModelPolicySnapshot.from_agent(agent_config.active_agent_or_default())
     cfg = policy.resolve("memory_extraction")[0]
     if cfg.protocol != "openai_chat" or not cfg.base_url or not cfg.model:
@@ -102,7 +101,6 @@ async def extract_and_update(
                 created_at=target.created_at,
                 updated_at=now,
                 expires_at=expires_at(memory_type, now),
-                namespace=namespace,
             )
             store.update_memory(updated)
             await vector_store.upsert(updated.id, updated.content, vector_ns)
@@ -117,7 +115,6 @@ async def extract_and_update(
             created_at=now,
             updated_at=now,
             expires_at=expires_at(memory_type, now),
-            namespace=namespace,
         )
         store.insert_memory(item)
         await vector_store.upsert(item.id, item.content, vector_ns)

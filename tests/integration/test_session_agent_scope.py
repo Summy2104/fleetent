@@ -16,7 +16,7 @@ import pytest
 
 from fleetent.db import SQLiteDatabase
 from fleetent.schema_migrations import migrate
-from fleetent.session.migrations import MIGRATIONS as SESSION_MIGRATIONS
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as SESSION_MIGRATIONS
 
 # ── Guard: no self-connection in session/index.py ──────────────────────────
 
