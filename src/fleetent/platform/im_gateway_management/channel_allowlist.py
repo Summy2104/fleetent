@@ -1,7 +1,6 @@
 """IM channel/workspace allowlist: stores allowed scopes and enforces them per platform."""
 
 import datetime
-import sqlite3
 from typing import Any
 
 from fleetent.platform.im_gateway_management import connector_store
@@ -27,7 +26,6 @@ def add_entry(
     """Add or update (upsert) an entry keyed by (owner_id, platform, scope_type, scope_id)."""
     if scope_type not in ("channel", "workspace"):
         raise ValueError(f"scope_type must be 'channel' or 'workspace', got {scope_type!r}")
-    _init_db()
     now = datetime.datetime.now(datetime.UTC).isoformat()
     with _conn() as conn:
         conn.execute(
@@ -50,14 +48,12 @@ def add_entry(
 
 
 def remove_entry(entry_id: int) -> None:
-    _init_db()
     with _conn() as conn:
         conn.execute("DELETE FROM im_channel_allowlist WHERE id = :id", {"id": entry_id})
 
 
 def list_entries(owner_id: str | None = None, platform: str | None = None) -> list[dict[str, Any]]:
     """List allowlist entries. owner_id=None lists across all owners (admin scope)."""
-    _init_db()
     clauses: list[str] = []
     params: dict[str, Any] = {}
     if owner_id is not None:
@@ -89,7 +85,6 @@ def is_allowed(
     enforced = bool(connector["allowlist_enforced"]) if connector else False
     if not enforced:
         return True
-    _init_db()
     with _conn() as conn:
         if _has_allow(conn, owner_id, platform, "channel", channel_id):
             return True
@@ -98,9 +93,7 @@ def is_allowed(
     return False
 
 
-def _has_allow(
-    conn: sqlite3.Connection, owner_id: str, platform: str, scope_type: str, scope_id: str
-) -> bool:
+def _has_allow(conn: Any, owner_id: str, platform: str, scope_type: str, scope_id: str) -> bool:
     row = conn.execute(
         """SELECT 1 FROM im_channel_allowlist
            WHERE owner_id = :owner_id AND platform = :platform
@@ -113,61 +106,3 @@ def _has_allow(
         },
     ).fetchone()
     return row is not None
-
-
-def _init_db() -> None:
-    from fleetent import user_store
-
-    # Resolve the backfill owner before opening our connection — admin_owner_id() opens
-    # its own connection on the same SQLite file and would deadlock against a held write.
-    admin_owner = user_store.admin_owner_id()
-    with _conn() as conn:
-        _rebuild_legacy_if_needed(conn, admin_owner)
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS im_channel_allowlist (
-                id         INTEGER PRIMARY KEY,
-                owner_id   TEXT NOT NULL,
-                platform   TEXT NOT NULL,
-                scope_type TEXT NOT NULL,
-                scope_id   TEXT NOT NULL,
-                allowed    INTEGER NOT NULL DEFAULT 1,
-                note       TEXT,
-                created_at TEXT NOT NULL,
-                UNIQUE(owner_id, platform, scope_type, scope_id)
-            )"""
-        )
-
-
-def _rebuild_legacy_if_needed(conn: sqlite3.Connection, owner: str) -> None:
-    """Rebuild a pre-multi-tenant `im_channel_allowlist` (no owner_id) in place, backfilling
-    owner_id with the built-in admin owner. Idempotent."""
-    exists = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='im_channel_allowlist'"
-    ).fetchone()
-    if not exists:
-        return
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(im_channel_allowlist)")}
-    if "owner_id" in cols:
-        return
-    conn.execute("ALTER TABLE im_channel_allowlist RENAME TO im_channel_allowlist_legacy")
-    conn.execute(
-        """CREATE TABLE im_channel_allowlist (
-            id         INTEGER PRIMARY KEY,
-            owner_id   TEXT NOT NULL,
-            platform   TEXT NOT NULL,
-            scope_type TEXT NOT NULL,
-            scope_id   TEXT NOT NULL,
-            allowed    INTEGER NOT NULL DEFAULT 1,
-            note       TEXT,
-            created_at TEXT NOT NULL,
-            UNIQUE(owner_id, platform, scope_type, scope_id)
-        )"""
-    )
-    conn.execute(
-        """INSERT INTO im_channel_allowlist
-               (id, owner_id, platform, scope_type, scope_id, allowed, note, created_at)
-           SELECT id, :owner, platform, scope_type, scope_id, allowed, note, created_at
-           FROM im_channel_allowlist_legacy""",
-        {"owner": owner},
-    )
-    conn.execute("DROP TABLE im_channel_allowlist_legacy")

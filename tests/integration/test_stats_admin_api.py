@@ -22,8 +22,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{managed_db}")
     for mod in (user_store, audit):
         monkeypatch.setattr(mod, "DB_PATH", db_path)
+    apply_migrations(db_path)
     user_store._init_db()
-    audit._init_db()
     apply_migrations(managed_db)
     monkeypatch.setattr(api, "fetch_traces", lambda **kw: [])
     monkeypatch.setattr(api, "fetch_approvals", lambda agent_id=None: [])

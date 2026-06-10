@@ -40,7 +40,6 @@ def issue_key(
     expires_at: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Create a new key. Returns (plaintext shown once, metadata dict without plaintext)."""
-    _init_db()
     plaintext = f"ma-{secrets.token_hex(32)}"
     prefix = plaintext[:11]
     now = _now()
@@ -59,7 +58,6 @@ def issue_key(
 
 
 def revoke_key(key_id: int) -> None:
-    _init_db()
     with _conn() as conn:
         conn.execute("UPDATE api_keys SET revoked_at = ? WHERE id = ?", (_now(), key_id))
 
@@ -76,7 +74,6 @@ def rotate_key(key_id: int) -> tuple[str, dict[str, Any]]:
 
 
 def list_keys(user_id: str) -> list[dict[str, Any]]:
-    _init_db()
     with _conn() as conn:
         rows = conn.execute(
             f"SELECT {_COLS} FROM api_keys WHERE user_id = ? ORDER BY created_at", (user_id,)
@@ -86,7 +83,6 @@ def list_keys(user_id: str) -> list[dict[str, Any]]:
 
 def resolve(plaintext: str) -> dict[str, Any] | None:
     """Return the key metadata if the key exists, is not revoked, and is not expired."""
-    _init_db()
     with _conn() as conn:
         row = conn.execute(
             f"SELECT {_COLS} FROM api_keys WHERE key_hash = ?", (_hash(plaintext),)
@@ -102,7 +98,6 @@ def resolve(plaintext: str) -> dict[str, Any] | None:
 
 
 def record_usage(key_id: int, ip: str | None = None, ua: str | None = None) -> None:
-    _init_db()
     with _conn() as conn:
         conn.execute(
             """UPDATE api_keys
@@ -127,24 +122,3 @@ def _row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
     d = dict(zip(_FIELDS, row, strict=True))
     d["scope"] = cast(list[str], json.loads(d["scope"])) if d["scope"] else ["*"]
     return d
-
-
-def _init_db() -> None:
-    with _conn() as conn:
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS api_keys (
-                id           INTEGER PRIMARY KEY,
-                user_id      TEXT NOT NULL,
-                key_hash     TEXT UNIQUE NOT NULL,
-                prefix       TEXT NOT NULL,
-                scope        TEXT NOT NULL DEFAULT '["*"]',
-                note         TEXT,
-                expires_at   TEXT,
-                revoked_at   TEXT,
-                created_at   TEXT NOT NULL,
-                last_used_at TEXT,
-                last_ip      TEXT,
-                last_ua      TEXT,
-                call_count   INTEGER NOT NULL DEFAULT 0
-            )"""
-        )

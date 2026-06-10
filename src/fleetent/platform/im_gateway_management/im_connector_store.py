@@ -8,7 +8,6 @@ from fleetent.platform.im_gateway_management.connector_store import (  # noqa: F
 )
 from fleetent.platform.im_gateway_management.connector_store import (  # noqa: F401
     STATUSES,
-    _init_db,
     get_connector,
     heartbeat,
     list_connectors,

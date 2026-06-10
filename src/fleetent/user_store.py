@@ -98,7 +98,6 @@ def migrate_api_keys() -> list[str]:
     from fleetent.platform.user_management import api_key_store
 
     _init_db()
-    api_key_store._init_db()
     moved: list[str] = []
     with _conn() as conn:
         users = conn.execute("SELECT id, api_key FROM users WHERE api_key IS NOT NULL").fetchall()

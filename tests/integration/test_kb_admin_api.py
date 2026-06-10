@@ -27,7 +27,6 @@ def client(tmp_path, monkeypatch):
     for mod in (user_store, audit):
         monkeypatch.setattr(mod, "DB_PATH", db_path)
     user_store._init_db()
-    audit._init_db()
     monkeypatch.setattr(api, "kb_engine_list", lambda tenant_id: [])
     monkeypatch.setattr(api, "kb_engine_create", lambda t, k, d: None)
     monkeypatch.setattr(api, "kb_engine_archive", lambda t, k: None)
@@ -68,7 +67,6 @@ def host_wired_client(tmp_path, monkeypatch):
     monkeypatch.setattr(vector_store, "search", search)
     monkeypatch.setattr(vector_store, "delete", delete)
     user_store._init_db()
-    audit._init_db()
     app = FastAPI()
     app.include_router(api.router)
     return TestClient(app, raise_server_exceptions=True)

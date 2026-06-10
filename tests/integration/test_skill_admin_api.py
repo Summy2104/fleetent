@@ -26,7 +26,6 @@ def client(tmp_path, monkeypatch):
     for mod in (user_store, audit):
         monkeypatch.setattr(mod, "DB_PATH", db_path)
     user_store._init_db()
-    audit._init_db()
     # neutral engine seams by default; individual tests override.
     monkeypatch.setattr(api, "engine_list_skills", lambda: [])
     monkeypatch.setattr(api, "engine_audit", lambda content: {"verdict": "pass", "rules": []})
