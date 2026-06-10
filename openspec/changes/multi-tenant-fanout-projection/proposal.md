@@ -6,7 +6,7 @@
 
 ## What Changes
 
-- **多主体 fan-out**：路由的主体来源从硬编码 `default` 改为 **agent 的归属主体**（`AgentContextIdentity.tenant_id`，来自 agent 配置/materialize）；`tenant_scope`/`agent_scope` 据此路由到 `<tenant>/...`。解除前序"单主体先行"限制。
+- **多主体 fan-out**：路由的主体来源从硬编码 `default` 改为 **agent 的归属主体**（agent 配置 `tenant_id`（`agent_tenant`），来自 agent 配置/materialize）；`tenant_scope`/`agent_scope` 据此路由到 `<tenant>/...`。解除前序"单主体先行"限制。
 - **主体目录 provisioning**：platform 在 onboard 主体/agent 时建立 `<tenant>/`、`<tenant>/<agent_id>/` 结构（或首次开库 lazy 建）；归 `platform/agent_lifecycle`。
 - **platform 只读投影（§7 实现）**：router 提供**只读模式**句柄；platform 经**共享 store 读函数 + 只读连接**读 agent 侧库，经 `management.db` registry 发现并遍历聚合；**不物化副本、不要求 agent 反向写**。approvals 投影 join 身份（#4）；memory 跨 agent 遍历；shared/KB per-tenant 直读。
 
@@ -18,7 +18,7 @@
 - `platform-read-projection`: 控制面只读观测 agent 侧物理库的统一机制——只读 router 句柄 + 共享 store 读函数 + registry 发现/遍历聚合；禁物化副本/禁 agent 反向写（target-arch §7 落地）。
 
 ### Modified Capabilities
-- `tenant-scoped-db-routing`: 解除"单主体先行"——`tenant_scope`/`agent_scope` 按 agent 归属主体（`AgentContextIdentity.tenant_id`）多主体 fan-out 到 `<tenant>/` 物理分区；新增主体目录 provisioning。
+- `tenant-scoped-db-routing`: 解除"单主体先行"——`tenant_scope`/`agent_scope` 按 agent 归属主体（agent 配置 `tenant_id`（`agent_tenant`））多主体 fan-out 到 `<tenant>/` 物理分区；新增主体目录 provisioning。
 
 ## Impact
 

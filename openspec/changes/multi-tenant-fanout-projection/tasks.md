@@ -1,6 +1,6 @@
 ## 1. 多主体 fan-out
 
-- [ ] 1.1 写失败测试：路由按 `AgentContextIdentity.tenant_id` 解析到 `<tenant>/`（非 default 硬编码）；T1 agent 够不到 T2 库（跨主体物理隔离）
+- [ ] 1.1 写失败测试：路由按 agent 配置 `tenant_id`（`agent_tenant`） 解析到 `<tenant>/`（非 default 硬编码）；T1 agent 够不到 T2 库（跨主体物理隔离）
 - [ ] 1.2 实现：`SQLiteTenantBackend` 去 default 硬编码、按真实主体路由；解除"单主体先行"，跑绿 1.1
 - [ ] 1.3 写失败测试 + 实现：主体目录 provisioning（router 幂等 lazy 建父目录 / agent_lifecycle 注册）
 

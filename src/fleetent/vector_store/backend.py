@@ -1,4 +1,6 @@
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -7,6 +9,9 @@ from urllib.parse import unquote, urlparse
 import aiosqlite
 
 from fleetent.config import VectorStoreSettings
+
+# Must match db.py _WAL_BUSY_TIMEOUT_MS so all SQLite connections share the same retry window.
+_VECTOR_WAL_BUSY_TIMEOUT_MS = 5000
 
 
 @dataclass(frozen=True)
@@ -40,7 +45,7 @@ class SQLiteVectorBackend:
 
         database_path = _sqlite_path(self.database_url)
         database_path.parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(database_path) as db:
+        async with _connect(database_path) as db:
             await _init_sqlite_schema(db)
             await db.execute(
                 """
@@ -68,7 +73,7 @@ class SQLiteVectorBackend:
 
         database_path = _sqlite_path(self.database_url)
         database_path.parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(database_path) as db:
+        async with _connect(database_path) as db:
             db.row_factory = aiosqlite.Row
             await _init_sqlite_schema(db)
             rows = await db.execute_fetchall(
@@ -93,7 +98,7 @@ class SQLiteVectorBackend:
     async def delete(self, id: str, namespace: str) -> None:
         database_path = _sqlite_path(self.database_url)
         database_path.parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(database_path) as db:
+        async with _connect(database_path) as db:
             await _init_sqlite_schema(db)
             await db.execute(
                 """
@@ -107,7 +112,7 @@ class SQLiteVectorBackend:
     async def clear_namespace(self, namespace: str) -> None:
         database_path = _sqlite_path(self.database_url)
         database_path.parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(database_path) as db:
+        async with _connect(database_path) as db:
             await _init_sqlite_schema(db)
             await db.execute(
                 """
@@ -171,6 +176,15 @@ def create_vector_backend(
         f"Unsupported vector_store.backend {settings.backend!r}. "
         "Supported vector backends: memory, sqlite"
     )
+
+
+@asynccontextmanager
+async def _connect(path: Path) -> AsyncIterator[aiosqlite.Connection]:
+    """Open an aiosqlite connection with WAL journal mode and busy_timeout set."""
+    async with aiosqlite.connect(path) as db:
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute(f"PRAGMA busy_timeout={_VECTOR_WAL_BUSY_TIMEOUT_MS}")
+        yield db
 
 
 def _validate_local_sqlite_url(database_url: str) -> None:
