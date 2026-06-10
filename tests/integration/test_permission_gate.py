@@ -1,13 +1,18 @@
 import asyncio
 import sqlite3
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
+import fleetent.governance.approval_allowlist_store as approval_allowlist_store
 import fleetent.governance.approval_store as approval_store
 import fleetent.im_gateway.outbound as outbound_mod
 from fleetent.agent_config import ApprovalRouting
+from fleetent.db import SQLiteDatabase
 from fleetent.governance.permission_gate import PermissionGate
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 def _routing(risk: str = "medium") -> ApprovalRouting:
@@ -22,10 +27,12 @@ def _connectors() -> dict:
 
 
 @pytest.fixture
-def db(tmp_path, monkeypatch):
+def db(tmp_path: Path, monkeypatch):
     db_path = tmp_path / "agent.db"
-    monkeypatch.setattr(approval_store, "DB_PATH", db_path)
-    approval_store.ensure_schema(db_path)
+    state_db = SQLiteDatabase(path=db_path)
+    migrate(state_db, AGENT_STATE_MIGRATIONS)
+    monkeypatch.setattr(approval_store, "_state_db", state_db)
+    monkeypatch.setattr(approval_allowlist_store, "_state_db", state_db)
     return db_path
 
 

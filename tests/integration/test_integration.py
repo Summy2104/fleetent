@@ -9,11 +9,15 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+import fleetent.governance.approval_allowlist_store as approval_allowlist_store
 import fleetent.governance.approval_store as approval_store
 import fleetent.im_gateway.outbound as outbound_mod
 import fleetent.session.manager as session_mgr
 import fleetent.user_store as user_store
+from fleetent.db import SQLiteDatabase
 from fleetent.platform.im_gateway_management import identity as im_user_store
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 from tests.integration._migration_template import apply_migrations as _apply_migrations
 
 
@@ -57,7 +61,10 @@ def isolated_db(tmp_path, monkeypatch):
     approval_db = tmp_path / "agent.db"
     monkeypatch.setattr(user_store, "DB_PATH", db)
     monkeypatch.setattr(im_user_store, "DB_PATH", db)
-    monkeypatch.setattr(approval_store, "DB_PATH", approval_db)
+    state_db = SQLiteDatabase(path=approval_db)
+    migrate(state_db, AGENT_STATE_MIGRATIONS)
+    monkeypatch.setattr(approval_store, "_state_db", state_db)
+    monkeypatch.setattr(approval_allowlist_store, "_state_db", state_db)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{managed_db}")
     _apply_migrations(managed_db)
