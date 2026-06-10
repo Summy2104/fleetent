@@ -12,8 +12,8 @@
 
 ## 3. 渠道担保解析器（IM）
 
-- [ ] 3.1 写失败测试：IM `(platform, platform_user_id)` 经渠道担保适配器产出 `Principal`，保留"原生 id 作 user_id、不读 user_store"语义
-- [ ] 3.2 实现：把 `im_gateway/access.resolve_identity` 包成端口适配器（产出 Principal），跑绿 3.1
+- [x] 3.1 写失败测试：IM `(platform, platform_user_id)` 经渠道担保适配器产出 `Principal`，保留"原生 id 作 user_id、不读 user_store"语义
+- [x] 3.2 实现：把 `im_gateway/access.resolve_identity` 包成端口适配器（产出 Principal），跑绿 3.1
 
 ## 4. 核消费 Principal + edge 接线
 
