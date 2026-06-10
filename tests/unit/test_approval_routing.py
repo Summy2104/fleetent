@@ -6,8 +6,6 @@ and empty-result → default-closed trigger.
 
 from __future__ import annotations
 
-import pytest
-
 
 def _routing(**kwargs):  # type: ignore[no-untyped-def]
     from fleetent.agent_config import ApprovalRouting
@@ -118,6 +116,49 @@ def test_empty_approvers_list_returns_empty() -> None:
     addrs, _ = resolve_approvers(routing, risk_level="high", tool_name="any_tool")
 
     assert addrs == []
+
+
+# ── requester sentinel ────────────────────────────────────────────────────────
+
+
+def test_requester_sentinel_resolved_as_requester_address() -> None:
+    """The literal 'requester' entry resolves to the ('requester', '') sentinel tuple."""
+    from fleetent.agent_config import resolve_approvers
+
+    routing = _routing(
+        by_risk={"medium": {"approvers": ["requester"], "policy": "any"}},
+    )
+
+    addrs, _ = resolve_approvers(routing, risk_level="medium", tool_name="send_im_message")
+
+    assert addrs == [("requester", "")]
+
+
+def test_requester_sentinel_mixes_with_outbound_addresses() -> None:
+    """Sentinel and platform:target addresses coexist in one resolved list."""
+    from fleetent.agent_config import resolve_approvers
+
+    routing = _routing(
+        by_risk={"medium": {"approvers": ["requester", "slack:U_ADMIN"], "policy": "any"}},
+    )
+
+    addrs, _ = resolve_approvers(routing, risk_level="medium", tool_name="any_tool")
+
+    assert ("requester", "") in addrs
+    assert ("slack", "U_ADMIN") in addrs
+
+
+def test_requester_with_target_is_reserved_and_skipped() -> None:
+    """'requester:<anything>' is reserved namespace — skipped, never an outbound address."""
+    from fleetent.agent_config import resolve_approvers
+
+    routing = _routing(
+        by_risk={"medium": {"approvers": ["requester:U_SPOOF", "slack:U_GOOD"], "policy": "any"}},
+    )
+
+    addrs, _ = resolve_approvers(routing, risk_level="medium", tool_name="any_tool")
+
+    assert addrs == [("slack", "U_GOOD")]
 
 
 # ── any / all policy preserved ────────────────────────────────────────────────

@@ -50,7 +50,7 @@ async def test_approved_path(gate, db, _mock_outbound):
 
     async def approve_after_delay():
         await asyncio.sleep(0.05)
-        await gate.resolve(approval_id, "approved", approver_user_id="approver-1")
+        await gate.resolve(approval_id, "approved", approver_user_id="U_APPROVER")
 
     asyncio.create_task(approve_after_delay())
     result = await gate.request_approval(
@@ -74,7 +74,7 @@ async def test_rejected_path(gate, db, _mock_outbound):
 
     async def reject_after_delay():
         await asyncio.sleep(0.05)
-        await gate.resolve(approval_id, "rejected", approver_user_id="user-1")
+        await gate.resolve(approval_id, "rejected", approver_user_id="U_APPROVER")
 
     asyncio.create_task(reject_after_delay())
     result = await gate.request_approval(
@@ -114,7 +114,7 @@ async def test_approvals_table_updated(gate, db, _mock_outbound):
 
     async def approve():
         await asyncio.sleep(0.02)
-        await gate.resolve(approval_id, "approved", approver_user_id="approver-1")
+        await gate.resolve(approval_id, "approved", approver_user_id="U_APPROVER")
 
     asyncio.create_task(approve())
     await gate.request_approval(
@@ -135,7 +135,7 @@ async def test_approvals_table_updated(gate, db, _mock_outbound):
     conn.close()
     assert row[0] == "approved"
     # approver_actor is set from gate.resolve(approver_user_id=...) call
-    assert row[1] == "approver-1"
+    assert row[1] == "U_APPROVER"
 
 
 async def test_timeout_sets_status_in_db(gate, db, _mock_outbound):

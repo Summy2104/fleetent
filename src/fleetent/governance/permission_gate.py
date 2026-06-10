@@ -26,6 +26,16 @@ logger = logging.getLogger(__name__)
 ApprovalResult = Literal["approved", "rejected", "timeout"]
 
 
+def _resolves_to_requester(approval_routing: Any | None, risk_level: str, tool_name: str) -> bool:
+    """True when the routing for this call includes the ``requester`` sentinel."""
+    if approval_routing is None:
+        return False
+    from fleetent.agent_config import REQUESTER_SENTINEL, resolve_approvers
+
+    addresses, _policy = resolve_approvers(approval_routing, risk_level, tool_name)
+    return any(platform == REQUESTER_SENTINEL for platform, _ in addresses)
+
+
 class PermissionGate:
     def __init__(self, medium_timeout: float = 300.0, high_timeout: float = 3600.0) -> None:
         self._medium_timeout = medium_timeout
@@ -35,6 +45,9 @@ class PermissionGate:
         # Per-pending-approval fingerprint context (approval-minimization) so resolve()
         # can persist an allow-always grant for the right (scope, tool) on "approve always".
         self._pending_fp: dict[str, tuple[str, str, str]] = {}
+        # Per-pending-approval authorized decision actors: only these identities may
+        # resolve the request (requester when sentinel-routed + reached approvers).
+        self._authorized: dict[str, set[str]] = {}
 
     async def request_approval(
         self,
@@ -85,6 +98,11 @@ class PermissionGate:
         else:
             timeout = high_timeout if high_timeout is not None else self._high_timeout
 
+        # The requester sentinel routes the prompt back to the conversation; it is
+        # always reachable here because the gate only runs with a live reply_func
+        # (the loop guards on it).
+        requester_routed = _resolves_to_requester(approval_routing, risk_level, tool_name)
+
         # Resolve and contact approvers via outbound DM (D2, D3).
         approver_actors = await self._notify_approvers(
             approval_id=approval_id,
@@ -95,7 +113,7 @@ class PermissionGate:
         )
 
         # No approvers reachable → default-closed reject immediately (D5).
-        if not approver_actors:
+        if not approver_actors and not requester_routed:
             await reply_func(
                 f"❌ Tool `{tool_name}` requires approval but no approver could be reached "
                 f"(risk: {risk_level}). Request rejected."
@@ -115,11 +133,31 @@ class PermissionGate:
             )
             return "rejected"
 
-        # Notify requester that the request is in flight.
-        await reply_func(
-            f"⏳ Tool `{tool_name}` requires approval (risk: {risk_level}). "
-            f"Approval ID: `{approval_id}` — waiting for approver."
-        )
+        # Authorized decision actors: the requester (when sentinel-routed) plus
+        # outbound approvers actually reached — stored both as the qualified
+        # "platform:target" tag and the bare target id so IM callers (bare
+        # msg.user_id) and qualified actors both pass the resolve() check.
+        authorized: set[str] = set()
+        for actor in approver_actors:
+            authorized.add(actor)
+            authorized.add(actor.partition(":")[2])
+        if requester_routed:
+            authorized.add(requester_user_id)
+        self._authorized[approval_id] = authorized
+
+        if requester_routed:
+            # The in-flight notice doubles as the requester's approval prompt.
+            await reply_func(
+                f"🔐 Tool `{tool_name}` requires your approval (risk: {risk_level}).\n"
+                f"Approval ID: `{approval_id}`\n"
+                f"Reply with: `approve {approval_id}` or `reject {approval_id}`"
+            )
+        else:
+            # Notify requester that the request is in flight.
+            await reply_func(
+                f"⏳ Tool `{tool_name}` requires approval (risk: {risk_level}). "
+                f"Approval ID: `{approval_id}` — waiting for approver."
+            )
 
         try:
             await asyncio.wait_for(event.wait(), timeout=timeout)
@@ -139,6 +177,7 @@ class PermissionGate:
         self._decisions.pop(approval_id, None)
         self._decisions.pop(approval_id + ":actor", None)
         self._pending_fp.pop(approval_id, None)
+        self._authorized.pop(approval_id, None)
         logger.info(
             "approval_resolved id=%s tool=%s risk=%s decision=%s",
             approval_id,
@@ -160,10 +199,13 @@ class PermissionGate:
         if approval_routing is None:
             return []
 
-        from fleetent.agent_config import resolve_approvers
+        from fleetent.agent_config import REQUESTER_SENTINEL, resolve_approvers
         from fleetent.outbound import is_reachable, send_to
 
         addresses, _policy = resolve_approvers(approval_routing, risk_level, tool_name)
+        # The requester sentinel is handled by the caller via reply_func — it is
+        # never an outbound address.
+        addresses = [(p, t) for p, t in addresses if p != REQUESTER_SENTINEL]
         if not addresses:
             return []
 
@@ -213,14 +255,20 @@ class PermissionGate:
     ) -> bool:
         """Resolve an approval request.
 
-        Returns True if the request was found, False if expired or unknown.
-        The approver_user_id is stored as an opaque actor string (D4). When
-        ``always`` is set and the decision is "approved", the pending request's
-        fingerprint is persisted to the allow-list so future identical calls
-        auto-approve (approval-minimization).
+        Returns True if the request was found, False if expired, unknown, or the
+        actor is not authorized to decide it. The approver_user_id is stored as
+        an opaque actor string (D4). When ``always`` is set and the decision is
+        "approved", the pending request's fingerprint is persisted to the
+        allow-list so future identical calls auto-approve (approval-minimization).
         """
         event = self._events.get(approval_id)
         if event is None:
+            return False
+        authorized = self._authorized.get(approval_id)
+        if authorized is not None and approver_user_id not in authorized:
+            logger.warning(
+                "approval_unauthorized_actor id=%s actor=%s", approval_id, approver_user_id
+            )
             return False
         if always and decision == "approved":
             pending = self._pending_fp.get(approval_id)

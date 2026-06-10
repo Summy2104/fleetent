@@ -132,7 +132,7 @@ async def test_permission_gate_approved_tool_executes(isolated_db, monkeypatch):
 
     async def approve_it():
         await asyncio.sleep(0.05)
-        await gate.resolve("test-appr-1", "approved", approver_user_id="user-1")
+        await gate.resolve("test-appr-1", "approved", approver_user_id="U_APPROVER")
 
     asyncio.create_task(approve_it())
 

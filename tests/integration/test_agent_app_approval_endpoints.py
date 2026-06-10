@@ -97,7 +97,7 @@ async def test_resolve_approval_happy_path(monkeypatch, tmp_path):
     client = _make_client(monkeypatch, tmp_path)
     resp = client.post(
         f"/approvals/{approval_id}/resolve",
-        json={"decision": "approved", "approver_user_id": "test"},
+        json={"decision": "approved", "approver_user_id": "U_LEAD"},
     )
     assert resp.status_code == 200
     assert resp.json()["decision"] == "approved"
