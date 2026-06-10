@@ -7,10 +7,10 @@
 - **新增租户作用域路由**：`scope(tenant) → {KB 关系 db, KB 向量后端}` 的抽象；调用点只表达"在 tenant X 作用域里访问"，后端可插拔。当下 SQLite 后端路由到 `<tenant>/` 目录文件，**单主体 `default` 先**（多主体 fan-out 留 3b）。
 - **新增嵌入式 forward-only 迁移引擎（Y）**：有序 `MIGRATIONS = [(ver, sql)]` + `PRAGMA user_version` 戳 + migrate-on-open + 版本闸（库版本 > 代码已知版本则拒启动）；空库与旧库同一代码路径。一个共享引擎，各库供自己的迁移清单。
 - **KB 成为 Y 的第一个消费者**：把 `knowledge_base/operations.py` 的 `ensure_schema()` DDL 原样 lift 成 KB 的 `MIGRATIONS`（v1..vN）；**保留 `tenant_id`/`kb_id` 列**（可换后端接缝：文件路由忽略、RLS 后端按行强制用之，data-model §5.7）。
-- **KB 内容存储构造走路由**：所有 `KnowledgeStore` 构造 + `knowledge_base/operations.py` 的 `create_database(_settings().database_url)` 自连接旁路改由路由供连接（它们服务 KB 内容表 knowledge_bases/documents/chunks，绕过注入抓全局库、物理分库后会连错库）。**`knowledge_base/bindings.py` 不在本切片**——它服务绑定表 `knowledge_base_agent_bindings`（alembic 012、`retrieval/scope` 经它解析 agent→KB），整摊归兄弟切片 3a-binding。
+- **所有 `KnowledgeStore` 构造走路由**：清掉 `knowledge_base/bindings.py`、`operations.py` 两条 `create_database(_settings().database_url)` 自连接旁路——它们绕过注入抓全局库，物理分库后会连错库。
 - **向量家族路由整改**（§5.6）：`VectorFamily` 显式枚举 + 单一 `family_of()` 路由入口，禁 ad-hoc `startswith`、未知前缀 raise；KB 关系库与向量库由**同一个 tenant-scope** 驱动，避免"只路由关系库、向量仍走扁平串"的半路由返工。
 
-不在本切片（明确排除）：per-tenant 目录 fan-out / 多主体（3b）；platform 只读投影（3b）；agent↔KB 绑定 materialize 进 agent.yaml（兄弟切片 3a-binding——**含 `bindings.py`、`retrieval/scope` 的绑定解析、`knowledge_base_agent_bindings` 表，3a 一律不碰**）；memory/traces 等其余 agent 侧库迁到 Y（后续，3a 只立引擎 + KB 首个消费者）。
+不在本切片（明确排除）：per-tenant 目录 fan-out / 多主体（3b）；platform 只读投影（3b）；agent↔KB 绑定 materialize 进 agent.yaml（兄弟切片 3a-binding）；memory/traces 等其余 agent 侧库迁到 Y（后续，3a 只立引擎 + KB 首个消费者）。
 
 ## Capabilities
 

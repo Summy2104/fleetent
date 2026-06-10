@@ -21,7 +21,7 @@
 
 **Non-Goals:**
 - 多主体 per-tenant 目录 fan-out（3b）；platform 只读投影（3b）。
-- agent↔KB 绑定 materialize 进 agent.yaml（兄弟切片 3a-binding）。**`knowledge_base/bindings.py`、`retrieval/scope` 的绑定解析、`knowledge_base_agent_bindings` 表本切片一律不碰**——它服务的是绑定（alembic 012、跨 agent/管理边界），与 KB 内容存储（operations/KnowledgeStore，3a 处理）是两摊。
+- agent↔KB 绑定 materialize 进 agent.yaml（兄弟切片 3a-binding）。
 - memory/traces/session 等其余 agent 侧库迁到 Y（3a 只立引擎 + KB 首个消费者）。
 - 真实 PG/RLS 后端实现（只立抽象接缝，不落 PG）。
 
@@ -50,7 +50,7 @@
 
 ## Risks / Trade-offs
 
-- **自连接旁路漏清 → 连错库**（物理分库后 `create_database(settings)` 抓全局库）。→ 缓解：加护栏测试断言 KB **内容存储**（operations/KnowledgeStore）无 `create_database(...settings...)` 自连接、连接来自路由；红/绿覆盖。**护栏范围不含 `bindings.py`**（绑定模块归 3a-binding，本切片暂留其现状）。
+- **自连接旁路漏清 → 连错库**（物理分库后 `create_database(settings)` 抓全局库）。→ 缓解：加护栏测试断言 KB 模块无 `create_database(...settings...)` 自连接路径、所有 store 连接来自路由；红/绿覆盖。
 - **Y 版本闸过严锁启动**（库版本 > 代码已知 → 拒启动是有意防降级，但误触会卡）。→ 缓解：仅在"库版本 > 代码"时拒、相等/小于正常迁；测试覆盖空库(v=0 跑全部)、旧库(增量)、超前库(拒)三态。
 - **向量家族整改打断现有 namespace**（mem/shared/kb 三家族都在用）。→ 缓解：枚举覆盖三家族 + 各家族路由测试；未知前缀 raise 而非静默兜底（暴露遗漏）。
 - **保留 tenant_id 列被误读成死列**。→ 缓解：spec/注释写明它是可换后端/RLS 接缝（§5.7），非冗余。

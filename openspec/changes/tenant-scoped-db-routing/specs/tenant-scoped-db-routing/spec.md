@@ -28,24 +28,19 @@
 - **WHEN** 后端实现被替换
 - **THEN** 调用方仍只通过 `scope(tenant)` 取后端，调用代码无需改动
 
-### Requirement: KB 内容存储连接来自路由
+### Requirement: agent 侧 store 连接来自路由
 
-KB **内容存储**（`KnowledgeStore` 及 `knowledge_base/operations.py`，服务 knowledge_bases/documents/chunks 等内容表）SHALL 从路由获取连接；这部分 MUST NOT 通过 `create_database(settings.database_url)` 等方式自连接全局库。系统 SHALL 提供护栏测试断言此约束。`knowledge_base/bindings.py`（绑定表 `knowledge_base_agent_bindings`）**不在本切片范围**——其连接来源与表归属由兄弟切片 3a-binding 处理，本切片不改动。
+agent 侧 store（首批 = KB）SHALL 从路由获取连接；模块 MUST NOT 通过 `create_database(settings.database_url)` 等方式自连接全局库。系统 SHALL 提供护栏测试断言此约束。
 
 #### Scenario: KnowledgeStore 经构造注入路由连接
 
 - **WHEN** 构造 `KnowledgeStore`
 - **THEN** 其 `database` 由路由提供，而非模块内部自连接
 
-#### Scenario: 护栏捕获内容存储自连接旁路
+#### Scenario: 护栏捕获自连接旁路
 
-- **WHEN** KB 内容存储（KnowledgeStore / operations.py）出现 `create_database(...settings...)` 之类的自连接路径
+- **WHEN** KB 模块出现 `create_database(...settings...)` 之类的自连接路径
 - **THEN** 护栏测试失败并指出该旁路
-
-#### Scenario: 绑定模块不在本切片
-
-- **WHEN** 检查 `knowledge_base/bindings.py` 的连接来源
-- **THEN** 本切片不要求其改动（归 3a-binding），护栏范围不含 bindings.py
 
 ### Requirement: 单主体作用域先行
 
