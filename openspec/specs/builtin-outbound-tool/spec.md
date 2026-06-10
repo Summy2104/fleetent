@@ -24,6 +24,13 @@ failures each return an explanatory text result.
 - **THEN** the message is delivered via the Slack connector as a DM to `U_OTHER` and
   the tool returns a success text naming the target
 
+#### Scenario: assistant-pane DM path injects connectors
+
+- **WHEN** the agent calls `send_im_message` from a Slack Assistant-pane conversation
+  (the `_route_assistant_message` inbound path)
+- **THEN** the Slack connector is available via `ToolContext.outbound_connectors`,
+  identical to the channel/plain-DM inbound path
+
 #### Scenario: channel post
 
 - **WHEN** the agent calls `send_im_message(target="C_NOTICE", text="...", target_type="channel")`
