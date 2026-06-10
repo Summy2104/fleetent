@@ -17,8 +17,8 @@ Column definitions are copied verbatim from each store's original _init_db() DDL
 
 from alembic import op
 
-revision = "067"
-down_revision = "066"
+revision = "068"
+down_revision = "067"
 branch_labels = None
 depends_on = None
 
