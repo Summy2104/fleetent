@@ -1,8 +1,8 @@
 ## 1. router 泛化（tenant_scope + agent_scope）
 
-- [ ] 1.1 写失败测试：`agent_scope(tenant, agent_id)` 返回 `AgentScope{state_db, vector_backend}`；SQLite 后端映射到 `<tenant>/<agent_id>/agent_state.db` + `agent_vectors.db`；与 `tenant_scope` 平级、不嵌套；后端可替换（注入假后端验调用点不变）
-- [ ] 1.2 实现：`tenant_router` 中 `scope`→`tenant_scope` 重命名 + 新增 `agent_scope` + `AgentScope` + `SQLiteTenantBackend` 的 per-agent 路径计算，跑绿 1.1
-- [ ] 1.3 同步 KB 侧所有 `router.scope(...)` 调用点改 `tenant_scope`；全仓 grep 确认无残留 `.scope(`；跑既有 KB 路由测试见绿
+- [x] 1.1 写失败测试：`agent_scope(tenant, agent_id)` 返回 `AgentScope{state_db, vector_backend}`；SQLite 后端映射到 `<tenant>/<agent_id>/agent_state.db` + `agent_vectors.db`；与 `tenant_scope` 平级、不嵌套；后端可替换（注入假后端验调用点不变）
+- [x] 1.2 实现：`tenant_router` 中 `scope`→`tenant_scope` 重命名 + 新增 `agent_scope` + `AgentScope` + `SQLiteTenantBackend` 的 per-agent 路径计算，跑绿 1.1
+- [x] 1.3 同步 KB 侧所有 `router.scope(...)` 调用点改 `tenant_scope`；全仓 grep 确认无残留 `.scope(`；跑既有 KB 路由测试见绿
 
 ## 2. per-agent 库的 MIGRATIONS（session 元数据 DDL lift）
 
