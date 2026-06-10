@@ -15,10 +15,10 @@
 - [ ] 3.2 实现路由 + 可换后端抽象（基座/`db.py` 邻近）：`scope(tenant)`、SQLite 后端映射 `<tenant>/` 文件、单主体 `default` 直返（不做 fan-out），跑绿 3.1
 - [ ] 3.3 写失败测试 + 实现：经路由打开的受 Y 管理的库，**开库即触发 migrate-on-open**（路由 ↔ 引擎接合）
 
-## 4. KB 连接走路由 + 清自连接旁路
+## 4. KB 内容存储连接走路由 + 清自连接旁路（不含绑定模块）
 
-- [ ] 4.1 写失败测试：`KnowledgeStore` 的 `database` 来自路由；护栏断言 KB 模块**无** `create_database(...settings...)` 自连接路径
-- [ ] 4.2 实现：所有 `KnowledgeStore` 构造改由路由供连接；删 `knowledge_base/bindings.py`、`operations.py` 两条 `create_database(_settings().database_url)` 旁路，跑绿 4.1
+- [ ] 4.1 写失败测试：`KnowledgeStore` 的 `database` 来自路由；护栏断言 KB **内容存储**（KnowledgeStore / operations.py）**无** `create_database(...settings...)` 自连接路径（护栏范围**不含 `bindings.py`**）
+- [ ] 4.2 实现：所有 `KnowledgeStore` 构造改由路由供连接；删 `knowledge_base/operations.py` 的 `create_database(_settings().database_url)` 旁路，跑绿 4.1。**`knowledge_base/bindings.py` 保持不动**——绑定表 `knowledge_base_agent_bindings` + `retrieval/scope` 解析整摊归兄弟切片 3a-binding
 - [ ] 4.3 跑既有 KB 单测/集成（retrieval/ingest/operations）确认行为不变（连接来源改、语义不改）
 
 ## 5. 向量家族路由整改（§5.6）
