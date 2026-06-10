@@ -7,9 +7,11 @@ route each agent to its own session/credential. Crucially, agent B's call must
 never be satisfied by agent A's authorization.
 """
 
-import httpx
+import contextlib
+from types import SimpleNamespace
+from typing import Any
+
 import pytest
-import respx
 
 import fleetent.integrations.mcp.client as mcp_client
 from fleetent.integrations.mcp.client import McpServerConfig
@@ -82,46 +84,68 @@ async def test_two_agents_same_github_route_to_separate_credentials(scoped_db, m
             api_key_env=row["api_key_env"],
         )
 
-    # Each endpoint echoes the bearer token it received back as the tool result.
-    def _echo(request: httpx.Request) -> httpx.Response:
-        auth = request.headers.get("Authorization", "")
-        return httpx.Response(
-            200,
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "result": {"content": [{"type": "text", "text": auth}]},
-            },
-        )
+    # Mock at the SDK seam (the client now runs on the official mcp SDK; a raw
+    # respx JSON-RPC echo no longer satisfies the streamable-HTTP handshake and
+    # the transport's retry loop hangs the test). Each fake connection captures
+    # the Authorization header it was opened with; its session echoes that
+    # credential back as the whoami result.
+    class _EchoSession:
+        def __init__(self, auth: str) -> None:
+            self._auth = auth
 
-    tools_resp = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "result": {"tools": [{"name": "whoami", "inputSchema": {"type": "object"}}]},
-    }
+        async def initialize(self) -> Any:
+            return SimpleNamespace(protocolVersion="2025-11-25", capabilities={})
 
-    with respx.mock:
-        respx.post("http://gh-a.test/").mock(
-            side_effect=lambda req: (
-                httpx.Response(200, json=tools_resp) if b"tools/list" in req.content else _echo(req)
+        async def list_tools(self, cursor: str | None = None) -> Any:
+            tool = SimpleNamespace(
+                name="whoami",
+                description="echo credential",
+                inputSchema={"type": "object", "properties": {}},
             )
-        )
-        # Only agent A is registered so far.
-        await mcp_client.register_all([_server_for(AGENT_A)], scope=AGENT_A)
+            return SimpleNamespace(tools=[tool], nextCursor=None)
 
-        # Agent B has no registration yet — its call must NOT fall through to A.
-        with pytest.raises(KeyError):
-            await mcp_client.call_tool("github", "whoami", {}, scope=AGENT_B)
-
-        respx.post("http://gh-b.test/").mock(
-            side_effect=lambda req: (
-                httpx.Response(200, json=tools_resp) if b"tools/list" in req.content else _echo(req)
+        async def call_tool(self, name: str, args: dict, **kw: Any) -> Any:
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text=self._auth)],
+                structuredContent=None,
+                isError=False,
             )
-        )
-        await mcp_client.register_all([_server_for(AGENT_B)], scope=AGENT_B)
 
-        a_result = await mcp_client.call_tool("github", "whoami", {}, scope=AGENT_A)
-        b_result = await mcp_client.call_tool("github", "whoami", {}, scope=AGENT_B)
+    pending_auth: list[str] = []
+
+    def fake_streamable(*args: Any, **kwargs: Any) -> Any:
+        headers = kwargs.get("headers") or {}
+        pending_auth.append(headers.get("Authorization", ""))
+
+        @contextlib.asynccontextmanager
+        async def _cm():
+            yield ("read", "write", None)
+
+        return _cm()
+
+    def fake_client_session(*args: Any, **kwargs: Any) -> Any:
+        auth = pending_auth[-1]
+
+        @contextlib.asynccontextmanager
+        async def _cm():
+            yield _EchoSession(auth)
+
+        return _cm()
+
+    monkeypatch.setattr(mcp_client, "streamablehttp_client", fake_streamable)
+    monkeypatch.setattr(mcp_client, "ClientSession", fake_client_session)
+
+    # Only agent A is registered so far.
+    await mcp_client.register_all([_server_for(AGENT_A)], scope=AGENT_A)
+
+    # Agent B has no registration yet — its call must NOT fall through to A.
+    with pytest.raises(KeyError):
+        await mcp_client.call_tool("github", "whoami", {}, scope=AGENT_B)
+
+    await mcp_client.register_all([_server_for(AGENT_B)], scope=AGENT_B)
+
+    a_result = await mcp_client.call_tool("github", "whoami", {}, scope=AGENT_A)
+    b_result = await mcp_client.call_tool("github", "whoami", {}, scope=AGENT_B)
 
     assert a_result == "Bearer tok-A"
     assert b_result == "Bearer tok-B"

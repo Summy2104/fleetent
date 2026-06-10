@@ -5,6 +5,7 @@ import pytest
 from fleetent import user_store
 from fleetent.platform.im_gateway_management import channel_allowlist as al
 from fleetent.platform.im_gateway_management import connector_store as store
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
@@ -12,6 +13,7 @@ def db(tmp_path, monkeypatch):
     p = tmp_path / "users.db"
     for mod in (user_store, store, al):
         monkeypatch.setattr(mod, "DB_PATH", p)
+        apply_migrations(p)
     return p
 
 

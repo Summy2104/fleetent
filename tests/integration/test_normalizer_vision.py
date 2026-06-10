@@ -21,19 +21,27 @@ PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"payload" * 4
 
 
 def _bind_default_agent(tmp_path, monkeypatch):
-    """Bind a default agent that allows user 'u1' so the per-agent gate passes."""
-    root = tmp_path / "agents"
-    d = root / "vision-bot"
+    """Deploy a single home agent allowing 'u1' (bindings were removed from AgentFile;
+    the deployed agents/default/agent.yaml is the forced default and the IM gate
+    lives on the per-platform connector declaration)."""
+    d = tmp_path / "agents" / "default"
     d.mkdir(parents=True, exist_ok=True)
     doc = {
-        "name": "vision-bot",
+        "name": "default",
         "version": 1,
         "models": agent_config.default_models().model_dump(mode="json"),
-        "bindings": {"default": True},
-        "access": {"allow_users": ["u1"]},
+        "connectors": {
+            "slack": {
+                "bot_token_env": "TEST_BOT_TOKEN",
+                "app_token_env": "TEST_APP_TOKEN",
+                "access": {"allow_users": ["u1"]},
+            }
+        },
     }
     (d / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
-    agent_config.scan(root)
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+    monkeypatch.delenv("FLEETENT_AGENTS_DIR", raising=False)
+    agent_config.scan()
     monkeypatch.setattr(access, "APPROVALS_PATH", tmp_path / "data" / "im_approvals.json")
 
 

@@ -121,6 +121,7 @@ async def test_approve_command_resolves_gate_and_does_not_call_agent(
         approval_id="abc12345",
         decision="approved",
         approver_user_id="approver-1",
+        always=False,
     )
     mock_agent_loop.run.assert_not_called()
     assert "abc12345" in reply_calls[0]
@@ -155,6 +156,7 @@ async def test_reject_command_resolves_gate(mock_session_mgr, mock_agent_loop, m
         approval_id="abc12345",
         decision="rejected",
         approver_user_id="approver-2",
+        always=False,
     )
     mock_agent_loop.run.assert_not_called()
     assert "rejected" in reply_calls[0]
@@ -163,23 +165,32 @@ async def test_reject_command_resolves_gate(mock_session_mgr, mock_agent_loop, m
 async def test_slack_dm_session_id():
     from fleetent.im_gateway.slack import _derive_session_id
 
-    assert _derive_session_id(user_id="U123", channel_type="im", thread_ts=None) == "user:U123"
+    # Thread-first ids (slack-context-and-session): DMs namespace per user + thread root.
+    result = _derive_session_id(
+        channel_type="im", channel_id="D1", user_id="U123", thread_root="171.5"
+    )
+    assert result == "slack:dm:U123:171.5"
 
 
 async def test_slack_thread_session_id():
     from fleetent.im_gateway.slack import _derive_session_id
 
-    result = _derive_session_id(user_id="U123", channel_type="channel", thread_ts="T456")
-    assert result == "thread:T456"
+    result = _derive_session_id(
+        channel_type="channel", channel_id="C9", user_id="U123", thread_root="T456"
+    )
+    assert result == "slack:thread:C9:T456"
 
 
-async def test_slack_channel_no_thread():
+async def test_slack_channel_top_level_message_uses_own_ts_as_root():
     from fleetent.im_gateway.slack import _derive_session_id
 
-    # No thread_ts in a channel message → use user session as fallback
-    result = _derive_session_id(user_id="U123", channel_type="channel", thread_ts=None)
-    # Should return something non-None (either user: or create a new thread)
-    assert result.startswith("user:") or result.startswith("thread:")
+    # A top-level channel message threads on its own ts: callers pass
+    # thread_root = thread_ts or message ts, so each new top-level message
+    # starts a fresh per-channel thread session.
+    result = _derive_session_id(
+        channel_type="channel", channel_id="C9", user_id="U123", thread_root="170.0"
+    )
+    assert result == "slack:thread:C9:170.0"
 
 
 async def test_telegram_private_session_id():
@@ -218,7 +229,11 @@ async def test_slack_create_app_returns_app_object(monkeypatch):
 
     assert result is mock_app_instance
     mock_app_cls.assert_called_once_with(token="xoxb-fake")
-    mock_app_instance.event.assert_called_once_with("message")
+    # slack-assistant: create_app now registers app_mention + message handlers and
+    # binds the AsyncAssistant middleware.
+    registered = {call.args[0] for call in mock_app_instance.event.call_args_list}
+    assert registered == {"app_mention", "message"}
+    mock_app_instance.assistant.assert_called_once()
 
 
 async def test_telegram_create_app_returns_application_object(monkeypatch):

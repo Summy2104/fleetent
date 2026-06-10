@@ -5,17 +5,22 @@ import fleetent.session.index as session_index
 
 @pytest.fixture(autouse=True)
 def _isolate_db(tmp_path, monkeypatch):
-    monkeypatch.setattr(session_index, "DB_PATH", tmp_path / "x.db")
+    # session.index resolves its DB from DATABASE_URL (the module-level DB_PATH was
+    # removed by the session-reliability refactor); sessions is an agent-side
+    # self-init table, so the fixture creates the schema the way agent boot does.
+    db_path = tmp_path / "x.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    session_index.ensure_schema(session_index._db())
+    return db_path
 
 
 # --- 2. table / schema ---
 
 
-def test_init_creates_sessions_table_with_expected_columns():
-    session_index._init_db()
+def test_init_creates_sessions_table_with_expected_columns(_isolate_db):
     import sqlite3
 
-    with sqlite3.connect(session_index.DB_PATH) as conn:
+    with sqlite3.connect(_isolate_db) as conn:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
     assert cols == {
         "session_id",
@@ -64,7 +69,6 @@ def test_record_activity_upsert_keeps_created_refreshes_updated(monkeypatch):
 
 
 def test_get_nonexistent_returns_none():
-    session_index._init_db()
     assert session_index.get("missing") is None
 
 
@@ -93,7 +97,6 @@ def test_count_and_total_message_count():
 
 
 def test_total_message_count_empty_is_zero():
-    session_index._init_db()
     assert session_index.total_message_count() == 0
     assert session_index.count() == 0
 
@@ -109,7 +112,6 @@ def test_delete_removes_existing_row():
 
 
 def test_delete_nonexistent_is_idempotent():
-    session_index._init_db()
     # Should not raise
     session_index.delete("no-such-session")
 
@@ -125,7 +127,6 @@ def test_delete_batch_removes_multiple_rows():
 
 
 def test_delete_batch_empty_list_is_idempotent():
-    session_index._init_db()
     # Should not raise
     session_index.delete_batch([])
 

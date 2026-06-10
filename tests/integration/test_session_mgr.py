@@ -19,10 +19,13 @@ def sessions_dir(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def index_db(tmp_path, monkeypatch):
-    # Isolate the metadata index DB for every test: save() now writes to it as a
-    # side effect, and tests must never touch the real data/users.db.
-    monkeypatch.setattr(session_index, "DB_PATH", tmp_path / "x.db")
-    return tmp_path / "x.db"
+    # Isolate the metadata index DB for every test: save() writes to it as a side
+    # effect. session.index resolves its DB from DATABASE_URL (module DB_PATH was
+    # removed); sessions is agent-side self-init, mirrored here via ensure_schema.
+    db_path = tmp_path / "x.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    session_index.ensure_schema(session_index._db())
+    return db_path
 
 
 @pytest.fixture(autouse=True)

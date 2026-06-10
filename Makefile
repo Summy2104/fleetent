@@ -15,12 +15,10 @@ test: ## Run full test suite
 t: ## Run tests (fail-fast, quiet)
 	uv run pytest -x -q
 
-# Quarantine: pre-existing flaky failures from the permission_gate approvals-id
-# bug (owner: governance/permission_gate, tracked separately). Scoped to this gate
-# only — a plain `pytest tests/unit` still surfaces them. Remove when the owner fixes.
-PR_DESELECT := \
-	--deselect tests/unit/test_loop_permission_gate.py::test_permission_gate_enabled_tool_blocked_on_timeout \
-	--deselect tests/unit/test_loop_permission_gate.py::test_permission_gate_medium_timeout_forwarded
+# Quarantine slot for flaky tests (none currently). The permission_gate
+# approvals-id pair was de-quarantined after the R1 agent-owned-approval refactor:
+# two consecutive full `pytest tests/unit` runs pass clean (2026-06-10).
+PR_DESELECT :=
 
 # ruff runs only on files this branch changed vs main: main carries pre-existing
 # format/lint debt across other owners' modules, so a whole-tree gate is unviable

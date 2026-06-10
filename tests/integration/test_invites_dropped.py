@@ -28,10 +28,7 @@ _INVITES_DDL = """
 def _tables(db_path: Path) -> set[str]:
     conn = sqlite3.connect(db_path)
     try:
-        return {
-            row[0]
-            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        }
+        return {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     finally:
         conn.close()
 
@@ -73,9 +70,9 @@ def test_roundtrip_upgrade_downgrade_upgrade(tmp_path):
 
 
 def test_downgrade_restores_invites_table(tmp_path):
-    """After downgrade -1 from head, invites table must be restored (downgrade is reversible)."""
+    """Downgrading below the drop migration (066) must restore the invites table."""
     db = tmp_path / "downgrade.db"
     _upgrade(db)
-    _downgrade(db, "-1")
+    _downgrade(db, "065")
     tables = _tables(db)
     assert "invites" in tables, f"downgrade did not restore invites table; present: {tables}"

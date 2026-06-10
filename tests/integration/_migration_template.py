@@ -24,14 +24,27 @@ _MIGRATIONS_DIR = str(Path(__file__).resolve().parents[2] / "migrations")
 
 @functools.lru_cache(maxsize=1)
 def _template_db() -> Path:
-    """Build the migrated template once per process and return its path."""
+    """Build the migrated template once per process and return its path.
+
+    migrations/env.py prefers DATABASE_URL over the ini url; whichever test
+    happens to trigger the lazy build may have it monkeypatched, which would
+    migrate that test's database instead of the template (head.db then never
+    exists and every later copy fails). Scrub it for the build.
+    """
+    import os
+
     tmp_dir = Path(tempfile.mkdtemp(prefix="fleetent_migr_tpl_"))
     atexit.register(shutil.rmtree, tmp_dir, ignore_errors=True)
     template = tmp_dir / "head.db"
     cfg = Config()
     cfg.set_main_option("script_location", _MIGRATIONS_DIR)
     cfg.set_main_option("sqlalchemy.url", f"sqlite:///{template}")
-    command.upgrade(cfg, "head")
+    saved = os.environ.pop("DATABASE_URL", None)
+    try:
+        command.upgrade(cfg, "head")
+    finally:
+        if saved is not None:
+            os.environ["DATABASE_URL"] = saved
     return template
 
 

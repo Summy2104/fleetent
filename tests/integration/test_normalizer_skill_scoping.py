@@ -12,17 +12,28 @@ from fleetent.im_gateway import access, normalizer
 from tests.integration._migration_template import apply_migrations
 
 
-def _write_agent(root, name, **fields):
+def _write_agent(home, monkeypatch, **fields):
+    # Deployed single home agent (forced default — bindings were removed); the IM
+    # gate lives on the per-platform connector declaration, allowing u1.
     doc = {
-        "name": name,
+        "name": "default",
         "version": 1,
         "models": agent_config.default_models().model_dump(mode="json"),
+        "connectors": {
+            "slack": {
+                "bot_token_env": "TEST_BOT_TOKEN",
+                "app_token_env": "TEST_APP_TOKEN",
+                "access": {"allow_users": ["u1"]},
+            }
+        },
     }
     doc.update(fields)
-    d = root / name
+    d = home / "agents" / "default"
     d.mkdir(parents=True, exist_ok=True)
     (d / "agent.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
-    agent_config.scan(root)
+    monkeypatch.setenv("FLEETENT_HOME", str(home))
+    monkeypatch.delenv("FLEETENT_AGENTS_DIR", raising=False)
+    agent_config.scan()
 
 
 def _setup_db(tmp_path, monkeypatch):
@@ -74,13 +85,11 @@ async def test_route_narrows_catalog_to_agent_allowed_skills(tmp_path, monkeypat
     await _common_patches(monkeypatch, captured, tmp_path)
 
     _write_agent(
-        tmp_path / "agents",
-        "ss-bot",
+        tmp_path,
+        monkeypatch,
         system_prompt="Sys.",
         allowed_tools=["shell"],
         allowed_skills=["weather"],
-        bindings={"channels": ["slack:C-SS"]},
-        access={"allow_users": ["u1"]},
     )
 
     replies: list[str] = []

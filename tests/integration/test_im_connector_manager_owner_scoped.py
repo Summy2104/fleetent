@@ -8,6 +8,7 @@ from fleetent import user_store
 from fleetent.platform.im_gateway_management import connector_config as im_connector_config
 from fleetent.platform.im_gateway_management import connector_manager as mgr
 from fleetent.platform.im_gateway_management import connector_store as store
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
@@ -15,6 +16,7 @@ def db(tmp_path, monkeypatch):
     p = tmp_path / "users.db"
     monkeypatch.setattr(user_store, "DB_PATH", p)
     monkeypatch.setattr(store, "DB_PATH", p)
+    apply_migrations(p)
     # every owner resolves config (skip admin-only env gating for this test)
     monkeypatch.setattr(
         im_connector_config, "resolve", lambda owner_id, platform: {"bot_token": "t"}

@@ -264,6 +264,23 @@ permission_gate_enabled: true             # false = skip approval gate entirely 
 permission_gate_medium_timeout_seconds: 300
 permission_gate_high_timeout_seconds: 3600
 
+# action gate — per-risk handling mode for gated tool calls (action-gate)
+#   approval = page a human approver (default) | auto = execute without paging | deny = always block
+action_gate_medium_mode: approval
+action_gate_high_mode: approval
+
+# approval routing — who gets paged when the gate fires (agent-owned-approval)
+# null = no approvers configured → default-closed (gated calls are rejected).
+approval: null
+# approval:
+#   by_risk:
+#     medium:
+#       approvers: ["slack:U012ABCDEF"]   # platform:target outbound DM addresses
+#       policy: any                        # any = first decision wins
+#     high:
+#       approvers: ["slack:U012ABCDEF", "telegram:123456789"]
+#       policy: any
+
 # provider circuit breaker
 provider_failure_threshold: 3     # consecutive failures before a provider is marked unhealthy
 provider_cooldown_seconds: 60     # seconds a tripped provider stays in cooldown
