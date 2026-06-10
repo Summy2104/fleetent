@@ -214,11 +214,13 @@ namespace 家族（`mem:` / `shared:` / `kb:`）现在**就是路由到物理后
 **背景**：客户公司存在多法人主体（如 A 主体 / B 主体），主体间数据（尤其财务的 KB / 记忆 / 会话）**必须强隔离、互不可见**（合规 / 数据主权硬要求）。故 §4-② 幻影实体的决议是 **立实体 + 物理隔离**，而非裁掉多租户。
 
 **实体**（裸列 → 真实体/外键）：
-- `tenants`（= 主体）：`id · name · status · created_at · 主体级配额/配置`
-- `teams`：`id · tenant_id`→tenants `· name · created_at`
+- `tenants`（= 主体）：`id · name · status · created_at · approver_user_id · 主体级配额/配置`
+- `teams`：`id · tenant_id`→tenants `· name · approver_user_id · created_at`
 - `users` 补 `tenant_id`→tenants（**今天 users 无任何组织归属——真缺口**）
 - `team_members`：`team_id`→teams `· user_id`→users（M:N）
 - agents/KB/traces/policies 的 `tenant_id`/`team_id` 升真外键；`shared_memory.scope_id` 按 `scope_type` 指向 tenants/teams
+
+**审批人(org 两级,2026-06-10)**：`teams.approver_user_id` / `tenants.approver_user_id` —— agent 可被多 team 的人使用,但其共享记忆/KB/高危工具的**审批归 agent 归属 team 的审批人**(非请求者 team)。解析链:`agent.team_id 的审批人 → (无) tenant 的审批人 → (无) reject(default-closed)`。部署/materialize 时沿链解析出审批人写进 agent.yaml `approval` 块,核运行只读配置、不实时查 org（保解耦);默认单审批人,config 可覆盖多人 + `any/all`。详见 `target-architecture-proposal.md §6.5`。
 
 **隔离 = 物理 per-tenant**（不靠 `tenant_id` 列 + 纪律）：
 - `管理库`：**单库、跨主体注册中心**（tenants/teams/users/team_members/agent 定义，带 `tenant_id` 列），platform 专用，**不存业务对话/KB**。
