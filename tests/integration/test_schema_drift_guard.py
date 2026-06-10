@@ -42,10 +42,14 @@ def _build_alembic_db(tmp_path: Path) -> Path:
 
 
 def _build_ensure_schema_db(tmp_path: Path) -> Path:
-    """Run all agent-side ensure_schema() functions on a fresh DB."""
+    """Run all agent-side ensure_schema() functions on a fresh DB.
+
+    KB tables are intentionally excluded: they are now managed by the Y embedded
+    migration engine (TenantRouter + migrate-on-open in a tenant-scoped db) and
+    must not appear in the ensure_schema path.
+    """
     import fleetent.schedule_store as schedule_store
     from fleetent.db import SQLiteDatabase
-    from fleetent.knowledge_base import operations as kb_ops
     from fleetent.memory import store as memory_store
     from fleetent.observability import traces
     from fleetent.reflection import ensure_schema as reflection_ensure_schema
@@ -57,9 +61,8 @@ def _build_ensure_schema_db(tmp_path: Path) -> Path:
     traces.ensure_schema(db)
     memory_store.ensure_schema(db)
     reflection_ensure_schema(db)
-    kb_ops.ensure_schema(db)
-    session_index.ensure_schema(db)  # session.index.ensure_schema added in task 3.2
-    schedule_store.ensure_schema(db)  # agent-owned-scheduled-tasks
+    session_index.ensure_schema(db)
+    schedule_store.ensure_schema(db)
     return db_path
 
 
@@ -109,6 +112,31 @@ def test_no_drift_between_alembic_head_and_ensure_schema(tmp_path: Path) -> None
             drifted.append(f"{table}: missing={missing!r} extra={extra!r}")
 
     assert not drifted, "Schema drift detected:\n" + "\n".join(f"  {d}" for d in drifted)
+
+
+_KB_TABLES = frozenset(
+    {
+        "knowledge_bases",
+        "knowledge_documents",
+        "knowledge_chunks",
+        "knowledge_source_states",
+        "knowledge_chunks_fts",
+    }
+)
+
+
+def test_drift_guard_excludes_kb_y_managed_tables(tmp_path: Path) -> None:
+    """KB tables are now managed by the Y embedded migration engine.
+
+    The drift guard must not include them in the ensure_schema() path —
+    calling _build_ensure_schema_db must not produce any KB relation tables.
+    """
+    ensure_db = _build_ensure_schema_db(tmp_path / "ensure")
+    tables = _table_names(ensure_db)
+    overlap = _KB_TABLES & tables
+    assert not overlap, (
+        f"KB tables must not be in the ensure_schema path (they are Y-managed): {overlap}"
+    )
 
 
 def test_drift_guard_detects_column_mismatch(tmp_path: Path) -> None:

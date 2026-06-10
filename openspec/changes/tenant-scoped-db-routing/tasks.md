@@ -23,12 +23,12 @@
 
 ## 5. 向量家族路由整改（§5.6）
 
-- [ ] 5.1 写失败测试：`VectorFamily` 枚举 + 单一 `family_of()`——已知前缀（`mem:`/`shared:`/`kb:`）归对应家族、未知前缀抛错（fail-fast）；既有 helper（`memory_namespace`/`knowledge_namespace`）返回值不变
-- [ ] 5.2 实现：引入 `VectorFamily` + `family_of()` 单一路由入口，替换散落的 ad-hoc `startswith`；KB 向量经同一 tenant-scope 路由到同主体向量后端，跑绿 5.1
+- [x] 5.1 写失败测试：`VectorFamily` 枚举 + 单一 `family_of()`——已知前缀（`mem:`/`shared:`/`kb:`）归对应家族、未知前缀抛错（fail-fast）；既有 helper（`memory_namespace`/`knowledge_namespace`）返回值不变
+- [x] 5.2 实现：引入 `VectorFamily` + `family_of()` 单一路由入口，替换散落的 ad-hoc `startswith`；KB 向量经同一 tenant-scope 路由到同主体向量后端，跑绿 5.1
 
 ## 6. 接合、护栏与收尾
 
-- [ ] 6.1 写失败测试 + 实现：boot 路径（`_start_infra`/agent_app）下 KB schema 经路由 + migrate-on-open 建立，不再由 KB `ensure_schema()` 建；其余 ensure_schema 库（traces/memory/reflection）行为不变
-- [ ] 6.2 写测试 + 实现：漂移护栏排除已迁入 Y 的 KB 表（KB 不在 ensure_schema↔alembic 校验范围）
-- [ ] 6.3 确认无 `import fleetent.platform.*`、无新增裸 `sqlite3.connect`、SQL 用 named parameters（跑依赖护栏 + `scripts/check_module_boundaries.py` 相关）
+- [x] 6.1 写失败测试 + 实现：boot 路径（`_start_infra`/agent_app）下 KB schema 经路由 + migrate-on-open 建立，不再由 KB `ensure_schema()` 建；其余 ensure_schema 库（traces/memory/reflection）行为不变
+- [x] 6.2 写测试 + 实现：漂移护栏排除已迁入 Y 的 KB 表（KB 不在 ensure_schema↔alembic 校验范围）
+- [x] 6.3 确认无 `import fleetent.platform.*`、无新增裸 `sqlite3.connect`、SQL 用 named parameters（跑依赖护栏 + `scripts/check_module_boundaries.py` 相关）
 - [ ] 6.4 change 收尾：`make test-pr` 全绿 + `uv run pytest tests/integration -q` 对照 main 基线无新增失败 + `openspec validate tenant-scoped-db-routing --strict`
