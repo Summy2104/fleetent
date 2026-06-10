@@ -79,9 +79,9 @@ async def graph_search(
     if depth not in {0, 1}:
         raise ValueError(f"unsupported graph search depth: {depth}")
 
-    from fleetent.knowledge_base.retrieval.scope import _kb_config
+    from fleetent.knowledge_base.retrieval._settings import kb_config
 
-    settings = _kb_config()
+    settings = kb_config()
     resolved_tenant_id = tenant_id or settings.default_tenant_id
     resolved_kb_ids = kb_ids or [settings.default_kb_id]
     if limit <= 0:

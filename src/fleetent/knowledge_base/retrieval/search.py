@@ -190,9 +190,9 @@ def _apply_rerank_results(
 
 
 def _scope_settings() -> KnowledgeBaseSettings:
-    from fleetent.knowledge_base.retrieval.scope import _kb_config
+    from fleetent.knowledge_base.retrieval._settings import kb_config
 
-    return _kb_config()
+    return kb_config()
 
 
 def _rerank_config() -> RerankSettings:

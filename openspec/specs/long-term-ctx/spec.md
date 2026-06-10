@@ -216,20 +216,20 @@ long-term context budget policy SHALL NOT 使用 LLM 做上下文选择、总结
 - **AND** 不调用 LLM、embedding provider、rerank provider 或外部 HTTP 服务来决定预算
 
 ### Requirement: Long-term context uses agent KB bindings
-long-term-ctx SHALL 通过 knowledge-base public API 解析 agent 的 KB 范围，并只检索该范围内的知识库内容。
+long-term-ctx SHALL 从 agent 配置中**已 materialize 的 KB bindings**（`agent.knowledge`，源自平台 `agent_kbs`，见 `kb-agent-binding`）解析 agent 的有效 KB 范围，并只检索该范围内的知识库内容。long-term-ctx MUST NOT 依赖 knowledge_base 模块的运行时绑定表/解析器。
 
-#### Scenario: Built-in provider resolves agent KB scope
+#### Scenario: Built-in provider resolves agent KB scope from agent.knowledge
 - **WHEN** `knowledge_base.enabled=true`
 - **AND** long-term-ctx built-in knowledge provider 准备检索 KB
-- **THEN** provider 调用 `knowledge_base.resolve_agent_kb_ids(tenant_id, agent_id)`
+- **THEN** provider 从 `agent.knowledge`（已 materialize 的 `AgentKnowledge` bindings）取该 agent 的有效 `kb_ids`
 
 #### Scenario: Built-in provider searches resolved KBs
-- **WHEN** `resolve_agent_kb_ids()` 返回一个或多个 KB id
+- **WHEN** `agent.knowledge` 含一个或多个 KB binding
 - **THEN** provider 调用 `knowledge_base.search(query, tenant_id, kb_ids, limit, mode)`
-- **AND** `kb_ids` 使用解析后的 KB 列表
+- **AND** `kb_ids` 使用 `agent.knowledge` 解析后的 KB 列表
 
 #### Scenario: Empty KB scope degrades without search
-- **WHEN** `resolve_agent_kb_ids()` 返回空列表
+- **WHEN** `agent.knowledge` 无任何 KB binding（或 `knowledge_base.enabled=false`）
 - **THEN** provider 不调用 `knowledge_base.search()`
 - **AND** `build_context()` 仍按现有规则返回 memory context 或空 context
 - **AND** agent-runtime 不因 KB 范围为空而失败
@@ -275,3 +275,4 @@ long-term-ctx SHALL support tenant default and agent override policies for User 
 #### Scenario: Policy budget controls source selection
 - **WHEN** policies define per-source top-k and token budgets
 - **THEN** long-term-ctx applies those limits before rendering injectable context
+

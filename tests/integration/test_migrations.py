@@ -13,6 +13,8 @@ _MIGRATIONS_DIR = str(Path(__file__).resolve().parents[2] / "migrations")
 
 __all__ = ["apply_migrations", "downgrade_migrations"]
 
+_REMOVED_AGENT_KB_TABLE = "knowledge_base_agent_bindings"
+
 
 def downgrade_migrations(db_path: Path) -> None:
     cfg = Config()
@@ -42,7 +44,7 @@ def test_upgrade_creates_tables(tmp_path):
     assert "knowledge_documents" in tables
     assert "knowledge_chunks" in tables
     assert "knowledge_chunks_fts" in tables
-    assert "knowledge_base_agent_bindings" in tables
+    assert _REMOVED_AGENT_KB_TABLE not in tables
     assert "knowledge_connector_status" in tables
     assert "kb_extraction_runs" in tables
     assert "kb_entities" in tables

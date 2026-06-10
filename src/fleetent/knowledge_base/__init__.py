@@ -10,11 +10,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from importlib import import_module
 
-from .bindings import (
-    AgentKnowledgeBaseBinding,
-    list_agent_kb_bindings,
-    resolve_agent_kb_ids,
-)
 from .config import (
     KnowledgeBaseConfig,
     KnowledgeConfigSnapshot,
@@ -116,7 +111,6 @@ _REEXPORTS = {
     "operations": "fleetent.knowledge_base.operations",
     "planner": "fleetent.knowledge_base.planner",
     "sync_planner": "fleetent.knowledge_base.sync_planner",
-    "bindings": "fleetent.knowledge_base.bindings",
     "config": "fleetent.knowledge_base.config",
     "extraction": "fleetent.knowledge_base.extraction",
     "extraction_store": "fleetent.knowledge_base.extraction_store",
@@ -165,7 +159,6 @@ _ATTRIBUTE_EXPORTS: dict[str, Callable[[], object]] = {
     "GoogleDriveSyncPlan": lambda: GoogleDriveSyncPlan,
     "GoogleDriveSyncSummary": lambda: GoogleDriveSyncSummary,
     "LocalDirectorySourceConfig": lambda: LocalDirectorySourceConfig,
-    "AgentKnowledgeBaseBinding": lambda: AgentKnowledgeBaseBinding,
     "ConnectorCheckResult": lambda: ConnectorCheckResult,
     "ConnectorDefinition": lambda: ConnectorDefinition,
     "ConnectorStatus": lambda: ConnectorStatus,
@@ -186,7 +179,6 @@ _ATTRIBUTE_EXPORTS: dict[str, Callable[[], object]] = {
     "iter_indexable_knowledge_chunks": lambda: iter_indexable_knowledge_chunks,
     "is_active_knowledge_base": lambda: is_active_knowledge_base,
     "knowledge_config_path": lambda: knowledge_config_path,
-    "list_agent_kb_bindings": lambda: list_agent_kb_bindings,
     "list_configured_connectors": lambda: list_configured_connectors,
     "list_documents": lambda: list_documents,
     "list_knowledge_bases": lambda: list_knowledge_bases,
@@ -196,7 +188,6 @@ _ATTRIBUTE_EXPORTS: dict[str, Callable[[], object]] = {
     "plan_knowledge_search": lambda: plan_knowledge_search,
     "plan_local_directory_sync": lambda: plan_local_directory_sync,
     "preview_document_chunks": lambda: preview_document_chunks,
-    "resolve_agent_kb_ids": lambda: resolve_agent_kb_ids,
     "run_connector_sync": lambda: run_connector_sync,
     "run_entity_extraction": lambda: run_entity_extraction,
     "search": lambda: search,

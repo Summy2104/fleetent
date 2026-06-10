@@ -14,26 +14,12 @@ if TYPE_CHECKING:
         RelationRef,
         match_entities,
     )
-    from .scope import (
-        AgentKnowledgeBaseBinding,
-        resolve_agent_kb_ids,
-    )
     from .search import SearchMode
 
 
 def __getattr__(name: str) -> object:
-    if name in {"graph_search", "search", "scope"}:
+    if name in {"graph_search", "search"}:
         return import_module(f"fleetent.knowledge_base.retrieval.{name}")
-    if name in {
-        "AgentKnowledgeBaseBinding",
-        "resolve_agent_kb_ids",
-    }:
-        from .scope import AgentKnowledgeBaseBinding, resolve_agent_kb_ids
-
-        return {
-            "AgentKnowledgeBaseBinding": AgentKnowledgeBaseBinding,
-            "resolve_agent_kb_ids": resolve_agent_kb_ids,
-        }[name]
     if name in {"SearchMode", "_search_hybrid", "_search_vector"}:
         from .search import SearchMode, _search_hybrid, _search_vector
 
@@ -91,16 +77,13 @@ def __dir__() -> list[str]:
     return sorted(
         [
             *globals(),
-            "AgentKnowledgeBaseBinding",
             "EntityRef",
             "GraphSearchChunk",
             "GraphSearchReason",
             "GraphSearchResult",
             "RelationRef",
             "SearchMode",
-            "resolve_agent_kb_ids",
             "search",
-            "scope",
             "graph_search",
             "match_entities",
             "_search_vector",
@@ -113,16 +96,13 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
-    "AgentKnowledgeBaseBinding",
     "EntityRef",
     "GraphSearchChunk",
     "GraphSearchReason",
     "GraphSearchResult",
     "RelationRef",
     "SearchMode",
-    "resolve_agent_kb_ids",
     "search",
-    "scope",
     "graph_search",
     "match_entities",
     "_search_vector",
