@@ -1,6 +1,6 @@
 # fleetent 总体架构
 
-> **总览 / 入口**。详细架构模型（核+4面+基座、模块边界、Identity、只读投影、现模块→目标归属）见 [`architecture/target-architecture-proposal.md`](architecture/target-architecture-proposal.md)；数据模型与物理库见 [`architecture/data-model.md`](architecture/data-model.md)；设计 rationale 见 [`records/decision-logs/`](records/decision-logs/)。
+> **总览 / 入口**。详细架构模型（核+4面+基座、模块边界、Identity、只读投影、现模块→目标归属）见 [`architecture/target-architecture.md`](architecture/target-architecture.md)；数据模型与物理库见 [`architecture/data-model.md`](architecture/data-model.md)；设计 rationale 见 [`records/decision-logs/`](records/decision-logs/)。
 
 ## 定位
 
@@ -18,8 +18,8 @@
 
 **心智模型 = 一个核（Agent 运行时）+ 四个面（① 边缘 / ② 控制 / ③ 编排 / ④ 摄取）+ 共享基座**。依赖单向：面 → 核（允许）、核 → 面（禁，核须脱离任何面独立跑）、任意 → 基座（允许）、基座 → 业务（禁）。模块边界由**依赖护栏测试**强制（`tests/unit/test_module_dependency_guardrails.py` 等）。
 
-- 模型与各面/核/基座的职责：见 [`target-architecture-proposal.md` §1–§7](architecture/target-architecture-proposal.md)。
-- **现模块 → 目标归属（速查）**：见 [`target-architecture-proposal.md` §10](architecture/target-architecture-proposal.md)。
+- 模型与各面/核/基座的职责：见 [`target-architecture.md` §1–§7](architecture/target-architecture.md)。
+- **现模块 → 目标归属（速查）**：见 [`target-architecture.md` §10](architecture/target-architecture.md)。
 - 模块边界为何这样切（根因/决策）：见 [`records/decision-logs/architecture-decisions.md`](records/decision-logs/architecture-decisions.md)。
 
 ---

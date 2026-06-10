@@ -1,6 +1,6 @@
 # 模块架构（核+4面+基座）—— 决策记录（rationale）
 
-> 记录 fleetent 模块架构（一个核 + 四个面 + 共享基座）的**为什么**。现状/模型见 [`architecture/target-architecture-proposal.md`](../../architecture/target-architecture-proposal.md)；本文保留根因诊断、决策依据与"解决了什么"，供回溯。持久层/多租户/实体减法的 rationale 另见 [`persistence-redesign-decisions.md`](./persistence-redesign-decisions.md)。
+> 记录 fleetent 模块架构（一个核 + 四个面 + 共享基座）的**为什么**。现状/模型见 [`architecture/target-architecture.md`](../../architecture/target-architecture.md)；本文保留根因诊断、决策依据与"解决了什么"，供回溯。持久层/多租户/实体减法的 rationale 另见 [`persistence-redesign-decisions.md`](./persistence-redesign-decisions.md)。
 
 ## 根因诊断（重设计起因）
 项目「怎么看怎么乱」的根因（依赖扫描 + 模块体量分析）：

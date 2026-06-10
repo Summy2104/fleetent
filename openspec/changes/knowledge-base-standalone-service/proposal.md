@@ -2,7 +2,7 @@
 
 ## Why
 
-承接 [`target-architecture-proposal.md` §5（knowledge_base 组件内四分）](../../../docs/architecture/target-architecture-proposal.md) 的**后置演进**。当 `knowledge_base/` 已是顶层独立组件、读写边界清晰（core/retrieval/ingest/management 四分落地）后，可进一步把它升格为**独立的自托管服务**：对外暴露检索 API（数据面，被 agent runtime 消费）+ 管理 API（控制面，被 platform 消费）。这与 fleetent「基础设施组件可自托管、数据不出内网」的原则一致——KB 像 PostgreSQL/Qdrant 一样是个可独立部署的组件。
+承接 [`target-architecture.md` §5（knowledge_base 组件内四分）](../../../docs/architecture/target-architecture.md) 的**后置演进**。当 `knowledge_base/` 已是顶层独立组件、读写边界清晰（core/retrieval/ingest/management 四分落地）后，可进一步把它升格为**独立的自托管服务**：对外暴露检索 API（数据面，被 agent runtime 消费）+ 管理 API（控制面，被 platform 消费）。这与 fleetent「基础设施组件可自托管、数据不出内网」的原则一致——KB 像 PostgreSQL/Qdrant 一样是个可独立部署的组件。
 
 ## What Changes（占位，不在本批实施）
 

@@ -180,7 +180,7 @@ legacy top-level governance shim modules SHALL NOT remain importable.
 
 #### Scenario: 模块归属映射存在
 - **WHEN** 读者查看架构文档
-- **THEN** `docs/architecture/target-architecture-proposal.md` §10「现模块 → 目标归属（速查）」给出各模块（runtime/platform/governance/channels/intelligence 各域、integrations、observability、infrastructure）的目标归属
+- **THEN** `docs/architecture/target-architecture.md` §10「现模块 → 目标归属（速查）」给出各模块（runtime/platform/governance/channels/intelligence 各域、integrations、observability、infrastructure）的目标归属
 
 ### Requirement: Integrations package migration
 系统 SHALL expose external capability integrations through `fleetent.integrations` canonical package paths
