@@ -1,3 +1,4 @@
+from tests.integration._migration_template import apply_migrations
 """DB-backed channel allowlist submodule behavior."""
 
 
@@ -9,6 +10,7 @@ def test_enforcement_opt_in_per_owner(tmp_path, monkeypatch):
     p = tmp_path / "users.db"
     for mod in (user_store, store, al):
         monkeypatch.setattr(mod, "DB_PATH", p)
+        apply_migrations(p)
     # No connector row -> not enforced -> everything allowed.
     assert al.is_allowed("ownerA", "slack", "C1") is True
     # Enforce, with one allowed channel.

@@ -3,16 +3,19 @@ import sqlite3
 import pytest
 
 from fleetent.platform.im_gateway_management import identity as im_user_store
+from tests.integration._migration_template import apply_migrations
 
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     db_path = tmp_path / "users.db"
     monkeypatch.setattr(im_user_store, "DB_PATH", db_path)
+    apply_migrations(db_path)
     # Also need to monkeypatch user_store DB_PATH since im_user_store creates users too
     import fleetent.user_store as user_store
 
     monkeypatch.setattr(user_store, "DB_PATH", db_path)
+    apply_migrations(db_path)
     im_user_store._init_db()
     return db_path
 
