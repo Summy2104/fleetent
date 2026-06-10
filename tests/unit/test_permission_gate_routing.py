@@ -43,13 +43,16 @@ async def _resolve_after(gate, approval_id, decision, actor, delay):
 
 @pytest.fixture(autouse=True)
 def _mock_store(monkeypatch):
-    """Patch approval_store so unit tests never touch real SQLite."""
-    from fleetent.governance import approval_store
+    """Patch approval_store + allowlist_store so unit tests never touch real SQLite."""
+    from fleetent.governance import approval_allowlist_store, approval_store
 
     monkeypatch.setattr(approval_store, "insert_approval", MagicMock())
     monkeypatch.setattr(approval_store, "update_approval", MagicMock())
     monkeypatch.setattr(approval_store, "list_approvals", MagicMock(return_value=[]))
     monkeypatch.setattr(approval_store, "cleanup_stale", MagicMock(return_value=0))
+    # allowlist.is_allowed is called inside request_approval (approval-minimization);
+    # default to False so tests exercise the full approval flow, not auto-approve.
+    monkeypatch.setattr(approval_allowlist_store, "is_allowed", MagicMock(return_value=False))
 
 
 # ── requestor ≠ approver: outbound DM to approver ─────────────────────────────
