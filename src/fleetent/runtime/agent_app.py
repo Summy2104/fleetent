@@ -154,21 +154,30 @@ def _init_agent_db_schema(database_url: str) -> None:
 
     Called once at boot after DATABASE_URL is redirected to the per-agent path.
     Each store's ensure_schema is idempotent; repeated calls are safe.
+
+    KB schema is bootstrapped via TenantRouter + migrate-on-open so that KB tables
+    land in the tenant-scoped directory (data/<tenant_id>/kb.db), not the main db.
+    All other agent-side stores continue using their ensure_schema paths.
     """
     from fleetent import reflection, schedule_store
     from fleetent.db import create_database
-    from fleetent.knowledge_base import operations as kb_ops
+    from fleetent.knowledge_base.core.migrations import MIGRATIONS as KB_MIGRATIONS
     from fleetent.memory import store as memory_store
     from fleetent.observability import traces
     from fleetent.session import index as session_index
+    from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
     db = create_database(database_url)
     traces.ensure_schema(db)
     memory_store.ensure_schema(db)
     reflection.ensure_schema(db)
-    kb_ops.ensure_schema(db)
     session_index.ensure_schema(db)
     schedule_store.ensure_schema(db)
+
+    # KB schema goes into the tenant-scoped db via the router, not the main agent db.
+    data_dir = db.path.parent
+    router = TenantRouter(SQLiteTenantBackend(data_dir=data_dir))
+    router.scope("default").open_kb_db(KB_MIGRATIONS)
 
 
 async def _start_infra(agent: AgentFile) -> None:

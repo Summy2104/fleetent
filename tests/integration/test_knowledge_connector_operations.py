@@ -13,7 +13,7 @@ def _patch_operations_database(monkeypatch, tmp_path):
     db_path = tmp_path / "connectors.db"
     apply_migrations(db_path)
     database = create_database(f"sqlite:///{db_path}")
-    monkeypatch.setattr(operations, "_database", lambda: database)
+    monkeypatch.setattr(operations, "default_database", lambda: database)
     return database
 
 
@@ -86,7 +86,7 @@ def test_connector_status_overwrites_previous_status(monkeypatch, tmp_path):
     )
 
     row = (
-        operations._database()
+        operations.default_database()
         .execute("SELECT last_status, last_summary_json FROM knowledge_connector_status")
         .fetchone()
     )
@@ -111,7 +111,7 @@ def test_connector_status_redacts_summary_and_error(monkeypatch, tmp_path):
     )
 
     row = (
-        operations._database()
+        operations.default_database()
         .execute("SELECT last_summary_json, last_error FROM knowledge_connector_status")
         .fetchone()
     )

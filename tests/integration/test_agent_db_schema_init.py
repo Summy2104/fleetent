@@ -164,17 +164,25 @@ def test_init_agent_db_schema_creates_all_agent_tables(
 
     _init_agent_db_schema(database_url)
 
-    db = SQLiteDatabase(path=db_path)
-    tables = _table_names(db)
-    assert "traces" in tables
-    assert "memory_items" in tables
-    assert "reflection_reports" in tables
-    assert "knowledge_bases" in tables
-    assert "knowledge_documents" in tables
-    assert "knowledge_chunks" in tables
-    assert "knowledge_chunks_fts" in tables
-    assert "knowledge_source_states" in tables
-    assert "sessions" in tables
+    # Non-KB agent-side stores land in the main agent db via ensure_schema.
+    main_tables = _table_names(SQLiteDatabase(path=db_path))
+    assert "traces" in main_tables
+    assert "memory_items" in main_tables
+    assert "reflection_reports" in main_tables
+    assert "sessions" in main_tables
+    # KB tables must NOT be in the main db — they are Y-managed in a tenant-scoped db.
+    assert "knowledge_bases" not in main_tables
+    assert "knowledge_documents" not in main_tables
+
+    # KB tables land in data/default/kb.db via TenantRouter + migrate-on-open.
+    kb_db_path = tmp_path / "default" / "kb.db"
+    assert kb_db_path.exists()
+    kb_tables = _table_names(SQLiteDatabase(path=kb_db_path))
+    assert "knowledge_bases" in kb_tables
+    assert "knowledge_documents" in kb_tables
+    assert "knowledge_chunks" in kb_tables
+    assert "knowledge_chunks_fts" in kb_tables
+    assert "knowledge_source_states" in kb_tables
 
 
 def test_init_agent_db_schema_idempotent(tmp_path: Path) -> None:
