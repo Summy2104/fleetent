@@ -10,6 +10,8 @@ AAA-8039 实测确认（2026-06-10，本地 my-bot 黑盒复现）：运行期�
 - **工具诚实降级**：调度器未运行（CLI 一次性运行 / scheduling disabled）时仍写 store，但工具返回值如实说明「任务已保存，将在 agent 服务运行后生效」
 - **fire 时回读校验（纵深防御）**：触发时按 id 回读 store，行不存在或 `enabled=0` → 跳过执行并卸载 job（与已有的 principal recheck 并列）
 - **once 任务触发后标记完成**：fire 成功后置 `enabled=0` + `last_status="completed"`，store 不残留"看似活着"的一次性任务
+- **fire 时 principal 复检改为按域执行**（实施中实测发现的第二处断点）：identity-port 的存档复检（2026-06-10 合并）把所有 `user_id` 一律按平台用户查 `user_store`——IM 渠道担保身份（spec 自己规定不读 user_store）必然查无此人，被误判为"已删"而静默跳过，standalone 部署下**所有** IM 创建的任务死亡。改为：平台用户查到且 blocked→拒；users 表不存在（无用户管理部署）→信任存档身份；查无此人但任务带 IM origin（渠道担保）→放行；查无此人且无 IM origin→拒（平台域"删则拒"语义保留）；`system`/`default` 分别走系统主体与占位放行
+- **任务属主取执行 principal**：`ToolContext` 新增 `principal` 字段（loop 注入），schedule 工具创建任务时属主取 `tool_context.principal.user_id`，不再信任模型自由填写的 `user_id` 参数（无 context 时保留参数回退）
 
 ## Capabilities
 
@@ -19,7 +21,8 @@ AAA-8039 实测确认（2026-06-10，本地 my-bot 黑盒复现）：运行期�
 
 ### Modified Capabilities
 
-- `cron-scheduled-tasks`: 「schedule tool for managing scheduled tasks」requirement 升级为强制经由 CronScheduler 单一变更入口（含降级场景）；新增「Live mutation through a single owner」与「Fire-time revalidation against the store」两条 requirement（once 触发后标记完成由既有场景覆盖，本次实现兑现）
+- `cron-scheduled-tasks`: 「schedule tool for managing scheduled tasks」requirement 升级为强制经由 CronScheduler 单一变更入口（含降级场景与属主取自执行 principal）；新增「Live mutation through a single owner」与「Fire-time revalidation against the store」两条 requirement（once 触发后标记完成由既有场景覆盖，本次实现兑现）
+- `identity-port`: 「非凭证身份获取路径」的③存档复检改为按身份所属域执行——平台用户经 user_store 复检（block/删→拒）；IM 渠道担保身份不经 user_store，凭任务 IM origin 放行；无用户管理部署信任存档身份
 
 ## Impact
 
