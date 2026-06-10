@@ -1,42 +1,32 @@
 """Agent-side approval store: persists tool approval requests and outcomes.
 
-Schema owner: this module — not Alembic. Uses fleetent.db.SQLiteDatabase with
-named params throughout. No platform imports.
+Schema owner: agent_state.db via per-agent MIGRATIONS (v12).  Connection is
+injected via set_state_db() at agent boot — no ensure_schema, no DB_PATH.
+Uses named parameters throughout.  No platform imports.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+import datetime
 from typing import Any
 
-from fleetent import paths
 from fleetent.db import SQLiteDatabase
 
-DB_PATH = paths.data_dir() / "fleetent.db"
+_state_db: SQLiteDatabase | None = None
 
 
-def _db(db_path: Path | None = None) -> SQLiteDatabase:
-    return SQLiteDatabase(path=db_path or DB_PATH)
+def set_state_db(db: SQLiteDatabase) -> None:
+    """Inject the per-agent state DB.  Called once at agent boot."""
+    global _state_db
+    _state_db = db
 
 
-def ensure_schema(db_path: Path | None = None) -> None:
-    """Create the approvals table if it does not exist. Idempotent."""
-    _db(db_path).execute(
-        """
-        CREATE TABLE IF NOT EXISTS approvals (
-            id                TEXT PRIMARY KEY,
-            session_id        TEXT NOT NULL,
-            requester_user_id TEXT NOT NULL,
-            risk_level        TEXT NOT NULL,
-            tool_name         TEXT NOT NULL,
-            tool_args         TEXT NOT NULL,
-            status            TEXT NOT NULL,
-            approver_actor    TEXT,
-            created_at        TEXT NOT NULL,
-            resolved_at       TEXT
+def database() -> SQLiteDatabase:
+    if _state_db is None:
+        raise RuntimeError(
+            "approval_store: state_db not initialized — call set_state_db(db) at boot"
         )
-        """
-    )
+    return _state_db
 
 
 def insert_approval(
@@ -48,10 +38,8 @@ def insert_approval(
     tool_name: str,
     tool_args: str,
     created_at: str,
-    db_path: Path | None = None,
 ) -> None:
-    ensure_schema(db_path)
-    _db(db_path).execute(
+    database().execute(
         """
         INSERT INTO approvals
             (id, session_id, requester_user_id, risk_level, tool_name, tool_args, status, created_at)
@@ -76,9 +64,8 @@ def update_approval(
     status: str,
     resolved_at: str,
     approver_actor: str | None = None,
-    db_path: Path | None = None,
 ) -> None:
-    _db(db_path).execute(
+    database().execute(
         "UPDATE approvals SET status = :status, resolved_at = :resolved_at, "
         "approver_actor = :approver_actor WHERE id = :id",
         {
@@ -90,10 +77,6 @@ def update_approval(
     )
 
 
-_LIST_COLS = [
-    "id", "session_id", "tool_name", "risk_level", "tool_args", "status",
-    "requester_user_id", "approver_actor", "created_at", "resolved_at",
-]
 _SELECT = (
     "SELECT id, session_id, tool_name, risk_level, tool_args, status, "
     "requester_user_id, approver_actor, created_at, resolved_at FROM approvals"
@@ -102,10 +85,8 @@ _SELECT = (
 
 def list_approvals(
     status: str | None = None,
-    db_path: Path | None = None,
 ) -> list[dict[str, Any]]:
-    ensure_schema(db_path)
-    db = _db(db_path)
+    db = database()
     if status is not None:
         rows = db.execute(
             f"{_SELECT} WHERE status = :status ORDER BY created_at DESC",
@@ -118,13 +99,10 @@ def list_approvals(
     return list(rows)
 
 
-def cleanup_stale(db_path: Path | None = None) -> int:
+def cleanup_stale() -> int:
     """Mark all pending approvals as timeout. Returns number of rows updated."""
-    import datetime
-
-    ensure_schema(db_path)
     now = datetime.datetime.now(datetime.UTC).isoformat()
-    result = _db(db_path).execute(
+    result = database().execute(
         "UPDATE approvals SET status = 'timeout', resolved_at = :now WHERE status = 'pending'",
         {"now": now},
     )

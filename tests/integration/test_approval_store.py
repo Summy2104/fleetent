@@ -1,45 +1,47 @@
-"""Integration tests for the agent-side approval store (task 3.1/3.2).
+"""Integration tests for the agent-side approval store (3b-4 set_state_db pattern).
 
-Verifies ensure_schema, CRUD, named params, correct session_id, and
-absence of sqlite3.connect / user_store._conn in the module source.
+Verifies CRUD, named params, and absence of sqlite3.connect / platform imports
+in the module source.  Connection is injected via monkeypatch on _state_db.
 """
 
 from __future__ import annotations
 
 import inspect
-import sqlite3
+from pathlib import Path
 
 import pytest
 
+from fleetent.db import SQLiteDatabase
 from fleetent.governance import approval_store
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 
 @pytest.fixture()
-def db_path(tmp_path):
-    return tmp_path / "approvals_test.db"
+def state_db(tmp_path: Path) -> SQLiteDatabase:
+    db = SQLiteDatabase(path=tmp_path / "agent_state.db")
+    migrate(db, AGENT_STATE_MIGRATIONS)
+    return db
 
 
-# ── ensure_schema ──────────────────────────────────────────────────────────────
+@pytest.fixture(autouse=True)
+def _inject_db(state_db: SQLiteDatabase, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(approval_store, "_state_db", state_db)
 
 
-def test_ensure_schema_creates_approvals_table(db_path) -> None:
-    """ensure_schema creates the approvals table idempotently."""
-    approval_store.ensure_schema(db_path)
-    approval_store.ensure_schema(db_path)  # idempotent
+# ── schema ────────────────────────────────────────────────────────────────────
 
-    conn = sqlite3.connect(db_path)
-    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    conn.close()
+
+def test_approvals_table_exists(state_db: SQLiteDatabase) -> None:
+    tables = {
+        r["name"]
+        for r in state_db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
     assert "approvals" in tables
 
 
-def test_ensure_schema_creates_required_columns(db_path) -> None:
-    approval_store.ensure_schema(db_path)
-
-    conn = sqlite3.connect(db_path)
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(approvals)")}
-    conn.close()
-
+def test_approvals_required_columns(state_db: SQLiteDatabase) -> None:
+    cols = {r["name"] for r in state_db.execute("PRAGMA table_info(approvals)").fetchall()}
     required = {
         "id", "session_id", "requester_user_id", "risk_level",
         "tool_name", "tool_args", "status", "approver_actor",
@@ -51,9 +53,7 @@ def test_ensure_schema_creates_required_columns(db_path) -> None:
 # ── insert / update lifecycle ─────────────────────────────────────────────────
 
 
-def test_insert_approval_creates_pending_record(db_path) -> None:
-    approval_store.ensure_schema(db_path)
-
+def test_insert_approval_creates_pending_record() -> None:
     approval_store.insert_approval(
         id="abc12345",
         session_id="user:alice",
@@ -62,10 +62,9 @@ def test_insert_approval_creates_pending_record(db_path) -> None:
         tool_name="delete_db",
         tool_args='{"table": "users"}',
         created_at="2026-01-01T00:00:00+00:00",
-        db_path=db_path,
     )
 
-    rows = approval_store.list_approvals(db_path=db_path)
+    rows = approval_store.list_approvals()
     assert len(rows) == 1
     row = rows[0]
     assert row["id"] == "abc12345"
@@ -74,10 +73,7 @@ def test_insert_approval_creates_pending_record(db_path) -> None:
     assert row["tool_name"] == "delete_db"
 
 
-def test_insert_approval_records_non_empty_session_id(db_path) -> None:
-    """session_id must be the actual session, not an empty string (bug fix)."""
-    approval_store.ensure_schema(db_path)
-
+def test_insert_approval_records_non_empty_session_id() -> None:
     approval_store.insert_approval(
         id="sess_fix",
         session_id="user:bob",
@@ -86,16 +82,14 @@ def test_insert_approval_records_non_empty_session_id(db_path) -> None:
         tool_name="run_code",
         tool_args="{}",
         created_at="2026-01-01T00:00:00+00:00",
-        db_path=db_path,
     )
 
-    rows = approval_store.list_approvals(db_path=db_path)
+    rows = approval_store.list_approvals()
     assert rows[0]["session_id"] == "user:bob"
     assert rows[0]["session_id"] != ""
 
 
-def test_update_approval_sets_status_and_actor(db_path) -> None:
-    approval_store.ensure_schema(db_path)
+def test_update_approval_sets_status_and_actor() -> None:
     approval_store.insert_approval(
         id="upd_test",
         session_id="s1",
@@ -104,26 +98,22 @@ def test_update_approval_sets_status_and_actor(db_path) -> None:
         tool_name="tool_x",
         tool_args="{}",
         created_at="2026-01-01T00:00:00+00:00",
-        db_path=db_path,
     )
-
     approval_store.update_approval(
         id="upd_test",
         status="approved",
         resolved_at="2026-01-01T01:00:00+00:00",
         approver_actor="slack:U_APPROVER",
-        db_path=db_path,
     )
 
-    rows = approval_store.list_approvals(db_path=db_path)
+    rows = approval_store.list_approvals()
     assert rows[0]["status"] == "approved"
     assert rows[0]["approver_actor"] == "slack:U_APPROVER"
     assert rows[0]["resolved_at"] is not None
 
 
-def test_list_approvals_filters_by_status(db_path) -> None:
-    approval_store.ensure_schema(db_path)
-    for id_, status in [("p1", None), ("p2", None)]:
+def test_list_approvals_filters_by_status() -> None:
+    for id_ in ("p1", "p2"):
         approval_store.insert_approval(
             id=id_,
             session_id="s",
@@ -132,32 +122,28 @@ def test_list_approvals_filters_by_status(db_path) -> None:
             tool_name="t",
             tool_args="{}",
             created_at="2026-01-01T00:00:00+00:00",
-            db_path=db_path,
         )
     approval_store.update_approval(
         id="p1",
         status="approved",
         resolved_at="2026-01-01T01:00:00+00:00",
-        db_path=db_path,
     )
 
-    pending = approval_store.list_approvals(status="pending", db_path=db_path)
-    approved = approval_store.list_approvals(status="approved", db_path=db_path)
+    pending = approval_store.list_approvals(status="pending")
+    approved = approval_store.list_approvals(status="approved")
     assert len(pending) == 1 and pending[0]["id"] == "p2"
     assert len(approved) == 1 and approved[0]["id"] == "p1"
 
 
-# ── module boundary: no sqlite3.connect / user_store._conn ────────────────────
+# ── module boundary ───────────────────────────────────────────────────────────
 
 
 def test_approval_store_does_not_use_raw_sqlite3_connect() -> None:
-    """Store must not call sqlite3.connect directly (use db.SQLiteDatabase)."""
     source = inspect.getsource(approval_store)
     assert "sqlite3.connect" not in source
 
 
 def test_approval_store_does_not_import_user_store() -> None:
-    """Store must not import from fleetent.user_store."""
     source = inspect.getsource(approval_store)
     assert "fleetent.user_store" not in source
     assert "user_store" not in source

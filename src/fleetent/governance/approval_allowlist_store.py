@@ -4,21 +4,34 @@ A grant keys on a fingerprint of (requester scope, tool, normalized args). Once 
 approver grants "always" for a call, future calls with the same fingerprint are
 auto-approved at the gate without re-prompting (approval-minimization).
 
-Schema owner: this module — not Alembic (pure agent-side table, like approval_store).
-Uses fleetent.db.SQLiteDatabase with named params throughout. No platform imports.
+Schema owner: agent_state.db via per-agent MIGRATIONS (v13).  Connection is
+injected via set_state_db() at agent boot — no ensure_schema, no DB_PATH.
+Uses named parameters throughout.  No platform imports.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 from typing import Any
 
-from fleetent import paths
 from fleetent.db import SQLiteDatabase
 
-DB_PATH = paths.data_dir() / "fleetent.db"
+_state_db: SQLiteDatabase | None = None
+
+
+def set_state_db(db: SQLiteDatabase) -> None:
+    """Inject the per-agent state DB.  Called once at agent boot."""
+    global _state_db
+    _state_db = db
+
+
+def database() -> SQLiteDatabase:
+    if _state_db is None:
+        raise RuntimeError(
+            "approval_allowlist_store: state_db not initialized — call set_state_db(db) at boot"
+        )
+    return _state_db
 
 
 def fingerprint(scope_key: str, tool_name: str, tool_args: dict[str, Any]) -> str:
@@ -33,36 +46,12 @@ def fingerprint(scope_key: str, tool_name: str, tool_args: dict[str, Any]) -> st
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _db(db_path: Path | None = None) -> SQLiteDatabase:
-    return SQLiteDatabase(path=db_path or DB_PATH)
-
-
-def ensure_schema(db_path: Path | None = None) -> None:
-    """Create the approval_allowlist table if it does not exist. Idempotent."""
-    _db(db_path).execute(
-        """
-        CREATE TABLE IF NOT EXISTS approval_allowlist (
-            fingerprint TEXT PRIMARY KEY,
-            scope_key   TEXT NOT NULL,
-            tool_name   TEXT NOT NULL,
-            created_at  TEXT NOT NULL,
-            created_by  TEXT
-        )
-        """
-    )
-
-
-def is_allowed(fp: str, db_path: Path | None = None) -> bool:
+def is_allowed(fp: str) -> bool:
     """Whether a fingerprint has a persistent allow-always grant."""
-    ensure_schema(db_path)
-    row = (
-        _db(db_path)
-        .execute(
-            "SELECT 1 FROM approval_allowlist WHERE fingerprint = :fp LIMIT 1",
-            {"fp": fp},
-        )
-        .fetchone()
-    )
+    row = database().execute(
+        "SELECT 1 FROM approval_allowlist WHERE fingerprint = :fp LIMIT 1",
+        {"fp": fp},
+    ).fetchone()
     return row is not None
 
 
@@ -73,11 +62,9 @@ def add_grant(
     tool_name: str,
     created_at: str,
     created_by: str | None = None,
-    db_path: Path | None = None,
 ) -> None:
     """Persist an allow-always grant. Idempotent on the fingerprint primary key."""
-    ensure_schema(db_path)
-    _db(db_path).execute(
+    database().execute(
         """
         INSERT INTO approval_allowlist (fingerprint, scope_key, tool_name, created_at, created_by)
         VALUES (:fingerprint, :scope_key, :tool_name, :created_at, :created_by)
@@ -93,15 +80,10 @@ def add_grant(
     )
 
 
-def list_grants(db_path: Path | None = None) -> list[dict[str, Any]]:
+def list_grants() -> list[dict[str, Any]]:
     """Return all allow-always grants (newest first)."""
-    ensure_schema(db_path)
-    rows = (
-        _db(db_path)
-        .execute(
-            "SELECT fingerprint, scope_key, tool_name, created_at, created_by "
-            "FROM approval_allowlist ORDER BY created_at DESC"
-        )
-        .fetchall()
-    )
+    rows = database().execute(
+        "SELECT fingerprint, scope_key, tool_name, created_at, created_by "
+        "FROM approval_allowlist ORDER BY created_at DESC"
+    ).fetchall()
     return list(rows)

@@ -1,7 +1,7 @@
-"""Integration test: standalone agent approval e2e without platform (task 4.3).
+"""Integration test: standalone agent approval e2e without platform (3b-4).
 
 Verifies that the full approval flow works without any platform DB tables present:
-- Real approval_store writes to an isolated tmp_path SQLite DB.
+- Real approval_store writes to an isolated per-agent SQLite DB.
 - LLM calls are mocked (no real API).
 - Outbound DM is mocked (no real Slack/Telegram).
 - Approval resolved via PermissionGate.resolve() (same code path as POST /approvals/{id}/resolve).
@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import fleetent.governance.approval_allowlist_store as allowlist_store_mod
 import fleetent.governance.approval_store as approval_store_mod
 
 # Patch the real module: permission_gate imports from fleetent.outbound; patching
@@ -24,7 +25,10 @@ import fleetent.governance.approval_store as approval_store_mod
 import fleetent.outbound as outbound_mod
 import fleetent.runtime.loop as loop_mod
 from fleetent.agent_config import ApprovalRouting
+from fleetent.db import SQLiteDatabase
 from fleetent.governance.permission_gate import PermissionGate
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+from fleetent.schema_migrations import migrate
 
 # ── LLM stub helpers ─────────────────────────────────────────────────────────
 
@@ -106,9 +110,11 @@ async def test_standalone_approval_no_platform(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _loop_env
 ) -> None:
     """End-to-end approval: no platform tables, real agent-side store, mock outbound."""
-    db_path = tmp_path / "agent.db"
-    # Redirect approval_store DB to tmp_path — no platform tables exist or are needed.
-    monkeypatch.setattr(approval_store_mod, "DB_PATH", db_path)
+    # Inject a fresh per-agent state DB — no platform tables exist or are needed.
+    state_db = SQLiteDatabase(path=tmp_path / "agent_state.db")
+    migrate(state_db, AGENT_STATE_MIGRATIONS)
+    monkeypatch.setattr(approval_store_mod, "_state_db", state_db)
+    monkeypatch.setattr(allowlist_store_mod, "_state_db", state_db)
 
     # Mock outbound: all sends succeed, all targets reachable.
     monkeypatch.setattr(outbound_mod, "send_to", AsyncMock(return_value=True))
@@ -129,7 +135,6 @@ async def test_standalone_approval_no_platform(
     captured_id: list[str] = []
 
     async def _intercept_send(platform, connector_obj, target, text, **kwargs):
-        # Extract approval_id from the DM text and schedule a resolve.
         import re
 
         m = re.search(r"`([a-f0-9-]{6,36})`", text)
@@ -161,7 +166,7 @@ async def test_standalone_approval_no_platform(
     )
 
     # Verify real approval_store was written — no platform DB needed.
-    approvals = approval_store_mod.list_approvals(db_path=db_path)
+    approvals = approval_store_mod.list_approvals()
     assert len(approvals) == 1
     rec = approvals[0]
     assert rec["status"] == "approved"
