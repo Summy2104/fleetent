@@ -49,6 +49,7 @@ from fleetent.platform.knowledge_base_management import kb_admin_api
 from fleetent.platform.model_provider_management import provider_admin_api
 from fleetent.platform.skill_management import skill_admin_api
 from fleetent.platform.user_management import user_admin_api
+from fleetent.platform.user_management.api_key_store import resolve as _resolve_api_key
 from fleetent.runtime import run_stream
 from fleetent.session import manager as session_mgr
 from fleetent.skills import scan as scan_skills
@@ -91,6 +92,10 @@ _slack_supervisor = SlackSupervisor()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    # Wire platform api_keys resolver so user_store.authenticate queries the api_keys
+    # table (+ legacy fallback) without the module-level platform import removed by #4.
+    user_store.set_api_key_resolver(_resolve_api_key)
+
     scan_skills()
     # file-driven-agent-config: scan agent.yaml files once at startup (same lifecycle
     # as scan_skills); the in-memory index drives zero-DB runtime agent resolution.

@@ -6,9 +6,9 @@
 
 ## 2. bearer 拆分 → 根除 #1（核心目标）
 
-- [ ] 2.1 写失败测试：依赖护栏断言 agent 运行时解析路径（含 bearer 适配器）**无 `import fleetent.platform.*`**；且「无 platform、platform 表不存在」下 standalone bearer 解析可用
-- [ ] 2.2 实现：platform 的 `api_keys` 解析下沉为 **platform 侧适配器**；改 `user_store.authenticate` 去掉无条件 `from fleetent.platform... import`，改由注入的端口适配器，跑绿 2.1
-- [ ] 2.3 跑既有 server/agent_app 鉴权测试确认行为不变（有效 key 过、吊销/过期/blocked 拒）
+- [x] 2.1 写失败测试：依赖护栏断言 agent 运行时解析路径（含 bearer 适配器）**无 `import fleetent.platform.*`**；且「无 platform、platform 表不存在」下 standalone bearer 解析可用
+- [x] 2.2 实现：platform 的 `api_keys` 解析下沉为 **platform 侧适配器**；改 `user_store.authenticate` 去掉无条件 `from fleetent.platform... import`，改由注入的端口适配器，跑绿 2.1
+- [x] 2.3 跑既有 server/agent_app 鉴权测试确认行为不变（有效 key 过、吊销/过期/blocked 拒）
 
 ## 3. 渠道担保解析器（IM）
 
