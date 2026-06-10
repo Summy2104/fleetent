@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from fleetent.config import KnowledgeBaseSettings, Settings
-from fleetent.db import SQLiteDatabase, create_database
+from fleetent.config import KnowledgeBaseSettings
+from fleetent.db import SQLiteDatabase, default_database
 from fleetent.observability import TraceEvent, record_trace_event
 
 
@@ -18,13 +18,17 @@ class AgentKnowledgeBaseBinding:
     created_at: datetime
 
 
-def list_agent_kb_bindings(tenant_id: str, agent_id: str) -> list[AgentKnowledgeBaseBinding]:
+def list_agent_kb_bindings(
+    tenant_id: str,
+    agent_id: str,
+    database: SQLiteDatabase | None = None,
+) -> list[AgentKnowledgeBaseBinding]:
     """List explicit knowledge-base bindings for an agent."""
     resolved_tenant_id = _require_non_empty("tenant_id", tenant_id)
     resolved_agent_id = _require_non_empty("agent_id", agent_id)
+    db = database or default_database()
     rows = (
-        _database()
-        .execute(
+        db.execute(
             """
         SELECT tenant_id, agent_id, kb_id, created_at
         FROM knowledge_base_agent_bindings
@@ -39,11 +43,15 @@ def list_agent_kb_bindings(tenant_id: str, agent_id: str) -> list[AgentKnowledge
     return [_row_to_binding(row) for row in rows]
 
 
-def resolve_agent_kb_ids(tenant_id: str, agent_id: str) -> list[str]:
+def resolve_agent_kb_ids(
+    tenant_id: str,
+    agent_id: str,
+    database: SQLiteDatabase | None = None,
+) -> list[str]:
     """Resolve the effective knowledge-base ids visible to an agent."""
     resolved_tenant_id = _require_non_empty("tenant_id", tenant_id)
     resolved_agent_id = _require_non_empty("agent_id", agent_id)
-    bindings = list_agent_kb_bindings(resolved_tenant_id, resolved_agent_id)
+    bindings = list_agent_kb_bindings(resolved_tenant_id, resolved_agent_id, database=database)
     if bindings:
         return [binding.kb_id for binding in bindings]
 
@@ -94,14 +102,6 @@ def _require_non_empty(field: str, value: str) -> str:
     return normalized
 
 
-def _settings() -> Settings:
-    return Settings()
-
-
 def _kb_config() -> KnowledgeBaseSettings:
     """Neutral KB binding defaults; Agent-side access lives in agent.knowledge."""
     return KnowledgeBaseSettings()
-
-
-def _database() -> SQLiteDatabase:
-    return create_database(_settings().database_url)

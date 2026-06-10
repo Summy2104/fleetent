@@ -8,8 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from fleetent.config import Settings
-from fleetent.db import SQLiteDatabase, create_database
+from fleetent.db import SQLiteDatabase, default_database
 from fleetent.knowledge_base.config import (
     KnowledgeConfigSnapshot,
     KnowledgeSourceConfig,
@@ -211,11 +210,13 @@ def get_connector_status(
     connector_id: str,
     *,
     settings: KnowledgeConfigSnapshot | None = None,
+    database: SQLiteDatabase | None = None,
 ) -> ConnectorStatus:
     """Read the latest known connector operation status."""
     definition = _get_connector_definition(connector_id, settings)
+    db = database or default_database()
     row = (
-        _database()
+        db
         .execute(
             """
         SELECT
@@ -254,11 +255,12 @@ def record_connector_status(
     error: str | None,
     started_at: datetime | None = None,
     finished_at: datetime | None = None,
+    database: SQLiteDatabase | None = None,
 ) -> None:
     """Persist the latest connector status summary."""
     started = started_at or _now()
     finished = finished_at or _now()
-    _database().execute(
+    (database or default_database()).execute(
         """
         INSERT INTO knowledge_connector_status (
             connector_id, connector_type, tenant_id, kb_id, last_status,
@@ -784,10 +786,6 @@ def ensure_schema(db: SQLiteDatabase) -> None:
     )
 
 
-def _settings() -> Settings:
-    return Settings()
-
-
 def _kb_config(settings: KnowledgeConfigSnapshot | None = None) -> KnowledgeConfigSnapshot:
     """Knowledge service config from explicit snapshot or platform.yaml."""
     if settings is not None:
@@ -798,5 +796,3 @@ def _kb_config(settings: KnowledgeConfigSnapshot | None = None) -> KnowledgeConf
         return KnowledgeConfigSnapshot()
 
 
-def _database() -> SQLiteDatabase:
-    return create_database(_settings().database_url)

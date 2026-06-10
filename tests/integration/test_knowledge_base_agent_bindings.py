@@ -15,7 +15,7 @@ def _patch_binding_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path):
     db_path = tmp_path / "bindings.db"
     apply_migrations(db_path)
     database = create_database(f"sqlite:///{db_path}")
-    monkeypatch.setattr(bindings, "_database", lambda: database)
+    monkeypatch.setattr(bindings, "default_database", lambda: database)
     return database
 
 

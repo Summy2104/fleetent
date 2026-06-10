@@ -11,9 +11,9 @@
 
 ## 3. 租户作用域路由 + 可换后端抽象
 
-- [ ] 3.1 写失败测试：`scope(tenant)` 解析出 {KB 关系 db, KB 向量后端}；二者同源于一次解析；SQLite 后端把 `scope("default")` 映射到 `default` 主体目录文件；后端可替换（注入假后端验调用点不变）
-- [ ] 3.2 实现路由 + 可换后端抽象（基座/`db.py` 邻近）：`scope(tenant)`、SQLite 后端映射 `<tenant>/` 文件、单主体 `default` 直返（不做 fan-out），跑绿 3.1
-- [ ] 3.3 写失败测试 + 实现：经路由打开的受 Y 管理的库，**开库即触发 migrate-on-open**（路由 ↔ 引擎接合）
+- [x] 3.1 写失败测试：`scope(tenant)` 解析出 {KB 关系 db, KB 向量后端}；二者同源于一次解析；SQLite 后端把 `scope("default")` 映射到 `default` 主体目录文件；后端可替换（注入假后端验调用点不变）
+- [x] 3.2 实现路由 + 可换后端抽象（基座/`db.py` 邻近）：`scope(tenant)`、SQLite 后端映射 `<tenant>/` 文件、单主体 `default` 直返（不做 fan-out），跑绿 3.1
+- [x] 3.3 写失败测试 + 实现：经路由打开的受 Y 管理的库，**开库即触发 migrate-on-open**（路由 ↔ 引擎接合）
 
 ## 4. KB 连接走路由 + 清自连接旁路
 
