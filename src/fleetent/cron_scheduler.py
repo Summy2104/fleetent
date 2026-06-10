@@ -45,14 +45,34 @@ def _parse_run_at(run_at: str) -> datetime:
     return datetime.fromisoformat(spec)
 
 
-def _resolve_cron_principal(user_id: str) -> Principal | None:
-    """Recheck user status before firing. Returns None if blocked or deleted."""
+def _resolve_cron_principal(task: dict[str, Any]) -> Principal | None:
+    """Recheck the archived identity in its own domain before firing.
+
+    Platform users (present in the users table) keep platform semantics: blocked →
+    reject; a row that disappeared (deleted user) with no IM origin → reject.
+    Channel-guaranteed IM identities never live in the users table (the identity-port
+    spec forbids resolving them through user_store), so a task carrying an IM origin
+    fires with its archived identity. Deployments without user management (no users
+    table at all) trust the archived identity — the agent-independence baseline.
+    """
+    user_id = str(task.get("user_id") or "default")
     if user_id == "system":
         return SYSTEM_PRINCIPAL
-    u = user_store.get_by_id(user_id)
-    if u is None or u.status == "blocked":
-        return None
-    return Principal(user_id=u.id, tenant_id=u.tenant_id)
+    if user_id == "default":  # placeholder, no platform identity claimed
+        return Principal(user_id="default", tenant_id="default")
+    try:
+        u = user_store.get_by_id(user_id)
+    except Exception:  # noqa: BLE001 — users table absent: no platform domain to consult
+        return Principal(user_id=user_id, tenant_id="default")
+    if u is not None:
+        if u.status == "blocked":
+            return None
+        return Principal(user_id=u.id, tenant_id=u.tenant_id)
+    origin = task.get("origin")
+    if isinstance(origin, dict) and origin.get("platform"):
+        # Channel-guaranteed IM identity: the edge authenticated the creator.
+        return Principal(user_id=user_id, tenant_id="default")
+    return None
 
 
 async def _agent_run(
@@ -83,8 +103,8 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
 
     from fleetent.session import manager as session_mgr
 
-    # Recheck user status before firing; skip if blocked or deleted.
-    principal = _resolve_cron_principal(task["user_id"])
+    # Recheck the archived identity in its own domain; skip when its domain rejects it.
+    principal = _resolve_cron_principal(task)
     if principal is None:
         logger.warning(
             "cron_fire_skipped task=%s reason=user_blocked_or_missing user_id=%s",
@@ -104,9 +124,7 @@ async def _fire(task: dict[str, Any], connectors: dict[str, Any] | None = None) 
 
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        reply = await _agent_run(
-            messages, agent_name=task.get("agent_name"), principal=principal
-        )
+        reply = await _agent_run(messages, agent_name=task.get("agent_name"), principal=principal)
     except Exception as exc:  # noqa: BLE001 — record the failure, never crash the scheduler
         logger.warning("cron_fire_run_failed task=%s error=%s", task.get("id"), exc)
         _record_run(task, now, "error", str(exc))
@@ -180,6 +198,17 @@ def _record_run(task: dict[str, Any], when: str, status: str, error: str | None)
         logger.warning("cron_run_state_writeback_failed task=%s error=%s", task.get("id"), exc)
 
 
+# Process-wide handle to the running scheduler (one agent per process). Set by
+# start(), cleared by shutdown(); the tool layer mutates tasks through it so the
+# store write and the live job registration cannot drift apart (single owner).
+_current: CronScheduler | None = None
+
+
+def current() -> CronScheduler | None:
+    """Return the running scheduler instance, or None outside the service lifecycle."""
+    return _current
+
+
 class CronScheduler:
     def __init__(
         self,
@@ -212,6 +241,8 @@ class CronScheduler:
 
         self._register_maintenance_jobs()
         self._scheduler.start()
+        global _current
+        _current = self
 
     def _register_maintenance_jobs(self) -> None:
         from fleetent.tools.result_truncation import cleanup_spillover
@@ -245,15 +276,110 @@ class CronScheduler:
     async def shutdown(self) -> None:
         import asyncio
 
+        global _current
+        if _current is self:
+            _current = None
         if self._scheduler.running:
             self._scheduler.shutdown(wait=False)
             await asyncio.sleep(0)
 
+    # ── Single mutation owner: store write + live job registration in one place ──
+
+    def create_task(
+        self,
+        *,
+        name: str,
+        schedule_kind: str = "cron",
+        cron_expr: str | None = None,
+        run_at: str | None = None,
+        interval_seconds: int | None = None,
+        timezone: str = "UTC",
+        user_id: str = "default",
+        message: str = "",
+        source: str = "tool",
+        session_id: str | None = None,
+        origin: dict[str, Any] | None = None,
+        deliver: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Persist a new task and register its live job in one step."""
+        task = _store.create(
+            name=name,
+            cron_expr=cron_expr,
+            timezone=timezone,
+            user_id=user_id,
+            message=message,
+            source=source,
+            session_id=session_id,
+            schedule_kind=schedule_kind,
+            run_at=run_at,
+            interval_seconds=interval_seconds,
+            origin=origin,
+            deliver=deliver,
+        )
+        self._register(task)
+        return task
+
+    def remove_task(self, task_id: str) -> bool:
+        """Delete the task row and deregister its live job. Returns False if unknown."""
+        deleted = _store.delete(task_id)
+        self.remove_job(task_id)
+        return deleted
+
+    def set_task_enabled(self, task_id: str, enabled: bool) -> bool:
+        """Toggle the enabled flag and (de)register the live job accordingly."""
+        matched = _store.set_enabled(task_id, enabled)
+        if not matched:
+            return False
+        if enabled:
+            task = _store.get(task_id)
+            if task is not None:
+                self._register(task)
+        else:
+            self.remove_job(task_id)
+        return True
+
+    def _complete_once(self, task_id: str) -> None:
+        """Mark a fired one-shot done so it never looks alive in the store again.
+
+        Only a successful run (last_status == "ok") flips to "completed"; a failed run
+        keeps its error state and stays enabled so boot-time misfire policy governs it.
+        """
+        row = _store.get(task_id)
+        if row is None or row.get("last_status") != "ok":
+            return
+        _store.set_enabled(task_id, False)
+        with suppress(Exception):
+            _store.update_run_state(
+                task_id,
+                last_run_at=row.get("last_run_at"),
+                last_status="completed",
+                last_error=None,
+            )
+
+    async def run_now(self, task_id: str) -> bool:
+        """Fire the task immediately without altering its schedule. False if unknown."""
+        task = _store.get(task_id)
+        if task is None:
+            return False
+        connectors = self._connectors_resolver() if self._connectors_resolver else None
+        await _fire(task, connectors=connectors)
+        return True
+
     def _register(self, task: dict[str, Any]) -> None:
 
-        async def _task_fire(t: dict[str, Any] = task) -> None:
+        async def _task_fire(task_id: str = task["id"]) -> None:
+            # Revalidate against the store at fire time: a row deleted or disabled by
+            # a writer that bypassed the facade must never execute. The fresh row (not
+            # the dict captured at registration) is the execution payload.
+            row = _store.get(task_id)
+            if row is None or not row.get("enabled"):
+                logger.warning("cron_fire_skipped task=%s reason=missing_or_disabled", task_id)
+                self.remove_job(task_id)
+                return
             connectors = self._connectors_resolver() if self._connectors_resolver else None
-            await _fire(t, connectors=connectors)
+            await _fire(row, connectors=connectors)
+            if (row.get("schedule_kind") or "cron") == "once":
+                self._complete_once(task_id)
 
         tz = task.get("timezone") or self._settings.default_timezone
         common: dict[str, Any] = {
@@ -277,6 +403,81 @@ class CronScheduler:
             self._scheduler.add_job(
                 _task_fire, trigger="cron", **_parse_cron(task["cron_expr"]), **common
             )
+
+
+# ── Module-level facade: the mutation API for callers without an instance handle ──
+# (the tool layer). Routes through the running scheduler when present so the live
+# job registration cannot drift from the store; degrades to store-only otherwise
+# (picked up at next boot).
+
+
+def create_task(
+    *,
+    name: str,
+    schedule_kind: str = "cron",
+    cron_expr: str | None = None,
+    run_at: str | None = None,
+    interval_seconds: int | None = None,
+    timezone: str = "UTC",
+    user_id: str = "default",
+    message: str = "",
+    source: str = "tool",
+    session_id: str | None = None,
+    origin: dict[str, Any] | None = None,
+    deliver: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create a task; registers the live job when a scheduler is running."""
+    kwargs: dict[str, Any] = {
+        "name": name,
+        "schedule_kind": schedule_kind,
+        "cron_expr": cron_expr,
+        "run_at": run_at,
+        "interval_seconds": interval_seconds,
+        "timezone": timezone,
+        "user_id": user_id,
+        "message": message,
+        "source": source,
+        "session_id": session_id,
+        "origin": origin,
+        "deliver": deliver,
+    }
+    sched = current()
+    if sched is not None:
+        return sched.create_task(**kwargs)
+    return _store.create(**kwargs)
+
+
+def remove_task(task_id: str) -> bool:
+    """Delete a task; deregisters the live job when a scheduler is running."""
+    sched = current()
+    if sched is not None:
+        return sched.remove_task(task_id)
+    return _store.delete(task_id)
+
+
+def set_task_enabled(task_id: str, enabled: bool) -> bool:
+    """Toggle a task; (de)registers the live job when a scheduler is running."""
+    sched = current()
+    if sched is not None:
+        return sched.set_task_enabled(task_id, enabled)
+    return _store.set_enabled(task_id, enabled)
+
+
+def list_tasks(include_disabled: bool = False) -> list[dict[str, Any]]:
+    """Read-only passthrough for the tool layer."""
+    return _store.list_tasks(include_disabled=include_disabled)
+
+
+async def run_task_now(task_id: str) -> bool:
+    """Fire a task immediately. Returns False if the task does not exist."""
+    sched = current()
+    if sched is not None:
+        return await sched.run_now(task_id)
+    task = _store.get(task_id)
+    if task is None:
+        return False
+    await _fire(task)
+    return True
 
 
 def _parse_cron(expr: str) -> dict[str, str]:

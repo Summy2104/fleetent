@@ -1482,6 +1482,7 @@ async def run(
         return await _run_inner(
             messages=messages,
             user_id=user_id,
+            principal=principal,
             system_prompt=system_prompt,
             is_sub_agent=is_sub_agent,
             reply_func=reply_func,
@@ -1517,6 +1518,7 @@ async def run(
 async def _run_inner(
     messages: list[dict[str, Any]],
     user_id: str = "default",
+    principal: Principal | None = None,
     system_prompt: str = _SYSTEM,
     is_sub_agent: bool = False,
     reply_func: ReplyFunc | None = None,
@@ -1579,6 +1581,7 @@ async def _run_inner(
         features=agent_features or {},
         session_id=session_id,
         session_context=session_context,
+        principal=principal,
         outbound_connectors=outbound_connectors or {},
     )
 
@@ -2085,6 +2088,7 @@ async def run_stream(
         features=agent_features or {},
         session_id=session_id,
         session_context=session_context,
+        principal=principal,
     )
 
     # P3: on_user_input hook — intercept/rewrite/deny before user message enters messages.

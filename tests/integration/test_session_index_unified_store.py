@@ -17,7 +17,7 @@ import pytest
 
 from fleetent.db import SQLiteDatabase
 from fleetent.schema_migrations import migrate
-from fleetent.session.migrations import MIGRATIONS as SESSION_MIGRATIONS
+from fleetent.runtime.agent_state_migrations import MIGRATIONS as SESSION_MIGRATIONS
 
 
 def _setup_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SQLiteDatabase:

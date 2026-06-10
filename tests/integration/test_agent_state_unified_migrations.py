@@ -92,7 +92,14 @@ def test_sessions_columns_match_ensure_schema(tmp_path: Path) -> None:
     db = _open(tmp_path)
     migrate(db, AGENT_STATE_MIGRATIONS)
     cols = _columns(db.path, "sessions")
-    assert cols == {"session_id", "user_id", "created_at", "updated_at", "message_count", "agent_name"}
+    assert cols == {
+        "session_id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "message_count",
+        "agent_name",
+    }
 
 
 def test_traces_columns_match_ensure_schema(tmp_path: Path) -> None:
@@ -102,8 +109,17 @@ def test_traces_columns_match_ensure_schema(tmp_path: Path) -> None:
     migrate(db, AGENT_STATE_MIGRATIONS)
     cols = _columns(db.path, "traces")
     assert cols == {
-        "id", "run_id", "span_id", "parent_span_id", "session_id",
-        "user_id", "agent_id", "tenant_id", "event_type", "ts", "payload_json",
+        "id",
+        "run_id",
+        "span_id",
+        "parent_span_id",
+        "session_id",
+        "user_id",
+        "agent_id",
+        "tenant_id",
+        "event_type",
+        "ts",
+        "payload_json",
     }
 
 
@@ -114,7 +130,12 @@ def test_reflection_reports_columns_match_ensure_schema(tmp_path: Path) -> None:
     migrate(db, AGENT_STATE_MIGRATIONS)
     cols = _columns(db.path, "reflection_reports")
     assert cols == {
-        "id", "scope", "time_window_start", "time_window_end", "findings_json", "created_at",
+        "id",
+        "scope",
+        "time_window_start",
+        "time_window_end",
+        "findings_json",
+        "created_at",
     }
 
 
@@ -152,9 +173,7 @@ def test_open_state_db_idempotent_via_agent_scope(tmp_path: Path) -> None:
     agent_dir = tmp_path / "default" / "test-agent"
     agent_dir.mkdir(parents=True)
     state_db = SQLiteDatabase(path=agent_dir / "agent_state.db")
-    vector_backend = SQLiteVectorBackend(
-        database_url=f"sqlite:///{agent_dir / 'agent_vectors.db'}"
-    )
+    vector_backend = SQLiteVectorBackend(database_url=f"sqlite:///{agent_dir / 'agent_vectors.db'}")
     scope = AgentScope(state_db=state_db, vector_backend=vector_backend)
 
     db1 = scope.open_state_db(AGENT_STATE_MIGRATIONS)
@@ -163,16 +182,51 @@ def test_open_state_db_idempotent_via_agent_scope(tmp_path: Path) -> None:
     assert db1.path == db2.path
 
 
-def test_session_only_db_raises_schema_too_new_if_given_session_list_only(
-    tmp_path: Path,
-) -> None:
-    """Regression: a DB already at v8 (unified) must raise SchemaTooNewError when given
-    the old SESSION_MIGRATIONS list (only knows v1) — proving the unified list is required."""
+# ── 6: memory_items created (3b-3) ───────────────────────────────────────────
+
+
+def test_unified_migrations_creates_memory_items_table(tmp_path: Path) -> None:
     from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
-    from fleetent.session.migrations import MIGRATIONS as SESSION_MIGRATIONS
 
     db = _open(tmp_path)
-    migrate(db, AGENT_STATE_MIGRATIONS)  # now at v8
+    migrate(db, AGENT_STATE_MIGRATIONS)
+    assert "memory_items" in _tables(db.path)
+
+
+def test_memory_items_columns_no_namespace(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+
+    db = _open(tmp_path)
+    migrate(db, AGENT_STATE_MIGRATIONS)
+    cols = _columns(db.path, "memory_items")
+    assert cols == {"id", "user_id", "type", "content", "created_at", "updated_at", "expires_at"}
+    assert "namespace" not in cols
+
+
+def test_memory_items_indexes_created(tmp_path: Path) -> None:
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+
+    db = _open(tmp_path)
+    migrate(db, AGENT_STATE_MIGRATIONS)
+    conn = __import__("sqlite3").connect(db.path)
+    indexes = {row[1] for row in conn.execute("PRAGMA index_list(memory_items)").fetchall()}
+    conn.close()
+    assert "idx_memory_items_user_type" in indexes
+    assert "idx_memory_items_user_expires" in indexes
+
+
+def test_fully_migrated_db_raises_schema_too_new_if_given_stale_list(
+    tmp_path: Path,
+) -> None:
+    """Regression: a DB at current max must raise SchemaTooNewError when given
+    a truncated list (only knows v1) — proving the unified list is required."""
+    from fleetent.runtime.agent_state_migrations import MIGRATIONS as AGENT_STATE_MIGRATIONS
+
+    # Minimal 1-step list — simulates what session/migrations.py used to be.
+    _STALE_ONE_STEP: list[tuple[int, str]] = [(1, "SELECT 1")]
+
+    db = _open(tmp_path)
+    migrate(db, AGENT_STATE_MIGRATIONS)  # DB now at current max
 
     with pytest.raises(SchemaTooNewError):
-        migrate(db, SESSION_MIGRATIONS)  # only knows v1 — must refuse to open
+        migrate(db, _STALE_ONE_STEP)  # only knows v1 — must refuse to open

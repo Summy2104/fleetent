@@ -149,7 +149,6 @@ async def build_context(
     query: str,
     agent_id: str,
     available_tokens: int,
-    memory_namespace: str = "default",
 ) -> BuiltContext:
     """Build injectable long-term context from memory and optional knowledge sources."""
 
@@ -172,7 +171,7 @@ async def build_context(
         )
 
     policy = _resolve_policy(available_tokens)
-    memories = await memory.search(user_id, query, limit=_MEMORY_LIMIT, namespace=memory_namespace)
+    memories = await memory.search(user_id, query, limit=_MEMORY_LIMIT)
     knowledge_results = await _search_knowledge(user_id, query, agent_id, _KNOWLEDGE_LIMIT)
     if not memories and not knowledge_results:
         return BuiltContext(
