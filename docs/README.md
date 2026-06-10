@@ -11,7 +11,8 @@ docs/
   architecture.md              # 架构总览，当前权威入口：模块关系、数据流、关键决策
   glossary.md                  # 术语表
   architecture/
-    source-module-organization-roadmap.md # 架构演进路线图和专题文档
+    target-architecture-proposal.md # 详细架构模型：核+4面+基座、模块边界、Identity、只读投影、模块归属速查
+    data-model.md                # 数据模型与物理拓扑（as-built）
   capabilities/
     _template.md               # 能力域文档模板
     *.md                       # 能力定义、状态和验收标准

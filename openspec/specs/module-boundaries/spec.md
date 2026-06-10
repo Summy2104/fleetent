@@ -175,30 +175,12 @@ legacy top-level governance shim modules SHALL NOT remain importable.
 - **THEN** 它通过 `fleetent.governance` public API 调用治理能力
 - **AND** governance package 不反向 import runtime entrypoint
 
-### Requirement: Source module organization roadmap
-系统 SHALL 维护 `src/fleetent` 的模块组织路线图，用于指导 legacy 平铺模块向模块化单体 package 迁移。
+### Requirement: Source module organization map
+系统 SHALL 在架构文档中维护 `src/fleetent` 的模块组织映射（现模块 → 目标归属：核 / ①边缘 / ②控制 / ③编排 / ④摄取 / 共享基座）。模块边界本身由依赖护栏测试强制（见本 spec 其它 requirement）；legacy 平铺模块向 package 的迁移已完成，原 `source-module-organization-roadmap.md` 已退场（其模块归属内容并入下述架构文档）。
 
-#### Scenario: Roadmap document exists
+#### Scenario: 模块归属映射存在
 - **WHEN** 读者查看架构文档
-- **THEN** 仓库包含 `docs/architecture/source-module-organization-roadmap.md`
-
-#### Scenario: Roadmap defines target package map
-- **WHEN** 读者查看 source module organization roadmap
-- **THEN** 文档定义 `runtime`、`platform`、`governance`、`channels`、`intelligence`、`integrations`、
-  `observability` 和 `infrastructure` 的目标职责
-
-#### Scenario: Roadmap defines migration order
-- **WHEN** maintainer 准备拆分 legacy 平铺模块
-- **THEN** roadmap 给出推荐迁移顺序、首批实现型 specs 和不应提前迁移的范围
-
-#### Scenario: Roadmap defines shim policy
-- **WHEN** legacy 模块被迁移到 package
-- **THEN** roadmap 要求旧 import 路径只保留 re-export shim
-- **AND** shim 不承载业务逻辑
-
-#### Scenario: Runtime behavior is unchanged
-- **WHEN** source module organization roadmap change 完成
-- **THEN** 仓库不包含运行时代码、数据库 schema 或配置行为变更
+- **THEN** `docs/architecture/target-architecture-proposal.md` §10「现模块 → 目标归属（速查）」给出各模块（runtime/platform/governance/channels/intelligence 各域、integrations、observability、infrastructure）的目标归属
 
 ### Requirement: Integrations package migration
 系统 SHALL expose external capability integrations through `fleetent.integrations` canonical package paths

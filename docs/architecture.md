@@ -1,5 +1,7 @@
 # fleetent 总体架构
 
+> **总览 / 入口**。详细架构模型（核+4面+基座、模块边界、Identity、只读投影、现模块→目标归属）见 [`architecture/target-architecture-proposal.md`](architecture/target-architecture-proposal.md)；数据模型与物理库见 [`architecture/data-model.md`](architecture/data-model.md)；设计 rationale 见 [`records/decision-logs/`](records/decision-logs/)。
+
 ## 定位
 
 面向企业 on-premises 部署的 Lean Agent 平台。核心主张：
@@ -12,110 +14,13 @@
 
 ---
 
-## 架构分层
+## 架构分层与模块组织
 
-```mermaid
-graph TD
-    A["接入层\nserver.py · im_gateway · webhook_router"]
-    B["编排层\nagent_loop · sub_agent"]
-    C["能力层\nmodel · tool_registry · intelligence.long_term_ctx\nintelligence.memory · intelligence.vector_store · intelligence.reflection\nskills · context_mgr · integrations.mcp\nintegrations.sandbox · governance.permission_gate · cron_scheduler"]
-    D["横切基础能力\nobservability · config · database runtime\nuser_store · agent_store · im_user_store\nsession · schedule_store · governance.agent_policy · platform.admin_cli"]
+**心智模型 = 一个核（Agent 运行时）+ 四个面（① 边缘 / ② 控制 / ③ 编排 / ④ 摄取）+ 共享基座**。依赖单向：面 → 核（允许）、核 → 面（禁，核须脱离任何面独立跑）、任意 → 基座（允许）、基座 → 业务（禁）。模块边界由**依赖护栏测试**强制（`tests/unit/test_module_dependency_guardrails.py` 等）。
 
-    A --> B --> C --> D
-```
-
-依赖方向单向向下，禁止反向或循环导入。
-
----
-
-## 模块地图
-
-### 目标 package map
-
-fleetent 采用模块化单体：单进程、单仓库、统一部署，但代码按能力边界组织。现有平铺模块可渐进迁移；
-新增模块优先进入目标 package。
-
-```
-src/fleetent/
-  runtime/          ← loop(←agent_loop)、context(←context_mgr)、sub_agent、snapshot(←agent_runtime)、运行治理(termination/loop_detector/budget/cancellation/message_hygiene/error_classifier/tool_guardrails)
-  model/            ← router(←model_router)、provider_health
-  tools/            ← registry(←tool_registry)、builtin_tools(←tools)、result_truncation、plugin_loader、vision_client、image_gen_client、multimodal
-  skills/           ← registry(←skill_registry)、audit(←skill_audit)
-  session/          ← manager(←session_mgr)、index(←session_index)
-  governance/       ← agent_policy、permission_gate、agent 能力边界
-  platform/         ← user / agent / API key / admin / auth control plane
-  channels/         ← im_gateway、webhook_router、cron_scheduler、schedule_store
-  intelligence/     ← memory、knowledge_base、long_term_ctx、vector_store、reflection
-  integrations/     ← mcp、sandbox(←sandbox_*,工具执行后端,与 mcp/connectors 同类)、connectors
-  observability/    ← trace、log、usage、diagnostics
-  infrastructure/   ← config、db runtime、底层 adapter
-```
-
-> 张洋负责的执行引擎 + 工具系统按 7 个 capability 边界细分为 `runtime` / `model` / `tools` / `skills` / `session` 五个独立顶层包 + `integrations/{mcp,sandbox}`;`sandbox` 归 integrations 因其是「工具依赖的可插拔外部执行后端」(Docker daemon 适配器),与 `mcp`(MCP server)、`connectors`(OAuth)同类。
-
-能力边界说明：
-
-- `intelligence/*` 负责 agent 的长期知识、记忆、检索、反思与上下文注入；其中 `vector_store`
-  暂时同时承载向量后端与 embedding / rerank provider 边界，等多个模块直接复用 provider 后再评估是否抽出。
-- `observability/*` 是横切基础能力，不归入 intelligence；它记录 logs、traces、usage 和 source attribution，
-  供 agent-runtime、platform、reflection 等模块读取。
-- `infrastructure/*` 只承载 config、database runtime 和底层 adapter，不拥有业务表或业务语义。
-
-迁移规则：
-
-- 新代码进入 owning package；旧平铺模块在被大幅触碰时迁移。
-- **每个能力域是一个 package（目录 + `__init__.py`），公共 API 收口于 `__init__.py`**。
-- 跨包调用只能使用目标包的 public API（其 `__init__.py` 导出），不 import 另一包的 internal module。
-- **迁入 package 时去冗余前缀命名**（对齐 `mcp_client.py` → `mcp/client.py`；`sandbox_client.py` → `sandbox/client.py`、`tool_registry.py` → `tools/registry.py`）；用 `git mv` 保留 blame。
-- 每张持久化表有且只有一个 owner module；其他模块通过 owner public API 访问。
-- 每个模块拥有稳定配置命名空间，例如 `memory.*`、`knowledge_base.*`、`observability.*`。
-- 平铺模块迁移期间可保留旧扁平路径的 re-export shim，但 **shim 只 re-export、不承载业务逻辑**；**所有包迁完且调用方改到新路径后，统一删除全部 shim**。
-- 迁移为纯结构搬迁：**不改运行时行为、公共契约、数据库 schema**；每步全量测试绿、可回退。
-
-迁移顺序（blast radius 由小到大，各为独立 change/PR，详见 `openspec/changes/runtime-package-blueprint`）：
-`integrations/sandbox` → `session` → `skills` → `model` → `tools` → `runtime`(殿后)。
-**蓝图 7 包全部落地**（`runtime` / `model` / `tools` / `skills` / `session` + `integrations/{mcp,sandbox}`）；旧扁平路径仅留 re-export shim，后续单提「统一删 shim」收尾 change。
-
-### 当前模块地图
-
-> 反映**迁移过程中的实时状态**(以上「目标 package map」为终态)。张洋负责的执行/工具能力域已全部包化；旧扁平路径仅留 re-export shim。
-
-```
-src/fleetent/
-  server.py          ← FastAPI：POST /chat (SSE)、GET /health、Bearer 认证
-  im_gateway/
-    normalizer.py    ← NormalizedMessage 统一路由 pipeline
-    slack.py         ← slack-bolt Socket Mode 适配器
-    telegram.py      ← python-telegram-bot polling 适配器
-  runtime/           ← loop(←agent_loop)：while tool-use 核心循环 run() / run_stream()；context(←context_mgr)：in-session token 压缩；snapshot(←agent_runtime)：agent 快照 load_active；sub_agent：asyncio.gather 并行子 agent（最大深度 1）；运行治理 termination / loop_detector / budget / layered_budget / cancellation / message_hygiene / error_classifier / tool_guardrails / sub_agent_lifecycle（已包化；旧 agent_loop.py / context_mgr.py / agent_runtime.py 等 13 个为 re-export shim）
-  model/             ← router(←model_router)：task_type → provider 配置 + fallback 链；provider_health：熔断缓存（已包化；旧 model_router.py / provider_health.py 为 re-export shim）
-  tools/             ← registry(←tool_registry)：@tool 注册、schema 构建、dispatch、访问控制；builtin_tools(←tools)：内置工具（import fleetent.tools 即注册，副作用经包 __init__ 保留）；result_truncation、plugin_loader、vision_client、image_gen_client、multimodal（已包化；旧 tool_registry.py 等 6 个为 re-export shim，tools.py 与包同名已删除）
-  skills/            ← registry(←skill_registry)：扫描 skills/、关键词匹配、注入 system prompt；audit(←skill_audit)：静态注入审计（已包化；旧 skill_registry.py / skill_audit.py 为 re-export shim）
-  intelligence/
-    memory/         ← 结构化 User Memory + Shared Memory：提取、维护、SQLite source of truth、vector_store 索引
-    knowledge_base/ ← 企业文档知识库：解析、导入、local / Google Drive / Confluence sync、hybrid / graph / rerank / planner
-    vector_store/   ← 向量索引基础设施：in-memory / SQLite backend，embedding / rerank provider，reindex
-    long_term_ctx.py ← 长期上下文调度：memory / knowledge_base / Shared Memory provider 与 context policy
-    reflection.py   ← 反思报告与 proposal：读取 traces / memory / KB 信号，只读趋势，不自动写回
-  integrations/
-    mcp/            ← MCP HTTP/stdio client；工具注册为 {server}__{tool}
-    sandbox/        ← Docker CLI 封装：隔离 Python 执行（已包化；旧 sandbox_*.py 为 re-export shim）
-  governance/
-    permission_gate.py ← asyncio.Event 人工审批门（medium/high 风险）
-    agent_policy.py    ← fnmatch 工具访问检查
-  cron_scheduler.py  ← APScheduler 定时任务；从 SQLite 动态任务恢复调度
-  webhook_router.py  ← Webhook 签名验证、消息提取
-  user_store.py      ← SQLite 用户/API key 管理
-  agent_store.py     ← SQLite：agent 定义 + 用户绑定 + channel 绑定
-  im_user_store.py   ← (platform, platform_user_id) → 内部 User；allowlist
-  session/           ← manager(←session_mgr)：JSON session 持久化、per-session asyncio.Lock；index(←session_index)：会话元数据索引（已包化；旧 session_mgr.py / session_index.py 为 re-export shim）
-  schedule_store.py  ← SQLite：定时任务定义与状态持久化
-  observability/     ← trace、log、usage、diagnostics
-  config.py          ← pydantic-settings；加载 .env；legacy settings/MCP YAML 缺失时使用默认值
-  agent_config.py    ← 读取 agents/<agent-id>/agent.yaml 单 agent 配置
-  platform/
-    admin_cli/       ← CLI 管理工具；console script 为 fleetent-admin
-```
+- 模型与各面/核/基座的职责：见 [`target-architecture-proposal.md` §1–§7](architecture/target-architecture-proposal.md)。
+- **现模块 → 目标归属（速查）**：见 [`target-architecture-proposal.md` §10](architecture/target-architecture-proposal.md)。
+- 模块边界为何这样切（根因/决策）：见 [`records/decision-logs/architecture-decisions.md`](records/decision-logs/architecture-decisions.md)。
 
 ---
 
@@ -125,8 +30,8 @@ src/fleetent/
 
 ```mermaid
 flowchart TD
-    A["POST /chat + Bearer token"] --> B["server.py\n认证 → user_id"]
-    B --> C["agent_loop.run_stream"]
+    A["POST /chat + Bearer token"] --> B["server.py\n认证 → Principal"]
+    B --> C["runtime.loop.run_stream"]
     C --> D["注入记忆\n匹配 Skill"]
     D --> E["LLM streaming call\n含 fallback 链"]
     E -->|text_delta| F["SSE 流式输出"]
@@ -143,13 +48,13 @@ flowchart TD
 ```mermaid
 flowchart TD
     A["IM 消息"] --> B["平台适配器\nSlack / Telegram"]
-    B --> C["im_user_store\n身份映射 / 自动创建"]
+    B --> C["渠道担保解析\n(platform,user)→Principal"]
     C --> D["normalizer.route"]
     D -->|approve/reject 命令| E["governance.permission_gate.resolve\n审批结果"]
     D -->|普通消息| F{"allowlist 检查"}
     F -->|未审批| G["拒绝\n提示联系管理员"]
     F -->|已审批| H["agent 解析\nchannel → user → default → 裸跑"]
-    H --> I["agent_loop.run"]
+    H --> I["runtime.loop.run"]
     I --> J["回写平台"]
 ```
 
@@ -162,15 +67,15 @@ flowchart TD
     C -->|失败| D["403 拒绝"]
     C -->|通过| E["extract_message\n模板提取 / JSON 序列化"]
     E --> F["normalizer.route\n复用 IM pipeline"]
-    F --> G["agent_loop.run"]
+    F --> G["runtime.loop.run"]
 ```
 
 ### Cron 路径
 
 ```mermaid
 flowchart TD
-    A["APScheduler trigger"] --> B["schedule_store\n读取任务定义"]
-    B --> C["agent_loop.run"]
+    A["APScheduler trigger"] --> B["schedule_store\n读取任务定义 + user 状态复检"]
+    B --> C["runtime.loop.run"]
     C --> D["reply_func\n回写 IM 或记录日志"]
 ```
 
@@ -178,16 +83,19 @@ flowchart TD
 
 ## 关键设计决策
 
+> 持久层 / 模块架构的详细决策与依据见 [`records/decision-logs/persistence-redesign-decisions.md`](records/decision-logs/persistence-redesign-decisions.md) 与 [`architecture-decisions.md`](records/decision-logs/architecture-decisions.md)。下表为项目级技术选型速查。
+
 | 决策 | 结论 | 理由 |
 |------|------|------|
 | 部署结构 | 模块化单体，单进程 | on-premises 天敌是复杂度，微服务带来不必要运维负担 |
 | LLM 调用 | 直接调 SDK，不用框架 | LangChain 频繁 breaking change，debug 困难 |
-| 数据库 | SQLite-first，不引入 ORM；通过 DB runtime + store 边界保留 PostgreSQL 迁移空间 | 初期零运维、on-premises 友好；手写 SQL 更可审计。业务层禁止直接依赖 SQLite 文件路径、连接实现或方言细节 |
-| Session 存储 | JSON 文件 + asyncio.Lock | 可调试；原子写（.tmp → rename）防损坏 |
-| 工具审批 | asyncio.Event 门控 | 无轮询，优雅等待；重启后调用 cleanup_stale_approvals() 清理孤儿 |
-| 代码执行隔离 | Docker CLI（当前）→ microsandbox microVM（v1.0 目标） | 每个沙箱独立 Linux 内核，无命名空间逃逸风险；< 100ms 启动；无需 dockerd |
+| 数据库 | SQLite-first，不引入 ORM；DB runtime + store 边界保留 PostgreSQL 迁移空间；按主体物理隔离（5 库拓扑，见 data-model） | 初期零运维、on-premises 友好；手写 SQL 可审计；合规"主体间互不可见"由文件边界保证 |
+| Session 存储 | JSON 文件 + asyncio.Lock；元数据入 per-agent 库 | 可调试；原子写（.tmp → rename）防损坏 |
+| 工具审批 | **agent 全权能力**：阻塞等审批人决定，platform 只读投影（R1） | 请求者≠审批人；agent 主动私信审批人；approvals 落 agent 侧 `approval_store`；agent 须脱离 platform 跑 |
+| 认证 | 认证属 edge、核只消费 `Principal`；authn 经基座 Identity 端口 | agent 侧不 import platform，结构性根除反向依赖泄漏 |
+| 代码执行隔离 | Docker CLI（当前）→ microsandbox microVM（v1.0 目标） | 每个沙箱独立 Linux 内核，无逃逸风险；< 100ms 启动；无需 dockerd |
 | MCP 工具命名 | `{server}__{tool}` 双下划线 | 避免与内置工具名冲突，来源可追溯 |
-| 记忆提取 | 轻量模型异步提取，不阻塞响应 | 结构化语义记忆写入 SQLite `memory_items`，通过 vector_store 建索引；v1.0 由 long_term_ctx 统一协调检索与注入 |
+| 记忆提取 | 轻量模型异步提取，不阻塞响应 | 结构化语义记忆写入 per-agent 库 `memory_items`，vector_store 建索引；long_term_ctx 统一协调检索与注入 |
 
 ---
 
