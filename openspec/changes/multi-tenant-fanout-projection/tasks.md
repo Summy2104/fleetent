@@ -9,7 +9,7 @@
 - [x] 2.1 写失败测试：router 提供只读句柄（写入被拒）；读停机 agent 库取历史 OK；**只读 open 不触发 migrate**（不改 user_version、不建/改表）——明确不复用 migrate-on-open 的 open_kb_db/open_state_db/open_shared_memory_db
 - [x] 2.2 实现：router 新增**不迁移的只读 open（mode=ro）**（区别于现有 open_*_db 的 migrate-on-open）；agent 侧 store 暴露共享只读查询函数（平台进程用只读连接 + set_state_db/注入 db 模式驱动），跑绿 2.1
 - [x] 2.3 写失败测试 + 实现：platform 经 registry 遍历 + 只读读函数聚合（统计/审批列表等）；approvals join 身份、memory 跨 agent、shared per-tenant 直读
-- [ ] 2.4 跑既有 platform console/统计测试改走只读投影、行为不变
+- [x] 2.4 跑既有 platform console/统计测试改走只读投影、行为不变
 
 ## 3. 收尾
 
