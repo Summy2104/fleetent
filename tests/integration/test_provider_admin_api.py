@@ -13,17 +13,44 @@ import fleetent.governance.audit_log as audit
 import fleetent.platform.model_provider_management.provider_admin_api as api
 import fleetent.platform.model_provider_management.provider_admin_store as store
 import fleetent.user_store as user_store
+from fleetent.db import create_database
 from tests.integration._migration_template import apply_migrations
 
 
-@pytest.fixture
-def client(tmp_path, monkeypatch):
+@pytest.fixture(scope="module")
+def client(tmp_path_factory):
+    """Module-scoped client for auth/read-only tests.
+
+    Patches store._database directly to avoid conflicts with the autouse
+    _isolate_database_url conftest fixture that deletes DATABASE_URL per test.
+    """
+    mp = pytest.MonkeyPatch()
+    tmp_path = tmp_path_factory.mktemp("db_ro")
     db_path = tmp_path / "users.db"
     apply_migrations(db_path)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
-    for mod in (user_store, audit):
-        monkeypatch.setattr(mod, "DB_PATH", db_path)
+    db_instance = create_database(f"sqlite:///{db_path}")
+    mp.setattr(store, "_database", lambda: db_instance)
+    mp.setattr(user_store, "DB_PATH", db_path)
+    mp.setattr(audit, "DB_PATH", db_path)
+    user_store._init_db()
+    app = FastAPI()
+    app.include_router(api.router)
+    yield TestClient(app, raise_server_exceptions=True)
+    mp.undo()
+
+
+@pytest.fixture
+def fresh_client(tmp_path, monkeypatch):
+    """Function-scoped client for write tests that need a clean DB per test.
+
+    Patches store._database directly (same reason as module client above).
+    """
+    db_path = tmp_path / "users.db"
+    apply_migrations(db_path)
+    db_instance = create_database(f"sqlite:///{db_path}")
+    monkeypatch.setattr(store, "_database", lambda: db_instance)
+    monkeypatch.setattr(user_store, "DB_PATH", db_path)
+    monkeypatch.setattr(audit, "DB_PATH", db_path)
     user_store._init_db()
     app = FastAPI()
     app.include_router(api.router)
@@ -63,24 +90,24 @@ def test_viewer_cannot_write(client):  # 场景 120
     assert _add(client, token).status_code == 403
 
 
-def test_add_provider_masks_key_in_response(client):
+def test_add_provider_masks_key_in_response(fresh_client):
     token, _ = _session_for("admin")
-    r = _add(client, token)
+    r = _add(fresh_client, token)
     assert r.status_code == 200
     assert r.json()["api_key"] == "****"  # never plaintext
     assert r.json()["api_key_set"] is True
 
 
-def test_inline_key_auto_derives_env_name(client):
+def test_inline_key_auto_derives_env_name(fresh_client):
     # value mode: type the key, the platform names the env var (no api_key_env field)
     token, _ = _session_for("admin")
-    r = _add(client, token, pid="fast-claude")
+    r = _add(fresh_client, token, pid="fast-claude")
     assert r.status_code == 200, r.text
     assert r.json()["api_key_env"] == "FLEETENT_MODEL_FAST_CLAUDE_API_KEY"
     assert r.json()["api_key_set"] is True
 
 
-def test_explicit_env_reference_preserved(client):
+def test_explicit_env_reference_preserved(fresh_client):
     # reference mode: an explicit env name is kept as-is, not auto-derived
     token, _ = _session_for("admin")
     body = {
@@ -89,16 +116,16 @@ def test_explicit_env_reference_preserved(client):
         "model": "gpt-5.5",
         "api_key_env": "MY_TEAM_KEY",
     }
-    r = client.post("/admin/providers", headers=_hdr(token), json=body)
+    r = fresh_client.post("/admin/providers", headers=_hdr(token), json=body)
     assert r.status_code == 200, r.text
     assert r.json()["api_key_env"] == "MY_TEAM_KEY"
     assert r.json()["api_key_set"] is False
 
 
-def test_add_provider_vendor_protocol_env_params_roundtrip(client):
+def test_add_provider_vendor_protocol_env_params_roundtrip(fresh_client):
     token, _ = _session_for("admin")
     r = _add(
-        client,
+        fresh_client,
         token,
         pid="fast",
         provider="anthropic",
@@ -114,65 +141,66 @@ def test_add_provider_vendor_protocol_env_params_roundtrip(client):
     assert body["api_key_env"] == "FLEETENT_MODEL_FAST_API_KEY"  # env name, not masked
     assert body["params"] == {"temperature": 0.3, "top_p": 0.9}
     # editing params + protocol persists
-    e = client.put(
+    e = fresh_client.put(
         "/admin/providers/fast",
         headers=_hdr(token),
         json={"protocol": "anthropic_messages", "params": {"temperature": 0.1}},
     )
     assert e.status_code == 200, e.text
-    got = client.get("/admin/providers", headers=_hdr(token)).json()
+    got = fresh_client.get("/admin/providers", headers=_hdr(token)).json()
     fast = next(p for p in got if p["id"] == "fast")
     assert fast["protocol"] == "anthropic_messages"
     assert fast["params"] == {"temperature": 0.1}
 
 
-def test_list_masks_key(client):
+def test_list_masks_key(fresh_client):
     token, _ = _session_for("admin")
-    _add(client, token)
+    _add(fresh_client, token)
     viewer, _ = _session_for("viewer")
-    r = client.get("/admin/providers", headers=_hdr(viewer))
+    r = fresh_client.get("/admin/providers", headers=_hdr(viewer))
     assert r.json()[0]["api_key"] == "****"
 
 
 # --- connectivity test (场景 115) --------------------------------------------
 
 
-def test_connectivity_test_reachable(client, monkeypatch):
+def test_connectivity_test_reachable(fresh_client, monkeypatch):
     monkeypatch.setattr(
         api,
         "router_connectivity_test",
         lambda p: {"reachable": True, "latency_ms": 42, "model": p["model"]},
     )
     token, _ = _session_for("admin")
-    _add(client, token)
-    r = client.post("/admin/providers/p/connectivity-test", headers=_hdr(token))
+    _add(fresh_client, token)
+    r = fresh_client.post("/admin/providers/p/connectivity-test", headers=_hdr(token))
     assert r.status_code == 200
     assert r.json()["reachable"] is True
     assert r.json()["latency_ms"] == 42
     assert r.json()["model"] == "gpt-5.5"
 
 
-def test_connectivity_test_viewer_forbidden(client):
+def test_connectivity_test_viewer_forbidden(fresh_client):
     token, _ = _session_for("admin")
-    _add(client, token)
+    _add(fresh_client, token)
     viewer, _ = _session_for("viewer")
     assert (
-        client.post("/admin/providers/p/connectivity-test", headers=_hdr(viewer)).status_code == 403
+        fresh_client.post("/admin/providers/p/connectivity-test", headers=_hdr(viewer)).status_code
+        == 403
     )
 
 
 # --- route orchestration + fallback order (场景 116) -------------------------
 
 
-def test_route_order_set_and_reorder(client):
+def test_route_order_set_and_reorder(fresh_client):
     token, _ = _session_for("admin")
-    _add(client, token, pid="a")
-    _add(client, token, pid="b")
-    client.put(
+    _add(fresh_client, token, pid="a")
+    _add(fresh_client, token, pid="b")
+    fresh_client.put(
         "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
     )
     assert store.get_route_providers("code") == ["a", "b"]
-    client.put(
+    fresh_client.put(
         "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["b", "a"]}
     )
     assert store.get_route_providers("code") == ["b", "a"]
@@ -197,14 +225,14 @@ def test_unconfigured_task_type_preview_falls_back(client):
     assert r.json()["falls_back_to"] == "default"
 
 
-def test_configured_task_type_preview_chain(client):
+def test_configured_task_type_preview_chain(fresh_client):
     token, _ = _session_for("admin")
-    _add(client, token, pid="a")
-    _add(client, token, pid="b")
-    client.put(
+    _add(fresh_client, token, pid="a")
+    _add(fresh_client, token, pid="b")
+    fresh_client.put(
         "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
     )
-    r = client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
+    r = fresh_client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
     assert r.json()["chain"] == ["a", "b"]
     assert r.json()["falls_back_to"] is None
 
@@ -212,19 +240,19 @@ def test_configured_task_type_preview_chain(client):
 # --- fallback chain progressive simulation (4.5/4.6) -------------------------
 
 
-def test_preview_simulation_skips_down_provider(client, monkeypatch):
+def test_preview_simulation_skips_down_provider(fresh_client, monkeypatch):
     monkeypatch.setattr(
         api,
         "router_health_probe",
         lambda: {"a": {"available": False, "recovers_at": "2026-06-02T10:00:00Z"}},
     )
     token, _ = _session_for("admin")
-    _add(client, token, pid="a")
-    _add(client, token, pid="b")
-    client.put(
+    _add(fresh_client, token, pid="a")
+    _add(fresh_client, token, pid="b")
+    fresh_client.put(
         "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
     )
-    r = client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
+    r = fresh_client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
     body = r.json()
     assert body["chain"] == ["a", "b"]
     sim = body["simulation"]
@@ -237,7 +265,7 @@ def test_preview_simulation_skips_down_provider(client, monkeypatch):
     assert body["selected"] == "b"
 
 
-def test_preview_simulation_all_down_selects_none(client, monkeypatch):
+def test_preview_simulation_all_down_selects_none(fresh_client, monkeypatch):
     monkeypatch.setattr(
         api,
         "router_health_probe",
@@ -247,25 +275,25 @@ def test_preview_simulation_all_down_selects_none(client, monkeypatch):
         },
     )
     token, _ = _session_for("admin")
-    _add(client, token, pid="a")
-    _add(client, token, pid="b")
-    client.put(
+    _add(fresh_client, token, pid="a")
+    _add(fresh_client, token, pid="b")
+    fresh_client.put(
         "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
     )
-    r = client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
+    r = fresh_client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
     body = r.json()
     assert body["selected"] is None
     assert all(s["action"] == "skip" for s in body["simulation"])
 
 
-def test_preview_simulation_empty_cache_selects_primary(client):
+def test_preview_simulation_empty_cache_selects_primary(fresh_client):
     token, _ = _session_for("admin")
-    _add(client, token, pid="a")
-    _add(client, token, pid="b")
-    client.put(
+    _add(fresh_client, token, pid="a")
+    _add(fresh_client, token, pid="b")
+    fresh_client.put(
         "/admin/providers/routes/code", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
     )
-    r = client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
+    r = fresh_client.get("/admin/providers/routes/code/preview", headers=_hdr(token))
     body = r.json()
     assert body["selected"] == "a"
     assert body["simulation"][0]["action"] == "selected"
@@ -274,16 +302,16 @@ def test_preview_simulation_empty_cache_selects_primary(client):
 # --- health probe state view (4.7/4.8) --------------------------------------
 
 
-def test_health_view_shows_down_provider_and_recovery(client, monkeypatch):
+def test_health_view_shows_down_provider_and_recovery(fresh_client, monkeypatch):
     monkeypatch.setattr(
         api,
         "router_health_probe",
         lambda: {"a": {"available": False, "recovers_at": "2026-06-02T10:00:00Z"}},
     )
     token, _ = _session_for("admin")
-    _add(client, token, pid="a")
-    _add(client, token, pid="b")
-    r = client.get("/admin/providers/health", headers=_hdr(token))
+    _add(fresh_client, token, pid="a")
+    _add(fresh_client, token, pid="b")
+    r = fresh_client.get("/admin/providers/health", headers=_hdr(token))
     body = r.json()
     providers = {p["id"]: p for p in body["providers"]}
     assert providers["a"]["available"] is False
@@ -301,20 +329,20 @@ def test_health_view_viewer_can_read(client):
 # --- pricing: unset shows 未配置, not 0 (场景 118) ---------------------------
 
 
-def test_unset_pricing_shows_unconfigured(client, monkeypatch):
+def test_unset_pricing_shows_unconfigured(fresh_client, monkeypatch):
     monkeypatch.setattr(
         api, "provider_observability", lambda pid: {"provider_id": pid, "calls": 5, "tokens": 100}
     )
     token, _ = _session_for("admin")
-    _add(client, token)
-    r = client.get("/admin/providers/p/observability", headers=_hdr(token))
+    _add(fresh_client, token)
+    r = fresh_client.get("/admin/providers/p/observability", headers=_hdr(token))
     assert r.json()["input_price_per_1k"] == "未配置"
 
 
-def test_explicit_zero_pricing_distinct_from_unset(client):
+def test_explicit_zero_pricing_distinct_from_unset(fresh_client):
     token, _ = _session_for("admin")
-    _add(client, token)
-    r = client.put(
+    _add(fresh_client, token)
+    r = fresh_client.put(
         "/admin/providers/p/pricing",
         headers=_hdr(token),
         json={"input_price_per_1k": 0.0, "output_price_per_1k": 0.0},
@@ -322,40 +350,40 @@ def test_explicit_zero_pricing_distinct_from_unset(client):
     assert r.json()["input_price_per_1k"] == 0.0  # configured 0, not 未配置
 
 
-def test_set_pricing_then_observability_uses_it(client, monkeypatch):
+def test_set_pricing_then_observability_uses_it(fresh_client, monkeypatch):
     monkeypatch.setattr(api, "provider_observability", lambda pid: {"provider_id": pid})
     token, _ = _session_for("admin")
-    _add(client, token)
-    client.put(
+    _add(fresh_client, token)
+    fresh_client.put(
         "/admin/providers/p/pricing",
         headers=_hdr(token),
         json={"input_price_per_1k": 1.5, "output_price_per_1k": 3.0},
     )
-    r = client.get("/admin/providers/p/observability", headers=_hdr(token))
+    r = fresh_client.get("/admin/providers/p/observability", headers=_hdr(token))
     assert r.json()["input_price_per_1k"] == 1.5
 
 
 # --- delete removes from routes + audit (场景 119) ---------------------------
 
 
-def test_delete_provider_removes_from_routes_and_audits(client):
+def test_delete_provider_removes_from_routes_and_audits(fresh_client):
     token, _ = _session_for("admin")
-    _add(client, token, pid="a")
-    _add(client, token, pid="b")
-    client.put(
+    _add(fresh_client, token, pid="a")
+    _add(fresh_client, token, pid="b")
+    fresh_client.put(
         "/admin/providers/routes/default", headers=_hdr(token), json={"provider_ids": ["a", "b"]}
     )
-    r = client.delete("/admin/providers/a", headers=_hdr(token))
+    r = fresh_client.delete("/admin/providers/a", headers=_hdr(token))
     assert r.status_code == 200
     assert store.get_route_providers("default") == ["b"]
     assert any(a["action"] == "provider.delete" for a in audit.search_audit())
 
 
-def test_edit_blank_key_keeps_secret(client):
+def test_edit_blank_key_keeps_secret(fresh_client):
     token, _ = _session_for("admin")
-    _add(client, token)
-    client.put("/admin/providers/p", headers=_hdr(token), json={"base_url": "https://new/"})
+    _add(fresh_client, token)
+    fresh_client.put("/admin/providers/p", headers=_hdr(token), json={"base_url": "https://new/"})
     assert store.get_provider("p")["api_key"] == "sk-secret"  # unchanged in store
-    r = client.get("/admin/providers", headers=_hdr(token))
+    r = fresh_client.get("/admin/providers", headers=_hdr(token))
     assert r.json()[0]["base_url"] == "https://new/"
     assert r.json()[0]["api_key"] == "****"

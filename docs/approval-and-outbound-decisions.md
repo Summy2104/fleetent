@@ -70,9 +70,38 @@
   下 block_actions 走现有连接，无需公网回调 URL。未开启时按钮显示但点击无响应——文本命令
   仍可用作兜底
 
-## Change 3：send-im-message-tool（待实施）
+## Change 3：send-im-message-tool（已实现）
 
-- 内置 `send_im_message(target, text, target_type)`，注册 medium，复用
-  `outbound.send_to()`；`ToolContext` 扩展携带 `outbound_connectors` + 会话元数据
-- 发当前会话对象（发件人 DM / 当前频道）= 直接执行；第三方 = 走 gate
-- 关单映射：AAA-8037②、AAA-8034、AAA-8052 根因；AAA-8051 由 Change 2 解决基础设施层
+### 决策
+
+- **D1 连接器经 `ToolContext.outbound_connectors` 注入**（与 session_context 同模式）：
+  `loop.run()`（IM 路径）填充；`run_stream()`（TUI/HTTP 路径）无连接器来源，工具返回
+  「当前通道不支持主动外发」说明文本。不引模块全局状态（Forbidden Pattern）
+- **D2 设计修正：放弃脑暴方案 C 的"当前会话目标直发"分流，全量 medium 门控**。
+  实施时发现 loop 有明确 anti-escape 红线：「risk 永不取自 LLM 参数」——按 target
+  分流处置违反该设计。且细想后分流本无必要：给当前会话发消息 = reply 既有能力
+  （agent 不需要工具就能回复），工具的边际能力恰是"发给第三方/跨频道"，对它全量
+  门控概念正确。配合 Change 1/2，审批成本 = 一次按钮点击
+- **D3 `platform` 参数可选**，默认当前会话平台（session_context.platform）；跨平台
+  外发显式传参
+- **D4 失败语义 = 解释性文本不抛异常**（无平台/无连接器/不可达/发送失败各有专属
+  文案），沿 builtin 工具惯例
+- 启用条件：agent 的 `allowed_tools` 含 send_im_message + approval_routing 配置
+  medium 审批人（推荐 `requester`）
+
+### 关单映射
+
+- AAA-8037②（发私信能力）、AAA-8034（默认用 google mcp 根因）、AAA-8052（固定频道
+  通知）由本 change 关闭根因；AAA-8051（按钮渲染）由 Change 2 解决基础设施层
+
+## 执行记录补充（2026-06-10 晚）
+
+- **my-bot smoke**：工具链路端到端验证通过（agent 经 send_im_message 成功投递 DM）。
+  首轮未触发审批是因 my-bot 此前配置 `permission_gate_enabled: false`（本地跳审批的
+  历史配置）——gate 行为正确，已改回 true 并配置 `approval.by_risk.medium.approvers:
+  ["requester"]`。第二轮按钮交互验证因用户同时在实机测试（定时通知）而中止，避免
+  干扰；按钮点击留待真人体验验证
+- **发现的预存 bug（上报，不在本批修复）**：`cron_scheduler._parse_cron` 对
+  `schedule_kind='run_at'`（一次性任务，cron_expr=NULL）在启动恢复时直接 `expr.split()`
+  崩溃，导致 agent 无法启动。本地以删除过期任务行恢复。归属 AAA-8039 定时任务一族，
+  建议 owner 修复：`_parse_cron` 前按 schedule_kind 分流或对 None 容错

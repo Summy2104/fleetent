@@ -1582,6 +1582,7 @@ async def _run_inner(
         session_id=session_id,
         session_context=session_context,
         principal=principal,
+        outbound_connectors=outbound_connectors or {},
     )
 
     start = time.monotonic()

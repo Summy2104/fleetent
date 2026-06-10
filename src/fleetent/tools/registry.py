@@ -39,6 +39,10 @@ class ToolContext:
     # persist ownership (e.g. schedule) record who is acting, not what the model
     # typed; typed Any to keep registry free of identity imports. None = unavailable.
     principal: Any = None
+    # Live IM connectors keyed by platform (e.g. {"slack": client}) for tools that
+    # send proactively (send_im_message). Empty when the run path has no IM gateway
+    # (TUI / HTTP) — such tools must degrade with an explanatory result.
+    outbound_connectors: dict[str, Any] = field(default_factory=dict)
 
 
 _registry: dict[str, tuple[Callable[..., Any], ToolSchema]] = {}
