@@ -1,8 +1,8 @@
 """Tests for the tenant-scoped DB router.
 
 Verifies:
-- scope(tenant) resolves to {kb_db, kb_vector_backend}
-- Both resolved from one scope call (same tenant binding)
+- tenant_scope(tenant) resolves to {kb_db, kb_vector_backend}
+- Both resolved from one tenant_scope call (same tenant binding)
 - SQLite backend maps default scope to <data_dir>/default/kb.db
 - Backend is replaceable without changing call sites
 """
@@ -11,18 +11,14 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
-
-import pytest
 
 from fleetent.db import SQLiteDatabase
 from fleetent.tenant_router import (
+    AgentScope,
     KbScope,
     SQLiteTenantBackend,
     TenantRouter,
-    VectorBackendHandle,
 )
-from fleetent.vector_store.backend import VectorBackend
 
 
 class _FakeVectorBackend:
@@ -31,9 +27,7 @@ class _FakeVectorBackend:
     async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
         pass
 
-    async def search(
-        self, vector: list[float], namespace: str, limit: int = 10
-    ) -> list[Any]:
+    async def search(self, vector: list[float], namespace: str, limit: int = 10) -> list[Any]:
         return []
 
     async def delete(self, id: str, namespace: str) -> None:
@@ -48,7 +42,7 @@ class _FakeVectorBackend:
 
 def test_scope_returns_kb_scope(tmp_path: Path) -> None:
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
-    result = router.scope("default")
+    result = router.tenant_scope("default")
     assert isinstance(result, KbScope)
     assert isinstance(result.kb_db, SQLiteDatabase)
     assert result.kb_vector_backend is not None
@@ -59,7 +53,7 @@ def test_scope_returns_kb_scope(tmp_path: Path) -> None:
 
 def test_scope_single_call_binds_both_backends(tmp_path: Path) -> None:
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
-    scope = router.scope("default")
+    scope = router.tenant_scope("default")
 
     # Both attributes are populated from one scope() call — verifying the
     # contract that "二者同源于一次解析" (design §3.1).
@@ -74,7 +68,7 @@ def test_scope_single_call_binds_both_backends(tmp_path: Path) -> None:
 
 def test_sqlite_backend_maps_default_to_tenant_directory(tmp_path: Path) -> None:
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
-    scope = router.scope("default")
+    scope = router.tenant_scope("default")
 
     assert isinstance(scope.kb_db, SQLiteDatabase)
     assert "default" in str(scope.kb_db.path)
@@ -85,8 +79,8 @@ def test_sqlite_backend_maps_default_to_tenant_directory(tmp_path: Path) -> None
 def test_sqlite_backend_different_tenants_use_different_directories(tmp_path: Path) -> None:
     router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
 
-    scope_a = router.scope("tenant-a")
-    scope_b = router.scope("tenant-b")
+    scope_a = router.tenant_scope("tenant-a")
+    scope_b = router.tenant_scope("tenant-b")
 
     assert scope_a.kb_db.path != scope_b.kb_db.path
     assert "tenant-a" in str(scope_a.kb_db.path)
@@ -112,6 +106,12 @@ class _FakeTenantBackend:
             kb_vector_backend=self._vector,
         )
 
+    def resolve_agent(self, tenant_id: str, agent_id: str) -> AgentScope:
+        return AgentScope(
+            state_db=SQLiteDatabase(path=self._db_path),
+            vector_backend=self._vector,  # type: ignore[arg-type]
+        )
+
 
 def test_backend_is_replaceable(tmp_path: Path) -> None:
     fake_vector = _FakeVectorBackend()
@@ -119,7 +119,7 @@ def test_backend_is_replaceable(tmp_path: Path) -> None:
     fake_backend = _FakeTenantBackend(fake_db_path, fake_vector)
 
     router = TenantRouter(fake_backend)
-    scope = router.scope("default")
+    scope = router.tenant_scope("default")
 
     assert scope.kb_db.path == fake_db_path
     assert scope.kb_vector_backend is fake_vector
@@ -127,10 +127,11 @@ def test_backend_is_replaceable(tmp_path: Path) -> None:
 
 
 def test_replacing_backend_does_not_change_call_sites(tmp_path: Path) -> None:
-    """Call sites only call router.scope(tenant) — not changed by backend swap."""
+    """Call sites only call router.tenant_scope(tenant_id) — not changed by backend swap."""
+
     # Call site code — identical regardless of which backend is injected:
     def call_site(router: TenantRouter, tenant_id: str) -> KbScope:
-        return router.scope(tenant_id)
+        return router.tenant_scope(tenant_id)
 
     # Real backend.
     real_router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
@@ -138,8 +139,6 @@ def test_replacing_backend_does_not_change_call_sites(tmp_path: Path) -> None:
     assert isinstance(real_scope.kb_db, SQLiteDatabase)
 
     # Fake backend — same call site, different backend.
-    fake_router = TenantRouter(
-        _FakeTenantBackend(tmp_path / "f.db", _FakeVectorBackend())
-    )
+    fake_router = TenantRouter(_FakeTenantBackend(tmp_path / "f.db", _FakeVectorBackend()))
     fake_scope = call_site(fake_router, "default")
     assert fake_scope.kb_db.path == tmp_path / "f.db"
