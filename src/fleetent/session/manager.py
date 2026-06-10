@@ -193,6 +193,11 @@ def cleanup_expired(
         # Best-effort: remove the agent-side todo list
         with suppress(OSError):
             (SESSIONS_DIR / f"{session_id}.todo").unlink()
+        # Best-effort: remove the flock anchor file. Safe here (not at unlock time,
+        # where deletion races with concurrent lockers): the session is expired, and
+        # flock binds to the inode — a hypothetical live holder is unaffected.
+        with suppress(OSError):
+            (SESSIONS_DIR / f"{session_id}.lock").unlink()
 
     _logger.info("session_cleanup_done", removed_count=len(removed), ttl_seconds=ttl_seconds)
     if removed:
