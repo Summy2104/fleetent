@@ -66,8 +66,11 @@ def test_memory_namespace_default() -> None:
     assert memory_namespace("user-1") == "mem:user-1"
 
 
-def test_memory_namespace_custom() -> None:
-    assert memory_namespace("user-1", "custom") == "mem:user-1:custom"
+def test_memory_namespace_single_param_only() -> None:
+    import pytest
+
+    with pytest.raises(TypeError):
+        memory_namespace("user-1", "custom")  # type: ignore[call-arg]
 
 
 def test_knowledge_namespace() -> None:

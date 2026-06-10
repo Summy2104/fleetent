@@ -11,7 +11,7 @@ def test_resolve_cron_principal_system_returns_system_principal() -> None:
     from fleetent.cron_scheduler import _resolve_cron_principal
     from fleetent.identity import SYSTEM_PRINCIPAL
 
-    result = _resolve_cron_principal("system")
+    result = _resolve_cron_principal({"id": "t", "user_id": "system", "origin": None})
     assert result is SYSTEM_PRINCIPAL
 
 
@@ -22,16 +22,17 @@ def test_resolve_cron_principal_system_never_calls_user_store(monkeypatch) -> No
 
     calls: list = []
     monkeypatch.setattr(user_store, "get_by_id", lambda uid: calls.append(uid) or None)
-    _resolve_cron_principal("system")
+    _resolve_cron_principal({"id": "t", "user_id": "system", "origin": None})
     assert calls == [], "system path must bypass user_store lookup"
 
 
 async def test_fire_system_task_runs_without_user_lookup(monkeypatch) -> None:
     """A task with user_id='system' fires using SYSTEM_PRINCIPAL without DB access."""
+    from unittest.mock import AsyncMock
+
+    import fleetent.session.manager as session_mgr
     from fleetent import cron_scheduler, user_store
     from fleetent.identity import SYSTEM_PRINCIPAL
-    from unittest.mock import AsyncMock
-    import fleetent.session.manager as session_mgr
 
     # Ensure get_by_id is never called
     calls: list = []
@@ -46,8 +47,15 @@ async def test_fire_system_task_runs_without_user_lookup(monkeypatch) -> None:
     monkeypatch.setattr(cron_scheduler, "_agent_run", _fake_agent_run)
     monkeypatch.setattr(session_mgr, "save", AsyncMock())
 
-    task = {"id": "sys-t1", "user_id": "system", "message": "ttl-cleanup",
-            "session_id": None, "agent_name": None, "deliver": None, "origin": None}
+    task = {
+        "id": "sys-t1",
+        "user_id": "system",
+        "message": "ttl-cleanup",
+        "session_id": None,
+        "agent_name": None,
+        "deliver": None,
+        "origin": None,
+    }
     await cron_scheduler._fire(task)
 
     assert calls == [], "system task must not hit user_store"

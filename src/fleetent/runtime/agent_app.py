@@ -176,9 +176,8 @@ def _init_agent_db_schema(database_url: str, *, agent_id: str) -> None:
 
     KB schema is bootstrapped via TenantRouter + migrate-on-open so that KB tables
     land in the tenant-scoped directory (data/<tenant_id>/kb.db), not the main db.
-    sessions/traces/reflection_reports are bootstrapped via a single unified
-    AGENT_STATE_MIGRATIONS run-on-open against agent_state.db (3b-2).
-    memory/approvals continue using ensure_schema until 3b-3/3b-4.
+    sessions/traces/reflection_reports/memory_items are bootstrapped via a single
+    unified AGENT_STATE_MIGRATIONS run-on-open against agent_state.db (3b-2/3b-3).
     """
     from fleetent import reflection, schedule_store
     from fleetent.db import create_database
@@ -190,7 +189,6 @@ def _init_agent_db_schema(database_url: str, *, agent_id: str) -> None:
     from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
     db = create_database(database_url)
-    memory_store.ensure_schema(db)
     schedule_store.ensure_schema(db)
 
     data_dir = db.path.parent
@@ -200,6 +198,7 @@ def _init_agent_db_schema(database_url: str, *, agent_id: str) -> None:
     session_index.set_state_db(agent_state_db)
     traces.set_state_db(agent_state_db)
     reflection.set_state_db(agent_state_db)
+    memory_store.set_state_db(agent_state_db)
 
 
 async def _start_infra(agent: AgentFile) -> None:

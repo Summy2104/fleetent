@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from fleetent import memory
 from fleetent.db import SQLiteDatabase, create_database
+from fleetent.memory import store as memory_store
 from tests.integration.test_migrations import apply_migrations
 
 
@@ -161,7 +162,9 @@ def _patch_database(tmp_path, monkeypatch) -> SQLiteDatabase:
     apply_migrations(db_path)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    return create_database(f"sqlite:///{db_path}")
+    db = create_database(f"sqlite:///{db_path}")
+    monkeypatch.setattr(memory_store, "_state_db", db)
+    return db
 
 
 def _insert_memory(

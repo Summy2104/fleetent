@@ -244,3 +244,24 @@ async def test_assistant_initial_status_passes_loading_messages(monkeypatch):
     first = set_status.call_args_list[0]
     assert first.kwargs.get("loading_messages")
     assert "思考中" in " ".join(first.kwargs["loading_messages"])
+
+
+async def test_assistant_message_carries_outbound_connectors(monkeypatch):
+    """Assistant-pane path injects the Slack client, same as the channel path."""
+    from fleetent.im_gateway import slack as slack_mod
+
+    routed = _capture_routed(monkeypatch)
+    client = MagicMock()
+
+    await slack_mod._route_assistant_message(
+        payload={"user": "U1", "text": "hi", "ts": "999.000"},
+        context=_ctx(),
+        set_status=AsyncMock(),
+        say=AsyncMock(),
+        client=client,
+        agent_name="agent1",
+        owner_id="ownerA",
+        bot_token="xoxb-test",
+    )
+
+    assert routed["msg"].outbound_connectors == {"slack": client}
