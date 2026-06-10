@@ -1,13 +1,16 @@
 """Tenant-scoped DB router: resolves per-tenant and per-agent physical backends.
 
 Two flat typed resolvers:
-  ``tenant_scope(tenant)`` → KbScope{kb_db, kb_vector_backend}   (per-tenant KB resources)
-  ``agent_scope(tenant, agent_id)`` → AgentScope{state_db, vector_backend}  (per-agent state)
+  ``tenant_scope(tenant)`` → KbScope{kb_db, kb_vector_backend,
+                                      shared_memory_db, shared_memory_vector_backend}
+  ``agent_scope(tenant, agent_id)`` → AgentScope{state_db, vector_backend}
 
 SQLite backend layout under ``<data_dir>/``::
 
-  <tenant_id>/kb.db              — KB relation tables (Y-managed)
-  <tenant_id>/kb_vectors.db      — KB vector store
+  <tenant_id>/kb.db                     — KB relation tables (Y-managed)
+  <tenant_id>/kb_vectors.db             — KB vector store
+  <tenant_id>/shared_memory.db          — shared memory relation tables (Y-managed, 3c)
+  <tenant_id>/shared_memory_vectors.db  — shared memory vector store (shared: family)
   <tenant_id>/<agent_id>/agent_state.db   — agent state (Y-managed, 3b-1+)
   <tenant_id>/<agent_id>/agent_vectors.db — agent vector store
 
@@ -37,11 +40,18 @@ class VectorBackendHandle:
 
 @dataclass(frozen=True)
 class KbScope:
-    """Resolved scope for one tenant's KB resources."""
+    """Resolved scope for one tenant's KB + shared memory resources.
+
+    Fields added in 3c (shared-memory-lib):
+      shared_memory_db            — per-tenant shared_memory.db (read-write; agents write)
+      shared_memory_vector_backend — shared: family vector backend for this tenant
+    """
 
     tenant_id: str
     kb_db: SQLiteDatabase
     kb_vector_backend: VectorBackend
+    shared_memory_db: SQLiteDatabase | None = None
+    shared_memory_vector_backend: VectorBackend | None = None
 
     def open_kb_db(self, migrations: list[tuple[int, str]]) -> SQLiteDatabase:
         """Run migrate-on-open against kb_db and return it.
@@ -52,6 +62,22 @@ class KbScope:
 
         migrate(self.kb_db, migrations)
         return self.kb_db
+
+    def open_shared_memory_db(self, migrations: list[tuple[int, str]]) -> SQLiteDatabase:
+        """Run migrate-on-open against shared_memory_db and return it.
+
+        Raises ValueError when shared_memory_db was not provisioned (e.g. fake backends
+        created without the new fields).  Idempotent when already at current version.
+        """
+        if self.shared_memory_db is None:
+            raise ValueError(
+                "shared_memory_db not provisioned in this KbScope — "
+                "use SQLiteTenantBackend or supply shared_memory_db explicitly"
+            )
+        from fleetent.schema_migrations import migrate
+
+        migrate(self.shared_memory_db, migrations)
+        return self.shared_memory_db
 
 
 @dataclass(frozen=True)
@@ -92,10 +118,16 @@ class SQLiteTenantBackend:
         kb_vector_backend = SQLiteVectorBackend(
             database_url=f"sqlite:///{tenant_dir / 'kb_vectors.db'}"
         )
+        shared_memory_db = SQLiteDatabase(path=tenant_dir / "shared_memory.db")
+        shared_memory_vector_backend = SQLiteVectorBackend(
+            database_url=f"sqlite:///{tenant_dir / 'shared_memory_vectors.db'}"
+        )
         return KbScope(
             tenant_id=tenant_id,
             kb_db=kb_db,
             kb_vector_backend=kb_vector_backend,
+            shared_memory_db=shared_memory_db,
+            shared_memory_vector_backend=shared_memory_vector_backend,
         )
 
     def resolve_agent(self, tenant_id: str, agent_id: str) -> AgentScope:

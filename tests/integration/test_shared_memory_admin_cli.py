@@ -1,11 +1,20 @@
-from io import StringIO
-from unittest.mock import patch
+"""Admin CLI integration tests for shared memory.
 
-from fleetent.db import create_database
-from fleetent.platform.admin_cli.main import main as admin_cli_main
+Updated for shared-memory-lib (3c): patches inject set_shared_memory_db
+instead of store.database.
+"""
+
+from __future__ import annotations
+
+from io import StringIO
+from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 
 
 def _run_admin(*args: str) -> tuple[str, str, int]:
+    from fleetent.platform.admin_cli.main import main as admin_cli_main
+
     stdout, stderr = StringIO(), StringIO()
     exit_code = 0
     with (
@@ -20,17 +29,35 @@ def _run_admin(*args: str) -> tuple[str, str, int]:
     return stdout.getvalue(), stderr.getvalue(), exit_code
 
 
-def _patch_shared_db(monkeypatch, tmp_path):
-    from fleetent.memory import store
-    from tests.integration.test_migrations import apply_migrations
+def _patch_shared_db(monkeypatch: Any, tmp_path: Path) -> None:
+    from fleetent.memory import shared
+    from fleetent.memory.shared_memory_migrations import MIGRATIONS
+    from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
-    db_path = tmp_path / "shared-memory-cli.db"
-    apply_migrations(db_path)
-    database = create_database(f"sqlite:///{db_path}")
-    monkeypatch.setattr(store, "database", lambda: database)
+    router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
+    scope = router.tenant_scope("default")
+    sm_db = scope.open_shared_memory_db(MIGRATIONS)
+
+    class _NullBackend:
+        async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+            pass
+
+        async def search(self, vector: list[float], namespace: str, limit: int = 10) -> list[Any]:
+            return []
+
+        async def delete(self, id: str, namespace: str) -> None:
+            pass
+
+        async def clear_namespace(self, namespace: str) -> None:
+            pass
+
+    monkeypatch.setattr(shared, "_shared_memory_db", sm_db)
+    monkeypatch.setattr(shared, "_shared_memory_vector_backend", _NullBackend())
 
 
-def test_admin_cli_can_create_list_update_and_archive_shared_memory(monkeypatch, tmp_path):
+def test_admin_cli_can_create_list_update_and_archive_shared_memory(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
     _patch_shared_db(monkeypatch, tmp_path)
     from fleetent.platform.admin_cli import shared_memory
 

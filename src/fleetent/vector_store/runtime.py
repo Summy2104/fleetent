@@ -71,6 +71,16 @@ async def clear_namespace(namespace: str) -> None:
     await _backend.clear_namespace(namespace)
 
 
+async def embed_text(text: str) -> list[float]:
+    """Embed *text* using the configured embedding provider.
+
+    Exposes the embedding step separately so callers that own their own
+    VectorBackend (e.g. per-tenant shared memory) can embed via the shared
+    provider while storing in a backend other than the global _backend.
+    """
+    return await _embedding.embed(text)
+
+
 def _validate_id(id: str) -> None:
     if not id.strip():
         raise ValueError("id must not be empty")

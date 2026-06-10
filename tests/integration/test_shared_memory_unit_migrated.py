@@ -1,21 +1,51 @@
+"""Unit-migrated integration tests for shared memory CRUD + vector sync.
+
+Updated for shared-memory-lib (3c): patches now inject set_shared_memory_db
+instead of store.database, and vector assertions track the injected backend
+rather than patching the global vector_store module.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
 import pytest
 
-from fleetent.db import create_database
+from fleetent.db import SQLiteDatabase
 from fleetent.vector_store import SearchResult
 
 
-def _patch_shared_db(monkeypatch, tmp_path):
-    from fleetent.memory import store
-    from tests.integration.test_migrations import apply_migrations
+def _patch_shared_db(monkeypatch: Any, tmp_path: Path) -> SQLiteDatabase:
+    from fleetent.memory import shared
+    from fleetent.memory.shared_memory_migrations import MIGRATIONS
+    from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
-    db_path = tmp_path / "shared-memory.db"
-    apply_migrations(db_path)
-    database = create_database(f"sqlite:///{db_path}")
-    monkeypatch.setattr(store, "database", lambda: database)
-    return database
+    router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
+    scope = router.tenant_scope("default")
+    sm_db = scope.open_shared_memory_db(MIGRATIONS)
+
+    class _NullBackend:
+        async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+            pass
+
+        async def search(
+            self, vector: list[float], namespace: str, limit: int = 10
+        ) -> list[SearchResult]:
+            return []
+
+        async def delete(self, id: str, namespace: str) -> None:
+            pass
+
+        async def clear_namespace(self, namespace: str) -> None:
+            pass
+
+    monkeypatch.setattr(shared, "_shared_memory_db", sm_db)
+    monkeypatch.setattr(shared, "_shared_memory_vector_backend", _NullBackend())
+    return sm_db
 
 
-def test_shared_memory_public_api_is_importable():
+def test_shared_memory_public_api_is_importable() -> None:
     from fleetent.memory import (
         SharedMemoryItem,
         archive_shared_memory,
@@ -41,11 +71,13 @@ def test_shared_memory_public_api_is_importable():
         ({"content": "   "}, "content"),
     ],
 )
-async def test_create_shared_memory_rejects_invalid_input(monkeypatch, tmp_path, kwargs, message):
+async def test_create_shared_memory_rejects_invalid_input(
+    monkeypatch: Any, tmp_path: Path, kwargs: dict[str, Any], message: str
+) -> None:
     _patch_shared_db(monkeypatch, tmp_path)
     from fleetent.memory import create_shared_memory
 
-    params = {
+    params: dict[str, Any] = {
         "scope_type": "team",
         "scope_id": "eng",
         "type": "context",
@@ -58,22 +90,39 @@ async def test_create_shared_memory_rejects_invalid_input(monkeypatch, tmp_path,
         await create_shared_memory(**params)
 
 
-async def test_create_update_and_archive_sync_vector_store(monkeypatch, tmp_path):
-    _patch_shared_db(monkeypatch, tmp_path)
-    from fleetent import memory
+async def test_create_update_and_archive_sync_vector_store(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
     from fleetent.memory import shared
+    from fleetent.memory.shared_memory_migrations import MIGRATIONS
+    from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
 
-    upserts: list[tuple[str, str, str]] = []
+    router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
+    scope = router.tenant_scope("default")
+    sm_db = scope.open_shared_memory_db(MIGRATIONS)
+    monkeypatch.setattr(shared, "_shared_memory_db", sm_db)
+
+    upserts: list[tuple[str, str]] = []  # (id, namespace)
     deletes: list[tuple[str, str]] = []
 
-    async def upsert(id: str, text: str, namespace: str) -> None:
-        upserts.append((id, text, namespace))
+    class _TrackingBackend:
+        async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+            upserts.append((id, namespace))
 
-    async def delete(id: str, namespace: str) -> None:
-        deletes.append((id, namespace))
+        async def search(
+            self, vector: list[float], namespace: str, limit: int = 10
+        ) -> list[SearchResult]:
+            return []
 
-    monkeypatch.setattr(shared.vector_store, "upsert", upsert)
-    monkeypatch.setattr(shared.vector_store, "delete", delete)
+        async def delete(self, id: str, namespace: str) -> None:
+            deletes.append((id, namespace))
+
+        async def clear_namespace(self, namespace: str) -> None:
+            pass
+
+    monkeypatch.setattr(shared, "_shared_memory_vector_backend", _TrackingBackend())
+
+    from fleetent import memory
 
     item = await memory.create_shared_memory(
         scope_type="team",
@@ -82,11 +131,11 @@ async def test_create_update_and_archive_sync_vector_store(monkeypatch, tmp_path
         content="Deployments use the release checklist.",
         created_by="admin",
     )
-    assert upserts == [(item.id, "Deployments use the release checklist.", "shared:team:eng")]
+    assert upserts == [(item.id, "shared:team:eng")]
 
     updated = await memory.update_shared_memory(item.id, content="Use the release checklist.")
     assert updated.content == "Use the release checklist."
-    assert upserts[-1] == (item.id, "Use the release checklist.", "shared:team:eng")
+    assert upserts[-1] == (item.id, "shared:team:eng")
 
     archived = await memory.archive_shared_memory(item.id)
     assert archived.status == "archived"
@@ -94,11 +143,36 @@ async def test_create_update_and_archive_sync_vector_store(monkeypatch, tmp_path
 
 
 async def test_search_shared_memory_is_scope_isolated_and_preserves_vector_order(
-    monkeypatch, tmp_path
-):
-    _patch_shared_db(monkeypatch, tmp_path)
-    from fleetent import memory
+    monkeypatch: Any, tmp_path: Path
+) -> None:
     from fleetent.memory import shared
+    from fleetent.memory.shared_memory_migrations import MIGRATIONS
+    from fleetent.tenant_router import SQLiteTenantBackend, TenantRouter
+
+    router = TenantRouter(SQLiteTenantBackend(data_dir=tmp_path))
+    scope = router.tenant_scope("default")
+    sm_db = scope.open_shared_memory_db(MIGRATIONS)
+    monkeypatch.setattr(shared, "_shared_memory_db", sm_db)
+
+    from fleetent import memory
+
+    # Pre-create items with a null backend (no vector calls needed for setup)
+    class _NullBackend:
+        async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+            pass
+
+        async def search(
+            self, vector: list[float], namespace: str, limit: int = 10
+        ) -> list[SearchResult]:
+            return []
+
+        async def delete(self, id: str, namespace: str) -> None:
+            pass
+
+        async def clear_namespace(self, namespace: str) -> None:
+            pass
+
+    monkeypatch.setattr(shared, "_shared_memory_vector_backend", _NullBackend())
 
     first = await memory.create_shared_memory(
         scope_type="team",
@@ -123,22 +197,37 @@ async def test_search_shared_memory_is_scope_isolated_and_preserves_vector_order
     )
     archived = await memory.archive_shared_memory(first.id)
 
-    async def search(query: str, namespace: str, limit: int = 10) -> list[SearchResult]:
-        assert namespace == "shared:team:eng"
-        return [
-            SearchResult(id=second.id, score=0.9),
-            SearchResult(id=archived.id, score=0.8),
-            SearchResult(id=other_scope.id, score=0.7),
-        ]
+    # Now swap to a search-returning backend
+    class _SearchBackend:
+        async def upsert(self, id: str, vector: list[float], namespace: str) -> None:
+            pass
 
-    monkeypatch.setattr(shared.vector_store, "search", search)
+        async def search(
+            self, vector: list[float], namespace: str, limit: int = 10
+        ) -> list[SearchResult]:
+            assert namespace == "shared:team:eng"
+            return [
+                SearchResult(id=second.id, score=0.9),
+                SearchResult(id=archived.id, score=0.8),
+                SearchResult(id=other_scope.id, score=0.7),
+            ]
+
+        async def delete(self, id: str, namespace: str) -> None:
+            pass
+
+        async def clear_namespace(self, namespace: str) -> None:
+            pass
+
+    monkeypatch.setattr(shared, "_shared_memory_vector_backend", _SearchBackend())
 
     results = await memory.search_shared_memory("team", "eng", "launch", limit=3)
 
     assert [item.id for item in results] == [second.id]
 
 
-async def test_iter_indexable_shared_memories_excludes_archived(monkeypatch, tmp_path):
+async def test_iter_indexable_shared_memories_excludes_archived(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
     _patch_shared_db(monkeypatch, tmp_path)
     from fleetent import memory
 
@@ -166,7 +255,9 @@ async def test_iter_indexable_shared_memories_excludes_archived(monkeypatch, tmp
     assert rows[0].metadata == {"type": "preference", "scope_type": "tenant"}
 
 
-async def test_update_shared_memory_rejects_invalid_status(monkeypatch, tmp_path):
+async def test_update_shared_memory_rejects_invalid_status(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
     _patch_shared_db(monkeypatch, tmp_path)
     from fleetent import memory
 
