@@ -189,11 +189,11 @@ async def test_blank_log_directory_resolves_to_agent_home_data_logs(
     assert mock_csl.call_args.kwargs["directory"] == home / "data" / "logs"
 
 
-async def test_explicit_log_directory_used_as_is(
+async def test_relative_log_directory_resolves_against_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """explicit directory in agent.yaml is forwarded unchanged."""
-    home = tmp_path / "explicitagent"
+    """relative directory in agent.yaml resolves against the agent home, not CWD."""
+    home = tmp_path / "relativeagent"
     home.mkdir()
     # Use the existing helper that sets directory: "data/logs"
     _write_agent_yaml(home, log_format="console")
@@ -209,7 +209,7 @@ async def test_explicit_log_directory_used_as_is(
         from fleetent.runtime import agent_app
 
         await agent_app.boot(
-            "explicitagent",
+            "relativeagent",
             home=home,
             start_im=False,
             with_infra=False,
@@ -218,4 +218,57 @@ async def test_explicit_log_directory_used_as_is(
         )
 
     mock_csl.assert_called_once()
-    assert mock_csl.call_args.kwargs["directory"] == "data/logs"
+    assert mock_csl.call_args.kwargs["directory"] == home / "data" / "logs"
+
+
+def _write_agent_yaml_abs_log_dir(home: Path, directory: str) -> None:
+    agent_yaml = {
+        "name": home.name,
+        "version": 1,
+        "models": {
+            "targets": [
+                {
+                    "id": "default",
+                    "provider": "local",
+                    "protocol": "openai_chat",
+                    "base_url": "http://localhost:11434/v1/",
+                    "model": "default",
+                }
+            ],
+            "routes": {"default": [{"target": "default"}]},
+        },
+        "observability": {"logging": {"directory": directory}},
+    }
+    (home / "agent.yaml").write_text(yaml.dump(agent_yaml))
+
+
+async def test_absolute_log_directory_used_as_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """absolute directory in agent.yaml is forwarded unchanged."""
+    home = tmp_path / "absagent"
+    home.mkdir()
+    abs_dir = str(tmp_path / "var" / "log" / "fleetent")
+    _write_agent_yaml_abs_log_dir(home, abs_dir)
+    monkeypatch.setenv("FLEETENT_HOME", str(tmp_path))
+
+    with contextlib.ExitStack() as stack:
+        _make_stack(stack)
+        mock_csl = stack.enter_context(
+            patch("fleetent.structured_logging.configure_structured_logging")
+        )
+        stack.enter_context(patch("structlog.configure"))
+
+        from fleetent.runtime import agent_app
+
+        await agent_app.boot(
+            "absagent",
+            home=home,
+            start_im=False,
+            with_infra=False,
+            supervisor=_mock_supervisor(),
+            telegram_supervisor=_mock_supervisor(),
+        )
+
+    mock_csl.assert_called_once()
+    assert mock_csl.call_args.kwargs["directory"] == Path(abs_dir)
