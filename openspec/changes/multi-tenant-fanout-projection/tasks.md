@@ -13,5 +13,5 @@
 
 ## 3. 收尾
 
-- [ ] 3.1 依赖护栏：platform 只读 agent（允许）、agent ✗→ platform、agent 物理够不到别主体；不物化副本
+- [x] 3.1 依赖护栏：platform 只读 agent（允许）、agent ✗→ platform、agent 物理够不到别主体；不物化副本
 - [ ] 3.2 跨主体隔离 + 只读投影端到端 + `make test-pr` 全绿 + `uv run pytest tests/integration -q` 对照 main 基线无新增失败 + `openspec validate multi-tenant-fanout-projection --strict`
