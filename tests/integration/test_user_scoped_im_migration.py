@@ -25,9 +25,22 @@ def db(tmp_path, monkeypatch):
 
 
 def _seed_admin(db: object) -> None:
+    # Users table is now Alembic-managed (migration 068); _init_db() is a no-op.
+    # Create it directly here because this test exercises the pre-migration IM rebuild
+    # path and cannot use apply_migrations (it creates IM tables in legacy format).
     now = datetime.datetime.now(datetime.UTC).isoformat()
-    user_store._init_db()
     with sqlite3.connect(str(db)) as c:
+        c.execute(
+            """CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                api_key TEXT UNIQUE NOT NULL, created_at TEXT NOT NULL,
+                email TEXT, password_hash TEXT,
+                role TEXT NOT NULL DEFAULT 'viewer',
+                status TEXT NOT NULL DEFAULT 'active',
+                must_reset INTEGER NOT NULL DEFAULT 0,
+                tenant_id TEXT NOT NULL DEFAULT 'default'
+            )"""
+        )
         c.execute(
             "INSERT INTO users (id, name, api_key, created_at, role)"
             " VALUES ('admin1', 'admin', 'ma-x', ?, 'built_in_admin')",

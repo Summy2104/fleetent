@@ -1,0 +1,55 @@
+## ADDED Requirements
+
+### Requirement: tenant / team 根实体
+系统 **MUST** 提供 `tenants`(主体)与 `teams`(团队)根实体,均以 uuid 字符串为主键。`teams.tenant_id` **MUST** 外键引用 `tenants`。两表 **MUST** 由 Alembic 迁移建立(管理库 alembic 权威),不走 store `_init_db`。
+
+#### Scenario: 空库建出 tenant/team 表
+- **WHEN** 对空库执行 `alembic upgrade head`
+- **THEN** schema 含 `tenants`、`teams` 两表,`teams.tenant_id` 为外键指向 `tenants.id`
+
+#### Scenario: 主体下建团队
+- **WHEN** 在主体 T 下创建团队 "财务"
+- **THEN** 该 team 行的 `tenant_id` = T,`id` 为新 uuid
+
+### Requirement: default 主体与回填
+迁移 **MUST** 创建一个 id=`"default"` 的 default 主体(对齐现有 `tenant_id` 列的默认值)。所有现有 `users` 的 `tenant_id` **MUST** 回填为 `"default"`;回填后 `users.tenant_id` **MUST** 置为 NOT NULL 且外键引用 `tenants`。现有 `agents`/`knowledge_*`/`traces`/`policies` 的 `tenant_id`(已为 `"default"`)**MUST** 升为外键引用 `tenants`;`agents.team_id`(可空)**MUST** 升为外键引用 `teams`。
+
+#### Scenario: 现有用户回填 default 主体
+- **WHEN** 迁移在已有用户的库上执行
+- **THEN** 每个 user 的 `tenant_id` = `"default"`,且 default 主体行存在、`users.tenant_id` 为 NOT NULL 外键
+
+#### Scenario: 现有 agent 的 tenant_id 升外键不丢值
+- **WHEN** 某 agent 原 `tenant_id="default"`
+- **THEN** 迁移后该值不变,且成为指向 default 主体的外键
+
+### Requirement: users 归属主体、不连 team
+`users` **MUST** 携带 `tenant_id`(归属一个主体);v1 **MUST NOT** 为 `users` 建立 team 关系(无 `users.team_id`、无 `team_members`)——用户的 team 当前无任何消费方。`teams` 可反向引用 user 作为审批人(见下),但 user 不记录自身所属 team。
+
+#### Scenario: user 只有主体归属
+- **WHEN** 创建一个新 user 并指定主体 T
+- **THEN** user 行有 `tenant_id=T`,系统无 user↔team 成员记录
+
+### Requirement: 两级审批人字段
+`tenants` 与 `teams` **MUST** 各有一个可空的 `approver_user_id`(外键引用 `users`),作为审批人解析链的源:agent 归属 team 的审批人 → (无)主体的审批人 → (无)default-closed reject。本期只建字段;实际"materialize 进 agent.yaml `approval` 块"的解析在部署侧(见 target-architecture §6.5),不在本期实现运行时解析。
+
+#### Scenario: 设置团队审批人
+- **WHEN** admin 把用户 U 设为团队 "财务" 的审批人
+- **THEN** 该 team 行 `approver_user_id=U`(U 须存在)
+
+#### Scenario: 审批人可空
+- **WHEN** 新建主体/团队未指定审批人
+- **THEN** `approver_user_id` 为 NULL(解析时由上层 fallback / default-closed 处理)
+
+### Requirement: 最小 provisioning(admin)
+系统 **MUST** 提供管理员可用的最小 provisioning 入口(admin CLI 或 API):创建主体、创建团队、设置某 user 的 `tenant_id`、设置主体/团队的 `approver_user_id`。这些操作 **MUST** 受现有 admin 鉴权保护并写审计。
+
+#### Scenario: 建主体并分配用户
+- **WHEN** admin 创建主体 "A主体" 并把用户 U 的 `tenant_id` 设为它
+- **THEN** "A主体" 行存在,U 的 `tenant_id` 指向它,且操作被审计
+
+### Requirement: users 纳入 alembic + 启动门
+因需为 `users` 加外键列,本变更 **MUST** 将 `users` 表纳入 Alembic 管理(从 store `_init_db` 迁出);其后 `users` 的 schema **MUST** 仅由 alembic 维护。部署在使用前 **MUST** 先 `alembic upgrade head`(`users` 不再由 `_init_db` 自愈)。
+
+#### Scenario: users schema 由 alembic 建
+- **WHEN** 空库 `alembic upgrade head`
+- **THEN** `users` 表(含 `tenant_id`)由 alembic 迁移建出,`user_store` 不再 `_init_db` 建 `users`
